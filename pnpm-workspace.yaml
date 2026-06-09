@@ -1,0 +1,4 @@
+packages:
+  - "apps/*/src"
+  - "platform/charts/*"
+  - "tools"

@@ -3,6 +3,7 @@
 age.key
 *.age
 key.txt
+keys.txt
 .env
 .env.*
 !.env.example

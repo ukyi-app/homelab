@@ -1,0 +1,18 @@
+{
+  "name": "homelab",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.30.3",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "echo 'dev: filled by M6 (DX) — not implemented yet' && exit 1",
+    "gen:app": "echo 'gen:app: filled by M6 (DX) — not implemented yet' && exit 1",
+    "verify:app": "echo 'verify:app: filled by M6 (DX) — not implemented yet' && exit 1",
+    "gen:env": "echo 'gen:env: filled by M6 (DX) — not implemented yet' && exit 1",
+    "verify:ledger": "scripts/ledger-to-json.sh docs/memory-ledger.md > /tmp/ledger.json && conftest test /tmp/ledger.json --policy policy/ledger.rego",
+    "verify:skeleton": "./scripts/check-skeleton.sh"
+  }
+}
