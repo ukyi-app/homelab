@@ -32,6 +32,9 @@ build/
 *.tsbuildinfo
 .pnpm-store/
 
+# --- Local Claude tooling / runtime state ---
+.claude/
+
 # --- OS / editor ---
 .DS_Store
 *.swp
