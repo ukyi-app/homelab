@@ -1,0 +1,46 @@
+# Recipients are public keys (safe to commit). Private keys live out-of-band (Task 0.4).
+# M0 fills BOTH real public keys here; M2 only CONSUMES the cluster key.
+_recipients:
+  - &cluster age1n3j7p70f0unl5dgrjhtr9jxrdntz2a67dtntu446qus9c3jd3fnsp8z960
+  - &recovery age154tu9q7922xu46x0rkfm5l9x3ulf9u5at5qvxeaqfx9sgtm7cumq75jdwc
+
+creation_rules:
+  # ----- platform prod -----
+  - path_regex: platform/.*/prod/.*\.enc\.yaml$
+    encrypted_regex: "^(data|stringData)$"
+    key_groups:
+      - age:
+          - *cluster
+          - *recovery
+
+  # ----- platform staging (structure baked in now per D7; no deploy yet) -----
+  - path_regex: platform/.*/staging/.*\.enc\.yaml$
+    encrypted_regex: "^(data|stringData)$"
+    key_groups:
+      - age:
+          - *cluster
+          - *recovery
+
+  # ----- apps prod -----
+  - path_regex: apps/.*/prod/.*\.enc\.yaml$
+    encrypted_regex: "^(data|stringData)$"
+    key_groups:
+      - age:
+          - *cluster
+          - *recovery
+
+  # ----- apps staging (structure baked in now per D7; no deploy yet) -----
+  - path_regex: apps/.*/staging/.*\.enc\.yaml$
+    encrypted_regex: "^(data|stringData)$"
+    key_groups:
+      - age:
+          - *cluster
+          - *recovery
+
+  # ----- catch-all: any other *.enc.yaml still gets encrypted (fail-safe) -----
+  - path_regex: \.enc\.yaml$
+    encrypted_regex: "^(data|stringData)$"
+    key_groups:
+      - age:
+          - *cluster
+          - *recovery
