@@ -5,7 +5,7 @@ These tools run on the developer Mac (host side), not inside the OrbStack VM.
 Install:
 
 ```bash
-brew install sops age conftest pre-commit ksops bash
+brew install sops age conftest pre-commit ksops bash yq bats-core
 ```
 
 > `bash` (>= 5) is required: the host-substrate scripts (`infra/k3s-bootstrap/*`)
@@ -25,6 +25,8 @@ brew install sops age conftest pre-commit ksops bash
 | conftest   | 0.68.2         | OPA/Rego policy checks (ledger validator) |
 | pre-commit | 4.6.0          | Git pre-commit hook framework             |
 | bash       | 5.3.12         | Host-substrate scripts need bash 4+       |
+| yq         | 4.53.2         | YAML assertions in bootstrap bats tests   |
+| bats-core  | 1.13.0         | Shell test harness                        |
 
 ## Re-verify
 
