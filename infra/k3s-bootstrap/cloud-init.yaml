@@ -1,0 +1,70 @@
+#cloud-config
+# Host substrate for the single k3s VM (Debian bookworm arm64), committed as code.
+# Provisioned once by orb-create.sh (Task 1.5); the VM is cattle (§4).
+
+hostname: k3s
+preserve_hostname: false
+timezone: Asia/Seoul
+
+packages:
+  - systemd-zram-generator      # OS-level OOM cushion (zstd zram), kubelet stays swap-unaware
+  - openssh-server              # SSH access (OrbStack also multiplexes ssh orb)
+  - curl
+  - ca-certificates
+  - apparmor                    # k3s default container runtime expects it present
+  - iptables                    # flannel/VXLAN dataplane
+
+package_update: true
+package_upgrade: false          # determinism: pin via versions.env / image, not apt drift
+
+users:
+  - name: ops
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    lock_passwd: true           # key-only; OrbStack injects its managed key automatically
+
+write_files:
+  # zram: ~2 GiB zstd compressed swap as an OOM cushion. NOT used by the kubelet
+  # for scheduling (k3s runs swap-unaware); purely a kernel page-reclaim safety net.
+  - path: /etc/systemd/zram-generator.conf
+    permissions: "0644"
+    content: |
+      [zram0]
+      zram-size = min(ram / 4, 2048)
+      compression-algorithm = zstd
+      swap-priority = 100
+
+  # Cap journald so logs on the internal SSD can never run away (R4 disk-fill posture).
+  - path: /etc/systemd/journald.conf.d/cap.conf
+    permissions: "0644"
+    content: |
+      [Journal]
+      Storage=persistent
+      SystemMaxUse=512M
+      SystemKeepFree=1G
+      RuntimeMaxUse=64M
+
+  # Harden sshd a touch: no root login, key auth only.
+  - path: /etc/ssh/sshd_config.d/10-hardening.conf
+    permissions: "0644"
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+
+runcmd:
+  # Storage mount points. 'internal' lives on the VM's own disk (512 GB internal SSD);
+  # 'bulk' is the directory OrbStack bind-mounts the 1 TB external SSD onto.
+  - [ install, -d, -m, "0700", -o, root, -g, root, /var/lib/rancher/k3s-storage/internal ]
+  - [ install, -d, -m, "0700", -o, root, -g, root, /var/lib/rancher/k3s-storage/bulk ]
+  # Activate zram + journald caps now (so this boot already benefits).
+  - [ systemctl, daemon-reload ]
+  - [ systemctl, restart, systemd-journald ]
+  - [ systemctl, start, "systemd-zram-setup@zram0.service" ]
+  - [ systemctl, restart, ssh ]
+
+# Final marker file lets orb-create.sh poll for completion.
+power_state:
+  mode: reboot
+  condition: false
