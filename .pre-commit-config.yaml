@@ -1,0 +1,12 @@
+repos:
+  - repo: local
+    hooks:
+      - id: sops-guard
+        name: Block plaintext *.enc.yaml
+        entry: scripts/sops-guard.sh
+        language: script
+        files: '\.enc\.yaml$'
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
