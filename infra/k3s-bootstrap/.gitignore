@@ -1,0 +1,6 @@
+# Retrieved kubeconfig holds a cluster-admin bearer token — never commit.
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+# Local scratch from drills.
+*.log
