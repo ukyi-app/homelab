@@ -1,0 +1,55 @@
+name: verify
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install tools
+        run: |
+          curl -sSL https://github.com/getsops/sops/releases/download/v3.9.4/sops-v3.9.4.linux.arm64 -o /usr/local/bin/sops
+          chmod +x /usr/local/bin/sops
+          curl -sSL https://dl.filippo.io/age/latest?for=linux/arm64 | tar -xz -C /tmp
+          sudo mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
+          curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_arm64.tar.gz | tar -xz -C /tmp
+          sudo mv /tmp/conftest /usr/local/bin/
+          sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Skeleton check
+        run: ./scripts/check-skeleton.sh
+
+      - name: Memory ledger budget gate (R2)
+        run: |
+          scripts/ledger-to-json.sh docs/memory-ledger.md > /tmp/ledger.json
+          conftest test /tmp/ledger.json --policy policy/ledger.rego
+
+      - name: SOPS round-trip (ephemeral CI key)
+        run: |
+          age-keygen -o /tmp/ci.agekey
+          export SOPS_AGE_KEY_FILE=/tmp/ci.agekey
+          # CI uses its own .sops.yaml recipients so the round-trip is self-contained
+          CIKEY=$(age-keygen -y /tmp/ci.agekey)
+          cat > /tmp/sops-ci.yaml <<EOF
+          creation_rules:
+            - path_regex: \.enc\.yaml$
+              encrypted_regex: "^(data|stringData)$"
+              age: "$CIKEY"
+          EOF
+          cp test/fixtures/sample-secret.yaml /tmp/ci.enc.yaml
+          sops --config /tmp/sops-ci.yaml --encrypt --in-place /tmp/ci.enc.yaml
+          if grep -q 'super-secret-value-123' /tmp/ci.enc.yaml; then echo "plaintext leaked after encrypt"; exit 1; fi
+          sops --config /tmp/sops-ci.yaml --decrypt /tmp/ci.enc.yaml | grep -q 'super-secret-value-123'
+
+      - name: Pre-commit secret guard
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files --show-diff-on-failure
