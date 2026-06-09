@@ -1,0 +1,40 @@
+# --- Secrets & keys — NEVER commit (only SOPS-encrypted *.enc.yaml belong in git) ---
+*.agekey
+age.key
+*.age
+key.txt
+.env
+.env.*
+!.env.example
+*.decrypted.yaml
+*.dec.yaml
+
+# --- Terraform ---
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+
+# --- Kubeconfig / cluster creds ---
+kubeconfig
+*.kubeconfig
+.kube/
+
+# --- Node / pnpm ---
+node_modules/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+.pnpm-store/
+
+# --- OS / editor ---
+.DS_Store
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
