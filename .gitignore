@@ -7,6 +7,7 @@ keys.txt
 .env
 .env.*
 !.env.example
+!.env.secrets.example
 *.decrypted.yaml
 *.dec.yaml
 
