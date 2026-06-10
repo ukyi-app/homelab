@@ -1,0 +1,5 @@
+# Copy to infra/<root>/backend.hcl and fill in. NEVER commit the filled version.
+endpoints  = { s3 = "https://<ACCT_ID>.r2.cloudflarestorage.com" }
+access_key = "<R2_STATE_ACCESS_KEY>"
+secret_key = "<R2_STATE_SECRET_KEY>"
+# key is set per-root below, e.g. key = "cloudflare/prod/terraform.tfstate"
