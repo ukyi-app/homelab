@@ -1,5 +1,5 @@
 image:
-  repo: ghcr.io/owner/api
+  repo: ghcr.io/ukyi-app/api
   tag: sha-0000000 # bumped by CI write-back (Task 6.16)
 kind: api
 replicas: 1

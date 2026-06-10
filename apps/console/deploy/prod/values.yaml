@@ -1,4 +1,4 @@
-image: { repo: ghcr.io/owner/console, tag: sha-0000000 }
+image: { repo: ghcr.io/ukyi-app/console, tag: sha-0000000 }
 kind: spa
 replicas: 1
 spa: { server: sws }

@@ -1,4 +1,4 @@
-image: { repo: ghcr.io/owner/web, tag: sha-0000000 }
+image: { repo: ghcr.io/ukyi-app/web, tag: sha-0000000 }
 kind: ssr
 replicas: 1
 resources:
