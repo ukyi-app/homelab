@@ -14,7 +14,12 @@ permissions:
 
 jobs:
   writeback:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Only act on a SUCCESSFUL build that ran on THIS repo's `main` (never a fork/PR build) —
+    # else attacker-controlled artifact contents could drive the admin-PAT push.
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.head_repository.full_name == github.repository
+          && github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-24.04-arm
     # NO matrix: a SINGLE serialized job bumps ONLY the apps that were actually built
     # (derived from build.yaml's `built-*` artifacts), verifies each digest exists, commits once.
@@ -58,6 +63,10 @@ jobs:
         run: |
           git pull --rebase origin main
           for app in $APPS; do
+            # sanitize artifact-derived names: skip anything not a strict lowercase app name
+            case "$app" in
+              ''|*[!a-z0-9-]*) echo "skip suspicious app name: '$app'"; continue ;;
+            esac
             # only deployed apps have a values.yaml to bump (pg-tools has none)
             [ -f "apps/$app/deploy/prod/values.yaml" ] || { echo "skip $app (no deploy values.yaml)"; continue; }
             echo "verify ghcr.io/$OWNER/$app:$SHA exists BEFORE bumping"
