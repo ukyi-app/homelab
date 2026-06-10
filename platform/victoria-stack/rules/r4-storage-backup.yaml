@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmalert-rules-r4
+  labels: { vmalert-rule: "true" }
+data:
+  r4.yaml: |
+    groups:
+      - name: storage-backup
+        rules:
+          # External 1TB SSD (bulk-ssd) disk-fill — byte-aware, fires before retention eviction would mask it
+          - alert: BulkSSDFilling
+            expr: |
+              (node_filesystem_avail_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}
+               / node_filesystem_size_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}) < 0.15
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "External SSD <15% free"
+              description: "bulk-ssd (media + backup staging) is filling; metrics retention byte-cap will NOT save this disk."
+          - alert: BulkSSDAlmostFull
+            expr: |
+              (node_filesystem_avail_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}
+               / node_filesystem_size_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}) < 0.05
+            for: 5m
+            labels: { severity: critical }
+            annotations:
+              summary: "External SSD <5% free"
+              description: "bulk-ssd nearly full — local backup staging + media at imminent risk."
+          # Internal SSD (standard) disk-fill — protects Postgres + vmsingle
+          - alert: StandardSSDFilling
+            expr: |
+              (node_filesystem_avail_bytes{mountpoint=~"/var/lib/rancher.*|/$"}
+               / node_filesystem_size_bytes{mountpoint=~"/var/lib/rancher.*|/$"}) < 0.10
+            for: 10m
+            labels: { severity: critical }
+            annotations:
+              summary: "Internal SSD <10% free"
+              description: "standard SC disk low — Postgres PGDATA/WAL at risk."
+          # Backup-liveness: the local CNPG base-backup CronJob (M4) must complete daily.
+          - alert: LocalBasebackupStale
+            expr: |
+              (time() - max(kube_job_status_completion_time{job_name=~"cnpg-local-basebackup.*"})) > 100000
+              or absent(kube_job_status_completion_time{job_name=~"cnpg-local-basebackup.*"})
+            for: 15m
+            labels: { severity: critical }
+            annotations:
+              summary: "Local base-backup stale (>27h) or missing"
+              description: "Restore copy 2 (local 1TB SSD) is at risk — unmounted drive or failed CronJob."
+          # Backup-liveness: the latest available R2 backup must keep advancing (offsite copy 3).
+          - alert: R2BackupStale
+            expr: |
+              (time() - cnpg_collector_last_available_backup_timestamp) > 100000
+              or absent(cnpg_collector_last_available_backup_timestamp)
+            for: 15m
+            labels: { severity: critical }
+            annotations:
+              summary: "R2 offsite backup stale (>27h) or missing"
+              description: "Offsite copy 3 (Cloudflare R2) has not produced a fresh backup; DR copy is going stale."
+          # Backup-liveness: WAL archiving to R2 must not be erroring (RPO ≈ 5min target).
+          - alert: WALArchiveStalled
+            expr: |
+              cnpg_collector_last_failed_archive_time > cnpg_collector_last_archived_time
+            for: 15m
+            labels: { severity: critical }
+            annotations:
+              summary: "WAL archiving to R2 stalled (RPO at risk)"
+              description: "Last failed archive is newer than last successful archive; offsite WAL stream is broken and the 5-min RPO is not being met."
+          # Restore-drill liveness: M4's recurring restore drill pushes restore_drill_last_success_timestamp.
+          - alert: CNPGRestoreDrillStale
+            expr: |
+              (time() - restore_drill_last_success_timestamp) > 700000
+              or absent(restore_drill_last_success_timestamp)
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "CNPG restore drill has not succeeded recently"
+              description: "The recurring restore-from-R2 drill (M4) has not pushed a fresh success timestamp; the only verified restore path may be broken (R1)."

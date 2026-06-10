@@ -17,6 +17,8 @@ spec:
           image: victoriametrics/vmalert:v1.103.0
           args:
             - --rule=/rules/core/*.yaml
+            - --rule=/rules/r4/*.yaml
+            - --rule=/rules/r6/*.yaml
             - --datasource.url=http://vmsingle:8428
             - --remoteWrite.url=http://vmsingle:8428
             - --remoteRead.url=http://vmsingle:8428
@@ -36,8 +38,12 @@ spec:
             capabilities: { drop: ["ALL"] }
           volumeMounts:
             - { name: rules-core, mountPath: /rules/core }
+            - { name: rules-r4, mountPath: /rules/r4 }
+            - { name: rules-r6, mountPath: /rules/r6 }
       volumes:
         - { name: rules-core, configMap: { name: vmalert-rules-core } }
+        - { name: rules-r4, configMap: { name: vmalert-rules-r4 } }
+        - { name: rules-r6, configMap: { name: vmalert-rules-r6 } }
 ---
 apiVersion: v1
 kind: Service

@@ -13,6 +13,10 @@ resources:
   - alertmanager.yaml
   - rules/core.yaml
   - vmalert.yaml
+  - rules/r4-storage-backup.yaml
+  - rules/r6-ci-staleness.yaml
+  - digest-exporter.yaml
+  - deadmanswitch-relay.yaml
 
 generators:
   - secret-generator.yaml
