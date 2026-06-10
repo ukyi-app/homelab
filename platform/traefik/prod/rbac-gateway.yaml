@@ -22,8 +22,12 @@ rules:
       - tcproutes/status
       - tlsroutes/status
     verbs: ["update", "patch"]
+  # HTTP-only in-cluster (TLS terminates at the Cloudflare edge + Tailscale, §6/§14),
+  # and kubernetesCRD is disabled — so the Gateway controller needs NO cluster-wide
+  # Secret read. If a TLS listener is ever added, grant cert Secrets via a namespaced
+  # Role (gateway ns + the cert namespace) + ReferenceGrant, never cluster-wide.
   - apiGroups: [""]
-    resources: ["services", "secrets", "namespaces"]
+    resources: ["services", "namespaces"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
