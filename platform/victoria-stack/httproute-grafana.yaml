@@ -1,0 +1,17 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+spec:
+  parentRefs:
+    - name: homelab
+      namespace: gateway
+      sectionName: web-internal
+  hostnames:
+    - "grafana.int.<DOMAIN>"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - name: grafana
+          port: 3000
