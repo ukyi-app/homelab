@@ -4,5 +4,8 @@ metadata:
   name: observability
   labels:
     app.kubernetes.io/part-of: victoria-stack
-    pod-security.kubernetes.io/enforce: restricted
+    # enforce=restricted는 라이브에서 전 워크로드 생성 거부로 확인됨: node-exporter/Vector DS가
+    # hostPath/host 네트워크를 쓰는 관측 스택 특성상 restricted는 설계상 불가 — baseline으로
+    # 강제하고 restricted는 warn으로 남겨 점진 하드닝 신호로 쓴다.
+    pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/warn: restricted
