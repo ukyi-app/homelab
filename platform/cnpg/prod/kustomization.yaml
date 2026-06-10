@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: database
+
+resources:
+  - object-store.yaml
+  - cluster.yaml
+  - pooler.yaml
+  - scheduled-backup.yaml
+  - basebackup-pvc.yaml
+  - basebackup-cronjob.yaml
+  - pgdump-hedge-cronjob.yaml
+  - restore-drill-rbac.yaml
+  - restore-drill-cronjob.yaml
+
+generators:
+  - secret-generator.yaml # KSOPS — renders ALL THREE database-ns seeds (see below)
+
+# The restore-drill ConfigMap is GENERATED from its source script so the running `drill.sh`
+# IS the source-of-truth — there is NO empty/placeholder path that could let the CronJob
+# exit 0 without restoring (R1). A render test (Task 4.10) asserts the script content is present.
+configMapGenerator:
+  - name: restore-drill-script
+    files:
+      - drill.sh=restore-drill-script.sh
+
+generatorOptions:
+  disableNameSuffixHash: true # stable names: cnpg-r2-creds, pg-app-credentials, restore-drill-alerting, restore-drill-script
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2" # the three seeds + the drill script apply BEFORE the Cluster CR (wave -1)
