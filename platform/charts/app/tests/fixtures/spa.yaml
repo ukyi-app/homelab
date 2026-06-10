@@ -1,0 +1,7 @@
+image: { repo: ghcr.io/owner/console, tag: sha-abc1234 }
+kind: spa
+spa: { server: sws }
+route: { host: console.example.com, public: true, paths: ["/"] }
+resources:
+  requests: { cpu: 10m, memory: 16Mi }
+  limits:   { cpu: 100m, memory: 32Mi }

@@ -64,3 +64,8 @@ m6-tools: ## verify chart/CI toolchain for milestone 6
 	@yq --version | grep -qE 'v4\.' || { echo "yq v4 required"; exit 1; }
 	@jq --version >/dev/null || { echo "jq required"; exit 1; }
 	@echo "m6-tools OK"
+
+.PHONY: chart-test
+chart-test: ## render+validate the app chart for all kinds
+	bats platform/charts/app/tests/
+	bash platform/charts/app/tests/render.sh
