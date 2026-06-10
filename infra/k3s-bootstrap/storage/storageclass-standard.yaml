@@ -8,6 +8,9 @@ metadata:
 provisioner: homelab.io/local-path-internal
 # Retain so DB PVs survive a PVC delete/reclaim — never auto-wipe Postgres data.
 reclaimPolicy: Retain
-# Immediate: DB PVs should bind up front, not wait on first consumer.
-volumeBindingMode: Immediate
+# WaitForFirstConsumer is REQUIRED by local-path-provisioner: it creates the hostPath PV on the node
+# where the consumer is scheduled, so it CANNOT bind before a consumer exists (Immediate fails with
+# "configuration error, no node was specified"). Single-node, so binding still happens as soon as the
+# consuming pod (Postgres, VictoriaMetrics/Logs, AdGuard, …) is scheduled.
+volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true

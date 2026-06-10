@@ -15,11 +15,12 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
   done
 }
 
-@test "standard is the default StorageClass, Retain, Immediate" {
+@test "standard is the default StorageClass, Retain, WaitForFirstConsumer" {
   run yq -e '.metadata.annotations["storageclass.kubernetes.io/is-default-class"]' "$STD"
   [ "$output" = "true" ]
   run yq -e '.reclaimPolicy' "$STD"; [ "$output" = "Retain" ]
-  run yq -e '.volumeBindingMode' "$STD"; [ "$output" = "Immediate" ]
+  # local-path-provisioner only supports WaitForFirstConsumer (Immediate => "no node was specified").
+  run yq -e '.volumeBindingMode' "$STD"; [ "$output" = "WaitForFirstConsumer" ]
   run yq -e '.provisioner' "$STD"; [ "$output" = "homelab.io/local-path-internal" ]
 }
 
