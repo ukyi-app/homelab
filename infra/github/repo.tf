@@ -1,6 +1,8 @@
 resource "github_repository" "homelab" {
-  name                   = var.repo_name
-  visibility             = "private"
+  name = var.repo_name
+  # public: 무료 플랜은 private repo에 branch protection을 지원하지 않는다. 시크릿은 전부
+  # SOPS 암호화(.enc.yaml)로만 커밋되는 설계(+pre-commit gitleaks)라 public이 안전하다.
+  visibility             = "public"
   has_issues             = true
   allow_merge_commit     = false
   allow_squash_merge     = true
