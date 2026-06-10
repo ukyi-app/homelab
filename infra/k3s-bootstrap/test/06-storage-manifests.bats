@@ -32,7 +32,10 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
 
 @test "provisioner config maps each class to its node path" {
   run grep -F "$INTERNAL_STORAGE_PATH" "$PROV"; [ "$status" -eq 0 ]
-  run grep -F "$BULK_STORAGE_PATH" "$PROV"; [ "$status" -eq 0 ]
+  # The bulk path is templated (${BULK_STORAGE_PATH}) so apply-storage.sh can point it at the
+  # external-SSD mount (or the VM-disk dev fallback); the rendered-output check lives in 07.
+  run grep -F '${BULK_STORAGE_PATH}' "$PROV"; [ "$status" -eq 0 ]
+  run grep -F "$BULK_STORAGE_PATH" "$PROV"; [ "$status" -ne 0 ]  # literal external path must NOT be baked in
 }
 
 @test "helper pod image is wired to the LOCAL_PATH_HELPER_IMAGE placeholder" {

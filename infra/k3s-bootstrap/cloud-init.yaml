@@ -54,8 +54,12 @@ write_files:
       KbdInteractiveAuthentication no
 
 runcmd:
-  # Storage mount points. 'internal' lives on the VM's own disk (512 GB internal SSD);
-  # 'bulk' is the directory OrbStack bind-mounts the 1 TB external SSD onto.
+  # Storage mount points. 'internal' lives on the VM's own disk (512 GB internal SSD).
+  # The REAL bulk-ssd tier lives on the EXTERNAL SSD that OrbStack shares into the VM at
+  # /mnt/mac/Volumes/homelab (virtiofs); that path is provisioned by the host runbook
+  # (docs/runbooks/external-ssd.md) and enforced by apply-storage.sh's external-SSD gate — NOT
+  # here, because the external volume need not exist at first boot. The dir below is only the
+  # VM-disk FALLBACK used when apply-storage.sh runs with BULK_ALLOW_VM_DISK=1 (dev; non-persistent).
   - [ install, -d, -m, "0700", -o, root, -g, root, /var/lib/rancher/k3s-storage/internal ]
   - [ install, -d, -m, "0700", -o, root, -g, root, /var/lib/rancher/k3s-storage/bulk ]
   # Activate zram + journald caps now (so this boot already benefits).
