@@ -20,6 +20,17 @@ resource "github_repository" "homelab" {
   # Repo already exists — import it once: see runbook 02.
 }
 
+# 외부 앱 레포의 출발점 — "Use this template"용. 내용(caller 워크플로/.homelab.yaml/Dockerfile)은
+# 최초 1회 push로 시드한다(런북 app-onboarding 참고).
+resource "github_repository" "app_template" {
+  name        = "homelab-app-template"
+  description = "homelab 앱 템플릿: .homelab.yaml 채우고 push하면 온보딩 PR이 자동 생성된다"
+  visibility  = "public"
+  is_template = true
+  auto_init   = true # main 브랜치 생성(내용 push 대상)
+  has_issues  = false
+}
+
 resource "github_branch_protection" "main" {
   repository_id = github_repository.homelab.node_id
   pattern       = "main"
