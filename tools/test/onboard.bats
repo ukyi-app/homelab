@@ -26,7 +26,7 @@ db: { enabled: true, migrateCmd: ["/app/blog","migrate"] }
 env: [{ name: LOG_LEVEL, value: info }]
 secrets: [blog-secrets]'
 
-@test "정상 api: host 자동 유도 + 원장 예산 계산 + 시크릿 체크리스트" {
+@test "valid api: derived host + ledger budget + secrets checklist" {
   p=$(payload blog "$VALID_API")
   run run_onboard "$p" --dry-run
   [ "$status" -eq 0 ]
@@ -35,7 +35,7 @@ secrets: [blog-secrets]'
   [[ "$output" == *'blog-secrets.enc.yaml'* ]]
 }
 
-@test "내부 앱은 *.home.<domain>으로 유도" {
+@test "internal app derives *.home.<domain> host" {
   p=$(payload intapp 'kind: api
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }')
   run run_onboard "$p" --dry-run
@@ -43,7 +43,7 @@ resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 
   [[ "$output" == *'"host": "intapp.home.ukyi.app"'* ]]
 }
 
-@test "거부: worker에 route" {
+@test "reject: route on worker" {
   p=$(payload w1 'kind: worker
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }
 route: { public: true }')
@@ -51,7 +51,7 @@ route: { public: true }')
   [ "$status" -ne 0 ]; [[ "$output" == *"route"* ]]
 }
 
-@test "거부: env 시크릿 패턴 / 허용: allowPlaintext" {
+@test "reject secret-pattern env / allow with allowPlaintext" {
   p=$(payload a2 'kind: api
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }
 env: [{ name: API_TOKEN, value: oops }]')
@@ -65,7 +65,7 @@ allowPlaintext: [CACHE_KEY_PREFIX]')
   [ "$status" -eq 0 ]
 }
 
-@test "거부: 원장 예산 초과 / 중복 앱 / internal host 규칙 / 미지 필드 / 태그 형식" {
+@test "reject: budget / duplicate / internal-host rule / unknown field / tag format" {
   p=$(payload big 'kind: api
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 500m, memory: 1Gi } }
 replicas: 3')
@@ -90,7 +90,7 @@ EOF
   run run_onboard "$bad" --dry-run; [ "$status" -ne 0 ]; [[ "$output" == *"tag"* ]]
 }
 
-@test "실쓰기: values/source-repo/KSOPS generator/원장 행이 생성된다 (픽스처 root)" {
+@test "real write: values, source-repo, KSOPS generator, ledger row (fixture root)" {
   fix="$(mktemp -d)"
   mkdir -p "$fix/apps" "$fix/docs"
   cat > "$fix/docs/memory-ledger.md" <<'EOF'
@@ -116,7 +116,7 @@ EOF
 }
 
 # ── 워크플로 보안 불변식 ─────────────────────────────────────────────────────────
-@test "bump: dispatch 경로가 직렬 그룹 공유 + 기존 잡은 workflow_run으로 한정" {
+@test "bump: dispatch path shares serial group; legacy job scoped to workflow_run" {
   f="$ROOT/.github/workflows/bump.yaml"
   grep -q 'repository_dispatch' "$f"
   grep -q 'app-image' "$f"
@@ -126,7 +126,7 @@ EOF
   [ "$(grep -c 'group: values-writeback' "$f")" -eq 1 ]
 }
 
-@test "bump dispatch: 비신뢰 payload는 env로만 + source-repo 바인딩 + digest 검증" {
+@test "bump dispatch: untrusted payload env-only + source-repo binding + digest verify" {
   f="$ROOT/.github/workflows/bump.yaml"
   grep -q 'source-repo' "$f"
   grep -q 'docker manifest inspect' "$f"
@@ -136,7 +136,7 @@ EOF
   [ -z "$bad" ]
 }
 
-@test "onboard: payload는 toJSON→env 경유, PAT로 PR 생성(required check 트리거), ledger 게이트 선행" {
+@test "onboard: payload via toJSON env, PAT-created PR, ledger gate first" {
   f="$ROOT/.github/workflows/onboard.yaml"
   grep -q 'toJSON(github.event.client_payload)' "$f"
   grep -q 'DEPLOY_BOT_PAT' "$f"
@@ -144,7 +144,7 @@ EOF
   grep -q 'kubeconform' "$f"
 }
 
-@test "reusable-app-build: arm64 + jq --arg 인용 + onboard/image 분기 + 승인 게이트 잡" {
+@test "reusable-app-build: arm64 + quoted jq args + onboard/image split + approval gate job" {
   f="$ROOT/.github/workflows/reusable-app-build.yaml"
   grep -q 'workflow_call' "$f"
   grep -q 'linux/arm64' "$f"

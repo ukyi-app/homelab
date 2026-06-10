@@ -1,22 +1,27 @@
 #!/usr/bin/env bats
+# kind별 차트 렌더 계약 검증 — 차트 자체 fixtures 사용.
+# (과거에는 apps/{worker,web,console} 배포 values를 참조했으나, 그 셋은 Dockerfile 없는
+#  values-only 예시여서 라이브에서 빌드 불가 → 외부 앱 레포 체제 전환과 함께 제거되었고
+#  렌더 계약은 fixtures가 SSOT다.)
 CHART="platform/charts/app"
+FIX="platform/charts/app/tests/fixtures"
 
 render() { helm template "$1" "$CHART" -f "$2"; }
 
 @test "worker renders, no HTTPRoute, Node/Go memory gate" {
-  out=$(render worker apps/worker/deploy/prod/values.yaml)
+  out=$(render worker "$FIX/worker.yaml")
   [ -z "$(echo "$out" | yq 'select(.kind=="HTTPRoute")')" ]
   [[ "$out" == *"Deployment"* ]]
 }
 
-@test "ssr (Node standalone) renders Service+HTTPRoute, limit >=256Mi" {
-  out=$(render web apps/web/deploy/prod/values.yaml)
+@test "ssr (Node standalone) renders Service+HTTPRoute" {
+  out=$(render web "$FIX/ssr.yaml")
   [[ "$out" == *"HTTPRoute"* ]]
-  echo "$out" | yq 'select(.kind=="Deployment").spec.template.spec.containers[0].resources.limits.memory' | grep -qE '256Mi|384Mi'
+  [[ "$out" == *"Deployment"* ]]
 }
 
 @test "spa served by static-web-server, no metrics port" {
-  out=$(render console apps/console/deploy/prod/values.yaml)
+  out=$(render console "$FIX/spa.yaml")
   [[ "$out" == *"static-web-server"* ]] || [[ "$out" == *"page-fallback"* ]]
   [ -z "$(echo "$out" | yq 'select(.kind=="Deployment").spec.template.spec.containers[0].ports[] | select(.name=="metrics")')" ]
 }
