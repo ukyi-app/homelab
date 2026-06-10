@@ -3,6 +3,33 @@
 Onboarding a service is a `values.yaml` for the shared chart `platform/charts/app`.
 Nothing else is hand-written.
 
+## 외부 앱 레포 방식 (권장 — 멀티레포 앱 플랫폼)
+
+앱 코드는 **별도 레포**(org `ukyi-app`)에 살고, homelab에는 배포 설정(`apps/<name>/deploy/prod/`)만 남는다.
+
+```
+[1회] gh repo create ukyi-app/<name> --template ukyi-app/homelab-app-template
+      $EDITOR .homelab.yaml   # kind/resources/route/db/env/secrets — 계약: tools/homelab-app-schema.json
+      git push                # 첫 push:
+        → reusable-app-build@main: arm64 빌드 → ghcr.io/ukyi-app/<name>:sha-<sha>
+        → homelab에 deploy 디렉토리 없음 → repository_dispatch(app-onboard, .homelab.yaml 동봉)
+        → homelab onboard.yaml: tools/onboard-app.mjs 검증(스키마·host 유도·env 시크릿 패턴·원장 예산)
+          → 스캐폴드(values.yaml + source-repo + KSOPS generator) + 원장 행 → 렌더/ledger 게이트 → 자동 PR
+      PR 머지(= 첫 배포 승인; secrets 선언 시 enc 파일을 PR 브랜치에 먼저 커밋 — 체크리스트 참조)
+        → ArgoCD appset이 발견 → wave0 config → wave1 migrate → wave2 deploy → 라이브
+
+[반복] 앱 레포 main 머지
+        → 빌드 → repository_dispatch(app-image)
+        → homelab bump.yaml(직렬): app명 regex + source-repo 바인딩 + GHCR digest 검증 → 태그 bump commit
+        → Telegram 알림 → ArgoCD sync (머지→라이브 약 4–7분)
+```
+
+전제(1회 설정): org secret `HOMELAB_DISPATCH_PAT`(fine-grained, homelab Contents:write),
+homelab repo variable `HOMELAB_DOMAIN`(apex 도메인), 머지 게이트가 싫은 앱은 `.homelab.yaml`의
+`deploy.autoDeploy: false` + 앱 레포 environment `production`에 required reviewer 등록.
+
+## 내부(monorepo) 방식 — 기존 샘플 앱(api/worker/web/console)용
+
 ## The chain
 ```
 pnpm gen:app <name> --kind api|worker|ssr|spa     # scaffolds apps/<name>/{src,Dockerfile,deploy/prod/values.yaml} + CI matrix entry

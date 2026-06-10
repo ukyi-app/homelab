@@ -3,8 +3,12 @@ on:
   workflow_run:
     workflows: [build]
     types: [completed]
+  # 외부 앱 레포의 reusable-app-build가 보내는 배포 dispatch (멀티레포 앱 플랫폼).
+  repository_dispatch:
+    types: [app-image]
 
 # SERIALIZED: only one write-back runs at a time; never cancel a partial commit.
+# (workflow_run 경로와 repository_dispatch 경로가 같은 그룹을 공유 — 교차 직렬화)
 concurrency:
   group: values-writeback
   cancel-in-progress: false
@@ -17,7 +21,8 @@ jobs:
     # Only act on a SUCCESSFUL build that ran on THIS repo's `main` (never a fork/PR build) —
     # else attacker-controlled artifact contents could drive the admin-PAT push.
     if: >-
-      ${{ github.event.workflow_run.conclusion == 'success'
+      ${{ github.event_name == 'workflow_run'
+          && github.event.workflow_run.conclusion == 'success'
           && github.event.workflow_run.head_repository.full_name == github.repository
           && github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-24.04-arm
@@ -92,3 +97,64 @@ jobs:
           curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             -d chat_id="${TG_CHAT}" \
             -d text="deploy write-back ${STATUS}: apps=[${APPS}] -> sha-${HEAD_SHA}"
+
+  # ── 외부 앱 레포 경로 (repository_dispatch: app-image) ────────────────────────────────────
+  # client_payload는 비신뢰 입력(PAT 소지자가 임의 값 전송 가능) — 전부 env로만 받고,
+  # regex + source-repo 바인딩 파일 + GHCR digest 실존의 3중 검증을 통과해야만 bump한다.
+  writeback-dispatch:
+    if: github.event_name == 'repository_dispatch'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.DEPLOY_BOT_PAT }}
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: pnpm install --frozen-lockfile
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: validate payload + verify digest + bump + commit
+        env:
+          APP: ${{ github.event.client_payload.app }}    # 비신뢰 — 아래에서 regex 검증
+          TAG: ${{ github.event.client_payload.tag }}    # 비신뢰 — 아래에서 regex 검증
+          SRC: ${{ github.event.client_payload.repo }}   # 비신뢰 — source-repo 바인딩과 대조
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          case "$APP" in ''|*[!a-z0-9-]*) echo "::error::app 이름 불량: '$APP'"; exit 1 ;; esac
+          echo "$TAG" | grep -qE '^sha-[0-9a-f]{7,40}$' || { echo "::error::tag 형식 불량: '$TAG'"; exit 1; }
+          echo "$SRC" | grep -qE '^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$' || { echo "::error::repo 형식 불량: '$SRC'"; exit 1; }
+          vals="apps/$APP/deploy/prod/values.yaml"
+          [ -f "$vals" ] || { echo "::error::미온보딩 앱 '$APP' — onboard PR부터 머지하라"; exit 1; }
+          # 발신 레포 바인딩: 온보딩 때 기록된 source-repo와 payload.repo가 일치해야 한다
+          bind="apps/$APP/deploy/prod/source-repo"
+          [ -f "$bind" ] || { echo "::error::$bind 없음 — 외부 앱이 아니거나 바인딩 누락"; exit 1; }
+          [ "$(tr -d '[:space:]' < "$bind")" = "$SRC" ] \
+            || { echo "::error::source-repo 바인딩 불일치: 기대 $(cat "$bind") vs payload '$SRC'"; exit 1; }
+          echo "verify ghcr.io/$OWNER/$APP:$TAG exists BEFORE bumping"
+          docker manifest inspect "ghcr.io/$OWNER/$APP:$TAG" >/dev/null 2>&1 \
+            || { echo "::error::ghcr.io/$OWNER/$APP:$TAG missing — refusing to bump"; exit 1; }
+          git pull --rebase origin main
+          node tools/bump-tag.mjs "$APP" "$TAG"
+          if git diff --quiet; then echo "no change (same tag)"; exit 0; fi
+          git config user.name "homelab-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add "apps/$APP/deploy/prod/values.yaml"
+          git commit -m "chore: ${APP} 이미지 태그를 ${TAG}로 갱신 (외부 레포 dispatch)"
+          git push origin main
+      - name: telegram notify
+        if: always()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          APP: ${{ github.event.client_payload.app }}
+          TAG: ${{ github.event.client_payload.tag }}
+          STATUS: ${{ job.status }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d text="deploy write-back ${STATUS}: ${APP} -> ${TAG} (dispatch)"

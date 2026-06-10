@@ -1,0 +1,121 @@
+# 외부 앱 레포가 호출하는 재사용 빌드 워크플로 (빌드 로직의 SSOT).
+# 앱 레포의 caller(템플릿 제공)는 main push에서 이걸 호출만 한다:
+#   uses: <owner>/homelab/.github/workflows/reusable-app-build.yaml@main
+#   with: { app: ${{ github.event.repository.name }} }
+#   secrets: { dispatch-pat: ${{ secrets.HOMELAB_DISPATCH_PAT }} }   # org-level secret
+# 흐름: arm64 빌드 → GHCR push → homelab에 deploy 디렉토리가 있으면 app-image(배포),
+#       없으면 app-onboard(.homelab.yaml 동봉 — homelab이 온보딩 PR 생성) dispatch.
+name: reusable-app-build
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: "앱 이름 (관례: 레포 이름과 동일)"
+        required: true
+        type: string
+    secrets:
+      dispatch-pat:
+        description: "homelab repo Contents:write fine-grained PAT (repository_dispatch용)"
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm # native arm64 — QEMU 불필요 (homelab build.yaml과 동일)
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      mode: ${{ steps.target.outputs.mode }}          # image | onboard
+      auto-deploy: ${{ steps.meta.outputs.auto-deploy }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: |
+          case "${{ inputs.app }}" in
+            ''|*[!a-z0-9-]*) echo "::error::app 이름 불량: '${{ inputs.app }}'"; exit 1 ;;
+          esac
+          echo "tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          # .homelab.yaml의 deploy.autoDeploy(기본 true) — false면 dispatch가 environment 승인 대기
+          auto=$(yq '.deploy.autoDeploy // true' .homelab.yaml 2>/dev/null || echo true)
+          echo "auto-deploy=${auto}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build + push (arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ inputs.app }}:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: target — homelab에 deploy 디렉토리가 있나?
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.dispatch-pat }}
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/${{ github.repository_owner }}/homelab/contents/apps/${{ inputs.app }}/deploy/prod/values.yaml")
+          if [ "$code" = "200" ]; then echo "mode=image" >> "$GITHUB_OUTPUT";
+          elif [ "$code" = "404" ]; then echo "mode=onboard" >> "$GITHUB_OUTPUT";
+          else echo "::error::homelab 조회 실패 (HTTP $code)"; exit 1; fi
+
+  # 온보딩 dispatch: 결과물이 PR(사람 머지 게이트)이므로 environment 승인 불필요 — 항상 즉시.
+  dispatch-onboard:
+    needs: build
+    if: needs.build.outputs.mode == 'onboard'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ secrets.dispatch-pat }}
+        run: |
+          [ -f .homelab.yaml ] || { echo "::error::.homelab.yaml 없음 — 온보딩 불가"; exit 1; }
+          payload=$(jq -n --arg app "${{ inputs.app }}" --arg repo "${{ github.repository }}" \
+            --arg tag "${{ needs.build.outputs.tag }}" --arg cfg "$(base64 < .homelab.yaml | tr -d '\n')" \
+            '{event_type: "app-onboard", client_payload: {app: $app, repo: $repo, tag: $tag, config_b64: $cfg}}')
+          curl -fsS -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository_owner }}/homelab/dispatches" -d "$payload"
+          echo "온보딩 dispatch 전송 — homelab에 PR이 생성됩니다"
+
+  # 배포 dispatch (autoDeploy: true): 즉시.
+  dispatch-image:
+    needs: build
+    if: needs.build.outputs.mode == 'image' && needs.build.outputs.auto-deploy == 'true'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.dispatch-pat }}
+        run: |
+          payload=$(jq -n --arg app "${{ inputs.app }}" --arg repo "${{ github.repository }}" \
+            --arg tag "${{ needs.build.outputs.tag }}" \
+            '{event_type: "app-image", client_payload: {app: $app, repo: $repo, tag: $tag}}')
+          curl -fsS -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository_owner }}/homelab/dispatches" -d "$payload"
+
+  # 배포 dispatch (autoDeploy: false): environment 승인 후 진행.
+  # 앱 레포 Settings → Environments → production 에 required reviewer를 등록해야 게이트가 작동한다
+  # (environment는 첫 참조 시 자동 생성되지만 보호 규칙은 비어 있음 — 템플릿 README에 안내).
+  dispatch-image-gated:
+    needs: build
+    if: needs.build.outputs.mode == 'image' && needs.build.outputs.auto-deploy != 'true'
+    runs-on: ubuntu-24.04-arm
+    environment: production
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.dispatch-pat }}
+        run: |
+          payload=$(jq -n --arg app "${{ inputs.app }}" --arg repo "${{ github.repository }}" \
+            --arg tag "${{ needs.build.outputs.tag }}" \
+            '{event_type: "app-image", client_payload: {app: $app, repo: $repo, tag: $tag}}')
+          curl -fsS -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository_owner }}/homelab/dispatches" -d "$payload"

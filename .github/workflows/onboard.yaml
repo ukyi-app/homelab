@@ -1,0 +1,95 @@
+# 외부 앱 레포의 app-onboard dispatch를 받아 온보딩 PR을 만든다.
+# 보안: client_payload는 발신자가 임의로 채울 수 있는 비신뢰 입력 — 절대 run에 ${{ }}로 인라인하지
+# 않고 env→파일로 받아 tools/onboard-app.mjs가 전부 검증한다(이름/태그/레포 regex, 스키마
+# additionalProperties:false, 원장 예산). 결과물은 직접 push가 아니라 PR — 사람 머지가 배포 승인이며
+# required check 'gate'(verify:ledger 포함)가 PR에서 강제된다.
+name: onboard
+on:
+  repository_dispatch:
+    types: [app-onboard]
+
+# 온보딩도 직렬화: 동시 dispatch 두 개가 같은 원장에 행을 겹쳐 쓰지 못하게.
+concurrency:
+  group: app-onboard
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  onboard:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      # DEPLOY_BOT_PAT 사용 이유: GITHUB_TOKEN으로 만든 PR은 워크플로(required check 'gate')를
+      # 트리거하지 않아 영원히 머지 불가가 된다 — PAT발 PR이어야 ci.yaml이 정상 실행된다.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.DEPLOY_BOT_PAT }}
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: install chart toolchain (render gate)
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-arm64.tar.gz | sudo tar xz -C /usr/local/bin kubeconform
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      - name: validate payload + scaffold (onboard-app.mjs가 모든 비신뢰 입력 검증)
+        id: scaffold
+        env:
+          PAYLOAD: ${{ toJSON(github.event.client_payload) }} # env 경유 — shell 보간 없음
+          DOMAIN: ${{ vars.HOMELAB_DOMAIN }}
+        run: |
+          [ -n "$DOMAIN" ] || { echo "::error::repo variable HOMELAB_DOMAIN 미설정 (Settings→Variables)"; exit 1; }
+          printf '%s' "$PAYLOAD" > /tmp/payload.json
+          node tools/onboard-app.mjs --payload /tmp/payload.json --domain "$DOMAIN" | tee /tmp/plan.json
+          {
+            echo "app=$(jq -r .app /tmp/plan.json)"
+            echo "host=$(jq -r '.host // "(worker)"' /tmp/plan.json)"
+          } >> "$GITHUB_OUTPUT"
+      - name: render gate — 새 values로 차트가 kubeconform-clean하게 렌더되는가
+        env:
+          APP: ${{ steps.scaffold.outputs.app }}
+        run: |
+          helm template "$APP" platform/charts/app -f "apps/$APP/deploy/prod/values.yaml" \
+            | kubeconform -strict -ignore-missing-schemas \
+                -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                -summary
+      - name: ledger gate (R2 — PR의 required check와 동일 검증을 선행)
+        run: pnpm verify:ledger
+      - name: PR 생성
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_BOT_PAT }}
+          APP: ${{ steps.scaffold.outputs.app }}
+        run: |
+          git config user.name "homelab-bot"
+          git config user.email "bot@users.noreply.github.com"
+          branch="onboard/${APP}"
+          git checkout -b "$branch"
+          git add "apps/${APP}" docs/memory-ledger.md
+          git commit -m "feat: ${APP} 앱 온보딩 (외부 레포 dispatch)"
+          git push -u origin "$branch"
+          {
+            echo "외부 앱 레포 dispatch로 생성된 온보딩 PR입니다. **머지 = 첫 배포 승인.**"
+            echo
+            echo '```json'; cat /tmp/plan.json; echo '```'
+            if [ "$(jq '.checklist | length' /tmp/plan.json)" -gt 0 ]; then
+              echo; echo "### ⚠️ 머지 전 체크리스트"
+              jq -r '.checklist[] | "- [ ] " + .' /tmp/plan.json
+            fi
+          } > /tmp/pr-body.md
+          gh pr create --title "feat: ${APP} 앱 온보딩" --body-file /tmp/pr-body.md --base main --head "$branch"
+      - name: telegram notify
+        if: always()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          APP: ${{ steps.scaffold.outputs.app || 'unknown' }}
+          HOST: ${{ steps.scaffold.outputs.host || '-' }}
+          STATUS: ${{ job.status }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d text="onboard ${STATUS}: ${APP} (${HOST}) — PR을 확인하세요"
