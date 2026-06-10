@@ -46,3 +46,8 @@ build/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# --- kustomize `--enable-helm` chart-pull cache (build artifact, never commit) ---
+platform/*/prod/charts/
+# Terraform provider lock files: regenerate per-platform; commit multi-platform locks deliberately
+.terraform.lock.hcl
