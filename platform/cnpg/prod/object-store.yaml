@@ -1,0 +1,26 @@
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: pg-r2
+  namespace: database
+spec:
+  retentionPolicy: "14d"
+  configuration:
+    destinationPath: "s3://homelab-pg-backups-prod/"
+    endpointURL: "https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com"
+    s3Credentials:
+      accessKeyId:
+        name: cnpg-r2-creds # M2-seeded Secret (ns database)
+        key: AWS_ACCESS_KEY_ID
+      secretAccessKey:
+        name: cnpg-r2-creds
+        key: AWS_SECRET_ACCESS_KEY
+    wal:
+      compression: gzip
+      maxParallel: 2
+    data:
+      compression: gzip
+      jobs: 2
+  env:
+    - name: AWS_REGION
+      value: "auto"
