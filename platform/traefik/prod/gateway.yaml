@@ -1,0 +1,22 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: homelab
+  namespace: gateway
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+spec:
+  gatewayClassName: traefik
+  listeners:
+    - name: web-public
+      protocol: HTTP
+      port: 8000
+      hostname: "*.<DOMAIN>"
+      allowedRoutes:
+        namespaces: { from: All }
+    - name: web-internal
+      protocol: HTTP
+      port: 8000
+      hostname: "*.int.<DOMAIN>"
+      allowedRoutes:
+        namespaces: { from: All }

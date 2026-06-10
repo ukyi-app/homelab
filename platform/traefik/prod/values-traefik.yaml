@@ -1,0 +1,43 @@
+deployment:
+  replicas: 1
+providers:
+  kubernetesGateway:
+    enabled: true
+  kubernetesIngress:
+    enabled: false
+  kubernetesCRD:
+    enabled: false
+gateway:
+  enabled: false # we manage GatewayClass + Gateway ourselves (gatewayclass.yaml/gateway.yaml)
+gatewayClass:
+  enabled: false
+service:
+  type: LoadBalancer # k3s servicelb publishes on the VM node IP :80/:443
+ports:
+  web:
+    port: 8000
+    expose: { default: true }
+    exposedPort: 80
+    protocol: TCP
+  websecure:
+    port: 8443
+    expose: { default: true }
+    exposedPort: 443
+    protocol: TCP
+logs:
+  general:
+    format: json
+    level: INFO
+  access:
+    enabled: true
+    format: json # JSON → stdout → Vector → VictoriaLogs (M5)
+ingressRoute:
+  dashboard:
+    enabled: false # dashboard is internal-only; not exposed here
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { cpu: 500m, memory: 128Mi }
+rbac:
+  enabled: true # base RBAC; Gateway-API extension comes from rbac-gateway.yaml (Task 3.3)
+serviceAccount:
+  name: traefik

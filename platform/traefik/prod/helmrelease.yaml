@@ -1,0 +1,10 @@
+apiVersion: builtin
+kind: HelmChartInflationGenerator
+metadata:
+  name: traefik
+name: traefik
+repo: https://traefik.github.io/charts
+version: 33.0.0 # PINNED Traefik v3.x chart
+releaseName: traefik
+namespace: gateway
+valuesFile: values-traefik.yaml
