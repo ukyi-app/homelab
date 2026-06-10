@@ -18,7 +18,7 @@ the DNS/edge come up before the stateful and app tiers.
 | Wave | Resource                                   |
 |------|--------------------------------------------|
 |   0  | ConfigMap / Secret (app config)            |
-|   1  | migration pre-upgrade Job (`migrate`)      |
+|   1  | migration Job (`migrate`, ArgoCD `Sync` hook — runs in the Sync phase AFTER wave-0 config, not a Helm PreSync hook) |
 |   2  | Deployment / Service / HTTPRoute           |
 
 Networking precedes apps: an app's HTTPRoute (per-app wave 2) attaches to a

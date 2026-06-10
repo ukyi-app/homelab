@@ -6,13 +6,17 @@ metadata:
   labels:
     {{- include "app.labels" . | nindent 4 }}
   annotations:
-    # Wave 1 orders this Job before the wave-2 Deployment WITHIN this app's Application. Cross-Application
-    # DB readiness is enforced by the wait-for-db initContainer below (sync-waves don't gate across Applications).
+    # ArgoCD-native Sync hook at wave 1 (Pass-5 Open Item #2). The hook runs in the SYNC phase
+    # (NOT PreSync), so it executes AFTER the wave-0 ConfigMap/Secret exist and BEFORE the wave-2
+    # Deployment, WITHIN this app's Application. A Helm pre-install/pre-upgrade hook would instead
+    # run in ArgoCD's PreSync phase — i.e. before wave-0 config/secrets (install) or with stale
+    # config (upgrade) — which is exactly the bug we are fixing here. Cross-Application DB readiness
+    # is still enforced by the wait-for-db initContainer below (sync-waves don't gate across Applications).
+    argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/sync-wave: "1"
-    # Helm hook makes this run on install/upgrade only, then be cleaned up.
-    helm.sh/hook: pre-install,pre-upgrade
-    helm.sh/hook-weight: "0"
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    # Delete the prior Job before creating the new one, so a changed migration re-applies on the next
+    # sync and a previously failed Job is cleaned up first.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   backoffLimit: 2
   activeDeadlineSeconds: 600

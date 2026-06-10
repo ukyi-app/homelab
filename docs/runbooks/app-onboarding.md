@@ -20,7 +20,7 @@ pnpm verify:app <name>                            # build→push→tag→sync→
 ```
 CNPG-Ready gate  (cnpg-data Application Healthy; enforced per-app by the chart's wait-for-db initContainer)
   → wave 0   ConfigMap / Secret (app config)
-  → wave 1   migration pre-upgrade hook Job  (helm.sh/hook: pre-install,pre-upgrade)
+  → wave 1   migration Job  (argocd.argoproj.io/hook: Sync — runs in the Sync phase, AFTER wave-0 config)
   → wave 2   Deployment / Service / HTTPRoute (attaches to the shared homelab Gateway)
 ```
 ArgoCD sync-waves order resources WITHIN one Application; cross-Application DB readiness is

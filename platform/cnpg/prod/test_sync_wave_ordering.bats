@@ -11,9 +11,12 @@
   grep -qE '\-2.*cnpg-operator' platform/argocd/root/SYNC-WAVES.md
   grep -qE '\-1.*Cluster' platform/argocd/root/SYNC-WAVES.md
 }
-@test "shared app chart runs migrate as a pre-upgrade hook at wave 1" {
-  # asserted against the chart owned by Milestone 6; this is the cross-milestone contract
+@test "shared app chart runs migrate as a wave-1 ArgoCD Sync hook" {
+  # asserted against the chart owned by Milestone 6; this is the cross-milestone contract.
+  # Pass-5 Open Item #2 moved this off the Helm pre-install/pre-upgrade hook (which runs in ArgoCD's
+  # PreSync phase, before wave-0 config) onto an ArgoCD Sync hook that runs AFTER wave-0 config.
   test -f platform/charts/app/templates/migrate-job.yaml || skip "chart from M6 not present yet"
-  grep -qE 'helm.sh/hook:\s*(pre-install,pre-upgrade|pre-upgrade)' platform/charts/app/templates/migrate-job.yaml
+  grep -qE 'argocd.argoproj.io/hook:\s*Sync' platform/charts/app/templates/migrate-job.yaml
   grep -qE 'sync-wave:\s*"1"' platform/charts/app/templates/migrate-job.yaml
+  ! grep -qE 'helm\.sh/hook' platform/charts/app/templates/migrate-job.yaml
 }

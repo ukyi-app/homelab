@@ -36,7 +36,7 @@ route:
 # --- database / migrations ---
 db:
   enabled: false
-  migrateCmd: ["migrate"] # command in the app image; run as pre-upgrade hook
+  migrateCmd: ["migrate"] # command in the app image; run by the wave-1 ArgoCD Sync-hook Job
 
 # --- probes ---
 probes:
