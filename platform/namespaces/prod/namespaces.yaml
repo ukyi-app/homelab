@@ -1,0 +1,19 @@
+# platform-components appset이 발견하는 컴포넌트들의 대상 네임스페이스.
+# appset 템플릿엔 destination.namespace가 없어 CreateNamespace=true가 무효이고(라이브에서
+# "namespaces gateway not found"로 확인), 각 컴포넌트 kustomization의 namespace: 트랜스포머는
+# Namespace 리소스 자체를 만들지 않는다 — 그래서 여기서 일괄 소유한다.
+# (database는 cnpg-data App의 CreateNamespace가, observability는 victoria 자체 manifest가 담당)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: edge
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
