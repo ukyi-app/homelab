@@ -997,7 +997,7 @@ spec:
         - --client-cert=/client/tls.crt
         - --server-address=:9090
         - --leader-elect
-        - --log-level=debug
+        - --log-level=info # LOCAL hardening (was debug): avoid leaking creds in logs; re-apply on re-vendor
         env:
         - name: SIDECAR_IMAGE
           valueFrom:
