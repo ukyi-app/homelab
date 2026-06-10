@@ -1,0 +1,11 @@
+image: { repo: ghcr.io/owner/worker, tag: sha-0000000 }
+kind: worker
+replicas: 1
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits:   { cpu: 500m, memory: 64Mi }
+envFrom:
+  - secretRef: { name: worker-secrets }
+db:
+  enabled: true
+  migrateCmd: ["/app/worker", "migrate"]

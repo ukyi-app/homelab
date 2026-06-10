@@ -1,0 +1,1 @@
+{ "name": "@homelab/console", "private": true, "scripts": { "dev": "vite" } }
