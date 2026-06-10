@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: gateway # AUTHORITATIVE destination for the traefik-prod Application
+# Gateway API standard channel, PINNED. Re-vendor by:
+#   curl -sL https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml \
+#     -o platform/traefik/prod/gateway-api-crds.yaml
+resources:
+  - gateway-api-crds.yaml
+  - rbac-gateway.yaml
+  - gateway.yaml # added in Task 3.4
+  - gatewayclass.yaml # added in Task 3.4
+  - whoami-smoke.yaml # added in Task 3.5
+
+generators:
+  - helmrelease.yaml # added in Task 3.4
