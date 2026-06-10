@@ -6,3 +6,8 @@ resources:
   - configmap.yaml
 generators:
   - secret-generator.yaml # this component's OWN KSOPS generator → cloudflared-tunnel
+# 생성되는 Secret에 wave -7 부여: Deployment(-6)보다 먼저 적용돼야 한다 — 주석이 없으면 wave 0이
+# 되어 'Deployment 헬시 대기 → Secret 미적용 → 영원히 unhealthy' 교착(라이브 확인, cnpg 패턴과 동일).
+generatorOptions:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-7"
