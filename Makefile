@@ -40,3 +40,15 @@ tf-validate: ## terraform fmt -check + validate across all infra roots
 .PHONY: seed-secrets
 seed-secrets: ## generate SOPS-encrypted seed secrets from terraform outputs
 	@bash scripts/seed-secrets.sh
+
+.PHONY: bootstrap-deadmanswitch
+bootstrap-deadmanswitch: ## [M5] verify the off-node dead-man's-switch ping URL is seeded (R8)
+	@echo ">> DEAD-MAN'S-SWITCH (R8): ensure healthchecks.io check 'homelab-watchdog' exists"
+	@echo ">> and HEALTHCHECKS_URL is set in platform/victoria-stack/prod/alerting.enc.yaml (M2-seeded)"
+	@echo ">> Full procedure: docs/runbooks/observability-bootstrap.md"
+	@sops --decrypt platform/victoria-stack/prod/alerting.enc.yaml 2>/dev/null | grep -q 'HEALTHCHECKS_URL' \
+		|| { echo "FAIL: HEALTHCHECKS_URL missing from M2-seeded SOPS secret"; exit 1; }
+	@echo "OK: dead-man's-switch ping URL present (armed once relay pod runs)"
+
+# EDIT (not re-declare): append bootstrap-deadmanswitch to the existing M0-owned bootstrap prereqs.
+bootstrap: bootstrap-deadmanswitch
