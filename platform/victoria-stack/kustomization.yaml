@@ -10,3 +10,9 @@ resources:
   - vmagent.yaml
   - victorialogs.yaml
   - vector.yaml
+  - alertmanager.yaml
+  - rules/core.yaml
+  - vmalert.yaml
+
+generators:
+  - secret-generator.yaml
