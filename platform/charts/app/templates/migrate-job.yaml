@@ -40,6 +40,10 @@ spec:
         # this Job runs. Make readiness self-contained: block until the DB accepts connections.
         - name: wait-for-db
           image: ghcr.io/cloudnative-pg/postgresql:16.4
+          env:
+            # runAsUser 65532는 이미지 /etc/passwd에 없어 libpq가 기본 사용자명을 못 정해
+            # pg_isready가 'no attempt'(rc=3)로 영원히 실패한다(라이브 확인) — 명시 PGUSER로 우회.
+            - { name: PGUSER, value: postgres }
           command: ["/bin/sh", "-c"]
           args:
             - |
