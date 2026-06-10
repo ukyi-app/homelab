@@ -1,0 +1,100 @@
+# Ingress isolation for the `database` (CNPG) tier — the crown jewel (Pass-5 Open Item #3).
+# Default-deny INGRESS, then allow only the legitimate callers. This is the target side of the
+# "a compromised public app must NOT reach the database" boundary (the source side is enforced in
+# platform/network-policies/prod by prod's egress default-deny).
+#
+# EGRESS is intentionally NOT default-denied here: CNPG instances must reach the Kubernetes API,
+# the R2 object store (barman/rclone), Telegram/healthchecks, and each other for replication.
+# Mapping all of that precisely needs a live cluster; locking egress down is tracked as future
+# hardening (do it with the live CNPG egress set in front of you, verified by a connectivity test).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-default-deny-ingress
+  namespace: database
+spec:
+  podSelector: {}            # every pod in `database`
+  policyTypes: [Ingress]
+  # no ingress rules => deny all ingress; the allows below re-open the minimum.
+---
+# Apps (prod namespace) connect to Postgres 5432 only (PgBouncer pg-pooler-rw / Cluster pg-rw).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-allow-ingress-from-prod
+  namespace: database
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: prod }
+      ports:
+        - { protocol: TCP, port: 5432 }
+---
+# The CNPG operator (cnpg-system) manages the instances (status/health on 8000, exec, config).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-allow-ingress-from-cnpg-system
+  namespace: database
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: cnpg-system }
+---
+# vmagent (observability) scrapes the CNPG metrics exporter on 9187.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-allow-ingress-metrics-from-observability
+  namespace: database
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: observability }
+      ports:
+        - { protocol: TCP, port: 9187 }
+---
+# Intra-namespace: streaming replication between instances, PgBouncer→instance, and the in-namespace
+# backup/restore CronJobs (basebackup, pgdump-hedge, restore-drill) connecting to pg-rw:5432.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-allow-ingress-intra
+  namespace: database
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}      # any pod in the same (database) namespace
+---
+# kubelet liveness/readiness probes are node-sourced; under default-deny-ingress they would be
+# dropped and crash-loop the CNPG instances. Allow the k3s pod/cluster CIDR (default 10.42.0.0/16)
+# to the instance manager (8000), Postgres (5432) and metrics (9187) ports. LIVE: confirm the probe
+# source and widen if k3s' cluster-cidr was customized (tests/posture/network-policy.bats).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-allow-ingress-kubelet-probes
+  namespace: database
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.42.0.0/16
+      ports:
+        - { protocol: TCP, port: 8000 }
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 9187 }

@@ -12,6 +12,7 @@ resources:
   - pgdump-hedge-cronjob.yaml
   - restore-drill-rbac.yaml
   - restore-drill-cronjob.yaml
+  - networkpolicy.yaml # database-tier ingress isolation (Pass-5 Open Item #3)
 
 generators:
   - secret-generator.yaml # KSOPS — renders ALL THREE database-ns seeds (see below)

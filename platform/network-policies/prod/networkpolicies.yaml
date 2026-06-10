@@ -1,0 +1,126 @@
+# East-west isolation for the `prod` apps namespace (Pass-5 Open Item #3).
+# k3s enforces NetworkPolicy via its bundled kube-router controller (we never pass
+# --disable-network-policy). Default-deny BOTH directions, then add the minimal explicit allows.
+# The security boundary that matters most — "a compromised public api/ssr pod must NOT reach the
+# database/admin tier" — is enforced here by EGRESS (apps egress only to DNS, database:5432, and
+# intra-prod app peers on 8080) and, in depth, by the database namespace's own ingress default-deny
+# (platform/cnpg/prod).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+spec:
+  podSelector: {}            # every pod in `prod`
+  policyTypes: [Ingress, Egress]
+  # no ingress/egress rules => deny all in both directions; the allows below re-open the minimum.
+---
+# Egress: DNS resolution to CoreDNS (kube-system). Without this, default-deny-egress breaks name
+# resolution for every pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Egress: apps → database tier on Postgres 5432 only (PgBouncer pg-pooler-rw / Cluster pg-rw, both
+# in the `database` namespace). Besides this and intra-prod app→app (8080), apps get no other
+# egress by default; an app that legitimately needs external/API egress ships its own additive policy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-database
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: database }
+      ports:
+        - { protocol: TCP, port: 5432 }
+---
+# Ingress: the shared Traefik Gateway (gateway namespace) → app HTTP port 8080. This is the public/
+# internal serving path; every app HTTPRoute attaches to that Gateway.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-from-gateway
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: gateway }
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# Ingress: vmagent (observability namespace) scrapes the app /metrics port 9090.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-metrics-from-observability
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: observability }
+      ports:
+        - { protocol: TCP, port: 9090 }
+---
+# Intra-prod app->app on the HTTP port 8080: server-side calls between co-tenant apps in the same
+# trust tier (notably SSR/web -> api). Without this, default-deny would silently break those calls.
+# This does NOT widen the database boundary — egress is still only to prod:8080 (apps), not database.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-prod-http
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: prod }
+      ports:
+        - { protocol: TCP, port: 8080 }
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: prod }
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# Ingress: kubelet liveness/readiness probes hit the HTTP port 8080 (and we allow the metrics port
+# too). Under default-deny-ingress these node-sourced probes would otherwise be dropped, crash-
+# looping every app. The source is the node, so we allow the k3s pod/cluster CIDR (default
+# 10.42.0.0/16). LIVE: confirm the probe source at bring-up (tests/posture/network-policy.bats) and
+# widen this ipBlock to the node's actual address if k3s' cluster-cidr was customized.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-kubelet-probes
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.42.0.0/16
+      ports:
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 9090 }
