@@ -3,7 +3,7 @@ kind: Ingress
 metadata:
   name: traefik-ts
   namespace: gateway
-  annotations: { argocd.argoproj.io/sync-wave: "-6" }
+
 spec:
   ingressClassName: tailscale
   defaultBackend:

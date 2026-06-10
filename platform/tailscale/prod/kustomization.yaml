@@ -10,8 +10,3 @@ resources:
 generators:
   - helmrelease.yaml
   - secret-generator.yaml # this component's OWN KSOPS generator → operator-oauth (edge)
-# 생성 리소스에 wave -7 부여: 워크로드(-6)보다 Secret/차트 산출물이 먼저 적용돼야 교착이 없다
-# (cloudflared와 동일한 라이브 교착 — cnpg generatorOptions 패턴).
-generatorOptions:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-7"

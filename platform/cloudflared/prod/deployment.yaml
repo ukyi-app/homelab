@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: cloudflared
   namespace: edge
-  annotations: { argocd.argoproj.io/sync-wave: "-6" }
+
 spec:
   replicas: 1
   selector: { matchLabels: { app: cloudflared } }

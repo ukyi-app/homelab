@@ -3,7 +3,7 @@ kind: ConfigMap
 metadata:
   name: cloudflared
   namespace: edge
-  annotations: { argocd.argoproj.io/sync-wave: "-6" }
+
 data:
   config.yaml: |
     tunnel: homelab
