@@ -18,7 +18,7 @@ echo "==> Setting global OrbStack caps: ${ORB_MEMORY_MIB} MiB / ${ORB_CPU} vCPU"
 orb config set memory_mib "$ORB_MEMORY_MIB"
 orb config set cpu "$ORB_CPU"
 
-if orb list 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -qx "$ORB_MACHINE"; then
+if orb list 2>/dev/null | awk 'NF && $1 != "NAME" {print $1}' | grep -qx "$ORB_MACHINE"; then
   echo "==> Machine '${ORB_MACHINE}' already exists — skipping create (idempotent)."
 else
   echo "==> Creating Debian ${DEBIAN_RELEASE} ${DEBIAN_ARCH} machine '${ORB_MACHINE}'…"

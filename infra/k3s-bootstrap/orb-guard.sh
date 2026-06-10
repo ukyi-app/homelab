@@ -15,8 +15,9 @@ if ! command -v orb >/dev/null 2>&1; then
   exit 2
 fi
 
-# `orb list` prints a header row + one row per machine. Strip the header.
-mapfile -t rows < <(orb list 2>/dev/null | tail -n +2 | sed '/^[[:space:]]*$/d')
+# `orb list` (OrbStack 2.x) prints NO header when piped/non-TTY; in a TTY it may
+# print a "NAME …" header. Robust to both: drop blank lines and any header row.
+mapfile -t rows < <(orb list 2>/dev/null | awk 'NF && $1 != "NAME"')
 
 count="${#rows[@]}"
 if [ "$count" -ne 1 ]; then
