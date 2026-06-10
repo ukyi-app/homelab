@@ -5,14 +5,17 @@ resource "tailscale_acl" "homelab" {
       "tag:k8s"          = ["tag:k8s-operator"]
     }
     acls = [
-      { action = "accept", src = ["autogroup:member"], dst = ["tag:k8s:*"] },
-      { action = "accept", src = ["tag:k8s-operator"], dst = ["*:*"] }
+      # Members reach internal services only through the Traefik ingress proxy
+      # (HTTP/HTTPS). kubelet/etcd/NodePort stay closed; kubectl is local via
+      # OrbStack, not Tailscale — so no kube-apiserver port is exposed here.
+      { action = "accept", src = ["autogroup:member"], dst = ["tag:k8s:80,443"] },
+      # The operator only manages the proxy devices it creates (tag:k8s);
+      # it does not need tailnet-wide any:any.
+      { action = "accept", src = ["tag:k8s-operator"], dst = ["tag:k8s:*"] }
     ]
-    # Split-horizon: int.<DOMAIN> resolves to the in-VM Traefik via the
-    # operator-exposed Ingress, pinned to the stable Tailscale IP (R7).
-    nodeAttrs = [
-      { target = ["tag:k8s"], attr = ["funnel"] }
-    ]
+    # No Funnel: this tailnet is INTERNAL-only (public exposure goes through the
+    # Cloudflare Tunnel, never Tailscale Funnel — see internal-by-default, §6).
+    # Split-horizon (int.<DOMAIN> → stable Tailscale IP, R7) needs no nodeAttrs.
   })
 }
 
