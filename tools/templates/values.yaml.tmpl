@@ -1,0 +1,8 @@
+image: { repo: ghcr.io/owner/__NAME__, tag: sha-0000000 }
+kind: __KIND__
+replicas: 1
+resources:
+  requests: { cpu: 50m, memory: __REQMEM__ }
+  limits:   { cpu: 500m, memory: __LIMMEM__ }
+__ROUTE__
+__DB__
