@@ -6,6 +6,6 @@ resources:
   requests: { cpu: 10m, memory: 16Mi }
   limits:   { cpu: 100m, memory: 32Mi }
 route:
-  host: console.int.<DOMAIN>
+  host: console.home.<DOMAIN>
   paths: ["/"]
   public: false

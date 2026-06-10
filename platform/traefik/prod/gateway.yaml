@@ -17,6 +17,6 @@ spec:
     - name: web-internal
       protocol: HTTP
       port: 8000
-      hostname: "*.int.<DOMAIN>"
+      hostname: "*.home.<DOMAIN>"
       allowedRoutes:
         namespaces: { from: All }

@@ -15,7 +15,7 @@ tpl() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
 }
 
 @test "internal app binds to the internal listener" {
-  rt=$(tpl --set kind=ssr --set route.host=admin.int.example.com --set route.public=false | yq 'select(.kind=="HTTPRoute")')
+  rt=$(tpl --set kind=ssr --set route.host=admin.home.example.com --set route.public=false | yq 'select(.kind=="HTTPRoute")')
   [[ "$rt" == *"sectionName: web-internal"* ]]
 }
 

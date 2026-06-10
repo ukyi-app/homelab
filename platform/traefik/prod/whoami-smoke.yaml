@@ -39,7 +39,7 @@ spec:
     - name: homelab
       namespace: gateway
       sectionName: web-internal
-  hostnames: ["whoami.int.<DOMAIN>"]
+  hostnames: ["whoami.home.<DOMAIN>"]
   rules:
     - matches: [{ path: { type: PathPrefix, value: / } }]
       backendRefs: [{ name: whoami, port: 80 }]

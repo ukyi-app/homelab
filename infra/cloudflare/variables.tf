@@ -17,7 +17,7 @@ variable "tunnel_name" {
 }
 variable "internal_suffix" {
   type        = string
-  description = "Internal hostname suffix, e.g. int.example.com."
+  description = "Internal hostname suffix, e.g. home.example.com."
 }
 variable "tailscale_ip" {
   type        = string

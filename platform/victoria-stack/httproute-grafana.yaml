@@ -8,7 +8,7 @@ spec:
       namespace: gateway
       sectionName: web-internal
   hostnames:
-    - "grafana.int.<DOMAIN>"
+    - "grafana.home.<DOMAIN>"
   rules:
     - matches:
         - path: { type: PathPrefix, value: / }

@@ -1,7 +1,7 @@
 # Lean single-node ArgoCD. HA OFF everywhere; processors tuned (§5).
 # M2 OWNS the KSOPS repo-server wiring below; M3/M4/M5 inherit it.
 global:
-  domain: argocd.int.<DOMAIN>
+  domain: argocd.home.<DOMAIN>
 
 redis-ha:
   enabled: false

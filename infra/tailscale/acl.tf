@@ -15,7 +15,7 @@ resource "tailscale_acl" "homelab" {
     ]
     # No Funnel: this tailnet is INTERNAL-only (public exposure goes through the
     # Cloudflare Tunnel, never Tailscale Funnel — see internal-by-default, §6).
-    # Split-horizon (int.<DOMAIN> → stable Tailscale IP, R7) needs no nodeAttrs.
+    # Split-horizon (home.<DOMAIN> → stable Tailscale IP, R7) needs no nodeAttrs.
   })
 }
 

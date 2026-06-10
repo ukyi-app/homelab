@@ -11,7 +11,7 @@ We deliberately do NOT run metrics-server (saves ~40–60 MiB, §14). Consequenc
 
 ## Internal-only posture
 Grafana, vmsingle, VictoriaLogs, vmalert, Alertmanager have NO public HTTPRoute and NO
-cloudflared route. They are reachable ONLY via `*.int.<DOMAIN>` through the single
+cloudflared route. They are reachable ONLY via `*.home.<DOMAIN>` through the single
 Tailscale-exposed `homelab` Gateway's `web-internal` listener (M3). Default posture =
 internal-by-default (§6).
 
