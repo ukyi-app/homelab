@@ -7,10 +7,9 @@ redis-ha:
   enabled: false
 
 controller:
+  # ARGOCD_CONTROLLER_REPLICAS env를 여기 명시하면 안 된다 — 차트가 replicas에서 같은 env를
+  # 자동 생성해 k8s SSA가 중복 키로 StatefulSet 생성을 거부한다(라이브 bootstrap에서 확인).
   replicas: 1
-  env:
-    - name: ARGOCD_CONTROLLER_REPLICAS
-      value: "1"
   args:
     statusProcessors: "4"
     operationProcessors: "2"

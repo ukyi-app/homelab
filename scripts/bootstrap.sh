@@ -20,12 +20,14 @@ kubectl -n argocd create secret generic sops-age \
 echo "==> [3/4] helm upgrade --install argo-cd (pinned ${CHART_VERSION})"
 helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
 helm repo update argo >/dev/null
+# helm 실패가 grep 파이프라인+|| true에 삼켜져 exit 0으로 위장됐던 라이브 버그 — 실패는 즉시 중단.
 helm upgrade --install argocd argo/argo-cd \
   --namespace argocd \
   --version "${CHART_VERSION}" \
   --values platform/argocd/bootstrap-values.yaml \
   --wait --timeout 10m \
-  | grep -E 'STATUS|REVISION' | sed 's/^/    /' || true
+  || { echo "FATAL: argo-cd helm install failed" >&2; exit 1; }
+helm -n argocd status argocd | grep -E 'STATUS|REVISION' | sed 's/^/    /' || true
 
 echo "==> [4/4] apply root app-of-apps + ArgoCD self-manage"
 kubectl apply -f platform/argocd/argocd-app.yaml | sed 's/^/    /'
