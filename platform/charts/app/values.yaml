@@ -1,0 +1,75 @@
+# --- image ---
+image:
+  repo: "" # e.g. ghcr.io/owner/api  (required)
+  tag: "" # e.g. sha-<gitsha>       (required, immutable)
+  pullPolicy: IfNotPresent
+# GHCR pull: EMPTY by default = the GHCR packages are PUBLIC (homelab default — anonymous
+# pulls, nothing to provision; the repo's package visibility is set Public). If you keep
+# packages PRIVATE instead, set [{ name: ghcr-pull }] AND have M2 seed a dockerconfigjson
+# Secret `ghcr-pull` in EVERY consuming namespace (prod, database).
+imagePullSecrets: []
+
+# --- workload shape ---
+kind: api # api | worker | ssr | spa
+replicas: 1
+
+# --- shared Gateway (Milestone 3) — defaults, rarely overridden ---
+gateway:
+  name: homelab
+  namespace: gateway
+
+# --- resources (NO defaults: per-runtime memory is a hard onboarding gate) ---
+resources:
+  requests: { cpu: "", memory: "" } # MUST be set per app
+  limits: { cpu: "", memory: "" } # MUST be set per app
+
+# --- config & secrets ---
+env: [] # [{name, value}]
+envFrom: [] # [{secretRef: {name}}]
+
+# --- routing (internal-by-default; opt into public) ---
+route:
+  host: "" # required for api|ssr|spa
+  paths: ["/"]
+  public: false # maps to sectionName: web-public (true) / web-internal (false)
+
+# --- database / migrations ---
+db:
+  enabled: false
+  migrateCmd: ["migrate"] # command in the app image; run as pre-upgrade hook
+
+# --- probes ---
+probes:
+  liveness: { path: /healthz }
+  readiness: { path: /readyz }
+
+# --- spa serving abstraction ---
+spa:
+  server: sws # sws | caddy   (only used when kind=spa; sws default)
+
+# --- pod hardening (defaults; rarely overridden) ---
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: ["ALL"] }
+
+terminationGracePeriodSeconds: 30
+preStopSleepSeconds: 3
+
+# --- ports (contract) ---
+ports:
+  http: 8080
+  metrics: 9090
+
+# --- scrape ---
+metrics:
+  enabled: true # adds prometheus.io/scrape annotations
+
+# --- escape hatch (conscious review gate, §13) ---
+extraManifests: []
