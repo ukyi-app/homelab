@@ -1,0 +1,89 @@
+# TWO ApplicationSets. Platform components render as plain kustomize directories;
+# APPS render through the SHARED Helm chart (multi-source: chart + per-app values),
+# because apps/<name>/deploy/prod holds ONLY values.yaml — a bare directory source
+# would render nothing (no Deployment/Service/HTTPRoute/migration Job).
+# -------- 1) PLATFORM components — plain git-directory generator --------
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: platform-components
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/<GH_USER>/homelab.git
+        revision: main
+        directories:
+          - path: platform/*/prod
+          # EXCLUDE argocd (self-managed), cnpg + victoria-stack (hand-rolled
+          # Applications under root/apps/ in M4/M5), charts/ (library, not an app).
+          - { path: platform/argocd/*, exclude: true }
+          - { path: platform/cnpg/*, exclude: true }
+          - { path: platform/victoria-stack/*, exclude: true }
+          - { path: platform/charts/*, exclude: true }
+  template:
+    metadata:
+      name: '{{ index .path.segments 1 }}-{{ .path.basename }}' # <component>-prod
+      labels: { homelab.env: '{{ .path.basename }}' }
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/<GH_USER>/homelab.git
+        targetRevision: main
+        path: '{{ .path.path }}' # platform/<component>/prod — a kustomization dir
+        # No destination.namespace: each component's kustomization sets `namespace:`
+        # (gateway, edge, ...). CreateNamespace covers first-apply.
+      destination:
+        server: https://kubernetes.default.svc
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        syncOptions: [CreateNamespace=true, ServerSideApply=true]
+---
+# -------- 2) APPS — render the SHARED chart with each app's values (multi-source Helm) --------
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/<GH_USER>/homelab.git
+        revision: main
+        directories:
+          - path: apps/*/deploy/prod # only DEPLOYED apps have a deploy/ dir (pg-tools does not)
+  template:
+    metadata:
+      name: '{{ index .path.segments 1 }}-{{ .path.basename }}' # <app>-prod
+      labels: { homelab.env: '{{ .path.basename }}' }
+    spec:
+      project: default
+      sources:
+        # source #1: the shared deploy chart (the SSOT for how an app is rendered)
+        - repoURL: https://github.com/<GH_USER>/homelab.git
+          targetRevision: main
+          path: platform/charts/app
+          helm:
+            releaseName: '{{ index .path.segments 1 }}'
+            valueFiles:
+              - '$values/{{ .path.path }}/values.yaml'
+        # source #2: the same repo exposed as $values so the chart can read the app's values
+        - repoURL: https://github.com/<GH_USER>/homelab.git
+          targetRevision: main
+          ref: values
+        # source #3: the app's deploy dir as a KUSTOMIZE source — renders the app's KSOPS
+        # secret-generator (its envFrom *.enc.yaml). The Helm chart (source #1) does NOT carry
+        # the app's secrets, so without this the Deployment/migration envFrom secrets are MISSING.
+        - repoURL: https://github.com/<GH_USER>/homelab.git
+          targetRevision: main
+          path: '{{ .path.path }}' # apps/<name>/deploy/prod: kustomization.yaml + secret-generator.yaml + *.enc.yaml
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: prod
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        syncOptions: [CreateNamespace=true, ServerSideApply=true]

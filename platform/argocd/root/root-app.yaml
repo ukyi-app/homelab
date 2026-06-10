@@ -3,6 +3,8 @@ kind: Application
 metadata:
   name: root
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-9" # ADDED by M3
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -12,14 +14,10 @@ spec:
     targetRevision: main
     path: platform/argocd/root
     directory:
-      recurse: true
+      recurse: true # picks up appset.yaml AND any hand-rolled Applications under root/ (M4/M5)
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-      - ApplyOutOfSyncOnly=true
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true]
