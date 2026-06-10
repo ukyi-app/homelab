@@ -8,6 +8,8 @@ spec:
   template:
     metadata: { labels: { app: adguard } }
     spec:
+      securityContext:
+        fsGroup: 65532 # PVC(conf/work)를 65532 그룹 쓰기 가능으로 — non-root AdGuard의 설정 저장용
       initContainers:
         - name: seed-config
           image: busybox:1.37
@@ -31,8 +33,11 @@ spec:
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532
-            allowPrivilegeEscalation: false
-            capabilities: { drop: ["ALL"] }
+            # AdGuard 공식 이미지는 바이너리에 file capability(setcap)가 있어 NoNewPrivs
+            # (allowPrivilegeEscalation:false)와 양립 불가 — exec EPERM으로 CrashLoop(라이브 확인).
+            # :53 바인딩용 NET_BIND_SERVICE만 허용하고 나머지는 전부 드랍 유지.
+            allowPrivilegeEscalation: true
+            capabilities: { drop: ["ALL"], add: ["NET_BIND_SERVICE"] }
       volumes:
         - name: seed
           configMap: { name: adguard-config }
