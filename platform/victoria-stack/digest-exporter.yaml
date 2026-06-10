@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: digest-exporter-script }
+data:
+  run.sh: |
+    #!/bin/sh
+    set -eu
+    # For each app, resolve the latest pushed digest from GHCR for the env-pinned tag.
+    # APPS is a space-separated "name=ghcr.io/owner/name:tag" list injected via env.
+    NOW=$(date +%s)
+    OUT=""
+    for entry in $APPS; do
+      APP="${entry%%=*}"; REF="${entry#*=}"
+      DIGEST=$(skopeo inspect --no-tags "docker://$REF" 2>/dev/null | sed -n 's/.*"Digest": "\(sha256:[a-f0-9]*\)".*/\1/p' | head -1 || true)
+      [ -z "$DIGEST" ] && continue
+      # expose as an info gauge: digest carried as a label, value 1
+      OUT="${OUT}ghcr_latest_digest{app=\"$APP\",digest=\"$DIGEST\"} 1 ${NOW}000\n"
+    done
+    printf "%b" "$OUT" | wget -q -O- --post-file=- 'http://vmsingle:8428/api/v1/import/prometheus' || true
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: digest-exporter }
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext: { runAsNonRoot: true, runAsUser: 65532 }
+          containers:
+            - name: digest-exporter
+              image: quay.io/skopeo/stable:v1.16.1
+              command: ["/bin/sh", "/script/run.sh"]
+              env:
+                - name: APPS
+                  value: "api=ghcr.io/<GH_USER>/api:prod worker=ghcr.io/<GH_USER>/worker:prod ssr=ghcr.io/<GH_USER>/ssr:prod spa=ghcr.io/<GH_USER>/spa:prod"
+              resources:
+                requests: { cpu: 20m, memory: 32Mi }
+                limits: { memory: 64Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts: [{ name: script, mountPath: /script }]
+          volumes: [{ name: script, configMap: { name: digest-exporter-script } }]

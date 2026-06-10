@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmalert-rules-r6
+  labels: { vmalert-rule: "true" }
+data:
+  r6.yaml: |
+    groups:
+      - name: ci-staleness
+        rules:
+          # ArgoCD app OutOfSync for >15m → write-back/sync likely broken (R6).
+          - alert: ArgoCDOutOfSync
+            expr: argocd_app_info{sync_status="OutOfSync"} == 1
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "ArgoCD app {{ $labels.name }} OutOfSync >15m"
+              description: "Tag write-back webhook or sync may have silently failed; cluster may be running yesterday's image."
+          # Recording rule: 1 when the running image digest does NOT match latest GHCR digest.
+          - record: app:image_digest_drift
+            expr: |
+              max by (app) (ghcr_latest_digest)
+              unless on (app, digest) (
+                label_replace(
+                  kube_pod_container_info{namespace="prod"},
+                  "digest", "$1", "image_id", ".*@(sha256:[a-f0-9]+)$"
+                ) * 0 + 1
+              )
+          - alert: ImageDigestDrift
+            expr: app:image_digest_drift == 1
+            for: 20m
+            labels: { severity: warning }
+            annotations:
+              summary: "Running image for {{ $labels.app }} != latest GHCR digest"
+              description: "Build pushed a new image but the running pod never picked it up (R6 write-back/sync staleness)."
