@@ -17,17 +17,24 @@ setup() { EXEC="$(K3S_PRINT_EXEC=1 "$BOOTSTRAP_DIR/k3s-install.sh")"; }
 @test "flannel backend is vxlan" {
   [[ "$EXEC" == *"--flannel-backend=vxlan"* ]]
 }
-@test "kube-reserved and system-reserved are 250m/512Mi each" {
-  [[ "$EXEC" == *"--kube-reserved=cpu=250m,memory=512Mi"* ]]
-  [[ "$EXEC" == *"--system-reserved=cpu=250m,memory=512Mi"* ]]
+# kube-reserved/system-reserved/eviction-hard/image-gc-* are KUBELET flags and
+# must be delivered via --kubelet-arg= (k3s server rejects them as bare flags).
+@test "kube-reserved and system-reserved go through --kubelet-arg" {
+  [[ "$EXEC" == *"--kubelet-arg=kube-reserved=cpu=250m,memory=512Mi"* ]]
+  [[ "$EXEC" == *"--kubelet-arg=system-reserved=cpu=250m,memory=512Mi"* ]]
 }
-@test "eviction-hard set for memory and nodefs" {
-  [[ "$EXEC" == *"memory.available<250Mi"* ]]
-  [[ "$EXEC" == *"nodefs.available<10%"* ]]
+@test "eviction-hard set for memory and nodefs via --kubelet-arg" {
+  [[ "$EXEC" == *"--kubelet-arg=eviction-hard=memory.available<250Mi,nodefs.available<10%"* ]]
 }
-@test "image GC thresholds are 80/70" {
-  [[ "$EXEC" == *"--image-gc-high-threshold=80"* ]]
-  [[ "$EXEC" == *"--image-gc-low-threshold=70"* ]]
+@test "image GC thresholds are 80/70 via --kubelet-arg" {
+  [[ "$EXEC" == *"--kubelet-arg=image-gc-high-threshold=80"* ]]
+  [[ "$EXEC" == *"--kubelet-arg=image-gc-low-threshold=70"* ]]
+}
+# bare kubelet flags must NOT appear as k3s server flags (the live-bringup bug)
+@test "kubelet flags are NOT passed as bare k3s server flags" {
+  [[ "$EXEC" != *"--kube-reserved="* ]]
+  [[ "$EXEC" != *"--system-reserved="* ]]
+  [[ "$EXEC" != *"--eviction-hard="* ]]
 }
 @test "secrets encryption enabled and kubeconfig mode 0644" {
   [[ "$EXEC" == *"--secrets-encryption"* ]]

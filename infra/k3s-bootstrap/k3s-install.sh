@@ -17,15 +17,17 @@ KUBECONFIG_PATH="${KUBECONFIG_PATH:-$SCRIPT_DIR/kubeconfig}"
 # servicelb is KEPT (absent from --disable). SQLite/kine is the default datastore
 # (no --cluster-init, so we do NOT get embedded etcd). secrets-encryption on from
 # day one. Node-protection reserves + eviction so a runaway pod can't OOM kubelet.
+# NOTE: kube-reserved/system-reserved/eviction-hard/image-gc-* are KUBELET flags,
+# so they MUST be passed via --kubelet-arg= (k3s server rejects them as bare flags).
 INSTALL_K3S_EXEC="server \
 --disable=traefik,local-storage,metrics-server \
 --disable-helm-controller \
 --flannel-backend=vxlan \
---kube-reserved=cpu=250m,memory=512Mi \
---system-reserved=cpu=250m,memory=512Mi \
---eviction-hard=memory.available<250Mi,nodefs.available<10% \
---image-gc-high-threshold=80 \
---image-gc-low-threshold=70 \
+--kubelet-arg=kube-reserved=cpu=250m,memory=512Mi \
+--kubelet-arg=system-reserved=cpu=250m,memory=512Mi \
+--kubelet-arg=eviction-hard=memory.available<250Mi,nodefs.available<10% \
+--kubelet-arg=image-gc-high-threshold=80 \
+--kubelet-arg=image-gc-low-threshold=70 \
 --secrets-encryption \
 --write-kubeconfig-mode=0644 \
 --default-local-storage-path=${INTERNAL_STORAGE_PATH}"
@@ -52,11 +54,11 @@ orb -m "$ORB_MACHINE" -u root bash -c "\
   done; echo 'k3s API did not become ready' >&2; exit 1"
 
 echo "==> Retrieving kubeconfig to ${KUBECONFIG_PATH} (gitignored)…"
-# The in-VM kubeconfig points at 127.0.0.1; rewrite to the VM's OrbStack DNS name
-# so it is reachable from macOS. k3s.orb.local resolves to the VM (OrbStack DNS).
-orb -m "$ORB_MACHINE" -u root cat /etc/rancher/k3s/k3s.yaml \
-  | sed 's#https://127.0.0.1:6443#https://k3s.orb.local:6443#' \
-  > "$KUBECONFIG_PATH"
+# OrbStack auto-forwards the VM's listening :6443 to the host's 127.0.0.1:6443, and
+# the k3s serving cert lists 127.0.0.1 as a SAN — so the in-VM kubeconfig (already
+# pointing at https://127.0.0.1:6443) is directly usable from macOS as-is. No DNS
+# rewrite (there is no k3s.orb.local in OrbStack 2.x, and it is not a cert SAN).
+orb -m "$ORB_MACHINE" -u root cat /etc/rancher/k3s/k3s.yaml > "$KUBECONFIG_PATH"
 chmod 0600 "$KUBECONFIG_PATH"
 
 echo "==> k3s installed. Use: export KUBECONFIG=${KUBECONFIG_PATH}"
