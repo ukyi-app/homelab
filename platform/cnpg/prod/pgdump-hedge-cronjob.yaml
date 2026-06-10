@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pg-dump-hedge-r2
+  namespace: database
+spec:
+  schedule: "0 4 * * *" # 04:00, after both backups
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 5400
+      template:
+        metadata:
+          labels:
+            cnpg.io/backupRole: pgdump-hedge
+        spec:
+          restartPolicy: Never
+          securityContext: { runAsUser: 26, runAsGroup: 26, fsGroup: 26 }
+          containers:
+            - name: pgdump-hedge
+              image: ghcr.io/<GH_USER>/pg-tools:16-rclone # BUILT BY M6 (apps/pg-tools/, M6 CI matrix)
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  TS="$(date -u +%Y%m%dT%H%M%SZ)"
+                  KEY="r2:homelab-pg-backups-prod/pgdump/app-${TS}.dump.gz"
+                  echo "[hedge] pg_dump (custom format) -> ${KEY}"
+                  pg_dump --host=pg-rw.database.svc --port=5432 \
+                          --username="$PGUSER" --dbname=app \
+                          --format=custom --no-password \
+                    | gzip -c \
+                    | rclone rcat "${KEY}" --s3-region auto
+                  echo "[hedge] verify object exists and is non-empty"
+                  SIZE="$(rclone size "${KEY}" --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["bytes"])')"
+                  test "${SIZE}" -gt 0
+                  echo "[hedge] prune dumps older than 14 days"
+                  rclone delete r2:homelab-pg-backups-prod/pgdump/ --min-age 14d
+                  echo "[hedge] OK size=${SIZE}"
+              envFrom:
+                - secretRef: { name: cnpg-r2-creds } # M2 seed: RCLONE_CONFIG_R2_* + AWS_* (AWS_REGION=auto)
+              env:
+                - name: PGUSER
+                  valueFrom: { secretKeyRef: { name: pg-app-credentials, key: username } }
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: pg-app-credentials, key: password } }
