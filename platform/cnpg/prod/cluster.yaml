@@ -1,0 +1,59 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1" # Cluster CR; Ready gates app migration Jobs (wave 1)
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.4
+  primaryUpdateStrategy: unsupervised
+  enableSuperuserAccess: true # creates the managed `pg-superuser` Secret (REPLICATION-capable) used by pg_basebackup — a SEPARATE credential from the app role
+  postgresUID: 26
+  postgresGID: 26
+
+  postgresql:
+    parameters:
+      # tied to the 1Gi POD LIMIT, not host RAM (avoids the 25%-of-host = 4GB OOM trap)
+      shared_buffers: "256MB"
+      effective_cache_size: "512MB"
+      work_mem: "8MB"
+      maintenance_work_mem: "128MB"
+      max_connections: "50"
+      archive_timeout: "5min"
+      wal_compression: "on"
+      max_wal_size: "1GB"
+      min_wal_size: "256MB"
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 768Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  storage:
+    size: 40Gi
+    storageClass: standard # internal 512GB SSD
+  walStorage:
+    size: 10Gi
+    storageClass: standard # SEPARATE WAL PVC, also internal SSD
+
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+      secret:
+        name: pg-app-credentials # SEEDED by M2 (platform/cnpg/prod/app-credentials.enc.yaml, ns database); MUST exist before bootstrap — this kustomization's KSOPS generator renders it at sync-wave -2 (before the Cluster at -1)
+
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: pg-r2 # -> ObjectStore from Task 4.3
+        serverName: pg
+
+  monitoring:
+    enablePodMonitor: false # scraped via prometheus.io annotations (M5)
