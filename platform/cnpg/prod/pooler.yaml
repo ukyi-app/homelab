@@ -1,0 +1,24 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: pg-pooler-rw # NOT "pg-rw": that name is RESERVED by CNPG for the Cluster's own rw Service
+  namespace: database
+spec:
+  cluster:
+    name: pg
+  instances: 1
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      pool_mode: "transaction"
+      max_client_conn: "200"
+      default_pool_size: "20"
+      reserve_pool_size: "5"
+  template:
+    spec:
+      containers:
+        - name: pgbouncer
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 64Mi }
