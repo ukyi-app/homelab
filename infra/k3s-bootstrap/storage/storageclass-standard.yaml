@@ -1,0 +1,13 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: standard
+  annotations:
+    # Default class: PVCs with no storageClassName land here (Postgres, configs).
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: homelab.io/local-path-internal
+# Retain so DB PVs survive a PVC delete/reclaim — never auto-wipe Postgres data.
+reclaimPolicy: Retain
+# Immediate: DB PVs should bind up front, not wait on first consumer.
+volumeBindingMode: Immediate
+allowVolumeExpansion: true

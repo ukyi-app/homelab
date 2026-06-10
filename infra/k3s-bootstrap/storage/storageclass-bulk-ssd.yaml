@@ -1,0 +1,12 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: bulk-ssd
+  # NOT annotated default — bulk is opt-in only.
+provisioner: homelab.io/local-path-bulk
+# Delete is fine here: media/backup-staging volumes are reproducible from R2.
+reclaimPolicy: Delete
+# WaitForFirstConsumer: bind only once a pod schedules (single node, but keeps
+# the binding semantics correct and avoids premature provisioning).
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
