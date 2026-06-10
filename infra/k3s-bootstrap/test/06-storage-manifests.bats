@@ -44,3 +44,19 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
   # rendered-output check lives in 07-apply-storage.bats.
   run grep -F '${LOCAL_PATH_HELPER_IMAGE}' "$PROV"; [ "$status" -eq 0 ]
 }
+
+@test "each provisioner passes --configmap-name matching its mounted configmap" {
+  # v0.0.30 REQUIRES --configmap-name (default 'local-path-config'); it names the configmap the
+  # provisioner reads AND mounts (setup/teardown/helperPod) into every helper pod. With our renamed
+  # configmaps, a missing/mismatched flag makes the daemon fatal and helper pods FailedMount
+  # (caught only at LIVE provisioning, never by offline render) — this guards that regression.
+  for pair in "local-path-provisioner-internal:local-path-config-internal" \
+              "local-path-provisioner-bulk:local-path-config-bulk"; do
+    dep="${pair%%:*}"; cm="${pair##*:}"
+    args="$(yq "select(.kind==\"Deployment\" and .metadata.name==\"$dep\") | .spec.template.spec.containers[0].args" "$PROV")"
+    [[ "$args" == *"--configmap-name=$cm"* ]]
+    [[ "$args" == *"--helper-pod-file=/etc/config/helperPod.yaml"* ]]
+    vol="$(yq "select(.kind==\"Deployment\" and .metadata.name==\"$dep\") | .spec.template.spec.volumes[] | select(.name==\"config-volume\") | .configMap.name" "$PROV")"
+    [ "$vol" = "$cm" ]   # the flag MUST match the actually-mounted configmap
+  done
+}

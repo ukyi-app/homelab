@@ -65,6 +65,11 @@ spec:
             - --provisioner-name=homelab.io/local-path-internal
             - --config=/etc/config/config.json
             - --service-account-name=local-path-provisioner-sa
+            # v0.0.30 REQUIRES --configmap-name (default `local-path-config`): it names the configmap the
+            # provisioner reads AND mounts (setup/teardown/helperPod scripts) into every helper pod. Ours
+            # is renamed, so without this the daemon fatals and each helper pod FailedMounts (volume "script").
+            - --configmap-name=local-path-config-internal
+            - --helper-pod-file=/etc/config/helperPod.yaml
           env:
             - name: POD_NAMESPACE
               value: local-path-storage
@@ -134,6 +139,11 @@ spec:
             - --provisioner-name=homelab.io/local-path-bulk
             - --config=/etc/config/config.json
             - --service-account-name=local-path-provisioner-sa
+            # v0.0.30 REQUIRES --configmap-name (default `local-path-config`): it names the configmap the
+            # provisioner reads AND mounts (setup/teardown/helperPod scripts) into every helper pod. Ours
+            # is renamed, so without this the daemon fatals and each helper pod FailedMounts (volume "script").
+            - --configmap-name=local-path-config-bulk
+            - --helper-pod-file=/etc/config/helperPod.yaml
           env:
             - name: POD_NAMESPACE
               value: local-path-storage
