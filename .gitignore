@@ -16,9 +16,13 @@ keys.txt
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
+backend.hcl
 crash.log
 override.tf
 override.tf.json
+
+# --- SOPS plaintext scratch ---
+*.tmp.yaml
 
 # --- Kubeconfig / cluster creds ---
 kubeconfig

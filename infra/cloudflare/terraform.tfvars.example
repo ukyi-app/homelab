@@ -1,0 +1,5 @@
+cloudflare_account_id = "<ACCT_ID>"
+zone_name             = "<DOMAIN>"
+internal_suffix       = "int.<DOMAIN>"
+tunnel_name           = "homelab-prod"
+# cloudflare_api_token supplied via TF_VAR_cloudflare_api_token (env), never in tfvars.
