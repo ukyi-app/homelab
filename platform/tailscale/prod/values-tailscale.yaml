@@ -1,0 +1,12 @@
+oauth:
+  # operator reads the M2-seeded SOPS Secret 'operator-oauth' (not inline)
+  existingSecret: operator-oauth
+apiServerProxyConfig:
+  mode: "false" # no kube-apiserver exposure; we only proxy Traefik
+operatorConfig:
+  hostname: homelab-operator
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+proxyConfig:
+  defaultProxyClass: ""

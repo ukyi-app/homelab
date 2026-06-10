@@ -1,0 +1,14 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: traefik-ts
+  namespace: gateway
+  annotations: { argocd.argoproj.io/sync-wave: "-6" }
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: traefik
+      port: { number: 80 }
+  tls:
+    - hosts: ["homelab"] # → homelab.<tailnet>.ts.net, Tailscale-issued TLS
