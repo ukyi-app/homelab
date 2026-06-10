@@ -16,10 +16,14 @@ This is the ONE ledger format/validator; M6's onboarding gate reuses
 | <!-- ledger:row --> cert-manager   | cert-manager   |     60 |      180 |
 | <!-- ledger:row --> observability  | observability  |    850 |     1966 |
 | <!-- ledger:row --> edge           | edge           |    236 |      594 |
-| <!-- ledger:row --> apps           | prod           |    369 |      737 |
+| <!-- ledger:row --> api            | prod           |     64 |       64 |
+| <!-- ledger:row --> worker         | prod           |     64 |       64 |
+| <!-- ledger:row --> web            | prod           |    128 |      256 |
+| <!-- ledger:row --> console        | prod           |     16 |       32 |
 | <!-- ledger:row --> media          | prod           |    133 |      389 |
 
-**Totals:** req ≈ 4269 Mi · limit ≈ 8565 Mi (must stay ≤ 8704 Mi).
+**Totals:** req ≈ 4172 Mi · limit ≈ 8244 Mi (must stay ≤ 8704 Mi).
+(`pg-tools` is a CronJob ops image — ephemeral, no standing-workload row; M6 apps are per-app rows above.)
 
 ## How to update
 Adding/resizing a component: edit its row's `req_mi`/`limit_mi` (or append a new
