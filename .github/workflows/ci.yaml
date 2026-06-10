@@ -19,6 +19,8 @@ jobs:
           sudo snap install yq || true
           curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-arm64.tar.gz | tar xz -C /usr/local/bin kubeconform
           curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          # verify:ledger가 conftest를 부른다 — 미설치로 첫 라이브 CI가 실패했던 버그
+          curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin conftest
           sudo apt-get update && sudo apt-get install -y bats
       - name: chart render + validate (all kinds)
         run: make chart-test

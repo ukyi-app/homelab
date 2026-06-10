@@ -6,6 +6,9 @@ on:
       - "apps/**"
       - "!apps/**/deploy/**" # the write-back's values.yaml bump must NOT re-trigger build → no CI self-loop
       - ".github/workflows/build.yaml"
+  # 신규 기본 브랜치 생성 push는 paths diff가 없어 트리거가 스킵된다(첫 라이브 push에서 확인)
+  # — 초기 시드/재빌드용 수동 트리거.
+  workflow_dispatch:
 
 permissions:
   contents: read
