@@ -93,6 +93,9 @@ kubectl get sc          # standard (default) + bulk-ssd present
 A healthy gate prints `==> Host check: /Volumes/homelab Device Location = External` and
 `==> External bulk SSD OK (external disk, virtiofs, writable).`
 
+For a full end-to-end provisioning check of BOTH storage tiers (real PVC create → write → read →
+reclaim), run `docs/runbooks/storage-verify.md`.
+
 ## Notes
 
 - **Persistence across rebuild:** the external volume survives `make up` (the VM is cattle, the SSD
