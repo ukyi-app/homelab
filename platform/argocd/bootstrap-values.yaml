@@ -1,0 +1,101 @@
+# Lean single-node ArgoCD. HA OFF everywhere; processors tuned (§5).
+# M2 OWNS the KSOPS repo-server wiring below; M3/M4/M5 inherit it.
+global:
+  domain: argocd.int.<DOMAIN>
+
+redis-ha:
+  enabled: false
+
+controller:
+  replicas: 1
+  env:
+    - name: ARGOCD_CONTROLLER_REPLICAS
+      value: "1"
+  args:
+    statusProcessors: "4"
+    operationProcessors: "2"
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+repoServer:
+  replicas: 1
+  env:
+    - name: ARGOCD_EXEC_TIMEOUT
+      value: "90s"
+    # KSOPS reads the age key from the mounted Secret at render time.
+    - name: SOPS_AGE_KEY_FILE
+      value: /home/argocd/.config/sops/age/keys.txt
+  # Install the ksops binary + a kustomize-with-exec into the repo-server.
+  initContainers:
+    - name: install-ksops
+      image: viaductoss/ksops:v4.3.2
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          echo "installing ksops + kustomize (exec-enabled)";
+          cp /usr/local/bin/ksops /custom-tools/;
+          cp /usr/local/bin/kustomize /custom-tools/;
+      volumeMounts:
+        - name: custom-tools
+          mountPath: /custom-tools
+  # Mount the in-cluster sops-age Secret (created by make bootstrap) read-only.
+  volumes:
+    - name: custom-tools
+      emptyDir: {}
+    - name: sops-age
+      secret:
+        secretName: sops-age
+  volumeMounts:
+    - name: custom-tools
+      mountPath: /usr/local/bin/kustomize
+      subPath: kustomize
+    - name: custom-tools
+      mountPath: /usr/local/bin/ksops
+      subPath: ksops
+    - name: sops-age
+      mountPath: /home/argocd/.config/sops/age
+      readOnly: true
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 384Mi }
+  # parallelismLimit tunes diff concurrency (§5).
+  extraArgs:
+    - --parallelismlimit=2
+
+server:
+  replicas: 1
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+
+applicationSet:
+  replicas: 1
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+
+notifications:
+  enabled: false
+
+dex:
+  enabled: false
+
+redis:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+configs:
+  params:
+    server.insecure: true # TLS terminates at Traefik/Tailscale, not ArgoCD.
+  cm:
+    # Enable the KSOPS exec plugin for kustomize-based decryption at render time.
+    # KSOPS (exec) + Traefik/Tailscale HelmChartInflationGenerator (helm) both need their flags.
+    kustomize.buildOptions: "--enable-alpha-plugins --enable-exec --enable-helm"
+    # cuts diff churn ~20-30% (§5)
+    resource.exclusions: |
+      - apiGroups: [""]
+        kinds: ["Endpoints", "Event"]
+      - apiGroups: ["discovery.k8s.io"]
+        kinds: ["EndpointSlice"]
