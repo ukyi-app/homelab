@@ -52,3 +52,15 @@ bootstrap-deadmanswitch: ## [M5] verify the off-node dead-man's-switch ping URL 
 
 # EDIT (not re-declare): append bootstrap-deadmanswitch to the existing M0-owned bootstrap prereqs.
 bootstrap: bootstrap-deadmanswitch
+
+## --- Milestone 6 tooling ---
+.PHONY: m6-tools
+m6-tools: ## verify chart/CI toolchain for milestone 6
+	@helm version --short | grep -qE 'v(3\.(1[6-9]|[2-9][0-9])|[4-9])\.' || { echo "helm >=3.16 required"; exit 1; }
+	@kubeconform -v | grep -qE 'v0\.(6\.[7-9]|[7-9]\.|[1-9][0-9]\.)' || { echo "kubeconform >=0.6.7 required"; exit 1; }
+	@bats --version | grep -qE 'Bats 1\.(1[1-9]|[2-9][0-9])' || { echo "bats >=1.11 required"; exit 1; }
+	@node --version | grep -qE 'v2[2-9]\.' || { echo "node >=22 required"; exit 1; }
+	@pnpm --version | grep -qE '^10\.' || { echo "pnpm 10 required (M0 pins pnpm@10)"; exit 1; }
+	@yq --version | grep -qE 'v4\.' || { echo "yq v4 required"; exit 1; }
+	@jq --version >/dev/null || { echo "jq required"; exit 1; }
+	@echo "m6-tools OK"
