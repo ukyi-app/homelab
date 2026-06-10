@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [api, worker, web, console, pg-tools]
+        app: [api, pg-tools]
     outputs:
       sha: ${{ github.sha }}
     steps:
