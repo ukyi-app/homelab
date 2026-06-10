@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: alerting-secrets
+    namespace: observability
+type: Opaque
+stringData:
+    TELEGRAM_BOT_TOKEN: ENC[AES256_GCM,data:z6IfJ7ZB9zzPQuVTU5nCOH3ceh4P4H1QDecSTiGckajMjg3ykZIIWC5lk2nJsA==,iv:OZ4AsrDXaCJNedQnyxOoUHCwlgFB8rL7mbAen0pvb20=,tag:BMXcqR2mcHcehE1JRNRQuw==,type:str]
+    TELEGRAM_CHAT_ID: ENC[AES256_GCM,data:OgVBcDq7/vzOUg==,iv:SASbED20aIhurF9sqtKqz4AA/bsYfjmNPFpEKdV0ACo=,tag:HTw9G8O1BGSG9sJ1mFa2cw==,type:str]
+    HEALTHCHECKS_URL: ENC[AES256_GCM,data:6W1m9l/X6ueSc8aVqElFwlJf8s40VdrFVRO1QNpQ2BARDtYEHBF9RbZFNK4i+98bj+Py6DHCFE0=,iv:Gs8qNupfdAi36LEtFMm8s+IunZsynC9+7qgDTMDBrpM=,tag:8qt1Mz0Sc2XaGIf/+89zpQ==,type:str]
+    GRAFANA_ADMIN_PASSWORD: ENC[AES256_GCM,data:Eztm36XUiS+2og==,iv:10HZHdOhKOuCbQBkEt4EDz464pX+ROMaXVdF8IT30XM=,tag:v1COHbEAzcxehRjzH2WCkQ==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBrVFJEQ1RXMlpGN3o0SXFD
+            SVJObThqSFh2ZVJDcEQrTmsxQWFlWTE4c0FNClB2aHozTGhnUlhvWUgxUnVlRjFV
+            UWdMWFFaZzhicUgrOXJRTFVGVWFNcDgKLS0tIExhOHlScVRTWi9HaTlETjd2RXFK
+            ZCs4bTNFYk05eFJaU3JCUmZVMEhvZlUKFUhFDN5T5Z9yn/Bznet2XvRwILzpz2rW
+            r0BAqAD2TdM53mMtbs7lXn6CbrPfeZlZfTGwO0YEM6nZUG5y2uZS/A==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1n3j7p70f0unl5dgrjhtr9jxrdntz2a67dtntu446qus9c3jd3fnsp8z960
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBwaVd1LzBWQ3hURUxyQ2ZY
+            NVlzN1hhays5cWVGSVFnb3IxRURVTS9VQ1NRClJCelQvcmtEK3pMUHFUMW8rSXZM
+            RjdnMktBSlpBWkxiakdaa0szQ1l1OXMKLS0tIDNXeVFNMVlGdll3TTJzS0tUWFBx
+            R01mMWxPRk5HTnkxaEhXQnRJZDFZVDQKDHYWLCuHfaJ/gK7vuIcc0jBsZIrXlOqm
+            /vMT776h90av/gC2ZSALYu5v5ivsRrBe9a/I01tVm8QIUDHguxWviw==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age154tu9q7922xu46x0rkfm5l9x3ulf9u5at5qvxeaqfx9sgtm7cumq75jdwc
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-06-10T13:44:36Z"
+    mac: ENC[AES256_GCM,data:dBMKp/RrLu9G3gs0HtKzKYvRwm4XOl25+zUgJ7qvZAXW6NMQE8PPDX/vGwcs1dIGE1VFQGZHFf8t9SRS07FmgTF7TMkgCJmy5tGNc3I+tqVmHzBeDGPxFP6xQ3pXMqIWXwkfBykom4HbBjACsK1q4W3FyF3G/uZP2jdQgYoBYhI=,iv:hs24Ps1jciVAtQmJUDHNb8BAcTz1amlZ8l8SS6p0RTU=,tag:d2JE8toCB2E4C5yQwKiA3g==,type:str]
+    version: 3.13.1

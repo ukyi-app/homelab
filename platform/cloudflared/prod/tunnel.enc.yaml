@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: cloudflared-tunnel
+    namespace: edge
+type: Opaque
+stringData:
+    token: ENC[AES256_GCM,data:VLB2Y90APrBZ7vXkdZ3plwanBXfKafuc3U8WXi7uhATWjfyakJCtBfnaxzJf11DXiQGVW/WbheSeSpl3ipH+rbZ9P+gF40Q9pvXqLJJojeMajRON0OkbKDBNK31LEptmxercveMZDIAkbPrQtXyMJLHTjRlExy0kGvzh3BUNCiq7aOAyh72R3A3Jc7j5n9jAaXmylFAaXibrEVAbKuQ+bqWViesa6ITw0RSQOhY8tqRNwoBcEvZJaG7iRES5jaBbi29jpLGdvkmPSTpjPiWRm5gweJzCczxnOzluD0/Nccg41gkkg1Xo0ogmH7kU+swq,iv:3GqXnIMKoi5nrCyAhVyaqpTChYqpx2dNs4f0v8AL4x4=,tag:cvPvgd6VWkuyeQJnjEM1zQ==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBVU2Z6RktSTXFKaE5KQWth
+            SDgyQzJVcURITkU0NDRkVG1yOEVGVTkrMGlVCkwwd0p0Y1Q1N1h3VnFHcXZWUmJK
+            SGxTWkU0YkkvSW1BYWJwVXMvajdPR00KLS0tIEFiRjhlTjNCVjg5enNXM1B2RnZw
+            QW9vK1hLcW9tOEt5SStGNXZtSmpTdjgKcVF0HKWz1XhFlo+cZE+4Wm412F1qaZ3W
+            wl+e5/i9990nD+x+RZa4/Up4K3FPMt0N+29CyUtF6MkZuCfAYqH5Xw==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1n3j7p70f0unl5dgrjhtr9jxrdntz2a67dtntu446qus9c3jd3fnsp8z960
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBWZytBK2NlTm95MFVETDQy
+            WnI0S2VkYUlPdzkyOHY0V01NYjVPS2Y5VmpnClB6NVM3dmZJSHVWc1FRSmtqUXVU
+            dmlyNlJtUGlabnFlbnh1d1A0VFRNZUkKLS0tIFZLTlJmY1EwejZLbTlEY1lSTjB3
+            cHJqNURlc01uTk5rYlZzdHNLNHFBVFEKFHO+EPYqpTpTI3gQUJvT9HoL1GfruuLV
+            zMO+blG7kXCEdiQxH1WCXAiY1hByPaC2uPcGPdArWnBHerzkHMftDQ==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age154tu9q7922xu46x0rkfm5l9x3ulf9u5at5qvxeaqfx9sgtm7cumq75jdwc
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-06-10T13:44:35Z"
+    mac: ENC[AES256_GCM,data:784l17h1zPO6Jfw/JjBBhv18FLTUfpXN9UfyqJrelWyiY7Q02Qra0mHo0xrDhGTIPZ33QF+fqgjdnF1nN1ynz79EK29ZfdRa4Yl4CF6oHCuqvG1NLBezqUS/m/znEoIw1EytFURXnIHfLZEL/HBtdsgsWMwDcGSuzbJNKzaRa/M=,iv:8xsOqkbLr9/F5Sx7egn1oI+1hZP7XxVKq/OMFWfgQp8=,tag:lKzFuWGvpc/xPEsizgU8mw==,type:str]
+    version: 3.13.1
