@@ -1,6 +1,6 @@
 image:
   repo: ghcr.io/ukyi-app/api
-  tag: sha-0000000 # bumped by CI write-back (Task 6.16)
+  tag: sha-9bebf8ddfe85acd29c757276a6e315a1dd820b92 # bumped by CI write-back (Task 6.16)
 kind: api
 replicas: 1
 resources:
@@ -12,11 +12,11 @@ envFrom:
   - secretRef: { name: api-secrets } # SOPS-decrypted via KSOPS
 route:
   host: api.ukyi.app
-  paths: ["/"]
+  paths: [ "/" ]
   public: true
 db:
   enabled: true
-  migrateCmd: ["/app/api", "migrate"]
+  migrateCmd: [ "/app/api", "migrate" ]
 probes:
   liveness: { path: /healthz }
   readiness: { path: /readyz }
