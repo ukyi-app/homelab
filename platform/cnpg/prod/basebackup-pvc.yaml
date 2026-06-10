@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pg-basebackup-local
+  namespace: database
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: bulk-ssd # 1TB external SSD, staging only — NEVER Postgres PGDATA
+  resources:
+    requests:
+      storage: 100Gi
