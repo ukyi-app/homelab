@@ -1,0 +1,23 @@
+{{- if include "app.isServed" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "app.fullname" . }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "app.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.ports.http }}
+      targetPort: http
+    {{- if ne .Values.kind "spa" }}
+    - name: metrics
+      port: {{ .Values.ports.metrics }}
+      targetPort: metrics
+    {{- end }}
+{{- end }}
