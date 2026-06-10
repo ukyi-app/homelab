@@ -26,3 +26,14 @@ verify: ## Run repo-foundation checks (skeleton + ledger + sops round-trip)
 	@scripts/ledger-to-json.sh docs/memory-ledger.md > /tmp/ledger.json
 	@conftest test /tmp/ledger.json --policy policy/ledger.rego
 	@bats test/sops-roundtrip.bats
+
+TF_ROOTS := cloudflare tailscale github
+
+.PHONY: tf-validate
+tf-validate: ## terraform fmt -check + validate across all infra roots
+	@for r in $(TF_ROOTS); do \
+	  terraform -chdir=infra/$$r fmt -check -recursive >/dev/null || \
+	    { echo "$$r: fmt FAILED (run 'terraform -chdir=infra/$$r fmt -recursive')"; exit 1; }; \
+	  terraform -chdir=infra/$$r validate >/dev/null || { echo "$$r: validate FAILED"; exit 1; }; \
+	  echo "$$r: validated"; \
+	done
