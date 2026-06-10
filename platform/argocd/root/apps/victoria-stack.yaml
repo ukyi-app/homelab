@@ -10,7 +10,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/<GH_USER>/homelab.git
+    repoURL: https://github.com/ukyi-app/homelab.git
     targetRevision: main
     path: platform/victoria-stack
   destination:

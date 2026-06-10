@@ -12,4 +12,4 @@ data:
     ingress:
       - service: http://traefik.gateway.svc.cluster.local:80
     # Public hostname → tunnel routing is managed in Cloudflare DNS by Terraform (M2):
-    #   *.<DOMAIN> CNAME <tunnel-id>.cfargotunnel.com (proxied)
+    #   *.ukyi.app CNAME <tunnel-id>.cfargotunnel.com (proxied)

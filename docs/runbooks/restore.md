@@ -62,7 +62,7 @@ Tarballs live on `bulk-ssd` PVC `pg-basebackup-local`:
 - `cnpg-local-basebackup` CronJob (02:30); the M5 `LocalBasebackupStale` alert reads
   `kube_job_status_completion_time{job_name=~"cnpg-local-basebackup.*"}`.
 - Run a drill on demand: `kubectl -n database create job drill-now --from=cronjob/pg-restore-drill`.
-  (Requires the M6-built `ghcr.io/<GH_USER>/pg-tools:16-rclone` image.)
+  (Requires the M6-built `ghcr.io/ukyi-app/pg-tools:16-rclone` image.)
 
 ## RTO/RPO
 - RPO ≈ 5 min (archive_timeout=5min continuous WAL archiving).

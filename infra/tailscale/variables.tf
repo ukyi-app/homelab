@@ -7,7 +7,7 @@ variable "ts_bootstrap_oauth_secret" {
   sensitive = true
 }
 variable "internal_suffix" {
-  type = string # home.<DOMAIN>
+  type = string # home.ukyi.app
 }
 variable "tailscale_ip" {
   type        = string

@@ -17,7 +17,7 @@ spec:
         releaseName: argocd
         valueFiles:
           - $values/platform/argocd/bootstrap-values.yaml # M2-owned single values file (KSOPS wiring lives here)
-    - repoURL: https://github.com/<GH_USER>/homelab.git
+    - repoURL: https://github.com/ukyi-app/homelab.git
       targetRevision: main
       ref: values
   destination:

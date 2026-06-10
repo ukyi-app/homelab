@@ -37,7 +37,7 @@ spec:
               command: ["/bin/sh", "/script/run.sh"]
               env:
                 - name: APPS
-                  value: "api=ghcr.io/<GH_USER>/api:prod worker=ghcr.io/<GH_USER>/worker:prod ssr=ghcr.io/<GH_USER>/ssr:prod spa=ghcr.io/<GH_USER>/spa:prod"
+                  value: "api=ghcr.io/ukyi-app/api:prod worker=ghcr.io/ukyi-app/worker:prod ssr=ghcr.io/ukyi-app/ssr:prod spa=ghcr.io/ukyi-app/spa:prod"
               resources:
                 requests: { cpu: 20m, memory: 32Mi }
                 limits: { memory: 64Mi }

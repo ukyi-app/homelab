@@ -13,7 +13,7 @@ if (!name || !["api", "worker", "ssr", "spa"].includes(kind)) {
 const mem = { api: ["64Mi", "64Mi"], worker: ["64Mi", "64Mi"], ssr: ["128Mi", "256Mi"], spa: ["16Mi", "32Mi"] }[kind];
 const served = ["api", "ssr", "spa"].includes(kind);
 const route = served
-  ? `route:\n  host: ${name}.<DOMAIN>\n  paths: ["/"]\n  public: false`
+  ? `route:\n  host: ${name}.ukyi.app\n  paths: ["/"]\n  public: false`
   : "# kind=worker: no route";
 const db = (kind === "api" || kind === "worker")
   ? `db:\n  enabled: true\n  migrateCmd: ["/app/${name}", "migrate"]`

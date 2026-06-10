@@ -9,7 +9,7 @@ variable "cloudflare_account_id" {
 }
 variable "zone_name" {
   type        = string
-  description = "Apex domain, e.g. example.com (the <DOMAIN> placeholder)."
+  description = "Apex domain, e.g. example.com (the ukyi.app placeholder)."
 }
 variable "tunnel_name" {
   type    = string

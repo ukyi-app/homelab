@@ -21,7 +21,7 @@ spec:
           securityContext: { runAsUser: 26, runAsGroup: 26, fsGroup: 26 }
           containers:
             - name: pgdump-hedge
-              image: ghcr.io/<GH_USER>/pg-tools:16-rclone # BUILT BY M6 (apps/pg-tools/, M6 CI matrix)
+              image: ghcr.io/ukyi-app/pg-tools:16-rclone # BUILT BY M6 (apps/pg-tools/, M6 CI matrix)
               command: ["/bin/bash", "-c"]
               args:
                 - |

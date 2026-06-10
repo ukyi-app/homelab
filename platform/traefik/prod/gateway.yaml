@@ -11,12 +11,12 @@ spec:
     - name: web-public
       protocol: HTTP
       port: 8000
-      hostname: "*.<DOMAIN>"
+      hostname: "*.ukyi.app"
       allowedRoutes:
         namespaces: { from: All }
     - name: web-internal
       protocol: HTTP
       port: 8000
-      hostname: "*.home.<DOMAIN>"
+      hostname: "*.home.ukyi.app"
       allowedRoutes:
         namespaces: { from: All }

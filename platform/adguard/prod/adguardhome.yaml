@@ -16,7 +16,7 @@ data:
     filtering:
       rewrites:
         # split-horizon: every *.int name → STABLE Tailscale IP of Traefik
-        - domain: "*.home.<DOMAIN>"
+        - domain: "*.home.ukyi.app"
           answer: "<STABLE_TAILSCALE_IP>"     # = tailscale ip -4 homelab (Task 3.7)
       protection_enabled: true
     filters:

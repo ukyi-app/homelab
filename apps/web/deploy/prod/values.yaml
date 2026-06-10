@@ -7,6 +7,6 @@ resources:
 env:
   - { name: NODE_OPTIONS, value: "--max-old-space-size=200" }
 route:
-  host: web.<DOMAIN>
+  host: web.ukyi.app
   paths: ["/"]
   public: true

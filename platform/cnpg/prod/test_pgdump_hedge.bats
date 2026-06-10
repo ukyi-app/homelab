@@ -14,5 +14,5 @@ f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
   grep -q 'name: cnpg-r2-creds' "$f"
 }
 @test "hedge uses the M6-built pg-tools image" {
-  grep -q 'ghcr.io/<GH_USER>/pg-tools:16-rclone' "$f"
+  grep -q 'ghcr.io/ukyi-app/pg-tools:16-rclone' "$f"
 }

@@ -22,11 +22,11 @@ Set the router's SECONDARY DNS to 1.1.1.1 (Cloudflare).
 - Do NOT set both primaries to AdGuard with no fallback.
 
 ## 3. Split-horizon verification
-From a LAN device, `*.home.<DOMAIN>` must resolve to the STABLE Tailscale IP of
+From a LAN device, `*.home.ukyi.app` must resolve to the STABLE Tailscale IP of
 the operator-exposed Traefik (Task 3.7), so internal apps work on-LAN and
 off-LAN identically:
 ```
-dig +short whoami.home.<DOMAIN>
+dig +short whoami.home.ukyi.app
 # <STABLE_TAILSCALE_IP>
 ```
 If it returns the VM IP instead, the AdGuard rewrite is stale — re-read

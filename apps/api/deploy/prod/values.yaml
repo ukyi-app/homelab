@@ -11,7 +11,7 @@ env:
 envFrom:
   - secretRef: { name: api-secrets } # SOPS-decrypted via KSOPS
 route:
-  host: api.<DOMAIN>
+  host: api.ukyi.app
   paths: ["/"]
   public: true
 db:
