@@ -7,13 +7,11 @@ help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
 
-host-up: ## [TODO: M1] provision/start the OrbStack VM (cloud-init host substrate)
-	@echo "host-up: not implemented yet (owned by M1 runtime foundation)" >&2
-	@exit 1
+up: ## [runtime] bring the OrbStack VM + k3s + storage up (idempotent, = host-up)
+	@infra/k3s-bootstrap/host-up.sh
 
-up: ## [TODO: M1] bring the OrbStack VM + k3s up
-	@echo "up: not implemented yet (owned by M1 runtime foundation)" >&2
-	@exit 1
+host-up: ## [runtime] alias for `up` — host substrate bring-up (M1)
+	@infra/k3s-bootstrap/host-up.sh
 
 down: ## [TODO: M1] tear the OrbStack VM down
 	@echo "down: not implemented yet (owned by M1 runtime foundation)" >&2

@@ -5,14 +5,10 @@
   [ "$status" -eq 0 ]
 }
 
-@test "unimplemented targets exit non-zero (cannot fake success)" {
+@test "unimplemented targets still exit non-zero (cannot fake success)" {
   run make bootstrap
   [ "$status" -ne 0 ]
-  run make up
-  [ "$status" -ne 0 ]
   run make down
-  [ "$status" -ne 0 ]
-  run make host-up
   [ "$status" -ne 0 ]
 }
 
@@ -22,4 +18,16 @@
   for t in bootstrap up down verify host-up; do
     echo "$output" | grep -q "$t"
   done
+}
+
+@test "up delegates to the host-substrate orchestrator (dry-run shows host-up.sh)" {
+  run make -n up
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'infra/k3s-bootstrap/host-up.sh'
+}
+
+@test "host-up delegates to the host-substrate orchestrator (dry-run shows host-up.sh)" {
+  run make -n host-up
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'infra/k3s-bootstrap/host-up.sh'
 }
