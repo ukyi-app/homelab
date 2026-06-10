@@ -1,0 +1,4 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# appset source #3 렌더용 — 이 앱은 시크릿이 없어 빈 kustomization(values.yaml 파싱 방지).
+resources: []
