@@ -11,8 +11,10 @@ spec:
   project: default
   sources:
     # >= 1.26: required by the barman-cloud CNPG-I plugin (Task 4.1b)
-    - repoURL: https://github.com/cloudnative-pg/charts
-      targetRevision: cnpg-v0.26.0
+    # chart: 를 쓰면 repoURL은 Helm 레지스트리여야 하고 targetRevision은 차트 semver여야 한다 —
+    # git URL+태그(cnpg-v0.26.0)는 "improper constraint"로 거부됨(라이브 확인). 0.26.0 ↔ tag cnpg-v0.26.0.
+    - repoURL: https://cloudnative-pg.github.io/charts
+      targetRevision: 0.26.0
       chart: cloudnative-pg
       helm:
         valueFiles:
