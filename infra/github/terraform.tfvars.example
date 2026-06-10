@@ -1,0 +1,3 @@
+github_owner = "<GH_USER>"
+repo_name    = "homelab"
+# github_token / bot_pat / telegram_* supplied via TF_VAR_* env.
