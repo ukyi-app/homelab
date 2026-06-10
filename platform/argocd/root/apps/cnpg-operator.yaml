@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cnpg-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2" # matches platform/argocd/root/SYNC-WAVES.md
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    # >= 1.26: required by the barman-cloud CNPG-I plugin (Task 4.1b)
+    - repoURL: https://github.com/cloudnative-pg/charts
+      targetRevision: cnpg-v0.26.0
+      chart: cloudnative-pg
+      helm:
+        valueFiles:
+          - $values/platform/cnpg/operator/values.yaml
+    - repoURL: https://github.com/<GH_USER>/homelab.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

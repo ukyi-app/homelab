@@ -1,0 +1,15 @@
+cloudnative-pg:
+  replicaCount: 1
+  monitoring:
+    podMonitorEnabled: false # no VM operator; we scrape via annotations (M5)
+  resources:
+    requests:
+      cpu: 50m
+      memory: 100Mi
+    limits:
+      cpu: 200m
+      memory: 200Mi
+  config:
+    data:
+      # barman-cloud plugin (CNPG-I) sidecar is enabled per-Cluster, not here
+      INHERITED_ANNOTATIONS: "prometheus.io/*"
