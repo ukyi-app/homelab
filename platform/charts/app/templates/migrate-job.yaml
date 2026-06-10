@@ -1,0 +1,72 @@
+{{- if .Values.db.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "app.fullname" . }}-migrate
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+  annotations:
+    # Wave 1 orders this Job before the wave-2 Deployment WITHIN this app's Application. Cross-Application
+    # DB readiness is enforced by the wait-for-db initContainer below (sync-waves don't gate across Applications).
+    argocd.argoproj.io/sync-wave: "1"
+    # Helm hook makes this run on install/upgrade only, then be cleaned up.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        {{- include "app.selectorLabels" . | nindent 8 }}
+        app.homelab/job: migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        # ArgoCD sync-waves order resources WITHIN one Application; they do NOT enforce a
+        # cross-Application gate, so "the cnpg-data Application is Healthy" is not guaranteed when
+        # this Job runs. Make readiness self-contained: block until the DB accepts connections.
+        - name: wait-for-db
+          image: ghcr.io/cloudnative-pg/postgresql:16.4
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              host="{{ .Values.db.host | default "pg-rw.database.svc" }}"
+              for i in $(seq 1 60); do
+                if pg_isready -h "$host" -p 5432 >/dev/null 2>&1; then echo "db ready"; exit 0; fi
+                echo "waiting for $host ($i/60)"; sleep 5
+              done
+              echo "db not ready after 5m" >&2; exit 1
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repo }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- toYaml .Values.db.migrateCmd | nindent 12 }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.env }}
+          env:
+            {{- range . }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            requests: { cpu: 50m, memory: {{ .Values.resources.requests.memory }} }
+            limits:   { cpu: 500m, memory: {{ .Values.resources.limits.memory }} }
+{{- end }}
