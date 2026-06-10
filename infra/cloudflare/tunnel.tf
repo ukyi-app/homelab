@@ -34,3 +34,10 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "homelab" {
     ]
   }
 }
+
+# v5: the run token is NOT an attribute of the tunnel resource — it is read via
+# this dedicated data source (resource has no `token` export).
+data "cloudflare_zero_trust_tunnel_cloudflared_token" "homelab" {
+  account_id = var.cloudflare_account_id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.homelab.id
+}
