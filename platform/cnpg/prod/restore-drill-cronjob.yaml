@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pg-restore-drill
+  namespace: database
+spec:
+  schedule: "0 5 * * 0" # Sunday 05:00 — RECURRING, monitored
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 4
+  failedJobsHistoryLimit: 4
+  jobTemplate:
+    spec:
+      backoffLimit: 0 # a failed drill must page, not silently retry
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels: { cnpg.io/job: restore-drill }
+        spec:
+          restartPolicy: Never
+          serviceAccountName: restore-drill
+          containers:
+            - name: drill
+              # PINNED BY DIGEST (immutable): this Job has delete rights in the database ns; a mutable
+              # tag could be swapped under it. CI records the digest — pin it here before enabling the drill.
+              image: ghcr.io/<GH_USER>/pg-tools:16-rclone@sha256:<PINNED_PG_TOOLS_DIGEST>
+              command: ["/bin/bash", "/scripts/drill.sh"]
+              env:
+                - name: TELEGRAM_BOT_TOKEN
+                  valueFrom: { secretKeyRef: { name: restore-drill-alerting, key: TELEGRAM_BOT_TOKEN } }
+                - name: TELEGRAM_CHAT_ID
+                  valueFrom: { secretKeyRef: { name: restore-drill-alerting, key: TELEGRAM_CHAT_ID } }
+                - name: HEALTHCHECKS_URL
+                  valueFrom: { secretKeyRef: { name: restore-drill-alerting, key: HEALTHCHECKS_URL } }
+                - name: METRICS_PUSH_URL
+                  value: "http://vmsingle.observability.svc:8428" # vmsingle import API (M5) — the success metric MUST land
+              volumeMounts:
+                - { name: script, mountPath: /scripts }
+          volumes:
+            - name: script
+              configMap: { name: restore-drill-script, defaultMode: 0755 }
