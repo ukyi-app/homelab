@@ -15,8 +15,13 @@ test -f ~/.config/sops/age/keys.txt && echo "cluster key OK"
 #     password manager — M0 custody; here we only need its PUBLIC key on hand)
 test -n "${AGE_RECOVERY_RECIPIENT:-}" && echo "recovery recipient OK"
 
-# (c) R2 state bucket must exist and be reachable via rclone remote 'r2'
-rclone lsd r2: | grep -q 'homelab-tfstate' && echo "state bucket OK"
+# (c) R2 state bucket must exist and be object-writable.
+#     주의: Object R&W 토큰은 ListBuckets/HeadBucket이 거부된다(Admin 전용) —
+#     `rclone lsd r2:`는 항상 403이므로 버킷 안 객체 작업으로 확인하고,
+#     rclone 업로드에는 no_check_bucket=true가 필요하다(라이브 검증된 R2 quirk).
+export RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
+echo ok | rclone rcat r2:homelab-tfstate/.preflight \
+  && rclone delete r2:homelab-tfstate/.preflight && echo "state bucket OK"
 ```
 
 ## Recipients (consume M0's key material — never mint)

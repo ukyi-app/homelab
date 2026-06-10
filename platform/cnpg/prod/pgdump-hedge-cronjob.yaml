@@ -43,6 +43,10 @@ spec:
               envFrom:
                 - secretRef: { name: cnpg-r2-creds } # M2 seed: RCLONE_CONFIG_R2_* + AWS_* (AWS_REGION=auto)
               env:
+                # R2 Object-R&W 토큰은 HeadBucket을 거부한다 — rclone의 업로드 전 버킷 체크가
+                # "버킷 없음→CreateBucket(403)"으로 오판하므로 체크를 끈다(라이브 검증에서 확인된 quirk).
+                - name: RCLONE_CONFIG_R2_NO_CHECK_BUCKET
+                  value: "true"
                 - name: PGUSER
                   valueFrom: { secretKeyRef: { name: pg-app-credentials, key: username } }
                 - name: PGPASSWORD
