@@ -1,0 +1,19 @@
+# LAN-reachable DNS: type LoadBalancer so k3s servicelb publishes :53 on the VM node IP, which
+# OrbStack maps to the Mac mini host — LAN clients reach it at the Mac's RESERVED LAN IP.
+# (A ClusterIP is NOT routable from household LAN clients, so it cannot back DHCP option 6.)
+apiVersion: v1
+kind: Service
+metadata: { name: adguard-dns, namespace: edge, annotations: { argocd.argoproj.io/sync-wave: "-6" } }
+spec:
+  type: LoadBalancer
+  selector: { app: adguard }
+  ports:
+    - { name: dns-udp, port: 53, targetPort: 53, protocol: UDP }
+    - { name: dns-tcp, port: 53, targetPort: 53, protocol: TCP }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: adguard-ui, namespace: edge }
+spec:
+  selector: { app: adguard }
+  ports: [{ name: http, port: 80, targetPort: 3000 }]

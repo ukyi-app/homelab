@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: adguard, namespace: edge, annotations: { argocd.argoproj.io/sync-wave: "-6" } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate } # RWO PVC, single node
+  selector: { matchLabels: { app: adguard } }
+  template:
+    metadata: { labels: { app: adguard } }
+    spec:
+      initContainers:
+        - name: seed-config
+          image: busybox:1.37
+          command: ["sh", "-c", "cp -n /seed/AdGuardHome.yaml /opt/adguardhome/conf/AdGuardHome.yaml || true"]
+          volumeMounts:
+            - { name: seed, mountPath: /seed }
+            - { name: data, mountPath: /opt/adguardhome/conf, subPath: conf }
+      containers:
+        - name: adguard
+          image: adguard/adguardhome:v0.107.55
+          ports:
+            - { name: dns-udp, containerPort: 53, protocol: UDP }
+            - { name: dns-tcp, containerPort: 53, protocol: TCP }
+            - { name: http, containerPort: 3000 }
+          volumeMounts:
+            - { name: data, mountPath: /opt/adguardhome/conf, subPath: conf }
+            - { name: data, mountPath: /opt/adguardhome/work, subPath: work }
+          resources:
+            requests: { cpu: 25m, memory: 48Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: seed
+          configMap: { name: adguard-config }
+        - name: data
+          persistentVolumeClaim: { claimName: adguard-data }
