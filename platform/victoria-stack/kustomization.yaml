@@ -6,3 +6,7 @@ resources:
   - node-exporter.yaml
   - kube-state-metrics.yaml
   - vmsingle.yaml
+  - vmagent-scrape-config.yaml
+  - vmagent.yaml
+  - victorialogs.yaml
+  - vector.yaml
