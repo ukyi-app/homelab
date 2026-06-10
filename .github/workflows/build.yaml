@@ -1,0 +1,81 @@
+name: build
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "!apps/**/deploy/**" # the write-back's values.yaml bump must NOT re-trigger build → no CI self-loop
+      - ".github/workflows/build.yaml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm # native arm64 runner — no QEMU
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, worker, web, console, pg-tools]
+    outputs:
+      sha: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: detect changed app
+        id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          APP: ${{ matrix.app }}
+        run: |
+          # only a SOURCE/Dockerfile change (never a deploy/values.yaml bump) counts as "changed"
+          if git diff --name-only "$BEFORE" "$SHA" \
+               | grep -E "^apps/${APP}/" | grep -qvE "^apps/${APP}/deploy/"; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: compute extra tag (pg-tools carries the canonical 16-rclone tag M4 references)
+        id: tags
+        env:
+          OWNER: ${{ github.repository_owner }}
+          APP: ${{ matrix.app }}
+          SHA: ${{ github.sha }}
+        run: |
+          TAGS="ghcr.io/${OWNER}/${APP}:sha-${SHA}"
+          if [ "${APP}" = "pg-tools" ]; then
+            TAGS="${TAGS},ghcr.io/${OWNER}/pg-tools:16-rclone"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+      - name: build & push
+        if: steps.changed.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/${{ matrix.app }}
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+      # Record which apps were ACTUALLY built so write-back (bump.yaml) bumps ONLY those —
+      # never points an unchanged app at a :sha tag that was never pushed (→ ImagePullBackOff).
+      - name: record built app
+        if: steps.changed.outputs.build == 'true'
+        env:
+          APP: ${{ matrix.app }}
+        run: mkdir -p built && printf '%s' "${APP}" > "built/${APP}"
+      - name: upload built-app marker
+        if: steps.changed.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-${{ matrix.app }}
+          path: built/${{ matrix.app }}
+          retention-days: 1
