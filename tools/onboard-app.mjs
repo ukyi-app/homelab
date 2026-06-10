@@ -120,8 +120,11 @@ const plan = {
   reqMi, limitMi, ledger: { before: sumLimit, after: sumLimit + limitMi, budget },
   secrets,
   autoDeploy: config.deploy?.autoDeploy ?? true,
-  checklist: secrets.map((s) =>
-    `apps/${app}/deploy/prod/${s}.enc.yaml 작성 필요 (sops로 namespace=prod Secret '${s}' 봉인 후 이 PR 브랜치에 커밋 — 없으면 ArgoCD sync 실패)`),
+  checklist: [
+    `GHCR 패키지 public 전환 필요: https://github.com/orgs/${owner}/packages/container/${app}/settings — org 패키지는 첫 push 시 private이라 클러스터 pull이 401(ErrImagePull)로 실패한다(가시성 변경은 UI 전용)`,
+    ...secrets.map((s) =>
+      `apps/${app}/deploy/prod/${s}.enc.yaml 작성 필요 (sops로 namespace=prod Secret '${s}' 봉인 후 이 PR 브랜치에 커밋 — 없으면 ArgoCD sync 실패)`),
+  ],
 };
 
 if (!DRY) {
