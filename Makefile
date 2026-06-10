@@ -17,9 +17,8 @@ down: ## [TODO: M1] tear the OrbStack VM down
 	@echo "down: not implemented yet (owned by M1 runtime foundation)" >&2
 	@exit 1
 
-bootstrap: ## [TODO: M2] idempotent cluster bootstrap = DR path (ArgoCD + age Secret + root app)
-	@echo "bootstrap: not implemented yet (owned by M2 GitOps/bootstrap)" >&2
-	@exit 1
+bootstrap: ## idempotent DR entry-point: install ArgoCD + sops-age Secret + root app
+	@bash scripts/bootstrap.sh
 
 verify: ## Run repo-foundation checks (skeleton + ledger + sops round-trip)
 	@./scripts/check-skeleton.sh

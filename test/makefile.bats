@@ -6,10 +6,15 @@
 }
 
 @test "unimplemented targets still exit non-zero (cannot fake success)" {
-  run make bootstrap
-  [ "$status" -ne 0 ]
+  # bootstrap (M2) and up/host-up (M1) are now implemented; only down remains a stub.
   run make down
   [ "$status" -ne 0 ]
+}
+
+@test "bootstrap delegates to scripts/bootstrap.sh (dry-run)" {
+  run make -n bootstrap
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'scripts/bootstrap.sh'
 }
 
 @test "make help lists every declared target" {
