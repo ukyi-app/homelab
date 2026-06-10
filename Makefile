@@ -37,3 +37,7 @@ tf-validate: ## terraform fmt -check + validate across all infra roots
 	  terraform -chdir=infra/$$r validate >/dev/null || { echo "$$r: validate FAILED"; exit 1; }; \
 	  echo "$$r: validated"; \
 	done
+
+.PHONY: seed-secrets
+seed-secrets: ## generate SOPS-encrypted seed secrets from terraform outputs
+	@bash scripts/seed-secrets.sh
