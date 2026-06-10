@@ -17,6 +17,10 @@ resources:
   - rules/r6-ci-staleness.yaml
   - digest-exporter.yaml
   - deadmanswitch-relay.yaml
+  - grafana-provisioning.yaml
+  - grafana-dashboards.yaml
+  - grafana.yaml
+  - httproute-grafana.yaml
 
 generators:
   - secret-generator.yaml

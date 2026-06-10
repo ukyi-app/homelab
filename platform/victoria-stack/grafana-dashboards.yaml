@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: grafana-dashboard-resources }
+data:
+  resources.json: |
+    {
+      "uid": "homelab-resources",
+      "title": "Homelab — Node & Pod Memory (kubectl top replacement)",
+      "schemaVersion": 39,
+      "version": 1,
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        {
+          "type": "timeseries", "title": "Node memory used %",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "VictoriaMetrics" },
+          "targets": [ { "expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)", "legendFormat": "node" } ]
+        },
+        {
+          "type": "timeseries", "title": "Per-pod working set (MiB)",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "VictoriaMetrics" },
+          "targets": [ { "expr": "sum by (namespace,pod) (container_memory_working_set_bytes{container!=\"\"}) / 1024 / 1024", "legendFormat": "{{namespace}}/{{pod}}" } ]
+        },
+        {
+          "type": "table", "title": "Pod memory vs limit (budget ledger view)",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "VictoriaMetrics" },
+          "targets": [ { "expr": "sum by (namespace,pod) (container_memory_working_set_bytes{container!=\"\"}) / sum by (namespace,pod) (kube_pod_container_resource_limits{resource=\"memory\"})", "format": "table", "instant": true } ]
+        }
+      ]
+    }
