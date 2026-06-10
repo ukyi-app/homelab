@@ -1,0 +1,107 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: alertmanager-config }
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: telegram
+      group_by: ['alertname','namespace']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - matchers: [ 'alertname = Watchdog' ]
+          receiver: deadmanswitch
+          group_wait: 0s
+          group_interval: 1m
+          repeat_interval: 1m
+          continue: false
+        - matchers: [ 'severity = critical' ]
+          receiver: telegram
+          repeat_interval: 1h
+    receivers:
+      - name: telegram
+        telegram_configs:
+          - bot_token_file: /etc/alertmanager/secrets/TELEGRAM_BOT_TOKEN
+            chat_id: __CHAT_ID__
+            api_url: https://api.telegram.org
+            parse_mode: HTML
+            send_resolved: true
+            message: |
+              <b>{{ .Status | toUpper }}</b> {{ .CommonLabels.alertname }}
+              {{ range .Alerts }}{{ .Annotations.summary }}
+              {{ .Annotations.description }}
+              {{ end }}
+      - name: deadmanswitch
+        webhook_configs:
+          - url: http://deadmanswitch-relay:9095/ping
+            send_resolved: false
+    inhibit_rules:
+      - source_matchers: [ 'severity = critical' ]
+        target_matchers: [ 'severity = warning' ]
+        equal: ['alertname','namespace']
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  labels: { app.kubernetes.io/name: alertmanager }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: alertmanager }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: alertmanager }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534 }
+      initContainers:
+        - name: render-config
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              sed "s/__CHAT_ID__/$TELEGRAM_CHAT_ID/" /config-in/alertmanager.yml > /config-out/alertmanager.yml
+          env:
+            - { name: TELEGRAM_CHAT_ID, valueFrom: { secretKeyRef: { name: alerting-secrets, key: TELEGRAM_CHAT_ID } } }
+          volumeMounts:
+            - { name: config-in, mountPath: /config-in }
+            - { name: config-out, mountPath: /config-out }
+          securityContext: { runAsNonRoot: true, runAsUser: 65534, allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.27.0
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --cluster.listen-address=
+            - --web.listen-address=:9093
+          ports: [{ name: http, containerPort: 9093 }]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+          readinessProbe: { httpGet: { path: /-/ready, port: 9093 } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: config-out, mountPath: /etc/alertmanager }
+            - { name: secrets, mountPath: /etc/alertmanager/secrets, readOnly: true }
+            - { name: data, mountPath: /alertmanager }
+      volumes:
+        - { name: config-in, configMap: { name: alertmanager-config } }
+        - { name: config-out, emptyDir: {} }
+        - { name: secrets, secret: { secretName: alerting-secrets } }
+        - { name: data, emptyDir: { sizeLimit: 128Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  labels: { app.kubernetes.io/name: alertmanager }
+spec:
+  selector: { app.kubernetes.io/name: alertmanager }
+  ports: [{ name: http, port: 9093, targetPort: 9093 }]
