@@ -28,8 +28,10 @@ spec:
           image: victoriametrics/victoria-metrics:v1.103.0
           args:
             - --storageDataPath=/storage
+            # retention.maxDiskSpaceUsageBytes는 VictoriaMetrics ENTERPRISE 전용 — 커뮤니티 에디션이
+            # "flag not defined"로 거부해 CrashLoop(라이브 확인). 디스크 폭주 가드는 시간 보존(30d)
+            # + R4 disk-fill 알림(vmalert)으로 담당한다. (VictoriaLogs 쪽 동일 플래그는 커뮤니티 지원)
             - --retentionPeriod=30d
-            - --retention.maxDiskSpaceUsageBytes=35GB
             - --memory.allowedPercent=60
             - --httpListenAddr=:8428
             - --dedup.minScrapeInterval=30s

@@ -15,6 +15,7 @@ concurrency:
 
 permissions:
   contents: write
+  packages: read # docker manifest inspect용 — 없으면 GHCR 조회가 익명 처리돼 digest 검증이 항상 실패
 
 jobs:
   writeback:

@@ -22,7 +22,7 @@ spec:
             - name: drill
               # PINNED BY DIGEST (immutable): this Job has delete rights in the database ns; a mutable
               # tag could be swapped under it. CI records the digest — pin it here before enabling the drill.
-              image: ghcr.io/ukyi-app/pg-tools:16-rclone@sha256:<PINNED_PG_TOOLS_DIGEST>
+              image: ghcr.io/ukyi-app/pg-tools:16-rclone@sha256:a4d8a9cc454dd81691112a53ef20d09aae4d2d8d62f8b5d3d46ceee681487664
               command: ["/bin/bash", "/scripts/drill.sh"]
               env:
                 - name: TELEGRAM_BOT_TOKEN
