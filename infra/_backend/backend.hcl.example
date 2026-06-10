@@ -1,5 +1,13 @@
-# Copy to infra/<root>/backend.hcl and fill in. NEVER commit the filled version.
+# R2 state 백엔드 자격증명 템플릿 (커밋되는 레퍼런스 — 실제 값 금지)
+# 사용법: 각 root로 복사 후 채움 — infra/{cloudflare,tailscale,github}/backend.hcl
+#         (사본은 backend.hcl로 gitignored, 절대 커밋 금지)
+#
+# endpoints: R2 페이지 Account Details의 'S3 API' URL 그대로 (<ACCT_ID> = Account ID 32자 hex)
+# access/secret: R2 → API → Manage API Tokens에서 발급한 토큰 (Object Read & Write)
+#   — .env.secrets의 R2_PG_* 와 같은 토큰을 재사용해도 된다
 endpoints  = { s3 = "https://<ACCT_ID>.r2.cloudflarestorage.com" }
 access_key = "<R2_STATE_ACCESS_KEY>"
 secret_key = "<R2_STATE_SECRET_KEY>"
-# key is set per-root below, e.g. key = "cloudflare/prod/terraform.tfstate"
+# key는 root별로 다르게: cloudflare/prod/terraform.tfstate,
+# tailscale/prod/terraform.tfstate, github/prod/terraform.tfstate
+key = "<root>/prod/terraform.tfstate"

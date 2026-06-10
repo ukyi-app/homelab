@@ -1,3 +1,13 @@
+# Tailscale root 식별자 템플릿 (커밋되는 레퍼런스 — 시크릿 아님)
+# 사용법: cp terraform.tfvars.example terraform.tfvars  (사본은 *.tfvars로 gitignored)
+#
+# ⚠️ 시크릿(OAuth client)은 여기 넣지 말 것 — .env.secrets의
+#    TF_VAR_ts_bootstrap_oauth_id / TF_VAR_ts_bootstrap_oauth_secret (env)로만 공급된다.
+
+# 내부 전용 호스트 접미사 — cloudflare root의 internal_suffix와 반드시 동일 값 ('int.' + 도메인)
 internal_suffix = "int.<DOMAIN>"
-tailscale_ip    = "100.x.y.z"
-# ts_bootstrap_oauth_* supplied via TF_VAR_* env.
+
+# split-DNS 네임서버 주소: tailnet 기기들이 int.<DOMAIN> 조회 시 물어볼 DNS(=AdGuard)의
+# 도달 주소. AdGuard :53은 servicelb→VM→OrbStack을 거쳐 Mac mini 호스트로 매핑되므로
+# 'Mac mini의 Tailscale IP'를 넣는다 (`tailscale ip -4`로 확인).
+tailscale_ip = "100.x.y.z"

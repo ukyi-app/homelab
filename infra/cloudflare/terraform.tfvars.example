@@ -1,5 +1,19 @@
+# Cloudflare root 식별자 템플릿 (커밋되는 레퍼런스 — 시크릿 아님)
+# 사용법: cp terraform.tfvars.example terraform.tfvars  (사본은 *.tfvars로 gitignored)
+#
+# ⚠️ 시크릿(cloudflare_api_token)은 여기 넣지 말 것 — .env.secrets의
+#    TF_VAR_cloudflare_api_token (env)로만 공급된다.
+
+# Account ID: dash.cloudflare.com → R2 페이지 우측 Account Details의 Account ID (32자 hex)
 cloudflare_account_id = "<ACCT_ID>"
-zone_name             = "<DOMAIN>"
-internal_suffix       = "int.<DOMAIN>"
-tunnel_name           = "homelab-prod"
-# cloudflare_api_token supplied via TF_VAR_cloudflare_api_token (env), never in tfvars.
+
+# Cloudflare에 zone으로 등록된 apex 도메인 (https:// 없이, 서브도메인 없이)
+zone_name = "<DOMAIN>"
+
+# 내부 전용 호스트 접미사 — 반드시 'int.' + 도메인 형태!
+# Gateway의 web-internal 리스너(*.int.<DOMAIN>)·AdGuard rewrite·split-DNS가 이 컨벤션에
+# 하드코딩돼 있어, apex와 같게 두면 public/internal 호스트가 충돌한다.
+internal_suffix = "int.<DOMAIN>"
+
+# cloudflared 터널 이름 (기본값 유지 권장)
+tunnel_name = "homelab-prod"
