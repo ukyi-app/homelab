@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmalert-rules-core
+  labels: { vmalert-rule: "true" }
+data:
+  core.yaml: |
+    groups:
+      - name: infra
+        rules:
+          - alert: TargetDown
+            expr: up == 0
+            for: 5m
+            labels: { severity: critical }
+            annotations:
+              summary: "Scrape target {{ $labels.job }}/{{ $labels.instance }} down"
+              description: "vmagent target has been unreachable for 5m."
+          - alert: NodeMemoryHigh
+            expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.92
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "VM memory >92%"
+              description: "Node memory pressure; eviction threshold nears."
+          - alert: PodOOMKilled
+            expr: increase(kube_pod_container_status_restarts_total[15m]) > 0 and on(namespace,pod) kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+            for: 0m
+            labels: { severity: warning }
+            annotations:
+              summary: "OOMKill in {{ $labels.namespace }}/{{ $labels.pod }}"
+              description: "Container hit its memory limit — check the ledger budget."
+      - name: deadmanswitch
+        rules:
+          - alert: Watchdog
+            expr: vector(1)
+            labels: { severity: none }
+            annotations:
+              summary: "Watchdog: alerting pipeline is alive."
+              description: "This always-firing alert proves Alertmanager→Telegram and the off-node dead-man's-switch are wired. Its ABSENCE at healthchecks.io is the page."
