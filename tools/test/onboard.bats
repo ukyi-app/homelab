@@ -110,8 +110,32 @@ EOF
   [ "$(cat "$fix/apps/blog/deploy/prod/source-repo")" = "ukyi-app/blog" ]
   grep -q 'path: ksops' "$fix/apps/blog/deploy/prod/secret-generator.yaml"
   grep -q 'blog-secrets.enc.yaml' "$fix/apps/blog/deploy/prod/secret-generator.yaml"
+  grep -q 'generators' "$fix/apps/blog/deploy/prod/kustomization.yaml"
   grep -q 'ledger:row --> blog' "$fix/docs/memory-ledger.md"
   grep -q 'limit ≈ 328 Mi' "$fix/docs/memory-ledger.md"   # 200 + 128
+}
+
+@test "no-secrets app STILL gets a kustomization.yaml (else ArgoCD parses values.yaml as manifest)" {
+  fix="$(mktemp -d)"; mkdir -p "$fix/apps" "$fix/docs"
+  cat > "$fix/docs/memory-ledger.md" <<'EOF'
+<!-- ledger:meta VM_ALLOCATABLE_MIB=11264 LIMIT_BUDGET_MIB=8704 -->
+| component | namespace | req_mi | limit_mi |
+|---|---|---:|---:|
+| <!-- ledger:row --> base | kube-system | 100 | 200 |
+**Totals:** req ≈ 100 Mi · limit ≈ 200 Mi (must stay ≤ 8704 Mi).
+EOF
+  nosec='kind: api
+resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 500m, memory: 128Mi } }
+route: { public: false }
+db: { enabled: false }
+env: []
+secrets: []'
+  p=$(payload demo "$nosec")
+  run run_onboard "$p" --repo-root "$fix"
+  [ "$status" -eq 0 ]
+  [ -f "$fix/apps/demo/deploy/prod/kustomization.yaml" ]   # secrets 없어도 반드시 존재
+  ! [ -f "$fix/apps/demo/deploy/prod/secret-generator.yaml" ]  # secrets 없으면 generator는 없음
+  grep -q 'kind: Kustomization' "$fix/apps/demo/deploy/prod/kustomization.yaml"
   rm -rf "$fix"
 }
 

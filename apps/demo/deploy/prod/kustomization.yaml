@@ -1,0 +1,5 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# appset source #3(이 디렉토리)이 kustomize로 렌더된다 — kustomization이 없으면 ArgoCD가
+# values.yaml을 매니페스트로 파싱해 "groupVersion shouldn't be empty"로 죽는다(라이브 확인).
+namespace: prod
