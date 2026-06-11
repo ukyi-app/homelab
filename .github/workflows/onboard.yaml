@@ -23,6 +23,8 @@ jobs:
     steps:
       # DEPLOY_BOT_PAT 사용 이유: GITHUB_TOKEN으로 만든 PR은 워크플로(required check 'gate')를
       # 트리거하지 않아 영원히 머지 불가가 된다 — PAT발 PR이어야 ci.yaml이 정상 실행된다.
+      # ⚠️ 이 PAT에는 Contents:write 외에 **Pull requests:write**가 반드시 필요하다
+      # (없으면 PR 생성이 "Resource not accessible by personal access token"로 실패 — 라이브 검증).
       - uses: actions/checkout@v4
         with:
           ref: main
