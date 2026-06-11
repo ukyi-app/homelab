@@ -25,6 +25,12 @@ spec:
       wal_compression: "on"
       max_wal_size: "1GB"
       min_wal_size: "256MB"
+    pg_hba:
+      # local-basebackup CronJob의 pg_basebackup은 postgres 유저로 REPLICATION 연결을 연다 —
+      # CNPG 기본 pg_hba는 replication을 streaming_replica(cert)만 허용해 거부된다
+      # (라이브 검증: "no pg_hba.conf entry for replication connection ... user postgres").
+      - hostssl replication postgres 10.42.0.0/16 scram-sha-256
+      - host replication postgres 10.42.0.0/16 scram-sha-256
 
   resources:
     requests:

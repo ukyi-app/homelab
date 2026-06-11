@@ -21,7 +21,9 @@ spec:
           securityContext: { runAsUser: 26, runAsGroup: 26, fsGroup: 26 }
           containers:
             - name: pgdump-hedge
-              image: ghcr.io/ukyi-app/pg-tools:16-rclone # M6가 빌드 (apps/pg-tools/, M6 CI matrix)
+              # digest 핀: mutable 태그는 build push 때마다 움직여 의도치 않은 이미지로 실행될 수 있다
+              # (restore-drill-cronjob과 동일 규약). 갱신은 bump 체인이 아니라 의도적 커밋으로만.
+              image: ghcr.io/ukyi-app/pg-tools:16-rclone@sha256:b7a4bf228bbba85401a52dfb5fc1302f7154306ee4f2109fe0eed7290a0825ef # M6가 빌드 (apps/pg-tools/)
               command: ["/bin/bash", "-c"]
               args:
                 - |
