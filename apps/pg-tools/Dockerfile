@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
-# Operations image for CNPG backup/restore tooling.
-# Consumed by Milestone 4's restore-drill CronJob and the pg_dump→rclone→R2 hedge.
-# Published as ghcr.io/<owner>/pg-tools:16-rclone (see Task 6.15 matrix).
+# CNPG 백업/복구 도구용 운영(ops) 이미지.
+# Milestone 4의 restore-drill CronJob과 pg_dump→rclone→R2 헤지가 사용한다.
+# ghcr.io/<owner>/pg-tools:16-rclone으로 게시된다 (Task 6.15 matrix 참조).
 FROM debian:bookworm-slim
 
 ARG TARGETARCH=arm64
@@ -9,17 +9,17 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl gnupg lsb-release unzip && \
-    # PostgreSQL client 16 (PGDG)
+    # PostgreSQL 클라이언트 16 (PGDG)
     install -d /usr/share/postgresql-common/pgdg && \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
       -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc && \
     echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
       > /etc/apt/sources.list.d/pgdg.list && \
     apt-get update && apt-get install -y --no-install-recommends postgresql-client-16 && \
-    # kubectl (stable, arch-aware)
+    # kubectl (stable 채널, 아키텍처 인지)
     curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/${TARGETARCH}/kubectl" \
       -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl && \
-    # rclone (R2-compatible S3)
+    # rclone (R2 호환 S3)
     curl -fsSL "https://downloads.rclone.org/rclone-current-linux-${TARGETARCH}.zip" -o /tmp/rclone.zip && \
     unzip -j /tmp/rclone.zip '*/rclone' -d /usr/local/bin && chmod +x /usr/local/bin/rclone && \
     rm -rf /tmp/rclone.zip /var/lib/apt/lists/*

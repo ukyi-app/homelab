@@ -24,7 +24,7 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
 
 @test "spa Deployment runs static-web-server (SWS args) when spa.server=sws" {
   out=$(dep --set kind=spa --set route.host=app.example.com --set spa.server=sws)
-  # SWS serving is proven by its args (--page-fallback + --root /public), comment-agnostic.
+  # SWS 서빙 여부는 args(--page-fallback + --root /public)로 검증 — 주석 내용과 무관.
   [[ "$out" == *"--page-fallback"* ]]
   [[ "$out" == *"/public"* ]]
   [[ "$out" == *"readOnlyRootFilesystem: true"* ]]

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Smoke test that proves bats runs and the helper loads.
+# bats가 동작하고 helper가 로드됨을 증명하는 스모크 테스트.
 
 load test_helper
 

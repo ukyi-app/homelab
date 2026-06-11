@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# Exercises the REAL in-VM bulk gate logic (bulk-gate-probe.sh) directly — no orb, no VM — so the
-# findmnt/sentinel behaviour is actually covered (Pass-5 #1 adversarial-review fix). The fake
-# `findmnt` mimics OrbStack's real behaviour: a subdir of the mac share is NOT its own mountpoint,
-# so it resolves ONLY with `-T`. A probe that forgot `-T` would therefore fail this suite.
+# 진짜 VM 내부 bulk 게이트 로직(bulk-gate-probe.sh)을 직접 검증한다 — orb도 VM도 없이 —
+# 그래서 findmnt/sentinel 동작이 실제로 커버된다 (Pass-5 #1 적대적 리뷰 수정). 가짜
+# `findmnt`는 OrbStack의 실제 동작을 흉내낸다: mac 공유의 하위 디렉토리는 자체 마운트포인트가
+# 아니라서 `-T`로만 resolve된다. 따라서 `-T`를 빼먹은 probe는 이 스위트에서 실패한다.
 load test_helper
 
 PROBE="$BOOTSTRAP_DIR/bulk-gate-probe.sh"
@@ -12,7 +12,7 @@ setup() {
   PATH="$STUBDIR:$PATH"; export PATH STUBDIR WORK
   cat >"$STUBDIR/findmnt" <<'EOF'
 #!/usr/bin/env sh
-# Real OrbStack: `findmnt <subdir>` prints nothing / exits 1; only `findmnt -T <subdir>` resolves.
+# 실제 OrbStack: `findmnt <subdir>`는 아무것도 출력하지 않고 1로 종료; `findmnt -T <subdir>`만 resolve된다.
 [ "${FINDMNT_NORESOLVE:-0}" = "1" ] && exit 1
 hasT=0; for a in "$@"; do [ "$a" = "-T" ] && hasT=1; done
 [ "$hasT" = "1" ] || exit 1
@@ -26,8 +26,8 @@ teardown() { rm -rf "$STUBDIR" "$WORK"; }
   BULK_EXTERNAL_MOUNT="/mnt/mac/Volumes/homelab" BULK_STORAGE_PATH="$WORK/bulk" run sh "$PROBE"
   [ "$status" -eq 0 ]
   [[ "$output" == *"external-bulk-probe-ok"* ]]
-  [ -d "$WORK/bulk" ]                       # the base dir was created
-  [ -z "$(ls -A "$WORK/bulk")" ]            # the sentinel was cleaned up
+  [ -d "$WORK/bulk" ]                       # 베이스 디렉토리가 생성됨
+  [ -z "$(ls -A "$WORK/bulk")" ]            # sentinel이 정리됨
 }
 
 @test "exit 11 when the mount cannot be resolved (fails closed)" {

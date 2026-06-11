@@ -8,11 +8,11 @@ providers:
   kubernetesCRD:
     enabled: false
 gateway:
-  enabled: false # we manage GatewayClass + Gateway ourselves (gatewayclass.yaml/gateway.yaml)
+  enabled: false # GatewayClass + Gateway는 직접 관리한다 (gatewayclass.yaml/gateway.yaml)
 gatewayClass:
   enabled: false
 service:
-  type: LoadBalancer # k3s servicelb publishes on the VM node IP :80/:443
+  type: LoadBalancer # k3s servicelb가 VM 노드 IP의 :80/:443에 노출
 ports:
   web:
     port: 8000
@@ -33,11 +33,11 @@ logs:
     format: json # JSON → stdout → Vector → VictoriaLogs (M5)
 ingressRoute:
   dashboard:
-    enabled: false # dashboard is internal-only; not exposed here
+    enabled: false # dashboard는 내부 전용; 여기서 노출하지 않음
 resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 500m, memory: 128Mi }
 rbac:
-  enabled: true # base RBAC; Gateway-API extension comes from rbac-gateway.yaml (Task 3.3)
+  enabled: true # 기본 RBAC; Gateway-API 확장은 rbac-gateway.yaml에서 (Task 3.3)
 serviceAccount:
   name: traefik

@@ -5,7 +5,7 @@ WF=".github/workflows/build.yaml"
   run yq '.jobs.build.runs-on' "$WF"
   [[ "$output" == "ubuntu-24.04-arm" ]]
   run grep -i "setup-qemu" "$WF"
-  [ "$status" -ne 0 ] # must NOT use QEMU
+  [ "$status" -ne 0 ] # QEMU를 쓰면 안 된다
 }
 
 @test "build pushes immutable :sha-<gitsha> to GHCR" {

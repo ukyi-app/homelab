@@ -4,7 +4,7 @@ metadata:
   name: argocd
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-10" # ADDED by M3: ArgoCD reconciles itself first
+    argocd.argoproj.io/sync-wave: "-10" # M3에서 추가: ArgoCD가 자기 자신을 가장 먼저 reconcile
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -12,11 +12,11 @@ spec:
   sources:
     - repoURL: https://argoproj.github.io/argo-helm
       chart: argo-cd
-      targetRevision: 7.7.11 # PINNED by M2 — bump deliberately, never floating
+      targetRevision: 7.7.11 # M2에서 고정 — 의도적으로만 올릴 것, floating 금지
       helm:
         releaseName: argocd
         valueFiles:
-          - $values/platform/argocd/bootstrap-values.yaml # M2-owned single values file (KSOPS wiring lives here)
+          - $values/platform/argocd/bootstrap-values.yaml # M2 소유의 단일 values 파일 (KSOPS 배선이 여기 있음)
     - repoURL: https://github.com/ukyi-app/homelab.git
       targetRevision: main
       ref: values

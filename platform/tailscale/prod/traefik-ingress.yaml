@@ -11,4 +11,4 @@ spec:
       name: traefik
       port: { number: 80 }
   tls:
-    - hosts: ["homelab"] # → homelab.<tailnet>.ts.net, Tailscale-issued TLS
+    - hosts: ["homelab"] # → homelab.<tailnet>.ts.net, Tailscale 발급 TLS

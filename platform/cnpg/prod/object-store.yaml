@@ -10,7 +10,7 @@ spec:
     endpointURL: "https://52f958915d71663164a60636dc2905ce.r2.cloudflarestorage.com"
     s3Credentials:
       accessKeyId:
-        name: cnpg-r2-creds # M2-seeded Secret (ns database)
+        name: cnpg-r2-creds # M2가 시드한 Secret (ns database)
         key: AWS_ACCESS_KEY_ID
       secretAccessKey:
         name: cnpg-r2-creds

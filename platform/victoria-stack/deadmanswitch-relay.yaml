@@ -5,8 +5,8 @@ data:
   relay.sh: |
     #!/bin/sh
     set -eu
-    # Minimal HTTP listener using busybox nc loop.
-    # On any POST to /ping, fire one ping to healthchecks.io.
+    # busybox nc 루프를 이용한 최소 HTTP 리스너.
+    # /ping에 어떤 POST가 오든 healthchecks.io로 ping 한 번을 보낸다.
     while true; do
       printf 'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok' | nc -l -p 9095 -q 1 2>/dev/null || true
       wget -q -T 10 -O /dev/null "$HEALTHCHECKS_URL" || echo "ping failed $(date)"

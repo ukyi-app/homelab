@@ -5,7 +5,7 @@ metadata:
   namespace: database
 spec:
   accessModes: ["ReadWriteOnce"]
-  storageClassName: bulk-ssd # 1TB external SSD, staging only — NEVER Postgres PGDATA
+  storageClassName: bulk-ssd # 1TB 외장 SSD, 스테이징 전용 — Postgres PGDATA에는 절대 금지
   resources:
     requests:
       storage: 100Gi

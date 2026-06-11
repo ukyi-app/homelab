@@ -1,8 +1,8 @@
 oauth:
-  # operator reads the M2-seeded SOPS Secret 'operator-oauth' (not inline)
+  # operator는 M2가 시드한 SOPS Secret 'operator-oauth'를 읽는다 (인라인 아님)
   existingSecret: operator-oauth
 apiServerProxyConfig:
-  mode: "false" # no kube-apiserver exposure; we only proxy Traefik
+  mode: "false" # kube-apiserver 노출 없음; Traefik만 프록시한다
 operatorConfig:
   hostname: homelab-operator
   resources:

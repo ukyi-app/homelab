@@ -3,7 +3,7 @@ load test_helper
 
 setup() {
   WORK="$(mktemp -d)"; ORDER="$WORK/order.log"; export WORK ORDER
-  # Shadow the real sub-scripts with order-logging stubs via HOSTUP_BINDIR.
+  # HOSTUP_BINDIR로 실제 하위 스크립트를 순서 기록 stub으로 가린다.
   mkdir -p "$WORK/bin"
   for s in orb-create.sh k3s-install.sh apply-storage.sh orb-guard.sh; do
     cat >"$WORK/bin/$s" <<EOF

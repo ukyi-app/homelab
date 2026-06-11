@@ -1,12 +1,12 @@
-# Shared S3-compatible backend pointed at Cloudflare R2 (copy of infra/_backend/backend.tf;
-# Terraform requires the backend block in-root). Per-root state key + secrets come
-# from the gitignored backend.hcl at init time.
+# Cloudflare R2를 가리키는 공유 S3 호환 백엔드 (infra/_backend/backend.tf의 사본;
+# Terraform은 backend 블록이 root 안에 있어야 한다). root별 state key와 시크릿은
+# init 시점에 gitignored된 backend.hcl에서 들어온다.
 terraform {
   backend "s3" {
     bucket = "homelab-tfstate"
     region = "auto"
 
-    # R2 is not real AWS S3 — disable the AWS-only handshakes.
+    # R2는 진짜 AWS S3가 아니다 — AWS 전용 핸드셰이크를 비활성화한다.
     skip_credentials_validation = true
     skip_region_validation      = true
     skip_requesting_account_id  = true

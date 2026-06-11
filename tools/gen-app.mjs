@@ -9,7 +9,7 @@ if (!name || !["api", "worker", "ssr", "spa"].includes(kind)) {
   console.error("usage: gen:app <name> --kind api|worker|ssr|spa"); process.exit(2);
 }
 
-// per-runtime memory gate defaults (design §9)
+// 런타임별 메모리 게이트 기본값 (설계 §9)
 const mem = { api: ["64Mi", "64Mi"], worker: ["64Mi", "64Mi"], ssr: ["128Mi", "256Mi"], spa: ["16Mi", "32Mi"] }[kind];
 const served = ["api", "ssr", "spa"].includes(kind);
 const route = served
@@ -37,7 +37,7 @@ USER 65532:65532
 `);
 writeFileSync(`${base}/src/.gitkeep`, "");
 
-// CI matrix entry
+// CI matrix 항목 추가
 const wfPath = ".github/workflows/build.yaml";
 const wf = parse(readFileSync(wfPath, "utf8"));
 const apps = wf.jobs.build.strategy.matrix.app;

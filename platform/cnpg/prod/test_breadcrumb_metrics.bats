@@ -12,7 +12,7 @@
 @test "M4 authors NO vmalert / PrometheusRule (those are M5-owned)" {
   run bash -c "ls platform/cnpg/prod/alert-rules.yaml 2>/dev/null"
   [ "$status" -ne 0 ]
-  # restrict to YAML manifests so this .bats file (which mentions the string) is not a self-match
+  # YAML manifest로 한정 — 이 문자열을 언급하는 이 .bats 파일 자신이 매칭되지 않도록
   run bash -c "grep -rl --include='*.yaml' 'kind: PrometheusRule' platform/cnpg 2>/dev/null"
   [ -z "$output" ]
 }

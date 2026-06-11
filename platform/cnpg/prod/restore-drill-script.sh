@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Restore drill (R1): prove R2 backups are actually recoverable.
-# 1) read a stable row count from the live cluster
-# 2) stand up a throwaway cluster recovered from R2
-# 3) wait until it is Ready, read the same row count
-# 4) compare; report PASS/FAIL to Telegram; on PASS ping healthchecks + push the
-#    restore_drill_last_success_timestamp metric (M5's CNPGRestoreDrillStale reads it)
-# 5) always delete the throwaway cluster
+# 복원 drill (R1): R2 백업이 실제로 복구 가능함을 증명한다.
+# 1) 라이브 클러스터에서 안정적인 row count를 읽는다
+# 2) R2에서 복구한 일회용 클러스터를 띄운다
+# 3) Ready가 될 때까지 기다린 뒤 같은 row count를 읽는다
+# 4) 비교; PASS/FAIL을 Telegram으로 보고; PASS 시 healthchecks를 ping하고
+#    restore_drill_last_success_timestamp 메트릭을 push (M5의 CNPGRestoreDrillStale이 읽음)
+# 5) 일회용 클러스터는 항상 삭제한다
 set -euo pipefail
 
 NS="database"
 LIVE_CLUSTER="pg"
 DRILL_CLUSTER="pg-restore-drill"
 DB="app"
-TABLE="${DRILL_TABLE:-restore_canary}" # canary table maintained by the live app/seed
+TABLE="${DRILL_TABLE:-restore_canary}" # 라이브 앱/시드가 유지하는 canary 테이블
 TG="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
-# vmsingle's Prometheus import endpoint (M5). Default to the in-cluster service so the metric is
-# ALWAYS delivered — M5's CNPGRestoreDrillStale uses absent(), so a missing series pages forever.
+# vmsingle의 Prometheus import 엔드포인트 (M5). 클러스터 내 service를 기본값으로 해 메트릭이
+# 항상 전달되게 한다 — M5의 CNPGRestoreDrillStale은 absent()를 쓰므로 시계열이 없으면 영원히 페이징된다.
 PUSHGW="${METRICS_PUSH_URL:-http://vmsingle.observability.svc:8428}"
 
 notify() { # $1=emoji-status $2=text
@@ -30,15 +30,15 @@ fail() {
   exit 1
 }
 
-push_success_metric() { # canonical series read by M5's CNPGRestoreDrillStale (vmsingle import API)
+push_success_metric() { # M5의 CNPGRestoreDrillStale이 읽는 정식 시계열 (vmsingle import API)
   printf 'restore_drill_last_success_timestamp %s\n' "$(date -u +%s)" \
     | curl -fsS --data-binary @- "${PUSHGW}/api/v1/import/prometheus" \
     || fail "could not push restore_drill_last_success_timestamp to ${PUSHGW} (M5 would page on the absent series)"
 }
 
-# Cleanup removes the drill's Cluster + PVCs. The drill uses the `drill-ssd` StorageClass
-# (reclaimPolicy=Delete), so deleting the PVCs AUTO-deletes their PVs — no cluster-wide PV
-# permission, no ~50 GiB/run leak. (CNPG does not delete PVCs on Cluster delete, so we do.)
+# cleanup은 drill의 Cluster + PVC를 제거한다. drill은 `drill-ssd` StorageClass
+# (reclaimPolicy=Delete)를 쓰므로 PVC 삭제 시 PV가 자동 삭제된다 — 클러스터 전역 PV 권한도,
+# 실행당 ~50 GiB 누수도 없음. (CNPG는 Cluster 삭제 시 PVC를 지우지 않으므로 직접 지운다.)
 cleanup() {
   kubectl -n "$NS" delete cluster "$DRILL_CLUSTER" --ignore-not-found --wait=true || true
   kubectl -n "$NS" delete pvc -l "cnpg.io/cluster=${DRILL_CLUSTER}" --ignore-not-found --wait=true || true
@@ -62,7 +62,7 @@ metadata:
 spec:
   instances: 1
   imageName: ghcr.io/cloudnative-pg/postgresql:16.4
-  storage: { size: 40Gi, storageClass: drill-ssd }      # Delete reclaim → PVCs auto-remove PVs (no leak, no PV RBAC)
+  storage: { size: 40Gi, storageClass: drill-ssd }      # Delete reclaim → PVC 삭제 시 PV 자동 제거 (누수 없음, PV RBAC 불필요)
   walStorage: { size: 10Gi, storageClass: drill-ssd }
   resources:
     requests: { cpu: 250m, memory: 768Mi }
@@ -95,11 +95,11 @@ ACTUAL_ROWS="$(kubectl -n "$NS" exec "${DRILL_CLUSTER}-1" -c postgres -- \
   || fail "could not read recovered row count"
 echo "[drill] ACTUAL_ROWS=${ACTUAL_ROWS}"
 
-# Allow >= because WAL replay may include rows written after the base backup.
+# WAL replay가 base backup 이후 쓰인 row를 포함할 수 있으므로 >= 허용.
 if [ "$ACTUAL_ROWS" -ge "$EXPECTED_ROWS" ] && [ "$ACTUAL_ROWS" -gt 0 ]; then
-  push_success_metric # BEFORE the PASS notify: fail-hard if the metric can't land (else M5's absent() alert pages forever)
+  push_success_metric # PASS notify 전에 실행: 메트릭 적재 실패 시 즉시 실패 (아니면 M5의 absent() 알림이 영원히 페이징)
   notify "🟢 PASS" "recovered ${ACTUAL_ROWS} rows (live ${EXPECTED_ROWS}) from R2"
-  # dead-man's switch: only ping on a genuine PASS (M5 owns the healthcheck definition)
+  # dead-man's switch: 진짜 PASS일 때만 ping (healthcheck 정의는 M5 소유)
   curl -fsS -m 10 "${HEALTHCHECKS_URL}" >/dev/null || true
   echo "[drill] PASS"
 else

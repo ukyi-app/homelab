@@ -1,7 +1,7 @@
 cloudnative-pg:
   replicaCount: 1
   monitoring:
-    podMonitorEnabled: false # no VM operator; we scrape via annotations (M5)
+    podMonitorEnabled: false # VM operator 없음; annotation 기반으로 scrape (M5)
   resources:
     requests:
       cpu: 50m
@@ -11,5 +11,5 @@ cloudnative-pg:
       memory: 200Mi
   config:
     data:
-      # barman-cloud plugin (CNPG-I) sidecar is enabled per-Cluster, not here
+      # barman-cloud plugin(CNPG-I) sidecar는 여기가 아니라 Cluster별로 활성화한다
       INHERITED_ANNOTATIONS: "prometheus.io/*"

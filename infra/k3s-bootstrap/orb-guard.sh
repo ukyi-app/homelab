@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# R3 health check: assert the OrbStack environment holds EXACTLY ONE machine,
-# named "$ORB_MACHINE", in the running state. The OrbStack memory cap is GLOBAL,
-# so any extra machine/container silently steals from the k3s VM's 11 GiB.
-# Re-used as a gate by later milestones — keep it dependency-free (no jq).
+# R3 헬스체크: OrbStack 환경에 "$ORB_MACHINE" 이름의 머신이 정확히 하나만,
+# running 상태로 존재함을 단언한다. OrbStack 메모리 상한은 전역이라,
+# 여분의 머신/컨테이너는 k3s VM의 11 GiB를 조용히 가로챈다.
+# 이후 마일스톤들이 게이트로 재사용한다 — 의존성 없이 유지할 것 (jq 금지).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,8 +15,8 @@ if ! command -v orb >/dev/null 2>&1; then
   exit 2
 fi
 
-# `orb list` (OrbStack 2.x) prints NO header when piped/non-TTY; in a TTY it may
-# print a "NAME …" header. Robust to both: drop blank lines and any header row.
+# `orb list`(OrbStack 2.x)는 파이프/non-TTY에서는 헤더를 출력하지 않고, TTY에서는
+# "NAME …" 헤더를 출력할 수 있다. 둘 다 견디게: 빈 줄과 헤더 행을 제거한다.
 mapfile -t rows < <(orb list 2>/dev/null | awk 'NF && $1 != "NAME"')
 
 count="${#rows[@]}"

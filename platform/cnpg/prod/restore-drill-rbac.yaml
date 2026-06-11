@@ -12,28 +12,28 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/exec"]
     verbs: ["get", "list", "create"]
-  - apiGroups: [""] # delete the drill cluster's PVCs (else ~50GiB/run leak)
+  - apiGroups: [""] # drill 클러스터의 PVC 삭제용 (없으면 실행당 ~50GiB 누수)
     resources: ["persistentvolumeclaims"]
     verbs: ["get", "list", "delete"]
 ---
-# NO cluster-wide PV permissions. Granting delete on ALL PersistentVolumes to a Job running a
-# MUTABLE image is a foot-gun (a bad image/script could delete LIVE PVs; a client-side name filter
-# is not an authorization boundary — Pass-4 finding). Instead the drill cluster uses the dedicated
-# `drill-ssd` StorageClass (reclaimPolicy=Delete), so deleting the drill PVCs (namespace Role above)
-# AUTOMATICALLY removes their PVs — no PV permission required.
+# 클러스터 전역 PV 권한 없음. mutable 이미지를 실행하는 Job에 모든 PersistentVolume의
+# delete 권한을 주는 것은 자충수다(불량 이미지/스크립트가 라이브 PV를 지울 수 있고,
+# 클라이언트 측 이름 필터는 인가 경계가 아니다 — Pass-4 발견 사항). 대신 drill 클러스터는
+# 전용 `drill-ssd` StorageClass(reclaimPolicy=Delete)를 사용하므로, drill PVC 삭제(위의
+# namespace Role)만으로 해당 PV가 자동 제거된다 — PV 권한 불필요.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata: { name: restore-drill, namespace: database }
 subjects: [{ kind: ServiceAccount, name: restore-drill, namespace: database }]
 roleRef: { kind: Role, name: restore-drill, apiGroup: rbac.authorization.k8s.io }
 ---
-# Dedicated DRILL StorageClass: reclaimPolicy=Delete so the drill's PVCs auto-remove their PVs
-# on delete — the cleanup needs only namespace-scoped PVC delete, NO cluster-wide PV RBAC.
-# Same local-path provisioner / internal SSD as `standard`; M1's local-path config maps
-# `drill-ssd` → /var/lib/rancher/k3s-storage/internal.
+# drill 전용 StorageClass: reclaimPolicy=Delete이므로 drill의 PVC 삭제 시 PV가 자동 제거된다
+# — 정리에는 namespace 범위 PVC delete만 필요하고 클러스터 전역 PV RBAC는 불필요.
+# `standard`와 같은 local-path provisioner / 내장 SSD; M1의 local-path 설정이
+# `drill-ssd` → /var/lib/rancher/k3s-storage/internal로 매핑.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata: { name: drill-ssd }
-provisioner: homelab.io/local-path-internal # MUST match M1's installed internal provisioner (NOT rancher.io/local-path)
+provisioner: homelab.io/local-path-internal # M1이 설치한 internal provisioner와 일치해야 함 (rancher.io/local-path 아님)
 reclaimPolicy: Delete
 volumeBindingMode: WaitForFirstConsumer

@@ -4,7 +4,7 @@ metadata:
   name: root
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-9" # ADDED by M3
+    argocd.argoproj.io/sync-wave: "-9" # M3에서 추가
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -14,7 +14,7 @@ spec:
     targetRevision: main
     path: platform/argocd/root
     directory:
-      recurse: true # picks up appset.yaml AND any hand-rolled Applications under root/ (M4/M5)
+      recurse: true # appset.yaml과 root/ 아래 수동 작성 Application들(M4/M5)을 모두 포착
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

@@ -3,14 +3,14 @@ kind: StorageClass
 metadata:
   name: standard
   annotations:
-    # Default class: PVCs with no storageClassName land here (Postgres, configs).
+    # 기본 클래스: storageClassName 없는 PVC는 여기로 온다 (Postgres, 설정류).
     storageclass.kubernetes.io/is-default-class: "true"
 provisioner: homelab.io/local-path-internal
-# Retain so DB PVs survive a PVC delete/reclaim — never auto-wipe Postgres data.
+# Retain이라서 DB PV는 PVC 삭제/reclaim에도 살아남는다 — Postgres 데이터를 자동 삭제하는 일은 절대 없다.
 reclaimPolicy: Retain
-# WaitForFirstConsumer is REQUIRED by local-path-provisioner: it creates the hostPath PV on the node
-# where the consumer is scheduled, so it CANNOT bind before a consumer exists (Immediate fails with
-# "configuration error, no node was specified"). Single-node, so binding still happens as soon as the
-# consuming pod (Postgres, VictoriaMetrics/Logs, AdGuard, …) is scheduled.
+# WaitForFirstConsumer는 local-path-provisioner에 필수다: consumer가 스케줄된 노드에 hostPath
+# PV를 만들기 때문에 consumer가 존재하기 전에는 바인딩할 수 없다 (Immediate는
+# "configuration error, no node was specified"로 실패). 단일 노드라서 소비하는 pod
+# (Postgres, VictoriaMetrics/Logs, AdGuard, …)가 스케줄되는 즉시 바인딩은 일어난다.
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true

@@ -12,20 +12,20 @@ resources:
   - pgdump-hedge-cronjob.yaml
   - restore-drill-rbac.yaml
   - restore-drill-cronjob.yaml
-  - networkpolicy.yaml # database-tier ingress isolation (Pass-5 Open Item #3)
+  - networkpolicy.yaml # database 계층 ingress 격리 (Pass-5 Open Item #3)
 
 generators:
-  - secret-generator.yaml # KSOPS — renders ALL THREE database-ns seeds (see below)
+  - secret-generator.yaml # KSOPS — database ns의 세 가지 시드를 전부 렌더 (아래 참조)
 
-# The restore-drill ConfigMap is GENERATED from its source script so the running `drill.sh`
-# IS the source-of-truth — there is NO empty/placeholder path that could let the CronJob
-# exit 0 without restoring (R1). A render test (Task 4.10) asserts the script content is present.
+# restore-drill ConfigMap은 소스 스크립트로부터 생성되므로 실행 중인 `drill.sh`가
+# 곧 source-of-truth다 — CronJob이 복원 없이 exit 0 할 수 있는 빈/플레이스홀더 경로가
+# 존재하지 않는다(R1). 렌더 테스트(Task 4.10)가 스크립트 내용 존재를 검증한다.
 configMapGenerator:
   - name: restore-drill-script
     files:
       - drill.sh=restore-drill-script.sh
 
 generatorOptions:
-  disableNameSuffixHash: true # stable names: cnpg-r2-creds, pg-app-credentials, restore-drill-alerting, restore-drill-script
+  disableNameSuffixHash: true # 고정 이름: cnpg-r2-creds, pg-app-credentials, restore-drill-alerting, restore-drill-script
   annotations:
-    argocd.argoproj.io/sync-wave: "-2" # the three seeds + the drill script apply BEFORE the Cluster CR (wave -1)
+    argocd.argoproj.io/sync-wave: "-2" # 세 시드 + drill 스크립트는 Cluster CR(wave -1)보다 먼저 apply

@@ -32,10 +32,10 @@ rules:
       - tcproutes/status
       - tlsroutes/status
     verbs: ["update", "patch"]
-  # HTTP-only in-cluster (TLS terminates at the Cloudflare edge + Tailscale, §6/§14),
-  # and kubernetesCRD is disabled — so the Gateway controller needs NO cluster-wide
-  # Secret read. If a TLS listener is ever added, grant cert Secrets via a namespaced
-  # Role (gateway ns + the cert namespace) + ReferenceGrant, never cluster-wide.
+  # 클러스터 내부는 HTTP 전용 (TLS는 Cloudflare edge + Tailscale에서 종단, §6/§14),
+  # kubernetesCRD도 비활성 — 따라서 Gateway 컨트롤러에 클러스터 전역 Secret 읽기 권한이
+  # 필요 없다. TLS listener를 추가하게 되면 cert Secret은 namespaced Role(gateway ns +
+  # cert namespace) + ReferenceGrant로 부여할 것, 절대 클러스터 전역으로는 금지.
   - apiGroups: [""]
     resources: ["services", "namespaces"]
     verbs: ["get", "list", "watch"]

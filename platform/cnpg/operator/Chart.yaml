@@ -3,8 +3,8 @@ name: cnpg-operator
 description: CloudNativePG operator (pinned umbrella)
 type: application
 version: 0.1.0
-appVersion: "1.26.0" # >= 1.26: required by the barman-cloud CNPG-I plugin (Task 4.1b)
+appVersion: "1.26.0" # >= 1.26: barman-cloud CNPG-I plugin이 요구 (Task 4.1b)
 dependencies:
   - name: cloudnative-pg
-    version: 0.26.0 # chart version shipping operator 1.26.x (pin to the exact compatible pair)
+    version: 0.26.0 # operator 1.26.x를 싣는 차트 버전 (정확한 호환 쌍으로 고정)
     repository: https://cloudnative-pg.github.io/charts

@@ -17,7 +17,7 @@ teardown() {
   run grep -c 'recipient:' "apps/_rttest/prod/secret.enc.yaml"
   [ "$output" -eq 2 ]
   run grep -q 'super-secret-value-123' "apps/_rttest/prod/secret.enc.yaml"
-  [ "$status" -ne 0 ]   # plaintext must NOT survive
+  [ "$status" -ne 0 ]   # 평문이 절대 살아남으면 안 된다
 }
 
 @test "sops decrypt round-trips to the original plaintext" {
