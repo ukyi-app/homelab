@@ -7,9 +7,9 @@ variable "ts_bootstrap_oauth_secret" {
   sensitive = true
 }
 variable "internal_suffix" {
-  type = string # home.ukyi.app
+  type = string # home.ukyi.app — 전역 nameserver 전환 후 미사용(tfvars 호환 위해 유지)
 }
-variable "tailscale_ip" {
+variable "adguard_dns_tailscale_ip" {
   type        = string
-  description = "Stable Tailscale IP of the VM (split-DNS nameserver target)."
+  description = "tailscale operator가 adguard-dns-ts LoadBalancer에 발급한 안정적 100.x IP (전역 nameserver 대상)."
 }
