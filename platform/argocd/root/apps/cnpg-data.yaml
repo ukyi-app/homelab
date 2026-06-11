@@ -21,6 +21,10 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      # CNPG mutating webhook이 Cluster에 기본값을 주입해 레거시 diff가 영구 OutOfSync를
+      # 보고한다 (argocd app diff/--server-side-generate 모두 diff 0인데 sync만 OutOfSync —
+      # 라이브 검증). dry-run SSA 기반 비교로 webhook 기본값을 비교에 포함시킨다.
+      - ServerSideDiff=true
     retry:
       limit: 5
       backoff: { duration: 30s, factor: 2, maxDuration: 5m }
