@@ -29,6 +29,7 @@ spec:
       tls:
         mode: Terminate
         certificateRefs:
-          - { kind: Secret, name: home-wildcard-tls }
+          # group ""는 서버 주입 기본값이지만 명시 — atomic 리스트라 미기재 시 영구 OutOfSync.
+          - { group: "", kind: Secret, name: home-wildcard-tls }
       allowedRoutes:
         namespaces: { from: All }
