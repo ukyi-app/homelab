@@ -3,7 +3,7 @@
 # (ClusterIP는 가정 LAN 클라이언트에서 라우팅 불가하므로 DHCP option 6의 대상이 될 수 없다.)
 apiVersion: v1
 kind: Service
-metadata: { name: adguard-dns, namespace: edge, annotations: { argocd.argoproj.io/sync-wave: "-6" } }
+metadata: { name: adguard-dns, namespace: edge }
 spec:
   type: LoadBalancer
   selector: { app: adguard }

@@ -1,6 +1,6 @@
 apiVersion: apps/v1
 kind: Deployment
-metadata: { name: adguard, namespace: edge, annotations: { argocd.argoproj.io/sync-wave: "-6" } }
+metadata: { name: adguard, namespace: edge }
 spec:
   replicas: 1
   strategy: { type: Recreate } # RWO PVC, 단일 노드
