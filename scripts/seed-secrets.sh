@@ -112,3 +112,18 @@ stringData:
   HEALTHCHECKS_URL: "${HEALTHCHECKS_URL}"
   GRAFANA_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD}"
 EOF
+
+# M4 restore drill 알림 (실패 시 Telegram, PASS 시 healthchecks ping).
+# HEALTHCHECKS_URL은 watchdog과 공유한다 — 드릴 전용 체크를 만들면 분리할 것.
+write_enc platform/cnpg/prod/restore-drill-alerting.enc.yaml <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: restore-drill-alerting
+  namespace: database
+type: Opaque
+stringData:
+  TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+  TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"
+  HEALTHCHECKS_URL: "${HEALTHCHECKS_URL}"
+EOF
