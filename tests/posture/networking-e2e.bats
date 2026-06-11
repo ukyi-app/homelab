@@ -28,7 +28,9 @@
 }
 
 @test "public path serves through Traefik via the tunnel" {
-  run bash -c "curl -s -o /dev/null -w '%{http_code}' https://whoami.${DOMAIN}/"
+  # whoami는 설계상 내부 전용(web-internal) — 공개 DNS 레코드는 apex/api/www뿐이다.
+  # 공개 경로 증명은 api 앱의 healthz로 한다 (DNS→Cloudflare→tunnel→Traefik web-public→api).
+  run bash -c "curl -s -o /dev/null -w '%{http_code}' https://api.${DOMAIN}/healthz"
   [ "$output" = "200" ]
 }
 
@@ -40,8 +42,10 @@
 }
 
 @test "AdGuard resolves *.home to the stable Tailscale IP" {
-  ag=$(kubectl -n edge get svc adguard-dns -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  # adguard-dns LB IP(=VM IP)는 Mac에서 직접 라우팅되지 않는다 — 실제 소비 경로는
+  # OrbStack 포워딩(dns-forward-trigger 유닛이 트리거, Mac의 localhost/LAN/tailnet IP에
+  # 바인드)이다. 이 스위트는 Mac mini(호스트)에서 돌므로 127.0.0.1이 그 경로다.
   tsip=$(tailscale ip -4 homelab)
-  run bash -c "dig +short @${ag} whoami.home.${DOMAIN}"
+  run bash -c "dig +short +time=3 @127.0.0.1 whoami.home.${DOMAIN}"
   [ "$output" = "$tsip" ]
 }
