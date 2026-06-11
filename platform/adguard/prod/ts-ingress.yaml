@@ -3,7 +3,6 @@ kind: Ingress
 metadata:
   name: adguard-ui
   namespace: edge
-  annotations: { argocd.argoproj.io/sync-wave: "-6" }
 spec:
   ingressClassName: tailscale
   defaultBackend:
