@@ -20,6 +20,13 @@ spec:
           value: "true"
         - name: crds.keep
           value: "true"
+        # DNS-01 self-check를 공개 resolver로 강제. 클러스터→노드 DNS 경로가 외부 권위
+        # 레코드(SOA)를 신뢰성 있게 못 풀어 "Could not determine the zone ... SERVFAIL"로
+        # 챌린지가 막힌다 — 1.1.1.1/8.8.8.8로 직접 조회한다.
+        - name: "dns01RecursiveNameservers"
+          value: "1.1.1.1:53,8.8.8.8:53"
+        - name: "dns01RecursiveNameserversOnly"
+          value: "true"
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager
