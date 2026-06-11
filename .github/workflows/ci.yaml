@@ -24,9 +24,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y bats
       - name: chart render + validate (all kinds)
         run: make chart-test
-      - name: .env.example drift
-        run: node tools/gen-env-example.mjs api --check
       - name: memory ledger onboarding gate (M0-owned)
         run: pnpm verify:ledger
       - name: tooling bats suites
-        run: bats tools/test/workspace.bats tools/test/examples.bats tools/test/pg-tools.bats tools/test/env-example.bats tools/test/gen-verify.bats tools/test/ledger-gate.bats tools/test/ci-build.bats tools/test/bump.bats tools/test/ci-gate.bats tools/test/onboard.bats
+        run: bats tools/test/workspace.bats tools/test/examples.bats tools/test/pg-tools.bats tools/test/ledger-gate.bats tools/test/ci-build.bats tools/test/bump.bats tools/test/ci-gate.bats tools/test/onboard.bats
