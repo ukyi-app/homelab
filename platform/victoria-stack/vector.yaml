@@ -65,7 +65,10 @@ spec:
       labels: { app.kubernetes.io/name: vector }
     spec:
       serviceAccountName: vector
-      securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534 }
+      # k3s가 쓰는 /var/log/pods/**/*.log는 root:root 0640이라 비root는 읽지 못한다 —
+      # nobody(65534)로는 17시간 동안 수집 0이었다(라이브 검증). 노드 로그 수집 DaemonSet의
+      # 표준대로 root로 실행한다(observability ns는 PSA privileged). 파일은 readOnly 마운트.
+      securityContext: { runAsUser: 0, runAsGroup: 0 }
       containers:
         - name: vector
           image: timberio/vector:0.41.1-distroless-libc
