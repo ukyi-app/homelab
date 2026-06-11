@@ -12,15 +12,15 @@ const valuesPath = `apps/${app}/deploy/prod/values.yaml`;
 const v = parse(readFileSync(valuesPath, "utf8"));
 
 const lines = [
-  `# GENERATED from ${valuesPath} by pnpm gen:env — DO NOT EDIT BY HAND`,
-  `# Local inner-loop env. Real values come from SOPS secrets in-cluster.`,
+  `# ${valuesPath}에서 pnpm gen:env로 생성됨 — 직접 수정 금지`,
+  `# 로컬 이너루프 env. 실제 값은 클러스터의 SOPS secret에서 온다.`,
   "",
 ];
 for (const e of v.env ?? []) lines.push(`${e.name}=${e.value ?? ""}`);
 // DB 이너루프 기본값 (로컬 컨테이너 Postgres, Task 6.12)
 if (v.db?.enabled) lines.push("DATABASE_URL=postgres://dev:dev@localhost:5432/app_dev?sslmode=disable");
 for (const f of v.envFrom ?? []) {
-  if (f.secretRef?.name) lines.push(`# from secret: ${f.secretRef.name}  (fill locally; never commit)`);
+  if (f.secretRef?.name) lines.push(`# secret 출처: ${f.secretRef.name}  (로컬에서만 채우고 절대 커밋 금지)`);
 }
 const out = lines.join("\n") + "\n";
 

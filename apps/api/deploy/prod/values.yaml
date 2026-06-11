@@ -1,15 +1,15 @@
 image:
   repo: ghcr.io/ukyi-app/api
-  tag: sha-27723a9b48ecef5764f6010154400ac155bf2c4e # bumped by CI write-back (Task 6.16)
+  tag: sha-27723a9b48ecef5764f6010154400ac155bf2c4e # CI write-back이 자동 갱신 (Task 6.16)
 kind: api
 replicas: 1
 resources:
-  requests: { cpu: 50m, memory: 64Mi } # Go runtime gate: 32–64Mi
+  requests: { cpu: 50m, memory: 64Mi } # Go 런타임 하한 기준 32–64Mi
   limits: { cpu: 500m, memory: 64Mi }
 env:
   - { name: LOG_LEVEL, value: info }
 envFrom:
-  - secretRef: { name: api-secrets } # SOPS-decrypted via KSOPS
+  - secretRef: { name: api-secrets } # KSOPS가 SOPS 복호화로 생성
 route:
   host: api.ukyi.app
   paths: [ "/" ]
