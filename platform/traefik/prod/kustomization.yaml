@@ -10,6 +10,8 @@ resources:
   - gateway.yaml # Task 3.4에서 추가
   - gatewayclass.yaml # Task 3.4에서 추가
   - whoami-smoke.yaml # Task 3.5에서 추가
+  - cert-issuer.yaml # *.home.ukyi.app 와일드카드 (internal HTTPS)
 
 generators:
   - helmrelease.yaml # Task 3.4에서 추가
+  - secret-generator.yaml # cloudflare-api-token (cert-manager DNS-01)

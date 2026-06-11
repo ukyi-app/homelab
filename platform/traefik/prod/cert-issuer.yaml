@@ -1,0 +1,34 @@
+# 내부 도메인 *.home.ukyi.app용 Let's Encrypt 와일드카드 인증서.
+# tailscale 켠 기기가 https://<앱>.home.ukyi.app에 valid cert로 접근하게 한다(tailscale 프록시는
+# TCP passthrough, Traefik이 :443에서 이 cert로 TLS 종단). 와일드카드라 DNS-01만 가능 —
+# Cloudflare API 토큰으로 _acme-challenge TXT를 ukyi.app 존에 쓴다. 모든 리소스를 gateway ns에
+# 두려고 ClusterIssuer가 아니라 namespaced Issuer를 쓴다(토큰 시크릿도 같은 ns).
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt-prod
+  namespace: gateway
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: home-wildcard
+  namespace: gateway
+spec:
+  secretName: home-wildcard-tls # Gateway web-internal-tls 리스너가 참조
+  issuerRef:
+    name: letsencrypt-prod
+    kind: Issuer
+  dnsNames:
+    - "*.home.ukyi.app"

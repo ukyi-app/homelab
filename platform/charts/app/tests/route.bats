@@ -14,9 +14,9 @@ tpl() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   [[ "$rt" == *"api.example.com"* ]]
 }
 
-@test "internal app binds to the internal listener" {
+@test "internal app binds to the internal HTTPS listener" {
   rt=$(tpl --set kind=ssr --set route.host=admin.home.example.com --set route.public=false | yq 'select(.kind=="HTTPRoute")')
-  [[ "$rt" == *"sectionName: web-internal"* ]]
+  [[ "$rt" == *"sectionName: web-internal-tls"* ]]
 }
 
 @test "worker has no Service and no HTTPRoute" {

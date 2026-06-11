@@ -15,7 +15,7 @@ spec:
       kind: Gateway
       name: {{ .Values.gateway.name }}            # 단일 공유 Gateway (Milestone 3)
       namespace: {{ .Values.gateway.namespace }}
-      sectionName: {{ if .Values.route.public }}web-public{{ else }}web-internal{{ end }}
+      sectionName: {{ if .Values.route.public }}web-public{{ else }}web-internal-tls{{ end }}
   hostnames:
     - {{ .Values.route.host | quote }}
   rules:
