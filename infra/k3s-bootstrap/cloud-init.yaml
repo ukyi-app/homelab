@@ -53,6 +53,51 @@ write_files:
       PasswordAuthentication no
       KbdInteractiveAuthentication no
 
+  # R7 LAN DNS — OrbStack 포워딩 트리거 (라이브 검증 2026-06-11):
+  # OrbStack은 VM에서 LISTEN 중인 포트만 Mac으로 자동 포워딩한다(바인드는 Mac의 *:53,
+  # 즉 LAN 인터페이스 포함). adguard-dns의 svclb는 iptables DNAT뿐이라 LISTEN 소켓이
+  # 없어 포워딩이 트리거되지 않는다 — 이 더미가 0.0.0.0:53을 점유해 포워딩만 트리거하고,
+  # 실제 패킷은 PREROUTING DNAT가 AdGuard로 가로채므로 이 소켓엔 도달하지 않는다.
+  # 체인: LAN 기기/라우터 → Mac LAN IP:53 → OrbStack → VM:53(DNAT) → AdGuard.
+  - path: /usr/local/lib/dns-forward-trigger.py
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env python3
+      import socket, threading
+      def tcp_loop():
+          s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+          s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          s.bind(("0.0.0.0", 53)); s.listen(5)
+          while True:
+              c, _ = s.accept(); c.close()
+      u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+      u.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+      u.bind(("0.0.0.0", 53))
+      threading.Thread(target=tcp_loop, daemon=True).start()
+      while True:
+          u.recvfrom(512)
+
+  - path: /etc/systemd/system/dns-forward-trigger.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=R7 LAN DNS - OrbStack port-forward trigger for adguard-dns (:53)
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      ExecStart=/usr/bin/python3 /usr/local/lib/dns-forward-trigger.py
+      Restart=always
+      RestartSec=3
+      # :53 바인드에만 필요한 최소 권한
+      AmbientCapabilities=CAP_NET_BIND_SERVICE
+      CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+      NoNewPrivileges=true
+      DynamicUser=true
+
+      [Install]
+      WantedBy=multi-user.target
+
 runcmd:
   # 스토리지 마운트 포인트. 'internal'은 VM 자체 디스크(512 GB 내장 SSD)에 있다.
   # 진짜 bulk-ssd 티어는 OrbStack이 /mnt/mac/Volumes/homelab (virtiofs)으로 VM에 공유하는
@@ -67,6 +112,8 @@ runcmd:
   - [ systemctl, restart, systemd-journald ]
   - [ systemctl, start, "systemd-zram-setup@zram0.service" ]
   - [ systemctl, restart, ssh ]
+  # R7 LAN DNS 포워딩 트리거 (위 write_files 참고)
+  - [ systemctl, enable, --now, dns-forward-trigger.service ]
 
 # 최종 마커 파일로 orb-create.sh가 완료를 폴링할 수 있다.
 power_state:
