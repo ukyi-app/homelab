@@ -1,6 +1,6 @@
 image:
   repo: ghcr.io/ukyi-app/api
-  tag: sha-27723a9b48ecef5764f6010154400ac155bf2c4e # CI write-back이 자동 갱신 (Task 6.16)
+  tag: sha-8b3febf9eaf453f2b75b1a7865b8bb6f8f012cf5 # CI write-back이 자동 갱신 (Task 6.16)
 kind: api
 replicas: 1
 resources:
