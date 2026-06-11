@@ -4,7 +4,7 @@
   run node tools/gen-env-example.mjs api --stdout
   [ "$status" -eq 0 ]
   [[ "$output" == *"LOG_LEVEL="* ]]
-  [[ "$output" == *"# from secret: api-secrets"* ]]
+  [[ "$output" == *"# secret 출처: api-secrets"* ]]
 }
 
 @test "gen:env --check passes on committed file" {

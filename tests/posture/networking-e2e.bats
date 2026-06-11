@@ -32,14 +32,16 @@
   [ "$output" = "200" ]
 }
 
-@test "tailscale operator node is present in tailnet" {
-  run bash -c "tailscale status | grep -c 'homelab-operator'"
+@test "tailscale proxy device for Traefik is present in tailnet" {
+  # operator 자체 디바이스(homelab-operator)는 least-privilege ACL 탓에 member 디바이스의
+  # netmap에 안 보인다 — split-horizon이 실제로 의존하는 것은 Traefik 프록시 디바이스다.
+  run bash -c "tailscale status | awk '{print \$2}' | grep -cx homelab"
   [ "$output" -ge 1 ]
 }
 
-@test "AdGuard resolves *.int to the stable Tailscale IP" {
+@test "AdGuard resolves *.home to the stable Tailscale IP" {
   ag=$(kubectl -n edge get svc adguard-dns -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
   tsip=$(tailscale ip -4 homelab)
-  run bash -c "dig +short @${ag} whoami.int.${DOMAIN}"
+  run bash -c "dig +short @${ag} whoami.home.${DOMAIN}"
   [ "$output" = "$tsip" ]
 }

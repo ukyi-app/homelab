@@ -6,10 +6,12 @@
 # 'web-public' 리스너에 붙은 HTTPRoute로만 부여된다 — 이 서비스들은 그것을 가져선 안 된다.
 # LIVE: kubectl 컨텍스트 = M3가 sync된 k3s VM 필요.
 
-@test "Traefik is the only LoadBalancer Service in the cluster" {
+@test "LoadBalancer Services are exactly traefik + adguard-dns" {
+  # adguard-dns LB는 R7 설계상 필수(LAN DHCP option 6 대상 — lan-dns 런북): servicelb가
+  # VM 노드 IP에 :53을 게시한다. 그 외 LoadBalancer가 늘어나면 공개면 확장이므로 실패해야 한다.
   run bash -c "kubectl get svc -A -o jsonpath='{range .items[?(@.spec.type==\"LoadBalancer\")]}{.metadata.namespace}/{.metadata.name} {end}'"
   [ "$status" -eq 0 ]
-  [ "$output" = "gateway/traefik " ]
+  [ "$output" = "edge/adguard-dns gateway/traefik " ]
 }
 
 @test "ArgoCD server has no public HTTPRoute" {
