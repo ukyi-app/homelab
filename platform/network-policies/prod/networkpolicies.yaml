@@ -1,4 +1,4 @@
-# `prod` 앱 namespace의 east-west 격리 (Pass-5 Open Item #3).
+# `prod` 앱 namespace의 east-west 격리.
 # k3s는 번들된 kube-router 컨트롤러로 NetworkPolicy를 강제한다(--disable-network-policy를
 # 절대 넘기지 않음). 양방향 default-deny 후 최소한의 명시적 allow만 추가한다.
 # 가장 중요한 보안 경계 — "침해된 공개 api/ssr pod가 database/admin 계층에 닿으면 안 된다" —
@@ -106,10 +106,10 @@ spec:
         - { protocol: TCP, port: 8080 }
 ---
 # Ingress: kubelet liveness/readiness probe가 HTTP 포트 8080을 친다.
-# ⚠️ 이전 cidr 10.42.0.0/16은 "전체 파드 CIDR"이라 모든 파드에 8080/9090을 개방해
-# default-deny를 무력화했다 (database 쪽과 동일 클래스 — 라이브 침해 검증 2026-06-11).
-# probe 소스는 노드(cni0=10.42.0.1)뿐이며, kube-router는 노드발 트래픽을 내장
-# `fib saddr type local accept`로 정책 평가 전에 이미 허용한다(라이브 검증) — 이 정책은
+# ⚠️ cidr는 노드(cni0=10.42.0.1/32)로만 좁힌다. 10.42.0.0/16은 "전체 파드 CIDR"이라
+# 모든 파드에 8080/9090을 개방해 default-deny를 무력화한다(database 쪽과 동일 클래스).
+# probe 소스는 노드(cni0)뿐이며, kube-router는 노드발 트래픽을 내장
+# `fib saddr type local accept`로 정책 평가 전에 이미 허용한다 — 이 정책은
 # CNI 이식성을 위한 의도 선언. 9090(metrics)은 파드발(vmagent)이라 metrics 정책이 담당.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

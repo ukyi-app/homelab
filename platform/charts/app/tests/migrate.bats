@@ -10,7 +10,7 @@ BASE="--set image.repo=ghcr.io/o/api --set image.tag=sha-abc1234 --set kind=api 
     | yq 'select(.kind==\"Job\")'"
   [ "$status" -eq 0 ]
   [[ "$output" == *"argocd.argoproj.io/sync-wave: \"1\""* ]]
-  # ArgoCD Sync hook (Sync 단계에서 실행, wave-0 설정 이후) — Pass-5 Open Item #2
+  # ArgoCD Sync hook (Sync 단계에서 실행, wave-0 설정 이후)
   [[ "$output" == *"argocd.argoproj.io/hook: Sync"* ]]
   [[ "$output" == *"argocd.argoproj.io/hook-delete-policy: BeforeHookCreation"* ]]
   # Helm hook이면 안 됨: 그 경우 ArgoCD의 PreSync 단계 — wave-0 설정/secret 이전 — 에 실행된다.
