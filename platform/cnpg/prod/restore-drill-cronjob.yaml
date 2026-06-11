@@ -22,7 +22,7 @@ spec:
             - name: drill
               # digest로 고정(불변): 이 Job은 database ns에서 delete 권한을 가진다; mutable 태그는
               # 몰래 교체될 수 있다. CI가 digest를 기록 — drill 활성화 전에 여기 고정할 것.
-              image: ghcr.io/ukyi-app/pg-tools:16-rclone@sha256:a4d8a9cc454dd81691112a53ef20d09aae4d2d8d62f8b5d3d46ceee681487664
+              image: ghcr.io/ukyi-app/pg-tools:16-rclone@sha256:b7a4bf228bbba85401a52dfb5fc1302f7154306ee4f2109fe0eed7290a0825ef
               command: ["/bin/bash", "/scripts/drill.sh"]
               env:
                 - name: TELEGRAM_BOT_TOKEN
