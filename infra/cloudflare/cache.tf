@@ -6,9 +6,9 @@ resource "cloudflare_ruleset" "cache_rules" {
   description = "Cache static assets; bypass API + SSR HTML to avoid per-user leaks."
   rules = [
     {
-      ref         = "bypass-api-and-ssr"
-      description = "Never cache API or SSR HTML responses"
-      expression  = "(http.host eq \"api.${var.zone_name}\") or (http.request.uri.path eq \"/\") or (not http.request.uri.path matches \"^/(assets|_next/static)/\")"
+      ref         = "bypass-dynamic"
+      description = "Never cache SSR HTML / non-static responses (per-user leak 방지)"
+      expression  = "(http.request.uri.path eq \"/\") or (not http.request.uri.path matches \"^/(assets|_next/static)/\")"
       action      = "set_cache_settings"
       action_parameters = {
         cache = false

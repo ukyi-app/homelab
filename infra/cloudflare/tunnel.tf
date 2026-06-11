@@ -25,10 +25,6 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "homelab" {
         service  = "http://traefik.gateway.svc.cluster.local:80"
       },
       {
-        hostname = "api.${var.zone_name}"
-        service  = "http://traefik.gateway.svc.cluster.local:80"
-      },
-      {
         service = "http_status:404"
       }
     ]
