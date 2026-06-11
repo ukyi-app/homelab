@@ -36,10 +36,14 @@ metadata:
   annotations: { argocd.argoproj.io/sync-wave: "-7" }
 spec:
   parentRefs:
-    - name: homelab
+    # group/kind/weight는 CRD 기본값이지만 명시 — SSA atomic 리스트의 서버 주입 기본값으로 인한
+    # 영구 OutOfSync 방지 (라이브 검증).
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab
       namespace: gateway
       sectionName: web-internal
   hostnames: ["whoami.home.ukyi.app"]
   rules:
     - matches: [{ path: { type: PathPrefix, value: / } }]
-      backendRefs: [{ name: whoami, port: 80 }]
+      backendRefs: [{ group: "", kind: Service, name: whoami, port: 80, weight: 1 }]

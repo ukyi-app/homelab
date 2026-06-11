@@ -16,6 +16,14 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: observability
+  # StatefulSet volumeClaimTemplates는 atomic 리스트라 서버 기본값(apiVersion/kind/volumeMode/
+  # status.phase)이 SSA diff에서 수렴 불가 → 영구 OutOfSync (라이브 검증, argo-cd#11143 계열).
+  # manifest에 기재할 수 없는 status.phase가 끼어 있어 기본값 명시로는 못 고친다 — diff에서 제외.
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates
   syncPolicy:
     automated:
       prune: true
@@ -23,6 +31,7 @@ spec:
     syncOptions:
       - CreateNamespace=false
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true
     retry:
       limit: 5
       backoff:

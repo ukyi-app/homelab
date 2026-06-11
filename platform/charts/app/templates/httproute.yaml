@@ -9,7 +9,11 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
 spec:
   parentRefs:
-    - name: {{ .Values.gateway.name }}            # 단일 공유 Gateway (Milestone 3)
+    # group/kind/weight는 CRD 기본값이지만 명시한다 — SSA diff가 atomic 리스트의 서버 주입
+    # 기본값을 drift로 봐서 영구 OutOfSync가 되는 것을 막는다 (라이브 검증).
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gateway.name }}            # 단일 공유 Gateway (Milestone 3)
       namespace: {{ .Values.gateway.namespace }}
       sectionName: {{ if .Values.route.public }}web-public{{ else }}web-internal{{ end }}
   hostnames:
@@ -22,6 +26,9 @@ spec:
             value: {{ . | quote }}
         {{- end }}
       backendRefs:
-        - name: {{ include "app.fullname" . }}
+        - group: ""
+          kind: Service
+          name: {{ include "app.fullname" . }}
           port: {{ .Values.ports.http }}
+          weight: 1
 {{- end }}
