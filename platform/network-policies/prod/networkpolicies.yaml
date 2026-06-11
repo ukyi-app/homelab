@@ -105,11 +105,12 @@ spec:
       ports:
         - { protocol: TCP, port: 8080 }
 ---
-# Ingress: kubelet liveness/readiness probe가 HTTP 포트 8080을 친다(metrics 포트도 허용).
-# default-deny-ingress 아래에서는 노드발(node-sourced) probe가 드랍되어 모든 앱이
-# crash-loop에 빠진다. 소스가 노드이므로 k3s pod/cluster CIDR(기본 10.42.0.0/16)을 허용한다.
-# 라이브: bring-up 시 probe 소스를 확인하고(tests/posture/network-policy.bats), k3s
-# cluster-cidr이 커스텀이면 이 ipBlock을 노드의 실제 주소로 넓힐 것.
+# Ingress: kubelet liveness/readiness probe가 HTTP 포트 8080을 친다.
+# ⚠️ 이전 cidr 10.42.0.0/16은 "전체 파드 CIDR"이라 모든 파드에 8080/9090을 개방해
+# default-deny를 무력화했다 (database 쪽과 동일 클래스 — 라이브 침해 검증 2026-06-11).
+# probe 소스는 노드(cni0=10.42.0.1)뿐이며, kube-router는 노드발 트래픽을 내장
+# `fib saddr type local accept`로 정책 평가 전에 이미 허용한다(라이브 검증) — 이 정책은
+# CNI 이식성을 위한 의도 선언. 9090(metrics)은 파드발(vmagent)이라 metrics 정책이 담당.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -120,7 +121,6 @@ spec:
   ingress:
     - from:
         - ipBlock:
-            cidr: 10.42.0.0/16
+            cidr: 10.42.0.1/32
       ports:
         - { protocol: TCP, port: 8080 }
-        - { protocol: TCP, port: 9090 }

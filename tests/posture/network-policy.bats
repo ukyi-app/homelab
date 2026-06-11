@@ -20,23 +20,27 @@
   [[ "$output" != *"False"* ]]
 }
 
+# ⚠️ 모든 nc는 `sleep 8` 후 실행한다: kube-router는 새 파드의 POD-FW 룰을 파드 생성 후
+# 수 초 지나서 설치하므로, 파드의 첫 명령으로 즉시 연결하면 강제 공백(미설치 창)을 통과해
+# NEGATIVE 테스트가 거짓 실패한다 (라이브 검증 2026-06-11 — nft 카운터로 확인).
+
 @test "NEGATIVE: a pod outside prod/cnpg-system/observability CANNOT reach the database on 5432" {
   # 허용 소스가 아닌 `default` 네임스페이스에서 임시 클라이언트를 띄운다 — database-default-deny-ingress가
   # 드롭하므로 연결은 실패하거나 타임아웃돼야 한다.
   run bash -c "kubectl -n default run npd-neg-\$RANDOM --image=busybox:1.36 --restart=Never --rm -i --quiet \
-    --command -- sh -c 'nc -w 5 -z pg-rw.database.svc.cluster.local 5432; echo rc=\$?'"
+    --command -- sh -c 'sleep 8; nc -w 5 -z pg-rw.database.svc.cluster.local 5432; echo rc=\$?'"
   [[ "$output" == *"rc=1"* ]] || [[ "$output" == *"rc=143"* ]]   # 거부/타임아웃이어야 하며 rc=0은 절대 안 된다
 }
 
 @test "POSITIVE: a prod-namespace client CAN reach the database on 5432" {
   run bash -c "kubectl -n prod run npd-pos-\$RANDOM --image=busybox:1.36 --restart=Never --rm -i --quiet \
-    --command -- sh -c 'nc -w 5 -z pg-rw.database.svc.cluster.local 5432; echo rc=\$?'"
+    --command -- sh -c 'sleep 8; nc -w 5 -z pg-rw.database.svc.cluster.local 5432; echo rc=\$?'"
   [[ "$output" == *"rc=0"* ]]
 }
 
 @test "NEGATIVE: prod egress to a non-database, non-DNS destination is denied by default" {
   # prod의 egress default-deny는 DNS, database:5432, prod 내부:8080만 허용한다. 외부는 실패해야 한다.
   run bash -c "kubectl -n prod run npd-egr-\$RANDOM --image=busybox:1.36 --restart=Never --rm -i --quiet \
-    --command -- sh -c 'nc -w 5 -z 1.1.1.1 443; echo rc=\$?'"
+    --command -- sh -c 'sleep 8; nc -w 5 -z 1.1.1.1 443; echo rc=\$?'"
   [[ "$output" == *"rc=1"* ]] || [[ "$output" == *"rc=143"* ]]
 }

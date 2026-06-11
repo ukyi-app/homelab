@@ -78,10 +78,14 @@ spec:
     - from:
         - podSelector: {}      # 같은(database) namespace의 모든 pod
 ---
-# kubelet liveness/readiness probe는 노드에서 출발한다; default-deny-ingress 아래에서는
-# 드랍되어 CNPG 인스턴스가 crash-loop에 빠진다. k3s pod/cluster CIDR(기본 10.42.0.0/16)에서
-# instance manager(8000), Postgres(5432), metrics(9187) 포트로의 접근을 허용한다.
-# 라이브: probe 소스를 확인하고 k3s cluster-cidr이 커스텀이면 범위를 넓힐 것 (tests/posture/network-policy.bats).
+# kubelet liveness/readiness probe는 노드(cni0=10.42.0.1)에서 출발한다.
+# ⚠️ 이전 cidr 10.42.0.0/16은 "전체 파드 CIDR"이라 임의 네임스페이스의 모든 파드에
+# 5432를 개방해 default-deny를 무력화했다 (라이브 침해 검증 2026-06-11 — nft 카운터로
+# 이 정책 체인이 default-ns 파드의 5432 SYN에 allow mark를 찍는 것을 확인).
+# 참고: kube-router는 노드발 트래픽을 POD-FW 체인의 내장 `fib saddr type local accept`
+# 룰로 정책 평가 전에 이미 허용한다(라이브 검증) — 이 정책은 CNI 이식성을 위한 의도
+# 선언이다. probe는 8000(instance manager HTTP)만 친다; 5432/9187은 파드발 트래픽이라
+# 각자의 allow 정책이 담당한다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -93,8 +97,6 @@ spec:
   ingress:
     - from:
         - ipBlock:
-            cidr: 10.42.0.0/16
+            cidr: 10.42.0.1/32
       ports:
         - { protocol: TCP, port: 8000 }
-        - { protocol: TCP, port: 5432 }
-        - { protocol: TCP, port: 9187 }

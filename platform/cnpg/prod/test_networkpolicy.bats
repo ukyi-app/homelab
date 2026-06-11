@@ -43,8 +43,10 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
   [ -z "$output" ]
 }
 
-@test "kubelet probe ingress is allowed from the cluster CIDR so CNPG pods stay Ready" {
+@test "kubelet probe ingress is node-only (pod-CIDR-wide ipBlock would defeat default-deny)" {
   p="$(yq 'select(.metadata.name=="database-allow-ingress-kubelet-probes")' "$NP")"
-  [[ "$p" == *"10.42.0.0/16"* ]]
+  [[ "$p" == *"cidr: 10.42.0.1/32"* ]]   # 노드(cni0)만 — /16은 전 파드에 5432 개방 (라이브 침해 검증)
+  [[ "$p" != *"cidr: 10.42.0.0/16"* ]]
   [[ "$p" == *"port: 8000"* ]]
+  [[ "$p" != *"port: 5432"* ]]           # probe 정책에 5432가 되살아나면 안 된다
 }
