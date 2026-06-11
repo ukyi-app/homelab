@@ -1,6 +1,7 @@
 locals {
   tunnel_target = "${cloudflare_zero_trust_tunnel_cloudflared.homelab.id}.cfargotunnel.com"
-  public_hosts  = toset([var.zone_name, "www.${var.zone_name}", "api.${var.zone_name}"])
+  # 사용자 앱은 외부 레포에서 온보딩하며 필요 시 자기 host를 추가한다. apex/www만 기본 유지.
+  public_hosts = toset([var.zone_name, "www.${var.zone_name}"])
 }
 
 resource "cloudflare_dns_record" "public" {
