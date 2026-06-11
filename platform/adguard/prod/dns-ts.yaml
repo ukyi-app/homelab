@@ -1,0 +1,20 @@
+# AdGuard DNS(:53)를 tailnet에 노출하는 tailscale LoadBalancer.
+# 목적(R7 변형): tailscale를 켠 개인 기기(아이폰/맥북)가 집 안팎 어디서나 AdGuard를
+# 전역 DNS로 써서 광고 차단 + *.home.ukyi.app 내부 도메인을 받는다.
+# Tailscale admin DNS의 Global nameserver(Override local DNS)가 이 디바이스 IP를 가리킨다
+# (infra/tailscale에서 terraform으로 선언). LAN DHCP option 6(라우터) 방식과 달리 라우터를
+# 건드리지 않으며, 대신 tailscale 미설치 기기(IoT/게스트)는 차단 대상이 아니다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: adguard-dns-ts
+  namespace: edge
+  annotations:
+    tailscale.com/hostname: adguard-dns # → adguard-dns.<tailnet>.ts.net + 안정적 100.x IP
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale # operator가 이 클래스의 LB Service를 tailnet에 L3 노출
+  selector: { app: adguard }
+  ports:
+    - { name: dns-udp, port: 53, targetPort: 53, protocol: UDP } # DNS 주 경로
+    - { name: dns-tcp, port: 53, targetPort: 53, protocol: TCP } # 큰 응답/TC=1 fallback

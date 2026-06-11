@@ -6,4 +6,5 @@ resources:
   - adguardhome.yaml
   - deployment.yaml
   - service.yaml
+  - dns-ts.yaml
   - ts-ingress.yaml
