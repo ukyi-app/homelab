@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# NOTE: the kustomize-build cases DEPEND ON M2 seeds (r2-creds.enc.yaml,
-# app-credentials.enc.yaml) existing — they pass only after M2's seed-secrets.sh runs.
-# The last case (data app wiring) is always offline-checkable.
+# 참고: kustomize-build 케이스들은 M2 시드(r2-creds.enc.yaml, app-credentials.enc.yaml)의
+# 존재에 의존한다 — M2의 seed-secrets.sh 실행 이후에만 통과한다.
+# 마지막 케이스(data 앱 배선)는 언제나 오프라인 검증 가능.
 
 @test "kustomize build with ksops renders Cluster + ObjectStore + Pooler + backups" {
   run bash -c 'kustomize build --enable-alpha-plugins --enable-exec platform/cnpg/prod'
@@ -19,17 +19,17 @@
   echo "$output" | grep -q 'name: cnpg-r2-creds'
   echo "$output" | grep -q 'name: pg-app-credentials'
   echo "$output" | grep -q 'name: restore-drill-alerting'
-  echo "$output" | grep -q 'AWS_ACCESS_KEY_ID' # canonical R2 schema (matches object-store.yaml)
+  echo "$output" | grep -q 'AWS_ACCESS_KEY_ID' # 정식 R2 스키마 (object-store.yaml과 일치)
   echo "$output" | grep -q 'TELEGRAM_BOT_TOKEN'
 }
 @test "restore-drill ConfigMap is GENERATED from the script (real recovery logic, not an empty placeholder)" {
   drill="$(kustomize build --enable-alpha-plugins --enable-exec platform/cnpg/prod \
     | yq 'select(.kind=="ConfigMap" and .metadata.name=="restore-drill-script") | .data."drill.sh"')"
-  echo "$drill" | grep -q 'bootstrap:' # recovery-cluster logic present...
+  echo "$drill" | grep -q 'bootstrap:' # 복구 클러스터 로직 존재...
   echo "$drill" | grep -q 'recovery:'
   echo "$drill" | grep -q 'EXPECTED_ROWS'
   echo "$drill" | grep -q 'ACTUAL_ROWS'
-  [ "$(printf '%s' "$drill" | wc -l)" -gt 30 ] # ...and it is the full script, not a one-line stub
+  [ "$(printf '%s' "$drill" | wc -l)" -gt 30 ] # ...그리고 한 줄짜리 스텁이 아닌 전체 스크립트다
 }
 @test "data app is sync-wave -1, project default, ns database" {
   f=platform/argocd/root/apps/cnpg-data.yaml

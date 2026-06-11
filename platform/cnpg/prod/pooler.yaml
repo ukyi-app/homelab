@@ -1,7 +1,7 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Pooler
 metadata:
-  name: pg-pooler-rw # NOT "pg-rw": that name is RESERVED by CNPG for the Cluster's own rw Service
+  name: pg-pooler-rw # "pg-rw" 금지: 그 이름은 CNPG가 Cluster 자체 rw Service용으로 예약
   namespace: database
 spec:
   cluster:

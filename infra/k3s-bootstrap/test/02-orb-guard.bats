@@ -8,7 +8,7 @@ setup() {
 }
 teardown() { rm -rf "$STUBDIR"; }
 
-# Build a fake `orb` whose `list` output we control.
+# `list` 출력을 우리가 제어하는 가짜 `orb`를 만든다.
 _make_orb() {
   cat >"$STUBDIR/orb" <<EOF
 #!/usr/bin/env bash

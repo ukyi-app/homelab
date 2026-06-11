@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 
-# Internal-by-default posture (design §6): ArgoCD, Grafana, AdGuard UI must NOT
-# be publicly reachable. The ONLY LoadBalancer is Traefik; the ONLY public egress
-# is cloudflared. Public reach is granted solely by an HTTPRoute on the
-# 'web-public' listener of Gateway homelab/gateway — these services must never have one.
-# LIVE: requires kubectl context = k3s VM with M3 synced.
+# 기본 내부(internal-by-default) 자세 (설계 §6): ArgoCD, Grafana, AdGuard UI는
+# 절대 공개적으로 접근 가능하면 안 된다. LoadBalancer는 Traefik 하나뿐이고, 공개
+# egress는 cloudflared 하나뿐이다. 공개 접근은 오직 Gateway homelab/gateway의
+# 'web-public' 리스너에 붙은 HTTPRoute로만 부여된다 — 이 서비스들은 그것을 가져선 안 된다.
+# LIVE: kubectl 컨텍스트 = M3가 sync된 k3s VM 필요.
 
 @test "Traefik is the only LoadBalancer Service in the cluster" {
   run bash -c "kubectl get svc -A -o jsonpath='{range .items[?(@.spec.type==\"LoadBalancer\")]}{.metadata.namespace}/{.metadata.name} {end}'"

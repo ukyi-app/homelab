@@ -9,7 +9,7 @@ teardown() { git checkout -- apps/api/deploy/prod/values.yaml 2>/dev/null || tru
   run yq '.image.tag' apps/api/deploy/prod/values.yaml
   [[ "$output" == "sha-deadbee" ]]
   after=$(yq '.kind' apps/api/deploy/prod/values.yaml)
-  [ "$before" == "$after" ] # nothing else changed
+  [ "$before" == "$after" ] # 그 외에는 아무것도 안 바뀜
 }
 
 @test "bump is idempotent (second run is a no-op)" {
@@ -22,5 +22,5 @@ teardown() { git checkout -- apps/api/deploy/prod/values.yaml 2>/dev/null || tru
   run yq '.concurrency.group' "$WF"
   [ -n "$output" ]
   run yq '.concurrency.cancel-in-progress' "$WF"
-  [[ "$output" == "false" ]] # never cancel a half-done write-back
+  [[ "$output" == "false" ]] # 반쯤 끝난 write-back은 절대 취소하지 않는다
 }

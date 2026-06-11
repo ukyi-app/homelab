@@ -17,7 +17,7 @@ resource "github_repository" "homelab" {
   allow_squash_merge     = true
   allow_rebase_merge     = false
   delete_branch_on_merge = true
-  # Repo already exists — import it once: see runbook 02.
+  # repo는 이미 존재한다 — 최초 1회 import 필요: 런북 02 참고.
 }
 
 # 외부 앱 레포의 출발점 — "Use this template"용. 내용(caller 워크플로/.homelab.yaml/Dockerfile)은
@@ -37,7 +37,7 @@ resource "github_branch_protection" "main" {
 
   required_status_checks {
     strict   = true
-    contexts = ["gate"] # ONLY `gate` runs on pull_request (ci.yaml); `build` runs on push-to-main (post-merge), so it must NOT be a required PR check or every PR hangs permanently pending
+    contexts = ["gate"] # pull_request에서는 `gate`만 실행된다(ci.yaml); `build`는 push-to-main(머지 후)에서 돌므로 필수 PR 체크로 넣으면 안 된다 — 넣으면 모든 PR이 영원히 pending에 걸린다
   }
   required_pull_request_reviews {
     required_approving_review_count = 0

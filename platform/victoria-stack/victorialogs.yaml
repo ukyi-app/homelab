@@ -32,7 +32,7 @@ spec:
             - --memory.allowedPercent=60
             - --httpListenAddr=:9428
           env:
-            - { name: GOMEMLIMIT, value: "460MiB" } # ~90% of 512Mi
+            - { name: GOMEMLIMIT, value: "460MiB" } # 512Mi의 약 90%
           ports: [{ name: http, containerPort: 9428 }]
           resources:
             requests: { cpu: 50m, memory: 256Mi }

@@ -3,7 +3,7 @@
 f=platform/argocd/root/apps/cnpg-operator.yaml
 
 @test "operator chart version is pinned (no caret/tilde/wildcard)" {
-  # exact git-tag pin cnpg-v0.26.0 (a trailing comment may follow on the line)
+  # 정확한 git 태그 고정 cnpg-v0.26.0 (줄 끝에 주석이 따라올 수 있음)
   run grep -E 'targetRevision:\s+cnpg-v0\.26\.0' "$f"
   [ "$status" -eq 0 ]
   run grep -E 'targetRevision:\s+[~^*]' "$f"

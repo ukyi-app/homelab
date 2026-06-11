@@ -36,7 +36,7 @@ spec:
             - --httpListenAddr=:8428
             - --dedup.minScrapeInterval=30s
           env:
-            - { name: GOMEMLIMIT, value: "920MiB" } # ~90% of 1Gi limit
+            - { name: GOMEMLIMIT, value: "920MiB" } # 1Gi limit의 약 90%
           ports:
             - { name: http, containerPort: 8428 }
           resources:

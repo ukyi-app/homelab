@@ -8,8 +8,8 @@ data:
   config.yaml: |
     tunnel: homelab
     no-autoupdate: true
-    metrics: 0.0.0.0:9090          # prometheus.io/scrape annotation on pod (M5)
+    metrics: 0.0.0.0:9090          # pod에 prometheus.io/scrape annotation (M5)
     ingress:
       - service: http://traefik.gateway.svc.cluster.local:80
-    # Public hostname → tunnel routing is managed in Cloudflare DNS by Terraform (M2):
+    # 공개 hostname → tunnel 라우팅은 Terraform이 Cloudflare DNS에서 관리 (M2):
     #   *.ukyi.app CNAME <tunnel-id>.cfargotunnel.com (proxied)

@@ -1,22 +1,22 @@
-# East-west isolation for the `prod` apps namespace (Pass-5 Open Item #3).
-# k3s enforces NetworkPolicy via its bundled kube-router controller (we never pass
-# --disable-network-policy). Default-deny BOTH directions, then add the minimal explicit allows.
-# The security boundary that matters most — "a compromised public api/ssr pod must NOT reach the
-# database/admin tier" — is enforced here by EGRESS (apps egress only to DNS, database:5432, and
-# intra-prod app peers on 8080) and, in depth, by the database namespace's own ingress default-deny
-# (platform/cnpg/prod).
+# `prod` 앱 namespace의 east-west 격리 (Pass-5 Open Item #3).
+# k3s는 번들된 kube-router 컨트롤러로 NetworkPolicy를 강제한다(--disable-network-policy를
+# 절대 넘기지 않음). 양방향 default-deny 후 최소한의 명시적 allow만 추가한다.
+# 가장 중요한 보안 경계 — "침해된 공개 api/ssr pod가 database/admin 계층에 닿으면 안 된다" —
+# 는 여기서 EGRESS로 강제되고(앱의 egress는 DNS, database:5432, 그리고 8080의 prod 내부
+# 앱 피어로만 허용), 심층 방어로 database namespace 자체의 ingress default-deny
+# (platform/cnpg/prod)가 보완한다.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-all
 spec:
-  podSelector: {}            # every pod in `prod`
+  podSelector: {}            # `prod`의 모든 pod
   policyTypes: [Ingress, Egress]
-  # no ingress/egress rules => deny all in both directions; the allows below re-open the minimum.
+  # ingress/egress 규칙 없음 => 양방향 전부 거부; 아래 allow들이 최소한만 다시 연다.
 ---
-# Egress: DNS resolution to CoreDNS (kube-system). Without this, default-deny-egress breaks name
-# resolution for every pod.
+# Egress: CoreDNS(kube-system)로의 DNS 해석. 이것이 없으면 default-deny-egress가
+# 모든 pod의 이름 해석을 망가뜨린다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -34,9 +34,9 @@ spec:
         - { protocol: UDP, port: 53 }
         - { protocol: TCP, port: 53 }
 ---
-# Egress: apps → database tier on Postgres 5432 only (PgBouncer pg-pooler-rw / Cluster pg-rw, both
-# in the `database` namespace). Besides this and intra-prod app→app (8080), apps get no other
-# egress by default; an app that legitimately needs external/API egress ships its own additive policy.
+# Egress: 앱 → database 계층, Postgres 5432만 (PgBouncer pg-pooler-rw / Cluster pg-rw, 둘 다
+# `database` namespace). 이것과 prod 내부 앱→앱(8080)을 제외하면 앱은 기본적으로 다른 egress가
+# 없다; 외부/API egress가 정당하게 필요한 앱은 자체 추가 policy를 함께 배포한다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -51,8 +51,8 @@ spec:
       ports:
         - { protocol: TCP, port: 5432 }
 ---
-# Ingress: the shared Traefik Gateway (gateway namespace) → app HTTP port 8080. This is the public/
-# internal serving path; every app HTTPRoute attaches to that Gateway.
+# Ingress: 공유 Traefik Gateway(gateway namespace) → 앱 HTTP 포트 8080. 공개/내부 서빙
+# 경로이며, 모든 앱 HTTPRoute가 그 Gateway에 attach된다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -67,7 +67,7 @@ spec:
       ports:
         - { protocol: TCP, port: 8080 }
 ---
-# Ingress: vmagent (observability namespace) scrapes the app /metrics port 9090.
+# Ingress: vmagent(observability namespace)가 앱의 /metrics 포트 9090을 scrape한다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -82,9 +82,9 @@ spec:
       ports:
         - { protocol: TCP, port: 9090 }
 ---
-# Intra-prod app->app on the HTTP port 8080: server-side calls between co-tenant apps in the same
-# trust tier (notably SSR/web -> api). Without this, default-deny would silently break those calls.
-# This does NOT widen the database boundary — egress is still only to prod:8080 (apps), not database.
+# prod 내부 앱->앱, HTTP 포트 8080: 같은 신뢰 계층에 함께 사는 앱들 간의 서버 사이드 호출
+# (특히 SSR/web -> api). 이것이 없으면 default-deny가 그 호출들을 조용히 망가뜨린다.
+# database 경계를 넓히지 않는다 — egress는 여전히 prod:8080(앱)으로만, database는 아님.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -105,11 +105,11 @@ spec:
       ports:
         - { protocol: TCP, port: 8080 }
 ---
-# Ingress: kubelet liveness/readiness probes hit the HTTP port 8080 (and we allow the metrics port
-# too). Under default-deny-ingress these node-sourced probes would otherwise be dropped, crash-
-# looping every app. The source is the node, so we allow the k3s pod/cluster CIDR (default
-# 10.42.0.0/16). LIVE: confirm the probe source at bring-up (tests/posture/network-policy.bats) and
-# widen this ipBlock to the node's actual address if k3s' cluster-cidr was customized.
+# Ingress: kubelet liveness/readiness probe가 HTTP 포트 8080을 친다(metrics 포트도 허용).
+# default-deny-ingress 아래에서는 노드발(node-sourced) probe가 드랍되어 모든 앱이
+# crash-loop에 빠진다. 소스가 노드이므로 k3s pod/cluster CIDR(기본 10.42.0.0/16)을 허용한다.
+# 라이브: bring-up 시 probe 소스를 확인하고(tests/posture/network-policy.bats), k3s
+# cluster-cidr이 커스텀이면 이 ipBlock을 노드의 실제 주소로 넓힐 것.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

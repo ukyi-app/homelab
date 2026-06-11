@@ -2,10 +2,10 @@
 
 CHART="${BATS_TEST_DIRNAME}/.."
 
-# The default values.yaml deliberately leaves image.* and resources.* EMPTY so an app
-# cannot inherit a silent default — the schema's minLength turns "forgot to size it" into
-# a render-time failure. So lint/template on the bare defaults is EXPECTED to fail; the
-# valid path is asserted with a complete override.
+# 기본 values.yaml은 image.*와 resources.*를 의도적으로 비워둔다 — 앱이 암묵적 기본값을
+# 상속할 수 없게 하기 위해서다. schema의 minLength가 "사이징을 깜빡함"을 렌더 시점 실패로
+# 바꾼다. 따라서 순정 기본값으로의 lint/template는 실패가 정상이며, 정상 경로는
+# 완전한 오버라이드로 검증한다.
 
 complete=(--set image.repo=ghcr.io/x/y --set image.tag=sha-deadbeef \
   --set resources.requests.cpu=10m --set resources.requests.memory=32Mi \

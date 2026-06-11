@@ -4,7 +4,7 @@ on:
     branches: [main]
     paths:
       - "apps/**"
-      - "!apps/**/deploy/**" # the write-back's values.yaml bump must NOT re-trigger build → no CI self-loop
+      - "!apps/**/deploy/**" # write-back의 values.yaml bump가 build를 재트리거하면 안 된다 → CI 자기 루프 방지
       - ".github/workflows/build.yaml"
   # 신규 기본 브랜치 생성 push는 paths diff가 없어 트리거가 스킵된다(첫 라이브 push에서 확인)
   # — 초기 시드/재빌드용 수동 트리거.
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm # native arm64 runner — no QEMU
+    runs-on: ubuntu-24.04-arm # 네이티브 arm64 runner — QEMU 불필요
     strategy:
       fail-fast: false
       matrix:
@@ -47,7 +47,7 @@ jobs:
           # → 전체 빌드. 첫 라이브에서 둘 다 build=false로 빠져 이미지 0개가 됐던 버그.
           if [ "$EVENT" = "workflow_dispatch" ] || [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
-          # only a SOURCE/Dockerfile change (never a deploy/values.yaml bump) counts as "changed"
+          # 소스/Dockerfile 변경만 "changed"로 간주 (deploy/values.yaml bump는 절대 아님)
           elif git diff --name-only "$BEFORE" "$SHA" \
                | grep -E "^apps/${APP}/" | grep -qvE "^apps/${APP}/deploy/"; then
             echo "build=true" >> "$GITHUB_OUTPUT"
@@ -77,8 +77,8 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha,scope=${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=${{ matrix.app }}
-      # Record which apps were ACTUALLY built so write-back (bump.yaml) bumps ONLY those —
-      # never points an unchanged app at a :sha tag that was never pushed (→ ImagePullBackOff).
+      # 실제로 빌드된 앱만 기록해 write-back(bump.yaml)이 그 앱들만 bump하게 한다 —
+      # 변경 없는 앱을 push된 적 없는 :sha 태그로 가리키는 일이 없도록 (→ ImagePullBackOff).
       - name: record built app
         if: steps.changed.outputs.build == 'true'
         env:

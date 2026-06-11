@@ -4,18 +4,18 @@ metadata:
   name: pg
   namespace: database
   annotations:
-    argocd.argoproj.io/sync-wave: "-1" # Cluster CR; Ready gates app migration Jobs (wave 1)
+    argocd.argoproj.io/sync-wave: "-1" # Cluster CR; Ready 상태가 앱 migration Job(wave 1)을 게이트
 spec:
   instances: 1
   imageName: ghcr.io/cloudnative-pg/postgresql:16.4
   primaryUpdateStrategy: unsupervised
-  enableSuperuserAccess: true # creates the managed `pg-superuser` Secret (REPLICATION-capable) used by pg_basebackup — a SEPARATE credential from the app role
+  enableSuperuserAccess: true # pg_basebackup이 쓰는 관리형 `pg-superuser` Secret(REPLICATION 가능)을 생성 — app 롤과는 별개의 자격증명
   postgresUID: 26
   postgresGID: 26
 
   postgresql:
     parameters:
-      # tied to the 1Gi POD LIMIT, not host RAM (avoids the 25%-of-host = 4GB OOM trap)
+      # 호스트 RAM이 아니라 1Gi POD LIMIT 기준 (호스트의 25% = 4GB OOM 함정 회피)
       shared_buffers: "256MB"
       effective_cache_size: "512MB"
       work_mem: "8MB"
@@ -36,24 +36,24 @@ spec:
 
   storage:
     size: 40Gi
-    storageClass: standard # internal 512GB SSD
+    storageClass: standard # 내장 512GB SSD
   walStorage:
     size: 10Gi
-    storageClass: standard # SEPARATE WAL PVC, also internal SSD
+    storageClass: standard # 분리된 WAL PVC, 역시 내장 SSD
 
   bootstrap:
     initdb:
       database: app
       owner: app
       secret:
-        name: pg-app-credentials # SEEDED by M2 (platform/cnpg/prod/app-credentials.enc.yaml, ns database); MUST exist before bootstrap — this kustomization's KSOPS generator renders it at sync-wave -2 (before the Cluster at -1)
+        name: pg-app-credentials # M2가 시드 (platform/cnpg/prod/app-credentials.enc.yaml, ns database); bootstrap 전에 반드시 존재해야 함 — 이 kustomization의 KSOPS generator가 sync-wave -2에서 렌더 (Cluster의 -1보다 먼저)
 
   plugins:
     - name: barman-cloud.cloudnative-pg.io
       isWALArchiver: true
       parameters:
-        barmanObjectName: pg-r2 # -> ObjectStore from Task 4.3
+        barmanObjectName: pg-r2 # -> Task 4.3의 ObjectStore
         serverName: pg
 
   monitoring:
-    enablePodMonitor: false # scraped via prometheus.io annotations (M5)
+    enablePodMonitor: false # prometheus.io annotation으로 scrape (M5)

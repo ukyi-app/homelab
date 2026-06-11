@@ -36,7 +36,7 @@ jobs:
         run: |
           age-keygen -o /tmp/ci.agekey
           export SOPS_AGE_KEY_FILE=/tmp/ci.agekey
-          # CI uses its own .sops.yaml recipients so the round-trip is self-contained
+          # CI는 자체 .sops.yaml recipients를 써서 왕복 검증을 자기완결로 만든다
           CIKEY=$(age-keygen -y /tmp/ci.agekey)
           cat > /tmp/sops-ci.yaml <<EOF
           creation_rules:

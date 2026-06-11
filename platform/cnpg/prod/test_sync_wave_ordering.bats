@@ -7,14 +7,14 @@
   grep -qE 'sync-wave:\s*"-1"' platform/cnpg/prod/cluster.yaml
 }
 @test "waves match the M3-owned SYNC-WAVES.md (cnpg-operator -2, Cluster -1)" {
-  # SYNC-WAVES.md is a wave-first table (| wave | component |), so match wave→component.
+  # SYNC-WAVES.md는 wave가 먼저 오는 표(| wave | component |)이므로 wave→컴포넌트 순으로 매칭.
   grep -qE '\-2.*cnpg-operator' platform/argocd/root/SYNC-WAVES.md
   grep -qE '\-1.*Cluster' platform/argocd/root/SYNC-WAVES.md
 }
 @test "shared app chart runs migrate as a wave-1 ArgoCD Sync hook" {
-  # asserted against the chart owned by Milestone 6; this is the cross-milestone contract.
-  # Pass-5 Open Item #2 moved this off the Helm pre-install/pre-upgrade hook (which runs in ArgoCD's
-  # PreSync phase, before wave-0 config) onto an ArgoCD Sync hook that runs AFTER wave-0 config.
+  # Milestone 6 소유 차트를 상대로 검증; 마일스톤 간 계약이다.
+  # Pass-5 Open Item #2가 이를 Helm pre-install/pre-upgrade hook(ArgoCD의 PreSync 단계,
+  # wave-0 설정 이전에 실행)에서 wave-0 설정 이후에 실행되는 ArgoCD Sync hook으로 옮겼다.
   test -f platform/charts/app/templates/migrate-job.yaml || skip "chart from M6 not present yet"
   grep -qE 'argocd.argoproj.io/hook:\s*Sync' platform/charts/app/templates/migrate-job.yaml
   grep -qE 'sync-wave:\s*"1"' platform/charts/app/templates/migrate-job.yaml

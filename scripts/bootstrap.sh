@@ -7,6 +7,7 @@ AGE_KEY="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}"
 test -f "${AGE_KEY}" || { echo "FATAL: M0 cluster age key not found at ${AGE_KEY}" >&2; exit 1; }
 
 echo "==> [1/4] namespace argocd"
+# shellcheck disable=SC2015  # 의도된 멱등 패턴: ns가 있으면 echo, 없으면 create (if-then-else 아님)
 kubectl get ns argocd >/dev/null 2>&1 \
   && echo "    namespace argocd already exists" \
   || kubectl create ns argocd

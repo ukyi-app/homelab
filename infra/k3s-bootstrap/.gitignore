@@ -1,6 +1,6 @@
-# Retrieved kubeconfig holds a cluster-admin bearer token — never commit.
+# 가져온 kubeconfig에는 cluster-admin bearer 토큰이 들어 있다 — 절대 커밋 금지.
 kubeconfig
 kubeconfig.*
 *.kubeconfig
-# Local scratch from drills.
+# drill에서 생기는 로컬 임시 파일.
 *.log

@@ -14,7 +14,7 @@ json.dump(p, f); f.close(); print(f.name)
 EOF
 }
 
-run_onboard() { # $1=payload-file [extra args...]
+run_onboard() { # $1=payload 파일 [추가 인자...]
   local p="$1"; shift
   (cd "$ROOT" && node tools/onboard-app.mjs --payload "$p" --domain ukyi.app "$@")
 }

@@ -40,7 +40,7 @@ subjects:
     name: local-path-provisioner-sa
     namespace: local-path-storage
 ---
-# ---------- INTERNAL provisioner (StorageClass: standard) ----------
+# ---------- 내장(internal) provisioner (StorageClass: standard) ----------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -65,9 +65,9 @@ spec:
             - --provisioner-name=homelab.io/local-path-internal
             - --config=/etc/config/config.json
             - --service-account-name=local-path-provisioner-sa
-            # v0.0.30 REQUIRES --configmap-name (default `local-path-config`): it names the configmap the
-            # provisioner reads AND mounts (setup/teardown/helperPod scripts) into every helper pod. Ours
-            # is renamed, so without this the daemon fatals and each helper pod FailedMounts (volume "script").
+            # v0.0.30은 --configmap-name(기본 `local-path-config`)이 필수다: provisioner가 읽고
+            # 모든 helper pod에 마운트하는(setup/teardown/helperPod 스크립트) configmap의 이름이다.
+            # 우리는 이름을 바꿨으므로 이게 없으면 데몬이 fatal나고 helper pod마다 FailedMount가 난다(volume "script").
             - --configmap-name=local-path-config-internal
             - --helper-pod-file=/etc/config/helperPod.yaml
           env:
@@ -114,7 +114,7 @@ data:
           image: ${LOCAL_PATH_HELPER_IMAGE}
           imagePullPolicy: IfNotPresent
 ---
-# ---------- BULK provisioner (StorageClass: bulk-ssd) ----------
+# ---------- bulk provisioner (StorageClass: bulk-ssd) ----------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -139,9 +139,9 @@ spec:
             - --provisioner-name=homelab.io/local-path-bulk
             - --config=/etc/config/config.json
             - --service-account-name=local-path-provisioner-sa
-            # v0.0.30 REQUIRES --configmap-name (default `local-path-config`): it names the configmap the
-            # provisioner reads AND mounts (setup/teardown/helperPod scripts) into every helper pod. Ours
-            # is renamed, so without this the daemon fatals and each helper pod FailedMounts (volume "script").
+            # v0.0.30은 --configmap-name(기본 `local-path-config`)이 필수다: provisioner가 읽고
+            # 모든 helper pod에 마운트하는(setup/teardown/helperPod 스크립트) configmap의 이름이다.
+            # 우리는 이름을 바꿨으므로 이게 없으면 데몬이 fatal나고 helper pod마다 FailedMount가 난다(volume "script").
             - --configmap-name=local-path-config-bulk
             - --helper-pod-file=/etc/config/helperPod.yaml
           env:

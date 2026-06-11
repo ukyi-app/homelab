@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# Offline validation of the `prod` apps-namespace NetworkPolicies (Pass-5 Open Item #3).
-# This component carries no secrets/CRDs, so it builds offline with plain kustomize.
+# `prod` 앱 namespace NetworkPolicy의 오프라인 검증 (Pass-5 Open Item #3).
+# 이 컴포넌트는 secret/CRD가 없어 일반 kustomize만으로 오프라인 빌드된다.
 
 DIR="${BATS_TEST_DIRNAME}"
 
@@ -9,13 +9,13 @@ build() { kustomize build "$DIR"; }
 @test "kustomize build renders and lands every policy in namespace prod" {
   run build
   [ "$status" -eq 0 ]
-  # all policies present
+  # 모든 policy가 존재
   for n in default-deny-all allow-dns-egress allow-egress-to-database \
            allow-ingress-from-gateway allow-ingress-metrics-from-observability \
            allow-intra-prod-http allow-ingress-kubelet-probes; do
     echo "$output" | grep -q "name: $n"
   done
-  # the namespace transformer pinned them to prod (grep -v drops yq's inter-doc '---' separators)
+  # namespace 트랜스포머가 prod로 고정 (grep -v는 yq의 문서 간 '---' 구분자를 제거)
   [ "$(build | yq 'select(.kind=="NetworkPolicy") | .metadata.namespace' | grep -v '^---' | sort -u)" = "prod" ]
 }
 
@@ -28,18 +28,18 @@ build() { kustomize build "$DIR"; }
 
 @test "default-deny covers BOTH ingress and egress" {
   policy="$(build | yq 'select(.metadata.name=="default-deny-all")')"
-  [ "$(echo "$policy" | yq '.spec.podSelector | length')" -eq 0 ]   # {} = all pods
+  [ "$(echo "$policy" | yq '.spec.podSelector | length')" -eq 0 ]   # {} = 모든 pod
   echo "$policy" | yq -e '.spec.policyTypes' | grep -q Ingress
   echo "$policy" | yq -e '.spec.policyTypes' | grep -q Egress
 }
 
 @test "egress allows DNS and database:5432 (no general internet egress by default)" {
-  # DNS allow targets kube-system kube-dns on 53
+  # DNS allow는 kube-system kube-dns의 53 포트를 대상으로 한다
   dns="$(build | yq 'select(.metadata.name=="allow-dns-egress")')"
   [[ "$dns" == *"kubernetes.io/metadata.name: kube-system"* ]]
   [[ "$dns" == *"k8s-app: kube-dns"* ]]
   [[ "$dns" == *"port: 53"* ]]
-  # database egress is 5432 only, to the database namespace
+  # database egress는 database namespace로 5432만 허용
   db="$(build | yq 'select(.metadata.name=="allow-egress-to-database")')"
   [[ "$db" == *"kubernetes.io/metadata.name: database"* ]]
   [[ "$db" == *"port: 5432"* ]]

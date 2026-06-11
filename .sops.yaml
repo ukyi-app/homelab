@@ -1,5 +1,5 @@
-# Recipients are public keys (safe to commit). Private keys live out-of-band (Task 0.4).
-# M0 fills BOTH real public keys here; M2 only CONSUMES the cluster key.
+# recipients는 공개키다(커밋해도 안전). 개인키는 레포 밖에서 보관한다(Task 0.4).
+# M0이 여기에 실제 공개키 둘 다 채우고, M2는 cluster 키를 소비만 한다.
 _recipients:
   - &cluster age1n3j7p70f0unl5dgrjhtr9jxrdntz2a67dtntu446qus9c3jd3fnsp8z960
   - &recovery age154tu9q7922xu46x0rkfm5l9x3ulf9u5at5qvxeaqfx9sgtm7cumq75jdwc
@@ -13,7 +13,7 @@ creation_rules:
           - *cluster
           - *recovery
 
-  # ----- platform staging (structure baked in now per D7; no deploy yet) -----
+  # ----- platform staging (D7에 따라 구조만 미리 마련; 아직 배포 없음) -----
   - path_regex: platform/.*/staging/.*\.enc\.yaml$
     encrypted_regex: "^(data|stringData)$"
     key_groups:
@@ -29,7 +29,7 @@ creation_rules:
           - *cluster
           - *recovery
 
-  # ----- apps staging (structure baked in now per D7; no deploy yet) -----
+  # ----- apps staging (D7에 따라 구조만 미리 마련; 아직 배포 없음) -----
   - path_regex: apps/.*/staging/.*\.enc\.yaml$
     encrypted_regex: "^(data|stringData)$"
     key_groups:
@@ -37,7 +37,7 @@ creation_rules:
           - *cluster
           - *recovery
 
-  # ----- catch-all: any other *.enc.yaml still gets encrypted (fail-safe) -----
+  # ----- catch-all: 그 외 모든 *.enc.yaml도 암호화 보장 (fail-safe) -----
   - path_regex: \.enc\.yaml$
     encrypted_regex: "^(data|stringData)$"
     key_groups:

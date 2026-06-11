@@ -15,7 +15,7 @@ f=platform/cnpg/prod/cluster.yaml
 @test "memory limit is 1Gi and shared_buffers is <= 1/4 of it" {
   grep -q 'memory: 1Gi' "$f"   # limit
   grep -q 'memory: 768Mi' "$f" # request
-  # 256MB <= 256MB (= 1Gi/4) : the limit-tie invariant holds
+  # 256MB <= 256MB (= 1Gi/4) : limit 연동 불변식 성립
 }
 
 @test "PGDATA on standard SC, WAL on a SEPARATE standard PVC, never bulk-ssd" {

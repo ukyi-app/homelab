@@ -1,10 +1,10 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: cnpg-local-basebackup # job_name=~"cnpg-local-basebackup.*" feeds M5's LocalBasebackupStale
+  name: cnpg-local-basebackup # job_name=~"cnpg-local-basebackup.*"가 M5의 LocalBasebackupStale에 공급됨
   namespace: database
 spec:
-  schedule: "30 2 * * *" # 02:30, before the 03:00 R2 ScheduledBackup
+  schedule: "30 2 * * *" # 02:30, 03:00 R2 ScheduledBackup보다 먼저
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -15,7 +15,7 @@ spec:
       template:
         metadata:
           labels:
-            cnpg.io/backupRole: local-basebackup # M5's alert selector
+            cnpg.io/backupRole: local-basebackup # M5의 알림 셀렉터
         spec:
           restartPolicy: Never
           securityContext:
@@ -41,11 +41,11 @@ spec:
                     --checkpoint=fast --progress --no-password
                   echo "[basebackup] pruning local copies older than 7 days"
                   find /backup -maxdepth 1 -type d -name 'basebackup-*' -mtime +7 -print -exec rm -rf {} +
-                  # local breadcrumb file (the Job completion-time series is what M5 alerts on)
+                  # 로컬 breadcrumb 파일 (M5는 Job 완료 시각 시계열로 알림을 건다)
                   date -u +%s > /backup/.last_basebackup_ok
               env:
-                # pg_basebackup opens a REPLICATION connection; the `app` role lacks REPLICATION.
-                # Use CNPG's managed superuser secret (created by enableSuperuserAccess: true).
+                # pg_basebackup은 REPLICATION 연결을 연다; `app` 롤에는 REPLICATION 권한이 없다.
+                # CNPG가 관리하는 superuser secret(enableSuperuserAccess: true로 생성)을 사용한다.
                 - name: PGUSER
                   valueFrom:
                     secretKeyRef: { name: pg-superuser, key: username }

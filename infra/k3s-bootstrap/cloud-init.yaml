@@ -1,32 +1,32 @@
 #cloud-config
-# Host substrate for the single k3s VM (Debian bookworm arm64), committed as code.
-# Provisioned once by orb-create.sh (Task 1.5); the VM is cattle (§4).
+# 단일 k3s VM(Debian bookworm arm64)의 호스트 기반 계층, 코드로 커밋된다.
+# orb-create.sh가 1회 프로비저닝(Task 1.5); VM은 cattle이다(§4).
 
 hostname: k3s
 preserve_hostname: false
 timezone: Asia/Seoul
 
 packages:
-  - systemd-zram-generator      # OS-level OOM cushion (zstd zram), kubelet stays swap-unaware
-  - openssh-server              # SSH access (OrbStack also multiplexes ssh orb)
+  - systemd-zram-generator      # OS 수준 OOM 완충재 (zstd zram), kubelet은 swap을 모르는 상태 유지
+  - openssh-server              # SSH 접근 (OrbStack도 ssh orb를 멀티플렉싱)
   - curl
   - ca-certificates
-  - apparmor                    # k3s default container runtime expects it present
-  - iptables                    # flannel/VXLAN dataplane
+  - apparmor                    # k3s 기본 컨테이너 런타임이 존재를 전제한다
+  - iptables                    # flannel/VXLAN 데이터플레인
 
 package_update: true
-package_upgrade: false          # determinism: pin via versions.env / image, not apt drift
+package_upgrade: false          # 결정론: apt 드리프트가 아니라 versions.env / 이미지로 고정
 
 users:
   - name: ops
     groups: [sudo]
     shell: /bin/bash
     sudo: ["ALL=(ALL) NOPASSWD:ALL"]
-    lock_passwd: true           # key-only; OrbStack injects its managed key automatically
+    lock_passwd: true           # 키 전용; OrbStack이 관리 키를 자동 주입한다
 
 write_files:
-  # zram: ~2 GiB zstd compressed swap as an OOM cushion. NOT used by the kubelet
-  # for scheduling (k3s runs swap-unaware); purely a kernel page-reclaim safety net.
+  # zram: OOM 완충재로 쓰는 ~2 GiB zstd 압축 swap. kubelet의 스케줄링에는 쓰이지
+  # 않는다(k3s는 swap을 모른 채 동작); 순수하게 커널 page-reclaim 안전망이다.
   - path: /etc/systemd/zram-generator.conf
     permissions: "0644"
     content: |
@@ -35,7 +35,7 @@ write_files:
       compression-algorithm = zstd
       swap-priority = 100
 
-  # Cap journald so logs on the internal SSD can never run away (R4 disk-fill posture).
+  # journald에 상한을 둬 내장 SSD의 로그가 폭주하지 못하게 한다 (R4 disk-fill 방어).
   - path: /etc/systemd/journald.conf.d/cap.conf
     permissions: "0644"
     content: |
@@ -45,7 +45,7 @@ write_files:
       SystemKeepFree=1G
       RuntimeMaxUse=64M
 
-  # Harden sshd a touch: no root login, key auth only.
+  # sshd 가벼운 하드닝: root 로그인 금지, 키 인증만 허용.
   - path: /etc/ssh/sshd_config.d/10-hardening.conf
     permissions: "0644"
     content: |
@@ -54,21 +54,21 @@ write_files:
       KbdInteractiveAuthentication no
 
 runcmd:
-  # Storage mount points. 'internal' lives on the VM's own disk (512 GB internal SSD).
-  # The REAL bulk-ssd tier lives on the EXTERNAL SSD that OrbStack shares into the VM at
-  # /mnt/mac/Volumes/homelab (virtiofs); that path is provisioned by the host runbook
-  # (docs/runbooks/external-ssd.md) and enforced by apply-storage.sh's external-SSD gate — NOT
-  # here, because the external volume need not exist at first boot. The dir below is only the
-  # VM-disk FALLBACK used when apply-storage.sh runs with BULK_ALLOW_VM_DISK=1 (dev; non-persistent).
+  # 스토리지 마운트 포인트. 'internal'은 VM 자체 디스크(512 GB 내장 SSD)에 있다.
+  # 진짜 bulk-ssd 티어는 OrbStack이 /mnt/mac/Volumes/homelab (virtiofs)으로 VM에 공유하는
+  # 외장 SSD에 있다; 그 경로는 호스트 런북(docs/runbooks/external-ssd.md)으로 프로비저닝되고
+  # apply-storage.sh의 외장 SSD 게이트가 강제한다 — 여기서 하지 않는 이유는 첫 부팅 시점에
+  # 외장 볼륨이 존재할 필요가 없기 때문. 아래 디렉토리는 apply-storage.sh가
+  # BULK_ALLOW_VM_DISK=1 로 실행될 때만 쓰는 VM 디스크 폴백이다(dev; 비영속).
   - [ install, -d, -m, "0700", -o, root, -g, root, /var/lib/rancher/k3s-storage/internal ]
   - [ install, -d, -m, "0700", -o, root, -g, root, /var/lib/rancher/k3s-storage/bulk ]
-  # Activate zram + journald caps now (so this boot already benefits).
+  # zram + journald 상한을 지금 활성화한다 (이번 부팅부터 바로 효과).
   - [ systemctl, daemon-reload ]
   - [ systemctl, restart, systemd-journald ]
   - [ systemctl, start, "systemd-zram-setup@zram0.service" ]
   - [ systemctl, restart, ssh ]
 
-# Final marker file lets orb-create.sh poll for completion.
+# 최종 마커 파일로 orb-create.sh가 완료를 폴링할 수 있다.
 power_state:
   mode: reboot
   condition: false

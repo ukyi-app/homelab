@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
-# Milestone 3 gate — networking path end-to-end.
-# LIVE: requires DOMAIN env set; kubectl context = k3s VM; run from a tailnet device.
+# Milestone 3 게이트 — 네트워킹 경로 엔드투엔드 검증.
+# LIVE: DOMAIN env 설정 필요; kubectl 컨텍스트 = k3s VM; tailnet에 연결된 기기에서 실행.
 
 @test "Gateway 'homelab' is Accepted + Programmed" {
   run bash -c "kubectl -n gateway get gateway homelab -o jsonpath='{range .status.conditions[*]}{.type}={.status};{end}'"

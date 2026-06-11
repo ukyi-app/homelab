@@ -24,7 +24,7 @@ resource "cloudflare_ruleset" "cache_rules" {
         cache = true
         edge_ttl = {
           mode    = "override_origin"
-          default = 2592000 # 30 days — assets are content-hashed
+          default = 2592000 # 30일 — 에셋은 content-hash가 붙어 있다
         }
         browser_ttl = {
           mode    = "override_origin"

@@ -8,7 +8,7 @@ data:
     groups:
       - name: storage-backup
         rules:
-          # External 1TB SSD (bulk-ssd) disk-fill — byte-aware, fires before retention eviction would mask it
+          # 외장 1TB SSD(bulk-ssd) 디스크 포화 — 바이트 기준, retention 축출이 가리기 전에 발화
           - alert: BulkSSDFilling
             expr: |
               (node_filesystem_avail_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}
@@ -27,7 +27,7 @@ data:
             annotations:
               summary: "External SSD <5% free"
               description: "bulk-ssd nearly full — local backup staging + media at imminent risk."
-          # Internal SSD (standard) disk-fill — protects Postgres + vmsingle
+          # 내장 SSD(standard) 디스크 포화 — Postgres + vmsingle 보호
           - alert: StandardSSDFilling
             expr: |
               (node_filesystem_avail_bytes{mountpoint=~"/var/lib/rancher.*|/$"}
@@ -37,7 +37,7 @@ data:
             annotations:
               summary: "Internal SSD <10% free"
               description: "standard SC disk low — Postgres PGDATA/WAL at risk."
-          # Backup-liveness: the local CNPG base-backup CronJob (M4) must complete daily.
+          # 백업 생존성: 로컬 CNPG base-backup CronJob(M4)은 매일 완료되어야 한다.
           - alert: LocalBasebackupStale
             expr: |
               (time() - max(kube_job_status_completion_time{job_name=~"cnpg-local-basebackup.*"})) > 100000
@@ -47,7 +47,7 @@ data:
             annotations:
               summary: "Local base-backup stale (>27h) or missing"
               description: "Restore copy 2 (local 1TB SSD) is at risk — unmounted drive or failed CronJob."
-          # Backup-liveness: the latest available R2 backup must keep advancing (offsite copy 3).
+          # 백업 생존성: 가장 최근 R2 백업이 계속 갱신되어야 한다 (오프사이트 사본 3).
           - alert: R2BackupStale
             expr: |
               (time() - cnpg_collector_last_available_backup_timestamp) > 100000
@@ -57,7 +57,7 @@ data:
             annotations:
               summary: "R2 offsite backup stale (>27h) or missing"
               description: "Offsite copy 3 (Cloudflare R2) has not produced a fresh backup; DR copy is going stale."
-          # Backup-liveness: WAL archiving to R2 must not be erroring (RPO ≈ 5min target).
+          # 백업 생존성: R2로의 WAL 아카이빙이 오류를 내면 안 된다 (RPO ≈ 5분 목표).
           - alert: WALArchiveStalled
             expr: |
               cnpg_collector_last_failed_archive_time > cnpg_collector_last_archived_time
@@ -66,7 +66,7 @@ data:
             annotations:
               summary: "WAL archiving to R2 stalled (RPO at risk)"
               description: "Last failed archive is newer than last successful archive; offsite WAL stream is broken and the 5-min RPO is not being met."
-          # Restore-drill liveness: M4's recurring restore drill pushes restore_drill_last_success_timestamp.
+          # 복원 drill 생존성: M4의 반복 복원 drill이 restore_drill_last_success_timestamp를 push한다.
           - alert: CNPGRestoreDrillStale
             expr: |
               (time() - restore_drill_last_success_timestamp) > 700000
