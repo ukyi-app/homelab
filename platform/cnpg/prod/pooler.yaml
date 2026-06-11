@@ -11,7 +11,8 @@ spec:
   pgbouncer:
     poolMode: transaction
     parameters:
-      pool_mode: transaction
+      # pool_mode는 CNPG 예약 파라미터 — parameters에 두면 vpooler webhook이 생성 자체를 거부한다
+      # (라이브 검증: "Invalid or reserved parameter"). poolMode 필드가 동일 동작을 표현한다.
       max_client_conn: "200"
       default_pool_size: "20"
       reserve_pool_size: "5"
