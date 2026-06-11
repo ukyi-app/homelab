@@ -42,7 +42,7 @@ spec:
       kind: Gateway
       name: homelab
       namespace: gateway
-      sectionName: web-internal
+      sectionName: web-internal-tls
   hostnames: ["whoami.home.ukyi.app"]
   rules:
     - matches: [{ path: { type: PathPrefix, value: / } }]

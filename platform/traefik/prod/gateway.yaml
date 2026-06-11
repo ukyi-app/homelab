@@ -20,3 +20,15 @@ spec:
       hostname: "*.home.ukyi.app"
       allowedRoutes:
         namespaces: { from: All }
+    # internal HTTPS: tailscale 프록시가 TCP passthrough(:443)로 보내면 여기서 와일드카드
+    # cert(home-wildcard-tls, cert-issuer.yaml)로 TLS 종단한다. 8443 = Traefik websecure 엔트리포인트.
+    - name: web-internal-tls
+      protocol: HTTPS
+      port: 8443
+      hostname: "*.home.ukyi.app"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - { kind: Secret, name: home-wildcard-tls }
+      allowedRoutes:
+        namespaces: { from: All }

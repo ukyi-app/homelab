@@ -10,6 +10,8 @@ set -euo pipefail
 : "${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID}"
 : "${HEALTHCHECKS_URL:?set HEALTHCHECKS_URL}"
 : "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}" # Grafana admin 비밀번호 (admin/admin 절대 금지)
+# cert-manager DNS-01용 Cloudflare API 토큰 (*.home.ukyi.app 와일드카드 발급). Zone DNS edit 필요.
+: "${TF_VAR_cloudflare_api_token:?set TF_VAR_cloudflare_api_token}"
 
 CF_OUT=$(terraform -chdir=infra/cloudflare output -json)
 TS_OUT=$(terraform -chdir=infra/tailscale output -json)
@@ -126,4 +128,16 @@ stringData:
   TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
   TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"
   HEALTHCHECKS_URL: "${HEALTHCHECKS_URL}"
+EOF
+
+# cert-manager DNS-01 솔버용 Cloudflare API 토큰 (gateway ns의 Issuer가 참조).
+write_enc platform/traefik/prod/cloudflare-api-token.enc.yaml <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-api-token
+  namespace: gateway
+type: Opaque
+stringData:
+  api-token: "${TF_VAR_cloudflare_api_token}"
 EOF

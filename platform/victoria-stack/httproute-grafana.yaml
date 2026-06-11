@@ -10,7 +10,7 @@ spec:
       kind: Gateway
       name: homelab
       namespace: gateway
-      sectionName: web-internal
+      sectionName: web-internal-tls
   hostnames:
     - "grafana.home.ukyi.app"
   rules:
