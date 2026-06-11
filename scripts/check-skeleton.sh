@@ -5,7 +5,7 @@ dirs=(
   platform/argocd/root platform/charts/app
   platform/traefik platform/cnpg platform/victoria-stack
   platform/adguard platform/cloudflared platform/tailscale
-  apps tools docs/plans docs/runbooks
+  apps tools docs/plans
 )
 rc=0
 for d in "${dirs[@]}"; do

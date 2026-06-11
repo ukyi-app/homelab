@@ -52,3 +52,5 @@ build/
 platform/*/prod/charts/
 # Terraform provider lock files: regenerate per-platform; commit multi-platform locks deliberately
 .terraform.lock.hcl
+# 운영 런북은 로컬 전용 — public 레포에 올리지 않는다(사용자 결정 2026-06-11)
+docs/runbooks/

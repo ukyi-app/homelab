@@ -8,14 +8,14 @@ setup() {
 teardown() { rm -rf apps/_guardtest; }
 
 @test "guard BLOCKS a plaintext *.enc.yaml" {
-  cp test/fixtures/sample-secret.yaml apps/_guardtest/prod/leak.enc.yaml
+  cp tests/fixtures/sample-secret.yaml apps/_guardtest/prod/leak.enc.yaml
   run ./scripts/sops-guard.sh apps/_guardtest/prod/leak.enc.yaml
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'BLOCKED'
 }
 
 @test "guard ALLOWS a properly encrypted *.enc.yaml" {
-  cp test/fixtures/sample-secret.yaml apps/_guardtest/prod/ok.enc.yaml
+  cp tests/fixtures/sample-secret.yaml apps/_guardtest/prod/ok.enc.yaml
   sops --encrypt --in-place apps/_guardtest/prod/ok.enc.yaml
   run ./scripts/sops-guard.sh apps/_guardtest/prod/ok.enc.yaml
   [ "$status" -eq 0 ]

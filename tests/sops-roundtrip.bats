@@ -4,7 +4,7 @@ setup() {
   export SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/keys.txt"
   WORK="apps/_rttest/prod"
   mkdir -p "$WORK"
-  cp test/fixtures/sample-secret.yaml "$WORK/secret.enc.yaml"
+  cp tests/fixtures/sample-secret.yaml "$WORK/secret.enc.yaml"
 }
 
 teardown() {

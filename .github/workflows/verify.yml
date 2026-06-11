@@ -44,7 +44,7 @@ jobs:
               encrypted_regex: "^(data|stringData)$"
               age: "$CIKEY"
           EOF
-          cp test/fixtures/sample-secret.yaml /tmp/ci.enc.yaml
+          cp tests/fixtures/sample-secret.yaml /tmp/ci.enc.yaml
           sops --config /tmp/sops-ci.yaml --encrypt --in-place /tmp/ci.enc.yaml
           if grep -q 'super-secret-value-123' /tmp/ci.enc.yaml; then echo "plaintext leaked after encrypt"; exit 1; fi
           sops --config /tmp/sops-ci.yaml --decrypt /tmp/ci.enc.yaml | grep -q 'super-secret-value-123'

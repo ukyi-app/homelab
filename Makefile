@@ -24,7 +24,7 @@ verify: ## Run repo-foundation checks (skeleton + ledger + sops round-trip)
 	@./scripts/check-skeleton.sh
 	@scripts/ledger-to-json.sh docs/memory-ledger.md > /tmp/ledger.json
 	@conftest test /tmp/ledger.json --policy policy/ledger.rego
-	@bats test/sops-roundtrip.bats
+	@bats tests/sops-roundtrip.bats
 
 TF_ROOTS := cloudflare tailscale github
 
