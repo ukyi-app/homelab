@@ -54,7 +54,8 @@ build() { kustomize build "$DIR"; }
   [[ "$obs" == *"port: 9090"* ]]
   probes="$(build | yq 'select(.metadata.name=="allow-ingress-kubelet-probes")')"
   [[ "$probes" == *"ipBlock"* ]]
-  [[ "$probes" == *"10.42.0.0/16"* ]]
+  [[ "$probes" == *"cidr: 10.42.0.1/32"* ]]   # 노드(cni0)만 — /16은 default-deny 무력화 (라이브 침해 검증)
+  [[ "$probes" != *"cidr: 10.42.0.0/16"* ]]
 }
 
 @test "intra-prod app-to-app on http 8080 is allowed (SSR->API server-side calls)" {
