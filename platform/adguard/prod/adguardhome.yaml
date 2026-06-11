@@ -15,9 +15,10 @@ data:
       upstream_mode: load_balance
     filtering:
       rewrites:
-        # split-horizon: 모든 *.home 이름 → Traefik의 고정 Tailscale IP
+        # split-horizon: 모든 *.home 이름 → Traefik tailscale passthrough 디바이스(traefik-ts LB).
+        # Traefik이 :443에서 와일드카드 cert로 TLS 종단하므로 valid HTTPS로 접근된다.
         - domain: "*.home.ukyi.app"
-          answer: "100.96.44.63"     # = tailscale ip -4 homelab (Task 3.7, ts-traefik-ts 프록시 디바이스)
+          answer: "100.77.132.120"
       protection_enabled: true
     filters:
       - enabled: true
