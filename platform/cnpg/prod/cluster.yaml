@@ -55,7 +55,10 @@ spec:
         name: pg-app-credentials # M2가 시드 (platform/cnpg/prod/app-credentials.enc.yaml, ns database); bootstrap 전에 반드시 존재해야 함 — 이 kustomization의 KSOPS generator가 sync-wave -2에서 렌더 (Cluster의 -1보다 먼저)
 
   plugins:
+    # enabled는 webhook 주입 기본값이지만 명시 — plugins는 listType 미지정(SSA atomic)이라
+    # 미기재 시 영구 OutOfSync (HTTPRoute group/kind/weight와 동일 클래스, 라이브 검증)
     - name: barman-cloud.cloudnative-pg.io
+      enabled: true
       isWALArchiver: true
       parameters:
         barmanObjectName: pg-r2 # -> Task 4.3의 ObjectStore
