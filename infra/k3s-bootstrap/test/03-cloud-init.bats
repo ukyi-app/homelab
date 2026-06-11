@@ -41,7 +41,7 @@ CI="$BOOTSTRAP_DIR/cloud-init.yaml"
 
 @test "R7 dns-forward-trigger unit binds :53 and is enabled (OrbStack LISTEN-trigger)" {
   # OrbStack은 LISTEN 포트만 Mac으로 포워딩한다 — svclb(iptables DNAT)는 트리거가 안 되므로
-  # 이 더미 유닛이 없으면 LAN/라우터가 AdGuard에 닿을 수 없다 (라이브 검증 2026-06-11).
+  # 이 더미 유닛이 없으면 LAN/라우터가 AdGuard에 닿을 수 없다.
   run yq -e '.write_files[] | select(.path == "/usr/local/lib/dns-forward-trigger.py") | .content' "$CI"
   [ "$status" -eq 0 ]
   [[ "$output" == *'("0.0.0.0", 53)'* ]]

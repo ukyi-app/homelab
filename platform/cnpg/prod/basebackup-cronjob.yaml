@@ -10,7 +10,7 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      backoffLimit: 4 # pg 재시작/페일오버 창과 겹쳐도 견디도록 (1이면 16초 만에 포기 — 라이브 검증)
+      backoffLimit: 4 # pg 재시작/페일오버 창과 겹쳐도 견디도록 (1은 부족 — 짧은 재시작에도 포기)
       activeDeadlineSeconds: 7200
       template:
         metadata:

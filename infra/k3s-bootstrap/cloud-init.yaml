@@ -1,6 +1,6 @@
 #cloud-config
 # 단일 k3s VM(Debian bookworm arm64)의 호스트 기반 계층, 코드로 커밋된다.
-# orb-create.sh가 1회 프로비저닝(Task 1.5); VM은 cattle이다(§4).
+# orb-create.sh가 1회 프로비저닝; VM은 cattle이다(§4).
 
 hostname: k3s
 preserve_hostname: false
@@ -53,7 +53,7 @@ write_files:
       PasswordAuthentication no
       KbdInteractiveAuthentication no
 
-  # R7 LAN DNS — OrbStack 포워딩 트리거 (라이브 검증 2026-06-11):
+  # R7 LAN DNS — OrbStack 포워딩 트리거:
   # OrbStack은 VM에서 LISTEN 중인 포트만 Mac으로 자동 포워딩한다(바인드는 Mac의 *:53,
   # 즉 LAN 인터페이스 포함). adguard-dns의 svclb는 iptables DNAT뿐이라 LISTEN 소켓이
   # 없어 포워딩이 트리거되지 않는다 — 이 더미가 0.0.0.0:53을 점유해 포워딩만 트리거하고,

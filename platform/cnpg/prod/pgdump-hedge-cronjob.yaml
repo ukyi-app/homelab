@@ -37,7 +37,7 @@ spec:
                     | gzip -c \
                     | rclone rcat "${KEY}" --s3-region auto
                   echo "[hedge] verify object exists and is non-empty"
-                  # pg-tools 이미지에는 python3가 없다 (라이브 검증: 첫 실행에서 발견) — sed로 파싱
+                  # pg-tools 이미지에는 python3가 없다 — sed로 파싱
                   SIZE="$(rclone size "${KEY}" --json | sed -n 's/.*"bytes":\([0-9][0-9]*\).*/\1/p')"
                   test "${SIZE}" -gt 0
                   echo "[hedge] prune dumps older than 14 days"
@@ -47,7 +47,7 @@ spec:
                 - secretRef: { name: cnpg-r2-creds } # M2 시드: RCLONE_CONFIG_R2_* + AWS_* (AWS_REGION=auto)
               env:
                 # R2 Object-R&W 토큰은 HeadBucket을 거부한다 — rclone의 업로드 전 버킷 체크가
-                # "버킷 없음→CreateBucket(403)"으로 오판하므로 체크를 끈다(라이브 검증에서 확인된 quirk).
+                # "버킷 없음→CreateBucket(403)"으로 오판하므로 체크를 끈다.
                 - name: RCLONE_CONFIG_R2_NO_CHECK_BUCKET
                   value: "true"
                 - name: PGUSER

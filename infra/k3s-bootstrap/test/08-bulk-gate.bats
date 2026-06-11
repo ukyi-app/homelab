@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # 진짜 VM 내부 bulk 게이트 로직(bulk-gate-probe.sh)을 직접 검증한다 — orb도 VM도 없이 —
-# 그래서 findmnt/sentinel 동작이 실제로 커버된다 (Pass-5 #1 적대적 리뷰 수정). 가짜
+# 그래서 findmnt/sentinel 동작이 실제로 커버된다. 가짜
 # `findmnt`는 OrbStack의 실제 동작을 흉내낸다: mac 공유의 하위 디렉토리는 자체 마운트포인트가
 # 아니라서 `-T`로만 resolve된다. 따라서 `-T`를 빼먹은 probe는 이 스위트에서 실패한다.
 load test_helper

@@ -1,4 +1,4 @@
-# `database`(CNPG) 계층의 ingress 격리 — 핵심 자산(crown jewel) 보호 (Pass-5 Open Item #3).
+# `database`(CNPG) 계층의 ingress 격리 — 핵심 자산(crown jewel) 보호.
 # INGRESS default-deny 후 정당한 호출자만 허용한다. 이것은 "침해된 공개 앱이 데이터베이스에
 # 닿으면 안 된다" 경계의 대상(target) 측이다(소스 측은 platform/network-policies/prod의
 # prod egress default-deny가 강제).
@@ -6,7 +6,7 @@
 # EGRESS는 의도적으로 default-deny하지 않는다: CNPG 인스턴스는 Kubernetes API,
 # R2 object store(barman/rclone), Telegram/healthchecks, 그리고 복제를 위해 서로에게
 # 접근해야 한다. 이를 정밀하게 매핑하려면 라이브 클러스터가 필요하므로, egress 잠그기는
-# 향후 하드닝 과제로 추적한다(라이브 CNPG egress 목록을 앞에 두고, 연결성 테스트로 검증하며 진행).
+# 향후 하드닝 과제로 추적한다(CNPG egress 목록을 앞에 두고, 연결성 테스트로 검증하며 진행).
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -79,12 +79,11 @@ spec:
         - podSelector: {}      # 같은(database) namespace의 모든 pod
 ---
 # kubelet liveness/readiness probe는 노드(cni0=10.42.0.1)에서 출발한다.
-# ⚠️ 이전 cidr 10.42.0.0/16은 "전체 파드 CIDR"이라 임의 네임스페이스의 모든 파드에
-# 5432를 개방해 default-deny를 무력화했다 (라이브 침해 검증 2026-06-11 — nft 카운터로
-# 이 정책 체인이 default-ns 파드의 5432 SYN에 allow mark를 찍는 것을 확인).
+# ⚠️ cidr는 노드(cni0=10.42.0.1/32)로만 좁힌다. 10.42.0.0/16은 "전체 파드 CIDR"이라
+# 임의 네임스페이스의 모든 파드에 5432를 개방해 default-deny를 무력화한다.
 # 참고: kube-router는 노드발 트래픽을 POD-FW 체인의 내장 `fib saddr type local accept`
-# 룰로 정책 평가 전에 이미 허용한다(라이브 검증) — 이 정책은 CNI 이식성을 위한 의도
-# 선언이다. probe는 8000(instance manager HTTP)만 친다; 5432/9187은 파드발 트래픽이라
+# 룰로 정책 평가 전에 이미 허용한다 — 이 정책은 CNI 이식성을 위한 의도 선언이다.
+# probe는 8000(instance manager HTTP)만 친다; 5432/9187은 파드발 트래픽이라
 # 각자의 allow 정책이 담당한다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

@@ -6,8 +6,7 @@ resource "tailscale_acl" "homelab" {
     }
     acls = [
       # 각 멤버는 자기 소유 기기에 대한 전체 접근을 유지한다 (laptop→Mac mini SSH/moshi).
-      # 이 줄이 없으면 default-deny ACL이 운영자의 원격 SSH 경로를 끊는다 — 이 세션이
-      # Tailscale SSH 위에서 돌고 있어 라이브 적용 직전에 잡은 함정.
+      # 이 줄이 없으면 default-deny ACL이 운영자의 원격 Tailscale SSH 경로를 끊는다.
       { action = "accept", src = ["autogroup:member"], dst = ["autogroup:self:*"] },
       # 멤버는 내부 서비스에 Traefik ingress 프록시(HTTP/HTTPS)를 통해서만 도달한다.
       # 전역 DNS(AdGuard)는 맥미니 tailscale IP:53으로 도달하며, 맥미니는 멤버 자기 소유
@@ -36,12 +35,12 @@ resource "tailscale_acl" "homelab" {
 # 죽으면 tailscale 기기의 이름해석이 끊긴다(런북 lan-dns 참고).
 # nameserver = 맥미니 tailscale IP: 맥미니 :53(OrbStack가 모든 인터페이스에 바인딩) →
 # dns-forward-trigger/servicelb DNAT → AdGuard. 전용 tailscale LB 디바이스(Service 재생성
-# 시 IP 변동)보다 맥미니 IP가 안정적이라 사용자 선택(라이브 검증: 광고 0.0.0.0 차단).
+# 시 IP 변동)보다 맥미니 IP가 안정적이라 사용자 선택.
 resource "tailscale_dns_nameservers" "global" {
   nameservers = [var.dns_nameserver_tailscale_ip]
 }
 
 # 주의: "Override local DNS" 토글은 admin console(DNS 페이지)에서 ON 해야 한다.
 # tailscale_dns_configuration(provider alpha)으로 시도하면 매 apply마다 위 nameservers를
-# 비우는 race가 발생한다(라이브 검증 2026-06-11) — 그래서 IaC 밖에 둔다. 한 번 켜면
+# 비우는 race가 발생한다 — 그래서 IaC 밖에 둔다. 한 번 켜면
 # tailnet 설정으로 유지된다. 켜야 모든 기기가 AdGuard를 전체 DNS로 써서 광고 차단을 받는다.

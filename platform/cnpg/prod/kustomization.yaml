@@ -12,14 +12,14 @@ resources:
   - pgdump-hedge-cronjob.yaml
   - restore-drill-rbac.yaml
   - restore-drill-cronjob.yaml
-  - networkpolicy.yaml # database 계층 ingress 격리 (Pass-5 Open Item #3)
+  - networkpolicy.yaml # database 계층 ingress 격리
 
 generators:
   - secret-generator.yaml # KSOPS — database ns의 세 가지 시드를 전부 렌더 (아래 참조)
 
 # restore-drill ConfigMap은 소스 스크립트로부터 생성되므로 실행 중인 `drill.sh`가
 # 곧 source-of-truth다 — CronJob이 복원 없이 exit 0 할 수 있는 빈/플레이스홀더 경로가
-# 존재하지 않는다(R1). 렌더 테스트(Task 4.10)가 스크립트 내용 존재를 검증한다.
+# 존재하지 않는다. 렌더 테스트가 스크립트 내용 존재를 검증한다.
 configMapGenerator:
   - name: restore-drill-script
     files:

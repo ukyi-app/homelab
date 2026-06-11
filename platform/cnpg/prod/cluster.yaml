@@ -27,8 +27,8 @@ spec:
       min_wal_size: "256MB"
     pg_hba:
       # local-basebackup CronJob의 pg_basebackup은 postgres 유저로 REPLICATION 연결을 연다 —
-      # CNPG 기본 pg_hba는 replication을 streaming_replica(cert)만 허용해 거부된다
-      # (라이브 검증: "no pg_hba.conf entry for replication connection ... user postgres").
+      # CNPG 기본 pg_hba는 replication을 streaming_replica(cert)만 허용하므로 postgres 유저의
+      # replication 연결이 거부된다. 아래 두 줄로 명시 허용해야 한다.
       - hostssl replication postgres 10.42.0.0/16 scram-sha-256
       - host replication postgres 10.42.0.0/16 scram-sha-256
 
@@ -56,12 +56,12 @@ spec:
 
   plugins:
     # enabled는 webhook 주입 기본값이지만 명시 — plugins는 listType 미지정(SSA atomic)이라
-    # 미기재 시 영구 OutOfSync (HTTPRoute group/kind/weight와 동일 클래스, 라이브 검증)
+    # 미기재 시 영구 OutOfSync (HTTPRoute group/kind/weight와 동일 클래스)
     - name: barman-cloud.cloudnative-pg.io
       enabled: true
       isWALArchiver: true
       parameters:
-        barmanObjectName: pg-r2 # -> Task 4.3의 ObjectStore
+        barmanObjectName: pg-r2 # -> object-store.yaml의 ObjectStore
         serverName: pg
 
   monitoring:

@@ -9,7 +9,7 @@ data:
     # /ping에 어떤 POST가 오든 healthchecks.io로 ping 한 번을 보낸다.
     # 주의: busybox 1.36 nc에는 -q 옵션이 없다(invalid option으로 리스너가 즉시 죽어
     # webhook이 영구 connection refused가 되고, while 루프가 healthchecks를 과도하게
-    # ping해 dead-man switch를 무력화한다 — 라이브 검증 2026-06-11).
+    # ping해 dead-man switch를 무력화한다).
     while true; do
       printf 'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok' | nc -l -p 9095 2>/dev/null || true
       wget -q -T 10 -O /dev/null "$HEALTHCHECKS_URL" || echo "ping failed $(date)"
