@@ -1,0 +1,19 @@
+image:
+  repo: ghcr.io/ukyi-app/demo
+  tag: sha-821a8ee1432c30a44de4b8cf70f8235a3c55df30
+kind: api
+replicas: 1
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 128Mi
+route:
+  host: demo.home.ukyi.app
+  paths:
+    - /
+  public: false
+db:
+  enabled: false
