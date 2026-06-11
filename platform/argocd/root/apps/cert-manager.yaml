@@ -4,7 +4,7 @@ metadata:
   name: cert-manager
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-3" # before the barman plugin (-2); provides the plugin's webhook cert
+    argocd.argoproj.io/sync-wave: "-3" # barman plugin(-2)보다 먼저; plugin의 webhook 인증서를 제공
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -12,10 +12,10 @@ spec:
   source:
     repoURL: https://charts.jetstack.io
     chart: cert-manager
-    targetRevision: v1.16.5 # PINNED
+    targetRevision: v1.16.5 # 버전 고정
     helm:
       parameters:
-        # v1.16 replaced the deprecated `installCRDs` with `crds.enabled`.
+        # v1.16에서 deprecated된 `installCRDs`가 `crds.enabled`로 대체되었다.
         - name: crds.enabled
           value: "true"
         - name: crds.keep

@@ -7,7 +7,7 @@ on:
   repository_dispatch:
     types: [app-image]
 
-# SERIALIZED: only one write-back runs at a time; never cancel a partial commit.
+# 직렬화: write-back은 한 번에 하나만 실행; 진행 중인 커밋은 절대 취소하지 않는다.
 # (workflow_run 경로와 repository_dispatch 경로가 같은 그룹을 공유 — 교차 직렬화)
 concurrency:
   group: values-writeback
@@ -15,25 +15,25 @@ concurrency:
 
 permissions:
   contents: write
-  packages: read # docker manifest inspect용 — 없으면 GHCR 조회가 익명 처리돼 digest 검증이 항상 실패
+  packages: read # docker manifest inspect용 — 없으면 GHCR 조회가 익명 처리되어 digest 검증이 항상 실패
 
 jobs:
   writeback:
-    # Only act on a SUCCESSFUL build that ran on THIS repo's `main` (never a fork/PR build) —
-    # else attacker-controlled artifact contents could drive the admin-PAT push.
+    # 이 레포의 `main`에서 돈 성공한 build에만 반응한다 (fork/PR build는 절대 아님) —
+    # 아니면 공격자가 통제한 아티팩트 내용이 admin PAT push를 조종할 수 있다.
     if: >-
       ${{ github.event_name == 'workflow_run'
           && github.event.workflow_run.conclusion == 'success'
           && github.event.workflow_run.head_repository.full_name == github.repository
           && github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-24.04-arm
-    # NO matrix: a SINGLE serialized job bumps ONLY the apps that were actually built
-    # (derived from build.yaml's `built-*` artifacts), verifies each digest exists, commits once.
+    # matrix 없음: 직렬화된 단일 job이 실제로 빌드된 앱만 bump하고
+    # (build.yaml의 `built-*` 아티팩트에서 도출), 각 digest 실존을 검증한 뒤 한 번만 커밋한다.
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
-          token: ${{ secrets.DEPLOY_BOT_PAT }} # OWNER/ADMIN PAT: its push BYPASSES branch protection
+          token: ${{ secrets.DEPLOY_BOT_PAT }} # OWNER/ADMIN PAT: 이 push는 branch protection을 우회한다
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - run: corepack enable && corepack prepare pnpm@10 --activate
@@ -69,11 +69,11 @@ jobs:
         run: |
           git pull --rebase origin main
           for app in $APPS; do
-            # sanitize artifact-derived names: skip anything not a strict lowercase app name
+            # 아티팩트 유래 이름 정제: 엄격한 소문자 앱 이름이 아니면 전부 건너뛴다
             case "$app" in
               ''|*[!a-z0-9-]*) echo "skip suspicious app name: '$app'"; continue ;;
             esac
-            # only deployed apps have a values.yaml to bump (pg-tools has none)
+            # 배포되는 앱만 bump할 values.yaml이 있다 (pg-tools에는 없음)
             [ -f "apps/$app/deploy/prod/values.yaml" ] || { echo "skip $app (no deploy values.yaml)"; continue; }
             echo "verify ghcr.io/$OWNER/$app:$SHA exists BEFORE bumping"
             docker manifest inspect "ghcr.io/$OWNER/$app:$SHA" >/dev/null 2>&1 \

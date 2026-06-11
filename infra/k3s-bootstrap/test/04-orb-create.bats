@@ -8,7 +8,7 @@ setup() {
 #!/usr/bin/env bash
 echo "orb $*" >>"$CALLS"
 case "$1" in
-  list)   cat "${ORB_LIST_FIXTURE:-/dev/null}" ;;  # empty by default = no machines
+  list)   cat "${ORB_LIST_FIXTURE:-/dev/null}" ;;  # 기본은 빈 출력 = 머신 없음
   config) exit 0 ;;
   create) exit 0 ;;
   *)      exit 0 ;;

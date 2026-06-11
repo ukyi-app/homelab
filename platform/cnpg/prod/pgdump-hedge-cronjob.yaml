@@ -4,7 +4,7 @@ metadata:
   name: pg-dump-hedge-r2
   namespace: database
 spec:
-  schedule: "0 4 * * *" # 04:00, after both backups
+  schedule: "0 4 * * *" # 04:00, 두 백업이 끝난 뒤
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -21,7 +21,7 @@ spec:
           securityContext: { runAsUser: 26, runAsGroup: 26, fsGroup: 26 }
           containers:
             - name: pgdump-hedge
-              image: ghcr.io/ukyi-app/pg-tools:16-rclone # BUILT BY M6 (apps/pg-tools/, M6 CI matrix)
+              image: ghcr.io/ukyi-app/pg-tools:16-rclone # M6가 빌드 (apps/pg-tools/, M6 CI matrix)
               command: ["/bin/bash", "-c"]
               args:
                 - |
@@ -41,7 +41,7 @@ spec:
                   rclone delete r2:homelab-pg-backups-prod/pgdump/ --min-age 14d
                   echo "[hedge] OK size=${SIZE}"
               envFrom:
-                - secretRef: { name: cnpg-r2-creds } # M2 seed: RCLONE_CONFIG_R2_* + AWS_* (AWS_REGION=auto)
+                - secretRef: { name: cnpg-r2-creds } # M2 시드: RCLONE_CONFIG_R2_* + AWS_* (AWS_REGION=auto)
               env:
                 # R2 Object-R&W 토큰은 HeadBucket을 거부한다 — rclone의 업로드 전 버킷 체크가
                 # "버킷 없음→CreateBucket(403)"으로 오판하므로 체크를 끈다(라이브 검증에서 확인된 quirk).

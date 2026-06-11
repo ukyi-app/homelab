@@ -1,12 +1,12 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# NO `namespace:` here. A global namespace transformer FORCES every namespaced resource —
-# including the `traefik-ts` Ingress — into one namespace, which would break the Ingress's
-# gateway-ns backend reference. Instead: the operator helmrelease + operator-oauth Secret
-# already declare `namespace: edge`, and the Ingress declares `namespace: gateway`. ArgoCD
-# applies each resource to its own declared namespace.
+# 여기에 `namespace:` 금지. 전역 namespace 트랜스포머는 `traefik-ts` Ingress를 포함한
+# 모든 namespaced 리소스를 한 namespace로 강제해, Ingress의 gateway ns backend 참조를
+# 망가뜨린다. 대신: operator helmrelease + operator-oauth Secret은 이미 `namespace: edge`를
+# 선언하고, Ingress는 `namespace: gateway`를 선언한다. ArgoCD는 각 리소스를 각자 선언된
+# namespace에 apply한다.
 resources:
   - traefik-ingress.yaml
 generators:
   - helmrelease.yaml
-  - secret-generator.yaml # this component's OWN KSOPS generator → operator-oauth (edge)
+  - secret-generator.yaml # 이 컴포넌트 전용 KSOPS generator → operator-oauth (edge)

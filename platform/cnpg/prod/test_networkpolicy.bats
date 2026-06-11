@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# Offline validation of the database-tier NetworkPolicies (Pass-5 Open Item #3).
-# The full `kustomize build platform/cnpg/prod` depends on M2 seeds (see test_kustomize_build.bats),
-# so this suite validates the standalone networkpolicy.yaml — always offline-checkable.
+# database 계층 NetworkPolicy의 오프라인 검증 (Pass-5 Open Item #3).
+# 전체 `kustomize build platform/cnpg/prod`는 M2 시드에 의존하므로(test_kustomize_build.bats 참조),
+# 이 스위트는 독립 파일인 networkpolicy.yaml을 검증한다 — 언제나 오프라인 검증 가능.
 
 NP="${BATS_TEST_DIRNAME}/networkpolicy.yaml"
 KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
@@ -38,7 +38,7 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
 }
 
 @test "egress is intentionally NOT default-denied (CNPG needs API/R2/replication egress)" {
-  # No policy in this file restricts Egress — that is a deliberate, documented scoping decision.
+  # 이 파일의 어떤 policy도 Egress를 제한하지 않는다 — 의도적이며 문서화된 범위 결정.
   run bash -c "yq 'select(.spec.policyTypes[] == \"Egress\")' '$NP'"
   [ -z "$output" ]
 }

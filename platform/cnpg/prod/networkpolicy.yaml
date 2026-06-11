@@ -1,12 +1,12 @@
-# Ingress isolation for the `database` (CNPG) tier — the crown jewel (Pass-5 Open Item #3).
-# Default-deny INGRESS, then allow only the legitimate callers. This is the target side of the
-# "a compromised public app must NOT reach the database" boundary (the source side is enforced in
-# platform/network-policies/prod by prod's egress default-deny).
+# `database`(CNPG) 계층의 ingress 격리 — 핵심 자산(crown jewel) 보호 (Pass-5 Open Item #3).
+# INGRESS default-deny 후 정당한 호출자만 허용한다. 이것은 "침해된 공개 앱이 데이터베이스에
+# 닿으면 안 된다" 경계의 대상(target) 측이다(소스 측은 platform/network-policies/prod의
+# prod egress default-deny가 강제).
 #
-# EGRESS is intentionally NOT default-denied here: CNPG instances must reach the Kubernetes API,
-# the R2 object store (barman/rclone), Telegram/healthchecks, and each other for replication.
-# Mapping all of that precisely needs a live cluster; locking egress down is tracked as future
-# hardening (do it with the live CNPG egress set in front of you, verified by a connectivity test).
+# EGRESS는 의도적으로 default-deny하지 않는다: CNPG 인스턴스는 Kubernetes API,
+# R2 object store(barman/rclone), Telegram/healthchecks, 그리고 복제를 위해 서로에게
+# 접근해야 한다. 이를 정밀하게 매핑하려면 라이브 클러스터가 필요하므로, egress 잠그기는
+# 향후 하드닝 과제로 추적한다(라이브 CNPG egress 목록을 앞에 두고, 연결성 테스트로 검증하며 진행).
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -14,11 +14,11 @@ metadata:
   name: database-default-deny-ingress
   namespace: database
 spec:
-  podSelector: {}            # every pod in `database`
+  podSelector: {}            # `database`의 모든 pod
   policyTypes: [Ingress]
-  # no ingress rules => deny all ingress; the allows below re-open the minimum.
+  # ingress 규칙 없음 => 모든 ingress 거부; 아래 allow들이 최소한만 다시 연다.
 ---
-# Apps (prod namespace) connect to Postgres 5432 only (PgBouncer pg-pooler-rw / Cluster pg-rw).
+# 앱(prod namespace)은 Postgres 5432로만 연결 (PgBouncer pg-pooler-rw / Cluster pg-rw).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -34,7 +34,7 @@ spec:
       ports:
         - { protocol: TCP, port: 5432 }
 ---
-# The CNPG operator (cnpg-system) manages the instances (status/health on 8000, exec, config).
+# CNPG operator(cnpg-system)가 인스턴스를 관리한다 (8000의 status/health, exec, 설정).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -48,7 +48,7 @@ spec:
         - namespaceSelector:
             matchLabels: { kubernetes.io/metadata.name: cnpg-system }
 ---
-# vmagent (observability) scrapes the CNPG metrics exporter on 9187.
+# vmagent(observability)가 9187에서 CNPG metrics exporter를 scrape한다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -64,8 +64,8 @@ spec:
       ports:
         - { protocol: TCP, port: 9187 }
 ---
-# Intra-namespace: streaming replication between instances, PgBouncer→instance, and the in-namespace
-# backup/restore CronJobs (basebackup, pgdump-hedge, restore-drill) connecting to pg-rw:5432.
+# namespace 내부: 인스턴스 간 streaming replication, PgBouncer→인스턴스, 그리고 같은 namespace의
+# 백업/복원 CronJob들(basebackup, pgdump-hedge, restore-drill)이 pg-rw:5432로 연결.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -76,12 +76,12 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        - podSelector: {}      # any pod in the same (database) namespace
+        - podSelector: {}      # 같은(database) namespace의 모든 pod
 ---
-# kubelet liveness/readiness probes are node-sourced; under default-deny-ingress they would be
-# dropped and crash-loop the CNPG instances. Allow the k3s pod/cluster CIDR (default 10.42.0.0/16)
-# to the instance manager (8000), Postgres (5432) and metrics (9187) ports. LIVE: confirm the probe
-# source and widen if k3s' cluster-cidr was customized (tests/posture/network-policy.bats).
+# kubelet liveness/readiness probe는 노드에서 출발한다; default-deny-ingress 아래에서는
+# 드랍되어 CNPG 인스턴스가 crash-loop에 빠진다. k3s pod/cluster CIDR(기본 10.42.0.0/16)에서
+# instance manager(8000), Postgres(5432), metrics(9187) 포트로의 접근을 허용한다.
+# 라이브: probe 소스를 확인하고 k3s cluster-cidr이 커스텀이면 범위를 넓힐 것 (tests/posture/network-policy.bats).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# DEPENDS ON M2: platform/cnpg/prod/r2-creds.enc.yaml is produced by M2's
-# seed-secrets.sh (live, needs real R2 creds). These tests pass only after M2 runs.
+# M2 의존: platform/cnpg/prod/r2-creds.enc.yaml은 M2의 seed-secrets.sh가 생성한다
+# (라이브, 실제 R2 자격증명 필요). 이 테스트들은 M2 실행 이후에만 통과한다.
 
-f=platform/cnpg/prod/r2-creds.enc.yaml # OWNED BY M2 — referenced here
+f=platform/cnpg/prod/r2-creds.enc.yaml # M2 소유 — 여기서는 참조만
 
 @test "M2 seed for cnpg-r2-creds exists" {
   [ -f "$f" ]
@@ -25,5 +25,5 @@ f=platform/cnpg/prod/r2-creds.enc.yaml # OWNED BY M2 — referenced here
 }
 @test "M4 does NOT author a duplicate R2 creds secret" {
   run bash -c "ls platform/cnpg/prod/object-store-creds.enc.yaml 2>/dev/null"
-  [ "$status" -ne 0 ] # the old M4-owned name must not exist
+  [ "$status" -ne 0 ] # 예전 M4 소유 이름이 존재하면 안 된다
 }

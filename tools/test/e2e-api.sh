@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LIVE end-to-end: requires a synced cluster (M1–M5) + the api app deployed. Run with DOMAIN set.
+# 라이브 엔드투엔드: 동기화된 클러스터(M1–M5) + api 앱 배포가 전제. DOMAIN을 설정하고 실행한다.
 set -euo pipefail
 NS=prod
 APP=api

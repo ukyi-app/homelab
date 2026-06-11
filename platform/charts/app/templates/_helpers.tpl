@@ -18,12 +18,12 @@ app.kubernetes.io/name: {{ include "app.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
-{{/* Workloads that listen on http and get a Service/HTTPRoute */}}
+{{/* http를 리슨하며 Service/HTTPRoute를 받는 워크로드 */}}
 {{- define "app.isServed" -}}
 {{- if or (eq .Values.kind "api") (eq .Values.kind "ssr") (eq .Values.kind "spa") -}}true{{- end -}}
 {{- end -}}
 
-{{/* Validation: required-by-kind */}}
+{{/* 검증: kind별 필수 항목 */}}
 {{- define "app.validate" -}}
 {{- if and (include "app.isServed" .) (not .Values.route.host) -}}
 {{- fail (printf "route.host is required for kind=%s" .Values.kind) -}}

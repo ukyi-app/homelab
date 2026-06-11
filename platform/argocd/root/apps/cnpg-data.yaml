@@ -4,7 +4,7 @@ metadata:
   name: cnpg-data
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-1" # after operator(-2), before app migrations(+1)
+    argocd.argoproj.io/sync-wave: "-1" # operator(-2) 이후, 앱 migration(+1) 이전
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:

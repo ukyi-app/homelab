@@ -1,5 +1,5 @@
-# Lean single-node ArgoCD. HA OFF everywhere; processors tuned (§5).
-# M2 OWNS the KSOPS repo-server wiring below; M3/M4/M5 inherit it.
+# 단일 노드용 경량 ArgoCD. HA는 전부 OFF; processor 수 튜닝(§5).
+# 아래 KSOPS repo-server 배선은 M2 소유; M3/M4/M5가 이를 상속한다.
 global:
   domain: argocd.home.ukyi.app
 
@@ -22,10 +22,10 @@ repoServer:
   env:
     - name: ARGOCD_EXEC_TIMEOUT
       value: "90s"
-    # KSOPS reads the age key from the mounted Secret at render time.
+    # KSOPS가 렌더 시점에 마운트된 Secret에서 age 키를 읽는다.
     - name: SOPS_AGE_KEY_FILE
       value: /home/argocd/.config/sops/age/keys.txt
-  # Install the ksops binary + a kustomize-with-exec into the repo-server.
+  # ksops 바이너리 + exec 지원 kustomize를 repo-server에 설치한다.
   initContainers:
     - name: install-ksops
       image: viaductoss/ksops:v4.3.2
@@ -38,7 +38,7 @@ repoServer:
       volumeMounts:
         - name: custom-tools
           mountPath: /custom-tools
-  # Mount the in-cluster sops-age Secret (created by make bootstrap) read-only.
+  # 클러스터 내 sops-age Secret(make bootstrap이 생성)을 read-only로 마운트한다.
   volumes:
     - name: custom-tools
       emptyDir: {}
@@ -58,7 +58,7 @@ repoServer:
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 384Mi }
-  # parallelismLimit tunes diff concurrency (§5).
+  # parallelismLimit는 diff 동시성을 조절한다(§5).
   extraArgs:
     - --parallelismlimit=2
 
@@ -87,12 +87,12 @@ redis:
 
 configs:
   params:
-    server.insecure: true # TLS terminates at Traefik/Tailscale, not ArgoCD.
+    server.insecure: true # TLS는 ArgoCD가 아니라 Traefik/Tailscale에서 종단된다.
   cm:
-    # Enable the KSOPS exec plugin for kustomize-based decryption at render time.
-    # KSOPS (exec) + Traefik/Tailscale HelmChartInflationGenerator (helm) both need their flags.
+    # 렌더 시점 kustomize 기반 복호화를 위해 KSOPS exec 플러그인을 활성화한다.
+    # KSOPS(exec)와 Traefik/Tailscale HelmChartInflationGenerator(helm) 둘 다 각자의 플래그가 필요하다.
     kustomize.buildOptions: "--enable-alpha-plugins --enable-exec --enable-helm"
-    # cuts diff churn ~20-30% (§5)
+    # diff churn을 약 20-30% 줄인다(§5)
     resource.exclusions: |
       - apiGroups: [""]
         kinds: ["Endpoints", "Event"]

@@ -8,7 +8,7 @@ data:
     groups:
       - name: ci-staleness
         rules:
-          # ArgoCD app OutOfSync for >15m → write-back/sync likely broken (R6).
+          # ArgoCD 앱이 15분 넘게 OutOfSync → write-back/sync 고장 가능성 (R6).
           - alert: ArgoCDOutOfSync
             expr: argocd_app_info{sync_status="OutOfSync"} == 1
             for: 15m
@@ -16,7 +16,7 @@ data:
             annotations:
               summary: "ArgoCD app {{ $labels.name }} OutOfSync >15m"
               description: "Tag write-back webhook or sync may have silently failed; cluster may be running yesterday's image."
-          # Recording rule: 1 when the running image digest does NOT match latest GHCR digest.
+          # Recording rule: 실행 중인 이미지 digest가 최신 GHCR digest와 다르면 1.
           - record: app:image_digest_drift
             expr: |
               max by (app) (ghcr_latest_digest)

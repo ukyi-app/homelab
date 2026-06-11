@@ -2,8 +2,8 @@
 set -euo pipefail
 FILE="${1:-docs/memory-ledger.md}"
 budget=$(grep -oE 'LIMIT_BUDGET_MIB=[0-9]+' "$FILE" | head -1 | cut -d= -f2)
-# Only true table rows (contain a pipe) AND carry the row marker, so a prose
-# mention of the marker can never inject a malformed row.
+# 파이프(|)를 포함한 진짜 표 행이면서 row 마커까지 가진 줄만 집계한다 —
+# 본문 산문에서 마커를 언급해도 기형 행이 주입될 수 없게.
 rows=$(grep 'ledger:row' "$FILE" | grep '|' | awk -F'|' '
   {
     gsub(/<!--.*-->/, "", $2); gsub(/^[ \t]+|[ \t]+$/, "", $2);

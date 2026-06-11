@@ -12,5 +12,5 @@ teardown() { docker compose -f tools/dev-postgres/compose.yaml down -v >/dev/nul
 
 @test "seed contains NO email/phone columns (sanitized)" {
   run grep -iE 'email|phone|ssn' tools/dev-postgres/seed.sql
-  [ "$status" -ne 0 ] # grep finds nothing -> exit 1
+  [ "$status" -ne 0 ] # grep이 아무것도 못 찾음 -> exit 1
 }

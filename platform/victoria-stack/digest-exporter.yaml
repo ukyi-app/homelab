@@ -5,15 +5,15 @@ data:
   run.sh: |
     #!/bin/sh
     set -eu
-    # For each app, resolve the latest pushed digest from GHCR for the env-pinned tag.
-    # APPS is a space-separated "name=ghcr.io/owner/name:tag" list injected via env.
+    # 각 앱에 대해 env로 고정된 태그의 최신 push digest를 GHCR에서 조회한다.
+    # APPS는 env로 주입되는 공백 구분 "name=ghcr.io/owner/name:tag" 목록이다.
     NOW=$(date +%s)
     OUT=""
     for entry in $APPS; do
       APP="${entry%%=*}"; REF="${entry#*=}"
       DIGEST=$(skopeo inspect --no-tags "docker://$REF" 2>/dev/null | sed -n 's/.*"Digest": "\(sha256:[a-f0-9]*\)".*/\1/p' | head -1 || true)
       [ -z "$DIGEST" ] && continue
-      # expose as an info gauge: digest carried as a label, value 1
+      # info gauge로 노출: digest는 label로 싣고 값은 1
       OUT="${OUT}ghcr_latest_digest{app=\"$APP\",digest=\"$DIGEST\"} 1 ${NOW}000\n"
     done
     printf "%b" "$OUT" | wget -q -O- --post-file=- 'http://vmsingle:8428/api/v1/import/prometheus' || true

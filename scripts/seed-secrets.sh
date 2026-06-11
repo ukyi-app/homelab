@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# R2 access/secret key pairs are minted out-of-band as scoped R2 API tokens
-# and provided via env (NOT terraform outputs).
+# R2 access/secret 키 쌍은 범위 제한된 R2 API 토큰으로 레포 밖에서 발급되어
+# env로 주입된다 (terraform output이 아님).
 : "${R2_PG_ACCESS_KEY:?set R2_PG_ACCESS_KEY}"
 : "${R2_PG_SECRET_KEY:?set R2_PG_SECRET_KEY}"
-# Alerting fan-out (consumed by M5 vmalert/Alertmanager).
+# 알림 팬아웃 (M5 vmalert/Alertmanager가 소비).
 : "${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN}"
 : "${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID}"
 : "${HEALTHCHECKS_URL:?set HEALTHCHECKS_URL}"
-: "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}" # Grafana admin password (NEVER admin/admin)
+: "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}" # Grafana admin 비밀번호 (admin/admin 절대 금지)
 
 CF_OUT=$(terraform -chdir=infra/cloudflare output -json)
 TS_OUT=$(terraform -chdir=infra/tailscale output -json)
@@ -19,17 +19,17 @@ R2_ENDPOINT=$(jq -r '.r2_account_endpoint.value' <<<"$CF_OUT")
 TS_ID=$(jq -r '.operator_oauth_client_id.value' <<<"$TS_OUT")
 TS_SECRET=$(jq -r '.operator_oauth_client_secret.value' <<<"$TS_OUT")
 
-write_enc() { # $1=path; plaintext-yaml on stdin -> ATOMIC: plaintext NEVER lands at $path
+write_enc() { # $1=path; 평문 yaml을 stdin으로 받음 -> 원자적: 평문이 $path에 닿는 일은 절대 없음
   local path="$1"
   mkdir -p "$(dirname "$path")"
   local tmp
   tmp="$(mktemp)"
   chmod 600 "$tmp"
   trap 'rm -f "$tmp" "$tmp.enc"' RETURN
-  cat >"$tmp" # plaintext stays in a 0600 temp only
+  cat >"$tmp" # 평문은 0600 임시 파일에만 머문다
   sops --encrypt --filename-override "$path" "$tmp" >"$tmp.enc" \
     || { echo "sops failed for $path — NO plaintext written to the target"; return 1; }
-  mv "$tmp.enc" "$path" # atomic: only the ENCRYPTED file lands at $path
+  mv "$tmp.enc" "$path" # 원자적: 암호화된 파일만 $path에 놓인다
   echo "sealed $path"
 }
 
@@ -64,9 +64,9 @@ metadata:
   namespace: database
 type: Opaque
 stringData:
-  # CANONICAL R2 key schema — consumed by BOTH the barman ObjectStore (AWS_*) and the
-  # pg_dump -> rclone hedge (RCLONE_CONFIG_R2_* + AWS_*, region=auto). Do not rename;
-  # object-store.yaml and pgdump-hedge-cronjob.yaml read these exact keys.
+  # 정본(canonical) R2 키 스키마 — barman ObjectStore(AWS_*)와 pg_dump -> rclone 헤지
+  # (RCLONE_CONFIG_R2_* + AWS_*, region=auto) 양쪽이 소비한다. 키 이름 변경 금지;
+  # object-store.yaml과 pgdump-hedge-cronjob.yaml이 정확히 이 키들을 읽는다.
   AWS_ACCESS_KEY_ID: "${R2_PG_ACCESS_KEY}"
   AWS_SECRET_ACCESS_KEY: "${R2_PG_SECRET_KEY}"
   RCLONE_CONFIG_R2_TYPE: "s3"
@@ -77,11 +77,11 @@ stringData:
   RCLONE_CONFIG_R2_REGION: "auto"
 EOF
 
-# pg-app-credentials: the app DB owner role. Consumed by CNPG initdb (database ns) and by
-# the pg_dump hedge. Generated ONCE and committed (SOPS); on re-run / DR the committed file
-# is the source of truth — regenerating would diverge from the password baked into the
-# restored database. (pg_basebackup uses the managed `pg-superuser` secret instead — it
-# needs REPLICATION, which the app role does not have.)
+# pg-app-credentials: 앱 DB 소유자 role. CNPG initdb(database ns)와 pg_dump 헤지가 소비한다.
+# 한 번만 생성해 커밋(SOPS)한다; 재실행/DR 시에는 커밋된 파일이 진실 공급원이다 —
+# 재생성하면 복원된 데이터베이스에 박혀 있는 비밀번호와 어긋난다.
+# (pg_basebackup은 대신 관리형 `pg-superuser` 시크릿을 쓴다 — REPLICATION 권한이 필요한데
+# 앱 role에는 없다.)
 if [ ! -f platform/cnpg/prod/app-credentials.enc.yaml ]; then
   PG_APP_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 32)"
   write_enc platform/cnpg/prod/app-credentials.enc.yaml <<EOF

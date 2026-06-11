@@ -18,6 +18,6 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
 
 @test "helper pod image is arch-pinned to arm64 by digest or arm64 tag" {
   [[ "$LOCAL_PATH_HELPER_IMAGE" == *busybox* ]]
-  # Must be pinned by digest (@sha256) — floating tags break the cattle rebuild.
+  # digest(@sha256)로 고정돼 있어야 한다 — 떠다니는 태그는 cattle 재구축을 깨뜨린다.
   [[ "$LOCAL_PATH_HELPER_IMAGE" == *@sha256:* ]]
 }

@@ -17,7 +17,7 @@ const lines = [
   "",
 ];
 for (const e of v.env ?? []) lines.push(`${e.name}=${e.value ?? ""}`);
-// DB inner-loop default (local containerized Postgres, Task 6.12)
+// DB 이너루프 기본값 (로컬 컨테이너 Postgres, Task 6.12)
 if (v.db?.enabled) lines.push("DATABASE_URL=postgres://dev:dev@localhost:5432/app_dev?sslmode=disable");
 for (const f of v.envFrom ?? []) {
   if (f.secretRef?.name) lines.push(`# from secret: ${f.secretRef.name}  (fill locally; never commit)`);

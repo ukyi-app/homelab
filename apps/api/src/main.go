@@ -18,13 +18,13 @@ var (
 )
 
 func healthzHandler(w http.ResponseWriter, _ *http.Request) {
-	// liveness: process is up, NO external deps.
+	// liveness: 프로세스가 떠 있는지만 본다. 외부 의존성 절대 없음.
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
 }
 
 func readyzHandler(w http.ResponseWriter, _ *http.Request) {
-	// readiness: flips to 503 while draining or if DB not reachable.
+	// readiness: draining 중이거나 DB에 닿지 못하면 503으로 전환된다.
 	if draining.Load() || !dbReady {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte("not ready"))
@@ -42,14 +42,14 @@ func metricsHandler(w http.ResponseWriter, _ *http.Request) {
 }
 
 func runMigrate() error {
-	// app-native migration entrypoint. Real impl runs golang-migrate against DATABASE_URL.
-	// Idempotent + backward-compatible (expand/contract). No-op when nothing to do.
+	// 앱 내장 마이그레이션 진입점. 실제 구현은 DATABASE_URL을 대상으로 golang-migrate를 실행한다.
+	// 멱등 + 하위 호환(expand/contract). 할 일이 없으면 no-op.
 	fmt.Println("migrate: schema up to date")
 	return nil
 }
 
 func checkDB() {
-	// Probe DATABASE_URL; here we mark ready if the env is present.
+	// DATABASE_URL을 프로브한다. 여기서는 env가 있으면 ready로 표시한다.
 	if os.Getenv("DATABASE_URL") != "" {
 		dbReady = true
 	}
@@ -90,7 +90,7 @@ func main() {
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 	<-stop
 
-	// SIGTERM drain: flip readyz -> 503, finish in-flight, exit < 30s.
+	// SIGTERM drain: readyz를 503으로 전환, 처리 중 요청 마무리, 30초 안에 종료.
 	draining.Store(true)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()

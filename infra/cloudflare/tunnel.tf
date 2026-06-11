@@ -10,7 +10,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared" "homelab" {
   config_src    = "cloudflare"
 }
 
-# Ingress rules: public hosts → in-cluster Traefik (plaintext, TLS terminates at edge).
+# Ingress 규칙: public 호스트 → 클러스터 내부 Traefik (plaintext, TLS는 edge에서 종료).
 resource "cloudflare_zero_trust_tunnel_cloudflared_config" "homelab" {
   account_id = var.cloudflare_account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.homelab.id
@@ -35,8 +35,8 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "homelab" {
   }
 }
 
-# v5: the run token is NOT an attribute of the tunnel resource — it is read via
-# this dedicated data source (resource has no `token` export).
+# v5: run 토큰은 tunnel 리소스의 속성이 아니다 — 이 전용 data source로
+# 읽어야 한다 (리소스에는 `token` export가 없음).
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "homelab" {
   account_id = var.cloudflare_account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.homelab.id

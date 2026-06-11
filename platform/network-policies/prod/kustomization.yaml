@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Namespace-level NetworkPolicies for the apps namespace (Pass-5 Open Item #3). Auto-discovered by
-# the platform-components ApplicationSet (path platform/*/prod); it sets namespace: prod + CreateNamespace.
+# 앱 namespace용 namespace 수준 NetworkPolicy (Pass-5 Open Item #3). platform-components
+# ApplicationSet(path platform/*/prod)이 자동 발견; namespace: prod + CreateNamespace 설정.
 namespace: prod
 
 resources:

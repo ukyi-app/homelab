@@ -3,7 +3,7 @@ cj=platform/cnpg/prod/restore-drill-cronjob.yaml
 sh=platform/cnpg/prod/restore-drill-script.sh
 
 @test "drill is recurring (weekly cron)" {
-  grep -qE 'schedule:\s+"0 5 \* \* 0"' "$cj" # Sunday 05:00
+  grep -qE 'schedule:\s+"0 5 \* \* 0"' "$cj" # 일요일 05:00
 }
 @test "drill uses the M6-built pg-tools image" {
   grep -q 'ghcr.io/ukyi-app/pg-tools:16-rclone' "$cj"
@@ -12,7 +12,7 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   grep -q 'bootstrap:' "$sh"
   grep -q 'recovery:' "$sh"
   grep -q 'barmanObjectName: pg-r2' "$sh"
-  grep -q 'pg-restore-drill' "$sh" # the throwaway cluster name
+  grep -q 'pg-restore-drill' "$sh" # 일회용 클러스터 이름
 }
 @test "drill compares row counts and reports pass/fail to Telegram" {
   grep -q 'EXPECTED_ROWS' "$sh"
@@ -25,8 +25,8 @@ sh=platform/cnpg/prod/restore-drill-script.sh
 }
 @test "drill tears the throwaway cluster down — including PVCs/PVs (no ~50GiB/run leak)" {
   grep -q 'delete cluster' "$sh"
-  grep -q 'delete pvc -l "cnpg.io/cluster=' "$sh" # PVCs deleted, not just the Cluster CR
-  grep -q 'delete pv' "$sh"                       # Released (Retain) PVs reaped
+  grep -q 'delete pvc -l "cnpg.io/cluster=' "$sh" # Cluster CR만이 아니라 PVC도 삭제
+  grep -q 'delete pv' "$sh"                       # Released(Retain) PV 회수
 }
 @test "drill script passes shellcheck" {
   run shellcheck "$sh"

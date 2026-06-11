@@ -1,53 +1,53 @@
 # --- image ---
 image:
-  repo: "" # e.g. ghcr.io/owner/api  (required)
-  tag: "" # e.g. sha-<gitsha>       (required, immutable)
+  repo: "" # 예: ghcr.io/owner/api  (필수)
+  tag: "" # 예: sha-<gitsha>       (필수, 불변)
   pullPolicy: IfNotPresent
-# GHCR pull: EMPTY by default = the GHCR packages are PUBLIC (homelab default — anonymous
-# pulls, nothing to provision; the repo's package visibility is set Public). If you keep
-# packages PRIVATE instead, set [{ name: ghcr-pull }] AND have M2 seed a dockerconfigjson
-# Secret `ghcr-pull` in EVERY consuming namespace (prod, database).
+# GHCR pull: 기본은 빈 값 = GHCR 패키지가 PUBLIC (homelab 기본 — 익명 pull,
+# 프로비저닝 불필요; repo의 패키지 가시성을 Public으로 설정). 패키지를 PRIVATE으로
+# 유지하려면 [{ name: ghcr-pull }]을 설정하고, M2가 소비하는 모든 namespace(prod, database)에
+# dockerconfigjson Secret `ghcr-pull`을 시드해야 한다.
 imagePullSecrets: []
 
-# --- workload shape ---
+# --- 워크로드 형태 ---
 kind: api # api | worker | ssr | spa
 replicas: 1
 
-# --- shared Gateway (Milestone 3) — defaults, rarely overridden ---
+# --- 공유 Gateway (Milestone 3) — 기본값, 오버라이드는 드묾 ---
 gateway:
   name: homelab
   namespace: gateway
 
-# --- resources (NO defaults: per-runtime memory is a hard onboarding gate) ---
+# --- resources (기본값 없음: 런타임별 메모리는 강제 온보딩 게이트) ---
 resources:
-  requests: { cpu: "", memory: "" } # MUST be set per app
-  limits: { cpu: "", memory: "" } # MUST be set per app
+  requests: { cpu: "", memory: "" } # 앱별로 반드시 설정
+  limits: { cpu: "", memory: "" } # 앱별로 반드시 설정
 
-# --- config & secrets ---
+# --- 설정 & secret ---
 env: [] # [{name, value}]
 envFrom: [] # [{secretRef: {name}}]
 
-# --- routing (internal-by-default; opt into public) ---
+# --- 라우팅 (기본 internal; public은 명시적 opt-in) ---
 route:
-  host: "" # required for api|ssr|spa
+  host: "" # api|ssr|spa에 필수
   paths: ["/"]
-  public: false # maps to sectionName: web-public (true) / web-internal (false)
+  public: false # sectionName 매핑: web-public (true) / web-internal (false)
 
-# --- database / migrations ---
+# --- 데이터베이스 / migration ---
 db:
   enabled: false
-  migrateCmd: ["migrate"] # command in the app image; run by the wave-1 ArgoCD Sync-hook Job
+  migrateCmd: ["migrate"] # 앱 이미지 내 명령; wave-1 ArgoCD Sync-hook Job이 실행
 
 # --- probes ---
 probes:
   liveness: { path: /healthz }
   readiness: { path: /readyz }
 
-# --- spa serving abstraction ---
+# --- spa 서빙 추상화 ---
 spa:
-  server: sws # sws | caddy   (only used when kind=spa; sws default)
+  server: sws # sws | caddy   (kind=spa일 때만 사용; 기본 sws)
 
-# --- pod hardening (defaults; rarely overridden) ---
+# --- pod 하드닝 (기본값; 오버라이드는 드묾) ---
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532
@@ -62,14 +62,14 @@ securityContext:
 terminationGracePeriodSeconds: 30
 preStopSleepSeconds: 3
 
-# --- ports (contract) ---
+# --- ports (계약) ---
 ports:
   http: 8080
   metrics: 9090
 
 # --- scrape ---
 metrics:
-  enabled: true # adds prometheus.io/scrape annotations
+  enabled: true # prometheus.io/scrape annotation 추가
 
-# --- escape hatch (conscious review gate, §13) ---
+# --- escape hatch (의식적 리뷰 게이트, §13) ---
 extraManifests: []

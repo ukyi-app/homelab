@@ -44,7 +44,7 @@ spec:
             - --httpListenAddr=:8429
             - --remoteWrite.tmpDataPath=/tmpdata
           env:
-            - { name: GOMEMLIMIT, value: "230MiB" } # ~90% of 256Mi
+            - { name: GOMEMLIMIT, value: "230MiB" } # 256Mi의 약 90%
           ports: [{ name: http, containerPort: 8429 }]
           resources:
             requests: { cpu: 50m, memory: 128Mi }

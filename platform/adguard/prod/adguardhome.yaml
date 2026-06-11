@@ -9,13 +9,13 @@ data:
       bind_hosts: ["0.0.0.0"]
       port: 53
       upstream_dns:
-        - https://dns.cloudflare.com/dns-query   # DoH upstream
+        - https://dns.cloudflare.com/dns-query   # DoH 업스트림
         - https://dns.quad9.net/dns-query
       bootstrap_dns: ["1.1.1.1", "9.9.9.9"]
       upstream_mode: load_balance
     filtering:
       rewrites:
-        # split-horizon: every *.int name → STABLE Tailscale IP of Traefik
+        # split-horizon: 모든 *.int 이름 → Traefik의 고정 Tailscale IP
         - domain: "*.home.ukyi.app"
           answer: "<STABLE_TAILSCALE_IP>"     # = tailscale ip -4 homelab (Task 3.7)
       protection_enabled: true
