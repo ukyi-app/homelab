@@ -4,7 +4,11 @@ metadata:
   name: grafana
 spec:
   parentRefs:
-    - name: homelab
+    # group/kind는 CRD 기본값이지만 명시한다 — SSA diff가 atomic 리스트의 서버 주입
+    # 기본값을 drift로 봐서 영구 OutOfSync가 되는 것을 막는다 (라이브 254회 재싱크 루프 검증).
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab
       namespace: gateway
       sectionName: web-internal
   hostnames:
@@ -13,5 +17,8 @@ spec:
     - matches:
         - path: { type: PathPrefix, value: / }
       backendRefs:
-        - name: grafana
+        - group: ""
+          kind: Service
+          name: grafana
           port: 3000
+          weight: 1
