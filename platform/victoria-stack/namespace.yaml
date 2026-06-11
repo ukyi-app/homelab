@@ -4,8 +4,8 @@ metadata:
   name: observability
   labels:
     app.kubernetes.io/part-of: victoria-stack
-    # enforce=restricted는 라이브에서 전 워크로드 생성 거부로 확인됨: node-exporter/Vector DS가
-    # hostPath/host 네트워크를 쓰는 관측 스택 특성상 restricted는 설계상 불가 — baseline으로
-    # 강제하고 restricted는 warn으로 남겨 점진 하드닝 신호로 쓴다.
-    pod-security.kubernetes.io/enforce: baseline
+    # enforce=restricted는 물론 baseline도 라이브에서 node-exporter(hostPID+hostPath)/Vector(hostPath)
+    # DS 생성을 거부함이 확인됨 — hostPath/host namespace는 privileged 프로파일에서만 허용된다.
+    # privileged로 강제하고 restricted는 warn으로 남겨 점진 하드닝 신호로 쓴다 (단일 노드 홈랩 수용).
+    pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/warn: restricted
