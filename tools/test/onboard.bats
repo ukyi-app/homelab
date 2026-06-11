@@ -70,9 +70,13 @@ allowPlaintext: [CACHE_KEY_PREFIX]')
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 500m, memory: 1Gi } }
 replicas: 3')
   run run_onboard "$p" --dry-run; [ "$status" -ne 0 ]; [[ "$output" == *"예산 초과"* ]]
-  p=$(payload api 'kind: api
+  # duplicate: 인-레포 앱이 없으므로 fixture root에 앱을 미리 만들어 중복 거부를 검증
+  fixdup="$(mktemp -d)"; mkdir -p "$fixdup/apps/dup/deploy/prod" "$fixdup/docs"
+  cp "$ROOT/docs/memory-ledger.md" "$fixdup/docs/memory-ledger.md"
+  p=$(payload dup 'kind: api
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }')
-  run run_onboard "$p" --dry-run; [ "$status" -ne 0 ]; [[ "$output" == *"이미 존재"* ]]
+  run run_onboard "$p" --dry-run --repo-root "$fixdup"; [ "$status" -ne 0 ]; [[ "$output" == *"이미 존재"* ]]
+  rm -rf "$fixdup"
   p=$(payload a4 'kind: api
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }
 route: { public: false, host: a4.ukyi.app }')

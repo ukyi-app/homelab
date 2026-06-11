@@ -20,7 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [api, pg-tools]
+        # 사용자 앱은 외부 레포(ukyi-app/<app>)에서 빌드된다. homelab은 플랫폼 ops 이미지만 빌드.
+        app: [pg-tools]
     outputs:
       sha: ${{ github.sha }}
     steps:

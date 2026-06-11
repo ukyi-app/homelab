@@ -1,10 +1,9 @@
 #!/usr/bin/env bats
 WF=".github/workflows/ci.yaml"
 
-@test "ci runs chart-test, env drift, ledger gate, and bats" {
+@test "ci runs chart-test, ledger gate, and bats" {
   run cat "$WF"
   [[ "$output" == *"make chart-test"* ]]
-  [[ "$output" == *"gen-env-example.mjs api --check"* ]]
   [[ "$output" == *"verify:ledger"* ]]
   [[ "$output" == *"bats "* ]]
 }

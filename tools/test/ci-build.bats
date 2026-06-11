@@ -15,10 +15,10 @@ WF=".github/workflows/build.yaml"
   [[ "$output" == *"linux/arm64"* ]]
 }
 
-@test "matrix includes the real apps and pg-tools (16-rclone)" {
+@test "matrix builds only the platform ops image pg-tools (no in-repo apps)" {
   run yq '.jobs.build.strategy.matrix.app' "$WF"
-  [[ "$output" == *"api"* ]]
   [[ "$output" == *"pg-tools"* ]]
+  [[ "$output" != *"api"* ]] # 사용자 앱은 외부 레포에서 빌드 — homelab matrix엔 없음
   run grep -E "pg-tools:16-rclone" "$WF"
   [ "$status" -eq 0 ]
 }
