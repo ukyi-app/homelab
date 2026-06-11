@@ -1,14 +1,20 @@
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+# Traefik :443(websecure)을 tailnet에 TCP passthrough로 노출하는 tailscale LoadBalancer.
+# 예전엔 tailscale Ingress(L7 Serve)로 homelab.<tailnet>.ts.net cert를 종단했으나, 그러면
+# *.home.ukyi.app SNI를 못 받아 브라우저가 cert 불일치로 실패했다. 이제 L4 passthrough로
+# 바꿔 TLS가 Traefik까지 도달하고, Traefik이 web-internal-tls 리스너의 와일드카드 cert로
+# 종단한다. 체인: 기기 → AdGuard(*.home → 이 디바이스 IP) → (TCP, tailnet 암호화) → Traefik :443.
+apiVersion: v1
+kind: Service
 metadata:
   name: traefik-ts
   namespace: gateway
-
+  annotations:
+    tailscale.com/hostname: homelab # → homelab.<tailnet>.ts.net + 안정적 100.x IP
 spec:
-  ingressClassName: tailscale
-  defaultBackend:
-    service:
-      name: traefik
-      port: { number: 80 }
-  tls:
-    - hosts: ["homelab"] # → homelab.<tailnet>.ts.net, Tailscale 발급 TLS
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app.kubernetes.io/instance: traefik-gateway
+    app.kubernetes.io/name: traefik
+  ports:
+    - { name: https, port: 443, targetPort: websecure, protocol: TCP } # → Traefik :8443
