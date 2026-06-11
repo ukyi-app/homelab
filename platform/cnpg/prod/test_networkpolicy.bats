@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# database 계층 NetworkPolicy의 오프라인 검증 (Pass-5 Open Item #3).
+# database 계층 NetworkPolicy의 오프라인 검증.
 # 전체 `kustomize build platform/cnpg/prod`는 M2 시드에 의존하므로(test_kustomize_build.bats 참조),
 # 이 스위트는 독립 파일인 networkpolicy.yaml을 검증한다 — 언제나 오프라인 검증 가능.
 
@@ -45,7 +45,7 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
 
 @test "kubelet probe ingress is node-only (pod-CIDR-wide ipBlock would defeat default-deny)" {
   p="$(yq 'select(.metadata.name=="database-allow-ingress-kubelet-probes")' "$NP")"
-  [[ "$p" == *"cidr: 10.42.0.1/32"* ]]   # 노드(cni0)만 — /16은 전 파드에 5432 개방 (라이브 침해 검증)
+  [[ "$p" == *"cidr: 10.42.0.1/32"* ]]   # 노드(cni0)만 — /16은 전 파드에 5432 개방
   [[ "$p" != *"cidr: 10.42.0.0/16"* ]]
   [[ "$p" == *"port: 8000"* ]]
   [[ "$p" != *"port: 5432"* ]]           # probe 정책에 5432가 되살아나면 안 된다

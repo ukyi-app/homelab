@@ -66,7 +66,7 @@ spec:
     spec:
       serviceAccountName: vector
       # k3s가 쓰는 /var/log/pods/**/*.log는 root:root 0640이라 비root는 읽지 못한다 —
-      # nobody(65534)로는 17시간 동안 수집 0이었다(라이브 검증). 노드 로그 수집 DaemonSet의
+      # nobody(65534)로는 로그 수집이 전혀 되지 않는다. 노드 로그 수집 DaemonSet의
       # 표준대로 root로 실행한다(observability ns는 PSA privileged). 파일은 readOnly 마운트.
       securityContext: { runAsUser: 0, runAsGroup: 0 }
       containers:

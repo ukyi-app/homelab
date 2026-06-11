@@ -133,7 +133,7 @@ if (!DRY) {
   writeFileSync(`${appDir}/deploy/prod/source-repo`, `${repo}\n`); // bump의 발신자 바인딩 검증용
   // kustomization.yaml은 secrets 유무와 무관하게 항상 필요하다 — appset source #3가 이 디렉토리를
   // kustomize로 렌더하는데, 없으면 ArgoCD가 values.yaml/source-repo를 매니페스트로 파싱해
-  // "groupVersion shouldn't be empty"로 죽는다(라이브 검증 — secrets 없는 demo 앱에서 발견).
+  // "groupVersion shouldn't be empty"로 죽는다.
   writeFileSync(`${appDir}/deploy/prod/kustomization.yaml`, toYaml({
     apiVersion: "kustomize.config.k8s.io/v1beta1", kind: "Kustomization",
     namespace: "prod",

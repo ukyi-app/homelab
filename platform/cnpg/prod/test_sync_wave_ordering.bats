@@ -13,8 +13,8 @@
 }
 @test "shared app chart runs migrate as a wave-1 ArgoCD Sync hook" {
   # Milestone 6 소유 차트를 상대로 검증; 마일스톤 간 계약이다.
-  # Pass-5 Open Item #2가 이를 Helm pre-install/pre-upgrade hook(ArgoCD의 PreSync 단계,
-  # wave-0 설정 이전에 실행)에서 wave-0 설정 이후에 실행되는 ArgoCD Sync hook으로 옮겼다.
+  # migrate는 Helm pre-install/pre-upgrade hook(ArgoCD PreSync 단계, wave-0 설정 이전 실행)이
+  # 아니라 ArgoCD Sync hook으로 둔다 — wave-0 설정이 끝난 뒤 마이그레이션이 돌아야 하기 때문.
   test -f platform/charts/app/templates/migrate-job.yaml || skip "chart from M6 not present yet"
   grep -qE 'argocd.argoproj.io/hook:\s*Sync' platform/charts/app/templates/migrate-job.yaml
   grep -qE 'sync-wave:\s*"1"' platform/charts/app/templates/migrate-job.yaml

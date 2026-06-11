@@ -14,12 +14,12 @@ rules:
     verbs: ["get", "list", "create"]
   - apiGroups: [""] # drill 클러스터의 PVC 삭제용 (없으면 실행당 ~50GiB 누수)
     resources: ["persistentvolumeclaims"]
-    # watch: kubectl delete --wait가 삭제 완료를 watch로 추적 (없으면 에러 노이즈 — 라이브 검증)
+    # watch: kubectl delete --wait가 삭제 완료를 watch로 추적 (없으면 에러 노이즈 발생)
     verbs: ["get", "list", "watch", "delete"]
 ---
 # 클러스터 전역 PV 권한 없음. mutable 이미지를 실행하는 Job에 모든 PersistentVolume의
 # delete 권한을 주는 것은 자충수다(불량 이미지/스크립트가 라이브 PV를 지울 수 있고,
-# 클라이언트 측 이름 필터는 인가 경계가 아니다 — Pass-4 발견 사항). 대신 drill 클러스터는
+# 클라이언트 측 이름 필터는 인가 경계가 아니다). 대신 drill 클러스터는
 # 전용 `drill-ssd` StorageClass(reclaimPolicy=Delete)를 사용하므로, drill PVC 삭제(위의
 # namespace Role)만으로 해당 PV가 자동 제거된다 — PV 권한 불필요.
 apiVersion: rbac.authorization.k8s.io/v1

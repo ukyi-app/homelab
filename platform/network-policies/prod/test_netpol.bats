@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# `prod` 앱 namespace NetworkPolicy의 오프라인 검증 (Pass-5 Open Item #3).
+# `prod` 앱 namespace NetworkPolicy의 오프라인 검증.
 # 이 컴포넌트는 secret/CRD가 없어 일반 kustomize만으로 오프라인 빌드된다.
 
 DIR="${BATS_TEST_DIRNAME}"
@@ -54,7 +54,7 @@ build() { kustomize build "$DIR"; }
   [[ "$obs" == *"port: 9090"* ]]
   probes="$(build | yq 'select(.metadata.name=="allow-ingress-kubelet-probes")')"
   [[ "$probes" == *"ipBlock"* ]]
-  [[ "$probes" == *"cidr: 10.42.0.1/32"* ]]   # 노드(cni0)만 — /16은 default-deny 무력화 (라이브 침해 검증)
+  [[ "$probes" == *"cidr: 10.42.0.1/32"* ]]   # 노드(cni0)만 — /16은 default-deny 무력화
   [[ "$probes" != *"cidr: 10.42.0.0/16"* ]]
 }
 

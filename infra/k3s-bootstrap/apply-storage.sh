@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 렌더링(고정된 arm64 helper 이미지 + bulk 노드 경로 치환) 후 듀얼 local-path provisioner와
 # 두 StorageClass를 클러스터에 apply한다. bulk-ssd를 연결하기 전에 외부 SSD가 VM 내부에서
-# 실제로 마운트되어 있고 쓰기 가능한지 게이트한다(Pass-5 Open Item #1) — bulk-ssd가
-# 조용히 VM 디스크에 자리잡았다가 cattle 재구축 때 유실되는 일을 막기 위함.
+# 실제로 마운트되어 있고 쓰기 가능한지 게이트한다 — bulk-ssd가 조용히 VM 디스크에 자리잡았다가
+# cattle 재구축 때 유실되는 일을 막기 위함.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,7 +13,7 @@ ORB_MACHINE="${ORB_MACHINE:-k3s}"
 
 command -v kubectl >/dev/null 2>&1 || { echo "FAIL: kubectl not on PATH." >&2; exit 2; }
 
-# --- bulk-ssd 백킹 스토어 게이트 (Pass-5 Open Item #1) -------------------------------------------
+# --- bulk-ssd 백킹 스토어 게이트 -----------------------------------------------------------------
 # bulk-ssd는 OrbStack이 VM으로 공유하는 외부 SSD(virtiofs)에 있어야 하며, 절대 VM/내장
 # 디스크에 조용히 놓이면 안 된다(cattle 재구축 시 유실). 독립적인 검사 두 가지, 둘 다 필수:
 #   (1) 호스트 측 (macOS `diskutil`): $BULK_EXTERNAL_HOST_PATH 가 물리적으로 외장 디스크에
@@ -26,7 +26,7 @@ command -v kubectl >/dev/null 2>&1 || { echo "FAIL: kubectl not on PATH." >&2; e
 gate_fail() {
   {
     echo "FAIL: $1"
-    echo "      This guards bulk-ssd from silently landing on the VM disk and being lost on rebuild (Pass-5 #1)."
+    echo "      This guards bulk-ssd from silently landing on the VM disk and being lost on rebuild."
     echo "      Fix: create the external 'homelab' APFS volume + grant OrbStack access — see docs/runbooks/external-ssd.md."
     echo "      Dev/inner-loop without the SSD: BULK_ALLOW_VM_DISK=1 $0"
   } >&2

@@ -37,7 +37,7 @@ metadata:
 spec:
   parentRefs:
     # group/kind/weight는 CRD 기본값이지만 명시 — SSA atomic 리스트의 서버 주입 기본값으로 인한
-    # 영구 OutOfSync 방지 (라이브 검증).
+    # 영구 OutOfSync 방지.
     - group: gateway.networking.k8s.io
       kind: Gateway
       name: homelab

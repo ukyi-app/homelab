@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# bulk-ssd 백킹 스토어 게이트의 VM 내부 절반 (Pass-5 Open Item #1). apply-storage.sh가 이것을
+# bulk-ssd 백킹 스토어 게이트의 VM 내부 절반. apply-storage.sh가 이것을
 # root로 k3s VM에 파이프한다(`orb -m k3s -u root env … sh -s < bulk-gate-probe.sh`); 또한
 # test/08-bulk-gate.bats가 직접 실행해 실제 findmnt/sentinel 로직이 실제로 검증되게 한다.
 #
