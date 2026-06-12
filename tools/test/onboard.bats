@@ -164,10 +164,12 @@ secrets: []'
   [ -z "$bad" ]
 }
 
-@test "onboard: payload via toJSON env, PAT-created PR, ledger gate first" {
+@test "onboard: payload via toJSON env, app-token-created PR, ledger gate first" {
   f="$ROOT/.github/workflows/onboard.yaml"
   grep -q 'toJSON(github.event.client_payload)' "$f"
-  grep -q 'DEPLOY_BOT_PAT' "$f"
+  # GITHUB_TOKEN PR은 required check를 트리거하지 않는다 — writer App 토큰발 PR이어야 한다
+  grep -qE 'create-github-app-token@[0-9a-f]{40}' "$f"
+  grep -q 'HOMELAB_WRITER_APP_ID' "$f"
   grep -q 'verify:ledger' "$f"
   grep -q 'kubeconform' "$f"
 }
