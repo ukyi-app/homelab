@@ -57,19 +57,45 @@ jobs:
           node tools/validate-mutation.mjs --action "$ACTION" --payload-file /tmp/payload.json
           echo "action=$ACTION" >> "$GITHUB_OUTPUT"
 
-  # 라우팅 스켈레톤 — 각 reusable(_create-app/_create-database/_create-cache/_teardown/_audit)은
-  # Phase 4/5/6에서 추가된다. activate-app은 Task 3.3의 Healthy 게이트 잡.
+  # ── 라우팅: validator 통과 입력만 reusable로 전달된다 ──────────────────────────────
+  create-app:
+    needs: validate
+    if: needs.validate.outputs.action == 'create-app'
+    uses: ./.github/workflows/_create-app.yml
+    with:
+      app_repo: ${{ github.event.inputs.app_repo }}
+      sha: ${{ github.event.inputs.sha }}
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
+
+  update-secrets:
+    needs: validate
+    if: needs.validate.outputs.action == 'update-secrets'
+    uses: ./.github/workflows/_update-secrets.yml
+    with:
+      app_repo: ${{ github.event.inputs.app_repo }}
+      sha: ${{ github.event.inputs.sha }}
+    secrets: inherit
+    permissions:
+      contents: read
+
+  # 미구현 액션 라우팅 스켈레톤 — _create-database/_create-cache/_teardown/_audit는
+  # Phase 5/6에서 추가. activate-app은 클러스터 접근 제약으로 owner 로컬 경로(런북).
   route:
     needs: validate
+    if: >-
+      ${{ !contains(fromJSON('["create-app","update-secrets"]'), needs.validate.outputs.action) }}
     runs-on: ubuntu-24.04-arm
     steps:
       - env:
           ACTION: ${{ needs.validate.outputs.action }}
-        run: echo "라우팅: $ACTION (reusable 연결은 Phase 4/5/6에서)"
+        run: echo "라우팅: $ACTION (reusable 연결은 Phase 5/6에서; activate-app은 런북의 로컬 경로)"
 
   # 거부/실패가 조용히 묻히지 않게 — owner는 Actions UI 외에 Telegram으로도 본다
   notify-failure:
-    needs: [validate, route]
+    needs: [validate, create-app, update-secrets, route]
     if: failure()
     runs-on: ubuntu-24.04-arm
     steps:

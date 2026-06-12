@@ -9,9 +9,11 @@ setup() { F="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/.github/workflows/dispatch-
   grep -q "cancel-in-progress: false" "$F"
 }
 
-@test "dispatcher inputs reach run steps only via env (no inline interpolation)" {
-  # github.event.inputs 참조는 env 할당(:) 또는 주석에만 — run 인라인 보간 금지
-  bad=$(grep -n 'github.event.inputs' "$F" | grep -vE '^[0-9]+:[[:space:]]*(#|[A-Z_]+:)' || true)
+@test "dispatcher inputs reach run steps only via env or reusable with: (no inline interpolation)" {
+  # github.event.inputs 참조는 env 할당([A-Z_]:), reusable with: 입력(소문자 키), 주석에만 —
+  # run 인라인 보간 금지 (with:는 구조적 전달이라 셸 주입 표면이 아니다)
+  bad=$(grep -n 'github.event.inputs' "$F" \
+    | grep -vE '^[0-9]+:[[:space:]]*(#|[A-Z_]+:|(app|app_repo|sha|resource|spec|action):)' || true)
   [ -z "$bad" ]
 }
 
