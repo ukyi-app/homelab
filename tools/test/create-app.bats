@@ -133,3 +133,10 @@ EOF
   [ "$status" -eq 0 ]
   [ -f "$FR/apps/orders/deploy/prod/kustomization.yaml" ]
 }
+
+@test "create-app refuses a tombstoned resource reference (teardown race guard)" {
+  echo '{"db:orders":{"state":"retained"}}' > "$FR/platform/data-conn/prod/.tombstones.json"
+  gen
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "tombstone"
+}

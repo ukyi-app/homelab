@@ -86,6 +86,11 @@ for (const e of config.env ?? [])
 // 미생성 리소스 가드: db/redis 참조는 create-database/create-cache 산출물이 선재해야 한다
 const dbs = config.db ?? [];
 const caches = config.redis ?? [];
+// tombstone 가드: teardown이 표시한 리소스는 신규 참조 금지(철거와 열린 create-app PR의 경쟁 차단)
+const tombPath = `${ROOT}/platform/data-conn/prod/.tombstones.json`;
+const tombs = existsSync(tombPath) ? JSON.parse(readFileSync(tombPath, "utf8")) : {};
+for (const n of dbs) if (tombs[`db:${n}`]) fail(`db '${n}'은 tombstone 상태(${tombs[`db:${n}`].state}) — 신규 참조 불가`);
+for (const n of caches) if (tombs[`cache:${n}`]) fail(`cache '${n}'은 tombstone 상태(${tombs[`cache:${n}`].state}) — 신규 참조 불가`);
 for (const n of dbs) {
   if (!existsSync(`${ROOT}/platform/cnpg/prod/databases/${n}.yaml`) ||
       !existsSync(`${ROOT}/platform/data-conn/prod/db-${n}-conn.sealed.yaml`))
