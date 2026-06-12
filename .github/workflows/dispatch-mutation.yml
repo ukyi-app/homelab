@@ -1,0 +1,84 @@
+# 중앙 mutation dispatcher — 모든 생성/파괴 변이의 단일 진입점 (homelab-initiated만).
+# 트리거 경계(런북 app-platform): 앱 레포는 어떤 homelab-write 자격도 없다 — owner가 여기서
+# workflow_dispatch로 실행하고, homelab이 reader App 토큰으로 앱 레포 config를 SHA 고정 read한다.
+# update-image는 이 dispatcher가 아니라 GHCR 폴링(bump-poll.yml)이 권위 처리한다.
+name: dispatch-mutation
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: create-app|activate-app|update-secrets|create-database|create-cache|teardown-app|teardown-resource|audit
+        required: true
+      app:
+        description: "앱 이름 (activate-app/teardown-app용)"
+        required: false
+      app_repo:
+        description: "ukyi-app/<app> (create-app/update-secrets용)"
+        required: false
+      sha:
+        description: "SHA — create-app/update-secrets: 앱 레포 커밋 SHA(config read), activate-app: homelab 머지 SHA(노출할 revision)"
+        required: false
+      resource:
+        description: "db:<name> | cache:<name> (teardown-resource용)"
+        required: false
+      spec:
+        description: "JSON 스펙 (create-database/create-cache)"
+        required: false
+
+# 전역 직렬화: 모든 homelab-mutation 워크플로(dispatcher/bump-poll/iac/tf-reconcile)가 같은 그룹.
+# queue: max — 기본(single)은 pending 1건만 유지해 동시 3번째가 대기 건을 취소(변이 누락).
+# max는 100건 FIFO 큐잉(2026-05 GA). cancel-in-progress와 병용 불가 — 절대 true로 바꾸지 말 것.
+# 잔여 안전망: 스케줄 멱등 reconcile(bump-poll/tf-reconcile)이 취소·실패를 다음 주기에 수렴시킨다.
+concurrency:
+  group: homelab-mutation
+  cancel-in-progress: false
+  queue: max
+
+# 검증/라우팅은 읽기만 — main 쓰기는 각 reusable이 writer App 토큰의 PR-first 경로로 수행한다.
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      action: ${{ steps.v.outputs.action }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - id: v
+        env:
+          ACTION: ${{ github.event.inputs.action }} # owner 입력도 비신뢰 — env 경유, 인라인 보간 금지
+          PAYLOAD: ${{ toJSON(github.event.inputs) }}
+        run: |
+          printf '%s' "$PAYLOAD" > /tmp/payload.json
+          node tools/validate-mutation.mjs --action "$ACTION" --payload-file /tmp/payload.json
+          echo "action=$ACTION" >> "$GITHUB_OUTPUT"
+
+  # 라우팅 스켈레톤 — 각 reusable(_create-app/_create-database/_create-cache/_teardown/_audit)은
+  # Phase 4/5/6에서 추가된다. activate-app은 Task 3.3의 Healthy 게이트 잡.
+  route:
+    needs: validate
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - env:
+          ACTION: ${{ needs.validate.outputs.action }}
+        run: echo "라우팅: $ACTION (reusable 연결은 Phase 4/5/6에서)"
+
+  # 거부/실패가 조용히 묻히지 않게 — owner는 Actions UI 외에 Telegram으로도 본다
+  notify-failure:
+    needs: [validate, route]
+    if: failure()
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ACTION: ${{ github.event.inputs.action }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d text="mutation FAILED: action=${ACTION} ${RUN_URL}"
