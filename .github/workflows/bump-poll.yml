@@ -1,0 +1,101 @@
+# update-image 권위 경로 — GHCR 폴링 bump (앱 레포 자격/입력 0, 트리거 경계 런북 참고).
+# 스케줄 멱등: 취소/실패해도 다음 주기가 자동 수렴한다(변이 누락 자가 치유).
+# 즉시 반영이 필요하면 owner가 workflow_dispatch로 수동 트리거.
+name: bump-poll
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: homelab-mutation
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+  packages: read # docker imagetools inspect — GHCR digest 해석
+
+jobs:
+  poll:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      # reader App: 앱 레포 main 커밋/compare 조회 (Contents:read, 앱 레포에만 설치)
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: reader
+        with:
+          app-id: ${{ secrets.HOMELAB_READER_APP_ID }}
+          private-key: ${{ secrets.HOMELAB_READER_APP_PRIVATE_KEY }}
+          owner: ukyi-app # cross-repo read — owner 미지정이면 현재 레포로만 제한된다
+          permission-contents: read
+      # writer App: homelab 브랜치 push + PR (PR-first 쓰기 모델)
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: writer
+        with:
+          app-id: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+          private-key: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ steps.writer.outputs.token }}
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: pnpm install --frozen-lockfile
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: plan (신뢰 경계: 바인딩 + GitHub/GHCR 사실만)
+        env:
+          GH_TOKEN: ${{ steps.reader.outputs.token }}
+        run: |
+          node tools/poll-ghcr.mjs --root . > /tmp/plan.json
+          jq -r '.[] | "\(.app): \(.action) \(.reason // "")"' /tmp/plan.json
+      - name: bump → PR (autoDeploy만 auto-merge; 승인 앱은 사람 머지 = 승인)
+        env:
+          GH_TOKEN: ${{ steps.writer.outputs.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          git config user.name "homelab-bot"
+          git config user.email "bot@users.noreply.github.com"
+          count=$(jq 'map(select(.action == "bump" or .action == "propose-pr")) | length' /tmp/plan.json)
+          [ "$count" -gt 0 ] || { echo "변경 없음 — no-op"; exit 0; }
+          jq -c '.[] | select(.action == "bump" or .action == "propose-pr")' /tmp/plan.json |
+          while read -r item; do
+            app=$(echo "$item" | jq -r .app)
+            tag=$(echo "$item" | jq -r .candidate.tag)
+            digest=$(echo "$item" | jq -r .candidate.digest)
+            action=$(echo "$item" | jq -r .action)
+            # 플래너 출력도 한 번 더 정제(심층 방어) — bump-tag.mjs가 재검증한다
+            case "$app" in ''|*[!a-z0-9-]*) echo "skip suspicious app: '$app'"; continue ;; esac
+            git checkout main
+            branch="bump-poll/${app}-${RUN_ID}"
+            git checkout -b "$branch"
+            node tools/bump-tag.mjs "$app" "$tag" --digest "$digest"
+            git add "apps/$app/deploy/prod/values.yaml"
+            git commit -m "chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)"
+            git push -u origin "$branch"
+            if [ "$action" = "bump" ]; then
+              gh pr create --base main --head "$branch" \
+                --title "chore: ${app} 이미지 갱신 (자동)" \
+                --body "GHCR 폴링 bump — main reachable + descendant + digest 핀 검증 통과. gate 통과 시 auto-merge."
+              gh pr merge --auto --squash "$branch" || gh pr merge --squash "$branch"
+            else
+              gh pr create --base main --head "$branch" \
+                --title "chore: ${app} 이미지 갱신 (승인 대기)" \
+                --body "autoDeploy:false — **머지 = 배포 승인**. GHCR 폴링이 검증한 후보(digest 핀)."
+            fi
+          done
+      - name: telegram notify (실패 시)
+        if: failure()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" -d text="bump-poll FAILED: ${RUN_URL}"
