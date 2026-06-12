@@ -1,0 +1,101 @@
+# create-database reusable — dispatcher(action=create-database)가 호출한다.
+# spec(JSON)은 비신뢰 입력: env 경유로만 다루고 인라인 `${{ }}` 보간은 금지(검증 산출물 제외).
+# 비밀번호는 provision-db.mjs가 내부 생성해 kubeseal로 즉시 봉인 — raw URL/비밀번호는
+# 로그·PR·Telegram 어디에도 나타나지 않는다(핸들 이름만 통지).
+# 머지 후 반영은 ArgoCD automated sync: cnpg-data(database NS) + data-conn-prod(prod NS).
+name: _create-database
+on:
+  workflow_call:
+    inputs:
+      spec:
+        description: 'JSON 스펙 — {"name": "<db>", "extensions": ["..."]} (owner는 받지 않음 — name 고정)'
+        required: true
+        type: string
+
+jobs:
+  provision:
+    runs-on: ubuntu-24.04-arm
+    # main 쓰기는 writer App 토큰의 PR-first 경로 — workflow 자체 권한은 읽기만
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: writer
+        with:
+          app-id: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+          private-key: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ steps.writer.outputs.token }}
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: spec 재검증 + name/extensions 추출 (defense-in-depth — dispatcher 외 호출 경로 대비)
+        id: spec
+        env:
+          SPEC: ${{ inputs.spec }} # 비신뢰 입력 — env 경유만, run 안 인라인 보간 금지
+        run: |
+          jq -n --arg action create-database --arg spec "$SPEC" \
+            '{action: $action, spec: $spec}' > /tmp/payload.json
+          node tools/validate-mutation.mjs --action create-database --payload-file /tmp/payload.json
+          name=$(printf '%s' "$SPEC" | jq -r '.name')
+          printf '%s' "$name" | grep -Eq '^[a-z]([a-z0-9-]*[a-z0-9])?$' \
+            || { echo "::error::spec.name 형식 불량"; exit 1; }
+          exts=$(printf '%s' "$SPEC" | jq -r '(.extensions // []) | join(",")')
+          { echo "name=$name"; echo "extensions=$exts"; } >> "$GITHUB_OUTPUT"
+      - name: kubeseal 설치 + 봉인 cert 확인
+        run: |
+          # cert가 아직 없으면(컨트롤러 미가동/미수확) 어떤 산출도 만들지 않고 중단
+          [ -f tools/sealed-secrets-cert.pem ] || { echo "::error::tools/sealed-secrets-cert.pem 없음 — sealed-secrets 컨트롤러 가동 후 'kubeseal --fetch-cert'로 받아 커밋해야 한다"; exit 1; }
+          # 버전 핀: platform/sealed-secrets 차트 2.18.6의 appVersion(0.37.0)과 동일
+          curl -fsSL https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.37.0/kubeseal-0.37.0-linux-arm64.tar.gz \
+            | sudo tar xz -C /usr/local/bin kubeseal
+          kubeseal --version
+      - name: 프로비저닝 (비밀번호 내부 생성 — 어떤 출력에도 비노출)
+        env:
+          NAME: ${{ steps.spec.outputs.name }} # 검증 통과 산출물(regex 강제)만 사용
+          EXTS: ${{ steps.spec.outputs.extensions }}
+        run: |
+          if [ -n "$EXTS" ]; then
+            node tools/provision-db.mjs --name "$NAME" --extensions "$EXTS" | tee /tmp/plan.json
+          else
+            node tools/provision-db.mjs --name "$NAME" | tee /tmp/plan.json
+          fi
+      - name: PR 생성 + auto-merge (PR-first — App 토큰은 branch protection 우회 불가)
+        env:
+          GH_TOKEN: ${{ steps.writer.outputs.token }}
+          NAME: ${{ steps.spec.outputs.name }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          git config user.name "homelab-bot"
+          git config user.email "bot@users.noreply.github.com"
+          branch="create-database/${NAME}-${RUN_ID}"
+          git checkout -b "$branch"
+          git add platform/cnpg/prod platform/data-conn/prod
+          git commit -m "feat: ${NAME} 논리 DB 프로비저닝 (create-database)"
+          git push -u origin "$branch"
+          {
+            echo "create-database 자동 생성 PR — 머지되면 ArgoCD가 cnpg-data(database NS)와 data-conn-prod(prod NS)를 싱크한다."
+            echo
+            echo '```json'; cat /tmp/plan.json; echo '```'
+            echo; echo "### 머지 후 체크리스트"
+            jq -r '.checklist[] | "- [ ] " + .' /tmp/plan.json
+          } > /tmp/pr-body.md
+          gh pr create --base main --head "$branch" \
+            --title "feat: ${NAME} DB 생성 (create-database)" --body-file /tmp/pr-body.md
+          gh pr merge --auto --squash "$branch" || gh pr merge --squash "$branch"
+      - name: telegram notify (핸들 이름만 — URL/비밀번호 금지)
+        if: always()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NAME: ${{ steps.spec.outputs.name }}
+          STATUS: ${{ job.status }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d text="create-database ${STATUS}: db=${NAME} — 핸들 db-${NAME}-conn / db-${NAME}-ro-conn (prod)"
