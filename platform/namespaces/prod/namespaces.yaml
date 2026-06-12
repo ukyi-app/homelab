@@ -22,3 +22,9 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: sealed-secrets
+---
+# cache: 앱별 경량 Valkey 인스턴스(platform/cache) — hostPath 없음, PSA baseline로 충분.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cache
