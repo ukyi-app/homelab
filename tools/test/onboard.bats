@@ -174,12 +174,14 @@ secrets: []'
   grep -q 'kubeconform' "$f"
 }
 
-@test "reusable-app-build: arm64 + quoted jq args + onboard/image split + approval gate job" {
+@test "reusable-app-build v1: build-only, dispatch jobs gone, dispatch-pat optional-compat" {
   f="$ROOT/.github/workflows/reusable-app-build.yaml"
   grep -q 'workflow_call' "$f"
   grep -q 'linux/arm64' "$f"
-  grep -q 'jq -n --arg' "$f"
-  grep -q 'app-onboard' "$f"
-  grep -q 'app-image' "$f"
-  grep -q 'environment: production' "$f"
+  # v1: homelab dispatch 경로 전부 제거 — 배포 반영은 bump-poll(GHCR 폴링)이 권위
+  run grep -E "repos/.*/dispatches|app-onboard|app-image|environment: production" "$f"
+  [ "$status" -ne 0 ]
+  # 호환 장치: dispatch-pat은 required:false 선언만 유지(미사용) — caller 검증 실패 방지
+  grep -q 'dispatch-pat' "$f"
+  grep -A1 'dispatch-pat' "$f" | grep -vq 'required: true'
 }
