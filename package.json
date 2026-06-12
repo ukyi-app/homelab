@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "node tools/dev.mjs",
+    "secret:seal": "node tools/seal-secret.mjs",
     "verify:ledger": "scripts/ledger-to-json.sh docs/memory-ledger.md > /tmp/ledger.json && conftest test /tmp/ledger.json --policy policy/ledger.rego",
     "verify:skeleton": "./scripts/check-skeleton.sh"
   },
