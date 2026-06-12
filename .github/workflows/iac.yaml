@@ -6,8 +6,19 @@ on:
       - "platform/argocd/**"
       - "Makefile"
       - "scripts/**"
+  # post-merge SHA 고정 apply: 머지된 커밋의 apps.json/dns/tunnel 상태를 그대로 적용한다.
+  # 트랜잭션 안전: 라이브 Cloudflare는 commit 전에 절대 건드리지 않는다(커밋된 상태만 apply).
+  push:
+    branches: [main]
+    paths:
+      - "infra/cloudflare/**"
+
+permissions:
+  contents: read
+
 jobs:
   iac-validate:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -26,3 +37,53 @@ jobs:
         run: |
           bats infra/_test/argocd_values.bats
           bats infra/_test/root_app.bats
+
+  # ── push-to-main: cloudflare 루트 plan→apply (R2 state) ─────────────────────────────
+  apply:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04-arm
+    # 전역 변이 직렬화 그룹 공유 — tfstate race 차단. queue:max로 취소 누락 차단.
+    # 그래도 취소/실패하면 tf-reconcile.yml(주기)이 다음 주기에 수렴시킨다.
+    concurrency:
+      group: homelab-mutation
+      cancel-in-progress: false
+      queue: max
+    env:
+      TF_VAR_cloudflare_api_token: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
+      TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
+      TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
+      TF_VAR_internal_suffix: home.${{ secrets.TF_DOMAIN }}
+    steps:
+      - uses: actions/checkout@v4 # push 이벤트의 머지 SHA가 기본 체크아웃 — SHA 고정
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - name: terraform init (R2 backend)
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          cat > infra/cloudflare/backend.hcl <<EOF
+          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
+          access_key = "${R2_ACCESS_KEY_ID}"
+          secret_key = "${R2_SECRET_ACCESS_KEY}"
+          key        = "cloudflare/prod/terraform.tfstate"
+          EOF
+          terraform -chdir=infra/cloudflare init -backend-config=backend.hcl -input=false
+      - name: plan → apply (분리 — plan 산출물만 적용)
+        run: |
+          terraform -chdir=infra/cloudflare plan -input=false -lock-timeout=120s -out=tf.plan
+          terraform -chdir=infra/cloudflare apply -input=false tf.plan
+      - name: telegram notify
+        if: always()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STATUS: ${{ job.status }}
+          SHA: ${{ github.sha }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d text="cloudflare apply ${STATUS}: ${SHA}"

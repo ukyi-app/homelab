@@ -3,8 +3,10 @@ locals {
   # [{ "name": "<app>", "host": "<fqdn>", "public": true, "active": false }]
   # active 게이트: 배포 revision이 Healthy로 확인된 뒤 activate-app이 true로 플립해야만
   # DNS/tunnel이 생성된다(배포 실패 중 외부 노출 0 — 등록과 공개의 분리).
-  apps      = jsondecode(file("${path.module}/apps.json"))
-  app_hosts = toset([for a in local.apps : a.host if a.public])
+  apps = jsondecode(file("${path.module}/apps.json"))
+  # public && active만 노출: create-app은 active:false로 등록(DNS 미생성), activate-app이
+  # 해당 revision Healthy 확인 후 true로 플립 — 배포 실패 중 외부 트래픽 노출 0.
+  app_hosts = toset([for a in local.apps : a.host if a.public && a.active])
 
   tunnel_target = "${cloudflare_zero_trust_tunnel_cloudflared.homelab.id}.cfargotunnel.com"
   # apex/www는 코드 고정 유지, 앱 host는 데이터 합류

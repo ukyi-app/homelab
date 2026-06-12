@@ -20,6 +20,11 @@ setup() { C="$(cd "$BATS_TEST_DIRNAME" && pwd)"; }
   [ "$status" -eq 0 ]
 }
 
+@test "dns exposure is gated on public && active (no DNS before Healthy)" {
+  run grep -E 'a.public && a.active' "$C/dns.tf"
+  [ "$status" -eq 0 ]
+}
+
 @test "tunnel ingress is deterministically ordered with 404 catch-all last" {
   # map 순회는 순서 비보장 — ingress는 리스트라 sort 없으면 영구 드리프트
   run grep -E "sort\(" "$C/tunnel.tf"
