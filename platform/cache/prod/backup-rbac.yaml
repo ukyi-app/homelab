@@ -1,0 +1,37 @@
+# cache-backup CronJob 전용 최소 RBAC — cache NS 한정(Role, ClusterRole 아님).
+# services list = 인스턴스 디스커버리(app.kubernetes.io/component=valkey),
+# secrets get = 인스턴스별 <name>-acl secret에서 백업 인증 자격(VALKEY_PASSWORD) 추출.
+# cache NS에는 캐시 ACL·R2 자격 외 다른 secret이 살지 않는다.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cache-backup
+  namespace: cache
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cache-backup
+  namespace: cache
+rules:
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cache-backup
+  namespace: cache
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cache-backup
+subjects:
+  - kind: ServiceAccount
+    name: cache-backup
+    namespace: cache
