@@ -81,21 +81,49 @@ jobs:
     permissions:
       contents: read
 
-  # 미구현 액션 라우팅 스켈레톤 — _create-database/_create-cache/_teardown/_audit는
-  # Phase 5/6에서 추가. activate-app은 클러스터 접근 제약으로 owner 로컬 경로(런북).
+  teardown-app:
+    needs: validate
+    if: needs.validate.outputs.action == 'teardown-app'
+    uses: ./.github/workflows/_teardown.yml
+    with:
+      app: ${{ github.event.inputs.app }}
+    secrets: inherit
+    permissions:
+      contents: read
+
+  teardown-resource:
+    needs: validate
+    if: needs.validate.outputs.action == 'teardown-resource'
+    uses: ./.github/workflows/_teardown.yml
+    with:
+      resource: ${{ github.event.inputs.resource }}
+    secrets: inherit
+    permissions:
+      contents: read
+
+  audit:
+    needs: validate
+    if: needs.validate.outputs.action == 'audit'
+    uses: ./.github/workflows/_audit.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
+  # 미구현 액션 라우팅 스켈레톤 — _create-database/_create-cache는 Phase 5에서 연결.
+  # activate-app은 클러스터 접근 제약으로 owner 로컬 경로(런북 app-platform).
   route:
     needs: validate
     if: >-
-      ${{ !contains(fromJSON('["create-app","update-secrets"]'), needs.validate.outputs.action) }}
+      ${{ !contains(fromJSON('["create-app","update-secrets","teardown-app","teardown-resource","audit"]'), needs.validate.outputs.action) }}
     runs-on: ubuntu-24.04-arm
     steps:
       - env:
           ACTION: ${{ needs.validate.outputs.action }}
-        run: echo "라우팅: $ACTION (reusable 연결은 Phase 5/6에서; activate-app은 런북의 로컬 경로)"
+        run: echo "라우팅: $ACTION (create-database/create-cache는 Phase 5에서; activate-app은 런북의 로컬 경로)"
 
   # 거부/실패가 조용히 묻히지 않게 — owner는 Actions UI 외에 Telegram으로도 본다
   notify-failure:
-    needs: [validate, create-app, update-secrets, route]
+    needs: [validate, create-app, update-secrets, teardown-app, teardown-resource, audit, route]
     if: failure()
     runs-on: ubuntu-24.04-arm
     steps:
