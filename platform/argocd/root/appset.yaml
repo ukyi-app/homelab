@@ -18,11 +18,13 @@ spec:
         directories:
           - path: platform/*/prod
           # 제외: argocd(자기 관리), cnpg + victoria-stack(M4/M5에서 root/apps/ 아래
-          # 수동 작성 Application), charts/(라이브러리이지 앱이 아님).
+          # 수동 작성 Application), charts/(라이브러리이지 앱이 아님),
+          # sealed-secrets(root/apps/ 수동 Application — wave 제어 필요, 이중 소유 금지).
           - { path: platform/argocd/*, exclude: true }
           - { path: platform/cnpg/*, exclude: true }
           - { path: platform/victoria-stack/*, exclude: true }
           - { path: platform/charts/*, exclude: true }
+          - { path: platform/sealed-secrets/*, exclude: true }
   template:
     metadata:
       name: '{{ index .path.segments 1 }}-{{ .path.basename }}' # <component>-prod
