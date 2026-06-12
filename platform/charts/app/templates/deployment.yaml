@@ -31,7 +31,7 @@ spec:
       {{- end }}
       containers:
         - name: app
-          image: "{{ .Values.image.repo }}:{{ .Values.image.tag }}"
+          image: {{ include "app.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- if eq .Values.kind "spa" }}
           {{- if eq .Values.spa.server "sws" }}

@@ -5,12 +5,20 @@
   "properties": {
     "image": {
       "type": "object",
-      "required": ["repo", "tag"],
+      "required": ["repo"],
       "properties": {
         "repo": { "type": "string", "minLength": 1 },
-        "tag": { "type": "string", "pattern": "^sha-[0-9a-f]{7,40}$|^[a-z0-9][a-z0-9._-]*$" },
+        "tag": { "type": "string", "pattern": "^$|^sha-[0-9a-f]{7,40}$|^[a-z0-9][a-z0-9._-]*$" },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
         "pullPolicy": { "type": "string", "enum": ["IfNotPresent", "Always", "Never"] }
-      }
+      },
+      "anyOf": [
+        { "required": ["digest"] },
+        {
+          "required": ["tag"],
+          "properties": { "tag": { "minLength": 1 } }
+        }
+      ]
     },
     "kind": { "type": "string", "enum": ["api", "worker", "ssr", "spa"] },
     "replicas": { "type": "integer", "minimum": 1, "maximum": 3 },

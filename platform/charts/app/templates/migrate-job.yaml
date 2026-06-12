@@ -57,7 +57,8 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
       containers:
         - name: migrate
-          image: "{{ .Values.image.repo }}:{{ .Values.image.tag }}"
+          # Deployment와 동일 helper — migration이 다른 이미지를 실행하는 skew를 차단한다
+          image: {{ include "app.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             {{- toYaml .Values.db.migrateCmd | nindent 12 }}
