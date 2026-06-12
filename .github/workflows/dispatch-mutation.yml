@@ -109,21 +109,31 @@ jobs:
     permissions:
       contents: read
 
-  # 미구현 액션 라우팅 스켈레톤 — _create-database/_create-cache는 Phase 5에서 연결.
+  create-database:
+    needs: validate
+    if: needs.validate.outputs.action == 'create-database'
+    uses: ./.github/workflows/_create-database.yml
+    with:
+      spec: ${{ github.event.inputs.spec }}
+    secrets: inherit
+    permissions:
+      contents: read
+
+  # 미구현 액션 라우팅 스켈레톤 — _create-cache는 Phase 5에서 연결.
   # activate-app은 클러스터 접근 제약으로 owner 로컬 경로(런북 app-platform).
   route:
     needs: validate
     if: >-
-      ${{ !contains(fromJSON('["create-app","update-secrets","teardown-app","teardown-resource","audit"]'), needs.validate.outputs.action) }}
+      ${{ !contains(fromJSON('["create-app","update-secrets","teardown-app","teardown-resource","audit","create-database"]'), needs.validate.outputs.action) }}
     runs-on: ubuntu-24.04-arm
     steps:
       - env:
           ACTION: ${{ needs.validate.outputs.action }}
-        run: echo "라우팅: $ACTION (create-database/create-cache는 Phase 5에서; activate-app은 런북의 로컬 경로)"
+        run: echo "라우팅: $ACTION (create-cache는 Phase 5에서; activate-app은 런북의 로컬 경로)"
 
   # 거부/실패가 조용히 묻히지 않게 — owner는 Actions UI 외에 Telegram으로도 본다
   notify-failure:
-    needs: [validate, create-app, update-secrets, teardown-app, teardown-resource, audit, route]
+    needs: [validate, create-app, update-secrets, teardown-app, teardown-resource, audit, create-database, route]
     if: failure()
     runs-on: ubuntu-24.04-arm
     steps:
