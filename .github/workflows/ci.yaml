@@ -16,9 +16,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: install chart toolchain
         run: |
-          sudo snap install yq || true
+          # yq는 직접 바이너리로 — snap yq는 strict 컨파인이라 private /tmp를 가져
+          # 테스트 픽스처(mktemp -d /tmp/...)를 "no such file"로 못 읽는다(라이브 검증된 함정)
+          sudo curl -sL https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_arm64 -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
           curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-arm64.tar.gz | tar xz -C /usr/local/bin kubeconform
           curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          # data-conn/sealed-secrets/cache 컴포넌트 render 테스트가 kustomize를 부른다
+          curl -sL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_arm64.tar.gz | sudo tar xz -C /usr/local/bin kustomize
           # verify:ledger가 conftest를 부른다 — 미설치로 첫 라이브 CI가 실패했던 버그
           curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin conftest
           sudo apt-get update && sudo apt-get install -y bats
@@ -26,5 +31,19 @@ jobs:
         run: make chart-test
       - name: memory ledger onboarding gate (M0-owned)
         run: pnpm verify:ledger
+      - name: registry/binding 정합 게이트 (배포 깨는 드리프트 차단)
+        # dangling-binding(missing Secret)/orphan-dns(빈 백엔드)/stale-ledger-row만 차단 —
+        # unreferenced-resource(create-db→create-app 사이 정상)는 통과
+        run: node tools/audit-orphans.mjs --ci
       - name: tooling bats suites
-        run: bats tools/test/workspace.bats tools/test/examples.bats tools/test/pg-tools.bats tools/test/ledger-gate.bats tools/test/ci-build.bats tools/test/bump.bats tools/test/ci-gate.bats tools/test/onboard.bats
+        # 하드코딩 목록은 신규 테스트를 게이트 밖으로 흘린다(App Platform DX 19파일이 누락됐던 버그) →
+        # 디렉토리 전체를 돌린다. dev-postgres.bats만 제외(실 docker 필요 — CI 게이트 부적합).
+        run: |
+          files=$(ls tools/test/*.bats | grep -v '/dev-postgres\.bats$')
+          bats $files
+      - name: platform component render + policy gates (신규 컴포넌트)
+        run: |
+          bats platform/sealed-secrets/prod/test_render.bats \
+               platform/data-conn/prod/test_render.bats \
+               platform/cache/prod/test_render.bats \
+               platform/network-policies/prod/test_netpol.bats

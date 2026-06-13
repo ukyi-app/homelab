@@ -2,9 +2,9 @@
 # k3s는 번들된 kube-router 컨트롤러로 NetworkPolicy를 강제한다(--disable-network-policy를
 # 절대 넘기지 않음). 양방향 default-deny 후 최소한의 명시적 allow만 추가한다.
 # 가장 중요한 보안 경계 — "침해된 공개 api/ssr pod가 database/admin 계층에 닿으면 안 된다" —
-# 는 여기서 EGRESS로 강제되고(앱의 egress는 DNS, database:5432, 그리고 8080의 prod 내부
-# 앱 피어로만 허용), 심층 방어로 database namespace 자체의 ingress default-deny
-# (platform/cnpg/prod)가 보완한다.
+# 는 여기서 EGRESS로 강제되고(앱의 egress는 DNS, database:5432, cache:6379, 그리고 8080의
+# prod 내부 앱 피어로만 허용), 심층 방어로 database/cache namespace 자체의 default-deny
+# (platform/cnpg/prod, platform/cache/prod)가 보완한다.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -50,6 +50,25 @@ spec:
             matchLabels: { kubernetes.io/metadata.name: database }
       ports:
         - { protocol: TCP, port: 5432 }
+---
+# Egress: 앱 → cache 계층, Valkey 6379만 (<name>.cache.svc — database 경계와 동일 클래스).
+# 캐시 자격은 conn SealedSecret(cache-<name>-conn)으로만 공급되고, 대상 측은
+# platform/cache/prod의 default-deny + allow-ingress-from-prod가 보완한다.
+# 피어는 namespaceSelector로만 — ipBlock에 pod CIDR(10.42.0.0/16)을 넣으면
+# default-deny가 무력화된다(라이브 검증 함정).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-cache
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: cache }
+      ports:
+        - { protocol: TCP, port: 6379 }
 ---
 # Ingress: 공유 Traefik Gateway(gateway namespace) → 앱 HTTP 포트 8080. 공개/내부 서빙
 # 경로이며, 모든 앱 HTTPRoute가 그 Gateway에 attach된다.

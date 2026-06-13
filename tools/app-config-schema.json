@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "app-config-schema",
+  "title": ".app-config.yml — 외부 앱 레포의 자기선언 v2 (create-app이 values.yaml + .bindings.json으로 변환)",
+  "description": "구계약(.homelab.yaml) 대비 변경: db가 enabled/migrateCmd 객체에서 리소스 참조 배열로 재정의되고(migrate.cmd로 분리), redis 배열이 추가됐다. db/redis 이름은 create-database/create-cache로 선프로비저닝된 리소스를 가리키며, create-app이 db-<name>-conn / cache-<name>-conn SealedSecret(prod NS)을 envFrom으로 배선한다.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "resources"],
+  "properties": {
+    "kind": { "enum": ["api", "worker", "ssr", "spa"] },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": { "$ref": "#/definitions/rr" },
+        "limits": { "$ref": "#/definitions/rr" }
+      }
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "public": { "type": "boolean", "default": false },
+        "host": { "type": "string", "pattern": "^[a-z0-9.-]+$" },
+        "paths": { "type": "array", "items": { "type": "string", "pattern": "^/" }, "minItems": 1 }
+      }
+    },
+    "replicas": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "db": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "uniqueItems": true
+    },
+    "redis": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "uniqueItems": true
+    },
+    "migrate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cmd"],
+      "properties": {
+        "cmd": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      }
+    },
+    "env": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "value"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "value": { "type": "string" }
+        }
+      }
+    },
+    "allowPlaintext": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+    },
+    "secrets": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "liveness": { "$ref": "#/definitions/probe" },
+        "readiness": { "$ref": "#/definitions/probe" }
+      }
+    },
+    "spa": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "server": { "enum": ["sws", "caddy"] } }
+    },
+    "deploy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "autoDeploy": { "type": "boolean", "default": true } }
+    }
+  },
+  "definitions": {
+    "rr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "memory"],
+      "properties": {
+        "cpu": { "type": "string", "pattern": "^[0-9]+m?$" },
+        "memory": { "type": "string", "pattern": "^[0-9]+(Mi|Gi)$" }
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": { "path": { "type": "string", "pattern": "^/" } }
+    }
+  }
+}

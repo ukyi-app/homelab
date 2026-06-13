@@ -17,6 +17,9 @@ resource "github_repository" "homelab" {
   allow_squash_merge     = true
   allow_rebase_merge     = false
   delete_branch_on_merge = true
+  # PR-first 쓰기 모델: App 토큰은 branch protection을 우회하지 못한다 — 자동화(bump/onboard 등)는
+  # PR 생성 후 auto-merge로 main에 쓴다. required check `gate` 통과가 머지 조건.
+  allow_auto_merge = true
   # repo는 이미 존재한다 — 최초 1회 import 필요: 런북 02 참고.
 }
 
