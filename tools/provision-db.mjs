@@ -54,6 +54,9 @@ const RESERVED = new Set(["app", "postgres", "pg", "template0", "template1", "st
 const name = args.name;
 if (!NAME_RE.test(name) || name.length > 30) fail(`name 형식 불량(kebab-case, ≤30자): '${name}'`);
 if (RESERVED.has(name)) fail(`예약 이름: '${name}' — bootstrap/시스템 객체와 충돌`);
+// -ro 접미사 예약: db 'foo-ro'의 conn 파일(db-foo-ro-conn)이 db 'foo'의 읽기전용
+// conn(db-foo-ro-conn)과 충돌해 한쪽을 조용히 덮어쓴다 → 접미사 자체를 금지.
+if (/-ro$/.test(name)) fail(`'-ro' 접미사 예약: '${name}' — 읽기전용 conn 이름과 충돌`);
 if (!NAME_RE.test(args.cluster)) fail(`cluster 형식 불량: '${args.cluster}'`);
 if (new Set(args.extensions).size !== args.extensions.length) fail("extensions에 중복 항목");
 for (const e of args.extensions) if (!EXT_RE.test(e)) fail(`extension 이름 불량: '${e}'`);

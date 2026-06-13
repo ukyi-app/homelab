@@ -162,3 +162,9 @@ provision() {
   run bash -c "kustomize build '$FIX/platform/cache/prod' | yq 'select(.kind==\"Deployment\") | .metadata.namespace'"
   [ "$output" = "cache" ]
 }
+
+@test "provision-cache rejects a -ro suffixed name (collides with readonly conn naming)" {
+  provision --name sessions-ro
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "ro"
+}

@@ -34,6 +34,8 @@ if (!name) {
   process.exit(2);
 }
 if (!/^[a-z]([a-z0-9-]{0,27}[a-z0-9])?$/.test(name)) fail(`이름 불량: '${name}' (^[a-z]([a-z0-9-]{0,27}[a-z0-9])?$)`);
+// -ro 접미사 예약: cache 'foo-ro'의 conn(cache-foo-ro-conn)이 'foo'의 읽기전용 conn과 충돌.
+if (/-ro$/.test(name)) fail(`'-ro' 접미사 예약: '${name}' — 읽기전용 conn 이름과 충돌`);
 if (!/^\d+$/.test(rawMaxmemory) || !Number.isInteger(maxmemoryMi) || maxmemoryMi < 16 || maxmemoryMi > 1024)
   fail(`maxmemory-mi는 16..1024 정수여야 한다: '${rawMaxmemory}'`);
 

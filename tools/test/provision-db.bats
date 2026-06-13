@@ -243,6 +243,12 @@ EOF
   done
 }
 
+@test "provision-db rejects a -ro suffixed name (collides with readonly conn naming)" {
+  provision --name orders-ro --repo-root "$FIX"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "ro"
+}
+
 @test "provision-db fails clearly when the sealed-secrets cert is missing" {
   rm "$FIX/tools/sealed-secrets-cert.pem"
   provision --name orders --repo-root "$FIX"
