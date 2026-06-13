@@ -1,0 +1,135 @@
+# create-app reusable — dispatcher(action=create-app)가 호출한다.
+# SHA 고정: homelab이 reader App 토큰으로 앱 레포의 입력 SHA에서 .app-config.yml(+ sealed
+# 시크릿)을 read한다 — 앱 레포가 payload로 보내지 않는다(변조/stale-revision 방지).
+# 결과물은 PR(required check `gate`) — 사람 머지 = 첫 배포 승인. apps.json은 active:false라
+# 머지돼도 DNS는 생기지 않고, activate-app 게이트 통과 후에만 노출된다.
+name: _create-app
+on:
+  workflow_call:
+    inputs:
+      app_repo:
+        required: true
+        type: string
+      sha:
+        required: true
+        type: string
+
+jobs:
+  create:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: read # digest 해석(docker imagetools)
+    steps:
+      - id: names
+        env:
+          APP_REPO: ${{ inputs.app_repo }} # validator가 ^ukyi-app/...$로 강제한 입력
+        run: echo "repo=${APP_REPO#ukyi-app/}" >> "$GITHUB_OUTPUT"
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: reader
+        with:
+          app-id: ${{ secrets.HOMELAB_READER_APP_ID }}
+          private-key: ${{ secrets.HOMELAB_READER_APP_PRIVATE_KEY }}
+          owner: ukyi-app
+          repositories: ${{ steps.names.outputs.repo }} # repositories는 owner 없는 레포명 — 그 레포만 스코프
+          permission-contents: read
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: writer
+        with:
+          app-id: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+          private-key: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ steps.writer.outputs.token }}
+      - name: 앱 레포 config + sealed 시크릿 SHA 고정 read
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.app_repo }}
+          ref: ${{ inputs.sha }}
+          token: ${{ steps.reader.outputs.token }}
+          path: .apprepo
+          sparse-checkout: |
+            .app-config.yml
+            deploy
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: pnpm install --frozen-lockfile
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: GHCR digest 해석 (이미지 실존 필수 — 없으면 생성 중단)
+        id: img
+        env:
+          APP_REPO: ${{ inputs.app_repo }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          app="${APP_REPO#ukyi-app/}"
+          tag="sha-${SHA}"
+          digest=$(docker buildx imagetools inspect "ghcr.io/ukyi-app/${app}:${tag}" \
+            --format '{{json .Manifest}}' | jq -r .digest) \
+            || { echo "::error::이미지 미존재 — 앱 레포에서 빌드(GHCR push) 먼저"; exit 1; }
+          { echo "app=$app"; echo "tag=$tag"; echo "digest=$digest"; } >> "$GITHUB_OUTPUT"
+      - name: 생성 + 렌더 게이트 + PR
+        env:
+          GH_TOKEN: ${{ steps.writer.outputs.token }}
+          APP: ${{ steps.img.outputs.app }}
+          APP_REPO: ${{ inputs.app_repo }}
+          TAG: ${{ steps.img.outputs.tag }}
+          DIGEST: ${{ steps.img.outputs.digest }}
+          DOMAIN: ${{ vars.HOMELAB_DOMAIN }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          [ -n "$DOMAIN" ] || { echo "::error::repo variable HOMELAB_DOMAIN 미설정"; exit 1; }
+          [ -f .apprepo/.app-config.yml ] || { echo "::error::.app-config.yml 없음(앱 레포 ${APP_REPO}@${TAG#sha-})"; exit 1; }
+          sealed_arg=""
+          if [ -f ".apprepo/deploy/${APP}-secrets.sealed.yaml" ]; then
+            sealed_arg="--sealed .apprepo/deploy/${APP}-secrets.sealed.yaml"
+          fi
+          # shellcheck disable=SC2086
+          node tools/create-app.mjs --config .apprepo/.app-config.yml --app "$APP" \
+            --repo "$APP_REPO" --domain "$DOMAIN" --tag "$TAG" --digest "$DIGEST" $sealed_arg \
+            | tee /tmp/plan.json
+          # 렌더 게이트: 새 values로 공유 차트가 kubeconform-clean하게 렌더되는가
+          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-arm64.tar.gz | sudo tar xz -C /usr/local/bin kubeconform
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          helm template "$APP" platform/charts/app -f "apps/$APP/deploy/prod/values.yaml" \
+            | kubeconform -strict -ignore-missing-schemas \
+                -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                -summary
+          # 원장 게이트(PR required check와 동일 검증 선행)
+          curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin conftest
+          pnpm verify:ledger
+          git config user.name "homelab-bot"
+          git config user.email "bot@users.noreply.github.com"
+          branch="create-app/${APP}-${RUN_ID}"
+          git checkout -b "$branch"
+          git add "apps/${APP}" docs/memory-ledger.md infra/cloudflare/apps.json
+          git commit -m "feat: ${APP} 앱 생성 (create-app — digest 핀, active:false)"
+          git push -u origin "$branch"
+          {
+            echo "create-app 자동 생성 PR입니다. **머지 = 첫 배포 승인** (DNS는 activate-app 게이트 후 별도)."
+            echo
+            echo '```json'; cat /tmp/plan.json; echo '```'
+            echo; echo "### ⚠️ 머지 전 체크리스트"
+            jq -r '.checklist[] | "- [ ] " + .' /tmp/plan.json
+          } > /tmp/pr-body.md
+          gh pr create --base main --head "$branch" \
+            --title "feat: ${APP} 앱 생성 (create-app)" --body-file /tmp/pr-body.md
+      - name: telegram notify
+        if: always()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          APP_REPO: ${{ inputs.app_repo }}
+          STATUS: ${{ job.status }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d text="create-app ${STATUS}: ${APP_REPO} — PR을 확인하세요"

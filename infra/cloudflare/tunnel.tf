@@ -11,23 +11,19 @@ resource "cloudflare_zero_trust_tunnel_cloudflared" "homelab" {
 }
 
 # Ingress 규칙: public 호스트 → 클러스터 내부 Traefik (plaintext, TLS는 edge에서 종료).
+# set 순회는 순서 비보장 — ingress는 리스트라 sort로 결정적 순서를 강제한다(드리프트 방지).
+# 404 catch-all은 항상 마지막.
 resource "cloudflare_zero_trust_tunnel_cloudflared_config" "homelab" {
   account_id = var.cloudflare_account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.homelab.id
   config = {
-    ingress = [
-      {
-        hostname = var.zone_name
+    ingress = concat(
+      [for h in sort(tolist(local.public_hosts)) : {
+        hostname = h
         service  = "http://traefik.gateway.svc.cluster.local:80"
-      },
-      {
-        hostname = "www.${var.zone_name}"
-        service  = "http://traefik.gateway.svc.cluster.local:80"
-      },
-      {
-        service = "http_status:404"
-      }
-    ]
+      }],
+      [{ service = "http_status:404" }]
+    )
   }
 }
 

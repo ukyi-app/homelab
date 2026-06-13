@@ -13,22 +13,31 @@ concurrency:
   group: app-onboard
   cancel-in-progress: false
 
+# GITHUB_TOKEN은 최소 권한만: 쓰기(branch push + PR 생성)는 writer App 토큰이 전담한다.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   onboard:
     runs-on: ubuntu-24.04-arm
     steps:
-      # DEPLOY_BOT_PAT 사용 이유: GITHUB_TOKEN으로 만든 PR은 워크플로(required check 'gate')를
-      # 트리거하지 않아 영원히 머지 불가가 된다 — PAT발 PR이어야 ci.yaml이 정상 실행된다.
-      # ⚠️ 이 PAT에는 Contents:write 외에 **Pull requests:write**가 반드시 필요하다
-      # (없으면 PR 생성이 "Resource not accessible by personal access token"로 실패 — 라이브 검증).
+      # writer App 토큰 사용 이유: GITHUB_TOKEN으로 만든 PR은 워크플로(required check 'gate')를
+      # 트리거하지 않아 영원히 머지 불가가 된다 — App 토큰발 PR은 check를 정상 트리거한다
+      # (검증 포인트: Task 1.4 라이브 E2E에서 gate 트리거 확인).
+      # ⚠️ writer App에는 Contents:write 외에 **Pull requests:write**가 반드시 필요하다
+      # (없으면 PR 생성이 "Resource not accessible" 류로 실패 — PAT 시절 라이브 검증된 동일 함정).
+      # composite action(homelab-token)은 체크아웃이 선행돼야 해서 여기서는 인라인으로 발급한다.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: token
+        with:
+          app-id: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+          private-key: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - uses: actions/checkout@v4
         with:
           ref: main
-          token: ${{ secrets.DEPLOY_BOT_PAT }}
+          token: ${{ steps.token.outputs.token }}
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - run: corepack enable && corepack prepare pnpm@10 --activate
@@ -65,7 +74,7 @@ jobs:
         run: pnpm verify:ledger
       - name: PR 생성
         env:
-          GH_TOKEN: ${{ secrets.DEPLOY_BOT_PAT }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
           APP: ${{ steps.scaffold.outputs.app }}
         run: |
           git config user.name "homelab-bot"
