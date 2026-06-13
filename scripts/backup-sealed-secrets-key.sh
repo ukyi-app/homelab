@@ -45,7 +45,7 @@ if [ "$verify" -eq 1 ]; then
   [ -n "$latest" ] || { echo "ERROR: 백업 없음 — 먼저 백업을 생성하라" >&2; exit 1; }
   live="$(live_keys)"
   [ -n "$live" ] || { echo "ERROR: 라이브 sealing key 0개 — 컨트롤러/라벨 점검" >&2; exit 1; }
-  backed="$(sops -d "$latest" | grep -oE 'name: sealed-secrets-key[a-z0-9]+' | sed 's/^name: //' | sort -u)"
+  backed="$(sops -d --input-type binary --output-type binary "$latest" | grep -oE 'name: sealed-secrets-key[a-z0-9]+' | sed 's/^name: //' | sort -u)"
   if [ "$live" != "$backed" ]; then
     echo "ERROR: sealing key 회전 감지 — 라이브 키 셋과 최신 백업($latest) 불일치." >&2
     echo "       백업을 재생성하고 복구 드릴을 다시 통과하라." >&2
@@ -60,14 +60,17 @@ fi
 tmp="$(mktemp "$outdir/ss-keys.tmp.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 
-# 평문은 파이프로만 흐른다(디스크 비접촉). 임시파일명은 *.enc.yaml 규칙과 안 맞으므로
-# --filename-override로 .sops.yaml catch-all 규칙을 강제 매칭한다.
+# 평문은 파이프로만 흐른다(디스크 비접촉). binary 모드로 통째 암호화한다 —
+# sealing key Secret의 data 키(tls.crt/tls.key)는 점을 포함하는데, sops의 selective(yaml)
+# 암호화는 점을 경로 구분자로 오해해 복호화가 깨진다(라이브 검증된 sops 함정). binary는
+# 전체를 불투명 blob으로 암호화해 이 문제를 회피한다. --filename-override는 .sops.yaml
+# catch-all 규칙에서 age recipient를 고르는 데 여전히 필요(encrypted_regex는 binary라 무시됨).
 kubectl -n sealed-secrets get secret -l "$LABEL" -o yaml \
   | sops --encrypt --filename-override ss-keys.enc.yaml \
-      --input-type yaml --output-type yaml /dev/stdin > "$tmp"
+      --input-type binary --output-type binary /dev/stdin > "$tmp"
 
 # 복구 검증(평문은 메모리만): 실제로 복호화되고 Secret을 담는지 — 키 0개(빈 List)도 여기서 거른다
-sops -d "$tmp" | grep -q "kind: Secret"
+sops -d --input-type binary --output-type binary "$tmp" | grep -q "kind: Secret"
 
 dest="$outdir/ss-keys.$(date +%s).enc.yaml"
 mv -f "$tmp" "$dest"

@@ -22,7 +22,8 @@ EOF
   if [ "$1" = ok ]; then
     cat > "$STUB/sops" <<'EOF'
 #!/bin/sh
-if [ "$1" = "-d" ]; then exec base64 -d < "$2"; fi
+# 파일 인자는 항상 마지막 위치 — binary 모드 플래그(--input-type 등)가 끼어도 견고
+if [ "$1" = "-d" ]; then for f in "$@"; do :; done; exec base64 -d < "$f"; fi
 exec base64
 EOF
   else
