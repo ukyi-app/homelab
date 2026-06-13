@@ -17,7 +17,28 @@ permissions:
   packages: read # docker imagetools inspect — GHCR digest 해석
 
 jobs:
+  # Phase 0(App secrets 등록) 전에 이 브랜치가 머지되면 스케줄이 매 10분 실패+Telegram 스팸 →
+  # 시크릿 부재 시 poll을 skip해 run을 깨끗한 성공으로 만든다(설정되면 자동 활성).
+  preflight:
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          READER: ${{ secrets.HOMELAB_READER_APP_ID }}
+          WRITER: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+        run: |
+          if [ -n "$READER" ] && [ -n "$WRITER" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Phase 0 미완(HOMELAB_*_APP_ID 미설정) — bump-poll skip"
+          fi
+
   poll:
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-24.04-arm
     steps:
       # reader App: 앱 레포 main 커밋/compare 조회 (Contents:read, 앱 레포에만 설치)
