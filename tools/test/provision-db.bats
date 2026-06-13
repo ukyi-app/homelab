@@ -189,9 +189,11 @@ EOF
   grep -q "ORDERS_DATABASE_URL" "$conn"
   grep -q "ORDERS_MIGRATE_DATABASE_URL" "$conn"
   grep -q "ORDERS_RO_DATABASE_URL" "$roconn"
-  # data-conn kustomization 등록 (namespace: prod 강제)
+  # data-conn kustomization 등록 (namespace: prod 강제) — grep으로 통일(lines 184-187과 동일).
+  # yq 미사용: snap-confined yq가 /tmp 픽스처를 못 읽는 CI 함정 회피.
   ck="$FIX/platform/data-conn/prod/kustomization.yaml"
-  [ "$(yq '.namespace' "$ck")" = "prod" ]
+  [ -f "$ck" ]
+  grep -q "namespace: prod" "$ck"
   grep -q "db-orders-conn.sealed.yaml" "$ck"
   grep -q "db-orders-ro-conn.sealed.yaml" "$ck"
 }

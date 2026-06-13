@@ -16,7 +16,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: install chart toolchain
         run: |
-          sudo snap install yq || true
+          # yq는 직접 바이너리로 — snap yq는 strict 컨파인이라 private /tmp를 가져
+          # 테스트 픽스처(mktemp -d /tmp/...)를 "no such file"로 못 읽는다(라이브 검증된 함정)
+          sudo curl -sL https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_arm64 -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
           curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-arm64.tar.gz | tar xz -C /usr/local/bin kubeconform
           curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
           # data-conn/sealed-secrets/cache 컴포넌트 render 테스트가 kustomize를 부른다
