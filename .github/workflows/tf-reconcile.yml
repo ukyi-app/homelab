@@ -1,0 +1,91 @@
+# 주기적 terraform reconcile — 취소·실패한 apply의 자가 수렴 (권위 안전망).
+# push-triggered apply(iac.yaml)가 어떤 이유로든 누락돼도(취소/일시 장애) apps.json↔실제
+# DNS/tunnel 드리프트를 다음 주기에 수렴시킨다. queue:max에 의존하지 않는 최후 보루.
+name: tf-reconcile
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homelab-mutation
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  # Phase 0(TF/R2 secrets 등록) 전에 머지되면 스케줄이 매 30분 실패+Telegram 스팸 →
+  # 시크릿 부재 시 reconcile을 skip해 run을 깨끗한 성공으로 만든다.
+  preflight:
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          CF: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
+          R2: ${{ secrets.R2_ACCESS_KEY_ID }}
+        run: |
+          if [ -n "$CF" ] && [ -n "$R2" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Phase 0 미완(TF_CLOUDFLARE_TOKEN/R2_* 미설정) — tf-reconcile skip"
+          fi
+
+  reconcile:
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
+    runs-on: ubuntu-24.04-arm
+    env:
+      TF_VAR_cloudflare_api_token: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
+      TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
+      TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
+      TF_VAR_internal_suffix: home.${{ secrets.TF_DOMAIN }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main } # 항상 main 최신 — 머지된 선언 상태가 권위
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - name: terraform init (R2 backend)
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          cat > infra/cloudflare/backend.hcl <<EOF
+          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
+          access_key = "${R2_ACCESS_KEY_ID}"
+          secret_key = "${R2_SECRET_ACCESS_KEY}"
+          key        = "cloudflare/prod/terraform.tfstate"
+          EOF
+          terraform -chdir=infra/cloudflare init -backend-config=backend.hcl -input=false
+      - name: drift 감지 → 있을 때만 apply
+        id: drift
+        run: |
+          set +e
+          terraform -chdir=infra/cloudflare plan -input=false -lock-timeout=120s \
+            -detailed-exitcode -out=tf.plan
+          rc=$?
+          set -e
+          case "$rc" in
+            0) echo "drift=false" >> "$GITHUB_OUTPUT"; echo "드리프트 없음 — no-op" ;;
+            2) echo "drift=true" >> "$GITHUB_OUTPUT"
+               terraform -chdir=infra/cloudflare apply -input=false tf.plan ;;
+            *) exit "$rc" ;;
+          esac
+      - name: telegram notify (드리프트 수렴 또는 실패 시에만)
+        if: failure() || steps.drift.outputs.drift == 'true'
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STATUS: ${{ job.status }}
+          DRIFT: ${{ steps.drift.outputs.drift }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d text="tf-reconcile ${STATUS}: drift=${DRIFT}"

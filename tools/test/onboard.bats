@@ -164,20 +164,24 @@ secrets: []'
   [ -z "$bad" ]
 }
 
-@test "onboard: payload via toJSON env, PAT-created PR, ledger gate first" {
+@test "onboard: payload via toJSON env, app-token-created PR, ledger gate first" {
   f="$ROOT/.github/workflows/onboard.yaml"
   grep -q 'toJSON(github.event.client_payload)' "$f"
-  grep -q 'DEPLOY_BOT_PAT' "$f"
+  # GITHUB_TOKEN PR은 required check를 트리거하지 않는다 — writer App 토큰발 PR이어야 한다
+  grep -qE 'create-github-app-token@[0-9a-f]{40}' "$f"
+  grep -q 'HOMELAB_WRITER_APP_ID' "$f"
   grep -q 'verify:ledger' "$f"
   grep -q 'kubeconform' "$f"
 }
 
-@test "reusable-app-build: arm64 + quoted jq args + onboard/image split + approval gate job" {
+@test "reusable-app-build v1: build-only, dispatch jobs gone, dispatch-pat optional-compat" {
   f="$ROOT/.github/workflows/reusable-app-build.yaml"
   grep -q 'workflow_call' "$f"
   grep -q 'linux/arm64' "$f"
-  grep -q 'jq -n --arg' "$f"
-  grep -q 'app-onboard' "$f"
-  grep -q 'app-image' "$f"
-  grep -q 'environment: production' "$f"
+  # v1: homelab dispatch 경로 전부 제거 — 배포 반영은 bump-poll(GHCR 폴링)이 권위
+  run grep -E "repos/.*/dispatches|app-onboard|app-image|environment: production" "$f"
+  [ "$status" -ne 0 ]
+  # 호환 장치: dispatch-pat은 required:false 선언만 유지(미사용) — caller 검증 실패 방지
+  grep -q 'dispatch-pat' "$f"
+  grep -A1 'dispatch-pat' "$f" | grep -vq 'required: true'
 }

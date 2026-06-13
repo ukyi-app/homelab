@@ -1,0 +1,35 @@
+# audit reusable — dispatcher(action=audit)가 호출한다. 읽기 전용 드리프트 리포트.
+name: _audit
+on:
+  workflow_call: {}
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: audit-orphans (읽기 전용)
+        id: audit
+        run: |
+          node tools/audit-orphans.mjs --repo-root . | tee /tmp/audit.json
+          echo "count=$(jq -r .count /tmp/audit.json)" >> "$GITHUB_OUTPUT"
+      - name: telegram report
+        if: always()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          COUNT: ${{ steps.audit.outputs.count }}
+          STATUS: ${{ job.status }}
+        run: |
+          summary=$(jq -r '.findings[:5][] | "- \(.type): \(.subject)"' /tmp/audit.json 2>/dev/null || true)
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            --data-urlencode text="audit ${STATUS}: 드리프트 ${COUNT}건
+          ${summary}"

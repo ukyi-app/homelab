@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Valkey 캐시 계층 — platform-components appset이 cache-prod로 자동 발견한다.
+# 대상 네임스페이스(cache)는 platform/namespaces가 소유한다(appset 템플릿에
+# destination.namespace가 없어 CreateNamespace가 무효 — 라이브 검증 함정).
+# 인스턴스 디렉토리(<name>/)는 tools/provision-cache.mjs가 resources에 멱등 등록한다.
+namespace: cache
+resources:
+  - networkpolicy.yaml
+  - backup-rbac.yaml
+  - backup-cronjob.yaml

@@ -1,0 +1,15 @@
+# 앱 소비용 conn SealedSecret 컴포넌트 (prod NS) — create-database/create-cache 산출물 전용.
+#
+# platform-components ApplicationSet이 platform/*/prod 패턴으로 이 디렉토리를
+# `data-conn-prod` Application으로 자동 발견한다 (destination namespace는 아래 namespace가 지정).
+#
+# platform/cnpg/prod(namespace: database 강제)와 분리한 이유: SealedSecret strict-scope는
+# 봉인 시점의 namespace와 일치해야 복호화된다 — prod용 conn 핸들을 cnpg 쪽에 두면
+# namespace가 database로 바뀌어 복호화가 영구 실패한다.
+#
+# resources는 tools/provision-db.mjs(이후 provision-cache.mjs)가 멱등 등록한다.
+# 빈 resources여도 kustomize build는 성공해야 한다 (appset 발견 시점에 DB 0개 가능).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources: []

@@ -11,7 +11,8 @@ build() { kustomize build "$DIR"; }
   [ "$status" -eq 0 ]
   # 모든 policy가 존재
   for n in default-deny-all allow-dns-egress allow-egress-to-database \
-           allow-ingress-from-gateway allow-ingress-metrics-from-observability \
+           allow-egress-to-cache allow-ingress-from-gateway \
+           allow-ingress-metrics-from-observability \
            allow-intra-prod-http allow-ingress-kubelet-probes; do
     echo "$output" | grep -q "name: $n"
   done
@@ -43,6 +44,14 @@ build() { kustomize build "$DIR"; }
   db="$(build | yq 'select(.metadata.name=="allow-egress-to-database")')"
   [[ "$db" == *"kubernetes.io/metadata.name: database"* ]]
   [[ "$db" == *"port: 5432"* ]]
+}
+
+@test "egress to the cache tier is valkey 6379 only (namespaceSelector, no ipBlock)" {
+  # grep 파이프라인 단언 — mid-test `[[ ]]` 실패는 bash 3.2에서 bats가 못 잡는다
+  c="$(build | yq 'select(.metadata.name=="allow-egress-to-cache")')"
+  echo "$c" | grep -q "kubernetes.io/metadata.name: cache"
+  echo "$c" | grep -q "port: 6379"
+  [ "$(echo "$c" | grep -c "ipBlock")" -eq 0 ]   # 피어는 namespaceSelector로만 — pod CIDR 함정 금지
 }
 
 @test "ingress allows are gateway:8080, observability:9090, and node probes" {
