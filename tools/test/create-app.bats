@@ -105,6 +105,24 @@ EOF
   grep -q "orders-secrets" "$FR/apps/orders/deploy/prod/values.yaml" # envFrom secretRef
 }
 
+@test "create-app writes a checksum/secrets pod annotation so rotation rolls declaratively" {
+  cat > "$TMP/sealed.yaml" <<'EOF'
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: orders-secrets
+  namespace: prod
+spec:
+  encryptedData: { API_KEY: AgX... }
+EOF
+  cat >> "$TMP/.app-config.yml" <<'EOF'
+secrets: [api-key]
+EOF
+  gen --sealed "$TMP/sealed.yaml"
+  [ "$status" -eq 0 ]
+  grep -q "checksum/secrets" "$FR/apps/orders/deploy/prod/values.yaml"
+}
+
 @test "create-app rejects a sealed secret with wrong namespace or name" {
   cat > "$TMP/sealed.yaml" <<'EOF'
 apiVersion: bitnami.com/v1alpha1

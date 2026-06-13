@@ -22,12 +22,17 @@ if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) {
   process.exit(2);
 }
 
-const envKey = `${name.replaceAll("-", "_").toUpperCase()}_REDIS_URL`;
+const NAME = name.replaceAll("-", "_").toUpperCase();
+// ro-conn Secret의 내부 키는 <NAME>_REDIS_RO_URL(읽기 ACL 유저). 앱이 소비하는 .env.local
+// 키는 <NAME>_REDIS_URL — 디버깅 시 그 키가 tailscale 직결 ro 엔드포인트를 가리키게 한다
+// (db-url과 동일 규약: ro 키를 읽어 비-ro 소비 키로 기록).
+const roEnvKey = `${NAME}_REDIS_RO_URL`;
+const envKey = `${NAME}_REDIS_URL`;
 
 if (DRY) {
   console.log(JSON.stringify({
     mode: "tailscale-readonly",
-    name, conn: `cache-${name}-ro-conn`, envKey,
+    name, conn: `cache-${name}-ro-conn`, roEnvKey, envKey,
     note: "prod의 cache-<name>-ro-conn(읽기 ACL 유저)에서 자격을 꺼내 .env.local에 기록",
   }, null, 2));
   process.exit(0);
@@ -39,7 +44,7 @@ if (!tsHost) {
 }
 const url = execFileSync("kubectl", [
   "-n", "prod", "get", "secret", `cache-${name}-ro-conn`,
-  "-o", `jsonpath={.data.${envKey}}`,
+  "-o", `jsonpath={.data.${roEnvKey}}`,
 ], { encoding: "utf8" });
 const plain = Buffer.from(url, "base64").toString("utf8")
   .replace(/@[^/]+/, `@${tsHost}:6379`);

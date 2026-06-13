@@ -21,6 +21,11 @@ spec:
         prometheus.io/port: "{{ .Values.ports.metrics }}"
         prometheus.io/path: "/metrics"
         {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- /* checksum/secrets 등 — 봉인 시크릿 회전 시 create-app/update-secrets가
+               해시를 갱신해 ArgoCD가 선언적으로 롤링한다(명령형 rollout restart 불필요) */}}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:

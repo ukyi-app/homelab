@@ -5,6 +5,7 @@
 // digest 핀 이미지, 권위 바인딩 레지스트리(.bindings.json)가 추가됐다.
 // _create-app.yml(homelab-initiated workflow_dispatch)이 호출 — 결과물은 PR(사람 머지 = 승인).
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
@@ -162,6 +163,13 @@ values.db = config.migrate
   : { enabled: false };
 if (config.probes) values.probes = config.probes;
 if (kind === "spa") values.spa = { server: config.spa?.server ?? "sws" };
+// 선언적 회전: 봉인 콘텐츠 해시를 pod template annotation으로 둔다 → update-secrets가 봉인본을
+// 갱신하면 이 해시가 바뀌어 ArgoCD가 Deployment를 롤링한다(envFrom 변경은 재시작 필요 —
+// 명령형 rollout restart는 취소/실패 시 옛 값 유지라 선언적으로). 해시는 기록될 봉인본 바이트 기준.
+if (sealedDoc) {
+  const sealedYaml = toYaml(sealedDoc);
+  values.podAnnotations = { "checksum/secrets": createHash("sha256").update(sealedYaml).digest("hex").slice(0, 16) };
+}
 
 // 권위 바인딩/정책 레지스트리 — teardown 참조 수 집계와 폴러 autoDeploy의 유일 소스
 const bindings = { db: dbs, redis: caches, autoDeploy: config.deploy?.autoDeploy ?? true };

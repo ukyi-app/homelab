@@ -22,6 +22,10 @@
     },
     "kind": { "type": "string", "enum": ["api", "worker", "ssr", "spa"] },
     "replicas": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
     "gateway": {
       "type": "object",
       "properties": {
