@@ -54,6 +54,28 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | jq -e '.findings | any(.type == "stale-ledger-row" and .subject == "stale-app")'
 }
 
+@test "audit --ci blocks orphan-dns but passes stale-ledger and unreferenced (no false PR block)" {
+  # 픽스처엔 orphan-dns(ghost)+stale-ledger-row(stale-app)+unreferenced(db:lonely)가 있다 →
+  # --ci는 orphan-dns(ghost)가 blocking이므로 비-0
+  run node "$ROOT/tools/audit-orphans.mjs" --repo-root "$FR" --ci
+  [ "$status" -ne 0 ]
+  # ghost(orphan-dns)만 제거 — stale-app(원장 드리프트)·db:lonely는 남긴다(둘 다 non-blocking)
+  echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
+    > "$FR/infra/cloudflare/apps.json"
+  run node "$ROOT/tools/audit-orphans.mjs" --repo-root "$FR" --ci
+  [ "$status" -eq 0 ]   # stale-ledger-row(stale-app)·unreferenced가 남아도 --ci는 통과
+  echo "$output" | jq -e '.findings | any(.type == "stale-ledger-row")'
+}
+
+@test "audit --ci blocks a dangling db binding (missing Secret at deploy)" {
+  mkdir -p "$FR/apps/orders/deploy/prod"
+  printf 'image: {repo: x, tag: sha-abc1234}\n' > "$FR/apps/orders/deploy/prod/values.yaml"
+  echo '{"db":["nonexistent"],"redis":[],"autoDeploy":true}' > "$FR/apps/orders/deploy/prod/.bindings.json"
+  run node "$ROOT/tools/audit-orphans.mjs" --repo-root "$FR" --ci
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "dangling-binding"
+}
+
 @test "audit --strict exits nonzero when findings exist, zero when clean" {
   run node "$ROOT/tools/audit-orphans.mjs" --repo-root "$FR" --strict
   [ "$status" -ne 0 ]

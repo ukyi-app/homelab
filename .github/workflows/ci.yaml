@@ -28,6 +28,10 @@ jobs:
         run: make chart-test
       - name: memory ledger onboarding gate (M0-owned)
         run: pnpm verify:ledger
+      - name: registry/binding 정합 게이트 (배포 깨는 드리프트 차단)
+        # dangling-binding(missing Secret)/orphan-dns(빈 백엔드)/stale-ledger-row만 차단 —
+        # unreferenced-resource(create-db→create-app 사이 정상)는 통과
+        run: node tools/audit-orphans.mjs --ci
       - name: tooling bats suites
         # 하드코딩 목록은 신규 테스트를 게이트 밖으로 흘린다(App Platform DX 19파일이 누락됐던 버그) →
         # 디렉토리 전체를 돌린다. dev-postgres.bats만 제외(실 docker 필요 — CI 게이트 부적합).

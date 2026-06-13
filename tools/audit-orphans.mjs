@@ -14,6 +14,16 @@ import { parse as parseYaml } from "yaml";
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const ROOT = arg("--repo-root", ".");
 const STRICT = process.argv.includes("--strict");
+// --ci: PR 게이트용 — 배포 정합을 깨는 유형만 비-0 종료(missing Secret/빈 백엔드 DNS/원장 드리프트).
+// unreferenced-resource(create-db→create-app 사이 정상)·missing-registration·incomplete-purge는
+// 정보/경고라 차단하지 않는다. (--strict는 전부 차단 — 수동 점검용.)
+const CI = process.argv.includes("--ci");
+// CI 차단은 새 app-platform 흐름에서 **정확히** 배포를 깨는 두 유형만:
+//   dangling-binding(.bindings.json이 미존재 db/cache 참조 → 배포 시 missing Secret),
+//   orphan-dns(apps.json active 행에 앱 매니페스트 부재 → 빈 백엔드로 DNS 노출).
+// stale-ledger-row는 제외 — apps/·platform/ 밖에서 관리되는 기존 워크로드(media 등)를
+// 오탐해 모든 PR을 막는다. 원장 드리프트는 --strict(수동 점검)로만.
+const BLOCKING = new Set(["dangling-binding", "orphan-dns"]);
 
 const findings = [];
 const add = (type, subject, detail) => findings.push({ type, subject, detail });
@@ -79,5 +89,10 @@ const tombs = readJson(`${ROOT}/platform/data-conn/prod/.tombstones.json`, {});
 for (const [k, v] of Object.entries(tombs))
   if (v.state === "purging") add("incomplete-purge", k, "purge 상태머신이 중단됨 — drop/verify/cleanup 재개 필요");
 
-console.log(JSON.stringify({ findings, count: findings.length }, null, 2));
+const blocking = findings.filter((f) => BLOCKING.has(f.type));
+console.log(JSON.stringify({ findings, count: findings.length, blocking: blocking.length }, null, 2));
 if (STRICT && findings.length > 0) process.exit(1);
+if (CI && blocking.length > 0) {
+  console.error(`audit-orphans: 배포 정합 위반 ${blocking.length}건 — ${blocking.map((f) => `${f.type}:${f.subject}`).join(", ")}`);
+  process.exit(1);
+}
