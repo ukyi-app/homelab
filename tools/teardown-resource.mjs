@@ -21,6 +21,7 @@
 // 참조 집계는 **오직 apps/*/deploy/prod/.bindings.json**(homelab 권위 레지스트리)로만 한다 —
 // envFrom 파싱이나 외부 앱 레포 config는 stale/접근불가일 수 있어 신뢰하지 않는다.
 import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
+import { parseDocument } from "yaml";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const has = (k) => process.argv.includes(k);
@@ -59,12 +60,47 @@ const tombs = existsSync(tombPath) ? JSON.parse(readFileSync(tombPath, "utf8")) 
 const writeTombs = () => writeFileSync(tombPath, JSON.stringify(tombs, null, 2) + "\n");
 
 // 대상 산출물 경로
-const crPath = `${ROOT}/platform/cnpg/prod/databases/${name}.yaml`;
+const dbDir = `${ROOT}/platform/cnpg/prod/databases`;
+const crPath = `${dbDir}/${name}.yaml`;
 const cacheDir = `${ROOT}/platform/cache/prod/${name}`;
 const connFiles = [
   `${ROOT}/platform/data-conn/prod/${kind}-${name}-conn.sealed.yaml`,
   `${ROOT}/platform/data-conn/prod/${kind}-${name}-ro-conn.sealed.yaml`,
 ];
+const dataConnKust = `${ROOT}/platform/data-conn/prod/kustomization.yaml`;
+const dbKust = `${dbDir}/kustomization.yaml`;
+const cacheKust = `${ROOT}/platform/cache/prod/kustomization.yaml`;
+
+// purge cleanup이 제거할 (파일/디렉토리, 등록된 kustomization, resources 엔트리) — provision이
+// 등록한 그대로를 역으로 제거한다. **파일만 rm하고 kustomization 엔트리를 남기면 kustomize
+// build가 "missing file"로 죽어 cnpg-data/data-conn-prod/cache-prod 렌더가 파손된다**(적대적 리뷰).
+const purgeArtifacts = kind === "db"
+  ? [
+      { file: crPath, kust: dbKust, entry: `${name}.yaml` },
+      { file: `${dbDir}/db-${name}-owner.sealed.yaml`, kust: dbKust, entry: `db-${name}-owner.sealed.yaml` },
+      { file: `${dbDir}/db-${name}-ro.sealed.yaml`, kust: dbKust, entry: `db-${name}-ro.sealed.yaml` },
+      { file: connFiles[0], kust: dataConnKust, entry: `db-${name}-conn.sealed.yaml` },
+      { file: connFiles[1], kust: dataConnKust, entry: `db-${name}-ro-conn.sealed.yaml` },
+    ]
+  : [
+      { file: cacheDir, dir: true, kust: cacheKust, entry: name },
+      { file: connFiles[0], kust: dataConnKust, entry: `cache-${name}-conn.sealed.yaml` },
+      { file: connFiles[1], kust: dataConnKust, entry: `cache-${name}-ro-conn.sealed.yaml` },
+    ];
+
+// kustomization resources에서 엔트리 제거(멱등) — provision의 addResource를 역으로. trailing
+// slash 정규화로 인스턴스 디렉토리 등록(name vs name/)도 매칭.
+function deregister(kustPath, entry) {
+  if (!existsSync(kustPath)) return;
+  const doc = parseDocument(readFileSync(kustPath, "utf8"));
+  const seq = doc.get("resources");
+  if (!seq?.items) return;
+  const norm = (v) => String(v).replace(/\/$/, "");
+  const idx = seq.items.findIndex((it) => norm(it.value ?? it) === norm(entry));
+  if (idx < 0) return;
+  doc.deleteIn(["resources", idx]);
+  writeFileSync(kustPath, doc.toString());
+}
 
 const plan = { resource: key, mode: deleteData ? "purge" : "retain", step, referrers: 0, backupId: backupId ?? null };
 
@@ -118,15 +154,17 @@ switch (step) {
   }
   case "cleanup": {
     if (!DRY) {
-      if (kind === "db") { if (existsSync(crPath)) rmSync(crPath); }
-      else if (existsSync(cacheDir)) rmSync(cacheDir, { recursive: true });
-      for (const f of connFiles) if (existsSync(f)) rmSync(f);
+      // 파일 제거 + 같은 항목을 kustomization에서 등록 해제(둘 다 멱등 — 재실행 안전)
+      for (const a of purgeArtifacts) {
+        if (existsSync(a.file)) rmSync(a.file, a.dir ? { recursive: true } : {});
+        deregister(a.kust, a.entry);
+      }
       tombs[key] = { state: "purged", backupId, at: new Date().toISOString() };
       writeTombs();
     }
     console.log(JSON.stringify({
       ...plan,
-      action: "cleanup — CR/인스턴스/conn 제거 + tombstone(purged)",
+      action: "cleanup — CR/인스턴스/conn 제거 + kustomization 등록 해제 + tombstone(purged)",
       manual: kind === "db" ? "cluster.yaml managed.roles에서 owner/_ro role 제거는 별도 커밋(워크플로 단계)" : "원장 행 제거 확인",
     }, null, 2));
     break;

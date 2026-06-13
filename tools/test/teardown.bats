@@ -26,10 +26,40 @@ EOF
 
 **합계:** req ≈ 128 Mi · limit ≈ 256 Mi (반드시 ≤ 8704 Mi 유지).
 EOF
-  # 리소스 산출물 (Phase 5 모양)
+  # 리소스 산출물 (Phase 5 모양) — provision-db/-cache가 만드는 파일 + kustomization 등록
   printf 'kind: Database\nspec: { ensure: present }\n' > "$FR/platform/cnpg/prod/databases/shared.yaml"
-  touch "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml" \
-    "$FR/platform/data-conn/prod/cache-sessions-conn.sealed.yaml"
+  touch "$FR/platform/cnpg/prod/databases/db-shared-owner.sealed.yaml" \
+    "$FR/platform/cnpg/prod/databases/db-shared-ro.sealed.yaml" \
+    "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml" \
+    "$FR/platform/data-conn/prod/db-shared-ro-conn.sealed.yaml" \
+    "$FR/platform/data-conn/prod/cache-sessions-conn.sealed.yaml" \
+    "$FR/platform/data-conn/prod/cache-sessions-ro-conn.sealed.yaml"
+  cat > "$FR/platform/cnpg/prod/databases/kustomization.yaml" <<'EOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: database
+resources:
+  - shared.yaml
+  - db-shared-owner.sealed.yaml
+  - db-shared-ro.sealed.yaml
+EOF
+  cat > "$FR/platform/data-conn/prod/kustomization.yaml" <<'EOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - db-shared-conn.sealed.yaml
+  - db-shared-ro-conn.sealed.yaml
+  - cache-sessions-conn.sealed.yaml
+  - cache-sessions-ro-conn.sealed.yaml
+EOF
+  cat > "$FR/platform/cache/prod/kustomization.yaml" <<'EOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cache
+resources:
+  - sessions
+EOF
 }
 teardown() { rm -rf "$TMP"; }
 
@@ -109,6 +139,45 @@ teardown() { rm -rf "$TMP"; }
   [ ! -f "$FR/platform/cnpg/prod/databases/shared.yaml" ]
   [ ! -f "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml" ]
   run jq -e '.["db:shared"].state == "purged"' "$FR/platform/data-conn/prod/.tombstones.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "purge cleanup deregisters every removed file from its kustomization (no broken render)" {
+  node "$ROOT/tools/teardown-app.mjs" --app orders --repo-root "$FR"
+  node "$ROOT/tools/teardown-app.mjs" --app billing --repo-root "$FR"
+  run node "$ROOT/tools/teardown-resource.mjs" --db shared --repo-root "$FR" --delete-data \
+    --backup-verified barman-1 --step cleanup
+  [ "$status" -eq 0 ]
+  # 파일 제거 (owner/ro 비밀번호 sealed 포함)
+  [ ! -f "$FR/platform/cnpg/prod/databases/shared.yaml" ]
+  [ ! -f "$FR/platform/cnpg/prod/databases/db-shared-owner.sealed.yaml" ]
+  [ ! -f "$FR/platform/cnpg/prod/databases/db-shared-ro.sealed.yaml" ]
+  [ ! -f "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml" ]
+  # kustomization 등록 해제 — 남아 있으면 kustomize build가 missing file로 죽는다
+  run grep -E "shared\.yaml|db-shared" "$FR/platform/cnpg/prod/databases/kustomization.yaml"
+  [ "$status" -ne 0 ]
+  run grep "db-shared" "$FR/platform/data-conn/prod/kustomization.yaml"
+  [ "$status" -ne 0 ]
+  # cache conn 항목은 무관하므로 보존
+  run grep "cache-sessions-conn" "$FR/platform/data-conn/prod/kustomization.yaml"
+  [ "$status" -eq 0 ]
+  # cleanup 재실행 = 멱등
+  run node "$ROOT/tools/teardown-resource.mjs" --db shared --repo-root "$FR" --delete-data \
+    --backup-verified barman-1 --step cleanup
+  [ "$status" -eq 0 ]
+}
+
+@test "cache purge cleanup deregisters the instance dir and its conns" {
+  node "$ROOT/tools/teardown-app.mjs" --app orders --repo-root "$FR"
+  run node "$ROOT/tools/teardown-resource.mjs" --cache sessions --repo-root "$FR" --delete-data \
+    --backup-verified rdb-1 --step cleanup
+  [ "$status" -eq 0 ]
+  run grep "sessions" "$FR/platform/cache/prod/kustomization.yaml"
+  [ "$status" -ne 0 ]
+  run grep "cache-sessions" "$FR/platform/data-conn/prod/kustomization.yaml"
+  [ "$status" -ne 0 ]
+  # db 항목은 무관하므로 보존
+  run grep "db-shared-conn" "$FR/platform/data-conn/prod/kustomization.yaml"
   [ "$status" -eq 0 ]
 }
 
