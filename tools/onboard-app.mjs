@@ -139,6 +139,9 @@ if (!DRY) {
     namespace: "prod",
     ...(secrets.length ? { generators: ["secret-generator.yaml"] } : {}),
   }));
+  // [deprecated] v1 KSOPS 앱-시크릿 경로. 앱 시크릿 표준은 create-app(v2) + SealedSecret이다
+  // (tools/create-app.mjs, --sealed <app>-secrets.sealed.yaml). 신규 앱은 KSOPS를 쓰지 말 것.
+  // 이 분기는 기존 v1 온보딩 호환용으로만 남긴다 — 동작 변경 금지(비목표).
   if (secrets.length) {
     writeFileSync(`${appDir}/deploy/prod/secret-generator.yaml`,
 `apiVersion: viaduct.ai/v1
