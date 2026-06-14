@@ -32,6 +32,13 @@ spec:
                   TS="$(date -u +%Y%m%dT%H%M%SZ)"
                   DEST="/backup/basebackup-${TS}"
                   echo "[basebackup] -> ${DEST}"
+                  # kube-router가 새 파드의 네트워크 룰(ClusterIP 라우팅)을 설치하기 전, 파드 첫
+                  # 동작으로 pg-rw에 접속하면 RST(Connection refused)가 나고 libpq는 즉시 포기한다
+                  # (라이브 검증). pg-rw:5432가 연결 가능해질 때까지 짧게 대기한 뒤 진행한다.
+                  for i in $(seq 1 30); do
+                    if (exec 3<>/dev/tcp/pg-rw.database.svc/5432) 2>/dev/null; then break; fi
+                    echo "[basebackup] waiting for pg-rw:5432 (attempt ${i}/30)"; sleep 1
+                  done
                   pg_basebackup \
                     --host=pg-rw.database.svc \
                     --port=5432 \

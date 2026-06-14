@@ -31,6 +31,13 @@ spec:
                   TS="$(date -u +%Y%m%dT%H%M%SZ)"
                   KEY="r2:homelab-pg-backups-prod/pgdump/app-${TS}.dump.gz"
                   echo "[hedge] pg_dump (custom format) -> ${KEY}"
+                  # kube-router가 새 파드의 네트워크 룰(ClusterIP 라우팅)을 설치하기 전, 파드 첫
+                  # 동작으로 pg-rw에 접속하면 RST(Connection refused)가 나고 libpq는 즉시 포기한다
+                  # (라이브 검증). pg-rw:5432가 연결 가능해질 때까지 짧게 대기한 뒤 진행한다.
+                  for i in $(seq 1 30); do
+                    if (exec 3<>/dev/tcp/pg-rw.database.svc/5432) 2>/dev/null; then break; fi
+                    echo "[hedge] waiting for pg-rw:5432 (attempt ${i}/30)"; sleep 1
+                  done
                   pg_dump --host=pg-rw.database.svc --port=5432 \
                           --username="$PGUSER" --dbname=app \
                           --format=custom --no-password \
@@ -50,7 +57,10 @@ spec:
                 # "버킷 없음→CreateBucket(403)"으로 오판하므로 체크를 끈다.
                 - name: RCLONE_CONFIG_R2_NO_CHECK_BUCKET
                   value: "true"
+                # pg_dump는 app DB 전체를 떠야 한다 — restore_canary 등 postgres 소유 객체를 app
+                # 롤로는 LOCK/덤프할 수 없어 permission denied로 실패한다(라이브 검증). 완전한 논리
+                # 백업을 위해 관리형 superuser(pg-superuser)로 접속한다(basebackup과 동일 규약).
                 - name: PGUSER
-                  valueFrom: { secretKeyRef: { name: pg-app-credentials, key: username } }
+                  valueFrom: { secretKeyRef: { name: pg-superuser, key: username } }
                 - name: PGPASSWORD
-                  valueFrom: { secretKeyRef: { name: pg-app-credentials, key: password } }
+                  valueFrom: { secretKeyRef: { name: pg-superuser, key: password } }
