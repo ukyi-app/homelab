@@ -16,3 +16,9 @@ cj=platform/cnpg/prod/basebackup-cronjob.yaml
 @test "cronjob emits the local-basebackup breadcrumb metric M5 alerts on" {
   grep -q 'cnpg.io/backupRole: local-basebackup' "$cj"
 }
+
+@test "cronjob waits for pg-rw to be reachable before pg_basebackup (kube-router rule-install gap)" {
+  # libpq는 첫 연결 거부에서 즉시 포기 — 새 파드의 첫 ClusterIP 접속이 kube-router 룰 설치 전
+  # 갭에 떨어지면 RST(Connection refused)로 job이 실패한다(라이브 검증). 도달 대기 루프가 필요.
+  grep -q '/dev/tcp/pg-rw.database.svc/5432' "$cj"
+}
