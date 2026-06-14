@@ -17,7 +17,13 @@ fi
 
 # `orb list`(OrbStack 2.x)는 파이프/non-TTY에서는 헤더를 출력하지 않고, TTY에서는
 # "NAME …" 헤더를 출력할 수 있다. 둘 다 견디게: 빈 줄과 헤더 행을 제거한다.
-mapfile -t rows < <(orb list 2>/dev/null | awk 'NF && $1 != "NAME"')
+# mapfile/readarray는 bash 4+ 전용 — macOS 기본 bash 3.2에서 'command not found'로
+# make up이 깨진다(라이브 검증). 의존성 없는 while-read 루프로 같은 결과를 만든다
+# (`|| [ -n ... ]`로 마지막 줄에 개행이 없어도 누락하지 않는다).
+rows=()
+while IFS= read -r line || [ -n "$line" ]; do
+  rows+=("$line")
+done < <(orb list 2>/dev/null | awk 'NF && $1 != "NAME"')
 
 count="${#rows[@]}"
 if [ "$count" -ne 1 ]; then
