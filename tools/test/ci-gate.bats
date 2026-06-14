@@ -8,10 +8,10 @@ WF=".github/workflows/ci.yaml"
   [[ "$output" == *"bats "* ]]
 }
 
-@test "ci runs on pull_request and uses pnpm@10" {
+@test "ci runs on pull_request and uses pnpm@11" {
   run yq '.on.pull_request' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" != "null" ]
-  run grep -E "pnpm@10" "$WF"
+  run grep -E "pnpm@11" "$WF"
   [ "$status" -eq 0 ]
 }

@@ -12,10 +12,6 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
 
-  apps/console/src: {}
-
-  apps/web/src: {}
-
 packages:
 
   yaml@2.9.0:

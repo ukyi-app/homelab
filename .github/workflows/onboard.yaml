@@ -40,7 +40,7 @@ jobs:
           token: ${{ steps.token.outputs.token }}
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
-      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: corepack enable && corepack prepare pnpm@11 --activate
       - run: pnpm install --frozen-lockfile
       - name: install chart toolchain (render + ledger gate)
         run: |

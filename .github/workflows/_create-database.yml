@@ -32,7 +32,7 @@ jobs:
           token: ${{ steps.writer.outputs.token }}
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
-      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: corepack enable && corepack prepare pnpm@11 --activate
       - run: pnpm install --frozen-lockfile
       - name: spec 재검증 + name/extensions 추출 (defense-in-depth — dispatcher 외 호출 경로 대비)
         id: spec
