@@ -28,3 +28,9 @@ f=platform/cnpg/prod/cluster.yaml
 @test "Cluster CR carries sync-wave -1 (Ready before app migrations)" {
   grep -qE 'argocd.argoproj.io/sync-wave:\s*"-1"' "$f"
 }
+
+@test "initdb seeds restore_canary so a DR rebuild restores it without a manual reseed" {
+  # restore_canary가 git 시드가 아니면 DR 재구축(initdb)에서 유실 → 주간 restore-drill이 깨진다.
+  grep -q 'postInitApplicationSQL:' "$f"
+  grep -q 'restore_canary' "$f"
+}

@@ -53,6 +53,12 @@ spec:
       owner: app
       secret:
         name: pg-app-credentials # M2가 시드 (platform/cnpg/prod/app-credentials.enc.yaml, ns database); bootstrap 전에 반드시 존재해야 함 — 이 kustomization의 KSOPS generator가 sync-wave -2에서 렌더 (Cluster의 -1보다 먼저)
+      # restore_canary를 git으로 시드한다 — DR 재구축(initdb)에서 자동 복원돼 주간 restore-drill이
+      # 수동 재시드 없이 동작한다. postInitApplicationSQL은 app DB에 initdb 시 1회만 실행되고,
+      # 기존 클러스터엔 no-op이다(R2 recovery 경로는 base backup의 테이블을 그대로 가져온다).
+      postInitApplicationSQL:
+        - CREATE TABLE IF NOT EXISTS restore_canary (id serial primary key, ts timestamptz default now())
+        - INSERT INTO restore_canary DEFAULT VALUES
 
   plugins:
     # enabled는 webhook 주입 기본값이지만 명시 — plugins는 listType 미지정(SSA atomic)이라
