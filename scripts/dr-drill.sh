@@ -108,7 +108,7 @@ ACTUAL=$(recover_and_check pg-dr-verify)
   || { echo "DR DRILL FAIL: recovered canary=$ACTUAL < pre-loss $EXPECTED — R2가 데이터를 복구하지 못함"; exit 1; }
 echo "    recovered canary = $ACTUAL (>= pre-loss $EXPECTED) — 재구축 노드에서 R2 데이터 복구 증명됨"
 
-echo "==> [6] 재구축된 플랫폼에서 앱 워크로드가 실제 서빙되는지 검증"
-kubectl -n prod rollout status deploy/api --timeout=300s
+echo "==> [6] 재구축된 플랫폼의 코어 워크로드가 실제 서빙되는지 검증 (인-레포 앱 0 — keystone 엣지 서비스 adguard)"
+kubectl -n edge rollout status deploy/adguard --timeout=300s
 
 echo "DR DRILL PASS — VM 재구축; 플랫폼 + 워크로드가 git에서 복귀, 재구축 노드에서 R2 데이터 복구 증명됨(prod 데이터는 docs/runbooks/restore.md로 복구)"
