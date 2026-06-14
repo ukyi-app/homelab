@@ -69,3 +69,7 @@ m6-tools: ## 마일스톤 6용 차트/CI 툴체인 검증
 chart-test: ## 모든 kind에 대해 app 차트 렌더+검증
 	bats platform/charts/app/tests/
 	bash platform/charts/app/tests/render.sh
+
+.PHONY: reset-pg-archive
+reset-pg-archive: ## [DR ④] R2 serverName pg 아카이브 정리(재구축 후 아카이빙 재개). 기본 dry-run; 실제 정리는 ARGS=--purge
+	@scripts/reset-pg-r2-archive.sh $(ARGS)
