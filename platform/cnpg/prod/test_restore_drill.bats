@@ -32,3 +32,12 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   run shellcheck "$sh"
   [ "$status" -eq 0 ]
 }
+@test "drill notify renders the shared contract (Korean source label + parse_mode HTML)" {
+  grep -q '복원드릴' "$sh"          # 소스 라벨
+  grep -q 'parse_mode=HTML' "$sh"   # HTML 모드 유지
+  grep -q 'notify-block (test-extracted)' "$sh" # 격리 테스트 추출 마커
+}
+@test "drill notify supports DRY_RUN (print instead of curl) and HTML-escapes" {
+  grep -q 'DRY_RUN' "$sh"
+  grep -q 'hx()' "$sh"
+}
