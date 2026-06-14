@@ -55,3 +55,10 @@ sh=scripts/dr-drill.sh
   [ "$(grep -c 'DR DRILL PASS' "$sh")" -eq 1 ]
   [ "$(tail -1 "$sh" | grep -c 'DR DRILL PASS')" -eq 1 ]
 }
+
+@test "dr-drill [6] verifies a workload that still exists (no removed in-repo app)" {
+  # prod/deploy/api는 제거됨(인-레포 앱 0) — 워크로드 서빙 검증은 현존 코어 서비스(adguard)를 가리킨다.
+  run grep -n 'deploy/api' "$sh"
+  [ "$status" -ne 0 ]
+  grep -q 'rollout status deploy/adguard' "$sh"
+}
