@@ -143,12 +143,16 @@ jobs:
     if: failure()
     runs-on: ubuntu-24.04-arm
     steps:
-      - env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ACTION: ${{ github.event.inputs.action }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT}" \
-            -d text="mutation FAILED: action=${ACTION} ${RUN_URL}"
+      # 이 잡은 validate 잡과 분리돼 checkout이 없었다 — 로컬 composite action(telegram-notify)을
+      # resolve하려면 레포 체크아웃이 선행돼야 한다(없으면 action.yml 경로 미존재로 실패).
+      - uses: actions/checkout@v4
+      - name: telegram notify
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: failure
+          source: 변이
+          title: 변이 실행
+          ident: action=${{ github.event.inputs.action }}
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

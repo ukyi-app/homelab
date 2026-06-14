@@ -78,12 +78,12 @@ jobs:
           terraform -chdir=infra/cloudflare apply -input=false tf.plan
       - name: telegram notify
         if: always()
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          STATUS: ${{ job.status }}
-          SHA: ${{ github.sha }}
-        run: |
-          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT}" \
-            -d text="cloudflare apply ${STATUS}: ${SHA}"
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ job.status }}
+          source: IaC
+          title: Cloudflare 적용
+          ident: ${{ github.sha }}
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

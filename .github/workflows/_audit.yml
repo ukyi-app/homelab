@@ -20,16 +20,27 @@ jobs:
         run: |
           node tools/audit-orphans.mjs --repo-root . | tee /tmp/audit.json
           echo "count=$(jq -r .count /tmp/audit.json)" >> "$GITHUB_OUTPUT"
+      - name: build audit summary
+        id: report
+        if: always()
+        run: |
+          summary="$(jq -r '.findings[:20][] | "- \(.type): \(.subject)"' /tmp/audit.json 2>/dev/null || true)"
+          {
+            echo "body<<EOF"
+            printf '드리프트 건수: %s\n%s\n' "$COUNT" "$summary"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          COUNT: ${{ steps.audit.outputs.count }}
       - name: telegram report
         if: always()
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          COUNT: ${{ steps.audit.outputs.count }}
-          STATUS: ${{ job.status }}
-        run: |
-          summary=$(jq -r '.findings[:5][] | "- \(.type): \(.subject)"' /tmp/audit.json 2>/dev/null || true)
-          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT}" \
-            --data-urlencode text="audit ${STATUS}: 드리프트 ${COUNT}건
-          ${summary}"
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ job.status }}
+          source: 감사
+          title: 드리프트 감사
+          ident: ${{ steps.audit.outputs.count }}건
+          body: ${{ steps.report.outputs.body }}
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

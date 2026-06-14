@@ -90,12 +90,13 @@ jobs:
           gh pr merge --auto --squash "$branch" || gh pr merge --squash "$branch"
       - name: telegram notify (핸들 이름만 — URL/비밀번호 금지)
         if: always()
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          NAME: ${{ steps.spec.outputs.name }}
-          STATUS: ${{ job.status }}
-        run: |
-          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT}" \
-            -d text="create-database ${STATUS}: db=${NAME} — 핸들 db-${NAME}-conn / db-${NAME}-ro-conn (prod)"
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ job.status }}
+          source: DB생성
+          title: DB 생성
+          ident: db=${{ steps.spec.outputs.name }}
+          body: "핸들 db-${{ steps.spec.outputs.name }}-conn / db-${{ steps.spec.outputs.name }}-ro-conn (prod)"
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
