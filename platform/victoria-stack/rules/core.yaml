@@ -13,22 +13,22 @@ data:
             for: 5m
             labels: { severity: critical }
             annotations:
-              summary: "Scrape target {{ $labels.job }}/{{ $labels.instance }} down"
-              description: "vmagent target has been unreachable for 5m."
+              summary: "스크레이프 타깃 {{ $labels.job }}/{{ $labels.instance }} 다운"
+              description: "vmagent 타깃이 5분간 도달 불가 상태입니다."
           - alert: NodeMemoryHigh
             expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.92
             for: 10m
             labels: { severity: warning }
             annotations:
-              summary: "VM memory >92%"
-              description: "Node memory pressure; eviction threshold nears."
+              summary: "VM 메모리 사용률 92% 초과"
+              description: "노드 메모리 압박 — eviction 임계치에 근접했습니다."
           - alert: PodOOMKilled
             expr: increase(kube_pod_container_status_restarts_total[15m]) > 0 and on(namespace,pod) kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
             for: 0m
             labels: { severity: warning }
             annotations:
-              summary: "OOMKill in {{ $labels.namespace }}/{{ $labels.pod }}"
-              description: "Container hit its memory limit — check the ledger budget."
+              summary: "OOMKill 발생: {{ $labels.namespace }}/{{ $labels.pod }}"
+              description: "컨테이너가 메모리 limit에 도달했습니다 — 메모리 원장 예산을 확인하세요."
           # Notifier 자기관측 (R8 보강): Telegram 전송이 실패하면 발화.
           # ⚠️ Watchdog 커버리지 경계 — Watchdog는 "vmalert→Alertmanager 평가 파이프라인이
           #    살아있음"만 증명하고(healthchecks.io의 off-node dead-man's-switch가 그 부재를 페이징),
@@ -50,5 +50,5 @@ data:
             expr: vector(1)
             labels: { severity: none }
             annotations:
-              summary: "Watchdog: alerting pipeline is alive."
-              description: "This always-firing alert proves Alertmanager→Telegram and the off-node dead-man's-switch are wired. Its ABSENCE at healthchecks.io is the page."
+              summary: "Watchdog: 알림 파이프라인 정상 동작 중."
+              description: "항상 발화하는 이 알림은 vmalert→Alertmanager→deadmanswitch(webhook)→healthchecks.io 경로의 생존만 증명합니다(healthchecks.io에서 이 알림의 부재가 곧 page). ⚠️ Telegram 전송은 증명하지 않는다 — Watchdog는 deadmanswitch로만 라우팅됨."

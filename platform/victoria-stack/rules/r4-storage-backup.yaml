@@ -16,8 +16,8 @@ data:
             for: 10m
             labels: { severity: warning }
             annotations:
-              summary: "External SSD <15% free"
-              description: "bulk-ssd (media + backup staging) is filling; metrics retention byte-cap will NOT save this disk."
+              summary: "외장 SSD 여유 공간 15% 미만"
+              description: "bulk-ssd(미디어 + 백업 스테이징)가 차오릅니다 — metrics retention 바이트 상한으로는 이 디스크를 구제할 수 없습니다."
           - alert: BulkSSDAlmostFull
             expr: |
               (node_filesystem_avail_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}
@@ -25,8 +25,8 @@ data:
             for: 5m
             labels: { severity: critical }
             annotations:
-              summary: "External SSD <5% free"
-              description: "bulk-ssd nearly full — local backup staging + media at imminent risk."
+              summary: "외장 SSD 여유 공간 5% 미만"
+              description: "bulk-ssd가 거의 가득 찼습니다 — 로컬 백업 스테이징과 미디어가 임박한 위험에 처했습니다."
           # 내장 SSD(standard) 디스크 포화 — Postgres + vmsingle 보호
           - alert: StandardSSDFilling
             expr: |
@@ -35,8 +35,8 @@ data:
             for: 10m
             labels: { severity: critical }
             annotations:
-              summary: "Internal SSD <10% free"
-              description: "standard SC disk low — Postgres PGDATA/WAL at risk."
+              summary: "내장 SSD 여유 공간 10% 미만"
+              description: "standard SC 디스크 여유 부족 — Postgres PGDATA/WAL이 위험합니다."
           # 백업 생존성: 로컬 CNPG base-backup CronJob(M4)은 매일 완료되어야 한다.
           - alert: LocalBasebackupStale
             expr: |
@@ -45,8 +45,8 @@ data:
             for: 15m
             labels: { severity: critical }
             annotations:
-              summary: "Local base-backup stale (>27h) or missing"
-              description: "Restore copy 2 (local 1TB SSD) is at risk — unmounted drive or failed CronJob."
+              summary: "로컬 base-backup이 stale(27시간 초과)이거나 누락됨"
+              description: "복원 사본 2(로컬 1TB SSD)가 위험합니다 — 드라이브 미마운트 또는 CronJob 실패."
           # 백업 생존성: 가장 최근 R2 백업이 계속 갱신되어야 한다 (오프사이트 사본 3).
           - alert: R2BackupStale
             expr: |
@@ -55,8 +55,8 @@ data:
             for: 15m
             labels: { severity: critical }
             annotations:
-              summary: "R2 offsite backup stale (>27h) or missing"
-              description: "Offsite copy 3 (Cloudflare R2) has not produced a fresh backup; DR copy is going stale."
+              summary: "R2 오프사이트 백업이 stale(27시간 초과)이거나 누락됨"
+              description: "오프사이트 사본 3(Cloudflare R2)가 최신 백업을 만들지 못했습니다 — DR 사본이 노후화되고 있습니다."
           # 백업 생존성: R2로의 WAL 아카이빙이 오류를 내면 안 된다 (RPO ≈ 5분 목표).
           - alert: WALArchiveStalled
             expr: |
@@ -64,8 +64,8 @@ data:
             for: 15m
             labels: { severity: critical }
             annotations:
-              summary: "WAL archiving to R2 stalled (RPO at risk)"
-              description: "Last failed archive is newer than last successful archive; offsite WAL stream is broken and the 5-min RPO is not being met."
+              summary: "R2로의 WAL 아카이빙 정지(RPO 위험)"
+              description: "마지막 실패 아카이브가 마지막 성공 아카이브보다 최신입니다 — 오프사이트 WAL 스트림이 끊겼고 5분 RPO 목표를 충족하지 못합니다."
           # 복원 drill 생존성: M4의 반복 복원 drill이 restore_drill_last_success_timestamp를 push한다.
           - alert: CNPGRestoreDrillStale
             expr: |
@@ -74,5 +74,5 @@ data:
             for: 30m
             labels: { severity: warning }
             annotations:
-              summary: "CNPG restore drill has not succeeded recently"
-              description: "The recurring restore-from-R2 drill (M4) has not pushed a fresh success timestamp; the only verified restore path may be broken (R1)."
+              summary: "CNPG 복원 drill이 최근에 성공하지 못함"
+              description: "반복 R2 복원 drill(M4)이 최신 성공 timestamp를 푸시하지 못했습니다 — 유일하게 검증된 복원 경로가 깨졌을 수 있습니다(R1)."
