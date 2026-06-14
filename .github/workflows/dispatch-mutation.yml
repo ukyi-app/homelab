@@ -146,13 +146,20 @@ jobs:
       # 이 잡은 validate 잡과 분리돼 checkout이 없었다 — 로컬 composite action(telegram-notify)을
       # resolve하려면 레포 체크아웃이 선행돼야 한다(없으면 action.yml 경로 미존재로 실패).
       - uses: actions/checkout@v4
+      - name: sanitize action input
+        id: safe
+        env:
+          ACTION: ${{ github.event.inputs.action }}   # 비신뢰 입력 — env 경유(with:에 인라인 보간 금지)
+        run: |
+          case "$ACTION" in (*[!a-z-]*|"") ACTION="(invalid)";; esac
+          echo "ident=action=${ACTION}" >> "$GITHUB_OUTPUT"
       - name: telegram notify
         uses: ./.github/actions/telegram-notify
         with:
           status: failure
           source: 변이
           title: 변이 실행
-          ident: action=${{ github.event.inputs.action }}
+          ident: ${{ steps.safe.outputs.ident }}
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
