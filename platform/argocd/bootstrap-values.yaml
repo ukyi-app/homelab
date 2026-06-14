@@ -26,6 +26,10 @@ repoServer:
     - name: SOPS_AGE_KEY_FILE
       value: /home/argocd/.config/sops/age/keys.txt
   # ksops 바이너리 + exec 지원 kustomize를 repo-server에 설치한다.
+  # ⚠️ 이 initContainer는 ksops뿐 아니라 repo-server가 쓰는 kustomize 바이너리 자체를 공급한다
+  #    (/custom-tools → /usr/local/bin/kustomize subPath 마운트). KSOPS를 제거하더라도 이 컨테이너를
+  #    통째로 지우면 안 된다 — kustomize(helm inflation용 --enable-helm)를 먼저 대체해야 한다.
+  #    하이브리드 명료화(2026-06-15)에서 KSOPS 제거는 비목표.
   initContainers:
     - name: install-ksops
       image: viaductoss/ksops:v4.3.2
@@ -91,6 +95,9 @@ configs:
   cm:
     # 렌더 시점 kustomize 기반 복호화를 위해 KSOPS exec 플러그인을 활성화한다.
     # KSOPS(exec)와 Traefik/Tailscale HelmChartInflationGenerator(helm) 둘 다 각자의 플래그가 필요하다.
+    # ⚠️ --enable-exec는 kustomize alpha 기능. ArgoCD/kustomize가 exec 플러그인을 폐기하면 KSOPS
+    #    렌더가 깨진다(platform 7개 SOPS 복호화 중단). 폐기 신호 관측 시 좁게 대응(해당 시크릿만
+    #    SealedSecrets 이전). 선제 마이그레이션은 비목표.
     kustomize.buildOptions: "--enable-alpha-plugins --enable-exec --enable-helm"
     # diff churn을 약 20-30% 줄인다(§5)
     resource.exclusions: |
