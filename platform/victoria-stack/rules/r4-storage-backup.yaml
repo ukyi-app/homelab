@@ -14,7 +14,7 @@ data:
               (node_filesystem_avail_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}
                / node_filesystem_size_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}) < 0.15
             for: 10m
-            labels: { severity: warning }
+            labels: { severity: warning, disk: bulk-ssd }
             annotations:
               summary: "외장 SSD 여유 공간 15% 미만"
               description: "bulk-ssd(미디어 + 백업 스테이징)가 차오릅니다 — metrics retention 바이트 상한으로는 이 디스크를 구제할 수 없습니다."
@@ -23,7 +23,7 @@ data:
               (node_filesystem_avail_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}
                / node_filesystem_size_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}) < 0.05
             for: 5m
-            labels: { severity: critical }
+            labels: { severity: critical, disk: bulk-ssd }
             annotations:
               summary: "외장 SSD 여유 공간 5% 미만"
               description: "bulk-ssd가 거의 가득 찼습니다 — 로컬 백업 스테이징과 미디어가 임박한 위험에 처했습니다."
@@ -33,7 +33,7 @@ data:
               (node_filesystem_avail_bytes{mountpoint=~"/var/lib/rancher.*|/$"}
                / node_filesystem_size_bytes{mountpoint=~"/var/lib/rancher.*|/$"}) < 0.10
             for: 10m
-            labels: { severity: critical }
+            labels: { severity: critical, disk: standard }
             annotations:
               summary: "내장 SSD 여유 공간 10% 미만"
               description: "standard SC 디스크 여유 부족 — Postgres PGDATA/WAL이 위험합니다."
@@ -87,3 +87,14 @@ data:
             annotations:
               summary: "CNPG 복원 drill이 최근에 성공하지 못함"
               description: "반복 R2 복원 drill(M4)이 최신 성공 timestamp를 푸시하지 못했습니다 — 유일하게 검증된 복원 경로가 깨졌을 수 있습니다(R1)."
+          # 백업 생존성: 논리 백업(헤지) — pg_dump→R2 CronJob(매일 04:00)이 완료되어야 한다(복원 사본 4).
+          # 나머지 3개 백업(로컬 base·R2 barman·복원 drill)은 감시되나 이 4번째만 무감시였다.
+          - alert: PgDumpHedgeStale
+            expr: |
+              (time() - max(kube_job_status_completion_time{job_name=~"pg-dump-hedge-r2.*"})) > 100000
+              or absent(kube_job_status_completion_time{job_name=~"pg-dump-hedge-r2.*"})
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "논리 백업(헤지)이 stale(27시간 초과)이거나 누락됨"
+              description: "pg_dump 헤지 사본(복원 사본 4, R2 pgdump/)이 갱신되지 않았습니다 — barman 실패 시 최후 보루입니다. CronJob/연결을 확인하세요."
