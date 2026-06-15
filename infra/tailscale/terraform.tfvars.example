@@ -3,6 +3,11 @@
 #
 # ⚠️ 시크릿(OAuth client)은 여기 넣지 말 것 — .env.secrets의
 #    TF_VAR_ts_bootstrap_oauth_id / TF_VAR_ts_bootstrap_oauth_secret (env)로만 공급된다.
+#
+# 이 루트는 owner 로컬 apply 전용(ACL/auth-key 관리 = 고-blast-radius, CI 무인 apply 금지).
+# 선택: tf-reconcile.yml의 plan-only 드리프트 알림을 켜려면 아래 Actions 시크릿을 등록한다
+#       (없으면 preflight가 skip) — TF_TAILSCALE_OAUTH_ID / TF_TAILSCALE_OAUTH_SECRET /
+#       TF_TAILSCALE_DNS_NAMESERVER_IP. plan만 돌리므로 읽기 가능 OAuth면 되고 apply 권한은 불필요.
 
 # 내부 전용 호스트 접미사 — cloudflare root의 internal_suffix와 반드시 동일 값 ('home.' + 도메인)
 internal_suffix = "home.<DOMAIN>"
