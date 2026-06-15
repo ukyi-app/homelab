@@ -34,6 +34,8 @@ fi
 # .sops.yaml(catch-all *.enc.yaml 규칙, age 2-recipient) 매칭은 레포 루트 기준
 cd "$ROOT"
 
+# 파일명은 ss-keys.<epoch>.enc.yaml로 통제돼 비알파뉴메릭 위험 없음 — ls가 의도된 정렬 선택
+# shellcheck disable=SC2012
 latest_backup() { ls -1 "$outdir"/ss-keys.*.enc.yaml 2>/dev/null | sort | tail -1; }
 live_keys() {
   kubectl -n sealed-secrets get secret -l "$LABEL" \
