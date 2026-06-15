@@ -46,9 +46,10 @@ data:
               {{- else if eq $name "ImageDigestDrift" }}{{ $title = "이미지 digest 드리프트" }}
               {{- else if eq $name "PodOOMKilled" }}{{ $title = "파드 OOM 종료" }}
               {{- else if eq $name "NodeMemoryHigh" }}{{ $title = "노드 메모리 경고" }}
-              {{- else if eq $name "BulkSSDFilling" }}{{ $title = "외장 SSD 포화" }}
-              {{- else if eq $name "BulkSSDAlmostFull" }}{{ $title = "외장 SSD 임박" }}
+              {{- else if eq $name "StandardSSDWarning" }}{{ $title = "내장 SSD 여유 경고" }}
               {{- else if eq $name "StandardSSDFilling" }}{{ $title = "내장 SSD 포화" }}
+              {{- else if eq $name "StandardSSDFillingTrend" }}{{ $title = "내장 SSD 포화 추세" }}
+              {{- else if eq $name "WALVolumeFilling" }}{{ $title = "WAL 볼륨 충전" }}
               {{- else if eq $name "PostgresClusterDown" }}{{ $title = "PostgreSQL 클러스터 다운" }}
               {{- else if eq $name "PodCrashLooping" }}{{ $title = "파드 재시작 반복" }}
               {{- else if eq $name "PgDumpHedgeStale" }}{{ $title = "논리 헤지 백업 정체" }}
@@ -77,9 +78,10 @@ data:
       - source_matchers: [ 'severity = critical' ]
         target_matchers: [ 'severity = warning' ]
         equal: ['alertname','namespace']
-      # 같은 디스크의 critical(예: BulkSSDAlmostFull)이 warning(BulkSSDFilling)을 억제한다.
+      # 같은 디스크의 critical(예: StandardSSDFilling)이 warning(StandardSSDWarning/Trend)을 억제한다.
       # 둘은 alertname이 달라 위 규칙(equal:alertname)으로는 매치 안 돼 둘 다 발화하던 것을 교정.
       # disk 라벨이 있는 알림으로만 한정(=~".+")해 비-디스크 알림을 과억제하지 않는다.
+      # (WAL은 disk:pgwal로 분리 — 루트 fs critical이 WAL 충전 경고를 가리지 않게: 원인이 WAL일 수 있다.)
       - source_matchers: [ 'severity = critical', 'disk =~ ".+"' ]
         target_matchers: [ 'severity = warning', 'disk =~ ".+"' ]
         equal: ['disk']

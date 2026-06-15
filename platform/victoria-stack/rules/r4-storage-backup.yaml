@@ -8,35 +8,54 @@ data:
     groups:
       - name: storage-backup
         rules:
-          # 외장 1TB SSD(bulk-ssd) 디스크 포화 — 바이트 기준, retention 축출이 가리기 전에 발화
-          - alert: BulkSSDFilling
+          # 디스크 포화 = PVC 포화: 모든 PV가 hostPath(local-path provisioner)라 per-PVC 쿼터·kubelet_volume_stats가
+          # 원천 부재다(hostPath는 MetricsProvider 미구현 → kubelet volume stats 영구 0건 — 라이브 검증). standard SC
+          # PVC(pg-1 PGDATA/WAL·adguard·vmsingle·vlogs)는 전부 루트 fs '/'(btrfs /dev/vdb1, 255GB)를 쿼터 없이 공유하므로
+          # '/' 포화 = 모든 standard PVC 동시 위험. node_filesystem 절대값으로 3티어(조기 warning/추세/critical) 감시한다.
+          # mountpoint="/"는 정확일치 — '/run/k3s/.../shm'·tmpfs·virtiofs(/mnt/mac) 노이즈를 배제하는 단일 btrfs series.
+          # (외장 bulk-ssd는 virtiofs /mnt/mac 하위라 VM node-exporter가 별도 series로 못 봐 직접 측정 불가 — 죽은
+          #  BulkSSD 알림은 제거했다. 미마운트/포화의 권위 backstop은 같은 group의 LocalBasebackupStale(CronJob 실패).)
+          - alert: StandardSSDWarning
             expr: |
-              (node_filesystem_avail_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}
-               / node_filesystem_size_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}) < 0.15
-            for: 10m
-            labels: { severity: warning, disk: bulk-ssd }
+              (node_filesystem_avail_bytes{mountpoint="/"}
+               / node_filesystem_size_bytes{mountpoint="/"}) < 0.15
+            for: 15m
+            labels: { severity: warning, disk: standard }
             annotations:
-              summary: "외장 SSD 여유 공간 15% 미만"
-              description: "bulk-ssd(미디어 + 백업 스테이징)가 차오릅니다 — metrics retention 바이트 상한으로는 이 디스크를 구제할 수 없습니다."
-          - alert: BulkSSDAlmostFull
-            expr: |
-              (node_filesystem_avail_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}
-               / node_filesystem_size_bytes{mountpoint=~".*bulk-ssd.*|/mnt/bulk.*"}) < 0.05
-            for: 5m
-            labels: { severity: critical, disk: bulk-ssd }
-            annotations:
-              summary: "외장 SSD 여유 공간 5% 미만"
-              description: "bulk-ssd가 거의 가득 찼습니다 — 로컬 백업 스테이징과 미디어가 임박한 위험에 처했습니다."
-          # 내장 SSD(standard) 디스크 포화 — Postgres + vmsingle 보호
+              summary: "내장 SSD 여유 공간 15% 미만(조기 경보)"
+              description: "standard SC 백킹 fs(루트 /, btrfs 255GB)가 차오릅니다 — pg-1/WAL·vmsingle·vlogs·adguard PVC가 쿼터 없이 공유하므로 한 워크로드 폭증이 전체를 위협합니다. 최대 소비자(보통 CNPG WAL 적체 또는 vmsingle/vlogs retention)를 확인하세요."
           - alert: StandardSSDFilling
             expr: |
-              (node_filesystem_avail_bytes{mountpoint=~"/var/lib/rancher.*|/$"}
-               / node_filesystem_size_bytes{mountpoint=~"/var/lib/rancher.*|/$"}) < 0.10
+              (node_filesystem_avail_bytes{mountpoint="/"}
+               / node_filesystem_size_bytes{mountpoint="/"}) < 0.10
             for: 10m
             labels: { severity: critical, disk: standard }
             annotations:
               summary: "내장 SSD 여유 공간 10% 미만"
-              description: "standard SC 디스크 여유 부족 — Postgres PGDATA/WAL이 위험합니다."
+              description: "standard SC 디스크 여유 부족 — Postgres PGDATA/WAL과 관측 스택이 임박한 위험입니다. 즉시 최대 소비자를 정리하거나 retention을 낮추세요."
+          - alert: StandardSSDFillingTrend
+            expr: |
+              predict_linear(node_filesystem_avail_bytes{mountpoint="/"}[6h], 48*3600) < 0
+               and (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.50
+            for: 30m
+            labels: { severity: warning, disk: standard }
+            annotations:
+              summary: "내장 SSD 48시간 내 포화 추세"
+              description: "최근 6시간 기울기로 외삽하면 루트 fs 여유가 48시간 내 소진될 추세입니다(현재 여유 50% 미만) — 절대 임계(15%/10%) 도달 전 대응 창입니다. WALArchiveStalled가 동반 발화하면 WAL 적체가 원인일 가능성이 큽니다."
+          # WAL 볼륨 충전 — per-PVC 포화의 유일한 직접 신호다. hostPath라 kubelet은 못 주지만 CNPG가 WAL 볼륨의
+          # 논리 용량(value="volume_size"=10Gi PVC)과 현재 사용량(value="size")을 직접 export한다(라이브 검증).
+          # disk:pgwal로 분리 라벨링 — 루트 fs critical(disk:standard)이 이 신호를 inhibit하면 안 된다(루트 fs 포화의
+          # 원인이 WAL 적체일 때 가려지면 트리아지가 어려워진다). cnpg_collector_pg_wal은 deprecated된 backup/archive
+          # 메트릭 계열이 아니라 살아있는 WAL-size collector다(인시던트 #13/#14와 무관).
+          - alert: WALVolumeFilling
+            expr: |
+              (cnpg_collector_pg_wal{value="size"}
+               / on(namespace, pod) cnpg_collector_pg_wal{value="volume_size"}) > 0.70
+            for: 15m
+            labels: { severity: warning, disk: pgwal }
+            annotations:
+              summary: "CNPG WAL 볼륨 70% 초과"
+              description: "pg-1의 WAL 디렉토리가 WAL 볼륨(10Gi)의 70%를 넘었습니다 — 아카이빙 지연이나 checkpoint 문제로 WAL이 적체되는 신호입니다. hostPath라 쿼터 강제는 없으나, 계속 차면 루트 fs(StandardSSDFilling)와 RPO(WALArchiveStalled)를 위협합니다."
           # 백업 생존성: 로컬 CNPG base-backup CronJob(M4)은 매일 완료되어야 한다.
           - alert: LocalBasebackupStale
             expr: |

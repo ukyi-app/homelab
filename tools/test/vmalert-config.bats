@@ -45,8 +45,38 @@ setup() {
 
 @test "disk-fill alerts carry a disk label so a critical inhibits the matching warning" {
   R="$ROOT/platform/victoria-stack/rules/r4-storage-backup.yaml"
-  [ "$(grep -c 'disk: bulk-ssd' "$R")" -eq 2 ]   # BulkSSDFilling(warning) + BulkSSDAlmostFull(critical)
-  grep -q 'disk: standard' "$R"
+  # bulk-ssd 알림은 제거됨(virtiofs 집계라 측정 불가 — 죽은 알림). 잔존 금지.
+  run grep -q 'disk: bulk-ssd' "$R"; [ "$status" -ne 0 ]
+  # standard 디스크는 warning(StandardSSDWarning/Trend)+critical(StandardSSDFilling)이 같은 disk 라벨을
+  # 공유해 disk-scoped inhibit(critical→warning)가 동작해야 한다.
+  [ "$(grep -c 'disk: standard' "$R")" -ge 2 ]
+  grep -q 'severity: critical, disk: standard' "$R"
+  grep -q 'severity: warning, disk: standard' "$R"
+}
+
+@test "PVC saturation is monitored at the backing filesystem, not kubelet_volume_stats (hostPath PVs)" {
+  R="$ROOT/platform/victoria-stack/rules/r4-storage-backup.yaml"
+  # hostPath PV라 kubelet_volume_stats_*가 원천 부재 — 그 메트릭 의존 룰 금지(불가능한 접근 재도입 차단).
+  # expr 형태(메트릭 접미사 '_')만 매치 — 주석의 설명 언급은 허용(core.yaml 선례와 동일).
+  run grep -q 'kubelet_volume_stats_' "$R"; [ "$status" -ne 0 ]
+  # 루트 fs 3티어: 조기 warning + critical + predict_linear 추세.
+  grep -q 'alert: StandardSSDWarning' "$R"
+  grep -q 'alert: StandardSSDFilling' "$R"
+  grep -q 'alert: StandardSSDFillingTrend' "$R"
+  grep -q 'predict_linear(node_filesystem_avail_bytes' "$R"
+  # mountpoint는 정확일치 '/'(shm/tmpfs/virtiofs 노이즈 배제) — 옛 정규식 회귀 금지.
+  grep -q 'node_filesystem_avail_bytes{mountpoint="/"}' "$R"
+}
+
+@test "WAL volume saturation uses the live CNPG WAL-size collector, not deprecated backup metrics" {
+  R="$ROOT/platform/victoria-stack/rules/r4-storage-backup.yaml"
+  grep -q 'alert: WALVolumeFilling' "$R"
+  # WAL 볼륨 충전율: CNPG가 직접 export하는 size/volume_size(라이브). disk:pgwal로 분리해 루트 critical이 inhibit 안 함.
+  grep -q 'cnpg_collector_pg_wal{value="size"}' "$R"
+  grep -q 'cnpg_collector_pg_wal{value="volume_size"}' "$R"
+  grep -q 'disk: pgwal' "$R"
+  # deprecated 백업/아카이브 in-tree 메트릭(plugin 환경 0/부재) 재도입 금지(인시던트 #13/#14).
+  run grep -qE 'cnpg_collector_last_(available_backup|archived|failed_archive)' "$R"; [ "$status" -ne 0 ]
 }
 
 @test "observability self-monitoring alerts defined and 4 components self-scraped" {
