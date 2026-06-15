@@ -30,3 +30,8 @@ f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
   # 갭에 떨어지면 RST(Connection refused)로 job이 실패한다(라이브 검증). 도달 대기 루프가 필요.
   grep -q '/dev/tcp/pg-rw.database.svc/5432' "$f"
 }
+@test "hedge container is hardened (no privesc, all caps dropped, seccomp RuntimeDefault)" {
+  grep -q 'allowPrivilegeEscalation: false' "$f"
+  grep -qF 'drop: [ALL]' "$f"
+  grep -q 'type: RuntimeDefault' "$f"
+}
