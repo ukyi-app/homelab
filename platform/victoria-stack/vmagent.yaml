@@ -38,6 +38,9 @@ spec:
           image: victoriametrics/vmagent:v1.103.0
           args:
             - --promscrape.config=/config/scrape.yml
+            # scrape config(ConfigMap) 변경을 자동 반영 — 없으면 vmagent가 옛 config를 계속 써서
+            # GitOps 변경이 rollout restart 전까지 silent staleness(vmalert configCheckInterval과 동형 규약).
+            - --promscrape.configCheckInterval=30s
             - --remoteWrite.url=http://vmsingle:8428/api/v1/write
             - --promscrape.noStaleMarkers
             - --memory.allowedPercent=60

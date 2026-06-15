@@ -35,6 +35,13 @@ data:
             target_label: __metrics_path__
             replacement: /api/v1/nodes/$1/proxy/metrics
       - job_name: pod-annotations
+        # honor_labels: KSM이 노출하는 namespace/pod(대상 파드의 실제 ns/pod)를 보존한다. 없으면
+        # 아래 relabel(namespace/pod ← scrape 대상 파드)이 KSM 자신의 ns(observability)/pod명으로
+        # 덮어써, 모든 kube_* 메트릭의 namespace가 observability가 되고 실제 값은 exported_*로 밀린다
+        # (라이브 검증된 함정: PostgresClusterDown 오발화·PodOOMKilled on(namespace,pod) join 고장의 원인).
+        # annotation-scrape 대상 중 namespace/pod 라벨을 노출하는 건 KSM뿐 — node-exporter/traefik/cnpg/
+        # alertmanager/cloudflared/cert-manager는 자기 라벨 미노출이라 relabel이 그대로 적용(영향 없음).
+        honor_labels: true
         kubernetes_sd_configs: [{ role: pod }]
         relabel_configs:
           - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]

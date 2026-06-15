@@ -13,6 +13,17 @@ setup() {
   grep -q 'configCheckInterval' "$VMALERT"
 }
 
+@test "vmagent auto-reloads scrape config on change (promscrape.configCheckInterval set)" {
+  # 없으면 scrape config(ConfigMap) 변경이 rollout restart 전까지 반영 안 됨(silent staleness).
+  grep -q 'promscrape.configCheckInterval' "$ROOT/platform/victoria-stack/vmagent.yaml"
+}
+
+@test "pod-annotations scrape honors target labels (KSM namespace/pod not clobbered to observability)" {
+  # honor_labels 없으면 kube_* 메트릭 namespace가 전부 observability가 돼 namespace 필터/조인이 깨진다
+  # (PostgresClusterDown 오발화·PodOOMKilled join 고장의 라이브 검증된 원인).
+  grep -q 'honor_labels: true' "$ROOT/platform/victoria-stack/vmagent-scrape-config.yaml"
+}
+
 @test "crown-jewel DB liveness + non-OOM crashloop alerts are defined" {
   C="$ROOT/platform/victoria-stack/rules/core.yaml"
   grep -q 'alert: PostgresClusterDown' "$C"          # 단일 인스턴스 pg 생존 페이징
