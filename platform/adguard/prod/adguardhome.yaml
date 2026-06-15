@@ -15,10 +15,14 @@ data:
       upstream_mode: load_balance
     filtering:
       rewrites:
-        # split-horizon: 모든 *.home 이름 → Traefik tailscale passthrough 디바이스(traefik-ts LB).
+        # split-horizon: 모든 *.home 이름 → Traefik tailscale 디바이스(gateway/traefik-ts LB)의 tailscale IP.
         # Traefik이 :443에서 와일드카드 cert로 TLS 종단하므로 valid HTTPS로 접근된다.
+        # ⚠️ 이 IP는 traefik-ts tailscale 디바이스 IP다. DR 재구축으로 디바이스가 재등록되면(예: homelab→
+        #    homelab-1) IP가 바뀌어 stale이 된다 — 그러면 tailscale/LAN 양쪽에서 *.home.ukyi.app이 죽은 IP로
+        #    연결돼 전부 실패한다(.ts.net MagicDNS 경로엔 안 드러남). 재구축 후 `kubectl -n gateway get svc traefik-ts`
+        #    의 tailscale IP로 갱신할 것. (cp -n 시드라 라이브 PVC의 AdGuardHome.yaml도 함께 고쳐 재시작해야 반영.)
         - domain: "*.home.ukyi.app"
-          answer: "100.77.132.120"
+          answer: "100.71.156.123"
       protection_enabled: true
     filters:
       - enabled: true
