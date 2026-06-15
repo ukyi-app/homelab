@@ -26,8 +26,9 @@ resource "cloudflare_ruleset" "waf_custom" {
 # brute-force/scrape 플러드에서 보호한다. 무료 플랜 호환 규약(apply에서만 검증되는 entitlement):
 #  - 표현식은 단순 연산자만(matches 정규식은 Business 전용 → 400 "not entitled", cache.tf 함정과 동일).
 #  - action=block, characteristics에 ip.src + cf.colo.id(필수), 무료는 rate-limit 룰 1개.
-#  - period: 무료는 10초만 허용 — API가 직접 거부("can only use a period among [10]"). 문서의 10/60 표기와
-#    달리 우리 존 entitlement는 10뿐. mitigation_timeout(duration): 무료는 60(1분)/3600(1시간)만.
+#  - period/mitigation_timeout 모두 무료는 10초만 — API가 직접 거부("can only use a period among [10]",
+#    "not entitled to use a mitigation timeout different from 10"). 공개 문서의 10/60·60/3600 표기와 달리
+#    우리 존 entitlement는 둘 다 10뿐(apply에서만 드러남). 초과 IP를 10초 차단 후 재평가.
 #  - period=10s 윈도우에서 100req(=600/min)은 명백한 플러드 임계 — 정상 홈랩 트래픽엔 안 걸린다.
 resource "cloudflare_ruleset" "waf_ratelimit" {
   zone_id     = data.cloudflare_zone.this.zone_id
@@ -45,7 +46,7 @@ resource "cloudflare_ruleset" "waf_ratelimit" {
         characteristics     = ["ip.src", "cf.colo.id"]
         period              = 10 # 무료 플랜 유일 허용값
         requests_per_period = 100
-        mitigation_timeout  = 60 # 초과 IP를 1분간 차단(무료: 60/3600만)
+        mitigation_timeout  = 10 # 무료는 period와 동일(10초)만 — 초과 IP를 10초 차단 후 재평가
       }
       enabled = true
     }
