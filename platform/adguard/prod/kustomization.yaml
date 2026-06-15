@@ -4,6 +4,7 @@ namespace: edge # adguard-prod Application의 권위 있는(authoritative) 대�
 resources:
   - pvc.yaml
   - adguardhome.yaml
+  - auth-sealed.yaml # UI 인증 bcrypt 해시(SealedSecret adguard-auth) — inject-auth init이 .users에 주입
   - deployment.yaml
   - service.yaml
   - ts-ingress.yaml
