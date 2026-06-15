@@ -1,0 +1,25 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: adguard
+spec:
+  parentRefs:
+    # group/kind는 CRD 기본값이지만 명시한다 — SSA가 atomic 리스트(parentRefs)의 서버 주입 기본값을
+    # drift로 봐 영구 OutOfSync가 되는 것을 막는다(grafana 라우트에서 검증된 함정, AGENTS.md).
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab
+      namespace: gateway
+      sectionName: web-internal-tls # *.home.ukyi.app 와일드카드 cert로 TLS 종단
+  hostnames:
+    - "adguard.home.ukyi.app"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        # adguard-ui Service(:80 → :3000)는 같은 edge 네임스페이스라 ReferenceGrant 불필요.
+        - group: ""
+          kind: Service
+          name: adguard-ui
+          port: 80
+          weight: 1
