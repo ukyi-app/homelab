@@ -2,29 +2,58 @@
 # appset 템플릿엔 destination.namespace가 없어 CreateNamespace=true가 무효이고(라이브에서
 # "namespaces gateway not found"로 확인), 각 컴포넌트 kustomization의 namespace: 트랜스포머는
 # Namespace 리소스 자체를 만들지 않는다 — 그래서 여기서 일괄 소유한다.
-# (database는 cnpg-data App의 CreateNamespace가, observability는 victoria 자체 manifest가 담당)
+# (database는 cnpg/prod/namespace.yaml이, observability는 victoria 자체 manifest가 담당)
+#
+# PSA(Pod Security Admission): admission 레벨 방어선. 라이브 워크로드는 전부 baseline-clean임을
+# 렌더로 확인했다(traefik=LoadBalancer/hostNetwork:false, adguard=NET_BIND_SERVICE[baseline 허용],
+# sealed-secrets/cloudflared/valkey 위반 없음). prod는 공유 차트가 restricted 완전 준수(빈 ns,
+# 미래 앱도 차트로 준수)라 restricted enforce. 나머지는 baseline enforce + restricted warn/audit로
+# 점진 하드닝 신호를 남긴다(adguard setcap·sealed-secrets 등 일부 미준수 항목이 있어 단계적).
 apiVersion: v1
 kind: Namespace
 metadata:
   name: gateway
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: edge
+  labels:
+    # adguard는 setcap(NET_BIND_SERVICE)+allowPrivilegeEscalation:true라 restricted 불가 — baseline 강제.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: prod
+  labels:
+    # 멀티레포 앱은 전부 공유 차트(restricted 완전 준수)로 배포된다 — restricted enforce로
+    # 첫 앱부터 강제(현재 인-레포 앱 0 → 무중단 적용).
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: sealed-secrets
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
 ---
-# cache: 앱별 경량 Valkey 인스턴스(platform/cache) — hostPath 없음, PSA baseline로 충분.
+# cache: 앱별 경량 Valkey 인스턴스(platform/cache) — hostPath 없음.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: cache
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
