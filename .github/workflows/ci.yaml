@@ -46,7 +46,8 @@ jobs:
           bats platform/sealed-secrets/prod/test_render.bats \
                platform/data-conn/prod/test_render.bats \
                platform/cache/prod/test_render.bats \
-               platform/network-policies/prod/test_netpol.bats
+               platform/network-policies/prod/test_netpol.bats \
+               platform/namespaces/prod/test_psa.bats
       - name: telegram 메시지 렌더 e2e (containerized AM v0.27)
         # amtool/grep이 못 잡는 inline message Go-template의 실제 컴파일·렌더를 사전 증명한다
         # (한국어 제목·글리프·자동 escape·링크). required gate 잡 스텝 → branch protection이 강제.

@@ -37,3 +37,10 @@
   grep -qE 'project:\s+default' "$f"
   grep -qE 'namespace:\s+database' "$f"
 }
+@test "database namespace is declared with PSA baseline labels (cnpg-data App owns it, wave -3)" {
+  f=platform/cnpg/prod/namespace.yaml
+  grep -qE 'pod-security.kubernetes.io/enforce:\s*baseline' "$f"   # pg/백업/덤프/복원드릴은 baseline-clean
+  grep -qE 'pod-security.kubernetes.io/warn:\s*restricted' "$f"
+  grep -qE 'argocd.argoproj.io/sync-wave:\s*"-3"' "$f"             # 시드(-2)·Cluster(-1)보다 먼저 라벨 적용
+  grep -q 'namespace.yaml' platform/cnpg/prod/kustomization.yaml   # kustomization에 배선됨
+}
