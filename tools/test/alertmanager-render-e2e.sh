@@ -73,7 +73,9 @@ wait_capture
 body="$(cat "$TMP/capture.txt")"
 grep -q 'parse_mode=HTML'        <<<"$body"
 grep -q '<b>파드 OOM 종료</b>'      <<<"$body"   # ⚠️ 제목 자체가 한국어여야(매핑된 제목)
-grep -qE '<b>[^<]*[가-힣][^<]*</b>' <<<"$body"   # 일반화: bold 제목 안에 한글
+# 일반화: bold 제목 안에 non-ASCII(한글). [가-힣] 범위는 CI 로케일(C)에서 invalid collation —
+# LC_ALL=C + 비-ASCII 바이트 클래스([^ -~])로 견고하게(literal 한글 grep은 로케일 무관).
+LC_ALL=C grep -qE '<b>[^<]*[^ -~][^<]*</b>' <<<"$body"
 grep -q '🔴'                       <<<"$body"   # critical 글리프
 grep -q '&lt;main&gt;'            <<<"$body"   # escaping 한 번(자동) — raw <main> 금지, 이중 &amp;lt; 금지
 ! grep -q '<main>'                <<<"$body"   # raw 태그가 살아남으면 안 됨
