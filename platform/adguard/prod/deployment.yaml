@@ -17,6 +17,32 @@ spec:
           volumeMounts:
             - { name: seed, mountPath: /seed }
             - { name: data, mountPath: /opt/adguardhome/conf, subPath: conf }
+        # GitOps 강제 UI 인증: AdGuard는 users:만 인증 수단(secret/env 네이티브 미지원)이라 PVC의
+        # AdGuardHome.yaml .users를 SealedSecret의 bcrypt 해시로 매 시작 set한다(yq 멱등 — UI에서 바꿔도
+        # 재시작 시 sealed 값으로 수렴, DR/재배포 일관). seed-config가 먼저 PVC를 채운 뒤 실행돼야 한다(순서 의존).
+        # cp -n은 라이브의 기존 users:[]를 덮지 않으므로 이 단계가 라이브에도 인증을 적용하는 유일 경로다.
+        - name: inject-auth
+          image: mikefarah/yq:4.44.6
+          command: ["yq"]
+          args:
+            - "-i"
+            - '.users = [{"name": strenv(AGH_USER), "password": strenv(AGH_PW_HASH)}]'
+            - /opt/adguardhome/conf/AdGuardHome.yaml
+          env:
+            - { name: AGH_USER, value: ukkiee } # username은 비밀이 아니다 — 평문 보관
+            - name: AGH_PW_HASH
+              valueFrom:
+                secretKeyRef: { name: adguard-auth, key: PASSWORD_HASH }
+          volumeMounts:
+            - { name: data, mountPath: /opt/adguardhome/conf, subPath: conf }
+            - { name: tmp, mountPath: /tmp } # yq -i는 /tmp에 임시파일을 쓴다 — readOnlyRootFilesystem과 양립시킴
+          securityContext: # setcap 불필요 → 메인 컨테이너와 달리 restricted 완전 충족
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
       containers:
         - name: adguard
           image: adguard/adguardhome:v0.107.55
@@ -43,3 +69,5 @@ spec:
           configMap: { name: adguard-config }
         - name: data
           persistentVolumeClaim: { claimName: adguard-data }
+        - name: tmp
+          emptyDir: {} # inject-auth yq의 /tmp 임시파일 전용(readOnlyRootFilesystem 양립)
