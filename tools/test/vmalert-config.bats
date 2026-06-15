@@ -15,9 +15,10 @@ setup() {
 
 @test "crown-jewel DB liveness + non-OOM crashloop alerts are defined" {
   C="$ROOT/platform/victoria-stack/rules/core.yaml"
-  grep -q 'alert: PostgresClusterDown' "$C"   # 단일 인스턴스 pg가 Ready 아니면 페이징
-  grep -q 'kube_pod_status_ready' "$C"
-  grep -q 'absent(kube_pod_status_ready' "$C"  # 스크레이프 전손 fail-closed 가드
+  grep -q 'alert: PostgresClusterDown' "$C"          # 단일 인스턴스 pg 생존 페이징
+  grep -q 'cnpg_collector_up' "$C"                    # pg-1에서 직접 scrape돼 라벨 정확(KSM clobbering 회피)
+  grep -q 'absent(cnpg_collector_up' "$C"             # 스크레이프 단절 fail-closed 가드
+  run grep -q 'max(kube_pod_status_ready' "$C"; [ "$status" -ne 0 ]  # expr 회귀 금지(주석 언급은 허용)
   grep -q 'alert: PodCrashLooping' "$C"
 }
 

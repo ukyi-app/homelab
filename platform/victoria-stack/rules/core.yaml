@@ -44,13 +44,16 @@ data:
             annotations:
               summary: "Alertmanager → Telegram 전송 실패 발생"
               description: "최근 15분간 telegram integration의 notifications_failed_total이 증가했다 — HTML parse 오류(escape 누락)·봇 토큰·chat_id·네트워크를 확인하라. 이 알림 자체도 같은 Telegram 경로를 타므로 전면 장애 시엔 미도달할 수 있다 — 그 경우 신호는 이 메트릭(Grafana 대시보드)·GitHub 워크플로 실패 알림이다(off-node 스위치는 pipeline 생존만 증명)."
-          # 단일 인스턴스 pg 클러스터(HA 없음)의 생존 — Ready가 아니면 전 앱이 의존하는 DB가 죽은 것.
-          # kube_pod_status_ready는 CrashLoop(Running이나 unready)·Pending·probe 실패를 전부 잡는다.
-          # absent() 가드: 파드 삭제/미스케줄로 시리즈가 사라져도 fail-closed로 페이징(스크레이프 전손 대비).
+          # 단일 인스턴스 pg 클러스터(HA 없음)의 생존 — CNPG instance manager의 up 게이지로 판정.
+          # cnpg_collector_up은 pg-1에서 직접 scrape돼 라벨이 정확하다(namespace=database,pod=pg-1).
+          # ⚠️ kube_pod_status_ready{namespace="database"}는 쓰지 말 것 — pod-annotations scrape가
+          # honor_labels 없이 KSM의 namespace/pod를 KSM 파드(observability)로 덮어써 0매치가 되고,
+          # absent() 가드가 정상 DB에도 오발화한다(라이브 검증된 함정). != 1은 exporter가 떠 있으나
+          # unhealthy인 경우, absent()는 파드 소멸/미스케줄(scrape 단절) 시 fail-closed로 페이징.
           - alert: PostgresClusterDown
             expr: |
-              max(kube_pod_status_ready{namespace="database", pod=~"pg-[0-9]+", condition="true"}) != 1
-              or absent(kube_pod_status_ready{namespace="database", pod=~"pg-[0-9]+", condition="true"})
+              max(cnpg_collector_up{namespace="database"}) != 1
+              or absent(cnpg_collector_up{namespace="database"})
             for: 3m
             labels: { severity: critical }
             annotations:
