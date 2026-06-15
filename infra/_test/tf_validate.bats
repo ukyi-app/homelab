@@ -7,3 +7,8 @@
   [[ "$output" == *"tailscale: validated"* ]]
   [[ "$output" == *"github: validated"* ]]
 }
+
+@test "DR R2 buckets are guarded by prevent_destroy (offsite backup + media origin)" {
+  # pg_backups(오프사이트 3차 사본)·media(유일 내구 origin)는 무인 apply의 destroy로부터 보호돼야 한다.
+  [ "$(grep -c 'prevent_destroy = true' infra/cloudflare/r2.tf)" -eq 2 ]
+}
