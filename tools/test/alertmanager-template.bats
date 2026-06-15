@@ -87,6 +87,7 @@ setup() {
 
 @test "amtool check-config (v0.27 image) accepts the AM config (CI-safe, no KSOPS)" {
   command -v docker >/dev/null || skip "docker required for amtool gate"
+  docker info >/dev/null 2>&1 || skip "docker daemon not available"
   command -v yq >/dev/null || skip "yq required"
   tmp="$(mktemp -d)"
   # 평문 ConfigMap에서 alertmanager.yml 직접 추출 — kustomize build(KSOPS exec generator) 미경유.
@@ -100,6 +101,6 @@ setup() {
   sed 's/__CHAT_ID__/-1001234567890/' "$tmp/raw.yml" > "$tmp/alertmanager.yml"
   run docker run --rm -v "$tmp:/cfg" --entrypoint amtool \
       prom/alertmanager:v0.27.0 check-config /cfg/alertmanager.yml
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 0 ] || { echo "amtool exit=$status output: $output"; false; }
   printf '%s' "$output" | grep -q 'SUCCESS'
 }
