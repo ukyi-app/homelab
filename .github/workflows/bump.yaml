@@ -50,7 +50,7 @@ jobs:
           token: ${{ steps.token.outputs.token }}
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
-      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: corepack enable && corepack prepare pnpm@11 --activate
       - run: pnpm install --frozen-lockfile
       - uses: docker/login-action@v3
         with:
@@ -111,16 +111,15 @@ jobs:
           gh pr merge --auto --squash "$branch" || gh pr merge --squash "$branch"
       - name: telegram notify
         if: always()
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          APPS: ${{ steps.set.outputs.apps }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          STATUS: ${{ job.status }}
-        run: |
-          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT}" \
-            -d text="deploy write-back ${STATUS}: apps=[${APPS}] -> sha-${HEAD_SHA}"
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ job.status }}
+          source: 배포
+          title: 이미지 태그 갱신
+          ident: "apps=[${{ steps.set.outputs.apps }}] -> sha-${{ github.event.workflow_run.head_sha }}"
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
 
   # ── 외부 앱 레포 경로 (repository_dispatch: app-image) ────────────────────────────────────
   # client_payload는 비신뢰 입력(dispatch 자격 소지자가 임의 값 전송 가능) — 전부 env로만 받고,
@@ -142,7 +141,7 @@ jobs:
           token: ${{ steps.token.outputs.token }}
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
-      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: corepack enable && corepack prepare pnpm@11 --activate
       - run: pnpm install --frozen-lockfile
       - uses: docker/login-action@v3
         with:
@@ -185,15 +184,25 @@ jobs:
             --body "외부 레포 dispatch → write-back 자동 PR. required check \`gate\` 통과 시 auto-merge."
           # 이미 clean(체크 완료) 상태의 PR엔 --auto가 에러를 낸다 → 직접 머지 폴백
           gh pr merge --auto --squash "$branch" || gh pr merge --squash "$branch"
-      - name: telegram notify
+      - name: sanitize dispatch payload
+        id: safe
         if: always()
         env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          APP: ${{ github.event.client_payload.app }}
+          APP: ${{ github.event.client_payload.app }}   # 비신뢰 — env 경유, 인라인 보간 금지
           TAG: ${{ github.event.client_payload.tag }}
-          STATUS: ${{ job.status }}
         run: |
-          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT}" \
-            -d text="deploy write-back ${STATUS}: ${APP} -> ${TAG} (dispatch)"
+          # regex 검증 — 통과 못하면 placeholder로 대체(알림은 best-effort)
+          case "$APP" in (*[!a-z0-9-]*|"") APP="(invalid)";; esac
+          case "$TAG" in (*[!A-Za-z0-9._-]*|"") TAG="(invalid)";; esac
+          echo "ident=${APP} -> ${TAG} (dispatch)" >> "$GITHUB_OUTPUT"
+      - name: telegram notify
+        if: always()
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ job.status }}
+          source: 배포
+          title: 이미지 태그 갱신
+          ident: ${{ steps.safe.outputs.ident }}
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

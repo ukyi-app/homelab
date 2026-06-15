@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: corepack enable && corepack prepare pnpm@11 --activate
       - run: pnpm install --frozen-lockfile
       - name: install chart toolchain
         run: |
@@ -47,3 +47,8 @@ jobs:
                platform/data-conn/prod/test_render.bats \
                platform/cache/prod/test_render.bats \
                platform/network-policies/prod/test_netpol.bats
+      - name: telegram 메시지 렌더 e2e (containerized AM v0.27)
+        # amtool/grep이 못 잡는 inline message Go-template의 실제 컴파일·렌더를 사전 증명한다
+        # (한국어 제목·글리프·자동 escape·링크). required gate 잡 스텝 → branch protection이 강제.
+        # docker/python3는 ubuntu 러너 기본 제공, yq는 위 install 스텝에서 설치됨.
+        run: bash tools/test/alertmanager-render-e2e.sh

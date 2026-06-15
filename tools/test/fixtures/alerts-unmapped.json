@@ -1,0 +1,2 @@
+[{"labels":{"alertname":"TelegramSmoke","severity":"warning"},
+  "annotations":{"summary":"텔레그램 스모크 테스트","description":"배포 후 전송 경로 확인용 합성 알림","runbook_url":"https://home.example/runbook/smoke"}}]

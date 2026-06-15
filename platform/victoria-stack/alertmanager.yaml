@@ -30,10 +30,42 @@ data:
             parse_mode: HTML
             send_resolved: true
             message: |
-              <b>{{ .Status | toUpper }}</b> {{ .CommonLabels.alertname }}
-              {{ range .Alerts }}{{ .Annotations.summary }}
-              {{ .Annotations.description }}
-              {{ end }}
+              {{- /* ⚠️ AM telegram은 동적 값({{ . }})을 parse_mode=HTML 컨텍스트로 *자동* HTML-escape한다
+                     (render-e2e로 실측: {{ .Annotations.x }}의 <main>이 &lt;main&gt;으로 한 번 escape됨).
+                     따라서 reReplaceAll/safeHtml 수동 escape는 금지 — 수동 escape는 &amp;lt;처럼 이중 escape를
+                     유발해 메시지를 깨뜨린다(검증됨). 리터럴 태그(<b>)는 template 텍스트라 raw로 남아 정상 동작. */ -}}
+              {{- $name := .CommonLabels.alertname -}}
+              {{- $title := $name -}}
+              {{- if eq $name "Watchdog" }}{{ $title = "알림 파이프라인" }}
+              {{- else if eq $name "TargetDown" }}{{ $title = "스크레이프 타겟 다운" }}
+              {{- else if eq $name "R2BackupStale" }}{{ $title = "R2 오프사이트 백업 정체" }}
+              {{- else if eq $name "WALArchiveStalled" }}{{ $title = "WAL 아카이빙 정체" }}
+              {{- else if eq $name "LocalBasebackupStale" }}{{ $title = "로컬 베이스백업 정체" }}
+              {{- else if eq $name "CNPGRestoreDrillStale" }}{{ $title = "복원 드릴 정체" }}
+              {{- else if eq $name "ArgoCDOutOfSync" }}{{ $title = "ArgoCD 동기화 이탈" }}
+              {{- else if eq $name "ImageDigestDrift" }}{{ $title = "이미지 digest 드리프트" }}
+              {{- else if eq $name "PodOOMKilled" }}{{ $title = "파드 OOM 종료" }}
+              {{- else if eq $name "NodeMemoryHigh" }}{{ $title = "노드 메모리 경고" }}
+              {{- else if eq $name "BulkSSDFilling" }}{{ $title = "외장 SSD 포화" }}
+              {{- else if eq $name "BulkSSDAlmostFull" }}{{ $title = "외장 SSD 임박" }}
+              {{- else if eq $name "StandardSSDFilling" }}{{ $title = "내장 SSD 포화" }}
+              {{- end -}}
+              {{- /* 미매핑 alertname → summary를 제목으로(신규 알림도 한국어). 자동 escape됨. summary 없으면 alertname 원문 */ -}}
+              {{- if and (eq $title $name) .CommonAnnotations.summary }}{{ $title = .CommonAnnotations.summary }}{{- end -}}
+              {{- /* .Status → 한글 + glyph (firing=발생/critical은 🔴, warning은 ⚠️; resolved=해소 🔵) */ -}}
+              {{- if eq .Status "resolved" -}}
+              🔵 <b>{{ $title }}</b> — 해소
+              {{- else if eq .CommonLabels.severity "warning" -}}
+              ⚠️ <b>{{ $title }}</b> — 경고
+              {{- else -}}
+              🔴 <b>{{ $title }}</b> — 발생
+              {{- end }}
+              알림 · {{ $name }}
+              {{ range .Alerts -}}
+              {{ if .Annotations.summary }}{{ .Annotations.summary }}
+              {{ end }}{{ if .Annotations.description }}{{ .Annotations.description }}
+              {{ end }}{{ if .Annotations.runbook_url }}→ {{ .Annotations.runbook_url }}
+              {{ end }}{{ end }}
       - name: deadmanswitch
         webhook_configs:
           - url: http://deadmanswitch-relay:9095/ping
@@ -55,6 +87,11 @@ spec:
   template:
     metadata:
       labels: { app.kubernetes.io/name: alertmanager }
+      # vmagent의 pod-annotations job이 /metrics:9093을 스크레이프해
+      # alertmanager_notifications_total / _failed_total{integration="telegram"}를 수집한다.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9093"
     spec:
       securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534 }
       initContainers:

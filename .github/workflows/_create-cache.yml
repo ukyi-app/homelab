@@ -31,7 +31,7 @@ jobs:
           token: ${{ steps.writer.outputs.token }}
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
-      - run: corepack enable && corepack prepare pnpm@10 --activate
+      - run: corepack enable && corepack prepare pnpm@11 --activate
       - run: pnpm install --frozen-lockfile
       - name: spec 재검증 (비신뢰 입력 — env 경유, 화이트리스트 밖 필드 거부)
         id: spec
@@ -92,12 +92,13 @@ jobs:
           gh pr merge --auto --squash "$branch" || gh pr merge --squash "$branch"
       - name: telegram notify (핸들 이름만 — URL/자격 금지)
         if: always()
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          NAME: ${{ steps.spec.outputs.name }}
-          STATUS: ${{ job.status }}
-        run: |
-          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT}" \
-            -d text="create-cache ${STATUS}: ${NAME} — conn 핸들 cache-${NAME}-conn (prod)"
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ job.status }}
+          source: 캐시생성
+          title: 캐시 생성
+          ident: ${{ steps.spec.outputs.name }}
+          body: "conn 핸들 cache-${{ steps.spec.outputs.name }}-conn (prod)"
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

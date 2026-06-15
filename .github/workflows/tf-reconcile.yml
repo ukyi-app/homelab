@@ -80,12 +80,12 @@ jobs:
           esac
       - name: telegram notify (드리프트 수렴 또는 실패 시에만)
         if: failure() || steps.drift.outputs.drift == 'true'
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          STATUS: ${{ job.status }}
-          DRIFT: ${{ steps.drift.outputs.drift }}
-        run: |
-          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT}" \
-            -d text="tf-reconcile ${STATUS}: drift=${DRIFT}"
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ job.status == 'success' && steps.drift.outputs.drift == 'true' && 'drift' || job.status }}
+          source: IaC수렴
+          title: IaC 수렴
+          ident: "drift=${{ steps.drift.outputs.drift }}"
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
