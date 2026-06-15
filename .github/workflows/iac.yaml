@@ -30,7 +30,8 @@ jobs:
       - name: terraform init (no backend) + validate all roots
         run: |
           for r in cloudflare tailscale github; do
-            terraform -chdir=infra/$r init -backend=false
+            # -lockfile=readonly: 커밋된 멀티플랫폼 lock과 어긋나면(provider 추가/버전 변경) 실패 → 드리프트 게이트화.
+            terraform -chdir=infra/$r init -backend=false -lockfile=readonly
           done
           make tf-validate
       - name: argocd values + root app lint
@@ -72,7 +73,7 @@ jobs:
           secret_key = "${R2_SECRET_ACCESS_KEY}"
           key        = "cloudflare/prod/terraform.tfstate"
           EOF
-          terraform -chdir=infra/cloudflare init -backend-config=backend.hcl -input=false
+          terraform -chdir=infra/cloudflare init -backend-config=backend.hcl -input=false -lockfile=readonly
       - name: plan → apply (분리 — plan 산출물만 적용)
         run: |
           terraform -chdir=infra/cloudflare plan -input=false -lock-timeout=120s -out=tf.plan
