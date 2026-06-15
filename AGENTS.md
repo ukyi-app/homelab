@@ -118,6 +118,18 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
   레포로만 제한). 액션은 full commit SHA로 핀(mutable 태그는 private key를 변조 액션에 넘김).
 - `concurrency.queue: max`(2026-05 GA)는 `cancel-in-progress: true`와 병용 불가(워크플로 검증
   에러로 전체 불능) — 기본(single)은 pending 1건만 유지해 동시 3번째가 대기 건을 취소한다.
+- **terraform provider lock을 처음 커밋할 땐 라이브 state writer 버전 이상으로 핀해야 한다.** lock
+  미커밋 시절 CI `init`은 `~>` 제약의 최신을 자동 설치해 그 버전으로 state를 기록한다 — 이후 더 낮은
+  버전을 핀한 lock + `-lockfile=readonly`는 "Resource instance managed by newer provider version"으로
+  apply 영구 실패. `terraform providers lock`은 기존 lock 버전을 보존(해시만 추가)하므로 업그레이드는
+  `rm lock && terraform providers lock -platform=...`로 최신 재생성해야 한다(레지스트리 버전 단조증가).
+- **tf 루트 관리 모델(CI vs 로컬):** cloudflare만 CI apply(iac.yaml push + tf-reconcile 수렴) — DNS/tunnel
+  좁은 스코프라 안전. github/tailscale은 **owner 로컬 apply 전용 신뢰 앵커**: github 루트가 CI Actions
+  시크릿(secrets.tf)·branch protection(repo.tf `contexts=["gate"]`)을, tailscale 루트가 ACL/auth-key를
+  관리한다. CI 무인 apply는 광범위 admin PAT/OAuth를 CI에 저장해야 해 보안 모델 위반 → 금지. CI는 이 둘에
+  대해 tf-reconcile에서 **plan-only 드리프트 알림**만 한다(신규 `TF_GITHUB_*`/`TF_TAILSCALE_*` 시크릿 있을
+  때만, 없으면 preflight skip). Cloudflare 무료 플랜 rate-limit entitlement(period·mitigation_timeout 둘 다
+  10초 고정 등)는 plan 통과해도 apply에서만 400으로 드러난다(cache.tf matches 함정과 동일 계열).
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 
