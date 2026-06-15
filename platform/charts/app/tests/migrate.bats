@@ -26,3 +26,11 @@ BASE="--set image.repo=ghcr.io/o/api --set image.tag=sha-abc1234 --set kind=api 
     | yq 'select(.kind==\"Job\")'"
   [ -z "$output" ]
 }
+
+@test "migration Job has a writable /tmp for readOnlyRootFilesystem migrations (no EROFS)" {
+  # securityContext.readOnlyRootFilesystem:true + /tmp emptyDir 부재 = prisma/knex/alembic류가 EROFS로 실패.
+  out="$(helm template t "$CHART" $BASE --set db.enabled=true | yq 'select(.kind=="Job")')"
+  echo "$out" | grep -q 'readOnlyRootFilesystem: true'
+  echo "$out" | grep -q 'mountPath: /tmp'
+  echo "$out" | grep -q 'emptyDir'
+}
