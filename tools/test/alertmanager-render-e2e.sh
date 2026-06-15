@@ -27,6 +27,9 @@ mv "$TMP/am.rendered.yml" "$TMP/am.yml"
 yq -i '(.receivers[]|select(.name=="telegram").telegram_configs[].api_url)="http://host.docker.internal:8089"' "$TMP/am.yml"
 yq -i '.route.group_wait="0s" | .route.group_interval="1s" | .route.repeat_interval="1m"' "$TMP/am.yml"
 printf '%s' 'dummy-bot-token' > "$TMP/TELEGRAM_BOT_TOKEN"
+# AM 컨테이너는 nobody(65534)로 config/token을 읽는다 — mktemp -d(700)를 못 읽어 CI에서 permission denied
+# (OrbStack은 관대). world-readable로 연다.
+chmod 755 "$TMP"; chmod 644 "$TMP/am.yml" "$TMP/TELEGRAM_BOT_TOKEN"
 
 # 2) mock telegram: POST body 캡처(form/json 디코드)
 python3 tools/test/mock-telegram.py "$TMP/capture.txt" 8089 & MOCK_PID=$!

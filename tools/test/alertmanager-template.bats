@@ -99,6 +99,9 @@ setup() {
   [ -s "$tmp/raw.yml" ]
   # init sed 모사: placeholder → 더미 int64 chat_id (amtool은 chat_id를 정수로 파싱).
   sed 's/__CHAT_ID__/-1001234567890/' "$tmp/raw.yml" > "$tmp/alertmanager.yml"
+  # 컨테이너의 amtool은 nobody(65534)로 실행 — mktemp -d(700)/파일을 못 읽어 permission denied
+  # (CI ubuntu docker에서 발생; OrbStack은 관대). world-readable로 연다.
+  chmod 755 "$tmp"; chmod 644 "$tmp/alertmanager.yml"
   run docker run --rm -v "$tmp:/cfg" --entrypoint amtool \
       prom/alertmanager:v0.27.0 check-config /cfg/alertmanager.yml
   [ "$status" -eq 0 ] || { echo "amtool exit=$status output: $output"; false; }
