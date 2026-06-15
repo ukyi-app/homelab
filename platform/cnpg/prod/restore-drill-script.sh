@@ -19,9 +19,10 @@ TG="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
 PUSHGW="${METRICS_PUSH_URL:-http://vmsingle.observability.svc:8428}"
 
 # >>> notify-block (test-extracted)
-# HTML-escape: parse_mode=HTML에서 동적 값의 & < > 를 엔티티로. & 를 먼저 치환해야 한다
-# (이미 만든 &lt; 의 &를 다시 이스케이프하지 않도록). 외부 명령 없이 bash 파라미터 확장만 사용.
-hx() { local s=${1//&/&amp;}; s=${s//</&lt;}; s=${s//>/&gt;}; printf '%s' "$s"; }
+# HTML-escape: parse_mode=HTML에서 동적 값의 & < > 를 엔티티로. & 를 먼저 치환한다.
+# ⚠️ bash 파라미터 확장(${s//</&lt;})은 bash 5.2+에서 replacement의 &를 "매치 텍스트 참조"로
+#    해석해 <lt; 처럼 깨진다(bash 3.2에선 literal이라 통과 — 라이브/CI는 bash 5.x). sed로 escape한다.
+hx() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 
 # 공유 메시지 계약(parse_mode=HTML, 고정 필드 순서):
 #   {glyph} <b>{제목}</b> — {상태}
