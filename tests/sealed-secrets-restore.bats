@@ -10,6 +10,10 @@ setup() {
   TMP="$(mktemp -d)"
   STUB="$TMP/bin"
   mkdir -p "$STUB" "$TMP/out"
+  # CI 러너엔 전역 git identity가 없다 — 임시 repo의 git commit이 'Author identity unknown'(rc 128)으로
+  # 깨지지 않게 이 스위트 한정 identity를 env로 공급(자기완결; activate-app.bats의 per-repo config와 동일 취지).
+  export GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=ci@homelab.test
+  export GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@homelab.test
 }
 teardown() { rm -rf "$TMP"; }
 
