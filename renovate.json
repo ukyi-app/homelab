@@ -1,0 +1,93 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommitsDisabled"
+  ],
+  "timezone": "Asia/Seoul",
+  "schedule": ["* 0-6 * * 1"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "rebaseWhen": "behind-base-branch",
+  "labels": ["dependencies"],
+  "dependencyDashboardTitle": "Renovate Dependency Dashboard",
+  "commitMessagePrefix": "chore(deps):",
+  "pinDigests": true,
+  "ignorePaths": [
+    "**/charts/**",
+    "platform/cnpg/barman-plugin/**",
+    "tools/templates/**",
+    "docs/plans/**"
+  ],
+  "github-actions": {
+    "description": "workflows:write 토큰 권한이 필요 — writer App에 권한 부여(Phase-0) 후 활성. 그 전엔 push가 거부돼 PR이 깨진다.",
+    "enabled": false
+  },
+  "kubernetes": {
+    "description": "platform/apps 매니페스트의 image: 추출(매니페스트는 native 자동감지가 안 돼 패턴 명시).",
+    "managerFilePatterns": [
+      "/^platform/.+\\.ya?ml$/",
+      "/^apps/.+\\.ya?ml$/"
+    ]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "k3s-bootstrap versions.env — k3s 릴리스 태그",
+      "managerFilePatterns": ["/^infra/k3s-bootstrap/versions\\.env$/"],
+      "matchStrings": ["K3S_VERSION=\"(?<currentValue>v[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "k3s-io/k3s",
+      "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\+k3s(?<build>\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "k3s-bootstrap versions.env — local-path-provisioner",
+      "managerFilePatterns": ["/^infra/k3s-bootstrap/versions\\.env$/"],
+      "matchStrings": ["LOCAL_PATH_PROVISIONER_VERSION=\"(?<currentValue>v[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "rancher/local-path-provisioner"
+    },
+    {
+      "customType": "regex",
+      "description": "k3s-bootstrap versions.env — local-path helper image(busybox, digest 핀)",
+      "managerFilePatterns": ["/^infra/k3s-bootstrap/versions\\.env$/"],
+      "matchStrings": ["LOCAL_PATH_HELPER_IMAGE=\"(?<depName>[^:\"]+):(?<currentValue>[^@\"]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?\""],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "argocd CHART_VERSION — argo-cd 차트(argo-helm)",
+      "managerFilePatterns": ["/^platform/argocd/CHART_VERSION$/"],
+      "matchStrings": ["^(?<currentValue>\\S+)\\s*$"],
+      "datasourceTemplate": "helm",
+      "depNameTemplate": "argo-cd",
+      "registryUrlTemplate": "https://argoproj.github.io/argo-helm"
+    },
+    {
+      "customType": "regex",
+      "description": "kustomize HelmChartInflationGenerator(helmrelease.yaml) — name/repo/version 핀",
+      "managerFilePatterns": ["/^platform/.+/helmrelease\\.yaml$/"],
+      "matchStrings": ["\\nname:\\s*(?<depName>\\S+)\\nrepo:\\s*(?<registryUrl>\\S+)\\nversion:\\s*(?<currentValue>\\S+)"],
+      "datasourceTemplate": "helm"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "단일 노드 홈랩 — 인프라/플랫폼 의존은 리뷰 후 수동 머지(자동머지 금지, gate는 통과 필요).",
+      "matchManagers": ["kubernetes", "helmv3", "terraform", "dockerfile", "custom.regex"],
+      "automerge": false
+    },
+    {
+      "description": "메이저 업그레이드는 라이브 영향이 커 별도 라벨로 리뷰 강조.",
+      "matchUpdateTypes": ["major"],
+      "labels": ["dependencies", "major-review"]
+    },
+    {
+      "description": "digest 핀 갱신은 그룹화해 노이즈 축소(supply-chain freshness).",
+      "matchUpdateTypes": ["digest"],
+      "groupName": "image digests"
+    }
+  ]
+}
