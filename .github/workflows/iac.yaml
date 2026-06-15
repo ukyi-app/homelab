@@ -37,6 +37,7 @@ jobs:
         run: |
           bats infra/_test/argocd_values.bats
           bats infra/_test/root_app.bats
+          bats infra/_test/tf_validate.bats # tf fmt/validate + R2 prevent_destroy 가드(이전엔 미게이트)
 
   # ── push-to-main: cloudflare 루트 plan→apply (R2 state) ─────────────────────────────
   apply:

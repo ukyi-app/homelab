@@ -6,6 +6,11 @@ resource "cloudflare_r2_bucket" "pg_backups" {
   account_id = var.cloudflare_account_id
   name       = "homelab-pg-backups-prod"
   location   = "WEUR"
+
+  # DR 핵심 자산 — 실수 리네임/리팩터가 destroy로 산출돼도 terraform이 거부(무인 apply 보호).
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # 오프사이트 보존 14일 (M4의 CNPG ScheduledBackup retention과 일치).
@@ -27,4 +32,9 @@ resource "cloudflare_r2_bucket" "media" {
   account_id = var.cloudflare_account_id
   name       = "homelab-media-prod"
   location   = "WEUR"
+
+  # 미디어 origin은 R2가 유일 내구 사본(로컬은 캐시) — 우발적 destroy 거부.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
