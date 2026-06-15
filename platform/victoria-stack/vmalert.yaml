@@ -24,6 +24,9 @@ spec:
             - --remoteRead.url=http://vmsingle:8428
             - --notifier.url=http://alertmanager:9093
             - --evaluationInterval=30s
+            # 룰 파일(ConfigMap mount) 변경을 30s마다 감시·자동 reload — 없으면 ArgoCD가 룰을
+            # 동기화해도 vmalert가 옛 룰을 계속 평가한다(수동 rollout restart 전까지 silent staleness).
+            - --configCheckInterval=30s
             - --httpListenAddr=:8880
           env:
             - { name: GOMEMLIMIT, value: "115MiB" }

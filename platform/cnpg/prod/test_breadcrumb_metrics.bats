@@ -43,3 +43,12 @@
   run grep -cE 'cnpg_collector_last_(archived|failed_archive)_time' platform/victoria-stack/rules/r4-storage-backup.yaml
   [ "$output" -eq 0 ]
 }
+
+@test "CNPGRestoreDrillStale uses last_over_time, not bare instant absent() (weekly single-sample push)" {
+  # 주간 단발 import는 instant staleness 윈도 밖에서 안 보여 bare absent()가 영구 오발화한다 —
+  # 임계값보다 넓은 윈도의 last_over_time으로 마지막 성공 push를 찾아야 한다.
+  grep -q 'last_over_time(restore_drill_last_success_timestamp' platform/victoria-stack/rules/r4-storage-backup.yaml
+  # bare instant 형태(absent(restore_drill_last_success_timestamp))가 남아있으면 안 된다
+  run grep -c 'absent(restore_drill_last_success_timestamp)' platform/victoria-stack/rules/r4-storage-backup.yaml
+  [ "$output" -eq 0 ]
+}

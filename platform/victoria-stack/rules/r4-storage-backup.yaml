@@ -74,11 +74,14 @@ data:
             annotations:
               summary: "R2로의 WAL 아카이빙 정지(RPO 위험)"
               description: "마지막 실패 아카이브가 마지막 성공 아카이브보다 최신입니다 — 오프사이트 WAL 스트림이 끊겼고 5분 RPO 목표를 충족하지 못합니다."
-          # 복원 drill 생존성: M4의 반복 복원 drill이 restore_drill_last_success_timestamp를 push한다.
+          # 복원 drill 생존성: M4의 반복(주간) 복원 drill이 restore_drill_last_success_timestamp를
+          # 단발 샘플로 vmsingle에 직접 import한다. instant query는 staleness 윈도(~분) 밖의 단발 샘플을
+          # 못 봐서, bare absent()는 주간 push 직후 수 분을 빼면 항상 참이 된다(영구 오발화 — 라이브 확인).
+          # 임계값(700000s=8.1일)보다 넓은 [10d] 윈도의 last_over_time으로 마지막 성공 push를 찾아 판정한다.
           - alert: CNPGRestoreDrillStale
             expr: |
-              (time() - restore_drill_last_success_timestamp) > 700000
-              or absent(restore_drill_last_success_timestamp)
+              (time() - last_over_time(restore_drill_last_success_timestamp[10d])) > 700000
+              or absent(last_over_time(restore_drill_last_success_timestamp[10d]))
             for: 30m
             labels: { severity: warning }
             annotations:
