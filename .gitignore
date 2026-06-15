@@ -50,7 +50,7 @@ build/
 
 # --- kustomize `--enable-helm` chart-pull cache (build artifact, never commit) ---
 platform/*/prod/charts/
-# Terraform provider lock files: regenerate per-platform; commit multi-platform locks deliberately
-.terraform.lock.hcl
+# Terraform provider lock files: 멀티플랫폼(linux_arm64=CI, darwin_arm64=local) 락을 커밋한다 —
+# 무인 apply/reconcile가 -lockfile=readonly로 핀된 provider만 쓰도록(재현성·공급망).
 # 운영 런북은 로컬 전용 — public 레포에 올리지 않는다(사용자 결정 2026-06-11)
 docs/runbooks/
