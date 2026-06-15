@@ -44,6 +44,26 @@ data:
             annotations:
               summary: "Alertmanager → Telegram 전송 실패 발생"
               description: "최근 15분간 telegram integration의 notifications_failed_total이 증가했다 — HTML parse 오류(escape 누락)·봇 토큰·chat_id·네트워크를 확인하라. 이 알림 자체도 같은 Telegram 경로를 타므로 전면 장애 시엔 미도달할 수 있다 — 그 경우 신호는 이 메트릭(Grafana 대시보드)·GitHub 워크플로 실패 알림이다(off-node 스위치는 pipeline 생존만 증명)."
+          # 단일 인스턴스 pg 클러스터(HA 없음)의 생존 — Ready가 아니면 전 앱이 의존하는 DB가 죽은 것.
+          # kube_pod_status_ready는 CrashLoop(Running이나 unready)·Pending·probe 실패를 전부 잡는다.
+          # absent() 가드: 파드 삭제/미스케줄로 시리즈가 사라져도 fail-closed로 페이징(스크레이프 전손 대비).
+          - alert: PostgresClusterDown
+            expr: |
+              max(kube_pod_status_ready{namespace="database", pod=~"pg-[0-9]+", condition="true"}) != 1
+              or absent(kube_pod_status_ready{namespace="database", pod=~"pg-[0-9]+", condition="true"})
+            for: 3m
+            labels: { severity: critical }
+            annotations:
+              summary: "PostgreSQL 클러스터 다운(Ready 인스턴스 0)"
+              description: "database/pg가 3분 이상 Ready가 아닙니다 — 단일 인스턴스라 전 앱이 의존하는 DB가 중단된 상태입니다. CrashLoop/OOM/Pending/PVC를 확인하세요. 백업 staleness 알림(R2BackupStale 등)은 27시간 뒤에야 발화하므로 이 알림이 1차 페이징입니다."
+          # 비-OOM CrashLoop 백스톱(OOM은 PodOOMKilled가 커버) — config/이미지풀/panic 반복 재시작.
+          - alert: PodCrashLooping
+            expr: increase(kube_pod_container_status_restarts_total{namespace=~"observability|database|prod|argocd|gateway|edge"}[15m]) > 3
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "파드 재시작 반복: {{ $labels.namespace }}/{{ $labels.pod }}"
+              description: "컨테이너가 15분간 3회 초과 재시작했습니다(CrashLoop) — OOM이 아니면(OOM은 PodOOMKilled가 커버) config/이미지/probe를 확인하세요."
       - name: deadmanswitch
         rules:
           - alert: Watchdog
