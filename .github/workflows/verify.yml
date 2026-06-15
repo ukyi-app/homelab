@@ -10,6 +10,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # pnpm@11.6.0은 Node >=22.13을 요구한다 — runner 기본 Node로는 ERR_PNPM_UNSUPPORTED_ENGINE.
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+
       # version을 명시하면 package.json의 packageManager(pnpm@11.6.0)와 충돌해 셋업이 실패한다
       # (라이브 첫 CI에서 확인) — packageManager 단일 출처로 둔다.
       - uses: pnpm/action-setup@v4
