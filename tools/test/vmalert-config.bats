@@ -12,3 +12,24 @@ setup() {
 @test "vmalert auto-reloads rule files on change (configCheckInterval set)" {
   grep -q 'configCheckInterval' "$VMALERT"
 }
+
+@test "crown-jewel DB liveness + non-OOM crashloop alerts are defined" {
+  C="$ROOT/platform/victoria-stack/rules/core.yaml"
+  grep -q 'alert: PostgresClusterDown' "$C"   # 단일 인스턴스 pg가 Ready 아니면 페이징
+  grep -q 'kube_pod_status_ready' "$C"
+  grep -q 'absent(kube_pod_status_ready' "$C"  # 스크레이프 전손 fail-closed 가드
+  grep -q 'alert: PodCrashLooping' "$C"
+}
+
+@test "fourth backup (pgdump hedge) has a staleness alert like the other three" {
+  R="$ROOT/platform/victoria-stack/rules/r4-storage-backup.yaml"
+  grep -q 'alert: PgDumpHedgeStale' "$R"
+  grep -q 'pg-dump-hedge-r2' "$R"
+  grep -q 'kube_job_status_completion_time' "$R"
+}
+
+@test "disk-fill alerts carry a disk label so a critical inhibits the matching warning" {
+  R="$ROOT/platform/victoria-stack/rules/r4-storage-backup.yaml"
+  [ "$(grep -c 'disk: bulk-ssd' "$R")" -eq 2 ]   # BulkSSDFilling(warning) + BulkSSDAlmostFull(critical)
+  grep -q 'disk: standard' "$R"
+}

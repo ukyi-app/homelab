@@ -49,6 +49,9 @@ data:
               {{- else if eq $name "BulkSSDFilling" }}{{ $title = "외장 SSD 포화" }}
               {{- else if eq $name "BulkSSDAlmostFull" }}{{ $title = "외장 SSD 임박" }}
               {{- else if eq $name "StandardSSDFilling" }}{{ $title = "내장 SSD 포화" }}
+              {{- else if eq $name "PostgresClusterDown" }}{{ $title = "PostgreSQL 클러스터 다운" }}
+              {{- else if eq $name "PodCrashLooping" }}{{ $title = "파드 재시작 반복" }}
+              {{- else if eq $name "PgDumpHedgeStale" }}{{ $title = "논리 헤지 백업 정체" }}
               {{- end -}}
               {{- /* 미매핑 alertname → summary를 제목으로(신규 알림도 한국어). 자동 escape됨. summary 없으면 alertname 원문 */ -}}
               {{- if and (eq $title $name) .CommonAnnotations.summary }}{{ $title = .CommonAnnotations.summary }}{{- end -}}
@@ -74,6 +77,12 @@ data:
       - source_matchers: [ 'severity = critical' ]
         target_matchers: [ 'severity = warning' ]
         equal: ['alertname','namespace']
+      # 같은 디스크의 critical(예: BulkSSDAlmostFull)이 warning(BulkSSDFilling)을 억제한다.
+      # 둘은 alertname이 달라 위 규칙(equal:alertname)으로는 매치 안 돼 둘 다 발화하던 것을 교정.
+      # disk 라벨이 있는 알림으로만 한정(=~".+")해 비-디스크 알림을 과억제하지 않는다.
+      - source_matchers: [ 'severity = critical', 'disk =~ ".+"' ]
+        target_matchers: [ 'severity = warning', 'disk =~ ".+"' ]
+        equal: ['disk']
 ---
 apiVersion: apps/v1
 kind: Deployment
