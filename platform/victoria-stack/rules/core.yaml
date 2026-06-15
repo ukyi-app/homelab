@@ -60,8 +60,10 @@ data:
               summary: "PostgreSQL 클러스터 다운(Ready 인스턴스 0)"
               description: "database/pg가 3분 이상 Ready가 아닙니다 — 단일 인스턴스라 전 앱이 의존하는 DB가 중단된 상태입니다. CrashLoop/OOM/Pending/PVC를 확인하세요. 백업 staleness 알림(R2BackupStale 등)은 27시간 뒤에야 발화하므로 이 알림이 1차 페이징입니다."
           # 비-OOM CrashLoop 백스톱(OOM은 PodOOMKilled가 커버) — config/이미지풀/panic 반복 재시작.
+          # 블랙리스트(시스템 ns만 제외) — 화이트리스트는 신규 PSA ns(cache·sealed-secrets)를 흘렸다(회귀).
+          # honor_labels(#20)로 kube_* namespace가 실제값이라 블랙리스트가 모든 워크로드 ns를 자동 포함.
           - alert: PodCrashLooping
-            expr: increase(kube_pod_container_status_restarts_total{namespace=~"observability|database|prod|argocd|gateway|edge"}[15m]) > 3
+            expr: increase(kube_pod_container_status_restarts_total{namespace!~"kube-system|kube-public|kube-node-lease"}[15m]) > 3
             for: 10m
             labels: { severity: warning }
             annotations:

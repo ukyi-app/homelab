@@ -58,13 +58,21 @@ jobs:
         run: |
           files=$(ls tests/*.bats | grep -vE '/(sops-roundtrip|sops-guard|makefile)\.bats$')
           bats $files
-      - name: platform component render + policy gates (신규 컴포넌트)
+      - name: platform component tests (render + 정적, 글롭으로 신규 자동 포함)
+        # 하드코딩 목록은 신규 테스트를 게이트 밖으로 흘린다 — 이번 세션 cnpg/argocd 테스트 14+개가 누락돼
+        # PSA/operator 단언이 깨져도 green이던 버그 → 글롭으로 수집. charts/app은 make chart-test가 커버(제외).
+        # KSOPS 시드 복호(실 age 키)가 필요한 cnpg 렌더 3종(creds_reference·drill_alerting·kustomize_build)은
+        # lean gate 밖이라 명시 제외(verify의 ephemeral 키는 .sops.yaml recipients를 안 써 부적용 — 로컬/통합 유지).
+        # 파일별 실행(루프) — bats 다중인자 동작 의존 회피, 하나라도 실패 시 게이트 실패.
         run: |
-          bats platform/sealed-secrets/prod/test_render.bats \
-               platform/data-conn/prod/test_render.bats \
-               platform/cache/prod/test_render.bats \
-               platform/network-policies/prod/test_netpol.bats \
-               platform/namespaces/prod/test_psa.bats
+          rc=0
+          for f in $(find platform -name 'test_*.bats' -not -path '*/charts/*' \
+            -not -name test_creds_reference.bats \
+            -not -name test_drill_alerting.bats \
+            -not -name test_kustomize_build.bats | sort); do
+            echo "::group::$f"; bats "$f" || rc=1; echo "::endgroup::"
+          done
+          exit $rc
       - name: telegram 메시지 렌더 e2e (containerized AM v0.27)
         # amtool/grep이 못 잡는 inline message Go-template의 실제 컴파일·렌더를 사전 증명한다
         # (한국어 제목·글리프·자동 escape·링크). required gate 잡 스텝 → branch protection이 강제.
