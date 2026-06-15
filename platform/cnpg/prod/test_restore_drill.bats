@@ -23,10 +23,11 @@ sh=platform/cnpg/prod/restore-drill-script.sh
 @test "drill pushes the restore_drill_last_success_timestamp breadcrumb (M5 alert metric)" {
   grep -q 'restore_drill_last_success_timestamp' "$sh"
 }
-@test "drill tears the throwaway cluster down — including PVCs/PVs (no ~50GiB/run leak)" {
+@test "drill tears the throwaway cluster down — PVC delete + Delete-reclaim SC (no ~50GiB/run leak)" {
   grep -q 'delete cluster' "$sh"
-  grep -q 'delete pvc -l "cnpg.io/cluster=' "$sh" # Cluster CR만이 아니라 PVC도 삭제
-  grep -q 'delete pv' "$sh"                       # Released(Retain) PV 회수
+  grep -q 'delete pvc -l "cnpg.io/cluster=' "$sh"  # Cluster CR만이 아니라 PVC도 삭제
+  grep -q 'storageClass: drill-ssd' "$sh"          # Delete reclaim → PVC 삭제 시 PV 자동 제거(수동 delete pv 불필요)
+  grep -q 'residual drill PVC' "$sh"               # cleanup 후 잔여 PVC 0 검증 가드(거짓통과 'delete pv' substring 제거)
 }
 @test "drill script passes shellcheck" {
   run shellcheck "$sh"
