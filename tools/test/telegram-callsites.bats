@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 13개 호출처가 telegram-notify 계약을 지키는지 검사. ⚠️ 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵통과).
+# 15개 호출처가 telegram-notify 계약을 지키는지 검사. ⚠️ 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵통과).
 # ⚠️ declare -A 금지(bash 3.2 미지원) — 기대 목록은 here-doc로.
 # ⚠️ @test 이름은 영어만(한글이면 bats 파싱 깨짐 — 검증된 버그, AGENTS.md).
 setup() {
@@ -7,7 +7,7 @@ setup() {
   command -v yq >/dev/null || skip "yq required"
 }
 
-@test "exactly the 13 expected workflows notify via the action (enumerated, bump=2)" {
+@test "exactly the 15 expected workflows notify via the action (enumerated, bump=2, tf-reconcile=3)" {
   total=0
   while read -r wf n; do
     [ -n "$wf" ] || continue
@@ -25,10 +25,10 @@ bump.yaml 2
 bump-poll.yml 1
 onboard.yaml 1
 iac.yaml 1
-tf-reconcile.yml 1
+tf-reconcile.yml 3
 dispatch-mutation.yml 1
 EOF
-  [ "$total" -eq 13 ]
+  [ "$total" -eq 15 ]
   ! grep -rq "api.telegram.org" "$WF"   # raw curl 0 — 모든 인라인 curl이 액션으로 이행됨
 }
 

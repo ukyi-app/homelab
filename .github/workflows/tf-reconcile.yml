@@ -97,3 +97,134 @@ jobs:
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+  # ── github/tailscale 루트: plan-only 드리프트 가시성 (무인 apply 절대 금지) ──────────────────
+  # 이 두 루트는 "신뢰 앵커/고-blast-radius"다: github 루트는 CI가 소비하는 Actions 시크릿(secrets.tf)과
+  # branch protection(repo.tf, contexts=["gate"])을 관리하고, tailscale 루트는 ACL/auth-key를 관리한다.
+  # CI에서 무인 apply하면 광범위 PAT/OAuth를 CI에 저장해야 해 보안 모델(App 토큰 최소권한·branch protection
+  # 우회 불가)을 위반한다. 그래서 cloudflare(좁은 DNS/tunnel 스코프)만 apply하고, 이 둘은 plan만 돌려
+  # 드리프트를 알리며 수렴은 owner 로컬 apply로 한다. read 토큰이 시크릿에 없으면 preflight가 skip(Phase-0 토글).
+  drift-github:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - id: pf
+        env:
+          TOK: ${{ secrets.TF_GITHUB_TOKEN }}
+          R2: ${{ secrets.R2_ACCESS_KEY_ID }}
+        run: |
+          if [ -n "$TOK" ] && [ -n "$R2" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::TF_GITHUB_TOKEN/R2_* 미설정 — github 루트 드리프트 체크 skip"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.pf.outputs.configured == 'true'
+        with: { ref: main }
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.pf.outputs.configured == 'true'
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - name: init + plan (드리프트 감지 — apply 안 함)
+        id: drift
+        if: steps.pf.outputs.configured == 'true'
+        env:
+          TF_VAR_github_owner: ${{ secrets.TF_GITHUB_OWNER }}
+          TF_VAR_github_token: ${{ secrets.TF_GITHUB_TOKEN }}
+          TF_VAR_bot_pat: ${{ secrets.TF_GITHUB_BOT_PAT }}
+          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TF_VAR_telegram_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          cat > infra/github/backend.hcl <<EOF
+          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
+          access_key = "${R2_ACCESS_KEY_ID}"
+          secret_key = "${R2_SECRET_ACCESS_KEY}"
+          key        = "github/prod/terraform.tfstate"
+          EOF
+          terraform -chdir=infra/github init -backend-config=backend.hcl -input=false -lockfile=readonly
+          set +e
+          terraform -chdir=infra/github plan -input=false -lock-timeout=120s -detailed-exitcode -no-color
+          rc=$?
+          set -e
+          case "$rc" in
+            0) echo "drift=false" >> "$GITHUB_OUTPUT"; echo "github 드리프트 없음" ;;
+            2) echo "drift=true" >> "$GITHUB_OUTPUT"; echo "::warning::github 루트 드리프트 감지 — owner 로컬 apply 필요(CI 무인 apply 금지)" ;;
+            *) exit "$rc" ;;
+          esac
+      - name: telegram notify (드리프트/실패 시에만)
+        if: steps.pf.outputs.configured == 'true' && (failure() || steps.drift.outputs.drift == 'true')
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ job.status == 'success' && steps.drift.outputs.drift == 'true' && 'drift' || job.status }}
+          source: IaC드리프트
+          title: github 루트 드리프트
+          ident: "root=github drift=${{ steps.drift.outputs.drift }} (수렴은 owner 로컬 apply)"
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+  drift-tailscale:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - id: pf
+        env:
+          TOK: ${{ secrets.TF_TAILSCALE_OAUTH_ID }}
+          R2: ${{ secrets.R2_ACCESS_KEY_ID }}
+        run: |
+          if [ -n "$TOK" ] && [ -n "$R2" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::TF_TAILSCALE_OAUTH_ID/R2_* 미설정 — tailscale 루트 드리프트 체크 skip"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.pf.outputs.configured == 'true'
+        with: { ref: main }
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.pf.outputs.configured == 'true'
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - name: init + plan (드리프트 감지 — apply 안 함)
+        id: drift
+        if: steps.pf.outputs.configured == 'true'
+        env:
+          TF_VAR_ts_bootstrap_oauth_id: ${{ secrets.TF_TAILSCALE_OAUTH_ID }}
+          TF_VAR_ts_bootstrap_oauth_secret: ${{ secrets.TF_TAILSCALE_OAUTH_SECRET }}
+          TF_VAR_internal_suffix: home.${{ secrets.TF_DOMAIN }}
+          TF_VAR_dns_nameserver_tailscale_ip: ${{ secrets.TF_TAILSCALE_DNS_NAMESERVER_IP }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          cat > infra/tailscale/backend.hcl <<EOF
+          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
+          access_key = "${R2_ACCESS_KEY_ID}"
+          secret_key = "${R2_SECRET_ACCESS_KEY}"
+          key        = "tailscale/prod/terraform.tfstate"
+          EOF
+          terraform -chdir=infra/tailscale init -backend-config=backend.hcl -input=false -lockfile=readonly
+          set +e
+          terraform -chdir=infra/tailscale plan -input=false -lock-timeout=120s -detailed-exitcode -no-color
+          rc=$?
+          set -e
+          case "$rc" in
+            0) echo "drift=false" >> "$GITHUB_OUTPUT"; echo "tailscale 드리프트 없음" ;;
+            2) echo "drift=true" >> "$GITHUB_OUTPUT"; echo "::warning::tailscale 루트 드리프트 감지 — owner 로컬 apply 필요(CI 무인 apply 금지)" ;;
+            *) exit "$rc" ;;
+          esac
+      - name: telegram notify (드리프트/실패 시에만)
+        if: steps.pf.outputs.configured == 'true' && (failure() || steps.drift.outputs.drift == 'true')
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ job.status == 'success' && steps.drift.outputs.drift == 'true' && 'drift' || job.status }}
+          source: IaC드리프트
+          title: tailscale 루트 드리프트
+          ident: "root=tailscale drift=${{ steps.drift.outputs.drift }} (수렴은 owner 로컬 apply)"
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

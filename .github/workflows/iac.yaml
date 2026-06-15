@@ -39,6 +39,79 @@ jobs:
           bats infra/_test/argocd_values.bats
           bats infra/_test/root_app.bats
           bats infra/_test/tf_validate.bats # tf fmt/validate + R2 prevent_destroy 가드(이전엔 미게이트)
+          bats infra/_test/tf_reconcile.bats # 드리프트 잡(github/tailscale)은 plan-only(무인 apply 금지) 불변식 가드
+
+  # ── PR: cloudflare 루트 plan 미리보기 — 머지 전 add/change/destroy를 job summary에 게시(드리프트/변경 가시성) ──
+  # 라이브 state(R2) 대비 실제 plan을 돌려 리뷰어가 머지 전에 적용 diff를 본다. 정보성(required check는 gate) —
+  # plan은 entitlement 400(무료 플랜 rate-limit 등 apply-time 거부)까지는 못 잡지만 리소스 add/change/destroy는 보여준다.
+  iac-plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      # 시크릿 부재(Phase 0 미완/외부 기여) 시 skip — 깨끗한 성공(required 아님).
+      - id: pf
+        env:
+          CF: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
+          R2: ${{ secrets.R2_ACCESS_KEY_ID }}
+        run: |
+          if [ -n "$CF" ] && [ -n "$R2" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::TF/R2 시크릿 미설정 — cloudflare plan 미리보기 skip"
+          fi
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.pf.outputs.configured == 'true'
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - name: terraform init (R2 backend, readonly)
+        if: steps.pf.outputs.configured == 'true'
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          cat > infra/cloudflare/backend.hcl <<EOF
+          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
+          access_key = "${R2_ACCESS_KEY_ID}"
+          secret_key = "${R2_SECRET_ACCESS_KEY}"
+          key        = "cloudflare/prod/terraform.tfstate"
+          EOF
+          terraform -chdir=infra/cloudflare init -backend-config=backend.hcl -input=false -lockfile=readonly
+      - name: terraform plan → job summary
+        if: steps.pf.outputs.configured == 'true'
+        env:
+          TF_VAR_cloudflare_api_token: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
+          TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
+          TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
+          TF_VAR_internal_suffix: home.${{ secrets.TF_DOMAIN }}
+        run: |
+          set +e
+          terraform -chdir=infra/cloudflare plan -input=false -lock-timeout=120s -no-color \
+            -detailed-exitcode -out=tf.plan > plan.txt 2>&1
+          rc=$?
+          set -e
+          {
+            echo "## Cloudflare plan 미리보기"
+            case "$rc" in
+              0) echo "✅ 변경 없음 (no-op)" ;;
+              2) echo "ℹ️ 적용 대기 변경 있음 — 아래 plan 확인" ;;
+              *) echo "⚠️ plan 실패(exit $rc)" ;;
+            esac
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # 파괴(delete/replace) 사전 경고 — 차단은 머지 후 tf-reconcile/prevent_destroy가, 여기선 가시성만.
+          if [ "$rc" = "2" ]; then
+            destroys=$(terraform -chdir=infra/cloudflare show -json tf.plan \
+              | jq '[.resource_changes[].change.actions[] | select(. == "delete")] | length')
+            [ "${destroys:-0}" -gt 0 ] && echo "::warning::cloudflare plan에 delete/replace ${destroys}건 — 머지 시 무인 apply가 차단(수동 검토 필요)"
+          fi
+          # 0(no-op)·2(변경 있음)는 정상, 그 외만 실패로 가시화(required 아님 → PR 차단 안 함).
+          [ "$rc" = "0" ] || [ "$rc" = "2" ] || exit "$rc"
 
   # ── push-to-main: cloudflare 루트 plan→apply (R2 state) ─────────────────────────────
   apply:
