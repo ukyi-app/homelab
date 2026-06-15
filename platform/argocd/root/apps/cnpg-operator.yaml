@@ -13,7 +13,9 @@ spec:
     # >= 1.26: barman-cloud CNPG-I plugin이 요구 (Task 4.1b)
     # chart: 를 쓰면 repoURL은 Helm 레지스트리여야 하고 targetRevision은 차트 semver여야 한다 —
     # git URL+태그(cnpg-v0.26.0)는 "improper constraint"로 거부됨(라이브 확인). 0.26.0 ↔ tag cnpg-v0.26.0.
-    - repoURL: https://cloudnative-pg.github.io/charts
+    # canonical 도메인으로 핀 — cloudnative-pg.github.io/charts는 cloudnative-pg.io/charts로 301
+    # 리다이렉트한다(현재 ArgoCD/helm이 따라가 동작하나, sealed-secrets처럼 구 Pages가 사라지면 깨짐).
+    - repoURL: https://cloudnative-pg.io/charts
       targetRevision: 0.26.0
       chart: cloudnative-pg
       helm:
