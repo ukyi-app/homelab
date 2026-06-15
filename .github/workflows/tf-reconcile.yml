@@ -74,7 +74,15 @@ jobs:
           set -e
           case "$rc" in
             0) echo "drift=false" >> "$GITHUB_OUTPUT"; echo "드리프트 없음 — no-op" ;;
-            2) echo "drift=true" >> "$GITHUB_OUTPUT"
+            2) # 파괴(destroy/replace) 액션이 있으면 무인 apply 금지 — DR/배포 자산 보호, 실패시켜 수동 검토 유도.
+               # (prevent_destroy 버킷은 plan 단계서 이미 rc=1로 막히지만, 그 외 리소스의 replace=delete+create도 차단.)
+               destroys=$(terraform -chdir=infra/cloudflare show -json tf.plan \
+                 | jq '[.resource_changes[].change.actions[] | select(. == "delete")] | length')
+               if [ "${destroys:-0}" -gt 0 ]; then
+                 echo "::error::tf plan에 delete/replace ${destroys}건 — 무인 apply 차단(수동 검토 후 적용)"
+                 exit 1
+               fi
+               echo "drift=true" >> "$GITHUB_OUTPUT"
                terraform -chdir=infra/cloudflare apply -input=false tf.plan ;;
             *) exit "$rc" ;;
           esac
