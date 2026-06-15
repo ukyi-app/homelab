@@ -4,6 +4,9 @@
 #   파괴 전에 백업·실복원(키쌍)을 증명하고, 재구축 후 전수 unseal + cert 일치를 검증한다.
 # fail-closed: 권위 소스(kubectl/git/yq) 조회·파싱 실패 시 0으로 단정하지 않고 ABORT/FAIL
 #   (SEALED_DR_ALLOW_OFFLINE=1 명시 오버라이드만 예외). 파서: yq(핀) + kubectl jsonpath(live).
+# 최신 백업 선택은 ss-keys.<epoch>.enc.yaml(통제 파일명)을 ls|sort|tail로 고른다 — 비알파뉴메릭
+# 위험이 없어 find 대신 ls가 의도된 선택(SC2012 파일 전역 면제).
+# shellcheck disable=SC2012
 CERT_REL="tools/sealed-secrets-cert.pem"
 SS_NS="sealed-secrets"; SS_DEPLOY="deploy/sealed-secrets-controller"
 UNSEAL_RETRIES="${SEALED_UNSEAL_RETRIES:-40}"; CTRL_WAIT_RETRIES="${SEALED_CTRL_WAIT_RETRIES:-60}"
@@ -118,8 +121,8 @@ rehearse_restore_on_live() {
   kubectl -n "$ns" create secret generic "$name" --from-literal=v="$want" --dry-run=client -o yaml \
     | kubeseal --cert "$repo/$CERT_REL" --format yaml 2>/dev/null | kubectl apply -f - >/dev/null 2>&1 \
     || { echo "    리허설: committed cert로 canary 봉인/적용 실패"; return 1; }
-  local i got=""
-  for i in $(seq 1 24); do
+  local got=""
+  for _ in $(seq 1 24); do
     got="$(kubectl -n "$ns" get secret "$name" -o jsonpath='{.data.v}' 2>/dev/null | base64 -d 2>/dev/null || true)"
     [ "$got" = "$want" ] && break
     sleep 5
@@ -129,8 +132,7 @@ rehearse_restore_on_live() {
 }
 
 wait_for_controller() {
-  local i
-  for i in $(seq 1 "$CTRL_WAIT_RETRIES"); do kubectl -n "$SS_NS" get "$SS_DEPLOY" >/dev/null 2>&1 && break; sleep 5; done
+  for _ in $(seq 1 "$CTRL_WAIT_RETRIES"); do kubectl -n "$SS_NS" get "$SS_DEPLOY" >/dev/null 2>&1 && break; sleep 5; done
   kubectl -n "$SS_NS" get "$SS_DEPLOY" >/dev/null 2>&1 || { echo "DR DRILL FAIL: sealed-secrets 컨트롤러 Deployment 미생성"; return 1; }
   kubectl -n "$SS_NS" rollout status "$SS_DEPLOY" --timeout=300s
 }
@@ -172,11 +174,11 @@ verify_all_sealedsecrets_unsealed() {
   if [ "$rc" -ne 0 ]; then   # 재구축 후엔 클러스터 생존 전제 — offline override 무관 무조건 fail-closed(P5-1)
     echo "DR DRILL FAIL: [4.5] 소비자 목록 조회 실패(kubectl/ref) — fail-closed, PASS 금지(offline override 미적용)"; return 1; fi
   [ -n "$merged" ] || { echo "    unseal 검증: 소비자 0개 — skip"; return 0; }
-  local fail=0 line ns name i ok
+  local fail=0 line ns name ok
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     ns="${line%%/*}"; name="${line#*/}"; ok=0
-    for i in $(seq 1 "$UNSEAL_RETRIES"); do kubectl -n "$ns" get secret "$name" >/dev/null 2>&1 && { ok=1; break; }; sleep 5; done
+    for _ in $(seq 1 "$UNSEAL_RETRIES"); do kubectl -n "$ns" get secret "$name" >/dev/null 2>&1 && { ok=1; break; }; sleep 5; done
     if [ "$ok" -eq 1 ]; then echo "    unseal OK: $ns/$name"; else echo "DR DRILL FAIL: $ns/$name 미생성"; fail=1; fi
   done <<< "$merged"
   return "$fail"
