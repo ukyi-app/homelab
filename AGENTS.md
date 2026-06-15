@@ -94,6 +94,11 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
   (cloud-init) 참고. VM IP(192.168.139.x)는 Mac에서 직접 라우팅되지 않는다.
 - AdGuard ConfigMap은 첫 부팅 시드 전용(initContainer `cp -n`) — 갱신 시 PVC 안의
   AdGuardHome.yaml도 함께 고치고 재시작해야 반영된다.
+- **AdGuard split-horizon rewrite(`*.home.ukyi.app → <traefik-ts tailscale IP>`)는 DR 재구축 시 stale이 된다.**
+  DR로 traefik-ts 디바이스가 재등록되면(예: homelab→homelab-1) tailscale IP가 바뀌는데 rewrite는 옛 IP를
+  가리킨 채라, tailscale·LAN 양쪽에서 모든 `*.home.ukyi.app`이 죽은 IP로 연결돼 실패한다(`.ts.net` MagicDNS
+  경로엔 안 드러나 한참 뒤에 발견). 재구축 후 `kubectl -n gateway get svc traefik-ts`의 tailscale IP로 seed +
+  라이브 PVC 둘 다 갱신할 것. (tailnet 전역 nameserver=맥미니 tailscale IP:53→AdGuard는 디바이스명이 안정적이라 무관.)
 - tailscale operator의 Ingress reconcile은 metadata-only 변경(annotation nudge)을 무시한다 —
   재처리는 operator 재시작으로.
 - **vector는 root로 실행해야 한다** — k3s `/var/log/pods/**/*.log`는 root:root 0640이라
