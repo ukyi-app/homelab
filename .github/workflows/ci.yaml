@@ -27,6 +27,11 @@ jobs:
           # verify:ledger가 conftest를 부른다 — 미설치로 첫 라이브 CI가 실패했던 버그
           curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin conftest
           sudo apt-get update && sudo apt-get install -y bats
+          # shellcheck v0.11.0 핀(aarch64): 파괴적/DR 스크립트 lint + tests/{dr-drill,reset-pg-r2-archive}.bats가 부른다.
+          # apt 버전은 러너마다 달라 SC2015 등 info 체크가 로컬과 드리프트한다 — 다른 도구(yq/conftest)처럼
+          # curl로 버전을 고정해 게이트를 결정론적으로 만든다(러너=ubuntu-24.04-arm → aarch64).
+          curl -sSL https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.aarch64.tar.xz \
+            | tar -xJ -C /tmp && sudo mv /tmp/shellcheck-v0.11.0/shellcheck /usr/local/bin/shellcheck
       - name: chart render + validate (all kinds)
         run: make chart-test
       - name: memory ledger onboarding gate (M0-owned)
@@ -40,6 +45,18 @@ jobs:
         # 디렉토리 전체를 돌린다. dev-postgres.bats만 제외(실 docker 필요 — CI 게이트 부적합).
         run: |
           files=$(ls tools/test/*.bats | grep -v '/dev-postgres\.bats$')
+          bats $files
+      - name: shell script lint (파괴적/DR 스크립트)
+        # scripts/*는 DR·시크릿·백업·아카이브 리셋 등 파괴적 경로 — shellcheck를 required gate로 강제.
+        run: shellcheck scripts/*.sh
+      - name: DR·시크릿 안전망 bats (tests/)
+        # 가장 위험한 로직(sealing-key DR fail-closed·백업 원자성·DR 드릴 불변식·archive --purge 가드)의
+        # 회귀 테스트가 로컬 전용이라 required gate 밖이었다 → 배선해 회귀를 차단한다.
+        # 글롭으로 신규 tests/*.bats를 자동 포함(하드코딩 목록의 누락 버그 방지). 단 실제 age 키가 필요한
+        # sops-roundtrip/sops-guard와 make verify(→sops 왕복) 의존 makefile은 제외(sops 왕복은 verify
+        # 잡이 ephemeral CI 키로 커버). posture는 라이브 클러스터 의존이라 tests/posture/ 하위라 미매칭.
+        run: |
+          files=$(ls tests/*.bats | grep -vE '/(sops-roundtrip|sops-guard|makefile)\.bats$')
           bats $files
       - name: platform component render + policy gates (신규 컴포넌트)
         run: |
