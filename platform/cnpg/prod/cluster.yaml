@@ -70,5 +70,16 @@ spec:
         barmanObjectName: pg-r2 # -> object-store.yaml의 ObjectStore
         serverName: pg
 
+  # vmagent의 pod-annotations job(role:pod)이 pg 인스턴스 파드를 발견·scrape하도록
+  # prometheus.io/* 주석을 관리형 리소스에 상속시킨다(없으면 cnpg_*/barman_cloud_*/
+  # cnpg_pg_stat_archiver_* 시리즈가 통째로 vmsingle에 부재 → R2BackupStale/WALArchiveStalled
+  # 가 absent로 오발화/블라인드). Service/PVC에도 같은 주석이 붙지만 vmagent는 role:pod만
+  # 쓰므로 무해. 메타데이터 전용 변경이라 파드 재생성/switchover 없음(단일 인스턴스 무중단).
+  inheritedMetadata:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9187"
+      prometheus.io/path: "/metrics"
+
   monitoring:
-    enablePodMonitor: false # prometheus.io annotation으로 scrape (M5)
+    enablePodMonitor: false # prometheus.io annotation(inheritedMetadata 상속)으로 scrape (M5)

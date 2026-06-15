@@ -48,19 +48,27 @@ data:
               summary: "로컬 base-backup이 stale(27시간 초과)이거나 누락됨"
               description: "복원 사본 2(로컬 1TB SSD)가 위험합니다 — 드라이브 미마운트 또는 CronJob 실패."
           # 백업 생존성: 가장 최근 R2 백업이 계속 갱신되어야 한다 (오프사이트 사본 3).
+          # barman-cloud plugin이 채우는 메트릭을 읽는다 — in-tree cnpg_collector backup 게이지는
+          # CNPG 1.27+plugin에서 deprecated라 항상 0이다(백업 정상이어도 영구 stale로 오발화).
+          # 값 0(아직 백업 없음)은 time()-0이 거대해 fail-loud로 발화 — 의도된 fail-closed.
           - alert: R2BackupStale
             expr: |
-              (time() - cnpg_collector_last_available_backup_timestamp) > 100000
-              or absent(cnpg_collector_last_available_backup_timestamp)
+              (time() - max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp)) > 100000
+              or absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp)
             for: 15m
             labels: { severity: critical }
             annotations:
               summary: "R2 오프사이트 백업이 stale(27시간 초과)이거나 누락됨"
               description: "오프사이트 사본 3(Cloudflare R2)가 최신 백업을 만들지 못했습니다 — DR 사본이 노후화되고 있습니다."
           # 백업 생존성: R2로의 WAL 아카이빙이 오류를 내면 안 된다 (RPO ≈ 5분 목표).
+          # pg_stat_archiver 타임스탬프를 비교한다 — in-tree cnpg_collector archive 게이지는
+          # plugin 환경에서 export되지 않아(부재) 원식은 영원히 no-data였다.
+          # absent() 가드: 스크레이프 전손 시(이번 인시던트의 실패모드) stall이 빈 벡터로 조용히
+          # 묻히지 않고 페이징되도록. (완전히 wedge된 아카이버의 backstop은 R2BackupStale.)
           - alert: WALArchiveStalled
             expr: |
-              cnpg_collector_last_failed_archive_time > cnpg_collector_last_archived_time
+              cnpg_pg_stat_archiver_last_failed_time > cnpg_pg_stat_archiver_last_archived_time
+              or absent(cnpg_pg_stat_archiver_last_archived_time)
             for: 15m
             labels: { severity: critical }
             annotations:
