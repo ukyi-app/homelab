@@ -29,7 +29,7 @@ INSTALL_K3S_EXEC="server \
 --kubelet-arg=image-gc-high-threshold=80 \
 --kubelet-arg=image-gc-low-threshold=70 \
 --secrets-encryption \
---write-kubeconfig-mode=0644 \
+--write-kubeconfig-mode=0600 \
 --default-local-storage-path=${INTERNAL_STORAGE_PATH}"
 
 if [ "${K3S_PRINT_EXEC:-0}" = "1" ]; then
