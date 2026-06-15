@@ -1,0 +1,58 @@
+# Self-hosted Renovate — 의존성(이미지 digest·terraform·k3s/local-path·helm 차트·npm) 자동 갱신 PR.
+# 트리거 경계: homelab writer App 토큰(Contents+PR write)으로 PR-first. App 토큰 PR이라 required
+# check `gate`가 정상 발화한다(GITHUB_TOKEN PR은 CI가 안 돌아 머지 불가 — App 토큰 필수). 설정은 renovate.json.
+# ⚠️ github-actions manager는 renovate.json에서 비활성 — uses: 핀 갱신은 토큰에 workflows:write가 필요한데
+#    writer App은 Contents+PR write 전용이다. writer App에 workflows:write 부여(Phase-0) + 아래 토큰에
+#    permission-workflows: write 추가 + renovate.json의 "github-actions".enabled=true로 함께 켤 것.
+name: renovate
+on:
+  schedule:
+    - cron: "0 19 * * 0" # 일요일 19:00 UTC = 월요일 04:00 KST (renovate.json schedule 창 0-6 Mon 내)
+  workflow_dispatch: {}
+
+concurrency:
+  group: renovate # 변이 디스패처(homelab-mutation)와 독립 — Renovate는 자체 PR만 만든다
+  cancel-in-progress: false
+
+permissions:
+  contents: read # 실제 쓰기는 아래 App 토큰이 수행(워크플로 GITHUB_TOKEN은 최소 권한 유지)
+
+jobs:
+  # Phase 0(writer App secret 등록) 전 머지되면 매주 실패하지 않도록 — 미설정 시 skip(clean success).
+  preflight:
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          WRITER: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+        run: |
+          if [ -n "$WRITER" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Phase 0 미완(HOMELAB_WRITER_APP_ID 미설정) — renovate skip"
+          fi
+
+  renovate:
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      # writer App 토큰: homelab Contents+PR write로 좁힘(workflows write 미요청 — github-actions manager 비활성).
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        with:
+          app-id: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+          private-key: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: renovatebot/github-action@8217b3fc286df088d7c27f3255fe8414463bc0fd # v46.1.15
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+        env:
+          RENOVATE_PLATFORM: github
+          RENOVATE_REPOSITORIES: ${{ github.repository }} # 자기 레포만 — autodiscover 금지
+          RENOVATE_ONBOARDING: "false" # renovate.json이 이미 레포에 있음(온보딩 PR 불필요)
+          LOG_LEVEL: info
