@@ -21,6 +21,7 @@ spec:
   template:
     metadata:
       labels: { app.kubernetes.io/name: vmsingle }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8428" } # 자기관측 vm_* 메트릭
     spec:
       securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534 }
       containers:

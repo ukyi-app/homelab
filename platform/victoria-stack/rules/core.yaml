@@ -69,6 +69,48 @@ data:
             annotations:
               summary: "파드 재시작 반복: {{ $labels.namespace }}/{{ $labels.pod }}"
               description: "컨테이너가 15분간 3회 초과 재시작했습니다(CrashLoop) — OOM이 아니면(OOM은 PodOOMKilled가 커버) config/이미지/probe를 확인하세요."
+          # 로그 수집(Vector→VictoriaLogs) 정체 — root 미실행 등으로 조용히 0이 되던 사일런트 실패모드(검증됨).
+          # VL self-scrape 주석 필요(이 변경에 포함). for:30m로 scrape 셋업 윈도의 absent() 전이를 흡수.
+          - alert: LogIngestionStalled
+            expr: |
+              sum(rate(vl_rows_ingested_total{type="elasticsearch_bulk"}[15m])) == 0
+              or absent(vl_rows_ingested_total{type="elasticsearch_bulk"})
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "로그 수집 정체(Vector→VictoriaLogs 0행)"
+              description: "elasticsearch_bulk 수집률이 0이거나 메트릭이 없습니다 — vector 경로 단절(예: root 미실행) 가능. VL self-scrape·vector 파드를 확인하세요."
+          # vmagent remoteWrite 실패/드롭 — 메트릭이 TSDB에 안 들어가 다른 알림이 조용히 무력화될 수 있다.
+          - alert: VmagentRemoteWriteDropping
+            expr: |
+              increase(vmagent_remotewrite_packets_dropped_total[15m]) > 0
+              or increase(vmagent_remotewrite_errors_total[15m]) > 0
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "vmagent remoteWrite 드롭/실패"
+              description: "vmagent가 샘플을 드롭하거나 remoteWrite에 실패합니다 — 메트릭 유실로 알림 평가가 부정확해질 수 있습니다."
+          # vmalert 자기관측 — 룰 평가/notifier/remoteWrite 에러(알림 엔진 자체 고장). Watchdog는 평가 생존만 증명.
+          - alert: VmalertUnhealthy
+            expr: |
+              increase(vmalert_alerting_rules_errors_total[15m]) > 0
+              or increase(vmalert_alerts_send_errors_total[15m]) > 0
+              or increase(vmalert_remotewrite_errors_total[15m]) > 0
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "vmalert 룰/알림 전송 에러"
+              description: "vmalert가 룰 평가 또는 Alertmanager 전송에 실패합니다 — 알림 파이프라인 자체가 손상됐을 수 있습니다."
+          # 일반 Job 실패 백스톱 — 전용 staleness 알림이 없는 Job(예: cache-backup)의 실패를 잡는다.
+          # honor_labels(#20)로 kube_job_* 라벨 정확. 백업 CronJob류(전용 staleness 보유)는 job_name으로 제외.
+          - alert: KubeJobFailed
+            expr: |
+              kube_job_failed{condition="true", namespace=~"prod|database|cache|observability", job_name!~"cnpg-local-basebackup.*|pg-dump-hedge-r2.*|pg-restore-drill.*"} > 0
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "Job 실패: {{ $labels.namespace }}/{{ $labels.job_name }}"
+              description: "Job이 실패 상태로 15분 이상 머뭅니다 — 전용 staleness 알림이 없는 정기 작업(예: 캐시 백업)의 실패입니다."
       - name: deadmanswitch
         rules:
           - alert: Watchdog
