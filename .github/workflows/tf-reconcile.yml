@@ -63,7 +63,7 @@ jobs:
           secret_key = "${R2_SECRET_ACCESS_KEY}"
           key        = "cloudflare/prod/terraform.tfstate"
           EOF
-          terraform -chdir=infra/cloudflare init -backend-config=backend.hcl -input=false
+          terraform -chdir=infra/cloudflare init -backend-config=backend.hcl -input=false -lockfile=readonly
       - name: drift 감지 → 있을 때만 apply
         id: drift
         run: |
