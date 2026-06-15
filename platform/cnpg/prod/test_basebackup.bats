@@ -22,3 +22,8 @@ cj=platform/cnpg/prod/basebackup-cronjob.yaml
   # 갭에 떨어지면 RST(Connection refused)로 job이 실패한다(라이브 검증). 도달 대기 루프가 필요.
   grep -q '/dev/tcp/pg-rw.database.svc/5432' "$cj"
 }
+@test "cronjob container is hardened (no privesc, all caps dropped, seccomp RuntimeDefault)" {
+  grep -q 'allowPrivilegeEscalation: false' "$cj"
+  grep -qF 'drop: [ALL]' "$cj"
+  grep -q 'type: RuntimeDefault' "$cj"
+}

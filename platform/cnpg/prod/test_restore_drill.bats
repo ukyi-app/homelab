@@ -42,3 +42,8 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   grep -q 'DRY_RUN' "$sh"
   grep -q 'hx()' "$sh"
 }
+@test "drill container is hardened (high-priv SA — no privesc, all caps dropped, seccomp RuntimeDefault)" {
+  grep -q 'allowPrivilegeEscalation: false' "$cj"
+  grep -qF 'drop: [ALL]' "$cj"
+  grep -q 'type: RuntimeDefault' "$cj"
+}

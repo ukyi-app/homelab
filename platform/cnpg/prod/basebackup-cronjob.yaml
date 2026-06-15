@@ -22,9 +22,14 @@ spec:
             runAsUser: 26
             runAsGroup: 26
             fsGroup: 26
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: basebackup
               image: ghcr.io/cloudnative-pg/postgresql:16.4
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: [ALL] }
               command: ["/bin/bash", "-c"]
               args:
                 - |
