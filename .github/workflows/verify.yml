@@ -10,10 +10,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # version을 명시하면 package.json의 packageManager(pnpm@10.30.3)와 충돌해 셋업이 실패한다
-      # (라이브 첫 CI에서 확인) — packageManager 단일 출처로 둔다.
-      - uses: pnpm/action-setup@v4
-
+      # verify 잡은 pnpm/node를 쓰지 않는다(skeleton·conftest·sops·pre-commit[pip]만) — pnpm 셋업 불필요.
+      # 과거 pnpm/action-setup이 있었으나 pnpm@11 self-install은 액션의 node20 런타임에서 실패한다
+      # (setup-node로도 안 됨 — 액션 자체가 node20). 잡이 pnpm을 안 쓰므로 통째로 제거한다.
       - name: Install tools
         run: |
           curl -sSL https://github.com/getsops/sops/releases/download/v3.9.4/sops-v3.9.4.linux.arm64 -o /usr/local/bin/sops

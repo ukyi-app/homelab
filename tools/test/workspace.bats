@@ -7,9 +7,9 @@
   [[ "$output" == *"tools"* ]]
 }
 
-@test "package.json pins pnpm@10 and exposes the platform gates" {
+@test "package.json pins pnpm@11 and exposes the platform gates" {
   run jq -r '.packageManager' package.json
-  [[ "$output" == pnpm@10* ]]
+  [[ "$output" == pnpm@11* ]]
   run jq -r '.scripts | keys | join(",")' package.json
   [[ "$output" == *"verify:ledger"* ]]
   [[ "$output" == *"verify:skeleton"* ]]

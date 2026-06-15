@@ -1,0 +1,5 @@
+[{ "labels": {"alertname":"PodOOMKilled","severity":"critical","namespace":"app"},
+   "annotations": {"summary":"파드가 메모리 한도 초과로 종료됨",
+                   "description":"컨테이너 <main>이 OOM — 메모리 상향 검토",
+                   "runbook_url":"https://home.example/runbook/oom"},
+   "startsAt":"2020-01-01T00:00:00Z" }]

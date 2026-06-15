@@ -1,0 +1,32 @@
+# telegram-notify composite action — 운영 알림 공통 송신기.
+# 메시지 계약(parse_mode=HTML, 고정 필드 순서) + 한국어 상태 어휘(글리프 동반) + HTML 이스케이프 +
+# best-effort(비2xx도 step 실패 없이 ::warning:: + STEP_SUMMARY, exit 0) + 4096자 캡.
+# ⚠️ client_payload 등 비신뢰 입력은 env로만 전달 — `with:` 텍스트에 ${{ }} 인라인 보간 금지(AGENTS.md).
+# 로직은 notify.sh(POSIX sh)에 있다 — bats로 DRY_RUN 단위 검증한다.
+name: telegram-notify
+description: 운영 Telegram 알림(메시지 계약·HTML 이스케이프·best-effort)
+inputs:
+  status:      { description: "success|failure|cancelled|skipped|PASS|FAIL|FIRING-critical|FIRING-warning|RESOLVED|drift", required: true }
+  source:      { description: "한국어 소스 라벨(알림/배포/해체/감사/…)", required: true }
+  title:       { description: "한국어 제목(<b> 안에 들어감)", required: true }
+  ident:       { description: "핵심 식별자(소스 라벨 뒤 · 식별자)", required: false, default: "" }
+  body:        { description: "추가 본문(key: value 여러 줄 가능). 동적값은 이스케이프됨", required: false, default: "" }
+  link:        { description: "액션 링크 URL(run/PR/runbook). 있으면 → 줄 추가", required: false, default: "" }
+  stamp:       { description: "1이면 KST 타임스탬프 추가", required: false, default: "" }
+  bot-token:   { description: "Telegram bot token (secrets.TELEGRAM_BOT_TOKEN)", required: true }
+  chat-id:     { description: "Telegram chat id (secrets.TELEGRAM_CHAT_ID)", required: true }
+runs:
+  using: composite
+  steps:
+    - shell: sh
+      env:
+        STATUS:  ${{ inputs.status }}
+        SOURCE:  ${{ inputs.source }}
+        TITLE:   ${{ inputs.title }}
+        IDENT:   ${{ inputs.ident }}
+        BODY:    ${{ inputs.body }}
+        LINK:    ${{ inputs.link }}
+        STAMP:   ${{ inputs.stamp }}
+        TG_TOKEN: ${{ inputs.bot-token }}
+        TG_CHAT:  ${{ inputs.chat-id }}
+      run: sh "$GITHUB_ACTION_PATH/notify.sh"

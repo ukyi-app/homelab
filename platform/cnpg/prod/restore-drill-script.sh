@@ -18,15 +18,46 @@ TG="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
 # 항상 전달되게 한다 — M5의 CNPGRestoreDrillStale은 absent()를 쓰므로 시계열이 없으면 영원히 페이징된다.
 PUSHGW="${METRICS_PUSH_URL:-http://vmsingle.observability.svc:8428}"
 
-notify() { # $1=emoji-status $2=text
+# >>> notify-block (test-extracted)
+# HTML-escape: parse_mode=HTML에서 동적 값의 & < > 를 엔티티로. & 를 먼저 치환한다.
+# ⚠️ bash 파라미터 확장(${s//</&lt;})은 bash 5.2+에서 replacement의 &를 "매치 텍스트 참조"로
+#    해석해 <lt; 처럼 깨진다(bash 3.2에선 literal이라 통과 — 라이브/CI는 bash 5.x). sed로 escape한다.
+hx() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+# 공유 메시지 계약(parse_mode=HTML, 고정 필드 순서):
+#   {glyph} <b>{제목}</b> — {상태}
+#   복원드릴 · {핵심 식별자}
+#   {key}: {value}
+#   → {링크}            (URL이 있을 때만)
+# $1=PASS|FAIL  $2=상태 상세 텍스트(동적, 이스케이프 대상)
+notify() {
+  local outcome=$1 detail=$2 glyph word
+  case "$outcome" in
+    PASS) glyph='✅'; word='성공' ;;
+    *)    glyph='🔴'; word='실패' ;;   # FAIL 및 기타 → 실패 (fail-closed)
+  esac
+  local stamp; stamp="$(TZ=Asia/Seoul date '+%m/%d %H:%M' 2>/dev/null || true)"
+  # 동적 값은 전부 이스케이프. 정적 한국어 라벨/태그는 그대로(계약 구조).
+  local text
+  text="${glyph} <b>복원 드릴</b> — ${word}
+복원드릴 · pg-restore-drill
+결과: $(hx "$detail")"
+  [ -n "$stamp" ] && text="${text}
+시각: ${stamp} KST"
+
+  if [ "${DRY_RUN:-0}" = "1" ]; then
+    printf '%s\n' "$text"
+    return 0
+  fi
   curl -fsS -X POST "$TG" \
     --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-    --data-urlencode "text=[restore-drill] $1 $2" \
+    --data-urlencode "text=${text}" \
     --data-urlencode "parse_mode=HTML" >/dev/null || true
 }
+# <<< notify-block (test-extracted)
 
 fail() {
-  notify "🔴 FAIL" "$1"
+  notify FAIL "$1"
   exit 1
 }
 
@@ -98,7 +129,7 @@ echo "[drill] ACTUAL_ROWS=${ACTUAL_ROWS}"
 # WAL replay가 base backup 이후 쓰인 row를 포함할 수 있으므로 >= 허용.
 if [ "$ACTUAL_ROWS" -ge "$EXPECTED_ROWS" ] && [ "$ACTUAL_ROWS" -gt 0 ]; then
   push_success_metric # PASS notify 전에 실행: 메트릭 적재 실패 시 즉시 실패 (아니면 M5의 absent() 알림이 영원히 페이징)
-  notify "🟢 PASS" "recovered ${ACTUAL_ROWS} rows (live ${EXPECTED_ROWS}) from R2"
+  notify PASS "복구 ${ACTUAL_ROWS}행 (라이브 ${EXPECTED_ROWS}행) — R2"
   # dead-man's switch: 진짜 PASS일 때만 ping (healthcheck 정의는 M5 소유)
   curl -fsS -m 10 "${HEALTHCHECKS_URL}" >/dev/null || true
   echo "[drill] PASS"

@@ -2,10 +2,10 @@
   "name": "homelab",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@10.30.3",
+  "packageManager": "pnpm@11.6.0",
   "engines": {
     "node": ">=22",
-    "pnpm": ">=10"
+    "pnpm": ">=11"
   },
   "scripts": {
     "dev": "node tools/dev.mjs",

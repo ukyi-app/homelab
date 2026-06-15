@@ -14,8 +14,8 @@ data:
             for: 15m
             labels: { severity: warning }
             annotations:
-              summary: "ArgoCD app {{ $labels.name }} OutOfSync >15m"
-              description: "Tag write-back webhook or sync may have silently failed; cluster may be running yesterday's image."
+              summary: "ArgoCD 앱 {{ $labels.name }} OutOfSync 15분 초과"
+              description: "태그 write-back webhook 또는 sync가 조용히 실패했을 수 있습니다 — 클러스터가 어제 이미지로 돌고 있을 수 있습니다."
           # Recording rule: 실행 중인 이미지 digest가 최신 GHCR digest와 다르면 1.
           - record: app:image_digest_drift
             expr: |
@@ -31,5 +31,5 @@ data:
             for: 20m
             labels: { severity: warning }
             annotations:
-              summary: "Running image for {{ $labels.app }} != latest GHCR digest"
-              description: "Build pushed a new image but the running pod never picked it up (R6 write-back/sync staleness)."
+              summary: "실행 중인 이미지가 최신 GHCR digest와 불일치: {{ $labels.app }}"
+              description: "빌드가 새 이미지를 푸시했지만 실행 중인 파드가 반영하지 못했습니다(R6 write-back/sync staleness)."
