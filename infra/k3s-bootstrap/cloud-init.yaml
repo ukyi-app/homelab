@@ -114,8 +114,3 @@ runcmd:
   - [ systemctl, restart, ssh ]
   # R7 LAN DNS 포워딩 트리거 (위 write_files 참고)
   - [ systemctl, enable, --now, dns-forward-trigger.service ]
-
-# 최종 마커 파일로 orb-create.sh가 완료를 폴링할 수 있다.
-power_state:
-  mode: reboot
-  condition: false

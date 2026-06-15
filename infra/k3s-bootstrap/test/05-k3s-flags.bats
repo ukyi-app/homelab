@@ -36,9 +36,9 @@ setup() { EXEC="$(K3S_PRINT_EXEC=1 "$BOOTSTRAP_DIR/k3s-install.sh")"; }
   [[ "$EXEC" != *"--system-reserved="* ]]
   [[ "$EXEC" != *"--eviction-hard="* ]]
 }
-@test "secrets encryption enabled and kubeconfig mode 0644" {
+@test "secrets encryption enabled and kubeconfig mode 0600 (private admin kubeconfig)" {
   [[ "$EXEC" == *"--secrets-encryption"* ]]
-  [[ "$EXEC" == *"--write-kubeconfig-mode=0644"* ]]
+  [[ "$EXEC" == *"--write-kubeconfig-mode=0600"* ]]
 }
 @test "datastore stays default sqlite/kine (no --cluster-init / etcd)" {
   [[ "$EXEC" != *"--cluster-init"* ]]

@@ -19,8 +19,3 @@ variable "internal_suffix" {
   type        = string
   description = "Internal hostname suffix, e.g. home.example.com."
 }
-variable "tailscale_ip" {
-  type        = string
-  description = "Stable Tailscale IP of the VM (for split-horizon; used by AdGuard/Tailscale roots, surfaced here for record)."
-  default     = ""
-}
