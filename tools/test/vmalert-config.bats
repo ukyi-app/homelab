@@ -48,3 +48,16 @@ setup() {
   [ "$(grep -c 'disk: bulk-ssd' "$R")" -eq 2 ]   # BulkSSDFilling(warning) + BulkSSDAlmostFull(critical)
   grep -q 'disk: standard' "$R"
 }
+
+@test "observability self-monitoring alerts defined and 4 components self-scraped" {
+  C="$ROOT/platform/victoria-stack/rules/core.yaml"
+  grep -q 'alert: LogIngestionStalled' "$C"        # vector→VL 침묵 실패 감지
+  grep -q 'vl_rows_ingested_total' "$C"
+  grep -q 'alert: VmagentRemoteWriteDropping' "$C"  # 메트릭 유실
+  grep -q 'alert: VmalertUnhealthy' "$C"            # 알림 엔진 자체 에러
+  grep -q 'alert: KubeJobFailed' "$C"               # 전용 staleness 없는 Job 실패(cache-backup 등)
+  # self-scrape 주석 — 위 self-metric이 TSDB에 들어가려면 4개 컴포넌트가 scrape돼야 한다.
+  for comp in vmsingle vmagent vmalert victorialogs; do
+    grep -q 'prometheus.io/scrape: "true"' "$ROOT/platform/victoria-stack/$comp.yaml"
+  done
+}

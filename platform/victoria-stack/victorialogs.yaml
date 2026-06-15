@@ -20,6 +20,7 @@ spec:
   template:
     metadata:
       labels: { app.kubernetes.io/name: victorialogs }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9428" } # 자기관측 vl_rows_ingested 등
     spec:
       securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534 }
       containers:
