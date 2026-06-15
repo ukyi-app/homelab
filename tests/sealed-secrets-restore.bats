@@ -120,7 +120,9 @@ EOF
   printf 'CERT\n' > "$REPO/tools/sealed-secrets-cert.pem"
   printf '#!/bin/sh\nexit 0\n' > "$STUB/kubectl"  # live 0
   printf '#!/bin/sh\nfor a in "$@"; do [ "$a" = fetch ] && exit 0; done\nexec /usr/bin/git "$@"\n' > "$STUB/git"
-  chmod +x "$STUB/kubectl" "$STUB/git"
+  # CI엔 kubeseal/sops 바이너리가 없다 — assert_dr_tools_present의 presence 체크용 스텁(이 경로는 미호출).
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/kubeseal"; printf '#!/bin/sh\nexit 0\n' > "$STUB/sops"
+  chmod +x "$STUB/kubectl" "$STUB/git" "$STUB/kubeseal" "$STUB/sops"
   . "$ROOT/scripts/sealing-key-dr-gate.sh"
   PATH="$STUB:$PATH" run assert_recoverable_before_destroy "$REPO" "" "HEAD"
   [ "$status" -ne 0 ]; echo "$output" | grep -q "키 연속성 필요"
@@ -129,7 +131,9 @@ EOF
   REPO="$TMP/repo-fc"; mkdir -p "$REPO"; (cd "$REPO" && git init -q && git commit -q --allow-empty -m init)
   printf '#!/bin/sh\nexit 7\n' > "$STUB/kubectl"
   printf '#!/bin/sh\nfor a in "$@"; do [ "$a" = fetch ] && exit 0; done\nexec /usr/bin/git "$@"\n' > "$STUB/git"
-  chmod +x "$STUB/kubectl" "$STUB/git"
+  # CI엔 kubeseal/sops 바이너리가 없다 — assert_dr_tools_present의 presence 체크용 스텁(이 경로는 미호출).
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/kubeseal"; printf '#!/bin/sh\nexit 0\n' > "$STUB/sops"
+  chmod +x "$STUB/kubectl" "$STUB/git" "$STUB/kubeseal" "$STUB/sops"
   . "$ROOT/scripts/sealing-key-dr-gate.sh"
   PATH="$STUB:$PATH" run assert_recoverable_before_destroy "$REPO" "" "HEAD"
   [ "$status" -ne 0 ]; echo "$output" | grep -q "fail-closed"
