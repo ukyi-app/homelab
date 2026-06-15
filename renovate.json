@@ -31,6 +31,12 @@
       "/^apps/.+\\.ya?ml$/"
     ]
   },
+  "argocd": {
+    "description": "ArgoCD Application 인라인 helm chart 핀 추적 — cnpg-operator(cloudnative-pg)·cert-manager. native argocd manager가 source/sources·필드순서·git source 제외를 처리(custom regex보다 견고).",
+    "managerFilePatterns": [
+      "/^platform/argocd/root/apps/.+\\.yaml$/"
+    ]
+  },
   "customManagers": [
     {
       "customType": "regex",

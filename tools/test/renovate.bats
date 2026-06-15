@@ -52,3 +52,12 @@ PY
   run grep -qE '^[[:space:]]+permission-workflows:' "$WF"
   [ "$status" -ne 0 ]
 }
+
+@test "renovate tracks ArgoCD inline helm charts (cnpg-operator, cert-manager)" {
+  command -v jq >/dev/null || skip "jq required"
+  # argocd manager가 apps 경로에 활성 — kubernetes(image)·custom(helmrelease) manager가 못 잡는 인라인 차트 핀 커버.
+  jq -e '.argocd.managerFilePatterns | any(test("argocd/root/apps"))' "$R" >/dev/null
+  # manager가 잡을 입력(인라인 chart 핀)이 실제로 존재해야 한다.
+  grep -q 'chart: cloudnative-pg' platform/argocd/root/apps/cnpg-operator.yaml
+  grep -q 'chart: cert-manager' platform/argocd/root/apps/cert-manager.yaml
+}
