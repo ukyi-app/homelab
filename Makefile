@@ -73,3 +73,7 @@ chart-test: ## 모든 kind에 대해 app 차트 렌더+검증
 .PHONY: reset-pg-archive
 reset-pg-archive: ## [DR ④] R2 serverName pg 아카이브 정리(재구축 후 아카이빙 재개). 기본 dry-run; 실제 정리는 ARGS=--purge
 	@scripts/reset-pg-r2-archive.sh $(ARGS)
+
+.PHONY: seal-adguard-auth
+seal-adguard-auth: ## AdGuard UI 비밀번호(.env.secrets ADGUARD_PASSWORD)를 bcrypt 봉인 → adguard-auth SealedSecret
+	@scripts/seal-adguard-auth.sh
