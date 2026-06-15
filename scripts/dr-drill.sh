@@ -13,6 +13,9 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/sealing-key-dr-gate.sh"
+SEALED_KEY_BACKUP_DIR="${SEALED_KEY_BACKUP_DIR:-}"  # 소비자 ≥1 또는 committed cert 존재 시 필요(git 밖 백업)
 NS="database"
 LIVE_CLUSTER="pg"
 DB="app"
@@ -87,6 +90,10 @@ PRE=$(recover_and_check pg-dr-precheck)
   || { echo "DR ABORT: 파괴 전 복구 실패(recovered=$PRE < $EXPECTED) — 라이브 노드 파괴 안 함"; exit 1; }
 echo "    canary=$EXPECTED, 백업 ${BK} completed, 복구 가능성 증명됨(recovered=$PRE). 파괴 안전."
 
+echo "==> [0.6] sealing-key DR: 도구 + fail-closed 검출 + 키 연속성(--verify·키쌍 암호·라이브 canary 리허설) 증명"
+assert_recoverable_before_destroy "$REPO_ROOT" "$SEALED_KEY_BACKUP_DIR" "origin/main" \
+  || { echo "DR ABORT: sealing key 복구 가능성 미증명 — 라이브 노드 파괴 거부"; exit 1; }
+
 echo "==> [1] VM 파괴(cattle) — 전체 노드 유실 시뮬레이션"
 orb delete -f k3s || true
 
@@ -97,10 +104,19 @@ use_live_kubeconfig # host-up.sh가 kubeconfig를 재생성한다
 echo "==> [3] make bootstrap — ArgoCD + sops-age Secret + root app, 전부 git에서"
 make bootstrap
 
+echo "==> [3.5] sealing-key DR: 컨트롤러 대기 → 백업 키 복원 + committed cert 일치(항상)"
+restore_sealing_key "$REPO_ROOT" "$SEALED_KEY_BACKUP_DIR" || { echo "DR DRILL FAIL: 복원 실패"; exit 1; }
+assert_committed_cert_matches_live "$REPO_ROOT" || { echo "DR DRILL FAIL: cert stale — 복구책 후 재시도"; exit 1; }
+
 echo "==> [4] 플랫폼 계층 수렴 대기(root + cnpg operator + data Healthy)"
 for app in root cnpg-operator cnpg-data; do
   kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy "application/$app" --timeout=900s
 done
+
+echo "==> [4.4] 모든 ArgoCD Application Healthy 대기 (소비자 App data-conn·apps의 SealedSecret CR 싱크 보장)"
+wait_all_applications_healthy 900s || { echo "DR DRILL FAIL: 일부 Application Healthy 수렴 실패"; exit 1; }
+echo "==> [4.5] sealing-key DR: 라이브 ∪ origin/main 전수 unseal 검증(수렴 후)"
+verify_all_sealedsecrets_unsealed "$REPO_ROOT" "origin/main" || { echo "DR DRILL FAIL: 일부 unseal 실패"; exit 1; }
 
 echo "==> [5] 재구축된 노드에서 R2로 DB 복구, 파괴 전 canary 검증"
 ACTUAL=$(recover_and_check pg-dr-verify)
