@@ -5,6 +5,8 @@ dirs=(
   platform/argocd/root platform/charts/app
   platform/traefik platform/cnpg platform/victoria-stack
   platform/adguard platform/cloudflared platform/tailscale
+  platform/sealed-secrets platform/data-conn platform/cache
+  platform/network-policies platform/namespaces
   apps tools docs/plans
 )
 rc=0
