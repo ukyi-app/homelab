@@ -67,9 +67,9 @@
     },
     {
       "customType": "regex",
-      "description": "kustomize HelmChartInflationGenerator(helmrelease.yaml) — name/repo/version 핀",
+      "description": "kustomize HelmChartInflationGenerator(helmrelease.yaml) — name/repo/version 핀. 키 사이 주석/줄을 허용([\\s\\S]*?) — name↔repo 사이 주석이 있으면 매치 0이 돼 차트가 silent 미추적됐던 버그(sealed-secrets) 회피. \\n앵커로 top-level name만(metadata.name 제외).",
       "managerFilePatterns": ["/^platform/.+/helmrelease\\.yaml$/"],
-      "matchStrings": ["\\nname:\\s*(?<depName>\\S+)\\nrepo:\\s*(?<registryUrl>\\S+)\\nversion:\\s*(?<currentValue>\\S+)"],
+      "matchStrings": ["\\nname:\\s*(?<depName>\\S+)[\\s\\S]*?\\nrepo:\\s*(?<registryUrl>\\S+)[\\s\\S]*?\\nversion:\\s*(?<currentValue>\\S+)"],
       "datasourceTemplate": "helm"
     }
   ],
