@@ -75,7 +75,15 @@ spec:
           {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests: { cpu: 50m, memory: {{ .Values.resources.requests.memory }} }
             limits:   { cpu: 500m, memory: {{ .Values.resources.limits.memory }} }
+      volumes:
+        # securityContext.readOnlyRootFilesystem:true라 마이그레이션 도구(prisma/knex/alembic 등)의
+        # /tmp 쓰기가 EROFS로 실패한다 — deployment와 동일하게 쓰기 가능한 tmp emptyDir 제공.
+        - name: tmp
+          emptyDir: {}
 {{- end }}
