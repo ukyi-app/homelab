@@ -31,6 +31,9 @@ setup() {
   grep -q 'absent(cnpg_collector_up' "$C"             # 스크레이프 단절 fail-closed 가드
   run grep -q 'max(kube_pod_status_ready' "$C"; [ "$status" -ne 0 ]  # expr 회귀 금지(주석 언급은 허용)
   grep -q 'alert: PodCrashLooping' "$C"
+  # PodCrashLooping은 블랙리스트(namespace!~)여야 신규 PSA ns(cache·sealed-secrets)를 자동 포함 —
+  # 화이트리스트 회귀 금지(restarts_total에 namespace!~ 사용 확인).
+  grep -qE 'kube_pod_container_status_restarts_total\{namespace!~' "$C"
 }
 
 @test "fourth backup (pgdump hedge) has a staleness alert like the other three" {

@@ -19,6 +19,26 @@ WF=".github/workflows/renovate.yml"
   grep -q 'helmrelease' "$R"    # HelmChartInflationGenerator(sealed-secrets/tailscale/…)
 }
 
+@test "helmrelease custom manager actually extracts ALL charts incl sealed-secrets (no silent miss)" {
+  # 존재 단언만으로는 정규식이 실제 차트를 잡는지 모른다 — name↔repo 사이 주석이 있으면 매치 0이 돼
+  # sealed-secrets(보안 컨트롤러)가 silent 미추적됐던 버그. renovate.json 실제 matchString으로 추출 검증.
+  command -v jq >/dev/null || skip "jq required"
+  command -v python3 >/dev/null || skip "python3 required"
+  ms="$(jq -r '.customManagers[] | select(.description|test("HelmChartInflationGenerator")) | .matchStrings[0]' "$R")"
+  [ -n "$ms" ]
+  MS="$ms" python3 - <<'PY'
+import re, os, glob, sys
+# Renovate/RE2 명명그룹 (?<name>) → python (?P<name>)로 변환(매치 여부만 확인).
+pat = re.compile(re.sub(r"\(\?<", "(?P<", os.environ["MS"]))
+files = sorted(glob.glob("platform/*/prod/helmrelease.yaml")) + sorted(glob.glob("platform/*/helmrelease.yaml"))
+missed = [f for f in files if not pat.search(open(f).read())]
+assert files, "helmrelease 파일 0개?"
+assert not missed, "helmrelease 정규식 미매치(silent 미추적): %s" % missed
+assert any("sealed-secrets" in f for f in files), "sealed-secrets helmrelease 부재"
+print("ok: %d helmrelease 전부 추출" % len(files))
+PY
+}
+
 @test "renovate workflow is preflight-gated and writes via a SHA-pinned App token" {
   grep -q 'HOMELAB_WRITER_APP_ID' "$WF"               # Phase-0 preflight skip(미설정 시 clean skip)
   grep -q 'create-github-app-token@bcd2ba4' "$WF"     # 액션 full SHA 핀(레포 규약)
