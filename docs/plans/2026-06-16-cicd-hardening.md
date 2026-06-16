@@ -1646,10 +1646,17 @@ PRECOMMIT="$BATS_TEST_DIRNAME/../../.pre-commit-config.yaml"
   [ "$status" -eq 0 ]
 }
 
-@test "gate gitleaks download is checksum-verified, not a bare curl|tar (F3 supply-chain)" {
-  # ⚠️ codex pass5 F3: required gate의 gitleaks 다운로드는 핀된 SHA256으로 검증 후 추출해야 한다.
+@test "gate gitleaks download is checksum-verified against the release checksums.txt, no placeholder (F3+restale F1)" {
+  # ⚠️ codex pass5 F3 + restale F1: gitleaks 다운로드는 sha256sum -c로 검증해야 하고, 하드코딩 placeholder가 아니라
+  # 릴리스 공식 checksums.txt로 검증해야 한다(placeholder를 그대로 두면 게이트가 invalid checksum으로 깨진다).
   run grep -qE 'sha256sum -c' "$CI"
   [ "$status" -eq 0 ]
+  # 공식 checksums.txt를 받아 검증하는지(=실 해시; placeholder 없음).
+  run grep -qE 'gitleaks_.*_checksums\.txt' "$CI"
+  [ "$status" -eq 0 ]
+  # placeholder SHA256(`<... SHA256 ...>`)가 남아있으면 안 된다.
+  run grep -qE 'GL_SHA256="<' "$CI"
+  [ "$status" -ne 0 ]
   # 체크섬 없이 gitleaks tarball을 curl→tar로 바로 파이프하면 안 된다.
   run grep -qE 'gitleaks.*\.tar\.gz" *\| *sudo tar' "$CI"
   [ "$status" -ne 0 ]
@@ -1723,13 +1730,14 @@ bats tests/gates/test_gate-secret-guard.bats
         # gitleaks는 pre-commit rev와 동일 버전을 핀(SSOT 드리프트 방지). 러너=arm64.
         run: |
           ver=$(grep -A2 'gitleaks/gitleaks' .pre-commit-config.yaml | grep -oE 'rev: v[0-9.]+' | grep -oE '[0-9.]+')
-          # ⚠️ codex pass5 F3: required gate에서 curl|tar로 바로 추출하면 체크섬 없는 실행체 공급망 표면이 된다
-          # (supplychain-5와 동일 계열). 파일로 받아 **핀된 SHA256 검증 후** 추출한다. SHA256은 해당 릴리스의
-          # 공식 checksums.txt에서 arm64 tarball 값을 핀(버전 핀 v${ver}과 함께 Renovate가 갱신).
-          GL_SHA256="<gitleaks_${ver}_linux_arm64.tar.gz 공식 SHA256 — 릴리스 checksums.txt에서>"
-          curl -fsSL -o /tmp/gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_arm64.tar.gz"
-          echo "${GL_SHA256}  /tmp/gitleaks.tgz" | sha256sum -c -
-          sudo tar -xz -C /usr/local/bin -f /tmp/gitleaks.tgz gitleaks
+          # ⚠️ codex pass5 F3 + restale F1: curl|tar 직접 추출은 체크섬 없는 실행체 공급망 표면(supplychain-5 동일).
+          # 하드코딩 SHA256 placeholder 금지(게이트 깨짐) — 릴리스 **공식 checksums.txt**를 받아 그 라인으로 검증 후
+          # 추출한다(버전 핀 v${ver}만 Renovate가 갱신; 해시는 매니페스트에서 자동 일치, stale 위험 0).
+          ( cd /tmp
+            curl -fsSL -O "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_arm64.tar.gz"
+            curl -fsSL -O "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_checksums.txt"
+            grep "  gitleaks_${ver}_linux_arm64.tar.gz$" "gitleaks_${ver}_checksums.txt" | sha256sum -c -
+            sudo tar -xz -C /usr/local/bin -f "gitleaks_${ver}_linux_arm64.tar.gz" gitleaks )
           # git 히스토리 전체 스캔(pre-commit 훅과 동등). --redact: 발견 시 시크릿 평문 미출력.
           # ⚠️ codex pass4 F2: bare 'gitleaks detect'는 git 히스토리 전체 스캔 → 과거 false-positive/회전된
           # 옛 시크릿 하나가 모든 PR을 영구 머지불가(게이트 red)로 만든다. pre-commit 훅처럼 작업트리만 스캔.
@@ -2783,6 +2791,17 @@ setup() {
   [ "$status" -eq 0 ]
   [ ! -f "$R/apps/orders/deploy/prod/.activation" ]
 }
+
+@test "repeated --flip on an already-active app with unchanged surface is a no-op (worktree clean, F2)" {
+  # ⚠️ codex restale F2: 멱등 — 이미 active + 마커(surfaceHash+registry+sha) 동일하면 쓰기 없이 끝나야 한다.
+  run node "$A" --app orders --sha "$SHA" --synced-rev "$SHA" --repo-dir "$R" --status-file "$TMP/status.json" --flip
+  [ "$status" -eq 0 ]
+  git -C "$R" add -A; git -C "$R" commit -qm "activate orders"
+  # 동일 인자로 재실행 — 아무것도 바뀌면 안 된다(git status clean).
+  run node "$A" --app orders --sha "$SHA" --synced-rev "$SHA" --repo-dir "$R" --status-file "$TMP/status.json" --flip
+  [ "$status" -eq 0 ]
+  [ -z "$(git -C "$R" status --porcelain)" ]
+}
 ```
 
 **Step 2: Run it, expect FAIL** — `bats tools/tests/test_activate-app.bats`
@@ -2824,29 +2843,32 @@ if (process.argv[1] && process.argv[1].endsWith("surface-hash.mjs")) {
 
 ```js
 // 게이트 전부 통과 — active:true 플립(워크트리). host/public은 절대 건드리지 않는다.
+// (상단 import에 existsSync/readFileSync가 없으면 추가: `import { existsSync, readFileSync, writeFileSync } from "node:fs";`)
 if (args.flip) {
   const rows = JSON.parse(currentRaw);
   const row = rows.find((r) => r.name === app);
-  if (row.active === true) console.error("activate-app: 이미 active — 멱등 no-op");
-  row.active = true;
-  writeFileSync(appsJsonPath, JSON.stringify(rows, null, 2) + "\n");
-  // races-5: 증명한 surface를 커밋된 마커로 남긴다. ⚠️ codex F3: .activation 제외 canonical 해시를 syncedRev에서
-  // 계산(마커 자기 무효화 방지). ⚠️ codex pass3 F1: 이 마커는 **정보성**이다 — audit이 차단 게이트로 쓰면 정상
-  // 이미지 bump(surface 변경)가 머지 불가가 되고, 새 revision은 머지돼야 Healthy가 되므로 데드락. 노출 재검증은
-  // 런북(activate 절차)이 담당한다. 빈 해시여도 마커는 남기고 audit이 정보성 missing-activation으로 표시한다.
-  // ⚠️ codex pass4 F1: DNS 노출은 apps/<app> 트리뿐 아니라 apps.json의 노출 행(host/public/active)이 결정한다.
-  // 마커에 그 행 projection을 포함해, activation 이후 host/public 변경(앱 트리 무변경)도 정보성으로 잡는다.
+  // races-5 마커: .activation 제외 canonical surfaceHash(F3, 자기무효화 방지) + apps.json 노출 행 projection(pass4 F1).
+  // 이 마커는 **정보성**(pass3 F1) — audit이 차단 게이트로 쓰면 정상 이미지 bump가 데드락. 노출 재검증은 런북.
   const registryRow = { name: row.name, host: row.host ?? null, public: row.public ?? false };
-  const marker = { app, sha, syncedRev, surfaceHash: surfaceHash(repoDir, syncedRev, app), registry: registryRow, activatedAt: new Date().toISOString() };
-  writeFileSync(
-    path.join(repoDir, `apps/${app}/deploy/prod/.activation`),
-    JSON.stringify(marker, null, 2) + "\n",
-  );
+  const sh = surfaceHash(repoDir, syncedRev, app);
+  const markerPath = path.join(repoDir, `apps/${app}/deploy/prod/.activation`);
+  // ⚠️ codex restale F2: 멱등 — 이미 active이고 마커(surfaceHash+registry+sha)가 동일하면 **아무것도 쓰지 않고**
+  // 끝낸다(재실행/리트라이 시 worktree clean — activatedAt churn·불필요 PR 노이즈 방지). 변경이 있으면 갱신.
+  const cur = (row.active === true && existsSync(markerPath)) ? JSON.parse(readFileSync(markerPath, "utf8")) : null;
+  const unchanged = cur && cur.surfaceHash === sh && cur.sha === sha && JSON.stringify(cur.registry) === JSON.stringify(registryRow);
+  if (unchanged) {
+    console.error("activate-app: 이미 active + 마커 동일 — 멱등 no-op(쓰기 없음, worktree clean)");
+  } else {
+    row.active = true;
+    writeFileSync(appsJsonPath, JSON.stringify(rows, null, 2) + "\n");
+    const marker = { app, sha, syncedRev, surfaceHash: sh, registry: registryRow, activatedAt: new Date().toISOString() };
+    writeFileSync(markerPath, JSON.stringify(marker, null, 2) + "\n");
+  }
 }
 ```
 
 **Step 4: Run test, expect PASS** — `bats tools/tests/test_activate-app.bats`
-기대 출력: 기존 6 + 신규 3 = `9 tests, 0 failures` (마커 기록 + 자기-무효화 회귀 + 미기록 통과).
+기대 출력: 기존 6 + 신규 4 = `10 tests, 0 failures` (마커 기록 + 자기-무효화 회귀 + 미기록 + 멱등 재실행 통과).
 
 **Step 5: Commit**
 `git -C /Users/ukyi/workspace/homelab-cicd-hardening add tools/lib/surface-hash.mjs tools/activate-app.mjs tools/tests/test_activate-app.bats && git -C /Users/ukyi/workspace/homelab-cicd-hardening commit -m "feat: activate-app가 .activation 제외 canonical surfaceHash를 마커로 커밋 (races-5)"`
@@ -4672,13 +4694,17 @@ git -C /Users/ukyi/workspace/homelab-cicd-hardening add .github/workflows/dispat
 ```bash
 cat >> tests/gates/test_dispatcher.bats <<'EOF'
 
+# ⚠️ codex restale F3: test_dispatcher.bats setup은 $F(= dispatch-mutation.yaml)만 정의한다($ROOT 없음).
+# _audit.yaml은 같은 디렉토리이므로 $F에서 유도한다.
 @test "_audit.yaml summary does not cap findings at 20 (relies on notify.sh 4096 cap)" {
-  run grep -c '\.findings\[:20\]' "$ROOT/.github/workflows/_audit.yaml"
+  AUDIT="$(dirname "$F")/_audit.yaml"
+  run grep -c '\.findings\[:20\]' "$AUDIT"
   [ "$output" = "0" ]
 }
 
 @test "_audit.yaml summary does not swallow jq errors with 2>/dev/null || true" {
-  run grep -cE '2>/dev/null \|\| true' "$ROOT/.github/workflows/_audit.yaml"
+  AUDIT="$(dirname "$F")/_audit.yaml"
+  run grep -cE '2>/dev/null \|\| true' "$AUDIT"
   [ "$output" = "0" ]
 }
 EOF
