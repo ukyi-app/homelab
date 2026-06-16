@@ -38,40 +38,16 @@ jobs:
         # dangling-binding(missing Secret)/orphan-dns(빈 백엔드)/stale-ledger-row만 차단 —
         # unreferenced-resource(create-db→create-app 사이 정상)는 통과
         run: node tools/audit-orphans.mjs --ci
-      - name: tooling bats suites
-        # 하드코딩 목록은 신규 테스트를 게이트 밖으로 흘린다(App Platform DX 19파일이 누락됐던 버그) →
-        # 디렉토리 전체를 돌린다. dev-postgres.bats만 제외(실 docker 필요 — CI 게이트 부적합).
-        run: |
-          files=$(ls tools/test/*.bats | grep -v '/dev-postgres\.bats$')
-          bats $files
+      - name: gate bats suite (run-bats.sh — 단일 수집 SSOT)
+        # 수집은 scripts/run-bats.sh 단일 진입점: git-tracked test_*.bats − platform/charts(chart-test 별도) −
+        # tests/.ci-exclude(라이브/docker/age/terraform). make ci 와 동일 호출 → 이중 SSOT 제거.
+        # 하드코딩/글롭 누락 클래스를 구조적으로 차단(미접두는 check-skeleton 네이밍 가드가 별도 차단).
+        # CI-safe infra 정적 가드(k3s-bootstrap·argocd lint)도 이제 required gate가 보호(죽은 커버리지 해소).
+        run: ./scripts/run-bats.sh
       - name: shell script lint (전 추적 .sh)
         # 전 추적 *.sh를 shellcheck — scripts/(DR/파괴적)뿐 아니라 notify.sh(알림 경로)·
         # restore-drill-script.sh·infra/k3s-bootstrap·e2e까지. 벤더 charts/는 untracked라 git ls-files에 안 잡힘.
         run: shellcheck $(git ls-files '*.sh')
-      - name: DR·시크릿 안전망 bats (tests/)
-        # 가장 위험한 로직(sealing-key DR fail-closed·백업 원자성·DR 드릴 불변식·archive --purge 가드)의
-        # 회귀 테스트가 로컬 전용이라 required gate 밖이었다 → 배선해 회귀를 차단한다.
-        # 글롭으로 신규 tests/*.bats를 자동 포함(하드코딩 목록의 누락 버그 방지). 단 실제 age 키가 필요한
-        # sops-roundtrip/sops-guard와 make verify(→sops 왕복) 의존 makefile은 제외(sops 왕복은 verify
-        # 잡이 ephemeral CI 키로 커버). posture는 라이브 클러스터 의존이라 tests/posture/ 하위라 미매칭.
-        run: |
-          files=$(ls tests/*.bats | grep -vE '/(sops-roundtrip|sops-guard|makefile)\.bats$')
-          bats $files
-      - name: platform component tests (render + 정적, 글롭으로 신규 자동 포함)
-        # 하드코딩 목록은 신규 테스트를 게이트 밖으로 흘린다 — 이번 세션 cnpg/argocd 테스트 14+개가 누락돼
-        # PSA/operator 단언이 깨져도 green이던 버그 → 글롭으로 수집. charts/app은 make chart-test가 커버(제외).
-        # KSOPS 시드 복호(실 age 키)가 필요한 cnpg 렌더 3종(creds_reference·drill_alerting·kustomize_build)은
-        # lean gate 밖이라 명시 제외(verify의 ephemeral 키는 .sops.yaml recipients를 안 써 부적용 — 로컬/통합 유지).
-        # 파일별 실행(루프) — bats 다중인자 동작 의존 회피, 하나라도 실패 시 게이트 실패.
-        run: |
-          rc=0
-          for f in $(find platform -name 'test_*.bats' -not -path '*/charts/*' \
-            -not -name test_creds_reference.bats \
-            -not -name test_drill_alerting.bats \
-            -not -name test_kustomize_build.bats | sort); do
-            echo "::group::$f"; bats "$f" || rc=1; echo "::endgroup::"
-          done
-          exit $rc
       - name: telegram 메시지 렌더 e2e (containerized AM v0.27)
         # amtool/grep이 못 잡는 inline message Go-template의 실제 컴파일·렌더를 사전 증명한다
         # (한국어 제목·글리프·자동 escape·링크). required gate 잡 스텝 → branch protection이 강제.

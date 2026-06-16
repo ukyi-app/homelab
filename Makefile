@@ -98,15 +98,11 @@ chart-test: ## 모든 kind에 대해 app 차트 렌더+검증
 	bash platform/charts/app/tests/render.sh
 
 .PHONY: ci
-ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate' 8스텝을 로컬에서 그대로 재현
+ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate'를 로컬에서 그대로 재현(bats 수집은 run-bats.sh SSOT)
 	pnpm verify:ledger
 	node tools/audit-orphans.mjs --ci
-	bats $$(ls tools/test/*.bats | grep -v '/dev-postgres\.bats$$')
+	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
-	bats $$(ls tests/*.bats | grep -vE '/(sops-roundtrip|sops-guard|makefile)\.bats$$')
-	@rc=0; for f in $$(find platform -name 'test_*.bats' -not -path '*/charts/*' \
-	  -not -name test_creds_reference.bats -not -name test_drill_alerting.bats \
-	  -not -name test_kustomize_build.bats | sort); do bats "$$f" || rc=1; done; exit $$rc
 	@if command -v docker >/dev/null 2>&1; then bash tools/test/alertmanager-render-e2e.sh; \
 	  else echo "ci: docker 없음 → telegram-render-e2e 스킵(gate에선 실행됨)" >&2; fi
 
