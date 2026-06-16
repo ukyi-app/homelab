@@ -45,6 +45,9 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 
 ## 라이브에서 검증된 함정 (재발 주의)
 
+> 이 절이 함정의 SSOT다. 그중 **실행 가능한 가드로 강제된 것**의 enforcement 현황은
+> `docs/traps.md` 원장이 추적하며 `make verify-traps`가 가드 파일 소실 드리프트를 차단한다.
+
 - **ArgoCD sync-wave는 "이전 wave가 healthy"를 기다린다** — 한 Application 안에서 워크로드(-6)가
   Secret(기본 0)보다 빠르면 영구 교착. `generatorOptions.annotations`는 KSOPS(exec) 출력에
   **적용되지 않는다**. 내부 wave는 꼭 필요할 때만.
