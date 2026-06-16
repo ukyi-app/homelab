@@ -44,6 +44,10 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 벤더 파일 수정 금지: `platform/*/prod/charts/`(helm 캐시, untracked), barman-plugin manifest,
   gateway-api CRD. `Chart.yaml`의 파스칼케이스는 Helm 고정 규약이다.
 - `docs/plans/`는 역사 기록 — 수정하지 않는다.
+- **네이밍 규약**: 워크플로는 전부 `.yaml`(reusable 포함). `_*.yaml`=내부 reusable(`dispatch-mutation`만
+  호출) vs `reusable-*.yaml`=cross-repo 공개 계약(외부 앱 레포가 `@main`으로 호출 — 파일명·입력이 계약).
+  스키마 `*-schema.json`=tools 계약(`app-config`/`app-deploy`/`homelab-app`) vs `values.schema.json`=Helm 고정.
+  bats는 `test_` 접두 통일, SealedSecret은 `*.sealed.yaml`.
 
 ## 라이브에서 검증된 함정 (재발 주의)
 
