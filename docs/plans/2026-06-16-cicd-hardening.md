@@ -5041,3 +5041,31 @@ git -C /Users/ukyi/workspace/homelab-cicd-hardening add platform/victoria-stack/
 **최종 상태**: 5패스 / 18 findings 전부 Accept·반영, 미해결 high/critical 0. 사용자 확정(2026-06-16). 마지막 검토 verdict는
 `needs-attention`(pass 5)이나, 사용자가 pass 5 3건 반영 후 수렴 판단으로 확정 — 잔여 미세 이슈는 본 계획의 TDD(각
 Task가 실패 테스트 우선)가 구현 단계에서 포착한다.
+
+### #53 리베이스 재검증 (2026-06-17)
+
+main이 **PR #53**(`b9c17bd` — 디렉토리·테스트조직·네이밍 8-워크스트림 리팩터)로 진행돼 재검토. **10-에이전트 staleness
+감사** 결론: **SALVAGEABLE-BY-UPDATE** — #53은 **CI/CD 로직 무변경**, 모든 버그·findings 그대로 유효(50 valid / 26
+접근변경 / 3 #53이 obviate). 설계·순서 재작업 없음. 워크트리를 `b9c17bd`로 rebase + 갱신:
+
+- **기계적**: 워크플로 `.yml`→`.yaml`(11종), 테스트 ~45경로 `tools/test/X`→`tools/tests/test_X` 또는 `tests/gates/test_X`,
+  `infra/_test`→`infra/_tests`, victoria-stack→`prod/`, e2e→`tests/gates/`(~430 치환).
+- **게이트 모델 재작성**: 옛 `tools/test/*.bats` 글롭 → **`scripts/run-bats.sh` 단일 SSOT**(git-tracked `test_*.bats` −
+  `platform/charts/*` − `tests/.ci-exclude`). canonical 규칙을 헤더에 명시. **HARD GATE 지뢰 3종**(test_ 접두·`.yml`
+  리터럴·callsites 15) 경고.
+- **3 addressed-by-53 축소**: Phase 4 supplychain-1 infra/_test 배선(run-bats.sh가 infra/도 게이트→무의미), Phase 8 Task 2
+  verify.yaml 인라인 ledger(W7가 제거), Phase 9 find-glob 문단(폐기 모델).
+- **내부결함 4**: Phase 2 카운트(8+5=13), Phase 9 relay **false-green**(prod/ 이동으로 setup `../..`→`../../..`), dispatcher
+  `$ROOT`→`$F`, callsites off-by-one.
+
+**codex 새-base 재검증 3패스(branch diff vs origin/main), 7 findings 전부 Accept·반영:**
+- restale pass1(3): gitleaks `GL_SHA256` placeholder→공식 checksums.txt 검증; activate flip 비멱등→마커 동일 시 쓰기 skip
+  +재실행 clean 테스트; `_audit` 테스트 `$ROOT`→`$(dirname "$F")`.
+- restale pass2(2): activation drift를 노출(host/public)에도 비차단→**`activation-exposure-drift`(차단)** 분리(app-tree
+  surfaceHash drift만 정보성 — 데드락 회피); entitlement 게이트가 `matches(`만 금지→**infix `matches` 연산자** 탐지+음성 fixture.
+- restale pass3(2): 콜사이트 enum 갱신 시퀀싱(dns-drift 누락)→**self-deriving**(각 notifier가 동일 커밋에 enum 줄 추가);
+  pr-sweeper update-branch 실패 은폐→실패 추적+nonzero 종료(failure() telegram 발화).
+
+**#53 재검증 최종**: 모든 finding이 여전히 유효(로직 무변경)하고 staleness·새 findings 전부 반영. 8 codex 패스(원 5 + 새-base
+3) 후 주변부 디테일로 수렴 — 잔여는 구현 TDD가 포착. 커밋: rebase 후 `02eda7d`(설계)·`b0b8cc4`(플랜)·`6090dba`(staleness)·
+`11a5aed`·`f0e92fb`·`cd1a510`(restale 1·2·3).
