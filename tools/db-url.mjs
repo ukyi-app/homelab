@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // db:url — 모드 2(실데이터 디버깅): 클러스터 DB에 tailscale로 **읽기 전용** 직결.
 // "단방향/비파괴"는 경고로 보장되지 않는다 — tailscale ACL은 *누가* 붙는지만 제어하고
 // *어떤 SQL*은 못 막는다. 그래서 owner가 아니라 **<name>_ro 롤 자격**(GRANT SELECT only)을

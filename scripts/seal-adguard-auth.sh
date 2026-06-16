@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # AdGuard UI 관리자 비밀번호(.env.secrets의 ADGUARD_PASSWORD)를 bcrypt 해시로 만들어
-# SealedSecret(platform/adguard/prod/auth-sealed.yaml: name=adguard-auth, ns=edge, key=PASSWORD_HASH)로 봉인한다.
+# SealedSecret(platform/adguard/prod/adguard-auth.sealed.yaml: name=adguard-auth, ns=edge, key=PASSWORD_HASH)로 봉인한다.
 # 평문도 bcrypt 해시도 stdout/로그에 절대 출력하지 않는다 — 봉인된 암호문 파일만 산출물이다.
 # 비밀번호 변경 시 .env.secrets를 고치고 이 스크립트를 다시 돌리면 된다(GitOps 강제라 재배포 시 적용).
 set -euo pipefail
@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 CERT="tools/sealed-secrets-cert.pem"
-OUT="platform/adguard/prod/auth-sealed.yaml"
+OUT="platform/adguard/prod/adguard-auth.sealed.yaml"
 
 [ -f .env.secrets ] || { echo "seal-adguard-auth: .env.secrets 없음 (.env.secrets.example 참고)" >&2; exit 1; }
 [ -f "$CERT" ] || { echo "seal-adguard-auth: $CERT 없음" >&2; exit 1; }

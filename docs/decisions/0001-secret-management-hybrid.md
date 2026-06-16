@@ -24,5 +24,5 @@
   SealedSecrets는 공개키만으로 앱 레포에서 봉인 가능(write-only 경계).
 
 ## 결과
-- sealing key 백업 체인을 DR fail-closed 게이트로 강제한다(`tests/sealed-secrets-restore.bats`).
+- sealing key 백업 체인을 DR fail-closed 게이트로 강제한다(`tests/test_sealed-secrets-restore.bats`).
 - "어느 도구로 뭘 봉인하나"의 인지부하는 `make secret-edit`/`secret:seal` 진입점으로 완화한다.

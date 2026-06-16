@@ -1,6 +1,5 @@
-#!/usr/bin/env node
 // create-database 프로비저너 — 공유 pg 클러스터(CNPG) 안의 논리 DB를 선언적으로 산출한다.
-// _create-database.yml(homelab-initiated workflow_dispatch)이 호출 — 결과물은 PR.
+// _create-database.yaml(homelab-initiated workflow_dispatch)이 호출 — 결과물은 PR.
 //
 // 산출물(4+3):
 //   1. CNPG Database CR            → platform/cnpg/prod/databases/<name>.yaml (database NS)

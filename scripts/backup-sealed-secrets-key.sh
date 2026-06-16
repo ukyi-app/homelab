@@ -11,7 +11,7 @@
 #   scripts/backup-sealed-secrets-key.sh --verify <outdir>   # 최신 백업이 라이브 키 셋을 담는지 (회전 게이트)
 #
 # 키 회전 게이트: 컨트롤러가 sealing key를 회전하면 --verify가 실패한다 → 백업 재생성 +
-# 복구 드릴(tests/sealed-secrets-restore.bats + 런북 restore.md)을 다시 통과해야 한다.
+# 복구 드릴(tests/test_sealed-secrets-restore.bats + 런북 restore.md)을 다시 통과해야 한다.
 set -euo pipefail
 umask 077
 

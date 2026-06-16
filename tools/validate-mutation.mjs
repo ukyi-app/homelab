@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // mutation dispatcher payload 검증기 — 액션 계약표를 강제한다.
 // 모든 입력은 비신뢰(owner 입력 포함): env/파일 경유로만 받고, 화이트리스트 regex와
 // action별 필수/허용 입력 외에는 전부 거부한다. 위반 시 비-0 종료(값은 일부만 출력, 시크릿 없음).
