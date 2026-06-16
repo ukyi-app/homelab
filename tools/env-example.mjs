@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // env:example — .app-config.yml(env+secrets+db+redis)에서 .env.example을 생성한다.
 // 로컬 패리티: 개발자가 어떤 env 키를 채워야 하는지 계약에서 자동 유도(값은 비움/플레이스홀더).
 import { readFileSync, writeFileSync } from "node:fs";

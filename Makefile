@@ -33,11 +33,13 @@ down: ## [TODO: M1] OrbStack VM 내리기
 bootstrap: ## 멱등 DR 진입점: ArgoCD + sops-age Secret + root app 설치
 	@bash scripts/bootstrap.sh
 
-verify: ## 레포 기반 점검 실행 (스켈레톤 + 원장 + sops 왕복)
+verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포계약 + 원장 + sops 왕복)
 	@./scripts/check-skeleton.sh
+	@bash scripts/check-bats-accounting.sh
+	@bash scripts/check-app-deploy.sh
 	@scripts/ledger-to-json.sh docs/memory-ledger.md > /tmp/ledger.json
 	@conftest test /tmp/ledger.json --policy policy/ledger.rego
-	@bats tests/sops-roundtrip.bats
+	@bats tests/test_sops-roundtrip.bats
 
 TF_ROOTS := cloudflare tailscale github
 
@@ -98,16 +100,12 @@ chart-test: ## 모든 kind에 대해 app 차트 렌더+검증
 	bash platform/charts/app/tests/render.sh
 
 .PHONY: ci
-ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate' 8스텝을 로컬에서 그대로 재현
+ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate'를 로컬에서 그대로 재현(bats 수집은 run-bats.sh SSOT)
 	pnpm verify:ledger
 	node tools/audit-orphans.mjs --ci
-	bats $$(ls tools/test/*.bats | grep -v '/dev-postgres\.bats$$')
+	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
-	bats $$(ls tests/*.bats | grep -vE '/(sops-roundtrip|sops-guard|makefile)\.bats$$')
-	@rc=0; for f in $$(find platform -name 'test_*.bats' -not -path '*/charts/*' \
-	  -not -name test_creds_reference.bats -not -name test_drill_alerting.bats \
-	  -not -name test_kustomize_build.bats | sort); do bats "$$f" || rc=1; done; exit $$rc
-	@if command -v docker >/dev/null 2>&1; then bash tools/test/alertmanager-render-e2e.sh; \
+	@if command -v docker >/dev/null 2>&1; then bash tests/gates/alertmanager-render-e2e.sh; \
 	  else echo "ci: docker 없음 → telegram-render-e2e 스킵(gate에선 실행됨)" >&2; fi
 
 .PHONY: reset-pg-archive
@@ -119,6 +117,12 @@ verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored
 	@if [ -d docs/runbooks ] && ls docs/runbooks/*.bats >/dev/null 2>&1; then \
 	  bats docs/runbooks/*.bats; \
 	else echo "verify-runbooks: docs/runbooks/*.bats 없음(로컬 전용 — 러너/fresh checkout엔 부재)"; fi
+
+.PHONY: verify-posture
+verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 필요(없으면 skip)
+	@if [ -f "$(KUBECONFIG_LIVE)" ]; then \
+	  KUBECONFIG=$(KUBECONFIG_LIVE) bats tests/posture/test_*.bats; \
+	else echo "verify-posture: $(KUBECONFIG_LIVE) 없음 — 라이브 클러스터 필요(skip). 먼저 make up"; fi
 
 .PHONY: verify-traps
 verify-traps: ## docs/traps.md 함정 원장의 guard 경로가 실재하는지(enforced 드리프트 차단)

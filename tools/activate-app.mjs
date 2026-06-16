@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // activate-app 게이트 — 등록(배포)과 DNS activation(공개)의 분리를 강제한다.
 // "현재 Synced된 아무 revision의 Healthy"는 옛 revision의 조기 노출을 허용한다 — 따라서
 // 노출하려는 homelab 머지 SHA를 고정하고 다음을 전부 증명해야 active를 플립한다:

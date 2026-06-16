@@ -5,7 +5,7 @@
 
 D="$BATS_TEST_DIRNAME/deployment.yaml"
 K="$BATS_TEST_DIRNAME/kustomization.yaml"
-S="$BATS_TEST_DIRNAME/auth-sealed.yaml"
+S="$BATS_TEST_DIRNAME/adguard-auth.sealed.yaml"
 
 @test "inject-auth init injects users from the sealed bcrypt hash via yq" {
   run grep -q 'name: inject-auth' "$D"; [ "$status" -eq 0 ]
@@ -36,5 +36,5 @@ S="$BATS_TEST_DIRNAME/auth-sealed.yaml"
   run grep -qE '^\s*stringData:|^\s*data:' "$S"; [ "$status" -ne 0 ]
   run grep -q 'encryptedData:' "$S"; [ "$status" -eq 0 ]
   # kustomization이 SealedSecret을 포함
-  run grep -q 'auth-sealed.yaml' "$K"; [ "$status" -eq 0 ]
+  run grep -q 'adguard-auth.sealed.yaml' "$K"; [ "$status" -eq 0 ]
 }

@@ -1,0 +1,25 @@
+# not-CI-safe 테스트의 단일 레지스트리 — gate(required)에서 제외할 bats.
+# scripts/run-bats.sh가 이 목록을 읽어 수집에서 뺀다. 각 줄 = 레포 루트 상대 경로.
+# 각 그룹 주석이 '왜 제외인지 + 어디서 실행되는지'(실행처)를 명시한다(accounting 가드가 강제).
+# platform/charts/*는 여기 두지 않는다 — 러너가 도메인 prune(make chart-test 별도 harness).
+
+# 라이브 클러스터 의존 (수동: make verify-posture)
+tests/posture/test_internal-by-default.bats
+tests/posture/test_network-policy.bats
+tests/posture/test_networking-e2e.bats
+# docker 의존
+tools/tests/test_dev-postgres.bats
+# 실 age 키 의존 (verify.yaml의 ephemeral 키 셸이 대체 커버)
+tests/test_sops-roundtrip.bats
+tests/test_sops-guard.bats
+tests/test_makefile.bats
+# KSOPS 실 age 시드 복호 의존
+platform/cnpg/prod/test_creds_reference.bats
+platform/cnpg/prod/test_drill_alerting.bats
+platform/cnpg/prod/test_kustomize_build.bats
+# terraform 의존 (gate엔 terraform 미설치 — iac.yaml advisory가 실행)
+infra/_tests/test_tf_validate.bats
+infra/_tests/test_tf_reconcile.bats
+infra/cloudflare/test_apps_data.bats
+# 라이브 전용 (infra 부트스트랩 — make bootstrap)
+infra/_tests/test_bootstrap.bats

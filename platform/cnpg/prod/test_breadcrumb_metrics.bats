@@ -30,25 +30,25 @@
 }
 
 @test "R2BackupStale reads the barman-cloud plugin backup metric, not the deprecated in-tree one" {
-  grep -q 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp' platform/victoria-stack/rules/r4-storage-backup.yaml
+  grep -q 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp' platform/victoria-stack/prod/rules/r4-storage-backup.yaml
   # deprecated in-tree 메트릭(plugin에서 항상 0)이 남아있으면 안 된다
-  run grep -c 'cnpg_collector_last_available_backup_timestamp' platform/victoria-stack/rules/r4-storage-backup.yaml
+  run grep -c 'cnpg_collector_last_available_backup_timestamp' platform/victoria-stack/prod/rules/r4-storage-backup.yaml
   [ "$output" -eq 0 ]
 }
 
 @test "WALArchiveStalled reads pg_stat_archiver metrics, not the absent in-tree archive metrics" {
-  grep -q 'cnpg_pg_stat_archiver_last_failed_time' platform/victoria-stack/rules/r4-storage-backup.yaml
-  grep -q 'cnpg_pg_stat_archiver_last_archived_time' platform/victoria-stack/rules/r4-storage-backup.yaml
+  grep -q 'cnpg_pg_stat_archiver_last_failed_time' platform/victoria-stack/prod/rules/r4-storage-backup.yaml
+  grep -q 'cnpg_pg_stat_archiver_last_archived_time' platform/victoria-stack/prod/rules/r4-storage-backup.yaml
   # plugin 환경에서 export되지 않는 in-tree archive 메트릭이 남아있으면 안 된다
-  run grep -cE 'cnpg_collector_last_(archived|failed_archive)_time' platform/victoria-stack/rules/r4-storage-backup.yaml
+  run grep -cE 'cnpg_collector_last_(archived|failed_archive)_time' platform/victoria-stack/prod/rules/r4-storage-backup.yaml
   [ "$output" -eq 0 ]
 }
 
 @test "CNPGRestoreDrillStale uses last_over_time, not bare instant absent() (weekly single-sample push)" {
   # 주간 단발 import는 instant staleness 윈도 밖에서 안 보여 bare absent()가 영구 오발화한다 —
   # 임계값보다 넓은 윈도의 last_over_time으로 마지막 성공 push를 찾아야 한다.
-  grep -q 'last_over_time(restore_drill_last_success_timestamp' platform/victoria-stack/rules/r4-storage-backup.yaml
+  grep -q 'last_over_time(restore_drill_last_success_timestamp' platform/victoria-stack/prod/rules/r4-storage-backup.yaml
   # bare instant 형태(absent(restore_drill_last_success_timestamp))가 남아있으면 안 된다
-  run grep -c 'absent(restore_drill_last_success_timestamp)' platform/victoria-stack/rules/r4-storage-backup.yaml
+  run grep -c 'absent(restore_drill_last_success_timestamp)' platform/victoria-stack/prod/rules/r4-storage-backup.yaml
   [ "$output" -eq 0 ]
 }

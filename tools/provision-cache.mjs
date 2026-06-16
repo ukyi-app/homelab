@@ -1,6 +1,5 @@
-#!/usr/bin/env node
 // create-cache 프로비저너 — 앱별 경량 Valkey 인스턴스(cache NS)와 prod 소비용 conn
-// SealedSecret 핸들을 산출한다 (_create-cache.yml이 호출; --dry-run은 계획 JSON만 출력).
+// SealedSecret 핸들을 산출한다 (_create-cache.yaml이 호출; --dry-run은 계획 JSON만 출력).
 //
 // 산출물:
 //   platform/cache/prod/<name>/                     Deployment·Service·PVC·ConfigMap·ACL SealedSecret

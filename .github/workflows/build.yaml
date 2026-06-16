@@ -3,8 +3,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "apps/**"
-      - "!apps/**/deploy/**" # write-back의 values.yaml bump가 build를 재트리거하면 안 된다 → CI 자기 루프 방지
+      - "ops/**" # 플랫폼 ops 이미지 소스(pg-tools 등). 배포-전용 apps/는 빌드 대상 아님(외부 레포에서 빌드)
       - ".github/workflows/build.yaml"
   # 신규 기본 브랜치 생성 push는 paths diff가 없어 트리거가 스킵된다(첫 라이브 push에서 확인)
   # — 초기 시드/재빌드용 수동 트리거.
@@ -48,9 +47,9 @@ jobs:
           # → 전체 빌드. 첫 라이브에서 둘 다 build=false로 빠져 이미지 0개가 됐던 버그.
           if [ "$EVENT" = "workflow_dispatch" ] || [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
-          # 소스/Dockerfile 변경만 "changed"로 간주 (deploy/values.yaml bump는 절대 아님)
+          # ops/ 소스(Dockerfile 등) 변경만 "changed"로 간주 (ops 이미지엔 deploy/ 없음 — 자기-루프 무관)
           elif git diff --name-only "$BEFORE" "$SHA" \
-               | grep -E "^apps/${APP}/" | grep -qvE "^apps/${APP}/deploy/"; then
+               | grep -qE "^ops/${APP}/"; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
             echo "build=false" >> "$GITHUB_OUTPUT"
@@ -71,7 +70,7 @@ jobs:
         if: steps.changed.outputs.build == 'true'
         uses: docker/build-push-action@v6
         with:
-          context: apps/${{ matrix.app }}
+          context: ops/${{ matrix.app }}
           platforms: linux/arm64
           push: true
           provenance: false

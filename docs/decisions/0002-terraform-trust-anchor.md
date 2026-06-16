@@ -1,7 +1,7 @@
 # 0002 — terraform github/tailscale 루트는 owner 로컬 apply 전용
 
 - 상태: 수용(accepted)
-- 관련: `AGENTS.md`(tf 루트 관리 모델), `.github/workflows/tf-reconcile.yml`, `infra/_test/tf_reconcile.bats`
+- 관련: `AGENTS.md`(tf 루트 관리 모델), `.github/workflows/tf-reconcile.yaml`, `infra/_tests/test_tf_reconcile.bats`
 
 ## 맥락
 terraform 3 루트가 있다 — cloudflare(DNS/tunnel), github(Actions 시크릿·branch protection),

@@ -12,7 +12,7 @@ spec:
   source:
     repoURL: https://github.com/ukyi-app/homelab.git
     targetRevision: main
-    path: platform/victoria-stack
+    path: platform/victoria-stack/prod
   destination:
     server: https://kubernetes.default.svc
     namespace: observability

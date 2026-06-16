@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "apps/<name>/deploy/prod 배포 계약 (SSOT)",
+  "description": "ArgoCD appset(apps/*/deploy/prod)이 싱크하는 배포-전용 앱의 필수 산출물. create-app.mjs가 생성하는 암묵 계약을 명문화한다. 빌드-전용 ops 이미지는 ops/<name>/ (deploy/ 없음 — 외부 caller가 참조하는 GHCR 이미지만 발행).",
+  "type": "object",
+  "required": ["values.yaml", ".bindings.json", "source-repo"],
+  "properties": {
+    "values.yaml": {
+      "description": "공유 Helm 차트(platform/charts/app) values 오버라이드. 없으면 ArgoCD가 'groupVersion shouldn't be empty'로 죽는다."
+    },
+    ".bindings.json": {
+      "description": "db/redis 바인딩 + autoDeploy SSOT. bump-poll(poll-ghcr)이 autoDeploy 권위로 읽는다(누락=fail-closed 승인 PR)."
+    },
+    "source-repo": {
+      "description": "외부 앱 레포 바인딩(ukyi-app/<app>). poll-ghcr가 이 파일이 있는 deploy/prod만 update-image 폴링한다(tools/poll-ghcr.mjs:145 — 없으면 continue로 영영 폴링 밖). 비어있으면 안 된다."
+    }
+  }
+}

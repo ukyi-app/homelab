@@ -1,0 +1,60 @@
+name: verify
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# PR엔 같은 PR의 이전 run 취소, main push는 sha 고유라 보존(queue:max 미사용 → 함정 무관).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      # verify 잡은 pnpm/node를 쓰지 않는다(skeleton·sops·pre-commit[pip]만) — pnpm 셋업 불필요.
+      # 과거 pnpm/action-setup이 있었으나 pnpm@11 self-install은 액션의 node20 런타임에서 실패한다
+      # (setup-node로도 안 됨 — 액션 자체가 node20). 잡이 pnpm을 안 쓰므로 통째로 제거한다.
+      - name: Install tools
+        uses: ./.github/actions/setup-toolchain
+        with:
+          sops: 'true'
+          age: 'true'
+          bats: 'true'
+
+      - name: Skeleton check
+        run: ./scripts/check-skeleton.sh
+
+      # 메모리 원장 게이트는 required check 'gate'(ci.yaml: pnpm verify:ledger)에 일원화 — 중복 제거(W7).
+      # verify.yaml은 고유 책임(skeleton·sops 왕복 ephemeral·pre-commit)만 유지.
+
+      - name: SOPS round-trip (ephemeral CI key)
+        run: |
+          age-keygen -o /tmp/ci.agekey
+          export SOPS_AGE_KEY_FILE=/tmp/ci.agekey
+          # CI는 자체 .sops.yaml recipients를 써서 왕복 검증을 자기완결로 만든다
+          CIKEY=$(age-keygen -y /tmp/ci.agekey)
+          cat > /tmp/sops-ci.yaml <<EOF
+          creation_rules:
+            - path_regex: \.enc\.yaml$
+              encrypted_regex: "^(data|stringData)$"
+              age: "$CIKEY"
+          EOF
+          cp tests/fixtures/sample-secret.yaml /tmp/ci.enc.yaml
+          sops --config /tmp/sops-ci.yaml --encrypt --in-place /tmp/ci.enc.yaml
+          if grep -q 'super-secret-value-123' /tmp/ci.enc.yaml; then echo "plaintext leaked after encrypt"; exit 1; fi
+          sops --config /tmp/sops-ci.yaml --decrypt /tmp/ci.enc.yaml | grep -q 'super-secret-value-123'
+
+      # gitleaks 훅 환경(콜드 빌드 수십초)을 config 해시 키로 캐시 — 미스 시 그냥 재빌드(안전).
+      - name: Cache pre-commit hooks
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: precommit-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Pre-commit secret guard
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files --show-diff-on-failure
