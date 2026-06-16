@@ -1,6 +1,14 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
+# node/pnpm PATH 보강 — make·git hook·Claude Code Bash는 셸 rc를 source하지 않아 mise 활성화
+# PATH가 없다(node/pnpm이 exit 127로 부재 → CI green인데 로컬만 깨지는 역패리티의 근원).
+# shim이 있을 때만 PATH 앞에 붙인다(멱등; mise 미사용 환경엔 무영향).
+MISE_SHIMS := $(HOME)/.local/share/mise/shims
+ifneq ($(wildcard $(MISE_SHIMS)/node),)
+export PATH := $(MISE_SHIMS):$(PATH)
+endif
+
 .PHONY: help bootstrap up down verify host-up
 
 help: ## 사용 가능한 타겟 목록 출력
@@ -69,6 +77,19 @@ m6-tools: ## 마일스톤 6용 차트/CI 툴체인 검증
 chart-test: ## 모든 kind에 대해 app 차트 렌더+검증
 	bats platform/charts/app/tests/
 	bash platform/charts/app/tests/render.sh
+
+.PHONY: ci
+ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate' 8스텝을 로컬에서 그대로 재현
+	pnpm verify:ledger
+	node tools/audit-orphans.mjs --ci
+	bats $$(ls tools/test/*.bats | grep -v '/dev-postgres\.bats$$')
+	shellcheck $$(git ls-files '*.sh')
+	bats $$(ls tests/*.bats | grep -vE '/(sops-roundtrip|sops-guard|makefile)\.bats$$')
+	@rc=0; for f in $$(find platform -name 'test_*.bats' -not -path '*/charts/*' \
+	  -not -name test_creds_reference.bats -not -name test_drill_alerting.bats \
+	  -not -name test_kustomize_build.bats | sort); do bats "$$f" || rc=1; done; exit $$rc
+	@if command -v docker >/dev/null 2>&1; then bash tools/test/alertmanager-render-e2e.sh; \
+	  else echo "ci: docker 없음 → telegram-render-e2e 스킵(gate에선 실행됨)" >&2; fi
 
 .PHONY: reset-pg-archive
 reset-pg-archive: ## [DR ④] R2 serverName pg 아카이브 정리(재구축 후 아카이빙 재개). 기본 dry-run; 실제 정리는 ARGS=--purge
