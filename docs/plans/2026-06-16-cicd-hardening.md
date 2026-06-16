@@ -34,7 +34,7 @@
 
 > 일관성 비평이 잡은 cross-phase 결합. 아래 지시가 개별 섹션의 라인번호 앵커보다 **우선**한다.
 
-1. **`tools/audit-orphans.mjs`는 3개 태스크(P6 races-5 · P8 drift-3 · P8 fm-5)가 같은 파일·같은 BLOCKING Set 리터럴·같은 registry 루프 영역을 편집한다.** 라인번호 앵커 금지 — **코드 랜드마크**(함수/Set 리터럴/주석 마커)로 앵커링. 머지 순서 **P6(races-5) → P8(drift-3 → fm-5)**. P8 태스크는 P6가 수정한 파일(registry 루프가 이미 active/inactive로 split, BLOCKING에 `activation-surface-drift` 포함) 기준으로 앵커를 재작성한다. 최종 BLOCKING set = `{dangling-binding, orphan-dns(active:true)}`, 비차단(정보성) = `{orphan-dns-inactive, dangling-role, activation-surface-drift, missing-activation}`(⚠️ codex pass3 F1: activation을 **차단**하면 정상 active-app 이미지 bump가 데드락 — 정보성으로만). BLOCKING Set 편집은 단일 지점에서만.
+1. **`tools/audit-orphans.mjs`는 3개 태스크(P6 races-5 · P8 drift-3 · P8 fm-5)가 같은 파일·같은 BLOCKING Set 리터럴·같은 registry 루프 영역을 편집한다.** 라인번호 앵커 금지 — **코드 랜드마크**(함수/Set 리터럴/주석 마커)로 앵커링. 머지 순서 **P6(races-5) → P8(drift-3 → fm-5)**. P8 태스크는 P6가 수정한 파일(registry 루프가 이미 active/inactive로 split, BLOCKING에 `activation-surface-drift` 포함) 기준으로 앵커를 재작성한다. 최종 BLOCKING set = `{dangling-binding, orphan-dns(active:true), activation-exposure-drift}`, 비차단(정보성) = `{orphan-dns-inactive, dangling-role, activation-surface-drift, missing-activation}`(⚠️ pass3 F1: app-tree surfaceHash drift 차단은 정상 이미지 bump 데드락 → 정보성; restale2 F1: 노출 행 host/public drift=`activation-exposure-drift`는 데드락 무관 + 미재검증 DNS 노출 재승인이라 **차단**). BLOCKING Set 편집은 단일 지점에서만.
 
 2. **telegram 콜사이트 카운트는 머지-순서 의존(절대값 prebake 금지).** 현재 `tests/gates/test_telegram-callsites.bats`의 enumerated total은 **15**. 새 콜사이트 3개 — **P3 `dns-drift.yaml`**, **P6 `pr-sweeper.yaml`**, **P8 `build.yaml`(obs-3)** — 가 각각 here-doc 줄 1개 추가 + 정수 **+1**. 절대값(16/17/18)은 머지 순서에 따라 달라지므로, 각 단계가 머지될 때 `./scripts/run-bats.sh --list`로 현재 total을 확인하고 `현재값+1`로 갱신한다(P6 Task 5의 '16' 가정과 P8의 '16→17'은 dns-drift를 빠뜨린 +1 과다 — 머지 시점 실측으로 대체). 각 콜사이트의 notify는 5개 필수 `with:` 키를 모두 갖는지 확인.
 
@@ -1083,10 +1083,20 @@ CACHE="$BATS_TEST_DIRNAME/../infra/cloudflare/cache.tf"
   [ "$total" -eq "$tens" ]
 }
 
-@test "no matches( regex operator in any cloudflare ruleset expression" {
-  # matches(는 Business/WAF Advanced 전용 — 무료 플랜 apply 400. waf.tf/cache.tf 양쪽 금지.
-  run grep -nE 'matches[[:space:]]*\(' "$WAF" "$CACHE"
+@test "no 'matches' regex operator in any cloudflare ruleset expression (infix or call)" {
+  # ⚠️ codex restale2 F2: Cloudflare `matches`는 **infix 연산자**다 — `http.host matches "..."`(괄호 없음).
+  # `matches(`만 막으면 infix 형태가 게이트를 통과해 apply 400. 주석(#) 제외하고 `\bmatches\b` 토큰을 잡는다.
+  # (Business/WAF Advanced 전용 — 무료 플랜 apply 400 "not entitled". starts_with()만 허용.)
+  run sh -c "grep -nE '\\bmatches\\b' \"$WAF\" \"$CACHE\" | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'"
   [ "$status" -ne 0 ]
+}
+
+@test "entitlement gate catches the infix 'http.host matches' form (negative fixture)" {
+  # 가드가 실제로 infix matches를 잡는지 증명(잡기 회귀 방지).
+  d="$BATS_TEST_TMPDIR"
+  printf 'rules = [{ expression = "(http.host matches \\"^x\\")" }]\n' > "$d/bad.tf"
+  run sh -c "grep -nE '\\bmatches\\b' \"$d/bad.tf\" | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'"
+  [ "$status" -eq 0 ]
 }
 
 @test "ratelimit characteristics include the mandatory cf.colo.id" {
@@ -2937,9 +2947,9 @@ if (args.flip) {
   echo "$output" | grep -q "missing-activation"
 }
 
-@test "audit REPORTS surface drift when only apps.json host/public changes after activation (F1)" {
-  # ⚠️ codex pass4 F1: 앱 트리(apps/<app>) 무변경이어도 apps.json의 host/public가 바뀌면 DNS 노출이 변한다 →
-  # 마커의 registry projection과 불일치 → 정보성 surface-drift. (비차단 — --ci status 0.)
+@test "audit BLOCKS exposure drift when apps.json host/public changes after activation (restale2 F1)" {
+  # ⚠️ codex pass4 F1 + restale2 F1: 앱 트리 무변경이어도 apps.json host/public가 바뀌면 DNS 노출이 변한다 →
+  # 마커 registry projection과 불일치 → activation-exposure-drift는 **차단**(데드락 무관, 미재검증 노출 막음).
   G="$TMP/git5"; mkdir -p "$G"; cp -R "$FR/." "$G/"
   git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
   echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
@@ -2953,8 +2963,8 @@ if (args.flip) {
   echo '[{ "name": "orders", "host": "neworders.example.com", "public": true, "active": true }]' \
     > "$G/infra/cloudflare/apps.json"
   run node "$ROOT/tools/audit-orphans.mjs" --repo-root "$G" --ci
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q "activation-surface-drift"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "activation-exposure-drift"
 }
 ```
 
@@ -2965,7 +2975,7 @@ if (args.flip) {
 
 1) BLOCKING set 확장(34행):
 ```js
-const BLOCKING = new Set(["dangling-binding", "orphan-dns"]); // ⚠️ codex pass3 F1: activation-* 는 비차단(정보성) — 차단 게이트는 정상 이미지 bump를 데드락시킨다(아래)
+const BLOCKING = new Set(["dangling-binding", "orphan-dns", "activation-exposure-drift"]); // pass3 F1: surfaceHash(app-tree) drift는 비차단(이미지 bump 데드락 회피); restale2 F1: 노출 행(host/public) drift=activation-exposure-drift는 차단(데드락 무관 + 미재검증 DNS 노출 막음)
 ```
 
 2) `tools/lib/surface-hash.mjs`(Task 8에서 생성)에서 `surfaceHash`를 import(`import { surfaceHash } from "./lib/surface-hash.mjs";`)한 뒤, registry↔매니페스트 루프(54-57) 다음에 active 행 surface-drift 체크 블록 추가. ⚠️ codex pass1 F3: 마커·감사 **둘 다** `.activation` 제외 canonical 해시를 써야 자기 무효화가 없다(직접 `rev-parse :apps/<app>` 금지 — 마커 커밋이 tree-hash를 바꿔 전 앱 오탐):
@@ -2989,13 +2999,16 @@ for (const r of registry) {
   if (current && current !== marker.surfaceHash)
     add("activation-surface-drift", r.name, `activation 이후 apps/${r.name} 표면 변경(정보성 — 런북 재검증 권장; 마커 ${String(marker.surfaceHash).slice(0, 12)} ≠ 현재 ${current.slice(0, 12)})`);
   // ⚠️ codex pass4 F1: apps.json 노출 행(host/public)이 바뀌면 앱 트리 무변경이어도 DNS 노출이 변한다 — 정보성으로 잡는다.
+  // ⚠️ codex restale2 F1: apps.json 노출 행(host/public) 변경은 app-tree(surfaceHash) drift와 달리 **데드락
+  // 위험이 없다**(호스트 변경은 앱 재배포·Healthy 선행 불필요) → 미재검증 public DNS 노출을 막기 위해 **차단**.
+  // (owner가 activate-app --flip로 새 노출 재증명+마커 갱신해야 머지 가능 = 의도한 재승인. surfaceHash drift만 정보성.)
   const curProj = { name: r.name, host: r.host ?? null, public: r.public ?? false };
   if (marker.registry && JSON.stringify(curProj) !== JSON.stringify(marker.registry))
-    add("activation-surface-drift", r.name, `activation 이후 apps.json 노출 행 변경(host/public — 마커 ${JSON.stringify(marker.registry)} ≠ 현재 ${JSON.stringify(curProj)}) — 런북 재검증 권장`);
+    add("activation-exposure-drift", r.name, `activation 이후 apps.json 노출 행 변경(host/public — 마커 ${JSON.stringify(marker.registry)} ≠ 현재 ${JSON.stringify(curProj)}) — activate-app 재실행으로 재승인 필요(차단)`);
 }
 ```
 
-(⚠️ codex pass3 F1: `activation-surface-drift`·`missing-activation`은 **비차단(정보성)**이다 — `--ci`를 막지 않아 정상 active-app 이미지 bump가 데드락되지 않는다. 마커는 가시성/런북 재검증 트리거용. `!appDirs.includes`로 매니페스트 없는 행(orphan-dns 케이스)은 skip. waive 메커니즘은 차단이 없어 불필요 — 제거.)
+(⚠️ codex pass3 F1 + restale2 F1: **app-tree** `activation-surface-drift`·`missing-activation`은 **비차단(정보성)** — `--ci`를 막지 않아 정상 active-app 이미지 bump가 데드락되지 않는다. 단 **`activation-exposure-drift`(apps.json host/public 변경)는 차단** — 데드락 위험이 없고 미재검증 public DNS 노출을 닫는다(activate-app 재실행으로 재승인). `!appDirs.includes`로 매니페스트 없는 행(orphan-dns 케이스)은 skip. waive 불필요 — 제거.)
 
 **Step 4: Run test, expect PASS** — `bats tools/tests/test_audit-orphans.bats`
 기대 출력: 기존 + 신규 테스트(surface-drift 정보성 리포트 / 커밋 후 무드리프트 / 마커없음 정보성) 전부 `ok`. activation-* 는 `--ci` 비차단이라 정상 bump PR을 막지 않는다.
@@ -3903,8 +3916,11 @@ setup() {
 
 @test "ci.yaml audit gate comment does not claim stale-ledger-row is blocking" {
   # 코드의 BLOCKING 셋엔 stale-ledger-row가 없다 — 주석도 그것을 차단한다고 말하면 안 된다.
-  run grep -nE '^\s*const BLOCKING = new Set\(\["dangling-binding", "orphan-dns"\]\);' "$SRC"
+  run grep -nE '^\s*const BLOCKING = new Set\(' "$SRC"
   [ "$status" -eq 0 ]
+  # restale2: 정확-set 하드코딩 대신 stale-ledger-row 부재를 단언(BLOCKING에 activation-exposure-drift 추가됨).
+  run sh -c "grep -E 'const BLOCKING = new Set' '$SRC' | grep -c stale-ledger-row"
+  [ "$output" = "0" ]
   # audit-orphans 게이트 스텝 주석(run 라인 직전 #...)에 stale-ledger-row가 등장하면 실패
   run bash -c "awk '/registry\\/binding 정합 게이트/{f=1} f&&/node tools\\/audit-orphans.mjs --ci/{exit} f' '$CI' | grep -c 'stale-ledger-row'"
   [ "$output" = "0" ]
