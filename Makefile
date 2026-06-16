@@ -116,6 +116,10 @@ verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored
 	  bats docs/runbooks/*.bats; \
 	else echo "verify-runbooks: docs/runbooks/*.bats 없음(로컬 전용 — 러너/fresh checkout엔 부재)"; fi
 
+.PHONY: verify-traps
+verify-traps: ## docs/traps.md 함정 원장의 guard 경로가 실재하는지(enforced 드리프트 차단)
+	@bash scripts/verify-traps.sh
+
 .PHONY: seal-adguard-auth
 seal-adguard-auth: ## AdGuard UI 비밀번호(.env.secrets ADGUARD_PASSWORD)를 bcrypt 봉인 → adguard-auth SealedSecret
 	@scripts/seal-adguard-auth.sh
