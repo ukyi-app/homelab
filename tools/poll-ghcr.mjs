@@ -18,8 +18,17 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { parse } from "yaml";
 
+const USAGE = `poll-ghcr — GHCR 폴링 bump 플래너(읽기 전용, update-image 권위 경로)
+사용법: node tools/poll-ghcr.mjs [--dry-run] [--root <dir>] [--owner <org>] [--fixtures <dir>]
+  --dry-run         plan JSON만 출력(부작용 0)
+  --root <dir>      레포 루트(기본 .)
+  --owner <org>     GHCR org(기본 ukyi-app)
+  --fixtures <dir>  테스트 픽스처 소스(라이브 gh/docker 대체)
+  --help, -h        이 도움말`;
+
 const args = { root: ".", owner: "ukyi-app" };
 const argv = process.argv.slice(2);
+if (argv.includes("--help") || argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === "--dry-run") args.dryRun = true;

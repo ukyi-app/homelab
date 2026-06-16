@@ -1,6 +1,18 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
+# node/pnpm PATH 보강 — make·git hook·Claude Code Bash는 셸 rc를 source하지 않아 mise 활성화
+# PATH가 없다(node/pnpm이 exit 127로 부재 → CI green인데 로컬만 깨지는 역패리티의 근원).
+# shim이 있을 때만 PATH 앞에 붙인다(멱등; mise 미사용 환경엔 무영향).
+MISE_SHIMS := $(HOME)/.local/share/mise/shims
+ifneq ($(wildcard $(MISE_SHIMS)/node),)
+export PATH := $(MISE_SHIMS):$(PATH)
+endif
+
+# 라이브 클러스터 접근(읽기 전용 운영 타겟 전용). 변경 권위는 ArgoCD — 절대 kubectl apply 금지.
+KUBECONFIG_LIVE := $(PWD)/infra/k3s-bootstrap/kubeconfig
+SOPS_AGE_KEY_FILE ?= $(HOME)/.config/sops/age/keys.txt
+
 .PHONY: help bootstrap up down verify host-up
 
 help: ## 사용 가능한 타겟 목록 출력
@@ -37,9 +49,20 @@ tf-validate: ## 모든 infra 루트에 terraform fmt -check + validate 실행
 	  echo "$$r: validated"; \
 	done
 
-.PHONY: seed-secrets
-seed-secrets: ## terraform output에서 SOPS 암호화 시드 시크릿 생성
-	@bash scripts/seed-secrets.sh
+.PHONY: seed-secrets secret-edit verify-secrets
+seed-secrets: ## [secret] terraform output + .env.secrets에서 SOPS 암호화 시드 시크릿 생성
+	@[ -f .env.secrets ] || { echo "seed-secrets: .env.secrets 없음 (cp .env.secrets.example .env.secrets 후 채우기)"; exit 1; }
+	@set -a; . ./.env.secrets; set +a; bash scripts/seed-secrets.sh
+
+secret-edit: ## [secret] FILE= SOPS 파일을 복호→편집→재암호화(sops 내장, 평문 디스크 미기록). 사람 전용(인터랙티브)
+	@test -n "$(FILE)" || { echo "FILE=<path>.enc.yaml 필요"; exit 1; }
+	@case "$(FILE)" in *.enc.yaml) : ;; *) echo "secret-edit: $(FILE) 는 *.enc.yaml 아님"; exit 1 ;; esac
+	@test -f "$(FILE)" || { echo "secret-edit: $(FILE) 없음"; exit 1; }
+	@test -f "$(SOPS_AGE_KEY_FILE)" || { echo "secret-edit: age 키 없음: $(SOPS_AGE_KEY_FILE)"; exit 1; }
+	SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) sops "$(FILE)"
+
+verify-secrets: ## [secret] 추적 *.enc.yaml 무결성(암호화 + recipient 2개 + 복호가능) 검사 — 값 미출력
+	@bash scripts/verify-secrets.sh
 
 .PHONY: bootstrap-deadmanswitch
 bootstrap-deadmanswitch: ## [M5] 노드 외부 dead-man's-switch ping URL 시드 여부 검증 (R8)
@@ -70,6 +93,19 @@ chart-test: ## 모든 kind에 대해 app 차트 렌더+검증
 	bats platform/charts/app/tests/
 	bash platform/charts/app/tests/render.sh
 
+.PHONY: ci
+ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate' 8스텝을 로컬에서 그대로 재현
+	pnpm verify:ledger
+	node tools/audit-orphans.mjs --ci
+	bats $$(ls tools/test/*.bats | grep -v '/dev-postgres\.bats$$')
+	shellcheck $$(git ls-files '*.sh')
+	bats $$(ls tests/*.bats | grep -vE '/(sops-roundtrip|sops-guard|makefile)\.bats$$')
+	@rc=0; for f in $$(find platform -name 'test_*.bats' -not -path '*/charts/*' \
+	  -not -name test_creds_reference.bats -not -name test_drill_alerting.bats \
+	  -not -name test_kustomize_build.bats | sort); do bats "$$f" || rc=1; done; exit $$rc
+	@if command -v docker >/dev/null 2>&1; then bash tools/test/alertmanager-render-e2e.sh; \
+	  else echo "ci: docker 없음 → telegram-render-e2e 스킵(gate에선 실행됨)" >&2; fi
+
 .PHONY: reset-pg-archive
 reset-pg-archive: ## [DR ④] R2 serverName pg 아카이브 정리(재구축 후 아카이빙 재개). 기본 dry-run; 실제 정리는 ARGS=--purge
 	@scripts/reset-pg-r2-archive.sh $(ARGS)
@@ -77,3 +113,31 @@ reset-pg-archive: ## [DR ④] R2 serverName pg 아카이브 정리(재구축 후
 .PHONY: seal-adguard-auth
 seal-adguard-auth: ## AdGuard UI 비밀번호(.env.secrets ADGUARD_PASSWORD)를 bcrypt 봉인 → adguard-auth SealedSecret
 	@scripts/seal-adguard-auth.sh
+
+## --- 운영 진입점 (라이브 read-only; 변경 권위는 ArgoCD) ---
+.PHONY: argo-status argo-sync argo-terminate argo-wait render kubeconfig audit
+
+argo-status: ## [ops] ArgoCD Application 목록 — sync/health/멈춘 operation phase
+	@KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd get applications \
+	  -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,OPERATION:.status.operationState.phase
+
+argo-sync: ## [ops] APP= 명시 sync 트리거(retry 소진 후 재시도). 예: make argo-sync APP=cnpg
+	@test -n "$(APP)" || { echo "APP=<application> 필요 (make argo-status로 이름 확인)"; exit 1; }
+	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd patch app $(APP) --type merge -p '{"operation":{"sync":{}}}'
+
+argo-terminate: ## [ops] APP= 멈춘 operation 종료(phase=Terminating). 예: make argo-terminate APP=cnpg
+	@test -n "$(APP)" || { echo "APP=<application> 필요"; exit 1; }
+	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd patch app $(APP) --subresource status --type merge -p '{"status":{"operationState":{"phase":"Terminating"}}}'
+
+argo-wait: ## [ops] Application이 Healthy 될 때까지 대기(APP= 미지정 시 전체)
+	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy application $(if $(APP),$(APP),--all) --timeout=300s
+
+render: ## [ops] COMP= KSOPS 풀 렌더(복호 읽기, 라이브 무영향). 예: make render COMP=cnpg
+	@test -n "$(COMP)" || { echo "COMP=<component> 필요 (platform/<COMP>/prod)"; exit 1; }
+	SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) kustomize build --enable-helm --enable-alpha-plugins --enable-exec platform/$(COMP)/prod
+
+kubeconfig: ## [ops] 라이브 kubeconfig export 출력 — eval "$$(make kubeconfig)"로 셸에 적용
+	@echo 'export KUBECONFIG=$(KUBECONFIG_LIVE)'
+
+audit: ## [ops] 레포 정적 드리프트 감사(registry↔매니페스트↔바인딩↔원장, 읽기 전용)
+	@node tools/audit-orphans.mjs

@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
 
+# PR엔 같은 PR의 이전 run을 취소(러너 절약 + gate에 stale 잔류 방지), main push는 sha 고유라 보존.
+# queue:max는 안 쓰므로 cancel-in-progress 병용 함정(AGENTS.md)과 무관.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   gate:
     runs-on: ubuntu-24.04-arm
