@@ -23,4 +23,13 @@ if [ -n "$unprefixed" ]; then
   rc=1
 fi
 
+# README 디렉토리 지도 드리프트 가드: 모든 platform 컴포넌트(charts 제외)가 README 지도에 나열돼야 한다.
+# 새 컴포넌트 추가 시 지도 갱신을 강제(가상명·누락 차단). tools/tests/test_dirmap.bats와 동일 불변식.
+# glob 루프(ls 파싱 회피 — SC2011). bash 3.2 안전.
+for d in platform/*/; do
+  c="$(basename "$d")"
+  case "$c" in charts) continue;; esac
+  if ! grep -q "$c" README.md; then echo "FAIL: README 디렉토리 지도에 platform 컴포넌트 누락: $c"; rc=1; fi
+done
+
 exit $rc
