@@ -20,10 +20,10 @@
 | busybox 1.36 nc에 -q 없음(relay 리스너) | gate | `platform/victoria-stack/test_relay.bats` |
 | vmalert configCheckInterval 없으면 룰 자동 reload 안 함 | gate | `tests/gates/test_vmalert-config.bats` |
 | Alertmanager telegram: 자동 HTML-escape(이중 escape 금지) + 계약 | gate | `tests/gates/alertmanager-render-e2e.sh`, `tests/gates/test_telegram-notify.bats`, `tests/gates/test_telegram-alert-korean.bats`, `tests/gates/test_telegram-callsites.bats` |
-| GitHub Actions client_payload는 비신뢰 입력(env 경유+regex) | gate | `tests/gates/test_dispatcher.bats`, `tools/test/test_validate-mutation.bats` |
+| GitHub Actions client_payload는 비신뢰 입력(env 경유+regex) | gate | `tests/gates/test_dispatcher.bats`, `tools/tests/test_validate-mutation.bats` |
 | concurrency queue:max ↔ cancel-in-progress 병용 불가(dispatcher 직렬화) | gate | `tests/gates/test_dispatcher.bats` |
 | 워크플로 YAML colon-in-unquoted-name 문법 깨짐 | gate | `tests/gates/test_workflow-yaml.bats` |
-| 메모리 원장 예산(limit 합계 ≤ 8704Mi) | gate | `policy/ledger.rego`, `tools/test/test_ledger-gate.bats` |
+| 메모리 원장 예산(limit 합계 ≤ 8704Mi) | gate | `policy/ledger.rego`, `tools/tests/test_ledger-gate.bats` |
 | AdGuard setcap 바이너리 ↔ allowPrivilegeEscalation 양립불가 | gate | `platform/adguard/prod/test_adguard_auth.bats` |
 | enc.yaml 평문 직접 수정 금지(SOPS MAC) | gate+verify | `scripts/sops-guard.sh`, `.claude/hooks/manifest-guard.sh`, `tests/gates/test_manifest-guard.bats`, `tests/gates/test_verify-secrets.bats` |
 | SOPS 왕복(암호화 후 복호 동일) | local | `tests/test_sops-roundtrip.bats` |
@@ -32,4 +32,4 @@
 | DR drill 안전 불변식(R5, 라이브 파괴 없이) | gate | `tests/test_dr-drill.bats` |
 | R2 pg 아카이브 reset --purge 가드(④) | gate | `tests/test_reset-pg-r2-archive.bats` |
 | sealing key 백업 체인 DR fail-closed 게이트 | gate | `tests/test_sealed-secrets-restore.bats` |
-| tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | iac | `infra/_test/test_tf_reconcile.bats` |
+| tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | iac | `infra/_tests/test_tf_reconcile.bats` |

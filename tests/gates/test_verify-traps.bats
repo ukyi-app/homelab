@@ -16,7 +16,7 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "verify-traps flags a ledger guard path that does not exist" {
-  printf '| 함정 | status | guard |\n|---|---|---|\n| x | gate-enforced | `tools/test/nonexistent-guard.bats` |\n' > "$TMP/bad.md"
+  printf '| 함정 | status | guard |\n|---|---|---|\n| x | gate-enforced | `tools/tests/nonexistent-guard.bats` |\n' > "$TMP/bad.md"
   run bash scripts/verify-traps.sh "$TMP/bad.md"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "nonexistent-guard"

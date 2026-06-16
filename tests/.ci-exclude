@@ -8,7 +8,7 @@ tests/posture/test_internal-by-default.bats
 tests/posture/test_network-policy.bats
 tests/posture/test_networking-e2e.bats
 # docker 의존
-tools/test/test_dev-postgres.bats
+tools/tests/test_dev-postgres.bats
 # 실 age 키 의존 (verify.yml의 ephemeral 키 셸이 대체 커버)
 tests/test_sops-roundtrip.bats
 tests/test_sops-guard.bats
@@ -18,8 +18,8 @@ platform/cnpg/prod/test_creds_reference.bats
 platform/cnpg/prod/test_drill_alerting.bats
 platform/cnpg/prod/test_kustomize_build.bats
 # terraform 의존 (gate엔 terraform 미설치 — iac.yaml advisory가 실행)
-infra/_test/test_tf_validate.bats
-infra/_test/test_tf_reconcile.bats
+infra/_tests/test_tf_validate.bats
+infra/_tests/test_tf_reconcile.bats
 infra/cloudflare/test_apps_data.bats
 # 라이브 전용 (infra 부트스트랩 — make bootstrap)
-infra/_test/test_bootstrap.bats
+infra/_tests/test_bootstrap.bats

@@ -9,7 +9,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   echo "$output" | grep -q 'platform/argocd/root/test_render.bats'
   # 제외: .ci-exclude 멤버
   ! echo "$output" | grep -q 'tests/posture/test_internal-by-default.bats'
-  ! echo "$output" | grep -q 'tools/test/test_dev-postgres.bats'
+  ! echo "$output" | grep -q 'tools/tests/test_dev-postgres.bats'
 }
 
 @test "run-bats.sh --list = all test_*.bats minus platform/charts minus .ci-exclude" {
