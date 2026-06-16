@@ -27,7 +27,9 @@ jobs:
           sudo curl -sL https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_arm64 -o /usr/local/bin/yq
           sudo chmod +x /usr/local/bin/yq
           curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-arm64.tar.gz | tar xz -C /usr/local/bin kubeconform
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          # helm은 고정 버전 tarball로 핀 — get-helm-3(latest)는 helm major가 chart-test를 깨면
+          # 유일 required check(gate)를 코드 무변경으로 막는 시한폭탄(m6-tools 하한 >=3.16과 정합).
+          curl -fsSL https://get.helm.sh/helm-v3.16.4-linux-arm64.tar.gz | tar xz -C /tmp && sudo mv /tmp/linux-arm64/helm /usr/local/bin/helm
           # data-conn/sealed-secrets/cache 컴포넌트 render 테스트가 kustomize를 부른다
           curl -sL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_arm64.tar.gz | sudo tar xz -C /usr/local/bin kustomize
           # verify:ledger가 conftest를 부른다 — 미설치로 첫 라이브 CI가 실패했던 버그

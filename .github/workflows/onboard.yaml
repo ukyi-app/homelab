@@ -45,7 +45,8 @@ jobs:
       - name: install chart toolchain (render + ledger gate)
         run: |
           curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-arm64.tar.gz | sudo tar xz -C /usr/local/bin kubeconform
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          # helm 고정 버전 핀(ci.yaml과 동일) — get-helm-3 latest는 chart-test 시한폭탄.
+          curl -fsSL https://get.helm.sh/helm-v3.16.4-linux-arm64.tar.gz | tar xz -C /tmp && sudo mv /tmp/linux-arm64/helm /usr/local/bin/helm
           # verify:ledger가 conftest를 부른다 — onboard.yaml에 누락돼 라이브 온보딩이 실패했던 버그(ci.yaml과 동일)
           curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin conftest
       - name: validate payload + scaffold (onboard-app.mjs가 모든 비신뢰 입력 검증)
