@@ -33,9 +33,10 @@ down: ## [TODO: M1] OrbStack VM 내리기
 bootstrap: ## 멱등 DR 진입점: ArgoCD + sops-age Secret + root app 설치
 	@bash scripts/bootstrap.sh
 
-verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 원장 + sops 왕복)
+verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포계약 + 원장 + sops 왕복)
 	@./scripts/check-skeleton.sh
 	@bash scripts/check-bats-accounting.sh
+	@bash scripts/check-app-deploy.sh
 	@scripts/ledger-to-json.sh docs/memory-ledger.md > /tmp/ledger.json
 	@conftest test /tmp/ledger.json --policy policy/ledger.rego
 	@bats tests/test_sops-roundtrip.bats

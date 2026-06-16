@@ -1,0 +1,45 @@
+#!/usr/bin/env bats
+# apps/<name>/deploy/prod 배포 계약 가드 — 필수 3산출물(values.yaml·.bindings.json·source-repo) +
+# source-repo 발견 계약. 인레포 배포앱 0개라 양성/음성 fixture로 체커를 검증. bash 3.2: 단언은 [ ]만.
+setup() {
+  ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  CHECK="$ROOT/scripts/check-app-deploy.sh"
+}
+
+@test "check-app-deploy passes on the real tree (in-repo deploy apps vacuously satisfy contract)" {
+  run bash "$CHECK"
+  [ "$status" -eq 0 ]
+}
+
+@test "positive fixture: deploy/prod with all 3 artifacts passes" {
+  d="$BATS_TEST_TMPDIR/app/deploy/prod"; mkdir -p "$d"
+  echo "image: {}" > "$d/values.yaml"
+  echo "{}" > "$d/.bindings.json"
+  echo "ukyi-app/myapp" > "$d/source-repo"
+  run bash "$CHECK" "$d"
+  [ "$status" -eq 0 ]
+}
+
+@test "negative fixture: missing source-repo fails (poll-ghcr would never discover the app)" {
+  d="$BATS_TEST_TMPDIR/bad/deploy/prod"; mkdir -p "$d"
+  echo "image: {}" > "$d/values.yaml"
+  echo "{}" > "$d/.bindings.json"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'source-repo'
+}
+
+@test "negative fixture: empty source-repo fails" {
+  d="$BATS_TEST_TMPDIR/empty/deploy/prod"; mkdir -p "$d"
+  echo "image: {}" > "$d/values.yaml"
+  echo "{}" > "$d/.bindings.json"
+  : > "$d/source-repo"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+}
+
+@test "poll-ghcr discovers apps by source-repo (contract: missing source-repo = never polled)" {
+  run grep -nE 'source-repo' "$ROOT/tools/poll-ghcr.mjs"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'continue'
+}
