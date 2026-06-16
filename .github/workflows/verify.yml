@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
 
+# PR엔 같은 PR의 이전 run 취소, main push는 sha 고유라 보존(queue:max 미사용 → 함정 무관).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   verify:
     runs-on: ubuntu-24.04-arm
