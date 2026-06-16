@@ -11,15 +11,14 @@ limit 합계가 이를 초과하면 새 앱 온보딩은 CI에서 실패한다 (
 | component                          | namespace      | req_mi | limit_mi |
 |------------------------------------|----------------|-------:|---------:|
 | <!-- ledger:row --> k3s+os+coredns | kube-system    |   1075 |     1740 |
-| <!-- ledger:row --> argocd         | argocd         |    594 |     1474 |
-| <!-- ledger:row --> cnpg           | database       |    952 |     1485 |
+| <!-- ledger:row --> argocd         | argocd         |    576 |     1280 |
+| <!-- ledger:row --> cnpg           | database       |    900 |     1288 |
 | <!-- ledger:row --> cert-manager   | cert-manager   |     60 |      180 |
-| <!-- ledger:row --> observability  | observability  |    850 |     1966 |
-| <!-- ledger:row --> edge           | edge           |    236 |      594 |
-| <!-- ledger:row --> media          | prod           |    133 |      389 |
+| <!-- ledger:row --> observability  | observability  |   1280 |     2560 |
+| <!-- ledger:row --> edge           | edge           |    240 |      544 |
 | <!-- ledger:row --> sealed-secrets | sealed-secrets |     32 |      128 |
 
-**합계:** req ≈ 3932 Mi · limit ≈ 7956 Mi (반드시 ≤ 8704 Mi 유지).
+**합계:** req ≈ 4163 Mi · limit ≈ 7720 Mi (반드시 ≤ 8704 Mi 유지).
 (`pg-tools`는 CronJob용 ops 이미지 — 일시적이므로 상주 워크로드 행이 없다. worker/web/console
 values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 앱은 온보딩 PR이 행을 추가한다.)
 

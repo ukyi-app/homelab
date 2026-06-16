@@ -1,18 +1,19 @@
 # ArgoCD sync-wave 원장 (전역 순서) — M3 소유
 
-낮은 wave가 먼저 sync된다. 플랫폼 전체는 CD, gateway, DNS/edge가
-stateful 계층과 앱 계층보다 먼저 올라오도록 순서가 잡혀 있다.
+낮은 wave가 먼저 sync된다. CD(-10/-9)와 gateway(traefik·sealed-secrets, -8)가 가장 먼저
+올라오고, 그 다음 stateful 계층(cert-manager -3 → cnpg -2/-1)이며, edge(cloudflared/
+tailscale/adguard, sync-wave 미지정 = 기본 0)와 observability(+2)는 그 뒤에 온다.
 
 | Wave | 컴포넌트                                                      | 담당 마일스톤   |
 |------|--------------------------------------------------------------|-----------------|
 | -10  | argocd (자기 관리 Application)                                | M3              |
 |  -9  | root (ApplicationSet을 소유하는 app-of-apps)                  | M3              |
 |  -8  | traefik (gateway): Gateway-API CRDs + RBAC + GatewayClass + Gateway; sealed-secrets (controller) | M3 |
-|  -6  | edge: cloudflared, tailscale-operator, adguard               | M3              |
 |  -3  | cert-manager: barman-plugin webhook 인증서 발급(plugin -2보다 먼저) | M4         |
 |  -2  | cnpg-operator (cnpg-system) + cnpg-barman-plugin             | M4              |
 |  -1  | cnpg Cluster (cnpg-data, database)                           | M4              |
 |  —   | CNPG-Ready = cnpg-data Application Healthy, 차트의 `wait-for-db` initContainer가 앱별로 강제 (sync-wave는 Application 경계를 넘어 게이트하지 못함) | M4/M6 |
+|  0   | edge: cloudflared, tailscale-operator, adguard (sync-wave 미지정 → platform-components ApplicationSet이 기본 wave 0로 발견; stateful 이후) | M3 |
 |  +2  | observability: victoria-stack (vmsingle/vmagent/VictoriaLogs/Vector/Grafana/vmalert/Alertmanager/node-exp/ksm) | M5 |
 
 ## 앱별 내부 wave (공유 차트, M6)

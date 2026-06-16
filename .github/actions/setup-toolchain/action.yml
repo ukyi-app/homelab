@@ -18,7 +18,7 @@ runs:
     - if: ${{ inputs.yq == 'true' }}
       shell: bash
       run: |
-        # yq는 직접 바이너리 — snap yq는 strict 컨파인이라 mktemp -d /tmp 픽스처를 못 읽는다(라이브 검증된 함정).
+        # yq는 직접 바이너리 — snap yq는 strict confinement라 mktemp -d /tmp 픽스처를 못 읽는다(라이브 검증된 함정).
         sudo curl -sL https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_arm64 -o /usr/local/bin/yq
         sudo chmod +x /usr/local/bin/yq
     - if: ${{ inputs.kubeconform == 'true' }}

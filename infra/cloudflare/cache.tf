@@ -4,7 +4,7 @@ resource "cloudflare_ruleset" "cache_rules" {
   kind        = "zone"
   phase       = "http_request_cache_settings"
   description = "Cache static assets; bypass API + SSR HTML to avoid per-user leaks."
-  # NOTE: 표현식은 starts_with()만 쓴다 — 정규식 matches 연산자는 Cloudflare Business/WAF Advanced
+  # 주의: 표현식은 starts_with()만 쓴다 — 정규식 matches 연산자는 Cloudflare Business/WAF Advanced
   #       플랜 전용이라 하위 플랜에선 ruleset apply가 400 "not entitled"로 거부된다(tf-reconcile 실패).
   rules = [
     {
