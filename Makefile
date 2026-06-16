@@ -115,7 +115,7 @@ seal-adguard-auth: ## AdGuard UI 비밀번호(.env.secrets ADGUARD_PASSWORD)를 
 	@scripts/seal-adguard-auth.sh
 
 ## --- 운영 진입점 (라이브 read-only; 변경 권위는 ArgoCD) ---
-.PHONY: argo-status argo-sync argo-terminate argo-wait render kubeconfig
+.PHONY: argo-status argo-sync argo-terminate argo-wait render kubeconfig audit
 
 argo-status: ## [ops] ArgoCD Application 목록 — sync/health/멈춘 operation phase
 	@KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd get applications \
@@ -138,3 +138,6 @@ render: ## [ops] COMP= KSOPS 풀 렌더(복호 읽기, 라이브 무영향). 예
 
 kubeconfig: ## [ops] 라이브 kubeconfig export 출력 — eval "$$(make kubeconfig)"로 셸에 적용
 	@echo 'export KUBECONFIG=$(KUBECONFIG_LIVE)'
+
+audit: ## [ops] 레포 정적 드리프트 감사(registry↔매니페스트↔바인딩↔원장, 읽기 전용)
+	@node tools/audit-orphans.mjs
