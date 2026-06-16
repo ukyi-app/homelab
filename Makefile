@@ -49,9 +49,20 @@ tf-validate: ## 모든 infra 루트에 terraform fmt -check + validate 실행
 	  echo "$$r: validated"; \
 	done
 
-.PHONY: seed-secrets
-seed-secrets: ## terraform output에서 SOPS 암호화 시드 시크릿 생성
-	@bash scripts/seed-secrets.sh
+.PHONY: seed-secrets secret-edit verify-secrets
+seed-secrets: ## [secret] terraform output + .env.secrets에서 SOPS 암호화 시드 시크릿 생성
+	@[ -f .env.secrets ] || { echo "seed-secrets: .env.secrets 없음 (cp .env.secrets.example .env.secrets 후 채우기)"; exit 1; }
+	@set -a; . ./.env.secrets; set +a; bash scripts/seed-secrets.sh
+
+secret-edit: ## [secret] FILE= SOPS 파일을 복호→편집→재암호화(sops 내장, 평문 디스크 미기록). 사람 전용(인터랙티브)
+	@test -n "$(FILE)" || { echo "FILE=<path>.enc.yaml 필요"; exit 1; }
+	@case "$(FILE)" in *.enc.yaml) : ;; *) echo "secret-edit: $(FILE) 는 *.enc.yaml 아님"; exit 1 ;; esac
+	@test -f "$(FILE)" || { echo "secret-edit: $(FILE) 없음"; exit 1; }
+	@test -f "$(SOPS_AGE_KEY_FILE)" || { echo "secret-edit: age 키 없음: $(SOPS_AGE_KEY_FILE)"; exit 1; }
+	SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) sops "$(FILE)"
+
+verify-secrets: ## [secret] 추적 *.enc.yaml 무결성(암호화 + recipient 2개 + 복호가능) 검사 — 값 미출력
+	@bash scripts/verify-secrets.sh
 
 .PHONY: bootstrap-deadmanswitch
 bootstrap-deadmanswitch: ## [M5] 노드 외부 dead-man's-switch ping URL 시드 여부 검증 (R8)
