@@ -17,7 +17,7 @@
 | NetworkPolicy ipBlock pod-CIDR → default-deny 무력화 | gate | `platform/network-policies/prod/test_netpol.bats`, `platform/cnpg/prod/test_networkpolicy.bats` |
 | CNPG Pooler 예약 파라미터(pool_mode) → poolMode 필드 | gate | `platform/cnpg/prod/test_pooler.bats` |
 | CNPG pg_hba replication(postgres) — pg_basebackup 허용 | gate | `platform/cnpg/prod/test_basebackup.bats` |
-| busybox 1.36 nc에 -q 없음(relay 리스너) | gate | `platform/victoria-stack/test_relay.bats` |
+| busybox 1.36 nc에 -q 없음(relay 리스너) | gate | `platform/victoria-stack/prod/test_relay.bats` |
 | vmalert configCheckInterval 없으면 룰 자동 reload 안 함 | gate | `tests/gates/test_vmalert-config.bats` |
 | Alertmanager telegram: 자동 HTML-escape(이중 escape 금지) + 계약 | gate | `tests/gates/alertmanager-render-e2e.sh`, `tests/gates/test_telegram-notify.bats`, `tests/gates/test_telegram-alert-korean.bats`, `tests/gates/test_telegram-callsites.bats` |
 | GitHub Actions client_payload는 비신뢰 입력(env 경유+regex) | gate | `tests/gates/test_dispatcher.bats`, `tools/tests/test_validate-mutation.bats` |

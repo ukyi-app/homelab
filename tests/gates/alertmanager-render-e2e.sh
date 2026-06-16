@@ -21,7 +21,7 @@ trap cleanup EXIT
 
 # 1) CI-safe config 추출(KSOPS 미경유) + 더미 chat_id + api_url→mock + group_wait 축소
 yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' \
-   platform/victoria-stack/alertmanager.yaml > "$TMP/am.yml"
+   platform/victoria-stack/prod/alertmanager.yaml > "$TMP/am.yml"
 sed 's/__CHAT_ID__/-1001234567890/' "$TMP/am.yml" > "$TMP/am.rendered.yml"
 mv "$TMP/am.rendered.yml" "$TMP/am.yml"
 yq -i '(.receivers[]|select(.name=="telegram").telegram_configs[].api_url)="http://host.docker.internal:8089"' "$TMP/am.yml"

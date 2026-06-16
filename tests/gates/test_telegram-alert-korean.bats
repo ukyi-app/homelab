@@ -7,7 +7,7 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  RULES="$ROOT/platform/victoria-stack/rules"
+  RULES="$ROOT/platform/victoria-stack/prod/rules"
 }
 
 @test "core.yaml summaries all contain Korean" {

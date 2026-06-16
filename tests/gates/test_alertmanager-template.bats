@@ -7,7 +7,7 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  AM="$ROOT/platform/victoria-stack/alertmanager.yaml"
+  AM="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
   # ⚠️ AM 파일은 멀티-도큐먼트(ConfigMap+Deployment+Service) — select로 ConfigMap만 좁힌다.
   # (안 하면 Deployment/Service에 .data가 null 도큐먼트로 섞여 카운트/추출이 깨진다.)
   MSG="$(yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' "$AM" \
@@ -76,7 +76,7 @@ setup() {
 }
 
 @test "core rules alert on telegram notification failures and document Watchdog boundary" {
-  CORE="$ROOT/platform/victoria-stack/rules/core.yaml"
+  CORE="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
   body="$(yq '.data["core.yaml"]' "$CORE")"
   printf '%s' "$body" | grep -q 'alert: AlertmanagerTelegramFailing'
   printf '%s' "$body" | grep -q 'alertmanager_notifications_failed_total{integration="telegram"}'
@@ -95,7 +95,7 @@ setup() {
   # kustomize build는 CI에 없는 ksops 바이너리+age 키를 요구해 환경 사유로 실패한다(교차검증 Finding 1).
   # alertmanager.yaml은 멀티-도큐먼트(ConfigMap+Deployment+Service) — ConfigMap만 선택.
   yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' \
-      "$ROOT/platform/victoria-stack/alertmanager.yaml" > "$tmp/raw.yml"
+      "$ROOT/platform/victoria-stack/prod/alertmanager.yaml" > "$tmp/raw.yml"
   [ -s "$tmp/raw.yml" ]
   # init sed 모사: placeholder → 더미 int64 chat_id (amtool은 chat_id를 정수로 파싱).
   sed 's/__CHAT_ID__/-1001234567890/' "$tmp/raw.yml" > "$tmp/alertmanager.yml"

@@ -6,7 +6,7 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  VMALERT="$ROOT/platform/victoria-stack/vmalert.yaml"
+  VMALERT="$ROOT/platform/victoria-stack/prod/vmalert.yaml"
 }
 
 @test "vmalert auto-reloads rule files on change (configCheckInterval set)" {
@@ -15,17 +15,17 @@ setup() {
 
 @test "vmagent auto-reloads scrape config on change (promscrape.configCheckInterval set)" {
   # 없으면 scrape config(ConfigMap) 변경이 rollout restart 전까지 반영 안 됨(silent staleness).
-  grep -q 'promscrape.configCheckInterval' "$ROOT/platform/victoria-stack/vmagent.yaml"
+  grep -q 'promscrape.configCheckInterval' "$ROOT/platform/victoria-stack/prod/vmagent.yaml"
 }
 
 @test "pod-annotations scrape honors target labels (KSM namespace/pod not clobbered to observability)" {
   # honor_labels 없으면 kube_* 메트릭 namespace가 전부 observability가 돼 namespace 필터/조인이 깨진다
   # (PostgresClusterDown 오발화·PodOOMKilled join 고장의 라이브 검증된 원인).
-  grep -q 'honor_labels: true' "$ROOT/platform/victoria-stack/vmagent-scrape-config.yaml"
+  grep -q 'honor_labels: true' "$ROOT/platform/victoria-stack/prod/vmagent-scrape-config.yaml"
 }
 
 @test "crown-jewel DB liveness + non-OOM crashloop alerts are defined" {
-  C="$ROOT/platform/victoria-stack/rules/core.yaml"
+  C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
   grep -q 'alert: PostgresClusterDown' "$C"          # 단일 인스턴스 pg 생존 페이징
   grep -q 'cnpg_collector_up' "$C"                    # pg-1에서 직접 scrape돼 라벨 정확(KSM clobbering 회피)
   grep -q 'absent(cnpg_collector_up' "$C"             # 스크레이프 단절 fail-closed 가드
@@ -37,14 +37,14 @@ setup() {
 }
 
 @test "fourth backup (pgdump hedge) has a staleness alert like the other three" {
-  R="$ROOT/platform/victoria-stack/rules/r4-storage-backup.yaml"
+  R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   grep -q 'alert: PgDumpHedgeStale' "$R"
   grep -q 'pg-dump-hedge-r2' "$R"
   grep -q 'kube_job_status_completion_time' "$R"
 }
 
 @test "disk-fill alerts carry a disk label so a critical inhibits the matching warning" {
-  R="$ROOT/platform/victoria-stack/rules/r4-storage-backup.yaml"
+  R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   # bulk-ssd 알림은 제거됨(virtiofs 집계라 측정 불가 — 죽은 알림). 잔존 금지.
   run grep -q 'disk: bulk-ssd' "$R"; [ "$status" -ne 0 ]
   # standard 디스크는 warning(StandardSSDWarning/Trend)+critical(StandardSSDFilling)이 같은 disk 라벨을
@@ -55,7 +55,7 @@ setup() {
 }
 
 @test "PVC saturation is monitored at the backing filesystem, not kubelet_volume_stats (hostPath PVs)" {
-  R="$ROOT/platform/victoria-stack/rules/r4-storage-backup.yaml"
+  R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   # hostPath PV라 kubelet_volume_stats_*가 원천 부재 — 그 메트릭 의존 룰 금지(불가능한 접근 재도입 차단).
   # expr 형태(메트릭 접미사 '_')만 매치 — 주석의 설명 언급은 허용(core.yaml 선례와 동일).
   run grep -q 'kubelet_volume_stats_' "$R"; [ "$status" -ne 0 ]
@@ -69,7 +69,7 @@ setup() {
 }
 
 @test "WAL volume saturation uses the live CNPG WAL-size collector, not deprecated backup metrics" {
-  R="$ROOT/platform/victoria-stack/rules/r4-storage-backup.yaml"
+  R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   grep -q 'alert: WALVolumeFilling' "$R"
   # WAL 볼륨 충전율: CNPG가 직접 export하는 size/volume_size(라이브). disk:pgwal로 분리해 루트 critical이 inhibit 안 함.
   grep -q 'cnpg_collector_pg_wal{value="size"}' "$R"
@@ -80,7 +80,7 @@ setup() {
 }
 
 @test "observability self-monitoring alerts defined and 4 components self-scraped" {
-  C="$ROOT/platform/victoria-stack/rules/core.yaml"
+  C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
   grep -q 'alert: LogIngestionStalled' "$C"        # vector→VL 침묵 실패 감지
   grep -q 'vl_rows_ingested_total' "$C"
   grep -q 'alert: VmagentRemoteWriteDropping' "$C"  # 메트릭 유실
@@ -88,13 +88,13 @@ setup() {
   grep -q 'alert: KubeJobFailed' "$C"               # 전용 staleness 없는 Job 실패(cache-backup 등)
   # self-scrape 주석 — 위 self-metric이 TSDB에 들어가려면 4개 컴포넌트가 scrape돼야 한다.
   for comp in vmsingle vmagent vmalert victorialogs; do
-    grep -q 'prometheus.io/scrape: "true"' "$ROOT/platform/victoria-stack/$comp.yaml"
+    grep -q 'prometheus.io/scrape: "true"' "$ROOT/platform/victoria-stack/prod/$comp.yaml"
   done
 }
 
 @test "cert-manager TLS expiry alerts defined and wired into vmalert" {
-  R="$ROOT/platform/victoria-stack/rules/r5-cert-tls.yaml"
-  V="$ROOT/platform/victoria-stack/vmalert.yaml"
+  R="$ROOT/platform/victoria-stack/prod/rules/r5-cert-tls.yaml"
+  V="$ROOT/platform/victoria-stack/prod/vmalert.yaml"
   # 4 룰: wildcard critical + 전 cert catch-all + NotReady + absent fail-closed.
   grep -q 'alert: CertWildcardExpiringSoon' "$R"
   grep -q 'alert: CertExpiringSoon' "$R"
