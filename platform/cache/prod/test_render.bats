@@ -60,6 +60,13 @@ build() { kustomize build "$DIR"; }
   echo "$output" | grep -q "kind: RoleBinding"
 }
 
+@test "backup r2-creds secret is optional so a no-cache cluster no-ops instead of failing" {
+  # 캐시 인스턴스 0개면 cache-r2-creds 봉인이 없는 게 정상 — optional이 아니면 upload 컨테이너가
+  # CreateContainerConfigError로 영영 못 떠 Job이 DeadlineExceeded로 매일 실패(KubeJobFailed 노이즈).
+  opt="$(build | yq 'select(.kind=="CronJob") | .spec.jobTemplate.spec.template.spec.containers[] | select(.name=="upload") | .envFrom[] | select(.secretRef.name=="cache-r2-creds") | .secretRef.optional')"
+  [ "$opt" = "true" ]
+}
+
 @test "prod namespace opens egress to cache:6379 and namespaces owns the cache namespace" {
   grep -q "allow-egress-to-cache" "$ROOT/platform/network-policies/prod/networkpolicies.yaml"
   grep -q "name: cache" "$ROOT/platform/namespaces/prod/namespaces.yaml"
