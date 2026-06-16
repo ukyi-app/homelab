@@ -38,8 +38,19 @@ build/
 *.tsbuildinfo
 .pnpm-store/
 
-# --- Local Claude tooling / runtime state ---
-.claude/
+# --- Claude Code 하네스 / 런타임 상태 ---
+# 런타임/세션/크레덴셜은 통째 무시하되, 추적할 하네스 자산만 화이트리스트로 되살린다.
+# 디렉토리 매치(.claude/)는 하위 부정(!)을 무력화하므로 반드시 `.claude/*`(직접 자식)형으로.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+!.claude/hooks/**
+!.claude/agents/
+!.claude/agents/**
+!.claude/commands/
+!.claude/commands/**
+!.claude/skills/
+!.claude/skills/**
 
 # --- OS / editor ---
 .DS_Store
