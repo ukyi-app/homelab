@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-DF="apps/pg-tools/Dockerfile"
+DF="ops/pg-tools/Dockerfile"
 
 @test "pg-tools Dockerfile installs kubectl, psql(16), rclone, curl" {
   run grep -iE 'kubectl' "$DF"; [ "$status" -eq 0 ]
