@@ -12,6 +12,7 @@
 | 함정 (AGENTS.md) | where | guard |
 |---|---|---|
 | ArgoCD sync-wave 순서/교착 + 원장 드리프트 | gate | `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats` |
+| SSA atomic 리스트(HTTPRoute group/kind/weight) 영구 OutOfSync | gate | `platform/adguard/prod/test_adguard_route.bats` |
 | PSA baseline가 hostPath/hostPID 금지(privileged 전용) | gate | `platform/namespaces/prod/test_psa.bats` |
 | NetworkPolicy ipBlock pod-CIDR → default-deny 무력화 | gate | `platform/network-policies/prod/test_netpol.bats`, `platform/cnpg/prod/test_networkpolicy.bats` |
 | CNPG Pooler 예약 파라미터(pool_mode) → poolMode 필드 | gate | `platform/cnpg/prod/test_pooler.bats` |
@@ -20,11 +21,12 @@
 | vmalert configCheckInterval 없으면 룰 자동 reload 안 함 | gate | `tools/test/vmalert-config.bats` |
 | Alertmanager telegram: 자동 HTML-escape(이중 escape 금지) + 계약 | gate | `tools/test/alertmanager-render-e2e.sh`, `tools/test/telegram-notify.bats`, `tools/test/telegram-alert-korean.bats`, `tools/test/telegram-callsites.bats` |
 | GitHub Actions client_payload는 비신뢰 입력(env 경유+regex) | gate | `tools/test/dispatcher.bats`, `tools/test/validate-mutation.bats` |
+| concurrency queue:max ↔ cancel-in-progress 병용 불가(dispatcher 직렬화) | gate | `tools/test/dispatcher.bats` |
 | 워크플로 YAML colon-in-unquoted-name 문법 깨짐 | gate | `tools/test/workflow-yaml.bats` |
 | 메모리 원장 예산(limit 합계 ≤ 8704Mi) | gate | `policy/ledger.rego`, `tools/test/ledger-gate.bats` |
 | AdGuard setcap 바이너리 ↔ allowPrivilegeEscalation 양립불가 | gate | `platform/adguard/prod/test_adguard_auth.bats` |
 | enc.yaml 평문 직접 수정 금지(SOPS MAC) | gate+verify | `scripts/sops-guard.sh`, `.claude/hooks/manifest-guard.sh`, `tools/test/manifest-guard.bats`, `tools/test/verify-secrets.bats` |
-| SOPS 왕복(암호화 후 복호 동일) | verify | `tests/sops-roundtrip.bats` |
+| SOPS 왕복(암호화 후 복호 동일) | local | `tests/sops-roundtrip.bats` |
 | `.claude/` 선택적 un-ignore(하네스 추적/런타임 무시) | gate | `tools/test/claude-harness-tracked.bats` |
 | make ci ↔ ci.yaml gate 8스텝 패리티 | gate | `tools/test/make-ci-parity.bats` |
 | DR drill 안전 불변식(R5, 라이브 파괴 없이) | gate | `tests/dr-drill.bats` |

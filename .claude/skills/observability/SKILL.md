@@ -29,5 +29,5 @@ description: 이 홈랩 레포의 관측 스택(victoria-stack)을 디버그할 
 ## 진단 후
 - ConfigMap(relay 스크립트 등) 변경은 파드 자동 재시작이 없다 → `kubectl rollout restart`.
 - `envFrom` 시크릿 변경도 파드 재시작이 있어야 반영.
-- 매니페스트 확인은 `make render COMP=victoria-stack`(KSOPS 풀 렌더).
+- 매니페스트 확인은 `kustomize build --enable-helm --enable-alpha-plugins --enable-exec platform/victoria-stack`(SOPS_AGE_KEY_FILE 설정 후). victoria-stack은 kustomization이 컴포넌트 루트에 있어 `make render COMP=`의 `/prod` 가정과 다르다.
 - 시크릿 값/`*.enc.yaml` 평문은 출력하지 않는다.

@@ -17,7 +17,7 @@ spec:
     targetRevision: main
     path: platform/cnpg/barman-plugin
     # directory.recurse=false(zero-value)를 명시하면 컨트롤러의 spec 정규화가 매번 삭제하고
-    # root의 selfHeal이 되살리는 플립플롭이 된다 (라이브 generation 1111 검증) — 기본값이므로 생략.
+    # root의 selfHeal이 되살리는 플립플롭이 된다(라이브 generation 1111 검증) — 기본값이므로 생략.
   destination:
     server: https://kubernetes.default.svc
     namespace: cnpg-system

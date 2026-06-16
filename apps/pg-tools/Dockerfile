@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# CNPG 백업/복구 도구용 운영(ops) 이미지.
-# Milestone 4의 restore-drill CronJob과 pg_dump→rclone→R2 헤지가 사용한다.
+# kubectl/psql/rclone 기반 운영(ops) 이미지 (Postgres 백업/복구 + 캐시 백업).
+# Milestone 4의 restore-drill CronJob·pg_dump→rclone→R2 헤지와 캐시(Valkey) 백업 CronJob이 사용한다.
 # ghcr.io/<owner>/pg-tools:16-rclone으로 게시된다 (Task 6.15 matrix 참조).
 FROM debian:bookworm-slim
 

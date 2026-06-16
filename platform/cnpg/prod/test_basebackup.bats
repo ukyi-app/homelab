@@ -27,3 +27,11 @@ cj=platform/cnpg/prod/basebackup-cronjob.yaml
   grep -qF 'drop: [ALL]' "$cj"
   grep -q 'type: RuntimeDefault' "$cj"
 }
+
+@test "cluster pg_hba allows postgres replication so pg_basebackup can connect" {
+  # CNPG 기본 pg_hba는 replication을 streaming_replica(cert)만 허용 — postgres 유저의 replication
+  # 연결이 거부돼 pg_basebackup이 실패한다(라이브 함정). cluster.yaml의 두 줄이 사라지면 여기서 잡힌다.
+  cluster=platform/cnpg/prod/cluster.yaml
+  grep -qE 'hostssl replication postgres' "$cluster"
+  grep -qE '\bhost replication postgres' "$cluster"
+}
