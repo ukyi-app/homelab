@@ -1,7 +1,7 @@
 # 0003 — required status check는 `gate` 단일
 
 - 상태: 수용(accepted)
-- 관련: `infra/github/repo.tf`(`contexts=["gate"]`), `.github/workflows/ci.yaml`(job `gate`), `tools/test/test_make-ci-parity.bats`
+- 관련: `infra/github/repo.tf`(`contexts=["gate"]`), `.github/workflows/ci.yaml`(job `gate`), `tests/gates/test_make-ci-parity.bats`
 
 ## 맥락
 여러 워크플로가 PR에서 돈다 — `ci`(job `gate`), `verify`, `iac`(plan/validate). branch protection의

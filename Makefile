@@ -103,7 +103,7 @@ ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate'를 �
 	node tools/audit-orphans.mjs --ci
 	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
-	@if command -v docker >/dev/null 2>&1; then bash tools/test/alertmanager-render-e2e.sh; \
+	@if command -v docker >/dev/null 2>&1; then bash tests/gates/alertmanager-render-e2e.sh; \
 	  else echo "ci: docker 없음 → telegram-render-e2e 스킵(gate에선 실행됨)" >&2; fi
 
 .PHONY: reset-pg-archive

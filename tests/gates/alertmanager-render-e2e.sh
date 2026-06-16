@@ -32,7 +32,7 @@ printf '%s' 'dummy-bot-token' > "$TMP/TELEGRAM_BOT_TOKEN"
 chmod 755 "$TMP"; chmod 644 "$TMP/am.yml" "$TMP/TELEGRAM_BOT_TOKEN"
 
 # 2) mock telegram: POST body 캡처(form/json 디코드)
-python3 tools/test/mock-telegram.py "$TMP/capture.txt" 8089 & MOCK_PID=$!
+python3 tests/gates/mock-telegram.py "$TMP/capture.txt" 8089 & MOCK_PID=$!
 
 # 3) AM 컨테이너(token 파일 마운트, host.docker.internal 매핑, 9093 publish).
 docker run -d --rm --name am-render-e2e \
@@ -68,7 +68,7 @@ wait_capture() { # capture.txt가 채워질 때까지(최대 30s)
 
 # 5) firing 주입 + 계약 단언
 : > "$TMP/capture.txt"
-inject tools/test/fixtures/alerts-firing.json
+inject tests/gates/fixtures/alerts-firing.json
 wait_capture
 body="$(cat "$TMP/capture.txt")"
 grep -q 'parse_mode=HTML'        <<<"$body"
@@ -87,7 +87,7 @@ grep -q '→ https://home.example/runbook/oom' <<<"$body"  # 링크
 
 # 6) 미매핑 alertname → summary가 한국어 제목으로 렌더되는지
 : > "$TMP/capture.txt"
-inject tools/test/fixtures/alerts-unmapped.json
+inject tests/gates/fixtures/alerts-unmapped.json
 wait_capture
 body2="$(cat "$TMP/capture.txt")"
 grep -q '<b>텔레그램 스모크 테스트</b>' <<<"$body2"   # 미매핑 → summary가 제목으로
@@ -95,7 +95,7 @@ grep -q '⚠️'                          <<<"$body2"   # warning 글리프
 
 # 7) resolved 경로(send_resolved:true) — 🔵 해소로 렌더되는지
 : > "$TMP/capture.txt"
-inject tools/test/fixtures/alerts-resolved.json
+inject tests/gates/fixtures/alerts-resolved.json
 wait_capture
 body3="$(cat "$TMP/capture.txt")"
 grep -q '🔵' <<<"$body3"
