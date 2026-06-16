@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmalert-rules-r5
+  labels: { vmalert-rule: "true" }
+data:
+  r5.yaml: |
+    groups:
+      - name: certificates
+        rules:
+          # cert-manager TLS 인증서 생존성. cert-manager는 renewBefore(LE 30일/selfsigned 15일) 전부터
+          # 자동갱신+재시도하나, 갱신이 외부 의존(ACME 도달성·Cloudflare API 토큰·LE rate-limit·DNS-01 TXT)
+          # 으로 *조용히* 실패하면 owner에게 알림이 없다. 만료 시 home-wildcard는 Gateway web-internal-tls가
+          # 참조 → *.home.ukyi.app 전체 HTTPS가 tailscale+LAN에서 동시 파손(단일노드 SPOF). 메트릭은
+          # cert-manager :9402를 pod-annotations로 스크레이프(honor_labels가 cert별 name/namespace 보존).
+          # 임계는 전부 renewBefore 버퍼 안쪽이라 정상 자동갱신 시 무발화(오발화 0).
+
+          # 와일드카드(*.home.ukyi.app) 만료 절벽 — blast radius 최고. 14일<LE renewBefore 30일이라
+          # 30일 전 갱신이 막혀 16일 더 지나야 발화(=갱신 silent 실패의 신뢰성 있는 신호). ready_status는
+          # 기존 cert가 유효한 동안 True로 남아 이 절벽을 못 잡으므로 expiration 절대값이 권위 backstop.
+          - alert: CertWildcardExpiringSoon
+            expr: |
+              (certmanager_certificate_expiration_timestamp_seconds{name="home-wildcard"} - time()) < 1209600
+            for: 1h
+            labels: { severity: critical }
+            annotations:
+              summary: "와일드카드 TLS 만료 임박: {{ $labels.namespace }}/{{ $labels.name }} 14일 미만"
+              description: "home-wildcard(*.home.ukyi.app) 인증서가 14일 내 만료입니다 — cert-manager의 30일 전 자동갱신이 막혔다는 뜻입니다. 만료되면 Gateway web-internal-tls가 이 cert를 참조해 grafana/adguard 등 *.home.ukyi.app 전체 HTTPS가 tailscale·LAN에서 파손됩니다. ACME 도달성·Cloudflare API 토큰 유효성·LE rate-limit·DNS-01 TXT 전파를 확인하고 cmctl renew home-wildcard로 강제 갱신하세요."
+          # 전 cert 7일 절벽 catch-all(selfsigned barman 2종 포함). 7일<selfsigned renewBefore 15일이라
+          # 정상 재서명 시 무발화. NotReady/WildcardExpiringSoon이 놓친 신규 cert·끝내 실패한 갱신의 최종 그물.
+          - alert: CertExpiringSoon
+            expr: |
+              (certmanager_certificate_expiration_timestamp_seconds - time()) < 604800
+            for: 1h
+            labels: { severity: warning }
+            annotations:
+              summary: "TLS 인증서 만료 임박: {{ $labels.namespace }}/{{ $labels.name }} 7일 미만"
+              description: "인증서가 7일 내 만료입니다 — 모든 자동갱신(LE 30일/selfsigned 15일 renewBefore)이 실패했다는 뜻입니다. barman-cloud-*(자가서명 mTLS)면 만료 시 R2 백업/WAL 아카이빙이 중단됩니다(R2BackupStale/WALArchiveStalled도 동반 발화). cmctl renew {{ $labels.name }} -n {{ $labels.namespace }}로 강제 갱신하세요."
+          # 발급/갱신이 실제로 실패해 cert가 NotReady가 된 즉시(1차 신호). condition="True"==0만이 올바른
+          # not-ready 형태(False/Unknown==0은 비활성 시리즈라 항상 매치 → 오발화). scrape 전손은 아래 절벽
+          # 룰의 absent가 잡으므로 여기선 ==0만(전손 시 시리즈 자체가 사라져 매치 안 됨 — fail-open 회피는 분리).
+          - alert: CertManagerCertNotReady
+            expr: |
+              certmanager_certificate_ready_status{condition="True"} == 0
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "TLS 인증서 NotReady: {{ $labels.namespace }}/{{ $labels.name }}"
+              description: "cert-manager Certificate가 15분 넘게 Ready=True가 아닙니다 — 발급 또는 갱신이 실패했습니다(ACME order 실패·DNS-01 거부·자가서명 재서명 고장 등). 만료 전이면 기존 cert가 아직 서빙 중일 수 있으나 갱신 파이프라인이 깨진 상태입니다. kubectl -n {{ $labels.namespace }} describe certificate {{ $labels.name }}로 원인을 확인하세요."
+          # fail-closed 가드: cert-manager 메트릭 전손(컨트롤러 다운·스크레이프 단절) 시 위 만료/NotReady 룰이
+          # silent 무발화가 되는 가장 위험한 시나리오를 fail-loud로 페이징. absent는 라벨이 없어 별도 룰로 분리
+          # (OR로 묶으면 만료 룰의 name/namespace 라벨이 비어 메시지 품질이 떨어진다 — 검증에서 지적).
+          - alert: CertMetricsAbsent
+            expr: |
+              absent(certmanager_certificate_expiration_timestamp_seconds)
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "cert-manager 인증서 메트릭 부재(만료 감시 차단)"
+              description: "certmanager_certificate_expiration_timestamp_seconds 메트릭이 사라졌습니다 — cert-manager 컨트롤러 다운 또는 스크레이프 경로 단절입니다(1차 신호는 TargetDown). TLS 만료 가시성이 fail-closed로 차단된 상태라 만료 절벽을 못 보게 됩니다. cert-manager 파드와 pod-annotations 스크레이프를 확인하세요."

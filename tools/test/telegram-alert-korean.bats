@@ -46,6 +46,24 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "r5-cert-tls summaries all contain Korean" {
+  run bash -c '
+    yq -r ".data[\"r5.yaml\"]" "'"$RULES"'/r5-cert-tls.yaml" \
+      | yq -r ".. | select(has(\"summary\")) | .summary" \
+      | LC_ALL=C grep -vn "[^ -~]"'
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "r5-cert-tls descriptions all contain Korean" {
+  run bash -c '
+    yq -r ".data[\"r5.yaml\"]" "'"$RULES"'/r5-cert-tls.yaml" \
+      | yq -r ".. | select(has(\"description\")) | .description" \
+      | LC_ALL=C grep -vn "[^ -~]"'
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
 @test "r6-ci-staleness summaries all contain Korean" {
   run bash -c '
     yq -r ".data[\"r6.yaml\"]" "'"$RULES"'/r6-ci-staleness.yaml" \
@@ -65,7 +83,7 @@ setup() {
 }
 
 @test "every rule with annotations has both summary and description (non-empty)" {
-  for spec in "core.yaml:core.yaml" "r4.yaml:r4-storage-backup.yaml" "r6.yaml:r6-ci-staleness.yaml"; do
+  for spec in "core.yaml:core.yaml" "r4.yaml:r4-storage-backup.yaml" "r5.yaml:r5-cert-tls.yaml" "r6.yaml:r6-ci-staleness.yaml"; do
     key="${spec%%:*}"; file="${spec##*:}"
     run bash -c '
       yq -r ".data[\"'"$key"'\"]" "'"$RULES"'/'"$file"'" \
