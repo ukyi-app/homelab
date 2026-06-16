@@ -9,6 +9,10 @@ ifneq ($(wildcard $(MISE_SHIMS)/node),)
 export PATH := $(MISE_SHIMS):$(PATH)
 endif
 
+# 라이브 클러스터 접근(읽기 전용 운영 타겟 전용). 변경 권위는 ArgoCD — 절대 kubectl apply 금지.
+KUBECONFIG_LIVE := $(PWD)/infra/k3s-bootstrap/kubeconfig
+SOPS_AGE_KEY_FILE ?= $(HOME)/.config/sops/age/keys.txt
+
 .PHONY: help bootstrap up down verify host-up
 
 help: ## 사용 가능한 타겟 목록 출력
@@ -98,3 +102,28 @@ reset-pg-archive: ## [DR ④] R2 serverName pg 아카이브 정리(재구축 후
 .PHONY: seal-adguard-auth
 seal-adguard-auth: ## AdGuard UI 비밀번호(.env.secrets ADGUARD_PASSWORD)를 bcrypt 봉인 → adguard-auth SealedSecret
 	@scripts/seal-adguard-auth.sh
+
+## --- 운영 진입점 (라이브 read-only; 변경 권위는 ArgoCD) ---
+.PHONY: argo-status argo-sync argo-terminate argo-wait render kubeconfig
+
+argo-status: ## [ops] ArgoCD Application 목록 — sync/health/멈춘 operation phase
+	@KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd get applications \
+	  -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,OPERATION:.status.operationState.phase
+
+argo-sync: ## [ops] APP= 명시 sync 트리거(retry 소진 후 재시도). 예: make argo-sync APP=cnpg
+	@test -n "$(APP)" || { echo "APP=<application> 필요 (make argo-status로 이름 확인)"; exit 1; }
+	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd patch app $(APP) --type merge -p '{"operation":{"sync":{}}}'
+
+argo-terminate: ## [ops] APP= 멈춘 operation 종료(phase=Terminating). 예: make argo-terminate APP=cnpg
+	@test -n "$(APP)" || { echo "APP=<application> 필요"; exit 1; }
+	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd patch app $(APP) --subresource status --type merge -p '{"status":{"operationState":{"phase":"Terminating"}}}'
+
+argo-wait: ## [ops] Application이 Healthy 될 때까지 대기(APP= 미지정 시 전체)
+	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy application $(if $(APP),$(APP),--all) --timeout=300s
+
+render: ## [ops] COMP= KSOPS 풀 렌더(복호 읽기, 라이브 무영향). 예: make render COMP=cnpg
+	@test -n "$(COMP)" || { echo "COMP=<component> 필요 (platform/<COMP>/prod)"; exit 1; }
+	SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) kustomize build --enable-helm --enable-alpha-plugins --enable-exec platform/$(COMP)/prod
+
+kubeconfig: ## [ops] 라이브 kubeconfig export 출력 — eval "$$(make kubeconfig)"로 셸에 적용
+	@echo 'export KUBECONFIG=$(KUBECONFIG_LIVE)'
