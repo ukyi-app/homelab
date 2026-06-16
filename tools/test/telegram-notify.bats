@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# telegram-notify composite action — message contract + escaping + lexicon + cap.
-# ⚠️ bash 3.2: mid-test assertions use [ ] only ([[ ]] failures pass silently).
-# The action's logic is in notify.sh; DRY_RUN=1 prints the assembled payload instead of curling.
+# telegram-notify composite action 테스트 — 메시지 계약·escape·용어집·cap.
+# ⚠️ bash 3.2: 중간 단언은 [ ]만 사용 — [[ ]] 실패는 침묵 통과.
+# action 로직은 notify.sh에 있고, DRY_RUN=1이면 curl 대신 조립된 payload를 출력한다.
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"

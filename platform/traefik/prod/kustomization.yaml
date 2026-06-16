@@ -7,11 +7,11 @@ namespace: gateway # traefik-prod Application의 권위 있는(authoritative) �
 resources:
   - gateway-api-crds.yaml
   - rbac-gateway.yaml
-  - gateway.yaml # Task 3.4에서 추가
-  - gatewayclass.yaml # Task 3.4에서 추가
-  - whoami-smoke.yaml # Task 3.5에서 추가
+  - gateway.yaml
+  - gatewayclass.yaml
+  - whoami-smoke.yaml
   - cert-issuer.yaml # *.home.ukyi.app 와일드카드 (internal HTTPS)
 
 generators:
-  - helmrelease.yaml # Task 3.4에서 추가
+  - helmrelease.yaml
   - secret-generator.yaml # cloudflare-api-token (cert-manager DNS-01)
