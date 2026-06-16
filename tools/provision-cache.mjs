@@ -26,6 +26,11 @@ const name = arg("--name");
 const ROOT = arg("--repo-root", ".");
 const CERT = arg("--cert", `${ROOT}/tools/sealed-secrets-cert.pem`);
 const rawMaxmemory = arg("--maxmemory-mi", "64");
+// 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시하고 디폴트를 적용한다.
+const ALLOWED_FLAGS = new Set(["--dry-run", "--name", "--repo-root", "--cert", "--maxmemory-mi"]);
+for (const a of process.argv.slice(2)) {
+  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
+}
 const maxmemoryMi = Number(rawMaxmemory);
 
 const fail = (msg) => { console.error(`::error::provision-cache: ${msg}`); process.exit(1); };

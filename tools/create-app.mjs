@@ -18,6 +18,11 @@ const ROOT = arg("--repo-root", ".");
 const tag = arg("--tag");
 const digest = arg("--digest");
 const sealedPath = arg("--sealed");
+// 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시하고 디폴트를 적용한다.
+const ALLOWED_FLAGS = new Set(["--dry-run", "--config", "--app", "--repo", "--domain", "--repo-root", "--tag", "--digest", "--sealed"]);
+for (const a of process.argv.slice(2)) {
+  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
+}
 if (!configPath || !app || !repo || !DOMAIN || !tag || !digest) {
   console.error("usage: create-app --config <.app-config.yml> --app <name> --repo <owner/app> --domain <apex> --tag sha-<gitsha> --digest sha256:<hex> [--sealed <file>] [--repo-root <dir>] [--dry-run]");
   process.exit(2);

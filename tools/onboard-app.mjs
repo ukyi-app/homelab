@@ -13,6 +13,11 @@ const DRY = process.argv.includes("--dry-run");
 const payloadPath = arg("--payload");
 const DOMAIN = arg("--domain");
 const ROOT = arg("--repo-root", ".");
+// 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시하고 디폴트를 적용한다.
+const ALLOWED_FLAGS = new Set(["--dry-run", "--payload", "--domain", "--repo-root"]);
+for (const a of process.argv.slice(2)) {
+  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
+}
 if (!payloadPath || !DOMAIN) { console.error("usage: onboard-app --payload <json> --domain <apex> [--dry-run]"); process.exit(2); }
 
 const fail = (msg) => { console.error(`::error::onboard: ${msg}`); process.exit(1); };
