@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # bulk-ssd 백킹 스토어 게이트의 VM 내부 절반. apply-storage.sh가 이것을
 # root로 k3s VM에 파이프한다(`orb -m k3s -u root env … sh -s < bulk-gate-probe.sh`); 또한
-# test/08-bulk-gate.bats가 직접 실행해 실제 findmnt/sentinel 로직이 실제로 검증되게 한다.
+# test/test_08-bulk-gate.bats가 직접 실행해 실제 findmnt/sentinel 로직이 실제로 검증되게 한다.
 #
 # bulk 경로가 OrbStack macOS virtiofs 공유 위에 있고 VM 내부에서 쓰기 가능한지를 확인한다
 # (local-path helper pod의 root 신원을 그대로 반영). 외장/내장 판별은 하지 않는다 —

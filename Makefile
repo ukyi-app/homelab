@@ -37,7 +37,7 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + 원장 + sops 왕복)
 	@./scripts/check-skeleton.sh
 	@scripts/ledger-to-json.sh docs/memory-ledger.md > /tmp/ledger.json
 	@conftest test /tmp/ledger.json --policy policy/ledger.rego
-	@bats tests/sops-roundtrip.bats
+	@bats tests/test_sops-roundtrip.bats
 
 TF_ROOTS := cloudflare tailscale github
 

@@ -36,10 +36,10 @@ jobs:
           make tf-validate
       - name: argocd values + root app lint
         run: |
-          bats infra/_test/argocd_values.bats
-          bats infra/_test/root_app.bats
-          bats infra/_test/tf_validate.bats # tf fmt/validate + R2 prevent_destroy 가드(이전엔 미게이트)
-          bats infra/_test/tf_reconcile.bats # 드리프트 잡(github/tailscale)은 plan-only(무인 apply 금지) 불변식 가드
+          bats infra/_test/test_argocd_values.bats
+          bats infra/_test/test_root_app.bats
+          bats infra/_test/test_tf_validate.bats # tf fmt/validate + R2 prevent_destroy 가드(이전엔 미게이트)
+          bats infra/_test/test_tf_reconcile.bats # 드리프트 잡(github/tailscale)은 plan-only(무인 apply 금지) 불변식 가드
 
   # ── PR: cloudflare 루트 plan 미리보기 — 머지 전 add/change/destroy를 job summary에 게시(드리프트/변경 가시성) ──
   # 라이브 state(R2) 대비 실제 plan을 돌려 리뷰어가 머지 전에 적용 diff를 본다. 정보성(required check는 gate) —

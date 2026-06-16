@@ -1,7 +1,7 @@
 # 0003 — required status check는 `gate` 단일
 
 - 상태: 수용(accepted)
-- 관련: `infra/github/repo.tf`(`contexts=["gate"]`), `.github/workflows/ci.yaml`(job `gate`), `tools/test/make-ci-parity.bats`
+- 관련: `infra/github/repo.tf`(`contexts=["gate"]`), `.github/workflows/ci.yaml`(job `gate`), `tools/test/test_make-ci-parity.bats`
 
 ## 맥락
 여러 워크플로가 PR에서 돈다 — `ci`(job `gate`), `verify`, `iac`(plan/validate). branch protection의
@@ -20,7 +20,7 @@ branch protection의 required status check는 **`gate` 하나**로 둔다(`repo.
 ## 결과
 - **`gate`가 유일 머지 게이트이므로 gate를 깨는 변경은 전면 차단된다.** 그래서 gate가 쓰는
   도구는 전부 핀해야 한다 — helm 무핀(`get-helm-3` latest)이 시한폭탄이었던 이유(→ 핀 완료).
-- 로컬에서 gate를 그대로 재현하는 단일 진입점이 필요하다 → `make ci`(+ `make-ci-parity.bats`가
+- 로컬에서 gate를 그대로 재현하는 단일 진입점이 필요하다 → `make ci`(+ `test_make-ci-parity.bats`가
   gate↔make ci 드리프트를 회귀 차단).
 - 새 회귀 가드는 gate가 수집하는 글롭(tools/test·tests·platform `test_*.bats`) 안에 둬야
   required로 동작한다.

@@ -39,7 +39,7 @@ ns 내부 제외). 앱은 기본적으로 **일반 인터넷 egress가 없다** 
   의도적으로 채택하지 않은 더 엄격한 자세다; 앱별 allow 쌍이 필요해지고 기본적으로 SSR→API가
   망가진다. prod→`database` 경계에는 영향이 없다.
 
-## 라이브 검증 (보류 — `tests/posture/network-policy.bats`)
+## 라이브 검증 (보류 — `tests/posture/test_network-policy.bats`)
 
 NetworkPolicy 강제는 라이브 클러스터에서만 테스트할 수 있다(namespace들은 ArgoCD가
 M3/M4를 sync하기 전에는 존재하지 않는다). bring-up 시 posture 스위트를 실행해 확인할 것:
