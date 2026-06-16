@@ -19,14 +19,12 @@ jobs:
       # 과거 pnpm/action-setup이 있었으나 pnpm@11 self-install은 액션의 node20 런타임에서 실패한다
       # (setup-node로도 안 됨 — 액션 자체가 node20). 잡이 pnpm을 안 쓰므로 통째로 제거한다.
       - name: Install tools
-        run: |
-          curl -sSL https://github.com/getsops/sops/releases/download/v3.9.4/sops-v3.9.4.linux.arm64 -o /usr/local/bin/sops
-          chmod +x /usr/local/bin/sops
-          curl -sSL https://dl.filippo.io/age/latest?for=linux/arm64 | tar -xz -C /tmp
-          sudo mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
-          curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_arm64.tar.gz | tar -xz -C /tmp
-          sudo mv /tmp/conftest /usr/local/bin/
-          sudo apt-get update && sudo apt-get install -y bats
+        uses: ./.github/actions/setup-toolchain
+        with:
+          sops: 'true'
+          age: 'true'
+          conftest: 'true'
+          bats: 'true'
 
       - name: Skeleton check
         run: ./scripts/check-skeleton.sh
@@ -53,6 +51,12 @@ jobs:
           if grep -q 'super-secret-value-123' /tmp/ci.enc.yaml; then echo "plaintext leaked after encrypt"; exit 1; fi
           sops --config /tmp/sops-ci.yaml --decrypt /tmp/ci.enc.yaml | grep -q 'super-secret-value-123'
 
+      # gitleaks 훅 환경(콜드 빌드 수십초)을 config 해시 키로 캐시 — 미스 시 그냥 재빌드(안전).
+      - name: Cache pre-commit hooks
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: precommit-${{ hashFiles('.pre-commit-config.yaml') }}
       - name: Pre-commit secret guard
         run: |
           pip install pre-commit
