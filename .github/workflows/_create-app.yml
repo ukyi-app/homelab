@@ -97,7 +97,8 @@ jobs:
             | tee /tmp/plan.json
           # 렌더 게이트: 새 values로 공유 차트가 kubeconform-clean하게 렌더되는가
           curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-arm64.tar.gz | sudo tar xz -C /usr/local/bin kubeconform
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          # helm 고정 버전 핀(ci.yaml과 동일) — get-helm-3 latest는 chart-test 시한폭탄.
+          curl -fsSL https://get.helm.sh/helm-v3.16.4-linux-arm64.tar.gz | tar xz -C /tmp && sudo mv /tmp/linux-arm64/helm /usr/local/bin/helm
           helm template "$APP" platform/charts/app -f "apps/$APP/deploy/prod/values.yaml" \
             | kubeconform -strict -ignore-missing-schemas \
                 -schema-location default \
