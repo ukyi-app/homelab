@@ -50,7 +50,7 @@ tf-validate: ## 모든 infra 루트에 terraform fmt -check + validate 실행
 	  echo "$$r: validated"; \
 	done
 
-.PHONY: seed-secrets secret-edit verify-secrets
+.PHONY: seed-secrets secret-edit verify-secrets secret-cert-check
 seed-secrets: ## [secret] terraform output + .env.secrets에서 SOPS 암호화 시드 시크릿 생성
 	@[ -f .env.secrets ] || { echo "seed-secrets: .env.secrets 없음 (cp .env.secrets.example .env.secrets 후 채우기)"; exit 1; }
 	@set -a; . ./.env.secrets; set +a; bash scripts/seed-secrets.sh
@@ -64,6 +64,9 @@ secret-edit: ## [secret] FILE= SOPS 파일을 복호→편집→재암호화(sop
 
 verify-secrets: ## [secret] 추적 *.enc.yaml 무결성(암호화 + recipient 2개 + 복호가능) 검사 — 값 미출력
 	@bash scripts/verify-secrets.sh
+
+secret-cert-check: ## [secret] 봉인 전 preflight — 커밋된 cert가 라이브 컨트롤러 cert와 일치하는지(stale 방지). 라이브 kubeseal 필요
+	@bash scripts/secret-cert-check.sh
 
 .PHONY: bootstrap-deadmanswitch
 bootstrap-deadmanswitch: ## [M5] 노드 외부 dead-man's-switch ping URL 시드 여부 검증 (R8)
