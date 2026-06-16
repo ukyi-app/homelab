@@ -110,6 +110,12 @@ ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate' 8스
 reset-pg-archive: ## [DR ④] R2 serverName pg 아카이브 정리(재구축 후 아카이빙 재개). 기본 dry-run; 실제 정리는 ARGS=--purge
 	@scripts/reset-pg-r2-archive.sh $(ARGS)
 
+.PHONY: verify-runbooks
+verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored 로컬 전용, CI 미배선)
+	@if [ -d docs/runbooks ] && ls docs/runbooks/*.bats >/dev/null 2>&1; then \
+	  bats docs/runbooks/*.bats; \
+	else echo "verify-runbooks: docs/runbooks/*.bats 없음(로컬 전용 — 러너/fresh checkout엔 부재)"; fi
+
 .PHONY: seal-adguard-auth
 seal-adguard-auth: ## AdGuard UI 비밀번호(.env.secrets ADGUARD_PASSWORD)를 bcrypt 봉인 → adguard-auth SealedSecret
 	@scripts/seal-adguard-auth.sh
