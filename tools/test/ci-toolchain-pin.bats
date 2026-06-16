@@ -11,10 +11,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -ne 0 ]
 }
 
-@test "workflows that need helm pin a specific version tarball" {
+@test "helm is pinned wherever installed (inline dispatch + pinned composite)" {
   local wf
-  for wf in ci.yaml onboard.yaml _create-app.yml; do
+  # dispatch 워크플로(onboard/_create-app)는 helm을 인라인 핀 tarball로 설치
+  for wf in onboard.yaml _create-app.yml; do
     run grep -E 'get\.helm\.sh/helm-v[0-9]+\.[0-9]+\.[0-9]+' ".github/workflows/$wf"
     [ "$status" -eq 0 ]
   done
+  # ci/verify는 setup-toolchain composite로 설치 — composite가 helm을 핀한다
+  run grep -E 'get\.helm\.sh/helm-v[0-9]+\.[0-9]+\.[0-9]+' .github/actions/setup-toolchain/action.yml
+  [ "$status" -eq 0 ]
 }
