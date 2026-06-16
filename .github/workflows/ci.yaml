@@ -1,7 +1,7 @@
 name: ci
 # 권위 게이트: 이 워크플로의 job 'gate'가 유일한 required check(infra/github/repo.tf contexts=["gate"]).
 # 메모리 원장(pnpm verify:ledger)·테스트 수집(run-bats.sh)·chart·shellcheck·e2e를 권위 게이트한다.
-# verify.yml(job 'verify')은 non-required 보조(skeleton·sops 왕복 ephemeral·pre-commit) — ledger 중복은 W7에서 제거.
+# verify.yaml(job 'verify')은 non-required 보조(skeleton·sops 왕복 ephemeral·pre-commit) — ledger 중복은 W7에서 제거.
 on:
   pull_request:
   push:

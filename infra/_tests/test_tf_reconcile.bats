@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
-# tf-reconcile.yml의 안전 불변식 가드:
+# tf-reconcile.yaml의 안전 불변식 가드:
 #  - github/tailscale 루트는 plan-only(무인 apply 절대 금지 — 신뢰 앵커/고-blast-radius).
 #  - cloudflare 루트만 apply하며 destroy 가드를 유지한다.
 #  - 각 드리프트 잡은 시크릿 부재 시 skip(preflight)되어야 한다.
 
-WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yml"
+WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
 
 @test "github/tailscale drift jobs exist" {
   run grep -qE '^  drift-github:' "$WF"

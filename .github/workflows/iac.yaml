@@ -119,7 +119,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04-arm
     # 전역 변이 직렬화 그룹 공유 — tfstate race 차단. queue:max로 취소 누락 차단.
-    # 그래도 취소/실패하면 tf-reconcile.yml(주기)이 다음 주기에 수렴시킨다.
+    # 그래도 취소/실패하면 tf-reconcile.yaml(주기)이 다음 주기에 수렴시킨다.
     concurrency:
       group: homelab-mutation
       cancel-in-progress: false

@@ -2,7 +2,7 @@
 # Renovate self-hosted 도입 게이트 — 설정/워크플로의 핵심 불변식을 강제한다.
 # (중간 단언은 [ ]/grep 단순 명령으로 — bash 3.2에서 [[ ]] 실패 침묵 통과 회피)
 R="renovate.json"
-WF=".github/workflows/renovate.yml"
+WF=".github/workflows/renovate.yaml"
 
 @test "renovate.json is valid JSON with the homelab guardrails" {
   command -v jq >/dev/null || skip "jq required"

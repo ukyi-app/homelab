@@ -154,18 +154,18 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
   `create-app | update-secrets | create-database | create-cache | teardown-app |
   teardown-resource | audit`. validator(`tools/validate-mutation.mjs`)가 계약표 강제.
   전역 직렬화: `concurrency: homelab-mutation` + `queue: max`.
-- **update-image:** `bump-poll.yml`(10분 주기 GHCR 폴링)이 권위 — main reachable + 배포 SHA
+- **update-image:** `bump-poll.yaml`(10분 주기 GHCR 폴링)이 권위 — main reachable + 배포 SHA
   descendant + digest 핀 검증 후 autoDeploy면 자동 PR+머지, 아니면 승인 PR(.bindings.json이
   autoDeploy SSOT, 누락=fail-closed). (인-레포 **앱 이미지** 전용.)
-- **인프라/플랫폼 의존:** self-hosted Renovate(`renovate.json` + `renovate.yml`, 주 1회, writer App
+- **인프라/플랫폼 의존:** self-hosted Renovate(`renovate.json` + `renovate.yaml`, 주 1회, writer App
   토큰 PR-first, automerge 금지 → 리뷰 후 머지)가 서드파티 이미지 digest·terraform provider·
   k3s/local-path(versions.env)·helm 차트(Chart.yaml/CHART_VERSION/helmrelease)·npm을 갱신. **github-actions
   manager는 비활성** — `uses:` 핀 갱신은 토큰에 `workflows: write`가 필요한데 writer App은 Contents+PR
-  write 전용이다. 켜려면: writer App에 workflows:write 부여 → renovate.yml 토큰에 `permission-workflows: write`
+  write 전용이다. 켜려면: writer App에 workflows:write 부여 → renovate.yaml 토큰에 `permission-workflows: write`
   추가 → `renovate.json`의 `"github-actions".enabled=true`. (벤더 `charts/`·barman-plugin은 ignorePaths.)
 - **공개(DNS):** create-app은 `infra/cloudflare/apps.json`에 `active:false`로 등록(DNS 미생성)
   → 배포 Healthy 확인 후 `tools/activate-app.mjs` 게이트(descendant+표면 무변경+행 고정)가
-  `active:true` 플립 → `iac.yaml`(push apply)/`tf-reconcile.yml`(30분 드리프트 수렴)이 노출.
+  `active:true` 플립 → `iac.yaml`(push apply)/`tf-reconcile.yaml`(30분 드리프트 수렴)이 노출.
 - **시크릿:** SealedSecrets(컨트롤러 `platform/sealed-secrets`, cert 공개) — 앱 레포에서
   `pnpm secret:seal`(.env→`<app>-secrets.sealed.yaml`) → create-app/update-secrets가 검증 복사.
   sealing key는 `scripts/backup-sealed-secrets-key.sh`로 out-of-band 백업(복구 드릴 게이트).

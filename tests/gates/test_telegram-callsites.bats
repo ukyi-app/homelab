@@ -15,18 +15,18 @@ setup() {
     [ "${got:-0}" -eq "$n" ] || { echo "$wf: want $n got ${got:-0}"; false; }
     total=$(( total + ${got:-0} ))
   done <<'EOF'
-_create-app.yml 1
-_create-database.yml 1
-_create-cache.yml 1
-_update-secrets.yml 1
-_teardown.yml 1
-_audit.yml 1
+_create-app.yaml 1
+_create-database.yaml 1
+_create-cache.yaml 1
+_update-secrets.yaml 1
+_teardown.yaml 1
+_audit.yaml 1
 bump.yaml 2
-bump-poll.yml 1
+bump-poll.yaml 1
 onboard.yaml 1
 iac.yaml 1
-tf-reconcile.yml 3
-dispatch-mutation.yml 1
+tf-reconcile.yaml 3
+dispatch-mutation.yaml 1
 EOF
   [ "$total" -eq 15 ]
   ! grep -rq "api.telegram.org" "$WF"   # raw curl 0 — 모든 인라인 curl이 액션으로 이행됨

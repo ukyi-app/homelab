@@ -12,7 +12,7 @@
 // 배포 승인 보존: .bindings.json의 autoDeploy가 true일 때만 "bump"(자동 PR+auto-merge),
 // false거나 **누락이면 fail-closed**로 "propose-pr"(사람 머지 = 승인)만 낸다.
 //
-// 이 스크립트는 플래너(읽기 전용)다 — 실제 bump/PR은 bump-poll.yml이 plan JSON을 소비해 수행.
+// 이 스크립트는 플래너(읽기 전용)다 — 실제 bump/PR은 bump-poll.yaml이 plan JSON을 소비해 수행.
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";

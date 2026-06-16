@@ -5,7 +5,7 @@
 #
 # v1 계약(인증 마이그레이션 단위 — 런북 app-platform):
 # - 빌드 + GHCR push만 한다. homelab dispatch는 전부 제거 — 배포 반영은 homelab측
-#   GHCR 폴링(bump-poll.yml)이 권위 처리하고, 온보딩은 owner의 dispatch-mutation(create-app).
+#   GHCR 폴링(bump-poll.yaml)이 권위 처리하고, 온보딩은 owner의 dispatch-mutation(create-app).
 # - `dispatch-pat`은 **선언만 유지(required:false, 미사용)**: 기존 caller가 secrets를 넘겨도
 #   "undeclared secret" 검증 실패가 나지 않게 하는 호환 장치다. 모든 caller가 secrets 블록을
 #   제거한 뒤 v2에서 선언을 삭제하고 org secret HOMELAB_DISPATCH_PAT를 폐기한다.
@@ -55,4 +55,4 @@ jobs:
           cache-to: type=gha,mode=max
       # 빌드 완료 후 흐름: bump-poll(10분 주기)이 main reachable + descendant + digest 검증 후
       # autoDeploy면 자동 PR+머지, 아니면 승인 PR을 만든다. 즉시 반영: owner가
-      # homelab에서 `gh workflow run bump-poll.yml`.
+      # homelab에서 `gh workflow run bump-poll.yaml`.

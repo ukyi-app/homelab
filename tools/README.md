@@ -26,48 +26,48 @@ v1(`.homelab.yaml`/`homelab-app-schema.json`)→v2(`.app-config.yml`/`app-config
 owner가 homelab에서 `dispatch-mutation`(workflow_dispatch)을 실행하면 reusable 워크플로가
 이 도구들을 호출하고 결과를 **PR**로 낸다. 직접 `node`로 돌리지 않는다.
 
-- **`validate-mutation.mjs`** — dispatcher payload 검증기(계약표 강제). `dispatch-mutation.yml`·
+- **`validate-mutation.mjs`** — dispatcher payload 검증기(계약표 강제). `dispatch-mutation.yaml`·
   각 `_create-*.yml`이 `--action <a> --payload-file <json>`으로 호출. action별 필수/허용
   입력 외에는 전부 거부(fail-closed); 모든 입력을 비신뢰로 취급(env/파일 경유 + regex).
   `update-image`는 여기 없다(GHCR 폴링이 처리).
-- **`create-app.mjs`** — v2 생성기. `_create-app.yml`이 호출
+- **`create-app.mjs`** — v2 생성기. `_create-app.yaml`이 호출
   (`--config .app-config.yml --app --repo --domain --tag sha-<sha> --digest sha256:<hex> [--sealed]`).
   스키마+비즈니스 규칙 검증 후 `apps/<app>/deploy/prod/`(values·`.bindings.json`·`source-repo`·
   kustomization) + `apps.json`(active:false) + 메모리 원장을 한 번에 산출. `--dry-run`은 plan JSON만.
 - **`onboard-app.mjs`** — v1 스캐폴더(구 경로). `onboard.yaml`이 호출
   (`--payload <json> --domain <apex>`, payload에 base64 `.homelab.yaml`). `.homelab.yaml` 검증 후
   동일 산출물을 만든다. KSOPS secret-generator 분기는 **deprecated**(신규 앱은 create-app+SealedSecret).
-- **`provision-db.mjs`** — create-database 프로비저너. `_create-database.yml`이 호출
+- **`provision-db.mjs`** — create-database 프로비저너. `_create-database.yaml`이 호출
   (`--name <db> [--extensions a,b] [--cluster pg]`). 공유 CNPG 안의 논리 DB + owner/ro managed role +
   비밀번호/conn SealedSecret 4개를 산출(`owner==name` 불변식, 논리 DB는 원장 행 비추가).
   비밀번호는 내부 생성→`kubeseal` stdin 직행(평문 비기록). `tools/sealed-secrets-cert.pem` 필요.
-- **`provision-cache.mjs`** — create-cache 프로비저너. `_create-cache.yml`이 호출
+- **`provision-cache.mjs`** — create-cache 프로비저너. `_create-cache.yaml`이 호출
   (`--name <cache> [--maxmemory-mi 16..1024]`). 앱별 경량 Valkey 인스턴스(cache NS) +
   conn/ro-conn SealedSecret + 원장 행을 산출. 자격은 `kubeseal` stdin 전용. cert 필요.
-- **`teardown-app.mjs`** — 앱 한정 철거. `_teardown.yml`(action=teardown-app)이 호출
+- **`teardown-app.mjs`** — 앱 한정 철거. `_teardown.yaml`(action=teardown-app)이 호출
   (`--app <name>`). `apps/<app>/`·`apps.json` 행·원장 행만 제거 — DB/캐시 conn·CR·Valkey는
   **절대 비접촉**(리소스 철거는 teardown-resource 전담). 멱등.
-- **`teardown-resource.mjs`** — DB/캐시 리소스 철거. `_teardown.yml`(action=teardown-resource)이
+- **`teardown-resource.mjs`** — DB/캐시 리소스 철거. `_teardown.yaml`(action=teardown-resource)이
   호출(`--db <name>`|`--cache <name>`). 참조 0 게이트(`.bindings.json`만 신뢰) → retain(기본,
   tombstone) / purge(`--delete-data` + `--backup-verified <id>` + `--step tombstone|drop|verify|cleanup`
   상태머신, 각 step 별도 커밋). 되돌릴 수 없어 fail-closed 게이트가 두껍다.
 
 ## update-image 폴링 (bump 경로 — 인-레포 앱 이미지 전용)
 
-- **`poll-ghcr.mjs`** — GHCR 폴링 bump **플래너**(읽기 전용, 부작용 0). `bump-poll.yml`(10분 주기)이
+- **`poll-ghcr.mjs`** — GHCR 폴링 bump **플래너**(읽기 전용, 부작용 0). `bump-poll.yaml`(10분 주기)이
   `node tools/poll-ghcr.mjs --root . > plan.json`으로 호출. `source-repo` 바인딩이 있는
   `apps/*/deploy/prod`만 순회 — 앱 레포 main 커밋(최신순)을 권위로, 배포 SHA의 descendant + GHCR
   manifest 실존을 증명해 후보를 고른다. `.bindings.json`의 `autoDeploy`가 true면 `bump`(자동 PR+머지),
   false/누락이면 `propose-pr`(fail-closed 승인). 테스트는 `--fixtures <dir>`.
 - **`bump-tag.mjs`** — values.yaml의 `image.tag`(+선택 `image.digest`)를 갱신하는 쓰기 도구.
-  `bump-poll.yml`이 플래너 출력을 받아 `node tools/bump-tag.mjs <app> sha-<gitsha> [--digest sha256:<hex>]`로
+  `bump-poll.yaml`이 플래너 출력을 받아 `node tools/bump-tag.mjs <app> sha-<gitsha> [--digest sha256:<hex>]`로
   호출(심층 방어 재검증). `bump.yaml`(레거시)도 사용. digest는 비신뢰 입력이라 형식 검증;
   digest 미지정 시 stale digest를 제거(tag bump가 실제 이미지를 바꾸도록).
 
 ## 정적 감사 (읽기 전용)
 
 - **`audit-orphans.mjs`** — registry(`apps.json`)↔매니페스트↔바인딩↔원장 교차 드리프트 리포트.
-  `make audit`(전체)·`make ci`/`ci.yaml`(`--ci`, 배포 깨는 유형만 차단)·`_audit.yml`(dispatch
+  `make audit`(전체)·`make ci`/`ci.yaml`(`--ci`, 배포 깨는 유형만 차단)·`_audit.yaml`(dispatch
   action=audit)이 호출. `--ci`(dangling-binding/orphan-dns만 비-0)·`--strict`(전부 비-0)·기본(리포트만).
 
 ## 앱 시크릿 봉인 (앱 레포 측 — `pnpm` 경유)

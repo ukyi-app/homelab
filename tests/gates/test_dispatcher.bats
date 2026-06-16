@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # dispatch-mutation 워크플로 — 직렬화/비신뢰 입력 게이트
 
-setup() { F="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/.github/workflows/dispatch-mutation.yml"; }
+setup() { F="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/.github/workflows/dispatch-mutation.yaml"; }
 
 @test "dispatcher serializes via homelab-mutation group with queue max (no pending loss)" {
   grep -q "group: homelab-mutation" "$F"

@@ -34,11 +34,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   echo "$output" | grep -q "required"
 }
 
-@test "memory ledger gate is centralized in the required gate (not duplicated in verify.yml)" {
+@test "memory ledger gate is centralized in the required gate (not duplicated in verify.yaml)" {
   # W7: ledger 검사(conftest policy/ledger.rego)는 required gate(ci.yaml: pnpm verify:ledger) 한 곳으로 일원화.
   run grep -q 'verify:ledger' "$ROOT/.github/workflows/ci.yaml"
   [ "$status" -eq 0 ]
-  # 핵심 단언(마지막) — verify.yml(비-required)엔 ledger 게이트가 없어야(중복 제거)
-  run grep -q 'ledger.rego' "$ROOT/.github/workflows/verify.yml"
+  # 핵심 단언(마지막) — verify.yaml(비-required)엔 ledger 게이트가 없어야(중복 제거)
+  run grep -q 'ledger.rego' "$ROOT/.github/workflows/verify.yaml"
   [ "$status" -ne 0 ]
 }

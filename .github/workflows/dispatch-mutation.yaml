@@ -1,7 +1,7 @@
 # 중앙 mutation dispatcher — 모든 생성/파괴 변이의 단일 진입점 (homelab-initiated만).
 # 트리거 경계(런북 app-platform): 앱 레포는 어떤 homelab-write 자격도 없다 — owner가 여기서
 # workflow_dispatch로 실행하고, homelab이 reader App 토큰으로 앱 레포 config를 SHA 고정 read한다.
-# update-image는 이 dispatcher가 아니라 GHCR 폴링(bump-poll.yml)이 권위 처리한다.
+# update-image는 이 dispatcher가 아니라 GHCR 폴링(bump-poll.yaml)이 권위 처리한다.
 name: dispatch-mutation
 on:
   workflow_dispatch:
@@ -61,7 +61,7 @@ jobs:
   create-app:
     needs: validate
     if: needs.validate.outputs.action == 'create-app'
-    uses: ./.github/workflows/_create-app.yml
+    uses: ./.github/workflows/_create-app.yaml
     with:
       app_repo: ${{ github.event.inputs.app_repo }}
       sha: ${{ github.event.inputs.sha }}
@@ -73,7 +73,7 @@ jobs:
   update-secrets:
     needs: validate
     if: needs.validate.outputs.action == 'update-secrets'
-    uses: ./.github/workflows/_update-secrets.yml
+    uses: ./.github/workflows/_update-secrets.yaml
     with:
       app_repo: ${{ github.event.inputs.app_repo }}
       sha: ${{ github.event.inputs.sha }}
@@ -84,7 +84,7 @@ jobs:
   teardown-app:
     needs: validate
     if: needs.validate.outputs.action == 'teardown-app'
-    uses: ./.github/workflows/_teardown.yml
+    uses: ./.github/workflows/_teardown.yaml
     with:
       app: ${{ github.event.inputs.app }}
     secrets: inherit
@@ -94,7 +94,7 @@ jobs:
   teardown-resource:
     needs: validate
     if: needs.validate.outputs.action == 'teardown-resource'
-    uses: ./.github/workflows/_teardown.yml
+    uses: ./.github/workflows/_teardown.yaml
     with:
       resource: ${{ github.event.inputs.resource }}
     secrets: inherit
@@ -104,7 +104,7 @@ jobs:
   audit:
     needs: validate
     if: needs.validate.outputs.action == 'audit'
-    uses: ./.github/workflows/_audit.yml
+    uses: ./.github/workflows/_audit.yaml
     secrets: inherit
     permissions:
       contents: read
@@ -112,7 +112,7 @@ jobs:
   create-database:
     needs: validate
     if: needs.validate.outputs.action == 'create-database'
-    uses: ./.github/workflows/_create-database.yml
+    uses: ./.github/workflows/_create-database.yaml
     with:
       spec: ${{ github.event.inputs.spec }}
     secrets: inherit
@@ -122,7 +122,7 @@ jobs:
   create-cache:
     needs: validate
     if: needs.validate.outputs.action == 'create-cache'
-    uses: ./.github/workflows/_create-cache.yml
+    uses: ./.github/workflows/_create-cache.yaml
     with:
       spec: ${{ github.event.inputs.spec }}
     secrets: inherit

@@ -21,8 +21,8 @@ WF=".github/workflows/ci.yaml"
   [ "$status" -eq 0 ]
   run grep -E "cancel-in-progress" "$WF"
   [ "$status" -eq 0 ]
-  run grep -E "^concurrency:" ".github/workflows/verify.yml"
+  run grep -E "^concurrency:" ".github/workflows/verify.yaml"
   [ "$status" -eq 0 ]
-  run grep -E "cancel-in-progress" ".github/workflows/verify.yml"
+  run grep -E "cancel-in-progress" ".github/workflows/verify.yaml"
   [ "$status" -eq 0 ]
 }

@@ -14,7 +14,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 @test "helm is pinned wherever installed (inline dispatch + pinned composite)" {
   local wf
   # dispatch 워크플로(onboard/_create-app)는 helm을 인라인 핀 tarball로 설치
-  for wf in onboard.yaml _create-app.yml; do
+  for wf in onboard.yaml _create-app.yaml; do
     run grep -E 'get\.helm\.sh/helm-v[0-9]+\.[0-9]+\.[0-9]+' ".github/workflows/$wf"
     [ "$status" -eq 0 ]
   done
