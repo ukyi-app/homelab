@@ -1459,9 +1459,11 @@ jobs:
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
 ```
+**telegram 콜사이트 enum 갱신(같은 커밋 — ⚠️ codex restale3 F1):** `dns-drift.yaml`은 `telegram-notify`를 쓰는 새 콜사이트다. `tests/gates/test_telegram-callsites.bats`의 exact-count 게이트가 즉시 빨개지므로 **이 커밋에서 함께** 갱신한다: (1) enum here-doc에 `dns-drift.yaml 1` 줄 추가, (2) dns-drift가 **최초 신규 콜사이트**이므로 합계 단언을 절대값에서 **self-deriving**(here-doc 줄 합)으로 전환 — 같은 enum 블록을 변수 `EXPECTED`로 캡처해 `expected=$(printf '%s\n' "$EXPECTED" | awk '{s+=$2} END{print s}')` 후 `[ "$total" -eq "$expected" ]`. 이후 P6(pr-sweeper)/P8(build.yaml)은 here-doc 줄만 더하면 된다(절대값 무수정 — F1 시퀀싱 해소).
+
 커밋:
 ```
-git -C /Users/ukyi/workspace/homelab-cicd-hardening add tools/dns-drift-check.mjs .github/workflows/dns-drift.yaml tools/tests/test_dns-drift-check.bats && git -C /Users/ukyi/workspace/homelab-cicd-hardening commit -m "feat: live-DNS 드리프트 체커 + opt-in 스케줄 워크플로 (drift-2 — active&&public host 미해결 감지)"
+git -C /Users/ukyi/workspace/homelab-cicd-hardening add tools/dns-drift-check.mjs .github/workflows/dns-drift.yaml tools/tests/test_dns-drift-check.bats tests/gates/test_telegram-callsites.bats && git -C /Users/ukyi/workspace/homelab-cicd-hardening commit -m "feat: live-DNS 드리프트 체커 + opt-in 워크플로 + 콜사이트 enum 갱신(self-deriving) (drift-2)"
 ```
 
 ---
@@ -2467,6 +2469,13 @@ setup() {
   grep -q "update-branch" "$F"
 }
 
+@test "pr-sweeper surfaces update-branch failures (tracks + exits nonzero, not silent green) (restale3 F2)" {
+  # ⚠️ codex restale3 F2: update-branch 실패를 ::warning::로 삼키고 green 종료하면 멈춘 PR이 무알림으로 묻힌다.
+  # 실패 PR을 모아 exit 1(→ failure() telegram 발화)해야 한다. 정적 단언: 실패 추적 변수 + nonzero 종료.
+  grep -q 'failed=' "$F"
+  grep -qE 'failed.*exit 1' "$F"
+}
+
 @test "pr-sweeper scopes to bot branches only (head prefix filter)" {
   # bump/ bump-poll/ create-database/ create-cache/ create-app/ onboard/ update-secrets/ 만 손댄다
   grep -qE 'bump|create-|onboard|update-secrets' "$F"
@@ -2554,11 +2563,18 @@ jobs:
                        | select(.headRefName | test("^(bump|bump-poll|create-database|create-cache|create-app|onboard|update-secrets)/"))
                        | .number' > /tmp/behind.txt
           if [ ! -s /tmp/behind.txt ]; then echo "behind한 봇 PR 없음 — no-op"; exit 0; fi
+          # ⚠️ codex restale3 F2: 실패를 ::warning::로 삼키고 green으로 끝내면 멈춘 PR(이 스위퍼가 잡으려던 모드)이
+          # 무알림으로 묻힌다 → 실패 PR을 모아 잡을 nonzero 종료(아래 failure() telegram이 발화해 owner에게 알림).
+          failed=""
           while read -r n; do
             [ -n "$n" ] || continue
             echo "update-branch PR #$n"
-            gh pr update-branch "$n" --repo "$REPO" || echo "::warning::PR #$n update-branch 실패(충돌 가능) — 다음 주기 재시도"
+            if ! gh pr update-branch "$n" --repo "$REPO"; then
+              echo "::warning::PR #$n update-branch 실패(충돌/권한/API) — 수동 확인 필요"
+              failed="$failed #$n"
+            fi
           done < /tmp/behind.txt
+          if [ -n "$failed" ]; then echo "::error::update-branch 실패 PR:$failed"; exit 1; fi
       - name: telegram notify (실패 시)
         if: failure()
         uses: ./.github/actions/telegram-notify
@@ -2607,23 +2623,28 @@ onboard.yaml 1
 iac.yaml 1
 tf-reconcile.yaml 3
 dispatch-mutation.yaml 1
+dns-drift.yaml 1
 pr-sweeper.yaml 1
 EOF
-  [ "$total" -eq 16 ]
+  # ⚠️ codex restale3 F1: dns-drift(P3)·pr-sweeper(P6) 둘 다 enum에 포함. **절대값 하드코딩(16/17) 금지** — 위 enum
+  # here-doc의 콜사이트 줄 합을 expected로 **도출**한다(self-deriving → 머지 순서·dns-drift 누락에 robust; 콜사이트
+  # 추가 시 here-doc 줄만 더하면 합계가 따라온다). 구현: 같은 enum 블록을 변수 EXPECTED로 캡처 후
+  # `expected=$(printf '%s\n' "$EXPECTED" | awk '{s+=$2} END{print s}')`.
+  [ "$total" -eq "$expected" ]
   ! grep -rq "api.telegram.org" "$WF"   # raw curl 0
 }
 ```
 
-**Step 2: Run it, expect FAIL** — 먼저 갱신 *전* 상태에서 pr-sweeper.yaml이 추가됐으므로 기존 "exactly the 15" 테스트가 이미 깨져 있음: `bats tests/gates/test_telegram-callsites.bats`
-기대 실패: `[ "$total" -eq 15 ]` 실패(total=16) — 즉 Task 4 머지로 인해 이 테스트가 빨개진 상태를 이 Task가 고친다. (TDD 순서상 Task 4 직후 이 테스트가 RED → Step 3에서 GREEN.)
+**Step 2: Run it, expect FAIL** — pr-sweeper.yaml(Task 4)이 새 콜사이트를 추가했으므로 self-deriving 게이트가 깨짐(actual `total`이 here-doc 합보다 1 큼): `bats tests/gates/test_telegram-callsites.bats`
+기대 실패: `[ "$total" -eq "$expected" ]` 실패(total = expected+1) — Task 4 머지로 RED → Step 3에서 here-doc에 pr-sweeper 줄을 더해 GREEN. (Phase 3가 이미 self-deriving 전환 + dns-drift 줄을 추가했으므로 여기선 절대값 무수정.)
 
-**Step 3: Minimal implementation** — Step 1의 블록으로 `tests/gates/test_telegram-callsites.bats:10-33`의 첫 `@test`를 교체(제목 15→16, here-doc에 `pr-sweeper.yaml 1` 추가, 합계 16).
+**Step 3: Minimal implementation** — `tests/gates/test_telegram-callsites.bats` 첫 `@test`의 enum here-doc에 `pr-sweeper.yaml 1` 줄만 추가한다(합계 단언은 self-deriving이라 무수정 — codex restale3 F1). 제목/주석에 콜사이트 수 언급이 있으면 함께 맞춘다.
 
 **Step 4: Run test, expect PASS** — `bats tests/gates/test_telegram-callsites.bats`
-기대 출력: `4 tests, 0 failures` (첫 테스트 포함 전부 ok).
+기대 출력: `4 tests, 0 failures` (전부 ok — total == here-doc 합).
 
 **Step 5: Commit**
-`git -C /Users/ukyi/workspace/homelab-cicd-hardening add tests/gates/test_telegram-callsites.bats && git -C /Users/ukyi/workspace/homelab-cicd-hardening commit -m "test: telegram 콜사이트 enum에 pr-sweeper 등록 (16곳)"`
+`git -C /Users/ukyi/workspace/homelab-cicd-hardening add tests/gates/test_telegram-callsites.bats && git -C /Users/ukyi/workspace/homelab-cicd-hardening commit -m "test: telegram 콜사이트 enum에 pr-sweeper 등록 (self-deriving)"`
 
 ---
 
