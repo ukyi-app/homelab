@@ -9,3 +9,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     grep -q "$c" README.md || { echo "missing in README: $c"; return 1; }
   done
 }
+
+@test "AGENTS directory map includes a scripts/ row (tools vs scripts vs k3s-bootstrap boundary)" {
+  # 라인번호 브리틀 회피 — 지도 테이블의 scripts/ 행 존재를 앵커로 검사. (@test 이름은 영어 — 한글 인코딩 깨짐)
+  run grep -nE '^\| `scripts/`' AGENTS.md
+  [ "$status" -eq 0 ]
+}
