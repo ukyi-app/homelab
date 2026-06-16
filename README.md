@@ -35,4 +35,5 @@ make bootstrap    # 멱등 DR 진입점: ArgoCD + sops-age + root app
 
 - **[AGENTS.md](AGENTS.md)** — 디렉토리 지도, 명령, 컨벤션, 라이브에서 검증된 함정
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — 황금률(검증 우선·평문 시크릿 금지·env는 경로에)
-- `docs/runbooks/` — 운영 런북 (로컬 전용, gitignored)
+- `docs/runbooks/` — 운영 런북 (로컬 전용, **gitignored** — 신규 체크아웃엔 부재. 디스크 유실 대비 별도 백업)
+- `docs/runbooks-public/toolchain-setup.md` — 호스트 툴체인 최소 설치 가이드 (tracked — gitignored 런북 대체본)
