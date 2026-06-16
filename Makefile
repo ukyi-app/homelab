@@ -116,6 +116,12 @@ verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored
 	  bats docs/runbooks/*.bats; \
 	else echo "verify-runbooks: docs/runbooks/*.bats 없음(로컬 전용 — 러너/fresh checkout엔 부재)"; fi
 
+.PHONY: verify-posture
+verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 필요(없으면 skip)
+	@if [ -f "$(KUBECONFIG_LIVE)" ]; then \
+	  KUBECONFIG=$(KUBECONFIG_LIVE) bats tests/posture/test_*.bats; \
+	else echo "verify-posture: $(KUBECONFIG_LIVE) 없음 — 라이브 클러스터 필요(skip). 먼저 make up"; fi
+
 .PHONY: verify-traps
 verify-traps: ## docs/traps.md 함정 원장의 guard 경로가 실재하는지(enforced 드리프트 차단)
 	@bash scripts/verify-traps.sh

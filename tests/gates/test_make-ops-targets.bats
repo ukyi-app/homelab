@@ -35,3 +35,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -ne 0 ]
   echo "$output" | grep -qi "COMP"
 }
+
+@test "make verify-posture target exists and is live-guarded" {
+  run grep -E '^verify-posture:' Makefile
+  [ "$status" -eq 0 ]
+  run grep -A4 '^verify-posture:' Makefile
+  echo "$output" | grep -q 'KUBECONFIG'   # 라이브 가드
+  echo "$output" | grep -q 'tests/posture'
+}
