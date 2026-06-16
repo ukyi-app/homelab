@@ -53,6 +53,10 @@ data:
               {{- else if eq $name "PostgresClusterDown" }}{{ $title = "PostgreSQL 클러스터 다운" }}
               {{- else if eq $name "PodCrashLooping" }}{{ $title = "파드 재시작 반복" }}
               {{- else if eq $name "PgDumpHedgeStale" }}{{ $title = "논리 헤지 백업 정체" }}
+              {{- else if eq $name "CertWildcardExpiringSoon" }}{{ $title = "와일드카드 인증서 만료 임박" }}
+              {{- else if eq $name "CertExpiringSoon" }}{{ $title = "TLS 인증서 만료 임박" }}
+              {{- else if eq $name "CertManagerCertNotReady" }}{{ $title = "TLS 인증서 NotReady" }}
+              {{- else if eq $name "CertMetricsAbsent" }}{{ $title = "인증서 메트릭 부재" }}
               {{- end -}}
               {{- /* 미매핑 alertname → summary를 제목으로(신규 알림도 한국어). 자동 escape됨. summary 없으면 alertname 원문 */ -}}
               {{- if and (eq $title $name) .CommonAnnotations.summary }}{{ $title = .CommonAnnotations.summary }}{{- end -}}

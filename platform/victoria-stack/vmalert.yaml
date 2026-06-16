@@ -19,6 +19,7 @@ spec:
           args:
             - --rule=/rules/core/*.yaml
             - --rule=/rules/r4/*.yaml
+            - --rule=/rules/r5/*.yaml
             - --rule=/rules/r6/*.yaml
             - --datasource.url=http://vmsingle:8428
             - --remoteWrite.url=http://vmsingle:8428
@@ -43,10 +44,12 @@ spec:
           volumeMounts:
             - { name: rules-core, mountPath: /rules/core }
             - { name: rules-r4, mountPath: /rules/r4 }
+            - { name: rules-r5, mountPath: /rules/r5 }
             - { name: rules-r6, mountPath: /rules/r6 }
       volumes:
         - { name: rules-core, configMap: { name: vmalert-rules-core } }
         - { name: rules-r4, configMap: { name: vmalert-rules-r4 } }
+        - { name: rules-r5, configMap: { name: vmalert-rules-r5 } }
         - { name: rules-r6, configMap: { name: vmalert-rules-r6 } }
 ---
 apiVersion: v1

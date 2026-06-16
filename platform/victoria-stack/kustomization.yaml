@@ -14,6 +14,7 @@ resources:
   - rules/core.yaml
   - vmalert.yaml
   - rules/r4-storage-backup.yaml
+  - rules/r5-cert-tls.yaml
   - rules/r6-ci-staleness.yaml
   - digest-exporter.yaml
   - deadmanswitch-relay.yaml

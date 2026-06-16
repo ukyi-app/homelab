@@ -91,3 +91,24 @@ setup() {
     grep -q 'prometheus.io/scrape: "true"' "$ROOT/platform/victoria-stack/$comp.yaml"
   done
 }
+
+@test "cert-manager TLS expiry alerts defined and wired into vmalert" {
+  R="$ROOT/platform/victoria-stack/rules/r5-cert-tls.yaml"
+  V="$ROOT/platform/victoria-stack/vmalert.yaml"
+  # 4 룰: wildcard critical + 전 cert catch-all + NotReady + absent fail-closed.
+  grep -q 'alert: CertWildcardExpiringSoon' "$R"
+  grep -q 'alert: CertExpiringSoon' "$R"
+  grep -q 'alert: CertManagerCertNotReady' "$R"
+  grep -q 'alert: CertMetricsAbsent' "$R"
+  # ready_status는 condition="True"==0만이 올바른 not-ready(False/Unknown==0은 비활성 시리즈라 상시 발화 함정).
+  grep -q 'certmanager_certificate_ready_status{condition="True"} == 0' "$R"
+  # fail-closed: 메트릭 전손 시 silent 무발화 방지.
+  grep -q 'absent(certmanager_certificate_expiration_timestamp_seconds)' "$R"
+  # 임계가 renewBefore 버퍼 안쪽이라 정상 자동갱신 무발화: wildcard 14일(<LE 30일)·catch-all 7일(<selfsigned 15일).
+  grep -q '< 1209600' "$R"   # 14d
+  grep -q '< 604800' "$R"    # 7d
+  # vmalert Deployment에 r5 배선(--rule + volumeMount + volume) — 없으면 룰이 로드 안 됨.
+  grep -q -- '--rule=/rules/r5/\*.yaml' "$V"
+  grep -q 'name: rules-r5, mountPath: /rules/r5' "$V"
+  grep -q 'name: rules-r5, configMap: { name: vmalert-rules-r5 }' "$V"
+}
