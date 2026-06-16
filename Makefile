@@ -16,8 +16,9 @@ SOPS_AGE_KEY_FILE ?= $(HOME)/.config/sops/age/keys.txt
 .PHONY: help bootstrap up down verify host-up
 
 help: ## 사용 가능한 타겟 목록 출력
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-	  | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
+	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	  | awk 'BEGIN{FS=":.*?## "}{printf "  %-22s %s\n", $$1, $$2}' \
+	  | sort
 
 up: ## [runtime] OrbStack VM + k3s + 스토리지 기동 (멱등, = host-up)
 	@infra/k3s-bootstrap/host-up.sh
