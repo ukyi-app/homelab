@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // audit-orphans — registry(apps.json) ↔ 매니페스트 ↔ 바인딩 ↔ 원장 교차 드리프트 리포트.
 // 읽기 전용(파괴 없음). 라이브 비교(kubectl)는 별도 — 이 도구는 레포 정적 사실만 본다.
 // 유형:

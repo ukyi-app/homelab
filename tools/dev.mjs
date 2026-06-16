@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // 로컬 개발 진입점. 서브커맨드:
 //   (없음)    : dev Postgres 기동 + 워크스페이스 dev 루프 (기존 동작)
 //   db:up     : 모드 1(깨끗한 개발) — docker postgres 기동 + 시드. 파괴 OK.

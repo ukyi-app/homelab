@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // create-app 생성기 — 외부 앱 레포의 .app-config.yml(v2 계약)을 검증하고
 // apps/<app>/deploy/prod/ + apps.json + 메모리 원장을 한 번에 갱신한다.
 // onboard-app.mjs(v1, .homelab.yaml)의 후속: db/redis 리소스 참조, SealedSecret 시크릿,

@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // cache:url — 모드 2: Valkey에 tailscale로 읽기 전용 직결(+@read -@write -@dangerous ACL 유저).
 // db-url.mjs와 대칭 — 파괴 수단 없음.
 import { readFileSync, writeFileSync, existsSync } from "node:fs";

@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // teardown-app — 앱 한정 철거. 공유 리소스 안전 원칙: DB/캐시는 앱과 독립한 리소스이며
 // 여러 앱이 같은 리소스를 참조할 수 있다 — 앱 teardown은 conn Secret/Database CR/Valkey를
 // **절대 건드리지 않는다**(리소스 철거는 teardown-resource의 참조 0 게이트가 전담).

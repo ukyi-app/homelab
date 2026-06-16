@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // 외부 앱 레포의 .homelab.yaml(dispatch payload)을 검증하고 apps/<app>/deploy/prod/를 스캐폴드한다.
 // onboard.yaml 워크플로가 호출. --dry-run이면 파일을 쓰지 않고 계획(JSON)만 출력 — 테스트도 이 모드를 쓴다.
 //

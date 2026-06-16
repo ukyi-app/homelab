@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // GHCR 폴링 bump 플래너 — update-image의 권위 경로 (앱 레포 자격/입력 0).
 //
 // 신뢰 경계: `source-repo` 바인딩(homelab 소유) + GitHub API(앱 레포 main 커밋, reader App

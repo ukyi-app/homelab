@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // teardown-resource — DB/캐시 리소스 철거. 두 상태 머신을 분리한다:
 //
 // retain(기본): 리소스를 **보존**하되 참조 0이면 tombstone(state: retained)으로 표시 —
