@@ -5,6 +5,7 @@
 //   orphan-dns-inactive   : active:false 행인데 매니페스트 부재 — DNS 미노출(정보성, 비차단)
 //   missing-registration  : public 앱 매니페스트인데 apps.json 행 부재
 //   dangling-binding      : .bindings.json 참조인데 리소스 산출물(CR/conn) 부재
+//   dangling-role         : cluster.yaml managed.role인데 passwordSecret sealed 부재 — 고아 role (정보성)
 //   unreferenced-resource : 어떤 앱도 참조 안 하는 리소스 — retain/teardown 후보 (정보성)
 //   stale-ledger-row      : prod 원장 행인데 apps/도 platform/도 없음
 //   incomplete-purge      : tombstone state=purging 잔존 — 상태머신 중단 흔적
@@ -129,6 +130,22 @@ for (const m of ledger.matchAll(/<!-- ledger:row --> *([a-z0-9+-]+) *\| *([a-z-]
 const tombs = readJson(`${ROOT}/platform/data-conn/prod/.tombstones.json`, {});
 for (const [k, v] of Object.entries(tombs))
   if (v.state === "purging") add("incomplete-purge", k, "purge 상태머신이 중단됨 — drop/verify/cleanup 재개 필요");
+
+// 6) dangling-role — cluster.yaml managed.roles 항목인데 passwordSecret sealed가 부재(정보성).
+//    purge cleanup이 sealed/CR을 제거했지만 cluster.yaml role 제거 커밋이 빠진 상태를 잡는다
+//    (incomplete-purge는 state=purging만 봐서 purge 완료 후 고아 role을 못 본다).
+const clusterPath = `${ROOT}/platform/cnpg/prod/cluster.yaml`;
+if (existsSync(clusterPath)) {
+  const cluster = parseYaml(readFileSync(clusterPath, "utf8")) ?? {};
+  const roles = cluster?.spec?.managed?.roles ?? [];
+  const dbDir = `${ROOT}/platform/cnpg/prod/databases`;
+  for (const role of roles) {
+    const secret = role?.passwordSecret?.name;
+    if (!secret) continue;
+    if (!existsSync(`${dbDir}/${secret}.sealed.yaml`))
+      add("dangling-role", role.name, `cluster.yaml managed.role이 부재 sealed(${secret}.sealed.yaml)를 참조 — purge 후 role 제거 커밋 누락 가능`);
+  }
+}
 
 const blocking = findings.filter((f) => BLOCKING.has(f.type));
 console.log(JSON.stringify({ findings, count: findings.length, blocking: blocking.length }, null, 2));
