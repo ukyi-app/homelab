@@ -29,10 +29,7 @@ jobs:
         with:
           ref: main
           token: ${{ steps.writer.outputs.token }}
-      - uses: actions/setup-node@v4
-        with: { node-version: "22" }
-      - run: corepack enable && corepack prepare pnpm@11 --activate
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-node-pnpm
       - name: spec 재검증 (비신뢰 입력 — env 경유, 화이트리스트 밖 필드 거부)
         id: spec
         env:

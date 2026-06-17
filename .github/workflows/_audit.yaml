@@ -11,10 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { ref: main }
-      - uses: actions/setup-node@v4
-        with: { node-version: "22" }
-      - run: corepack enable && corepack prepare pnpm@11 --activate
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-node-pnpm
       - name: audit-orphans (읽기 전용)
         id: audit
         run: |

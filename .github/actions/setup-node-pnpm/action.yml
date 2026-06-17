@@ -1,0 +1,14 @@
+name: setup-node-pnpm
+description: node + corepack pnpm 핀 + frozen 설치 (버전 SSOT). node-version·pnpm 버전을 한 곳에서 핀한다.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    # corepack로 pnpm@11 활성 — 러너 기본 pnpm/npm 버전 드리프트 차단(lockfile 호환).
+    - shell: bash
+      run: corepack enable && corepack prepare pnpm@11 --activate
+    - shell: bash
+      run: pnpm install --frozen-lockfile
