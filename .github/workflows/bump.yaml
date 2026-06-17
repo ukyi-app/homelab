@@ -9,11 +9,14 @@ on:
   repository_dispatch:
     types: [app-image]
 
-# 직렬화: write-back은 한 번에 하나만 실행; 진행 중인 커밋은 절대 취소하지 않는다.
-# (workflow_run 경로와 repository_dispatch 경로가 같은 그룹을 공유 — 교차 직렬화)
+# 직렬화: 모든 main 변이(dispatch-mutation/bump-poll/bump)가 공유하는 전역 큐에 합류한다.
+# values-writeback 전용 그룹은 queue:max가 없어 동시 3번째 write-back이 대기 건을 조용히 취소했다
+# (races-1/2 — 인-repo bump 유실). 진행 중인 커밋은 절대 취소하지 않는다(cancel-in-progress:false).
+# queue:max(2026-05 GA)는 cancel-in-progress:true와 병용 불가 — false 유지.
 concurrency:
-  group: values-writeback
+  group: homelab-mutation
   cancel-in-progress: false
+  queue: max
 
 # GITHUB_TOKEN은 최소 권한만: main 쓰기는 writer App 토큰의 PR 경로가 전담한다.
 permissions:

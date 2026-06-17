@@ -73,11 +73,15 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   [ "$status" -ne 0 ]
 }
 
-@test "bump workflow is serialized via a single concurrency group" {
+@test "bump workflow joins the global homelab-mutation queue (no pending loss)" {
+  # races-1/2: values-writeback는 queue:max가 없어 동시 3번째 write-back이 대기 건을 조용히 취소했다.
+  # 문서화된 전역 직렬화(homelab-mutation + queue:max)에 합류시켜 인-repo bump 유실을 막는다.
   run yq '.concurrency.group' "$WF"
-  [ -n "$output" ]
+  [ "$output" == "homelab-mutation" ]
+  run yq '.concurrency.queue' "$WF"
+  [ "$output" == "max" ]
   run yq '.concurrency.cancel-in-progress' "$WF"
-  [[ "$output" == "false" ]] # 반쯤 끝난 write-back은 절대 취소하지 않는다
+  [ "$output" == "false" ] # 반쯤 끝난 write-back은 절대 취소하지 않는다 (queue:max는 cancel:true와 병용 불가)
 }
 
 # ── dry-3: allowed-flag 가드 (오타 플래그가 digest 핀을 침묵 삭제하는 것 차단) ──
