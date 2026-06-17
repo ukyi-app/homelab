@@ -112,3 +112,26 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.[0].action == "refuse"'
 }
+
+@test "a transient imagetools error (not a genuine 404) refuses instead of treating image as absent" {
+  # bbb2222 manifest를 transient 오류로 표시 — 진짜 404가 아니므로 'absent'로 삼키면 안 되고 refuse여야.
+  rm -f "$FX/orders.manifest-sha-bbb2222.json"
+  cat > "$FX/orders.manifest-sha-bbb2222.error.json" <<'JSON'
+{ "message": "received unexpected HTTP status: 500 Internal Server Error" }
+JSON
+  run_poll
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[0].action == "refuse"'
+  echo "$output" | jq -e '.[0].reason | test("manifest|transient|일시")'
+}
+
+@test "a genuine manifest-unknown 404 is still treated as image absent (not built)" {
+  rm -f "$FX/orders.manifest-sha-bbb2222.json"
+  cat > "$FX/orders.manifest-sha-bbb2222.error.json" <<'JSON'
+{ "message": "ghcr.io/ukyi-app/orders:sha-bbb...: not found" }
+JSON
+  run_poll
+  [ "$status" -eq 0 ]
+  # 404는 absent → 후보 없음(noop), refuse 아님
+  echo "$output" | jq -e '.[0].action == "noop"'
+}
