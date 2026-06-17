@@ -46,6 +46,10 @@ resource "github_branch_protection" "main" {
     required_approving_review_count = 0
     require_last_push_approval      = false
   }
+  # enforce_admins=false: 솔로-오너 환경의 의도된 잔여 우회다. required_pull_request_reviews의
+  # approving_review_count=0(위)이라 owner가 자기 PR을 auto-merge로 통과시키는 모델과 정합 —
+  # admin 강제를 켜면 owner 직접 머지 경로가 막혀 운영 불가. 게이트(gate check + strict)는
+  # admin에게도 유효(이 줄은 admin '추가' 룰만 면제). residual bypass임을 branch_protection.bats가 잠근다.
   enforce_admins      = false
   allows_force_pushes = false
   allows_deletions    = false
