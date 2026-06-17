@@ -1,6 +1,7 @@
 # active&&public host의 라이브 DNS resolve 체크 (drift-2 잔여, opt-in 스케줄). apply 실패로 active:true인데
 # DNS가 안 생긴 경우를 잡는다. 라이브 DNS 호출은 이 워크플로 안에서만 — required gate는 클러스터리스 유지.
 name: dns-drift
+run-name: "🔁 dns-drift — ${{ github.event_name == 'schedule' && '스케줄' || format('수동({0})', github.actor) }}"
 on:
   schedule:
     - cron: "23 */6 * * *"   # 6시간마다(DNS는 자주 안 변함)
