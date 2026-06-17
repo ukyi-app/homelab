@@ -1,0 +1,22 @@
+# tf-destroy-guard composite — tf plan의 delete/replace를 세어 무인 apply를 가드(SSOT).
+# 로직은 destroy-guard.sh(POSIX sh)에 있고 bats로 PLAN_JSON 픽스처 단위 검증한다.
+# ⚠️ plan 산출(`-out=tf.plan`)은 호출 측이 먼저 수행 — 이 액션은 산출된 plan만 검사한다.
+name: tf-destroy-guard
+description: tf plan의 delete/replace 액션 가드(mode=block→exit1 / mode=warn→::warning::)
+inputs:
+  mode:    { description: "block|warn", required: false, default: "block" }
+  root:    { description: "terraform -chdir 루트(예: infra/cloudflare)", required: true }
+  plan:    { description: "plan 산출물 경로(루트 기준)", required: false, default: "tf.plan" }
+outputs:
+  result:        { description: "ok | blocked-delete | error (codex pass5 F1)", value: "${{ steps.guard.outputs.result }}" }
+  destroy_count: { description: "delete 액션 수(result=error면 미설정)", value: "${{ steps.guard.outputs.destroy_count }}" }
+runs:
+  using: composite
+  steps:
+    - id: guard
+      shell: sh
+      env:
+        MODE: ${{ inputs.mode }}
+        ROOT: ${{ inputs.root }}
+        PLAN: ${{ inputs.plan }}
+      run: sh "$GITHUB_ACTION_PATH/destroy-guard.sh"
