@@ -23,3 +23,29 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   run grep -E "inputs\.kubeseal == 'true'" "$A"
   [ "$status" -eq 0 ]
 }
+
+@test "sealing workflows use the composite kubeseal (no inline kubeseal curl)" {
+  local wf
+  for wf in _create-cache.yaml _create-database.yaml; do
+    run grep -F 'uses: ./.github/actions/setup-toolchain' "$ROOT/.github/workflows/$wf"
+    [ "$status" -eq 0 ]
+    # 인라인 kubeseal 다운로드가 워크플로에 남지 않았는지
+    run grep -E 'sealed-secrets/releases/download/.*kubeseal' "$ROOT/.github/workflows/$wf"
+    [ "$status" -ne 0 ]
+  done
+  # 옛 v0.27.3 핀이 어디에도 안 남았는지(레포 전역)
+  run grep -rE 'kubeseal-0\.27\.3' "$ROOT/.github/workflows/"
+  [ "$status" -ne 0 ]
+}
+
+@test "onboard and _create-app use the composite (no inline helm/kubeconform/conftest curl)" {
+  local wf
+  for wf in onboard.yaml _create-app.yaml; do
+    run grep -F 'uses: ./.github/actions/setup-toolchain' "$ROOT/.github/workflows/$wf"
+    [ "$status" -eq 0 ]
+    run grep -E 'get\.helm\.sh/helm-v' "$ROOT/.github/workflows/$wf"
+    [ "$status" -ne 0 ]
+    run grep -E 'conftest_0\.56\.0' "$ROOT/.github/workflows/$wf"
+    [ "$status" -ne 0 ]
+  done
+}

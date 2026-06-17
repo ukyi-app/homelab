@@ -50,12 +50,10 @@ jobs:
           console.log(`maxmemory=${mm}`);
           EOF
       - name: kubeseal + conftest 설치
-        run: |
-          curl -sL https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.3/kubeseal-0.27.3-linux-arm64.tar.gz \
-            | sudo tar xz -C /usr/local/bin kubeseal
-          # verify:ledger가 conftest를 부른다 (ci.yaml과 동일 핀)
-          curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_arm64.tar.gz \
-            | sudo tar -xz -C /usr/local/bin conftest
+        uses: ./.github/actions/setup-toolchain
+        with:
+          kubeseal: 'true'
+          conftest: 'true'
       - name: provision + 원장 게이트
         env:
           NAME: ${{ steps.spec.outputs.name }}
