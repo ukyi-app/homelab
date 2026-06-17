@@ -26,3 +26,26 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; WF="$ROOT/.github/work
   run grep -E "pr merge --auto" "$WF/bump.yaml"
   [ "$status" -eq 0 ]
 }
+
+@test "no github_actions_secret bot_pat resource remains in terraform" {
+  # App 마이그레이션 후 DEPLOY_BOT_PAT(write-capable standing PAT)는 소비자 0 — 리소스가 남으면 안 됨
+  run grep -nE 'github_actions_secret"?[[:space:]]*"bot_pat"' "$ROOT/infra/github/secrets.tf"
+  [ "$status" -ne 0 ]
+}
+
+@test "no variable bot_pat declared in terraform" {
+  run grep -nE '^variable[[:space:]]+"bot_pat"' "$ROOT/infra/github/variables.tf"
+  [ "$status" -ne 0 ]
+}
+
+@test "DEPLOY_BOT_PAT secret_name is gone from terraform" {
+  # secret_name 문자열까지 사라져야 라이브 destroy가 next apply에서 발생한다
+  run grep -rn 'DEPLOY_BOT_PAT' "$ROOT/infra/github/"
+  [ "$status" -ne 0 ]
+}
+
+@test "tf-reconcile drift-github no longer injects TF_VAR_bot_pat" {
+  # 변수 제거 후 dead 주입(오해 유발) 차단 — TF_GITHUB_TOKEN/OWNER 등 나머지 plan-only 시크릿은 보존
+  run grep -nE 'TF_VAR_bot_pat' "$ROOT/.github/workflows/tf-reconcile.yaml"
+  [ "$status" -ne 0 ]
+}
