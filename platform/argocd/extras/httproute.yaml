@@ -1,0 +1,26 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd-server
+spec:
+  parentRefs:
+    # group/kind는 CRD 기본값이지만 명시 — SSA atomic 리스트(parentRefs) 영구 OutOfSync 함정 회피
+    # (grafana/adguard 라우트 검증, AGENTS.md).
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab
+      namespace: gateway
+      sectionName: web-internal-tls # *.home.ukyi.app 와일드카드 cert로 TLS 종단
+  hostnames:
+    - "argocd.home.ukyi.app"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        # argocd-server Service:80(→8080)은 server.insecure=true라 평문 HTTP. 443 아님(TLS-on-TLS 회피).
+        # 같은 argocd 네임스페이스라 ReferenceGrant 불필요.
+        - group: ""
+          kind: Service
+          name: argocd-server
+          port: 80
+          weight: 1
