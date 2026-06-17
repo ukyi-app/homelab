@@ -126,6 +126,14 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
   compound command 실패를 무시 — 마지막 명령 status만으로 ok). 중간 단언은 `[ ]`(단순 명령)로.
 - helm 차트 CRD가 `crds/` 디렉토리에 있으면 kustomize HelmChartInflationGenerator 기본 렌더에서
   빠진다 — `includeCRDs: true` 필수(sealed-secrets에서 검증).
+- **sealed-secrets patch-mode로 기존(타 도구 생성) Secret에 키를 머지하려면 `sealedsecrets.bitnami.com/patch:
+  "true"`를 대상 live Secret에 둬야 한다** — 컨트롤러(0.37.0)는 SealedSecret 템플릿이 아니라 **대상 Secret의
+  어노테이션**에서 patch 여부를 읽는다. 템플릿에만 두면 `failed update: Resource "<name>" already exists and is
+  not managed by SealedSecret`로 거부돼 Application이 Degraded(argocd ukkiee 비밀번호를 argocd-secret에 머지하다
+  발견). argo-helm은 `configs.secret.annotations`로 data 블록 없이 이 어노테이션을 차트 생성 시점에 부여할 수
+  있다(data 필드 미설정 시 data 블록 미렌더 → 머지 키 prune 없음, DR-durable). `patch` 단독이면 ownerRef 없이
+  additive 머지(기존 키 보존). **`managed: "true"`는 controller ownerRef를 만들어 SealedSecret 삭제 시 대상 Secret
+  전체가 cascade delete되므로 쓰지 말 것**(patch 단독으로 충분).
 - `gh pr merge --auto`는 이미 clean(체크 완료)인 PR에 에러를 낸다 — `|| gh pr merge` 폴백 필요.
 - `create-github-app-token`의 `repositories` 입력은 **owner 없는 레포명**만 받는다
   (`owner/repo` 형태를 넣으면 스코프 실패). cross-repo read는 `owner:` 명시 필수(비우면 현재
