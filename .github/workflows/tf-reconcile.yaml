@@ -145,7 +145,6 @@ jobs:
         env:
           TF_VAR_github_owner: ${{ secrets.TF_GITHUB_OWNER }}
           TF_VAR_github_token: ${{ secrets.TF_GITHUB_TOKEN }}
-          TF_VAR_bot_pat: ${{ secrets.TF_GITHUB_BOT_PAT }}
           TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TF_VAR_telegram_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
