@@ -1,0 +1,16 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: argocd-secret
+  namespace: argocd
+spec:
+  encryptedData:
+    accounts.ukkiee.password: AgBFfUCZbqk49weXgGZFOiuOj9HH9oqNIncxhy70U8ZvLzwV+ESIF29ISVpxmiBRs3IxQA8hSIGyl32VdteS0RKd6M0uwzQ3S8Y79EVcAfBIRvM5eHY3Sxv6yrK1Uc3HDm1FuvUmRZuJF5bUQZURlxnvekLIcWlj+1ndvZjnTXbOhiupQArR5Wbo5Dtg/hSN9h90Ygz4WAaU4FxqMbflFzvUt4fh4mfn/RMqlhd6IGhG6Xyk85wvTAxOesqXRyBEHTF7de1Z3GCOy+jv06jWGx9PSITGRZT9zYTXdvM43wkYavGbPDF/oYuckgaG9E3Ybyqj+OE9QWVhCebS/I/7YaVKgulez9IEAQ6x6cmfv4scKn+mLkMcznCYhKNNnoVNYKSNgMJFQardsOhymFCJS8PGGcqh54oPWjuQKOpWY0u54U2SfHF5IrGQ1HkFOKb4o10Xnr2sC9OsM66oBm/sweLchCrbN7JoT/Ro95nDxMFSDzvss1u5G737Zd5MnYnURmorAN9o9L75enXJCDWy+YPkpEbz0wAfwKA/dzbGNRScV9WBo9OI1kISE2obNHfoUQq0tD7oj/c27LDomXuQXNf4txbYTXmO8ZAd6tHYUkZl/Aee0muvx7eg5NOkRnWYIdswz+A7BSbph1UDs8f6IqvOUTTEZYzgVzkRzQ2jCIH/hturiGZJfxvLgN05Bl94P5hMzDmjgIuaDxYpTjxeT3KujTNIymTwenMRCmXz4T9LJz2mqJ6+s+HCv9W/qlVksl+OB/vT1J4D8j1KGho=
+  template:
+    metadata:
+      annotations:
+        sealedsecrets.bitnami.com/patch: "true"
+      name: argocd-secret
+      namespace: argocd
+    type: Opaque

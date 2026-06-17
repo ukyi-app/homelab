@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-extras
+  namespace: argocd
+  annotations:
+    # PR1: argocd-secret에 ukkiee 비밀번호 패치(SealedSecret). PR2: argocd UI HTTPRoute 추가.
+    # gateway(-8)·sealed-secrets 컨트롤러(-8)·argocd 차트 app(-10)이 먼저 떠 있어야 머지/attach → wave 1.
+    # (Application 경계 health 게이트는 없어 eventual — retry 소진 시 명시 sync로 복구: Task 8 참조.)
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ukyi-app/homelab.git
+    targetRevision: main
+    path: platform/argocd/extras
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=false # argocd ns는 argocd 차트 app(-10)이 소유
+      - ServerSideApply=true # HTTPRoute atomic-list 함정 회피(PR2)
+    retry:
+      limit: 5
+      backoff: { duration: 15s, factor: 2, maxDuration: 5m }
