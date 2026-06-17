@@ -77,25 +77,36 @@ jobs:
             2) echo "drift=true" >> "$GITHUB_OUTPUT" ;;
             *) exit "$rc" ;;
           esac
-      # destroy/replace가 있으면 무인 apply 금지 — DR/배포 자산 보호. composite가 ::error::+exit1.
-      - name: destroy 가드 (block)
+      # drift-2: delete/replace는 무인 apply 금지하되 reconcile 잡은 죽이지 않는다(alert-and-skip) —
+      # 합법 teardown(push-apply 취소)이 30분마다 잡을 영구 red로 만드는 것을 막는다. ⚠️ F3: 원자적이라 delete
+      # 포함 시 비-delete도 함께 대기. ⚠️ codex pass5 F1: outcome이 아니라 가드의 **typed output**으로 분기 —
+      # result=='ok'만 apply, 'blocked-delete'면 alert-and-skip, 'error'(가드 자체 깨짐)면 잡을 loud 실패.
+      - name: destroy 가드 (block, alert-and-skip)
+        id: guard
         if: steps.drift.outputs.drift == 'true'
+        continue-on-error: true
         uses: ./.github/actions/tf-destroy-guard
         with:
           mode: block
           root: infra/cloudflare
           plan: tf.plan
-      - name: apply (드리프트 + 가드 통과 시에만)
-        if: steps.drift.outputs.drift == 'true'
+      # codex pass5 F1: 가드 내부 오류(plan 손상·jq 부재 등)는 delete 차단과 다르다 — 조용히 skip하지 말고 잡 실패.
+      - name: 가드 내부 오류면 잡 실패 (delete 차단과 구분)
+        if: steps.drift.outputs.drift == 'true' && steps.guard.outputs.result == 'error'
+        run: |
+          echo "::error::tf-destroy-guard 내부 오류(result=error) — 가드 신뢰 불가, reconcile 잡 실패시켜 가시화"
+          exit 1
+      - name: apply (드리프트 + 가드 result=ok일 때만)
+        if: steps.drift.outputs.drift == 'true' && steps.guard.outputs.result == 'ok'
         run: terraform -chdir=infra/cloudflare apply -input=false tf.plan
-      - name: telegram notify (드리프트 수렴 또는 실패 시에만)
+      - name: telegram notify (수렴/실패/delete-차단 시에만)
         if: failure() || steps.drift.outputs.drift == 'true'
         uses: ./.github/actions/telegram-notify
         with:
-          status: ${{ job.status == 'success' && steps.drift.outputs.drift == 'true' && 'drift' || job.status }}
+          status: ${{ steps.guard.outputs.result == 'blocked-delete' && 'drift' || (job.status == 'success' && steps.drift.outputs.drift == 'true' && 'drift' || job.status) }}
           source: IaC수렴
           title: IaC 수렴
-          ident: "drift=${{ steps.drift.outputs.drift }}"
+          ident: "drift=${{ steps.drift.outputs.drift }} guard=${{ steps.guard.outputs.result }} (blocked-delete면 owner 로컬 apply)"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

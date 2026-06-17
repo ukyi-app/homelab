@@ -27,3 +27,11 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/iac.yaml"
   run grep -F 'select(. == "delete")' "$WF"
   [ "$status" -ne 0 ]
 }
+
+@test "iac.yaml primary apply guard stays block (drift-2 alert-and-skip is reconcile-only)" {
+  # primary apply(iac.yaml)는 alert-and-skip로 완화하지 않는다 — 무인 delete는 여기서 끝까지 막힌다.
+  run grep -qE 'mode:[[:space:]]*block' "$WF"
+  [ "$status" -eq 0 ]
+  run grep -qE 'continue-on-error:[[:space:]]*true' "$WF"
+  [ "$status" -ne 0 ]   # iac.yaml apply 경로엔 continue-on-error 없음
+}
