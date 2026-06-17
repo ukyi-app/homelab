@@ -26,7 +26,8 @@ jobs:
       # (검증 포인트: Task 1.4 라이브 E2E에서 gate 트리거 확인).
       # ⚠️ writer App에는 Contents:write 외에 **Pull requests:write**가 반드시 필요하다
       # (없으면 PR 생성이 "Resource not accessible" 류로 실패 — PAT 시절 라이브 검증된 동일 함정).
-      # composite action(homelab-token)은 체크아웃이 선행돼야 해서 여기서는 인라인으로 발급한다.
+      # checkout 자체에 토큰이 필요해 이 첫 step에서 create-github-app-token을 인라인 발급한다
+      # (핀 SSOT: tests/gates/test_app-token-sha-ssot.bats가 전 콜사이트 동일 SHA 강제).
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: token
         with:
