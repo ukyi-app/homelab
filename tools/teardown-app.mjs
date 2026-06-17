@@ -5,6 +5,7 @@
 // apply로 DNS 회수), 원장 행. 멱등(이미 없어도 0 종료).
 import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { APP_NAME_RE } from "./lib/identity.mjs";
+import { replaceTotals } from "./lib/ledger-totals.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 // 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시한다(mutator 패밀리 fail-closed).
@@ -45,7 +46,7 @@ if (!DRY) {
     const rows = [...out.matchAll(/<!-- ledger:row --> *[a-z0-9+-]+ *\|[^|]*\| *(\d+) *\| *(\d+) *\|/g)];
     const sumReq = rows.reduce((s, m) => s + +m[1], 0);
     const sumLimit = rows.reduce((s, m) => s + +m[2], 0);
-    out = out.replace(/req ≈ \d+ Mi · limit ≈ \d+ Mi/, `req ≈ ${sumReq} Mi · limit ≈ ${sumLimit} Mi`);
+    out = replaceTotals(out, sumReq, sumLimit);
     writeFileSync(ledgerPath, out);
   }
 }

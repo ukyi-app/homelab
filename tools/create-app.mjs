@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.mjs";
+import { replaceTotals } from "./lib/ledger-totals.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const DRY = process.argv.includes("--dry-run");
@@ -211,7 +212,7 @@ if (!DRY) {
   const lastRow = lines.map((l, i) => (l.includes("<!-- ledger:row -->") ? i : -1)).filter((i) => i >= 0).pop();
   lines.splice(lastRow + 1, 0, `| <!-- ledger:row --> ${app.padEnd(14)} | prod           | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);
   let out = lines.join("\n");
-  out = out.replace(/req ≈ \d+ Mi · limit ≈ \d+ Mi/, `req ≈ ${sumReq + reqMi} Mi · limit ≈ ${sumLimit + limitMi} Mi`);
+  out = replaceTotals(out, sumReq + reqMi, sumLimit + limitMi);
   writeFileSync(ledgerPath, out);
 }
 console.log(JSON.stringify(plan, null, 2));
