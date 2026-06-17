@@ -89,7 +89,7 @@ jobs:
           } > /tmp/pr-body.md
           gh pr create --base main --head "$branch" \
             --title "feat: ${NAME} 캐시 생성 (create-cache)" --body-file /tmp/pr-body.md
-          gh pr merge --auto --squash "$branch" || gh pr merge --squash "$branch"
+          bash scripts/auto-merge-or-fail.sh "$branch"
       - name: telegram notify (핸들 이름만 — URL/자격 금지)
         if: always()
         uses: ./.github/actions/telegram-notify

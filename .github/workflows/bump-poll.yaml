@@ -104,7 +104,7 @@ jobs:
               gh pr create --base main --head "$branch" \
                 --title "chore: ${app} 이미지 갱신 (자동)" \
                 --body "GHCR 폴링 bump — main reachable + descendant + digest 핀 검증 통과. gate 통과 시 auto-merge."
-              gh pr merge --auto --squash "$branch" || gh pr merge --squash "$branch"
+              bash scripts/auto-merge-or-fail.sh "$branch"
             else
               gh pr create --base main --head "$branch" \
                 --title "chore: ${app} 이미지 갱신 (승인 대기)" \

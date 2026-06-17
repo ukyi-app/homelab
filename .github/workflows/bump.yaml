@@ -110,8 +110,7 @@ jobs:
           gh pr create --base main --head "$branch" \
             --title "chore: 이미지 태그 갱신 (${APPS})" \
             --body "build → write-back 자동 PR. required check \`gate\` 통과 시 auto-merge."
-          # 이미 clean(체크 완료) 상태의 PR엔 --auto가 에러를 낸다(라이브 검증된 GitHub 계약) → 직접 머지 폴백
-          gh pr merge --auto --squash "$branch" || gh pr merge --squash "$branch"
+          bash scripts/auto-merge-or-fail.sh "$branch"
       - name: telegram notify
         if: always()
         uses: ./.github/actions/telegram-notify
@@ -185,8 +184,7 @@ jobs:
           gh pr create --base main --head "$branch" \
             --title "chore: ${APP} 이미지 태그 갱신" \
             --body "외부 레포 dispatch → write-back 자동 PR. required check \`gate\` 통과 시 auto-merge."
-          # 이미 clean(체크 완료) 상태의 PR엔 --auto가 에러를 낸다 → 직접 머지 폴백
-          gh pr merge --auto --squash "$branch" || gh pr merge --squash "$branch"
+          bash scripts/auto-merge-or-fail.sh "$branch"
       - name: sanitize dispatch payload
         id: safe
         if: always()

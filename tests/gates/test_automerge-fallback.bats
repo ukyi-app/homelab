@@ -61,3 +61,16 @@ teardown() { rm -rf "$TMP"; }
   run bash "$S"
   [ "$status" -ne 0 ]
 }
+
+@test "all six auto-merge callsites use the shared script, not the raw OR-fallback" {
+  WF="$ROOT/.github/workflows"
+  # races-6: un-gated 직접 머지 OR-폴백을 6곳에서 박멸 — 공유 스크립트만 호출한다.
+  raw=$(grep -rn 'gh pr merge --auto --squash "\$branch" || gh pr merge --squash' "$WF" || true)
+  [ -z "$raw" ]
+  for f in bump.yaml bump-poll.yaml _create-database.yaml _create-cache.yaml _update-secrets.yaml; do
+    grep -q 'auto-merge-or-fail.sh' "$WF/$f" || { echo "missing shared fallback in $f"; false; }
+  done
+  # bump.yaml은 두 job(writeback/writeback-dispatch) — 2회 호출
+  run grep -c 'auto-merge-or-fail.sh' "$WF/bump.yaml"
+  [ "$output" -eq 2 ]
+}
