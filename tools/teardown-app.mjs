@@ -6,6 +6,11 @@
 import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
+// 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시한다(mutator 패밀리 fail-closed).
+const ALLOWED_FLAGS = new Set(["--app", "--repo-root", "--dry-run"]);
+for (const a of process.argv.slice(2)) {
+  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
+}
 const DRY = process.argv.includes("--dry-run");
 const app = arg("--app");
 const ROOT = arg("--repo-root", ".");
