@@ -6,6 +6,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
+import { APP_NAME_RE } from "./lib/identity.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const DRY = process.argv.includes("--dry-run");
@@ -29,7 +30,7 @@ if (!configPath || !app || !repo || !DOMAIN || !tag || !digest) {
 const fail = (msg) => { console.error(`::error::create-app: ${msg}`); process.exit(1); };
 
 // ---------- 1) 식별자/이미지 핀 검증 ----------
-if (!/^[a-z][a-z0-9-]{1,29}$/.test(app)) fail(`app 이름 불량: '${app}'`);
+if (!APP_NAME_RE.test(app)) fail(`app 이름 불량: '${app}'`);
 if (!/^ukyi-app\/[A-Za-z0-9._-]+$/.test(repo)) fail(`repo는 ukyi-app org여야 한다: '${repo}'`);
 const [owner, repoName] = repo.split("/");
 if (repoName !== app) fail(`레포 이름(${repoName})과 app(${app}) 불일치 — 컨벤션: app=repo명`);

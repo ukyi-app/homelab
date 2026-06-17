@@ -10,6 +10,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { APP_NAME_RE } from "./lib/identity.mjs";
 
 function die(msg) {
   console.error(`activate-app: GATE FAIL — ${msg}`);
@@ -27,7 +28,7 @@ for (let i = 0; i < argv.length; i++) {
 const { app, sha, syncedRev } = args;
 const repoDir = path.resolve(args.repoDir ?? ".");
 if (!app || !sha || !syncedRev) die("--app --sha --synced-rev 필수");
-if (!/^[a-z][a-z0-9-]{0,38}[a-z0-9]$/.test(app)) die(`app 이름 형식 불량: ${app}`);
+if (!APP_NAME_RE.test(app)) die(`app 이름 형식 불량: ${app}`);
 if (!/^[0-9a-f]{7,40}$/.test(sha)) die(`sha 형식 불량`);
 
 const git = (...a) => execFileSync("git", a, { cwd: repoDir, encoding: "utf8" });

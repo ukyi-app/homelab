@@ -6,6 +6,7 @@
 // 검증 2단계: 비즈니스 규칙(worker-no-route, host 유도/suffix, env 시크릿 패턴, 원장 예산, 중복)
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
+import { APP_NAME_RE } from "./lib/identity.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const DRY = process.argv.includes("--dry-run");
@@ -24,7 +25,7 @@ const fail = (msg) => { console.error(`::error::onboard: ${msg}`); process.exit(
 // ---------- 1) payload ----------
 const payload = JSON.parse(readFileSync(payloadPath, "utf8"));
 const { app, repo, tag } = payload;
-if (!/^[a-z][a-z0-9-]{1,29}$/.test(app ?? "")) fail(`app 이름 불량: '${app}' (^[a-z][a-z0-9-]{1,29}$)`);
+if (!APP_NAME_RE.test(app ?? "")) fail(`app 이름 불량: '${app}' (${APP_NAME_RE})`);
 if (!/^sha-[0-9a-f]{7,40}$/.test(tag ?? "")) fail(`tag 형식 불량: '${tag}' (sha-<gitsha>)`);
 if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo ?? "")) fail(`repo 형식 불량: '${repo}'`);
 const [owner, repoName] = repo.split("/");

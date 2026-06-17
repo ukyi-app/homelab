@@ -4,6 +4,7 @@
 // 제거 대상: apps/<app>/(바인딩 포함), apps.json 행(active:true였다면 행 제거가 terraform
 // apply로 DNS 회수), 원장 행. 멱등(이미 없어도 0 종료).
 import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { APP_NAME_RE } from "./lib/identity.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 // 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시한다(mutator 패밀리 fail-closed).
@@ -14,7 +15,7 @@ for (const a of process.argv.slice(2)) {
 const DRY = process.argv.includes("--dry-run");
 const app = arg("--app");
 const ROOT = arg("--repo-root", ".");
-if (!app || !/^[a-z][a-z0-9-]{1,29}$/.test(app)) {
+if (!app || !APP_NAME_RE.test(app)) {
   console.error("usage: teardown-app --app <name> [--repo-root <dir>] [--dry-run]");
   process.exit(2);
 }
