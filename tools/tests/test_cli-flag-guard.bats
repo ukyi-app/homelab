@@ -23,3 +23,15 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "알 수 없는 옵션"
 }
+
+@test "teardown-app rejects an unknown flag" {
+  run node tools/teardown-app.mjs --app blog --dry-run --bogus-flag x
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "알 수 없는 옵션"
+}
+
+@test "teardown-resource rejects an unknown flag" {
+  run node tools/teardown-resource.mjs --db shared --dry-run --bogus-flag x
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "알 수 없는 옵션"
+}

@@ -52,19 +52,15 @@ jobs:
           terraform_version: "1.9.8"
           terraform_wrapper: false
       - name: terraform init (R2 backend)
+        uses: ./.github/actions/tf-r2-init
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: |
-          cat > infra/cloudflare/backend.hcl <<EOF
-          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
-          access_key = "${R2_ACCESS_KEY_ID}"
-          secret_key = "${R2_SECRET_ACCESS_KEY}"
-          key        = "cloudflare/prod/terraform.tfstate"
-          EOF
-          terraform -chdir=infra/cloudflare init -backend-config=backend.hcl -input=false -lockfile=readonly
-      - name: drift 감지 → 있을 때만 apply
+        with:
+          root: cloudflare
+          state-key: cloudflare/prod/terraform.tfstate
+      - name: drift 감지 (plan -out=tf.plan)
         id: drift
         run: |
           set +e
@@ -74,26 +70,39 @@ jobs:
           set -e
           case "$rc" in
             0) echo "drift=false" >> "$GITHUB_OUTPUT"; echo "드리프트 없음 — no-op" ;;
-            2) # 파괴(destroy/replace) 액션이 있으면 무인 apply 금지 — DR/배포 자산 보호, 실패시켜 수동 검토 유도.
-               # (prevent_destroy 버킷은 plan 단계서 이미 rc=1로 막히지만, 그 외 리소스의 replace=delete+create도 차단.)
-               destroys=$(terraform -chdir=infra/cloudflare show -json tf.plan \
-                 | jq '[.resource_changes[].change.actions[] | select(. == "delete")] | length')
-               if [ "${destroys:-0}" -gt 0 ]; then
-                 echo "::error::tf plan에 delete/replace ${destroys}건 — 무인 apply 차단(수동 검토 후 적용)"
-                 exit 1
-               fi
-               echo "drift=true" >> "$GITHUB_OUTPUT"
-               terraform -chdir=infra/cloudflare apply -input=false tf.plan ;;
+            2) echo "drift=true" >> "$GITHUB_OUTPUT" ;;
             *) exit "$rc" ;;
           esac
-      - name: telegram notify (드리프트 수렴 또는 실패 시에만)
+      # drift-2: delete/replace는 무인 apply 금지하되 reconcile 잡은 죽이지 않는다(alert-and-skip) —
+      # 합법 teardown(push-apply 취소)이 30분마다 잡을 영구 red로 만드는 것을 막는다. ⚠️ F3: 원자적이라 delete
+      # 포함 시 비-delete도 함께 대기. ⚠️ codex pass5 F1: outcome이 아니라 가드의 **typed output**으로 분기 —
+      # result=='ok'만 apply, 'blocked-delete'면 alert-and-skip, 'error'(가드 자체 깨짐)면 잡을 loud 실패.
+      - name: destroy 가드 (block, alert-and-skip)
+        id: guard
+        if: steps.drift.outputs.drift == 'true'
+        continue-on-error: true
+        uses: ./.github/actions/tf-destroy-guard
+        with:
+          mode: block
+          root: infra/cloudflare
+          plan: tf.plan
+      # codex pass5 F1: 가드 내부 오류(plan 손상·jq 부재 등)는 delete 차단과 다르다 — 조용히 skip하지 말고 잡 실패.
+      - name: 가드 내부 오류면 잡 실패 (delete 차단과 구분)
+        if: steps.drift.outputs.drift == 'true' && steps.guard.outputs.result == 'error'
+        run: |
+          echo "::error::tf-destroy-guard 내부 오류(result=error) — 가드 신뢰 불가, reconcile 잡 실패시켜 가시화"
+          exit 1
+      - name: apply (드리프트 + 가드 result=ok일 때만)
+        if: steps.drift.outputs.drift == 'true' && steps.guard.outputs.result == 'ok'
+        run: terraform -chdir=infra/cloudflare apply -input=false tf.plan
+      - name: telegram notify (수렴/실패/delete-차단 시에만)
         if: failure() || steps.drift.outputs.drift == 'true'
         uses: ./.github/actions/telegram-notify
         with:
-          status: ${{ job.status == 'success' && steps.drift.outputs.drift == 'true' && 'drift' || job.status }}
+          status: ${{ steps.guard.outputs.result == 'blocked-delete' && 'drift' || (job.status == 'success' && steps.drift.outputs.drift == 'true' && 'drift' || job.status) }}
           source: IaC수렴
           title: IaC 수렴
-          ident: "drift=${{ steps.drift.outputs.drift }}"
+          ident: "drift=${{ steps.drift.outputs.drift }} guard=${{ steps.guard.outputs.result }} (blocked-delete면 owner 로컬 apply)"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -126,26 +135,25 @@ jobs:
         with:
           terraform_version: "1.9.8"
           terraform_wrapper: false
-      - name: init + plan (드리프트 감지 — apply 안 함)
+      - name: terraform init (R2 backend, github)
+        if: steps.pf.outputs.configured == 'true'
+        uses: ./.github/actions/tf-r2-init
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        with:
+          root: github
+          state-key: github/prod/terraform.tfstate
+      - name: plan (드리프트 감지 — apply 안 함)
         id: drift
         if: steps.pf.outputs.configured == 'true'
         env:
           TF_VAR_github_owner: ${{ secrets.TF_GITHUB_OWNER }}
           TF_VAR_github_token: ${{ secrets.TF_GITHUB_TOKEN }}
-          TF_VAR_bot_pat: ${{ secrets.TF_GITHUB_BOT_PAT }}
           TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TF_VAR_telegram_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          cat > infra/github/backend.hcl <<EOF
-          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
-          access_key = "${R2_ACCESS_KEY_ID}"
-          secret_key = "${R2_SECRET_ACCESS_KEY}"
-          key        = "github/prod/terraform.tfstate"
-          EOF
-          terraform -chdir=infra/github init -backend-config=backend.hcl -input=false -lockfile=readonly
           set +e
           terraform -chdir=infra/github plan -input=false -lock-timeout=120s -detailed-exitcode -no-color
           rc=$?
@@ -189,7 +197,17 @@ jobs:
         with:
           terraform_version: "1.9.8"
           terraform_wrapper: false
-      - name: init + plan (드리프트 감지 — apply 안 함)
+      - name: terraform init (R2 backend, tailscale)
+        if: steps.pf.outputs.configured == 'true'
+        uses: ./.github/actions/tf-r2-init
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        with:
+          root: tailscale
+          state-key: tailscale/prod/terraform.tfstate
+      - name: plan (드리프트 감지 — apply 안 함)
         id: drift
         if: steps.pf.outputs.configured == 'true'
         env:
@@ -197,17 +215,7 @@ jobs:
           TF_VAR_ts_bootstrap_oauth_secret: ${{ secrets.TF_TAILSCALE_OAUTH_SECRET }}
           TF_VAR_internal_suffix: home.${{ secrets.TF_DOMAIN }}
           TF_VAR_dns_nameserver_tailscale_ip: ${{ secrets.TF_TAILSCALE_DNS_NAMESERVER_IP }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          cat > infra/tailscale/backend.hcl <<EOF
-          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
-          access_key = "${R2_ACCESS_KEY_ID}"
-          secret_key = "${R2_SECRET_ACCESS_KEY}"
-          key        = "tailscale/prod/terraform.tfstate"
-          EOF
-          terraform -chdir=infra/tailscale init -backend-config=backend.hcl -input=false -lockfile=readonly
           set +e
           terraform -chdir=infra/tailscale plan -input=false -lock-timeout=120s -detailed-exitcode -no-color
           rc=$?

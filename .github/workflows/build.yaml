@@ -91,3 +91,15 @@ jobs:
           name: built-${{ matrix.app }}
           path: built/${{ matrix.app }}
           retention-days: 1
+      # 빌드 결과를 owner에게 가시화 — push 실패가 Actions UI에만 묻히지 않게(if: always()).
+      - name: telegram notify
+        if: always()
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ job.status }}
+          source: 배포
+          title: 이미지 빌드
+          ident: ${{ matrix.app }}@${{ github.sha }}
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

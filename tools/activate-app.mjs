@@ -7,9 +7,11 @@
 //   (4) Application Synced+Healthy && HTTPRoute Accepted/ResolvedRefs True (같은 revision)
 // 통과 시 active:true만 변경(워크트리) — 커밋/PR은 호출자(owner 또는 워크플로)가 PR-first로.
 // 라이브 상태는 kubectl로 읽고(--status-file 미지정 시), 테스트는 픽스처 주입.
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { APP_NAME_RE } from "./lib/identity.mjs";
+import { surfaceHash } from "./lib/surface-hash.mjs";
 
 function die(msg) {
   console.error(`activate-app: GATE FAIL — ${msg}`);
@@ -27,7 +29,7 @@ for (let i = 0; i < argv.length; i++) {
 const { app, sha, syncedRev } = args;
 const repoDir = path.resolve(args.repoDir ?? ".");
 if (!app || !sha || !syncedRev) die("--app --sha --synced-rev 필수");
-if (!/^[a-z][a-z0-9-]{0,38}[a-z0-9]$/.test(app)) die(`app 이름 형식 불량: ${app}`);
+if (!APP_NAME_RE.test(app)) die(`app 이름 형식 불량: ${app}`);
 if (!/^[0-9a-f]{7,40}$/.test(sha)) die(`sha 형식 불량`);
 
 const git = (...a) => execFileSync("git", a, { cwd: repoDir, encoding: "utf8" });
@@ -86,8 +88,22 @@ for (const type of ["Accepted", "ResolvedRefs"]) {
 if (args.flip) {
   const rows = JSON.parse(currentRaw);
   const row = rows.find((r) => r.name === app);
-  if (row.active === true) console.error("activate-app: 이미 active — 멱등 no-op");
-  row.active = true;
-  writeFileSync(appsJsonPath, JSON.stringify(rows, null, 2) + "\n");
+  // races-5 마커: .activation 제외 canonical surfaceHash(F3, 자기무효화 방지) + apps.json 노출 행 projection(pass4 F1).
+  // 이 마커는 **정보성**(pass3 F1) — audit이 차단 게이트로 쓰면 정상 이미지 bump가 데드락. 노출 재검증은 런북.
+  const registryRow = { name: row.name, host: row.host ?? null, public: row.public ?? false };
+  const sh = surfaceHash(repoDir, syncedRev, app);
+  const markerPath = path.join(repoDir, `apps/${app}/deploy/prod/.activation`);
+  // ⚠️ codex restale F2: 멱등 — 이미 active이고 마커(surfaceHash+registry+sha)가 동일하면 **아무것도 쓰지 않고**
+  // 끝낸다(재실행/리트라이 시 worktree clean — activatedAt churn·불필요 PR 노이즈 방지). 변경이 있으면 갱신.
+  const cur = (row.active === true && existsSync(markerPath)) ? JSON.parse(readFileSync(markerPath, "utf8")) : null;
+  const unchanged = cur && cur.surfaceHash === sh && cur.sha === sha && JSON.stringify(cur.registry) === JSON.stringify(registryRow);
+  if (unchanged) {
+    console.error("activate-app: 이미 active + 마커 동일 — 멱등 no-op(쓰기 없음, worktree clean)");
+  } else {
+    row.active = true;
+    writeFileSync(appsJsonPath, JSON.stringify(rows, null, 2) + "\n");
+    const marker = { app, sha, syncedRev, surfaceHash: sh, registry: registryRow, activatedAt: new Date().toISOString() };
+    writeFileSync(markerPath, JSON.stringify(marker, null, 2) + "\n");
+  }
 }
 console.log(JSON.stringify({ ok: true, app, sha, syncedRev, flipped: Boolean(args.flip) }));

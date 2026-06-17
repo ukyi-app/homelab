@@ -7,14 +7,10 @@ setup() {
   command -v yq >/dev/null || skip "yq required"
 }
 
-@test "exactly the 15 expected workflows notify via the action (enumerated, bump=2, tf-reconcile=3)" {
-  total=0
-  while read -r wf n; do
-    [ -n "$wf" ] || continue
-    got=$(grep -c "uses: ./.github/actions/telegram-notify" "$WF/$wf" 2>/dev/null || true)
-    [ "${got:-0}" -eq "$n" ] || { echo "$wf: want $n got ${got:-0}"; false; }
-    total=$(( total + ${got:-0} ))
-  done <<'EOF'
+@test "exactly the expected workflows notify via the action (self-deriving sum, bump=2, tf-reconcile=3)" {
+  # ⚠️ codex restale3 F1: 합계는 here-doc 줄의 self-deriving sum(절대값 prebake 금지) — 새 콜사이트(P6 pr-sweeper·
+  # P8 build.yaml)는 EXPECTED here-doc 줄만 더하면 된다(머지 순서 의존 절대값 무수정).
+  EXPECTED="$(cat <<'EOF'
 _create-app.yaml 1
 _create-database.yaml 1
 _create-cache.yaml 1
@@ -27,8 +23,22 @@ onboard.yaml 1
 iac.yaml 1
 tf-reconcile.yaml 3
 dispatch-mutation.yaml 1
+dns-drift.yaml 1
+pr-sweeper.yaml 1
+build.yaml 1
 EOF
-  [ "$total" -eq 15 ]
+)"
+  total=0
+  while read -r wf n; do
+    [ -n "$wf" ] || continue
+    got=$(grep -c "uses: ./.github/actions/telegram-notify" "$WF/$wf" 2>/dev/null || true)
+    [ "${got:-0}" -eq "$n" ] || { echo "$wf: want $n got ${got:-0}"; false; }
+    total=$(( total + ${got:-0} ))
+  done <<EOF
+$EXPECTED
+EOF
+  expected=$(printf '%s\n' "$EXPECTED" | awk '{ s += $2 } END { print s }')
+  [ "$total" -eq "$expected" ]
   ! grep -rq "api.telegram.org" "$WF"   # raw curl 0 — 모든 인라인 curl이 액션으로 이행됨
 }
 

@@ -137,15 +137,27 @@ jobs:
     steps:
       - run: echo "activate-app은 Healthy 게이트에 클러스터 접근이 필요 — 런북의 owner 로컬 절차로 실행"
 
-  # 거부/실패가 조용히 묻히지 않게 — owner는 Actions UI 외에 Telegram으로도 본다
+  # 거부/실패/취소가 조용히 묻히지 않게 — owner는 Actions UI 외에 Telegram으로도 본다.
+  # queue:max 취소나 owner 수동 취소도 cancelled()로 잡아 가시화한다.
   notify-failure:
     needs: [validate, create-app, update-secrets, teardown-app, teardown-resource, audit, create-database, create-cache, route]
-    if: failure()
+    if: failure() || cancelled()
     runs-on: ubuntu-24.04-arm
     steps:
       # 이 잡은 validate 잡과 분리돼 checkout이 없었다 — 로컬 composite action(telegram-notify)을
       # resolve하려면 레포 체크아웃이 선행돼야 한다(없으면 action.yml 경로 미존재로 실패).
       - uses: actions/checkout@v4
+      - name: normalize upstream status
+        id: norm
+        env:
+          RESULTS: ${{ toJSON(needs) }}   # 모든 needs의 result — 본 잡 job.status(success)가 아니라 이걸로 판정
+        run: |
+          # if: failure()||cancelled()로 진입했으므로 취소>실패 우선 정규화(둘 다 notify.sh enum 멤버).
+          if printf '%s' "$RESULTS" | grep -q '"result": *"cancelled"'; then
+            echo "status=cancelled" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=failure" >> "$GITHUB_OUTPUT"
+          fi
       - name: sanitize action input
         id: safe
         env:
@@ -156,7 +168,7 @@ jobs:
       - name: telegram notify
         uses: ./.github/actions/telegram-notify
         with:
-          status: failure
+          status: ${{ steps.norm.outputs.status }}
           source: 변이
           title: 변이 실행
           ident: ${{ steps.safe.outputs.ident }}
