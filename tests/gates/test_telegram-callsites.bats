@@ -25,6 +25,7 @@ tf-reconcile.yaml 3
 dispatch-mutation.yaml 1
 dns-drift.yaml 1
 pr-sweeper.yaml 1
+build.yaml 1
 EOF
 )"
   total=0
