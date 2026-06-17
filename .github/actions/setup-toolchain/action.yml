@@ -11,6 +11,7 @@ inputs:
   shellcheck:  { description: shellcheck v0.11.0,    default: 'false' }
   sops:        { description: sops v3.9.4,           default: 'false' }
   age:         { description: age latest,            default: 'false' }
+  kubeseal:    { description: kubeseal v0.37.0,       default: 'false' }
 
 runs:
   using: composite
@@ -54,3 +55,10 @@ runs:
       run: |
         curl -sSL https://dl.filippo.io/age/latest?for=linux/arm64 | tar -xz -C /tmp
         sudo mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
+    - if: ${{ inputs.kubeseal == 'true' }}
+      shell: bash
+      run: |
+        # kubeseal 버전 핀 — 컨트롤러 appVersion(platform/sealed-secrets app v0.37.0)과 동일해야 seal/unseal 호환.
+        # 봉인 워크플로(_create-cache/_create-database)가 제각각 핀하던 v0.27.3/v0.37.0을 이 한 곳으로 수렴.
+        curl -fsSL https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.37.0/kubeseal-0.37.0-linux-arm64.tar.gz \
+          | sudo tar xz -C /usr/local/bin kubeseal
