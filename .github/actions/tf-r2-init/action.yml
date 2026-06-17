@@ -1,0 +1,26 @@
+name: tf-r2-init
+description: R2(S3 호환) backend.hcl 작성 + terraform init (-lockfile=readonly). R2 자격은 env(R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY)로 상속.
+inputs:
+  root:
+    description: tf 루트 디렉토리명 (cloudflare | github | tailscale)
+    required: true
+  state-key:
+    description: R2 state object key (예 cloudflare/prod/terraform.tfstate)
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        ROOT: ${{ inputs.root }}
+        STATE_KEY: ${{ inputs.state-key }}
+      run: |
+        # backend.hcl은 .gitignore 등록됨 — R2 자격이 평문이라 절대 커밋/로그 금지(set -x 금지).
+        cat > "infra/${ROOT}/backend.hcl" <<EOF
+        endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
+        access_key = "${R2_ACCESS_KEY_ID}"
+        secret_key = "${R2_SECRET_ACCESS_KEY}"
+        key        = "${STATE_KEY}"
+        EOF
+        # -lockfile=readonly: 커밋된 멀티플랫폼 lock과 어긋나면 실패 → 공급망/재현성 가드(불변식 SSOT)
+        terraform -chdir="infra/${ROOT}" init -backend-config=backend.hcl -input=false -lockfile=readonly

@@ -52,18 +52,14 @@ jobs:
           terraform_version: "1.9.8"
           terraform_wrapper: false
       - name: terraform init (R2 backend)
+        uses: ./.github/actions/tf-r2-init
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: |
-          cat > infra/cloudflare/backend.hcl <<EOF
-          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
-          access_key = "${R2_ACCESS_KEY_ID}"
-          secret_key = "${R2_SECRET_ACCESS_KEY}"
-          key        = "cloudflare/prod/terraform.tfstate"
-          EOF
-          terraform -chdir=infra/cloudflare init -backend-config=backend.hcl -input=false -lockfile=readonly
+        with:
+          root: cloudflare
+          state-key: cloudflare/prod/terraform.tfstate
       - name: drift 감지 (plan -out=tf.plan)
         id: drift
         run: |
@@ -139,7 +135,17 @@ jobs:
         with:
           terraform_version: "1.9.8"
           terraform_wrapper: false
-      - name: init + plan (드리프트 감지 — apply 안 함)
+      - name: terraform init (R2 backend, github)
+        if: steps.pf.outputs.configured == 'true'
+        uses: ./.github/actions/tf-r2-init
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        with:
+          root: github
+          state-key: github/prod/terraform.tfstate
+      - name: plan (드리프트 감지 — apply 안 함)
         id: drift
         if: steps.pf.outputs.configured == 'true'
         env:
@@ -147,17 +153,7 @@ jobs:
           TF_VAR_github_token: ${{ secrets.TF_GITHUB_TOKEN }}
           TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TF_VAR_telegram_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          cat > infra/github/backend.hcl <<EOF
-          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
-          access_key = "${R2_ACCESS_KEY_ID}"
-          secret_key = "${R2_SECRET_ACCESS_KEY}"
-          key        = "github/prod/terraform.tfstate"
-          EOF
-          terraform -chdir=infra/github init -backend-config=backend.hcl -input=false -lockfile=readonly
           set +e
           terraform -chdir=infra/github plan -input=false -lock-timeout=120s -detailed-exitcode -no-color
           rc=$?
@@ -201,7 +197,17 @@ jobs:
         with:
           terraform_version: "1.9.8"
           terraform_wrapper: false
-      - name: init + plan (드리프트 감지 — apply 안 함)
+      - name: terraform init (R2 backend, tailscale)
+        if: steps.pf.outputs.configured == 'true'
+        uses: ./.github/actions/tf-r2-init
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        with:
+          root: tailscale
+          state-key: tailscale/prod/terraform.tfstate
+      - name: plan (드리프트 감지 — apply 안 함)
         id: drift
         if: steps.pf.outputs.configured == 'true'
         env:
@@ -209,17 +215,7 @@ jobs:
           TF_VAR_ts_bootstrap_oauth_secret: ${{ secrets.TF_TAILSCALE_OAUTH_SECRET }}
           TF_VAR_internal_suffix: home.${{ secrets.TF_DOMAIN }}
           TF_VAR_dns_nameserver_tailscale_ip: ${{ secrets.TF_TAILSCALE_DNS_NAMESERVER_IP }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          cat > infra/tailscale/backend.hcl <<EOF
-          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
-          access_key = "${R2_ACCESS_KEY_ID}"
-          secret_key = "${R2_SECRET_ACCESS_KEY}"
-          key        = "tailscale/prod/terraform.tfstate"
-          EOF
-          terraform -chdir=infra/tailscale init -backend-config=backend.hcl -input=false -lockfile=readonly
           set +e
           terraform -chdir=infra/tailscale plan -input=false -lock-timeout=120s -detailed-exitcode -no-color
           rc=$?

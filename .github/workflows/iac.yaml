@@ -69,18 +69,14 @@ jobs:
           terraform_wrapper: false
       - name: terraform init (R2 backend, readonly)
         if: steps.pf.outputs.configured == 'true'
+        uses: ./.github/actions/tf-r2-init
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: |
-          cat > infra/cloudflare/backend.hcl <<EOF
-          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
-          access_key = "${R2_ACCESS_KEY_ID}"
-          secret_key = "${R2_SECRET_ACCESS_KEY}"
-          key        = "cloudflare/prod/terraform.tfstate"
-          EOF
-          terraform -chdir=infra/cloudflare init -backend-config=backend.hcl -input=false -lockfile=readonly
+        with:
+          root: cloudflare
+          state-key: cloudflare/prod/terraform.tfstate
       - name: terraform plan → job summary
         if: steps.pf.outputs.configured == 'true'
         env:
@@ -138,18 +134,14 @@ jobs:
           terraform_version: "1.9.8"
           terraform_wrapper: false
       - name: terraform init (R2 backend)
+        uses: ./.github/actions/tf-r2-init
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: |
-          cat > infra/cloudflare/backend.hcl <<EOF
-          endpoints  = { s3 = "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" }
-          access_key = "${R2_ACCESS_KEY_ID}"
-          secret_key = "${R2_SECRET_ACCESS_KEY}"
-          key        = "cloudflare/prod/terraform.tfstate"
-          EOF
-          terraform -chdir=infra/cloudflare init -backend-config=backend.hcl -input=false -lockfile=readonly
+        with:
+          root: cloudflare
+          state-key: cloudflare/prod/terraform.tfstate
       - name: terraform plan (-out=tf.plan)
         run: terraform -chdir=infra/cloudflare plan -input=false -lock-timeout=120s -out=tf.plan
       # primary merge→apply 경로 destroy 가드 — DNS/tunnel/ruleset의 delete/replace를 무인 apply 차단.
