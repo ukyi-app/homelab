@@ -33,6 +33,29 @@ jobs:
           conftest: 'true'
           bats: 'true'
           shellcheck: 'true'
+      - name: secret-guard — gitleaks(누출) + sops-guard(평문 enc.yaml) 강제
+        # verify.yaml의 gitleaks/sops-guard는 required가 아니라(분기보호 contexts=["gate"]),
+        # 누출 PR이 gate만 통과하면 머지된다 → required `gate` 잡에 폴딩(코드 전용, 머지 즉시 발효).
+        # gitleaks는 pre-commit rev와 동일 버전을 핀(SSOT 드리프트 방지). 러너=arm64.
+        run: |
+          ver=$(grep -A2 'gitleaks/gitleaks' .pre-commit-config.yaml | grep -oE 'rev: v[0-9.]+' | grep -oE '[0-9.]+')
+          # ⚠️ codex pass5 F3 + restale F1: curl|tar 직접 추출은 체크섬 없는 실행체 공급망 표면(supplychain-5 동일).
+          # 하드코딩 SHA256 placeholder 금지(게이트 깨짐) — 릴리스 **공식 checksums.txt**를 받아 그 라인으로 검증 후
+          # 추출한다(버전 핀 v${ver}만 Renovate가 갱신; 해시는 매니페스트에서 자동 일치, stale 위험 0).
+          ( cd /tmp
+            curl -fsSL -O "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_arm64.tar.gz"
+            curl -fsSL -O "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_checksums.txt"
+            grep "  gitleaks_${ver}_linux_arm64.tar.gz$" "gitleaks_${ver}_checksums.txt" | sha256sum -c -
+            sudo tar -xz -C /usr/local/bin -f "gitleaks_${ver}_linux_arm64.tar.gz" gitleaks )
+          # git 히스토리 전체 스캔(pre-commit 훅과 동등). --redact: 발견 시 시크릿 평문 미출력.
+          # ⚠️ codex pass4 F2: bare 'gitleaks detect'는 git 히스토리 전체 스캔 → 과거 false-positive/회전된
+          # 옛 시크릿 하나가 모든 PR을 영구 머지불가(게이트 red)로 만든다. pre-commit 훅처럼 작업트리만 스캔.
+          gitleaks detect --no-git --source . --redact --no-banner --exit-code 1
+      - name: sops-guard — 추적된 모든 *.enc.yaml 구조 검증
+        # 평문 *.enc.yaml(또는 부분 암호화)을 차단. gate는 setup-toolchain에서 yq를 이미 설치했다.
+        run: |
+          files=$(git ls-files '*.enc.yaml')
+          if [ -n "$files" ]; then scripts/sops-guard.sh $files; fi
       - name: chart render + validate (all kinds)
         run: make chart-test
       - name: memory ledger onboarding gate (M0-owned)
