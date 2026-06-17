@@ -39,8 +39,13 @@ V="platform/argocd/bootstrap-values.yaml"
   run yq '.configs.cm."admin.enabled"' "$V"; [ "$output" = "false" ]
 }
 
-@test "no configs.secret block (preserves argocd-secret two-writer safety invariant)" {
-  run yq '.configs.secret' "$V"; [ "$output" = "null" ]
+@test "configs.secret has only the patch annotation, no data-bearing fields (two-writer invariant)" {
+  # 차트가 argocd-secret에 patch 어노테이션을 부여해야 sealed-secrets가 머지 가능(DR-durable)
+  run yq '.configs.secret.annotations."sealedsecrets.bitnami.com/patch"' "$V"; [ "$output" = "true" ]
+  # data 필드는 없어야 — 있으면 차트가 data 블록을 렌더해 SSA가 머지 키를 prune (annotations 단일 키만 허용)
+  run yq '.configs.secret | keys | length' "$V"; [ "$output" = "1" ]
+  run yq '.configs.secret.argocdServerAdminPassword' "$V"; [ "$output" = "null" ]
+  run yq '.configs.secret.extra' "$V"; [ "$output" = "null" ]
 }
 
 @test "server.insecure stays true (TLS terminated upstream)" {
