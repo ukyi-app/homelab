@@ -140,3 +140,10 @@ teardown() { rm -rf "$TMP"; }
   run cat "$GITHUB_STEP_SUMMARY"
   echo "$output" | grep -qi "telegram"; [ "$?" -eq 0 ]
 }
+
+@test "accepts the IaC-drift source label emitted by tf-reconcile drift steps (obs-1 live bug)" {
+  # tf-reconcile.yaml:163,225가 발화하는 라벨 — enum 건초더미에 빠져 있으면 exit 2(라이브 침묵).
+  run env STATUS=drift SOURCE=IaC드리프트 TITLE="github 드리프트" sh "$SH"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "IaC드리프트"; [ "$?" -eq 0 ]
+}
