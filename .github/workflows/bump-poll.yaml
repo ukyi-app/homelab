@@ -96,7 +96,13 @@ jobs:
             git checkout main
             branch="bump-poll/${app}-${RUN_ID}"
             git checkout -b "$branch"
-            node tools/bump-tag.mjs "$app" "$tag" --digest "$digest"
+            # races-4 TOCTOU 가드: 플래너가 증명한 from-tag는 plan JSON의 `.current.tag`(plan 시점 스냅샷)다.
+            # ⚠️ codex pass1 F2: checkout main 후 values.yaml에서 다시 읽으면 main이 움직여도 그 값이 같이
+            # 움직여 "자기 자신과 비교"가 돼 가드가 no-op이 된다 → 반드시 플래너 스냅샷($item.current.tag)을 쓴다.
+            # checkout 직후의 실측 image.tag가 이 expect와 다르면(=plan 이후 main 이동) bump-tag가 fail-closed로
+            # 중단(stale 증명 push 방지) — 다음 주기가 새 스냅샷으로 다시 plan한다.
+            expect=$(echo "$item" | jq -r '.current.tag')
+            node tools/bump-tag.mjs "$app" "$tag" --digest "$digest" --expect-current "$expect"
             git add "apps/$app/deploy/prod/values.yaml"
             git commit -m "chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)"
             git push -u origin "$branch"
