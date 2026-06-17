@@ -89,10 +89,26 @@ redis:
     requests: { cpu: 25m, memory: 64Mi }
     limits: { cpu: 200m, memory: 128Mi }
 
+# ⚠️ configs.secret.* (argocdServerAdminPassword 등) 추가 금지 — 추가하면 차트가 argocd-secret에
+#    data 블록을 렌더해 SSA가 data.*를 소유하고, sealed-secrets 컨트롤러가 머지한 accounts.ukkiee.* 키를
+#    prune할 수 있다. ukkiee 비밀번호는 extras의 patch-mode SealedSecret이 additive로 공급한다.
 configs:
   params:
     server.insecure: true # TLS는 ArgoCD가 아니라 Traefik/Tailscale에서 종단된다.
+  rbac:
+    # ukkiee에 직접 subject 정책(p-policy)으로 전체 권한 부여. group 바인딩(g, ukkiee, role:admin)이 아니라
+    # p-policy를 쓰는 이유: 추후 SSO(dex) 도입 시 동명 scope/group이 롤을 상속하는 충돌 에스컬레이션 차단(F4).
+    # policy.default는 라이브 현재 미설정이며 내장 기본과 동일 — 명시화일 뿐 narrowing 아님.
+    policy.default: role:readonly
+    policy.csv: |
+      p, ukkiee, *, *, *, allow
   cm:
+    # 로컬 계정 ukkiee 활성화 — UI/CLI 비밀번호 로그인(login capability). apiKey 미부여(token 발급 불가, 의도).
+    # 비밀번호(bcrypt)는 argocd-secret에 patch-mode SealedSecret로 머지(platform/argocd/extras).
+    accounts.ukkiee: login
+    # built-in admin 비활성화 — ukkiee 단일 어드민(F12). 노출(PR2) 전에 PR1에서 끄고 port-forward로
+    # 입증해 'admin 켜진 채 노출' 윈도우를 원천 제거(F17 — same-PR은 두 Application 독립 sync라 비원자적).
+    admin.enabled: "false"
     # 렌더 시점 kustomize 기반 복호화를 위해 KSOPS exec 플러그인을 활성화한다.
     # KSOPS(exec)와 Traefik/Tailscale HelmChartInflationGenerator(helm) 둘 다 각자의 플래그가 필요하다.
     # ⚠️ --enable-exec는 kustomize alpha 기능. ArgoCD/kustomize가 exec 플러그인을 폐기하면 KSOPS
