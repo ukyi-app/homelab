@@ -25,6 +25,9 @@ override.tf.json
 # --- SOPS plaintext scratch ---
 *.tmp.yaml
 
+# --- 외부(비신뢰) 앱 레포 sparse-checkout 경로 — create-app/update-secrets가 여기에 푼다 ---
+.apprepo/
+
 # --- Kubeconfig / cluster creds ---
 kubeconfig
 *.kubeconfig

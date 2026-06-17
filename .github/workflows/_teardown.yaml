@@ -58,7 +58,9 @@ jobs:
           if [ -z "$(git status --porcelain)" ]; then echo "변경 없음 — 멱등 no-op"; exit 0; fi
           branch="${subject}-${RUN_ID}"
           git checkout -b "$branch"
-          git add -A
+          # 전체 트리를 통째로 add하면 비신뢰 .apprepo까지 들어간다 → tool이 쓰는 트리만 명시 add.
+          # (없는 경로는 git이 조용히 무시 — teardown-app/resource 양쪽을 포괄)
+          git add apps/ docs/memory-ledger.md infra/cloudflare/apps.json platform/ 2>/dev/null || true
           git commit -m "$title"
           git push -u origin "$branch"
           {
