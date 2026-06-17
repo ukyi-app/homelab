@@ -9,7 +9,7 @@ on:
   repository_dispatch:
     types: [app-image]
 
-# 직렬화: 모든 main 변이(dispatch-mutation/bump-poll/bump)가 공유하는 전역 큐에 합류한다.
+# 직렬화: 모든 main 변이(변이 디스패처/bump-poll/bump)가 공유하는 전역 큐에 합류한다.
 # values-writeback 전용 그룹은 queue:max가 없어 동시 3번째 write-back이 대기 건을 조용히 취소했다
 # (races-1/2 — 인-repo bump 유실). 진행 중인 커밋은 절대 취소하지 않는다(cancel-in-progress:false).
 # queue:max(2026-05 GA)는 cancel-in-progress:true와 병용 불가 — false 유지.

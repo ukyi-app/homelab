@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# owner-local teardown 래퍼 — _teardown.yaml의 안전 envelope를 로컬에 이식(A.5 F2, C-F1).
+# owner-local teardown 래퍼 — 구 teardown reusable 워크플로의 안전 envelope를 로컬에 이식(A.5 F2, C-F1).
 # clean-worktree 가드 → origin/main fetch → teardown/<target>-<ts> 전용 브랜치(fresh main 기반) 생성 →
 # 툴(plan) → allowlist staging → PR(gh). App 토큰이 아니라 owner 본인 gh 자격(owner=admin).
 # fresh main 기반 전용 브랜치라 stale main/무관 커밋이 teardown PR에 실리지 않는다(C-F1).
