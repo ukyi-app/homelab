@@ -150,8 +150,8 @@ secrets: []'
   grep -q 'app-image' "$f"
   grep -qE "event_name == 'workflow_run'" "$f"
   grep -qE "event_name == 'repository_dispatch'" "$f"
-  # 직렬 그룹은 하나만 (양 경로 공유)
-  [ "$(grep -c 'group: values-writeback' "$f")" -eq 1 ]
+  # 직렬 그룹은 하나만 (양 경로 공유) — Phase 6 races-1/2로 전역 homelab-mutation 큐에 합류
+  [ "$(grep -c 'group: homelab-mutation' "$f")" -eq 1 ]
 }
 
 @test "bump dispatch: untrusted payload env-only + source-repo binding + digest verify" {
