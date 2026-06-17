@@ -1,0 +1,74 @@
+# create-app 변이 디스패처 — 신규 앱 온보딩(외부 레포 config를 SHA 고정 read → 매니페스트 PR, active:false).
+# 트리거 경계(런북 app-platform): 앱 레포는 homelab-write 자격 0 — owner가 여기서 workflow_dispatch로 실행.
+# 변이 로직은 _create-app.yaml(reusable)에 있다 — 이 파일은 trigger+validate+notify 셸.
+name: "변이: create-app"
+run-name: "변이: create-app — ${{ inputs.app_repo }}@${{ inputs.sha }}"
+on:
+  workflow_dispatch:
+    inputs:
+      app_repo:
+        description: "ukyi-app/<app> — 온보딩할 앱 레포"
+        required: true
+      sha:
+        description: "앱 레포 커밋 SHA (config를 이 SHA로 고정 read)"
+        required: true
+
+# 전역 직렬화: 모든 homelab-mutation 워크플로(변이 디스패처/bump-poll/iac/tf-reconcile)가 같은 그룹.
+# queue: max — pending FIFO 큐잉. cancel-in-progress와 병용 불가(AGENTS.md 함정) — 절대 true 금지.
+concurrency:
+  group: homelab-mutation
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - env:
+          PAYLOAD: ${{ toJSON(github.event.inputs) }} # owner 입력도 비신뢰 — env 경유, 인라인 보간 금지
+        run: |
+          printf '%s' "$PAYLOAD" > /tmp/payload.json
+          node tools/validate-mutation.mjs --action create-app --payload-file /tmp/payload.json
+
+  create-app:
+    needs: validate
+    uses: ./.github/workflows/_create-app.yaml
+    with:
+      app_repo: ${{ github.event.inputs.app_repo }}
+      sha: ${{ github.event.inputs.sha }}
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read # _create-app.yaml의 GHCR digest 해석에 필수 — reusable 권한은 caller가 상한 (A.5 F1)
+
+  notify:
+    needs: [validate, create-app]
+    if: failure() || cancelled()
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - id: norm
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          # notify 잡의 job.status는 자기 자신(success)이라 거짓 — 상류 needs로 정규화(취소>실패)
+          if printf '%s' "$RESULTS" | grep -q '"result": *"cancelled"'; then
+            echo "status=cancelled" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=failure" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ steps.norm.outputs.status }}
+          source: 변이
+          title: create-app 실행
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
