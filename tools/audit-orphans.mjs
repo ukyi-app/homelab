@@ -9,6 +9,7 @@
 //   incomplete-purge      : tombstone state=purging 잔존 — 상태머신 중단 흔적
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
+import { surfaceHash } from "./lib/surface-hash.mjs";
 
 const USAGE = `audit-orphans — registry↔매니페스트↔바인딩↔원장 교차 드리프트 리포트(읽기 전용)
 사용법: node tools/audit-orphans.mjs [--repo-root <dir>] [--ci] [--strict]
@@ -30,7 +31,7 @@ const CI = process.argv.includes("--ci");
 //   orphan-dns(apps.json active 행에 앱 매니페스트 부재 → 빈 백엔드로 DNS 노출).
 // stale-ledger-row는 제외 — apps/·platform/ 밖에서 관리되는 기존 워크로드(media 등)를
 // 오탐해 모든 PR을 막는다. 원장 드리프트는 --strict(수동 점검)로만.
-const BLOCKING = new Set(["dangling-binding", "orphan-dns"]);
+const BLOCKING = new Set(["dangling-binding", "orphan-dns", "activation-exposure-drift"]); // pass3 F1: surfaceHash(app-tree) drift는 비차단(이미지 bump 데드락 회피); restale2 F1: 노출 행(host/public) drift=activation-exposure-drift는 차단(데드락 무관 + 미재검증 DNS 노출 막음)
 
 const findings = [];
 const add = (type, subject, detail) => findings.push({ type, subject, detail });
@@ -58,6 +59,32 @@ for (const a of appDirs) {
   const values = parseYaml(readFileSync(`${appsRoot}/${a}/deploy/prod/values.yaml`, "utf8")) ?? {};
   if (values.route?.public === true && !registry.some((r) => r.name === a))
     add("missing-registration", a, "public 앱인데 apps.json 행 부재 — activate 불가 상태");
+}
+
+// 1b) activation surface-drift (races-5) — active:true(+ 매니페스트 존재) 앱의 커밋된 .activation
+// surfaceHash가 현재 canonical surfaceHash(.activation 제외)와 다르면, activation 이후 표면이 바뀐 것.
+// ⚠️ codex pass3 F1: **정보성만**(BLOCKING 아님). 차단 게이트로 쓰면 정상 이미지 bump(values.yaml의
+// image.tag 변경 → surface 변경)가 머지 불가가 되고, 새 revision은 머지돼야 Healthy가 되므로 데드락
+// (autoDeploy 붕괴). 노출 재검증은 런북(activate 절차)이 담당한다. canonical 해시(F3)는 .activation 자기
+// 무효화로 인한 false-positive 노이즈를 막기 위해 여전히 필요하다.
+for (const r of registry) {
+  if (r.active !== true || !appDirs.includes(r.name)) continue;
+  const markerPath = `${appsRoot}/${r.name}/deploy/prod/.activation`;
+  const marker = readJson(markerPath, null);
+  if (!marker || !marker.surfaceHash) {
+    add("missing-activation", r.name, "active:true인데 .activation 마커 없음/빈 surfaceHash — 정보성(activate-app 재실행 또는 런북 재검증 권장)");
+    continue;
+  }
+  const current = surfaceHash(ROOT, "HEAD", r.name); // .activation 제외 canonical — 마커와 동일 함수
+  if (current && current !== marker.surfaceHash)
+    add("activation-surface-drift", r.name, `activation 이후 apps/${r.name} 표면 변경(정보성 — 런북 재검증 권장; 마커 ${String(marker.surfaceHash).slice(0, 12)} ≠ 현재 ${current.slice(0, 12)})`);
+  // ⚠️ codex pass4 F1: apps.json 노출 행(host/public)이 바뀌면 앱 트리 무변경이어도 DNS 노출이 변한다 — 정보성으로 잡는다.
+  // ⚠️ codex restale2 F1: apps.json 노출 행(host/public) 변경은 app-tree(surfaceHash) drift와 달리 **데드락
+  // 위험이 없다**(호스트 변경은 앱 재배포·Healthy 선행 불필요) → 미재검증 public DNS 노출을 막기 위해 **차단**.
+  // (owner가 activate-app --flip로 새 노출 재증명+마커 갱신해야 머지 가능 = 의도한 재승인. surfaceHash drift만 정보성.)
+  const curProj = { name: r.name, host: r.host ?? null, public: r.public ?? false };
+  if (marker.registry && JSON.stringify(curProj) !== JSON.stringify(marker.registry))
+    add("activation-exposure-drift", r.name, `activation 이후 apps.json 노출 행 변경(host/public — 마커 ${JSON.stringify(marker.registry)} ≠ 현재 ${JSON.stringify(curProj)}) — activate-app 재실행으로 재승인 필요(차단)`);
 }
 
 // 2) 바인딩 ↔ 리소스
