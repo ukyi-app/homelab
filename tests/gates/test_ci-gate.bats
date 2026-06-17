@@ -12,7 +12,10 @@ WF=".github/workflows/ci.yaml"
   run yq '.on.pull_request' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" != "null" ]
-  run grep -E "pnpm@11" "$WF"
+  # pnpm@11 핀은 setup-node-pnpm composite로 이전됨(Phase 7 dry-7) — ci가 composite를 채택하고 composite가 핀한다.
+  run grep -F 'uses: ./.github/actions/setup-node-pnpm' "$WF"
+  [ "$status" -eq 0 ]
+  run grep -E "pnpm@11" .github/actions/setup-node-pnpm/action.yml
   [ "$status" -eq 0 ]
 }
 
