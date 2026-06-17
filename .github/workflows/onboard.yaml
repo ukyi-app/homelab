@@ -77,10 +77,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           APP: ${{ steps.scaffold.outputs.app }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           git config user.name "homelab-bot"
           git config user.email "bot@users.noreply.github.com"
-          branch="onboard/${APP}"
+          branch="onboard/${APP}-${RUN_ID}"
           git checkout -b "$branch"
           git add "apps/${APP}" docs/memory-ledger.md
           git commit -m "feat: ${APP} 앱 온보딩 (외부 레포 dispatch)"

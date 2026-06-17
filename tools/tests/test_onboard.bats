@@ -185,3 +185,12 @@ secrets: []'
   grep -q 'dispatch-pat' "$f"
   grep -A1 'dispatch-pat' "$f" | grep -vq 'required: true'
 }
+
+@test "onboard branch name is run-scoped (no fixed collision-prone branch)" {
+  WF="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/.github/workflows/onboard.yaml"
+  # fm-2: 고정 onboard/<app>는 재dispatch 시 충돌해 게이트 후 abort + dangling 브랜치를 남긴다.
+  # 모든 dispatch reusable처럼 run_id로 유일화한다.
+  ! grep -qE 'branch="onboard/\$\{APP\}"' "$WF"
+  grep -q 'github.run_id' "$WF"
+  grep -qE 'branch="onboard/\$\{APP\}-' "$WF"
+}
