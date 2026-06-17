@@ -20,10 +20,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; WF="$ROOT/.github/work
 }
 
 @test "bump.yaml does not push directly to main (PR-first write model)" {
-  # App 토큰은 branch protection을 우회하지 못한다 — main 쓰기는 PR + auto-merge로만
+  # App 토큰은 branch protection을 우회하지 못한다 — main 쓰기는 PR + auto-merge로만.
+  # Phase 6 races-6으로 raw `pr merge --auto`가 공유 스크립트(auto-merge-or-fail.sh)로 수렴 — 둘 중 하나면 PR-first.
   run grep -E "git push origin main" "$WF/bump.yaml"
   [ "$status" -ne 0 ]
-  run grep -E "pr merge --auto" "$WF/bump.yaml"
+  run grep -E "pr merge --auto|auto-merge-or-fail" "$WF/bump.yaml"
   [ "$status" -eq 0 ]
 }
 
