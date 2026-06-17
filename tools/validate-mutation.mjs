@@ -3,6 +3,7 @@
 // action별 필수/허용 입력 외에는 전부 거부한다. 위반 시 비-0 종료(값은 일부만 출력, 시크릿 없음).
 // update-image는 이 dispatcher가 아니라 GHCR 폴링(bump-poll)이 처리하므로 계약표에 없다.
 import { readFileSync } from "node:fs";
+import { APP_NAME_RE } from "./lib/identity.mjs";
 
 function die(msg) {
   console.error(`validate-mutation: ${msg}`);
@@ -22,7 +23,7 @@ const CONTRACT = {
 };
 
 const FIELD_RE = {
-  app: /^[a-z][a-z0-9-]{0,38}[a-z0-9]$/,
+  app: APP_NAME_RE,
   app_repo: /^ukyi-app\/[A-Za-z0-9._-]+$/, // org 고정 — 외부 org 레포 read 차단
   sha: /^[0-9a-f]{7,40}$/,
   resource: /^(db|cache):[a-z][a-z0-9-]*$/,

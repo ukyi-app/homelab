@@ -11,10 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { ref: main }
-      - uses: actions/setup-node@v4
-        with: { node-version: "22" }
-      - run: corepack enable && corepack prepare pnpm@11 --activate
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-node-pnpm
       - name: audit-orphans (읽기 전용)
         id: audit
         run: |
@@ -24,7 +21,9 @@ jobs:
         id: report
         if: always()
         run: |
-          summary="$(jq -r '.findings[:20][] | "- \(.type): \(.subject)"' /tmp/audit.json 2>/dev/null || true)"
+          # [:20] 캡 제거 — 전 드리프트를 보낸다(notify.sh 4096자 캡이 안전 절단). jq 오류삼킴(|| true)도
+          # 제거 — malformed JSON이면 스텝을 깨 조용한 빈 body 전송을 차단(obs-6).
+          summary="$(jq -r '.findings[] | "- \(.type): \(.subject)"' /tmp/audit.json)"
           {
             echo "body<<EOF"
             printf '드리프트 건수: %s\n%s\n' "$COUNT" "$summary"

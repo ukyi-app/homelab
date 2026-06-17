@@ -44,6 +44,12 @@ const short = (sha) => sha.slice(0, 7);
 
 // 데이터 소스 추상화 — 테스트는 fixtures 디렉토리, 라이브는 gh api + docker manifest inspect.
 // (GHCR versions API 대신 "main 커밋 → manifest 실존" 순서로 묻는다 — 위 후진 배포 차단 참고.)
+// 진짜 404(이미지 미빌드)만 absent로 삼킨다 — transient(인증/네트워크/5xx)는 rethrow해
+// planApp outer catch가 refuse로 fail-closed(후진 후보 선택 방지).
+function isNotFound(msg) {
+  return /not found|manifest unknown|no such manifest|404/i.test(msg ?? "");
+}
+
 function makeQuery(app) {
   if (args.fixtures) {
     const fx = (name) => {
@@ -53,7 +59,15 @@ function makeQuery(app) {
     return {
       commits: (src) => fx("commits") ?? [],
       compare: (src, base, head) => fx(`compare-${short(base)}-${head === "main" ? "main" : short(head)}`),
-      manifest: (repo, tag) => fx(`manifest-${tag.slice(0, 11)}`), // sha- + 7자
+      manifest: (repo, tag) => {
+        const t = tag.slice(0, 11); // sha- + 7자
+        const err = fx(`manifest-${t}.error`);
+        if (err) {
+          if (isNotFound(err.message)) return null; // 진짜 404 — 미빌드
+          throw new Error(`manifest 일시 오류(transient): ${err.message}`);
+        }
+        return fx(`manifest-${t}`);
+      },
     };
   }
   const gh = (p) => JSON.parse(execFileSync("gh", ["api", p], { encoding: "utf8" }));
@@ -64,11 +78,13 @@ function makeQuery(app) {
       try {
         const out = execFileSync(
           "docker", ["buildx", "imagetools", "inspect", `${repo}:${tag}`, "--format", "{{json .Manifest}}"],
-          { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+          { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
         );
         return { digest: JSON.parse(out).digest };
-      } catch {
-        return null; // 미존재 — 빌드 안 된 커밋
+      } catch (e) {
+        const stderr = (e.stderr ?? "").toString();
+        if (isNotFound(stderr) || isNotFound(e.message)) return null; // 진짜 404 — 미빌드 커밋
+        throw new Error(`manifest 조회 일시 오류(transient, rethrow→refuse): ${stderr || e.message}`);
       }
     },
   };

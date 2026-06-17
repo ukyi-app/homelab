@@ -10,9 +10,17 @@ data:
     # 주의: busybox 1.36 nc에는 -q 옵션이 없다(invalid option으로 리스너가 즉시 죽어
     # webhook이 영구 connection refused가 되고, while 루프가 healthchecks를 과도하게
     # ping해 dead-man switch를 무력화한다).
+    # fm-1: nc가 실제로 연결을 서빙(exit 0)했을 때만 healthchecks를 ping한다. nc가 연결 없이
+    # 즉시 반환하면(파드 재시작 시 bind 경합·busybox 엣지) ping을 건너뛰고 floor sleep으로
+    # self-throttle한다 — 무조건 ping하면 루프가 healthchecks를 폭주 ping해 webhook이 안 와도
+    # 체크를 영구 green으로 만들어 dead-man switch를 무력화한다.
     while true; do
-      printf 'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok' | nc -l -p 9095 2>/dev/null || true
-      wget -q -T 10 -O /dev/null "$HEALTHCHECKS_URL" || echo "ping failed $(date)"
+      if printf 'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok' | nc -l -p 9095 2>/dev/null; then
+        wget -q -T 10 -O /dev/null "$HEALTHCHECKS_URL" || echo "ping failed $(date)"
+      else
+        echo "nc listener failed, throttling $(date)"
+        sleep 5
+      fi
     done
 ---
 apiVersion: apps/v1
@@ -27,6 +35,10 @@ spec:
   template:
     metadata:
       labels: { app.kubernetes.io/name: deadmanswitch-relay }
+      annotations:
+        # relay.sh 내용 해시 — 스크립트 변경 시 이 값을 yq|sha256sum|cut으로 갱신하면 pod template이 바뀌어
+        # ArgoCD가 자동 롤한다(ConfigMap 무재시작 함정 회피, AGENTS.md). test_relay.bats가 일치를 강제.
+        checksum/relay-script: "b0ef4811484da55f"
     spec:
       securityContext: { runAsNonRoot: true, runAsUser: 65534 }
       containers:

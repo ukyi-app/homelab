@@ -150,8 +150,8 @@ secrets: []'
   grep -q 'app-image' "$f"
   grep -qE "event_name == 'workflow_run'" "$f"
   grep -qE "event_name == 'repository_dispatch'" "$f"
-  # 직렬 그룹은 하나만 (양 경로 공유)
-  [ "$(grep -c 'group: values-writeback' "$f")" -eq 1 ]
+  # 직렬 그룹은 하나만 (양 경로 공유) — Phase 6 races-1/2로 전역 homelab-mutation 큐에 합류
+  [ "$(grep -c 'group: homelab-mutation' "$f")" -eq 1 ]
 }
 
 @test "bump dispatch: untrusted payload env-only + source-repo binding + digest verify" {
@@ -184,4 +184,13 @@ secrets: []'
   # 호환 장치: dispatch-pat은 required:false 선언만 유지(미사용) — caller 검증 실패 방지
   grep -q 'dispatch-pat' "$f"
   grep -A1 'dispatch-pat' "$f" | grep -vq 'required: true'
+}
+
+@test "onboard branch name is run-scoped (no fixed collision-prone branch)" {
+  WF="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/.github/workflows/onboard.yaml"
+  # fm-2: 고정 onboard/<app>는 재dispatch 시 충돌해 게이트 후 abort + dangling 브랜치를 남긴다.
+  # 모든 dispatch reusable처럼 run_id로 유일화한다.
+  ! grep -qE 'branch="onboard/\$\{APP\}"' "$WF"
+  grep -q 'github.run_id' "$WF"
+  grep -qE 'branch="onboard/\$\{APP\}-' "$WF"
 }

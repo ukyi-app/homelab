@@ -22,7 +22,7 @@ esac
 
 # 소스 라벨 enum 검증 — 멤버십 테스트(상수 haystack, 패턴에 변수): case subject가 상수인 게 의도.
 # shellcheck disable=SC2194
-case " 알림 복원드릴 앱생성 DB생성 캐시생성 시크릿갱신 해체 배포 온보딩 IaC IaC수렴 감사 이미지폴링 변이 " in
+case " 알림 복원드릴 앱생성 DB생성 캐시생성 시크릿갱신 해체 배포 온보딩 IaC IaC수렴 IaC드리프트 감사 이미지폴링 변이 " in
   *" ${SOURCE:-} "*) : ;;
   *) echo "telegram-notify: unknown source '${SOURCE:-}'" >&2; exit 2 ;;
 esac

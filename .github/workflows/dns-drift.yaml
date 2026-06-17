@@ -1,0 +1,45 @@
+# active&&public host의 라이브 DNS resolve 체크 (drift-2 잔여, opt-in 스케줄). apply 실패로 active:true인데
+# DNS가 안 생긴 경우를 잡는다. 라이브 DNS 호출은 이 워크플로 안에서만 — required gate는 클러스터리스 유지.
+name: dns-drift
+on:
+  schedule:
+    - cron: "23 */6 * * *"   # 6시간마다(DNS는 자주 안 변함)
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: dns-drift
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4        # 로컬 telegram-notify 액션 resolve + 체커 실행(F8 가드 충족)
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - id: pf   # active&&public이 0이면 skip(깨끗한 성공)
+        run: |
+          n=$(node -e 'const a=JSON.parse(require("fs").readFileSync("infra/cloudflare/apps.json","utf8"));process.stdout.write(String(a.filter(r=>r.public&&r.active).length))')
+          if [ "$n" -gt 0 ]; then echo "go=true" >> "$GITHUB_OUTPUT"; else echo "go=false" >> "$GITHUB_OUTPUT"; echo "::notice::active&&public 0 — dns-drift skip"; fi
+      - id: check
+        if: steps.pf.outputs.go == 'true'
+        run: |
+          node tools/dns-drift-check.mjs --apps infra/cloudflare/apps.json > /tmp/drift.json
+          # ⚠️ codex pass4 F3: drift 알림은 .drift(NXDOMAIN)만 센다 — transient(SERVFAIL/timeout)는 거짓 알림 방지.
+          n=$(node -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.drift.length))')
+          t=$(node -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.transient.length))')
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+          echo "transient=$t" >> "$GITHUB_OUTPUT"
+          [ "$t" -gt 0 ] && echo "::warning::DNS resolve 일시 실패 ${t}건(transient — drift 아님, 재확인)"
+          cat /tmp/drift.json
+      - name: telegram notify (드리프트/실패 시에만)
+        if: steps.pf.outputs.go == 'true' && (failure() || steps.check.outputs.count != '0')
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ steps.check.outputs.count != '0' && 'drift' || job.status }}
+          source: IaC드리프트
+          title: DNS 드리프트
+          ident: "active&&public host 미해결 ${{ steps.check.outputs.count }}건"
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

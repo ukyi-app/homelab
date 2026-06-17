@@ -31,6 +31,11 @@ const ROOT = arg("--repo-root", ".");
 const deleteData = has("--delete-data");
 const backupId = arg("--backup-verified");
 const step = arg("--step", deleteData ? undefined : "tombstone");
+// 오타 옵션 침묵-무시 차단 — arg()/has() 헬퍼는 미지정 플래그를 조용히 무시한다(mutator 패밀리 fail-closed).
+const ALLOWED_FLAGS = new Set(["--db", "--cache", "--repo-root", "--delete-data", "--backup-verified", "--step", "--dry-run"]);
+for (const a of process.argv.slice(2)) {
+  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
+}
 
 const fail = (msg) => { console.error(`teardown-resource: ${msg}`); process.exit(1); };
 if ((db ? 1 : 0) + (cache ? 1 : 0) !== 1) fail("--db <name> 또는 --cache <name> 중 정확히 하나");

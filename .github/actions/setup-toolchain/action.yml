@@ -1,5 +1,8 @@
 name: setup-toolchain
 description: 핀된 차트/정책/시크릿 툴체인 설치 (버전 SSOT). 필요한 도구만 입력으로 켠다. 러너=ubuntu-24.04-arm(arm64).
+# ⚠️ supplychain-5: 모든 다운로드는 받기→sha256sum -c→설치 패턴(TLS만 신뢰 금지 — 미러/계정 침해 시 변조 차단).
+# 체크섬은 각 핀 버전 자산을 직접 받아 산출한 실 SHA256(placeholder 금지 — test_toolchain-checksums.bats가 강제).
+# 버전 bump 시 Renovate가 URL을 갱신하면 SHA도 함께 갱신해야 한다(불일치 시 gate가 sha256sum 실패로 즉시 차단).
 
 inputs:
   yq:          { description: yq v4.44.6,            default: 'false' }
@@ -10,7 +13,8 @@ inputs:
   bats:        { description: bats (apt),            default: 'false' }
   shellcheck:  { description: shellcheck v0.11.0,    default: 'false' }
   sops:        { description: sops v3.9.4,           default: 'false' }
-  age:         { description: age latest,            default: 'false' }
+  age:         { description: age v1.2.1,            default: 'false' }
+  kubeseal:    { description: kubeseal v0.37.0,       default: 'false' }
 
 runs:
   using: composite
@@ -19,22 +23,38 @@ runs:
       shell: bash
       run: |
         # yq는 직접 바이너리 — snap yq는 strict confinement라 mktemp -d /tmp 픽스처를 못 읽는다(라이브 검증된 함정).
-        sudo curl -sL https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_arm64 -o /usr/local/bin/yq
-        sudo chmod +x /usr/local/bin/yq
+        f=/tmp/yq; curl -fsSL https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_arm64 -o "$f"
+        echo "9477ac3cc447b6c083986129e35af8122eb2b938fe55c9c3e40436fb966e5813  $f" | sha256sum -c -
+        sudo install -m 0755 "$f" /usr/local/bin/yq
     - if: ${{ inputs.kubeconform == 'true' }}
       shell: bash
-      run: curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-arm64.tar.gz | sudo tar xz -C /usr/local/bin kubeconform
+      run: |
+        f=/tmp/kubeconform.tgz
+        curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-arm64.tar.gz -o "$f"
+        echo "dc82f79bb03c5479b1ae5fd4af221e4b5a3111f62bf01a2795d9c5c20fa96644  $f" | sha256sum -c -
+        sudo tar -xz -C /usr/local/bin -f "$f" kubeconform
     - if: ${{ inputs.helm == 'true' }}
       shell: bash
       run: |
         # helm 고정 버전 핀 — get-helm-3(latest)는 helm major가 chart-test를 깨면 유일 required check를 막는 시한폭탄(m6-tools >=3.16과 정합).
-        curl -fsSL https://get.helm.sh/helm-v3.16.4-linux-arm64.tar.gz | tar xz -C /tmp && sudo mv /tmp/linux-arm64/helm /usr/local/bin/helm
+        f=/tmp/helm.tgz
+        curl -fsSL https://get.helm.sh/helm-v3.16.4-linux-arm64.tar.gz -o "$f"
+        echo "d3f8f15b3d9ec8c8678fbf3280c3e5902efabe5912e2f9fcf29107efbc8ead69  $f" | sha256sum -c -
+        tar -xz -C /tmp -f "$f" && sudo mv /tmp/linux-arm64/helm /usr/local/bin/helm
     - if: ${{ inputs.kustomize == 'true' }}
       shell: bash
-      run: curl -sL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_arm64.tar.gz | sudo tar xz -C /usr/local/bin kustomize
+      run: |
+        f=/tmp/kustomize.tgz
+        curl -fsSL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_arm64.tar.gz -o "$f"
+        echo "1b515578b0af12c15d9856720066ce2fe66756d63785b2cbccaf2885beb2381c  $f" | sha256sum -c -
+        sudo tar -xz -C /usr/local/bin -f "$f" kustomize
     - if: ${{ inputs.conftest == 'true' }}
       shell: bash
-      run: curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin conftest
+      run: |
+        f=/tmp/conftest.tgz
+        curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_arm64.tar.gz -o "$f"
+        echo "86334e4ca57b991f0dca0dd3d011270edda50fdff2b2e208954ea639bb1c99ec  $f" | sha256sum -c -
+        sudo tar -xz -C /usr/local/bin -f "$f" conftest
     - if: ${{ inputs.bats == 'true' }}
       shell: bash
       run: sudo apt-get update && sudo apt-get install -y bats
@@ -42,15 +62,30 @@ runs:
       shell: bash
       run: |
         # shellcheck v0.11.0 핀(aarch64) — apt 버전은 러너마다 달라 SC2015 등 info 체크가 로컬과 드리프트한다.
-        curl -sSL https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.aarch64.tar.xz \
-          | tar -xJ -C /tmp && sudo mv /tmp/shellcheck-v0.11.0/shellcheck /usr/local/bin/shellcheck
+        f=/tmp/shellcheck.tar.xz
+        curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.aarch64.tar.xz -o "$f"
+        echo "12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588  $f" | sha256sum -c -
+        tar -xJ -C /tmp -f "$f" && sudo mv /tmp/shellcheck-v0.11.0/shellcheck /usr/local/bin/shellcheck
     - if: ${{ inputs.sops == 'true' }}
       shell: bash
       run: |
-        curl -sSL https://github.com/getsops/sops/releases/download/v3.9.4/sops-v3.9.4.linux.arm64 -o /usr/local/bin/sops
-        chmod +x /usr/local/bin/sops
+        f=/tmp/sops; curl -fsSL https://github.com/getsops/sops/releases/download/v3.9.4/sops-v3.9.4.linux.arm64 -o "$f"
+        echo "16564c6b181d88505d9e0dfef62771894293d85cde5884d9b1a843859eee174b  $f" | sha256sum -c -
+        sudo install -m 0755 "$f" /usr/local/bin/sops
     - if: ${{ inputs.age == 'true' }}
       shell: bash
       run: |
-        curl -sSL https://dl.filippo.io/age/latest?for=linux/arm64 | tar -xz -C /tmp
-        sudo mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
+        # age 버전 핀 + 체크섬 — 무핀 latest(dl.filippo.io)는 공급망/재현성 구멍(supplychain-5).
+        f=/tmp/age.tgz
+        curl -fsSL https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-arm64.tar.gz -o "$f"
+        echo "57fd79a7ece5fe501f351b9dd51a82fbee1ea8db65a8839db17f5c080245e99f  $f" | sha256sum -c -
+        tar -xz -C /tmp -f "$f" && sudo mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
+    - if: ${{ inputs.kubeseal == 'true' }}
+      shell: bash
+      run: |
+        # kubeseal 버전 핀 — 컨트롤러 appVersion(platform/sealed-secrets app v0.37.0)과 동일해야 seal/unseal 호환.
+        # 봉인 워크플로(_create-cache/_create-database)가 제각각 핀하던 v0.27.3/v0.37.0을 이 한 곳으로 수렴.
+        f=/tmp/kubeseal.tgz
+        curl -fsSL https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.37.0/kubeseal-0.37.0-linux-arm64.tar.gz -o "$f"
+        echo "b25c791a91f7b1b2b4848e8efa6fc165ee985ef69a1f07a54972f33e69f1c648  $f" | sha256sum -c -
+        sudo tar -xz -C /usr/local/bin -f "$f" kubeseal

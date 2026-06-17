@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { randomBytes, createHash } from "node:crypto";
 import { parseDocument } from "yaml";
+import { replaceTotals } from "./lib/ledger-totals.mjs";
 
 // 버전 핀 — latest 금지. backup-cronjob.yaml의 snapshot 컨테이너와 같은 태그를 유지한다.
 const VALKEY_IMAGE = "valkey/valkey:8.1.1-alpine";
@@ -333,7 +334,7 @@ resources:
   const lastRow = lines.map((l, i) => (l.includes("<!-- ledger:row -->") ? i : -1)).filter((i) => i >= 0).pop();
   lines.splice(lastRow + 1, 0, `| <!-- ledger:row --> ${component.padEnd(14)} | cache          | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);
   let out = lines.join("\n");
-  out = out.replace(/req ≈ \d+ Mi · limit ≈ \d+ Mi/, `req ≈ ${sumReq + reqMi} Mi · limit ≈ ${sumLimit + limitMi} Mi`);
+  out = replaceTotals(out, sumReq + reqMi, sumLimit + limitMi);
   writeFileSync(ledgerPath, out);
 }
 
