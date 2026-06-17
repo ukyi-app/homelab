@@ -159,3 +159,9 @@ kubeconfig: ## [ops] 라이브 kubeconfig export 출력 — eval "$$(make kubeco
 
 audit: ## [ops] 레포 정적 드리프트 감사(registry↔매니페스트↔바인딩↔원장, 읽기 전용)
 	@node tools/audit-orphans.mjs
+
+.PHONY: teardown-app teardown-resource
+teardown-app: ## [teardown] APP= 앱 철거(owner-local — clean-worktree·fresh-main 전용브랜치·PR). 예: make teardown-app APP=foo
+	@scripts/teardown.sh --app "$(APP)"
+teardown-resource: ## [teardown] RESOURCE=<db|cache>:<name> 리소스 retain 철거(owner-local). 예: make teardown-resource RESOURCE=db:foo
+	@scripts/teardown.sh --resource "$(RESOURCE)"
