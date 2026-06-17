@@ -89,12 +89,23 @@ redis:
     requests: { cpu: 25m, memory: 64Mi }
     limits: { cpu: 200m, memory: 128Mi }
 
-# ⚠️ configs.secret.* (argocdServerAdminPassword 등) 추가 금지 — 추가하면 차트가 argocd-secret에
-#    data 블록을 렌더해 SSA가 data.*를 소유하고, sealed-secrets 컨트롤러가 머지한 accounts.ukkiee.* 키를
-#    prune할 수 있다. ukkiee 비밀번호는 extras의 patch-mode SealedSecret이 additive로 공급한다.
+# ⚠️ configs.secret에 DATA 필드(argocdServerAdminPassword/extra/webhook 등) 추가 금지 — 추가하면 차트가
+#    argocd-secret에 data 블록을 렌더해 SSA가 data.*를 소유하고, sealed-secrets 컨트롤러가 머지한
+#    accounts.ukkiee.* 키를 prune할 수 있다. annotations-only는 안전(data 필드 미설정 시 data 블록 자체가
+#    렌더되지 않음 — argo-helm argocd-secret.yaml로 확인). ukkiee 비밀번호는 extras의 patch-mode
+#    SealedSecret이 additive로 공급한다.
 configs:
   params:
     server.insecure: true # TLS는 ArgoCD가 아니라 Traefik/Tailscale에서 종단된다.
+  secret:
+    # argocd-secret에 patch 어노테이션을 차트 생성 시점에 부여한다. sealed-secrets(patch-mode)가 기존
+    # argocd-secret에 accounts.ukkiee.password를 머지하려면 이 어노테이션이 **대상 live Secret에** 있어야 한다
+    # (0.37.0 컨트롤러는 SealedSecret 템플릿이 아니라 대상 Secret의 어노테이션에서 patch 여부를 읽는다 —
+    # 없으면 'already exists and is not managed by SealedSecret'로 거부해 argocd-extras가 Degraded). 차트가
+    # 부여하므로 DR 콜드스타트에도 선언적으로 보장된다. managed는 쓰지 않는다 — controller ownerRef를 만들어
+    # SealedSecret 삭제 시 argocd-secret 전체가 cascade delete된다(라이브 검증). patch 단독이 additive(기존 키 보존).
+    annotations:
+      sealedsecrets.bitnami.com/patch: "true"
   rbac:
     # ukkiee에 직접 subject 정책(p-policy)으로 전체 권한 부여. group 바인딩(g, ukkiee, role:admin)이 아니라
     # p-policy를 쓰는 이유: 추후 SSO(dex) 도입 시 동명 scope/group이 롤을 상속하는 충돌 에스컬레이션 차단(F4).
