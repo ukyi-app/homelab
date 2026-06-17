@@ -1,7 +1,8 @@
 // audit-orphans — registry(apps.json) ↔ 매니페스트 ↔ 바인딩 ↔ 원장 교차 드리프트 리포트.
 // 읽기 전용(파괴 없음). 라이브 비교(kubectl)는 별도 — 이 도구는 레포 정적 사실만 본다.
 // 유형:
-//   orphan-dns            : apps.json 행(특히 active:true)인데 앱 매니페스트 부재 — DNS 고아
+//   orphan-dns            : apps.json active:true 행인데 앱 매니페스트 부재 — DNS 고아(빈 백엔드 노출, 차단)
+//   orphan-dns-inactive   : active:false 행인데 매니페스트 부재 — DNS 미노출(정보성, 비차단)
 //   missing-registration  : public 앱 매니페스트인데 apps.json 행 부재
 //   dangling-binding      : .bindings.json 참조인데 리소스 산출물(CR/conn) 부재
 //   unreferenced-resource : 어떤 앱도 참조 안 하는 리소스 — retain/teardown 후보 (정보성)
@@ -51,9 +52,15 @@ const cacheDirs = existsSync(`${ROOT}/platform/cache/prod`)
 const connExists = (kind, n) => existsSync(`${ROOT}/platform/data-conn/prod/${kind}-${n}-conn.sealed.yaml`);
 
 // 1) registry ↔ 매니페스트
+//   active:true orphan → orphan-dns(차단): dns.tf가 public&&active만 노출하므로 빈 백엔드 DNS가 실재.
+//   active:false orphan → orphan-dns-inactive(정보, 비차단): DNS 미노출이라 create-app 중간 상태에서 정상.
 for (const r of registry) {
-  if (!appDirs.includes(r.name))
-    add("orphan-dns", r.name, `apps.json 행(active=${r.active})인데 apps/${r.name}/deploy/prod 부재${r.active ? " — DNS가 빈 백엔드로 노출 중" : ""}`);
+  if (!appDirs.includes(r.name)) {
+    if (r.active)
+      add("orphan-dns", r.name, `apps.json active:true 행인데 apps/${r.name}/deploy/prod 부재 — DNS가 빈 백엔드로 노출 중`);
+    else
+      add("orphan-dns-inactive", r.name, `apps.json active:false 행인데 apps/${r.name}/deploy/prod 부재 — DNS 미노출(create-app 매니페스트 머지 대기 가능)`);
+  }
 }
 for (const a of appDirs) {
   const values = parseYaml(readFileSync(`${appsRoot}/${a}/deploy/prod/values.yaml`, "utf8")) ?? {};

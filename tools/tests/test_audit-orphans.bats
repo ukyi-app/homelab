@@ -143,6 +143,35 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | grep -q "missing-activation"
 }
 
+@test "an inactive (active:false) orphan row is non-blocking info, not orphan-dns" {
+  # dns.tf는 public && active만 노출 — active:false orphan은 DNS를 노출하지 않으므로 PR을 막으면 안 된다.
+  cat > "$FR/infra/cloudflare/apps.json" <<'JSON'
+[
+  { "name": "orders", "host": "orders.example.com", "public": true, "active": true },
+  { "name": "pending-app", "host": "pending.example.com", "public": true, "active": false }
+]
+JSON
+  run node "$ROOT/tools/audit-orphans.mjs" --repo-root "$FR" --ci
+  [ "$status" -eq 0 ]   # active:false orphan은 비차단 → --ci 통과
+  # 비차단 정보 유형으로 보고는 된다(가시성 유지)
+  echo "$output" | jq -e '.findings | any(.type == "orphan-dns-inactive" and .subject == "pending-app")'
+  # 차단 유형(orphan-dns)으로는 잡히지 않는다
+  run bash -c "node '$ROOT/tools/audit-orphans.mjs' --repo-root '$FR' | jq -e '.findings | any(.type == \"orphan-dns\" and .subject == \"pending-app\")'"
+  [ "$status" -ne 0 ]
+}
+
+@test "an active:true orphan row is still blocking under --ci" {
+  cat > "$FR/infra/cloudflare/apps.json" <<'JSON'
+[
+  { "name": "orders", "host": "orders.example.com", "public": true, "active": true },
+  { "name": "ghost", "host": "ghost.example.com", "public": true, "active": true }
+]
+JSON
+  run node "$ROOT/tools/audit-orphans.mjs" --repo-root "$FR" --ci
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'orphan-dns:ghost'
+}
+
 @test "audit BLOCKS exposure drift when apps.json host/public changes after activation (restale2 F1)" {
   # ⚠️ codex pass4 F1 + restale2 F1: 앱 트리 무변경이어도 apps.json host/public가 바뀌면 DNS 노출이 변한다 →
   # 마커 registry projection과 불일치 → activation-exposure-drift는 **차단**(데드락 무관, 미재검증 노출 막음).
