@@ -34,8 +34,16 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
 }
 
 @test "cloudflare reconcile keeps the destroy guard" {
-  run grep -q '무인 apply 차단' "$WF"
+  run grep -q 'uses: ./.github/actions/tf-destroy-guard' "$WF"
   [ "$status" -eq 0 ]
   run grep -qE 'chdir=infra/cloudflare apply' "$WF"
   [ "$status" -eq 0 ]
+}
+
+@test "cloudflare reconcile uses the tf-destroy-guard composite (block) not inline jq" {
+  run grep -q 'uses: ./.github/actions/tf-destroy-guard' "$WF"
+  [ "$status" -eq 0 ]
+  # 인라인 destroy jq가 reconcile에서 제거됐는지(composite로 수렴)
+  run grep -F 'select(. == "delete")' "$WF"
+  [ "$status" -ne 0 ]
 }
