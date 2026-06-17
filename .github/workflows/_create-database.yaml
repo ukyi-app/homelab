@@ -96,7 +96,7 @@ jobs:
           source: DB생성
           title: DB 생성
           ident: db=${{ steps.spec.outputs.name }}
-          body: "핸들 db-${{ steps.spec.outputs.name }}-conn / db-${{ steps.spec.outputs.name }}-ro-conn (prod)"
+          body: "PR 생성됨(머지 대기) · 핸들 db-${{ steps.spec.outputs.name }}-conn / db-${{ steps.spec.outputs.name }}-ro-conn (prod)"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

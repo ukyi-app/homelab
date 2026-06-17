@@ -56,6 +56,14 @@ setup() {
   [ "$co" -lt "$tg" ]
 }
 
+@test "auto-merge workflows phrase success as merge-pending, not deployed" {
+  WF="$ROOT/.github/workflows"
+  # obs-5: auto-merge 성공은 "PR 무장"이지 "배포 완료"가 아니다 — 알림 body가 그 사실을 드러낸다.
+  for f in _create-database.yaml _create-cache.yaml _update-secrets.yaml; do
+    grep -q "머지 대기" "$WF/$f" || { echo "missing '머지 대기' notice in $f"; false; }
+  done
+}
+
 @test "no workflow uses a local ./.github/actions composite without an actions/checkout (F8 systemic)" {
   # F8 재발 방지: 로컬 composite를 쓰는 모든 워크플로는 checkout을 가져야 한다(파일 단위 presence 가드).
   WFDIR="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/.github/workflows"
