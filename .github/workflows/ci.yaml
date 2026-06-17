@@ -57,8 +57,9 @@ jobs:
       - name: memory ledger onboarding gate (M0-owned)
         run: pnpm verify:ledger
       - name: registry/binding 정합 게이트 (배포 깨는 드리프트 차단)
-        # dangling-binding(missing Secret)/orphan-dns(빈 백엔드)/stale-ledger-row만 차단 —
-        # unreferenced-resource(create-db→create-app 사이 정상)는 통과
+        # 차단(--ci)은 배포/노출을 깨는 유형만: dangling-binding(미존재 db/cache 참조 → missing Secret),
+        # orphan-dns(active 행 매니페스트 부재 → 빈 백엔드 DNS), activation-exposure-drift(노출 행 변경 → 재승인 필요).
+        # 그 외(원장 행·미참조 리소스·미등록·incomplete-purge 등)는 비차단(정보/경고).
         run: node tools/audit-orphans.mjs --ci
       - name: gate bats suite (run-bats.sh — 단일 수집 SSOT)
         # 수집은 scripts/run-bats.sh 단일 진입점: git-tracked test_*.bats − platform/charts(chart-test 별도) −
