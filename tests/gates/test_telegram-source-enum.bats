@@ -25,7 +25,9 @@ setup() {
   # reverse 방향: 워크플로가 아닌 발화처(예: CNPG restore-drill CronJob)도 enum을 정당하게 쓴다.
   # 워크플로만 보면 false-positive가 나므로, 비-워크플로 발화처는 레포 전역 grep으로 보강하고
   # 발화처가 아예 0인 예약 라벨만 명시 exemption으로 둔다.
-  EXEMPT_RESERVED="알림"   # 제네릭 예약 라벨 — 현재 emitter 0(의도). 삭제는 별도 결정.
+  # 예약 라벨(의도적 0-emitter, 공백패딩 — case 멤버십 매치용):
+  #  알림=제네릭 예약. 해체=teardown owner-local 이전으로 CI 미발화(notify.sh 렌더 경로·테스트는 보존, 미래 재사용 가능).
+  EXEMPT_RESERVED=" 알림 해체 "
 }
 
 @test "enum tokens were extracted (non-empty SSOT parse of notify.sh case line)" {
@@ -62,8 +64,8 @@ EOF
     # 비-워크플로 발화처(스크립트/CronJob 등) — 레포 전역에서 'source 라벨'로 등장하는지.
     # restore-drill-script.sh는 '복원드릴 · ident' 형태로 본문에 라벨을 직접 쓴다.
     if grep -rqF "$tok" "$ROOT/platform" "$ROOT/tools" 2>/dev/null; then continue; fi
-    # 명시 예약 라벨 exemption
-    if [ "$tok" = "$EXEMPT_RESERVED" ]; then continue; fi
+    # 명시 예약 라벨 exemption (공백패딩 멤버십 매치 — 다중 예약 지원)
+    case "$EXEMPT_RESERVED" in *" $tok "*) continue ;; esac
     dead="$dead $tok"
   done <<EOF
 $ENUM_TOKENS
