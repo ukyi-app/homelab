@@ -20,7 +20,7 @@
         }
       ]
     },
-    "kind": { "type": "string", "enum": ["api", "worker", "ssr", "spa"] },
+    "kind": { "type": "string", "enum": ["service", "worker", "static"] },
     "replicas": { "type": "integer", "minimum": 1, "maximum": 3 },
     "podAnnotations": {
       "type": "object",
@@ -55,7 +55,7 @@
         }
       }
     },
-    "spa": {
+    "static": {
       "type": "object",
       "properties": { "server": { "type": "string", "enum": ["sws", "caddy"] } }
     },

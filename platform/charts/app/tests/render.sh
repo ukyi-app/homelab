@@ -2,7 +2,7 @@
 set -euo pipefail
 CHART="$(cd "$(dirname "$0")/.." && pwd)"
 fail=0
-for k in api worker ssr spa; do
+for k in service worker static; do
   echo "== rendering kind=$k =="
   helm template t "$CHART" -f "$CHART/tests/fixtures/$k.yaml" \
     | kubeconform -strict -summary -ignore-missing-schemas \

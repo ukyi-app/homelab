@@ -4,8 +4,8 @@ R="--set resources.requests.cpu=50m --set resources.requests.memory=64Mi \
    --set resources.limits.cpu=500m --set resources.limits.memory=128Mi"
 tpl() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 $R "$@"; }
 
-@test "api gets Service and HTTPRoute referencing the shared Gateway" {
-  out=$(tpl --set kind=api --set route.host=api.example.com --set route.public=true)
+@test "service gets Service and HTTPRoute referencing the shared Gateway" {
+  out=$(tpl --set kind=service --set route.host=api.example.com --set route.public=true)
   echo "$out" | yq 'select(.kind=="Service")' | grep -q "port: 8080"
   rt=$(echo "$out" | yq 'select(.kind=="HTTPRoute")')
   [[ "$rt" == *"name: homelab"* ]]
@@ -15,7 +15,7 @@ tpl() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
 }
 
 @test "internal app binds to the internal HTTPS listener" {
-  rt=$(tpl --set kind=ssr --set route.host=admin.home.example.com --set route.public=false | yq 'select(.kind=="HTTPRoute")')
+  rt=$(tpl --set kind=service --set route.host=admin.home.example.com --set route.public=false | yq 'select(.kind=="HTTPRoute")')
   [[ "$rt" == *"sectionName: web-internal-tls"* ]]
 }
 

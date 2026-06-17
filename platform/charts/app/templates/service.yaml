@@ -15,7 +15,7 @@ spec:
     - name: http
       port: {{ .Values.ports.http }}
       targetPort: http
-    {{- if ne .Values.kind "spa" }}
+    {{- if ne .Values.kind "static" }}
     - name: metrics
       port: {{ .Values.ports.metrics }}
       targetPort: metrics
