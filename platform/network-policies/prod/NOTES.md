@@ -2,7 +2,7 @@
 
 k3s는 번들된 **kube-router** 컨트롤러로 NetworkPolicy를 강제한다(설치 시
 `--disable-network-policy`를 절대 넘기지 않음). "내부 전용"은 이전에는 "공개 HTTPRoute 없음"으로만
-강제되었다; 이 policy들은 실제 east-west 격리를 추가해, 침해된 공개 `api`/`ssr` pod가
+강제되었다; 이 policy들은 실제 east-west 격리를 추가해, 침해된 공개 `service` pod가
 database/admin 계층으로 측면 이동(lateral movement)하지 못하게 한다.
 
 ## 강제되는 내용

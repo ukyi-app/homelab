@@ -3,7 +3,7 @@ CHART="${BATS_TEST_DIRNAME}/.."
 # 형식만 유효한 64-hex digest 픽스처 (실제 이미지와 무관)
 DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 # db.enabled=true로 Deployment + migration Job을 모두 렌더해 이미지 일치를 검증한다
-BASE="--set image.repo=ghcr.io/o/api --set kind=api \
+BASE="--set image.repo=ghcr.io/o/api --set kind=service \
   --set route.host=api.example.com --set db.enabled=true \
   --set resources.requests.cpu=50m --set resources.requests.memory=64Mi \
   --set resources.limits.cpu=500m --set resources.limits.memory=128Mi"

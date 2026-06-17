@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 CHART="${BATS_TEST_DIRNAME}/.."
-BASE="--set image.repo=ghcr.io/o/api --set image.tag=sha-abc1234 --set kind=api \
+BASE="--set image.repo=ghcr.io/o/api --set image.tag=sha-abc1234 --set kind=service \
   --set route.host=api.example.com \
   --set resources.requests.cpu=50m --set resources.requests.memory=64Mi \
   --set resources.limits.cpu=500m --set resources.limits.memory=128Mi"

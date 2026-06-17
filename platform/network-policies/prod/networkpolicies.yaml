@@ -1,7 +1,7 @@
 # `prod` 앱 namespace의 east-west 격리.
 # k3s는 번들된 kube-router 컨트롤러로 NetworkPolicy를 강제한다(--disable-network-policy를
 # 절대 넘기지 않음). 양방향 default-deny 후 최소한의 명시적 allow만 추가한다.
-# 가장 중요한 보안 경계 — "침해된 공개 api/ssr pod가 database/admin 계층에 닿으면 안 된다" —
+# 가장 중요한 보안 경계 — "침해된 공개 service pod가 database/admin 계층에 닿으면 안 된다" —
 # 는 여기서 EGRESS로 강제되고(앱의 egress는 DNS, database:5432, cache:6379, 그리고 8080의
 # prod 내부 앱 피어로만 허용), 심층 방어로 database/cache namespace 자체의 default-deny
 # (platform/cnpg/prod, platform/cache/prod)가 보완한다.

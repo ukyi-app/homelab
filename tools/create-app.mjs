@@ -70,10 +70,10 @@ check(config, schema, ".app-config.yml");
 
 // ---------- 3) 비즈니스 규칙 (onboard v1과 동일 + v2 리소스 가드) ----------
 const kind = config.kind;
-const served = ["api", "ssr", "spa"].includes(kind);
+const served = kind !== "worker";
 if (!served && config.route) fail("kind=worker는 route를 가질 수 없다");
-if (kind !== "spa" && config.spa) fail("spa 블록은 kind=spa 전용");
-if (kind === "spa" && (config.db?.length || config.migrate)) fail("kind=spa는 db/migrate를 가질 수 없다(정적 서빙)");
+if (kind !== "static" && config.static) fail("static 블록은 kind=static 전용");
+if (kind === "static" && (config.db?.length || config.migrate)) fail("kind=static은 db/migrate를 가질 수 없다(정적 서빙)");
 
 const pub = config.route?.public ?? false;
 let host = config.route?.host;
@@ -168,7 +168,7 @@ values.db = config.migrate
   ? { enabled: true, migrateCmd: config.migrate.cmd }
   : { enabled: false };
 if (config.probes) values.probes = config.probes;
-if (kind === "spa") values.spa = { server: config.spa?.server ?? "sws" };
+if (kind === "static") values.static = { server: config.static?.server ?? "sws" };
 // 선언적 회전: 봉인 콘텐츠 해시를 pod template annotation으로 둔다 → update-secrets가 봉인본을
 // 갱신하면 이 해시가 바뀌어 ArgoCD가 Deployment를 롤링한다(envFrom 변경은 재시작 필요 —
 // 명령형 rollout restart는 취소/실패 시 옛 값 유지라 선언적으로). 해시는 기록될 봉인본 바이트 기준.
