@@ -15,7 +15,7 @@ setup() {
   grep -q 'if: always()' "$BUILD"
 }
 
-@test "build.yaml notify uses source 배포 and job.status" {
+@test "build.yaml notify uses the deploy source label and job.status" {
   grep -q 'source: 배포' "$BUILD"
   grep -q 'status: ' "$BUILD"
   grep -q 'job.status' "$BUILD"
