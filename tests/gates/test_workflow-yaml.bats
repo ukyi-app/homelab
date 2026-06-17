@@ -28,7 +28,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 }
 
 @test "no stale .yml references to renamed workflows (code·docs·tests·manifests)" {
-  # 구 .yml 참조(11 워크플로 basename)가 어디에도 잔존하면 안 된다. git grep은 매치0에 exit1 → || true로 흡수.
-  run bash -c "git -C '$ROOT' grep -lE '(_audit|_create-app|_create-cache|_create-database|_teardown|_update-secrets|bump-poll|dispatch-mutation|renovate|tf-reconcile|verify)\.yml' -- ':!docs/plans/*' || true"
+  # 구 .yml 참조(워크플로 basename)가 어디에도 잔존하면 안 된다. git grep은 매치0에 exit1 → || true로 흡수.
+  run bash -c "git -C '$ROOT' grep -lE '(_create-app|_create-cache|_create-database|_update-secrets|bump-poll|renovate|tf-reconcile|verify)\.yml' -- ':!docs/plans/*' || true"
+  [ -z "$output" ]
+}
+
+@test "deleted dispatch workflows have no tracked references" {
+  # dispatch-mutation 멀티플렉서 + _audit/_teardown reusable 삭제 후 잔존 참조 0.
+  # 제외: docs/plans(역사)·외부계약 reusable-app-build·이 가드 파일 자신(패턴 정의가 자기매치).
+  run bash -c "git -C \"$ROOT\" grep -lE 'dispatch-mutation|_audit\.yaml|_teardown\.yaml' -- ':!docs/plans/*' ':!.github/workflows/reusable-app-build.yaml' ':!tests/gates/test_workflow-yaml.bats' || true"
   [ -z "$output" ]
 }

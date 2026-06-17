@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# audit 스케줄 reconciler(audit.yaml) 불변식. _audit.yaml(reusable)에서 이관된 단언 포함.
+# audit 스케줄 reconciler(audit.yaml) 불변식. 구 audit reusable 워크플로에서 이관된 단언 포함.
 # (@test 이름 영어, 단언은 grep/run+[ ] — bash 3.2 [[ ]] 침묵통과 함정 회피)
 
 setup() { ROOT="$(git rev-parse --show-toplevel)"; F="$ROOT/.github/workflows/audit.yaml"; }

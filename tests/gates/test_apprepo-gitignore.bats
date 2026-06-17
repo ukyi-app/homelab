@@ -14,7 +14,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "teardown wrapper does not use git add -A (explicit allowlist only)" {
-  # teardown은 owner-local scripts/teardown.sh로 이전됨(_teardown.yaml 제거) — 명시 allowlist만 add.
+  # teardown은 owner-local scripts/teardown.sh로 이전됨(구 teardown 워크플로 제거) — 명시 allowlist만 add.
   run grep -E 'git add -A' scripts/teardown.sh
   [ "$status" -ne 0 ]
   # allowlist에 apps/ + 원장 + cloudflare apps.json + platform/ 포함 확인

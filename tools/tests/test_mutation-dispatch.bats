@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # 변이 디스패처(create-app/update-secrets/create-database/create-cache) 구조·notify 불변식.
-# test_dispatcher.bats(dispatch-mutation 전용, Task 4에서 삭제)의 단언을 4 디스패처로 일반화.
+# 구 단일 디스패처 전용 테스트(삭제됨)의 단언을 4 디스패처로 일반화.
 # (@test 이름 영어, 단언은 run+[ ] — bash 3.2 [[ ]] 침묵통과 함정 회피)
 
 setup() {
