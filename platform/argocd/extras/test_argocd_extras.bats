@@ -27,3 +27,19 @@ S="$D/argocd-accounts.sealed.yaml"
 @test "kustomization has no KSOPS generator (plain SealedSecret CR)" {
   run grep -q 'generators:' "$D/kustomization.yaml"; [ "$status" -ne 0 ]
 }
+
+@test "kustomize build also renders exactly one HTTPRoute" {
+  run kustomize build "$D"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^kind: HTTPRoute')" -eq 1 ]
+}
+
+@test "HTTPRoute exposes argocd UI on web-internal-tls to argocd-server:80" {
+  H="$D/httproute.yaml"
+  run grep -q 'argocd.home.ukyi.app' "$H"; [ "$status" -eq 0 ]
+  run grep -q 'sectionName: web-internal-tls' "$H"; [ "$status" -eq 0 ]
+  run grep -q 'name: argocd-server' "$H"; [ "$status" -eq 0 ]
+  run grep -qE 'port: 80' "$H"; [ "$status" -eq 0 ]
+  run grep -q 'kind: Gateway' "$H"; [ "$status" -eq 0 ]
+  run grep -qE 'weight: 1' "$H"; [ "$status" -eq 0 ]
+}
