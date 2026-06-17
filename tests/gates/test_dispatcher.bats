@@ -27,3 +27,33 @@ setup() { F="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/.github/workflows/dispatch-
   run grep -E "repository_dispatch|pull_request:|push:" "$F"
   [ "$status" -ne 0 ]
 }
+
+@test "notify-failure fires on cancelled as well as failure" {
+  run grep -nE "if:\s*failure\(\)\s*\|\|\s*cancelled\(\)" "$F"
+  [ "$status" -eq 0 ]
+}
+
+@test "notify-failure normalizes status from needs.* results, not its own job.status (F5)" {
+  # ⚠️ codex pass2 F5: notify-failure 잡의 job.status는 그 잡 자신(success)이라 거짓 ✅. toJSON(needs)로
+  # 정규화하는 스텝이 있고, telegram status가 그 정규화 출력(steps.norm.outputs.status)을 써야 한다.
+  WF="$F"
+  run grep -nE 'toJSON\(needs\)' "$WF"
+  [ "$status" -eq 0 ]
+  run grep -nE 'status:[[:space:]]*\$\{\{[[:space:]]*steps\.norm\.outputs\.status' "$WF"
+  [ "$status" -eq 0 ]
+  # notify-failure telegram status로 job.status를 직접 쓰면 거짓 success — 금지.
+  run grep -nE 'status:[[:space:]]*\$\{\{[[:space:]]*job\.status[[:space:]]*\}\}' "$WF"
+  [ "$status" -ne 0 ]
+}
+
+@test "_audit.yaml summary does not cap findings at 20 (relies on notify.sh 4096 cap)" {
+  AUDIT="$(dirname "$F")/_audit.yaml"
+  run grep -c '\.findings\[:20\]' "$AUDIT"
+  [ "$output" = "0" ]
+}
+
+@test "_audit.yaml summary does not swallow jq errors with 2>/dev/null || true" {
+  AUDIT="$(dirname "$F")/_audit.yaml"
+  run grep -cE '2>/dev/null \|\| true' "$AUDIT"
+  [ "$output" = "0" ]
+}
