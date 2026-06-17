@@ -5,14 +5,14 @@
 CHART="$BATS_TEST_DIRNAME/.."
 
 @test "db conn handle wires a secretRef into deployment envFrom" {
-  out=$(helm template t "$CHART" --set kind=api --set route.host=t.home.example.com \
+  out=$(helm template t "$CHART" --set kind=service --set route.host=t.home.example.com \
     --set image.repo=ghcr.io/x/y --set image.tag=sha-abc1234 --set resources.requests.cpu=50m --set resources.requests.memory=64Mi --set resources.limits.cpu=200m --set resources.limits.memory=128Mi \
     --set-json 'envFrom=[{"secretRef":{"name":"db-orders-conn"}}]')
   echo "$out" | grep -q "db-orders-conn"
 }
 
 @test "cache conn handle and app secrets render together in envFrom" {
-  out=$(helm template t "$CHART" --set kind=api --set route.host=t.home.example.com \
+  out=$(helm template t "$CHART" --set kind=service --set route.host=t.home.example.com \
     --set image.repo=ghcr.io/x/y --set image.tag=sha-abc1234 --set resources.requests.cpu=50m --set resources.requests.memory=64Mi --set resources.limits.cpu=200m --set resources.limits.memory=128Mi \
     --set-json 'envFrom=[{"secretRef":{"name":"cache-sessions-conn"}},{"secretRef":{"name":"orders-secrets"}}]')
   echo "$out" | grep -q "cache-sessions-conn"
@@ -20,7 +20,7 @@ CHART="$BATS_TEST_DIRNAME/.."
 }
 
 @test "migrate job inherits envFrom (MIGRATE_DATABASE_URL reaches the migration)" {
-  out=$(helm template t "$CHART" --set kind=api --set route.host=t.home.example.com \
+  out=$(helm template t "$CHART" --set kind=service --set route.host=t.home.example.com \
     --set image.repo=ghcr.io/x/y --set image.tag=sha-abc1234 --set resources.requests.cpu=50m --set resources.requests.memory=64Mi --set resources.limits.cpu=200m --set resources.limits.memory=128Mi \
     --set db.enabled=true --set-json 'db.migrateCmd=["npm","run","migrate"]' \
     --set-json 'envFrom=[{"secretRef":{"name":"db-orders-conn"}}]')

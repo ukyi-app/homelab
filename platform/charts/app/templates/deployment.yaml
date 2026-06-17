@@ -16,7 +16,7 @@ spec:
       labels:
         {{- include "app.labels" . | nindent 8 }}
       annotations:
-        {{- if and .Values.metrics.enabled (ne .Values.kind "spa") }}
+        {{- if and .Values.metrics.enabled (ne .Values.kind "static") }}
         prometheus.io/scrape: "true"
         prometheus.io/port: "{{ .Values.ports.metrics }}"
         prometheus.io/path: "/metrics"
@@ -38,8 +38,8 @@ spec:
         - name: app
           image: {{ include "app.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- if eq .Values.kind "spa" }}
-          {{- if eq .Values.spa.server "sws" }}
+          {{- if eq .Values.kind "static" }}
+          {{- if eq .Values.static.server "sws" }}
           # static-web-server (Rust): SPA fallback + 읽기 전용 root
           args: ["--port", "{{ .Values.ports.http }}", "--root", "/public", "--page-fallback", "/public/index.html", "--health"]
           {{- end }}
@@ -47,7 +47,7 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.ports.http }}
-            {{- if ne .Values.kind "spa" }}
+            {{- if ne .Values.kind "static" }}
             - name: metrics
               containerPort: {{ .Values.ports.metrics }}
             {{- end }}

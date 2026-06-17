@@ -9,7 +9,7 @@ teardown() { rm -rf "$TMP"; }
 
 @test "seal-secret only seals keys declared in secrets allowlist" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: api
+kind: service
 secrets: [api-key, db-extra]
 EOF
   cat > "$TMP/.env" <<'EOF'
@@ -27,7 +27,7 @@ EOF
 
 @test "seal-secret errors when a declared secret is missing from .env" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: api
+kind: service
 secrets: [missing-key]
 EOF
   printf 'OTHER=x\n' > "$TMP/.env"
@@ -38,7 +38,7 @@ EOF
 
 @test "seal-secret never prints secret values (dry-run or error paths)" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: api
+kind: service
 secrets: [api-key]
 EOF
   cat > "$TMP/.env" <<'EOF'
@@ -51,7 +51,7 @@ EOF
 
 @test "seal-secret pipes a plaintext Secret through kubeseal and writes sealed yaml" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: api
+kind: service
 secrets: [api-key]
 EOF
   cat > "$TMP/.env" <<'EOF'

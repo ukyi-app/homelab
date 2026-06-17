@@ -22,7 +22,7 @@ EOF
   touch "$FR/platform/data-conn/prod/db-orders-conn.sealed.yaml"
   touch "$FR/platform/data-conn/prod/cache-sessions-conn.sealed.yaml"
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: api
+kind: service
 resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
 route: { public: true, host: orders.example.com }
 db: [orders]

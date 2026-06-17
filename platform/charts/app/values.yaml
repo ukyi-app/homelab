@@ -10,7 +10,7 @@ image:
 imagePullSecrets: []
 
 # --- 워크로드 형태 ---
-kind: api # api | worker | ssr | spa
+kind: service # service | worker | static
 replicas: 1
 
 # --- 공유 Gateway (Milestone 3) — 기본값, 오버라이드는 드묾 ---
@@ -29,7 +29,7 @@ envFrom: [] # [{secretRef: {name}}]
 
 # --- 라우팅 (기본 internal; public은 명시적 opt-in) ---
 route:
-  host: "" # api|ssr|spa에 필수
+  host: "" # service|static에 필수
   paths: ["/"]
   public: false # sectionName 매핑: web-public (true) / web-internal (false)
 
@@ -43,9 +43,9 @@ probes:
   liveness: { path: /healthz }
   readiness: { path: /readyz }
 
-# --- spa 서빙 추상화 ---
-spa:
-  server: sws # sws | caddy   (kind=spa일 때만 사용; 기본 sws)
+# --- static(정적 파일) 서빙 추상화 ---
+static:
+  server: sws # sws | caddy   (kind=static일 때만 사용; 기본 sws)
 
 # --- pod 하드닝 (기본값; 오버라이드는 드묾) ---
 podSecurityContext:

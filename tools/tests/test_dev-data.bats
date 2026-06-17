@@ -38,7 +38,7 @@ teardown() { rm -rf "$TMP"; }
 
 @test "env:example renders env+secrets+db+redis keys from .app-config.yml" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: api
+kind: service
 resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
 env: [{ name: LOG_LEVEL, value: info }]
 secrets: [api-key]

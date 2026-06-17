@@ -14,14 +14,14 @@ render() { helm template "$1" "$CHART" -f "$2"; }
   [[ "$out" == *"Deployment"* ]]
 }
 
-@test "ssr (Node standalone) renders Service+HTTPRoute" {
-  out=$(render web "$FIX/ssr.yaml")
+@test "service (Node standalone) renders Service+HTTPRoute" {
+  out=$(render web "$FIX/service.yaml")
   [[ "$out" == *"HTTPRoute"* ]]
   [[ "$out" == *"Deployment"* ]]
 }
 
-@test "spa served by static-web-server, no metrics port" {
-  out=$(render console "$FIX/spa.yaml")
+@test "static served by static-web-server, no metrics port" {
+  out=$(render console "$FIX/static.yaml")
   [[ "$out" == *"static-web-server"* ]] || [[ "$out" == *"page-fallback"* ]]
   [ -z "$(echo "$out" | yq 'select(.kind=="Deployment").spec.template.spec.containers[0].ports[] | select(.name=="metrics")')" ]
 }

@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["kind", "resources"],
   "properties": {
-    "kind": { "enum": ["api", "worker", "ssr", "spa"] },
+    "kind": { "enum": ["service", "worker", "static"] },
     "resources": {
       "type": "object",
       "additionalProperties": false,
@@ -73,7 +73,7 @@
         "readiness": { "$ref": "#/definitions/probe" }
       }
     },
-    "spa": {
+    "static": {
       "type": "object",
       "additionalProperties": false,
       "properties": { "server": { "enum": ["sws", "caddy"] } }

@@ -1,5 +1,5 @@
 image: { repo: ghcr.io/owner/api, tag: sha-abc1234 }
-kind: api
+kind: service
 route: { host: api.example.com, public: true, paths: ["/"] }
 db: { enabled: true, migrateCmd: ["/app/api", "migrate"] }
 envFrom:

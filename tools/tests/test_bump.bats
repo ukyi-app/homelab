@@ -9,7 +9,7 @@ setup() {
 image:
   repo: ghcr.io/ukyi-app/blog
   tag: sha-0000000
-kind: api
+kind: service
 EOF
 }
 teardown() { rm -rf "$FIX"; }

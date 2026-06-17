@@ -29,9 +29,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 
-{{/* http를 리슨하며 Service/HTTPRoute를 받는 워크로드 */}}
+{{/* http를 리슨하며 Service/HTTPRoute를 받는 워크로드 — worker만 비서빙 */}}
 {{- define "app.isServed" -}}
-{{- if or (eq .Values.kind "api") (eq .Values.kind "ssr") (eq .Values.kind "spa") -}}true{{- end -}}
+{{- if ne .Values.kind "worker" -}}true{{- end -}}
 {{- end -}}
 
 {{/* 검증: kind별 필수 항목 */}}
@@ -39,7 +39,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if and (include "app.isServed" .) (not .Values.route.host) -}}
 {{- fail (printf "route.host is required for kind=%s" .Values.kind) -}}
 {{- end -}}
-{{- if and (eq .Values.kind "spa") .Values.db.enabled -}}
-{{- fail "kind=spa must not set db.enabled (static assets have no DB)" -}}
+{{- if and (eq .Values.kind "static") .Values.db.enabled -}}
+{{- fail "kind=static must not set db.enabled (static assets have no DB)" -}}
 {{- end -}}
 {{- end -}}

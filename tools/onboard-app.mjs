@@ -62,10 +62,10 @@ check(config, schema, ".homelab.yaml");
 
 // ---------- 3) 비즈니스 규칙 ----------
 const kind = config.kind;
-const served = ["api", "ssr", "spa"].includes(kind);
+const served = kind !== "worker";
 if (!served && config.route) fail("kind=worker는 route를 가질 수 없다");
-if (kind !== "spa" && config.spa) fail("spa 블록은 kind=spa 전용");
-if (kind === "spa" && config.db?.enabled) fail("kind=spa는 db를 가질 수 없다(정적 서빙)");
+if (kind !== "static" && config.static) fail("static 블록은 kind=static 전용");
+if (kind === "static" && config.db?.enabled) fail("kind=static은 db를 가질 수 없다(정적 서빙)");
 
 const pub = config.route?.public ?? false;
 let host = config.route?.host;
@@ -118,7 +118,7 @@ values.db = config.db?.enabled
   ? { enabled: true, migrateCmd: config.db.migrateCmd ?? ["migrate"] }
   : { enabled: false };
 if (config.probes) values.probes = config.probes;
-if (kind === "spa") values.spa = { server: config.spa?.server ?? "sws" };
+if (kind === "static") values.static = { server: config.static?.server ?? "sws" };
 
 // ---------- 5) 산출물 ----------
 const plan = {

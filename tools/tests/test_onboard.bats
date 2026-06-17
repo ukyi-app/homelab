@@ -19,15 +19,15 @@ run_onboard() { # $1=payload 파일 [추가 인자...]
   (cd "$ROOT" && node tools/onboard-app.mjs --payload "$p" --domain ukyi.app "$@")
 }
 
-VALID_API='kind: api
+VALID_SERVICE='kind: service
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 500m, memory: 128Mi } }
 route: { public: true }
 db: { enabled: true, migrateCmd: ["/app/blog","migrate"] }
 env: [{ name: LOG_LEVEL, value: info }]
 secrets: [blog-secrets]'
 
-@test "valid api: derived host + ledger budget + secrets checklist" {
-  p=$(payload blog "$VALID_API")
+@test "valid service: derived host + ledger budget + secrets checklist" {
+  p=$(payload blog "$VALID_SERVICE")
   run run_onboard "$p" --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *'"host": "blog.ukyi.app"'* ]]
@@ -36,7 +36,7 @@ secrets: [blog-secrets]'
 }
 
 @test "internal app derives *.home.<domain> host" {
-  p=$(payload intapp 'kind: api
+  p=$(payload intapp 'kind: service
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }')
   run run_onboard "$p" --dry-run
   [ "$status" -eq 0 ]
@@ -52,12 +52,12 @@ route: { public: true }')
 }
 
 @test "reject secret-pattern env / allow with allowPlaintext" {
-  p=$(payload a2 'kind: api
+  p=$(payload a2 'kind: service
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }
 env: [{ name: API_TOKEN, value: oops }]')
   run run_onboard "$p" --dry-run
   [ "$status" -ne 0 ]; [[ "$output" == *"API_TOKEN"* ]]
-  p=$(payload a3 'kind: api
+  p=$(payload a3 'kind: service
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }
 env: [{ name: CACHE_KEY_PREFIX, value: v1 }]
 allowPlaintext: [CACHE_KEY_PREFIX]')
@@ -66,26 +66,26 @@ allowPlaintext: [CACHE_KEY_PREFIX]')
 }
 
 @test "reject: budget / duplicate / internal-host rule / unknown field / tag format" {
-  p=$(payload big 'kind: api
+  p=$(payload big 'kind: service
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 500m, memory: 1Gi } }
 replicas: 3')
   run run_onboard "$p" --dry-run; [ "$status" -ne 0 ]; [[ "$output" == *"예산 초과"* ]]
   # duplicate: 인-레포 앱이 없으므로 fixture root에 앱을 미리 만들어 중복 거부를 검증
   fixdup="$(mktemp -d)"; mkdir -p "$fixdup/apps/dup/deploy/prod" "$fixdup/docs"
   cp "$ROOT/docs/memory-ledger.md" "$fixdup/docs/memory-ledger.md"
-  p=$(payload dup 'kind: api
+  p=$(payload dup 'kind: service
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }')
   run run_onboard "$p" --dry-run --repo-root "$fixdup"; [ "$status" -ne 0 ]; [[ "$output" == *"이미 존재"* ]]
   rm -rf "$fixdup"
-  p=$(payload a4 'kind: api
+  p=$(payload a4 'kind: service
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }
 route: { public: false, host: a4.ukyi.app }')
   run run_onboard "$p" --dry-run; [ "$status" -ne 0 ]; [[ "$output" == *"home."* ]]
-  p=$(payload a5 'kind: api
+  p=$(payload a5 'kind: service
 hostPort: 9999
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }')
   run run_onboard "$p" --dry-run; [ "$status" -ne 0 ]; [[ "$output" == *"알 수 없는 필드"* ]]
-  bad=$(payload t1 'kind: api
+  bad=$(payload t1 'kind: service
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 100m, memory: 64Mi } }')
   python3 - "$bad" <<'EOF'
 import json,sys
@@ -104,7 +104,7 @@ EOF
 | <!-- ledger:row --> base | kube-system | 100 | 200 |
 **Totals:** req ≈ 100 Mi · limit ≈ 200 Mi (must stay ≤ 8704 Mi).
 EOF
-  p=$(payload blog "$VALID_API")
+  p=$(payload blog "$VALID_SERVICE")
   run run_onboard "$p" --repo-root "$fix"
   [ "$status" -eq 0 ]
   [ -f "$fix/apps/blog/deploy/prod/values.yaml" ]
@@ -128,7 +128,7 @@ EOF
 | <!-- ledger:row --> base | kube-system | 100 | 200 |
 **Totals:** req ≈ 100 Mi · limit ≈ 200 Mi (must stay ≤ 8704 Mi).
 EOF
-  nosec='kind: api
+  nosec='kind: service
 resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 500m, memory: 128Mi } }
 route: { public: false }
 db: { enabled: false }
