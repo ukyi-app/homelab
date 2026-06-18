@@ -24,3 +24,10 @@ setup() { C="${BATS_TEST_DIRNAME}/config"; }
   run grep -q 'hideVersion: true' "$C/settings.yaml"; [ "$status" -eq 0 ]
   run grep -q 'statusStyle: dot' "$C/settings.yaml"; [ "$status" -eq 0 ]
 }
+
+@test "widgets add the logo and h23 time format" {
+  run grep -qE '^[[:space:]]*-[[:space:]]*logo:' "$C/widgets.yaml"; [ "$status" -eq 0 ]
+  run grep -q '/images/logo.png' "$C/widgets.yaml"; [ "$status" -eq 0 ]
+  run grep -q 'hourCycle: h23' "$C/widgets.yaml"; [ "$status" -eq 0 ]
+  run grep -q 'timeStyle: short' "$C/widgets.yaml"; [ "$status" -eq 0 ]
+}
