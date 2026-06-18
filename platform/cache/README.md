@@ -1,6 +1,6 @@
 # cache
 
-**역할** — 앱별 경량 Valkey 캐시 계층. 공유 백업 CronJob/RBAC/NetworkPolicy를 두고, 인스턴스 디렉토리(`<name>/`)는 `tools/provision-cache.mjs`가 `resources:`에 멱등 등록한다. `cache` 네임스페이스.
+**역할** — 앱별 경량 Valkey 캐시 계층. 공유 백업 CronJob/RBAC/NetworkPolicy를 두고, 인스턴스 디렉토리(`<name>/`)는 `tools/provision-cache.ts`가 `resources:`에 멱등 등록한다. `cache` 네임스페이스.
 
 **싱크 Application · sync-wave** — `platform-components` ApplicationSet이 `platform/cache/prod`을 `cache-prod` Application으로 자동 발견. sync-wave 미지정 → 기본 **0**. 대상 NS `cache`는 `platform/namespaces`가 소유.
 

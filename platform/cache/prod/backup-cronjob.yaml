@@ -57,7 +57,7 @@ spec:
             # 2) 스냅샷: BGSAVE 트리거 → LASTSAVE 변화 폴링으로 완료 대기 → --rdb로 네트워크 풀
             #    → sha256 체크섬. 인증은 REDISCLI_AUTH env로만(-a 인자는 ps에 노출된다).
             - name: snapshot
-              image: valkey/valkey:8.1.1-alpine # provision-cache.mjs의 VALKEY_IMAGE와 같은 핀 — 함께 올린다
+              image: valkey/valkey:8.1.1-alpine # provision-cache.ts의 VALKEY_IMAGE와 같은 핀 — 함께 올린다
               command: ["/bin/sh", "-c"]
               args:
                 - |
