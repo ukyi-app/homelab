@@ -1,7 +1,0 @@
-- Ops:
-    - ArgoCD:
-        - abbr: CD
-          href: https://argocd.home.ukyi.app
-    - Grafana:
-        - abbr: GR
-          href: https://grafana.home.ukyi.app
