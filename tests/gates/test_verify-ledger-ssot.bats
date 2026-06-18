@@ -13,12 +13,12 @@ setup() {
 }
 
 @test "package.json verify:ledger delegates to the SSOT script" {
-  run node -e "process.stdout.write(require('$ROOT/package.json').scripts['verify:ledger'])"
+  run bun -e "process.stdout.write(require('$ROOT/package.json').scripts['verify:ledger'])"
   echo "$output" | grep -q 'scripts/verify-ledger.sh'
 }
 
 @test "verify.yaml does not inline the ledger conftest pipeline (consolidated to gate via verify:ledger, #53 W7)" {
-  # #53 W7: verify.yaml의 ledger는 required gate(ci.yaml의 pnpm verify:ledger → verify-ledger.sh)로 일원화 —
+  # #53 W7: verify.yaml의 ledger는 required gate(ci.yaml의 bun run verify:ledger → verify-ledger.sh)로 일원화 —
   # verify.yaml 자체엔 ledger 스텝이 없다(인라인 conftest 0). SSOT 소비는 package.json·Makefile이 담당.
   run grep -c 'conftest test /tmp/ledger.json' "$ROOT/.github/workflows/verify.yaml"
   [ "$output" = "0" ]

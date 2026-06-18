@@ -8,7 +8,7 @@ setup() {
 }
 
 @test "replaceTotals substitutes the totals prose and returns updated text" {
-  run node -e '
+  run bun -e '
     import("file://" + process.argv[1]).then(m => {
       const before = "blah\n**합계:** req ≈ 100 Mi · limit ≈ 200 Mi (≤ 8704 Mi).\n";
       const after = m.replaceTotals(before, 150, 250);
@@ -21,7 +21,7 @@ setup() {
 }
 
 @test "replaceTotals throws (fail-loud) when the totals prose is missing" {
-  run node -e '
+  run bun -e '
     import("file://" + process.argv[1]).then(m => {
       try { m.replaceTotals("no totals phrase here\n", 1, 2); console.log("DID-NOT-THROW"); }
       catch (e) { console.log("threw"); }

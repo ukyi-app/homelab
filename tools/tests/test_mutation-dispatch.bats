@@ -32,7 +32,7 @@ setup() {
 @test "each dispatcher validates with fixed action then routes to its reusable" {
   for d in $DISPATCHERS; do
     f="$WF/$d.yaml"
-    grep -q "validate-mutation.mjs --action $d" "$f"
+    grep -q "validate-mutation.ts --action $d" "$f"
     grep -q "needs: validate" "$f"
     grep -q "uses: ./.github/workflows/_$d.yaml" "$f"
   done

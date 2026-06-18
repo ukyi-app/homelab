@@ -5,7 +5,7 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   CI="$ROOT/.github/workflows/ci.yaml"
-  SRC="$ROOT/tools/audit-orphans.mjs"
+  SRC="$ROOT/tools/audit-orphans.ts"
 }
 
 @test "ci.yaml audit gate comment does not claim stale-ledger-row is blocking" {
@@ -16,12 +16,12 @@ setup() {
   run sh -c "grep -E 'const BLOCKING = new Set' '$SRC' | grep -c stale-ledger-row"
   [ "$output" = "0" ]
   # audit-orphans 게이트 스텝 주석(run 라인 직전 #...)에 stale-ledger-row가 등장하면 실패
-  run bash -c "awk '/registry\\/binding 정합 게이트/{f=1} f&&/node tools\\/audit-orphans.mjs --ci/{exit} f' '$CI' | grep -c 'stale-ledger-row'"
+  run bash -c "awk '/registry\\/binding 정합 게이트/{f=1} f&&/bun tools\\/audit-orphans.ts --ci/{exit} f' '$CI' | grep -c 'stale-ledger-row'"
   [ "$output" = "0" ]
 }
 
 @test "ci.yaml audit gate comment names both real blocking types" {
-  run bash -c "awk '/registry\\/binding 정합 게이트/{f=1} f&&/node tools\\/audit-orphans.mjs --ci/{exit} f' '$CI'"
+  run bash -c "awk '/registry\\/binding 정합 게이트/{f=1} f&&/bun tools\\/audit-orphans.ts --ci/{exit} f' '$CI'"
   echo "$output" | grep -q 'dangling-binding'
   echo "$output" | grep -q 'orphan-dns'
 }
