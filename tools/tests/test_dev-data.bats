@@ -9,29 +9,29 @@ setup() {
 teardown() { rm -rf "$TMP"; }
 
 @test "db:up writes a localhost DATABASE_URL for clean dev (dry-run)" {
-  run node "$ROOT/tools/dev.mjs" db:up --dry-run --name orders
+  run bun "$ROOT/tools/dev.ts" db:up --dry-run --name orders
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "localhost"
   echo "$output" | grep -q "ORDERS_DATABASE_URL"
 }
 
 @test "db:url targets the tailscale path with the read-only role (no destructive ops)" {
-  run node "$ROOT/tools/db-url.mjs" --name orders --dry-run
+  run bun "$ROOT/tools/db-url.ts" --name orders --dry-run
   [ "$status" -eq 0 ]
   echo "$output" | grep -qi "tailscale"
   echo "$output" | grep -q "orders_ro"
 }
 
 @test "db-url provides no reset/drop/teardown surface" {
-  run node "$ROOT/tools/db-url.mjs" --name orders --reset
+  run bun "$ROOT/tools/db-url.ts" --name orders --reset
   [ "$status" -ne 0 ]
   # 도구 소스에 파괴 명령이 없다
-  run grep -iE "DROP TABLE|db:reset|compose down" "$ROOT/tools/db-url.mjs"
+  run grep -iE "DROP TABLE|db:reset|compose down" "$ROOT/tools/db-url.ts"
   [ "$status" -ne 0 ]
 }
 
 @test "cache:url exposes only the read-only ACL user" {
-  run node "$ROOT/tools/cache-url.mjs" --name sessions --dry-run
+  run bun "$ROOT/tools/cache-url.ts" --name sessions --dry-run
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "sessions-ro"
 }
