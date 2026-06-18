@@ -43,7 +43,7 @@ jobs:
             --json number,headRefName,mergeStateStatus,autoMergeRequest \
             --jq '.[] | select(.autoMergeRequest != null)
                        | select(.mergeStateStatus == "BEHIND")
-                       | select(.headRefName | test("^(bump|bump-poll|create-database|create-cache|create-app|onboard|update-secrets)/"))
+                       | select(.headRefName | test("^(bump|bump-poll|create-database|create-cache|create-app|update-secrets)/"))
                        | .number' > /tmp/behind.txt
           if [ ! -s /tmp/behind.txt ]; then echo "behind한 봇 PR 없음 — no-op"; exit 0; fi
           # ⚠️ codex restale3 F2: 실패를 ::warning::로 삼키고 green으로 끝내면 멈춘 PR(이 스위퍼가 잡으려던 모드)이

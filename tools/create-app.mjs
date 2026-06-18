@@ -1,7 +1,7 @@
 // create-app 생성기 — 외부 앱 레포의 .app-config.yml(v2 계약)을 검증하고
 // apps/<app>/deploy/prod/ + apps.json + 메모리 원장을 한 번에 갱신한다.
-// onboard-app.mjs(v1, .homelab.yaml)의 후속: db/redis 리소스 참조, SealedSecret 시크릿,
-// digest 핀 이미지, 권위 바인딩 레지스트리(.bindings.json)가 추가됐다.
+// db/redis 리소스 참조, SealedSecret 시크릿, digest 핀 이미지,
+// 권위 바인딩 레지스트리(.bindings.json)를 다룬다.
 // _create-app.yaml(homelab-initiated workflow_dispatch)이 호출 — 결과물은 PR(사람 머지 = 승인).
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";

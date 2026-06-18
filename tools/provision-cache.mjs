@@ -329,7 +329,7 @@ resources:
     }
   }
 
-  // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신 (onboard-app.mjs와 동일 규약)
+  // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신 (create-app.mjs와 동일 규약)
   const lines = ledger.split("\n");
   const lastRow = lines.map((l, i) => (l.includes("<!-- ledger:row -->") ? i : -1)).filter((i) => i >= 0).pop();
   lines.splice(lastRow + 1, 0, `| <!-- ledger:row --> ${component.padEnd(14)} | cache          | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);
