@@ -1,0 +1,17 @@
+# A.5#1: glances :61208을 homepage ns에서만 허용. NP가 glances pod를 선택 → 그 외 ingress는
+# default-deny가 된다(observability ns엔 ns-wide default-deny가 없어 이 NP가 노출을 차단).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: glances-allow-homepage
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: glances }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: homepage }
+      ports:
+        - { protocol: TCP, port: 61208 }

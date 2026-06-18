@@ -1,0 +1,58 @@
+# Glances 호스트 메트릭 API(homepage 위젯 전용). observability ns(PSA privileged) 동거 — node-exporter 동류.
+# A.5: strict nonroot(65534)·root fallback 금지·최소 마운트(host / 미마운트, hostPID로 호스트 /proc 가시성).
+# A.5#1 ingress 격리는 glances-netpol.yaml. Pass2: automountServiceAccountToken false(k8s API 불요).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glances
+  namespace: observability
+  labels: { app.kubernetes.io/name: glances }
+spec:
+  replicas: 1                 # 단일 노드 — DaemonSet 불요
+  selector:
+    matchLabels: { app.kubernetes.io/name: glances }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: glances }
+    spec:
+      automountServiceAccountToken: false   # Glances는 k8s API 불요 — SA 토큰 마운트 금지(공격면 축소)
+      hostPID: true                         # 호스트 CPU/메모리/프로세스 가시성(/proc가 호스트 PID ns 반영)
+      securityContext:
+        runAsNonRoot: true                  # ★ A.5: 하드 요구. root fallback 금지
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: glances
+          image: nicolargo/glances:4.5.5    # 최신 stable 4.x(2026-06). digest 핀은 Renovate 후속
+          env:
+            - { name: GLANCES_OPT, value: "-w" }   # 웹서버 모드(REST API @ :61208)
+            - { name: TMPDIR, value: /tmp }
+          ports:
+            - { name: api, containerPort: 61208 }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 192Mi }       # 메모리 원장 glances 행(Task 10)과 일치
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true    # /tmp emptyDir로 쓰기 경로 제공
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: os-release, mountPath: /etc/os-release, readOnly: true }
+            # host /proc·/sys는 hostPID + 런타임 기본으로 cpu/mem/process 커버 시도 — Task 12 live-proof로
+            # 부족한 metric(sensor/fs) 확인 후 최소 마운트만 추가(host / 는 금지).
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        - { name: os-release, hostPath: { path: /etc/os-release, type: File } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: glances
+  namespace: observability
+  labels: { app.kubernetes.io/name: glances }
+spec:
+  selector: { app.kubernetes.io/name: glances }
+  ports:
+    - { name: api, port: 61208, targetPort: 61208 }
