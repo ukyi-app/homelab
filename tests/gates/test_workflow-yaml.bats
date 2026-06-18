@@ -39,3 +39,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   run bash -c "git -C \"$ROOT\" grep -lE 'dispatch-mutation|_audit\.yaml|_teardown\.yaml' -- ':!docs/plans/*' ':!.github/workflows/reusable-app-build.yaml' ':!tests/gates/test_workflow-yaml.bats' || true"
   [ -z "$output" ]
 }
+
+@test "deleted v1 onboarding identifiers have no tracked references" {
+  # v1 onboarding 경로(onboard.yaml·onboard-app·homelab-app-schema·.homelab.yaml) 전면 폐기 후 잔존 0.
+  # 제외: docs/plans(역사)·docs/runbooks(로컬 런북, 별도 수동)·자기 가드 파일.
+  run bash -c "git -C \"$ROOT\" grep -lE 'onboard\.yaml|onboard-app|homelab-app-schema|\.homelab\.yaml' -- ':!docs/plans/*' ':!docs/runbooks/*' ':!tests/gates/test_workflow-yaml.bats' || true"
+  [ -z "$output" ]
+}
