@@ -6,8 +6,8 @@
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 
-@test "every workflow file is valid YAML (node yaml parser)" {
-  run node -e '
+@test "every workflow file is valid YAML (bun yaml parser)" {
+  run bun -e '
     const y = require("yaml"), fs = require("fs");
     const dir = process.argv[1] + "/.github/workflows";
     const bad = [];

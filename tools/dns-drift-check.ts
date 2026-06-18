@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { promises as dnsp } from "node:dns";
 
-const arg = (k) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : undefined; };
+const arg = (k: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : undefined; };
 const appsPath = arg("--apps") ?? "infra/cloudflare/apps.json";
 const fixture = arg("--fixture");
 
@@ -13,15 +13,15 @@ let resolve;
 if (fixture !== undefined) {
   const map = JSON.parse(fixture);
   // 테스트용 sentinel: 값이 "TRANSIENT" 문자열이면 undefined(일시 실패)로 매핑(JSON엔 undefined가 없으므로).
-  resolve = async (h) => {
+  resolve = async (h: string) => {
     if (!Object.prototype.hasOwnProperty.call(map, h)) return null;
     const v = map[h];
     return v === "TRANSIENT" ? undefined : v;
   };
 } else {
-  resolve = async (h) => {
+  resolve = async (h: string) => {
     try { return await dnsp.resolve(h); }                 // A/AAAA — proxied면 Cloudflare anycast IP
-    catch (e) {
+    catch (e: any) {
       if (e.code === "ENOTFOUND" || e.code === "ENODATA") return null;  // 레코드 없음(미생성)
       return undefined;                                    // transient(SERVFAIL/timeout) — drift 단정 불가
     }

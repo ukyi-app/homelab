@@ -39,7 +39,7 @@ setup() {
 }
 
 @test "poll-ghcr discovers apps by source-repo (contract: missing source-repo = never polled)" {
-  run grep -nE 'source-repo' "$ROOT/tools/poll-ghcr.mjs"
+  run grep -nE 'source-repo' "$ROOT/tools/poll-ghcr.ts"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'continue'
 }

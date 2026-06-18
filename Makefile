@@ -1,14 +1,6 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-# node/pnpm PATH 보강 — make·git hook·Claude Code Bash는 셸 rc를 source하지 않아 mise 활성화
-# PATH가 없다(node/pnpm이 exit 127로 부재 → CI green인데 로컬만 깨지는 역패리티의 근원).
-# shim이 있을 때만 PATH 앞에 붙인다(멱등; mise 미사용 환경엔 무영향).
-MISE_SHIMS := $(HOME)/.local/share/mise/shims
-ifneq ($(wildcard $(MISE_SHIMS)/node),)
-export PATH := $(MISE_SHIMS):$(PATH)
-endif
-
 # 라이브 클러스터 접근(읽기 전용 운영 타겟 전용). 변경 권위는 ArgoCD — 절대 kubectl apply 금지.
 KUBECONFIG_LIVE := $(PWD)/infra/k3s-bootstrap/kubeconfig
 SOPS_AGE_KEY_FILE ?= $(HOME)/.config/sops/age/keys.txt
@@ -87,8 +79,7 @@ m6-tools: ## 마일스톤 6용 차트/CI 툴체인 검증
 	@helm version --short | grep -qE 'v(3\.(1[6-9]|[2-9][0-9])|[4-9])\.' || { echo "helm >=3.16 required"; exit 1; }
 	@kubeconform -v | grep -qE 'v0\.(6\.[7-9]|[7-9]\.|[1-9][0-9]\.)' || { echo "kubeconform >=0.6.7 required"; exit 1; }
 	@bats --version | grep -qE 'Bats 1\.(1[1-9]|[2-9][0-9])' || { echo "bats >=1.11 required"; exit 1; }
-	@node --version | grep -qE 'v2[2-9]\.' || { echo "node >=22 required"; exit 1; }
-	@pnpm --version | grep -qE '^11\.' || { echo "pnpm 11 required"; exit 1; }
+	@bun --version | grep -qF '1.3.10' || { echo "bun 1.3.10 required"; exit 1; }
 	@yq --version | grep -qE 'v4\.' || { echo "yq v4 required"; exit 1; }
 	@jq --version >/dev/null || { echo "jq required"; exit 1; }
 	@echo "m6-tools OK"
@@ -100,8 +91,9 @@ chart-test: ## 모든 kind에 대해 app 차트 렌더+검증
 
 .PHONY: ci
 ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate'를 로컬에서 그대로 재현(bats 수집은 run-bats.sh SSOT)
-	pnpm verify:ledger
-	node tools/audit-orphans.mjs --ci
+	bun run typecheck
+	bun run verify:ledger
+	bun tools/audit-orphans.ts --ci
 	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
 	@files=$$(git ls-files '*.enc.yaml'); if [ -n "$$files" ]; then scripts/sops-guard.sh $$files; fi
@@ -158,7 +150,7 @@ kubeconfig: ## [ops] 라이브 kubeconfig export 출력 — eval "$$(make kubeco
 	@echo 'export KUBECONFIG=$(KUBECONFIG_LIVE)'
 
 audit: ## [ops] 레포 정적 드리프트 감사(registry↔매니페스트↔바인딩↔원장, 읽기 전용)
-	@node tools/audit-orphans.mjs
+	@bun tools/audit-orphans.ts
 
 .PHONY: teardown-app teardown-resource
 teardown-app: ## [teardown] APP= 앱 철거(owner-local — clean-worktree·fresh-main 전용브랜치·PR). 예: make teardown-app APP=foo

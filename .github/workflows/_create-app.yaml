@@ -57,7 +57,7 @@ jobs:
           # 명령치환은 실패를 삼킨다(빈 sha → tag="sha-" → 오해성 "이미지 미존재") — 명시 실패로.
           sha="$(git -C .apprepo rev-parse HEAD)" || { echo "::error::앱 레포 main HEAD 해석 실패"; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/setup-node-pnpm
+      - uses: ./.github/actions/setup-bun
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -98,7 +98,7 @@ jobs:
             sealed_arg="--sealed .apprepo/deploy/${APP}-secrets.sealed.yaml"
           fi
           # shellcheck disable=SC2086
-          node tools/create-app.mjs --config .apprepo/.app-config.yml --app "$APP" \
+          bun tools/create-app.ts --config .apprepo/.app-config.yml --app "$APP" \
             --repo "$APP_REPO" --domain "$DOMAIN" --tag "$TAG" --digest "$DIGEST" $sealed_arg \
             | tee /tmp/plan.json
           # 렌더 게이트: 새 values로 공유 차트가 kubeconform-clean하게 렌더되는가 (toolchain은 composite가 설치)
@@ -108,7 +108,7 @@ jobs:
                 -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
                 -summary
           # 원장 게이트(PR required check와 동일 검증 선행)
-          pnpm verify:ledger
+          bun run verify:ledger
           git config user.name "homelab-bot"
           git config user.email "bot@users.noreply.github.com"
           branch="create-app/${APP}-${RUN_ID}"

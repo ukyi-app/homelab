@@ -6,14 +6,14 @@
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
 
 @test "audit-orphans --help prints usage and exits 0" {
-  run node tools/audit-orphans.mjs --help
+  run bun tools/audit-orphans.ts --help
   [ "$status" -eq 0 ]
   echo "$output" | grep -qi "audit-orphans"
   echo "$output" | grep -q -- "--ci"
 }
 
 @test "poll-ghcr --help prints usage and exits 0 (was: unknown-arg exit 2)" {
-  run node tools/poll-ghcr.mjs --help
+  run bun tools/poll-ghcr.ts --help
   [ "$status" -eq 0 ]
   echo "$output" | grep -qi "poll-ghcr"
   echo "$output" | grep -q -- "--dry-run"

@@ -1,6 +1,6 @@
 # data-conn
 
-**역할** — 앱 소비용 DB/캐시 conn SealedSecret 컴포넌트(`prod` 네임스페이스). `create-database`/`create-cache` 산출물 전용. `resources`는 `tools/provision-db.mjs`(이후 `provision-cache.mjs`)가 멱등 등록 — 빈 resources여도 kustomize build는 성공해야 한다.
+**역할** — 앱 소비용 DB/캐시 conn SealedSecret 컴포넌트(`prod` 네임스페이스). `create-database`/`create-cache` 산출물 전용. `resources`는 `tools/provision-db.ts`(이후 `provision-cache.ts`)가 멱등 등록 — 빈 resources여도 kustomize build는 성공해야 한다.
 
 **싱크 Application · sync-wave** — `platform-components` ApplicationSet이 `platform/data-conn/prod`을 `data-conn-prod` Application으로 자동 발견. sync-wave 미지정 → 기본 **0**. 대상 NS는 kustomization이 `prod` 지정.
 

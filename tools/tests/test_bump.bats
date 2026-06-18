@@ -17,7 +17,7 @@ teardown() { rm -rf "$FIX"; }
 @test "bump rewrites only image.tag in the app's values.yaml" {
   f="$FIX/apps/blog/deploy/prod/values.yaml"
   before=$(yq '.kind' "$f")
-  node tools/bump-tag.mjs blog sha-deadbee --repo-root "$FIX"
+  bun tools/bump-tag.ts blog sha-deadbee --repo-root "$FIX"
   run yq '.image.tag' "$f"
   [[ "$output" == "sha-deadbee" ]]
   after=$(yq '.kind' "$f")
@@ -25,8 +25,8 @@ teardown() { rm -rf "$FIX"; }
 }
 
 @test "bump is idempotent (second run is a no-op)" {
-  node tools/bump-tag.mjs blog sha-deadbee --repo-root "$FIX"
-  run node tools/bump-tag.mjs blog sha-deadbee --repo-root "$FIX"
+  bun tools/bump-tag.ts blog sha-deadbee --repo-root "$FIX"
+  run bun tools/bump-tag.ts blog sha-deadbee --repo-root "$FIX"
   [[ "$output" == *"no-op"* || "$output" == *"unchanged"* ]]
 }
 
@@ -37,7 +37,7 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 
 @test "bump --digest records image.digest alongside the tag" {
   f="$FIX/apps/blog/deploy/prod/values.yaml"
-  node tools/bump-tag.mjs blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
   run yq '.image.digest' "$f"
   [ "$output" == "$DIG" ]
   # tag는 source SHA 추적용으로 함께 기록된다
@@ -46,22 +46,22 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 }
 
 @test "bump rejects a malformed digest with exit 2" {
-  run node tools/bump-tag.mjs blog sha-deadbee --digest sha256:nothex --repo-root "$FIX"
+  run bun tools/bump-tag.ts blog sha-deadbee --digest sha256:nothex --repo-root "$FIX"
   [ "$status" -eq 2 ]
 }
 
 @test "bump with same tag and digest is a no-op" {
-  node tools/bump-tag.mjs blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
-  run node tools/bump-tag.mjs blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  run bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
   [ "$status" -eq 0 ]
   [[ "$output" == *"no-op"* ]]
 }
 
 @test "tag-only bump removes a stale digest (image must follow the new tag)" {
   f="$FIX/apps/blog/deploy/prod/values.yaml"
-  node tools/bump-tag.mjs blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
   # digest 없이 tag만 bump하면 차트 helper가 stale digest를 계속 우선하므로 digest를 제거해야 한다
-  node tools/bump-tag.mjs blog sha-feedbee --repo-root "$FIX"
+  bun tools/bump-tag.ts blog sha-feedbee --repo-root "$FIX"
   run yq '.image.digest' "$f"
   [ "$output" == "null" ]
   run yq '.image.tag' "$f"
@@ -69,7 +69,7 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 }
 
 @test "bump refuses path traversal outside apps/" {
-  run node tools/bump-tag.mjs ../../etc sha-deadbee --repo-root "$FIX"
+  run bun tools/bump-tag.ts ../../etc sha-deadbee --repo-root "$FIX"
   [ "$status" -ne 0 ]
 }
 
@@ -88,11 +88,11 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 @test "bump rejects an unknown flag with exit 2 (typo'd --digest must not silently drop the pin)" {
   f="$FIX/apps/blog/deploy/prod/values.yaml"
   # 먼저 digest 핀을 심는다
-  node tools/bump-tag.mjs blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
   run yq '.image.digest' "$f"
   [ "$output" == "$DIG" ]
   # --diges 오타: 가드가 없으면 takeOpt가 못 떼어내 digest=undefined → image.digest 삭제 + exit 0
-  run node tools/bump-tag.mjs blog sha-feedbee --diges "$DIG" --repo-root "$FIX"
+  run bun tools/bump-tag.ts blog sha-feedbee --diges "$DIG" --repo-root "$FIX"
   [ "$status" -eq 2 ]
   echo "$output" | grep -q "알 수 없는 옵션"
   # 거부됐으므로 핀은 그대로여야 한다 (격하 없음)
@@ -102,14 +102,14 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 
 @test "bump --expect-current aborts when current tag differs (races-4 TOCTOU)" {
   # 현재 tag는 sha-0000000 (setup fixture). 기대값을 sha-aaaaaaa로 주면 불일치 → abort
-  run node tools/bump-tag.mjs blog sha-feedbee --expect-current sha-aaaaaaa --repo-root "$FIX"
+  run bun tools/bump-tag.ts blog sha-feedbee --expect-current sha-aaaaaaa --repo-root "$FIX"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "expect-current"
 }
 
 @test "bump --expect-current proceeds when current tag matches" {
   f="$FIX/apps/blog/deploy/prod/values.yaml"
-  run node tools/bump-tag.mjs blog sha-feedbee --expect-current sha-0000000 --repo-root "$FIX"
+  run bun tools/bump-tag.ts blog sha-feedbee --expect-current sha-0000000 --repo-root "$FIX"
   [ "$status" -eq 0 ]
   run yq '.image.tag' "$f"
   [ "$output" == "sha-feedbee" ]
@@ -118,14 +118,14 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 @test "bump rejects a value-flag with no value (arity, F2 digest-pin downgrade class)" {
   # ⚠️ codex pass5 F2: --digest가 값 없이 끝에 오면 digest=undefined로 떨어져 digest 핀을 조용히 격하했다.
   # arity 파서는 값 누락을 exit 2로 거부해야 한다(핀 격하 방지).
-  run node tools/bump-tag.mjs blog sha-feedbee --digest --repo-root "$FIX"
+  run bun tools/bump-tag.ts blog sha-feedbee --digest --repo-root "$FIX"
   [ "$status" -eq 2 ]
   echo "$output" | grep -q "arity"
 }
 
 @test "bump rejects a value-flag whose value is another --flag (arity)" {
   # --digest 다음이 또 다른 플래그면 값이 누락된 것 — 그 플래그를 값으로 삼키지 말고 거부.
-  run node tools/bump-tag.mjs blog sha-feedbee --digest --expect-current sha-0000000 --repo-root "$FIX"
+  run bun tools/bump-tag.ts blog sha-feedbee --digest --expect-current sha-0000000 --repo-root "$FIX"
   [ "$status" -eq 2 ]
 }
 

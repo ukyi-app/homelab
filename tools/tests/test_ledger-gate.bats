@@ -5,7 +5,7 @@
 # minLength가 더 먼저 잡는다 — tools/test/schema.bats 참고.)
 
 @test "verify:ledger passes on current apps (M6 rows within budget)" {
-  run pnpm verify:ledger
+  run bun run verify:ledger
   [ "$status" -eq 0 ]
 }
 

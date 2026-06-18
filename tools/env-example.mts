@@ -3,12 +3,12 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { parse } from "yaml";
 
-const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
+const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const configPath = arg("--config", ".app-config.yml");
 const out = arg("--out", ".env.example");
 
 const config = parse(readFileSync(configPath, "utf8")) ?? {};
-const upper = (n) => n.replaceAll("-", "_").toUpperCase();
+const upper = (n: string) => n.replaceAll("-", "_").toUpperCase();
 
 const lines = ["# .app-config.yml에서 자동 생성 (pnpm env:example) — 값을 채워 .env로 복사"];
 for (const e of config.env ?? []) lines.push(`${e.name}=${e.value}`);

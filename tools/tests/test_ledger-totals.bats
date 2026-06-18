@@ -4,11 +4,11 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  LIB="$ROOT/tools/lib/ledger-totals.mjs"
+  LIB="$ROOT/tools/lib/ledger-totals.ts"
 }
 
 @test "replaceTotals substitutes the totals prose and returns updated text" {
-  run node -e '
+  run bun -e '
     import("file://" + process.argv[1]).then(m => {
       const before = "blah\n**합계:** req ≈ 100 Mi · limit ≈ 200 Mi (≤ 8704 Mi).\n";
       const after = m.replaceTotals(before, 150, 250);
@@ -21,7 +21,7 @@ setup() {
 }
 
 @test "replaceTotals throws (fail-loud) when the totals prose is missing" {
-  run node -e '
+  run bun -e '
     import("file://" + process.argv[1]).then(m => {
       try { m.replaceTotals("no totals phrase here\n", 1, 2); console.log("DID-NOT-THROW"); }
       catch (e) { console.log("threw"); }
@@ -32,8 +32,8 @@ setup() {
 }
 
 @test "teardown-app imports the shared helper (no inline replace regex)" {
-  # 인라인 'req ≈ ...' 치환이 teardown-app.mjs에서 사라지고 공용 헬퍼를 import 하는지.
-  run grep -c 'req ≈' "$ROOT/tools/teardown-app.mjs"
+  # 인라인 'req ≈ ...' 치환이 teardown-app.ts에서 사라지고 공용 헬퍼를 import 하는지.
+  run grep -c 'req ≈' "$ROOT/tools/teardown-app.ts"
   [ "$output" = "0" ]
-  grep -q "lib/ledger-totals" "$ROOT/tools/teardown-app.mjs"
+  grep -q "lib/ledger-totals" "$ROOT/tools/teardown-app.ts"
 }

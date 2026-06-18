@@ -4,10 +4,10 @@
 // 제거 대상: apps/<app>/(바인딩 포함), apps.json 행(active:true였다면 행 제거가 terraform
 // apply로 DNS 회수), 원장 행. 멱등(이미 없어도 0 종료).
 import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
-import { APP_NAME_RE } from "./lib/identity.mjs";
-import { replaceTotals } from "./lib/ledger-totals.mjs";
+import { APP_NAME_RE } from "./lib/identity.ts";
+import { replaceTotals } from "./lib/ledger-totals.ts";
 
-const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
+const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 // 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시한다(mutator 패밀리 fail-closed).
 const ALLOWED_FLAGS = new Set(["--app", "--repo-root", "--dry-run"]);
 for (const a of process.argv.slice(2)) {
@@ -21,14 +21,15 @@ if (!app || !APP_NAME_RE.test(app)) {
   process.exit(2);
 }
 
-const plan = { app, remove: [], appsJsonRow: null, ledgerRow: false, untouched: "db/cache conn·CR·Valkey는 teardown-resource 전담" };
+const plan: { app: string; remove: string[]; appsJsonRow: any; ledgerRow: boolean; untouched: string } =
+  { app, remove: [], appsJsonRow: null, ledgerRow: false, untouched: "db/cache conn·CR·Valkey는 teardown-resource 전담" };
 
 const appDir = `${ROOT}/apps/${app}`;
 if (existsSync(appDir)) plan.remove.push(`apps/${app}`);
 
 const appsJsonPath = `${ROOT}/infra/cloudflare/apps.json`;
 const registry = existsSync(appsJsonPath) ? JSON.parse(readFileSync(appsJsonPath, "utf8")) : [];
-plan.appsJsonRow = registry.find((r) => r.name === app) ?? null;
+plan.appsJsonRow = registry.find((r: any) => r.name === app) ?? null;
 
 const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
 const ledger = existsSync(ledgerPath) ? readFileSync(ledgerPath, "utf8") : "";
@@ -38,7 +39,7 @@ plan.ledgerRow = rowRe.test(ledger);
 if (!DRY) {
   if (existsSync(appDir)) rmSync(appDir, { recursive: true });
   if (plan.appsJsonRow) {
-    writeFileSync(appsJsonPath, JSON.stringify(registry.filter((r) => r.name !== app), null, 2) + "\n");
+    writeFileSync(appsJsonPath, JSON.stringify(registry.filter((r: any) => r.name !== app), null, 2) + "\n");
   }
   if (plan.ledgerRow) {
     // 행 제거 + 합계 프로즈 재계산

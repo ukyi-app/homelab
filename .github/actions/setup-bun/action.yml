@@ -1,0 +1,12 @@
+name: setup-bun
+description: bun 핀 + frozen 설치 (버전 SSOT). bun-version을 한 곳에서 핀한다.
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2.2.0
+      with:
+        bun-version: "1.3.10"
+    # frozen install — bun.lock 드리프트 차단(lockfile 호환). 러너 기본 bun 버전 드리프트는 위 핀이 막는다.
+    - shell: bash
+      run: bun install --frozen-lockfile

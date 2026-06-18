@@ -28,3 +28,7 @@ setup() { ROOT="$(git rev-parse --show-toplevel)"; SH="$ROOT/scripts/teardown.sh
   # 전체 base-SHA 검증은 mock remote 필요 — 단위 수준에선 FETCH_HEAD 분기를 단언(stale tracking ref 회피).
   grep -qE 'switch -c .* FETCH_HEAD' "$SH"
 }
+@test "teardown wrapper carries no node/.mjs entrypoints (bun-only)" {
+  run grep -nE 'node tools/|\.mjs' "$SH"
+  [ "$status" -ne 0 ]
+}

@@ -52,7 +52,7 @@ jobs:
         with:
           ref: main
           token: ${{ steps.token.outputs.token }}
-      - uses: ./.github/actions/setup-node-pnpm
+      - uses: ./.github/actions/setup-bun
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -94,7 +94,7 @@ jobs:
             echo "verify ghcr.io/$OWNER/$app:$SHA exists BEFORE bumping"
             docker manifest inspect "ghcr.io/$OWNER/$app:$SHA" >/dev/null 2>&1 \
               || { echo "::error::ghcr.io/$OWNER/$app:$SHA missing — refusing to bump (would ImagePullBackOff)"; exit 1; }
-            node tools/bump-tag.mjs "$app" "$SHA"
+            bun tools/bump-tag.ts "$app" "$SHA"
           done
           if git diff --quiet; then echo "no values changed"; exit 0; fi
           git config user.name "homelab-bot"
@@ -140,7 +140,7 @@ jobs:
         with:
           ref: main
           token: ${{ steps.token.outputs.token }}
-      - uses: ./.github/actions/setup-node-pnpm
+      - uses: ./.github/actions/setup-bun
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -168,7 +168,7 @@ jobs:
           echo "verify ghcr.io/$OWNER/$APP:$TAG exists BEFORE bumping"
           docker manifest inspect "ghcr.io/$OWNER/$APP:$TAG" >/dev/null 2>&1 \
             || { echo "::error::ghcr.io/$OWNER/$APP:$TAG missing — refusing to bump"; exit 1; }
-          node tools/bump-tag.mjs "$APP" "$TAG"
+          bun tools/bump-tag.ts "$APP" "$TAG"
           if git diff --quiet; then echo "no change (same tag)"; exit 0; fi
           git config user.name "homelab-bot"
           git config user.email "bot@users.noreply.github.com"

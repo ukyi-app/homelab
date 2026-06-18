@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # `cache`(Valkey) 컴포넌트의 오프라인 렌더 검증 — secret/CRD 의존 없이 일반 kustomize로 빌드된다.
-# (인스턴스 디렉토리는 provision-cache.mjs가 추가 — 0개 상태에서도 정적 골격이 렌더돼야 한다.)
+# (인스턴스 디렉토리는 provision-cache.ts가 추가 — 0개 상태에서도 정적 골격이 렌더돼야 한다.)
 # 주의: macOS bash 3.2에서 mid-test `[[ ]]`/`! cmd` 실패는 bats가 못 잡는다 —
 # 단언은 전부 grep 파이프라인/`[ ]`/카운트 비교로 쓴다.
 

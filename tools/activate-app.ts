@@ -10,15 +10,15 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
-import { APP_NAME_RE } from "./lib/identity.mjs";
-import { surfaceHash } from "./lib/surface-hash.mjs";
+import { APP_NAME_RE } from "./lib/identity.ts";
+import { surfaceHash } from "./lib/surface-hash.ts";
 
-function die(msg) {
+function die(msg: string): never {
   console.error(`activate-app: GATE FAIL — ${msg}`);
   process.exit(1);
 }
 
-const args = {};
+const args: Record<string, any> = {};
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -32,8 +32,8 @@ if (!app || !sha || !syncedRev) die("--app --sha --synced-rev 필수");
 if (!APP_NAME_RE.test(app)) die(`app 이름 형식 불량: ${app}`);
 if (!/^[0-9a-f]{7,40}$/.test(sha)) die(`sha 형식 불량`);
 
-const git = (...a) => execFileSync("git", a, { cwd: repoDir, encoding: "utf8" });
-const gitOk = (...a) => {
+const git = (...a: string[]) => execFileSync("git", a, { cwd: repoDir, encoding: "utf8" });
+const gitOk = (...a: string[]) => {
   try {
     execFileSync("git", a, { cwd: repoDir, stdio: "ignore" });
     return true;
@@ -51,8 +51,8 @@ if (!gitOk("diff", "--quiet", sha, syncedRev, "--", `apps/${app}/`, "platform/ch
   die(`${sha.slice(0, 12)}..${syncedRev.slice(0, 12)} 사이에 앱 표면(apps/${app}/ 또는 공유 차트)이 변경됨 — 재요청 필요`);
 
 // (3) apps.json 행 고정 — 승인 SHA의 행(name/host/public)과 현재 워크트리 행이 동일해야 한다
-const rowOf = (json) => {
-  const rows = JSON.parse(json).filter((r) => r.name === app);
+const rowOf = (json: string) => {
+  const rows = JSON.parse(json).filter((r: any) => r.name === app);
   if (rows.length !== 1) die(`apps.json에 ${app} 행이 정확히 1개가 아니다(${rows.length}개)`);
   const { name, host, public: pub } = rows[0];
   return JSON.stringify({ name, host, public: pub });
@@ -68,7 +68,7 @@ let status;
 if (args.statusFile) {
   status = JSON.parse(readFileSync(args.statusFile, "utf8"));
 } else {
-  const kubectl = (...a) => JSON.parse(execFileSync("kubectl", a, { encoding: "utf8" }));
+  const kubectl = (...a: string[]) => JSON.parse(execFileSync("kubectl", a, { encoding: "utf8" }));
   status = {
     application: kubectl("-n", "argocd", "get", "application", `${app}-prod`, "-o", "json"),
     httproute: kubectl("-n", "prod", "get", "httproute", app, "-o", "json"),
@@ -78,16 +78,16 @@ const sync = status.application?.status?.sync?.status;
 const health = status.application?.status?.health?.status;
 if (sync !== "Synced") die(`Application sync=${sync} (Synced 아님)`);
 if (health !== "Healthy") die(`Application health=${health} (Healthy 아님)`);
-const conds = (status.httproute?.status?.parents ?? []).flatMap((p) => p.conditions ?? []);
+const conds = (status.httproute?.status?.parents ?? []).flatMap((p: any) => p.conditions ?? []);
 for (const type of ["Accepted", "ResolvedRefs"]) {
-  const c = conds.find((c) => c.type === type);
+  const c = conds.find((c: any) => c.type === type);
   if (!c || c.status !== "True") die(`HTTPRoute ${type}=${c?.status ?? "(없음)"} (True 아님)`);
 }
 
 // 게이트 전부 통과 — active:true 플립(워크트리). host/public은 절대 건드리지 않는다.
 if (args.flip) {
   const rows = JSON.parse(currentRaw);
-  const row = rows.find((r) => r.name === app);
+  const row = rows.find((r: any) => r.name === app);
   // races-5 마커: .activation 제외 canonical surfaceHash(F3, 자기무효화 방지) + apps.json 노출 행 projection(pass4 F1).
   // 이 마커는 **정보성**(pass3 F1) — audit이 차단 게이트로 쓰면 정상 이미지 bump가 데드락. 노출 재검증은 런북.
   const registryRow = { name: row.name, host: row.host ?? null, public: row.public ?? false };

@@ -1,7 +1,7 @@
 # create-cache reusable — dispatcher(action=create-cache)가 호출한다.
-# spec(JSON)은 validate-mutation.mjs를 통과한 입력이지만 비신뢰로 취급해 여기서도
+# spec(JSON)은 validate-mutation.ts를 통과한 입력이지만 비신뢰로 취급해 여기서도
 # env 경유 + 화이트리스트 재검증한다(fail-closed, 인라인 보간 금지).
-# 산출은 PR-first: provision-cache.mjs가 만든 매니페스트/원장 변경을 브랜치로 push하고
+# 산출은 PR-first: provision-cache.ts가 만든 매니페스트/원장 변경을 브랜치로 push하고
 # auto-merge(required check 통과 시) 또는 즉시 squash 머지를 시도한다.
 # Telegram 통지는 핸들 이름만 — conn URL/자격은 어떤 경로로도 출력하지 않는다.
 name: _create-cache
@@ -29,14 +29,14 @@ jobs:
         with:
           ref: main
           token: ${{ steps.writer.outputs.token }}
-      - uses: ./.github/actions/setup-node-pnpm
+      - uses: ./.github/actions/setup-bun
       - name: spec 재검증 (비신뢰 입력 — env 경유, 화이트리스트 밖 필드 거부)
         id: spec
         env:
           SPEC: ${{ inputs.spec }}
         run: |
           printf '%s' "$SPEC" > /tmp/spec.json
-          node - <<'EOF' >> "$GITHUB_OUTPUT"
+          bun - <<'EOF' >> "$GITHUB_OUTPUT"
           const s = JSON.parse(require("node:fs").readFileSync("/tmp/spec.json", "utf8"));
           const extra = Object.keys(s).filter((k) => !["name", "maxmemory_mi"].includes(k));
           if (extra.length) { console.error(`::error::spec 허용 밖 필드: ${extra.join(",")}`); process.exit(1); }
@@ -58,9 +58,9 @@ jobs:
         run: |
           # 봉인 cert는 레포 커밋본을 쓴다 — 없으면 즉시 실패(평문 fallback 금지)
           [ -f tools/sealed-secrets-cert.pem ] || { echo "::error::tools/sealed-secrets-cert.pem 없음 — kubeseal --fetch-cert로 갱신/커밋 필요"; exit 1; }
-          node tools/provision-cache.mjs --name "$NAME" --maxmemory-mi "$MAXMEMORY" | tee /tmp/plan.json
+          bun tools/provision-cache.ts --name "$NAME" --maxmemory-mi "$MAXMEMORY" | tee /tmp/plan.json
           # 원장 게이트(PR required check와 동일 검증 선행 — 초과 시 PR 자체를 만들지 않는다)
-          pnpm verify:ledger
+          bun run verify:ledger
       - name: PR 생성 + auto-merge
         env:
           GH_TOKEN: ${{ steps.writer.outputs.token }}

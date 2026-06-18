@@ -1,13 +1,13 @@
 // cache:url — 모드 2: Valkey에 tailscale로 읽기 전용 직결(+@read -@write -@dangerous ACL 유저).
-// db-url.mjs와 대칭 — 파괴 수단 없음.
+// db-url.ts와 대칭 — 파괴 수단 없음.
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
-const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
+const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const DRY = process.argv.includes("--dry-run");
 const name = arg("--name");
 const tsHost = arg("--host", process.env.TS_CACHE_HOST ?? "");
-const envLocal = arg("--env-local", ".env.local");
+const envLocal = arg("--env-local", ".env.local")!;
 
 const allowed = new Set(["--name", "--host", "--env-local", "--dry-run"]);
 for (const a of process.argv.slice(2)) {

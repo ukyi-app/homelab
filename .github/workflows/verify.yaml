@@ -28,7 +28,7 @@ jobs:
       - name: Skeleton check
         run: ./scripts/check-skeleton.sh
 
-      # 메모리 원장 게이트는 required check 'gate'(ci.yaml: pnpm verify:ledger)에 일원화 — 중복 제거(W7).
+      # 메모리 원장 게이트는 required check 'gate'(ci.yaml: bun run verify:ledger)에 일원화 — 중복 제거(W7).
       # verify.yaml은 고유 책임(skeleton·sops 왕복 ephemeral·pre-commit)만 유지.
 
       - name: SOPS round-trip (ephemeral CI key)

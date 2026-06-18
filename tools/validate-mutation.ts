@@ -3,9 +3,9 @@
 // action별 필수/허용 입력 외에는 전부 거부한다. 위반 시 비-0 종료(값은 일부만 출력, 시크릿 없음).
 // update-image는 이 dispatcher가 아니라 GHCR 폴링(bump-poll)이 처리하므로 계약표에 없다.
 import { readFileSync } from "node:fs";
-import { APP_NAME_RE } from "./lib/identity.mjs";
+import { APP_NAME_RE } from "./lib/identity.ts";
 
-function die(msg) {
+function die(msg: string): never {
   console.error(`validate-mutation: ${msg}`);
   process.exit(1);
 }
@@ -13,7 +13,7 @@ function die(msg) {
 // 계약표: action → 필수 입력 (허용 입력 == 필수 입력; 그 외 비어 있지 않으면 거부)
 // create-app/update-secrets는 sha를 입력으로 받지 않는다 — reusable이 앱 레포 main HEAD를
 // 체크아웃해 해석한다(sha 입력은 거부). activate-app만 sha(노출할 homelab 머지 revision) 유지.
-const CONTRACT = {
+const CONTRACT: Record<string, string[]> = {
   "create-app": ["app_repo"],
   "activate-app": ["app", "sha"],
   "update-secrets": ["app_repo"],
@@ -24,7 +24,7 @@ const CONTRACT = {
   audit: [],
 };
 
-const FIELD_RE = {
+const FIELD_RE: Record<string, RegExp> = {
   app: APP_NAME_RE,
   app_repo: /^ukyi-app\/[A-Za-z0-9._-]+$/, // org 고정 — 외부 org 레포 read 차단
   sha: /^[0-9a-f]{7,40}$/,
@@ -37,7 +37,7 @@ const EXT_RE = /^[a-z][a-z0-9_-]*$/;
 
 // spec(JSON 문자열) 검증 — 공유 클러스터 지원 필드만 (storage/cpu/mem/version은
 // 클러스터 레벨 속성이라 DB/캐시 생성 API의 입력이 아니다 — 스키마 밖 필드 거부)
-function validateSpec(action, specStr) {
+function validateSpec(action: string, specStr: string): void {
   let spec;
   try {
     spec = JSON.parse(specStr);
@@ -97,7 +97,7 @@ if (payload.action !== undefined && payload.action !== "" && payload.action !== 
   die(`payload.action(${String(payload.action).slice(0, 40)})이 --action(${action})과 불일치`);
 
 const required = CONTRACT[action];
-const get = (k) => String(payload[k] ?? "");
+const get = (k: string) => String(payload[k] ?? "");
 
 // 필수 입력: 비어 있으면 거부 + 형식 검증
 for (const k of required) {

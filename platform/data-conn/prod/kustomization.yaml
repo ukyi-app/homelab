@@ -7,7 +7,7 @@
 # 봉인 시점의 namespace와 일치해야 복호화된다 — prod용 conn 핸들을 cnpg 쪽에 두면
 # namespace가 database로 바뀌어 복호화가 영구 실패한다.
 #
-# resources는 tools/provision-db.mjs(이후 provision-cache.mjs)가 멱등 등록한다.
+# resources는 tools/provision-db.ts(이후 provision-cache.ts)가 멱등 등록한다.
 # 빈 resources여도 kustomize build는 성공해야 한다 (appset 발견 시점에 DB 0개 가능).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

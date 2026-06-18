@@ -1,4 +1,0 @@
-packages:
-  # 사용자 앱은 외부 레포에 있다 — homelab은 공유 차트와 DX 툴만 워크스페이스 멤버.
-  - "platform/charts/*"
-  - "tools"

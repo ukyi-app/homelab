@@ -7,13 +7,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { parse } from "yaml";
 
-function die(msg) {
+function die(msg: string): never {
   console.error(`seal-secret: ${msg}`);
   process.exit(1);
 }
 
-function parseArgs(argv) {
-  const args = { namespace: "prod", cert: "tools/sealed-secrets-cert.pem", dryRun: false };
+type Args = { namespace: string; cert: string; dryRun: boolean; config?: string; env?: string; app?: string; out?: string };
+function parseArgs(argv: string[]): Args {
+  const args: Args = { namespace: "prod", cert: "tools/sealed-secrets-cert.pem", dryRun: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dry-run") args.dryRun = true;
@@ -30,9 +31,9 @@ function parseArgs(argv) {
 }
 
 // kebab-case(api-key) → UPPER_SNAKE(API_KEY) — secrets 선언과 .env 키의 정규화 규약
-const toEnvKey = (name) => name.replaceAll("-", "_").toUpperCase();
+const toEnvKey = (name: string) => name.replaceAll("-", "_").toUpperCase();
 
-function parseDotEnv(path) {
+function parseDotEnv(path: string) {
   const out = new Map();
   for (const raw of readFileSync(path, "utf8").split("\n")) {
     const line = raw.trim();
@@ -45,7 +46,7 @@ function parseDotEnv(path) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const config = parse(readFileSync(args.config, "utf8")) ?? {};
+const config = parse(readFileSync(args.config!, "utf8")) ?? {};
 const declared = Array.isArray(config.secrets) ? config.secrets : [];
 if (declared.length === 0) die("config에 secrets 선언이 없다 — 봉인할 대상 0");
 
@@ -53,8 +54,8 @@ for (const name of declared) {
   if (!/^[a-z][a-z0-9-]*$/.test(String(name))) die(`secrets 항목 형식 불량(kebab-case 아님): ${name}`);
 }
 
-const envMap = parseDotEnv(args.env);
-const targets = declared.map((n) => ({ name: n, envKey: toEnvKey(n) }));
+const envMap = parseDotEnv(args.env!);
+const targets: { name: any; envKey: string }[] = declared.map((n: any) => ({ name: n, envKey: toEnvKey(n) }));
 const missing = targets.filter((t) => !envMap.has(t.envKey)).map((t) => t.envKey);
 if (missing.length > 0) die(`missing in .env: ${missing.join(", ")}`); // 키 이름만 — 값 비출력
 
