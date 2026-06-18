@@ -31,3 +31,9 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
   run grep -q '192.168.139.0/24' "$P"; [ "$status" -eq 0 ]
   run grep -q '6443' "$P"; [ "$status" -eq 0 ]
 }
+
+@test "egress to glances is scoped to glances pods on 61208" {
+  run grep -q '61208' "$P"; [ "$status" -eq 0 ]
+  run grep -q 'app.kubernetes.io/name: glances' "$P"; [ "$status" -eq 0 ]
+  run grep -q 'kubernetes.io/metadata.name: observability' "$P"; [ "$status" -eq 0 ]
+}
