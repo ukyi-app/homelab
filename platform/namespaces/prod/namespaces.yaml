@@ -57,3 +57,14 @@ metadata:
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/warn: restricted
     pod-security.kubernetes.io/audit: restricted
+---
+# homepage: 운영자 진입점 대시보드(platform/homepage). gethomepage는 restricted 완전 준수
+# (runAsUser 1000·privesc off·drop ALL·seccomp RuntimeDefault) — restricted enforce.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: homepage
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
