@@ -1,7 +1,7 @@
 # tools/ — DX 도구 인덱스
 
 App Platform DX 스크립트(`.mjs`)와 계약 스키마(`.json`) 모음. 각 도구의 **호출 경로**를
-명시한다 — 대부분은 워크플로/`dispatch-mutation`이나 `pnpm`/`make` 타겟을 통해서만 돌고,
+명시한다 — 대부분은 워크플로(변이 디스패처)나 `pnpm`/`make` 타겟을 통해서만 돌고,
 일부만 직접 `node tools/x.mjs`로 부른다. 라이브 변이는 전부 PR-first(사람 머지 = 승인).
 
 > 신뢰 경계·플로우 전반은 루트 `AGENTS.md`의 "멀티레포 앱 플로우"와 (gitignored) 런북
@@ -21,13 +21,14 @@ v1(`.homelab.yaml`/`homelab-app-schema.json`)→v2(`.app-config.yml`/`app-config
 차이: v2는 db/redis를 선프로비저닝 리소스 참조 배열로 재정의하고, digest 핀 이미지와
 권위 바인딩 레지스트리(`.bindings.json`)·SealedSecret 시크릿을 추가했다. 신규 앱은 v2.
 
-## App Platform 변이 도구 (dispatch-mutation 경유 — 직접 실행 금지)
+## App Platform 변이 도구 (변이 디스패처 경유 — 직접 실행 금지)
 
-owner가 homelab에서 `dispatch-mutation`(workflow_dispatch)을 실행하면 reusable 워크플로가
-이 도구들을 호출하고 결과를 **PR**로 낸다. 직접 `node`로 돌리지 않는다.
+owner가 homelab에서 액션별 변이 디스패처(`create-app.yaml` 등, workflow_dispatch)를 실행하면
+reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸다. 직접 `node`로 돌리지 않는다.
+(teardown은 예외 — owner-local `make teardown-*`.)
 
-- **`validate-mutation.mjs`** — dispatcher payload 검증기(계약표 강제). `dispatch-mutation.yaml`·
-  각 `_create-*.yml`이 `--action <a> --payload-file <json>`으로 호출. action별 필수/허용
+- **`validate-mutation.mjs`** — payload 검증기(계약표 강제). 각 변이 디스패처(`create-app.yaml` 등)와
+  owner-local `scripts/teardown.sh`가 `--action <a> --payload-file <json>`으로 호출. action별 필수/허용
   입력 외에는 전부 거부(fail-closed); 모든 입력을 비신뢰로 취급(env/파일 경유 + regex).
   `update-image`는 여기 없다(GHCR 폴링이 처리).
 - **`create-app.mjs`** — v2 생성기. `_create-app.yaml`이 호출
@@ -44,10 +45,10 @@ owner가 homelab에서 `dispatch-mutation`(workflow_dispatch)을 실행하면 re
 - **`provision-cache.mjs`** — create-cache 프로비저너. `_create-cache.yaml`이 호출
   (`--name <cache> [--maxmemory-mi 16..1024]`). 앱별 경량 Valkey 인스턴스(cache NS) +
   conn/ro-conn SealedSecret + 원장 행을 산출. 자격은 `kubeseal` stdin 전용. cert 필요.
-- **`teardown-app.mjs`** — 앱 한정 철거. `_teardown.yaml`(action=teardown-app)이 호출
+- **`teardown-app.mjs`** — 앱 한정 철거. owner-local `make teardown-app`(`scripts/teardown.sh`)이 호출
   (`--app <name>`). `apps/<app>/`·`apps.json` 행·원장 행만 제거 — DB/캐시 conn·CR·Valkey는
   **절대 비접촉**(리소스 철거는 teardown-resource 전담). 멱등.
-- **`teardown-resource.mjs`** — DB/캐시 리소스 철거. `_teardown.yaml`(action=teardown-resource)이
+- **`teardown-resource.mjs`** — DB/캐시 리소스 철거. owner-local `make teardown-resource`(`scripts/teardown.sh`)가
   호출(`--db <name>`|`--cache <name>`). 참조 0 게이트(`.bindings.json`만 신뢰) → retain(기본,
   tombstone) / purge(`--delete-data` + `--backup-verified <id>` + `--step tombstone|drop|verify|cleanup`
   상태머신, 각 step 별도 커밋). 되돌릴 수 없어 fail-closed 게이트가 두껍다.
@@ -67,8 +68,8 @@ owner가 homelab에서 `dispatch-mutation`(workflow_dispatch)을 실행하면 re
 ## 정적 감사 (읽기 전용)
 
 - **`audit-orphans.mjs`** — registry(`apps.json`)↔매니페스트↔바인딩↔원장 교차 드리프트 리포트.
-  `make audit`(전체)·`make ci`/`ci.yaml`(`--ci`, 배포 깨는 유형만 차단)·`_audit.yaml`(dispatch
-  action=audit)이 호출. `--ci`(dangling-binding/orphan-dns만 비-0)·`--strict`(전부 비-0)·기본(리포트만).
+  `make audit`(전체)·`make ci`/`ci.yaml`(`--ci`, 배포 깨는 유형만 차단)·`audit.yaml`(스케줄
+  reconciler)이 호출. `--ci`(dangling-binding/orphan-dns만 비-0)·`--strict`(전부 비-0)·기본(리포트만).
 
 ## 앱 시크릿 봉인 (앱 레포 측 — `pnpm` 경유)
 

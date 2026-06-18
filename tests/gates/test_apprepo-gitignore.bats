@@ -13,10 +13,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
 }
 
-@test "teardown does not use git add -A (explicit paths only)" {
-  run grep -E 'git add -A' .github/workflows/_teardown.yaml
+@test "teardown wrapper does not use git add -A (explicit allowlist only)" {
+  # teardown은 owner-local scripts/teardown.sh로 이전됨(구 teardown 워크플로 제거) — 명시 allowlist만 add.
+  run grep -E 'git add -A' scripts/teardown.sh
   [ "$status" -ne 0 ]
-  # tool이 쓰는 명시 경로를 add 하는지(apps/ + 원장 + cloudflare apps.json + cnpg/cache/data-conn)
-  run grep -E 'git add .*apps/' .github/workflows/_teardown.yaml
+  # allowlist에 apps/ + 원장 + cloudflare apps.json + platform/ 포함 확인
+  run grep -E 'apps/' scripts/teardown.sh
   [ "$status" -eq 0 ]
 }

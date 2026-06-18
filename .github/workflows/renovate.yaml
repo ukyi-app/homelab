@@ -5,6 +5,7 @@
 #    writer App은 Contents+PR write 전용이다. writer App에 workflows:write 부여(Phase-0) + 아래 토큰에
 #    permission-workflows: write 추가 + renovate.json의 "github-actions".enabled=true로 함께 켤 것.
 name: renovate
+run-name: "🔁 renovate — ${{ github.event_name == 'schedule' && '스케줄' || format('수동({0})', github.actor) }}"
 on:
   schedule:
     - cron: "0 19 * * 0" # 일요일 19:00 UTC = 월요일 04:00 KST (renovate.json schedule 창 0-6 Mon 내)

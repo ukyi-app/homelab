@@ -3,6 +3,7 @@
 # 영원히 무장만 한 채 멈춘다("PR 생성됨(머지 대기)"는 "배포됨"이 아니다 — obs-5). 주기적으로 열린
 # 봇 PR 중 auto-merge 무장 + BEHIND인 것만 update-branch해 수렴을 깨운다. 다른 PR은 손대지 않는다.
 name: pr-sweeper
+run-name: "🔁 pr-sweeper — ${{ github.event_name == 'schedule' && '스케줄' || format('수동({0})', github.actor) }}"
 on:
   schedule:
     - cron: "*/30 * * * *"

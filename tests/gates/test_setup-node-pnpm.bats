@@ -15,16 +15,16 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   [ "$status" -eq 0 ]
 }
 
-@test "all 9 node workflows adopt the composite" {
+@test "all 8 node workflows adopt the composite" {
   local wf
-  for wf in ci.yaml onboard.yaml bump.yaml bump-poll.yaml _create-app.yaml _create-database.yaml _create-cache.yaml _teardown.yaml _audit.yaml; do
+  for wf in ci.yaml onboard.yaml bump.yaml bump-poll.yaml _create-app.yaml _create-database.yaml _create-cache.yaml audit.yaml; do
     run grep -F 'uses: ./.github/actions/setup-node-pnpm' "$ROOT/.github/workflows/$wf"
     [ "$status" -eq 0 ]
   done
 }
 
 @test "no node workflow keeps the inline corepack pnpm@11 block" {
-  # dispatch-mutation은 pnpm install을 안 쓰므로(검증 전용) 제외 대상 — 인라인 corepack 0
+  # 변이 디스패처(create-app 등)는 validate 전용(pnpm 미사용)이라 제외 대상 — 인라인 corepack 0
   run grep -rE 'corepack prepare pnpm@11' "$ROOT/.github/workflows/"
   [ "$status" -ne 0 ]
 }

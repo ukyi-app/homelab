@@ -20,8 +20,8 @@
 | busybox 1.36 nc에 -q 없음(relay 리스너) | gate | `platform/victoria-stack/prod/test_relay.bats` |
 | vmalert configCheckInterval 없으면 룰 자동 reload 안 함 | gate | `tests/gates/test_vmalert-config.bats` |
 | Alertmanager telegram: 자동 HTML-escape(이중 escape 금지) + 계약 | gate | `tests/gates/alertmanager-render-e2e.sh`, `tests/gates/test_telegram-notify.bats`, `tests/gates/test_telegram-alert-korean.bats`, `tests/gates/test_telegram-callsites.bats` |
-| GitHub Actions client_payload는 비신뢰 입력(env 경유+regex) | gate | `tests/gates/test_dispatcher.bats`, `tools/tests/test_validate-mutation.bats` |
-| concurrency queue:max ↔ cancel-in-progress 병용 불가(dispatcher 직렬화) | gate | `tests/gates/test_dispatcher.bats` |
+| GitHub Actions 비신뢰 입력(env 경유+regex) | gate | `tools/tests/test_mutation-dispatch.bats`, `tools/tests/test_validate-mutation.bats` |
+| concurrency queue:max ↔ cancel-in-progress 병용 불가(변이 디스패처 직렬화) | gate | `tools/tests/test_mutation-dispatch.bats` |
 | 워크플로 YAML colon-in-unquoted-name 문법 깨짐 | gate | `tests/gates/test_workflow-yaml.bats` |
 | 메모리 원장 예산(limit 합계 ≤ 8704Mi) | gate | `policy/ledger.rego`, `tools/tests/test_ledger-gate.bats` |
 | AdGuard setcap 바이너리 ↔ allowPrivilegeEscalation 양립불가 | gate | `platform/adguard/prod/test_adguard_auth.bats` |

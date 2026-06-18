@@ -2,6 +2,7 @@
 # 스케줄 멱등: 취소/실패해도 다음 주기가 자동 수렴한다(변이 누락 자가 치유).
 # 즉시 반영이 필요하면 owner가 workflow_dispatch로 수동 트리거.
 name: bump-poll
+run-name: "🔁 bump-poll — ${{ github.event_name == 'schedule' && '스케줄' || format('수동({0})', github.actor) }}"
 on:
   schedule:
     - cron: "*/10 * * * *"

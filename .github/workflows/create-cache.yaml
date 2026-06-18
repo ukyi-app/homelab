@@ -1,0 +1,66 @@
+# create-cache 변이 디스패처 — 앱용 redis 프로비전(spec → 캐시 산출물 PR). owner는 name만(고정).
+# 변이 로직은 _create-cache.yaml(reusable)에 있다 — 이 파일은 trigger+validate+notify 셸.
+name: "✨ create-cache"
+run-name: "✨ create-cache — ${{ inputs.spec }}"
+on:
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: '{"name":"<cache>"} — owner는 받지 않음(name 고정)'
+        required: true
+
+concurrency:
+  group: homelab-mutation
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - env:
+          PAYLOAD: ${{ toJSON(github.event.inputs) }} # owner 입력도 비신뢰 — env 경유, 인라인 보간 금지
+        run: |
+          printf '%s' "$PAYLOAD" > /tmp/payload.json
+          node tools/validate-mutation.mjs --action create-cache --payload-file /tmp/payload.json
+
+  create-cache:
+    needs: validate
+    uses: ./.github/workflows/_create-cache.yaml
+    with:
+      spec: ${{ github.event.inputs.spec }}
+    secrets: inherit
+    permissions:
+      contents: read
+
+  notify:
+    needs: [validate, create-cache]
+    if: failure() || cancelled()
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - id: norm
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          # notify 잡의 job.status는 자기 자신(success)이라 거짓 — 상류 needs로 정규화(취소>실패)
+          if printf '%s' "$RESULTS" | grep -q '"result": *"cancelled"'; then
+            echo "status=cancelled" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=failure" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ steps.norm.outputs.status }}
+          source: 변이
+          title: create-cache 실행
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

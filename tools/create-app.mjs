@@ -101,11 +101,11 @@ for (const n of caches) if (tombs[`cache:${n}`]) fail(`cache '${n}'은 tombstone
 for (const n of dbs) {
   if (!existsSync(`${ROOT}/platform/cnpg/prod/databases/${n}.yaml`) ||
       !existsSync(`${ROOT}/platform/data-conn/prod/db-${n}-conn.sealed.yaml`))
-    fail(`db '${n}' 미생성 — create-database 먼저 (dispatch-mutation action=create-database)`);
+    fail(`db '${n}' 미생성 — 변이 디스패처 create-database 먼저 실행`);
 }
 for (const n of caches) {
   if (!existsSync(`${ROOT}/platform/data-conn/prod/cache-${n}-conn.sealed.yaml`))
-    fail(`cache '${n}' 미생성 — create-cache 먼저 (dispatch-mutation action=create-cache)`);
+    fail(`cache '${n}' 미생성 — 변이 디스패처 create-cache 먼저 실행`);
 }
 
 const toMi = (m) => m.endsWith("Gi") ? parseInt(m) * 1024 : parseInt(m);
