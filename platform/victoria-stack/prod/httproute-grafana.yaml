@@ -2,6 +2,13 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: grafana
+  annotations:
+    # homepage 자동발견(platform/homepage). metadata-only라 SSA atomic 리스트 미접촉.
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Grafana"
+    gethomepage.dev/group: "Platform"
+    gethomepage.dev/icon: "grafana.png"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/name=grafana"
 spec:
   parentRefs:
     # group/kind는 CRD 기본값이지만 명시한다 — SSA diff가 atomic 리스트의 서버 주입
