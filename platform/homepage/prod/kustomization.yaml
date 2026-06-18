@@ -19,3 +19,9 @@ configMapGenerator:
       - config/services.yaml
       - config/widgets.yaml
       - config/bookmarks.yaml
+  # 로고/배경(바이너리 → binaryData). /app/public/images에 RO 디렉토리 마운트(deployment.yaml).
+  # 해시 접미사 → 이미지 변경 시 Deployment 자동 rollout. 합계 1MiB 한도 내(로고 256px 리사이즈).
+  - name: homepage-assets
+    files:
+      - public/background.jpg
+      - public/logo.png
