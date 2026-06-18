@@ -2,23 +2,22 @@
   "name": "homelab",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@11.6.0",
-  "engines": {
-    "node": ">=22",
-    "pnpm": ">=11"
-  },
+  "packageManager": "bun@1.3.10",
   "scripts": {
-    "dev": "node tools/dev.mjs",
-    "db:up": "node tools/dev.mjs db:up",
-    "db:reset": "node tools/dev.mjs db:reset",
-    "db:url": "node tools/db-url.mjs",
-    "cache:url": "node tools/cache-url.mjs",
-    "env:example": "node tools/env-example.mjs",
-    "secret:seal": "node tools/seal-secret.mjs",
+    "dev": "bun tools/dev.ts",
+    "db:up": "bun tools/dev.ts db:up",
+    "db:reset": "bun tools/dev.ts db:reset",
+    "db:url": "bun tools/db-url.ts",
+    "cache:url": "bun tools/cache-url.ts",
+    "env:example": "bun tools/env-example.mts",
+    "secret:seal": "bun tools/seal-secret.mts",
+    "typecheck": "tsc --noEmit",
     "verify:ledger": "scripts/verify-ledger.sh",
     "verify:skeleton": "./scripts/check-skeleton.sh"
   },
   "devDependencies": {
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "typescript": "^5.8.0",
+    "@types/bun": "latest"
   }
 }
