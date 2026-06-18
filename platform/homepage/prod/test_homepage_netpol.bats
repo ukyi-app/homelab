@@ -26,7 +26,8 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
   run grep -q '0.0.0.0/0' "$P"; [ "$status" -ne 0 ]
 }
 
-@test "apiserver egress is scoped by ipBlock, not port-only (F5)" {
-  # apiserver 도달은 scoped ipBlock(/32)으로만 — to 없는 포트온리 허용 금지
-  run grep -qE '10\.43\.0\.1/32|/32' "$P"; [ "$status" -eq 0 ]
+@test "apiserver egress is scoped to node-subnet on 6443 (F5)" {
+  # kube-router DNAT 후 dest는 노드 InternalIP:6443 — 노드 서브넷 ipBlock으로 허용(ClusterIP 아님).
+  run grep -q '192.168.139.0/24' "$P"; [ "$status" -eq 0 ]
+  run grep -q '6443' "$P"; [ "$status" -eq 0 ]
 }
