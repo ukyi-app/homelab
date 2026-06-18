@@ -27,16 +27,16 @@ esac
 # 입력 형식 검증(validate-mutation 계약 재사용) + 툴 명령·제목·slug 결정
 if [ "$mode" = "app" ]; then
   printf '{"app":"%s"}' "$target" >/tmp/td-payload.json
-  node tools/validate-mutation.mjs --action teardown-app --payload-file /tmp/td-payload.json
-  plan_cmd=(node tools/teardown-app.mjs --app "$target" --repo-root .)
+  bun tools/validate-mutation.ts --action teardown-app --payload-file /tmp/td-payload.json
+  plan_cmd=(bun tools/teardown-app.ts --app "$target" --repo-root .)
   slug="teardown-app-${target}"
   title="chore: ${target} 앱 철거 (teardown-app)"
 else
   printf '{"resource":"%s"}' "$target" >/tmp/td-payload.json
-  node tools/validate-mutation.mjs --action teardown-resource --payload-file /tmp/td-payload.json
+  bun tools/validate-mutation.ts --action teardown-resource --payload-file /tmp/td-payload.json
   kind="${target%%:*}"
   name="${target#*:}"
-  plan_cmd=(node tools/teardown-resource.mjs "--${kind}" "$name" --repo-root .)
+  plan_cmd=(bun tools/teardown-resource.ts "--${kind}" "$name" --repo-root .)
   slug="teardown-resource-${kind}-${name}"
   title="chore: ${target} retain tombstone (teardown-resource)"
 fi
