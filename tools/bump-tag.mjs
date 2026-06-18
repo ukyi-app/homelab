@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { parseDocument } from "yaml";
-import { APP_NAME_RE } from "./lib/identity.mjs";
+import { APP_NAME_RE } from "./lib/identity.ts";
 
 const argv = process.argv.slice(2);
 // arity 검증 파서: 인식된 값-플래그는 비어있지 않은 값(다음 토큰이 `--flag`가 아님)을 필수로 갖는다.

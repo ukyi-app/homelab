@@ -12,3 +12,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   run jq -r '.compilerOptions.allowImportingTsExtensions' tsconfig.json
   [ "$output" = "true" ]
 }
+
+@test "typecheck passes on TypeScript sources" {
+  run bun run typecheck
+  [ "$status" -eq 0 ]
+}

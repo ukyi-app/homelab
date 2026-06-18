@@ -3,7 +3,7 @@
 // action별 필수/허용 입력 외에는 전부 거부한다. 위반 시 비-0 종료(값은 일부만 출력, 시크릿 없음).
 // update-image는 이 dispatcher가 아니라 GHCR 폴링(bump-poll)이 처리하므로 계약표에 없다.
 import { readFileSync } from "node:fs";
-import { APP_NAME_RE } from "./lib/identity.mjs";
+import { APP_NAME_RE } from "./lib/identity.ts";
 
 function die(msg) {
   console.error(`validate-mutation: ${msg}`);

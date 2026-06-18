@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { randomBytes, createHash } from "node:crypto";
 import { parseDocument } from "yaml";
-import { replaceTotals } from "./lib/ledger-totals.mjs";
+import { replaceTotals } from "./lib/ledger-totals.ts";
 
 // 버전 핀 — latest 금지. backup-cronjob.yaml의 snapshot 컨테이너와 같은 태그를 유지한다.
 const VALKEY_IMAGE = "valkey/valkey:8.1.1-alpine";

@@ -11,7 +11,7 @@
 //   incomplete-purge      : tombstone state=purging 잔존 — 상태머신 중단 흔적
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
-import { surfaceHash } from "./lib/surface-hash.mjs";
+import { surfaceHash } from "./lib/surface-hash.ts";
 
 const USAGE = `audit-orphans — registry↔매니페스트↔바인딩↔원장 교차 드리프트 리포트(읽기 전용)
 사용법: node tools/audit-orphans.mjs [--repo-root <dir>] [--ci] [--strict]

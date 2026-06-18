@@ -4,7 +4,7 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  LIB="$ROOT/tools/lib/ledger-totals.mjs"
+  LIB="$ROOT/tools/lib/ledger-totals.ts"
 }
 
 @test "replaceTotals substitutes the totals prose and returns updated text" {

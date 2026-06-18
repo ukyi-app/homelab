@@ -96,7 +96,7 @@ teardown() { rm -rf "$TMP"; }
   G="$TMP/git"; mkdir -p "$G"; cp -R "$FR/." "$G/"
   git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
   git -C "$G" add -A; git -C "$G" commit -qm init
-  oldhash=$(node "$ROOT/tools/lib/surface-hash.mjs" "$G" HEAD orders)  # .activation 제외 canonical
+  oldhash=$(bun "$ROOT/tools/lib/surface-hash.ts" "$G" HEAD orders)  # .activation 제외 canonical
   printf '{"app":"orders","sha":"abc1234","syncedRev":"abc1234","surfaceHash":"%s"}\n' "$oldhash" \
     > "$G/apps/orders/deploy/prod/.activation"
   # 마커 기록 후 표면 변경
@@ -120,7 +120,7 @@ teardown() { rm -rf "$TMP"; }
   git -C "$G" add -A; git -C "$G" commit -qm init
   # ⚠️ codex pass1 F3: canonical surfaceHash(.activation 제외)로 마커를 만들고 .activation을 **커밋**한다.
   # 커밋이 apps/orders 트리를 바꿔도 canonical 해시는 불변이라 drift가 없어야 한다(자기 무효화 회귀).
-  curhash=$(node "$ROOT/tools/lib/surface-hash.mjs" "$G" HEAD orders)
+  curhash=$(bun "$ROOT/tools/lib/surface-hash.ts" "$G" HEAD orders)
   printf '{"app":"orders","sha":"abc1234","syncedRev":"abc1234","surfaceHash":"%s"}\n' "$curhash" \
     > "$G/apps/orders/deploy/prod/.activation"
   git -C "$G" add -A; git -C "$G" commit -qm "activate orders (+.activation marker)"
@@ -182,7 +182,7 @@ JSON
   # ⚠️ surfaceHash는 git ls-tree HEAD:apps/<app>이므로 HEAD가 존재해야(=먼저 commit) 비-empty가 된다.
   # (마커 surfaceHash가 비면 audit이 missing-activation으로 빠져 continue → exposure 검사 자체가 안 돈다.)
   git -C "$G" add -A; git -C "$G" commit -qm init
-  curhash=$(node "$ROOT/tools/lib/surface-hash.mjs" "$G" HEAD orders)
+  curhash=$(bun "$ROOT/tools/lib/surface-hash.ts" "$G" HEAD orders)
   # 마커는 옛 host(orders.example.com)로 기록
   printf '{"app":"orders","sha":"abc1234","syncedRev":"abc1234","surfaceHash":"%s","registry":{"name":"orders","host":"orders.example.com","public":true}}\n' "$curhash" \
     > "$G/apps/orders/deploy/prod/.activation"

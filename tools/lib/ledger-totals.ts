@@ -3,7 +3,7 @@
 // 매치가 0이면 throw해 fail-loud(silent no-op 차단).
 const TOTALS_RE = /req ≈ \d+ Mi · limit ≈ \d+ Mi/;
 
-export function replaceTotals(text, sumReqMi, sumLimitMi) {
+export function replaceTotals(text: string, sumReqMi: number, sumLimitMi: number): string {
   if (!TOTALS_RE.test(text)) {
     throw new Error(
       `ledger Totals 프로즈를 찾지 못함(정규식 '${TOTALS_RE.source}') — 원장 포맷 드리프트로 합계 갱신 불가`,

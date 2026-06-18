@@ -6,8 +6,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
-import { APP_NAME_RE } from "./lib/identity.mjs";
-import { replaceTotals } from "./lib/ledger-totals.mjs";
+import { APP_NAME_RE } from "./lib/identity.ts";
+import { replaceTotals } from "./lib/ledger-totals.ts";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const DRY = process.argv.includes("--dry-run");

@@ -10,8 +10,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
-import { APP_NAME_RE } from "./lib/identity.mjs";
-import { surfaceHash } from "./lib/surface-hash.mjs";
+import { APP_NAME_RE } from "./lib/identity.ts";
+import { surfaceHash } from "./lib/surface-hash.ts";
 
 function die(msg) {
   console.error(`activate-app: GATE FAIL — ${msg}`);

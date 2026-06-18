@@ -100,7 +100,7 @@ teardown() { rm -rf "$TMP"; }
   run jq -r '.sha' "$M"
   [ "$output" == "$SHA" ]
   # surfaceHash는 공용 lib(.activation 제외)와 동일 알고리즘 결과여야 한다 — 테스트도 같은 CLI를 호출.
-  expected=$(node "$ROOT/tools/lib/surface-hash.mjs" "$R" HEAD orders)
+  expected=$(bun "$ROOT/tools/lib/surface-hash.ts" "$R" HEAD orders)
   run jq -r '.surfaceHash' "$M"
   [ "$output" == "$expected" ]
 }
@@ -108,13 +108,13 @@ teardown() { rm -rf "$TMP"; }
 @test "marker surfaceHash stays valid AFTER the .activation marker is committed (F3 self-invalidation)" {
   # ⚠️ codex pass1 F3 회귀: 마커를 커밋하면 apps/orders 트리가 바뀌지만 canonical 해시는 .activation을
   # 제외하므로 커밋 전/후가 동일해야 한다(자기 무효화 금지). 이 케이스가 없으면 F3 회귀를 못 잡는다.
-  before=$(node "$ROOT/tools/lib/surface-hash.mjs" "$R" HEAD orders)
+  before=$(bun "$ROOT/tools/lib/surface-hash.ts" "$R" HEAD orders)
   run node "$A" --app orders --sha "$SHA" --synced-rev "$SHA" \
     --repo-dir "$R" --status-file "$TMP/status.json" --flip
   [ "$status" -eq 0 ]
   git -C "$R" add -A
   git -C "$R" commit -qm "activate orders (+.activation marker)"
-  after=$(node "$ROOT/tools/lib/surface-hash.mjs" "$R" HEAD orders)
+  after=$(bun "$ROOT/tools/lib/surface-hash.ts" "$R" HEAD orders)
   [ "$before" == "$after" ]
   run jq -r '.surfaceHash' "$R/apps/orders/deploy/prod/.activation"
   [ "$output" == "$after" ]
