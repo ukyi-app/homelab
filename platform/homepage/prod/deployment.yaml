@@ -84,9 +84,15 @@ spec:
             # 자유 복사 + /app/config/logs 기록. ConfigMap 변경은 configMapGenerator 해시 →
             # Deployment rollout → initContainer 재seed로 반영(F3).
             - { name: config, mountPath: /app/config }
+            # 로고/배경 자산을 RO 디렉토리 마운트(subPath 금지 — EROFS 가드와 양립). gethomepage는
+            # 여기 write하지 않고 정적 서빙만 하므로 RO 안전. /app/public/images는 이미지에 없어 섀도잉 0.
+            - { name: assets, mountPath: /app/public/images, readOnly: true }
       volumes:
         - name: config
           emptyDir: {}
         - name: config-src
           configMap:
             name: homepage
+        - name: assets
+          configMap:
+            name: homepage-assets   # kustomize가 해시 접미사 자동 치환

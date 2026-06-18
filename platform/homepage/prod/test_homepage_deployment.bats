@@ -36,3 +36,10 @@ setup() { D="${BATS_TEST_DIRNAME}/deployment.yaml"; }
   run grep -qE '^[[:space:]]*subPath:' "$D"; [ "$status" -ne 0 ]
   run grep -qE 'mountPath: /app/config\b' "$D"; [ "$status" -eq 0 ]
 }
+
+@test "assets configmap is mounted read-only at public images (no subPath)" {
+  # 로고/배경 자산을 /app/public/images에 디렉토리 RO 마운트(subPath 금지 가드와 양립).
+  run grep -qE 'mountPath: /app/public/images\b' "$D"; [ "$status" -eq 0 ]
+  run grep -q 'name: assets' "$D"; [ "$status" -eq 0 ]
+  run grep -q 'homepage-assets' "$D"; [ "$status" -eq 0 ]
+}

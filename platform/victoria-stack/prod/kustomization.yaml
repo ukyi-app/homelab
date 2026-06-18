@@ -4,6 +4,8 @@ namespace: observability
 resources:
   - namespace.yaml
   - node-exporter.yaml
+  - glances.yaml          # 호스트 메트릭 API(homepage 위젯) — node-exporter 동류
+  - glances-netpol.yaml   # glances :61208을 homepage ns로만 제한(A.5#1)
   - kube-state-metrics.yaml
   - vmsingle.yaml
   - vmagent-scrape-config.yaml

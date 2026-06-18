@@ -1,6 +1,9 @@
+- logo:
+    icon: /images/logo.png          # homepage-assets ConfigMap → /app/public/images (Task 5). 클라이언트 로드, 클릭 링크 없음
 - greeting:
     text_size: xl
     text: Homelab
 - datetime:
     format:
       timeStyle: short
+      hourCycle: h23
