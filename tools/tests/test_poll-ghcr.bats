@@ -4,7 +4,7 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  P="$ROOT/tools/poll-ghcr.mjs"
+  P="$ROOT/tools/poll-ghcr.ts"
   TMP="$(mktemp -d)"
   D="$TMP/apps/orders/deploy/prod"
   FX="$TMP/fx"
@@ -35,7 +35,7 @@ EOF
 }
 teardown() { rm -rf "$TMP"; }
 
-run_poll() { run node "$P" --root "$TMP" --fixtures "$FX" --dry-run; }
+run_poll() { run bun "$P" --root "$TMP" --fixtures "$FX" --dry-run; }
 
 @test "autoDeploy true app with a newer eligible main commit becomes a bump with digest" {
   run_poll

@@ -25,7 +25,7 @@ const USAGE = `poll-ghcr — GHCR 폴링 bump 플래너(읽기 전용, update-im
   --fixtures <dir>  테스트 픽스처 소스(라이브 gh/docker 대체)
   --help, -h        이 도움말`;
 
-const args = { root: ".", owner: "ukyi-app" };
+const args: { root: string; owner: string; dryRun?: boolean; fixtures?: string } = { root: ".", owner: "ukyi-app" };
 const argv = process.argv.slice(2);
 if (argv.includes("--help") || argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 for (let i = 0; i < argv.length; i++) {
@@ -40,26 +40,27 @@ for (let i = 0; i < argv.length; i++) {
   }
 }
 
-const short = (sha) => sha.slice(0, 7);
+const short = (sha: string) => sha.slice(0, 7);
 
 // 데이터 소스 추상화 — 테스트는 fixtures 디렉토리, 라이브는 gh api + docker manifest inspect.
 // (GHCR versions API 대신 "main 커밋 → manifest 실존" 순서로 묻는다 — 위 후진 배포 차단 참고.)
 // 진짜 404(이미지 미빌드)만 absent로 삼킨다 — transient(인증/네트워크/5xx)는 rethrow해
 // planApp outer catch가 refuse로 fail-closed(후진 후보 선택 방지).
-function isNotFound(msg) {
+function isNotFound(msg: string | undefined) {
   return /not found|manifest unknown|no such manifest|404/i.test(msg ?? "");
 }
 
-function makeQuery(app) {
+function makeQuery(app: string) {
   if (args.fixtures) {
-    const fx = (name) => {
-      const p = path.join(args.fixtures, `${app}.${name}.json`);
+    const fixturesDir = args.fixtures;
+    const fx = (name: string) => {
+      const p = path.join(fixturesDir, `${app}.${name}.json`);
       return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : null;
     };
     return {
-      commits: (src) => fx("commits") ?? [],
-      compare: (src, base, head) => fx(`compare-${short(base)}-${head === "main" ? "main" : short(head)}`),
-      manifest: (repo, tag) => {
+      commits: (src: string) => fx("commits") ?? [],
+      compare: (src: string, base: string, head: string) => fx(`compare-${short(base)}-${head === "main" ? "main" : short(head)}`),
+      manifest: (repo: string, tag: string) => {
         const t = tag.slice(0, 11); // sha- + 7자
         const err = fx(`manifest-${t}.error`);
         if (err) {
@@ -70,18 +71,18 @@ function makeQuery(app) {
       },
     };
   }
-  const gh = (p) => JSON.parse(execFileSync("gh", ["api", p], { encoding: "utf8" }));
+  const gh = (p: string) => JSON.parse(execFileSync("gh", ["api", p], { encoding: "utf8" }));
   return {
-    commits: (src) => gh(`repos/${src}/commits?sha=main&per_page=30`),
-    compare: (src, base, head) => gh(`repos/${src}/compare/${base}...${head}`),
-    manifest: (repo, tag) => {
+    commits: (src: string) => gh(`repos/${src}/commits?sha=main&per_page=30`),
+    compare: (src: string, base: string, head: string) => gh(`repos/${src}/compare/${base}...${head}`),
+    manifest: (repo: string, tag: string) => {
       try {
         const out = execFileSync(
           "docker", ["buildx", "imagetools", "inspect", `${repo}:${tag}`, "--format", "{{json .Manifest}}"],
           { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
         );
         return { digest: JSON.parse(out).digest };
-      } catch (e) {
+      } catch (e: any) {
         const stderr = (e.stderr ?? "").toString();
         if (isNotFound(stderr) || isNotFound(e.message)) return null; // 진짜 404 — 미빌드 커밋
         throw new Error(`manifest 조회 일시 오류(transient, rethrow→refuse): ${stderr || e.message}`);
@@ -90,9 +91,18 @@ function makeQuery(app) {
   };
 }
 
-function planApp(dir, app) {
-  const read = (f) => readFileSync(path.join(dir, f), "utf8");
-  const result = { app, action: "noop", reason: "", current: null, candidate: null };
+type Plan = {
+  app: string;
+  action: string;
+  reason: string;
+  current: { tag: string; digest: any } | null;
+  candidate: { gitsha: string; tag: string; digest: any } | null;
+  src?: string;
+};
+
+function planApp(dir: string, app: string): Plan {
+  const read = (f: string) => readFileSync(path.join(dir, f), "utf8");
+  const result: Plan = { app, action: "noop", reason: "", current: null, candidate: null };
 
   const src = read("source-repo").trim();
   result.src = src;
@@ -131,7 +141,7 @@ function planApp(dir, app) {
   if (baseCmp.status === "identical") return { ...result, reason: "배포 SHA == main tip" };
 
   // (b) main 최신→과거로 걸으며 이미지 실존하는 첫 커밋 = 후보 (배포 SHA 도달 시 중단)
-  let candidate = null;
+  let candidate: { gitsha: string; tag: string; digest: any } | null = null;
   for (const c of q.commits(src)) {
     if (c.sha.startsWith(deployed) || deployed.startsWith(short(c.sha))) break; // 배포 지점 도달
     const m = q.manifest(repo, `sha-${c.sha}`);
@@ -160,7 +170,7 @@ for (const name of existsSync(appsRoot) ? readdirSync(appsRoot) : []) {
   if (!existsSync(path.join(dir, "source-repo"))) continue;
   try {
     plans.push(planApp(dir, name));
-  } catch (e) {
+  } catch (e: any) {
     plans.push({ app: name, action: "refuse", reason: `플랜 실패: ${e.message}` });
   }
 }

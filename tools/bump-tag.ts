@@ -7,8 +7,8 @@ const argv = process.argv.slice(2);
 // arity 검증 파서: 인식된 값-플래그는 비어있지 않은 값(다음 토큰이 `--flag`가 아님)을 필수로 갖는다.
 // 미인식 `--flag`는 거부(오타 침묵-무시 차단). 나머지는 positional(app, tag).
 const VALUE_FLAGS = new Set(["--repo-root", "--digest", "--expect-current"]);
-const opts = {};
-const positionals = [];
+const opts: Record<string, string> = {};
+const positionals: string[] = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a.startsWith("--")) {
