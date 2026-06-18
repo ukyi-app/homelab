@@ -36,3 +36,8 @@ setup() { C="${BATS_TEST_DIRNAME}/config"; }
   run grep -q 'https://github.com/ukkiee' "$C/bookmarks.yaml"; [ "$status" -eq 0 ]
   run grep -q 'https://instagram.com/ukyi_' "$C/bookmarks.yaml"; [ "$status" -eq 0 ]
 }
+
+@test "infra group includes the glances host widget" {
+  run grep -q 'type: glances' "$C/services.yaml"; [ "$status" -eq 0 ]
+  run grep -q 'glances.observability.svc.cluster.local:61208' "$C/services.yaml"; [ "$status" -eq 0 ]
+}

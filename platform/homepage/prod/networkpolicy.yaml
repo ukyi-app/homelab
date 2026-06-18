@@ -90,3 +90,22 @@ spec:
             cidr: 10.42.0.1/32
       ports:
         - { protocol: TCP, port: 3000 }
+---
+# Glances 호스트 메트릭 위젯 — homepage가 서버사이드로 observability의 glances pod:61208 호출.
+# Pass1#2: namespaceSelector + podSelector를 한 to 항목에 함께(AND) — observability 전체로 넓히지 않음.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-glances
+  namespace: homepage
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: observability }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: glances }
+      ports:
+        - { protocol: TCP, port: 61208 }

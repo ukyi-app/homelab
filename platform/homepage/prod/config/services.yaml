@@ -26,3 +26,12 @@
               query: max(cnpg_collector_up{namespace="database"})
               format:
                 type: number
+    - Host:
+        icon: mdi-gauge
+        description: 호스트 라이브 메트릭(Glances)
+        widget:
+          type: glances
+          url: http://glances.observability.svc.cluster.local:61208
+          version: 4
+          metric: cpu          # cpu/memory/fs 등 — 라이브 미세조정
+          refreshInterval: 5000
