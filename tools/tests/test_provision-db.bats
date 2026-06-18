@@ -38,7 +38,7 @@ EOF
   mkdir -p "$TMP/bin"
   cat > "$TMP/bin/kubeseal" <<'EOF'
 #!/bin/sh
-exec node -e '
+exec bun -e '
 let d = "";
 process.stdin.on("data", (c) => (d += c)).on("end", () => {
   const m = JSON.parse(d);
@@ -66,7 +66,7 @@ EOF
 
 teardown() { rm -rf "$TMP"; }
 
-provision() { PATH="$TMP/bin:$PATH" run node "$ROOT/tools/provision-db.mjs" "$@"; }
+provision() { PATH="$TMP/bin:$PATH" run bun "$ROOT/tools/provision-db.ts" "$@"; }
 
 @test "provision-db emits a CNPG Database CR with owner==name, retain policy and extensions" {
   provision --name orders --extensions pgcrypto,citext --repo-root "$FIX"

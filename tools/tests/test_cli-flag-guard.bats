@@ -13,7 +13,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "provision-cache rejects an unknown flag" {
-  run node tools/provision-cache.mjs --dry-run --bogus-flag x
+  run bun tools/provision-cache.ts --dry-run --bogus-flag x
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "알 수 없는 옵션"
 }

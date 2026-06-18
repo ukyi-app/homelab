@@ -20,12 +20,12 @@ import { replaceTotals } from "./lib/ledger-totals.ts";
 // 버전 핀 — latest 금지. backup-cronjob.yaml의 snapshot 컨테이너와 같은 태그를 유지한다.
 const VALKEY_IMAGE = "valkey/valkey:8.1.1-alpine";
 
-const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
+const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const DRY = process.argv.includes("--dry-run");
 const name = arg("--name");
 const ROOT = arg("--repo-root", ".");
-const CERT = arg("--cert", `${ROOT}/tools/sealed-secrets-cert.pem`);
-const rawMaxmemory = arg("--maxmemory-mi", "64");
+const CERT = arg("--cert", `${ROOT}/tools/sealed-secrets-cert.pem`)!;
+const rawMaxmemory = arg("--maxmemory-mi", "64")!;
 // 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시하고 디폴트를 적용한다.
 const ALLOWED_FLAGS = new Set(["--dry-run", "--name", "--repo-root", "--cert", "--maxmemory-mi"]);
 for (const a of process.argv.slice(2)) {
@@ -33,7 +33,7 @@ for (const a of process.argv.slice(2)) {
 }
 const maxmemoryMi = Number(rawMaxmemory);
 
-const fail = (msg) => { console.error(`::error::provision-cache: ${msg}`); process.exit(1); };
+function fail(msg: string): never { console.error(`::error::provision-cache: ${msg}`); process.exit(1); }
 if (!name) {
   console.error("usage: provision-cache --name <cache> [--maxmemory-mi 16..1024] [--repo-root <dir>] [--cert <pem>] [--dry-run]");
   process.exit(2);
@@ -74,7 +74,7 @@ if (sumLimit + limitMi > budget)
 const NAME = name.replaceAll("-", "_").toUpperCase();
 const pw = randomBytes(24).toString("base64url");
 const pwRo = randomBytes(24).toString("base64url");
-const sha256 = (s) => createHash("sha256").update(s).digest("hex");
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 // users.acl에는 sha256 해시(#...)만 — 평문은 conn URL과 VALKEY_PASSWORD(백업 잡 인증용) 키로만.
 const usersAcl = [
   `user default on #${sha256(pw)} ~* &* +@all`,
@@ -83,7 +83,7 @@ const usersAcl = [
 ].join("\n");
 
 // ---------- 인스턴스 manifest ----------
-const labels = (indent) => [
+const labels = (indent: string) => [
   `${indent}app.kubernetes.io/name: ${name}`,
   `${indent}app.kubernetes.io/component: valkey`,
   `${indent}app.kubernetes.io/part-of: cache`,
@@ -215,7 +215,7 @@ resources:
 `;
 
 // ---------- kubeseal (평문은 stdin으로만) ----------
-function seal(manifest) {
+function seal(manifest: any) {
   const res = spawnSync("kubeseal", ["--cert", CERT, "--format", "yaml"], {
     input: JSON.stringify(manifest), // kubeseal은 JSON manifest도 받는다(YAML 슈퍼셋)
     encoding: "utf8",
@@ -224,14 +224,14 @@ function seal(manifest) {
   if (res.status !== 0) fail(`kubeseal 종료 코드 ${res.status} — cert(${CERT}) 점검`);
   return res.stdout;
 }
-const secret = (ns, secretName, stringData) => ({
+const secret = (ns: string, secretName: string, stringData: any) => ({
   apiVersion: "v1", kind: "Secret",
   metadata: { name: secretName, namespace: ns },
   type: "Opaque", stringData,
 });
 
 // ---------- kustomization 멱등 등록 ----------
-function registerResource(file, entry) {
+function registerResource(file: string, entry: string) {
   const doc = parseDocument(readFileSync(file, "utf8"));
   const cur = doc.toJS()?.resources ?? [];
   if (cur.includes(entry)) return null;
@@ -332,7 +332,7 @@ resources:
   // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신 (create-app.mjs와 동일 규약)
   const lines = ledger.split("\n");
   const lastRow = lines.map((l, i) => (l.includes("<!-- ledger:row -->") ? i : -1)).filter((i) => i >= 0).pop();
-  lines.splice(lastRow + 1, 0, `| <!-- ledger:row --> ${component.padEnd(14)} | cache          | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);
+  lines.splice(lastRow! + 1, 0, `| <!-- ledger:row --> ${component.padEnd(14)} | cache          | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);
   let out = lines.join("\n");
   out = replaceTotals(out, sumReq + reqMi, sumLimit + limitMi);
   writeFileSync(ledgerPath, out);

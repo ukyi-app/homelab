@@ -34,7 +34,7 @@ EOF
 teardown() { rm -rf "$TMP"; }
 
 provision() {
-  PATH="$TMP/bin:$PATH" run node "$ROOT/tools/provision-cache.mjs" \
+  PATH="$TMP/bin:$PATH" run bun "$ROOT/tools/provision-cache.ts" \
     --repo-root "$FIX" --cert "$TMP/cert.pem" "$@"
 }
 

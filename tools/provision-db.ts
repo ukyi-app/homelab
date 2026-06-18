@@ -20,11 +20,12 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { Document, parseDocument } from "yaml";
 
-const fail = (msg) => { console.error(`::error::provision-db: ${msg}`); process.exit(1); };
+function fail(msg: string): never { console.error(`::error::provision-db: ${msg}`); process.exit(1); }
 
 // ---------- 1) 인자 파싱 — 허용 밖 인자는 전부 거부 (fail-closed) ----------
-function parseArgs(argv) {
-  const args = { cluster: "pg", root: ".", extensions: [], dryRun: false };
+type Args = { cluster: string; root: string; extensions: string[]; dryRun: boolean; name?: string };
+function parseArgs(argv: string[]): Args {
+  const args: Args = { cluster: "pg", root: ".", extensions: [], dryRun: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--name") args.name = argv[++i];
@@ -88,7 +89,7 @@ if (existsSync(paths.cr)) fail(`DB '${name}' 이미 존재 (${paths.cr}) — nam
 if (existsSync(paths.connSealed)) fail(`conn 핸들 이미 존재 (${paths.connSealed}) — name은 전역 유일`);
 
 const clusterDoc = parseDocument(readFileSync(paths.cluster, "utf8"));
-const existingRoles = clusterDoc.getIn(["spec", "managed", "roles"]);
+const existingRoles: any = clusterDoc.getIn(["spec", "managed", "roles"]);
 if (existingRoles?.items) {
   for (const item of existingRoles.items) {
     const n = item.get?.("name");
@@ -131,7 +132,7 @@ const pwOwner = randomBytes(24).toString("base64url");
 const pwRo = randomBytes(24).toString("base64url");
 
 // 평문 Secret manifest는 메모리에서만 조립해 kubeseal stdin으로 직행 (seal-secret.mjs와 동일 패턴)
-function seal(manifest, outPath) {
+function seal(manifest: any, outPath: string) {
   const res = spawnSync("kubeseal", ["--cert", certPath, "--format", "yaml"], {
     input: JSON.stringify(manifest), // kubeseal은 JSON manifest도 받는다(YAML 슈퍼셋)
     encoding: "utf8",
@@ -146,7 +147,7 @@ function seal(manifest, outPath) {
 // Service는 endpoint가 없고(replica 전용), 디버깅 세션 역시 session 시맨틱이 필요하다.
 const POOLER_HOST = "pg-pooler-rw.database.svc.cluster.local:5432";
 const DIRECT_HOST = "pg-rw.database.svc.cluster.local:5432";
-const url = (user, pw, host) => `postgres://${encodeURIComponent(user)}:${encodeURIComponent(pw)}@${host}/${name}`;
+const url = (user: string, pw: string, host: string) => `postgres://${encodeURIComponent(user)}:${encodeURIComponent(pw)}@${host}/${name}`;
 
 // 봉인을 파일 쓰기보다 전부 먼저 수행 — kubeseal 실패 시 부분 산출이 남지 않는다
 const sealed = [
@@ -197,12 +198,12 @@ const crDoc = new Document({
 });
 crDoc.commentBefore = ` ${name} 논리 DB — create-database(provision-db.mjs) 산출물.
  공유 pg 클러스터 안의 논리 객체라 메모리 원장 행을 추가하지 않는다(8704Mi 게이트 왜곡 방지).`;
-crDoc.getIn(["spec", "owner"], true).comment = " owner == name 불변식 — role↔DB 1:1 (teardown 격리)";
-crDoc.getIn(["spec", "ensure"], true).comment = " teardown은 absent 전환으로 (CR 삭제가 아니라)";
-crDoc.getIn(["spec", "databaseReclaimPolicy"], true).comment = " CR이 사라져도 DB 보존 — 삭제는 teardown에서 명시적으로";
+(crDoc.getIn(["spec", "owner"], true) as any).comment = " owner == name 불변식 — role↔DB 1:1 (teardown 격리)";
+(crDoc.getIn(["spec", "ensure"], true) as any).comment = " teardown은 absent 전환으로 (CR 삭제가 아니라)";
+(crDoc.getIn(["spec", "databaseReclaimPolicy"], true) as any).comment = " CR이 사라져도 DB 보존 — 삭제는 teardown에서 명시적으로";
 if (args.extensions.length) {
   // ensure: present는 서버 주입 기본값 — SSA atomic 리스트라 미기재 시 영구 OutOfSync
-  crDoc.getIn(["spec", "extensions", 0, "ensure"], true).comment =
+  (crDoc.getIn(["spec", "extensions", 0, "ensure"], true) as any).comment =
     " 서버 주입 기본값 명시 (SSA atomic 리스트 — cluster.yaml plugins.enabled와 동일 클래스)";
 }
 
@@ -210,10 +211,10 @@ if (args.extensions.length) {
 if (!clusterDoc.hasIn(["spec", "managed", "roles"])) {
   clusterDoc.setIn(["spec", "managed", "roles"], clusterDoc.createNode([]));
 }
-const rolesSeq = clusterDoc.getIn(["spec", "managed", "roles"]);
+const rolesSeq: any = clusterDoc.getIn(["spec", "managed", "roles"]);
 rolesSeq.flow = false;
 // 서버 주입 기본값(ensure/inherit/connectionLimit)을 명시 — SSA atomic 리스트 함정 회피
-const mkRole = (roleName, secretName, comment) => {
+const mkRole = (roleName: string, secretName: string, comment: string) => {
   const node = clusterDoc.createNode({
     name: roleName,
     ensure: "present",
@@ -232,11 +233,11 @@ rolesSeq.add(mkRole(roRole, `db-${name}-ro`,
 
 // ---------- 9) kustomization 멱등 등록 ----------
 // 시퀀스에 항목이 없을 때만 추가 — 기존 항목/주석은 그대로 보존된다
-function addResource(doc, entry, comment) {
+function addResource(doc: any, entry: string, comment?: string) {
   if (!doc.has("resources")) doc.set("resources", doc.createNode([]));
   const seq = doc.get("resources");
-  const norm = (v) => String(v).replace(/\/$/, "");
-  if (seq.items.some((it) => norm(it.value ?? it) === norm(entry))) return false;
+  const norm = (v: any) => String(v).replace(/\/$/, "");
+  if (seq.items.some((it: any) => norm(it.value ?? it) === norm(entry))) return false;
   const node = doc.createNode(entry);
   if (comment) node.comment = comment;
   seq.add(node);
