@@ -31,3 +31,8 @@ setup() { C="${BATS_TEST_DIRNAME}/config"; }
   run grep -q 'hourCycle: h23' "$C/widgets.yaml"; [ "$status" -eq 0 ]
   run grep -q 'timeStyle: short' "$C/widgets.yaml"; [ "$status" -eq 0 ]
 }
+
+@test "bookmarks expose github and instagram profiles" {
+  run grep -q 'https://github.com/ukkiee' "$C/bookmarks.yaml"; [ "$status" -eq 0 ]
+  run grep -q 'https://instagram.com/ukyi_' "$C/bookmarks.yaml"; [ "$status" -eq 0 ]
+}
