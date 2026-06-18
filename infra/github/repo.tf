@@ -17,17 +17,17 @@ resource "github_repository" "homelab" {
   allow_squash_merge     = true
   allow_rebase_merge     = false
   delete_branch_on_merge = true
-  # PR-first 쓰기 모델: App 토큰은 branch protection을 우회하지 못한다 — 자동화(bump/onboard 등)는
+  # PR-first 쓰기 모델: App 토큰은 branch protection을 우회하지 못한다 — 자동화(bump/create-app 등)는
   # PR 생성 후 auto-merge로 main에 쓴다. required check `gate` 통과가 머지 조건.
   allow_auto_merge = true
   # repo는 이미 존재한다 — 최초 1회 import 필요: 런북 02 참고.
 }
 
-# 외부 앱 레포의 출발점 — "Use this template"용. 내용(caller 워크플로/.homelab.yaml/Dockerfile)은
+# 외부 앱 레포의 출발점 — "Use this template"용. 내용(caller 워크플로/.app-config.yml/Dockerfile)은
 # 최초 1회 push로 시드한다(런북 app-onboarding 참고).
 resource "github_repository" "app_template" {
   name        = "homelab-app-template"
-  description = "homelab 앱 템플릿: .homelab.yaml 채우고 push하면 온보딩 PR이 자동 생성된다"
+  description = "homelab 앱 템플릿: .app-config.yml 채우고 push(빌드) → owner가 create-app으로 온보딩"
   visibility  = "public"
   is_template = true
   auto_init   = true # main 브랜치 생성(내용 push 대상)
