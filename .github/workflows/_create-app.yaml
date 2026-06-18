@@ -1,6 +1,6 @@
 # create-app reusable — dispatcher(action=create-app)가 호출한다.
-# SHA 고정: homelab이 reader App 토큰으로 앱 레포의 입력 SHA에서 .app-config.yml(+ sealed
-# 시크릿)을 read한다 — 앱 레포가 payload로 보내지 않는다(변조/stale-revision 방지).
+# homelab이 reader App 토큰으로 앱 레포 main HEAD에서 .app-config.yml(+ sealed 시크릿)을 read하고
+# 그 HEAD 커밋 SHA로 이미지 태그를 핀한다(앱 레포가 payload로 SHA를 보내지 않음 — 변조 방지).
 # 결과물은 PR(required check `gate`) — 사람 머지 = 첫 배포 승인. apps.json은 active:false라
 # 머지돼도 DNS는 생기지 않고, activate-app 게이트 통과 후에만 노출된다.
 name: _create-app
@@ -8,9 +8,6 @@ on:
   workflow_call:
     inputs:
       app_repo:
-        required: true
-        type: string
-      sha:
         required: true
         type: string
 
@@ -44,16 +41,22 @@ jobs:
         with:
           ref: main
           token: ${{ steps.writer.outputs.token }}
-      - name: 앱 레포 config + sealed 시크릿 SHA 고정 read
+      - name: 앱 레포 config + sealed 시크릿 read (main HEAD)
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.app_repo }}
-          ref: ${{ inputs.sha }}
+          ref: main
           token: ${{ steps.reader.outputs.token }}
           path: .apprepo
           sparse-checkout: |
             .app-config.yml
             deploy
+      - name: 앱 레포 main HEAD SHA (이미지 태그·digest 핀)
+        id: appsha
+        run: |
+          # 명령치환은 실패를 삼킨다(빈 sha → tag="sha-" → 오해성 "이미지 미존재") — 명시 실패로.
+          sha="$(git -C .apprepo rev-parse HEAD)" || { echo "::error::앱 레포 main HEAD 해석 실패"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-node-pnpm
       - uses: docker/login-action@v3
         with:
@@ -64,7 +67,7 @@ jobs:
         id: img
         env:
           APP_REPO: ${{ inputs.app_repo }}
-          SHA: ${{ inputs.sha }}
+          SHA: ${{ steps.appsha.outputs.sha }}
         run: |
           app="${APP_REPO#ukyi-app/}"
           tag="sha-${SHA}"

@@ -11,10 +11,12 @@ function die(msg) {
 }
 
 // 계약표: action → 필수 입력 (허용 입력 == 필수 입력; 그 외 비어 있지 않으면 거부)
+// create-app/update-secrets는 sha를 입력으로 받지 않는다 — reusable이 앱 레포 main HEAD를
+// 체크아웃해 해석한다(sha 입력은 거부). activate-app만 sha(노출할 homelab 머지 revision) 유지.
 const CONTRACT = {
-  "create-app": ["app_repo", "sha"],
+  "create-app": ["app_repo"],
   "activate-app": ["app", "sha"],
-  "update-secrets": ["app_repo", "sha"],
+  "update-secrets": ["app_repo"],
   "create-database": ["spec"],
   "create-cache": ["spec"],
   "teardown-app": ["app"],

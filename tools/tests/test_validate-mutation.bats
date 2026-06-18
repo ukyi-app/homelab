@@ -10,17 +10,32 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; V="$ROOT/tools/validat
 }
 
 @test "rejects app_repo with shell metacharacters" {
-  run node "$V" --action create-app --payload '{"app_repo":"ukyi-app/foo; rm -rf /","sha":"abc1234","spec":""}'
+  run node "$V" --action create-app --payload '{"app_repo":"ukyi-app/foo; rm -rf /","spec":""}'
   [ "$status" -ne 0 ]
 }
 
-@test "accepts a real create-app workflow_dispatch payload (with empty optional spec)" {
-  run node "$V" --action create-app --payload '{"action":"create-app","app":"","app_repo":"ukyi-app/orders","sha":"abc1234def","resource":"","spec":""}'
+@test "accepts a real create-app workflow_dispatch payload (no sha — resolved from main HEAD)" {
+  run node "$V" --action create-app --payload '{"action":"create-app","app":"","app_repo":"ukyi-app/orders","resource":"","spec":""}'
   [ "$status" -eq 0 ]
 }
 
+@test "rejects sha for create-app (sha is resolved from app-repo main HEAD, not an input)" {
+  run node "$V" --action create-app --payload '{"app_repo":"ukyi-app/orders","sha":"abc1234def"}'
+  [ "$status" -ne 0 ]
+}
+
+@test "accepts update-secrets with app_repo only (no sha)" {
+  run node "$V" --action update-secrets --payload '{"app_repo":"ukyi-app/orders"}'
+  [ "$status" -eq 0 ]
+}
+
+@test "rejects sha for update-secrets (resolved from main HEAD)" {
+  run node "$V" --action update-secrets --payload '{"app_repo":"ukyi-app/orders","sha":"abc1234def"}'
+  [ "$status" -ne 0 ]
+}
+
 @test "rejects app_repo not in ukyi-app org" {
-  run node "$V" --action create-app --payload '{"app_repo":"evil/orders","sha":"abc1234","spec":""}'
+  run node "$V" --action create-app --payload '{"app_repo":"evil/orders","spec":""}'
   [ "$status" -ne 0 ]
 }
 
@@ -65,13 +80,13 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; V="$ROOT/tools/validat
 }
 
 @test "rejects non-empty inputs that the action does not allow (stray input = mistake)" {
-  run node "$V" --action create-app --payload '{"app_repo":"ukyi-app/orders","sha":"abc1234","resource":"db:orders"}'
+  run node "$V" --action create-app --payload '{"app_repo":"ukyi-app/orders","resource":"db:orders"}'
   [ "$status" -ne 0 ]
 }
 
 @test "reads payload from file via --payload-file" {
   tmp="$(mktemp)"
-  printf '{"app_repo":"ukyi-app/orders","sha":"abc1234def","spec":""}' > "$tmp"
+  printf '{"app_repo":"ukyi-app/orders","spec":""}' > "$tmp"
   run node "$V" --action create-app --payload-file "$tmp"
   rm -f "$tmp"
   [ "$status" -eq 0 ]

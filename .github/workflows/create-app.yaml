@@ -2,15 +2,12 @@
 # 트리거 경계(런북 app-platform): 앱 레포는 homelab-write 자격 0 — owner가 여기서 workflow_dispatch로 실행.
 # 변이 로직은 _create-app.yaml(reusable)에 있다 — 이 파일은 trigger+validate+notify 셸.
 name: "✨ create-app"
-run-name: "✨ create-app — ${{ inputs.app_repo }}@${{ inputs.sha }}"
+run-name: "✨ create-app — ${{ inputs.app_repo }}"
 on:
   workflow_dispatch:
     inputs:
       app_repo:
-        description: "ukyi-app/<app> — 온보딩할 앱 레포"
-        required: true
-      sha:
-        description: "앱 레포 커밋 SHA (config를 이 SHA로 고정 read)"
+        description: "ukyi-app/<app> — 온보딩할 앱 레포 (config·이미지는 그 레포 main HEAD 기준)"
         required: true
 
 # 전역 직렬화: 모든 homelab-mutation 워크플로(변이 디스패처/bump-poll/iac/tf-reconcile)가 같은 그룹.
@@ -42,7 +39,6 @@ jobs:
     uses: ./.github/workflows/_create-app.yaml
     with:
       app_repo: ${{ github.event.inputs.app_repo }}
-      sha: ${{ github.event.inputs.sha }}
     secrets: inherit
     permissions:
       contents: read
