@@ -1,17 +1,17 @@
 # 워크플로 인덱스
 
-`.github/workflows`에서 **무엇을 수동 실행하고 무엇이 자동인지** 한눈에. **owner가 직접 누르는 건 🎛️ 변이뿐**(생성류). 파괴·로컬 작업은 셸(아래 💻 owner-local).
+`.github/workflows`에서 **무엇을 수동 실행하고 무엇이 자동인지** 한눈에. **owner가 직접 누르는 건 ✨ 변이뿐**(생성류). 파괴·로컬 작업은 셸(아래 💻 owner-local).
 
 > 네이밍: `<action>.yaml`=공개 디스패처(Run 버튼 O) · `_*.yaml`=내부 reusable(버튼 X, 디스패처가 `uses:`) · `reusable-*.yaml`=cross-repo 계약(외부 앱 레포가 `@main` 호출).
 
-## 🎛️ 변이 — owner 수동 (workflow_dispatch)
+## ✨ 변이 — owner 수동 (workflow_dispatch)
 
 | 워크플로 | 입력 | 언제 |
 |---|---|---|
-| 🎛️ 변이: create-app | app_repo·sha | 신규 앱 온보딩(매니페스트 PR, active:false) |
-| 🎛️ 변이: update-secrets | app_repo·sha | 앱 SealedSecret 갱신 |
-| 🎛️ 변이: create-database | spec | 앱용 CNPG DB 프로비전 |
-| 🎛️ 변이: create-cache | spec | 앱용 redis 프로비전 |
+| ✨ create-app | app_repo·sha | 신규 앱 온보딩(매니페스트 PR, active:false) |
+| ✨ update-secrets | app_repo·sha | 앱 SealedSecret 갱신 |
+| ✨ create-database | spec | 앱용 CNPG DB 프로비전 |
+| ✨ create-cache | spec | 앱용 redis 프로비전 |
 
 전역 직렬화(`group: homelab-mutation`, `queue: max`, `cancel-in-progress: false`)로 bump-poll/iac/tf-reconcile과 한 줄로 직렬 실행. 변이 로직은 동명 `_*.yaml` reusable에, 이 디스패처는 validate→route→실패 notify 셸.
 

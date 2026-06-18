@@ -1,7 +1,7 @@
 # create-cache 변이 디스패처 — 앱용 redis 프로비전(spec → 캐시 산출물 PR). owner는 name만(고정).
 # 변이 로직은 _create-cache.yaml(reusable)에 있다 — 이 파일은 trigger+validate+notify 셸.
-name: "🎛️ 변이: create-cache"
-run-name: "🎛️ 변이: create-cache — ${{ inputs.spec }}"
+name: "✨ create-cache"
+run-name: "✨ create-cache — ${{ inputs.spec }}"
 on:
   workflow_dispatch:
     inputs:

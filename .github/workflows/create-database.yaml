@@ -1,7 +1,7 @@
 # create-database 변이 디스패처 — 앱용 CNPG DB 프로비전(spec → CR/conn PR). owner는 name만(고정).
 # 변이 로직은 _create-database.yaml(reusable)에 있다 — 이 파일은 trigger+validate+notify 셸.
-name: "🎛️ 변이: create-database"
-run-name: "🎛️ 변이: create-database — ${{ inputs.spec }}"
+name: "✨ create-database"
+run-name: "✨ create-database — ${{ inputs.spec }}"
 on:
   workflow_dispatch:
     inputs:
