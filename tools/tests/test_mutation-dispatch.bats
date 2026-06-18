@@ -54,8 +54,9 @@ setup() {
 }
 
 @test "each dispatcher declares only its contract inputs" {
-  grep -q "app_repo:" "$WF/create-app.yaml";    grep -q "sha:" "$WF/create-app.yaml"
-  grep -q "app_repo:" "$WF/update-secrets.yaml"; grep -q "sha:" "$WF/update-secrets.yaml"
+  # create-app/update-secrets는 app_repo만 — sha는 reusable이 앱 레포 main HEAD에서 해석(입력 없음).
+  grep -q "app_repo:" "$WF/create-app.yaml";     run grep -q "sha:" "$WF/create-app.yaml";     [ "$status" -ne 0 ]
+  grep -q "app_repo:" "$WF/update-secrets.yaml"; run grep -q "sha:" "$WF/update-secrets.yaml"; [ "$status" -ne 0 ]
   grep -q "spec:" "$WF/create-database.yaml"
   grep -q "spec:" "$WF/create-cache.yaml"
 }
