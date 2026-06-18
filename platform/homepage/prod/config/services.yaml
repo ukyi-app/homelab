@@ -1,0 +1,28 @@
+# 자동발견 서비스는 annotation의 group 이름(Platform/Apps)에 합류한다.
+# Infra 그룹은 VictoriaMetrics PromQL 요약(prometheusmetric). 쿼리는 라이브에서 미세조정.
+- Infra:
+    - Cluster:
+        icon: kubernetes.png
+        description: 노드/예산 요약
+        widget:
+          type: prometheusmetric
+          url: http://vmsingle.observability.svc.cluster.local:8428
+          refreshInterval: 30000
+          metrics:
+            - label: Node Mem
+              query: (1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)) * 100
+              format:
+                type: percent
+            - label: Node CPU
+              query: (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100
+              format:
+                type: percent
+            - label: Mem Budget
+              query: sum(kube_pod_container_resource_limits{resource="memory"}) / 1024 / 1024
+              format:
+                type: number
+                suffix: " Mi"
+            - label: Postgres
+              query: max(cnpg_collector_up{namespace="database"})
+              format:
+                type: number
