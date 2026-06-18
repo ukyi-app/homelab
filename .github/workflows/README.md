@@ -48,4 +48,4 @@ run-name에 트리거 출처(`스케줄`/`수동(actor)`)가 박혀 이력에서
 |---|---|---|
 | 앱 철거 | `make teardown-app APP=<x>` | 파괴 — 원클릭 금지. 래퍼가 clean-worktree·fresh-main 전용브랜치·allowlist staging·PR을 강제 |
 | 리소스 철거(retain) | `make teardown-resource RESOURCE=<db\|cache>:<name>` | 위와 동일. purge(--delete-data)는 런북 절차로만 |
-| 앱 활성화(DNS 노출) | `tools/activate-app.mjs` (런북 app-platform) | Healthy 게이트에 클러스터 접근 필요 |
+| 앱 활성화(DNS 노출) | `tools/activate-app.ts` (런북 app-platform) | Healthy 게이트에 클러스터 접근 필요 |
