@@ -41,7 +41,10 @@ spec:
         - { protocol: TCP, port: 8428 }
 ---
 # ★ apiserver egress (F5) — scoped ipBlock만. to 없는 포트온리/광역 금지.
-# 라이브 확인 항목(Task 12): ClusterIP(10.43.0.1/32) vs 노드 IP. 미해결 시 hard-gate(머지 보류).
+# kube-router가 ClusterIP(10.43.0.1:443)를 apiserver endpoint(노드 InternalIP:6443)로 DNAT하고,
+# netpol egress는 DNAT '후' dest를 평가하므로 ClusterIP가 아니라 노드 서브넷:6443을 허용해야 한다.
+# (10.43.0.1/32로는 자동발견이 Connection refused로 막혀 전체 실패 — 라이브 확인됨.)
+# OrbStack VM 서브넷 /24라 VM IP 변경에 durable. DR로 OrbStack 대역 자체가 바뀌면 갱신.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -53,9 +56,8 @@ spec:
   egress:
     - to:
         - ipBlock:
-            cidr: 10.43.0.1/32  # kubernetes.default.svc ClusterIP (라이브 확인 후 노드 IP로 조정 가능)
+            cidr: 192.168.139.0/24  # OrbStack VM 서브넷(노드 InternalIP 192.168.139.92) — DNAT 후 apiserver
       ports:
-        - { protocol: TCP, port: 443 }
         - { protocol: TCP, port: 6443 }
 ---
 apiVersion: networking.k8s.io/v1

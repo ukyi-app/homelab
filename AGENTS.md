@@ -98,6 +98,12 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - kube-router는 새 파드의 방화벽 룰을 생성 후 수 초 지나 설치한다 — 파드 첫 명령으로 즉시
   연결하는 NP 테스트는 그 공백을 통과한다(`sleep 8` 후 연결). kube-router v2는 sync마다
   체인 이름을 바꾸므로 라이브 디버깅은 원자 스냅샷(nft list 1회) 안에서 카운터를 읽을 것.
+- **NetworkPolicy egress로 apiserver(ClusterIP) 접근은 ClusterIP ipBlock으로 안 된다** — kube-router가
+  `kubernetes.default.svc`(10.43.0.1:443)를 apiserver endpoint(노드 InternalIP:6443)로 DNAT하고, netpol
+  egress는 **DNAT 후 dest**를 평가한다. ClusterIP `10.43.0.1/32`를 ipBlock에 넣으면 API 호출이 Connection
+  refused(default-deny REJECT)로 막힌다 — **노드 서브넷:6443**을 허용해야 한다(homepage 자동발견이
+  "Error getting namespaces"로 전체 실패하며 검증). selfHeal 있는 Application엔 임시 patch가 reconcile에 곧
+  원복돼 라이브 디버그가 어렵다 — PR로 수정.
 - OrbStack은 VM에서 **LISTEN 중인 포트만** Mac으로 포워딩한다(바인드는 Mac 전 인터페이스).
   servicelb/hostPort는 iptables DNAT뿐이라 트리거가 안 된다 — `dns-forward-trigger.service`
   (cloud-init) 참고. VM IP(192.168.139.x)는 Mac에서 직접 라우팅되지 않는다.
