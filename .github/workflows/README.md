@@ -8,10 +8,10 @@
 
 | 워크플로 | 입력 | 언제 |
 |---|---|---|
-| 변이: create-app | app_repo·sha | 신규 앱 온보딩(매니페스트 PR, active:false) |
-| 변이: update-secrets | app_repo·sha | 앱 SealedSecret 갱신 |
-| 변이: create-database | spec | 앱용 CNPG DB 프로비전 |
-| 변이: create-cache | spec | 앱용 redis 프로비전 |
+| 🎛️ 변이: create-app | app_repo·sha | 신규 앱 온보딩(매니페스트 PR, active:false) |
+| 🎛️ 변이: update-secrets | app_repo·sha | 앱 SealedSecret 갱신 |
+| 🎛️ 변이: create-database | spec | 앱용 CNPG DB 프로비전 |
+| 🎛️ 변이: create-cache | spec | 앱용 redis 프로비전 |
 
 전역 직렬화(`group: homelab-mutation`, `queue: max`, `cancel-in-progress: false`)로 bump-poll/iac/tf-reconcile과 한 줄로 직렬 실행. 변이 로직은 동명 `_*.yaml` reusable에, 이 디스패처는 validate→route→실패 notify 셸.
 
