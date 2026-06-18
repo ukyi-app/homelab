@@ -22,7 +22,6 @@ create-cache.yaml 1
 audit.yaml 1
 bump.yaml 2
 bump-poll.yaml 1
-onboard.yaml 1
 iac.yaml 1
 tf-reconcile.yaml 3
 dns-drift.yaml 1

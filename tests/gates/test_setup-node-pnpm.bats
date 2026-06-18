@@ -15,9 +15,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   [ "$status" -eq 0 ]
 }
 
-@test "all 8 node workflows adopt the composite" {
+@test "all 7 node workflows adopt the composite" {
   local wf
-  for wf in ci.yaml onboard.yaml bump.yaml bump-poll.yaml _create-app.yaml _create-database.yaml _create-cache.yaml audit.yaml; do
+  for wf in ci.yaml bump.yaml bump-poll.yaml _create-app.yaml _create-database.yaml _create-cache.yaml audit.yaml; do
     run grep -F 'uses: ./.github/actions/setup-node-pnpm' "$ROOT/.github/workflows/$wf"
     [ "$status" -eq 0 ]
   done
