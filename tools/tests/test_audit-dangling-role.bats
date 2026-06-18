@@ -29,15 +29,15 @@ YAML
 teardown() { rm -rf "$TMP"; }
 
 @test "a managed role whose passwordSecret sealed file is gone is reported as dangling-role" {
-  run node "$ROOT/tools/audit-orphans.mjs" --repo-root "$FR"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.findings | any(.type == "dangling-role" and .subject == "orders_ro")'
   # owner role은 sealed가 살아있어 고아 아님
-  run bash -c "node '$ROOT/tools/audit-orphans.mjs' --repo-root '$FR' | jq -e '.findings | any(.type==\"dangling-role\" and .subject==\"orders_owner\")'"
+  run bash -c "bun '$ROOT/tools/audit-orphans.ts' --repo-root '$FR' | jq -e '.findings | any(.type==\"dangling-role\" and .subject==\"orders_owner\")'"
   [ "$status" -ne 0 ]
 }
 
 @test "dangling-role is informational (non-blocking under --ci)" {
-  run node "$ROOT/tools/audit-orphans.mjs" --repo-root "$FR" --ci
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci
   [ "$status" -eq 0 ]
 }

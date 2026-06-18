@@ -21,7 +21,7 @@ const USAGE = `audit-orphans — registry↔매니페스트↔바인딩↔원장
   --help, -h         이 도움말`;
 if (process.argv.includes("--help") || process.argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 
-const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
+const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const ROOT = arg("--repo-root", ".");
 const STRICT = process.argv.includes("--strict");
 // --ci: PR 게이트용 — 배포 정합을 깨는 유형만 비-0 종료(missing Secret/빈 백엔드 DNS/원장 드리프트).
@@ -35,12 +35,14 @@ const CI = process.argv.includes("--ci");
 // 오탐해 모든 PR을 막는다. 원장 드리프트는 --strict(수동 점검)로만.
 const BLOCKING = new Set(["dangling-binding", "orphan-dns", "activation-exposure-drift"]); // pass3 F1: surfaceHash(app-tree) drift는 비차단(이미지 bump 데드락 회피); restale2 F1: 노출 행(host/public) drift=activation-exposure-drift는 차단(데드락 무관 + 미재검증 DNS 노출 막음)
 
-const findings = [];
-const add = (type, subject, detail) => findings.push({ type, subject, detail });
-const readJson = (p, d) => (existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : d);
+type RegRow = { name: string; active?: boolean; host?: string | null; public?: boolean };
+
+const findings: { type: string; subject: string; detail: string }[] = [];
+const add = (type: string, subject: string, detail: string) => findings.push({ type, subject, detail });
+const readJson = (p: string, d: any): any => (existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : d);
 
 // 레포 사실 수집
-const registry = readJson(`${ROOT}/infra/cloudflare/apps.json`, []);
+const registry: RegRow[] = readJson(`${ROOT}/infra/cloudflare/apps.json`, []);
 const appsRoot = `${ROOT}/apps`;
 const appDirs = (existsSync(appsRoot) ? readdirSync(appsRoot) : [])
   .filter((a) => existsSync(`${appsRoot}/${a}/deploy/prod/values.yaml`));
@@ -50,7 +52,7 @@ const dbCRs = existsSync(`${ROOT}/platform/cnpg/prod/databases`)
 const cacheDirs = existsSync(`${ROOT}/platform/cache/prod`)
   ? readdirSync(`${ROOT}/platform/cache/prod`, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
   : [];
-const connExists = (kind, n) => existsSync(`${ROOT}/platform/data-conn/prod/${kind}-${n}-conn.sealed.yaml`);
+const connExists = (kind: string, n: string) => existsSync(`${ROOT}/platform/data-conn/prod/${kind}-${n}-conn.sealed.yaml`);
 
 // 1) registry ↔ 매니페스트
 //   active:true orphan → orphan-dns(차단): dns.tf가 public&&active만 노출하므로 빈 백엔드 DNS가 실재.
@@ -127,7 +129,7 @@ for (const m of ledger.matchAll(/<!-- ledger:row --> *([a-z0-9+-]+) *\| *([a-z-]
 }
 
 // 5) 중단된 purge
-const tombs = readJson(`${ROOT}/platform/data-conn/prod/.tombstones.json`, {});
+const tombs: Record<string, any> = readJson(`${ROOT}/platform/data-conn/prod/.tombstones.json`, {});
 for (const [k, v] of Object.entries(tombs))
   if (v.state === "purging") add("incomplete-purge", k, "purge 상태머신이 중단됨 — drop/verify/cleanup 재개 필요");
 
