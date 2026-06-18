@@ -35,7 +35,9 @@
 - README: step 2 `.homelab.yaml`→`.app-config.yml`, 시크릿 절 KSOPS/SOPS → **`pnpm secret:seal`**.
 - 검증: 템플릿 `.app-config.yml`을 `node tools/create-app.mjs --dry-run`(스키마+비즈니스 규칙)으로 통과 확인(권위 검증기).
 
-### B. homelab v1 전면 폐기 (별도 PR)
+### B. homelab v1 전면 폐기 (별도 PR — **A 선행 필수**)
+
+> **선행조건(A.5 F1)**: A(템플릿 v2)가 먼저 머지되고 템플릿 `.app-config.yml`이 `create-app --dry-run`을 통과한 뒤에만 B를 머지한다. B가 먼저 가면 (B 머지 ~ A 머지) 구간에 템플릿산 앱이 create-app(`.app-config.yml` 부재 거부)·onboard(삭제됨) 양쪽 다 못 써 **온보딩 경로 0**이 된다.
 
 **삭제(4):** `.github/workflows/onboard.yaml` · `tools/onboard-app.mjs` · `tools/homelab-app-schema.json` · `tools/tests/test_onboard.bats`
 
@@ -78,5 +80,6 @@
 
 - repo.tf description = owner-local terraform apply(수동) — PR 머지만으론 GitHub 메타데이터 미반영.
 - pr-sweeper regex서 onboard 제거 = 동작 변경(onboard/ 브랜치 미스윕 — 존재 0이라 무해).
-- 템플릿(A)·homelab(B)는 독립 PR, 의존 없음(v1 이미 orphaned). 순서 무관.
+- **A → B 순서 필수(A.5 F1)**: 별도 PR이나 **순서 의존 있음** — A(템플릿 v2 머지 + `create-app --dry-run` 통과)가 B(v1 삭제)의 선행조건. 위반(B 먼저) 시 온보딩 경로 0 구간 발생.
+- **stale-template fail-fast**: B 후 구-템플릿(`.homelab.yaml`)으로 만든 앱은 `create-app`이 *"`.app-config.yml` 없음"* 명시 에러로 거부(silent 아님) → v2 이행 안내. 별도 rollback 불필요.
 - 런북(로컬)은 PR 게이트 밖 — 수동 갱신 필요.
