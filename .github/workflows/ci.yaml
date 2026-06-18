@@ -19,6 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-bun
+      - name: typecheck (tsc --noEmit — erasableSyntaxOnly 게이트, make ci 패리티)
+        run: bun run typecheck
       - name: install chart toolchain
         uses: ./.github/actions/setup-toolchain
         with:
