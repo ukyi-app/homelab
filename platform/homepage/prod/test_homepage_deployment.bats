@@ -28,8 +28,11 @@ setup() { D="${BATS_TEST_DIRNAME}/deployment.yaml"; }
   run grep -qE 'memory:\s*128Mi' "$D"; [ "$status" -eq 0 ]
 }
 
-@test "config mounts as a directory without subPath so updates propagate" {
-  # F3: subPath '필드' 금지(갱신 미전파) — 주석 단어가 아니라 'subPath:' 키만 검사.
+@test "config is a writable emptyDir seeded by initContainer (EROFS regression guard)" {
+  # /app/config RO 마운트는 gethomepage skeleton copyfile을 EROFS로 막아 CrashLoop → 금지.
+  run grep -q 'name: seed-config' "$D"; [ "$status" -eq 0 ]
+  run grep -q 'emptyDir: {}' "$D"; [ "$status" -eq 0 ]
+  run grep -q 'name: config-src' "$D"; [ "$status" -eq 0 ]
   run grep -qE '^[[:space:]]*subPath:' "$D"; [ "$status" -ne 0 ]
   run grep -qE 'mountPath: /app/config\b' "$D"; [ "$status" -eq 0 ]
 }

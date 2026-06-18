@@ -3,8 +3,18 @@ kind: Kustomization
 namespace: homepage  # homepage-prod Application의 권위 있는 대상 namespace
 resources:
   - rbac.yaml
-  - configmap.yaml
   - deployment.yaml
   - service.yaml
   - httproute.yaml
   - networkpolicy.yaml
+# config는 generator로 — 내용 해시가 이름에 붙어 ConfigMap 변경 시 Deployment가 자동 rollout(F3).
+# initContainer(seed-config)가 이 ConfigMap을 writable emptyDir로 복사한다(custom.css/js는
+# gethomepage가 skeleton으로 생성).
+configMapGenerator:
+  - name: homepage
+    files:
+      - config/kubernetes.yaml
+      - config/settings.yaml
+      - config/services.yaml
+      - config/widgets.yaml
+      - config/bookmarks.yaml

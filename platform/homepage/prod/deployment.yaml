@@ -24,6 +24,25 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # ConfigMap(RO)을 writable emptyDir로 seed. gethomepage는 시작 시 누락 skeleton
+        # config(docker.yaml 등)를 /app/config로 copyfile하므로 디렉토리가 writable이어야 한다
+        # — RO면 EROFS "required config 초기화 실패" → CrashLoop("no available server").
+        # adguard seed-config 동형.
+        - name: seed-config
+          image: busybox:1.37
+          command: ["sh", "-c", "cp -L /tmp/cfg/* /app/config/ 2>/dev/null; true"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - { name: config-src, mountPath: /tmp/cfg, readOnly: true }
+            - { name: config, mountPath: /app/config }
       containers:
         - name: homepage
           image: ghcr.io/gethomepage/homepage:v1.13.2  # digest 핀은 Renovate 후속 PR
@@ -61,13 +80,13 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 20
           volumeMounts:
-            # F3: 개별 파일 마운트 대신 config 디렉토리 통째 마운트 — ConfigMap 변경이
-            # pod에 전파되고 Homepage가 핫리로드한다. config는 RO, logs만 그 위 emptyDir 중첩.
-            - { name: config, mountPath: /app/config, readOnly: true }
-            - { name: logs,   mountPath: /app/config/logs }
+            # writable emptyDir(initContainer가 ConfigMap을 seed). gethomepage가 누락 skeleton을
+            # 자유 복사 + /app/config/logs 기록. ConfigMap 변경은 configMapGenerator 해시 →
+            # Deployment rollout → initContainer 재seed로 반영(F3).
+            - { name: config, mountPath: /app/config }
       volumes:
         - name: config
+          emptyDir: {}
+        - name: config-src
           configMap:
             name: homepage
-        - name: logs
-          emptyDir: {}

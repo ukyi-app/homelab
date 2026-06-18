@@ -1,0 +1,12 @@
+title: Homelab
+headerStyle: clean
+layout:
+  Infra:
+    style: row
+    columns: 4
+  Platform:
+    style: row
+    columns: 4
+  Apps:
+    style: row
+    columns: 4

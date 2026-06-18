@@ -1,0 +1,5 @@
+# 클러스터 내부에서 SA 토큰으로 발견. Gateway API HTTPRoute 자동발견 활성.
+mode: cluster
+ingress: false
+traefik: false
+gateway: true
