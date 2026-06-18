@@ -133,18 +133,23 @@ spec:
   template:
     spec:
       hostPID: true         # 호스트 프로세스/CPU/mem 가시성 (docker --pid host 패턴)
-      securityContext: { runAsNonRoot: true, ... }   # node-exporter 패턴 미러(가능 시)
+      securityContext:
+        runAsNonRoot: true  # ★ 하드 요구 — root fallback 금지(A.5#2). node-exporter는 65534로 동작
+        runAsUser: 65534    # nonroot uid (node-exporter 패턴). Glances가 이 uid로 호스트 /proc 읽기 가능해야
       containers:
         - name: glances
           image: nicolargo/glances:<tag>     # 태그 핀(digest는 Renovate 후속)
           args/env: ["-w"]   # 웹서버+API 모드, 포트 61208 (--disable-webui 검토)
           ports: [{ containerPort: 61208 }]
           resources: { requests: {memory: 64Mi}, limits: {memory: 192Mi} }  # 원장 여유 856Mi 내
-          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true(가능 시),
-                             capabilities: { drop: [ALL] } }
-          volumeMounts:      # 호스트 가시성 (node-exporter 패턴)
-            - /host/proc (RO), /host/sys (RO), /host/root (RO), /etc/os-release (RO)
-      volumes: [ hostPath /proc, /sys, / ]
+          securityContext:   # ★ 최소 권한 하드 경계(A.5#2)
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true       # 가능 시(불가하면 escalate, root 전환 금지)
+            capabilities: { drop: [ALL] }
+          volumeMounts:      # ★ 선택 metric에 필요한 최소 마운트만(A.5#2)
+            - /host/proc (RO), /host/sys (RO), /etc/os-release (RO)
+            # host `/`(/host/root)는 fs:/ metric을 쓸 때만 RO로 추가 + 정당화. 기본 미마운트.
+      volumes: [ hostPath /proc, /sys ]   # / 는 fs metric 채택 시에만
 ---
 apiVersion: v1
 kind: Service
@@ -152,14 +157,20 @@ metadata: { name: glances, namespace: observability }
 spec: { selector: {app: glances}, ports: [{ port: 61208, targetPort: 61208 }] }
 ```
 
-검증 필요(plan에서 TDD): nicolargo/glances의 nonroot 실행 가능 여부 / 호스트 가시성에 필요한
-정확한 마운트·플래그(hostPID로 /proc 호스트 반영 vs `--path` 류 옵션 부재) / `-w` 활성화 방식
-(`GLANCES_OPT` env vs command). privileged ns라 root 필요 시에도 허용되나 node-exporter처럼
-nonroot 선호.
+검증 필요(plan에서 TDD/live-proof): nicolargo/glances가 **nonroot(65534)로 실행 + hostPID로 호스트
+/proc 가시성** 확보 가능한지 / `-w` 활성화 방식(`GLANCES_OPT` env vs command) / fs metric 채택 시
+host `/` RO 마운트 필요 여부. **★ root fallback 금지(A.5#2)** — nonroot로 필요한 metric을 못 얻으면
+fallback이 아니라 설계 escalate(사용자에게 보고 후 metric 축소 또는 대안). 노출 API라 node-exporter
+(비노출 scrape)보다 엄격한 경계 적용.
 
-**netpol**: `platform/homepage/prod/networkpolicy.yaml`의 egress에 observability:61208 허용 1줄 추가
-(기존 `allow-egress-to-vmsingle`는 8428 전용 — 포트 추가 또는 별도 rule). observability엔
-default-deny ingress가 없으므로 glances 측 ingress rule은 불요.
+**netpol — egress + ingress 둘 다(A.5#1)**:
+- egress: `platform/homepage/prod/networkpolicy.yaml`에 homepage→observability:61208 허용 1줄
+  추가(기존 `allow-egress-to-vmsingle`는 8428 전용 — 포트 추가 또는 별도 rule).
+- **★ ingress: glances pod를 선택하는 NetworkPolicy를 victoria-stack에 추가** — `:61208`을
+  **homepage ns(podSelector)에서만** 허용. observability엔 ns-wide default-deny가 없어 glances :61208이
+  egress 가진 모든 워크로드에 노출되므로(A.5#1), glances pod 자체에 ingress NP를 걸어 차단한다
+  (NP가 glances pod를 선택하면 그 pod ingress는 명시 allow 외 default-deny가 됨). 호스트 텔레메트리
+  blast radius 축소.
 
 **메모리 원장**: `docs/memory-ledger.md`의 observability 행 증액(req +64 / limit +192) 또는 glances
 전용 행 추가 → `bun run verify:ledger` GREEN(현재 limit 7848/8704, 여유 856Mi).
@@ -212,7 +223,8 @@ Infra 그룹에 Glances 서비스 위젯 카드 추가(metric별 1카드):
     `background`(image), `hourCycle: h23`, `logo` 위젯, bookmarks의 github/instagram href.
   - **@test 이름 영어 유지**(한글 인코딩 깨짐 — 검증된 버그).
 - Glances: `platform/victoria-stack/prod/`에 deployment/service 가드 bats(hostPID, ns=observability,
-  포트 61208) + homepage netpol 가드(egress 61208).
+  포트 61208, **runAsNonRoot/65534 + capabilities drop ALL + host `/` 미마운트** — A.5#2) +
+  **glances ingress NP 가드(61208을 homepage ns에서만 — A.5#1)** + homepage netpol 가드(egress 61208).
 - `make verify`(원장 conftest) GREEN.
 - 렌더 검증: `kustomize build platform/homepage/prod`, `kustomize build platform/victoria-stack/prod`
   (KSOPS 풀 렌더는 victoria-stack 시크릿 generator 때문에 SOPS 키 필요 — 워크트리에서 확인).
@@ -230,3 +242,12 @@ Infra 그룹에 Glances 서비스 위젯 카드 추가(metric별 1카드):
 - 배경 이미지 파일(≤700KiB 최적화).
 - greeting text(Homelab 유지 vs ukyi) — 기본 유지.
 - Glances 위젯 metric 카드 구성(cpu/memory/fs 등) — 라이브 미세조정.
+
+## 9. A.5 설계 리뷰 반영 (codex, needs-attention, 2 high — 둘 다 Accept)
+
+- **A.5#1 (high, Accept)** Glances 호스트 API ingress 미격리 → §D에 **glances pod 선택 ingress
+  NetworkPolicy(61208을 homepage ns에서만)** 추가, §F에 가드 추가. (observability ns-wide
+  default-deny 부재로 인한 호스트 텔레메트리 노출 차단.)
+- **A.5#2 (high, Accept·정제)** 호스트 root 마운트 + root fallback 과다 권한 → §D를 **strict
+  nonroot(65534) 하드 요구(root fallback 금지)** + **선택 metric 최소 마운트(host `/`는 fs metric
+  시에만 RO)**로 정정.
