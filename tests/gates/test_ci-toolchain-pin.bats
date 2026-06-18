@@ -12,9 +12,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "helm is pinned via setup-toolchain everywhere it is installed" {
-  # ci/verify/onboard/_create-app 모두 composite로 helm 설치 — 인라인 get-helm-3 핀은 더 이상 없다.
+  # ci/verify/_create-app 모두 composite로 helm 설치 — 인라인 get-helm-3 핀은 더 이상 없다.
   local wf
-  for wf in ci.yaml onboard.yaml _create-app.yaml; do
+  for wf in ci.yaml _create-app.yaml; do
     run grep -F 'uses: ./.github/actions/setup-toolchain' ".github/workflows/$wf"
     [ "$status" -eq 0 ]
   done

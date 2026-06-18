@@ -159,7 +159,7 @@ jobs:
           echo "$TAG" | grep -qE '^sha-[0-9a-f]{7,40}$' || { echo "::error::tag 형식 불량: '$TAG'"; exit 1; }
           echo "$SRC" | grep -qE '^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$' || { echo "::error::repo 형식 불량: '$SRC'"; exit 1; }
           vals="apps/$APP/deploy/prod/values.yaml"
-          [ -f "$vals" ] || { echo "::error::미온보딩 앱 '$APP' — onboard PR부터 머지하라"; exit 1; }
+          [ -f "$vals" ] || { echo "::error::미온보딩 앱 '$APP' — ✨ create-app 먼저 실행하라"; exit 1; }
           # 발신 레포 바인딩: 온보딩 때 기록된 source-repo와 payload.repo가 일치해야 한다
           bind="apps/$APP/deploy/prod/source-repo"
           [ -f "$bind" ] || { echo "::error::$bind 없음 — 외부 앱이 아니거나 바인딩 누락"; exit 1; }

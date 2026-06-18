@@ -36,7 +36,6 @@ run-name에 트리거 출처(`스케줄`/`수동(actor)`)가 박혀 이력에서
 | verify | PR·push | 보조 점검(skeleton·sops 왕복·pre-commit) |
 | iac | PR·push(cloudflare) | terraform apply |
 | bump | build 완료·repo_dispatch | 이미지 write-back |
-| onboard | repo_dispatch | 앱 온보딩 |
 
 ## 🧩 reusable — 직접 실행 불가 (Run 버튼 없음)
 

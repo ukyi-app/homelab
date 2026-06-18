@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "app-config-schema",
   "title": ".app-config.yml — 외부 앱 레포의 자기선언 v2 (create-app이 values.yaml + .bindings.json으로 변환)",
-  "description": "구계약(.homelab.yaml) 대비 변경: db가 enabled/migrateCmd 객체에서 리소스 참조 배열로 재정의되고(migrate.cmd로 분리), redis 배열이 추가됐다. db/redis 이름은 create-database/create-cache로 선프로비저닝된 리소스를 가리키며, create-app이 db-<name>-conn / cache-<name>-conn SealedSecret(prod NS)을 envFrom으로 배선한다.",
+  "description": "db/redis 이름은 create-database/create-cache로 선프로비저닝된 리소스를 가리키며(migrate.cmd로 마이그레이션 분리), create-app이 db-<name>-conn / cache-<name>-conn SealedSecret(prod NS)을 envFrom으로 배선한다.",
   "type": "object",
   "additionalProperties": false,
   "required": ["kind", "resources"],

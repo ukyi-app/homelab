@@ -38,9 +38,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   [ "$status" -ne 0 ]
 }
 
-@test "onboard and _create-app use the composite (no inline helm/kubeconform/conftest curl)" {
+@test "_create-app uses the composite (no inline helm/kubeconform/conftest curl)" {
   local wf
-  for wf in onboard.yaml _create-app.yaml; do
+  for wf in _create-app.yaml; do
     run grep -F 'uses: ./.github/actions/setup-toolchain' "$ROOT/.github/workflows/$wf"
     [ "$status" -eq 0 ]
     run grep -E 'get\.helm\.sh/helm-v' "$ROOT/.github/workflows/$wf"

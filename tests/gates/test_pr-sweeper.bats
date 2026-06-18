@@ -37,8 +37,8 @@ setup() {
 }
 
 @test "pr-sweeper scopes to bot branches only (head prefix filter)" {
-  # bump/ bump-poll/ create-database/ create-cache/ create-app/ onboard/ update-secrets/ 만 손댄다
-  grep -qE 'bump|create-|onboard|update-secrets' "$F"
+  # bump/ bump-poll/ create-database/ create-cache/ create-app/ update-secrets/ 만 손댄다
+  grep -qE 'bump|create-|update-secrets' "$F"
 }
 
 @test "pr-sweeper notifies on failure via the telegram action (mutation source label)" {

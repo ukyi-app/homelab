@@ -80,7 +80,6 @@ spec:
         # source #3: 앱의 deploy 디렉토리를 KUSTOMIZE source로 렌더한다. Helm 차트(source #1)는
         # 앱의 secret을 담지 않으므로, 이것이 없으면 Deployment/migration의 envFrom secret이 누락된다.
         # 앱 시크릿 표준 경로는 create-app(v2) + SealedSecret(`<app>-secrets.sealed.yaml`을 resources:에).
-        # (legacy: onboard-app v1은 KSOPS secret-generator + *.enc.yaml을 냈다 — deprecated, 신규는 SealedSecret)
         - repoURL: https://github.com/ukyi-app/homelab.git
           targetRevision: main
           path: '{{ .path.path }}' # apps/<name>/deploy/prod: kustomization.yaml + (v2) <app>-secrets.sealed.yaml

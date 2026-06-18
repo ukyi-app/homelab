@@ -1,4 +1,4 @@
-// 메모리 원장 Totals 프로즈 치환 SSOT — create-app/onboard-app/provision-cache/teardown-app 공용.
+// 메모리 원장 Totals 프로즈 치환 SSOT — create-app/provision-cache/teardown-app 공용.
 // 프로즈 문구가 드리프트하면 String.replace가 조용히 no-op이 되어 합계가 stale로 남는다 →
 // 매치가 0이면 throw해 fail-loud(silent no-op 차단).
 const TOTALS_RE = /req ≈ \d+ Mi · limit ≈ \d+ Mi/;
