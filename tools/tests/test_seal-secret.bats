@@ -18,7 +18,7 @@ DB_EXTRA=more
 UNDECLARED=should-not-seal
 EOF
   # --dry-run은 봉인 없이 어떤 키가 대상인지 JSON으로 출력
-  run node "$ROOT/tools/seal-secret.mjs" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
+  run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "API_KEY"
   echo "$output" | grep -q "DB_EXTRA"
@@ -31,7 +31,7 @@ kind: service
 secrets: [missing-key]
 EOF
   printf 'OTHER=x\n' > "$TMP/.env"
-  run node "$ROOT/tools/seal-secret.mjs" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
+  run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
   [ "$status" -ne 0 ]
   echo "$output" | grep -qi "missing"
 }
@@ -44,7 +44,7 @@ EOF
   cat > "$TMP/.env" <<'EOF'
 API_KEY=super-sensitive-value-xyz
 EOF
-  run node "$ROOT/tools/seal-secret.mjs" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
+  run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
   [ "$status" -eq 0 ]
   ! echo "$output" | grep -q "super-sensitive-value-xyz"
 }
@@ -65,7 +65,7 @@ printf 'apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nmetadata:\n  name:
 EOF
   chmod +x "$TMP/bin/kubeseal"
   : > "$TMP/cert.pem"
-  PATH="$TMP/bin:$PATH" run node "$ROOT/tools/seal-secret.mjs" \
+  PATH="$TMP/bin:$PATH" run bun "$ROOT/tools/seal-secret.mts" \
     --config "$TMP/.app-config.yml" --env "$TMP/.env" \
     --cert "$TMP/cert.pem" --app demo --namespace prod --out "$TMP/demo-secrets.sealed.yaml"
   [ "$status" -eq 0 ]

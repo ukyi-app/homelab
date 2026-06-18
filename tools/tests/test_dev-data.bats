@@ -45,7 +45,7 @@ secrets: [api-key]
 db: [orders]
 redis: [sessions]
 EOF
-  run node "$ROOT/tools/env-example.mjs" --config "$TMP/.app-config.yml" --out "$TMP/.env.example"
+  run bun "$ROOT/tools/env-example.mts" --config "$TMP/.app-config.yml" --out "$TMP/.env.example"
   [ "$status" -eq 0 ]
   grep -q "LOG_LEVEL=" "$TMP/.env.example"
   grep -q "API_KEY=" "$TMP/.env.example"
