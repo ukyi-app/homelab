@@ -30,7 +30,7 @@ jobs:
         with:
           ref: main
           token: ${{ steps.writer.outputs.token }}
-      - uses: ./.github/actions/setup-node-pnpm
+      - uses: ./.github/actions/setup-bun
       - name: spec 재검증 + name/extensions 추출 (defense-in-depth — dispatcher 외 호출 경로 대비)
         id: spec
         env:

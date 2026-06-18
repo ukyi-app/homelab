@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-node-pnpm
+      - uses: ./.github/actions/setup-bun
       - name: install chart toolchain
         uses: ./.github/actions/setup-toolchain
         with:

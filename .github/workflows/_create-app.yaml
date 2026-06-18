@@ -57,7 +57,7 @@ jobs:
           # 명령치환은 실패를 삼킨다(빈 sha → tag="sha-" → 오해성 "이미지 미존재") — 명시 실패로.
           sha="$(git -C .apprepo rev-parse HEAD)" || { echo "::error::앱 레포 main HEAD 해석 실패"; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/setup-node-pnpm
+      - uses: ./.github/actions/setup-bun
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io

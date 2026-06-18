@@ -29,7 +29,7 @@ jobs:
         with:
           ref: main
           token: ${{ steps.writer.outputs.token }}
-      - uses: ./.github/actions/setup-node-pnpm
+      - uses: ./.github/actions/setup-bun
       - name: spec 재검증 (비신뢰 입력 — env 경유, 화이트리스트 밖 필드 거부)
         id: spec
         env:

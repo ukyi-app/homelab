@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { ref: main }
-      - uses: ./.github/actions/setup-node-pnpm
+      - uses: ./.github/actions/setup-bun
       - id: audit
         run: |
           node tools/audit-orphans.mjs --repo-root . | tee /tmp/audit.json
