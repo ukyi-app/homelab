@@ -66,7 +66,7 @@ teardown() { rm -rf "$TMP"; }
 # ── teardown-app ─────────────────────────────────────────────────────────────
 
 @test "teardown-app removes only app-scoped artifacts, never db/cache resources" {
-  run node "$ROOT/tools/teardown-app.mjs" --app orders --repo-root "$FR" --dry-run
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR" --dry-run
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.remove | any(. == "apps/orders")'
   echo "$output" | jq -e '.appsJsonRow.name == "orders"'
@@ -76,7 +76,7 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "teardown-app really removes the app dir, registry row, ledger row (idempotent)" {
-  run node "$ROOT/tools/teardown-app.mjs" --app orders --repo-root "$FR"
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
   [ "$status" -eq 0 ]
   [ ! -d "$FR/apps/orders" ]
   run jq -e 'map(select(.name == "orders")) | length == 0' "$FR/infra/cloudflare/apps.json"
@@ -87,23 +87,23 @@ teardown() { rm -rf "$TMP"; }
   [ -f "$FR/platform/cnpg/prod/databases/shared.yaml" ]
   [ -f "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml" ]
   # 멱등: 한 번 더 → 0 종료
-  run node "$ROOT/tools/teardown-app.mjs" --app orders --repo-root "$FR"
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
   [ "$status" -eq 0 ]
 }
 
 # ── teardown-resource ────────────────────────────────────────────────────────
 
 @test "teardown-resource refuses while any bindings still reference the db" {
-  run node "$ROOT/tools/teardown-resource.mjs" --db shared --repo-root "$FR" --dry-run
+  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --dry-run
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "orders"
   echo "$output" | grep -q "billing"
 }
 
 @test "teardown-resource retain (default) tombstones a zero-ref resource without deleting" {
-  node "$ROOT/tools/teardown-app.mjs" --app orders --repo-root "$FR"
-  node "$ROOT/tools/teardown-app.mjs" --app billing --repo-root "$FR"
-  run node "$ROOT/tools/teardown-resource.mjs" --db shared --repo-root "$FR"
+  bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
+  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR"
   [ "$status" -eq 0 ]
   # 보존: CR/conn 전부 유지 + tombstone 기재 (접근 가능 상태 그대로)
   [ -f "$FR/platform/cnpg/prod/databases/shared.yaml" ]
@@ -113,27 +113,27 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "purge without a verified backup id is refused (data deletion gate)" {
-  node "$ROOT/tools/teardown-app.mjs" --app orders --repo-root "$FR"
-  node "$ROOT/tools/teardown-app.mjs" --app billing --repo-root "$FR"
-  run node "$ROOT/tools/teardown-resource.mjs" --db shared --repo-root "$FR" --delete-data --step drop
+  bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
+  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data --step drop
   [ "$status" -ne 0 ]
   echo "$output" | grep -qi "backup"
 }
 
 @test "purge state machine: drop sets ensure absent; cleanup removes artifacts (resumable)" {
-  node "$ROOT/tools/teardown-app.mjs" --app orders --repo-root "$FR"
-  node "$ROOT/tools/teardown-app.mjs" --app billing --repo-root "$FR"
-  run node "$ROOT/tools/teardown-resource.mjs" --db shared --repo-root "$FR" --delete-data \
+  bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
+  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data \
     --backup-verified barman-20260612 --step drop
   [ "$status" -eq 0 ]
   run grep "ensure: absent" "$FR/platform/cnpg/prod/databases/shared.yaml"
   [ "$status" -eq 0 ]
   # drop 재실행 = 멱등
-  run node "$ROOT/tools/teardown-resource.mjs" --db shared --repo-root "$FR" --delete-data \
+  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data \
     --backup-verified barman-20260612 --step drop
   [ "$status" -eq 0 ]
   # cleanup은 별도 커밋(별도 revision)용 단계 — CR/conn 제거, role은 워크플로가 cluster.yaml에서
-  run node "$ROOT/tools/teardown-resource.mjs" --db shared --repo-root "$FR" --delete-data \
+  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data \
     --backup-verified barman-20260612 --step cleanup
   [ "$status" -eq 0 ]
   [ ! -f "$FR/platform/cnpg/prod/databases/shared.yaml" ]
@@ -143,9 +143,9 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "purge cleanup deregisters every removed file from its kustomization (no broken render)" {
-  node "$ROOT/tools/teardown-app.mjs" --app orders --repo-root "$FR"
-  node "$ROOT/tools/teardown-app.mjs" --app billing --repo-root "$FR"
-  run node "$ROOT/tools/teardown-resource.mjs" --db shared --repo-root "$FR" --delete-data \
+  bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
+  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data \
     --backup-verified barman-1 --step cleanup
   [ "$status" -eq 0 ]
   # 파일 제거 (owner/ro 비밀번호 sealed 포함)
@@ -162,14 +162,14 @@ teardown() { rm -rf "$TMP"; }
   run grep "cache-sessions-conn" "$FR/platform/data-conn/prod/kustomization.yaml"
   [ "$status" -eq 0 ]
   # cleanup 재실행 = 멱등
-  run node "$ROOT/tools/teardown-resource.mjs" --db shared --repo-root "$FR" --delete-data \
+  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data \
     --backup-verified barman-1 --step cleanup
   [ "$status" -eq 0 ]
 }
 
 @test "cache purge cleanup deregisters the instance dir and its conns" {
-  node "$ROOT/tools/teardown-app.mjs" --app orders --repo-root "$FR"
-  run node "$ROOT/tools/teardown-resource.mjs" --cache sessions --repo-root "$FR" --delete-data \
+  bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  run bun "$ROOT/tools/teardown-resource.ts" --cache sessions --repo-root "$FR" --delete-data \
     --backup-verified rdb-1 --step cleanup
   [ "$status" -eq 0 ]
   run grep "sessions" "$FR/platform/cache/prod/kustomization.yaml"
@@ -182,8 +182,8 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "cache teardown removes only that instance dir and its conn (per-app pvc isolation)" {
-  node "$ROOT/tools/teardown-app.mjs" --app orders --repo-root "$FR"
-  run node "$ROOT/tools/teardown-resource.mjs" --cache sessions --repo-root "$FR" --delete-data \
+  bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  run bun "$ROOT/tools/teardown-resource.ts" --cache sessions --repo-root "$FR" --delete-data \
     --backup-verified rdb-20260612 --step cleanup
   [ "$status" -eq 0 ]
   [ ! -d "$FR/platform/cache/prod/sessions" ]

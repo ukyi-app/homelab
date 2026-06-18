@@ -9,7 +9,7 @@ import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { replaceTotals } from "./lib/ledger-totals.ts";
 
-const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
+const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const DRY = process.argv.includes("--dry-run");
 const configPath = arg("--config");
 const app = arg("--app");
@@ -28,7 +28,7 @@ if (!configPath || !app || !repo || !DOMAIN || !tag || !digest) {
   console.error("usage: create-app --config <.app-config.yml> --app <name> --repo <owner/app> --domain <apex> --tag sha-<gitsha> --digest sha256:<hex> [--sealed <file>] [--repo-root <dir>] [--dry-run]");
   process.exit(2);
 }
-const fail = (msg) => { console.error(`::error::create-app: ${msg}`); process.exit(1); };
+function fail(msg: string): never { console.error(`::error::create-app: ${msg}`); process.exit(1); }
 
 // ---------- 1) 식별자/이미지 핀 검증 ----------
 if (!APP_NAME_RE.test(app)) fail(`app 이름 불량: '${app}'`);
@@ -40,15 +40,15 @@ if (!/^sha256:[0-9a-f]{64}$/.test(digest)) fail(`digest 형식 불량(불변 핀
 
 let config;
 try { config = parseYaml(readFileSync(configPath, "utf8")) ?? {}; }
-catch (e) { fail(`.app-config.yml 파싱 실패: ${e.message}`); }
+catch (e: any) { fail(`.app-config.yml 파싱 실패: ${e.message}`); }
 
 // ---------- 2) 스키마 검증 (app-config-schema.json이 계약 SSOT) ----------
 const schema = JSON.parse(readFileSync(new URL("./app-config-schema.json", import.meta.url), "utf8"));
-const deref = (s) => (s?.$ref ? schema.definitions[s.$ref.split("/").pop()] : s);
-function check(val, sch, path) {
+const deref = (s: any) => (s?.$ref ? schema.definitions[s.$ref.split("/").pop()] : s);
+function check(val: any, sch: any, path: string) {
   sch = deref(sch);
   const t = sch.type;
-  const is = { object: (v) => v && typeof v === "object" && !Array.isArray(v), array: Array.isArray,
+  const is: Record<string, (v: any) => boolean> = { object: (v) => v && typeof v === "object" && !Array.isArray(v), array: Array.isArray,
     string: (v) => typeof v === "string", integer: Number.isInteger, boolean: (v) => typeof v === "boolean" };
   if (sch.enum) { if (!sch.enum.includes(val)) fail(`${path}: '${val}'은 ${JSON.stringify(sch.enum)} 중 하나여야 함`); return; }
   if (t && !is[t]?.(val)) fail(`${path}: ${t} 타입이어야 함`);
@@ -57,7 +57,7 @@ function check(val, sch, path) {
     if (sch.maximum != null && val > sch.maximum) fail(`${path}: ≤${sch.maximum}`); }
   if (t === "array") { if (sch.minItems && val.length < sch.minItems) fail(`${path}: 최소 ${sch.minItems}개`);
     if (sch.uniqueItems && new Set(val.map(String)).size !== val.length) fail(`${path}: 중복 항목`);
-    val.forEach((v, i) => check(v, sch.items, `${path}[${i}]`)); }
+    val.forEach((v: any, i: number) => check(v, sch.items, `${path}[${i}]`)); }
   if (t === "object") {
     for (const r of sch.required ?? []) if (!(r in val)) fail(`${path}.${r}: 필수`);
     for (const [k, v] of Object.entries(val)) {
@@ -108,8 +108,8 @@ for (const n of caches) {
     fail(`cache '${n}' 미생성 — 변이 디스패처 create-cache 먼저 실행`);
 }
 
-const toMi = (m) => m.endsWith("Gi") ? parseInt(m) * 1024 : parseInt(m);
-const toMilli = (c) => c.endsWith("m") ? parseInt(c) : parseInt(c) * 1000;
+const toMi = (m: string) => m.endsWith("Gi") ? parseInt(m) * 1024 : parseInt(m);
+const toMilli = (c: string) => c.endsWith("m") ? parseInt(c) : parseInt(c) * 1000;
 const { requests: rq, limits: lm } = config.resources;
 if (toMi(lm.memory) < toMi(rq.memory)) fail("limits.memory < requests.memory");
 if (toMilli(lm.cpu) < toMilli(rq.cpu)) fail("limits.cpu < requests.cpu");
@@ -135,8 +135,8 @@ const appsJsonPath = `${ROOT}/infra/cloudflare/apps.json`;
 const registry = JSON.parse(readFileSync(appsJsonPath, "utf8"));
 if (served && pub) {
   if ([DOMAIN, `www.${DOMAIN}`].includes(host) || host.endsWith(`.home.${DOMAIN}`)) fail(`예약 host: ${host}`);
-  if (registry.some((r) => r.name === app)) fail(`apps.json에 name '${app}' 이미 존재`);
-  if (registry.some((r) => r.host === host)) fail(`apps.json에 host '${host}' 이미 존재(오라우팅 차단)`);
+  if (registry.some((r: any) => r.name === app)) fail(`apps.json에 name '${app}' 이미 존재`);
+  if (registry.some((r: any) => r.host === host)) fail(`apps.json에 host '${host}' 이미 존재(오라우팅 차단)`);
 }
 
 // SealedSecret 시크릿: secrets 선언 시 봉인본 필수 + 메타데이터 검증(봉인본이라 전송/커밋 안전)
@@ -151,15 +151,15 @@ if (secrets.length) {
 }
 
 // ---------- 4) values.yaml 구성 ----------
-const values = {
+const values: Record<string, any> = {
   image: { repo: `ghcr.io/${owner}/${app}`, tag, digest }, // digest가 권위(불변), tag는 source SHA 추적
   kind, replicas,
   resources: { requests: { cpu: rq.cpu, memory: rq.memory }, limits: { cpu: lm.cpu, memory: lm.memory } },
 };
 if ((config.env ?? []).length) values.env = config.env;
 const envFrom = [
-  ...dbs.map((n) => ({ secretRef: { name: `db-${n}-conn` } })),
-  ...caches.map((n) => ({ secretRef: { name: `cache-${n}-conn` } })),
+  ...dbs.map((n: any) => ({ secretRef: { name: `db-${n}-conn` } })),
+  ...caches.map((n: any) => ({ secretRef: { name: `cache-${n}-conn` } })),
   ...(secrets.length ? [{ secretRef: { name: `${app}-secrets` } }] : []),
 ];
 if (envFrom.length) values.envFrom = envFrom;
@@ -210,7 +210,7 @@ if (!DRY) {
   // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신
   const lines = ledger.split("\n");
   const lastRow = lines.map((l, i) => (l.includes("<!-- ledger:row -->") ? i : -1)).filter((i) => i >= 0).pop();
-  lines.splice(lastRow + 1, 0, `| <!-- ledger:row --> ${app.padEnd(14)} | prod           | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);
+  lines.splice(lastRow! + 1, 0, `| <!-- ledger:row --> ${app.padEnd(14)} | prod           | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);
   let out = lines.join("\n");
   out = replaceTotals(out, sumReq + reqMi, sumLimit + limitMi);
   writeFileSync(ledgerPath, out);

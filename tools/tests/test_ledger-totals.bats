@@ -32,8 +32,8 @@ setup() {
 }
 
 @test "teardown-app imports the shared helper (no inline replace regex)" {
-  # 인라인 'req ≈ ...' 치환이 teardown-app.mjs에서 사라지고 공용 헬퍼를 import 하는지.
-  run grep -c 'req ≈' "$ROOT/tools/teardown-app.mjs"
+  # 인라인 'req ≈ ...' 치환이 teardown-app.ts에서 사라지고 공용 헬퍼를 import 하는지.
+  run grep -c 'req ≈' "$ROOT/tools/teardown-app.ts"
   [ "$output" = "0" ]
-  grep -q "lib/ledger-totals" "$ROOT/tools/teardown-app.mjs"
+  grep -q "lib/ledger-totals" "$ROOT/tools/teardown-app.ts"
 }

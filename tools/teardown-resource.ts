@@ -22,8 +22,8 @@
 import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
 import { parseDocument } from "yaml";
 
-const arg = (k, d) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
-const has = (k) => process.argv.includes(k);
+const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
+const has = (k: string) => process.argv.includes(k);
 const DRY = has("--dry-run");
 const db = arg("--db");
 const cache = arg("--cache");
@@ -37,16 +37,16 @@ for (const a of process.argv.slice(2)) {
   if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
 }
 
-const fail = (msg) => { console.error(`teardown-resource: ${msg}`); process.exit(1); };
+const fail = (msg: string): never => { console.error(`teardown-resource: ${msg}`); process.exit(1); };
 if ((db ? 1 : 0) + (cache ? 1 : 0) !== 1) fail("--db <name> 또는 --cache <name> 중 정확히 하나");
-const name = db ?? cache;
+const name = (db ?? cache)!;
 if (!/^[a-z][a-z0-9-]*$/.test(name)) fail(`이름 형식 불량: ${name}`);
 const kind = db ? "db" : "cache";
 const key = `${kind}:${name}`;
 
 // ── 참조 수 집계 (권위: .bindings.json만) ──────────────────────────────────────
 const appsRoot = `${ROOT}/apps`;
-const referrers = [];
+const referrers: string[] = [];
 for (const a of existsSync(appsRoot) ? readdirSync(appsRoot) : []) {
   const b = `${appsRoot}/${a}/deploy/prod/.bindings.json`;
   if (!existsSync(b)) continue;
@@ -94,13 +94,13 @@ const purgeArtifacts = kind === "db"
 
 // kustomization resources에서 엔트리 제거(멱등) — provision의 addResource를 역으로. trailing
 // slash 정규화로 인스턴스 디렉토리 등록(name vs name/)도 매칭.
-function deregister(kustPath, entry) {
+function deregister(kustPath: string, entry: string) {
   if (!existsSync(kustPath)) return;
   const doc = parseDocument(readFileSync(kustPath, "utf8"));
-  const seq = doc.get("resources");
+  const seq: any = doc.get("resources");
   if (!seq?.items) return;
-  const norm = (v) => String(v).replace(/\/$/, "");
-  const idx = seq.items.findIndex((it) => norm(it.value ?? it) === norm(entry));
+  const norm = (v: any) => String(v).replace(/\/$/, "");
+  const idx = seq.items.findIndex((it: any) => norm(it.value ?? it) === norm(entry));
   if (idx < 0) return;
   doc.deleteIn(["resources", idx]);
   writeFileSync(kustPath, doc.toString());

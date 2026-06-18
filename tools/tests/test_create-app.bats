@@ -34,7 +34,7 @@ EOF
 teardown() { rm -rf "$TMP"; }
 
 gen() {
-  run node "$ROOT/tools/create-app.mjs" --config "$TMP/.app-config.yml" --app orders \
+  run bun "$ROOT/tools/create-app.ts" --config "$TMP/.app-config.yml" --app orders \
     --repo ukyi-app/orders --domain example.com --repo-root "$FR" \
     --digest sha256:1111111111111111111111111111111111111111111111111111111111111111 \
     --tag sha-aaa1111000000000000000000000000000000000 "$@"
