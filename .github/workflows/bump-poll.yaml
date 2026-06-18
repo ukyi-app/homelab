@@ -72,7 +72,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.reader.outputs.token }}
         run: |
-          node tools/poll-ghcr.mjs --root . > /tmp/plan.json
+          bun tools/poll-ghcr.ts --root . > /tmp/plan.json
           jq -r '.[] | "\(.app): \(.action) \(.reason // "")"' /tmp/plan.json
       - name: bump → PR (autoDeploy만 auto-merge; 승인 앱은 사람 머지 = 승인)
         env:
@@ -89,7 +89,7 @@ jobs:
             tag=$(echo "$item" | jq -r .candidate.tag)
             digest=$(echo "$item" | jq -r .candidate.digest)
             action=$(echo "$item" | jq -r .action)
-            # 플래너 출력도 한 번 더 정제(심층 방어) — bump-tag.mjs가 재검증한다
+            # 플래너 출력도 한 번 더 정제(심층 방어) — bump-tag.ts가 재검증한다
             case "$app" in ''|*[!a-z0-9-]*) echo "skip suspicious app: '$app'"; continue ;; esac
             git checkout main
             branch="bump-poll/${app}-${RUN_ID}"
@@ -100,7 +100,7 @@ jobs:
             # checkout 직후의 실측 image.tag가 이 expect와 다르면(=plan 이후 main 이동) bump-tag가 fail-closed로
             # 중단(stale 증명 push 방지) — 다음 주기가 새 스냅샷으로 다시 plan한다.
             expect=$(echo "$item" | jq -r '.current.tag')
-            node tools/bump-tag.mjs "$app" "$tag" --digest "$digest" --expect-current "$expect"
+            bun tools/bump-tag.ts "$app" "$tag" --digest "$digest" --expect-current "$expect"
             git add "apps/$app/deploy/prod/values.yaml"
             git commit -m "chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)"
             git push -u origin "$branch"

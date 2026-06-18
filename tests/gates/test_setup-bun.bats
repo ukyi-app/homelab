@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# setup-bun composite — bun-version 핀 + frozen 설치 SSOT. (7 워크플로 채택; onboard.yaml은 #62로 삭제)
+# setup-bun composite — bun-version 핀 + frozen 설치 SSOT. (7 워크플로 채택)
 # 9개 워크플로에 복붙된 setup/frozen-install 블록을 흡수한다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 

@@ -1,6 +1,6 @@
 # create-database reusable — dispatcher(action=create-database)가 호출한다.
 # spec(JSON)은 비신뢰 입력: env 경유로만 다루고 인라인 `${{ }}` 보간은 금지(검증 산출물 제외).
-# 비밀번호는 provision-db.mjs가 내부 생성해 kubeseal로 즉시 봉인 — raw URL/비밀번호는
+# 비밀번호는 provision-db.ts가 내부 생성해 kubeseal로 즉시 봉인 — raw URL/비밀번호는
 # 로그·PR·Telegram 어디에도 나타나지 않는다(핸들 이름만 통지).
 # 머지 후 반영은 ArgoCD automated sync: cnpg-data(database NS) + data-conn-prod(prod NS).
 name: _create-database
@@ -38,7 +38,7 @@ jobs:
         run: |
           jq -n --arg action create-database --arg spec "$SPEC" \
             '{action: $action, spec: $spec}' > /tmp/payload.json
-          node tools/validate-mutation.mjs --action create-database --payload-file /tmp/payload.json
+          bun tools/validate-mutation.ts --action create-database --payload-file /tmp/payload.json
           name=$(printf '%s' "$SPEC" | jq -r '.name')
           printf '%s' "$name" | grep -Eq '^[a-z]([a-z0-9-]*[a-z0-9])?$' \
             || { echo "::error::spec.name 형식 불량"; exit 1; }
@@ -58,9 +58,9 @@ jobs:
           EXTS: ${{ steps.spec.outputs.extensions }}
         run: |
           if [ -n "$EXTS" ]; then
-            node tools/provision-db.mjs --name "$NAME" --extensions "$EXTS" | tee /tmp/plan.json
+            bun tools/provision-db.ts --name "$NAME" --extensions "$EXTS" | tee /tmp/plan.json
           else
-            node tools/provision-db.mjs --name "$NAME" | tee /tmp/plan.json
+            bun tools/provision-db.ts --name "$NAME" | tee /tmp/plan.json
           fi
       - name: PR 생성 + auto-merge (PR-first — App 토큰은 branch protection 우회 불가)
         env:
