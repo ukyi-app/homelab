@@ -1,5 +1,16 @@
-title: Homelab
-headerStyle: clean
+title: ukyi
+headerStyle: boxedWidgets
+target: _blank
+quicklaunch:
+  searchDescriptions: true
+background:
+  image: /images/background.jpg   # homepage-assets ConfigMap → /app/public/images (Task 5)
+  blur: sm
+  brightness: 75
+  opacity: 50
+hideVersion: true
+statusStyle: dot
+useEqualHeights: true
 layout:
   Infra:
     style: row
