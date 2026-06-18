@@ -89,7 +89,7 @@ const labels = (indent: string) => [
   `${indent}app.kubernetes.io/part-of: cache`,
 ].join("\n");
 
-const deploymentYaml = `# ${name} — 앱별 경량 Valkey 인스턴스 (provision-cache.mjs 산출 — 수정은 의도적 커밋으로만).
+const deploymentYaml = `# ${name} — 앱별 경량 Valkey 인스턴스 (provision-cache.ts 산출 — 수정은 의도적 커밋으로만).
 # limit(${limitMi}Mi)는 maxmemory(${maxmemoryMi}Mi)에 BGSAVE fork COW·단편화·클라이언트 버퍼 여유를 더한 값.
 # namespace는 상위 kustomization(namespace: cache)이 부여한다.
 apiVersion: apps/v1
@@ -314,7 +314,7 @@ if (!DRY) {
     writeFileSync(cacheKustomization, `apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 # Valkey 캐시 계층 — platform-components appset이 cache-prod로 자동 발견한다.
-# 인스턴스 디렉토리는 tools/provision-cache.mjs가 resources에 멱등 등록한다.
+# 인스턴스 디렉토리는 tools/provision-cache.ts가 resources에 멱등 등록한다.
 namespace: cache
 resources:
   - ${name}
@@ -329,7 +329,7 @@ resources:
     }
   }
 
-  // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신 (create-app.mjs와 동일 규약)
+  // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신 (create-app.ts와 동일 규약)
   const lines = ledger.split("\n");
   const lastRow = lines.map((l, i) => (l.includes("<!-- ledger:row -->") ? i : -1)).filter((i) => i >= 0).pop();
   lines.splice(lastRow! + 1, 0, `| <!-- ledger:row --> ${component.padEnd(14)} | cache          | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);

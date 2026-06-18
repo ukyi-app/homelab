@@ -18,7 +18,7 @@ import path from "node:path";
 import { parse } from "yaml";
 
 const USAGE = `poll-ghcr — GHCR 폴링 bump 플래너(읽기 전용, update-image 권위 경로)
-사용법: node tools/poll-ghcr.mjs [--dry-run] [--root <dir>] [--owner <org>] [--fixtures <dir>]
+사용법: bun tools/poll-ghcr.ts [--dry-run] [--root <dir>] [--owner <org>] [--fixtures <dir>]
   --dry-run         plan JSON만 출력(부작용 0)
   --root <dir>      레포 루트(기본 .)
   --owner <org>     GHCR org(기본 ukyi-app)

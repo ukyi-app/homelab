@@ -46,7 +46,7 @@ if (!args.name) {
 }
 
 // ---------- 2) 입력 검증 ----------
-const NAME_RE = /^[a-z]([a-z0-9-]*[a-z0-9])?$/; // validate-mutation.mjs와 동일 계열 (kebab-case)
+const NAME_RE = /^[a-z]([a-z0-9-]*[a-z0-9])?$/; // validate-mutation.ts와 동일 계열 (kebab-case)
 const EXT_RE = /^[a-z][a-z0-9_-]*$/;
 // 예약 이름: bootstrap initdb(app), 시스템 롤/DB — 충돌 시 클러스터가 깨진다
 const RESERVED = new Set(["app", "postgres", "pg", "template0", "template1", "streaming_replica"]);
@@ -131,7 +131,7 @@ if (!existsSync(certPath)) {
 const pwOwner = randomBytes(24).toString("base64url");
 const pwRo = randomBytes(24).toString("base64url");
 
-// 평문 Secret manifest는 메모리에서만 조립해 kubeseal stdin으로 직행 (seal-secret.mjs와 동일 패턴)
+// 평문 Secret manifest는 메모리에서만 조립해 kubeseal stdin으로 직행 (seal-secret.mts와 동일 패턴)
 function seal(manifest: any, outPath: string) {
   const res = spawnSync("kubeseal", ["--cert", certPath, "--format", "yaml"], {
     input: JSON.stringify(manifest), // kubeseal은 JSON manifest도 받는다(YAML 슈퍼셋)
@@ -196,7 +196,7 @@ const crDoc = new Document({
       : {}),
   },
 });
-crDoc.commentBefore = ` ${name} 논리 DB — create-database(provision-db.mjs) 산출물.
+crDoc.commentBefore = ` ${name} 논리 DB — create-database(provision-db.ts) 산출물.
  공유 pg 클러스터 안의 논리 객체라 메모리 원장 행을 추가하지 않는다(8704Mi 게이트 왜곡 방지).`;
 (crDoc.getIn(["spec", "owner"], true) as any).comment = " owner == name 불변식 — role↔DB 1:1 (teardown 격리)";
 (crDoc.getIn(["spec", "ensure"], true) as any).comment = " teardown은 absent 전환으로 (CR 삭제가 아니라)";
@@ -267,7 +267,7 @@ addResource(parentDoc, "databases/", " 논리 DB + owner/ro 시크릿 (create-da
 // data-conn 컴포넌트 (prod NS) — 없으면 신설 (appset이 data-conn-prod로 자동 발견)
 const connKustDoc = existsSync(paths.connKust)
   ? parseDocument(readFileSync(paths.connKust, "utf8"))
-  : parseDocument(`# 앱 소비용 conn SealedSecret 컴포넌트 (prod NS) — provision-db.mjs가 신설/등록.
+  : parseDocument(`# 앱 소비용 conn SealedSecret 컴포넌트 (prod NS) — provision-db.ts가 신설/등록.
 # platform-components ApplicationSet이 data-conn-prod Application으로 자동 발견한다.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

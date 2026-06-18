@@ -14,7 +14,7 @@ import { parse as parseYaml } from "yaml";
 import { surfaceHash } from "./lib/surface-hash.ts";
 
 const USAGE = `audit-orphans — registry↔매니페스트↔바인딩↔원장 교차 드리프트 리포트(읽기 전용)
-사용법: node tools/audit-orphans.mjs [--repo-root <dir>] [--ci] [--strict]
+사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict]
   --repo-root <dir>  레포 루트(기본 .)
   --ci               배포를 깨는 유형만 비-0 종료(dangling-binding/orphan-dns) — PR 게이트용
   --strict           모든 드리프트 유형을 비-0 종료(수동 점검)
