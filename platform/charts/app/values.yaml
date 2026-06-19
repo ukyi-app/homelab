@@ -33,6 +33,13 @@ route:
   paths: ["/"]
   public: false # sectionName 매핑: web-public (true) / web-internal (false)
 
+# --- homepage(gethomepage) 대시보드 자동발견 (served kind만; 기본 off) ---
+homepage:
+  enabled: false # true면 HTTPRoute에 gethomepage.dev/* annotation 부여 → Apps 그룹 자동 등장 + liveness 점
+  name: "" # 표시 이름(기본 릴리스명)
+  group: Apps # 대시보드 그룹
+  icon: "" # mdi-*/si-*/dashboard-icon 파일명 (선택)
+
 # --- 데이터베이스 / migration ---
 db:
   enabled: false
