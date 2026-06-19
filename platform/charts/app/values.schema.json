@@ -73,6 +73,15 @@
         "paths": { "type": "array", "items": { "type": "string" } },
         "public": { "type": "boolean" }
       }
+    },
+    "homepage": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "name": { "type": "string" },
+        "group": { "type": "string" },
+        "icon": { "type": "string" }
+      }
     }
   }
 }

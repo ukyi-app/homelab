@@ -1,8 +1,9 @@
 title: ukyi
-headerStyle: boxedWidgets
+headerStyle: underlined
 target: _blank
 quicklaunch:
   searchDescriptions: true
+  hideInternetSearch: true   # 내부 전용 대시보드 — 등록 서비스/북마크 안에서만 검색
 background:
   image: /images/background.jpg   # homepage-assets ConfigMap → /app/public/images (Task 5)
   blur: sm
@@ -15,9 +16,12 @@ layout:
   Infra:
     style: row
     columns: 4
+    icon: mdi-server-network
   Platform:
     style: row
     columns: 4
+    icon: mdi-cog
   Apps:
     style: row
     columns: 4
+    icon: mdi-apps

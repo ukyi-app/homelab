@@ -24,3 +24,13 @@ tpl() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   [ -z "$(echo "$out" | yq 'select(.kind=="Service")')" ]
   [ -z "$(echo "$out" | yq 'select(.kind=="HTTPRoute")')" ]
 }
+
+@test "homepage discovery annotations gate on homepage.enabled" {
+  tpl --set kind=service --set route.host=api.example.com > "$BATS_TEST_TMPDIR/off.yaml"
+  run grep -q 'gethomepage.dev/enabled' "$BATS_TEST_TMPDIR/off.yaml"; [ "$status" -ne 0 ]
+  tpl --set kind=service --set route.host=api.example.com --set homepage.enabled=true --set homepage.icon=mdi-test > "$BATS_TEST_TMPDIR/on.yaml"
+  run grep -q 'gethomepage.dev/enabled: "true"' "$BATS_TEST_TMPDIR/on.yaml"; [ "$status" -eq 0 ]
+  run grep -q 'gethomepage.dev/group: "Apps"' "$BATS_TEST_TMPDIR/on.yaml"; [ "$status" -eq 0 ]
+  run grep -q 'gethomepage.dev/icon: "mdi-test"' "$BATS_TEST_TMPDIR/on.yaml"; [ "$status" -eq 0 ]
+  run grep -q 'gethomepage.dev/pod-selector: "app.kubernetes.io/instance=t"' "$BATS_TEST_TMPDIR/on.yaml"; [ "$status" -eq 0 ]
+}

@@ -1,9 +1,10 @@
 # 자동발견 서비스는 annotation의 group 이름(Platform/Apps)에 합류한다.
-# Infra 그룹은 VictoriaMetrics PromQL 요약(prometheusmetric). 쿼리는 라이브에서 미세조정.
+# Infra 그룹 = VictoriaMetrics PromQL 요약(Cluster/Health) + Glances 라이브 호스트(Host/Host Mem).
+# 쿼리는 라이브 vmsingle:8428 질의로 검증함(빈 카드 없음).
 - Infra:
     - Cluster:
         icon: kubernetes.png
-        description: 노드/예산 요약
+        description: 노드/워크로드
         widget:
           type: prometheusmetric
           url: http://vmsingle.observability.svc.cluster.local:8428
@@ -17,21 +18,86 @@
               query: (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100
               format:
                 type: percent
+            - label: Disk
+              query: (1 - sum(node_filesystem_avail_bytes{mountpoint="/"}) / sum(node_filesystem_size_bytes{mountpoint="/"})) * 100
+              format:
+                type: percent
             - label: Mem Budget
               query: sum(kube_pod_container_resource_limits{resource="memory"}) / 1024 / 1024
               format:
                 type: number
                 suffix: " Mi"
+            - label: Running
+              query: count(kube_pod_status_phase{phase="Running"} == 1)
+              format:
+                type: number
+            - label: Pending
+              query: sum(kube_pod_status_phase{phase="Pending"}) or vector(0)
+              format:
+                type: number
+            - label: Nodes Ready
+              query: sum(kube_node_status_condition{condition="Ready",status="true"})
+              format:
+                type: number
+    - Health:
+        icon: mdi-heart-pulse
+        description: 알림/DB/DR/GitOps
+        widget:
+          type: prometheusmetric
+          url: http://vmsingle.observability.svc.cluster.local:8428
+          refreshInterval: 30000
+          metrics:
+            - label: Alerts
+              query: count(ALERTS{alertstate="firing", alertname!="Watchdog"}) or vector(0)
+              format:
+                type: number
+            - label: Restarts 15m
+              query: sum(increase(kube_pod_container_status_restarts_total{namespace!~"kube-system|kube-public|kube-node-lease"}[15m])) or vector(0)
+              format:
+                type: number
+                options:
+                  maximumFractionDigits: 0
             - label: Postgres
               query: max(cnpg_collector_up{namespace="database"})
               format:
                 type: number
+            - label: WAL Fill
+              query: max((cnpg_collector_pg_wal{value="size"} / on(namespace,pod) cnpg_collector_pg_wal{value="volume_size"}) * 100)
+              format:
+                type: percent
+            - label: Backup Age
+              query: (time() - max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp)) / 3600
+              format:
+                type: number
+                suffix: " h"
+                options:
+                  maximumFractionDigits: 1
+            - label: Cert Days
+              query: (certmanager_certificate_expiration_timestamp_seconds{name="home-wildcard"} - time()) / 86400
+              format:
+                type: number
+                suffix: " d"
+                options:
+                  maximumFractionDigits: 0
+            - label: OutOfSync
+              query: count(argocd_app_info{sync_status="OutOfSync"} == 1) or vector(0)
+              format:
+                type: number
     - Host:
         icon: mdi-gauge
-        description: 호스트 라이브 메트릭(Glances)
+        description: 호스트 CPU(Glances)
         widget:
           type: glances
           url: http://glances.observability.svc.cluster.local:61208
           version: 4
-          metric: cpu          # cpu/memory/fs 등 — 라이브 미세조정
+          metric: cpu
+          refreshInterval: 5000
+    - Host Mem:
+        icon: mdi-memory
+        description: 호스트 메모리(Glances)
+        widget:
+          type: glances
+          url: http://glances.observability.svc.cluster.local:61208
+          version: 4
+          metric: memory
           refreshInterval: 5000
