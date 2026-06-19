@@ -17,7 +17,7 @@ setup() { C="${BATS_TEST_DIRNAME}/config"; }
 }
 
 @test "settings apply header/target/search/background tweaks" {
-  run grep -qE '^headerStyle:[[:space:]]*boxedWidgets' "$C/settings.yaml"; [ "$status" -eq 0 ]
+  run grep -qE '^headerStyle:[[:space:]]*underlined' "$C/settings.yaml"; [ "$status" -eq 0 ]
   run grep -qE '^target:[[:space:]]*_blank' "$C/settings.yaml"; [ "$status" -eq 0 ]
   run grep -q 'searchDescriptions: true' "$C/settings.yaml"; [ "$status" -eq 0 ]
   run grep -q '/images/background.jpg' "$C/settings.yaml"; [ "$status" -eq 0 ]

@@ -1,5 +1,5 @@
 title: ukyi
-headerStyle: boxedWidgets
+headerStyle: underlined
 target: _blank
 quicklaunch:
   searchDescriptions: true
