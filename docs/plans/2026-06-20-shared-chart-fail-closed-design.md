@@ -44,9 +44,11 @@
   terminationGracePeriodSeconds·preStopSleepSeconds·ports·metrics·nameOverride` + 신규 `strategy·
   automountServiceAccountToken·livenessProbe`를 properties에 등재.
 - **① extraManifests 제거**: values.yaml·deployment.yaml(range 블록)·schema 전부에서 삭제. 추가 매니페스트는
-  appset source#3(`apps/<name>/deploy/prod` kustomization)로 — SealedSecret이 이미 그 경로라 일관적이고
-  PSA·테마1 `apps` AppProject kind 화이트리스트가 동일 적용(2차 방어). extraManifests를 남기면
-  additionalProperties:false가 그걸 reject하므로 제거가 정합.
+  appset source#3(`apps/<name>/deploy/prod` kustomization)로 — SealedSecret이 이미 그 경로다. ⚠️ **정직하게**:
+  테마2 성과는 escape hatch "닫음"이 아니라 **차트가 무검증 toYaml로 임의 객체를 방출하던 백도어를 차트에서
+  제거**(fail-closed)한 것이다. source#3 자체의 kind 경계(임의 kind 차단)는 [[테마1]] apps AppProject
+  namespaceResourceWhitelist가 머지된 뒤에야 적용된다(현 origin/main은 project:default라 미적용); PSA는 Pod에만.
+  extraManifests를 남기면 additionalProperties:false가 reject하므로 제거가 정합.
 - **동작보존 핵심**: 3 fixture(service/static/worker)가 쓰는 키를 전수 커버해야 reject 0. 0앱 환경에선
   fixture가 키 SSOT다. 회귀: 미지 top키 1개라도 주면 거부 + 3 fixture 전부 통과.
 
