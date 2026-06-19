@@ -34,6 +34,7 @@
 ### 비목표
 - CLI 전면 재작성·통합 런처(`cli.mjs` 식 일괄 교체)는 **하지 않는다**(고위험·저가치, P2 백로그에서 보류 판정).
 - 각 도구의 **플래그 계약(받는 옵션 집합)·동작 의미는 보존**한다 — 공유 파서는 기존 계약을 깨지 않는 선에서만 채택.
+- **app-shared `.mts`(seal-secret·env-example)는 미수정**(Pass1 F3) — app-starter 템플릿에 동봉돼 외부 앱 레포에서 node strip-types로 실행되는 self-contained 스크립트라 homelab-local lib import 금지. 이들은 자체 kubeseal/arg 파싱을 유지한다.
 - 새 기능·새 도구 추가 없음. 동작 추가가 아니라 **중복 제거 + 발산 수렴 + 버그 수정**.
 
 ## 3. 설계: `tools/lib/` 5개 모듈
@@ -59,10 +60,10 @@
 - 기존 `replaceTotals`는 유지. addRow/removeRow는 호출 후 합계 재계산 → `replaceTotals`와 함께 쓰여 totals 정합 유지.
 - 통일 대상: `create-app.ts:124,211-213`(추가)·`audit-orphans.ts:123`(파싱)·`teardown-app.ts:35`(제거)·`provision-cache.ts:62,334`(cache 행 파싱/추가) + **`teardown-resource.ts` purge(removeRow 신규 배선 — §4 버그①)**.
 
-### 모듈 3 — `seal.mts` 신설 (`.mts`): kubeseal 봉인 SSOT
+### 모듈 3 — `seal.ts` 신설 (`.ts`): kubeseal 봉인 SSOT
 - `sealManifest(manifest: object, certPath: string): string` — 평문 manifest를 메모리에서 kubeseal stdin으로만 흘려 봉인 YAML 반환(디스크 비기록).
-- 현재 **바이트 동일 3복제**: `provision-db.ts:136`·`provision-cache.ts:219`(둘 다 `spawnSync("kubeseal", ["--cert", …, "--format", "yaml"], { input: JSON.stringify(manifest) })`)·`seal-secret.mts`. provision-db:134 주석이 "seal-secret.mts와 동일 패턴"이라 복제를 이미 인정.
-- **`.mts` 필수·완전공유 확정**(사용자 결정): `seal-secret.mts`가 node strip-types(≥22.18)라 `.ts` import 불가 → 공유 모듈이 `.mts`여야 3콜사이트 전부 공유. `sealManifest`는 단순 함수라 strip-types 제약(no enum/namespace/decorator) 만족 자명.
+- 현재 **바이트 동일 3복제**: `provision-db.ts:136`·`provision-cache.ts:219`·`seal-secret.mts`. provision-db:134 주석이 "seal-secret.mts와 동일 패턴"이라 복제를 이미 인정.
+- **`.ts`·homelab 전용 공유**(Pass1 F3 적대리뷰 반영): `seal-secret.mts`는 app-starter 템플릿에 동봉돼 외부 앱 레포에서 `pnpm secret:seal`로 실행되는 **self-contained 스크립트**라(`seal-secret.mts:5`·`test_app-shared-node-smoke` 게이트), homelab-local lib를 import하면 앱 레포 번들에서 모듈 부재로 깨진다(homelab CI는 lib가 있어 green=무성 회귀). 따라서 **seal는 `.ts`**(provision-db·provision-cache 2곳만 공유)이고 **seal-secret.mts는 미수정**(자체 kubeseal 블록 유지).
 
 ### 모듈 4 — `kustomization.ts` 신설 (`.ts`): kustomization.yaml 멱등 편집 SSOT
 - `addResource(kustomizationYaml, entry): string` / `removeResource(kustomizationYaml, entry): string` — `yaml` 라운드트립(주석 보존), `resources` 리스트에 멱등 추가/제거.
@@ -70,12 +71,12 @@
 - 통일 대상: `provision-db.ts`·`provision-cache.ts:233-248`(데이터 conn kustomization 포함).
 - 주의: vendor `charts/` 등 비대상 kustomization은 건드리지 않음. 대상은 데이터 리소스(cnpg databases·cache instances·data-conn) 한정.
 
-### 모듈 5 — `cli.mts` 신설 (`.mts`): 인자 파싱 SSOT
+### 모듈 5 — `cli.ts` 신설 (`.ts`): 인자 파싱 SSOT
 - `parseFlags(argv, spec): Record<string, …>` — `--flag value` 루프를 한 곳에서:
   - **값이 `--`로 시작하면 거부**(§4 버그② — 현재 일부 파서가 누락된 값 자리에서 다음 플래그를 값으로 삼킴).
   - **unknown 플래그 거부**(이미 일부 도구가 ALLOWED_FLAGS로 하는 패턴을 표준화).
   - `--help` / `--dry-run` 등 boolean 플래그 지원.
-- 현재 16개 파일이 제각각 `process.argv.slice(2)`/`indexOf` 루프(env-example.mts·seal-secret.mts 포함 → **`.mts` 필수·완전공유**).
+- 현재 16개 파일이 제각각 `process.argv.slice(2)`/`indexOf` 루프. **`.ts`·homelab 전용**(Pass1 F3): app-shared `env-example.mts`·`seal-secret.mts`는 외부 앱 레포 배포 self-contained라 **미수정**(자체 파싱 유지). cli는 homelab `.ts` 도구만 공유.
 - **채택 원칙**: 손으로 짠 동일 패턴 루프를 가진 콜사이트만 교체하고, **각 도구의 플래그 집합·의미는 1:1 보존**한다. 한 번에 전부 강제 교체 금지(비목표) — Phase B에서 콜사이트별로 안전한 것만 명시 선정.
 
 ## 4. 통일이 고치는 2개 잠복 버그
@@ -96,8 +97,8 @@
 
 ## 6. 결정사항 (3건 — 전부 해소)
 
-- **D1 (seal/cli `.mts` vs `.ts`)** → **`.mts` 완전공유**(사용자 결정 2026-06-20). seal-secret.mts·env-example.mts(node strip-types `.mts`)까지 공유해 복제 0. parseFlags/sealManifest는 단순 함수라 strip-types 제약 부담 없음. `.mts` 패턴은 tools/에 이미 존재.
-  - identity/ledger-totals/kustomization은 콜사이트가 전부 `.ts`라 **`.ts` 유지**(불필요한 .mts 전환 안 함).
+- **D1 (seal/cli 형식)** → **`.ts`·homelab 전용 공유**(2026-06-20 최초 `.mts` 완전공유 결정 → Pass1 F3 적대리뷰로 **정정**). seal-secret.mts·env-example.mts는 app-starter 템플릿 동봉 self-contained 스크립트(외부 앱 레포 `pnpm secret:seal`/`env:example` 경로, node strip-types)라 homelab-local lib import 시 **앱 레포 번들서 모듈 부재로 깨진다**(homelab CI는 lib 있어 green=무성 회귀). 따라서 seal/cli는 `.ts`로 두고 homelab `.ts` 도구만 공유, **app-shared `.mts` 2개는 미수정**. tools/lib 전부 `.ts` 일관 유지.
+  - identity/ledger-totals/kustomization도 콜사이트가 전부 homelab `.ts`라 **`.ts`**.
 - **D2 (RESOURCE_NAME_RE 길이/형태)** → **≤30·single-char 허용·no trailing hyphen** = `/^[a-z]([a-z0-9-]{0,28}[a-z0-9])?$/`. provision-db(30)/provision-cache(29) 발산을 **30**(더 관대·k8s 파생명 `db-<name>-ro-conn` 등 ≤63 여유 충분)으로 통일. single-char는 모든 현행 검증기가 허용 → 보존.
 - **D3 (EXT_RE 포함)** → **포함**. validate-mutation:36 + provision-db:50 **바이트 동일 2복제** 확인 → 추출에 SSOT 가치(검증된 발산 위험: 한쪽만 고치면 우회 표면).
 
