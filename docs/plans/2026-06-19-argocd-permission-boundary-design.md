@@ -49,23 +49,22 @@ appset + bats만 수정).
   `HTTPRoute`(gateway.networking.k8s.io), `SealedSecret`(bitnami.com).
   (extraManifests로 다른 kind 주입 시 거부 — 테마2의 escape hatch와 맞물리는 2차 방어선.)
 
-**`platform` (스코프 — 동작보존 우선)**
-- `sourceRepos` = homelab repo + 각 매니페스트의 helm repoURL (**파생**)
-- `destinations` = in-cluster server + 플랫폼이 실제 배포하는 **렌더된 namespace 집합**
-  (argocd·cert-manager·cnpg-system·database·sealed-secrets·gateway·edge·prod·cache·homepage·observability).
-  ⚠️ **설계 리뷰 #2**: appset-생성 platform 컴포넌트는 Application `.spec.destination.namespace`가
-  **비어있다**(appset 템플릿은 `destination.server`만; ns는 각 kustomization의 `namespace:` 트랜스포머가
-  렌더 — appset.yaml:40-41 확인). 따라서 destination.namespace 파생은 무의미·잘못된 레이어 →
-  **rendered manifest의 리소스 namespace**에서 파생해야 한다(ArgoCD는 리소스 ns를 project destinations로
-  검증). 정확 목록은 plan이 `kustomize build`로 enumerate.
+**`platform` (스코프 — 동작보존 우선; **server+repo** 경계)**
+- `sourceRepos` = homelab repo + helm repoURL(`charts.jetstack.io`·`cloudnative-pg.io/charts`) (**파생**)
+- `destinations` = `[{server: https://kubernetes.default.svc, namespace: '*'}]`.
+  ⚠️ **plan 리뷰 Pass2 #1**: appset-생성 platform 컴포넌트는 Application `.spec.destination.namespace`가
+  **비어있고**(appset 템플릿은 `destination.server`만; ns는 각 kustomization·리소스가 정함 — tailscale은
+  edge·gateway **양쪽**에 내므로 트랜스포머조차 없음), ArgoCD는 매니페스트 검사 **전에** 그 빈 destination을
+  project destinations로 검증한다 → named-only면 **InvalidSpec**으로 platform 앱이 깨진다(동작파괴). appset
+  템플릿은 컴포넌트별 destination.namespace를 줄 수 없으므로 tight namespace 경계는 **실현 불가** → `'*'`로 빈
+  destination 허용(동작보존). platform 경계는 **server+repo**로 유지, tight namespace 경계는 실제 위협 표면인
+  `apps` 프로젝트(ns=prod)에 둔다.
 - `clusterResourceWhitelist: ['*']` — 플랫폼은 CRD/ClusterRole/GatewayClass/Namespace를 정당하게
-  설치하므로 좁히면 동작파괴. 와일드카드 유지(가치=server+repo+namespace 경계; cluster-scoped는
-  소유자-PR 경로라 §D default-lockdown 가드가 보완).
+  설치하므로 좁히면 동작파괴. 와일드카드 유지.
 
-**파생값 안전장치**: sourceRepos/destinations는 추측하지 않고 enumerate하며, bats 가드는
-**`kustomize build` 렌더 산출물의 리소스 namespace**(Application `.spec.destination.namespace`가 아니라)와
-helm repoURL이 각각 project destinations·sourceRepos에 포함되는지 강제(드리프트 차단). 렌더 ns가 project에
-없으면 ArgoCD가 그 리소스를 거부하므로, 이 렌더-기준 가드가 동작보존의 핵심이다.
+**가드**: bats가 (a) 모든 platform Application의 repoURL ∈ `sourceRepos`, (b) 모든 platform Application의
+`.spec.destination`(server+namespace, **빈 namespace 포함**)이 project destinations에 **permitted**임을 강제 —
+미래의 destinations tightening이 빈 Application destination을 깨는 회귀를 커밋 전 차단(동작보존 핵심).
 
 ### B. 프로젝트 재배정
 
@@ -125,8 +124,8 @@ Healthy 확인)는 각 배치 사이에 둔다.
 
 **정적(gate)**
 - projects.yaml 렌더(kustomize/kubeconform) 통과.
-- platform 파생-가드 bats(#2): 모든 platform 컴포넌트의 **렌더 리소스 namespace** ∈ project destinations,
-  helm repoURL ∈ sourceRepos (`kustomize build` 기준, Application destination.namespace 아님).
+- platform 가드 bats(Pass2 #1): 모든 platform Application의 repoURL ∈ sourceRepos + `.spec.destination`
+  (빈 namespace 포함)이 project destinations에 permitted (destinations='*'라 회귀 tightening 차단).
 - apps 프로젝트 namespaceResourceWhitelist가 차트 방출 kind를 전수 포함하는지 bats.
 - exclude⊇root/apps bats.
 - Namespace 소유 Application no-finalizer bats(#1).
@@ -158,6 +157,14 @@ Healthy 확인)는 각 배치 사이에 둔다.
 - **#3 (high)**: default 프로젝트 잔류가 steady-state escape hatch → "argocd·root만 default" +
   apps 프로젝트 약화 금지 가드(§D). (root를 별도 control-plane 프로젝트로 이전하는 무거운 안은
   부트스트랩 chicken-egg 회피 위해 보류 — 가드가 비례적 봉쇄.)
+
+## plan 리뷰 (Phase C, codex working-tree) — 설계로 환류된 발견
+
+- **Pass1**: default-lockdown 전수 스캔화 + destination 가드를 실제 렌더 기준화 + no-finalizer 정적
+  탐지+allowlist(전부 가드 구현 정제, 핵심 설계 불변). plan에만 반영.
+- **Pass2 #1 (high, 사용자 승인)**: named-only platform destinations가 appset 생성 앱의 **빈 Application
+  destination**을 InvalidSpec으로 거부 → **§A 변경**: platform destinations=`'*'`(server+repo 경계만, tight
+  namespace 경계는 실현 불가). Pass2 #2(tailscale multi-ns)는 파생 ns 가드 제거로 자동 해소.
 
 ## 범위 밖 (후속 plan)
 
