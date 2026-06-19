@@ -12,8 +12,8 @@ setup() { C="${BATS_TEST_DIRNAME}/config"; }
   run grep -q 'vmsingle.observability.svc.cluster.local:8428' "$C/services.yaml"; [ "$status" -eq 0 ]
 }
 
-@test "settings declare the dashboard title as ukyi" {
-  run grep -qE '^title:[[:space:]]*ukyi$' "$C/settings.yaml"; [ "$status" -eq 0 ]
+@test "settings declare the dashboard title" {
+  run grep -qF 'title: "ukyi · home"' "$C/settings.yaml"; [ "$status" -eq 0 ]
 }
 
 @test "settings apply header/target/search/background tweaks" {
@@ -28,6 +28,10 @@ setup() { C="${BATS_TEST_DIRNAME}/config"; }
 @test "layout groups carry icons and quicklaunch hides internet search" {
   run grep -q 'icon: mdi-server-network' "$C/settings.yaml"; [ "$status" -eq 0 ]
   run grep -q 'hideInternetSearch: true' "$C/settings.yaml"; [ "$status" -eq 0 ]
+}
+
+@test "greeting header shows ukyi" {
+  run grep -qE '^[[:space:]]*text:[[:space:]]*ukyi$' "$C/widgets.yaml"; [ "$status" -eq 0 ]
 }
 
 @test "widgets add the logo and h23 time format" {
