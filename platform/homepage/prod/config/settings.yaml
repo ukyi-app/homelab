@@ -15,7 +15,7 @@ useEqualHeights: true
 layout:
   Infra:
     style: row
-    columns: 4
+    columns: 3   # 6타일(메트릭 4카드+Glances 2)을 3x2로 — 카드 폭 확보로 잘림 방지
     icon: mdi-server-network
   Platform:
     style: row
