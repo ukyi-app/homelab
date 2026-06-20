@@ -38,7 +38,7 @@
 - `tools/tests/test_dirmap.bats` 주석(L2 "README.md/AGENTS.md")에서 AGENTS.md 언급 제거(테스트는 이미 README만 검사 — 정합).
 
 ### 수정 3 — 런북 인덱스 드리프트 로컬 가드 (발견3)
-- `make verify-runbooks`(또는 `scripts/verify-runbooks.sh`, **로컬 전용**): `docs/runbooks/`에 `.md`가 있으면 AGENTS.md 런북 인덱스 ↔ 실제 파일 일치 확인. 런북 gitignored라 **CI는 파일 부재로 skip**(verify-posture류 로컬 게이트 — required gate 아님, dead-green 회피).
+- **신규 `make verify-runbook-index`**(`scripts/verify-runbook-index.sh`, **로컬 전용**): `docs/runbooks/`에 `.md`가 있으면 AGENTS.md 런북 인덱스 ↔ 실제 파일 일치. 런북 gitignored라 **CI는 파일 부재로 skip**(required gate 아님). ★**기존 `verify-runbooks`(DR 런북 bats 러너, Makefile:107)는 불변** — 별도 타겟(DR 테스트 은닉 방지, Pass1 F2).
 
 ### 수정 4 — 트랩 SSOT ↔ 원장 내용 드리프트 가드 (D3 guard-path-tie, 발견4)
 - `scripts/verify-traps.sh` 확장: 기존(원장 guard 경로 **실재**) + **신규: 원장 guard 경로가 `traps-detail.md`에도 등장**(enforced 트랩이 SSOT에 부재=드리프트 차단). ID 불요 — 기존 guard 경로를 매칭 키로.
@@ -47,8 +47,8 @@
 ## 4. 라이브 위험 / 검증
 
 - **라이브 위험 없음** — 순수 문서/가드(ArgoCD 무관, 클러스터 무관).
-- ★**핵심 리스크 = 트랩 무손실 이전**: 41항목 전량 보존(누락=하드원 지식 유실). 이전 후 **diff로 무손실 검증**(AGENTS 제거분 ⊆ traps-detail 추가분).
-- **검증**: 정적 bats(`test_traps-sync`·`test_dirmap`)·`make verify-traps`(확장) — run-bats 게이트 / `make ci`. 런북 가드는 로컬(`make verify-runbooks`). homepage README 존재 확인.
+- ★**핵심 리스크 = 트랩 무손실 이전**: 41항목 전량 보존(누락=하드원 지식 유실). traps-detail.md에 **원본 불릿 verbatim 보존** + **불릿블록 whole-line `grep -Fq` 검증**(strip 0·intro 제외·fail-closed — Pass1-3 F1/F4/F5: `**`·glob strip은 거짓 MISSING, intro는 재작성 대상).
+- **검증**: 정적 bats(`test_traps-sync`[인덱스↔detail·F6 회귀]·`test_dirmap`)·`make verify-traps`(**guard-path-tie=표 guard열만**, prose 경로 제외 F6) — run-bats / `make ci`. 런북 가드는 로컬(`make verify-runbook-index`, 별도). homepage README 존재.
 - bats `@test` 영어·중간 단언 `[ ]`·bash 3.2 호환.
 
 ## 5. 결정사항
