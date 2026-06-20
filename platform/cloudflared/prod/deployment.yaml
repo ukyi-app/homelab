@@ -14,6 +14,9 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault   # 표준 정합(homepage/adguard/cnpg 동형) — userspace 터널이라 RuntimeDefault 안전
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared:2024.10.1
