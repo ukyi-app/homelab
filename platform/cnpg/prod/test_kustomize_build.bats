@@ -31,10 +31,10 @@
   echo "$drill" | grep -q 'ACTUAL_ROWS'
   [ "$(printf '%s' "$drill" | wc -l)" -gt 30 ] # ...그리고 한 줄짜리 스텁이 아닌 전체 스크립트다
 }
-@test "data app is sync-wave -1, project default, ns database" {
+@test "data app is sync-wave -1, project platform, ns database" {
   f=platform/argocd/root/apps/cnpg-data.yaml
   grep -qE 'argocd.argoproj.io/sync-wave:\s*"-1"' "$f"
-  grep -qE 'project:\s+default' "$f"
+  grep -qE 'project:\s+platform' "$f"   # 테마1 권한경계 재배정(default→platform)
   grep -qE 'namespace:\s+database' "$f"
 }
 @test "database namespace is declared with PSA baseline labels (cnpg-data App owns it, wave -3)" {

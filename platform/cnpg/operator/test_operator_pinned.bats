@@ -16,8 +16,9 @@ f=platform/argocd/root/apps/cnpg-operator.yaml
   [ "$status" -eq 0 ]
 }
 
-@test "operator uses the default AppProject" {
-  run grep -E 'project:\s+default' "$f"
+# 테마1 권한경계 재배정(default→platform). @test 이름은 영어만(한글이면 디렉토리 실행 시 침묵 스킵).
+@test "operator uses the platform AppProject" {
+  run grep -E 'project:\s+platform' "$f"
   [ "$status" -eq 0 ]
 }
 
