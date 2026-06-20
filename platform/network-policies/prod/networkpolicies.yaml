@@ -45,9 +45,16 @@ spec:
   podSelector: {}
   policyTypes: [Egress]
   egress:
+    # 최소권한: database namespace 전체가 아니라 pooler/cluster pod로 한정(직접 primary 우회 차단).
+    # ★라이브 `kubectl -n database get pods --show-labels`로 라벨 확정 + rehearsal(scripts/netpol-rehearsal.sh)로
+    #   머지 전 검증 — 라벨 미스 시 DB 전면 차단. namespaceSelector+podSelector는 같은 to 항목(AND).
     - to:
-        - namespaceSelector:
-            matchLabels: { kubernetes.io/metadata.name: database }
+        # pooler(pg-pooler-rw, PgBouncer) — 앱의 권장 런타임 경로
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: database } }
+          podSelector: { matchLabels: { cnpg.io/poolerName: pg-pooler-rw } }
+        # cnpg 클러스터 pod(pg-rw→primary, pg-ro→replica) — CNPG 자동생성 라벨 cnpg.io/cluster=<cluster명 'pg'>
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: database } }
+          podSelector: { matchLabels: { cnpg.io/cluster: pg } }
       ports:
         - { protocol: TCP, port: 5432 }
 ---
