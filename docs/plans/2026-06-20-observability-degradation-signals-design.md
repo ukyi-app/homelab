@@ -36,7 +36,8 @@
 ### 수정 1 — vmagent 버퍼: leading 경고 + graceful drop (D1)
 - `vmagent.yaml` args에 **`--remoteWrite.maxDiskUsagePerURL=<512Mi 미만, 예 450MiB>`** 추가 → 큐가 그 캡 도달 시 oldest drop(기존 `VmagentRemoteWriteDropping`이 신호), **emptyDir 512Mi eviction+전량유실 회피**.
 - `core.yaml`에 **`VmagentBufferFilling`**(warning) — vmagent 버퍼 메트릭이 캡의 일정 비율(예 70%) 초과 지속 시. ★메트릭명은 **라이브 vmagent:8429/metrics로 정확 확인**(후보 `vmagent_remotewrite_pending_data_bytes` 또는 `vm_persistentqueue_bytes_pending` — 버전별 상이, 부재 메트릭 알림은 죽은 알림[인시던트 #13/#14]).
-- 2티어: `VmagentBufferFilling`(leading, 채워짐) + 기존 `VmagentRemoteWriteDropping`(실제 드롭).
+- ★**커버리지 경계(Pass1 F5)**: 이 알림은 vmsingle **느림/backpressure**(write가 trickle 통과)에 leading하나, vmsingle **write 전면다운** 시엔 pending 메트릭도 vmagent 큐에 갇혀 vmsingle 미도달→**침묵(self-defeating, 자기 메트릭이 그 버퍼를 통과)**이라 그 케이스는 `TargetDown(vmsingle)`+deadman이 커버. 룰 주석에 경계 명시(`AlertmanagerTelegramFailing`의 자기참조 한계 주석 선례). summary/description도 "느림/backpressure"로 정직화(=테마의 부분열화).
+- 2티어: `VmagentBufferFilling`(leading on slow, 채워짐) + 기존 `VmagentRemoteWriteDropping`(실제 드롭).
 
 ### 수정 2 — vector 메트릭 노출 + backpressure 경고
 - `vector.yaml` ConfigMap config에 `sources.internal: { type: internal_metrics }` + `sinks.prometheus: { type: prometheus_exporter, inputs: [internal], address: "0.0.0.0:9598" }`.
