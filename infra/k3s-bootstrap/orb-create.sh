@@ -20,6 +20,8 @@ orb config set cpu "$ORB_CPU"
 
 if orb list 2>/dev/null | awk 'NF && $1 != "NAME" {print $1}' | grep -qx "$ORB_MACHINE"; then
   echo "==> Machine '${ORB_MACHINE}' already exists — skipping create (idempotent)."
+  echo "    ⚠️ cloud-init.yaml 편집은 기존 머신에 적용되지 않는다 — 반영하려면 재생성(orb delete '${ORB_MACHINE}' 후 재실행)"
+  echo "       하거나 머신 내에서 수동 적용. host-up.sh의 다른 단계는 멱등하지만 cloud-init은 생성 1회뿐이다."
 else
   echo "==> Creating Debian ${DEBIAN_RELEASE} ${DEBIAN_ARCH} machine '${ORB_MACHINE}'…"
   # Apple Silicon의 OrbStack은 arm64가 기본이다; 배포판은 명시적으로 지정한다.
