@@ -32,3 +32,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; S="$ROOT/tools/app-con
   run jq -e '.properties.deploy.properties.autoDeploy.type == "boolean"' "$S"
   [ "$status" -eq 0 ]
 }
+
+@test "static.server enum is sws-only (chart contract: caddy removed)" {
+  run jq -e '.properties.static.properties.server.enum == ["sws"]' "$S"
+  [ "$status" -eq 0 ]
+}

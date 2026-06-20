@@ -52,7 +52,7 @@ probes:
 
 # --- static(정적 파일) 서빙 추상화 ---
 static:
-  server: sws # sws | caddy   (kind=static일 때만 사용; 기본 sws)
+  server: sws # sws 단일(kind=static일 때만 사용; caddy는 미구현이라 제거 — 테마2)
 
 # --- pod 하드닝 (기본값; 오버라이드는 드묾) ---
 podSecurityContext:

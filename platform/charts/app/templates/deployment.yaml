@@ -62,16 +62,23 @@ spec:
             {{- end }}
           {{- end }}
           {{- if include "app.isServed" . }}
+          {{- $live := .Values.probes.liveness.path }}
+          {{- $ready := .Values.probes.readiness.path }}
+          {{- if eq .Values.kind "static" }}
+          {{- /* static-web-server는 --health로 /health만 노출 (서비스용 /healthz·/readyz 부재) */}}
+          {{- $live = "/health" }}
+          {{- $ready = "/health" }}
+          {{- end }}
           livenessProbe:
-            httpGet: { path: {{ .Values.probes.liveness.path }}, port: http }
+            httpGet: { path: {{ $live }}, port: http }
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
-            httpGet: { path: {{ .Values.probes.readiness.path }}, port: http }
+            httpGet: { path: {{ $ready }}, port: http }
             initialDelaySeconds: 3
             periodSeconds: 5
           {{- else }}
-          # worker: 프로세스 liveness만 확인 (exec true 플레이스홀더; 런타임별 오버라이드)
+          # worker: 기본 exec /bin/true (Task 4에서 livenessProbe override 추가)
           livenessProbe:
             exec: { command: ["/bin/true"] }
             periodSeconds: 30
