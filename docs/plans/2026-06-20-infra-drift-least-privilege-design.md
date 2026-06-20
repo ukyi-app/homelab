@@ -40,6 +40,7 @@
 ### 수정 3 — prod→database egress 최소화 (★HIGH 라이브 — 강한 게이트)
 - `allow-egress-to-database`의 `to`에 **podSelector 추가** — pooler(`pg-pooler-rw`) + cnpg 클러스터 pod만. CNPG 자동생성 라벨(예 `cnpg.io/poolerName`·`cnpg.io/cluster`)이라 ★**라이브 `kubectl -n database get pods --show-labels`로 정확 라벨 확인 후** 작성(미스시 DB 전면 차단).
 - 정적: `test_netpol.bats`가 podSelector 좁힘을 단언(기존 namespace+5432 + 신규 pod 한정). 라이브: **`make verify-posture`(test_networking-e2e)로 앱→DB 연결 정상·비대상 차단** 확인 — 머지 전 필수(outage 방지).
+- ★**candidate rehearsal 필수 (Pass1-4 하드닝)**: GitOps selfHeal라 pre-merge verify-posture는 main(broad)을 테스트 → candidate를 `scripts/netpol-rehearsal.sh`(app **`network-policies-prod`**·selfHeal off·candidate apply·**`trap` 보장 복원**)로 머지 전 실연. 정적은 **yq 구조 단언**(broad 피어 0 + pooler·cluster **정확 셀렉터 둘 다**). posture는 **pg-rw + pg-pooler-rw**(앱 런타임 PgBouncer 경로) 둘 다 **fail-closed**. (F1a 잘못된정책검증·F2 rehearsal필수·F3 앱명·F4 pooler경로·F5 trap복원·F6 fail-closed)
 
 ### 수정 4 — storage 고아 Released PV 감사 (D2: 스크립트/런북)
 - 감사 스크립트(`scripts/audit-orphan-pv.sh` 또는 기존 audit 확장): `kubectl get pv`에서 `status.phase==Released` PV 나열(고아=PVC 삭제+Retain 잔존) + hostPath 경로 표시 → owner가 수동 reclaim. 런북(`docs/runbooks/` 로컬)에 절차.
