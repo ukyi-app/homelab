@@ -50,6 +50,10 @@ probes:
   liveness: { path: /healthz }
   readiness: { path: /readyz }
 
+# liveness override (raw probe spec). 비면 기본(served=httpGet, worker=exec /bin/true).
+# distroless(Rust static/scratch) 이미지는 /bin/true가 없으니 grpc/tcpSocket 등으로 오버라이드.
+livenessProbe: {}
+
 # --- static(정적 파일) 서빙 추상화 ---
 static:
   server: sws # sws 단일(kind=static일 때만 사용; caddy는 미구현이라 제거 — 테마2)
@@ -67,7 +71,7 @@ securityContext:
   capabilities: { drop: ["ALL"] }
 
 terminationGracePeriodSeconds: 30
-preStopSleepSeconds: 3
+preStopSleepSeconds: 3 # 0이면 preStop 생략(distroless엔 /bin/sleep 부재 — drain은 terminationGracePeriod+readiness)
 
 # --- ports (계약) ---
 ports:

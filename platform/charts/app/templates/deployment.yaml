@@ -71,24 +71,36 @@ spec:
           {{- $live = "/health" }}
           {{- $ready = "/health" }}
           {{- end }}
+          {{- if .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          {{- else }}
           livenessProbe:
             httpGet: { path: {{ $live }}, port: http }
             initialDelaySeconds: 5
             periodSeconds: 10
+          {{- end }}
           readinessProbe:
             httpGet: { path: {{ $ready }}, port: http }
             initialDelaySeconds: 3
             periodSeconds: 5
           {{- else }}
-          # worker: 기본 exec /bin/true (Task 4에서 livenessProbe override 추가)
+          {{- /* worker 기본 liveness=exec true 플레이스홀더; distroless는 livenessProbe로 오버라이드 */}}
+          {{- if .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          {{- else }}
           livenessProbe:
             exec: { command: ["/bin/true"] }
             periodSeconds: 30
           {{- end }}
+          {{- end }}
+          {{- if gt (int .Values.preStopSleepSeconds) 0 }}
           lifecycle:
             preStop:
               exec:
                 command: ["/bin/sleep", "{{ .Values.preStopSleepSeconds }}"]
+          {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
