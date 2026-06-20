@@ -16,6 +16,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes, createHash } from "node:crypto";
 import { parseDocument } from "yaml";
 import { replaceTotals } from "./lib/ledger-totals.ts";
+import { RESOURCE_NAME_RE } from "./lib/identity.ts";
 
 // 버전 핀 — latest 금지. backup-cronjob.yaml의 snapshot 컨테이너와 같은 태그를 유지한다.
 const VALKEY_IMAGE = "valkey/valkey:8.1.1-alpine";
@@ -38,7 +39,7 @@ if (!name) {
   console.error("usage: provision-cache --name <cache> [--maxmemory-mi 16..1024] [--repo-root <dir>] [--cert <pem>] [--dry-run]");
   process.exit(2);
 }
-if (!/^[a-z]([a-z0-9-]{0,27}[a-z0-9])?$/.test(name)) fail(`이름 불량: '${name}' (^[a-z]([a-z0-9-]{0,27}[a-z0-9])?$)`);
+if (!RESOURCE_NAME_RE.test(name)) fail(`이름 불량: '${name}' (소문자 kebab, trailing hyphen 금지, ≤30)`);
 // -ro 접미사 예약: cache 'foo-ro'의 conn(cache-foo-ro-conn)이 'foo'의 읽기전용 conn과 충돌.
 if (/-ro$/.test(name)) fail(`'-ro' 접미사 예약: '${name}' — 읽기전용 conn 이름과 충돌`);
 if (!/^\d+$/.test(rawMaxmemory) || !Number.isInteger(maxmemoryMi) || maxmemoryMi < 16 || maxmemoryMi > 1024)

@@ -21,6 +21,7 @@
 // envFrom 파싱이나 외부 앱 레포 config는 stale/접근불가일 수 있어 신뢰하지 않는다.
 import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
 import { parseDocument } from "yaml";
+import { RESOURCE_NAME_RE } from "./lib/identity.ts";
 
 const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const has = (k: string) => process.argv.includes(k);
@@ -40,7 +41,7 @@ for (const a of process.argv.slice(2)) {
 const fail = (msg: string): never => { console.error(`teardown-resource: ${msg}`); process.exit(1); };
 if ((db ? 1 : 0) + (cache ? 1 : 0) !== 1) fail("--db <name> 또는 --cache <name> 중 정확히 하나");
 const name = (db ?? cache)!;
-if (!/^[a-z][a-z0-9-]*$/.test(name)) fail(`이름 형식 불량: ${name}`);
+if (!RESOURCE_NAME_RE.test(name)) fail(`이름 형식 불량: ${name}`);
 const kind = db ? "db" : "cache";
 const key = `${kind}:${name}`;
 

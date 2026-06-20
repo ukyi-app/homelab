@@ -5,6 +5,7 @@
 // 이 도구는 reset/drop 등 어떤 파괴 수단도 제공하지 않는다(파괴 작업은 docker 모드 전용).
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { RESOURCE_NAME_RE } from "./lib/identity.ts";
 
 const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const DRY = process.argv.includes("--dry-run");
@@ -19,7 +20,7 @@ for (const a of process.argv.slice(2)) {
     process.exit(2);
   }
 }
-if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) {
+if (!name || !RESOURCE_NAME_RE.test(name)) {
   console.error("usage: db-url --name <db> [--host <tailscale-ip>] [--dry-run]");
   process.exit(2);
 }
