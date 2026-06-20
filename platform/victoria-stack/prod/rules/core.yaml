@@ -90,6 +90,19 @@ data:
             annotations:
               summary: "vmagent remoteWrite 드롭/실패"
               description: "vmagent가 샘플을 드롭하거나 remoteWrite에 실패합니다 — 메트릭 유실로 알림 평가가 부정확해질 수 있습니다."
+          # vmagent 버퍼 채워짐(leading) — vmsingle이 느림/backpressure(write가 천천히 통과)일 때 큐가
+          # maxDiskUsagePerURL 캡에 근접. 드롭 전 조기 경고(드롭은 VmagentRemoteWriteDropping = 2티어).
+          # ⚠️ 커버리지 경계(F5): 이 메트릭(vmagent self-metric)도 remoteWrite로 vmsingle에 들어가 vmalert가
+          #    질의한다 — vmsingle write가 전면 실패하면 pending 메트릭도 vmagent 큐에 갇혀 vmsingle에 못 도달,
+          #    이 알림은 그 케이스엔 침묵한다(vmsingle 전면다운 = TargetDown{job~vmsingle}+deadman이 커버).
+          #    즉 "vmsingle 느림/부분열화"에 leading하고 "write 전면다운"엔 무력(의도적 경계). emptyDir라 재시작 시 큐 휘발.
+          - alert: VmagentBufferFilling
+            expr: sum(vmagent_remotewrite_pending_data_bytes) > 330000000   # ≈315Mi(450Mi 캡의 70%) — 라이브 메트릭명 확정 후
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "vmagent remoteWrite 버퍼 채워짐(vmsingle 느림/backpressure — 드롭 임박)"
+              description: "vmagent 디스크 큐가 maxDiskUsagePerURL 캡에 근접 — vmsingle write가 느려져(backpressure) 적체 중. 곧 oldest drop(VmagentRemoteWriteDropping)으로 메트릭 유실. vmsingle 부하/디스크를 확인하세요. ⚠️ vmsingle write 전면다운 시엔 이 메트릭도 버퍼에 갇혀 미발화(그 케이스는 TargetDown(vmsingle)+deadman) — 이 알림은 부분열화(느림)용입니다. emptyDir 버퍼라 vmagent 재시작 시 큐 휘발."
           # vmalert 자기관측 — 룰 평가/notifier/remoteWrite 에러(알림 엔진 자체 고장). Watchdog는 평가 생존만 증명.
           - alert: VmalertUnhealthy
             expr: |

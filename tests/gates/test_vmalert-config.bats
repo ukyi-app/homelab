@@ -112,3 +112,11 @@ setup() {
   grep -q 'name: rules-r5, mountPath: /rules/r5' "$V"
   grep -q 'name: rules-r5, configMap: { name: vmalert-rules-r5 }' "$V"
 }
+
+@test "vmagent buffer saturation has a leading warning + graceful drop cap" {
+  C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
+  V="$ROOT/platform/victoria-stack/prod/vmagent.yaml"
+  grep -q 'alert: VmagentBufferFilling' "$C"                      # leading 경고(드롭 전)
+  grep -qE 'vmagent_remotewrite_pending_data_bytes|vm_persistentqueue_bytes_pending' "$C"  # 버퍼 메트릭(실재명 라이브 확정)
+  grep -q 'maxDiskUsagePerURL' "$V"                               # eviction 대신 graceful drop
+}
