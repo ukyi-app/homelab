@@ -90,3 +90,26 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   run bun tools/provision-db.ts --name blog --cluster 'Bad Cluster' --dry-run
   [ "$status" -ne 0 ]
 }
+
+@test "resourceNameError flags db reserved names and cache -ro suffix" {
+  run bun -e '
+    import { resourceNameError } from "./tools/lib/identity.ts";
+    if (resourceNameError("db", "blog") !== null) { console.error("valid db rejected"); process.exit(1); }
+    if (resourceNameError("db", "postgres") === null) { console.error("reserved db accepted"); process.exit(1); }
+    if (resourceNameError("cache", "widget") !== null) { console.error("valid cache rejected"); process.exit(1); }
+    if (resourceNameError("cache", "foo-ro") === null) { console.error("cache -ro accepted"); process.exit(1); }
+    if (resourceNameError("db", "foo-ro") === null) { console.error("db -ro accepted (F8)"); process.exit(1); }
+    if (resourceNameError("db", "bad-") === null) { console.error("trailing hyphen accepted"); process.exit(1); }
+    console.log("ok");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "ok"
+}
+
+@test "executors use shared reserved policy (no local RESERVED/-ro check left)" {
+  run grep -Fq 'resourceNameError' tools/provision-db.ts;        [ "$status" -eq 0 ]
+  run grep -Fq '"streaming_replica"' tools/provision-db.ts;      [ "$status" -ne 0 ]   # 로컬 RESERVED 리터럴 제거
+  run grep -Fq '/-ro$/' tools/provision-db.ts;                   [ "$status" -ne 0 ]   # provision-db 로컬 -ro 제거(F8)
+  run grep -Fq '/-ro$/' tools/provision-cache.ts;                [ "$status" -ne 0 ]   # provision-cache 로컬 -ro 제거
+  run grep -Fq 'resourceNameError' tools/validate-mutation.ts;   [ "$status" -eq 0 ]
+}

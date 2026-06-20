@@ -18,7 +18,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { RESOURCE_NAME_RE, EXT_RE } from "./lib/identity.ts";
+import { RESOURCE_NAME_RE, EXT_RE, resourceNameError } from "./lib/identity.ts";
 import { Document, parseDocument } from "yaml";
 
 function fail(msg: string): never { console.error(`::error::provision-db: ${msg}`); process.exit(1); }
@@ -47,15 +47,11 @@ if (!args.name) {
 }
 
 // ---------- 2) 입력 검증 ----------
-// 예약 이름: bootstrap initdb(app), 시스템 롤/DB — 충돌 시 클러스터가 깨진다
-const RESERVED = new Set(["app", "postgres", "pg", "template0", "template1", "streaming_replica"]);
-
 const name = args.name;
-if (!RESOURCE_NAME_RE.test(name)) fail(`name 형식 불량(kebab-case, trailing hyphen 금지, ≤30자): '${name}'`);
-if (RESERVED.has(name)) fail(`예약 이름: '${name}' — bootstrap/시스템 객체와 충돌`);
-// -ro 접미사 예약: db 'foo-ro'의 conn 파일(db-foo-ro-conn)이 db 'foo'의 읽기전용
-// conn(db-foo-ro-conn)과 충돌해 한쪽을 조용히 덮어쓴다 → 접미사 자체를 금지.
-if (/-ro$/.test(name)) fail(`'-ro' 접미사 예약: '${name}' — 읽기전용 conn 이름과 충돌`);
+// 형식 + DB 예약 이름 + '-ro' 접미사(F8)를 공유 정책으로 단일 검사(디스패처 validate-mutation과 동일)
+const nameErr = resourceNameError("db", name);
+if (nameErr) fail(nameErr);
+// cluster는 format만 — 기본값 'pg'가 DB 예약이라 resourceNameError("db",…)를 쓰면 자기 자신을 거부한다
 if (!RESOURCE_NAME_RE.test(args.cluster)) fail(`cluster 형식 불량: '${args.cluster}'`);
 if (new Set(args.extensions).size !== args.extensions.length) fail("extensions에 중복 항목");
 for (const e of args.extensions) if (!EXT_RE.test(e)) fail(`extension 이름 불량: '${e}'`);

@@ -76,3 +76,16 @@ setup() {
     run grep -nE 'status:[[:space:]]*\$\{\{[[:space:]]*job\.status[[:space:]]*\}\}' "$f"; [ "$status" -ne 0 ]
   done
 }
+
+@test "dispatcher rejects a reserved db name before the executor" {
+  run bun "$ROOT/tools/validate-mutation.ts" --action create-database --payload '{"spec":"{\"name\":\"postgres\"}"}'
+  [ "$status" -ne 0 ]
+}
+@test "dispatcher rejects a cache -ro suffix name" {
+  run bun "$ROOT/tools/validate-mutation.ts" --action create-cache --payload '{"spec":"{\"name\":\"foo-ro\"}"}'
+  [ "$status" -ne 0 ]
+}
+@test "dispatcher rejects a db -ro suffix name (F8)" {
+  run bun "$ROOT/tools/validate-mutation.ts" --action create-database --payload '{"spec":"{\"name\":\"foo-ro\"}"}'
+  [ "$status" -ne 0 ]
+}
