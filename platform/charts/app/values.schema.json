@@ -67,6 +67,14 @@
       "properties": { "enabled": { "type": "boolean" } }
     },
     "livenessProbe": { "type": "object" },
+    "automountServiceAccountToken": { "type": "boolean" },
+    "strategy": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["Recreate", "RollingUpdate"] },
+        "rollingUpdate": { "type": "object" }
+      }
+    },
     "podSecurityContext": { "type": "object" },
     "securityContext": { "type": "object" },
     "terminationGracePeriodSeconds": { "type": "integer" },

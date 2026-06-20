@@ -73,6 +73,14 @@ securityContext:
 terminationGracePeriodSeconds: 30
 preStopSleepSeconds: 3 # 0이면 preStop 생략(distroless엔 /bin/sleep 부재 — drain은 terminationGracePeriod+readiness)
 
+# SA 토큰: 앱은 차트가 RBAC를 0 부여하므로 k8s API 불요 → 토큰 미마운트. API 쓰는 앱만 true.
+automountServiceAccountToken: false
+
+# 배포 전략: 단일노드 + RWO PVC면 RollingUpdate가 두 파드의 볼륨 경합으로 교착 → 기본 Recreate.
+# 멀티레플리카 stateless는 { type: RollingUpdate }로 무중단 배포 opt-in.
+strategy:
+  type: Recreate
+
 # --- ports (계약) ---
 ports:
   http: 8080
