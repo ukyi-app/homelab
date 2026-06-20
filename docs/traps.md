@@ -4,7 +4,8 @@
 이 원장은 그중 **실행 가능한 가드로 강제된 함정만** 추적해, 가드 파일이 삭제·리네임됐는데 함정이
 다시 물리는 드리프트를 `make verify-traps`로 차단한다. 여기 없는 함정 = doc-only(traps-detail.md가 유일 SSOT).
 
-- **검사 방향**: `scripts/verify-traps.sh`는 아래 `guard` 열의 백틱 경로가 **실재하는지**만 본다(enforced인데
+- **검사 방향**: `scripts/verify-traps.sh`는 아래 `guard` 열의 백틱 경로가 **실재하는지** + `docs/traps-detail.md`의
+  `> 가드:` 주석 경로가 **이 원장에도 추적되는지**(역방향 guard-path-tie — SSOT↔원장 내용 드리프트 차단)를 본다(enforced인데
   파일 없음 = 거짓 안심 → 실패). 가드의 *내용 정확성*은 각 가드 테스트 자신이 책임진다.
 - **where**: `gate`=ci.yaml job `gate`가 수집 · `verify`=verify.yaml(pre-commit/sops/ledger) · `iac`=iac/tf-reconcile · `local`=make/pre-commit 로컬.
 - 새 가드 테스트를 추가하면 이 표에도 한 줄 추가한다(리네임 시 verify-traps가 강제로 알려준다).
