@@ -7,10 +7,10 @@ PRECOMMIT="$BATS_TEST_DIRNAME/../../.pre-commit-config.yaml"
 
 @test "gate job installs gitleaks pinned to the pre-commit rev" {
   # pre-commit rev(SSOT)와 동일 버전을 핀해야 한다 — ci.yaml은 .pre-commit-config.yaml에서 버전을 런타임
-  # 유도(grep)해 다운로드하므로 드리프트가 0이다(리터럴 하드코딩보다 강함 — 자동 추종).
+  # 유도(yq 구조 쿼리)해 다운로드하므로 드리프트가 0이다(리터럴 하드코딩보다 강함 — 자동 추종).
   rev=$(grep -A2 'gitleaks/gitleaks' "$PRECOMMIT" | grep -oE 'rev: v[0-9.]+' | grep -oE 'v[0-9.]+')
   [ -n "$rev" ]
-  run grep -qE 'grep .*gitleaks/gitleaks.*\.pre-commit-config\.yaml' "$CI"
+  run grep -qE 'yq .*\.pre-commit-config\.yaml|select\(\.repo.*gitleaks' "$CI"
   [ "$status" -eq 0 ]
   run grep -q 'gitleaks/gitleaks/releases/download/' "$CI"
   [ "$status" -eq 0 ]
