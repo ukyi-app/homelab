@@ -222,7 +222,10 @@ rolesSeq.add(mkRole(roRole, `db-${name}-ro`,
   ` ${name} 읽기전용(모드2 디버깅) — GRANT는 managed role 범위 밖, PR checklist의 SQL 후처리 필요`));
 
 // ---------- 9) kustomization 멱등 등록 ----------
-// 시퀀스에 항목이 없을 때만 추가 — 기존 항목/주석은 그대로 보존된다
+// 시퀀스에 항목이 없을 때만 추가 — 기존 항목/주석은 그대로 보존된다.
+// ★lib/kustomization.ts(string-기반)로 이주하지 않는다 — 이 헬퍼는 doc-배치(여러 add 후 1회 write)·
+//   엔트리 comment(아래 databases/ 등록)·toString({lineWidth:0})·빈 배열 flow→block 동작이 달라
+//   이주 시 직렬화/주석이 바뀐다(동작보존, plan Step5의 "차이 있으면 보존").
 function addResource(doc: any, entry: string, comment?: string) {
   if (!doc.has("resources")) doc.set("resources", doc.createNode([]));
   const seq = doc.get("resources");

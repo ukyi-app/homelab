@@ -17,6 +17,7 @@ import { parseDocument } from "yaml";
 import { replaceTotals, addRow, parseLedgerRows } from "./lib/ledger-totals.ts";
 import { resourceNameError } from "./lib/identity.ts";
 import { sealManifest } from "./lib/seal.ts";
+import { addResource } from "./lib/kustomization.ts";
 
 // 버전 핀 — latest 금지. backup-cronjob.yaml의 snapshot 컨테이너와 같은 태그를 유지한다.
 const VALKEY_IMAGE = "valkey/valkey:8.1.1-alpine";
@@ -228,12 +229,9 @@ const secret = (ns: string, secretName: string, stringData: any) => ({
 
 // ---------- kustomization 멱등 등록 ----------
 function registerResource(file: string, entry: string) {
-  const doc = parseDocument(readFileSync(file, "utf8"));
-  const cur = doc.toJS()?.resources ?? [];
-  if (cur.includes(entry)) return null;
-  if (doc.has("resources")) doc.addIn(["resources"], entry);
-  else doc.set("resources", [entry]);
-  return doc.toString();
+  const cur = readFileSync(file, "utf8");
+  const updated = addResource(cur, entry);   // 멱등 SSOT(이미 있으면 동일 문자열)
+  return updated === cur ? null : updated;   // 기존 계약 보존: 변화 없으면 null
 }
 
 const checklist = [

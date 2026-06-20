@@ -20,9 +20,9 @@
 // 참조 집계는 **오직 apps/*/deploy/prod/.bindings.json**(homelab 권위 레지스트리)로만 한다 —
 // envFrom 파싱이나 외부 앱 레포 config는 stale/접근불가일 수 있어 신뢰하지 않는다.
 import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
-import { parseDocument } from "yaml";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
 import { replaceTotals, removeRow, parseLedgerRows } from "./lib/ledger-totals.ts";
+import { removeResource } from "./lib/kustomization.ts";
 
 const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const has = (k: string) => process.argv.includes(k);
@@ -94,19 +94,6 @@ const purgeArtifacts = kind === "db"
       { file: connFiles[1], kust: dataConnKust, entry: `cache-${name}-ro-conn.sealed.yaml` },
     ];
 
-// kustomization resources에서 엔트리 제거(멱등) — provision의 addResource를 역으로. trailing
-// slash 정규화로 인스턴스 디렉토리 등록(name vs name/)도 매칭.
-function deregister(kustPath: string, entry: string) {
-  if (!existsSync(kustPath)) return;
-  const doc = parseDocument(readFileSync(kustPath, "utf8"));
-  const seq: any = doc.get("resources");
-  if (!seq?.items) return;
-  const norm = (v: any) => String(v).replace(/\/$/, "");
-  const idx = seq.items.findIndex((it: any) => norm(it.value ?? it) === norm(entry));
-  if (idx < 0) return;
-  doc.deleteIn(["resources", idx]);
-  writeFileSync(kustPath, doc.toString());
-}
 
 const plan = { resource: key, mode: deleteData ? "purge" : "retain", step, referrers: 0, backupId: backupId ?? null };
 
@@ -179,7 +166,7 @@ switch (step) {
       // 파일 제거 + 같은 항목을 kustomization에서 등록 해제(둘 다 멱등 — 재실행 안전)
       for (const a of purgeArtifacts) {
         if (existsSync(a.file)) rmSync(a.file, a.dir ? { recursive: true } : {});
-        deregister(a.kust, a.entry);
+        if (existsSync(a.kust)) writeFileSync(a.kust, removeResource(readFileSync(a.kust, "utf8"), a.entry));
       }
       tombs[key] = { state: "purged", backupId, at: new Date().toISOString() };
       writeTombs();
