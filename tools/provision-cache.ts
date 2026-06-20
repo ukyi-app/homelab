@@ -18,21 +18,21 @@ import { replaceTotals, addRow, parseLedgerRows } from "./lib/ledger-totals.ts";
 import { resourceNameError } from "./lib/identity.ts";
 import { sealManifest } from "./lib/seal.ts";
 import { addResource } from "./lib/kustomization.ts";
+import { parseFlags } from "./lib/cli.ts";
 
 // 버전 핀 — latest 금지. backup-cronjob.yaml의 snapshot 컨테이너와 같은 태그를 유지한다.
 const VALKEY_IMAGE = "valkey/valkey:8.1.1-alpine";
 
-const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
-const DRY = process.argv.includes("--dry-run");
+// parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
+let __f: Record<string, string | boolean>;
+try { __f = parseFlags(process.argv.slice(2), { value: ["--name", "--repo-root", "--cert", "--maxmemory-mi"], bool: ["--dry-run"] }); }
+catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --dry-run --name --repo-root --cert --maxmemory-mi`); process.exit(2); }
+const arg = (k: string, d?: string) => (typeof __f[k] === "string" ? __f[k] as string : d);
+const DRY = __f["--dry-run"] === true;
 const name = arg("--name");
 const ROOT = arg("--repo-root", ".");
 const CERT = arg("--cert", `${ROOT}/tools/sealed-secrets-cert.pem`)!;
 const rawMaxmemory = arg("--maxmemory-mi", "64")!;
-// 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시하고 디폴트를 적용한다.
-const ALLOWED_FLAGS = new Set(["--dry-run", "--name", "--repo-root", "--cert", "--maxmemory-mi"]);
-for (const a of process.argv.slice(2)) {
-  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
-}
 const maxmemoryMi = Number(rawMaxmemory);
 
 function fail(msg: string): never { console.error(`::error::provision-cache: ${msg}`); process.exit(1); }

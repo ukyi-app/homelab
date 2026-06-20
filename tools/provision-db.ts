@@ -19,6 +19,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { RESOURCE_NAME_RE, EXT_RE, resourceNameError } from "./lib/identity.ts";
 import { sealManifest } from "./lib/seal.ts";
+import { parseFlags } from "./lib/cli.ts";
 import { Document, parseDocument } from "yaml";
 
 function fail(msg: string): never { console.error(`::error::provision-db: ${msg}`); process.exit(1); }
@@ -26,18 +27,18 @@ function fail(msg: string): never { console.error(`::error::provision-db: ${msg}
 // ---------- 1) 인자 파싱 — 허용 밖 인자는 전부 거부 (fail-closed) ----------
 type Args = { cluster: string; root: string; extensions: string[]; dryRun: boolean; name?: string };
 function parseArgs(argv: string[]): Args {
-  const args: Args = { cluster: "pg", root: ".", extensions: [], dryRun: false };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--name") args.name = argv[++i];
-    else if (a === "--extensions") args.extensions = (argv[++i] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    else if (a === "--cluster") args.cluster = argv[++i];
-    else if (a === "--repo-root") args.root = argv[++i];
-    else if (a === "--dry-run") args.dryRun = true;
-    else if (a === "--owner") fail("owner는 입력받지 않는다 — 항상 name으로 고정 (owner 공유 시 teardown이 다른 DB를 깬다)");
-    else fail(`알 수 없는 인자: ${a}`);
-  }
-  return args;
+  // parseFlags: unknown + arg 삼킴(값 누락 자리서 다음 --플래그 삼킴) fail-closed. --owner는 known(value)으로 받되 아래서 전용 메시지로 거부.
+  let f: Record<string, string | boolean>;
+  try { f = parseFlags(argv, { value: ["--name", "--extensions", "--cluster", "--repo-root", "--owner"], bool: ["--dry-run"] }); }
+  catch (e) { fail(e instanceof Error ? e.message : String(e)); }
+  if (f["--owner"] !== undefined) fail("owner는 입력받지 않는다 — 항상 name으로 고정 (owner 공유 시 teardown이 다른 DB를 깬다)");
+  return {
+    name: typeof f["--name"] === "string" ? f["--name"] : undefined,
+    extensions: typeof f["--extensions"] === "string" ? f["--extensions"].split(",").map((s) => s.trim()).filter(Boolean) : [],
+    cluster: typeof f["--cluster"] === "string" ? f["--cluster"] : "pg",
+    root: typeof f["--repo-root"] === "string" ? f["--repo-root"] : ".",
+    dryRun: f["--dry-run"] === true,
+  };
 }
 
 const args = parseArgs(process.argv.slice(2));

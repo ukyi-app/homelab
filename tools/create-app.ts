@@ -8,9 +8,14 @@ import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { replaceTotals, addRow, parseLedgerRows } from "./lib/ledger-totals.ts";
+import { parseFlags } from "./lib/cli.ts";
 
-const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
-const DRY = process.argv.includes("--dry-run");
+// parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
+let __f: Record<string, string | boolean>;
+try { __f = parseFlags(process.argv.slice(2), { value: ["--config", "--app", "--repo", "--domain", "--repo-root", "--tag", "--digest", "--sealed"], bool: ["--dry-run"] }); }
+catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --dry-run --config --app --repo --domain --repo-root --tag --digest --sealed`); process.exit(2); }
+const arg = (k: string, d?: string) => (typeof __f[k] === "string" ? __f[k] as string : d);
+const DRY = __f["--dry-run"] === true;
 const configPath = arg("--config");
 const app = arg("--app");
 const repo = arg("--repo");
@@ -19,11 +24,6 @@ const ROOT = arg("--repo-root", ".");
 const tag = arg("--tag");
 const digest = arg("--digest");
 const sealedPath = arg("--sealed");
-// 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시하고 디폴트를 적용한다.
-const ALLOWED_FLAGS = new Set(["--dry-run", "--config", "--app", "--repo", "--domain", "--repo-root", "--tag", "--digest", "--sealed"]);
-for (const a of process.argv.slice(2)) {
-  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
-}
 if (!configPath || !app || !repo || !DOMAIN || !tag || !digest) {
   console.error("usage: create-app --config <.app-config.yml> --app <name> --repo <owner/app> --domain <apex> --tag sha-<gitsha> --digest sha256:<hex> [--sealed <file>] [--repo-root <dir>] [--dry-run]");
   process.exit(2);

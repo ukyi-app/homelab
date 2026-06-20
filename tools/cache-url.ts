@@ -3,20 +3,17 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
+import { parseFlags } from "./lib/cli.ts";
 
-const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
-const DRY = process.argv.includes("--dry-run");
+// parseFlags: unknown 옵션 + arg 삼킴 fail-closed. 종료 코드 2 보존.
+let __f: Record<string, string | boolean>;
+try { __f = parseFlags(process.argv.slice(2), { value: ["--name", "--host", "--env-local"], bool: ["--dry-run"] }); }
+catch (e) { console.error(`cache-url: ${e instanceof Error ? e.message : String(e)} (읽기 전용 도구)`); process.exit(2); }
+const arg = (k: string, d?: string) => (typeof __f[k] === "string" ? __f[k] as string : d);
+const DRY = __f["--dry-run"] === true;
 const name = arg("--name");
 const tsHost = arg("--host", process.env.TS_CACHE_HOST ?? "");
 const envLocal = arg("--env-local", ".env.local")!;
-
-const allowed = new Set(["--name", "--host", "--env-local", "--dry-run"]);
-for (const a of process.argv.slice(2)) {
-  if (a.startsWith("--") && !allowed.has(a)) {
-    console.error(`cache-url: 지원하지 않는 옵션: ${a} (읽기 전용 도구)`);
-    process.exit(2);
-  }
-}
 if (!name || !RESOURCE_NAME_RE.test(name)) {
   console.error("usage: cache-url --name <cache> [--host <tailscale-ip>] [--dry-run]");
   process.exit(2);

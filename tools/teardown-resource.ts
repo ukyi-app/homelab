@@ -23,9 +23,14 @@ import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from "no
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
 import { replaceTotals, removeRow, parseLedgerRows } from "./lib/ledger-totals.ts";
 import { removeResource } from "./lib/kustomization.ts";
+import { parseFlags } from "./lib/cli.ts";
 
-const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
-const has = (k: string) => process.argv.includes(k);
+// parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()/has()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
+let __f: Record<string, string | boolean>;
+try { __f = parseFlags(process.argv.slice(2), { value: ["--db", "--cache", "--repo-root", "--backup-verified", "--step"], bool: ["--delete-data", "--dry-run"] }); }
+catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --db --cache --repo-root --backup-verified --step --delete-data --dry-run`); process.exit(2); }
+const arg = (k: string, d?: string) => (typeof __f[k] === "string" ? __f[k] as string : d);
+const has = (k: string) => __f[k] === true;
 const DRY = has("--dry-run");
 const db = arg("--db");
 const cache = arg("--cache");
@@ -33,11 +38,6 @@ const ROOT = arg("--repo-root", ".");
 const deleteData = has("--delete-data");
 const backupId = arg("--backup-verified");
 const step = arg("--step", deleteData ? undefined : "tombstone");
-// 오타 옵션 침묵-무시 차단 — arg()/has() 헬퍼는 미지정 플래그를 조용히 무시한다(mutator 패밀리 fail-closed).
-const ALLOWED_FLAGS = new Set(["--db", "--cache", "--repo-root", "--delete-data", "--backup-verified", "--step", "--dry-run"]);
-for (const a of process.argv.slice(2)) {
-  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
-}
 
 const fail = (msg: string): never => { console.error(`teardown-resource: ${msg}`); process.exit(1); };
 if ((db ? 1 : 0) + (cache ? 1 : 0) !== 1) fail("--db <name> 또는 --cache <name> 중 정확히 하나");
