@@ -6,4 +6,4 @@
 
 **라이브 디버그** — `observability` 스킬(메트릭/로그/알림 흐름, telegram 검증, PVC 포화, vmalert 룰). 런북 `docs/runbooks/observability-verify.md`. 컴포넌트 노트는 [NOTES.md](prod/NOTES.md).
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": vector는 root 실행 필수(k3s `/var/log/pods` root:root 0640), VictoriaLogs는 distroless(라이브 질의는 vmagent 등에서 service DNS), vmalert는 `configCheckInterval` 없으면 룰 reload 안 함, 모든 PV가 hostPath라 `kubelet_volume_stats` 부재(PVC 포화는 `node_filesystem`+`cnpg_collector_pg_wal`로), busybox 1.36 nc `-q` 없음(deadmanswitch relay), Alertmanager telegram 검증은 `alertmanager_notifications_total{integration="telegram"}`로.
+**함정 SSOT** — docs/traps-detail.md: vector는 root 실행 필수(k3s `/var/log/pods` root:root 0640), VictoriaLogs는 distroless(라이브 질의는 vmagent 등에서 service DNS), vmalert는 `configCheckInterval` 없으면 룰 reload 안 함, 모든 PV가 hostPath라 `kubelet_volume_stats` 부재(PVC 포화는 `node_filesystem`+`cnpg_collector_pg_wal`로), busybox 1.36 nc `-q` 없음(deadmanswitch relay), Alertmanager telegram 검증은 `alertmanager_notifications_total{integration="telegram"}`로.

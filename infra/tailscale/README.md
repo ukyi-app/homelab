@@ -6,4 +6,4 @@
 
 **라이브 디버그** — terraform plan 로그(owner 로컬). operator 런타임은 `platform/tailscale`, DNS 연동은 런북 `docs/runbooks/lan-dns.md`.
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": github/tailscale 루트=신뢰 앵커라 CI 무인 apply 금지(plan-only). provider lock 첫 커밋은 라이브 state writer 버전 이상으로 핀. (운영 측 함정: DR 재구축 시 traefik-ts tailscale IP 변동 → AdGuard rewrite stale.)
+**함정 SSOT** — docs/traps-detail.md: github/tailscale 루트=신뢰 앵커라 CI 무인 apply 금지(plan-only). provider lock 첫 커밋은 라이브 state writer 버전 이상으로 핀. (운영 측 함정: DR 재구축 시 traefik-ts tailscale IP 변동 → AdGuard rewrite stale.)

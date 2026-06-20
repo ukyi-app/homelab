@@ -6,4 +6,4 @@
 
 **라이브 디버그** — `argo` 스킬(sync/health). 런북 `docs/runbooks/restore.md`(복구 R1·DR 핵심), `docs/runbooks/storage-verify.md`.
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": `chart:` 사용 시 repoURL=Helm 레지스트리·targetRevision=차트 semver, barman ObjectStore `spec.env` SSA 거부, 기본 pg_hba는 replication을 streaming_replica(cert)만 허용(pg_basebackup엔 postgres 항목 추가), barman-cloud plugin이 in-tree `cnpg_collector_*` 백업 메트릭 deprecate(→`barman_cloud_*`/pg_stat_archiver, WAL-size collector는 생존).
+**함정 SSOT** — docs/traps-detail.md: `chart:` 사용 시 repoURL=Helm 레지스트리·targetRevision=차트 semver, barman ObjectStore `spec.env` SSA 거부, 기본 pg_hba는 replication을 streaming_replica(cert)만 허용(pg_basebackup엔 postgres 항목 추가), barman-cloud plugin이 in-tree `cnpg_collector_*` 백업 메트릭 deprecate(→`barman_cloud_*`/pg_stat_archiver, WAL-size collector는 생존).

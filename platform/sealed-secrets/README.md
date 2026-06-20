@@ -6,4 +6,4 @@
 
 **라이브 디버그** — `argo` 스킬(sync/health, 컨트롤러 복호화 실패 진단). 봉인 절차는 런북 `docs/runbooks/app-platform.md`, 키 모델은 `docs/runbooks/age-keys.md`.
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": helm 차트 CRD가 `crds/`에 있으면 kustomize HelmChartInflationGenerator 기본 렌더에서 빠짐 → `includeCRDs: true` 필수(sealed-secrets에서 검증). SealedSecret strict-scope는 봉인 시점 namespace 일치 필요(data-conn 참조).
+**함정 SSOT** — docs/traps-detail.md: helm 차트 CRD가 `crds/`에 있으면 kustomize HelmChartInflationGenerator 기본 렌더에서 빠짐 → `includeCRDs: true` 필수(sealed-secrets에서 검증). SealedSecret strict-scope는 봉인 시점 namespace 일치 필요(data-conn 참조).
