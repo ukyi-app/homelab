@@ -15,10 +15,10 @@
 //   - 비밀번호/raw URL은 stdout·로그 어디에도 출력하지 않는다. 평문 Secret은 메모리에서만
 //     조립해 kubeseal stdin으로 직행한다(디스크 비기록).
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { RESOURCE_NAME_RE, EXT_RE, resourceNameError } from "./lib/identity.ts";
+import { sealManifest } from "./lib/seal.ts";
 import { Document, parseDocument } from "yaml";
 
 function fail(msg: string): never { console.error(`::error::provision-db: ${msg}`); process.exit(1); }
@@ -126,15 +126,10 @@ if (!existsSync(certPath)) {
 const pwOwner = randomBytes(24).toString("base64url");
 const pwRo = randomBytes(24).toString("base64url");
 
-// 평문 Secret manifest는 메모리에서만 조립해 kubeseal stdin으로 직행 (seal-secret.mts와 동일 패턴)
-function seal(manifest: any, outPath: string) {
-  const res = spawnSync("kubeseal", ["--cert", certPath, "--format", "yaml"], {
-    input: JSON.stringify(manifest), // kubeseal은 JSON manifest도 받는다(YAML 슈퍼셋)
-    encoding: "utf8",
-  });
-  if (res.error) fail(`kubeseal 실행 실패: ${res.error.message}`);
-  if (res.status !== 0) fail(`kubeseal 종료 코드 ${res.status} — cert/컨트롤러 점검 (stderr는 값 미포함 시에만 확인)`);
-  return { outPath, content: res.stdout };
+// 평문 Secret manifest는 메모리에서만 조립해 kubeseal stdin으로 직행 (봉인 SSOT = lib/seal.ts)
+function seal(manifest: object, outPath: string) {
+  try { return { outPath, content: sealManifest(manifest, certPath) }; }
+  catch (e) { fail(e instanceof Error ? e.message : String(e)); } // strict catch(F11)·기존 exit 코드 보존
 }
 
 // 런타임은 PgBouncer(pg-pooler-rw) 경유 — 다중 앱 풀이 max_connections=50을 고갈시키지 않게.

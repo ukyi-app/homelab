@@ -12,11 +12,11 @@
 // data-conn kustomization은 다른 작업자(Task 5.1) 소유 — 있으면 resources만 추가, 없으면
 // 생성하지 않고 plan JSON checklist에 기재한다.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { randomBytes, createHash } from "node:crypto";
 import { parseDocument } from "yaml";
 import { replaceTotals } from "./lib/ledger-totals.ts";
 import { resourceNameError } from "./lib/identity.ts";
+import { sealManifest } from "./lib/seal.ts";
 
 // 버전 핀 — latest 금지. backup-cronjob.yaml의 snapshot 컨테이너와 같은 태그를 유지한다.
 const VALKEY_IMAGE = "valkey/valkey:8.1.1-alpine";
@@ -215,15 +215,10 @@ resources:
   - acl.sealed.yaml
 `;
 
-// ---------- kubeseal (평문은 stdin으로만) ----------
-function seal(manifest: any) {
-  const res = spawnSync("kubeseal", ["--cert", CERT, "--format", "yaml"], {
-    input: JSON.stringify(manifest), // kubeseal은 JSON manifest도 받는다(YAML 슈퍼셋)
-    encoding: "utf8",
-  });
-  if (res.error) fail(`kubeseal 실행 실패: ${res.error.message}`);
-  if (res.status !== 0) fail(`kubeseal 종료 코드 ${res.status} — cert(${CERT}) 점검`);
-  return res.stdout;
+// ---------- kubeseal (평문은 stdin으로만 — 봉인 SSOT = lib/seal.ts) ----------
+function seal(manifest: object) {
+  try { return sealManifest(manifest, CERT); }
+  catch (e) { fail(e instanceof Error ? e.message : String(e)); } // strict catch(F11)·기존 exit 코드 보존
 }
 const secret = (ns: string, secretName: string, stringData: any) => ({
   apiVersion: "v1", kind: "Secret",
