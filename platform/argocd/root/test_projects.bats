@@ -81,3 +81,35 @@ setup() {
   run yq 'select(.metadata.name=="platform") | .spec.clusterResourceWhitelist[0].kind' "$P"
   [ "$output" = "*" ]
 }
+
+# --- default-lockdown (설계리뷰 #3 + Pass1 #1): 전수 스캔 ---
+# root app이 platform/argocd/root를 recurse하므로 그 트리 **전체**(새 파일/하위디렉토리 포함) +
+# argocd-app(부모)을 스캔. 어디든 default 쓰는 Application·ApplicationSet 템플릿이 끼면 잡는다.
+@test "only argocd and root use the default project — exhaustive scan of the recursed tree" {
+  cd "$ROOT"
+  offenders=""
+  files="$(find platform/argocd/root -name '*.yaml') platform/argocd/argocd-app.yaml"
+  for f in $files; do
+    # Application 문서: "name project" (multi-doc 안전 — yq가 전 문서 순회)
+    while read -r name proj; do
+      [ -n "$name" ] || continue
+      case "$name" in
+        argocd|root) [ "$proj" = "default" ] || offenders="$offenders $name:$proj";;
+        *) [ "$proj" != "default" ] || offenders="$offenders $name:default";;
+      esac
+    done < <(yq 'select(.kind=="Application") | .metadata.name + " " + .spec.project' "$f")
+    # ApplicationSet 템플릿 project
+    while read -r proj; do
+      [ -n "$proj" ] || continue
+      [ "$proj" != "default" ] || offenders="$offenders appset@$(basename "$f"):default"
+    done < <(yq 'select(.kind=="ApplicationSet") | .spec.template.spec.project' "$f")
+  done
+  [ -z "$offenders" ] || { echo "default escape hatch:$offenders"; false; }
+}
+
+@test "both ApplicationSet templates use the new non-default projects" {
+  run yq '.spec.template.spec.project' "$APPSET"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx "platform"
+  echo "$output" | grep -qx "apps"
+}
