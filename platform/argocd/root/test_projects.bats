@@ -113,3 +113,62 @@ setup() {
   echo "$output" | grep -qx "platform"
   echo "$output" | grep -qx "apps"
 }
+
+# --- destination-permitted 가드 (설계 §A / plan 리뷰 Pass2 #1) ---
+# ArgoCD는 매니페스트 검사 **전에** 각 Application의 .spec.destination을 그 project의 destinations로
+# 검증한다. appset 생성 platform 앱은 destination.namespace가 **비어있으므로**(appset 템플릿은
+# destination.server만), project가 빈 destination을 허용(namespace '*')해야 InvalidSpec이 안 난다.
+# 미래에 누가 destinations를 named-only로 tightening하면 이 가드가 빈/named destination 미허용을 잡는다.
+@test "every Application spec.destination (server AND namespace) is permitted by its AppProject" {
+  cd "$ROOT"
+  P="platform/argocd/root/projects.yaml"
+  # $1=proj $2=server $3=ns → project destinations 중 (server 글롭)&(namespace 글롭) **동시** 매치 시 0.
+  # plan 리뷰 Pass4 #2: server도 검사해야 잘못된 클러스터 타깃·server 와일드카드 약화를 잡는다.
+  permits() {
+    local proj="$1" srv="$2" ns="$3" ds dn
+    while IFS="$(printf '\t')" read -r ds dn; do
+      { [ "$ds" = "*" ] || [ "$ds" = "$srv" ]; } || continue
+      { [ "$dn" = "*" ] || [ "$dn" = "$ns" ]; } && return 0
+    done < <(yq "select(.metadata.name==\"$proj\") | .spec.destinations[] | .server + \"\t\" + .namespace" "$P")
+    return 1
+  }
+  miss=""
+  # 수동 platform/apps 앱 (재배정된 것만)
+  for f in platform/argocd/root/apps/*.yaml; do
+    proj="$(yq '.spec.project' "$f")"
+    case "$proj" in platform|apps) ;; *) continue;; esac
+    srv="$(yq '.spec.destination.server // ""' "$f")"
+    ns="$(yq '.spec.destination.namespace // ""' "$f")"
+    permits "$proj" "$srv" "$ns" || miss="$miss $(yq '.metadata.name' "$f")@$proj"
+  done
+  # 두 appset 템플릿 (platform-components=빈 namespace, apps=prod)
+  for an in platform-components apps; do
+    proj="$(yq "select(.metadata.name==\"$an\") | .spec.template.spec.project" "$APPSET")"
+    srv="$(yq "select(.metadata.name==\"$an\") | .spec.template.spec.destination.server // \"\"" "$APPSET")"
+    ns="$(yq "select(.metadata.name==\"$an\") | .spec.template.spec.destination.namespace // \"\"" "$APPSET")"
+    permits "$proj" "$srv" "$ns" || miss="$miss appset-$an@$proj"
+  done
+  [ -z "$miss" ] || { echo "destination 미허용(InvalidSpec/잘못된 server 위험):$miss"; false; }
+}
+
+@test "apps and platform AppProject destinations target only the in-cluster API server" {
+  # plan 리뷰 Pass4 #2: server 경계 — destination server가 정확히 in-cluster여야(‘*’/외부 클러스터 금지).
+  run yq 'select(.kind=="AppProject") | .spec.destinations[].server' platform/argocd/root/projects.yaml
+  [ "$status" -eq 0 ]
+  # yq 멀티독(2 AppProject) 출력의 '---' 구분자 제외 후, 모든 server가 in-cluster여야(외부/‘*’ 0줄)
+  bad="$(echo "$output" | grep -vx -- '---' | grep -vx 'https://kubernetes.default.svc' || true)"
+  [ -z "$bad" ]
+}
+
+@test "every platform component helm repoURL is in the platform project sourceRepos" {
+  cd "$ROOT"
+  repos="$(yq 'select(.metadata.name=="platform") | .spec.sourceRepos[]' platform/argocd/root/projects.yaml | sort -u)"
+  miss=""
+  for f in platform/argocd/root/apps/*.yaml; do
+    [ "$(yq '.spec.project' "$f")" = "platform" ] || continue
+    for u in $(yq '[.spec.source.repoURL // (.spec.sources[]?.repoURL)] | flatten | .[]' "$f"); do
+      echo "$repos" | grep -qx "$u" || miss="$miss $u"
+    done
+  done
+  [ -z "$miss" ] || { echo "sourceRepos 누락:$miss"; false; }
+}
