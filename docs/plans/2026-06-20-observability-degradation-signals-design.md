@@ -41,7 +41,8 @@
 ### 수정 2 — vector 메트릭 노출 + backpressure 경고
 - `vector.yaml` ConfigMap config에 `sources.internal: { type: internal_metrics }` + `sinks.prometheus: { type: prometheus_exporter, inputs: [internal], address: "0.0.0.0:9598" }`.
 - DaemonSet: `ports: [{ name: metrics, containerPort: 9598 }]` + pod template annotation `prometheus.io/scrape: "true"`, `prometheus.io/port: "9598"`(vmagent pod-annotations job이 scrape).
-- `core.yaml`에 **`VectorBackpressure`**(warning) — vector 부분드롭/정체 신호. ★vector 0.41 internal_metrics가 실제 emit하는 backpressure 메트릭을 노출 **후 라이브 확인**: `vector_component_discarded_events_total`(드롭) / `vector_buffer_byte_size`÷`vector_buffer_max_byte_size`(충전율) / `vector_component_errors_total`(sink 에러) 중 vector 버퍼 동작(block vs drop)에 맞는 것. ★**노출은 deploy 후에야 메트릭 존재** — 알림 expr은 동일 PR이되 표준 메트릭 사용 + 머지 후 라이브 검증(부재면 무력).
+- **`VectorBackpressure`**(warning) — vector 부분드롭/정체 신호. ★vector 0.41 internal_metrics가 실제 emit하는 backpressure 메트릭(`vector_component_discarded_events_total`(드롭)/`vector_buffer_byte_size`÷`vector_buffer_max_byte_size`(충전율)/`vector_component_errors_total`(sink 에러)) 중 버퍼 동작(block vs drop)에 맞는 것을 **노출 deploy 후 라이브 확인**. ★**노출은 deploy 후에야 메트릭 존재** → **이 알림은 별도 후속 PR(PR-B)**: 이 PR(PR-A)은 노출만, 배포·라이브 관측으로 실측 메트릭 확정 후 PR-B에서 알림 추가(부재 메트릭 알림=죽은 알림 방지, Pass1 F2 escalation).
+- vector config는 **컨테이너 `vector validate` 필수 gate**(render는 vector 의미오류 미차단, Pass1 F1).
 
 ### 수정 3 — relay in-band: AM webhook 전송실패 경고
 - `core.yaml`에 **`DeadmanswitchRelayUnreachable`**(warning) — `increase(alertmanager_notifications_failed_total{integration="webhook"}[15m]) > 0`. AM(up)이 relay `:9095/ping` webhook 전송에 실패 = relay 다운/도달불가. AM→Telegram으로 전달 가능(off-node 윈도보다 빠름). AM은 이미 scrape(9093)라 메트릭 실재.
@@ -50,7 +51,7 @@
 
 - core.yaml 룰 변경 → vmalert가 `configCheckInterval`로 reload(기존 가드). vector.yaml 변경 → DaemonSet rollout(config reload).
 - **위험**: ①룰 expr 오류(PromQL 타이포) → vmalert load 실패 → 기존 `VmalertUnhealthy`가 라이브 백스톱. ②**부재 메트릭 알림**(메트릭명 오류) → 조용히 무력(인시던트 #13/#14 클래스) — **메트릭 실재 검증이 핵심**. ③vector config 오류 → vector 시작 실패 → 로그 수집 중단 → 기존 `LogIngestionStalled`가 백스톱(단 로그 유실). ④warning 티어라 오발화는 저해(critical paging 아님).
-- **검증**: (a) `tests/gates/test_vmalert-config.bats` 구조 검증(alert명·metric·fail-closed) 확장 · (b) `make chart-test`/`make render COMP=victoria-stack` 렌더(YAML·kustomize) · (c) **메트릭 실재 라이브 검증**(observability 스킬: `kubectl -n observability exec deploy/vmagent -- wget -qO- vmagent:8429/metrics | grep <metric>` — 기존 메트릭은 머지 전, vector는 노출 deploy 후) · (d) vector config 검증(`vector validate`). 단일 PR.
+- **검증**: (a) `tests/gates/test_vmalert-config.bats` 구조 검증(alert명·metric·fail-closed) 확장 · (b) `make chart-test`/`make render COMP=victoria-stack` 렌더(YAML·kustomize) · (c) **메트릭 실재 라이브 검증**(observability 스킬: `kubectl -n observability exec deploy/vmagent -- wget -qO- vmagent:8429/metrics | grep <metric>` — 기존 메트릭은 머지 전, vector는 노출 deploy 후) · (d) **vector config 컨테이너 `vector validate` 필수 gate**(배포 버전 0.41.1, `alertmanager-render-e2e` 선례 — render는 vector 의미오류 미차단, Pass1 F1).
 
 ## 5. 핵심 함정 (재발 주의)
 
@@ -62,6 +63,7 @@
 ## 6. 결정사항
 
 - **D1 (vmagent finding 스코프)** → **alert + `--remoteWrite.maxDiskUsagePerURL` 하드닝**(사용자 결정 2026-06-20). leading 경고 알림 + maxDiskUsagePerURL로 eviction+전량유실 대신 graceful drop. 둘 다 가산.
+- **D2 (vector 알림 PR 구조, Pass1 F2 escalation)** → **2-PR 분리**: PR-A=vmagent 버퍼 + vector 메트릭 노출 + relay in-band(전부 머지 전 메트릭 검증 가능). PR-B=VectorBackpressure 알림(PR-A 배포+라이브 관측으로 실측 메트릭 확정 후). 노출 deploy 전엔 vector 메트릭 부재라 단일 PR서 알림 검증 불가 → 죽은 알림 방지(2-PR 하드닝 패턴, homepage 선례). 최초 단일PR 승인 → Pass1 F2로 정정.
 - **A.5 생략**(사용자 결정) — 룰 expr/메트릭은 Phase C + 라이브 검증이 안전망.
 
 ## 7. 범위 밖 (명시)
