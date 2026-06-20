@@ -23,6 +23,19 @@ if [ -n "$unprefixed" ]; then
   rc=1
 fi
 
+# CJK @test 이름 가드: bats는 디렉토리 단위 실행 시 한글/CJK @test 이름을 조용히 스킵한다(검증된 함정).
+# @test 선언의 **이름만**(닫는 따옴표까지 `"([^"]*)"`) 검사 — trailing 한국어 주석·em-dash는 bats OK라 제외(F2).
+cjk_hits=""
+while IFS= read -r f; do
+  h="$(perl -CSDA -ne 'print "$ARGV:$.: $_" if /^\s*\@test\s+"([^"]*)"/ && $1 =~ /[\p{Han}\p{Hangul}\p{Hiragana}\p{Katakana}]/' "$f")"
+  if [ -n "$h" ]; then cjk_hits="$cjk_hits$h"$'\n'; fi
+done < <(git ls-files '*test_*.bats')
+if [ -n "$cjk_hits" ]; then
+  echo "FAIL: @test 이름에 CJK 문자(디렉토리 실행 시 침묵스킵) — 영어로 변경:"
+  printf '%s' "$cjk_hits"
+  rc=1
+fi
+
 # README 디렉토리 지도 드리프트 가드: 모든 platform 컴포넌트(charts 제외)가 README 지도에 나열돼야 한다.
 # 새 컴포넌트 추가 시 지도 갱신을 강제(가상명·누락 차단). tools/tests/test_dirmap.bats와 동일 불변식.
 # glob 루프(ls 파싱 회피 — SC2011). bash 3.2 안전.
