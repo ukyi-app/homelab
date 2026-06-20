@@ -120,3 +120,9 @@ setup() {
   grep -qE 'vmagent_remotewrite_pending_data_bytes|vm_persistentqueue_bytes_pending' "$C"  # 버퍼 메트릭(실재명 라이브 확정)
   grep -q 'maxDiskUsagePerURL' "$V"                               # eviction 대신 graceful drop
 }
+
+@test "relay single-down has an in-band signal via AM webhook failure (faster than off-node deadman)" {
+  C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
+  grep -q 'alert: DeadmanswitchRelayUnreachable' "$C"
+  grep -q 'alertmanager_notifications_failed_total{integration="webhook"}' "$C"
+}
