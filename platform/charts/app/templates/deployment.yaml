@@ -16,7 +16,7 @@ spec:
       labels:
         {{- include "app.labels" . | nindent 8 }}
       annotations:
-        {{- if and .Values.metrics.enabled (ne .Values.kind "static") }}
+        {{- if and .Values.metrics.enabled (eq .Values.kind "service") }}
         prometheus.io/scrape: "true"
         prometheus.io/port: "{{ .Values.ports.metrics }}"
         prometheus.io/path: "/metrics"
@@ -44,13 +44,15 @@ spec:
           args: ["--port", "{{ .Values.ports.http }}", "--root", "/public", "--page-fallback", "/public/index.html", "--health"]
           {{- end }}
           {{- end }}
+          {{- if include "app.isServed" . }}
           ports:
             - name: http
               containerPort: {{ .Values.ports.http }}
-            {{- if ne .Values.kind "static" }}
+            {{- if eq .Values.kind "service" }}
             - name: metrics
               containerPort: {{ .Values.ports.metrics }}
             {{- end }}
+          {{- end }}
           {{- if or .Values.env .Values.envFrom }}
           envFrom:
             {{- if .Values.env }}
