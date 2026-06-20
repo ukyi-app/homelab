@@ -22,6 +22,7 @@
 import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
 import { parseDocument } from "yaml";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
+import { replaceTotals, removeRow, parseLedgerRows } from "./lib/ledger-totals.ts";
 
 const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const has = (k: string) => process.argv.includes(k);
@@ -159,6 +160,22 @@ switch (step) {
   }
   case "cleanup": {
     if (!DRY) {
+      // 원장 행 제거를 파괴적 작업(파일 rm·tombstone) **전에** — totals 프로즈 드리프트/write 실패 시 cleanup abort(F1·F2 버그수정).
+      if (kind === "cache") {
+        const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
+        const component = `cache-${name}`; // F1: 원장 행은 cache-<name>로 기록됨(provision-cache와 동일)
+        if (existsSync(ledgerPath)) {
+          let lg = readFileSync(ledgerPath, "utf8");
+          // 멱등은 사전 존재 검사로(부재면 이미 정리됨). 존재하면 removeRow→합계 재계산→replaceTotals→write를
+          // catch 없이 실행(F2: fail-loud 보존 — 드리프트/write 실패가 purged tombstone 전에 걸린다).
+          if (new RegExp(`<!-- ledger:row --> *${component} `).test(lg)) {
+            lg = removeRow(lg, component);
+            const rows = parseLedgerRows(lg); // F7: 명명 필드(raw 인덱스 금지)
+            lg = replaceTotals(lg, rows.reduce((a, r) => a + r.reqMi, 0), rows.reduce((a, r) => a + r.limitMi, 0));
+            writeFileSync(ledgerPath, lg);
+          }
+        }
+      }
       // 파일 제거 + 같은 항목을 kustomization에서 등록 해제(둘 다 멱등 — 재실행 안전)
       for (const a of purgeArtifacts) {
         if (existsSync(a.file)) rmSync(a.file, a.dir ? { recursive: true } : {});
@@ -170,7 +187,7 @@ switch (step) {
     console.log(JSON.stringify({
       ...plan,
       action: "cleanup — CR/인스턴스/conn 제거 + kustomization 등록 해제 + tombstone(purged)",
-      manual: kind === "db" ? "cluster.yaml managed.roles에서 owner/_ro role 제거는 별도 커밋(워크플로 단계)" : "원장 행 제거 확인",
+      manual: kind === "db" ? "cluster.yaml managed.roles에서 owner/_ro role 제거는 별도 커밋(워크플로 단계)" : "원장 행 자동 제거됨(cache-<name>)",
     }, null, 2));
     break;
   }
