@@ -1,0 +1,7 @@
+# actionlint 설정 — concurrency.queue: max 는 2026-05 GA 유효 문법(homelab 변이 디스패처 직렬화 계약).
+# actionlint(v1.7.12)가 아직 모르는 schema-lag 오탐만 좁게 무시한다. ★queue:max 자체는 절대 제거/약화 금지.
+# 다른 진짜 에러(셸인젝션·표현식 오류 등)는 계속 잡힌다(이 한 메시지에만 한정).
+paths:
+  .github/workflows/*.yaml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'
