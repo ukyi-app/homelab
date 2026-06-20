@@ -94,6 +94,7 @@ ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate'를 �
 	bun run typecheck
 	bun run verify:ledger
 	bun tools/audit-orphans.ts --ci
+	@./scripts/check-skeleton.sh
 	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
 	@files=$$(git ls-files '*.enc.yaml'); if [ -n "$$files" ]; then scripts/sops-guard.sh $$files; fi
