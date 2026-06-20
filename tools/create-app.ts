@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
-import { replaceTotals } from "./lib/ledger-totals.ts";
+import { replaceTotals, addRow, parseLedgerRows } from "./lib/ledger-totals.ts";
 
 const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const DRY = process.argv.includes("--dry-run");
@@ -121,9 +121,10 @@ const appDir = `${ROOT}/apps/${app}`;
 if (existsSync(appDir)) fail(`apps/${app} 이미 존재`);
 const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
 const ledger = readFileSync(ledgerPath, "utf8");
-const rowRe = /<!-- ledger:row --> *([a-z0-9+-]+) *\|[^|]*\| *(\d+) *\| *(\d+) *\|/g;
-let m, sumReq = 0, sumLimit = 0, names = [];
-while ((m = rowRe.exec(ledger))) { names.push(m[1]); sumReq += +m[2]; sumLimit += +m[3]; }
+const rows = parseLedgerRows(ledger); // F7: 명명 필드(raw 인덱스 금지)
+const names = rows.map((r) => r.name);
+const sumReq = rows.reduce((a, r) => a + r.reqMi, 0);
+const sumLimit = rows.reduce((a, r) => a + r.limitMi, 0);
 if (names.includes(app)) fail(`원장에 '${app}' 행이 이미 있다`);
 const budget = +(ledger.match(/LIMIT_BUDGET_MIB=(\d+)/)?.[1] ?? 0);
 if (!budget) fail("원장 메타(LIMIT_BUDGET_MIB)를 찾지 못함");
@@ -208,10 +209,7 @@ if (!DRY) {
     writeFileSync(appsJsonPath, JSON.stringify(registry, null, 2) + "\n");
   }
   // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신
-  const lines = ledger.split("\n");
-  const lastRow = lines.map((l, i) => (l.includes("<!-- ledger:row -->") ? i : -1)).filter((i) => i >= 0).pop();
-  lines.splice(lastRow! + 1, 0, `| <!-- ledger:row --> ${app.padEnd(14)} | prod           | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);
-  let out = lines.join("\n");
+  let out = addRow(ledger, { name: app, env: "prod", reqMi, limitMi });
   out = replaceTotals(out, sumReq + reqMi, sumLimit + limitMi);
   writeFileSync(ledgerPath, out);
 }

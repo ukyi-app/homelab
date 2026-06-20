@@ -14,7 +14,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { randomBytes, createHash } from "node:crypto";
 import { parseDocument } from "yaml";
-import { replaceTotals } from "./lib/ledger-totals.ts";
+import { replaceTotals, addRow, parseLedgerRows } from "./lib/ledger-totals.ts";
 import { resourceNameError } from "./lib/identity.ts";
 import { sealManifest } from "./lib/seal.ts";
 
@@ -60,10 +60,10 @@ if (existsSync(connPath) || existsSync(roConnPath)) fail(`data-conn에 cache-${n
 const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
 if (!existsSync(ledgerPath)) fail(`메모리 원장 없음: ${ledgerPath}`);
 const ledger = readFileSync(ledgerPath, "utf8");
-const rowRe = /<!-- ledger:row --> *([a-z0-9+-]+) *\|[^|]*\| *(\d+) *\| *(\d+) *\|/g;
-let m, sumReq = 0, sumLimit = 0;
-const names = [];
-while ((m = rowRe.exec(ledger))) { names.push(m[1]); sumReq += +m[2]; sumLimit += +m[3]; }
+const rows = parseLedgerRows(ledger); // F7: 명명 필드(raw 인덱스 금지)
+const names = rows.map((r) => r.name);
+const sumReq = rows.reduce((a, r) => a + r.reqMi, 0);
+const sumLimit = rows.reduce((a, r) => a + r.limitMi, 0);
 const component = `cache-${name}`;
 if (names.includes(component)) fail(`원장에 '${component}' 행이 이미 있다`);
 const budget = +(ledger.match(/LIMIT_BUDGET_MIB=(\d+)/)?.[1] ?? 0);
@@ -326,10 +326,7 @@ resources:
   }
 
   // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신 (create-app.ts와 동일 규약)
-  const lines = ledger.split("\n");
-  const lastRow = lines.map((l, i) => (l.includes("<!-- ledger:row -->") ? i : -1)).filter((i) => i >= 0).pop();
-  lines.splice(lastRow! + 1, 0, `| <!-- ledger:row --> ${component.padEnd(14)} | cache          | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);
-  let out = lines.join("\n");
+  let out = addRow(ledger, { name: component, env: "cache", reqMi, limitMi });
   out = replaceTotals(out, sumReq + reqMi, sumLimit + limitMi);
   writeFileSync(ledgerPath, out);
 }
