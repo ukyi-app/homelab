@@ -12,11 +12,28 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   run grep -E 'bun install --frozen-lockfile' "$A"; [ "$status" -eq 0 ]
 }
 
-@test "all 7 install workflows adopt the setup-bun composite" {
+@test "all 12 workflows adopt the setup-bun composite" {
   local wf
-  for wf in ci.yaml bump.yaml bump-poll.yaml _create-app.yaml _create-database.yaml _create-cache.yaml audit.yaml; do
+  for wf in ci.yaml bump.yaml bump-poll.yaml _create-app.yaml _create-database.yaml _create-cache.yaml audit.yaml \
+            create-app.yaml create-cache.yaml create-database.yaml update-secrets.yaml dns-drift.yaml; do
     run grep -F 'uses: ./.github/actions/setup-bun' "$ROOT/.github/workflows/$wf"
     [ "$status" -eq 0 ]
+  done
+}
+
+@test "setup-bun composite exposes an install input (default true)" {
+  run grep -Eq '^[[:space:]]+install:' "$A"   # inputs.install 키
+  [ "$status" -eq 0 ]
+}
+
+@test "dispatchers + dns-drift use the composite with install:false (no inline oven-sh, deps unneeded)" {
+  for wf in create-app create-cache create-database update-secrets dns-drift; do
+    run grep -Fq 'oven-sh/setup-bun' "$ROOT/.github/workflows/$wf.yaml"
+    [ "$status" -ne 0 ]                                   # 인라인 잔존 0
+    run grep -Fq './.github/actions/setup-bun' "$ROOT/.github/workflows/$wf.yaml"
+    [ "$status" -eq 0 ]                                   # 컴포지트 사용
+    run grep -Eq "install:[[:space:]]*'?false'?" "$ROOT/.github/workflows/$wf.yaml"
+    [ "$status" -eq 0 ]                                   # install:false(동작보존)
   done
 }
 
