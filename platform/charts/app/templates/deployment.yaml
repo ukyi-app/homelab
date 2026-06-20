@@ -90,9 +90,3 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-{{- with .Values.extraManifests }}
-{{- range . }}
----
-{{ toYaml . }}
-{{- end }}
-{{- end }}
