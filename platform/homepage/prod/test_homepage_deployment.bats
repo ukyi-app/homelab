@@ -25,7 +25,8 @@ setup() { D="${BATS_TEST_DIRNAME}/deployment.yaml"; }
 }
 
 @test "declares resource limits matching the ledger" {
-  run grep -qE 'memory:\s*128Mi' "$D"; [ "$status" -eq 0 ]
+  run grep -qE 'limits:' "$D"; [ "$status" -eq 0 ]
+  run grep -qE 'memory:\s*192Mi' "$D"; [ "$status" -eq 0 ]
 }
 
 @test "config is a writable emptyDir seeded by initContainer (EROFS regression guard)" {
