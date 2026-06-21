@@ -19,7 +19,7 @@ setup() {
 @test "AppProjects sync strictly before every non-default project consumer (Pass3 #1)" {
   cd "$ROOT"
   # AppProjects의 (가장 늦은) wave
-  # yq는 멀티독(2 AppProject) 출력 사이에 '---' 구분자를 넣으므로 숫자 줄만 추려 sort(플랜 버그 수정)
+  # yq는 멀티독(2 AppProject) 출력 사이에 '---' 구분자를 넣으므로 숫자 줄만 추려 sort
   projwave="$(yq 'select(.kind=="AppProject") | .metadata.annotations."argocd.argoproj.io/sync-wave"' "$P" | grep -E '^-?[0-9]+$' | sort -n | tail -1)"
   # non-default consumer 최소 wave: appset 생성앱은 템플릿에 sync-wave 없어 wave 0,
   # 수동 root/apps 앱(project!=default)은 자기 sync-wave(없으면 0).
@@ -201,7 +201,7 @@ setup() {
   # plan 리뷰 Pass5 #1: finalizer 부재는 Application 삭제만 막는다. prune:true라 namespaces.yaml에서
   # Namespace를 빼면 ArgoCD가 그 ns를 prune(삭제)한다 — 별개 삭제 벡터. 각 Namespace를 Prune=false로 보호.
   out="$(kustomize build "$ROOT/platform/namespaces/prod")"
-  # ★yq 멀티독 출력은 결과 사이에 '---' 구분자를 넣으므로 이름 카운트서 제외(plan total 카운트 버그 수정).
+  # ★yq 멀티독 출력은 결과 사이에 '---' 구분자를 넣으므로 이름 카운트서 제외.
   total="$(echo "$out" | yq 'select(.kind=="Namespace") | .metadata.name' | grep -v '^---$' | grep -c .)"
   pf="$(echo "$out" | yq 'select(.kind=="Namespace") | .metadata.annotations."argocd.argoproj.io/sync-options" // ""' | grep -c 'Prune=false')"
   [ "$total" -gt 0 ]
@@ -212,7 +212,7 @@ setup() {
 @test "both ApplicationSet templates carry resources-finalizer" {
   run yq '.spec.template.metadata.finalizers[]' "$APPSET"
   [ "$status" -eq 0 ]
-  # platform-components + apps 두 템플릿 모두 — yq 멀티독 '---' 무관하게 grep -c로 카운트(plan paste|bc 버그 회피)
+  # platform-components + apps 두 템플릿 모두 — yq 멀티독 '---' 무관하게 grep -c로 카운트
   n="$(yq '.spec.template.metadata.finalizers[]' "$APPSET" | grep -c 'resources-finalizer.argocd.argoproj.io')"
   [ "$n" -eq 2 ]
 }

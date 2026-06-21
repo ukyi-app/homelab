@@ -117,7 +117,7 @@ setup() {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
   V="$ROOT/platform/victoria-stack/prod/vmagent.yaml"
   grep -q 'alert: VmagentBufferFilling' "$C"                      # leading 경고(드롭 전)
-  grep -qE 'vmagent_remotewrite_pending_data_bytes|vm_persistentqueue_bytes_pending' "$C"  # 버퍼 메트릭(실재명 라이브 확정)
+  grep -qE 'vmagent_remotewrite_pending_data_bytes|vm_persistentqueue_bytes_pending' "$C"  # 버퍼 메트릭
   grep -q 'maxDiskUsagePerURL' "$V"                               # eviction 대신 graceful drop
 }
 
@@ -130,5 +130,5 @@ setup() {
 @test "vector sink backpressure has a partial-degradation alert (PR-B, uses PR-A exposed vector_utilization)" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
   grep -q 'alert: VectorBackpressure' "$C"
-  grep -q 'vector_utilization' "$C"   # PR-A가 노출한 메트릭(라이브 scrape 확정: vlogs·prometheus sink)
+  grep -q 'vector_utilization' "$C"   # vector internal_metrics로 노출된 메트릭
 }
