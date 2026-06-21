@@ -25,6 +25,7 @@ spec:
           - { path: platform/victoria-stack/*, exclude: true }
           - { path: platform/charts/*, exclude: true }
           - { path: platform/sealed-secrets/*, exclude: true }
+          - { path: platform/namespaces/*, exclude: true } # 수동 Application으로 wave 제어(root/apps/namespaces.yaml)
   template:
     metadata:
       name: '{{ index .path.segments 1 }}-{{ .path.basename }}' # <component>-prod

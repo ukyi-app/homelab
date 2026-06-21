@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: namespaces
+  namespace: argocd
+  annotations:
+    # sealed-secrets(-8)·traefik(-8)보다 먼저 — bare ns + PSA 라벨 윈도우 제거
+    argocd.argoproj.io/sync-wave: "-9"
+  # ⚠️ resources-finalizer 없음 (설계리뷰 #1): Namespace는 cascade 삭제 금지.
+  # 삭제/롤백 시 non-cascading → 네임스페이스 orphan-retain(안전). 다른 수동앱과 다른 의도적 예외.
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/ukyi-app/homelab.git
+    targetRevision: main
+    path: platform/namespaces/prod
+  destination:
+    server: https://kubernetes.default.svc
+    # destination.namespace 없음 — Namespace는 cluster-scoped (appset namespaces-prod와 동일 렌더)
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=true # moot(ns 없음)이나 appset namespaces-prod와 동일 옵션 유지
+      - ServerSideApply=true

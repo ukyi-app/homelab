@@ -176,3 +176,34 @@ setup() {
   done
   [ -z "$miss" ] || { echo "sourceRepos 누락:$miss"; false; }
 }
+
+# --- namespaces wave 승격 (설계 §C) ---
+@test "platform appset excludes namespaces (no double-ownership with manual app)" {
+  run grep -E "path: platform/namespaces/\*, exclude: true" "$APPSET"
+  [ "$status" -eq 0 ]
+}
+
+@test "manual namespaces Application: platform project, wave -9, adopts the same path" {
+  N="$ROOT/platform/argocd/root/apps/namespaces.yaml"
+  run yq '.spec.project' "$N"; [ "$output" = "platform" ]
+  run yq '.spec.source.path' "$N"; [ "$output" = "platform/namespaces/prod" ]
+  run yq '.metadata.annotations."argocd.argoproj.io/sync-wave"' "$N"; [ "$output" = "-9" ]
+}
+
+@test "manual namespaces Application has NO resources-finalizer (cascade-delete forbidden)" {
+  # 설계리뷰 #1: namespaces는 cascade 삭제 절대 금지 → finalizer 없으면 삭제 시 orphan-retain(안전)
+  N="$ROOT/platform/argocd/root/apps/namespaces.yaml"
+  run yq '(.metadata.finalizers // []) | length' "$N"
+  [ "$output" = "0" ]
+}
+
+@test "every owned Namespace is non-prunable (Prune=false sync-option)" {
+  # plan 리뷰 Pass5 #1: finalizer 부재는 Application 삭제만 막는다. prune:true라 namespaces.yaml에서
+  # Namespace를 빼면 ArgoCD가 그 ns를 prune(삭제)한다 — 별개 삭제 벡터. 각 Namespace를 Prune=false로 보호.
+  out="$(kustomize build "$ROOT/platform/namespaces/prod")"
+  # ★yq 멀티독 출력은 결과 사이에 '---' 구분자를 넣으므로 이름 카운트서 제외(plan total 카운트 버그 수정).
+  total="$(echo "$out" | yq 'select(.kind=="Namespace") | .metadata.name' | grep -v '^---$' | grep -c .)"
+  pf="$(echo "$out" | yq 'select(.kind=="Namespace") | .metadata.annotations."argocd.argoproj.io/sync-options" // ""' | grep -c 'Prune=false')"
+  [ "$total" -gt 0 ]
+  [ "$total" = "$pf" ]
+}
