@@ -38,6 +38,14 @@
   [[ "$output" == *"rc=0"* ]]
 }
 
+@test "POSITIVE: a prod-namespace client CAN reach the pooler pg-pooler-rw on 5432 (app runtime path, F4b)" {
+  # 앱 런타임 DB 경로 = pooler(pg-pooler-rw, PgBouncer). netpol narrowing이 이 경로를 막으면 안 된다 —
+  # pg-rw(cluster)만 테스트하면 pooler 셀렉터 미스가 미검출(F4). kube-router 룰 갭이라 sleep 8 후 연결.
+  run bash -c "kubectl -n prod run npd-pool-\$RANDOM --image=busybox:1.36 --restart=Never --rm -i --quiet \
+    --command -- sh -c 'sleep 8; nc -w 5 -z pg-pooler-rw.database.svc.cluster.local 5432; echo rc=\$?'"
+  [[ "$output" == *"rc=0"* ]]
+}
+
 @test "NEGATIVE: prod egress to a non-database, non-DNS destination is denied by default" {
   # prod의 egress default-deny는 DNS, database:5432, prod 내부:8080만 허용한다. 외부는 실패해야 한다.
   run bash -c "kubectl -n prod run npd-egr-\$RANDOM --image=busybox:1.36 --restart=Never --rm -i --quiet \

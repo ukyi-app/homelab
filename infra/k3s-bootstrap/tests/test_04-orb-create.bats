@@ -40,3 +40,11 @@ teardown() { rm -rf "$STUBDIR"; }
   run grep -c 'orb create' "$CALLS"
   [ "$output" -eq 0 ]
 }
+
+@test "warns that cloud-init edits do not apply when the machine already exists" {
+  FIX="$STUBDIR/fix"; printf 'NAME  STATE    DISTRO\nk3s   running  debian\n' >"$FIX"
+  ORB_LIST_FIXTURE="$FIX" run "$BOOTSTRAP_DIR/orb-create.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'cloud-init.yaml 편집'      # skip 분기서 경고 출력(편집→host-up→오인 차단)
+  echo "$output" | grep -qE '재생성|orb delete'
+}
