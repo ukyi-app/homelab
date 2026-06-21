@@ -6,4 +6,4 @@
 
 **라이브 디버그** — `argo` 스킬(sync/health). split-horizon rewrite 연동은 런북 `docs/runbooks/lan-dns.md`. ACL/auth-key는 `infra/tailscale`(terraform).
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": tailscale operator의 Ingress reconcile은 metadata-only 변경(annotation nudge)을 무시 → 재처리는 operator 재시작. DR 재구축 시 `traefik-ts` tailscale IP가 바뀌면 AdGuard rewrite가 stale(adguard 참고).
+**함정 SSOT** — docs/traps-detail.md: tailscale operator의 Ingress reconcile은 metadata-only 변경(annotation nudge)을 무시 → 재처리는 operator 재시작. DR 재구축 시 `traefik-ts` tailscale IP가 바뀌면 AdGuard rewrite가 stale(adguard 참고).

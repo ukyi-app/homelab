@@ -6,4 +6,4 @@
 
 **라이브 디버그** — 셸 스크립트 로그 + `verify-cluster.sh`. 런북 `docs/runbooks/host-substrate.md`(OrbStack VM/k3s 계층), `docs/runbooks/external-ssd.md`, `docs/runbooks/storage-verify.md`. 테스트는 `infra/k3s-bootstrap/test/`.
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": OrbStack은 VM에서 LISTEN 중인 포트만 Mac으로 포워딩(servicelb/hostPort iptables DNAT는 트리거 안 됨 → `dns-forward-trigger.service`), VM IP(192.168.139.x)는 Mac에서 직접 라우팅 안 됨. 모든 PV가 hostPath라 `kubelet_volume_stats` 부재, 외장 SSD는 virtiofs라 VM서 측정 불가.
+**함정 SSOT** — docs/traps-detail.md: OrbStack은 VM에서 LISTEN 중인 포트만 Mac으로 포워딩(servicelb/hostPort iptables DNAT는 트리거 안 됨 → `dns-forward-trigger.service`), VM IP(192.168.139.x)는 Mac에서 직접 라우팅 안 됨. 모든 PV가 hostPath라 `kubelet_volume_stats` 부재, 외장 SSD는 virtiofs라 VM서 측정 불가.

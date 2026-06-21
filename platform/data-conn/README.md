@@ -6,4 +6,4 @@
 
 **라이브 디버그** — `argo` 스킬(SealedSecret 복호화/sync 상태). 봉인 절차는 런북 `docs/runbooks/app-platform.md` 참고.
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": SealedSecret strict-scope는 봉인 시점 namespace와 일치해야 복호화 → conn 핸들은 `database`가 아닌 `prod` NS로 분리(cnpg 쪽에 두면 영구 복호화 실패). `*.enc.yaml`/봉인 시크릿은 직접 수정 금지.
+**함정 SSOT** — docs/traps-detail.md: SealedSecret strict-scope는 봉인 시점 namespace와 일치해야 복호화 → conn 핸들은 `database`가 아닌 `prod` NS로 분리(cnpg 쪽에 두면 영구 복호화 실패). `*.enc.yaml`/봉인 시크릿은 직접 수정 금지.

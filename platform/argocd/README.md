@@ -8,4 +8,4 @@
 
 **전역 sync-wave 원장** — [root/SYNC-WAVES.md](root/SYNC-WAVES.md)가 SSOT(M3 소유).
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": sync-wave는 "이전 wave healthy" 대기(한 Application 내 워크로드가 Secret보다 빠르면 교착), `generatorOptions.annotations`는 KSOPS exec 출력에 미적용, retry 소진 후 비재시도(명시 sync patch), Application zero-value 필드 기재 금지(정규화 플립플롭).
+**함정 SSOT** — docs/traps-detail.md: sync-wave는 "이전 wave healthy" 대기(한 Application 내 워크로드가 Secret보다 빠르면 교착), `generatorOptions.annotations`는 KSOPS exec 출력에 미적용, retry 소진 후 비재시도(명시 sync patch), Application zero-value 필드 기재 금지(정규화 플립플롭).
