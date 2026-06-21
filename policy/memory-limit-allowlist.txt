@@ -1,0 +1,19 @@
+# Memory-limit allowlist — check-memory-limits.sh (vector OOM PR #85 포스트모템 가드)
+#
+# 규칙: 상주 워크로드(Deployment/DaemonSet/StatefulSet)의 main 컨테이너는 memory limit 필수.
+#   부득이 미설정해야 하면 아래에 한 줄로 등재한다(게이트가 해당 항목만 면제):
+#       <Kind>/<name>/<container>   # 이유
+#   '#' 이후는 주석. 형식 외 라인은 면제 항목이 아니다(문서로만 취급).
+#
+# ── 강제 면제(enforced exemptions) ──
+#   현재 없음 — 로컬 소스 매니페스트의 전 상주 워크로드가 memory limit 보유(위반 0).
+#
+# ── 범위 밖(문서 전용, 게이트 미강제) — 의도적으로 limit 미설정인 알려진 컨테이너 ──
+#   이들은 원격-helm 차트/벤더/k3s-시스템이라 소스 매니페스트에 없어 이 게이트가 스캔하지 못한다.
+#   강제 대신 "왜 unlimited인가"를 여기 기록해 블라인드스팟을 가시화한다. 변경은 라이브로 확인.
+#     - cert-manager controller/cainjector/webhook : 원격 helm 차트(platform/argocd/root/apps/cert-manager.yaml).
+#         임계 컴포넌트라 too-tight limit이면 cert 발급/갱신 장애(self-induced OOM) 위험 → 노드 여유로 흡수.
+#         (limit이 있는 워크로드는 ContainerMemoryNearLimit 알림이 OOM 전에 커버하나, unlimited는 미커버.)
+#     - cnpg-operator manager : 원격 helm 차트(platform/argocd/root/apps/cnpg-operator.yaml).
+#     - barman-cloud : 벤더 barman-plugin manifest(platform/cnpg/barman-plugin — 수정 금지).
+#     - kube-system svclb-* (klipper-lb) : k3s 관리(우리 매니페스트 아님).
