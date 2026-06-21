@@ -126,3 +126,9 @@ setup() {
   grep -q 'alert: DeadmanswitchRelayUnreachable' "$C"
   grep -q 'alertmanager_notifications_failed_total{integration="webhook"}' "$C"
 }
+
+@test "vector sink backpressure has a partial-degradation alert (PR-B, uses PR-A exposed vector_utilization)" {
+  C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
+  grep -q 'alert: VectorBackpressure' "$C"
+  grep -q 'vector_utilization' "$C"   # PR-A가 노출한 메트릭(라이브 scrape 확정: vlogs·prometheus sink)
+}
