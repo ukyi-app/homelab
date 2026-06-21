@@ -13,6 +13,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: gateway
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false # 매니페스트서 빠져도 ns prune(삭제) 금지(plan Pass5 #1)
   labels:
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/warn: restricted
@@ -22,6 +24,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: edge
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false # 매니페스트서 빠져도 ns prune(삭제) 금지(plan Pass5 #1)
   labels:
     # adguard는 setcap(NET_BIND_SERVICE)+allowPrivilegeEscalation:true라 restricted 불가 — baseline 강제.
     pod-security.kubernetes.io/enforce: baseline
@@ -32,6 +36,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: prod
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false # 매니페스트서 빠져도 ns prune(삭제) 금지(plan Pass5 #1)
   labels:
     # 멀티레포 앱은 전부 공유 차트(restricted 완전 준수)로 배포된다 — restricted enforce로
     # 첫 앱부터 강제(현재 인-레포 앱 0 → 무중단 적용).
@@ -43,6 +49,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: sealed-secrets
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false # 매니페스트서 빠져도 ns prune(삭제) 금지(plan Pass5 #1)
   labels:
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/warn: restricted
@@ -53,6 +61,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: cache
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false # 매니페스트서 빠져도 ns prune(삭제) 금지(plan Pass5 #1)
   labels:
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/warn: restricted
@@ -64,6 +74,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: homepage
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false # 매니페스트서 빠져도 ns prune(삭제) 금지(plan Pass5 #1)
   labels:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/warn: restricted

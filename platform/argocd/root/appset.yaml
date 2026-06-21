@@ -25,12 +25,15 @@ spec:
           - { path: platform/victoria-stack/*, exclude: true }
           - { path: platform/charts/*, exclude: true }
           - { path: platform/sealed-secrets/*, exclude: true }
+          - { path: platform/namespaces/*, exclude: true } # 수동 Application으로 wave 제어(root/apps/namespaces.yaml)
   template:
     metadata:
       name: '{{ index .path.segments 1 }}-{{ .path.basename }}' # <component>-prod
       labels: { homelab.env: '{{ .path.basename }}' }
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io # teardown 시 워크로드 cascade prune (고아화 방지)
     spec:
-      project: default
+      project: platform
       source:
         repoURL: https://github.com/ukyi-app/homelab.git
         targetRevision: main
@@ -62,8 +65,10 @@ spec:
     metadata:
       name: '{{ index .path.segments 1 }}-{{ .path.basename }}' # <app>-prod
       labels: { homelab.env: '{{ .path.basename }}' }
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io # teardown 시 워크로드 cascade prune (고아화 방지)
     spec:
-      project: default
+      project: apps
       sources:
         # source #1: 공유 deploy 차트 (앱 렌더 방식의 SSOT)
         - repoURL: https://github.com/ukyi-app/homelab.git

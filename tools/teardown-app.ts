@@ -6,14 +6,14 @@
 import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { replaceTotals } from "./lib/ledger-totals.ts";
+import { parseFlags } from "./lib/cli.ts";
 
-const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
-// 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시한다(mutator 패밀리 fail-closed).
-const ALLOWED_FLAGS = new Set(["--app", "--repo-root", "--dry-run"]);
-for (const a of process.argv.slice(2)) {
-  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
-}
-const DRY = process.argv.includes("--dry-run");
+// parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
+let __f: Record<string, string | boolean>;
+try { __f = parseFlags(process.argv.slice(2), { value: ["--app", "--repo-root"], bool: ["--dry-run"] }); }
+catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --app --repo-root --dry-run`); process.exit(2); }
+const arg = (k: string, d?: string) => (typeof __f[k] === "string" ? __f[k] as string : d);
+const DRY = __f["--dry-run"] === true;
 const app = arg("--app");
 const ROOT = arg("--repo-root", ".");
 if (!app || !APP_NAME_RE.test(app)) {

@@ -40,7 +40,7 @@ jobs:
           const s = JSON.parse(require("node:fs").readFileSync("/tmp/spec.json", "utf8"));
           const extra = Object.keys(s).filter((k) => !["name", "maxmemory_mi"].includes(k));
           if (extra.length) { console.error(`::error::spec 허용 밖 필드: ${extra.join(",")}`); process.exit(1); }
-          if (!/^[a-z]([a-z0-9-]{0,27}[a-z0-9])?$/.test(s.name ?? "")) { console.error("::error::spec.name 형식 불량"); process.exit(1); }
+          if (!/^[a-z]([a-z0-9-]{0,28}[a-z0-9])?$/.test(s.name ?? "")) { console.error("::error::spec.name 형식 불량"); process.exit(1); }
           const mm = s.maxmemory_mi ?? 64;
           if (!Number.isInteger(mm) || mm < 16 || mm > 1024) { console.error("::error::spec.maxmemory_mi는 16..1024 정수"); process.exit(1); }
           console.log(`name=${s.name}`);

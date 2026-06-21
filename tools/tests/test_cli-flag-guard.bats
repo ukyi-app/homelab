@@ -29,3 +29,39 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "알 수 없는 옵션"
 }
+
+@test "parseFlags rejects a value that starts with -- (arg-swallow guard)" {
+  run bun -e '
+    import { parseFlags } from "./tools/lib/cli.ts";
+    try { parseFlags(["--name", "--dry-run"], { value: ["--name"], bool: ["--dry-run"] }); console.log("DID-NOT-THROW"); }
+    catch { console.log("threw"); }
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^threw$"
+}
+
+@test "parseFlags rejects unknown flag and accepts a well-formed value" {
+  run bun -e '
+    import { parseFlags } from "./tools/lib/cli.ts";
+    const ok = parseFlags(["--name", "blog", "--dry-run"], { value: ["--name"], bool: ["--dry-run"] });
+    if (ok["--name"] !== "blog" || ok["--dry-run"] !== true) { console.error("parse"); process.exit(1); }
+    try { parseFlags(["--bogus", "x"], { value: [], bool: [] }); console.log("DID-NOT-THROW"); }
+    catch { console.log("ok"); }
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok$"
+}
+
+@test "migrated mutators import the shared parseFlags (cli.ts adoption)" {
+  for f in db-url cache-url teardown-resource provision-db provision-cache create-app teardown-app; do
+    run grep -q "lib/cli.ts" "tools/$f.ts"; [ "$status" -eq 0 ]
+  done
+}
+
+@test "migrated mutators reject a missing flag value (arg-swallow guard per callsite)" {
+  # 값-요구 플래그 뒤 값 누락 → fail-closed(이전엔 다음 플래그를 삼킴).
+  run bun tools/teardown-app.ts --app --dry-run;     [ "$status" -ne 0 ]
+  run bun tools/db-url.ts --name --dry-run;          [ "$status" -ne 0 ]
+  run bun tools/provision-cache.ts --name --dry-run; [ "$status" -ne 0 ]
+  run bun tools/teardown-resource.ts --db --dry-run; [ "$status" -ne 0 ]
+}

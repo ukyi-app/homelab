@@ -12,25 +12,27 @@
 // data-conn kustomization은 다른 작업자(Task 5.1) 소유 — 있으면 resources만 추가, 없으면
 // 생성하지 않고 plan JSON checklist에 기재한다.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { randomBytes, createHash } from "node:crypto";
 import { parseDocument } from "yaml";
-import { replaceTotals } from "./lib/ledger-totals.ts";
+import { replaceTotals, addRow, parseLedgerRows } from "./lib/ledger-totals.ts";
+import { resourceNameError } from "./lib/identity.ts";
+import { sealManifest } from "./lib/seal.ts";
+import { addResource } from "./lib/kustomization.ts";
+import { parseFlags } from "./lib/cli.ts";
 
 // 버전 핀 — latest 금지. backup-cronjob.yaml의 snapshot 컨테이너와 같은 태그를 유지한다.
 const VALKEY_IMAGE = "valkey/valkey:8.1.1-alpine";
 
-const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
-const DRY = process.argv.includes("--dry-run");
+// parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
+let __f: Record<string, string | boolean>;
+try { __f = parseFlags(process.argv.slice(2), { value: ["--name", "--repo-root", "--cert", "--maxmemory-mi"], bool: ["--dry-run"] }); }
+catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --dry-run --name --repo-root --cert --maxmemory-mi`); process.exit(2); }
+const arg = (k: string, d?: string) => (typeof __f[k] === "string" ? __f[k] as string : d);
+const DRY = __f["--dry-run"] === true;
 const name = arg("--name");
 const ROOT = arg("--repo-root", ".");
 const CERT = arg("--cert", `${ROOT}/tools/sealed-secrets-cert.pem`)!;
 const rawMaxmemory = arg("--maxmemory-mi", "64")!;
-// 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시하고 디폴트를 적용한다.
-const ALLOWED_FLAGS = new Set(["--dry-run", "--name", "--repo-root", "--cert", "--maxmemory-mi"]);
-for (const a of process.argv.slice(2)) {
-  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
-}
 const maxmemoryMi = Number(rawMaxmemory);
 
 function fail(msg: string): never { console.error(`::error::provision-cache: ${msg}`); process.exit(1); }
@@ -38,9 +40,9 @@ if (!name) {
   console.error("usage: provision-cache --name <cache> [--maxmemory-mi 16..1024] [--repo-root <dir>] [--cert <pem>] [--dry-run]");
   process.exit(2);
 }
-if (!/^[a-z]([a-z0-9-]{0,27}[a-z0-9])?$/.test(name)) fail(`이름 불량: '${name}' (^[a-z]([a-z0-9-]{0,27}[a-z0-9])?$)`);
-// -ro 접미사 예약: cache 'foo-ro'의 conn(cache-foo-ro-conn)이 'foo'의 읽기전용 conn과 충돌.
-if (/-ro$/.test(name)) fail(`'-ro' 접미사 예약: '${name}' — 읽기전용 conn 이름과 충돌`);
+// 형식 + '-ro' 접미사를 공유 정책으로 단일 검사(디스패처 validate-mutation과 동일)
+const nameErr = resourceNameError("cache", name);
+if (nameErr) fail(nameErr);
 if (!/^\d+$/.test(rawMaxmemory) || !Number.isInteger(maxmemoryMi) || maxmemoryMi < 16 || maxmemoryMi > 1024)
   fail(`maxmemory-mi는 16..1024 정수여야 한다: '${rawMaxmemory}'`);
 
@@ -59,10 +61,10 @@ if (existsSync(connPath) || existsSync(roConnPath)) fail(`data-conn에 cache-${n
 const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
 if (!existsSync(ledgerPath)) fail(`메모리 원장 없음: ${ledgerPath}`);
 const ledger = readFileSync(ledgerPath, "utf8");
-const rowRe = /<!-- ledger:row --> *([a-z0-9+-]+) *\|[^|]*\| *(\d+) *\| *(\d+) *\|/g;
-let m, sumReq = 0, sumLimit = 0;
-const names = [];
-while ((m = rowRe.exec(ledger))) { names.push(m[1]); sumReq += +m[2]; sumLimit += +m[3]; }
+const rows = parseLedgerRows(ledger); // F7: 명명 필드(raw 인덱스 금지)
+const names = rows.map((r) => r.name);
+const sumReq = rows.reduce((a, r) => a + r.reqMi, 0);
+const sumLimit = rows.reduce((a, r) => a + r.limitMi, 0);
 const component = `cache-${name}`;
 if (names.includes(component)) fail(`원장에 '${component}' 행이 이미 있다`);
 const budget = +(ledger.match(/LIMIT_BUDGET_MIB=(\d+)/)?.[1] ?? 0);
@@ -214,15 +216,10 @@ resources:
   - acl.sealed.yaml
 `;
 
-// ---------- kubeseal (평문은 stdin으로만) ----------
-function seal(manifest: any) {
-  const res = spawnSync("kubeseal", ["--cert", CERT, "--format", "yaml"], {
-    input: JSON.stringify(manifest), // kubeseal은 JSON manifest도 받는다(YAML 슈퍼셋)
-    encoding: "utf8",
-  });
-  if (res.error) fail(`kubeseal 실행 실패: ${res.error.message}`);
-  if (res.status !== 0) fail(`kubeseal 종료 코드 ${res.status} — cert(${CERT}) 점검`);
-  return res.stdout;
+// ---------- kubeseal (평문은 stdin으로만 — 봉인 SSOT = lib/seal.ts) ----------
+function seal(manifest: object) {
+  try { return sealManifest(manifest, CERT); }
+  catch (e) { fail(e instanceof Error ? e.message : String(e)); } // strict catch(F11)·기존 exit 코드 보존
 }
 const secret = (ns: string, secretName: string, stringData: any) => ({
   apiVersion: "v1", kind: "Secret",
@@ -232,12 +229,9 @@ const secret = (ns: string, secretName: string, stringData: any) => ({
 
 // ---------- kustomization 멱등 등록 ----------
 function registerResource(file: string, entry: string) {
-  const doc = parseDocument(readFileSync(file, "utf8"));
-  const cur = doc.toJS()?.resources ?? [];
-  if (cur.includes(entry)) return null;
-  if (doc.has("resources")) doc.addIn(["resources"], entry);
-  else doc.set("resources", [entry]);
-  return doc.toString();
+  const cur = readFileSync(file, "utf8");
+  const updated = addResource(cur, entry);   // 멱등 SSOT(이미 있으면 동일 문자열)
+  return updated === cur ? null : updated;   // 기존 계약 보존: 변화 없으면 null
 }
 
 const checklist = [
@@ -330,10 +324,7 @@ resources:
   }
 
   // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신 (create-app.ts와 동일 규약)
-  const lines = ledger.split("\n");
-  const lastRow = lines.map((l, i) => (l.includes("<!-- ledger:row -->") ? i : -1)).filter((i) => i >= 0).pop();
-  lines.splice(lastRow! + 1, 0, `| <!-- ledger:row --> ${component.padEnd(14)} | cache          | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);
-  let out = lines.join("\n");
+  let out = addRow(ledger, { name: component, env: "cache", reqMi, limitMi });
   out = replaceTotals(out, sumReq + reqMi, sumLimit + limitMi);
   writeFileSync(ledgerPath, out);
 }
