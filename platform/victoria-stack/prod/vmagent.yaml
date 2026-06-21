@@ -47,6 +47,7 @@ spec:
             - --memory.allowedPercent=60
             - --httpListenAddr=:8429
             - --remoteWrite.tmpDataPath=/tmpdata
+            - --remoteWrite.maxDiskUsagePerURL=450MiB   # 512Mi emptyDir 미만 — 큐가 차면 oldest drop(eviction+전량유실 회피)
           env:
             - { name: GOMEMLIMIT, value: "230MiB" } # 256Mi의 약 90%
           ports: [{ name: http, containerPort: 8429 }]

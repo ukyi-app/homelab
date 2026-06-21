@@ -84,6 +84,9 @@ jobs:
         # (한국어 제목·글리프·자동 escape·링크). required gate 잡 스텝 → branch protection이 강제.
         # docker/python3는 ubuntu 러너 기본 제공, yq는 위 install 스텝에서 설치됨.
         run: bash tests/gates/alertmanager-render-e2e.sh
+      - name: vector config validate (containerized — render 미차단 vector 의미오류)
+        # alertmanager-render-e2e 선례 — kustomize render는 vector config 의미오류를 못 잡는다. docker는 러너 기본.
+        run: bash tests/gates/vector-validate.sh
       # app-shared .mts가 node strip-types(앱 레포 secret:seal 경로)에서도 실행됨을 required gate가 보장 (A.5 F1·pass3) —
       # 별도 잡이면 비-required라 무성 회귀라 gate 잡 안 스텝으로. node 22.18은 strip-types 실행용 의식적 예외(setup-bun ban 유일 예외).
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4 — node strip-types 실행용
