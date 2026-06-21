@@ -1,11 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
+  "additionalProperties": false,
   "required": ["image", "kind", "resources"],
   "properties": {
     "image": {
-      "type": "object",
-      "required": ["repo"],
+      "type": "object", "additionalProperties": false, "required": ["repo"],
       "properties": {
         "repo": { "type": "string", "minLength": 1 },
         "tag": { "type": "string", "pattern": "^$|^sha-[0-9a-f]{7,40}$|^[a-z0-9][a-z0-9._-]*$" },
@@ -14,74 +14,70 @@
       },
       "anyOf": [
         { "required": ["digest"] },
-        {
-          "required": ["tag"],
-          "properties": { "tag": { "minLength": 1 } }
-        }
+        { "required": ["tag"], "properties": { "tag": { "minLength": 1 } } }
       ]
     },
     "kind": { "type": "string", "enum": ["service", "worker", "static"] },
     "replicas": { "type": "integer", "minimum": 1, "maximum": 3 },
-    "podAnnotations": {
-      "type": "object",
-      "additionalProperties": { "type": "string" }
-    },
+    "nameOverride": { "type": "string" },
+    "imagePullSecrets": { "type": "array", "items": { "type": "object" } },
+    "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } },
     "gateway": {
-      "type": "object",
-      "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "namespace": { "type": "string", "minLength": 1 }
-      }
+      "type": "object", "additionalProperties": false,
+      "properties": { "name": { "type": "string", "minLength": 1 }, "namespace": { "type": "string", "minLength": 1 } }
     },
     "resources": {
-      "type": "object",
-      "required": ["requests", "limits"],
+      "type": "object", "required": ["requests", "limits"],
       "properties": {
-        "requests": {
-          "type": "object",
-          "required": ["cpu", "memory"],
-          "properties": {
-            "cpu": { "type": "string", "minLength": 1 },
-            "memory": { "type": "string", "minLength": 1 }
-          }
-        },
-        "limits": {
-          "type": "object",
-          "required": ["cpu", "memory"],
-          "properties": {
-            "cpu": { "type": "string", "minLength": 1 },
-            "memory": { "type": "string", "minLength": 1 }
-          }
-        }
+        "requests": { "type": "object", "required": ["cpu", "memory"], "properties": { "cpu": { "type": "string", "minLength": 1 }, "memory": { "type": "string", "minLength": 1 } } },
+        "limits":   { "type": "object", "required": ["cpu", "memory"], "properties": { "cpu": { "type": "string", "minLength": 1 }, "memory": { "type": "string", "minLength": 1 } } }
+      }
+    },
+    "env": { "type": "array", "items": { "type": "object" } },
+    "envFrom": { "type": "array", "items": { "type": "object" } },
+    "route": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "host": { "type": "string" }, "paths": { "type": "array", "items": { "type": "string" } }, "public": { "type": "boolean" } }
+    },
+    "homepage": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "enabled": { "type": "boolean" }, "name": { "type": "string" }, "group": { "type": "string" }, "icon": { "type": "string" } }
+    },
+    "db": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "enabled": { "type": "boolean" }, "host": { "type": "string" }, "migrateCmd": { "type": "array", "items": { "type": "string" } } }
+    },
+    "probes": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "liveness": { "type": "object", "additionalProperties": false, "properties": { "path": { "type": "string" } } },
+        "readiness": { "type": "object", "additionalProperties": false, "properties": { "path": { "type": "string" } } }
       }
     },
     "static": {
-      "type": "object",
-      "properties": { "server": { "type": "string", "enum": ["sws", "caddy"] } }
+      "type": "object", "additionalProperties": false,
+      "properties": { "server": { "type": "string", "enum": ["sws"] } }
     },
-    "db": {
-      "type": "object",
+    "ports": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "http": { "type": "integer" }, "metrics": { "type": "integer" } }
+    },
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "enabled": { "type": "boolean" } }
+    },
+    "livenessProbe": { "type": "object" },
+    "automountServiceAccountToken": { "type": "boolean" },
+    "strategy": {
+      "type": "object", "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean" },
-        "migrateCmd": { "type": "array", "items": { "type": "string" } }
+        "type": { "type": "string", "enum": ["Recreate", "RollingUpdate"] },
+        "rollingUpdate": { "type": "object" }
       }
     },
-    "route": {
-      "type": "object",
-      "properties": {
-        "host": { "type": "string" },
-        "paths": { "type": "array", "items": { "type": "string" } },
-        "public": { "type": "boolean" }
-      }
-    },
-    "homepage": {
-      "type": "object",
-      "properties": {
-        "enabled": { "type": "boolean" },
-        "name": { "type": "string" },
-        "group": { "type": "string" },
-        "icon": { "type": "string" }
-      }
-    }
+    "podSecurityContext": { "type": "object" },
+    "securityContext": { "type": "object" },
+    "terminationGracePeriodSeconds": { "type": "integer" },
+    "preStopSleepSeconds": { "type": "integer", "minimum": 0 }
   }
 }

@@ -76,7 +76,7 @@
     "static": {
       "type": "object",
       "additionalProperties": false,
-      "properties": { "server": { "enum": ["sws", "caddy"] } }
+      "properties": { "server": { "enum": ["sws"] } }
     },
     "deploy": {
       "type": "object",

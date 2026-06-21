@@ -27,6 +27,7 @@ spec:
         {{- include "app.selectorLabels" . | nindent 8 }}
         app.homelab/job: migrate
     spec:
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
       restartPolicy: Never
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
