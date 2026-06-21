@@ -126,10 +126,11 @@ setup() {
   # plan 리뷰 Pass4 #2: server도 검사해야 잘못된 클러스터 타깃·server 와일드카드 약화를 잡는다.
   permits() {
     local proj="$1" srv="$2" ns="$3" ds dn
-    while IFS="$(printf '\t')" read -r ds dn; do
+    # 구분자는 리터럴 '|' — yq의 "\t" 이스케이프는 버전 따라 탭(v4.52)/리터럴(v4.44 CI)이라 분할이 깨진다(CI green 보장).
+    while IFS='|' read -r ds dn; do
       { [ "$ds" = "*" ] || [ "$ds" = "$srv" ]; } || continue
       { [ "$dn" = "*" ] || [ "$dn" = "$ns" ]; } && return 0
-    done < <(yq "select(.metadata.name==\"$proj\") | .spec.destinations[] | .server + \"\t\" + .namespace" "$P")
+    done < <(yq "select(.metadata.name==\"$proj\") | .spec.destinations[] | .server + \"|\" + .namespace" "$P")
     return 1
   }
   miss=""
