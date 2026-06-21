@@ -216,3 +216,67 @@ setup() {
   n="$(yq '.spec.template.metadata.finalizers[]' "$APPSET" | grep -c 'resources-finalizer.argocd.argoproj.io')"
   [ "$n" -eq 2 ]
 }
+
+# --- exclude ⊇ root/apps (이중소유 플립플롭 차단, 설계 §D) ---
+@test "every root/apps platform path is excluded from the platform appset" {
+  cd "$ROOT"
+  miss=""
+  for f in platform/argocd/root/apps/*.yaml; do
+    # source path(들) 중 platform/<comp>/... 패턴의 comp 추출
+    for p in $(yq '[.spec.source.path // (.spec.sources[]?.path)] | flatten | .[]' "$f" 2>/dev/null); do
+      case "$p" in
+        platform/*/*)
+          comp="$(echo "$p" | cut -d/ -f2)"
+          grep -qE "path: platform/$comp/\*, exclude: true" platform/argocd/root/appset.yaml \
+            || miss="$miss $(yq '.metadata.name' "$f"):$comp"
+          ;;
+      esac
+    done
+  done
+  [ -z "$miss" ] || { echo "appset exclude 누락(이중소유 위험):$miss"; false; }
+}
+
+# --- Namespace-소유 Application은 finalizer 금지 (설계리뷰 #1 + Pass1 #3) ---
+# **정적 탐지**(render 불요, KSOPS도 안 스킵): source 디렉토리에 `kind: Namespace` 매니페스트가 있으면
+# 그 Application은 Namespace 소유자다. build-실패-skip은 가장 위험한 소유자(cnpg-data 등 KSOPS)를 놓치므로 금지.
+# **명시 allowlist**: cnpg-data는 자기 `database` ns를 라이프사이클에 결합 소유 — 의도적 예외다(cnpg-data
+# 삭제 = 의도적 DB teardown, R2 백업 보유, 소유자 PR로만 발생). namespaces app은 공유 foundational ns 다수를
+# 소유하므로 cascade 절대 금지(finalizer 없음 강제). 신규 Namespace 소유자는 전부 강제 검사.
+# 의도적 예외 — 각자 자기 전용 ns를 라이프사이클에 결합 소유(삭제=의도적 teardown, owner PR로만): cnpg-data=database·
+# victoria-stack=observability(둘 다 기존 finalizer, 자기 스택만 cascade). 공유 foundational ns 다수를 소유하는
+# namespaces app은 finalizer 0(cascade 절대 금지)이라 비-allowlist. 추가 시 '자기 전용 ns' 근거 주석 필수.
+NS_FINALIZER_ALLOW="cnpg-data victoria-stack"
+@test "Namespace-owning Applications carry no resources-finalizer (allowlist documented)" {
+  cd "$ROOT"
+  bad=""
+  for f in platform/argocd/root/apps/*.yaml; do
+    name="$(yq '.metadata.name' "$f")"
+    case " $NS_FINALIZER_ALLOW " in *" $name "*) continue;; esac
+    owns=0
+    for p in $(yq '[.spec.source.path // (.spec.sources[]?.path)] | flatten | .[]' "$f" 2>/dev/null); do
+      [ -d "$p" ] || continue
+      grep -rqs '^kind: Namespace$' "$p" && owns=1
+    done
+    [ "$owns" = "1" ] || continue
+    fin="$(yq '(.metadata.finalizers // []) | length' "$f")"
+    [ "$fin" = "0" ] || bad="$bad $name"
+  done
+  [ -z "$bad" ] || { echo "Namespace 소유인데 finalizer 보유(cascade 위험):$bad"; false; }
+}
+
+# --- appset-생성 컴포넌트의 Namespace 소유 금지 (설계리뷰 Pass3 #3) ---
+# Task 5가 두 appset 템플릿에 finalizer를 부여하므로, appset이 발견하는 platform/*/prod(exclude 제외)는
+# finalizer를 **상속**한다. 그 경로가 Namespace를 소유하면 cascade 위험 → Namespace 소유 컴포넌트는
+# 반드시 exclude(수동 root/apps Application, finalizer 없음)로 관리해야 한다. 정적 grep(CI-safe).
+@test "no ApplicationSet-discovered platform component owns a Namespace (would inherit finalizer)" {
+  cd "$ROOT"
+  bad=""
+  for d in platform/*/prod; do
+    comp="$(echo "$d" | cut -d/ -f2)"
+    case "$comp" in charts) continue;; esac                          # 라이브러리(앱 아님)
+    # appset exclude(수동 관리)면 제외 — 그건 위 root/apps 가드가 커버
+    grep -qE "path: platform/$comp/\*, exclude: true" platform/argocd/root/appset.yaml && continue
+    grep -rqs '^kind: Namespace$' "$d" && bad="$bad $comp"
+  done
+  [ -z "$bad" ] || { echo "appset-생성 컴포넌트가 Namespace 소유(finalizer 상속 cascade 위험):$bad"; false; }
+}

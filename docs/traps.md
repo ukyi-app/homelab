@@ -33,3 +33,4 @@
 | R2 pg 아카이브 reset --purge 가드(④) | gate | `tests/test_reset-pg-r2-archive.bats` |
 | sealing key 백업 체인 DR fail-closed 게이트 | gate | `tests/test_sealed-secrets-restore.bats` |
 | tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | iac | `infra/_tests/test_tf_reconcile.bats` |
+| ArgoCD AppProject 권한경계 + appset finalizer/exclude/default-lockdown 거버넌스 | gate | `platform/argocd/root/test_projects.bats` |
