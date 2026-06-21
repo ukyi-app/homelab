@@ -30,6 +30,8 @@ spec:
     metadata:
       name: '{{ index .path.segments 1 }}-{{ .path.basename }}' # <component>-prod
       labels: { homelab.env: '{{ .path.basename }}' }
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io # teardown 시 워크로드 cascade prune (고아화 방지)
     spec:
       project: platform
       source:
@@ -63,6 +65,8 @@ spec:
     metadata:
       name: '{{ index .path.segments 1 }}-{{ .path.basename }}' # <app>-prod
       labels: { homelab.env: '{{ .path.basename }}' }
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io # teardown 시 워크로드 cascade prune (고아화 방지)
     spec:
       project: apps
       sources:
