@@ -6,4 +6,4 @@
 
 **라이브 디버그** — `argo` 스킬(sync/health). 터널/DNS 자체는 `infra/cloudflare`(terraform)와 연동.
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": `*.enc.yaml` 직접 수정 금지(평문 메타데이터도 SOPS MAC 포함, 복호화→편집→재암호화만), `envFrom` 시크릿 변경은 파드 재시작이 있어야 반영.
+**함정 SSOT** — docs/traps-detail.md: `*.enc.yaml` 직접 수정 금지(평문 메타데이터도 SOPS MAC 포함, 복호화→편집→재암호화만), `envFrom` 시크릿 변경은 파드 재시작이 있어야 반영.

@@ -6,4 +6,4 @@
 
 **라이브 디버그** — `argo` 스킬(sync/health, HTTPRoute parentRefs OutOfSync).
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": Traefik 차트는 `serviceAccount.name` 지정 시 SA를 생성하지 않음, SSA + atomic 리스트(HTTPRoute `parentRefs`/`backendRefs`)는 서버 주입 기본값이 영구 OutOfSync → manifest에 기본값(group/kind/weight) 명시. gateway-api CRD는 벤더 파일이라 직접 수정 금지.
+**함정 SSOT** — docs/traps-detail.md: Traefik 차트는 `serviceAccount.name` 지정 시 SA를 생성하지 않음, SSA + atomic 리스트(HTTPRoute `parentRefs`/`backendRefs`)는 서버 주입 기본값이 영구 OutOfSync → manifest에 기본값(group/kind/weight) 명시. gateway-api CRD는 벤더 파일이라 직접 수정 금지.

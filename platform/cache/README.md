@@ -6,4 +6,4 @@
 
 **라이브 디버그** — `argo` 스킬(sync/health), `observability` 스킬(메트릭/알림).
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": appset 템플릿에 `destination.namespace`가 없어 CreateNamespace가 무효 → 대상 NS는 `platform/namespaces`가 일괄 소유. NetworkPolicy ipBlock에 pod CIDR 금지(default-deny 무력화), kube-router 룰 설치 갭(`sleep 8` 후 연결).
+**함정 SSOT** — docs/traps-detail.md: appset 템플릿에 `destination.namespace`가 없어 CreateNamespace가 무효 → 대상 NS는 `platform/namespaces`가 일괄 소유. NetworkPolicy ipBlock에 pod CIDR 금지(default-deny 무력화), kube-router 룰 설치 갭(`sleep 8` 후 연결).

@@ -6,4 +6,4 @@
 
 **라이브 디버그** — terraform plan 로그(owner 로컬). App 인증 경계는 런북 `docs/runbooks/app-platform.md`.
 
-**함정 SSOT** — AGENTS.md "라이브에서 검증된 함정": github/tailscale 루트=신뢰 앵커라 CI 무인 apply 금지(plan-only). required check는 `gate` 단일. fine-grained PAT 능력은 실제 push 테스트로만 확인(repo GET `permissions`는 역할만 표시). provider lock 첫 커밋은 라이브 state writer 버전 이상으로 핀.
+**함정 SSOT** — docs/traps-detail.md: github/tailscale 루트=신뢰 앵커라 CI 무인 apply 금지(plan-only). required check는 `gate` 단일. fine-grained PAT 능력은 실제 push 테스트로만 확인(repo GET `permissions`는 역할만 표시). provider lock 첫 커밋은 라이브 state writer 버전 이상으로 핀.

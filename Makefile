@@ -111,6 +111,10 @@ verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored
 	  bats docs/runbooks/*.bats; \
 	else echo "verify-runbooks: docs/runbooks/*.bats 없음(로컬 전용 — 러너/fresh checkout엔 부재)"; fi
 
+.PHONY: verify-runbook-index
+verify-runbook-index: ## [local] 런북 인덱스↔docs/runbooks 정합(gitignored라 CI skip — verify-runbooks와 별개)
+	@bash scripts/verify-runbook-index.sh
+
 .PHONY: verify-posture
 verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 필요(없으면 skip)
 	@if [ -f "$(KUBECONFIG_LIVE)" ]; then \

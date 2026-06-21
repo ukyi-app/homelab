@@ -16,5 +16,19 @@ while IFS= read -r p; do
   [ -e "$p" ] || { echo "FAIL: 원장이 가리키는 가드 부재: $p"; fail=1; }
 done <<< "$paths"
 
-if [ "$fail" -ne 0 ]; then echo "verify-traps: 가드 드리프트 발견(enforced인데 파일 없음)" >&2; exit 1; fi
-echo "verify-traps: 원장의 모든 guard 경로 실재 OK"
+# 역방향 guard-path-tie(D3): traps-detail.md의 '> 가드:' 주석 경로가 원장(traps.md)에도 등장하는지.
+# 위는 원장→가드파일 존재검사, 이건 SSOT(traps-detail.md) 가드주석→원장 추적 검사 — SSOT가 enforced라 단
+# 가드를 원장이 안 따라가는 드리프트 차단. ★'> 가드:' 줄의 백틱 경로만 — 본문 prose 백틱(scripts/verify-traps.sh
+# 등)은 비대상(F6: 원장 prose 경로를 SSOT에 요구하던 overbroad tie 회피).
+DETAIL="${2:-docs/traps-detail.md}"
+if [ -f "$DETAIL" ]; then
+  # shellcheck disable=SC2016  # 백틱은 리터럴 매칭
+  detail_guards="$(grep -E '^> 가드:' "$DETAIL" | grep -oE '`[^`]+`' | tr -d '`' | grep -E '\.(bats|sh|rego|mjs|ya?ml|json)$' | sort -u)"
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    grep -Fq -- "$p" "$LEDGER" || { echo "FAIL: SSOT(traps-detail.md) 가드가 원장에 부재(드리프트): $p"; fail=1; }
+  done <<< "$detail_guards"
+fi
+
+if [ "$fail" -ne 0 ]; then echo "verify-traps: 가드 드리프트 발견" >&2; exit 1; fi
+echo "verify-traps: 원장 guard 실재 + SSOT 가드주석↔원장 일치 OK"
