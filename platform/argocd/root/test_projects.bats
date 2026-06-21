@@ -144,9 +144,12 @@ setup() {
   done
   # 두 appset 템플릿 (platform-components=빈 namespace, apps=prod)
   for an in platform-components apps; do
-    proj="$(yq "select(.metadata.name==\"$an\") | .spec.template.spec.project" "$APPSET")"
-    srv="$(yq "select(.metadata.name==\"$an\") | .spec.template.spec.destination.server // \"\"" "$APPSET")"
-    ns="$(yq "select(.metadata.name==\"$an\") | .spec.template.spec.destination.namespace // \"\"" "$APPSET")"
+    # ★매칭 doc을 먼저 단일 YAML로 추출 후 질의 — 멀티독 select+`// ""`은 yq v4.44(CI)서 비매칭 doc에
+    # 빈 줄을 방출하고, 매칭이 2번째 doc(apps)이면 그 앞 빈 줄이 $()에 잔존해 srv를 오염시킨다(v4.52 로컬은 무방출).
+    d="$(yq "select(.metadata.name==\"$an\")" "$APPSET")"
+    proj="$(echo "$d" | yq '.spec.template.spec.project')"
+    srv="$(echo "$d" | yq '.spec.template.spec.destination.server // ""')"
+    ns="$(echo "$d" | yq '.spec.template.spec.destination.namespace // ""')"
     permits "$proj" "$srv" "$ns" || miss="$miss appset-$an@$proj"
   done
   [ -z "$miss" ] || { echo "destination 미허용(InvalidSpec/잘못된 server 위험):$miss"; false; }
