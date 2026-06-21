@@ -55,7 +55,7 @@ build() { kustomize build "$DIR"; }
   # podSelector로 좁힌 피어 ≥1
   run yq '[.spec.egress[].to[] | select(has("podSelector"))] | length' "$TMP"
   [ "$output" -ge 1 ]
-  # ★F4: pooler+cluster 정확 셀렉터 둘 다(오타 통과 방지). 라이브 --show-labels로 확정한 값.
+  # ★F4: pooler+cluster 정확 셀렉터 둘 다(오타 통과 방지). CNPG 자동생성 라벨(poolerName·cluster).
   run grep -q 'cnpg.io/poolerName: pg-pooler-rw' "$TMP"; [ "$status" -eq 0 ]   # pooler(앱 런타임 경로, PgBouncer)
   run grep -q 'cnpg.io/cluster: pg' "$TMP"; [ "$status" -eq 0 ]                # cluster(pg-rw→primary)
   run grep -q 'port: 5432' "$TMP"; [ "$status" -eq 0 ]
