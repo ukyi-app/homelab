@@ -191,3 +191,29 @@ teardown() { rm -rf "$TMP"; }
   # db 산출물 무손상
   [ -f "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml" ]
 }
+
+@test "teardown-resource cache purge cleanup removes the cache-name ledger row (budget leak fix)" {
+  D="$(mktemp -d)"; mkdir -p "$D/docs" "$D/apps" "$D/platform/data-conn/prod" "$D/platform/cache/prod/widget"
+  printf '%s\n' '<!-- LIMIT_BUDGET_MIB=8704 -->' \
+    '| <!-- ledger:row --> cache-widget   | cache          |     64 |      128 |' \
+    '**합계:** req ≈ 64 Mi · limit ≈ 128 Mi (≤ 8704 Mi).' > "$D/docs/memory-ledger.md"
+  echo '{}' > "$D/platform/data-conn/prod/.tombstones.json"
+  run bun "$ROOT/tools/teardown-resource.ts" --cache widget --repo-root "$D" --delete-data --backup-verified test-id --step cleanup
+  [ "$status" -eq 0 ]
+  run grep -c 'ledger:row --> cache-widget' "$D/docs/memory-ledger.md"
+  [ "$output" = "0" ]
+  run grep -q '"state": "purged"' "$D/platform/data-conn/prod/.tombstones.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "teardown-resource cache purge fails loud when totals prose drifted (no silent purge)" {
+  D="$(mktemp -d)"; mkdir -p "$D/docs" "$D/apps" "$D/platform/data-conn/prod" "$D/platform/cache/prod/widget"
+  printf '%s\n' '<!-- LIMIT_BUDGET_MIB=8704 -->' \
+    '| <!-- ledger:row --> cache-widget   | cache          |     64 |      128 |' \
+    'totals prose 누락(드리프트)' > "$D/docs/memory-ledger.md"
+  echo '{}' > "$D/platform/data-conn/prod/.tombstones.json"
+  run bun "$ROOT/tools/teardown-resource.ts" --cache widget --repo-root "$D" --delete-data --backup-verified test-id --step cleanup
+  [ "$status" -ne 0 ]
+  run grep -q '"state": "purged"' "$D/platform/data-conn/prod/.tombstones.json"   # fail-loud: purged로 안 넘어가야
+  [ "$status" -ne 0 ]
+}

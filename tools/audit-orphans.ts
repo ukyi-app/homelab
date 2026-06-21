@@ -12,6 +12,7 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { surfaceHash } from "./lib/surface-hash.ts";
+import { parseLedgerRows } from "./lib/ledger-totals.ts";
 
 const USAGE = `audit-orphans — registry↔매니페스트↔바인딩↔원장 교차 드리프트 리포트(읽기 전용)
 사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict]
@@ -120,8 +121,8 @@ for (const n of cacheDirs) if (!referenced.has(`cache:${n}`)) add("unreferenced-
 
 // 4) 원장 ↔ 실체 (prod 행만 — 플랫폼 컴포넌트 행은 namespace가 다르거나 platform/에 실체)
 const ledger = existsSync(`${ROOT}/docs/memory-ledger.md`) ? readFileSync(`${ROOT}/docs/memory-ledger.md`, "utf8") : "";
-for (const m of ledger.matchAll(/<!-- ledger:row --> *([a-z0-9+-]+) *\| *([a-z-]+) *\|/g)) {
-  const [, comp, ns] = m;
+for (const r of parseLedgerRows(ledger)) { // F7: 명명 필드(raw 인덱스 금지)
+  const comp = r.name, ns = r.env;
   if (ns === "prod" && !appDirs.includes(comp) && !existsSync(`${ROOT}/platform/${comp}`))
     add("stale-ledger-row", comp, "원장 prod 행인데 apps/·platform/ 어디에도 실체 없음");
   if (ns === "cache" && !cacheDirs.includes(comp.replace(/^cache-/, "")))

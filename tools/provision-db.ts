@@ -15,9 +15,11 @@
 //   - 비밀번호/raw URL은 stdout·로그 어디에도 출력하지 않는다. 평문 Secret은 메모리에서만
 //     조립해 kubeseal stdin으로 직행한다(디스크 비기록).
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
+import { RESOURCE_NAME_RE, EXT_RE, resourceNameError } from "./lib/identity.ts";
+import { sealManifest } from "./lib/seal.ts";
+import { parseFlags } from "./lib/cli.ts";
 import { Document, parseDocument } from "yaml";
 
 function fail(msg: string): never { console.error(`::error::provision-db: ${msg}`); process.exit(1); }
@@ -25,18 +27,18 @@ function fail(msg: string): never { console.error(`::error::provision-db: ${msg}
 // ---------- 1) 인자 파싱 — 허용 밖 인자는 전부 거부 (fail-closed) ----------
 type Args = { cluster: string; root: string; extensions: string[]; dryRun: boolean; name?: string };
 function parseArgs(argv: string[]): Args {
-  const args: Args = { cluster: "pg", root: ".", extensions: [], dryRun: false };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--name") args.name = argv[++i];
-    else if (a === "--extensions") args.extensions = (argv[++i] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    else if (a === "--cluster") args.cluster = argv[++i];
-    else if (a === "--repo-root") args.root = argv[++i];
-    else if (a === "--dry-run") args.dryRun = true;
-    else if (a === "--owner") fail("owner는 입력받지 않는다 — 항상 name으로 고정 (owner 공유 시 teardown이 다른 DB를 깬다)");
-    else fail(`알 수 없는 인자: ${a}`);
-  }
-  return args;
+  // parseFlags: unknown + arg 삼킴(값 누락 자리서 다음 --플래그 삼킴) fail-closed. --owner는 known(value)으로 받되 아래서 전용 메시지로 거부.
+  let f: Record<string, string | boolean>;
+  try { f = parseFlags(argv, { value: ["--name", "--extensions", "--cluster", "--repo-root", "--owner"], bool: ["--dry-run"] }); }
+  catch (e) { fail(e instanceof Error ? e.message : String(e)); }
+  if (f["--owner"] !== undefined) fail("owner는 입력받지 않는다 — 항상 name으로 고정 (owner 공유 시 teardown이 다른 DB를 깬다)");
+  return {
+    name: typeof f["--name"] === "string" ? f["--name"] : undefined,
+    extensions: typeof f["--extensions"] === "string" ? f["--extensions"].split(",").map((s) => s.trim()).filter(Boolean) : [],
+    cluster: typeof f["--cluster"] === "string" ? f["--cluster"] : "pg",
+    root: typeof f["--repo-root"] === "string" ? f["--repo-root"] : ".",
+    dryRun: f["--dry-run"] === true,
+  };
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -46,18 +48,12 @@ if (!args.name) {
 }
 
 // ---------- 2) 입력 검증 ----------
-const NAME_RE = /^[a-z]([a-z0-9-]*[a-z0-9])?$/; // validate-mutation.ts와 동일 계열 (kebab-case)
-const EXT_RE = /^[a-z][a-z0-9_-]*$/;
-// 예약 이름: bootstrap initdb(app), 시스템 롤/DB — 충돌 시 클러스터가 깨진다
-const RESERVED = new Set(["app", "postgres", "pg", "template0", "template1", "streaming_replica"]);
-
 const name = args.name;
-if (!NAME_RE.test(name) || name.length > 30) fail(`name 형식 불량(kebab-case, ≤30자): '${name}'`);
-if (RESERVED.has(name)) fail(`예약 이름: '${name}' — bootstrap/시스템 객체와 충돌`);
-// -ro 접미사 예약: db 'foo-ro'의 conn 파일(db-foo-ro-conn)이 db 'foo'의 읽기전용
-// conn(db-foo-ro-conn)과 충돌해 한쪽을 조용히 덮어쓴다 → 접미사 자체를 금지.
-if (/-ro$/.test(name)) fail(`'-ro' 접미사 예약: '${name}' — 읽기전용 conn 이름과 충돌`);
-if (!NAME_RE.test(args.cluster)) fail(`cluster 형식 불량: '${args.cluster}'`);
+// 형식 + DB 예약 이름 + '-ro' 접미사(F8)를 공유 정책으로 단일 검사(디스패처 validate-mutation과 동일)
+const nameErr = resourceNameError("db", name);
+if (nameErr) fail(nameErr);
+// cluster는 format만 — 기본값 'pg'가 DB 예약이라 resourceNameError("db",…)를 쓰면 자기 자신을 거부한다
+if (!RESOURCE_NAME_RE.test(args.cluster)) fail(`cluster 형식 불량: '${args.cluster}'`);
 if (new Set(args.extensions).size !== args.extensions.length) fail("extensions에 중복 항목");
 for (const e of args.extensions) if (!EXT_RE.test(e)) fail(`extension 이름 불량: '${e}'`);
 
@@ -131,15 +127,10 @@ if (!existsSync(certPath)) {
 const pwOwner = randomBytes(24).toString("base64url");
 const pwRo = randomBytes(24).toString("base64url");
 
-// 평문 Secret manifest는 메모리에서만 조립해 kubeseal stdin으로 직행 (seal-secret.mts와 동일 패턴)
-function seal(manifest: any, outPath: string) {
-  const res = spawnSync("kubeseal", ["--cert", certPath, "--format", "yaml"], {
-    input: JSON.stringify(manifest), // kubeseal은 JSON manifest도 받는다(YAML 슈퍼셋)
-    encoding: "utf8",
-  });
-  if (res.error) fail(`kubeseal 실행 실패: ${res.error.message}`);
-  if (res.status !== 0) fail(`kubeseal 종료 코드 ${res.status} — cert/컨트롤러 점검 (stderr는 값 미포함 시에만 확인)`);
-  return { outPath, content: res.stdout };
+// 평문 Secret manifest는 메모리에서만 조립해 kubeseal stdin으로 직행 (봉인 SSOT = lib/seal.ts)
+function seal(manifest: object, outPath: string) {
+  try { return { outPath, content: sealManifest(manifest, certPath) }; }
+  catch (e) { fail(e instanceof Error ? e.message : String(e)); } // strict catch(F11)·기존 exit 코드 보존
 }
 
 // 런타임은 PgBouncer(pg-pooler-rw) 경유 — 다중 앱 풀이 max_connections=50을 고갈시키지 않게.
@@ -232,7 +223,10 @@ rolesSeq.add(mkRole(roRole, `db-${name}-ro`,
   ` ${name} 읽기전용(모드2 디버깅) — GRANT는 managed role 범위 밖, PR checklist의 SQL 후처리 필요`));
 
 // ---------- 9) kustomization 멱등 등록 ----------
-// 시퀀스에 항목이 없을 때만 추가 — 기존 항목/주석은 그대로 보존된다
+// 시퀀스에 항목이 없을 때만 추가 — 기존 항목/주석은 그대로 보존된다.
+// ★lib/kustomization.ts(string-기반)로 이주하지 않는다 — 이 헬퍼는 doc-배치(여러 add 후 1회 write)·
+//   엔트리 comment(아래 databases/ 등록)·toString({lineWidth:0})·빈 배열 flow→block 동작이 달라
+//   이주 시 직렬화/주석이 바뀐다(동작보존, plan Step5의 "차이 있으면 보존").
 function addResource(doc: any, entry: string, comment?: string) {
   if (!doc.has("resources")) doc.set("resources", doc.createNode([]));
   const seq = doc.get("resources");

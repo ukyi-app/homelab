@@ -76,3 +76,24 @@ setup() {
     run grep -nE 'status:[[:space:]]*\$\{\{[[:space:]]*job\.status[[:space:]]*\}\}' "$f"; [ "$status" -ne 0 ]
   done
 }
+
+@test "dispatcher rejects a reserved db name before the executor" {
+  run bun "$ROOT/tools/validate-mutation.ts" --action create-database --payload '{"spec":"{\"name\":\"postgres\"}"}'
+  [ "$status" -ne 0 ]
+}
+@test "dispatcher rejects a cache -ro suffix name" {
+  run bun "$ROOT/tools/validate-mutation.ts" --action create-cache --payload '{"spec":"{\"name\":\"foo-ro\"}"}'
+  [ "$status" -ne 0 ]
+}
+@test "dispatcher rejects a db -ro suffix name (F8)" {
+  run bun "$ROOT/tools/validate-mutation.ts" --action create-database --payload '{"spec":"{\"name\":\"foo-ro\"}"}'
+  [ "$status" -ne 0 ]
+}
+
+@test "workflow inline name regex matches the <=30 SSOT policy (no stale copy)" {
+  for wf in _create-cache _create-database; do
+    run grep -Fq '{0,28}' "$WF/$wf.yaml"; [ "$status" -eq 0 ]            # ≤30(RESOURCE_NAME_RE와 동일) 존재
+  done
+  run grep -Fq '{0,27}' "$WF/_create-cache.yaml"; [ "$status" -ne 0 ]        # 옛 ≤29 제거
+  run grep -Fq '[a-z0-9-]*[a-z0-9]' "$WF/_create-database.yaml"; [ "$status" -ne 0 ]  # 옛 무제한 제거
+}
