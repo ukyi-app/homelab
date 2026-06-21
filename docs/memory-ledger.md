@@ -17,10 +17,10 @@ limit 합계가 이를 초과하면 새 앱 온보딩은 CI에서 실패한다 (
 | <!-- ledger:row --> observability  | observability  |   1344 |     2688 |
 | <!-- ledger:row --> edge           | edge           |    240 |      544 |
 | <!-- ledger:row --> sealed-secrets | sealed-secrets |     32 |      128 |
-| <!-- ledger:row --> homepage       | homepage       |     64 |      128 |
+| <!-- ledger:row --> homepage       | homepage       |    128 |      192 |
 | <!-- ledger:row --> glances        | observability  |     64 |      192 |
 
-**합계:** req ≈ 4355 Mi · limit ≈ 8168 Mi (반드시 ≤ 8704 Mi 유지).
+**합계:** req ≈ 4419 Mi · limit ≈ 8232 Mi (반드시 ≤ 8704 Mi 유지).
 (`pg-tools`는 CronJob용 ops 이미지 — 일시적이므로 상주 워크로드 행이 없다. worker/web/console
 values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 앱은 온보딩 PR이 행을 추가한다.)
 
