@@ -29,6 +29,21 @@ data:
             annotations:
               summary: "OOMKill 발생: {{ $labels.namespace }}/{{ $labels.pod }}"
               description: "컨테이너가 메모리 limit에 도달했습니다 — 메모리 원장 예산을 확인하세요."
+          # 선제(leading) 메모리 경보 — PodOOMKilled(사후)의 짝. working_set이 limit의 85%를 10분 넘으면
+          # OOM 전에 발화(vector·homepage류 만성 과소 limit 조기 포착). working_set 기준 — page cache를
+          # 포함하는 max_usage는 hostPath 로그수집 파드에서 limit까지 차므로 금지(라이브 검증된 함정).
+          # limit 미설정 컨테이너는 kube_pod_container_resource_limits가 없어 매칭 0 → 자동 제외.
+          # system ns는 PodCrashLooping과 동일하게 제외. 발화 시 원장에서 해당 행 limit 상향을 검토.
+          - alert: ContainerMemoryNearLimit
+            expr: |
+              max by (namespace, pod, container) (container_memory_working_set_bytes{container!="", namespace!~"kube-system|kube-public|kube-node-lease"})
+                / max by (namespace, pod, container) (kube_pod_container_resource_limits{resource="memory"})
+                > 0.85
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "컨테이너 메모리 limit 근접: {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }}"
+              description: "working_set이 메모리 limit의 85%를 10분 초과 — OOM 임박. 메모리 원장에서 해당 행 limit 상향을 검토하세요."
           # Notifier 자기관측 (R8 보강): Telegram 전송이 실패하면 발화.
           # ⚠️ Watchdog 커버리지 경계 — Watchdog는 "vmalert→Alertmanager 평가 파이프라인이
           #    살아있음"만 증명하고(healthchecks.io의 off-node dead-man's-switch가 그 부재를 페이징),
