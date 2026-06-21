@@ -46,9 +46,9 @@ jobs:
       TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
       TF_VAR_internal_suffix: home.${{ secrets.TF_DOMAIN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with: { ref: main } # 항상 main 최신 — 머지된 선언 상태가 권위
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3
         with:
           terraform_version: "1.9.8"
           terraform_wrapper: false
@@ -128,10 +128,10 @@ jobs:
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::notice::TF_GITHUB_TOKEN/R2_* 미설정 — github 루트 드리프트 체크 skip"
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         if: steps.pf.outputs.configured == 'true'
         with: { ref: main }
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3
         if: steps.pf.outputs.configured == 'true'
         with:
           terraform_version: "1.9.8"
@@ -190,10 +190,10 @@ jobs:
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::notice::TF_TAILSCALE_OAUTH_ID/R2_* 미설정 — tailscale 루트 드리프트 체크 skip"
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         if: steps.pf.outputs.configured == 'true'
         with: { ref: main }
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3
         if: steps.pf.outputs.configured == 'true'
         with:
           terraform_version: "1.9.8"

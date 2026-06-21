@@ -13,7 +13,7 @@ jobs:
   verify:
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       # verify 잡은 pnpm/node를 쓰지 않는다(skeleton·sops·pre-commit[pip]만) — pnpm 셋업 불필요.
       # 과거 pnpm/action-setup이 있었으나 pnpm@11 self-install은 액션의 node20 런타임에서 실패한다
@@ -48,7 +48,7 @@ jobs:
 
       # gitleaks 훅 환경(콜드 빌드 수십초)을 config 해시 키로 캐시 — 미스 시 그냥 재빌드(안전).
       - name: Cache pre-commit hooks
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
         with:
           path: ~/.cache/pre-commit
           key: precommit-${{ hashFiles('.pre-commit-config.yaml') }}

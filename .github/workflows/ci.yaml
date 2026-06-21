@@ -17,7 +17,7 @@ jobs:
   gate:
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - uses: ./.github/actions/setup-bun
       - name: typecheck (tsc --noEmit — erasableSyntaxOnly 게이트, make ci 패리티)
         run: bun run typecheck
@@ -31,12 +31,14 @@ jobs:
           conftest: 'true'
           bats: 'true'
           shellcheck: 'true'
+          actionlint: 'true'
       - name: secret-guard — gitleaks(누출) + sops-guard(평문 enc.yaml) 강제
         # verify.yaml의 gitleaks/sops-guard는 required가 아니라(분기보호 contexts=["gate"]),
         # 누출 PR이 gate만 통과하면 머지된다 → required `gate` 잡에 폴딩(코드 전용, 머지 즉시 발효).
         # gitleaks는 pre-commit rev와 동일 버전을 핀(SSOT 드리프트 방지). 러너=arm64.
         run: |
-          ver=$(grep -A2 'gitleaks/gitleaks' .pre-commit-config.yaml | grep -oE 'rev: v[0-9.]+' | grep -oE '[0-9.]+')
+          ver=$(yq '.repos[] | select(.repo == "https://github.com/gitleaks/gitleaks") | .rev' .pre-commit-config.yaml | sed 's/^v//')
+          [ -n "$ver" ] || { echo "::error::gitleaks rev를 .pre-commit-config.yaml에서 못 찾음"; exit 1; }   # fail-loud(빈 버전 차단)
           # ⚠️ codex pass5 F3 + restale F1: curl|tar 직접 추출은 체크섬 없는 실행체 공급망 표면(supplychain-5 동일).
           # 하드코딩 SHA256 placeholder 금지(게이트 깨짐) — 릴리스 **공식 checksums.txt**를 받아 그 라인으로 검증 후
           # 추출한다(버전 핀 v${ver}만 Renovate가 갱신; 해시는 매니페스트에서 자동 일치, stale 위험 0).
@@ -51,9 +53,7 @@ jobs:
           gitleaks detect --no-git --source . --redact --no-banner --exit-code 1
       - name: sops-guard — 추적된 모든 *.enc.yaml 구조 검증
         # 평문 *.enc.yaml(또는 부분 암호화)을 차단. gate는 setup-toolchain에서 yq를 이미 설치했다.
-        run: |
-          files=$(git ls-files '*.enc.yaml')
-          if [ -n "$files" ]; then scripts/sops-guard.sh $files; fi
+        run: git ls-files '*.enc.yaml' | xargs -r scripts/sops-guard.sh
       - name: chart render + validate (all kinds)
         run: make chart-test
       - name: memory ledger onboarding gate (M0-owned)
@@ -74,7 +74,11 @@ jobs:
       - name: shell script lint (전 추적 .sh)
         # 전 추적 *.sh를 shellcheck — scripts/(DR/파괴적)뿐 아니라 notify.sh(알림 경로)·
         # restore-drill-script.sh·infra/k3s-bootstrap·e2e까지. 벤더 charts/는 untracked라 git ls-files에 안 잡힘.
-        run: shellcheck $(git ls-files '*.sh')
+        run: git ls-files '*.sh' | xargs shellcheck
+      - name: actionlint — 워크플로 정적 검사(run 셸인젝션·표현식·문법)
+        # required gate 잡 안 스텝(별도 잡이면 비-required라 무성 회귀). setup-toolchain이 설치.
+        # .github/actionlint.yaml로 queue:max(2026-05 GA) schema-lag 오탐만 좁게 무시(직렬화 계약 유지).
+        run: actionlint
       - name: telegram 메시지 렌더 e2e (containerized AM v0.27)
         # amtool/grep이 못 잡는 inline message Go-template의 실제 컴파일·렌더를 사전 증명한다
         # (한국어 제목·글리프·자동 escape·링크). required gate 잡 스텝 → branch protection이 강제.

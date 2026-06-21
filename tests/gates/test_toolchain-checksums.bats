@@ -15,10 +15,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
 }
 
 @test "every download step verifies a sha256 checksum" {
-  # 핀 도구 9종 전부 sha256sum -c를 호출하는지 — 한 번이라도 누락이면 fail.
-  # 'sha256sum -c'가 도구 수(>=9)만큼 등장하는지 하한 검사.
+  # 핀 도구 10종(yq/kubeconform/helm/kustomize/conftest/shellcheck/sops/age/kubeseal/actionlint) 전부
+  # sha256sum -c를 호출하는지 — 한 번이라도 누락이면 fail. 'sha256sum -c' 등장 수 하한 검사.
   n=$(grep -c 'sha256sum -c' "$A")
-  [ "$n" -ge 9 ]
+  [ "$n" -ge 10 ]
 }
 
 @test "no checksum line is an obvious placeholder" {
