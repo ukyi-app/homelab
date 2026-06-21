@@ -20,7 +20,7 @@ trap restore EXIT
 kubectl -n argocd get app "$APP" >/dev/null                                  # 앱 존재(F3; 없으면 set -e→trap)
 kubectl -n argocd patch app "$APP" --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}'
 [ "$(kubectl -n argocd get app "$APP" -o jsonpath='{.spec.syncPolicy.automated.selfHeal}')" = false ]  # 확인(F3)
-make render COMP=network-policies | kubectl apply -f -                       # candidate 적용
+make -s render COMP=network-policies | kubectl apply -f -                    # candidate 적용(-s: make 명령 에코 억제 — 안 하면 echo가 line1이라 kubectl YAML 파싱 실패)
 kubectl -n "$NS" get netpol allow-egress-to-database -o yaml | grep -q 'cnpg.io/poolerName'  # 반영 확인(F3)
 sleep 8                                                                      # kube-router 룰 갭(검증 함정)
 make verify-posture                                                          # pg-rw + pg-pooler-rw(F4b, fail-closed)
