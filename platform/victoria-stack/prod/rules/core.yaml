@@ -113,6 +113,15 @@ data:
             annotations:
               summary: "vmagent remoteWrite 버퍼 채워짐(vmsingle 느림/backpressure — 드롭 임박)"
               description: "vmagent 디스크 큐가 maxDiskUsagePerURL 캡에 근접 — vmsingle write가 느려져(backpressure) 적체 중. 곧 oldest drop(VmagentRemoteWriteDropping)으로 메트릭 유실. vmsingle 부하/디스크를 확인하세요. ⚠️ vmsingle write 전면다운 시엔 이 메트릭도 버퍼에 갇혀 미발화(그 케이스는 TargetDown(vmsingle)+deadman) — 이 알림은 부분열화(느림)용입니다. emptyDir 버퍼라 vmagent 재시작 시 큐 휘발."
+          # vector backpressure(PR-B) — sink(vlogs)이 입력을 못 따라가면 utilization이 1에 근접(부분 드롭/적체 전조).
+          # PR-A가 노출한 vector_utilization(internal_metrics→prometheus_exporter) 사용. 라이브 확정: vlogs·prometheus 2 sink.
+          - alert: VectorBackpressure
+            expr: max(vector_utilization{component_kind="sink"}) > 0.9
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "vector sink backpressure(utilization>0.9 10분 — 로그 적체/드롭 위험)"
+              description: "vector sink가 10분간 utilization>0.9 — 입력을 못 따라가 버퍼 적체/부분 드롭 위험(LogIngestionStalled는 전면 0만 잡음, 이건 부분열화). VictoriaLogs(vlogs sink) 부하/디스크를 확인하세요. PR-A가 노출한 vector_utilization 기반."
           # vmalert 자기관측 — 룰 평가/notifier/remoteWrite 에러(알림 엔진 자체 고장). Watchdog는 평가 생존만 증명.
           - alert: VmalertUnhealthy
             expr: |
