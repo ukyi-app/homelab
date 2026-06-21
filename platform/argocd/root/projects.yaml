@@ -1,0 +1,51 @@
+# ArgoCD AppProject 권한경계 (테마1 / plan 1) — root app(directory.recurse)이 동기화.
+# wave -10: 모든 non-default 참조 컴포넌트(최이른 namespaces -9·sealed-secrets -8)보다 strictly 먼저 생성
+# — fresh/DR 일괄 sync에서 project가 Application 검증 전 존재 보장(plan 리뷰 Pass3 #1). argocd self-manage(-10)
+# 가 AppProject CRD를 설치하고 root(-9 app)가 그 뒤 sync하므로 CRD는 이미 존재.
+# apps = 멀티레포 자동발견 위협 표면(엄격). platform = 소유자 PR 경로(스코프, 동작보존).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  description: 멀티레포 자동발견 앱 (apps ApplicationSet) — 엄격 경계
+  sourceRepos:
+    - https://github.com/ukyi-app/homelab.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: prod
+  clusterResourceWhitelist: [] # cluster-scoped 전면 금지 (앱은 namespaced만)
+  namespaceResourceWhitelist:
+    - { group: apps, kind: Deployment }
+    - { group: "", kind: Service }
+    - { group: "", kind: ConfigMap }
+    - { group: batch, kind: Job }
+    - { group: gateway.networking.k8s.io, kind: HTTPRoute }
+    - { group: bitnami.com, kind: SealedSecret }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  description: 플랫폼 컴포넌트 (소유자 PR 경로) — server+repo+namespace 스코프
+  sourceRepos:
+    - https://github.com/ukyi-app/homelab.git
+    - https://charts.jetstack.io
+    - https://cloudnative-pg.io/charts
+  # destinations='*' (설계 §A / plan 리뷰 Pass2 #1): appset 생성 platform 앱은 Application
+  # destination.namespace가 **비어있고** ArgoCD가 매니페스트 검사 전에 그 빈 destination을 검증한다 →
+  # named-only면 InvalidSpec(동작파괴). '*'로 빈 destination 허용. platform 경계=server+repo,
+  # tight namespace 경계는 apps 프로젝트(ns=prod). Task 3 가드가 '빈 destination permitted'를 강제.
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: "*" }
+  clusterResourceWhitelist:
+    - { group: "*", kind: "*" } # CRD/ClusterRole/GatewayClass/Namespace 정당 — 좁히면 동작파괴
+  namespaceResourceWhitelist:
+    - { group: "*", kind: "*" }

@@ -30,7 +30,7 @@ spec:
       name: '{{ index .path.segments 1 }}-{{ .path.basename }}' # <component>-prod
       labels: { homelab.env: '{{ .path.basename }}' }
     spec:
-      project: default
+      project: platform
       source:
         repoURL: https://github.com/ukyi-app/homelab.git
         targetRevision: main
@@ -63,7 +63,7 @@ spec:
       name: '{{ index .path.segments 1 }}-{{ .path.basename }}' # <app>-prod
       labels: { homelab.env: '{{ .path.basename }}' }
     spec:
-      project: default
+      project: apps
       sources:
         # source #1: 공유 deploy 차트 (앱 렌더 방식의 SSOT)
         - repoURL: https://github.com/ukyi-app/homelab.git
