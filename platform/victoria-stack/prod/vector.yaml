@@ -86,8 +86,11 @@ spec:
           env:
             - { name: VECTOR_SELF_NODE_NAME, valueFrom: { fieldRef: { fieldPath: spec.nodeName } } }
           resources:
-            requests: { cpu: 50m, memory: 64Mi }
-            limits: { memory: 128Mi }
+            # kubernetes_logs catch-up + internal_metrics(테마6) 피크 working_set이 ~113Mi(이전 limit의 88%)에
+            # 달해 128Mi 천장에 부딪혀 OOMKilled crashloop 발생 → 256Mi로 상향(피크 위 ~2x 헤드룸으로 버스트 흡수).
+            # request는 working_set 피크(~113Mi) 위로 둬 node 압박 시 eviction 보호. (원장 observability 행 동반 갱신.)
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
