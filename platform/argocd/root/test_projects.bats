@@ -207,3 +207,12 @@ setup() {
   [ "$total" -gt 0 ]
   [ "$total" = "$pf" ]
 }
+
+# --- appset finalizer (설계 §D, teardown cascade prune) ---
+@test "both ApplicationSet templates carry resources-finalizer" {
+  run yq '.spec.template.metadata.finalizers[]' "$APPSET"
+  [ "$status" -eq 0 ]
+  # platform-components + apps 두 템플릿 모두 — yq 멀티독 '---' 무관하게 grep -c로 카운트(plan paste|bc 버그 회피)
+  n="$(yq '.spec.template.metadata.finalizers[]' "$APPSET" | grep -c 'resources-finalizer.argocd.argoproj.io')"
+  [ "$n" -eq 2 ]
+}
