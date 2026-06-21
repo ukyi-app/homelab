@@ -25,11 +25,9 @@ jobs:
           age: 'true'
           bats: 'true'
 
-      - name: Skeleton check
-        run: ./scripts/check-skeleton.sh
-
       # 메모리 원장 게이트는 required check 'gate'(ci.yaml: bun run verify:ledger)에 일원화 — 중복 제거(W7).
-      # verify.yaml은 고유 책임(skeleton·sops 왕복 ephemeral·pre-commit)만 유지.
+      # check-skeleton(네이밍/CJK/dirmap)도 required gate(ci.yaml)로 승격 — verify.yaml 중복 제거(theme5).
+      # verify.yaml은 고유 책임(sops 왕복 ephemeral·pre-commit)만 유지.
 
       - name: SOPS round-trip (ephemeral CI key)
         run: |
