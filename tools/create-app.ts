@@ -7,10 +7,15 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
-import { replaceTotals } from "./lib/ledger-totals.ts";
+import { replaceTotals, addRow, parseLedgerRows } from "./lib/ledger-totals.ts";
+import { parseFlags } from "./lib/cli.ts";
 
-const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
-const DRY = process.argv.includes("--dry-run");
+// parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
+let __f: Record<string, string | boolean>;
+try { __f = parseFlags(process.argv.slice(2), { value: ["--config", "--app", "--repo", "--domain", "--repo-root", "--tag", "--digest", "--sealed"], bool: ["--dry-run"] }); }
+catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --dry-run --config --app --repo --domain --repo-root --tag --digest --sealed`); process.exit(2); }
+const arg = (k: string, d?: string) => (typeof __f[k] === "string" ? __f[k] as string : d);
+const DRY = __f["--dry-run"] === true;
 const configPath = arg("--config");
 const app = arg("--app");
 const repo = arg("--repo");
@@ -19,11 +24,6 @@ const ROOT = arg("--repo-root", ".");
 const tag = arg("--tag");
 const digest = arg("--digest");
 const sealedPath = arg("--sealed");
-// 오타 옵션 침묵-무시 차단 — arg() 헬퍼는 미지정 플래그를 조용히 무시하고 디폴트를 적용한다.
-const ALLOWED_FLAGS = new Set(["--dry-run", "--config", "--app", "--repo", "--domain", "--repo-root", "--tag", "--digest", "--sealed"]);
-for (const a of process.argv.slice(2)) {
-  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
-}
 if (!configPath || !app || !repo || !DOMAIN || !tag || !digest) {
   console.error("usage: create-app --config <.app-config.yml> --app <name> --repo <owner/app> --domain <apex> --tag sha-<gitsha> --digest sha256:<hex> [--sealed <file>] [--repo-root <dir>] [--dry-run]");
   process.exit(2);
@@ -121,9 +121,10 @@ const appDir = `${ROOT}/apps/${app}`;
 if (existsSync(appDir)) fail(`apps/${app} 이미 존재`);
 const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
 const ledger = readFileSync(ledgerPath, "utf8");
-const rowRe = /<!-- ledger:row --> *([a-z0-9+-]+) *\|[^|]*\| *(\d+) *\| *(\d+) *\|/g;
-let m, sumReq = 0, sumLimit = 0, names = [];
-while ((m = rowRe.exec(ledger))) { names.push(m[1]); sumReq += +m[2]; sumLimit += +m[3]; }
+const rows = parseLedgerRows(ledger); // F7: 명명 필드(raw 인덱스 금지)
+const names = rows.map((r) => r.name);
+const sumReq = rows.reduce((a, r) => a + r.reqMi, 0);
+const sumLimit = rows.reduce((a, r) => a + r.limitMi, 0);
 if (names.includes(app)) fail(`원장에 '${app}' 행이 이미 있다`);
 const budget = +(ledger.match(/LIMIT_BUDGET_MIB=(\d+)/)?.[1] ?? 0);
 if (!budget) fail("원장 메타(LIMIT_BUDGET_MIB)를 찾지 못함");
@@ -208,10 +209,7 @@ if (!DRY) {
     writeFileSync(appsJsonPath, JSON.stringify(registry, null, 2) + "\n");
   }
   // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신
-  const lines = ledger.split("\n");
-  const lastRow = lines.map((l, i) => (l.includes("<!-- ledger:row -->") ? i : -1)).filter((i) => i >= 0).pop();
-  lines.splice(lastRow! + 1, 0, `| <!-- ledger:row --> ${app.padEnd(14)} | prod           | ${String(reqMi).padStart(6)} | ${String(limitMi).padStart(8)} |`);
-  let out = lines.join("\n");
+  let out = addRow(ledger, { name: app, env: "prod", reqMi, limitMi });
   out = replaceTotals(out, sumReq + reqMi, sumLimit + limitMi);
   writeFileSync(ledgerPath, out);
 }

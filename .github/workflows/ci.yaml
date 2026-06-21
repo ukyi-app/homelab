@@ -63,6 +63,8 @@ jobs:
         # orphan-dns(active 행 매니페스트 부재 → 빈 백엔드 DNS), activation-exposure-drift(노출 행 변경 → 재승인 필요).
         # 그 외(원장 행·미참조 리소스·미등록·incomplete-purge 등)는 비차단(정보/경고).
         run: bun tools/audit-orphans.ts --ci
+      - name: skeleton + 네이밍/CJK/dirmap 가드 (required — 기존 verify.yaml non-required서 승격)
+        run: bash scripts/check-skeleton.sh
       - name: gate bats suite (run-bats.sh — 단일 수집 SSOT)
         # 수집은 scripts/run-bats.sh 단일 진입점: git-tracked test_*.bats − platform/charts(chart-test 별도) −
         # tests/.ci-exclude(라이브/docker/age/terraform). make ci 와 동일 호출 → 이중 SSOT 제거.

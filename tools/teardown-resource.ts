@@ -20,10 +20,17 @@
 // 참조 집계는 **오직 apps/*/deploy/prod/.bindings.json**(homelab 권위 레지스트리)로만 한다 —
 // envFrom 파싱이나 외부 앱 레포 config는 stale/접근불가일 수 있어 신뢰하지 않는다.
 import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
-import { parseDocument } from "yaml";
+import { RESOURCE_NAME_RE } from "./lib/identity.ts";
+import { replaceTotals, removeRow, parseLedgerRows } from "./lib/ledger-totals.ts";
+import { removeResource } from "./lib/kustomization.ts";
+import { parseFlags } from "./lib/cli.ts";
 
-const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
-const has = (k: string) => process.argv.includes(k);
+// parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()/has()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
+let __f: Record<string, string | boolean>;
+try { __f = parseFlags(process.argv.slice(2), { value: ["--db", "--cache", "--repo-root", "--backup-verified", "--step"], bool: ["--delete-data", "--dry-run"] }); }
+catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --db --cache --repo-root --backup-verified --step --delete-data --dry-run`); process.exit(2); }
+const arg = (k: string, d?: string) => (typeof __f[k] === "string" ? __f[k] as string : d);
+const has = (k: string) => __f[k] === true;
 const DRY = has("--dry-run");
 const db = arg("--db");
 const cache = arg("--cache");
@@ -31,16 +38,11 @@ const ROOT = arg("--repo-root", ".");
 const deleteData = has("--delete-data");
 const backupId = arg("--backup-verified");
 const step = arg("--step", deleteData ? undefined : "tombstone");
-// 오타 옵션 침묵-무시 차단 — arg()/has() 헬퍼는 미지정 플래그를 조용히 무시한다(mutator 패밀리 fail-closed).
-const ALLOWED_FLAGS = new Set(["--db", "--cache", "--repo-root", "--delete-data", "--backup-verified", "--step", "--dry-run"]);
-for (const a of process.argv.slice(2)) {
-  if (a.startsWith("--") && !ALLOWED_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...ALLOWED_FLAGS].join(" ")}`); process.exit(2); }
-}
 
 const fail = (msg: string): never => { console.error(`teardown-resource: ${msg}`); process.exit(1); };
 if ((db ? 1 : 0) + (cache ? 1 : 0) !== 1) fail("--db <name> 또는 --cache <name> 중 정확히 하나");
 const name = (db ?? cache)!;
-if (!/^[a-z][a-z0-9-]*$/.test(name)) fail(`이름 형식 불량: ${name}`);
+if (!RESOURCE_NAME_RE.test(name)) fail(`이름 형식 불량: ${name}`);
 const kind = db ? "db" : "cache";
 const key = `${kind}:${name}`;
 
@@ -92,19 +94,6 @@ const purgeArtifacts = kind === "db"
       { file: connFiles[1], kust: dataConnKust, entry: `cache-${name}-ro-conn.sealed.yaml` },
     ];
 
-// kustomization resources에서 엔트리 제거(멱등) — provision의 addResource를 역으로. trailing
-// slash 정규화로 인스턴스 디렉토리 등록(name vs name/)도 매칭.
-function deregister(kustPath: string, entry: string) {
-  if (!existsSync(kustPath)) return;
-  const doc = parseDocument(readFileSync(kustPath, "utf8"));
-  const seq: any = doc.get("resources");
-  if (!seq?.items) return;
-  const norm = (v: any) => String(v).replace(/\/$/, "");
-  const idx = seq.items.findIndex((it: any) => norm(it.value ?? it) === norm(entry));
-  if (idx < 0) return;
-  doc.deleteIn(["resources", idx]);
-  writeFileSync(kustPath, doc.toString());
-}
 
 const plan = { resource: key, mode: deleteData ? "purge" : "retain", step, referrers: 0, backupId: backupId ?? null };
 
@@ -158,10 +147,26 @@ switch (step) {
   }
   case "cleanup": {
     if (!DRY) {
+      // 원장 행 제거를 파괴적 작업(파일 rm·tombstone) **전에** — totals 프로즈 드리프트/write 실패 시 cleanup abort(F1·F2 버그수정).
+      if (kind === "cache") {
+        const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
+        const component = `cache-${name}`; // F1: 원장 행은 cache-<name>로 기록됨(provision-cache와 동일)
+        if (existsSync(ledgerPath)) {
+          let lg = readFileSync(ledgerPath, "utf8");
+          // 멱등은 사전 존재 검사로(부재면 이미 정리됨). 존재하면 removeRow→합계 재계산→replaceTotals→write를
+          // catch 없이 실행(F2: fail-loud 보존 — 드리프트/write 실패가 purged tombstone 전에 걸린다).
+          if (new RegExp(`<!-- ledger:row --> *${component} `).test(lg)) {
+            lg = removeRow(lg, component);
+            const rows = parseLedgerRows(lg); // F7: 명명 필드(raw 인덱스 금지)
+            lg = replaceTotals(lg, rows.reduce((a, r) => a + r.reqMi, 0), rows.reduce((a, r) => a + r.limitMi, 0));
+            writeFileSync(ledgerPath, lg);
+          }
+        }
+      }
       // 파일 제거 + 같은 항목을 kustomization에서 등록 해제(둘 다 멱등 — 재실행 안전)
       for (const a of purgeArtifacts) {
         if (existsSync(a.file)) rmSync(a.file, a.dir ? { recursive: true } : {});
-        deregister(a.kust, a.entry);
+        if (existsSync(a.kust)) writeFileSync(a.kust, removeResource(readFileSync(a.kust, "utf8"), a.entry));
       }
       tombs[key] = { state: "purged", backupId, at: new Date().toISOString() };
       writeTombs();
@@ -169,7 +174,7 @@ switch (step) {
     console.log(JSON.stringify({
       ...plan,
       action: "cleanup — CR/인스턴스/conn 제거 + kustomization 등록 해제 + tombstone(purged)",
-      manual: kind === "db" ? "cluster.yaml managed.roles에서 owner/_ro role 제거는 별도 커밋(워크플로 단계)" : "원장 행 제거 확인",
+      manual: kind === "db" ? "cluster.yaml managed.roles에서 owner/_ro role 제거는 별도 커밋(워크플로 단계)" : "원장 행 자동 제거됨(cache-<name>)",
     }, null, 2));
     break;
   }

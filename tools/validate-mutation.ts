@@ -3,7 +3,7 @@
 // action별 필수/허용 입력 외에는 전부 거부한다. 위반 시 비-0 종료(값은 일부만 출력, 시크릿 없음).
 // update-image는 이 dispatcher가 아니라 GHCR 폴링(bump-poll)이 처리하므로 계약표에 없다.
 import { readFileSync } from "node:fs";
-import { APP_NAME_RE } from "./lib/identity.ts";
+import { APP_NAME_RE, RESOURCE_NAME_RE, EXT_RE, resourceNameError } from "./lib/identity.ts";
 
 function die(msg: string): never {
   console.error(`validate-mutation: ${msg}`);
@@ -28,12 +28,10 @@ const FIELD_RE: Record<string, RegExp> = {
   app: APP_NAME_RE,
   app_repo: /^ukyi-app\/[A-Za-z0-9._-]+$/, // org 고정 — 외부 org 레포 read 차단
   sha: /^[0-9a-f]{7,40}$/,
-  resource: /^(db|cache):[a-z][a-z0-9-]*$/,
+  resource: new RegExp(`^(db|cache):${RESOURCE_NAME_RE.source.slice(1, -1)}$`),
 };
 
 const PAYLOAD_KEYS = new Set(["action", "app", "app_repo", "sha", "resource", "spec"]);
-const NAME_RE = /^[a-z][a-z0-9-]*$/;
-const EXT_RE = /^[a-z][a-z0-9_-]*$/;
 
 // spec(JSON 문자열) 검증 — 공유 클러스터 지원 필드만 (storage/cpu/mem/version은
 // 클러스터 레벨 속성이라 DB/캐시 생성 API의 입력이 아니다 — 스키마 밖 필드 거부)
@@ -50,7 +48,8 @@ function validateSpec(action: string, specStr: string): void {
   for (const k of Object.keys(spec)) {
     if (!allowed.includes(k)) die(`spec 허용 밖 필드: ${k} (허용: ${allowed.join(", ")})`);
   }
-  if (!NAME_RE.test(String(spec.name ?? ""))) die("spec.name 형식 불량 (^[a-z][a-z0-9-]*$)");
+  const nameErr = resourceNameError(action === "create-database" ? "db" : "cache", String(spec.name ?? ""));
+  if (nameErr) die(`spec.name ${nameErr}`); // 디스패처가 예약 이름(postgres/-ro 등)을 실행기 전에 거부
   if (action === "create-database") {
     // owner==name 불변식: owner 공유 시 한쪽 teardown/회전이 다른 DB를 깬다 (role↔DB 1:1)
     if (spec.owner !== undefined && spec.owner !== spec.name) die("spec.owner는 name과 같아야 한다(owner==name)");

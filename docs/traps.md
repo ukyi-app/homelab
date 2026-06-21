@@ -35,3 +35,5 @@
 | sealing key 백업 체인 DR fail-closed 게이트 | gate | `tests/test_sealed-secrets-restore.bats` |
 | tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | iac | `infra/_tests/test_tf_reconcile.bats` |
 | ArgoCD AppProject 권한경계 + appset finalizer/exclude/default-lockdown 거버넌스 | gate | `platform/argocd/root/test_projects.bats` |
+| bats @test 이름 한글/CJK 디렉토리실행 침묵스킵 | gate | `tests/gates/test_check-skeleton-cjk.bats`, `tests/gates/test_check-skeleton-gate.bats` |
+| homepage EROFS(RO config)·apiserver egress(노드서브넷:6443 not ClusterIP) | gate | `platform/homepage/prod/test_homepage_render.bats`, `platform/homepage/prod/test_homepage_netpol.bats` |
