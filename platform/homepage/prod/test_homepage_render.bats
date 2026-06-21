@@ -29,11 +29,13 @@ setup() {
   cm_config="$(yq 'select(.kind == "ConfigMap" and (.metadata.name | test("^homepage-[a-z0-9]+$"))) | .metadata.name' "$RENDERED")"
   cm_assets="$(yq 'select(.kind == "ConfigMap" and (.metadata.name | test("^homepage-assets-[a-z0-9]+$"))) | .metadata.name' "$RENDERED")"
   [ -n "$cm_config" ]; [ -n "$cm_assets" ]
-  # config-src/assets 볼륨이 그 **정확한 생성 이름**을 참조(literal homepage 참조면 런타임 실패 — grep-on-source 못 잡음)
-  run yq -e "$D | .spec.template.spec.volumes[] | select(.name == \"config-src\") | .configMap.name == \"$cm_config\"" "$RENDERED"
-  [ "$status" -eq 0 ]; [ "$output" = "true" ]
-  run yq -e "$D | .spec.template.spec.volumes[] | select(.name == \"assets\") | .configMap.name == \"$cm_assets\"" "$RENDERED"
-  [ "$status" -eq 0 ]; [ "$output" = "true" ]
+  # config-src/assets 볼륨이 그 **정확한 생성 이름**을 참조(literal homepage 참조면 런타임 실패 — grep-on-source 못 잡음).
+  # ★볼륨의 configMap.name을 추출해 bash 비교 — yq -e "==" 의 멀티독 출력이 yq 버전 따라 달라(CI v4.44 != 로컬 v4.52)
+  #   "true" 단언이 깨졌다. 추출+비교는 버전 무관. grep -v '---'로 멀티독 구분자 제거.
+  vol_config="$(yq "$D | .spec.template.spec.volumes[] | select(.name == \"config-src\") | .configMap.name" "$RENDERED" | grep -v '^---$' | head -1)"
+  vol_assets="$(yq "$D | .spec.template.spec.volumes[] | select(.name == \"assets\") | .configMap.name" "$RENDERED" | grep -v '^---$' | head -1)"
+  [ "$vol_config" = "$cm_config" ]
+  [ "$vol_assets" = "$cm_assets" ]
 }
 
 @test "EROFS regression guard (#65): config emptyDir + seed binds + WRITABLE (readOnly!=true) mounts" {
