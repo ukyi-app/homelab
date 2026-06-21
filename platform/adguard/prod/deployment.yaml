@@ -45,7 +45,7 @@ spec:
             seccompProfile: { type: RuntimeDefault }
       containers:
         - name: adguard
-          image: adguard/adguardhome:v0.107.55
+          image: adguard/adguardhome:v0.107.77@sha256:e6f2b8bcda06064ab055b44933a4f0e983c35558b9cdb8d2e7ab1efcee36d890
           ports:
             - { name: dns-udp, containerPort: 53, protocol: UDP }
             - { name: dns-tcp, containerPort: 53, protocol: TCP }
