@@ -15,7 +15,7 @@ controller:
     operationProcessors: "2"
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    limits: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: 500m, memory: 640Mi } # OOM-watch: 상시 ~79%(peak 464)·앱 온보딩 성장형 → 선제 상향(512→640)
 
 repoServer:
   replicas: 1
