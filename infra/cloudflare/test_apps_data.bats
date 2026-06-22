@@ -1,12 +1,9 @@
 #!/usr/bin/env bats
-# apps.json 레지스트리 — 데이터 기반 DNS/tunnel의 SSOT 게이트
+# apps.json 레지스트리 — 데이터 기반 DNS/tunnel의 terraform 게이트(이 파일은 terraform 의존이라 .ci-exclude).
+# ★구조 무결성(JSON 배열·host 유일성·예약어 충돌)은 terraform 비의존이라 test_apps_structure.bats로 분리해
+#   required gate가 수집한다(advisory-only 우회 차단). 여기엔 terraform validate + .tf grep만 잔류.
 
 setup() { C="$(cd "$BATS_TEST_DIRNAME" && pwd)"; }
-
-@test "apps.json is valid JSON and is an array" {
-  run jq -e 'type == "array"' "$C/apps.json"
-  [ "$status" -eq 0 ]
-}
 
 @test "terraform validate passes with data-driven dns" {
   cd "$C" && run terraform validate
@@ -30,16 +27,5 @@ setup() { C="$(cd "$BATS_TEST_DIRNAME" && pwd)"; }
   run grep -E "sort\(" "$C/tunnel.tf"
   [ "$status" -eq 0 ]
   run grep -E "http_status:404" "$C/tunnel.tf"
-  [ "$status" -eq 0 ]
-}
-
-@test "apps.json has globally unique app names and hosts (no silent collision)" {
-  # 중복 host는 toset에서 조용히 사라지지만 Gateway엔 같은 hostname HTTPRoute 2개 → 오라우팅
-  run jq -e '(.|length) == ([.[].name]|unique|length) and (.|length) == ([.[].host]|unique|length)' "$C/apps.json"
-  [ "$status" -eq 0 ]
-}
-
-@test "apps.json hosts do not collide with reserved names (apex/www/home suffix)" {
-  run jq -e 'all(.[]; (.host != "ukyi.app") and (.host != "www.ukyi.app") and ((.host | endswith(".home.ukyi.app")) | not))' "$C/apps.json"
   [ "$status" -eq 0 ]
 }

@@ -57,7 +57,7 @@ setup() {
 }
 
 @test "apps project namespaceResourceWhitelist covers exactly the shared-chart kinds" {
-  # 공유 차트(deployment/service/configmap/httproute/migrate-job) + source#3 SealedSecret
+  # 공유 차트(deployment/service/configmap/httproute/migrate-job) + source#3 SealedSecret + NetworkPolicy.
   run yq 'select(.metadata.name=="apps") | .spec.namespaceResourceWhitelist[] | .group + "/" + .kind' "$P"
   [ "$status" -eq 0 ]
   echo "$output" | grep -qx "apps/Deployment"
@@ -66,6 +66,8 @@ setup() {
   echo "$output" | grep -qx "batch/Job"
   echo "$output" | grep -qx "gateway.networking.k8s.io/HTTPRoute"
   echo "$output" | grep -qx "bitnami.com/SealedSecret"
+  # 외부 egress 앱이 자체 NetworkPolicy를 source#3로 배포할 수 있어야 함(없으면 첫 외부-egress 앱 sync 거부).
+  echo "$output" | grep -qx "networking.k8s.io/NetworkPolicy"
 }
 
 # --- platform 프로젝트: 스코프 (소유자 PR 경로, 동작보존) ---
