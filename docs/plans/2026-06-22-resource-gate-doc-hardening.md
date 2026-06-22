@@ -20,6 +20,8 @@
 ## W1 — 자원 축 가드 + 노드 압박/eviction 알림
 
 > 발견: critic top-risk #1/#2. 정정 — `values.schema.json:32-33`이 이미 cpu+memory limit을 required+minLength:1로 강제하므로 **앱 경로 CPU는 이미 커버**. 실제 갭은 (a) 플랫폼 매니페스트 가드가 memory만 검사 (b) scan-건수 floor 부재(false-green) (c) 노드 압박/eviction 알림 0건.
+>
+> **실행 중 결정(사용자 승인)**: 12개 플랫폼 워크로드가 cpu *request*는 있으나 cpu *limit*은 **의도적 생략**(cpu limit=CFS quota라 throttling, SRE 권장 패턴)임을 발견. 가드를 cpu *limit* 강제가 아니라 **`requests.cpu` + `requests.memory` + `limits.memory` 강제**(cpu limit 비요구)로 조정 — starvation은 request 점유율로, OOM은 memory limit으로 막고 throttling 회피. 12개 전부 즉시 통과(현 양호 상태 잠금, 라이브 변경 0).
 
 ### Task 1: 자원 가드를 cpu+memory로 확장 + scan floor (가드 rename)
 
