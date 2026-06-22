@@ -10,7 +10,7 @@ data:
         rules:
           # 디스크 포화 = PVC 포화: 모든 PV가 hostPath(local-path provisioner)라 per-PVC 쿼터·kubelet_volume_stats가
           # 원천 부재다(hostPath는 MetricsProvider 미구현 → kubelet volume stats 영구 0건 — 라이브 검증). standard SC
-          # PVC(pg-1 PGDATA/WAL·adguard·vmsingle·vlogs)는 전부 루트 fs '/'(btrfs /dev/vdb1, 255GB)를 쿼터 없이 공유하므로
+          # PVC(pg-1 PGDATA/WAL·adguard·vmsingle·vlogs)는 전부 루트 fs '/'(btrfs /dev/vdb1, ~224GiB 실측)를 쿼터 없이 공유하므로
           # '/' 포화 = 모든 standard PVC 동시 위험. node_filesystem 절대값으로 3티어(조기 warning/추세/critical) 감시한다.
           # mountpoint="/"는 정확일치 — '/run/k3s/.../shm'·tmpfs·virtiofs(/mnt/mac) 노이즈를 배제하는 단일 btrfs series.
           # (외장 bulk-ssd는 virtiofs /mnt/mac 하위라 VM node-exporter가 별도 series로 못 봐 직접 측정 불가 — 죽은
@@ -23,7 +23,7 @@ data:
             labels: { severity: warning, disk: standard }
             annotations:
               summary: "내장 SSD 여유 공간 15% 미만(조기 경보)"
-              description: "standard SC 백킹 fs(루트 /, btrfs 255GB)가 차오릅니다 — pg-1/WAL·vmsingle·vlogs·adguard PVC가 쿼터 없이 공유하므로 한 워크로드 폭증이 전체를 위협합니다. 최대 소비자(보통 CNPG WAL 적체 또는 vmsingle/vlogs retention)를 확인하세요."
+              description: "standard SC 백킹 fs(루트 /, btrfs ~224GiB)가 차오릅니다 — pg-1/WAL·vmsingle·vlogs·adguard PVC가 쿼터 없이 공유하므로 한 워크로드 폭증이 전체를 위협합니다. 최대 소비자(보통 CNPG WAL 적체 또는 vmsingle/vlogs retention)를 확인하세요."
           - alert: StandardSSDFilling
             expr: |
               (node_filesystem_avail_bytes{mountpoint="/"}
@@ -65,7 +65,7 @@ data:
             labels: { severity: critical }
             annotations:
               summary: "로컬 base-backup이 stale(27시간 초과)이거나 누락됨"
-              description: "복원 사본 2(로컬 1TB SSD)가 위험합니다 — 드라이브 미마운트 또는 CronJob 실패."
+              description: "복원 사본 2(로컬 외장 SSD, ~1.9T 실측)가 위험합니다 — 드라이브 미마운트 또는 CronJob 실패."
           # 백업 생존성: 가장 최근 R2 백업이 계속 갱신되어야 한다 (오프사이트 사본 3).
           # barman-cloud plugin이 채우는 메트릭을 읽는다 — in-tree cnpg_collector backup 게이지는
           # CNPG 1.27+plugin에서 deprecated라 항상 0이다(백업 정상이어도 영구 stale로 오발화).
