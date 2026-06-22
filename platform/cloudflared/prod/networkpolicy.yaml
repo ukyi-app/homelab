@@ -1,0 +1,89 @@
+# edge ns east-west egress 격리 — cloudflared(인터넷 터널 종단점) 워크로드 한정.
+# 보안 감사 후속 #1(NETPOL-1): cloudflared는 인터넷 인바운드가 처음 닿는 워크로드인데 egress
+# default-deny가 없어 침해 시 클러스터 평면(apiserver·sealed-secrets·tailscale proxy 등)으로 자유
+# lateral이 가능했다. 가장 신뢰경계가 얇은 종단점에 네트워크 격리를 추가한다.
+#
+# ★ns-wide(podSelector:{}) default-deny 대신 워크로드별(app=cloudflared) isolation을 쓴다 —
+#   cloudflared-prod와 adguard-prod는 별도 ArgoCD Application(platform-components appset이
+#   platform/*/prod를 각각 발견)이라, ns-wide deny를 한 컴포넌트에 두면 cross-Application 싱크
+#   레이스로 다른 워크로드 egress가 (그 Application이 sync될 때까지) 끊긴다. 각 워크로드가 자기
+#   deny+allow를 한 Application 안에서 원자적으로 소유한다(adguard는 platform/adguard/prod/networkpolicy.yaml).
+#
+# INGRESS는 미제한: cloudflared는 인바운드 오픈 포트가 없고(터널은 아웃바운드 전용) metrics(9090)는
+#   observability scrape + kubelet probe라 별도 가드가 불필요하다. lateral 핵심인 egress에 집중한다.
+# ⚠️ ipBlock에 pod CIDR(10.42.0.0/24) 금지 — "전체 파드 허용"이 되어 deny가 무력화된다(라이브 검증 함정).
+#   내부 피어는 namespaceSelector로만, 외부는 0.0.0.0/0 except private로 내부 평면 도달을 차단한다.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared-default-deny-egress
+  namespace: edge
+spec:
+  podSelector:
+    matchLabels: { app: cloudflared }
+  policyTypes: [Egress]
+  # egress 규칙 없음 => cloudflared의 모든 egress 거부; 아래 allow들이 최소한만 다시 연다.
+---
+# Egress: CoreDNS — traefik.gateway.svc.cluster.local 및 Cloudflare edge 호스트네임(region*.argotunnel.com) 해석.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared-allow-dns-egress
+  namespace: edge
+spec:
+  podSelector:
+    matchLabels: { app: cloudflared }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Egress: 터널 트래픽 → gateway ns Traefik web 엔트리포인트(8000). cloudflared config의
+# http://traefik.gateway.svc.cluster.local:80 → service port 80 → kube-router DNAT 후 pod targetPort 8000.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared-allow-egress-to-gateway
+  namespace: edge
+spec:
+  podSelector:
+    matchLabels: { app: cloudflared }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: gateway }
+      ports:
+        - { protocol: TCP, port: 8000 }
+---
+# Egress: Cloudflare edge(터널 아웃바운드) — 공개 인터넷만(0.0.0.0/0 except private)으로 좁혀
+# 내부 클러스터 평면(pod/service/노드) 도달을 차단(lateral 방지)하면서 터널 연결은 보존한다.
+# cloudflared는 QUIC/HTTP2로 7844(TCP+UDP), 폴백 443(TCP)으로 Cloudflare edge에 아웃바운드 연결한다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared-allow-egress-cloudflare-edge
+  namespace: edge
+spec:
+  podSelector:
+    matchLabels: { app: cloudflared }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8       # pod(10.42.0.0/24)·service(10.43.0.0/16) CIDR 차단
+              - 172.16.0.0/12
+              - 192.168.0.0/16   # 노드 서브넷(192.168.139.0/24) 차단
+      ports:
+        - { protocol: TCP, port: 7844 }
+        - { protocol: UDP, port: 7844 }
+        - { protocol: TCP, port: 443 }
