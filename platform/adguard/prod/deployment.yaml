@@ -55,7 +55,7 @@ spec:
             - { name: data, mountPath: /opt/adguardhome/work, subPath: work }
           resources:
             requests: { cpu: 25m, memory: 48Mi }
-            limits: { cpu: 200m, memory: 128Mi }
+            limits: { cpu: 200m, memory: 192Mi } # OOM-watch: peak 123/128(96%)·블록리스트 성장·LAN DNS → 선제 상향(128→192, edge 행 버퍼 흡수)
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532
