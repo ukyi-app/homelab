@@ -1,0 +1,48 @@
+# edge ns east-west egress 격리 — adguard(DNS 리졸버) 워크로드 한정.
+# 보안 감사 후속 #1(NETPOL-1): edge ns egress default-deny 부재. 워크로드별 isolation(cloudflared와
+# 동일 사유: cloudflared-prod·adguard-prod는 별도 ArgoCD Application이라 ns-wide deny는 cross-app
+# 싱크 레이스 위험 → 각자 deny+allow를 한 Application 안에서 원자적으로 소유).
+#
+# adguard egress 수요: 업스트림 DoH(443) + bootstrap DNS(53) — 둘 다 공개 인터넷. CoreDNS는 불요
+# (bootstrap_dns 1.1.1.1/9.9.9.9로 업스트림 호스트네임을 직접 해석한다).
+#
+# ⚠️ INGRESS(DNS 서빙 :53)는 의도적으로 미제한 — adguard-dns LoadBalancer(k3s klipper svclb)의 SNAT
+#   소스 IP 매핑은 라이브 검증을 요하고(잘못 좁히면 LAN/tailscale DNS 전면 장애), database egress 잠금과
+#   동일하게 후속 하드닝으로 추적한다(network-policies/prod/NOTES.md 패턴). 이 PR은 lateral 방지 핵심인
+#   egress에 집중한다.
+# ⚠️ ipBlock에 pod CIDR(10.42.0.0/24) 금지(deny 무력화 함정). 외부는 0.0.0.0/0 except private.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: adguard-default-deny-egress
+  namespace: edge
+spec:
+  podSelector:
+    matchLabels: { app: adguard }
+  policyTypes: [Egress]
+  # egress 규칙 없음 => adguard의 모든 egress 거부; 아래 allow가 업스트림 DNS만 다시 연다.
+---
+# Egress: 업스트림 DoH(dns.cloudflare.com·dns.quad9.net, 443) + bootstrap DNS(1.1.1.1·9.9.9.9, 53).
+# 전부 공개 인터넷 — 0.0.0.0/0 except private로 내부 평면 도달은 차단하며 업스트림 해석은 보존한다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: adguard-allow-egress-upstream-dns
+  namespace: edge
+spec:
+  podSelector:
+    matchLabels: { app: adguard }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8       # pod·service CIDR 차단
+              - 172.16.0.0/12
+              - 192.168.0.0/16   # 노드 서브넷 차단
+      ports:
+        - { protocol: TCP, port: 443 }  # DoH 업스트림
+        - { protocol: TCP, port: 53 }   # bootstrap DNS (TCP 폴백)
+        - { protocol: UDP, port: 53 }   # bootstrap DNS
