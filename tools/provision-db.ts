@@ -11,7 +11,7 @@
 // 불변식:
 //   - owner == name 고정(입력 안 받음) — owner 공유 시 한쪽 teardown/회전이 다른 DB를 깬다(role↔DB 1:1).
 //   - storage/cpu/mem/version은 받지 않는다 — 공유 클러스터 레벨 속성(cluster.yaml 별도 작업 + 원장 게이트).
-//   - 논리 DB는 메모리 원장 행을 추가하지 않는다 — 공유 CNPG pod 안의 논리 객체라 8704Mi 게이트를 왜곡한다.
+//   - 논리 DB는 메모리 원장 행을 추가하지 않는다 — 공유 CNPG pod 안의 논리 객체라 9216Mi 게이트를 왜곡한다.
 //   - 비밀번호/raw URL은 stdout·로그 어디에도 출력하지 않는다. 평문 Secret은 메모리에서만
 //     조립해 kubeseal stdin으로 직행한다(디스크 비기록).
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -188,7 +188,7 @@ const crDoc = new Document({
   },
 });
 crDoc.commentBefore = ` ${name} 논리 DB — create-database(provision-db.ts) 산출물.
- 공유 pg 클러스터 안의 논리 객체라 메모리 원장 행을 추가하지 않는다(8704Mi 게이트 왜곡 방지).`;
+ 공유 pg 클러스터 안의 논리 객체라 메모리 원장 행을 추가하지 않는다(9216Mi 게이트 왜곡 방지).`;
 (crDoc.getIn(["spec", "owner"], true) as any).comment = " owner == name 불변식 — role↔DB 1:1 (teardown 격리)";
 (crDoc.getIn(["spec", "ensure"], true) as any).comment = " teardown은 absent 전환으로 (CR 삭제가 아니라)";
 (crDoc.getIn(["spec", "databaseReclaimPolicy"], true) as any).comment = " CR이 사라져도 DB 보존 — 삭제는 teardown에서 명시적으로";
