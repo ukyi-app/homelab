@@ -8,7 +8,7 @@
       "type": "object", "additionalProperties": false, "required": ["repo"],
       "properties": {
         "repo": { "type": "string", "minLength": 1 },
-        "tag": { "type": "string", "pattern": "^$|^sha-[0-9a-f]{7,40}$|^[a-z0-9][a-z0-9._-]*$" },
+        "tag": { "type": "string", "pattern": "^$|^sha-[0-9a-f]{7,40}$" },
         "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
         "pullPolicy": { "type": "string", "enum": ["IfNotPresent", "Always", "Never"] }
       },
@@ -75,8 +75,23 @@
         "rollingUpdate": { "type": "object" }
       }
     },
-    "podSecurityContext": { "type": "object" },
-    "securityContext": { "type": "object" },
+    "podSecurityContext": {
+      "type": "object",
+      "comment": "약화 거부(fast-feedback) — 전체 PSA restricted 패리티는 chart-test conftest(psa-restricted.rego)가 렌더 검증.",
+      "not": { "anyOf": [
+        { "required": ["runAsUser"], "properties": { "runAsUser": { "const": 0 } } },
+        { "required": ["runAsNonRoot"], "properties": { "runAsNonRoot": { "const": false } } }
+      ] }
+    },
+    "securityContext": {
+      "type": "object",
+      "comment": "약화 거부(fast-feedback) — 전체 PSA restricted 패리티는 chart-test conftest가 렌더 검증.",
+      "not": { "anyOf": [
+        { "required": ["privileged"], "properties": { "privileged": { "const": true } } },
+        { "required": ["allowPrivilegeEscalation"], "properties": { "allowPrivilegeEscalation": { "const": true } } },
+        { "required": ["runAsUser"], "properties": { "runAsUser": { "const": 0 } } }
+      ] }
+    },
     "terminationGracePeriodSeconds": { "type": "integer" },
     "preStopSleepSeconds": { "type": "integer", "minimum": 0 }
   }
