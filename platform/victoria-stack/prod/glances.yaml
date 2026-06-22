@@ -32,7 +32,7 @@ spec:
             - { name: api, containerPort: 61208 }
           resources:
             requests: { cpu: 25m, memory: 64Mi }
-            limits: { memory: 192Mi }       # 메모리 원장 glances 행(Task 10)과 일치
+            limits: { memory: 128Mi }       # 메모리 원장 glances 행과 일치 (right-size 2026-06-22, peak 88Mi)
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true    # /tmp emptyDir로 쓰기 경로 제공

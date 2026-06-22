@@ -49,11 +49,11 @@ spec:
             - --remoteWrite.tmpDataPath=/tmpdata
             - --remoteWrite.maxDiskUsagePerURL=450MiB   # 512Mi emptyDir 미만 — 큐가 차면 oldest drop(eviction+전량유실 회피)
           env:
-            - { name: GOMEMLIMIT, value: "230MiB" } # 256Mi의 약 90%
+            - { name: GOMEMLIMIT, value: "200MiB" } # 224Mi의 약 90% (right-size 2026-06-22)
           ports: [{ name: http, containerPort: 8429 }]
           resources:
             requests: { cpu: 50m, memory: 128Mi }
-            limits: { memory: 256Mi }
+            limits: { memory: 224Mi }
           readinessProbe: { httpGet: { path: /health, port: 8429 } }
           securityContext:
             allowPrivilegeEscalation: false

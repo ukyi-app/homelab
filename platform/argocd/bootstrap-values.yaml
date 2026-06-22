@@ -87,7 +87,7 @@ dex:
 redis:
   resources:
     requests: { cpu: 25m, memory: 64Mi }
-    limits: { cpu: 200m, memory: 128Mi }
+    limits: { cpu: 200m, memory: 64Mi } # right-size 2026-06-22: peak 26Mi, 안정 소형 캐시(2.4x 여유)
 
 # ⚠️ configs.secret에 DATA 필드(argocdServerAdminPassword/extra/webhook 등) 추가 금지 — 추가하면 차트가
 #    argocd-secret에 data 블록을 렌더해 SSA가 data.*를 소유하고, sealed-secrets 컨트롤러가 머지한
