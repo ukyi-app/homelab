@@ -44,14 +44,16 @@ homepage:
 db:
   enabled: false
   migrateCmd: ["migrate"] # 앱 이미지 내 명령; wave-1 ArgoCD Sync-hook Job이 실행
+  # migrateMemory: 256Mi  # migrate Job 메모리(앱 런타임 limit과 독립, 기본 256Mi). 무거운 마이그레이션만 상향.
 
 # --- probes ---
 probes:
   liveness: { path: /healthz }
   readiness: { path: /readyz }
 
-# liveness override (raw probe spec). 비면 기본(served=httpGet, worker=exec /bin/true).
-# distroless(Rust static/scratch) 이미지는 /bin/true가 없으니 grpc/tcpSocket 등으로 오버라이드.
+# liveness override (raw probe spec). 비면 기본: served=httpGet, **worker=liveness 없음**.
+# distroless(Rust static/scratch) worker는 /bin/true가 없어 기본 liveness가 CrashLoop을 유발하므로,
+# liveness가 필요한 worker는 grpc/tcpSocket 등으로 명시 오버라이드한다(기본은 안전하게 미설정).
 livenessProbe: {}
 
 # --- static(정적 파일) 서빙 추상화 ---

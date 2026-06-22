@@ -27,6 +27,18 @@ spec:
           value: "1.1.1.1:53,8.8.8.8:53"
         - name: "dns01RecursiveNameserversOnly"
           value: "true"
+        # 거버넌스 캡(2026-06-22): 무제한이던 3개 control-plane 컨테이너에 메모리 limit 신설.
+        # peak_ws controller 82·cainjector 77·webhook 69 → 각 128Mi(webhook은 admission 게이트라
+        # 가장 보수적). cpu는 request만(throttling 회피). 원장 cert-manager 행 180→384 동반.
+        - { name: resources.requests.cpu, value: "10m" }
+        - { name: resources.requests.memory, value: "32Mi" }
+        - { name: resources.limits.memory, value: "128Mi" }
+        - { name: cainjector.resources.requests.cpu, value: "10m" }
+        - { name: cainjector.resources.requests.memory, value: "32Mi" }
+        - { name: cainjector.resources.limits.memory, value: "128Mi" }
+        - { name: webhook.resources.requests.cpu, value: "10m" }
+        - { name: webhook.resources.requests.memory, value: "24Mi" }
+        - { name: webhook.resources.limits.memory, value: "128Mi" }
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager

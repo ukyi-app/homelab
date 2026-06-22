@@ -22,7 +22,7 @@ spec:
             capabilities: { drop: [ALL] }
           env:
             - { name: GF_INSTALL_PLUGINS, value: "victoriametrics-logs-datasource" }
-            - { name: GF_SECURITY_ADMIN_USER, value: "admin" }
+            - { name: GF_SECURITY_ADMIN_USER, value: "ukkiee" } # argocd 로컬계정과 일관. data가 emptyDir(휘발 SQLite)라 재시작 시 깨끗이 rename.
             # admin/admin 절대 금지: 비밀번호는 M2가 시드한 SOPS secret
             # `alerting-secrets`(key GRAFANA_ADMIN_PASSWORD)에서 온다.
             - name: GF_SECURITY_ADMIN_PASSWORD

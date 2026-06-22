@@ -200,3 +200,14 @@
   대해 tf-reconcile에서 **plan-only 드리프트 알림**만 한다(신규 `TF_GITHUB_*`/`TF_TAILSCALE_*` 시크릿 있을
   때만, 없으면 preflight skip). Cloudflare 무료 플랜 rate-limit entitlement(period·mitigation_timeout 둘 다
   10초 고정 등)는 plan 통과해도 apply에서만 400으로 드러난다(cache.tf matches 함정과 동일 계열).
+
+### 상주 워크로드 자원 limit 블라인드스팟
+- **자원 limit 블라인드스팟:** 메모리 원장 게이트(`verify:ledger`/`ledger.rego`)는 docs/memory-ledger.md의
+  **마크다운 행만** 검증하고 라이브/소스 manifest와 교차하지 않는다 — 워크로드에 메모리 소비자를 추가하며
+  limit/행을 안 올려도 GREEN, OOM으로만 발현(vector OOM PR #85 포스트모템). 대칭으로 CPU도 starvation 축
+  (cpu request 없으면 점유율 보장 0 → 이웃 굶김). `scripts/check-resource-limits.sh`가 상주 워크로드
+  (Deployment/DaemonSet/StatefulSet) main 컨테이너에 **cpu·memory request + memory limit**을 강제한다
+  (cpu limit은 CFS quota라 유휴서도 throttling → 비요구; starvation은 request로, OOM은 memory limit으로).
+  grep 셀렉터 붕괴 시 0매치 침묵통과(false-green)는 scan-floor로 차단. operator/원격-helm 런타임 생성처럼
+  의도적 미설정은 `policy/memory-limit-allowlist.txt`에 사유와 함께 등재(블라인드스팟 가시화).
+> 가드: `scripts/check-resource-limits.sh`, `tests/test_resource_limits.bats`

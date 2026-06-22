@@ -24,7 +24,8 @@
 | GitHub Actions 비신뢰 입력(env 경유+regex) | gate | `tools/tests/test_mutation-dispatch.bats`, `tools/tests/test_validate-mutation.bats` |
 | concurrency queue:max ↔ cancel-in-progress 병용 불가(변이 디스패처 직렬화) | gate | `tools/tests/test_mutation-dispatch.bats` |
 | 워크플로 YAML colon-in-unquoted-name 문법 깨짐 | gate | `tests/gates/test_workflow-yaml.bats` |
-| 메모리 원장 예산(limit 합계 ≤ 8704Mi) | gate | `policy/ledger.rego`, `tools/tests/test_ledger-gate.bats` |
+| 메모리 원장 예산(limit 합계 ≤ 9216Mi) | gate | `policy/ledger.rego`, `tools/tests/test_ledger-gate.bats` |
+| 상주 워크로드 자원 limit 블라인드스팟(cpu·memory request + memory limit) | gate | `scripts/check-resource-limits.sh`, `tests/test_resource_limits.bats` |
 | AdGuard setcap 바이너리 ↔ allowPrivilegeEscalation 양립불가 | gate | `platform/adguard/prod/test_adguard_auth.bats` |
 | enc.yaml 평문 직접 수정 금지(SOPS MAC) | gate+verify | `scripts/sops-guard.sh`, `.claude/hooks/manifest-guard.sh`, `tests/gates/test_manifest-guard.bats`, `tests/gates/test_verify-secrets.bats` |
 | SOPS 왕복(암호화 후 복호 동일) | local | `tests/test_sops-roundtrip.bats` |

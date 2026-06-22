@@ -140,6 +140,25 @@ EOF
   [ "$status" -ne 0 ]
 }
 
+@test "create-app rejects sealed encryptedData keys that mismatch declared secrets (envFrom shadowing guard)" {
+  # 봉인본이 conn 키(PROD_DATABASE_URL)를 담아 관리형 conn URL을 envFrom 후순위로 섀도잉하려는 시도 —
+  # 선언 secrets=[api-key]→API_KEY와 불일치라 거부돼야 한다(ns/name은 정상이라 키 검사까지 도달).
+  cat > "$TMP/sealed.yaml" <<'EOF'
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: orders-secrets
+  namespace: prod
+spec:
+  encryptedData: { PROD_DATABASE_URL: AgX... }
+EOF
+  cat >> "$TMP/.app-config.yml" <<'EOF'
+secrets: [api-key]
+EOF
+  gen --sealed "$TMP/sealed.yaml"
+  [ "$status" -ne 0 ]
+}
+
 @test "create-app adds a ledger row and respects the budget gate" {
   gen
   [ "$status" -eq 0 ]

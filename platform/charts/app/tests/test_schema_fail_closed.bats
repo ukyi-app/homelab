@@ -16,6 +16,36 @@ C="--set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
   [ "$status" -ne 0 ]
 }
 
+@test "schema rejects mutable image tags (immutable sha pin only)" {
+  run helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=latest \
+    --set resources.requests.cpu=10m --set resources.requests.memory=32Mi \
+    --set resources.limits.cpu=100m --set resources.limits.memory=64Mi \
+    --set route.host=x.example.com --set kind=service
+  [ "$status" -ne 0 ]
+}
+
+@test "schema rejects securityContext.privileged=true" {
+  run helm template t "$CHART" $C --set kind=service --set securityContext.privileged=true
+  [ "$status" -ne 0 ]
+}
+
+@test "schema rejects securityContext.allowPrivilegeEscalation=true" {
+  run helm template t "$CHART" $C --set kind=service --set securityContext.allowPrivilegeEscalation=true
+  [ "$status" -ne 0 ]
+}
+
+@test "schema rejects podSecurityContext.runAsNonRoot=false" {
+  run helm template t "$CHART" $C --set kind=service --set podSecurityContext.runAsNonRoot=false
+  [ "$status" -ne 0 ]
+}
+
+@test "schema rejects runAsUser=0 (root) in pod or container security context" {
+  run helm template t "$CHART" $C --set kind=service --set podSecurityContext.runAsUser=0
+  [ "$status" -ne 0 ]
+  run helm template t "$CHART" $C --set kind=service --set securityContext.runAsUser=0
+  [ "$status" -ne 0 ]
+}
+
 @test "all three fixtures still render under the tightened schema (behavior-preserving)" {
   for k in service worker static; do
     run helm template t "$CHART" -f "$CHART/tests/fixtures/$k.yaml"
