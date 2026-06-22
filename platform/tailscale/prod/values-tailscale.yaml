@@ -9,4 +9,4 @@ operatorConfig:
     requests: { cpu: 25m, memory: 64Mi }
     limits: { cpu: 200m, memory: 128Mi }
 proxyConfig:
-  defaultProxyClass: ""
+  defaultProxyClass: "resource-capped" # 거버넌스 캡: 전 proxy에 proxyclass.yaml 적용(메모리 limit 192Mi)

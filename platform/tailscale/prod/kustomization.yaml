@@ -7,6 +7,7 @@ kind: Kustomization
 # namespace에 apply한다.
 resources:
   - traefik-ingress.yaml
+  - proxyclass.yaml # 거버넌스 캡: proxy 파드 메모리 limit(defaultProxyClass로 적용). cluster-scoped.
 generators:
   - helmrelease.yaml
   - secret-generator.yaml # 이 컴포넌트 전용 KSOPS generator → operator-oauth (edge)
