@@ -1,0 +1,16 @@
+# 거버넌스 캡(2026-06-22): operator가 생성하는 proxy 파드(ts-* StatefulSet)는 기본 무제한이라
+# 메모리 누수/스파이크가 노드 RAM을 무한정 잠식하는 블라인드스팟이다(감사 ★top: 상주 워크로드
+# limit 블라인드스팟 + 노드압박 보호 부재). 이 ProxyClass를 values-tailscale.yaml의
+# proxyConfig.defaultProxyClass로 전 proxy에 적용해, 폭주를 노드-eviction이 아닌 파드-OOM으로 격리한다.
+# tailscaleContainer peak_ws 116Mi → limit 192Mi(1.65×). ProxyClass는 cluster-scoped(CRD는 operator 차트가 관리).
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyClass
+metadata:
+  name: resource-capped
+spec:
+  statefulSet:
+    pod:
+      tailscaleContainer:
+        resources:
+          requests: { cpu: 25m, memory: 64Mi }
+          limits: { memory: 192Mi }
