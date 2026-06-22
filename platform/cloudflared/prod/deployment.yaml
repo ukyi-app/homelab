@@ -25,12 +25,12 @@ spec:
             - name: TUNNEL_TOKEN
               valueFrom: { secretKeyRef: { name: cloudflared-tunnel, key: token } }
             - name: GOMEMLIMIT
-              value: "115MiB"
+              value: "86MiB"
           volumeMounts:
             - { name: config, mountPath: /etc/cloudflared }
           resources:
             requests: { cpu: 25m, memory: 48Mi }
-            limits: { cpu: 300m, memory: 128Mi }
+            limits: { cpu: 300m, memory: 96Mi } # right-size 2026-06-22: peak 51Mi, p99 45Mi (1.89x)
           livenessProbe:
             httpGet: { path: /ready, port: 9090 }
             initialDelaySeconds: 10
