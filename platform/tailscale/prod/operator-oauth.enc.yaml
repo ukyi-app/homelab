@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Secret
 metadata:
     name: operator-oauth
-    namespace: edge
+    namespace: tailscale
 type: Opaque
 stringData:
     client_id: ENC[AES256_GCM,data:5OKaSYMYX/ikOG94+WMkssM=,iv:hoURkCkZHQYQMA2P4Oko2cNMjGO02YHQm6/prO1NXkE=,tag:GEfquKFP0yV8/Won9ydBCQ==,type:str]
@@ -28,6 +28,6 @@ sops:
             -----END AGE ENCRYPTED FILE-----
           recipient: age154tu9q7922xu46x0rkfm5l9x3ulf9u5at5qvxeaqfx9sgtm7cumq75jdwc
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-06-10T13:44:35Z"
-    mac: ENC[AES256_GCM,data:JzcZvoFp2i6YuuSQKKmLAKUFEnOdwzhfVz0KKWUpVdnQL8E2XfEYJdJ6IRO7futebGivb5wMv+NiC8ZWckNEtTJbS9lJJbIFmguZbQk7MqpnnIxtoxLqgVhKNq3iyyq4pY7lifjzAMZiE36OZZTTiEJYdM5Yy4TA/txzenhbyzQ=,iv:HltjxUZBQ45072DgiWjtMtxDzlU8yZAY1UjhlVCOP2o=,tag:HICvb6eh+63oC2dZ2MlX4Q==,type:str]
+    lastmodified: "2026-06-22T11:41:54Z"
+    mac: ENC[AES256_GCM,data:Uk9A6gzwILJuVeWRGTlTQv7joZ232giG4BqrhxBH/DwvExoX4t4lWZkqSVBuH2KyioAlgkXiwYYqOn3hW6wnkmcgompaoG+SO+MM7aNpAhflDWhIx6CC204bUXGjDB4tB7KCKnNsGE7zZ4WwvcvsEVHssP47Ewi4jpJYqR/sBVA=,iv:wDuhLUZGmw5lUwFu4yq2KDHf4IS7nwrEZXF5jh7hpEQ=,tag:29VY3zb+cDAwkUGA+4YTgQ==,type:str]
     version: 3.13.1

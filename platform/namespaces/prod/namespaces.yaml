@@ -109,3 +109,20 @@ metadata:
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/warn: restricted
     pod-security.kubernetes.io/audit: restricted
+---
+# tailscale: tailscale operator + 그가 생성하는 proxy 파드(ts-* StatefulSet) 전용 ns.
+# proxy는 TUN 디바이스+sysctl(net.ipv4.ip_forward)을 위해 init/main 둘 다 privileged=true가 필수라
+# baseline/restricted를 만족할 수 없다 → 이 ns만 enforce=privileged로 격리(edge는 baseline 유지,
+# adguard/cloudflared의 가드 보존). privileged 권한을 한 워크로드 클래스에 좁게 가둔 의도적 분리
+# (2026-06-22: edge baseline 하에서 proxy 재생성이 차단된 인시던트 후속 — 공유 ns privileged 회피).
+# warn/audit=restricted로 비준수 신호는 유지.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tailscale
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false # 매니페스트서 빠져도 ns prune(삭제) 금지
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
