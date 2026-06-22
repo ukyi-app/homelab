@@ -22,10 +22,10 @@
   [ "$v" = "restricted" ]
 }
 
-@test "edge enforces only baseline (adguard setcap + allowPrivilegeEscalation can't meet restricted)" {
+@test "edge enforces privileged (tailscale proxy needs privileged for TUN/sysctl; adguard setcap also can't meet restricted)" {
   v="$(kustomize build platform/namespaces/prod 2>/dev/null \
     | yq e 'select(.kind=="Namespace" and .metadata.name=="edge") | .metadata.labels["pod-security.kubernetes.io/enforce"]' -)"
-  [ "$v" = "baseline" ]
+  [ "$v" = "privileged" ]
 }
 
 @test "every owned namespace warns at restricted (progressive hardening signal)" {
