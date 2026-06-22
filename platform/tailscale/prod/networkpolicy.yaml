@@ -1,0 +1,98 @@
+# tailscale ns east-west egress 격리. 보안 감사 후속 #2(NETPOL-2): 이 ns는 enforce=privileged
+# (클러스터 최강 워크로드 클래스 — operator + operator가 생성하는 ts-* proxy)인데 egress default-deny가
+# 없어 proxy/operator 침해 시 클러스터 평면으로 lateral이 무제어였다. PSA privileged 격리(파드 권한)와
+# netpol(네트워크 도달 범위)은 직교 — privileged 워크로드일수록 네트워크 경계 보완이 정석이다.
+#
+# ★edge와 달리 ns-wide(podSelector:{}) default-deny를 쓴다 — tailscale ns는 단일 ArgoCD Application
+#   (platform/tailscale/prod)이 operator+proxy를 한 sync에서 원자적으로 소유하므로 cross-app 레이스가
+#   없고, proxy는 operator가 동적 생성(label app=<uuid>)이라 ns-wide가 미래 proxy까지 자동 커버한다.
+#
+# INGRESS는 미제한: proxy는 tailnet WireGuard 인바운드를 받아야 하고(소스=외부 동적 IP), operator는
+#   apiserver/webhook 인바운드가 있어 잘못 좁히면 tailnet/operator가 끊긴다. lateral 핵심인 egress에 집중.
+# ⚠️ ipBlock pod-CIDR(10.42.0.0/24) 금지(deny 무력화 함정). 외부는 0.0.0.0/0 except private로 내부 차단.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tailscale-default-deny-egress
+  namespace: tailscale
+spec:
+  podSelector: {}            # tailscale ns의 모든 pod(operator + proxy)
+  policyTypes: [Egress]
+  # egress 규칙 없음 => 전 egress 거부; 아래 allow들이 최소한만 다시 연다.
+---
+# Egress: CoreDNS — operator/proxy의 cluster service 및 control-plane 호스트네임 해석.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tailscale-allow-dns-egress
+  namespace: tailscale
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Egress: operator → kube-apiserver. operator는 proxy StatefulSet/Service/Secret을 reconcile한다.
+# ★kube-router가 ClusterIP(10.43.0.1:443)를 노드 InternalIP:6443으로 DNAT하고 netpol egress는 DNAT
+#   '후' dest를 평가하므로 ClusterIP가 아니라 노드 서브넷:6443을 허용한다(homepage F5와 동일 함정).
+#   OrbStack VM /24라 VM IP 변경에 durable. DR로 OrbStack 대역이 바뀌면 갱신.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tailscale-allow-egress-to-apiserver
+  namespace: tailscale
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.139.0/24 # 노드 InternalIP 192.168.139.92 — DNAT 후 apiserver
+      ports:
+        - { protocol: TCP, port: 6443 }
+---
+# Egress: proxy → gateway ns Traefik websecure(8443). traefik-ts(loadBalancerClass=tailscale) Service의
+# 백엔드 — tailnet :443 인입을 traefik 8443(home-wildcard-tls 종단)로 포워딩한다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tailscale-allow-egress-to-gateway
+  namespace: tailscale
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: gateway }
+      ports:
+        - { protocol: TCP, port: 8443 }
+---
+# Egress: tailnet(control plane login/controlplane.tailscale.com·DERP relay·WireGuard 직접 연결) —
+# 전부 공개 인터넷. DERP/STUN/WireGuard는 동적 IP·포트라 0.0.0.0/0 except private로 전 포트 허용하되
+# 내부 클러스터 평면(10/8·172.16/12·192.168/16)은 except로 차단해 lateral은 막고 tailnet 기능은 보존한다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tailscale-allow-egress-tailnet
+  namespace: tailscale
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8       # pod·service CIDR 차단
+              - 172.16.0.0/12
+              - 192.168.0.0/16   # 노드 서브넷 차단(apiserver는 위 전용 룰로만 허용)
+      # ports 생략 = 외부 전 포트 허용 — DERP(443)·STUN(3478/udp)·WireGuard(41641/udp 등 동적) 수용
