@@ -149,6 +149,14 @@ if (secrets.length) {
   if (sealedDoc?.kind !== "SealedSecret") fail("sealed 파일이 kind: SealedSecret이 아니다");
   if (sealedDoc?.metadata?.namespace !== "prod") fail(`sealed namespace는 prod여야 한다(strict-scope): ${sealedDoc?.metadata?.namespace}`);
   if (sealedDoc?.metadata?.name !== `${app}-secrets`) fail(`sealed name은 ${app}-secrets여야 한다: ${sealedDoc?.metadata?.name}`);
+  // 봉인본 encryptedData 키가 선언된 secrets(toEnvKey)와 정확히 일치하는지 — 초과/누락 모두 거부.
+  // envFrom은 app-secrets가 후순위라(아래 161줄) 봉인본의 동명 키가 conn URL(PROD_DATABASE_URL 등)을
+  // 조용히 섀도잉할 수 있다. 키 이름은 평문이라 시크릿 노출 없이 검증 가능. toEnvKey는 seal-secret.mts SSOT와 동일.
+  const toEnvKey = (n: string) => n.replaceAll("-", "_").toUpperCase();
+  const declaredKeys = [...secrets].map(toEnvKey).sort();
+  const sealedKeys = Object.keys(sealedDoc?.spec?.encryptedData ?? {}).sort();
+  if (JSON.stringify(declaredKeys) !== JSON.stringify(sealedKeys))
+    fail(`sealed encryptedData 키가 선언된 secrets와 불일치(섀도잉/누락 위험) — 선언(toEnvKey): [${declaredKeys.join(", ")}] vs 봉인: [${sealedKeys.join(", ")}]`);
 }
 
 // ---------- 4) values.yaml 구성 ----------

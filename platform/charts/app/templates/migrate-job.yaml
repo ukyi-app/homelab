@@ -80,8 +80,10 @@ spec:
             - name: tmp
               mountPath: /tmp
           resources:
-            requests: { cpu: 50m, memory: {{ .Values.resources.requests.memory }} }
-            limits:   { cpu: 500m, memory: {{ .Values.resources.limits.memory }} }
+            # migrate 메모리는 앱 런타임 limit과 독립 — tight 런타임 limit이 migration 도구(prisma/knex/
+            # alembic류, steady-state보다 메모리 많이 씀) OOM을 유발하지 않게. 기본 256Mi, db.migrateMemory로 override.
+            requests: { cpu: 50m, memory: {{ .Values.db.migrateMemory | default "256Mi" }} }
+            limits:   { cpu: 500m, memory: {{ .Values.db.migrateMemory | default "256Mi" }} }
       volumes:
         # securityContext.readOnlyRootFilesystem:true라 마이그레이션 도구(prisma/knex/alembic 등)의
         # /tmp 쓰기가 EROFS로 실패한다 — deployment와 동일하게 쓰기 가능한 tmp emptyDir 제공.

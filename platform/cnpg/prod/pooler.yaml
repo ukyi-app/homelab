@@ -22,4 +22,4 @@ spec:
         - name: pgbouncer
           resources:
             requests: { cpu: 25m, memory: 32Mi }
-            limits: { cpu: 200m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi } # OOM-watch: peak 63/64(98%·4.8× 스파이크)·DB 풀 → 선제 상향(64→128, database 행 버퍼 흡수)

@@ -34,3 +34,13 @@ BASE="--set image.repo=ghcr.io/o/api --set image.tag=sha-abc1234 --set kind=serv
   echo "$out" | grep -q 'mountPath: /tmp'
   echo "$out" | grep -q 'emptyDir'
 }
+
+@test "migration Job memory is independent of the app runtime limit (default 256Mi, OOM-safe)" {
+  # BASE 앱 limit=128Mi인데 migrate Job은 256Mi(독립) — tight 런타임 limit이 migration을 굶기지 않음.
+  out="$(helm template t "$CHART" $BASE --set db.enabled=true | yq 'select(.kind=="Job")')"
+  echo "$out" | grep -q 'memory: 256Mi'
+  run grep -q 'memory: 128Mi' <<<"$out"; [ "$status" -ne 0 ]
+  # db.migrateMemory로 override 가능
+  out2="$(helm template t "$CHART" $BASE --set db.enabled=true --set db.migrateMemory=512Mi | yq 'select(.kind=="Job")')"
+  echo "$out2" | grep -q 'memory: 512Mi'
+}

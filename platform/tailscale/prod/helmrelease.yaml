@@ -6,5 +6,5 @@ name: tailscale-operator
 repo: https://pkgs.tailscale.com/helmcharts
 version: 1.78.1 # 버전 고정
 releaseName: tailscale-operator
-namespace: edge
+namespace: tailscale # 전용 privileged ns — proxy(ts-*)가 여기 생성됨(edge baseline 비호환 회피)
 valuesFile: values-tailscale.yaml

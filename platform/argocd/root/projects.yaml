@@ -25,6 +25,10 @@ spec:
     - { group: batch, kind: Job }
     - { group: gateway.networking.k8s.io, kind: HTTPRoute }
     - { group: bitnami.com, kind: SealedSecret }
+    # 외부/API egress가 필요한 앱은 deploy/prod(source#3)에 자체 NetworkPolicy 배포(prod=default-deny-egress).
+    # namespace-scoped·prod 한정이라 권한경계 안 넓힘. app-scoped 셀렉터는 check-app-netpol.sh가 강제(Task 4b),
+    # 라이브 셀렉터 정합은 owner-local netpol-rehearsal.sh로 검증.
+    - { group: networking.k8s.io, kind: NetworkPolicy }
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject

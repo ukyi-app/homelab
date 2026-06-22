@@ -99,7 +99,7 @@ write_files:
       WantedBy=multi-user.target
 
 runcmd:
-  # 스토리지 마운트 포인트. 'internal'은 VM 자체 디스크(512 GB 내장 SSD)에 있다.
+  # 스토리지 마운트 포인트. 'internal'은 VM 자체 디스크(내장 SSD, /dev/vdb1 btrfs ~224GiB 실측)에 있다.
   # 진짜 bulk-ssd 티어는 OrbStack이 /mnt/mac/Volumes/homelab (virtiofs)으로 VM에 공유하는
   # 외장 SSD에 있다; 그 경로는 호스트 런북(docs/runbooks/external-ssd.md)으로 프로비저닝되고
   # apply-storage.sh의 외장 SSD 게이트가 강제한다 — 여기서 하지 않는 이유는 첫 부팅 시점에

@@ -132,3 +132,19 @@ setup() {
   grep -q 'alert: VectorBackpressure' "$C"
   grep -q 'vector_utilization' "$C"   # vector internal_metrics로 노출된 메트릭
 }
+
+@test "node pressure and pod eviction alerts are defined (single-node starvation/disk coverage)" {
+  C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
+  grep -q 'alert: NodePressure' "$C"                          # kubelet Memory/Disk/PIDPressure condition
+  grep -q 'alert: PodEvicted' "$C"                            # 노드 압박 eviction(사후)
+  grep -q 'kube_node_status_condition' "$C"                   # NodePressure 메트릭(라이브 확인)
+  grep -q 'kube_pod_status_reason{reason="Evicted"}' "$C"     # PodEvicted 메트릭(honor_labels로 실제 ns)
+}
+
+@test "leading OOM alert uses working_set not max_usage (reclaimable page-cache trap)" {
+  C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
+  grep -q 'alert: ContainerMemoryNearLimit' "$C"
+  grep -q 'container_memory_working_set_bytes' "$C"
+  # max_usage는 reclaimable page cache를 포함해 hostPath 로그파드에서 limit까지 차는 오발화 함정 — 회귀 금지.
+  run grep -q 'container_memory_max_usage_bytes' "$C"; [ "$status" -ne 0 ]
+}

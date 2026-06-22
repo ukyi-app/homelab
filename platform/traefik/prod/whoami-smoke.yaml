@@ -13,7 +13,7 @@ spec:
           ports: [{ containerPort: 80 }]
           resources:
             requests: { cpu: 10m, memory: 16Mi }
-            limits: { cpu: 50m, memory: 32Mi }
+            limits: { cpu: 50m, memory: 16Mi } # right-size: peak ~4Mi, request=limit 16Mi(4× 마진)
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532

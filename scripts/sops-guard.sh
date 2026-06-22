@@ -11,6 +11,13 @@ if ! command -v yq >/dev/null 2>&1; then
   exit 2
 fi
 
+# canonical age recipient(공개키) — .sops.yaml _recipients 앵커. recipient '개수'가 아니라 '신원'을 강제해
+# recovery 키 스왑/드롭(개수는 2 유지)이 게이트를 통과하는 갭을 닫는다(DR 복호 불능 방지). 정렬해 집합 비교.
+SOPS_YAML="$(git rev-parse --show-toplevel 2>/dev/null)/.sops.yaml"
+[ -f "$SOPS_YAML" ] || SOPS_YAML=".sops.yaml"
+CANON=""
+[ -f "$SOPS_YAML" ] && CANON="$(yq '._recipients[]' "$SOPS_YAML" 2>/dev/null | sort)"
+
 rc=0
 for f in "$@"; do
   case "$f" in
@@ -27,6 +34,11 @@ for f in "$@"; do
         #    test() 정규식으로 prefix 검사. `\\[`는 yq가 `\[`(리터럴 `[`)로 unescape한다.
         leaks=$(yq '[(.data // {})[], (.stringData // {})[]] | map(select(test("^ENC\\[") | not)) | length' "$f" 2>/dev/null || echo 99)
         [ "$leaks" = "0" ] || reason="$leaks plaintext data/stringData leaf(s)"
+      fi
+      # recipient 신원 검증 — 구조가 정상이고 canonical을 알 때만(정렬 집합 정확 일치).
+      if [ -z "$reason" ] && [ -n "$CANON" ]; then
+        got="$(yq '.sops.age[].recipient' "$f" 2>/dev/null | sort)"
+        [ "$got" = "$CANON" ] || reason="recipient 신원이 .sops.yaml canonical(cluster+recovery)과 불일치(스왑/recovery 드롭)"
       fi
       if [ -n "$reason" ]; then
         echo "BLOCKED: $f is *.enc.yaml but NOT properly sops-encrypted ($reason)." >&2

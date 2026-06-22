@@ -88,14 +88,10 @@ spec:
             initialDelaySeconds: 3
             periodSeconds: 5
           {{- else }}
-          {{- /* worker 기본 liveness=exec true 플레이스홀더; distroless는 livenessProbe로 오버라이드 */}}
+          {{- /* worker: 기본 liveness 없음(distroless /bin/true CrashLoop 방지) — 필요 시 livenessProbe override(grpc/tcpSocket) */}}
           {{- if .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
-          {{- else }}
-          livenessProbe:
-            exec: { command: ["/bin/true"] }
-            periodSeconds: 30
           {{- end }}
           {{- end }}
           {{- if gt (int .Values.preStopSleepSeconds) 0 }}

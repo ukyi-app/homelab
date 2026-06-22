@@ -35,7 +35,7 @@ spec:
           ports: [{ name: http, containerPort: 8880 }]
           resources:
             requests: { cpu: 20m, memory: 64Mi }
-            limits: { memory: 128Mi }
+            limits: { memory: 64Mi } # right-size: peak ~26Mi, request=limit 64Mi(2.46× 마진, 버스트 메커니즘 없음)
           readinessProbe: { httpGet: { path: /health, port: 8880 } }
           securityContext:
             allowPrivilegeEscalation: false

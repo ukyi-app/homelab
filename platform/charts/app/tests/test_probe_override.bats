@@ -10,9 +10,11 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   run grep -q '/bin/true' <<<"$out"; [ "$status" -ne 0 ]
 }
 
-@test "default worker liveness is exec /bin/true when no override (unchanged)" {
+@test "worker has NO default liveness probe (distroless-safe; avoids /bin/true CrashLoop)" {
   out=$(dep --set kind=worker)
-  echo "$out" | grep -q '/bin/true'
+  # 기본 liveness 미렌더 — /bin/true 없음 + livenessProbe 키 자체 없음(override 시에만 등장).
+  run grep -q '/bin/true' <<<"$out"; [ "$status" -ne 0 ]
+  run grep -q 'livenessProbe' <<<"$out"; [ "$status" -ne 0 ]
 }
 
 @test "preStopSleepSeconds=0 omits the preStop block (distroless: no /bin/sleep)" {

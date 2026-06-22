@@ -59,6 +59,7 @@ PRECOMMIT="$BATS_TEST_DIRNAME/../../.pre-commit-config.yaml"
 @test "sops-guard PASSES a realistically sops-shaped enc.yaml (ENC[AES256_GCM,...] leaves)" {
   # codex pass1 F4 회귀 fixture: 실제 SOPS 리프 형태가 평문으로 오판되지 않아야(gate가 모든 enc.yaml을
   # 오차단하지 않게). age 키 불필요 — sops-guard는 구조만 본다. 게이트 글롭 포함 파일이라 required로 강제.
+  # 실제 sops 파일은 항상 .sops.age(canonical cluster+recovery 공개키)를 갖는다 — recipient 신원 검사 통과용.
   d="$BATS_TEST_TMPDIR"
   cat > "$d/real.enc.yaml" <<'YAML'
 apiVersion: v1
@@ -66,6 +67,11 @@ kind: Secret
 stringData:
     TOKEN: ENC[AES256_GCM,data:Zm9v,iv:YmFy,tag:YmF6,type:str]
 sops:
+    age:
+        - recipient: age1n3j7p70f0unl5dgrjhtr9jxrdntz2a67dtntu446qus9c3jd3fnsp8z960
+          enc: x
+        - recipient: age154tu9q7922xu46x0rkfm5l9x3ulf9u5at5qvxeaqfx9sgtm7cumq75jdwc
+          enc: y
     mac: ENC[AES256_GCM,data:bWFj,type:str]
     lastmodified: "2026-06-16T00:00:00Z"
 YAML

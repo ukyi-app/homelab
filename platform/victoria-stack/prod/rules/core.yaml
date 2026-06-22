@@ -22,6 +22,26 @@ data:
             annotations:
               summary: "VM 메모리 사용률 92% 초과"
               description: "노드 메모리 압박 — eviction 임계치에 근접했습니다."
+          # 노드-레벨 압박(kubelet condition) — OOM/디스크/PID 고갈의 노드 신호, eviction 선행 지표.
+          # 단일 노드라 한 워크로드의 unbounded 자원 증가가 이웃 eviction으로 번진다. hostPath PV 4종이
+          # 쿼터 없는 공유 fs(내장 SSD 실용량 224G)를 써 DiskPressure가 현실적 위험. status="true"==1로 발화
+          # (메트릭은 condition×status 라벨에 0/1 값 — 라이브 확인). NodeMemoryHigh(92% 추세)의 사후/보강.
+          - alert: NodePressure
+            expr: kube_node_status_condition{condition=~"MemoryPressure|DiskPressure|PIDPressure", status="true"} == 1
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "노드 압박: {{ $labels.node }} {{ $labels.condition }}"
+              description: "kubelet이 {{ $labels.condition }}를 보고합니다 — eviction 임박. 자원(메모리/디스크/PID) 소비자를 확인하세요. PVC 포화는 node_filesystem_avail_bytes(/)·StandardSSDFilling도 함께 보세요."
+          # 파드 eviction 발생(사후) — 노드 압박으로 kubelet이 축출. NodePressure가 선행 경보.
+          # kube_pod_status_reason는 honor_labels로 실제 ns/pod 라벨 보유(라이브 확인 — KSM clobber 아님).
+          - alert: PodEvicted
+            expr: kube_pod_status_reason{reason="Evicted"} == 1
+            for: 0m
+            labels: { severity: warning }
+            annotations:
+              summary: "파드 eviction: {{ $labels.namespace }}/{{ $labels.pod }}"
+              description: "노드 압박으로 파드가 축출됐습니다 — 원인 자원(디스크/메모리)을 확인하세요. hostPath PV 포화 가능."
           - alert: PodOOMKilled
             expr: increase(kube_pod_container_status_restarts_total[15m]) > 0 and on(namespace,pod) kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
             for: 0m

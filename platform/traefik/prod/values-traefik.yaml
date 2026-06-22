@@ -36,7 +36,7 @@ ingressRoute:
     enabled: false # dashboard는 내부 전용; 여기서 노출하지 않음
 resources:
   requests: { cpu: 50m, memory: 64Mi }
-  limits: { cpu: 500m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 192Mi } # OOM-watch: peak가 limit과 동일(헤드룸 0)·전 ingress 데이터플레인 → 선제 상향(128→192)
 rbac:
   enabled: true # 기본 RBAC; Gateway-API 확장은 rbac-gateway.yaml에서 (Task 3.3)
 serviceAccount:
