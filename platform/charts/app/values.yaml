@@ -44,6 +44,7 @@ homepage:
 db:
   enabled: false
   migrateCmd: ["migrate"] # 앱 이미지 내 명령; wave-1 ArgoCD Sync-hook Job이 실행
+  # migrateMemory: 256Mi  # migrate Job 메모리(앱 런타임 limit과 독립, 기본 256Mi). 무거운 마이그레이션만 상향.
 
 # --- probes ---
 probes:

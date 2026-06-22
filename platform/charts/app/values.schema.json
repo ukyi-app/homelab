@@ -45,7 +45,7 @@
     },
     "db": {
       "type": "object", "additionalProperties": false,
-      "properties": { "enabled": { "type": "boolean" }, "host": { "type": "string" }, "migrateCmd": { "type": "array", "items": { "type": "string" } } }
+      "properties": { "enabled": { "type": "boolean" }, "host": { "type": "string" }, "migrateCmd": { "type": "array", "items": { "type": "string" } }, "migrateMemory": { "type": "string", "minLength": 1 } }
     },
     "probes": {
       "type": "object", "additionalProperties": false,
