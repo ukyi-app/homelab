@@ -16,4 +16,11 @@
 #         (limit이 있는 워크로드는 ContainerMemoryNearLimit 알림이 OOM 전에 커버하나, unlimited는 미커버.)
 #     - cnpg-operator manager : 원격 helm 차트(platform/argocd/root/apps/cnpg-operator.yaml).
 #     - barman-cloud : 벤더 barman-plugin manifest(platform/cnpg/barman-plugin — 수정 금지).
+#     - database/pg-1 plugin-barman-cloud : CNPG가 pg StatefulSet에 주입하는 사이드카(소스 매니페스트 부재, unlimited).
+#     - edge/ts-traefik-* tailscale : tailscale operator가 만드는 proxy StatefulSet(런타임 생성·ProxyClass 미지정 → unlimited).
+#         근본 조치 여지: ProxyClass CR 정의 후 defaultProxyClass 지정으로 proxy에 memory limit 부여.
 #     - kube-system svclb-* (klipper-lb) : k3s 관리(우리 매니페스트 아님).
+#
+#   ── 스캔 제외(but limit 보유) — 아래는 unlimited가 아니라 charts/ 하위라 게이트가 못 보는 것뿐 ──
+#     local-helm 상주(traefik·argocd·sealed-secrets·tailscale-operator)는 렌더가 charts/(스캔 제외)에 떨어지나
+#     각 values(values-traefik.yaml 등)에 memory limit을 선언한다 — 회귀 시 게이트 미포착이라 values 직접 확인.
