@@ -8,6 +8,7 @@ spec:
   template:
     metadata: { labels: { app: adguard } }
     spec:
+      automountServiceAccountToken: false # SA 토큰 불요(k8s API 미사용) — 토큰 탈취 표면 제거(보안 감사 SA-2)
       securityContext:
         fsGroup: 65532 # PVC(conf/work)를 65532 그룹 쓰기 가능으로 — non-root AdGuard의 설정 저장용
       initContainers:

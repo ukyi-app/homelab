@@ -40,7 +40,7 @@ spec:
         # ArgoCD가 자동 롤한다(ConfigMap 무재시작 함정 회피, AGENTS.md). test_relay.bats가 일치를 강제.
         checksum/relay-script: "b0ef4811484da55f"
     spec:
-      securityContext: { runAsNonRoot: true, runAsUser: 65534 }
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: relay
           image: busybox:1.36
