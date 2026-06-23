@@ -86,11 +86,15 @@ spec:
           env:
             - { name: VECTOR_SELF_NODE_NAME, valueFrom: { fieldRef: { fieldPath: spec.nodeName } } }
           resources:
-            # kubernetes_logs catch-up + internal_metrics(테마6) 피크 working_set이 ~113Mi(이전 limit의 88%)에
-            # 달해 128Mi 천장에 부딪혀 OOMKilled crashloop 발생 → 256Mi로 상향(피크 위 ~2x 헤드룸으로 버스트 흡수).
-            # request는 working_set 피크(~113Mi) 위로 둬 node 압박 시 eviction 보호. (원장 observability 행 동반 갱신.)
-            requests: { cpu: 50m, memory: 128Mi }
-            limits: { memory: 256Mi }
+            # OOM 근본원인(2026-06-23, PR#107 seccomp 롤아웃이 방아쇠): 파드 '재생성' 시 data_dir이 emptyDir라
+            # vector 체크포인트(파일별 읽기 위치)가 유실 → kubernetes_logs가 read_from=beginning으로 /var/log 백로그를
+            # 처음부터 콜드 재리드(라이브 실측 50.9Mi 단발 버스트) → reclaimable page-cache가 얹혀 cgroup max_usage가
+            # 256Mi 천장을 터치 → 스타트업 창에서 단발 OOMKilled. 근본수정=data_dir hostPath 영속화(아래 volumes)로
+            # 재생성 콜드 재리드 자체를 제거. limit/request는 라이브 실측 재산정 — steady working_set ~145Mi(10m max)/
+            # 172Mi(1h)·스타트업 피크 197Mi 기준: request 160Mi(steady 위로 eviction 보호)·limit 320Mi(cgroup 피크
+            # 256Mi 위 헤드룸 + hostPath 적용 첫 부팅의 마지막 콜드리드 흡수). (원장 행 동반: req 1120→1152, limit 2144→2208.)
+            requests: { cpu: 50m, memory: 160Mi }
+            limits: { memory: 320Mi }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -102,6 +106,9 @@ spec:
             - { name: varlibdockercontainers, mountPath: /var/lib/docker/containers, readOnly: true }
       volumes:
         - { name: config, configMap: { name: vector-config } }
-        - { name: data, emptyDir: { sizeLimit: 256Mi } }
+        # data_dir(/vector-data) 체크포인트를 노드 디스크에 영속화 — 파드 재생성·재부팅에도 보존돼 kubernetes_logs
+        # 콜드 재리드를 제거(근본수정). DirectoryOrCreate=첫 부팅 자동 생성(root:root 0755, vector runAsUser:0이라 쓰기 OK).
+        # VM 재구축(DR) 시 /var/log와 함께 소실되나 그때만 1회 콜드리드(백로그도 함께 비어 소규모).
+        - { name: data, hostPath: { path: /var/lib/vector, type: DirectoryOrCreate } }
         - { name: varlog, hostPath: { path: /var/log } }
         - { name: varlibdockercontainers, hostPath: { path: /var/lib/docker/containers } }
