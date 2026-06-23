@@ -20,7 +20,7 @@ spec:
           type: RuntimeDefault   # 표준 정합(homepage/adguard/cnpg 동형) — userspace 터널이라 RuntimeDefault 안전
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared:2024.10.1
+          image: cloudflare/cloudflared:2026.6.1@sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283 # 멀티아치 index digest 핀(linux/arm64 검증)
           args: ["tunnel", "--config", "/etc/cloudflared/config.yaml", "--no-autoupdate", "run"]
           env:
             - name: TUNNEL_TOKEN
