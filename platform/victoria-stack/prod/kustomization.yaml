@@ -13,6 +13,7 @@ resources:
   - victorialogs.yaml
   - vector.yaml
   - alertmanager.yaml
+  - networkpolicy.yaml    # 외부 egress 격리(alertmanager·relay) — minimal, metrics east-west 불간섭
   - rules/core.yaml
   - vmalert.yaml
   - rules/r4-storage-backup.yaml

@@ -1,0 +1,81 @@
+# cert-manager ns egress default-deny + 최소 allow (보안 감사 후속 NETPOL-4).
+# cert-manager 컨트롤러는 클러스터 전역 Secret 관리 RBAC를 가진 측면이동 고가치 표적이라 egress
+# 도달범위를 라이브 실측 4갈래로만 제한한다(defense-in-depth):
+#   apiserver(노드서브넷:6443 DNAT 후) · CoreDNS:53 · 외부 443(LE ACME + Cloudflare API) · 외부 53(DNS-01 self-check).
+# ns 3파드(controller/cainjector/webhook) 모두 단일 remote-helm Application 소유라 ns-wide
+# (podSelector:{}) deny가 cross-app 레이스 없이 안전(동거 워크로드 0). ns는 이 컴포넌트 kustomization이 지정.
+#
+# ★cert-manager 자체는 remote-helm 앱(chart v1.16.5에 networkPolicy 옵션 부재)이라 helm values로 붙일 수
+#   없어 독립 컴포넌트로 분리한다 — platform-components appset이 별도 Application으로 자기 netpol을 원자 소유.
+# INGRESS는 의도적 미제한: apiserver→webhook(:10250)은 노드발이라 kube-router가 정책 평가 전 허용(probe 선례),
+#   metrics(:9402) scrape는 ingress deny 없으면 유지 → egress가 lateral 핵심이라 egress에 집중.
+# ⚠️ ipBlock에 pod CIDR(10.42.0.0/24) 금지(deny 무력화 함정). 외부는 0.0.0.0/0 except private.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cert-manager-default-deny-egress
+spec:
+  podSelector: {}            # cert-manager ns의 모든 pod
+  policyTypes: [Egress]
+  # egress 규칙 없음 => 전부 거부; 아래 allow들이 최소한만 다시 연다.
+---
+# Egress: CoreDNS — acme-v02.api.letsencrypt.org·api.cloudflare.com 호스트네임 해석(dnsPolicy=ClusterFirst).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cert-manager-allow-dns-egress
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Egress: apiserver — controller/cainjector/webhook가 Certificate/Issuer/Order/Secret watch·생성.
+# ★kube-router가 ClusterIP(10.43.0.1:443)를 노드 InternalIP:6443으로 DNAT하고 netpol egress는 DNAT '후'
+#   dest를 평가하므로 ClusterIP가 아니라 노드 서브넷:6443을 허용한다(라이브: 노드IP 192.168.139.92).
+#   OrbStack VM /24라 VM IP 변경에 durable. DR로 대역 자체가 바뀌면 갱신.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cert-manager-allow-egress-to-apiserver
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.139.0/24 # 노드 InternalIP 192.168.139.92 — DNAT 후 apiserver
+      ports:
+        - { protocol: TCP, port: 6443 }
+---
+# Egress: 외부 443(LE ACME acme-v02 order/challenge/finalize + Cloudflare API DNS-01 _acme-challenge TXT)
+# + 외부 53(DNS-01 self-check 공개 resolver 1.1.1.1/8.8.8.8, dns01RecursiveNameserversOnly=true 라이브 확인).
+# Cloudflare/LE anycast IP가 동적이라 호스트 핀 불가 → 0.0.0.0/0 except private로 내부 평면(pod/service/노드)
+# 도달을 차단(lateral 방지)하며 외부 ACME·DNS 경로는 보존한다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cert-manager-allow-egress-external
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8       # pod(10.42.0.0/24)·service(10.43.0.0/16) CIDR 차단
+              - 172.16.0.0/12
+              - 192.168.0.0/16   # 노드 서브넷 차단(apiserver는 위 전용 룰로만)
+      ports:
+        - { protocol: TCP, port: 443 }   # LE ACME + Cloudflare API
+        - { protocol: UDP, port: 53 }    # DNS-01 self-check (1.1.1.1/8.8.8.8)
+        - { protocol: TCP, port: 53 }

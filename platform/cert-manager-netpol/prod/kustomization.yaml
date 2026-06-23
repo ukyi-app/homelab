@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# cert-manager ns egress 격리(NETPOL-4). cert-manager 자체는 remote-helm Application이라
+# networkPolicy를 helm values로 못 붙여 독립 컴포넌트로 분리한다. platform-components
+# ApplicationSet(platform/*/prod 자동발견)이 `cert-manager-netpol-prod` Application으로 sync,
+# netpol을 원자 소유한다(appset 템플릿에 destination.namespace 없음 → 아래 namespace 트랜스포머가 권위).
+namespace: cert-manager
+resources:
+  - networkpolicy.yaml
