@@ -137,3 +137,18 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 0 ]
   [ -z "$(git -C "$R" status --porcelain)" ]
 }
+
+@test "rejects activating an internal home host (EXP exposure foot-gun guard)" {
+  # 내부 호스트(*.home.<zone>)를 committed 상태로 만든다 — 동일 sha/synced·표면무변경·행동일·healthy라
+  # 다른 게이트는 전부 통과하고, 유일하게 남는 거부 사유는 내부호스트 가드(3.5)다.
+  jq '.[0].host = "orders.home.ukyi.app"' "$R/infra/cloudflare/apps.json" > "$R/aj"
+  mv "$R/aj" "$R/infra/cloudflare/apps.json"
+  git -C "$R" add -A && git -C "$R" commit -qm "internal host"
+  SYNCED="$(git -C "$R" rev-parse HEAD)"
+  run bun "$A" --app orders --sha "$SYNCED" --synced-rev "$SYNCED" \
+    --repo-dir "$R" --status-file "$TMP/status.json" --flip
+  [ "$status" -ne 0 ]
+  # active는 절대 플립되지 않아야 한다(내부 앱 공개 노출 차단)
+  run jq -e '.[0].active == false' "$R/infra/cloudflare/apps.json"
+  [ "$status" -eq 0 ]
+}

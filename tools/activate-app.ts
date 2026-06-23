@@ -63,6 +63,14 @@ const currentRaw = readFileSync(appsJsonPath, "utf8");
 const currentRow = rowOf(currentRaw);
 if (approvedRow !== currentRow) die(`apps.json 행이 승인 SHA와 다르다: 승인=${approvedRow} 현재=${currentRow}`);
 
+// (3.5) 내부 호스트 보호(보안 감사 EXP) — *.home.<zone>는 tailscale 전용(web-internal-tls)이라 공개
+// DNS/tunnel 노출(active:true)이 금지된다. internal host가 apps.json에 public/active로 들어가는 foot-gun을
+// 차단한다 — 내부 격리는 Gateway 강제가 아니라 '터널 ingress 목록 + 공개 DNS 부재'에 의존하므로,
+// 이 게이트가 실수 노출을 막는 마지막 코드 강제선이다(`.home.` 라벨 = web-internal 규약, AGENTS.md).
+const thisRow = JSON.parse(currentRaw).find((r: any) => r.name === app);
+if (thisRow?.host && /\.home\./.test(thisRow.host))
+  die(`내부 호스트(${thisRow.host})는 tailscale 전용 — 공개 activate 불가(*.home.<zone>는 web-internal-tls 경로)`);
+
 // (4) 라이브 상태 — Application Synced+Healthy, HTTPRoute Accepted/ResolvedRefs
 let status;
 if (args.statusFile) {
