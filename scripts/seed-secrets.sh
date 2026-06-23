@@ -10,7 +10,12 @@ set -euo pipefail
 : "${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID}"
 : "${HEALTHCHECKS_URL:?set HEALTHCHECKS_URL}"
 : "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}" # Grafana admin 비밀번호 (admin/admin 절대 금지)
-# cert-manager DNS-01용 Cloudflare API 토큰 (*.home.ukyi.app 와일드카드 발급). Zone DNS edit 필요.
+# cert-manager DNS-01용 좁은 Cloudflare API 토큰 (*.home.ukyi.app 와일드카드 발급) — Zone DNS:Edit + Zone:Read만.
+# ★SEC-1: 브로드 TF 토큰(R2·Tunnel·WAF·Cache·Zone Settings)을 클러스터 Secret에 봉인하던 것에서 분리한다.
+#   클러스터(cert-manager)의 CF 노출을 '전체 계정'→'DNS 편집'으로 축소(침해/Secret 유출 시 blast radius 감소).
+#   브로드 토큰은 terraform provider 인증 전용(TF_VAR_, Actions secret에만, 클러스터엔 봉인 안 함).
+: "${CERT_MANAGER_CF_API_TOKEN:?set CERT_MANAGER_CF_API_TOKEN}"
+# 브로드 토큰은 terraform output(아래)·provider 인증에 여전히 필요.
 : "${TF_VAR_cloudflare_api_token:?set TF_VAR_cloudflare_api_token}"
 
 CF_OUT=$(terraform -chdir=infra/cloudflare output -json)
@@ -131,6 +136,7 @@ stringData:
 EOF
 
 # cert-manager DNS-01 솔버용 Cloudflare API 토큰 (gateway ns의 Issuer가 참조).
+# ★SEC-1: 브로드 TF 토큰이 아니라 좁은 cert-manager 전용 토큰(Zone DNS:Edit + Zone:Read)을 봉인한다.
 write_enc platform/traefik/prod/cloudflare-api-token.enc.yaml <<EOF
 apiVersion: v1
 kind: Secret
@@ -139,5 +145,5 @@ metadata:
   namespace: gateway
 type: Opaque
 stringData:
-  api-token: "${TF_VAR_cloudflare_api_token}"
+  api-token: "${CERT_MANAGER_CF_API_TOKEN}"
 EOF
