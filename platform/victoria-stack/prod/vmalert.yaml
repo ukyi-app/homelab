@@ -12,7 +12,7 @@ spec:
       labels: { app.kubernetes.io/name: vmalert }
       annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8880" } # 자기관측 룰/notifier 에러 메트릭
     spec:
-      securityContext: { runAsNonRoot: true, runAsUser: 65534 }
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: vmalert
           image: victoriametrics/vmalert:v1.103.0

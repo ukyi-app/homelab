@@ -33,7 +33,7 @@ spec:
       annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8429" } # 자기관측 remoteWrite 메트릭
     spec:
       serviceAccountName: vmagent
-      securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534 }
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: vmagent
           image: victoriametrics/vmagent:v1.103.0
