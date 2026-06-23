@@ -7,10 +7,14 @@ resource "cloudflare_ruleset" "waf_custom" {
   rules = [
     {
       ref         = "block-traversal"
-      description = "Block path traversal attempts"
-      expression  = "(http.request.uri.path contains \"../\") or (http.request.uri.path contains \"..%2f\")"
-      action      = "block"
-      enabled     = true
+      description = "Block path traversal attempts (best-effort literals)"
+      # ⚠️ 무료 플랜이라 정규식(matches) 불가 → 리터럴 OR만 가능. double-encoding·backslash·점 인코딩
+      #    변종까지 보강하나 여전히 best-effort다(완전 커버 불가). 진짜 traversal 방어는 오리진 앱의
+      #    path canonicalization(프레임워크 책임) — 이 룰은 엣지 1차 시그널일 뿐이다.
+      #    `../`·`..%2f`(단일 인코딩) + `..%5c`(backslash) + `%2e%2e`(점 인코딩) + `..%252f`(double-encode).
+      expression = "(http.request.uri.path contains \"../\") or (http.request.uri.path contains \"..%2f\") or (http.request.uri.path contains \"..%5c\") or (http.request.uri.path contains \"%2e%2e\") or (http.request.uri.path contains \"..%252f\")"
+      action     = "block"
+      enabled    = true
     },
     {
       ref         = "block-disallowed-methods"
