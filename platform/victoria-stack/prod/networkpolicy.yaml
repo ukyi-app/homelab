@@ -1,0 +1,87 @@
+# observability ns 외부 egress 격리 (보안 감사 후속 NETPOL-4, minimal). 인터넷으로 나가는 워크로드만
+# default-deny egress + 최소 allow로 봉인한다 — 침해 시 임의 외부 C2/exfil·내부 lateral을 차단.
+#
+# ★metrics 평면(vmagent/kube-state-metrics/vmsingle 등 east-west)은 의도적으로 건드리지 않는다:
+#   vmagent는 role:pod SD로 apiserver를 watch하고 전 namespace의 annotated 파드를 동적 포트로
+#   스크레이프하므로(vmagent-scrape-config.yaml), ns-wide default-deny는 near-allow-all이 되어
+#   격리 가치 0 + 동적 타겟 silent 실패 위험만 크다(라이브 검증). 따라서 외부로 나가는 워크로드만
+#   워크로드별(app.kubernetes.io/name)로 격리한다.
+#   - alertmanager → api.telegram.org(443) + deadmanswitch-relay 내부 webhook(:9095)
+#   - deadmanswitch-relay → healthchecks.io(443)
+#   (digest-exporter도 ghcr.io로 나가나 CronJob 템플릿에 pod 라벨이 없어 셀렉터 미스 + 현재 APPS="" 비활성 → 제외.)
+# ⚠️ ipBlock에 pod CIDR(10.42.0.0/24) 금지(deny 무력화 함정). 외부는 0.0.0.0/0 except private.
+# ns는 victoria-stack kustomization의 `namespace: observability` 트랜스포머가 지정.
+---
+# === alertmanager: telegram(외부 443) + deadmanswitch-relay(내부 :9095) ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: alertmanager-default-deny-egress
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: alertmanager }
+  policyTypes: [Egress]
+  # egress 규칙 없음 => alertmanager의 모든 egress 거부; 아래 allow가 최소만 재개방.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: alertmanager-allow-egress
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: alertmanager }
+  policyTypes: [Egress]
+  egress:
+    - to: # DNS — api.telegram.org 해석(CoreDNS)
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to: # deadmanswitch-relay 내부 webhook(:9095) — alertmanager가 /ping을 쳐 dead-man 체인을 돌린다(같은 ns)
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: deadmanswitch-relay }
+      ports:
+        - { protocol: TCP, port: 9095 }
+    - to: # 외부 telegram(api.telegram.org:443) — 사설 대역 except로 내부 lateral 차단
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - { protocol: TCP, port: 443 }
+---
+# === deadmanswitch-relay: healthchecks.io(외부 443) ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deadmanswitch-relay-default-deny-egress
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: deadmanswitch-relay }
+  policyTypes: [Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deadmanswitch-relay-allow-egress
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: deadmanswitch-relay }
+  policyTypes: [Egress]
+  egress:
+    - to: # DNS — healthchecks.io 해석(CoreDNS)
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to: # 외부 healthchecks.io(443, wget HEALTHCHECKS_URL)
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - { protocol: TCP, port: 443 }
