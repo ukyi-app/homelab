@@ -39,3 +39,14 @@ DIR="${BATS_TEST_DIRNAME}"
   run yq -e 'select(.kind=="NetworkPolicy" and .metadata.name=="database-default-deny-ingress") | .spec.policyTypes[0]=="Ingress"' "$DIR/networkpolicy.yaml"
   [ "$status" -eq 0 ]
 }
+
+# ── C3: pg-rw tailscale LoadBalancer ─────────────────────────────────────────
+@test "pg-rw-tailscale is a tailscale LoadBalancer exposing 5432 with a stable hostname" {
+  run yq -e '[(.spec.type=="LoadBalancer"), (.spec.loadBalancerClass=="tailscale"), (.metadata.annotations["tailscale.com/hostname"]=="pg-rw"), (.spec.ports[0].port==5432), (.spec.ports[0].targetPort==5432)] | all' "$DIR/pg-rw-tailscale-service.yaml"
+  [ "$status" -eq 0 ]
+}
+
+@test "pg-rw-tailscale selects the CNPG cluster pods (primary on single-instance)" {
+  run yq -e '.spec.selector["cnpg.io/cluster"]=="pg"' "$DIR/pg-rw-tailscale-service.yaml"
+  [ "$status" -eq 0 ]
+}

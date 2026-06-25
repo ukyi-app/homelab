@@ -14,6 +14,7 @@ resources:
   - restore-drill-rbac.yaml
   - restore-drill-cronjob.yaml
   - networkpolicy.yaml # database 계층 ingress 격리
+  - pg-rw-tailscale-service.yaml # pg-rw tailscale LoadBalancer(owner GUI/로컬 직결)
 
 generators:
   - secret-generator.yaml # KSOPS — database ns의 세 가지 시드를 전부 렌더 (아래 참조)
