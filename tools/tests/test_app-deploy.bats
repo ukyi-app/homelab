@@ -38,6 +38,14 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
+@test "app-deploy .bindings.json contract is autoDeploy-centric (db/redis dropped)" {
+  # 연결=SealedSecret 이후 .bindings.json은 autoDeploy만 기록 — 계약 설명에서 db/redis 제거 회귀 가드.
+  # 단일 run+status로 검사(bats는 마지막 명령만 평가하므로 중간 grep 단언은 함정).
+  run jq -e '.properties.".bindings.json".description | test("autoDeploy") and (test("db/redis") | not)' \
+    "$ROOT/tools/app-deploy-schema.json"
+  [ "$status" -eq 0 ]
+}
+
 @test "poll-ghcr discovers apps by source-repo (contract: missing source-repo = never polled)" {
   run grep -nE 'source-repo' "$ROOT/tools/poll-ghcr.ts"
   [ "$status" -eq 0 ]
