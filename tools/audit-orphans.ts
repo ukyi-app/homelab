@@ -121,7 +121,7 @@ if (existsSync(clusterPath)) {
     const secret = role?.passwordSecret?.name;
     if (!secret) continue;
     // 비밀번호 시크릿 경로 2종: provision-db owner/ro는 databases/<secret>.sealed.yaml(SealedSecret),
-    // KSOPS 시드 롤(app_admin 등)은 <secret>.enc.yaml(secret-generator.yaml가 렌더). 둘 다 없으면 고아.
+    // KSOPS 시드 롤(ukkiee 등)은 <secret>.enc.yaml(secret-generator.yaml가 렌더). 둘 다 없으면 고아.
     if (!existsSync(`${cnpgDir}/databases/${secret}.sealed.yaml`) && !existsSync(`${cnpgDir}/${secret}.enc.yaml`))
       add("dangling-role", role.name, `cluster.yaml managed.role이 비밀번호 시크릿(${secret})의 sealed/.enc.yaml를 어디서도 못 찾음 — purge 후 role 제거 커밋 누락 가능`);
   }

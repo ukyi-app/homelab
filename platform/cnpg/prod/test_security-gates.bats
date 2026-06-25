@@ -5,18 +5,18 @@
 DIR="${BATS_TEST_DIRNAME}"
 
 # ── C1: GUI/로컬 직결 admin superuser 롤 ──────────────────────────────────────
-@test "cluster.yaml defines app_admin managed role with full SSA-explicit fields" {
+@test "cluster.yaml defines ukkiee managed role with full SSA-explicit fields" {
   # ★존재 가드 먼저(vacuous-truth 방지): select가 빈 스트림이면 [bools]|all=[]|all=true로 false-green이 된다.
-  #   app_admin 롤이 정확히 1개인지 length==1로 단언 — 삭제/개명 시 RED.
-  run yq -e '[(.spec.managed.roles[] | select(.name=="app_admin"))] | length == 1' "$DIR/cluster.yaml"
+  #   ukkiee 롤이 정확히 1개인지 length==1로 단언 — 삭제/개명 시 RED.
+  run yq -e '[(.spec.managed.roles[] | select(.name=="ukkiee"))] | length == 1' "$DIR/cluster.yaml"
   [ "$status" -eq 0 ]
   # 필드 값(yq `and` 연쇄 함정 → [bools]|all). 존재 가드가 위에서 보장하므로 여긴 비-vacuous.
-  run yq -e '.spec.managed.roles[] | select(.name=="app_admin") | [(.superuser==true), (.login==true), (.ensure=="present"), (.inherit==true), (.connectionLimit==-1)] | all' "$DIR/cluster.yaml"
+  run yq -e '.spec.managed.roles[] | select(.name=="ukkiee") | [(.superuser==true), (.login==true), (.ensure=="present"), (.inherit==true), (.connectionLimit==-1)] | all' "$DIR/cluster.yaml"
   [ "$status" -eq 0 ]
 }
 
-@test "app_admin references the pg-admin-credentials passwordSecret" {
-  run yq -e 'select(.kind=="Cluster").spec.managed.roles[] | select(.name=="app_admin") | .passwordSecret.name=="pg-admin-credentials"' "$DIR/cluster.yaml"
+@test "ukkiee references the pg-admin-credentials passwordSecret" {
+  run yq -e 'select(.kind=="Cluster").spec.managed.roles[] | select(.name=="ukkiee") | .passwordSecret.name=="pg-admin-credentials"' "$DIR/cluster.yaml"
   [ "$status" -eq 0 ]
 }
 
@@ -29,7 +29,7 @@ DIR="${BATS_TEST_DIRNAME}"
   run grep -c 'ENC\[AES256_GCM' "$DIR/pg-admin-credentials.enc.yaml"
   [ "$status" -eq 0 ]
   [ "$output" -ge 2 ]                                    # username + password 암호화
-  run grep -q 'app_admin' "$DIR/pg-admin-credentials.enc.yaml"
+  run grep -q 'ukkiee' "$DIR/pg-admin-credentials.enc.yaml"
   [ "$status" -ne 0 ]                                    # 평문 username/password 노출 0
 }
 
