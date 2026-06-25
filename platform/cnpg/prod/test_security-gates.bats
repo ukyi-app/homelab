@@ -28,3 +28,14 @@ DIR="${BATS_TEST_DIRNAME}"
   run grep -q 'app_admin' "$DIR/pg-admin-credentials.enc.yaml"
   [ "$status" -ne 0 ]                                    # 평문 username/password 노출 0
 }
+
+# ── C2: tailscale → pg(5432) ingress (default-deny 유지) ──────────────────────
+@test "cnpg netpol allows ingress from the tailscale namespace on 5432" {
+  run yq -e 'select(.kind=="NetworkPolicy" and .metadata.name=="cnpg-allow-tailscale") | [(.spec.ingress[0].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]=="tailscale"), (.spec.ingress[0].ports[0].port==5432)] | all' "$DIR/networkpolicy.yaml"
+  [ "$status" -eq 0 ]
+}
+
+@test "database default-deny-ingress baseline is preserved (crown-jewel)" {
+  run yq -e 'select(.kind=="NetworkPolicy" and .metadata.name=="database-default-deny-ingress") | .spec.policyTypes[0]=="Ingress"' "$DIR/networkpolicy.yaml"
+  [ "$status" -eq 0 ]
+}

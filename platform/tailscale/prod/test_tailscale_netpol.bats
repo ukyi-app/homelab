@@ -24,6 +24,12 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
   run grep -q 'port: 8443' "$P"; [ "$status" -eq 0 ]
 }
 
+@test "proxy backend egress to database pg-rw on 5432 is declared (pg tailscale exposure)" {
+  run grep -q 'tailscale-allow-egress-to-database' "$P"; [ "$status" -eq 0 ]
+  run grep -q 'kubernetes.io/metadata.name: database' "$P"; [ "$status" -eq 0 ]
+  run grep -q 'port: 5432' "$P"; [ "$status" -eq 0 ]
+}
+
 @test "tailnet egress (0.0.0.0/0) always excludes private/cluster ranges (lateral guard)" {
   run grep -q '0.0.0.0/0' "$P"; [ "$status" -eq 0 ]
   run grep -q '10.0.0.0/8' "$P"; [ "$status" -eq 0 ]

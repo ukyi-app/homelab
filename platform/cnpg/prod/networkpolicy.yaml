@@ -99,3 +99,21 @@ spec:
             cidr: 10.42.0.1/32
       ports:
         - { protocol: TCP, port: 8000 }
+---
+# tailscale operator proxy(ts-*, tailscale ns)가 pg-rw를 tailnet에 노출(pg-rw-tailscale LB) — owner
+# GUI(TablePlus)/로컬 직결용. tailscale ns에서 5432 ingress만 허용한다(default-deny는 유지 — crown-jewel).
+# *누가* 붙는지는 tailscale ACL(infra/tailscale, owner-only)이, *어떤 SQL*은 ro/owner/admin 롤 권한이 제어.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cnpg-allow-tailscale
+  namespace: database
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: tailscale }
+      ports:
+        - { protocol: TCP, port: 5432 }
