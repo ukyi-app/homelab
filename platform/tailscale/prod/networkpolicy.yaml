@@ -96,3 +96,21 @@ spec:
               - 172.16.0.0/12
               - 192.168.0.0/16   # 노드 서브넷 차단(apiserver는 위 전용 룰로만 허용)
       # ports 생략 = 외부 전 포트 허용 — DERP(443)·STUN(3478/udp)·WireGuard(41641/udp 등 동적) 수용
+---
+# Egress: proxy → database ns pg-rw(5432). pg-rw-tailscale(loadBalancerClass=tailscale) Service의 백엔드 —
+# tailnet :5432 인입을 CNPG pg-rw 5432로 포워딩(owner GUI/로컬 직결). egress default-deny라 명시 허용 필요
+# (gateway:8443 룰과 동일 패턴). database ns의 ingress 측은 cnpg-allow-tailscale netpol이 5432를 연다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tailscale-allow-egress-to-database
+  namespace: tailscale
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: database }
+      ports:
+        - { protocol: TCP, port: 5432 }

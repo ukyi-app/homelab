@@ -36,7 +36,12 @@ else
   bun tools/validate-mutation.ts --action teardown-resource --payload-file /tmp/td-payload.json
   kind="${target%%:*}"
   name="${target#*:}"
-  plan_cmd=(bun tools/teardown-resource.ts "--${kind}" "$name" --repo-root .)
+  # teardown-resource는 모든 모드(retain/purge)에 --refs-verified attestation을 fail-closed로 강제한다(F1).
+  # owner가 런북(docs/runbooks/teardown-resource.md) 수동 확인(사용 앱 grep + kubectl + 백업) 후 증거 id를
+  # REFS_VERIFIED로 전달해야 한다 — 누락 시 즉시 거부(툴은 dry-run에도 요구하므로 래퍼도 선차단).
+  REFS_VERIFIED="${REFS_VERIFIED:-}"
+  [ -n "$REFS_VERIFIED" ] || { echo "거부: REFS_VERIFIED=<evidence-id> 필요 — 런북 수동 확인 후 증거 id 전달 (make teardown-resource RESOURCE=${target} REFS_VERIFIED=<id>)" >&2; exit 2; }
+  plan_cmd=(bun tools/teardown-resource.ts "--${kind}" "$name" --refs-verified "$REFS_VERIFIED" --repo-root .)
   slug="teardown-resource-${kind}-${name}"
   title="chore: ${target} retain tombstone (teardown-resource)"
 fi

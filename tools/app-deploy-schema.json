@@ -9,7 +9,7 @@
       "description": "공유 Helm 차트(platform/charts/app) values 오버라이드. 없으면 ArgoCD가 'groupVersion shouldn't be empty'로 죽는다."
     },
     ".bindings.json": {
-      "description": "db/redis 바인딩 + autoDeploy SSOT. bump-poll(poll-ghcr)이 autoDeploy 권위로 읽는다(누락=fail-closed 승인 PR)."
+      "description": "autoDeploy SSOT. bump-poll(poll-ghcr)이 autoDeploy 권위로 읽는다(누락=fail-closed 승인 PR). 연결(DB/Redis)은 앱 SealedSecret이라 여기 기록하지 않는다."
     },
     "source-repo": {
       "description": "외부 앱 레포 바인딩(ukyi-app/<app>). poll-ghcr가 이 파일이 있는 deploy/prod만 update-image 폴링한다(tools/poll-ghcr.ts:145 — 없으면 continue로 영영 폴링 밖). 비어있으면 안 된다."

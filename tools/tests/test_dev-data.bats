@@ -8,18 +8,22 @@ setup() {
 }
 teardown() { rm -rf "$TMP"; }
 
-@test "db:up writes a localhost DATABASE_URL for clean dev (dry-run)" {
+@test "db:up writes the canonical localhost DATABASE_URL for clean dev (dry-run)" {
   run bun "$ROOT/tools/dev.ts" db:up --dry-run --name orders
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "localhost"
-  echo "$output" | grep -q "ORDERS_DATABASE_URL"
+  # canonical 키(모드2/클러스터와 동일) — per-name ORDERS_DATABASE_URL이 아니어야 함
+  echo "$output" | grep -q '"DATABASE_URL"'
+  run bash -c "bun '$ROOT/tools/dev.ts' db:up --dry-run --name orders | grep -ow ORDERS_DATABASE_URL"
+  [ "$status" -ne 0 ]
 }
 
-@test "db:url targets the tailscale path with the read-only role (no destructive ops)" {
+@test "db:url targets the read-only conn by default (determining field, no destructive ops)" {
   run bun "$ROOT/tools/db-url.ts" --name orders --dry-run
   [ "$status" -eq 0 ]
-  echo "$output" | grep -qi "tailscale"
-  echo "$output" | grep -q "orders_ro"
+  # prose note가 아니라 결정 필드(mode/secretRef)로 RO 라우팅을 단언
+  echo "$output" | grep -q '"mode": "readonly"'
+  echo "$output" | grep -q "db-orders-ro-conn"
 }
 
 @test "db-url provides no reset/drop/teardown surface" {
@@ -36,7 +40,7 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | grep -q "sessions-ro"
 }
 
-@test "env:example renders env+secrets+db+redis keys from .app-config.yml" {
+@test "env:example renders env+secrets keys only (connection URL is a sealed secret)" {
   cat > "$TMP/.app-config.yml" <<'EOF'
 kind: service
 resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
@@ -49,6 +53,7 @@ EOF
   [ "$status" -eq 0 ]
   grep -q "LOG_LEVEL=" "$TMP/.env.example"
   grep -q "API_KEY=" "$TMP/.env.example"
-  grep -q "ORDERS_DATABASE_URL=" "$TMP/.env.example"
-  grep -q "SESSIONS_REDIS_URL=" "$TMP/.env.example"
+  # db/redis가 config에 남아 있어도 연결 URL은 스캐폴드하지 않는다(연결=SealedSecret, 로컬은 db-url/cache-url)
+  run grep -qE "_DATABASE_URL|_REDIS_URL" "$TMP/.env.example"
+  [ "$status" -ne 0 ]
 }

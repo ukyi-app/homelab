@@ -40,7 +40,10 @@ function parseDotEnv(path: string) {
     if (!line || line.startsWith("#")) continue;
     const eq = line.indexOf("=");
     if (eq <= 0) continue;
-    out.set(line.slice(0, eq).trim(), line.slice(eq + 1).trim());
+    let val = line.slice(eq + 1).trim();
+    // .env 관례: 양끝 매칭 따옴표는 구분자라 벗긴다(미제거 시 봉인 값에 따옴표 혼입 + F2 거부 우회).
+    if (val.length >= 2 && ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))) val = val.slice(1, -1);
+    out.set(line.slice(0, eq).trim(), val);
   }
   return out;
 }
@@ -58,6 +61,24 @@ const envMap = parseDotEnv(args.env!);
 const targets: { name: any; envKey: string }[] = declared.map((n: any) => ({ name: n, envKey: toEnvKey(n) }));
 const missing = targets.filter((t) => !envMap.has(t.envKey)).map((t) => t.envKey);
 if (missing.length > 0) die(`missing in .env: ${missing.join(", ")}`); // 키 이름만 — 값 비출력
+
+// F2(best-effort): 봉인 값이 DB superuser 자격을 가리키면 거부 — 앱 런타임 secret에 superuser가
+// 들어가면 로컬 앱이 app_admin으로 구동되거나 봉인 사고로 과권한 URL이 클러스터에 박힌다.
+// ⚠️ host가 아니라 USER(userinfo) 매칭이다 — host는 공유라 false-positive 위험. 거부 user는
+// C1 cluster.yaml managed.roles SSOT와 동기: postgres superuser=app_admin, backup superuser=postgres.
+// (C1에서 롤명을 바꾸면 여기 ADMIN_DB_USERS도 같이 바꾼다.) Valkey default는 per-instance RW =
+// 정상 런타임 자격(superuser 상위 없음)이라 제외 — 거부하면 캐시 쓰기 앱 오탐(실행 중 결정 #1:
+// false-positive 최소화). 값은 어떤 경로로도 출력 금지 — 키 이름만. SEAL_FORCE=1로 우회(informed).
+const ADMIN_DB_USERS = ["app_admin", "postgres"]; // C1 cluster.yaml managed.roles와 동기(SSOT)
+// jdbc: 접두(JVM 표준)와 :// 직후 공백도 흡수 — 명백한 사고 형태(따옴표는 parseDotEnv가 선제거)를 망라.
+// best-effort라 모든 변형을 잡진 못한다(SEAL_FORCE=1 우회=informed).
+const adminDbRe = new RegExp(`^(jdbc:)?postgres(ql)?://\\s*(${ADMIN_DB_USERS.join("|")})(:[^@]*)?@`, "i");
+if (process.env.SEAL_FORCE !== "1") {
+  for (const t of targets) {
+    if (adminDbRe.test(String(envMap.get(t.envKey) ?? "")))
+      die(`${t.envKey}: superuser 자격(${ADMIN_DB_USERS.join("/")})으로 보이는 연결 URL은 봉인 거부(F2) — 앱은 owner/ro를 써라. 의도적이면 SEAL_FORCE=1로 우회`);
+  }
+}
 
 if (args.dryRun) {
   // 봉인 없이 대상 키 목록만 (값 절대 미포함)

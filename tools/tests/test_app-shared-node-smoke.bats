@@ -12,6 +12,18 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   run grep -E '^  app-shared-node-smoke:' .github/workflows/ci.yaml; [ "$status" -ne 0 ]
 }
 
+@test "env-example no longer scaffolds _DATABASE_URL/_REDIS_URL (connection is a sealed secret)" {
+  tmp="$BATS_TEST_TMPDIR/ee"; mkdir -p "$tmp"
+  # db/redis가 raw로 들어와도(구계약) URL 스캐폴드를 만들지 않아야 — secrets만 유도.
+  printf 'kind: service\nsecrets: [token]\ndb: [orders]\nredis: [sessions]\n' > "$tmp/.app-config.yml"
+  run bun "$ROOT/tools/env-example.mts" --config "$tmp/.app-config.yml" --out "$tmp/.env.example"
+  [ "$status" -eq 0 ]
+  run grep -qE '_DATABASE_URL|_REDIS_URL' "$tmp/.env.example"
+  [ "$status" -ne 0 ]
+  run grep -q 'TOKEN=' "$tmp/.env.example"
+  [ "$status" -eq 0 ]
+}
+
 @test "smoke actually runs the .mts under node when node>=22.18 is available" {
   command -v node >/dev/null || skip "node 미설치 — CI에서 검증"
   ver=$(node --version); ver=${ver#v}

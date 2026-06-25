@@ -1,51 +1,76 @@
-// db:url — 모드 2(실데이터 디버깅): 클러스터 DB에 tailscale로 **읽기 전용** 직결.
-// "단방향/비파괴"는 경고로 보장되지 않는다 — tailscale ACL은 *누가* 붙는지만 제어하고
-// *어떤 SQL*은 못 막는다. 그래서 owner가 아니라 **<name>_ro 롤 자격**(GRANT SELECT only)을
-// prod의 db-<name>-ro-conn Secret에서 꺼내 .env.local에 기록한다.
-// 이 도구는 reset/drop 등 어떤 파괴 수단도 제공하지 않는다(파괴 작업은 docker 모드 전용).
+// db:url — 로컬/GUI 디버깅용 DB 연결 URL을 .env.local(admin은 .env.admin.local)에 기록한다.
+// 모드(상호배타): 기본=RO(db-<name>-ro-conn, 읽기전용 롤) / --rw=owner(db-<name>-conn, 읽기쓰기) /
+//   --admin=superuser(pg-admin-credentials, database ns — GUI 전용).
+// "비파괴"는 도구가 보장 못 한다 — tailscale ACL은 *누가* 붙는지만, 롤 GRANT가 *무엇을*. 그래서 기본은 ro.
+// ★채널 분리(F2): RO/RW는 canonical DATABASE_URL → .env.local(앱 런타임 채널). admin은 DATABASE_ADMIN_URL
+//   → .env.admin.local(앱 런타임/봉인 경로와 분리) — superuser URL이 실수로 앱 구동/봉인에 들어가지 않게.
+//   .env.local·.env.admin.local은 .gitignore 필수, secret:seal 대상 아님(앱 봉인은 .env만).
+// 평문 URL은 stdout에 절대 출력하지 않는다(전 모드). dry-run은 모드/secretRef/키/대상파일만(값 없음).
+// 이 도구는 reset/drop 등 파괴 수단을 제공하지 않는다(파괴는 docker 모드 전용).
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
 import { parseFlags } from "./lib/cli.ts";
 
-// parseFlags: unknown 옵션 + arg 삼킴(값 누락 자리에서 다음 --플래그를 삼킴) fail-closed. 종료 코드 2 보존.
+// parseFlags: unknown 옵션 + arg 삼킴 fail-closed. 종료 코드 2 보존.
 let __f: Record<string, string | boolean>;
-try { __f = parseFlags(process.argv.slice(2), { value: ["--name", "--host", "--env-local"], bool: ["--dry-run"] }); }
+try { __f = parseFlags(process.argv.slice(2), { value: ["--name", "--host", "--env-local"], bool: ["--dry-run", "--rw", "--admin"] }); }
 catch (e) { console.error(`db-url: ${e instanceof Error ? e.message : String(e)} (읽기 전용 도구 — 파괴 수단 없음)`); process.exit(2); }
 const arg = (k: string, d?: string) => (typeof __f[k] === "string" ? __f[k] as string : d);
 const DRY = __f["--dry-run"] === true;
+const RW = __f["--rw"] === true;
+const ADMIN = __f["--admin"] === true;
 const name = arg("--name");
 const tsHost = arg("--host", process.env.TS_DB_HOST ?? "");
-const envLocal = arg("--env-local", ".env.local")!;
 if (!name || !RESOURCE_NAME_RE.test(name)) {
-  console.error("usage: db-url --name <db> [--host <tailscale-ip>] [--dry-run]");
+  console.error("usage: db-url --name <db> [--host <tailscale-host>] [--rw|--admin] [--dry-run]");
+  process.exit(2);
+}
+if (RW && ADMIN) { console.error("db-url: --rw와 --admin은 상호배타 — 하나만 지정"); process.exit(2); }
+
+const NAME = name.replaceAll("-", "_").toUpperCase();
+// 모드별: secret(NS) · 내부 srcKey(있으면 URL, 없으면 basic-auth=admin) · 출력 env 키 · 대상 파일
+const mode = ADMIN
+  ? { label: "admin-superuser", ns: "database", secret: "pg-admin-credentials", srcKey: "", envKey: "DATABASE_ADMIN_URL", envFile: ".env.admin.local" }
+  : RW
+    ? { label: "owner-readwrite", ns: "prod", secret: `db-${name}-conn`, srcKey: `${NAME}_DATABASE_URL`, envKey: "DATABASE_URL", envFile: ".env.local" }
+    : { label: "readonly", ns: "prod", secret: `db-${name}-ro-conn`, srcKey: `${NAME}_RO_DATABASE_URL`, envKey: "DATABASE_URL", envFile: ".env.local" };
+const envLocal = arg("--env-local", mode.envFile)!;
+// F2 채널 분리 완결: --admin은 .env.admin.local에만 기록 — --env-local로 앱 런타임 파일(.env.local 등)을
+// 가리켜 superuser URL을 런타임 채널에 흘리는 것을 차단한다(envKey는 DATABASE_ADMIN_URL이라 키 오염은
+// 없지만 파일 분리 불변식도 강제).
+if (ADMIN && typeof __f["--env-local"] === "string" && envLocal !== mode.envFile) {
+  console.error(`db-url: --admin은 ${mode.envFile}에만 기록 — --env-local로 앱 런타임 파일 지정 불가(F2 채널 분리)`);
   process.exit(2);
 }
 
-const envKey = `${name.replaceAll("-", "_").toUpperCase()}_DATABASE_URL`;
-const roUser = `${name.replaceAll("-", "_")}_ro`;
-
 if (DRY) {
   console.log(JSON.stringify({
-    mode: "tailscale-readonly",
-    name, user: roUser, envKey,
-    note: "prod의 db-<name>-ro-conn에서 ro 자격을 꺼내 host를 tailscale IP로 치환해 .env.local에 기록",
+    mode: mode.label, name, secretRef: `${mode.ns}/${mode.secret}`,
+    envKey: mode.envKey, envFile: envLocal,
+    note: "평문 URL은 stdout에 출력하지 않음 — 라이브 실행 시 host를 tailscale로 치환해 대상 파일에만 기록",
   }, null, 2));
   process.exit(0);
 }
 
 if (!tsHost) {
-  console.error("db-url: --host <tailscale-ip>(또는 TS_DB_HOST) 필요 — 리소스를 tailscale LB로 노출했을 때만(런북)");
+  console.error("db-url: --host <tailscale-host>(또는 TS_DB_HOST) 필요 — pg-rw-tailscale LB host(런북)");
   process.exit(1);
 }
-// 라이브: prod NS의 ro conn에서 URL을 꺼내 host만 tailscale IP로 치환 (값은 stdout 비노출)
-const url = execFileSync("kubectl", [
-  "-n", "prod", "get", "secret", `db-${name}-ro-conn`,
-  "-o", `jsonpath={.data.${name.replaceAll("-", "_").toUpperCase()}_RO_DATABASE_URL}`,
-], { encoding: "utf8" });
-const plain = Buffer.from(url, "base64").toString("utf8")
-  .replace(/@[^/]+\//, `@${tsHost}:5432/`);
-const lines = existsSync(envLocal) ? readFileSync(envLocal, "utf8").split("\n").filter((l) => !l.startsWith(`${envKey}=`)) : [];
-lines.push(`${envKey}=${plain}`);
+
+// 라이브: secret에서 자격을 꺼내 host를 tailscale로 치환(admin은 basic-auth로 URL 조립). 값은 stdout 비노출.
+const b64 = (s: string) => Buffer.from(s, "base64").toString("utf8");
+const getData = (key: string) => execFileSync("kubectl",
+  ["-n", mode.ns, "get", "secret", mode.secret, "-o", `jsonpath={.data.${key}}`], { encoding: "utf8" });
+let url: string;
+if (ADMIN) {
+  const user = b64(getData("username"));
+  const pw = b64(getData("password"));
+  url = `postgres://${encodeURIComponent(user)}:${encodeURIComponent(pw)}@${tsHost}:5432/${name}`;
+} else {
+  url = b64(getData(mode.srcKey)).replace(/@[^/]+\//, `@${tsHost}:5432/`);
+}
+const lines = existsSync(envLocal) ? readFileSync(envLocal, "utf8").split("\n").filter((l) => !l.startsWith(`${mode.envKey}=`)) : [];
+lines.push(`${mode.envKey}=${url}`);
 writeFileSync(envLocal, lines.filter(Boolean).join("\n") + "\n");
-console.log(`db-url: ${envLocal}에 ${envKey} 기록(user=${roUser}, host=tailscale) — 값은 출력하지 않음`);
+console.log(`db-url: ${envLocal}에 ${mode.envKey} 기록(mode=${mode.label}, host=tailscale) — 값은 출력하지 않음`);

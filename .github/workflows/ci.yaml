@@ -59,9 +59,9 @@ jobs:
       - name: memory ledger onboarding gate (M0-owned)
         run: bun run verify:ledger
       - name: registry/binding 정합 게이트 (배포 깨는 드리프트 차단)
-        # 차단(--ci)은 배포/노출을 깨는 유형만: dangling-binding(미존재 db/cache 참조 → missing Secret),
-        # orphan-dns(active 행 매니페스트 부재 → 빈 백엔드 DNS), activation-exposure-drift(노출 행 변경 → 재승인 필요).
-        # 그 외(원장 행·미참조 리소스·미등록·incomplete-purge 등)는 비차단(정보/경고).
+        # 차단(--ci)은 배포/노출을 깨는 유형만: orphan-dns(active 행 매니페스트 부재 → 빈 백엔드 DNS),
+        # activation-exposure-drift(노출 행 변경 → 재승인 필요).
+        # 그 외(원장 행·미등록·incomplete-purge 등)는 비차단(정보/경고). 연결=SealedSecret이라 db/redis 바인딩 검사는 없다.
         run: bun tools/audit-orphans.ts --ci
       - name: skeleton + 네이밍/CJK/dirmap 가드 (required — 기존 verify.yaml non-required서 승격)
         run: bash scripts/check-skeleton.sh

@@ -21,7 +21,8 @@ setup() {
 }
 
 @test "ci.yaml audit gate comment names both real blocking types" {
-  run bash -c "awk '/registry\\/binding 정합 게이트/{f=1} f&&/bun tools\\/audit-orphans.ts --ci/{exit} f' '$CI'"
-  echo "$output" | grep -q 'dangling-binding'
-  echo "$output" | grep -q 'orphan-dns'
+  # BLOCKING = {orphan-dns, activation-exposure-drift} (dangling-binding은 연결=SealedSecret으로 제거).
+  cmt="$(awk '/registry\/binding 정합 게이트/{f=1} f&&/bun tools\/audit-orphans.ts --ci/{exit} f' "$CI")"
+  run grep -q 'orphan-dns' <<<"$cmt"; [ "$status" -eq 0 ]
+  run grep -q 'activation-exposure-drift' <<<"$cmt"; [ "$status" -eq 0 ]
 }

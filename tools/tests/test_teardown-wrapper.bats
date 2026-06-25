@@ -24,6 +24,16 @@ setup() { ROOT="$(git rev-parse --show-toplevel)"; SH="$ROOT/scripts/teardown.sh
   run env DRY_RUN=1 bash "$SH" --bogus x
   [ "$status" -ne 0 ]
 }
+@test "teardown wrapper resource mode refuses without REFS_VERIFIED attestation (F1)" {
+  run env TEARDOWN_DIRTY=0 DRY_RUN=1 bash "$SH" --resource db:foo
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "REFS_VERIFIED"
+}
+@test "teardown wrapper resource dry-run passes --refs-verified into the plan command" {
+  run env TEARDOWN_DIRTY=0 DRY_RUN=1 REFS_VERIFIED=manual-test bash "$SH" --resource db:foo
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- "--refs-verified manual-test"
+}
 @test "teardown wrapper branches from freshly fetched FETCH_HEAD (F7)" {
   # 전체 base-SHA 검증은 mock remote 필요 — 단위 수준에선 FETCH_HEAD 분기를 단언(stale tracking ref 회피).
   grep -qE 'switch -c .* FETCH_HEAD' "$SH"

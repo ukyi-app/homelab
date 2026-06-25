@@ -145,4 +145,6 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 | `observability-bootstrap.md` / `observability-verify.md` | 관측성 셋업/검증 스윕 |
 | `restore.md` | CNPG 복구(R1) — DR 핵심 |
 | `storage-verify.md` | 스토리지 라이브 e2e 검증 |
+| `teardown-resource.md` | DB/캐시 리소스 철거 — `--refs-verified` attestation·삭제 전 수동 확인·purge 상태머신(F1) |
+| `db-cache-access.md` | DB/캐시 로컬·GUI 접속 — tailscale 직결·admin superuser·port-forward·롤백/자격 회수(F3) |
 | `toolchain.md` | 호스트 도구 핀 |

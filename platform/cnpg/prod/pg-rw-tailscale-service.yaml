@@ -1,0 +1,22 @@
+# CNPG pg-rw(primary)를 tailnet에 L4로 노출하는 tailscale LoadBalancer — owner GUI(TablePlus)/로컬 직결.
+# traefik-ts(gateway)와 동일 패턴(loadBalancerClass=tailscale + hostname). 체인: 기기 → (tailnet WireGuard) →
+# ts-* proxy(tailscale ns) → cnpg-allow-tailscale ingress → pg-rw 5432. *누가* 붙는지는 ACL(infra/tailscale,
+# owner-only)이, *어떤 SQL*은 ro/owner/admin 롤 권한이 제어한다.
+#
+# ★selector: 단일 인스턴스라 cnpg.io/cluster=pg로 충분(=primary). 멀티 인스턴스로 가면 RW가 replica로
+#   라우팅되지 않도록 cnpg.io/instanceRole: primary를 추가해야 한다. apply 전 라이브 라벨 확인(owner-local):
+#   kubectl -n database get svc pg-rw -o jsonpath='{.spec.selector}'
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg-rw-tailscale
+  namespace: database
+  annotations:
+    tailscale.com/hostname: pg-rw # → pg-rw.<tailnet>.ts.net + 안정적 100.x IP
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    cnpg.io/cluster: pg
+  ports:
+    - { name: postgres, port: 5432, targetPort: 5432, protocol: TCP }

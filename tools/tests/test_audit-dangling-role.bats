@@ -41,3 +41,15 @@ teardown() { rm -rf "$TMP"; }
   run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci
   [ "$status" -eq 0 ]
 }
+
+@test "a managed role backed by a KSOPS .enc.yaml seed (app_admin) is NOT dangling" {
+  # app_admin superuser 비번은 databases/*.sealed.yaml가 아니라 cnpg root의 KSOPS .enc.yaml에 있다.
+  cat >> "$FR/platform/cnpg/prod/cluster.yaml" <<'YAML'
+      - name: app_admin
+        passwordSecret: { name: pg-admin-credentials }
+YAML
+  # KSOPS 시드 파일 존재(secret-generator가 렌더) — 평문 아님(테스트는 파일 존재만 본다)
+  touch "$FR/platform/cnpg/prod/pg-admin-credentials.enc.yaml"
+  run bash -c "bun '$ROOT/tools/audit-orphans.ts' --repo-root '$FR' | jq -e '.findings | any(.type==\"dangling-role\" and .subject==\"app_admin\")'"
+  [ "$status" -ne 0 ]   # app_admin은 .enc.yaml로 해소 → 고아 아님
+}
