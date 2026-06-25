@@ -57,6 +57,22 @@ EOF
   echo "$output" | grep -Eq "superuser|app_admin"
 }
 
+@test "seal-secret rejects a jdbc:postgresql superuser URL (F2, common JVM accident form)" {
+  printf 'kind: service\nsecrets: [db-url]\n' > "$TMP/.app-config.yml"
+  printf 'DB_URL=jdbc:postgresql://app_admin:pw@pg-rw-tailscale:5432/app\n' > "$TMP/.env"
+  run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -Eq "superuser|app_admin"
+}
+
+@test "seal-secret rejects a quoted superuser URL (F2, blocks the .env quote bypass)" {
+  printf 'kind: service\nsecrets: [db-url]\n' > "$TMP/.app-config.yml"
+  printf 'DB_URL="postgres://app_admin:pw@pg-rw-tailscale:5432/app"\n' > "$TMP/.env"
+  run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -Eq "superuser|app_admin"
+}
+
 @test "seal-secret allows an owner/ro connection URL (no false-positive on least-privilege creds)" {
   printf 'kind: service\nsecrets: [db-url]\n' > "$TMP/.app-config.yml"
   printf 'DB_URL=postgres://orders_ro:pw@pg-rw-tailscale:5432/orders\n' > "$TMP/.env"
