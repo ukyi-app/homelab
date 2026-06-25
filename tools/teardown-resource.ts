@@ -8,7 +8,8 @@
 //   복구 경로) 게이트 + 재개 가능한 단계로 분해한다. 각 단계는 **별도 커밋/revision**으로
 //   적용해야 한다(ensure:absent와 role 제거를 한 revision에 섞으면 CNPG reconcile 순서
 //   비보장으로 cannotReconcile — 라이브 검증 함정):
-//   --step tombstone : 신규 참조 차단 표시 (create-app 가드가 읽음)
+//   --step tombstone : purge 진행 표시(state=purging) — audit-orphans가 incomplete-purge로 감시
+//                      (구 create-app tombstone 가드는 연결=SealedSecret 전환으로 제거됨; 강제 차단 아님)
 //   --step drop      : Database CR spec.ensure: absent (논리 DB만 DROP — **PVC 비접촉**,
 //                      공유 클러스터라 DB별 PVC가 없다; PVC를 지우면 클러스터 전체가 날아간다)
 //   --step verify    : (라이브) Database CR status + 실제 DB 부재 확인 — 워크플로/owner가 kubectl로
@@ -108,7 +109,7 @@ if (!backupId) fail("--delete-data는 --backup-verified <검증된 복구 지점
 switch (step) {
   case "tombstone": {
     if (!DRY) { tombs[key] = { state: "purging", backupId, at: new Date().toISOString() }; writeTombs(); }
-    console.log(JSON.stringify({ ...plan, action: "tombstone(purging) — 신규 참조 차단" }, null, 2));
+    console.log(JSON.stringify({ ...plan, action: "tombstone(purging) — purge 진행 표시(audit incomplete-purge 감시)" }, null, 2));
     break;
   }
   case "drop": {

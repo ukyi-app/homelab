@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# audit-orphans — registry/매니페스트/바인딩/원장 교차 드리프트 리포트 (읽기 전용)
+# audit-orphans — registry/매니페스트/원장 교차 드리프트 리포트 (읽기 전용; db/redis 바인딩 교차는 제거)
 # ⚠️ 중간 단언은 [ ]만 사용 — bash 3.2에서 [[ ]] 실패는 침묵 통과.
 
 setup() {

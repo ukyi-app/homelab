@@ -1,4 +1,5 @@
-// audit-orphans — registry(apps.json) ↔ 매니페스트 ↔ 바인딩 ↔ 원장 교차 드리프트 리포트.
+// audit-orphans — registry(apps.json) ↔ 매니페스트 ↔ 원장 교차 드리프트 리포트.
+//   (연결=SealedSecret 전환으로 db/redis 바인딩 교차검사는 제거 — .bindings.json엔 autoDeploy만)
 // 읽기 전용(파괴 없음). 라이브 비교(kubectl)는 별도 — 이 도구는 레포 정적 사실만 본다.
 // 유형:
 //   orphan-dns            : apps.json active:true 행인데 앱 매니페스트 부재 — DNS 고아(빈 백엔드 노출, 차단)
@@ -12,7 +13,7 @@ import { parse as parseYaml } from "yaml";
 import { surfaceHash } from "./lib/surface-hash.ts";
 import { parseLedgerRows } from "./lib/ledger-totals.ts";
 
-const USAGE = `audit-orphans — registry↔매니페스트↔바인딩↔원장 교차 드리프트 리포트(읽기 전용)
+const USAGE = `audit-orphans — registry↔매니페스트↔원장 교차 드리프트 리포트(읽기 전용)
 사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict]
   --repo-root <dir>  레포 루트(기본 .)
   --ci               배포를 깨는 유형만 비-0 종료(orphan-dns/activation-exposure-drift) — PR 게이트용
