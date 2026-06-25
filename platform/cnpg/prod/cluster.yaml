@@ -70,6 +70,22 @@ spec:
         barmanObjectName: pg-r2 # -> object-store.yaml의 ObjectStore
         serverName: pg
 
+  # GUI/로컬 직결 전용 admin superuser 롤 — pg_basebackup용 관리형 pg-superuser(enableSuperuserAccess)와
+  # 분리된 별도 자격(owner가 TablePlus 등으로 붙는다). 비번은 pg-admin-credentials(KSOPS, wave -2).
+  # ★SSA-atomic 리스트: 서버 주입 기본값(ensure/inherit/connectionLimit)을 명시해야 ArgoCD가
+  #   OutOfSync 플립을 안 한다(plugins 리스트와 동일 클래스). provision-db는 이 리스트에 owner/ro를
+  #   append(보존)한다. 롤명 app_admin은 seal-secret.mts F2 거부 SSOT(ADMIN_DB_USERS)와 동기 — 변경 시 동반 수정.
+  managed:
+    roles:
+      - name: app_admin
+        ensure: present
+        login: true
+        superuser: true
+        inherit: true
+        connectionLimit: -1
+        passwordSecret:
+          name: pg-admin-credentials
+
   # vmagent의 pod-annotations job(role:pod)이 pg 인스턴스 파드를 발견·scrape하도록
   # prometheus.io/* 주석을 관리형 리소스에 상속시킨다(없으면 cnpg_*/barman_cloud_*/
   # cnpg_pg_stat_archiver_* 시리즈가 통째로 vmsingle에 부재 → R2BackupStale/WALArchiveStalled
