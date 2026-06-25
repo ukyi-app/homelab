@@ -15,11 +15,11 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | grep -q "ORDERS_DATABASE_URL"
 }
 
-@test "db:url targets the tailscale path with the read-only role (no destructive ops)" {
+@test "db:url targets the tailscale read-only conn by default (no destructive ops)" {
   run bun "$ROOT/tools/db-url.ts" --name orders --dry-run
   [ "$status" -eq 0 ]
   echo "$output" | grep -qi "tailscale"
-  echo "$output" | grep -q "orders_ro"
+  echo "$output" | grep -q "db-orders-ro-conn"
 }
 
 @test "db-url provides no reset/drop/teardown surface" {
