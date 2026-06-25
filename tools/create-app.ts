@@ -1,7 +1,7 @@
 // create-app 생성기 — 외부 앱 레포의 .app-config.yml(v2 계약)을 검증하고
 // apps/<app>/deploy/prod/ + apps.json + 메모리 원장을 한 번에 갱신한다.
-// db/redis 리소스 참조, SealedSecret 시크릿, digest 핀 이미지,
-// 권위 바인딩 레지스트리(.bindings.json)를 다룬다.
+// 연결(DB/Redis)은 앱 SealedSecret(DATABASE_URL/REDIS_URL)으로 주입 — create-app은
+// SealedSecret 시크릿·digest 핀 이미지·권위 바인딩 레지스트리(.bindings.json=autoDeploy)를 다룬다.
 // _create-app.yaml(homelab-initiated workflow_dispatch)이 호출 — 결과물은 PR(사람 머지 = 승인).
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -73,7 +73,6 @@ const kind = config.kind;
 const served = kind !== "worker";
 if (!served && config.route) fail("kind=worker는 route를 가질 수 없다");
 if (kind !== "static" && config.static) fail("static 블록은 kind=static 전용");
-if (kind === "static" && config.db?.length) fail("kind=static은 db를 가질 수 없다(정적 서빙)");
 
 const pub = config.route?.public ?? false;
 let host = config.route?.host;
@@ -89,24 +88,6 @@ const allow = new Set(config.allowPlaintext ?? []);
 for (const e of config.env ?? [])
   if (SECRETISH.test(e.name) && !allow.has(e.name))
     fail(`env '${e.name}'은 시크릿으로 보인다 — secrets:로 선언(SealedSecret)하거나 의도적 평문이면 allowPlaintext에 명시`);
-
-// 미생성 리소스 가드: db/redis 참조는 create-database/create-cache 산출물이 선재해야 한다
-const dbs = config.db ?? [];
-const caches = config.redis ?? [];
-// tombstone 가드: teardown이 표시한 리소스는 신규 참조 금지(철거와 열린 create-app PR의 경쟁 차단)
-const tombPath = `${ROOT}/platform/data-conn/prod/.tombstones.json`;
-const tombs = existsSync(tombPath) ? JSON.parse(readFileSync(tombPath, "utf8")) : {};
-for (const n of dbs) if (tombs[`db:${n}`]) fail(`db '${n}'은 tombstone 상태(${tombs[`db:${n}`].state}) — 신규 참조 불가`);
-for (const n of caches) if (tombs[`cache:${n}`]) fail(`cache '${n}'은 tombstone 상태(${tombs[`cache:${n}`].state}) — 신규 참조 불가`);
-for (const n of dbs) {
-  if (!existsSync(`${ROOT}/platform/cnpg/prod/databases/${n}.yaml`) ||
-      !existsSync(`${ROOT}/platform/data-conn/prod/db-${n}-conn.sealed.yaml`))
-    fail(`db '${n}' 미생성 — 변이 디스패처 create-database 먼저 실행`);
-}
-for (const n of caches) {
-  if (!existsSync(`${ROOT}/platform/data-conn/prod/cache-${n}-conn.sealed.yaml`))
-    fail(`cache '${n}' 미생성 — 변이 디스패처 create-cache 먼저 실행`);
-}
 
 const toMi = (m: string) => m.endsWith("Gi") ? parseInt(m) * 1024 : parseInt(m);
 const toMilli = (c: string) => c.endsWith("m") ? parseInt(c) : parseInt(c) * 1000;
@@ -150,8 +131,8 @@ if (secrets.length) {
   if (sealedDoc?.metadata?.namespace !== "prod") fail(`sealed namespace는 prod여야 한다(strict-scope): ${sealedDoc?.metadata?.namespace}`);
   if (sealedDoc?.metadata?.name !== `${app}-secrets`) fail(`sealed name은 ${app}-secrets여야 한다: ${sealedDoc?.metadata?.name}`);
   // 봉인본 encryptedData 키가 선언된 secrets(toEnvKey)와 정확히 일치하는지 — 초과/누락 모두 거부.
-  // envFrom은 app-secrets가 후순위라(아래 161줄) 봉인본의 동명 키가 conn URL(PROD_DATABASE_URL 등)을
-  // 조용히 섀도잉할 수 있다. 키 이름은 평문이라 시크릿 노출 없이 검증 가능. toEnvKey는 seal-secret.mts SSOT와 동일.
+  // 선언 안 된 키가 봉인본에 섞이면 의도 밖 env가 주입된다(envFrom secretRef는 컨테이너에 그대로 노출).
+  // 키 이름은 평문이라 시크릿 노출 없이 검증 가능. toEnvKey는 seal-secret.mts SSOT와 동일.
   const toEnvKey = (n: string) => n.replaceAll("-", "_").toUpperCase();
   const declaredKeys = [...secrets].map(toEnvKey).sort();
   const sealedKeys = Object.keys(sealedDoc?.spec?.encryptedData ?? {}).sort();
@@ -166,11 +147,7 @@ const values: Record<string, any> = {
   resources: { requests: { cpu: rq.cpu, memory: rq.memory }, limits: { cpu: lm.cpu, memory: lm.memory } },
 };
 if ((config.env ?? []).length) values.env = config.env;
-const envFrom = [
-  ...dbs.map((n: any) => ({ secretRef: { name: `db-${n}-conn` } })),
-  ...caches.map((n: any) => ({ secretRef: { name: `cache-${n}-conn` } })),
-  ...(secrets.length ? [{ secretRef: { name: `${app}-secrets` } }] : []),
-];
+const envFrom = secrets.length ? [{ secretRef: { name: `${app}-secrets` } }] : [];
 if (envFrom.length) values.envFrom = envFrom;
 if (served) values.route = { host, paths: config.route?.paths ?? ["/"], public: pub };
 if (config.probes) values.probes = config.probes;
@@ -183,8 +160,8 @@ if (sealedDoc) {
   values.podAnnotations = { "checksum/secrets": createHash("sha256").update(sealedYaml).digest("hex").slice(0, 16) };
 }
 
-// 권위 바인딩/정책 레지스트리 — teardown 참조 수 집계와 폴러 autoDeploy의 유일 소스
-const bindings = { db: dbs, redis: caches, autoDeploy: config.deploy?.autoDeploy ?? true };
+// 권위 정책 레지스트리 — 폴러(poll-ghcr) autoDeploy 승인 게이트의 유일 소스
+const bindings = { autoDeploy: config.deploy?.autoDeploy ?? true };
 
 // ---------- 5) 산출물 ----------
 const plan = {

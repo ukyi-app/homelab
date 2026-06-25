@@ -17,16 +17,10 @@ setup() {
 **합계:** req ≈ 100 Mi · limit ≈ 200 Mi (반드시 ≤ 8704 Mi 유지).
 EOF
   echo '[]' > "$FR/infra/cloudflare/apps.json"
-  # 선프로비저닝된 db/cache 핸들 (Phase 5 산출물 모양)
-  touch "$FR/platform/cnpg/prod/databases/orders.yaml"
-  touch "$FR/platform/data-conn/prod/db-orders-conn.sealed.yaml"
-  touch "$FR/platform/data-conn/prod/cache-sessions-conn.sealed.yaml"
   cat > "$TMP/.app-config.yml" <<'EOF'
 kind: service
 resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
 route: { public: true, host: orders.example.com }
-db: [orders]
-redis: [sessions]
 deploy: { autoDeploy: false }
 EOF
 }
@@ -53,17 +47,10 @@ gen() {
   [ "$status" -ne 0 ]   # migrate Job 제거 → values.db.enabled/migrateCmd 미생성
 }
 
-@test "create-app wires db/redis SealedSecret conn handles into envFrom" {
+@test "bindings.json records only autoDeploy (no db/redis — connection is a sealed secret)" {
   gen
   [ "$status" -eq 0 ]
-  grep -q "db-orders-conn" "$FR/apps/orders/deploy/prod/values.yaml"
-  grep -q "cache-sessions-conn" "$FR/apps/orders/deploy/prod/values.yaml"
-}
-
-@test "create-app writes the authoritative bindings registry (refcount + autoDeploy source)" {
-  gen
-  [ "$status" -eq 0 ]
-  run jq -e '.db == ["orders"] and .redis == ["sessions"] and .autoDeploy == false' \
+  run jq -e '(has("db")|not) and (has("redis")|not) and .autoDeploy == false' \
     "$FR/apps/orders/deploy/prod/.bindings.json"
   [ "$status" -eq 0 ]
 }
@@ -74,14 +61,6 @@ gen() {
   run jq -e '.[0] == {name:"orders", host:"orders.example.com", public:true, active:false}' \
     "$FR/infra/cloudflare/apps.json"
   [ "$status" -eq 0 ]
-}
-
-@test "create-app rejects an unprovisioned db reference with a clear error" {
-  sed -i '' 's/db: \[orders\]/db: [missing]/' "$TMP/.app-config.yml" 2>/dev/null \
-    || sed -i 's/db: \[orders\]/db: [missing]/' "$TMP/.app-config.yml"
-  gen
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -q "create-database"
 }
 
 @test "create-app rejects duplicate host in apps.json (silent toset collision guard)" {
@@ -175,11 +154,4 @@ EOF
   gen
   [ "$status" -eq 0 ]
   [ -f "$FR/apps/orders/deploy/prod/kustomization.yaml" ]
-}
-
-@test "create-app refuses a tombstoned resource reference (teardown race guard)" {
-  echo '{"db:orders":{"state":"retained"}}' > "$FR/platform/data-conn/prod/.tombstones.json"
-  gen
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -q "tombstone"
 }
