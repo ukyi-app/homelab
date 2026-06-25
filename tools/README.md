@@ -13,8 +13,23 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
 
 | 파일 | 검증 대상 | 누가 읽나 |
 |---|---|---|
-| `app-config-schema.json` | **외부 앱 레포**의 `.app-config.yml` 자기선언 (v2 계약). `kind`/`resources` 필수, `db`/`redis`는 선프로비저닝 리소스 **이름 배열**, `migrate.cmd`, `secrets`(SealedSecret), `env`/`allowPlaintext` 등. | `create-app.ts`(SSOT), `seal-secret.mts`·`env-example.mts`(앱 레포 측) |
+| `app-config-schema.json` | **외부 앱 레포**의 `.app-config.yml` 자기선언 (v2 계약). `kind`/`resources` 필수, `db`/`redis`는 선프로비저닝 리소스 **이름 배열**, `secrets`(SealedSecret), `env`/`allowPlaintext` 등. 마이그레이션 명령은 없다(앱 self-migrate — 아래 절). | `create-app.ts`(SSOT), `seal-secret.mts`·`env-example.mts`(앱 레포 측) |
 | `app-deploy-schema.json` | **이 레포**의 `apps/<name>/deploy/prod/` 산출물 계약. 필수: `values.yaml`·`.bindings.json`·`source-repo`. create-app이 만드는 암묵 계약의 명문화. | `scripts/check-app-deploy.sh`(SSOT — `make verify`) |
+
+## App 계약: self-migration (DB 스키마 마이그레이션)
+
+플랫폼은 더 이상 migrate Job을 렌더하지 않는다(`migrate-job.yaml`·`migrate.cmd` 제거). DB 스키마
+마이그레이션은 **앱의 책임**이며 다음 계약을 따른다:
+
+- **앱이 부팅 시 self-migrate한다** — 컨테이너 시작 시 자신의 직결 `DATABASE_URL`로 마이그레이션을
+  실행한 뒤 서비스를 연다. 별도 Job/sync-wave 오케스트레이션 없음.
+- **expand/contract(확장-수축) 패턴 필수** — 스키마 변경은 구버전 코드와 호환되는 단계로 쪼갠다
+  (① 확장: 새 컬럼/테이블을 nullable·기본값으로 추가 → ② 코드 롤아웃 → ③ 수축: 구 컬럼 제거).
+  단일노드 Recreate 배포라 롤백 시 구버전 코드가 새 스키마를 만나도 깨지지 않아야 한다.
+- **멱등(idempotent) 강제** — 동일 마이그레이션이 재시작·재배포로 여러 번 돌아도 안전해야 한다
+  (이미 적용된 변경은 no-op). 부분 실패 후 재실행도 수렴해야 한다.
+- **검증 위치** — 마이그레이션 정합성·멱등성은 **앱 레포 CI**에서 검증한다(homelab은 강제하지 않음;
+  homelab 측은 수동 확인). 설계 근거: `docs/plans/2026-06-25-data-connection-as-secret-design.md` §5.8(F3).
 
 ## App Platform 변이 도구 (변이 디스패처 경유 — 직접 실행 금지)
 
