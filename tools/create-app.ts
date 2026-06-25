@@ -73,7 +73,7 @@ const kind = config.kind;
 const served = kind !== "worker";
 if (!served && config.route) fail("kind=worker는 route를 가질 수 없다");
 if (kind !== "static" && config.static) fail("static 블록은 kind=static 전용");
-if (kind === "static" && (config.db?.length || config.migrate)) fail("kind=static은 db/migrate를 가질 수 없다(정적 서빙)");
+if (kind === "static" && config.db?.length) fail("kind=static은 db를 가질 수 없다(정적 서빙)");
 
 const pub = config.route?.public ?? false;
 let host = config.route?.host;
@@ -173,9 +173,6 @@ const envFrom = [
 ];
 if (envFrom.length) values.envFrom = envFrom;
 if (served) values.route = { host, paths: config.route?.paths ?? ["/"], public: pub };
-values.db = config.migrate
-  ? { enabled: true, migrateCmd: config.migrate.cmd }
-  : { enabled: false };
 if (config.probes) values.probes = config.probes;
 if (kind === "static") values.static = { server: config.static?.server ?? "sws" };
 // 선언적 회전: 봉인 콘텐츠 해시를 pod template annotation으로 둔다 → update-secrets가 봉인본을

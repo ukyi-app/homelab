@@ -27,7 +27,6 @@ resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128
 route: { public: true, host: orders.example.com }
 db: [orders]
 redis: [sessions]
-migrate: { cmd: [npm, run, migrate] }
 deploy: { autoDeploy: false }
 EOF
 }
@@ -45,6 +44,13 @@ gen() {
   [ "$status" -eq 0 ]
   grep -q "ghcr.io/ukyi-app/orders" "$FR/apps/orders/deploy/prod/values.yaml"
   grep -q "digest: sha256:1111" "$FR/apps/orders/deploy/prod/values.yaml"
+}
+
+@test "create-app values.yaml has no migrate/db.enabled (migrate removed)" {
+  gen
+  [ "$status" -eq 0 ]
+  run grep -E "migrateCmd|enabled:" "$FR/apps/orders/deploy/prod/values.yaml"
+  [ "$status" -ne 0 ]   # migrate Job 제거 → values.db.enabled/migrateCmd 미생성
 }
 
 @test "create-app wires db/redis SealedSecret conn handles into envFrom" {
