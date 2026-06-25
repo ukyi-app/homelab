@@ -14,6 +14,11 @@ resource "tailscale_acl" "homelab" {
       # kubelet/etcd/NodePort는 닫힌 상태 유지; kubectl은 Tailscale이 아니라 OrbStack
       # 경유 로컬이므로 여기서 kube-apiserver 포트는 노출되지 않는다.
       { action = "accept", src = ["autogroup:member"], dst = ["tag:k8s:80,443"] },
+      # GUI(TablePlus)+로컬 CLI: CNPG pg(5432)에 tailscale 직결 — **owner(autogroup:admin)만**.
+      # ★F2: crown-jewel DB는 autogroup:member 금지(전 tailnet 멤버 노출 방지). autogroup:admin =
+      #   tailnet 관리자 = owner. 80,443(웹)은 member 허용이지만 5432(DB 직결)는 admin 전용으로 좁힌다.
+      #   (pg-rw-tailscale LB 디바이스는 operator가 tag:k8s로 태그한다.)
+      { action = "accept", src = ["autogroup:admin"], dst = ["tag:k8s:5432"] },
       # operator는 자신이 생성한 프록시 기기(tag:k8s)만 관리한다;
       # tailnet 전체 any:any는 필요 없다.
       { action = "accept", src = ["tag:k8s-operator"], dst = ["tag:k8s:*"] }
