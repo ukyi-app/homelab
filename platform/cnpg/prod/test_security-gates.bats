@@ -6,8 +6,12 @@ DIR="${BATS_TEST_DIRNAME}"
 
 # ── C1: GUI/로컬 직결 admin superuser 롤 ──────────────────────────────────────
 @test "cluster.yaml defines app_admin managed role with full SSA-explicit fields" {
-  # yq `and` 연산자는 bool 연쇄에서 false를 반환하는 함정 → [bools]|all로 검사(검증된 패턴).
-  run yq -e 'select(.kind=="Cluster").spec.managed.roles[] | select(.name=="app_admin") | [(.superuser==true), (.login==true), (.ensure=="present"), (.inherit==true), (.connectionLimit==-1)] | all' "$DIR/cluster.yaml"
+  # ★존재 가드 먼저(vacuous-truth 방지): select가 빈 스트림이면 [bools]|all=[]|all=true로 false-green이 된다.
+  #   app_admin 롤이 정확히 1개인지 length==1로 단언 — 삭제/개명 시 RED.
+  run yq -e '[(.spec.managed.roles[] | select(.name=="app_admin"))] | length == 1' "$DIR/cluster.yaml"
+  [ "$status" -eq 0 ]
+  # 필드 값(yq `and` 연쇄 함정 → [bools]|all). 존재 가드가 위에서 보장하므로 여긴 비-vacuous.
+  run yq -e '.spec.managed.roles[] | select(.name=="app_admin") | [(.superuser==true), (.login==true), (.ensure=="present"), (.inherit==true), (.connectionLimit==-1)] | all' "$DIR/cluster.yaml"
   [ "$status" -eq 0 ]
 }
 
@@ -30,13 +34,24 @@ DIR="${BATS_TEST_DIRNAME}"
 }
 
 # ── C2: tailscale → pg(5432) ingress (default-deny 유지) ──────────────────────
-@test "cnpg netpol allows ingress from the tailscale namespace on 5432" {
-  run yq -e 'select(.kind=="NetworkPolicy" and .metadata.name=="cnpg-allow-tailscale") | [(.spec.ingress[0].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]=="tailscale"), (.spec.ingress[0].ports[0].port==5432)] | all' "$DIR/networkpolicy.yaml"
+# ★멀티독 함정: networkpolicy.yaml은 7-doc. `select(...)|[bools]|all`은 비매칭 doc마다 []|all=true를 내고
+#   yq -e는 멀티독 스트림에서 하나라도 true면 exit 0이라 규칙 삭제/포트변경/네임스페이스확대가 false-green이 된다.
+#   → yq ea로 매칭 doc만 [select]로 모아 length==1 존재 가드 + .[0] 단일값 필드 단언(yq `and` 함정도 회피).
+@test "cnpg netpol allows ingress from the tailscale namespace on 5432 (non-vacuous)" {
+  SEL='[select(.kind=="NetworkPolicy" and .metadata.name=="cnpg-allow-tailscale")]'
+  run yq ea -e "$SEL | length == 1" "$DIR/networkpolicy.yaml"
+  [ "$status" -eq 0 ]
+  run yq ea -e "$SEL | .[0].spec.ingress[0].from[0].namespaceSelector.matchLabels[\"kubernetes.io/metadata.name\"] == \"tailscale\"" "$DIR/networkpolicy.yaml"
+  [ "$status" -eq 0 ]
+  run yq ea -e "$SEL | .[0].spec.ingress[0].ports[0].port == 5432" "$DIR/networkpolicy.yaml"
   [ "$status" -eq 0 ]
 }
 
-@test "database default-deny-ingress baseline is preserved (crown-jewel)" {
-  run yq -e 'select(.kind=="NetworkPolicy" and .metadata.name=="database-default-deny-ingress") | .spec.policyTypes[0]=="Ingress"' "$DIR/networkpolicy.yaml"
+@test "database default-deny-ingress baseline is preserved (crown-jewel, non-vacuous)" {
+  SEL='[select(.kind=="NetworkPolicy" and .metadata.name=="database-default-deny-ingress")]'
+  run yq ea -e "$SEL | length == 1" "$DIR/networkpolicy.yaml"
+  [ "$status" -eq 0 ]
+  run yq ea -e "$SEL | .[0].spec.policyTypes[0] == \"Ingress\"" "$DIR/networkpolicy.yaml"
   [ "$status" -eq 0 ]
 }
 
