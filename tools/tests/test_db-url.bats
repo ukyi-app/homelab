@@ -39,6 +39,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   [ "$status" -ne 0 ]   # admin은 앱 런타임 키(DATABASE_URL)를 절대 쓰지 않음
 }
 
+@test "db-url --admin rejects --env-local override to a non-admin file (F2 channel separation)" {
+  run bun "$ROOT/tools/db-url.ts" --name orders --host 100.0.0.1 --admin --env-local .env.local --dry-run
+  [ "$status" -eq 2 ]
+  # 명시적으로 .env.admin.local을 주는 것은 허용(기본과 동일)
+  run bun "$ROOT/tools/db-url.ts" --name orders --host 100.0.0.1 --admin --env-local .env.admin.local --dry-run
+  [ "$status" -eq 0 ]
+}
+
 @test "db-url provides no reset/drop/teardown surface (read-only tool)" {
   run bun "$ROOT/tools/db-url.ts" --name orders --reset
   [ "$status" -ne 0 ]   # 알 수 없는 플래그 fail-closed

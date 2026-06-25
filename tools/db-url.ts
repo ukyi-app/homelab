@@ -36,6 +36,13 @@ const mode = ADMIN
     ? { label: "owner-readwrite", ns: "prod", secret: `db-${name}-conn`, srcKey: `${NAME}_DATABASE_URL`, envKey: "DATABASE_URL", envFile: ".env.local" }
     : { label: "readonly", ns: "prod", secret: `db-${name}-ro-conn`, srcKey: `${NAME}_RO_DATABASE_URL`, envKey: "DATABASE_URL", envFile: ".env.local" };
 const envLocal = arg("--env-local", mode.envFile)!;
+// F2 채널 분리 완결: --admin은 .env.admin.local에만 기록 — --env-local로 앱 런타임 파일(.env.local 등)을
+// 가리켜 superuser URL을 런타임 채널에 흘리는 것을 차단한다(envKey는 DATABASE_ADMIN_URL이라 키 오염은
+// 없지만 파일 분리 불변식도 강제).
+if (ADMIN && typeof __f["--env-local"] === "string" && envLocal !== mode.envFile) {
+  console.error(`db-url: --admin은 ${mode.envFile}에만 기록 — --env-local로 앱 런타임 파일 지정 불가(F2 채널 분리)`);
+  process.exit(2);
+}
 
 if (DRY) {
   console.log(JSON.stringify({
