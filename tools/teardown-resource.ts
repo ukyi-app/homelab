@@ -17,9 +17,10 @@
 //   모든 step은 멱등(중단→재실행 안전). --backup-verified <id> 없이는 drop/cleanup 거부
 //   (최근 검증된 백업/복구 지점 강제 — postgres: CNPG barman, valkey: RDB 스냅샷 ID).
 //
-// 참조 집계는 **오직 apps/*/deploy/prod/.bindings.json**(homelab 권위 레지스트리)로만 한다 —
-// envFrom 파싱이나 외부 앱 레포 config는 stale/접근불가일 수 있어 신뢰하지 않는다.
-import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
+// 자동 refcount는 제거됐다(연결=SealedSecret이라 .bindings.json에 db/redis 참조가 없다) — 대신
+// 모든 teardown(retain/purge)은 --refs-verified <id> attestation을 강제한다(owner가 런북 수동
+// 확인: 사용 앱 grep + 실행 워크로드 kubectl + 백업 검증 후 증거 id 전달; F1 강화).
+import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
 import { replaceTotals, removeRow, parseLedgerRows } from "./lib/ledger-totals.ts";
 import { removeResource } from "./lib/kustomization.ts";
@@ -27,8 +28,8 @@ import { parseFlags } from "./lib/cli.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()/has()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
 let __f: Record<string, string | boolean>;
-try { __f = parseFlags(process.argv.slice(2), { value: ["--db", "--cache", "--repo-root", "--backup-verified", "--step"], bool: ["--delete-data", "--dry-run"] }); }
-catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --db --cache --repo-root --backup-verified --step --delete-data --dry-run`); process.exit(2); }
+try { __f = parseFlags(process.argv.slice(2), { value: ["--db", "--cache", "--repo-root", "--backup-verified", "--refs-verified", "--step"], bool: ["--delete-data", "--dry-run"] }); }
+catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --db --cache --repo-root --backup-verified --refs-verified --step --delete-data --dry-run`); process.exit(2); }
 const arg = (k: string, d?: string) => (typeof __f[k] === "string" ? __f[k] as string : d);
 const has = (k: string) => __f[k] === true;
 const DRY = has("--dry-run");
@@ -37,6 +38,7 @@ const cache = arg("--cache");
 const ROOT = arg("--repo-root", ".");
 const deleteData = has("--delete-data");
 const backupId = arg("--backup-verified");
+const refsVerified = arg("--refs-verified");
 const step = arg("--step", deleteData ? undefined : "tombstone");
 
 const fail = (msg: string): never => { console.error(`teardown-resource: ${msg}`); process.exit(1); };
@@ -46,19 +48,12 @@ if (!RESOURCE_NAME_RE.test(name)) fail(`이름 형식 불량: ${name}`);
 const kind = db ? "db" : "cache";
 const key = `${kind}:${name}`;
 
-// ── 참조 수 집계 (권위: .bindings.json만) ──────────────────────────────────────
-const appsRoot = `${ROOT}/apps`;
-const referrers: string[] = [];
-for (const a of existsSync(appsRoot) ? readdirSync(appsRoot) : []) {
-  const b = `${appsRoot}/${a}/deploy/prod/.bindings.json`;
-  if (!existsSync(b)) continue;
-  try {
-    const bindings = JSON.parse(readFileSync(b, "utf8"));
-    const refs = kind === "db" ? bindings.db ?? [] : bindings.redis ?? [];
-    if (refs.includes(name)) referrers.push(a);
-  } catch { referrers.push(`${a}(bindings 파싱 불가 — 보수적으로 참조 취급)`); }
-}
-if (referrers.length > 0) fail(`참조 중인 앱이 있어 거부: ${referrers.join(", ")} — teardown-app 먼저`);
+// ── refs-verified attestation 게이트 (F1 강화) ────────────────────────────────
+// db: 필드 제거로 자동 refcount는 불가하다 — 대신 owner가 "사용 앱 수동 확인 완료"를 명시 attest해야
+// 모든 teardown(retain/purge)이 진행한다. 증거 id는 런북 체크리스트 수행 기록(apps/*/deploy/prod grep +
+// 실행 워크로드 kubectl + 백업 검증). 기계 검증은 아니지만 "그냥 실행"을 막는 강제 게이트.
+if (!refsVerified || !refsVerified.trim())
+  fail("--refs-verified <evidence-id> 필수 — 런북 수동 확인(사용 앱 0 + 백업) 후 증거 id를 전달하라");
 
 // ── tombstone 인벤토리 ────────────────────────────────────────────────────────
 const tombPath = `${ROOT}/platform/data-conn/prod/.tombstones.json`;
@@ -95,7 +90,7 @@ const purgeArtifacts = kind === "db"
     ];
 
 
-const plan = { resource: key, mode: deleteData ? "purge" : "retain", step, referrers: 0, backupId: backupId ?? null };
+const plan = { resource: key, mode: deleteData ? "purge" : "retain", step, refsVerified, backupId: backupId ?? null };
 
 if (!deleteData) {
   // retain: 보존 + tombstone(retained)만 — 어떤 파일도 제거하지 않는다

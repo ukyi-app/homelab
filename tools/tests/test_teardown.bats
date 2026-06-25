@@ -63,6 +63,10 @@ EOF
 }
 teardown() { rm -rf "$TMP"; }
 
+# teardown-resource는 모든 모드에서 --refs-verified attestation 필수(F1 강화) — 자동 refcount 대체.
+# 래퍼는 attestation을 항상 전달; 누락 거부는 별도 테스트에서 ${ROOT} raw 호출로 검증.
+tdr() { bun "$ROOT/tools/teardown-resource.ts" --refs-verified manual-test "$@"; }
+
 # ── teardown-app ─────────────────────────────────────────────────────────────
 
 @test "teardown-app removes only app-scoped artifacts, never db/cache resources" {
@@ -93,17 +97,24 @@ teardown() { rm -rf "$TMP"; }
 
 # ── teardown-resource ────────────────────────────────────────────────────────
 
-@test "teardown-resource refuses while any bindings still reference the db" {
-  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --dry-run
+@test "any teardown is refused without --refs-verified attestation (F1 enforceable guard)" {
+  # raw 호출(${ROOT} 중괄호 — tdr 래퍼 우회): attestation 누락이면 거부돼야 한다.
+  run bun "${ROOT}/tools/teardown-resource.ts" --db shared --repo-root "$FR"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q "orders"
-  echo "$output" | grep -q "billing"
+  echo "$output" | grep -q "refs-verified"
+}
+
+@test "retain proceeds with --refs-verified <id> (auto refcount replaced by attestation)" {
+  run bun "${ROOT}/tools/teardown-resource.ts" --db shared --refs-verified manual-2026-06-25 --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  run jq -e '.["db:shared"].state == "retained"' "$FR/platform/data-conn/prod/.tombstones.json"
+  [ "$status" -eq 0 ]
 }
 
 @test "teardown-resource retain (default) tombstones a zero-ref resource without deleting" {
   bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
   bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
-  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR"
+  run tdr --db shared --repo-root "$FR"
   [ "$status" -eq 0 ]
   # 보존: CR/conn 전부 유지 + tombstone 기재 (접근 가능 상태 그대로)
   [ -f "$FR/platform/cnpg/prod/databases/shared.yaml" ]
@@ -115,7 +126,7 @@ teardown() { rm -rf "$TMP"; }
 @test "purge without a verified backup id is refused (data deletion gate)" {
   bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
   bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
-  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data --step drop
+  run tdr --db shared --repo-root "$FR" --delete-data --step drop
   [ "$status" -ne 0 ]
   echo "$output" | grep -qi "backup"
 }
@@ -123,17 +134,17 @@ teardown() { rm -rf "$TMP"; }
 @test "purge state machine: drop sets ensure absent; cleanup removes artifacts (resumable)" {
   bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
   bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
-  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data \
+  run tdr --db shared --repo-root "$FR" --delete-data \
     --backup-verified barman-20260612 --step drop
   [ "$status" -eq 0 ]
   run grep "ensure: absent" "$FR/platform/cnpg/prod/databases/shared.yaml"
   [ "$status" -eq 0 ]
   # drop 재실행 = 멱등
-  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data \
+  run tdr --db shared --repo-root "$FR" --delete-data \
     --backup-verified barman-20260612 --step drop
   [ "$status" -eq 0 ]
   # cleanup은 별도 커밋(별도 revision)용 단계 — CR/conn 제거, role은 워크플로가 cluster.yaml에서
-  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data \
+  run tdr --db shared --repo-root "$FR" --delete-data \
     --backup-verified barman-20260612 --step cleanup
   [ "$status" -eq 0 ]
   [ ! -f "$FR/platform/cnpg/prod/databases/shared.yaml" ]
@@ -145,7 +156,7 @@ teardown() { rm -rf "$TMP"; }
 @test "purge cleanup deregisters every removed file from its kustomization (no broken render)" {
   bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
   bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
-  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data \
+  run tdr --db shared --repo-root "$FR" --delete-data \
     --backup-verified barman-1 --step cleanup
   [ "$status" -eq 0 ]
   # 파일 제거 (owner/ro 비밀번호 sealed 포함)
@@ -162,14 +173,14 @@ teardown() { rm -rf "$TMP"; }
   run grep "cache-sessions-conn" "$FR/platform/data-conn/prod/kustomization.yaml"
   [ "$status" -eq 0 ]
   # cleanup 재실행 = 멱등
-  run bun "$ROOT/tools/teardown-resource.ts" --db shared --repo-root "$FR" --delete-data \
+  run tdr --db shared --repo-root "$FR" --delete-data \
     --backup-verified barman-1 --step cleanup
   [ "$status" -eq 0 ]
 }
 
 @test "cache purge cleanup deregisters the instance dir and its conns" {
   bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
-  run bun "$ROOT/tools/teardown-resource.ts" --cache sessions --repo-root "$FR" --delete-data \
+  run tdr --cache sessions --repo-root "$FR" --delete-data \
     --backup-verified rdb-1 --step cleanup
   [ "$status" -eq 0 ]
   run grep "sessions" "$FR/platform/cache/prod/kustomization.yaml"
@@ -183,7 +194,7 @@ teardown() { rm -rf "$TMP"; }
 
 @test "cache teardown removes only that instance dir and its conn (per-app pvc isolation)" {
   bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
-  run bun "$ROOT/tools/teardown-resource.ts" --cache sessions --repo-root "$FR" --delete-data \
+  run tdr --cache sessions --repo-root "$FR" --delete-data \
     --backup-verified rdb-20260612 --step cleanup
   [ "$status" -eq 0 ]
   [ ! -d "$FR/platform/cache/prod/sessions" ]
@@ -198,7 +209,7 @@ teardown() { rm -rf "$TMP"; }
     '| <!-- ledger:row --> cache-widget   | cache          |     64 |      128 |' \
     '**합계:** req ≈ 64 Mi · limit ≈ 128 Mi (≤ 8704 Mi).' > "$D/docs/memory-ledger.md"
   echo '{}' > "$D/platform/data-conn/prod/.tombstones.json"
-  run bun "$ROOT/tools/teardown-resource.ts" --cache widget --repo-root "$D" --delete-data --backup-verified test-id --step cleanup
+  run tdr --cache widget --repo-root "$D" --delete-data --backup-verified test-id --step cleanup
   [ "$status" -eq 0 ]
   run grep -c 'ledger:row --> cache-widget' "$D/docs/memory-ledger.md"
   [ "$output" = "0" ]
@@ -212,7 +223,7 @@ teardown() { rm -rf "$TMP"; }
     '| <!-- ledger:row --> cache-widget   | cache          |     64 |      128 |' \
     'totals prose 누락(드리프트)' > "$D/docs/memory-ledger.md"
   echo '{}' > "$D/platform/data-conn/prod/.tombstones.json"
-  run bun "$ROOT/tools/teardown-resource.ts" --cache widget --repo-root "$D" --delete-data --backup-verified test-id --step cleanup
+  run tdr --cache widget --repo-root "$D" --delete-data --backup-verified test-id --step cleanup
   [ "$status" -ne 0 ]
   run grep -q '"state": "purged"' "$D/platform/data-conn/prod/.tombstones.json"   # fail-loud: purged로 안 넘어가야
   [ "$status" -ne 0 ]
