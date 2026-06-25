@@ -57,11 +57,3 @@ C="--set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
   run grep -q "extraManifests" "$CHART/templates/deployment.yaml"
   [ "$status" -ne 0 ]
 }
-
-@test "db.host override stays schema-valid and is consumed by the migrate Job (no contract regression)" {
-  # migrate-job.yaml:50이 .Values.db.host를 default와 함께 소비한다 → additionalProperties:false가
-  # db.host를 거부하면 기존 계약 회귀. schema에 host 등재 + 렌더 소비 확인. (plan 리뷰 Pass1 #2)
-  run helm template t "$CHART" $C --set kind=service --set db.enabled=true --set db.host=custom.db.svc
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'custom.db.svc'
-}

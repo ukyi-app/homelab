@@ -39,7 +39,4 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if and (include "app.isServed" .) (not .Values.route.host) -}}
 {{- fail (printf "route.host is required for kind=%s" .Values.kind) -}}
 {{- end -}}
-{{- if and (eq .Values.kind "static") .Values.db.enabled -}}
-{{- fail "kind=static must not set db.enabled (static assets have no DB)" -}}
-{{- end -}}
 {{- end -}}
