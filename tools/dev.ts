@@ -7,13 +7,13 @@ import { execSync, spawn } from "node:child_process";
 
 const argv = process.argv.slice(2);
 const cmd = argv[0]?.startsWith("--") ? undefined : argv[0];
-const arg = (k: string, d?: string) => { const i = argv.indexOf(k); return i > -1 ? argv[i + 1] : d; };
 const DRY = argv.includes("--dry-run");
 const COMPOSE = "docker compose -f tools/dev-postgres/compose.yaml";
 
 if (cmd === "db:up" || cmd === "db:reset") {
-  const name = arg("--name", "app")!;
-  const envKey = `${name.replaceAll("-", "_").toUpperCase()}_DATABASE_URL`;
+  // canonical DATABASE_URL — db-url.ts(모드2)·클러스터 계약과 동일 변수명(설계 §5.7 로컬·클러스터 일치).
+  // 모드1은 단일 docker dev DB(app_dev)라 per-name 구분 불요(--name은 더 이상 키에 영향 없음).
+  const envKey = "DATABASE_URL";
   const url = "postgres://dev:dev@localhost:5432/app_dev";
   if (DRY) {
     console.log(JSON.stringify({ mode: "docker-clean-dev", cmd, [envKey]: url, note: ".env에 localhost URL — 파괴 작업은 이 모드에서만" }, null, 2));

@@ -8,17 +8,21 @@ setup() {
 }
 teardown() { rm -rf "$TMP"; }
 
-@test "db:up writes a localhost DATABASE_URL for clean dev (dry-run)" {
+@test "db:up writes the canonical localhost DATABASE_URL for clean dev (dry-run)" {
   run bun "$ROOT/tools/dev.ts" db:up --dry-run --name orders
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "localhost"
-  echo "$output" | grep -q "ORDERS_DATABASE_URL"
+  # canonical 키(모드2/클러스터와 동일) — per-name ORDERS_DATABASE_URL이 아니어야 함
+  echo "$output" | grep -q '"DATABASE_URL"'
+  run bash -c "bun '$ROOT/tools/dev.ts' db:up --dry-run --name orders | grep -ow ORDERS_DATABASE_URL"
+  [ "$status" -ne 0 ]
 }
 
-@test "db:url targets the tailscale read-only conn by default (no destructive ops)" {
+@test "db:url targets the read-only conn by default (determining field, no destructive ops)" {
   run bun "$ROOT/tools/db-url.ts" --name orders --dry-run
   [ "$status" -eq 0 ]
-  echo "$output" | grep -qi "tailscale"
+  # prose note가 아니라 결정 필드(mode/secretRef)로 RO 라우팅을 단언
+  echo "$output" | grep -q '"mode": "readonly"'
   echo "$output" | grep -q "db-orders-ro-conn"
 }
 
