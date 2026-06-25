@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# .app-config.yml 스키마 — 외부 앱 레포 계약 v2 (db/redis 리소스 참조)
+# .app-config.yml 스키마 — 외부 앱 레포 계약 v2 (연결=SealedSecret의 DATABASE_URL/REDIS_URL)
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; S="$ROOT/tools/app-config-schema.json"; }
 
@@ -8,10 +8,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; S="$ROOT/tools/app-con
   [ "$status" -eq 0 ]
 }
 
-@test "schema allows db and redis as arrays of resource names" {
-  run jq -e '.properties.db.type == "array" and .properties.redis.type == "array"' "$S"
-  [ "$status" -eq 0 ]
-  run jq -e '.properties.db.items.pattern == "^[a-z][a-z0-9-]*$"' "$S"
+@test "schema no longer has db/redis fields (connection is a sealed secret)" {
+  run jq -e '(.properties | has("db") | not) and (.properties | has("redis") | not)' "$S"
   [ "$status" -eq 0 ]
 }
 
