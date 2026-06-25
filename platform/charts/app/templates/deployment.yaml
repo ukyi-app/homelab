@@ -1,3 +1,4 @@
+{{- include "app.validate" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -56,15 +57,9 @@ spec:
               containerPort: {{ .Values.ports.metrics }}
             {{- end }}
           {{- end }}
-          {{- if or .Values.env .Values.envFrom }}
+          {{- with .Values.envFrom }}
           envFrom:
-            {{- if .Values.env }}
-            - configMapRef:
-                name: {{ include "app.fullname" . }}-env
-            {{- end }}
-            {{- with .Values.envFrom }}
             {{- toYaml . | nindent 12 }}
-            {{- end }}
           {{- end }}
           {{- if include "app.isServed" . }}
           {{- $live := .Values.probes.liveness.path }}

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "app-config-schema",
   "title": ".app-config.yml — 외부 앱 레포의 자기선언 v2 (create-app이 values.yaml + .bindings.json으로 변환)",
-  "description": "앱 연결(DB/Redis)은 앱 SealedSecret의 DATABASE_URL/REDIS_URL로 주입한다(별도 db/redis 필드 없음). create-app이 secrets(SealedSecret)·env·digest 핀 이미지를 검증해 values.yaml + .bindings.json(autoDeploy)으로 변환한다. 마이그레이션은 앱이 부팅 시 self-migrate(expand/contract+멱등).",
+  "description": "앱 연결(DB/Redis)은 앱 SealedSecret의 DATABASE_URL/REDIS_URL로 주입한다(별도 db/redis 필드 없음). create-app이 secrets(SealedSecret)·digest 핀 이미지를 검증해 values.yaml + .bindings.json(autoDeploy)으로 변환한다. 설정·비밀은 전부 secrets(SealedSecret) — 평문 env 필드 없음. 마이그레이션은 앱이 부팅 시 self-migrate(expand/contract+멱등).",
   "type": "object",
   "additionalProperties": false,
   "required": ["kind", "resources"],
@@ -27,22 +27,6 @@
       }
     },
     "replicas": { "type": "integer", "minimum": 1, "maximum": 3 },
-    "env": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["name", "value"],
-        "properties": {
-          "name": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
-          "value": { "type": "string" }
-        }
-      }
-    },
-    "allowPlaintext": {
-      "type": "array",
-      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
-    },
     "secrets": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }

@@ -33,7 +33,6 @@
         "limits":   { "type": "object", "required": ["cpu", "memory"], "properties": { "cpu": { "type": "string", "minLength": 1 }, "memory": { "type": "string", "minLength": 1 } } }
       }
     },
-    "env": { "type": "array", "items": { "type": "object" } },
     "envFrom": { "type": "array", "items": { "type": "object" } },
     "route": {
       "type": "object", "additionalProperties": false,
