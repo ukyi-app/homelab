@@ -83,12 +83,6 @@ if (served) {
   else if (!host.endsWith(`.home.${DOMAIN}`)) fail(`internal host는 *.home.${DOMAIN}: '${host}'`);
 }
 
-const SECRETISH = /(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|PRIVATE|(^|_)KEY(_|$))/;
-const allow = new Set(config.allowPlaintext ?? []);
-for (const e of config.env ?? [])
-  if (SECRETISH.test(e.name) && !allow.has(e.name))
-    fail(`env '${e.name}'은 시크릿으로 보인다 — secrets:로 선언(SealedSecret)하거나 의도적 평문이면 allowPlaintext에 명시`);
-
 const toMi = (m: string) => m.endsWith("Gi") ? parseInt(m) * 1024 : parseInt(m);
 const toMilli = (c: string) => c.endsWith("m") ? parseInt(c) : parseInt(c) * 1000;
 const { requests: rq, limits: lm } = config.resources;
@@ -146,7 +140,6 @@ const values: Record<string, any> = {
   kind, replicas,
   resources: { requests: { cpu: rq.cpu, memory: rq.memory }, limits: { cpu: lm.cpu, memory: lm.memory } },
 };
-if ((config.env ?? []).length) values.env = config.env;
 const envFrom = secrets.length ? [{ secretRef: { name: `${app}-secrets` } }] : [];
 if (envFrom.length) values.envFrom = envFrom;
 if (served) values.route = { host, paths: config.route?.paths ?? ["/"], public: pub };

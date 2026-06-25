@@ -23,8 +23,7 @@ resources:
   requests: { cpu: "", memory: "" } # 앱별로 반드시 설정
   limits: { cpu: "", memory: "" } # 앱별로 반드시 설정
 
-# --- 설정 & secret ---
-env: [] # [{name, value}]
+# --- secret 배선 ---
 envFrom: [] # [{secretRef: {name}}]
 
 # --- 라우팅 (기본 internal; public은 명시적 opt-in) ---
