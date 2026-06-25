@@ -20,11 +20,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; S="$ROOT/tools/app-con
   [ "$status" -eq 0 ]
 }
 
-@test "migrate command moved out of db (db is now a resource-name array)" {
-  # 구계약 db.enabled/migrateCmd → migrate.cmd 분리 (db는 리소스 참조 배열로 재정의)
-  run jq -e '.properties.migrate.properties.cmd.type == "array"' "$S"
-  [ "$status" -eq 0 ]
-  run jq -e '.properties.db | has("properties") | not' "$S"
+@test "schema no longer has migrate property (app self-migrates at boot)" {
+  # migrate Job 제거 — 앱이 부팅 시 expand/contract + 멱등 self-migrate (Task A5 문서)
+  run jq -e '.properties | has("migrate") | not' "$S"
   [ "$status" -eq 0 ]
 }
 

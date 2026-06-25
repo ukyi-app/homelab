@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "app-config-schema",
   "title": ".app-config.yml — 외부 앱 레포의 자기선언 v2 (create-app이 values.yaml + .bindings.json으로 변환)",
-  "description": "db/redis 이름은 create-database/create-cache로 선프로비저닝된 리소스를 가리키며(migrate.cmd로 마이그레이션 분리), create-app이 db-<name>-conn / cache-<name>-conn SealedSecret(prod NS)을 envFrom으로 배선한다.",
+  "description": "db/redis 이름은 create-database/create-cache로 선프로비저닝된 리소스를 가리키며, create-app이 db-<name>-conn / cache-<name>-conn SealedSecret(prod NS)을 envFrom으로 배선한다. 마이그레이션은 앱이 부팅 시 self-migrate(expand/contract+멱등).",
   "type": "object",
   "additionalProperties": false,
   "required": ["kind", "resources"],
@@ -36,14 +36,6 @@
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
       "uniqueItems": true
-    },
-    "migrate": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["cmd"],
-      "properties": {
-        "cmd": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
-      }
     },
     "env": {
       "type": "array",
