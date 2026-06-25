@@ -11,12 +11,4 @@
   grep -qE '\-2.*cnpg-operator' platform/argocd/root/SYNC-WAVES.md
   grep -qE '\-1.*Cluster' platform/argocd/root/SYNC-WAVES.md
 }
-@test "shared app chart runs migrate as a wave-1 ArgoCD Sync hook" {
-  # Milestone 6 소유 차트를 상대로 검증; 마일스톤 간 계약이다.
-  # migrate는 Helm pre-install/pre-upgrade hook(ArgoCD PreSync 단계, wave-0 설정 이전 실행)이
-  # 아니라 ArgoCD Sync hook으로 둔다 — wave-0 설정이 끝난 뒤 마이그레이션이 돌아야 하기 때문.
-  test -f platform/charts/app/templates/migrate-job.yaml || skip "chart from M6 not present yet"
-  grep -qE 'argocd.argoproj.io/hook:\s*Sync' platform/charts/app/templates/migrate-job.yaml
-  grep -qE 'sync-wave:\s*"1"' platform/charts/app/templates/migrate-job.yaml
-  ! grep -qE 'helm\.sh/hook' platform/charts/app/templates/migrate-job.yaml
-}
+# (migrate Job wave-1 Sync hook 테스트 제거 — migrate Job 폐기, 앱이 부팅 시 self-migrate)

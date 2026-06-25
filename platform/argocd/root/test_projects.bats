@@ -57,7 +57,8 @@ setup() {
 }
 
 @test "apps project namespaceResourceWhitelist covers exactly the shared-chart kinds" {
-  # 공유 차트(deployment/service/configmap/httproute/migrate-job) + source#3 SealedSecret + NetworkPolicy.
+  # 공유 차트(deployment/service/configmap/httproute) + source#3 (Job/SealedSecret/NetworkPolicy).
+  # Job은 더 이상 차트가 렌더하지 않지만(migrate 폐기), 앱이 source#3로 일회성 Job 배포 가능하도록 화이트리스트 유지.
   run yq 'select(.metadata.name=="apps") | .spec.namespaceResourceWhitelist[] | .group + "/" + .kind' "$P"
   [ "$status" -eq 0 ]
   echo "$output" | grep -qx "apps/Deployment"
