@@ -40,12 +40,6 @@ homepage:
   group: Apps # 대시보드 그룹
   icon: "" # mdi-*/si-*/dashboard-icon 파일명 (선택)
 
-# --- 데이터베이스 / migration ---
-db:
-  enabled: false
-  migrateCmd: ["migrate"] # 앱 이미지 내 명령; wave-1 ArgoCD Sync-hook Job이 실행
-  # migrateMemory: 256Mi  # migrate Job 메모리(앱 런타임 limit과 독립, 기본 256Mi). 무거운 마이그레이션만 상향.
-
 # --- probes ---
 probes:
   liveness: { path: /healthz }
