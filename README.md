@@ -89,6 +89,7 @@ k3s 단일 노드(Mac mini · OrbStack VM · arm64) **GitOps 모노레포**. Arg
 | `victoria-stack` | 관측성 — VictoriaMetrics/Logs · Grafana · Alertmanager · Vector |
 | `sealed-secrets` | SealedSecrets 컨트롤러(controller-독립 DR 자산) |
 | `data-conn` | 앱 소비용 conn SealedSecret — create-database/create-cache 산출물 |
+| `ghcr-pull` | private GHCR pull용 imagePullSecret (prod NS dockerconfigjson SealedSecret) |
 | `network-policies` | prod east-west 격리 — default-deny + 최소 allow |
 | `cert-manager-netpol` | cert-manager ns egress 격리 — remote-helm이라 별도 컴포넌트로 분리 |
 | `namespaces` | 네임스페이스 소유 + PSA(Pod Security Admission) enforce 라벨 |
