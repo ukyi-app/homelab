@@ -3,11 +3,11 @@ image:
   repo: "" # 예: ghcr.io/owner/api  (필수)
   tag: "" # 예: sha-<gitsha>       (필수, 불변)
   pullPolicy: IfNotPresent
-# GHCR pull: 기본은 빈 값 = GHCR 패키지가 PUBLIC (homelab 기본 — 익명 pull,
-# 프로비저닝 불필요; repo의 패키지 가시성을 Public으로 설정). 패키지를 PRIVATE으로
-# 유지하려면 [{ name: ghcr-pull }]을 설정하고, M2가 소비하는 모든 namespace(prod, database)에
-# dockerconfigjson Secret `ghcr-pull`을 시드해야 한다.
-imagePullSecrets: []
+# GHCR pull: 패키지는 private 유지(첫 push 기본 — 가시성 변경은 UI 전용·비가역). 클러스터는
+# imagePullSecret `ghcr-pull`로 pull한다(platform/ghcr-pull/prod = prod NS dockerconfigjson
+# SealedSecret, seed: .env.secrets GHCR_PULL_TOKEN → `make seal-ghcr-pull`). 인레포 앱은 전부
+# prod NS라 아래 기본값으로 충분 — 패키지 public 전환 불필요.
+imagePullSecrets: [{ name: ghcr-pull }]
 
 # --- 워크로드 형태 ---
 kind: service # service | worker | static

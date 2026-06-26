@@ -109,8 +109,8 @@ jobs:
                 -summary
           # 원장 게이트(PR required check와 동일 검증 선행)
           bun run verify:ledger
-          git config user.name "homelab-bot"
-          git config user.email "bot@users.noreply.github.com"
+          git config user.name "ukyi-homelab-writer[bot]"
+          git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
           branch="create-app/${APP}-${RUN_ID}"
           git checkout -b "$branch"
           git add "apps/${APP}" docs/memory-ledger.md infra/cloudflare/apps.json
