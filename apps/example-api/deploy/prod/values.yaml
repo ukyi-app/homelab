@@ -1,0 +1,18 @@
+image:
+  repo: ghcr.io/ukyi-app/example-api
+  tag: sha-a6dea4eeaea600557ba936e0698a53b95bb0f7f3
+  digest: sha256:084857015d606dc07aa892445d5a9e0889c141b663a7fb739aa9a03347ac1748
+kind: service
+replicas: 1
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 128Mi
+route:
+  host: example-api.ukyi.app
+  paths:
+    - /
+  public: true
