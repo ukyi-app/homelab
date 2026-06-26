@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       app_repo:
-        description: "ukyi-app/<app> — 프리필된 ukyi-app/ 뒤에 앱 이름만 입력 (config·이미지는 그 레포 main HEAD 기준)"
+        description: "ukyi-app/<app> — 뒤에 앱 이름만 입력"
         required: true
         default: "ukyi-app/"
 

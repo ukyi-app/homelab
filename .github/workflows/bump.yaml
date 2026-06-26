@@ -1,7 +1,7 @@
-name: bump
+name: "🔼 bump"
 on:
   workflow_run:
-    workflows: [build]
+    workflows: ["📦 build"]
     types: [completed]
   # 외부 앱 레포의 reusable-app-build가 보내는 배포 dispatch (멀티레포 앱 플랫폼).
   # ⚠️ 과도기 경로: Task 3.4(bump-poll GHCR 폴링)가 라이브 검증되면 이 트리거와

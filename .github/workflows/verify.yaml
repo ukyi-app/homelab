@@ -1,4 +1,4 @@
-name: verify
+name: "🧪 verify"
 on:
   pull_request:
   push:
