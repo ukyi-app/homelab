@@ -42,3 +42,9 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   [[ "$out" == *"/public"* ]]
   [[ "$out" == *"readOnlyRootFilesystem: true"* ]]
 }
+
+@test "Deployment defaults imagePullSecrets to ghcr-pull (private GHCR pull, no public toggle)" {
+  out=$(dep --set kind=service --set route.host=api.example.com)
+  echo "$out" | grep -q 'imagePullSecrets:'
+  echo "$out" | grep -q 'name: ghcr-pull'
+}

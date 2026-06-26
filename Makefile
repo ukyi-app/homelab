@@ -131,6 +131,10 @@ verify-traps: ## docs/traps.md 함정 원장의 guard 경로가 실재하는지(
 seal-adguard-auth: ## AdGuard UI 비밀번호(.env.secrets ADGUARD_PASSWORD)를 bcrypt 봉인 → adguard-auth SealedSecret
 	@scripts/seal-adguard-auth.sh
 
+.PHONY: seal-ghcr-pull
+seal-ghcr-pull: ## GHCR read 토큰(.env.secrets GHCR_PULL_TOKEN)을 ghcr-pull SealedSecret로 봉인(prod NS, private pull)
+	@scripts/seal-ghcr-pull.sh
+
 ## --- 운영 진입점 (라이브 read-only; 변경 권위는 ArgoCD) ---
 .PHONY: argo-status argo-sync argo-terminate argo-wait render kubeconfig audit
 

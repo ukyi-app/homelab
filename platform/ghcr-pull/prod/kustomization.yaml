@@ -1,0 +1,9 @@
+# ghcr-pull — private GHCR 패키지 pull용 imagePullSecret (prod NS).
+# platform-components ApplicationSet이 platform/*/prod로 자동 발견 → ghcr-pull-prod Application(일반 kustomize).
+# 공유차트(values.imagePullSecrets: [{name: ghcr-pull}])가 이 Secret을 소비 → 앱 이미지가 private이어도
+# pull 성공(패키지 가시성 public 토글 불필요·비가역 회피). 자격은 read:packages 전용 토큰.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - ghcr-pull.sealed.yaml
