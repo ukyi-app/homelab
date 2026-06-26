@@ -7,8 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       app_repo:
-        description: "ukyi-app/<app> — 온보딩할 앱 레포 (config·이미지는 그 레포 main HEAD 기준)"
+        description: "ukyi-app/<app> — 프리필된 ukyi-app/ 뒤에 앱 이름만 입력 (config·이미지는 그 레포 main HEAD 기준)"
         required: true
+        default: "ukyi-app/"
 
 # 전역 직렬화: 모든 homelab-mutation 워크플로(변이 디스패처/bump-poll/iac/tf-reconcile)가 같은 그룹.
 # queue: max — pending FIFO 큐잉. cancel-in-progress와 병용 불가(AGENTS.md 함정) — 절대 true 금지.
