@@ -3,7 +3,7 @@
 # 그 HEAD 커밋 SHA로 이미지 태그를 핀한다(앱 레포가 payload로 SHA를 보내지 않음 — 변조 방지).
 # 결과물은 PR(required check `gate`) — 사람 머지 = 첫 배포 승인. apps.json은 active:false라
 # 머지돼도 DNS는 생기지 않고, activate-app 게이트 통과 후에만 노출된다.
-name: _create-app
+name: "🧰 _create-app"
 on:
   workflow_call:
     inputs:
