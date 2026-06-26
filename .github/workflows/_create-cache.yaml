@@ -4,7 +4,7 @@
 # 산출은 PR-first: provision-cache.ts가 만든 매니페스트/원장 변경을 브랜치로 push하고
 # auto-merge(required check 통과 시) 또는 즉시 squash 머지를 시도한다.
 # Telegram 통지는 핸들 이름만 — conn URL/자격은 어떤 경로로도 출력하지 않는다.
-name: _create-cache
+name: "🧰 _create-cache"
 on:
   workflow_call:
     inputs:

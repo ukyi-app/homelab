@@ -3,7 +3,7 @@
 # 비밀번호는 provision-db.ts가 내부 생성해 kubeseal로 즉시 봉인 — raw URL/비밀번호는
 # 로그·PR·Telegram 어디에도 나타나지 않는다(핸들 이름만 통지).
 # 머지 후 반영은 ArgoCD automated sync: cnpg-data(database NS) + data-conn-prod(prod NS).
-name: _create-database
+name: "🧰 _create-database"
 on:
   workflow_call:
     inputs:
