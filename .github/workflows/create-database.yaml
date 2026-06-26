@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       spec:
-        description: '{"name":"<db>","extensions":["..."]} — owner는 받지 않음(name 고정)'
+        description: '{"name":"<db>","extensions":["..."]}'
         required: true
 
 concurrency:

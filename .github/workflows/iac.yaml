@@ -1,4 +1,4 @@
-name: iac
+name: "🌍 iac"
 on:
   pull_request:
     paths:

@@ -4,7 +4,7 @@
 # ⚠️ github-actions manager는 renovate.json에서 비활성 — uses: 핀 갱신은 토큰에 workflows:write가 필요한데
 #    writer App은 Contents+PR write 전용이다. writer App에 workflows:write 부여(Phase-0) + 아래 토큰에
 #    permission-workflows: write 추가 + renovate.json의 "github-actions".enabled=true로 함께 켤 것.
-name: renovate
+name: "🔁 renovate"
 run-name: "🔁 renovate — ${{ github.event_name == 'schedule' && '스케줄' || format('수동({0})', github.actor) }}"
 on:
   schedule:

@@ -9,7 +9,7 @@
 # - `dispatch-pat`은 **선언만 유지(required:false, 미사용)**: 기존 caller가 secrets를 넘겨도
 #   "undeclared secret" 검증 실패가 나지 않게 하는 호환 장치다. 모든 caller가 secrets 블록을
 #   제거한 뒤 v2에서 선언을 삭제하고 org secret HOMELAB_DISPATCH_PAT를 폐기한다.
-name: reusable-app-build
+name: "📦 reusable-app-build"
 on:
   workflow_call:
     inputs:
