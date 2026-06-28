@@ -17,7 +17,7 @@ setup() { C="$(cd "$BATS_TEST_DIRNAME" && pwd)"; }
   [ "$status" -eq 0 ]
 }
 
-@test "dns exposure is gated on public && active (no DNS before Healthy)" {
+@test "dns exposure is gated on public && active" {
   run grep -E 'a.public && a.active' "$C/dns.tf"
   [ "$status" -eq 0 ]
 }

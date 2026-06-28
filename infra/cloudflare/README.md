@@ -2,7 +2,7 @@
 
 **역할** — Cloudflare terraform 루트: DNS·tunnel·R2 상태 버킷·WAF·cache·rate-limit. `apps.json`이 앱 공개(DNS) SSOT(`active` 플립).
 
-**적용 방식** — **CI apply 전용**(좁은 DNS/tunnel 스코프라 안전): `iac.yaml`(push apply) + `tf-reconcile.yaml`(30분 드리프트 수렴). 앱 공개는 `tools/activate-app.ts` 게이트가 `active:true` 플립 → CI가 노출.
+**적용 방식** — **CI apply 전용**(좁은 DNS/tunnel 스코프라 안전): `iac.yaml`(push apply) + `tf-reconcile.yaml`(30분 드리프트 수렴). create-app PR 머지가 앱 공개 승인(`apps.json active:true`)이며, 머지 후 CI가 DNS/tunnel을 노출한다.
 
 **라이브 디버그** — terraform plan/apply 로그(CI). 상태 버킷·bootstrap 절차는 런북 `docs/runbooks/02-cloud-iac-bootstrap.md`.
 

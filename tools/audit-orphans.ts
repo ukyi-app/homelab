@@ -52,13 +52,13 @@ const cacheDirs = existsSync(`${ROOT}/platform/cache/prod`)
 
 // 1) registry ↔ 매니페스트
 //   active:true orphan → orphan-dns(차단): dns.tf가 public&&active만 노출하므로 빈 백엔드 DNS가 실재.
-//   active:false orphan → orphan-dns-inactive(정보, 비차단): DNS 미노출이라 create-app 중간 상태에서 정상.
+//   active:false orphan → orphan-dns-inactive(정보, 비차단): DNS 미노출이라 수동 보류/철거 중이면 정상.
 for (const r of registry) {
   if (!appDirs.includes(r.name)) {
     if (r.active)
       add("orphan-dns", r.name, `apps.json active:true 행인데 apps/${r.name}/deploy/prod 부재 — DNS가 빈 백엔드로 노출 중`);
     else
-      add("orphan-dns-inactive", r.name, `apps.json active:false 행인데 apps/${r.name}/deploy/prod 부재 — DNS 미노출(create-app 매니페스트 머지 대기 가능)`);
+      add("orphan-dns-inactive", r.name, `apps.json active:false 행인데 apps/${r.name}/deploy/prod 부재 — DNS 미노출(수동 보류/철거 중 상태일 수 있음)`);
   }
 }
 for (const a of appDirs) {
@@ -67,8 +67,9 @@ for (const a of appDirs) {
     add("missing-registration", a, "public 앱인데 apps.json 행 부재 — activate 불가 상태");
 }
 
-// 1b) activation surface-drift (races-5) — active:true(+ 매니페스트 존재) 앱의 커밋된 .activation
-// surfaceHash가 현재 canonical surfaceHash(.activation 제외)와 다르면, activation 이후 표면이 바뀐 것.
+// 1b) activation surface-drift (races-5) — .activation 마커가 있는 active:true 앱만 검사한다.
+// create-app PR 머지 자체가 첫 공개 승인이라 초기 active:true 앱에는 마커가 없어도 정상이다.
+// 마커가 있으면 surfaceHash가 현재 canonical surfaceHash(.activation 제외)와 다른지 확인한다.
 // ⚠️ codex pass3 F1: **정보성만**(BLOCKING 아님). 차단 게이트로 쓰면 정상 이미지 bump(values.yaml의
 // image.tag 변경 → surface 변경)가 머지 불가가 되고, 새 revision은 머지돼야 Healthy가 되므로 데드락
 // (autoDeploy 붕괴). 노출 재검증은 런북(activate 절차)이 담당한다. canonical 해시(F3)는 .activation 자기
@@ -77,10 +78,7 @@ for (const r of registry) {
   if (r.active !== true || !appDirs.includes(r.name)) continue;
   const markerPath = `${appsRoot}/${r.name}/deploy/prod/.activation`;
   const marker = readJson(markerPath, null);
-  if (!marker || !marker.surfaceHash) {
-    add("missing-activation", r.name, "active:true인데 .activation 마커 없음/빈 surfaceHash — 정보성(activate-app 재실행 또는 런북 재검증 권장)");
-    continue;
-  }
+  if (!marker || !marker.surfaceHash) continue;
   const current = surfaceHash(ROOT, "HEAD", r.name); // .activation 제외 canonical — 마커와 동일 함수
   if (current && current !== marker.surfaceHash)
     add("activation-surface-drift", r.name, `activation 이후 apps/${r.name} 표면 변경(정보성 — 런북 재검증 권장; 마커 ${String(marker.surfaceHash).slice(0, 12)} ≠ 현재 ${current.slice(0, 12)})`);

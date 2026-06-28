@@ -1,4 +1,4 @@
-# create-app 변이 디스패처 — 신규 앱 온보딩(외부 레포 config를 main HEAD에서 read → 매니페스트 PR, active:false).
+# create-app 변이 디스패처 — 신규 앱 온보딩(외부 레포 config를 main HEAD에서 read → 매니페스트+공개 PR).
 # 트리거 경계(런북 app-platform): 앱 레포는 homelab-write 자격 0 — owner가 여기서 workflow_dispatch로 실행.
 # 변이 로직은 _create-app.yaml(reusable)에 있다 — 이 파일은 trigger+validate+notify 셸.
 name: "✨ create-app"

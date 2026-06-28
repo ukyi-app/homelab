@@ -55,10 +55,10 @@ gen() {
   [ "$status" -eq 0 ]
 }
 
-@test "create-app registers public app in apps.json with active:false (no DNS before Healthy)" {
+@test "create-app registers public app in apps.json with active:true (merge exposes DNS)" {
   gen
   [ "$status" -eq 0 ]
-  run jq -e '.[0] == {name:"orders", host:"orders.example.com", public:true, active:false}' \
+  run jq -e '.[0] == {name:"orders", host:"orders.example.com", public:true, active:true}' \
     "$FR/infra/cloudflare/apps.json"
   [ "$status" -eq 0 ]
 }

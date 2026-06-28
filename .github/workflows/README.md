@@ -8,7 +8,7 @@
 
 | 워크플로 | 입력 | 언제 |
 |---|---|---|
-| ✨ create-app | app_repo | 신규 앱 온보딩(앱 레포 main HEAD 기준, 매니페스트 PR, active:false) |
+| ✨ create-app | app_repo | 신규 앱 온보딩(앱 레포 main HEAD 기준, 매니페스트+공개 PR) |
 | ✨ update-secrets | app_repo | 앱 SealedSecret 갱신(앱 레포 main HEAD 기준) |
 | ✨ create-database | spec | 앱용 CNPG DB 프로비전 |
 | ✨ create-cache | spec | 앱용 redis 프로비전 |
@@ -48,4 +48,4 @@ run-name에 트리거 출처(`스케줄`/`수동(actor)`)가 박혀 이력에서
 |---|---|---|
 | 앱 철거 | `make teardown-app APP=<x>` | 파괴 — 원클릭 금지. 래퍼가 clean-worktree·fresh-main 전용브랜치·allowlist staging·PR을 강제 |
 | 리소스 철거(retain) | `make teardown-resource RESOURCE=<db\|cache>:<name>` | 위와 동일. purge(--delete-data)는 런북 절차로만 |
-| 앱 활성화(DNS 노출) | `tools/activate-app.ts` (런북 app-platform) | Healthy 게이트에 클러스터 접근 필요 |
+| 앱 재활성화/노출 재승인 | `tools/activate-app.ts` (런북 app-platform) | host/public 변경 등 별도 재증명이 필요할 때만 |
