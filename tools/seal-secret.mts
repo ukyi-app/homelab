@@ -1,11 +1,10 @@
 // .env → SealedSecret 봉인 CLI (`pnpm secret:seal`).
-// .app-config.yml의 `secrets:[...]`만 allowlist로 봉인한다 — 선언 안 된 .env 키는 절대 봉인하지
-// 않고, 선언됐는데 .env에 없으면 키 이름만 출력하며 실패한다(값은 어떤 경로로도 출력 금지).
+// .env의 UPPER_SNAKE 키가 봉인 대상의 SSOT다. .app-config.yml에는 시크릿 키 목록을 쓰지 않는다.
 // 평문 Secret manifest는 디스크에 쓰지 않고 kubeseal stdin으로만 흐른다.
 // 이 사본은 homelab 마이그레이션/테스트용 — 동일 스크립트가 app-starter 템플릿에도 동봉된다.
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { parse } from "yaml";
+import { basename, dirname } from "node:path";
 
 function die(msg: string): never {
   console.error(`seal-secret: ${msg}`);
@@ -30,8 +29,7 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
-// kebab-case(api-key) → UPPER_SNAKE(API_KEY) — secrets 선언과 .env 키의 정규화 규약
-const toEnvKey = (name: string) => name.replaceAll("-", "_").toUpperCase();
+const DENIED_ENV_KEYS = new Set(["DATABASE_ADMIN_URL"]);
 
 function parseDotEnv(path: string) {
   const out = new Map();
@@ -49,18 +47,16 @@ function parseDotEnv(path: string) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const config = parse(readFileSync(args.config!, "utf8")) ?? {};
-const declared = Array.isArray(config.secrets) ? config.secrets : [];
-if (declared.length === 0) die("config에 secrets 선언이 없다 — 봉인할 대상 0");
-
-for (const name of declared) {
-  if (!/^[a-z][a-z0-9-]*$/.test(String(name))) die(`secrets 항목 형식 불량(kebab-case 아님): ${name}`);
-}
-
+readFileSync(args.config!, "utf8"); // 존재/읽기 가능성만 확인한다. 시크릿 키 목록은 .env가 SSOT.
 const envMap = parseDotEnv(args.env!);
-const targets: { name: any; envKey: string }[] = declared.map((n: any) => ({ name: n, envKey: toEnvKey(n) }));
-const missing = targets.filter((t) => !envMap.has(t.envKey)).map((t) => t.envKey);
-if (missing.length > 0) die(`missing in .env: ${missing.join(", ")}`); // 키 이름만 — 값 비출력
+const envKeys = [...envMap.keys()].sort();
+const bad = envKeys.filter((key) => !/^[A-Z][A-Z0-9_]*$/.test(key));
+if (bad.length > 0) die(`봉인 대상은 UPPER_SNAKE .env 키만 지원: ${bad.join(", ")}`);
+if (envKeys.length === 0) die(".env에 봉인할 대상이 없다");
+
+const targets: { envKey: string }[] = envKeys.map((envKey) => ({ envKey }));
+const denied = targets.filter((t) => DENIED_ENV_KEYS.has(t.envKey)).map((t) => t.envKey);
+if (denied.length > 0) die(`${denied.join(", ")}: 앱 런타임 봉인 금지 키 — admin 자격은 .env.admin.local 채널만 사용`);
 
 // F2(best-effort): 봉인 값이 DB superuser 자격을 가리키면 거부 — 앱 런타임 secret에 superuser가
 // 들어가면 로컬 앱이 ukkiee으로 구동되거나 봉인 사고로 과권한 URL이 클러스터에 박힌다.
@@ -86,8 +82,9 @@ if (args.dryRun) {
   process.exit(0);
 }
 
-if (!args.app) die("--app <name> 필수 (Secret 이름 규약: <app>-secrets)");
-if (!args.out) die("--out <파일> 필수");
+args.app = args.app ?? process.env.APP ?? basename(process.cwd());
+if (!/^[a-z][a-z0-9-]*$/.test(args.app)) die(`--app <name> 형식 불량: ${args.app}`);
+args.out = args.out ?? `deploy/${args.app}-secrets.sealed.yaml`;
 
 // 평문 Secret manifest는 메모리에서만 조립해 kubeseal stdin으로 직행
 const stringData = Object.fromEntries(targets.map((t) => [t.envKey, envMap.get(t.envKey)]));
@@ -105,5 +102,6 @@ const res = spawnSync("kubeseal", ["--cert", args.cert, "--format", "yaml"], {
 });
 if (res.error) die(`kubeseal 실행 실패: ${res.error.message}`);
 if (res.status !== 0) die(`kubeseal 종료 코드 ${res.status} — cert/컨트롤러 점검 (stderr는 값 미포함 시에만 확인)`);
+mkdirSync(dirname(args.out), { recursive: true });
 writeFileSync(args.out, res.stdout);
 console.log(`sealed: ${args.out} (keys: ${targets.map((t) => t.envKey).join(", ")})`);

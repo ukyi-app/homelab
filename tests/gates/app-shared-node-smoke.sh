@@ -9,19 +9,18 @@ mkdir -p "$tmp/bin"
 cat > "$tmp/bin/kubeseal" <<'STUB'
 #!/usr/bin/env bash
 cat > /dev/null            # stdin(평문 Secret manifest) 소비
-printf 'apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\n'
+printf 'apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nspec:\n  encryptedData:\n    TOKEN: AgXstub\n'
 STUB
 chmod +x "$tmp/bin/kubeseal"
-# secret 이름은 lower-kebab → UPPER_SNAKE 매핑(seal-secret 규약): secrets:[token] → .env의 TOKEN.
 cat > "$tmp/.app-config.yml" <<'EOF'
 name: smoke-app
 kind: service
-secrets: [token]
 EOF
 printf 'TOKEN=x\n' > "$tmp/.env"
 # 실제 seal 경로(--app/--out + kubeseal spawnSync)를 node strip-types로 — 출력 파일 단언
 PATH="$tmp/bin:$PATH" node tools/seal-secret.mts --config "$tmp/.app-config.yml" --env "$tmp/.env" --app smoke-app --out "$tmp/sealed.yaml"
 [ -s "$tmp/sealed.yaml" ] || { echo "sealed output missing"; exit 1; }
-node tools/env-example.mts --config "$tmp/.app-config.yml" --out "$tmp/.env.example"
+node tools/env-example.mts --config "$tmp/.app-config.yml" --sealed "$tmp/sealed.yaml" --out "$tmp/.env.example"
 [ -s "$tmp/.env.example" ] || { echo "env-example output missing"; exit 1; }
+grep -q '^TOKEN=' "$tmp/.env.example" || { echo "env-example key missing"; exit 1; }
 echo "app-shared node smoke OK"

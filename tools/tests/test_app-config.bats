@@ -24,6 +24,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; S="$ROOT/tools/app-con
   [ "$status" -eq 0 ]
 }
 
+@test "schema no longer has secrets property (sealed file encryptedData is the key list)" {
+  run jq -e '.properties | has("secrets") | not' "$S"
+  [ "$status" -eq 0 ]
+}
+
 @test "deploy.autoDeploy survives in the schema (approval gate source)" {
   run jq -e '.properties.deploy.properties.autoDeploy.type == "boolean"' "$S"
   [ "$status" -eq 0 ]

@@ -40,16 +40,21 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | grep -q "sessions-ro"
 }
 
-@test "env:example renders only secrets keys (plaintext env removed; connection is a sealed secret)" {
+@test "env:example renders encryptedData keys from the sealed secret" {
   cat > "$TMP/.app-config.yml" <<'EOF'
 kind: service
 resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
 env: [{ name: LOG_LEVEL, value: info }]
-secrets: [api-key]
 db: [orders]
 redis: [sessions]
 EOF
-  run bun "$ROOT/tools/env-example.mts" --config "$TMP/.app-config.yml" --out "$TMP/.env.example"
+  cat > "$TMP/sealed.yaml" <<'EOF'
+kind: SealedSecret
+spec:
+  encryptedData:
+    API_KEY: AgX...
+EOF
+  run bun "$ROOT/tools/env-example.mts" --config "$TMP/.app-config.yml" --sealed "$TMP/sealed.yaml" --out "$TMP/.env.example"
   [ "$status" -eq 0 ]
   grep -q "API_KEY=" "$TMP/.env.example"
   # env(LOG_LEVEL)·연결 URL 모두 스캐폴드 안 함(평문 env 제거 + 연결=SealedSecret, 로컬은 db-url/cache-url)
