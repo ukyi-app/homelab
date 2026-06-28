@@ -12,15 +12,16 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   [ "$status" -ne 0 ]
 }
 
-@test "static probes hit the SWS health endpoint (/health), not service /healthz·/readyz" {
+@test "static probes hit the SWS health endpoint (/health), not legacy split health paths" {
   out=$(dep --set kind=static --set route.host=s.example.com)
   echo "$out" | grep -q 'path: /health'
   run grep -q 'path: /healthz' <<<"$out"; [ "$status" -ne 0 ]
   run grep -q 'path: /readyz' <<<"$out"; [ "$status" -ne 0 ]
 }
 
-@test "service probes keep /healthz·/readyz (unchanged)" {
+@test "service probes use one /health endpoint by default" {
   out=$(dep --set kind=service --set route.host=a.example.com)
-  echo "$out" | grep -q 'path: /healthz'
-  echo "$out" | grep -q 'path: /readyz'
+  echo "$out" | grep -q 'path: /health'
+  run grep -q 'path: /healthz' <<<"$out"; [ "$status" -ne 0 ]
+  run grep -q 'path: /readyz' <<<"$out"; [ "$status" -ne 0 ]
 }

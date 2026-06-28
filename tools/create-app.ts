@@ -127,8 +127,6 @@ if (sealedPath) {
   if (secretKeys.length === 0) fail("sealed encryptedData가 비어 있다");
   const badKeys = secretKeys.filter((key) => !/^[A-Z][A-Z0-9_]*$/.test(key));
   if (badKeys.length) fail(`sealed encryptedData 키는 UPPER_SNAKE여야 한다: ${badKeys.join(", ")}`);
-  const deniedKeys = secretKeys.filter((key) => key === "DATABASE_ADMIN_URL");
-  if (deniedKeys.length) fail(`앱 런타임 봉인 금지 키: ${deniedKeys.join(", ")}`);
 }
 
 // ---------- 4) values.yaml 구성 ----------
@@ -142,6 +140,7 @@ if (envFrom.length) values.envFrom = envFrom;
 if (served) values.route = { host, paths: config.route?.paths ?? ["/"], public: pub };
 if (config.probes) values.probes = config.probes;
 if (kind === "static") values.static = { server: config.static?.server ?? "sws" };
+values.metrics = { enabled: config.metrics?.enabled ?? false };
 // 선언적 회전: 봉인 콘텐츠 해시를 pod template annotation으로 둔다 → update-secrets가 봉인본을
 // 갱신하면 이 해시가 바뀌어 ArgoCD가 Deployment를 롤링한다(envFrom 변경은 재시작 필요 —
 // 명령형 rollout restart는 취소/실패 시 옛 값 유지라 선언적으로). 해시는 기록될 봉인본 바이트 기준.

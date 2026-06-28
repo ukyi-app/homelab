@@ -34,6 +34,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; S="$ROOT/tools/app-con
   [ "$status" -eq 0 ]
 }
 
+@test "metrics.enabled is an explicit app-config opt-in" {
+  run jq -e '.properties.metrics.properties.enabled.type == "boolean"' "$S"
+  [ "$status" -eq 0 ]
+}
+
 @test "static.server enum is sws-only (chart contract: caddy removed)" {
   run jq -e '.properties.static.properties.server.enum == ["sws"]' "$S"
   [ "$status" -eq 0 ]

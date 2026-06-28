@@ -52,7 +52,7 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.ports.http }}
-            {{- if eq .Values.kind "service" }}
+            {{- if and (eq .Values.kind "service") .Values.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.ports.metrics }}
             {{- end }}
@@ -65,7 +65,7 @@ spec:
           {{- $live := .Values.probes.liveness.path }}
           {{- $ready := .Values.probes.readiness.path }}
           {{- if eq .Values.kind "static" }}
-          {{- /* static-web-server는 --health로 /health만 노출 (서비스용 /healthz·/readyz 부재) */}}
+          {{- /* static-web-server는 --health로 /health만 노출 */}}
           {{- $live = "/health" }}
           {{- $ready = "/health" }}
           {{- end }}

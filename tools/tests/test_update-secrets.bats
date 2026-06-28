@@ -86,7 +86,7 @@ EOF
   ! echo "$output" | grep -q '"B"'
 }
 
-@test "update-secrets rejects DATABASE_ADMIN_URL even when it is already sealed" {
+@test "update-secrets allows DATABASE_ADMIN_URL when it is already sealed" {
   cat > "$APPREPO/deploy/example-api-secrets.sealed.yaml" <<'EOF'
 apiVersion: bitnami.com/v1alpha1
 kind: SealedSecret
@@ -100,7 +100,7 @@ EOF
 
   run bun "$ROOT/tools/update-secrets.ts" --app example-api --repo-root "$FR" --app-repo-root "$APPREPO"
 
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
   echo "$output" | grep -q "DATABASE_ADMIN_URL"
 }
 

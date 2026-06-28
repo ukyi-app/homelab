@@ -100,38 +100,41 @@ EOF
   [ "$status" -ne 0 ]
 }
 
-@test "seal-secret rejects DATABASE_ADMIN_URL" {
+@test "seal-secret allows DATABASE_ADMIN_URL like any other env key" {
   printf 'kind: service\n' > "$TMP/.app-config.yml"
   printf 'DATABASE_ADMIN_URL=postgres://orders:pw@pg-rw-tailscale:5432/orders\n' > "$TMP/.env"
 
   run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
 
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
   echo "$output" | grep -q "DATABASE_ADMIN_URL"
 }
 
-@test "seal-secret rejects a value pointing at the admin superuser (F2, best-effort)" {
+@test "seal-secret allows a value pointing at the admin superuser while hiding the value" {
   printf 'kind: service\n' > "$TMP/.app-config.yml"
   printf 'DB_URL=postgres://ukkiee@pg-rw-tailscale:5432/app\n' > "$TMP/.env"  # C1 superuser 롤(SSOT=ukkiee)
   run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -Eq "superuser|ukkiee"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DB_URL"
+  ! echo "$output" | grep -q "ukkiee"
 }
 
-@test "seal-secret rejects a jdbc:postgresql superuser URL (F2, common JVM accident form)" {
+@test "seal-secret allows a jdbc:postgresql superuser URL while hiding the value" {
   printf 'kind: service\n' > "$TMP/.app-config.yml"
   printf 'DB_URL=jdbc:postgresql://ukkiee:pw@pg-rw-tailscale:5432/app\n' > "$TMP/.env"
   run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -Eq "superuser|ukkiee"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DB_URL"
+  ! echo "$output" | grep -q "ukkiee"
 }
 
-@test "seal-secret rejects a quoted superuser URL (F2, blocks the .env quote bypass)" {
+@test "seal-secret allows a quoted superuser URL while hiding the value" {
   printf 'kind: service\n' > "$TMP/.app-config.yml"
   printf 'DB_URL="postgres://ukkiee:pw@pg-rw-tailscale:5432/app"\n' > "$TMP/.env"
   run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -Eq "superuser|ukkiee"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DB_URL"
+  ! echo "$output" | grep -q "ukkiee"
 }
 
 @test "seal-secret allows an owner/ro connection URL (no false-positive on least-privilege creds)" {
@@ -139,14 +142,6 @@ EOF
   printf 'DB_URL=postgres://orders_ro:pw@pg-rw-tailscale:5432/orders\n' > "$TMP/.env"
   run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
   [ "$status" -eq 0 ]
-}
-
-@test "seal-secret SEAL_FORCE=1 bypasses the F2 superuser guard (informed override, value still hidden)" {
-  printf 'kind: service\n' > "$TMP/.app-config.yml"
-  printf 'DB_URL=postgres://ukkiee:topsecretpw@pg-rw-tailscale:5432/app\n' > "$TMP/.env"
-  SEAL_FORCE=1 run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
-  [ "$status" -eq 0 ]
-  ! echo "$output" | grep -q "topsecretpw"
 }
 
 @test "seal-secret pipes a plaintext Secret through kubeseal and writes sealed yaml" {

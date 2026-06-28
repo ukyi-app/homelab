@@ -29,8 +29,8 @@
 
 @test "public path serves through Traefik via the tunnel" {
   # whoami는 설계상 내부 전용(web-internal) — 공개 DNS 레코드는 apex/api/www뿐이다.
-  # 공개 경로 증명은 api 앱의 healthz로 한다 (DNS→Cloudflare→tunnel→Traefik web-public→api).
-  run bash -c "curl -s -o /dev/null -w '%{http_code}' https://api.${DOMAIN}/healthz"
+  # 공개 경로 증명은 api 앱의 /health로 한다 (DNS→Cloudflare→tunnel→Traefik web-public→api).
+  run bash -c "curl -s -o /dev/null -w '%{http_code}' https://api.${DOMAIN}/health"
   [ "$output" = "200" ]
 }
 

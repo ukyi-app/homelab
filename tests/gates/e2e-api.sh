@@ -17,7 +17,7 @@ DEP_START=$(kubectl -n $NS get deploy ${APP} -o jsonpath='{.metadata.creationTim
 test -n "$JOB_END" || { echo "migration Job did not complete"; exit 1; }
 echo "   migrate completed at $JOB_END (deploy created $DEP_START)"
 
-echo "4) pod readiness (readyz) green"
+echo "4) pod readiness (/health) green"
 kubectl -n $NS rollout status deploy/${APP} --timeout=180s
 kubectl -n $NS get deploy ${APP} -o jsonpath='{.status.readyReplicas}' | grep -qx 1
 
@@ -28,6 +28,6 @@ kubectl -n $NS get httproute ${APP} \
 echo "6) reachable through Traefik (in-cluster curl, gateway ns Service)"
 kubectl -n $NS run curl-$RANDOM --rm -i --restart=Never --image=curlimages/curl:8.10.1 -- \
   -s -o /dev/null -w "%{http_code}\n" -H "Host: api.${DOMAIN:?set DOMAIN}" \
-  http://traefik.gateway.svc.cluster.local/healthz | grep -qx 200
+  http://traefik.gateway.svc.cluster.local/health | grep -qx 200
 
 echo "E2E api: PASS"
