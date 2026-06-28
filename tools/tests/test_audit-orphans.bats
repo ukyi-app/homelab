@@ -116,8 +116,9 @@ teardown() { rm -rf "$TMP"; }
   [ "$output" -eq 0 ]
 }
 
-@test "audit REPORTS missing-activation for an active app with no marker but does NOT block (F1 non-blocking)" {
-  # ⚠️ codex pass3 F1: 마커 없음은 정보성 missing-activation — --ci를 막지 않는다(정상 active-app 데드락 방지).
+@test "audit accepts an active app without an activation marker (create-app merge is approval)" {
+  # create-app PR 머지 자체가 첫 공개 승인이다. .activation 마커는 별도 재활성화/노출 변경
+  # 재증명에만 쓰므로, 초기 active:true 앱에 마커가 없어도 audit 노이즈를 내지 않는다.
   G="$TMP/git3"; mkdir -p "$G"; cp -R "$FR/." "$G/"
   git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
   echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
@@ -126,7 +127,8 @@ teardown() { rm -rf "$TMP"; }
   git -C "$G" add -A; git -C "$G" commit -qm init
   run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$G" --ci
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "missing-activation"
+  run sh -c 'echo "$1" | grep -c missing-activation' _ "$output"
+  [ "$output" -eq 0 ]
 }
 
 @test "an inactive (active:false) orphan row is non-blocking info, not orphan-dns" {

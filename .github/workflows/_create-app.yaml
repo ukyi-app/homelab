@@ -1,8 +1,8 @@
 # create-app reusable — dispatcher(action=create-app)가 호출한다.
 # homelab이 reader App 토큰으로 앱 레포 main HEAD에서 .app-config.yml(+ sealed 시크릿)을 read하고
 # 그 HEAD 커밋 SHA로 이미지 태그를 핀한다(앱 레포가 payload로 SHA를 보내지 않음 — 변조 방지).
-# 결과물은 PR(required check `gate`) — 사람 머지 = 첫 배포 승인. apps.json은 active:false라
-# 머지돼도 DNS는 생기지 않고, activate-app 게이트 통과 후에만 노출된다.
+# 결과물은 PR(required check `gate`) — 사람 머지 = 첫 배포 승인 + 공개 승인.
+# apps.json은 active:true로 생성되어 머지 후 iac.yaml이 DNS/tunnel을 적용한다.
 name: "🧰 _create-app"
 on:
   workflow_call:
@@ -114,10 +114,10 @@ jobs:
           branch="create-app/${APP}-${RUN_ID}"
           git checkout -b "$branch"
           git add "apps/${APP}" docs/memory-ledger.md infra/cloudflare/apps.json
-          git commit -m "feat: ${APP} 앱 생성 (create-app — digest 핀, active:false)"
+          git commit -m "feat: ${APP} 앱 생성 (create-app — digest 핀, 공개 활성화)"
           git push -u origin "$branch"
           {
-            echo "create-app 자동 생성 PR입니다. **머지 = 첫 배포 승인** (DNS는 activate-app 게이트 후 별도)."
+            echo "create-app 자동 생성 PR입니다. **머지 = 첫 배포 승인 + 공개 승인** (DNS/tunnel은 머지 후 iac.yaml이 적용)."
             echo
             echo '```json'; cat /tmp/plan.json; echo '```'
             echo; echo "### ⚠️ 머지 전 체크리스트"

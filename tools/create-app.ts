@@ -180,7 +180,8 @@ if (!DRY) {
   }));
   if (sealedDoc) writeFileSync(`${appDir}/deploy/prod/${app}-secrets.sealed.yaml`, toYaml(sealedDoc));
   if (served && pub) {
-    registry.push({ name: app, host, public: true, active: false }); // active는 activate-app만 켠다
+    // create-app PR 머지가 첫 공개 승인이다. 머지 후 iac.yaml이 이 active:true 행을 DNS/tunnel에 적용한다.
+    registry.push({ name: app, host, public: true, active: true });
     writeFileSync(appsJsonPath, JSON.stringify(registry, null, 2) + "\n");
   }
   // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신
