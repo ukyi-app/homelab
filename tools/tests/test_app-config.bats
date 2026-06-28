@@ -39,7 +39,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; S="$ROOT/tools/app-con
   [ "$status" -eq 0 ]
 }
 
-@test "static.server enum is sws-only (chart contract: caddy removed)" {
-  run jq -e '.properties.static.properties.server.enum == ["sws"]' "$S"
+@test "schema hides static.server from external app config (kind=static implies sws)" {
+  run jq -e '(.properties | has("static") | not)' "$S"
   [ "$status" -eq 0 ]
 }

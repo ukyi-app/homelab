@@ -72,7 +72,6 @@ check(config, schema, ".app-config.yml");
 const kind = config.kind;
 const served = kind !== "worker";
 if (!served && config.route) fail("kind=worker는 route를 가질 수 없다");
-if (kind !== "static" && config.static) fail("static 블록은 kind=static 전용");
 
 const pub = config.route?.public ?? false;
 let host = config.route?.host;
@@ -139,7 +138,8 @@ const envFrom = sealedDoc ? [{ secretRef: { name: `${app}-secrets` } }] : [];
 if (envFrom.length) values.envFrom = envFrom;
 if (served) values.route = { host, paths: config.route?.paths ?? ["/"], public: pub };
 if (config.probes) values.probes = config.probes;
-if (kind === "static") values.static = { server: config.static?.server ?? "sws" };
+// 외부 app-config는 kind만 선언한다. static 서버 구현체(SWS)는 chart 내부 계약으로 숨긴다.
+if (kind === "static") values.static = { server: "sws" };
 values.metrics = { enabled: config.metrics?.enabled ?? false };
 // 선언적 회전: 봉인 콘텐츠 해시를 pod template annotation으로 둔다 → update-secrets가 봉인본을
 // 갱신하면 이 해시가 바뀌어 ArgoCD가 Deployment를 롤링한다(envFrom 변경은 재시작 필요 —
