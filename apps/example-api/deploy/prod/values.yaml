@@ -16,3 +16,8 @@ route:
   paths:
     - /
   public: true
+envFrom:
+  - secretRef:
+      name: example-api-secrets
+podAnnotations:
+  checksum/secrets: 0a7f652ff7ee884b
