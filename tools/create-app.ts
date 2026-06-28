@@ -115,23 +115,20 @@ if (served && pub) {
   if (registry.some((r: any) => r.host === host)) fail(`apps.json에 host '${host}' 이미 존재(오라우팅 차단)`);
 }
 
-// SealedSecret 시크릿: secrets 선언 시 봉인본 필수 + 메타데이터 검증(봉인본이라 전송/커밋 안전)
-const secrets = config.secrets ?? [];
+// SealedSecret 시크릿: 봉인본이 있으면 encryptedData 키 목록을 권위로 삼아 배선한다.
 let sealedDoc = null;
-if (secrets.length) {
-  if (!sealedPath) fail("secrets 선언인데 --sealed <app-secrets.sealed.yaml> 누락 — 앱 레포 deploy/ 경로에서 read");
+let secretKeys: string[] = [];
+if (sealedPath) {
   sealedDoc = parseYaml(readFileSync(sealedPath, "utf8"));
   if (sealedDoc?.kind !== "SealedSecret") fail("sealed 파일이 kind: SealedSecret이 아니다");
   if (sealedDoc?.metadata?.namespace !== "prod") fail(`sealed namespace는 prod여야 한다(strict-scope): ${sealedDoc?.metadata?.namespace}`);
   if (sealedDoc?.metadata?.name !== `${app}-secrets`) fail(`sealed name은 ${app}-secrets여야 한다: ${sealedDoc?.metadata?.name}`);
-  // 봉인본 encryptedData 키가 선언된 secrets(toEnvKey)와 정확히 일치하는지 — 초과/누락 모두 거부.
-  // 선언 안 된 키가 봉인본에 섞이면 의도 밖 env가 주입된다(envFrom secretRef는 컨테이너에 그대로 노출).
-  // 키 이름은 평문이라 시크릿 노출 없이 검증 가능. toEnvKey는 seal-secret.mts SSOT와 동일.
-  const toEnvKey = (n: string) => n.replaceAll("-", "_").toUpperCase();
-  const declaredKeys = [...secrets].map(toEnvKey).sort();
-  const sealedKeys = Object.keys(sealedDoc?.spec?.encryptedData ?? {}).sort();
-  if (JSON.stringify(declaredKeys) !== JSON.stringify(sealedKeys))
-    fail(`sealed encryptedData 키가 선언된 secrets와 불일치(섀도잉/누락 위험) — 선언(toEnvKey): [${declaredKeys.join(", ")}] vs 봉인: [${sealedKeys.join(", ")}]`);
+  secretKeys = Object.keys(sealedDoc?.spec?.encryptedData ?? {}).sort();
+  if (secretKeys.length === 0) fail("sealed encryptedData가 비어 있다");
+  const badKeys = secretKeys.filter((key) => !/^[A-Z][A-Z0-9_]*$/.test(key));
+  if (badKeys.length) fail(`sealed encryptedData 키는 UPPER_SNAKE여야 한다: ${badKeys.join(", ")}`);
+  const deniedKeys = secretKeys.filter((key) => key === "DATABASE_ADMIN_URL");
+  if (deniedKeys.length) fail(`앱 런타임 봉인 금지 키: ${deniedKeys.join(", ")}`);
 }
 
 // ---------- 4) values.yaml 구성 ----------
@@ -140,7 +137,7 @@ const values: Record<string, any> = {
   kind, replicas,
   resources: { requests: { cpu: rq.cpu, memory: rq.memory }, limits: { cpu: lm.cpu, memory: lm.memory } },
 };
-const envFrom = secrets.length ? [{ secretRef: { name: `${app}-secrets` } }] : [];
+const envFrom = sealedDoc ? [{ secretRef: { name: `${app}-secrets` } }] : [];
 if (envFrom.length) values.envFrom = envFrom;
 if (served) values.route = { host, paths: config.route?.paths ?? ["/"], public: pub };
 if (config.probes) values.probes = config.probes;
@@ -160,7 +157,7 @@ const bindings = { autoDeploy: config.deploy?.autoDeploy ?? true };
 const plan = {
   app, repo, tag, digest, kind, host: served ? host : null, replicas,
   reqMi, limitMi, ledger: { before: sumLimit, after: sumLimit + limitMi, budget },
-  bindings, secrets,
+  bindings, secretKeys,
   checklist: [
     `이미지 pull: ghcr-pull imagePullSecret(prod NS)로 private 패키지 pull — 패키지 가시성 public 전환 불필요`,
   ],
@@ -176,7 +173,7 @@ if (!DRY) {
   writeFileSync(`${appDir}/deploy/prod/kustomization.yaml`, toYaml({
     apiVersion: "kustomize.config.k8s.io/v1beta1", kind: "Kustomization",
     namespace: "prod",
-    ...(secrets.length ? { resources: [`${app}-secrets.sealed.yaml`] } : {}),
+    ...(sealedDoc ? { resources: [`${app}-secrets.sealed.yaml`] } : {}),
   }));
   if (sealedDoc) writeFileSync(`${appDir}/deploy/prod/${app}-secrets.sealed.yaml`, toYaml(sealedDoc));
   if (served && pub) {

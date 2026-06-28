@@ -9,7 +9,7 @@
 | 워크플로 | 입력 | 언제 |
 |---|---|---|
 | ✨ create-app | app_repo | 신규 앱 온보딩(앱 레포 main HEAD 기준, 매니페스트+공개 PR) |
-| ✨ update-secrets | app_repo | 앱 SealedSecret 갱신(앱 레포 main HEAD 기준) |
+| ✨ update-secrets | app_repo | 앱 SealedSecret 첫 추가/갱신(앱 레포 main HEAD 기준) |
 | ✨ create-database | spec | 앱용 CNPG DB 프로비전 |
 | ✨ create-cache | spec | 앱용 redis 프로비전 |
 
