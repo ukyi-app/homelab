@@ -160,6 +160,29 @@ EOF
   yq -e '.metrics.enabled == true' "$FR/apps/orders/deploy/prod/values.yaml"
 }
 
+@test "create-app maps kind=static to internal sws without exposing static.server in app config" {
+  cat > "$TMP/.app-config.yml" <<'EOF'
+kind: static
+resources: { requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 100m, memory: 64Mi} }
+route: { public: false }
+EOF
+  gen
+  [ "$status" -eq 0 ]
+  yq -e '.kind == "static" and .static.server == "sws" and .route.host == "orders.home.example.com"' \
+    "$FR/apps/orders/deploy/prod/values.yaml"
+}
+
+@test "create-app rejects static.server in external app config" {
+  cat > "$TMP/.app-config.yml" <<'EOF'
+kind: static
+resources: { requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 100m, memory: 64Mi} }
+route: { public: false }
+static: { server: sws }
+EOF
+  gen
+  [ "$status" -ne 0 ]
+}
+
 @test "create-app adds a ledger row and respects the budget gate" {
   gen
   [ "$status" -eq 0 ]
