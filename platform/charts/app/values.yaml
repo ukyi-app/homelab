@@ -41,8 +41,8 @@ homepage:
 
 # --- probes ---
 probes:
-  liveness: { path: /healthz }
-  readiness: { path: /readyz }
+  liveness: { path: /health }
+  readiness: { path: /health }
 
 # liveness override (raw probe spec). 비면 기본: served=httpGet, **worker=liveness 없음**.
 # distroless(Rust static/scratch) worker는 /bin/true가 없어 기본 liveness가 CrashLoop을 유발하므로,
@@ -66,7 +66,7 @@ securityContext:
   capabilities: { drop: ["ALL"] }
 
 terminationGracePeriodSeconds: 30
-preStopSleepSeconds: 3 # 0이면 preStop 생략(distroless엔 /bin/sleep 부재 — drain은 terminationGracePeriod+readiness)
+preStopSleepSeconds: 0 # distroless 기본 안전값. /bin/sleep 있는 이미지에서 drain 지연이 필요할 때만 >0.
 
 # SA 토큰: 앱은 차트가 RBAC를 0 부여하므로 k8s API 불요 → 토큰 미마운트. API 쓰는 앱만 true.
 automountServiceAccountToken: false
@@ -83,7 +83,7 @@ ports:
 
 # --- scrape ---
 metrics:
-  enabled: true # prometheus.io/scrape annotation 추가
+  enabled: false # true면 service에 metrics 포트 + prometheus.io/scrape annotation 추가
 
 # 추가 매니페스트(NetworkPolicy/ConfigMap 등)는 앱의 deploy 디렉토리(appset source#3,
 # apps/<name>/deploy/prod kustomization)로. ⚠️ source#3는 별도 경로라 임의 kind 주입이 여전히

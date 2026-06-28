@@ -5,15 +5,15 @@ R="--set resources.requests.cpu=50m --set resources.requests.memory=64Mi \
 
 dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 $R "$@" | yq 'select(.kind=="Deployment")'; }
 
-@test "service Deployment is wave2, non-root, with probes and scrape annotation" {
+@test "service Deployment is wave2, non-root, with one health probe endpoint" {
   out=$(dep --set kind=service --set route.host=api.example.com)
   [[ "$out" == *'argocd.argoproj.io/sync-wave: "2"'* ]]
   [[ "$out" == *"runAsNonRoot: true"* ]]
   [[ "$out" == *"runAsUser: 65532"* ]]
-  [[ "$out" == *"path: /healthz"* ]]
-  [[ "$out" == *"path: /readyz"* ]]
-  [[ "$out" == *'prometheus.io/scrape: "true"'* ]]
-  [[ "$out" == *"sleep"* ]]
+  [[ "$out" == *"path: /health"* ]]
+  [[ "$out" != *"path: /healthz"* ]]
+  [[ "$out" != *"path: /readyz"* ]]
+  [[ "$out" != *"sleep"* ]]
   [[ "$out" == *"terminationGracePeriodSeconds: 30"* ]]
 }
 

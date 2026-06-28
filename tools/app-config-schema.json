@@ -40,6 +40,11 @@
       "additionalProperties": false,
       "properties": { "server": { "enum": ["sws"] } }
     },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "enabled": { "type": "boolean", "default": false } }
+    },
     "deploy": {
       "type": "object",
       "additionalProperties": false,

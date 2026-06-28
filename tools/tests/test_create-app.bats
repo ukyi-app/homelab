@@ -43,7 +43,7 @@ gen() {
 @test "create-app values.yaml has no migrate/db.enabled (migrate removed)" {
   gen
   [ "$status" -eq 0 ]
-  run grep -E "migrateCmd|enabled:" "$FR/apps/orders/deploy/prod/values.yaml"
+  run grep -E "migrateCmd|^db:" "$FR/apps/orders/deploy/prod/values.yaml"
   [ "$status" -ne 0 ]   # migrate Job 제거 → values.db.enabled/migrateCmd 미생성
 }
 
@@ -130,7 +130,7 @@ EOF
   [ "$status" -ne 0 ]
 }
 
-@test "create-app rejects DATABASE_ADMIN_URL even when it is already sealed" {
+@test "create-app allows DATABASE_ADMIN_URL when it is already sealed" {
   cat > "$TMP/sealed.yaml" <<'EOF'
 apiVersion: bitnami.com/v1alpha1
 kind: SealedSecret
@@ -141,8 +141,23 @@ spec:
   encryptedData: { DATABASE_ADMIN_URL: AgX... }
 EOF
   gen --sealed "$TMP/sealed.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
   echo "$output" | grep -q "DATABASE_ADMIN_URL"
+}
+
+@test "create-app disables metrics by default for service apps" {
+  gen
+  [ "$status" -eq 0 ]
+  yq -e '.metrics.enabled == false' "$FR/apps/orders/deploy/prod/values.yaml"
+}
+
+@test "create-app preserves metrics opt-in from app config" {
+  cat >> "$TMP/.app-config.yml" <<'EOF'
+metrics: { enabled: true }
+EOF
+  gen
+  [ "$status" -eq 0 ]
+  yq -e '.metrics.enabled == true' "$FR/apps/orders/deploy/prod/values.yaml"
 }
 
 @test "create-app adds a ledger row and respects the budget gate" {

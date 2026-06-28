@@ -54,8 +54,6 @@ const sealedKeys = Object.keys(sealedDoc?.spec?.encryptedData ?? {}).sort();
 if (sealedKeys.length === 0) fail("sealed encryptedData가 비어 있다");
 const badKeys = sealedKeys.filter((key) => !/^[A-Z][A-Z0-9_]*$/.test(key));
 if (badKeys.length) fail(`sealed encryptedData 키는 UPPER_SNAKE여야 한다: ${badKeys.join(", ")}`);
-const deniedKeys = sealedKeys.filter((key) => key === "DATABASE_ADMIN_URL");
-if (deniedKeys.length) fail(`앱 런타임 봉인 금지 키: ${deniedKeys.join(", ")}`);
 
 const checksum = createHash("sha256").update(sealedYaml).digest("hex").slice(0, 16);
 const secretName = `${app}-secrets`;

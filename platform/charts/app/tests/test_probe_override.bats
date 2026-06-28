@@ -22,7 +22,12 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   run grep -q 'preStop' <<<"$out"; [ "$status" -ne 0 ]
 }
 
-@test "default preStop still uses /bin/sleep (unchanged)" {
+@test "default preStop omits /bin/sleep (distroless-safe)" {
   out=$(dep --set kind=service --set route.host=a.example.com)
+  run grep -q 'preStop' <<<"$out"; [ "$status" -ne 0 ]
+}
+
+@test "preStopSleepSeconds>0 explicitly enables /bin/sleep" {
+  out=$(dep --set kind=service --set route.host=a.example.com --set preStopSleepSeconds=3)
   echo "$out" | grep -q 'sleep'
 }
