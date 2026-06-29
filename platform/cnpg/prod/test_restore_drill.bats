@@ -6,7 +6,7 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   grep -qE 'schedule:\s+"0 5 \* \* 0"' "$cj" # 일요일 05:00
 }
 @test "drill uses the M6-built pg-tools image" {
-  grep -q 'ghcr.io/ukyi-app/pg-tools:16-rclone' "$cj"
+  grep -q 'ghcr.io/ukyi-app/pg-tools:18-rclone' "$cj"
 }
 @test "drill bootstraps a FRESH cluster via recovery from R2" {
   grep -q 'bootstrap:' "$sh"
