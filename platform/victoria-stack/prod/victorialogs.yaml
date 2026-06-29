@@ -25,7 +25,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: victorialogs
-          image: victoriametrics/victoria-logs:v0.42.0-victorialogs
+          image: victoriametrics/victoria-logs:v1.24.0-victorialogs
           args:
             - --storageDataPath=/vlogs
             - --retentionPeriod=14d
