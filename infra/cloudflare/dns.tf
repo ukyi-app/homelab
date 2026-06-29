@@ -38,12 +38,3 @@ resource "cloudflare_dns_record" "app" {
   proxied  = true
   ttl      = 1
 }
-
-# 일회성 마이그레이션: 구 구조(앱 DNS가 public)의 example-api(이미 철거됨) state 항목을 분리된 app
-# 리소스 주소로 옮긴다. apps.json=[]라 옮긴 뒤 desired에 없어 삭제되며, 그 삭제는 app[*]라 가드
-# allowlist 대상이 되어 무인 자동 apply된다(잔류 레코드 자동 정리 → 별도 수동 apply 불필요).
-# 적용 후 이 블록은 no-op이므로 후속 PR에서 제거 가능.
-moved {
-  from = cloudflare_dns_record.public["example-api.ukyi.app"]
-  to   = cloudflare_dns_record.app["example-api.ukyi.app"]
-}
