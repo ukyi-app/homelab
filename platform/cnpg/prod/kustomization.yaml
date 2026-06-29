@@ -15,6 +15,7 @@ resources:
   - restore-drill-cronjob.yaml
   - networkpolicy.yaml # database 계층 ingress 격리
   - pg-rw-tailscale-service.yaml # pg-rw tailscale LoadBalancer(owner GUI/로컬 직결)
+  - databases/ # 논리 DB + owner/ro 시크릿 (create-database 산출물)
 
 generators:
   - secret-generator.yaml # KSOPS — database ns의 네 가지 시드를 전부 렌더 (아래 참조)
