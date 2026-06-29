@@ -16,7 +16,7 @@ spec:
     # canonical 도메인으로 핀 — cloudnative-pg.github.io/charts는 cloudnative-pg.io/charts로 301
     # 리다이렉트한다(현재 ArgoCD/helm이 따라가 동작하나, sealed-secrets처럼 구 Pages가 사라지면 깨짐).
     - repoURL: https://cloudnative-pg.io/charts
-      targetRevision: 0.26.0
+      targetRevision: 0.28.3
       chart: cloudnative-pg
       helm:
         valueFiles:
