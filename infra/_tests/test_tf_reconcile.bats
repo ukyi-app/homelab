@@ -40,6 +40,11 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
   [ "$status" -eq 0 ]
 }
 
+@test "cloudflare reconcile passes allow=app-DNS + allow_max cap (teardown auto, mass blocked)" {
+  # app DNS(app[*])만 자동 apply, apex/www는 보호, allow_max로 대량 삭제 차단.
+  grep -qF 'cloudflare_dns_record\.app' "$WF" && grep -qE '^[[:space:]]+allow_max:' "$WF"
+}
+
 @test "cloudflare reconcile uses the tf-destroy-guard composite (block) not inline jq" {
   run grep -q 'uses: ./.github/actions/tf-destroy-guard' "$WF"
   [ "$status" -eq 0 ]
