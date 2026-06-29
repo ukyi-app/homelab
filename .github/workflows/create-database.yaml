@@ -1,13 +1,39 @@
-# create-database 변이 디스패처 — 앱용 CNPG DB 프로비전(spec → CR/conn PR). owner는 name만(고정).
-# 변이 로직은 _create-database.yaml(reusable)에 있다 — 이 파일은 trigger+validate+notify 셸.
+# create-database 변이 디스패처 — 앱용 CNPG DB 프로비전(입력 → spec 조립 → CR/conn PR). owner는 name만(고정).
+# 변이 로직은 _create-database.yaml(reusable)에 있다 — 이 파일은 trigger+조립+validate+notify 셸.
+# 입력은 평평한 필드(name + 확장 체크박스 + 자유입력) — GitHub UI에서 클릭 선택. validate 잡이
+# 이를 spec JSON으로 조립해 reusable(spec 문자열 계약)에 넘긴다(reusable/provision-db는 무변경).
 name: "✨ create-database"
-run-name: "✨ create-database — ${{ inputs.spec }}"
+run-name: "✨ create-database — ${{ inputs.name }}"
 on:
   workflow_dispatch:
     inputs:
-      spec:
-        description: '{"name":"<db>","extensions":["..."]}'
+      name:
+        description: "DB 이름 (소문자 시작, 영숫자/하이픈, ≤30자)"
         required: true
+      ext_pg_trgm:
+        description: "확장 pg_trgm — 유사도/퍼지 검색"
+        type: boolean
+        default: false
+      ext_pgcrypto:
+        description: "확장 pgcrypto — gen_random_uuid()/암복호화"
+        type: boolean
+        default: false
+      ext_citext:
+        description: "확장 citext — 대소문자 무시 텍스트"
+        type: boolean
+        default: false
+      ext_vector:
+        description: "확장 vector(pgvector) — 임베딩"
+        type: boolean
+        default: false
+      ext_postgis:
+        description: "확장 postgis — 지리정보"
+        type: boolean
+        default: false
+      ext_extra:
+        description: "기타 확장 (쉼표구분, 선택) — 예: hstore,ltree,uuid-ossp"
+        required: false
+        default: ""
 
 concurrency:
   group: homelab-mutation
@@ -20,22 +46,50 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-24.04-arm
+    outputs:
+      spec: ${{ steps.assemble.outputs.spec }}   # 조립한 spec JSON을 reusable 호출 잡으로 전달
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with: { ref: main }
       - uses: ./.github/actions/setup-bun
         with: { install: 'false' }     # validate-mutation 체크는 deps 불요
-      - env:
-          PAYLOAD: ${{ toJSON(github.event.inputs) }} # owner 입력도 비신뢰 — env 경유, 인라인 보간 금지
+      - name: 입력 → spec JSON 조립 (체크박스+자유입력 → extensions, 빈 값이면 생략·중복 제거)
+        id: assemble
+        env: # 비신뢰 입력 — env 경유, run 안 인라인 보간 금지(boolean은 true/false 리터럴)
+          NAME: ${{ inputs.name }}
+          PG_TRGM: ${{ inputs.ext_pg_trgm }}
+          PGCRYPTO: ${{ inputs.ext_pgcrypto }}
+          CITEXT: ${{ inputs.ext_citext }}
+          VECTOR: ${{ inputs.ext_vector }}
+          POSTGIS: ${{ inputs.ext_postgis }}
+          EXTRA: ${{ inputs.ext_extra }}
         run: |
-          printf '%s' "$PAYLOAD" > /tmp/payload.json
+          spec=$(jq -cn \
+            --arg name "$NAME" \
+            --argjson pg_trgm "${PG_TRGM:-false}" \
+            --argjson pgcrypto "${PGCRYPTO:-false}" \
+            --argjson citext "${CITEXT:-false}" \
+            --argjson vector "${VECTOR:-false}" \
+            --argjson postgis "${POSTGIS:-false}" \
+            --arg extra "$EXTRA" \
+            '( [ {n:"pg_trgm",on:$pg_trgm}, {n:"pgcrypto",on:$pgcrypto}, {n:"citext",on:$citext}, {n:"vector",on:$vector}, {n:"postgis",on:$postgis} ]
+                 | map(select(.on) | .n) )
+             + ( $extra | split(",") | map(gsub("(^\\s+|\\s+$)"; "")) | map(select(. != "")) )
+             | unique as $e
+             | {name: $name} + (if ($e | length) > 0 then {extensions: $e} else {} end)')
+          printf 'spec=%s\n' "$spec" >> "$GITHUB_OUTPUT"   # jq -c = 단일행 → GITHUB_OUTPUT 주입 안전
+      - name: spec 계약 검증 (허용 밖 필드·예약 이름·확장명 거부 — fail-closed)
+        env:
+          SPEC: ${{ steps.assemble.outputs.spec }}
+        run: |
+          jq -n --arg action create-database --arg spec "$SPEC" '{action: $action, spec: $spec}' > /tmp/payload.json
           bun tools/validate-mutation.ts --action create-database --payload-file /tmp/payload.json
 
   create-database:
     needs: validate
     uses: ./.github/workflows/_create-database.yaml
     with:
-      spec: ${{ github.event.inputs.spec }}
+      spec: ${{ needs.validate.outputs.spec }}   # validate가 조립·검증한 spec JSON
     secrets: inherit
     permissions:
       contents: read
