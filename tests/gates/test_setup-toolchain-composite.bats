@@ -8,7 +8,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 
 @test "setup-toolchain composite action exists and pins conftest" {
   [ -f .github/actions/setup-toolchain/action.yml ]
-  run grep -E 'conftest_0\.56\.0' .github/actions/setup-toolchain/action.yml
+  run grep -E 'conftest_0\.68\.2' .github/actions/setup-toolchain/action.yml
   [ "$status" -eq 0 ]
 }
 
@@ -17,8 +17,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   run grep -F 'uses: ./.github/actions/setup-toolchain' .github/workflows/verify.yaml
   [ "$status" -eq 0 ]
-  run grep -E 'conftest_0\.56\.0' .github/workflows/ci.yaml
+  run grep -E 'conftest_0\.68\.2' .github/workflows/ci.yaml
   [ "$status" -ne 0 ]
-  run grep -E 'conftest_0\.56\.0' .github/workflows/verify.yaml
+  run grep -E 'conftest_0\.68\.2' .github/workflows/verify.yaml
   [ "$status" -ne 0 ]
 }

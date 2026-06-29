@@ -9,7 +9,7 @@ inputs:
   kubeconform: { description: kubeconform v0.6.7,    default: 'false' }
   helm:        { description: helm v3.16.4,          default: 'false' }
   kustomize:   { description: kustomize v5.4.3,      default: 'false' }
-  conftest:    { description: conftest v0.56.0,      default: 'false' }
+  conftest:    { description: conftest v0.68.2,      default: 'false' }
   bats:        { description: bats (apt),            default: 'false' }
   shellcheck:  { description: shellcheck v0.11.0,    default: 'false' }
   sops:        { description: sops v3.9.4,           default: 'false' }
@@ -53,8 +53,8 @@ runs:
       shell: bash
       run: |
         f=/tmp/conftest.tgz
-        curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_arm64.tar.gz -o "$f"
-        echo "86334e4ca57b991f0dca0dd3d011270edda50fdff2b2e208954ea639bb1c99ec  $f" | sha256sum -c -
+        curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.68.2/conftest_0.68.2_Linux_arm64.tar.gz -o "$f"
+        echo "4005441089655ded475384cb87d57762ae08ebef78305bada49c70530d2f4184  $f" | sha256sum -c -
         sudo tar -xz -C /usr/local/bin -f "$f" conftest
     - if: ${{ inputs.bats == 'true' }}
       shell: bash
