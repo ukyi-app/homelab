@@ -3,9 +3,9 @@
 f=platform/argocd/root/apps/cnpg-operator.yaml
 
 @test "operator chart version is pinned (no caret/tilde/wildcard)" {
-  # chart: 소스라 targetRevision은 차트 semver(0.26.0) — git URL+태그(cnpg-v0.26.0)는 ArgoCD가
-  # "improper constraint"로 거부한다(cnpg-operator.yaml 주석 참고). 0.26.0 ↔ git tag cnpg-v0.26.0.
-  run grep -E 'targetRevision:\s+0\.26\.0' "$f"
+  # chart: 소스라 targetRevision은 차트 semver(0.28.3) — git URL+태그(cnpg-v0.26.0)는 ArgoCD가
+  # "improper constraint"로 거부한다(cnpg-operator.yaml 주석 참고). 0.28.3 ↔ git tag cnpg-v0.28.3.
+  run grep -E 'targetRevision:\s+0\.28\.3' "$f"
   [ "$status" -eq 0 ]
   run grep -E 'targetRevision:\s+[~^*]' "$f"
   [ "$status" -ne 0 ]
