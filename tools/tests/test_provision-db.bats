@@ -198,6 +198,21 @@ EOF
   grep -q "db-orders-ro-conn.sealed.yaml" "$ck"
 }
 
+@test "provision-db gives owner/ro password SealedSecrets a sync-wave ahead of the Cluster CR" {
+  provision --name orders --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+  own="$FIX/platform/cnpg/prod/databases/db-orders-owner.sealed.yaml"
+  ro="$FIX/platform/cnpg/prod/databases/db-orders-ro.sealed.yaml"
+  # CNPG가 managed role을 reconcile하기 전에 비번 Secret이 먼저 적용되도록, ArgoCD가 적용하는
+  # SealedSecret '리소스 자체'의 top-level metadata에 wave -2(Cluster CR -1보다 앞섬)가 있어야 한다.
+  # (kubeseal은 입력 Secret annotation을 spec.template로 옮기므로 seal 후 top-level 주입이 필요)
+  grep -q 'argocd.argoproj.io/sync-wave: "-2"' "$own"
+  grep -q 'argocd.argoproj.io/sync-wave: "-2"' "$ro"
+  # conn 핸들(prod NS)은 CNPG 롤 게이팅과 무관 — wave를 받지 않는다(owner/ro만)
+  conn="$FIX/platform/data-conn/prod/db-orders-conn.sealed.yaml"
+  ! grep -q 'sync-wave' "$conn"
+}
+
 @test "provision-db merges into an existing data-conn kustomization without dropping entries" {
   mkdir -p "$FIX/platform/data-conn/prod"
   cat > "$FIX/platform/data-conn/prod/kustomization.yaml" <<'EOF'

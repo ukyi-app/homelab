@@ -133,6 +133,17 @@ function seal(manifest: object, outPath: string) {
   catch (e) { fail(e instanceof Error ? e.message : String(e)); } // strict catch(F11)·기존 exit 코드 보존
 }
 
+// CNPG가 managed role을 reconcile하기 전에 비번 Secret이 먼저 적용되도록, owner/ro 비번
+// SealedSecret을 Cluster CR(wave -1)보다 앞선 wave -2로 적용한다. kubeseal은 입력 Secret의
+// annotations를 SealedSecret의 spec.template.metadata(생성될 평문 Secret용)로 옮기므로, ArgoCD가
+// 적용 순서를 보는 SealedSecret '리소스 자체'의 top-level metadata.annotations에는 seal 후 주입한다.
+const CNPG_SECRET_WAVE = "-2"; // < Cluster CR(-1) — 롤 reconcile 전 비번 Secret 존재 보장(방어 1층, 결정적 보장은 ensure-role-password)
+function withSyncWave(r: { outPath: string; content: string }) {
+  const doc = parseDocument(r.content);
+  doc.setIn(["metadata", "annotations", "argocd.argoproj.io/sync-wave"], CNPG_SECRET_WAVE);
+  return { outPath: r.outPath, content: doc.toString({ lineWidth: 0 }) }; // lineWidth:0 = 긴 encryptedData scalar 재줄바꿈 금지
+}
+
 // 런타임은 PgBouncer(pg-pooler-rw) 경유 — 다중 앱 풀이 max_connections=50을 고갈시키지 않게.
 // 마이그레이션은 session 시맨틱이 필요해 직결(pg-rw). ro도 직결 — 단일 인스턴스라 pg-ro
 // Service는 endpoint가 없고(replica 전용), 디버깅 세션 역시 session 시맨틱이 필요하다.
@@ -142,18 +153,18 @@ const url = (user: string, pw: string, host: string) => `postgres://${encodeURIC
 
 // 봉인을 파일 쓰기보다 전부 먼저 수행 — kubeseal 실패 시 부분 산출이 남지 않는다
 const sealed = [
-  seal({ // CNPG managed role passwordSecret 계약: kubernetes.io/basic-auth (username/password)
+  withSyncWave(seal({ // CNPG managed role passwordSecret 계약: kubernetes.io/basic-auth (username/password)
     apiVersion: "v1", kind: "Secret",
     metadata: { name: `db-${name}-owner`, namespace: "database" },
     type: "kubernetes.io/basic-auth",
     stringData: { username: owner, password: pwOwner },
-  }, paths.ownerSealed),
-  seal({
+  }, paths.ownerSealed)),
+  withSyncWave(seal({
     apiVersion: "v1", kind: "Secret",
     metadata: { name: `db-${name}-ro`, namespace: "database" },
     type: "kubernetes.io/basic-auth",
     stringData: { username: roRole, password: pwRo },
-  }, paths.roSealed),
+  }, paths.roSealed)),
   seal({ // 앱 소비용 conn 핸들 (prod NS — envFrom은 네임스페이스-로컬)
     apiVersion: "v1", kind: "Secret",
     metadata: { name: `db-${name}-conn`, namespace: "prod" },

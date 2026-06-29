@@ -13,6 +13,8 @@ resources:
   - pgdump-hedge-cronjob.yaml
   - restore-drill-rbac.yaml
   - restore-drill-cronjob.yaml
+  - ensure-role-password-rbac.yaml # SA/RBAC — managed role 비번 적용 보장 Job용
+  - ensure-role-password-job.yaml # PostSync hook: owner/ro 비번 적용 결정적 보장(#3 회귀 차단, fail-closed)
   - networkpolicy.yaml # database 계층 ingress 격리
   - pg-rw-tailscale-service.yaml # pg-rw tailscale LoadBalancer(owner GUI/로컬 직결)
   - databases/ # 논리 DB + owner/ro 시크릿 (create-database 산출물)
@@ -27,6 +29,9 @@ configMapGenerator:
   - name: restore-drill-script
     files:
       - drill.sh=restore-drill-script.sh
+  - name: ensure-role-password-script # PostSync hook Job이 /scripts로 마운트
+    files:
+      - ensure-role-password.sh
 
 generatorOptions:
   disableNameSuffixHash: true # 고정 이름: cnpg-r2-creds, pg-app-credentials, pg-admin-credentials, restore-drill-alerting, restore-drill-script
