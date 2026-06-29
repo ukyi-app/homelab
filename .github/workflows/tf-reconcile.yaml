@@ -87,6 +87,10 @@ jobs:
           mode: block
           root: infra/cloudflare
           plan: tf.plan
+          # allow: app 공개 DNS(app[*]) delete는 자동 apply(차단 제외) — teardown 머지/취소 후 다음 주기에
+          # 자동 회수. apex/www(public[*])는 비대상. allow_max=1: 대량 삭제는 자동 허용 취소→차단.
+          allow: '^cloudflare_dns_record\.app\['
+          allow_max: '1'
       # codex pass5 F1: 가드 내부 오류(plan 손상·jq 부재 등)는 delete 차단과 다르다 — 조용히 skip하지 말고 잡 실패.
       - name: 가드 내부 오류면 잡 실패 (delete 차단과 구분)
         if: steps.drift.outputs.drift == 'true' && steps.guard.outputs.result == 'error'

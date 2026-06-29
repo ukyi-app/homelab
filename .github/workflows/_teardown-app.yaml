@@ -58,7 +58,7 @@ jobs:
           git commit -m "chore: ${APP} 앱 철거 (teardown-app)"
           git push -u origin "$branch"
           {
-            echo "teardown-app 자동 생성 PR입니다. **머지 = 철거 승인** — ArgoCD가 Application/워크로드/SealedSecret prune; active였으면 머지 후 iac.yaml이 DNS/tunnel 제거."
+            echo "teardown-app 자동 생성 PR입니다. **머지 = 철거 승인** — ArgoCD가 Application/워크로드/SealedSecret prune; active였으면 머지 후 iac.yaml이 DNS/tunnel ingress를 **자동 제거**(app 공개 DNS는 destroy 가드 allowlist라 무인 apply 허용). 별도 수동 terraform apply 불필요."
             echo
             echo "**사전 상태**: active=${active} (롤백 시 DNS 복원 필요 여부 판단)"
             echo "**롤백**: 잘못 머지하면 이 PR을 git revert(또는 GitHub Revert) → apps/${APP}/(SealedSecret 포함)+apps.json 행+원장 행 복원 → ArgoCD 재생성 + (active였으면) iac DNS 재적용."

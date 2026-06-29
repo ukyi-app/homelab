@@ -104,6 +104,9 @@ jobs:
           # 0(no-op)·2(변경 있음)는 정상, 그 외만 실패로 가시화(required 아님 → PR 차단 안 함).
           [ "$rc" = "0" ] || [ "$rc" = "2" ] || exit "$rc"
       # 인라인 destroy jq 경고를 tf-destroy-guard composite(warn)로 치환 — 산출된 tf.plan을 검사.
+      # allow: app 공개 DNS(cloudflare_dns_record.app[*]) delete는 자동 apply 표면이라 경고 제외
+      # (teardown은 정상 흐름) — apex/www·구조적 delete/replace만 경고. allow_max 초과 대량 삭제도 경고.
+      # 실제 plan은 위 job summary에 게시된다.
       - name: destroy 사전 경고 (warn)
         if: steps.pf.outputs.configured == 'true'
         uses: ./.github/actions/tf-destroy-guard
@@ -111,6 +114,8 @@ jobs:
           mode: warn
           root: infra/cloudflare
           plan: tf.plan
+          allow: '^cloudflare_dns_record\.app\['
+          allow_max: '1'
 
   # ── push-to-main: cloudflare 루트 plan→apply (R2 state) ─────────────────────────────
   apply:
@@ -144,14 +149,19 @@ jobs:
           state-key: cloudflare/prod/terraform.tfstate
       - name: terraform plan (-out=tf.plan)
         run: terraform -chdir=infra/cloudflare plan -input=false -lock-timeout=120s -out=tf.plan
-      # primary merge→apply 경로 destroy 가드 — DNS/tunnel/ruleset의 delete/replace를 무인 apply 차단.
-      # (prevent_destroy R2 버킷은 plan에서 이미 막히지만, 그 외 리소스 replace=delete+create도 차단.)
+      # primary merge→apply 경로 destroy 가드 — apex/www(public[*])·tunnel/ruleset/zone 등 구조적
+      # 리소스의 delete/replace는 무인 apply 차단. (prevent_destroy R2 버킷은 plan에서 이미 막힘.)
+      # allow: app 공개 DNS(cloudflare_dns_record.app[*]) delete만 자동 apply 허용 — create-app의 DNS
+      # 추가 자동 apply와 대칭으로 teardown-app 머지 시 DNS/tunnel ingress가 자동 회수된다.
+      # allow_max=1: 대량 app DNS 삭제(apps.json 통째 비움)는 자동 허용 취소→차단(blast-radius 캡).
       - name: destroy 가드 (block)
         uses: ./.github/actions/tf-destroy-guard
         with:
           mode: block
           root: infra/cloudflare
           plan: tf.plan
+          allow: '^cloudflare_dns_record\.app\['
+          allow_max: '1'
       - name: terraform apply (plan 산출물만 적용)
         run: terraform -chdir=infra/cloudflare apply -input=false tf.plan
       - name: telegram notify
