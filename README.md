@@ -99,7 +99,7 @@ k3s 단일 노드(Mac mini · OrbStack VM · arm64) **GitOps 모노레포**. Arg
 
 ```bash
 make verify       # 기반 게이트: skeleton + 메모리 원장(conftest) + sops 라운드트립
-make chart-test   # 공유 차트: 3 kind(service/worker/static) 렌더 + kubeconform + bats
+make chart-test   # 공유 차트: 3 kind(web/worker/site) 렌더 + kubeconform + bats
 make tf-validate  # terraform fmt + validate (3 루트)
 make bootstrap    # 멱등 DR 진입점: ArgoCD + sops-age + root app
 make ci           # push 전 단일 진입점 — CI 'gate' job을 로컬에서 그대로 재현
