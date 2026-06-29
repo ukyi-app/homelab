@@ -1,7 +1,13 @@
 #!/usr/bin/env bats
 
 # Milestone 3 게이트 — 네트워킹 경로 엔드투엔드 검증.
-# LIVE: DOMAIN env 설정 필요; kubectl 컨텍스트 = k3s VM; tailnet에 연결된 기기에서 실행.
+# LIVE: kubectl 컨텍스트 = k3s VM; tailnet에 연결된 기기에서 실행.
+
+setup() {
+  # DOMAIN 기본값 — make verify-posture는 KUBECONFIG만 주입하므로 기본 zone(ukyi.app)으로 폴백한다.
+  # 다른 zone을 테스트하려면 `DOMAIN=… bats …`로 override(:= 는 미설정일 때만 대입).
+  : "${DOMAIN:=ukyi.app}"
+}
 
 @test "Gateway 'homelab' is Accepted + Programmed" {
   run bash -c "kubectl -n gateway get gateway homelab -o jsonpath='{range .status.conditions[*]}{.type}={.status};{end}'"
@@ -28,9 +34,10 @@
 }
 
 @test "public path serves through Traefik via the tunnel" {
-  # whoami는 설계상 내부 전용(web-internal) — 공개 DNS 레코드는 apex/api/www뿐이다.
-  # 공개 경로 증명은 api 앱의 /health로 한다 (DNS→Cloudflare→tunnel→Traefik web-public→api).
-  run bash -c "curl -s -o /dev/null -w '%{http_code}' https://api.${DOMAIN}/health"
+  # whoami는 설계상 내부 전용(web-internal) — 공개 DNS 레코드는 apex/www + 활성 앱 host(현재 page)다.
+  # 공개 경로 증명은 page 앱의 /health로 한다 (DNS→Cloudflare→tunnel→Traefik web-public→page).
+  # (구 'api' 앱은 미배포 — apps.json의 활성 public 앱이 권위. page.${DOMAIN}/health=200 확인.)
+  run bash -c "curl -s -o /dev/null -w '%{http_code}' https://page.${DOMAIN}/health"
   [ "$output" = "200" ]
 }
 

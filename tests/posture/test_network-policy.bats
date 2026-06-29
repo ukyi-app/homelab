@@ -6,6 +6,27 @@
 # LIVE: kubectl 컨텍스트 = M3+M4가 sync되고 network-policies 컴포넌트가 적용된 k3s VM 필요.
 # 렌더된 매니페스트가 아니라 실제 적용(kube-router)을 검증한다.
 
+# ⚠️ prod 네임스페이스는 restricted PSA를 enforce한다 — 임시 프로브 파드도 PSA-호환
+# securityContext(runAsNonRoot·seccompProfile·drop ALL·allowPrivilegeEscalation=false)가
+# 있어야 admit된다. 없으면 'violates PodSecurity restricted'로 거부돼 NEGATIVE/POSITIVE가
+# 거짓 실패한다(라이브 확인 2026-06-30). 아래 probe()가 그 컨텍스트를 주입한다.
+# ⚠️ securityContext는 --overrides로만 줄 수 있는데(kubectl run 전용 플래그 없음), --overrides는
+# `--rm -i` attach의 stdout 캡처를 깨뜨린다(빈 출력). 그래서 attach 대신 run→phase 폴링→logs→delete로
+# 결과를 회수한다(라이브 확인 2026-06-30 — attach 빈 출력 vs logs 정상).
+# $1=namespace, $2=파드 내부 sh -c 명령(호출 시 작은따옴표로 $? 등 리터럴 유지). stdout 반환.
+probe() {
+  local ns="$1" cmd="$2" name="npd-$RANDOM" phase=""
+  kubectl -n "$ns" run "$name" --image=busybox:1.36 --restart=Never \
+    --overrides="{\"spec\":{\"securityContext\":{\"runAsNonRoot\":true,\"runAsUser\":65534,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"containers\":[{\"name\":\"npd\",\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"$cmd\"],\"securityContext\":{\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"]}}}]}}" >/dev/null 2>&1
+  for _ in $(seq 1 40); do
+    phase=$(kubectl -n "$ns" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null)
+    { [ "$phase" = "Succeeded" ] || [ "$phase" = "Failed" ]; } && break
+    sleep 1
+  done
+  kubectl -n "$ns" logs "$name" 2>/dev/null
+  kubectl -n "$ns" delete pod "$name" --grace-period=0 --force >/dev/null 2>&1
+}
+
 @test "the prod default-deny and database default-deny policies are applied" {
   run bash -c "kubectl -n prod get netpol default-deny-all -o name"
   [ "$status" -eq 0 ]
@@ -27,28 +48,24 @@
 @test "NEGATIVE: a pod outside prod/cnpg-system/observability CANNOT reach the database on 5432" {
   # 허용 소스가 아닌 `default` 네임스페이스에서 임시 클라이언트를 띄운다 — database-default-deny-ingress가
   # 드롭하므로 연결은 실패하거나 타임아웃돼야 한다.
-  run bash -c "kubectl -n default run npd-neg-\$RANDOM --image=busybox:1.36 --restart=Never --rm -i --quiet \
-    --command -- sh -c 'sleep 8; nc -w 5 -z pg-rw.database.svc.cluster.local 5432; echo rc=\$?'"
+  run probe default 'sleep 8; nc -w 5 -z pg-rw.database.svc.cluster.local 5432; echo rc=$?'
   [[ "$output" == *"rc=1"* ]] || [[ "$output" == *"rc=143"* ]]   # 거부/타임아웃이어야 하며 rc=0은 절대 안 된다
 }
 
 @test "POSITIVE: a prod-namespace client CAN reach the database on 5432" {
-  run bash -c "kubectl -n prod run npd-pos-\$RANDOM --image=busybox:1.36 --restart=Never --rm -i --quiet \
-    --command -- sh -c 'sleep 8; nc -w 5 -z pg-rw.database.svc.cluster.local 5432; echo rc=\$?'"
+  run probe prod 'sleep 8; nc -w 5 -z pg-rw.database.svc.cluster.local 5432; echo rc=$?'
   [[ "$output" == *"rc=0"* ]]
 }
 
 @test "POSITIVE: a prod-namespace client CAN reach the pooler pg-pooler-rw on 5432 (app runtime path, F4b)" {
   # 앱 런타임 DB 경로 = pooler(pg-pooler-rw, PgBouncer). netpol narrowing이 이 경로를 막으면 안 된다 —
   # pg-rw(cluster)만 테스트하면 pooler 셀렉터 미스가 미검출(F4). kube-router 룰 갭이라 sleep 8 후 연결.
-  run bash -c "kubectl -n prod run npd-pool-\$RANDOM --image=busybox:1.36 --restart=Never --rm -i --quiet \
-    --command -- sh -c 'sleep 8; nc -w 5 -z pg-pooler-rw.database.svc.cluster.local 5432; echo rc=\$?'"
+  run probe prod 'sleep 8; nc -w 5 -z pg-pooler-rw.database.svc.cluster.local 5432; echo rc=$?'
   [[ "$output" == *"rc=0"* ]]
 }
 
 @test "NEGATIVE: prod egress to a non-database, non-DNS destination is denied by default" {
   # prod의 egress default-deny는 DNS, database:5432, prod 내부:8080만 허용한다. 외부는 실패해야 한다.
-  run bash -c "kubectl -n prod run npd-egr-\$RANDOM --image=busybox:1.36 --restart=Never --rm -i --quiet \
-    --command -- sh -c 'sleep 8; nc -w 5 -z 1.1.1.1 443; echo rc=\$?'"
+  run probe prod 'sleep 8; nc -w 5 -z 1.1.1.1 443; echo rc=$?'
   [[ "$output" == *"rc=1"* ]] || [[ "$output" == *"rc=143"* ]]
 }
