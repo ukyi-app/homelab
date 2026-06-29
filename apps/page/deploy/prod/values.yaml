@@ -1,0 +1,25 @@
+image:
+  repo: ghcr.io/ukyi-app/page
+  tag: sha-7991797b1f8200bbcc861d47f018a51262a34fbf
+  digest: sha256:9edcbf03de250c32c9f3f58c73697e7fa4261a891ffc13ab4f620400300dfea0
+kind: web
+replicas: 1
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+envFrom:
+  - secretRef:
+      name: page-secrets
+route:
+  host: page.ukyi.app
+  paths:
+    - /
+  public: true
+metrics:
+  enabled: false
+podAnnotations:
+  checksum/secrets: b921000ca9977c25
