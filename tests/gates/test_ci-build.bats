@@ -19,6 +19,6 @@ WF=".github/workflows/build.yaml"
   run yq '.jobs.build.strategy.matrix.app' "$WF"
   [[ "$output" == *"pg-tools"* ]]
   [[ "$output" != *"api"* ]] # 사용자 앱은 외부 레포에서 빌드 — homelab matrix엔 없음
-  run grep -E "pg-tools:16-rclone" "$WF"
+  run grep -E "pg-tools:18-rclone" "$WF"
   [ "$status" -eq 0 ]
 }
