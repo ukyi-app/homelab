@@ -23,7 +23,7 @@ jobs:
     steps:
       # ⚠️ codex pass2 F8: 로컬 composite(아래 telegram-notify)는 체크아웃된 레포에서 resolve된다 —
       # checkout이 없으면 failure 알림 스텝이 액션 로드 실패로 죽어 알림 자체가 안 간다. 첫 스텝으로 checkout.
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       # writer App: 봇 PR 브랜치 update + auto-merge 무장 확인(Contents+PR write).
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: writer
