@@ -24,13 +24,13 @@ ports:
     expose: { default: true }
     exposedPort: 443
     protocol: TCP
-logs:
-  general:
-    format: json
-    level: INFO
-  access:
-    enabled: true
-    format: json # JSON → stdout → Vector → VictoriaLogs (M5)
+# 차트 v34+에서 logs.general→log, logs.access→accessLog로 키가 리네임됨(Traefik v3.x 값 구조 정합).
+log:
+  format: json
+  level: INFO
+accessLog:
+  enabled: true
+  format: json # JSON → stdout → Vector → VictoriaLogs (M5)
 ingressRoute:
   dashboard:
     enabled: false # dashboard는 내부 전용; 여기서 노출하지 않음
