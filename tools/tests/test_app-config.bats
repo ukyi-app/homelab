@@ -39,7 +39,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; S="$ROOT/tools/app-con
   [ "$status" -eq 0 ]
 }
 
-@test "schema hides static.server from external app config (kind=static implies sws)" {
+@test "schema hides static.server from external app config (kind=site implies sws)" {
   run jq -e '(.properties | has("static") | not)' "$S"
+  [ "$status" -eq 0 ]
+}
+
+@test "kind enum is web/worker/site (renamed from service/static)" {
+  run jq -e '.properties.kind.enum == ["web","worker","site"]' "$S"
   [ "$status" -eq 0 ]
 }

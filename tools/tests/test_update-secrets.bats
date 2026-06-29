@@ -12,7 +12,7 @@ image:
   repo: ghcr.io/ukyi-app/example-api
   tag: sha-aaaaaaaa
   digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
-kind: service
+kind: web
 resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 500m, memory: 128Mi }

@@ -14,7 +14,7 @@ STUB
 chmod +x "$tmp/bin/kubeseal"
 cat > "$tmp/.app-config.yml" <<'EOF'
 name: smoke-app
-kind: service
+kind: web
 EOF
 printf 'TOKEN=x\n' > "$tmp/.env"
 # 실제 seal 경로(--app/--out + kubeseal spawnSync)를 node strip-types로 — 출력 파일 단언

@@ -9,7 +9,7 @@ teardown() { rm -rf "$TMP"; }
 
 @test "seal-secret seals every .env UPPER_SNAKE key" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: service
+kind: web
 EOF
   cat > "$TMP/.env" <<'EOF'
 API_KEY=topsecret
@@ -24,7 +24,7 @@ EOF
 
 @test "seal-secret drops keys removed from .env on the next seal" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: service
+kind: web
 EOF
   printf 'A=aaa\n' > "$TMP/.env"
 
@@ -37,7 +37,7 @@ EOF
 
 @test "seal-secret never prints secret values (dry-run or error paths)" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: service
+kind: web
 EOF
   cat > "$TMP/.env" <<'EOF'
 API_KEY=super-sensitive-value-xyz
@@ -49,7 +49,7 @@ EOF
 
 @test "seal-secret does not write secrets back to app config" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: service
+kind: web
 EOF
   cat > "$TMP/.env" <<'EOF'
 ENV_TEST=hello
@@ -81,7 +81,7 @@ EOF
   mkdir -p "$TMP/example-api"
   cd "$TMP/example-api" || exit 1
   cat > .app-config.yml <<'EOF'
-kind: service
+kind: web
 EOF
   printf 'ENV_TEST=hello\n' > .env
   mkdir -p "$TMP/bin"
@@ -101,7 +101,7 @@ EOF
 }
 
 @test "seal-secret allows DATABASE_ADMIN_URL like any other env key" {
-  printf 'kind: service\n' > "$TMP/.app-config.yml"
+  printf 'kind: web\n' > "$TMP/.app-config.yml"
   printf 'DATABASE_ADMIN_URL=postgres://orders:pw@pg-rw-tailscale:5432/orders\n' > "$TMP/.env"
 
   run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
@@ -111,7 +111,7 @@ EOF
 }
 
 @test "seal-secret allows a value pointing at the admin superuser while hiding the value" {
-  printf 'kind: service\n' > "$TMP/.app-config.yml"
+  printf 'kind: web\n' > "$TMP/.app-config.yml"
   printf 'DB_URL=postgres://ukkiee@pg-rw-tailscale:5432/app\n' > "$TMP/.env"  # C1 superuser 롤(SSOT=ukkiee)
   run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
   [ "$status" -eq 0 ]
@@ -120,7 +120,7 @@ EOF
 }
 
 @test "seal-secret allows a jdbc:postgresql superuser URL while hiding the value" {
-  printf 'kind: service\n' > "$TMP/.app-config.yml"
+  printf 'kind: web\n' > "$TMP/.app-config.yml"
   printf 'DB_URL=jdbc:postgresql://ukkiee:pw@pg-rw-tailscale:5432/app\n' > "$TMP/.env"
   run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
   [ "$status" -eq 0 ]
@@ -129,7 +129,7 @@ EOF
 }
 
 @test "seal-secret allows a quoted superuser URL while hiding the value" {
-  printf 'kind: service\n' > "$TMP/.app-config.yml"
+  printf 'kind: web\n' > "$TMP/.app-config.yml"
   printf 'DB_URL="postgres://ukkiee:pw@pg-rw-tailscale:5432/app"\n' > "$TMP/.env"
   run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
   [ "$status" -eq 0 ]
@@ -138,7 +138,7 @@ EOF
 }
 
 @test "seal-secret allows an owner/ro connection URL (no false-positive on least-privilege creds)" {
-  printf 'kind: service\n' > "$TMP/.app-config.yml"
+  printf 'kind: web\n' > "$TMP/.app-config.yml"
   printf 'DB_URL=postgres://orders_ro:pw@pg-rw-tailscale:5432/orders\n' > "$TMP/.env"
   run bun "$ROOT/tools/seal-secret.mts" --config "$TMP/.app-config.yml" --env "$TMP/.env" --dry-run
   [ "$status" -eq 0 ]
@@ -146,7 +146,7 @@ EOF
 
 @test "seal-secret pipes a plaintext Secret through kubeseal and writes sealed yaml" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: service
+kind: web
 EOF
   cat > "$TMP/.env" <<'EOF'
 API_KEY=sealme

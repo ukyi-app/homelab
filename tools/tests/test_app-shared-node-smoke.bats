@@ -15,7 +15,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 @test "env-example no longer scaffolds _DATABASE_URL/_REDIS_URL (connection is a sealed secret)" {
   tmp="$BATS_TEST_TMPDIR/ee"; mkdir -p "$tmp"
   # db/redis가 raw로 들어와도(구계약) URL 스캐폴드를 만들지 않아야 — 봉인본 키만 유도.
-  printf 'kind: service\ndb: [orders]\nredis: [sessions]\n' > "$tmp/.app-config.yml"
+  printf 'kind: web\ndb: [orders]\nredis: [sessions]\n' > "$tmp/.app-config.yml"
   cat > "$tmp/sealed.yaml" <<'EOF'
 kind: SealedSecret
 spec:
