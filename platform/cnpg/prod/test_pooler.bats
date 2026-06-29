@@ -11,3 +11,8 @@ f=platform/cnpg/prod/pooler.yaml
   grep -q 'max_client_conn:' "$f"
   grep -q 'default_pool_size:' "$f"
 }
+@test "transaction pooler ignores client server-GUC startup params (libpq/node-pg compat)" {
+  # statement_timeout 등을 무시하지 않으면 클라이언트 연결이 "unsupported startup parameter"로 거부됨
+  grep -q 'ignore_startup_parameters:' "$f"
+  grep -E 'ignore_startup_parameters:' "$f" | grep -q 'statement_timeout'
+}
