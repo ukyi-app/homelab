@@ -7,7 +7,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "-1" # Cluster CR; Ready 상태가 앱 migration Job(wave 1)을 게이트
 spec:
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:16.14
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4
   primaryUpdateStrategy: unsupervised
   enableSuperuserAccess: true # pg_basebackup이 쓰는 관리형 `pg-superuser` Secret(REPLICATION 가능)을 생성 — app 롤과는 별개의 자격증명
   postgresUID: 26
