@@ -16,7 +16,7 @@ WF=".github/workflows/ci.yaml"
   # bun 버전 핀은 setup-bun composite로 이전 — ci가 composite를 채택하고 composite가 핀한다.
   run grep -F 'uses: ./.github/actions/setup-bun' "$WF"
   [ "$status" -eq 0 ]
-  run grep -E 'bun-version: "1.3.10"' .github/actions/setup-bun/action.yml
+  run grep -E 'bun-version: "1.3.14"' .github/actions/setup-bun/action.yml
   [ "$status" -eq 0 ]
 }
 

@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "packageManager": "bun@1.3.10",
+  "packageManager": "bun@1.3.14",
   "scripts": {
     "dev": "bun tools/dev.ts",
     "db:up": "bun tools/dev.ts db:up",

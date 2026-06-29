@@ -33,12 +33,12 @@ jobs:
           private-key: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           ref: main
           token: ${{ steps.writer.outputs.token }}
       - name: 앱 레포 config + sealed 시크릿 read (main HEAD)
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: ukyi-app/${{ inputs.app }}   # org는 ukyi-app 고정 — 앱 이름으로 레포 경로 구성
           ref: main
@@ -54,7 +54,7 @@ jobs:
           sha="$(git -C .apprepo rev-parse HEAD)" || { echo "::error::앱 레포 main HEAD 해석 실패"; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-bun
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+      - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
