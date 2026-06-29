@@ -36,7 +36,7 @@ spec:
             #    인증 자격 추출. 자격 값은 로그에 출력하지 않는다(파일로만, umask 077).
             - name: discover
               # digest 핀: mutable 태그는 push 때마다 움직인다 (pgdump-hedge와 동일 규약).
-              image: ghcr.io/ukyi-app/pg-tools:16-rclone@sha256:b7a4bf228bbba85401a52dfb5fc1302f7154306ee4f2109fe0eed7290a0825ef
+              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:9c4cb3572d07c495647be713bf8bbc58a2bf15bbcdd3fc4fc4ae387239cadecf
               command: ["/bin/bash", "-c"]
               env:
                 - { name: HOME, value: /work } # kubectl 캐시 경로 (read-only rootfs 대비)
@@ -57,7 +57,7 @@ spec:
             # 2) 스냅샷: BGSAVE 트리거 → LASTSAVE 변화 폴링으로 완료 대기 → --rdb로 네트워크 풀
             #    → sha256 체크섬. 인증은 REDISCLI_AUTH env로만(-a 인자는 ps에 노출된다).
             - name: snapshot
-              image: valkey/valkey:8.1.8-alpine # provision-cache.ts의 VALKEY_IMAGE와 같은 핀 — 함께 올린다
+              image: valkey/valkey:9.1.0-alpine # provision-cache.ts의 VALKEY_IMAGE와 같은 핀 — 함께 올린다
               command: ["/bin/sh", "-c"]
               args:
                 - |
@@ -83,7 +83,7 @@ spec:
           containers:
             # 3) 업로드: rclone → R2 + 신선도 메타(last_success.json) + 14일 초과분 프루닝.
             - name: upload
-              image: ghcr.io/ukyi-app/pg-tools:16-rclone@sha256:b7a4bf228bbba85401a52dfb5fc1302f7154306ee4f2109fe0eed7290a0825ef
+              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:9c4cb3572d07c495647be713bf8bbc58a2bf15bbcdd3fc4fc4ae387239cadecf
               command: ["/bin/bash", "-c"]
               args:
                 - |

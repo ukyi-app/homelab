@@ -23,7 +23,7 @@ spec:
             - name: pgdump-hedge
               # digest 핀: mutable 태그는 build push 때마다 움직여 의도치 않은 이미지로 실행될 수 있다
               # (restore-drill-cronjob과 동일 규약). 갱신은 bump 체인이 아니라 의도적 커밋으로만.
-              image: ghcr.io/ukyi-app/pg-tools:16-rclone@sha256:b7a4bf228bbba85401a52dfb5fc1302f7154306ee4f2109fe0eed7290a0825ef # M6가 빌드 (ops/pg-tools/)
+              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:9c4cb3572d07c495647be713bf8bbc58a2bf15bbcdd3fc4fc4ae387239cadecf # M6가 빌드 (ops/pg-tools/)
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities: { drop: [ALL] }

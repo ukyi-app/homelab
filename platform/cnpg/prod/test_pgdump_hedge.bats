@@ -22,7 +22,7 @@ f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
   [ "$status" -ne 0 ]
 }
 @test "hedge uses the M6-built pg-tools image" {
-  grep -q 'ghcr.io/ukyi-app/pg-tools:16-rclone' "$f"
+  grep -q 'ghcr.io/ukyi-app/pg-tools:18-rclone' "$f"
 }
 
 @test "hedge waits for pg-rw to be reachable before pg_dump (kube-router rule-install gap)" {
