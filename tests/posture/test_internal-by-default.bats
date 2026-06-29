@@ -6,12 +6,14 @@
 # 'web-public' 리스너에 붙은 HTTPRoute로만 부여된다 — 이 서비스들은 그것을 가져선 안 된다.
 # LIVE: kubectl 컨텍스트 = M3가 sync된 k3s VM 필요.
 
-@test "LoadBalancer Services are exactly traefik + adguard-dns" {
+@test "servicelb LoadBalancer Services are exactly traefik + adguard-dns" {
   # adguard-dns LB는 R7 설계상 필수(LAN DHCP option 6 대상 — lan-dns 런북): servicelb가
-  # VM 노드 IP에 :53을 게시한다. 그 외 LoadBalancer가 늘어나면 공개면 확장이므로 실패해야 한다.
-  run bash -c "kubectl get svc -A -o jsonpath='{range .items[?(@.spec.type==\"LoadBalancer\")]}{.metadata.namespace}/{.metadata.name} {end}'"
+  # VM 노드 IP에 :53을 게시한다. 그 외 servicelb LoadBalancer가 늘어나면 공개면 확장이므로 실패해야 한다.
+  # ⚠️ tailscale operator가 만든 LB(loadBalancerClass=tailscale, pg-rw-tailscale·traefik-ts)는
+  # tailnet 전용(공개면 아님)이라 제외한다 — servicelb(class 미지정) LB만 공개면 후보다.
+  run bash -c "kubectl get svc -A -o json | jq -r '[.items[] | select(.spec.type==\"LoadBalancer\") | select((.spec.loadBalancerClass // \"\") != \"tailscale\") | \"\(.metadata.namespace)/\(.metadata.name)\"] | sort | join(\" \")'"
   [ "$status" -eq 0 ]
-  [ "$output" = "edge/adguard-dns gateway/traefik " ]
+  [ "$output" = "edge/adguard-dns gateway/traefik" ]
 }
 
 @test "ArgoCD server has no public HTTPRoute" {
