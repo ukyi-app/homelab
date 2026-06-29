@@ -13,7 +13,7 @@ spec:
         fsGroup: 65532 # PVC(conf/work)를 65532 그룹 쓰기 가능으로 — non-root AdGuard의 설정 저장용
       initContainers:
         - name: seed-config
-          image: busybox:1.37
+          image: busybox:1.38
           command: ["sh", "-c", "cp -n /seed/AdGuardHome.yaml /opt/adguardhome/conf/AdGuardHome.yaml || true"]
           volumeMounts:
             - { name: seed, mountPath: /seed }

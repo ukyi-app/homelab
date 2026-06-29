@@ -16,8 +16,8 @@
 # $1=namespace, $2=파드 내부 sh -c 명령(호출 시 작은따옴표로 $? 등 리터럴 유지). stdout 반환.
 probe() {
   local ns="$1" cmd="$2" name="npd-$RANDOM" phase=""
-  kubectl -n "$ns" run "$name" --image=busybox:1.36 --restart=Never \
-    --overrides="{\"spec\":{\"securityContext\":{\"runAsNonRoot\":true,\"runAsUser\":65534,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"containers\":[{\"name\":\"npd\",\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"$cmd\"],\"securityContext\":{\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"]}}}]}}" >/dev/null 2>&1
+  kubectl -n "$ns" run "$name" --image=busybox:1.38 --restart=Never \
+    --overrides="{\"spec\":{\"securityContext\":{\"runAsNonRoot\":true,\"runAsUser\":65534,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"containers\":[{\"name\":\"npd\",\"image\":\"busybox:1.38\",\"command\":[\"sh\",\"-c\",\"$cmd\"],\"securityContext\":{\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"]}}}]}}" >/dev/null 2>&1
   for _ in $(seq 1 40); do
     phase=$(kubectl -n "$ns" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null)
     { [ "$phase" = "Succeeded" ] || [ "$phase" = "Failed" ]; } && break
