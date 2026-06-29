@@ -21,7 +21,7 @@ import { addResource } from "./lib/kustomization.ts";
 import { parseFlags } from "./lib/cli.ts";
 
 // 버전 핀 — latest 금지. backup-cronjob.yaml의 snapshot 컨테이너와 같은 태그를 유지한다.
-const VALKEY_IMAGE = "valkey/valkey:8.1.8-alpine";
+const VALKEY_IMAGE = "valkey/valkey:9.1.0-alpine";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
 let __f: Record<string, string | boolean>;
