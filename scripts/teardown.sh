@@ -26,7 +26,8 @@ esac
 
 # 입력 형식 검증(validate-mutation 계약 재사용) + 툴 명령·제목·slug 결정
 if [ "$mode" = "app" ]; then
-  printf '{"app":"%s"}' "$target" >/tmp/td-payload.json
+  # confirm은 디스패처(UI)의 오발사 가드 — CLI는 이미 명시 명령+clean-worktree가 마찰이라 confirm=app 자동 주입(단일 계약 유지)
+  printf '{"app":"%s","confirm":"%s"}' "$target" "$target" >/tmp/td-payload.json
   bun tools/validate-mutation.ts --action teardown-app --payload-file /tmp/td-payload.json
   plan_cmd=(bun tools/teardown-app.ts --app "$target" --repo-root .)
   slug="teardown-app-${target}"
