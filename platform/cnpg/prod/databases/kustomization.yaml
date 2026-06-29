@@ -1,0 +1,10 @@
+# create-database가 관리하는 논리 DB 디렉토리 — 상위 platform/cnpg/prod kustomization이
+# resources로 포함한다. KSOPS 풀렌더 없이 `kustomize build platform/cnpg/prod/databases`로
+# 단독 검증 가능하도록 별도 kustomization을 유지한다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: database
+resources:
+  - page.yaml
+  - db-page-owner.sealed.yaml
+  - db-page-ro.sealed.yaml
