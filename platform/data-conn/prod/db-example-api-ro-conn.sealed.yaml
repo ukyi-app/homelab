@@ -1,0 +1,14 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: db-example-api-ro-conn
+  namespace: prod
+spec:
+  encryptedData:
+    EXAMPLE_API_RO_DATABASE_URL: AgA7SUOQDOSOjrE4apHll7BEri8oTJLze1mJ3CruKZC+2xNmVre1MMnVuXs0PLESgJ3pedFQCoROoDBE/ZVSof0vRD3PQCczcdHsPMC/APQhx3oOmDdyzLrjb9CdJcEiLfgHzHpXPirbsckEcQ0E/GKUYuRKU54hckzo6R0Q+gZNDOivoLbeJQ+/u8eDkpnjKbCJpFJpmw810vcrXPtUG/6u4dBoAcHE8+RBL1qn6PbMToabOgvDjoP9PaYCwcWLDsxubFmnlAWF/xLhp//jXqDO1IvWRkT5qymMIKBao3x/V3pcL+2bjJstxOiEEypXyn78B+fUicWwe3oI4wBeVuSocAzQ0AMHoQ0HzH/MNCxxQh6xpqXXpTH3eECwVu3VpQFKrOABN3kstb27Pk3fXt74EC1j0AKWDSuaXVwZNj8n8kPfZEG3wTky33FTU55N1kAdZ74/sXCU0Ag2g8sVEpHdsnOYcKg5/ii1UEMrb4qPGUEuI25yWKLYKFhlV1LZ19+vzOBajHcPNEuvR6PRg61kumTLSDcYgyDJFv/J1ewTH3ldpn3rN3cOHkYmuxhA/S3KhW9Eswm3cWJDPe92WunTpMLNB/Y/MgFrqwzdLhPFSpcPBxYGh6P9DM8HVJv0mlu24lHAKeUVlTcrmxx3pbE/sxw8BIIBT2AZDSALD0SIDTt/8dw8mjdbnFyEagO64VpuHQdElszJy5YPDU/p/T9QEuceOCo6X8vB378ZPkw9oVa99ycfV2oJJTcpc/MLJSK6QNiUI1TqeVN6jX7T2OYnDlaFtzOaiPD73ponyCJUOj2UErbGUq0woXjFreSefE1yddd/LudQfShio50=
+  template:
+    metadata:
+      name: db-example-api-ro-conn
+      namespace: prod
+    type: Opaque
