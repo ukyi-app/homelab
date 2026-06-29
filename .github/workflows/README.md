@@ -8,8 +8,8 @@
 
 | 워크플로 | 입력 | 언제 |
 |---|---|---|
-| ✨ create-app | app_repo | 신규 앱 온보딩(앱 레포 main HEAD 기준, 매니페스트+공개 PR) |
-| ✨ update-secrets | app_repo | 앱 SealedSecret 첫 추가/갱신(앱 레포 main HEAD 기준) |
+| ✨ create-app | app | 신규 앱 온보딩(앱 이름만 — repo=ukyi-app/<app> main HEAD 기준, 매니페스트+공개 PR) |
+| ✨ update-secrets | app | 앱 SealedSecret 첫 추가/갱신(앱 이름만 — repo=ukyi-app/<app> main HEAD 기준) |
 | ✨ create-database | name + 확장(체크박스 pg_trgm/pgcrypto/citext/vector/postgis + 자유입력) | 앱용 CNPG DB 프로비전 |
 | ✨ create-cache | name + maxmemory(선택) | 앱용 redis 프로비전 |
 | 🗑️ teardown-app | app, confirm | 앱 철거 — **파괴**(confirm===app 가드 + **수동 머지**; reusable이 파괴 경계에서 confirm 재검증). owner-local `make teardown-app`과 공존 |

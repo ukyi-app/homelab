@@ -48,17 +48,23 @@ setup() {
 @test "each dispatcher references inputs only via env or with: (no run inline interpolation)" {
   for d in $DISPATCHERS; do
     bad=$(grep -n 'github.event.inputs' "$WF/$d.yaml" \
-      | grep -vE '^[0-9]+:[[:space:]]*(#|[A-Z_]+:|(app_repo|sha|spec|app|confirm):)' || true)
+      | grep -vE '^[0-9]+:[[:space:]]*(#|[A-Z_]+:|(sha|spec|app|confirm):)' || true)
     [ -z "$bad" ]
   done
 }
 
 @test "each dispatcher declares only its contract inputs" {
-  # create-app/update-secrets는 app_repo만 — sha는 reusable이 앱 레포 main HEAD에서 해석(입력 없음).
-  grep -q "app_repo:" "$WF/create-app.yaml";     run grep -q "sha:" "$WF/create-app.yaml";     [ "$status" -ne 0 ]
-  grep -q "app_repo:" "$WF/update-secrets.yaml"; run grep -q "sha:" "$WF/update-secrets.yaml"; [ "$status" -ne 0 ]
+  # create-app/update-secrets는 app만(repo=ukyi-app/<app>·sha는 reusable이 main HEAD에서 해석 — 입력 없음).
+  grep -q "app:" "$WF/create-app.yaml";     run grep -q "app_repo:" "$WF/create-app.yaml";     [ "$status" -ne 0 ]
+  grep -q "app:" "$WF/update-secrets.yaml"; run grep -q "app_repo:" "$WF/update-secrets.yaml"; [ "$status" -ne 0 ]
   grep -q "spec:" "$WF/create-database.yaml"
   grep -q "spec:" "$WF/create-cache.yaml"
+}
+
+@test "create-app and update-secrets no longer reference app_repo anywhere (org is structurally ukyi-app)" {
+  # 단일 결정 단언(bats는 마지막 명령만 평가) — 4 파일 어디에도 app_repo가 없어야 한다.
+  run grep -l "app_repo" "$WF/create-app.yaml" "$WF/_create-app.yaml" "$WF/update-secrets.yaml" "$WF/_update-secrets.yaml"
+  [ "$status" -ne 0 ]
 }
 
 @test "each dispatcher notify fires on cancelled as well as failure" {

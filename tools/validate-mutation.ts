@@ -13,10 +13,11 @@ function die(msg: string): never {
 // 계약표: action → 필수 입력 (허용 입력 == 필수 입력; 그 외 비어 있지 않으면 거부)
 // create-app/update-secrets는 sha를 입력으로 받지 않는다 — reusable이 앱 레포 main HEAD를
 // 체크아웃해 해석한다(sha 입력은 거부). activate-app만 sha(노출할 homelab 머지 revision) 유지.
+// 모든 디스패처는 앱 이름만 받는다(repo는 ukyi-app/<app>로 reusable이 구성 — org는 코드에 고정).
 const CONTRACT: Record<string, string[]> = {
-  "create-app": ["app_repo"],
+  "create-app": ["app"],
   "activate-app": ["app", "sha"],
-  "update-secrets": ["app_repo"],
+  "update-secrets": ["app"],
   "create-database": ["spec"],
   "create-cache": ["spec"],
   "teardown-app": ["app", "confirm"], // confirm은 app과 일치해야(파괴 오발사 가드 — 아래 교차검증)
@@ -25,14 +26,13 @@ const CONTRACT: Record<string, string[]> = {
 };
 
 const FIELD_RE: Record<string, RegExp> = {
-  app: APP_NAME_RE,
+  app: APP_NAME_RE, // 앱 이름(= ukyi-app/<app> 레포명). slash 불가라 외부 org 표현 자체가 불가능
   confirm: APP_NAME_RE, // teardown-app 파괴 확인 — 형식은 app과 동일, 일치는 교차검증
-  app_repo: /^ukyi-app\/[A-Za-z0-9._-]+$/, // org 고정 — 외부 org 레포 read 차단
   sha: /^[0-9a-f]{7,40}$/,
   resource: new RegExp(`^(db|cache):${RESOURCE_NAME_RE.source.slice(1, -1)}$`),
 };
 
-const PAYLOAD_KEYS = new Set(["action", "app", "app_repo", "sha", "resource", "spec", "confirm"]);
+const PAYLOAD_KEYS = new Set(["action", "app", "sha", "resource", "spec", "confirm"]);
 
 // spec(JSON 문자열) 검증 — 공유 클러스터 지원 필드만 (storage/cpu/mem/version은
 // 클러스터 레벨 속성이라 DB/캐시 생성 API의 입력이 아니다 — 스키마 밖 필드 거부)
@@ -110,7 +110,7 @@ for (const k of required) {
 if (action === "teardown-app" && get("confirm") !== get("app"))
   die(`confirm이 app과 불일치(파괴 확인 실패): confirm=${get("confirm").slice(0, 40)} ≠ app=${get("app").slice(0, 40)}`);
 // 허용 밖 입력이 비어 있지 않으면 거부 (오입력 = 오동작 신호 — fail-closed)
-for (const k of ["app", "app_repo", "sha", "resource", "spec", "confirm"]) {
+for (const k of ["app", "sha", "resource", "spec", "confirm"]) {
   if (!required.includes(k) && get(k) !== "") die(`action ${action}이 허용하지 않는 입력: ${k}`);
 }
 
