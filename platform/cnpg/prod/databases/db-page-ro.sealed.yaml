@@ -4,6 +4,8 @@ kind: SealedSecret
 metadata:
   name: db-page-ro
   namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
 spec:
   encryptedData:
     password: AgC/YqEiz+jegWvgB/C4CSg+l7O6wdsPxYcWX5yWaDaTOpaEGr0xFrCVKL7n4AD0KA+KnBUy1dTC6dbmHMDKXz/5E7Yuj/bQTb/aNkXMyLyYYweT6LCnLDlcGAMXjfH6k0kWDcr7JUD42EKpxdLuGccgAGPvAW+NCpl4l76kES4r4lmC9sBhxgjFTz8zzdK5ja/oqerE5HFvdXgAAt7WHzvf5cZ7DHXBAYuuVAemx0JeaIFChXZbcdepA0iZzdM9twl+3LCfUEbB/Nz2COBssjpGBApkECkC/D6H3Lac0UPlQMx3EfkFICza73Aqxgnlytoca1ZQW9UvymOh5OZ2Fst8XBzwuF4Z6FuUQ9vlTQ996mM9cS+0E47lH9aNrDYKj9SYKUhf7FrUeQOGb8TsAzXziWj7O7Qq7w74uCROTBc0A08tZY+zmNr7KK0jDqa5YYxRotvcgGpTK1TdP2ZXL+z4p8Vy1whv/sxs/DUgb7WW99qCPDjL4mLFKZ8i9I00oY6mzf+gxRXYJUpJwn8ZgW/pqAuxGn7CkKtgJggCsQekZ12OWRmljY4CSdr01JJBThFpFUm0fxljct0GkGHkbBnSX/L0onYieaW2O+h50kUyg9NT+Hk1HzRjRbnXva4AY8e3UxaJhc/03cXlCaP3YTNFMydFVJZ2ADRSo/IkHxA2JYHmiUqvMnHioEwV7winDfKaSm5QNdjVJ5oOUAfv4YdUOfJEhhOE0dYec9969yJKrQ==
