@@ -4,7 +4,8 @@
 // ★F3(노출 정합): Valkey tailscale 상시 노출은 deferred(캐시별 Service/netpol/ACL 비용) — 따라서 host는
 //   tailscale가 아니라 **127.0.0.1(port-forward 타깃)** 기본. 선행: kubectl -n cache port-forward
 //   svc/<name> 6379:6379 (런북). tailscale 상시 노출이 필요하면 별도 PR(db-url처럼 LB+netpol+ACL).
-// 출력 키 REDIS_URL(canonical). 평문 URL은 stdout에 절대 출력하지 않는다. 파괴 수단 없음.
+// 출력 키는 prod conn 핸들과 동일하게 namespaced(RW=<NAME>_REDIS_URL, RO=<NAME>_REDIS_RO_URL) —
+//   앱이 로컬·prod에서 같은 env 키를 읽는다. 평문 URL은 stdout에 절대 출력하지 않는다. 파괴 수단 없음.
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
@@ -27,9 +28,9 @@ if (!name || !RESOURCE_NAME_RE.test(name)) {
 
 const NAME = name.replaceAll("-", "_").toUpperCase();
 const mode = RW
-  ? { label: "default-readwrite", secret: `cache-${name}-conn`, srcKey: `${NAME}_REDIS_URL` }
-  : { label: "readonly", secret: `cache-${name}-ro-conn`, srcKey: `${NAME}_REDIS_RO_URL` };
-const envKey = "REDIS_URL"; // canonical (db-url의 DATABASE_URL과 대칭)
+  ? { label: "default-readwrite", secret: `cache-${name}-conn`, srcKey: `${NAME}_REDIS_URL`, envKey: `${NAME}_REDIS_URL` }
+  : { label: "readonly", secret: `cache-${name}-ro-conn`, srcKey: `${NAME}_REDIS_RO_URL`, envKey: `${NAME}_REDIS_RO_URL` };
+const envKey = mode.envKey; // prod conn 핸들과 동일한 namespaced 키(RW=<NAME>_REDIS_URL, RO=<NAME>_REDIS_RO_URL)
 
 if (DRY) {
   console.log(JSON.stringify({
