@@ -15,3 +15,5 @@ namespace: prod
 resources:
   - db-page-conn.sealed.yaml
   - db-page-ro-conn.sealed.yaml
+  - db-example-api-conn.sealed.yaml
+  - db-example-api-ro-conn.sealed.yaml
