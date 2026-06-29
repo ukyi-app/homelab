@@ -2,6 +2,11 @@
 # 아래 KSOPS repo-server 배선은 M2 소유; M3/M4/M5가 이를 상속한다.
 global:
   domain: argocd.home.ukyi.app
+  # 차트 10.0.0이 networkPolicy.create 기본을 false→true로 바꿨다 — 홈랩은 자체 netpol
+  # (network-policies-prod)로 argocd 네임스페이스를 관리하므로 차트 생성 NetworkPolicy를
+  # 비활성해 기존 동작을 유지한다(차트 netpol 4개가 자체 정책과 충돌/과제약하는 것 방지).
+  networkPolicy:
+    create: false
 
 redis-ha:
   enabled: false

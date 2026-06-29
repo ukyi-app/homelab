@@ -12,7 +12,7 @@ spec:
   sources:
     - repoURL: https://argoproj.github.io/argo-helm
       chart: argo-cd
-      targetRevision: 9.7.1 # M2에서 고정 — 의도적으로만 올릴 것, floating 금지
+      targetRevision: 10.0.1 # M2에서 고정 — 의도적으로만 올릴 것, floating 금지
       helm:
         releaseName: argocd
         valueFiles:
