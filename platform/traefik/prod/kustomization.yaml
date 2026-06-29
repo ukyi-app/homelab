@@ -2,7 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: gateway # traefik-prod Application의 권위 있는(authoritative) 대상 namespace
 # Gateway API standard 채널, 버전 고정. 재벤더링 방법:
-#   curl -sL https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml \
+#   curl -sL https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.1/standard-install.yaml \
 #     -o platform/traefik/prod/gateway-api-crds.yaml
 resources:
   - gateway-api-crds.yaml

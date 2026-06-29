@@ -4,7 +4,7 @@ metadata:
   name: traefik
 name: traefik
 repo: https://traefik.github.io/charts
-version: 33.0.0 # Traefik v3.x 차트, 버전 고정
+version: 41.0.0 # Traefik v3.x 차트, 버전 고정
 releaseName: traefik
 namespace: gateway
 valuesFile: values-traefik.yaml
