@@ -14,6 +14,8 @@ resources:
 envFrom:
   - secretRef:
       name: example-api-secrets
+  - secretRef:
+      name: db-example-api-conn # DB 연결(EXAMPLE_API_DATABASE_URL/MIGRATE) — create-database 산출 conn 핸들
 route:
   host: example-api.home.ukyi.app
   paths:
