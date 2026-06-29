@@ -14,7 +14,7 @@ inputs:
   shellcheck:  { description: shellcheck v0.11.0,    default: 'false' }
   sops:        { description: sops v3.13.1,           default: 'false' }
   age:         { description: age v1.3.1,            default: 'false' }
-  kubeseal:    { description: kubeseal v0.37.0,       default: 'false' }
+  kubeseal:    { description: kubeseal v0.38.1,       default: 'false' }
   actionlint:  { description: actionlint v1.7.12,     default: 'false' }
 
 runs:
@@ -84,11 +84,11 @@ runs:
     - if: ${{ inputs.kubeseal == 'true' }}
       shell: bash
       run: |
-        # kubeseal 버전 핀 — 컨트롤러 appVersion(platform/sealed-secrets app v0.37.0)과 동일해야 seal/unseal 호환.
+        # kubeseal 버전 핀 — 컨트롤러 appVersion(platform/sealed-secrets app v0.38.1)과 동일해야 seal/unseal 호환.
         # 봉인 워크플로(_create-cache/_create-database)가 제각각 핀하던 v0.27.3/v0.37.0을 이 한 곳으로 수렴.
         f=/tmp/kubeseal.tgz
-        curl -fsSL https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.37.0/kubeseal-0.37.0-linux-arm64.tar.gz -o "$f"
-        echo "b25c791a91f7b1b2b4848e8efa6fc165ee985ef69a1f07a54972f33e69f1c648  $f" | sha256sum -c -
+        curl -fsSL https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.38.1/kubeseal-0.38.1-linux-arm64.tar.gz -o "$f"
+        echo "4637aac2ee095d6555242cc1ad51f13b9dfcfee7db6b0a4cf4f5a1443309d05e  $f" | sha256sum -c -
         sudo tar -xz -C /usr/local/bin -f "$f" kubeseal
     - if: ${{ inputs.actionlint == 'true' }}
       shell: bash

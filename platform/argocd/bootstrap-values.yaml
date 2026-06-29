@@ -100,7 +100,7 @@ configs:
   secret:
     # argocd-secret에 patch 어노테이션을 차트 생성 시점에 부여한다. sealed-secrets(patch-mode)가 기존
     # argocd-secret에 accounts.ukkiee.password를 머지하려면 이 어노테이션이 **대상 live Secret에** 있어야 한다
-    # (0.37.0 컨트롤러는 SealedSecret 템플릿이 아니라 대상 Secret의 어노테이션에서 patch 여부를 읽는다 —
+    # (0.38.1 컨트롤러는 SealedSecret 템플릿이 아니라 대상 Secret의 어노테이션에서 patch 여부를 읽는다 —
     # 없으면 'already exists and is not managed by SealedSecret'로 거부해 argocd-extras가 Degraded). 차트가
     # 부여하므로 DR 콜드스타트에도 선언적으로 보장된다. managed는 쓰지 않는다 — controller ownerRef를 만들어
     # SealedSecret 삭제 시 argocd-secret 전체가 cascade delete된다(라이브 검증). patch 단독이 additive(기존 키 보존).
