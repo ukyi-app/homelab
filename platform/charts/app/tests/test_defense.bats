@@ -15,11 +15,11 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
 }
 
 @test "Deployment strategy defaults to Recreate (single-node RWO deadlock safety)" {
-  out=$(dep --set kind=service --set route.host=a.example.com)
+  out=$(dep --set kind=web --set route.host=a.example.com)
   echo "$out" | grep -q 'type: Recreate'
 }
 
 @test "strategy can be overridden to RollingUpdate for multi-replica stateless apps" {
-  out=$(dep --set kind=service --set route.host=a.example.com --set strategy.type=RollingUpdate)
+  out=$(dep --set kind=web --set route.host=a.example.com --set strategy.type=RollingUpdate)
   echo "$out" | grep -q 'type: RollingUpdate'
 }

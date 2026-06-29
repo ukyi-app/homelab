@@ -1,6 +1,6 @@
 # 스키마는 통과하나 PSA restricted 위반(capabilities.add) — conftest 백스톱이 잡아야 함.
 image: { repo: ghcr.io/owner/api, tag: sha-abc1234 }
-kind: service
+kind: web
 route: { host: api.example.com, public: true, paths: ["/"] }
 resources:
   requests: { cpu: 50m, memory: 64Mi }

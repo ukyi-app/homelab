@@ -3,7 +3,7 @@ CHART="${BATS_TEST_DIRNAME}/.."
 # 형식만 유효한 64-hex digest 픽스처 (실제 이미지와 무관)
 DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 # Deployment 이미지가 digest/tag를 권위(불변) 참조로 렌더하는지 검증한다
-BASE="--set image.repo=ghcr.io/o/api --set kind=service \
+BASE="--set image.repo=ghcr.io/o/api --set kind=web \
   --set route.host=api.example.com \
   --set resources.requests.cpu=50m --set resources.requests.memory=64Mi \
   --set resources.limits.cpu=500m --set resources.limits.memory=128Mi"

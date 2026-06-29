@@ -11,22 +11,22 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   run grep -q 'prometheus.io/scrape' <<<"$out"; [ "$status" -ne 0 ]
 }
 
-@test "service defaults to http only and no metrics scrape annotation" {
-  out=$(dep --set kind=service --set route.host=a.example.com)
+@test "web defaults to http only and no metrics scrape annotation" {
+  out=$(dep --set kind=web --set route.host=a.example.com)
   echo "$out" | grep -q 'name: http'
   run grep -q 'name: metrics' <<<"$out"; [ "$status" -ne 0 ]
   run grep -q 'prometheus.io/scrape' <<<"$out"; [ "$status" -ne 0 ]
 }
 
-@test "service exposes metrics only when metrics.enabled=true" {
-  out=$(dep --set kind=service --set route.host=a.example.com --set metrics.enabled=true)
+@test "web exposes metrics only when metrics.enabled=true" {
+  out=$(dep --set kind=web --set route.host=a.example.com --set metrics.enabled=true)
   echo "$out" | grep -q 'name: http'
   echo "$out" | grep -q 'name: metrics'
   echo "$out" | grep -q 'prometheus.io/scrape'
 }
 
-@test "static keeps http port but no metrics (serves files, no /metrics)" {
-  out=$(dep --set kind=static --set route.host=s.example.com)
+@test "site keeps http port but no metrics (serves files, no /metrics)" {
+  out=$(dep --set kind=site --set route.host=s.example.com)
   echo "$out" | grep -q 'name: http'
   run grep -q 'name: metrics' <<<"$out"; [ "$status" -ne 0 ]
   run grep -q 'prometheus.io/scrape' <<<"$out"; [ "$status" -ne 0 ]

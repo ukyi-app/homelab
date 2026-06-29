@@ -1,5 +1,5 @@
 image: { repo: ghcr.io/owner/console, tag: sha-abc1234 }
-kind: static
+kind: site
 static: { server: sws }
 route: { host: console.example.com, public: true, paths: ["/"] }
 resources:
