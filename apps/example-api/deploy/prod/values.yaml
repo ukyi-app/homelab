@@ -1,0 +1,32 @@
+image:
+  repo: ghcr.io/ukyi-app/example-api
+  tag: sha-dff55e2830c46e7e18432386913ae512d42b537f
+  digest: sha256:5f2be4109e08ea612e8418599c8ff8a1072e00cfb7728e54054050c259476411
+kind: web
+replicas: 1
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 128Mi
+envFrom:
+  - secretRef:
+      name: example-api-secrets
+  - secretRef:
+      name: db-example-api-conn # DB 연결(EXAMPLE_API_DATABASE_URL/MIGRATE) — create-database 산출 conn 핸들
+route:
+  host: example-api.home.ukyi.app
+  paths:
+    - /
+  public: false
+probes:
+  liveness:
+    path: /health
+  readiness:
+    path: /ready
+metrics:
+  enabled: false
+podAnnotations:
+  checksum/secrets: e08a60c1d9269538
