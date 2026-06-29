@@ -15,8 +15,8 @@ gitignored(owner 로컬 전용)이므로, **도구 설치 단계에 한해** 이
 
 | 도구 | CI 핀(`setup-toolchain`) | 로컬 최소(`m6-tools`) | 용도 | 설치 힌트 |
 |---|---|---|---|---|
-| **bun** | (러너 `setup-bun`) | `1.3.10` (핀) | tools/`*.ts`·`*.mts` 실행 + 패키지/스크립트 런타임 | `curl -fsSL https://bun.sh/install \| bash`(시스템 PATH) 또는 `mise use -g bun@1.3.10` |
-| **Node.js** | (러너 `setup-node` 22.18, app-shared 스모크) | `>=22.18`(app-shared만) | app-shared `*.mts`(seal-secret·env-example) node strip-types 실행 — 앱 레포 `pnpm secret:seal` 경로 | `mise use -g node@22` 또는 `brew install node` |
+| **bun** | (러너 `setup-bun`) | `1.3.14` (핀) | tools/`*.ts`·`*.mts` 실행 + 패키지/스크립트 런타임 | `curl -fsSL https://bun.sh/install \| bash`(시스템 PATH) 또는 `mise use -g bun@1.3.14` |
+| **Node.js** | (러너 `setup-node` 24.14.0, app-shared 스모크) | `>=22.18`(app-shared 계약 하한) | app-shared `*.mts`(seal-secret·env-example) node strip-types 실행 — 앱 레포 `pnpm secret:seal` 경로 | `mise use -g node@22` 또는 `brew install node` |
 | **helm** | `v3.16.4` | `>=3.16` | 공유 차트 렌더(chart-test) | `brew install helm` (버전 확인 — major 변동 시 chart-test 파손 위험) |
 | **kustomize** | `v5.4.3` | (게이트 없음) | KSOPS 풀 렌더(`make render`) | `brew install kustomize` |
 | **kubeconform** | `v0.6.7` | `>=0.6.7` | 매니페스트 스키마 검증(chart-test) | `brew install kubeconform` |
@@ -40,7 +40,7 @@ gitignored(owner 로컬 전용)이므로, **도구 설치 단계에 한해** 이
 ## 설치 후 검증
 
 ```bash
-make m6-tools        # helm/kubeconform/bats/bun(1.3.10)/yq/jq 최소 버전 게이트
+make m6-tools        # helm/kubeconform/bats/bun(1.3.14)/yq/jq 최소 버전 게이트
 bun install      # 워크스페이스 의존성
 pre-commit install   # 시크릿 가드 훅
 export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt   # 로컬 복호화(age 키는 owner 보관)

@@ -49,7 +49,7 @@ jobs:
     outputs:
       spec: ${{ steps.assemble.outputs.spec }}   # 조립한 spec JSON을 reusable 호출 잡으로 전달
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with: { ref: main }
       - uses: ./.github/actions/setup-bun
         with: { install: 'false' }     # validate-mutation 체크는 deps 불요
@@ -99,7 +99,7 @@ jobs:
     if: failure() || cancelled()
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - id: norm
         env:
           RESULTS: ${{ toJSON(needs) }}
