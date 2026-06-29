@@ -55,7 +55,7 @@ jobs:
           else
             echo "build=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: compute extra tag (pg-tools carries the canonical 16-rclone tag M4 references)
+      - name: compute extra tag (pg-tools carries the canonical 18-rclone tag M4 references)
         id: tags
         env:
           OWNER: ${{ github.repository_owner }}
@@ -64,7 +64,7 @@ jobs:
         run: |
           TAGS="ghcr.io/${OWNER}/${APP}:sha-${SHA}"
           if [ "${APP}" = "pg-tools" ]; then
-            TAGS="${TAGS},ghcr.io/${OWNER}/pg-tools:16-rclone"
+            TAGS="${TAGS},ghcr.io/${OWNER}/pg-tools:18-rclone"
           fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
       - name: build & push
