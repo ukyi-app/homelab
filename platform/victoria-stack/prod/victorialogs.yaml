@@ -25,7 +25,9 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: victorialogs
-          image: victoriametrics/victoria-logs:v1.24.0-victorialogs
+          # v1.51+는 plain 태그 스킴(구 -victorialogs suffix 폐기). LogsQL filter-pipe breaking(foo|bar)
+          # 은 우리 committed 쿼리 무영향(대시보드=PromQL, Explore 임시질의만 LogsQL). forward-compat.
+          image: victoriametrics/victoria-logs:v1.51.0
           args:
             - --storageDataPath=/vlogs
             - --retentionPeriod=14d
