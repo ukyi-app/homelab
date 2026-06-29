@@ -14,7 +14,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 472, fsGroup: 472, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: grafana
-          image: grafana/grafana:11.6.16
+          image: grafana/grafana:13.1.0
           # 컨테이너 하드닝: 권한상승 차단 + 전 capability drop. readOnlyRootFilesystem은
           # 플러그인 설치(/var/lib/grafana)·/tmp 쓰기 때문에 보류(별도 검증 후 적용).
           securityContext:
