@@ -10,7 +10,7 @@ spec:
       automountServiceAccountToken: false # SA 토큰 불요 — smoke 앱, k8s API 미사용(보안 감사 SA-2)
       containers:
         - name: whoami
-          image: traefik/whoami:v1.10.3
+          image: traefik/whoami:v1.11.0
           ports: [{ containerPort: 80 }]
           resources:
             requests: { cpu: 10m, memory: 16Mi }

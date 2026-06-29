@@ -15,7 +15,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: vmalert
-          image: victoriametrics/vmalert:v1.103.0
+          image: victoriametrics/vmalert:v1.145.0
           args:
             - --rule=/rules/core/*.yaml
             - --rule=/rules/r4/*.yaml

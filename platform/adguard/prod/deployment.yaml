@@ -23,7 +23,7 @@ spec:
         # 재시작 시 sealed 값으로 수렴, DR/재배포 일관). seed-config가 먼저 PVC를 채운 뒤 실행돼야 한다(순서 의존).
         # cp -n은 라이브의 기존 users:[]를 덮지 않으므로 이 단계가 라이브에도 인증을 적용하는 유일 경로다.
         - name: inject-auth
-          image: mikefarah/yq:4.44.6
+          image: mikefarah/yq:4.53.3
           command: ["yq"]
           args:
             - "-i"
