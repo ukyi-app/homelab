@@ -12,7 +12,7 @@ spec:
   source:
     repoURL: https://charts.jetstack.io
     chart: cert-manager
-    targetRevision: v1.16.5 # 버전 고정
+    targetRevision: v1.20.3 # 버전 고정
     helm:
       parameters:
         # v1.16에서 deprecated된 `installCRDs`가 `crds.enabled`로 대체되었다.
