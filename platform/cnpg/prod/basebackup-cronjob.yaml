@@ -26,7 +26,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: basebackup
-              image: ghcr.io/cloudnative-pg/postgresql:16.14
+              image: ghcr.io/cloudnative-pg/postgresql:18.4
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities: { drop: [ALL] }
