@@ -7,7 +7,7 @@ name: "🧰 _create-app"
 on:
   workflow_call:
     inputs:
-      app_repo:
+      app:
         required: true
         type: string
 
@@ -18,17 +18,13 @@ jobs:
       contents: read
       packages: read # digest 해석(docker imagetools)
     steps:
-      - id: names
-        env:
-          APP_REPO: ${{ inputs.app_repo }} # validator가 ^ukyi-app/...$로 강제한 입력
-        run: echo "repo=${APP_REPO#ukyi-app/}" >> "$GITHUB_OUTPUT"
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: reader
         with:
           app-id: ${{ secrets.HOMELAB_READER_APP_ID }}
           private-key: ${{ secrets.HOMELAB_READER_APP_PRIVATE_KEY }}
           owner: ukyi-app
-          repositories: ${{ steps.names.outputs.repo }} # repositories는 owner 없는 레포명 — 그 레포만 스코프
+          repositories: ${{ inputs.app }} # owner 없는 레포명(= 앱 이름) — 그 레포만 스코프(org는 ukyi-app 고정)
           permission-contents: read
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: writer
@@ -44,7 +40,7 @@ jobs:
       - name: 앱 레포 config + sealed 시크릿 read (main HEAD)
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
-          repository: ${{ inputs.app_repo }}
+          repository: ukyi-app/${{ inputs.app }}   # org는 ukyi-app 고정 — 앱 이름으로 레포 경로 구성
           ref: main
           token: ${{ steps.reader.outputs.token }}
           path: .apprepo
@@ -66,10 +62,10 @@ jobs:
       - name: GHCR digest 해석 (이미지 실존 필수 — 없으면 생성 중단)
         id: img
         env:
-          APP_REPO: ${{ inputs.app_repo }}
+          APP: ${{ inputs.app }}
           SHA: ${{ steps.appsha.outputs.sha }}
         run: |
-          app="${APP_REPO#ukyi-app/}"
+          app="$APP"
           tag="sha-${SHA}"
           digest=$(docker buildx imagetools inspect "ghcr.io/ukyi-app/${app}:${tag}" \
             --format '{{json .Manifest}}' | jq -r .digest) \
@@ -85,21 +81,20 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.writer.outputs.token }}
           APP: ${{ steps.img.outputs.app }}
-          APP_REPO: ${{ inputs.app_repo }}
           TAG: ${{ steps.img.outputs.tag }}
           DIGEST: ${{ steps.img.outputs.digest }}
           DOMAIN: ${{ vars.HOMELAB_DOMAIN }}
           RUN_ID: ${{ github.run_id }}
         run: |
           [ -n "$DOMAIN" ] || { echo "::error::repo variable HOMELAB_DOMAIN 미설정"; exit 1; }
-          [ -f .apprepo/.app-config.yml ] || { echo "::error::.app-config.yml 없음(앱 레포 ${APP_REPO}@${TAG#sha-})"; exit 1; }
+          [ -f .apprepo/.app-config.yml ] || { echo "::error::.app-config.yml 없음(앱 레포 ukyi-app/${APP}@${TAG#sha-})"; exit 1; }
           sealed_arg=""
           if [ -f ".apprepo/deploy/${APP}-secrets.sealed.yaml" ]; then
             sealed_arg="--sealed .apprepo/deploy/${APP}-secrets.sealed.yaml"
           fi
           # shellcheck disable=SC2086
           bun tools/create-app.ts --config .apprepo/.app-config.yml --app "$APP" \
-            --repo "$APP_REPO" --domain "$DOMAIN" --tag "$TAG" --digest "$DIGEST" $sealed_arg \
+            --repo "ukyi-app/$APP" --domain "$DOMAIN" --tag "$TAG" --digest "$DIGEST" $sealed_arg \
             | tee /tmp/plan.json
           # 렌더 게이트: 새 values로 공유 차트가 kubeconform-clean하게 렌더되는가 (toolchain은 composite가 설치)
           helm template "$APP" platform/charts/app -f "apps/$APP/deploy/prod/values.yaml" \
@@ -132,7 +127,7 @@ jobs:
           status: ${{ job.status }}
           source: 앱생성
           title: 앱 생성
-          ident: ${{ inputs.app_repo }}
+          ident: ${{ inputs.app }}
           body: "PR을 확인하세요"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}

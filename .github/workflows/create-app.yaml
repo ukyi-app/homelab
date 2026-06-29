@@ -2,14 +2,13 @@
 # 트리거 경계(런북 app-platform): 앱 레포는 homelab-write 자격 0 — owner가 여기서 workflow_dispatch로 실행.
 # 변이 로직은 _create-app.yaml(reusable)에 있다 — 이 파일은 trigger+validate+notify 셸.
 name: "✨ create-app"
-run-name: "✨ create-app — ${{ inputs.app_repo }}"
+run-name: "✨ create-app — ${{ inputs.app }}"
 on:
   workflow_dispatch:
     inputs:
-      app_repo:
-        description: "ukyi-app/<app> — 뒤에 앱 이름만 입력"
+      app:
+        description: "앱 이름 (= ukyi-app/<app> 레포명)"
         required: true
-        default: "ukyi-app/"
 
 # 전역 직렬화: 모든 homelab-mutation 워크플로(변이 디스패처/bump-poll/iac/tf-reconcile)가 같은 그룹.
 # queue: max — pending FIFO 큐잉. cancel-in-progress와 병용 불가(AGENTS.md 함정) — 절대 true 금지.
@@ -39,7 +38,7 @@ jobs:
     needs: validate
     uses: ./.github/workflows/_create-app.yaml
     with:
-      app_repo: ${{ github.event.inputs.app_repo }}
+      app: ${{ github.event.inputs.app }}
     secrets: inherit
     permissions:
       contents: read
