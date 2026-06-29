@@ -5,7 +5,7 @@
 
 setup() {
   ROOT="$(git rev-parse --show-toplevel)"; WF="$ROOT/.github/workflows"
-  DISPATCHERS="create-app update-secrets create-database create-cache"
+  DISPATCHERS="create-app update-secrets create-database create-cache teardown-app"
 }
 
 @test "every dispatcher serializes via homelab-mutation group with queue max" {
@@ -48,7 +48,7 @@ setup() {
 @test "each dispatcher references inputs only via env or with: (no run inline interpolation)" {
   for d in $DISPATCHERS; do
     bad=$(grep -n 'github.event.inputs' "$WF/$d.yaml" \
-      | grep -vE '^[0-9]+:[[:space:]]*(#|[A-Z_]+:|(app_repo|sha|spec):)' || true)
+      | grep -vE '^[0-9]+:[[:space:]]*(#|[A-Z_]+:|(app_repo|sha|spec|app|confirm):)' || true)
     [ -z "$bad" ]
   done
 }
@@ -96,4 +96,26 @@ setup() {
   done
   run grep -Fq '{0,27}' "$WF/_create-cache.yaml"; [ "$status" -ne 0 ]        # 옛 ≤29 제거
   run grep -Fq '[a-z0-9-]*[a-z0-9]' "$WF/_create-database.yaml"; [ "$status" -ne 0 ]  # 옛 무제한 제거
+}
+
+@test "teardown-app dispatcher declares only app and confirm inputs (no app_repo)" {
+  grep -q "app:" "$WF/teardown-app.yaml"
+  grep -q "confirm:" "$WF/teardown-app.yaml"
+  run grep -q "app_repo:" "$WF/teardown-app.yaml"; [ "$status" -ne 0 ]
+}
+
+@test "teardown-app reusable uses writer token only (no reader, no GHCR)" {
+  grep -q "HOMELAB_WRITER_APP_ID" "$WF/_teardown-app.yaml"
+  run grep -q "HOMELAB_READER_APP_ID" "$WF/_teardown-app.yaml"; [ "$status" -ne 0 ]
+}
+
+@test "teardown-app reusable enforces confirm at its boundary (workflow_call input + re-validate)" {
+  grep -q "confirm:" "$WF/_teardown-app.yaml"                                  # workflow_call에 confirm 입력
+  grep -q "validate-mutation.ts --action teardown-app" "$WF/_teardown-app.yaml" # teardown 前 재검증(defense-in-depth)
+}
+
+@test "teardown-app reusable does NOT auto-merge (destruction = manual merge)" {
+  # 주석 제외 후 실행 라인만 검사 — 워크플로 주석에 'auto-merge-or-fail' 설명 문구가 있어 그대로 grep하면 오탐
+  run bash -c "grep -v '^[[:space:]]*#' '$WF/_teardown-app.yaml' | grep -q 'auto-merge-or-fail'"; [ "$status" -ne 0 ]
+  run bash -c "grep -v '^[[:space:]]*#' '$WF/_teardown-app.yaml' | grep -qE 'gh pr merge.*--auto'"; [ "$status" -ne 0 ]
 }

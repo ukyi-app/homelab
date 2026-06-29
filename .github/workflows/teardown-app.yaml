@@ -1,0 +1,73 @@
+# teardown-app 변이 디스패처 — 앱 철거(apps/<app> + apps.json 행 + 원장 행 제거 → 수동 머지 PR).
+# 트리거 경계: owner가 여기서 workflow_dispatch로 실행. 변이 로직은 _teardown-app.yaml(reusable).
+# 파괴 가드: confirm===app(validate-mutation) + 수동 머지(auto-merge 안 함).
+name: "🗑️ teardown-app"
+run-name: "🗑️ teardown-app — ${{ inputs.app }}"
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "철거할 앱 이름 (apps/<app>)"
+        required: true
+      confirm:
+        description: "확인 — 위 앱 이름을 정확히 다시 입력 (불일치 시 거부)"
+        required: true
+
+# 전역 직렬화: 모든 homelab-mutation 워크플로가 같은 그룹. queue: max — pending FIFO.
+# cancel-in-progress와 병용 불가(AGENTS.md 함정) — 절대 true 금지.
+concurrency:
+  group: homelab-mutation
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with: { ref: main }
+      - uses: ./.github/actions/setup-bun
+        with: { install: 'false' }     # validate-mutation 체크는 deps 불요
+      - env:
+          PAYLOAD: ${{ toJSON(github.event.inputs) }} # owner 입력도 비신뢰 — env 경유, 인라인 보간 금지
+        run: |
+          printf '%s' "$PAYLOAD" > /tmp/payload.json
+          bun tools/validate-mutation.ts --action teardown-app --payload-file /tmp/payload.json
+
+  teardown-app:
+    needs: validate
+    uses: ./.github/workflows/_teardown-app.yaml
+    with:
+      app: ${{ github.event.inputs.app }}
+      confirm: ${{ github.event.inputs.confirm }}   # 파괴 경계(reusable)에서 confirm===app 재검증용
+    secrets: inherit
+    permissions:
+      contents: read
+
+  notify:
+    needs: [validate, teardown-app]
+    if: failure() || cancelled()
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - id: norm
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          # notify 잡의 job.status는 자기 자신(success)이라 거짓 — 상류 needs로 정규화(취소>실패)
+          if printf '%s' "$RESULTS" | grep -q '"result": *"cancelled"'; then
+            echo "status=cancelled" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=failure" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ steps.norm.outputs.status }}
+          source: 변이
+          title: teardown-app 실행
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

@@ -91,3 +91,23 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; V="$ROOT/tools/validat
   rm -f "$tmp"
   [ "$status" -eq 0 ]
 }
+
+@test "teardown-app accepts when confirm equals app" {
+  run bun "$V" --action teardown-app --payload '{"app":"orders","confirm":"orders"}'
+  [ "$status" -eq 0 ]
+}
+
+@test "teardown-app rejects when confirm differs from app (mis-fire guard)" {
+  run bun "$V" --action teardown-app --payload '{"app":"orders","confirm":"order"}'
+  [ "$status" -ne 0 ]
+}
+
+@test "teardown-app rejects missing confirm (legacy payload)" {
+  run bun "$V" --action teardown-app --payload '{"app":"orders"}'
+  [ "$status" -ne 0 ]
+}
+
+@test "non-teardown action rejects a stray confirm input" {
+  run bun "$V" --action create-app --payload '{"app_repo":"ukyi-app/orders","confirm":"orders"}'
+  [ "$status" -ne 0 ]
+}

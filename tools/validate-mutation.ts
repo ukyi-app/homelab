@@ -19,19 +19,20 @@ const CONTRACT: Record<string, string[]> = {
   "update-secrets": ["app_repo"],
   "create-database": ["spec"],
   "create-cache": ["spec"],
-  "teardown-app": ["app"],
+  "teardown-app": ["app", "confirm"], // confirm은 app과 일치해야(파괴 오발사 가드 — 아래 교차검증)
   "teardown-resource": ["resource"],
   audit: [],
 };
 
 const FIELD_RE: Record<string, RegExp> = {
   app: APP_NAME_RE,
+  confirm: APP_NAME_RE, // teardown-app 파괴 확인 — 형식은 app과 동일, 일치는 교차검증
   app_repo: /^ukyi-app\/[A-Za-z0-9._-]+$/, // org 고정 — 외부 org 레포 read 차단
   sha: /^[0-9a-f]{7,40}$/,
   resource: new RegExp(`^(db|cache):${RESOURCE_NAME_RE.source.slice(1, -1)}$`),
 };
 
-const PAYLOAD_KEYS = new Set(["action", "app", "app_repo", "sha", "resource", "spec"]);
+const PAYLOAD_KEYS = new Set(["action", "app", "app_repo", "sha", "resource", "spec", "confirm"]);
 
 // spec(JSON 문자열) 검증 — 공유 클러스터 지원 필드만 (storage/cpu/mem/version은
 // 클러스터 레벨 속성이라 DB/캐시 생성 API의 입력이 아니다 — 스키마 밖 필드 거부)
@@ -105,8 +106,11 @@ for (const k of required) {
   if (k === "spec") validateSpec(action, v);
   else if (!FIELD_RE[k].test(v)) die(`${k} 형식 불량: ${v.slice(0, 60)}`);
 }
+// teardown-app: confirm은 app과 정확히 일치해야 한다(파괴 오발사 방지 — GitHub repo 삭제 방식)
+if (action === "teardown-app" && get("confirm") !== get("app"))
+  die(`confirm이 app과 불일치(파괴 확인 실패): confirm=${get("confirm").slice(0, 40)} ≠ app=${get("app").slice(0, 40)}`);
 // 허용 밖 입력이 비어 있지 않으면 거부 (오입력 = 오동작 신호 — fail-closed)
-for (const k of ["app", "app_repo", "sha", "resource", "spec"]) {
+for (const k of ["app", "app_repo", "sha", "resource", "spec", "confirm"]) {
   if (!required.includes(k) && get(k) !== "") die(`action ${action}이 허용하지 않는 입력: ${k}`);
 }
 
