@@ -4,8 +4,8 @@
 CHART="${BATS_TEST_DIRNAME}/.."
 REGO="$CHART/tests/psa-restricted.rego"
 
-@test "chart fixtures (service/worker/static) pass PSA restricted conftest" {
-  for k in service worker static; do
+@test "chart fixtures (web/worker/site) pass PSA restricted conftest" {
+  for k in web worker site; do
     run bash -c "helm template t '$CHART' -f '$CHART/tests/fixtures/$k.yaml' | conftest test --policy '$REGO' -"
     echo "$output"
     [ "$status" -eq 0 ]

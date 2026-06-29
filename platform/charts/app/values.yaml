@@ -10,7 +10,7 @@ image:
 imagePullSecrets: [{ name: ghcr-pull }]
 
 # --- 워크로드 형태 ---
-kind: service # service | worker | static
+kind: web # web | worker | site
 replicas: 1
 
 # --- 공유 Gateway (Milestone 3) — 기본값, 오버라이드는 드묾 ---
@@ -28,7 +28,7 @@ envFrom: [] # [{secretRef: {name}}]
 
 # --- 라우팅 (기본 internal; public은 명시적 opt-in) ---
 route:
-  host: "" # service|static에 필수
+  host: "" # web|site에 필수
   paths: ["/"]
   public: false # sectionName 매핑: web-public (true) / web-internal (false)
 
@@ -51,7 +51,7 @@ livenessProbe: {}
 
 # --- static(정적 파일) 서빙 추상화 ---
 static:
-  server: sws # sws 단일(kind=static일 때만 사용; caddy는 미구현이라 제거 — 테마2)
+  server: sws # sws 단일(kind=site일 때만 사용; caddy는 미구현이라 제거 — 테마2)
 
 # --- pod 하드닝 (기본값; 오버라이드는 드묾) ---
 podSecurityContext:

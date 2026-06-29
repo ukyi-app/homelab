@@ -50,7 +50,11 @@ function check(val: any, sch: any, path: string) {
   const t = sch.type;
   const is: Record<string, (v: any) => boolean> = { object: (v) => v && typeof v === "object" && !Array.isArray(v), array: Array.isArray,
     string: (v) => typeof v === "string", integer: Number.isInteger, boolean: (v) => typeof v === "boolean" };
-  if (sch.enum) { if (!sch.enum.includes(val)) fail(`${path}: '${val}'은 ${JSON.stringify(sch.enum)} 중 하나여야 함`); return; }
+  if (sch.enum) {
+    // 폐기된 kind 값에 actionable 안내(rename: service→web, static→site) — 침묵 거부 방지
+    if (path.endsWith(".kind") && (val === "service" || val === "static"))
+      fail(`${path}: kind '${val}'는 폐기됨 → ${val === "service" ? "web" : "site"}로 변경하세요`);
+    if (!sch.enum.includes(val)) fail(`${path}: '${val}'은 ${JSON.stringify(sch.enum)} 중 하나여야 함`); return; }
   if (t && !is[t]?.(val)) fail(`${path}: ${t} 타입이어야 함`);
   if (t === "string" && sch.pattern && !new RegExp(sch.pattern).test(val)) fail(`${path}: 패턴 ${sch.pattern} 불일치 ('${val}')`);
   if (t === "integer") { if (sch.minimum != null && val < sch.minimum) fail(`${path}: ≥${sch.minimum}`);
@@ -139,7 +143,8 @@ if (envFrom.length) values.envFrom = envFrom;
 if (served) values.route = { host, paths: config.route?.paths ?? ["/"], public: pub };
 if (config.probes) values.probes = config.probes;
 // 외부 app-config는 kind만 선언한다. static 서버 구현체(SWS)는 chart 내부 계약으로 숨긴다.
-if (kind === "static") values.static = { server: "sws" };
+// (kind 이름은 site로 리네임됐으나, 정적 파일 서빙 메커니즘 필드는 static.server로 유지.)
+if (kind === "site") values.static = { server: "sws" };
 values.metrics = { enabled: config.metrics?.enabled ?? false };
 // 선언적 회전: 봉인 콘텐츠 해시를 pod template annotation으로 둔다 → update-secrets가 봉인본을
 // 갱신하면 이 해시가 바뀌어 ArgoCD가 Deployment를 롤링한다(envFrom 변경은 재시작 필요 —

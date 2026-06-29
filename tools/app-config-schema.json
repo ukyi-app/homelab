@@ -2,12 +2,12 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "app-config-schema",
   "title": ".app-config.yml — 외부 앱 레포의 자기선언 v2 (create-app이 values.yaml + .bindings.json으로 변환)",
-  "description": "앱 연결(DB/Redis)은 앱 SealedSecret의 DATABASE_URL/REDIS_URL로 주입한다(별도 db/redis 필드 없음). create-app이 SealedSecret 봉인본·digest 핀 이미지를 검증해 values.yaml + .bindings.json(autoDeploy)으로 변환한다. 설정·비밀 키 목록은 봉인본 encryptedData가 SSOT — 평문 env 필드 없음. kind=static은 내부에서 static-web-server(SWS)로 서빙한다. 마이그레이션은 앱이 부팅 시 self-migrate(expand/contract+멱등).",
+  "description": "앱 연결(DB/Redis)은 앱 SealedSecret의 DATABASE_URL/REDIS_URL로 주입한다(별도 db/redis 필드 없음). create-app이 SealedSecret 봉인본·digest 핀 이미지를 검증해 values.yaml + .bindings.json(autoDeploy)으로 변환한다. 설정·비밀 키 목록은 봉인본 encryptedData가 SSOT — 평문 env 필드 없음. kind=site는 내부에서 static-web-server(SWS)로 서빙한다. 마이그레이션은 앱이 부팅 시 self-migrate(expand/contract+멱등).",
   "type": "object",
   "additionalProperties": false,
   "required": ["kind", "resources"],
   "properties": {
-    "kind": { "enum": ["service", "worker", "static"] },
+    "kind": { "enum": ["web", "worker", "site"] },
     "resources": {
       "type": "object",
       "additionalProperties": false,

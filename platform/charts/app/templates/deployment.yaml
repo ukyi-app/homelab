@@ -19,7 +19,7 @@ spec:
       labels:
         {{- include "app.labels" . | nindent 8 }}
       annotations:
-        {{- if and .Values.metrics.enabled (eq .Values.kind "service") }}
+        {{- if and .Values.metrics.enabled (eq .Values.kind "web") }}
         prometheus.io/scrape: "true"
         prometheus.io/port: "{{ .Values.ports.metrics }}"
         prometheus.io/path: "/metrics"
@@ -42,7 +42,7 @@ spec:
         - name: app
           image: {{ include "app.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- if eq .Values.kind "static" }}
+          {{- if eq .Values.kind "site" }}
           {{- if eq .Values.static.server "sws" }}
           # static-web-server (Rust): SPA fallback + 읽기 전용 root
           args: ["--port", "{{ .Values.ports.http }}", "--root", "/public", "--page-fallback", "/public/index.html", "--health"]
@@ -52,7 +52,7 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.ports.http }}
-            {{- if and (eq .Values.kind "service") .Values.metrics.enabled }}
+            {{- if and (eq .Values.kind "web") .Values.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.ports.metrics }}
             {{- end }}
@@ -64,7 +64,7 @@ spec:
           {{- if include "app.isServed" . }}
           {{- $live := .Values.probes.liveness.path }}
           {{- $ready := .Values.probes.readiness.path }}
-          {{- if eq .Values.kind "static" }}
+          {{- if eq .Values.kind "site" }}
           {{- /* static-web-server는 --health로 /health만 노출 */}}
           {{- $live = "/health" }}
           {{- $ready = "/health" }}

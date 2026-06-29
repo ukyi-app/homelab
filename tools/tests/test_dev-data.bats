@@ -42,7 +42,7 @@ teardown() { rm -rf "$TMP"; }
 
 @test "env:example renders encryptedData keys from the sealed secret" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: service
+kind: web
 resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
 env: [{ name: LOG_LEVEL, value: info }]
 db: [orders]

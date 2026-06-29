@@ -18,7 +18,7 @@ setup() {
 EOF
   echo '[]' > "$FR/infra/cloudflare/apps.json"
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: service
+kind: web
 resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
 route: { public: true, host: orders.example.com }
 deploy: { autoDeploy: false }
@@ -145,7 +145,7 @@ EOF
   echo "$output" | grep -q "DATABASE_ADMIN_URL"
 }
 
-@test "create-app disables metrics by default for service apps" {
+@test "create-app disables metrics by default for web apps" {
   gen
   [ "$status" -eq 0 ]
   yq -e '.metrics.enabled == false' "$FR/apps/orders/deploy/prod/values.yaml"
@@ -160,27 +160,38 @@ EOF
   yq -e '.metrics.enabled == true' "$FR/apps/orders/deploy/prod/values.yaml"
 }
 
-@test "create-app maps kind=static to internal sws without exposing static.server in app config" {
+@test "create-app maps kind=site to internal sws without exposing static.server in app config" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: static
+kind: site
 resources: { requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 100m, memory: 64Mi} }
 route: { public: false }
 EOF
   gen
   [ "$status" -eq 0 ]
-  yq -e '.kind == "static" and .static.server == "sws" and .route.host == "orders.home.example.com"' \
+  yq -e '.kind == "site" and .static.server == "sws" and .route.host == "orders.home.example.com"' \
     "$FR/apps/orders/deploy/prod/values.yaml"
 }
 
 @test "create-app rejects static.server in external app config" {
   cat > "$TMP/.app-config.yml" <<'EOF'
-kind: static
+kind: site
 resources: { requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 100m, memory: 64Mi} }
 route: { public: false }
 static: { server: sws }
 EOF
   gen
   [ "$status" -ne 0 ]
+}
+
+@test "create-app rejects legacy kind=service with actionable message (rename gate)" {
+  cat > "$TMP/.app-config.yml" <<'EOF'
+kind: service
+resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
+route: { public: false }
+EOF
+  gen
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -Fq "web"   # 안내가 신값 web을 가리켜야
 }
 
 @test "create-app adds a ledger row and respects the budget gate" {

@@ -1,5 +1,5 @@
 image: { repo: ghcr.io/owner/api, tag: sha-abc1234 }
-kind: service
+kind: web
 route: { host: api.example.com, public: true, paths: ["/"] }
 envFrom:
   - secretRef: { name: api-secrets }

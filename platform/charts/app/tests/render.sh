@@ -4,7 +4,7 @@ CHART="$(cd "$(dirname "$0")/.." && pwd)"
 ROOT="$(cd "$CHART/../../.." && pwd)"
 REGO="$CHART/tests/psa-restricted.rego"
 fail=0
-for k in service worker static; do
+for k in web worker site; do
   echo "== rendering kind=$k =="
   out="$(helm template t "$CHART" -f "$CHART/tests/fixtures/$k.yaml")"
   echo "$out" | kubeconform -strict -summary -ignore-missing-schemas \

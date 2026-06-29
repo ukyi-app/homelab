@@ -15,7 +15,7 @@ spec:
     - name: http
       port: {{ .Values.ports.http }}
       targetPort: http
-    {{- if and (eq .Values.kind "service") .Values.metrics.enabled }}
+    {{- if and (eq .Values.kind "web") .Values.metrics.enabled }}
     - name: metrics
       port: {{ .Values.ports.metrics }}
       targetPort: metrics
