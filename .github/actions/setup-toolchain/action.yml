@@ -5,15 +5,15 @@ description: 핀된 차트/정책/시크릿 툴체인 설치 (버전 SSOT). 필�
 # 버전 bump 시 Renovate가 URL을 갱신하면 SHA도 함께 갱신해야 한다(불일치 시 gate가 sha256sum 실패로 즉시 차단).
 
 inputs:
-  yq:          { description: yq v4.44.6,            default: 'false' }
+  yq:          { description: yq v4.53.3,            default: 'false' }
   kubeconform: { description: kubeconform v0.6.7,    default: 'false' }
-  helm:        { description: helm v3.16.4,          default: 'false' }
-  kustomize:   { description: kustomize v5.4.3,      default: 'false' }
+  helm:        { description: helm v3.21.2,          default: 'false' }
+  kustomize:   { description: kustomize v5.8.1,      default: 'false' }
   conftest:    { description: conftest v0.68.2,      default: 'false' }
   bats:        { description: bats (apt),            default: 'false' }
   shellcheck:  { description: shellcheck v0.11.0,    default: 'false' }
-  sops:        { description: sops v3.9.4,           default: 'false' }
-  age:         { description: age v1.2.1,            default: 'false' }
+  sops:        { description: sops v3.13.1,           default: 'false' }
+  age:         { description: age v1.3.1,            default: 'false' }
   kubeseal:    { description: kubeseal v0.37.0,       default: 'false' }
   actionlint:  { description: actionlint v1.7.12,     default: 'false' }
 
@@ -24,8 +24,8 @@ runs:
       shell: bash
       run: |
         # yq는 직접 바이너리 — snap yq는 strict confinement라 mktemp -d /tmp 픽스처를 못 읽는다(라이브 검증된 함정).
-        f=/tmp/yq; curl -fsSL https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_arm64 -o "$f"
-        echo "9477ac3cc447b6c083986129e35af8122eb2b938fe55c9c3e40436fb966e5813  $f" | sha256sum -c -
+        f=/tmp/yq; curl -fsSL https://github.com/mikefarah/yq/releases/download/v4.53.3/yq_linux_arm64 -o "$f"
+        echo "578648e463a11c1b6db6010cbf41eafed6bee79466fcffa1bb446672cf7945ea  $f" | sha256sum -c -
         sudo install -m 0755 "$f" /usr/local/bin/yq
     - if: ${{ inputs.kubeconform == 'true' }}
       shell: bash
@@ -39,15 +39,15 @@ runs:
       run: |
         # helm 고정 버전 핀 — get-helm-3(latest)는 helm major가 chart-test를 깨면 유일 required check를 막는 시한폭탄(m6-tools >=3.16과 정합).
         f=/tmp/helm.tgz
-        curl -fsSL https://get.helm.sh/helm-v3.16.4-linux-arm64.tar.gz -o "$f"
-        echo "d3f8f15b3d9ec8c8678fbf3280c3e5902efabe5912e2f9fcf29107efbc8ead69  $f" | sha256sum -c -
+        curl -fsSL https://get.helm.sh/helm-v3.21.2-linux-arm64.tar.gz -o "$f"
+        echo "bbd559fc0547f1d96ccbc68fe4f1cb98f01808f36538139e669369066b781267  $f" | sha256sum -c -
         tar -xz -C /tmp -f "$f" && sudo mv /tmp/linux-arm64/helm /usr/local/bin/helm
     - if: ${{ inputs.kustomize == 'true' }}
       shell: bash
       run: |
         f=/tmp/kustomize.tgz
-        curl -fsSL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_arm64.tar.gz -o "$f"
-        echo "1b515578b0af12c15d9856720066ce2fe66756d63785b2cbccaf2885beb2381c  $f" | sha256sum -c -
+        curl -fsSL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/kustomize_v5.8.1_linux_arm64.tar.gz -o "$f"
+        echo "0953ea3e476f66d6ddfcd911d750f5167b9365aa9491b2326398e289fef2c142  $f" | sha256sum -c -
         sudo tar -xz -C /usr/local/bin -f "$f" kustomize
     - if: ${{ inputs.conftest == 'true' }}
       shell: bash
@@ -70,16 +70,16 @@ runs:
     - if: ${{ inputs.sops == 'true' }}
       shell: bash
       run: |
-        f=/tmp/sops; curl -fsSL https://github.com/getsops/sops/releases/download/v3.9.4/sops-v3.9.4.linux.arm64 -o "$f"
-        echo "16564c6b181d88505d9e0dfef62771894293d85cde5884d9b1a843859eee174b  $f" | sha256sum -c -
+        f=/tmp/sops; curl -fsSL https://github.com/getsops/sops/releases/download/v3.13.1/sops-v3.13.1.linux.arm64 -o "$f"
+        echo "19576fb1734dbf8fb77eda0cf0f3a2218f99bf4d33b814318e5e10d6babb9820  $f" | sha256sum -c -
         sudo install -m 0755 "$f" /usr/local/bin/sops
     - if: ${{ inputs.age == 'true' }}
       shell: bash
       run: |
         # age 버전 핀 + 체크섬 — 무핀 latest(dl.filippo.io)는 공급망/재현성 구멍(supplychain-5).
         f=/tmp/age.tgz
-        curl -fsSL https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-arm64.tar.gz -o "$f"
-        echo "57fd79a7ece5fe501f351b9dd51a82fbee1ea8db65a8839db17f5c080245e99f  $f" | sha256sum -c -
+        curl -fsSL https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-arm64.tar.gz -o "$f"
+        echo "c6878a324421b69e3e20b00ba17c04bc5c6dab0030cfe55bf8f68fa8d9e9093a  $f" | sha256sum -c -
         tar -xz -C /tmp -f "$f" && sudo mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
     - if: ${{ inputs.kubeseal == 'true' }}
       shell: bash
