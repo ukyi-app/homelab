@@ -16,6 +16,10 @@ spec:
       max_client_conn: "200"
       default_pool_size: "20"
       reserve_pool_size: "5"
+      # transaction 풀링은 클라이언트가 startup으로 보낸 서버 GUC를 거부한다("unsupported startup
+      # parameter"). libpq/node-pg 등이 흔히 보내는 항목을 무시하게 해 모든 앱이 풀러와 호환되게 한다.
+      # 무시는 "미적용"이므로 실제 강제가 필요한 값(statement_timeout 등)은 서버측 ALTER ROLE ... SET으로 둔다.
+      ignore_startup_parameters: extra_float_digits,statement_timeout,idle_in_transaction_session_timeout
   template:
     spec:
       containers:
