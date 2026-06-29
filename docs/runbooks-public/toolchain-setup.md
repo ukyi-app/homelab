@@ -20,7 +20,7 @@ gitignored(owner 로컬 전용)이므로, **도구 설치 단계에 한해** 이
 | **helm** | `v3.16.4` | `>=3.16` | 공유 차트 렌더(chart-test) | `brew install helm` (버전 확인 — major 변동 시 chart-test 파손 위험) |
 | **kustomize** | `v5.4.3` | (게이트 없음) | KSOPS 풀 렌더(`make render`) | `brew install kustomize` |
 | **kubeconform** | `v0.6.7` | `>=0.6.7` | 매니페스트 스키마 검증(chart-test) | `brew install kubeconform` |
-| **conftest** | `v0.56.0` | (게이트 없음, 필수) | 메모리 원장 OPA 정책(`verify:ledger`) | `brew install conftest` (Open Policy Agent) |
+| **conftest** | `v0.68.2` | (게이트 없음, 필수) | 메모리 원장 OPA 정책(`verify:ledger`) | `brew install conftest` (Open Policy Agent) |
 | **bats** | apt(`>=1.11`) | `>=1.11` | bats 테스트 게이트(`run-bats.sh`) | `brew install bats-core` (1.11+ 확인 — macOS 기본 bash 3.2 함정 주의) |
 | **shellcheck** | `v0.11.0` | (게이트 없음) | `*.sh` 린트(`make ci`) | `brew install shellcheck` (버전이 다르면 info 체크가 CI와 드리프트) |
 | **yq** | `v4.44.6` | `v4` | YAML 파싱(여러 스크립트/게이트) | `brew install yq` (mikefarah v4 — go-yq) |
