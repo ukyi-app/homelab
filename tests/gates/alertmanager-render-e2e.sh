@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 컨테이너화 AM v0.27 렌더 e2e — message Go-template이 실제로 컴파일·렌더되어 계약(parse_mode=HTML,
+# 컨테이너화 AM v0.33 렌더 e2e — message Go-template이 실제로 컴파일·렌더되어 계약(parse_mode=HTML,
 # 글리프, <b>한국어 제목</b>, &lt; escape, → 링크)을 만족함을 사전(pre-merge) 증명한다.
 # amtool은 inline message Go-template을 컴파일하지 않으므로(검증됨) 이 스크립트가 유일한 컴파일·렌더 증거다.
 #
@@ -40,7 +40,7 @@ docker run -d --rm --name am-render-e2e \
   -p 9093:9093 \
   -v "$TMP/am.yml:/etc/alertmanager/alertmanager.yml:ro" \
   -v "$TMP/TELEGRAM_BOT_TOKEN:/etc/alertmanager/secrets/TELEGRAM_BOT_TOKEN:ro" \
-  prom/alertmanager:v0.27.0 \
+  prom/alertmanager:v0.33.0 \
     --config.file=/etc/alertmanager/alertmanager.yml \
     --cluster.listen-address= >/dev/null
 BASE="http://127.0.0.1:9093"

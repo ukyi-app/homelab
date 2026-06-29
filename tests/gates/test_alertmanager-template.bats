@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# Alertmanager telegram 메시지 contract 구조 게이트 (in-place v0.27).
+# Alertmanager telegram 메시지 contract 구조 게이트 (in-place v0.33).
 # amtool(아래 게이트)은 message Go-template을 컴파일하지 않는다 — glyph/branch/escape 구조는
-# 이 테스트만이 지킨다. v0.27 유지·단일 receiver·단일 chat_id·send_resolved 고정도 함께 검증.
+# 이 테스트만이 지킨다. v0.33 유지·단일 receiver·단일 chat_id·send_resolved 고정도 함께 검증.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2에서 [[ ]] 실패는 침묵 통과(검증된 버그).
 # ⚠️ @test 이름은 영어만 — 한글이면 bats 파싱이 깨진다(검증된 버그, AGENTS.md).
 
@@ -14,8 +14,8 @@ setup() {
         | yq '.receivers[] | select(.name == "telegram") | .telegram_configs[0].message')"
 }
 
-@test "image stays pinned to v0.27.0 (no v0.28 upgrade)" {
-  run grep -c 'image: prom/alertmanager:v0.27.0' "$AM"
+@test "image stays pinned to v0.33.0 (render-e2e verified; no blind upgrade)" {
+  run grep -c 'image: prom/alertmanager:v0.33.0' "$AM"
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]
 }
@@ -85,7 +85,7 @@ setup() {
   grep -q '자기 자신의 전송 실패는 감지하지 못한다' "$CORE"
 }
 
-@test "amtool check-config (v0.27 image) accepts the AM config (CI-safe, no KSOPS)" {
+@test "amtool check-config (v0.33 image) accepts the AM config (CI-safe, no KSOPS)" {
   command -v docker >/dev/null || skip "docker required for amtool gate"
   docker info >/dev/null 2>&1 || skip "docker daemon not available"
   command -v yq >/dev/null || skip "yq required"
@@ -103,7 +103,7 @@ setup() {
   # (CI ubuntu docker에서 발생; OrbStack은 관대). world-readable로 연다.
   chmod 755 "$tmp"; chmod 644 "$tmp/alertmanager.yml"
   run docker run --rm -v "$tmp:/cfg" --entrypoint amtool \
-      prom/alertmanager:v0.27.0 check-config /cfg/alertmanager.yml
+      prom/alertmanager:v0.33.0 check-config /cfg/alertmanager.yml
   [ "$status" -eq 0 ] || { echo "amtool exit=$status output: $output"; false; }
   printf '%s' "$output" | grep -q 'SUCCESS'
 }

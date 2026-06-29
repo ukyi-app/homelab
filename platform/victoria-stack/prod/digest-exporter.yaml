@@ -33,7 +33,7 @@ spec:
           securityContext: { runAsNonRoot: true, runAsUser: 65532 }
           containers:
             - name: digest-exporter
-              image: quay.io/skopeo/stable:v1.16.1
+              image: quay.io/skopeo/stable:v1.22.2
               command: ["/bin/sh", "/script/run.sh"]
               env:
                 # 배포된 외부 앱의 "name=ghcr.io/owner/name:tag" 공백 구분 목록. 현재 배포 앱 없음 —
