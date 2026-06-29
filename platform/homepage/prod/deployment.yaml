@@ -30,7 +30,7 @@ spec:
         # — RO면 EROFS "required config 초기화 실패" → CrashLoop("no available server").
         # adguard seed-config 동형.
         - name: seed-config
-          image: busybox:1.37
+          image: busybox:1.38
           command: ["sh", "-c", "cp -L /tmp/cfg/* /app/config/ 2>/dev/null; true"]
           securityContext:
             runAsNonRoot: true
