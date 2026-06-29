@@ -1,1 +1,8 @@
-[]
+[
+  {
+    "name": "page",
+    "host": "page.ukyi.app",
+    "public": true,
+    "active": true
+  }
+]
