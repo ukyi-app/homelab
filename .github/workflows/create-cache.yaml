@@ -1,13 +1,18 @@
-# create-cache 변이 디스패처 — 앱용 redis 프로비전(spec → 캐시 산출물 PR). owner는 name만(고정).
-# 변이 로직은 _create-cache.yaml(reusable)에 있다 — 이 파일은 trigger+validate+notify 셸.
+# create-cache 변이 디스패처 — 앱용 redis 프로비전(입력 → spec 조립 → 캐시 산출물 PR). owner는 name만(고정).
+# 변이 로직은 _create-cache.yaml(reusable)에 있다 — 이 파일은 trigger+조립+validate+notify 셸.
+# 입력은 평평한 필드(name + 선택 maxmemory) — validate 잡이 spec JSON으로 조립해 reusable에 넘긴다.
 name: "✨ create-cache"
-run-name: "✨ create-cache — ${{ inputs.spec }}"
+run-name: "✨ create-cache — ${{ inputs.name }}"
 on:
   workflow_dispatch:
     inputs:
-      spec:
-        description: '{"name":"<cache>"}'
+      name:
+        description: "캐시 이름 (소문자 시작, 영숫자/하이픈, ≤30자)"
         required: true
+      maxmemory_mi:
+        description: "maxmemory (Mi, 16..1024, 비우면 기본 64)"
+        required: false
+        default: ""
 
 concurrency:
   group: homelab-mutation
@@ -20,22 +25,37 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-24.04-arm
+    outputs:
+      spec: ${{ steps.assemble.outputs.spec }}   # 조립한 spec JSON을 reusable 호출 잡으로 전달
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with: { ref: main }
       - uses: ./.github/actions/setup-bun
         with: { install: 'false' }     # validate-mutation 체크는 deps 불요
-      - env:
-          PAYLOAD: ${{ toJSON(github.event.inputs) }} # owner 입력도 비신뢰 — env 경유, 인라인 보간 금지
+      - name: 입력 → spec JSON 조립 (maxmemory 비우면 생략 → reusable 기본 64)
+        id: assemble
+        env: # 비신뢰 입력 — env 경유, run 안 인라인 보간 금지
+          NAME: ${{ inputs.name }}
+          MAXMEMORY: ${{ inputs.maxmemory_mi }}
         run: |
-          printf '%s' "$PAYLOAD" > /tmp/payload.json
+          spec=$(jq -cn --arg name "$NAME" --arg mm "$MAXMEMORY" \
+            '{name: $name}
+             + (if $mm == "" then {}
+                elif ($mm | test("^[0-9]+$")) then {maxmemory_mi: ($mm | tonumber)}
+                else {maxmemory_mi: $mm} end)')   # 비숫자는 문자열로 둬서 validate-mutation이 "정수" 거부
+          printf 'spec=%s\n' "$spec" >> "$GITHUB_OUTPUT"
+      - name: spec 계약 검증 (허용 밖 필드·예약 이름·maxmemory 범위 거부 — fail-closed)
+        env:
+          SPEC: ${{ steps.assemble.outputs.spec }}
+        run: |
+          jq -n --arg action create-cache --arg spec "$SPEC" '{action: $action, spec: $spec}' > /tmp/payload.json
           bun tools/validate-mutation.ts --action create-cache --payload-file /tmp/payload.json
 
   create-cache:
     needs: validate
     uses: ./.github/workflows/_create-cache.yaml
     with:
-      spec: ${{ github.event.inputs.spec }}
+      spec: ${{ needs.validate.outputs.spec }}   # validate가 조립·검증한 spec JSON
     secrets: inherit
     permissions:
       contents: read

@@ -10,8 +10,8 @@
 |---|---|---|
 | ✨ create-app | app_repo | 신규 앱 온보딩(앱 레포 main HEAD 기준, 매니페스트+공개 PR) |
 | ✨ update-secrets | app_repo | 앱 SealedSecret 첫 추가/갱신(앱 레포 main HEAD 기준) |
-| ✨ create-database | spec | 앱용 CNPG DB 프로비전 |
-| ✨ create-cache | spec | 앱용 redis 프로비전 |
+| ✨ create-database | name + 확장(체크박스 pg_trgm/pgcrypto/citext/vector/postgis + 자유입력) | 앱용 CNPG DB 프로비전 |
+| ✨ create-cache | name + maxmemory(선택) | 앱용 redis 프로비전 |
 | 🗑️ teardown-app | app, confirm | 앱 철거 — **파괴**(confirm===app 가드 + **수동 머지**; reusable이 파괴 경계에서 confirm 재검증). owner-local `make teardown-app`과 공존 |
 
 전역 직렬화(`group: homelab-mutation`, `queue: max`, `cancel-in-progress: false`)로 bump-poll/iac/tf-reconcile과 한 줄로 직렬 실행. 변이 로직은 동명 `_*.yaml` reusable에, 이 디스패처는 validate→route→실패 notify 셸.
