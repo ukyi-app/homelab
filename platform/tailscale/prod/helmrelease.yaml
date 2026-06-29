@@ -4,7 +4,7 @@ metadata:
   name: tailscale-operator
 name: tailscale-operator
 repo: https://pkgs.tailscale.com/helmcharts
-version: 1.78.1 # 버전 고정
+version: 1.98.4 # 버전 고정 (TS-2026-002 따라잡기 + multi-major 버전 위생; values/ProxyClass CRD 무변경)
 releaseName: tailscale-operator
 namespace: tailscale # 전용 privileged ns — proxy(ts-*)가 여기 생성됨(edge baseline 비호환 회피)
 valuesFile: values-tailscale.yaml
