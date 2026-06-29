@@ -8,7 +8,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
 @test "setup-bun composite exists and pins bun + frozen install" {
   [ -f "$A" ]
   run grep -E "oven-sh/setup-bun@[0-9a-f]{40}" "$A"; [ "$status" -eq 0 ]
-  run grep -E "bun-version: ['\"]1\.3\.10['\"]" "$A"; [ "$status" -eq 0 ]
+  run grep -E "bun-version: ['\"]1\.3\.14['\"]" "$A"; [ "$status" -eq 0 ]
   run grep -E 'bun install --frozen-lockfile' "$A"; [ "$status" -eq 0 ]
 }
 
@@ -43,7 +43,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   # setup-node는 ci.yaml(app-shared node 스모크) 1파일에서만 — 그 외 0
   run bash -c "grep -rlE 'actions/setup-node' '$ROOT/.github/workflows/' | grep -vE '/ci\.yaml$' || true"
   [ -z "$output" ]
-  # 그 예외는 SHA핀 + node 22.18
+  # 그 예외는 SHA핀 + node 24.14.0 (.mts 계약 하한은 22.18 — AGENTS.md, CI는 LTS 24)
   run grep -E "actions/setup-node@[0-9a-f]{40}" "$ROOT/.github/workflows/ci.yaml"; [ "$status" -eq 0 ]
-  run grep -E "node-version: ['\"]22\.18" "$ROOT/.github/workflows/ci.yaml"; [ "$status" -eq 0 ]
+  run grep -E "node-version: ['\"]24\.14" "$ROOT/.github/workflows/ci.yaml"; [ "$status" -eq 0 ]
 }

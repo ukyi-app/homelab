@@ -81,7 +81,7 @@ m6-tools: ## 마일스톤 6용 차트/CI 툴체인 검증
 	@helm version --short | grep -qE 'v(3\.(1[6-9]|[2-9][0-9])|[4-9])\.' || { echo "helm >=3.16 required"; exit 1; }
 	@kubeconform -v | grep -qE 'v0\.(6\.[7-9]|[7-9]\.|[1-9][0-9]\.)' || { echo "kubeconform >=0.6.7 required"; exit 1; }
 	@bats --version | grep -qE 'Bats 1\.(1[1-9]|[2-9][0-9])' || { echo "bats >=1.11 required"; exit 1; }
-	@bun --version | grep -qF '1.3.10' || { echo "bun 1.3.10 required"; exit 1; }
+	@bun --version | grep -qF '1.3.14' || { echo "bun 1.3.14 required"; exit 1; }
 	@yq --version | grep -qE 'v4\.' || { echo "yq v4 required"; exit 1; }
 	@jq --version >/dev/null || { echo "jq required"; exit 1; }
 	@echo "m6-tools OK"
