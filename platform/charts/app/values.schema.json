@@ -17,7 +17,7 @@
         { "required": ["tag"], "properties": { "tag": { "minLength": 1 } } }
       ]
     },
-    "kind": { "type": "string", "enum": ["service", "worker", "static"] },
+    "kind": { "type": "string", "enum": ["web", "worker", "site"] },
     "replicas": { "type": "integer", "minimum": 1, "maximum": 3 },
     "nameOverride": { "type": "string" },
     "imagePullSecrets": { "type": "array", "items": { "type": "object" } },
