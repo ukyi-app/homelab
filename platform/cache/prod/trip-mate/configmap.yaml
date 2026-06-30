@@ -1,0 +1,23 @@
+# trip-mate valkey.conf — 비밀 없음(ACL은 SealedSecret trip-mate-acl의 users.acl).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trip-mate-config
+  labels:
+    app.kubernetes.io/name: trip-mate
+    app.kubernetes.io/component: valkey
+    app.kubernetes.io/part-of: cache
+data:
+  valkey.conf: |
+    bind 0.0.0.0
+    port 6379
+    # 캐시 시맨틱: maxmemory 도달 시 LRU 퇴출
+    maxmemory 64mb
+    maxmemory-policy allkeys-lru
+    # 백업 체인: AOF off, RDB 스냅샷만 (cache-backup CronJob이 BGSAVE 후 R2 업로드)
+    appendonly no
+    save 900 1
+    save 300 100
+    dir /data
+    # ACL: default(전체 권한) + ro(+@read -@write -@dangerous)
+    aclfile /etc/valkey-acl/users.acl

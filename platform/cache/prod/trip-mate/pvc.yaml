@@ -1,0 +1,13 @@
+# RDB 스냅샷(dump.rdb) 저장 — 기본 1Gi (maxmemory ≤ 1Gi 전제).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: trip-mate-data
+  labels:
+    app.kubernetes.io/name: trip-mate
+    app.kubernetes.io/component: valkey
+    app.kubernetes.io/part-of: cache
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 1Gi }

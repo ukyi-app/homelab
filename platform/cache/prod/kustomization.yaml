@@ -9,3 +9,4 @@ resources:
   - networkpolicy.yaml
   - backup-rbac.yaml
   - backup-cronjob.yaml
+  - trip-mate
