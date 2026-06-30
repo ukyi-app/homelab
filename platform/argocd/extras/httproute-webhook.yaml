@@ -1,0 +1,28 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd-webhook
+  # homepage 자동발견 비대상(웹훅 엔드포인트, UI 아님) — gethomepage 어노테이션 없음.
+spec:
+  parentRefs:
+    # group/kind는 CRD 기본값이지만 명시 — SSA atomic 리스트(parentRefs) 영구 OutOfSync 함정 회피.
+    # 내부 UI 라우트(web-internal-tls)와 달리 이 라우트만 web-public(Cloudflare 터널 노출)에 붙인다.
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab
+      namespace: gateway
+      sectionName: web-public
+  hostnames:
+    - "argocd-webhook.ukyi.app"
+  rules:
+    # /api/webhook 경로만 공개한다 — UI/API 전체(/)는 절대 web-public에 노출하지 않는다.
+    # GitHub push 웹훅이 ArgoCD app refresh를 즉시 트리거(서명은 webhook.github.secret으로 검증).
+    - matches:
+        - path: { type: PathPrefix, value: /api/webhook }
+      backendRefs:
+        # argocd-server Service:80(→8080)은 server.insecure=true라 평문 HTTP. 같은 ns라 ReferenceGrant 불필요.
+        - group: ""
+          kind: Service
+          name: argocd-server
+          port: 80
+          weight: 1
