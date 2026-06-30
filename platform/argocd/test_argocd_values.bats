@@ -51,3 +51,8 @@ V="platform/argocd/bootstrap-values.yaml"
 @test "server.insecure stays true (TLS terminated upstream)" {
   run yq '.configs.params."server.insecure"' "$V"; [ "$output" = "true" ]
 }
+
+@test "reconciliation timeout is tightened to 30s for faster deploy convergence (internal ArgoCD = no webhook)" {
+  # ArgoCD 내부 전용이라 GitHub 웹훅 대신 폴링 주기 단축으로 배포 지연을 줄인다(노출 없이).
+  run yq '.configs.cm."timeout.reconciliation"' "$V"; [ "$output" = "30s" ]
+}
