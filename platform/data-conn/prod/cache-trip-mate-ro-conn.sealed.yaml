@@ -1,0 +1,14 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: cache-trip-mate-ro-conn
+  namespace: prod
+spec:
+  encryptedData:
+    TRIP_MATE_REDIS_RO_URL: AgBM2shouqF31fqopPaPKS9mLAU6GlVjFLmaML5gUFTFk/UaAkc4a9fGqhjG+nvUUsgt5o/wCII9P/rAuQ6FZow3BZBVw5ReCetVaME8xjtygaYgE1guq7lSN0nfAMvX8fwg9yBOraT/Y109aV3CUqmL01S6qRNNGdT9QNrZeSY7RYIRt6rkAV6iDen9BDdDzYVW1AFP27G2OIUVAwxofVLSHIWokZCT5Ki+rIOsZhGPblP9fOsyCoFbA0YXG4bQroewLKLwbWfqYVxZoaXZ2u4tzTfmzKks493TjiTCiNP5Gpwi4AX6qH0WHzqDTX5Ej5I1xUksVdZ0dUUVqXQqdxZ4+/DS0JcwZUj0D+MNPlPqSFH8sxOcwSaalxm77IIQ2Thusv8rmdx7cF1FPRN0lrJFAU6fONQZkJuWW15t5TYo4NfkyFqa4g1Yl4yqFzS2X2BkG3TokfXkxfM+g5DuHel1Ojd/HfjEwANyqkk3m+RWWyFToD6NrU8MvfkDIS9HzBUGX3s+HshCGRoUgI8q9XaDLg3U8iu3QZS35FcbvxB6G+J+9fcrQFZOrHbq5jvLTLtXom4uyN1AHlCN/smvJv1+8Wc4UnkRvAxNyQSYGabSj8JNcasWoAxxYNGCdL27+8AsWj46BMQ2x7YnS6FGkyea7ecMpUG3uxl7Lm2YED12diGC+Oiaw7i/OzpBCG30nCgGRC9y2f4v71fjV/fl9crk84dQcNvvIR0A8u0k1r9uJzRcUoN8x87mp78Z8WelF958iBny5IB31dRdWWWt4q44xNJTMeTZs3hda5usN+O852ED
+  template:
+    metadata:
+      name: cache-trip-mate-ro-conn
+      namespace: prod
+    type: Opaque

@@ -7,7 +7,7 @@ data:
     set -eu
     # busybox nc 루프를 이용한 최소 HTTP 리스너.
     # /ping에 어떤 POST가 오든 healthchecks.io로 ping 한 번을 보낸다.
-    # 주의: busybox 1.36 nc에는 -q 옵션이 없다(invalid option으로 리스너가 즉시 죽어
+    # 주의: busybox 1.38 nc에는 -q 옵션이 없다(invalid option으로 리스너가 즉시 죽어
     # webhook이 영구 connection refused가 되고, while 루프가 healthchecks를 과도하게
     # ping해 dead-man switch를 무력화한다).
     # fm-1: nc가 실제로 연결을 서빙(exit 0)했을 때만 healthchecks를 ping한다. nc가 연결 없이
@@ -38,7 +38,7 @@ spec:
       annotations:
         # relay.sh 내용 해시 — 스크립트 변경 시 이 값을 yq|sha256sum|cut으로 갱신하면 pod template이 바뀌어
         # ArgoCD가 자동 롤한다(ConfigMap 무재시작 함정 회피, AGENTS.md). test_relay.bats가 일치를 강제.
-        checksum/relay-script: "b0ef4811484da55f"
+        checksum/relay-script: "cd12d6b0e30903c1"
     spec:
       securityContext: { runAsNonRoot: true, runAsUser: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:

@@ -40,7 +40,7 @@ kind: Cluster
 metadata: { name: $1, namespace: ${NS}, labels: { cnpg.io/drill: "true" } }
 spec:
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:16.4
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4
   storage: { size: 40Gi, storageClass: drill-ssd }
   walStorage: { size: 10Gi, storageClass: drill-ssd }
   resources:

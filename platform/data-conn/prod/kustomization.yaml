@@ -19,3 +19,5 @@ resources:
   - db-example-api-ro-conn.sealed.yaml
   - db-trip-mate-conn.sealed.yaml
   - db-trip-mate-ro-conn.sealed.yaml
+  - cache-trip-mate-conn.sealed.yaml
+  - cache-trip-mate-ro-conn.sealed.yaml

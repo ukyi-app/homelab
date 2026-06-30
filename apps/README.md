@@ -20,4 +20,4 @@ ArgoCD appset(`platform/argocd/root/appset.yaml`)이 `apps/*/deploy/prod`를 싱
 CronJob 등이 참조하는 빌드-전용 이미지(예: `pg-tools`)는 **`ops/<name>/`**(Dockerfile만, `deploy/` 없음 — GHCR로
 이미지만 발행). `apps/`는 ArgoCD가 워크로드로 싱크하는 배포 앱 전용이다. `build.yaml`은 `ops/**`만 빌드한다.
 
-> 현재 인레포 배포 앱 0개 — 계약 가드는 신규 앱을 위한 fail-closed 전제다.
+> 현재 인레포 배포 앱 1개(page) — 계약 가드가 필수 산출물을 강제한다.
