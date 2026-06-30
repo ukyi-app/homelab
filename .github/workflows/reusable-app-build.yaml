@@ -1,14 +1,13 @@
-# 외부 앱 레포가 호출하는 재사용 빌드 워크플로 (빌드 로직의 SSOT) — v1: build-only.
+# 외부 앱 레포가 호출하는 재사용 빌드 워크플로 (빌드 로직의 SSOT) — build-only.
 # 앱 레포의 caller(템플릿 제공)는 main push에서 이걸 호출만 한다:
 #   uses: <owner>/homelab/.github/workflows/reusable-app-build.yaml@main
 #   with: { app: ${{ github.event.repository.name }} }
 #
-# v1 계약(인증 마이그레이션 단위 — 런북 app-platform):
-# - 빌드 + GHCR push만 한다. homelab dispatch는 전부 제거 — 배포 반영은 homelab측
-#   GHCR 폴링(bump-poll.yaml)이 권위 처리하고, 온보딩은 owner의 dispatch-mutation(create-app).
-# - `dispatch-pat`은 **선언만 유지(required:false, 미사용)**: 기존 caller가 secrets를 넘겨도
-#   "undeclared secret" 검증 실패가 나지 않게 하는 호환 장치다. 모든 caller가 secrets 블록을
-#   제거한 뒤 v2에서 선언을 삭제하고 org secret HOMELAB_DISPATCH_PAT를 폐기한다.
+# 계약(v1 dispatch 경로 폐기 완료):
+# - 빌드 + GHCR push만 한다. homelab dispatch는 없음 — 배포 반영은 homelab측 GHCR 폴링
+#   (bump-poll.yaml)이 권위 처리하고, 빌드 직후 즉시 반영은 앱 release의 bump-poll 디스패치다.
+# - 구 dispatch 입력(secrets)·org secret·bump.yaml의 외부 dispatch 경로는 모두 폐기됨
+#   (인증 마이그레이션 완료). caller는 secrets 블록을 넘기지 않는다.
 name: "📦 reusable-app-build"
 on:
   workflow_call:
@@ -17,10 +16,6 @@ on:
         description: "앱 이름 (관례: 레포 이름과 동일)"
         required: true
         type: string
-    secrets:
-      dispatch-pat:
-        description: "(deprecated — 미사용) v2에서 제거 예정. caller는 secrets 블록을 지워라."
-        required: false
 
 jobs:
   build:

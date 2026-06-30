@@ -7,7 +7,7 @@ setup() {
   command -v yq >/dev/null || skip "yq required"
 }
 
-@test "exactly the expected workflows notify via the action (self-deriving sum, bump=2, tf-reconcile=3)" {
+@test "exactly the expected workflows notify via the action (self-deriving sum, bump=1, tf-reconcile=3)" {
   # ⚠️ codex restale3 F1: 합계는 here-doc 줄의 self-deriving sum(절대값 prebake 금지) — 새 콜사이트(P6 pr-sweeper·
   # P8 build.yaml)는 EXPECTED here-doc 줄만 더하면 된다(머지 순서 의존 절대값 무수정).
   EXPECTED="$(cat <<'EOF'
@@ -20,7 +20,7 @@ update-secrets.yaml 1
 create-database.yaml 1
 create-cache.yaml 1
 audit.yaml 1
-bump.yaml 2
+bump.yaml 1
 bump-poll.yaml 1
 iac.yaml 1
 tf-reconcile.yaml 3
