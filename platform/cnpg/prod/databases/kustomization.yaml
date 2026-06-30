@@ -8,3 +8,6 @@ resources:
   - page.yaml
   - db-page-owner.sealed.yaml
   - db-page-ro.sealed.yaml
+  - trip-mate.yaml
+  - db-trip-mate-owner.sealed.yaml
+  - db-trip-mate-ro.sealed.yaml
