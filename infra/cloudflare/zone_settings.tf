@@ -75,13 +75,14 @@ resource "cloudflare_zone_setting" "security_header" {
   }
 }
 
-# Email Obfuscation(Scrape Shield) 비활성. 기본 ON이면 Cloudflare가 text/html을 변형 대상으로
-# 처리하며 응답의 강한 ETag를 제거한다 — 오리진이 내려보내는 조건부 캐시 검증자가 공개 응답에서
-# 사라진다(확인: 오리진 etag 존재, page.ukyi.app 응답에선 부재, 본문은 바이트 동일).
-# page 앱은 리비전 단위 강한 ETag로 304 재검증(본문 전송 생략)을 하므로 그 검증자가 엣지까지
-# 보존되도록 끈다. 공개 페이지는 CSP default-src 'none' 샌드박스라 이메일 스크레이핑 노출도 없다.
+# Email Obfuscation(Scrape Shield) 기본값 on 명시 유지. #198에서 page 앱의 강한 ETag가
+# 엣지에서 제거되는 원인으로 의심해 off로 바꿨으나, 검증 결과 무관함이 확인됐다(off 적용 후에도
+# Cloudflare가 ETag를 계속 제거; 실제 in-cluster Traefik까지는 ETag 보존). 따라서 원래 기본값
+# on으로 복원한다 — 무해한 anti-scrape 하드닝이며, off로 두면 zone 전역(*.ukyi.app) 메일 난독화가
+# 사라진다. (단순 리소스 삭제 대신 on을 명시하는 이유: 삭제 시 Cloudflare가 off에 멈춘 채 GitOps
+# 관리 밖으로 드리프트하기 때문.)
 resource "cloudflare_zone_setting" "email_obfuscation" {
   zone_id    = data.cloudflare_zone.this.zone_id
   setting_id = "email_obfuscation"
-  value      = "off"
+  value      = "on"
 }
