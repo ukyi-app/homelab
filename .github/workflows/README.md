@@ -52,3 +52,5 @@ run-name에 트리거 출처(`스케줄`/`수동(actor)`)가 박혀 이력에서
 | 앱 재활성화/노출 재승인 | `tools/activate-app.ts` (런북 app-platform) | host/public 변경 등 별도 재증명이 필요할 때만 |
 
 > 머지 정책: main은 GitHub Merge Queue를 거친다(ruleset merge-queue-main). PR은 gate 통과 후 큐가 순차 머지한다.
+
+<!-- merge queue + auto-merge --squash 호환 검증 (#194 후속) -->
