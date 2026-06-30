@@ -3,7 +3,7 @@
   grep -qE 'sync-wave:\s*"-2"' platform/argocd/root/apps/cnpg-operator.yaml
   grep -qE 'sync-wave:\s*"-1"' platform/argocd/root/apps/cnpg-data.yaml
 }
-@test "Cluster CR carries wave -1 so it is Ready before app migrations (wave 1)" {
+@test "Cluster CR carries wave -1 so it is Ready before apps (self-migrate on boot)" {
   grep -qE 'sync-wave:\s*"-1"' platform/cnpg/prod/cluster.yaml
 }
 @test "waves match the M3-owned SYNC-WAVES.md (cnpg-operator -2, Cluster -1)" {

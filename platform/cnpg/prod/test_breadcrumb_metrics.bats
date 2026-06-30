@@ -17,7 +17,7 @@
   [ -z "$output" ]
 }
 
-# --- M5 알림이 읽는 메트릭이 실제 export되는 이름과 일치하는지 강제 (CNPG 1.27 + barman-cloud plugin) ---
+# --- M5 알림이 읽는 메트릭이 실제 export되는 이름과 일치하는지 강제 (CNPG 1.29 + barman-cloud plugin) ---
 # 배경: in-tree cnpg_collector backup/archive 메트릭은 plugin 환경에서 deprecated(0)거나 부재다.
 # plugin은 barman_cloud_* 접두사로, WAL 아카이빙 상태는 pg_stat_archiver로 export한다.
 # (중간 단언은 [ ]/grep 단순 명령으로 — bash 3.2에서 [[ ]] 실패 침묵 통과 회피)

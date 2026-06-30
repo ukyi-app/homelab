@@ -1,7 +1,7 @@
 # ApplicationSet 두 개. 플랫폼 컴포넌트는 일반 kustomize 디렉토리로 렌더하고,
 # 앱은 공유 Helm 차트(multi-source: 차트 + 앱별 values)를 통해 렌더한다 —
 # apps/<name>/deploy/prod에는 values.yaml만 있어서 단순 directory source로는
-# 아무것도 렌더되지 않기 때문(Deployment/Service/HTTPRoute/migration Job 없음).
+# 아무것도 렌더되지 않기 때문(Deployment/Service/HTTPRoute 없음).
 # -------- 1) 플랫폼 컴포넌트 — 일반 git-directory generator --------
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
