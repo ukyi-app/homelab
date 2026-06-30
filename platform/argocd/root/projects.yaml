@@ -20,6 +20,11 @@ spec:
   clusterResourceWhitelist: [] # cluster-scoped 전면 금지 (앱은 namespaced만)
   namespaceResourceWhitelist:
     - { group: apps, kind: Deployment }
+    # Deployment·Job의 런타임 자식(컨트롤러 생성, git sync 대상 아님). ArgoCD는 namespaceResourceWhitelist로
+    # 리소스 트리도 필터링하므로, 이 둘이 없으면 UI 트리에서 RS/Pod가 사라진다(라이브 검증·통제 실험 확정).
+    # 위협표면: bare Pod는 prod·namespaced·PSA restricted 한정이라 경계 확장 미미.
+    - { group: apps, kind: ReplicaSet }
+    - { group: "", kind: Pod }
     - { group: "", kind: Service }
     - { group: "", kind: ConfigMap }
     - { group: batch, kind: Job }

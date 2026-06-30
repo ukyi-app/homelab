@@ -62,6 +62,10 @@ setup() {
   run yq 'select(.metadata.name=="apps") | .spec.namespaceResourceWhitelist[] | .group + "/" + .kind' "$P"
   [ "$status" -eq 0 ]
   echo "$output" | grep -qx "apps/Deployment"
+  # Deployment·Job의 런타임 자식 — ArgoCD가 whitelist로 리소스 트리도 필터링하므로 트리 가시성용
+  # (없으면 UI 트리에서 RS/Pod가 사라진다 — 라이브 검증).
+  echo "$output" | grep -qx "apps/ReplicaSet"
+  echo "$output" | grep -qx "/Pod"
   echo "$output" | grep -qx "/Service"
   echo "$output" | grep -qx "/ConfigMap"
   echo "$output" | grep -qx "batch/Job"
