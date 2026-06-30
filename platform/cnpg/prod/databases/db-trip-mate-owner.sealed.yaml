@@ -1,0 +1,17 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: db-trip-mate-owner
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  encryptedData:
+    password: AgAbERmITKh5pUyQ7OYO+rZDR8F+62LxruikuQsLL6puOfEhatZ5QUrGzfZuZG/5lJlRJV0zDR4WhXo8dvBErWExi97u7cK1b9d2LoefLA6XhwOZLSmxvI8pbl35R0U0oZzXJXx3SzhkYHmJkM1+qUE8s/bKdRggL9mOTEZzXKmYjlDdOPH8QLkUiy7pseZMBhK88cqYqXLA9G0abaRIiJUzhrqy3S8t6CJwOjgOcbBA/yPw5BH3mxAxmYpdZexYYTZ6031y5G16CctD+zNcd+mRWtwHAJY+FXFYmK8jsdqbNsVG/ouFAdfBVXUpK7Az9osAvCiRCqReEWYMMCQOE1ntwVBwrviDG+ZSQiZ0mmc5pqZ7kQttOic6sMRyeEbR9xfL9HSnqAxWAkJpohzTyF/pV0Atkr5NNgAkBo+gCCgrf1Kmmf1BvEn/ZuKgjWBiejLaQYhYqnU4ZXKZI7/Wy3RuntmBIeikDZPyj0a4lEe7+gF77cvudARDp6P+tlpeUwA0FuLkqhMfXCyMdbTshlJOKESBPVtwaxrR3q6yOoMcZtS4nE9jCGInEuFVk2oinDrQ0+Gwgy24Bk5gLi7UG6hpPacnRP6WuJiUmy1SZW6ncv0QWjQFg6A3owraCWbXq4RPsOQNsNJieMd+hRx4x4F2QuXVz/HHMM2ARCDBRWBloKD8tOsSC1+M69FoFUtivSG3EHKt8OhpFoeZuGSEJcTSw9veSaY3xaqAhVtZ7cSq5Q==
+    username: AgBBSIOvz+VlB50cITWDyxITbaDuE5+cHcjCezoQjURyPLs3Wzk2GrD96QThommMh1EdtpWSx/JckWxfNSv1dgoMCS4AJXlBQMSSmJg3aabtqlJAK33k5kLcKJVZVQmM/MP9dX4C4k6n/7SXMQAqFn1WtjxejSdgG4yf36k/K9CeXcurQOHePA43vgtbLH4/NTtgZKfGek/oOaxZwCZP4qLWmR/PMhutS5gdnn8or9sAN1mhTrrKjuzzkz63keK+FJq/llKIkdLhdHabdolOLGHjIbfTHmhZhWpNDskA+H5ugQV/3PuoxSxune8GzLt72o6O3Gj96PPVkhwOcQv95fM1WHd19yq3CZAucEoqA8+Gkp9kh+Wy590A4IWO1xCW/gCdZFswuhfG2YEOTb1rVB8aYYClNPO0d2PZr5xdqPeXUPnizwFLsfGO/2KwyRIXfX1AT5VLJLwoG4Lxcn/EU5IAyldu6Nbn5hN44na5bzzhen473j6EMDCk080jqccv3UgKHZrFFiecUhWakyes2yy7kh8gx1QlOiJchT7L07Kf4Ukz/fx00g2DXGmzXNWGu+U3eolkC+HmsS7HWVeyuU9h5qiF8xd5Mm6/WZbijQ2+sBaLw90fZARYuW4NCXxPXcqcQuqYohmp/mq1syqC4rYYgoqoi3f7LwO68c6KaUyrcAFbVAFMSZgw9zeJLIF4Gz+1SKAm20+htW4=
+  template:
+    metadata:
+      name: db-trip-mate-owner
+      namespace: database
+    type: kubernetes.io/basic-auth
