@@ -8,6 +8,3 @@ resources:
   - page.yaml
   - db-page-owner.sealed.yaml
   - db-page-ro.sealed.yaml
-  - example-api.yaml
-  - db-example-api-owner.sealed.yaml
-  - db-example-api-ro.sealed.yaml
