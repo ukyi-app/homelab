@@ -4,6 +4,8 @@ name: "🧪 ci"
 # verify.yaml(job 'verify')은 non-required 보조(skeleton·sops 왕복 ephemeral·pre-commit) — ledger 중복은 W7에서 제거.
 on:
   pull_request:
+  # merge queue: 큐가 임시 merge_group 브랜치에서 required check 'gate'를 돌릴 수 있어야 큐가 멈추지 않는다.
+  merge_group:
   push:
     branches: [main]
 
