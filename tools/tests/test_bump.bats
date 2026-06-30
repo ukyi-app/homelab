@@ -129,23 +129,12 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   [ "$status" -eq 2 ]
 }
 
-# ── bump.yaml 워크플로 보안 불변식 (test_onboard.bats에서 이관 — v1 폐기 전 보존) ──
-@test "bump: dispatch path shares serial group; legacy job scoped to workflow_run" {
+# ── v1 dispatch 경로 폐기 가드 (이전엔 존재를 단언 — 이제 부재를 단언) ──
+@test "bump: v1 repository_dispatch path fully removed (writeback-dispatch gone)" {
   f="$WF"
-  grep -q 'repository_dispatch' "$f"
-  grep -q 'app-image' "$f"
+  run grep -E 'repository_dispatch:|app-image|writeback-dispatch|client_payload|source-repo' "$f"
+  [ "$status" -ne 0 ]
+  # workflow_run write-back 경로 + digest 검증은 유지된다
   grep -qE "event_name == 'workflow_run'" "$f"
-  grep -qE "event_name == 'repository_dispatch'" "$f"
-  # 직렬 그룹은 하나만 (양 경로 공유) — Phase 6 races-1/2로 전역 homelab-mutation 큐에 합류
-  [ "$(grep -c 'group: homelab-mutation' "$f")" -eq 1 ]
-}
-
-@test "bump dispatch: untrusted payload env-only + source-repo binding + digest verify" {
-  f="$WF"
-  grep -q 'source-repo' "$f"
   grep -q 'docker manifest inspect' "$f"
-  # client_payload 참조는 env 할당(APP:/TAG:/SRC:) 또는 주석에만 등장해야 한다 — run 인라인 보간 금지
-  # (BSD grep은 \s 미지원 — POSIX [[:space:]] 사용)
-  bad=$(grep -n 'client_payload' "$f" | grep -vE '^[0-9]+:[[:space:]]*(#|(APP|TAG|SRC):)' || true)
-  [ -z "$bad" ]
 }
