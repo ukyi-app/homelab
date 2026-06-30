@@ -83,7 +83,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - AdGuard split-horizon rewrite DR stale
 - tailscale operator Ingress reconcile metadata-only 무시
 - vector는 root로 실행
-- busybox 1.36 nc -q 없음
+- busybox nc -q 없음
 - VictoriaLogs distroless 라이브 질의
 - Alertmanager telegram 전송 검증 메트릭
 - ConfigMap 변경 파드 자동 재시작 없음

@@ -135,8 +135,8 @@
   nobody(65534)는 못 읽어 수집이 조용히 0이 된다(healthcheck disabled라 에러도 안 뜸).
   진단은 VL `vl_rows_ingested_total{type="elasticsearch_bulk"}`로(0이면 경로 단절).
 
-### busybox 1.36 nc -q 없음
-- **busybox 1.36 nc에는 `-q` 옵션이 없다** — `nc -l -p PORT -q 1`은 invalid option으로 즉시
+### busybox nc -q 없음
+- **busybox nc에는 `-q` 옵션이 없다**(1.36~1.38 전 버전 — 실측 확인) — `nc -l -p PORT -q 1`은 invalid option으로 즉시
   죽는다. deadmanswitch relay가 이 때문에 webhook을 영구 거부하고 healthchecks를 과도 ping해
   dead-man switch를 무력화했다.
 > 가드: `platform/victoria-stack/prod/test_relay.bats`
