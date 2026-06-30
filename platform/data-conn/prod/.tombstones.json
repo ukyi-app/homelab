@@ -1,0 +1,7 @@
+{
+  "db:example-api": {
+    "state": "purging",
+    "backupId": "pg-daily-r2-20260630030000",
+    "at": "2026-06-30T07:25:00.875Z"
+  }
+}
