@@ -6,16 +6,20 @@
 {{- .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/* 인스턴스 식별 라벨은 app.homelab/instance를 쓴다(표준 app.kubernetes.io/instance 회피).
+     app.kubernetes.io/instance는 ArgoCD 예약 라벨이라, ArgoCD v3 클러스터 캐시가 이 라벨을 단
+     자식 RS/Pod를 리소스 트리에서 제외한다(instanceLabelKey 설정 무관 — 값 아닌 '존재'만으로).
+     통제 실험으로 확정. 워크로드엔 무해하나 UI 트리에서 파드가 사라진다. */}}
 {{- define "app.labels" -}}
 app.kubernetes.io/name: {{ include "app.name" . }}
-app.kubernetes.io/instance: {{ .Release.Name }}
+app.homelab/instance: {{ .Release.Name }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.homelab/kind: {{ .Values.kind }}
 {{- end -}}
 
 {{- define "app.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "app.name" . }}
-app.kubernetes.io/instance: {{ .Release.Name }}
+app.homelab/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{/* 이미지 참조 SSOT: digest가 있으면 repo@digest(불변, 권위), 없으면 repo:tag.
