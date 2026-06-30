@@ -51,13 +51,13 @@ k3s 단일 노드(Mac mini · OrbStack VM · arm64) **GitOps 모노레포**. Arg
 
 | 영역 | 기술 |
 |---|---|
-| 호스트 · 오케스트레이션 | OrbStack VM(Debian 12 · arm64) · **k3s** v1.31 · local-path-provisioner(내장 btrfs SSD + 외장 bulk SSD via virtiofs) |
-| GitOps · CD | **ArgoCD** v2.13 — app-of-apps + ApplicationSet |
+| 호스트 · 오케스트레이션 | OrbStack VM(Debian 12 · arm64) · **k3s** v1.36 · local-path-provisioner(내장 btrfs SSD + 외장 bulk SSD via virtiofs) |
+| GitOps · CD | **ArgoCD** v3.4 — app-of-apps + ApplicationSet |
 | IaC | **Terraform** ≥1.9 — `cloudflare` · `github` · `tailscale` provider · **R2**(S3 호환) state backend |
-| 엣지 · 네트워크 | **Cloudflare**(DNS · Tunnel · WAF · zone hardening) · **cloudflared** · **tailscale-operator** v1.78 · **AdGuard Home** · kube-router NetworkPolicy |
-| 인그레스 · TLS | **Traefik** v3 (Gateway API) · **cert-manager** v1.16 (Let's Encrypt DNS-01 와일드카드) |
-| 데이터 | **CloudNativePG**(PostgreSQL 16 · PgBouncer · barman-cloud → R2) · **Valkey** 8 (Redis 호환) |
-| 관측성 | **VictoriaMetrics** v1.103 · **VictoriaLogs** · vmagent/vmalert · **Alertmanager**(텔레그램) · **Grafana** · **Vector** · node-exporter · kube-state-metrics · Glances |
+| 엣지 · 네트워크 | **Cloudflare**(DNS · Tunnel · WAF · zone hardening) · **cloudflared** · **tailscale-operator** v1.98 · **AdGuard Home** · kube-router NetworkPolicy |
+| 인그레스 · TLS | **Traefik** v3 (Gateway API) · **cert-manager** v1.20 (Let's Encrypt DNS-01 와일드카드) |
+| 데이터 | **CloudNativePG**(PostgreSQL 18 · PgBouncer · barman-cloud → R2) · **Valkey** 9 (Redis 호환) |
+| 관측성 | **VictoriaMetrics** v1.145 · **VictoriaLogs** · vmagent/vmalert · **Alertmanager**(텔레그램) · **Grafana** · **Vector** · node-exporter · kube-state-metrics · Glances |
 | 시크릿 | **SOPS** + age(2-recipient) · **KSOPS** · **SealedSecrets** (하이브리드) |
 | 대시보드 · DX | **Homepage** 운영자 대시보드 · **Bun** + TypeScript CLI(`tools/`) · skopeo(이미지 digest 검증) |
 | CI · 품질 | **GitHub Actions**(gate) · **bats** · **conftest/OPA**(메모리 원장) · **Renovate** · pre-commit |
