@@ -50,3 +50,5 @@ run-name에 트리거 출처(`스케줄`/`수동(actor)`)가 박혀 이력에서
 | 앱 철거(로컬) | `make teardown-app APP=<x>` | 디스패처 `🗑️ teardown-app`과 공존하는 로컬 경로(오프라인/파워유저). 래퍼가 clean-worktree·fresh-main 전용브랜치·allowlist staging·PR 강제 + confirm=app 자동 |
 | 리소스 철거(retain) | `make teardown-resource RESOURCE=<db\|cache>:<name>` | 위와 동일. purge(--delete-data)는 런북 절차로만 |
 | 앱 재활성화/노출 재승인 | `tools/activate-app.ts` (런북 app-platform) | host/public 변경 등 별도 재증명이 필요할 때만 |
+
+> 머지 정책: main은 GitHub Merge Queue를 거친다(ruleset merge-queue-main). PR은 gate 통과 후 큐가 순차 머지한다.
