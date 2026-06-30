@@ -1,0 +1,66 @@
+# trip-mate — 앱별 경량 Valkey 인스턴스 (provision-cache.ts 산출 — 수정은 의도적 커밋으로만).
+# limit(160Mi)는 maxmemory(64Mi)에 BGSAVE fork COW·단편화·클라이언트 버퍼 여유를 더한 값.
+# namespace는 상위 kustomization(namespace: cache)이 부여한다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trip-mate
+  labels:
+    app.kubernetes.io/name: trip-mate
+    app.kubernetes.io/component: valkey
+    app.kubernetes.io/part-of: cache
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # RWO PVC — RollingUpdate면 신구 파드가 같은 볼륨을 두고 교착
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trip-mate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: trip-mate
+        app.kubernetes.io/component: valkey
+        app.kubernetes.io/part-of: cache
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999 # valkey 이미지의 기본 user(valkey)
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: valkey
+          image: valkey/valkey:9.1.0-alpine
+          command: ["valkey-server", "/etc/valkey/valkey.conf"]
+          ports:
+            - { name: redis, containerPort: 6379 }
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 250m, memory: 160Mi }
+          securityContext:
+            allowPrivilegeEscalation: false # valkey는 setcap 바이너리가 아니라 양립 가능 (AdGuard와 다름)
+            readOnlyRootFilesystem: true # 쓰기는 /data(PVC)뿐
+            capabilities: { drop: [ALL] }
+          # ACL 인증이 걸려 있어 exec PING 대신 tcpSocket — NOAUTH와 무관하게 기동/생존만 본다
+          livenessProbe:
+            tcpSocket: { port: 6379 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket: { port: 6379 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          volumeMounts:
+            - { name: config, mountPath: /etc/valkey, readOnly: true }
+            - { name: acl, mountPath: /etc/valkey-acl, readOnly: true }
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: config
+          configMap: { name: trip-mate-config }
+        - name: acl
+          secret:
+            secretName: trip-mate-acl
+            items: [{ key: users.acl, path: users.acl }] # VALKEY_PASSWORD 키는 마운트하지 않는다
+        - name: data
+          persistentVolumeClaim: { claimName: trip-mate-data }
