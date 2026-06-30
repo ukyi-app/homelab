@@ -18,6 +18,8 @@ S="$D/argocd-accounts.sealed.yaml"
   run yq '.spec.template.metadata.namespace' "$S"; [ "$output" = "argocd" ]
   run yq '.spec.template.metadata.annotations."sealedsecrets.bitnami.com/patch"' "$S"; [ "$output" = "true" ]
   run yq '.spec.encryptedData."accounts.ukkiee.password"' "$S"; [ "$output" != "null" ]
+  # GitHub 웹훅 서명 검증용 시크릿도 같은 patch-mode SealedSecret으로 argocd-secret에 머지된다.
+  run yq '.spec.encryptedData."webhook.github.secret"' "$S"; [ "$output" != "null" ]
 }
 
 @test "no passwordMtime is sealed (avoids RFC3339 settings-load failure)" {
@@ -28,10 +30,10 @@ S="$D/argocd-accounts.sealed.yaml"
   run grep -q 'generators:' "$D/kustomization.yaml"; [ "$status" -ne 0 ]
 }
 
-@test "kustomize build also renders exactly one HTTPRoute" {
+@test "kustomize build renders exactly two HTTPRoutes (internal UI + public webhook)" {
   run kustomize build "$D"
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c '^kind: HTTPRoute')" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^kind: HTTPRoute')" -eq 2 ]
 }
 
 @test "HTTPRoute exposes argocd UI on web-internal-tls to argocd-server:80" {
@@ -42,4 +44,14 @@ S="$D/argocd-accounts.sealed.yaml"
   run grep -qE 'port: 80' "$H"; [ "$status" -eq 0 ]
   run grep -q 'kind: Gateway' "$H"; [ "$status" -eq 0 ]
   run grep -qE 'weight: 1' "$H"; [ "$status" -eq 0 ]
+}
+
+@test "webhook HTTPRoute exposes ONLY /api/webhook on web-public (UI stays internal)" {
+  H="$D/httproute-webhook.yaml"
+  run grep -q 'argocd-webhook.ukyi.app' "$H"; [ "$status" -eq 0 ]
+  run grep -q 'sectionName: web-public' "$H"; [ "$status" -eq 0 ]
+  run grep -q 'value: /api/webhook' "$H"; [ "$status" -eq 0 ]
+  run grep -q 'name: argocd-server' "$H"; [ "$status" -eq 0 ]
+  # 루트 PathPrefix(/)는 web-public에 절대 노출하지 않는다 — /api/webhook만.
+  run grep -qE 'value: /$' "$H"; [ "$status" -ne 0 ]
 }
