@@ -126,9 +126,9 @@ jobs:
         with:
           status: ${{ job.status }}
           source: 앱생성
-          title: 앱 생성
+          title: 앱 생성 PR
           ident: ${{ inputs.app }}
-          body: "PR을 확인하세요"
+          body: "${{ job.status == 'success' && 'PR 생성됨(수동 머지 대기)' || '' }}"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

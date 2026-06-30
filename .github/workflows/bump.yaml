@@ -114,7 +114,7 @@ jobs:
           source: 배포
           title: 이미지 태그 갱신
           ident: "apps=[${{ steps.set.outputs.apps }}] -> sha-${{ github.event.workflow_run.head_sha }}"
-          body: "PR 생성됨(머지 대기)"
+          body: "${{ job.status == 'success' && steps.set.outputs.apps != '' && 'PR 생성됨(머지 대기)' || '' }}"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

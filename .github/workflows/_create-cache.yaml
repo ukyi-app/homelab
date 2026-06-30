@@ -91,9 +91,9 @@ jobs:
         with:
           status: ${{ job.status }}
           source: 캐시생성
-          title: 캐시 생성
+          title: 캐시 생성 PR
           ident: ${{ steps.spec.outputs.name }}
-          body: "PR 생성됨(머지 대기) · conn 핸들 cache-${{ steps.spec.outputs.name }}-conn (prod)"
+          body: "${{ job.status == 'success' && format('PR 생성됨(머지 대기) · conn 핸들 cache-{0}-conn (prod)', steps.spec.outputs.name) || '' }}"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
