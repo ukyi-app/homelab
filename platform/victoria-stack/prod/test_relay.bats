@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # deadmanswitch relay 회귀 가드.
-# (1) busybox 1.36 nc에는 -q 옵션이 없다 — 'nc -l -p PORT -q 1'은 invalid option으로 즉시 죽어
+# (1) busybox 1.38 nc에는 -q 옵션이 없다 — 'nc -l -p PORT -q 1'은 invalid option으로 즉시 죽어
 #     webhook을 영구 거부했고, 그 결과 healthchecks를 과도 ping해 dead-man switch를 무력화한
 #     라이브 인시던트가 있었다.
 # (2) fm-1: nc가 실제로 연결을 서빙(exit 0)했을 때만 healthchecks를 ping해야 한다. nc 실패를

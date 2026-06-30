@@ -5,7 +5,7 @@
 # ns 3파드(controller/cainjector/webhook) 모두 단일 remote-helm Application 소유라 ns-wide
 # (podSelector:{}) deny가 cross-app 레이스 없이 안전(동거 워크로드 0). ns는 이 컴포넌트 kustomization이 지정.
 #
-# ★cert-manager 자체는 remote-helm 앱(chart v1.16.5에 networkPolicy 옵션 부재)이라 helm values로 붙일 수
+# ★cert-manager 자체는 remote-helm 앱(chart v1.20.3에 networkPolicy 옵션 부재)이라 helm values로 붙일 수
 #   없어 독립 컴포넌트로 분리한다 — platform-components appset이 별도 Application으로 자기 netpol을 원자 소유.
 # INGRESS는 의도적 미제한: apiserver→webhook(:10250)은 노드발이라 kube-router가 정책 평가 전 허용(probe 선례),
 #   metrics(:9402) scrape는 ingress deny 없으면 유지 → egress가 lateral 핵심이라 egress에 집중.

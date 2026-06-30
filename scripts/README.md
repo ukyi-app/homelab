@@ -12,7 +12,7 @@
 ## CI 게이트 (읽기 전용 검사)
 
 - **`check-skeleton.sh`** — 필수 디렉토리 스켈레톤 존재 검사. `make verify`·**`bun run verify:skeleton`**·
-  `verify.yaml`이 호출. 라이브 무관.
+  `ci.yaml`(gate)이 호출. 라이브 무관.
 - **`check-bats-accounting.sh`** — 모든 추적 `test_*.bats`가 정확히 한 도메인(gate / chart-test /
   `.ci-exclude`)에 배정됐는지 검사(고아·이중소유 차단). `make verify`가 호출. `run-bats.sh --list`를 읽는다.
 - **`check-app-deploy.sh`** — `apps/<name>/deploy/prod/` 배포 계약 가드. 필수 산출물 목록을
@@ -25,7 +25,7 @@
 - **`verify-traps.sh`** — `docs/traps.md` enforcement 원장이 가리키는 guard 파일이 실재하는지 검사
   (가드 소실 드리프트 = 거짓 안심 차단). **`make verify-traps`**가 호출. 순수 파일 존재 검사.
 - **`ledger-to-json.sh`** — `docs/memory-ledger.md` 표를 JSON으로 변환(conftest 입력 생성). **`bun run verify:ledger`**·
-  `make verify`·`verify.yaml`이 호출(출력을 `conftest test … policy/ledger.rego`로 파이프). 라이브 무관.
+  `make verify`·`ci.yaml`(gate)이 호출(출력을 `conftest test … policy/ledger.rego`로 파이프). 라이브 무관.
 - **`sops-guard.sh`** — 인자로 받은 `*.enc.yaml`이 실제 sops 암호화됐는지(평문 누출 차단) 검사.
   pre-commit 가드 훅이 호출(staged 파일). `make`/워크플로 배선 아님.
 

@@ -9,7 +9,7 @@ limit 합계가 이를 초과하면 새 앱 온보딩은 CI에서 실패한다 (
 ## 모델 주석 — 명목 잔여 ≠ 실 헤드룸 (의도적 보수성)
 
 이 합계는 **limit-합 가드(cap)**이지 실제 RAM 예약이 아니다. k8s는 requests만 스케줄에 강제하고
-limit over-commit을 허용하므로, limit 합(현재 8092)은 *동시-peak 상한*일 뿐 실사용이 아니다.
+limit over-commit을 허용하므로, limit 합(현재 8508)은 *동시-peak 상한*일 뿐 실사용이 아니다.
 실측(2026-06-22): 전 파드 working_set ≈ 2244Mi · 동시 peak(라이브 limit합) ≈ 6586Mi · MemAvailable
 ≈ 7925Mi(66%) — 물리 RAM은 막대히 여유다. 9216 cap은 의도적 보수치(VM ~12GiB에서 page-cache/burst·
 OS reserve를 떼어둠)로 "OOM 전에 예산 경계에서 시끄럽게 실패"시키는 가드다. (원래 8704였으나 명목
@@ -17,7 +17,7 @@ OS reserve를 떼어둠)로 "OOM 전에 예산 경계에서 시끄럽게 실패"
 
 한 행은 라이브 pod limit보다 **의도적으로 크다**: `k3s+os+coredns`(OS/커널 비-pod reserve — 실 coredns
 pod만 ~170Mi). (`edge`·`cnpg` 보수 버퍼는 2026-06-22 right-size에서 라이브 정합 회수; `cert-manager`·
-tailscale proxy는 무제한이었으나 같은 날 거버넌스 캡 신설해 예산에 편입.) 따라서 명목 잔여(9216−8092 = 1124)는
+tailscale proxy는 무제한이었으나 같은 날 거버넌스 캡 신설해 예산에 편입.) 따라서 명목 잔여(9216−8508 = 708)는
 실 헤드룸을 과소표현한다(여전히 동시 peak ≈ 6586 ≪ allocatable 10724).
 더 많은 명목 헤드룸이 필요하면 (a) 상주 워크로드를 라이브 peak 실측에 맞게 right-size해 limit을 회수한다
 (2026-06-22 observability/argocd/edge/cnpg 808Mi 회수; postgres·최근 OOM 수정분은 보호. 잔여 medium-risk
