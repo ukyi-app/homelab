@@ -9,14 +9,14 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
     {{- if .Values.homepage.enabled }}
     # gethomepage 자동발견(kubernetes.yaml gateway:true). metadata-only라 SSA atomic 리스트 미접촉.
-    # pod-selector는 고유 라벨 instance(=Release.Name)로 — name 라벨은 차트명("app")이라 비고유.
+    # pod-selector는 고유 라벨 app.homelab/instance(=Release.Name)로 — name 라벨은 차트명("app")이라 비고유.
     gethomepage.dev/enabled: "true"
     gethomepage.dev/name: {{ .Values.homepage.name | default (include "app.fullname" .) | quote }}
     gethomepage.dev/group: {{ .Values.homepage.group | default "Apps" | quote }}
     {{- with .Values.homepage.icon }}
     gethomepage.dev/icon: {{ . | quote }}
     {{- end }}
-    gethomepage.dev/pod-selector: {{ printf "app.kubernetes.io/instance=%s" (include "app.fullname" .) | quote }}
+    gethomepage.dev/pod-selector: {{ printf "app.homelab/instance=%s" (include "app.fullname" .) | quote }}
     {{- end }}
 spec:
   parentRefs:

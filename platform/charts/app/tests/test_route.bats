@@ -32,5 +32,5 @@ tpl() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   run grep -q 'gethomepage.dev/enabled: "true"' "$BATS_TEST_TMPDIR/on.yaml"; [ "$status" -eq 0 ]
   run grep -q 'gethomepage.dev/group: "Apps"' "$BATS_TEST_TMPDIR/on.yaml"; [ "$status" -eq 0 ]
   run grep -q 'gethomepage.dev/icon: "mdi-test"' "$BATS_TEST_TMPDIR/on.yaml"; [ "$status" -eq 0 ]
-  run grep -q 'gethomepage.dev/pod-selector: "app.kubernetes.io/instance=t"' "$BATS_TEST_TMPDIR/on.yaml"; [ "$status" -eq 0 ]
+  run grep -q 'gethomepage.dev/pod-selector: "app.homelab/instance=t"' "$BATS_TEST_TMPDIR/on.yaml"; [ "$status" -eq 0 ]
 }
