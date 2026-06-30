@@ -101,22 +101,6 @@ spec:
         connectionLimit: -1
         passwordSecret:
           name: db-page-ro
-      # example-api owner — create-database 산출물. ensure/inherit/connectionLimit는 서버 주입 기본값 명시(SSA atomic 리스트)
-      - name: example-api
-        ensure: present
-        login: true
-        inherit: true
-        connectionLimit: -1
-        passwordSecret:
-          name: db-example-api-owner
-      # example-api 읽기전용(모드2 디버깅) — GRANT는 managed role 범위 밖, PR checklist의 SQL 후처리 필요
-      - name: example-api_ro
-        ensure: present
-        login: true
-        inherit: true
-        connectionLimit: -1
-        passwordSecret:
-          name: db-example-api-ro
       # trip-mate owner — create-database 산출물. ensure/inherit/connectionLimit는 서버 주입 기본값 명시(SSA atomic 리스트)
       - name: trip-mate
         ensure: present
