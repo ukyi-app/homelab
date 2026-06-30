@@ -125,6 +125,11 @@ configs:
     # built-in admin 비활성화 — ukkiee 단일 어드민(F12). 노출(PR2) 전에 PR1에서 끄고 port-forward로
     # 입증해 'admin 켜진 채 노출' 윈도우를 원천 제거(F17 — same-PR은 두 Application 독립 sync라 비원자적).
     admin.enabled: "false"
+    # 배포 수렴 가속 — app 변경 감지 폴링 주기를 기본 180s/현행 120s에서 30s로 단축한다.
+    # ArgoCD는 내부 전용(argocd.home.ukyi.app, argocd-ui-internal 설계)이라 GitHub 웹훅(인터넷 도달
+    # 필요)을 쓰지 않는다 — 노출 없이 배포 지연을 줄이는 안전한 경로가 폴링 주기 단축이다.
+    # 단일 노드 부하는 statusProcessors:4 + resource.exclusions로 흡수(앱 ~10개 규모).
+    timeout.reconciliation: 30s
     # 렌더 시점 kustomize 기반 복호화를 위해 KSOPS exec 플러그인을 활성화한다.
     # KSOPS(exec)와 Traefik/Tailscale HelmChartInflationGenerator(helm) 둘 다 각자의 플래그가 필요하다.
     # ⚠️ --enable-exec는 kustomize alpha 기능. ArgoCD/kustomize가 exec 플러그인을 폐기하면 KSOPS
