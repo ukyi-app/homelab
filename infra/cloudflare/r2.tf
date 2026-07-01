@@ -27,6 +27,29 @@ resource "cloudflare_r2_bucket_lifecycle" "pg_backups" {
   }]
 }
 
+# Valkey 캐시의 오프사이트 RDB 스냅샷 (cache-backup CronJob → rclone rcat).
+# PG/미디어와 달리 캐시는 재구축 가능(유일 내구 사본 아님)이라 prevent_destroy 미설정 —
+# 캐시 teardown 시 버킷도 정리 가능해야 한다.
+resource "cloudflare_r2_bucket" "cache_backups" {
+  account_id = var.cloudflare_account_id
+  name       = "homelab-cache-backups-prod"
+  location   = "WEUR"
+}
+
+# 오프사이트 보존 14일 (cache-backup CronJob의 `rclone delete --min-age 14d`와 정합).
+resource "cloudflare_r2_bucket_lifecycle" "cache_backups" {
+  account_id  = var.cloudflare_account_id
+  bucket_name = cloudflare_r2_bucket.cache_backups.name
+  rules = [{
+    id         = "expire-14d"
+    enabled    = true
+    conditions = { prefix = "" }
+    delete_objects_transition = {
+      condition = { type = "Age", max_age = 1209600 } # 14일(초 단위)
+    }
+  }]
+}
+
 # 미디어 서비스의 내구성 있는 origin (로컬 SSD가 핫 캐시, §7).
 resource "cloudflare_r2_bucket" "media" {
   account_id = var.cloudflare_account_id
