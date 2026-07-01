@@ -1,0 +1,17 @@
+# notify-smoke — 알림 canary 워크로드(테스트 전용). argocd-extras가 상주 싱크하지 않도록
+# extras/kustomization.yaml resources에 넣지 않는다(별도 Application으로만 Task 6에서 apply).
+# progressDeadlineSeconds:60 → 잘못된 이미지 패치 시 Degraded가 ≤~90s에 결정적으로 표면화(실앱 불가침 canary).
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: notify-smoke }
+spec:
+  progressDeadlineSeconds: 60
+  replicas: 1
+  selector: { matchLabels: { app: notify-smoke } }
+  template:
+    metadata: { labels: { app: notify-smoke } }
+    spec:
+      containers:
+        - name: app # ⚠️ `kubectl set image deploy/notify-smoke app=...` 대상 컨테이너 이름
+          image: registry.k8s.io/pause:3.9
+          resources: { requests: { cpu: 5m, memory: 16Mi }, limits: { memory: 32Mi } }
