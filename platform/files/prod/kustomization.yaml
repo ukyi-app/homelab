@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: files # files-prod Application의 권위 대상 namespace(appset destination.namespace 부재)
+resources:
+  - pvc.yaml
+  - files-keys.sealed.yaml
+  - ghcr-pull.sealed.yaml
+  - deployment.yaml
+  - service.yaml
+  - httproute-internal.yaml
+  - httproute-public.yaml
+  - networkpolicy.yaml
+# 이미지는 deployment.yaml에 repo:sha-<gitsha>@sha256:<digest> 인라인 핀(태그+digest 불변, 홈랩
+# first-party 규약; kustomize images는 newTag+digest 동시 지정 불가라 인라인 채택). bump-poll
+# 미적용(apps/ 전용) → 릴리스마다 deployment.yaml 이미지 라인 갱신 PR.
