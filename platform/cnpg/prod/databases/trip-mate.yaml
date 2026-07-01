@@ -1,0 +1,15 @@
+# trip-mate 논리 DB — create-database(provision-db.ts) 산출물.
+# 공유 pg 클러스터 안의 논리 객체라 메모리 원장 행을 추가하지 않는다(9216Mi 게이트 왜곡 방지).
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: trip-mate
+  namespace: database
+spec:
+  cluster:
+    name: pg
+  name: trip-mate
+  owner: trip-mate # owner == name 불변식 — role↔DB 1:1 (teardown 격리)
+  ensure: present # teardown은 absent 전환으로 (CR 삭제가 아니라)
+  databaseReclaimPolicy: retain # CR이 사라져도 DB 보존 — 삭제는 teardown에서 명시적으로

@@ -1,0 +1,14 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: db-trip-mate-ro-conn
+  namespace: prod
+spec:
+  encryptedData:
+    TRIP_MATE_RO_DATABASE_URL: AgCnaaFxmGl87Yb14azxosZP9H1UpMdVaNvBH6lgPrGmaOHERK4wRaA6T/LU2daBJkhrqkUEjeHgYlkxtU17gaEXc6BffQd38KZIsSuxDhoiLydK1jJhRkdS7MFSrzPto4/CyWfDtmgmSTnhXw/fv3IkVUvMV2z2B4sgyJpltSJRX75BDzkgz3s1+j0B3Wfc3vlcX2W2zjoXl3+KWabTider8Zo+6zg0f+TkzlL86buZYNMqncqlDDTM1v5l9GN6NEzgDcmz9fuhS4gO63oct0IjC9Ucnse80sxFsHJf9DOWnUf0anOI3eGhgh3umJYmgcV/I5ytmB+AkdztTy4cDNRj8kW51TBVou47CkEvlFOXJ2EbSh1faJX3nu4NThl4oXAF+/tdAOM6B9P1BoELz6EkIZgaQ/w156kqhUjp0Joa2Ti+6zMmgMpOqzucuIooB8aK/2kYVD+gto+/hP58ghV+ciMiAaVD67SssjkvzC+FmLCMHELKx6YMr4rl1fU/Y0qjOt+o8lF+pgYFvOTiPgWctvkEe28ZMgXM0TffEunwHsJ1XUgolHJJ3gdBjcH6vkvihbuA58Hi7nmJzKgChB3iCrVPzEB0IKcmrIVJf9MBbqKqW5oMs6TGofqsXxHcU2ZccsKNL/Rj8JfJU6cN86IHjncN3g6zm53XsrUQRkZgCKVrDG5CjywUj8bP1vBKDhajcydID5iAZOdU81MHDhn9v6jsXfYezS7Rrtc9gyeE+e108bKE0vkcrlU8mLGy4oUPuuw9sNwB7Ay+qhIe+Nfx3CAvO7NzGDZiiEl7YXKNOhkWYoTrSMvMetyB6JpAf+XHjYmwHSMACg==
+  template:
+    metadata:
+      name: db-trip-mate-ro-conn
+      namespace: prod
+    type: Opaque

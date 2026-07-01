@@ -15,5 +15,7 @@ namespace: prod
 resources:
   - db-page-conn.sealed.yaml
   - db-page-ro-conn.sealed.yaml
+  - db-trip-mate-conn.sealed.yaml
+  - db-trip-mate-ro-conn.sealed.yaml
   - cache-trip-mate-conn.sealed.yaml
   - cache-trip-mate-ro-conn.sealed.yaml
