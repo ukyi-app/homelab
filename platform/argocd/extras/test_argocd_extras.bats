@@ -30,6 +30,16 @@ S="$D/argocd-accounts.sealed.yaml"
   run grep -q 'generators:' "$D/kustomization.yaml"; [ "$status" -ne 0 ]
 }
 
+@test "notify-smoke source builds, container is app, and is NOT synced by argocd-extras" {
+  kustomize build "$D/smoke" >/dev/null || { echo "smoke build 실패"; false; }
+  run yq '.metadata.name' "$D/smoke/deployment.yaml"
+  [ "$output" = "notify-smoke" ] || { echo "name=$output"; false; }
+  grep -q 'name: app' "$D/smoke/deployment.yaml" || { echo "container 이름 app 아님"; false; }
+  # 상주화 방지: argocd-extras가 smoke를 resources로 싱크하면 안 된다(canary는 Task 6에서 별도 Application만).
+  run yq '.resources[]' "$D/kustomization.yaml"
+  if printf '%s' "$output" | grep -q 'smoke'; then echo "extras가 smoke 포함 — 상주화 위험"; false; fi
+}
+
 @test "kustomize build renders exactly two HTTPRoutes (internal UI + public webhook)" {
   run kustomize build "$D"
   [ "$status" -eq 0 ]
