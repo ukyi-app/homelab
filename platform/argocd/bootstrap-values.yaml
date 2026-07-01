@@ -180,3 +180,44 @@ configs:
         kinds: ["Endpoints", "Event"]
       - apiGroups: ["discovery.k8s.io"]
         kinds: ["EndpointSlice"]
+
+# notifications-controller 스코프 egress netpol — 차트가 그대로 렌더(toYaml). 컨트롤러와 같은
+# Application(argocd, wave -10)에 두고 sync-wave -1(컨트롤러보다 먼저)로 적용해 콜드스타트에도
+# RBAC-exfil egress 창을 없앤다(extras 분리 시 cross-app 순서 갭). 차트 netpol은 global.networkPolicy.create:false로 OFF.
+extraObjects:
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: argocd-notifications-default-deny-egress
+      namespace: argocd
+      annotations: { argocd.argoproj.io/sync-wave: "-1" } # 컨트롤러보다 먼저 적용(부트스트랩 exfil 창 제거)
+    spec:
+      podSelector:
+        matchLabels: { app.kubernetes.io/name: argocd-notifications-controller }
+      policyTypes: [Egress]
+      # 규칙 없음 => 컨트롤러 egress 전부 거부; 아래 allow가 최소만 재개방.
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: argocd-notifications-allow-egress
+      namespace: argocd
+      annotations: { argocd.argoproj.io/sync-wave: "-1" }
+    spec:
+      podSelector:
+        matchLabels: { app.kubernetes.io/name: argocd-notifications-controller }
+      policyTypes: [Egress]
+      egress:
+        - to: # DNS — api.telegram.org 해석(CoreDNS)
+            - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+              podSelector: { matchLabels: { k8s-app: kube-dns } }
+          ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+        - to: # apiserver — Application/Secret watch. ClusterIP 아닌 node-subnet:6443(kube-router DNAT-후 트랩)
+            - ipBlock: { cidr: 192.168.139.0/24 }
+          ports: [{ protocol: TCP, port: 6443 }]
+        - to: # 외부 telegram(api.telegram.org:443) — 사설대역 except로 내부 lateral 차단
+            - ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16] }
+          ports: [{ protocol: TCP, port: 443 }]
+        # ⚠️ apiserver allow는 별도 to 블록 — 위 telegram except의 192.168.0.0/16이 apiserver(192.168.139.x)도 제외하기 때문.
+        # (Step 5.1: repo-server는 기본 미사용 → 제외. Task 6.1 연결 테스트가 막히면 아래 주석 해제.)
+        # - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: argocd-repo-server } } }]
+        #   ports: [{ protocol: TCP, port: 8081 }]

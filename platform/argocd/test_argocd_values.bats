@@ -86,3 +86,18 @@ V="platform/argocd/bootstrap-values.yaml"
   run yq '.notifications.subscriptions[0].triggers | tag' platform/argocd/bootstrap-values.yaml
   [ "$output" = "!!seq" ] || { echo "triggers must be a list, got $output"; false; }
 }
+
+@test "notifications netpol is in chart extraObjects, syncs before controller, default-deny + allows" {
+  v=platform/argocd/bootstrap-values.yaml
+  run yq '.extraObjects[] | select(.metadata.name=="argocd-notifications-default-deny-egress") | .metadata.annotations."argocd.argoproj.io/sync-wave"' "$v"
+  [ "$output" = "-1" ] || { echo "default-deny sync-wave != -1: $output"; false; }
+  run yq '.extraObjects[] | select(.metadata.name=="argocd-notifications-default-deny-egress") | .spec.policyTypes[]' "$v"
+  printf '%s' "$output" | grep -qF 'Egress' || { echo "default-deny egress 없음"; false; }
+  run yq '.extraObjects[] | select(.metadata.name=="argocd-notifications-allow-egress")' "$v"
+  # trap-safe: 누락을 플래그로 모아 최종 단언이 권위를 갖게(bats 중간 false 침묵통과 회피).
+  miss=0
+  for n in '0.0.0.0/0' '192.168.0.0/16' '192.168.139.0/24' '6443'; do
+    printf '%s' "$output" | grep -qF "$n" || { echo "miss in netpol: $n"; miss=1; }
+  done
+  [ "$miss" -eq 0 ] || { echo "allow-egress netpol missing required needles"; false; }
+}
