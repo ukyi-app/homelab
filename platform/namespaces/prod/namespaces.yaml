@@ -126,3 +126,16 @@ metadata:
     pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/warn: restricted
     pod-security.kubernetes.io/audit: restricted
+---
+# files: 자기-호스팅 파일 스토어(platform/files) — bulk-ssd PVC + 2리스너, 비루트·RO루트·drop ALL·
+# 포트>1024·setcap 불요 → restricted 완전 준수(homepage와 동급). Prune=false로 ns 삭제 방지.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: files
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false # 매니페스트서 빠져도 ns prune(삭제) 금지
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
