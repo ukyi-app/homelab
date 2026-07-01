@@ -67,24 +67,30 @@ V="platform/argocd/bootstrap-values.yaml"
   [ "$output" != "null" ] || { echo "notifications.resources.limits.memory 미설정"; false; }
 }
 
-@test "notifications cm has telegram service, line1 templates, deployed+degraded triggers, central selector subscription" {
+@test "notifications cm has telegram webhook service, HTML line1 templates, deployed+degraded triggers, central selector subscription" {
   has() { printf '%s' "$1" | grep -qF "$2" || { echo "miss: $2"; false; }; }
-  run yq '.notifications.notifiers."service.telegram"' platform/argocd/bootstrap-values.yaml
-  has "$output" 'token: $telegram-token'
-  run yq '.notifications.templates."template.app-deployed"' platform/argocd/bootstrap-values.yaml
-  has "$output" '✅ <b>배포 완료</b>'
-  run yq '.notifications.templates."template.app-degraded"' platform/argocd/bootstrap-values.yaml
-  has "$output" '🔴 <b>앱 저하</b>'
-  run yq '.notifications.triggers."trigger.on-deployed"' platform/argocd/bootstrap-values.yaml
+  v=platform/argocd/bootstrap-values.yaml
+  # native telegram이 아니라 webhook service — telegram API로 직접 POST(HTML + 양수 chatId 지원). 토큰은 $telegram-token(secret 확장).
+  run yq '.notifications.notifiers."service.webhook.telegram"' "$v"
+  has "$output" 'api.telegram.org'; has "$output" '$telegram-token'
+  # HTML line1 계약이 webhook body에: 글리프 + <b>제목</b> + parse_mode HTML
+  run yq '.notifications.templates."template.app-deployed"' "$v"
+  has "$output" '✅ <b>배포 완료</b>'; has "$output" 'parse_mode'; has "$output" 'HTML'; has "$output" '/sendMessage'
+  run yq '.notifications.templates."template.app-degraded"' "$v"
+  has "$output" '🔴 <b>앱 저하</b>'; has "$output" 'HTML'
+  run yq '.notifications.triggers."trigger.on-deployed"' "$v"
   has "$output" 'Healthy'; has "$output" 'oncePer'
-  run yq '.notifications.triggers."trigger.on-health-degraded"' platform/argocd/bootstrap-values.yaml
+  run yq '.notifications.triggers."trigger.on-health-degraded"' "$v"
   has "$output" 'Degraded'
-  run yq '.notifications.subscriptions | tag' platform/argocd/bootstrap-values.yaml
+  run yq '.notifications.subscriptions | tag' "$v"
   [ "$output" = "!!seq" ] || { echo "subscriptions must be a YAML list, got $output"; false; }
-  run yq '.notifications.subscriptions[0].selector' platform/argocd/bootstrap-values.yaml
+  run yq '.notifications.subscriptions[0].selector' "$v"
   has "$output" 'notify.homelab/telegram'
-  run yq '.notifications.subscriptions[0].triggers | tag' platform/argocd/bootstrap-values.yaml
+  run yq '.notifications.subscriptions[0].triggers | tag' "$v"
   [ "$output" = "!!seq" ] || { echo "triggers must be a list, got $output"; false; }
+  # recipient = webhook 서비스명 'telegram'(엔진이 subscription recipient에 $secret 미확장 → 서비스명만, $ 없어야)
+  run yq '.notifications.subscriptions[0].recipients[0]' "$v"
+  [ "$output" = "telegram" ] || { echo "recipient must be 'telegram', got $output"; false; }
 }
 
 @test "notifications netpol is in chart extraObjects, syncs before controller, default-deny + allows" {

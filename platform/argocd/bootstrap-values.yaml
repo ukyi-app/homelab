@@ -94,20 +94,35 @@ notifications:
     requests: { cpu: 10m, memory: 64Mi }
     limits: { memory: 128Mi }
   # cm.data로 렌더되는 notifications-engine 설정(notifiers/templates/triggers는 키명이 곧 cm.data 키명).
-  # 봇 토큰은 argocd-notifications-secret(SealedSecret·extras)의 $telegram-token으로 참조 — cm엔 평문 없음.
+  # ⚠️ native telegram service가 아니라 webhook service로 telegram Bot API에 직접 POST한다 —
+  #    argocd v3.4.4 번들 notifications-engine의 native telegram(telegram.go)은 parseMode를 "Markdown"으로
+  #    하드코딩(템플릿 parseMode 무시)하고, recipient가 '-' 접두일 때만 numeric chatID로 파싱하며 그 외(양수)는
+  #    @channel로 오해석한다(소스 1dbe3de712f8 확정). 우리 대상은 양수 DM chatId + HTML <b> 계약이라 native 불가.
+  #    webhook은 chat_id/parse_mode를 우리가 바디로 통제 → 양수 chatId + HTML 그대로 동작.
+  #    봇 토큰은 $telegram-token으로 URL에 주입(service config는 secret 확장 대상) — cm/git엔 평문 토큰 없음.
   notifiers:
-    service.telegram: |
-      token: $telegram-token
+    service.webhook.telegram: |
+      url: https://api.telegram.org/bot$telegram-token
+      headers:
+        - name: Content-Type
+          value: application/json
   # line1 메시지 계약(3채널 공유): {글리프} <b>{제목}</b> — {상태}. parse_mode HTML(리터럴 <b>는 raw).
+  # chat_id는 리터럴 numeric(비-credential — 토큰 없이는 발송 불가). app 이름은 k8s DNS명(따옴표/역슬래시 없음)이라 JSON 안전.
   templates:
     template.app-deployed: |
-      message: "✅ <b>배포 완료</b> — {{.app.metadata.name}} (Healthy)"
-      telegram:
-        parseMode: HTML
+      webhook:
+        telegram:
+          method: POST
+          path: /sendMessage
+          body: |
+            {"chat_id": 8001733025, "parse_mode": "HTML", "text": "✅ <b>배포 완료</b> — {{.app.metadata.name}} (Healthy)"}
     template.app-degraded: |
-      message: "🔴 <b>앱 저하</b> — {{.app.metadata.name}} (Degraded)"
-      telegram:
-        parseMode: HTML
+      webhook:
+        telegram:
+          method: POST
+          path: /sendMessage
+          body: |
+            {"chat_id": 8001733025, "parse_mode": "HTML", "text": "🔴 <b>앱 저하</b> — {{.app.metadata.name}} (Degraded)"}
   triggers:
     trigger.on-deployed: |
       # ⚠️ 멀티소스 appset(apps)은 status.sync.revision(단수)이 비거나 불안정 → 멀티소스 호환 oncePer.
@@ -120,7 +135,8 @@ notifications:
         send: [app-degraded]
   subscriptions:                       # ⚠️ YAML 리스트 — 블록 스칼라 `|` 금지(차트가 cm.data.subscriptions로 래핑; `|`면 중첩되어 무효)
     - recipients:
-        - telegram:$telegram-chat-id   # $ 미해석 시 chatId 리터럴로 보정(Task 6.5)
+        # recipient = webhook 서비스명(telegram). subscription recipient엔 $secret 확장 없음(config.go) → 서비스명만.
+        - telegram
       triggers: [on-deployed, on-health-degraded]
       selector: notify.homelab/telegram=true
 

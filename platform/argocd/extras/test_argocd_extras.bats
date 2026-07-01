@@ -33,9 +33,9 @@ S="$D/argocd-accounts.sealed.yaml"
   [ "$output" = "argocd-notifications-secret" ] || { echo "name=$output"; false; }
   run yq 'select(.kind=="SealedSecret") | .metadata.namespace' "$N"
   [ "$output" = "argocd" ] || { echo "ns=$output"; false; }
-  # 컨트롤러가 참조하는 두 키가 봉인됐는지($telegram-token / recipient $telegram-chat-id)
+  # 봇 토큰만 봉인($telegram-token → webhook URL 확장). chatId는 봉인하지 않는다(비-credential·webhook body 리터럴).
   run yq '.spec.encryptedData."telegram-token"' "$N"; [ "$output" != "null" ] || { echo "telegram-token 미봉인"; false; }
-  run yq '.spec.encryptedData."telegram-chat-id"' "$N"; [ "$output" != "null" ] || { echo "telegram-chat-id 미봉인"; false; }
+  run yq '.spec.encryptedData."telegram-chat-id"' "$N"; [ "$output" = "null" ] || { echo "chatId는 봉인 대상 아님(webhook body 리터럴): $output"; false; }
   # 독립 소유 — patch-mode 금지(argocd-accounts와 달리 기존 Secret 머지가 아니라 신규 생성).
   run yq '.spec.template.metadata.annotations."sealedsecrets.bitnami.com/patch"' "$N"
   [ "$output" = "null" ] || { echo "patch 어노테이션이 있으면 안 됨: $output"; false; }
