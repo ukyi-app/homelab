@@ -45,6 +45,14 @@ spec:
       syncPolicy:
         automated: { prune: true, selfHeal: true }
         syncOptions: [CreateNamespace=true, ServerSideApply=true]
+  # data-conn/cache Application에만 알림 라벨 — 데이터서비스 생성 완료/저하만 구독(관측/cert-manager 등 제외).
+  # templatePatch(문자열 goTemplate)라 template.metadata의 inline `{{if}}`/미정의 `.X` 함정(missingkey=error) 없음.
+  templatePatch: |
+    {{- if has (index .path.segments 1) (list "data-conn" "cache") }}
+    metadata:
+      labels:
+        notify.homelab/telegram: "true"
+    {{- end }}
 ---
 # -------- 2) 앱 — 공유 차트를 각 앱의 values로 렌더 (multi-source Helm) --------
 apiVersion: argoproj.io/v1alpha1
@@ -64,7 +72,9 @@ spec:
   template:
     metadata:
       name: '{{ index .path.segments 1 }}-{{ .path.basename }}' # <app>-prod
-      labels: { homelab.env: '{{ .path.basename }}' }
+      labels:
+        homelab.env: '{{ .path.basename }}'
+        notify.homelab/telegram: "true" # 배포완료/저하 telegram 알림 구독(cm 중앙 selector)
       finalizers:
         - resources-finalizer.argocd.argoproj.io # teardown 시 워크로드 cascade prune (고아화 방지)
     spec:
