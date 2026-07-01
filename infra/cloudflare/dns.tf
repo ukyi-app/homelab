@@ -14,8 +14,9 @@ locals {
   site_hosts = toset([var.zone_name, "www.${var.zone_name}"])
   # 플랫폼 공개 host — 코드 고정(구조적), 앱이 아님. apps.json(앱 레지스트리)이 아니라 여기서 관리한다.
   # argocd-webhook: ArgoCD의 /api/webhook만 공개해 GitHub push→즉시 sync를 받는다(UI는 내부 전용 유지).
+  # files: 베스포크 플랫폼 컴포넌트(platform/files)의 공개 다운로드 표면(files.ukyi.app→web-public→:8081).
   # destroy 가드 allowlist(^cloudflare_dns_record\.app\[) 비대상이라 apex/www처럼 무인 삭제로부터 보호된다.
-  platform_hosts = toset(["argocd-webhook.${var.zone_name}"])
+  platform_hosts = toset(["argocd-webhook.${var.zone_name}", "files.${var.zone_name}"])
   # tunnel ingress는 apex/www/플랫폼/앱 host 전부를 라우팅한다 — 합집합 유지(tunnel.tf가 참조).
   public_hosts = toset(concat(tolist(local.site_hosts), tolist(local.platform_hosts), tolist(local.app_hosts)))
 }
