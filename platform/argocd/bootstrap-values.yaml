@@ -84,7 +84,15 @@ applicationSet:
     limits: { cpu: 250m, memory: 128Mi }
 
 notifications:
-  enabled: false
+  enabled: true
+  # 봇 토큰 Secret은 SealedSecret(extras)이 단독 소유 — 차트가 빈 Secret을 만들면 이중 소유 충돌(트랩).
+  secret:
+    create: false
+  # 상주 워크로드 — 자원 limit 필수(원장 SSOT·CI 강제). Go 워크로드지만 알림 컨트롤러는 소형이라
+  # GOMEMLIMIT 연동 불요(대형 Go 컨트롤러만 limit의 90%로 연동).
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits: { memory: 128Mi }
 
 dex:
   enabled: false

@@ -56,3 +56,13 @@ V="platform/argocd/bootstrap-values.yaml"
   # ArgoCD 내부 전용이라 GitHub 웹훅 대신 폴링 주기 단축으로 배포 지연을 줄인다(노출 없이).
   run yq '.configs.cm."timeout.reconciliation"' "$V"; [ "$output" = "30s" ]
 }
+
+@test "notifications controller is enabled, owns no secret, and has resource limits" {
+  run yq '.notifications.enabled' platform/argocd/bootstrap-values.yaml
+  [ "$output" = "true" ] || { echo "enabled != true: $output"; false; }
+  run yq '.notifications.secret.create' platform/argocd/bootstrap-values.yaml
+  [ "$output" = "false" ] || { echo "secret.create != false: $output"; false; }
+  # 상주 워크로드 자원 limit 필수(원장 블라인드스팟 트랩 — 원격 차트라 source-scanner 미포착)
+  run yq '.notifications.resources.limits.memory' platform/argocd/bootstrap-values.yaml
+  [ "$output" != "null" ] || { echo "notifications.resources.limits.memory 미설정"; false; }
+}
