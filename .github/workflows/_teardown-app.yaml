@@ -76,7 +76,7 @@ jobs:
         with:
           status: ${{ job.status }}
           source: 해체
-          title: 앱 철거 PR
+          title: "${{ job.status == 'success' && '앱 철거 PR' || '앱 철거' }}"
           ident: ${{ inputs.app }}
           body: "${{ job.status == 'success' && 'PR 생성됨(수동 머지 대기)' || '' }}"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

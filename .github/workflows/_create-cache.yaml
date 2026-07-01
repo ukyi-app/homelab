@@ -91,7 +91,7 @@ jobs:
         with:
           status: ${{ job.status }}
           source: 캐시생성
-          title: 캐시 생성 PR
+          title: "${{ job.status == 'success' && '캐시 생성 PR' || '캐시 생성' }}"
           ident: ${{ steps.spec.outputs.name }}
           body: "${{ job.status == 'success' && format('PR 생성됨(머지 대기) · conn 핸들 cache-{0}-conn (prod)', steps.spec.outputs.name) || '' }}"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

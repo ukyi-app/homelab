@@ -73,6 +73,7 @@ jobs:
           echo "apps=$built_apps" >> "$GITHUB_OUTPUT"
           echo "built: $built_apps"
       - name: verify digests + bump ONLY built apps + PR once (auto-merge)
+        id: bump
         if: steps.set.outputs.apps != ''
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -105,6 +106,8 @@ jobs:
           gh pr create --base main --head "$branch" \
             --title "chore: 이미지 태그 갱신 (${APPS})" \
             --body "build → write-back 자동 PR. required check \`gate\` 통과 시 auto-merge."
+          # PR 생성 확정 후 신호 — 이후 auto-merge 실패해도 PR은 존재(알림이 PR 생성을 정확히 반영)
+          echo "result=pr" >> "$GITHUB_OUTPUT"
           bash scripts/auto-merge-or-fail.sh "$branch"
       - name: telegram notify
         if: always()
@@ -114,7 +117,7 @@ jobs:
           source: 배포
           title: 이미지 태그 갱신
           ident: "apps=[${{ steps.set.outputs.apps }}] -> sha-${{ github.event.workflow_run.head_sha }}"
-          body: "${{ job.status == 'success' && steps.set.outputs.apps != '' && 'PR 생성됨(머지 대기)' || '' }}"
+          body: "${{ job.status == 'success' && steps.bump.outputs.result == 'pr' && 'PR 생성됨(머지 대기)' || '' }}"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

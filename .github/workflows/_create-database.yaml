@@ -91,7 +91,7 @@ jobs:
         with:
           status: ${{ job.status }}
           source: DB생성
-          title: DB 생성 PR
+          title: "${{ job.status == 'success' && 'DB 생성 PR' || 'DB 생성' }}"
           ident: ${{ steps.spec.outputs.name }}
           body: "${{ job.status == 'success' && format('PR 생성됨(머지 대기) · 핸들 db-{0}-conn / db-{0}-ro-conn (prod)', steps.spec.outputs.name) || '' }}"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

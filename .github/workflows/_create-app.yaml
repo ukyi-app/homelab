@@ -126,7 +126,7 @@ jobs:
         with:
           status: ${{ job.status }}
           source: 앱생성
-          title: 앱 생성 PR
+          title: "${{ job.status == 'success' && '앱 생성 PR' || '앱 생성' }}"
           ident: ${{ inputs.app }}
           body: "${{ job.status == 'success' && 'PR 생성됨(수동 머지 대기)' || '' }}"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
