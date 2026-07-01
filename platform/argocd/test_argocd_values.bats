@@ -67,17 +67,17 @@ V="platform/argocd/bootstrap-values.yaml"
   [ "$output" != "null" ] || { echo "notifications.resources.limits.memory 미설정"; false; }
 }
 
-@test "notifications cm has telegram webhook service, HTML line1 templates, deployed+degraded triggers, central selector subscription" {
+@test "notifications cm has native telegram service, Markdown line1 templates, deployed+degraded triggers, central selector subscription" {
   has() { printf '%s' "$1" | grep -qF "$2" || { echo "miss: $2"; false; }; }
   v=platform/argocd/bootstrap-values.yaml
-  # native telegram이 아니라 webhook service — telegram API로 직접 POST(HTML + 양수 chatId 지원). 토큰은 $telegram-token(secret 확장).
-  run yq '.notifications.notifiers."service.webhook.telegram"' "$v"
-  has "$output" 'api.telegram.org'; has "$output" '$telegram-token'
-  # HTML line1 계약이 webhook body에: 글리프 + <b>제목</b> + parse_mode HTML
+  # native telegram service — 토큰만($telegram-token, tgbotapi에 직접 전달·URL 미로깅 → webhook의 토큰 로그 유출 회피).
+  run yq '.notifications.notifiers."service.telegram"' "$v"
+  has "$output" 'token: $telegram-token'
+  # Markdown line1(native는 parseMode Markdown 강제): 글리프 + *제목*
   run yq '.notifications.templates."template.app-deployed"' "$v"
-  has "$output" '✅ <b>배포 완료</b>'; has "$output" 'parse_mode'; has "$output" 'HTML'; has "$output" '/sendMessage'
+  has "$output" '✅ *배포 완료*'
   run yq '.notifications.templates."template.app-degraded"' "$v"
-  has "$output" '🔴 <b>앱 저하</b>'; has "$output" 'HTML'
+  has "$output" '🔴 *앱 저하*'
   run yq '.notifications.triggers."trigger.on-deployed"' "$v"
   has "$output" 'Healthy'; has "$output" 'oncePer'
   run yq '.notifications.triggers."trigger.on-health-degraded"' "$v"
@@ -88,9 +88,9 @@ V="platform/argocd/bootstrap-values.yaml"
   has "$output" 'notify.homelab/telegram'
   run yq '.notifications.subscriptions[0].triggers | tag' "$v"
   [ "$output" = "!!seq" ] || { echo "triggers must be a list, got $output"; false; }
-  # recipient = webhook 서비스명 'telegram'(엔진이 subscription recipient에 $secret 미확장 → 서비스명만, $ 없어야)
+  # recipient = telegram:<음수 그룹 chatId>(native는 '-' 접두 음수 그룹만; 양수 DM은 @channel 오해석). $secret 확장 없음(리터럴).
   run yq '.notifications.subscriptions[0].recipients[0]' "$v"
-  [ "$output" = "telegram" ] || { echo "recipient must be 'telegram', got $output"; false; }
+  printf '%s' "$output" | grep -qE '^telegram:-[0-9]+$' || { echo "recipient must be telegram:<negative chatId>, got $output"; false; }
 }
 
 @test "notifications netpol is in chart extraObjects, syncs before controller, default-deny + allows" {
