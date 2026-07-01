@@ -1,0 +1,25 @@
+# 공개 표면: files.ukyi.app → files-public:8081(읽기전용 리스너). Gateway core는 /{bucket}/{key}
+# 경로 템플릿 불가라 경계는 앱 :8081 프로세스가 유일(/api 핸들러 물리 부재) — method:GET로 방어심화.
+# ⚠️ backendRef.port는 절대 8080 금지(write/admin API 인터넷 노출). test_files_route.bats가 강제.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: files-public, namespace: files }
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab
+      namespace: gateway
+      sectionName: web-public # *.ukyi.app, plaintext(edge-TLS), cloudflared 터널
+  hostnames:
+    - "files.ukyi.app"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+          method: GET
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: files-public
+          port: 8081
+          weight: 1

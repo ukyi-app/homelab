@@ -1,0 +1,14 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: files-keys
+  namespace: files
+spec:
+  encryptedData:
+    keys.json: AgAGgBH1LHSbb9pH28dZTfDz4EcZ/3HZ4RoZ/ocO5RxFg0puHFgnTJ6iLE4m42zSZVVseKf/zufe+wXozLl4EsUPn04DmZ3jEsjpJCcCCOPs9ovPNojPHzF/W4dCu/el37mf96wo4jqiy0UN2VLAx37JAS2OdWVCzqtW7jmEhmI2vv5Nat/yHj3I44V3X5bEtbqdhgXOs4UPzVH1Ts5Bw41jSAEJhVMOKi0VLqg47W1Aa8+iLwz7KB7ljeDa1gSMrvZNOIOvx8cT+GWR2s3/sxhEKn1JpKAqWhYHxP83u/4dIUFbiHsKgl13yGO1XkCm9h9l+7XSsZHT3BzMcYLTeTka9N/fSZ9bfLexEQ1g8V6G6wDCeOhulZUJP9IrnGRP29qIc7H4HPe4dd6kQvyUa+oyQ7Snb9LR6h6mIW/2O5nryz/recHEqLr0V2jojkvO9GiehGy9yZRFRt6N8N8buKAWLqm96m3oSqIOmfJEixE+i58WKNZE+8ABEjsBs0yYoVVqHVxJYetvjISsRuTBd+J5aTpKL1+Y9XU4aAaPPkH7E5qVDw34HBvJCVH71tZZ1jsKKNSRas04AljjF8UM5As/hzLut5tKV6LHKDIzDesy3iAyuwzlJNo52Yd3NOwtRMu+1SGucVanfu8yvUh1nHtDx5hzVXBJOANHnzD4ZtvcRD03Jh77h+f8XCYswA9Aa+o0ejlcZuQuaU8y3xYXIXRfAtZgiYFOb7TuNTkn8jrOahNFwiXqrQNya/HIFAbgq+v9w6QUq5l77sPtTcpNVC+gjetwO5ue2F1kV2XIFrom7O8RSTV1bMcXp7xOXvMsNaOmmBdSf2rbXYZG27YjLoEy8TgjpXpTtKPShg==
+  template:
+    metadata:
+      name: files-keys
+      namespace: files
+    type: Opaque
