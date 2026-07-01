@@ -5,10 +5,10 @@
 D="$BATS_TEST_DIRNAME"
 S="$D/argocd-accounts.sealed.yaml"
 
-@test "kustomize build succeeds and renders exactly one SealedSecret" {
+@test "kustomize build succeeds and renders exactly two SealedSecrets (argocd-secret patch + notifications)" {
   run kustomize build "$D"
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c '^kind: SealedSecret')" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^kind: SealedSecret')" -eq 2 ]
 }
 
 @test "SealedSecret patch-merges into argocd-secret with patch annotation in template metadata" {
@@ -24,6 +24,21 @@ S="$D/argocd-accounts.sealed.yaml"
 
 @test "no passwordMtime is sealed (avoids RFC3339 settings-load failure)" {
   run yq '.spec.encryptedData."accounts.ukkiee.passwordMtime"' "$S"; [ "$output" = "null" ]
+}
+
+@test "argocd-notifications-secret is wired and sealed for argocd ns (independent ownership, not patch-mode)" {
+  N="$D/argocd-notifications-secret.sealed.yaml"
+  grep -q 'argocd-notifications-secret.sealed.yaml' "$D/kustomization.yaml" || { echo "kustomization 미등록"; false; }
+  run yq 'select(.kind=="SealedSecret") | .metadata.name' "$N"
+  [ "$output" = "argocd-notifications-secret" ] || { echo "name=$output"; false; }
+  run yq 'select(.kind=="SealedSecret") | .metadata.namespace' "$N"
+  [ "$output" = "argocd" ] || { echo "ns=$output"; false; }
+  # 컨트롤러가 참조하는 두 키가 봉인됐는지($telegram-token / recipient $telegram-chat-id)
+  run yq '.spec.encryptedData."telegram-token"' "$N"; [ "$output" != "null" ] || { echo "telegram-token 미봉인"; false; }
+  run yq '.spec.encryptedData."telegram-chat-id"' "$N"; [ "$output" != "null" ] || { echo "telegram-chat-id 미봉인"; false; }
+  # 독립 소유 — patch-mode 금지(argocd-accounts와 달리 기존 Secret 머지가 아니라 신규 생성).
+  run yq '.spec.template.metadata.annotations."sealedsecrets.bitnami.com/patch"' "$N"
+  [ "$output" = "null" ] || { echo "patch 어노테이션이 있으면 안 됨: $output"; false; }
 }
 
 @test "kustomization has no KSOPS generator (plain SealedSecret CR)" {
