@@ -1,0 +1,34 @@
+image:
+  repo: ghcr.io/ukyi-app/trip-mate-api
+  tag: sha-e072580bea97f20a71591e7bc85c129f93f5e9e9
+  digest: sha256:bc2ca6d04196655d4c7b2a2b47ec150afaab899681b811674593c753cdcf0e1c
+kind: web
+replicas: 1
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+envFrom:
+  - secretRef:
+      name: trip-mate-api-secrets
+  - secretRef:
+      name: db-trip-mate-conn # DB conn(TRIP_MATE_DATABASE_URL/_MIGRATE) — create-database 산출
+  - secretRef:
+      name: cache-trip-mate-conn # 캐시 conn(TRIP_MATE_REDIS_URL) — create-cache 산출
+route:
+  host: trip-mate-api.home.ukyi.app
+  paths:
+    - /
+  public: false
+probes:
+  liveness:
+    path: /health
+  readiness:
+    path: /ready
+metrics:
+  enabled: false
+podAnnotations:
+  checksum/secrets: a13d49afda4da59e

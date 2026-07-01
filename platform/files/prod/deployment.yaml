@@ -1,0 +1,66 @@
+# files 파일 스토어 — 단일 파드 2리스너. securityContext는 trip-mate(restricted) + fsGroup(adguard) 복제.
+# 쓰기는 /data(PVC)·/tmp(emptyDir)뿐. 이미지는 repo:sha-TAG@sha256:DIGEST 인라인 핀(불변).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: files
+  labels:
+    app.kubernetes.io/name: files
+spec:
+  replicas: 1
+  strategy: { type: Recreate } # RWO PVC — 단일 노드, 신구 파드 볼륨 교착 회피
+  selector:
+    matchLabels: { app.kubernetes.io/name: files }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: files }
+    spec:
+      automountServiceAccountToken: false # k8s API 미사용
+      imagePullSecrets: [{ name: ghcr-pull }] # private GHCR
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532 # distroless nonroot
+        runAsGroup: 65532
+        fsGroup: 65532 # 비루트의 RWO /data 쓰기 허용
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: files
+          image: ghcr.io/ukyi-app/files:sha-f1d87ea23622db32f05f05e46099dce693c3b7e8@sha256:44f0197e8f92e65c63fba9636f23007a2a57cde9722f51848f4679ec01cf5eb9 # sha-f1d87ea + digest 인라인 핀(불변)
+          ports:
+            - { name: internal, containerPort: 8080 }
+            - { name: public, containerPort: 8081 }
+          env:
+            - { name: FILES_DATA_DIR, value: /data }
+            - { name: FILES_KEYS_PATH, value: /etc/files-keys/keys.json }
+            - { name: FILES_INTERNAL_PORT, value: "8080" }
+            - { name: FILES_PUBLIC_PORT, value: "8081" }
+            - { name: FILES_PUBLIC_BASE_URL, value: "https://files.ukyi.app" }
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { memory: 128Mi } # cpu limit 미설정(CFS throttling 회피 — 홈랩 규약)
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          livenessProbe:
+            httpGet: { path: /healthz, port: internal }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            # /readyz = /data 실제 write 프로브 + free-space 확인 → 스토리지 저하 시 NotReady
+            httpGet: { path: /readyz, port: internal }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - { name: keys, mountPath: /etc/files-keys, readOnly: true }
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: keys
+          secret:
+            secretName: files-keys
+            items: [{ key: keys.json, path: keys.json }]
+        - name: data
+          persistentVolumeClaim: { claimName: files-data }
+        - name: tmp
+          emptyDir: {}

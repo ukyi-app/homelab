@@ -94,6 +94,7 @@ k3s 단일 노드(Mac mini · OrbStack VM · arm64) **GitOps 모노레포**. Arg
 | `cert-manager-netpol` | cert-manager ns egress 격리 — remote-helm이라 별도 컴포넌트로 분리 |
 | `namespaces` | 네임스페이스 소유 + PSA(Pod Security Admission) enforce 라벨 |
 | `homepage` | 운영자 진입점 대시보드 |
+| `files` | 자기-호스팅 파일 스토어 — internal API 업로드 + public 다운로드/카탈로그(bulk-ssd) |
 
 ## 명령
 

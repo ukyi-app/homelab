@@ -56,3 +56,54 @@ V="platform/argocd/bootstrap-values.yaml"
   # ArgoCD 내부 전용이라 GitHub 웹훅 대신 폴링 주기 단축으로 배포 지연을 줄인다(노출 없이).
   run yq '.configs.cm."timeout.reconciliation"' "$V"; [ "$output" = "30s" ]
 }
+
+@test "notifications controller is enabled, owns no secret, and has resource limits" {
+  run yq '.notifications.enabled' platform/argocd/bootstrap-values.yaml
+  [ "$output" = "true" ] || { echo "enabled != true: $output"; false; }
+  run yq '.notifications.secret.create' platform/argocd/bootstrap-values.yaml
+  [ "$output" = "false" ] || { echo "secret.create != false: $output"; false; }
+  # 상주 워크로드 자원 limit 필수(원장 블라인드스팟 트랩 — 원격 차트라 source-scanner 미포착)
+  run yq '.notifications.resources.limits.memory' platform/argocd/bootstrap-values.yaml
+  [ "$output" != "null" ] || { echo "notifications.resources.limits.memory 미설정"; false; }
+}
+
+@test "notifications cm has native telegram service, Markdown line1 templates, deployed+degraded triggers, central selector subscription" {
+  has() { printf '%s' "$1" | grep -qF "$2" || { echo "miss: $2"; false; }; }
+  v=platform/argocd/bootstrap-values.yaml
+  # native telegram service — 토큰만($telegram-token, tgbotapi에 직접 전달·URL 미로깅 → webhook의 토큰 로그 유출 회피).
+  run yq '.notifications.notifiers."service.telegram"' "$v"
+  has "$output" 'token: $telegram-token'
+  # Markdown line1(native는 parseMode Markdown 강제): 글리프 + *제목*
+  run yq '.notifications.templates."template.app-deployed"' "$v"
+  has "$output" '✅ *배포 완료*'
+  run yq '.notifications.templates."template.app-degraded"' "$v"
+  has "$output" '🔴 *앱 저하*'
+  run yq '.notifications.triggers."trigger.on-deployed"' "$v"
+  has "$output" 'Healthy'; has "$output" 'oncePer'
+  run yq '.notifications.triggers."trigger.on-health-degraded"' "$v"
+  has "$output" 'Degraded'
+  run yq '.notifications.subscriptions | tag' "$v"
+  [ "$output" = "!!seq" ] || { echo "subscriptions must be a YAML list, got $output"; false; }
+  run yq '.notifications.subscriptions[0].selector' "$v"
+  has "$output" 'notify.homelab/telegram'
+  run yq '.notifications.subscriptions[0].triggers | tag' "$v"
+  [ "$output" = "!!seq" ] || { echo "triggers must be a list, got $output"; false; }
+  # recipient = telegram:<음수 그룹 chatId>(native는 '-' 접두 음수 그룹만; 양수 DM은 @channel 오해석). $secret 확장 없음(리터럴).
+  run yq '.notifications.subscriptions[0].recipients[0]' "$v"
+  printf '%s' "$output" | grep -qE '^telegram:-[0-9]+$' || { echo "recipient must be telegram:<negative chatId>, got $output"; false; }
+}
+
+@test "notifications netpol is in chart extraObjects, syncs before controller, default-deny + allows" {
+  v=platform/argocd/bootstrap-values.yaml
+  run yq '.extraObjects[] | select(.metadata.name=="argocd-notifications-default-deny-egress") | .metadata.annotations."argocd.argoproj.io/sync-wave"' "$v"
+  [ "$output" = "-1" ] || { echo "default-deny sync-wave != -1: $output"; false; }
+  run yq '.extraObjects[] | select(.metadata.name=="argocd-notifications-default-deny-egress") | .spec.policyTypes[]' "$v"
+  printf '%s' "$output" | grep -qF 'Egress' || { echo "default-deny egress 없음"; false; }
+  run yq '.extraObjects[] | select(.metadata.name=="argocd-notifications-allow-egress")' "$v"
+  # trap-safe: 누락을 플래그로 모아 최종 단언이 권위를 갖게(bats 중간 false 침묵통과 회피).
+  miss=0
+  for n in '0.0.0.0/0' '192.168.0.0/16' '192.168.139.0/24' '6443'; do
+    printf '%s' "$output" | grep -qF "$n" || { echo "miss in netpol: $n"; miss=1; }
+  done
+  [ "$miss" -eq 0 ] || { echo "allow-egress netpol missing required needles"; false; }
+}

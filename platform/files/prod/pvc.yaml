@@ -1,0 +1,15 @@
+# 사용자 파일 저장 — 2TB 외장 SSD(bulk-ssd, virtiofs). storageClassName 명시 필수(opt-in;
+# 누락 시 standard=VM 디스크로 조용히 착지). Prune=false + (라이브)PV-Retain 패치로 삭제민감 데이터 보호.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: files-data
+  namespace: files
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: bulk-ssd
+  resources:
+    requests:
+      storage: 100Gi

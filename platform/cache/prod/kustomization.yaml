@@ -10,3 +10,10 @@ resources:
   - backup-rbac.yaml
   - backup-cronjob.yaml
   - trip-mate
+
+# cache-backup CronJob의 R2 업로드 자격(cache-r2-creds) — KSOPS로 복호. cnpg 패턴 미러.
+generators:
+  - secret-generator.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true # 고정 이름 cache-r2-creds (CronJob envFrom가 참조)

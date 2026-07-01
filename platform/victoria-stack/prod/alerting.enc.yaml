@@ -5,7 +5,7 @@ metadata:
     namespace: observability
 type: Opaque
 stringData:
-    TELEGRAM_BOT_TOKEN: ENC[AES256_GCM,data:z6IfJ7ZB9zzPQuVTU5nCOH3ceh4P4H1QDecSTiGckajMjg3ykZIIWC5lk2nJsA==,iv:OZ4AsrDXaCJNedQnyxOoUHCwlgFB8rL7mbAen0pvb20=,tag:BMXcqR2mcHcehE1JRNRQuw==,type:str]
+    TELEGRAM_BOT_TOKEN: ENC[AES256_GCM,data:iqEZ+H1j/xLQlxgxxvq5EHhgmD0XEcZ6KoedffGBI6b5q1O2yr5nZW6HQJOPbQ==,iv:brNyGFwURchGAIrAP3lvkqRRa9hZFyhyaKsdUWNtqK4=,tag:WoVOpZce3fXv8mo+8quWjw==,type:str]
     TELEGRAM_CHAT_ID: ENC[AES256_GCM,data:OgVBcDq7/vzOUg==,iv:SASbED20aIhurF9sqtKqz4AA/bsYfjmNPFpEKdV0ACo=,tag:HTw9G8O1BGSG9sJ1mFa2cw==,type:str]
     HEALTHCHECKS_URL: ENC[AES256_GCM,data:6W1m9l/X6ueSc8aVqElFwlJf8s40VdrFVRO1QNpQ2BARDtYEHBF9RbZFNK4i+98bj+Py6DHCFE0=,iv:Gs8qNupfdAi36LEtFMm8s+IunZsynC9+7qgDTMDBrpM=,tag:8qt1Mz0Sc2XaGIf/+89zpQ==,type:str]
     GRAFANA_ADMIN_PASSWORD: ENC[AES256_GCM,data:Eztm36XUiS+2og==,iv:10HZHdOhKOuCbQBkEt4EDz464pX+ROMaXVdF8IT30XM=,tag:v1COHbEAzcxehRjzH2WCkQ==,type:str]
@@ -30,6 +30,6 @@ sops:
             -----END AGE ENCRYPTED FILE-----
           recipient: age154tu9q7922xu46x0rkfm5l9x3ulf9u5at5qvxeaqfx9sgtm7cumq75jdwc
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-06-10T13:44:36Z"
-    mac: ENC[AES256_GCM,data:dBMKp/RrLu9G3gs0HtKzKYvRwm4XOl25+zUgJ7qvZAXW6NMQE8PPDX/vGwcs1dIGE1VFQGZHFf8t9SRS07FmgTF7TMkgCJmy5tGNc3I+tqVmHzBeDGPxFP6xQ3pXMqIWXwkfBykom4HbBjACsK1q4W3FyF3G/uZP2jdQgYoBYhI=,iv:hs24Ps1jciVAtQmJUDHNb8BAcTz1amlZ8l8SS6p0RTU=,tag:d2JE8toCB2E4C5yQwKiA3g==,type:str]
+    lastmodified: "2026-07-01T09:00:07Z"
+    mac: ENC[AES256_GCM,data:ZaPdKdedgNP6fMAiY0OzY6F0RbXJ6KiNpa/fILcn8PsQA+vdGmTJGj3TqQyT1rPIJ/xyq3xpRmO7+Q+6VI/V2h1mkyL5XYU6o3X9IcfUHtFDjNMm0LdryHI1Dwg7O4KzGa/GoJ6eET4QISJTrKDi7Vr42Y5QMlReRXuxeRveTa0=,iv:6MvOh7/fqN7JfbOo2W/dI/zgUUbDvOif1QNJL1CAdtw=,tag:fbMQq4PLmM2T3NsryMGMuw==,type:str]
     version: 3.13.1

@@ -1,0 +1,38 @@
+# files 워크로드 자기격리(컴포넌트 내부 소유 — cross-app 싱크 레이스 회피, adguard 패턴).
+# egress=DNS만(파일스토어는 DB/캐시/외부 불요). ingress=gateway ns에서 8080·8081만(intra-ns :8080 없음
+# → write/admin API를 형제 앱에서 도달 불가). pod-CIDR ipBlock 금지.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: files-default-deny-egress, namespace: files }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: files } }
+  policyTypes: [Egress]
+  # egress 규칙 없음 => 전 egress 거부(아래 DNS만 재개방)
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: files-allow-dns-egress, namespace: files }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: files } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: files-allow-ingress-from-gateway, namespace: files }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: files } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: gateway } }
+      ports:
+        - { protocol: TCP, port: 8080 } # internal(files.home.ukyi.app, tailscale->traefik)
+        - { protocol: TCP, port: 8081 } # public(files.ukyi.app, cloudflared->traefik)
