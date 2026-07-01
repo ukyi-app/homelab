@@ -66,3 +66,23 @@ V="platform/argocd/bootstrap-values.yaml"
   run yq '.notifications.resources.limits.memory' platform/argocd/bootstrap-values.yaml
   [ "$output" != "null" ] || { echo "notifications.resources.limits.memory 미설정"; false; }
 }
+
+@test "notifications cm has telegram service, line1 templates, deployed+degraded triggers, central selector subscription" {
+  has() { printf '%s' "$1" | grep -qF "$2" || { echo "miss: $2"; false; }; }
+  run yq '.notifications.notifiers."service.telegram"' platform/argocd/bootstrap-values.yaml
+  has "$output" 'token: $telegram-token'
+  run yq '.notifications.templates."template.app-deployed"' platform/argocd/bootstrap-values.yaml
+  has "$output" '✅ <b>배포 완료</b>'
+  run yq '.notifications.templates."template.app-degraded"' platform/argocd/bootstrap-values.yaml
+  has "$output" '🔴 <b>앱 저하</b>'
+  run yq '.notifications.triggers."trigger.on-deployed"' platform/argocd/bootstrap-values.yaml
+  has "$output" 'Healthy'; has "$output" 'oncePer'
+  run yq '.notifications.triggers."trigger.on-health-degraded"' platform/argocd/bootstrap-values.yaml
+  has "$output" 'Degraded'
+  run yq '.notifications.subscriptions | tag' platform/argocd/bootstrap-values.yaml
+  [ "$output" = "!!seq" ] || { echo "subscriptions must be a YAML list, got $output"; false; }
+  run yq '.notifications.subscriptions[0].selector' platform/argocd/bootstrap-values.yaml
+  has "$output" 'notify.homelab/telegram'
+  run yq '.notifications.subscriptions[0].triggers | tag' platform/argocd/bootstrap-values.yaml
+  [ "$output" = "!!seq" ] || { echo "triggers must be a list, got $output"; false; }
+}

@@ -93,6 +93,36 @@ notifications:
   resources:
     requests: { cpu: 10m, memory: 64Mi }
     limits: { memory: 128Mi }
+  # cm.data로 렌더되는 notifications-engine 설정(notifiers/templates/triggers는 키명이 곧 cm.data 키명).
+  # 봇 토큰은 argocd-notifications-secret(SealedSecret·extras)의 $telegram-token으로 참조 — cm엔 평문 없음.
+  notifiers:
+    service.telegram: |
+      token: $telegram-token
+  # line1 메시지 계약(3채널 공유): {글리프} <b>{제목}</b> — {상태}. parse_mode HTML(리터럴 <b>는 raw).
+  templates:
+    template.app-deployed: |
+      message: "✅ <b>배포 완료</b> — {{.app.metadata.name}} (Healthy)"
+      telegram:
+        parseMode: HTML
+    template.app-degraded: |
+      message: "🔴 <b>앱 저하</b> — {{.app.metadata.name}} (Degraded)"
+      telegram:
+        parseMode: HTML
+  triggers:
+    trigger.on-deployed: |
+      # ⚠️ 멀티소스 appset(apps)은 status.sync.revision(단수)이 비거나 불안정 → 멀티소스 호환 oncePer.
+      #    최종 표현식은 Task 6.4b에서 라이브 app-prod의 status.sync.revisions(복수)로 확정/검증.
+      - when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+        oncePer: 'app.status.sync.revisions != nil ? join(app.status.sync.revisions, ",") : app.status.sync.revision'
+        send: [app-deployed]
+    trigger.on-health-degraded: |
+      - when: app.status.health.status == 'Degraded'
+        send: [app-degraded]
+  subscriptions:                       # ⚠️ YAML 리스트 — 블록 스칼라 `|` 금지(차트가 cm.data.subscriptions로 래핑; `|`면 중첩되어 무효)
+    - recipients:
+        - telegram:$telegram-chat-id   # $ 미해석 시 chatId 리터럴로 보정(Task 6.5)
+      triggers: [on-deployed, on-health-degraded]
+      selector: notify.homelab/telegram=true
 
 dex:
   enabled: false
