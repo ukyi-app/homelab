@@ -111,10 +111,13 @@ notifications:
       message: "🔴 *앱 저하* — {{.app.metadata.name}} (Degraded)"
   triggers:
     trigger.on-deployed: |
-      # ⚠️ 멀티소스 appset(apps)은 status.sync.revision(단수)이 비거나 불안정 → 멀티소스 호환 oncePer.
-      #    최종 표현식은 Task 6.4b에서 라이브 app-prod의 status.sync.revisions(복수)로 확정/검증.
-      - when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
-        oncePer: 'app.status.sync.revisions != nil ? join(app.status.sync.revisions, ",") : app.status.sync.revision'
+      # oncePer는 "실제 sync 작업이 돈 revision"(operationState.syncResult)에 건다 — status.sync.revision(관측된 desired
+      #   HEAD)은 모노레포에서 커밋마다 새 HEAD로 전진해 매니페스트 무변경 앱까지 매 머지 재발화시킨다(노이즈).
+      #   syncResult는 실제 매니페스트 변경으로 sync 작업이 돌 때만 전진 → no-op 머지는 무발화, 실배포만 1건.
+      #   멀티소스 appset은 revision(단수)이 비고 revisions(복수)가 채워지므로 ternary+join으로 처리
+      #   (when의 phase=='Succeeded'가 syncResult 채워짐을 보장 → 빈 oncePer 불가).
+      - when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy' and app.status.operationState.syncResult != nil
+        oncePer: 'app.status.operationState.syncResult.revisions != nil ? join(app.status.operationState.syncResult.revisions, ",") : app.status.operationState.syncResult.revision'
         send: [app-deployed]
     trigger.on-health-degraded: |
       - when: app.status.health.status == 'Degraded'
