@@ -84,7 +84,61 @@ applicationSet:
     limits: { cpu: 250m, memory: 128Mi }
 
 notifications:
-  enabled: false
+  enabled: true
+  # 봇 토큰 Secret은 SealedSecret(extras)이 단독 소유 — 차트가 빈 Secret을 만들면 이중 소유 충돌(트랩).
+  secret:
+    create: false
+  # 상주 워크로드 — 자원 limit 필수(원장 SSOT·CI 강제). Go 워크로드지만 알림 컨트롤러는 소형이라
+  # GOMEMLIMIT 연동 불요(대형 Go 컨트롤러만 limit의 90%로 연동).
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits: { memory: 128Mi }
+  # cm.data로 렌더되는 notifications-engine 설정(notifiers/templates/triggers는 키명이 곧 cm.data 키명).
+  # ⚠️ native telegram service가 아니라 webhook service로 telegram Bot API에 직접 POST한다 —
+  #    argocd v3.4.4 번들 notifications-engine의 native telegram(telegram.go)은 parseMode를 "Markdown"으로
+  #    하드코딩(템플릿 parseMode 무시)하고, recipient가 '-' 접두일 때만 numeric chatID로 파싱하며 그 외(양수)는
+  #    @channel로 오해석한다(소스 1dbe3de712f8 확정). 우리 대상은 양수 DM chatId + HTML <b> 계약이라 native 불가.
+  #    webhook은 chat_id/parse_mode를 우리가 바디로 통제 → 양수 chatId + HTML 그대로 동작.
+  #    봇 토큰은 $telegram-token으로 URL에 주입(service config는 secret 확장 대상) — cm/git엔 평문 토큰 없음.
+  notifiers:
+    service.webhook.telegram: |
+      url: https://api.telegram.org/bot$telegram-token
+      headers:
+        - name: Content-Type
+          value: application/json
+  # line1 메시지 계약(3채널 공유): {글리프} <b>{제목}</b> — {상태}. parse_mode HTML(리터럴 <b>는 raw).
+  # chat_id는 리터럴 numeric(비-credential — 토큰 없이는 발송 불가). app 이름은 k8s DNS명(따옴표/역슬래시 없음)이라 JSON 안전.
+  templates:
+    template.app-deployed: |
+      webhook:
+        telegram:
+          method: POST
+          path: /sendMessage
+          body: |
+            {"chat_id": 8001733025, "parse_mode": "HTML", "text": "✅ <b>배포 완료</b> — {{.app.metadata.name}} (Healthy)"}
+    template.app-degraded: |
+      webhook:
+        telegram:
+          method: POST
+          path: /sendMessage
+          body: |
+            {"chat_id": 8001733025, "parse_mode": "HTML", "text": "🔴 <b>앱 저하</b> — {{.app.metadata.name}} (Degraded)"}
+  triggers:
+    trigger.on-deployed: |
+      # ⚠️ 멀티소스 appset(apps)은 status.sync.revision(단수)이 비거나 불안정 → 멀티소스 호환 oncePer.
+      #    최종 표현식은 Task 6.4b에서 라이브 app-prod의 status.sync.revisions(복수)로 확정/검증.
+      - when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+        oncePer: 'app.status.sync.revisions != nil ? join(app.status.sync.revisions, ",") : app.status.sync.revision'
+        send: [app-deployed]
+    trigger.on-health-degraded: |
+      - when: app.status.health.status == 'Degraded'
+        send: [app-degraded]
+  subscriptions:                       # ⚠️ YAML 리스트 — 블록 스칼라 `|` 금지(차트가 cm.data.subscriptions로 래핑; `|`면 중첩되어 무효)
+    - recipients:
+        # recipient = webhook 서비스명(telegram). subscription recipient엔 $secret 확장 없음(config.go) → 서비스명만.
+        - telegram
+      triggers: [on-deployed, on-health-degraded]
+      selector: notify.homelab/telegram=true
 
 dex:
   enabled: false
@@ -142,3 +196,44 @@ configs:
         kinds: ["Endpoints", "Event"]
       - apiGroups: ["discovery.k8s.io"]
         kinds: ["EndpointSlice"]
+
+# notifications-controller 스코프 egress netpol — 차트가 그대로 렌더(toYaml). 컨트롤러와 같은
+# Application(argocd, wave -10)에 두고 sync-wave -1(컨트롤러보다 먼저)로 적용해 콜드스타트에도
+# RBAC-exfil egress 창을 없앤다(extras 분리 시 cross-app 순서 갭). 차트 netpol은 global.networkPolicy.create:false로 OFF.
+extraObjects:
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: argocd-notifications-default-deny-egress
+      namespace: argocd
+      annotations: { argocd.argoproj.io/sync-wave: "-1" } # 컨트롤러보다 먼저 적용(부트스트랩 exfil 창 제거)
+    spec:
+      podSelector:
+        matchLabels: { app.kubernetes.io/name: argocd-notifications-controller }
+      policyTypes: [Egress]
+      # 규칙 없음 => 컨트롤러 egress 전부 거부; 아래 allow가 최소만 재개방.
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: argocd-notifications-allow-egress
+      namespace: argocd
+      annotations: { argocd.argoproj.io/sync-wave: "-1" }
+    spec:
+      podSelector:
+        matchLabels: { app.kubernetes.io/name: argocd-notifications-controller }
+      policyTypes: [Egress]
+      egress:
+        - to: # DNS — api.telegram.org 해석(CoreDNS)
+            - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+              podSelector: { matchLabels: { k8s-app: kube-dns } }
+          ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+        - to: # apiserver — Application/Secret watch. ClusterIP 아닌 node-subnet:6443(kube-router DNAT-후 트랩)
+            - ipBlock: { cidr: 192.168.139.0/24 }
+          ports: [{ protocol: TCP, port: 6443 }]
+        - to: # 외부 telegram(api.telegram.org:443) — 사설대역 except로 내부 lateral 차단
+            - ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16] }
+          ports: [{ protocol: TCP, port: 443 }]
+        # ⚠️ apiserver allow는 별도 to 블록 — 위 telegram except의 192.168.0.0/16이 apiserver(192.168.139.x)도 제외하기 때문.
+        # (Step 5.1: repo-server는 기본 미사용 → 제외. Task 6.1 연결 테스트가 막히면 아래 주석 해제.)
+        # - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: argocd-repo-server } } }]
+        #   ports: [{ protocol: TCP, port: 8081 }]

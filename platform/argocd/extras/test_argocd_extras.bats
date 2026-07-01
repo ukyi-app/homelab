@@ -5,10 +5,10 @@
 D="$BATS_TEST_DIRNAME"
 S="$D/argocd-accounts.sealed.yaml"
 
-@test "kustomize build succeeds and renders exactly one SealedSecret" {
+@test "kustomize build succeeds and renders exactly two SealedSecrets (argocd-secret patch + notifications)" {
   run kustomize build "$D"
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c '^kind: SealedSecret')" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^kind: SealedSecret')" -eq 2 ]
 }
 
 @test "SealedSecret patch-merges into argocd-secret with patch annotation in template metadata" {
@@ -26,8 +26,33 @@ S="$D/argocd-accounts.sealed.yaml"
   run yq '.spec.encryptedData."accounts.ukkiee.passwordMtime"' "$S"; [ "$output" = "null" ]
 }
 
+@test "argocd-notifications-secret is wired and sealed for argocd ns (independent ownership, not patch-mode)" {
+  N="$D/argocd-notifications-secret.sealed.yaml"
+  grep -q 'argocd-notifications-secret.sealed.yaml' "$D/kustomization.yaml" || { echo "kustomization 미등록"; false; }
+  run yq 'select(.kind=="SealedSecret") | .metadata.name' "$N"
+  [ "$output" = "argocd-notifications-secret" ] || { echo "name=$output"; false; }
+  run yq 'select(.kind=="SealedSecret") | .metadata.namespace' "$N"
+  [ "$output" = "argocd" ] || { echo "ns=$output"; false; }
+  # 봇 토큰만 봉인($telegram-token → webhook URL 확장). chatId는 봉인하지 않는다(비-credential·webhook body 리터럴).
+  run yq '.spec.encryptedData."telegram-token"' "$N"; [ "$output" != "null" ] || { echo "telegram-token 미봉인"; false; }
+  run yq '.spec.encryptedData."telegram-chat-id"' "$N"; [ "$output" = "null" ] || { echo "chatId는 봉인 대상 아님(webhook body 리터럴): $output"; false; }
+  # 독립 소유 — patch-mode 금지(argocd-accounts와 달리 기존 Secret 머지가 아니라 신규 생성).
+  run yq '.spec.template.metadata.annotations."sealedsecrets.bitnami.com/patch"' "$N"
+  [ "$output" = "null" ] || { echo "patch 어노테이션이 있으면 안 됨: $output"; false; }
+}
+
 @test "kustomization has no KSOPS generator (plain SealedSecret CR)" {
   run grep -q 'generators:' "$D/kustomization.yaml"; [ "$status" -ne 0 ]
+}
+
+@test "notify-smoke source builds, container is app, and is NOT synced by argocd-extras" {
+  kustomize build "$D/smoke" >/dev/null || { echo "smoke build 실패"; false; }
+  run yq '.metadata.name' "$D/smoke/deployment.yaml"
+  [ "$output" = "notify-smoke" ] || { echo "name=$output"; false; }
+  grep -q 'name: app' "$D/smoke/deployment.yaml" || { echo "container 이름 app 아님"; false; }
+  # 상주화 방지: argocd-extras가 smoke를 resources로 싱크하면 안 된다(canary는 Task 6에서 별도 Application만).
+  run yq '.resources[]' "$D/kustomization.yaml"
+  if printf '%s' "$output" | grep -q 'smoke'; then echo "extras가 smoke 포함 — 상주화 위험"; false; fi
 }
 
 @test "kustomize build renders exactly two HTTPRoutes (internal UI + public webhook)" {
