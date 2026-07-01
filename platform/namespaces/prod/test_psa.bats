@@ -3,17 +3,17 @@
 # 라벨이 없으면 네임스페이스는 privileged 기본값으로 동작(admission 방어선 0) — 그 회귀를 막는다.
 # @test 이름은 영어(디렉토리 단위 실행 시 한글 인코딩 깨짐 — 검증된 버그).
 
-@test "kustomize build renders all nine owned namespaces" {
+@test "kustomize build renders all ten owned namespaces" {
   run bash -c 'kustomize build platform/namespaces/prod'
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | grep -c '^kind: Namespace')" -eq 9 ]
+  [ "$(echo "$output" | grep -c '^kind: Namespace')" -eq 10 ]
 }
 
 @test "every owned namespace carries a PSA enforce label (no unregulated namespace)" {
   run bash -c 'kustomize build platform/namespaces/prod'
   [ "$status" -eq 0 ]
-  # 8개 ns × enforce 라벨 = 정확히 8건
-  [ "$(echo "$output" | grep -c 'pod-security.kubernetes.io/enforce:')" -eq 9 ]
+  # 10개 ns × enforce 라벨 = 정확히 10건
+  [ "$(echo "$output" | grep -c 'pod-security.kubernetes.io/enforce:')" -eq 10 ]
 }
 
 @test "prod enforces restricted (shared chart is restricted-compliant)" {
@@ -37,7 +37,7 @@
 @test "every owned namespace warns at restricted (progressive hardening signal)" {
   run bash -c 'kustomize build platform/namespaces/prod'
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | grep -c 'pod-security.kubernetes.io/warn: restricted')" -eq 9 ]
+  [ "$(echo "$output" | grep -c 'pod-security.kubernetes.io/warn: restricted')" -eq 10 ]
 }
 
 @test "cnpg-system enforces at least baseline PSA (operator ns: admission floor)" {
