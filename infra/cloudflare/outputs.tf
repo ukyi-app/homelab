@@ -22,6 +22,11 @@ output "r2_pg_backups_bucket" {
   sensitive = false
 }
 
+output "r2_cache_backups_bucket" {
+  value     = cloudflare_r2_bucket.cache_backups.name
+  sensitive = false
+}
+
 output "r2_media_bucket" {
   value     = cloudflare_r2_bucket.media.name
   sensitive = false

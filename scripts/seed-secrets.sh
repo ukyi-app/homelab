@@ -84,6 +84,24 @@ stringData:
   RCLONE_CONFIG_R2_REGION: "auto"
 EOF
 
+write_enc platform/cache/prod/cache-r2-creds.enc.yaml <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cache-r2-creds
+  namespace: cache
+type: Opaque
+stringData:
+  # cache-backup CronJob의 rclone R2 업로드(homelab-cache-backups-prod) — cnpg-r2-creds와 동일 계정 전역
+  # R2 토큰 재사용, RCLONE_CONFIG_R2_* 서브셋(aws-cli 미사용이라 AWS_* 불요). 키 이름 변경 금지.
+  RCLONE_CONFIG_R2_TYPE: "s3"
+  RCLONE_CONFIG_R2_PROVIDER: "Cloudflare"
+  RCLONE_CONFIG_R2_ACCESS_KEY_ID: "${R2_PG_ACCESS_KEY}"
+  RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: "${R2_PG_SECRET_KEY}"
+  RCLONE_CONFIG_R2_ENDPOINT: "${R2_ENDPOINT}"
+  RCLONE_CONFIG_R2_REGION: "auto"
+EOF
+
 # pg-app-credentials: 앱 DB 소유자 role. CNPG initdb(database ns)와 pg_dump 헤지가 소비한다.
 # 한 번만 생성해 커밋(SOPS)한다; 재실행/DR 시에는 커밋된 파일이 진실 공급원이다 —
 # 재생성하면 복원된 데이터베이스에 박혀 있는 비밀번호와 어긋난다.

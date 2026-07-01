@@ -17,6 +17,7 @@ tests/test_makefile.bats
 platform/cnpg/prod/test_creds_reference.bats
 platform/cnpg/prod/test_drill_alerting.bats
 platform/cnpg/prod/test_kustomize_build.bats
+platform/cache/prod/test_ksops_render.bats
 # terraform 의존 (gate엔 terraform 미설치 — iac.yaml advisory가 실행)
 infra/_tests/test_tf_validate.bats
 infra/_tests/test_tf_reconcile.bats
