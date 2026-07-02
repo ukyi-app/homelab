@@ -56,7 +56,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: operator-oauth
-  namespace: edge
+  namespace: tailscale
 type: Opaque
 stringData:
   client_id: "${TS_ID}"
