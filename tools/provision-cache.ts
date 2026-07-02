@@ -236,7 +236,7 @@ function registerResource(file: string, entry: string) {
 
 const checklist = [
   `valkey 이미지 태그(${VALKEY_IMAGE}) 실존/arm64 확인 후 필요 시 digest 핀`,
-  `소비 앱은 envFrom secretRef cache-${name}-conn — envFrom 변경 반영은 파드 재시작 필요`,
+  `apps/<app>/deploy/prod/values.yaml envFrom에 secretRef 'cache-${name}-conn' 배선 필요 — 미배선 시 앱이 캐시 없이 그대로 배포된다(#211 재발 클래스). envFrom 변경(회전 포함) 반영은 파드 재시작 필요`,
   "cache NS의 R2 백업 자격 cache-r2-creds가 아직 없으면 kubeseal로 봉인 필요 (platform/cache/prod/backup-cronjob.yaml 참고)",
 ];
 const dataConnKustomization = `${ROOT}/platform/data-conn/prod/kustomization.yaml`;
