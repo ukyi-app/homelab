@@ -62,3 +62,13 @@ sh=scripts/dr-drill.sh
   [ "$status" -ne 0 ]
   grep -q 'rollout status deploy/adguard' "$sh"
 }
+
+@test "dr-drill derives the PG image from cluster.yaml instead of hardcoding a pin" {
+  # 하드코딩 핀은 PG 메이저 갱신 시 cross-major 물리복구 불가로 드릴을 조용히 죽인다(M6).
+  # SSOT = platform/cnpg/prod/cluster.yaml spec.imageName — 파생 실패는 fail-closed.
+  run grep -c 'cloudnative-pg/postgresql:[0-9]' "$sh"
+  [ "$output" -eq 0 ]                                  # 리터럴 태그 핀 0
+  grep -q 'platform/cnpg/prod/cluster.yaml' "$sh"      # SSOT 참조
+  grep -q 'imageName: ${PG_IMAGE}' "$sh"               # heredoc이 파생 변수 사용
+  grep -q 'PG 이미지 파생 실패' "$sh"                   # fail-closed 분기 존재
+}

@@ -21,6 +21,16 @@ LIVE_CLUSTER="pg"
 DB="app"
 KUBECONFIG_PATH="$REPO_ROOT/infra/k3s-bootstrap/kubeconfig"
 
+# PG 이미지는 cluster.yaml(SSOT)에서 파생 — 하드코딩 핀은 PG 메이저 갱신 시 cross-major
+# 물리복구 불가로 드릴을 조용히 죽인다(M6). 인클러스터 소비자(basebackup·restore-drill)는
+# 런타임에 레포가 없어 파생 불가 → tests/test_pg-image-pin.bats가 핀 정합을 강제한다.
+command -v yq >/dev/null || { echo "DR DRILL FAIL: yq 필요(docs/runbooks/toolchain.md 핀)"; exit 1; }
+PG_IMAGE="$(yq '.spec.imageName' platform/cnpg/prod/cluster.yaml)"
+case "$PG_IMAGE" in
+  ghcr.io/cloudnative-pg/postgresql:[0-9]*) ;; # yq 버전차 방어 — 값 형태를 직접 검증
+  *) echo "DR DRILL FAIL: cluster.yaml에서 PG 이미지 파생 실패 (got: '${PG_IMAGE}')"; exit 1 ;;
+esac
+
 : "${SOPS_AGE_KEY_FILE:?export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt (노드 유실에도 살아남는 out-of-band 입력)}"
 test -s "$SOPS_AGE_KEY_FILE" || { echo "DR DRILL FAIL: age key missing at $SOPS_AGE_KEY_FILE"; exit 1; }
 
@@ -40,7 +50,7 @@ kind: Cluster
 metadata: { name: $1, namespace: ${NS}, labels: { cnpg.io/drill: "true" } }
 spec:
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.4
+  imageName: ${PG_IMAGE}
   storage: { size: 40Gi, storageClass: drill-ssd }
   walStorage: { size: 10Gi, storageClass: drill-ssd }
   resources:
