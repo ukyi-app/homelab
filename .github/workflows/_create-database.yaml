@@ -12,6 +12,12 @@ on:
         required: true
         type: string
 
+# 기본 셸(bash -e {0})은 pipefail 부재 — 명시 bash로 전 run 스텝에 -eo pipefail 강제
+# (가드: tests/gates/test_workflow-pipefail.bats)
+defaults:
+  run:
+    shell: bash
+
 jobs:
   provision:
     runs-on: ubuntu-24.04-arm
