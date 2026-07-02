@@ -73,8 +73,11 @@ EOF
   [ "$status" -ne 0 ]
   echo "$seal_output" | grep -q "ENV_TEST"
   echo "$seal_output" | grep -q "API_KEY"
-  ! echo "$seal_output" | grep -q "hello"
-  ! echo "$seal_output" | grep -q "topsecret"
+  # 중간 negate는 침묵 통과 → run+status로 강제(check-bats-style.sh). $seal_output 보존됨.
+  run grep -q "hello" <<<"$seal_output"
+  [ "$status" -ne 0 ]
+  run grep -q "topsecret" <<<"$seal_output"
+  [ "$status" -ne 0 ]
 }
 
 @test "seal-secret defaults app and output path from current directory" {
@@ -163,8 +166,11 @@ EOF
     --config "$TMP/.app-config.yml" --env "$TMP/.env" \
     --cert "$TMP/cert.pem" --app demo --namespace prod --out "$TMP/demo-secrets.sealed.yaml"
   [ "$status" -eq 0 ]
+  seal_output="$output"   # run 재호출이 $output을 덮으므로 보존
   grep -q "kind: SealedSecret" "$TMP/demo-secrets.sealed.yaml"
-  # 평문 값이 산출/출력 어디에도 없다
-  ! grep -rq "sealme" "$TMP/demo-secrets.sealed.yaml"
-  ! echo "$output" | grep -q "sealme"
+  # 평문 값이 산출/출력 어디에도 없다 (중간 negate는 침묵 통과 → run+status로 강제)
+  run grep -rq "sealme" "$TMP/demo-secrets.sealed.yaml"
+  [ "$status" -ne 0 ]
+  run grep -q "sealme" <<<"$seal_output"
+  [ "$status" -ne 0 ]
 }
