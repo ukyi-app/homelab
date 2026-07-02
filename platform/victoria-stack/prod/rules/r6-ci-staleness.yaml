@@ -10,12 +10,14 @@ data:
         rules:
           # ArgoCD 앱이 15분 넘게 OutOfSync → write-back/sync 고장 가능성 (R6).
           - alert: ArgoCDOutOfSync
-            expr: argocd_app_info{sync_status="OutOfSync"} == 1
+            expr: |
+              argocd_app_info{sync_status="OutOfSync"} == 1
+              or absent(argocd_app_info)
             for: 15m
             labels: { severity: warning }
             annotations:
               summary: "ArgoCD 앱 {{ $labels.name }} OutOfSync 15분 초과"
-              description: "태그 write-back webhook 또는 sync가 조용히 실패했을 수 있습니다 — 클러스터가 어제 이미지로 돌고 있을 수 있습니다."
+              description: "태그 write-back webhook 또는 sync가 조용히 실패했을 수 있습니다 — 클러스터가 어제 이미지로 돌고 있을 수 있습니다. 메트릭이 통째로 사라지면(scrape 단절) absent 가드가 fail-closed로 페이징합니다."
           # Recording rule: 실행 중인 이미지 digest가 최신 GHCR digest와 다르면 1.
           - record: app:image_digest_drift
             expr: |
