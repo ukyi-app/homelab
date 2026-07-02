@@ -16,14 +16,33 @@
   [ "$output" = "edge/adguard-dns gateway/traefik" ]
 }
 
-@test "ArgoCD server has no public HTTPRoute" {
-  run bash -c "kubectl get httproute -A -o json | jq -r '.items[] | select(.spec.parentRefs[].sectionName==\"web-public\") | .spec.backendRefs[]?.name' | grep -c '^argocd' || true"
-  [ "$output" = "0" ]
+@test "ArgoCD server is public only via the /api/webhook allowlist" {
+  # HTTPRoute backendRefs는 .spec.rules[].backendRefs에 있다(.spec.backendRefs는 부재 — 옛 vacuous 버그).
+  # web-public 리스너의 argocd-* 백엔드는 오직 argocd-webhook 라우트의 /api/webhook prefix만 허용한다.
+  # matches 생략 시 Gateway API 기본값은 PathPrefix '/'(전면 노출)이므로 위반으로 센다.
+  run kubectl get httproute -A -o json
+  [ "$status" -eq 0 ]
+  count="$(jq '[
+      .items[]
+      | select(any(.spec.parentRefs[]?; .sectionName=="web-public"))
+      | .spec.rules[]?
+      | select(any(.backendRefs[]?; (.name // "") | startswith("argocd")))
+      | (if (.matches // [] | length)==0 then ["/"] else (.matches | map(.path.value // "/")) end) as $paths
+      | select(any($paths[]; . != "/api/webhook"))
+    ] | length' <<<"$output")"
+  [ "$count" = "0" ]   # /api/webhook 이외 경로로 argocd를 web-public에 노출하는 rule 0
 }
 
 @test "Grafana has no public HTTPRoute" {
-  run bash -c "kubectl get httproute -A -o json | jq -r '.items[] | select(.spec.parentRefs[].sectionName==\"web-public\") | .spec.backendRefs[]?.name' | grep -c '^grafana' || true"
-  [ "$output" = "0" ]
+  run kubectl get httproute -A -o json
+  [ "$status" -eq 0 ]
+  count="$(jq '[
+      .items[]
+      | select(any(.spec.parentRefs[]?; .sectionName=="web-public"))
+      | .spec.rules[]?
+      | select(any(.backendRefs[]?; (.name // "") | startswith("grafana")))
+    ] | length' <<<"$output")"
+  [ "$count" = "0" ]   # grafana 백엔드는 web-public 리스너에 절대 없어야 한다(내부 전용)
 }
 
 @test "AdGuard UI is ClusterIP (Tailscale-only), never LoadBalancer" {
