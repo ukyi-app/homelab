@@ -28,7 +28,7 @@ data:
               unless on (app, digest) (
                 label_replace(
                   label_replace(
-                    kube_pod_container_info{namespace="prod", image=~"ghcr\.io/ukyi-app/.*"},
+                    kube_pod_container_info{namespace="prod", image=~"ghcr[.]io/ukyi-app/.*"},
                     "digest", "$1", "image_id", ".*@(sha256:[a-f0-9]+)$"
                   ),
                   "app", "$1", "image", ".*/([a-z0-9-]+)[@:].*"
