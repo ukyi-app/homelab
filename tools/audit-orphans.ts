@@ -6,6 +6,7 @@
 //   orphan-dns-inactive   : active:false 행인데 매니페스트 부재 — DNS 미노출(정보성, 비차단)
 //   missing-registration  : public 앱 매니페스트인데 apps.json 행 부재
 //   dangling-role         : cluster.yaml managed.role인데 passwordSecret sealed 부재 — 고아 role (정보성)
+//   unreferenced-conn     : data-conn 등록 conn인데 어느 apps/*/values.yaml envFrom도 미참조 (정보성; *-ro-conn 제외)
 //   stale-ledger-row      : prod 원장 행인데 apps/도 platform/도 없음
 //   incomplete-purge      : tombstone state=purging 잔존 — 상태머신 중단 흔적
 import { readFileSync, existsSync, readdirSync } from "node:fs";
@@ -122,6 +123,32 @@ if (existsSync(clusterPath)) {
     // KSOPS 시드 롤(ukkiee 등)은 <secret>.enc.yaml(secret-generator.yaml가 렌더). 둘 다 없으면 고아.
     if (!existsSync(`${cnpgDir}/databases/${secret}.sealed.yaml`) && !existsSync(`${cnpgDir}/${secret}.enc.yaml`))
       add("dangling-role", role.name, `cluster.yaml managed.role이 비밀번호 시크릿(${secret})의 sealed/.enc.yaml를 어디서도 못 찾음 — purge 후 role 제거 커밋 누락 가능`);
+  }
+}
+
+// 5) unreferenced-conn — data-conn kustomization의 conn 항목인데 어느 apps/*/values.yaml
+//    envFrom도 참조하지 않음(정보성, 비차단). *-ro-conn은 모드2 디버깅 전용(의도적 미참조)이라 제외.
+//    trip-mate 실재발(#211): conn이 봉인·커밋돼도 앱이 envFrom을 배선 안 하면 어떤 게이트도 안 잡았다.
+//    (이름 재사용/공유 등 이름≠앱 케이스가 있어 차단하지 않는다 — 정보로만 표면화.)
+const connKustPath = `${ROOT}/platform/data-conn/prod/kustomization.yaml`;
+if (existsSync(connKustPath)) {
+  const connKust = parseYaml(readFileSync(connKustPath, "utf8")) ?? {};
+  const connEntries: string[] = (connKust.resources ?? [])
+    .map((r: any) => String(r))
+    .filter((r: string) => /^(db|cache)-.+-conn\.sealed\.yaml$/.test(r) && !r.endsWith("-ro-conn.sealed.yaml"));
+  const referenced = new Set<string>();
+  for (const a of appDirs) {
+    const values = parseYaml(readFileSync(`${appsRoot}/${a}/deploy/prod/values.yaml`, "utf8")) ?? {};
+    for (const e of values.envFrom ?? []) {
+      const n = e?.secretRef?.name;
+      if (n) referenced.add(String(n));
+    }
+  }
+  for (const entry of connEntries) {
+    const handle = entry.replace(/\.sealed\.yaml$/, "");
+    if (!referenced.has(handle))
+      add("unreferenced-conn", handle,
+        "data-conn 등록 conn인데 어느 apps/*/values.yaml envFrom도 참조하지 않음 — 앱이 DB/캐시 없이 배포 중일 수 있음(#211 클래스, 정보성)");
   }
 }
 
