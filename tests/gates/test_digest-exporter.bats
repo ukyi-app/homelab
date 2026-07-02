@@ -32,3 +32,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; D="$ROOT/platform/vict
   want="$(ls -1 "$ROOT/apps" | grep -vx 'README.md' | sort | tr '\n' ' ')"
   [ "$got" = "$want" ] || { echo "APPS names='$got' != apps/='$want'"; false; }
 }
+
+@test "digest-exporter pushes via curl (wget is absent from the skopeo image)" {
+  grep -q 'curl -fsS --data-binary' "$D"
+  # 주석의 'wget' 언급은 허용 — 파이프 호출(| wget)만 금지(회귀 표적을 정확히 겨냥)
+  run grep -qE '\|\s*wget' "$D"; [ "$status" -ne 0 ]
+}
