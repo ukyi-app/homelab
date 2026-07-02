@@ -16,7 +16,9 @@ data:
       # info gauge로 노출: digest는 label로 싣고 값은 1
       OUT="${OUT}ghcr_latest_digest{app=\"$APP\",digest=\"$DIGEST\"} 1 ${NOW}000\n"
     done
-    printf "%b" "$OUT" | wget -q -O- --post-file=- 'http://vmsingle:8428/api/v1/import/prometheus' || true
+    # ⚠️ push는 curl — quay.io/skopeo/stable 이미지에 wget 부재(라이브 검증에서 발각: || true가 127을 삼켜
+    # 시리즈 0으로 무소음 사망). 실패는 비치명 유지하되 stderr로 가시화(Job 로그에서 추적 가능).
+    printf "%b" "$OUT" | curl -fsS --data-binary @- 'http://vmsingle:8428/api/v1/import/prometheus' || echo "vmsingle push failed (exit $?)" >&2
 ---
 apiVersion: batch/v1
 kind: CronJob
