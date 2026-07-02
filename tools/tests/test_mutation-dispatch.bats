@@ -176,3 +176,29 @@ setup() {
     grep -q 'validate-mutation.ts --action' "$WF/$wf.yaml"
   done
 }
+
+@test "every workflow_dispatch entrypoint is actor-guarded or explicitly allowlisted" {
+  # 동적 열거(P2-1): 하드코딩 목록이 아니라 dispatch 보유 전수를 스캔 — 신규 워크플로 자동 편입(fail-open 차단).
+  run bun -e '
+    const y = require("yaml"), fs = require("fs");
+    const dir = process.argv[1] + "/.github/workflows";
+    const ALLOW = new Set(["bump-poll.yaml"]); // 자체 fail-closed 검증기 — 디스패치 자격의 의도된 유일 표적
+    const bad = [];
+    for (const f of fs.readdirSync(dir)) {
+      if (!/\.ya?ml$/.test(f)) continue;
+      const src = fs.readFileSync(dir + "/" + f, "utf8");
+      const doc = y.parse(src);
+      const on = doc?.on ?? doc?.[true];   // 일부 YAML 파서의 on→true 키 함정 방어
+      const hasDispatch = !!on && typeof on === "object" && Object.prototype.hasOwnProperty.call(on, "workflow_dispatch");
+      if (!hasDispatch || ALLOW.has(f)) continue;
+      const guarded = src.includes("vars.HOMELAB_OWNER") && src.includes("github.actor") && src.includes("HOMELAB_OWNER 미설정");
+      if (!guarded) bad.push(f + ": workflow_dispatch 진입점에 actor 가드 부재(허용목록 아님)");
+    }
+    if (bad.length) { console.error(bad.join("\n")); process.exit(1); }
+  ' "$ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "bump-poll stays allowlisted WITHOUT the actor guard (intended dispatch target)" {
+  run grep -q 'HOMELAB_OWNER' "$WF/bump-poll.yaml"; [ "$status" -ne 0 ]
+}

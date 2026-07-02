@@ -21,6 +21,15 @@ jobs:
   sweep:
     runs-on: ubuntu-24.04-arm
     steps:
+      - name: actor 가드 (workflow_dispatch 한정 — 스케줄/기타 트리거 무영향)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        run: |
+          # 디스패치 자격(actions:write)은 워크플로 단위 스코프가 불가 — 허용목록(bump-poll) 외 전 진입점 가드(P2-1).
+          [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — actor 가드 fail-closed"; exit 1; }
+          [ "$ACTOR" = "$OWNER" ] || { echo "::error::workflow_dispatch는 owner($OWNER)만 실행 가능 — actor=$ACTOR 거부"; exit 1; }
       # ⚠️ codex pass2 F8: 로컬 composite(아래 telegram-notify)는 체크아웃된 레포에서 resolve된다 —
       # checkout이 없으면 failure 알림 스텝이 액션 로드 실패로 죽어 알림 자체가 안 간다. 첫 스텝으로 checkout.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0

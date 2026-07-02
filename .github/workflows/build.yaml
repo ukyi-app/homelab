@@ -25,6 +25,15 @@ jobs:
     outputs:
       sha: ${{ github.sha }}
     steps:
+      - name: actor 가드 (workflow_dispatch 한정 — 스케줄/기타 트리거 무영향)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        run: |
+          # 디스패치 자격(actions:write)은 워크플로 단위 스코프가 불가 — 허용목록(bump-poll) 외 전 진입점 가드(P2-1).
+          [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — actor 가드 fail-closed"; exit 1; }
+          [ "$ACTOR" = "$OWNER" ] || { echo "::error::workflow_dispatch는 owner($OWNER)만 실행 가능 — actor=$ACTOR 거부"; exit 1; }
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           # 변경 감지가 git diff $BEFORE..$SHA를 쓴다 — 기본 depth=1이면 BEFORE 커밋이 없어
