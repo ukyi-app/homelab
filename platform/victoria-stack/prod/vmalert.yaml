@@ -31,7 +31,7 @@ spec:
             - --configCheckInterval=30s
             - --httpListenAddr=:8880
           env:
-            - { name: GOMEMLIMIT, value: "115MiB" }
+            - { name: GOMEMLIMIT, value: "57MiB" } # 64Mi limit의 ~90%(정정: 구 128Mi 기준 115MiB 잔류 버그 — right-size 시 GOMEMLIMIT 미동반)
           ports: [{ name: http, containerPort: 8880 }]
           resources:
             requests: { cpu: 20m, memory: 64Mi }

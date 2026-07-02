@@ -19,6 +19,14 @@ while IFS= read -r f; do
   json=$(yq ea -o=json '[.]' "$f")
   out=$(ML_JSON="$json" ML_ALLOW="$ALLOW" python3 - <<'PY'
 import os, json
+import re
+def to_bytes(v):
+    m = re.match(r'^\s*(\d+(?:\.\d+)?)\s*([A-Za-z]*)\s*$', str(v))
+    if not m: return None
+    u = {"":1,"B":1,"Ki":2**10,"Mi":2**20,"Gi":2**30,"Ti":2**40,
+         "KiB":2**10,"MiB":2**20,"GiB":2**30,"TiB":2**40,
+         "k":1e3,"K":1e3,"M":1e6,"G":1e9,"T":1e12}
+    return float(m.group(1)) * u[m.group(2)] if m.group(2) in u else None
 allowed = set()
 try:
     with open(os.environ["ML_ALLOW"]) as fh:
@@ -39,6 +47,17 @@ for o in json.loads(os.environ["ML_JSON"]):
         res = c.get("resources") or {}
         requests = res.get("requests") or {}
         limits = res.get("limits") or {}
+        # GOMEMLIMIT ≤ limit×0.95 (right-size 시 GOMEMLIMIT 미동반 갱신 → GC 소프트리밋이 cgroup limit
+        # 위로 올라가 OOMKill 직행. vmalert 드리프트가 이 검사로 자동 포착 — 원장이 못 보는 2차 축).
+        gomem = None
+        for e in c.get("env", []) or []:
+            if isinstance(e, dict) and e.get("name") == "GOMEMLIMIT":
+                gomem = e.get("value")
+        if gomem and "memory" in limits:
+            gb, lb = to_bytes(gomem), to_bytes(limits["memory"])
+            if gb is not None and lb is not None and gb > lb * 0.95:
+                print("%s/%s/%s [GOMEMLIMIT %s > limit×0.95 (%s)]" % (
+                    o.get("kind"), name, c.get("name"), gomem, limits["memory"]))
         missing = []
         if "cpu" not in requests:
             missing.append("requests.cpu")

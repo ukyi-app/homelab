@@ -135,3 +135,34 @@ YAML
   rm -rf "$tmp"
   [ "$status" -eq 0 ]
 }
+
+@test "GOMEMLIMIT must not exceed 0.95x the memory limit (right-size coupling)" {
+  # 실 매니페스트: vmalert 정정(57MiB) 후 통과. 이 @test가 red면 GOMEMLIMIT 드리프트가 남아있는 것.
+  run bash "${BATS_TEST_DIRNAME}/../scripts/check-resource-limits.sh"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "resource guard flags a container whose GOMEMLIMIT exceeds 0.95x limit (red-green)" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/scripts" "$tmp/platform/probe/prod" "$tmp/policy"
+  cp "${BATS_TEST_DIRNAME}/../scripts/check-resource-limits.sh" "$tmp/scripts/"
+  : > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  cat > "$tmp/platform/probe/prod/deploy.yaml" <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: probe, namespace: probe }
+spec:
+  template:
+    spec:
+      containers:
+        - name: probe
+          image: busybox
+          env: [{ name: GOMEMLIMIT, value: "115MiB" }]
+          resources: { requests: { cpu: 25m, memory: 16Mi }, limits: { memory: 64Mi } }
+YAML
+  run bash "$tmp/scripts/check-resource-limits.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'GOMEMLIMIT'
+  rm -rf "$tmp"
+}
