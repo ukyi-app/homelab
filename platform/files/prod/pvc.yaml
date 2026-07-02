@@ -1,5 +1,10 @@
 # 사용자 파일 저장 — 2TB 외장 SSD(bulk-ssd, virtiofs). storageClassName 명시 필수(opt-in;
-# 누락 시 standard=VM 디스크로 조용히 착지). Prune=false + (라이브)PV-Retain 패치로 삭제민감 데이터 보호.
+# 누락 시 standard=VM 디스크로 조용히 착지). Prune=false + SC bulk-ssd reclaimPolicy=Retain
+# (git SSOT: infra/k3s-bootstrap/storage/storageclass-bulk-ssd.yaml)로 삭제민감 데이터 보호.
+# 내구성 등급 = 비재생성(non-regenerable): files-data는 git+R2+age로 재구축 불가한 유일 자산.
+#   · 오삭제/침묵유실 방어: Retain + Prune=false + /readyz free-space + FilesBackup/FilesBulkSSD 알림(r4).
+#   · 매체(SSD) 유실 방어: 호스트 오프-SSD rsync 사본(scripts/backup-files-data.sh, RPO=일1회/24h launchd).
+#   · R2 미사용(무료티어)은 '백업 없음'이 아니라 '백업 = 호스트 내장 디스크 사본'. DR 재결합=external-ssd.md.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
