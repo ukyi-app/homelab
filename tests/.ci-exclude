@@ -13,7 +13,7 @@ tools/tests/test_dev-postgres.bats
 tests/test_sops-roundtrip.bats
 tests/test_sops-guard.bats
 tests/test_makefile.bats
-# KSOPS 실 age 시드 복호 의존
+# KSOPS 실 age 시드 복호 의존 — 실행처: owner-local 'make verify-ksops'(age 키 있으면 실행/없으면 skip)
 platform/cnpg/prod/test_creds_reference.bats
 platform/cnpg/prod/test_drill_alerting.bats
 platform/cnpg/prod/test_kustomize_build.bats
