@@ -5,7 +5,16 @@
 
 setup() {
   ROOT="$(git rev-parse --show-toplevel)"; WF="$ROOT/.github/workflows"
-  DISPATCHERS="create-app update-secrets create-database create-cache teardown-app"
+  # 디스패처 목록 동적 파생 — 하드코딩 열거는 신규 디스패처를 조용히 빠뜨린다(fail-open, arch-meta finding).
+  # 규칙: workflow_dispatch 보유 + 동명 reusable(uses: ./.github/workflows/_<self>.yaml) 참조.
+  DISPATCHERS=""
+  for f in "$WF"/*.yaml; do
+    base="$(basename "$f" .yaml)"
+    case "$base" in _*) continue;; esac
+    grep -q 'workflow_dispatch:' "$f" || continue
+    grep -q "uses: ./.github/workflows/_${base}.yaml" "$f" || continue
+    DISPATCHERS="$DISPATCHERS $base"
+  done
 }
 
 @test "every dispatcher serializes via homelab-mutation group with queue max" {
@@ -74,13 +83,28 @@ setup() {
   done
 }
 
-@test "each dispatcher notify normalizes status from needs (not its own job.status)" {
+@test "dynamic DISPATCHERS derivation is non-empty and includes the known five" {
+  [ -n "$DISPATCHERS" ]
+  for d in create-app update-secrets create-database create-cache teardown-app; do
+    case " $DISPATCHERS " in *" $d "*) : ;; *) false ;; esac
+  done
+}
+
+@test "each dispatcher notify delegates to the mutation-notify composite" {
   for d in $DISPATCHERS; do
     f="$WF/$d.yaml"
-    run grep -nE 'toJSON\(needs\)' "$f"; [ "$status" -eq 0 ]
-    run grep -nE 'status:[[:space:]]*\$\{\{[[:space:]]*steps\.norm\.outputs\.status' "$f"; [ "$status" -eq 0 ]
+    grep -q 'uses: ./.github/actions/mutation-notify' "$f"
+    run grep -nE 'results:[[:space:]]*\$\{\{[[:space:]]*toJSON\(needs\)' "$f"; [ "$status" -eq 0 ]
+    # norm 로직은 composite로 이동 — 디스패처엔 job.status 직접 참조가 없어야 한다
     run grep -nE 'status:[[:space:]]*\$\{\{[[:space:]]*job\.status[[:space:]]*\}\}' "$f"; [ "$status" -ne 0 ]
   done
+}
+
+@test "mutation-notify composite normalizes cancelled over failure and labels the mutation source" {
+  a="$ROOT/.github/actions/mutation-notify/action.yml"
+  [ -f "$a" ]
+  grep -q 'status=cancelled' "$a"
+  grep -q 'source: 변이' "$a"
 }
 
 @test "dispatcher rejects a reserved db name before the executor" {

@@ -10,15 +10,18 @@ setup() {
 @test "exactly the expected workflows notify via the action (self-deriving sum, bump=1, tf-reconcile=3)" {
   # ⚠️ codex restale3 F1: 합계는 here-doc 줄의 self-deriving sum(절대값 prebake 금지) — 새 콜사이트(P6 pr-sweeper·
   # P8 build.yaml)는 EXPECTED here-doc 줄만 더하면 된다(머지 순서 의존 절대값 무수정).
+  # B6a: 4 변이 디스패처(create-app/update-secrets/create-database/create-cache)는 notify를
+  # .github/actions/mutation-notify composite로 위임(→내부에서 telegram-notify) → 직접 카운트 0.
+  # 위임 자체는 test_mutation-dispatch.bats가 검증(composite uses + job.status 직접참조 금지).
   EXPECTED="$(cat <<'EOF'
 _create-app.yaml 1
 _create-database.yaml 1
 _create-cache.yaml 1
 _update-secrets.yaml 1
-create-app.yaml 1
-update-secrets.yaml 1
-create-database.yaml 1
-create-cache.yaml 1
+create-app.yaml 0
+update-secrets.yaml 0
+create-database.yaml 0
+create-cache.yaml 0
 audit.yaml 1
 bump.yaml 1
 bump-poll.yaml 1

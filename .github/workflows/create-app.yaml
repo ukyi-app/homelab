@@ -50,21 +50,10 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-      - id: norm
-        env:
-          RESULTS: ${{ toJSON(needs) }}
-        run: |
-          # notify 잡의 job.status는 자기 자신(success)이라 거짓 — 상류 needs로 정규화(취소>실패)
-          if printf '%s' "$RESULTS" | grep -q '"result": *"cancelled"'; then
-            echo "status=cancelled" >> "$GITHUB_OUTPUT"
-          else
-            echo "status=failure" >> "$GITHUB_OUTPUT"
-          fi
-      - uses: ./.github/actions/telegram-notify
+      - uses: ./.github/actions/mutation-notify
         with:
-          status: ${{ steps.norm.outputs.status }}
-          source: 변이
+          results: ${{ toJSON(needs) }}
           title: create-app 실행
-          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
