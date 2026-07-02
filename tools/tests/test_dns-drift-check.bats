@@ -11,8 +11,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   echo "$out" | jq -e '.drift[] | select(.host=="blog.ukyi.app" and (.reason|test("NXDOMAIN")))'
   echo "$out" | jq -e '.drift | length == 1'
   echo "$out" | jq -e '.transient | length == 0'
-  ! echo "$out" | grep -q 'draft.ukyi.app'
-  ! echo "$out" | grep -q 'old.ukyi.app'
+  # 중간 negate는 침묵 통과 → run+status로 강제(check-bats-style.sh). $out은 일반 변수라 보존.
+  run grep -q 'draft.ukyi.app' <<<"$out"
+  [ "$status" -ne 0 ]
+  run grep -q 'old.ukyi.app' <<<"$out"
+  [ "$status" -ne 0 ]
 }
 
 @test "reports no drift when every active and public host resolves" {

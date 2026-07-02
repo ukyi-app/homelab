@@ -59,14 +59,14 @@ teardown() { rm -rf "$TMP"; }
   run env STATUS=success SOURCE=감사 TITLE="audit" IDENT="a<b>&c" sh "$SH"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "a&lt;b&gt;&amp;c"; [ "$?" -eq 0 ]
-  ! echo "$output" | grep -q "a<b>&c"   # raw must NOT survive (set-e safe negate)
+  ! echo "$output" | grep -q "a<b>&c"   # raw must NOT survive (마지막 명령이라 유효 — 중간이면 침묵 통과(check-bats-style.sh 강제))
 }
 
 @test "ampersand is escaped before angle brackets (no double-escape of entities)" {
   run env STATUS=success SOURCE=감사 TITLE="audit" IDENT="x & y" sh "$SH"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "x &amp; y"; [ "$?" -eq 0 ]
-  ! echo "$output" | grep -q "&amp;lt;" # no entity got re-escaped (set-e safe negate)
+  ! echo "$output" | grep -q "&amp;lt;" # no entity got re-escaped (마지막 명령이라 유효 — 중간이면 침묵 통과(check-bats-style.sh 강제))
 }
 
 @test "teardown label fix: only the non-empty subject is shown (app set, resource empty)" {
@@ -75,7 +75,7 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "orders"; [ "$?" -eq 0 ]
   # the old concat bug glued them; with resource empty the output must not be "orders" + trailing junk
-  ! echo "$output" | grep -qE "orders[^ <]"   # set-e safe negate
+  ! echo "$output" | grep -qE "orders[^ <]"   # 마지막 명령이라 유효 — 중간이면 침묵 통과(check-bats-style.sh 강제)
 }
 
 @test "teardown label fix: resource set, app empty -> shows resource only" {
@@ -95,7 +95,7 @@ teardown() { rm -rf "$TMP"; }
 @test "omits the arrow line when no url" {
   run env STATUS=success SOURCE=배포 TITLE="x" sh "$SH"
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -q "→ "   # set-e safe negate
+  ! echo "$output" | grep -q "→ "   # 마지막 명령이라 유효 — 중간이면 침묵 통과(check-bats-style.sh 강제)
 }
 
 @test "HTML-escapes the link too (query-string & and angle brackets)" {
@@ -103,7 +103,7 @@ teardown() { rm -rf "$TMP"; }
     LINK="https://x.test/run?a=1&b=2&t=<x>" sh "$SH"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "→ https://x.test/run?a=1&amp;b=2&amp;t=&lt;x&gt;"; [ "$?" -eq 0 ]
-  ! echo "$output" | grep -q "a=1&b=2"   # raw & must NOT survive (set-e safe negate)
+  ! echo "$output" | grep -q "a=1&b=2"   # raw & must NOT survive (마지막 명령이라 유효 — 중간이면 침묵 통과(check-bats-style.sh 강제))
 }
 
 @test "rejects an unknown status enum" {
