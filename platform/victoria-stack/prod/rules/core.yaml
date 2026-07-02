@@ -178,6 +178,18 @@ data:
             annotations:
               summary: "Job 실패: {{ $labels.namespace }}/{{ $labels.job_name }}"
               description: "Job이 실패 상태로 15분 이상 머뭅니다 — 전용 staleness 알림이 없는 정기 작업(예: 캐시 백업)의 실패입니다."
+          # 워크로드-불가용(NotReady) — Deployment Available=False. 구독 라벨 없는 플랫폼 컴포넌트
+          # (files·adguard·homepage)의 1차 실패모드(재시작 없는 NotReady)는 PodCrashLooping·TargetDown·
+          # ArgoCD on-health-degraded 어디에도 안 잡히던 공백(M13). Available 조건은 KSM이 Deployment에만
+          # 노출하고 honor_labels로 namespace가 실제값 → 시스템 ns 블랙리스트로 전 워크로드 커버.
+          # status="false"==1이 not-available(condition×status 매트릭스). files /readyz 저하(스토리지)도 여기서 페이징.
+          - alert: WorkloadUnavailable
+            expr: kube_deployment_status_condition{condition="Available", status="false", namespace!~"kube-system|kube-public|kube-node-lease"} == 1
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "워크로드 불가용: {{ $labels.namespace }}/{{ $labels.deployment }}"
+              description: "Deployment가 10분 이상 Available=False입니다(NotReady 파드가 minAvailable 미달) — 재시작이 없어 CrashLoop/OOM 알림에 안 잡히는 실패모드입니다. files는 /readyz 스토리지 저하, 그 외는 probe/스케줄/이미지를 확인하세요."
       - name: deadmanswitch
         rules:
           - alert: Watchdog

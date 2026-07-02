@@ -117,3 +117,19 @@ data:
             annotations:
               summary: "논리 백업(헤지)이 stale(27시간 초과)이거나 누락됨"
               description: "pg_dump 헤지 사본(복원 사본 4, R2 pgdump/)이 갱신되지 않았습니다 — barman 실패 시 최후 보루입니다. CronJob/연결을 확인하세요."
+          # 백업 생존성: 공용 캐시(Valkey) 백업 CronJob(cache-backup, 매일 03:45 KST)이 완료돼야 한다.
+          # pg 4사본과 달리 KubeJobFailed(존재-시-발화)만 있어 Job 오브젝트 소실/미스케줄 시 침묵(fail-open)이던
+          # 비대칭 해소 — pg staleness 패턴 복제(absent 가드 fail-closed). 캐시는 LRU 휘발 티어라 warning.
+          # ⚠️ absent 설계: cache-backup CronJob은 platform/cache/prod 상주 컴포넌트라 항상 존재하고, valkey
+          #    인스턴스 0개여도 discover 루프가 0회 돌고 성공 완료해 completion_time을 갱신한다(backup-cronjob.yaml)
+          #    → absent()는 CronJob 자체 소멸(=cache 컴포넌트 철거) 시에만 발화. 그 경우 이 룰도 제거한다
+          #    (죽은 알림 금지 규약). 신규/DR 배포 첫 실행 전(03:45 KST 이전) 일시 absent는 pg 4룰과 동일 수용.
+          - alert: CacheBackupStale
+            expr: |
+              (time() - max(kube_job_status_completion_time{job_name=~"cache-backup.*"})) > 100000
+              or absent(kube_job_status_completion_time{job_name=~"cache-backup.*"})
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "캐시 백업이 stale(27시간 초과)이거나 누락됨"
+              description: "공용 Valkey 백업(cache-backup CronJob → R2)이 갱신되지 않았습니다 — Job 오브젝트 소실/CronJob suspend/미스케줄 가능. last_success.json 신선도는 teardown 시점에만 검사되므로 이 룰이 상시 backstop입니다. 캐시는 LRU 휘발 티어라 warning."

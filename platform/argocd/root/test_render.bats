@@ -26,5 +26,5 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; F="$ROOT/platform/a
   [ "$output" = "true" ] || { echo "cnpg-data label=$output"; false; }
   # platform-components: data-conn/cache만 templatePatch 조건부(missingkey=error 안전 — inline .X 금지)
   run yq 'select(.kind=="ApplicationSet" and .metadata.name=="platform-components") | .spec.templatePatch' "$F"
-  has "$output" 'data-conn'; has "$output" 'cache'; has "$output" 'notify.homelab/telegram'
+  has "$output" 'data-conn'; has "$output" 'cache'; has "$output" 'files'; has "$output" 'notify.homelab/telegram'
 }
