@@ -8,7 +8,7 @@ setup() {
 
 @test "verify-ledger.sh SSOT script exists and is executable" {
   [ -x "$ROOT/scripts/verify-ledger.sh" ]
-  grep -q 'ledger-to-json.sh' "$ROOT/scripts/verify-ledger.sh"
+  grep -q 'ledger-to-json.ts' "$ROOT/scripts/verify-ledger.sh"
   grep -q 'conftest test' "$ROOT/scripts/verify-ledger.sh"
 }
 
