@@ -94,3 +94,15 @@ setup() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^ok$"
 }
+
+@test "parseLedgerRows accepts a digit-bearing env (namespace class regression)" {
+  run bun -e '
+    import("file://" + process.argv[1]).then(m => {
+      const rows = m.parseLedgerRows("| <!-- ledger:row --> aaa | pg18 | 10 | 20 |\n");
+      if (rows.length !== 1 || rows[0].env !== "pg18") { console.error(JSON.stringify(rows)); process.exit(1); }
+      console.log("ok");
+    }).catch(e => { console.error(e.message); process.exit(1); });
+  ' "$LIB"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok$"
+}

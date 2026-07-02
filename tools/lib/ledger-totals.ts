@@ -14,7 +14,9 @@ export function replaceTotals(text: string, sumReqMi: number, sumLimitMi: number
 
 // 원장 행 SSOT — 행 형식: | <!-- ledger:row --> <name padEnd14> | <env padEnd14> | <req padStart6> | <limit padStart8> |
 // LEDGER_ROW_RE는 모듈 내부 전용 — 콜사이트는 raw 인덱스 대신 parseLedgerRows(명명 필드)를 쓴다(F7).
-const LEDGER_ROW_RE = /<!-- ledger:row --> *([a-z0-9+-]+) *\| *([a-z-]+) *\| *(\d+) *\| *(\d+) *\|/g;
+// env 클래스는 숫자 허용([a-z0-9-]) — 숫자 포함 namespace 행(예: pg18)이 TS 파서만 침묵 드랍되면
+// 예산 게이트가 과소 합산돼 fail-open. awk 파서(제거됨)와 동치 유지.
+const LEDGER_ROW_RE = /<!-- ledger:row --> *([a-z0-9+-]+) *\| *([a-z0-9-]+) *\| *(\d+) *\| *(\d+) *\|/g;
 
 // 캐노니컬 파서 — audit-orphans(name|type)·create-app/provision-cache(name|type|req|limit) 변형 통일.
 // String.matchAll은 정규식을 복제하므로 공유 /g lastIndex 오염 없음.
