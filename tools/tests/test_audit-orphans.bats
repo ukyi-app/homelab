@@ -182,3 +182,40 @@ JSON
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "activation-exposure-drift"
 }
+
+@test "audit reports unreferenced conn handles and skips ro-conn (mode-2 debug handles)" {
+  # data-conn 등록 conn인데 어느 apps/*/values.yaml envFrom도 참조 안 함 → 정보성 발화(#211 클래스).
+  cat > "$FR/platform/data-conn/prod/kustomization.yaml" <<'KEOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - db-orders-conn.sealed.yaml
+  - db-orders-ro-conn.sealed.yaml
+  - db-lonely-conn.sealed.yaml
+KEOF
+  printf 'image: {repo: x, tag: sha-abc1234}\nroute: {public: true, host: orders.example.com}\nenvFrom:\n  - secretRef:\n      name: orders-secrets\n  - secretRef:\n      name: db-orders-conn\n' \
+    > "$FR/apps/orders/deploy/prod/values.yaml"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.findings | any(.type == "unreferenced-conn" and .subject == "db-lonely-conn")'
+  # 참조된 conn과 ro-conn(의도적 미참조)은 미발화
+  run bash -c "bun '$ROOT/tools/audit-orphans.ts' --repo-root '$FR' | jq -e '.findings | any(.type == \"unreferenced-conn\" and (.subject == \"db-orders-conn\" or .subject == \"db-orders-ro-conn\"))'"
+  [ "$status" -ne 0 ]
+}
+
+@test "unreferenced-conn is informational and never blocks --ci" {
+  # ghost(orphan-dns, 차단 유형)를 제거해 --ci 판정을 unreferenced-conn만으로 격리
+  echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
+    > "$FR/infra/cloudflare/apps.json"
+  cat > "$FR/platform/data-conn/prod/kustomization.yaml" <<'KEOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - db-lonely-conn.sealed.yaml
+KEOF
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.findings | any(.type == "unreferenced-conn" and .subject == "db-lonely-conn")'
+}

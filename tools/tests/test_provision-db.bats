@@ -275,3 +275,14 @@ EOF
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "sealed-secrets-cert"
 }
+
+@test "provision-db checklist surfaces the app values.yaml envFrom wiring step" {
+  # trip-mate 실재발(#211): conn이 봉인·커밋돼도 앱 values.yaml envFrom 미배선이면 DB 없이 배포된다.
+  provision --name orders --repo-root "$FIX" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -re '.checklist[]' | grep -q "values.yaml"
+  echo "$output" | jq -re '.checklist[]' | grep -q "envFrom"
+  echo "$output" | jq -re '.checklist[]' | grep -q "db-orders-conn"
+  # ro-conn은 모드2 디버깅 전용 — 배선 대상이 아님이 checklist에 명시된다
+  echo "$output" | jq -re '.checklist[]' | grep -q "db-orders-ro-conn"
+}
