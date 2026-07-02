@@ -36,22 +36,17 @@ jobs:
           ref: main
           token: ${{ steps.writer.outputs.token }}
       - uses: ./.github/actions/setup-bun
-      - name: spec 재검증 (비신뢰 입력 — env 경유, 화이트리스트 밖 필드 거부)
+      - name: spec 재검증 + name/maxmemory 추출 (defense-in-depth — 디스패처 외 호출 대비)
         id: spec
         env:
-          SPEC: ${{ inputs.spec }}
+          SPEC: ${{ inputs.spec }} # 비신뢰 입력 — env 경유만, run 안 인라인 보간 금지
         run: |
-          printf '%s' "$SPEC" > /tmp/spec.json
-          bun - <<'EOF' >> "$GITHUB_OUTPUT"
-          const s = JSON.parse(require("node:fs").readFileSync("/tmp/spec.json", "utf8"));
-          const extra = Object.keys(s).filter((k) => !["name", "maxmemory_mi"].includes(k));
-          if (extra.length) { console.error(`::error::spec 허용 밖 필드: ${extra.join(",")}`); process.exit(1); }
-          if (!/^[a-z]([a-z0-9-]{0,28}[a-z0-9])?$/.test(s.name ?? "")) { console.error("::error::spec.name 형식 불량"); process.exit(1); }
-          const mm = s.maxmemory_mi ?? 64;
-          if (!Number.isInteger(mm) || mm < 16 || mm > 1024) { console.error("::error::spec.maxmemory_mi는 16..1024 정수"); process.exit(1); }
-          console.log(`name=${s.name}`);
-          console.log(`maxmemory=${mm}`);
-          EOF
+          jq -n --arg action create-cache --arg spec "$SPEC" \
+            '{action: $action, spec: $spec}' > /tmp/payload.json
+          bun tools/validate-mutation.ts --action create-cache --payload-file /tmp/payload.json
+          name=$(printf '%s' "$SPEC" | jq -r '.name')
+          mm=$(printf '%s' "$SPEC" | jq -r '.maxmemory_mi // 64')
+          { echo "name=$name"; echo "maxmemory=$mm"; } >> "$GITHUB_OUTPUT"
       - name: kubeseal + conftest 설치
         uses: ./.github/actions/setup-toolchain
         with:
@@ -67,20 +62,8 @@ jobs:
           bun tools/provision-cache.ts --name "$NAME" --maxmemory-mi "$MAXMEMORY" | tee /tmp/plan.json
           # 원장 게이트(PR required check와 동일 검증 선행 — 초과 시 PR 자체를 만들지 않는다)
           bun run verify:ledger
-      - name: PR 생성 + auto-merge
-        env:
-          GH_TOKEN: ${{ steps.writer.outputs.token }}
-          NAME: ${{ steps.spec.outputs.name }}
-          MAXMEMORY: ${{ steps.spec.outputs.maxmemory }}
-          RUN_ID: ${{ github.run_id }}
+      - name: PR 본문 작성 (plan.json + 체크리스트)
         run: |
-          git config user.name "ukyi-homelab-writer[bot]"
-          git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
-          branch="create-cache/${NAME}-${RUN_ID}"
-          git checkout -b "$branch"
-          git add platform/cache platform/data-conn docs/memory-ledger.md
-          git commit -m "feat: ${NAME} 캐시 생성 (create-cache — Valkey maxmemory ${MAXMEMORY}Mi)"
-          git push -u origin "$branch"
           {
             echo "create-cache 자동 생성 PR입니다. 머지 = ArgoCD 싱크(cache-prod) — conn 핸들은 data-conn 등록 후 prod에 나타납니다."
             echo
@@ -88,9 +71,16 @@ jobs:
             echo; echo "### ⚠️ 머지 전 체크리스트"
             jq -r '.checklist[] | "- [ ] " + .' /tmp/plan.json
           } > /tmp/pr-body.md
-          gh pr create --base main --head "$branch" \
-            --title "feat: ${NAME} 캐시 생성 (create-cache)" --body-file /tmp/pr-body.md
-          bash scripts/auto-merge-or-fail.sh "$branch"
+      - name: PR-first 커밋 + auto-merge
+        uses: ./.github/actions/pr-first-commit
+        with:
+          branch: create-cache/${{ steps.spec.outputs.name }}-${{ github.run_id }}
+          add-paths: platform/cache platform/data-conn docs/memory-ledger.md
+          commit-message: "feat: ${{ steps.spec.outputs.name }} 캐시 생성 (create-cache — Valkey maxmemory ${{ steps.spec.outputs.maxmemory }}Mi)"
+          pr-title: "feat: ${{ steps.spec.outputs.name }} 캐시 생성 (create-cache)"
+          pr-body-file: /tmp/pr-body.md
+          auto-merge: 'true'
+          gh-token: ${{ steps.writer.outputs.token }}
       - name: telegram notify (핸들 이름만 — URL/자격 금지)
         if: always()
         uses: ./.github/actions/telegram-notify

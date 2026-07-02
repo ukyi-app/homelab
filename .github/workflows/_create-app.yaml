@@ -60,6 +60,12 @@ jobs:
           sha="$(git -C .apprepo rev-parse HEAD)" || { echo "::error::앱 레포 main HEAD 해석 실패"; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-bun
+      - name: app 재검증 (경계 defense-in-depth — 디스패처 외 호출 대비)
+        env:
+          APP: ${{ inputs.app }}
+        run: |
+          jq -n --arg app "$APP" '{action:"create-app", app:$app}' > /tmp/mv-payload.json
+          bun tools/validate-mutation.ts --action create-app --payload-file /tmp/mv-payload.json
       - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
         with:
           registry: ghcr.io
@@ -90,14 +96,12 @@ jobs:
           kubeconform: 'true'
           helm: 'true'
           conftest: 'true'
-      - name: 생성 + 렌더 게이트 + PR
+      - name: 생성 + 렌더 게이트 + PR 본문
         env:
-          GH_TOKEN: ${{ steps.writer.outputs.token }}
           APP: ${{ steps.img.outputs.app }}
           TAG: ${{ steps.img.outputs.tag }}
           DIGEST: ${{ steps.img.outputs.digest }}
           DOMAIN: ${{ vars.HOMELAB_DOMAIN }}
-          RUN_ID: ${{ github.run_id }}
         run: |
           [ -n "$DOMAIN" ] || { echo "::error::repo variable HOMELAB_DOMAIN 미설정"; exit 1; }
           [ -f .apprepo/.app-config.yml ] || { echo "::error::.app-config.yml 없음(앱 레포 ukyi-app/${APP}@${TAG#sha-})"; exit 1; }
@@ -117,13 +121,6 @@ jobs:
                 -summary
           # 원장 게이트(PR required check와 동일 검증 선행)
           bun run verify:ledger
-          git config user.name "ukyi-homelab-writer[bot]"
-          git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
-          branch="create-app/${APP}-${RUN_ID}"
-          git checkout -b "$branch"
-          git add "apps/${APP}" docs/memory-ledger.md infra/cloudflare/apps.json
-          git commit -m "feat: ${APP} 앱 생성 (create-app — digest 핀, 공개 활성화)"
-          git push -u origin "$branch"
           {
             echo "create-app 자동 생성 PR입니다. **머지 = 첫 배포 승인 + 공개 승인** (DNS/tunnel은 머지 후 iac.yaml이 적용)."
             echo
@@ -131,8 +128,16 @@ jobs:
             echo; echo "### ⚠️ 머지 전 체크리스트"
             jq -r '.checklist[] | "- [ ] " + .' /tmp/plan.json
           } > /tmp/pr-body.md
-          gh pr create --base main --head "$branch" \
-            --title "feat: ${APP} 앱 생성 (create-app)" --body-file /tmp/pr-body.md
+      - name: PR-first 커밋 (수동 머지 — create-app 패턴)
+        uses: ./.github/actions/pr-first-commit
+        with:
+          branch: create-app/${{ steps.img.outputs.app }}-${{ github.run_id }}
+          add-paths: apps/${{ steps.img.outputs.app }} docs/memory-ledger.md infra/cloudflare/apps.json
+          commit-message: "feat: ${{ steps.img.outputs.app }} 앱 생성 (create-app — digest 핀, 공개 활성화)"
+          pr-title: "feat: ${{ steps.img.outputs.app }} 앱 생성 (create-app)"
+          pr-body-file: /tmp/pr-body.md
+          auto-merge: 'false'
+          gh-token: ${{ steps.writer.outputs.token }}
       - name: telegram notify
         if: always()
         uses: ./.github/actions/telegram-notify

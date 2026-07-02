@@ -45,9 +45,7 @@ jobs:
           jq -n --arg action create-database --arg spec "$SPEC" \
             '{action: $action, spec: $spec}' > /tmp/payload.json
           bun tools/validate-mutation.ts --action create-database --payload-file /tmp/payload.json
-          name=$(printf '%s' "$SPEC" | jq -r '.name')
-          printf '%s' "$name" | grep -Eq '^[a-z]([a-z0-9-]{0,28}[a-z0-9])?$' \
-            || { echo "::error::spec.name 형식 불량"; exit 1; }
+          name=$(printf '%s' "$SPEC" | jq -r '.name')  # validate-mutation이 형식을 이미 SSOT 검증(인라인 regex 사본 제거)
           exts=$(printf '%s' "$SPEC" | jq -r '(.extensions // []) | join(",")')
           { echo "name=$name"; echo "extensions=$exts"; } >> "$GITHUB_OUTPUT"
       - name: 봉인 cert 확인 (없으면 산출 0)
@@ -68,19 +66,8 @@ jobs:
           else
             bun tools/provision-db.ts --name "$NAME" | tee /tmp/plan.json
           fi
-      - name: PR 생성 + auto-merge (PR-first — App 토큰은 branch protection 우회 불가)
-        env:
-          GH_TOKEN: ${{ steps.writer.outputs.token }}
-          NAME: ${{ steps.spec.outputs.name }}
-          RUN_ID: ${{ github.run_id }}
+      - name: PR 본문 작성 (plan.json + 체크리스트)
         run: |
-          git config user.name "ukyi-homelab-writer[bot]"
-          git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
-          branch="create-database/${NAME}-${RUN_ID}"
-          git checkout -b "$branch"
-          git add platform/cnpg/prod platform/data-conn/prod
-          git commit -m "feat: ${NAME} 논리 DB 프로비저닝 (create-database)"
-          git push -u origin "$branch"
           {
             echo "create-database 자동 생성 PR — 머지되면 ArgoCD가 cnpg-data(database NS)와 data-conn-prod(prod NS)를 싱크한다."
             echo
@@ -88,9 +75,16 @@ jobs:
             echo; echo "### 머지 후 체크리스트"
             jq -r '.checklist[] | "- [ ] " + .' /tmp/plan.json
           } > /tmp/pr-body.md
-          gh pr create --base main --head "$branch" \
-            --title "feat: ${NAME} DB 생성 (create-database)" --body-file /tmp/pr-body.md
-          bash scripts/auto-merge-or-fail.sh "$branch"
+      - name: PR-first 커밋 + auto-merge
+        uses: ./.github/actions/pr-first-commit
+        with:
+          branch: create-database/${{ steps.spec.outputs.name }}-${{ github.run_id }}
+          add-paths: platform/cnpg/prod platform/data-conn/prod
+          commit-message: "feat: ${{ steps.spec.outputs.name }} 논리 DB 프로비저닝 (create-database)"
+          pr-title: "feat: ${{ steps.spec.outputs.name }} DB 생성 (create-database)"
+          pr-body-file: /tmp/pr-body.md
+          auto-merge: 'true'
+          gh-token: ${{ steps.writer.outputs.token }}
       - name: telegram notify (핸들 이름만 — URL/비밀번호 금지)
         if: always()
         uses: ./.github/actions/telegram-notify

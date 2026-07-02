@@ -45,27 +45,14 @@ jobs:
           # writer 토큰의 destructive 사용(push/PR)은 이 검증 통과 후에만 일어난다.
           printf '{"app":"%s","confirm":"%s"}' "$APP" "$CONFIRM" > /tmp/td-payload.json
           bun tools/validate-mutation.ts --action teardown-app --payload-file /tmp/td-payload.json
-      - name: 철거 plan + PR (수동 머지 — auto-merge 안 함)
+      - name: 철거 plan + PR 본문 (수동 머지)
         env:
-          GH_TOKEN: ${{ steps.writer.outputs.token }}
           APP: ${{ inputs.app }}
-          RUN_ID: ${{ github.run_id }}
         run: |
-          set -euo pipefail   # 파괴 단계 belt-and-suspenders — ⚠️ GHA 기본 셸은 bash -e {0}(pipefail 없음).
-          # defaults(shell: bash)가 -eo pipefail을 이미 주고, 여기선 -u(미정의 변수 차단)까지 추가한다.
-          # 과거 주석의 "GHA 기본 -eo pipefail"은 반대 오해였다 — 기본(-e만)과 명시 bash를 혼동하지 말 것.
           [ -d "apps/$APP" ] || { echo "::error::apps/$APP 없음 — 이미 철거됐거나 이름 오류"; exit 1; }
           # 사전 active 상태 기록(롤백 시 DNS 복원 필요 여부 판단용)
           active=$(jq -r --arg a "$APP" '(map(select(.name==$a)) | .[0].active) // false' infra/cloudflare/apps.json 2>/dev/null || echo unknown)
           bun tools/teardown-app.ts --app "$APP" --repo-root . | tee /tmp/plan.json
-          git config user.name "ukyi-homelab-writer[bot]"
-          git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
-          branch="teardown/teardown-app-${APP}-${RUN_ID}"
-          git checkout -b "$branch"
-          # teardown-app.ts가 제거/수정한 것 staging — allowlist(apps/<app> 삭제 + apps.json 행 + 원장 행)
-          git add apps docs/memory-ledger.md infra/cloudflare/apps.json platform
-          git commit -m "chore: ${APP} 앱 철거 (teardown-app)"
-          git push -u origin "$branch"
           {
             echo "teardown-app 자동 생성 PR입니다. **머지 = 철거 승인** — ArgoCD가 Application/워크로드/SealedSecret prune; active였으면 머지 후 iac.yaml이 DNS/tunnel ingress를 **자동 제거**(app 공개 DNS는 destroy 가드 allowlist라 무인 apply 허용). 별도 수동 terraform apply 불필요."
             echo
@@ -76,9 +63,16 @@ jobs:
             cat /tmp/plan.json
             echo '```'
           } > /tmp/pr-body.md
-          # auto-merge-or-fail.sh 호출 안 함 — 파괴는 수동 머지(create-app 패턴)
-          gh pr create --base main --head "$branch" \
-            --title "chore: ${APP} 앱 철거 (teardown-app)" --body-file /tmp/pr-body.md
+      - name: PR-first 커밋 (auto-merge 안 함 — 파괴는 수동 머지)
+        uses: ./.github/actions/pr-first-commit
+        with:
+          branch: teardown/teardown-app-${{ inputs.app }}-${{ github.run_id }}
+          add-paths: apps docs/memory-ledger.md infra/cloudflare/apps.json platform
+          commit-message: "chore: ${{ inputs.app }} 앱 철거 (teardown-app)"
+          pr-title: "chore: ${{ inputs.app }} 앱 철거 (teardown-app)"
+          pr-body-file: /tmp/pr-body.md
+          auto-merge: 'false'
+          gh-token: ${{ steps.writer.outputs.token }}
       - name: telegram notify
         if: always()
         uses: ./.github/actions/telegram-notify

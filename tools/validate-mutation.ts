@@ -12,7 +12,11 @@ function die(msg: string): never {
 
 // 계약표: action → 필수 입력 (허용 입력 == 필수 입력; 그 외 비어 있지 않으면 거부)
 // create-app/update-secrets는 sha를 입력으로 받지 않는다 — reusable이 앱 레포 main HEAD를
-// 체크아웃해 해석한다(sha 입력은 거부). activate-app만 sha(노출할 homelab 머지 revision) 유지.
+// 체크아웃해 해석한다(sha 입력은 거부). sha는 activate-app 행에만 남지만 그 액션은 이 검증기를 타지 않는다.
+// ⚠️ activate-app·audit 행은 어떤 디스패처도 이 검증기로 라우팅하지 않는다(활성 호출처 0):
+//   activate-app = owner-local CLI(tools/activate-app.ts 자체 검증), audit = 스케줄 reconciler(audit.yaml).
+//   실제 --action 호출처는 create-app/create-cache/create-database/update-secrets/teardown-app(워크플로)
+//   + teardown-resource(scripts/teardown.sh)뿐. 두 행은 선언적 아키타입 + 회귀 앵커(test_validate-mutation.bats)로만 보존한다.
 // 모든 디스패처는 앱 이름만 받는다(repo는 ukyi-app/<app>로 reusable이 구성 — org는 코드에 고정).
 const CONTRACT: Record<string, string[]> = {
   "create-app": ["app"],
