@@ -96,6 +96,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - terraform provider lock 첫 커밋 라이브 state writer 이상
 - tf 루트 관리 모델 CI vs 로컬
 - 상주 워크로드 자원 limit 블라인드스팟
+- GHA run 기본 셸 pipefail 부재(bash -e {0})
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 
