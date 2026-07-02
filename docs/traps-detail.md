@@ -205,12 +205,12 @@
 - **자원 limit 블라인드스팟:** 메모리 원장 게이트(`verify:ledger`/`ledger.rego`)는 docs/memory-ledger.md의
   **마크다운 행만** 검증하고 라이브/소스 manifest와 교차하지 않는다 — 워크로드에 메모리 소비자를 추가하며
   limit/행을 안 올려도 GREEN, OOM으로만 발현(vector OOM PR #85 포스트모템). 대칭으로 CPU도 starvation 축
-  (cpu request 없으면 점유율 보장 0 → 이웃 굶김). `scripts/check-resource-limits.sh`가 상주 워크로드
+  (cpu request 없으면 점유율 보장 0 → 이웃 굶김). `tools/check-resource-limits.ts`가 상주 워크로드
   (Deployment/DaemonSet/StatefulSet) main 컨테이너에 **cpu·memory request + memory limit**을 강제한다
   (cpu limit은 CFS quota라 유휴서도 throttling → 비요구; starvation은 request로, OOM은 memory limit으로).
   grep 셀렉터 붕괴 시 0매치 침묵통과(false-green)는 scan-floor로 차단. operator/원격-helm 런타임 생성처럼
   의도적 미설정은 `policy/memory-limit-allowlist.txt`에 사유와 함께 등재(블라인드스팟 가시화).
-> 가드: `scripts/check-resource-limits.sh`, `tests/test_resource_limits.bats`
+> 가드: `tools/check-resource-limits.ts`, `tests/test_resource_limits.bats`
 
 ### GHA run 기본 셸 pipefail 부재(bash -e {0})
 - GitHub Actions run 스텝의 기본 셸은 `bash -e {0}` — **pipefail이 없다**. `bun 도구 | tee 로그` 류
