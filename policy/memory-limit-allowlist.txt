@@ -1,4 +1,4 @@
-# Resource-limit allowlist — check-resource-limits.sh (vector OOM PR #85 포스트모템 + CPU 단일축 편향 해소 가드)
+# Resource-limit allowlist — check-resource-limits.ts (vector OOM PR #85 포스트모템 + CPU 단일축 편향 해소 가드)
 #
 # 규칙: 상주 워크로드(Deployment/DaemonSet/StatefulSet)의 main 컨테이너는 cpu·memory request + memory limit
 #   필수(cpu limit은 비요구 — throttling 회피). 부득이 미설정해야 하면 아래에 한 줄로 등재한다(게이트 면제):
