@@ -22,8 +22,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; D="$ROOT/platform/vict
 @test "drift recording-rule aligns both join sides on (app,digest) (no permanent false fire)" {
   R="$ROOT/platform/victoria-stack/prod/rules/r6-ci-staleness.yaml"
   grep -q 'max by (app, digest) (ghcr_latest_digest)' "$R"   # 좌변 digest 보존
-  grep -q '"app", "$1", "image"' "$R"                        # 우변 image→app 추출
+  grep -q '"app", "$1", "image_id"' "$R"                     # 우변 image_id→app 추출(k3s: image=bare ID)
   run grep -q 'max by (app) (ghcr_latest_digest)' "$R"; [ "$status" -ne 0 ]  # 파손식 회귀 금지
+  run grep -q 'image=~' "$R"; [ "$status" -ne 0 ]            # bare-ID 라벨 selector 회귀 금지
 }
 
 @test "digest-exporter APPS tracks exactly the deployed apps/ set (variant-chain parity)" {
