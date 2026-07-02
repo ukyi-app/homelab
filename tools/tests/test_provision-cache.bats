@@ -168,3 +168,11 @@ provision() {
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "ro"
 }
+
+@test "provision-cache checklist surfaces the app values.yaml envFrom wiring step" {
+  # 기존 항목은 '소비 시점 안내'였다 — 배선 액션(values.yaml 경로 명시)으로 강화됐는지 단언(#211 클래스).
+  provision --name demo --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -re '.checklist[]' | grep -q "values.yaml"
+  echo "$output" | jq -re '.checklist[]' | grep -q "cache-demo-conn"
+}

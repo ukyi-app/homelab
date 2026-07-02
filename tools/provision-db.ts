@@ -107,6 +107,7 @@ const plan = {
     paths.dbKust, paths.parentKust, paths.cluster, paths.connKust],
   dryRun: args.dryRun,
   checklist: [
+    `apps/<app>/deploy/prod/values.yaml envFrom에 secretRef 'db-${name}-conn' 배선 필요 — 미배선 시 앱이 DB 없이 그대로 배포된다(#211 재발 클래스). 'db-${name}-ro-conn'은 모드2 디버깅 전용이라 배선하지 않는다`,
     `읽기전용 롤 GRANT SQL 후처리: CNPG managed role은 롤 생성만 하고 GRANT는 관리하지 않는다 — Database CR Ready 후 ${name} DB에서 적용 필요: GRANT CONNECT ON DATABASE "${name}" TO "${roRole}"; GRANT USAGE ON SCHEMA public TO "${roRole}"; GRANT SELECT ON ALL TABLES IN SCHEMA public TO "${roRole}"; ALTER DEFAULT PRIVILEGES FOR ROLE "${owner}" IN SCHEMA public GRANT SELECT ON TABLES TO "${roRole}";`,
     "envFrom 시크릿 변경(회전 포함)은 파드 재시작이 있어야 반영된다",
     "메모리 원장: 논리 DB는 행 추가 금지 — 공유 CNPG limit를 키울 때만 기존 CNPG 행을 갱신",
