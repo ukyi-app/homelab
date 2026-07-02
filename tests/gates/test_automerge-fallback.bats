@@ -62,14 +62,21 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -ne 0 ]
 }
 
-@test "all five auto-merge callsites use the shared script, not the raw OR-fallback" {
+@test "all auto-merge callsites use the shared script, not the raw OR-fallback" {
   WF="$ROOT/.github/workflows"
-  # races-6: un-gated 직접 머지 OR-폴백을 5곳에서 박멸 — 공유 스크립트만 호출한다.
+  A="$ROOT/.github/actions"
+  # races-6: un-gated 직접 머지 OR-폴백 박멸 — 공유 스크립트만 호출한다.
   raw=$(grep -rn 'gh pr merge --auto --squash "\$branch" || gh pr merge --squash' "$WF" || true)
   [ -z "$raw" ]
-  for f in bump.yaml bump-poll.yaml _create-database.yaml _create-cache.yaml _update-secrets.yaml; do
+  # 변이 reusable의 auto-merge는 pr-first-commit composite로 수렴(B6) — 스크립트는 composite에서 1회 호출.
+  grep -q 'auto-merge-or-fail.sh' "$A/pr-first-commit/action.yml"
+  # 직접 호출은 bump/bump-poll(비-변이 reconciler)에만 잔존.
+  for f in bump.yaml bump-poll.yaml; do
     grep -q 'auto-merge-or-fail.sh' "$WF/$f" || { echo "missing shared fallback in $f"; false; }
   done
+  # 변이 reusable은 composite 위임이라 직접 호출 0(auto-merge: 'true'/'false' 입력만).
+  run grep -l 'auto-merge-or-fail.sh' "$WF"/_create-database.yaml "$WF"/_create-cache.yaml "$WF"/_update-secrets.yaml "$WF"/_create-app.yaml "$WF"/_teardown-app.yaml
+  [ "$status" -ne 0 ]
   # bump.yaml은 단일 job(writeback) — 1회 호출 (v1 외부 dispatch 경로 폐기)
   run grep -c 'auto-merge-or-fail.sh' "$WF/bump.yaml"
   [ "$output" -eq 1 ]

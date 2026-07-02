@@ -1,0 +1,54 @@
+# pr-first-commit composite — writer 봇 자격으로 브랜치→커밋→PR→(선택) auto-merge.
+# 5개 변이 reusable의 동일 시퀀스(봇 identity 리터럴·checkout -b·add·commit·push·gh pr create·
+# auto-merge-or-fail.sh)를 SSOT로 수렴. auto-merge 여부는 입력 분기(create-app/teardown=false).
+# 멱등(update-secrets): skip-if-empty=true면 staged diff 없을 때 no-op(result=noop, PR 없음).
+# gh-token은 composite가 secrets 직접 접근 불가라 입력으로 받는다(writer App 토큰).
+name: pr-first-commit
+description: PR-first 변이 커밋(브랜치·커밋·PR·선택적 auto-merge, 멱등 no-op 지원)
+inputs:
+  branch:         { description: "브랜치명", required: true }
+  add-paths:      { description: "git add 대상(공백 구분 pathspec)", required: true }
+  commit-message: { description: "커밋 메시지(한국어 conventional)", required: true }
+  pr-title:       { description: "PR 제목", required: true }
+  pr-body-file:   { description: "PR 본문 파일 경로", required: true }
+  auto-merge:     { description: "true면 auto-merge-or-fail.sh 호출(create-app/teardown은 false)", required: false, default: "false" }
+  skip-if-empty:  { description: "true면 staged diff 없을 때 no-op(멱등 update-secrets)", required: false, default: "false" }
+  gh-token:       { description: "writer App 토큰(gh/PR 인증)", required: true }
+outputs:
+  result:
+    description: "pr(생성) | noop(멱등 무변경)"
+    value: ${{ steps.commit.outputs.result }}
+runs:
+  using: composite
+  steps:
+    - id: commit
+      shell: bash
+      env:
+        GH_TOKEN:      ${{ inputs.gh-token }}
+        BRANCH:        ${{ inputs.branch }}
+        ADD_PATHS:     ${{ inputs.add-paths }}
+        MSG:           ${{ inputs.commit-message }}
+        PR_TITLE:      ${{ inputs.pr-title }}
+        PR_BODY:       ${{ inputs.pr-body-file }}
+        AUTO_MERGE:    ${{ inputs.auto-merge }}
+        SKIP_IF_EMPTY: ${{ inputs.skip-if-empty }}
+      run: |
+        set -euo pipefail
+        git config user.name "ukyi-homelab-writer[bot]"
+        git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
+        # shellcheck disable=SC2086  # ADD_PATHS는 공백 구분 다중 pathspec — 의도적 분할(값은 검증된 경로)
+        git add $ADD_PATHS
+        # 신규(미추적) 파일은 `git diff --quiet`가 항상 0이므로 staged diff로 검사(첫 시크릿 추가도 감지)
+        if [ "$SKIP_IF_EMPTY" = "true" ] && git diff --cached --quiet; then
+          echo "동일 콘텐츠 — 멱등 no-op(PR 없음)"
+          echo "result=noop" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        git checkout -b "$BRANCH"
+        git commit -m "$MSG"
+        git push -u origin "$BRANCH"
+        gh pr create --base main --head "$BRANCH" --title "$PR_TITLE" --body-file "$PR_BODY"
+        echo "result=pr" >> "$GITHUB_OUTPUT"
+        if [ "$AUTO_MERGE" = "true" ]; then
+          bash scripts/auto-merge-or-fail.sh "$BRANCH"
+        fi

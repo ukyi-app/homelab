@@ -96,14 +96,6 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
-@test "workflow inline name regex matches the <=30 SSOT policy (no stale copy)" {
-  for wf in _create-cache _create-database; do
-    run grep -Fq '{0,28}' "$WF/$wf.yaml"; [ "$status" -eq 0 ]            # ≤30(RESOURCE_NAME_RE와 동일) 존재
-  done
-  run grep -Fq '{0,27}' "$WF/_create-cache.yaml"; [ "$status" -ne 0 ]        # 옛 ≤29 제거
-  run grep -Fq '[a-z0-9-]*[a-z0-9]' "$WF/_create-database.yaml"; [ "$status" -ne 0 ]  # 옛 무제한 제거
-}
-
 @test "teardown-app dispatcher declares only app and confirm inputs (no app_repo)" {
   grep -q "app:" "$WF/teardown-app.yaml"
   grep -q "confirm:" "$WF/teardown-app.yaml"
@@ -124,4 +116,39 @@ setup() {
   # 주석 제외 후 실행 라인만 검사 — 워크플로 주석에 'auto-merge-or-fail' 설명 문구가 있어 그대로 grep하면 오탐
   run bash -c "grep -v '^[[:space:]]*#' '$WF/_teardown-app.yaml' | grep -q 'auto-merge-or-fail'"; [ "$status" -ne 0 ]
   run bash -c "grep -v '^[[:space:]]*#' '$WF/_teardown-app.yaml' | grep -qE 'gh pr merge.*--auto'"; [ "$status" -ne 0 ]
+}
+
+@test "every mutation reusable routes its PR through the pr-first-commit composite" {
+  for wf in _create-app _create-database _create-cache _update-secrets _teardown-app; do
+    grep -q 'uses: ./.github/actions/pr-first-commit' "$WF/$wf.yaml"
+  done
+}
+
+@test "auto-merge policy is preserved per reusable (db/cache/secrets=true, app/teardown=false)" {
+  for wf in _create-database _create-cache _update-secrets; do
+    grep -qE "auto-merge:[[:space:]]*'true'" "$WF/$wf.yaml"
+  done
+  for wf in _create-app _teardown-app; do
+    grep -qE "auto-merge:[[:space:]]*'false'" "$WF/$wf.yaml"
+  done
+}
+
+@test "the bot commit identity lives only in the pr-first-commit composite (no 5x literal copies)" {
+  a="$ROOT/.github/actions/pr-first-commit/action.yml"
+  grep -q 'ukyi-homelab-writer\[bot\]' "$a"
+  run grep -l '293311924+ukyi-homelab-writer' "$WF"/_create-app.yaml "$WF"/_create-database.yaml "$WF"/_create-cache.yaml "$WF"/_update-secrets.yaml "$WF"/_teardown-app.yaml
+  [ "$status" -ne 0 ]
+}
+
+@test "reusables carry no inline RESOURCE_NAME_RE copy (identity.ts SSOT via validate-mutation)" {
+  for wf in _create-cache _create-database; do
+    run grep -Fq '{0,28}' "$WF/$wf.yaml"; [ "$status" -ne 0 ]
+    grep -q 'validate-mutation.ts --action' "$WF/$wf.yaml"
+  done
+}
+
+@test "every mutation reusable re-validates via validate-mutation at its boundary (symmetric defense-in-depth)" {
+  for wf in _create-app _update-secrets _create-database _create-cache _teardown-app; do
+    grep -q 'validate-mutation.ts --action' "$WF/$wf.yaml"
+  done
 }
