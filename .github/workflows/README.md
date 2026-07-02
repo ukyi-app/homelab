@@ -14,7 +14,7 @@
 | ✨ create-cache | name + maxmemory(선택) | 앱용 redis 프로비전 |
 | 🗑️ teardown-app | app, confirm | 앱 철거 — **파괴**(confirm===app 가드 + **수동 머지**; reusable이 파괴 경계에서 confirm 재검증). owner-local `make teardown-app`과 공존 |
 
-전역 직렬화(`group: homelab-mutation`, `queue: max`, `cancel-in-progress: false`)로 bump-poll/iac/tf-reconcile과 한 줄로 직렬 실행. 변이 로직은 동명 `_*.yaml` reusable에, 이 디스패처는 validate→route→실패 notify 셸.
+전역 직렬화(`group: homelab-mutation`, `queue: max`, `cancel-in-progress: false`)로 bump-poll/iac/tf-reconcile과 한 줄로 직렬 실행. 변이 로직은 동명 `_*.yaml` reusable에, 이 디스패처는 **actor 가드(owner-only, `vars.HOMELAB_OWNER`)→validate→route→실패 notify(`.github/actions/mutation-notify`)** 셸. reusable의 PR-first 커밋은 `.github/actions/pr-first-commit`(브랜치·커밋·PR·선택적 auto-merge) 공통 사용. ⚠️ actor 가드는 `vars.HOMELAB_OWNER` 미설정 시 fail-closed — owner 로그인을 repo variable로 1회 설정해야 변이 실행 가능.
 
 ## 🔁 reconciler — 스케줄 + 수동 강제 (workflow_dispatch)
 
