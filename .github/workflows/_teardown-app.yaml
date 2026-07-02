@@ -10,6 +10,13 @@ on:
       confirm:
         required: true
         type: string
+
+# 기본 셸(bash -e {0})은 pipefail 부재 — 명시 bash로 전 run 스텝에 -eo pipefail 강제
+# (가드: tests/gates/test_workflow-pipefail.bats)
+defaults:
+  run:
+    shell: bash
+
 jobs:
   teardown:
     runs-on: ubuntu-24.04-arm
@@ -44,7 +51,9 @@ jobs:
           APP: ${{ inputs.app }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          set -euo pipefail   # 파괴 단계 명시 fail-closed(GHA 기본 -eo pipefail에 더한 belt-and-suspenders — bun|tee 실패가 PR 생성으로 새지 않게)
+          set -euo pipefail   # 파괴 단계 belt-and-suspenders — ⚠️ GHA 기본 셸은 bash -e {0}(pipefail 없음).
+          # defaults(shell: bash)가 -eo pipefail을 이미 주고, 여기선 -u(미정의 변수 차단)까지 추가한다.
+          # 과거 주석의 "GHA 기본 -eo pipefail"은 반대 오해였다 — 기본(-e만)과 명시 bash를 혼동하지 말 것.
           [ -d "apps/$APP" ] || { echo "::error::apps/$APP 없음 — 이미 철거됐거나 이름 오류"; exit 1; }
           # 사전 active 상태 기록(롤백 시 DNS 복원 필요 여부 판단용)
           active=$(jq -r --arg a "$APP" '(map(select(.name==$a)) | .[0].active) // false' infra/cloudflare/apps.json 2>/dev/null || echo unknown)

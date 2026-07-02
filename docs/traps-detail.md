@@ -211,3 +211,14 @@
   grep 셀렉터 붕괴 시 0매치 침묵통과(false-green)는 scan-floor로 차단. operator/원격-helm 런타임 생성처럼
   의도적 미설정은 `policy/memory-limit-allowlist.txt`에 사유와 함께 등재(블라인드스팟 가시화).
 > 가드: `scripts/check-resource-limits.sh`, `tests/test_resource_limits.bats`
+
+### GHA run 기본 셸 pipefail 부재(bash -e {0})
+- GitHub Actions run 스텝의 기본 셸은 `bash -e {0}` — **pipefail이 없다**. `bun 도구 | tee 로그` 류
+  파이프는 좌변(도구) 실패가 tee의 exit 0에 삼켜져 스텝이 green — 변이 reusable에선 부분 산출물이
+  PR·auto-merge로 샐 수 있다(fail-open). 명시 `shell: bash`는 `bash --noprofile --norc -eo pipefail {0}`로
+  실행되므로 워크플로 `defaults.run.shell: bash`가 구조적 해법(신규 스텝 자동 커버). 스텝별
+  `set -euo pipefail` 삽입 규율은 이 결함의 발생 기전 그 자체(_teardown-app만 있고 형제 5개 누락)라
+  비채택. 과거 _teardown-app 주석의 "GHA 기본 -eo pipefail"은 **반대 오해**였다 — 기본(-e만)과
+  명시 bash(-eo pipefail)를 혼동하지 말 것. 명령치환 인라인(`echo "x=$(jq …)"`)도 동류 fail-open —
+  대입으로 분리해야 -e가 잡는다.
+> 가드: `tests/gates/test_workflow-pipefail.bats`

@@ -12,6 +12,13 @@ permissions:
 concurrency:
   group: audit
   cancel-in-progress: false
+
+# 기본 셸(bash -e {0})은 pipefail 부재 — 명시 bash로 전 run 스텝에 -eo pipefail 강제
+# (가드: tests/gates/test_workflow-pipefail.bats)
+defaults:
+  run:
+    shell: bash
+
 jobs:
   audit:
     runs-on: ubuntu-24.04-arm
@@ -22,7 +29,9 @@ jobs:
       - id: audit
         run: |
           bun tools/audit-orphans.ts --repo-root . | tee /tmp/audit.json
-          echo "count=$(jq -r .count /tmp/audit.json)" >> "$GITHUB_OUTPUT"
+          # 명령치환을 echo 인자에 인라인하면 jq 실패가 echo exit 0에 삼켜진다 → 대입 분리(-e가 잡음)
+          count=$(jq -r .count /tmp/audit.json)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
       - name: build audit summary
         id: report
         if: always() && (steps.audit.outcome == 'failure' || steps.audit.outputs.count != '0')
