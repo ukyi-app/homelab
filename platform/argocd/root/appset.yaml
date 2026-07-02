@@ -45,10 +45,10 @@ spec:
       syncPolicy:
         automated: { prune: true, selfHeal: true }
         syncOptions: [CreateNamespace=true, ServerSideApply=true]
-  # data-conn/cache Application에만 알림 라벨 — 데이터서비스 생성 완료/저하만 구독(관측/cert-manager 등 제외).
+  # data-conn/cache/files Application에만 알림 라벨 — 데이터서비스 + files(NotReady 구독).
   # templatePatch(문자열 goTemplate)라 template.metadata의 inline `{{if}}`/미정의 `.X` 함정(missingkey=error) 없음.
   templatePatch: |
-    {{- if has (index .path.segments 1) (list "data-conn" "cache") }}
+    {{- if has (index .path.segments 1) (list "data-conn" "cache" "files") }}
     metadata:
       labels:
         notify.homelab/telegram: "true"
