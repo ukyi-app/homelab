@@ -123,6 +123,16 @@ verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpo
 	  KUBECONFIG=$(KUBECONFIG_LIVE) bats tests/posture/test_*.bats; \
 	else echo "verify-posture: $(KUBECONFIG_LIVE) 없음 — 라이브 클러스터 필요(skip). 먼저 make up"; fi
 
+.PHONY: verify-ksops
+verify-ksops: ## [local] KSOPS 렌더 bats(cnpg×3·cache×1) — 실 age 키 있으면 실행/없으면 skip(.ci-exclude 그룹)
+	@if [ -f "$(SOPS_AGE_KEY_FILE)" ]; then \
+	  SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) bats \
+	    platform/cnpg/prod/test_creds_reference.bats \
+	    platform/cnpg/prod/test_drill_alerting.bats \
+	    platform/cnpg/prod/test_kustomize_build.bats \
+	    platform/cache/prod/test_ksops_render.bats; \
+	else echo "verify-ksops: $(SOPS_AGE_KEY_FILE) 없음 — 실 age 키 필요(skip). SOPS_AGE_KEY_FILE 지정 후 재실행"; fi
+
 .PHONY: verify-traps
 verify-traps: ## docs/traps.md 함정 원장의 guard 경로가 실재하는지(enforced 드리프트 차단)
 	@bash scripts/verify-traps.sh
