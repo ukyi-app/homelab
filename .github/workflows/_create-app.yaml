@@ -73,9 +73,16 @@ jobs:
         run: |
           app="$APP"
           tag="sha-${SHA}"
-          digest=$(docker buildx imagetools inspect "ghcr.io/ukyi-app/${app}:${tag}" \
-            --format '{{json .Manifest}}' | jq -r .digest) \
+          # 파이프 분리 — docker 실패/jq 파싱 실패를 구분하고, 성공-빈출력(digest="" 또는 null)도 형식 검사로 차단
+          manifest=$(docker buildx imagetools inspect "ghcr.io/ukyi-app/${app}:${tag}" \
+            --format '{{json .Manifest}}') \
             || { echo "::error::이미지 미존재 — 앱 레포에서 빌드(GHCR push) 먼저"; exit 1; }
+          digest=$(jq -r .digest <<<"$manifest") \
+            || { echo "::error::manifest JSON 파싱 실패"; exit 1; }
+          case "$digest" in
+            sha256:?*) ;;
+            *) echo "::error::digest 형식 이상: '${digest}'"; exit 1;;
+          esac
           { echo "app=$app"; echo "tag=$tag"; echo "digest=$digest"; } >> "$GITHUB_OUTPUT"
       - name: install chart toolchain (render + ledger gate)
         uses: ./.github/actions/setup-toolchain
