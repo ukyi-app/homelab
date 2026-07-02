@@ -30,7 +30,7 @@ function parseArgs(argv: string[]): Args {
   // parseFlags: unknown + arg 삼킴(값 누락 자리서 다음 --플래그 삼킴) fail-closed. --owner는 known(value)으로 받되 아래서 전용 메시지로 거부.
   let f: Record<string, string | boolean>;
   try { f = parseFlags(argv, { value: ["--name", "--extensions", "--cluster", "--repo-root", "--owner"], bool: ["--dry-run"] }); }
-  catch (e) { fail(e instanceof Error ? e.message : String(e)); }
+  catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --name --extensions --cluster --repo-root --dry-run`); process.exit(2); }
   if (f["--owner"] !== undefined) fail("owner는 입력받지 않는다 — 항상 name으로 고정 (owner 공유 시 teardown이 다른 DB를 깬다)");
   return {
     name: typeof f["--name"] === "string" ? f["--name"] : undefined,

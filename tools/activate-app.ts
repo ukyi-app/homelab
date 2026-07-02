@@ -11,6 +11,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { APP_NAME_RE } from "./lib/identity.ts";
+import { typedFlags, type TypedFlags } from "./lib/cli.ts";
 import { surfaceHash } from "./lib/surface-hash.ts";
 
 function die(msg: string): never {
@@ -18,16 +19,23 @@ function die(msg: string): never {
   process.exit(1);
 }
 
-const args: Record<string, any> = {};
-const argv = process.argv.slice(2);
-for (let i = 0; i < argv.length; i++) {
-  const a = argv[i];
-  if (a === "--flip") args.flip = true;
-  else if (a.startsWith("--")) args[a.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = argv[++i];
-  else die(`알 수 없는 인자: ${a}`);
+// typedFlags: 미지 플래그 침묵 수용(예: --filp 오타 → 플립 없이 exit 0) 차단. 파싱=2 / 게이트 실패=1(규약).
+let f: TypedFlags;
+try {
+  f = typedFlags(process.argv.slice(2), {
+    value: ["--app", "--sha", "--synced-rev", "--repo-dir", "--status-file"],
+    bool: ["--flip"],
+  });
+} catch (e) {
+  console.error(`${e instanceof Error ? e.message : String(e)}\nusage: activate-app --app <name> --sha <merge-sha> --synced-rev <rev> [--repo-dir <dir>] [--status-file <json>] [--flip]`);
+  process.exit(2);
 }
-const { app, sha, syncedRev } = args;
-const repoDir = path.resolve(args.repoDir ?? ".");
+const app = f.str("--app");
+const sha = f.str("--sha");
+const syncedRev = f.str("--synced-rev");
+const repoDir = path.resolve(f.str("--repo-dir") ?? ".");
+const statusFile = f.str("--status-file");
+const flip = f.bool("--flip");
 if (!app || !sha || !syncedRev) die("--app --sha --synced-rev 필수");
 if (!APP_NAME_RE.test(app)) die(`app 이름 형식 불량: ${app}`);
 if (!/^[0-9a-f]{7,40}$/.test(sha)) die(`sha 형식 불량`);
@@ -73,8 +81,8 @@ if (thisRow?.host && /\.home\./.test(thisRow.host))
 
 // (4) 라이브 상태 — Application Synced+Healthy, HTTPRoute Accepted/ResolvedRefs
 let status;
-if (args.statusFile) {
-  status = JSON.parse(readFileSync(args.statusFile, "utf8"));
+if (statusFile) {
+  status = JSON.parse(readFileSync(statusFile, "utf8"));
 } else {
   const kubectl = (...a: string[]) => JSON.parse(execFileSync("kubectl", a, { encoding: "utf8" }));
   status = {
@@ -93,7 +101,7 @@ for (const type of ["Accepted", "ResolvedRefs"]) {
 }
 
 // 게이트 전부 통과 — active:true 플립(워크트리). host/public은 절대 건드리지 않는다.
-if (args.flip) {
+if (flip) {
   const rows = JSON.parse(currentRaw);
   const row = rows.find((r: any) => r.name === app);
   // races-5 마커: .activation 제외 canonical surfaceHash(F3, 자기무효화 방지) + apps.json 노출 행 projection(pass4 F1).
@@ -114,4 +122,4 @@ if (args.flip) {
     writeFileSync(markerPath, JSON.stringify(marker, null, 2) + "\n");
   }
 }
-console.log(JSON.stringify({ ok: true, app, sha, syncedRev, flipped: Boolean(args.flip) }));
+console.log(JSON.stringify({ ok: true, app, sha, syncedRev, flipped: flip }));
