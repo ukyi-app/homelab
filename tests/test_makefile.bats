@@ -36,3 +36,11 @@
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'infra/k3s-bootstrap/host-up.sh'
 }
+
+@test "make verify-ksops wires the four KSOPS bats and gates on the age key" {
+  run make -n verify-ksops
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'test_ksops_render.bats'
+  echo "$output" | grep -q 'test_kustomize_build.bats'
+  echo "$output" | grep -q 'SOPS_AGE_KEY_FILE'
+}

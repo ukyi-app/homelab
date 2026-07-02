@@ -133,9 +133,12 @@ provision() { PATH="$TMP/bin:$PATH" run bun "$ROOT/tools/provision-db.ts" "$@"; 
 @test "provision-db never prints raw connection URLs or passwords" {
   provision --name orders --extensions pgcrypto --repo-root "$FIX"
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -qiE "postgres://|password="
+  # 중간 negate는 침묵 통과 → run+status로 강제(check-bats-style.sh)
+  run grep -qiE "postgres://|password=" <<<"$output"
+  [ "$status" -ne 0 ]
   # 산출 파일 어디에도 평문 Secret 없음 (스텁이 stringData를 그대로 출력하지 않음을 포함 검증)
-  ! grep -rqE "postgres://|stringData" "$FIX/platform"
+  run grep -rqE "postgres://|stringData" "$FIX/platform"
+  [ "$status" -ne 0 ]
 }
 
 @test "provision-db rejects --owner because owner is always pinned to name" {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # cache 전체 KSOPS 렌더 검증 — cache-r2-creds.enc.yaml 복호에 실 age 키가 필요하다(SOPS_AGE_KEY_FILE).
-# 그래서 .ci-exclude(gate엔 age 키 없음) — 로컬 `make ci`/owner가 실행(cnpg test_kustomize_build.bats 선례).
+# 그래서 .ci-exclude(gate엔 age 키 없음) — owner-local `make verify-ksops`가 실행(age 키 있으면; cnpg KSOPS bats 선례).
 # CI-safe 정적 단언은 test_render.bats.
 
 DIR="${BATS_TEST_DIRNAME}"

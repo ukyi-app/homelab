@@ -59,9 +59,15 @@ setup() {
   # ⚠️ AM telegram은 동적 값({{ . }})을 parse_mode=HTML 컨텍스트로 자동 HTML-escape한다(render-e2e로 실측:
   #    <main> → &lt;main&gt; 한 번). 수동 reReplaceAll escape는 &amp;lt;처럼 이중 escape를 유발하므로 금지.
   #    safeHtml(escape 우회 — 'already safe' 마킹)도 금지. 실제 escape 정확성은 alertmanager-render-e2e.sh가 증명.
-  # set-e 안전 negate(직접 파이프) — MSG는 큰따옴표를 포함해 bash -c 보간이 구문을 깨뜨린다.
-  ! printf '%s' "$MSG" | grep -q 'reReplaceAll'
-  ! printf '%s' "$MSG" | grep -qE '\|[[:space:]]*safeHtml|safeHtml[[:space:]]+\.'
+  # 중간 negate는 bats가 침묵 통과 → run+status로 강제(check-bats-style.sh). MSG는 큰따옴표를
+  # 포함하므로 bash -c 보간 대신 here-string(<<<)으로 원문 그대로 grep에 전달한다.
+  # ⚠️ 템플릿 머리의 {{- /* … */ -}} 주석이 이 함정을 '산문'으로 문서화한다(reReplaceAll 언급) —
+  #    가드는 사용처만 잡아야 하므로 Go-template 주석 블록을 벗겨낸 뒤 검사한다(구 죽은 가드가 숨겼던 오탐).
+  stripped="$(sed '/{{- *\/\*/,/\*\/ *-}}/d' <<<"$MSG")"
+  run grep -q 'reReplaceAll' <<<"$stripped"
+  [ "$status" -ne 0 ]
+  run grep -qE '\|[[:space:]]*safeHtml|safeHtml[[:space:]]+\.' <<<"$stripped"
+  [ "$status" -ne 0 ]
 }
 
 @test "message ranges over .Alerts annotations" {
