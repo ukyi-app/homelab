@@ -70,8 +70,11 @@ fi
 
 # --- dest 매체 검사: 반드시 내장 디스크(외장 SSD 사본은 매체 유실 무방비) ---
 command -v diskutil >/dev/null 2>&1 || { echo "ERROR: diskutil 부재 — dest 매체 판별 불가" >&2; exit 2; }
-loc="$(diskutil info "$dest" 2>/dev/null | awk -F': *' '/Device Location/{print $2}' | tr -d '[:space:]' || true)"
-[ "$loc" = "Internal" ] || { echo "ERROR: dest($dest) Device Location='${loc:-?}' — 외장 SSD 위 사본은 매체 유실 무방비. 내장 디스크 경로를 쓰라." >&2; exit 1; }
+# ⚠️ diskutil info는 임의 디렉토리 경로에 Device Location을 주지 않는다(라이브 발각) — df로 mount의
+# device node(/dev/diskNsM)를 먼저 해석한 뒤 그 노드의 Device Location을 읽어야 한다.
+dest_dev="$(df "$dest" 2>/dev/null | awk 'NR==2{print $1}')"
+loc="$([ -n "$dest_dev" ] && diskutil info "$dest_dev" 2>/dev/null | awk -F': *' '/Device Location/{print $2}' | tr -d '[:space:]' || true)"
+[ "$loc" = "Internal" ] || { echo "ERROR: dest($dest, dev=${dest_dev:-?}) Device Location='${loc:-?}' — 외장 SSD 위 사본은 매체 유실 무방비. 내장 디스크 경로를 쓰라." >&2; exit 1; }
 
 if [ "$MODE" = dryrun ]; then
   echo "==> DRY-RUN rsync $vmpath/ → $dest/data.new/ (스테이징 — 승격 없음)"
