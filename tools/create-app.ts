@@ -9,6 +9,7 @@ import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { replaceTotals, addRow, parseLedgerRows } from "./lib/ledger-totals.ts";
 import { parseFlags } from "./lib/cli.ts";
+import { addApp } from "./lib/digest-exporter.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
 let __f: Record<string, string | boolean>;
@@ -189,5 +190,9 @@ if (!DRY) {
   let out = addRow(ledger, { name: app, env: "prod", reqMi, limitMi });
   out = replaceTotals(out, sumReq + reqMi, sumLimit + limitMi);
   writeFileSync(ledgerPath, out);
+  // R6 digest 감시: digest-exporter APPS에 이 앱 추가(create-app/teardown-app이 SSOT 유지 — parity 게이트)
+  const dePath = `${ROOT}/platform/victoria-stack/prod/digest-exporter.yaml`;
+  if (!existsSync(dePath)) { console.error(`digest-exporter.yaml 부재: ${dePath} — APPS 배선 불가`); process.exit(1); }
+  writeFileSync(dePath, addApp(readFileSync(dePath, "utf8"), app, `ghcr.io/${owner}/${app}:${tag}`));
 }
 console.log(JSON.stringify(plan, null, 2));
