@@ -53,7 +53,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "migrated mutators import the shared parseFlags (cli.ts adoption)" {
-  for f in db-url cache-url teardown-resource provision-db provision-cache create-app teardown-app; do
+  for f in db-url cache-url teardown-resource provision-db provision-cache create-app teardown-app activate-app verify-db-marker; do
     run grep -q "lib/cli.ts" "tools/$f.ts"; [ "$status" -eq 0 ]
   done
 }
@@ -64,4 +64,25 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   run bun tools/db-url.ts --name --dry-run;          [ "$status" -ne 0 ]
   run bun tools/provision-cache.ts --name --dry-run; [ "$status" -ne 0 ]
   run bun tools/teardown-resource.ts --db --dry-run; [ "$status" -ne 0 ]
+}
+
+@test "activate-app rejects an unknown flag with usage exit code 2" {
+  run bun tools/activate-app.ts --app orders --sha deadbee --synced-rev deadbee --bogus x
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "알 수 없는 옵션"
+}
+
+@test "verify-db-marker rejects an unknown flag with usage exit code 2" {
+  run bun tools/verify-db-marker.ts --name shared --bogus x
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "알 수 없는 옵션"
+}
+
+@test "provision-db exits 2 on flag-parse errors (exit-code convention alignment)" {
+  run bun tools/provision-db.ts --bogus x
+  [ "$status" -eq 2 ]
+}
+
+@test "cli.ts documents the shared exit-code convention" {
+  grep -q "종료코드 규약" tools/lib/cli.ts
 }
