@@ -23,6 +23,8 @@ resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128
 route: { public: true, host: orders.example.com }
 deploy: { autoDeploy: false }
 EOF
+  mkdir -p "$FR/platform/victoria-stack/prod"
+  printf 'apiVersion: batch/v1\nkind: CronJob\nmetadata: { name: digest-exporter }\nspec:\n  jobTemplate:\n    spec:\n      template:\n        spec:\n          containers:\n            - name: digest-exporter\n              env:\n                - name: APPS\n                  value: ""\n' > "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
 }
 teardown() { rm -rf "$TMP"; }
 
@@ -204,4 +206,10 @@ EOF
   gen
   [ "$status" -eq 0 ]
   [ -f "$FR/apps/orders/deploy/prod/kustomization.yaml" ]
+}
+
+@test "create-app wires the app into digest-exporter APPS (R6 drift tracking)" {
+  gen
+  [ "$status" -eq 0 ]
+  grep -q 'orders=ghcr.io/ukyi-app/orders:sha-aaa1111' "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
 }

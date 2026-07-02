@@ -19,6 +19,7 @@ resources:
   - rules/r4-storage-backup.yaml
   - rules/r5-cert-tls.yaml
   - rules/r6-ci-staleness.yaml
+  - ghcr-read.sealed.yaml # digest-exporter private GHCR inspect 자격(owner: make seal-ghcr-read)
   - digest-exporter.yaml
   - deadmanswitch-relay.yaml
   - grafana-provisioning.yaml
