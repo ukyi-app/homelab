@@ -72,3 +72,9 @@ sh=scripts/dr-drill.sh
   grep -q 'imageName: ${PG_IMAGE}' "$sh"               # heredoc이 파생 변수 사용
   grep -q 'PG 이미지 파생 실패' "$sh"                   # fail-closed 분기 존재
 }
+
+@test "dr-drill re-attaches files data and refuses a silently-empty catalog (M14)" {
+  grep -q 'rollout status deploy/files' "$sh"
+  grep -q 'files-data PV 미바운드' "$sh"
+  grep -q 'files 카탈로그 비어있음' "$sh"
+}
