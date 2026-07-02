@@ -5,7 +5,8 @@
 // apply로 DNS 회수), 원장 행. 멱등(이미 없어도 0 종료).
 import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { APP_NAME_RE } from "./lib/identity.ts";
-import { replaceTotals } from "./lib/ledger-totals.ts";
+import { parseLedgerRows } from "./lib/ledger-totals.ts";
+import { removeRowWithTotals } from "./lib/ledger-budget.ts";
 import { parseFlags } from "./lib/cli.ts";
 import { removeApp } from "./lib/digest-exporter.ts";
 
@@ -34,8 +35,7 @@ plan.appsJsonRow = registry.find((r: any) => r.name === app) ?? null;
 
 const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
 const ledger = existsSync(ledgerPath) ? readFileSync(ledgerPath, "utf8") : "";
-const rowRe = new RegExp(`^.*<!-- ledger:row --> *${app} .*$`, "m");
-plan.ledgerRow = rowRe.test(ledger);
+plan.ledgerRow = parseLedgerRows(ledger).some((r) => r.name === app);
 
 const dePath = `${ROOT}/platform/victoria-stack/prod/digest-exporter.yaml`;
 if (existsSync(dePath) && new RegExp(`(^|[" ])${app}=`).test(readFileSync(dePath, "utf8"))) {
@@ -49,13 +49,8 @@ if (!DRY) {
     writeFileSync(appsJsonPath, JSON.stringify(registry.filter((r: any) => r.name !== app), null, 2) + "\n");
   }
   if (plan.ledgerRow) {
-    // 행 제거 + 합계 프로즈 재계산
-    let out = ledger.replace(rowRe, "").replace(/\n\n\n+/g, "\n\n");
-    const rows = [...out.matchAll(/<!-- ledger:row --> *[a-z0-9+-]+ *\|[^|]*\| *(\d+) *\| *(\d+) *\|/g)];
-    const sumReq = rows.reduce((s, m) => s + +m[1], 0);
-    const sumLimit = rows.reduce((s, m) => s + +m[2], 0);
-    out = replaceTotals(out, sumReq, sumLimit);
-    writeFileSync(ledgerPath, out);
+    // 행 제거 + 합계 재계산(removeRow는 줄 splice라 빈 줄 잔류 없음 — 구 인라인 replace 버그 소멸)
+    writeFileSync(ledgerPath, removeRowWithTotals(ledger, app));
   }
 }
 console.log(JSON.stringify(plan, null, 2));

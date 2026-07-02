@@ -12,7 +12,7 @@
 @test "verify:ledger FAILS an over-budget ledger (negative test, gate mechanism)" {
   cp docs/memory-ledger.md /tmp/bad-ledger.md
   printf '| <!-- ledger:row --> hog | prod | 100 | 9000 |\n' >> /tmp/bad-ledger.md
-  scripts/ledger-to-json.sh /tmp/bad-ledger.md > /tmp/bad.json
+  bun tools/ledger-to-json.ts /tmp/bad-ledger.md > /tmp/bad.json
   run conftest test /tmp/bad.json --policy policy/ledger.rego
   [ "$status" -ne 0 ]
   [[ "$output" == *"over budget"* ]]
