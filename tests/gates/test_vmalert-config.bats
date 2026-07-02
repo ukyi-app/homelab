@@ -154,3 +154,18 @@ setup() {
   grep -q 'alert: ArgoCDOutOfSync' "$R"
   grep -q 'absent(argocd_app_info)' "$R"   # scrape 재단절 시 silent 무발화 방지
 }
+
+@test "workload-unavailable alert covers subscription-less platform components (files/adguard/homepage gap)" {
+  C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
+  grep -q 'alert: WorkloadUnavailable' "$C"
+  grep -q 'kube_deployment_status_condition{condition="Available", status="false"' "$C"
+  # 블랙리스트(namespace!~)여야 files(files ns)·adguard(edge)·homepage(homepage) 자동 포함
+  grep -qE 'kube_deployment_status_condition\{condition="Available", status="false", namespace!~' "$C"
+}
+
+@test "cache backup has a staleness alert like the four pg backups (fail-open asymmetry fixed)" {
+  R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
+  grep -q 'alert: CacheBackupStale' "$R"
+  grep -q 'job_name=~"cache-backup' "$R"
+  grep -q 'absent(kube_job_status_completion_time{job_name=~"cache-backup' "$R"   # fail-closed 가드
+}
