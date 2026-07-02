@@ -14,7 +14,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { randomBytes, createHash } from "node:crypto";
 import { parseDocument } from "yaml";
-import { replaceTotals, addRow, parseLedgerRows } from "./lib/ledger-totals.ts";
+import { analyzeLedger, appendRowWithTotals, budgetViolation, type LedgerAgg } from "./lib/ledger-budget.ts";
 import { resourceNameError } from "./lib/identity.ts";
 import { sealManifest } from "./lib/seal.ts";
 import { addResource } from "./lib/kustomization.ts";
@@ -61,16 +61,12 @@ if (existsSync(connPath) || existsSync(roConnPath)) fail(`data-conn에 cache-${n
 const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
 if (!existsSync(ledgerPath)) fail(`메모리 원장 없음: ${ledgerPath}`);
 const ledger = readFileSync(ledgerPath, "utf8");
-const rows = parseLedgerRows(ledger); // F7: 명명 필드(raw 인덱스 금지)
-const names = rows.map((r) => r.name);
-const sumReq = rows.reduce((a, r) => a + r.reqMi, 0);
-const sumLimit = rows.reduce((a, r) => a + r.limitMi, 0);
 const component = `cache-${name}`;
-if (names.includes(component)) fail(`원장에 '${component}' 행이 이미 있다`);
-const budget = +(ledger.match(/LIMIT_BUDGET_MIB=(\d+)/)?.[1] ?? 0);
-if (!budget) fail("원장 메타(LIMIT_BUDGET_MIB)를 찾지 못함");
-if (sumLimit + limitMi > budget)
-  fail(`원장 예산 초과: 현재 ${sumLimit}Mi + ${component} ${limitMi}Mi > ${budget}Mi — maxmemory를 줄여라`);
+let agg: LedgerAgg;
+try { agg = analyzeLedger(ledger); } catch (e) { fail(e instanceof Error ? e.message : String(e)); }
+const viol = budgetViolation(agg, component, limitMi, "maxmemory를 줄여라");
+if (viol) fail(viol);
+const { sumReq, sumLimit, budget } = agg;
 
 // ---------- 자격 생성 (비출력 — kubeseal stdin 전용) ----------
 const NAME = name.replaceAll("-", "_").toUpperCase();
@@ -323,10 +319,8 @@ resources:
     }
   }
 
-  // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신 (create-app.ts와 동일 규약)
-  let out = addRow(ledger, { name: component, env: "cache", reqMi, limitMi });
-  out = replaceTotals(out, sumReq + reqMi, sumLimit + limitMi);
-  writeFileSync(ledgerPath, out);
+  // 원장: 행 추가 + Totals 프로즈 동반 갱신(ledger-budget SSOT — create-app.ts와 동일)
+  writeFileSync(ledgerPath, appendRowWithTotals(agg, { name: component, env: "cache", reqMi, limitMi }));
 }
 
 console.log(JSON.stringify(plan, null, 2));
