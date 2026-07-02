@@ -8,7 +8,7 @@
 #   워크로드별(app.kubernetes.io/name)로 격리한다.
 #   - alertmanager → api.telegram.org(443) + deadmanswitch-relay 내부 webhook(:9095)
 #   - deadmanswitch-relay → healthchecks.io(443)
-#   (digest-exporter도 ghcr.io로 나가나 CronJob 템플릿에 pod 라벨이 없어 셀렉터 미스 + 현재 APPS="" 비활성 → 제외.)
+#   - digest-exporter → ghcr.io(외부 443, skopeo inspect) + vmsingle import(내부 8428) — 아래 격리
 # ⚠️ ipBlock에 pod CIDR(10.42.0.0/24) 금지(deny 무력화 함정). 외부는 0.0.0.0/0 except private.
 # ns는 victoria-stack kustomization의 `namespace: observability` 트랜스포머가 지정.
 ---
@@ -85,3 +85,29 @@ spec:
             except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
       ports:
         - { protocol: TCP, port: 443 }
+---
+# === digest-exporter: ghcr.io(외부 443, skopeo inspect) + vmsingle import(내부 8428) ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: digest-exporter-default-deny-egress }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: digest-exporter } }
+  policyTypes: [Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: digest-exporter-allow-egress }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: digest-exporter } }
+  policyTypes: [Egress]
+  egress:
+    - to: # DNS — ghcr.io/vmsingle 해석(CoreDNS)
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+    - to: # vmsingle import(같은 ns) — ghcr_latest_digest push. ClusterIP→pod IP(kube-router DNAT후) 평가
+        - podSelector: { matchLabels: { app.kubernetes.io/name: vmsingle } }
+      ports: [{ protocol: TCP, port: 8428 }]
+    - to: # 외부 ghcr.io(443) — 사설 대역 except로 내부 lateral 차단
+        - ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16] }
+      ports: [{ protocol: TCP, port: 443 }]

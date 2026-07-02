@@ -135,6 +135,10 @@ seal-adguard-auth: ## AdGuard UI 비밀번호(.env.secrets ADGUARD_PASSWORD)를 
 seal-ghcr-pull: ## GHCR read 토큰(.env.secrets GHCR_PULL_TOKEN)을 ghcr-pull SealedSecret로 봉인(prod NS, private pull)
 	@scripts/seal-ghcr-pull.sh
 
+.PHONY: seal-ghcr-read
+seal-ghcr-read: ## GHCR read 토큰을 observability NS ghcr-read SealedSecret로 봉인(digest-exporter private inspect)
+	@scripts/seal-ghcr-read.sh
+
 .PHONY: seal-argocd-notify
 seal-argocd-notify: ## telegram 봇 토큰/chatId(.env.secrets)를 argocd-notifications-secret SealedSecret로 봉인(argocd NS)
 	@scripts/seal-argocd-notify.sh
