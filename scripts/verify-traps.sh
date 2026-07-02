@@ -10,7 +10,7 @@ LEDGER="${1:-docs/traps.md}"
 
 fail=0
 # shellcheck disable=SC2016  # 백틱은 의도된 리터럴 매칭(명령 치환 아님)
-paths="$(grep -oE '`[^`]+`' "$LEDGER" | tr -d '`' | grep -E '\.(bats|sh|rego|mjs|ya?ml|json)$' | sort -u)"
+paths="$(grep -oE '`[^`]+`' "$LEDGER" | tr -d '`' | grep -E '\.(bats|sh|ts|rego|mjs|ya?ml|json)$' | sort -u)"
 while IFS= read -r p; do
   [ -n "$p" ] || continue
   [ -e "$p" ] || { echo "FAIL: 원장이 가리키는 가드 부재: $p"; fail=1; }
@@ -23,7 +23,7 @@ done <<< "$paths"
 DETAIL="${2:-docs/traps-detail.md}"
 if [ -f "$DETAIL" ]; then
   # shellcheck disable=SC2016  # 백틱은 리터럴 매칭
-  detail_guards="$(grep -E '^> 가드:' "$DETAIL" | grep -oE '`[^`]+`' | tr -d '`' | grep -E '\.(bats|sh|rego|mjs|ya?ml|json)$' | sort -u)"
+  detail_guards="$(grep -E '^> 가드:' "$DETAIL" | grep -oE '`[^`]+`' | tr -d '`' | grep -E '\.(bats|sh|ts|rego|mjs|ya?ml|json)$' | sort -u)"
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     grep -Fq -- "$p" "$LEDGER" || { echo "FAIL: SSOT(traps-detail.md) 가드가 원장에 부재(드리프트): $p"; fail=1; }
