@@ -4,8 +4,11 @@ metadata:
   name: bulk-ssd
   # default 어노테이션 없음 — bulk는 opt-in 전용.
 provisioner: homelab.io/local-path-bulk
-# 여기서는 Delete가 적절하다: media/backup-staging 볼륨은 R2에서 재생성 가능하다.
-reclaimPolicy: Delete
+# Retain: bulk-ssd 소비자 files-data는 유일한 비재생성 사용자 데이터다(git+R2+age로 재구축 불가). Delete면
+# PVC 삭제/reclaim이 외장 SSD의 실데이터를 파괴한다. (다른 소비자 pg-basebackup-local은 그 자체가 백업이라
+# Retain 무해 — Released 잔존은 scripts/audit-orphan-pv.sh가 나열.) 라이브 인플레이스 반영은 reclaimPolicy가
+# SC immutable이라 delete+recreate 필요(런북 external-ssd.md); DR 신규 클러스터는 fresh apply라 무영향.
+reclaimPolicy: Retain
 # WaitForFirstConsumer: pod가 스케줄될 때만 바인딩한다 (단일 노드지만 바인딩
 # 시맨틱을 올바르게 유지하고 조기 프로비저닝을 피한다).
 volumeBindingMode: WaitForFirstConsumer
