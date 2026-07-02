@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { replaceTotals } from "./lib/ledger-totals.ts";
 import { parseFlags } from "./lib/cli.ts";
+import { removeApp } from "./lib/digest-exporter.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
 let __f: Record<string, string | boolean>;
@@ -36,8 +37,14 @@ const ledger = existsSync(ledgerPath) ? readFileSync(ledgerPath, "utf8") : "";
 const rowRe = new RegExp(`^.*<!-- ledger:row --> *${app} .*$`, "m");
 plan.ledgerRow = rowRe.test(ledger);
 
+const dePath = `${ROOT}/platform/victoria-stack/prod/digest-exporter.yaml`;
+if (existsSync(dePath) && new RegExp(`(^|[" ])${app}=`).test(readFileSync(dePath, "utf8"))) {
+  plan.remove.push("digest-exporter APPS 항목");
+}
+
 if (!DRY) {
   if (existsSync(appDir)) rmSync(appDir, { recursive: true });
+  if (existsSync(dePath)) writeFileSync(dePath, removeApp(readFileSync(dePath, "utf8"), app));
   if (plan.appsJsonRow) {
     writeFileSync(appsJsonPath, JSON.stringify(registry.filter((r: any) => r.name !== app), null, 2) + "\n");
   }

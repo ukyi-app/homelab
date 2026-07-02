@@ -60,6 +60,8 @@ namespace: cache
 resources:
   - sessions
 EOF
+  mkdir -p "$FR/platform/victoria-stack/prod"
+  printf 'apiVersion: batch/v1\nkind: CronJob\nmetadata: { name: digest-exporter }\nspec:\n  jobTemplate:\n    spec:\n      template:\n        spec:\n          containers:\n            - name: digest-exporter\n              env:\n                - name: APPS\n                  value: "orders=ghcr.io/ukyi-app/orders:sha-x"\n' > "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
 }
 teardown() { rm -rf "$TMP"; }
 
@@ -226,5 +228,12 @@ tdr() { bun "$ROOT/tools/teardown-resource.ts" --refs-verified manual-test "$@";
   run tdr --cache widget --repo-root "$D" --delete-data --backup-verified test-id --step cleanup
   [ "$status" -ne 0 ]
   run grep -q '"state": "purged"' "$D/platform/data-conn/prod/.tombstones.json"   # fail-loud: purged로 안 넘어가야
+  [ "$status" -ne 0 ]
+}
+
+@test "teardown-app removes the app from digest-exporter APPS" {
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  run grep -q 'orders=' "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
   [ "$status" -ne 0 ]
 }
