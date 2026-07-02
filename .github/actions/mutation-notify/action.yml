@@ -1,0 +1,35 @@
+# mutation-notify composite — 변이 디스패처 실패/취소 알림 공통화.
+# needs 결과를 정규화(취소>실패)해 telegram-notify(source=변이)로 송신 — 5개 디스패처 notify 잡이
+# title 한 단어 차이로 동일했던 것을 SSOT로 수렴한다.
+# 비신뢰 입력 없음: results=needs 컨텍스트(GHA 신뢰), title=디스패처 리터럴.
+# telegram-notify는 중첩 composite로 호출 — 로컬 액션 경로는 워크스페이스 체크아웃 기준 해석(notify 잡이 checkout 선행).
+name: mutation-notify
+description: 변이 디스패처 실패/취소 알림(needs 정규화 + telegram 송신)
+inputs:
+  results:   { description: "toJSON(needs) — 상류 잡 결과 JSON", required: true }
+  title:     { description: "한국어 제목(예: create-app 실행)", required: true }
+  run-url:   { description: "액션 run 링크 URL", required: true }
+  bot-token: { description: "Telegram bot token", required: true }
+  chat-id:   { description: "Telegram chat id", required: true }
+runs:
+  using: composite
+  steps:
+    - id: norm
+      shell: bash
+      env:
+        RESULTS: ${{ inputs.results }}
+      run: |
+        # notify 잡의 job.status는 자기 자신(success)이라 거짓 — 상류 needs로 정규화(취소>실패)
+        if printf '%s' "$RESULTS" | grep -q '"result": *"cancelled"'; then
+          echo "status=cancelled" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=failure" >> "$GITHUB_OUTPUT"
+        fi
+    - uses: ./.github/actions/telegram-notify
+      with:
+        status: ${{ steps.norm.outputs.status }}
+        source: 변이
+        title: ${{ inputs.title }}
+        link: ${{ inputs.run-url }}
+        bot-token: ${{ inputs.bot-token }}
+        chat-id: ${{ inputs.chat-id }}
