@@ -144,6 +144,7 @@ echo "==> [6.5] files 데이터 재결합 검증: files pod Ready + 재바운드
 kubectl -n files rollout status deploy/files --timeout=300s
 FILES_VMPATH="$(kubectl get pv -o json | yq -r '.items[] | select(.spec.claimRef.namespace=="files" and .spec.claimRef.name=="files-data") | (.spec.hostPath.path // .spec.local.path // "")' | head -1)"
 [ -n "$FILES_VMPATH" ] || { echo "DR DRILL FAIL: files-data PV 미바운드 — 재결합 런북(external-ssd.md) 미수행"; exit 1; }
+# shellcheck disable=SC2016  # 단일따옴표 의도적: FILES_VMPATH는 env로 inner sh에 전달돼 그쪽서 확장
 orb -m k3s -u root env FILES_VMPATH="$FILES_VMPATH" sh -c 'test -n "$(ls -A "$FILES_VMPATH" 2>/dev/null)"' \
   || { echo "DR DRILL FAIL: files 카탈로그 비어있음($FILES_VMPATH) — 재결합이 기존 데이터를 복원하지 못함(침묵 유실 모드)"; exit 1; }
 echo "    files 카탈로그 비어있지 않음 — 외장 SSD 데이터 재결합 확인"
