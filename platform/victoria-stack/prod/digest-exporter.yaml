@@ -44,7 +44,7 @@ spec:
                 # (게이트: tests/gates/test_digest-exporter.bats). 갱신 주체: create-app/teardown-app(tools) +
                 # bump 경로(B9 bump-tag 배선 예정 — 그 전까지 이미지 bump 직후 일시 오발화 가능, for:20m 완충).
                 - name: APPS
-                  value: "page=ghcr.io/ukyi-app/page:sha-cd4815ca409992f56bf72d324d0806acb97010e2 trip-mate-api=ghcr.io/ukyi-app/trip-mate-api:sha-e072580bea97f20a71591e7bc85c129f93f5e9e9" # 공개 git SHA 이미지 태그(시크릿 아님) — gitleaks:allow
+                  value: "page=ghcr.io/ukyi-app/page:sha-cd4815ca409992f56bf72d324d0806acb97010e2 trip-mate-api=ghcr.io/ukyi-app/trip-mate-api:sha-bceff89be749a5ee483286e9990a9c62d330532d" # 공개 git SHA 이미지 태그(시크릿 아님) — gitleaks:allow
               resources:
                 requests: { cpu: 20m, memory: 32Mi }
                 limits: { memory: 64Mi }

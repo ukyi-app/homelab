@@ -21,17 +21,19 @@ data:
           # Recording rule: 실행 중인 이미지 digest가 최신 GHCR digest와 다르면 1.
           # ⚠️ 정정(B2): (a) max by (app)은 digest 라벨을 떨궈 join 키 소실, (b) 우변(pod info)에 app 라벨
           #    부재 → on(app,digest) 매칭 영구 미스 → 채우면 drift 상시 1(오발화). 좌변은 by(app,digest)로 digest
-          #    보존, 우변은 image 라벨에서 app 추출해 양변 라벨을 정렬한다(라이브 미검증 죽은 식 → 발화 검증 필수).
+          #    보존, 우변은 image_id에서 app·digest를 추출해 양변을 정렬한다(라이브 미검증 죽은 식 → 발화 검증 필수).
+          #    ⚠️ k3s/containerd 실측: KSM `image` 라벨은 bare 이미지 ID(sha256:…)라 selector·추출 소스는
+          #    반드시 `image_id`(ghcr.io/<owner>/<app>@sha256:<manifest digest> — skopeo Digest와 일치)다.
           - record: app:image_digest_drift
             expr: |
               max by (app, digest) (ghcr_latest_digest)
               unless on (app, digest) (
                 label_replace(
                   label_replace(
-                    kube_pod_container_info{namespace="prod", image=~"ghcr[.]io/ukyi-app/.*"},
+                    kube_pod_container_info{namespace="prod", image_id=~"ghcr[.]io/ukyi-app/.*"},
                     "digest", "$1", "image_id", ".*@(sha256:[a-f0-9]+)$"
                   ),
-                  "app", "$1", "image", ".*/([a-z0-9-]+)[@:].*"
+                  "app", "$1", "image_id", ".*/([a-z0-9-]+)[@:].*"
                 )
               )
           - alert: ImageDigestDrift
