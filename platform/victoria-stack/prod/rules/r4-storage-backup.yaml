@@ -133,3 +133,27 @@ data:
             annotations:
               summary: "캐시 백업이 stale(27시간 초과)이거나 누락됨"
               description: "공용 Valkey 백업(cache-backup CronJob → R2)이 갱신되지 않았습니다 — Job 오브젝트 소실/CronJob suspend/미스케줄 가능. last_success.json 신선도는 teardown 시점에만 검사되므로 이 룰이 상시 backstop입니다. 캐시는 LRU 휘발 티어라 warning."
+          # files 오프-SSD 백업 생존성(H2/M14): 호스트 launchd(scripts/backup-files-data.sh, 일1회)가
+          # rsync 성공 시 files_backup_last_success_timestamp를 vmsingle에 단발 import한다. instant query는
+          # staleness 윈도(~분) 밖의 단발 샘플을 못 봐 bare absent()가 영구 오발화하므로(CNPGRestoreDrillStale과
+          # 동형), [10d] last_over_time으로 마지막 성공을 찾아 임계(180000s≈2.08일 — 일1회 RPO의 2배 여유)로 판정.
+          # 값 없음(첫 push 전)은 absent가로 fail-loud — launchd 미설치/미실행을 페이징(백업 필수화 강제).
+          - alert: FilesBackupStale
+            expr: |
+              (time() - last_over_time(files_backup_last_success_timestamp[10d])) > 180000
+              or absent(last_over_time(files_backup_last_success_timestamp[10d]))
+            for: 30m
+            labels: { severity: critical }
+            annotations:
+              summary: "files 오프-SSD 백업이 stale(≈2일 초과)이거나 없음"
+              description: "files-data(비재생성 사용자 데이터)의 유일한 2차 매체(Mac 내장 디스크 rsync 사본)가 갱신되지 않았습니다 — launchd 미실행 또는 외장 SSD 미마운트. 매체 유실 시 전손 위험(R2 미사용). scripts/backup-files-data.sh를 확인하세요."
+          # bulk-ssd(외장 SSD) 용량: 호스트 df를 백업 잡이 함께 push(files_data_bulk_avail/size_bytes). VM node-exporter는
+          # 외장 virtiofs(/mnt/mac 하위)를 별도 series로 못 봐(r4 상단 주석) 직접 측정 불가 — 호스트 push가 유일 관측.
+          - alert: FilesBulkSSDLow
+            expr: |
+              (files_data_bulk_avail_bytes / files_data_bulk_size_bytes) < 0.10
+            for: 30m
+            labels: { severity: warning, disk: bulk }
+            annotations:
+              summary: "외장 bulk SSD 여유 공간 10% 미만"
+              description: "files-data·pg-basebackup-local이 공유하는 2TB 외장 SSD 여유가 부족합니다 — files 쓰기 실패(/readyz NotReady) 및 로컬 base-backup 적체 위험. 최대 소비자를 정리하세요."

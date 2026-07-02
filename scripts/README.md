@@ -56,3 +56,9 @@
   out-of-band 백업. `scripts/backup-sealed-secrets-key.sh <outdir>`(백업 생성, outdir는 git 밖) /
   `--verify <outdir>`(최신 백업이 라이브 키 셋을 담는지 — 회전 게이트). `sealing-key-dr-gate.sh`가 `--verify`로 호출.
   평문 private key를 디스크에 비기록(kubectl→sops 직행), git 작업트리 안 보관 거부.
+- **`backup-files-data.sh`** — **owner 전용(내구성 불변식, 비파괴)**. files-data(비재생성 사용자 데이터)를
+  외장 SSD → Mac 내장 디스크로 rsync 오프-SSD 백업. `<dest>`(백업)/`--dry-run <dest>`/`--verify <dest>`
+  (백업서 전 파일 복원+sha256 대조 — 매체 판독성 게이트). dest는 반드시 내장 디스크(외장이면 거부),
+  스테이징→sanity(빈/급감 중단)→승격(data.prev 1개 보존). 성공 시 `files_backup_last_success_timestamp`·
+  용량을 vmsingle에 push(r4의 FilesBackupStale/FilesBulkSSDLow). launchd 일1회 배선(RPO=24h)은
+  owner-local(external-ssd.md). Makefile 배선 없음 — 직접 실행.

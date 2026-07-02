@@ -169,3 +169,11 @@ setup() {
   grep -q 'job_name=~"cache-backup' "$R"
   grep -q 'absent(kube_job_status_completion_time{job_name=~"cache-backup' "$R"   # fail-closed 가드
 }
+
+@test "files off-SSD backup freshness + bulk-ssd capacity alerts are defined (host push)" {
+  R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
+  grep -q 'alert: FilesBackupStale' "$R"     # 오프-SSD 백업 신선도(백업 필수화 강제)
+  grep -q 'alert: FilesBulkSSDLow' "$R"       # bulk-ssd 용량 임계
+  # 주간/일간 단발 push라 bare absent()는 영구 오발화 — last_over_time 윈도로 판정(restore-drill 패턴).
+  grep -q 'last_over_time(files_backup_last_success_timestamp' "$R"
+}
