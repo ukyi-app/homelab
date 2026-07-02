@@ -107,3 +107,9 @@ V="platform/argocd/bootstrap-values.yaml"
   done
   [ "$miss" -eq 0 ] || { echo "allow-egress netpol missing required needles"; false; }
 }
+
+@test "application-controller is scraped by pod-annotations (R6 argocd_app_info source)" {
+  V="platform/argocd/bootstrap-values.yaml"
+  run yq '.controller.podAnnotations."prometheus.io/scrape"' "$V"; [ "$output" = "true" ]
+  run yq '.controller.podAnnotations."prometheus.io/port"' "$V"; [ "$output" = "8082" ]
+}

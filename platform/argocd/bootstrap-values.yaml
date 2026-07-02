@@ -15,6 +15,11 @@ controller:
   # ARGOCD_CONTROLLER_REPLICAS env를 여기 명시하면 안 된다 — 차트가 replicas에서 같은 env를
   # 자동 생성해 k8s SSA가 중복 키로 StatefulSet 생성을 거부한다(라이브 bootstrap에서 확인).
   replicas: 1
+  # application-controller metrics(8082)를 pod-annotations job이 scrape → argocd_app_info 공급(R6).
+  # argocd ns는 netpol 격리 없음(chart netpol OFF·prod netpol은 prod 한정)이라 vmagent(observability)가 자유 scrape.
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8082"
   args:
     statusProcessors: "4"
     operationProcessors: "2"

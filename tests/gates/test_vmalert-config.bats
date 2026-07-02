@@ -148,3 +148,9 @@ setup() {
   # max_usage는 reclaimable page cache를 포함해 hostPath 로그파드에서 limit까지 차는 오발화 함정 — 회귀 금지.
   run grep -q 'container_memory_max_usage_bytes' "$C"; [ "$status" -ne 0 ]
 }
+
+@test "R6 ArgoCDOutOfSync has an absent() fail-closed guard like the other R-rules" {
+  R="$ROOT/platform/victoria-stack/prod/rules/r6-ci-staleness.yaml"
+  grep -q 'alert: ArgoCDOutOfSync' "$R"
+  grep -q 'absent(argocd_app_info)' "$R"   # scrape 재단절 시 silent 무발화 방지
+}
