@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
-import { replaceTotals, addRow, parseLedgerRows } from "./lib/ledger-totals.ts";
+import { analyzeLedger, appendRowWithTotals, budgetViolation, type LedgerAgg } from "./lib/ledger-budget.ts";
 import { parseFlags } from "./lib/cli.ts";
 import { addApp } from "./lib/digest-exporter.ts";
 
@@ -100,15 +100,11 @@ const appDir = `${ROOT}/apps/${app}`;
 if (existsSync(appDir)) fail(`apps/${app} 이미 존재`);
 const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
 const ledger = readFileSync(ledgerPath, "utf8");
-const rows = parseLedgerRows(ledger); // F7: 명명 필드(raw 인덱스 금지)
-const names = rows.map((r) => r.name);
-const sumReq = rows.reduce((a, r) => a + r.reqMi, 0);
-const sumLimit = rows.reduce((a, r) => a + r.limitMi, 0);
-if (names.includes(app)) fail(`원장에 '${app}' 행이 이미 있다`);
-const budget = +(ledger.match(/LIMIT_BUDGET_MIB=(\d+)/)?.[1] ?? 0);
-if (!budget) fail("원장 메타(LIMIT_BUDGET_MIB)를 찾지 못함");
-if (sumLimit + limitMi > budget)
-  fail(`원장 예산 초과: 현재 ${sumLimit}Mi + ${app} ${limitMi}Mi > ${budget}Mi — resources/replicas를 줄여라`);
+let agg: LedgerAgg;
+try { agg = analyzeLedger(ledger); } catch (e) { fail(e instanceof Error ? e.message : String(e)); }
+const viol = budgetViolation(agg, app, limitMi, "resources/replicas를 줄여라");
+if (viol) fail(viol);
+const { sumReq, sumLimit, budget } = agg;
 
 // apps.json 전역 유일성 + 예약어 (중복 host는 toset에서 조용히 사라져 오라우팅 — 등록 단계에서 거부)
 const appsJsonPath = `${ROOT}/infra/cloudflare/apps.json`;
@@ -186,10 +182,8 @@ if (!DRY) {
     registry.push({ name: app, host, public: true, active: true });
     writeFileSync(appsJsonPath, JSON.stringify(registry, null, 2) + "\n");
   }
-  // 원장: 마지막 row 다음에 행 추가 + Totals 프로즈 갱신
-  let out = addRow(ledger, { name: app, env: "prod", reqMi, limitMi });
-  out = replaceTotals(out, sumReq + reqMi, sumLimit + limitMi);
-  writeFileSync(ledgerPath, out);
+  // 원장: 행 추가 + Totals 프로즈 동반 갱신(ledger-budget SSOT)
+  writeFileSync(ledgerPath, appendRowWithTotals(agg, { name: app, env: "prod", reqMi, limitMi }));
   // R6 digest 감시: digest-exporter APPS에 이 앱 추가(create-app/teardown-app이 SSOT 유지 — parity 게이트)
   const dePath = `${ROOT}/platform/victoria-stack/prod/digest-exporter.yaml`;
   if (!existsSync(dePath)) { console.error(`digest-exporter.yaml 부재: ${dePath} — APPS 배선 불가`); process.exit(1); }
