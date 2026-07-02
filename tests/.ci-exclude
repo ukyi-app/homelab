@@ -7,6 +7,7 @@
 tests/posture/test_internal-by-default.bats
 tests/posture/test_network-policy.bats
 tests/posture/test_networking-e2e.bats
+tests/posture/test_storage-reclaim.bats
 # docker 의존
 tools/tests/test_dev-postgres.bats
 # 실 age 키 의존 (verify.yaml의 ephemeral 키 셸이 대체 커버)

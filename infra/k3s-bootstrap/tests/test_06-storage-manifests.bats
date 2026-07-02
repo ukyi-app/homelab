@@ -29,6 +29,8 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
   [ "$output" != "true" ]
   run yq -e '.volumeBindingMode' "$BULK"; [ "$output" = "WaitForFirstConsumer" ]
   run yq -e '.provisioner' "$BULK"; [ "$output" = "homelab.io/local-path-bulk" ]
+  # files-data는 비재생성 사용자 데이터 — Retain 필수(git SSOT). Delete면 PVC 삭제/reclaim이 SSD 데이터를 파괴.
+  run yq -e '.reclaimPolicy' "$BULK"; [ "$output" = "Retain" ]
 }
 
 @test "provisioner config maps each class to its node path" {
