@@ -22,3 +22,15 @@ setup() { C="$(cd "$BATS_TEST_DIRNAME" && pwd)"; }
   run jq -e 'all(.[]; (.host != "ukyi.app") and (.host != "www.ukyi.app") and ((.host | endswith(".home.ukyi.app")) | not))' "$C/apps.json"
   [ "$status" -eq 0 ]
 }
+
+@test "reserved-hosts.json is valid and lists fully-qualified platform hosts" {
+  run jq -e '(.platform_hosts | type) == "array" and (.platform_hosts | length) > 0 and (.platform_hosts | all(test("\\.ukyi\\.app$")))' "$C/reserved-hosts.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "apps.json hosts do not collide with reserved platform hosts (reserved-hosts.json SSOT)" {
+  # 예약 host(platform_hosts)를 앱이 등록하면 Gateway 오라우팅 — apps.json은 예약 host를 못 가진다.
+  run jq -e -n --slurpfile a "$C/apps.json" --slurpfile r "$C/reserved-hosts.json" \
+    '($r[0].platform_hosts // []) as $rh | all($a[0][]; .host as $h | ($rh | index($h)) == null)'
+  [ "$status" -eq 0 ]
+}
