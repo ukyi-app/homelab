@@ -163,6 +163,11 @@ seal-ghcr-read: ## GHCR read 토큰을 observability NS ghcr-read 봉인 (seal-b
 seal-all: ## [DR] 선언 테이블 전 봉인본 일괄 재봉인 — sealing key 회전 드릴(owner-local 5+ 봉인본)
 	@bun tools/seal-batch.ts --all
 
+.PHONY: backup-local-asset
+backup-local-asset: ## [DR] 런북 tarball을 age 백업(OUT=<git 밖 경로>). --verify는 ARGS=--verify
+	@test -n "$(OUT)" || { echo "OUT=<git 밖 outdir> 필요"; exit 1; }
+	@bash scripts/backup-local-asset.sh $(ARGS) "$(OUT)"
+
 ## --- 운영 진입점 (라이브 read-only; 변경 권위는 ArgoCD) ---
 .PHONY: argo-status argo-sync argo-terminate argo-wait render kubeconfig audit
 
