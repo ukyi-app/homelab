@@ -47,4 +47,8 @@ echo "==> [5] secrets-encryption enabled?"
 enc="$(orb -m "$ORB_MACHINE" -u root k3s secrets-encrypt status 2>/dev/null || true)"
 echo "$enc" | grep -qi "Enabled" || fail "secrets encryption is not Enabled"
 
-echo "OK: host substrate verified (node Ready, both SCs, traefik/metrics-server absent, servicelb kept, secrets-encryption enabled)."
+echo "==> [6] k3s version pinned to versions.env (K3S_VERSION)?"
+kver="$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true)"
+[ "$kver" = "$K3S_VERSION" ] || fail "k3s version drift: live '${kver:-<none>}' != pinned '$K3S_VERSION' (versions.env)"
+
+echo "OK: host substrate verified (node Ready, both SCs, traefik/metrics-server absent, servicelb kept, secrets-encryption enabled, k3s ver pinned)."

@@ -63,3 +63,10 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
     [ "$vol" = "$cm" ]   # 플래그는 실제로 마운트된 configmap과 일치해야 한다
   done
 }
+
+@test "local-path-provisioner image tag matches versions.env (Renovate bump non-silent)" {
+  # M12: LOCAL_PATH_PROVISIONER_VERSION 소비자 0 → versions.env bump가 silent no-op였다.
+  # 하드코딩 태그가 versions.env와 일치하는지 게이트해 드리프트를 loud하게. (setup()이 versions.env source)
+  run grep -cE "rancher/local-path-provisioner:${LOCAL_PATH_PROVISIONER_VERSION}([[:space:]]|\$)" "$PROV"
+  [ "$output" -ge 2 ]   # provisioner Deployment 2 아키타입(:60,:134) 모두 핀
+}

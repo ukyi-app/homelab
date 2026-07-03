@@ -11,6 +11,7 @@ setup() {
   echo "true"  > "$STUBDIR/encryption.txt"               # secrets-encrypt 활성화
   echo "Ready" > "$STUBDIR/nodestatus.txt"
   printf 'standard\nbulk-ssd\n' > "$STUBDIR/sc.txt"
+  source "$BOOTSTRAP_DIR/versions.env"; echo "$K3S_VERSION" > "$STUBDIR/kubeletversion.txt"  # 건강한 기본값 = 핀 버전
 
   cat >"$STUBDIR/orb" <<'EOF'
 #!/usr/bin/env bash
@@ -28,6 +29,7 @@ EOF
 #!/usr/bin/env bash
 args="$*"
 case "$args" in
+  *"nodeInfo.kubeletVersion"*) cat "$STUBDIR/kubeletversion.txt" ;;
   *"get nodes"*)         cat "$STUBDIR/nodestatus.txt" ;;
   *"get pods"*)          cat "$STUBDIR/pods.txt" ;;
   *"get sc"*|*"get storageclass"*) cat "$STUBDIR/sc.txt" ;;
@@ -82,4 +84,11 @@ EOF
   echo "metrics-server-zzz" >> "$STUBDIR/pods.txt"
   run "$BOOTSTRAP_DIR/verify-cluster.sh"
   [ "$status" -ne 0 ]
+}
+
+@test "fails when live k3s version drifts from versions.env K3S_VERSION" {
+  echo "v1.99.9+k3s1" > "$STUBDIR/kubeletversion.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"version"* ]]
 }
