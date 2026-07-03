@@ -1,0 +1,22 @@
+{
+  "_note": "동봉 계약(vendored) SSOT. homelab tools/*가 원본, 다운스트림은 복사본. files(Rust)는 seal 도구 없어 제외. cert는 exact(공개 봉인 cert 바이트 일치 필수), .mts는 typescript(포매터 재포맷 허용).",
+  "owner": "ukyi-app",
+  "vendored": [
+    {
+      "source": "tools/seal-secret.mts",
+      "targets": [
+        { "repo": "homelab-app-template", "ref": "main", "path": "scaffold/common/tools/seal-secret.mts", "normalize": "typescript" },
+        { "repo": "page", "ref": "main", "path": "tools/seal-secret.mts", "normalize": "typescript" },
+        { "repo": "trip-mate-api", "ref": "main", "path": "tools/seal-secret.mts", "normalize": "typescript" }
+      ]
+    },
+    {
+      "source": "tools/sealed-secrets-cert.pem",
+      "targets": [
+        { "repo": "homelab-app-template", "ref": "main", "path": "scaffold/common/tools/sealed-secrets-cert.pem", "normalize": "exact" },
+        { "repo": "page", "ref": "main", "path": "tools/sealed-secrets-cert.pem", "normalize": "exact" },
+        { "repo": "trip-mate-api", "ref": "main", "path": "tools/sealed-secrets-cert.pem", "normalize": "exact" }
+      ]
+    }
+  ]
+}
