@@ -53,7 +53,6 @@ jobs:
       TF_VAR_cloudflare_api_token: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
       TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
       TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
-      TF_VAR_internal_suffix: home.${{ secrets.TF_DOMAIN }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with: { ref: main } # 항상 main 최신 — 머지된 선언 상태가 권위
@@ -227,7 +226,6 @@ jobs:
         env:
           TF_VAR_ts_bootstrap_oauth_id: ${{ secrets.TF_TAILSCALE_OAUTH_ID }}
           TF_VAR_ts_bootstrap_oauth_secret: ${{ secrets.TF_TAILSCALE_OAUTH_SECRET }}
-          TF_VAR_internal_suffix: home.${{ secrets.TF_DOMAIN }}
           TF_VAR_dns_nameserver_tailscale_ip: ${{ secrets.TF_TAILSCALE_DNS_NAMESERVER_IP }}
         run: |
           set +e

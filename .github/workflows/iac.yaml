@@ -83,7 +83,6 @@ jobs:
           TF_VAR_cloudflare_api_token: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
           TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
-          TF_VAR_internal_suffix: home.${{ secrets.TF_DOMAIN }}
         run: |
           set +e
           terraform -chdir=infra/cloudflare plan -input=false -lock-timeout=120s -no-color \
@@ -131,7 +130,6 @@ jobs:
       TF_VAR_cloudflare_api_token: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
       TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
       TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
-      TF_VAR_internal_suffix: home.${{ secrets.TF_DOMAIN }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0 — push 이벤트의 머지 SHA가 기본 체크아웃 — SHA 고정
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1

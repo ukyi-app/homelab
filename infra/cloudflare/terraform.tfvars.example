@@ -10,10 +10,5 @@ cloudflare_account_id = "<ACCT_ID>"
 # Cloudflare에 zone으로 등록된 apex 도메인 (https:// 없이, 서브도메인 없이)
 zone_name = "<DOMAIN>"
 
-# 내부 전용 호스트 접미사 — 반드시 'home.' + 도메인 형태!
-# Gateway의 web-internal 리스너(*.home.<DOMAIN>)·AdGuard rewrite·split-DNS가 이 컨벤션에
-# 하드코딩돼 있어, apex와 같게 두면 public/internal 호스트가 충돌한다.
-internal_suffix = "home.<DOMAIN>"
-
 # cloudflared 터널 이름 (기본값 유지 권장)
 tunnel_name = "homelab-prod"
