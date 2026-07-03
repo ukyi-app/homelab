@@ -35,8 +35,9 @@
   **`make bootstrap`**이 호출(+ `bootstrap-deadmanswitch` 선행). 라이브 클러스터에 적용.
 - **`seed-secrets.sh`** — terraform output + `.env.secrets`에서 SOPS 암호화 시드 시크릿 생성.
   **`make seed-secrets`**가 호출(`.env.secrets`를 source한 뒤). R2/telegram 등 키를 env로 요구.
-- **`seal-adguard-auth.sh`** — `.env.secrets`의 `ADGUARD_PASSWORD`를 bcrypt로 봉인 → `adguard-auth`
-  SealedSecret(edge NS). **`make seal-adguard-auth`**가 호출. 평문·해시 모두 stdout 비출력(봉인본만 산출물).
+- **`tools/seal-batch.ts`** (셸 아님 — 참고) — seal-* 4종(adguard-auth·argocd-notify·files·ghcr-pull)을
+  선언 테이블로 통합. `make seal-<name>`(별칭)·`make seal-all`(회전 드릴)이 호출. 봉인 전 `secret-cert-check`
+  preflight fail-closed(break-glass `--offline-ok`). 평문·해시·토큰은 kubeseal stdin 전용(값 미출력).
 - **`secret-cert-check.sh`** — 봉인 전 preflight: 커밋된 `tools/sealed-secrets-cert.pem`이 라이브
   컨트롤러 cert와 fingerprint 일치하는지(stale 차단) 검사. **`make secret-cert-check`**가 호출.
   read-only(fetch만); 오프라인이면 검증 스킵(에러 아님). `sealing-key-dr-gate.sh` 로직 재사용.
