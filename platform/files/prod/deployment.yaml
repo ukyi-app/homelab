@@ -16,7 +16,7 @@ spec:
       labels: { app.kubernetes.io/name: files }
     spec:
       automountServiceAccountToken: false # k8s API 미사용
-      imagePullSecrets: [{ name: ghcr-pull }] # private GHCR
+      imagePullSecrets: [ { name: ghcr-pull } ] # private GHCR
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532 # distroless nonroot
@@ -25,7 +25,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: files
-          image: ghcr.io/ukyi-app/files:sha-57bb62b3a796df2a1c9fe728bf190604e1bf5baf@sha256:fae868d1ff22a78339745218b453d52b400a6cf5af5d51dc18bfcdc7dad11795 # sha-57bb62b + digest 인라인 핀(불변)
+          image: ghcr.io/ukyi-app/files:sha-39e4c1acf865fb72318319ec3cf67185761a4dda@sha256:5b8ea124cd268322dc7b2750de5510eb5e13dc3a67f4f43fb1dd8f591ef307a3 # sha-39e4c1a + digest 인라인 핀(불변)
           ports:
             - { name: internal, containerPort: 8080 }
             - { name: public, containerPort: 8081 }
@@ -41,7 +41,7 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            capabilities: { drop: [ "ALL" ] }
           livenessProbe:
             httpGet: { path: /healthz, port: internal }
             initialDelaySeconds: 5
@@ -59,7 +59,7 @@ spec:
         - name: keys
           secret:
             secretName: files-keys
-            items: [{ key: keys.json, path: keys.json }]
+            items: [ { key: keys.json, path: keys.json } ]
         - name: data
           persistentVolumeClaim: { claimName: files-data }
         - name: tmp
