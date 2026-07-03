@@ -6,7 +6,7 @@ metadata:
 type: Opaque
 stringData:
     TELEGRAM_BOT_TOKEN: ENC[AES256_GCM,data:iqEZ+H1j/xLQlxgxxvq5EHhgmD0XEcZ6KoedffGBI6b5q1O2yr5nZW6HQJOPbQ==,iv:brNyGFwURchGAIrAP3lvkqRRa9hZFyhyaKsdUWNtqK4=,tag:WoVOpZce3fXv8mo+8quWjw==,type:str]
-    TELEGRAM_CHAT_ID: ENC[AES256_GCM,data:OgVBcDq7/vzOUg==,iv:SASbED20aIhurF9sqtKqz4AA/bsYfjmNPFpEKdV0ACo=,tag:HTw9G8O1BGSG9sJ1mFa2cw==,type:str]
+    TELEGRAM_CHAT_ID: ENC[AES256_GCM,data:F0suC4EH81Aijfg=,iv:yrqTSEBXrjJCpWaqJN6nhg6uvtQT1qP0fNlwa0OpsrY=,tag:h2z5VFSJvvuQwpMfiRXWGQ==,type:str]
     HEALTHCHECKS_URL: ENC[AES256_GCM,data:6W1m9l/X6ueSc8aVqElFwlJf8s40VdrFVRO1QNpQ2BARDtYEHBF9RbZFNK4i+98bj+Py6DHCFE0=,iv:Gs8qNupfdAi36LEtFMm8s+IunZsynC9+7qgDTMDBrpM=,tag:8qt1Mz0Sc2XaGIf/+89zpQ==,type:str]
     GRAFANA_ADMIN_PASSWORD: ENC[AES256_GCM,data:Eztm36XUiS+2og==,iv:10HZHdOhKOuCbQBkEt4EDz464pX+ROMaXVdF8IT30XM=,tag:v1COHbEAzcxehRjzH2WCkQ==,type:str]
 sops:
@@ -30,6 +30,6 @@ sops:
             -----END AGE ENCRYPTED FILE-----
           recipient: age154tu9q7922xu46x0rkfm5l9x3ulf9u5at5qvxeaqfx9sgtm7cumq75jdwc
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-07-01T09:00:07Z"
-    mac: ENC[AES256_GCM,data:ZaPdKdedgNP6fMAiY0OzY6F0RbXJ6KiNpa/fILcn8PsQA+vdGmTJGj3TqQyT1rPIJ/xyq3xpRmO7+Q+6VI/V2h1mkyL5XYU6o3X9IcfUHtFDjNMm0LdryHI1Dwg7O4KzGa/GoJ6eET4QISJTrKDi7Vr42Y5QMlReRXuxeRveTa0=,iv:6MvOh7/fqN7JfbOo2W/dI/zgUUbDvOif1QNJL1CAdtw=,tag:fbMQq4PLmM2T3NsryMGMuw==,type:str]
+    lastmodified: "2026-07-03T13:34:11Z"
+    mac: ENC[AES256_GCM,data:xn9hDjG9lNO47PBPTDGi6EE48ETqHQ6LlYSUc5X4HV0qGPNj5OvpwWv3y/O51NLZW1eelIwdPAsjJZEmPMzJjUd5v/AoByLrPTDvEvmmUvYD5ggC85SKktSQfXn6FPI2vVPg+pZEsGL0cH+oj5MyN8i78d47fydrgXis4OFxV3U=,iv:gDdVIHJnXnAnp65de+HXgOLog/CGG/IxmUe7Fi9Euao=,tag:/AfFG3kukpOqYpYacTDmFQ==,type:str]
     version: 3.13.1
