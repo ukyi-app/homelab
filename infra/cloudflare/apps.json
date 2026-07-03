@@ -4,5 +4,11 @@
     "host": "page.ukyi.app",
     "public": true,
     "active": true
+  },
+  {
+    "name": "trip-mate-api",
+    "host": "trip-mate-api.ukyi.app",
+    "public": true,
+    "active": true
   }
 ]
