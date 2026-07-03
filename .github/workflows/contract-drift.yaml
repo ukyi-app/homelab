@@ -1,0 +1,56 @@
+# 동봉 계약(vendored: seal-secret.mts·sealed-secrets-cert.pem) 드리프트 리컨실러 (opt-in 스케줄).
+# homelab SSOT ↔ 다운스트림(template scaffold·page·trip-mate-api) 정규화 diff. files(Rust)는 대상 아님.
+# alert-and-report: 하드 실패 아님 — 드리프트/fetch 실패 시 telegram. 라이브 raw fetch는 이 워크플로 안에서만.
+name: "🔁 contract-drift"
+run-name: "🔁 contract-drift — ${{ github.event_name == 'schedule' && '스케줄' || format('수동({0})', github.actor) }}"
+on:
+  schedule:
+    - cron: "37 6 * * 1"   # 매주 월 06:37 UTC (vendored는 거의 안 변함)
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: contract-drift
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5   # hung raw.githubusercontent 연결이 주간 run을 platform max까지 끌지 않도록(fetch도 15s AbortSignal 병용)
+    steps:
+      - name: actor 가드 (workflow_dispatch 한정 — 스케줄 무영향, B6 전수 가드 불변식)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        run: |
+          # B6가 확립한 불변식(codex pass3 P3-1): dispatch 진입점은 허용목록(bump-poll) 외 전부 actor 가드.
+          [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — actor 가드 fail-closed"; exit 1; }
+          [ "$ACTOR" = "$OWNER" ] || { echo "::error::workflow_dispatch는 owner($OWNER)만 실행 가능 — actor=$ACTOR 거부"; exit 1; }
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0 — 로컬 telegram-notify 액션 resolve
+      - uses: ./.github/actions/setup-bun
+        with: { install: 'false' }     # 체커는 fetch+fs만 — deps 불요
+      - id: check
+        run: |
+          bun tools/contract-drift-check.ts --manifest tools/vendored-contract.json > /tmp/drift.json
+          d=$(bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.drift.length))')
+          e=$(bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.errors.length))')
+          echo "drift=$d" >> "$GITHUB_OUTPUT"
+          echo "errors=$e" >> "$GITHUB_OUTPUT"
+          [ "$e" -gt 0 ] && echo "::warning::계약 사본 fetch 실패 ${e}건(transient 가능 — 재확인)"
+          cat /tmp/drift.json
+      - name: telegram notify (드리프트·fetch 실패·하드 실패 시)
+        # fetch 실패도 알림(codex pass3 P3-2): errors만 있고 무소음이면 체커가 blind pass — 감시의 감시 공백.
+        # ⚠️ status는 notify.sh enum만 — 체커가 성공(outcome==success)일 때만 드리프트/fetch 실패를 ⚠️경고(drift)로,
+        #    그 외(체커 실패·이전 스텝 실패로 skip)는 🔴실패(failure)로. (하드 실패 시 outputs가 ''이고 ''!='0'이 참이라
+        #    순진하게 쓰면 drift로 오라벨링되는 함정 — outcome 가드로 회피. failure()는 with: 표현식 불가라 outcome 사용.
+        #    세부 카운트는 ident로 구분. b11b 적대리뷰 반영.)
+        if: failure() || steps.check.outputs.drift != '0' || steps.check.outputs.errors != '0'
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ steps.check.outcome == 'success' && ((steps.check.outputs.drift != '0' || steps.check.outputs.errors != '0') && 'drift' || 'success') || 'failure' }}
+          source: 계약드리프트
+          title: 동봉 계약 드리프트
+          ident: "vendored 불일치 ${{ steps.check.outputs.drift }}건 · fetch 실패 ${{ steps.check.outputs.errors }}건"
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

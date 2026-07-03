@@ -28,6 +28,7 @@ bump-poll.yaml 1
 iac.yaml 1
 tf-reconcile.yaml 3
 dns-drift.yaml 1
+contract-drift.yaml 1
 pr-sweeper.yaml 1
 build.yaml 1
 EOF
