@@ -38,9 +38,17 @@ app.homelab/instance: {{ .Release.Name }}
 {{- if ne .Values.kind "worker" -}}true{{- end -}}
 {{- end -}}
 
-{{/* 검증: kind별 필수 항목 */}}
+{{/* 검증: kind별 필수 항목 + host↔public .home. 정합(create-app.ts와 동일 규칙, 차트 렌더 SSOT) */}}
 {{- define "app.validate" -}}
 {{- if and (include "app.isServed" .) (not .Values.route.host) -}}
 {{- fail (printf "route.host is required for kind=%s" .Values.kind) -}}
+{{- end -}}
+{{- if and (include "app.isServed" .) .Values.route.host -}}
+  {{- if and .Values.route.public (contains ".home." .Values.route.host) -}}
+  {{- fail (printf "공개 route는 내부 .home. host를 쓸 수 없다: %s" .Values.route.host) -}}
+  {{- end -}}
+  {{- if and (not .Values.route.public) (not (contains ".home." .Values.route.host)) -}}
+  {{- fail (printf "내부 route(public=false)는 .home. host여야 한다: %s" .Values.route.host) -}}
+  {{- end -}}
 {{- end -}}
 {{- end -}}

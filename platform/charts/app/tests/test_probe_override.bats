@@ -18,16 +18,16 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
 }
 
 @test "preStopSleepSeconds=0 omits the preStop block (distroless: no /bin/sleep)" {
-  out=$(dep --set kind=web --set route.host=a.example.com --set preStopSleepSeconds=0)
+  out=$(dep --set kind=web --set route.public=true --set route.host=a.example.com --set preStopSleepSeconds=0)
   run grep -q 'preStop' <<<"$out"; [ "$status" -ne 0 ]
 }
 
 @test "default preStop omits /bin/sleep (distroless-safe)" {
-  out=$(dep --set kind=web --set route.host=a.example.com)
+  out=$(dep --set kind=web --set route.public=true --set route.host=a.example.com)
   run grep -q 'preStop' <<<"$out"; [ "$status" -ne 0 ]
 }
 
 @test "preStopSleepSeconds>0 explicitly enables /bin/sleep" {
-  out=$(dep --set kind=web --set route.host=a.example.com --set preStopSleepSeconds=3)
+  out=$(dep --set kind=web --set route.public=true --set route.host=a.example.com --set preStopSleepSeconds=3)
   echo "$out" | grep -q 'sleep'
 }

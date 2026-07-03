@@ -4,7 +4,7 @@ CHART="${BATS_TEST_DIRNAME}/.."
 C="--set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
    --set resources.requests.cpu=10m --set resources.requests.memory=32Mi \
    --set resources.limits.cpu=100m --set resources.limits.memory=64Mi \
-   --set route.host=x.example.com"
+   --set route.public=true --set route.host=x.example.com"
 
 @test "schema rejects an unknown top-level key (typo'd security/probe keys cannot pass silently)" {
   run helm template t "$CHART" $C --set kind=web --set securtyContext.foo=bar
@@ -20,7 +20,7 @@ C="--set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
   run helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=latest \
     --set resources.requests.cpu=10m --set resources.requests.memory=32Mi \
     --set resources.limits.cpu=100m --set resources.limits.memory=64Mi \
-    --set route.host=x.example.com --set kind=web
+    --set route.public=true --set route.host=x.example.com --set kind=web
   [ "$status" -ne 0 ]
 }
 
