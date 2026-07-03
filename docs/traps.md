@@ -40,3 +40,4 @@
 | homepage EROFS(RO config)·apiserver egress(노드서브넷:6443 not ClusterIP) | gate | `platform/homepage/prod/test_homepage_render.bats`, `platform/homepage/prod/test_homepage_netpol.bats` |
 | GHA run 기본 셸 pipefail 부재(bash -e {0}) — tee 파이프 fail-open | gate | `tests/gates/test_workflow-pipefail.bats` |
 | PG 메이저 업그레이드 3-이미지 동시 갱신(pg-tools digest 일관성) | gate | `tests/gates/test_pgtools-digest.bats`, `tests/test_dr-drill.bats` |
+| 로컬 자산 백업 체인(런북 tarball age 백업·인덱스 양방향) | gate | `scripts/backup-local-asset.sh`, `scripts/verify-runbook-index.sh`, `tests/test_backup-local-asset.bats` |

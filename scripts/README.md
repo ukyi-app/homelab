@@ -84,3 +84,7 @@
   main=broad을 테스트, candidate 아님). Makefile/워크플로 배선 없음 — 직접 실행.
 - **`auto-merge-or-fail.sh`** — 워크플로 헬퍼(비파괴). `bump.yaml`·변이 경로가 PR 생성 후 auto-merge
   설정, PR이 CLEAN일 때만 폴백하고 BLOCKED/BEHIND/UNKNOWN이면 시끄럽게 실패(un-gated 직접 머지 차단). `make`/직접 실행 아님.
+- **`backup-local-asset.sh`** — **owner 전용(DR 불변식, 비파괴)**. 런북(`docs/runbooks/`, gitignored 단일
+  사본)을 tarball→age(sops binary) 암호화해 git 밖 매체에 버전드 백업. `<outdir>`(생성)/`--verify <outdir>`
+  (최신 백업이 현재 런북과 파일명+내용 sha256 일치하는지 신선도 게이트). **`make backup-local-asset OUT=<git 밖>`**
+  (`ARGS=--verify`)가 호출. sealing key 백업과 대칭. `verify-runbook-index`가 양방향 fail-closed로 인덱스 드리프트 차단.
