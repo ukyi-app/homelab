@@ -138,3 +138,57 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   grep -qE "event_name == 'workflow_run'" "$f"
   grep -q 'docker manifest inspect' "$f"
 }
+
+# ── 인라인 핀 편집 모드(베스포크 platform 컴포넌트: deployment.yaml repo:tag@digest 단일 스칼라) ──
+seed_pin() {
+  mkdir -p "$FIX/platform/files/prod"
+  cat > "$FIX/platform/files/prod/.image-pin.json" <<'JSON'
+{ "file": "deployment.yaml", "path": ["spec","template","spec","containers",0,"image"], "autoDeploy": true }
+JSON
+  cat > "$FIX/platform/files/prod/deployment.yaml" <<EOF
+spec:
+  template:
+    spec:
+      containers:
+        - name: files
+          image: ghcr.io/ukyi-app/files:sha-0000000@$DIG # sha-0000000 + digest 인라인 핀(불변)
+EOF
+}
+NEWDIG="sha256:1111111111111111111111111111111111111111111111111111111111111111"
+
+@test "bump --pin edits the inline repo:tag@digest scalar in a bespoke deployment.yaml" {
+  seed_pin
+  f="$FIX/platform/files/prod/deployment.yaml"
+  run bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --pin platform/files/prod/.image-pin.json --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+  run yq '.spec.template.spec.containers[0].image' "$f"
+  [ "$output" == "ghcr.io/ukyi-app/files:sha-feedbee@$NEWDIG" ]
+}
+
+@test "bump --pin without --digest is refused (bespoke pins are always digest-pinned)" {
+  seed_pin
+  run bun tools/bump-tag.ts files sha-feedbee --pin platform/files/prod/.image-pin.json --repo-root "$FIX"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "인라인 핀 모드는 --digest 필수"
+}
+
+@test "bump --pin --expect-current aborts on a tag mismatch (TOCTOU, exit 3)" {
+  seed_pin
+  run bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --expect-current sha-aaaaaaa --pin platform/files/prod/.image-pin.json --repo-root "$FIX"
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "expect-current"
+}
+
+@test "bump --pin is idempotent (same tag+digest is a no-op)" {
+  seed_pin
+  bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --pin platform/files/prod/.image-pin.json --repo-root "$FIX"
+  run bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --pin platform/files/prod/.image-pin.json --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no-op"* ]]
+}
+
+@test "bump --pin refuses a descriptor outside platform/ (path traversal guard)" {
+  seed_pin
+  run bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --pin ../outside.json --repo-root "$FIX"
+  [ "$status" -eq 2 ]
+}

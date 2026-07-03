@@ -1,12 +1,12 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { resolve, sep } from "node:path";
-import { parseDocument } from "yaml";
+import { resolve, sep, dirname } from "node:path";
+import { parseDocument, isScalar } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
 
 const argv = process.argv.slice(2);
 // arity 검증 파서: 인식된 값-플래그는 비어있지 않은 값(다음 토큰이 `--flag`가 아님)을 필수로 갖는다.
 // 미인식 `--flag`는 거부(오타 침묵-무시 차단). 나머지는 positional(app, tag).
-const VALUE_FLAGS = new Set(["--repo-root", "--digest", "--expect-current"]);
+const VALUE_FLAGS = new Set(["--repo-root", "--digest", "--expect-current", "--pin"]);
 const opts: Record<string, string> = {};
 const positionals: string[] = [];
 for (let i = 0; i < argv.length; i++) {
@@ -35,6 +35,37 @@ if (!/^sha-[0-9a-f]{7,40}$/.test(tag ?? "")) {
 if (digest !== undefined && !/^sha256:[0-9a-f]{64}$/.test(digest)) {
   console.error(`bad digest: ${digest}`); process.exit(2);
 }
+
+// ── 인라인 핀 편집 모드(베스포크 platform 컴포넌트) ──
+// apps/의 values.yaml image.tag/digest(분리 키) 전제와 달리, 디스크립터(.image-pin.json)가
+// deployment.yaml의 <repo>:<tag>@<digest> 단일 스칼라 위치를 가리킨다. TOCTOU·no-op·path-traversal 동일.
+const pinArg = opts["--pin"];
+if (pinArg !== undefined) {
+  if (digest === undefined) { console.error("인라인 핀 모드는 --digest 필수(베스포크 핀은 태그+digest 불변)"); process.exit(2); }
+  const platRoot = resolve(repoRoot, "platform");
+  const descPath = resolve(repoRoot, pinArg);
+  if (!descPath.startsWith(platRoot + sep)) { console.error(`refusing pin outside platform/: ${pinArg}`); process.exit(2); }
+  const desc = JSON.parse(readFileSync(descPath, "utf8"));
+  const targetPath = resolve(dirname(descPath), desc.file);
+  if (!targetPath.startsWith(platRoot + sep)) { console.error(`refusing to write outside platform/: ${desc.file}`); process.exit(2); }
+  const doc = parseDocument(readFileSync(targetPath, "utf8"));
+  const node = doc.getIn(desc.path, true); // keepScalar: flow 서식·lineComment 보존
+  if (!isScalar(node)) { console.error(`핀 경로가 스칼라가 아님: ${JSON.stringify(desc.path)}`); process.exit(2); }
+  const cur = String(node.value ?? "");
+  const m = /^(.+?):(sha-[0-9a-f]{7,40})@(sha256:[0-9a-f]{64})$/.exec(cur);
+  if (!m) { console.error(`인라인 핀 형식 불량(repo:sha-*@sha256:*): ${cur}`); process.exit(2); }
+  const [, pinRepo, curTag, curDigest] = m;
+  if (expectCurrent !== undefined && curTag !== expectCurrent) {
+    console.error(`expect-current 불일치: 기대 ${expectCurrent}, 실제 ${curTag} — bump 중단(race)`); process.exit(3);
+  }
+  if (curTag === tag && curDigest === digest) { console.log(`bump: ${targetPath} already ${tag}@${digest} (no-op)`); process.exit(0); }
+  node.value = `${pinRepo}:${tag}@${digest}`;
+  node.comment = ` sha-${tag.slice(4, 11)} + digest 인라인 핀(불변)`; // lineComment 갱신(stale short-sha 방지)
+  writeFileSync(targetPath, doc.toString());
+  console.log(`bump(inline): ${targetPath} ${cur} -> ${node.value}`);
+  process.exit(0);
+}
+
 const path = `${repoRoot}/apps/${app}/deploy/prod/values.yaml`;
 // 심층 방어: regex가 나중에 느슨해지더라도 apps/ 밖 쓰기는 거부한다.
 const root = resolve(repoRoot, "apps");
