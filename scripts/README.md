@@ -28,6 +28,18 @@
   `make verify`·`ci.yaml`(gate)이 호출(출력을 `conftest test … policy/ledger.rego`로 파이프). 라이브 무관.
 - **`sops-guard.sh`** — 인자로 받은 `*.enc.yaml`이 실제 sops 암호화됐는지(평문 누출 차단) 검사.
   pre-commit 가드 훅이 호출(staged 파일). `make`/워크플로 배선 아님.
+- **`check-doc-index.sh`** — `scripts/`·`tools/`·`.github/workflows/` 산출물이 해당 README에 등재됐는지
+  검사(가드 없는 인덱스 드리프트 소멸). **`make verify`**·gate(`tests/gates/test_check-doc-index.bats`)가 호출. 순수 문자열 검사.
+- **`check-app-netpol.sh`** — `apps/<app>/deploy/**`의 app-owned NetworkPolicy가 app-scoped 셀렉터
+  (`app.kubernetes.io/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). **`make verify`**가 호출. 인레포 앱 0개면 vacuous pass.
+- **`check-bats-style.sh`** — bats 단언-스타일 가드: `@test` 본문의 중간(마지막 아님) 부정(`! `)·조건(`[[ `)
+  단언을 잡는다(bats가 침묵 통과시키는 false-green 가드 차단; NEG=hard-zero·BB=ratchet). `tests/gates/test_bats-style.bats`가 호출.
+- **`verify-ledger.sh`** — 메모리 원장 예산 게이트 SSOT. `bun tools/ledger-to-json.ts` 출력을
+  `conftest … policy/ledger.rego`로 검사. **`bun run verify:ledger`**·`make verify`·`make ci`·`ci.yaml`(gate)이 호출.
+- **`verify-runbook-index.sh`** — `docs/runbooks/`(gitignored) ↔ AGENTS.md 런북 인덱스 정합(로컬 전용).
+  런북 부재 시 skip(required gate 아님 — repo/CI엔 런북 없음). **`make verify-runbook-index`**가 호출.
+- **`audit-orphan-pv.sh`** — 고아 Released PV 감사(storageclass Retain이라 PVC 삭제 시 PV 누수). 나열만
+  (비파괴), reclaim은 owner 수동. `tests/gates/test_audit-orphan-pv.bats`가 가드. ★fail-closed(도구/쿼리 실패=비-0).
 
 ## 시크릿 / 부트스트랩 (라이브 쓰기·봉인본 산출)
 
@@ -63,3 +75,12 @@
   스테이징→sanity(빈/급감 중단)→승격(data.prev 1개 보존). 성공 시 `files_backup_last_success_timestamp`·
   용량을 vmsingle에 push(r4의 FilesBackupStale/FilesBulkSSDLow). launchd 일1회 배선(RPO=24h)은
   owner-local(external-ssd.md). Makefile 배선 없음 — 직접 실행.
+- **`teardown.sh`** — **파괴적(owner 전용)**. `make teardown-app`/`teardown-resource` 래퍼가 호출 —
+  clean-worktree 가드 → origin/main fetch → `teardown/<target>-<ts>` fresh-main 전용브랜치 → 툴(plan) →
+  allowlist staging → PR(owner gh 자격). 앱/리소스 매니페스트·apps.json·원장 행 제거(리소스 purge는
+  상태머신·런북 전용). fresh-main 기반이라 무관 커밋 미포함(C-F1). 잘못 쓰면 배포/데이터 유실.
+- **`netpol-rehearsal.sh`** — **owner-local**. NetworkPolicy candidate를 selfHeal off→apply→verify-posture→
+  trap 복원으로 리허설(라벨 미스가 prod로 안 새게). GitOps selfHeal라 머지 전 필수(pre-merge posture는
+  main=broad을 테스트, candidate 아님). Makefile/워크플로 배선 없음 — 직접 실행.
+- **`auto-merge-or-fail.sh`** — 워크플로 헬퍼(비파괴). `bump.yaml`·변이 경로가 PR 생성 후 auto-merge
+  설정, PR이 CLEAN일 때만 폴백하고 BLOCKED/BEHIND/UNKNOWN이면 시끄럽게 실패(un-gated 직접 머지 차단). `make`/직접 실행 아님.

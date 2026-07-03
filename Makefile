@@ -27,6 +27,7 @@ bootstrap: ## 멱등 DR 진입점: ArgoCD + sops-age Secret + root app 설치
 
 verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포계약 + 자원 limit + 원장 + sops 왕복)
 	@./scripts/check-skeleton.sh
+	@bash scripts/check-doc-index.sh
 	@bash scripts/check-bats-accounting.sh
 	@bash scripts/check-app-deploy.sh
 	@bun tools/check-resource-limits.ts
