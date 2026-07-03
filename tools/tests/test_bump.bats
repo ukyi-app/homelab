@@ -138,3 +138,99 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   grep -qE "event_name == 'workflow_run'" "$f"
   grep -q 'docker manifest inspect' "$f"
 }
+
+# ── 인라인 핀 편집 모드(베스포크 platform 컴포넌트: deployment.yaml repo:tag@digest 단일 스칼라) ──
+seed_pin() {
+  mkdir -p "$FIX/platform/files/prod"
+  cat > "$FIX/platform/files/prod/.image-pin.json" <<'JSON'
+{ "file": "deployment.yaml", "path": ["spec","template","spec","containers",0,"image"], "autoDeploy": true }
+JSON
+  cat > "$FIX/platform/files/prod/deployment.yaml" <<EOF
+spec:
+  template:
+    spec:
+      containers:
+        - name: files
+          image: ghcr.io/ukyi-app/files:sha-0000000@$DIG # sha-0000000 + digest 인라인 핀(불변)
+EOF
+}
+NEWDIG="sha256:1111111111111111111111111111111111111111111111111111111111111111"
+
+@test "bump --pin edits the inline repo:tag@digest scalar in a bespoke deployment.yaml" {
+  seed_pin
+  f="$FIX/platform/files/prod/deployment.yaml"
+  run bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --pin platform/files/prod/.image-pin.json --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+  run yq '.spec.template.spec.containers[0].image' "$f"
+  [ "$output" == "ghcr.io/ukyi-app/files:sha-feedbee@$NEWDIG" ]
+}
+
+@test "bump --pin without --digest is refused (bespoke pins are always digest-pinned)" {
+  seed_pin
+  run bun tools/bump-tag.ts files sha-feedbee --pin platform/files/prod/.image-pin.json --repo-root "$FIX"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "인라인 핀 모드는 --digest 필수"
+}
+
+@test "bump --pin --expect-current aborts on a tag mismatch (TOCTOU, exit 3)" {
+  seed_pin
+  run bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --expect-current sha-aaaaaaa --pin platform/files/prod/.image-pin.json --repo-root "$FIX"
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "expect-current"
+}
+
+@test "bump --pin is idempotent (same tag+digest is a no-op)" {
+  seed_pin
+  bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --pin platform/files/prod/.image-pin.json --repo-root "$FIX"
+  run bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --pin platform/files/prod/.image-pin.json --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no-op"* ]]
+}
+
+@test "bump --pin refuses a descriptor outside platform/ (path traversal guard)" {
+  seed_pin
+  run bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --pin ../outside.json --repo-root "$FIX"
+  [ "$status" -eq 2 ]
+}
+
+# ── digest-exporter APPS 신선도 동기(codex pass2 P2-2): bump 시 같은 앱의 APPS 태그도 함께 갱신 ──
+# APPS는 "name=ghcr.io/owner/name:tag" 공백 구분 목록. sha-* 태그 불변이라 배포 핀만 갱신하면
+# digest-exporter가 stale 참조로 거짓 ImageDigestDrift(B2)를 낸다 — bump-tag가 같은 커밋에서 동기.
+seed_exporter() {  # $1 = APPS value 문자열
+  mkdir -p "$FIX/platform/victoria-stack/prod"
+  cat > "$FIX/platform/victoria-stack/prod/digest-exporter.yaml" <<EOF
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: digest-exporter
+          env:
+            - name: APPS
+              value: "$1"
+EOF
+}
+
+@test "bump also refreshes the digest-exporter APPS tag for an app already listed" {
+  seed_exporter "blog=ghcr.io/ukyi-app/blog:sha-0000000 page=ghcr.io/ukyi-app/page:sha-cd4815ca409992f56bf72d324d0806acb97010e2"
+  bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  ex="$FIX/platform/victoria-stack/prod/digest-exporter.yaml"
+  # 배포 핀(values.yaml)과 APPS 태그가 같은 값으로 동시 갱신
+  run yq '.image.tag' "$FIX/apps/blog/deploy/prod/values.yaml"
+  [ "$output" == "sha-deadbee" ]
+  run grep -c "blog=ghcr.io/ukyi-app/blog:sha-deadbee" "$ex"
+  [ "$output" -eq 1 ]
+  # page 항목은 불변(교차 오염 없음)
+  run grep -c "page=ghcr.io/ukyi-app/page:sha-cd4815ca409992f56bf72d324d0806acb97010e2" "$ex"
+  [ "$output" -eq 1 ]
+}
+
+@test "bump leaves the digest-exporter byte-identical for an app not listed in APPS" {
+  seed_exporter "page=ghcr.io/ukyi-app/page:sha-cd4815ca409992f56bf72d324d0806acb97010e2"
+  ex="$FIX/platform/victoria-stack/prod/digest-exporter.yaml"
+  before=$(shasum "$ex" | awk '{print $1}')
+  bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  after=$(shasum "$ex" | awk '{print $1}')
+  [ "$before" == "$after" ]
+}

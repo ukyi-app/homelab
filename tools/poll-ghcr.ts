@@ -98,7 +98,37 @@ type Plan = {
   current: { tag: string; digest: any } | null;
   candidate: { gitsha: string; tag: string; digest: any } | null;
   src?: string;
+  writePath?: string; // git add 대상(apps: values.yaml / 베스포크: deployment.yaml)
+  pin?: string;       // 베스포크 핀 디스크립터 경로(apps 레인은 미설정 → bump-poll이 apps 분기)
 };
+
+// 인라인 핀 스칼라 경로 추적용(yaml parse는 순수 객체/배열 반환 — 배열 인덱스 포함 traverse)
+const getIn = (obj: any, p: (string | number)[]) => p.reduce((o: any, k) => (o == null ? o : o[k]), obj);
+
+// 배포된 tag/digest·autoDeploy·src를 받아 bump/propose-pr/refuse/noop을 계산(두 레인 공유).
+// key = 데이터소스 조회 키(app 또는 컴포넌트 이름 — fixtures 파일명 접두).
+function computeBump(result: Plan, s: { key: string; src: string; repo: string; deployed: string; digest: any; autoDeploy: boolean }): Plan {
+  const q = makeQuery(s.key);
+  // (a) 배포 SHA가 main의 조상인가 — 아니면 수동 rollback/이력 조작 상황: 자동 폴링 거부
+  const baseCmp = q.compare(s.src, s.deployed, "main");
+  if (!baseCmp || !["ahead", "identical"].includes(baseCmp.status))
+    return { ...result, action: "refuse", reason: `배포 SHA(${short(s.deployed)})가 main 조상이 아님(status=${baseCmp?.status ?? "?"}) — 명시적 rollback 작업으로만` };
+  if (baseCmp.status === "identical") return { ...result, reason: "배포 SHA == main tip" };
+  // (b) main 최신→과거로 걸으며 이미지 실존하는 첫 커밋 = 후보 (배포 SHA 도달 시 중단)
+  let candidate: { gitsha: string; tag: string; digest: any } | null = null;
+  for (const c of q.commits(s.src)) {
+    if (c.sha.startsWith(s.deployed) || s.deployed.startsWith(short(c.sha))) break;
+    const m = q.manifest(s.repo, `sha-${c.sha}`);
+    if (m?.digest) { candidate = { gitsha: c.sha, tag: `sha-${c.sha}`, digest: m.digest }; break; }
+  }
+  if (!candidate) return { ...result, reason: "배포 이후 빌드된 main 커밋 없음" };
+  // (c) 후보가 배포 SHA의 descendant임을 재증명 (merge 커밋 목록의 비선형성 방어)
+  const candCmp = q.compare(s.src, s.deployed, candidate.gitsha);
+  if (!candCmp || candCmp.status !== "ahead")
+    return { ...result, action: "refuse", reason: `후보(${short(candidate.gitsha)})가 배포 SHA의 descendant가 아님(status=${candCmp?.status ?? "?"})` };
+  if (candidate.digest === s.digest) return { ...result, reason: "동일 digest — 멱등 no-op" };
+  return { ...result, action: s.autoDeploy ? "bump" : "propose-pr", candidate, reason: s.autoDeploy ? "" : "autoDeploy 아님(fail-closed) — 승인 PR만" };
+}
 
 function planApp(dir: string, app: string): Plan {
   const read = (f: string) => readFileSync(path.join(dir, f), "utf8");
@@ -106,60 +136,49 @@ function planApp(dir: string, app: string): Plan {
 
   const src = read("source-repo").trim();
   result.src = src;
-  if (!new RegExp(`^${args.owner}/[A-Za-z0-9._-]+$`).test(src)) {
+  if (!new RegExp(`^${args.owner}/[A-Za-z0-9._-]+$`).test(src))
     return { ...result, action: "refuse", reason: `source-repo가 ${args.owner} org 밖: ${src}` };
-  }
 
   const values = parse(read("values.yaml"));
   const repo = values?.image?.repo ?? "";
   const tag = String(values?.image?.tag ?? "");
   const digest = values?.image?.digest ?? null;
   result.current = { tag, digest };
-  if (!/^sha-[0-9a-f]{7,40}$/.test(tag)) {
+  result.writePath = path.join("apps", app, "deploy", "prod", "values.yaml");
+  if (!/^sha-[0-9a-f]{7,40}$/.test(tag))
     return { ...result, action: "refuse", reason: `배포 tag가 sha-* 형식이 아니라 조상 증명 불가: ${tag}` };
-  }
-  const deployed = tag.slice(4);
 
   // 승인 정책: autoDeploy === true만 자동, 그 외(false/누락/파싱 불가)는 전부 fail-closed
   let autoDeploy = false;
   const bindingsPath = path.join(dir, ".bindings.json");
   if (existsSync(bindingsPath)) {
-    try {
-      autoDeploy = JSON.parse(readFileSync(bindingsPath, "utf8")).autoDeploy === true;
-    } catch {
-      autoDeploy = false;
-    }
+    try { autoDeploy = JSON.parse(readFileSync(bindingsPath, "utf8")).autoDeploy === true; } catch { autoDeploy = false; }
   }
+  return computeBump(result, { key: app, src, repo, deployed: tag.slice(4), digest, autoDeploy });
+}
 
-  const q = makeQuery(app);
+// 베스포크 핀 레인: platform/<comp>/prod/.image-pin.json이 인라인 이미지 핀(values.yaml image.tag/
+// digest 분리 키 대신 deployment.yaml의 <repo>:<tag>@<digest> 단일 스칼라)의 위치·autoDeploy를 담는다.
+// source-repo = org 바인딩(apps/와 동일). GHCR repo는 source-repo에서 파생(ghcr.io/<src>)해 인라인 파싱본과 대조.
+function planComponent(dir: string, name: string): Plan {
+  const read = (f: string) => readFileSync(path.join(dir, f), "utf8");
+  const result: Plan = { app: name, action: "noop", reason: "", current: null, candidate: null };
 
-  // (a) 배포 SHA가 main의 조상인가 — 아니면 수동 rollback/이력 조작 상황: 자동 폴링 거부
-  const baseCmp = q.compare(src, deployed, "main");
-  if (!baseCmp || !["ahead", "identical"].includes(baseCmp.status)) {
-    return { ...result, action: "refuse", reason: `배포 SHA(${short(deployed)})가 main 조상이 아님(status=${baseCmp?.status ?? "?"}) — 명시적 rollback 작업으로만` };
-  }
-  if (baseCmp.status === "identical") return { ...result, reason: "배포 SHA == main tip" };
+  const src = read("source-repo").trim();
+  result.src = src;
+  if (!new RegExp(`^${args.owner}/[A-Za-z0-9._-]+$`).test(src))
+    return { ...result, action: "refuse", reason: `source-repo가 ${args.owner} org 밖: ${src}` };
 
-  // (b) main 최신→과거로 걸으며 이미지 실존하는 첫 커밋 = 후보 (배포 SHA 도달 시 중단)
-  let candidate: { gitsha: string; tag: string; digest: any } | null = null;
-  for (const c of q.commits(src)) {
-    if (c.sha.startsWith(deployed) || deployed.startsWith(short(c.sha))) break; // 배포 지점 도달
-    const m = q.manifest(repo, `sha-${c.sha}`);
-    if (m?.digest) {
-      candidate = { gitsha: c.sha, tag: `sha-${c.sha}`, digest: m.digest };
-      break;
-    }
-  }
-  if (!candidate) return { ...result, reason: "배포 이후 빌드된 main 커밋 없음" };
-
-  // (c) 후보가 배포 SHA의 descendant임을 재증명 (merge 커밋 목록의 비선형성 방어)
-  const candCmp = q.compare(src, deployed, candidate.gitsha);
-  if (!candCmp || candCmp.status !== "ahead") {
-    return { ...result, action: "refuse", reason: `후보(${short(candidate.gitsha)})가 배포 SHA의 descendant가 아님(status=${candCmp?.status ?? "?"})` };
-  }
-  if (candidate.digest === digest) return { ...result, reason: "동일 digest — 멱등 no-op" };
-
-  return { ...result, action: autoDeploy ? "bump" : "propose-pr", candidate, reason: autoDeploy ? "" : "autoDeploy 아님(fail-closed) — 승인 PR만" };
+  const pin = JSON.parse(read(".image-pin.json"));
+  const image = String(getIn(parse(read(pin.file)), pin.path) ?? "");
+  const m = /^(.+?):(sha-[0-9a-f]{7,40})@(sha256:[0-9a-f]{64})$/.exec(image);
+  if (!m) return { ...result, action: "refuse", reason: `인라인 핀 형식 불량(repo:sha-*@sha256:*): ${image}` };
+  const [, repo, tag, digest] = m;
+  if (repo !== `ghcr.io/${src}`) return { ...result, action: "refuse", reason: `핀 repo(${repo})가 source-repo(${src})와 불일치` };
+  result.current = { tag, digest };
+  result.pin = path.join("platform", name, "prod", ".image-pin.json");
+  result.writePath = path.join("platform", name, "prod", pin.file);
+  return computeBump(result, { key: name, src, repo, deployed: tag.slice(4), digest, autoDeploy: pin.autoDeploy === true });
 }
 
 // apps/*/deploy/prod 중 source-repo 바인딩이 있는 앱만 순회
@@ -170,6 +189,18 @@ for (const name of existsSync(appsRoot) ? readdirSync(appsRoot) : []) {
   if (!existsSync(path.join(dir, "source-repo"))) continue;
   try {
     plans.push(planApp(dir, name));
+  } catch (e: any) {
+    plans.push({ app: name, action: "refuse", reason: `플랜 실패: ${e.message}` });
+  }
+}
+
+// platform/*/prod 중 베스포크 핀 디스크립터(.image-pin.json)가 있는 컴포넌트 2차 순회
+const platformRoot = path.join(args.root, "platform");
+for (const name of existsSync(platformRoot) ? readdirSync(platformRoot) : []) {
+  const dir = path.join(platformRoot, name, "prod");
+  if (!existsSync(path.join(dir, ".image-pin.json"))) continue;
+  try {
+    plans.push(planComponent(dir, name));
   } catch (e: any) {
     plans.push({ app: name, action: "refuse", reason: `플랜 실패: ${e.message}` });
   }
