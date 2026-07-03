@@ -63,7 +63,11 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
         env:
           RENOVATE_PLATFORM: github
-          # homelab + 템플릿(oven/bun·setup-bun·@types/bun 핀 갱신). autodiscover는 여전히 금지(명시 목록).
+          # homelab + 템플릿(homelab-app-template) 갱신 대상 선언(oven/bun·setup-bun·@types/bun 핀). autodiscover는 여전히 금지(명시 목록).
+          # ⚠️ 템플릿 갱신 활성화는 owner-manual 선행 2건 필요(미완이면 템플릿은 no-access로 skip — homelab은 무영향/fail-safe):
+          #   (1) writer App을 homelab-app-template에 Contents+PR write로 설치,
+          #   (2) 완료 후 별도 커밋으로 위 app-token 스텝에 owner/repositories 추가(App 미설치 상태에서 먼저 넣으면
+          #       토큰 발급이 hard-fail — create-github-app-token repositories 트랩). 그 전까지 이 줄은 선언일 뿐 무력.
           RENOVATE_REPOSITORIES: "${{ github.repository }},${{ github.repository_owner }}/homelab-app-template"
           RENOVATE_ONBOARDING: "false" # renovate.json이 이미 레포에 있음(온보딩 PR 불필요)
           LOG_LEVEL: info
