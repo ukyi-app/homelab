@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # app-shared .mts를 bun 없이 node strip-types(>=22.18)로 실제 seal 경로까지 실행 —
-# 앱 레포 `pnpm secret:seal` 경로 증명(A.5 F1 안전망). node_modules(yaml)는 bun install이 채운다.
+# 앱 레포 `bun run secret:seal` 경로 증명(A.5 F1 안전망). node_modules(yaml)는 bun install이 채운다.
 set -euo pipefail
 node --version
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT

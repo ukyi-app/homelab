@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# apps/<name>/deploy/prod 배포 계약 가드 — 필수 3산출물(values.yaml·.bindings.json·source-repo) +
-# source-repo 발견 계약. 인레포 배포앱 0개라 양성/음성 fixture로 체커를 검증. bash 3.2: 단언은 [ ]만.
+# apps/<name>/deploy/prod 배포 계약 가드 — 필수 4산출물(values.yaml·.bindings.json·source-repo·
+# kustomization.yaml) + source-repo 발견 계약. 인레포 배포앱 0개라 양성/음성 fixture로 체커를 검증. bash 3.2: 단언은 [ ]만.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   CHECK="$ROOT/scripts/check-app-deploy.sh"
@@ -11,11 +11,12 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "positive fixture: deploy/prod with all 3 artifacts passes" {
+@test "positive fixture: deploy/prod with all 4 artifacts passes" {
   d="$BATS_TEST_TMPDIR/app/deploy/prod"; mkdir -p "$d"
   echo "image: {}" > "$d/values.yaml"
   echo "{}" > "$d/.bindings.json"
   echo "ukyi-app/myapp" > "$d/source-repo"
+  echo "resources: []" > "$d/kustomization.yaml"
   run bash "$CHECK" "$d"
   [ "$status" -eq 0 ]
 }
@@ -36,6 +37,16 @@ setup() {
   : > "$d/source-repo"
   run bash "$CHECK" "$d"
   [ "$status" -ne 0 ]
+}
+
+@test "negative fixture: missing kustomization.yaml fails (appset kustomize render needs it)" {
+  d="$BATS_TEST_TMPDIR/nokust/deploy/prod"; mkdir -p "$d"
+  echo "image: {}" > "$d/values.yaml"
+  echo "{}" > "$d/.bindings.json"
+  echo "ukyi-app/myapp" > "$d/source-repo"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'kustomization.yaml'
 }
 
 @test "app-deploy .bindings.json contract is autoDeploy-centric (db/redis dropped)" {
