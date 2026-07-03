@@ -19,7 +19,7 @@ CHART="${BATS_TEST_DIRNAME}/.."
 
 @test "no chart template renders a migrate Job (db removed)" {
   out=$(helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
-    --set kind=web --set route.host=a.example.com \
+    --set kind=web --set route.public=true --set route.host=a.example.com \
     --set resources.requests.cpu=10m --set resources.requests.memory=32Mi \
     --set resources.limits.cpu=100m --set resources.limits.memory=64Mi)
   run bash -c "echo \"\$1\" | yq 'select(.kind==\"Job\")'" _ "$out"

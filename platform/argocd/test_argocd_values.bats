@@ -113,3 +113,10 @@ V="platform/argocd/bootstrap-values.yaml"
   run yq '.controller.podAnnotations."prometheus.io/scrape"' "$V"; [ "$output" = "true" ]
   run yq '.controller.podAnnotations."prometheus.io/port"' "$V"; [ "$output" = "8082" ]
 }
+
+@test "on-deployed oncePer gates on the actual sync-job revision, not observed HEAD (#224 noise regression guard)" {
+  v=platform/argocd/bootstrap-values.yaml
+  run yq '.notifications.triggers."trigger.on-deployed"' "$v"
+  printf '%s' "$output" | grep -qF 'operationState.syncResult != nil'      # #224 nil 가드(when)
+  printf '%s' "$output" | grep -qF 'operationState.syncResult.revision'    # oncePer가 실 sync 작업 revision(sync.revision 아님)
+}

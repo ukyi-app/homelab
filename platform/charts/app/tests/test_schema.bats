@@ -10,7 +10,7 @@ CHART="${BATS_TEST_DIRNAME}/.."
 complete=(--set image.repo=ghcr.io/x/y --set image.tag=sha-deadbeef \
   --set resources.requests.cpu=10m --set resources.requests.memory=32Mi \
   --set resources.limits.cpu=100m --set resources.limits.memory=64Mi \
-  --set route.host=x.example.com)
+  --set route.public=true --set route.host=x.example.com)
 
 @test "helm lint passes on a complete, schema-valid values set" {
   run helm lint "$CHART" "${complete[@]}"
@@ -34,4 +34,10 @@ complete=(--set image.repo=ghcr.io/x/y --set image.tag=sha-deadbeef \
 @test "schema rejects invalid kind enum" {
   run helm template t "$CHART" "${complete[@]}" --set kind=database
   [ "$status" -ne 0 ]
+}
+
+@test "schema keeps cpu+memory required on both requests and limits (onboarding sizing-discipline; divergence from platform SRE policy is intentional and documented)" {
+  S="$CHART/values.schema.json"
+  run jq -e '.properties.resources.properties.limits.required == ["cpu","memory"]' "$S"; [ "$status" -eq 0 ]
+  run jq -e '.properties.resources.comment | test("사이징 디시플린")' "$S"; [ "$status" -eq 0 ]
 }
