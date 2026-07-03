@@ -129,7 +129,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
   → `iac.yaml`(push apply)/`tf-reconcile.yaml`(30분 드리프트 수렴)이 DNS/tunnel 노출.
   `tools/activate-app.ts` 게이트(descendant+표면 무변경+행 고정)는 host/public 변경 시 재노출 재승인 전용(owner-local CLI).
 - **시크릿:** SealedSecrets(컨트롤러 `platform/sealed-secrets`, cert 공개) — 앱 레포에서
-  `pnpm secret:seal`(.env→`<app>-secrets.sealed.yaml`) → create-app/update-secrets가 봉인본 키를 검증·배선.
+  `bun run secret:seal`(.env→`<app>-secrets.sealed.yaml`) → create-app/update-secrets가 봉인본 키를 검증·배선.
   sealing key는 `scripts/backup-sealed-secrets-key.sh`로 out-of-band 백업(복구 드릴 게이트).
 - **teardown:** 앱(`teardown-app`)과 리소스(`teardown-resource`)는 분리 — 리소스는
   `.bindings.json` 참조 0 강제, retain(보존+tombstone) 기본, purge(--delete-data)는
