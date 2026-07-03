@@ -240,8 +240,8 @@
   만든다 — 전 소비처 단일 digest 일관성을 게이트로 강제하고 bump.yaml이 빌드 시 자동 재핀한다.
 > 가드: `tests/gates/test_pgtools-digest.bats`, `tests/test_dr-drill.bats`
 
-### 베스포크 공개 노출은 platform_hosts(apps.json 아님)
-- 골든패스 앱의 공개 DNS는 `infra/cloudflare/apps.json`(active&&public)이 SSOT지만, **베스포크 플랫폼
+### 베스포크 공개 노출은 platform_hosts
+- 골든패스 앱의 공개 DNS는 `infra/cloudflare/apps.json`(active&&public)이 SSOT지만(apps.json 아님이 함정), **베스포크 플랫폼
   컴포넌트(files·argocd-webhook 등)의 공개 노출은 `infra/cloudflare/dns.tf`의 `platform_hosts`(= `reserved-hosts.json` SSOT)**가 권위다
   — apps.json에 넣으면 audit-orphans가 apps/ 매니페스트 부재로 차단한다(files 온보딩서 실증). 예약 host 검사·
   dns-drift·create-app 예약어가 apps.json만 인지해 platform_hosts를 모르던 갭은 예약 host SSOT 통합(B9)으로 해소.
