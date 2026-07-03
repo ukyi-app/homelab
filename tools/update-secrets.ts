@@ -40,7 +40,7 @@ const dstSealedPath = `${appDir}/${app}-secrets.sealed.yaml`;
 const valuesPath = `${appDir}/values.yaml`;
 const kustomizationPath = `${appDir}/kustomization.yaml`;
 
-if (!existsSync(sealedPath)) fail(`${sealedPath} 없음 — 앱 레포에서 pnpm secret:seal 먼저`);
+if (!existsSync(sealedPath)) fail(`${sealedPath} 없음 — 앱 레포에서 bun run secret:seal 먼저`);
 if (!existsSync(valuesPath)) fail(`${valuesPath} 없음`);
 if (!existsSync(kustomizationPath)) fail(`${kustomizationPath} 없음`);
 

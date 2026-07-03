@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# apps/<name>/deploy/prod 배포 계약 가드 — 필수 산출물(values.yaml·.bindings.json·source-repo)을 강제.
+# apps/<name>/deploy/prod 배포 계약 가드 — 필수 산출물(values.yaml·.bindings.json·source-repo·kustomization.yaml)을 강제.
 # 필수 파일 목록은 tools/app-deploy-schema.json(.required)에서 읽는다(SSOT — 하드코딩 금지).
 # source-repo 누락/공백이면 poll-ghcr가 그 앱을 update-image 폴링에서 영영 빠뜨린다 → fail-closed로 차단.
 # 인자로 deploy/prod 디렉토리들을 받으면 그것만, 없으면 apps/*/deploy/prod 전체를 검사(인레포 앱 0개면 vacuous).
@@ -31,5 +31,5 @@ else
   done
 fi
 
-if [ "$rc" -eq 0 ]; then echo "check-app-deploy: 배포 계약(values.yaml·.bindings.json·source-repo) OK"; fi
+if [ "$rc" -eq 0 ]; then echo "check-app-deploy: 배포 계약(values.yaml·.bindings.json·source-repo·kustomization.yaml) OK"; fi
 exit $rc
