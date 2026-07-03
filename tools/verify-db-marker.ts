@@ -9,18 +9,16 @@
 // owner-local(admin kubeconfig) — DB가 'usable'한지의 단일 권위. WS2 온보딩 수용/activation이 호출.
 import { execFileSync } from "node:child_process";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
+import { typedFlags, type TypedFlags } from "./lib/cli.ts";
 
 function die(msg: string): never { console.error(`verify-db-marker: ${msg}`); process.exit(1); }
 
-const args: Record<string, string> = {};
-const argv = process.argv.slice(2);
-for (let i = 0; i < argv.length; i++) {
-  const a = argv[i];
-  if (a.startsWith("--")) args[a.slice(2)] = argv[++i];
-  else die(`알 수 없는 인자: ${a}`);
-}
-const name = args.name;
-const ns = args.namespace ?? "database";
+// typedFlags: 미지 플래그 침묵 수용(--namespcae 오타 → 기본 ns 무성 진행) 차단. 파싱 오류=exit 2(규약).
+let f: TypedFlags;
+try { f = typedFlags(process.argv.slice(2), { value: ["--name", "--namespace"], bool: [] }); }
+catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\nusage: verify-db-marker --name <db> [--namespace database]`); process.exit(2); }
+const name = f.str("--name");
+const ns = f.str("--namespace", "database")!;
 if (!name) die("--name <db> 필수");
 if (!RESOURCE_NAME_RE.test(name)) die(`db 이름 형식 불량: ${name}`);
 
