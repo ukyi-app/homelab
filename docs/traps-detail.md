@@ -222,3 +222,26 @@
   명시 bash(-eo pipefail)를 혼동하지 말 것. 명령치환 인라인(`echo "x=$(jq …)"`)도 동류 fail-open —
   대입으로 분리해야 -e가 잡는다.
 > 가드: `tests/gates/test_workflow-pipefail.bats`
+
+### ArgoCD Notifications telegram native 함정
+- ArgoCD Notifications v3.4.x telegram은 함정이 겹친다(#213→#217→#224 라이브 확정): **webhook 방식은 봇
+  토큰을 retryablehttp DEBUG 로그로 URL에 실어 VictoriaLogs로 유출**한다 → native(tgbotapi, 미로깅)로 회피.
+  native recipient는 **음수 그룹 chatId만** 유효(양수 DM은 @channel로 오해석→전송 실패), **parseMode가
+  Markdown 하드코딩**(HTML 무시 → `*bold*` 리터럴), recipient에 `$secret` 확장 없음(chatId 리터럴). oncePer는
+  관측 HEAD(`sync.revision`)가 아니라 **실제 sync 작업 revision(`operationState.syncResult.revision(s)`)**에 걸어야
+  한다 — 모노레포는 main 머지마다 구독 앱 전부가 같은 HEAD를 관측해 거짓 "배포 완료" 버스트(#224). supergroup
+  승격 시 chatId가 바뀐다(전송 조용히 실패).
+
+### PG 메이저 업그레이드 3-이미지 동시 갱신
+- PG 메이저 업그레이드는 **서버(CNPG Cluster) + basebackup(barman) + pg-tools(ops 이미지)를 한꺼번에** 올려야
+  한다 — `pg_dump`는 서버보다 낮은 major를 거부한다(ops/pg-tools Dockerfile). 라이브 2회 발현: PgDumpHedgeStale
+  (pg_dump16 vs 서버18, #178/#180)·dr-drill 이미지 16.4 잔류(#206). pg-tools digest는 5개 소비처(cache
+  backup-cronjob ×2·cnpg ensure-role-password/restore-drill/pgdump-hedge)에 인라인 핀돼 부분 갱신이 skew를
+  만든다 — 전 소비처 단일 digest 일관성을 게이트로 강제하고 bump.yaml이 빌드 시 자동 재핀한다.
+> 가드: `tests/gates/test_pgtools-digest.bats`, `tests/test_dr-drill.bats`
+
+### 베스포크 공개 노출은 platform_hosts(apps.json 아님)
+- 골든패스 앱의 공개 DNS는 `infra/cloudflare/apps.json`(active&&public)이 SSOT지만, **베스포크 플랫폼
+  컴포넌트(files·argocd-webhook 등)의 공개 노출은 `infra/cloudflare/dns.tf`의 `platform_hosts`(= `reserved-hosts.json` SSOT)**가 권위다
+  — apps.json에 넣으면 audit-orphans가 apps/ 매니페스트 부재로 차단한다(files 온보딩서 실증). 예약 host 검사·
+  dns-drift·create-app 예약어가 apps.json만 인지해 platform_hosts를 모르던 갭은 예약 host SSOT 통합(B9)으로 해소.
