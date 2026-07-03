@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+README="${CK_README:-README.md}"   # 테스트 오버라이드(역방향 검사용)
+BT='`'                              # 백틱 리터럴
+# platform 컴포넌트는 아래 양방향 검사(정방향 dir→표 + 역방향 표→dir)가 동적 커버한다 —
+# argocd/root·charts/app 서브경로 스켈레톤만 여기 명시 유지(basename 검사가 못 잡는 깊이).
 dirs=(
   infra/cloudflare infra/github infra/tailscale infra/k3s-bootstrap
   platform/argocd/root platform/charts/app
-  platform/traefik platform/cnpg platform/victoria-stack
-  platform/adguard platform/cloudflared platform/tailscale
-  platform/sealed-secrets platform/data-conn platform/cache
-  platform/network-policies platform/namespaces
   apps tools docs/plans
 )
 rc=0
@@ -42,7 +42,15 @@ fi
 for d in platform/*/; do
   c="$(basename "$d")"
   case "$c" in charts) continue;; esac
-  if ! grep -q "$c" README.md; then echo "FAIL: README 디렉토리 지도에 platform 컴포넌트 누락: $c"; rc=1; fi
+  if ! grep -q "$c" "$README"; then echo "FAIL: README 디렉토리 지도에 platform 컴포넌트 누락: $c"; rc=1; fi
 done
+
+# 역방향(README 컴포넌트 표 → 디렉토리): 표에 나열된 각 컴포넌트가 platform/<c>/로 실재하는지.
+# 정방향(dir→표)과 합쳐 양방향 — phantom/리네임 항목을 잡고 신규 컴포넌트를 자동 편입한다.
+comps="$(sed -n '/### platform 컴포넌트/,/^## /p' "$README" | grep -oE "^\| ${BT}[a-z0-9-]+${BT}" | tr -d "${BT}|" | tr -d ' ')"
+while IFS= read -r c; do
+  [ -n "$c" ] || continue
+  [ -d "platform/$c" ] || { echo "FAIL: README 컴포넌트 표에 있으나 platform/ 디렉토리 부재: $c"; rc=1; }
+done <<< "$comps"
 
 exit $rc
