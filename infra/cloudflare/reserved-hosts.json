@@ -1,0 +1,6 @@
+{
+  "platform_hosts": [
+    "argocd-webhook.ukyi.app",
+    "files.ukyi.app"
+  ]
+}

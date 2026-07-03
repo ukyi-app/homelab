@@ -34,3 +34,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   echo "$out" | jq -e '.drift | length == 0'
   echo "$out" | jq -e '.transient[] | select(.host=="blog.ukyi.app")'
 }
+
+@test "reserved platform hosts from the SSOT are checked for drift (M11 platform_hosts gap)" {
+  d="$BATS_TEST_TMPDIR"
+  printf '[]\n' > "$d/apps.json"
+  printf '{"platform_hosts":["files.ukyi.app","argocd-webhook.ukyi.app"]}\n' > "$d/reserved.json"
+  # files는 NXDOMAIN(미apply), argocd-webhook은 resolve
+  out=$(bun "$ROOT/tools/dns-drift-check.ts" --apps "$d/apps.json" --reserved "$d/reserved.json" \
+    --fixture '{"argocd-webhook.ukyi.app":["104.21.0.1"]}')
+  echo "$out" | jq -e '.drift[] | select(.host=="files.ukyi.app" and (.reason|test("예약 platform host")))'
+  echo "$out" | jq -e '.drift | length == 1'
+}

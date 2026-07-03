@@ -3,10 +3,13 @@
 // resolver는 주입 가능: 라이브는 node:dns, 테스트는 --fixture(host→records|null) JSON.
 import { readFileSync } from "node:fs";
 import { promises as dnsp } from "node:dns";
+import { dirname, join } from "node:path";
 
 const arg = (k: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : undefined; };
 const appsPath = arg("--apps") ?? "infra/cloudflare/apps.json";
 const fixture = arg("--fixture");
+// 예약 platform host SSOT — 기본은 --apps 형제(reserved-hosts.json). 형제 부재면 빈 목록(tmp-fixture 회귀 0).
+const reservedPath = arg("--reserved") ?? join(dirname(appsPath), "reserved-hosts.json");
 
 // resolver: host → 배열(존재) | null(NXDOMAIN) | undefined(transient: SERVFAIL/timeout)
 let resolve;
@@ -36,6 +39,16 @@ for (const r of registry) {
   const recs = await resolve(r.host);
   if (recs === null) drift.push({ host: r.host, name: r.name, reason: "NXDOMAIN — active:true인데 DNS 레코드 미존재(apply 누락 의심)" });
   else if (recs === undefined) transient.push({ host: r.host, name: r.name, reason: "resolve 일시 실패(SERVFAIL/timeout) — drift 아님, 재확인 필요" });
+}
+// 예약 platform host(reserved-hosts.json SSOT) — 구조적으로 항상 public&&active라 반드시 resolve돼야
+// 한다. M11: apps.json만 감시하던 dns-drift가 argocd-webhook/files를 놓치던 갭 해소. 파일 부재는
+// 빈 목록(tmp-fixture 테스트 무영향 — 형제 파일 없음).
+let reservedHosts: string[] = [];
+try { reservedHosts = JSON.parse(readFileSync(reservedPath, "utf8")).platform_hosts ?? []; } catch { reservedHosts = []; }
+for (const host of reservedHosts) {
+  const recs = await resolve(host);
+  if (recs === null) drift.push({ host, name: "platform", reason: "NXDOMAIN — 예약 platform host인데 DNS 레코드 미존재(apply 누락 의심)" });
+  else if (recs === undefined) transient.push({ host, name: "platform", reason: "resolve 일시 실패(SERVFAIL/timeout) — drift 아님, 재확인 필요" });
 }
 // drift와 transient 분리 출력 — 워크플로는 .drift.length만 drift 알림으로(transient는 별도 경고).
 console.log(JSON.stringify({ drift, transient }, null, 2));

@@ -110,7 +110,10 @@ const { sumReq, sumLimit, budget } = agg;
 const appsJsonPath = `${ROOT}/infra/cloudflare/apps.json`;
 const registry = JSON.parse(readFileSync(appsJsonPath, "utf8"));
 if (served && pub) {
-  if ([DOMAIN, `www.${DOMAIN}`].includes(host) || host.endsWith(`.home.${DOMAIN}`)) fail(`예약 host: ${host}`);
+  const reserved = new Set<string>(
+    JSON.parse(readFileSync(`${ROOT}/infra/cloudflare/reserved-hosts.json`, "utf8")).platform_hosts ?? [],
+  );
+  if ([DOMAIN, `www.${DOMAIN}`].includes(host) || host.endsWith(`.home.${DOMAIN}`) || reserved.has(host)) fail(`예약 host: ${host}`);
   if (registry.some((r: any) => r.name === app)) fail(`apps.json에 name '${app}' 이미 존재`);
   if (registry.some((r: any) => r.host === host)) fail(`apps.json에 host '${host}' 이미 존재(오라우팅 차단)`);
 }

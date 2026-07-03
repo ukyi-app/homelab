@@ -17,6 +17,7 @@ setup() {
 **합계:** req ≈ 100 Mi · limit ≈ 200 Mi (반드시 ≤ 8704 Mi 유지).
 EOF
   echo '[]' > "$FR/infra/cloudflare/apps.json"
+  echo '{"platform_hosts":["argocd-webhook.ukyi.app","files.ukyi.app"]}' > "$FR/infra/cloudflare/reserved-hosts.json"
   cat > "$TMP/.app-config.yml" <<'EOF'
 kind: web
 resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
@@ -212,4 +213,18 @@ EOF
   gen
   [ "$status" -eq 0 ]
   grep -q 'orders=ghcr.io/ukyi-app/orders:sha-aaa1111' "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
+}
+
+@test "create-app rejects a reserved platform host (reserved-hosts.json SSOT)" {
+  cat > "$TMP/.app-config.yml" <<'EOF'
+kind: web
+resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
+route: { public: true, host: files.ukyi.app }
+EOF
+  run bun "$ROOT/tools/create-app.ts" --config "$TMP/.app-config.yml" --app orders \
+    --repo ukyi-app/orders --domain ukyi.app --repo-root "$FR" \
+    --digest sha256:1111111111111111111111111111111111111111111111111111111111111111 \
+    --tag sha-aaa1111000000000000000000000000000000000
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -Fq "예약 host"
 }
