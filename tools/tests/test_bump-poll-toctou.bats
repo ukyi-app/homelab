@@ -29,3 +29,15 @@ setup() {
   run grep -E 'expect=.*\.current\.tag' "$F"
   [ "$status" -eq 0 ]
 }
+
+@test "bump-poll branches on the bespoke pin descriptor and passes --pin to bump-tag" {
+  run grep -E "pin=\\\$\(echo .*jq -r '\.pin // empty'\)" "$F"
+  [ "$status" -eq 0 ]
+  run grep -E 'bump-tag\.ts .*--pin' "$F"
+  [ "$status" -eq 0 ]
+}
+
+@test "bump-poll git-adds the planner writePath (unifies apps and bespoke lanes)" {
+  run grep -E 'git add "\$writePath"' "$F"
+  [ "$status" -eq 0 ]
+}

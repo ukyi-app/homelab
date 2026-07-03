@@ -3,6 +3,21 @@ import { resolve, sep, dirname } from "node:path";
 import { parseDocument, isScalar } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
 
+// digest-exporter APPS 신선도 동기(codex pass2 P2-2): bump한 앱이 APPS 목록에 있으면 그 항목의
+// 이미지 태그를 새 tag로 갱신한다. sha-* 태그가 불변이라 배포 핀만 바꾸면 digest-exporter가 stale
+// 참조로 거짓 ImageDigestDrift(B2)를 낸다. 파일/항목 부재는 무변경 no-op(정보 로그만) — apps·베스포크 공통.
+function syncDigestExporter(root: string, appName: string, newTag: string): void {
+  const p = resolve(root, "platform/victoria-stack/prod/digest-exporter.yaml");
+  let raw: string;
+  try { raw = readFileSync(p, "utf8"); } catch { return; } // 파일 부재 = no-op
+  const esc = appName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(ghcr\\.io/ukyi-app/${esc}:)sha-[0-9a-f]{7,40}`, "g");
+  const next = raw.replace(re, `$1${newTag}`);
+  if (next === raw) { console.log(`digest-exporter: APPS에 ${appName} 없음(또는 이미 최신) — 동기 skip`); return; }
+  writeFileSync(p, next);
+  console.log(`digest-exporter: APPS ${appName} 태그 동기 → ${newTag}`);
+}
+
 const argv = process.argv.slice(2);
 // arity 검증 파서: 인식된 값-플래그는 비어있지 않은 값(다음 토큰이 `--flag`가 아님)을 필수로 갖는다.
 // 미인식 `--flag`는 거부(오타 침묵-무시 차단). 나머지는 positional(app, tag).
@@ -62,6 +77,7 @@ if (pinArg !== undefined) {
   node.value = `${pinRepo}:${tag}@${digest}`;
   node.comment = ` sha-${tag.slice(4, 11)} + digest 인라인 핀(불변)`; // lineComment 갱신(stale short-sha 방지)
   writeFileSync(targetPath, doc.toString());
+  syncDigestExporter(repoRoot, app, tag);
   console.log(`bump(inline): ${targetPath} ${cur} -> ${node.value}`);
   process.exit(0);
 }
@@ -92,6 +108,7 @@ if (digest !== undefined) {
   doc.deleteIn(["image", "digest"]);
 }
 writeFileSync(path, doc.toString());
+syncDigestExporter(repoRoot, app, tag);
 const detail = digest !== undefined
   ? `image.tag ${curTag} -> ${tag}, image.digest ${curDigest ?? "<none>"} -> ${digest}`
   : curDigest !== undefined

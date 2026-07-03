@@ -89,6 +89,8 @@ jobs:
             tag=$(echo "$item" | jq -r .candidate.tag)
             digest=$(echo "$item" | jq -r .candidate.digest)
             action=$(echo "$item" | jq -r .action)
+            pin=$(echo "$item" | jq -r '.pin // empty')          # 베스포크 레인만 세팅(apps는 empty)
+            writePath=$(echo "$item" | jq -r .writePath)          # git add 대상(두 레인 통일)
             # 플래너 출력도 한 번 더 정제(심층 방어) — bump-tag.ts가 재검증한다
             case "$app" in ''|*[!a-z0-9-]*) echo "skip suspicious app: '$app'"; continue ;; esac
             git checkout main
@@ -100,8 +102,15 @@ jobs:
             # checkout 직후의 실측 image.tag가 이 expect와 다르면(=plan 이후 main 이동) bump-tag가 fail-closed로
             # 중단(stale 증명 push 방지) — 다음 주기가 새 스냅샷으로 다시 plan한다.
             expect=$(echo "$item" | jq -r '.current.tag')
-            bun tools/bump-tag.ts "$app" "$tag" --digest "$digest" --expect-current "$expect"
-            git add "apps/$app/deploy/prod/values.yaml"
+            if [ -n "$pin" ]; then
+              bun tools/bump-tag.ts "$app" "$tag" --digest "$digest" --expect-current "$expect" --pin "$pin"
+            else
+              bun tools/bump-tag.ts "$app" "$tag" --digest "$digest" --expect-current "$expect"
+            fi
+            # digest-exporter APPS 신선도(codex pass2 P2-2): sha-* 태그는 불변이라 배포 핀만 갱신하면
+            # ImageDigestDrift(B2)가 stale 참조로 거짓 드리프트를 낸다 — bump-tag.ts가 같은 실행에서
+            # APPS의 동일 앱 항목 태그를 동기 갱신(항목 부재=no-op), 같은 커밋에 포함한다.
+            git add "$writePath" platform/victoria-stack/prod/digest-exporter.yaml
             git commit -m "chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)"
             git push -u origin "$branch"
             if [ "$action" = "bump" ]; then
