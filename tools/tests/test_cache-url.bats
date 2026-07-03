@@ -33,3 +33,17 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   run grep -iE "FLUSHALL|flushdb|del " "$ROOT/tools/cache-url.ts"
   [ "$status" -ne 0 ]
 }
+
+@test "cache-url live path writes the namespaced env key, substitutes the port-forward host, and never prints plaintext" {
+  T="$(mktemp -d)"; mkdir -p "$T/bin"
+  cat > "$T/bin/kubectl" <<'STUB'
+#!/usr/bin/env bash
+printf '%s' "cmVkaXM6Ly91Om5AY2FjaGUtc2Vzc2lvbnM6NjM3OQ=="
+STUB
+  chmod +x "$T/bin/kubectl"
+  run env PATH="$T/bin:$PATH" bun "$ROOT/tools/cache-url.ts" --name sessions --env-local "$T/.env.local"
+  [ "$status" -eq 0 ]
+  grep -q '^SESSIONS_REDIS_RO_URL=redis://u:n@127.0.0.1:6379$' "$T/.env.local"   # 기본 host(127.0.0.1) 치환 + namespaced 키
+  [ "$(printf '%s' "$output" | grep -c 'redis://')" -eq 0 ]    # 평문 URL stdout 비노출
+  rm -rf "$T"
+}

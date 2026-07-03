@@ -48,3 +48,21 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; S="$ROOT/tools/app-con
   run jq -e '.properties.kind.enum == ["web","worker","site"]' "$S"
   [ "$status" -eq 0 ]
 }
+
+@test "app-config-schema uses only keywords the create-app mini-validator implements (unimplemented constraint = silent under-validation)" {
+  run env S="$S" bun -e '
+    const s = JSON.parse(require("fs").readFileSync(process.env.S,"utf8"));
+    const OK = new Set(["$schema","$id","title","description","$ref","definitions","default","comment",
+      "type","enum","pattern","minimum","maximum","minItems","uniqueItems","required","properties","additionalProperties","items"]);
+    const bad = [];
+    const visit = (n) => { if (!n || typeof n!=="object") return;
+      for (const k of Object.keys(n)) if (!OK.has(k)) bad.push(k);
+      if (n.properties) for (const v of Object.values(n.properties)) visit(v);
+      if (n.items) visit(n.items);
+      if (n.definitions) for (const v of Object.values(n.definitions)) visit(v);
+    };
+    visit(s);
+    if (bad.length) { console.error("미구현 키워드:", [...new Set(bad)].join(",")); process.exit(1); }
+  '
+  [ "$status" -eq 0 ]
+}

@@ -55,3 +55,17 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   run grep -iE "DROP TABLE|db:reset|compose down" "$ROOT/tools/db-url.ts"
   [ "$status" -ne 0 ]
 }
+
+@test "db-url live path writes the namespaced env key, substitutes the tailscale host, and never prints plaintext" {
+  T="$(mktemp -d)"; mkdir -p "$T/bin"
+  cat > "$T/bin/kubectl" <<'STUB'
+#!/usr/bin/env bash
+printf '%s' "cG9zdGdyZXM6Ly91Om5AcGctcncucHJvZDo1NDMyL29yZGVycw=="
+STUB
+  chmod +x "$T/bin/kubectl"
+  run env PATH="$T/bin:$PATH" bun "$ROOT/tools/db-url.ts" --name orders --host 100.99.0.1 --env-local "$T/.env.local"
+  [ "$status" -eq 0 ]
+  grep -q '^ORDERS_RO_DATABASE_URL=postgres://u:n@100.99.0.1:5432/orders$' "$T/.env.local"   # host 치환 + namespaced 키
+  [ "$(printf '%s' "$output" | grep -c 'postgres://')" -eq 0 ]    # 평문 URL stdout 비노출(카운트 패턴)
+  rm -rf "$T"
+}

@@ -228,3 +228,19 @@ EOF
   [ "$status" -ne 0 ]
   echo "$output" | grep -Fq "예약 host"
 }
+
+@test "create-app rejects an internal app whose host collides with an existing app's route.host (mis-routing guard)" {
+  mkdir -p "$FR/apps/other/deploy/prod"
+  printf 'route: { host: shared.home.example.com, public: false }\n' > "$FR/apps/other/deploy/prod/values.yaml"
+  cat > "$TMP/.app-config.yml" <<'EOF'
+kind: web
+resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
+route: { public: false, host: shared.home.example.com }
+EOF
+  run bun "$ROOT/tools/create-app.ts" --config "$TMP/.app-config.yml" --app orders \
+    --repo ukyi-app/orders --domain example.com --repo-root "$FR" \
+    --digest sha256:1111111111111111111111111111111111111111111111111111111111111111 \
+    --tag sha-aaa1111000000000000000000000000000000000
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -Fq "이미 배선"
+}
