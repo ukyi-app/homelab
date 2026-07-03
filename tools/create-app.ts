@@ -3,7 +3,7 @@
 // 연결(DB/Redis)은 앱 SealedSecret(DATABASE_URL/REDIS_URL)으로 주입 — create-app은
 // SealedSecret 시크릿·digest 핀 이미지·권위 바인딩 레지스트리(.bindings.json=autoDeploy)를 다룬다.
 // _create-app.yaml(homelab-initiated workflow_dispatch)이 호출 — 결과물은 PR(사람 머지 = 승인).
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
@@ -44,6 +44,8 @@ try { config = parseYaml(readFileSync(configPath, "utf8")) ?? {}; }
 catch (e: any) { fail(`.app-config.yml 파싱 실패: ${e.message}`); }
 
 // ---------- 2) 스키마 검증 (app-config-schema.json이 계약 SSOT) ----------
+// 미니 검증기(check()) 지원 키워드 SSOT는 test_app-config.bats 화이트리스트 — 스키마에 미구현
+// 제약(maxLength/const/oneOf/anyOf/not/format 등) 추가 시 그 정적 가드가 fail-closed로 잡는다.
 const schema = JSON.parse(readFileSync(new URL("./app-config-schema.json", import.meta.url), "utf8"));
 const deref = (s: any) => (s?.$ref ? schema.definitions[s.$ref.split("/").pop()] : s);
 function check(val: any, sch: any, path: string) {
@@ -84,7 +86,17 @@ if (served) {
   const derived = pub ? `${app}.${DOMAIN}` : `${app}.home.${DOMAIN}`;
   if (!host) host = derived;
   else if (pub) { if (!host.endsWith(`.${DOMAIN}`) || host.endsWith(`.home.${DOMAIN}`)) fail(`public host는 *.${DOMAIN}(단, *.home.* 제외): '${host}'`); }
-  else if (!host.endsWith(`.home.${DOMAIN}`)) fail(`internal host는 *.home.${DOMAIN}: '${host}'`);
+  else {
+    if (!host.endsWith(`.home.${DOMAIN}`)) fail(`internal host는 *.home.${DOMAIN}: '${host}'`);
+    // 내부 host 유일성 — 내부 앱은 apps.json 미등록이라 기존 apps/*/values.yaml route.host를 스캔(명시 override 충돌=오라우팅)
+    const appsDir = `${ROOT}/apps`;
+    if (existsSync(appsDir)) for (const d of readdirSync(appsDir)) {
+      const vp = `${appsDir}/${d}/deploy/prod/values.yaml`;
+      if (d === app || !existsSync(vp)) continue;
+      const rh = (parseYaml(readFileSync(vp, "utf8")) ?? {})?.route?.host;
+      if (rh === host) fail(`내부 host '${host}'가 apps/${d}에 이미 배선됨(오라우팅 차단)`);
+    }
+  }
 }
 
 const toMi = (m: string) => m.endsWith("Gi") ? parseInt(m) * 1024 : parseInt(m);
