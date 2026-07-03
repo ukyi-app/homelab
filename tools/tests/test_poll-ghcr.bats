@@ -135,3 +135,54 @@ JSON
   # 404는 absent → 후보 없음(noop), refuse 아님
   echo "$output" | jq -e '.[0].action == "noop"'
 }
+
+@test "a bespoke platform component (image-pin descriptor) joins the bump lane with pin+writePath" {
+  PD="$TMP/platform/files/prod"; mkdir -p "$PD"
+  printf 'ukyi-app/files' > "$PD/source-repo"
+  cat > "$PD/.image-pin.json" <<'JSON'
+{ "file": "deployment.yaml", "path": ["spec","template","spec","containers",0,"image"], "autoDeploy": true }
+JSON
+  cat > "$PD/deployment.yaml" <<'YAML'
+spec:
+  template:
+    spec:
+      containers:
+        - name: files
+          image: ghcr.io/ukyi-app/files:sha-aaa1111000000000000000000000000000000000@sha256:1111111111111111111111111111111111111111111111111111111111111111
+YAML
+  cat > "$FX/files.commits.json" <<'EOF'
+[ { "sha": "bbb2222000000000000000000000000000000000" }, { "sha": "aaa1111000000000000000000000000000000000" } ]
+EOF
+  printf '{ "status": "ahead", "ahead_by": 1 }\n' > "$FX/files.compare-aaa1111-main.json"
+  printf '{ "status": "ahead", "ahead_by": 1 }\n' > "$FX/files.compare-aaa1111-bbb2222.json"
+  printf '{ "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" }\n' > "$FX/files.manifest-sha-bbb2222.json"
+  run bun "$P" --root "$TMP" --fixtures "$FX" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[] | select(.app=="files") | .action == "bump"'
+  echo "$output" | jq -e '.[] | select(.app=="files") | .pin == "platform/files/prod/.image-pin.json"'
+  echo "$output" | jq -e '.[] | select(.app=="files") | .writePath == "platform/files/prod/deployment.yaml"'
+  echo "$output" | jq -e '.[] | select(.app=="files") | .candidate.tag == "sha-bbb2222000000000000000000000000000000000"'
+}
+
+@test "bespoke descriptor without autoDeploy is fail-closed (propose-pr, never auto bump)" {
+  PD="$TMP/platform/files/prod"; mkdir -p "$PD"
+  printf 'ukyi-app/files' > "$PD/source-repo"
+  printf '{ "file": "deployment.yaml", "path": ["spec","template","spec","containers",0,"image"] }\n' > "$PD/.image-pin.json"
+  cat > "$PD/deployment.yaml" <<'YAML'
+spec:
+  template:
+    spec:
+      containers:
+        - name: files
+          image: ghcr.io/ukyi-app/files:sha-aaa1111000000000000000000000000000000000@sha256:1111111111111111111111111111111111111111111111111111111111111111
+YAML
+  cat > "$FX/files.commits.json" <<'EOF'
+[ { "sha": "bbb2222000000000000000000000000000000000" }, { "sha": "aaa1111000000000000000000000000000000000" } ]
+EOF
+  printf '{ "status": "ahead", "ahead_by": 1 }\n' > "$FX/files.compare-aaa1111-main.json"
+  printf '{ "status": "ahead", "ahead_by": 1 }\n' > "$FX/files.compare-aaa1111-bbb2222.json"
+  printf '{ "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" }\n' > "$FX/files.manifest-sha-bbb2222.json"
+  run bun "$P" --root "$TMP" --fixtures "$FX" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[] | select(.app=="files") | .action == "propose-pr"'
+}
