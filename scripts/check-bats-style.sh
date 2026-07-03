@@ -11,7 +11,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-BB_BASELINE="${BB_BASELINE_OVERRIDE:-65}"   # 현재 트리 중간 [[ ]] 수(B13 정비 대상). 신규 증가 차단.
+BB_BASELINE="${BB_BASELINE_OVERRIDE:-53}"   # 현재 트리 중간 [[ ]] 수(B13.4 차트 bats 정비로 65→53). 신규 증가 차단, 0 수렴 목표.
 FILES=()
 if [ "$#" -gt 0 ]; then FILES=("$@"); else
   while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.bats')

@@ -27,6 +27,7 @@
       "properties": { "name": { "type": "string", "minLength": 1 }, "namespace": { "type": "string", "minLength": 1 } }
     },
     "resources": {
+      "comment": "cpu·memory request + cpu·memory limit 4값 전부 required — 온보딩 사이징 디시플린(값 상속 금지, 앱 저자가 명시 선언). platform/ 베스포크의 check-resource-limits는 cpu limit 비요구(런타임 SRE=CFS throttling 회피)지만 이 차트는 apps/를 지배하는 별개 레이어라 정책이 다르다(분리 트리·게이트 무충돌). cpu limit 값은 저자 자유(넉넉히 두면 throttling 회피).",
       "type": "object", "required": ["requests", "limits"],
       "properties": {
         "requests": { "type": "object", "required": ["cpu", "memory"], "properties": { "cpu": { "type": "string", "minLength": 1 }, "memory": { "type": "string", "minLength": 1 } } },

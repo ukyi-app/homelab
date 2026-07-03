@@ -30,7 +30,7 @@ envFrom: [] # [{secretRef: {name}}]
 route:
   host: "" # web|site에 필수
   paths: ["/"]
-  public: false # sectionName 매핑: web-public (true) / web-internal (false)
+  public: false # sectionName 매핑: web-public (true) / web-internal-tls (false)
 
 # --- homepage(gethomepage) 대시보드 자동발견 (served kind만; 기본 off) ---
 homepage:
