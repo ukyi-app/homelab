@@ -7,7 +7,7 @@
 #   result=blocked-delete : delete>0 && mode=block      → exit 1 (호출 측이 alert-and-skip로 강등)
 #   result=error          : 내부/도구 오류              → exit 2 (호출 측이 잡 실패)
 # ALLOW(정규식, 선택): 매칭 resource address의 delete는 차단 카운트에서 제외한다(자동 관리 표면
-#   = app 공개 DNS, cloudflare_dns_record.public[*]). 구조적 리소스 delete/replace는 계속 차단.
+#   = app 공개 DNS, cloudflare_dns_record.app[*]). 구조적 리소스 delete/replace는 계속 차단.
 # 단위 테스트용: PLAN_JSON이 있으면 그 파일을, 없으면 `terraform -chdir=$ROOT show -json $PLAN`.
 set -u
 out="${GITHUB_OUTPUT:-/dev/null}"
