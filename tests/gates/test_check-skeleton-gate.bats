@@ -30,3 +30,9 @@ setup() {
   run yq -e '.jobs.gate.steps[] | select((.uses // "") | test("setup-toolchain")) | (.with.kustomize == "true" and .with.yq == "true")' .github/workflows/ci.yaml
   [ "$status" -eq 0 ]; [ "$output" = "true" ]
 }
+
+@test "check-skeleton FAILS when README component table lists a nonexistent platform dir (reverse tie)" {
+  run bash -c 'sed "s/| \`files\`/| \`ghostcomp\`/" README.md > /tmp/ck_readme_$$ && CK_README=/tmp/ck_readme_$$ ./scripts/check-skeleton.sh; rc=$?; rm -f /tmp/ck_readme_$$; exit $rc'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "ghostcomp"
+}
