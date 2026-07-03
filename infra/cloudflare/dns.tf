@@ -11,12 +11,13 @@ locals {
   # apex/www는 코드 고정(구조적) — destroy 가드가 무인 삭제를 끝까지 차단한다. 앱 host는 apps.json
   # 데이터 합류(자동 관리)라 별도 리소스(cloudflare_dns_record.app)로 분리 — destroy 가드 allowlist
   # (^cloudflare_dns_record\.app\[)가 앱 DNS만 정확히 겨냥하고 apex/www는 보호되게 한다.
-  site_hosts = toset([var.zone_name, "www.${var.zone_name}"])
-  # 플랫폼 공개 host — 코드 고정(구조적), 앱이 아님. apps.json(앱 레지스트리)이 아니라 여기서 관리한다.
-  # argocd-webhook: ArgoCD의 /api/webhook만 공개해 GitHub push→즉시 sync를 받는다(UI는 내부 전용 유지).
-  # files: 베스포크 플랫폼 컴포넌트(platform/files)의 공개 다운로드 표면(files.ukyi.app→web-public→:8081).
-  # destroy 가드 allowlist(^cloudflare_dns_record\.app\[) 비대상이라 apex/www처럼 무인 삭제로부터 보호된다.
-  platform_hosts = toset(["argocd-webhook.${var.zone_name}", "files.${var.zone_name}"])
+  # 플랫폼 공개 host — 코드 고정(구조적), 앱이 아님. reserved-hosts.json이 SSOT(dns.tf·create-app·
+  # test_apps_structure·dns-drift 4소비자 공유). apps.json(앱 레지스트리, 데이터 합류·자동 회수)과
+  # 분리한다 — 예약 host는 자동 회수 대상이 아니라 destroy 가드 allowlist(^cloudflare_dns_record\.app\[)
+  # 비대상이라 apex/www처럼 무인 삭제로부터 보호된다.
+  # argocd-webhook: ArgoCD /api/webhook만 공개(UI는 내부 전용). files: 베스포크 컴포넌트 다운로드 표면.
+  site_hosts     = toset([var.zone_name, "www.${var.zone_name}"])
+  platform_hosts = toset(jsondecode(file("${path.module}/reserved-hosts.json")).platform_hosts)
   # tunnel ingress는 apex/www/플랫폼/앱 host 전부를 라우팅한다 — 합집합 유지(tunnel.tf가 참조).
   public_hosts = toset(concat(tolist(local.site_hosts), tolist(local.platform_hosts), tolist(local.app_hosts)))
 }

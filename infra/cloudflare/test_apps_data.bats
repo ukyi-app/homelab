@@ -17,6 +17,11 @@ setup() { C="$(cd "$BATS_TEST_DIRNAME" && pwd)"; }
   [ "$status" -eq 0 ]
 }
 
+@test "dns.tf consumes reserved-hosts.json as the platform_hosts SSOT" {
+  run grep -E 'jsondecode\(file\(.*reserved-hosts\.json' "$C/dns.tf"
+  [ "$status" -eq 0 ]
+}
+
 @test "dns exposure is gated on public && active" {
   run grep -E 'a.public && a.active' "$C/dns.tf"
   [ "$status" -eq 0 ]
