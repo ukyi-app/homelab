@@ -62,3 +62,7 @@ pre-commit run -a    # (보조) 평문 시크릿 가드 + gitleaks
 `make ci`가 통과하면 머지를 막는 required check는 통과한다(branch protection `contexts=[gate]`).
 verify·pre-commit은 sops/시크릿 안전망이다. `make ci`는 시스템 PATH의 `bun`(1.3.14 핀)을 쓴다 —
 설치는 `docs/runbooks-public/toolchain-setup.md` 참고(`m6-tools`가 버전 게이트).
+
+## 문서 관례
+- **계획 문서 크기**: `docs/plans/`는 검색 노이즈를 줄이기 위해 간결히(권장 상한 ~1500줄/문서). 대형
+  산출물은 요약 SSOT + 링크로 분리한다. 히스토리 재작성은 하지 않고 `.rgignore`가 검색에서 제외한다.
