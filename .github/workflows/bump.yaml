@@ -87,20 +87,33 @@ jobs:
             case "$app" in
               ''|*[!a-z0-9-]*) echo "skip suspicious app name: '$app'"; continue ;;
             esac
-            # 배포되는 앱만 bump할 values.yaml이 있다 (pg-tools에는 없음)
-            [ -f "apps/$app/deploy/prod/values.yaml" ] || { echo "skip $app (no deploy values.yaml)"; continue; }
-            echo "verify ghcr.io/$OWNER/$app:$SHA exists BEFORE bumping"
-            docker manifest inspect "ghcr.io/$OWNER/$app:$SHA" >/dev/null 2>&1 \
-              || { echo "::error::ghcr.io/$OWNER/$app:$SHA missing — refusing to bump (would ImagePullBackOff)"; exit 1; }
-            bun tools/bump-tag.ts "$app" "$SHA"
+            # 배포되는 앱은 values.yaml을 bump, ops 이미지(pg-tools)는 5-site 인라인 digest를 재핀
+            if [ -f "apps/$app/deploy/prod/values.yaml" ]; then
+              echo "verify ghcr.io/$OWNER/$app:$SHA exists BEFORE bumping"
+              docker manifest inspect "ghcr.io/$OWNER/$app:$SHA" >/dev/null 2>&1 \
+                || { echo "::error::ghcr.io/$OWNER/$app:$SHA missing — refusing to bump (would ImagePullBackOff)"; exit 1; }
+              bun tools/bump-tag.ts "$app" "$SHA"
+            elif [ "$app" = "pg-tools" ]; then
+              # ops 이미지: values.yaml 없음 — pg-tools:18-rclone 새 digest를 5-site 인라인 핀에 재핀(부분 갱신 skew 차단)
+              digest="$(docker buildx imagetools inspect "ghcr.io/$OWNER/pg-tools:18-rclone" --format '{{.Manifest.Digest}}')"
+              case "$digest" in sha256:*) : ;; *) echo "::error::pg-tools digest 해석 실패: '$digest'"; exit 1 ;; esac
+              bun tools/repin-pgtools.ts "$digest"
+            else
+              echo "skip $app (no deploy values.yaml, no re-pin registry)"; continue
+            fi
           done
           if git diff --quiet; then echo "no values changed"; exit 0; fi
           git config user.name "ukyi-homelab-writer[bot]"
           git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
           branch="bump/build-${RUN_ID}"
           git checkout -b "$branch"
-          git add apps/*/deploy/prod/values.yaml
-          git commit -m "chore: 빌드된 앱 이미지 태그를 ${SHA}로 갱신 (${APPS})"
+          # apps는 디렉토리 형식(인레포 앱 0일 때 glob 미매치 pathspec 에러 회피 — pg-tools 전용 bump 대응)
+          git add apps \
+                  platform/cache/prod/backup-cronjob.yaml \
+                  platform/cnpg/prod/ensure-role-password-job.yaml \
+                  platform/cnpg/prod/restore-drill-cronjob.yaml \
+                  platform/cnpg/prod/pgdump-hedge-cronjob.yaml
+          git commit -m "chore: 빌드 산출물 이미지 핀 갱신 (${APPS})"
           git push -u origin "$branch"
           # PR-first 쓰기 모델: gate 통과 시 자동 머지(squash). 머지 후 브랜치는 자동 삭제(repo 설정).
           gh pr create --base main --head "$branch" \
