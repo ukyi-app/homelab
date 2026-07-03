@@ -37,12 +37,12 @@ spec:
             - --httpListenAddr=:8428
             - --dedup.minScrapeInterval=30s
           env:
-            - { name: GOMEMLIMIT, value: "920MiB" } # 1Gi limit의 약 90%
+            - { name: GOMEMLIMIT, value: "800MiB" } # 896Mi limit의 약 89%(B2 게이트 ≤limit×0.95=851 준수, right-size 2026-07 B10)
           ports:
             - { name: http, containerPort: 8428 }
           resources:
             requests: { cpu: 100m, memory: 512Mi }
-            limits: { memory: 1Gi }
+            limits: { memory: 896Mi } # right-size 2026-07(B10): 라이브 peak ~445Mi(7d) 대비 ~2x, allowedPercent=60이 캐시를 새 예산에 자동 튜닝
           readinessProbe: { httpGet: { path: /health, port: 8428 }, initialDelaySeconds: 5 }
           livenessProbe: { httpGet: { path: /health, port: 8428 }, initialDelaySeconds: 30 }
           securityContext:
