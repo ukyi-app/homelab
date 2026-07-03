@@ -11,9 +11,9 @@ if [ -n "$age_key" ] && [ -f "$age_key" ]; then can_decrypt=1; fi
 
 # canonical age recipient(공개키) — .sops.yaml _recipients 앵커. 개수가 아니라 신원을 강제해
 # recovery 키 스왑/드롭(개수는 2 유지)이 통과하는 갭을 닫는다(DR 복호 불능 방지). 정렬 집합 비교.
-SOPS_YAML="$(git rev-parse --show-toplevel 2>/dev/null)/.sops.yaml"
-[ -f "$SOPS_YAML" ] || SOPS_YAML=".sops.yaml"
-CANON="$(yq '._recipients[]' "$SOPS_YAML" 2>/dev/null | sort)"
+# shellcheck source=scripts/lib/sops-recipients.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/sops-recipients.sh"
+CANON="$(sops_canonical_recipients)"
 
 fail=0
 
@@ -26,7 +26,7 @@ check_one() {
   if [ -z "$CANON" ]; then
     echo "FAIL $f: .sops.yaml canonical recipient를 읽지 못함"; return 1
   fi
-  got="$(yq '.sops.age[].recipient' "$f" 2>/dev/null | sort)"
+  got="$(sops_file_recipients "$f")"
   if [ "$got" != "$CANON" ]; then
     echo "FAIL $f: recipient 신원이 canonical(cluster+recovery)과 불일치 — 스왑/recovery 드롭"; return 1
   fi

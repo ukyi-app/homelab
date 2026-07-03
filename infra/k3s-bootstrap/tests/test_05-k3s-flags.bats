@@ -44,3 +44,7 @@ setup() { EXEC="$(K3S_PRINT_EXEC=1 "$BOOTSTRAP_DIR/k3s-install.sh")"; }
   [[ "$EXEC" != *"--cluster-init"* ]]
   [[ "$EXEC" != *"etcd"* ]]
 }
+
+@test "does NOT pass --default-local-storage-path (built-in local-storage provisioner is disabled → flag is a no-op)" {
+  [[ "$EXEC" != *"--default-local-storage-path"* ]]
+}

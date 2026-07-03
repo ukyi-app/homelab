@@ -15,7 +15,3 @@ variable "tunnel_name" {
   type    = string
   default = "homelab-prod"
 }
-variable "internal_suffix" {
-  type        = string
-  description = "Internal hostname suffix, e.g. home.example.com."
-}

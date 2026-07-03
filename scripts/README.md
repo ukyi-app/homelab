@@ -20,8 +20,8 @@
   인레포 앱 0개면 vacuous pass.
 - **`run-bats.sh`** — **단일 테스트 수집·실행기(required GATE)**. `make ci`·`ci.yaml`(gate)이 공통 호출(이중 SSOT 제거).
   스코프 = git-tracked `test_*.bats` − `platform/charts/*`(chart-test 별도) − `tests/.ci-exclude`. `--list`는 수집 목록만.
-- **`verify-secrets.sh`** — 추적 `*.enc.yaml` 무결성(암호화됨 + age recipient 정확히 2개 + 복호 가능)
-  검사. **`make verify-secrets`**가 호출. 값 비출력; age 키 없으면(=CI) 복호 단계만 스킵하고 구조 검사는 수행.
+- **`verify-secrets.sh`** — 추적 `*.enc.yaml` 무결성(암호화됨 + age recipient 신원이 canonical(.sops.yaml
+  cluster+recovery)과 일치 + 복호 가능) 검사. **`make verify-secrets`**가 호출. 값 비출력; age 키 없으면(=CI) 복호 단계만 스킵하고 구조 검사는 수행.
 - **`verify-traps.sh`** — `docs/traps.md` enforcement 원장이 가리키는 guard 파일이 실재하는지 검사
   (가드 소실 드리프트 = 거짓 안심 차단). **`make verify-traps`**가 호출. 순수 파일 존재 검사.
 - **`ledger-to-json.ts`** — `docs/memory-ledger.md` 표를 JSON으로 변환(conftest 입력 생성). **`bun run verify:ledger`**·
@@ -39,7 +39,8 @@
 - **`verify-runbook-index.sh`** — `docs/runbooks/`(gitignored) ↔ AGENTS.md 런북 인덱스 정합(로컬 전용).
   런북 부재 시 skip(required gate 아님 — repo/CI엔 런북 없음). **`make verify-runbook-index`**가 호출.
 - **`audit-orphan-pv.sh`** — 고아 Released PV 감사(storageclass Retain이라 PVC 삭제 시 PV 누수). 나열만
-  (비파괴), reclaim은 owner 수동. `tests/gates/test_audit-orphan-pv.bats`가 가드. ★fail-closed(도구/쿼리 실패=비-0).
+  (비파괴), reclaim은 owner 수동. **`make audit-orphan-pv`**(라이브 ops)가 호출. `tests/gates/test_audit-orphan-pv.bats`가
+  가드. ★fail-closed(도구/쿼리 실패=비-0).
 
 ## 시크릿 / 부트스트랩 (라이브 쓰기·봉인본 산출)
 

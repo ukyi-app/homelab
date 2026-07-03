@@ -58,7 +58,7 @@ secret-edit: ## [secret] FILE= SOPS 파일을 복호→편집→재암호화(sop
 	@test -f "$(SOPS_AGE_KEY_FILE)" || { echo "secret-edit: age 키 없음: $(SOPS_AGE_KEY_FILE)"; exit 1; }
 	SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) sops "$(FILE)"
 
-verify-secrets: ## [secret] 추적 *.enc.yaml 무결성(암호화 + recipient 2개 + 복호가능) 검사 — 값 미출력
+verify-secrets: ## [secret] 추적 *.enc.yaml 무결성(암호화 + recipient 신원 canonical 일치 + 복호가능) 검사 — 값 미출력
 	@bash scripts/verify-secrets.sh
 
 secret-cert-check: ## [secret] 봉인 전 preflight — 커밋된 cert가 라이브 컨트롤러 cert와 일치하는지(stale 방지). 라이브 kubeseal 필요
@@ -169,7 +169,7 @@ backup-local-asset: ## [DR] 런북 tarball을 age 백업(OUT=<git 밖 경로>). 
 	@bash scripts/backup-local-asset.sh $(ARGS) "$(OUT)"
 
 ## --- 운영 진입점 (라이브 read-only; 변경 권위는 ArgoCD) ---
-.PHONY: argo-status argo-sync argo-terminate argo-wait render kubeconfig audit
+.PHONY: argo-status argo-sync argo-terminate argo-wait render kubeconfig audit audit-orphan-pv
 
 argo-status: ## [ops] ArgoCD Application 목록 — sync/health/멈춘 operation phase
 	@KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd get applications \
@@ -195,6 +195,9 @@ kubeconfig: ## [ops] 라이브 kubeconfig export 출력 — eval "$$(make kubeco
 
 audit: ## [ops] 레포 정적 드리프트 감사(registry↔매니페스트↔바인딩↔원장, 읽기 전용)
 	@bun tools/audit-orphans.ts
+
+audit-orphan-pv: ## [ops][live] 고아 Released PV 감사(PVC 삭제+Retain hostPath 누수 나열, 파괴 없음)
+	@KUBECONFIG=$(KUBECONFIG_LIVE) bash scripts/audit-orphan-pv.sh
 
 .PHONY: teardown-app teardown-resource
 teardown-app: ## [teardown] APP= 앱 철거(owner-local — clean-worktree·fresh-main 전용브랜치·PR). 예: make teardown-app APP=foo

@@ -9,9 +9,6 @@
 #       (없으면 preflight가 skip) — TF_TAILSCALE_OAUTH_ID / TF_TAILSCALE_OAUTH_SECRET /
 #       TF_TAILSCALE_DNS_NAMESERVER_IP. plan만 돌리므로 읽기 가능 OAuth면 되고 apply 권한은 불필요.
 
-# 내부 전용 호스트 접미사 — cloudflare root의 internal_suffix와 반드시 동일 값 ('home.' + 도메인)
-internal_suffix = "home.<DOMAIN>"
-
 # split-DNS 네임서버 주소: tailnet 기기들이 home.<DOMAIN> 조회 시 물어볼 DNS(=AdGuard)의
 # 도달 주소. AdGuard :53은 servicelb→VM→OrbStack을 거쳐 Mac mini 호스트로 매핑되므로
 # 'Mac mini의 Tailscale IP'를 넣는다 (`tailscale ip -4`로 확인).
