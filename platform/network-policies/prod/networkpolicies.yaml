@@ -5,6 +5,10 @@
 # 는 여기서 EGRESS로 강제되고(앱의 egress는 DNS, database:5432, cache:6379, 그리고 8080의
 # prod 내부 앱 피어로만 허용), 심층 방어로 database/cache namespace 자체의 default-deny
 # (platform/cnpg/prod, platform/cache/prod)가 보완한다.
+# ★포트 계약: 아래 하드코딩된 8080(http)·9090(metrics)은 공유 차트(platform/charts/app)의
+#   values.schema.json에서 ports.http/ports.metrics를 const 8080/9090으로 고정해 상호 잠금한다.
+#   앱이 커스텀 포트를 쓰면 gateway→pod가 이 default-deny에 걸려 무성 502가 된다 — 포트를
+#   바꾸려면 스키마 const와 이 파일의 포트를 반드시 동시에 갱신한다.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

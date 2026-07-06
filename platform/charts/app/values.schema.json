@@ -19,7 +19,6 @@
     },
     "kind": { "type": "string", "enum": ["web", "worker", "site"] },
     "replicas": { "type": "integer", "minimum": 1, "maximum": 3 },
-    "nameOverride": { "type": "string" },
     "imagePullSecrets": { "type": "array", "items": { "type": "object" } },
     "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } },
     "gateway": {
@@ -56,7 +55,11 @@
     },
     "ports": {
       "type": "object", "additionalProperties": false,
-      "properties": { "http": { "type": "integer" }, "metrics": { "type": "integer" } }
+      "comment": "http=8080·metrics=9090은 const로 고정 — prod ns-wide NetworkPolicy(platform/network-policies/prod/networkpolicies.yaml)가 이 두 포트를 하드코딩한다(gateway→8080 ingress, observability→9090 scrape, kubelet probe→8080). 커스텀 포트를 넣으면 렌더는 통과하나 gateway→pod가 default-deny로 드롭되고 kubelet probe는 노드발이라 통과 → 파드 Ready·ArgoCD green인 채 공개 edge만 502(무성 실패). 포트를 바꾸려면 netpol과 이 const를 반드시 동시에 갱신한다.",
+      "properties": {
+        "http": { "type": "integer", "const": 8080, "default": 8080 },
+        "metrics": { "type": "integer", "const": 9090, "default": 9090 }
+      }
     },
     "metrics": {
       "type": "object", "additionalProperties": false,
