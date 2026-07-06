@@ -44,8 +44,9 @@
   API(`/control/rewrite/list|delete|add`)로 `*.home.ukyi.app` rewrite를 수렴.
 - **API 쓰기는 AdGuard 라이브 설정(PVC)에 영속** → "ConfigMap 첫부팅 시드 전용" 함정 우회.
   DR 재구축 시나리오(디바이스 재등록으로 IP 변경)도 10분 내 자가복구 — 드리프트 자체가 소멸.
-- 불일치 수정 시 텔레그램 통지(ensure-role-password Job 패턴). 성공 timestamp 메트릭 push +
-  staleness 알림룰(absent 가드 fail-closed).
+- 통지는 **발송 자격 분리**(2026-07-06 적대 리뷰 F13 개정): 리컨실러는 fix/성공 timestamp 메트릭만
+  push하고, 텔레그램 발송은 vmalert 룰 → alertmanager 경유 — DNS 변이 권한 파드에 봇 토큰·인터넷
+  egress를 두지 않는다. staleness 알림룰(absent 가드 fail-closed).
 - RBAC: gateway ns svc get 한정(Role+RoleBinding cross-ns). 인증: 기존 adguard 자격
   SealedSecret 재사용. netpol: apiserver=노드서브넷:6443 함정 준수, adguard:3000, DNS. PSA restricted 준수.
 - ConfigMap 시드의 하드코딩 IP·주석은 유지하되 "리컨실러가 수렴" 주석 추가. lan-dns 런북 갱신.
