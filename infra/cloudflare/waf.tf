@@ -26,6 +26,14 @@ resource "cloudflare_ruleset" "waf_custom" {
   ]
 }
 
+# [결정 2026-07-06] API 호스트(trip-mate-api.ukyi.app)도 zone-wide 보호(아래 rate-limit +
+# zone_settings.tf의 browser_check·security_level)를 의도적으로 상속한다 — 클라이언트가
+# 브라우저 웹앱뿐(쿠키 세션·Google OAuth, owner 확인)이라 브라우저 XHR은 BIC를 통과하고,
+# cache.tf bypass-dynamic으로 전 API 요청이 rate-limit에 계상돼도 100req/10s/IP는 개인용
+# 트래픽에 충분하다. 네이티브 앱/CLI 클라이언트가 생기면: http_config_settings 페이즈
+# ruleset으로 해당 호스트에 BIC off(+필요시 security_level 완화) 예외를 추가한다(무료 플랜
+# config rule 지원). rate-limit 분리는 불가 — 무료는 rate-limit 룰 1개뿐(아래).
+#
 # 단일 노드 SPOF L7 보호 — cloudflared→traefik→단일 노드로 흐르는 공개 표면을 IP당 rate-limit로
 # brute-force/scrape 플러드에서 보호한다. 무료 플랜 호환 규약(apply에서만 검증되는 entitlement):
 #  - 표현식은 단순 연산자만(matches 정규식은 Business 전용 → 400 "not entitled", cache.tf 함정과 동일).
