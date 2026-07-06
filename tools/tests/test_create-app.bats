@@ -105,6 +105,40 @@ EOF
   grep -q "checksum/secrets" "$FR/apps/orders/deploy/prod/values.yaml"
 }
 
+@test "create-app output satisfies the check-app-deploy checksum gate (raw-byte hash convention, #277 guard)" {
+  # 봉인본을 원본 바이트 그대로 기록하고 그 바이트로 checksum을 산출하므로 게이트가 통과해야 한다
+  # (update-secrets.ts와 동일 규약 — 재직렬화 드리프트로 checksum이 어긋나던 회귀를 잠근다).
+  cat > "$TMP/sealed.yaml" <<'EOF'
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: orders-secrets
+  namespace: prod
+spec:
+  encryptedData: { API_KEY: AgX... }
+EOF
+  gen --sealed "$TMP/sealed.yaml"
+  [ "$status" -eq 0 ]
+  run bash "$ROOT/scripts/check-app-deploy.sh" "$FR/apps/orders/deploy/prod"
+  [ "$status" -eq 0 ]
+}
+
+@test "create-app writes the sealed file verbatim (raw bytes, not re-serialized)" {
+  cat > "$TMP/sealed.yaml" <<'EOF'
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: orders-secrets
+  namespace: prod
+spec:
+  encryptedData: { API_KEY: AgX... }
+EOF
+  gen --sealed "$TMP/sealed.yaml"
+  [ "$status" -eq 0 ]
+  run diff "$TMP/sealed.yaml" "$FR/apps/orders/deploy/prod/orders-secrets.sealed.yaml"
+  [ "$status" -eq 0 ]
+}
+
 @test "create-app rejects a sealed secret with wrong namespace or name" {
   cat > "$TMP/sealed.yaml" <<'EOF'
 apiVersion: bitnami.com/v1alpha1
