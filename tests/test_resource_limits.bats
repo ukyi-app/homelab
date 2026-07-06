@@ -160,3 +160,129 @@ YAML
   echo "$output" | grep -q 'GOMEMLIMIT'
   rm -rf "$tmp"
 }
+
+# ── CNPG CR 커버리지: Cluster(spec.resources)·Pooler(spec.template.spec.containers[]) ──
+# 이들은 kind가 Deployment/DaemonSet/StatefulSet가 아니라 예전엔 스캔 밖이었다 → 자원 블록이
+# 실수로 제거돼도 GREEN이던 블라인드스팟. 아래 red-green으로 스캔 편입을 고정한다.
+
+@test "resource guard fails on a CNPG Cluster missing spec.resources (red-green)" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/platform/cnpg/prod" "$tmp/policy"
+  : > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  cat > "$tmp/platform/cnpg/prod/cluster.yaml" <<'YAML'
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata: { name: pg, namespace: database }
+spec:
+  instances: 1
+YAML
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+}
+
+@test "resource guard passes a CNPG Cluster that declares spec.resources" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/platform/cnpg/prod" "$tmp/policy"
+  : > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  cat > "$tmp/platform/cnpg/prod/cluster.yaml" <<'YAML'
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata: { name: pg, namespace: database }
+spec:
+  instances: 1
+  resources:
+    requests: { cpu: 250m, memory: 768Mi }
+    limits: { cpu: "1", memory: 1Gi }
+YAML
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+@test "resource guard honors an allowlist exemption for a CNPG Cluster" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/platform/cnpg/prod" "$tmp/policy"
+  echo "Cluster/pg/postgres   # 테스트 면제" > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  cat > "$tmp/platform/cnpg/prod/cluster.yaml" <<'YAML'
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata: { name: pg, namespace: database }
+spec:
+  instances: 1
+YAML
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+@test "resource guard fails on a CNPG Pooler whose pgbouncer container drops resources (red-green)" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/platform/cnpg/prod" "$tmp/policy"
+  : > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  cat > "$tmp/platform/cnpg/prod/pooler.yaml" <<'YAML'
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata: { name: pg-pooler-rw, namespace: database }
+spec:
+  cluster: { name: pg }
+  instances: 1
+  type: rw
+  template:
+    spec:
+      containers:
+        - name: pgbouncer
+YAML
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+}
+
+@test "resource guard fails on a CNPG Pooler with no template (unlimited pgbouncer)" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/platform/cnpg/prod" "$tmp/policy"
+  : > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  cat > "$tmp/platform/cnpg/prod/pooler.yaml" <<'YAML'
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata: { name: pg-pooler-rw, namespace: database }
+spec:
+  cluster: { name: pg }
+  instances: 1
+  type: rw
+YAML
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+}
+
+@test "resource guard passes a CNPG Pooler that declares container resources" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/platform/cnpg/prod" "$tmp/policy"
+  : > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  cat > "$tmp/platform/cnpg/prod/pooler.yaml" <<'YAML'
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata: { name: pg-pooler-rw, namespace: database }
+spec:
+  cluster: { name: pg }
+  instances: 1
+  type: rw
+  template:
+    spec:
+      containers:
+        - name: pgbouncer
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+YAML
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
