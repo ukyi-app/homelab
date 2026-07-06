@@ -19,10 +19,10 @@ envFrom:
   - secretRef:
       name: cache-trip-mate-conn # 캐시 conn(TRIP_MATE_REDIS_URL) — create-cache 산출
 route:
-  host: trip-mate-api.home.ukyi.app
+  host: trip-mate-api.ukyi.app
   paths:
     - /
-  public: false
+  public: true
 probes:
   liveness:
     path: /health
