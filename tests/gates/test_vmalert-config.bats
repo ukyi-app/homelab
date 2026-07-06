@@ -197,3 +197,16 @@ setup() {
   # 주간/일간 단발 push라 bare absent()는 영구 오발화 — last_over_time 윈도로 판정(restore-drill 패턴).
   grep -q 'last_over_time(files_backup_last_success_timestamp' "$R"
 }
+
+@test "per-PVC du exporter has staleness + in-cluster bulk capacity alerts (push metric windows)" {
+  R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
+  # 메타갭 ③ Task 2(W1-A): du exporter 생존 + bulk 용량(W3 선행 신호, F18/F20).
+  grep -q 'alert: PvcDuExporterStale' "$R"
+  grep -q 'alert: BulkStorageLow' "$R"
+  # 일 1회 단발 push라 last_over_time 윈도 + absent fail-closed(instant staleness 함정, restore-drill 패턴).
+  grep -q 'last_over_time(pvc_du_last_success_timestamp\[3d\])' "$R"
+  grep -q 'absent(last_over_time(pvc_du_last_success_timestamp' "$R"
+  grep -q 'storage_tier_avail_bytes{tier="bulk"}' "$R"
+  grep -q 'last_over_time(storage_tier_avail_bytes{tier="bulk"}\[3d\])' "$R"
+  grep -q 'absent(last_over_time(storage_tier_avail_bytes{tier="bulk"}' "$R"
+}

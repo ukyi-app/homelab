@@ -21,6 +21,7 @@ resources:
   - rules/r6-ci-staleness.yaml
   - ghcr-read.sealed.yaml # digest-exporter private GHCR inspect 자격(owner: make seal-ghcr-read)
   - digest-exporter.yaml
+  - pvc-du-exporter.yaml  # per-PVC 용량 가시화 CronJob + 전용 egress netpol(메타갭 ③ W1-A)
   - deadmanswitch-relay.yaml
   - grafana-provisioning.yaml
   - grafana-dashboards.yaml

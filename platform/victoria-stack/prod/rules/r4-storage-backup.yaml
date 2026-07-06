@@ -157,3 +157,31 @@ data:
             annotations:
               summary: "외장 bulk SSD 여유 공간 10% 미만"
               description: "files-data·pg-basebackup-local이 공유하는 2TB 외장 SSD 여유가 부족합니다 — files 쓰기 실패(/readyz NotReady) 및 로컬 base-backup 적체 위험. 최대 소비자를 정리하세요."
+          # per-PVC du exporter(pvc-du-exporter.yaml, 일 1회 05:00 KST) 생존 — pvc_du_last_success_timestamp를
+          # 단발 push한다. instant query는 staleness 윈도(~분) 밖 단발 샘플을 못 보므로(CNPGRestoreDrillStale과
+          # 동형) [3d] last_over_time으로 마지막 성공을 찾아 판정. 값 없음(첫 push 전)은 absent가로 fail-loud.
+          - alert: PvcDuExporterStale
+            expr: |
+              (time() - last_over_time(pvc_du_last_success_timestamp[3d])) > 172800
+              or absent(last_over_time(pvc_du_last_success_timestamp[3d]))
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "per-PVC 용량 수집이 48시간 이상 정체"
+              description: "pvc-du-exporter CronJob이 pvc_dir_size_bytes/storage_tier_* 갱신에 실패했습니다 — bulk(virtiofs) 용량의 유일 in-cluster 신호가 소실됩니다(W3 선행). CronJob/마운트/경로를 확인하세요."
+          # 외장 bulk-ssd의 in-cluster 용량 신호(W3 관측 데이터 이전의 선행 조건, F18) — du exporter가 파드
+          # 내부 df로 티어 용량을 push한다. FilesBulkSSDLow(host launchd df push, <10%)와 물리 매체는 같으나
+          # ⚠️ 의도적 이원화(중복 아님): (a) 독립 liveness — host launchd 백업이 멈춰도(FilesBulkSSDLow capacity
+          # 판독이 freeze) 이 in-cluster 신호는 생존, (b) 티어 스캔 무결성 증거(F20 — pvc_dir_size_bytes{tier="bulk"}
+          # 동반)로 df 경로가 진짜 bulk 트리를 본다는 것을 증명. 15%로 FilesBulkSSDLow(10%)보다 먼저 발화(early).
+          # 일 1회 push라 last_over_time [3d] 윈도 필수(instant staleness 함정).
+          - alert: BulkStorageLow
+            expr: |
+              (last_over_time(storage_tier_avail_bytes{tier="bulk"}[3d])
+                / last_over_time(storage_tier_size_bytes{tier="bulk"}[3d])) < 0.15
+              or absent(last_over_time(storage_tier_avail_bytes{tier="bulk"}[3d]))
+            for: 30m
+            labels: { severity: warning, disk: bulk }
+            annotations:
+              summary: "외장(bulk-ssd) 여유 15% 미만 또는 in-cluster 신호 소실"
+              description: "du exporter가 본 bulk 티어 여유가 15% 미만이거나 storage_tier_avail_bytes{tier=bulk} 신호가 소실됐습니다 — W3에서 관측 TSDB가 bulk에 얹히므로 이전 착수 전 반드시 여유를 확인하세요(FilesBulkSSDLow의 in-cluster 짝)."
