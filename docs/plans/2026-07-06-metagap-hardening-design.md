@@ -13,6 +13,7 @@
 | ③ | 단일 무쿼터 btrfs `/`(~224GiB)에 PGDATA/WAL·vmsingle·vlogs·adguard 동거 — 상관장애 + 관측자 동거 | **예측 알림 + vmsingle/vlogs를 bulk-ssd로 이전**(DB는 내장 유지) |
 | ④ | 장수 자격증명(tailscale·R2·telegram bot·GitHub App key·PAT) 만료/회전 감시 0 (+ R2_PG 2026-07-01 노출 건 회전 미완) | **인벤토리 + 만료 감시 + R2_PG 회전 실행** (자동회전은 비범위) |
 | ⑤ | RBAC/SA automount 최소권한 축 미감사 (automount:false는 glances뿐) | **전수 감사 + 저위험 조치만**(automount 확산·verb 축소), 위험 항목은 보고 |
+| ⑥ | 원장 명목 잔여 4Mi — 신규 앱 온보딩 실질 차단(2026-07-06 tailscale +192 정정의 귀결) | **right-size 스윕**(종이 캡 조정 + 측정 기반 회수, 목표 잔여 ≥256Mi) — VM 증설(+1GiB)은 스윕 부족 시 후속 옵션으로만 명기(owner 확정 2026-07-06) |
 
 **스코프 결정**: 5건 전부 한 캠페인, 위험도 오름차순 3웨이브. 웨이브별 독립 머지·라이브
 검증 후 다음 진행(PR-first + auto-merge, 파괴·구조 변경은 수동 확인 게이트).
@@ -36,6 +37,16 @@
 ### W1-C (⑤) RBAC 전수 감사
 - 산출물: SA/ClusterRole/RoleBinding/automount 인벤토리 + 워크로드별 API 실사용 여부 →
   조치안을 저위험(W2-C 대상)/보고-only로 분류한 리포트. 코드 변경 없음.
+
+### W1-D (⑥) 원장 명목 헤드룸 회수 (right-size 스윕)
+- 배경: tailscale 미계상 정정(+192)으로 명목 잔여 4Mi — 원장 게이트상 신규 온보딩 실질 차단.
+  실 헤드룸은 충분(동시 peak ≪ allocatable)하므로 명목치 회수가 목적. 목표: **잔여 ≥256Mi**.
+- 1단계(무위험, 종이 캡): 라이브 limit이 없는 수기 행의 과보수 캡 조정 — cert-manager 384→288
+  (파드는 원래 unlimited, 행은 거버넌스 예약) 등. whoami(16Mi 디버그 에코) 존치/철거는 owner 결정 항목.
+- 2단계(측정 기반): 14일 peak working_set 실측(파드 세대·containerID 귀속 함정 준수) → 안전율
+  1.3~1.5x 미달 후보만 소PR로 회수(GOMEMLIMIT 동반 함정, repo-server 보류 판정 유지).
+- VM 증설(+1GiB, memory_mib 11264→12288 + VM_ALLOCATABLE_MIB·cap 동반 상향)은 스윕 후에도
+  부족할 때의 **후속 옵션**으로만 명기(VM 재시작 다운타임·호스트 여유 4GiB 축소 트레이드오프, Mac 16GiB 실측).
 
 ## W2 — 설정·조치 (컴포넌트 단위)
 

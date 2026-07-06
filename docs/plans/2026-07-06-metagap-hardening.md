@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 2026-07-06 감사 완전성 비평가가 지적한 메타갭 5건(①내부 DNS 링치핀 ②renovate pinDigests 드리프트 ③단일 디스크 상관장애 ④토큰 만료 감시 0 ⑤RBAC 최소권한 미감사)을 3웨이브로 해소한다.
+**Goal:** 2026-07-06 감사 완전성 비평가가 지적한 메타갭 5건(①내부 DNS 링치핀 ②renovate pinDigests 드리프트 ③단일 디스크 상관장애 ④토큰 만료 감시 0 ⑤RBAC 최소권한 미감사)과 **⑥원장 명목 잔여 4Mi 회수(온보딩 차단 해소, owner 확정: right-size 스윕)**를 3웨이브로 해소한다.
 
 **Architecture:** 설계 문서 `docs/plans/2026-07-06-metagap-hardening-design.md`(커밋됨)를 따른다. W1=감시·인벤토리(무위험) → W2=설정·조치(컴포넌트 단위) → W3=구조(관측 데이터 외장 이전). 웨이브별 독립 PR·라이브 검증 후 다음 웨이브. 모든 감시는 fail-closed(absent 가드), 모든 신규 컴포넌트는 기존 패턴(restore-drill push 메트릭·ensure-role-password 텔레그램·check-* 게이트·bulk-ssd PVC) 복제.
 
@@ -322,7 +322,29 @@ jobs:
 4. 리포트 구조: A) automount:false 후보(저위험, W2-C 대상 목록) B) verb 축소 후보(homepage 등) C) 위험/보고-only(사유 명시). 각 항목에 근거 파일:라인.
 5. Commit — `docs: RBAC/SA automount 전수 감사 리포트 (메타갭 ⑤ W1-C)`
 
-**W1 웨이브 게이트:** W1 PR 전부 머지 + Task 1/2 알림·메트릭 라이브 확인 후 W2 착수.
+### Task 5.5: (⑥) 원장 명목 헤드룸 회수 — right-size 스윕
+
+**배경:** tailscale 미계상 정정(#296, +192)으로 명목 잔여 4Mi — verify:ledger 게이트상 신규 앱 온보딩 실질 차단. 실 헤드룸은 충분(동시 peak ≪ allocatable — 원장 산문)하므로 명목치 회수가 목적. **수용 기준: 명목 잔여 ≥ 256Mi(온보딩 1앱 분) + `bun run verify:ledger` green + 행·산문·합계 삼자 일관.** VM 증설(+1GiB)은 이 스윕 후에도 부족할 때의 후속 옵션(owner 확정 2026-07-06 — 설계 문서 W1-D).
+
+**Files:**
+- Modify: `docs/memory-ledger.md` (행·합계·산문), `policy/memory-limit-allowlist.txt` (종이 캡 변경 시 산문 정합)
+- Modify(2단계 후보 확정 시): 해당 컴포넌트 values/manifest + GOMEMLIMIT 동반
+- Test: 기존 ledger 스위트(verify:ledger·test_ledger)가 게이트 — 신규 테스트 불요
+
+**Step 1: 1단계 — 종이 캡 조정(증거 기반 — 적대 리뷰 F24: 무한대 워크로드의 캡 축소는 실측 없이는 거버넌스 약화일 뿐)**
+- **선행 실측**: cert-manager 3컨테이너(controller/cainjector/webhook)의 14일 peak working_set을 개별 질의(파드 세대 귀속 함정 준수). 캡 조정은 **측정 peak 합 × ≥2.0x**를 유지하는 값으로만(예: peak 합 120Mi면 288 가능, 160Mi면 336까지만) — 근거 수치·측정일을 원장 산문에 기록. unlimited 파드라 ContainerMemoryNearLimit이 못 지키는 컴포넌트임을 산문에 명시(기존 allowlist 문구와 정합).
+- `whoami`(16/16, gateway ns 디버그 에코): **owner 결정 항목** — 철거(teardown류 소PR, +16) 또는 존치. 계획 실행 시 AskUserQuestion 1회로 확정(철거 시 posture 스위트의 whoami 참조 여부를 먼저 grep — 라이브 e2e가 참조하면 존치).
+
+**Step 2: 2단계 — 측정 기반 회수(≥256 도달까지, 후보당 롤백 게이트 — 적대 리뷰 F25)**
+- 14일 peak working_set 실측 — **함정 준수**: 파드 세대/containerID 귀속(OOM victim vs survivor), VM 다중 series는 pod 명시 + max, `sum by (namespace)`의 세대 중복 과대 금지(컴포넌트별 컨테이너 단위로).
+- 후보 판정 기준(B10 방법론): 현 limit / 실측 peak ≥ 1.5x인 상주 워크로드만, 축소 후에도 ≥1.3x 유지. **repo-server(1.06x UNSAFE 보류)·postgres·최근 OOM 수정분(vector 등)은 제외 목록에 명시.**
+- **후보당 절차(직렬, 한 번에 하나)**: ⑴적용 전 기록(구 limit/GOMEMLIMIT/원장 행 — 커밋 메시지에 포함) → ⑵소PR(GOMEMLIMIT 동반 함정 — Go는 limit×0.9, check-resource-limits ≤0.95 게이트가 검증) → ⑶관찰 윈도 24h: Ready 실패·OOMKill·ContainerMemoryNearLimit 발화 중 하나라도 발생하면 **즉시 revert PR(기록해 둔 구 값 복원)**하고 해당 후보를 제외 목록에 사유와 함께 등재 → ⑷이전 후보가 윈도를 통과하기 전에는 다음 후보 착수 금지. **스택 PR 금지(squash 함정) — main에서 순차.**
+
+**Step 3: 검증·Commit**
+- `bun run verify:ledger` + `make ci` rc=0. 라이브: 후보당 관찰 윈도(Step 2-⑶)가 검증 그 자체.
+- Commit(단계별): `chore: 원장 캡 조정 — cert-manager 예약 <old>→<new> (14d peak <p>Mi 실측, 메타갭 ⑥)` / 후보별 `refactor: <comp> memory right-size <old>→<new> (실측 peak <p>Mi, 메타갭 ⑥)`
+
+**W1 웨이브 게이트(적대 리뷰 F23 — 미달 통과 금지):** W1 PR 전부 머지 + Task 1/2 알림·메트릭 라이브 확인 + **Task 5.5는 다음 중 하나가 충족돼야 W1 완료**: (a) 명목 잔여 ≥256Mi 달성, 또는 (b) 측정상 안전 후보 소진을 증빙한 보고에 대해 **owner가 명시 결정**(VM 증설 착수를 W2 병행 태스크로 편입 / 또는 "당분간 온보딩 차단 수용"을 원장 산문에 명문화). 결정 없이 갭 보고만으로 W2 진행 금지 — 온보딩 차단은 이 태스크의 존재 이유다.
 
 ---
 
@@ -672,6 +694,14 @@ codex 적대 리뷰 7패스(1~3차 기본 캡 + owner 승인 연장 4~7차), 발
 | F20 | 7 | high | 전역 카운트로 bulk 오경로에도 녹색 | Accepted — 티어별 fail-loud + 알려진 bulk PVC series를 W3 조건에 |
 | F21 | 7 | medium | WaitForFirstConsumer PVC Pending으로 ArgoCD 헬스 교착 | Accepted — 일회성 바인더 Pod 절차 |
 | F22 | 7 | medium | substrate 이미지가 게이트 스코프 밖인데 allowlist-0 주장 | Accepted — 스코프 경계 명시 + provisioner digest 핀 검토 스텝 |
+
+**개정(2026-07-06, ⑥ 원장 헤드룸 회수 Task 5.5 추가 — owner 요청·right-size 스윕 방향 확정)** — 개정분 diff에 대한 추가 패스 1회, 발견 3건 전원 Accepted:
+
+| # | 패스 | 심각도 | 요지 | 처분 |
+|---|---|---|---|---|
+| F23 | 개정1 | high | ≥256 미달이어도 "갭 보고"만으로 W1 통과 — 목표(온보딩 차단 해소)와 자기모순 | Accepted — W1 게이트를 "≥256 달성 or owner 명시 결정(VM 증설 편입/차단 수용 명문화)"로 경성화 |
+| F24 | 개정1 | medium | unlimited 워크로드의 종이 캡 축소를 실측 없이 회수로 계상 | Accepted — cert-manager 3컨테이너 14d peak 실측 선행, 캡은 peak합×≥2.0x로만, 근거 산문 기록 |
+| F25 | 개정1 | medium | 라이브 right-size PR에 롤백 경로 부재 | Accepted — 후보당 직렬 절차(구값 기록→24h 관찰→Ready/OOM/NearLimit 시 즉시 revert→통과 전 다음 후보 금지) |
 
 ## Execution directives
 - **Skill:** implement via `executing-plans` in a **separate session, in this worktree** (`.claude/worktrees/metagap-hardening-plan`).
