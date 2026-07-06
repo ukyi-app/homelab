@@ -17,6 +17,11 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.homelab/kind: {{ .Values.kind }}
 {{- end -}}
 
+{{/* ★selectorLabels는 Deployment.spec.selector로 그대로 쓰인다 — 생성 후 immutable이라
+     여기서 파생되는 app.kubernetes.io/name(=app.name → .Chart.Name)은 절대 가변값에서
+     파생하면 안 된다. 그래서 nameOverride를 values.schema.json에서 제거했다
+     (additionalProperties:false로 설정 시도가 거부됨) — name 계열 값은 불변이어야 한다.
+     라이브 앱이 나중에 name을 바꾸면 selector가 변해 ArgoCD 싱크가 영구 실패한다. */}}
 {{- define "app.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "app.name" . }}
 app.homelab/instance: {{ .Release.Name }}
