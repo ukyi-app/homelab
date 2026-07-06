@@ -10,6 +10,8 @@ import { APP_NAME_RE } from "./lib/identity.ts";
 import { analyzeLedger, appendRowWithTotals, budgetViolation, type LedgerAgg } from "./lib/ledger-budget.ts";
 import { parseFlags } from "./lib/cli.ts";
 import { addApp } from "./lib/digest-exporter.ts";
+import { surfaceHashWorktree } from "./lib/surface-hash.ts";
+import { buildActivationMarker, registryProjection } from "./lib/activation-marker.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
 let __f: Record<string, string | boolean>;
@@ -21,7 +23,7 @@ const configPath = arg("--config");
 const app = arg("--app");
 const repo = arg("--repo");
 const DOMAIN = arg("--domain");
-const ROOT = arg("--repo-root", ".");
+const ROOT = arg("--repo-root", ".") ?? ".";
 const tag = arg("--tag");
 const digest = arg("--digest");
 const sealedPath = arg("--sealed");
@@ -196,6 +198,16 @@ if (!DRY) {
     // create-app PR 머지가 첫 공개 승인이다. 머지 후 iac.yaml이 이 active:true 행을 DNS/tunnel에 적용한다.
     registry.push({ name: app, host, public: true, active: true });
     writeFileSync(appsJsonPath, JSON.stringify(registry, null, 2) + "\n");
+    // 재노출 감사(audit-orphans activation-exposure-drift)가 검사할 .activation 마커를 함께 기록한다.
+    // 이게 없으면 create-app으로 공개된 앱이 재노출 게이트에서 영구 제외된다(activate-app --flip만 마커를
+    // 남기던 갭). activate-app과 동일 포맷 — surfaceHash는 working-tree canonical(커밋 후 audit의
+    // surfaceHash(HEAD)와 일치), sha/syncedRev는 생성 시점 미확정이라 null.
+    const marker = buildActivationMarker({
+      app,
+      surfaceHash: surfaceHashWorktree(ROOT, app),
+      registry: registryProjection({ name: app, host, public: true }),
+    });
+    writeFileSync(`${appDir}/deploy/prod/.activation`, JSON.stringify(marker, null, 2) + "\n");
   }
   // 원장: 행 추가 + Totals 프로즈 동반 갱신(ledger-budget SSOT)
   writeFileSync(ledgerPath, appendRowWithTotals(agg, { name: app, env: "prod", reqMi, limitMi }));
