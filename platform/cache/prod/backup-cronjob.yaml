@@ -97,7 +97,15 @@ spec:
                     # pg-tools 이미지에는 python3가 없다 — sed로 파싱 (pgdump-hedge와 동일)
                     SIZE="$(rclone size "$KEY" --json | sed -n 's/.*"bytes":\([0-9][0-9]*\).*/\1/p')"
                     test "${SIZE}" -gt 0
-                    SHA="$(cat "/work/${name}.sha256")"
+                    SHA="$(cat "/work/${name}.sha256")"   # snapshot 단계서 로컬 RDB로 계산(업로드 전 원본)
+                    # 라운드트립 무결성: 업로드 사본을 되읽어(rclone cat=GetObject) sha256 재계산 → 로컬 원본과
+                    # 대조. size>0만으론 전송 중 절삭/비트플립을 못 잡는다. 불일치면 fail-loud(exit 1)→KubeJobFailed.
+                    # sha256sum은 coreutils — 같은 이미지의 base64/wc와 동반 설치. R2 Object-R&W 토큰은 GetObject 허용.
+                    REMOTE_SHA="$(rclone cat "$KEY" --s3-region auto | sha256sum | cut -d' ' -f1)"
+                    if [ "$REMOTE_SHA" != "$SHA" ]; then
+                      echo "[backup] ${name}: 업로드 사본 sha256 불일치 — local=${SHA} remote=${REMOTE_SHA}" >&2
+                      exit 1
+                    fi
                     # 신선도 메타 — teardown --delete-data 게이트 소스 (시각/체크섬/크기/객체 키)
                     printf '{"instance":"%s","ts":"%s","object":"rdb/dump-%s.rdb","sha256":"%s","bytes":%s}\n' \
                       "$name" "$TS" "$TS" "$SHA" "$SIZE" \

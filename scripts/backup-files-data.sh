@@ -42,8 +42,15 @@ if [ "$MODE" = verify ]; then
   [ -s "$man" ] || { echo "ERROR: 매니페스트 비어있음: $man" >&2; exit 1; }
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
   n=0
-  while read -r want rel; do
-    [ -n "${rel:-}" ] || continue
+  # IFS-보존 파싱: 'read -r want rel'(기본 IFS)은 선두 공백을 먹어 ' <경로>'(빈 해시) 행을 rel='' 로
+  # 읽고 조용히 skip(전수 대조 취지 위반 false-green). want=첫 공백 앞, rel=첫 공백 뒤로 잘라 선두/후행
+  # 공백 파일명도 보존한다. 공백 없는 행(want==line)이나 빈 해시/경로는 손상 매니페스트 — fail-loud.
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    want="${line%% *}"; rel="${line#* }"
+    if [ "$want" = "$line" ] || [ -z "$want" ] || [ -z "$rel" ]; then
+      echo "ERROR: 매니페스트 손상 행(해시/경로 파싱 실패): '$line' — 백업 무결성 의심" >&2; exit 1
+    fi
     n=$((n + 1))
     file="$dest/data/$rel"; [ -f "$file" ] || { echo "ERROR: 백업에 파일 부재: $rel" >&2; exit 1; }
     cp "$file" "$tmp/restored"                      # 복원 시뮬레이션(매체서 판독)
@@ -104,11 +111,17 @@ if [ -d "$dest/data" ]; then
 fi
 
 # --- 3) sha256 매니페스트: 스테이징 기준, 승격 전 생성 ('<sha> <상대경로>' — 복원 검증 입력) ---
+# ⚠️ 프로세스 치환(< <(...))으로 while을 메인 셸에서 돌린다 — 파이프(| while)면 루프가 서브셸이라
+#    빈 해시 발각 시 exit이 서브셸만 죽이고 스크립트는 계속 진행한다(fail-loud 무력). sha256 실패/빈 출력은
+#    ' <경로>'(빈 해시) 행을 남겨 --verify 전수 대조를 조용히 통과시키므로(false-green) 즉시 중단한다.
 man="$dest/files-data.$(date +%s).sha256"
 : > "$man"
-( cd "$dest/data.new" && find . -type f -print ) | while IFS= read -r f; do
-  printf '%s %s\n' "$(sha256 "$dest/data.new/${f#./}" | awk '{print $1}')" "${f#./}" >> "$man"
-done
+while IFS= read -r f; do
+  rel="${f#./}"
+  h="$(sha256 "$dest/data.new/$rel" | awk '{print $1}')" || h=""
+  [ -n "$h" ] || { echo "ERROR: sha256 계산 실패($rel) — 매니페스트 무결성 훼손, 승격 중단" >&2; rm -f "$man"; rm -rf "$dest/data.new"; exit 1; }
+  printf '%s %s\n' "$h" "$rel" >> "$man"
+done < <(cd "$dest/data.new" && find . -type f -print)
 [ -s "$man" ] || { echo "ERROR: 매니페스트 비어있음 — 승격 중단" >&2; rm -f "$man"; rm -rf "$dest/data.new"; exit 1; }
 
 # --- 4) 승격(rotate): 직전 스냅샷 1개(data.prev) 보존 ---
