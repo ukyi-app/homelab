@@ -6,7 +6,7 @@ metadata:
 type: Opaque
 stringData:
     TELEGRAM_BOT_TOKEN: ENC[AES256_GCM,data:DO006HE93qYgy4j4btw3wVFEBT6bZCrhchIKZVG9jm1oAkltIzF8YMZYljEBPA==,iv:VwHCDL2N4U7Bbost+R1k+LYQVDKgkQi7NJW3/jbffIQ=,tag:pDpGW08YEbUUlcXMNxkPpw==,type:str]
-    TELEGRAM_CHAT_ID: ENC[AES256_GCM,data:AIO15h0gzQPVqQ==,iv:sfpNUjf+OKayNs/LpxS1x9YMLuwey6qA4QSNKV6ODew=,tag:R1jaTrs7ACWLI7y6rsnj6A==,type:str]
+    TELEGRAM_CHAT_ID: ENC[AES256_GCM,data:UFq+GDdLncRJmWw=,iv:nTwFqNPgPzQagQeoPxQ8sCtmMixRd4/YscS5VNCrFH4=,tag:ehkz+Sy69gX35hYDDBnohQ==,type:str]
     HEALTHCHECKS_URL: ENC[AES256_GCM,data:OM3ifDSc/Q+ufjhdmD+iMwWrtB24jrVxN+nt5Reszq1HJs6bGMZmQBbwzVSmgHiJ/svA2kYTg8w=,iv:C004louwYDFh0BR2ZZDsUjInxUtYjK3H3ZMHLv099JY=,tag:nJLfQswYRo2hHRTf7zCXwQ==,type:str]
 sops:
     age:
@@ -29,6 +29,6 @@ sops:
             -----END AGE ENCRYPTED FILE-----
           recipient: age154tu9q7922xu46x0rkfm5l9x3ulf9u5at5qvxeaqfx9sgtm7cumq75jdwc
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-07-01T09:00:07Z"
-    mac: ENC[AES256_GCM,data:q1fq1J3UKZL6uVk36VSaykzD3Se0JgGjqVhpsrzUDxftW8MJHqVRWKkvr1a0RDUaLlQ/S6lBiA+T7arjA6BPlUiV9CQBaiWFa5Ct8l6AYWtIYQ/zy/N7F/Re+eADunl+8+rQRI85X2QbrGcIvS994ny8GdLh/kjgffo5sto1Qyg=,iv:dmK6cKDgzpenSKbzwBY0SfgUve0fLis0DmTTRDVA3FE=,tag:FuXsfuhSnQneRCj31CDqNw==,type:str]
+    lastmodified: "2026-07-06T04:14:16Z"
+    mac: ENC[AES256_GCM,data:zRGurdiEzTkAlp7n2S9rPxN0+QyKGpbDfAbSYxkJGX9VKLvXAk64bNEglxdzltWDO6fJK0D60I5cc5xDZ680YcGNLVGZPaHDVN3DPLgQaMlCOF0PMftrS9N6OpE1mUJSkDvnwjoQewA6ysZ3Kf21UEeVmSMFvQiWTqc63wN6qjA=,iv:192ydhRWybIlq/LTZc4edMI6oj3yBE3JfPthZnUNIqk=,tag:xOSozKkvk9jnSXDzOr+YWg==,type:str]
     version: 3.13.1
