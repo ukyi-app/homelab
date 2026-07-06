@@ -5,6 +5,7 @@
 //   orphan-dns            : apps.json active:true 행인데 앱 매니페스트 부재 — DNS 고아(빈 백엔드 노출, 차단)
 //   orphan-dns-inactive   : active:false 행인데 매니페스트 부재 — DNS 미노출(정보성, 비차단)
 //   missing-registration  : public 앱 매니페스트인데 apps.json 행 부재
+//   missing-activation    : active:true+public 앱인데 .activation 마커(registry projection) 부재 — 재노출 게이트 사각(차단)
 //   dangling-role         : cluster.yaml managed.role인데 passwordSecret sealed 부재 — 고아 role (정보성)
 //   unreferenced-conn     : data-conn 등록 conn인데 어느 apps/*/values.yaml envFrom도 미참조 (정보성; *-ro-conn 제외)
 //   stale-ledger-row      : prod 원장 행인데 apps/도 platform/도 없음
@@ -12,12 +13,13 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { surfaceHash } from "./lib/surface-hash.ts";
+import { registryProjection } from "./lib/activation-marker.ts";
 import { parseLedgerRows } from "./lib/ledger-totals.ts";
 
 const USAGE = `audit-orphans — registry↔매니페스트↔원장 교차 드리프트 리포트(읽기 전용)
 사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict]
   --repo-root <dir>  레포 루트(기본 .)
-  --ci               배포를 깨는 유형만 비-0 종료(orphan-dns/activation-exposure-drift) — PR 게이트용
+  --ci               배포를 깨는 유형만 비-0 종료(orphan-dns/activation-exposure-drift/missing-activation) — PR 게이트용
   --strict           모든 드리프트 유형을 비-0 종료(수동 점검)
   --help, -h         이 도움말`;
 if (process.argv.includes("--help") || process.argv.includes("-h")) { console.log(USAGE); process.exit(0); }
@@ -29,12 +31,13 @@ const STRICT = process.argv.includes("--strict");
 // missing-registration·incomplete-purge·원장 드리프트는 정보/경고라 차단하지 않는다.
 // (--strict는 전부 차단 — 수동 점검용.)
 const CI = process.argv.includes("--ci");
-// CI 차단은 **정확히** 배포 정합/노출을 깨는 두 유형만:
+// CI 차단은 **정확히** 배포 정합/노출을 깨는 세 유형만:
 //   orphan-dns(apps.json active 행에 앱 매니페스트 부재 → 빈 백엔드로 DNS 노출),
-//   activation-exposure-drift(activation 이후 apps.json host/public 변경 → 미재검증 DNS 노출).
+//   activation-exposure-drift(activation 이후 apps.json host/public 변경 → 미재검증 DNS 노출),
+//   missing-activation(active&&public 앱에 .activation 마커 부재 → 재노출 게이트 영구 우회).
 // 연결=SealedSecret이라 .bindings.json엔 db/redis 참조가 없다(dangling-binding 제거).
 // stale-ledger-row는 제외 — apps/·platform/ 밖 워크로드 오탐 방지. 원장 드리프트는 --strict로만.
-const BLOCKING = new Set(["orphan-dns", "activation-exposure-drift"]); // pass3 F1: surfaceHash(app-tree) drift는 비차단(이미지 bump 데드락 회피); restale2 F1: 노출 행(host/public) drift=activation-exposure-drift는 차단(데드락 무관 + 미재검증 DNS 노출 막음)
+const BLOCKING = new Set(["orphan-dns", "activation-exposure-drift", "missing-activation"]); // pass3 F1: surfaceHash(app-tree) drift는 비차단(이미지 bump 데드락 회피); restale2 F1: 노출 행(host/public) drift=activation-exposure-drift는 차단(데드락 무관 + 미재검증 DNS 노출 막음); missing-activation: 마커 부재=재노출 게이트 사각(차단)
 
 type RegRow = { name: string; active?: boolean; host?: string | null; public?: boolean };
 
@@ -79,6 +82,14 @@ for (const r of registry) {
   if (r.active !== true || !appDirs.includes(r.name)) continue;
   const markerPath = `${appsRoot}/${r.name}/deploy/prod/.activation`;
   const marker = readJson(markerPath, null);
+  // ⚠️ 마커 없는 active&&public 앱은 유일 차단 재노출 게이트(activation-exposure-drift)가 registry
+  // projection 부재로 **영구 제외**된다(감사 사각). create-app(공개 생성)·activate-app(--flip) 둘 다
+  // 마커를 기록하므로, 부재/registry 누락 = 미검증 DNS 노출이 게이트를 우회 → BLOCKING.
+  // (public 한정: internal 앱은 apps.json 미등록·active:false는 dns.tf가 노출 안 함 → 노출 사각 없음.)
+  if (r.public === true && (!marker || !marker.registry)) {
+    add("missing-activation", r.name, `active:true+public 앱인데 .activation 마커(registry projection)가 없음 — 재노출 게이트가 이 앱을 영구 제외(create-app/activate-app가 마커를 기록해야 함, 차단)`);
+    continue;
+  }
   if (!marker || !marker.surfaceHash) continue;
   const current = surfaceHash(ROOT, "HEAD", r.name); // .activation 제외 canonical — 마커와 동일 함수
   if (current && current !== marker.surfaceHash)
@@ -87,7 +98,7 @@ for (const r of registry) {
   // ⚠️ codex restale2 F1: apps.json 노출 행(host/public) 변경은 app-tree(surfaceHash) drift와 달리 **데드락
   // 위험이 없다**(호스트 변경은 앱 재배포·Healthy 선행 불필요) → 미재검증 public DNS 노출을 막기 위해 **차단**.
   // (owner가 activate-app --flip로 새 노출 재증명+마커 갱신해야 머지 가능 = 의도한 재승인. surfaceHash drift만 정보성.)
-  const curProj = { name: r.name, host: r.host ?? null, public: r.public ?? false };
+  const curProj = registryProjection(r); // 마커와 동일 projection(키 순서 계약)
   if (marker.registry && JSON.stringify(curProj) !== JSON.stringify(marker.registry))
     add("activation-exposure-drift", r.name, `activation 이후 apps.json 노출 행 변경(host/public — 마커 ${JSON.stringify(marker.registry)} ≠ 현재 ${JSON.stringify(curProj)}) — activate-app 재실행으로 재승인 필요(차단)`);
 }

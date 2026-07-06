@@ -1,0 +1,12 @@
+{
+  "app": "page",
+  "sha": null,
+  "syncedRev": null,
+  "surfaceHash": "5e3ce55b92f917e4069723eec3ea51721d5220b475d2ec6b2aeaa413a8e17691",
+  "registry": {
+    "name": "page",
+    "host": "page.ukyi.app",
+    "public": true
+  },
+  "activatedAt": "2026-07-06T00:00:00.000Z"
+}

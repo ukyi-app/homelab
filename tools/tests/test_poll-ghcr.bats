@@ -113,6 +113,43 @@ EOF
   echo "$output" | jq -e '.[0].action == "refuse"'
 }
 
+@test "refuses when values image.repo does not match the source-repo binding (cross-repo guard)" {
+  # source-repo=ukyi-app/orders인데 values가 다른 레포 이미지를 가리키면 다른 레포를 폴링/bump하게 되므로 거부.
+  cat > "$D/values.yaml" <<'EOF'
+image:
+  repo: ghcr.io/ukyi-app/evil
+  tag: sha-aaa1111000000000000000000000000000000000
+  digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+EOF
+  run_poll
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[0].action == "refuse"'
+  echo "$output" | jq -e '.[0].reason | test("image.repo|불일치")'
+}
+
+@test "refuses when the candidate is not a descendant of the deployed sha (non-fast-forward re-verification)" {
+  # 배포 SHA는 main 조상(baseCmp ahead)이지만, 후보(bbb2222)를 배포 SHA 기준으로 재비교하면 diverged →
+  # merge 목록 비선형성 방어 재증명(candCmp)이 refuse해야 한다.
+  cat > "$FX/orders.compare-aaa1111-bbb2222.json" <<'EOF'
+{ "status": "diverged", "ahead_by": 0 }
+EOF
+  run_poll
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[0].action == "refuse"'
+  echo "$output" | jq -e '.[0].reason | test("descendant")'
+}
+
+@test "noop when the deployed sha is identical to main tip (already at HEAD)" {
+  # baseCmp(deployed..main)=identical → 후보 탐색 없이 noop(멱등).
+  cat > "$FX/orders.compare-aaa1111-main.json" <<'EOF'
+{ "status": "identical", "ahead_by": 0 }
+EOF
+  run_poll
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[0].action == "noop"'
+  echo "$output" | jq -e '.[0].reason | test("tip")'
+}
+
 @test "a transient imagetools error (not a genuine 404) refuses instead of treating image as absent" {
   # bbb2222 manifest를 transient 오류로 표시 — 진짜 404가 아니므로 'absent'로 삼키면 안 되고 refuse여야.
   rm -f "$FX/orders.manifest-sha-bbb2222.json"
