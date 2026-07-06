@@ -34,6 +34,9 @@
   (`app.kubernetes.io/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). **`make verify`**가 호출. 인레포 앱 0개면 vacuous pass.
 - **`check-bats-style.sh`** — bats 단언-스타일 가드: `@test` 본문의 중간(마지막 아님) 부정(`! `)·조건(`[[ `)
   단언을 잡는다(bats가 침묵 통과시키는 false-green 가드 차단; NEG=hard-zero·BB=ratchet). `tests/gates/test_bats-style.bats`가 호출.
+- **`check-credential-expiry.sh`** — 자격증명 만료 원장(`policy/credential-expiry.json`) 검사. `--days N`
+  (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). `credential-expiry.yaml`(주간)이 D-14 telegram 경고로
+  중계, `tests/gates/test_credential_expiry.bats`가 가드. jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)
 - **`verify-ledger.sh`** — 메모리 원장 예산 게이트 SSOT. `bun tools/ledger-to-json.ts` 출력을
   `conftest … policy/ledger.rego`로 검사. **`bun run verify:ledger`**·`make verify`·`make ci`·`ci.yaml`(gate)이 호출.
 - **`verify-runbook-index.sh`** — `docs/runbooks/`(gitignored) ↔ AGENTS.md 런북 인덱스 정합(로컬 전용).

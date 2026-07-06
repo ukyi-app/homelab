@@ -26,6 +26,7 @@
 | pr-sweeper | 30분 | stale auto-merge PR update-branch |
 | dns-drift | 6시간 | active&&public DNS resolve 체크 |
 | contract-drift | 주1(월) | 동봉 계약(vendored) 사본 드리프트 체크 |
+| credential-expiry | 주1(월) | 자격증명 만료 D-14 감시(telegram 경고) |
 | renovate | 주1 | 의존성 갱신 PR |
 
 run-name에 트리거 출처(`스케줄`/`수동(actor)`)가 박혀 이력에서 구분된다.
