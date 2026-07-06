@@ -24,6 +24,21 @@ C="--set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
   [ "$status" -ne 0 ]
 }
 
+@test "schema rejects a custom ports.http (const 8080 — coupled to prod ns-wide NetworkPolicy)" {
+  run helm template t "$CHART" $C --set kind=web --set ports.http=3000
+  [ "$status" -ne 0 ]
+}
+
+@test "schema rejects a custom ports.metrics (const 9090 — coupled to prod ns-wide NetworkPolicy)" {
+  run helm template t "$CHART" $C --set kind=web --set ports.metrics=3000
+  [ "$status" -ne 0 ]
+}
+
+@test "schema rejects nameOverride (app name is selector-derived; Deployment.spec.selector is immutable)" {
+  run helm template t "$CHART" $C --set kind=web --set nameOverride=renamed
+  [ "$status" -ne 0 ]
+}
+
 @test "schema rejects securityContext.privileged=true" {
   run helm template t "$CHART" $C --set kind=web --set securityContext.privileged=true
   [ "$status" -ne 0 ]
