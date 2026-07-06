@@ -1,6 +1,6 @@
 # traefik
 
-**역할** — Gateway-API 인그레스(Traefik HelmRelease) + Gateway-API CRDs + GatewayClass + Gateway + cert-manager Issuer. `web-internal` 리스너가 `home.<도메인>` 내부 호스트 규약을 담당. `gateway` 네임스페이스.
+**역할** — Gateway-API 인그레스(Traefik HelmRelease) + Gateway-API CRDs + GatewayClass + Gateway + cert-manager Issuer. `web-internal-tls` 리스너가 `home.<도메인>` 내부 호스트 규약을 담당(tailscale passthrough→:8443). `gateway` 네임스페이스.
 
 **싱크 Application · sync-wave** — `platform-components` ApplicationSet이 `platform/traefik/prod`을 `traefik-prod` Application으로 자동 발견(appset 생성). manifest의 Gateway-API CRDs/RBAC/GatewayClass/Gateway는 **sync-wave -8**(gateway 계층, 가장 먼저)로 핀 — 앱 HTTPRoute(앱별 wave 2)가 이미 Programmed된 Gateway에 attach된다.
 

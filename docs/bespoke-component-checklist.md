@@ -20,7 +20,8 @@
 - [ ] NetworkPolicy 트리오: default-deny egress + allow-dns egress(kube-system/kube-dns) +
       allow-ingress-from-gateway(namespaceSelector gateway). 함정: NetworkPolicy egress 포트는
       DNAT 후 targetPort.
-- [ ] 내부 host는 `<comp>.home.<도메인>`(Gateway web-internal 리스너 규약). HTTPRoute internal.
+- [ ] 내부 host는 `<comp>.home.<도메인>`(Gateway web-internal-tls 리스너 규약 — 내부 인입은 tailscale
+      passthrough→:8443만). HTTPRoute internal은 `sectionName: web-internal-tls`에 붙인다.
 - [ ] 공개 노출은 **`infra/cloudflare/reserved-hosts.json`→dns.tf `platform_hosts`**(apps.json 아님
       — apps.json은 audit-orphans가 apps/ 부재를 차단한다). 공개 HTTPRoute + reserved-hosts.json 등록.
 
