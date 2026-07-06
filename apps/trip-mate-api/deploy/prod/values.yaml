@@ -31,4 +31,7 @@ probes:
 metrics:
   enabled: false
 podAnnotations:
-  checksum/secrets: a13d49afda4da59e
+  # #277 공개 전환 재봉인(BETTER_AUTH_URL 등 8키)이 checksum 미갱신으로 파드에 반영되지
+  # 않던 것을 정정 — envFrom secretRef 변경은 파드를 재시작시키지 않으므로(문서화된 함정)
+  # 이 값이 유일한 롤링 트리거다. 값 = sha256(sealed 원본 바이트) 앞 16자(update-secrets.ts 규약).
+  checksum/secrets: d0e5d00dea68cf72
