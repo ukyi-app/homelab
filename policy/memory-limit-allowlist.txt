@@ -14,7 +14,6 @@
 #     - cert-manager controller/cainjector/webhook : 원격 helm 차트(platform/argocd/root/apps/cert-manager.yaml).
 #         임계 컴포넌트라 too-tight limit이면 cert 발급/갱신 장애(self-induced OOM) 위험 → 노드 여유로 흡수.
 #         (limit이 있는 워크로드는 ContainerMemoryNearLimit 알림이 OOM 전에 커버하나, unlimited는 미커버.)
-#     - cnpg-operator manager : 원격 helm 차트(platform/argocd/root/apps/cnpg-operator.yaml).
 #     - barman-cloud : 벤더 barman-plugin manifest(platform/cnpg/barman-plugin — 수정 금지).
 #     - database/pg-1 plugin-barman-cloud : CNPG가 pg StatefulSet에 주입하는 사이드카(소스 매니페스트 부재, unlimited).
 #     - edge/ts-traefik-* tailscale : tailscale operator가 만드는 proxy StatefulSet(런타임 생성·ProxyClass 미지정 → unlimited).
@@ -24,3 +23,6 @@
 #   ── 스캔 제외(but limit 보유) — 아래는 unlimited가 아니라 charts/ 하위라 게이트가 못 보는 것뿐 ──
 #     local-helm 상주(traefik·argocd·sealed-secrets·tailscale-operator)는 렌더가 charts/(스캔 제외)에 떨어지나
 #     각 values(values-traefik.yaml 등)에 memory limit을 선언한다 — 회귀 시 게이트 미포착이라 values 직접 확인.
+#     - cnpg-operator manager : 원격 helm 차트라 스캔 밖이나 limit 보유(platform/cnpg/operator/values.yaml
+#         top-level resources 160Mi, 원장 cnpg-operator 행과 동기). 2026-07-06 이전엔 values가 umbrella용
+#         네스팅으로 조용히 무시돼 실제 unlimited였다 — 회귀 시 라이브 deploy resources로 확인.

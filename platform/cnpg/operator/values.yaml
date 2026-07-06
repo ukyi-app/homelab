@@ -1,15 +1,20 @@
-cloudnative-pg:
-  replicaCount: 1
-  monitoring:
-    podMonitorEnabled: false # VM operator 없음; annotation 기반으로 scrape (M5)
-  resources:
-    requests:
-      cpu: 50m
-      memory: 100Mi
-    limits:
-      cpu: 200m
-      memory: 200Mi
-  config:
-    data:
-      # barman-cloud plugin(CNPG-I) sidecar는 여기가 아니라 Cluster별로 활성화한다
-      INHERITED_ANNOTATIONS: "prometheus.io/*"
+# cnpg-operator Application(platform/argocd/root/apps/cnpg-operator.yaml)이 원격 standalone 차트
+# (cloudnative-pg)를 이 파일로 직접 렌더한다 — 키는 반드시 top-level이어야 한다.
+# ⚠️ 과거 이 파일이 umbrella(Chart.yaml dependency)용 `cloudnative-pg:` 블록으로 감싸져 있어
+#    전 키가 조용히 무시됐고 operator가 BestEffort(무제한)로 구동됐다(2026-07-06 라이브 확인).
+#    Chart.yaml은 Renovate 버전 앵커로만 남는다(아무도 umbrella로 렌더하지 않음).
+replicaCount: 1
+monitoring:
+  podMonitorEnabled: false # VM operator 없음; annotation 기반으로 scrape (M5)
+resources:
+  requests:
+    cpu: 50m
+    memory: 100Mi
+  limits:
+    cpu: 200m
+    # 14일 peak working_set 88Mi(라이브 실측 2026-07-06) × ~1.8 헤드룸. 원장(cnpg-operator 행)과 동기.
+    memory: 160Mi
+config:
+  data:
+    # barman-cloud plugin(CNPG-I) sidecar는 여기가 아니라 Cluster별로 활성화한다
+    INHERITED_ANNOTATIONS: "prometheus.io/*"
