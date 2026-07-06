@@ -133,10 +133,13 @@ if (served && pub) {
 }
 
 // SealedSecret 시크릿: 봉인본이 있으면 encryptedData 키 목록을 권위로 삼아 배선한다.
+// 원본 바이트는 그대로 보존한다(디스크 기록·checksum 해시 모두 원본 기준 — update-secrets.ts 규약과 통일).
 let sealedDoc = null;
+let sealedRaw = "";
 let secretKeys: string[] = [];
 if (sealedPath) {
-  sealedDoc = parseYaml(readFileSync(sealedPath, "utf8"));
+  sealedRaw = readFileSync(sealedPath, "utf8");
+  sealedDoc = parseYaml(sealedRaw); // 검증 전용(kind/namespace/name/키) — 재직렬화본은 디스크·해시에 쓰지 않는다
   if (sealedDoc?.kind !== "SealedSecret") fail("sealed 파일이 kind: SealedSecret이 아니다");
   if (sealedDoc?.metadata?.namespace !== "prod") fail(`sealed namespace는 prod여야 한다(strict-scope): ${sealedDoc?.metadata?.namespace}`);
   if (sealedDoc?.metadata?.name !== `${app}-secrets`) fail(`sealed name은 ${app}-secrets여야 한다: ${sealedDoc?.metadata?.name}`);
@@ -162,10 +165,10 @@ if (kind === "site") values.static = { server: "sws" };
 values.metrics = { enabled: config.metrics?.enabled ?? false };
 // 선언적 회전: 봉인 콘텐츠 해시를 pod template annotation으로 둔다 → update-secrets가 봉인본을
 // 갱신하면 이 해시가 바뀌어 ArgoCD가 Deployment를 롤링한다(envFrom 변경은 재시작 필요 —
-// 명령형 rollout restart는 취소/실패 시 옛 값 유지라 선언적으로). 해시는 기록될 봉인본 바이트 기준.
+// 명령형 rollout restart는 취소/실패 시 옛 값 유지라 선언적으로). 해시는 디스크에 기록될 봉인본
+// 원본 바이트 기준(update-secrets.ts와 동일 규약 — check-app-deploy 게이트가 정합을 강제).
 if (sealedDoc) {
-  const sealedYaml = toYaml(sealedDoc);
-  values.podAnnotations = { "checksum/secrets": createHash("sha256").update(sealedYaml).digest("hex").slice(0, 16) };
+  values.podAnnotations = { "checksum/secrets": createHash("sha256").update(sealedRaw).digest("hex").slice(0, 16) };
 }
 
 // 권위 정책 레지스트리 — 폴러(poll-ghcr) autoDeploy 승인 게이트의 유일 소스
@@ -193,7 +196,7 @@ if (!DRY) {
     namespace: "prod",
     ...(sealedDoc ? { resources: [`${app}-secrets.sealed.yaml`] } : {}),
   }));
-  if (sealedDoc) writeFileSync(`${appDir}/deploy/prod/${app}-secrets.sealed.yaml`, toYaml(sealedDoc));
+  if (sealedDoc) writeFileSync(`${appDir}/deploy/prod/${app}-secrets.sealed.yaml`, sealedRaw); // 원본 바이트 그대로(checksum과 정합)
   if (served && pub) {
     // create-app PR 머지가 첫 공개 승인이다. 머지 후 iac.yaml이 이 active:true 행을 DNS/tunnel에 적용한다.
     registry.push({ name: app, host, public: true, active: true });
