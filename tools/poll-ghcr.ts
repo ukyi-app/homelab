@@ -145,6 +145,10 @@ function planApp(dir: string, app: string): Plan {
   const digest = values?.image?.digest ?? null;
   result.current = { tag, digest };
   result.writePath = path.join("apps", app, "deploy", "prod", "values.yaml");
+  // values image.repo가 source-repo 바인딩과 일치하는지 강제(베스포크 레인 planComponent와 동일 계약).
+  // 불일치면 다른 레포의 이미지를 폴링·bump하게 되므로 refuse(fail-closed, cross-repo 오배포 차단).
+  if (repo !== `ghcr.io/${src}`)
+    return { ...result, action: "refuse", reason: `values image.repo(${repo})가 source-repo(ghcr.io/${src})와 불일치` };
   if (!/^sha-[0-9a-f]{7,40}$/.test(tag))
     return { ...result, action: "refuse", reason: `배포 tag가 sha-* 형식이 아니라 조상 증명 불가: ${tag}` };
 
