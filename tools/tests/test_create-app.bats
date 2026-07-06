@@ -66,6 +66,34 @@ gen() {
   [ "$status" -eq 0 ]
 }
 
+@test "create-app records an .activation marker for a public app (audit re-exposure gate coverage)" {
+  # 공개 생성은 재노출 감사(audit-orphans activation-exposure-drift)가 검사할 .activation 마커를
+  # activate-app --flip과 동일 포맷으로 남겨야 한다(마커 없으면 게이트에서 영구 제외).
+  gen
+  [ "$status" -eq 0 ]
+  M="$FR/apps/orders/deploy/prod/.activation"
+  [ -f "$M" ]
+  run jq -e '.registry == {name:"orders", host:"orders.example.com", public:true}' "$M"
+  [ "$status" -eq 0 ]
+  # sha/syncedRev는 생성 시점 미확정(PR 머지 sha는 미래)이라 null이어야 한다.
+  run jq -e '.sha == null and .syncedRev == null' "$M"
+  [ "$status" -eq 0 ]
+}
+
+@test "create-app marker surfaceHash matches the committed canonical hash (no activation-surface-drift on merge)" {
+  # working-tree에서 산출한 surfaceHash가 커밋 후 surfaceHash(HEAD)와 동일해야 머지 직후 audit이
+  # activation-surface-drift(오탐)를 내지 않는다. git 레포로 커밋 후 공용 lib와 대조한다.
+  git -C "$FR" init -q -b main; git -C "$FR" config user.email t@t; git -C "$FR" config user.name t
+  gen
+  [ "$status" -eq 0 ]
+  M="$FR/apps/orders/deploy/prod/.activation"
+  git -C "$FR" add -A; git -C "$FR" commit -qm "create orders"
+  expected=$(bun "$ROOT/tools/lib/surface-hash.ts" "$FR" HEAD orders)
+  [ -n "$expected" ]
+  run jq -r '.surfaceHash' "$M"
+  [ "$output" == "$expected" ]
+}
+
 @test "create-app rejects duplicate host in apps.json (silent toset collision guard)" {
   echo '[{"name":"other","host":"orders.example.com","public":true,"active":true}]' \
     > "$FR/infra/cloudflare/apps.json"

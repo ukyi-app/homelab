@@ -11,6 +11,10 @@ setup() {
   printf 'image: {repo: x, tag: sha-abc1234}\nroute: {public: true, host: orders.example.com}\n' \
     > "$FR/apps/orders/deploy/prod/values.yaml"
   echo '{"db":["shared"],"redis":[],"autoDeploy":true}' > "$FR/apps/orders/deploy/prod/.bindings.json"
+  # active&&public 앱은 .activation 마커(registry projection)가 필수 — 없으면 missing-activation(차단).
+  # $FR은 git 레포가 아니라 surfaceHash(HEAD)가 ""여서 surface-drift는 안 나온다(registry만 유효).
+  printf '{"app":"orders","sha":null,"syncedRev":null,"surfaceHash":"seed","registry":{"name":"orders","host":"orders.example.com","public":true}}\n' \
+    > "$FR/apps/orders/deploy/prod/.activation"
   cat > "$FR/infra/cloudflare/apps.json" <<'EOF'
 [
   { "name": "orders", "host": "orders.example.com", "public": true, "active": true },
@@ -83,7 +87,7 @@ teardown() { rm -rf "$TMP"; }
   git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
   git -C "$G" add -A; git -C "$G" commit -qm init
   oldhash=$(bun "$ROOT/tools/lib/surface-hash.ts" "$G" HEAD orders)  # .activation 제외 canonical
-  printf '{"app":"orders","sha":"abc1234","syncedRev":"abc1234","surfaceHash":"%s"}\n' "$oldhash" \
+  printf '{"app":"orders","sha":"abc1234","syncedRev":"abc1234","surfaceHash":"%s","registry":{"name":"orders","host":"orders.example.com","public":true}}\n' "$oldhash" \
     > "$G/apps/orders/deploy/prod/.activation"
   # 마커 기록 후 표면 변경
   printf 'image: {repo: x, tag: sha-NEW9999}\nroute: {public: true, host: orders.example.com}\n' \
@@ -107,7 +111,7 @@ teardown() { rm -rf "$TMP"; }
   # ⚠️ codex pass1 F3: canonical surfaceHash(.activation 제외)로 마커를 만들고 .activation을 **커밋**한다.
   # 커밋이 apps/orders 트리를 바꿔도 canonical 해시는 불변이라 drift가 없어야 한다(자기 무효화 회귀).
   curhash=$(bun "$ROOT/tools/lib/surface-hash.ts" "$G" HEAD orders)
-  printf '{"app":"orders","sha":"abc1234","syncedRev":"abc1234","surfaceHash":"%s"}\n' "$curhash" \
+  printf '{"app":"orders","sha":"abc1234","syncedRev":"abc1234","surfaceHash":"%s","registry":{"name":"orders","host":"orders.example.com","public":true}}\n' "$curhash" \
     > "$G/apps/orders/deploy/prod/.activation"
   git -C "$G" add -A; git -C "$G" commit -qm "activate orders (+.activation marker)"
   run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$G"
@@ -116,9 +120,9 @@ teardown() { rm -rf "$TMP"; }
   [ "$output" -eq 0 ]
 }
 
-@test "audit accepts an active app without an activation marker (create-app merge is approval)" {
-  # create-app PR 머지 자체가 첫 공개 승인이다. .activation 마커는 별도 재활성화/노출 변경
-  # 재증명에만 쓰므로, 초기 active:true 앱에 마커가 없어도 audit 노이즈를 내지 않는다.
+@test "audit BLOCKS an active+public app that has no .activation marker (create-app/activate-app must record one)" {
+  # 마커가 없으면 유일 차단 재노출 게이트(activation-exposure-drift)가 registry projection 부재로 이 앱을
+  # 영구 제외한다(감사 사각). create-app(공개 생성)·activate-app(--flip) 둘 다 마커를 기록하므로 부재 = BLOCKING.
   G="$TMP/git3"; mkdir -p "$G"; cp -R "$FR/." "$G/"
   git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
   echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
@@ -126,9 +130,18 @@ teardown() { rm -rf "$TMP"; }
   rm -f "$G/apps/orders/deploy/prod/.activation"
   git -C "$G" add -A; git -C "$G" commit -qm init
   run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$G" --ci
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "missing-activation"
+}
+
+@test "audit accepts an active+public app that has a valid .activation marker (create-app/activate-app path)" {
+  # setup의 orders는 registry projection을 담은 .activation 마커가 있으므로 missing-activation 미발화·--ci 통과.
+  echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
+    > "$FR/infra/cloudflare/apps.json"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci
   [ "$status" -eq 0 ]
-  run sh -c 'echo "$1" | grep -c missing-activation' _ "$output"
-  [ "$output" -eq 0 ]
+  run bash -c "bun '$ROOT/tools/audit-orphans.ts' --repo-root '$FR' | jq -e '.findings | any(.type == \"missing-activation\")'"
+  [ "$status" -ne 0 ]
 }
 
 @test "an inactive (active:false) orphan row is non-blocking info, not orphan-dns" {
