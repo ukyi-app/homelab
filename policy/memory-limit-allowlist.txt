@@ -16,8 +16,10 @@
 #         (limit이 있는 워크로드는 ContainerMemoryNearLimit 알림이 OOM 전에 커버하나, unlimited는 미커버.)
 #     - barman-cloud : 벤더 barman-plugin manifest(platform/cnpg/barman-plugin — 수정 금지).
 #     - database/pg-1 plugin-barman-cloud : CNPG가 pg StatefulSet에 주입하는 사이드카(소스 매니페스트 부재, unlimited).
-#     - edge/ts-traefik-* tailscale : tailscale operator가 만드는 proxy StatefulSet(런타임 생성·ProxyClass 미지정 → unlimited).
-#         근본 조치 여지: ProxyClass CR 정의 후 defaultProxyClass 지정으로 proxy에 memory limit 부여.
+#     - tailscale/ts-* tailscale : tailscale operator가 만드는 proxy StatefulSet(런타임 생성 → 소스 매니페스트 부재).
+#         proxyclass.yaml(resource-capped)을 defaultProxyClass로 지정해 각 proxy에 memory limit 192Mi를 cap함
+#         (더는 unlimited 아님). ProxyClass가 생성하는 StatefulSet이라 이 게이트 스캔 밖 → 원장 tailscale 행에
+#         proxy 대수만큼 수기 계상(현재 2대: traefik-ts + pg-rw-tailscale). LB 서비스 증감 시 원장 동반 갱신.
 #     - kube-system svclb-* (klipper-lb) : k3s 관리(우리 매니페스트 아님).
 #
 #   ── 스캔 제외(but limit 보유) — 아래는 unlimited가 아니라 charts/ 하위라 게이트가 못 보는 것뿐 ──
