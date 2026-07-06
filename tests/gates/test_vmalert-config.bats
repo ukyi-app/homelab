@@ -85,7 +85,9 @@ setup() {
   grep -q 'vl_rows_ingested_total' "$C"
   grep -q 'alert: VmagentRemoteWriteDropping' "$C"  # 메트릭 유실
   grep -q 'alert: VmalertUnhealthy' "$C"            # 알림 엔진 자체 에러
-  grep -q 'alert: KubeJobFailed' "$C"               # 전용 staleness 없는 Job 실패(cache-backup 등)
+  grep -q 'alert: KubeJobFailed' "$C"               # 전용 staleness 없는 Job 실패(files ns 등)
+  # 블랙리스트(namespace!~)여야 신규 ns(files 등)를 자동 포함 — 화이트리스트 회귀 금지(:108 교훈, PodCrashLooping과 동일).
+  grep -qE 'kube_job_failed\{condition="true", namespace!~' "$C"
   # self-scrape 주석 — 위 self-metric이 TSDB에 들어가려면 4개 컴포넌트가 scrape돼야 한다.
   for comp in vmsingle vmagent vmalert victorialogs; do
     grep -q 'prometheus.io/scrape: "true"' "$ROOT/platform/victoria-stack/prod/$comp.yaml"

@@ -53,6 +53,15 @@ CJ="$DIR/backup-cronjob.yaml"
   [ "$opt" = "true" ]
 }
 
+@test "backup upload round-trips the RDB: re-reads the uploaded copy and re-checks sha256, not just size" {
+  # size>0만으론 전송 중 절삭/비트플립을 못 잡는다 — rclone cat으로 되읽어 로컬 원본 sha256과 재대조해야 한다.
+  up="$(yq 'select(.kind=="CronJob") | .spec.jobTemplate.spec.template.spec.containers[] | select(.name=="upload") | .args[0]' "$CJ")"
+  echo "$up" | grep -q 'rclone cat'    # 업로드 사본 되읽기(GetObject)
+  echo "$up" | grep -q 'sha256sum'     # 되읽은 사본 재해싱
+  echo "$up" | grep -q 'REMOTE_SHA'    # 로컬 원본과 대조할 원격 해시
+  echo "$up" | grep -q 'exit 1'        # 불일치 시 fail-loud
+}
+
 @test "cache-r2-creds is KSOPS-wired: secret-generator lists the enc file and kustomization loads it" {
   grep -q "cache-r2-creds.enc.yaml" "$DIR/secret-generator.yaml"
   grep -q "secret-generator.yaml" "$DIR/kustomization.yaml"
