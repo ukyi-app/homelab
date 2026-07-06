@@ -1,7 +1,7 @@
 image:
   repo: ghcr.io/ukyi-app/trip-mate-api
-  tag: sha-88a59e788ba4da7d585f1a8cbc0c29ccd3e1984d
-  digest: sha256:73da2e2f872639516d7c2e0b5ce075c39d7e312fb903c326831e1ced8a3b9888
+  tag: sha-c43d9b21aece62fab231ac577b96e5dd5e14271d
+  digest: sha256:3a2e2fb1c275dd7e7521d71f2d96bd07295557fdb0d890a4ff7b9c2408816aec
 kind: web
 replicas: 1
 resources:
