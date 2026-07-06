@@ -83,4 +83,20 @@ teardown() { rm -rf "$STUB" "$DEST" "$SRC"; }
 @test "fails loud when the source path does not exist" {
   FILES_DATA_HOST_PATH="/no/such/dir" run bash "$S" "$DEST"; [ "$status" -ne 0 ]
 }
+@test "manifest generation fails loud on an empty sha256 (no silent empty-hash rows), no promotion" {
+  # shasum 스텁: 빈 출력·성공 종료 → 해시 계산이 '성공했으나 값이 빈' 병리 케이스 재현.
+  # (STUB이 PATH 선두라 sha256() 의 command -v shasum 이 이 스텁을 집는다.)
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/shasum"; chmod +x "$STUB/shasum"
+  run bash "$S" "$DEST"; [ "$status" -ne 0 ]
+  echo "$output" | grep -q "sha256 계산 실패"
+  run bash -c "ls -d '$DEST/data.new' 2>/dev/null"; [ "$status" -ne 0 ]   # 스테이징 정리됨
+  run bash -c "ls -d '$DEST/data' 2>/dev/null"; [ "$status" -ne 0 ]       # 승격 안 됨
+}
+@test "manifest round-trips filenames with leading/trailing spaces (IFS-preserving verify)" {
+  printf 'spacey\n' > "$SRC/ leading.txt"        # 선두 공백 파일명
+  printf 'spacey2\n' > "$SRC/trailing .txt"      # 후행 공백 파일명
+  run bash "$S" "$DEST"; [ "$status" -eq 0 ]
+  run bash "$S" --verify "$DEST"; [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- "--verify 통과"
+}
 @test "passes shellcheck" { run shellcheck "$S"; [ "$status" -eq 0 ]; }
