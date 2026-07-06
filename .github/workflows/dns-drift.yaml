@@ -27,10 +27,13 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0 — 로컬 telegram-notify 액션 resolve + 체커 실행(F8 가드 충족)
       - uses: ./.github/actions/setup-bun
         with: { install: 'false' }     # dns 체크는 deps 불요
-      - id: pf   # active&&public이 0이면 skip(깨끗한 성공)
+      - id: pf   # active&&public + platform_hosts가 모두 0이면 skip(깨끗한 성공)
         run: |
+          # 검사기(dns-drift-check.ts)는 apps.json active&&public + reserved-hosts.json platform_hosts를 둘 다 검사한다.
+          # go 게이트도 양쪽을 합산 — apps.json이 비어도 platform_hosts가 있으면 검사(argocd-webhook/files 갭 재발 방지).
           n=$(bun -e 'const a=JSON.parse(require("fs").readFileSync("infra/cloudflare/apps.json","utf8"));process.stdout.write(String(a.filter(r=>r.public&&r.active).length))')
-          if [ "$n" -gt 0 ]; then echo "go=true" >> "$GITHUB_OUTPUT"; else echo "go=false" >> "$GITHUB_OUTPUT"; echo "::notice::active&&public 0 — dns-drift skip"; fi
+          p=$(bun -e 'let n=0;try{n=(JSON.parse(require("fs").readFileSync("infra/cloudflare/reserved-hosts.json","utf8")).platform_hosts||[]).length}catch{}process.stdout.write(String(n))')
+          if [ "$n" -gt 0 ] || [ "$p" -gt 0 ]; then echo "go=true" >> "$GITHUB_OUTPUT"; else echo "go=false" >> "$GITHUB_OUTPUT"; echo "::notice::active&&public + platform_hosts 0 — dns-drift skip"; fi
       - id: check
         if: steps.pf.outputs.go == 'true'
         run: |
@@ -46,7 +49,9 @@ jobs:
         if: steps.pf.outputs.go == 'true' && (failure() || steps.check.outputs.count != '0')
         uses: ./.github/actions/telegram-notify
         with:
-          status: ${{ steps.check.outputs.count != '0' && 'drift' || job.status }}
+          # check 스텝 크래시 시 count가 미설정('')이라 count!='0'이 참→'drift'로 오라벨된다.
+          # audit.yaml과 동일한 outcome 가드를 앞에 둬 실패는 'failure'로 정확히 표기.
+          status: ${{ steps.check.outcome == 'failure' && 'failure' || (steps.check.outputs.count != '0' && 'drift' || job.status) }}
           source: IaC드리프트
           title: DNS 드리프트
           ident: "active&&public host 미해결 ${{ steps.check.outputs.count }}건"
