@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
 
+# 최소권한 — skeleton·sops 왕복·pre-commit만(전부 읽기/테스트). top-level 부재 시 fork PR의
+# 비신뢰 코드(pre-commit 훅 등)가 레포 기본 토큰 권한으로 실행된다. write 필요 스텝 없음.
+permissions:
+  contents: read
+
 # PR엔 같은 PR의 이전 run 취소, main push는 sha 고유라 보존(queue:max 미사용 → 함정 무관).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
