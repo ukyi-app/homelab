@@ -13,6 +13,7 @@ import path from "node:path";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { typedFlags, type TypedFlags } from "./lib/cli.ts";
 import { surfaceHash } from "./lib/surface-hash.ts";
+import { buildActivationMarker, registryProjection } from "./lib/activation-marker.ts";
 
 function die(msg: string): never {
   console.error(`activate-app: GATE FAIL — ${msg}`);
@@ -106,7 +107,7 @@ if (flip) {
   const row = rows.find((r: any) => r.name === app);
   // races-5 마커: .activation 제외 canonical surfaceHash(F3, 자기무효화 방지) + apps.json 노출 행 projection(pass4 F1).
   // 이 마커는 **정보성**(pass3 F1) — audit이 차단 게이트로 쓰면 정상 이미지 bump가 데드락. 노출 재검증은 런북.
-  const registryRow = { name: row.name, host: row.host ?? null, public: row.public ?? false };
+  const registryRow = registryProjection(row); // create-app/audit과 공유(키 순서 계약)
   const sh = surfaceHash(repoDir, syncedRev, app);
   const markerPath = path.join(repoDir, `apps/${app}/deploy/prod/.activation`);
   // ⚠️ codex restale F2: 멱등 — 이미 active이고 마커(surfaceHash+registry+sha)가 동일하면 **아무것도 쓰지 않고**
@@ -118,7 +119,7 @@ if (flip) {
   } else {
     row.active = true;
     writeFileSync(appsJsonPath, JSON.stringify(rows, null, 2) + "\n");
-    const marker = { app, sha, syncedRev, surfaceHash: sh, registry: registryRow, activatedAt: new Date().toISOString() };
+    const marker = buildActivationMarker({ app, sha, syncedRev, surfaceHash: sh, registry: registryRow });
     writeFileSync(markerPath, JSON.stringify(marker, null, 2) + "\n");
   }
 }
