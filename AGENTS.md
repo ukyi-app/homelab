@@ -40,7 +40,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - **`*.enc.yaml`은 직접 수정 금지** — 평문 메타데이터도 SOPS MAC에 포함된다. 수정은
   복호화→편집→재암호화(`sops`)로만. 시크릿 값은 채팅/로그에 절대 출력하지 않는다.
 - 시크릿 공급: 로컬 `.env.secrets`(gitignored, 템플릿 `.env.secrets.example`) + SOPS 시드만.
-- 내부 호스트 접미사는 `home.<도메인>` (Gateway `web-internal` 리스너 규약).
+- 내부 호스트 접미사는 `home.<도메인>` (Gateway `web-internal-tls` 리스너 규약 — 내부 인입은 tailscale passthrough→:8443뿐).
 - 벤더 파일 수정 금지: `platform/*/prod/charts/`(helm 캐시, untracked), barman-plugin manifest,
   gateway-api CRD. `Chart.yaml`의 파스칼케이스는 Helm 고정 규약이다.
 - `docs/plans/`는 역사 기록 — 수정하지 않는다.
@@ -110,7 +110,8 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 (App 토큰은 branch protection 우회 불가; required check `gate` 통과 시 자동 머지).
 
 - **빌드:** 템플릿으로 레포 생성 → `.app-config.yml` 작성(계약: `tools/app-config-schema.json`)
-  → main push → `reusable-app-build.yaml`(v1: arm64→GHCR push만, dispatch 없음).
+  → main push → `reusable-app-build.yaml`(arm64→GHCR push + deploy-trigger 잡: `HOMELAB_DISPATCH_APP`
+    시크릿 쌍 전달 시 homelab bump-poll 1회 디스패치로 크론 지연 제거, 미전달=clean skip·크론 백스톱).
 - **생성 변이:** owner가 homelab에서 액션별 디스패처(workflow_dispatch) 실행 (변이 디스패처는 `vars.HOMELAB_OWNER` actor 가드로 owner 전용 — bump-poll/audit reconciler는 비대상) —
   `create-app`/`update-secrets`/`create-database`/`create-cache`/`teardown-app`(각 전용 워크플로). **파괴: `teardown-app`은
   디스패처(`🗑️ teardown-app` — confirm===app 가드 + **수동 머지**, reusable이 파괴 경계에서 confirm 재검증) + owner-local CLI(`make teardown-app`) 공존.

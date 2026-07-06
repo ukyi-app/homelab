@@ -34,7 +34,7 @@ setup() {
 }
 
 @test "public path serves through Traefik via the tunnel" {
-  # whoami는 설계상 내부 전용(web-internal) — 공개 DNS 레코드는 apex/www + 활성 앱 host(현재 page)다.
+  # whoami는 설계상 내부 전용(web-internal-tls) — 공개 DNS 레코드는 apex/www + 활성 앱 host(현재 page)다.
   # 공개 경로 증명은 page 앱의 /health로 한다 (DNS→Cloudflare→tunnel→Traefik web-public→page).
   # (구 'api' 앱은 미배포 — apps.json의 활성 public 앱이 권위. page.${DOMAIN}/health=200 확인.)
   run bash -c "curl -s -o /dev/null -w '%{http_code}' https://page.${DOMAIN}/health"
