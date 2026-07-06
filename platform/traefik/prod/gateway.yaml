@@ -1,3 +1,7 @@
+# 2026-07-06 결정: traefik(gateway ns) egress default-deny NetworkPolicy 미적용 —
+#   백엔드가 동적(전 내부 라우트 대상)이라 allowlist 유지비가 높고, crown-jewel(db/cache)은 대상측
+#   ingress default-deny가 gateway ns를 배제해 이미 보호된다. 재검토 조건: 멀티테넌트화 또는 gateway ns의
+#   신뢰경계 변화.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -14,6 +18,9 @@ spec:
       hostname: "*.ukyi.app"
       allowedRoutes:
         namespaces: { from: All }
+    # ⚠️ 실사용 라우트 0 — 내부 인입은 tailscale traefik-ts(:443)→websecure(:8443)=web-internal-tls만
+    #    거친다. 문서를 따라 HTTPRoute를 이 평문(HTTP:8000) 리스너에 붙이면 내부 host에 도달하지 못한다
+    #    (web-internal-tls를 쓸 것). 리스너 자체는 명시성/이력 위해 유지(제거는 별도 결정).
     - name: web-internal
       protocol: HTTP
       port: 8000

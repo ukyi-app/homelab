@@ -11,8 +11,8 @@
 
 ## 내부 전용 자세
 Grafana, vmsingle, VictoriaLogs, vmalert, Alertmanager는 공개 HTTPRoute도, cloudflared
-라우트도 없다. 오직 Tailscale로 노출된 단일 `homelab` Gateway의 `web-internal`
-listener(M3)를 거쳐 `*.home.ukyi.app`으로만 접근 가능하다. 기본 자세 =
+라우트도 없다. 오직 Tailscale로 노출된 단일 `homelab` Gateway의 `web-internal-tls`
+listener(M3, :8443)를 거쳐 `*.home.ukyi.app`으로만 접근 가능하다. 기본 자세 =
 internal-by-default (§6).
 
 ## dead-man's-switch 부트스트랩 의존성
