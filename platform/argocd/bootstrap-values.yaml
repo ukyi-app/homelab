@@ -23,6 +23,11 @@ controller:
   args:
     statusProcessors: "4"
     operationProcessors: "2"
+  # 대형 Go 컨트롤러 — GOMEMLIMIT을 limit(640Mi)의 90%로 연동해 cgroup OOM 전에 GC가 소프트리밋에서
+  # 힙을 수거하게 한다(자체 정책: notifications 주석 참조·check-resource-limits는 ≤limit×0.95 강제).
+  env:
+    - name: GOMEMLIMIT
+      value: "576MiB"
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 500m, memory: 640Mi } # OOM-watch: 상시 ~79%(peak 464)·앱 온보딩 성장형 → 선제 상향(512→640)
@@ -35,6 +40,9 @@ repoServer:
     # KSOPS가 렌더 시점에 마운트된 Secret에서 age 키를 읽는다.
     - name: SOPS_AGE_KEY_FILE
       value: /home/argocd/.config/sops/age/keys.txt
+    # 대형 Go 컨트롤러 — GOMEMLIMIT을 limit(384Mi)의 90%로 연동(cgroup OOM 전 GC 소프트리밋 수거·≤limit×0.95).
+    - name: GOMEMLIMIT
+      value: "345MiB"
   # ksops 바이너리 + exec 지원 kustomize를 repo-server에 설치한다.
   # ⚠️ 이 initContainer는 ksops뿐 아니라 repo-server가 쓰는 kustomize 바이너리 자체를 공급한다
   #    (/custom-tools → /usr/local/bin/kustomize subPath 마운트). KSOPS를 제거하더라도 이 컨테이너를
