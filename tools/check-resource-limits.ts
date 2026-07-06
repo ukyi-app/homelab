@@ -1,6 +1,8 @@
 // 상주 워크로드(Deployment/DaemonSet/StatefulSet) main 컨테이너 자원 가드 — cpu·memory request +
 // memory limit 필수(OR policy/memory-limit-allowlist.txt 명시 allowlist) + GOMEMLIMIT ≤ memory limit×0.95(B2).
 // (cpu limit은 비요구: CFS quota 유휴 throttling 회피 — 의도적 생략이 SRE 권장. initContainer 비대상.)
+// CNPG CR도 스캔한다: kind:Cluster는 컨테이너 개념이 없어 spec.resources를 pseudo-container 'postgres'로
+// (allowlist 키 Cluster/<name>/postgres), kind:Pooler는 spec.template.spec.containers[](pgbouncer)로 검사한다.
 // 구 scripts/check-resource-limits.sh(bash+yq+python3 3언어)를 bun/TS 단일로 이관 — 메시지·scan-floor 동일.
 // 원격-helm 벤더(platform/*/prod/charts/)·barman-plugin은 스캔 밖. make verify가 호출, bats가 행동 검증.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -12,8 +14,10 @@ try { f = parseFlags(process.argv.slice(2), { value: ["--repo-root"], bool: [] }
 catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root`); process.exit(2); }
 const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string) : ".";
 
-const KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet"]);
-const KIND_RE = /^kind:[ \t]*(Deployment|DaemonSet|StatefulSet)\b/m;
+const KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler", "Cluster"]);
+// spec.template.spec.containers[] 경로를 쓰는 kind(Pooler = CNPG pgbouncer). Cluster는 별도(spec.resources).
+const CONTAINER_KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler"]);
+const KIND_RE = /^kind:[ \t]*(Deployment|DaemonSet|StatefulSet|Pooler|Cluster)\b/m;
 const MIN_SCAN = 10;
 const ALLOW = "policy/memory-limit-allowlist.txt";
 
@@ -44,6 +48,33 @@ const files = (existsSync(platformDir) ? readdirSync(platformDir, { recursive: t
 
 let count = 0;
 const viol: string[] = [];
+
+// 자원 블록 1개(컨테이너 또는 Cluster spec.resources) 검사 — cpu·memory request + memory limit 필수,
+// cpu limit 비요구. env가 있으면 GOMEMLIMIT ≤ limit×0.95도 검사(Cluster는 Go 워크로드가 아니라 env 미전달).
+function checkBlock(
+  kind: string, name: string, container: string, resources: any, env: any[] | undefined, rel: string,
+): void {
+  const requests = resources?.requests ?? {};
+  const limits = resources?.limits ?? {};
+  // GOMEMLIMIT ≤ limit×0.95 (right-size 시 GOMEMLIMIT 미동반 갱신 → GC 소프트리밋이 cgroup limit
+  // 위로 올라가 OOMKill 직행. vmalert 드리프트가 이 검사로 자동 포착 — 원장이 못 보는 2차 축).
+  let gomem: string | undefined;
+  for (const e of env ?? []) if (e && typeof e === "object" && e.name === "GOMEMLIMIT") gomem = e.value;
+  if (gomem && limits.memory != null) {
+    const gb = toBytes(gomem), lb = toBytes(limits.memory);
+    if (gb != null && lb != null && gb > lb * 0.95) {
+      viol.push(`${kind}/${name}/${container} [GOMEMLIMIT ${gomem} > limit×0.95 (${limits.memory})]  (${rel})`);
+    }
+  }
+  const missing: string[] = [];
+  if (requests.cpu == null) missing.push("requests.cpu");
+  if (requests.memory == null) missing.push("requests.memory");
+  if (limits.memory == null) missing.push("limits.memory");
+  if (!missing.length) return;
+  const key = `${kind}/${name}/${container}`;
+  if (!allowed.has(key)) viol.push(`${key} [missing: ${missing.join(",")}]  (${rel})`);
+}
+
 for (const rel of files) {
   const text = readFileSync(`${ROOT}/${rel}`, "utf8");
   if (!KIND_RE.test(text)) continue;
@@ -53,26 +84,17 @@ for (const rel of files) {
     const o = doc.toJS() as any;
     if (!o || typeof o !== "object" || !KINDS.has(o.kind)) continue;
     const name = o.metadata?.name ?? "?";
-    for (const c of o.spec?.template?.spec?.containers ?? []) {
-      const requests = c.resources?.requests ?? {};
-      const limits = c.resources?.limits ?? {};
-      // GOMEMLIMIT ≤ limit×0.95 (right-size 시 GOMEMLIMIT 미동반 갱신 → GC 소프트리밋이 cgroup limit
-      // 위로 올라가 OOMKill 직행. vmalert 드리프트가 이 검사로 자동 포착 — 원장이 못 보는 2차 축).
-      let gomem: string | undefined;
-      for (const e of c.env ?? []) if (e && typeof e === "object" && e.name === "GOMEMLIMIT") gomem = e.value;
-      if (gomem && limits.memory != null) {
-        const gb = toBytes(gomem), lb = toBytes(limits.memory);
-        if (gb != null && lb != null && gb > lb * 0.95) {
-          viol.push(`${o.kind}/${name}/${c.name} [GOMEMLIMIT ${gomem} > limit×0.95 (${limits.memory})]  (${rel})`);
-        }
+    if (o.kind === "Cluster") {
+      // CNPG Cluster: 컨테이너 없음 — spec.resources를 pseudo-container 'postgres'로 검사(GOMEMLIMIT 무관).
+      checkBlock(o.kind, name, "postgres", o.spec?.resources, undefined, rel);
+    } else if (CONTAINER_KINDS.has(o.kind)) {
+      // Deployment/DaemonSet/StatefulSet/Pooler: spec.template.spec.containers[]
+      const containers = o.spec?.template?.spec?.containers ?? [];
+      if (o.kind === "Pooler" && containers.length === 0) {
+        // template 미지정 Pooler = pgbouncer 자원 unlimited → fail-loud(자원 블록 통째 삭제 우회 차단).
+        checkBlock(o.kind, name, "pgbouncer", undefined, undefined, rel);
       }
-      const missing: string[] = [];
-      if (requests.cpu == null) missing.push("requests.cpu");
-      if (requests.memory == null) missing.push("requests.memory");
-      if (limits.memory == null) missing.push("limits.memory");
-      if (!missing.length) continue;
-      const key = `${o.kind}/${name}/${c.name}`;
-      if (!allowed.has(key)) viol.push(`${key} [missing: ${missing.join(",")}]  (${rel})`);
+      for (const c of containers) checkBlock(o.kind, name, c.name, c.resources, c.env, rel);
     }
   }
 }
