@@ -28,7 +28,7 @@ spec:
         - name: victorialogs
           # v1.51+는 plain 태그 스킴(구 -victorialogs suffix 폐기). LogsQL filter-pipe breaking(foo|bar)
           # 은 우리 committed 쿼리 무영향(대시보드=PromQL, Explore 임시질의만 LogsQL). forward-compat.
-          image: victoriametrics/victoria-logs:v1.51.0
+          image: victoriametrics/victoria-logs:v1.51.0@sha256:e16dd33a95623cc21730cf5285344ed9f97419eeaff7d24b039c135beb85ee7e
           args:
             - --storageDataPath=/vlogs
             - --retentionPeriod=14d

@@ -13,5 +13,5 @@ spec:
     spec:
       containers:
         - name: app # ⚠️ `kubectl set image deploy/notify-smoke app=...` 대상 컨테이너 이름
-          image: registry.k8s.io/pause:3.9
+          image: registry.k8s.io/pause:3.9@sha256:7031c1b283388d2c2e09b57badb803c05ebed362dc88d84b480cc47f72a21097
           resources: { requests: { cpu: 5m, memory: 16Mi }, limits: { memory: 32Mi } }

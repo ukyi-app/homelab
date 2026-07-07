@@ -24,7 +24,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: glances
-          image: nicolargo/glances:4.5.5    # 최신 stable 4.x(2026-06). digest 핀은 Renovate 후속
+          image: nicolargo/glances:4.5.5@sha256:9ac5de7debffb1e5746654585daaf1d23179ea91fbdfd4c25a7a17945d9c74bf    # 최신 stable 4.x(2026-06). digest 핀은 Renovate 후속
           env:
             - { name: GLANCES_OPT, value: "-w" }   # 웹서버 모드(REST API @ :61208)
             - { name: TMPDIR, value: /tmp }

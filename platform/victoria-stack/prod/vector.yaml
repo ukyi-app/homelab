@@ -80,7 +80,7 @@ spec:
       securityContext: { runAsUser: 0, runAsGroup: 0, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: vector
-          image: timberio/vector:0.56.0-distroless-libc
+          image: timberio/vector:0.56.0-distroless-libc@sha256:58c37f908648388a8a771426451476d60ebbd393fe52cc08a94573bcbb1c629a
           args: ["--config", "/etc/vector/vector.yaml"]
           ports: [{ name: metrics, containerPort: 9598 }]   # vector 메트릭 노출
           env:
