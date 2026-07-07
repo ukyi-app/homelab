@@ -16,9 +16,9 @@
 # 예외: policy/image-pin-allowlist.txt(라인당 이미지 값 또는 app:<name>, # 사유 주석 **강제** — 인라인 또는 직전 줄).
 #   수용 기준 = allowlist 0(핀 후).
 #
-# ⚠️ Task 8 범위: 체커 구축뿐 — make verify 배선·실-레포 통과 단언은 Task 9(핀 적용 후, 중간 CI 파손 방지).
-#   배선 시 --min-scan을 넘기지 말 것(기본 20 = scan-floor 유효). 지금 실 레포 실행은 tag-only를 의도적으로
-#   출력하며 exit 1이 정상(핀 대상 진단).
+# make verify 배선됨(Task 9, 핀 적용 후) — 기본 --min-scan 20(scan-floor 유효, 배선부에 넘기지 않는다).
+#   24 tag-only 이미지를 수동 digest 핀(renovate pin-dependencies 배치가 Issues:write gap으로 엉켜 결정적 경로 선택)
+#   완료 후 실 레포는 allowlist 0으로 통과한다. 신규 미핀 이미지는 이 게이트가 fail-closed로 차단.
 # bash 3.2 호환: [[ ]]·mapfile 금지(중간 단언 [ ]/grep). --root로 픽스처 tmp git 레포 지정 가능.
 set -euo pipefail
 

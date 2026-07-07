@@ -184,6 +184,13 @@ EOF
   echo "$output" | grep -q 'lane2'
 }
 
+@test "(f) real repo passes — all runtime images digest-pinned (default scan-floor, Task 9)" {
+  # Task 9: 24 tag-only 이미지 수동 핀 적용 후 실 레포가 allowlist 0으로 통과(기본 min-scan=20 scan-floor 유효).
+  run bash "$ROOT/scripts/check-image-pins.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '전부 digest 핀됨'
+}
+
 @test "lane2 flow-style image without digest is flagged; with digest passes" {
   # 적대 리뷰 LOW: flow-style image: {repo,tag} 도 digest 강제(계약 완결).
   wf apps/flowbad/deploy/prod/values.yaml <<'EOF'

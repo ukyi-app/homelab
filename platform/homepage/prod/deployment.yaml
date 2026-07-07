@@ -30,7 +30,7 @@ spec:
         # — RO면 EROFS "required config 초기화 실패" → CrashLoop("no available server").
         # adguard seed-config 동형.
         - name: seed-config
-          image: busybox:1.38
+          image: busybox:1.38@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d
           command: ["sh", "-c", "cp -L /tmp/cfg/* /app/config/ 2>/dev/null; true"]
           securityContext:
             runAsNonRoot: true
@@ -45,7 +45,7 @@ spec:
             - { name: config, mountPath: /app/config }
       containers:
         - name: homepage
-          image: ghcr.io/gethomepage/homepage:v1.13.2  # digest 핀은 Renovate 후속 PR
+          image: ghcr.io/gethomepage/homepage:v1.13.2@sha256:a0b71c8e757298d02560186bab9fbe3fc2d375c523a62cc1019177b37e48aa28  # digest 핀은 Renovate 후속 PR
           ports:
             - containerPort: 3000
               name: http
