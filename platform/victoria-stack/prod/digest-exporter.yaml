@@ -34,6 +34,7 @@ spec:
           labels: { app.kubernetes.io/name: digest-exporter } # observability egress netpol 셀렉터
         spec:
           restartPolicy: Never
+          automountServiceAccountToken: false # skopeo(ghcr)+curl(vmsingle)만 — k8s API 미사용(메타갭 ⑤ W2-C)
           securityContext: { runAsNonRoot: true, runAsUser: 65532 }
           containers:
             - name: digest-exporter

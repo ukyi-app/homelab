@@ -11,6 +11,7 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: grafana }
     spec:
+      automountServiceAccountToken: false # k8s API 미사용(대시보드=TSDB 질의) — SA 토큰 마운트 금지(메타갭 ⑤ W2-C)
       securityContext: { runAsNonRoot: true, runAsUser: 472, fsGroup: 472, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: grafana

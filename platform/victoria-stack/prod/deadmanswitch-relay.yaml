@@ -40,6 +40,7 @@ spec:
         # ArgoCD가 자동 롤한다(ConfigMap 무재시작 함정 회피, AGENTS.md). test_relay.bats가 일치를 강제.
         checksum/relay-script: "cd12d6b0e30903c1"
     spec:
+      automountServiceAccountToken: false # busybox nc relay — k8s API 미사용, SA 토큰 마운트 금지(메타갭 ⑤ W2-C)
       securityContext: { runAsNonRoot: true, runAsUser: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: relay
