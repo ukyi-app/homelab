@@ -63,10 +63,13 @@ setup() {
   grep -q 'backoffLimit: 0' "$F"
 }
 
-@test "reconciler bounds every curl via a shared CURL var (connect/total timeout)" {
+@test "reconciler bounds every curl via a shared CURL var (connect/total timeout + connrefused retry)" {
   # F6/F12: 전 네트워크 호출이 타임아웃 바운드. 직접 curl 호출(라인 선두 공백 뒤 curl) 없음.
   grep -q 'connect-timeout 5' "$F"
   grep -q 'max-time 20' "$F"
+  # 전이적 연결거부 재시도 — adguard/apiserver 롤링 중 ~2s 갭에 backoffLimit:0 Job이 Failed→Degraded로
+  # 얼어붙던 라이브 함정 회피(4xx는 재시도 안 함).
+  grep -q 'retry-connrefused' "$F"
   run grep -cE '^[[:space:]]*curl[[:space:]]' "$F"
   [ "$output" = "0" ] || [ "$status" -ne 0 ]
 }
