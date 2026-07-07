@@ -1,0 +1,21 @@
+# rewrite-reconciler(edge ns SA)가 traefik-ts 서비스 하나만 get할 수 있는 최소권한 RBAC.
+# ⚠️ cross-ns 제약: adguard-prod kustomization의 `namespace: edge` 트랜스포머가 네임스페이스드 Role을 edge로
+#    강제하므로 gateway ns의 traefik-ts를 읽을 네임스페이스드 Role은 불가능하다 → ClusterRole + resourceNames로
+#    traefik-ts 단일 서비스만 겨냥한다(get by name — resourceNames는 list/watch엔 무효라 read-by-name만 허용,
+#    traefik-ts는 gateway ns 유일 인스턴스라 사실상 gateway-scoped). ClusterRole/Binding은 cluster-scoped라
+#    namespace 트랜스포머 무영향, 바인딩 subject의 SA namespace만 edge로 정정된다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: rewrite-reconciler-traefik-ts-reader }
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["traefik-ts"] # 단일 서비스만 — 최소권한
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: rewrite-reconciler-traefik-ts-reader }
+subjects:
+  - { kind: ServiceAccount, name: rewrite-reconciler, namespace: edge }
+roleRef: { kind: ClusterRole, name: rewrite-reconciler-traefik-ts-reader, apiGroup: rbac.authorization.k8s.io }

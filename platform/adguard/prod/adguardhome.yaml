@@ -19,8 +19,11 @@ data:
         # Traefik이 :443에서 와일드카드 cert로 TLS 종단하므로 valid HTTPS로 접근된다.
         # ⚠️ 이 IP는 traefik-ts tailscale 디바이스 IP다. DR 재구축으로 디바이스가 재등록되면(예: homelab→
         #    homelab-1) IP가 바뀌어 stale이 된다 — 그러면 tailscale/LAN 양쪽에서 *.home.ukyi.app이 죽은 IP로
-        #    연결돼 전부 실패한다(.ts.net MagicDNS 경로엔 안 드러남). 재구축 후 `kubectl -n gateway get svc traefik-ts`
-        #    의 tailscale IP로 갱신할 것. (cp -n 시드라 라이브 PVC의 AdGuardHome.yaml도 함께 고쳐 재시작해야 반영.)
+        #    연결돼 전부 실패한다(.ts.net MagicDNS 경로엔 안 드러남).
+        #    ✅ 셀프힐(메타갭 ① W2-A): adguard-rewrite-reconciler CronJob이 10분마다 traefik-ts 실 LB IP로 이 rewrite를
+        #    자동 수렴한다(rewrite-reconciler.yaml) — 재구축/IP 변경 시 수동 갱신 불요. 리컨실러 침묵 시
+        #    AdguardRewriteReconcilerStale가 페이징하고, 그때만 `kubectl -n gateway get svc traefik-ts`의 IP로 수동 갱신한다
+        #    (cp -n 시드라 라이브 PVC의 AdGuardHome.yaml도 함께 고쳐 재시작해야 반영).
         - domain: "*.home.ukyi.app"
           answer: "100.120.85.39" # traefik-ts tailscale 디바이스 IP (2026-06-22 tailscale 전용 ns 이전으로 proxy 재등록 → 갱신)
       protection_enabled: true

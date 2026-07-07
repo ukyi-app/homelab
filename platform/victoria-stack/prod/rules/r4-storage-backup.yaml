@@ -185,3 +185,29 @@ data:
             annotations:
               summary: "외장(bulk-ssd) 여유 15% 미만 또는 in-cluster 신호 소실"
               description: "du exporter가 본 bulk 티어 여유가 15% 미만이거나 storage_tier_avail_bytes{tier=bulk} 신호가 소실됐습니다 — W3에서 관측 TSDB가 bulk에 얹히므로 이전 착수 전 반드시 여유를 확인하세요(FilesBulkSSDLow의 in-cluster 짝)."
+          # adguard *.home rewrite 셀프힐 리컨실러(메타갭 ① W2-A) 생존 — 리컨실러가 10분마다
+          # adguard_rewrite_reconcile_timestamp를 push한다. 침묵(30분+ = 3주기 누락)이면 *.home 드리프트가
+          # 무방비가 되므로 페이징. 10분 주기 push라 last_over_time[2h] 윈도 + absent가 fail-closed(push-metric 함정).
+          # (도메인은 스토리지 아님이나 push-metric staleness 패턴상 r4에 함께 둔다 — CNPGRestoreDrillStale과 동형.)
+          - alert: AdguardRewriteReconcilerStale
+            expr: |
+              (time() - last_over_time(adguard_rewrite_reconcile_timestamp[2h])) > 1800
+              or absent(last_over_time(adguard_rewrite_reconcile_timestamp[2h]))
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "adguard rewrite 리컨실러가 30분+ 침묵 — *.home 드리프트 무방비"
+              description: "adguard-rewrite-reconciler CronJob이 하트비트를 못 보냅니다 — traefik-ts IP 변경/DR 재구축 시 *.home.ukyi.app이 죽은 IP로 해석될 위험. CronJob/RBAC/AdGuard 자격을 확인하세요."
+          # 통지 분리(F13): DNS 변이 파드엔 발송 자격 0. 실제 수렴(FIXED=1)이 있었을 때만 리컨실러가 fix
+          # 타임스탬프를 push하고, 이 info 룰이 alertmanager→telegram으로 중계한다(발송 자격은 alertmanager에만).
+          # F19: no-op 런은 fix 샘플을 안 써서 last_over_time이 직전 fix로 유지 — 20분 창 후 자동 해소.
+          # ⚠️ drift-fix 이벤트당 telegram 2건(ℹ️ 정보 발화 + 20분 후 🔵 해소, send_resolved). 드리프트는 DR/proxy
+          # 재등록 등 IP 변경 시에만이라 저빈도 → 전용 send_resolved:false receiver(telegram 템플릿 40줄 중복) 대신 수용.
+          - alert: AdguardRewriteDriftFixed
+            expr: |
+              (time() - last_over_time(adguard_rewrite_last_fix_timestamp[2h])) < 1200
+              and last_over_time(adguard_rewrite_last_fix_timestamp[2h]) > 0
+            labels: { severity: info }
+            annotations:
+              summary: "adguard *.home rewrite 드리프트가 자동 수렴됨"
+              description: "리컨실러가 traefik-ts 실 IP로 rewrite를 복구했습니다 — DR 재구축/IP 변경이 있었는지 확인하세요."

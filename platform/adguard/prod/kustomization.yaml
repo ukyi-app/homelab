@@ -5,7 +5,10 @@ resources:
   - pvc.yaml
   - adguardhome.yaml
   - adguard-auth.sealed.yaml # UI 인증 bcrypt 해시(SealedSecret adguard-auth) — inject-auth init이 .users에 주입
+  - adguard-api-creds.sealed.yaml # API 평문 비밀번호(SealedSecret adguard-api-creds) — rewrite 리컨실러 basic auth
   - deployment.yaml
   - service.yaml
   - httproute.yaml # UI를 adguard.home.ukyi.app로 노출(web-internal-tls). 구 tailscale Ingress 대체.
   - networkpolicy.yaml # edge egress 격리(업스트림 DNS만) — 워크로드별 self-isolation
+  - rewrite-reconciler.yaml # *.home rewrite 셀프힐 CronJob + SA + 전용 egress netpol(메타갭 ① W2-A)
+  - rewrite-reconciler-rbac.yaml # traefik-ts get ClusterRole/Binding(cross-ns, resourceNames 스코프)

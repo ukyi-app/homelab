@@ -38,3 +38,23 @@ S="$BATS_TEST_DIRNAME/adguard-auth.sealed.yaml"
   # kustomization이 SealedSecret을 포함
   run grep -q 'adguard-auth.sealed.yaml' "$K"; [ "$status" -eq 0 ]
 }
+
+@test "api-creds is a SealedSecret named adguard-api-creds in edge (reconciler basic-auth password)" {
+  # 메타갭 ① Task 6(W2-A): rewrite 리컨실러 basic auth용 평문 비밀번호(UI는 bcrypt·API는 평문, 같은 ADGUARD_PASSWORD).
+  A="$BATS_TEST_DIRNAME/adguard-api-creds.sealed.yaml"
+  run grep -q 'kind: SealedSecret' "$A"; [ "$status" -eq 0 ]
+  run grep -q 'name: adguard-api-creds' "$A"; [ "$status" -eq 0 ]
+  run grep -q 'namespace: edge' "$A"; [ "$status" -eq 0 ]
+  run grep -q 'ADGUARD_PASSWORD' "$A"; [ "$status" -eq 0 ]
+  # 봉인본에는 평문 필드 없음 — encryptedData만.
+  run grep -qE '^\s*stringData:|^\s*data:' "$A"; [ "$status" -ne 0 ]
+  run grep -q 'encryptedData:' "$A"; [ "$status" -eq 0 ]
+  run grep -q 'adguard-api-creds.sealed.yaml' "$K"; [ "$status" -eq 0 ]
+}
+
+@test "reconciler wires username plaintext (ukkiee) + password via adguard-api-creds envFrom" {
+  # username은 비밀 아님 → env 평문(deployment inject-auth AGH_USER 동일 규약), password만 봉인본 envFrom.
+  R="$BATS_TEST_DIRNAME/rewrite-reconciler.yaml"
+  run grep -qE 'name: ADGUARD_USER, value: ukkiee' "$R"; [ "$status" -eq 0 ]
+  run grep -q 'secretRef: { name: adguard-api-creds }' "$R"; [ "$status" -eq 0 ]
+}

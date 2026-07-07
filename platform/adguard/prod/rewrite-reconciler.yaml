@@ -1,0 +1,156 @@
+# adguard *.home rewrite 셀프힐 리컨실러(메타갭 ① W2-A) — split-horizon rewrite(`*.home.ukyi.app → traefik-ts
+# tailscale IP`)가 DR 재구축/proxy 재등록으로 stale이 되면 tailscale·LAN 양쪽에서 *.home이 죽은 IP로 해석된다
+# (AdGuard split-horizon rewrite DR stale 함정). 이 CronJob이 10분마다 traefik-ts svc의 실 LB IP를 apiserver로
+# 읽어 AdGuard rewrite를 수렴시킨다. 통지는 발송 자격 없이 메트릭→vmalert→alertmanager 경유(F13).
+#
+# ⚠️ F13(발송 자격 분리): 이 파드는 DNS 변이 권한 + AdGuard 자격 + SA 토큰을 가진 링치핀 변이자다. 인터넷
+#    egress(0.0.0.0/0:443)를 주면 침해 시 텔레그램/HTTP로 자격을 직결 유출할 수 있어, 전용 netpol로
+#    apiserver(노드서브넷:6443)·adguard-ui(:3000)·vmsingle(:8428)·DNS(:53)만 허용하고 인터넷 직결 egress는 0으로 둔다.
+#    (⚠️ 잔여: DNS(:53) 허용은 CoreDNS 재귀 경유 exfil(DNS 터널링)을 이론상 남긴다 — 느리고 시끄럽고 공격자
+#     인프라 필요라 수용. 애초에 발송 자격을 이 파드에 두지 않음 — 통지는 메트릭→vmalert→alertmanager 경유.)
+# ⚠️ F6(중첩/무한대기 금지): concurrencyPolicy Forbid + activeDeadline 120 + startingDeadline 300 + backoffLimit 0.
+# ⚠️ F7(비원자성 회피): AdGuard v0.107.45+ 원자적 /control/rewrite/update로 stale→want 교체(delete→add 갭 없음)
+#    + read-back 재조회 통과 후에만 성공 하트비트.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: rewrite-reconciler, namespace: edge }
+automountServiceAccountToken: true # apiserver로 traefik-ts svc를 읽으므로 SA 토큰 필요(du-exporter와 반대).
+---
+# === 전용 default-deny egress: 리컨실러의 모든 egress 거부(아래 allow가 최소만 재개방) ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rewrite-reconciler-default-deny-egress
+  namespace: edge
+spec:
+  podSelector:
+    matchLabels: { app: rewrite-reconciler }
+  policyTypes: [Egress]
+---
+# === allow egress: apiserver(노드서브넷) + adguard-ui + vmsingle + DNS만 — 인터넷 egress 없음(F13) ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rewrite-reconciler-allow-egress
+  namespace: edge
+spec:
+  podSelector:
+    matchLabels: { app: rewrite-reconciler }
+  policyTypes: [Egress]
+  egress:
+    - to: # DNS — adguard-ui/vmsingle/kubernetes.default 해석(CoreDNS)
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+    - to: # apiserver — kube-router가 ClusterIP(10.43.0.1:443)를 노드 InternalIP:6443으로 DNAT하고 netpol은
+          # DNAT 후 dest를 평가하므로 ClusterIP가 아니라 노드서브넷:6443을 허용(NetworkPolicy egress apiserver 함정).
+        - ipBlock: { cidr: 192.168.139.0/24 } # OrbStack VM 서브넷(노드 InternalIP 192.168.139.92)
+      ports: [{ protocol: TCP, port: 6443 }]
+    - to: # adguard-ui(같은 ns) — /control/rewrite/*. svc port 80 → targetPort 3000(DNAT 후 targetPort 평가 함정)
+        - podSelector: { matchLabels: { app: adguard } }
+      ports: [{ protocol: TCP, port: 3000 }]
+    - to: # vmsingle import(observability) — 하트비트/fix 메트릭 push
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: observability } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: vmsingle } }
+      ports: [{ protocol: TCP, port: 8428 }]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: adguard-rewrite-reconciler
+  namespace: edge
+  labels: { app: rewrite-reconciler }
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid    # 중첩 실행 금지 — stale have/want로 이중 변이(플래핑) 차단(F6)
+  startingDeadlineSeconds: 300 # 스케줄 밀림 시 오래된 잡 기동 포기(다음 주기에 맡김)
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0          # 재시도 없이 다음 주기 — staleness 알림이 침묵을 잡는다
+      activeDeadlineSeconds: 120 # 주기(600s)보다 훨씬 짧게 — 행 걸림 방지
+      template:
+        metadata:
+          labels: { app: rewrite-reconciler }
+        spec:
+          restartPolicy: Never
+          serviceAccountName: rewrite-reconciler
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: reconciler
+              # digest 핀: pgdump-hedge-cronjob.yaml과 동일 값(curl+sed 보유 — 라이브 확인). 의도적 커밋으로만 갱신.
+              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:9c4cb3572d07c495647be713bf8bbc58a2bf15bbcdd3fc4fc4ae387239cadecf
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL] }
+              resources:
+                requests: { cpu: 10m, memory: 32Mi }
+                limits: { cpu: 100m, memory: 64Mi }
+              env:
+                - { name: HOME, value: /tmp } # readOnlyRootFilesystem 하 curl 임시 경로
+                - { name: ADGUARD_USER, value: ukkiee } # username은 비밀 아님 — 평문(deployment inject-auth AGH_USER 동일 규약)
+              envFrom:
+                - secretRef: { name: adguard-api-creds } # ADGUARD_PASSWORD 평문(basic auth) — Task 6 봉인, 텔레그램 자격 없음
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  CURL="curl -fsS --connect-timeout 5 --max-time 20"   # F6: 모든 네트워크 호출 바운드
+                  SA=/var/run/secrets/kubernetes.io/serviceaccount
+                  APISERVER="https://kubernetes.default.svc"
+                  TOKEN=$(cat $SA/token)
+                  AG="http://adguard-ui.edge.svc"
+                  DOMAIN='*.home.ukyi.app'
+                  AUTH="${ADGUARD_USER}:${ADGUARD_PASSWORD}"
+                  # 1) want = traefik-ts LB tailscale IP (apiserver로 svc 조회 — status.loadBalancer.ingress[].ip)
+                  want=$($CURL --cacert $SA/ca.crt -H "Authorization: Bearer $TOKEN" \
+                    "$APISERVER/api/v1/namespaces/gateway/services/traefik-ts" \
+                    | sed -n 's/.*"ip"[[:space:]]*:[[:space:]]*"\([0-9.]*\)".*/\1/p')
+                  want=${want%%$'\n'*}   # 첫 매치만(다중 라인 방어) — `| head`의 SIGPIPE+pipefail 141 회피
+                  [ -n "$want" ] || { echo "traefik-ts LB IP 추출 실패"; exit 1; }
+                  # 2) have = AdGuard 현재 *.home rewrite answer
+                  list_answer() {
+                    # local 미사용(local var=$(...)는 종료코드를 삼켜 set -e를 무력화 — bash 함정). pipefail로 curl 실패 전파.
+                    # answer 캡처는 [^"]*(IP뿐 아니라 hostname/CNAME 등 비-IPv4도) — [0-9.]*면 비-IPv4 answer를
+                    # 못 봐 have=빈값→ADD가 중복 rewrite를 만든다(적대 리뷰 LOW). 비-IPv4면 have≠want로 update(PUT) 수렴.
+                    out=$($CURL -u "$AUTH" "$AG/control/rewrite/list" \
+                      | sed -n 's/.*"domain":"\*.home.ukyi.app","answer":"\([^"]*\)".*/\1/p')
+                    printf '%s' "${out%%$'\n'*}"   # 첫 매치만 — head 파이프 SIGPIPE 회피
+                  }
+                  have=$(list_answer)
+                  FIXED=0
+                  if [ "$have" != "$want" ]; then
+                    if [ -z "$have" ]; then
+                      # rewrite 부재 → 추가
+                      $CURL -u "$AUTH" -H 'Content-Type: application/json' \
+                        -d "{\"domain\":\"${DOMAIN}\",\"answer\":\"${want}\"}" "$AG/control/rewrite/add"
+                    else
+                      # F7: 원자적 교체(delete→add 갭 없음) — v0.107.45+ /control/rewrite/update.
+                      # ★AdGuard는 update를 PUT으로만 등록(rewritehttp.go:150) — -X PUT 없으면 curl -d가 POST를
+                      #   보내 405로 매번 실패해 stale 교정이 불능(적대 리뷰 HIGH). add는 POST가 맞으므로 무변경.
+                      $CURL -X PUT -u "$AUTH" -H 'Content-Type: application/json' \
+                        -d "{\"target\":{\"domain\":\"${DOMAIN}\",\"answer\":\"${have}\"},\"update\":{\"domain\":\"${DOMAIN}\",\"answer\":\"${want}\"}}" \
+                        "$AG/control/rewrite/update"
+                    fi
+                    FIXED=1
+                    # ⚠️ 텔레그램 직접 발송 금지(F13) — 통지는 아래 fix 메트릭 → vmalert 룰 → alertmanager 경유.
+                  fi
+                  # 3) read-back 검증(F7) — 실제 라이브 상태가 want인지 재조회로 확인한 뒤에만 성공 하트비트.
+                  now=$(list_answer)
+                  [ "$now" = "$want" ] || { echo "read-back 불일치: now=${now} want=${want}"; exit 1; }
+                  # 4) 성공 하트비트 + fix 표시 — read-back 통과 시에만. F19: fix 타임스탬프는 FIXED=1일 때만(희소 샘플, 0 금지).
+                  { printf 'adguard_rewrite_reconcile_timestamp %s\n' "$(date +%s)"
+                    if [ "$FIXED" = 1 ]; then printf 'adguard_rewrite_last_fix_timestamp %s\n' "$(date +%s)"; fi
+                  } | $CURL --data-binary @- "http://vmsingle.observability.svc:8428/api/v1/import/prometheus"
+                  echo "done: have=${have:-<none>} want=${want} fixed=${FIXED}"
+              volumeMounts:
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: tmp
+              emptyDir: {}

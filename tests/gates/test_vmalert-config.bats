@@ -210,3 +210,19 @@ setup() {
   grep -q 'last_over_time(storage_tier_avail_bytes{tier="bulk"}\[3d\])' "$R"
   grep -q 'absent(last_over_time(storage_tier_avail_bytes{tier="bulk"}' "$R"
 }
+
+@test "adguard rewrite reconciler has staleness + drift-fixed notify alerts (push metric, notify via AM not pod)" {
+  R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
+  A="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
+  # 메타갭 ① Task 7(W2-A): 리컨실러 생존(staleness) + 실제 수렴 시 통지(F13 — 발송은 alertmanager 경유).
+  grep -q 'alert: AdguardRewriteReconcilerStale' "$R"
+  grep -q 'alert: AdguardRewriteDriftFixed' "$R"
+  # 10분 push라 last_over_time 윈도 + absent fail-closed(push-metric staleness 함정).
+  grep -q 'last_over_time(adguard_rewrite_reconcile_timestamp\[2h\])' "$R"
+  grep -q 'absent(last_over_time(adguard_rewrite_reconcile_timestamp' "$R"
+  # F19: fix 통지는 fix 타임스탬프 > 0 가드(no-op 0 샘플이 직전 fix를 지우지 않음).
+  grep -q 'adguard_rewrite_last_fix_timestamp\[2h\]) > 0' "$R"
+  # alertmanager 타이틀 매핑(신규 알림 한국어).
+  grep -q 'AdguardRewriteReconcilerStale' "$A"
+  grep -q 'AdguardRewriteDriftFixed' "$A"
+}

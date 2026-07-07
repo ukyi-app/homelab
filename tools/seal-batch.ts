@@ -26,6 +26,11 @@ const TABLE: Entry[] = [
   { name: "adguard-auth", env: "ADGUARD_PASSWORD", transform: "bcrypt", ns: "edge",
     secretName: "adguard-auth", key: "PASSWORD_HASH",
     out: "platform/adguard/prod/adguard-auth.sealed.yaml", keys: ["PASSWORD_HASH"] },
+  // rewrite 리컨실러 basic auth용 평문 비밀번호(같은 ADGUARD_PASSWORD 재사용 — UI는 bcrypt·API는 평문).
+  // username(ukkiee)은 비밀 아님이라 리컨실러 env에 평문(deployment inject-auth AGH_USER와 동일 규약).
+  { name: "adguard-api", env: "ADGUARD_PASSWORD", transform: "literal", ns: "edge",
+    secretName: "adguard-api-creds", key: "ADGUARD_PASSWORD",
+    out: "platform/adguard/prod/adguard-api-creds.sealed.yaml", keys: ["ADGUARD_PASSWORD"] },
   { name: "argocd-notify", env: "TELEGRAM_BOT_TOKEN", transform: "literal", ns: "argocd",
     secretName: "argocd-notifications-secret", key: "telegram-token",
     out: "platform/argocd/extras/argocd-notifications-secret.sealed.yaml", keys: ["telegram-token"] },
