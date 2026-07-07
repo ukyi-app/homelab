@@ -101,7 +101,10 @@ spec:
               args:
                 - |
                   set -euo pipefail
-                  CURL="curl -fsS --connect-timeout 5 --max-time 20"   # F6: 모든 네트워크 호출 바운드
+                  # F6: 모든 네트워크 호출 바운드 + 전이적 연결거부 재시도(adguard/apiserver 롤링 중 ~2s 갭 흡수 —
+                  # backoffLimit:0라 단발 connrefused가 Job Failed→ArgoCD Degraded로 얼어붙던 라이브 확인된 함정.
+                  # connrefused는 즉시 실패라 재시도 비용 작고 120s 데드라인 내. 4xx(인증 등)는 재시도 안 함).
+                  CURL="curl -fsS --connect-timeout 5 --max-time 20 --retry 3 --retry-delay 2 --retry-connrefused"
                   SA=/var/run/secrets/kubernetes.io/serviceaccount
                   APISERVER="https://kubernetes.default.svc"
                   TOKEN=$(cat $SA/token)
