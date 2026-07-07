@@ -37,6 +37,10 @@
 - **`check-credential-expiry.sh`** — 자격증명 만료 원장(`policy/credential-expiry.json`) 검사. `--days N`
   (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). `credential-expiry.yaml`(주간)이 D-14 telegram 경고로
   중계, `tests/gates/test_credential_expiry.bats`가 가드. jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)
+- **`check-image-pins.sh`** — 이미지 digest 핀 2-레인 게이트: 레인1(platform 문자열 `image:`)·레인2(apps values
+  `image:` 구조체 `digest:`). 벤더(barman-plugin)·테스트/픽스처(`**/tests/**`·`**/fixtures*/**`) 제외, substrate 스코프 밖,
+  scan-floor. 예외=`policy/image-pin-allowlist.txt`(사유 주석). `tests/gates/test_image_pins.bats`가 픽스처로 가드.
+  ⚠️ **make verify 배선은 Task 9(핀 적용 후)** — 현재 실 레포는 tag-only 다수라 의도적 exit 1(핀 대상 진단용). (메타갭 ②)
 - **`verify-ledger.sh`** — 메모리 원장 예산 게이트 SSOT. `bun tools/ledger-to-json.ts` 출력을
   `conftest … policy/ledger.rego`로 검사. **`bun run verify:ledger`**·`make verify`·`make ci`·`ci.yaml`(gate)이 호출.
 - **`verify-runbook-index.sh`** — `docs/runbooks/`(gitignored) ↔ AGENTS.md 런북 인덱스 정합(로컬 전용).
