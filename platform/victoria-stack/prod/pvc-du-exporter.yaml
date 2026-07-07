@@ -1,0 +1,129 @@
+# per-PVC 용량 가시화(메타갭 ③ W1-A) — 모든 PV가 hostPath(local-path)라 kubelet_volume_stats가 원천
+# 부재하고(r4 상단 주석), 외장 bulk(virtiofs)는 VM node-exporter가 별도 series로 못 본다(F10). 이 CronJob이
+# 두 provisioner 루트를 파드 내부에서 직접 du/df해 per-PVC 사용량(pvc_dir_size_bytes)과 티어 용량
+# (storage_tier_{size,avail}_bytes)을 vmsingle에 push한다. 후자는 W3(관측 데이터 bulk 이전)의 선행 용량 신호다.
+#
+# ⚠️ 격리 계약(F8 — 전-PVC 읽기 도달성의 명시적 리스크 수용): 이 잡은 두 provisioner 루트 전체(무관한 앱·DB
+#    볼륨 포함)를 읽는다. per-PVC 커버리지가 목적이라 스코프 축소 대신 아래 가드를 전부 강제해 유출 반경을 봉인한다:
+#    (1) automountServiceAccountToken:false — API 미사용, 침해 시 토큰 동반 탈취 차단
+#    (2) 전용 default-deny egress netpol — 허용은 vmsingle:8428·DNS:53만(인터넷·telegram 불허 → exfil 봉쇄)
+#    (3) resources limits + readOnly 마운트 + readOnlyRootFilesystem
+#    (4) 이미지는 레포 기존 digest 핀(pg-tools) 재사용 — 신규 서드파티 금지
+#    root+DAC_READ_SEARCH: 0700 PVC 디렉토리(pg PGDATA 등)를 순회하려면 읽기 우회 capability가 필요하다.
+#    drop:[ALL] 후 DAC_READ_SEARCH만 add(읽기-전용 우회 — 쓰기 불가), readOnly 마운트로 변이 경로 자체를 제거.
+#    (라이브 dry-run 확인: internal 7 dirs·bulk 3 dirs, du_failures=0.)
+---
+# === default-deny egress: 이 잡의 모든 egress 거부(아래 allow가 최소만 재개방) ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pvc-du-exporter-default-deny-egress
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: pvc-du-exporter }
+  policyTypes: [Egress]
+---
+# === allow egress: DNS + vmsingle import(내부 8428)만 — 인터넷 egress 없음(F8) ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pvc-du-exporter-allow-egress
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: pvc-du-exporter }
+  policyTypes: [Egress]
+  egress:
+    - to: # DNS — vmsingle.observability.svc 해석(CoreDNS)
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+    - to: # vmsingle import(같은 ns). ClusterIP→pod IP(kube-router DNAT후) 평가라 podSelector로 지정
+        - podSelector: { matchLabels: { app.kubernetes.io/name: vmsingle } }
+      ports: [{ protocol: TCP, port: 8428 }]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pvc-du-exporter
+  namespace: observability
+  labels: { app.kubernetes.io/name: pvc-du-exporter }
+spec:
+  schedule: "0 5 * * *" # 05:00 KST(k3s VM TZ=Asia/Seoul, 다른 CronJob과 동일 규약 — timeZone 미지정)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels: { app.kubernetes.io/name: pvc-du-exporter }
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsUser: 0 # 0700 PVC 디렉토리 순회에 필요(DAC_READ_SEARCH와 함께)
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: du
+              # digest 핀: pgdump-hedge-cronjob.yaml과 동일 값(의도적 커밋으로만 갱신, bump 체인 비대상).
+              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:9c4cb3572d07c495647be713bf8bbc58a2bf15bbcdd3fc4fc4ae387239cadecf
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL], add: [DAC_READ_SEARCH] } # 읽기-전용 우회만(쓰기 불가)
+              resources:
+                requests: { cpu: 20m, memory: 32Mi }
+                limits: { cpu: 200m, memory: 64Mi }
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  TS=$(date +%s)
+                  BODY=""
+                  # 듀얼 provisioner 루트 둘 다 스캔(F9 — 경로 SSOT = versions.env:
+                  #   INTERNAL_STORAGE_PATH=/var/lib/rancher/k3s-storage/internal,
+                  #   BULK_STORAGE_PATH=/mnt/mac/Volumes/homelab/k3s-bulk(라이브 실측)).
+                  # local-path PVC 디렉토리명 = pvc-<uid>_<ns>_<pvcname> (k8s 이름엔 '_' 불가라 '_'가 유일 구분자).
+                  # ⚠️ F20: 카운트는 티어별 — 전역 카운트는 bulk 경로가 틀려도 internal만으로 녹색이 된다.
+                  N_internal=0; N_bulk=0
+                  for root in /storage-internal /storage-bulk; do
+                    tier=${root#/storage-}
+                    for d in "$root"/*_*_*; do
+                      [ -d "$d" ] || continue
+                      base=$(basename "$d")
+                      ns=$(echo "$base" | cut -d_ -f2)
+                      pvc=$(echo "$base" | cut -d_ -f3-)
+                      bytes=$(du -sb "$d" | cut -f1)
+                      BODY="${BODY}pvc_dir_size_bytes{namespace=\"${ns}\",pvc=\"${pvc}\",tier=\"${tier}\"} ${bytes}\n"
+                      case "$tier" in
+                        internal) N_internal=$((N_internal+1)) ;;
+                        bulk) N_bulk=$((N_bulk+1)) ;;
+                      esac
+                    done
+                    # 티어별 fs 지표(F10) — virtiofs는 node-exporter가 못 본다. 파드 내 statfs(df)로 대체 계측
+                    # (라이브 dry-run: bulk df size=2TB·avail=~2TB로 신뢰값 확인 → du-합산 폴백 불요).
+                    read -r fs_size fs_avail <<< "$(df -B1 --output=size,avail "$root" | tail -1)"
+                    BODY="${BODY}storage_tier_size_bytes{tier=\"${tier}\"} ${fs_size}\n"
+                    BODY="${BODY}storage_tier_avail_bytes{tier=\"${tier}\"} ${fs_avail}\n"
+                  done
+                  # F9/F20: 티어별 fail-loud — internal은 상주 PVC 다수(라이브 7), bulk에도 알려진 상주 PVC가
+                  # 최소 2개(files-data·pg-basebackup-local, 라이브 3). 0이면 경로/마운트가 틀린 것 — 녹색 하트비트 금지.
+                  [ "$N_internal" -ge 1 ] || { echo "internal PVC 0개 — 마운트/경로 확인"; exit 1; }
+                  [ "$N_bulk" -ge 1 ] || { echo "bulk PVC 0개 — bulk 경로/외장 마운트 확인(F20)"; exit 1; }
+                  BODY="${BODY}pvc_du_last_success_timestamp ${TS}\n"
+                  printf "%b" "$BODY" | curl -fsS --connect-timeout 5 --max-time 30 --data-binary @- \
+                    "http://vmsingle.observability.svc:8428/api/v1/import/prometheus"
+                  echo "pushed: internal=${N_internal} bulk=${N_bulk} pvc dirs"
+              volumeMounts:
+                - { name: storage-internal, mountPath: /storage-internal, readOnly: true }
+                - { name: storage-bulk, mountPath: /storage-bulk, readOnly: true }
+          volumes:
+            - name: storage-internal
+              hostPath: { path: /var/lib/rancher/k3s-storage/internal, type: Directory }
+            - name: storage-bulk
+              # 라이브 provisioner 실경로(local-path-config-bulk nodePathMap) — 외장 SSD virtiofs 마운트.
+              hostPath: { path: /mnt/mac/Volumes/homelab/k3s-bulk, type: Directory }

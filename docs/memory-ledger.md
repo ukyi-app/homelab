@@ -24,6 +24,25 @@ ts-traefik-ts·ts-pg-rw-tailscale 2대). 새 값 = operator(128/64) + proxy(192/
 right-size 회수(옵션 a) 또는 VM RAM 증설(cap은 이미 9216에서 소진 — 옵션 b 너머, VM_ALLOCATABLE_MIB
 동반 상향)이 유일하다.
 
+2026-07-06 (메타갭 ⑥ Task 5.5 — right-size 스윕 실측 결과, **≥256 회수 불가 판정**): 14일 peak
+working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, right-size만으로는 명목 잔여 ≥256
+달성이 **불가능**함이 확정됐다. 근거(측정 2026-07-06):
+- **cert-manager**(플랜이 지목한 1차 레버): 3컨테이너 peak 합 = 267Mi(cainjector 101·controller 96·
+  webhook 69) vs cap 384 = **1.44x**. F24의 peak×2.0x 마진 미달이라 축소 불가(오히려 타이트) — 레버 무효.
+- **whoami**(+16 후보): posture 라이브 e2e(`tests/posture/test_networking-e2e.bats` — internal gateway
+  smoke·`whoami.home` dig)가 참조하는 **load-bearing** 컴포넌트라 철거 불가(존치).
+- 실제 slack 보유(≥1.5x) 후보 = files(6/128=21x, ~64 회수)·page(88/256=2.9x, ~80)·trip-mate-api
+  (149/256=1.72x, ~32)·sealed-secrets(56/96=1.71x, ~16) 합 ≈ **192**. 4+192 = 196 **< 256** — 안전 후보를
+  전부 회수해도 온보딩 1앱분(256)에 미달. 게다가 각 후보는 F25의 24h 관찰 윈도(다중일) 필요.
+- 오히려 **cnpg-operator(153/160=1.05x)·homepage(162/192=1.19x)·glances(112/128)·traefik(168/192)**은
+  타이트(≥1.3x 미달) — 축소 금지, cnpg-operator는 near-OOM이라 관찰 필요(ContainerMemoryNearLimit이 backstop).
+- **owner 결정(2026-07-07, F23 게이트): (b) VM RAM 증설 확정** — right-size로 ≥256 불가 확정에 따라 VM
+  증설이 온보딩 차단의 유일 실효 해소책으로 채택. 착수 = W2 병행 owner-local 태스크(VM 재시작 필요):
+  `infra/k3s-bootstrap/versions.env` ORB_MEMORY_MIB 11264→12288 + 이 원장 meta VM_ALLOCATABLE_MIB
+  11264→12288·LIMIT_BUDGET_MIB 9216→10240(reserve 2048 유지). 반영 후 명목 잔여 ≈ 1028Mi(온보딩 차단 해소).
+  ⚠️ config 변경은 VM resize와 **커플링** — VM 재시작 전 cap 선행 상향 시 page-cache/burst 리저브 침식이라,
+  **VM 재시작 전까지 cap 9216 유지**(이 문단이 결정 기록, 실제 meta 변경은 resize와 동일 커밋에서). 동시 peak ≪ allocatable라 노드-OOM 안전.
+
 한 행은 라이브 pod limit보다 **의도적으로 크다**: `k3s+os+coredns`(OS/커널 비-pod reserve — 실 coredns
 pod만 ~170Mi). (`edge`·`cnpg` limit 보수 버퍼는 2026-06-22 right-size에서 라이브 정합 회수 — 단 `edge`
 req는 176으로 stale하게 남아 있어 2026-07-06 실측(adguard 48 + cloudflared 48 = 96)으로 정정(−80 req);
