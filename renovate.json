@@ -94,6 +94,12 @@
       "description": "digest 핀 갱신은 그룹화해 노이즈 축소(supply-chain freshness).",
       "matchUpdateTypes": ["digest"],
       "groupName": "image digests"
+    },
+    {
+      "description": "GitOps 자기참조(homelab.git · ArgoCD Application targetRevision: main)는 renovate 대상 밖 — 자기 repo의 main을 커밋으로 핀/갱신하면 continuous sync가 깨진다. 이 git-refs 자기참조가 pin-dependencies 배치에 섞여 배치 update failure의 원인. argocd manager의 helm 차트 추적(cnpg-operator·cert-manager)은 유지.",
+      "matchDatasources": ["git-refs", "git-tags"],
+      "matchPackageNames": ["https://github.com/ukyi-app/homelab.git", "https://github.com/ukyi-app/homelab"],
+      "enabled": false
     }
   ]
 }
