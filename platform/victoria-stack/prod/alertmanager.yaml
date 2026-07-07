@@ -108,6 +108,7 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9093"
     spec:
+      automountServiceAccountToken: false # k8s API 미사용 — SA 토큰 마운트 금지(메타갭 ⑤ W2-C)
       securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
       initContainers:
         - name: render-config

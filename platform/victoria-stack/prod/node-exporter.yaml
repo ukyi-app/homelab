@@ -15,6 +15,7 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       hostPID: true
+      automountServiceAccountToken: false # host 메트릭만 — k8s API 미사용, SA 토큰 마운트 금지(메타갭 ⑤ W2-C)
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534

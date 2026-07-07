@@ -22,6 +22,7 @@ spec:
       labels: { app.kubernetes.io/name: victorialogs }
       annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9428" } # 자기관측 vl_rows_ingested 등
     spec:
+      automountServiceAccountToken: false # k8s API 미사용(로그 저장) — SA 토큰 마운트 금지(메타갭 ⑤ W2-C)
       securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: victorialogs

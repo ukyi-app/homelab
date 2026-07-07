@@ -1,0 +1,10 @@
+# 이미지 digest 핀 게이트(check-image-pins.sh) 예외 목록 — 메타갭 ② W2-B.
+# 수용 기준 = allowlist 0(핀 적용 후). 정당한 예외만 최소 등재하고 반드시 사유 주석을 동반한다.
+#
+# 형식:
+#   레인1(문자열 이미지): 이미지 참조 전체를 한 줄에(예: registry.k8s.io/pause:3.9)
+#   레인2(apps 구조체): app:<앱이름> (예: app:page)
+#   그 위/옆 줄에 # 사유(왜 digest 핀이 불가/불요한지).
+#
+# (현재 비어 있음 — Task 9가 renovate pinDigests로 platform tag-only 24건(문자열 image 23 + CNPG
+#  Cluster imageName 1)을 핀 후 이 목록을 최소화한다. 정당한 예외(예: renovate가 못 다루는 이미지)만 남긴다.)
