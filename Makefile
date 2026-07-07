@@ -143,6 +143,10 @@ verify-traps: ## docs/traps.md 함정 원장의 guard 경로가 실재하는지(
 seal-adguard-auth: ## AdGuard UI 비밀번호를 bcrypt 봉인 → adguard-auth SealedSecret (seal-batch 위임)
 	@bun tools/seal-batch.ts --only adguard-auth
 
+.PHONY: seal-adguard-api
+seal-adguard-api: ## AdGuard API 평문 비밀번호를 adguard-api-creds SealedSecret로 봉인 — rewrite 리컨실러 basic auth (seal-batch 위임)
+	@bun tools/seal-batch.ts --only adguard-api
+
 .PHONY: seal-argocd-notify
 seal-argocd-notify: ## telegram 봇 토큰을 argocd-notifications-secret SealedSecret로 봉인 (seal-batch 위임)
 	@bun tools/seal-batch.ts --only argocd-notify

@@ -94,8 +94,9 @@ spec:
                 limits: { cpu: 100m, memory: 64Mi }
               env:
                 - { name: HOME, value: /tmp } # readOnlyRootFilesystem 하 curl 임시 경로
+                - { name: ADGUARD_USER, value: ukkiee } # username은 비밀 아님 — 평문(deployment inject-auth AGH_USER 동일 규약)
               envFrom:
-                - secretRef: { name: adguard-api-creds } # ADGUARD_USER/ADGUARD_PASSWORD (Task 6 봉인 — 텔레그램 자격 없음)
+                - secretRef: { name: adguard-api-creds } # ADGUARD_PASSWORD 평문(basic auth) — Task 6 봉인, 텔레그램 자격 없음
               command: ["/bin/bash", "-c"]
               args:
                 - |

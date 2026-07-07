@@ -1,0 +1,14 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: adguard-api-creds
+  namespace: edge
+spec:
+  encryptedData:
+    ADGUARD_PASSWORD: AgC+f3A0D/4YHCrcU8N2RoDFZn79XXgZgB6q9/6zO1OivowBww+3sw4KIv3Ff1pKVm5iAWgbotYTaEpfTlLOqXfSkeBev1tX7+cgI2kT5fQyxQwUqXiFgzGhxJNVdn6lPy8muKHumFqU4NkIuV3TxDtOzBJAyBtHTlGBobXZOQ8TQfprIf9NCv9vEPaYx8NdDf73CglAO4ZHI4S+LbqZzXWpGwb3uWSFR+9AwSKgE4ISonE2vUEg3rITlGyho2jvKCO3SSnm/PmuY8H4utaLHIfpp8vqvQzsBq7zgoNj/yMmhxTPGdGAKcGootoAPcWHQRXvBTbNdExTw94WOumBYzP9xwDxC2L7IHxAMAwzIm1YQQLHjgPnz50ay0iCgvH9hH/T02/HCG4jqdv11tWUKlQNlzgjHgSyC7ZAhGmJZ+3szhbl0haSHuqYB3ojLNVTiAlLkel5z8j3N6TED5KLI1sJpVniQxgIQKX4Y/dQzToOJMy9wH0stun31+8CIuyvlPXpJjp/r+USpWS8xsPfpXD0E56/As4c9Uc1lf7I++4ku3PG5MHnQ75jM6jMvsRKfWPKzooP09QV5engwpvk6pos5mcPAzNGQ0z8JHue37bvu5nKqgNz+8OjBrybESQQdSheHPMvvu5LYIgrQRECzeKJ5WK+nLqROii9oiiWAPSynzOQDNe50OKjJPILxdPh2GCrSg8XIGjCV58R
+  template:
+    metadata:
+      name: adguard-api-creds
+      namespace: edge
+    type: Opaque
