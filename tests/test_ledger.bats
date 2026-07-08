@@ -8,7 +8,7 @@
 
 @test "over-budget ledger is rejected" {
   cp docs/memory-ledger.md /tmp/bad-ledger.md
-  # add a 9000Mi row that blows the 9216 budget
+  # add a 9000Mi row that blows the 10240 budget (seed total ~9212 + 9000 > 10240)
   printf '| <!-- ledger:row --> hog | prod | 100 | 9000 |\n' >> /tmp/bad-ledger.md
   bun tools/ledger-to-json.ts /tmp/bad-ledger.md > /tmp/bad.json
   run conftest test /tmp/bad.json --policy policy/ledger.rego

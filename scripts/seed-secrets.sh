@@ -3,8 +3,8 @@ set -euo pipefail
 
 # R2 access/secret 키 쌍은 범위 제한된 R2 API 토큰으로 레포 밖에서 발급되어
 # env로 주입된다 (terraform output이 아님).
-: "${R2_PG_ACCESS_KEY:?set R2_PG_ACCESS_KEY}"
-: "${R2_PG_SECRET_KEY:?set R2_PG_SECRET_KEY}"
+: "${R2_BACKUPS_PG_CACHE_ACCESS_KEY:?set R2_BACKUPS_PG_CACHE_ACCESS_KEY}"
+: "${R2_BACKUPS_PG_CACHE_SECRET_KEY:?set R2_BACKUPS_PG_CACHE_SECRET_KEY}"
 # 알림 팬아웃 (M5 vmalert/Alertmanager가 소비).
 : "${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN}"
 : "${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID}"
@@ -14,7 +14,7 @@ set -euo pipefail
 # ★SEC-1: 브로드 TF 토큰(R2·Tunnel·WAF·Cache·Zone Settings)을 클러스터 Secret에 봉인하던 것에서 분리한다.
 #   클러스터(cert-manager)의 CF 노출을 '전체 계정'→'DNS 편집'으로 축소(침해/Secret 유출 시 blast radius 감소).
 #   브로드 토큰은 terraform provider 인증 전용(TF_VAR_, Actions secret에만, 클러스터엔 봉인 안 함).
-: "${CERT_MANAGER_CF_API_TOKEN:?set CERT_MANAGER_CF_API_TOKEN}"
+: "${CF_CERTMANAGER_DNS01_TOKEN:?set CF_CERTMANAGER_DNS01_TOKEN}"
 # 브로드 토큰은 terraform output(아래)·provider 인증에 여전히 필요.
 : "${TF_VAR_cloudflare_api_token:?set TF_VAR_cloudflare_api_token}"
 
@@ -74,12 +74,12 @@ stringData:
   # 정본(canonical) R2 키 스키마 — barman ObjectStore(AWS_*)와 pg_dump -> rclone 헤지
   # (RCLONE_CONFIG_R2_* + AWS_*, region=auto) 양쪽이 소비한다. 키 이름 변경 금지;
   # object-store.yaml과 pgdump-hedge-cronjob.yaml이 정확히 이 키들을 읽는다.
-  AWS_ACCESS_KEY_ID: "${R2_PG_ACCESS_KEY}"
-  AWS_SECRET_ACCESS_KEY: "${R2_PG_SECRET_KEY}"
+  AWS_ACCESS_KEY_ID: "${R2_BACKUPS_PG_CACHE_ACCESS_KEY}"
+  AWS_SECRET_ACCESS_KEY: "${R2_BACKUPS_PG_CACHE_SECRET_KEY}"
   RCLONE_CONFIG_R2_TYPE: "s3"
   RCLONE_CONFIG_R2_PROVIDER: "Cloudflare"
-  RCLONE_CONFIG_R2_ACCESS_KEY_ID: "${R2_PG_ACCESS_KEY}"
-  RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: "${R2_PG_SECRET_KEY}"
+  RCLONE_CONFIG_R2_ACCESS_KEY_ID: "${R2_BACKUPS_PG_CACHE_ACCESS_KEY}"
+  RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: "${R2_BACKUPS_PG_CACHE_SECRET_KEY}"
   RCLONE_CONFIG_R2_ENDPOINT: "${R2_ENDPOINT}"
   RCLONE_CONFIG_R2_REGION: "auto"
 EOF
@@ -96,8 +96,8 @@ stringData:
   # R2 토큰 재사용, RCLONE_CONFIG_R2_* 서브셋(aws-cli 미사용이라 AWS_* 불요). 키 이름 변경 금지.
   RCLONE_CONFIG_R2_TYPE: "s3"
   RCLONE_CONFIG_R2_PROVIDER: "Cloudflare"
-  RCLONE_CONFIG_R2_ACCESS_KEY_ID: "${R2_PG_ACCESS_KEY}"
-  RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: "${R2_PG_SECRET_KEY}"
+  RCLONE_CONFIG_R2_ACCESS_KEY_ID: "${R2_BACKUPS_PG_CACHE_ACCESS_KEY}"
+  RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: "${R2_BACKUPS_PG_CACHE_SECRET_KEY}"
   RCLONE_CONFIG_R2_ENDPOINT: "${R2_ENDPOINT}"
   RCLONE_CONFIG_R2_REGION: "auto"
 EOF
@@ -163,5 +163,5 @@ metadata:
   namespace: gateway
 type: Opaque
 stringData:
-  api-token: "${CERT_MANAGER_CF_API_TOKEN}"
+  api-token: "${CF_CERTMANAGER_DNS01_TOKEN}"
 EOF
