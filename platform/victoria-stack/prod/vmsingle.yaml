@@ -8,6 +8,19 @@ spec:
   ports:
     - { name: http, port: 8428, targetPort: 8428 }
 ---
+# W3 관측 TSDB bulk-ssd 이전(메타갭 캠페인 Task 13) — VCT는 불변이라 standalone PVC로 전환(F2).
+# bulk-ssd는 WaitForFirstConsumer라 소비자 스케줄 전까지 Pending → 머지 직후 일회성 바인더 Pod로
+# Bound 전환(F21, 절차는 runbooks/observability-bootstrap.md). 컷오버는 STS delete-orphan 재생성.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vmsingle-data-bulk
+  labels: { app.kubernetes.io/name: vmsingle }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: bulk-ssd
+  resources: { requests: { storage: 20Gi } }
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
