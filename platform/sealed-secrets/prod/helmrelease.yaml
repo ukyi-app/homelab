@@ -6,7 +6,7 @@ name: sealed-secrets
 # helm repo가 bitnami-labs.github.io → bitnami.github.io로 이동(구 Pages는 404로 제거됨).
 # 동일 차트(tarball은 GitHub release 자산으로 호스팅) — 버전/컨트롤러 무변경, fetch 경로만 교정.
 repo: https://bitnami.github.io/sealed-secrets
-version: 2.19.0 # 버전 고정 (app v0.38.1 — kubeseal CLI도 동일 버전 핀: _create-database.yaml)
+version: 2.19.1 # 버전 고정 (app v0.38.1 — kubeseal CLI도 동일 버전 핀: _create-database.yaml)
 releaseName: sealed-secrets
 namespace: sealed-secrets
 includeCRDs: true # SealedSecret CRD는 차트 crds/에 있어 기본 렌더에서 빠진다 — 누락 시 CR apply 전멸
