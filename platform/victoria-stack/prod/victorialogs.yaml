@@ -7,6 +7,19 @@ spec:
   selector: { app.kubernetes.io/name: victorialogs }
   ports: [{ name: http, port: 9428, targetPort: 9428 }]
 ---
+# W3 관측 로그 저장소 bulk-ssd 이전(메타갭 캠페인 Task 14, 컷오버 2026-07-08 STS delete-orphan
+# 재생성) — vmsingle(Task 13)과 동일 시퀀스(F2). 로그는 보존 요구가 낮아 데이터 이전 없이
+# 빈 볼륨 재축적(retention 14d, owner 결정). 절차는 runbooks/observability-bootstrap.md §5.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vlogs-bulk
+  labels: { app.kubernetes.io/name: victorialogs }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: bulk-ssd
+  resources: { requests: { storage: 10Gi } }
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -47,9 +60,6 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
           volumeMounts: [{ name: vlogs, mountPath: /vlogs }]
-  volumeClaimTemplates:
-    - metadata: { name: vlogs }
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        storageClassName: standard
-        resources: { requests: { storage: 10Gi } }
+      volumes:
+        - name: vlogs
+          persistentVolumeClaim: { claimName: vlogs-bulk }
