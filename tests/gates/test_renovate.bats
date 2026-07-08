@@ -45,6 +45,7 @@ PY
   grep -q 'renovatebot/github-action@8217b3fc' "$WF"  # 액션 full SHA 핀
   grep -q 'permission-contents: write' "$WF"
   grep -q 'permission-pull-requests: write' "$WF"
+  grep -q 'permission-issues: write' "$WF"   # Dependency Dashboard(#92) 쓰기 — 미요청 시 ensureIssue 실패
 }
 
 @test "renovate token does NOT request workflows:write (consistent with github-actions manager disabled)" {
