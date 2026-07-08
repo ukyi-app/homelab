@@ -27,9 +27,9 @@ teardown() { rm -rf "$STUBDIR"; }
   grep -qE 'orb create .* k3s' "$CALLS"
 }
 
-@test "sets the GLOBAL memory and cpu caps (11 GiB / 6 vCPU)" {
+@test "sets the GLOBAL memory and cpu caps (12 GiB / 6 vCPU)" {
   run "$BOOTSTRAP_DIR/orb-create.sh"
-  grep -q 'config set memory_mib 11264' "$CALLS"
+  grep -q 'config set memory_mib 12288' "$CALLS"
   grep -q 'config set cpu 6' "$CALLS"
 }
 
