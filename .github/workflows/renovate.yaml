@@ -50,7 +50,9 @@ jobs:
     if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-24.04-arm
     steps:
-      # writer App 토큰: homelab Contents+PR write로 좁힘(workflows write 미요청 — github-actions manager 비활성).
+      # writer App 토큰: homelab Contents+PR write + Issues write로 좁힘(workflows write 미요청 — github-actions manager 비활성).
+      # issues:write는 Dependency Dashboard(#92, ":dependencyDashboard") 쓰기에 필수 — 미요청 시 renovate가
+      # "Could not ensure issue"로 대시보드 갱신 실패해 pin-CREATION 추적이 동결된다(2026-07-08 실측·복구).
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app-token
         with:
@@ -58,6 +60,7 @@ jobs:
           private-key: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
+          permission-issues: write
       - uses: renovatebot/github-action@8217b3fc286df088d7c27f3255fe8414463bc0fd # v46.1.15
         with:
           token: ${{ steps.app-token.outputs.token }}

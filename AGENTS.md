@@ -154,4 +154,5 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 | `storage-verify.md` | 스토리지 라이브 e2e 검증 |
 | `teardown-resource.md` | DB/캐시 리소스 철거 — `--refs-verified` attestation·삭제 전 수동 확인·purge 상태머신(F1) |
 | `db-cache-access.md` | DB/캐시 로컬·GUI 접속 — tailscale 직결·admin superuser·port-forward·롤백/자격 회수(F3) |
+| `token-inventory.md` | 전 자격증명 인벤토리 — 만료 원장(`credential-expiry.json`) 동기화·회전 절차(메타갭 ④) |
 | `toolchain.md` | 호스트 도구 핀 |
