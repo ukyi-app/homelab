@@ -52,7 +52,7 @@ jobs:
         run: |
           # cert가 아직 없으면(컨트롤러 미가동/미수확) 어떤 산출도 만들지 않고 중단
           [ -f tools/sealed-secrets-cert.pem ] || { echo "::error::tools/sealed-secrets-cert.pem 없음 — sealed-secrets 컨트롤러 가동 후 'kubeseal --fetch-cert'로 받아 커밋해야 한다"; exit 1; }
-      - name: kubeseal 설치 (버전 SSOT — 컨트롤러 appVersion v0.38.1)
+      - name: kubeseal 설치 (버전 SSOT — 컨트롤러 appVersion v0.38.4)
         uses: ./.github/actions/setup-toolchain
         with:
           kubeseal: 'true'
