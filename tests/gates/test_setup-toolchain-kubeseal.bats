@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # setup-toolchain composite의 kubeseal input — 봉인 워크플로의 kubeseal 버전 SSOT.
-# 컨트롤러 appVersion(helmrelease.yaml app v0.38.1)과 동일 버전으로 수렴(seal/unseal 호환).
+# 컨트롤러 appVersion(helmrelease.yaml app v0.38.4)과 동일 버전으로 수렴(seal/unseal 호환).
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actions/setup-toolchain/action.yml"; }
@@ -10,8 +10,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   [ "$status" -eq 0 ]
 }
 
-@test "setup-toolchain pins kubeseal to v0.38.1 (controller appVersion)" {
-  run grep -E 'sealed-secrets/releases/download/v0\.38\.1/kubeseal-0\.38\.1-linux-arm64\.tar\.gz' "$A"
+@test "setup-toolchain pins kubeseal to v0.38.4 (controller appVersion)" {
+  run grep -E 'sealed-secrets/releases/download/v0\.38\.4/kubeseal-0\.38\.4-linux-arm64\.tar\.gz' "$A"
   [ "$status" -eq 0 ]
   # 옛 v0.27.3 핀이 composite에 남지 않았는지
   run grep -E 'kubeseal-0\.27\.3' "$A"
