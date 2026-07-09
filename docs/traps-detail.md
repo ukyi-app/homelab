@@ -253,3 +253,22 @@
   `--verify`로 신선도를 게이트한다. verify-runbook-index는 owner 머신(런북 실재)에서 **양방향 fail-closed**
   (런북↔AGENTS 인덱스)로 드리프트를 차단한다.
 > 가드: `scripts/backup-local-asset.sh`, `scripts/verify-runbook-index.sh`, `tests/test_backup-local-asset.bats`
+
+### 재부팅 IP churn — instance 라벨 불안정
+- 호스트 재부팅이면 파드 오브젝트가 그대로여도 CNI가 파드 IP를 재할당한다 → 스크레이프 타깃의 `instance`
+  라벨이 바뀌어 **시계열 정체성이 갈린다**(KSM `10.42.0.208:8080`→`10.42.0.80:8080` 라이브 실측). 두 파괴 모드:
+- **모드 A(increase 누적 누출)**: VM `increase()`는 새 시계열의 첫 샘플을 "0에서 증가"로 간주한다.
+  `kube_pod_container_status_restarts_total`은 KSM이 k8s API `restartCount`에서 재파생하는 **상태-파생
+  카운터**라 exporter 재시작에도 값이 0으로 리셋되지 않는다 → 누적 재시작수가 통째로 "15분간 N회"로 읽혀
+  `PodCrashLooping`이 재시작>3인 파드 전부에 오발화했다(07-02·07-07·07-08·07-09 4회). 15분 뒤 자동 해소라
+  사후 조사가 어렵다. **`alertmanager_*`·`vmagent_*`·`vmalert_*`는 프로세스-로컬이라 재시작 시 0 리셋 → 무해**
+  — 판정 기준은 "rollup을 썼는가"가 아니라 "상태-파생 카운터인가"다. 해법: rollup **이전에** 집계로 instance
+  제거(`increase(max by (namespace,pod,container,uid) (m)[15m:1m])`). `uid` 보존 필수(파드 재생성 리셋 처리).
+- **모드 B(벡터 매칭 422)**: 구 instance 시계열이 staleness(~5분) 동안 살아 `on(namespace,pod)` 산술 조인의
+  한쪽에 그룹당 2 시계열이 생긴다 → `duplicate time series on the left side of /` HTTP 422 → 룰 평가 실패 →
+  `VmalertUnhealthy` 발화(`WALVolumeFilling`에서 실측). 양변을 `max by(...)`로 사전 집계해 1:1 매칭을 강제한다.
+  집합 연산자(`and`/`or`/`unless`)는 중복에 422를 내지 않으므로 대상이 아니다.
+- **왜 게이트를 4번 뚫었나**: required `vmalert -dryRun`은 파싱만 한다(두 모드 다 문법상 유효). 라이브 eval
+  게이트도 무력 — 정상상태 데이터엔 결함이 부재하고 재부팅 과도구간에서만 발현해 merge-time 재현이 불가하다.
+  유일한 형태가 expr 안티패턴 정적 lint다. 집계자는 반드시 `max` — `sum without(instance)`는 중첩 구간에 배가.
+> 가드: `tools/check-alert-rules.ts`, `tests/test_alert_rules.bats`
