@@ -42,8 +42,14 @@ data:
             annotations:
               summary: "파드 eviction: {{ $labels.namespace }}/{{ $labels.pod }}"
               description: "노드 압박으로 파드가 축출됐습니다 — 원인 자원(디스크/메모리)을 확인하세요. hostPath PV 포화 가능."
+          # ⚠️ 좌변의 max by(...) 서브쿼리는 필수다(instance 라벨 불안정 — PodCrashLooping :111과 동일 계열).
+          # kube_pod_container_status_restarts_total은 KSM이 k8s API restartCount에서 재파생하는 상태-파생
+          # 카운터라 KSM 프로세스 재시작에도 값이 0으로 리셋되지 않는다. KSM 파드 IP가 바뀌면(instance 라벨)
+          # 시계열 정체성이 갈려 VM increase()가 새 시계열 첫 샘플(=누적 재시작수)을 "0에서 증가"로 오독한다.
+          # 그러면 과거 OOMKilled 이력이 남은 **건강한** 파드에서 좌변>0 & 우변 가드=1로 조인 매치 → 오발화.
+          # uid를 보존해야 파드 재생성(새 incarnation, restartCount 0 리셋)의 카운터 리셋 처리가 유지된다.
           - alert: PodOOMKilled
-            expr: increase(kube_pod_container_status_restarts_total[15m]) > 0 and on(namespace,pod) kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+            expr: increase(max by (namespace,pod,container,uid) (kube_pod_container_status_restarts_total)[15m:1m]) > 0 and on(namespace,pod) kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
             for: 0m
             labels: { severity: warning }
             annotations:
@@ -107,8 +113,14 @@ data:
           # 비-OOM CrashLoop 백스톱(OOM은 PodOOMKilled가 커버) — config/이미지풀/panic 반복 재시작.
           # 블랙리스트(시스템 ns만 제외) — 화이트리스트는 신규 PSA ns(cache·sealed-secrets)를 흘렸다(회귀).
           # honor_labels(#20)로 kube_* namespace가 실제값이라 블랙리스트가 모든 워크로드 ns를 자동 포함.
+          # ⚠️ max by(...) 서브쿼리는 필수 — rollup **이전에** instance를 벗긴다(라이브 검증된 함정).
+          # 호스트 재부팅이면 KSM 파드 IP가 바뀌어 instance 라벨이 갈리고, 상태-파생(비-리셋) 카운터라
+          # 새 시계열 첫 샘플이 누적 재시작수(예 9)로 등장한다 → raw increase()는 이를 "15분간 9회"로 오독해
+          # 재시작 3회 초과 이력이 있는 모든 파드에 오발화했다(07-02·07-07·07-08·07-09 4회 재발).
+          # by 목록에 uid 보존 필수 — 빼면 서로 다른 파드 incarnation이 병합돼 카운터 리셋 처리가 깨진다.
+          # (프로세스-로컬 카운터인 alertmanager_*/vmagent_*/vmalert_*는 재시작 시 0 리셋이라 이 처리 불요.)
           - alert: PodCrashLooping
-            expr: increase(kube_pod_container_status_restarts_total{namespace!~"kube-system|kube-public|kube-node-lease"}[15m]) > 3
+            expr: increase(max by (namespace,pod,container,uid) (kube_pod_container_status_restarts_total{namespace!~"kube-system|kube-public|kube-node-lease"})[15m:1m]) > 3
             for: 10m
             labels: { severity: warning }
             annotations:

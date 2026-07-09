@@ -47,10 +47,16 @@ data:
           # disk:pgwal로 분리 라벨링 — 루트 fs critical(disk:standard)이 이 신호를 inhibit하면 안 된다(루트 fs 포화의
           # 원인이 WAL 적체일 때 가려지면 트리아지가 어려워진다). cnpg_collector_pg_wal은 deprecated된 backup/archive
           # 메트릭 계열이 아니라 살아있는 WAL-size collector다(인시던트 #13/#14와 무관).
+          # ⚠️ 양변의 max by(namespace,pod)는 필수 — on()이 instance를 매칭키에서 빼는데 양변 raw 셀렉터엔
+          # instance가 남아 있어, 재부팅으로 CNPG exporter 파드 IP가 바뀌면 구/신 시계열이 staleness(~5분)
+          # 동안 공존해 (namespace,pod)당 2 시계열이 된다 → many-to-many → "duplicate time series on the
+          # left side of /" HTTP 422 → 룰 평가 실패 → VmalertUnhealthy 오발화(라이브 검증). 사전 집계로
+          # 그룹당 1 시계열을 보장해 1:1 매칭을 강제한다. pg는 단일 파드라 max는 항등이며, 다중이어도
+          # filling(>0.70) 방향에선 보수적(더 큰 값 채택 → 참양성 유지). cf. ContainerMemoryNearLimit 선례.
           - alert: WALVolumeFilling
             expr: |
-              (cnpg_collector_pg_wal{value="size"}
-               / on(namespace, pod) cnpg_collector_pg_wal{value="volume_size"}) > 0.70
+              (max by (namespace, pod) (cnpg_collector_pg_wal{value="size"})
+               / on(namespace, pod) max by (namespace, pod) (cnpg_collector_pg_wal{value="volume_size"})) > 0.70
             for: 15m
             labels: { severity: warning, disk: pgwal }
             annotations:
