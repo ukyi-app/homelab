@@ -1,0 +1,19 @@
+# 상태-파생(비-리셋) 카운터 denylist — check-alert-rules.ts 모드 A 가드.
+#
+# 여기 등재된 메트릭이 rollup 함수(increase/rate/irate/delta/…)의 인자에 나오면,
+# rollup **이전에** 집계로 instance를 벗겨야 한다:
+#     increase(max by (namespace,pod,container,uid) (<metric>{...})[15m:1m])
+#
+# 왜: 이 카운터들은 exporter(kube-state-metrics 등)가 k8s API 상태에서 재파생하므로
+# exporter 프로세스가 재시작해도 값이 0으로 리셋되지 않는다. 호스트 재부팅 등으로
+# exporter 파드 IP가 바뀌면 `instance` 라벨이 갈려 새 시계열이 생기고, VictoriaMetrics의
+# increase()는 새 시계열의 첫 샘플을 "0에서 증가"로 간주해 **누적값을 통째로 증가분으로**
+# 반환한다(라이브 검증 — PR #327, 07-02·07-07·07-08·07-09 4회 재발).
+#
+# 여기 없는 카운터(alertmanager_*·vmagent_*·vmalert_*·vl_*)는 exporter 프로세스 자기-스크레이프라
+# 재시작 시 0으로 리셋된다 → 새 instance 시계열이 0에서 시작 → phantom 증가분 없음 → 안전.
+#
+# 형식: 메트릭 이름 한 줄에 하나. `#` 이후는 주석.
+# 신규 상태-파생 카운터를 rollup으로 감쌀 때 반드시 여기 추가한다(누락 = false-negative).
+
+kube_pod_container_status_restarts_total   # KSM이 파드 status.containerStatuses[].restartCount에서 재파생

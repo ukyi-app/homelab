@@ -1,0 +1,11 @@
+# instance 라벨 안정성 게이트(check-alert-rules.ts) 예외 목록.
+#
+# 수용 기준 = allowlist 0. 정당한 예외만 최소 등재하고 **반드시 사유 주석을 동반**한다
+# (사유 없는 줄은 게이트가 거부한다 — image-pin-allowlist 선례).
+#
+# 형식:
+#   <alert명>                       (예: PodCrashLooping)
+#   <룰파일 경로>:<alert명>          (예: platform/victoria-stack/prod/rules/core.yaml:PodCrashLooping)
+#   그 줄 끝에 # 사유(왜 instance 제거가 불가/불요한지).
+#
+# 현재 예외 없음 — PR #327이 세 결함(PodCrashLooping·PodOOMKilled·WALVolumeFilling)을 모두 수정했다.
