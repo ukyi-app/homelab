@@ -101,6 +101,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - PG 메이저 업그레이드 3-이미지 동시 갱신
 - 베스포크 공개 노출은 platform_hosts
 - 로컬 자산 백업 체인
+- 재부팅 IP churn — instance 라벨 불안정
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 
