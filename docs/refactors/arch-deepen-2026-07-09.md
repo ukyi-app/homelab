@@ -3,7 +3,7 @@ refactor: arch-deepen-2026-07-09
 invariant-class: refactor
 entry-track: architecture
 review-track: full
-pipeline-stage: verification
+pipeline-stage: release-gate
 issue-tracker: local
 behavior-baseline: 124d1f96a834d03405a0082805026129280ae72f
 characterization-lock: done
