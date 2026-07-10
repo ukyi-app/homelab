@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "No-ship: the plan’s load-bearing characterization lock overclaims coverage. Simpler alternative: I do not see a materially simpler refactor than the narrowed kernel; fix the lock before execution.",
+  "planFile": "docs/refactors/arch-deepen-2026-07-09.md",
+  "planInDiff": true,
+  "reviewedFileCount": 1,
+  "target": "working tree diff",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "critical",
+      "title": "Behavior-lock coverage is materially overstated",
+      "body": "The plan says B1-B10 are already covered by the five committed Bats suites, but those suites do not pin several rows that the refactor is about to touch. Examples: poll-ghcr has no baseline test for malformed inline pins or the exact B2 refuse strings; bump inline mode checks only the parsed image value, not the B6 line comment or byte-identical YAML output; create-app has no malformed tag/digest cases for B9; and B4/B8 exact stderr/log behavior is only partially checked. A competent engineer could follow this plan, change user-visible refuse messages or YAML/comment output, and still get the stated lock command green.",
+      "file": "docs/refactors/arch-deepen-2026-07-09.md",
+      "line_start": 114,
+      "line_end": 123,
+      "confidence": 0.93,
+      "recommendation": "Before starting R-1, add baseline characterization cases for every Behavior Contract row at the stable CLI/file-output seams: exact poll refuse reasons for invalid tag/inline pin/repo mismatch/parse failure, exact bump exit/message cases, full-file or targeted comment assertions for inline YAML output, create-app invalid tag/digest exit text, digest-exporter log text, and boundary accept/reject cases for tag/digest/inline regexes. Then update characterization-lock.json with the new green case count.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Backfill the missing baseline tests before any extraction commit.",
+    "Keep the five existing suites unmodified except for additive characterization cases tied to the Behavior Contract."
+  ]
+}
