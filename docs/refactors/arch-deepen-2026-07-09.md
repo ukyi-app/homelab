@@ -159,6 +159,9 @@ bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats \
   ImageDigestDrift 재현 경로로 지목한 갭.
 - **F-2** repin-pgtools:17의 digest 형식 정규식 — 배포 핀 개념 밖(ops 이미지)
   이라 수렴 제외. DIGEST_RE 재사용 여부는 별도 판단(개념 경계 vs 형식 SSOT).
+- **F-3** bump-tag syncDigestExporter:15의 언앵커드 `sha-[0-9a-f]{7,40}` 잔존
+  (R-2 Standards 리뷰 발견) — 커널이 TAG_BODY(언앵커드 본문)를 의도적으로 미노출한
+  결과. 부분매치용 본문 export는 커널 인터페이스 확장이라 별도 판단.
 
 ## Review Decision Log
 
