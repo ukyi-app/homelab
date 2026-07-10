@@ -3,10 +3,10 @@ refactor: arch-deepen-2026-07-09
 invariant-class: refactor
 entry-track: architecture
 review-track: full
-pipeline-stage: discover
+pipeline-stage: design
 issue-tracker: local
 candidate: image-pin 커널 — poll-ghcr(읽기)·bump-tag(쓰기) 양단에 복제된 배포 핀 형식·descriptor 지식을 tools/lib 커널로 수렴 (스켑틱 축소 범위)
-intake-grill:
+intake-grill: done
 spike-1:
 ---
 
@@ -39,6 +39,21 @@ repin-pgtools 제외(ops 이미지, 비-sha tag — 개념 불일치), create-ap
 리팩터에서 제외, 별도 트랙. ④ bump-tag 호출자는 bump-poll.yaml + bump.yaml
 2곳(양쪽 행위 보존). ⑤ 신규 lib은 tools/README.md 등재 + AGENTS.md "lib/ 8개"
 산문 갱신 필요.
+
+## Grilling 결정 (2026-07-10, discover 그릴 — design은 capture-only)
+
+- **Q1 커널 범위**: 형식 원자(sha-* tag·sha256 digest) + inline-pin parse/format +
+  descriptor 타입·관용 파스(`autoDeploy === true` fail-closed 해석 포함). 파일 변이·
+  traversal 가드·TOCTOU/no-op·stale-digest·ancestry는 커널 밖.
+- **Q2 seam 위치**: 신규 `tools/lib/image-pin.ts` (identity.ts 합류 기각 — 개념 상이).
+  부기: tools/README.md 등재 + AGENTS.md lib 개수 산문 갱신.
+- **Q3 메시지 소유권**: 커널은 순수 판정/파스만 — 에러 문구·exit·전송로는 전부
+  콜사이트 유지(특성화 자명성 우선). parse 실패 = null류 반환, throw 금지.
+- **Q4 증분 구조**: R-1 = 커널+lib 단위 테스트+poll-ghcr 채택(=first-increment,
+  구조 게이트 대상) → R-2 = bump-tag 채택 → R-3 = create-app RE 채택+부기+안티드리프트 가드.
+- **Q5 테스트**: 특성화 lock = 기존 5 스위트 무수정(anti-cheat), 신규
+  `tools/tests/test_image-pin-lib.bats`(@test 영어), 마지막 증분에 grep-guard
+  (인라인 핀 정규식 리터럴 콜사이트 재출현 FAIL — test_ledger-budget.bats:64-68 선례).
 
 **특성화 seam(평가 완료, lockable=yes)**: 두 CLI stdout+exit —
 poll-ghcr `--fixtures/--root/--dry-run` hermetic plan JSON, bump-tag fixture
