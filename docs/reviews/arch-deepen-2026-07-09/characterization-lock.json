@@ -1,7 +1,7 @@
 {
   "green": true,
-  "baselineSha": "bb22ecd469b295cfe53cfeadcc8f16e2f8205451",
-  "testCmd": "bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_digest-exporter-lib.bats tools/tests/test_create-app.bats tools/tests/test_bump-poll-toctou.bats",
-  "cases": 68,
-  "notes": "rung (a) — 기존 CLI seam(stdout+exit+파일 산출물) hermetic bats 재사용. Behavior Contract B1~B10을 poll-ghcr(15)·bump(≈20)·digest-exporter-lib·create-app·bump-poll-toctou 스위트가 커버. 이 5개 스위트 파일은 리팩터 전 구간 무수정(anti-cheat)."
+  "baselineSha": "124d1f96a834d03405a0082805026129280ae72f",
+  "testCmd": "bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_digest-exporter-lib.bats tools/tests/test_create-app.bats tools/tests/test_bump-poll-toctou.bats tools/tests/test_image-pin-charlock.bats",
+  "cases": 85,
+  "notes": "rung (a) — 기존 CLI seam hermetic bats 5스위트(68) + plan-gate P-1 백필 test_image-pin-charlock.bats(17: B2 정확 refuse 4·B4 stderr/exit 3·B6 바이트 diff+stale 2·B8 로그 2·B9 create-app 문구 2·B10 경계/non-greedy 4). 이 6개 스위트 파일은 리팩터 전 구간 무수정(anti-cheat)."
 }
