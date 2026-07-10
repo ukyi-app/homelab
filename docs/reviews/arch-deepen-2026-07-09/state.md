@@ -10,6 +10,13 @@ intake-grill: done
 spike-1:
 ---
 
+## Executing 스코프 (사용자 동의 2026-07-10)
+
+현재 체크아웃(refactor/arch-deepen-2026-07-09)에서 진행 — 별도 worktree 없음
+(단독 사용 홈랩). R-1→구조 게이트(트리아지 정지)→R-2→R-3 직렬, 증분당 신선한
+구현자(opus) 디스패치 + 컨덕터 /code-review(Spec 우선) + **커밋은 컨덕터**.
+매 디스패치 전 --gate-check, 매 증분 lock testCmd(85) green.
+
 ## Track note
 
 `/gated-refactor` 무인자 호출 → architecture 도어. Rule 0 판정: 행위 보존 +
