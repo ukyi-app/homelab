@@ -8,7 +8,7 @@ issue-tracker: local
 behavior-baseline: 124d1f96a834d03405a0082805026129280ae72f
 characterization-lock: done
 first-increment: [R-1]
-structure-gate: pending
+structure-gate: done
 increments: [R-1, R-2, R-3]
 spike-1:
 ---
@@ -168,3 +168,5 @@ bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats \
 | P-1 | Behavior-lock coverage is materially overstated | critical | Accept | 5개 스위트가 B2 정확 refuse 문자열·B6 lineComment/바이트 출력·B9 불량 tag/digest 문구·B4/B8 정확 stderr/로그를 미고정 — refuse 메시지·YAML 출력이 바뀌어도 lock이 green일 수 있음(Codex가 스위트 직접 판독) | 신규 `tools/tests/test_image-pin-charlock.bats` 추가 전용 백필(기존 5 스위트는 무수정 동결 유지) → testCmd 포함 → characterization-lock.json 재기록(새 baselineSha·케이스 수) → r2 |
 
 ### Codex Plan Review — r2: clean — verdict approve, 0 findings. "P-1 materially addressed: charlock 17케이스 실재 + lock 85 green @124d1f9 확인. 추가 고위험 플랜 갭 없음." (엔진 노트: 각 green-commit 경계에서 lock 재실행으로 드리프트 즉시 검출)
+
+### Codex Structure Review — r1: clean — verdict approve, 0 findings. "R-1 구조 건전: 좁힌 형식/descriptor 원자 집합의 seam이 실제로 집중됐고, 행위 보존 콜은 seam에서 무변경, 특성화 lock 계약은 추가 전용으로만 확장." (frontier 개방 — R-2/R-3 진행 가능)
