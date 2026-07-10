@@ -1,0 +1,7 @@
+{
+  "green": true,
+  "baselineSha": "bb22ecd469b295cfe53cfeadcc8f16e2f8205451",
+  "testCmd": "bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_digest-exporter-lib.bats tools/tests/test_create-app.bats tools/tests/test_bump-poll-toctou.bats",
+  "cases": 68,
+  "notes": "rung (a) — 기존 CLI seam(stdout+exit+파일 산출물) hermetic bats 재사용. Behavior Contract B1~B10을 poll-ghcr(15)·bump(≈20)·digest-exporter-lib·create-app·bump-poll-toctou 스위트가 커버. 이 5개 스위트 파일은 리팩터 전 구간 무수정(anti-cheat)."
+}
