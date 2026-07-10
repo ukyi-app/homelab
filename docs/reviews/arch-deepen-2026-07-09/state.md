@@ -3,9 +3,9 @@ refactor: arch-deepen-2026-07-09
 invariant-class: refactor
 entry-track: architecture
 review-track: full
-pipeline-stage: intake
+pipeline-stage: discover
 issue-tracker: local
-candidate:
+candidate: image-pin 커널 — poll-ghcr(읽기)·bump-tag(쓰기) 양단에 복제된 배포 핀 형식·descriptor 지식을 tools/lib 커널로 수렴 (스켑틱 축소 범위)
 intake-grill:
 spike-1:
 ---
@@ -14,6 +14,34 @@ spike-1:
 
 `/gated-refactor` 무인자 호출 → architecture 도어. Rule 0 판정: 행위 보존 +
 구조적 심화, 측정 지표 없음, 기계적 breadth 아님 → `invariant-class: refactor`.
-후보는 discover 스테이지의 improve-codebase-architecture(HTML 리포트 → 사용자
-단일 선택)가 확정한다. main은 protected(PR-first)라 파이프라인 부기는
+main은 protected(PR-first)라 파이프라인 부기는
 `refactor/arch-deepen-2026-07-09` 브랜치에서 진행, finishing에서 PR 랜딩.
+
+## Discover 결과 (2026-07-10)
+
+탐사 6표면 → 후보 20 → opus 2-렌즈 적대 검증(deletion-test 스켑틱 + seam 평가,
+분포 Worth exploring 12 · Speculative 6 · Reject 2). 사용자 선택 = **#4 image-pin 커널**.
+전체 증거는 `discover-evidence.json`(후보+스켑틱+seam 원문).
+
+**Deletion-test 증거(검증 완료)**: poll-ghcr.ts:178 ≡ bump-tag.ts:70 —
+인라인 핀 정규식 `/^(.+?):(sha-[0-9a-f]{7,40})@(sha256:[0-9a-f]{64})$/` 바이트
+동일 복제. sha-* tag 형식 정규식 3벌(poll:152·bump:46·create-app:41), sha256
+digest 형식 정규식 3벌(bump:50·create-app:42·repin:17). `.image-pin.json`
+descriptor 의미론이 읽기(poll:176-185)/쓰기(bump:63-79)로 양분. 축소 커널을
+지우면 이 지식이 2+파일에 재출현 = 집중(deletion test pass). 한쪽 정규식만
+드리프트하면 해당 컴포넌트 영구 refuse 루프 — 잡는 게이트 0.
+
+**스켑틱 축소 범위(설계 계약에 반영할 것)**: ① 커널은 얇은 형식/descriptor
+계층만(inline-pin parse/format + tag·digest 검증 + descriptor shape) — 깊은
+로직(ancestry 증명·TOCTOU·stale-digest 제거)은 읽기/쓰기 측 잔존. ②
+repin-pgtools 제외(ops 이미지, 비-sha tag — 개념 불일치), create-app은 형식
+검증자만 소비. ③ digest-exporter APPS-sync fail-loud화는 행위 변경 — 이
+리팩터에서 제외, 별도 트랙. ④ bump-tag 호출자는 bump-poll.yaml + bump.yaml
+2곳(양쪽 행위 보존). ⑤ 신규 lib은 tools/README.md 등재 + AGENTS.md "lib/ 8개"
+산문 갱신 필요.
+
+**특성화 seam(평가 완료, lockable=yes)**: 두 CLI stdout+exit —
+poll-ghcr `--fixtures/--root/--dry-run` hermetic plan JSON, bump-tag fixture
+변이. 기존 test_poll-ghcr.bats(15)+test_bump.bats가 형식 refuse·TOCTOU·
+fail-closed 전량 green 고정. testCmd 후보:
+`bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_digest-exporter-lib.bats tools/tests/test_create-app.bats tools/tests/test_bump-poll-toctou.bats`
