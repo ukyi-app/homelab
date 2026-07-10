@@ -3,7 +3,7 @@ refactor: arch-deepen-2026-07-09
 invariant-class: refactor
 entry-track: architecture
 review-track: full
-pipeline-stage: release-gate
+pipeline-stage: finishing
 issue-tracker: local
 behavior-baseline: 124d1f96a834d03405a0082805026129280ae72f
 characterization-lock: done
@@ -173,3 +173,5 @@ bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats \
 ### Codex Plan Review — r2: clean — verdict approve, 0 findings. "P-1 materially addressed: charlock 17케이스 실재 + lock 85 green @124d1f9 확인. 추가 고위험 플랜 갭 없음." (엔진 노트: 각 green-commit 경계에서 lock 재실행으로 드리프트 즉시 검출)
 
 ### Codex Structure Review — r1: clean — verdict approve, 0 findings. "R-1 구조 건전: 좁힌 형식/descriptor 원자 집합의 seam이 실제로 집중됐고, 행위 보존 콜은 seam에서 무변경, 특성화 lock 계약은 추가 전용으로만 확장." (frontier 개방 — R-2/R-3 진행 가능)
+
+### Codex Release Review — r1: clean — verdict approve, 0 findings. "머지를 막을 실질 발견 없음 — R-1~R-3은 접촉 seam에서 행위 보존이고, 커밋된 lock/전체 테스트 증거가 명시된 검증 계약과 일치." (엔진 노트: 머지 SHA에서 lock 명령 독립 재실행 권장 · F-1/F-2/F-3은 별도 트랙 선행 금지)
