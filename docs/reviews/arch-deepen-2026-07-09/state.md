@@ -24,6 +24,16 @@ spike-1:
 main은 protected(PR-first)라 파이프라인 부기는
 `refactor/arch-deepen-2026-07-09` 브랜치에서 진행, finishing에서 PR 랜딩.
 
+## Landing — done (2026-07-12)
+
+PR [#337](https://github.com/ukyi-app/homelab/pull/337) → main squash 머지 = **`d829ff7`**.
+브랜치 보호가 strict(up-to-date 필수)라 머지 직전 `gh pr update-branch`로 base를 흡수했다
+(rebase는 SHA를 재작성해 `reviewedSha`가 HEAD의 조상에서 벗어나 게이트 재실행을 강제하므로 회피).
+머지된 main에서 재검증: 전체 bats 1166/1166 · lock testCmd 85/85. 원격 브랜치는 머지 시 자동 삭제.
+
+증분 R-1/R-2/R-3 전부 done, 스파이크 0, 후속 F-1~F-3은 플랜 Follow-up backlog에 필링.
+`pipeline-stage: done`.
+
 ## 릴리스 게이트 r2 — approve (2026-07-12)
 
 `release-r1.json`은 freshness 스탬프(`reviewedSha`) 이전 스크립트 산물이라 barrier가
