@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
+import { TAG_RE, DIGEST_RE } from "./lib/image-pin.ts";
 import { analyzeLedger, appendRowWithTotals, budgetViolation, type LedgerAgg } from "./lib/ledger-budget.ts";
 import { parseFlags } from "./lib/cli.ts";
 import { addApp } from "./lib/digest-exporter.ts";
@@ -38,8 +39,8 @@ if (!APP_NAME_RE.test(app)) fail(`app 이름 불량: '${app}'`);
 if (!/^ukyi-app\/[A-Za-z0-9._-]+$/.test(repo)) fail(`repo는 ukyi-app org여야 한다: '${repo}'`);
 const [owner, repoName] = repo.split("/");
 if (repoName !== app) fail(`레포 이름(${repoName})과 app(${app}) 불일치 — 컨벤션: app=repo명`);
-if (!/^sha-[0-9a-f]{7,40}$/.test(tag)) fail(`tag 형식 불량: '${tag}'`);
-if (!/^sha256:[0-9a-f]{64}$/.test(digest)) fail(`digest 형식 불량(불변 핀 필수): '${digest}'`);
+if (!TAG_RE.test(tag)) fail(`tag 형식 불량: '${tag}'`);
+if (!DIGEST_RE.test(digest)) fail(`digest 형식 불량(불변 핀 필수): '${digest}'`);
 
 let config;
 try { config = parseYaml(readFileSync(configPath, "utf8")) ?? {}; }
