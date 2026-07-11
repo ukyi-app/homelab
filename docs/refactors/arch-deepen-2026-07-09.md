@@ -3,7 +3,7 @@ refactor: arch-deepen-2026-07-09
 invariant-class: refactor
 entry-track: architecture
 review-track: full
-pipeline-stage: finishing
+pipeline-stage: done
 issue-tracker: local
 behavior-baseline: 75e4d336d328a6a0299d63c2f443611ff8e3d545
 characterization-lock: done
@@ -175,3 +175,12 @@ bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats \
 ### Codex Structure Review — r1: clean — verdict approve, 0 findings. "R-1 구조 건전: 좁힌 형식/descriptor 원자 집합의 seam이 실제로 집중됐고, 행위 보존 콜은 seam에서 무변경, 특성화 lock 계약은 추가 전용으로만 확장." (frontier 개방 — R-2/R-3 진행 가능)
 
 ### Codex Release Review — r1: clean — verdict approve, 0 findings. "머지를 막을 실질 발견 없음 — R-1~R-3은 접촉 seam에서 행위 보존이고, 커밋된 lock/전체 테스트 증거가 명시된 검증 계약과 일치." (엔진 노트: 머지 SHA에서 lock 명령 독립 재실행 권장 · F-1/F-2/F-3은 별도 트랙 선행 금지)
+
+### Codex Release Review — r2: clean — verdict approve, 0 findings. "전체 브랜치 diff에서 실질 적대 발견 없음 — 문서화된 seam에서 행위 보존이 유지되고, 커밋된 검증 증거가 해당 SHA의 특성화 lock/전체 bats/make verify 요구를 충족." 재실행 사유 = r1 아티팩트가 freshness 스탬프(`reviewedSha`) 이전 스크립트 산물이라 landing barrier가 차단(발견 대응이 아님). `reviewedSha=0bcc2d2`. base 정밀도 한계(리뷰 diff가 PR diff의 상위집합)는 `docs/reviews/…/state.md`에 기록.
+
+## Landing (2026-07-12)
+
+- **머지 ref**: `d829ff7` — PR [#337](https://github.com/ukyi-app/homelab/pull/337) squash 머지 (required check `gate` 통과 후 auto-merge).
+- **머지 결과 재검증**(main `d829ff7`): 전체 bats 1166/1166 · lock testCmd 85/85 (릴리스 게이트 next_steps의 "머지 SHA 독립 재실행" 권고 이행).
+- **깊이 before/after**: 배포 핀 형식·descriptor 지식이 `poll-ghcr`·`bump-tag`·`create-app` 3파일에 산재(인라인 핀 정규식 2벌 바이트 동일, tag 형식 3벌, digest 형식 3벌) → 순수 함수 leaf lib `tools/lib/image-pin.ts` 1개로 수렴. 재출현은 grep-guard 테스트가 FAIL로 잡는다.
+- **후속(F-1/F-2/F-3)**: 아래 Follow-up backlog에 필링 — 전부 이 리팩터 범위 밖(F-1은 행위 변경이라 gated-pipeline 판정 대상, F-2/F-3은 커널 개념 경계 판단). 특성화 중 발견된 잠복 버그(hard rule 10 대상)는 없음.
