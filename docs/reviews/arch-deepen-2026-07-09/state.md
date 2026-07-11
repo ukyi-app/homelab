@@ -24,6 +24,21 @@ spike-1:
 main은 protected(PR-first)라 파이프라인 부기는
 `refactor/arch-deepen-2026-07-09` 브랜치에서 진행, finishing에서 PR 랜딩.
 
+## 릴리스 게이트 r2 — approve (2026-07-12)
+
+`release-r1.json`은 freshness 스탬프(`reviewedSha`) 이전 스크립트 산물이라 barrier가
+landing을 차단했다(`refactor-status.mjs`: "Approving release artifact lacks reviewedSha").
+리베이스된 HEAD에서 전체 재리뷰 → `release-r2.json`: **verdict approve, 0 findings**,
+`reviewedSha=0bcc2d2`(= verification 커밋 = 브랜치 tip). 트리아지 대상 발견 없음.
+
+**base 정밀도 기록(정직성)**: 로컬 `main` ref(`7013509`)가 리베이스 기준점
+(`7d23492` = 당시 origin/main tip)보다 3커밋 뒤처져 있어, 게이트가 본 diff는 23파일
+= 실제 PR diff(21파일, `origin/main...HEAD`)의 **상위집합**이다(초과분 = 이미 main에
+머지된 trip-mate digest bump 2파일: `apps/trip-mate-api/deploy/prod/values.yaml`,
+`platform/victoria-stack/prod/digest-exporter.yaml`). 우리가 보내는 변경은 전부
+정확한 커밋에서 리뷰됐으므로 미리뷰 갭은 0 — base만 덜 정밀했다. r1도 동일한 base
+(reviewedFileCount 20)였다.
+
 ## Discover 결과 (2026-07-10)
 
 탐사 6표면 → 후보 20 → opus 2-렌즈 적대 검증(deletion-test 스켑틱 + seam 평가,
