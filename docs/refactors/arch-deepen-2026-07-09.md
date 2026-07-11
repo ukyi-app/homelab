@@ -5,7 +5,7 @@ entry-track: architecture
 review-track: full
 pipeline-stage: finishing
 issue-tracker: local
-behavior-baseline: 124d1f96a834d03405a0082805026129280ae72f
+behavior-baseline: 75e4d336d328a6a0299d63c2f443611ff8e3d545
 characterization-lock: done
 first-increment: [R-1]
 structure-gate: done

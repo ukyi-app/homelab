@@ -1,7 +1,7 @@
 {
   "green": true,
-  "baselineSha": "124d1f96a834d03405a0082805026129280ae72f",
+  "baselineSha": "75e4d336d328a6a0299d63c2f443611ff8e3d545",
   "testCmd": "bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_digest-exporter-lib.bats tools/tests/test_create-app.bats tools/tests/test_bump-poll-toctou.bats tools/tests/test_image-pin-charlock.bats",
   "cases": 85,
-  "notes": "rung (a) — 기존 CLI seam hermetic bats 5스위트(68) + plan-gate P-1 백필 test_image-pin-charlock.bats(17: B2 정확 refuse 4·B4 stderr/exit 3·B6 바이트 diff+stale 2·B8 로그 2·B9 create-app 문구 2·B10 경계/non-greedy 4). 이 6개 스위트 파일은 리팩터 전 구간 무수정(anti-cheat)."
+  "notes": "rung (a) — 기존 CLI seam hermetic bats 5스위트(68) + plan-gate P-1 백필 test_image-pin-charlock.bats(17: B2 정확 refuse 4·B4 stderr/exit 3·B6 바이트 diff+stale 2·B8 로그 2·B9 create-app 문구 2·B10 경계/non-greedy 4). 이 6개 스위트 파일은 리팩터 전 구간 무수정(anti-cheat). (2026-07-10 origin/main 리베이스로 SHA 재작성 — baselineSha를 등가 커밋으로 갱신, 트리 내용 동일)"
 }
