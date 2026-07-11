@@ -16,6 +16,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { parse } from "yaml";
+import { TAG_RE, parseInlinePin, parseDescriptor, descriptorAutoDeploy } from "./lib/image-pin.ts";
 
 const USAGE = `poll-ghcr — GHCR 폴링 bump 플래너(읽기 전용, update-image 권위 경로)
 사용법: bun tools/poll-ghcr.ts [--dry-run] [--root <dir>] [--owner <org>] [--fixtures <dir>]
@@ -149,14 +150,14 @@ function planApp(dir: string, app: string): Plan {
   // 불일치면 다른 레포의 이미지를 폴링·bump하게 되므로 refuse(fail-closed, cross-repo 오배포 차단).
   if (repo !== `ghcr.io/${src}`)
     return { ...result, action: "refuse", reason: `values image.repo(${repo})가 source-repo(ghcr.io/${src})와 불일치` };
-  if (!/^sha-[0-9a-f]{7,40}$/.test(tag))
+  if (!TAG_RE.test(tag))
     return { ...result, action: "refuse", reason: `배포 tag가 sha-* 형식이 아니라 조상 증명 불가: ${tag}` };
 
   // 승인 정책: autoDeploy === true만 자동, 그 외(false/누락/파싱 불가)는 전부 fail-closed
   let autoDeploy = false;
   const bindingsPath = path.join(dir, ".bindings.json");
   if (existsSync(bindingsPath)) {
-    try { autoDeploy = JSON.parse(readFileSync(bindingsPath, "utf8")).autoDeploy === true; } catch { autoDeploy = false; }
+    try { autoDeploy = descriptorAutoDeploy(JSON.parse(readFileSync(bindingsPath, "utf8"))); } catch { autoDeploy = false; }
   }
   return computeBump(result, { key: app, src, repo, deployed: tag.slice(4), digest, autoDeploy });
 }
@@ -173,16 +174,16 @@ function planComponent(dir: string, name: string): Plan {
   if (!new RegExp(`^${args.owner}/[A-Za-z0-9._-]+$`).test(src))
     return { ...result, action: "refuse", reason: `source-repo가 ${args.owner} org 밖: ${src}` };
 
-  const pin = JSON.parse(read(".image-pin.json"));
+  const pin = parseDescriptor(read(".image-pin.json"));
   const image = String(getIn(parse(read(pin.file)), pin.path) ?? "");
-  const m = /^(.+?):(sha-[0-9a-f]{7,40})@(sha256:[0-9a-f]{64})$/.exec(image);
-  if (!m) return { ...result, action: "refuse", reason: `인라인 핀 형식 불량(repo:sha-*@sha256:*): ${image}` };
-  const [, repo, tag, digest] = m;
+  const parsed = parseInlinePin(image);
+  if (!parsed) return { ...result, action: "refuse", reason: `인라인 핀 형식 불량(repo:sha-*@sha256:*): ${image}` };
+  const { repo, tag, digest } = parsed;
   if (repo !== `ghcr.io/${src}`) return { ...result, action: "refuse", reason: `핀 repo(${repo})가 source-repo(${src})와 불일치` };
   result.current = { tag, digest };
   result.pin = path.join("platform", name, "prod", ".image-pin.json");
   result.writePath = path.join("platform", name, "prod", pin.file);
-  return computeBump(result, { key: name, src, repo, deployed: tag.slice(4), digest, autoDeploy: pin.autoDeploy === true });
+  return computeBump(result, { key: name, src, repo, deployed: tag.slice(4), digest, autoDeploy: descriptorAutoDeploy(pin) });
 }
 
 // apps/*/deploy/prod 중 source-repo 바인딩이 있는 앱만 순회

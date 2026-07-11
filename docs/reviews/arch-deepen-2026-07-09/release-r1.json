@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "approve",
+  "summary": "No material finding rises to block merge; the R-1~R-3 changes appear behavior-preserving at the touched seams and the committed lock/full-test evidence matches the stated verification contract.",
+  "planFile": "docs/refactors/arch-deepen-2026-07-09.md",
+  "planInDiff": null,
+  "reviewedFileCount": 20,
+  "target": "branch diff against main",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [
+    "Re-run the recorded lock command on your CI head (`bats test_poll-ghcr.bats test_bump.bats test_digest-exporter-lib.bats test_create-app.bats test_bump-poll-toctou.bats test_image-pin-charlock.bats`) to independently re-verify green output at the merge SHA.",
+    "Implement deferred follow-up items (F-1/F-2/F-3) separately before changing behavioral semantics around digest-exporter fail-louding and ops-image regex policy."
+  ]
+}

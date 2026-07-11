@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "approve",
+  "summary": "R-1 is structurally sound: the seam is actually centralized for the narrow format/descriptor atom set, behavior-preserving calls are unchanged at their seams, and the characterisation lock contract is extended only additively.",
+  "planFile": "docs/refactors/arch-deepen-2026-07-09.md",
+  "planInDiff": null,
+  "reviewedFileCount": 14,
+  "target": "branch diff against main",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [
+    "Re-run the lock command immediately at this commit boundary (including `test_image-pin-charlock.bats`) after any R-2 changes, then again after each green commit before moving to R-3."
+  ]
+}

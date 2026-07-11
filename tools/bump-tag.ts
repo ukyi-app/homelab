@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve, sep, dirname } from "node:path";
 import { parseDocument, isScalar } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
+import { TAG_RE, DIGEST_RE, parseInlinePin, parseDescriptor, formatInlinePin, type PinDescriptor } from "./lib/image-pin.ts";
 
 // digest-exporter APPS 신선도 동기(codex pass2 P2-2): bump한 앱이 APPS 목록에 있으면 그 항목의
 // 이미지 태그를 새 tag로 갱신한다. sha-* 태그가 불변이라 배포 핀만 바꾸면 digest-exporter가 stale
@@ -43,11 +44,11 @@ const [app, tag] = positionals;
 if (!app || !APP_NAME_RE.test(app)) {
   console.error(`bad app name: ${app ?? "<none>"}`); process.exit(2);
 }
-if (!/^sha-[0-9a-f]{7,40}$/.test(tag ?? "")) {
+if (!TAG_RE.test(tag ?? "")) {
   console.error("usage: bump-tag <app> sha-<gitsha> [--digest sha256:<64hex>] [--expect-current sha-<gitsha>] [--repo-root <dir>]"); process.exit(2);
 }
 // digest는 비신뢰 입력(workflow client_payload 경유 가능) — 형식 검증 필수
-if (digest !== undefined && !/^sha256:[0-9a-f]{64}$/.test(digest)) {
+if (digest !== undefined && !DIGEST_RE.test(digest)) {
   console.error(`bad digest: ${digest}`); process.exit(2);
 }
 
@@ -60,21 +61,21 @@ if (pinArg !== undefined) {
   const platRoot = resolve(repoRoot, "platform");
   const descPath = resolve(repoRoot, pinArg);
   if (!descPath.startsWith(platRoot + sep)) { console.error(`refusing pin outside platform/: ${pinArg}`); process.exit(2); }
-  const desc = JSON.parse(readFileSync(descPath, "utf8"));
+  const desc: PinDescriptor = parseDescriptor(readFileSync(descPath, "utf8"));
   const targetPath = resolve(dirname(descPath), desc.file);
   if (!targetPath.startsWith(platRoot + sep)) { console.error(`refusing to write outside platform/: ${desc.file}`); process.exit(2); }
   const doc = parseDocument(readFileSync(targetPath, "utf8"));
   const node = doc.getIn(desc.path, true); // keepScalar: flow 서식·lineComment 보존
   if (!isScalar(node)) { console.error(`핀 경로가 스칼라가 아님: ${JSON.stringify(desc.path)}`); process.exit(2); }
   const cur = String(node.value ?? "");
-  const m = /^(.+?):(sha-[0-9a-f]{7,40})@(sha256:[0-9a-f]{64})$/.exec(cur);
-  if (!m) { console.error(`인라인 핀 형식 불량(repo:sha-*@sha256:*): ${cur}`); process.exit(2); }
-  const [, pinRepo, curTag, curDigest] = m;
+  const parsed = parseInlinePin(cur);
+  if (!parsed) { console.error(`인라인 핀 형식 불량(repo:sha-*@sha256:*): ${cur}`); process.exit(2); }
+  const { repo: pinRepo, tag: curTag, digest: curDigest } = parsed;
   if (expectCurrent !== undefined && curTag !== expectCurrent) {
     console.error(`expect-current 불일치: 기대 ${expectCurrent}, 실제 ${curTag} — bump 중단(race)`); process.exit(3);
   }
   if (curTag === tag && curDigest === digest) { console.log(`bump: ${targetPath} already ${tag}@${digest} (no-op)`); process.exit(0); }
-  node.value = `${pinRepo}:${tag}@${digest}`;
+  node.value = formatInlinePin({ ...parsed, tag, digest });
   node.comment = ` sha-${tag.slice(4, 11)} + digest 인라인 핀(불변)`; // lineComment 갱신(stale short-sha 방지)
   writeFileSync(targetPath, doc.toString());
   syncDigestExporter(repoRoot, app, tag);

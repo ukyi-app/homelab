@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "approve",
+  "summary": "Re-review scope is clean. The previously critical behavior-lock gap (P-1) is materially addressed: `test_image-pin-charlock.bats` exists with the 17 charlock cases, and `docs/reviews/arch-deepen-2026-07-09/characterization-lock.json` records the expanded lock command and 85 green cases at baseline `124d1f96a834d03405a0082805026129280ae72f`. No additional high-risk plan-level gaps were found in this round.",
+  "planFile": "docs/refactors/arch-deepen-2026-07-09.md",
+  "planInDiff": true,
+  "reviewedFileCount": 2,
+  "target": "working tree diff",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [
+    "Re-run the lock command now on your current head before changing any increment: `bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_digest-exporter-lib.bats tools/tests/test_create-app.bats tools/tests/test_bump-poll-toctou.bats tools/tests/test_image-pin-charlock.bats`.",
+    "Execute R-1 then re-lock immediately so lock drift is detected at each green-commit boundary."
+  ]
+}
