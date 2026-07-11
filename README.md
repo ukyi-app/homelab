@@ -9,7 +9,7 @@ k3s 단일 노드(Mac mini · OrbStack VM · arm64) **GitOps 모노레포**. Arg
 
 ```
    ukyi-app/<app> ──image(GHCR)──┐        ┌── git(main) ──▶ ArgoCD ──sync──▶ 전 스택
-   (앱 코드 · 별도 레포)          │        │                 (SSOT — 클러스터 수동변경 0)
+   (앱 코드 · 별도 레포)             │        │                 (SSOT — 클러스터 수동변경 0)
                                  ▼        │
    ══════════════════  k3s 단일 노드 · OrbStack VM (arm64 · 11GiB · 6 vCPU)  ══════════════════
 
@@ -21,7 +21,7 @@ k3s 단일 노드(Mac mini · OrbStack VM · arm64) **GitOps 모노레포**. Arg
      Cloudflare                                    AdGuard
      DNS · WAF · rate-limit · HSTS                 DNS 광고차단 + split-horizon
         │ cloudflared Tunnel (outbound only)          │  *.home.ukyi.app → tailscale IP
-        └─────────────────────┬────────────────────────┘
+        └─────────────────────┬───────────────────────┘
                               ▼
                     Traefik · Gateway API
      web-public(*.ukyi.app)   │   web-internal-tls(*.home.ukyi.app · Let's Encrypt 와일드카드)
