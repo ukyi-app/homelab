@@ -1,0 +1,46 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "needs-attention",
+  "summary": "NO-SHIP: the 8b2f521 flip record is internally consistent, ancestral, and test-frozen, and R-1/R-2 were handled as stated. However, the mandatory verification document still certifies the old GREEN SHA, and R-3’s single-consumer exception remains recorded as pending outside the Decision Log.",
+  "planFile": "docs/bugfixes/files-bulk-ssd-low-never-fires.md",
+  "planInDiff": null,
+  "reviewedFileCount": 16,
+  "target": "branch diff against main",
+  "reviewedSha": "ede0a1a704875ded6241a1cb9ed672ab9ec91432",
+  "reviewedTree": "12337ce03e77aee988d35aa145c610597b55c8de",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Missing verification: post-R-1 GREEN SHA",
+      "body": "The lock now pins green.sha to 8b2f521 and a matching script-owned record exists, but verification.md still declares b2b3dc0 as GREEN and attributes the PASS evidence to that pre-R-1 tree. Consequently, the mandatory verification artifact does not demonstrate the final locked state after the comment change, despite the raw record being available.",
+      "file": "docs/reviews/files-bulk-ssd-low-never-fires/verification.md",
+      "line_start": 9,
+      "line_end": 19,
+      "confidence": 0.99,
+      "recommendation": "Refresh verification.md from bugfix-verify-green-cd6f1c11e15f9b2aa7e50193225d7a23e7a1ca17.json: identify 8b2f521 as GREEN and include the locked regression and characterization command outputs. Do not hand-edit the verify-record.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "medium",
+      "title": "R-3 exception is not recorded as human-approved",
+      "body": "The R-3 row contains the conductor’s justification, but the following text still labels human approval as pending. Moreover, this release table appears before the actual `## Review Decision Log` section at line 135. Thus the committed branch does not yet contain the human-approved Decision-Log exception required for a shared seam with only one adapter, even though this prompt now supplies that approval.",
+      "file": "docs/bugfixes/files-bulk-ssd-low-never-fires.md",
+      "line_start": 109,
+      "line_end": 118,
+      "confidence": 0.98,
+      "recommendation": "Record the R-3 acceptance under the actual Review Decision Log, remove the pending-confirmation wording, and reference F-5 as the approved gated-refactor follow-up.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Hold the merge and correct both committed evidence records.",
+    "Because this is Round 2, explicitly triage these residual findings; landing remains blocked unless they are fixed, waived, or a manual Round 3 is approved.",
+    "No test or repro rerun is needed solely for these documentation corrections; preserve the existing machine-owned records unless a lock command, harness, or GREEN tree changes."
+  ]
+}

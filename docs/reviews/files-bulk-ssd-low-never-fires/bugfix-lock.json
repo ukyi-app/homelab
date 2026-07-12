@@ -1,0 +1,20 @@
+{
+  "regressionCmd": "bash tests/gates/vmalert-bulkssd-firing-e2e.sh > /tmp/bulkssd-verify.log 2>&1; rc=$?; cat /tmp/bulkssd-verify.log; echo \"--- failed legs (symptom) ---\"; grep -E \"^FAIL \" /tmp/bulkssd-verify.log || echo \"(none - all legs passed)\"; exit $rc",
+  "characterizationCmd": "bats tests/test_alert_rules.bats tests/gates/test_vmalert-config.bats && bash tests/gates/vmalert-rules-validate.sh && bash tests/gates/vmalert-drift-firing-e2e.sh",
+  "flips": [
+    {
+      "testId": "L1 — FilesBulkSSDLow fires when the bulk SSD sits below the 10% threshold (deployed rule bytes, for: 30m unmodified)",
+      "symptomToken": "FilesBulkSSDLow did not fire despite"
+    }
+  ],
+  "scope": [
+    "platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
+  ],
+  "red": {
+    "sha": "ffa1797eb65a0540129c454ae24cbcf42bbdf0bd"
+  },
+  "green": {
+    "sha": "8b2f5212505aa1f8bf32037c5bd332122ed9d6e7"
+  },
+  "notes": "reproCmd 미선언(의도적 waive): 원본 repro는 라이브 클러스터 질의인데 클러스터는 머지+싱크 전까지 옛 룰을 돌린다 — green.sha 워크트리에서도 재현되므로 락에 넣으면 거짓 실패. 증상은 hermetic L1이 고정한다. | regressionCmd 래퍼: verify-record의 outputTail(마지막 2000자)이 symptomToken을 자르지 않도록 실패 레그를 출력 끝에 재출력한다(하네스는 동결, exit 코드 그대로 전달) — image-digest-drift 릴리스 게이트 R-1의 교훈. | characterizationCmd에 드리프트 게이트를 포함해 방금 머지한 알림의 회귀를 함께 못박는다."
+}

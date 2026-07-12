@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "approve",
+  "summary": "Ship the plan. The RED record matches ffa1797 and fails on the exact firing symptom; the real-rule replay, L3 anti-false-GREEN control, L4 firing control, 3d window rationale, and FilesBackupStale backstop are coherent. Simpler alternative: delete FilesBulkSSDLow and rely on the earlier fail-loud BulkStorageLow alert, but that sacrifices the intended independent host-side sensor.",
+  "planFile": "docs/bugfixes/files-bulk-ssd-low-never-fires.md",
+  "planInDiff": true,
+  "reviewedFileCount": 1,
+  "target": "working tree diff",
+  "reviewedSha": "31d5ad5f2e17bc1169e6109de53254dadd403c42",
+  "reviewedTree": "930939b523d51873e1029ff19add4ad3581d5458",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [
+    "Implement B-1 exactly as scoped, preserve the frozen regression artifacts, and let the pipeline generate GREEN evidence."
+  ]
+}

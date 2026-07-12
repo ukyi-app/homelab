@@ -100,6 +100,11 @@ jobs:
         # push 메트릭 rollup 누락 → record 구멍 → for: 리셋)을 통과시켰다. 이 게이트가 실제 발화를 증명한다.
         # ⚠️ bats 아님 — run-bats.sh는 tests/.ci-exclude로 docker 의존 테스트를 빼므로 죽은 커버리지가 된다.
         run: bash tests/gates/vmalert-drift-firing-e2e.sh
+      - name: vmalert 발화 e2e — bulk SSD 용량 (일 1회 push 메트릭)
+        # 같은 클래스의 두 번째 죽은 알림(FilesBulkSSDLow): files_data_bulk_*는 호스트 launchd가 **하루 1회**
+        # push하는데 룩백은 5m → 하루 1440분 중 5분만 보인다 → for: 30m(연속 61회 평가)에 구조적 도달 불가.
+        # 형제 BulkStorageLow(rollup 착용)는 같은 매체·같은 결핍에 정상 발화한다 — 그 대조를 L4가 매 실행 증명한다.
+        run: bash tests/gates/vmalert-bulkssd-firing-e2e.sh
       # app-shared .mts가 node strip-types(앱 레포 secret:seal 경로)에서도 실행됨을 required gate가 보장 (A.5 F1·pass3) —
       # 별도 잡이면 비-required라 무성 회귀라 gate 잡 안 스텝으로. node는 strip-types 실행용 의식적 예외(setup-bun ban 유일 예외).
       # CI는 현 LTS node 24로 실행(strip-types는 node 23.6+ 무플래그 기본). .mts 계약 하한은 여전히 node 22.18(앱 레포 secret:seal 경로).
