@@ -1,0 +1,24 @@
+# 픽스처(동결 — 절대 "고치지" 마라): r4 `FilesBulkSSDLow`의 **결함 expr** 스냅샷.
+# files_data_bulk_*(호스트 launchd, **하루 1회** push)를 rollup 없이 맨 참조 → vmalert instant 질의
+# 룩백(5m)을 넘어서면 시리즈가 사라진다 → 하루 1440분 중 **5분만** 조건이 참일 수 있다(최대 11회 연속
+# 평가) → for: 30m(≈61회 연속 필요)에 **구조적으로 도달 불가** → 영구 미발화(라이브 확인).
+#
+# 용도: vmalert-bulkssd-firing-e2e.sh의 L3(하네스 이빨 증명) — 여유율 5%를 먹여도 이 expr은 발화하지
+# 못하고 **pending에 갇힘**을 매 실행 증명한다. 이게 "발화 없음 + pending 있음"으로 나와야 하네스가
+# 버그를 실제로 감지할 능력이 있는 것이다(pending>0 = 데이터가 룰에 실제로 닿았다는 양성 증거 →
+# vacuous 통과 차단).
+#
+# ★ 이 픽스처가 **발화하면** 하네스가 push 구멍을 보간하고 있다는 뜻이고(거짓 GREEN), 그러면 배포 룰이
+#   안 고쳐졌는데도 L1이 통과할 수 있다. 즉 이 파일은 하네스의 **거짓 GREEN 방지 최종 보증**이다 —
+#   datasource 룩백 핀보다 이쪽이 권위다(핀은 방어선, 이 레그는 증명).
+# (배포 룰이 고쳐진 뒤에도 이 픽스처는 그대로 결함 상태로 남는다 — 하네스의 음성 기준선.)
+groups:
+  - name: storage-backup-fixture-buggy
+    rules:
+      - alert: FilesBulkSSDLow
+        expr: |
+          (files_data_bulk_avail_bytes / files_data_bulk_size_bytes) < 0.10
+        for: 30m
+        labels: { severity: warning, disk: bulk }
+        annotations:
+          summary: "fixture(buggy) — 외장 bulk SSD 여유 공간 10% 미만"
