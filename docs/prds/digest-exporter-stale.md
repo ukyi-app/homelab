@@ -253,3 +253,12 @@ pending**에 들어가고, `for: 10m`이 producer 주기(`*/10`)와 같아 첫 C
 
 Codex 총평: "검증된 코드베이스 전제들은 정확했고, 확정된 결정 범위 안에서 실질적으로 더 단순한 안전한
 대안은 발견되지 않았다."
+
+### Codex Plan Review — r2: needs-attention (escalated)
+
+아티팩트: `docs/reviews/digest-exporter-stale/plan-r2.json` (reviewedSha `5a37ba3`). P-1·P-3은 해소
+확인. **P-2는 미해소** — 하드룰 4에 따라 owner에게 에스컬레이션했고 게이트는 **BLOCKED** 상태다.
+
+| ID | 심각도 | 잔여 발견 | 상태 |
+|---|---|---|---|
+| P-2 | high | `P-2 remains unresolved: slice boundaries are not deployment boundaries` — full 트랙 파이프라인은 skeleton과 종속 슬라이스를 **격리 브랜치에 두었다가 마지막에 한 번 랜딩**하는데, victoria-stack ArgoCD Application은 **`main`을 감시**한다. 따라서 슬라이스 1을 skeleton으로 지정하는 것만으로는 **배포되지 않는다** — 통상 파이프라인을 따르면 producer와 룰이 **함께 랜딩**되어 P-2가 제거하려던 최초 실행 `absent(...)` 경주가 그대로 재현된다 | **에스컬레이션** — owner 결정 대기 |
