@@ -7,13 +7,21 @@
 - `docs/reviews/image-digest-drift-never-fires/bugfix-verify-red-158e7e26….json`
 - `docs/reviews/image-digest-drift-never-fires/bugfix-verify-green-d963ecb3….json`
 
+> **release-gate R-1 교정 후 재생성됨.** 기록의 `outputTail`은 마지막 2000자로 잘리는데, 하네스가
+> 8레그로 늘면서 symptomToken이 tail 경계에서 반토막 나 **기록이 자기 검증 불가**였다(“토큰이 있다”고
+> 주장하면서 증거엔 안 보임). 하네스는 **바이트 동결** 그대로 두고 락의 `regressionCmd`가 출력 전문을
+> 찍은 뒤 **실패 레그 줄을 맨 끝에 재출력**하도록 감쌌다(exit 코드 그대로 전달, 단언 무변경).
+> 결과: RED 기록의 tail이 정확한 토큰을 담은 `FAIL L1 …` 줄로 끝나고, GREEN은
+> `(none - all legs passed)`로 끝난다 — 양쪽 다 감사 가능.
+
 ## Claim 1 — 단일 flip 증명 (FAIL@red → PASS@green)
 
 핀된 명령(`bugfix-lock.json`):
 
 ```bash
-# regressionCmd (플립 테스트 단독)
-bash tests/gates/vmalert-drift-firing-e2e.sh
+# regressionCmd (플립 테스트 단독 — 증거 보존 래퍼, 하네스 자체는 동결)
+bash tests/gates/vmalert-drift-firing-e2e.sh > /tmp/idd-verify.log 2>&1; rc=$?; cat /tmp/idd-verify.log
+echo "--- failed legs (symptom) ---"; grep -E "^FAIL " /tmp/idd-verify.log || echo "(none - all legs passed)"; exit $rc
 
 # characterizationCmd (주변 보존 스위트)
 bats tests/test_alert_rules.bats tests/gates/test_vmalert-config.bats tests/gates/test_digest-exporter.bats \
