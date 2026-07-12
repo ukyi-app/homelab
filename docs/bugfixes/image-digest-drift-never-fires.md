@@ -3,7 +3,7 @@ bugfix: image-digest-drift-never-fires
 invariant-class: bugfix
 entry-track: bug
 review-track: full
-pipeline-stage: release-gate
+pipeline-stage: done
 issue-tracker: local
 symptom: "ImageDigestDrift 알림이 60일간 한 번도 발화하지 않았다 — 드리프트 상태가 실제로 발생했는데도(app:image_digest_drift에 page 81샘플·trip-mate-api 84샘플) 통보가 0건이다. 배포 드리프트 감시견이 fail-open으로 죽어 있다."
 red-baseline: f4497d23d5bc44e254dca736382d0472b8633ef5
@@ -341,6 +341,26 @@ exact firing symptom"). 잔여 1건:
 | CR-1 | 중복된 파드 셀렉터 계약이 **무가드** — `label_replace(kube_pod_container_info…)`가 `unless` 우변과 `and` 가드에 바이트 쌍둥이로 존재하는데, 한쪽만 고치면 **가드의 app 집합이 조용히 좁아져 진짜 드리프트를 억제**한다(고치려던 fail-open의 재발 경로) | Standards | **Accept** | bats에 쌍둥이 단언 추가(app-추출 label_replace occurrence == 2 + 두 셀렉터 문자열 동일). 중복 자체는 유지 — 대안(새 recording rule=eval 순서 의존 / 우변 rollup=fail-open 거울상)이 더 나쁘다 |
 | CR-2 | `annotations.description`의 phantom caveat이 **stale** — 픽스 후 거짓이 되어 온콜을 오도 | Standards | **Accept**(의도적 예외) | 위 "의도적 예외 공개" 참조. 발화 조건 무변경이라 단일 flip 유지 |
 | CR-3 | 새로 라이브 확증된 함정 2건이 **`docs/traps-detail.md` SSOT·`docs/traps.md` 원장에 미등록**(레포 규약 위반) | Standards | **Accept** | traps-detail 섹션 2개 + AGENTS 인덱스 2줄 + 원장 행(guard=`tests/gates/vmalert-drift-firing-e2e.sh`). `make verify-traps` 통과 필수. 겸사겸사 r6 룰 주석을 불변식+포인터로 압축(지식이 두 사본으로 갈리는 것 방지) |
+
+### Codex Release Review — r1 → r2
+
+| ID | Finding | Severity | Decision | Reason | Action |
+|----|---------|----------|----------|--------|--------|
+| R-1 | Inconsistent verify-record — 기록이 `symptomTokenPresent: true`를 주장하는데 bounded `outputTail`(마지막 2000자)이 토큰을 반토막 내 **증거에 토큰이 안 보인다** | high (conf 1.0) | **Accept** | 판정 자체는 옳았다(토큰 검사는 전체 출력 기준). 문제는 **감사 가능성** — 아티팩트가 자기 검증되지 않으면 anti-forgery 일관성 검사를 통과할 수 없다. 8레그로 출력이 길어진 결과다. | 아티팩트 손수정 금지 지시 준수: **하네스는 바이트 동결**한 채 락의 `regressionCmd`가 출력 전문 후 **실패 레그 줄을 맨 끝에 재출력**하도록 감쌈(exit 코드 그대로 전달, 단언 무변경) → `--verify-flip` 재실행 → RED tail이 토큰 포함 줄로 종료. 폐기된 red.sha의 stale 기록도 삭제 |
+
+**r2: clean — verdict approve, 0 findings — "Ship."** 원문: "the RED tail contains the exact symptom token
+with exit 1, GREEN shows harness success with exit 0, both characterization runs remain green,
+ancestry/tree SHAs match, and the harness blob is unchanged. The wrapper only re-emits harness-produced
+FAIL lines and exits the saved harness status, so it preserves machine-owned flip semantics."
+
+### Landing (2026-07-12)
+
+- **머지 ref**: `a6d9c61` — PR [#339](https://github.com/ukyi-app/homelab/pull/339) squash 머지
+  (required check `gate` 통과 후 auto-merge). strict 보호라 rebase 대신 `gh pr update-branch`로 base 흡수
+  (rebase는 SHA를 재작성해 red.sha/green.sha 락과 게이트 reviewedSha를 통째로 무효화한다).
+- **배포**: ArgoCD `victoria-stack` Synced/Healthy @ `a6d9c61` → r6 ConfigMap에 새 룰 반영 확인.
+- **라이브 검증**: 아래 `docs/reviews/…/state.md`의 "라이브 검증" 절 참조.
+- **증분**: B-1 done(단일 증분). 스파이크 0. `[DEBUG-]` 계측 0.
 
 ### Codex Structure Review — r1: clean — verdict **approve**, 0 findings
 
