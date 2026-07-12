@@ -272,3 +272,39 @@
   게이트도 무력 — 정상상태 데이터엔 결함이 부재하고 재부팅 과도구간에서만 발현해 merge-time 재현이 불가하다.
   유일한 형태가 expr 안티패턴 정적 lint다. 집계자는 반드시 `max` — `sum without(instance)`는 중첩 구간에 배가.
 > 가드: `tools/check-alert-rules.ts`, `tests/test_alert_rules.bats`
+
+### push 주기 > instant 룩백 → 룰 시리즈 구멍 → 무발화
+- **push(스크레이프 아닌) 메트릭을 rollup 없이 맨 참조하면 그 룰은 발화하지 못한다.** vmalert의 instant 질의
+  룩백은 `-datasource.queryStep`(**미지정 시 기본 5m** — 문서화되지 않은 상수)인데, push 주기가 그보다 길면
+  매 주기 후반에 메트릭이 vmalert 눈에서 **사라진다** → 기록룰/알림 시리즈에 구멍 → `for:` pending이 매 주기
+  **리셋** → 임계 시간을 영원히 누적하지 못한다. `ImageDigestDrift`가 이 형태로 **라이브 60일간 발화 0**이었다
+  (기록룰이 10분 크론 push 메트릭 `ghcr_latest_digest`를 맨 참조 · 룩백 5m · `for: 20m`). 감시견이 fail-open으로
+  죽어 있어도 **아무 신호가 없다**는 것이 이 함정의 본질이다.
+- **해법**: 읽는 쪽에서 `last_over_time(m[W])`로 감싸 의미 불일치를 해소한다(`W ≥ push 주기`). r4가 같은 함정을
+  이미 6번 방어하고 있었고 r6만 규약을 안 지켰다. cron을 조밀하게(`*/2`) 만드는 우회는 알림 생존을 vmalert의
+  **기본 상수**에 의존시키는 fail-open by construction이라 기각했다.
+- **왜 게이트를 통과했나**: required `vmalert -dryRun`은 **파싱만** 한다 — 이 죽은 식은 문법상 유효한 MetricsQL이다.
+  실효 방어는 hermetic replay e2e(발화를 실제로 관측)뿐. 룰 작성자가 주석에 "라이브 미검증 → 발화 검증 필수"라고
+  스스로 적어뒀으나 그 검증이 수행되지 않았다 — **미검증 주석은 가드가 아니다.**
+> 가드: `tests/gates/vmalert-drift-firing-e2e.sh`, `tests/gates/test_digest-exporter.bats`
+
+### rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭
+- 위 함정의 해법(rollup)에는 **상한**이 있다. rollup 윈도는 "최근 W 안에 본 값을 지금의 값으로 되살리는
+  **상태 래치**"다 → 상태가 바뀐 뒤에도 구 상태가 W 동안 부활한다. 그 잔존이 `for:`를 넘기면 **상태 전이마다
+  오발화**한다(`ImageDigestDrift`: 이미지 bump 후 구 digest가 좌변에서 부활 → phantom 드리프트 페이지).
+- **산술**: `phantom 지속 = W − 룩백` → 발화 임계는 `W > for + 룩백`. 즉 `for=20m`·룩백 `5m`이면 W=30m은
+  phantom 25m > 20m으로 **관측 가능하게 오발화**하지만 W=20~25m 구간은 **관측 레그가 구조적으로 못 본다** →
+  경계는 관측이 아니라 **산술 단언**(`push ≤ W < for` preflight)으로만 닫힌다. 음성 레그·양성 레그·산술 단언
+  셋이 상보적이다.
+- **★ 비대칭(핵심)**: 같은 `last_over_time(m[W])`라도 윈도 상한의 유무가 갈린다.
+  - **타임스탬프-값 하트비트(staleness)** — `time() - last_over_time(m[W]) > 임계`(r4의 `[2h]`/`[3d]`). **값이
+    타임스탬프**이고 판정도 값으로 한다 → 윈도는 "마지막 하트비트를 어디까지 뒤질까"라는 **탐색 지평**일 뿐 →
+    **상한 없음**(넓혀도 판정이 바뀌지 않는다).
+  - **라벨-값 상태 게이지(identity)** — 값은 무의미한 1이고 **시리즈의 존재와 라벨 자체가 상태**다(r6의 `digest`).
+    넓은 윈도는 구·신 상태를 **동시에** 현재라고 주장한다 → **윈도 < `for:`**.
+  - 한 줄 규칙: **타임스탬프-값 하트비트 → 윈도 상한 없음 / 라벨-값 상태 게이지 → 윈도 < `for:`.**
+- **동반 함정**: 좌변에 rollup을 걸면 시리즈가 **연속**이 되므로, `unless` 조인의 **우변(KSM 텔레메트리)이 사라질 때**
+  아무것도 제거되지 않아 **전 대상이 거짓 사유로 발화**한다(원인 오귀속 — 진실은 "KSM이 죽었다"이고 그건
+  `TargetDown` 소관). rollup에는 **우변 존재 가드**(`and on (key) (<우변 존재>)`)를 동반시켜라. 반대로 **우변
+  셀렉터 자체에는 rollup 금지** — 구 상태가 부활해 진짜 드리프트를 억제하는 fail-open의 거울상이다.
+> 가드: `tests/gates/vmalert-drift-firing-e2e.sh`

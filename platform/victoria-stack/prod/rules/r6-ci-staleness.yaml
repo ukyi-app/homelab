@@ -21,12 +21,31 @@ data:
           # Recording rule: 실행 중인 이미지 digest가 최신 GHCR digest와 다르면 1.
           # ⚠️ 정정(B2): (a) max by (app)은 digest 라벨을 떨궈 join 키 소실, (b) 우변(pod info)에 app 라벨
           #    부재 → on(app,digest) 매칭 영구 미스 → 채우면 drift 상시 1(오발화). 좌변은 by(app,digest)로 digest
-          #    보존, 우변은 image_id에서 app·digest를 추출해 양변을 정렬한다(라이브 미검증 죽은 식 → 발화 검증 필수).
+          #    보존, 우변은 image_id에서 app·digest를 추출해 양변을 정렬한다.
           #    ⚠️ k3s/containerd 실측: KSM `image` 라벨은 bare 이미지 ID(sha256:…)라 selector·추출 소스는
           #    반드시 `image_id`(ghcr.io/<owner>/<app>@sha256:<manifest digest> — skopeo Digest와 일치)다.
+          #
+          # ★ 윈도 불변식(크론·for·W 중 하나라도 바꾸기 전에 읽어라): push(10m) ≤ W(15m) < for(20m)
+          #    - 하한 = digest-exporter 크론(`*/10`)의 push 주기. W가 좁으면 vmalert instant 룩백(기본 5m)을 넘는
+          #      구멍이 시리즈에 남아 `for:` pending이 매 주기 리셋된다 → **영구 무발화**(이 룰의 원래 버그, 라이브 60일 0건).
+          #    - 상한 = `for:`. rollup 윈도는 **상태 래치**라 bump 후 구 digest를 W 동안 되살린다 → 그 phantom 잔존이
+          #      `for:`를 넘기면 bump마다 오발화. (하트비트 staleness 룰(r4 `[2h]`/`[3d]`)에 윈도 상한이 없는 것과의
+          #      **비대칭**: 값이 타임스탬프면 윈도는 탐색 지평일 뿐, 라벨-값 상태 게이지면 윈도가 곧 래치다.)
+          #    ⚠️ 셋 중 **하나를 바꾸면 나머지 둘을 반드시 함께 봐야 한다.** 게이트 `tests/gates/vmalert-drift-firing-e2e.sh`가
+          #      preflight로 이 산술을 강제하고(위반=HARNESS FAULT), L1(발화)·L3/L8(phantom 상한)·L7(가드)로 매 실행 증명한다.
+          #      ⇒ 전문·근거는 `docs/traps-detail.md`(SSOT) 「push 주기 > instant 룩백 …」·「rollup 윈도 상한 …」.
+          #
+          # ★ 말미 `and on (app) (…)` = 우변 존재 가드 — **제거 금지**. 좌변 rollup은 시리즈를 연속으로 만들므로,
+          #    KSM/스크레이프 장애로 우변이 사라지면 `unless`가 아무것도 못 지워 **전 앱이 "이미지 불일치"라는 거짓
+          #    사유로 발화**한다(원인 오귀속 — 진실은 "KSM이 죽었다"이고 그건 `TargetDown` 소관). 가드는 파드 텔레메트리가
+          #    있는 app에만 드리프트를 주장하게 한다(게이트 L7).
+          #    ⚠️ 우변 파드 셀렉터 자체엔 **rollup 금지** — 구 파드 digest가 부활해 진짜 드리프트를 억제한다(fail-open 거울상).
+          #    ⚠️ `unless` 우변과 이 가드의 파드 셀렉터는 **바이트 쌍둥이**다(새 recording rule은 eval 순서 의존이라 회피).
+          #      한쪽만 고치면 가드의 app 집합이 조용히 좁아져 드리프트를 억제한다 → 둘을 **함께** 고쳐라
+          #      (`tests/gates/test_digest-exporter.bats`가 쌍둥이 동일성을 못박는다).
           - record: app:image_digest_drift
             expr: |
-              max by (app, digest) (ghcr_latest_digest)
+              max by (app, digest) (last_over_time(ghcr_latest_digest[15m]))
               unless on (app, digest) (
                 label_replace(
                   label_replace(
@@ -36,10 +55,18 @@ data:
                   "app", "$1", "image_id", ".*/([a-z0-9-]+)[@:].*"
                 )
               )
+              and on (app) (
+                max by (app) (
+                  label_replace(
+                    kube_pod_container_info{namespace="prod", image_id=~"ghcr[.]io/ukyi-app/.*"},
+                    "app", "$1", "image_id", ".*/([a-z0-9-]+)[@:].*"
+                  )
+                )
+              )
           - alert: ImageDigestDrift
             expr: app:image_digest_drift == 1
             for: 20m
             labels: { severity: warning }
             annotations:
               summary: "실행 중인 이미지가 최신 GHCR digest와 불일치: {{ $labels.app }}"
-              description: "빌드가 새 이미지를 푸시했지만 실행 중인 파드가 반영하지 못했습니다(R6 write-back/sync staleness). ⚠️ 이미지 bump 직후 digest-exporter APPS 갱신 전까지 일시 오발화 가능(B9 bump-tag 배선 후 해소)."
+              description: "빌드가 새 이미지를 푸시했지만 실행 중인 파드가 반영하지 못했습니다(R6 write-back/sync staleness). 발화했다면 **실제 드리프트**입니다 — ArgoCD sync 지연/실패 또는 태그 write-back 고장을 확인하세요. 이미지 bump 직후의 일시 phantom(구 digest가 rollup 윈도 동안 되살아나는 상태 래치)은 윈도 불변식 push(10m) ≤ W(15m) < for(20m)이 구조적으로 차단하며 회귀 게이트가 매 실행 강제합니다."

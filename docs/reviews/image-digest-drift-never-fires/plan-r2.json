@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship this plan yet. P-1 and P-2 are resolved, and the RED record matches f4497d2 and the exact firing symptom. P-3 remains broken. No materially simpler safe fix than the left-side rollup was identified.",
+  "planFile": "docs/bugfixes/image-digest-drift-never-fires.md",
+  "planInDiff": true,
+  "reviewedFileCount": 1,
+  "target": "working tree diff",
+  "reviewedSha": "741fdad4e97ee357f457373f43e241e64e52b4dc",
+  "reviewedTree": "6b21520c39f907579c3c04c6bed2d183205bbcd6",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "medium",
+      "title": "P-3 characterization cannot accept or reliably validate the planned rule",
+      "body": "`$R` is a ConfigMap whose rule YAML is embedded under `.data[\"r6.yaml\"]`; it has no `.spec.groups`, so the proposed extraction returns an empty `EXPR` and the positive greps fail. After correcting that path, the broad negative pattern also matches the required P-1 RHS guard's legitimate `max by (app) (`. Finally, bare `! grep` is a middle negation that this repository explicitly detects as a Bats false-green. Following the plan therefore leaves characterization either permanently red or unable to enforce the intended negative contract; removing the RHS guard to satisfy it would reintroduce P-1.",
+      "file": "docs/bugfixes/image-digest-drift-never-fires.md",
+      "line_start": 194,
+      "line_end": 202,
+      "confidence": 1,
+      "recommendation": "First extract `.data[\"r6.yaml\"]`, parse its `.groups[].rules[]`, and require exactly one non-empty record expression. Use `run grep ...; [ \"$status\" -ne 0 ]` and narrow the negative assertion to a broken `max by (app)` specifically around `ghcr_latest_digest`, so the RHS existence guard remains allowed.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Human-triage this residual round-2 finding; the plan gate remains blocked.",
+    "Correct the P-3 assertions without removing or weakening the RHS existence guard."
+  ]
+}

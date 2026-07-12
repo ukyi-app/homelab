@@ -95,6 +95,11 @@ jobs:
       - name: vmalert rule validate (containerized — render/grep 미차단 룰 expr 오류)
         # grep만으론 오류 PromQL/MetricsQL이 통과(test_vmalert-config는 존재 grep) → vmalert -dryRun으로 파싱 검증.
         run: bash tests/gates/vmalert-rules-validate.sh
+      - name: vmalert 발화 e2e (containerized replay — dryRun 미차단 "영원히 발화 못 하는 룰")
+        # 위 -dryRun은 expr 파싱만 본다 → 문법은 멀쩡한데 라이브에서 발화 0인 룰(ImageDigestDrift:
+        # push 메트릭 rollup 누락 → record 구멍 → for: 리셋)을 통과시켰다. 이 게이트가 실제 발화를 증명한다.
+        # ⚠️ bats 아님 — run-bats.sh는 tests/.ci-exclude로 docker 의존 테스트를 빼므로 죽은 커버리지가 된다.
+        run: bash tests/gates/vmalert-drift-firing-e2e.sh
       # app-shared .mts가 node strip-types(앱 레포 secret:seal 경로)에서도 실행됨을 required gate가 보장 (A.5 F1·pass3) —
       # 별도 잡이면 비-required라 무성 회귀라 gate 잡 안 스텝으로. node는 strip-types 실행용 의식적 예외(setup-bun ban 유일 예외).
       # CI는 현 LTS node 24로 실행(strip-types는 node 23.6+ 무플래그 기본). .mts 계약 하한은 여전히 node 22.18(앱 레포 secret:seal 경로).

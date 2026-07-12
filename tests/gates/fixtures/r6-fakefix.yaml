@@ -1,0 +1,31 @@
+# 픽스처(동결 — 절대 "고치지" 마라): 그럴듯하지만 **가짜인** 픽스 — rollup은 안 넣고 식 **바깥**에
+# `or absent(ghcr_latest_digest)`만 덧붙인 형태. 구멍(push 주기 후반 5분)을 "absent 가드로 메웠다"는
+# 착각을 준다. 실제로는 absent가 만드는 시리즈는 **라벨 집합이 다르다**({} vs {app,digest}) →
+# 5분마다 시리즈 정체성이 갈려 for: 20m이 여전히 리셋된다 → 지속 드리프트에도 발화 못 함.
+#
+# 용도: vmalert-drift-firing-e2e.sh의 L5(하네스 이빨 증명 ②) — 하네스가 이 가짜 픽스를 통과시키지
+# 않음을 매 실행 증명한다(진짜 픽스는 rollup으로 push 주기를 덮어 **같은 시리즈**를 연속화해야 한다).
+groups:
+  - name: ci-staleness-fixture-fakefix
+    rules:
+      - record: app:image_digest_drift
+        expr: |
+          (
+            max by (app, digest) (ghcr_latest_digest)
+            unless on (app, digest) (
+              label_replace(
+                label_replace(
+                  kube_pod_container_info{namespace="prod", image_id=~"ghcr[.]io/ukyi-app/.*"},
+                  "digest", "$1", "image_id", ".*@(sha256:[a-f0-9]+)$"
+                ),
+                "app", "$1", "image_id", ".*/([a-z0-9-]+)[@:].*"
+              )
+            )
+          )
+          or absent(ghcr_latest_digest)
+      - alert: ImageDigestDrift
+        expr: app:image_digest_drift == 1
+        for: 20m
+        labels: { severity: warning }
+        annotations:
+          summary: "fixture(fakefix) — 실행 중인 이미지가 최신 GHCR digest와 불일치: {{ $labels.app }}"
