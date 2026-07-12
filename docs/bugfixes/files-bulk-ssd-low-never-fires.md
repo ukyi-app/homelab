@@ -3,11 +3,11 @@ bugfix: files-bulk-ssd-low-never-fires
 invariant-class: bugfix
 entry-track: bug
 review-track: standard
-pipeline-stage: executing
+pipeline-stage: verification
 issue-tracker: local
 symptom: "FilesBulkSSDLow가 구조적으로 발화 불가하다 — files_data_bulk_* 는 호스트 launchd가 하루 1회(04:30) 단발 push하는데 vmalert instant 질의 룩백은 5분이라, 알림 표현식이 하루 1440분 중 5분만 보인다. 30초 간격 평가로 최대 10회 연속 참 → for: 30m(60회 필요)에 절대 도달하지 못한다. 외장 bulk SSD가 꽉 차도 이 알림은 영원히 울리지 않는다."
 red-baseline: ffa1797eb65a0540129c454ae24cbcf42bbdf0bd
-bugfix-lock: red
+bugfix-lock: green
 first-increment: [B-1]
 increments: [B-1]
 spike-1:
