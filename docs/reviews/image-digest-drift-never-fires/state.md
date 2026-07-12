@@ -62,6 +62,21 @@ BulkStorageLow·PvcDuExporterStale·AdguardRewriteReconcilerStale·FilesBackupSt
 **프로세스 갭**: r6 룰 주석에 작성자가 `⚠️ 라이브 미검증 죽은 식 → 발화 검증 필수`라고 스스로
 적어뒀으나 그 검증이 끝내 수행되지 않았다.
 
+## 게이트 이력 — 전부 통과 (2026-07-12)
+
+| 게이트 | 결과 |
+|---|---|
+| plan r1 | needs-attention 3건(P-1 high: rollup만 넣으면 KSM 장애 시 전 앱 오발화 / P-2: 하네스가 윈도 불변식 미강제 / P-3: 부정 단언이 vacuous) → 전부 Accept |
+| plan r2 | needs-attention 1건(P-3′: ConfigMap 경로 오류 + 부정 패턴이 우변 가드를 잡음 + 중간 부정 false-green) → Accept. **2라운드 캡 도달 → 인간 트리아지로 executing 진행**(잔여는 기계 루프가 fail-closed 봉쇄) |
+| structure r1 | **approve, 0 findings** — "RED 하네스·동결 픽스처가 픽스를 통과해 바이트 동일, characterization 약화 없음, scope 봉쇄" · 의도적 예외 2건(annotations 교체·docs를 scope에) 수용 |
+| release r1 | needs-attention 1건(R-1 high, conf 1.0: RED 기록의 2000자 outputTail이 symptomToken을 반토막 내 **자기 검증 불가**) → Accept |
+| release r2 | **approve, 0 findings — "Ship."** 래퍼가 하네스 산 FAIL 줄을 재출력하고 저장된 exit 상태로 종료하므로 기계 소유 flip 의미론 보존 |
+
+**stage 부기 주의**: 릴리스 승인(reviewedSha `9a33241`) 이후 `docs/reviews/<slug>/` 밖 경로를 커밋하면
+freshness 배리어가 승인을 무효화한다(플랜 문서도 예외가 아니다). 따라서 `pipeline-stage`는
+`release-gate`에 둔 채 랜딩하고, **머지 후 main에서 `done`으로 전환**한다(그 시점엔 stage=done이
+freshness 검사를 면제한다). 랜딩 결정·라이브 검증 결과는 이 파일(예외 경로)에 기록한다.
+
 ## Red-capture — seam 판정 (2026-07-12)
 
 3 후보를 스파이크로 실증하고 판정했다(전부 실제 실행 증거 기반).

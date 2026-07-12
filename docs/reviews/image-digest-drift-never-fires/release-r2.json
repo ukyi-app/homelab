@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "approve",
+  "summary": "Ship. R-1 is resolved: the RED tail contains the exact symptom token with exit 1, GREEN shows harness success with exit 0, both characterization runs remain green, ancestry/tree SHAs match, and the harness blob is unchanged. The wrapper only re-emits harness-produced FAIL lines and exits the saved harness status, so it preserves machine-owned flip semantics.",
+  "planFile": "docs/bugfixes/image-digest-drift-never-fires.md",
+  "planInDiff": null,
+  "reviewedFileCount": 22,
+  "target": "branch diff against main",
+  "reviewedSha": "9a332414687772bf6c6230e773dc242a054bfe76",
+  "reviewedTree": "731f542691989989129cce269e8c1ea088dcf64a",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [
+    "Record the round-2 approval and proceed with normal landing and post-sync verification."
+  ]
+}
