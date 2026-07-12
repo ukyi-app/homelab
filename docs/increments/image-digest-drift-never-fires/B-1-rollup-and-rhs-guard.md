@@ -1,11 +1,11 @@
 ---
 id: B-1
 title: 기록룰 좌변에 rollup 착용 + 우변 존재 가드 — ImageDigestDrift가 실제 드리프트에 발화하게 한다
-status: open
+status: done
 blocked-by: [none]
 plan: docs/bugfixes/image-digest-drift-never-fires.md
 created: 2026-07-12
-closed:
+closed: 2026-07-12
 ---
 
 ## What the fix does here
@@ -48,4 +48,12 @@ KSM 장애 시 **오늘과 동일하게 침묵**시킨다(KSM 사망은 `TargetD
 
 ## Result
 
-(닫을 때 채운다: 커밋 sha, 결과 한 줄, 이월 항목)
+**커밋 `a1f7d21`.** 회귀 게이트 L1이 RED→GREEN(firing=191), L2~L8 유지(exit 0) ·
+characterization 43/43(신규 쌍둥이 계약 단언 포함) · `make verify` rc=0 · `make verify-traps` rc=0 ·
+전체 bats 1167/0. 동결 픽스처(L4/L5/L8)·하네스 무변경.
+
+컨덕터측 code-review 3건 반영: CR-1(쌍둥이 파드 셀렉터 무가드 → bats 단언으로 봉합) ·
+CR-2(stale 운영자 문구 교체 — 의도적 예외, 플랜에 공개) · CR-3(함정 2건 traps SSOT·원장·인덱스 등재).
+룰 주석은 45줄→18줄로 압축하고 전문은 traps-detail(SSOT)로 이관.
+
+**이월 없음.** 후속 F-1~F-3은 플랜 백로그 참조.
