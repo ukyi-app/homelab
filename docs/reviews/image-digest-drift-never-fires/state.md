@@ -102,6 +102,19 @@ ArgoCD `victoria-stack` Synced/Healthy @ `a6d9c61` → r6 ConfigMap 반영 → v
 firing 중인 알림은 `Watchdog`(deadman)뿐. 가드가 정상 동작(우변 텔레메트리 존재 → 판정 수행, 드리프트
 없으므로 침묵).
 
+## 머지 후 락 상태에 대한 정직한 기록
+
+머지 **후** `bugfix-status.mjs`를 main에서 돌리면 `greenValid: false`
+("GREEN flip proof is invalid — stale/forged cache")가 뜬다. **squash 머지의 필연이지 결함이 아니다**:
+배리어 B2는 `red.sha`(`f4497d2`)와 `green.sha`(`a1f7d21`)가 **현재 HEAD에서 도달 가능**할 것을
+요구하는데(dangling sha 위조 방지), squash가 브랜치 커밋을 단일 커밋(`a6d9c61`)으로 접어버려
+그 조건이 깨진다.
+
+**증거는 그대로 남는다** — 기계가 재실행해 쓴 verify-record 2개(`bugfix-verify-red-158e7e26….json`,
+`bugfix-verify-green-d963ecb3….json`)가 커밋돼 있고, treeSha·exit 코드·symptomToken이 그 안에 있다.
+릴리스 게이트 r2는 **머지 전**(양 sha가 도달 가능하던 시점)에 ancestry/tree SHA 일치를 확인하고
+approve했다("ancestry/tree SHAs match, and the harness blob is unchanged").
+
 ## Red-capture — seam 판정 (2026-07-12)
 
 3 후보를 스파이크로 실증하고 판정했다(전부 실제 실행 증거 기반).
