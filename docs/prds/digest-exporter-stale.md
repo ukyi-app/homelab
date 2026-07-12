@@ -3,7 +3,7 @@ feature: digest-exporter-stale
 invariant-class: feature
 entry-track: feature
 review-track: full
-pipeline-stage: issues
+pipeline-stage: prd-gate
 issue-tracker: local
 prd-published: false
 skeleton-issue: []
@@ -247,9 +247,9 @@ pending**에 들어가고, `for: 10m`이 producer 주기(`*/10`)와 같아 첫 C
 
 | ID | 심각도 | 발견 | 결정 | 반영 |
 |---|---|---|---|---|
-| P-1 | high | 혼합-성공 카운터 생산 로직을 **어느 seam도 실행하지 않는다** — 합성 replay는 룰만, `sh -n`은 문법만, 라이브는 성공 경로만 증명한다. 카운터 증가를 빈-digest 검사 앞에 두면 모든 게이트를 통과하면서 US2가 조용히 깨진다 | **Accept** | Testing Decisions seam 3을 **producer 행위 seam**으로 승격 — ConfigMap에서 `run.sh` 추출 → stub `skopeo` + `curl` 페이로드 캡처로 실행 → 입력 4종(전건성공·부분실패·전건실패·zero-app)의 출력값 단언 |
-| P-2 | medium | 최초 배포 시 이력이 없어 `absent(...)`가 즉시 pending → `for:10m`이 producer 주기와 같아 **롤아웃이 원인인 거짓 페이지** 가능. 계획에 배포·롤백 순서가 없다 | **Accept(수정 수용)** | 롤아웃 순서를 계약으로 명시(슬라이스 1 = exporter+레지스트리+행위테스트 → 라이브 하트비트 확인 → 슬라이스 2 = 룰+e2e), 롤백은 역순. **Codex가 대안으로 제시한 `for:` 유예 인플레는 거부** — 발화가 T0+45분으로 밀려 Question ③에서 좁힌 15분 실명 구간이 원복되기 때문. 이 순서가 skeleton 경계를 확정 |
-| P-3 | medium | replay 매트릭스에 **`absent` 가지(하트비트 전무)** 와 **zero-app 침묵**이 없다 → `absent` 누락·`<`→`<=` 변경·거부된 zero-app 가드 추가가 계획된 레그를 통과하면서 US1/결정 ④를 위반할 수 있다 | **Accept** | 발화 e2e 레그 4 → **6**: L5(하트비트 전무 → 발화, `absent` 가지의 유일한 증명) · L6(0/0 → 무발화, 결정 ④를 락) 추가. L2를 `firing==0 AND pending==0`으로 강화. 비용 +≈70초 |
+| P-1 | high | `Open question: which seam tests mixed-success counter production?` — 혼합-성공 카운터 생산 로직을 **어느 seam도 실행하지 않는다** — 합성 replay는 룰만, `sh -n`은 문법만, 라이브는 성공 경로만 증명한다. 카운터 증가를 빈-digest 검사 앞에 두면 모든 게이트를 통과하면서 US2가 조용히 깨진다 | **Accept** | Testing Decisions seam 3을 **producer 행위 seam**으로 승격 — ConfigMap에서 `run.sh` 추출 → stub `skopeo` + `curl` 페이로드 캡처로 실행 → 입력 4종(전건성공·부분실패·전건실패·zero-app)의 출력값 단언 |
+| P-2 | medium | `Initial deployment can fire before the first heartbeat` — 최초 배포 시 이력이 없어 `absent(...)`가 즉시 pending → `for:10m`이 producer 주기와 같아 **롤아웃이 원인인 거짓 페이지** 가능. 계획에 배포·롤백 순서가 없다 | **Accept(수정 수용)** | 롤아웃 순서를 계약으로 명시(슬라이스 1 = exporter+레지스트리+행위테스트 → 라이브 하트비트 확인 → 슬라이스 2 = 룰+e2e), 롤백은 역순. **Codex가 대안으로 제시한 `for:` 유예 인플레는 거부** — 발화가 T0+45분으로 밀려 Question ③에서 좁힌 15분 실명 구간이 원복되기 때문. 이 순서가 skeleton 경계를 확정 |
+| P-3 | medium | `Open question: which seam tests first-run absence and zero-app silence?` — replay 매트릭스에 **`absent` 가지(하트비트 전무)** 와 **zero-app 침묵**이 없다 → `absent` 누락·`<`→`<=` 변경·거부된 zero-app 가드 추가가 계획된 레그를 통과하면서 US1/결정 ④를 위반할 수 있다 | **Accept** | 발화 e2e 레그 4 → **6**: L5(하트비트 전무 → 발화, `absent` 가지의 유일한 증명) · L6(0/0 → 무발화, 결정 ④를 락) 추가. L2를 `firing==0 AND pending==0`으로 강화. 비용 +≈70초 |
 
 Codex 총평: "검증된 코드베이스 전제들은 정확했고, 확정된 결정 범위 안에서 실질적으로 더 단순한 안전한
 대안은 발견되지 않았다."
