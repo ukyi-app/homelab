@@ -9,12 +9,54 @@
 # CI-safe(소스 스캔, bun/TS 단일) → run-bats.sh gate 도메인에 자동 수집.
 
 # scan-floor(30) 통과용 정상 룰 30건 + 선택적 프로브 룰 1건을 담은 룰 ConfigMap을 시드한다.
+# **생산자·레지스트리도 함께 시드**한다 — 린터는 레지스트리의 생산자 파일이 실재하고, 그 파일이 선언된
+# 메트릭을 실제로 push하며, cron 스케줄 파일이 존재할 것을 강제한다(fail-open 4구멍 중 F-3·F-4).
+# 프로덕션 레지스트리를 약화시키지 않으려고 테스트는 **--registry로 픽스처를 주입**해 격리한다.
 _seed() {
   local root="$1" name="${2:-}" expr="${3:-}" i
-  mkdir -p "$root/platform/victoria-stack/prod/rules" "$root/policy"
+  mkdir -p "$root/platform/victoria-stack/prod/rules" "$root/platform/fake/prod" "$root/scripts" "$root/policy"
   : > "$root/policy/alert-instance-stability-allowlist.txt"
   echo 'kube_pod_container_status_restarts_total   # 테스트 시드' \
     > "$root/policy/alert-instance-stability-denylist.txt"
+
+  # 생산자 픽스처 ①: 10분 크론 CronJob이 ghcr_latest_digest를 push(실 digest-exporter와 동형).
+  cat > "$root/platform/fake/prod/digest-exporter.yaml" <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: fake-digest-exporter-script }
+data:
+  run.sh: |
+    #!/bin/sh
+    OUT="${OUT}ghcr_latest_digest{app=\"$APP\",digest=\"$DIGEST\"} 1\n"
+    printf "%b" "$OUT" | curl -fsS --data-binary @- 'http://vmsingle:8428/api/v1/import/prometheus'
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: fake-digest-exporter }
+spec:
+  schedule: "*/10 * * * *"
+  jobTemplate: { spec: { template: { spec: { containers: [] } } } }
+YAML
+  # 생산자 픽스처 ②: 레포 밖(launchd) 일 1회 — files_* 3종을 push(실 backup-files-data.sh와 동형).
+  cat > "$root/scripts/fake-files-backup.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'files_backup_last_success_timestamp %s\nfiles_data_bulk_avail_bytes %s\nfiles_data_bulk_size_bytes %s\n' \
+  "$(date -u +%s)" "${avail:-0}" "${size:-0}" \
+  | curl -fsS --data-binary @- "${url}/api/v1/import/prometheus"
+SH
+  cat > "$root/registry.json" <<'JSON'
+[
+  { "metric": "ghcr_latest_digest", "producer": "platform/fake/prod/digest-exporter.yaml",
+    "schedule": { "kind": "cron", "file": "platform/fake/prod/digest-exporter.yaml" } },
+  { "metric": "files_backup_last_success_timestamp", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처 — 호스트 launchd 일 1회" } },
+  { "metric": "files_data_bulk_avail_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처 — 호스트 launchd 일 1회" } },
+  { "metric": "files_data_bulk_size_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처 — 호스트 launchd 일 1회" } }
+]
+JSON
+
   {
     echo "apiVersion: v1"
     echo "kind: ConfigMap"
@@ -35,11 +77,15 @@ _seed() {
   } > "$root/platform/victoria-stack/prod/rules/probe.yaml"
 }
 
+_lint() {   # $1=root — 픽스처 레지스트리를 주입해 린터 실행
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json"
+  echo "$output"
+}
+
 _run_probe() {   # $1=alert명 $2=expr → run 결과를 호출자가 판정
   tmp="$(mktemp -d)"
   _seed "$tmp" "$1" "$2"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp"
-  echo "$output"
+  _lint "$tmp"
 }
 
 # 동결 결함 픽스처(tests/gates/fixtures/*.yaml — 실제 역사적 버그의 expr 스냅샷)를 **무수정**으로
@@ -141,8 +187,7 @@ _seed_frozen_fixture() {   # $1=root $2=픽스처 경로
   tmp="$(mktemp -d)"
   _seed "$tmp"
   _seed_frozen_fixture "$tmp" "${BATS_TEST_DIRNAME}/gates/fixtures/r6-buggy-expr.yaml"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp"
-  echo "$output"
+  _lint "$tmp"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '\[모드 C:'
@@ -156,8 +201,7 @@ _seed_frozen_fixture() {   # $1=root $2=픽스처 경로
   tmp="$(mktemp -d)"
   _seed "$tmp"
   _seed_frozen_fixture "$tmp" "${BATS_TEST_DIRNAME}/gates/fixtures/r4-bulkssd-buggy-expr.yaml"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp"
-  echo "$output"
+  _lint "$tmp"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '\[모드 C:'
@@ -194,6 +238,88 @@ _seed_frozen_fixture() {   # $1=root $2=픽스처 경로
   [ "$status" -eq 0 ]
 }
 
+# ── 모드 C가 fail-open으로 뚫렸던 4구멍(적대 검증에서 실증) — 동결 회귀 프로브 ──
+
+@test "mode C F-1 flags a push metric hidden in a __name__ equality selector" {
+  # 리터럴 토큰 스캔은 `{__name__="m"}`을 못 본다(이름이 문자열 안) — 알림은 여전히 죽는다.
+  _run_probe NameSelectorProbe '{__name__="ghcr_latest_digest"} == 1'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[모드 C:'
+  echo "$output" | grep -q 'ghcr_latest_digest'
+}
+
+@test "mode C F-1 flags a push metric hidden in the VictoriaMetrics shorthand selector" {
+  _run_probe ShorthandSelectorProbe '{"ghcr_latest_digest"} == 1'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[모드 C:'
+}
+
+@test "mode C F-1 flags a __name__ regex selector that can match a push metric (fail-closed)" {
+  _run_probe NameRegexProbe '{__name__=~"ghcr_.*"} == 1'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[모드 C:'
+  echo "$output" | grep -q 'fail-closed'
+}
+
+@test "mode C F-1 still accepts a __name__ selector that IS wrapped in a rollup (no over-flagging)" {
+  # 정규화가 과잉 검출로 번지지 않는지 — 정당하게 감싼 형태는 통과해야 한다.
+  _run_probe WrappedNameSelectorProbe 'last_over_time({__name__="ghcr_latest_digest"}[15m]) == 1'
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+@test "mode C F-2 rejects irate() as a rollup (needs 2 samples — window holds only 1 push)" {
+  _run_probe IrateProbe 'irate(ghcr_latest_digest[10m]) > 0'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[모드 C:'
+  echo "$output" | grep -q 'irate'
+}
+
+@test "mode C F-2 rejects idelta() as a rollup (fake fix that still cannot fire)" {
+  _run_probe IdeltaProbe 'idelta(files_data_bulk_avail_bytes[1d]) > 0'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[모드 C:'
+}
+
+@test "mode C F-2 rejects a bare range selector with no rollup function" {
+  _run_probe BareRangeProbe 'ghcr_latest_digest[15m]'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[모드 C:'
+  echo "$output" | grep -q '맨 참조'
+}
+
+@test "mode C F-3 flags a new metric added to an ALREADY REGISTERED producer (metric-level completeness)" {
+  # 가장 흔한 우회 경로: 파일은 이미 등록돼 있으니 파일 단위 가드는 통과한다 → 메트릭 단위로 강제해야 한다.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  printf 'OUT="${OUT}new_digest_exporter_metric{app=\\"x\\"} 1\\n"\n' \
+    >> "$tmp/platform/fake/prod/digest-exporter.yaml"
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'new_digest_exporter_metric'
+  echo "$output" | grep -q '레지스트리에 없음'
+}
+
+@test "mode C F-4 fails when a registry cron schedule file is missing (no silent constant fallback)" {
+  # CronJob을 옮기거나 리네임하면 cron 교차검증과 생산자 발견을 동시에 우회할 수 있었다 → 부재 = FAIL.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  # 생산자(=push 스크립트)는 남기고 cron 선언만 다른 경로로 돌린다(= CronJob을 옮긴 상황).
+  sed 's#"file": "platform/fake/prod/digest-exporter.yaml"#"file": "platform/fake/prod/moved-cronjob.yaml"#' \
+    "$tmp/registry.json" > "$tmp/registry.tmp" && mv "$tmp/registry.tmp" "$tmp/registry.json"
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'moved-cronjob.yaml'
+}
+
 @test "mode C fails when a push producer is not in the registry (completeness guard)" {
   # 새 push exporter를 추가했는데 레지스트리에 메트릭을 등록하지 않으면 다음 사람이 같은 함정에 빠진다.
   tmp="$(mktemp -d)"
@@ -213,8 +339,7 @@ spec:
             - name: push
               command: ["sh", "-c", "echo 'new_thing_metric 1' | curl -fsS --data-binary @- http://vmsingle:8428/api/v1/import/prometheus"]
 YAML
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp"
-  echo "$output"
+  _lint "$tmp"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'new-exporter.yaml'
@@ -225,11 +350,9 @@ YAML
 
 @test "alert-rule guard enforces a minimum scan count (extraction collapse = fail-loud)" {
   tmp="$(mktemp -d)"
-  mkdir -p "$tmp/platform/victoria-stack/prod/rules" "$tmp/policy"
-  : > "$tmp/policy/alert-instance-stability-allowlist.txt"
-  : > "$tmp/policy/alert-instance-stability-denylist.txt"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp"
-  echo "$output"
+  _seed "$tmp"
+  rm -f "$tmp/platform/victoria-stack/prod/rules/probe.yaml"   # 룰 추출 붕괴 시뮬레이션
+  _lint "$tmp"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '스캔 룰'
@@ -239,8 +362,7 @@ YAML
   tmp="$(mktemp -d)"
   _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
   echo 'PodCrashLoopingProbe   # 테스트 면제' > "$tmp/policy/alert-instance-stability-allowlist.txt"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp"
-  echo "$output"
+  _lint "$tmp"
   rm -rf "$tmp"
   [ "$status" -eq 0 ]
 }
@@ -249,8 +371,7 @@ YAML
   tmp="$(mktemp -d)"
   _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
   echo 'PodCrashLoopingProbe' > "$tmp/policy/alert-instance-stability-allowlist.txt"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp"
-  echo "$output"
+  _lint "$tmp"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '사유 주석'
@@ -271,8 +392,7 @@ YAML
           - alert: WALVolumeFilling
             expr: '(cnpg_collector_pg_wal{value="size"} / on(namespace, pod) cnpg_collector_pg_wal{value="volume_size"}) > 0.70'
 YAML
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp"
-  echo "$output"
+  _lint "$tmp"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'PodCrashLooping'
