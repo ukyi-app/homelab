@@ -114,9 +114,6 @@ push를 보간해 **버그 룰이 통과**하는 거짓 GREEN). 그러나 **일 
 | R-2 | **`make ci`가 required gate를 재현한다는 문서화된 약속이 깨졌다** — 새 컨테이너 게이트(bulkssd)가 `make ci` 경로에 없다(이미 머지된 **드리프트 게이트도 마찬가지**). 로컬 사전 점검이 초록인데 CI에서 실패할 수 있다. | **Accept → 별건** | 정당한 지적이고 **두 게이트 모두**에 걸친다. 그러나 `Makefile`은 이 픽스의 `scope[]` 밖(런타임 행위 아님)이고, 여기서 고치면 단일 flip 표면이 흐려진다. CI는 fail-closed라 프로덕션 위험은 없다(로컬 DX 결함). | **F-4 신설**: 두 컨테이너 게이트를 `make ci`에 배선(로컬 docker 부재 시 skip 가드) + `test_make-ci-parity.bats` 강화. 별도 소형 PR |
 | R-3 | **공유 라이브러리 소비자가 1개뿐** — `tests/gates/lib/vmalert-e2e.sh`를 만들면서 드리프트 하네스는 인라인 사본을 유지했다. 두 하네스가 갈릴 자유가 있다(릴리스 룰: 실 어댑터 2개 이상 또는 Decision-Log 정당화 필요). | **Accept → Decision-Log 정당화 + 별건 이관** | 게이트가 명시적으로 허용한 경로다("record a human-approved Decision-Log justification and a separate migration/refactor follow-up"). **정당화**: 드리프트 하네스는 방금 머지된 다른 알림의 **회귀 가드**이자 이 픽스의 **characterizationCmd 구성원**이다. 이 브랜치에서 리팩터하면 (a) 단일 flip 픽스에 행위 보존 리팩터가 섞이고, (b) **보존 계약의 측정 도구 자체를 픽스 도중에 바꾸는 셈**이라 anti-cheat 표면이 넓어진다. 올바른 집은 **gated-refactor**다. | **F-5 신설**: 드리프트 하네스를 공유 lib으로 이관(gated-refactor, 행위 보존 — 두 게이트 전부 GREEN 유지가 불변식) |
 
-> ⚠️ **사용자 확인 요청(R-3)**: 게이트가 "human-approved" 정당화를 요구한다. 컨덕터 판단은 위와 같다
-> (지금 이관하지 않고 F-5로 분리). 이견이 있으면 뒤집을 수 있다.
-
 ## Follow-up backlog
 
 - **F-1**: `check-alert-rules` **모드 C** — push 메트릭을 rollup 없이 참조하면 FAIL(정적 lint).
@@ -133,6 +130,24 @@ push를 보간해 **버그 룰이 통과**하는 거짓 GREEN). 그러나 **일 
   소비자가 1개뿐이라 두 하네스가 갈릴 수 있다. **gated-refactor**(행위 보존: 두 게이트 전부 GREEN 유지).
 
 ## Review Decision Log
+
+### R-3 예외 — **사용자 승인됨** (2026-07-12)
+
+공유 seam `tests/gates/lib/vmalert-e2e.sh`의 실 어댑터가 **1개뿐**인 상태를 이 브랜치에서 허용한다.
+**사용자가 명시적으로 승인**했다(선택지: "F-5로 분리" / "지금 이관" / "추상화 제거" → **F-5로 분리** 선택).
+
+**근거**: 드리프트 하네스는 (a) 방금 머지된 다른 알림(`ImageDigestDrift`)의 **회귀 가드**이고,
+(b) 이 픽스의 **characterizationCmd 구성원**이다. 이 브랜치에서 그것을 공유 lib으로 이관하면 단일 flip
+픽스 안에 행위 보존 리팩터가 섞이고, 무엇보다 **보존 계약의 측정 도구 자체를 픽스 도중에 바꾸는 셈**이라
+anti-cheat 표면이 넓어진다. 올바른 집은 **gated-refactor**다 → **F-5**(행위 보존 불변식: 두 게이트가
+전부 GREEN 유지).
+
+### Codex Release Review — r2 트리아지
+
+| ID | Finding | Decision | Action |
+|----|---------|----------|--------|
+| R-4 | **verification.md가 R-1 이전의 옛 green.sha를 증거로 내세운다**(high) — `--verify-flip`은 재실행했으면서 문서를 갱신하지 않았다 | **Accept** | capturing-evidence 하드룰 위반이 맞다. 최종 락 상태(`green.sha` = R-1 반영본)의 기록으로 verification.md를 **재작성**하고, RED/GREEN 기록의 outputTail 원문(증상 토큰 포함)을 인용했다. 아티팩트는 손대지 않았다 |
+| R-5 | **R-3 예외가 실제 Decision Log 밖에 있고 "확인 대기"로 표기**(medium) | **Accept** | 사용자에게 명시적으로 물어 **승인 획득** → 위 "R-3 예외" 항목으로 Decision Log에 기록, pending 문구 제거, F-5 참조 |
 
 ### Codex Plan Review — r1: clean — verdict **approve**, 0 findings
 
