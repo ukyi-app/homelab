@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship this plan yet. The committed RED proof matches red.sha and fails for the intended symptom, but the proposed fix introduces an undeclared degraded-dependency paging behavior and the planned checks do not enforce their claimed invariants. No materially simpler safe fix than a left-side rollup was found.",
+  "planFile": "docs/bugfixes/image-digest-drift-never-fires.md",
+  "planInDiff": true,
+  "reviewedFileCount": 1,
+  "target": "working tree diff",
+  "reviewedSha": "382777c28016261376fdb5f3a466ac6862f7f977",
+  "reviewedTree": "2f29bf0eb08d67793dadd5fc6d2cfadc89eadc02",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 3,
+  "planFindingCount": 3,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "RHS telemetry loss becomes a second, mislabeled paging condition",
+      "body": "The plan treats a 30s scrape cadence as proof that `kube_pod_container_info` is always present. During a kube-state-metrics/scrape outage, however, the RHS disappears. The rolled-up LHS remains continuous across 10m pushes, so `unless on (app, digest)` emits every app continuously and `ImageDigestDrift` fires after 20m. The current bare LHS instead holes every cycle and never fires. This creates a new, misleading per-app paging behavior distinct from actual digest drift—the same misattribution principle used to reject an LHS `absent()` guard. L2 and L3 always provide pod data, so they do not characterize this path.",
+      "file": "docs/bugfixes/image-digest-drift-never-fires.md",
+      "line_start": 121,
+      "line_end": 121,
+      "confidence": 0.98,
+      "recommendation": "Add no-pod and missing-KSM-data characterization legs. Preserve current alert behavior with an explicit current-RHS-presence guard while still allowing differently digested pods to trigger drift; otherwise declare the additional paging behavior and route it outside the single-flip bugfix.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "medium",
+      "title": "L3 does not enforce the claimed window or for-duration invariants",
+      "body": "The committed harness does not extract or compare W, and it derives `FOR` from the mutable rule rather than asserting `20m`. Its single phantom phase places the last old exporter sample 10m before BUMP and keeps the old pod visible until roughly BUMP−4.5m. Consequently W=20m produces only about 14.5m of phantom mismatch and can pass L3 despite violating `W < for`; the cited manual 30m failure only brackets 15m versus 30m. A changed `for: 15m` can also pass. The proposed characterization regex accepts any window, so an overwide window or altered paging threshold can go GREEN and introduce false pages or faster paging.",
+      "file": "docs/bugfixes/image-digest-drift-never-fires.md",
+      "line_start": 118,
+      "line_end": 120,
+      "confidence": 0.97,
+      "recommendation": "Pin `for: 20m` and the selected `15m` range in characterization, parse W/push/for and assert `push <= W < for`, and add a worst-order overwide-window witness that demonstrably fails at the upper boundary.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "medium",
+      "title": "The planned negative characterization never reads the rule file",
+      "body": "The replacement negative assertion omits `\"$R\"`. `grep` therefore reads stdin; under noninteractive Bats execution it normally exits nonzero at EOF, making `[ \"$status\" -ne 0 ]` pass regardless of the rule contents. The line described as the key strengthening is therefore vacuous and no longer checks the broken `max by (app)` form.",
+      "file": "docs/bugfixes/image-digest-drift-never-fires.md",
+      "line_start": 145,
+      "line_end": 145,
+      "confidence": 1,
+      "recommendation": "Pass `\"$R\"` to the negative grep. Prefer extracting the `app:image_digest_drift` expression with `yq` first so comments or unrelated expressions cannot satisfy either assertion.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Revise the single-flip contract and characterization for missing RHS telemetry.",
+    "Make the W/for bounds machine-enforced rather than relying on the 15m-versus-30m observation.",
+    "Correct the proposed Bats command before implementation."
+  ]
+}
