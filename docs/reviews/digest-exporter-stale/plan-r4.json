@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship. P-2 remains mechanically unresolved: the combined-branch release approval cannot authorize the producer-only PR-A under the mandatory landing freshness gate. No other new critical issue was found within scope, and no simpler safe alternative exists under the confirmed single-flow constraint.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": true,
+  "reviewedFileCount": 5,
+  "target": "branch diff against main",
+  "reviewedSha": "906f7867285bf0025472b767726427cb711c51cf",
+  "reviewedTree": "e47b260a17198e6b5a38098fd5920876b8c8a95b",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "critical",
+      "title": "P-2 remains unresolved: the combined approval cannot land PR-A",
+      "body": "The plan runs the sole release gate against the combined slice-1-plus-slice-2 HEAD, then asks `landing` to create PR-A containing only slice 1. Landing must run `--gate-check` on the current branch, while release freshness requires the approved `reviewedSha` to remain its ancestor and permits only later review bookkeeping. A producer-only PR-A must either use an earlier/sibling tip that excludes the reviewed SHA or remove slice 2 after approval; both fail closed. The normal PR path also publishes the current branch rather than selecting commits. Following this plan therefore requires bypassing the gate or makes PR-A impossible, eliminating the producer-first heartbeat boundary and collapsing P-2 back toward a single landing.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 160,
+      "line_end": 169,
+      "confidence": 0.99,
+      "recommendation": "Attest each deployable branch shape separately: run verification and release approval for finalized PR-A, merge and verify the heartbeat, then construct PR-B on updated `main` and repeat verification/release. If one flow and one pre-landing release gate are mandatory, first extend and test the landing/status tooling with a checkpoint model that explicitly attests both exact PR tips.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Revise the rollout contract so PR-A has a gate-valid landing transition, then rerun the focused P-2 review."
+  ]
+}
