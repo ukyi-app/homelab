@@ -39,12 +39,12 @@ KSM 장애 시 **오늘과 동일하게 침묵**시킨다(KSM 사망은 `TargetD
 
 ## Acceptance
 
-- [ ] `bash tests/gates/vmalert-drift-firing-e2e.sh` — L1이 RED→GREEN, **L2~L8 GREEN 유지**, exit 0
-- [ ] characterizationCmd 전건 GREEN
-- [ ] 변경된 non-test 경로가 전부 `scope[]`(= r6-ci-staleness.yaml) 안
-- [ ] L4/L5/L8 결함 픽스처는 **동결** — 절대 갱신하지 않는다(갱신 = 하네스 이빨 제거 = anti-cheat)
-- [ ] `for: 20m` 무변경, 우변 파드 셀렉터 무변경, 새 recording rule 없음
-- [ ] 테스트 약화 0(skip/xfail 없음, 단언 완화 없음, 증상 특수처리 없음)
+- [x] `bash tests/gates/vmalert-drift-firing-e2e.sh` — L1이 RED→GREEN, **L2~L8 GREEN 유지**, exit 0
+- [x] characterizationCmd 전건 GREEN
+- [x] 변경된 non-test 경로가 전부 `scope[]` 안 (행위 표면 = r6-ci-staleness.yaml 단일 · docs 3개는 레포 규약상 함정 등재로 scope에 명시)
+- [x] L4/L5/L8 결함 픽스처는 **동결** — 절대 갱신하지 않는다(갱신 = 하네스 이빨 제거 = anti-cheat)
+- [x] `for: 20m` 무변경, 우변 파드 셀렉터 무변경, 새 recording rule 없음
+- [x] 테스트 약화 0(skip/xfail 없음, 단언 완화 없음, 증상 특수처리 없음)
 
 ## Result
 

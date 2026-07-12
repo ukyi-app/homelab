@@ -3,7 +3,7 @@ bugfix: image-digest-drift-never-fires
 invariant-class: bugfix
 entry-track: bug
 review-track: full
-pipeline-stage: executing
+pipeline-stage: structure-gate
 issue-tracker: local
 symptom: "ImageDigestDrift 알림이 60일간 한 번도 발화하지 않았다 — 드리프트 상태가 실제로 발생했는데도(app:image_digest_drift에 page 81샘플·trip-mate-api 84샘플) 통보가 0건이다. 배포 드리프트 감시견이 fail-open으로 죽어 있다."
 red-baseline: f4497d23d5bc44e254dca736382d0472b8633ef5
