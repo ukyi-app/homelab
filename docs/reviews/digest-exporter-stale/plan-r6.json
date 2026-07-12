@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship yet. P-2 remains unresolved because the 780s bound excludes an already-running legacy Job. No separate new critical issue or materially simpler complete approach was found.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": true,
+  "reviewedFileCount": 7,
+  "target": "branch diff against main",
+  "reviewedSha": "0426d1f1e6f6f1f1b8c7cd49b788f58164b74f83",
+  "reviewedTree": "da2fcbb4d65844b0dd86a7699e449cc8d5e2d3fb",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "P-2 remains unresolved: a legacy Forbid Job escapes the bound",
+      "body": "`activeDeadlineSeconds` is added only to `CronJob.spec.jobTemplate`; Kubernetes does not retrofit template changes onto existing Jobs. If a pre-change Job is active during the single landing, it retains the old unbounded commands, while `concurrencyPolicy: Forbid` skips every new Job carrying the deadline. The manifest-only preflight and synthetic L7 still pass, but production can remain heartbeat-free past `for: 15m` and emit the rollout-only page P-2 was meant to prevent.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 175,
+      "line_end": 183,
+      "confidence": 0.99,
+      "recommendation": "Specify a declarative transition that handles an already-active legacy Job, such as a tested `Replace` policy, versioned CronJob rollover, or automated cleanup before rule activation. Make preflight lock that transition and add a rollout test beginning with an active pre-change Job.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Revise the existing-Job transition contract and L7/preflight coverage.",
+    "Rerun the focused P-2 review."
+  ]
+}
