@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship this plan yet. The partial-failure producer logic is not behavior-tested, initial deployment can page before the first heartbeat, and key fail-closed/zero-app contracts are absent from the replay matrix. Verified codebase premises were otherwise accurate; no materially simpler safe approach was found within the confirmed decisions.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": true,
+  "reviewedFileCount": 1,
+  "target": "working tree diff",
+  "reviewedSha": "b8353c1cdcc08f9329eafdc5d397cf5b15ad5b96",
+  "reviewedTree": "9431822be0694b111d42789b579b4749b6bd274e",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 3,
+  "planFindingCount": 3,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Open question: which seam tests mixed-success counter production?",
+      "body": "The replay injects synthetic metrics, while the proposed `run.sh` gate only parses/checks its shape. Neither seam executes the exporter with mixed `skopeo` outcomes. For example, incrementing `apps_scraped` before the empty-digest check would still pass `sh -n`, registry checks, the synthetic firing replay, and an all-success live visibility check, but real partial and total GHCR failures would report `scraped == configured` and User Story 2 would remain silently broken.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 157,
+      "line_end": 162,
+      "confidence": 0.99,
+      "recommendation": "Execute the extracted ConfigMap script under a controlled PATH with stubbed `skopeo` and a `curl` payload capture. Assert exact configured/scraped/heartbeat output for all-success, mixed-failure, all-failure, and zero-app inputs.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "medium",
+      "title": "Initial deployment can fire before the first heartbeat",
+      "body": "The new series has no history on first deployment, so `absent(...)` starts pending as soon as vmalert loads the rule. Its `for: 10m` equals the producer's `*/10` period. The rule and exporter currently share one kustomization with no sync-wave or readiness ordering; if the rule reloads just after an old-script run, the first new CronJob has almost no completion margin before the alert fires. Scheduling, image-start, or GHCR latency can therefore produce a rollout-only `DigestExporterStale` page. The plan defines neither a safe skeleton/deployment sequence nor rollback ordering.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 123,
+      "line_end": 128,
+      "confidence": 0.96,
+      "recommendation": "Specify an ordered rollout and rollback contract: deploy and verify the producer's first heartbeat before enabling the rule, then reverse that order on rollback. If this must remain one GitOps release, add an explicit initialization grace that exceeds one schedule plus worst-case job startup/runtime and test it.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "medium",
+      "title": "Open question: which seam tests first-run absence and zero-app silence?",
+      "body": "The four stated replay legs cover an old/stale heartbeat, a normal heartbeat, a frozen bare-expression defect, and the positive `scraped < configured` case. They do not explicitly cover a heartbeat that never existed or aged out of `[2h]`, nor an emitted `configured=0, scraped=0` or equal-count healthy state. Omitting the `absent` branch, changing `<` to `<=`, or adding the explicitly rejected zero-app guard could therefore satisfy the planned legs while violating User Story 1 or the confirmed zero-app decision.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 166,
+      "line_end": 169,
+      "confidence": 0.97,
+      "recommendation": "Add replay legs for no heartbeat samples producing `DigestExporterStale`, equal nonzero counts producing no scrape alert, and explicit 0/0 samples producing no scrape alert. Assert both firing and pending absence on healthy legs.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Add an executable mixed-outcome producer test.",
+    "Define the structure-gate skeleton and safe producer-before-rule rollout/rollback.",
+    "Expand the replay matrix with absent-heartbeat and equal/zero-count legs."
+  ]
+}
