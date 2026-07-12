@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: P-2 still depends on an unenforced ≈12-minute bound, and L7 does not exercise that bound. No separate new critical issue was found, and no materially simpler safe single-landing alternative is established.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": true,
+  "reviewedFileCount": 6,
+  "target": "branch diff against main",
+  "reviewedSha": "24bbc2248070fb4f0dc614b7066881b38968b25c",
+  "reviewedTree": "9fc01a9fc6809818248914b6fc27ed29f2b50eed",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "P-2 remains unresolved: the bootstrap bound is neither enforced nor locked",
+      "body": "The claimed upper bound includes approximate scheduling, image-start, sequential `skopeo`, and push durations. The current CronJob has `concurrencyPolicy: Forbid`, no starting or active deadline, a dynamic `APPS` loop, and no explicit `skopeo` or `curl` timeout. An existing or first Job can therefore exceed 15 minutes, allowing the initial `absent(...)` state to fire before an eventual heartbeat. L7 injects at +10 minutes, earlier than the plan's own ≈12-minute case; for example, `for: 11m` would pass L7 but fire before a +12-minute heartbeat. Therefore the rollout false page is not structurally impossible.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 166,
+      "line_end": 183,
+      "confidence": 0.99,
+      "recommendation": "Define an enforceable schedule-to-heartbeat bound below 15 minutes using whole-Job and command deadlines, including handling for an already-active `Forbid` Job. Derive the preflight from those contracts, then place L7's sample at the enforced latest arrival, prove pending existed beforehand, replay beyond the firing boundary, and assert zero firing.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Revise the bootstrap latency contract and L7 boundary scenario.",
+    "Rerun the focused P-2 review."
+  ]
+}
