@@ -17,7 +17,7 @@
     "sha": "f4497d23d5bc44e254dca736382d0472b8633ef5"
   },
   "green": {
-    "sha": "499be06f32b26acb07f4983175ca1d76b67e6e69"
+    "sha": "a1f7d21c3dfe1954be6f5e51431974484fdf60ba"
   },
   "notes": "reproCmd 미선언(의도적 waive): 원본 repro는 라이브 클러스터 PromQL 질의인데, 클러스터는 머지+ArgoCD 싱크 전까지 옛 룰을 계속 돌린다 — green.sha 워크트리에서 돌려도 여전히 재현되므로 락에 넣으면 거짓 실패가 된다. 증상은 hermetic 회귀 테스트 L1이 대신 고정한다. 하네스는 매 실행 자기 이빨을 증명한다(L4 버그 픽스처·L5 가짜 픽스 거부, L6 대조 알림 발화). | scope[] 주석: 유일한 **행위 표면**은 r6-ci-staleness.yaml이다. 나머지 3개는 런타임 행위가 없는 **문서**(레포 규약상 새 함정은 docs/traps-detail.md SSOT + docs/traps.md 원장 + AGENTS.md 인덱스에 등재해야 하며 make verify-traps가 강제한다) — B4 배리어가 non-test 경로를 기계적으로 검사하므로 명시적으로 선언한다."
 }
