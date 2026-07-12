@@ -1,0 +1,28 @@
+# 픽스처(동결 — 절대 "고치지" 마라): r6 record `app:image_digest_drift`의 **결함 expr** 스냅샷.
+# push 메트릭 ghcr_latest_digest(10분 주기)를 rollup 없이 맨 참조 → vmalert instant 질의 룩백(5m)을
+# 넘어서는 매 주기 후반 5분간 시리즈가 사라진다 → record에 구멍 → for: 20m pending이 리셋 → 영구 미발화.
+#
+# 용도: vmalert-drift-firing-e2e.sh의 L4(하네스 이빨 증명 ①) — 지속 드리프트를 먹여도 이 expr은 발화하지
+# 못함을 매 실행 증명한다. 이게 "발화 없음"으로 나와야 하네스가 버그를 실제로 감지할 능력이 있는 것이다.
+# (배포 룰이 고쳐진 뒤에도 이 픽스처는 그대로 결함 상태로 남는다 — 하네스의 음성 기준선.)
+groups:
+  - name: ci-staleness-fixture-buggy
+    rules:
+      - record: app:image_digest_drift
+        expr: |
+          max by (app, digest) (ghcr_latest_digest)
+          unless on (app, digest) (
+            label_replace(
+              label_replace(
+                kube_pod_container_info{namespace="prod", image_id=~"ghcr[.]io/ukyi-app/.*"},
+                "digest", "$1", "image_id", ".*@(sha256:[a-f0-9]+)$"
+              ),
+              "app", "$1", "image_id", ".*/([a-z0-9-]+)[@:].*"
+            )
+          )
+      - alert: ImageDigestDrift
+        expr: app:image_digest_drift == 1
+        for: 20m
+        labels: { severity: warning }
+        annotations:
+          summary: "fixture(buggy) — 실행 중인 이미지가 최신 GHCR digest와 불일치: {{ $labels.app }}"

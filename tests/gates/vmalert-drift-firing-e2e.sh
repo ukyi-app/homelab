@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# vmalert **발화** e2e(컨테이너, 배포 버전) — 룰이 "파싱된다"가 아니라 "실제로 발화한다"를 증명한다.
+# 형제 게이트 vmalert-rules-validate.sh(-dryRun)는 expr **파싱**만 본다 → 문법은 멀쩡한데 라이브에서
+# 영원히 발화하지 못하는 룰(ImageDigestDrift: push 메트릭 rollup 누락 → record 구멍 → for: 리셋,
+# 라이브 60일 발화 0)을 통과시킨다. 이 게이트가 그 갭을 닫는다.
+#
+# 설계:
+#  - 룰은 **배포 ConfigMap에서 매 실행 바이트 그대로 추출**(픽스처 복제 금지 → 드리프트 0). for:는 불변.
+#  - 버전/주기/룩백은 전부 **매니페스트에서 파생**(하드코딩 0): vmalert·vmsingle 이미지 태그,
+#    --evaluationInterval, --datasource.queryStep(미지정=vmalert 기본 5m), digest-exporter 크론.
+#  - vmsingle에 합성 시계열을 백필하고 vmalert **replay**로 시간을 앞으로 감아 ALERTS를 remoteWrite시킨다.
+#  - ⚠️ naive replay는 **거짓 GREEN**이다: replay는 /api/v1/query_range를 쓰고 VM이 10분 간격 push를
+#    연속 보간해버려 버그 룰조차 발화한다(실증됨). 반드시 datasource URL에 ?max_lookback=<queryStep>을
+#    붙여 **라이브 instant 질의 룩백**을 복원해야 증상이 재현된다.
+#  - 클러스터 접근 0(hermetic). 외부 호출은 이미지 pull뿐. docker는 러너 기본(형제 e2e 선례).
+#
+# 판정 레그:
+#   L1 지속 드리프트   → ImageDigestDrift **발화해야** 함        (RED 락: 버그 상태에선 실패)
+#   L2 드리프트 없음   → ImageDigestDrift 시리즈 **없어야** 함   (오발화 금지)
+#   L3 phantom-drift   → bump 수렴 후 **발화 금지**              (rollup 윈도 과대 → 구 digest 부활 오발화 차단)
+#   L4 결함 픽스처     → 발화 **부재**                            (하네스 이빨 ①: 버그를 실제로 감지함)
+#   L5 가짜픽스 픽스처 → 발화 **부재**                            (하네스 이빨 ②: 가짜 픽스 불통과)
+#   L6 ArgoCDOutOfSync → 발화 **존재**                            (하네스 생존: 발화 못 하는 하네스가 아님)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+STACK="$ROOT/platform/victoria-stack/prod"
+RULES_CM="$STACK/rules/r6-ci-staleness.yaml"
+FIXTURES="$ROOT/tests/gates/fixtures"
+GEN="$ROOT/tests/gates/vmalert-drift-gen.py"
+START_EPOCH="$(date +%s)"
+
+# ── 1) 배포 매니페스트에서 파라미터 파생(하드코딩 금지 — 형제 vmalert-rules-validate.sh 관례) ────────
+VA_VER="$(grep -oE 'victoriametrics/vmalert:v[0-9.]+' "$STACK/vmalert.yaml" | head -1 | cut -d: -f2)"
+VM_VER="$(grep -oE 'victoriametrics/victoria-metrics:v[0-9.]+' "$STACK/vmsingle.yaml" | head -1 | cut -d: -f2)"
+[ -n "$VA_VER" ] && [ -n "$VM_VER" ] || { echo "이미지 버전 추출 실패(vmalert/vmsingle)"; exit 1; }
+
+# ⚠️ `set -e`: 미지정 플래그는 grep이 1로 끝난다 → 대입이 스크립트를 죽인다. `|| true`로 기본값 분기 보존.
+EVAL="$(grep -oE -- '--evaluationInterval=[0-9a-z]+' "$STACK/vmalert.yaml" | head -1 | cut -d= -f2 || true)"
+[ -n "$EVAL" ] || EVAL=1m # vmalert 기본
+# vmalert instant 질의의 룩백 = -datasource.queryStep (미지정 시 vmalert 기본 5m). 이게 버그의 핵심 상수다.
+LOOKBACK="$(grep -oE -- '--datasource\.queryStep=[0-9a-z]+' "$STACK/vmalert.yaml" | head -1 | cut -d= -f2 || true)"
+[ -n "$LOOKBACK" ] || LOOKBACK=5m # vmalert 기본
+# push 주기 = digest-exporter CronJob 크론의 분 필드(*/N).
+CRON="$(yq 'select(.kind=="CronJob") | .spec.schedule' "$STACK/digest-exporter.yaml" | head -1)"
+PUSH_MIN="$(printf '%s' "$CRON" | cut -d' ' -f1 | grep -oE '[0-9]+$' || true)"
+case "$CRON" in '*/'*) : ;; *) echo "digest-exporter 크론이 */N 형식이 아님: $CRON"; exit 1 ;; esac
+[ -n "$PUSH_MIN" ] || { echo "push 주기 추출 실패: $CRON"; exit 1; }
+
+to_s() { # 30s|5m|2h → 초
+  case "$1" in
+    *s) printf '%s' "${1%s}" ;;
+    *m) printf '%s' "$(( ${1%m} * 60 ))" ;;
+    *h) printf '%s' "$(( ${1%h} * 3600 ))" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+EVAL_S="$(to_s "$EVAL")"
+LOOKBACK_S="$(to_s "$LOOKBACK")"
+PUSH_S=$(( PUSH_MIN * 60 ))
+SCRAPE_S=30 # KSM scrape 간격(replay step의 정수배 — 그리드 정렬)
+
+# ── 2) 배포 ConfigMap에서 룰 바이트 그대로 추출(매 실행 재추출 → 픽스처 드리프트 0) ─────────────────
+TMP="$(mktemp -d)"
+NET="r6drift-e2e-net-$$"
+CONTAINERS=""
+cleanup() {
+  for c in $CONTAINERS; do docker rm -f "$c" >/dev/null 2>&1 || true; done
+  docker network rm "$NET" >/dev/null 2>&1 || true
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
+
+yq '.data["r6.yaml"]' "$RULES_CM" > "$TMP/r6-deployed.yaml"
+[ -s "$TMP/r6-deployed.yaml" ] || { echo "룰 추출 실패: $RULES_CM"; exit 1; }
+cp "$FIXTURES/r6-buggy-expr.yaml" "$TMP/r6-buggy.yaml"
+cp "$FIXTURES/r6-fakefix.yaml" "$TMP/r6-fakefix.yaml"
+
+# fail-closed: 하네스가 겨냥하는 룰/레코드가 실제로 존재하는지(리네임 시 무성 무측정 방지)
+for want in 'record: app:image_digest_drift' 'alert: ImageDigestDrift' 'alert: ArgoCDOutOfSync'; do
+  grep -q "$want" "$TMP/r6-deployed.yaml" || { echo "배포 룰에 '$want' 부재 — 하네스가 아무것도 측정하지 않는다"; exit 1; }
+done
+FOR="$(yq '.groups[].rules[] | select(.alert=="ImageDigestDrift") | .for' "$TMP/r6-deployed.yaml" | head -1)"
+FOR_S="$(to_s "$FOR")"
+
+# ── 3) 시간창(now 기준 상대, push/scrape 간격의 정수배로 정렬 → 결정성) ─────────────────────────────
+# 파드는 exporter보다 **먼저** 새 digest로 전환된다(라이브 순서: 머지 → ArgoCD sync(수분) → exporter는
+# 다음 크론 폴링에서야 새 digest를 push). POD_LEAD = 마지막 구-digest push 1분 뒤 전환 = 최악(가장 긴)
+# phantom 창. 이 값이 룩백보다 커야 구 파드 시리즈의 staleness가 bump 전에 만료돼 레그가 실제로 문다.
+POD_LEAD=$(( PUSH_S - 60 ))
+# 픽스처 산술 preflight — 파생 파라미터가 바뀌어 레그가 무의미해지면 조용히 통과시키지 말고 즉시 실패.
+[ "$LOOKBACK_S" -lt "$PUSH_S" ] || { echo "룩백($LOOKBACK) ≥ push 주기(${PUSH_MIN}m) — 구멍이 생기지 않는다(버그 전제 소멸). 레그 산술 재설계 필요"; exit 1; }
+[ "$POD_LEAD" -gt "$LOOKBACK_S" ] || { echo "POD_LEAD(${POD_LEAD}s) ≤ 룩백($LOOKBACK) — L3 phantom 레그가 이빨을 잃는다. 픽스처 산술 재설계 필요"; exit 1; }
+[ "$PUSH_S" -lt "$FOR_S" ] || { echo "push 주기(${PUSH_MIN}m) ≥ for:($FOR) — 어떤 rollup 윈도도 안전대가 없다. 룰 재설계 필요"; exit 1; }
+[ $(( FOR_S % EVAL_S )) -eq 0 ] || { echo "for:($FOR)가 evaluationInterval($EVAL)의 정수배가 아님 — 발화 경계가 비결정적"; exit 1; }
+
+NOW="$(date +%s)"
+T_END=$(( NOW / PUSH_S * PUSH_S ))   # push 그리드 정렬
+DATA_START=$(( T_END - 3 * 3600 ))   # 백필 3h(룩백 워밍업 여유 포함)
+RP_FROM=$(( T_END - 2 * 3600 ))      # replay 2h
+RP_TO=$(( T_END - 300 ))             # 데이터 끝보다 앞 — 끝단 경계 회피
+BUMP=$(( T_END - 3600 ))             # phantom: exporter가 새 digest를 처음 push(= replay 60분 지점)
+POD_SWITCH=$(( BUMP - POD_LEAD ))    # 파드는 그보다 POD_LEAD 앞서 전환
+DRIFT_MIN=$(( (RP_TO - RP_FROM) / 60 ))
+
+iso() { python3 -c 'import datetime,sys;print(datetime.datetime.fromtimestamp(int(sys.argv[1]),datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$1"; }
+
+echo "[params] vmalert=$VA_VER vmsingle=$VM_VER eval=$EVAL lookback=$LOOKBACK(queryStep) push=${PUSH_MIN}m for=$FOR"
+echo "[window] backfill $(iso "$DATA_START") .. $(iso "$T_END") | replay $(iso "$RP_FROM") .. $(iso "$RP_TO") (${DRIFT_MIN}m)"
+
+docker network create "$NET" >/dev/null
+
+# ── 4) 레그 실행기: vmsingle 기동 → 합성 백필 → vmalert replay → ALERTS 질의 ────────────────────────
+BASE=""
+replay() { # $1=label $2=rules-file $3=scenario
+  local label="$1" rules="$2" scenario="$3" vm port ready
+  vm="r6drift-e2e-$label-$$"
+  CONTAINERS="$CONTAINERS $vm"
+  docker run -d --name "$vm" --network "$NET" -p 127.0.0.1:0:8428 \
+    "victoriametrics/victoria-metrics:${VM_VER}" \
+    --storageDataPath=/storage --retentionPeriod=100y --httpListenAddr=:8428 \
+    --dedup.minScrapeInterval="${SCRAPE_S}s" >/dev/null
+  port="$(docker port "$vm" 8428/tcp | head -1 | sed 's/.*://')"
+  BASE="http://127.0.0.1:${port}"
+  ready=0
+  for _ in $(seq 60); do
+    if curl -sf "$BASE/health" >/dev/null 2>&1; then ready=1; break; fi
+    sleep 0.5
+  done
+  [ "$ready" = 1 ] || { echo "vmsingle($label) not ready"; docker logs "$vm" 2>&1 | tail -20; exit 1; }
+
+  python3 "$GEN" "$scenario" "$DATA_START" "$T_END" "$PUSH_S" "$SCRAPE_S" "$BUMP" "$POD_SWITCH" > "$TMP/$label.jsonl"
+  curl -sf -X POST "$BASE/api/v1/import" --data-binary "@$TMP/$label.jsonl"
+  curl -sf -X POST "$BASE/internal/force_flush" >/dev/null
+  # 백필 sanity: 임포트가 조용히 비었으면 모든 레그가 거짓 통과한다(fail-closed).
+  [ "$(promql "count(count_over_time(ghcr_latest_digest[4h]))")" -ge 1 ] || { echo "백필 sanity 실패($label): ghcr_latest_digest 시리즈 0"; exit 1; }
+  [ "$(promql "count(count_over_time(kube_pod_container_info[4h]))")" -ge 1 ] || { echo "백필 sanity 실패($label): kube_pod_container_info 시리즈 0"; exit 1; }
+
+  # ⚠️ ?max_lookback=<queryStep> — 이게 없으면 replay가 query_range 보간으로 구멍을 메워 거짓 GREEN이 된다.
+  # ⚠️ 체이닝 레이스(비결정성의 유일한 원천): alert 룰은 record 룰이 remoteWrite한 시리즈를 **query_range
+  #    1회**로 읽는다. record 샘플이 그 시점에 아직 flush 전이면 결과가 통째로 비어 ALERTS=0 → 버그가 아닌데도
+  #    RED로 보이는 거짓 실패(실측함). vmalert 문서 요구대로 rulesDelay ≥ flushInterval을 **넉넉히**(8×) 준다.
+  docker run --rm --network "$NET" -v "$TMP:/rules:ro" \
+    "victoriametrics/vmalert:${VA_VER}" \
+    --rule="/rules/$(basename "$rules")" \
+    --datasource.url="http://${vm}:8428/?max_lookback=${LOOKBACK}" \
+    --remoteWrite.url="http://${vm}:8428" \
+    --remoteWrite.flushInterval=500ms \
+    --notifier.blackhole \
+    --evaluationInterval="$EVAL" \
+    --replay.timeFrom="$(iso "$RP_FROM")" \
+    --replay.timeTo="$(iso "$RP_TO")" \
+    --replay.disableProgressBar \
+    --replay.rulesDelay=4s \
+    --loggerLevel=WARN >/dev/null
+
+  # remoteWrite flush를 눌러 판정 전에 ALERTS가 확실히 질의 가능해지도록(rulesDelay + force_flush).
+  curl -sf -X POST "$BASE/internal/force_flush" >/dev/null
+  sleep 2
+  curl -sf -X POST "$BASE/internal/force_flush" >/dev/null
+  # 하네스 무결성: record 룰 결과가 datasource에 실제로 안착했는지. 0이면 룰 판정이 아니라 **하네스 고장**
+  # (체이닝 레이스)이다 — 조용한 거짓 RED로 새지 않도록 여기서 크게 실패시킨다.
+  RECORD_SAMPLES="$(promql "sum(count_over_time(app:image_digest_drift[4h]))")"
+}
+
+promql() { # $1=query → 스칼라(결과 없으면 0)
+  curl -sfG "$BASE/api/v1/query" --data-urlencode "query=$1" \
+    | python3 -c 'import json,sys;r=json.load(sys.stdin)["data"]["result"];print(int(float(r[0]["value"][1])) if r else 0)'
+}
+firing()  { promql "sum(count_over_time(ALERTS{alertname=\"$1\",alertstate=\"firing\"}[4h]))"; }
+pending() { promql "sum(count_over_time(ALERTS{alertname=\"$1\",alertstate=\"pending\"}[4h]))"; }
+series()  { promql "count(count_over_time(ALERTS{alertname=\"$1\"}[4h]))"; }
+
+FAILED=0
+RECORD_SAMPLES=0
+fail() { echo "FAIL $*" >&2; FAILED=$(( FAILED + 1 )); }
+pass() { echo "PASS $*"; }
+# 지속 드리프트를 먹인 레그에서 record 룰 샘플이 0이면 그건 룰 판정이 아니라 하네스 고장이다
+# (체이닝 레이스 = record가 flush되기 전에 alert 룰이 query_range 1회로 읽어 빈 결과 → 조용한 거짓 RED).
+require_record() {
+  [ "$RECORD_SAMPLES" -gt 0 ] || {
+    echo "HARNESS FAULT ($1): app:image_digest_drift record produced 0 samples under sustained drift — 룰 판정 불가(record→alert 체이닝 레이스 또는 record 자체 사망). rulesDelay/flushInterval 확인." >&2
+    exit 2
+  }
+}
+
+# ── L1(RED 락) + L6(하네스 생존): 지속 드리프트 + 배포 룰 ───────────────────────────────────────────
+replay l1-drift "$TMP/r6-deployed.yaml" drift
+require_record L1
+F1="$(firing ImageDigestDrift)"; P1="$(pending ImageDigestDrift)"
+F6="$(firing ArgoCDOutOfSync)"
+echo "  [L1] deployed rules + sustained drift → record=$RECORD_SAMPLES firing=$F1 pending=$P1"
+if [ "$F1" -gt 0 ]; then
+  pass "L1 ImageDigestDrift fired under ${DRIFT_MIN}m of sustained drift (firing samples=$F1)"
+else
+  fail "L1 ImageDigestDrift did not fire despite ${DRIFT_MIN} minutes of sustained drift (firing=0, pending=$P1) — record rule reads the ${PUSH_MIN}m push metric without a rollup, so the series holes out past the ${LOOKBACK} instant-query lookback and the for: ${FOR} hold never accumulates"
+fi
+echo "  [L6] deployed rules + same run → ArgoCDOutOfSync firing=$F6"
+if [ "$F6" -gt 0 ]; then
+  pass "L6 harness is alive — ArgoCDOutOfSync(for:15m) fired in the same replay (firing samples=$F6)"
+else
+  fail "L6 harness is DEAD — ArgoCDOutOfSync did not fire either; every other leg is meaningless"
+fi
+docker rm -f "r6drift-e2e-l1-drift-$$" >/dev/null 2>&1 || true
+
+# ── L2(음성 대조): 드리프트 없음 ────────────────────────────────────────────────────────────────────
+replay l2-nodrift "$TMP/r6-deployed.yaml" nodrift
+S2="$(series ImageDigestDrift)"
+echo "  [L2] deployed rules + no drift → record=$RECORD_SAMPLES ALERTS series=$S2"
+if [ "$S2" -eq 0 ]; then pass "L2 no false ImageDigestDrift when the running digest matches latest"
+else fail "L2 ImageDigestDrift alert series appeared with zero drift (series=$S2) — false positive"; fi
+docker rm -f "r6drift-e2e-l2-nodrift-$$" >/dev/null 2>&1 || true
+
+# ── L3(phantom-drift): bump 수렴 후 오발화 금지 ─────────────────────────────────────────────────────
+replay l3-phantom "$TMP/r6-deployed.yaml" phantom
+F3="$(firing ImageDigestDrift)"; P3="$(pending ImageDigestDrift)"
+echo "  [L3] deployed rules + coherent image bump → record=$RECORD_SAMPLES firing=$F3 pending=$P3"
+if [ "$F3" -eq 0 ]; then pass "L3 no phantom page after a coherent image bump (pending=$P3, firing=0)"
+else fail "L3 phantom drift paged after a coherent image bump (firing=$F3) — the rollup window resurrects the pre-bump digest for longer than for: ${FOR}; the window must be < for: (and ≥ the ${PUSH_MIN}m push period)"; fi
+docker rm -f "r6drift-e2e-l3-phantom-$$" >/dev/null 2>&1 || true
+
+# ── L4(하네스 이빨 ①): 결함 expr 픽스처는 지속 드리프트에도 발화 못 함 ──────────────────────────────
+replay l4-buggy "$TMP/r6-buggy.yaml" drift
+require_record L4
+F4="$(firing ImageDigestDrift)"; P4="$(pending ImageDigestDrift)"
+echo "  [L4] fixtures/r6-buggy-expr.yaml + sustained drift → record=$RECORD_SAMPLES firing=$F4 pending=$P4"
+if [ "$F4" -eq 0 ] && [ "$P4" -gt 0 ]; then pass "L4 harness has teeth — the frozen buggy expr stays stuck in pending (pending=$P4, firing=0)"
+elif [ "$F4" -gt 0 ]; then fail "L4 the frozen buggy expr FIRED (firing=$F4) — the harness is interpolating the push metric (false GREEN); check ?max_lookback on the datasource URL"
+else fail "L4 the frozen buggy expr produced no alert state at all (pending=0) — the synthetic drift never reached the rule; harness is measuring nothing"; fi
+docker rm -f "r6drift-e2e-l4-buggy-$$" >/dev/null 2>&1 || true
+
+# ── L5(하네스 이빨 ②): rollup 밖 `or absent()` 가짜 픽스도 통과 못 함 ───────────────────────────────
+replay l5-fakefix "$TMP/r6-fakefix.yaml" drift
+require_record L5
+F5="$(firing ImageDigestDrift)"; P5="$(pending ImageDigestDrift)"
+echo "  [L5] fixtures/r6-fakefix.yaml + sustained drift → record=$RECORD_SAMPLES firing=$F5 pending=$P5"
+if [ "$F5" -eq 0 ] && [ "$P5" -gt 0 ]; then pass "L5 harness rejects the fake fix — bare 'or absent()' outside the rollup still cannot hold for: ${FOR} (pending=$P5, firing=0)"
+elif [ "$F5" -gt 0 ]; then fail "L5 the fake fix FIRED (firing=$F5) — the harness would green-light a rule that only papers over the hole with a different label set"
+else fail "L5 the fake fix produced no alert state at all (pending=0) — harness is measuring nothing"; fi
+docker rm -f "r6drift-e2e-l5-fakefix-$$" >/dev/null 2>&1 || true
+
+echo "[elapsed] $(( $(date +%s) - START_EPOCH ))s"
+if [ "$FAILED" -gt 0 ]; then
+  echo "vmalert-drift-firing-e2e: ${FAILED} leg(s) FAILED" >&2
+  exit 1
+fi
+echo "vmalert-drift-firing-e2e OK (L1~L6 통과 — ImageDigestDrift가 실제 드리프트에 발화하고, 오발화/가짜픽스는 차단)"
