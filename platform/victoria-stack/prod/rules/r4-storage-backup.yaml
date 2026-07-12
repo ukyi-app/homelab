@@ -172,10 +172,18 @@ data:
           #      상한 제약은 **적용되지 않는다**(그 룰의 W는 구 상태를 되살리는 래치라 for:보다 작아야 한다 —
           #      혼동 주의). 여기서 rollup이 되살리는 건 "마지막으로 측정된 여유율"이고, 그건 값 자체다.
           #
-          # ★ absent() 가드를 **의도적으로 달지 않는다**: 같은 스크립트가 함께 push하는
-          #   files_backup_last_success_timestamp의 생존은 위 FilesBackupStale(severity critical, absent 착용)이
-          #   이미 fail-loud로 페이징한다. 여기 또 달면 **동일 고장(launchd 미실행/외장 SSD 미마운트)에 중복 페이지**가
-          #   난다. 이 알림은 용량 신호에만 집중한다(형제 BulkStorageLow는 in-cluster 짝이라 자체 absent를 가진다).
+          # ★ absent() 가드를 **의도적으로 달지 않는다**: launchd/push의 **전면** 실패(미실행·크래시·push 불가)는
+          #   같은 스크립트가 함께 발행하는 files_backup_last_success_timestamp를 통해 위 FilesBackupStale
+          #   (severity critical, absent 착용)이 fail-loud로 페이징한다. 여기 또 달면 동일 고장에 중복 페이지가 난다.
+          #   ⚠️ **다만 그 백스톱은 부분 고장(값 오염)까지는 못 잡는다** — 정직한 한계다. backup-files-data.sh의
+          #   push_metrics()는 df가 실패해도 `${avail:-0}`/`${size:-0}`로 **0을 대입한 채** 성공 하트비트를 함께
+          #   발행하고, 호출부도 `|| WARN`이라 abort하지 않는다 → FilesBackupStale는 **초록**인데 여기 avail=0이
+          #   흘러들면 이 알림이 "여유 0%"로 **오귀속 페이지**를 낼 수 있다(진실은 "df가 실패했다"). size까지 0이면
+          #   0/0=NaN이라 반대로 **침묵**한다. 픽스 전엔 이 알림이 애초에 못 울려 이 경로가 가려져 있었고, 발화를
+          #   살리는 순간 처음으로 도달 가능해진다.
+          #   → 해법은 **읽는 쪽(expr)이 아니라 쓰는 쪽**이다(F-3 후속: 스크립트가 df 값을 검증한 뒤에만 하트비트를
+          #     발행하도록 fail-loud화). expr에 absent()나 `size > 0` 가드를 다는 우회는 금지 — 전자는 중복 페이지,
+          #     후자는 **진짜 결핍(avail=0)** 까지 억제해 이 알림을 다시 죽인다.
           - alert: FilesBulkSSDLow
             expr: |
               (last_over_time(files_data_bulk_avail_bytes[3d])

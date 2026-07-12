@@ -106,12 +106,31 @@ push를 보간해 **버그 룰이 통과**하는 거짓 GREEN). 그러나 **일 
 |---|---|---|---|
 | B-1 | `FilesBulkSSDLow` expr의 두 피연산자를 `last_over_time(...[3d])`로 감싸고, 룰 주석에 윈도 근거(`2×push ≤ W`)와 "absent를 안 다는 이유(FilesBackupStale 중복 페이지 회피)"를 명시 | none | first-increment. 단일 표현식 |
 
+### Codex Release Review — r1 (needs-attention, 3 findings — 전부 medium)
+
+| ID | Finding | Decision | Reason | Action |
+|----|---------|----------|--------|--------|
+| R-1 | **용량 텔레메트리가 고장나도 백스톱은 초록** — `scripts/backup-files-data.sh`가 df 결과가 비면 **0을 대입**한 채 성공 하트비트를 정상 발행한다(`push_metrics`가 `||` 아래라 본문 실패로 abort도 안 함). avail=0·size=정상 → 비율 0 → 이 알림이 **"SSD 여유 10% 미만"으로 거짓 페이지**(진실은 "df가 실패했다") = **원인 오귀속**. 그런데 `FilesBackupStale`은 초록이다. | **Accept(부분)** | 정확하다. 그리고 **픽스 전엔 알림이 아예 못 울려서 가려져 있던 경로**다 — 우리 픽스가 발화를 살리면서 **처음 도달 가능**해진다. 다만 expr에 `absent()`나 `size > 0` 가드를 넣는 것은 두 번째 flip이거나 **진짜 결핍(avail=0)을 억제**할 위험이 있다. | ① 룰 주석의 과장된 주장 **축소**(백스톱은 *전면* 실패만 잡는다 — 값 오염은 못 잡는다) + 잔여 위험 명시. ② **F-3 신설**: 스크립트가 df 값을 검증한 뒤에만 하트비트를 발행하도록 fail-loud화(exporter 행위 변경 → 별도 파이프라인) |
+| R-2 | **`make ci`가 required gate를 재현한다는 문서화된 약속이 깨졌다** — 새 컨테이너 게이트(bulkssd)가 `make ci` 경로에 없다(이미 머지된 **드리프트 게이트도 마찬가지**). 로컬 사전 점검이 초록인데 CI에서 실패할 수 있다. | **Accept → 별건** | 정당한 지적이고 **두 게이트 모두**에 걸친다. 그러나 `Makefile`은 이 픽스의 `scope[]` 밖(런타임 행위 아님)이고, 여기서 고치면 단일 flip 표면이 흐려진다. CI는 fail-closed라 프로덕션 위험은 없다(로컬 DX 결함). | **F-4 신설**: 두 컨테이너 게이트를 `make ci`에 배선(로컬 docker 부재 시 skip 가드) + `test_make-ci-parity.bats` 강화. 별도 소형 PR |
+| R-3 | **공유 라이브러리 소비자가 1개뿐** — `tests/gates/lib/vmalert-e2e.sh`를 만들면서 드리프트 하네스는 인라인 사본을 유지했다. 두 하네스가 갈릴 자유가 있다(릴리스 룰: 실 어댑터 2개 이상 또는 Decision-Log 정당화 필요). | **Accept → Decision-Log 정당화 + 별건 이관** | 게이트가 명시적으로 허용한 경로다("record a human-approved Decision-Log justification and a separate migration/refactor follow-up"). **정당화**: 드리프트 하네스는 방금 머지된 다른 알림의 **회귀 가드**이자 이 픽스의 **characterizationCmd 구성원**이다. 이 브랜치에서 리팩터하면 (a) 단일 flip 픽스에 행위 보존 리팩터가 섞이고, (b) **보존 계약의 측정 도구 자체를 픽스 도중에 바꾸는 셈**이라 anti-cheat 표면이 넓어진다. 올바른 집은 **gated-refactor**다. | **F-5 신설**: 드리프트 하네스를 공유 lib으로 이관(gated-refactor, 행위 보존 — 두 게이트 전부 GREEN 유지가 불변식) |
+
+> ⚠️ **사용자 확인 요청(R-3)**: 게이트가 "human-approved" 정당화를 요구한다. 컨덕터 판단은 위와 같다
+> (지금 이관하지 않고 F-5로 분리). 이견이 있으면 뒤집을 수 있다.
+
 ## Follow-up backlog
 
 - **F-1**: `check-alert-rules` **모드 C** — push 메트릭을 rollup 없이 참조하면 FAIL(정적 lint).
   **이 픽스가 머지돼야 위반 0이 되어 배선 가능**하다. 전수 조사 결과 위반은 이 알림이 마지막이었다.
 - **F-2**: `DigestExporterStale` 신설 — exporter의 조용한 실패(skopeo·push 실패해도 Job은 초록)를
   아무도 못 잡는다. net-new 발화 조건이라 별도 파이프라인.
+- **F-3 (release-gate R-1)**: `scripts/backup-files-data.sh`를 **fail-loud화** — df 실패 시 0을 대입한 채
+  성공 하트비트를 발행하지 않도록(값 검증 후에만 push). 지금은 **값 오염이 백스톱을 우회**해 이 알림이
+  0 여유로 **오귀속 페이지**를 낼 수 있다. exporter 행위 변경 → 별도 파이프라인.
+- **F-4 (release-gate R-2)**: `make ci` 패리티 복원 — 컨테이너 게이트 2개(드리프트·bulkssd)를 `make ci`에
+  배선(docker 부재 시 skip) + `test_make-ci-parity.bats` 강화. 문서화된 약속(CONTRIBUTING/Makefile)이
+  깨져 있다.
+- **F-5 (release-gate R-3)**: 드리프트 하네스를 `tests/gates/lib/vmalert-e2e.sh`로 이관 — 현재 공유 lib
+  소비자가 1개뿐이라 두 하네스가 갈릴 수 있다. **gated-refactor**(행위 보존: 두 게이트 전부 GREEN 유지).
 
 ## Review Decision Log
 

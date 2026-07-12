@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "needs-attention",
+  "summary": "Flip evidence is internally consistent and scope-preserving, with no second production flip found. Release still needs triage for an incomplete telemetry backstop, broken local/CI parity, and a prohibited single-consumer seam.",
+  "planFile": "docs/bugfixes/files-bulk-ssd-low-never-fires.md",
+  "planInDiff": null,
+  "reviewedFileCount": 14,
+  "target": "branch diff against main",
+  "reviewedSha": "c33e156f938a813b38d193306e8f24bf00ea548e",
+  "reviewedTree": "f8ce29864f04b8c50e686cdb643ff7a2720dd02c",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 3,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "medium",
+      "title": "Capacity telemetry can fail while the backstop stays green",
+      "body": "The absent-guard rationale assumes FilesBackupStale covers this sensor pipeline. However, scripts/backup-files-data.sh:133-149 substitutes 0 for empty df results while publishing a fresh backup-success timestamp. Because push_metrics is called under `||`, Bash does not abort its body on those failures. This can produce 0/0 or value/0: FilesBulkSSDLow remains silent or false-pages while FilesBackupStale stays healthy. BulkStorageLow mitigates total disk coverage, but the claimed independent host sensor is not fail-loud.",
+      "file": "platform/victoria-stack/prod/rules/r4-storage-backup.yaml",
+      "line_start": 175,
+      "line_end": 182,
+      "confidence": 0.97,
+      "recommendation": "Narrow the comment to total launchd/push failure and add a follow-up to validate both df values before publishing the success heartbeat, or introduce a separate capacity-telemetry heartbeat. Adding absent() alone will not detect zero-valued corrupt samples.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "medium",
+      "title": "The new required gate is missing from the documented local CI path",
+      "body": "The workflow adds the bulk-SSD replay to the sole required `gate`, but `make ci` still invokes only the alertmanager containerized e2e. This violates CONTRIBUTING.md:56-62 and Makefile:98's promise that `make ci` reproduces the required gate, allowing the documented local pre-push check to pass without exercising this regression.",
+      "file": ".github/workflows/ci.yaml",
+      "line_start": 103,
+      "line_end": 107,
+      "confidence": 0.99,
+      "recommendation": "Restore parity through a shared CI driver or invoke this replay from `make ci` when Docker is available, and strengthen test_make-ci-parity.bats to assert the bulk-SSD gate is present on both paths.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "medium",
+      "title": "New shared replay seam has only one consumer",
+      "body": "This file declares common vmalert replay primitives while explicitly retaining the existing drift harness as an inline copy. Repository-wide references show only vmalert-bulkssd-firing-e2e.sh consumes the library, and the Review Decision Log contains no exception. That violates the release rule requiring at least two real adapters or a Decision-Log justification and leaves two supposedly related harness implementations free to drift.",
+      "file": "tests/gates/lib/vmalert-e2e.sh",
+      "line_start": 2,
+      "line_end": 9,
+      "confidence": 0.99,
+      "recommendation": "For this frozen RED/GREEN branch, record a human-approved Decision-Log justification and a separate migration/refactor follow-up. Otherwise, remove the premature abstraction or migrate a second consumer with freshly generated machine-owned evidence.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Triage the three findings before merge; the first should become an explicit follow-up rather than a second alert flip in this bugfix.",
+    "If any harness or command changes, regenerate both script-owned verify records and verification evidence.",
+    "Preserve the current frozen fixture and symptom-token-bearing RED tail."
+  ]
+}
