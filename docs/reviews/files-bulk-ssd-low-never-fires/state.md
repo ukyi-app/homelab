@@ -25,6 +25,15 @@ spike-1:
 쟁점을 이미 전부 통과시켰다(구조 게이트 approve). full 트랙의 추가 구조 게이트가 살 값이 낮다.
 단, 배리어 1~4는 트랙 무관하게 그대로 적용된다.
 
+## 게이트 이력
+
+| 게이트 | 결과 |
+|---|---|
+| plan r1 | **approve, 0 findings** (더 단순한 대안 = 알림 삭제 → 이원화 포기라 기각) |
+| release r1 | needs-attention 3건 → R-1(백스톱 주장 과장: df 실패 시 0 대입 + 성공 하트비트 → 값 오염이 백스톱 우회) 브랜치 내 교정(주석) · R-2(make ci 패리티) → F-4 · R-3(공유 lib 소비자 1개) → **사용자 승인 후 F-5** |
+| release r2 | needs-attention 2건 → R-4(verification이 옛 green.sha 인용 — capturing-evidence 하드룰 위반) · R-5(R-3 승인 미기록) 교정 |
+| release r3 | **approve, 0 findings — "SHIP"** (사용자 승인 하의 캡 초과 라운드) |
+
 ## 진단 (전수 조사 + 적대 검증 — 2026-07-12)
 
 `ImageDigestDrift` 픽스 직후, **같은 클래스의 죽은 알림이 더 있는지 전수 조사**했다(push 메트릭을

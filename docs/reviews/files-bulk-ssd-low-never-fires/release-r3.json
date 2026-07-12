@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "approve",
+  "summary": "SHIP: R-4 and R-5 are resolved. verification.md now identifies locked green SHA 8b2f521 and matching tree/records with consistent RED/GREEN tails; the verify-records remain unchanged and reachable from HEAD. The R-3 exception is explicitly human-approved under the Review Decision Log with F-5 referenced. Round 3 changed documentation only and introduced no new critical issue.",
+  "planFile": "docs/bugfixes/files-bulk-ssd-low-never-fires.md",
+  "planInDiff": null,
+  "reviewedFileCount": 17,
+  "target": "branch diff against main",
+  "reviewedSha": "9b257e5c3aa194fa6e030aed676ae330c122b1a4",
+  "reviewedTree": "edd482db98f89afcf2cb5a4ea4dec81c2aa0abc2",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [
+    "Persist the clean Round 3 result and proceed to landing."
+  ]
+}
