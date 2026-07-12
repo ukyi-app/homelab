@@ -1,0 +1,40 @@
+# 픽스처(동결 — 절대 "고치지" 마라): rollup은 붙였지만 **윈도가 과대한**(W=30m) 결함 expr.
+# rollup 윈도는 "최근 W 안에 본 digest를 지금의 latest로 되살리는 **상태 래치**"다. 이미지 bump 후
+# 구 digest가 W 동안 좌변에서 되살아나는데, 우변(파드)은 이미 새 digest로 넘어갔으므로 그 잔존이
+# **phantom 드리프트**가 된다. 잔존이 `for:`를 넘기면 **bump마다 오발화**한다.
+#
+# 산술(하네스가 매 실행 재검증한다 — vmalert-drift-firing-e2e.sh 참조):
+#   phantom 시작 = 구 파드 마지막 샘플 + instant 룩백(5m)   = BUMP - PUSH + 룩백
+#   phantom 끝   = 구 digest 마지막 push  + rollup 윈도 W    = BUMP - PUSH + W
+#   phantom 지속 = **W − 룩백**  →  발화 조건: W − 룩백 > for  →  W > for(20m) + 룩백(5m) = 25m
+# 즉 W=30m은 phantom 25m > for 20m → **발화가 관측된다**. (배포 룰의 W=15m은 10m → 무발화.)
+#
+# 용도: vmalert-drift-firing-e2e.sh의 L8(하네스 이빨 증명 ③) — L3("bump 후 오발화 금지")가 윈도
+# **상한**에서 실제로 이빨을 갖고 있음을 매 실행 증명한다. L3만으로는 "발화가 없다"는 음성 관측뿐이라
+# 메커니즘이 죽어도 조용히 통과할 수 있다. L8이 같은 시나리오에서 **양성**을 뽑아 그 갭을 닫는다.
+# (⚠️ L3의 탐지 임계는 W > for + 룩백 = 25m이다. 20~25m 구간은 L3가 **못 잡는다** —
+#  그 경계는 하네스 preflight의 `push ≤ W < for` 산술 단언이 강제한다. 둘은 상보적이다.)
+#
+# 우변 존재 가드(`and on (app) …`)는 **일부러 넣지 않았다**: phantom 시나리오에서는 파드 텔레메트리가
+# 전 구간 존재하므로 가드는 no-op이고, 이 픽스처가 겨냥하는 축은 오직 **윈도 과대** 하나다.
+groups:
+  - name: ci-staleness-fixture-overwide
+    rules:
+      - record: app:image_digest_drift
+        expr: |
+          max by (app, digest) (last_over_time(ghcr_latest_digest[30m]))
+          unless on (app, digest) (
+            label_replace(
+              label_replace(
+                kube_pod_container_info{namespace="prod", image_id=~"ghcr[.]io/ukyi-app/.*"},
+                "digest", "$1", "image_id", ".*@(sha256:[a-f0-9]+)$"
+              ),
+              "app", "$1", "image_id", ".*/([a-z0-9-]+)[@:].*"
+            )
+          )
+      - alert: ImageDigestDrift
+        expr: app:image_digest_drift == 1
+        for: 20m
+        labels: { severity: warning }
+        annotations:
+          summary: "fixture(overwide) — 실행 중인 이미지가 최신 GHCR digest와 불일치: {{ $labels.app }}"
