@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: the authoritative RED record is internally inconsistent, so the mandatory flip proof is not auditable. The runtime change is otherwise scoped and rollback is a ConfigMap revert with automatic vmalert reload.",
+  "planFile": "docs/bugfixes/image-digest-drift-never-fires.md",
+  "planInDiff": null,
+  "reviewedFileCount": 22,
+  "target": "branch diff against main",
+  "reviewedSha": "6e207c8f3317237f6c052b7e879a5c51c471fe16",
+  "reviewedTree": "06975259a0fcb8de76c53eda09120ee619f7bef8",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Inconsistent verify-record",
+      "body": "The lock requires the exact token `ImageDigestDrift did not fire despite`. This record claims `symptomTokenPresent: true`, but its bounded `outputTail` starts at `pite 115 minutes...` and never contains that token. The older record containing it belongs to a superseded red SHA, so it cannot prove the current f4497d2 baseline. This fails the release gate's anti-forgery consistency check.",
+      "file": "docs/reviews/image-digest-drift-never-fires/bugfix-verify-red-158e7e26597c241948e14ff2c539dd90ddbea966.json",
+      "line_start": 9,
+      "line_end": 10,
+      "confidence": 1,
+      "recommendation": "Do not hand-edit the artifact. Make the verifier retain the token-containing line in bounded evidence, rerun `--verify-flip`, commit regenerated RED/GREEN records and refreshed verification, then rerun the release review.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Regenerate machine-owned flip evidence with the exact symptom token visible in the RED output tail.",
+    "After the gate passes, perform the documented post-sync live checks; rollback requires reverting the rule ConfigMap change and letting vmalert reload it."
+  ]
+}

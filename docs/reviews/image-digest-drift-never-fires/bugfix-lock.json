@@ -1,5 +1,5 @@
 {
-  "regressionCmd": "bash tests/gates/vmalert-drift-firing-e2e.sh",
+  "regressionCmd": "bash tests/gates/vmalert-drift-firing-e2e.sh > /tmp/idd-verify.log 2>&1; rc=$?; cat /tmp/idd-verify.log; echo \"--- failed legs (symptom) ---\"; grep -E \"^FAIL \" /tmp/idd-verify.log || echo \"(none - all legs passed)\"; exit $rc",
   "characterizationCmd": "bats tests/test_alert_rules.bats tests/gates/test_vmalert-config.bats tests/gates/test_digest-exporter.bats && bash tests/gates/vmalert-rules-validate.sh",
   "flips": [
     {
@@ -19,5 +19,5 @@
   "green": {
     "sha": "a1f7d21c3dfe1954be6f5e51431974484fdf60ba"
   },
-  "notes": "reproCmd 미선언(의도적 waive): 원본 repro는 라이브 클러스터 PromQL 질의인데, 클러스터는 머지+ArgoCD 싱크 전까지 옛 룰을 계속 돌린다 — green.sha 워크트리에서 돌려도 여전히 재현되므로 락에 넣으면 거짓 실패가 된다. 증상은 hermetic 회귀 테스트 L1이 대신 고정한다. 하네스는 매 실행 자기 이빨을 증명한다(L4 버그 픽스처·L5 가짜 픽스 거부, L6 대조 알림 발화). | scope[] 주석: 유일한 **행위 표면**은 r6-ci-staleness.yaml이다. 나머지 3개는 런타임 행위가 없는 **문서**(레포 규약상 새 함정은 docs/traps-detail.md SSOT + docs/traps.md 원장 + AGENTS.md 인덱스에 등재해야 하며 make verify-traps가 강제한다) — B4 배리어가 non-test 경로를 기계적으로 검사하므로 명시적으로 선언한다."
+  "notes": "reproCmd 미선언(의도적 waive): 원본 repro는 라이브 클러스터 PromQL 질의인데, 클러스터는 머지+ArgoCD 싱크 전까지 옛 룰을 계속 돌린다 — green.sha 워크트리에서 돌려도 여전히 재현되므로 락에 넣으면 거짓 실패가 된다. 증상은 hermetic 회귀 테스트 L1이 대신 고정한다. 하네스는 매 실행 자기 이빨을 증명한다(L4 버그 픽스처·L5 가짜 픽스 거부, L6 대조 알림 발화). | scope[] 주석: 유일한 **행위 표면**은 r6-ci-staleness.yaml이다. 나머지 3개는 런타임 행위가 없는 **문서**(레포 규약상 새 함정은 docs/traps-detail.md SSOT + docs/traps.md 원장 + AGENTS.md 인덱스에 등재해야 하며 make verify-traps가 강제한다) — B4 배리어가 non-test 경로를 기계적으로 검사하므로 명시적으로 선언한다. | regressionCmd 래퍼(release-gate R-1 교정): 하네스는 **바이트 동결** 그대로 두고, 출력 전문을 찍은 뒤 실패 레그 줄을 맨 끝에 재출력한다. verify-record의 outputTail이 마지막 2000자로 잘리는데 8레그로 출력이 길어져 symptomToken이 tail 경계에서 반토막 났고, 그 결과 기록이 symptomTokenPresent=true를 주장하면서 정작 증거에는 토큰이 안 보이는 **감사 불가** 상태였다. 래퍼는 exit 코드를 그대로 전달하며(rc 보존) 테스트 내용·단언을 전혀 바꾸지 않는다."
 }
