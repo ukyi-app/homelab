@@ -164,7 +164,8 @@ r6에는 digest-exporter staleness 알림이 **없다**. record 룰에 `or absen
 | # | 보존 대상 | 이를 못박는 것 |
 |---|---|---|
 | 1 | `ArgoCDOutOfSync` 전체(expr·`absent(argocd_app_info)`·for: 15m) | 하네스 **L6**(매 실행 발화 증명) + `test_vmalert-config.bats` |
-| 2 | `ImageDigestDrift` 알림 룰 — `== 1`, **`for: 20m`**, severity, annotations | **`for:`는 절대 손대지 않는다**(anti-cheat 1순위이자 하네스 preflight 산술의 입력) |
+| 2 | `ImageDigestDrift` 알림 룰 — `== 1`, **`for: 20m`**, severity, alert명, annotations.summary | **`for:`는 절대 손대지 않는다**(anti-cheat 1순위이자 하네스 preflight 산술의 입력) |
+| 2b | ⚠️ **의도적 예외 — `annotations.description`은 고친다**(아래 공개 참조) | 구조 게이트 판단 대상 |
 | 3 | 드리프트 없을 때 무발화 | 하네스 **L2** |
 | 4 | 이미지 bump 직후 무발화 | 하네스 **L3** (W < `for` 강제) |
 | 5 | **우변 파드 셀렉터 무변경** — `kube_pod_container_info{...}` + `label_replace` 2단. **우변에 rollup 금지** | 여기에 rollup을 붙이면 **구 파드 digest가 되살아나 진짜 드리프트를 억제**한다(같은 fail-open의 거울상) |
@@ -224,6 +225,26 @@ run grep -qE 'max by \(app\) \([^)]*ghcr_latest_digest' <<<"$EXPR"      # 파손
 (`max by (app) (last_over_time(...))`라는 파손식을 못 잡는다). 위 형태로 바꾸면 가드가 **강해진다**.
 즉 테스트 약화가 아니라 **강화**다. 구조 게이트의 anti-cheat 렌즈에 이 논거를 제출한다.
 (B4 배리어상 `tests/` 경로는 non-test scope 검사에서 제외되므로 `scope[]` 변경은 불필요.)
+
+### ⚠️ 의도적 예외 공개 — `annotations.description`의 stale 문구를 고친다
+
+Preserved Contract는 원래 "annotations 무변경"을 약속했다. 그러나 컨덕터측 code-review(Standards 축)가
+잡았다: 현재 description이 이렇게 말한다.
+
+> `⚠️ 이미지 bump 직후 digest-exporter APPS 갱신 전까지 일시 오발화 가능(B9 bump-tag 배선 후 해소).`
+
+**픽스 후 이 문장은 거짓이다.** bump phantom은 이제 rollup 윈도 불변식(`W < for`)이 관장하고,
+L3(음성)·L8(양성)·preflight(산술)가 회귀로 막는다. 이 문구를 그대로 두면 **온콜에게 "무시해도 되는
+일시 알람"이라고 오도**한다 — 60일간 죽어 있던 감시견을 살리면서, 그 감시견이 짖을 때 무시하라고
+적어둔 채 배포하는 셈이다. 안전 관련 결함이라 판단해 **고친다**.
+
+- 바뀌는 것: `annotations.description`의 phantom caveat 문장 → "발화하면 실제 드리프트다 + 윈도
+  불변식이 bump phantom을 막는다"로 교체.
+- **바뀌지 않는 것**: `summary`·`severity`·`for: 20m`·alert명·record명·expr 판정 조건.
+- **왜 flip이 아닌가**: 알림의 **발화 조건**은 그대로다(단일 flip 유지). 바뀌는 것은 발화 시 전달되는
+  설명 문구뿐이고, 그 문구는 새 행위를 **정확히 기술하도록** 고치는 것이다. 어떤 테스트도 약화되지
+  않고 증상 특수처리도 아니다.
+- 구조 게이트의 anti-cheat 렌즈에 이 판단을 그대로 제출한다.
 
 ### 윈도·`for` 불변식을 **기계로 강제한다** (플랜 게이트 P-2 교정)
 
@@ -312,6 +333,14 @@ exact firing symptom"). 잔여 1건:
 | ID | Finding | Severity | Decision | Reason | Action |
 |----|---------|----------|----------|--------|--------|
 | P-3′ | P-3 characterization cannot accept or reliably validate the planned rule | medium | **Accept** | 3중으로 정확하다. ㉠ `$R`은 ConfigMap이라 `.spec.groups[]`는 빈 EXPR → 긍정 단언 영구 실패(characterization 영구 RED). ㉡ 넓은 부정 패턴이 **P-1 가드의 정당한 `max by (app) (`를 매치** → 테스트를 통과시키려면 가드를 빼야 하고 그러면 P-1이 재발한다(테스트가 결함을 강요하는 최악의 형태). ㉢ 맨 `! grep` 중간 부정은 레포가 bats false-green으로 검출하는 함정. | 위 "교체 단언 최종형"으로 교정: `.data["r6.yaml"]` 추출 + 비어있지 않음 단언 + 부정 패턴을 `ghcr_latest_digest` 주변으로 좁힘 + `run`/`status` |
+
+### 컨덕터측 code-review — B-1 (Spec: 통과 / Standards: 하드 위반 0, 지적 3건 수용)
+
+| ID | Finding | 축 | Decision | Action |
+|----|---------|-----|----------|--------|
+| CR-1 | 중복된 파드 셀렉터 계약이 **무가드** — `label_replace(kube_pod_container_info…)`가 `unless` 우변과 `and` 가드에 바이트 쌍둥이로 존재하는데, 한쪽만 고치면 **가드의 app 집합이 조용히 좁아져 진짜 드리프트를 억제**한다(고치려던 fail-open의 재발 경로) | Standards | **Accept** | bats에 쌍둥이 단언 추가(app-추출 label_replace occurrence == 2 + 두 셀렉터 문자열 동일). 중복 자체는 유지 — 대안(새 recording rule=eval 순서 의존 / 우변 rollup=fail-open 거울상)이 더 나쁘다 |
+| CR-2 | `annotations.description`의 phantom caveat이 **stale** — 픽스 후 거짓이 되어 온콜을 오도 | Standards | **Accept**(의도적 예외) | 위 "의도적 예외 공개" 참조. 발화 조건 무변경이라 단일 flip 유지 |
+| CR-3 | 새로 라이브 확증된 함정 2건이 **`docs/traps-detail.md` SSOT·`docs/traps.md` 원장에 미등록**(레포 규약 위반) | Standards | **Accept** | traps-detail 섹션 2개 + AGENTS 인덱스 2줄 + 원장 행(guard=`tests/gates/vmalert-drift-firing-e2e.sh`). `make verify-traps` 통과 필수. 겸사겸사 r6 룰 주석을 불변식+포인터로 압축(지식이 두 사본으로 갈리는 것 방지) |
 
 **2라운드 캡 도달 → 인간 트리아지**: 잔여 P-3′는 플랜 **산문의 단언 스니펫** 결함이고, 실제 계약은
 B-1 구현이 작성하는 bats 코드다. 그 코드는 (a) characterizationCmd로 **매 증분 실행**되므로 추출

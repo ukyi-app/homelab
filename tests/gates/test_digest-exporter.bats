@@ -19,12 +19,38 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; D="$ROOT/platform/vict
   grep -q 'digest-exporter-allow-egress' "$N"
 }
 
-@test "drift recording-rule aligns both join sides on (app,digest) (no permanent false fire)" {
+@test "drift recording-rule aligns both join sides on (app,digest) and rolls up the push metric" {
   R="$ROOT/platform/victoria-stack/prod/rules/r6-ci-staleness.yaml"
-  grep -q 'max by (app, digest) (ghcr_latest_digest)' "$R"   # 좌변 digest 보존
-  grep -q '"app", "$1", "image_id"' "$R"                     # 우변 image_id→app 추출(k3s: image=bare ID)
-  run grep -q 'max by (app) (ghcr_latest_digest)' "$R"; [ "$status" -ne 0 ]  # 파손식 회귀 금지
-  run grep -q 'image=~' "$R"; [ "$status" -ne 0 ]            # bare-ID 라벨 selector 회귀 금지
+  # ⚠️ $R은 ConfigMap이다 — 룰 YAML은 .data["r6.yaml"]에 **문자열로** 박혀 있다(.spec.groups 아님 → 빈 결과).
+  # 단언은 record expr **하나만** 겨냥한다(주석·타 룰이 단언을 만족시키는 오염 차단).
+  EXPR="$(yq '.data["r6.yaml"]' "$R" | yq '.groups[].rules[] | select(.record == "app:image_digest_drift") | .expr')"
+  [ -n "$EXPR" ]                                                          # 추출 실패 = 즉시 FAIL(빈 문자열 false-green 차단)
+  grep -qE 'max by \(app, digest\) \(' <<<"$EXPR"                         # 좌변 digest 라벨 보존(조인 양변 정렬)
+  grep -qE 'last_over_time\(ghcr_latest_digest\[[0-9]+m\]\)' <<<"$EXPR"   # push(10m) 메트릭에 rollup 착용 — 없으면 5m 룩백에 구멍→영구 무발화
+  grep -q '"app", "$1", "image_id"' "$R"                                  # 우변 image_id→app 추출(k3s: image=bare ID)
+  # 파손식(좌변이 digest 라벨을 떨궈 조인 키 소실) 회귀 금지. 부정 패턴은 ghcr_latest_digest **주변으로 좁힌다** —
+  # 넓게 쓰면 우변 존재 가드의 정당한 `max by (app) (label_replace(kube_pod_container_info…))`까지 잡아
+  # 올바른 픽스를 RED로 만든다. 맨 `! grep` 중간 부정은 bats false-green 함정 → run + status.
+  run grep -qE 'max by \(app\) \([^)]*ghcr_latest_digest' <<<"$EXPR"
+  [ "$status" -ne 0 ]
+  run grep -q 'image=~' "$R"; [ "$status" -ne 0 ]                         # bare-ID 라벨 selector 회귀 금지
+}
+
+@test "drift rule's twin pod selectors stay byte-identical (unless RHS vs. existence guard)" {
+  R="$ROOT/platform/victoria-stack/prod/rules/r6-ci-staleness.yaml"
+  EXPR="$(yq '.data["r6.yaml"]' "$R" | yq '.groups[].rules[] | select(.record == "app:image_digest_drift") | .expr')"
+  [ -n "$EXPR" ]
+  # `unless` 우변과 말미 존재 가드는 같은 파드 셀렉터의 **바이트 쌍둥이**다(중복 수용: 새 recording rule은
+  # eval 순서 의존, 우변 rollup은 fail-open 거울상 → 둘 다 더 나쁘다). 문제는 그 쌍둥이 계약을 지키는 가드가
+  # 없다는 것 — 누가 ns/owner/app-추출 정규식을 **한쪽만** 고치면 가드의 app 집합이 조용히 좁아져 진짜
+  # 드리프트를 억제한다(= 우리가 고친 fail-open의 재발 경로). 여기서 못박는다.
+  sel="$(grep -oE 'kube_pod_container_info\{[^}]*\}' <<<"$EXPR")"
+  [ "$(printf '%s\n' "$sel" | wc -l | tr -d ' ')" -eq 2 ]           # 파드 셀렉터는 정확히 2회(unless 우변 + 존재 가드)
+  [ "$(printf '%s\n' "$sel" | sort -u | wc -l | tr -d ' ')" -eq 1 ] # …그리고 둘이 동일(namespace + image_id 정규식)
+  # app-추출 label_replace도 쌍둥이 — 치환 정규식까지 포함해 동일해야 가드의 app 집합이 우변과 일치한다.
+  lr="$(grep -oE '"app", "\$1", "image_id", "[^"]*"' <<<"$EXPR")"
+  [ "$(printf '%s\n' "$lr" | wc -l | tr -d ' ')" -eq 2 ]
+  [ "$(printf '%s\n' "$lr" | sort -u | wc -l | tr -d ' ')" -eq 1 ]
 }
 
 @test "digest-exporter APPS tracks exactly the deployed apps/ set (variant-chain parity)" {
