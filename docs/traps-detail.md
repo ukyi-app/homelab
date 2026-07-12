@@ -286,7 +286,11 @@
 - **왜 게이트를 통과했나**: required `vmalert -dryRun`은 **파싱만** 한다 — 이 죽은 식은 문법상 유효한 MetricsQL이다.
   실효 방어는 hermetic replay e2e(발화를 실제로 관측)뿐. 룰 작성자가 주석에 "라이브 미검증 → 발화 검증 필수"라고
   스스로 적어뒀으나 그 검증이 수행되지 않았다 — **미검증 주석은 가드가 아니다.**
-> 가드: `tests/gates/vmalert-drift-firing-e2e.sh`, `tests/gates/test_digest-exporter.bats`
+- **레포 전역 가드(모드 C)**: e2e는 룰 2건만 증명한다 → 나머지 룰은 `tools/check-alert-rules.ts` 모드 C가 정적으로
+  막는다(push 메트릭을 rollup 없이 맨 참조 / 윈도 < 주기 = FAIL). 주기는 생산자 CronJob의 cron에서 파생하고,
+  `api/v1/import` 호출부가 레지스트리(`PUSH_METRICS`)에 없으면 FAIL한다 — **새 push exporter를 추가하고 메트릭
+  등록을 잊는 경로**가 이 함정의 재발로다.
+> 가드: `tests/gates/vmalert-drift-firing-e2e.sh`, `tests/gates/vmalert-bulkssd-firing-e2e.sh`, `tests/gates/test_digest-exporter.bats`, `tools/check-alert-rules.ts`, `tests/test_alert_rules.bats`
 
 ### rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭
 - 위 함정의 해법(rollup)에는 **상한**이 있다. rollup 윈도는 "최근 W 안에 본 값을 지금의 값으로 되살리는

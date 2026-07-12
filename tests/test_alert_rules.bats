@@ -1,7 +1,10 @@
 #!/usr/bin/env bats
-# vmalert 룰 instance-라벨 안정성 가드 (PR #327 포스트모템 — 재부팅 IP churn 오탐 4회 재발).
-# required 게이트인 `vmalert -dryRun`은 문법만 본다 → 두 모드(eval-time 의미)를 원리적으로 못 잡는다.
-# 라이브 eval 게이트도 무력하다(정상상태 데이터엔 결함이 부재, 재부팅 과도구간에서만 발현) →
+# vmalert 룰 expr 정적 lint 가드 — 세 모드 전부 "문법은 유효한데 eval-time에 죽는" 결함을 겨냥한다.
+#   모드 A/B: instance-라벨 불안정 (PR #327 포스트모템 — 재부팅 IP churn 오탐 4회 재발).
+#   모드 C:   push 주기 > vmalert instant 룩백(5m) 메트릭의 맨 참조 (PR #339/#341 — 죽은 알림 2건,
+#             라이브 60일 발화 0). 동결 결함 픽스처 2개가 회귀 앵커다.
+# required 게이트인 `vmalert -dryRun`은 문법만 본다 → 세 모드(eval-time 의미)를 원리적으로 못 잡는다.
+# 라이브 eval 게이트도 무력하다(A/B는 재부팅 과도구간에서만 발현, C는 "아무 신호도 없음"이 증상) →
 # 유일하게 CI에서 잡을 수 있는 형태는 expr 안티패턴의 정적 lint다. @test 이름은 영어(CJK 함정).
 # CI-safe(소스 스캔, bun/TS 단일) → run-bats.sh gate 도메인에 자동 수집.
 
@@ -39,10 +42,25 @@ _run_probe() {   # $1=alert명 $2=expr → run 결과를 호출자가 판정
   echo "$output"
 }
 
+# 동결 결함 픽스처(tests/gates/fixtures/*.yaml — 실제 역사적 버그의 expr 스냅샷)를 **무수정**으로
+# 룰 ConfigMap에 감싸 시드한다. 픽스처는 raw `groups:` 문서라 그대로는 린터 대상(ConfigMap)이 아니다 →
+# 블록 스칼라로 들여쓰기만 해서 감싼다(파일 자체는 손대지 않는다 — 하네스의 음성 기준선이므로).
+_seed_frozen_fixture() {   # $1=root $2=픽스처 경로
+  {
+    echo "apiVersion: v1"
+    echo "kind: ConfigMap"
+    echo "metadata: { name: vmalert-rules-frozen-fixture }"
+    echo "data:"
+    echo "  fixture.yaml: |"
+    sed 's/^/    /' "$2"
+  } > "$1/platform/victoria-stack/prod/rules/zz-frozen-fixture.yaml"
+}
+
 @test "alert-rule guard passes on the real repository rules" {
   run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "${BATS_TEST_DIRNAME}/.."
   echo "$output"
   [ "$status" -eq 0 ]
+  echo "$output" | grep -q '모드 A/B/C 위반 0'   # 세 모드 전부 실행됐다는 증거(모드 침묵 스킵 차단)
 }
 
 # ── 모드 A: rollup이 상태-파생(비-리셋) 카운터를 감쌀 때 instance 제거를 강제 ──
@@ -51,7 +69,7 @@ _run_probe() {   # $1=alert명 $2=expr → run 결과를 호출자가 판정
   _run_probe PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q '모드 A'
+  echo "$output" | grep -q '\[모드 A:'
 }
 
 @test "mode A accepts a subquery that strips instance before the rollup" {
@@ -93,7 +111,7 @@ _run_probe() {   # $1=alert명 $2=expr → run 결과를 호출자가 판정
   _run_probe WALVolumeFillingProbe '(cnpg_collector_pg_wal{value="size"} / on(namespace, pod) cnpg_collector_pg_wal{value="volume_size"}) > 0.70'
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q '모드 B'
+  echo "$output" | grep -q '\[모드 B:'
 }
 
 @test "mode B accepts an arithmetic on() join whose operands are pre-aggregated" {
@@ -113,6 +131,94 @@ _run_probe() {   # $1=alert명 $2=expr → run 결과를 호출자가 판정
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '우변'
+}
+
+# ── 모드 C: push 주기 > instant 룩백(300s)인 메트릭은 윈도 ≥ 주기인 rollup 필수 ──
+
+@test "mode C flags the frozen r6 buggy fixture (real historical bug: ImageDigestDrift)" {
+  # 회귀 앵커 ①: PR #339 이전에 실제로 배포돼 있던 r6 record expr(동결 픽스처, 자구 그대로).
+  # push 메트릭 ghcr_latest_digest(10분 주기)를 rollup 없이 맨 참조 → 라이브 60일 발화 0.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _seed_frozen_fixture "$tmp" "${BATS_TEST_DIRNAME}/gates/fixtures/r6-buggy-expr.yaml"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[모드 C:'
+  echo "$output" | grep -q 'ghcr_latest_digest'
+  # record 체인 dedup: 결함은 record 1건 — 그 record를 참조하는 alert(ImageDigestDrift)는 이중 계산 금지.
+  [ "$(echo "$output" | grep -c '\[모드 C:')" -eq 1 ]
+}
+
+@test "mode C flags the frozen r4 bulkssd buggy fixture (real historical bug: FilesBulkSSDLow)" {
+  # 회귀 앵커 ②: PR #341 이전의 r4 alert expr(동결 픽스처). files_data_bulk_*(하루 1회 push)를 맨 참조.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _seed_frozen_fixture "$tmp" "${BATS_TEST_DIRNAME}/gates/fixtures/r4-bulkssd-buggy-expr.yaml"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[모드 C:'
+  echo "$output" | grep -q 'files_data_bulk_avail_bytes'
+}
+
+@test "mode C accepts the shipped ImageDigestDrift fix (W=15m over a 10m push — under 2x, still valid)" {
+  # 과잉 검출 방지 앵커: 하한은 W ≥ 주기(보편 참)다. 누락 내성(2×)을 강제하면 방금 머지한 픽스가
+  # FAIL한다 — W=15m은 `for: 20m` 상한(W < for) 때문에 강제된 선택이다(윈도 상한은 e2e preflight 소관).
+  _run_probe ImageDigestDriftProbe 'max by (app, digest) (last_over_time(ghcr_latest_digest[15m])) == 1'
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+@test "mode C flags a rollup window narrower than the push period" {
+  # files_data_bulk_avail_bytes = 86400s 주기 → [1h](3600s) 윈도는 하루의 대부분에서 시리즈가 비어 무발화.
+  _run_probe FilesBulkSSDLowProbe 'last_over_time(files_data_bulk_avail_bytes[1h]) / last_over_time(files_data_bulk_size_bytes[3d]) < 0.10'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[모드 C:'
+  echo "$output" | grep -q '1h'
+}
+
+@test "mode C accepts a subquery window at least as wide as the push period" {
+  _run_probe ImageDigestDriftProbe 'last_over_time(max by (app, digest) (ghcr_latest_digest)[15m:1m]) == 1'
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+@test "mode C ignores scrape metrics (only push producers carry the lookback mismatch)" {
+  # 스크레이프 메트릭(30s 간격)은 룩백 안에 항상 샘플이 있다 → rollup 강제 대상 아님.
+  _run_probe ArgoCDOutOfSyncProbe 'argocd_app_info{sync_status="OutOfSync"} == 1 or absent(argocd_app_info)'
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+@test "mode C fails when a push producer is not in the registry (completeness guard)" {
+  # 새 push exporter를 추가했는데 레지스트리에 메트릭을 등록하지 않으면 다음 사람이 같은 함정에 빠진다.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  mkdir -p "$tmp/platform/newthing/prod"
+  cat > "$tmp/platform/newthing/prod/new-exporter.yaml" <<'YAML'
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: new-exporter }
+spec:
+  schedule: "*/30 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: push
+              command: ["sh", "-c", "echo 'new_thing_metric 1' | curl -fsS --data-binary @- http://vmsingle:8428/api/v1/import/prometheus"]
+YAML
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'new-exporter.yaml'
+  echo "$output" | grep -q '레지스트리'
 }
 
 # ── 게이트 자체의 fail-closed 성질 ──
