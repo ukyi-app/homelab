@@ -320,6 +320,102 @@ _seed_frozen_fixture() {   # $1=root $2=픽스처 경로
   echo "$output" | grep -q 'moved-cronjob.yaml'
 }
 
+# ── G-1: 생산자 발견이 단일 엔드포인트(`api/v1/import`)에 묶이면 다른 쓰기 경로가 발견을 통째로 우회한다 ──
+
+@test "mode C G-1 flags a producer that pushes via Prometheus remote_write (/api/v1/write)" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  mkdir -p "$tmp/platform/newthing/prod"
+  cat > "$tmp/platform/newthing/prod/rw-exporter.yaml" <<'YAML'
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: rw-exporter }
+spec:
+  schedule: "*/10 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: push
+              command: ["sh", "-c", "echo 'rw_pushed_metric 1' | curl -fsS -X POST --data-binary @- http://vmsingle:8428/api/v1/write"]
+YAML
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'rw-exporter.yaml'
+  echo "$output" | grep -q 'rw_pushed_metric'
+}
+
+@test "mode C G-1 flags a producer that pushes via the InfluxDB line protocol (/write)" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  cat > "$tmp/scripts/influx-pusher.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'influx_pushed_metric 1\n' | curl -fsS --data-binary @- "http://vmsingle:8428/write"
+SH
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'influx-pusher.sh'
+}
+
+@test "mode C G-1 flags a producer whose VM URL is synthesized from variables (no literal endpoint path)" {
+  # 경로 조각이 파일에 안 보여도 호스트 + 쓰기 동사로 잡아야 한다.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  cat > "$tmp/scripts/synth-url-pusher.sh" <<'SH'
+#!/usr/bin/env bash
+VM="http://vmsingle:8428"
+EP="${VM}/${TARGET_PATH}"
+printf 'synth_pushed_metric 1\n' | curl -fsS --data-binary @- "$EP"
+SH
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'synth-url-pusher.sh'
+  echo "$output" | grep -q 'URL 합성'
+}
+
+@test "mode C G-1 fails closed when a producer payload cannot be parsed statically" {
+  # 등록된 생산자라도 무엇을 push하는지 정적으로 못 읽으면 모드 C가 그 메트릭을 영영 못 본다 → FAIL.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  cat > "$tmp/scripts/fake-files-backup.sh" <<'SH'
+#!/usr/bin/env bash
+# 페이로드를 파일에서 읽어 그대로 전송 — 메트릭 이름을 정적으로 해석할 수 없다.
+curl -fsS --data-binary @/var/tmp/payload.txt "http://vmsingle:8428/api/v1/import/prometheus"
+SH
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '정적으로 해석할 수 없다'
+}
+
+@test "mode C G-1 does not mistake read-only vmsingle consumers for producers (no false positives)" {
+  # homepage 위젯·grafana·게이트처럼 **질의만** 하는 소비자는 생산자가 아니다(쓰기 신호 부재).
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  mkdir -p "$tmp/platform/consumer/prod"
+  cat > "$tmp/platform/consumer/prod/widget.yaml" <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: widget }
+data:
+  services.yaml: |
+    - Observability:
+        - Metrics:
+            widget:
+              type: prometheus
+              url: http://vmsingle:8428
+              query: http://vmsingle:8428/api/v1/query?query=up
+              export: http://vmsingle:8428/api/v1/export
+YAML
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
 @test "mode C fails when a push producer is not in the registry (completeness guard)" {
   # 새 push exporter를 추가했는데 레지스트리에 메트릭을 등록하지 않으면 다음 사람이 같은 함정에 빠진다.
   tmp="$(mktemp -d)"

@@ -41,6 +41,12 @@
 //       교차검증과 생산자 발견을 동시에 우회한다. → schedule은 **판별 가능한 소스**다: `cron`(레포 내
 //       CronJob — 파일 부재/파싱불가 = FAIL, 주기는 여기서만 파생) 또는 `external`(레포 밖 스케줄 —
 //       상수 + 근거 필수).
+//   G-1 생산자 발견이 단일 엔드포인트에 묶임: `api/v1/import` 문자열 하나로 찾으면 remote_write(`/api/v1/write`)·
+//       InfluxDB(`/influx`)·datadog·opentsdb·vmagent 경유·**URL 합성**(호스트가 변수) push가 **발견 자체를**
+//       우회한다. → 두 신호로 넓혔다: (1) VM 수집 경로 조각, (2) vmsingle/vmagent 호스트 + 쓰기 동사
+//       (`--data-binary`/`-X POST`/`remoteWrite` 등). 후보인데 **페이로드를 정적으로 못 읽으면 FAIL**(fail-closed).
+//       읽기 전용 소비자(homepage 위젯·grafana·netpol)는 쓰기 신호가 없어 후보가 되지 않는다 —
+//       읽기 경로 "제외 목록"은 두지 않는다(제외 목록 자체가 우회 경로다).
 //
 // 한계(의도적 — 여전히 못 잡는 것):
 //  - 정적 패턴 검사라 remediation의 **정확성**은 보장하지 않는다. 모드 A의 집계자는 `max`여야 한다 —
@@ -57,6 +63,11 @@
 //  - 생산자 메트릭 추출은 **exposition 페이로드 조립부의 알려진 형태**만 인식한다(printf 포맷 문자열 ·
 //    `VAR="${VAR}name{…} val\n"` 누적). 추출 결과가 0이면 **fail-closed**(FAIL)지만, 헬퍼로 이름을 조립하는
 //    형태에서 **일부만** 인식되는 경우는 놓칠 수 있다 → 새 생산자는 알려진 형태로 쓰거나 EXPO_RE를 넓혀라.
+//  - 생산자 발견은 **이 레포 안**만 본다: (a) **앱 레포(`ukyi-app/*`)가 직접 push**하면 여기 스캔 범위 밖이다
+//    (앱 메트릭을 알림 룰에서 읽으려면 레지스트리에 수동 등재해야 한다), (b) 호스트·수동 실행처럼 레포에
+//    코드가 없는 push, (c) 호스트도 경로도 **전부** 변수/시크릿에 담겨 파일에 아무 신호가 없는 경우.
+//  - `PRODUCER_EXEMPT`(vmagent/vmalert 릴레이)는 사유가 강제되지만 **면제 자체가 신뢰 지점**이다 — 새 항목은
+//    리뷰에서 "정말 고정 메트릭 집합이 없는가"를 물어야 한다.
 //  - 모드 C의 record 체인: 기록룰이 rollup을 착용하면 그 **record명**은 연속 시리즈라 이를 참조하는 alert는
 //    검사 대상이 아니다(push 메트릭명만 매칭 — 이중 계산 없음). 기록룰이 맨 참조면 결함은 **기록룰 1건**으로만
 //    보고된다.
@@ -90,10 +101,37 @@ const SET_OP_RE = /(?:^|[^\w])(and|or|unless)\s*$/;
 const BIN_OP_RE = /(?:==|!=|>=|<=|[+\-*/%^]|>|<)\s*$/;
 
 // ── 모드 C 상수 ──
-// VictoriaMetrics push 엔드포인트 — 생산자의 지문(완전성 가드가 이걸로 스캔한다).
-const IMPORT_NEEDLE = "api/v1/import";
-// 자기 참조 제외: 이 파일이 needle을 문자열 리터럴로 들고 있다.
+// **생산자 발견 신호**(G-1). `api/v1/import` 문자열 하나로 찾으면 remote_write·influx·datadog·opentsdb·
+// vmagent 경유·URL 합성 push가 **발견 자체를 우회**한다 → 우리가 막으려던 fail-open이 그대로 남는다.
+// 두 갈래로 찾는다: (1) VM 수집(쓰기) 엔드포인트 경로 조각, (2) vmsingle/vmagent 호스트 + 쓰기 요청 동사
+// (URL이 변수로 합성돼 경로가 안 보여도 잡힌다).
+const WRITE_PATH_RES: RegExp[] = [
+  /api\/v1\/import(?:\/[a-z]+)?/,   // /api/v1/import{,/prometheus,/csv,/native}
+  /api\/v1\/write/,                 // Prometheus remote_write
+  /\/influx(?:\/|\b)/,              // InfluxDB 라인 프로토콜(/write · /influx/api/v2/write)
+  /\/datadog(?:\/|\b)/,
+  /\/opentsdb(?:\/|\b)/,
+];
+const VM_HOST_RES: RegExp[] = [/\bvmsingle\b/, /\bvmagent\b/, /:8428\b/, /:8429\b/];
+const WRITE_VERB_RES: RegExp[] = [
+  /--data-binary/, /--data-raw/, /--data\s+@/, /\s-d\s+@/, /-X\s*POST/, /--request\s+POST/,
+  /remoteWrite/, /remote_write/,
+];
+// ★ 읽기 전용 소비자(homepage 위젯·grafana 데이터소스·netpol·게이트 스크립트)는 위 신호가 **없다** —
+//   `/api/v1/query`·`/export`·`/series`·`/rules`는 쓰기 신호가 아니라 애초에 후보가 되지 않는다.
+//   읽기 경로 "제외 목록"을 두지 않는 이유: 제외 목록 자체가 우회 경로가 된다(읽기 경로로 위장한 push는
+//   불가능하므로 신호를 **양성 목록**으로만 두는 편이 엄격하다).
+// 자기 참조 제외: 이 파일이 신호 문자열들을 리터럴로 들고 있다.
 const SELF = "tools/check-alert-rules.ts";
+
+// VM에 쓰지만 **큐레이트 메트릭 생산자가 아닌** 인프라 릴레이 — 고정된 메트릭 이름 집합이 없다(시계열
+// 이름의 소유자가 딴 데 있다). 사유 필수(무근거 면제 금지). 새 항목은 반드시 리뷰 대상이다.
+const PRODUCER_EXEMPT: Record<string, string> = {
+  "platform/victoria-stack/prod/vmagent.yaml":
+    "스크레이프 릴레이 — remoteWrite로 전달만 한다(메트릭 이름은 스크레이프 타깃이 소유). push 주기 = 스크레이프 간격(≤ 룩백)이라 모드 C 대상이 아니다.",
+  "platform/victoria-stack/prod/vmalert.yaml":
+    "recording rule 결과 remoteWrite — 이름은 룰 파일이 소유하고 이 린터가 직접 검사한다. 기록 주기 = vmalert 평가 간격(≤ 룩백).",
+};
 // 생산자가 살 수 있는 표면(큐레이트) — 레포 전체 walk는 금물(루트에 scratch/워크트리 잔재가 있다).
 const PRODUCER_ROOTS = ["platform", "scripts", "infra", "tools", "apps", "ops", ".github"];
 const PRODUCER_EXT = [".yaml", ".yml", ".sh", ".ts", ".mts", ".js", ".mjs", ".py"];
@@ -285,17 +323,32 @@ function cronOf(rel: string): string {
   return found[0];
 }
 
-// 생산자 표면 walk — `api/v1/import` 호출부를 찾는다(하네스·벤더·자기 자신 제외).
-function walkProducers(rel: string, out: string[]): void {
+// 이 파일이 VM에 **쓰는가**? 신호(사유 문자열)를 돌려준다. 빈 문자열 = 생산자 후보 아님.
+function writeSignal(text: string): string {
+  for (const re of WRITE_PATH_RES) {
+    const mt = re.exec(text);
+    if (mt) return `쓰기 엔드포인트 '${mt[0]}'`;
+  }
+  if (VM_HOST_RES.some((re) => re.test(text))) {
+    const verb = WRITE_VERB_RES.find((re) => re.test(text));
+    if (verb) return `vmsingle/vmagent 호스트 + 쓰기 요청('${(verb.exec(text) as RegExpExecArray)[0].trim()}') — URL 합성 push`;
+  }
+  return "";
+}
+
+// 생산자 표면 walk — VM에 쓰는 파일을 찾는다(하네스·벤더·자기 자신·룰 디렉토리 제외).
+// 룰 디렉토리는 **소비자** 표면이다(이 린터의 검사 대상) — 생산자로 오인하면 안 된다.
+function walkProducers(rel: string, out: Array<{ path: string; why: string }>): void {
   let ents;
   try { ents = readdirSync(`${ROOT}/${rel}`, { withFileTypes: true }); } catch { return; }
   for (const e of ents.sort((a, b) => a.name.localeCompare(b.name))) {
     const r = `${rel}/${e.name}`;
-    if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walkProducers(r, out); continue; }
-    if (!e.isFile() || r === SELF) continue;
+    if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name) && r !== RULES_DIR) walkProducers(r, out); continue; }
+    if (!e.isFile() || r === SELF || PRODUCER_EXEMPT[r]) continue;   // 면제는 사유와 함께 코드에 명시
     if (e.name.startsWith("test_") || e.name.endsWith(".bats")) continue;   // 하네스/픽스처는 생산자가 아니다
     if (!PRODUCER_EXT.some((x) => e.name.endsWith(x))) continue;
-    if (readFileSync(`${ROOT}/${r}`, "utf8").includes(IMPORT_NEEDLE)) out.push(r);
+    const why = writeSignal(readFileSync(`${ROOT}/${r}`, "utf8"));
+    if (why) out.push({ path: r, why });
   }
 }
 
@@ -444,12 +497,17 @@ const registryMetrics = new Set(REGISTRY.map((e) => e.metric));
 const producerViol: string[] = [];
 const pushPeriod = new Map<string, number>();   // 메트릭 → push 주기(초)
 
-// (a) 레지스트리 항목 검증: 생산자 실재 + 여전히 push + 그 메트릭을 실제로 발행 + 주기 판별.
+// 면제 목록은 사유가 있어야 한다(무근거 면제 = 우회 경로).
+for (const [p, why] of Object.entries(PRODUCER_EXEMPT)) {
+  if (!why.trim()) fatal(`PRODUCER_EXEMPT['${p}']에 사유가 없다 — 무근거 면제 금지`);
+}
+
+// (a) 레지스트리 항목 검증: 생산자 실재 + 여전히 VM에 씀 + 그 메트릭을 실제로 발행 + 주기 판별.
 for (const e of REGISTRY) {
   const pp = `${ROOT}/${e.producer}`;
   if (!existsSync(pp)) fatal(`레지스트리 생산자 파일 부재: ${e.producer}(${e.metric}) — 경로를 고치거나 항목을 지워라`);
   const text = readFileSync(pp, "utf8");
-  if (!text.includes(IMPORT_NEEDLE)) fatal(`${e.producer}: '${IMPORT_NEEDLE}' 호출이 사라졌다(${e.metric}) — 레지스트리 항목이 낡았다`);
+  if (!writeSignal(text)) fatal(`${e.producer}: VM 쓰기 호출이 사라졌다(${e.metric}) — 레지스트리 항목이 낡았다`);
   if (!extractMetrics(text).includes(e.metric)) {
     producerViol.push(`${e.producer} — 레지스트리 메트릭 '${e.metric}'을 더는 push하지 않는다(이름 변경/삭제? 추출 실패?)`);
   }
@@ -458,20 +516,22 @@ for (const e of REGISTRY) {
     : e.schedule.periodSec);
 }
 
-// (b) 완전성 가드: 생산자 표면을 스캔해 **파일 단위 + 메트릭 단위** 등록을 강제(F-3).
-const foundProducers: string[] = [];
-for (const root of PRODUCER_ROOTS) walkProducers(root, foundProducers);
+// (b) 완전성 가드: VM에 쓰는 표면을 전부 스캔해 **파일 단위 + 메트릭 단위** 등록을 강제(F-3·G-1).
+const found: Array<{ path: string; why: string }> = [];
+for (const root of PRODUCER_ROOTS) walkProducers(root, found);
+const foundProducers = found.map((x) => x.path);
 const registeredProducers = new Set(REGISTRY.map((e) => e.producer));
-for (const p of foundProducers) {
+for (const { path: p, why } of found) {
   const metrics = extractMetrics(readFileSync(`${ROOT}/${p}`, "utf8"));
   if (!registeredProducers.has(p)) {
-    producerViol.push(`${p} — '${IMPORT_NEEDLE}'로 push하는데 레지스트리에 없는 생산자` +
-      (metrics.length ? ` (발행 메트릭: ${metrics.join("·")})` : " (메트릭 추출 실패 — 지원 형식 밖)"));
+    producerViol.push(`${p} — VM에 쓰는데(${why}) 레지스트리에 없는 생산자` +
+      (metrics.length ? ` (발행 메트릭: ${metrics.join("·")})` : " (페이로드 정적 해석 불가 — 아래 fail-closed 참조)"));
     continue;
   }
+  // fail-closed: 쓰기는 하는데 무엇을 쓰는지 정적으로 못 읽으면 모드 C가 그 메트릭을 영영 못 본다.
   if (!metrics.length) {
-    producerViol.push(`${p} — push 페이로드에서 메트릭 이름을 추출하지 못했다(지원 형식 밖) — fail-closed. ` +
-      `알려진 형태로 쓰거나 EXPO_RE를 넓혀라`);
+    producerViol.push(`${p} — VM에 쓰지만(${why}) push 페이로드를 **정적으로 해석할 수 없다**(메트릭 이름 추출 0) — ` +
+      `fail-closed. 알려진 exposition 형태로 쓰거나(printf 'name val\\n' · VAR="\${VAR}name{…} val\\n") EXPO_RE를 넓혀라`);
   }
   for (const m of metrics) {
     if (!registryMetrics.has(m)) {
