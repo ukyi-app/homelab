@@ -3,7 +3,7 @@ bugfix: image-digest-drift-never-fires
 invariant-class: bugfix
 entry-track: bug
 review-track: full
-pipeline-stage: structure-gate
+pipeline-stage: verification
 issue-tracker: local
 symptom: "ImageDigestDrift 알림이 60일간 한 번도 발화하지 않았다 — 드리프트 상태가 실제로 발생했는데도(app:image_digest_drift에 page 81샘플·trip-mate-api 84샘플) 통보가 0건이다. 배포 드리프트 감시견이 fail-open으로 죽어 있다."
 red-baseline: f4497d23d5bc44e254dca736382d0472b8633ef5
@@ -341,6 +341,13 @@ exact firing symptom"). 잔여 1건:
 | CR-1 | 중복된 파드 셀렉터 계약이 **무가드** — `label_replace(kube_pod_container_info…)`가 `unless` 우변과 `and` 가드에 바이트 쌍둥이로 존재하는데, 한쪽만 고치면 **가드의 app 집합이 조용히 좁아져 진짜 드리프트를 억제**한다(고치려던 fail-open의 재발 경로) | Standards | **Accept** | bats에 쌍둥이 단언 추가(app-추출 label_replace occurrence == 2 + 두 셀렉터 문자열 동일). 중복 자체는 유지 — 대안(새 recording rule=eval 순서 의존 / 우변 rollup=fail-open 거울상)이 더 나쁘다 |
 | CR-2 | `annotations.description`의 phantom caveat이 **stale** — 픽스 후 거짓이 되어 온콜을 오도 | Standards | **Accept**(의도적 예외) | 위 "의도적 예외 공개" 참조. 발화 조건 무변경이라 단일 flip 유지 |
 | CR-3 | 새로 라이브 확증된 함정 2건이 **`docs/traps-detail.md` SSOT·`docs/traps.md` 원장에 미등록**(레포 규약 위반) | Standards | **Accept** | traps-detail 섹션 2개 + AGENTS 인덱스 2줄 + 원장 행(guard=`tests/gates/vmalert-drift-firing-e2e.sh`). `make verify-traps` 통과 필수. 겸사겸사 r6 룰 주석을 불변식+포인터로 압축(지식이 두 사본으로 갈리는 것 방지) |
+
+### Codex Structure Review — r1: clean — verdict **approve**, 0 findings
+
+원문: "The 15m rollup fixes the cadence/lookback mismatch at the correct rule seam, while the RHS guard
+preserves silence during telemetry loss. The RED harness and frozen fixtures are byte-identical through
+the fix, characterization was not weakened, scope is contained, and no material coupling blocks the
+follow-ups." → **의도적 예외 2건(annotations.description 교체 · docs를 scope에 포함) 모두 수용**.
 
 **2라운드 캡 도달 → 인간 트리아지**: 잔여 P-3′는 플랜 **산문의 단언 스니펫** 결함이고, 실제 계약은
 B-1 구현이 작성하는 bats 코드다. 그 코드는 (a) characterizationCmd로 **매 증분 실행**되므로 추출

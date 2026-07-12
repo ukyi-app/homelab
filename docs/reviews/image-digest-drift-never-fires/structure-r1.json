@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "approve",
+  "summary": "Structure gate can approve. The 15m rollup fixes the cadence/lookback mismatch at the correct rule seam, while the RHS guard preserves silence during telemetry loss. The RED harness and frozen fixtures are byte-identical through the fix, characterization was not weakened, scope is contained, and no material coupling blocks the follow-ups.",
+  "planFile": "docs/bugfixes/image-digest-drift-never-fires.md",
+  "planInDiff": null,
+  "reviewedFileCount": 19,
+  "target": "branch diff against main",
+  "reviewedSha": "ac9c4f1611607006305c78f327f98f73666bf14f",
+  "reviewedTree": "51c770d55b328f39aa361c3d8f437e67c17c9630",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [
+    "Proceed to verification and commit the machine-owned GREEN record with green.sha before the release gate."
+  ]
+}
