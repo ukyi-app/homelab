@@ -65,11 +65,16 @@ spike-1:
 - 흡수하는 백로그: image-pin 리팩터 F-1 · files-bulk-ssd F-3(exporter 조용한 실패 fail-loud화) —
   이 기능이 그 방향과 겹친다.
 
-## 열린 설계 질문 (intake에서 결정)
+## 설계 결정 (intake — 사용자 확정 2026-07-12)
 
-- 부분 실패를 **하트비트 하나로** 다룰지(전체 실패 시에만 timestamp 미갱신) vs **카운트 메트릭 추가**로
-  앱 단위 실패까지 잡을지. 후자가 더 정확하나 exporter 스크립트 복잡도가 오른다.
-- staleness 임계·윈도: `*/10` 주기이므로 rollup 윈도 `[2h]`류(형제 `AdguardRewriteReconcilerStale`과
-  동형) + 임계 ≈ 3주기 누락(30~40분). severity(warning vs critical — 이건 감시견의 감시견이라 warning이
-  적절해 보이나 논의).
-- exporter의 조용한 실패 자체를 **fail-loud화**(F-1/F-3)까지 이 기능에 포함할지, 아니면 하트비트+알림만.
+- **감지 깊이 = 하트비트 + 앱 카운트**: `digest_exporter_last_success_timestamp`(전체 push 성공) +
+  앱 단위 카운트(`digest_exporter_apps_total` / `..._scraped` 류) → **전체 push는 됐는데 앱 절반이
+  skopeo 실패한 부분 고장까지** 구분한다. 하트비트만으로는 부분 실패를 놓친다.
+- **범위 = 하트비트 + 알림만** — exporter 조용한 실패 지점의 **fail-loud화(F-3)는 이 기능에 넣지
+  않는다**. 이번엔 관측을 추가해 조용한 실패를 "보이게"만 한다(curl 실패 시 하트비트 미갱신이 자연스럽게
+  알림을 부른다). Job 종료코드 변경(F-3)은 별도 — digest-exporter가 종료코드 바뀌어도 안전한지 별도 검토 필요.
+- **staleness 임계·윈도(PRD에서 확정)**: `*/10` 주기 → rollup 윈도 `[2h]`류(형제
+  `AdguardRewriteReconcilerStale`과 동형) + 임계 ≈ 3주기 누락(30~40분). severity = warning
+  (감시견의 감시견 — 페이징 긴급도는 낮으나 무시하면 ImageDigestDrift가 조용히 죽는다).
+- **앱 카운트 알림**: `apps_scraped < apps_total`이 지속되면 별도 경고(부분 고장). 이것도 push
+  메트릭이라 rollup 필수.
