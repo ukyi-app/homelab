@@ -238,6 +238,24 @@ _seed_frozen_fixture() {   # $1=root $2=픽스처 경로
   [ "$status" -eq 0 ]
 }
 
+# ── S-1: rollup 윈도 귀속은 메트릭을 **실제로 감싸는** 서브쿼리여야 한다(형제 윈도로 우회/오검출 금지) ──
+
+@test "mode C S-1 flags a decoy-window dead alert (sibling [1h:1m] but the wrapping window is [1m:10s])" {
+  # 실제로 ghcr를 감싸는 윈도는 [1m:10s](60s < 600s → 죽음)인데, 형제 서브쿼리 [1h:1m]을 보고 통과했었다.
+  _run_probe DecoyWindowProbe 'last_over_time(( max by (app) (last_over_time(kube_pod_container_info{namespace="prod"}[1h:1m])) and on (app) ghcr_latest_digest )[1m:10s]) > 0'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[모드 C:'
+  echo "$output" | grep -q '1m'
+}
+
+@test "mode C S-1 does not over-flag when the wrapping window is valid but a sibling is small" {
+  # 실제로 ghcr를 감싸는 윈도는 정당한 [15m:1m], 형제(딴 메트릭)의 [1m:10s]은 무관 → 오검출 0.
+  _run_probe ValidWrapProbe 'last_over_time(( max by (app) (last_over_time(kube_pod_container_info{namespace="prod"}[1m:10s])) and on (app) ghcr_latest_digest )[15m:1m]) > 0'
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
 # ── 모드 C가 fail-open으로 뚫렸던 4구멍(적대 검증에서 실증) — 동결 회귀 프로브 ──
 
 @test "mode C F-1 flags a push metric hidden in a __name__ equality selector" {
@@ -410,6 +428,75 @@ data:
               url: http://vmsingle:8428
               query: http://vmsingle:8428/api/v1/query?query=up
               export: http://vmsingle:8428/api/v1/export
+YAML
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+# ── G-2: URL 신호 자체가 우회 가능(호스트·경로가 전부 변수/시크릿) → **페이로드 모양**이 세 번째 신호 ──
+
+@test "mode C G-2 flags a producer whose VM URL comes entirely from a secret (payload shape is the signal)" {
+  # URL 리터럴이 파일에 **전혀 없다** — 그래도 exposition 페이로드를 POST하면 그건 메트릭 push다.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  cat > "$tmp/scripts/secret-url-pusher.sh" <<'SH'
+#!/usr/bin/env bash
+VM_URL="$(cat /etc/secret/vm-url)"
+printf 'sneaky_metric{a="1"} 42\n' | curl -fsS --data-binary @- "$VM_URL"
+SH
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'secret-url-pusher.sh'
+  echo "$output" | grep -q 'sneaky_metric'
+  echo "$output" | grep -q 'exposition'
+}
+
+@test "mode C G-2 does not flag non-exposition POSTs (AdGuard/telegram-style JSON API calls)" {
+  # 오탐 경계: exposition이 아닌 POST는 그냥 다른 API 호출이다 → 후보가 아니다(조용히 통과).
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  cat > "$tmp/scripts/json-api-caller.sh" <<'SH'
+#!/usr/bin/env bash
+curl -fsS -X POST -H 'Content-Type: application/json' \
+  -d "{\"target\":{\"domain\":\"${DOMAIN}\",\"answer\":\"${WANT}\"}}" \
+  "${API}/control/rewrite/update"
+curl -fsS -X POST --data-raw "chat_id=${CHAT}&text=${MSG}" "${TG}/sendMessage"
+SH
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+# ── S-2: EXPO_LINE(heredoc 본문의 진짜-개행 exposition 라인) — heredoc push 메트릭을 놓치지 않는다 ──
+
+@test "mode C S-2 flags a metric pushed via heredoc into an already-registered producer" {
+  # 등록된 digest-exporter가 heredoc으로 정적 리터럴 메트릭을 추가 push하면 잡아야 한다(printf만 보던 추출기 우회).
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  cat >> "$tmp/platform/fake/prod/digest-exporter.yaml" <<'YAML'
+    curl -fsS --data-binary @- 'http://vmsingle:8428/api/v1/import/prometheus' <<EOF
+    ghcr_stale_tag_count 7
+    EOF
+YAML
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'ghcr_stale_tag_count'
+  echo "$output" | grep -q '레지스트리에 없음'
+}
+
+@test "mode C S-2 does not extract metrics from an arbitrary-text heredoc (no false positives)" {
+  # exposition이 아닌 heredoc(로그/산문·매니페스트)은 메트릭으로 오인하면 안 된다.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  cat >> "$tmp/platform/fake/prod/digest-exporter.yaml" <<'YAML'
+    cat <<MSG
+    Deploying the digest exporter now.
+    All apps have been reconciled successfully.
+    replicas: 3
+    MSG
 YAML
   _lint "$tmp"
   rm -rf "$tmp"

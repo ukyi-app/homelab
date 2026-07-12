@@ -43,10 +43,22 @@
 //       상수 + 근거 필수).
 //   G-1 생산자 발견이 단일 엔드포인트에 묶임: `api/v1/import` 문자열 하나로 찾으면 remote_write(`/api/v1/write`)·
 //       InfluxDB(`/influx`)·datadog·opentsdb·vmagent 경유·**URL 합성**(호스트가 변수) push가 **발견 자체를**
-//       우회한다. → 두 신호로 넓혔다: (1) VM 수집 경로 조각, (2) vmsingle/vmagent 호스트 + 쓰기 동사
-//       (`--data-binary`/`-X POST`/`remoteWrite` 등). 후보인데 **페이로드를 정적으로 못 읽으면 FAIL**(fail-closed).
-//       읽기 전용 소비자(homepage 위젯·grafana·netpol)는 쓰기 신호가 없어 후보가 되지 않는다 —
-//       읽기 경로 "제외 목록"은 두지 않는다(제외 목록 자체가 우회 경로다).
+//       우회한다. → 신호 (1) VM 수집 경로 조각, (2) vmsingle/vmagent 호스트 + 쓰기 동사
+//       (`--data-binary`/`-X POST`/`remoteWrite` 등). 읽기 전용 소비자(homepage 위젯·grafana·netpol)는 쓰기
+//       신호가 없어 후보가 되지 않는다 — 읽기 경로 "제외 목록"은 두지 않는다(제외 목록 자체가 우회 경로다).
+//   G-2 URL 신호 자체가 우회 가능: `VM_URL="$(cat /etc/secret/vm-url)"`처럼 **호스트도 경로도 전부 변수/시크릿**
+//       이면 (1)·(2) 어느 쪽도 안 걸린다. → **페이로드 모양**이 세 번째 신호다: 쓰기 동사 + Prometheus
+//       exposition 페이로드 조립(= exposition 추출 성공(EXPO_INLINE·EXPO_LINE))이면 URL이 어디서 오든 **메트릭 push다**.
+//       판정표: [URL 있음·추출 성공]=생산자 / [URL 있음·추출 실패]=**fail-closed FAIL**(VM에 쓰는 게 확실한데
+//       해석 불가) / [URL 없음·쓰기동사+추출 성공]=생산자 / [URL 없음·추출 실패]=후보 아님(exposition이 아닌
+//       그냥 다른 API 호출 — AdGuard API JSON·telegram·alertmanager는 조용히 통과).
+//   S-1 rollup 윈도 귀속이 위치 기반: 메트릭에 직접 `[W]`가 없으면(서브쿼리 안 맨몸) 폴백이 owner 본문에서
+//       **아무 형제 서브쿼리의 첫 `[W:step]`**를 긁어 검증했다 → 미끼 윈도(`[1h:1m]`)로 죽은 알림이 통과하고,
+//       역으로 정당한 룰이 형제의 작은 윈도로 오검출됐다. → `rollupWindow`가 **메트릭을 실제로 감싸는**
+//       depth-0 종료 서브쿼리만 집는다(스코프 인식). 실 레포 `app:image_digest_drift`가 다중 서브쿼리 중첩.
+//   S-2 heredoc 메트릭 누락: `EXPO_RE`가 **진짜 개행**을 못 봐서 heredoc(`<<EOF\nname 7\nEOF`)으로 push하는
+//       정적 리터럴 메트릭을 놓쳤다(파일에 다른 메트릭이 있으면 fail-closed도 안 걸림). → `EXPO_LINE`(줄 전체를
+//       `name{labels} value [ts]$`로 앵커링)을 추가. 임의 셸 텍스트의 줄-시작 단어 오탐은 값+줄끝 앵커로 차단.
 //
 // 한계(의도적 — 여전히 못 잡는 것):
 //  - 정적 패턴 검사라 remediation의 **정확성**은 보장하지 않는다. 모드 A의 집계자는 `max`여야 한다 —
@@ -60,12 +72,15 @@
 //        타임스탬프-값 하트비트(r4의 `time() - last_over_time(…)`)엔 상한이 없다 → 이 비대칭은 린터가
 //        구분 못 한다. cf. `docs/traps-detail.md` 「rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭」.
 //  - **동적으로 합성된 메트릭명**(`label_replace`로 만든 이름, 변수 조립)은 정적으로 추적 불가.
-//  - 생산자 메트릭 추출은 **exposition 페이로드 조립부의 알려진 형태**만 인식한다(printf 포맷 문자열 ·
-//    `VAR="${VAR}name{…} val\n"` 누적). 추출 결과가 0이면 **fail-closed**(FAIL)지만, 헬퍼로 이름을 조립하는
-//    형태에서 **일부만** 인식되는 경우는 놓칠 수 있다 → 새 생산자는 알려진 형태로 쓰거나 EXPO_RE를 넓혀라.
-//  - 생산자 발견은 **이 레포 안**만 본다: (a) **앱 레포(`ukyi-app/*`)가 직접 push**하면 여기 스캔 범위 밖이다
-//    (앱 메트릭을 알림 룰에서 읽으려면 레지스트리에 수동 등재해야 한다), (b) 호스트·수동 실행처럼 레포에
-//    코드가 없는 push, (c) 호스트도 경로도 **전부** 변수/시크릿에 담겨 파일에 아무 신호가 없는 경우.
+//  - 생산자 메트릭 추출은 **exposition 페이로드 조립부의 알려진 형태**만 인식한다: 인라인(printf 포맷 ·
+//    `VAR="${VAR}name{…} val\n"` 누적)과 **heredoc(진짜 개행 줄)**(S-2). 추출 0이면 **fail-closed**(FAIL)지만,
+//    이 세 형태 밖(예: 셸 배열을 loop로 join)이면 **일부만** 인식될 수 있다 → 알려진 형태로 쓰거나 EXPO_*를 넓혀라.
+//  - 생산자 발견은 **이 레포 안 · 텍스트로 조립되는 페이로드**만 본다:
+//    (a) **앱 레포(`ukyi-app/*`)가 직접 push**하면 여기 스캔 범위 밖이다 — 그 메트릭을 알림 룰에서 읽으려면
+//        레지스트리에 **수동 등재**해야 한다(등재 안 하면 모드 C가 그 메트릭을 안 본다).
+//    (b) 호스트·수동 실행처럼 **레포에 코드가 없는** push.
+//    (c) 클라이언트 **라이브러리**로 push하는 코드(protobuf remote_write SDK 등) — 페이로드가 문자열로
+//        조립되지 않아 추출기(EXPO_*)가 볼 게 없다. URL이 코드에 있으면 (1)·(2) 신호로는 잡힌다.
 //  - `PRODUCER_EXEMPT`(vmagent/vmalert 릴레이)는 사유가 강제되지만 **면제 자체가 신뢰 지점**이다 — 새 항목은
 //    리뷰에서 "정말 고정 메트릭 집합이 없는가"를 물어야 한다.
 //  - 모드 C의 record 체인: 기록룰이 rollup을 착용하면 그 **record명**은 연속 시리즈라 이를 참조하는 alert는
@@ -323,22 +338,37 @@ function cronOf(rel: string): string {
   return found[0];
 }
 
-// 이 파일이 VM에 **쓰는가**? 신호(사유 문자열)를 돌려준다. 빈 문자열 = 생산자 후보 아님.
-function writeSignal(text: string): string {
+// 이 파일이 메트릭을 push하는가? 신호를 돌려준다(null = 후보 아님).
+//   viaUrl=true  — URL로 VM에 쓰는 게 확실하다(경로 조각 또는 호스트+쓰기동사).
+//   viaUrl=false — **G-2 페이로드 신호**: URL이 전부 변수/시크릿이라 파일에 아무 URL 흔적이 없어도,
+//                  쓰기 동사 + Prometheus exposition 페이로드 조립이면 그건 메트릭 push다.
+//                  (URL 신호에 기대는 한 `VM_URL="$(cat /etc/secret/vm-url)"` 형태가 발견을 통째로 우회한다.)
+// 판정표: [URL 있음·추출 성공]=생산자 / [URL 있음·추출 실패]=fail-closed FAIL(VM에 쓰는데 해석 불가) /
+//         [URL 없음·쓰기동사+추출 성공]=생산자(G-2) / [URL 없음·추출 실패]=후보 아님(그냥 다른 API 호출).
+function producerSignal(text: string): { why: string; viaUrl: boolean } | null {
   for (const re of WRITE_PATH_RES) {
     const mt = re.exec(text);
-    if (mt) return `쓰기 엔드포인트 '${mt[0]}'`;
+    if (mt) return { why: `쓰기 엔드포인트 '${mt[0]}'`, viaUrl: true };
   }
+  const verbRe = WRITE_VERB_RES.find((re) => re.test(text));
+  if (!verbRe) return null;
+  const verb = (verbRe.exec(text) as RegExpExecArray)[0].trim();
   if (VM_HOST_RES.some((re) => re.test(text))) {
-    const verb = WRITE_VERB_RES.find((re) => re.test(text));
-    if (verb) return `vmsingle/vmagent 호스트 + 쓰기 요청('${(verb.exec(text) as RegExpExecArray)[0].trim()}') — URL 합성 push`;
+    return { why: `vmsingle/vmagent 호스트 + 쓰기 요청('${verb}') — URL 합성 push`, viaUrl: true };
   }
-  return "";
+  // exposition을 조립해 POST한다 = URL이 어디서 오든 메트릭 push다. 추출 성공이 곧 그 증거.
+  // (exposition이 아닌 POST — AdGuard API JSON·telegram·alertmanager — 은 추출 0이라 후보가 아니다.)
+  const metrics = extractMetrics(text);
+  if (metrics.length) {
+    return { why: `쓰기 요청('${verb}') + Prometheus exposition 페이로드 조립(${metrics.join("·")}) — URL이 변수/시크릿이어도 페이로드 모양이 push를 증명한다`, viaUrl: false };
+  }
+  return null;
 }
 
-// 생산자 표면 walk — VM에 쓰는 파일을 찾는다(하네스·벤더·자기 자신·룰 디렉토리 제외).
+// 생산자 표면 walk — 메트릭을 push하는 파일을 찾는다(하네스·벤더·자기 자신·룰 디렉토리 제외).
 // 룰 디렉토리는 **소비자** 표면이다(이 린터의 검사 대상) — 생산자로 오인하면 안 된다.
-function walkProducers(rel: string, out: Array<{ path: string; why: string }>): void {
+type Candidate = { path: string; why: string; viaUrl: boolean; metrics: string[] };
+function walkProducers(rel: string, out: Candidate[]): void {
   let ents;
   try { ents = readdirSync(`${ROOT}/${rel}`, { withFileTypes: true }); } catch { return; }
   for (const e of ents.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -347,22 +377,48 @@ function walkProducers(rel: string, out: Array<{ path: string; why: string }>): 
     if (!e.isFile() || r === SELF || PRODUCER_EXEMPT[r]) continue;   // 면제는 사유와 함께 코드에 명시
     if (e.name.startsWith("test_") || e.name.endsWith(".bats")) continue;   // 하네스/픽스처는 생산자가 아니다
     if (!PRODUCER_EXT.some((x) => e.name.endsWith(x))) continue;
-    const why = writeSignal(readFileSync(`${ROOT}/${r}`, "utf8"));
-    if (why) out.push({ path: r, why });
+    const text = readFileSync(`${ROOT}/${r}`, "utf8");
+    const sig = producerSignal(text);
+    if (sig) out.push({ path: r, why: sig.why, viaUrl: sig.viaUrl, metrics: extractMetrics(text) });
   }
 }
 
 // 생산자에서 **실제 push되는 메트릭 이름**을 추출한다(F-3). Prometheus exposition 페이로드 조립부의
 // 알려진 형태를 인식한다:
 //   printf 'name %s\n' …                     (이름이 따옴표 직후)
-//   printf 'a %s\nb %s\n' …                  (이름이 리터럴 `\n` 직후)
+//   printf 'a %s\nb %s\n' …                  (이름이 **리터럴** `\n` 직후 — 이스케이프 문자열)
 //   BODY="${BODY}name{labels} ${val}\n"      (이름이 `${VAR}` 확장 직후 — 라벨 안의 `${…}`도 허용)
-// 이름 뒤에는 (선택)라벨 블록 + 공백 + **값 토큰**(%s · $VAR · ${VAR} · 숫자)이 와야 한다 — 이 값 토큰
-// 요구가 일반 셸 문자열("vmsingle push failed …" 등)과 메트릭 라인을 가른다.
-const EXPO_RE = /(?:\\n|\$\{[A-Za-z_][A-Za-z0-9_]*\}|["'`])([a-z_][a-z0-9_]*)(?:\{(?:\$\{[^}]*\}|[^{}])*\})?[ \t]+(?:%[a-z]|\$\{?[A-Za-z0-9_]|\d)/g;
+//   <<EOF\nname{labels} 7\nEOF               (heredoc — 이름이 **진짜 개행** 직후, S-2)
+// 이름 뒤에는 (선택)라벨 블록 + 공백 + **값 토큰**이 와야 한다 — 이 값 토큰 요구가 일반 셸 문자열
+// ("vmsingle push failed …" 등)과 메트릭 라인을 가른다.
+// EXPO_INLINE = 문자열/변수 안에서 조립되는 형태(값 토큰 = %fmt · $var · 숫자).
+const EXPO_INLINE = /(?:\\n|\$\{[A-Za-z_][A-Za-z0-9_]*\}|["'`])([a-z_][a-z0-9_]*)(?:\{(?:\$\{[^}]*\}|[^{}])*\})?[ \t]+(?:%[a-z]|\$\{?[A-Za-z0-9_]|\d)/g;
+// EXPO_LINE = **진짜 개행**으로 시작하는 exposition 라인. 줄 전체를 `name{labels} value [ts]$`로 앵커링해
+// 좁힌다(값 뒤엔 선택 timestamp 하나만 오고 줄이 끝나야 한다). lookbehind/lookahead로 개행을 소비하지 않아
+// 연속 라인이 전부 잡힌다. **heredoc 본문에만** 적용한다 — shell에서 메트릭명이 진짜 개행으로 시작하는 곳은
+// heredoc뿐이고, 전역 적용하면 `return 1`·`exit 1`·`sleep 5`처럼 `단어 숫자` 셸 코드를 메트릭으로 오인한다.
+const EXPO_LINE = /(?<=^|\n)[ \t]*([a-z_][a-z0-9_]*)(?:\{(?:\$\{[^}]*\}|[^{}])*\})?[ \t]+(?:-?\d[\d.eE+-]*|%[a-z]|\$\{?[A-Za-z0-9_])(?:[ \t]+-?\d+)?[ \t]*(?=\n|$)/g;
+// heredoc 본문을 뽑는다: `<<[-~]?['"]?DELIM['"]?` … 뒤 라인부터 `DELIM`만 있는 줄 전까지(S-2).
+function heredocBodies(text: string): string[] {
+  const bodies: string[] = [];
+  // `(?<!<)` — `<<<`(here-string)를 heredoc으로 오인하지 않는다(단일 라인 입력이라 본문이 없다).
+  const open = /(?<!<)<<[-~]?\s*(['"]?)([A-Za-z_]\w*)\1/g;
+  for (let m = open.exec(text); m; m = open.exec(text)) {
+    const start = text.indexOf("\n", open.lastIndex);
+    if (start < 0) break;
+    const body: string[] = [];
+    for (const line of text.slice(start + 1).split("\n")) {
+      if (line.trim() === m[2]) break;   // 닫는 구분자(선택 들여쓰기)
+      body.push(line);
+    }
+    bodies.push(body.join("\n"));
+  }
+  return bodies;
+}
 function extractMetrics(text: string): string[] {
   const out = new Set<string>();
-  for (const mt of text.matchAll(EXPO_RE)) out.add(mt[1]);
+  for (const mt of text.matchAll(EXPO_INLINE)) out.add(mt[1]);
+  for (const body of heredocBodies(text)) for (const mt of body.matchAll(EXPO_LINE)) out.add(mt[1]);
   return [...out].sort();
 }
 
@@ -469,6 +525,29 @@ function rangeAt(s: string, from: number): string | null {
   return s.slice(j + 1, c).split(":")[0].trim();   // 서브쿼리 [W:step]도 앞이 W
 }
 
+// 메트릭 토큰을 **실제로 감싸는** rollup 윈도를 스코프 인식으로 찾는다(S-1). owner = 메트릭을 감싸는
+// 최내곽 함수(rollup). owner 인자를 종료하는 서브쿼리 `[W:step]`는 owner 본문에서 **paren-depth 0**에
+// 있고 메트릭 **뒤**에 온다(브래킷은 식 뒤에 붙으므로). 형제 서브쿼리(`[1h:1m]` 등)는 paren-depth ≥ 1에
+// 있어 절대 집히지 않는다 — 위치 기반 "본문 첫 [W]" 폴백이 미끼 윈도에 속던 버그를 없앤다.
+function rollupWindow(s: string, metricPos: number, metricLen: number, owner: { open: number; close: number }): string | null {
+  const direct = rangeAt(s, metricPos + metricLen);   // 메트릭에 직접 붙은 [W]
+  if (direct !== null) return direct;
+  const rel = metricPos - (owner.open + 1);            // 본문 내 메트릭 상대 위치
+  const body = s.slice(owner.open + 1, owner.close);
+  let depth = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === "(") depth++;
+    else if (c === ")") depth--;
+    else if (c === "[" && depth === 0 && i > rel) {   // 메트릭을 감싸는 depth-0 종료 서브쿼리
+      const close = body.indexOf("]", i);
+      if (close < 0) return null;
+      return body.slice(i + 1, close).split(":")[0].trim();
+    }
+  }
+  return null;
+}
+
 const denyMetrics = readList(DENYLIST).map((l) => l.split("#", 1)[0].trim()).filter(Boolean);
 
 // ── 레지스트리 로드 + 완전성 가드(모드 C 전처리) ──
@@ -507,7 +586,7 @@ for (const e of REGISTRY) {
   const pp = `${ROOT}/${e.producer}`;
   if (!existsSync(pp)) fatal(`레지스트리 생산자 파일 부재: ${e.producer}(${e.metric}) — 경로를 고치거나 항목을 지워라`);
   const text = readFileSync(pp, "utf8");
-  if (!writeSignal(text)) fatal(`${e.producer}: VM 쓰기 호출이 사라졌다(${e.metric}) — 레지스트리 항목이 낡았다`);
+  if (!producerSignal(text)) fatal(`${e.producer}: 메트릭 push 호출이 사라졌다(${e.metric}) — 레지스트리 항목이 낡았다`);
   if (!extractMetrics(text).includes(e.metric)) {
     producerViol.push(`${e.producer} — 레지스트리 메트릭 '${e.metric}'을 더는 push하지 않는다(이름 변경/삭제? 추출 실패?)`);
   }
@@ -516,22 +595,22 @@ for (const e of REGISTRY) {
     : e.schedule.periodSec);
 }
 
-// (b) 완전성 가드: VM에 쓰는 표면을 전부 스캔해 **파일 단위 + 메트릭 단위** 등록을 강제(F-3·G-1).
-const found: Array<{ path: string; why: string }> = [];
+// (b) 완전성 가드: push하는 표면을 전부 스캔해 **파일 단위 + 메트릭 단위** 등록을 강제(F-3·G-1·G-2).
+const found: Candidate[] = [];
 for (const root of PRODUCER_ROOTS) walkProducers(root, found);
 const foundProducers = found.map((x) => x.path);
 const registeredProducers = new Set(REGISTRY.map((e) => e.producer));
-for (const { path: p, why } of found) {
-  const metrics = extractMetrics(readFileSync(`${ROOT}/${p}`, "utf8"));
+for (const { path: p, why, viaUrl, metrics } of found) {
   if (!registeredProducers.has(p)) {
-    producerViol.push(`${p} — VM에 쓰는데(${why}) 레지스트리에 없는 생산자` +
+    producerViol.push(`${p} — 메트릭을 push하는데(${why}) 레지스트리에 없는 생산자` +
       (metrics.length ? ` (발행 메트릭: ${metrics.join("·")})` : " (페이로드 정적 해석 불가 — 아래 fail-closed 참조)"));
     continue;
   }
-  // fail-closed: 쓰기는 하는데 무엇을 쓰는지 정적으로 못 읽으면 모드 C가 그 메트릭을 영영 못 본다.
-  if (!metrics.length) {
+  // fail-closed: **VM에 쓰는 게 확실한데**(URL 신호) 무엇을 쓰는지 정적으로 못 읽으면 모드 C가 그 메트릭을
+  // 영영 못 본다. (URL 신호 없이 페이로드로만 잡힌 후보는 정의상 추출에 성공한 것이라 이 갈래가 아니다.)
+  if (viaUrl && !metrics.length) {
     producerViol.push(`${p} — VM에 쓰지만(${why}) push 페이로드를 **정적으로 해석할 수 없다**(메트릭 이름 추출 0) — ` +
-      `fail-closed. 알려진 exposition 형태로 쓰거나(printf 'name val\\n' · VAR="\${VAR}name{…} val\\n") EXPO_RE를 넓혀라`);
+      `fail-closed. 알려진 exposition 형태로 쓰거나(printf 'name val\\n' · VAR="\${VAR}name{…} val\\n") EXPO_INLINE·EXPO_LINE을 넓혀라`);
   }
   for (const m of metrics) {
     if (!registryMetrics.has(m)) {
@@ -654,8 +733,7 @@ function checkExpr(rel: string, name: string, expr: string): void {
           `irate/idelta/rate/increase/delta/deriv는 윈도 안 2샘플 이상을 요구해 push 메트릭엔 무력하다(가짜 픽스). ${fix}]`);
         continue;
       }
-      const w = rangeAt(mc, mt.index + metric.length)
-        ?? (/\[\s*([^\]:\s]+)\s*:[^\]]*\]/.exec(mc.slice(owner.open + 1, owner.close))?.[1] ?? null);
+      const w = rollupWindow(mc, mt.index, metric.length, owner);
       if (w === null) {
         viol.push(`${rel} ${name} [모드 C: ${metric}가 ${owner.name}() 안에 있으나 range 윈도 [W]가 없다 — ${fix}]`);
         continue;
