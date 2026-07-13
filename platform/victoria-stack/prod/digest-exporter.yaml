@@ -45,25 +45,45 @@ data:
       # ⚠️ SCRAPED 증가는 **반드시 이 검사 뒤**다 — 앞에 두면 skopeo가 전부 실패해도 scraped == configured로
       #    오보고되어 문법 검사·레지스트리 완전성·발화 e2e·라이브 전건성공 확인을 **전부 통과하면서** US2가
       #    조용히 깨진다(부분 고장이 영영 무성). 게이트: tests/gates/test_digest-exporter-producer.bats.
-      [ -z "$DIGEST" ] && continue
+      if [ -z "$DIGEST" ]; then
+        # ★ 조용한 스킵 금지 — DigestExporterScrapeIncomplete의 description이 "Job 로그를 보라"고 지시하므로
+        #   **어느 앱이 실패했는지**가 로그에 반드시 남아야 한다(skopeo stderr는 2>/dev/null로 버린다 —
+        #   그쪽엔 authfile 경로·레지스트리 응답이 섞여 나올 수 있어 정제된 한 줄만 낸다).
+        #   ⚠️ 자격증명·authfile 내용은 절대 출력하지 않는다. APP/REF는 공개 이미지 좌표라 안전하다.
+        #   ⚠️ 형식은 `key=value`로 쓴다 — `단어 <공백> $var` 형태는 모드 C 린터의 exposition 추출기
+        #      (EXPO_INLINE)가 메트릭 라인으로 **오인**해 레지스트리 완전성 가드가 fail-closed FAIL을 낸다.
+        echo "digest scrape failed: app=$APP ref=$REF" >&2
+        continue
+      fi
       SCRAPED=$((SCRAPED+1))
       # info gauge로 노출: digest는 label로 싣고 값은 1
       OUT="${OUT}ghcr_latest_digest{app=\"$APP\",digest=\"$DIGEST\"} 1 ${NOW}000\n"
     done
-    # ★ 하트비트(bare 시리즈 — 라벨 0, epoch 초). 의미론은 **"push 경로 생존"이지 "수집 성공"이 아니다** —
-    #   skopeo가 전건 실패해도(GHCR 장애·ghcr-read 만료) 이 줄은 반드시 나간다. 그래야 DigestExporterStale이
-    #   GHCR 장애를 "push 사망"으로 오귀속하지 않는다(수집 실패는 별개 알림의 소관 — 역할 분리).
-    #   같은 curl 페이로드에 실리므로 push가 실패하면 하트비트도 미적재된다(fail-closed).
-    #   bare여야 하는 이유: `time() - last_over_time(m[2h]) > 900 or absent(last_over_time(m[2h]))`에서 좌·우
-    #   브랜치가 같은 (빈) 라벨셋을 내야 시리즈 만료 시 알림 identity가 유지돼 for: pending이 리셋되지 않는다.
-    TS=$(date +%s)
-    OUT="${OUT}digest_exporter_last_success_timestamp ${TS}\n"
-    # ★ 수집 카운트 2개도 **bare 시리즈**(라벨 0)로 같은 페이로드에 싣는다 — 룰이 on()/ignoring() 없이 1:1
+    # ★ 수집 카운트 2개는 **bare 시리즈**(라벨 0)로 같은 페이로드에 싣는다 — 룰이 on()/ignoring() 없이 1:1
     #   스칼라 비교(scraped < configured)를 하므로 한쪽에만 라벨이 붙으면 매치가 통째로 사라져(빈 벡터)
     #   알림이 조용히 죽는다. exposition은 `OUT="${OUT}<이름> ${VAL}\n"` 형태를 지킬 것 — 이름을 변수로
     #   조립하면 모드 C 린터의 정적 추출기(EXPO_INLINE)가 못 읽어 fail-closed FAIL이 난다.
     OUT="${OUT}digest_exporter_apps_configured ${CONFIGURED}\n"
     OUT="${OUT}digest_exporter_apps_scraped ${SCRAPED}\n"
+    # ★★ 하트비트는 **페이로드의 마지막 줄**이어야 한다 — 순서가 곧 fail-closed 계약이다(순서 게이트:
+    #   tests/gates/test_digest-exporter-producer.bats "heartbeat is the LAST line").
+    #   왜: /api/v1/import/prometheus는 **스트리밍 인입**이라 요청이 중도 절단되면(파드 eviction·
+    #   activeDeadlineSeconds 만료·CURL_MAX_TIME 초과·vmsingle 재시작) 서버가 **읽은 접두부만 적재**한다.
+    #   하트비트가 카운트보다 앞에 있으면 "하트비트는 적재 / 카운트는 유실"이 가능해진다 →
+    #     · 신선한 하트비트 → DigestExporterStale 침묵
+    #     · 낡은 카운트가 last_over_time(...[2h])에 그대로 살아남음 → DigestExporterScrapeIncomplete 침묵
+    #   = push가 반복 절단되는데 **두 알림 모두 무성**(fail-open). 하트비트를 마지막에 두면 절단은 항상
+    #   하트비트부터 잃으므로 **하트비트 유실 → Stale 발화**로 fail-closed가 복원된다(post-commit 마커).
+    #   ⚠️ 요청을 2회로 쪼개는 대안은 채택하지 않는다 — curl 예산이 2×CURL_MAX_TIME이 되어 인-데드라인
+    #      부등식의 N_MAX가 7→5로 떨어진다(tests/gates/lib/digest-exporter-budget.sh).
+    #
+    #   하트비트 의미론은 **"push 경로 생존"이지 "수집 성공"이 아니다** — skopeo가 전건 실패해도
+    #   (GHCR 장애·ghcr-read 만료) 이 줄은 반드시 나간다. 그래야 DigestExporterStale이 GHCR 장애를
+    #   "push 사망"으로 오귀속하지 않는다(수집 실패는 별개 알림의 소관 — 역할 분리).
+    #   bare여야 하는 이유: `time() - last_over_time(m[2h]) > 900 or absent(last_over_time(m[2h]))`에서 좌·우
+    #   브랜치가 같은 (빈) 라벨셋을 내야 시리즈 만료 시 알림 identity가 유지돼 for: pending이 리셋되지 않는다.
+    TS=$(date +%s)
+    OUT="${OUT}digest_exporter_last_success_timestamp ${TS}\n"
     # ⚠️ push는 curl — quay.io/skopeo/stable 이미지에 wget 부재(라이브 검증에서 발각: || true가 127을 삼켜
     # 시리즈 0으로 무소음 사망). 실패는 비치명 유지하되 stderr로 가시화(Job 로그에서 추적 가능).
     # curl 플래그의 **순서는 계약이 아니다** — 게이트는 같은 호출 안에 -fsS·--data-binary @-·--max-time이

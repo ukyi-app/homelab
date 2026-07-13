@@ -18,7 +18,15 @@
 
 # ── 명시 상수(매니페스트에서 파생 불가 — 계약의 일부라 코드에 못박는다. 여기가 유일한 정의처다) ─────────
 # activeDeadlineSeconds는 **파드 생성부터** 재므로 스케줄+이미지 pull이 데드라인 **안에** 들어간다.
-DEB_POD_START_BUDGET_S=60   # 파드 스케줄 + 이미지 pull 예산
+#
+# ⚠️ DEB_POD_START_BUDGET_S는 **가정이지 강제된 값이 아니다** — k8s에는 이 잡의 startup에 상한을 거는
+#    수단이 없고(activeDeadlineSeconds는 startup을 **포함한** 총량 상한일 뿐), 매니페스트 어디에서도 파생되지
+#    않는다. 즉 N_MAX와 첫-하트비트 상한 계산은 "스케줄+이미지 pull ≤ 60s"라는 **관측 기반 가정** 위에 선다.
+#    ㆍ현재 여유: N=2에서 60 + 2×10 + 30 + 10 = 120 < 180(ADS) → startup이 실제로 120s까지 늘어져도 push가 산다.
+#    ㆍ가정이 깨져도 **fail-open이 아니다**: startup이 예산을 초과하면 Job이 ADS에 걸려 죽고 → 하트비트가
+#      미발행되고 → DigestExporterStale이 운다(fail-closed). 즉 최악은 "거짓 페이지"이지 "무성 실패"가 아니다.
+#    ㆍ강제 가능한 제약에서 파생하는 것(startup SLA 도입 또는 ADS/N_MAX 재산정)은 PRD Follow-up **F-7**.
+DEB_POD_START_BUDGET_S=60   # 파드 스케줄 + 이미지 pull 예산(관측 기반 **가정** — 위 ⚠️ 참조)
 DEB_EXEC_SLACK_S=10         # sed/head/셸 오버헤드
 
 # ── 파생값(deb_load가 채운다) ───────────────────────────────────────────────────────────────────────

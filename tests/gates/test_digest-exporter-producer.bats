@@ -50,17 +50,23 @@ printf '{"Digest": "sha256:%040dabc", "Name": "%s"}\n' 1 "$ref"
 SKOPEO
 
   # ── curl stub: push 페이로드(stdin) + argv 캡처 ──
+  # STUB_CURL_TRUNCATE가 설정되면 **스트리밍 인입 절단**을 흉내낸다 — /api/v1/import/prometheus는 스트리밍이라
+  # 요청이 중도 절단되면 서버가 **읽은 접두부만** 적재한다(= 마지막 줄이 잘려나간다). `sed '$d'`가 그 접두부다.
   cat > "$STUB/curl" <<'CURL'
 #!/bin/sh
 echo "$*" >> "$OUTDIR/curl.argv"
-cat > "$OUTDIR/payload.txt"
+if [ -n "${STUB_CURL_TRUNCATE:-}" ]; then
+  sed '$d' > "$OUTDIR/payload.txt"
+else
+  cat > "$OUTDIR/payload.txt"
+fi
 CURL
   chmod +x "$STUB/skopeo" "$STUB/curl"
 }
 
 # run.sh를 stub PATH로 실행한다. $1=APPS, 나머지는 env로 넘어온다.
 run_producer() {
-  OUTDIR="$OUTDIR" STUB_FAIL_APPS="${STUB_FAIL_APPS:-}" APPS="$1" \
+  OUTDIR="$OUTDIR" STUB_FAIL_APPS="${STUB_FAIL_APPS:-}" STUB_CURL_TRUNCATE="${STUB_CURL_TRUNCATE:-}" APPS="$1" \
     SKOPEO_TIMEOUT="${SKOPEO_TIMEOUT:-3s}" CURL_MAX_TIME="${CURL_MAX_TIME:-7}" \
     PATH="$STUB:$PATH" sh "$BATS_TEST_TMPDIR/run.sh"
 }
@@ -68,6 +74,12 @@ run_producer() {
 # 페이로드에서 **bare 게이지**(라벨 0)의 값을 뽑는다 — 부재/라벨 부착이면 빈 문자열이라 단언이 RED가 된다.
 # (grep -c는 0매치에서 exit 1이라 bats의 set -e에 걸린다 → sed로 값 자체를 뽑아 비교한다.)
 gauge() { sed -n "s/^$1 \([0-9][0-9]*\)\$/\1/p" "$OUTDIR/payload.txt"; }
+
+# 페이로드의 **마지막 비어있지 않은 줄**. printf "%b"라 파일은 개행으로 끝나므로 빈 줄을 걸러낸 뒤 tail한다
+# (trailing newline을 "마지막 줄"로 오인하지 않기 위함).
+payload_last_line() { sed -e '/^[[:space:]]*$/d' "$OUTDIR/payload.txt" | tail -n 1; }
+# 페이로드에서 패턴이 처음 나타나는 줄 번호(없으면 빈 문자열 → 비교가 RED가 된다).
+payload_lineno() { grep -n "$1" "$OUTDIR/payload.txt" | head -1 | cut -d: -f1; }
 
 @test "producer passes skopeo the global --command-timeout BEFORE the inspect subcommand" {
   run run_producer "page=ghcr.io/ukyi-app/page:sha-aaa"
@@ -168,4 +180,62 @@ gauge() { sed -n "s/^$1 \([0-9][0-9]*\)\$/\1/p" "$OUTDIR/payload.txt"; }
   [ "$status" -eq 0 ]
   run grep -q -- '--data-binary @-' "$OUTDIR/curl.argv"
   [ "$status" -eq 0 ]
+}
+
+# ── 하트비트 = post-commit 마커(페이로드 **순서**가 fail-closed 계약이다) ──────────────────────────────
+# /api/v1/import/prometheus는 **스트리밍 인입**이다 — 요청이 중도 절단되면(파드 eviction·activeDeadlineSeconds
+# 만료·CURL_MAX_TIME 초과·vmsingle 재시작) 서버는 **읽은 접두부만** 적재한다. 하트비트가 카운트보다 앞에 있으면
+# "하트비트는 적재 / 카운트는 유실"이 가능해지고, 그러면 신선한 하트비트가 DigestExporterStale을 침묵시키는
+# 동시에 낡은 카운트가 last_over_time(...[2h]) 안에 살아남아 DigestExporterScrapeIncomplete까지 침묵시킨다
+# (= push가 반복 절단되는데 두 알림 모두 무성 = fail-open). 하트비트를 **마지막 줄**에 두면 절단은 언제나
+# 하트비트부터 잃으므로 "하트비트 유실 → Stale 발화"라는 fail-closed가 복원된다.
+# ⚠️ 아래 두 레그가 없으면 그 순서는 조용히 되돌아간다(다른 어떤 게이트도 순서를 보지 않는다).
+
+@test "producer emits the heartbeat as the LAST payload line (post-commit marker)" {
+  run run_producer "page=ghcr.io/ukyi-app/page:sha-aaa trip-mate-api=ghcr.io/ukyi-app/trip-mate-api:sha-bbb"
+  [ "$status" -eq 0 ]
+  # 마지막 줄이 곧 하트비트다(빈 줄/trailing newline은 payload_last_line이 걸러낸다).
+  run payload_last_line
+  [ "$status" -eq 0 ]
+  [ "${output%% *}" = "digest_exporter_last_success_timestamp" ]
+  # 순서 단언: 카운트 2줄은 하트비트보다 **앞**에 있어야 한다(&& 체인 금지 — bash 3.2에서 침묵 통과한다).
+  HB="$(payload_lineno '^digest_exporter_last_success_timestamp ')"
+  CFG="$(payload_lineno '^digest_exporter_apps_configured ')"
+  SCR="$(payload_lineno '^digest_exporter_apps_scraped ')"
+  [ -n "$HB" ]
+  [ -n "$CFG" ]
+  [ -n "$SCR" ]
+  [ "$HB" -gt "$CFG" ]
+  [ "$HB" -gt "$SCR" ]
+}
+
+@test "a truncated push loses the heartbeat first so DigestExporterStale can still fire (fail-closed)" {
+  # curl stub이 접두부만 적재한다(마지막 줄 소실) = 스트리밍 절단. 하트비트가 마지막이므로 절단의 첫 희생자다.
+  STUB_CURL_TRUNCATE=1 run run_producer "page=ghcr.io/ukyi-app/page:sha-aaa trip-mate-api=ghcr.io/ukyi-app/trip-mate-api:sha-bbb"
+  [ "$status" -eq 0 ]
+  # 하트비트가 유실됐다 → 시리즈가 낡아 DigestExporterStale이 운다(무성 실패가 아니다).
+  run grep -q '^digest_exporter_last_success_timestamp ' "$OUTDIR/payload.txt"
+  [ "$status" -ne 0 ]
+  # 반대로 카운트는 접두부라 살아남는다 — 하트비트가 앞에 있었다면 이 관계가 뒤집혀 두 알림 모두 침묵했다.
+  [ "$(gauge digest_exporter_apps_configured)" = "2" ]
+  [ "$(gauge digest_exporter_apps_scraped)" = "2" ]
+}
+
+# ── 스크레이프 실패의 가시화(알림 description이 "Job 로그를 확인하라"고 지시한다) ──────────────────────
+@test "producer names the failing app on stderr when a skopeo scrape fails" {
+  # `run`은 stdout/stderr를 합치므로 stderr를 파일로 분리 캡처한다(무엇이 어디로 갔는지 못박기 위함).
+  STUB_FAIL_APPS="trip-mate-api" run_producer \
+    "page=ghcr.io/ukyi-app/page:sha-aaa trip-mate-api=ghcr.io/ukyi-app/trip-mate-api:sha-bbb" \
+    2> "$OUTDIR/stderr.txt"
+  # 실패한 앱이 식별된다(앱 이름 + 이미지 좌표).
+  run grep -q 'app=trip-mate-api' "$OUTDIR/stderr.txt"
+  [ "$status" -eq 0 ]
+  run grep -q 'ref=ghcr.io/ukyi-app/trip-mate-api:sha-bbb' "$OUTDIR/stderr.txt"
+  [ "$status" -eq 0 ]
+  # 성공한 앱은 실패로 보고되지 않는다(로그가 거짓말하지 않는다).
+  run grep -q 'app=page' "$OUTDIR/stderr.txt"
+  [ "$status" -ne 0 ]
+  # ⚠️ 자격증명·authfile은 절대 새지 않는다(skopeo stderr는 2>/dev/null로 버린다 — 정제된 한 줄만 낸다).
+  run grep -qE 'authfile|config\.json|dockerconfigjson' "$OUTDIR/stderr.txt"
+  [ "$status" -ne 0 ]
 }
