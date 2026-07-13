@@ -24,8 +24,17 @@ data:
     CURL_MAX_TIME="${CURL_MAX_TIME:-30}"
     NOW=$(date +%s)
     OUT=""
+    # ★ 수집 카운트(US2) — 하트비트와 **직교하는 축**이다. 하트비트는 "push 경로 생존"만 말하므로, push는
+    #   살아 있는데 앱 일부/전부의 skopeo 조회가 실패하는 **부분 고장**(GHCR 장애·ghcr-read 만료)은 아래
+    #   `[ -z "$DIGEST" ] && continue`로 조용히 스킵될 뿐 아무 신호도 나지 않는다. CONFIGURED(루프 반복 수) vs
+    #   SCRAPED(digest 획득 성공 수)를 함께 push해 DigestExporterScrapeIncomplete(r4)가 그 격차를 페이징한다.
+    #   ⚠️ POSIX sh: 카운터는 `N=$((N+1))` **대입 형태만** 쓴다 — `: $((N++))`는 결과 0에서 non-zero를 반환해
+    #      `set -e`가 스크립트를 죽인다(그 순간 하트비트도 못 나간다).
+    CONFIGURED=0
+    SCRAPED=0
     for entry in $APPS; do
       APP="${entry%%=*}"; REF="${entry#*=}"
+      CONFIGURED=$((CONFIGURED+1))
       # ⚠️ --command-timeout은 **글로벌 옵션**이므로 서브커맨드(inspect) **앞**에 둔다.
       #    (실측 2026-07-13: 핀된 v1.22.2는 cobra persistent flag 상속 덕에 `inspect` 뒤에 둬도 상한을
       #     강제한다 — 계획이 가정한 "뒤=무효"는 사실이 아니다. 그럼에도 앞 배치를 계약으로 못박는 이유는
@@ -33,7 +42,11 @@ data:
       #     cobra 플래그 상속이라는 구현 세부라 CLI 재구성 한 번에 사라질 수 있기 때문이다.
       #     게이트는 존재가 아니라 argv **순서**를 단언한다.)
       DIGEST=$(skopeo --command-timeout="$SKOPEO_TIMEOUT" inspect --authfile /auth/config.json --no-tags "docker://$REF" 2>/dev/null | sed -n 's/.*"Digest": "\(sha256:[a-f0-9]*\)".*/\1/p' | head -1 || true)
+      # ⚠️ SCRAPED 증가는 **반드시 이 검사 뒤**다 — 앞에 두면 skopeo가 전부 실패해도 scraped == configured로
+      #    오보고되어 문법 검사·레지스트리 완전성·발화 e2e·라이브 전건성공 확인을 **전부 통과하면서** US2가
+      #    조용히 깨진다(부분 고장이 영영 무성). 게이트: tests/gates/test_digest-exporter-producer.bats.
       [ -z "$DIGEST" ] && continue
+      SCRAPED=$((SCRAPED+1))
       # info gauge로 노출: digest는 label로 싣고 값은 1
       OUT="${OUT}ghcr_latest_digest{app=\"$APP\",digest=\"$DIGEST\"} 1 ${NOW}000\n"
     done
@@ -45,6 +58,12 @@ data:
     #   브랜치가 같은 (빈) 라벨셋을 내야 시리즈 만료 시 알림 identity가 유지돼 for: pending이 리셋되지 않는다.
     TS=$(date +%s)
     OUT="${OUT}digest_exporter_last_success_timestamp ${TS}\n"
+    # ★ 수집 카운트 2개도 **bare 시리즈**(라벨 0)로 같은 페이로드에 싣는다 — 룰이 on()/ignoring() 없이 1:1
+    #   스칼라 비교(scraped < configured)를 하므로 한쪽에만 라벨이 붙으면 매치가 통째로 사라져(빈 벡터)
+    #   알림이 조용히 죽는다. exposition은 `OUT="${OUT}<이름> ${VAL}\n"` 형태를 지킬 것 — 이름을 변수로
+    #   조립하면 모드 C 린터의 정적 추출기(EXPO_INLINE)가 못 읽어 fail-closed FAIL이 난다.
+    OUT="${OUT}digest_exporter_apps_configured ${CONFIGURED}\n"
+    OUT="${OUT}digest_exporter_apps_scraped ${SCRAPED}\n"
     # ⚠️ push는 curl — quay.io/skopeo/stable 이미지에 wget 부재(라이브 검증에서 발각: || true가 127을 삼켜
     # 시리즈 0으로 무소음 사망). 실패는 비치명 유지하되 stderr로 가시화(Job 로그에서 추적 가능).
     # curl 플래그의 **순서는 계약이 아니다** — 게이트는 같은 호출 안에 -fsS·--data-binary @-·--max-time이

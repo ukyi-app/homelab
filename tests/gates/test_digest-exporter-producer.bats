@@ -65,6 +65,10 @@ run_producer() {
     PATH="$STUB:$PATH" sh "$BATS_TEST_TMPDIR/run.sh"
 }
 
+# 페이로드에서 **bare 게이지**(라벨 0)의 값을 뽑는다 — 부재/라벨 부착이면 빈 문자열이라 단언이 RED가 된다.
+# (grep -c는 0매치에서 exit 1이라 bats의 set -e에 걸린다 → sed로 값 자체를 뽑아 비교한다.)
+gauge() { sed -n "s/^$1 \([0-9][0-9]*\)\$/\1/p" "$OUTDIR/payload.txt"; }
+
 @test "producer passes skopeo the global --command-timeout BEFORE the inspect subcommand" {
   run run_producer "page=ghcr.io/ukyi-app/page:sha-aaa"
   [ "$status" -eq 0 ]
@@ -81,6 +85,50 @@ run_producer() {
   [ "$status" -eq 0 ]
   # 전건 성공 → 앱마다 digest 라인
   [ "$(grep -c '^ghcr_latest_digest{' "$OUTDIR/payload.txt")" -eq 2 ]
+}
+
+# ── 수집 카운트(US2) — 하트비트와 **직교하는 축**이다 ────────────────────────────────────────────────
+# 하트비트는 "push 경로 생존"만 증명한다. push는 살아 있는데 앱 일부/전부의 skopeo 조회가 실패하는
+# **부분 고장**은 `[ -z "$DIGEST" ] && continue`로 조용히 스킵될 뿐이라 여전히 무성이다.
+# → configured(루프 반복 수) vs scraped(digest 획득 성공 수)를 함께 push하고 DigestExporterScrapeIncomplete가
+#   그 격차를 페이징한다. 카운터 증가 **위치**가 의미론 전부다: scraped를 빈-digest 검사 **앞**에 두면
+#   scraped == configured로 오보고되어 문법·레지스트리·replay·라이브 전건성공 확인을 전부 통과하면서
+#   US2가 조용히 깨진다. 아래 4입력이 그 위치를 못박는다(값을 **정확히** 단언 — 존재만 보지 않는다).
+# ⚠️ 두 게이지 모두 **bare**(라벨 0)여야 한다 — 룰이 on()/ignoring() 없이 1:1 스칼라 비교를 하므로
+#    한쪽에만 라벨이 붙으면 매치가 통째로 사라져(빈 벡터) 알림이 조용히 죽는다.
+
+@test "producer counts every configured app as scraped when all skopeo lookups succeed" {
+  run run_producer "page=ghcr.io/ukyi-app/page:sha-aaa trip-mate-api=ghcr.io/ukyi-app/trip-mate-api:sha-bbb"
+  [ "$status" -eq 0 ]
+  [ "$(gauge digest_exporter_apps_configured)" = "2" ]
+  [ "$(gauge digest_exporter_apps_scraped)" = "2" ]
+}
+
+@test "producer counts only the successful scrapes when some skopeo lookups fail" {
+  STUB_FAIL_APPS="trip-mate-api" run run_producer "page=ghcr.io/ukyi-app/page:sha-aaa trip-mate-api=ghcr.io/ukyi-app/trip-mate-api:sha-bbb"
+  [ "$status" -eq 0 ]
+  # ★ 이 레그가 카운터 위치를 못박는다 — scraped 증가가 빈-digest 검사 앞에 있으면 여기서 2가 나온다.
+  [ "$(gauge digest_exporter_apps_configured)" = "2" ]
+  [ "$(gauge digest_exporter_apps_scraped)" = "1" ]
+}
+
+@test "producer reports zero scraped apps while still emitting the heartbeat when every scrape fails" {
+  STUB_FAIL_APPS="page trip-mate-api" run run_producer "page=ghcr.io/ukyi-app/page:sha-aaa trip-mate-api=ghcr.io/ukyi-app/trip-mate-api:sha-bbb"
+  [ "$status" -eq 0 ]
+  [ "$(gauge digest_exporter_apps_configured)" = "2" ]
+  [ "$(gauge digest_exporter_apps_scraped)" = "0" ]
+  # GHCR 전면 장애에도 push 경로는 살아 있다 → 하트비트는 나가고(Stale 오귀속 방지) 카운트가 고장을 말한다.
+  run grep -qE '^digest_exporter_last_success_timestamp [0-9]{10}$' "$OUTDIR/payload.txt"
+  [ "$status" -eq 0 ]
+}
+
+@test "producer reports zero configured and zero scraped apps when APPS is empty" {
+  # zero-app(마지막 앱 teardown) = **의도된 침묵**(owner 결정 ④): 0 < 0이 거짓이라 알림이 안 운다.
+  # 그 침묵이 성립하려면 두 게이지가 실제로 0으로 **발행**돼야 한다(미발행이면 빈 벡터라 우연히 조용할 뿐).
+  run run_producer ""
+  [ "$status" -eq 0 ]
+  [ "$(gauge digest_exporter_apps_configured)" = "0" ]
+  [ "$(gauge digest_exporter_apps_scraped)" = "0" ]
 }
 
 @test "producer still emits the heartbeat when every skopeo scrape fails (push-path liveness, not scrape success)" {

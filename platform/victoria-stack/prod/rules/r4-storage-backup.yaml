@@ -257,6 +257,36 @@ data:
             annotations:
               summary: "digest-exporter 하트비트가 30분+ 침묵 — ImageDigestDrift 실명 위험"
               description: "digest-exporter CronJob(*/10)이 vmsingle에 하트비트를 못 보냅니다 — 크론 미실행/파드 기동 실패/push 경로 장애. ghcr_latest_digest 공급이 끊기면 ImageDigestDrift가 조용히 실명해(기록 룰 [15m] 윈도 만료) 이미지 드리프트를 놓칩니다. Job 로그와 vmsingle 도달성을 확인하세요."
+          # ★ digest-exporter 수집 카운트(US2) — 하트비트와 **직교하는 축**이다. 하트비트(위)는 "push 경로
+          #   생존"만 증명하므로, push는 살아 있는데 앱 일부(또는 전부)의 skopeo 조회가 실패하는 **부분 고장**
+          #   (GHCR 장애·ghcr-read 토큰 만료)은 여전히 조용하다 — run.sh가 `[ -z "$DIGEST" ] && continue`로 그
+          #   앱을 스킵할 뿐이라 해당 앱이 ImageDigestDrift 감시에서 **소리 없이 빠진다**. exporter가 같은
+          #   페이로드에 configured(설정 앱 수)/scraped(수집 성공 수)를 함께 싣고 그 격차를 여기서 페이징한다.
+          #
+          # ★ bare끼리의 1:1 매치라 on()/ignoring()이 **불필요**하다(쓰면 모드 B — raw 피연산자 422 위험).
+          #   양변 모두 rollup 필수: 10분 push(600s) > vmalert instant 룩백(5m)이라 한쪽만 맨 참조여도 그 변이
+          #   주기 후반에 사라져 비교가 통째로 빈 벡터가 된다(모드 C — 조용한 무발화).
+          #
+          # ★ absent() 가드를 **의도적으로 달지 않는다**: 전면 침묵(크론 미실행·push 사망)은 바로 위
+          #   DigestExporterStale이 이미 fail-closed로 잡는다. 여기 또 달면 같은 고장에 두 번 페이징한다
+          #   (FilesBulkSSDLow가 명시적으로 거부한 패턴).
+          #
+          # ★ **zero-app은 의도된 공백이다**(owner 결정 ④ — "왜 안 잡히지"로 헤매지 말 것): 마지막 앱을
+          #   teardown하면 APPS가 빈 문자열이 되어 configured=0·scraped=0이 push되고, `0 < 0`은 거짓이라 이
+          #   알림은 **침묵한다**. 앱이 0개면 감시할 대상 자체가 없으므로 그것이 정답이다 — `<`를 `<=`로 바꾸거나
+          #   `configured == 0` 가드를 덧붙이지 마라(둘 다 vmalert-digest-stale-firing-e2e.sh의 L6에서 죽는다).
+          #
+          # ★ for: 30m = 3주기 관용 — 단발 GHCR 블립(레지스트리 순간 5xx·네트워크 flap)을 흡수한다. 부트스트랩엔
+          #   무관하다(absent 가지가 없어 두 시리즈가 없는 동안 expr이 빈 벡터 → 무발화 = 설계상).
+          - alert: DigestExporterScrapeIncomplete
+            expr: |
+              last_over_time(digest_exporter_apps_scraped[2h])
+                < last_over_time(digest_exporter_apps_configured[2h])
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "digest-exporter가 설정된 앱 중 일부의 digest 수집에 실패"
+              description: "digest-exporter가 APPS에 설정된 앱 수보다 적은 수만 GHCR에서 digest를 가져왔습니다 — GHCR 장애이거나 ghcr-read 토큰이 만료됐을 가능성이 큽니다. 수집에서 빠진 앱은 ImageDigestDrift 감시가 조용히 실명하므로(그 앱만 시리즈가 끊깁니다) 이미지 드리프트를 놓칩니다. CronJob 로그에서 실패한 앱과 skopeo 오류를 확인하고 ghcr-read 자격을 점검하세요."
           # adguard *.home rewrite 셀프힐 리컨실러(메타갭 ① W2-A) 생존 — 리컨실러가 10분마다
           # adguard_rewrite_reconcile_timestamp를 push한다. 침묵(30분+ = 3주기 누락)이면 *.home 드리프트가
           # 무방비가 되므로 페이징. 10분 주기 push라 last_over_time[2h] 윈도 + absent가 fail-closed(push-metric 함정).
