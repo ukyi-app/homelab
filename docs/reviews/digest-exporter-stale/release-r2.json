@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "approve",
+  "summary": "Ship. R-1, R-3, and R-4 are substantively fixed, their verification targets the relevant failure modes, and the fixes introduce no new critical issue.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": null,
+  "reviewedFileCount": 34,
+  "target": "branch diff against main",
+  "reviewedSha": "827ad9439f74b16db6d9b59d186b5fbe88e357d6",
+  "reviewedTree": "7c2bf6986de9b051083da218a7fb25856f3252ee",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [
+    "After ArgoCD sync, perform the documented Alertmanager restart and running-config check, then record the live verification."
+  ]
+}
