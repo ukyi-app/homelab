@@ -1,0 +1,13 @@
+{
+  "regressionCmd": "DRIFT_E2E_LEGS=\"L9\" bash tests/gates/vmalert-drift-firing-e2e.sh",
+  "characterizationCmd": "DRIFT_E2E_LEGS=\"L1,L2,L3,L4,L5,L7,L8\" bash tests/gates/vmalert-drift-firing-e2e.sh",
+  "flips": [
+    {
+      "testId": "L9 attestation rebuild — identical deployed content must not page",
+      "symptomToken": "ImageDigestDrift FIRED while the deployed content is identical"
+    }
+  ],
+  "scope": ["platform/victoria-stack/prod/rules/r6-ci-staleness.yaml"],
+  "red": { "sha": "42100d1bdeb623697053aae4c944a1074dbf463d" },
+  "green": { "sha": "" }
+}
