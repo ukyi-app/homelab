@@ -1,7 +1,7 @@
 image:
   repo: ghcr.io/ukyi-app/page
-  tag: sha-4e62abae3c55b4069935eeed800fa0390e4f566c
-  digest: sha256:54211c26ac8b0503d7775625c8c3ee53bfec6021370ea6942e4bfb77338ebded
+  tag: sha-815abb1378bc924458299cf65237c691aeca1ddf
+  digest: sha256:7f175c75bded24d1235a2f60b57deb128df4498236166859ae22ccf2dc74d578
 kind: web
 replicas: 1
 resources:
