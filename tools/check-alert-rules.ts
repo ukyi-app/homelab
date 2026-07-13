@@ -187,7 +187,10 @@ const FILES_BACKUP = "scripts/backup-files-data.sh";
 const LAUNCHD_DAILY: Schedule = { kind: "external", periodSec: 86400, why: "호스트 launchd 일 1회(RPO=24h) — 레포 밖 스케줄" };
 
 const DEFAULT_REGISTRY: PushEntry[] = [
-  { metric: "ghcr_latest_digest", producer: DIGEST_EXPORTER, schedule: { kind: "cron", file: DIGEST_EXPORTER } },
+  // digest-exporter는 같은 curl 페이로드에 수집 결과(ghcr_latest_digest)와 자기관측 하트비트를 함께 싣는다.
+  // 하트비트 의미론 = **push 경로 생존**(수집 성공 아님) → DigestExporterStale(r4)이 이걸 읽는다.
+  ...["ghcr_latest_digest", "digest_exporter_last_success_timestamp"]
+    .map((metric): PushEntry => ({ metric, producer: DIGEST_EXPORTER, schedule: { kind: "cron", file: DIGEST_EXPORTER } })),
   ...["pvc_dir_size_bytes", "storage_tier_size_bytes", "storage_tier_avail_bytes", "pvc_du_last_success_timestamp"]
     .map((metric): PushEntry => ({ metric, producer: DU_EXPORTER, schedule: { kind: "cron", file: DU_EXPORTER } })),
   ...["adguard_rewrite_reconcile_timestamp", "adguard_rewrite_last_fix_timestamp"]

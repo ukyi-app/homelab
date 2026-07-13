@@ -57,6 +57,7 @@ data:
               {{- else if eq $name "CertExpiringSoon" }}{{ $title = "TLS 인증서 만료 임박" }}
               {{- else if eq $name "CertManagerCertNotReady" }}{{ $title = "TLS 인증서 NotReady" }}
               {{- else if eq $name "CertMetricsAbsent" }}{{ $title = "인증서 메트릭 부재" }}
+              {{- else if eq $name "DigestExporterStale" }}{{ $title = "digest-exporter 하트비트 정체" }}
               {{- else if eq $name "AdguardRewriteReconcilerStale" }}{{ $title = "adguard rewrite 리컨실러 정체" }}
               {{- else if eq $name "AdguardRewriteDriftFixed" }}{{ $title = "adguard rewrite 자동 수렴" }}
               {{- end -}}

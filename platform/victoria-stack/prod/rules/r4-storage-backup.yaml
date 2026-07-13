@@ -221,6 +221,42 @@ data:
             annotations:
               summary: "외장(bulk-ssd) 여유 15% 미만 또는 in-cluster 신호 소실"
               description: "du exporter가 본 bulk 티어 여유가 15% 미만이거나 storage_tier_avail_bytes{tier=bulk} 신호가 소실됐습니다 — W3에서 관측 TSDB가 bulk에 얹히므로 이전 착수 전 반드시 여유를 확인하세요(FilesBulkSSDLow의 in-cluster 짝)."
+          # ★ digest-exporter 자기관측(감시견의 감시견) — ImageDigestDrift(r6)의 **먹이 공급선**이 죽으면
+          #   그 알림이 조용히 실명한다(ghcr_latest_digest 시리즈가 끊긴 뒤 [15m] 윈도가 만료되면 좌변이 빈
+          #   벡터 → 드리프트가 있어도 무발화). exporter의 조용한 실패 3모드(크론 미실행·push 실패·파드 기동
+          #   실패)는 전부 **초록 Job(exit 0)** 이라 KubeJobFailed가 원리적으로 못 잡는다.
+          #   → exporter가 같은 curl 페이로드에 하트비트(digest_exporter_last_success_timestamp)를 함께 싣고,
+          #     그 침묵을 여기서 페이징한다. 하트비트 의미론은 **"push 경로 생존"이지 "수집 성공"이 아니다**
+          #     (skopeo 전건 실패에도 하트비트는 나간다 — 수집 실패는 별개 알림의 소관, 역할 분리).
+          #
+          # ★ 왜 별도 alertname인가: 감시 대상 룰(ImageDigestDrift)에 per-rule absent()를 덧붙이면 exporter
+          #   사망을 "이미지 불일치"로 **오귀속**한다(잘못된 원인 페이지 + TargetDown 중복) — 레포 규약이자
+          #   tests/gates/test_vmalert-config.bats가 강제하는 사항.
+          #
+          # ★ rollup [2h] 필수 — 10분 크론 push(600s) > vmalert instant 룩백(5m)이라 맨 참조는 매 주기 시야에서
+          #   사라져 for: pending이 영구 리셋된다(모드 C — ImageDigestDrift가 라이브 60일 무발화였던 바로 그
+          #   함정). absent도 반드시 absent(last_over_time(...)) 형태여야 한다(맨 absent()는 같은 이유로 무력).
+          #   ⚠️ 윈도 **상한은 없다** — 타임스탬프-값 하트비트에서 윈도는 "마지막 하트비트를 어디까지 뒤질까"라는
+          #   탐색 지평일 뿐이다. r6 ImageDigestDrift의 `W < for:` 상한은 **라벨-값 상태 게이지 전용**이며 여기
+          #   복사하면 누락 내성만 잃는다(docs/traps-detail.md 「rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭」).
+          #
+          # ★ T=900s · for:15m 분할이 load-bearing하다(총 30분 = 발화 시각 T0+30분은 고정):
+          #   for(900s) > **강제된** 최악 첫 하트비트 지연 840s = cron(600s) + activeDeadlineSeconds(180s)
+          #   + 컨트롤러 여유(60s) → 최초 배포 시 이력이 없어 absent가 즉시 pending에 들어가도 첫 하트비트가
+          #   반드시 for: 안에 도착해 리셋된다 → **롤아웃이 원인인 거짓 페이지가 구조적으로 불가능**하다.
+          #   그 840s 상한은 추정이 아니라 digest-exporter.yaml이 매니페스트로 강제한다(concurrencyPolicy:
+          #   Replace + activeDeadlineSeconds + skopeo/curl 타임아웃). 누가 크론을 늘리거나 데드라인을 키우면
+          #   tests/gates/vmalert-digest-stale-firing-e2e.sh의 preflight가 exit 2로 먼저 죽는다.
+          #   누락 내성은 분할과 무관 — 어느 분할이든 30분 연속 staleness(=3주기 누락)에서만 발화한다(플랩 없음).
+          - alert: DigestExporterStale
+            expr: |
+              (time() - last_over_time(digest_exporter_last_success_timestamp[2h])) > 900
+              or absent(last_over_time(digest_exporter_last_success_timestamp[2h]))
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "digest-exporter 하트비트가 30분+ 침묵 — ImageDigestDrift 실명 위험"
+              description: "digest-exporter CronJob(*/10)이 vmsingle에 하트비트를 못 보냅니다 — 크론 미실행/파드 기동 실패/push 경로 장애. ghcr_latest_digest 공급이 끊기면 ImageDigestDrift가 조용히 실명해(기록 룰 [15m] 윈도 만료) 이미지 드리프트를 놓칩니다. Job 로그와 vmsingle 도달성을 확인하세요."
           # adguard *.home rewrite 셀프힐 리컨실러(메타갭 ① W2-A) 생존 — 리컨실러가 10분마다
           # adguard_rewrite_reconcile_timestamp를 push한다. 침묵(30분+ = 3주기 누락)이면 *.home 드리프트가
           # 무방비가 되므로 페이징. 10분 주기 push라 last_over_time[2h] 윈도 + absent가 fail-closed(push-metric 함정).

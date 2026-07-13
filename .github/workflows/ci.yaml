@@ -105,6 +105,20 @@ jobs:
         # push하는데 룩백은 5m → 하루 1440분 중 5분만 보인다 → for: 30m(연속 61회 평가)에 구조적 도달 불가.
         # 형제 BulkStorageLow(rollup 착용)는 같은 매체·같은 결핍에 정상 발화한다 — 그 대조를 L4가 매 실행 증명한다.
         run: bash tests/gates/vmalert-bulkssd-firing-e2e.sh
+      - name: vmalert 발화 e2e — digest-exporter 하트비트 (감시견의 감시견)
+        # digest-exporter는 ImageDigestDrift의 **먹이 공급선**이다. exporter가 조용히 죽으면(크론 미실행·push
+        # 실패·파드 기동 실패 — 전부 초록 Job(exit 0)이라 KubeJobFailed가 원리적으로 못 잡는다) 기록 룰의
+        # [15m] 윈도가 만료돼 ImageDigestDrift가 **조용히 실명**한다(원 버그와 같은 실패 양식의 2차 실명).
+        # L1/L5=발화(stale·absent 두 가지) · L2=정상 침묵(대조 알림으로 vacuity 차단) · L3=결함 픽스처(하네스
+        # 이빨) · L7=최초 배포 거짓 페이지 불가(첫 하트비트가 강제 상한 840s에 도착). preflight가 부트스트랩
+        # 부등식을 매니페스트에서 파생해 강제(위반 = exit 2).
+        run: bash tests/gates/vmalert-digest-stale-firing-e2e.sh
+      - name: skopeo 실물 타임아웃 스모크 (핀된 이미지 + 제어된 블랙홀)
+        # PATH stub은 진짜 타임아웃을 증명할 수 없다(stub이 skopeo를 대체하므로 stub 자신을 테스트할 뿐).
+        # digest-exporter의 인-데드라인 예산(POD_START + N×SKOPEO_TIMEOUT + CURL_MAX_TIME + EXEC_SLACK <
+        # activeDeadlineSeconds) 전체가 "skopeo가 실제로 t에 끊긴다"는 전제 위에 서 있으므로, 그 전제를
+        # 핀된 이미지에 대해 직접 증명한다(응답 없는 TCP sink → 경과가 --command-timeout 값을 따라감).
+        run: bash tests/gates/skopeo-timeout-smoke.sh
       # app-shared .mts가 node strip-types(앱 레포 secret:seal 경로)에서도 실행됨을 required gate가 보장 (A.5 F1·pass3) —
       # 별도 잡이면 비-required라 무성 회귀라 gate 잡 안 스텝으로. node는 strip-types 실행용 의식적 예외(setup-bun ban 유일 예외).
       # CI는 현 LTS node 24로 실행(strip-types는 node 23.6+ 무플래그 기본). .mts 계약 하한은 여전히 node 22.18(앱 레포 secret:seal 경로).
