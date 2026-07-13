@@ -1,13 +1,12 @@
 {
-  "kind": "bugfix-verify-red",
+  "kind": "bugfix-verify-green",
   "bug": "image-digest-drift-false-positive",
-  "sha": "e9b69c3cdc5d3b96c8dd1a9ea54c6c91ae81c3b0",
-  "treeSha": "400c1b0e85d9690e555ff61089e970270b7cb11c",
+  "sha": "f9e738158dd93b5c09a1fe84504bc1b96c8c475e",
+  "treeSha": "410ca86560b05cc4657ccb8baeb3c516c20207ed",
   "regression": {
-    "exit": 1,
-    "failed": true,
-    "symptomTokenPresent": true,
-    "outputTail": "gen[attestation]: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee=19 page-6d9f7c8b4-abcde=361\n2026/07/13 11:05:40 INFO: metrics: disable exposing PSI metrics because of failed init: open /sys/fs/cgroup/cpu.pressure: no such file or directory\nFAIL L9 ImageDigestDrift FIRED while the deployed content is identical (firing=191, pending=40) — the pod spec pins the same GHCR index digest the exporter reports as latest, but containerd keeps reporting the OLD index digest in image_id because the arm64 child manifest is byte-identical (buildx attestation manifests are non-deterministic, so a source-identical rebuild mints a new index digest). Joining GHCR's index digest against image_id alone turns this permanent mismatch into a permanent page — compare against the deployed pin (image_spec) instead\nvmalert-drift-firing-e2e: 1 leg(s) FAILED (legs=L9)\n[preflight] W=15m → push(10m) ≤ W < for(20m) OK\n[params] vmalert=v1.145.0 vmsingle=v1.145.0 eval=30s lookback=5m(queryStep) push=10m for=20m\n[window] backfill 2026-07-13T08:00:00Z .. 2026-07-13T11:00:00Z | replay 2026-07-13T09:00:00Z .. 2026-07-13T10:55:00Z (115m)\n[legs] L9\n  [L9] deployed rules + attestation rebuild (pod spec pins latest index, containerd image_id still the old index) → record=231 firing=191 pending=40 (control ArgoCDOutOfSync firing=201)\n[elapsed] 16s\n"
+    "exit": 0,
+    "passed": true,
+    "outputTail": "[preflight] W=15m → push(10m) ≤ W < for(20m) OK\n[params] vmalert=v1.145.0 vmsingle=v1.145.0 eval=30s lookback=5m(queryStep) push=10m for=20m\n[window] backfill 2026-07-13T08:00:00Z .. 2026-07-13T11:00:00Z | replay 2026-07-13T09:00:00Z .. 2026-07-13T10:55:00Z (115m)\n[legs] L9\n  [L9] deployed rules + attestation rebuild (pod spec pins latest index, containerd image_id still the old index) → record=0 firing=0 pending=0 (control ArgoCDOutOfSync firing=201)\nPASS L9 no page after an attestation-only rebuild — the deployed content is identical (arm64 child manifest byte-identical) so the rule stays silent (firing=0, pending=0)\n[elapsed] 16s\nvmalert-drift-firing-e2e OK (preflight + 선택 레그 [L9] 통과 — ImageDigestDrift는 실제 드리프트에만 발화하고(교착 롤아웃 포함), 오발화/가짜픽스/KSM-장애-오귀속/과대윈도/attestation-재빌드는 차단)\n"
   },
   "characterization": {
     "exit": 0,
@@ -15,5 +14,5 @@
     "outputTail": "nc firing=201\nPASS L6 harness is alive — ArgoCDOutOfSync(for:15m) fired in the same replay (firing samples=201)\n  [L2] deployed rules + no drift → record=0 ALERTS series=0\nPASS L2 no false ImageDigestDrift when the running digest matches latest\n  [L3] deployed rules + coherent image bump → record=28 firing=0 pending=29\nPASS L3 no phantom page after a coherent image bump (pending=29, firing=0)\n  [L4] fixtures/r6-buggy-expr.yaml + sustained drift → record=120 firing=0 pending=132\nPASS L4 harness has teeth — the frozen buggy expr stays stuck in pending (pending=132, firing=0)\n  [L5] fixtures/r6-fakefix.yaml + sustained drift → record=231 firing=0 pending=254\nPASS L5 harness rejects the fake fix — bare 'or absent()' outside the rollup still cannot hold for: 20m (pending=254, firing=0)\n  [L7] deployed rules + RHS telemetry loss (no kube_pod_container_info) → record=0 firing=0 pending=0 (control ArgoCDOutOfSync firing=201)\nPASS L7 no page when the join RHS vanishes (KSM/scrape down) — the rule stays silent instead of blaming every app for an 'image mismatch' (firing=0, pending=0)\n  [L8] fixtures/r6-overwide-window.yaml (W=30m) + coherent image bump → record=58 firing=19 pending=40 (expected phantom ≈ 1500s > for 1200s)\nPASS L8 harness has teeth on the upper bound — an over-wide rollup window (W=30m) resurrects the pre-bump digest for ~1500s > for: 20m and phantom-pages (firing samples=19); this is exactly what L3 must keep out\n  [L10] deployed rules + stuck rollout (old pod running OLD, new pod ImagePullBackOff → image_spec=NEW / image_id=\"\") → record=231 firing=191 pending=40 (control ArgoCDOutOfSync firing=201)\nPASS L10 real drift still pages when a rollout is stuck — the only pod actually running the image serves the OLD digest and the new pod never materialized one (firing samples=191)\n[elapsed] 112s\nvmalert-drift-firing-e2e OK (preflight + 선택 레그 [L1 L2 L3 L4 L5 L7 L8 L10] 통과 — ImageDigestDrift는 실제 드리프트에만 발화하고(교착 롤아웃 포함), 오발화/가짜픽스/KSM-장애-오귀속/과대윈도/attestation-재빌드는 차단)\n"
   },
   "repro": null,
-  "note": "written by bugfix-status.mjs --verify-red (script-owned re-execution)"
+  "note": "written by bugfix-status.mjs --verify-flip (script-owned re-execution)"
 }

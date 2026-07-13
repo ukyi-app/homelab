@@ -3,11 +3,11 @@ bugfix: image-digest-drift-false-positive
 invariant-class: bugfix
 entry-track: incident
 review-track: standard
-pipeline-stage: verification
+pipeline-stage: release-gate
 issue-tracker: local
 symptom: "ImageDigestDrift{app=\"page\"}가 라이브에서 firing 중 — 그러나 배포된 컨테이너는 GHCR 최신과 바이트 동일한 arm64 이미지를 서빙하고 있다(실제 드리프트 없음). warning 라우트라 4시간마다 텔레그램 반복 통보되고, 진짜 드리프트가 나도 구분 불가."
 red-baseline: e9b69c3cdc5d3b96c8dd1a9ea54c6c91ae81c3b0
-bugfix-lock: red
+bugfix-lock: green
 first-increment: [B-1]
 increments: [B-1]
 spike-1:
