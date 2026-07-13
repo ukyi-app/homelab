@@ -1,11 +1,11 @@
 ---
 id: B-1
 title: r6 드리프트 룰의 조인 소스를 image_spec으로(셀렉터는 image_id 유지) + 정적 게이트 갱신
-status: open
+status: done
 blocked-by: [none]
 plan: docs/bugfixes/image-digest-drift-false-positive.md
 created: 2026-07-13
-closed:
+closed: 2026-07-13
 ---
 
 ## What to build
@@ -34,3 +34,9 @@ closed:
 ## Blocked by
 
 None - can start immediately
+
+## Result
+
+커밋 `381e001`. L9(오탐) **RED→GREEN**, L10(막힌 롤아웃)·L7(KSM 장애) **GREEN 유지** — 단일 flip 확인.
+비-테스트 변경은 r6 룰 1개뿐(B4 표면). 리뷰 결과 하드 위반 0, 저심각도 1건 반영(digest-핀 암묵 의존을
+룰 주석에 명시 — `check-image-pins.sh` 레인2가 유일 방어선이고 allowlist 등재 시 구멍이 열린다는 경고 포함).
