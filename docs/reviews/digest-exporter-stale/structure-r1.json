@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "approve",
+  "summary": "Approve the I-1 structure gate. No material macro-level issue was found: the registry, producer harness, r4 rule location, replay scenario/leg seam, and budget helper let I-2 add counts and L4/L6 behavior without structural rework. Tests exercise the recorded public seams rather than internal implementation.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": null,
+  "reviewedFileCount": 30,
+  "target": "branch diff against main",
+  "reviewedSha": "7fb3a766264868ca6a9fad6efd77a4a62bad6095",
+  "reviewedTree": "7881c0035a1933b0757a99e8835d3c98338580b7",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": []
+}
