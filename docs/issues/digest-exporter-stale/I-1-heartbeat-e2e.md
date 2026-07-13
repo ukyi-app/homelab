@@ -1,11 +1,11 @@
 ---
 id: I-1
 title: digest-exporter 하트비트 end-to-end — 자기관측 push + 지연 상한 강제 + DigestExporterStale 발화 증명
-status: open
+status: done
 blocked-by: [none]
 prd: docs/prds/digest-exporter-stale.md
 created: 2026-07-13
-closed:
+closed: 2026-07-13
 ---
 
 ## What to build
@@ -68,3 +68,40 @@ curl `--max-time`. 두 부등식이 성립해야 한다:
 ## Blocked by
 
 None - can start immediately
+
+## Result
+
+커밋 `5a64480`. 하트비트 → 룰 → 발화 증명 경로가 end-to-end로 섰다.
+
+- **producer**: `run.sh`가 bare `digest_exporter_last_success_timestamp`를 기존 push 페이로드에 실어
+  보낸다(fail-closed — curl 실패 시 하트비트도 미적재). 지연 상한을 매니페스트로 강제:
+  `concurrencyPolicy: Forbid → Replace`(레거시 무제한 Job 구멍 차단) + `activeDeadlineSeconds: 180`
+  + skopeo `--command-timeout`(글로벌 플래그, `inspect` 앞) + curl `--max-time`.
+- **알림**: r4 `DigestExporterStale` — `last_over_time[2h]` rollup + `absent(last_over_time(...))` 가드,
+  `T=900s`·`for: 15m` → **T0+30분 발화**. `for(900s) > 강제 상한 840s`라 최초 배포 거짓 페이지가
+  구조적으로 불가능하다.
+- **seam 4종**: 모드 C 레지스트리(양방향) · producer 행위 테스트(stub이 argv 순서 단언) ·
+  발화 e2e 5레그(L1 stale→발화 / L2 정상→침묵+대조알림 / L3 동결 결함픽스처→`firing==0 && pending>0` /
+  L5 absent 가지→발화 / L7 **부트스트랩**: 첫 샘플이 강제 상한 840s에 도착 → 무발화, pending=28로
+  비-vacuity 증명) · 핀된 skopeo **실물** 타임아웃 스모크(호스트 TCP sink 블랙홀, 실측 `3s→3초`·`9s→9초`).
+- **예산 SSOT**: `tests/gates/lib/digest-exporter-budget.sh` — 상수 정의 1곳, 파생 실패는 fail-closed.
+- **`?max_lookback` 핀은 load-bearing으로 실측 확정**: 핀을 빼면 L3(결함 픽스처)가 `pending=0`이 되어
+  거짓 GREEN이 난다(VM range 질의가 600s 구멍을 보간). 하네스 헤더에 기록.
+
+### 코드리뷰 발견 → 수정
+- **[HARD·fail-open]** 정적 게이트의 중간 복합 단언(`[ -n "$ST" ] && [ -n "$CT" ]`)이 `set -e`에서 침묵
+  통과 → 파생이 빈 값이어도 `BUDGET=70 < 180`으로 **green**이 되던 구멍(이 테스트가 막겠다던 바로 그
+  fail-open). fail-closed `deb_load`로 교체하고 **red 증명** 완료.
+- **[HARD·표준]** 스모크가 python을 셸 heredoc에 내장 → `tests/gates/tcp-blackhole-sink.py`로 분리
+  (`CONTRIBUTING.md` 금지 항목, 형제 관용구 `mock-telegram.py`).
+- **[중복]** 하네스 공통 코드(~40줄)를 `lib/vmalert-e2e.sh`로 승격(`vme_` 접두) — bulkssd/drift 게이트는
+  **0줄 변경**(F-5 범위 보존), 무회귀 실행 확인.
+- **[결합]** 프로덕션 argv를 구속하던 인접 grep을 순서-무관 존재 단언으로 완화.
+
+### 계획 전제 1건이 실측으로 반증됨
+plan 게이트 r9(N-4)의 "skopeo `--command-timeout`을 `inspect` 뒤에 두면 무효"는 **거짓**이다 —
+핀된 v1.22.2에서 그것은 **cobra persistent flag**라 서브커맨드가 상속한다(실측 `=3s`→3초, `=9s`→9초).
+argv 순서 계약은 유지하되(스모크가 실제로 증명한 배치이고, 뒤 배치의 수용은 CLI 재구성 한 번에 사라질 수
+있는 구현 세부다) PRD의 근거를 실측으로 교체했다.
+
+검증: `make ci` exit 0(bats 1203) · 신규 e2e 292s PASS · 스모크 PASS · bulkssd 무회귀 PASS.
