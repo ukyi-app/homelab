@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "No ship: the RED record matches red.sha and fails for L9 as claimed, but the plan introduces an uncharacterized fail-open for supported RollingUpdate deployments. Simpler alternative: retain the existing `image_id` repository selector as a materialization guard and change only the `label_replace` sources to `image_spec`.",
+  "planFile": "docs/bugfixes/image-digest-drift-false-positive.md",
+  "planInDiff": true,
+  "reviewedFileCount": 1,
+  "target": "working tree diff",
+  "reviewedSha": "9234a0db6e7248db94064962e41a2cf2edf6e9a8",
+  "reviewedTree": "5d8fcdcf789e3efa3174b2d40a07f7d5522c985a",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: the spec-only selector lets a non-running replacement suppress real drift",
+      "body": "Line 110 replaces the `image_id` selector with `image_spec`. The chart explicitly supports RollingUpdate, where an old ready Pod can remain while its replacement cannot pull the new image. KSM constructs `kube_pod_container_info` by pairing the spec image with status `imageID` without requiring a running container ([official source](https://github.com/kubernetes/kube-state-metrics/blob/main/internal/store/pod.go)); Kubernetes also classifies time spent pulling an image as Pending ([API reference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.29/)). The replacement can therefore advertise `image_spec=NEW` with an empty `image_id`; the planned RHS matches NEW and suppresses the alert although only OLD is running. The current selector excludes that replacement and continues detecting drift. L1 and L9 use single-Pod scenarios, so this second behavior flip is unprotected.",
+      "file": "docs/bugfixes/image-digest-drift-false-positive.md",
+      "line_start": 110,
+      "line_end": 110,
+      "confidence": 0.99,
+      "recommendation": "Add a preserved-contract leg containing an OLD running Pod plus a NEW pull-failed Pod with empty `image_id`, and require continued firing. Keep the twin `image_id=~\"ghcr…\"` selectors while extracting app/digest from `image_spec`, or explicitly join against running-container status.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Revise B-1 and the characterization suite to cover the failed RollingUpdate ordering before implementation.",
+    "Open question: should `ImageDigestDrift` remain a running-image alert or become desired-spec-only? The latter is a second behavior change and should move to gated-pipeline."
+  ]
+}
