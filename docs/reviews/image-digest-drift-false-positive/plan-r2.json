@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "No ship: R-1 is behaviorally resolved and the e9b69c3 RED/L10 evidence matches. However, the plan cannot satisfy the static gate it explicitly requires. The revised selector/source split is already the simplest safe behavioral fix; no open question remains.",
+  "planFile": "docs/bugfixes/image-digest-drift-false-positive.md",
+  "planInDiff": true,
+  "reviewedFileCount": 2,
+  "target": "working tree diff",
+  "reviewedSha": "e1ebc3ed4a2dafa33e6411cb34aeab87e2b4fcb4",
+  "reviewedTree": "f6eec4e6de9aa86832c4a49555dcd1f184071d8a",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "B-1 cannot pass the gate it names without an undeclared test change",
+      "body": "B-1 changes all app/digest extraction sources to `image_spec` and requires `test_digest-exporter.bats` to remain green, but the existing gate explicitly requires app extraction from `image_id` at lines 51 and 72–74. Following the stated rule-only step therefore leaves the gate red, forcing the implementer to depart from the plan or get stuck. This is directly coupled to the R-1 revision because the gate must distinguish the retained `image_id` selectors from the new `image_spec` extraction sources.",
+      "file": "docs/bugfixes/image-digest-drift-false-positive.md",
+      "line_start": 118,
+      "line_end": 118,
+      "confidence": 0.99,
+      "recommendation": "Extend B-1 to update `tests/gates/test_digest-exporter.bats`: require two identical `image_id` selectors, require both app extractions and the digest extraction to source `image_spec`, and update the corresponding rule comments. Keep test changes outside behavioral `scope[]`.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Amend B-1 with the required gate and rule-comment synchronization before implementation."
+  ]
+}
