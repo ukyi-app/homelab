@@ -1,11 +1,11 @@
 ---
 id: I-2
 title: 수집 카운트 end-to-end — apps_configured/apps_scraped push + DigestExporterScrapeIncomplete 발화 증명
-status: open
+status: done
 blocked-by: [I-1]
 prd: docs/prds/digest-exporter-stale.md
 created: 2026-07-13
-closed:
+closed: 2026-07-13
 ---
 
 ## What to build
@@ -49,3 +49,32 @@ closed:
 ## Blocked by
 
 - I-1 (레지스트리 관용구·룰 파일·발화 e2e 하네스·producer 행위 테스트 하네스를 세운다)
+
+## Result
+
+커밋 `56cf311`. 수집 성공을 하트비트와 **직교하는 축**으로 관측해 부분 고장의 침묵을 없앴다.
+
+- **producer**: `run.sh`가 bare 게이지 `digest_exporter_apps_configured`(루프 반복 수)/`_scraped`
+  (skopeo 성공 수)를 같은 payload에 싣는다. `SCRAPED` 증가는 `[ -z "$DIGEST" ] && continue` **뒤** —
+  앞에 두면 전건 실패에도 `scraped == configured`로 오보고되어 모든 게이트를 통과하면서 US2가 조용히
+  깨진다(그 위치가 곧 의미론이라 주석·테스트로 못박음).
+- **알림**: r4 `DigestExporterScrapeIncomplete` — 양변 rollup 스칼라 비교(`on()`/`ignoring()` 없음 →
+  모드 B 비대상), `for: 30m`, warning. **`absent` 미착용**(전면 침묵은 `DigestExporterStale`이 이미
+  fail-closed로 잡는다 — 중복 페이지 금지). zero-app 공백(owner 결정 ④)을 룰 주석에 명시.
+- **e2e**: L4(부분 실패 → 발화, 같은 replay에서 `DigestExporterStale firing=0`으로 **축 직교성까지 단언**)
+  · L6(0/0 → 무발화, 결정 ④를 락) 추가, L2를 두 알림 모두 `firing==0 AND pending==0`으로 확장.
+  **뮤테이션 검증**: `<`를 `<=`로 바꾸면 L2·L6이 죽는다(이빨 확인).
+- **producer 행위 테스트**: 입력 4종의 카운트 값을 정확히 단언(전건성공 2/2 · 부분실패 2/1 ·
+  전건실패 2/0 + 하트비트 발행 · zero-app 0/0).
+
+### 코드리뷰 발견 → 수정 (하드 위반 0)
+- **[fail-open]** `vme_to_s`가 빈 값을 받으면 산술에서 **0으로 평가돼 부등식이 조용히 참**이 되던 구멍 →
+  fail-closed(빈 값·비수치 = `vme_fault`). 형제 하네스 무회귀 확인.
+- **[fail-closed 구멍]** `for:` 추출에 가드가 없어 룰에서 `for:`가 사라지면 잡음 크래시 → `vme_alert_for`
+  신설 + 3곳 가드. red 증명(`for:` 삭제 → exit 2 HARNESS FAULT).
+- **[중복]** preflight rollup 3검사 → `vme_assert_rollup_ok`로 SSOT화, 레그 판정 뼈대 7중 복제 →
+  헬퍼 3개로 접음(진단 산문은 인자로 보존).
+- **[계약]** L4가 "하트비트 정상"을 **주장만** 하던 것을 단언으로 승격(오귀속 시 red).
+- **[잠복 버그]** `$VAR한글` 언바운드 트랩(bash가 멀티바이트를 변수명에 흡수) 인스턴스 제거.
+
+검증: `make ci` exit 0(bats 1207) · e2e **L1~L7 전부 PASS**(460s) · 스모크 PASS · bulkssd 무회귀 PASS.
