@@ -3,7 +3,7 @@ feature: digest-exporter-stale
 invariant-class: feature
 entry-track: feature
 review-track: full
-pipeline-stage: verification
+pipeline-stage: release-gate
 issue-tracker: local
 prd-published: true
 worktree: (none — 주 체크아웃 /Users/ukyi/workspace/homelab. 이 브랜치에 PRD·이슈 커밋이 이미 쌓여 있어 별도 워크트리가 같은 브랜치를 체크아웃할 수 없다)
