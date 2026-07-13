@@ -48,7 +48,18 @@ load_budget() {
   [ -n "$EXPR" ]                                                          # 추출 실패 = 즉시 FAIL(빈 문자열 false-green 차단)
   grep -qE 'max by \(app, digest\) \(' <<<"$EXPR"                         # 좌변 digest 라벨 보존(조인 양변 정렬)
   grep -qE 'last_over_time\(ghcr_latest_digest\[[0-9]+m\]\)' <<<"$EXPR"   # push(10m) 메트릭에 rollup 착용 — 없으면 5m 룩백에 구멍→영구 무발화
-  grep -q '"app", "$1", "image_id"' "$R"                                  # 우변 image_id→app 추출(k3s: image=bare ID)
+  # ── 우변의 **추출 소스** = `image_spec`(파드가 선언한 핀) ─────────────────────────────────────────
+  # 왜 계약인가: `image_id`는 **containerd의 저장 아티팩트**다. buildx attestation이 비결정적이라 소스 무변경
+  # 재빌드에도 태그의 OCI **인덱스** digest가 새로 생기지만 arm64 자식은 바이트 동일 → containerd는 콘텐츠를
+  # 재사용하고 `image_id`로 **구 인덱스 digest**를 계속 보고한다. 좌변(GHCR 인덱스 digest)과 **영구 불일치 =
+  # 영구 오탐**(라이브 page: 신 98db4e11 / 구 54211c26, 공통 arm64 자식 d68dbeb6 → 콘텐츠 동일). 비교는 반드시
+  # 파드가 **쓰기로 선언한 핀**(`image_spec`, 좌변과 같은 정체성 공간)과 해야 한다. (발화 게이트 L9)
+  grep -q '"digest", "$1", "image_spec"' <<<"$EXPR"                       # digest 추출 소스 = 선언된 핀
+  grep -q '"app", "$1", "image_spec"' <<<"$EXPR"                          # app 추출 소스도 같은 라벨(정체성 일관)
+  # 회귀 금지: 추출 소스가 `image_id`로 되돌아가면 L9 오탐이 부활한다. (맨 `! grep` 중간 부정은 bats false-green
+  # 함정 → run + status.)
+  run grep -qE '"(app|digest)", "\$1", "image_id"' <<<"$EXPR"
+  [ "$status" -ne 0 ]
   # 파손식(좌변이 digest 라벨을 떨궈 조인 키 소실) 회귀 금지. 부정 패턴은 ghcr_latest_digest **주변으로 좁힌다** —
   # 넓게 쓰면 우변 존재 가드의 정당한 `max by (app) (label_replace(kube_pod_container_info…))`까지 잡아
   # 올바른 픽스를 RED로 만든다. 맨 `! grep` 중간 부정은 bats false-green 함정 → run + status.
@@ -68,8 +79,22 @@ load_budget() {
   sel="$(grep -oE 'kube_pod_container_info\{[^}]*\}' <<<"$EXPR")"
   [ "$(printf '%s\n' "$sel" | wc -l | tr -d ' ')" -eq 2 ]           # 파드 셀렉터는 정확히 2회(unless 우변 + 존재 가드)
   [ "$(printf '%s\n' "$sel" | sort -u | wc -l | tr -d ' ')" -eq 1 ] # …그리고 둘이 동일(namespace + image_id 정규식)
+  # ── 셀렉터는 **여전히 `image_id`** 여야 한다 = materialization 가드(B-1에서 추출 소스만 image_spec으로 옮겼다) ──
+  # 왜 계약인가: 셀렉터를 `image_spec`으로 바꾸면 **fail-open**이다. ImagePullBackOff 파드는 KSM이
+  # `image_spec=<최신 digest>` + **`image_id=""`** 로 내보내는데, 그 **실행조차 못 한** 파드가 우변에 들어와
+  # 최신 digest와 매치되면 `unless`가 좌변을 지워 **진짜 드리프트를 억제한다**(구 파드가 여전히 구 이미지를
+  # 서빙 중인데 침묵) — 발화 게이트 **L10**(롤아웃 교착)이 실측으로 락하는 회귀다. 빈 `image_id`는 아래
+  # 정규식에 걸리지 않으므로, 이 필터가 곧 "이미지를 **실제로 실현한** 파드만" 이라는 존재 판정이다.
+  sel_want='image_id=~"ghcr[.]io/ukyi-app/.*"'
+  [ "$(printf '%s\n' "$sel" | grep -cF "$sel_want" | tr -d ' ')" -eq 2 ] || {
+    echo "우변 파드 셀렉터가 materialization 가드('$sel_want')를 잃었다 — image_spec 셀렉터는 pull 실패 파드가"
+    echo "진짜 드리프트를 억제하는 fail-open이다(L10). 셀렉터는 image_id, 추출 소스만 image_spec이다."
+    echo "실제 셀렉터: $sel"
+    false
+  }
   # app-추출 label_replace도 쌍둥이 — 치환 정규식까지 포함해 동일해야 가드의 app 집합이 우변과 일치한다.
-  lr="$(grep -oE '"app", "\$1", "image_id", "[^"]*"' <<<"$EXPR")"
+  # (소스 라벨은 image_spec — 위 join-alignment 테스트가 그 계약을 소유한다.)
+  lr="$(grep -oE '"app", "\$1", "image_spec", "[^"]*"' <<<"$EXPR")"
   [ "$(printf '%s\n' "$lr" | wc -l | tr -d ' ')" -eq 2 ]
   [ "$(printf '%s\n' "$lr" | sort -u | wc -l | tr -d ' ')" -eq 1 ]
 }

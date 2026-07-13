@@ -21,9 +21,40 @@ data:
           # Recording rule: 실행 중인 이미지 digest가 최신 GHCR digest와 다르면 1.
           # ⚠️ 정정(B2): (a) max by (app)은 digest 라벨을 떨궈 join 키 소실, (b) 우변(pod info)에 app 라벨
           #    부재 → on(app,digest) 매칭 영구 미스 → 채우면 drift 상시 1(오발화). 좌변은 by(app,digest)로 digest
-          #    보존, 우변은 image_id에서 app·digest를 추출해 양변을 정렬한다.
-          #    ⚠️ k3s/containerd 실측: KSM `image` 라벨은 bare 이미지 ID(sha256:…)라 selector·추출 소스는
-          #    반드시 `image_id`(ghcr.io/<owner>/<app>@sha256:<manifest digest> — skopeo Digest와 일치)다.
+          #    보존, 우변은 파드의 이미지 참조에서 app·digest를 추출해 양변을 정렬한다.
+          #    ⚠️ k3s/containerd 실측: KSM `image` 라벨은 bare 이미지 ID(sha256:…)라 selector·추출 소스로 쓸 수
+          #    없다 — `ghcr.io/<owner>/<app>@sha256:…` 형태인 `image_id`/`image_spec`만 쓸 수 있다.
+          #
+          # ★★ 우변의 두 역할은 **서로 다른 라벨**이다 — 하나로 뭉치면 오탐 아니면 미발화가 된다(B-1 버그의 정체).
+          #    ① **materialization 가드(셀렉터)** = `image_id=~"ghcr[.]io/ukyi-app/.*"` — "이 파드가 이미지를
+          #       **실제로 실현**했는가". ImagePullBackOff 파드는 KSM이 `image_id=""`로 내보내므로 이 셀렉터에서
+          #       자동 제외된다. ⚠️ 여기를 `image_spec`으로 바꾸면 **fail-open**: 롤아웃 교착 시 **실행조차 못 한**
+          #       신 파드가 최신 digest와 매치돼 `unless`가 **진짜 드리프트를 지운다**(게이트 L10이 락한다).
+          #    ② **비교 대상 digest(label_replace의 소스)** = `image_spec` — "이 파드가 쓰기로 **선언한 핀**".
+          #       좌변(GHCR 태그가 가리키는 OCI **인덱스** digest)과 **같은 정체성 공간**에 있다.
+          #    왜 `image_id`가 비교 대상으로 부적절한가: buildx는 태그에 **인덱스**(arm64 이미지 매니페스트 +
+          #    provenance/SBOM **attestation** 매니페스트)를 push하는데 attestation이 **비결정적**이라 소스 무변경
+          #    재빌드에도 인덱스 digest가 새로 생긴다. 그러나 arm64 자식 매니페스트는 **바이트 동일**이라
+          #    containerd는 이미 가진 콘텐츠를 재사용하고 `image_id`로 **최초 저장 시점의 (구) 인덱스 digest**를
+          #    계속 보고한다 → 좌변(신 인덱스) vs `image_id`(구 인덱스) **영구 불일치 = 영구 오탐**.
+          #    라이브 실측(page, 2026-07-13): GHCR 최신 인덱스 `sha256:98db4e11…` = 파드 spec 핀(`image_spec`)
+          #    ≠ containerd `image_id` `sha256:54211c26…` — 그런데 두 인덱스의 arm64 자식은 **동일**
+          #    (`sha256:d68dbeb6…`) = 배포된 콘텐츠는 무변경. **containerd의 저장 아티팩트(`image_id`)를
+          #    레지스트리 인덱스 digest와 같은 정체성으로 취급한 것**이 버그였다 → **비교는 `image_spec`,
+          #    존재 판정은 `image_id`**로 나눈다(게이트 L9=오탐 침묵 / L10=진짜 드리프트 발화 유지).
+          #
+          # ★ 암묵 의존성(비교 소스를 `image_spec`으로 옮기며 **새로 생긴 전제**): 이 룰은 이제
+          #    **앱 values가 이미지를 digest로 핀한다**는 전제에 의존한다. 어떤 앱이 digest 없이 태그만 쓰면
+          #    (`repo:tag`) `image_spec`에 `@sha256:`이 없어 `label_replace`가 `digest` 라벨을 못 붙이고 →
+          #    `unless`가 그 앱을 지우지 못해 **상시 오탐**이 된다. (구 `image_id` 소스는 컨테이너가 뜨기만 하면
+          #    항상 digest 형태라 이 의존이 **없었다** — 즉 픽스가 전제를 하나 늘렸다.)
+          #    이 전제는 `scripts/check-image-pins.sh` **레인2**(apps/*/deploy/prod/values.yaml의 image 블록에
+          #    `digest: sha256:` 블록-스코프 강제, `make verify` 배선)가 게이트로 지킨다. 좌변 app 집합은
+          #    digest-exporter의 `APPS`(=apps/ 디렉토리 parity)라 레인2 스코프와 **정확히 일치**한다.
+          #    공유 차트 `_helpers.tpl`의 `app.image`는 digest 부재 시 **조용히 `repo:tag`로 폴백**하므로(렌더는
+          #    성공 — 실패로 드러나지 않는다) 그 게이트가 **유일한 방어선**이다.
+          #    ⚠️ 탈출구: 레인2는 `policy/image-pin-allowlist.txt`에 `app:<앱>`을 등재하면 면제된다(현재 0건,
+          #      수용 기준도 0). 앱을 allowlist에 올리는 순간 이 룰이 그 앱에서 오탐하므로 **함께 판단하라**.
           #
           # ★ 윈도 불변식(크론·for·W 중 하나라도 바꾸기 전에 읽어라): push(10m) ≤ W(15m) < for(20m)
           #    - 하한 = digest-exporter 크론(`*/10`)의 push 주기. W가 좁으면 vmalert instant 룩백(기본 5m)을 넘는
@@ -40,9 +71,10 @@ data:
           #    사유로 발화**한다(원인 오귀속 — 진실은 "KSM이 죽었다"이고 그건 `TargetDown` 소관). 가드는 파드 텔레메트리가
           #    있는 app에만 드리프트를 주장하게 한다(게이트 L7).
           #    ⚠️ 우변 파드 셀렉터 자체엔 **rollup 금지** — 구 파드 digest가 부활해 진짜 드리프트를 억제한다(fail-open 거울상).
-          #    ⚠️ `unless` 우변과 이 가드의 파드 셀렉터는 **바이트 쌍둥이**다(새 recording rule은 eval 순서 의존이라 회피).
-          #      한쪽만 고치면 가드의 app 집합이 조용히 좁아져 드리프트를 억제한다 → 둘을 **함께** 고쳐라
-          #      (`tests/gates/test_digest-exporter.bats`가 쌍둥이 동일성을 못박는다).
+          #    ⚠️ `unless` 우변과 이 가드의 **파드 셀렉터 + app-추출 `label_replace`**는 **바이트 쌍둥이**다
+          #      (새 recording rule은 eval 순서 의존이라 회피). 한쪽만 고치면 가드의 app 집합이 조용히 좁아져
+          #      드리프트를 억제한다 → 둘을 **함께** 고쳐라(`tests/gates/test_digest-exporter.bats`가 쌍둥이
+          #      동일성 + 셀렉터=`image_id` / 추출 소스=`image_spec` 분리를 못박는다).
           - record: app:image_digest_drift
             expr: |
               max by (app, digest) (last_over_time(ghcr_latest_digest[15m]))
@@ -50,16 +82,16 @@ data:
                 label_replace(
                   label_replace(
                     kube_pod_container_info{namespace="prod", image_id=~"ghcr[.]io/ukyi-app/.*"},
-                    "digest", "$1", "image_id", ".*@(sha256:[a-f0-9]+)$"
+                    "digest", "$1", "image_spec", ".*@(sha256:[a-f0-9]+)$"
                   ),
-                  "app", "$1", "image_id", ".*/([a-z0-9-]+)[@:].*"
+                  "app", "$1", "image_spec", ".*/([a-z0-9-]+)[@:].*"
                 )
               )
               and on (app) (
                 max by (app) (
                   label_replace(
                     kube_pod_container_info{namespace="prod", image_id=~"ghcr[.]io/ukyi-app/.*"},
-                    "app", "$1", "image_id", ".*/([a-z0-9-]+)[@:].*"
+                    "app", "$1", "image_spec", ".*/([a-z0-9-]+)[@:].*"
                   )
                 )
               )
