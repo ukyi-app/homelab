@@ -3,12 +3,13 @@ feature: digest-exporter-stale
 invariant-class: feature
 entry-track: feature
 review-track: full
-pipeline-stage: prd
+pipeline-stage: executing
 issue-tracker: local
-prd-published: false
-worktree:
+prd-published: true
+worktree: (none — 주 체크아웃 /Users/ukyi/workspace/homelab. 이 브랜치에 PRD·이슈 커밋이 이미 쌓여 있어 별도 워크트리가 같은 브랜치를 체크아웃할 수 없다)
 branch: feat/digest-exporter-stale
-consent-scope:
+consent-scope: "I-1(skeleton) → structure 게이트 → I-2. 구현=fresh 서브에이전트(opus), 리뷰=/code-review, 커밋·이슈 종료=컨덕터. main 푸시/머지 없음(랜딩은 별도 승인). owner 승인 2026-07-13."
+toolchain-note: "호스트 bun은 mise 전역 핀 1.3.14. 세션 PATH에 구 1.3.10 설치 디렉터리가 잔류하므로 명령은 PATH=\"$HOME/.local/share/mise/installs/bun/1.3.14/bin:$PATH\"로 실행한다(Makefile m6-tools가 1.3.14를 강제)."
 inbound-issue:
 intake-grill:
 spike-1:

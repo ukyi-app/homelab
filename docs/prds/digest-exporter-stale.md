@@ -3,7 +3,7 @@ feature: digest-exporter-stale
 invariant-class: feature
 entry-track: feature
 review-track: full
-pipeline-stage: issues
+pipeline-stage: executing
 issue-tracker: local
 prd-published: true
 skeleton-issue: [I-1]
