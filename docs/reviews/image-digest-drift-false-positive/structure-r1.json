@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "approve",
+  "summary": "Structure gate passes. B-1 fixes the identity-space mismatch at the PromQL join seam, leaves the RED L9 test untouched, preserves the `image_id` materialization guard, and stays within declared scope. No material macro-level blocker found; tests were not re-executed.",
+  "planFile": "docs/bugfixes/image-digest-drift-false-positive.md",
+  "planInDiff": null,
+  "reviewedFileCount": 13,
+  "target": "branch diff against main",
+  "reviewedSha": "79d715106375ef0c19e88ef97137d87f75d737d1",
+  "reviewedTree": "66986ccee63fe628a7cd8982690c7260d821625f",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [
+    "Proceed to the next gated stage and capture release verification evidence there."
+  ]
+}
