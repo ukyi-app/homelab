@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "approve",
+  "summary": "코드 리뷰 스킬을 적용해 r9 수정사항과 PRD가 전제하는 기존 저장소 사실을 실제 파일에서 재검증하겠습니다. 최종 응답은 요청한 JSON 스키마만 반환합니다.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": true,
+  "reviewedFileCount": 11,
+  "target": "branch diff against main",
+  "reviewedSha": "1d25615754865bd893489328434513cd02f69ba4",
+  "reviewedTree": "3c909ab90b80d17415e2985110ad447f46887192",
+  "codexStatus": 1,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": []
+}

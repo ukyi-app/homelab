@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship the plan yet. The two-main-merge sequence creates a real GitOps boundary, but PR-A still lacks a valid transition through the named gated pipeline. No materially simpler safe alternative was found within the confirmed decisions.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": true,
+  "reviewedFileCount": 4,
+  "target": "branch diff against main",
+  "reviewedSha": "7dc8e414549a64c0c92bb6ebbb6cff3c37b18c05",
+  "reviewedTree": "277dde5e4722aac92fa87403b01b29e2e2ccee26",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "critical",
+      "title": "P-2 remains unresolved: PR-A has no valid gated landing transition",
+      "body": "The plan lands PR-A after only the structure gate, preserves the feature for further execution, and explicitly scopes the eventual release gate to PR-B. However, the declared full-track workflow invokes `landing` only from `finishing`, after verification and an approving release gate; completing that landing ends the flow. An engineer must therefore either bypass the named gate contract and deploy producer code without release review, or follow it and be unable to perform PR-A as specified—collapsing back to the single landing that recreates the first-run `absent(...)` race.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 155,
+      "line_end": 168,
+      "confidence": 0.98,
+      "recommendation": "Define a supported checkpoint landing: give PR-A scope-fenced verification and release approval, merge it without closing the overall feature, record the live heartbeat gate, then re-anchor PR-B on updated `main`. Alternatively, model PR-A and PR-B as separately complete gated flows.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Revise the two-landing contract to include a gate-valid PR-A transition, then rerun the manual Round 3 review."
+  ]
+}

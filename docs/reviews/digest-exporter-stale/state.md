@@ -1,0 +1,81 @@
+---
+feature: digest-exporter-stale
+invariant-class: feature
+entry-track: feature
+review-track: full
+pipeline-stage: release-gate
+issue-tracker: local
+prd-published: true
+worktree: (none — 주 체크아웃 /Users/ukyi/workspace/homelab. 이 브랜치에 PRD·이슈 커밋이 이미 쌓여 있어 별도 워크트리가 같은 브랜치를 체크아웃할 수 없다)
+branch: feat/digest-exporter-stale
+consent-scope: "I-1(skeleton) → structure 게이트 → I-2. 구현=fresh 서브에이전트(opus), 리뷰=/code-review, 커밋·이슈 종료=컨덕터. main 푸시/머지 없음(랜딩은 별도 승인). owner 승인 2026-07-13."
+toolchain-note: "호스트 bun은 mise 전역 핀 1.3.14. 세션 PATH에 구 1.3.10 설치 디렉터리가 잔류하므로 명령은 PATH=\"$HOME/.local/share/mise/installs/bun/1.3.14/bin:$PATH\"로 실행한다(Makefile m6-tools가 1.3.14를 강제)."
+inbound-issue:
+intake-grill:
+spike-1:
+---
+
+## Track note
+
+**Rule 0**: net-new 관측 행위가 **2개 이상** 새로 생긴다 — (a) digest-exporter가 자기관측
+하트비트/카운트 메트릭을 push, (b) 새 `DigestExporterStale` 알림이 발화. → `invariant-class: feature`
+(단일 flip이 아니므로 gated-bugfix 아님; 행위 추가이므로 refactor/perf/migration 아님).
+
+**review-track: full** — 알림 룰 클래스는 이 레포에서 4번 재발했고(메모리 alert-instance-label-churn),
+방금 이 세션에서 3번 더 뚫렸다(모드 C 적대 검증). skeleton 슬라이스(하트비트 push + 발화 e2e)가
+구조 게이트의 정확한 대상이다.
+
+**진행 순서**: intake→prd는 지금 진행. **executing은 모드 C PR(#343) 머지 후 main에서** 시작한다 —
+이 기능의 (a) 새 메트릭은 모드 C 완전성 가드 대상이라 린터 레지스트리 등재가 필요하고, (b) 발화 e2e
+하네스가 #343의 공유 lib(`tests/gates/lib/vmalert-e2e.sh`)을 재사용하기 때문이다. 브랜치는 머지 후 rebase.
+
+## 배경 — 이번 세션의 죽은-알림 3부작을 잇는 마지막 조각
+
+방금 죽은 알림 2건을 살렸다(ImageDigestDrift #339 · FilesBulkSSDLow #341) + 재발 방지 정적 린터
+(모드 C #343, 머지 중). 그런데 **살린 ImageDigestDrift의 먹이 공급선 자체가 무방비**다.
+
+`platform/victoria-stack/prod/digest-exporter.yaml`(CronJob `*/10`)은 **자기 생존을 알리는 하트비트가
+없다** — `ghcr_latest_digest`(정보 게이지)만 push한다. 조용한 실패 3모드(코드 확인):
+
+| 모드 | 코드 | 결과 |
+|---|---|---|
+| skopeo 실패(GHCR 장애·ghcr-read 토큰 만료) | `DIGEST=$(skopeo … \|\| true)` + `[ -z "$DIGEST" ] && continue` | **그 앱만 조용히 스킵** |
+| 전체 push 실패 | `curl … \|\| echo "push failed" >&2` | **Job은 여전히 exit 0** |
+| CronJob 미실행 | — | 메트릭 전체 정지 |
+
+어느 경우든 `ghcr_latest_digest`가 사라지고, rollup으로 살린 `ImageDigestDrift`도 **원본 시리즈가
+없어 다시 침묵**한다. `KubeJobFailed`(core.yaml)는 `kube_job_failed{condition="true"}`만 봐서
+**초록 Job(부분/전체 push 실패)은 못 잡는다**.
+
+## 요구 기능 (net-new)
+
+1. **자기관측 메트릭 push**: 형제 선례(`restore_drill_last_success_timestamp`·
+   `files_backup_last_success_timestamp`)를 따라 `digest_exporter_last_success_timestamp`.
+   **부분 실패도 구분하려면** scrape 성공/전체 카운트(`digest_exporter_apps_total` /
+   `..._scraped` 류) — 전체 push는 됐는데 앱 절반이 skopeo 실패한 경우.
+2. **`DigestExporterStale` 알림 신설**: 형제 staleness 패턴(`time() - last_over_time(ts[윈도]) > 임계
+   or absent(...)`, fail-closed). ⚠️ 하트비트는 push 메트릭(10분 주기)이니 **rollup 필수** — 방금
+   만든 함정을 그대로 밟지 말 것. ⚠️ 새 메트릭은 **모드 C 완전성 가드 대상** → 린터 레지스트리 등재 필수.
+
+## 참고 (형제 선례 = 정답 형태)
+
+- `platform/cnpg/prod/restore-drill-script.sh`(하트비트 push) + r4 `CNPGRestoreDrillStale`
+- `scripts/backup-files-data.sh`(`push_metrics`) + r4 `FilesBackupStale`
+- r4-storage-backup.yaml `PvcDuExporterStale`(저빈도 push staleness 알림)
+- 이 세션 산물: 모드 C 린터 · 발화 e2e 하네스(`tests/gates/vmalert-*-firing-e2e.sh` + `lib/vmalert-e2e.sh`)
+- 흡수하는 백로그: image-pin 리팩터 F-1 · files-bulk-ssd F-3(exporter 조용한 실패 fail-loud화) —
+  이 기능이 그 방향과 겹친다.
+
+## 설계 결정 (intake — 사용자 확정 2026-07-12)
+
+- **감지 깊이 = 하트비트 + 앱 카운트**: `digest_exporter_last_success_timestamp`(전체 push 성공) +
+  앱 단위 카운트(`digest_exporter_apps_total` / `..._scraped` 류) → **전체 push는 됐는데 앱 절반이
+  skopeo 실패한 부분 고장까지** 구분한다. 하트비트만으로는 부분 실패를 놓친다.
+- **범위 = 하트비트 + 알림만** — exporter 조용한 실패 지점의 **fail-loud화(F-3)는 이 기능에 넣지
+  않는다**. 이번엔 관측을 추가해 조용한 실패를 "보이게"만 한다(curl 실패 시 하트비트 미갱신이 자연스럽게
+  알림을 부른다). Job 종료코드 변경(F-3)은 별도 — digest-exporter가 종료코드 바뀌어도 안전한지 별도 검토 필요.
+- **staleness 임계·윈도(PRD에서 확정)**: `*/10` 주기 → rollup 윈도 `[2h]`류(형제
+  `AdguardRewriteReconcilerStale`과 동형) + 임계 ≈ 3주기 누락(30~40분). severity = warning
+  (감시견의 감시견 — 페이징 긴급도는 낮으나 무시하면 ImageDigestDrift가 조용히 죽는다).
+- **앱 카운트 알림**: `apps_scraped < apps_total`이 지속되면 별도 경고(부분 고장). 이것도 push
+  메트릭이라 rollup 필수.

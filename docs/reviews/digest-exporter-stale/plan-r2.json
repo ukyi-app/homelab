@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship the plan yet. P-1 and P-3 are substantively addressed, but P-2 still lacks an executable rollout boundary: the pipeline lands the completed feature branch once, while ArgoCD deploys only `main`, so the producer-first live checkpoint would never occur. No materially simpler safe alternative was found within the confirmed decisions.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": true,
+  "reviewedFileCount": 3,
+  "target": "branch diff against main",
+  "reviewedSha": "5a37ba3d67af51f880da2d4a89c11f6741e58256",
+  "reviewedTree": "ab7639e81dd8162df0eb68c1b7ddb70349891ae8",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "P-2 remains unresolved: slice boundaries are not deployment boundaries",
+      "body": "The plan says to deploy slice 1, observe its first heartbeat, and then deploy slice 2. However, the full-track pipeline keeps skeleton and dependent slices on the isolated feature branch until final landing, while the Victoria Stack ArgoCD Application watches `main`. Therefore, merely designating slice 1 as the skeleton does not deploy it. Following the normal pipeline would land the producer and rules together, recreating the first-run `absent(...)` race that P-2 was intended to eliminate.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 151,
+      "line_end": 155,
+      "confidence": 0.99,
+      "recommendation": "Define an actual deployment boundary: land a producer-only change to `main`, wait for ArgoCD synchronization, and verify a fresh heartbeat before separately landing the rules. Document how pipeline state and gates continue across those two landings. Alternatively, specify and test a single-landing activation mechanism that prevents rule evaluation before producer initialization.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Escalate this residual Round 2 finding for human decision; the plan gate remains blocked unless the risk is waived or the rollout mechanism is corrected."
+  ]
+}

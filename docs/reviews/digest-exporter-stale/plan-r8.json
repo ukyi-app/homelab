@@ -1,0 +1,45 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship the plan yet. The timeout budget breaks as APPS grows, and the promised landing-time evidence has no executable recording point. No materially simpler safe design was found; the rejected r7 transition-test finding is not re-raised.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": true,
+  "reviewedFileCount": 9,
+  "target": "branch diff against main",
+  "reviewedSha": "e92cbaf79f720e0b8b410ea47e22ccb8da6d2bd3",
+  "reviewedTree": "843642b1f8f23d4bce0f37247f39eb5dfb5081e3",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
+  "planFindingCount": 2,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Sequential scrape timeouts exceed the fixed Job deadline",
+      "body": "The exporter iterates APPS sequentially, while create-app can add entries without a cardinality limit. Four blackholed registries consume 4×30s before the 30s curl allowance, exceeding the 120s Job deadline; three already leave no margin if curl also stalls. The Job can therefore die before publishing heartbeat and count metrics, misreporting a GHCR outage as DigestExporterStale/KubeJobFailed instead of DigestExporterScrapeIncomplete and violating User Story 2. The planned immediate stubs and static flag checks cannot expose this.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 176,
+      "line_end": 178,
+      "confidence": 0.99,
+      "recommendation": "Define and enforce a maximum APPS cardinality with a deadline inequality that includes every sequential scrape, curl, and margin, or bound total collection time through shorter/parallel queries. Add a timed producer test at the supported cardinality limit.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "medium",
+      "title": "Compensating landing evidence has no executable pipeline step",
+      "body": "The plan earlier states that Victoria Stack deploys only main and landing occurs after verification/release and ends the flow. It nevertheless requires post-sync successor UID and first-heartbeat latency to be recorded in verification. Before landing, the branch is not deployed; after landing, updating the committed verification artifact would require another change and invalidate release freshness. A competent engineer cannot satisfy this compensating control as written. This does not require reinstating the rejected r7 transition test.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 266,
+      "line_end": 270,
+      "confidence": 0.97,
+      "recommendation": "Specify an executable finishing/post-merge checkpoint: where the evidence is stored without modifying the reviewed branch, exact pre-merge and post-sync commands, timeout/failure handling, and whether failed evidence blocks or triggers rollback. Otherwise explicitly remove it as a required compensating control and rely on the recorded waiver.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Reconcile the APPS cardinality, per-command timeouts, and Job deadline in both the manifest contract and tests.",
+    "Define the durable post-landing evidence workflow, then rerun the plan review."
+  ]
+}

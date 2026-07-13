@@ -2,7 +2,28 @@
 # R6 ImageDigestDrift 소생: digest-exporter가 (a) private GHCR 자격으로 inspect하고, (b) recording-rule
 # join이 양변 라벨(app,digest) 정렬돼 오발화하지 않으며, (c) egress가 격리되고, (d) APPS가 apps/와 parity.
 # (@test 이름 영어, 중간 단언 run+[ ] — bash 3.2 함정)
-setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; D="$ROOT/platform/victoria-stack/prod/digest-exporter.yaml"; }
+setup() {
+  ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  D="$ROOT/platform/victoria-stack/prod/digest-exporter.yaml"
+  # 지연 예산의 상수·파생·부등식 SSOT(발화 e2e·skopeo 스모크와 **같은 코드**를 쓴다 — 리터럴 복제 금지).
+  # shellcheck source=lib/digest-exporter-budget.sh
+  . "$ROOT/tests/gates/lib/digest-exporter-budget.sh"
+}
+
+# 예산 파생은 fail-closed다 — 빈 값/비수치면 즉시 RED. `deb_load || { …; false; }`로 받는 이유:
+# ⚠️ `set -e`는 **&&/|| 리스트의 마지막이 아닌** 명령의 실패를 무시한다(docs/traps-detail.md
+#    「bats bash 3.2 중간 [[ ]] 침묵 통과」). 예전 코드의 `[ -n "$ST" ] && [ -n "$CT" ]`가 바로 그 함정이었다:
+#    파생이 비면 그 줄이 **조용히 통과**하고 BUDGET이 70으로 계산돼 부등식(< 180)이 참이 되어, 타임아웃을
+#    하나도 강제하지 못한 채 게이트가 green이 됐다(= 이 테스트가 막겠다던 fail-open 그 자체).
+#    → 중간 단언은 반드시 **단순 명령 + `|| { …; false; }`** 형태로만 쓴다.
+load_budget() {
+  deb_load "$D" || {
+    echo "digest-exporter 예산 파생 실패(fail-closed) — 위 stderr 참조."
+    echo "→ 매니페스트의 run.sh 타임아웃 기본값 / activeDeadlineSeconds / APPS env / cron 형식 중 하나가 바뀌었다."
+    echo "→ 빈 값을 그대로 산술에 넣으면 부등식이 참이 되어 상한을 하나도 강제하지 못한 채 통과한다."
+    false
+  }
+}
 
 @test "digest-exporter authenticates to private GHCR via ghcr-read authfile" {
   grep -q -- '--authfile /auth/config.json' "$D"          # skopeo가 자격 사용
@@ -61,7 +82,86 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; D="$ROOT/platform/vict
 }
 
 @test "digest-exporter pushes via curl (wget is absent from the skopeo image)" {
-  grep -q 'curl -fsS --data-binary' "$D"
+  # ★ 플래그 **인접**이 아니라 **존재**를 본다 — 인접 grep은 매니페스트의 argv 순서를 테스트에 종속시킨다
+  #   (실제로 그랬다: run.sh가 --max-time을 --data-binary 뒤로 밀어야 했다).
+  # ⚠️ 주석 제거 후 단언한다 — run.sh 주석이 'curl … --data-binary'를 언급하므로 원문을 그대로 grep하면
+  #   **주석이 단언을 만족시킨다**(fail-open). 단언은 실행 라인만 겨냥한다.
+  RUN="$(yq 'select(.kind=="ConfigMap").data["run.sh"]' "$D")"
+  [ -n "$RUN" ] || { echo "run.sh 추출 실패 — ConfigMap 경로가 바뀌었다"; false; }
+  CODE="$(grep -v '^[[:space:]]*#' <<<"$RUN")"
+  run grep -qE 'curl[^|]*--data-binary' <<<"$CODE"; [ "$status" -eq 0 ]
   # 주석의 'wget' 언급은 허용 — 파이프 호출(| wget)만 금지(회귀 표적을 정확히 겨냥)
-  run grep -qE '\|\s*wget' "$D"; [ "$status" -ne 0 ]
+  run grep -qE '\|\s*wget' <<<"$CODE"; [ "$status" -ne 0 ]
+}
+
+# ── 지연 상한 강제(부트스트랩 안전성 계약) ──────────────────────────────────────────────────────────
+# DigestExporterStale의 `for: 15m`은 "첫 하트비트가 반드시 840s 안에 온다"는 **강제된 상한** 위에 서 있다.
+# 그 상한을 만드는 4개 계약(Replace · activeDeadlineSeconds · skopeo/curl 타임아웃 · APPS 카디널리티)을
+# 여기서 정적으로 못박는다. 하나라도 되돌리면 최초 배포 거짓 페이지 또는 원인 오귀속이 되살아난다.
+# (같은 부등식을 tests/gates/vmalert-digest-stale-firing-e2e.sh의 preflight ①④가 독립 파생해 강제한다.)
+
+@test "digest-exporter CronJob caps hung Jobs (concurrencyPolicy Replace + activeDeadlineSeconds)" {
+  load_budget   # activeDeadlineSeconds 부재/비정수 = fail-closed RED(lib이 강제)
+  # ⚠️ Forbid이면 안 된다: activeDeadlineSeconds는 jobTemplate에만 붙고 k8s는 **이미 실행 중인 Job에
+  #    소급 적용하지 않는다** → 랜딩 순간 살아 있던 무제한 레거시 Job이 Forbid 슬롯을 계속 점유하면
+  #    상한이 통째로 무너진다. Replace는 구 Job을 죽이고 새(제한된) Job을 반드시 띄운다(잡은 멱등).
+  [ "$DEB_CONCURRENCY_POLICY" = "Replace" ] || { echo "concurrencyPolicy='$DEB_CONCURRENCY_POLICY' (기대: Replace — 레거시 무제한 Job이 상한을 빠져나간다)"; false; }
+  [ "$DEB_ACTIVE_DEADLINE_S" -gt 0 ] || { echo "activeDeadlineSeconds='$DEB_ACTIVE_DEADLINE_S' — 양의 정수여야 한다(부재 = 상한 없음)"; false; }
+}
+
+@test "digest-exporter run.sh puts skopeo --command-timeout BEFORE inspect and bounds the curl push" {
+  RUN="$(yq 'select(.kind=="ConfigMap").data["run.sh"]' "$D")"
+  [ -n "$RUN" ] || { echo "run.sh 추출 실패 — ConfigMap 경로가 바뀌었다"; false; }
+
+  # ── skopeo: 존재가 아니라 **순서**를 단언한다(의도된 계약) ──
+  #   run.sh는 tests/gates/skopeo-timeout-smoke.sh가 핀된 실물 이미지에서 **실제로 증명한** 배치
+  #   (글로벌 옵션이 서브커맨드 앞)에서 벗어나면 안 된다.
+  #   (실측: 그 skopeo 빌드는 cobra persistent flag 상속으로 `inspect` 뒤 배치도 상한을 강제한다 —
+  #    계획이 가정한 "뒤=무효"는 사실이 아니었다. 그래도 증명된 배치를 계약으로 고정한다: 뒤 배치의
+  #    수용은 구현 세부이고, 그것이 조용히 사라지면 상한이 무강제가 된다. 스모크의 S3가 그 회귀를 감시한다.)
+  run grep -qE 'skopeo --command-timeout="\$SKOPEO_TIMEOUT" inspect ' <<<"$RUN"
+  [ "$status" -eq 0 ]
+  # inspect 뒤에 --command-timeout이 오는 형태(증명되지 않은 배치) 회귀 금지
+  run grep -qE 'skopeo +inspect[^|]*--command-timeout' <<<"$RUN"
+  [ "$status" -ne 0 ]
+
+  # ── curl: **순서가 아니라 존재**를 단언한다(플래그 순서는 계약이 아니다) ──
+  #   ★ 예전 게이트는 `curl -fsS --data-binary` **인접**을 grep해서, 매니페스트가 --max-time을
+  #     --data-binary 뒤로 밀도록 강요했다(테스트가 프로덕션 argv를 구속 = test-induced coupling).
+  #     이제 curl 호출 하나를 잘라내(파이프 앞까지) 그 안에 필요한 플래그가 **있는지**만 각각 본다.
+  #   ⚠️ 주석 줄 먼저 제거 — run.sh 주석에 "push는 curl …"이 있어 그냥 grep하면 **주석이 먼저 잡힌다**
+  #     (실측: 단언이 주석을 검사하게 되어 오탐). 단언은 실행 라인만 겨냥한다.
+  CURL_CALL="$(grep -v '^[[:space:]]*#' <<<"$RUN" | grep -oE 'curl [^|]*' | head -1)"
+  [ -n "$CURL_CALL" ] || { echo "run.sh에서 curl 호출을 찾지 못했다 — push 경로가 사라졌다"; false; }
+  run grep -q -- '-fsS' <<<"$CURL_CALL"; [ "$status" -eq 0 ]                        # 조용히 실패하지 않는다
+  run grep -q -- '--data-binary @-' <<<"$CURL_CALL"; [ "$status" -eq 0 ]            # stdin 페이로드
+  run grep -qE -- '--max-time "\$CURL_MAX_TIME"' <<<"$CURL_CALL"; [ "$status" -eq 0 ] # push 상한
+
+  # env 기본값(오버라이드 가능해야 테스트가 빠른 값으로 돈다 — lib의 파생 대상이기도 하다)
+  run grep -qE 'SKOPEO_TIMEOUT="\$\{SKOPEO_TIMEOUT:-[0-9]+s\}"' <<<"$RUN"
+  [ "$status" -eq 0 ]
+  run grep -qE 'CURL_MAX_TIME="\$\{CURL_MAX_TIME:-[0-9]+\}"' <<<"$RUN"
+  [ "$status" -eq 0 ]
+}
+
+@test "digest-exporter APPS cardinality satisfies the strict in-deadline budget (8th app must go red)" {
+  # 상수(POD_START·EXEC_SLACK)·파생(타임아웃·ADS·N)·부등식은 전부 lib이 소유한다 — 발화 e2e preflight ④와
+  # **같은 코드**로 판정하므로 두 게이트가 갈릴 수 없다. 파생 실패는 여기서 fail-closed RED가 된다.
+  load_budget
+  # ★ 순차 스크레이프 예산 — **엄격 부등식**이다(등호 금지):
+  #   activeDeadlineSeconds는 **파드 생성부터** 재고(startup이 그 안에 포함된다) 컨트롤러는 duration ≥ ADS에서
+  #   만료시키므로, 등호를 허용하면 CI가 "push 전에 죽는 Job"을 승인하게 된다 → GHCR 장애가 아니라
+  #   DigestExporterStale/KubeJobFailed로 **오귀속**된다.
+  BUDGET="$(deb_in_deadline_budget)"
+  N_MAX="$(deb_n_max)"
+  [ "$BUDGET" -lt "$DEB_ACTIVE_DEADLINE_S" ] || {
+    echo "in-deadline 예산 초과: POD_START($DEB_POD_START_BUDGET_S) + N($DEB_APPS_N)×SKOPEO_TIMEOUT($DEB_SKOPEO_TIMEOUT_S) + CURL_MAX_TIME($DEB_CURL_MAX_TIME_S) + EXEC_SLACK($DEB_EXEC_SLACK_S) = $BUDGET ≥ activeDeadlineSeconds($DEB_ACTIVE_DEADLINE_S)."
+    echo "→ Job이 push 전에 죽어 하트비트가 미발행되고 GHCR 장애가 'push 사망'으로 오귀속된다."
+    echo "→ activeDeadlineSeconds를 올리되(그러면 부트스트랩 부등식 for > cron+ADS+파드예산 을 함께 재확인),"
+    echo "   또는 SKOPEO_TIMEOUT을 낮춰라. 두 부등식을 **동시에** 만족해야 한다."
+    false
+  }
+  # 현 계약의 상한을 명시적으로 기록(문서 아닌 실행 가능한 형태) — N_MAX = 7
+  echo "# APPS N=$DEB_APPS_N / N_MAX=$N_MAX (ADS=$DEB_ACTIVE_DEADLINE_S skopeo=${DEB_SKOPEO_TIMEOUT_S}s curl=${DEB_CURL_MAX_TIME_S}s)" >&3
+  [ "$DEB_APPS_N" -le "$N_MAX" ] || { echo "APPS N=$DEB_APPS_N > N_MAX=$N_MAX — 앱을 더 붙이려면 예산을 재설계하라"; false; }
 }

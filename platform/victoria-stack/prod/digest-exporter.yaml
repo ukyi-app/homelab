@@ -7,28 +7,107 @@ data:
     set -eu
     # 각 앱에 대해 env로 고정된 태그의 최신 push digest를 GHCR에서 조회한다.
     # APPS는 env로 주입되는 공백 구분 "name=ghcr.io/owner/name:tag" 목록이다.
+    #
+    # ⚠️ POSIX sh(#!/bin/sh + set -eu, pipefail 없음) + readOnlyRootFilesystem(tmp 볼륨 없음):
+    #    bash-ism([[ ]]·배열·<<<)과 임시파일 쓰기 불가.
+    #
+    # ⚠️ 지연 상한(부트스트랩 안전성 계약 — DigestExporterStale의 for: 15m이 여기 의존한다):
+    #    앱당 GHCR 조회(SKOPEO_TIMEOUT)와 push(CURL_MAX_TIME)에 상한을 건다. env 오버라이드 가능
+    #    (테스트가 빠른 값으로 실행). 상한이 없으면 행(hung) 잡이 슬롯을 무한 점유해 첫 하트비트가
+    #    임의로 늦어지고, 최초 배포 시 거짓 페이지가 난다.
+    #    강제 부등식(게이트가 이 매니페스트에서 파생해 검사 — 상수·파생·부등식의 SSOT는
+    #    tests/gates/lib/digest-exporter-budget.sh 하나이고, 정적 게이트·발화 e2e·스모크가 그것을 공유한다):
+    #      · 부트스트랩: for(900s) > cron(600s) + activeDeadlineSeconds(180s) + 파드 예산(60s) = 840s
+    #      · 인-데드라인: POD_START(60s) + N_apps×SKOPEO_TIMEOUT + CURL_MAX_TIME + EXEC_SLACK(10s)
+    #                    < activeDeadlineSeconds  → 현재 값으로 N_MAX = 7(8번째 앱부터 CI red)
+    SKOPEO_TIMEOUT="${SKOPEO_TIMEOUT:-10s}"
+    CURL_MAX_TIME="${CURL_MAX_TIME:-30}"
     NOW=$(date +%s)
     OUT=""
+    # ★ 수집 카운트(US2) — 하트비트와 **직교하는 축**이다. 하트비트는 "push 경로 생존"만 말하므로, push는
+    #   살아 있는데 앱 일부/전부의 skopeo 조회가 실패하는 **부분 고장**(GHCR 장애·ghcr-read 만료)은 아래
+    #   `[ -z "$DIGEST" ] && continue`로 조용히 스킵될 뿐 아무 신호도 나지 않는다. CONFIGURED(루프 반복 수) vs
+    #   SCRAPED(digest 획득 성공 수)를 함께 push해 DigestExporterScrapeIncomplete(r4)가 그 격차를 페이징한다.
+    #   ⚠️ POSIX sh: 카운터는 `N=$((N+1))` **대입 형태만** 쓴다 — `: $((N++))`는 결과 0에서 non-zero를 반환해
+    #      `set -e`가 스크립트를 죽인다(그 순간 하트비트도 못 나간다).
+    CONFIGURED=0
+    SCRAPED=0
     for entry in $APPS; do
       APP="${entry%%=*}"; REF="${entry#*=}"
-      DIGEST=$(skopeo inspect --authfile /auth/config.json --no-tags "docker://$REF" 2>/dev/null | sed -n 's/.*"Digest": "\(sha256:[a-f0-9]*\)".*/\1/p' | head -1 || true)
-      [ -z "$DIGEST" ] && continue
+      CONFIGURED=$((CONFIGURED+1))
+      # ⚠️ --command-timeout은 **글로벌 옵션**이므로 서브커맨드(inspect) **앞**에 둔다.
+      #    (실측 2026-07-13: 핀된 v1.22.2는 cobra persistent flag 상속 덕에 `inspect` 뒤에 둬도 상한을
+      #     강제한다 — 계획이 가정한 "뒤=무효"는 사실이 아니다. 그럼에도 앞 배치를 계약으로 못박는 이유는
+      #     ⓐ 그게 tests/gates/skopeo-timeout-smoke.sh가 **실제로 증명한** 배치이고 ⓑ 뒤 배치의 수용은
+      #     cobra 플래그 상속이라는 구현 세부라 CLI 재구성 한 번에 사라질 수 있기 때문이다.
+      #     게이트는 존재가 아니라 argv **순서**를 단언한다.)
+      DIGEST=$(skopeo --command-timeout="$SKOPEO_TIMEOUT" inspect --authfile /auth/config.json --no-tags "docker://$REF" 2>/dev/null | sed -n 's/.*"Digest": "\(sha256:[a-f0-9]*\)".*/\1/p' | head -1 || true)
+      # ⚠️ SCRAPED 증가는 **반드시 이 검사 뒤**다 — 앞에 두면 skopeo가 전부 실패해도 scraped == configured로
+      #    오보고되어 문법 검사·레지스트리 완전성·발화 e2e·라이브 전건성공 확인을 **전부 통과하면서** US2가
+      #    조용히 깨진다(부분 고장이 영영 무성). 게이트: tests/gates/test_digest-exporter-producer.bats.
+      if [ -z "$DIGEST" ]; then
+        # ★ 조용한 스킵 금지 — DigestExporterScrapeIncomplete의 description이 "Job 로그를 보라"고 지시하므로
+        #   **어느 앱이 실패했는지**가 로그에 반드시 남아야 한다(skopeo stderr는 2>/dev/null로 버린다 —
+        #   그쪽엔 authfile 경로·레지스트리 응답이 섞여 나올 수 있어 정제된 한 줄만 낸다).
+        #   ⚠️ 자격증명·authfile 내용은 절대 출력하지 않는다. APP/REF는 공개 이미지 좌표라 안전하다.
+        #   ⚠️ 형식은 `key=value`로 쓴다 — `단어 <공백> $var` 형태는 모드 C 린터의 exposition 추출기
+        #      (EXPO_INLINE)가 메트릭 라인으로 **오인**해 레지스트리 완전성 가드가 fail-closed FAIL을 낸다.
+        echo "digest scrape failed: app=$APP ref=$REF" >&2
+        continue
+      fi
+      SCRAPED=$((SCRAPED+1))
       # info gauge로 노출: digest는 label로 싣고 값은 1
       OUT="${OUT}ghcr_latest_digest{app=\"$APP\",digest=\"$DIGEST\"} 1 ${NOW}000\n"
     done
+    # ★ 수집 카운트 2개는 **bare 시리즈**(라벨 0)로 같은 페이로드에 싣는다 — 룰이 on()/ignoring() 없이 1:1
+    #   스칼라 비교(scraped < configured)를 하므로 한쪽에만 라벨이 붙으면 매치가 통째로 사라져(빈 벡터)
+    #   알림이 조용히 죽는다. exposition은 `OUT="${OUT}<이름> ${VAL}\n"` 형태를 지킬 것 — 이름을 변수로
+    #   조립하면 모드 C 린터의 정적 추출기(EXPO_INLINE)가 못 읽어 fail-closed FAIL이 난다.
+    OUT="${OUT}digest_exporter_apps_configured ${CONFIGURED}\n"
+    OUT="${OUT}digest_exporter_apps_scraped ${SCRAPED}\n"
+    # ★★ 하트비트는 **페이로드의 마지막 줄**이어야 한다 — 순서가 곧 fail-closed 계약이다(순서 게이트:
+    #   tests/gates/test_digest-exporter-producer.bats "heartbeat is the LAST line").
+    #   왜: /api/v1/import/prometheus는 **스트리밍 인입**이라 요청이 중도 절단되면(파드 eviction·
+    #   activeDeadlineSeconds 만료·CURL_MAX_TIME 초과·vmsingle 재시작) 서버가 **읽은 접두부만 적재**한다.
+    #   하트비트가 카운트보다 앞에 있으면 "하트비트는 적재 / 카운트는 유실"이 가능해진다 →
+    #     · 신선한 하트비트 → DigestExporterStale 침묵
+    #     · 낡은 카운트가 last_over_time(...[2h])에 그대로 살아남음 → DigestExporterScrapeIncomplete 침묵
+    #   = push가 반복 절단되는데 **두 알림 모두 무성**(fail-open). 하트비트를 마지막에 두면 절단은 항상
+    #   하트비트부터 잃으므로 **하트비트 유실 → Stale 발화**로 fail-closed가 복원된다(post-commit 마커).
+    #   ⚠️ 요청을 2회로 쪼개는 대안은 채택하지 않는다 — curl 예산이 2×CURL_MAX_TIME이 되어 인-데드라인
+    #      부등식의 N_MAX가 7→5로 떨어진다(tests/gates/lib/digest-exporter-budget.sh).
+    #
+    #   하트비트 의미론은 **"push 경로 생존"이지 "수집 성공"이 아니다** — skopeo가 전건 실패해도
+    #   (GHCR 장애·ghcr-read 만료) 이 줄은 반드시 나간다. 그래야 DigestExporterStale이 GHCR 장애를
+    #   "push 사망"으로 오귀속하지 않는다(수집 실패는 별개 알림의 소관 — 역할 분리).
+    #   bare여야 하는 이유: `time() - last_over_time(m[2h]) > 900 or absent(last_over_time(m[2h]))`에서 좌·우
+    #   브랜치가 같은 (빈) 라벨셋을 내야 시리즈 만료 시 알림 identity가 유지돼 for: pending이 리셋되지 않는다.
+    TS=$(date +%s)
+    OUT="${OUT}digest_exporter_last_success_timestamp ${TS}\n"
     # ⚠️ push는 curl — quay.io/skopeo/stable 이미지에 wget 부재(라이브 검증에서 발각: || true가 127을 삼켜
     # 시리즈 0으로 무소음 사망). 실패는 비치명 유지하되 stderr로 가시화(Job 로그에서 추적 가능).
-    printf "%b" "$OUT" | curl -fsS --data-binary @- 'http://vmsingle:8428/api/v1/import/prometheus' || echo "vmsingle push failed (exit $?)" >&2
+    # curl 플래그의 **순서는 계약이 아니다** — 게이트는 같은 호출 안에 -fsS·--data-binary @-·--max-time이
+    # **존재**하는지만 단언한다(argv 순서가 계약인 것은 skopeo 쪽뿐: 글로벌 옵션이 서브커맨드 앞).
+    printf "%b" "$OUT" | curl -fsS --data-binary @- --max-time "$CURL_MAX_TIME" 'http://vmsingle:8428/api/v1/import/prometheus' || echo "vmsingle push failed (exit $?)" >&2
 ---
 apiVersion: batch/v1
 kind: CronJob
 metadata: { name: digest-exporter }
 spec:
-  schedule: "*/10 * * * *"
-  concurrencyPolicy: Forbid
+  schedule: "*/10 * * * *" # ⚠️ 변경 금지 — 모드 C 하한(push 주기)과 발화 e2e preflight가 여기서 파생한다
+  # ⚠️ Forbid이 아니라 Replace다(레거시 Job 구멍): activeDeadlineSeconds는 jobTemplate에만 붙고 k8s는
+  #    **이미 실행 중인 Job에 소급 적용하지 않는다**. 랜딩 순간 구(무제한) Job이 살아 있으면 Forbid가
+  #    새(제한된) Job을 계속 스킵해 지연 상한이 통째로 무너진다 → 최초 배포 거짓 페이지. Replace는 구 Job을
+  #    죽이고 새 Job을 반드시 띄우므로 상한이 레거시 상태와 무관하게 성립한다(잡은 멱등 — GHCR 조회 +
+  #    메트릭 push라 중도 종료로 잃는 것이 없다).
+  concurrencyPolicy: Replace
   jobTemplate:
     spec:
       backoffLimit: 1
+      # 어떤 잡도 3분 넘게 못 산다(정상 실행 ~10~20초). 행(hung) 잡이 슬롯을 무한 점유하는 경로를 차단해
+      # "첫 하트비트 ≤ cron(600s) + ADS(180s) + 컨트롤러 여유(60s) = 840s < for(900s)"를 **강제**한다.
+      # 부수 효과로 행 잡은 이제 죽어 KubeJobFailed가 잡는다(현재는 영원히 매달린다 — 바람직한 개선).
+      activeDeadlineSeconds: 180
       template:
         metadata:
           labels: { app.kubernetes.io/name: digest-exporter } # observability egress netpol 셀렉터

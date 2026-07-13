@@ -1,0 +1,68 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: the core fail-closed guarantee can break during a partial VictoriaMetrics import, leaving both new alerts silent. Three additional verification and operational gaps should follow promptly.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": null,
+  "reviewedFileCount": 32,
+  "target": "branch diff against main",
+  "reviewedSha": "a026629e366a0e8967ed6cc7e0031513f5d1b8cb",
+  "reviewedTree": "68c6c21cb1a213ecd1353a3f3ce4f2ad732f88d5",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 4,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Heartbeat is not an atomic commit marker for the streamed batch",
+      "body": "The heartbeat is placed before the configured/scraped counters and all lines are sent through one `/api/v1/import/prometheus` request. The code assumes that sharing a body makes publication fail-closed, but VictoriaMetrics documents this endpoint as streaming and notes that streaming import APIs may not report every parsing error ([official ingestion documentation](https://docs.victoriametrics.com/victoriametrics/single-server-victoriametrics/#how-to-import-data-in-prometheus-exposition-format)). Therefore, as an inference, a truncated/reset request can ingest the heartbeat prefix while never ingesting lines 65-66. Curl then logs failure and the Job still exits successfully, while the fresh heartbeat and old equal—or absent—counts leave both alerts silent. The committed producer test uses a curl stub that consumes the complete body, so this failure mode is untested.",
+      "file": "platform/victoria-stack/prod/digest-exporter.yaml",
+      "line_start": 53,
+      "line_end": 71,
+      "confidence": 0.93,
+      "recommendation": "Make the heartbeat a post-commit marker: import digest/count data first, require acknowledged success, then publish the heartbeat separately, or use an atomic protocol/generation-matching design. Add a server fault test that accepts a prefix and resets, proving the heartbeat cannot advance.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "medium",
+      "title": "Missing verification: the 60-second startup budget is not enforced",
+      "body": "`DEB_POD_START_BUDGET_S=60` is a test-only premise explicitly described as not derivable from the manifest, yet both N_MAX and the synthetic L7 proof depend on it. Production enforces only the total 180-second active deadline. At the admitted N=7 limit, scrapes, curl, and execution slack can consume 110 seconds after startup; a cold pull or scheduling delay of 70 seconds reaches the deadline before worst-case completion. The green gates therefore evaluate the same assumption rather than independently proving it. Current N=2 has more margin, making this follow-up-grade rather than an immediate current-capacity blocker.",
+      "file": "tests/gates/lib/digest-exporter-budget.sh",
+      "line_start": 19,
+      "line_end": 22,
+      "confidence": 0.98,
+      "recommendation": "Either enforce and test a genuine startup SLA, including cold image pull and scheduling, or derive ADS/N_MAX from enforceable constraints and stop presenting N_MAX=7 as an unconditional reach-push guarantee.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "medium",
+      "title": "Scrape alert points to logs that discard the affected app and cause",
+      "body": "Every `skopeo` error is redirected to `/dev/null`, and an empty digest silently continues. Because the new metrics are bare aggregate counts, the resulting alert identifies neither the failed app nor the error, while its description instructs the operator to inspect CronJob logs for exactly that information. A token expiry or per-app registry fault therefore leaves that app's drift monitoring blind while requiring manual reproduction to diagnose.",
+      "file": "platform/victoria-stack/prod/digest-exporter.yaml",
+      "line_start": 44,
+      "line_end": 48,
+      "confidence": 0.99,
+      "recommendation": "Log a sanitized app identifier and bounded failure category before continuing, without exposing credentials or raw auth material, and assert those diagnostics in the producer behavior tests.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "low",
+      "title": "New Alertmanager title mappings will not reach the running pod",
+      "body": "The changed ConfigMap is copied into an `emptyDir` by an initContainer only when the pod starts. The Deployment has no config checksum/revision change or reloader, so ArgoCD can apply lines 60-61 while the existing Alertmanager continues using the old rendered file indefinitely. The summary fallback preserves Korean alert delivery, limiting impact, but the accepted explicit-title mapping is not actually deployed by this diff.",
+      "file": "platform/victoria-stack/prod/alertmanager.yaml",
+      "line_start": 108,
+      "line_end": 155,
+      "confidence": 0.99,
+      "recommendation": "Make the ConfigMap revision part of the Pod template, use a generated immutable ConfigMap name, or add a reloader; verify that applying a mapping change updates the running Alertmanager configuration.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Block merge until partial import cannot advance the heartbeat without its counters and a RED fault-injection test covers that path.",
+    "Convert the startup allowance from a shared test assumption into an enforceable or honestly conditional contract.",
+    "Add actionable scrape diagnostics and a declarative Alertmanager configuration reload path."
+  ]
+}

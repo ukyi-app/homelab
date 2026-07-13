@@ -290,7 +290,19 @@
   막는다(push 메트릭을 rollup 없이 맨 참조 / 윈도 < 주기 = FAIL). 주기는 생산자 CronJob의 cron에서 파생하고,
   `api/v1/import` 호출부가 레지스트리(`PUSH_METRICS`)에 없으면 FAIL한다 — **새 push exporter를 추가하고 메트릭
   등록을 잊는 경로**가 이 함정의 재발로다.
-> 가드: `tests/gates/vmalert-drift-firing-e2e.sh`, `tests/gates/vmalert-bulkssd-firing-e2e.sh`, `tests/gates/test_digest-exporter.bats`, `tools/check-alert-rules.ts`, `tests/test_alert_rules.bats`
+- **2차 실명(감시견의 감시견)**: 이 함정을 고쳐도 **exporter 자신이 죽으면** 룰은 다시 실명한다 —
+  `ghcr_latest_digest`가 끊기면 기록 룰의 `[15m]` 윈도가 만료되며 좌변이 빈 벡터가 되고, exporter의 조용한
+  실패 3모드(크론 미실행·push 실패·파드 기동 실패)는 **전부 초록 Job(exit 0)** 이라 `KubeJobFailed`가 원리적으로
+  못 잡는다. → exporter가 **같은 push 페이로드에 하트비트**(`digest_exporter_last_success_timestamp`, bare
+  타임스탬프-값)를 실어 보내고 `DigestExporterStale`(r4)이 그 침묵을 페이징한다(fail-closed: curl이 실패하면
+  하트비트도 미적재). ⚠️ 하트비트 의미론은 **"push 경로 생존"이지 "수집 성공"이 아니다** — skopeo 전건 실패에도
+  하트비트는 나가야 GHCR 장애가 "push 사망"으로 **오귀속**되지 않는다(producer 행위 테스트가 실행으로 강제).
+  ⚠️ 신규 하트비트 룰은 **부트스트랩 경주**를 낳는다(최초 배포 시 이력이 없어 `absent(...)`가 즉시 pending) →
+  `for:`를 **강제된** 최악 첫 하트비트 지연보다 크게 잡아야 한다. 그 상한은 추정이 아니라 매니페스트가 강제한다:
+  `concurrencyPolicy: Replace`(⚠️ `activeDeadlineSeconds`는 **이미 실행 중인 Job에 소급 적용되지 않아** Forbid이면
+  레거시 무제한 Job이 상한을 빠져나간다) + `activeDeadlineSeconds` + skopeo/curl 타임아웃 → `cron + 파드예산 +
+  ADS < for:`. e2e preflight가 이 부등식을 매니페스트에서 파생해 강제한다(위반 = exit 2).
+> 가드: `tests/gates/vmalert-drift-firing-e2e.sh`, `tests/gates/vmalert-bulkssd-firing-e2e.sh`, `tests/gates/vmalert-digest-stale-firing-e2e.sh`, `tests/gates/test_digest-exporter.bats`, `tests/gates/test_digest-exporter-producer.bats`, `tests/gates/skopeo-timeout-smoke.sh`, `tools/check-alert-rules.ts`, `tests/test_alert_rules.bats`
 
 ### rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭
 - 위 함정의 해법(rollup)에는 **상한**이 있다. rollup 윈도는 "최근 W 안에 본 값을 지금의 값으로 되살리는

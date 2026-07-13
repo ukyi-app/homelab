@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship. The r8 deadline guard certifies an unsafe 12-app state, its timeout test cannot exercise the real timeout, and its failure rollback can hide a broken producer. No materially simpler complete design was found; the waived r7 finding was not re-raised.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": true,
+  "reviewedFileCount": 10,
+  "target": "branch diff against main",
+  "reviewedSha": "9502680680efe80b5d47f881246611c3acf6d7f7",
+  "reviewedTree": "82a80ccbc724eb4950c557791375b17d5481ece8",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 3,
+  "planFindingCount": 3,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "APPS cap still permits Jobs that cannot reach the push",
+      "body": "The formula allows equality: `12×10 + 30 + 30 = 180s`. The pinned Kubernetes controller starts the Job deadline before Pod creation and expires it at `duration >= activeDeadlineSeconds`, so scheduling and startup consume the same 180s. The plan itself budgets startup at 60s, making the admitted worst case 210s. CI can therefore approve a Job that dies before publishing heartbeat/counts, recreating the r8 misattribution. See the [Kubernetes v1.36.2 controller](https://github.com/kubernetes/kubernetes/blob/v1.36.2/pkg/controller/job/job_controller.go).",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 179,
+      "line_end": 185,
+      "confidence": 0.99,
+      "recommendation": "Use one strict in-deadline invariant: `pod_start + N×skopeo + curl + execution_slack < activeDeadlineSeconds`, and derive both gates from it. With the stated budgets and 180s deadline, the safe cap is at most 8 unless the deadline is increased.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "high",
+      "title": "Open question: which seam tests real Skopeo timeout enforcement?",
+      "body": "A sleeping PATH stub replaces the Skopeo binary that implements `--command-timeout`, so the proposed test cannot make the real timeout fire; emulating it only tests the stub. Moreover, the current command begins `skopeo inspect`, while the pinned CLI requires this global option before `inspect`. The presence-only gate can therefore pass invalid placement, leaving the timeout bound unenforced. See the [Skopeo v1.22.2 CLI contract](https://github.com/containers/skopeo/blob/v1.22.2/docs/skopeo.1.md).",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 228,
+      "line_end": 228,
+      "confidence": 0.99,
+      "recommendation": "Make the stub assert exact argv ordering and simulate a failure for loop semantics; separately smoke-test the pinned Skopeo image against a controlled blackhole to prove bounded completion.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "high",
+      "title": "Rule-only rollback can hide a broken producer",
+      "body": "On a late heartbeat or alert, the plan removes only the rules while retaining `Replace`, the Job deadline, and command timeouts. If those producer changes caused missed or partial publication, removing `DigestExporterStale` and `DigestExporterScrapeIncomplete` silences the new detection while `ghcr_latest_digest` remains stale, again blinding `ImageDigestDrift`. This contradicts the full-revert safety contract at line 206.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 283,
+      "line_end": 285,
+      "confidence": 0.98,
+      "recommendation": "Define cause-specific rollback: rule-only only after proving producer metrics and `ghcr_latest_digest` are healthy; otherwise revert producer and rules together and verify digest publication resumes.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Correct the deadline invariant and cardinality cap.",
+    "Replace the impossible timeout seam with argument-order and real-binary checks.",
+    "Make rollback cause-specific, then rerun the plan review."
+  ]
+}

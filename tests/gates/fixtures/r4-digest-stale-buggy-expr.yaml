@@ -1,0 +1,31 @@
+# 픽스처(동결 — 절대 "고치지" 마라): r4 `DigestExporterStale`의 **결함 expr** 스냅샷(모드 C — 맨 참조).
+#
+# 결함: digest_exporter_last_success_timestamp(digest-exporter CronJob, **10분 주기** push)를 rollup 없이
+# 맨 참조한다. vmalert instant 질의 룩백은 5m(-datasource.queryStep 기본)이라, 매 push 주기의 **후반 5분**은
+# 시리즈가 vmalert 눈에서 사라진다:
+#   [push, push+5m)  → 시리즈 보임 → time()-hb 는 작다 → expr false
+#   [push+5m, push+10m) → 시리즈 **안 보임** → 좌변은 빈 벡터, 맨 `absent(hb)`가 1 → expr **true**
+# 즉 정상 하트비트에서도 expr이 5분마다 켜졌다 꺼진다 → pending이 최대 5분(10회 평가)만 쌓이고 매 주기
+# **리셋** → `for: 15m`(30회 연속)에 **구조적으로 도달 불가**. 죽은 알림의 정확히 그 형태다.
+#
+# 용도: vmalert-digest-stale-firing-e2e.sh의 L3(하네스 이빨 증명). **정상** 하트비트를 먹였을 때
+#   firing == 0 && pending > 0 이어야 한다.
+#   · pending > 0  = push 구멍이 **실재한다**는 양성 증거(데이터가 룰에 실제로 닿았다 → vacuous 통과 차단).
+#   · firing == 0  = 맨 참조는 for:를 절대 못 넘긴다(rollup만이 연속성을 준다).
+#
+# ★ 이 픽스처의 pending이 **0이 되면** 하네스가 10분 push 구멍을 보간하고 있다는 뜻이다(거짓 GREEN) —
+#   그러면 배포 룰이 안 고쳐졌는데도 L1/L5가 통과할 수 있다. 즉 이 파일은 하네스의 **거짓 GREEN 방지
+#   최종 보증**이다(datasource `?max_lookback` 핀보다 이쪽이 권위 — 핀은 방어선, 이 레그는 증명).
+#   반대로 이 픽스처가 **발화하면** 맨 참조가 for:를 넘겼다는 뜻이라 역시 하네스/격자가 깨진 것이다.
+# (배포 룰이 고쳐진 뒤에도 이 픽스처는 그대로 결함 상태로 남는다 — 하네스의 음성 기준선.)
+groups:
+  - name: storage-backup-fixture-buggy
+    rules:
+      - alert: DigestExporterStale
+        expr: |
+          (time() - digest_exporter_last_success_timestamp) > 900
+          or absent(digest_exporter_last_success_timestamp)
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "fixture(buggy) — digest-exporter 하트비트 정체(맨 참조)"
