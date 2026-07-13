@@ -26,6 +26,13 @@
 #                                                                 페이징 조건**(거짓 사유) 차단 — 우변 존재 가드 강제)
 #   L8 과대 윈도 픽스처(W=30m) + bump → phantom **발화 관측**    (하네스 이빨 ③: L3가 상한에서 실제로 문다)
 #   L9 attestation 재빌드(spec=최신 인덱스, image_id=구 인덱스) → 발화 **부재** (라이브 오탐 재현)
+#   L10 롤아웃 교착(구 파드 실행 중 + 신 파드 ImagePullBackOff, image_id="") → 발화 **존재**
+#                                                                 (L9 픽스의 **fail-open 거울상** 차단:
+#                                                                  image_spec만 조인하면 **실행되지 않는**
+#                                                                  파드가 최신 digest와 매치돼 진짜
+#                                                                  드리프트를 억제한다 → image_id 셀렉터를
+#                                                                  "materialize된 파드만" 가드로 유지해야 함.
+#                                                                  현행 룰에서도 GREEN = 보존 계약)
 #
 # 부분 실행: `DRIFT_E2E_LEGS="L9"` 또는 인자(`bash … L1,L2`). 미지정 = 전 레그(기존 동작 동일).
 set -euo pipefail
@@ -193,7 +200,7 @@ echo "[window] backfill $(iso "$DATA_START") .. $(iso "$T_END") | replay $(iso "
 # preflight(§2b 산술 단언)는 선택과 무관하게 **항상** 돈다 — 전제 붕괴는 어떤 부분 실행에서도 침묵하면 안 된다.
 # L6(하네스 생존)은 L1과 **같은 replay**에 얹혀 있다 → "L6" 지정은 L1을 뜻한다.
 # 알 수 없는 이름은 fail-closed(exit 2) — 오타로 "레그 0개 실행 후 green"이 되는 vacuous 통과를 막는다.
-ALL_LEGS="L1 L2 L3 L4 L5 L7 L8 L9"
+ALL_LEGS="L1 L2 L3 L4 L5 L7 L8 L9 L10"
 LEGS_IN="${DRIFT_E2E_LEGS:-}"
 [ "$#" -gt 0 ] && LEGS_IN="$*"
 SELECTED=""
@@ -210,7 +217,8 @@ else
       L7) leg=L7 ;;
       L8) leg=L8 ;;
       L9|ATTESTATION|ATTESTATION-REBUILD) leg=L9 ;;
-      *) echo "알 수 없는 레그: '$raw' (가능: $ALL_LEGS L6 attestation all)" >&2; exit 2 ;;
+      L10|ROLLOUT-STUCK) leg=L10 ;;
+      *) echo "알 수 없는 레그: '$raw' (가능: $ALL_LEGS L6 attestation rollout-stuck all)" >&2; exit 2 ;;
     esac
     case " $SELECTED " in *" $leg "*) : ;; *) SELECTED="$SELECTED $leg" ;; esac
   done
@@ -437,9 +445,66 @@ fi
 docker rm -f "r6drift-e2e-l9-attestation-$$" >/dev/null 2>&1 || true
 fi
 
+# ── L10(보존 계약 / L9 픽스의 fail-open 거울상): 롤아웃 교착 → 발화 **지속**해야 함 ──────────────────
+# 시나리오: GHCR 최신 = 신 digest. bump-poll이 values를 그 digest로 핀했지만 **새 파드가 이미지를 못 당긴다**
+# (ImagePullBackOff — GHCR 인증 만료/태그 삭제/노드 디스크 부족 등). RollingUpdate는 새 파드가 Ready가 되기
+# 전엔 구 파드를 죽이지 않으므로 **실제 서빙은 여전히 구 이미지**다 → 이건 **진짜 드리프트**이고 발화가 정답이다.
+#
+# 왜 이 레그가 필요한가(L9 픽스의 위험): pull 실패 파드의 KSM 라벨은 `image_spec`=신 digest,
+# **`image_id`=빈 문자열**이다(컨테이너가 시작조차 못 했으니 containerd가 보고할 이미지가 없다). L9 오탐을
+# 고치려고 조인 우변을 `image_id` → `image_spec`으로 **통째로** 갈아치우면, 이 **실행되지 않는** 파드가
+# 최신 digest와 매치돼 `unless`가 좌변을 지워버린다 → **진짜 드리프트를 놓치는 fail-open**. 픽스는
+# `image_id=~"ghcr[.]io/ukyi-app/.*"` 셀렉터를 **"이미지가 실제로 materialize된 파드만" 가드로 유지**하고
+# `label_replace`의 **소스 라벨만** `image_spec`으로 바꿔야 한다.
+# ⚠️ 현행(red) 룰에서도 GREEN이다 — 빈 image_id는 셀렉터 정규식에 걸리지 않아 자동 제외되므로. 즉 이 레그는
+#    회귀(RED)가 아니라 **characterization(보존 계약)**이다. red에서 RED가 나오면 전제가 틀린 것이다.
+if want L10; then
+replay l10-rollout-stuck "$TMP/r6-deployed.yaml" rollout-stuck
+# ⚠️ require_record는 **쓰지 않는다**. fail-open 룰에서는 막힌 파드가 `unless` 우변을 채워 record가 **0으로
+#    떨어지는 것이 바로 그 버그의 모습**이다 — require_record를 걸면 그 실패가 "체이닝 레이스"라는 **엉뚱한
+#    사유의 HARNESS FAULT(exit 2)**로 나가 진단을 오도한다(실측 확인). 대신 L7/L9와 같은 관용구로 vacuity를
+#    막는다: ① 픽스처 무결성 preflight(아래) ② 대조 알림이 **같은 replay에서** 발화했는지.
+# 픽스처 무결성 — **fail-open 전제 자체가 데이터에 없으면**(막힌 파드가 안 심겼거나 빈 image_id가 셀렉터에
+# 걸리면) 이 레그는 그냥 L1의 복사본이 되어 아무것도 지키지 못한다 → 전제 붕괴는 룰 판정이 아니라
+# HARNESS FAULT(exit 2)로 크게 실패시킨다.
+Q_STUCK='count(last_over_time(kube_pod_container_info{namespace="prod", pod=~"page-new-.*"}[4h]))'
+Q_STUCK_VISIBLE='count(last_over_time(kube_pod_container_info{namespace="prod", pod=~"page-new-.*", image_id=~"ghcr[.]io/ukyi-app/.*"}[4h]))'
+Q_RUNNING='count(last_over_time(kube_pod_container_info{namespace="prod", pod=~"page-old-.*", image_id=~"ghcr[.]io/ukyi-app/.*"}[4h]))'
+# 막힌 파드의 spec 핀이 exporter latest와 **같은** digest여야 fail-open이 성립한다(다르면 어떤 조인이든 발화 → 무의미).
+# shellcheck disable=SC2016  # `$1`은 PromQL label_replace의 캡처 그룹이다 — 셸 확장을 **막아야** 한다(작은따옴표 의도적).
+Q_SPEC_MISMATCH='count(
+  count by (digest) (
+    label_replace(
+      last_over_time(kube_pod_container_info{namespace="prod", pod=~"page-new-.*"}[4h]),
+      "digest", "$1", "image_spec", ".*@(sha256:[a-f0-9]+)$"
+    )
+  )
+  unless on (digest) count by (digest) (last_over_time(ghcr_latest_digest[4h]))
+)'
+[ "$(promql "$Q_STUCK")" -ge 1 ] || { echo "HARNESS FAULT (L10): pull 실패 파드(page-new-*) 시리즈가 datasource에 없다 — fail-open 전제가 데이터에 없으므로 이 레그는 아무것도 증명하지 못한다." >&2; exit 2; }
+[ "$(promql "$Q_STUCK_VISIBLE")" -eq 0 ] || { echo "HARNESS FAULT (L10): pull 실패 파드가 image_id 셀렉터(ghcr[.]io/ukyi-app/.*)에 걸린다 — 빈 image_id를 심지 못했다(실물 KSM과 불일치). 생성기의 pending_pod_series를 확인하라." >&2; exit 2; }
+[ "$(promql "$Q_RUNNING")" -ge 1 ] || { echo "HARNESS FAULT (L10): 구(실행 중) 파드(page-old-*) 시리즈가 없다 — '실제로 도는 것은 구 이미지'라는 전제가 무너졌다." >&2; exit 2; }
+[ "$(promql "$Q_SPEC_MISMATCH")" -eq 0 ] || { echo "HARNESS FAULT (L10): 막힌 파드의 image_spec digest가 ghcr_latest_digest와 다르다 — fail-open이 애초에 성립하지 않아 이 레그는 이빨이 없다." >&2; exit 2; }
+F10="$(firing ImageDigestDrift)"; P10="$(pending ImageDigestDrift)"
+F10CTL="$(firing ArgoCDOutOfSync)"
+echo "  [L10] deployed rules + stuck rollout (old pod running OLD, new pod ImagePullBackOff → image_spec=NEW / image_id=\"\") → record=$RECORD_SAMPLES firing=$F10 pending=$P10 (control ArgoCDOutOfSync firing=$F10CTL)"
+# 대조 알림: vmalert가 이 replay에서 애초에 아무것도 쓰지 못했다면(체이닝 레이스·하네스 고장) firing=0은
+# 룰 판정이 아니다 → 거짓 RED로 새지 않도록 여기서 exit 2. 발화했다면 F10=0은 **순수한 룰 판정**이다.
+[ "$F10CTL" -gt 0 ] || {
+  echo "HARNESS FAULT (L10): control alert ArgoCDOutOfSync did not fire in the rollout-stuck replay — vmalert wrote nothing, so an ImageDigestDrift verdict is meaningless." >&2
+  exit 2
+}
+if [ "$F10" -gt 0 ]; then
+  pass "L10 real drift still pages when a rollout is stuck — the only pod actually running the image serves the OLD digest and the new pod never materialized one (firing samples=$F10)"
+else
+  fail "L10 ImageDigestDrift went SILENT while the rollout was stuck (firing=$F10, pending=$P10) — the only container actually running serves the OLD digest; the new pod is in ImagePullBackOff and reports image_spec=<latest> with an EMPTY image_id. Joining on image_spec alone lets that never-running pod satisfy the 'unless' and suppress a REAL drift (fail-open — the mirror image of L9). Keep the image_id=~\"ghcr[.]io/ukyi-app/.*\" selector as a 'the image actually materialized' guard and only swap the label_replace SOURCE label to image_spec"
+fi
+docker rm -f "r6drift-e2e-l10-rollout-stuck-$$" >/dev/null 2>&1 || true
+fi
+
 echo "[elapsed] $(( $(date +%s) - START_EPOCH ))s"
 if [ "$FAILED" -gt 0 ]; then
   echo "vmalert-drift-firing-e2e: ${FAILED} leg(s) FAILED (legs=$SELECTED)" >&2
   exit 1
 fi
-echo "vmalert-drift-firing-e2e OK (preflight + 선택 레그 [$SELECTED] 통과 — ImageDigestDrift는 실제 드리프트에만 발화하고, 오발화/가짜픽스/KSM-장애-오귀속/과대윈도/attestation-재빌드는 차단)"
+echo "vmalert-drift-firing-e2e OK (preflight + 선택 레그 [$SELECTED] 통과 — ImageDigestDrift는 실제 드리프트에만 발화하고(교착 롤아웃 포함), 오발화/가짜픽스/KSM-장애-오귀속/과대윈도/attestation-재빌드는 차단)"
