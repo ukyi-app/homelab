@@ -1,13 +1,31 @@
 # 외부 앱 레포가 호출하는 재사용 빌드 워크플로 (빌드 로직의 SSOT) — build-only.
-# 앱 레포의 caller(템플릿 제공)는 main push에서 이걸 호출만 한다:
-#   uses: <owner>/homelab/.github/workflows/reusable-app-build.yaml@main
-#   with: { app: ${{ github.event.repository.name }} }
+# 앱 레포의 caller(템플릿 제공)는 두 모드로 이걸 호출만 한다(thin-caller):
+#   release(push: main)    uses: <owner>/homelab/.github/workflows/reusable-app-build.yaml@main
+#                          with: { app: ${{ github.event.repository.name }} }              # push 기본 true
+#   pr(pull_request)       with: { app: …, push: false }                                   # BUILD ONLY
 #
 # 계약(v1 repository_dispatch 경로 폐기 완료):
-# - build 잡: arm64 빌드 + GHCR push. 배포 반영은 homelab측 GHCR 폴링(bump-poll.yaml)이 권위 처리.
+# - build 잡: arm64 빌드(+ push=true면 GHCR push). 배포 반영은 homelab측 GHCR 폴링(bump-poll.yaml)이 권위 처리.
 # - deploy-trigger 잡(앱 release.yaml에서 흡수): 빌드 직후 homelab bump-poll을 1회 디스패치해 크론 지연을
 #   제거한다. caller는 HOMELAB_DISPATCH_APP_ID/KEY 2개만 passthrough(미전달=크론 백스톱, clean skip).
 # - 구 PAT 기반 dispatch·org secret·bump.yaml 외부 dispatch 경로는 모두 폐기됨(인증 마이그레이션 완료).
+#
+# push=false(BUILD ONLY)가 있는 이유: 앱의 품질 게이트(typecheck+test)는 CI 잡이 아니라 Dockerfile 안에
+# 산다(ADR-0001) → 그 게이트를 돌리는 유일한 방법이 "이미지를 빌드하는 것"이다. push 경로만 있던 동안
+# 앱 레포의 PR(특히 Renovate 의존성·베이스 이미지 범프)은 체크 0개로 승인 요청됐고, 게이트는 머지 후
+# (= 이미 배포되는 중)에야 울렸다. push=false는 같은 빌드를 PR에서 돌리되 레지스트리·배포는 건드리지 않는다.
+#
+# ⚠️ 이 워크플로는 permissions를 선언하지 않는다(의도적 — 잡 permissions 부재 = caller 잡 권한 상속).
+#    GHA reusable 규칙상 called 워크플로의 permissions는 caller 상한을 넘길 수 없고, 넘기면 잡이 아니라
+#    run 자체가 죽는다("nested job is requesting 'packages: write', but is only allowed 'packages: none'").
+#    permissions 키는 표현식을 못 받으므로(모드별 분기 불가) 여기에 무엇을 박든 두 모드 중 하나가 틀린다:
+#      packages: write를 박으면 → build-only caller(PR)가 packages: write를 주지 않는 한 run이 죽는다
+#                                 (= PR 워크플로에 push 권한을 강제 = 최소권한 파괴).
+#      안 박으면(=contents만) → push 경로가 GHCR에 못 민다.
+#    그래서 상한 결정을 caller에 위임한다. caller가 지켜야 할 최소권한:
+#      push=true  → permissions: { contents: read, packages: write }   (기존 release.yaml 그대로)
+#      push=false → permissions: { contents: read }                    (토큰에 packages 스코프 자체가 없다
+#                                                                        → build-only run은 밀고 싶어도 못 민다)
 name: "📦 reusable-app-build"
 on:
   workflow_call:
@@ -16,9 +34,14 @@ on:
         description: "앱 이름 (관례: 레포 이름과 동일)"
         required: true
         type: string
+      push:
+        description: "GHCR push 여부. false = BUILD ONLY(PR 검증용) — 로그인·push·deploy-trigger 전부 비활성, Dockerfile 품질 게이트만 돈다."
+        required: false
+        default: true
+        type: boolean
     secrets:
       HOMELAB_DISPATCH_APP_ID:
-        description: "homelab bump-poll 즉시 디스패치용 App ID (미전달/미설정 시 즉시 디스패치 skip — homelab 크론이 백스톱). per-repo 유지, org secret 아님."
+        description: "homelab bump-poll 즉시 디스패치용 App ID (미전달/미설정 시 즉시 디스패치 skip — homelab 크론이 백스톱). per-repo 유지, org secret 아님. push=false caller는 아예 안 넘긴다."
         required: false
       HOMELAB_DISPATCH_APP_PRIVATE_KEY:
         description: "동 App private key (ID와 쌍)"
@@ -27,9 +50,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04-arm # native arm64 — QEMU 불필요 (homelab build.yaml과 동일)
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - id: meta
@@ -41,21 +61,31 @@ jobs:
           esac
           echo "tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
-      - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
+      # GHCR 로그인은 push 경로 전용이다. build-only에선 (a) 밀 게 없고, (b) 베이스 이미지가 전부 공개라
+      # (oven/bun·gcr.io distroless·ghcr.io SWS) 익명 pull로 충분하며, (c) 그 토큰엔 packages 스코프도 없다.
+      # 그런데도 로그인하면 러너 docker credential store에 자격증명을 구워둔 채 곧바로 **PR이 가져온 미검증
+      # 의존성**(Renovate 범프)을 이미지 빌드 안에서 실행(typecheck/test)하게 된다 — 늘릴 이유 없는 노출면.
+      - if: ${{ inputs.push }}
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: build + push (arm64)
+      # 두 모드의 빌드 스펙은 `push:` 한 줄만 다르다 — 그래야 PR 체크가 릴리스 빌드의 충실한 dry-run이다.
+      # (플랫폼·컨텍스트·캐시·태그가 갈라지면 PR 초록이 릴리스 초록을 보장하지 못한다 = 게이트의 존재 이유 소멸.)
+      # tags: push=false에선 아무 데도 안 밀리는 로컬 메타데이터일 뿐이라 그대로 둔다(스펙 분기 최소화).
+      # cache: gha 캐시는 두 모드 공용 — PR run이 쓰는 캐시는 그 PR ref 스코프에 격리돼 main 스코프를 오염시킬 수
+      #        없고(GHA 캐시 스코프 규칙), 반대로 main 캐시는 PR이 읽는다 → PR 게이트가 웜 캐시로 돈다.
+      - name: build (+ push to GHCR when inputs.push)
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
         with:
           context: .
           platforms: linux/arm64
-          push: true
+          push: ${{ inputs.push }}
           tags: ghcr.io/${{ github.repository_owner }}/${{ inputs.app }}:${{ steps.meta.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # 빌드 완료 후 흐름: bump-poll(10분 주기)이 main reachable + descendant + digest 검증 후
+      # 빌드 완료 후 흐름(push=true): bump-poll(10분 주기)이 main reachable + descendant + digest 검증 후
       # autoDeploy면 자동 PR+머지, 아니면 승인 PR을 만든다. 즉시 반영: owner가
       # homelab에서 `gh workflow run bump-poll.yaml`.
 
@@ -63,8 +93,14 @@ jobs:
   # secrets 쌍(ID+KEY) 미전달이면 preflight로 clean skip — bump-poll 크론이 백스톱이라 안전. 하나만 오면 설정 오류 fail(부분 설정이 빌드 후 실패로 새는 것 차단).
   # ⚠️ workflow_call은 caller 컨텍스트 실행 — 노출면은 caller가 넘긴 2개 시크릿 뿐(흡수는 보안 중립).
   #    디스패치 자격 오용 방어는 homelab의 workflow_dispatch 전수 actor 가드(B6, 허용목록=bump-poll)가 담당한다.
+  # ⚠️ if: inputs.push — build-only(PR)에선 이 잡이 아예 뜨지 않는다. 밀지 않은 이미지로 배포를 깨우는 건 무의미하고,
+  #    PR caller는 시크릿을 하나도 안 넘기므로 위 preflight의 "쌍 불일치 = 설정 오류 fail" 경로에 스칠 여지도 없앤다
+  #    (둘 다 부재 = clean skip이라 실행돼도 안전하지만, 배포 트리거는 PR에서 '실행되지 않는 것'이 계약이다).
+  #    needs의 success() 게이트는 유지된다 — if에 status 함수(always() 등)가 없으면 기본 success()가 그대로 적용되므로
+  #    빌드 실패 시 디스패치는 여전히 안 된다(push=true 경로 동작 무변).
   deploy-trigger:
     needs: build
+    if: ${{ inputs.push }}
     runs-on: ubuntu-latest
     permissions: {}
     steps:
