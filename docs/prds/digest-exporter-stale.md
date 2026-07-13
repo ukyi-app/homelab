@@ -5,10 +5,10 @@ entry-track: feature
 review-track: full
 pipeline-stage: issues
 issue-tracker: local
-prd-published: false
-skeleton-issue: []
+prd-published: true
+skeleton-issue: [I-1]
 structure-gate: pending
-issues: []
+issues: [I-1, I-2]
 ---
 
 # digest-exporter 자기관측 — 하트비트 + 수집 카운트 + staleness 알림
