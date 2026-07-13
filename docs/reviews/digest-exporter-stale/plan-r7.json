@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship yet. `Replace` closes the declarative legacy-Job hole, but P-2 still lacks the pre-landing transition test required by r6. No new critical issue or materially simpler safe alternative was found.",
+  "planFile": "docs/prds/digest-exporter-stale.md",
+  "planInDiff": true,
+  "reviewedFileCount": 8,
+  "target": "branch diff against main",
+  "reviewedSha": "213073a40aa57bd1fe1ecd63b11ba57a02615020",
+  "reviewedTree": "42772928d92adc4257ae9e2b883773d57a412268",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "medium",
+      "title": "Open question: which seam tests active legacy Job replacement?",
+      "body": "`Replace` matches [Kubernetes concurrency semantics](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/#concurrency-policy), but L7 only injects a synthetic heartbeat, preflight only checks YAML values, and the post-landing observation does not guarantee an active pre-change Job. Every planned gate can therefore pass without exercising deletion of the unbounded legacy Job, creation of its bounded replacement, and heartbeat delivery before `for:`—the exact transition that caused r6 to reject P-2.",
+      "file": "docs/prds/digest-exporter-stale.md",
+      "line_start": 240,
+      "line_end": 265,
+      "confidence": 0.99,
+      "recommendation": "Add a required transition test against the pinned Kubernetes version: seed a hanging pre-change `Forbid` Job, apply `Replace` plus `activeDeadlineSeconds`, then assert the old Job UID is deleted, a bounded successor starts, and its heartbeat arrives before 900 seconds.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Add the active-legacy-Job transition test and rerun the focused P-2 review."
+  ]
+}
