@@ -1,0 +1,20 @@
+{
+  "ok": false,
+  "status": "review-incomplete",
+  "kind": "release",
+  "verdict": null,
+  "summary": null,
+  "planFile": "docs/bugfixes/image-digest-drift-false-positive.md",
+  "planInDiff": null,
+  "reviewedFileCount": 16,
+  "target": "branch diff against main",
+  "reviewedSha": "50572d27757e3a8d1042200281fb87c8daa312e9",
+  "reviewedTree": "0c7c0d5120edc6ba570fb4da55ff01bf53f119fc",
+  "codexStatus": 1,
+  "parseError": "Selected model is at capacity. Please try a different model.",
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [],
+  "hint": "Codex returned no usable verdict (codex run failed, was empty, or output did not parse). Re-run; if it persists, check `/codex:setup`."
+}
