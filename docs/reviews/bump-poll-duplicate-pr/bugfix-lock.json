@@ -1,17 +1,28 @@
 {
-  "regressionCmd": "bats tools/tests/test_ensure-bump-pr.bats --filter-tags regression",
-  "characterizationCmd": "bats --filter-tags '!regression' tools/tests/test_ensure-bump-pr.bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_bump-poll-toctou.bats",
+  "regressionCmd": "bats tools/tests/test_ensure-bump-pr.bats tests/gates/test_bump-poll-callsite.bats --filter-tags regression",
+  "characterizationCmd": "bats --filter-tags '!regression' tools/tests/test_ensure-bump-pr.bats tests/gates/test_bump-poll-callsite.bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_bump-poll-toctou.bats",
   "flips": [
     {
-      "testId": "an open same-repo writer PR for the same bump suppresses a duplicate create (skip)",
-      "symptomToken": "duplicate bump PR: ensure-bump-pr still says 'create' while PR #350 (same-repo, writer) already proposes"
+      "testId": "W1: an open same-repo writer PR suppresses every mutation (no push, no create)",
+      "symptomToken": "duplicate bump PR: ensure-bump-pr executed 'gh pr create' while PR #350 (same-repo, writer) is already open"
     },
     {
-      "testId": "an open same-repo writer PR that went DIRTY is rebuilt, not duplicated (rebuild)",
-      "symptomToken": "duplicate bump PR: ensure-bump-pr still says 'create' while PR #351 (same-repo, writer) is DIRTY"
+      "testId": "W3: an orphan remote branch (push ok, pr create failed) is adopted with a leased push, not collided with",
+      "symptomToken": "orphan bump branch: ensure-bump-pr pushed"
+    },
+    {
+      "testId": "bump-poll never calls gh pr create directly (PR creation goes through ensure-bump-pr)",
+      "symptomToken": "duplicate bump PR: bump-poll.yaml still calls 'gh pr create' directly"
     }
   ],
-  "scope": ["tools/ensure-bump-pr.ts", ".github/workflows/bump-poll.yaml"],
-  "red": { "sha": "7373cdf4916e5e8b49d89a8dc4e0b8a92b47c8db" },
-  "green": { "sha": "" }
+  "scope": [
+    "tools/ensure-bump-pr.ts",
+    ".github/workflows/bump-poll.yaml"
+  ],
+  "red": {
+    "sha": "e9f4d59731a0822855ab1e045b145e613be5c55e"
+  },
+  "green": {
+    "sha": ""
+  }
 }
