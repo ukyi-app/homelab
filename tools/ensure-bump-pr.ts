@@ -31,7 +31,7 @@
 // 절대 신뢰하지 않는다. 신뢰하면 포크 PR 하나로 배포를 무기한 억제할 수 있다(억제 = 공격 표면).
 // 신뢰하는 제안은 **동일-레포(isCrossRepository=false) + writer App 작성자**뿐이다.
 //
-// 판정표(수정 후 목표 — 지금은 아래 red-capture 블록이 이걸 무시한다). push는 **정확히 이 세 argv뿐**:
+// 판정표. push는 **정확히 이 세 argv뿐**:
 //   신뢰 PR 없음 + 원격 브랜치 없음            → create   git push origin HEAD:refs/heads/<b>                                → gh pr create
 //   신뢰 PR 없음 + 원격 브랜치 **있음**(고아)   → adopt    git push --force-with-lease=refs/heads/<b>:<원격 OID> origin HEAD:refs/heads/<b> → gh pr create
 //   신뢰 PR + CLEAN/BEHIND/BLOCKED/UNKNOWN    → skip     push·create 둘 다 하지 않는다
@@ -67,11 +67,9 @@
 //    run 1이 무장에서 죽어 무장 없는 PR이 남고, 이후 main 이동이 그 PR을 충돌시킨다). rebuild만 하고
 //    무장 갭을 남기면 PR은 깨끗해지는데 auto-merge가 영영 안 붙어 배포가 정지한다.
 //
-// ⚠️ 현재는 **red-capture 상태**다 — 판정 로직은 아직 없고 관측 사실과 무관하게 **항상 create 경로를
-// 실행**한다(= 버그 재현: 중복 PR + 고아 브랜치 충돌 + lease 없는 push + 무장 재수렴 없음). 사실은
-// 파싱·검증해 stdout의 `observed`에(무장 여부 포함), 실제 실행한 명령은 `executed`에 실어 배선이 살아
-// 있음을 증명한다. 회귀 테스트(tools/tests/test_ensure-bump-pr.bats, test_tags=regression)가 이 RED를 고정한다.
-// ⚠️ 관측은 배선했으나 **결정에는 쓰지 않는다**(동결) — `observed.*.autoMerge`는 아직 아무 분기도 하지 않는다.
+// 사실은 파싱·검증해 stdout의 `observed`에(무장 여부 포함), 실제 실행한 명령은 `executed`에 실어
+// 호출부/테스트가 "무엇을 관측하고 무엇을 변이했는가"를 검증할 수 있게 한다
+// (tools/tests/test_ensure-bump-pr.bats가 argv 원장으로 이 계약을 고정한다).
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { TAG_RE } from "./lib/image-pin.ts";
@@ -279,28 +277,63 @@ const remoteBranch = parseLsRemote(run("git", ["ls-remote", "--heads", args.remo
 const observedPrs = prs.map((pr) => ({ ...pr, trusted: isTrusted(pr, args.writer) }));
 const trusted = observedPrs.find((pr) => pr.trusted) ?? null;
 
-// ── ② 결정 ────────────────────────────────────────────────────────────────────────────────
-// ⚠️ red-capture: 여기가 수정 seam이다. 지금은 판정을 버그 상태로 동결한다 — 신뢰하는 열린 PR이
-// 있어도, 고아 원격 브랜치가 있어도, 그 PR의 무장이 빠져 있어도 무조건 create 경로를 실행한다
-// (= 매 주기 중복 PR + 고아 충돌 + 무장 갭 미수렴).
-// 수정 시 위 판정표대로 action을 정하고 ③의 변이를 분기하도록 이 두 블록만 바꾸면 된다.
-// (무장은 **별도 축**이다: `lane === "bump" && trusted && !trusted.autoMerge`이면 판정이 skip이든
-//  rebuild든 재무장하고, create/adopt는 PR 생성 직후 무장한다 — R-10. propose-pr은 절대 무장 없음.)
-const action = "create" as const;
-const reason =
-  "red-capture: 판정 미구현 — 신뢰 PR·고아 브랜치·무장 여부와 무관하게 항상 create(중복 PR·lease 없는 push·무장 미수렴 재현)";
+// ── ② 결정 — 관측 사실만으로 정한다(부작용 0) ──────────────────────────────────────────────
+// 축 1(판정): 신뢰 PR의 **존재**가 최우선이다. 신뢰 PR이 있으면 원격 브랜치는 당연히 있으므로
+// (그 PR의 head가 그것이다) 고아 판정으로 내려가지 않는다.
+//   신뢰 PR + DIRTY  → rebuild (PR 재사용 — create 금지)
+//   신뢰 PR + 그 외  → skip    (CLEAN/BEHIND/BLOCKED/UNKNOWN … 변이 0)
+//   신뢰 PR 없음 + 고아 원격 브랜치 → adopt
+//   신뢰 PR 없음 + 원격 브랜치 없음 → create
+// ⚠️ DIRTY만이 rebuild다. UNKNOWN(GitHub의 지연 계산)을 충돌로 오분류하면 매 폴링 force-push가 난다.
+type Decision = "create" | "adopt" | "skip" | "rebuild";
+let action: Decision;
+let reason: string;
+if (trusted !== null) {
+  if (trusted.mergeStateStatus === "DIRTY") {
+    action = "rebuild";
+    reason = `열린 신뢰 PR #${trusted.number}이 DIRTY(충돌) — 최신 main에서 재구축해 leased force-push(같은 PR 재사용, create 금지)`;
+  } else {
+    action = "skip";
+    reason = `열린 신뢰 PR #${trusted.number}(${trusted.mergeStateStatus}) — 이미 진행 중이므로 변이하지 않는다(중복 PR 금지)`;
+  }
+} else if (remoteBranch !== null) {
+  action = "adopt";
+  reason = `열린 신뢰 PR은 없는데 원격 브랜치가 남아 있다(고아 ${remoteBranch.oid}) — 원격 OID를 기대값으로 leased force-push 후 PR 생성`;
+} else {
+  action = "create";
+  reason = "열린 신뢰 PR도 원격 브랜치도 없다 — 정상 경로(push → PR 생성)";
+}
 
-// ── ③ 변이(원격) ───────────────────────────────────────────────────────────────────────────
-// 동결된 create 경로: **lease 없는** push + 무조건 PR 생성 → 고아 브랜치와 non-fast-forward 충돌
-// (bare 원격으로 실측: `! [rejected] … (fetch first)`). (수정 후: skip이면 이 블록을 통째로 건너뛴다.)
-mutate("git", ["push", args.remote, `HEAD:${ref}`], "git push");
-mutate("gh", [
-  "pr", "create", "--base", args.base, "--head", branch,
-  "--title", args.title, "--body", args.body,
-], "gh pr create");
+// 축 2(무장) — **판정과 직교**한다(R-10/R-11). propose-pr(승인 레인)은 어떤 경로로도 무장하지 않는다:
+// 사람 머지가 곧 배포 승인이므로 무장 없음이 그 레인의 **정상 상태**다(재무장 대상이 아니다).
+//   · create/adopt = PR을 새로 만든다 → 생성 직후 무장(그 PR엔 무장이 있을 수 없다)
+//   · skip/rebuild = 이미 있는 신뢰 PR → 무장이 **없을 때만** 재무장(desired state 수렴, 있으면 손대지 않음)
+const createsPr = action === "create" || action === "adopt";
+const armGap = trusted !== null && !trusted.autoMerge;
+const shouldArm = lane === "bump" && (createsPr || armGap);
+
+// ── ③ 변이(원격) — 판정이 허락한 것만, 계약된 argv 그대로 ───────────────────────────────────
+// push는 세 경로의 argv가 **완전 형태**로 못박혀 있다(plan r3): 목적지를 `refs/heads/<b>`로 완전 수식하고
+// lease는 항상 `<ref>:<기대 OID>` 명시 형태다(bare lease는 원격 추적 참조 없는 checkout에서 stale 거부).
+// skip은 여기서 **아무것도 하지 않는다** — 그게 이 픽스의 flip이다(중복 PR 금지).
+if (action === "create") {
+  mutate("git", ["push", args.remote, `HEAD:${ref}`], "git push");
+} else if (action === "adopt") {
+  // 고아 브랜치 접수: 기대값은 **원격에 실제로 있는 OID**(ls-remote 관측값)다.
+  mutate("git", ["push", `--force-with-lease=${ref}:${remoteBranch!.oid}`, args.remote, `HEAD:${ref}`], "git push");
+} else if (action === "rebuild") {
+  // DIRTY 회복: 기대값은 **그 PR의 head OID**(gh pr list 관측값)다 — PR은 재사용하므로 create는 없다.
+  mutate("git", ["push", `--force-with-lease=${ref}:${trusted!.headRefOid}`, args.remote, `HEAD:${ref}`], "git push");
+}
+if (createsPr) {
+  mutate("gh", [
+    "pr", "create", "--base", args.base, "--head", branch,
+    "--title", args.title, "--body", args.body,
+  ], "gh pr create");
+}
 // 무장은 **레인만** 본다 — propose-pr(승인 레인)은 어떤 경로로도 여기 들어오지 못한다(R-11).
-// ⚠️ red-capture: 지금은 "PR 생성 직후 1회"뿐이라 무장 실패가 영구화된다(R-10의 정확한 실패 모드).
-if (lane === "bump") {
+// 새 PR이면 생성 직후, 기존 PR이면 무장 갭이 있을 때만(판정이 skip이든 rebuild든) 수렴시킨다(R-10).
+if (shouldArm) {
   // races-6 폴백(gh pr merge --auto는 이미 CLEAN인 PR에 에러) — 검증된 공유 스크립트를 재사용한다.
   const script = path.join(import.meta.dir, "..", "scripts", "auto-merge-or-fail.sh");
   mutate("bash", [script, branch], "auto-merge-or-fail");
