@@ -18,7 +18,8 @@
   "scope": [
     "tools/ensure-bump-pr.ts",
     ".github/workflows/bump-poll.yaml",
-    ".github/workflows/pr-sweeper.yaml"
+    ".github/workflows/pr-sweeper.yaml",
+    "tools/README.md"
   ],
   "red": {
     "sha": "616750ae95ca961b9f71d1c098d827ea5f14a49b"
