@@ -410,3 +410,30 @@ dump_calls()    { echo "--- 스텝이 실행한 명령(원장) ---"; python3 "$L
   run grep -q 'auto-merge-or-fail\.sh' "$ROOT/tools/ensure-bump-pr.ts"
   [ "$status" -eq 0 ]
 }
+
+# bats test_tags=regression
+@test "the commit identity and message the workflow writes match what the executor proves ownership with" {
+  # ★ structure r5: 실행기는 force-push 직전에 "덮어쓸 커밋이 우리 것인가"를 **커밋의 정체성 + 메시지**로
+  # 증명한다(tools/ensure-bump-pr.ts: WRITER_BOT_NAME / BUMP_COMMIT_MESSAGE). 그 증명은 호출부가 실제로
+  # 심는 값과 **글자 그대로** 같아야 한다 — 드리프트하면 라이브에서 **정상 경로가 통째로 fail-closed**된다
+  # (우리 브랜치를 우리가 못 알아본다 → adopt·rebuild 영구 실패 → 배포 정지). 두 파일을 여기서 묶는다.
+  run grep -qF 'git config user.name "ukyi-homelab-writer[bot]"' "$CODE"
+  [ "$status" -eq 0 ] || {
+    echo "ownership drift: bump-poll.yaml의 git user.name이 실행기의 기대(ukyi-homelab-writer[bot])와 다르다"
+    grep -nE 'git config user\.' "$CODE"; false
+  }
+  run grep -qE 'git config user\.email "[0-9]+\+ukyi-homelab-writer\[bot\]@users\.noreply\.github\.com"' "$CODE"
+  [ "$status" -eq 0 ] || {
+    echo "ownership drift: bump-poll.yaml의 git user.email이 실행기의 기대(<id>+ukyi-homelab-writer[bot]@users.noreply.github.com)와 다르다"
+    grep -nE 'git config user\.' "$CODE"; false
+  }
+  # 커밋 메시지 패턴(app·tag가 박히는 자리까지) — 실행기의 BUMP_COMMIT_MESSAGE와 동형이어야 한다.
+  run grep -qF 'git commit -m "chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)"' "$CODE"
+  [ "$status" -eq 0 ] || {
+    echo "ownership drift: bump-poll.yaml의 커밋 메시지가 실행기의 BUMP_COMMIT_MESSAGE와 다르다 —"
+    echo "  실행기는 이 메시지로 '우리 커밋'을 증명한다. 드리프트하면 adopt/rebuild가 영구 fail-closed된다."
+    grep -nE 'git commit -m' "$CODE"; false
+  }
+  run grep -qF 'BUMP_COMMIT_MESSAGE' "$ROOT/tools/ensure-bump-pr.ts"
+  [ "$status" -eq 0 ]
+}

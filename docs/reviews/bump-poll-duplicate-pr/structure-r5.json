@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "No ship: the executor authenticates PR identity but not branch ownership, and the pagination witness can pass without exercising pagination.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 30,
+  "target": "branch diff against main",
+  "reviewedSha": "bfe083594b7b5961bf818282eb68f36470080a2b",
+  "reviewedTree": "c3a241de483270dc8395bd4d58ee7022a4c417fc",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 3,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: PR authorship is treated as branch ownership",
+      "body": "`isTrusted` proves who opened a PR, but not who owns or last wrote its deterministic ref. Nevertheless, any remote ref without a visible PR is force-pushed by `adopt`, and a writer-authored PR remains trusted after another same-repo actor pushes to its head. A contents-write actor can therefore have commits erased by `adopt`, or leave its replacement head auto-merge-armed through `skip`. `--force-with-lease` only proves the OID stayed unchanged after observation; it provides no provenance. No writer-only rule for `bump-poll/**` is present.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 535,
+      "line_end": 540,
+      "confidence": 0.97,
+      "recommendation": "Establish an enforceable ref-ownership invariant: reserve `bump-poll/**` for the writer App with a ruleset, or verify the observed head/tree against the locally prepared bump before every adopt/skip/rebuild and fail closed when provenance is unproven. Add witnesses for a foreign orphan ref and a writer-authored PR whose head was replaced.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Test-quality: the fork-saturation witness never crosses a page boundary",
+      "body": "The stub wraps an arbitrarily large node array into one terminal GraphQL page. W11 supplies 200 forks plus the writer this way, although production requests `first:100`. The test therefore exercises filtering a large array, not aggregating later pages. An implementation that keeps `--paginate` but consumes only the first page can satisfy the current witnesses while missing a page-2 writer and recreating false absence, destructive adoption, or deployment suppression.",
+      "file": "tools/tests/test_ensure-bump-pr.bats",
+      "line_start": 197,
+      "line_end": 202,
+      "confidence": 1,
+      "recommendation": "Inject a realistic multi-page `--slurp` envelope: page 1 with `hasNextPage:true`, one or more subsequent pages, and the trusted writer only on the terminal page. Require normal reconciliation and zero orphan misclassification.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "medium",
+      "title": "Accepted structure decisions are absent from the authoritative contract",
+      "body": "The plan still specifies bounded `gh pr list` discovery and says a non-writer same-repository PR leads to `create`. The implementation now intentionally uses exhaustive GraphQL discovery, `(head, base)` identity, Bot typing, fail-closed branch ownership, and bidirectional auto-merge reconciliation. The public tools README and increment result are similarly stale, while the plan's Review Decision Log contains no structure r1-r4 decisions. Future work and release review are therefore anchored to the pre-fix state machine and can fight or regress the accepted structure.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 45,
+      "line_end": 59,
+      "confidence": 1,
+      "recommendation": "Synchronize the final state machine, GraphQL contract, trust rules, disarm behavior, witnesses, and structure decisions into the plan, increment result/state, and public README before the next gate.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Fix and witness branch/ref ownership before shipping.",
+    "Replace the impossible single-page crowding fixture with a positive multi-page witness.",
+    "Update the authoritative plan and public contract to match the accepted implementation."
+  ]
+}

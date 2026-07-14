@@ -516,6 +516,99 @@ const shouldArm = lane === "bump" && (createsPr || armGap);
 const staleArm = trusted !== null && trusted.autoMerge;
 const shouldDisarm = lane === "propose-pr" && staleArm;
 
+// ── ②-b **ref 소유권** 검증 — force-push 직전에 "덮어쓸 커밋이 우리 것인가"를 확인한다 ──────────
+// ★ PR 작성자 인증(isTrusted)은 **누가 PR을 열었는지**만 증명한다 — **그 ref를 누가 마지막으로 썼는지**는
+//   증명하지 않는다. 두 구멍이 남아 있었다:
+//     · adopt : PR이 안 보이는 원격 ref를 **무조건** force-push로 덮어썼다(그 브랜치가 우리 잔해라는 근거 0).
+//     · rebuild: writer가 연 PR이라도, **다른 동일-레포 행위자가 그 head에 push**하면 PR 작성자는 그대로
+//                writer다 → 신뢰된 채로 남고, 우리는 그 사람의 커밋을 force-push로 지운다.
+//   그래서 force-push하는 두 경로(adopt·rebuild)는 **밀어낼 커밋의 소유권**을 먼저 확인한다.
+// 우리 커밋의 조건(전부 만족해야 한다 — 하나라도 아니면 fail-closed):
+//   · author·committer의 name = `<writer>[bot]`, email = `<id>+<writer>[bot]@users.noreply.github.com`
+//     (호출부가 `git config user.name/user.email`로 심는 바로 그 정체성 — bump-poll.yaml과 계약이 묶여 있고,
+//      그 드리프트는 tests/gates/test_bump-poll-callsite.bats가 잡는다)
+//   · 메시지 = 이 bump의 커밋 메시지와 **정확히** 일치(app·tag까지) — 브랜치가 (app, tag)로 결정적이므로
+//     그 브랜치의 우리 커밋 메시지도 결정적이다.
+// ⚠️ **이건 인증이 아니라 안전 인터록이다**(라이브 확인: 이 커밋들은 `signature: null` — 워크플로의
+//    `git commit` + 토큰 push는 서명되지 않는다). git의 author/committer는 자유 텍스트라 contents:write를
+//    가진 **악의적** 행위자는 이 정체성과 메시지를 위조할 수 있다. 즉 이 가드가 확실히 막는 것은
+//    **사고성 파괴**(다른 봇/사람이 같은 ref를 쓰는 경우, 남은 남의 브랜치, 낯선 커밋)이고,
+//    악의적 행위자에 대해서는 심층 방어일 뿐이다. **강제 가능한 불변식은 ruleset**(`bump-poll/**`를 writer App
+//    전용으로 예약)이며 그건 이 도구 밖(레포 설정/IaC)이다 — 그 전까지 이 인터록이 최선의 방어다.
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+// GraphQL 커밋 조회 — 라이브 실측 스키마(이 레포의 실제 bump 커밋):
+//   {"oid":"5bb77fc…","message":"chore: page 이미지를 sha-815abb1…(digest 핀)로 갱신 (GHCR 폴링)",
+//    "author":{"name":"ukyi-homelab-writer[bot]",
+//              "email":"293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"},
+//    "committer":{…같음…}}
+const COMMIT_QUERY = `query($owner:String!,$repo:String!,$oid:GitObjectID!){
+  repository(owner:$owner,name:$repo){
+    object(oid:$oid){
+      ... on Commit { oid message author{ name email } committer{ name email } }
+    }
+  }
+}`;
+// 호출부(bump-poll.yaml)가 만드는 커밋 메시지와 **글자 그대로** 같아야 한다.
+const BUMP_COMMIT_MESSAGE = `chore: ${args.app} 이미지를 ${args.tag}(digest 핀)로 갱신 (GHCR 폴링)`;
+const WRITER_BOT_NAME = `${normalizeLogin(args.writer)}[bot]`;
+const WRITER_BOT_EMAIL_RE = new RegExp(`^\\d+\\+${escapeRe(WRITER_BOT_NAME)}@users\\.noreply\\.github\\.com$`);
+
+function isWriterIdent(id: { name: string; email: string }): boolean {
+  return id.name === WRITER_BOT_NAME && WRITER_BOT_EMAIL_RE.test(id.email);
+}
+
+// 이 OID의 커밋이 **우리가 만든 bump 커밋**임을 증명한다. 아니면 fail-closed(force-push 0회).
+function assertOurCommit(oid: string, what: string): void {
+  const raw = run("gh", [
+    "api", "graphql",
+    "-f", `query=${COMMIT_QUERY}`,
+    "-F", "owner={owner}", "-F", "repo={repo}", "-F", `oid=${oid}`,
+  ], "gh api graphql (commit)");
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    inputError(`커밋 조회 JSON 파싱 실패(${what} ${oid}): ${(e as Error).message}`);
+  }
+  if (parsed?.errors !== undefined) inputError(`커밋 조회 GraphQL 오류(${what}): ${JSON.stringify(parsed.errors)}`);
+  const c = parsed?.data?.repository?.object;
+  // object가 null이면 그 OID를 못 찾은 것이다(다른 레포의 커밋·GC됨·오타) → 덮어쓰지 않는다.
+  if (c === null || typeof c !== "object") {
+    inputError(`커밋을 찾을 수 없다(${what} ${oid}) — 무엇을 덮어쓰는지 모르면 force-push하지 않는다`);
+  }
+  // 스키마 드리프트(필드 누락·Commit이 아님)는 "우리 것"의 증명이 아니다 → fail-closed.
+  if (typeof c.oid !== "string" || c.oid !== oid) inputError(`커밋 조회 결과의 oid 불일치(${what}: 기대 ${oid}, 받음 ${String(c.oid)})`);
+  if (typeof c.message !== "string") inputError(`커밋 message 문자열 아님(${what} ${oid}) — Commit이 아니거나 스키마 드리프트`);
+  for (const [k, v] of [["author", c.author], ["committer", c.committer]] as const) {
+    if (v === null || typeof v !== "object" || typeof v.name !== "string" || typeof v.email !== "string") {
+      inputError(`커밋 ${k}.name/email 문자열 아님(${what} ${oid}) — 소유권을 증명할 수 없다`);
+    }
+  }
+
+  const ident = isWriterIdent(c.author) && isWriterIdent(c.committer);
+  const msg = c.message.trim() === BUMP_COMMIT_MESSAGE;
+  if (!ident || !msg) {
+    execError(
+      `${what}의 head 커밋(${oid})은 **우리 bump 커밋이 아니다** — force-push로 덮어쓰지 않는다.\n`
+      + `  관측: author=${c.author.name} <${c.author.email}> / committer=${c.committer.name} <${c.committer.email}>\n`
+      + `        message=${JSON.stringify(c.message.trim())}\n`
+      + `  기대: author·committer=${WRITER_BOT_NAME} <<id>+${WRITER_BOT_NAME}@users.noreply.github.com>\n`
+      + `        message=${JSON.stringify(BUMP_COMMIT_MESSAGE)}\n`
+      + "  누군가 이 ref에 자기 커밋을 올렸다(또는 우리 것이 아닌 브랜치다). 그 작업을 지우지 않는다.",
+    );
+  }
+}
+
+// force-push하는 두 경로만 검증한다. create는 **없는 브랜치**를 만드는 plain push라 덮어쓸 커밋이 없다.
+if (action === "adopt") {
+  assertOurCommit(remoteBranch!.oid, "고아 원격 브랜치");
+} else if (action === "rebuild") {
+  assertOurCommit(trusted!.headRefOid, `신뢰 PR #${trusted!.number}`);
+}
+
 // ── ③ 변이(원격) — 판정이 허락한 것만, 계약된 argv 그대로 ───────────────────────────────────
 // push는 세 경로의 argv가 **완전 형태**로 못박혀 있다(plan r3): 목적지를 `refs/heads/<b>`로 완전 수식하고
 // lease는 항상 `<ref>:<기대 OID>` 명시 형태다(bare lease는 원격 추적 참조 없는 checkout에서 stale 거부).

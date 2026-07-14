@@ -105,6 +105,20 @@ setup() {
   printf '[]' > "$STUB_PRS"    # 기본: 열린 PR 0건
   : > "$STUB_HEADS"            # 기본: 원격 브랜치 없음
 
+  # ── force-push 대상 커밋의 **소유권** 픽스처(structure r5 high-1) ────────────────────────────
+  # 기본값 = **우리 bump 커밋**(라이브 실측 형태) → adopt/rebuild 정상 경로가 그대로 동작한다.
+  #   author/committer 정체성은 호출부가 심는 그것과 같다(bump-poll.yaml):
+  #     git config user.name  "ukyi-homelab-writer[bot]"
+  #     git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
+  #   메시지는 이 bump의 결정적 커밋 메시지다(app·tag까지):
+  #     git commit -m "chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)"
+  # ⚠️ 라이브 확인: 이 커밋들은 **서명이 없다**(`signature: null` — 토큰 push는 GitHub이 서명하지 않는다).
+  #    그러니 이 검증은 **인증이 아니라 안전 인터록**이다: 사고성 파괴(남의 커밋·낯선 브랜치)는 확실히 막지만,
+  #    contents:write를 가진 악의적 행위자는 정체성·메시지를 위조할 수 있다(진짜 불변식은 ruleset — 도구 밖).
+  export STUB_COMMIT_NAME="ukyi-homelab-writer[bot]"
+  export STUB_COMMIT_EMAIL="293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
+  export STUB_COMMIT_MSG="chore: ${APP} 이미지를 ${TAG}(digest 핀)로 갱신 (GHCR 폴링)"
+
   # ── push argv 계약(완전 형태 3종)을 **배열**로 고정한다. 하네스(stub)와 증인(테스트)이 같은 배열을 본다.
   #    왜 완전 형태인가(plan r3): 접두만 보면 `origin HEAD:refs/heads/<b>`를 빠뜨린 구현도 GREEN이 되는데,
   #    라이브에선 아무것도 밀지 못해(또는 엉뚱한 ref를 밀어) DIRTY/고아 회복이 실패하고 배포가 정지한다.
@@ -191,15 +205,53 @@ PY
 { printf '%s\0' gh "$@"; printf '\036'; } >> "$CALLS"
 case "$1:$2" in
   api:graphql)
-    if [ -n "${STUB_GH_LIST_FAIL:-}" ]; then echo "stub: gh api graphql 실패(조회 장애 시뮬)" >&2; exit 1; fi
-    # 봉투(envelope) 자체를 주입해야 하는 증인(레포 해석 실패·GraphQL errors·페이지네이션 미완)용 탈출구.
-    if [ -n "${STUB_GRAPHQL_RAW+set}" ]; then printf '%s' "$STUB_GRAPHQL_RAW"; exit 0; fi
-    # 기본: 픽스처(=노드 배열)를 `gh api graphql --paginate --slurp`의 **페이지 배열** 봉투에 싸서 낸다.
-    # 라이브 형태(실측): [{"data":{"repository":{"pullRequests":{"pageInfo":{…},"nodes":[…]}}}}]
-    # ★ 상한이 없다 — 노드가 200건이든 2000건이든 그대로 낸다(gh가 hasNextPage=false까지 따라가므로
-    #   도구가 보는 것은 언제나 **완전 열거**다). 옛 `gh pr list` stub의 --limit 절단은 여기서 사라진다.
-    printf '[{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":%s,"endCursor":null},"nodes":%s}}}}]' \
-      "${STUB_HAS_NEXT_PAGE:-false}" "$(cat "$STUB_PRS")"
+    # 이 stub은 **두 GraphQL 질의**를 흉내낸다 — 질의문(한 인자에 통째로 실린다)으로 갈라낸다.
+    q=""
+    for a in "$@"; do case "$a" in query=*) q="$a" ;; esac; done
+
+    case "$q" in
+      *"object(oid:"*)
+        # ── 커밋 소유권 조회(force-push 직전) ──────────────────────────────────────────────
+        if [ -n "${STUB_COMMIT_FAIL:-}" ]; then echo "stub: 커밋 조회 실패" >&2; exit 1; fi
+        if [ -n "${STUB_COMMIT_RAW+set}" ]; then printf '%s' "$STUB_COMMIT_RAW"; exit 0; fi
+        oid=""
+        for a in "$@"; do case "$a" in oid=*) oid="${a#oid=}" ;; esac; done
+        # 기본값 = **우리 bump 커밋**(라이브 실측 형태) → 정상 경로(adopt/rebuild)가 그대로 동작한다.
+        printf '{"data":{"repository":{"object":{"oid":"%s","message":%s,"author":{"name":"%s","email":"%s"},"committer":{"name":"%s","email":"%s"}}}}}' \
+          "$oid" \
+          "$(printf '%s' "${STUB_COMMIT_MSG}" | jq -Rs .)" \
+          "${STUB_COMMIT_NAME}" "${STUB_COMMIT_EMAIL}" \
+          "${STUB_COMMIT_CNAME:-$STUB_COMMIT_NAME}" "${STUB_COMMIT_CEMAIL:-$STUB_COMMIT_EMAIL}"
+        ;;
+      *)
+        # ── PR 열거(--paginate --slurp) ────────────────────────────────────────────────────
+        if [ -n "${STUB_GH_LIST_FAIL:-}" ]; then echo "stub: gh api graphql 실패(조회 장애 시뮬)" >&2; exit 1; fi
+        if [ -n "${STUB_GRAPHQL_RAW+set}" ]; then printf '%s' "$STUB_GRAPHQL_RAW"; exit 0; fi
+        # ★ 라이브처럼 **first:100 페이지 경계**로 쪼갠다(structure r5): 노드 배열을 100개씩 페이지로 나눠
+        #   `--slurp` 배열(페이지들)로 낸다. 앞 페이지는 hasNextPage=true, 마지막만 false.
+        #   이게 없으면(전부 한 종단 페이지로 감싸면) **첫 페이지만 소비하는 구현도 통과**한다 —
+        #   즉 "큰 배열 필터링"만 시험하고 **뒷 페이지 집계**는 시험하지 못한다(거짓 GREEN).
+        if pages="$(jq -c --argjson forcelast "${STUB_HAS_NEXT_PAGE:-false}" '
+              . as $all
+              | ($all | length) as $n
+              | (if $n == 0 then 1 else (($n + 99) / 100 | floor) end) as $np
+              | [ range(0; $np) as $i
+                  | { data: { repository: { pullRequests: {
+                        pageInfo: {
+                          hasNextPage: (if $i < $np - 1 then true else $forcelast end),
+                          endCursor: (if $i < $np - 1 then "cursor\($i)" else null end)
+                        },
+                        nodes: $all[($i * 100):(($i + 1) * 100)]
+                      } } } } ]
+            ' "$STUB_PRS" 2>/dev/null)"; then
+          printf '%s' "$pages"
+        else
+          # 깨진 JSON·비배열 픽스처(fail-closed 증인)는 쪼갤 수 없다 → 원본을 봉투에 그대로 실어 흘린다.
+          printf '[{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":%s,"endCursor":null},"nodes":%s}}}}]' \
+            "${STUB_HAS_NEXT_PAGE:-false}" "$(cat "$STUB_PRS")"
+        fi
+        ;;
+    esac
     ;;
   # gh pr create는 만든 PR의 **URL**을 stdout에 낸다 → 도구가 거기서 번호를 파싱해 무장 셀렉터로 쓴다.
   # STUB_GH_CREATE_OUT으로 출력 형식 드리프트(번호 파싱 불가)를 주입할 수 있다(fail-closed 증인).
@@ -1085,6 +1137,127 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   }
   merges="$(merge_calls)"
   [ "$merges" -eq 0 ]
+}
+
+# ── W20~W24: **ref 소유권** — PR 작성자 인증은 "누가 그 ref를 썼는가"를 증명하지 않는다 ──────────
+# isTrusted는 **누가 PR을 열었는지**만 본다. 그런데 force-push는 **ref의 내용**을 지운다:
+#   · adopt : PR이 안 보이는 원격 ref를 무조건 덮어썼다 — 그게 우리 잔해라는 근거가 0이었다.
+#   · rebuild: writer가 연 PR이라도 **다른 동일-레포 행위자가 그 head에 push**하면 PR 작성자는 그대로
+#              writer다 → 신뢰된 채로 남고, 우리는 그 사람의 커밋을 지운다(contents:write 보유자의 작업 파괴).
+# → force-push하는 두 경로는 **밀어낼 커밋이 우리 bump 커밋인지** 먼저 증명한다(정체성 + 결정적 메시지).
+# ⚠️ 라이브 확인: 이 커밋들엔 **서명이 없다**(signature: null) → 이건 인증이 아니라 **안전 인터록**이다.
+#    사고성 파괴는 확실히 막지만, 악의적 contents:write 행위자는 정체성·메시지를 위조할 수 있다.
+#    강제 가능한 불변식은 ruleset(`bump-poll/**` writer 전용 예약) — 도구 밖이다.
+
+# bats test_tags=regression
+@test "W20: an orphan branch whose head commit is NOT ours is never force-pushed over (adopt fails closed)" {
+  # 고아처럼 보이지만 실은 **남의 브랜치**다(같은 이름을 누가 먼저 썼거나, 우리 것이 아닌 잔해).
+  # 옛 코드는 "열린 PR 없음 + 원격 ref 있음"만 보고 무조건 force-push했다 → 그 커밋을 지운다.
+  write_prs '[]'
+  write_heads "$ORPHAN_OID"
+  export STUB_COMMIT_NAME="ukkiee"
+  export STUB_COMMIT_EMAIL="ukkiee@users.noreply.github.com"
+  export STUB_COMMIT_MSG="feat: 내 작업 중인 커밋"
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "destructive force-push: 남의 커밋이 올라간 ref를 adopt로 덮어썼다"
+    echo "$output"; dump_calls; false
+  }
+  echo "$stderr" | grep -q "우리 bump 커밋이 아니다" \
+    || { echo "에러가 소유권 실패를 말하지 않는다"; echo "$stderr"; false; }
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || {
+    echo "destructive force-push: ${BRANCH}(남의 커밋)를 force-push로 덮어썼다 — 작업 파괴"
+    dump_calls; false
+  }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+  merges="$(merge_calls)"
+  [ "$merges" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W21: a DIRTY writer PR whose head was pushed by someone else is never rebuilt over (rebuild fails closed)" {
+  # ★ 이게 "PR 작성자 인증 ≠ ref 소유권"의 정확한 형태다. PR은 writer가 열었으니 isTrusted는 통과한다 —
+  # 그런데 그 사이 **다른 동일-레포 행위자가 그 브랜치에 자기 커밋을 push**했다(PR head가 갱신됐다).
+  # PR 작성자는 여전히 writer라 신뢰는 유지되고, rebuild는 그 사람 커밋을 force-push로 지운다.
+  write_prs "[$(writer_pr 395 DIRTY "$(amr_armed)")]"
+  write_heads "$PR_OID"
+  export STUB_COMMIT_NAME="ukkiee"
+  export STUB_COMMIT_EMAIL="ukkiee@users.noreply.github.com"
+  export STUB_COMMIT_MSG="fix: 이 브랜치에 내가 올린 수정"
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "destructive force-push: 남이 갱신한 PR head를 rebuild로 덮어썼다"
+    echo "$output"; dump_calls; false
+  }
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || {
+    echo "destructive force-push: PR #395의 head(남의 커밋)를 force-push로 지웠다"
+    dump_calls; false
+  }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W22: a commit carrying the writer identity but a FOREIGN message is not ours either (message is part of the proof)" {
+  # 정체성만 보면, 같은 봇이 만든 **다른 목적의 커밋**(다른 워크플로가 같은 ref를 재사용)도 통과한다.
+  # 우리 브랜치는 (app, tag)로 결정적이므로 그 위의 우리 커밋 메시지도 결정적이다 → 메시지도 증명의 일부다.
+  write_prs '[]'
+  write_heads "$ORPHAN_OID"
+  export STUB_COMMIT_MSG="chore: 전혀 다른 자동 커밋"
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "destructive force-push: writer 정체성만 맞으면 남의 목적의 커밋도 덮어썼다"
+    echo "$output"; dump_calls; false
+  }
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W23: a commit whose COMMITTER is not the writer fails closed (author alone is not enough)" {
+  # author는 위조하기 쉬운 자유 텍스트이고, 실제로 ref에 커밋을 얹은 주체는 committer다 → 둘 다 본다.
+  write_prs '[]'
+  write_heads "$ORPHAN_OID"
+  export STUB_COMMIT_CNAME="ukkiee"
+  export STUB_COMMIT_CEMAIL="ukkiee@users.noreply.github.com"
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "destructive force-push: committer가 writer가 아닌 커밋을 덮어썼다(author만 보고 통과)"
+    echo "$output"; dump_calls; false
+  }
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W24: a failing or drifted commit lookup fails closed (unknown content is never force-pushed over)" {
+  # 무엇을 덮어쓰는지 **모르면** 덮어쓰지 않는다. 조회 실패·스키마 드리프트·OID 미발견 전부 같다.
+  write_prs '[]'
+  write_heads "$ORPHAN_OID"
+  export STUB_COMMIT_FAIL=1
+  run_ensure_lane bump
+  [ "$status" -ne 0 ]
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+
+  # 스키마 드리프트(object=null — 그 OID를 못 찾음)도 같은 결론이다.
+  : > "$CALLS"
+  unset STUB_COMMIT_FAIL
+  export STUB_COMMIT_RAW='{"data":{"repository":{"object":null}}}'
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "unknown content: 커밋을 못 찾았는데(object=null) force-push로 진행했다"
+    echo "$output"; dump_calls; false
+  }
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
 }
 
 # ---------------------------------------------------------------------------

@@ -163,6 +163,13 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Follow-up backlog
 
+- **F-0 (권장, 이 픽스의 한계)**: `bump-poll/**` ref를 **writer App 전용으로 예약하는 GitHub ruleset**
+  (`infra/github` terraform). 이 픽스의 커밋 소유권 검증은 **안전 인터록이지 인증이 아니다** — 워크플로의
+  `git commit` + 토큰 push는 **서명되지 않으므로**(GitHub은 API로 만든 커밋만 서명한다) git author/committer는
+  자유 텍스트이고, 적대적 `contents:write` 행위자는 신원·메시지를 **위조**할 수 있다. 인터록은 *우발적* 파괴
+  (다른 봇/사람의 push, 동명 브랜치 재사용, 미지의 고아)를 확실히 막고 심층 방어가 되지만, **강제 가능한
+  불변식은 ruleset뿐**이다. 별도 파이프라인.
+
 - **F-1**: 좀비 PR **#348·#350·#351** 정리(운영 — 랜딩 시 수동 close).
 - **F-2**: `pr-sweeper`가 **DIRTY + auto-merge 무장** PR을 감지해 경고하도록 확장(별도 flip).
 - **F-3**: 콘텐츠 동일 재빌드가 새 인덱스 digest를 만들어 **무의미한 배포 회전**을 일으키는 문제
