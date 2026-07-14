@@ -1,0 +1,13 @@
+{
+  "regressionCmd": "bats tools/tests/test_poll-ghcr.bats --filter-tags regression",
+  "characterizationCmd": "bats --filter-tags '!regression' tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_bump-poll-toctou.bats",
+  "flips": [
+    {
+      "testId": "an open bump PR proposing the same candidate suppresses the duplicate bump (dedupe)",
+      "symptomToken": "duplicate bump PR: planner still says 'bump' while PR #350 already proposes the same candidate"
+    }
+  ],
+  "scope": ["tools/poll-ghcr.ts", ".github/workflows/bump-poll.yaml"],
+  "red": { "sha": "32c9c7ca8ef9a3ed243865e8d8c11f063a2be25d" },
+  "green": { "sha": "" }
+}
