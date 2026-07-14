@@ -269,6 +269,12 @@ write_heads() { printf '%s\t%s\n' "$1" "refs/heads/$BRANCH" > "$STUB_HEADS"; }
 run_ensure_lane() {
   run --separate-stderr bun tools/ensure-bump-pr.ts --app "$APP" --tag "$TAG" --action "$1" \
     --title "chore: ${APP} 이미지 갱신 (자동)" --body "GHCR 폴링 bump"
+  # ⚠️ bats의 `run`은 **호출할 때마다 $output을 덮어쓴다**. 아래 증인들은 판정 단언 전에
+  # `run has_call_exact …`(원장 질의)를 쓰므로, 그 시점엔 $output이 이미 원장 질의의 출력(빈 문자열)이다
+  # → `echo "$output" | jq -r .action`이 항상 ''을 읽어 **어떤 구현으로도 통과할 수 없는 단언**이 된다.
+  # (red baseline에선 그 앞의 push argv 단언에서 먼저 죽어 이 결함이 가려져 있었다.)
+  # 결과 JSON을 별도 변수에 **보존**해 판정 단언이 실제로 평가되게 한다(단언을 푸는 게 아니라 되살린다).
+  JSON="$output"
 }
 run_ensure() { run_ensure_lane bump; }
 
@@ -359,10 +365,11 @@ arm_calls_gh()     { count_calls gh pr merge; }
   pushes="$(count_calls git push)"
   [ "$pushes" -eq 1 ]
 
-  action="$(echo "$output" | jq -r '.action')"
+  # ⚠️ $output은 위 `run has_call_exact`가 덮어썼다 → 도구의 결과 JSON은 $JSON(run_ensure_lane이 보존)에서 읽는다.
+  action="$(echo "$JSON" | jq -r '.action')"
   [ "$action" = "rebuild" ] || {
     echo "duplicate bump PR: ensure-bump-pr decided '$action' while PR #351 is DIRTY on ${BRANCH} (expected rebuild)"
-    echo "$output"; false
+    echo "$JSON"; false
   }
 }
 
@@ -393,10 +400,11 @@ arm_calls_gh()     { count_calls gh pr merge; }
   creates="$(count_calls gh pr create)"
   [ "$creates" -eq 1 ]
 
-  action="$(echo "$output" | jq -r '.action')"
+  # ⚠️ $output은 위 `run has_call_exact`가 덮어썼다 → 결과 JSON은 $JSON에서 읽는다.
+  action="$(echo "$JSON" | jq -r '.action')"
   [ "$action" = "adopt" ] || {
     echo "orphan bump branch: ensure-bump-pr decided '$action' with an orphan remote branch present (expected adopt)"
-    echo "$output"; false
+    echo "$JSON"; false
   }
 }
 
@@ -517,10 +525,11 @@ arm_calls_gh()     { count_calls gh pr merge; }
   gh_arms="$(arm_calls_gh)"
   [ "$gh_arms" -eq 1 ]
 
-  action="$(echo "$output" | jq -r '.action')"
+  # ⚠️ $output은 위 `run has_call_exact`가 덮어썼다 → 결과 JSON은 $JSON에서 읽는다.
+  action="$(echo "$JSON" | jq -r '.action')"
   [ "$action" = "rebuild" ] || {
     echo "duplicate bump PR: ensure-bump-pr decided '$action' while PR #363 is DIRTY on ${BRANCH} (expected rebuild + 재무장)"
-    echo "$output"; false
+    echo "$JSON"; false
   }
 }
 
