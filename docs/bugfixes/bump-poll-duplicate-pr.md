@@ -6,7 +6,7 @@ review-track: standard
 pipeline-stage: design
 issue-tracker: local
 symptom: "같은 앱 커밋(page sha-815abb…)에 대해 bump-poll이 11분 사이 PR 3개(#348·#350·#353)를 열었다. 각 PR이 15분짜리 required 게이트를 태우고, 먼저 머지된 하나를 뺀 나머지는 DIRTY(충돌)+auto-merge 무장 상태로 영구 잔류한다(pr-sweeper는 BEHIND만 처리)."
-red-baseline: 56d11e88dc68f8cce9b42800099612673916a865
+red-baseline: 4fd7c5576a34c9740f38168c16a9c22fedefc12f
 bugfix-lock: red
 first-increment: [B-1]
 increments: [B-1]
@@ -58,6 +58,17 @@ spike-1:
 | **cross-repo(포크) PR만** 존재 | **create** | 포크는 신뢰하지 않는다 |
 | 동일-레포지만 **writer가 아닌 작성자** | **create** | 신뢰하지 않는다 |
 | 잘못된/빈 JSON | **fail-closed(에러)** | 조용한 create 금지 |
+
+**auto-merge 무장은 결정과 직교하는 축이다**(plan 게이트 r5 R-10/R-11):
+
+| 레인 | 상태 | 무장 |
+|---|---|---|
+| `bump`(autoDeploy) | 신뢰된 PR + **미무장** | **재무장**(그 run의 결정이 skip이든 rebuild든) |
+| `bump` | 신뢰된 PR + 이미 무장 | 손대지 않음(멱등 — force-push는 무장을 지우지 않는다: `autoMergeRequest`는 PR에 붙지 head OID에 붙지 않는다) |
+| `bump` | create/adopt(새 PR) | 생성 직후 무장 |
+| **`propose-pr`(승인 레인)** | — | **절대 무장하지 않는다** |
+
+**승인 게이트 우회가 구조적으로 불가능한 이유**: `--auto-merge` 플래그를 **제거**하고 **`--action <bump\|propose-pr>`(필수·기본값 없음)** 으로 대체했다. 레인은 `tools/poll-ghcr.ts`가 `.bindings.json`의 `autoDeploy`에서 유도하는 값이고(SSOT), 호출부 게이트가 **워크플로는 그 값을 그대로 전달**할 것을 강제한다(하드코딩 `--action bump` 거부). 따라서 `autoDeploy:false` 앱을 자동 배포하려면 **`.bindings.json`을 고쳐야** 하며 워크플로만으로는 불가능하다.
 
 **push argv 계약(완전 형태 — plan r3)**: 도구가 낼 수 있는 push는 **정확히 이 셋뿐**이고, 회귀 증인은
 원장 줄 **전체**를 `grep -Fx`로 단언하며 테스트의 git stub은 계약 밖 push argv를 **exit 3**으로 죽인다
@@ -150,6 +161,13 @@ update 성공**(기대 OID의 로컬 오브젝트가 없어도 된다 — 40-hex
   (buildx attestation 비결정성 — 원래 F-1의 다른 절반). 별도 파이프라인.
 
 ## Review Decision Log
+
+### Codex Plan Review — r5: needs-attention → 2건 전부 Accept (owner 2026-07-14)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-10 | high | `Blocker: auto-merge arming is not idempotent` — 신뢰된 비-DIRTY PR은 항상 skip이므로, push+PR 생성은 됐는데 **무장이 실패**하면 다음 폴링이 그 PR을 보고 **영원히 skip** → autoDeploy 배포가 조용히 정지(pr-sweeper는 이미 무장된 PR만 다룬다) | **Accept** | `autoMergeRequest`를 관측(라이브 스키마 확인: 미무장=`null`)하고 **무장을 desired state**로 취급 — 신뢰 PR + lane=bump + 미무장이면 **재무장**(결정과 **직교하는 축**). 증인 W4(재무장)·W5(멱등)·**W6(DIRTY+미무장 = rebuild+재무장)**·W7(DIRTY+무장 = 재무장 0) |
+| R-11 | high | `Blocker: the call-site gate can auto-merge approval PRs` — 게이트가 `--auto-merge` 토큰 존재만 봐서, 두 레인 모두에 무조건 전달해도 GREEN이 된다 → **`autoDeploy:false` 승인 PR이 자동 배포**(승인 게이트 우회 = 단일 flip 밖의 두 번째 행위 변경) | **Accept** | **`--auto-merge` 플래그 제거** → **`--action <bump\|propose-pr>`(필수·기본값 없음)**. 레인은 `.bindings.json`(autoDeploy SSOT)에서만 나오고, 호출부 게이트가 **워크플로의 verbatim 전달**을 강제(하드코딩 거부). 7가지 후보 호출부로 이빨 검증: R-11 우회(양쪽에 `--action bump`)·반쪽 하드코딩·레인 재해석은 **전부 FAIL**, 정상 전달 3형태는 PASS |
 
 ### Codex Plan Review — r4: needs-attention → 2건 전부 Accept (owner 2026-07-14)
 
