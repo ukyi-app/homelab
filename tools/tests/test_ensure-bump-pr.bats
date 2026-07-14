@@ -282,6 +282,14 @@ amr_absent() { printf 'null'; }
 #   --json number,isCrossRepository,mergeStateStatus,author,headRefOid,autoMergeRequest 의 **원시 스키마** 그대로.
 write_prs()   { printf '%s' "$1" > "$STUB_PRS"; }
 # git ls-remote --heads origin <branch> 의 원시 출력("<oid>\trefs/heads/<branch>").
+#
+# ★ 픽스처 불변식(structure r3): **열린 동일-레포 PR이 있으면 그 브랜치는 이 레포에 존재한다.**
+#   `isCrossRepository:false`인 PR의 head는 우리 레포의 ref일 수밖에 없다(포크와 달리 남의 레포에 못 둔다).
+#   그러니 동일-레포 PR을 주입하는 픽스처는 **반드시 write_heads도 함께** 준다. 이걸 빠뜨리면
+#   "PR은 있는데 브랜치는 없다"는 **프로덕션에 존재할 수 없는 상태**를 테스트하게 되고, 바로 그 틈에
+#   adopt(force-push) 경로가 숨는다 — 실제로 그렇게 숨어 있었다(비-writer 증인이 남의 브랜치를 덮어쓰는
+#   파괴 경로를 통과시켰다). 반대로 **포크 PR만** 있는 경우엔 우리 레포에 그 브랜치가 없을 수 있다
+#   (포크의 head는 자기 레포 ref다) → 그때만 write_heads를 생략한다.
 write_heads() { printf '%s\t%s\n' "$1" "refs/heads/$BRANCH" > "$STUB_HEADS"; }
 
 # 신뢰 PR(동일-레포 + writer App) 한 건의 원시 JSON — number / mergeStateStatus / autoMergeRequest만 갈린다.
@@ -370,6 +378,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # PR은 **이미 무장**돼 있다 → 이 주기의 옳은 행동은 문자 그대로 "아무것도 하지 않음"이다
   # (무장이 빠진 경우의 재무장은 W4가, 재무장의 멱등성은 W5가 따로 고정한다).
   write_prs "[{\"number\":350,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure
   [ "$status" -eq 0 ]
 
@@ -399,6 +408,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # DIRTY 교착: 유일한 PR이 충돌나면 이후 폴링이 전부 skip → 깨끗한 대체 PR이 영영 안 생겨
   # 배포가 조용히 멈춘다(pr-sweeper는 DIRTY를 무시). 최신 main에서 재구축해 force-push해야 풀린다.
   write_prs "[{\"number\":351,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure
   [ "$status" -eq 0 ]
 
@@ -481,6 +491,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   #
   # 기대: 무장 1회(공유 스크립트 경유) + push 0 + create 0(PR은 이미 있다 — 새로 열면 그게 중복 PR이다).
   write_prs "[{\"number\":360,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
 
@@ -526,6 +537,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # `gh pr merge --auto`가 이미 무장된 PR에 대해 무슨 짓을 하든(성공/에러/재무장 이벤트) 그건
   # desired-state 수렴이 아니라 churn이다 — 무장은 "있거나 없거나"이므로 있으면 손대지 않는다.
   write_prs "[{\"number\":361,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
 
@@ -554,6 +566,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # auto-merge가 영영 안 붙어 autoDeploy 배포가 조용히 정지한다(pr-sweeper는 무장된 PR만 다룬다).
   # 계약: 신뢰 PR이 있고 lane=bump인데 무장이 없으면, **그 run의 판정이 무엇이든**(skip이든 rebuild든) 재무장한다.
   write_prs "[{\"number\":363,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
 
@@ -602,6 +615,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # 이미 살아 있는 무장을 다시 건드린다 — 무장은 desired state지 rebuild의 부작용이 아니다.
   # force-push는 무장을 지우지 않는다(autoMergeRequest는 head OID가 아니라 PR에 붙는다) → 재무장할 게 없다.
   write_prs "[{\"number\":364,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
 
@@ -645,6 +659,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # autoDeploy:true 시절에 열려 **무장된** PR이, autoDeploy:false로 바뀐 뒤에도 그대로 열려 있다.
   # 이 주기의 옳은 행동: 판정은 skip(변이 0)이되 **낡은 인가는 회수**한다.
   write_prs "[$(writer_pr 370 CLEAN "$(amr_armed)")]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane propose-pr
   [ "$status" -eq 0 ]
 
@@ -690,6 +705,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # rebuild(force-push)만 하고 해제를 건너뛰면, 그 push가 체크를 다시 green으로 만들어 **바로 그 순간**
   # 낡은 무장이 머지를 성사시킨다 — 승인 게이트가 통째로 우회된다.
   write_prs "[$(writer_pr 371 DIRTY "$(amr_armed)")]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane propose-pr
   [ "$status" -eq 0 ]
 
@@ -865,6 +881,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 # bats test_tags=regression
 @test "W14: re-arming on the SKIP path targets the trusted PR number, never the branch selector" {
   write_prs "[$(writer_pr 360 BLOCKED "$(amr_absent)")]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
   run arm_calls_num 360
@@ -882,6 +899,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 # bats test_tags=regression
 @test "W15: re-arming on the REBUILD path targets the trusted PR number, never the branch selector" {
   write_prs "[$(writer_pr 363 DIRTY "$(amr_absent)")]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
   run arm_calls_num 363
@@ -1124,23 +1142,79 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   fi
 }
 
-@test "a fork (cross-repo) PR on the same branch name is never trusted" {
+@test "a fork (cross-repo) PR on the same branch name is never trusted (and does not own our branch)" {
   # 공개 레포 — 포크 PR은 같은 브랜치명 + 그럴듯한 본문을 아무나 올릴 수 있다. 이걸 신뢰하면
   # 포크 PR 하나로 배포를 무기한 억제할 수 있다(억제 = 공격 표면) → 신뢰 0.
+  # ⚠️ 포크의 head는 **자기 레포의 ref**다 — 우리 레포엔 그 브랜치가 없다(그래서 write_heads 없음).
+  #    포크 PR은 우리 브랜치를 침해하지 않으므로, 브랜치가 없으면 그대로 create 경로다.
   write_prs "[{\"number\":400,\"isCrossRepository\":true,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"author\":{\"is_bot\":false,\"login\":\"drive-by\"},\"autoMergeRequest\":$(amr_absent)}]"
   run_ensure
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.observed.trusted == null'
   echo "$output" | jq -e '.observed.prs[0].trusted == false'
+  echo "$output" | jq -e '.observed.remoteBranch == null'
   creates="$(count_calls gh pr create)"
   [ "$creates" -eq 1 ]
+  action="$(echo "$output" | jq -r '.action')"
+  [ "$action" = "create" ]
 }
 
-@test "a same-repo PR authored by someone other than the writer App is not trusted" {
+# bats test_tags=regression
+@test "W18: an untrusted SAME-REPO PR owns the branch — the executor fails closed instead of force-pushing over it" {
+  # ★★ 파괴적 경로. 동일-레포(isCrossRepository:false) PR의 head는 **반드시 이 레포의 ref**다 →
+  # "사람(ukkiee)이 이 브랜치로 PR을 열어 뒀다" = **그 브랜치는 그 사람 것이다**.
+  # 옛 판정은 여기서 trusted=null + remoteBranch!=null을 보고 **adopt**(leased force-push)를 골랐다 →
+  # 남의 브랜치를 통째로 덮어쓰고 PR까지 또 연다(작업 파괴). 옛 픽스처는 원격 브랜치를 비워 둬서
+  # 그 경로를 숨겼다 — 프로덕션에선 **불가능한 상태**였다.
+  # 계약: 신뢰할 수 없는 동일-레포 PR이 이 브랜치에 열려 있으면 **아무것도 변이하지 않는다**(fail-closed).
   write_prs "[{\"number\":401,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"author\":{\"is_bot\":false,\"login\":\"ukkiee\"},\"autoMergeRequest\":$(amr_absent)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**(프로덕션 불변식)
   run_ensure
+  [ "$status" -ne 0 ] || {
+    echo "destructive adopt: 신뢰할 수 없는 동일-레포 PR #401(ukkiee)이 이 브랜치를 소유하는데 도구가 성공으로 끝났다"
+    echo "$output"; dump_calls; false
+  }
+  echo "$output$stderr" | grep -q "신뢰할 수 없는 동일-레포 PR" \
+    || { echo "에러 메시지가 원인(신뢰할 수 없는 동일-레포 PR)을 말하지 않는다"; echo "$output$stderr"; false; }
+
+  # 파괴 0 — force-push도, 중복 PR도 없다.
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || {
+    echo "destructive adopt: 사람이 연 브랜치 '${BRANCH}'를 force-push로 덮어썼다 — 작업 파괴"
+    dump_calls; false
+  }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ] || {
+    echo "duplicate PR: 이미 사람의 PR #401이 열린 head에 PR을 또 만들었다"
+    dump_calls; false
+  }
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ]
+  merges="$(merge_calls)"
+  [ "$merges" -eq 0 ]
+}
+
+# ⚠️ 보존(태그 없음) — baseline에서도 GREEN이다. W18의 파괴 가드가 **포크까지 삼켜** 배포를 억제하는
+#    과잉 반응(포크 PR 하나로 영구 정지)을 막는 게 목적이다.
+@test "a fork-only PR does NOT block adopting our own orphan branch (the fork does not own our ref)" {
+  # 위 W18의 정확한 반대편 — **과잉 반응 금지**. 포크 PR은 우리 레포의 ref를 소유할 수 없다(head가 자기 레포에
+  # 있다). 그러니 포크 PR이 열려 있어도 우리 레포에 남은 그 브랜치는 **여전히 우리 고아**다(앞선 run이 push엔
+  # 성공하고 create에서 죽은 잔해). 여기서 fail-closed로 굳으면 포크 PR 하나로 배포를 영구 억제할 수 있다
+  # (억제 = 공격 표면) → 포크는 무시하고 정상적으로 adopt한다.
+  write_prs "[{\"number\":400,\"isCrossRepository\":true,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"author\":{\"is_bot\":false,\"login\":\"drive-by\"},\"autoMergeRequest\":$(amr_absent)}]"
+  write_heads "$ORPHAN_OID"   # 우리 레포에 남은 고아 브랜치(포크는 이걸 만들 수 없다)
+  run_ensure
+  [ "$status" -eq 0 ] || {
+    echo "suppression by fork: 포크 PR 하나가 우리 고아 브랜치의 adopt를 막았다 — 배포가 영구 정지한다"
+    echo "$output"; dump_calls; false
+  }
+  action="$(echo "$JSON" | jq -r '.action')"
+  [ "$action" = "adopt" ] || {
+    echo "suppression by fork: 포크 PR 때문에 '$action'로 갔다(기대 adopt)"
+    echo "$JSON"; false
+  }
+  run has_call_exact "${PUSH_ADOPT[@]}"
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.observed.trusted == null'
   creates="$(count_calls gh pr create)"
   [ "$creates" -eq 1 ]
 }
@@ -1149,6 +1223,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # 표기 계약 고정: gh CLI는 `app/ukyi-homelab-writer`, REST/GraphQL은 `ukyi-homelab-writer[bot]`.
   # 한쪽만 인식하면 신뢰 판정이 조용히 무너져(=trusted 0) 중복 PR이 그대로 남는다.
   write_prs "[{\"number\":352,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"author\":{\"is_bot\":true,\"login\":\"ukyi-homelab-writer[bot]\"},\"autoMergeRequest\":$(amr_armed)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.observed.trusted.number == 352'
@@ -1193,6 +1268,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 
 @test "a PR without headRefOid fails closed (no lease expectation means no safe recovery)" {
   write_prs "[{\"number\":350,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure
   [ "$status" -ne 0 ]
   pushes="$(count_calls git push)"
@@ -1205,6 +1281,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   #   undefined를 "무장됨"으로 읽으면 → 무장 갭이 영영 안 닫혀 autoDeploy 배포가 조용히 정지
   # 둘 다 조용한 오동작이라 판정도 변이도 하지 않는다(headRefOid·isCrossRepository 가드와 동형).
   write_prs "[{\"number\":350,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure
   [ "$status" -ne 0 ]
   pushes="$(count_calls git push)"
@@ -1288,6 +1365,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # W4(재무장)가 레인을 넘어 새지 않는가 — 승인 PR에 무장이 없는 건 **정상**이다(그게 승인 레인이다).
   # 재무장은 bump 레인의 desired state일 뿐, "무장 없음"을 보편적 결함으로 취급하면 승인 게이트가 무너진다.
   write_prs "[{\"number\":362,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane propose-pr
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.observed.trusted.autoMerge == false' > /dev/null
@@ -1326,6 +1404,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 @test "the propose-pr lane does not arm on the REBUILD path (a DIRTY PR is rebuilt, never armed)" {
   # DIRTY 회복 → PR을 재사용하며 force-push. 무장 갭이 있어도(승인 레인에선 정상) 재무장하지 않는다.
   write_prs "[{\"number\":365,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane propose-pr
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.observed.trusted.mergeStateStatus == "DIRTY"' > /dev/null \
@@ -1349,6 +1428,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # 승인 PR에 무장이 없는 건 **정상 상태**다 → 회수할 인가가 없다. 매 폴링 --disable-auto를 때리면
   # 무의미한 API 호출(그리고 gh 에러)로 run이 시끄러워지거나 죽는다.
   write_prs "[$(writer_pr 372 BLOCKED "$(amr_absent)")]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane propose-pr
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.observed.trusted.autoMerge == false' > /dev/null
@@ -1365,6 +1445,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # ★ bump 레인의 desired state는 무장 **있음**이다. 해제 로직이 레인을 넘어 새면 autoDeploy 앱의 무장을
   # 매 폴링 회수해 배포가 조용히 정지한다 — W5(무장 멱등)의 정확한 거울상 결함이다.
   write_prs "[$(writer_pr 373 CLEAN "$(amr_armed)")]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.observed.trusted.autoMerge == true' > /dev/null
@@ -1381,6 +1462,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 @test "the bump lane does not disarm on the REBUILD path either (a DIRTY armed autoDeploy PR keeps its arming)" {
   # W7(rebuild + 이미 무장 → 재무장 0)의 해제 짝. rebuild 경로에 해제가 새면 DIRTY 회복이 자동 배포를 죽인다.
   write_prs "[$(writer_pr 374 DIRTY "$(amr_armed)")]"
+  write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
   run disarm_calls 374

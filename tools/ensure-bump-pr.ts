@@ -379,6 +379,25 @@ if (trustedAll.length > 1) {
 }
 const trusted = trustedAll[0] ?? null;
 
+// ★★ 파괴 가드 — `adopt`(force-push)는 **우리 자신의 고아 브랜치**일 때만 정당하다 ────────────────
+// 동일-레포(isCrossRepository:false) PR의 head는 **반드시 이 레포의 ref**다(포크와 달리 남의 레포에 있을 수
+// 없다). 그러니 "열린 동일-레포 PR이 있다" = "그 브랜치는 이 레포에 존재하고, **그 PR의 주인 것**이다".
+// 그 PR을 신뢰하지 못하면(= writer App이 아닌 사람/다른 봇이 열었다) 우리는 두 가지를 다 하면 안 된다:
+//   · adopt로 그 브랜치를 leased force-push → **남의 브랜치를 덮어써 작업을 파괴한다**
+//   · create로 PR을 또 연다 → 같은 head에 중복 제안
+// remoteBranch 유무로 갈리지 않는다: 동일-레포 PR이 열려 있는데 브랜치가 없는 상태는 **불가능**하고,
+// 만약 그렇게 보인다면 우리가 사실을 잘못 읽은 것이다 → 어느 쪽이든 변이하지 않는 게 정답이다.
+// (포크 PR은 여기 걸리지 않는다 — 포크의 head는 우리 레포 ref가 아니라 우리 브랜치를 침해하지 않는다.
+//  그래서 포크만 있는 경우는 기존대로 브랜치 유무로 create/adopt를 고른다.)
+const untrustedSameRepo = observedPrs.filter((pr) => !pr.trusted && !pr.isCrossRepository);
+if (trusted === null && untrustedSameRepo.length > 0) {
+  const who = untrustedSameRepo.map((p) => `#${p.number}(${p.author.login})`).join(", ");
+  execError(
+    `신뢰할 수 없는 동일-레포 PR이 이 브랜치에 열려 있다: ${who} — 브랜치 '${branch}'는 그 PR의 것이다. `
+    + "force-push(adopt)로 덮어쓰면 남의 작업을 파괴하고, PR을 새로 열면 중복 제안이 된다",
+  );
+}
+
 // ── ② 결정 — 관측 사실만으로 정한다(부작용 0) ──────────────────────────────────────────────
 // 축 1(판정): 신뢰 PR의 **존재**가 최우선이다. 신뢰 PR이 있으면 원격 브랜치는 당연히 있으므로
 // (그 PR의 head가 그것이다) 고아 판정으로 내려가지 않는다.
