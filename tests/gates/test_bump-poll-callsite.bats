@@ -64,6 +64,113 @@ setup() {
 # 주석 제거 뷰에서 ERE가 처음 등장한 줄 번호(없으면 빈 문자열 → 단언이 [ -n ]로 잡는다).
 first_line() { grep -nE "$1" "$CODE" | head -1 | cut -d: -f1; }
 
+# ── hermetic 루프 하네스(plan r6) ───────────────────────────────────────────────────────────
+# 왜 필요한가: 정적 grep 증인은 **문자열 모양**만 본다. `action=$(… jq -r .action)` … `action=bump` …
+# `--action "$action"`처럼 **읽은 뒤 덮어쓰는** 호출부는 모든 grep 증인을 통과하면서 승인 레인(propose-pr)
+# 후보를 bump 레인으로 흘려보낸다(= autoDeploy:false 앱 자동 배포). 그런 우회는 "실제로 무슨 argv가
+# 실행기에 갔는가"를 봐야만 죽는다 → 워크플로의 bump 스텝 셸 본문을 **그대로 꺼내서** 두 레인이 섞인
+# plan.json으로 **실행**하고, 실행기에 전달된 argv를 원장에서 단언한다.
+#
+# 왜 YAML에서 추출하는가(스텝을 scripts/*.sh로 강제 추출시키지 않고): 게이트가 프로덕션의 **구조**까지
+# 지시하면 fix 증분이 "테스트를 만족시키려고" 리팩터를 떠안는다. 스텝 본문은 이미 다른 증인들이 그
+# 존재를 요구하는 것(bump-tag·ensure-bump-pr 호출)이라 선택자가 안정적이다 → 프로덕션 무변경으로 실행 가능.
+extract_step() {
+  # 스텝 선택자: `.run`에 bump-tag가 있는 스텝(= bump 스텝)의 **셸 본문(.run)**. 순서 증인이 이미
+  # 그 스텝의 존재를 강제한다. ⚠️ `.[0]`은 스텝 **맵 전체**를 준다 — 반드시 `.[0].run`이어야 한다
+  # (실측: 맵을 그대로 실행하면 `syntax error near unexpected token '('`로 죽는다).
+  yq -r '[.jobs.poll.steps[] | select(.run) | select(.run | test("bump-tag"))] | .[0].run // ""' "$F"
+}
+
+setup_hermetic() {
+  STUB="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$STUB"
+  export CALLS="$BATS_TEST_TMPDIR/calls.nul"   # NUL 구분 argv 원장(인자 경계 보존 — tools 스위트와 동형)
+  : > "$CALLS"
+
+  # 두 레인이 **섞인** plan — 이게 이 증인의 핵심이다. 한 레인만 돌리면 "둘 다 bump로 넘기는" 우회가 안 죽는다.
+  PLAN="$BATS_TEST_TMPDIR/plan.json"
+  cat > "$PLAN" <<'JSON'
+[
+  {"app":"page","action":"bump","writePath":"apps/page/deploy/prod/values.yaml",
+   "current":{"tag":"sha-1111111111111111111111111111111111111111"},
+   "candidate":{"tag":"sha-2222222222222222222222222222222222222222","digest":"sha256:aaaa"}},
+  {"app":"trip-mate","action":"propose-pr","writePath":"apps/trip-mate/deploy/prod/values.yaml",
+   "current":{"tag":"sha-3333333333333333333333333333333333333333"},
+   "candidate":{"tag":"sha-4444444444444444444444444444444444444444","digest":"sha256:bbbb"}}
+]
+JSON
+
+  # git/bun/gh stub — argv를 원장에 남기고 성공만 흉내낸다(실제 변이 0).
+  for c in git bun gh; do
+    cat > "$STUB/$c" <<STUBEOF
+#!/bin/sh
+{ printf '%s\0' "$c" "\$@"; printf '\036'; } >> "\$CALLS"
+exit 0
+STUBEOF
+    chmod +x "$STUB/$c"
+  done
+
+  # 스텝 본문 추출 → /tmp/plan.json(하드코딩 경로)만 픽스처로 치환해 hermetic하게 만든다.
+  STEP="$BATS_TEST_TMPDIR/bump-step.sh"
+  extract_step > "$STEP.raw"
+  [ -s "$STEP.raw" ] || return 9   # 추출 실패는 호출부에서 시끄럽게 잡는다
+  sed "s#/tmp/plan.json#$PLAN#g" "$STEP.raw" > "$STEP"
+
+  # 실행기에 실제로 간 argv를 원장에서 되읽는 파서(NUL 경계 보존 — 붙여 쓴 인자와 구분된다).
+  LEDGER_PY="$BATS_TEST_TMPDIR/ledger.py"
+  cat > "$LEDGER_PY" <<'PY'
+import sys
+
+mode, path = sys.argv[1], sys.argv[2]
+want = sys.argv[3:]
+raw = open(path, "rb").read()
+
+records = []
+for chunk in raw.split(b"\x1e"):
+    if chunk == b"":
+        continue
+    fields = chunk.split(b"\x00")
+    if fields and fields[-1] == b"":
+        fields.pop()
+    records.append([f.decode("utf-8", "surrogateescape") for f in fields])
+
+def tool(name):
+    return [r for r in records if len(r) >= 2 and r[0] == "bun" and r[1] == name]
+
+
+ensure = tool("tools/ensure-bump-pr.ts")
+
+
+def opt(rec, name):
+    for i, a in enumerate(rec):
+        if a == name and i + 1 < len(rec):
+            return rec[i + 1]
+    return ""
+
+
+if mode == "count":
+    print(len(ensure))
+elif mode == "bumptag":  # 하네스 자체의 증명: 루프가 두 후보를 **실제로** 돌았는가
+    print(len(tool("tools/bump-tag.ts")))
+elif mode == "lane":  # want[0] = app 이름 → 그 앱의 --action 값(정확히 1건이 아니면 빈 문자열)
+    hits = [r for r in ensure if opt(r, "--app") == want[0]]
+    print(opt(hits[0], "--action") if len(hits) == 1 else "")
+elif mode == "dump":
+    for i, r in enumerate(records, 1):
+        print("%2d) argc=%d  %s" % (i, len(r), " ".join(repr(a) for a in r)))
+else:
+    sys.exit(2)
+PY
+
+  # 워크플로 스텝은 GHA에서 `bash -e {0}`로 돈다(레포 함정 원장) → 같은 셸 의미로 실행한다.
+  PATH="$STUB:$PATH" GH_TOKEN=stub-token RUN_ID=999 bash -e "$STEP" > "$BATS_TEST_TMPDIR/step.out" 2>&1 || true
+}
+
+ensure_calls()  { python3 "$LEDGER_PY" count "$CALLS"; }
+bumptag_calls() { python3 "$LEDGER_PY" bumptag "$CALLS"; }
+lane_of()       { python3 "$LEDGER_PY" lane "$CALLS" "$1"; }
+dump_calls()    { echo "--- 스텝이 실행한 명령(원장) ---"; python3 "$LEDGER_PY" dump "$CALLS"; }
+
 # bats test_tags=regression
 @test "bump-poll never calls gh pr create directly (PR creation goes through ensure-bump-pr)" {
   run grep -n "gh pr create" "$CODE"
@@ -191,13 +298,91 @@ first_line() { grep -nE "$1" "$CODE" | head -1 | cut -d: -f1; }
 
   # ④ ★ 봉인: **모든** --action 등장이 `$action` 변수 **그대로**여야 한다. 하드코딩된 `--action bump`가
   #    하나라도 있으면 propose-pr 후보가 bump 레인으로 흘러 자동 배포된다 — 그리고 ①②③은 다 통과한다.
-  #    (허용 표기: `--action "$action"` / `--action $action` / `--action="$action"` / `--action "${action}"`)
-  good="$(grep -oE -- '--action[= ]+"?\$\{?action\}?"?' "$CODE" | wc -l | tr -d ' ')"
+  #    허용 표기: `--action "$action"` / `--action $action` / `--action "${action}"` — **공백 구분만**이다.
+  #    ⚠️ `--action="$action"`(등호 결합)은 허용하지 않는다: 도구의 argv 파서는 `--action` 다음 **인자**를
+  #       값으로 읽는다(`a === "--action"`) → 등호 결합은 "알 수 없는 옵션"으로 exit 2다. 게이트가 이걸
+  #       통과시키면 라이브에서만 죽는 형태를 GREEN으로 눈감아주는 셈이다(실측 확인).
+  good="$(grep -oE -- '--action[[:space:]]+"?\$\{?action\}?"?' "$CODE" | wc -l | tr -d ' ')"
   [ "$good" -eq "$total" ] || {
     echo "approval gate bypass: --action 등장 ${total}회 중 ${good}회만 플래너의 \$action을 그대로 넘긴다 —"
     echo "  하드코딩(--action bump)이나 재해석은 금지다. autoDeploy:false 앱이 자동 배포될 수 있다."
     echo "  레인별로 title/body가 다르면 if/else로 **그것만** 가르고, --action \"\$action\"은 양쪽에 똑같이 넘긴다."
     grep -nE -- '--action' "$CODE"
+    false
+  }
+}
+
+# bats test_tags=regression
+@test "the two lanes reach the executor with their own --action (hermetic run of the real bump step)" {
+  # ★★ plan r6. 정적 grep 증인의 **거짓 GREEN 경로**를 닫는다.
+  #   `action=$(… jq -r .action)`  ← 플래너에서 읽고 (증인 ② 통과)
+  #   `action=bump`                 ← 읽은 뒤 덮어쓰고
+  #   `--action "$action"`          ← verbatim으로 넘긴다 (증인 ④ 통과)
+  # 이 호출부는 모든 문자열 증인을 통과하면서 propose-pr(autoDeploy:false) 후보를 bump 레인으로 흘린다.
+  # 문자열이 아니라 **실행된 argv**를 봐야만 죽는다: 워크플로의 bump 스텝 본문을 그대로 꺼내, 두 레인이
+  # 섞인 plan.json으로 stub 아래에서 **실제로 돌리고**, 실행기가 받은 --action을 앱별로 단언한다.
+  setup_hermetic
+  rc=$?
+  [ "$rc" -ne 9 ] || {
+    echo "hermetic harness: bump-poll.yaml에서 bump 스텝(.run에 bump-tag 포함)을 추출하지 못했다"
+    echo "  선택자: .jobs.poll.steps[] | select(.run | test(\"bump-tag\"))"
+    false
+  }
+
+  # ⓪ 하네스 자체의 증명 — 추출한 본문이 **실제로 두 후보를 돌았는가**. 이게 없으면 추출이 조용히
+  #    깨졌을 때(빈 스크립트·early exit) "실행기 0회"라는 **엉뚱한 이유의 RED**가 진짜 RED로 위장한다.
+  bt="$(bumptag_calls)"
+  [ "$bt" -eq 2 ] || {
+    echo "harness: 추출한 bump 스텝이 두 후보를 돌지 않았다(bump-tag 호출 ${bt}회, 기대 2회) —"
+    echo "  yq 추출(.run) 또는 plan.json 픽스처 배선이 깨졌다. 이건 프로덕션 결함이 아니라 하네스 결함이다."
+    cat "$BATS_TEST_TMPDIR/step.out"
+    dump_calls
+    false
+  }
+
+  # ① 실행기가 두 후보 **각각에** 대해 정확히 1회씩 호출됐는가(루프가 레인을 건너뛰지 않았는가).
+  n="$(ensure_calls)"
+  [ "$n" -eq 2 ] || {
+    echo "duplicate bump PR: bump 스텝이 tools/ensure-bump-pr.ts를 후보당 1회 부르지 않았다(호출 ${n}회, 기대 2회) —"
+    echo "  원격 변이(push·PR·auto-merge)는 전부 실행기를 통해야 한다. 지금은 워크플로가 직접 push/create한다."
+    cat "$BATS_TEST_TMPDIR/step.out"
+    dump_calls
+    false
+  }
+
+  # ② ★ 봉인: **각 앱이 자기 레인 그대로** 실행기에 도달했는가. 읽은 뒤 덮어쓰기(action=bump)는
+  #    여기서 trip-mate의 --action이 bump로 나오며 죽는다 — 정적 증인으로는 절대 잡히지 않는 우회다.
+  page_lane="$(lane_of page)"
+  [ "$page_lane" = "bump" ] || {
+    echo "lane drift: autoDeploy 앱 page가 --action '${page_lane}'로 실행기에 갔다(기대 bump) — 자동 배포가 멈춘다"
+    dump_calls; false
+  }
+  trip_lane="$(lane_of trip-mate)"
+  [ "$trip_lane" = "propose-pr" ] || {
+    echo "approval gate bypass: 승인 앱 trip-mate(autoDeploy:false)가 --action '${trip_lane}'로 실행기에 갔다(기대 propose-pr) —"
+    echo "  플래너의 레인이 호출부에서 갈아치워졌다(읽은 뒤 덮어쓰기?). 승인 PR이 자동 배포된다."
+    dump_calls; false
+  }
+}
+
+@test "the planner's action is never reassigned after it is read (a post-read overwrite forges the lane)" {
+  # plan r6의 정적 절반 — hermetic 증인(위)의 빠른 진단판. `action`은 **정확히 한 번** 대입되고,
+  # 그 대입은 플래너의 `.action`이어야 한다. 두 번째 대입이 있으면 레인을 위조할 수 있다.
+  # ⚠️ baseline에서도 GREEN이다(지금은 대입이 1회뿐) → regression 태그를 붙이지 않는다.
+  #    fix가 레인을 넘기면서 덮어쓰기를 끼워 넣는 회귀를 잡는 게 목적이다.
+  # `--action="$action"`(앞 글자가 `-`)·`"$action" = "bump"`(등호 앞 공백)·`jq -r .action`(등호 없음)은
+  # 대입이 아니므로 세지 않는다 — 대입만 겨냥한다.
+  assigns="$(grep -oE '(^|[[:space:];&|(])action=' "$CODE" | wc -l | tr -d ' ')"
+  [ "$assigns" -eq 1 ] || {
+    echo "lane forgery: bump 스텝에서 'action' 대입이 ${assigns}회다(기대 1회 — 플래너 읽기 단 한 번)."
+    echo "  읽은 뒤 재대입(action=bump)하면 모든 정적 증인을 통과하면서 승인 레인이 자동 배포된다."
+    grep -nE '(^|[[:space:];&|(])action=' "$CODE"
+    false
+  }
+  run grep -nE 'action=\$\(.*jq -r [.]action' "$CODE"
+  [ "$status" -eq 0 ] || {
+    echo "lane provenance: 그 단 한 번의 대입이 플래너의 .action이 아니다 —"
+    echo "  레인의 출처는 poll-ghcr(.bindings.json의 autoDeploy)여야 한다."
     false
   }
 }

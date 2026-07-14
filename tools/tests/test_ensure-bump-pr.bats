@@ -874,7 +874,7 @@ arm_calls_gh()     { count_calls gh pr merge; }
   }
 }
 
-@test "the propose-pr lane does not arm even when a trusted un-armed PR is open (no re-arm outside autoDeploy)" {
+@test "the propose-pr lane does not arm on the SKIP path (a trusted un-armed PR is left alone)" {
   # W4(재무장)가 레인을 넘어 새지 않는가 — 승인 PR에 무장이 없는 건 **정상**이다(그게 승인 레인이다).
   # 재무장은 bump 레인의 desired state일 뿐, "무장 없음"을 보편적 결함으로 취급하면 승인 게이트가 무너진다.
   write_prs "[{\"number\":362,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
@@ -884,6 +884,45 @@ arm_calls_gh()     { count_calls gh pr merge; }
   arms="$(arm_calls_script)"
   [ "$arms" -eq 0 ] || {
     echo "approval gate bypass: 승인 레인의 무장 안 된 PR #362을 '재무장'했다 — 승인 PR은 무장이 없는 게 정상이다"
+    dump_calls; false
+  }
+  gh_arms="$(arm_calls_gh)"
+  [ "$gh_arms" -eq 0 ]
+}
+
+# ── propose-pr × **네 결정 경로 전부** 무장 0(plan r6) ───────────────────────────────────────
+# 위 두 증인은 create·skip 경로만 덮는다 → 무장을 **adopt/rebuild 분기 안에** 심은 구현이 GREEN이 된다
+# (그 두 경로는 라이브에서 실제로 밟힌다: 고아 브랜치 접수·DIRTY 회복). 레인 격리는 **경로별**로 증명한다.
+# ⚠️ 지금은 판정이 동결(항상 create)이라 아래 두 증인은 "그 사실 아래 create를 돌린" 셈이지만, fix가
+#    판정을 켜는 순간 같은 픽스처가 진짜 adopt/rebuild 경로로 들어간다(W2·W3가 그 판정을 못박는다).
+
+@test "the propose-pr lane does not arm on the ADOPT path (orphan branch is adopted, never armed)" {
+  # 고아 원격 브랜치 접수 → PR을 새로 연다. bump 레인이면 생성 직후 무장하지만, 승인 레인은 열기만 한다.
+  write_prs '[]'
+  write_heads "$ORPHAN_OID"
+  run_ensure_lane propose-pr
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e --arg o "$ORPHAN_OID" '.observed.remoteBranch.oid == $o' > /dev/null \
+    || { echo "harness: 고아 브랜치 사실을 관측하지 못했다"; echo "$output"; dump_calls; false; }
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ] || {
+    echo "approval gate bypass: 승인 레인이 adopt 경로에서 auto-merge를 무장했다 — 사람 머지 = 배포 승인이 우회된다"
+    dump_calls; false
+  }
+  gh_arms="$(arm_calls_gh)"
+  [ "$gh_arms" -eq 0 ]
+}
+
+@test "the propose-pr lane does not arm on the REBUILD path (a DIRTY PR is rebuilt, never armed)" {
+  # DIRTY 회복 → PR을 재사용하며 force-push. 무장 갭이 있어도(승인 레인에선 정상) 재무장하지 않는다.
+  write_prs "[{\"number\":365,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
+  run_ensure_lane propose-pr
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.observed.trusted.mergeStateStatus == "DIRTY"' > /dev/null \
+    || { echo "harness: DIRTY 상태를 관측하지 못했다"; echo "$output"; dump_calls; false; }
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ] || {
+    echo "approval gate bypass: 승인 레인이 rebuild 경로에서 auto-merge를 무장했다 — DIRTY 회복이 배포 승인을 삼켰다"
     dump_calls; false
   }
   gh_arms="$(arm_calls_gh)"
