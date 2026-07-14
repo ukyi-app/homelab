@@ -6,7 +6,7 @@ review-track: standard
 pipeline-stage: design
 issue-tracker: local
 symptom: "같은 앱 커밋(page sha-815abb…)에 대해 bump-poll이 11분 사이 PR 3개(#348·#350·#353)를 열었다. 각 PR이 15분짜리 required 게이트를 태우고, 먼저 머지된 하나를 뺀 나머지는 DIRTY(충돌)+auto-merge 무장 상태로 영구 잔류한다(pr-sweeper는 BEHIND만 처리)."
-red-baseline: 15c8556a0e4814a7a8ce2f486d829fa6e2b0cd64
+red-baseline: 56d11e88dc68f8cce9b42800099612673916a865
 bugfix-lock: red
 first-increment: [B-1]
 increments: [B-1]
@@ -150,6 +150,13 @@ update 성공**(기대 OID의 로컬 오브젝트가 없어도 된다 — 40-hex
   (buildx attestation 비결정성 — 원래 F-1의 다른 절반). 별도 파이프라인.
 
 ## Review Decision Log
+
+### Codex Plan Review — r4: needs-attention → 2건 전부 Accept (owner 2026-07-14)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-8 | high | `Blocker: executor ownership can still go GREEN with broken workflow ordering` — 호출부 게이트가 도구 존재·직접 push/create 부재·RUN_ID 부재만 본다. **순서**(브랜치 생성 → bump-tag → commit → 실행기)를 증명하지 않고, 워크플로에 남은 **직접 `auto-merge-or-fail.sh` 호출**도 금지하지 않는다 | **Accept** | 호출부 증인 2건 추가(순서 · **auto-merge 독점**). ⚠️ 이 과정에서 **교차 게이트 충돌** 발견: `test_automerge-fallback.bats`가 "bump-poll이 그 스크립트를 호출할 것"을 요구하고 있었다(픽스 후 머지 불가가 될 뻔) → 불변식 소유자를 **파일 → 도구**로 재조준(픽스 전후 모두 GREEN) |
+| R-9 | high | `Blocker: the exact-argv harness discards argument boundaries` — stub이 `"$*"`로 평탄화해 기록/비교 → `git push 'origin HEAD:refs/heads/<b>'`(1인자, 라이브에서 **실패**)가 계약(2인자)과 **같은 원장 줄**이 되어 통과한다(거짓 GREEN) | **Accept** | 원장을 **NUL 구분**(레코드 = `arg\0…` + RS)으로 바꿔 argc·인자 경계 보존. 계약 매칭은 **argv 배열 hex 키**로 정확 비교(결합 인자는 `0x20` vs `0x00`으로 갈린다). negative 증인 10종(결합 remote/refspec, 결합 lease/remote/refspec 포함) — **구 하네스가 실제로 거짓 GREEN을 냈음을 재현으로 확인** |
 
 ### Codex Plan Review — r3: needs-attention → 2건 전부 Accept (owner 2026-07-14)
 

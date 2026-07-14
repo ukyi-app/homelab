@@ -20,7 +20,7 @@
     ".github/workflows/bump-poll.yaml"
   ],
   "red": {
-    "sha": "15c8556a0e4814a7a8ce2f486d829fa6e2b0cd64"
+    "sha": "56d11e88dc68f8cce9b42800099612673916a865"
   },
   "green": {
     "sha": ""
