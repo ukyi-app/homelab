@@ -1836,7 +1836,6 @@ setup_closable_sibling() {
   echo "$JSON" | jq -e '[.superseded[] | select(.closed)] | length == 1' > /dev/null
 }
 
-# bats test_tags=regression
 @test "W35: a FORK PR on a sibling branch name is never disarmed and never closed" {
   # 공개 레포다 — 포크는 같은 결정적 브랜치명으로 PR을 열 수 있다. 접두 일치는 소유권의 증거가 **아니다**.
   write_prs '[]'
@@ -1854,7 +1853,6 @@ setup_closable_sibling() {
   [ "$output" -eq 0 ] || { echo "포크 PR의 auto-merge를 건드렸다"; dump_calls; false; }
 }
 
-# bats test_tags=regression
 @test "W36: a HUMAN-authored PR on a sibling branch name is never disarmed and never closed" {
   # `bump-poll/**` ruleset(F-0)이 없으므로 그 접두는 **예약돼 있지 않다** — 사람이 쓸 수 있다.
   write_prs '[]'
@@ -1945,7 +1943,6 @@ setup_closable_sibling() {
   [ "$output" -eq 1 ]
 }
 
-# bats test_tags=regression
 @test "W40: other prefixes and other apps are not siblings (the name boundary is a literal prefix + TAG_RE)" {
   # 정규식 한 글자 실수로 열린 봇 PR 전부가 대상이 되는 걸 막는다. 이름 경계는 **리터럴 접두 + 앵커 완전일치**다.
   write_prs '[]'
@@ -2068,7 +2065,6 @@ setup_closable_sibling() {
   [ "$arms" -eq 0 ]
 }
 
-# bats test_tags=regression
 @test "W45: an orphan sibling ref (no open PR) is left alone — the branch is never deleted" {
   # 고아 ref는 남겨 둔다: 그 tag가 다시 후보가 되면 adopt가 접수한다. ref 삭제는 되돌아가지 않는다.
   write_prs '[]'
@@ -2209,7 +2205,6 @@ setup_closable_sibling() {
   [ "$merges" -eq 0 ]
 }
 
-# bats test_tags=regression
 @test "W50: --reconcile-only refuses an injected lane (--action cannot reach this mode)" {
   # ★ 승인 게이트 우회 봉인(R-11)의 연장. 이 모드가 레인을 **인자로** 받으면 호출부가 레인을 지어낼 수
   # 있고(그리고 noop/refuse 주기엔 플래너가 레인을 말해주지도 않는다) → 회수가 조용히 꺼진다.
