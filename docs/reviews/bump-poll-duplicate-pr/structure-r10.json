@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: three post-r9 structural gaps remain despite the valid pinned RED→GREEN pair.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 42,
+  "target": "branch diff against main",
+  "reviewedSha": "6bdc24c5d0de673fdfd341adcda56a31b654c3d6",
+  "reviewedTree": "34ffa9f2da4849ec8020bb58cb520cc2464a7de9",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 3,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: exhaustive pagination is re-bounded by spawnSync",
+      "body": "`runSoft` buffers the complete output of `gh api graphql --paginate --slurp`. The Node-compatible `spawnSync` contract has a finite output buffer—Node documents a 1 MiB default—and this code supplies neither streaming nor `maxBuffer`. Same-head fork PRs can therefore exceed the subprocess boundary, kill `gh`, and repeatedly suppress the targeted app's polling. This recreates the fork-saturation primitive below the GraphQL pagination layer. See the [Node child-process contract](https://nodejs.org/api/child_process.html).",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 377,
+      "line_end": 383,
+      "confidence": 0.92,
+      "recommendation": "Fetch GraphQL pages incrementally with a bounded per-page subprocess or streaming API, reducing each page immediately instead of using `--slurp`. Add a witness whose aggregate response exceeds the default subprocess buffer.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: reconcile treats an unobservable author as “not ours”",
+      "body": "The sibling parser accepts an omitted `author` field as `null`, while the main parser correctly treats omission as schema failure. `isTrustedSibling` then filters the PR out, so an armed writer PR can disappear from reconciliation and the run exits successfully without `revocationBlind`. This violates V-2's requirement that observation failures capable of hiding revocation subjects fail loudly and exposes the cost of maintaining two PR parsers/trust models.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 993,
+      "line_end": 1001,
+      "confidence": 0.99,
+      "recommendation": "Use one canonical PR observation parser and trust predicate. Require the `author` field to be present, allow only explicit `null` as the deleted-account state, and aggregate missing/malformed authorship as a revocation observation failure.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: the branch escapes scope[] and publishes the retired seam",
+      "body": "`tools/README.md` is changed against main but is absent from the lock's three-path `scope[]`, violating the stated single-flip rule. Its new public contract is also materially obsolete: it advertises bounded `gh pr list` discovery and `BEHIND → skip`, while the implementation uses exhaustive GraphQL and rebuilds BEHIND. The increment artifact remains similarly stale at `docs/increments/bump-poll-duplicate-pr/B-1-idempotent-pr.md:19`.",
+      "file": "tools/README.md",
+      "line_start": 76,
+      "line_end": 83,
+      "confidence": 1,
+      "recommendation": "Bring the README into the declared scope and rebuild the frozen RED/GREEN pair with the corrected contract, or revert it into a separate scoped documentation change. Synchronize the plan and increment artifact with the final GraphQL, BEHIND, reconcile-only, and 106/63 contracts.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Replace buffered slurping with bounded incremental pagination.",
+    "Unify PR parsing and add the missing-author revocation witness.",
+    "Resolve the scope/documentation drift, then regenerate machine-owned verify records without changing tests between pins."
+  ]
+}
