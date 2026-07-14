@@ -13,8 +13,19 @@
 //
 // 관측 사실(변이 이전에 반드시 수집):
 //   gh pr list --head <branch> --state open \
-//     --json number,isCrossRepository,mergeStateStatus,author,headRefOid   ← writer 토큰
+//     --json number,isCrossRepository,mergeStateStatus,author,headRefOid,autoMergeRequest  ← writer 토큰
 //   git ls-remote --heads origin <branch>                                  ← 원격 브랜치 존재/OID
+//
+// ── 레인(--action)과 판정(action)은 **다른 축**이다 ────────────────────────────────────────────
+// · 레인 = 플래너(poll-ghcr)가 .bindings.json의 autoDeploy로 정한 배포 승인 모델:
+//     autoDeploy:true  → "bump"       (자동 배포 — auto-merge 무장)
+//     autoDeploy:false → "propose-pr" (승인 레인 — **사람 머지 = 배포 승인**)
+//   호출부는 플래너의 `.action`을 **그대로** `--action`으로 넘긴다(재해석 금지).
+// · 판정 = 이 도구가 관측 사실로 정하는 변이 경로(create/adopt/skip/rebuild).
+// ⚠️ auto-merge 무장 여부는 **오직 레인**이 정한다(`--action bump`일 때만). 승인 레인을 무장시킬 수 있는
+//    별도 플래그는 **존재하지 않는다** — `--auto-merge` 같은 우회 스위치를 두면 호출부가 두 레인 모두에
+//    무조건 넘기는 것만으로 `autoDeploy:false` 앱이 자동 배포된다(승인 게이트 우회, plan r5 R-11).
+//    승인 레인을 무장시키려면 **플래너를 속여야** 한다 = .bindings.json(autoDeploy SSOT)을 고쳐야 한다.
 //
 // 신뢰 경계: 이 레포는 **공개**다. 포크(cross-repo) PR은 같은 브랜치명을 쓸 수 있고 아무나 연다 →
 // 절대 신뢰하지 않는다. 신뢰하면 포크 PR 하나로 배포를 무기한 억제할 수 있다(억제 = 공격 표면).
@@ -40,27 +51,47 @@
 // DIRTY를 rebuild로 되살리지 않으면 유일한 PR이 충돌난 순간 이후 폴링이 영원히 skip →
 // 깨끗한 대체 PR이 영영 안 생겨 배포가 조용히 멈춘다(pr-sweeper는 DIRTY를 안 건드린다).
 //
+// auto-merge 무장도 **desired state**다(plan r5 R-10). "PR 생성 직후 1회 무장"은 무장이 실패하거나
+// (또는 그 사이 프로세스가 죽으면) 영영 복구되지 않는다: 다음 폴링은 그 **무장 안 된 PR**을 신뢰하고
+// skip해버리고, pr-sweeper는 `autoMergeRequest`가 **이미 있는** PR만 다룬다 → autoDeploy 배포가 조용히
+// 정지한다. 그래서 무장 여부(`autoMergeRequest`)를 사실로 관측한다.
+//
+// ★ 무장 계약(정확히) — 무장 축은 위 판정표와 **직교**한다. 판정은 브랜치/PR의 존재로, 무장은 레인과
+//   `autoMergeRequest`로 각각 독립적으로 정해진다:
+//     lane=bump      + 신뢰 PR + 무장 없음 → 그 run의 **판정이 무엇이든**(skip이든 rebuild든) 재무장한다
+//     lane=bump      + 신뢰 PR + 무장 있음 → 손대지 않는다(멱등 — force-push는 무장을 지우지 않는다:
+//                                            autoMergeRequest는 head OID가 아니라 PR에 붙는다)
+//     lane=bump      + create/adopt(PR 신규) → 생성 직후 무장한다
+//     lane=propose-pr                        → **어떤 경우에도 무장하지 않는다**(사람 머지 = 배포 승인)
+// ⚠️ 재무장을 skip 경로에만 매달면 **DIRTY + 미무장**에서 새 나간다(라이브에서 실제로 겹치는 조합이다:
+//    run 1이 무장에서 죽어 무장 없는 PR이 남고, 이후 main 이동이 그 PR을 충돌시킨다). rebuild만 하고
+//    무장 갭을 남기면 PR은 깨끗해지는데 auto-merge가 영영 안 붙어 배포가 정지한다.
+//
 // ⚠️ 현재는 **red-capture 상태**다 — 판정 로직은 아직 없고 관측 사실과 무관하게 **항상 create 경로를
-// 실행**한다(= 버그 재현: 중복 PR + 고아 브랜치 충돌 + lease 없는 push). 사실은 파싱·검증해 stdout의
-// `observed`에, 실제 실행한 명령은 `executed`에 실어 배선이 살아 있음을 증명한다. 회귀 테스트
-// (tools/tests/test_ensure-bump-pr.bats, test_tags=regression)가 이 RED를 고정한다.
+// 실행**한다(= 버그 재현: 중복 PR + 고아 브랜치 충돌 + lease 없는 push + 무장 재수렴 없음). 사실은
+// 파싱·검증해 stdout의 `observed`에(무장 여부 포함), 실제 실행한 명령은 `executed`에 실어 배선이 살아
+// 있음을 증명한다. 회귀 테스트(tools/tests/test_ensure-bump-pr.bats, test_tags=regression)가 이 RED를 고정한다.
+// ⚠️ 관측은 배선했으나 **결정에는 쓰지 않는다**(동결) — `observed.*.autoMerge`는 아직 아무 분기도 하지 않는다.
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { TAG_RE } from "./lib/image-pin.ts";
 
 const USAGE = `ensure-bump-pr — bump PR 멱등 실행기(조회 → 결정 → 변이; 같은 bump = 같은 브랜치 = 열린 PR 1개)
-사용법: bun tools/ensure-bump-pr.ts --app <app> --tag <sha-tag> --title <t> --body <b> [옵션]
+사용법: bun tools/ensure-bump-pr.ts --app <app> --tag <sha-tag> --action <lane> --title <t> --body <b> [옵션]
   --app <app>       앱 이름(소문자/숫자/하이픈)
   --tag <tag>       후보 배포 핀 tag(sha-<7..40 hex>) — 브랜치는 bump-poll/<app>-<tag>(RUN_ID 없음)
+  --action <lane>   플래너(poll-ghcr)의 .action을 **그대로** — bump | propose-pr (필수, 기본값 없음)
+                      bump       = autoDeploy:true  → auto-merge 무장(desired state — 없으면 재무장)
+                      propose-pr = autoDeploy:false → **절대 무장하지 않는다**(사람 머지 = 배포 승인)
   --title <t>       gh pr create --title
   --body <b>        gh pr create --body
-  --auto-merge      PR 생성 후 scripts/auto-merge-or-fail.sh로 auto-merge 무장(autoDeploy 앱만)
   --base <branch>   PR base (기본 main)
   --remote <name>   git 원격 (기본 origin)
   --writer <slug>   신뢰하는 writer App slug(기본 ukyi-homelab-writer)
   --help, -h        이 도움말
+⚠️ auto-merge를 켜는 **별도 플래그는 없다** — 레인이 유일한 입력이다(승인 게이트 우회 방지, plan r5 R-11).
 전제: 호출부가 <branch>를 **최신 main에서 재구축**해 로컬 커밋을 얹어 둔 상태(원격 변이만 이 도구 몫).
-출력(stdout): {"action":"create"|"adopt"|"skip"|"rebuild","reason":"…","branch":"…","observed":{…},"executed":[…]}`;
+출력(stdout): {"action":"create"|"adopt"|"skip"|"rebuild","lane":"bump"|"propose-pr","reason":"…","branch":"…","observed":{…},"executed":[…]}`;
 
 // 기본 writer App slug. gh는 App 작성자를 `app/<slug>`로, REST/GraphQL은 `<slug>[bot]`로 준다 →
 // 아래 normalizeLogin이 두 표기를 모두 같은 slug로 정규화한다.
@@ -68,10 +99,19 @@ const DEFAULT_WRITER = "ukyi-homelab-writer";
 const APP_RE = /^[a-z0-9-]+$/;
 const OID_RE = /^[0-9a-f]{40}$/;
 
+// 배포 승인 레인 — poll-ghcr.ts가 내는 값과 **글자 그대로** 같다(`s.autoDeploy ? "bump" : "propose-pr"`).
+// 호출부가 이 값을 재해석하지 않고 그대로 넘기므로, 승인 레인(propose-pr)을 자동 배포로 바꾸려면
+// .bindings.json의 autoDeploy(SSOT)를 고치는 수밖에 없다 — 워크플로 편집만으론 불가능하다.
+const LANES = ["bump", "propose-pr"] as const;
+type Lane = (typeof LANES)[number];
+function isLane(v: string): v is Lane {
+  return (LANES as readonly string[]).includes(v);
+}
+
 const args: {
-  app?: string; tag?: string; title?: string; body?: string;
-  writer: string; base: string; remote: string; autoMerge: boolean;
-} = { writer: DEFAULT_WRITER, base: "main", remote: "origin", autoMerge: false };
+  app?: string; tag?: string; title?: string; body?: string; lane?: Lane;
+  writer: string; base: string; remote: string;
+} = { writer: DEFAULT_WRITER, base: "main", remote: "origin" };
 const argv = process.argv.slice(2);
 if (argv.includes("--help") || argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 for (let i = 0; i < argv.length; i++) {
@@ -80,7 +120,11 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === "--tag") args.tag = argv[++i];
   else if (a === "--title") args.title = argv[++i];
   else if (a === "--body") args.body = argv[++i];
-  else if (a === "--auto-merge") args.autoMerge = true;
+  else if (a === "--action") {
+    const v = argv[++i] ?? "";
+    if (!isLane(v)) usageError(`--action 형식 위반: '${v}' (${LANES.join(" | ")})`);
+    args.lane = v;
+  }
   else if (a === "--base") args.base = argv[++i] ?? "";
   else if (a === "--remote") args.remote = argv[++i] ?? "";
   else if (a === "--writer") args.writer = argv[++i] ?? "";
@@ -109,6 +153,10 @@ if (!args.app) usageError("--app 필수");
 if (!args.tag) usageError("--tag 필수");
 if (!args.title) usageError("--title 필수");
 if (!args.body) usageError("--body 필수");
+// 레인은 **기본값 없이 필수**다 — 기본값을 두면(무엇이든) 호출부가 레인을 빼먹었을 때 조용히 한쪽으로
+// 흘러간다. bump로 기본하면 승인 앱이 자동 배포되고, propose-pr로 기본하면 autoDeploy 배포가 멈춘다.
+if (!args.lane) usageError(`--action 필수 (${LANES.join(" | ")}) — 플래너의 .action을 그대로 넘긴다`);
+const lane: Lane = args.lane;
 if (!APP_RE.test(args.app)) usageError(`--app 형식 위반: '${args.app}' (소문자/숫자/하이픈만)`);
 if (!TAG_RE.test(args.tag)) usageError(`--tag 형식 위반: '${args.tag}' (sha-<7..40 hex>)`);
 
@@ -137,9 +185,17 @@ function mutate(cmd: string, a: string[], what: string): void {
 // gh pr list --json이 주는 원시 스키마. author는 봇일 때 {is_bot, login}만 오고(id/name 없음),
 // 사람일 때 {id, is_bot, login, name}이 온다 → login/is_bot만 신뢰한다(라이브 확인 완료).
 // headRefOid는 DIRTY rebuild의 `--force-with-lease=<ref>:<oid>` 기대값이다(R-5) — 없으면 fail-closed.
+//
+// autoMergeRequest(R-10) — 라이브 실측 스키마(`gh pr list --json autoMergeRequest`, 이 레포):
+//   무장 안 됨: null
+//   무장 됨   : {"authorEmail":null,"commitBody":null,"commitHeadline":null,"mergeMethod":"SQUASH",
+//                "enabledAt":"2026-07-13T06:35:24Z",
+//                "enabledBy":{"is_bot":true,"login":"app/ukyi-homelab-writer"}}
+// → 무장 여부의 유일한 신호는 **null 여부**다(내부 필드는 보지 않는다 — 무장은 있거나 없거나다).
 type RawPr = {
   number: number; isCrossRepository: boolean; mergeStateStatus: string;
   headRefOid: string; author: { login: string; is_bot?: boolean };
+  autoMerge: boolean;
 };
 
 // 비신뢰 입력 검증 — 빈 문자열/깨진 JSON/배열 아님/필드 누락·타입 위반은 전부 fail-closed.
@@ -161,12 +217,23 @@ function parsePrs(raw: string): RawPr[] {
     if (typeof pr.headRefOid !== "string" || !OID_RE.test(pr.headRefOid)) inputError(`${at}.headRefOid가 40-hex OID 아님(lease 기대값 필수)`);
     if (pr.author === null || typeof pr.author !== "object") inputError(`${at}.author 객체가 아님`);
     if (typeof pr.author.login !== "string" || pr.author.login === "") inputError(`${at}.author.login 문자열 아님`);
+    // 무장 여부는 **필드 존재**까지 계약이다(R-10). 필드명이 드리프트해 undefined가 되면 "무장 안 됨"으로
+    // 읽혀 매 폴링 재무장(소음)하거나, 반대로 "무장됨"으로 읽혀 무장 갭이 영영 안 닫힌다 → 둘 다 조용한
+    // 오동작이라 fail-closed로 막는다(headRefOid·isCrossRepository 드리프트 가드와 동형).
+    if (!("autoMergeRequest" in pr)) {
+      inputError(`${at}.autoMergeRequest 필드 없음 — 무장 여부를 모르면 재무장을 판정할 수 없다(필드명 드리프트)`);
+    }
+    const amr = pr.autoMergeRequest;
+    if (amr !== null && (typeof amr !== "object" || Array.isArray(amr))) {
+      inputError(`${at}.autoMergeRequest가 null도 객체도 아님(무장=객체 / 미무장=null)`);
+    }
     return {
       number: pr.number,
       isCrossRepository: pr.isCrossRepository,
       mergeStateStatus: pr.mergeStateStatus,
       headRefOid: pr.headRefOid,
       author: { login: pr.author.login, is_bot: pr.author.is_bot },
+      autoMerge: amr !== null,
     };
   });
 }
@@ -204,7 +271,7 @@ function isTrusted(pr: RawPr, writer: string): boolean {
 const prs = parsePrs(run(
   "gh",
   ["pr", "list", "--head", branch, "--state", "open",
-    "--json", "number,isCrossRepository,mergeStateStatus,author,headRefOid"],
+    "--json", "number,isCrossRepository,mergeStateStatus,author,headRefOid,autoMergeRequest"],
   "gh pr list",
 ));
 const remoteBranch = parseLsRemote(run("git", ["ls-remote", "--heads", args.remote, branch], "git ls-remote"));
@@ -214,11 +281,14 @@ const trusted = observedPrs.find((pr) => pr.trusted) ?? null;
 
 // ── ② 결정 ────────────────────────────────────────────────────────────────────────────────
 // ⚠️ red-capture: 여기가 수정 seam이다. 지금은 판정을 버그 상태로 동결한다 — 신뢰하는 열린 PR이
-// 있어도, 고아 원격 브랜치가 있어도 무조건 create 경로를 실행한다(= 매 주기 중복 PR + 고아 충돌).
+// 있어도, 고아 원격 브랜치가 있어도, 그 PR의 무장이 빠져 있어도 무조건 create 경로를 실행한다
+// (= 매 주기 중복 PR + 고아 충돌 + 무장 갭 미수렴).
 // 수정 시 위 판정표대로 action을 정하고 ③의 변이를 분기하도록 이 두 블록만 바꾸면 된다.
+// (무장은 **별도 축**이다: `lane === "bump" && trusted && !trusted.autoMerge`이면 판정이 skip이든
+//  rebuild든 재무장하고, create/adopt는 PR 생성 직후 무장한다 — R-10. propose-pr은 절대 무장 없음.)
 const action = "create" as const;
 const reason =
-  "red-capture: 판정 미구현 — 신뢰 PR·고아 브랜치와 무관하게 항상 create(중복 PR·lease 없는 push 재현)";
+  "red-capture: 판정 미구현 — 신뢰 PR·고아 브랜치·무장 여부와 무관하게 항상 create(중복 PR·lease 없는 push·무장 미수렴 재현)";
 
 // ── ③ 변이(원격) ───────────────────────────────────────────────────────────────────────────
 // 동결된 create 경로: **lease 없는** push + 무조건 PR 생성 → 고아 브랜치와 non-fast-forward 충돌
@@ -228,20 +298,29 @@ mutate("gh", [
   "pr", "create", "--base", args.base, "--head", branch,
   "--title", args.title, "--body", args.body,
 ], "gh pr create");
-if (args.autoMerge) {
-  // races-6 폴백(gh pr merge --auto는 이미 CLEAN인 PR에 에러) — 검증된 스크립트를 재사용한다.
+// 무장은 **레인만** 본다 — propose-pr(승인 레인)은 어떤 경로로도 여기 들어오지 못한다(R-11).
+// ⚠️ red-capture: 지금은 "PR 생성 직후 1회"뿐이라 무장 실패가 영구화된다(R-10의 정확한 실패 모드).
+if (lane === "bump") {
+  // races-6 폴백(gh pr merge --auto는 이미 CLEAN인 PR에 에러) — 검증된 공유 스크립트를 재사용한다.
   const script = path.join(import.meta.dir, "..", "scripts", "auto-merge-or-fail.sh");
   mutate("bash", [script, branch], "auto-merge-or-fail");
 }
 
 console.log(JSON.stringify({
   action,
+  lane, // 배포 승인 레인(입력) — 판정(action)과 다른 축이다
   reason,
   branch,
   observed: {
     prs: observedPrs,
     trusted: trusted
-      ? { number: trusted.number, mergeStateStatus: trusted.mergeStateStatus, headRefOid: trusted.headRefOid }
+      ? {
+        number: trusted.number,
+        mergeStateStatus: trusted.mergeStateStatus,
+        headRefOid: trusted.headRefOid,
+        // R-10: 무장이 desired state라는 걸 판정이 쓸 수 있게 사실로 싣는다(지금은 아무 분기도 안 한다).
+        autoMerge: trusted.autoMerge,
+      }
       : null,
     remoteBranch,
   },

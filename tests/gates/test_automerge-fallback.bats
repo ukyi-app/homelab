@@ -72,10 +72,11 @@ teardown() { rm -rf "$TMP"; }
   grep -q 'auto-merge-or-fail.sh' "$A/pr-first-commit/action.yml"
   # 직접 호출은 bump.yaml(비-변이 reconciler)에만 잔존.
   grep -q 'auto-merge-or-fail.sh' "$WF/bump.yaml" || { echo "missing shared fallback in bump.yaml"; false; }
-  # ⚠️ bump-poll 레인은 **파일이 아니라 도구**가 소유한다(plan r4 R-8): auto-merge는 tools/ensure-bump-pr.ts가
-  # PR을 실제로 만든 직후에만 무장한다(--auto-merge). 워크플로가 따로 부르면 skip/rebuild 판정(PR 생성 0)에도
-  # 무장돼 옛 PR이 머지될 수 있다 → bump-poll.yaml 안의 직접 호출은 tests/gates/test_bump-poll-callsite.bats가
-  # 금지한다. 여기서는 그 레인이 **여전히 공유 스크립트를 쓴다**는 사실만 고정한다(raw OR-폴백 박멸이 이 게이트의 불변식).
+  # ⚠️ bump-poll 레인은 **파일이 아니라 도구**가 소유한다(plan r4 R-8): auto-merge는 tools/ensure-bump-pr.ts
+  # 안에서만, **레인이 bump일 때만**(`--action bump` — autoDeploy) 무장한다(plan r5 R-11: 무장을 켜는 별도
+  # 플래그는 없다). 워크플로가 따로 부르면 skip/rebuild 판정(PR 생성 0)에도 무장돼 옛 PR이 머지될 수 있다 →
+  # bump-poll.yaml 안의 직접 호출은 tests/gates/test_bump-poll-callsite.bats가 금지한다.
+  # 여기서는 그 레인이 **여전히 공유 스크립트를 쓴다**는 사실만 고정한다(raw OR-폴백 박멸이 이 게이트의 불변식).
   grep -q 'auto-merge-or-fail.sh' "$ROOT/tools/ensure-bump-pr.ts" || { echo "missing shared fallback in tools/ensure-bump-pr.ts"; false; }
   # 변이 reusable은 composite 위임이라 직접 호출 0(auto-merge: 'true'/'false' 입력만).
   run grep -l 'auto-merge-or-fail.sh' "$WF"/_create-database.yaml "$WF"/_create-cache.yaml "$WF"/_update-secrets.yaml "$WF"/_create-app.yaml "$WF"/_teardown-app.yaml

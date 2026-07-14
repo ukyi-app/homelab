@@ -15,10 +15,23 @@
 #      HEAD다). 커밋 전에 도구를 부르면 빈 커밋(=main과 동일)을 밀어 PR이 diff 0으로 열리고, bump-tag 전에
 #      부르면 갱신 자체가 빠진다 — 둘 다 "테스트는 GREEN, 배포는 무동작"이다. ①②③만으론 순서가 안 잡힌다.
 #   ⑤ **auto-merge 독점**(plan r4 R-8): 워크플로는 `scripts/auto-merge-or-fail.sh`를 **직접 부르지 않는다**.
-#      auto-merge는 실행기가 **PR을 실제로 만든 직후에만** 무장한다(--auto-merge). 워크플로가 따로 부르면
-#      skip/rebuild 판정(=PR 생성 없음)에도 머지가 무장돼, 남의 PR이나 옛 PR을 건드릴 수 있다(이중 auto-merge).
+#      auto-merge는 실행기 안에서만 무장한다. 워크플로가 따로 부르면 skip/rebuild 판정(=PR 생성 없음)에도
+#      머지가 무장돼, 남의 PR이나 옛 PR을 건드릴 수 있다(이중 auto-merge).
 #      ⚠️ 이 금지는 **bump-poll.yaml 파일 안에서만**이다 — 스크립트 자체는 bump.yaml·pr-first-commit
 #      composite·ensure-bump-pr.ts가 계속 쓴다(아래 보존 증인이 그걸 고정한다).
+#   ⑥ **레인 매핑**(plan r5 R-11): 승인 게이트 우회를 **구조적으로** 불가능하게 만든다.
+#      ⚠️ ⑤만으로는 부족하다: "워크플로 어딘가에 `--auto-merge` 토큰이 있으면 통과"하는 게이트는,
+#      두 레인 **모두에 무조건** 그 플래그를 넘기는 구현도 GREEN으로 통과시킨다 → `autoDeploy:false`
+#      승인 PR이 자동 배포된다(단일 flip 밖의 **두 번째 행위 변경** + 승인 게이트 우회).
+#      봉인은 세 겹이고, 셋이 함께여야 성립한다:
+#        (a) 실행기에 auto-merge를 켜는 **플래그가 없다** — 레인(`--action`)이 유일한 입력이다.
+#            (도구 스위트: "there is no flag that can arm auto-merge outside the bump lane")
+#        (b) 실행기는 `--action bump`에서만 무장하고 `propose-pr`에선 **절대** 무장하지 않는다.
+#            (도구 스위트: "the propose-pr lane NEVER arms auto-merge")
+#        (c) 워크플로는 레인을 **재해석하지 않고** 플래너의 `.action`을 **그대로** 넘긴다(아래 증인).
+#      → 승인 레인을 자동 배포로 바꾸려면 플래너를 속여야 하고, 플래너의 레인은 `.bindings.json`의
+#        autoDeploy(SSOT)에서 온다(poll-ghcr.ts: `action: s.autoDeploy ? "bump" : "propose-pr"`).
+#        즉 **워크플로 편집만으로는 승인 게이트를 넘을 수 없다** — 그게 이 계약의 요점이다.
 #
 # ── 구현자 가이드(이 파일의 회귀 증인들이 GREEN이 되려면 bump 스텝이 이렇게 생겨야 한다) ────────────
 #   git checkout main
@@ -27,8 +40,11 @@
 #   bun tools/bump-tag.ts "$app" "$tag" --digest "$digest" --expect-current "$expect" [--pin "$pin"]  # ④-2
 #   git add "$writePath" platform/victoria-stack/prod/digest-exporter.yaml
 #   git commit -m "chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)"                        # ④-3
-#   bun tools/ensure-bump-pr.ts --app "$app" --tag "$tag" \
-#     --title … --body … $( [ "$action" = "bump" ] && echo --auto-merge )                             # ④-4, ⑤
+#   bun tools/ensure-bump-pr.ts --app "$app" --tag "$tag" --action "$action" \                        # ④-4, ⑤, ⑥
+#     --title … --body …
+#   # ⑥ `--action "$action"` — 플래너가 준 값 **그대로**. 하드코딩(`--action bump`)도, 재해석
+#   #    (`[ "$action" = bump ] && …`)도 금지다. 레인별로 title/body가 다르면 if/else로 그것만 가르고
+#   #    `--action "$action"`는 양쪽에 똑같이 넘긴다.
 #   # ⑤ `git push`·`gh pr create`·`bash scripts/auto-merge-or-fail.sh`는 이 스텝에 **남지 않는다**.
 #
 # 회귀(test_tags=regression): 지금은 RED(워크플로가 아직 옛 방식 — 직접 push + 직접 gh pr create + RUN_ID
@@ -125,22 +141,65 @@ first_line() { grep -nE "$1" "$CODE" | head -1 | cut -d: -f1; }
 @test "auto-merge is armed only by ensure-bump-pr (bump-poll never runs the shared script itself)" {
   # plan r4 R-8: 워크플로에 직접 호출이 남아 있으면, 도구가 skip/rebuild(=PR 생성 0)를 판정한 주기에도
   # 워크플로가 auto-merge를 무장한다 → 옛 PR/남의 PR에 머지가 걸리는 **이중 auto-merge**. auto-merge는
-  # "지금 막 내가 만든 PR"에만 붙어야 한다 = 실행기 안(PR 생성 직후)이 유일한 자리다.
+  # 실행기 안(관측된 사실 + 레인으로 판정)이 유일한 자리다.
   run grep -nE 'auto-merge-or-fail\.sh' "$CODE"
   if [ "$status" -eq 0 ]; then
     echo "double auto-merge: bump-poll.yaml still runs 'scripts/auto-merge-or-fail.sh' itself —"
-    echo "  auto-merge는 tools/ensure-bump-pr.ts가 PR을 **실제로 만든 직후에만** 무장한다(--auto-merge)."
+    echo "  auto-merge는 tools/ensure-bump-pr.ts 안에서만 무장한다(레인=bump일 때, 무장이 없을 때)."
     echo "  skip/rebuild 판정(PR 생성 0)에도 무장되면 옛 PR이 머지될 수 있다."
     echo "$output"
     false
   fi
-  # 무장 자체가 사라지면 안 된다(autoDeploy 레인은 여전히 자동 머지) → 도구에 --auto-merge를 넘긴다.
+}
+
+# bats test_tags=regression
+@test "the lane is forwarded verbatim from the planner (only autoDeploy can arm auto-merge)" {
+  # ★ plan r5 R-11. 승인 게이트 우회를 **구조적으로** 막는 호출부 절반(⑥의 (c)).
+  #
+  # 옛 게이트는 "워크플로 어딘가에 --auto-merge 토큰이 있으면 통과"였다. 그 게이트는 두 레인 모두에
+  # 무조건 --auto-merge를 넘기는 구현도 GREEN으로 통과시킨다 → autoDeploy:false 승인 PR이 자동 배포된다.
+  # 새 계약: auto-merge를 켜는 플래그는 **존재하지 않고**(도구 스위트가 그걸 고정), 레인이 유일한 입력이며,
+  # 워크플로는 그 레인을 **플래너가 준 그대로** 넘긴다.
+
+  # ① 무장 플래그는 워크플로 어디에도 없다 — 도구가 그런 옵션을 받지 않는다(exit 2). 남아 있다면
+  #    누군가 "레인 밖에서 무장하는 길"을 되살리려 한 것이다.
   run grep -nE -- '--auto-merge' "$CODE"
-  if [ "$status" -ne 0 ]; then
-    echo "lost auto-merge: bump-poll.yaml이 ensure-bump-pr에 --auto-merge를 넘기지 않는다 —"
-    echo "  autoDeploy(action=bump) 레인은 자동 머지가 계약이다(승인 레인=propose-pr은 사람 머지)."
+  if [ "$status" -eq 0 ]; then
+    echo "approval gate bypass: bump-poll.yaml에 '--auto-merge'가 있다 — 그런 플래그는 존재하지 않는다."
+    echo "  무장은 레인(--action bump)만이 켠다. 별도 플래그를 되살리면 두 레인에 무조건 넘기는 것만으로"
+    echo "  autoDeploy:false 승인 PR이 자동 배포된다(승인 게이트 우회)."
+    echo "$output"
     false
   fi
+
+  # ② 레인은 플래너의 `.action`에서 온다(= .bindings.json의 autoDeploy SSOT). 이 배선이 끊기면
+  #    워크플로가 레인을 스스로 지어내게 되고, 그 순간 승인 게이트는 워크플로 편집만으로 뚫린다.
+  run grep -nE 'action=\$\(.*jq -r [.]action' "$CODE"
+  if [ "$status" -ne 0 ]; then
+    echo "lane provenance: bump-poll.yaml이 플래너의 .action을 \$action으로 읽지 않는다 —"
+    echo "  레인의 출처는 poll-ghcr(.bindings.json의 autoDeploy)여야 한다: action=\$(echo \"\$item\" | jq -r .action)"
+    false
+  fi
+
+  # ③ 실행기에 --action이 최소 1회 넘어간다(무장 자체가 사라지면 autoDeploy 배포가 멈춘다).
+  total="$(grep -oE -- '--action' "$CODE" | wc -l | tr -d ' ')"
+  [ "$total" -ge 1 ] || {
+    echo "lost auto-merge: bump-poll.yaml이 ensure-bump-pr에 --action을 넘기지 않는다 —"
+    echo "  레인이 없으면 도구가 exit 2로 죽는다(기본값 없음). autoDeploy 레인은 자동 머지가 계약이다."
+    false
+  }
+
+  # ④ ★ 봉인: **모든** --action 등장이 `$action` 변수 **그대로**여야 한다. 하드코딩된 `--action bump`가
+  #    하나라도 있으면 propose-pr 후보가 bump 레인으로 흘러 자동 배포된다 — 그리고 ①②③은 다 통과한다.
+  #    (허용 표기: `--action "$action"` / `--action $action` / `--action="$action"` / `--action "${action}"`)
+  good="$(grep -oE -- '--action[= ]+"?\$\{?action\}?"?' "$CODE" | wc -l | tr -d ' ')"
+  [ "$good" -eq "$total" ] || {
+    echo "approval gate bypass: --action 등장 ${total}회 중 ${good}회만 플래너의 \$action을 그대로 넘긴다 —"
+    echo "  하드코딩(--action bump)이나 재해석은 금지다. autoDeploy:false 앱이 자동 배포될 수 있다."
+    echo "  레인별로 title/body가 다르면 if/else로 **그것만** 가르고, --action \"\$action\"은 양쪽에 똑같이 넘긴다."
+    grep -nE -- '--action' "$CODE"
+    false
+  }
 }
 
 # ---------------------------------------------------------------------------
