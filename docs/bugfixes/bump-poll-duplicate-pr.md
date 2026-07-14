@@ -181,6 +181,14 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 | ID | 심각도 | 발견 | 결정 | 반영 |
 |---|---|---|---|---|
+> **R-22 이행 중 드러난 더 깊은 사실**(재구성이 폭로했다): 옛 동결 executor는 `gh pr list` 프로토콜이라
+> 최종 stub(GraphQL)과 어긋나 **fail-closed(exit 3)** 로 죽었다 → "변이하지 않는다·무장하지 않는다"류 단언을
+> **공짜로 만족** → W11c·W11e·W11f·W17·W21~W24·W26 **9개 증인이 RED였던 적이 없다**. 또 하네스 가드가
+> `.observed.*`를 증상 단언보다 **먼저** 요구해, **조회를 아예 하지 않는** executor를 잡지 못했다(픽스의 설계를
+> 버그 관측의 전제로 삼는 순환). 교정: baseline을 **main 인라인 그대로**(조회 0·무조건 create·비-lease push·
+> 브랜치 셀렉터 무장) 모델링하고, 증상은 **argv 원장만으로** 단언한다. 결과 — regression **65건 전부 baseline RED**
+> (공짜 통과 0), characterization 54건 양 끝단 green, symptomToken 3/3 적중.
+
 | R-22 | high | `Blocker: the locked regression partition changes between RED and HEAD` — 커밋된 RED 레코드는 regression **15**케이스를 돌렸는데, 태그 필터가 그대로인 채 HEAD에선 **37**케이스를 고른다. W8/W9·W20~W24는 `red.sha` **이후에** 추가돼 잠긴 baseline에서 **RED였던 적이 없다** → GREEN 레코드가 **다른 테스트 집합**과 비교되어 동일-테스트 단일-flip을 증명하지 못한다 | **Accept**(권고 대신 대안 이행) | **RED baseline 재구성**: `main` + **최종 테스트 전량** + 동결 executor 로 pre-fix 커밋을 만들고 `--verify-red` 재실행 → `red.sha`·`red-baseline` 재핀. 양 끝단이 **같은 파티션**을 돈다. ⚠️ Codex의 "쪼개서 별도 버그픽스로" 권고는 **Reject**: disarm·ownership은 *이 픽스가 만든* 위험(멱등 브랜치가 force-push 표면을 새로 연다)을 막는 **방어물**이라 분리하면 그 사이 구간이 무방비다 — 단일 flip의 **안전 전제조건**이지 두 번째 관측 행위가 아니다 |
 | R-23 | high | `Blocker: ownership proof does not protect auto-merge authorization` — `assertOurCommit`이 force-push 경로에서만 돈다. head가 **교체된** writer PR은 skip 경로에서 여전히 신뢰돼 **미검증 head에 auto-merge가 유지·추가**되고, 반대로 **무장된 DIRTY propose-pr**은 ownership 실패로 `--disable-auto` **이전에 죽어** 낡은 인가가 살아남는다 | **Accept** | provenance를 **인가 reconcile의 입력**으로 승격 — 미검증 head엔 무장 금지 + **이미 무장돼 있으면 회수**. **순서 규칙**: 회수(안전 방향)는 **중단 가능한 ownership 검사보다 먼저**. 증인: foreign-head skip(무장 0·회수 1) · foreign-head DIRTY(push 0 + 회수) · **무장된 propose-pr은 ownership fail-closed여도 disarm 수행** |
 | R-24 | medium | `Test-quality: the ownership call-site witness checks dead text` — 워크플로의 `git config`·`git commit` **리터럴 grep** + `BUMP_COMMIT_MESSAGE` 존재 확인뿐 → 이후 config/env 오버라이드·`--amend`가 **실효 커밋을 바꿔도 전부 green** → adopt/rebuild가 **영구 fail-closed**(조용한 배포 정지) | **Accept** | hermetic 루프 증인의 `git` stub이 **실효 user.name/user.email(마지막 쓰기 승)** 과 **실효 최종 커밋 메시지**(amend 반영)를 원장에 기록하고 executor의 ownership 기대식과 대조. 리터럴 grep 단언 제거 |
