@@ -322,7 +322,27 @@ case "$1:$2" in
   # gh pr create는 만든 PR의 **URL**을 stdout에 낸다 → 도구가 거기서 번호를 파싱해 무장 셀렉터로 쓴다.
   # STUB_GH_CREATE_OUT으로 출력 형식 드리프트(번호 파싱 불가)를 주입할 수 있다(fail-closed 증인).
   pr:create) printf '%s\n' "${STUB_GH_CREATE_OUT-https://github.com/ukyi/homelab/pull/999}" ;;
-  pr:merge)  : ;;
+  # ── 해제(--disable-auto) 실패 주입(R-32) ──────────────────────────────────────────────────────
+  # 라이브의 해제 실패(API 5xx·레이스·권한 회수)는 드물지만 일어난다. 그때 **"회수하지 못했다"는 사실이
+  # 조용히 묻히는가**(exit 0)를 실측하려면 **특정 PR의 해제만** 죽일 수 있어야 한다 — 전부 죽이면 주 경로의
+  # 해제(③-a)까지 같이 죽어 **다른 이유의 RED**가 된다(그건 이 증인이 겨냥하는 결함이 아니다).
+  # ⚠️ 무장(--auto)은 건드리지 않는다: 이 주입은 `--disable-auto` + 그 PR 번호가 argv에 **둘 다** 있을 때만 문다.
+  pr:merge)
+    if [ -n "${STUB_DISARM_FAIL_PR:-}" ]; then
+      da=""
+      for a in "$@"; do
+        case "$a" in --disable-auto) da=1 ;; esac
+      done
+      if [ -n "$da" ]; then
+        for a in "$@"; do
+          if [ "$a" = "$STUB_DISARM_FAIL_PR" ]; then
+            echo "stub: gh pr merge --disable-auto $a 실패(주입 — API 장애)" >&2
+            exit 1
+          fi
+        done
+      fi
+    fi
+    ;;
   pr:view)   echo CLEAN ;;
   # superseded 형제 close. ⚠️ **브랜치 삭제는 계약 밖이다**(close는 reopen으로 되돌아가지만 ref 삭제는
   # 되돌아가지 않는다) → `--delete-branch`가 붙은 형태는 exit 3으로 죽인다(라이브 성공이 아니라 하네스 거부).
@@ -2004,38 +2024,71 @@ setup_closable_sibling() {
 }
 
 # bats test_tags=regression
-@test "W42: a failing sibling enumeration closes nothing but never blocks the main decision (suppression is an attack surface)" {
-  # 스윕이 주 판정을 abort시킬 수 있으면, 아무나 `bump-poll/<app>-*` 브랜치 하나를 만들어(또는 API를
-  # 흔들어) **배포를 영구 정지**시킬 수 있다. 스윕의 실패는 경고 후 계속이다.
+@test "W42: a blind sibling sweep never blocks the main decision, but it can never be reported as success either (an unobservable subject is a revocation failure)" {
+  # ★★ 두 성질을 **함께** 못박는다(V-2). 예전 증인은 앞의 하나만 봤고, 그래서 **결함을 GREEN으로 잠갔다**:
+  #   ① **비-기아**(예전에도 있었다): 스윕이 주 판정을 abort시킬 수 있으면 아무나 `bump-poll/<app>-*` 브랜치
+  #      하나를 만들어(또는 API를 흔들어) **배포를 영구 정지**시킬 수 있다 → 메인 변이는 끝까지 간다.
+  #   ② **비-침묵**(새로 못박는다): 형제를 **관측하지 못한 것**은 "형제가 없다"가 아니다. 그 브랜치에
+  #      **무장된 좀비 PR**이 있었을 수 있는데, 예전 코드는 `closeAbandoned`만 세우고 **exit 0**으로 끝냈다
+  #      (`closeAbandoned`는 close(위생)만 막고 종료 코드엔 영향이 0이다 — 종료 코드는 revocationFailures가
+  #      정한다) → **회수 대상을 보지도 못한 채 run이 초록이고 telegram도 울리지 않는다**.
+  #      같은 실패를 `--reconcile-only`는 exit 1로 냈다 → 두 경로의 "같은 실패 계약"이 **거짓**이었다.
   write_prs '[]'
   export STUB_GIT_SIBLINGS_FAIL=1
   run_ensure_lane bump
-  [ "$status" -eq 0 ] || {
-    echo "deployment suppressed: 형제 열거 실패가 주 판정(create)을 죽였다 — 스윕은 배포를 막을 수 없어야 한다"
-    echo "$output"; echo "$stderr"; dump_calls; false
-  }
-  total="$(close_calls_total)"
-  [ "$total" -eq 0 ]
-  creates="$(count_calls gh pr create)"
-  [ "$creates" -eq 1 ]
-  run has_call_exact "${PUSH_CREATE[@]}"
-  [ "$status" -eq 0 ]
-
-  # 형제 PR **조회**(GraphQL) 실패도 같다 — 닫지 않되 배포는 계속한다.
-  : > "$CALLS"
   unset STUB_GIT_SIBLINGS_FAIL
+  RC="$status"   # ⚠️ 아래 원장 질의(`run …`)가 $status를 덮어쓴다 → 지금 보존한다(하네스 함정)
+
+  # ① 메인 변이는 굶지 않았다 — 스윕은 배포를 막을 수 없다.
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 1 ] || {
+    echo "deployment suppressed: 형제 열거 실패가 주 판정(create)을 죽였다 — 억제는 공격 표면이다"
+    echo "$JSON"; echo "$stderr"; dump_calls; false
+  }
+  run has_call_exact "${PUSH_CREATE[@]}"
+  [ "$status" -eq 0 ] || { echo "deployment suppressed: 계약 push가 나가지 않았다"; dump_calls; false; }
+  total="$(close_calls_total)"
+  [ "$total" -eq 0 ] || { echo "불완전 열거 위에서 close했다"; dump_calls; false; }
+
+  # ② 그런데 run은 **빨갛다** — 회수 대상을 열거조차 못 했다.
+  [ "$RC" -ne 0 ] || {
+    echo "silent blind sweep: bump-poll/* 네임스페이스 열거가 실패했는데 실행기가 성공(exit 0)으로 끝났다 —"
+    echo "  그 네임스페이스에 **무장된 좀비 PR**이 있었는지 우리는 모른다. '보지 못했다'는 '없다'가 아니다."
+    echo "$JSON"; echo "$stderr"; dump_calls; false
+  }
+  # ③ 그리고 **무엇을 보지 못했는지** 보고에 남는다(주 경로와 --reconcile-only가 같은 키를 쓴다).
+  echo "$JSON" | jq -e '.revocationFailures | length == 1' > /dev/null || {
+    echo "silent target: 관측 실패를 revocationFailures로 보고하지 않았다"; echo "$JSON"; false
+  }
+  echo "$JSON" | jq -e '.revocationFailures[0] | test("열거")' > /dev/null || { echo "$JSON"; false; }
+
+  # ── 형제 PR **조회**(GraphQL) 실패도 **글자 그대로 같은 계약**이다 ────────────────────────────
+  : > "$CALLS"
   export STUB_SIB_FAIL=1
   local sb; sb="$(SIB_BRANCH_OF)"
   add_sibling "$sb" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
   run_ensure_lane bump
-  [ "$status" -eq 0 ] || {
+  unset STUB_SIB_FAIL
+  RC="$status"
+
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 1 ] || {
     echo "deployment suppressed: 형제 PR 조회 실패가 주 판정을 죽였다"
-    echo "$output"; echo "$stderr"; dump_calls; false
+    echo "$JSON"; echo "$stderr"; dump_calls; false
   }
   total="$(close_calls_total)"
   [ "$total" -eq 0 ]
-  creates="$(count_calls gh pr create)"
-  [ "$creates" -eq 1 ]
+  [ "$RC" -ne 0 ] || {
+    echo "silent blind sweep: 형제 PR 조회가 실패했는데 run이 초록이다 — 그 브랜치(${sb})의 PR #348은"
+    echo "  **무장된 채 열려 있는데** 우리는 그것을 보지도 못했다(그리고 이 앱은 bump 레인이라"
+    echo "  --reconcile-only도 그 무장을 '인가된 것'으로 남겨 둘 수 있다)."
+    echo "$JSON"; echo "$stderr"; dump_calls; false
+  }
+  # **실패한 주체(브랜치)가 이름으로 남는다** — exit 코드만으론 어느 형제를 못 봤는지 알 수 없다.
+  echo "$JSON" | jq -e --arg b "$sb" '[.revocationFailures[] | select(test($b))] | length == 1' > /dev/null || {
+    echo "silent target: 관측하지 못한 형제 브랜치(${sb})가 보고에 없다"
+    echo "$JSON"; false
+  }
 }
 
 # bats test_tags=regression
@@ -2183,23 +2236,183 @@ setup_closable_sibling() {
 }
 
 # bats test_tags=regression
-@test "W48: --reconcile-only leaves an autoDeploy:true app's arming alone (it is authorized)" {
-  # 반대편 — 회수는 **인가되지 않은** 무장만 겨냥한다. autoDeploy:true 앱의 무장은 정당하다:
-  # 여기서 무차별 해제하면 매 10분 무장을 지웠다 다시 거는 churn이 되고, noop 주기엔 다시 걸어 줄
-  # bump 루프조차 돌지 않아 **autoDeploy 배포가 조용히 정지**한다.
+@test "W48: --reconcile-only leaves ONLY the newest open PR of an autoDeploy:true app armed (the newest is authorized, its older siblings are not)" {
+  # ★★ V-1로 **좁혀진** 증인이다. 예전엔 "autoDeploy:true 앱의 무장은 건드리지 않는다"였는데, 그 문장은
+  #    **너무 넓었다**: superseded된 옛 형제의 무장까지 인가된 것으로 취급해 버렸고, 그 형제를 회수할
+  #    사람은 주 경로의 스윕뿐인데 그 경로는 플래너가 후보를 내는 주기에만 돈다(noop/refuse면 굶는다).
+  #    올바른 문장: **그 앱의 가장 새로운 PR 하나만** 인가된 무장이다.
+  # ⚠️ 원래의 anti-churn 의도는 그대로 산다 — 최신 PR의 무장은 **손대지 않는다**(매 10분 지웠다 다시 거는
+  #    churn 금지 · noop 주기엔 다시 걸어 줄 bump 루프조차 돌지 않는다).
   write_bindings '{"autoDeploy": true}'
-  setup_closable_sibling
+  local t2="sha-8888888$(printf '%033d' 0)"
+  # 옛 형제(#348 · 06:34)와 최신(#350 · 06:44) — 둘 다 무장돼 있고 둘 다 head가 우리 커밋이다.
+  add_sibling "$(SIB_BRANCH_OF)" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
+  sibling_commit "$SIB_OID" "$(sib_commit_msg "$SIB_TAG")"
+  add_sibling "$(SIB_BRANCH_OF "$t2")" "$ORPHAN_OID" "$(sib_node 350 "$ORPHAN_OID" "2026-07-13T06:44:00Z" "$(amr_armed)")"
+  sibling_commit "$ORPHAN_OID" "$(sib_commit_msg "$t2")"
   run_reconcile
-  [ "$status" -eq 0 ] || { echo "$output"; echo "$stderr"; dump_calls; false; }
-  merges="$(merge_calls)"
-  [ "$merges" -eq 0 ] || {
-    echo "arming churn: autoDeploy:true 앱의 무장을 reconcile 패스가 건드렸다(gh pr merge ${merges}회, 기대 0회)"
+  [ "$status" -eq 0 ] || { echo "$JSON"; echo "$stderr"; dump_calls; false; }
+
+  # ① **최신**(#350)의 무장은 그대로다 — 인가된 무장이고, churn을 만들지 않는다.
+  run disarm_calls 350
+  [ "$output" -eq 0 ] || {
+    echo "arming churn: autoDeploy:true 앱의 **최신** PR #350의 무장을 회수했다 —"
+    echo "  매 10분 무장을 지웠다 다시 거는 churn이 되고, noop 주기엔 다시 걸어 줄 bump 루프조차 돌지 않는다."
     dump_calls; false
   }
+  # ② 그런데 **옛 형제**(#348)는 회수된다 — superseded PR은 레인과 무관하게 머지될 자격이 없다.
+  run disarm_calls 348
+  [ "$output" -eq 1 ] || {
+    echo "stale authorization survives: superseded된 옛 PR #348(06:34 < 06:44)의 무장을 남겼다 —"
+    echo "  이 앱은 bump 레인이라 주 경로의 형제 스윕이 유일한 회수자인데, 그 경로는 플래너가 후보를"
+    echo "  낸 주기에만 돈다(noop/refuse면 굶는다) → 낡은 인가가 무기한 살아남는다(무승인 롤백)."
+    echo "$JSON"; dump_calls; false
+  }
+  merges="$(merge_calls)"
+  [ "$merges" -eq 1 ] || { echo "gh pr merge ${merges}회(기대 1회 — 옛 형제 해제뿐)"; dump_calls; false; }
+  # ③ 이 모드의 변이는 여전히 **해제 하나뿐**이다.
   total="$(close_calls_total)"
   [ "$total" -eq 0 ]
-  echo "$JSON" | jq -e '.subjects[0].lane == "bump"' > /dev/null
-  echo "$JSON" | jq -e '[.subjects[] | select(.disarmed)] | length == 0' > /dev/null
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ]
+  echo "$JSON" | jq -e '[.subjects[] | select(.lane == "bump")] | length == 2' > /dev/null
+  echo "$JSON" | jq -e '[.subjects[] | select(.disarmed) | .number] == [348]' > /dev/null \
+    || { echo "회수된 주체가 #348 하나가 아니다"; echo "$JSON"; false; }
+}
+
+# bats test_tags=regression
+@test "W67: --reconcile-only revokes a bump-lane app's superseded sibling with NO candidate, NO planner, and NO caller-supplied app (the sole revoker must not starve on a noop cycle)" {
+  # ★★★ V-1의 핵심 증인. 회수 트리거는 **셋**인데(레인 뒤집힘 · superseded 형제 · 증명되지 않은 head)
+  #      예전 reconcile 패스는 **첫째만** 다루고 `if (lane === "bump") continue`로 나머지를 통째로 버렸다.
+  #      나머지 둘의 유일한 회수자는 **주 경로의 형제 스윕**인데, 호출부는 그 경로를 **플래너가 그 앱의
+  #      후보를 낸 주기에만** 부른다(`select(.action == "bump" or .action == "propose-pr")`).
+  # ⚠️ 그래서 굶는 순간이 정확히 있다 — 그리고 그건 예외 상태가 아니라 **정상 상태**다:
+  #      · `noop`   : bump가 머지된 **직후**(배포 핀 = GHCR 최신 태그) → 후보 없음 → 실행기 미호출.
+  #      · `refuse` : 앱 레포 이력 재작성 · source-repo 드리프트 · GHCR 일시 장애.
+  #    그 주기에 옛 armed PR은 **열린 채 살아남고 run은 초록이다**(telegram 무발화). 나중에 누가 그
+  #    브랜치를 전진시키면("Update branch" · 체크 재실행 · main 이동) **옛 이미지가 승인 없이 머지된다**.
+  # ★ 이 증인은 **실행기 계약**이다(호출부 계약이 아니다): 실행기는 플래너가 무엇을 냈는지 **알 필요도,
+  #   알 방법도 없어야** 한다. 그래서 여기선 --app·--tag·--action을 **하나도 넘기지 않는다**.
+  write_bindings '{"autoDeploy": true}'
+  local t2="sha-8888888$(printf '%033d' 0)"
+  add_sibling "$(SIB_BRANCH_OF)" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
+  sibling_commit "$SIB_OID" "$(sib_commit_msg "$SIB_TAG")"
+  add_sibling "$(SIB_BRANCH_OF "$t2")" "$ORPHAN_OID" "$(sib_node 350 "$ORPHAN_OID" "2026-07-13T06:44:00Z" "$(amr_armed)")"
+  sibling_commit "$ORPHAN_OID" "$(sib_commit_msg "$t2")"
+
+  run_reconcile   # ← 후보(tag)도, 레인도, 대상 앱도, plan.json도 없다. 오직 --reconcile-only뿐이다.
+  [ "$status" -eq 0 ] || { echo "$JSON"; echo "$stderr"; dump_calls; false; }
+
+  run disarm_calls 348
+  [ "$output" -eq 1 ] || {
+    echo "stale authorization survives: 후보 없는 주기(noop/refuse)에 superseded 형제 #348의 무장이 살아남았다."
+    echo "  reconcile 패스가 bump 레인을 통째로 건너뛰면, 그 앱의 superseded 무장을 회수할 사람은"
+    echo "  **플래너가 후보를 낸 주기의 주 경로**뿐이다 — 그리고 그 주기는 오지 않을 수 있다."
+    echo "$JSON"; dump_calls; false
+  }
+  # 회수 사유가 **superseded**로 보고된다(레인 뒤집힘이 아니라) — 어느 트리거가 물었는지 구분된다.
+  echo "$JSON" | jq -e '[.subjects[] | select(.number == 348) | .revokeReason] | length == 1' > /dev/null
+  echo "$JSON" | jq -e '.subjects[] | select(.number == 348) | .revokeReason | test("superseded")' > /dev/null \
+    || { echo "회수 사유가 superseded로 보고되지 않았다"; echo "$JSON"; false; }
+  echo "$JSON" | jq -e '.subjects[] | select(.number == 348) | .revokeReason | test("#350")' > /dev/null \
+    || { echo "무엇에 의해 superseded됐는지(더 새로운 PR 번호)를 보고하지 않았다"; echo "$JSON"; false; }
+  # 그리고 **레인은 여전히 bump다** — 회수가 레인 오독으로 일어난 게 아님을 못박는다(다른 이유의 GREEN 금지).
+  echo "$JSON" | jq -e '.subjects[] | select(.number == 348) | .lane == "bump"' > /dev/null
+  # 이 모드의 변이는 해제 하나뿐이다(push·create·무장·close 0).
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ]
+  total="$(close_calls_total)"
+  [ "$total" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W68: when the createdAt order cannot be established, EVERY arming of that bump app is revoked (at least one of them is certainly superseded)" {
+  # ★ 애매함의 방향을 정한다. 이 앱엔 열린 신뢰 PR이 **2건**인데 그중 하나의 createdAt을 관측할 수 없다
+  #   → 누가 최신인지 증명할 수 없다. 그런데 **이번 후보는 하나뿐이므로 최소 하나는 확실히 superseded다**.
+  #   "모르니까 놔둔다"는 그 확실한 낡은 인가를 **확실히 살려 두는** 선택이다.
+  # ⚠️ close(파괴)의 관용구("관측할 수 없으면 아무것도 하지 않는다")와 **일부러 반대 방향**이다 —
+  #   두 연산의 안전 방향이 반대이기 때문이다: close는 되돌릴 수 없고, 회수는 다음 주기가 되돌린다(R-10).
+  write_bindings '{"autoDeploy": true}'
+  local t2="sha-8888888$(printf '%033d' 0)"
+  add_sibling "$(SIB_BRANCH_OF)" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
+  sibling_commit "$SIB_OID" "$(sib_commit_msg "$SIB_TAG")"
+  # 최신이어야 할 PR의 나이를 **관측할 수 없다**(스키마 드리프트·권한) → 전순서가 무너진다.
+  add_sibling "$(SIB_BRANCH_OF "$t2")" "$ORPHAN_OID" "$(sib_node 350 "$ORPHAN_OID" "2026-07-13T06:44:00Z" "$(amr_armed)" 'del(.createdAt)')"
+  sibling_commit "$ORPHAN_OID" "$(sib_commit_msg "$t2")"
+  run_reconcile
+  [ "$status" -eq 0 ] || { echo "$JSON"; echo "$stderr"; dump_calls; false; }
+
+  run disarm_calls 348
+  [ "$output" -eq 1 ] || {
+    echo "stale authorization survives: 전순서를 세울 수 없다는 이유로 옛 PR #348의 무장을 남겼다 —"
+    echo "  이 앱에 열린 신뢰 PR이 2건이면 **최소 하나는 확실히 superseded**다. 모른다는 것이 인가의 근거가 될 수 없다."
+    echo "$JSON"; dump_calls; false
+  }
+  run disarm_calls 350
+  [ "$output" -eq 1 ] || {
+    echo "stale authorization survives: 나이를 관측할 수 없는 PR #350의 무장을 '최신일 것'이라며 남겼다"
+    echo "$JSON"; dump_calls; false
+  }
+  echo "$JSON" | jq -e '.subjects[] | select(.number == 348) | .revokeReason | test("createdAt")' > /dev/null \
+    || { echo "회수 사유(전순서 불능)를 보고하지 않았다"; echo "$JSON"; false; }
+}
+
+# bats test_tags=regression
+@test "W69: --reconcile-only revokes an armed PR whose head is not provably ours, in the bump lane too (R-23 parity — ownership is the precondition of authorization)" {
+  # ★ R-23은 "증명되지 않은 head엔 무장하지 않고, 이미 무장돼 있으면 회수한다"였는데 그 계약이
+  #   **주 경로에만** 있었다 → autoDeploy:true 앱에서 누가 그 head를 갈아치우면, 후보가 없는 주기엔
+  #   아무도 그 사실을 확인하지 않고 **남의 커밋에 머지 인가가 걸린 채** 남는다.
+  #   무장은 push만큼이나 강력한 변이다: gate가 green이 되는 순간 그 head가 main으로 들어간다.
+  write_bindings '{"autoDeploy": true}'   # ← bump 레인이다(그런데도 회수한다 — 소유권은 레인과 직교한다)
+  local sb; sb="$(SIB_BRANCH_OF)"
+  add_sibling "$sb" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
+  # 이 head는 **우리 bump 커밋이 아니다**(누군가 이 ref에 자기 커밋을 올렸다).
+  sibling_commit "$SIB_OID" "fix: 내가 이 브랜치 head에 올린 커밋" "ukkiee" "ukkiee@users.noreply.github.com"
+  run_reconcile
+  [ "$status" -eq 0 ] || { echo "$JSON"; echo "$stderr"; dump_calls; false; }
+
+  run disarm_calls 348
+  [ "$output" -eq 1 ] || {
+    echo "merge authorization on a stranger's commit: head가 우리 것임이 증명되지 않은 PR #348의 무장을 남겼다 —"
+    echo "  bump 레인이라는 이유로. 소유권은 **인가의 전제조건**이지 레인의 함수가 아니다(R-23)."
+    echo "$JSON"; dump_calls; false
+  }
+  echo "$JSON" | jq -e '.subjects[0].headProven == false' > /dev/null \
+    || { echo "head 소유권 판정을 사실로 보고하지 않았다"; echo "$JSON"; false; }
+  echo "$JSON" | jq -e '.subjects[0].revokeReason | test("R-23")' > /dev/null \
+    || { echo "회수 사유가 소유권 미증명으로 보고되지 않았다"; echo "$JSON"; false; }
+  # 이 모드는 여전히 **회수만** 한다 — 낯선 head를 만났다고 push하거나 닫지 않는다.
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  total="$(close_calls_total)"
+  [ "$total" -eq 0 ]
+}
+
+@test "a lone armed PR of a bump app keeps its arming even when its createdAt is unobservable (no sibling, no supersession, no churn)" {
+  # ⚠️⚠️ **characterization(태그 없음)** — 이유를 정확히 적어 둔다: 이 증인의 유일한 단언은 "회수하지
+  #    **않는다**"이고, baseline은 `--reconcile-only`를 모르는 채 exit 2로 죽어 **아무것도 하지 않는다** →
+  #    **공짜로 통과**한다. 공짜 통과는 회귀 증인이 아니다(실측으로 확인했다).
+  #    (baseline이 exit 2라는 사실에 기대는 `status`/JSON 단언을 붙이면 **엉뚱한 이유의 RED**가 되므로
+  #     붙이지 않는다 — 그런 단언은 픽스가 아니라 CLI 표면을 시험한다. 이 모드의 성공·보고는
+  #     W48/W67이 같은 픽스처 모양으로 이미 고정한다.)
+  # 이 증인이 지키는 것: V-1의 회수 규칙이 **과잉 회수 쪽으로 새지 않는가**(뮤턴트 증명 전용 앵커).
+  #   형제가 **없으면** superseded될 수 없다 → 나이를 몰라도 그 무장은 인가된 것이다. `group.length > 1`
+  #   가드를 지우면 uniqueNewest(단일 그룹)가 createdAt 부재로 null을 내고 → 이 PR이 회수돼 RED가 된다
+  #   (매 10분 무장을 지웠다 다시 거는 churn · noop 주기엔 다시 걸어 줄 bump 루프조차 돌지 않는다).
+  write_bindings '{"autoDeploy": true}'
+  local sb; sb="$(SIB_BRANCH_OF)"
+  add_sibling "$sb" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)" 'del(.createdAt)')"
+  sibling_commit "$SIB_OID" "$(sib_commit_msg "$SIB_TAG")"
+  run_reconcile
+  merges="$(merge_calls)"
+  [ "$merges" -eq 0 ] || {
+    echo "arming churn: 형제가 없는(= superseded될 수 없는) PR #348의 무장을 나이를 모른다는 이유로 회수했다"
+    echo "$JSON"; dump_calls; false
+  }
 }
 
 # bats test_tags=regression
@@ -2276,6 +2489,11 @@ setup_closable_sibling() {
   write_bindings_for other '{"autoDeploy": true}'        # other      → 자동 레인 → 그대로 둔다
   add_sibling "$(SIB_BRANCH_OF)" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
   add_sibling "bump-poll/other-${SIB_TAG}" "$ORPHAN_OID" "$(sib_node 501 "$ORPHAN_OID" "2026-07-13T06:00:00Z" "$(amr_armed)")"
+  # ⚠️ **자동 레인 앱의 head 커밋 픽스처가 필요하다**(V-1의 R-23 패리티): 무장을 **남겨 두려면** 그 head가
+  #    우리 bump 커밋임이 증명돼야 한다. 증명하지 못하면 이 패스는 레인과 무관하게 회수한다(W69) —
+  #    즉 이 픽스처가 없으면 이 증인은 **엉뚱한 이유로** GREEN/RED가 된다(레인이 아니라 소유권 때문에).
+  #    메시지는 **그 브랜치 자신의 (app, tag)** 로 재계산한다(app=other).
+  sibling_commit "$ORPHAN_OID" "chore: other 이미지를 ${SIB_TAG}(digest 핀)로 갱신 (GHCR 폴링)"
   run_reconcile
   [ "$status" -eq 0 ] || { echo "$output"; echo "$stderr"; dump_calls; false; }
 
@@ -2638,9 +2856,127 @@ setup_closable_sibling() {
   }
 }
 
+# ══ 회수 실패의 **계약**(structure r9 R-32) — 두 경로가 같은 계약을 쓴다 ═══════════════════════
+# 계속하는 것(비-기아)과 성공으로 끝나는 것(비-보고)은 다른 이야기다. 예전엔 형제 해제 실패가 warn 뒤
+# **exit 0**으로 끝났다 — 그런데 `autoDeploy:true` 앱에선 `--reconcile-only`가 무장을 **일부러** 건드리지
+# 않으므로(인가된 무장이다 — W48), 그 PR이 superseded되는 순간 **이 스윕이 유일한 회수자**다.
+# 해제가 실패하고 close마저 막히면(사람 흔적·불완전 열거·CLOSE_MAX 캡·킬 스위치 — 넷 다 **정상 동작**이다)
+# → 무장된 좀비 PR이 남는데 **run은 초록이고 telegram도 울리지 않는다**.
+# 계약: ① 모든 대상과 **메인 변이는 계속 처리** ② 실패한 회수를 **집계해 끝에서 비-0 종료** ③ **보고에 남긴다**.
+
+# bats test_tags=regression
+@test "W65: a failed sibling disarm lets the main mutation through but still turns the run RED (revocation failure is a security fact)" {
+  # 형제는 **사람이 만진** superseded PR이다 → close는 humanTouch로 막힌다(정상 동작) → 이 주기에
+  # 그 낡은 인가를 거둘 수단은 **해제 하나뿐**이고, 그 해제가 실패한다. 즉 "무장된 채 남는" 그 상태다.
+  write_prs '[]'   # 우리 PR은 없다 → 판정은 create(= 메인 변이가 있어야 "굶기지 않았다"를 볼 수 있다)
+  local sb; sb="$(SIB_BRANCH_OF)"
+  add_sibling "$sb" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)" '.reviews.totalCount=1')"
+  sibling_commit "$SIB_OID" "$(sib_commit_msg "$SIB_TAG")"
+  export STUB_DISARM_FAIL_PR=348
+  run_ensure_lane bump
+  unset STUB_DISARM_FAIL_PR
+  RC="$status"   # ⚠️ 아래 원장 질의(`run …`)가 $status를 덮어쓴다 → 지금 보존한다(하네스 함정)
+
+  # ① ★ 증상: **회수를 못 했는데 run이 초록이다.** 이게 R-32가 지적한 바로 그 침묵이다.
+  [ "$RC" -ne 0 ] || {
+    echo "silent revocation failure: 형제 PR #348의 auto-merge 해제가 실패했는데 실행기가 성공(exit 0)으로 끝났다 —"
+    echo "  close는 사람의 흔적으로 막혔다(정상) → 그 PR은 **열린 채 무장된 채** 남는다. 그런데 run은 초록이고"
+    echo "  telegram도 울리지 않는다. 회수 실패는 **보안 사실**이다 — 조용히 지나갈 수 없다."
+    echo "$JSON"; echo "$stderr"; dump_calls; false
+  }
+
+  # ② 그래도 **해제를 시도는 했다**(실패했을 뿐) — 시도조차 안 한 것과 구분한다.
+  run disarm_calls 348
+  [ "$output" -eq 1 ] || {
+    echo "형제 PR #348의 해제를 시도조차 하지 않았다(호출 ${output}회, 기대 1회)"
+    dump_calls; false
+  }
+
+  # ③ ★ 그리고 **메인 변이는 굶지 않았다** — 한 PR의 회수 실패가 배포를 멈추면 억제가 곧 공격 표면이다.
+  run has_call_exact "${PUSH_CREATE[@]}"
+  [ "$status" -eq 0 ] || {
+    echo "starved deployment: 형제 해제 실패가 이번 주기의 push(create)를 막았다 —"
+    echo "  회수 실패는 **보고**되어야지 다른 변이를 **굶겨선** 안 된다(억제 = 공격 표면)."
+    dump_calls; false
+  }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 1 ] || {
+    echo "starved deployment: 형제 해제 실패가 우리 PR 생성을 막았다(create ${creates}회, 기대 1회)"
+    dump_calls; false
+  }
+  run arm_calls_num 999
+  [ "$output" -eq 1 ] || {
+    echo "starved deployment: 형제 해제 실패가 우리 PR의 무장까지 막았다(무장 ${output}회, 기대 1회)"
+    dump_calls; false
+  }
+
+  # ④ close는 **여전히 막혀 있다**(사람 흔적) — 즉 그 형제는 진짜로 무장된 채 남았다.
+  total="$(close_calls_total)"
+  [ "$total" -eq 0 ] || { echo "사람이 만진 형제를 닫았다"; dump_calls; false; }
+
+  # ⑤ ★ **무엇을 회수하지 못했는지 보고에 남는다**(exit 코드만으론 어느 PR인지 알 수 없다).
+  echo "$JSON" | jq -e '.revocationFailures | length == 1' > /dev/null || {
+    echo "silent target: 회수 실패를 보고하지 않았다 — 어떤 PR의 무장이 남았는지 알 수 없다"
+    echo "$JSON"; false
+  }
+  echo "$JSON" | jq -e '.revocationFailures[0] | test("#348")' > /dev/null || {
+    echo "wrong target: 보고된 회수 실패가 PR #348을 가리키지 않는다"
+    echo "$JSON"; false
+  }
+  echo "$JSON" | jq -e '[.superseded[] | select(.disarmed)] | length == 0' > /dev/null
+}
+
+# bats test_tags=regression
+@test "W66: --reconcile-only carries the SAME failure contract (one failed disarm never starves the next subject, and the pass still exits non-zero)" {
+  # ★ 두 회수 경로의 계약이 **갈라지면** 안 된다(R-32): 한쪽은 모아서 비-0, 다른 쪽은 warn 후 초록 —
+  #   그 비대칭이 "어느 경로가 회수자였느냐"에 따라 침묵을 만든다. 같은 공유 연산, 같은 계약이어야 한다.
+  write_bindings '{"autoDeploy": false}'   # 승인 레인 → 무장은 인가되지 않았다 → 전부 회수 대상이다
+  local t2="sha-8888888$(printf '%033d' 0)"
+  add_sibling "$(SIB_BRANCH_OF)" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
+  add_sibling "$(SIB_BRANCH_OF "$t2")" "$ORPHAN_OID" "$(sib_node 350 "$ORPHAN_OID" "2026-07-13T06:35:00Z" "$(amr_armed)")"
+  export STUB_DISARM_FAIL_PR=348   # **첫** 주체의 해제가 실패한다 → 뒤따르는 주체가 굶는가?
+  run_reconcile
+  unset STUB_DISARM_FAIL_PR
+
+  # ① 뒤따르는 주체는 **여전히 회수된다** — 한 실패가 나머지를 굶기면 그게 곧 회수의 실패다.
+  run disarm_calls 350
+  [ "$output" -eq 1 ] || {
+    echo "starved revocation: PR #348의 해제 실패가 다음 주체(PR #350)의 회수를 굶겼다(해제 ${output}회, 기대 1회) —"
+    echo "  회수는 항목별로 격리돼야 한다(한 PR의 API 장애가 다른 앱의 낡은 인가를 살려 두면 안 된다)."
+    echo "$JSON"; dump_calls; false
+  }
+  # ② 그런데 run은 **빨갛다**(같은 계약의 나머지 절반).
+  [ "$RCODE" -ne 0 ] || {
+    echo "silent revocation failure: 해제 실패가 있었는데 reconcile 패스가 성공(exit 0)으로 끝났다"
+    echo "$JSON"; false
+  }
+  # ③ 보고: **어떤 대상**을 회수하지 못했는가(주 경로와 **같은 키**로 보고한다).
+  echo "$JSON" | jq -e '.revocationFailures | length == 1' > /dev/null || {
+    echo "두 회수 경로의 보고 형태가 다르다 — 같은 공유 연산이 아니다"; echo "$JSON"; false
+  }
+  echo "$JSON" | jq -e '.revocationFailures[0] | test("#348")' > /dev/null || { echo "$JSON"; false; }
+  echo "$JSON" | jq -e '.failures | length > 0' > /dev/null
+  # ④ 실패한 주체는 disarmed=false, 성공한 주체는 true(보고가 사실과 일치한다).
+  echo "$JSON" | jq -e '[.subjects[] | select(.disarmed)] | length == 1' > /dev/null || { echo "$JSON"; false; }
+  echo "$JSON" | jq -e '[.subjects[] | select(.number == 350 and .disarmed)] | length == 1' > /dev/null || { echo "$JSON"; false; }
+}
+
 # ---------------------------------------------------------------------------
 # 하네스 자체의 증명 — 이게 GREEN이 아니면 위 증인들은 아무것도 증명하지 못한다
 # ---------------------------------------------------------------------------
+
+@test "the harness kills the disarm of exactly one PR (the injection must not spill into arming or the other subjects)" {
+  # W65·W66의 주입점 증명. 이게 없으면 stub이 **모든** merge를 죽이거나(→ 다른 이유의 RED) 아무것도
+  # 죽이지 않아도(→ 거짓 GREEN) 위 두 증인이 조용히 무의미해진다.
+  STUB_DISARM_FAIL_PR=348 run "$STUB/gh" pr merge --disable-auto 348
+  [ "$status" -eq 1 ]
+  STUB_DISARM_FAIL_PR=348 run "$STUB/gh" pr merge --disable-auto 350
+  [ "$status" -eq 0 ]
+  STUB_DISARM_FAIL_PR=348 run "$STUB/gh" pr merge --auto --squash 348
+  [ "$status" -eq 0 ]
+  run "$STUB/gh" pr merge --disable-auto 348
+  [ "$status" -eq 0 ]
+}
 
 @test "the harness kills every branch-deleting argv (a close can never take the ref with it)" {
   # ★ close를 계약에 넣는다는 건 **파괴 표면을 새로 여는 일**이다. close는 reopen으로 되돌아가지만

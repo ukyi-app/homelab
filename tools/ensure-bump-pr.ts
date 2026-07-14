@@ -174,8 +174,38 @@
 //   createdAt < 우리 PR · **사람의 흔적 0**(리뷰·사람 코멘트·리뷰어 요청·assignee·draft·hold 라벨) ·
 //   **우리 PR이 이미 열려 있음**(후계자 없는 제거 금지) · 후보 수 ≤ CLOSE_MAX · 레인 = bump.
 // ⚠️ 승인 레인(propose-pr)의 형제는 **해제만 하고 닫지 않는다** — 그 레인의 존재 이유가 사람의 판단이다.
-// ⚠️ 스윕의 조회·close 실패는 **경고 후 계속**이다(주 판정을 abort시키지 않는다). 안 그러면 아무나
+// ⚠️ 스윕의 조회·close 실패는 **abort시키지 않는다**(주 판정은 끝까지 간다). 안 그러면 아무나
 //    `bump-poll/<app>-*` 브랜치 하나를 만들어 **배포를 영구 정지**시킬 수 있다(억제 = 공격 표면).
+//    다만 **조용하지도 않다** — 아래 두 별표 블록(R-32 · V-2)이 그 결과 계약을 정한다.
+//
+// ★★★★★ 그런데 **회수 실패는 조용히 지나갈 수 없다**(structure r9 R-32) ─────────────────────────
+// 계속하는 것(비-기아)과 성공으로 끝나는 것(비-보고)은 **다른 이야기**인데 예전 코드는 그 둘을 한 덩어리로
+// 묶었다: 형제 해제가 실패하면 warn만 하고 exit 0으로 끝났다 → 옛 PR이 **열린 채 무장된 채** 남는데
+// (close는 사람 흔적·불완전 열거·CLOSE_MAX 캡·킬 스위치로 **정상적으로** 막힐 수 있다) 프로세스는 **성공**으로
+// 끝나고 telegram도 울리지 않는다. "회수 실패는 보안 사실이다"라는 불변식과 정면으로 모순된다.
+// → 회수는 **결과를 나르는 하나의 공유 연산**이다(revokeArming): 두 경로(--reconcile-only · 형제 스윕)가
+//   같은 실패 계약을 쓴다 —
+//     ① **모든 대상과 메인 변이는 끝까지 처리한다**(억제 = 공격 표면 — 한 실패가 다른 앱·다른 변이를 굶기면 안 된다),
+//     ② 실패한 회수를 **전부 집계**해 처리가 끝난 뒤 **비-0으로 종료**한다(run이 빨개지고 telegram이 발화한다),
+//     ③ **무엇을 회수하지 못했는지 보고에 남긴다**(stdout JSON의 `revocationFailures`).
+// ⚠️ 이 계약은 close의 성공 여부에 **의존하지 않는다** — 위생(close)의 성공에 보안 사실(회수)의 보고를
+//    매다는 것이 바로 이 결함이었다.
+//
+// ★★★★★★ 그리고 **회수 대상을 보는 일(관측)에도 같은 계약이 걸린다**(V-2) ────────────────────────
+// R-32는 회수 **호출**에만 실패 계약을 줬다. 그 바로 앞 단계 — 형제 ref 열거 · 형제 PR 조회 · 파싱 ·
+// 신뢰 PR 모호성 — 은 여전히 warn + `closeAbandoned`로 끝났는데, `closeAbandoned`는 **close만** 막고
+// 종료 코드엔 아무 영향이 없다(종료 코드는 오직 revocationFailures가 정한다). 즉 형제 하나의 조회가 깨지면
+// **그 브랜치의 무장된 좀비를 보지도 못한 채 run이 초록**이었다. 반대편(`--reconcile-only`)은 같은 넷을
+// 실패로 집계해 exit 1이었다 → "두 경로가 같은 실패 계약을 쓴다"는 이 헤더의 주장이 **거짓**이었다.
+// → **회수 대상을 가릴 수 있는 관측 실패는 그 자체로 회수 실패다**(revocationBlind). 모르는 것을 근거로
+//   "회수할 게 없었다"고 말할 수 없다. 이제 두 경로가 정말로 하나의 결과 계약을 공유한다.
+//
+// ★★★★★★★ 회수의 **완전성**도 마찬가지다 — `--reconcile-only`는 네임스페이스 전체를 판정한다(V-1) ──
+// 회수 트리거는 셋(레인 뒤집힘 · superseded 형제 · 증명되지 않은 head)인데, 예전엔 `--reconcile-only`가
+// **첫째만** 다루고(`if (lane === "bump") continue`) 나머지 둘을 주 경로에만 뒀다. 그런데 주 경로는
+// **플래너가 그 앱의 후보를 낸 주기에만** 돈다 → `autoDeploy:true` 앱의 superseded 무장은 `noop`
+// (bump 머지 직후의 **정상 상태**)나 `refuse` 주기에 **아무도 회수하지 않는다**. 자세한 근거와 그 패스의
+// 새 규칙은 아래 `--reconcile-only` 블록의 주석 참고.
 //
 // 사실은 파싱·검증해 stdout의 `observed`에(무장 여부 포함), 실제 실행한 명령은 `executed`에 실어
 // 호출부/테스트가 "무엇을 관측하고 무엇을 변이했는가"를 검증할 수 있게 한다
@@ -207,7 +237,8 @@ const USAGE = `ensure-bump-pr — bump PR 멱등 실행기(조회 → 결정 →
   --help, -h        이 도움말
 ⚠️ auto-merge를 켜는 **별도 플래그는 없다** — 레인이 유일한 입력이다(승인 게이트 우회 방지, plan r5 R-11).
 전제: 호출부가 <branch>를 **최신 main에서 재구축**해 로컬 커밋을 얹어 둔 상태(원격 변이만 이 도구 몫).
-출력(stdout): {"action":"create"|"adopt"|"skip"|"rebuild","lane":"bump"|"propose-pr","reason":"…","branch":"…","observed":{…},"executed":[…]}`;
+출력(stdout): {"action":"create"|"adopt"|"skip"|"rebuild","lane":"bump"|"propose-pr","reason":"…","branch":"…","observed":{…},"superseded":[…],"revocationFailures":[…],"executed":[…]}
+종료코드: 0=정상 / 1=fail-closed 또는 **회수 실패**(무장을 거두지 못했다 — 변이는 다 했다) / 2=사용법`;
 
 // 기본 writer App slug. gh는 App 작성자를 `app/<slug>`로, REST/GraphQL은 `<slug>[bot]`로 준다 →
 // 아래 normalizeLogin이 두 표기를 모두 같은 slug로 정규화한다.
@@ -355,6 +386,168 @@ function runSoft(cmd: string, a: string[]): { failure: string | null; stdout: st
 function mutate(cmd: string, a: string[], what: string): void {
   const out = run(cmd, a, what);
   if (out) process.stderr.write(out);
+}
+
+// ══ 회수(auto-merge 무장 해제) = **결과를 나르는 하나의 공유 연산**(R-32) ═══════════════════════
+// 두 스윕(`--reconcile-only` · 주 경로의 superseded 형제)이 **같은 함수, 같은 실패 계약**을 쓴다:
+//   · 실패해도 **던지지 않는다** → 호출부는 나머지 대상과 **메인 변이를 계속 처리**한다(억제 = 공격 표면:
+//     한 PR의 회수 실패가 다른 앱의 배포나 다른 회수를 굶기면 안 된다).
+//   · 실패는 **여기 한 곳에** 모인다 → 처리가 끝난 뒤 호출부가 이 배열로 **비-0 종료**를 결정하고,
+//     **무엇을 회수하지 못했는지**를 stdout JSON(`revocationFailures`)에 남긴다.
+// ⚠️ 이 배열이 비지 않았는데 exit 0으로 끝나는 경로는 **하나도 없어야 한다** — 그게 R-32의 결함이었다
+//    (해제 실패 + close 차단 = 무장된 좀비 PR이 남는데 run은 초록, telegram 무발화).
+// ⚠️ 대상은 언제나 **인증된 PR 번호**다(브랜치 셀렉터는 동명 포크 PR로 오조준될 수 있다).
+const revocationFailures: string[] = [];
+function revokeArming(number: number, where: string): boolean {
+  const r = runSoft("gh", ["pr", "merge", "--disable-auto", String(number)]);
+  if (r.failure === null) return true;
+  const why = `PR #${number}(${where}) auto-merge 해제 실패 ${r.failure}`;
+  revocationFailures.push(why);
+  warn(
+    `${why} — **다음 주기가 재시도한다**(그 재시도는 이제 후보 유무와 무관하다: `
+    + "`--reconcile-only`가 네임스페이스 전체를 방문해 superseded 무장을 레인과 무관하게 회수한다 — V-1). "
+    + "처리는 계속하지만(다른 대상·다른 변이를 굶기지 않는다) "
+    + "이 run은 **비-0으로 끝난다**: 회수하지 못한 무장은 보안 사실이다(낡은 인가가 살아 있다)",
+  );
+  return false;
+}
+
+// ══ 회수 대상을 **가릴 수 있는 관측 실패**는 그 자체로 회수 실패다(V-2) ═══════════════════════════
+// R-32는 회수 **호출**(gh pr merge --disable-auto)에 실패 계약을 줬지만, **무엇을 회수해야 하는지 보는 일**
+// (형제 ref 열거 · 형제 PR 조회 · 파싱 · 신뢰 PR 모호성)엔 주지 않았다. 그 넷은 warn + `closeAbandoned`만
+// 세우고 **exit 0으로 끝났다** — 그런데 `closeAbandoned`는 **close(위생)만** 막고 종료 코드엔 아무 영향이 없다.
+// 결과: 형제 하나의 PR 조회가 깨지면 **그 브랜치의 무장된 좀비 PR을 보지도 못한 채** run이 초록으로 끝난다.
+// 반대편(`--reconcile-only`)은 같은 넷을 실패로 집계해 exit 1이었다 → **두 경로의 계약이 갈라져 있었다**.
+// → 관측 실패도 `revocationFailures`에 모은다. 두 경로가 이제 **하나의 결과 계약**을 공유한다:
+//   ① 나머지 대상과 **메인 변이는 끝까지** 처리한다(억제 = 공격 표면 — 아무나 형제 브랜치 하나로 배포를
+//      정지시킬 수 있으면 안 된다), ② 끝나고 **비-0 종료**, ③ **무엇을 보지 못했는지 보고에 남긴다**.
+// ⚠️ "가려졌을 수 있다"와 "가려졌다"를 구분하지 않는다 — 회수는 보안 속성이라 **모른다 = 실패**다.
+function revocationBlind(why: string): void {
+  revocationFailures.push(why);
+  warn(
+    `${why} — 회수 **대상을 관측하지 못했다**(가려진 무장이 있을 수 있다). 처리는 계속하지만 `
+    + "이 run은 **비-0으로 끝난다**: 보지 못한 것을 근거로 '회수할 게 없었다'고 말할 수 없다",
+  );
+}
+
+// ══ ref 소유권 검증 — **두 모드가 공유한다**(주 경로 ③-b · `--reconcile-only`의 R-23 패리티) ═══════
+// ★ PR 작성자 인증(isTrusted)은 **누가 PR을 열었는지**만 증명한다 — **그 ref를 누가 마지막으로 썼는지**는
+//   증명하지 않는다. 두 구멍이 남아 있었다:
+//     · adopt : PR이 안 보이는 원격 ref를 **무조건** force-push로 덮어썼다(그 브랜치가 우리 잔해라는 근거 0).
+//     · rebuild: writer가 연 PR이라도, **다른 동일-레포 행위자가 그 head에 push**하면 PR 작성자는 그대로
+//                writer다 → 신뢰된 채로 남고, 우리는 그 사람의 커밋을 force-push로 지운다.
+//
+// ★★ 소유권은 **force-push 허가**만이 아니라 **인가 조정(auto-merge)의 입력**이다(structure r6 R-23) ──
+// 예전엔 이 검증을 force-push 경로(adopt/rebuild)에만 걸었다. 그래서 두 구멍이 남았다:
+//   ① skip 경로: writer가 연 PR인데 **head 커밋이 다른 행위자로 교체**됐다. 상태가 CLEAN/BLOCKED/UNKNOWN이면
+//      판정은 skip이고, 소유권은 아예 검사되지 않는다 → bump 레인이 그 **증명되지 않은 head에 auto-merge를
+//      무장**하거나(무장 갭이면) **이미 걸린 무장을 그대로 둔다**. 그건 남의 커밋에 **머지 인가를 부여**한
+//      것이다(auto-merge는 PR에 붙고, gate가 green이 되는 순간 그 head가 main으로 들어간다).
+//   ② propose-pr 해제 경로: ARMED + DIRTY + 낯선 head인 PR은 소유권 검증에서 **먼저 죽어** `--disable-auto`에
+//      닿지 못했다 → **낡은 인가가 가장 필요할 때 살아남았다**.
+// → 계약: **증명되지 않은 head는 무장하지 않고, 이미 무장돼 있으면 해제한다**(인가 회수 = 안전 방향).
+//   그 뒤에 변이 쪽을 fail-closed한다(force-push 0 · create 0).
+// ⚠️ **순서 규칙**: 회수(해제)는 **abort할 수 있는 소유권 검사보다 먼저** 실행한다. 안전 방향 행동이 앞,
+//   중단 가능한 검사가 뒤다. 그래서 조회(probe)는 값을 돌려줄 뿐 **죽지 않고**(runSoft), 죽는 건 ③-b다.
+// ⚠️⚠️ 같은 계약이 `--reconcile-only`에도 걸린다(V-1의 4번): 그 패스가 **무장을 남겨 두기로 한** PR
+//    (= bump 레인의 최신 PR)은 **head가 우리 것임이 증명된 경우에만** 그 인가를 유지한다. 증명하지
+//    못하면 회수한다 — 레인과 무관하게. 안 그러면 R-23의 구멍이 후보 없는 주기에 그대로 열려 있다.
+//
+// 우리 커밋의 조건(전부 만족해야 한다 — 하나라도 아니면 "증명되지 않음"):
+//   · author·committer의 name = `<writer>[bot]`, email = `<id>+<writer>[bot]@users.noreply.github.com`
+//     (호출부가 `git config user.name/user.email`로 심는 바로 그 정체성 — bump-poll.yaml과 계약이 묶여 있고,
+//      그 드리프트는 tests/gates/test_bump-poll-callsite.bats가 잡는다)
+//   · 메시지 = 그 bump의 커밋 메시지와 **정확히** 일치(app·tag까지) — 브랜치가 (app, tag)로 결정적이므로
+//     그 브랜치의 우리 커밋 메시지도 결정적이다.
+// ⚠️ **이건 인증이 아니라 안전 인터록이다**(라이브 확인: 이 커밋들은 `signature: null` — 워크플로의
+//    `git commit` + 토큰 push는 서명되지 않는다). git의 author/committer는 자유 텍스트라 contents:write를
+//    가진 **악의적** 행위자는 이 정체성과 메시지를 위조할 수 있다. 즉 이 가드가 확실히 막는 것은
+//    **사고성 파괴**(다른 봇/사람이 같은 ref를 쓰는 경우, 남은 남의 브랜치, 낯선 커밋)이고,
+//    악의적 행위자에 대해서는 심층 방어일 뿐이다. **강제 가능한 불변식은 ruleset**(`bump-poll/**`를 writer App
+//    전용으로 예약)이며 그건 이 도구 밖(레포 설정/IaC)이다 — 그 전까지 이 인터록이 최선의 방어다.
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+// GraphQL 커밋 조회 — 라이브 실측 스키마(이 레포의 실제 bump 커밋):
+//   {"oid":"5bb77fc…","message":"chore: page 이미지를 sha-815abb1…(digest 핀)로 갱신 (GHCR 폴링)",
+//    "author":{"name":"ukyi-homelab-writer[bot]",
+//              "email":"293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"},
+//    "committer":{…같음…}}
+const COMMIT_QUERY = `query($owner:String!,$repo:String!,$oid:GitObjectID!){
+  repository(owner:$owner,name:$repo){
+    object(oid:$oid){
+      ... on Commit { oid message author{ name email } committer{ name email } }
+    }
+  }
+}`;
+// 호출부(bump-poll.yaml)가 만드는 커밋 메시지 — **(app, tag)로 결정적**이다.
+// ★ reconcile 패스는 자기 app/tag가 없다(주체는 네임스페이스가 준다) → **브랜치에서 유도한 (app, tag)**로
+//   기대 메시지를 재계산한다. 그래서 이 함수는 app까지 인자로 받는다(전역 APP에 매달지 않는다).
+function bumpCommitMessageOf(app: string, tag: string): string {
+  return `chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)`;
+}
+const BUMP_COMMIT_MESSAGE = bumpCommitMessageOf(APP, TAG);
+// 형제 브랜치의 기대 메시지는 **그 PR 자신의 tag**로 재계산한다(우리 tag가 아니다) — 그래야 그 head가
+// "그 bump의 우리 커밋"임을 증명할 수 있다. 브랜치명 파싱만으로는 소유권의 증거가 되지 못한다.
+function bumpCommitMessageFor(tag: string): string {
+  return bumpCommitMessageOf(APP, tag);
+}
+const WRITER_BOT_NAME = `${normalizeLogin(args.writer)}[bot]`;
+const WRITER_BOT_EMAIL_RE = new RegExp(`^\\d+\\+${escapeRe(WRITER_BOT_NAME)}@users\\.noreply\\.github\\.com$`);
+
+function isWriterIdent(id: { name: string; email: string }): boolean {
+  return id.name === WRITER_BOT_NAME && WRITER_BOT_EMAIL_RE.test(id.email);
+}
+
+// 이 OID의 커밋이 **우리가 만든 bump 커밋**인지 조회한다. **죽지 않는다** — 판정을 값으로 돌려준다
+// (순서 규칙: 회수(해제)가 abort보다 먼저다. 여기서 죽으면 낡은 인가를 회수할 기회가 사라진다).
+// 증명 실패의 종류(조회 장애·스키마 드리프트·OID 미발견·낯선 커밋)를 구분하지 않는다:
+// **"우리 것임을 증명하지 못했다"는 하나의 사실**이고, 그 사실의 안전한 귀결은 언제나 같다
+// (무장하지 않는다 / 무장돼 있으면 회수한다 / 변이하지 않는다).
+// `expectMessage`는 기본이 이번 bump의 메시지지만, superseded 형제나 reconcile 주체를 검증할 땐
+// **그 브랜치 자신의 (app, tag)로 재계산한 메시지**를 넘긴다(같은 함수, 다른 기대값).
+type Proof = { ok: true } | { ok: false; why: string };
+function proveOurCommit(oid: string, what: string, expectMessage: string = BUMP_COMMIT_MESSAGE): Proof {
+  const no = (why: string): Proof => ({ ok: false, why: `${what}(${oid}) — ${why}` });
+
+  const r = runSoft("gh", [
+    "api", "graphql",
+    "-f", `query=${COMMIT_QUERY}`,
+    "-F", "owner={owner}", "-F", "repo={repo}", "-F", `oid=${oid}`,
+  ]);
+  if (r.failure !== null) return no(`gh api graphql (commit) ${r.failure} — 무엇인지 모르는 커밋은 우리 것이 아니다`);
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(r.stdout);
+  } catch (e) {
+    return no(`커밋 조회 JSON 파싱 실패: ${(e as Error).message}`);
+  }
+  if (parsed?.errors !== undefined) return no(`커밋 조회 GraphQL 오류: ${JSON.stringify(parsed.errors)}`);
+  const c = parsed?.data?.repository?.object;
+  // object가 null이면 그 OID를 못 찾은 것이다(다른 레포의 커밋·GC됨·오타) → 우리 것이라는 증명이 없다.
+  if (c === null || typeof c !== "object") return no("커밋을 찾을 수 없다(GC됨·다른 레포·스키마 드리프트)");
+  // 스키마 드리프트(필드 누락·Commit이 아님)도 "우리 것"의 증명이 아니다.
+  if (typeof c.oid !== "string" || c.oid !== oid) return no(`커밋 조회 결과의 oid 불일치(받음 ${String(c.oid)})`);
+  if (typeof c.message !== "string") return no("커밋 message 문자열 아님(Commit이 아니거나 스키마 드리프트)");
+  for (const k of ["author", "committer"] as const) {
+    const v = c[k];
+    if (v === null || typeof v !== "object" || typeof v.name !== "string" || typeof v.email !== "string") {
+      return no(`커밋 ${k}.name/email 문자열 아님 — 소유권을 증명할 수 없다`);
+    }
+  }
+
+  const ident = isWriterIdent(c.author) && isWriterIdent(c.committer);
+  const msg = c.message.trim() === expectMessage;
+  if (ident && msg) return { ok: true };
+  return no(
+    "**우리 bump 커밋이 아니다**.\n"
+    + `  관측: author=${c.author.name} <${c.author.email}> / committer=${c.committer.name} <${c.committer.email}>\n`
+    + `        message=${JSON.stringify(c.message.trim())}\n`
+    + `  기대: author·committer=${WRITER_BOT_NAME} <<id>+${WRITER_BOT_NAME}@users.noreply.github.com>\n`
+    + `        message=${JSON.stringify(expectMessage)}\n`
+    + "  누군가 이 ref에 자기 커밋을 올렸다(또는 우리 것이 아닌 브랜치다).",
+  );
 }
 
 // ── 조회 = **상한 없는 완전 열거**(GraphQL connection, 끝까지 페이지네이션) ──────────────────────
@@ -849,10 +1042,33 @@ type SiblingState = {
 // ★★ **해제는 가용성이 아니라 보안 속성이다** — 플래너가 후보를 내주느냐에 의존해선 안 된다.
 //    그래서 호출부는 **바인딩된 전 앱**에 대해 **매 주기** 이 모드를 돌린다(후보 유무·plan action 무관).
 //
-// 이 모드의 규칙은 의도적으로 **좁다**(무엇이 "이번 후보"인지 알 필요조차 없다):
-//   · lane=propose-pr → 열린 `bump-poll/<app>-*` 신뢰 PR의 무장을 **전부** 회수한다.
-//   · lane=bump       → **아무것도 하지 않는다**(그 무장은 인가된 것이다).
-// 변이는 **해제 하나뿐**이다: push·PR 생성·무장·close는 이 모드에서 **어떤 경로로도** 일어나지 않는다
+// ★★★ 이 패스는 **네임스페이스에 대해 완전해야 한다**(V-1) — "레인이 뒤집혔나"만 보면 안 된다 ─────
+// 회수의 트리거는 **셋**인데 예전 이 패스는 그중 **하나**(레인이 propose-pr로 뒤집힘)만 다루고
+// `if (lane === "bump") continue;`로 나머지를 통째로 건너뛰었다:
+//     ① 레인 뒤집힘(autoDeploy true→false)        ← 이 패스가 다뤘다
+//     ② **superseded 형제**(더 새 후보가 나왔다)   ← 주 경로의 형제 스윕에만 있었다
+//     ③ **증명되지 않은 head**(R-23)               ← 주 경로에만 있었다
+// 그런데 주 경로는 **플래너가 그 앱의 후보를 낸 주기에만** 호출된다(`select(.action == "bump" or …)`).
+// 즉 `autoDeploy:true` 앱에서 ②·③의 **유일한 회수자가 주 경로**인데, 그 경로는 정확히 다음 순간에 굶는다:
+//   · `noop` — bump가 머지된 **직후의 정상 상태**다(배포 핀 = GHCR 최신 태그) → 후보 없음 → 실행기 미호출.
+//   · `refuse` — 앱 레포 이력 재작성·source-repo 드리프트·GHCR 일시 장애.
+// 그 사이 무장된 옛 PR은 **열린 채 살아남고 run은 매번 초록이다**(telegram 무발화). 누군가(사람의
+// "Update branch", 체크 재실행, main 이동에 따른 체크 재평가) 그 브랜치를 전진시키는 순간 **옛 이미지가
+// 승인 없이 머지된다** = 무승인 롤백(R-25가 막으려던 바로 그 피해).
+// → 그래서 이 패스는 **레인과 무관하게** 네임스페이스 전체를 판정한다. 쓰는 사실은 이 패스가 **이미
+//   관측하는 것뿐**이다(네임스페이스 열거 + PR 조회 + 커밋 조회 — 플래너도, reader 토큰도 필요 없다):
+//   · lane=propose-pr / SSOT 부재·파손 / 앱을 유도할 수 없는 브랜치 → 신뢰 PR의 무장을 **전부** 회수한다.
+//   · lane=bump → 그 앱의 **가장 새로운**(createdAt) 열린 신뢰 PR **하나만** 무장을 유지하고,
+//                 **더 오래된 형제는 전부 회수한다**(superseded PR은 레인과 무관하게 머지될 자격이 없다).
+//   · 레인 무관 — 무장된 PR의 head가 **우리 bump 커밋임이 증명되지 않으면** 회수한다(R-23 패리티).
+// ⚠️ 비대칭이 이 설계를 정당화한다: **과잉 회수는 안전하다**(다음 bump 주기가 정당한 최신 PR을 desired
+//    state로 **재무장**한다 — R-10). **과소 회수는 무승인 머지다**. 애매하면 회수한다.
+// ⚠️ 남는 한계(정직하게): 그 앱의 열린 신뢰 PR이 **하나뿐**이면 이 패스는 그것을 최신으로 보고 무장을
+//    유지한다 — 그게 이미 superseded된 좀비여도(그 사실은 GHCR 최신 태그를 아는 **플래너만** 알 수 있고,
+//    이 패스는 의도적으로 플래너에 의존하지 않는다). 그 경우는 후보가 다시 생기는 주기에 주 경로가 잡는다.
+//    이 패스가 좁히는 것은 "형제가 둘 이상인데 아무도 방문하지 않는" 구간이다(라이브 좀비 #348·#350·#351).
+//
+// 변이는 여전히 **해제 하나뿐**이다: push·PR 생성·무장·close는 이 모드에서 **어떤 경로로도** 일어나지 않는다
 // (그래서 레인을 잘못 읽어도 인가를 **부여**할 길이 없다 — 최악이 "회수 누락"이거나 "과잉 회수"다).
 //
 // 레인의 출처는 플래너가 아니라 **autoDeploy SSOT 파일 그 자체**다(poll-ghcr.ts와 **같은 파일, 같은 헬퍼**):
@@ -920,13 +1136,49 @@ function probeLane(app: string): LaneProbe {
 }
 
 // 이 모드가 관측·회수한 주체(브랜치) 하나의 상태 — 테스트/운영이 stdout으로 검증한다.
+// createdAt: superseded 판정의 **유일한 순서 근거**(주 경로의 close 스윕과 같은 사실을 쓴다).
+// headProven: R-23 패리티의 결과(null = 검사하지 않았다 — 어차피 회수할 대상이었다).
+// revokeReason: 왜 회수했는가(null이면 "인가된 무장이라 손대지 않았다").
 type SubjectState = {
   branch: string; app: string | null; tag: string | null;
   lane: Lane; laneResolution: LaneResolution | "unparsed-branch"; laneSource: string | null;
   number: number | null; trusted: boolean; armed: boolean; headRefOid: string | null;
+  createdAt: string | null;
   humanTouch: string | null;
+  headProven: boolean | null;
+  revokeReason: string | null;
   disarmed: boolean;
 };
+
+// 한 앱의 열린 신뢰 PR들 중 **유일한 최신**(createdAt 전순서)을 고른다. 증명할 수 없으면 null이다.
+// ⚠️ **애매하면 회수한다** — 여기서 null을 돌려준다는 건 "이 앱의 어떤 무장도 인가됐다고 말할 수 없다"는
+//    뜻이고, 호출부는 그 앱의 무장을 **전부 회수한다**. 이 판단은 close 스윕의 관용구("관측할 수 없으면
+//    아무것도 하지 않는다")와 **일부러 반대 방향**이다. 두 연산의 안전 방향이 반대이기 때문이다:
+//      · close = **파괴** → 모르면 하지 않는다(되돌릴 수 없는 것을 추측으로 하지 않는다).
+//      · 회수 = **인가 박탈** → 모르면 **한다**(모듈 전체가 반복해 말한다: 회수는 언제나 안전 방향이다).
+//    결정적 근거: 한 앱에 열린 신뢰 PR이 **2건 이상**이면 그중 **최소 하나는 확실히 superseded**다
+//    (이번 후보는 하나뿐이다). 순서를 모른다고 손을 떼면 **낡은 인가가 확실히 하나 살아남는다**.
+//    반대로 전부 회수하면 최악이 "정당한 최신 PR의 무장이 한 주기 늦게 복구된다"이고, 그건 R-10의
+//    desired-state 재무장이 다음 bump 주기에 자동으로 고쳐 준다. (열린 PR이 하나뿐이면 superseded될
+//    형제 자체가 없으므로 호출부가 이 함수를 부르지도 않는다 — 무의미한 churn 0.)
+function uniqueNewest(group: SubjectState[]): SubjectState | null {
+  let best: SubjectState | null = null;
+  let bestAt = -Infinity;
+  let tied = false;
+  for (const s of group) {
+    if (s.createdAt === null) return null;            // 나이를 모르는 PR이 하나라도 있으면 전순서가 없다
+    const at = Date.parse(s.createdAt);
+    if (Number.isNaN(at)) return null;                // 형식 드리프트도 같다
+    if (at > bestAt) {
+      bestAt = at;
+      best = s;
+      tied = false;
+    } else if (at === bestAt) {
+      tied = true;                                    // 동률 = "그 최신"이 유일하지 않다
+    }
+  }
+  return tied ? null : best;
+}
 
 if (args.reconcileOnly) {
   const subjects: SubjectState[] = [];
@@ -945,12 +1197,16 @@ if (args.reconcileOnly) {
     return p;
   };
 
+  // ══ 패스 A — 관측(변이 0). 네임스페이스 전체를 먼저 **다 본다** ═══════════════════════════════
+  // 왜 두 패스인가: superseded 판정은 **한 앱의 형제들을 서로 비교**해야 나온다(누가 가장 새로운가).
+  // 주체를 보면서 그 자리에서 회수하면 그 비교를 할 수 없다 — 아직 못 본 형제가 더 새로울 수 있다.
+  //
   // ★ 주체는 **네임스페이스가 준다**(R-27) — 플래너의 plan.json도, 호출부의 앱 목록도 입력이 아니다.
   //   그래서 플래너 스텝이 죽든, reader 토큰이 죽든, 어떤 앱이 플래너 출력에서 빠지든 이 스윕은 그대로 돈다.
   const refsResult = enumerateNsRefs();
   if (!refsResult.ok) {
-    failures.push(refsResult.why);
-    warn(`bump-poll/* 네임스페이스 열거 실패 — 회수를 증명할 수 없다: ${refsResult.why}`);
+    // 열거가 깨지면 **주체를 하나도 보지 못한 것**이다 → 회수 대상을 가릴 수 있는 관측 실패(V-2).
+    revocationBlind(`bump-poll/* 네임스페이스 열거 실패: ${refsResult.why}`);
   } else {
     for (const nref of refsResult.refs) {
       // ── 레인 결정 ────────────────────────────────────────────────────────────────────────
@@ -976,55 +1232,108 @@ if (args.reconcileOnly) {
         "-F", "owner={owner}", "-F", "repo={repo}", "-F", `head=${nref.branch}`,
       ]);
       if (q.failure !== null) {
-        failures.push(`PR 조회 실패(${nref.branch}) ${q.failure}`);
-        warn(`${nref.branch}: PR 조회 실패 ${q.failure} — 이 브랜치는 건드리지 않는다`);
+        // 이 브랜치에 무장된 PR이 있는지 **알 수 없다** — "없다"가 아니다(V-2).
+        revocationBlind(`PR 조회 실패(${nref.branch}) ${q.failure}`);
         continue;
       }
       const parsedSib = parseSiblingPrs(q.stdout);
       if (!parsedSib.ok) {
-        failures.push(`PR 조회 파싱 실패(${nref.branch}): ${parsedSib.why}`);
-        warn(`${nref.branch}: PR 조회 파싱 실패 — ${parsedSib.why}`);
+        revocationBlind(`PR 조회 파싱 실패(${nref.branch}): ${parsedSib.why}`);
         continue;
       }
       const mine = parsedSib.prs.filter(isTrustedSibling);
       if (mine.length > 1) {
-        failures.push(`${nref.branch}에 신뢰 PR이 ${mine.length}건 — 모호해서 건드리지 않는다`);
-        warn(`${nref.branch}: 신뢰 PR이 ${mine.length}건이다(GitHub 계약상 불가능) — 건드리지 않는다`);
+        revocationBlind(`${nref.branch}에 신뢰 PR이 ${mine.length}건이다(GitHub 계약상 불가능) — 모호해서 건드리지 않는다`);
         continue;
       }
       const pr = mine[0] ?? null;
-      const st: SubjectState = {
+      subjects.push({
         branch: nref.branch, app: nref.app, tag: nref.tag,
         lane: laneHere, laneResolution: resolution, laneSource: probe?.source ?? null,
         number: pr?.number ?? null, trusted: pr !== null, armed: pr?.autoMerge ?? false,
-        headRefOid: pr?.headRefOid ?? null, humanTouch: pr?.humanTouch ?? null,
-        disarmed: false,
-      };
-      subjects.push(st);
-      // 우리가 만질 수 있는 PR이 없다(고아 ref · 포크 · 사람 · 다른 base) → 아무것도 하지 않는다.
-      if (pr === null) continue;
-      if (laneHere === "bump") continue;  // autoDeploy:true → 이 무장은 인가된 것이다(멱등: 손대지 않는다)
-      if (!pr.autoMerge) continue;        // 이미 무장 없음 → 회수할 것도 없다(멱등)
-      // 대상은 언제나 **인증된 PR 번호**다(브랜치 셀렉터는 동명 포크 PR로 오조준될 수 있다).
-      const r = runSoft("gh", ["pr", "merge", "--disable-auto", String(pr.number)]);
-      if (r.failure !== null) {
-        failures.push(`PR #${pr.number}(${nref.branch}) 해제 실패 ${r.failure}`);
-        warn(`PR #${pr.number}(${nref.branch}) auto-merge 해제 실패 ${r.failure} — 다음 주기가 재시도한다`);
-        continue;
-      }
-      st.disarmed = true;
+        headRefOid: pr?.headRefOid ?? null, createdAt: pr?.createdAt ?? null,
+        humanTouch: pr?.humanTouch ?? null,
+        headProven: null, revokeReason: null, disarmed: false,
+      });
     }
   }
 
+  // ══ 패스 B — 판정 + 회수(유일한 변이) ═══════════════════════════════════════════════════════
+  // 앱별로 열린 신뢰 PR을 모은다. **이 그룹이 superseded 판정의 전부다** — 그 앱의 후보가 무엇인지
+  // 알 필요가 없고(플래너 없음), 알 수도 없다(writer 토큰뿐).
+  const byApp = new Map<string, SubjectState[]>();
+  for (const st of subjects) {
+    if (st.app === null) continue;   // 앱을 모르는 브랜치는 그룹이 없다(어차피 propose-pr → 전부 회수)
+    if (!st.trusted) continue;       // 고아 ref · 포크 · 사람 · 다른 base는 우리 PR이 아니다
+    const g = byApp.get(st.app) ?? [];
+    g.push(st);
+    byApp.set(st.app, g);
+  }
+
+  for (const st of subjects) {
+    if (!st.trusted) continue;       // 우리가 만질 수 있는 PR이 없다 → 아무것도 하지 않는다
+    if (!st.armed) continue;         // 이미 무장 없음 → 회수할 것도 없다(멱등)
+
+    // ── 회수 트리거 ① 레인 — 승인 레인·SSOT 부재/파손·앱 미상은 전부 "인가되지 않은 무장"이다(R-26).
+    if (st.lane !== "bump") {
+      st.revokeReason = `무장이 인가되지 않았다(레인=${st.lane} · ${st.laneResolution})`;
+    } else {
+      // ── 회수 트리거 ② superseded — 그 앱의 **가장 새로운** PR 하나만 무장을 유지한다(V-1).
+      //    형제가 없으면(그 앱의 열린 신뢰 PR이 이 하나뿐) superseded될 수 없다 → 건드리지 않는다
+      //    (W48의 anti-churn: 매 10분 무장을 지웠다 다시 거는 짓을 하지 않는다).
+      const group = byApp.get(st.app!) ?? [st];
+      if (group.length > 1) {
+        const newest = uniqueNewest(group);
+        if (newest === null) {
+          // 전순서를 세울 수 없다(createdAt 부재·형식 드리프트·동률). 그런데 **둘 이상이 열려 있으므로
+          // 최소 하나는 확실히 superseded다** → 어느 것도 "인가된 무장"이라고 말할 수 없다 → 전부 회수.
+          // (과잉 회수는 R-10의 재무장이 다음 주기에 되돌린다. 과소 회수는 무승인 머지다.)
+          st.revokeReason = "이 앱의 열린 신뢰 PR이 2건 이상인데 createdAt으로 최신을 특정할 수 없다"
+            + "(부재·형식 드리프트·동률) — 최소 하나는 확실히 superseded이므로 어느 무장도 인가로 볼 수 없다";
+        } else if (newest !== st) {
+          st.revokeReason = `superseded — 같은 앱의 더 새로운 PR #${newest.number}(${newest.branch})이 열려 있다`;
+        }
+      }
+    }
+
+    // ── 회수 트리거 ③ **증명되지 않은 head**(R-23 패리티 — 레인 무관) ──────────────────────────
+    // 무장을 **남겨 두기로 한** PR에만 건다: 그 인가를 유지하려면 head가 우리 bump 커밋이어야 한다.
+    // (이미 회수하기로 한 PR엔 묻지 않는다 — 결론이 같은데 커밋 조회를 한 번 더 때릴 이유가 없다.)
+    if (st.revokeReason === null) {
+      const proof = proveOurCommit(
+        st.headRefOid!,
+        `PR #${st.number}(${st.branch})의 head`,
+        bumpCommitMessageOf(st.app!, st.tag!),
+      );
+      st.headProven = proof.ok;
+      if (!proof.ok) {
+        st.revokeReason = `head 소유권 미증명(R-23) — ${proof.why}`;
+        warn(`${st.branch}: ${st.revokeReason}`);
+      }
+    }
+
+    if (st.revokeReason === null) continue;   // **인가된 무장**이다 — 손대지 않는다(멱등)
+    // 회수는 **공유 연산**이다(R-32) — 주 경로의 형제 스윕과 **같은 함수, 같은 실패 계약**을 쓴다:
+    // 실패해도 **다음 주체로 계속 간다**(한 PR의 실패가 나머지를 굶기면 그게 곧 회수의 실패다).
+    // 실패 사실은 revocationFailures에 모여 아래에서 종료 코드와 보고를 함께 결정한다.
+    if (!revokeArming(st.number!, st.branch)) continue;
+    st.disarmed = true;
+  }
+
+  // 이 패스의 실패 = 회수 실패 + 관측 실패(둘 다 revocationFailures — V-2) + 깨진 SSOT(failures).
+  // 전부 "회수를 증명하지 못했다"는 같은 결론이라 한 목록으로 보고하고, 한 종료 코드로 낸다.
+  const allFailures = [...failures, ...revocationFailures];
   console.log(JSON.stringify({
     mode: "reconcile-only",
     // 주체는 **관측된 네임스페이스**다(입력이 아니다) — 레인은 주체마다 SSOT에서 따로 정해진다.
     subjects,
-    failures,
+    failures: allFailures,
+    // R-32: **회수만** 따로 뽑은 목록(두 모드가 같은 키로 보고한다) — 무엇을 회수하지 못했는가.
+    revocationFailures,
     executed,
   }, null, 2));
   // 회수는 보안 속성이다 → 한 건이라도 못 했으면 run은 **빨개야** 한다(telegram 알림이 발화한다).
-  process.exit(failures.length > 0 ? 1 : 0);
+  process.exit(allFailures.length > 0 ? 1 : 0);
 }
 
 // ── ① 조회 — 변이보다 **먼저**, 상한 없이 **전부** 수집한다(순서도 완전성도 계약이다: R-4) ────────
@@ -1040,15 +1349,23 @@ const prs = parsePrs(run(
 ));
 const remoteBranch = parseLsRemote(run("git", ["ls-remote", "--heads", args.remote, branch], "git ls-remote"));
 
-// ── ①-b superseded 형제 열거(관측) — 변이 0. 실패는 **경고 후 계속**이다(주 판정을 막지 않는다) ────
-// `closeAbandoned`: 열거·조회가 한 곳이라도 깨지면 **그 run의 close는 전부 포기**한다. 과소 열거로
-// **일부만** 닫는 것보다 아예 안 닫는 게 단순하고 안전하다(파괴는 완전한 증거 위에서만).
+// ── ①-b superseded 형제 열거(관측) — 변이 0. 실패는 **계속하되 조용하지 않다** ────────────────
+// 두 가지가 여기서 **갈라진다**(예전엔 한 덩어리였고 그게 결함이었다 — V-2):
+//   · `closeAbandoned` = **위생(close)의 게이트**. 열거·조회가 한 곳이라도 깨지면 그 run의 close는 전부
+//     포기한다(과소 열거로 **일부만** 닫는 것보다 아예 안 닫는 게 안전하다 — 파괴는 완전한 증거 위에서만).
+//   · `revocationBlind()` = **결과(종료 코드·보고)**. 같은 실패는 "이 브랜치에 무장된 PR이 있는지 **모른다**"는
+//     뜻이기도 하다. 그건 close의 문제가 아니라 **회수의 문제**다.
+// 예전 코드는 `closeAbandoned`만 세우고 exit 0으로 끝냈다 — 그런데 종료 코드는 오직 revocationFailures가
+// 정한다 → **형제 조회가 깨지면 무장된 좀비를 보지도 못한 채 run이 초록**이었다(그리고 `--reconcile-only`는
+// 같은 상황에서 exit 1이었다 → 두 경로의 계약이 갈라져 있었다). 이제 둘 다 같은 결과 계약을 쓴다.
+// ⚠️ 그래도 **abort하지 않는다**: 아무나 `bump-poll/<app>-*` ref 하나로 배포를 정지시킬 수 있으면 안 된다
+//    (억제 = 공격 표면). 메인 변이는 끝까지 하고, run만 맨 끝에서 빨개진다.
 const siblings: SiblingState[] = [];
 let closeAbandoned: string | null = null;
 const refsResult = enumerateSiblingRefs();
 if (!refsResult.ok) {
   closeAbandoned = refsResult.why;
-  warn(`형제 브랜치 열거 실패 — superseded 스윕을 건너뛴다(주 판정은 계속한다): ${refsResult.why}`);
+  revocationBlind(`형제 브랜치 열거 실패 — superseded 스윕이 아무도 방문하지 못했다: ${refsResult.why}`);
 } else {
   for (const sref of refsResult.refs) {
     const q = runSoft("gh", [
@@ -1058,20 +1375,20 @@ if (!refsResult.ok) {
     ]);
     if (q.failure !== null) {
       closeAbandoned = `형제 PR 조회 실패(${sref.branch}) ${q.failure}`;
-      warn(`${closeAbandoned} — 이 형제는 건드리지 않는다`);
+      revocationBlind(`형제 PR 조회 실패(${sref.branch}) ${q.failure} — 이 형제의 무장 여부를 모른다`);
       continue;
     }
     const parsedSib = parseSiblingPrs(q.stdout);
     if (!parsedSib.ok) {
       closeAbandoned = `형제 PR 조회 파싱 실패(${sref.branch}): ${parsedSib.why}`;
-      warn(`${closeAbandoned} — 이 형제는 건드리지 않는다`);
+      revocationBlind(`형제 PR 조회 파싱 실패(${sref.branch}): ${parsedSib.why} — 이 형제의 무장 여부를 모른다`);
       continue;
     }
     const mine = parsedSib.prs.filter(isTrustedSibling);
     if (mine.length > 1) {
       // GitHub 계약상 같은 head→base에 열린 PR은 1건뿐이다 → 2건은 사실을 잘못 읽은 것이다.
       closeAbandoned = `형제 브랜치 ${sref.branch}에 신뢰 PR이 ${mine.length}건 — 모호해서 건드리지 않는다`;
-      warn(closeAbandoned);
+      revocationBlind(`형제 브랜치 ${sref.branch}에 신뢰 PR이 ${mine.length}건이다(GitHub 계약상 불가능) — 어느 것도 건드리지 않는다`);
       continue;
     }
     const pr = mine[0] ?? null;
@@ -1104,18 +1421,25 @@ if (!refsResult.ok) {
 // 증거 요건이 여기 커버리지를 깎아먹지 않게 **두 축을 분리**한다:
 //   · 해제는 **레인을 읽지 않는다** — superseded PR은 레인과 무관하게 머지될 자격이 없다(옛 이미지 배포).
 //   · 해제는 **소유권 증명도 요구하지 않는다** — 인가 회수는 언제나 안전한 방향이다.
-//   · 해제 실패는 경고 후 계속 — 다음 주기(10분)가 다시 수렴시킨다.
 // 대상은 언제나 **인증된 PR 번호**다(브랜치 셀렉터 금지 — 동명 포크 PR 오조준).
 // ⚠️ 이 스윕은 아래 fail-closed 검사들(신뢰 PR 모호성·비신뢰 동일-레포 PR·소유권)보다 **먼저** 실행한다:
 //    중단 가능한 검사가 앞서면, 인가를 **가장 회수해야 할 상태**에서 정확히 회수하지 못한다(R-23의 순서 규칙).
+//
+// ★ 해제 실패의 계약(R-32) — `--reconcile-only`와 **글자 그대로 같다**(revokeArming 하나를 공유한다):
+//   · **중단하지 않는다**: 나머지 형제도, **이번 주기의 메인 변이(push/create/skip)도 그대로 진행**한다.
+//     한 PR의 해제 실패가 배포를 멈추면 억제가 곧 공격 표면이 되고, 다른 형제의 회수까지 굶긴다.
+//   · **그러나 조용하지도 않다**: 실패는 revocationFailures에 모여 이 run을 **비-0으로 끝낸다**(맨 아래).
+//     여기서 실패를 삼키면(그리고 close가 사람 흔적·캡·킬 스위치로 막히면) **무장된 좀비 PR이 남는데
+//     아무도 모른다** — 그리고 그건 "다음 주기가 고친다"의 전제조건(누군가 그 PR을 **방문한다**)이
+//     성립하지 않는 상태다.
+// ★ 이 스윕은 이제 **유일한 회수자가 아니다**(V-1): `--reconcile-only`도 bump 레인의 superseded 형제를
+//   회수한다(후보가 없는 noop/refuse 주기에도). 그래서 위 revokeArming의 "다음 주기가 재시도한다"는
+//   약속이 **비로소 참이 됐다** — 예전엔 그 재시도가 "플래너가 이 앱의 후보를 또 내주면"이라는 조건에
+//   묶여 있었고, 그 조건이 깨진 주기가 정확히 이 결함의 서식지였다.
 for (const s of siblings) {
   if (!s.trusted) continue;
   if (!s.armed) continue;
-  const r = runSoft("gh", ["pr", "merge", "--disable-auto", String(s.number)]);
-  if (r.failure !== null) {
-    warn(`형제 PR #${s.number}(${s.branch})의 auto-merge 해제 실패 ${r.failure} — 다음 주기가 재시도한다`);
-    continue;
-  }
+  if (!revokeArming(s.number!, s.branch)) continue;
   s.disarmed = true;
 }
 
@@ -1220,118 +1544,10 @@ if (trusted !== null) {
   reason = "열린 신뢰 PR도 원격 브랜치도 없다 — 정상 경로(push → PR 생성)";
 }
 
-// ── ②-b **ref 소유권** 검증 — "그 head 커밋이 우리 것인가"를 사실로 확정한다 ─────────────────────
-// ★ PR 작성자 인증(isTrusted)은 **누가 PR을 열었는지**만 증명한다 — **그 ref를 누가 마지막으로 썼는지**는
-//   증명하지 않는다. 두 구멍이 남아 있었다:
-//     · adopt : PR이 안 보이는 원격 ref를 **무조건** force-push로 덮어썼다(그 브랜치가 우리 잔해라는 근거 0).
-//     · rebuild: writer가 연 PR이라도, **다른 동일-레포 행위자가 그 head에 push**하면 PR 작성자는 그대로
-//                writer다 → 신뢰된 채로 남고, 우리는 그 사람의 커밋을 force-push로 지운다.
+// ── ②-b **ref 소유권** 검증 — 정의는 위(proveOurCommit)에 있다 ────────────────────────────────
+// 이 검증기는 **두 모드가 함께 쓰므로**(주 경로 · `--reconcile-only`의 R-23 패리티) 파일 앞쪽으로
+// 올려 두었다. 설계 근거는 그 정의 위의 주석을 참고.
 //
-// ★★ 소유권은 **force-push 허가**만이 아니라 **인가 조정(auto-merge)의 입력**이다(structure r6 R-23) ──
-// 예전엔 이 검증을 force-push 경로(adopt/rebuild)에만 걸었다. 그래서 두 구멍이 남았다:
-//   ① skip 경로: writer가 연 PR인데 **head 커밋이 다른 행위자로 교체**됐다. 상태가 CLEAN/BLOCKED/UNKNOWN이면
-//      판정은 skip이고, 소유권은 아예 검사되지 않는다 → bump 레인이 그 **증명되지 않은 head에 auto-merge를
-//      무장**하거나(무장 갭이면) **이미 걸린 무장을 그대로 둔다**. 그건 남의 커밋에 **머지 인가를 부여**한
-//      것이다(auto-merge는 PR에 붙고, gate가 green이 되는 순간 그 head가 main으로 들어간다).
-//   ② propose-pr 해제 경로: ARMED + DIRTY + 낯선 head인 PR은 소유권 검증에서 **먼저 죽어** `--disable-auto`에
-//      닿지 못했다 → **낡은 인가가 가장 필요할 때 살아남았다**.
-// → 계약: **증명되지 않은 head는 무장하지 않고, 이미 무장돼 있으면 해제한다**(인가 회수 = 안전 방향).
-//   그 뒤에 변이 쪽을 fail-closed한다(force-push 0 · create 0).
-// ⚠️ **순서 규칙**: 회수(해제)는 **abort할 수 있는 소유권 검사보다 먼저** 실행한다. 안전 방향 행동이 앞,
-//   중단 가능한 검사가 뒤다. 그래서 조회(probe)는 값을 돌려줄 뿐 **죽지 않고**(runSoft), 죽는 건 ③-b다.
-//
-// 우리 커밋의 조건(전부 만족해야 한다 — 하나라도 아니면 "증명되지 않음"):
-//   · author·committer의 name = `<writer>[bot]`, email = `<id>+<writer>[bot]@users.noreply.github.com`
-//     (호출부가 `git config user.name/user.email`로 심는 바로 그 정체성 — bump-poll.yaml과 계약이 묶여 있고,
-//      그 드리프트는 tests/gates/test_bump-poll-callsite.bats가 잡는다)
-//   · 메시지 = 이 bump의 커밋 메시지와 **정확히** 일치(app·tag까지) — 브랜치가 (app, tag)로 결정적이므로
-//     그 브랜치의 우리 커밋 메시지도 결정적이다.
-// ⚠️ **이건 인증이 아니라 안전 인터록이다**(라이브 확인: 이 커밋들은 `signature: null` — 워크플로의
-//    `git commit` + 토큰 push는 서명되지 않는다). git의 author/committer는 자유 텍스트라 contents:write를
-//    가진 **악의적** 행위자는 이 정체성과 메시지를 위조할 수 있다. 즉 이 가드가 확실히 막는 것은
-//    **사고성 파괴**(다른 봇/사람이 같은 ref를 쓰는 경우, 남은 남의 브랜치, 낯선 커밋)이고,
-//    악의적 행위자에 대해서는 심층 방어일 뿐이다. **강제 가능한 불변식은 ruleset**(`bump-poll/**`를 writer App
-//    전용으로 예약)이며 그건 이 도구 밖(레포 설정/IaC)이다 — 그 전까지 이 인터록이 최선의 방어다.
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-// GraphQL 커밋 조회 — 라이브 실측 스키마(이 레포의 실제 bump 커밋):
-//   {"oid":"5bb77fc…","message":"chore: page 이미지를 sha-815abb1…(digest 핀)로 갱신 (GHCR 폴링)",
-//    "author":{"name":"ukyi-homelab-writer[bot]",
-//              "email":"293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"},
-//    "committer":{…같음…}}
-const COMMIT_QUERY = `query($owner:String!,$repo:String!,$oid:GitObjectID!){
-  repository(owner:$owner,name:$repo){
-    object(oid:$oid){
-      ... on Commit { oid message author{ name email } committer{ name email } }
-    }
-  }
-}`;
-// 호출부(bump-poll.yaml)가 만드는 커밋 메시지와 **글자 그대로** 같아야 한다.
-const BUMP_COMMIT_MESSAGE = `chore: ${args.app} 이미지를 ${args.tag}(digest 핀)로 갱신 (GHCR 폴링)`;
-// 형제 브랜치의 기대 메시지는 **그 PR 자신의 tag**로 재계산한다(우리 tag가 아니다) — 그래야 그 head가
-// "그 bump의 우리 커밋"임을 증명할 수 있다. 브랜치명 파싱만으로는 소유권의 증거가 되지 못한다.
-function bumpCommitMessageFor(tag: string): string {
-  return `chore: ${APP} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)`;
-}
-const WRITER_BOT_NAME = `${normalizeLogin(args.writer)}[bot]`;
-const WRITER_BOT_EMAIL_RE = new RegExp(`^\\d+\\+${escapeRe(WRITER_BOT_NAME)}@users\\.noreply\\.github\\.com$`);
-
-function isWriterIdent(id: { name: string; email: string }): boolean {
-  return id.name === WRITER_BOT_NAME && WRITER_BOT_EMAIL_RE.test(id.email);
-}
-
-// 이 OID의 커밋이 **우리가 만든 bump 커밋**인지 조회한다. **죽지 않는다** — 판정을 값으로 돌려준다
-// (순서 규칙: 회수(해제)가 abort보다 먼저다. 여기서 죽으면 낡은 인가를 회수할 기회가 사라진다).
-// 증명 실패의 종류(조회 장애·스키마 드리프트·OID 미발견·낯선 커밋)를 구분하지 않는다:
-// **"우리 것임을 증명하지 못했다"는 하나의 사실**이고, 그 사실의 안전한 귀결은 언제나 같다
-// (무장하지 않는다 / 무장돼 있으면 회수한다 / 변이하지 않는다).
-// `expectMessage`는 기본이 이번 bump의 메시지지만, superseded 형제를 검증할 땐 **그 형제의 tag로
-// 재계산한 메시지**를 넘긴다(같은 함수, 다른 기대값 — 증명의 대상이 다르기 때문이다).
-type Proof = { ok: true } | { ok: false; why: string };
-function proveOurCommit(oid: string, what: string, expectMessage: string = BUMP_COMMIT_MESSAGE): Proof {
-  const no = (why: string): Proof => ({ ok: false, why: `${what}(${oid}) — ${why}` });
-
-  const r = runSoft("gh", [
-    "api", "graphql",
-    "-f", `query=${COMMIT_QUERY}`,
-    "-F", "owner={owner}", "-F", "repo={repo}", "-F", `oid=${oid}`,
-  ]);
-  if (r.failure !== null) return no(`gh api graphql (commit) ${r.failure} — 무엇인지 모르는 커밋은 우리 것이 아니다`);
-
-  let parsed: any;
-  try {
-    parsed = JSON.parse(r.stdout);
-  } catch (e) {
-    return no(`커밋 조회 JSON 파싱 실패: ${(e as Error).message}`);
-  }
-  if (parsed?.errors !== undefined) return no(`커밋 조회 GraphQL 오류: ${JSON.stringify(parsed.errors)}`);
-  const c = parsed?.data?.repository?.object;
-  // object가 null이면 그 OID를 못 찾은 것이다(다른 레포의 커밋·GC됨·오타) → 우리 것이라는 증명이 없다.
-  if (c === null || typeof c !== "object") return no("커밋을 찾을 수 없다(GC됨·다른 레포·스키마 드리프트)");
-  // 스키마 드리프트(필드 누락·Commit이 아님)도 "우리 것"의 증명이 아니다.
-  if (typeof c.oid !== "string" || c.oid !== oid) return no(`커밋 조회 결과의 oid 불일치(받음 ${String(c.oid)})`);
-  if (typeof c.message !== "string") return no("커밋 message 문자열 아님(Commit이 아니거나 스키마 드리프트)");
-  for (const k of ["author", "committer"] as const) {
-    const v = c[k];
-    if (v === null || typeof v !== "object" || typeof v.name !== "string" || typeof v.email !== "string") {
-      return no(`커밋 ${k}.name/email 문자열 아님 — 소유권을 증명할 수 없다`);
-    }
-  }
-
-  const ident = isWriterIdent(c.author) && isWriterIdent(c.committer);
-  const msg = c.message.trim() === expectMessage;
-  if (ident && msg) return { ok: true };
-  return no(
-    "**우리 bump 커밋이 아니다**.\n"
-    + `  관측: author=${c.author.name} <${c.author.email}> / committer=${c.committer.name} <${c.committer.email}>\n`
-    + `        message=${JSON.stringify(c.message.trim())}\n`
-    + `  기대: author·committer=${WRITER_BOT_NAME} <<id>+${WRITER_BOT_NAME}@users.noreply.github.com>\n`
-    + `        message=${JSON.stringify(expectMessage)}\n`
-    + "  누군가 이 ref에 자기 커밋을 올렸다(또는 우리 것이 아닌 브랜치다).",
-  );
-}
-
 // 신뢰 PR의 head 소유권 — **판정과 무관하게 언제나** 확인한다(R-23). skip이어도 확인하는 이유:
 // 그 head는 무장(=머지 인가)의 **대상**이다. force-push를 하지 않는다고 해서 남의 커밋에 auto-merge를
 // 걸어도 되는 건 아니다 — 인가는 push만큼이나 강력한 변이다.
@@ -1374,6 +1590,12 @@ const shouldDisarm = staleArm && (lane === "propose-pr" || !headProof.ok);
 // 무장(arm)과 달리 공유 스크립트(auto-merge-or-fail.sh)를 쓰지 않는다 — 그 스크립트는 races-6 폴백
 // ("--auto는 이미 CLEAN인 PR에 에러" → 직접 머지)이 본질이고, 그건 **머지를 성사시키는** 경로다.
 // 해제는 정반대(인가 회수)라 폴백이 있어선 안 된다: 실패하면 fail-closed로 시끄럽게 죽는 게 맞다.
+//
+// ⚠️ 여기만 **형제 스윕(①-c)의 "계속하되 나중에 빨갛게"와 다르다** — 더 **엄격하다**(R-32의 예외가 아니라 강화다).
+//    이 PR의 해제가 실패했는데 그대로 진행하면 바로 다음 줄들이 **그 PR을 force-push**한다 → 그 push가
+//    required 체크를 다시 돌려 green으로 만들고, **아직 살아 있는 무장**이 사람 승인 없이 머지를 성사시킨다.
+//    형제는 그렇지 않다(우리 브랜치를 밀어도 형제의 체크는 green이 되지 않는다) → 형제만 "계속"이 안전하다.
+//    두 경로 모두 **run은 비-0으로 끝난다**(회수 실패 = 보안 사실). 여기선 그 위에 "밀지 않는다"가 더 붙는다.
 if (shouldDisarm) {
   mutate("gh", ["pr", "merge", "--disable-auto", String(trusted!.number)], "gh pr merge --disable-auto");
 }
@@ -1536,5 +1758,22 @@ console.log(JSON.stringify({
   },
   // R-25: `bump-poll/<app>-*` 네임스페이스의 형제들 — 해제(무조건·안전 방향)와 close(증거 완비 시에만).
   superseded: siblings,
+  // R-32: **회수하지 못한 무장**(두 모드가 같은 키로 보고한다). 비어 있지 않으면 아래에서 비-0 종료다.
+  revocationFailures,
   executed,
 }, null, 2));
+
+// ── ③-f 회수 실패 = **보안 사실** → 처리는 다 끝내고, run은 빨갛게 끝낸다(R-32) ──────────────────
+// 여기까지 왔다는 건 이번 주기의 메인 변이(push/create/skip + 무장/해제 + close)가 **전부 제 일을 했다**는
+// 뜻이다 — 회수 실패가 그것들을 굶기지 않았다(억제 = 공격 표면). 그러나 낡은 머지 인가를 **거두지 못한 채**
+// 성공으로 끝나면, 무장된 좀비 PR이 남았는데 아무도 모르는 상태가 된다(telegram 무발화).
+// ⚠️ 이 판정은 close의 성공 여부를 **보지 않는다**: 위생(close)의 성공에 보안 사실(회수)의 보고를 매다는 것이
+//    바로 R-32의 결함이었다. 회수를 못 했으면 close가 어떻게 됐든 이 run은 실패다.
+if (revocationFailures.length > 0) {
+  console.error(
+    `ensure-bump-pr: auto-merge 회수 ${revocationFailures.length}건 실패 — 낡은 머지 인가가 살아 있다:\n`
+    + revocationFailures.map((f) => `  · ${f}`).join("\n")
+    + "\n  (이번 주기의 다른 변이는 정상 수행했다. 다음 주기가 회수를 재시도한다.)",
+  );
+  process.exit(1);
+}

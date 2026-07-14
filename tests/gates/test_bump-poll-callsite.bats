@@ -90,7 +90,13 @@ def need(pat, what):
 writer = need(r'DEFAULT_WRITER\s*=\s*"([^"]+)"', "DEFAULT_WRITER").group(1)
 name_tmpl = need(r"WRITER_BOT_NAME\s*=\s*`([^`]*)`", "WRITER_BOT_NAME").group(1)
 email_tmpl = need(r"WRITER_BOT_EMAIL_RE\s*=\s*new RegExp\(`([^`]*)`\)", "WRITER_BOT_EMAIL_RE").group(1)
-msg_tmpl = need(r"BUMP_COMMIT_MESSAGE\s*=\s*`([^`]*)`", "BUMP_COMMIT_MESSAGE").group(1)
+# 커밋 메시지 템플릿의 SSOT는 **bumpCommitMessageOf(app, tag)**다(V-1: `--reconcile-only`가 브랜치에서
+# 유도한 (app, tag)로 기대 메시지를 재계산해야 해서, 전역 상수 하나로는 표현할 수 없게 됐다).
+# 그 함수의 **본문 템플릿**을 뽑는다 — 상수 BUMP_COMMIT_MESSAGE는 이제 그 함수의 호출 결과일 뿐이다.
+msg_tmpl = need(
+    r"function bumpCommitMessageOf\([^)]*\)[^{]*\{\s*return\s*`([^`]*)`",
+    "bumpCommitMessageOf의 커밋 메시지 템플릿",
+).group(1)
 
 # 템플릿 리터럴의 보간부를 실행기와 **같은 값**으로 채운다(기본 --writer = DEFAULT_WRITER).
 bot_name = name_tmpl.replace("${normalizeLogin(args.writer)}", writer)
@@ -103,10 +109,102 @@ if mode == "name":
 elif mode == "email":  # argv[3] = 관측된 effective email
     sys.exit(0 if re.match(email_re, sys.argv[3]) else 1)
 elif mode == "msg":  # argv[3] = app, argv[4] = tag
-    print(msg_tmpl.replace("${args.app}", sys.argv[3]).replace("${args.tag}", sys.argv[4]))
+    # 템플릿의 보간부는 함수의 파라미터명(`${app}` / `${tag}`)이다.
+    print(msg_tmpl.replace("${app}", sys.argv[3]).replace("${tag}", sys.argv[4]))
 else:
     sys.exit(2)
 PY
+
+  # ── GitHub Actions **조건식 평가기**(structure r9 R-31) ────────────────────────────────────────
+  # 왜 grep이 아니라 평가인가: 이 게이트가 지켜야 하는 불변식은 "reconcile job의 **본문**이 reader를 쓰지
+  # 않는다"가 아니라 "**GitHub이 그 job을 실행한다**"이다. 두 문장 사이엔 `if:`와 `needs:`라는 **선행 의존**이
+  # 통째로 들어 있다 — job 본문만 검사하는 증인은 공유 `configured` 출력(READER && WRITER) 하나로 회수가
+  # **깨끗하게 skip**되는 그 결함을 그대로 통과시킨다(실제로 통과시켰다: R-31).
+  # → 그래서 두 job의 `if`를 **실제 값으로 평가한다**. 값의 출처는 프로덕션 preflight 스텝을 그 자격 조합으로
+  #   **직접 실행해** 얻은 GITHUB_OUTPUT이다(테스트가 지어낸 값이 아니다).
+  # 이 평가기가 다루는 문맥은 하나다: **취소되지 않았고, needs(preflight)는 성공했다**(라이브의 정상 주기).
+  # ⚠️ 해석하지 못한 컨텍스트 참조(needs.*/github.*/…)가 남으면 **평가하지 않고 exit 2로 죽는다** —
+  #    "몰라서 false"는 이 게이트가 막으려는 바로 그 침묵이다.
+  EVALIF_PY="$BATS_TEST_TMPDIR/eval-if.py"
+  cat > "$EVALIF_PY" <<'PY'
+import re
+import sys
+
+expr = sys.argv[1]
+# `${{ … }}` 래퍼는 있어도 없어도 된다(GHA가 job-level if에서 둘 다 받는다).
+expr = re.sub(r"^\s*\$\{\{", "", expr)
+expr = re.sub(r"\}\}\s*$", "", expr)
+
+# 이 시나리오의 문맥: 취소 아님 · 선행 job 성공.
+for fn, val in (("cancelled()", "False"), ("always()", "True"),
+                ("success()", "True"), ("failure()", "False")):
+    expr = expr.replace(fn, val)
+
+# needs.preflight.outputs.<name> → preflight이 **실제로 낸** 값(문자열 리터럴)
+for kv in sys.argv[2:]:
+    name, _, value = kv.partition("=")
+    expr = re.sub(r"needs\.preflight\.outputs\." + re.escape(name) + r"\b", repr(value), expr)
+
+if re.search(r"\b(needs|github|env|inputs|secrets|steps|vars|job|runner|matrix)\s*\.", expr):
+    sys.stderr.write("eval-if: 해석하지 못한 컨텍스트 참조가 남았다(조용한 false 금지): %s\n" % expr)
+    sys.exit(2)
+
+py = expr.replace("&&", " and ").replace("||", " or ")
+py = py.replace("!=", "__NE__").replace("!", " not ").replace("__NE__", "!=")
+try:
+    value = eval(py, {"__builtins__": {}}, {})  # noqa: S307 — 리터럴만 남은 식이다
+except Exception as e:  # noqa: BLE001
+    sys.stderr.write("eval-if: 조건식 평가 실패(%s): %s\n" % (e, py))
+    sys.exit(2)
+print("true" if value else "false")
+PY
+}
+
+# preflight 스텝을 **주어진 자격 조합으로 실제로 실행**하고, 그 job이 선언한 출력들의 값을 계산한다.
+# 값은 스텝이 GITHUB_OUTPUT에 쓴 것에서 나온다 — job-level `outputs:`의 `${{ steps.<id>.outputs.<key> }}`
+# 배선까지 따라간다(그 배선이 끊기면 라이브에서도 출력이 빈다).
+preflight_values() { # $1=READER $2=WRITER → "이름=값" 줄들
+  local body="$BATS_TEST_TMPDIR/preflight.sh"
+  yq -r '[.jobs.preflight.steps[] | select(.run)] | .[0].run // ""' "$F" > "$body"
+  [ -s "$body" ] || { echo "preflight 스텝(.run)을 추출하지 못했다" >&2; return 9; }
+  local out="$BATS_TEST_TMPDIR/preflight.out"
+  : > "$out"
+  READER="$1" WRITER="$2" GITHUB_OUTPUT="$out" bash -e "$body" > "$BATS_TEST_TMPDIR/preflight.log" 2>&1 \
+    || { echo "preflight 스텝이 비-0으로 죽었다(READER='$1' WRITER='$2')" >&2; return 9; }
+  local name raw key val
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    raw="$(yq -r ".jobs.preflight.outputs.\"$name\"" "$F")"
+    case "$raw" in
+      *outputs.*) : ;;
+      *) echo "preflight.outputs.$name이 스텝 출력 참조가 아니다: '$raw'" >&2; return 9 ;;
+    esac
+    key="$(printf '%s' "$raw" | sed -E 's/.*outputs\.([A-Za-z0-9_-]+).*/\1/')"
+    val="$(awk -F= -v k="$key" '$1 == k { v = $2 } END { print v }' "$out")"
+    printf '%s=%s\n' "$name" "$val"
+  done < <(yq -r '.jobs.preflight.outputs // {} | keys | .[]' "$F")
+}
+# 한 job의 `if`를 그 값들로 평가한다(없으면 GHA 기본값 = true).
+eval_if() { # $1=job, 나머지=이름=값
+  local job="$1"
+  shift
+  local expr
+  expr="$(yq -r ".jobs.\"$job\".if // \"true\"" "$F")"
+  python3 "$EVALIF_PY" "$expr" "$@"
+}
+# 자격 조합 하나에 대해 **두 게이트를 함께** 평가한다 → "reconcile poll"(true/false).
+gates_for() { # $1=READER $2=WRITER
+  local f="$BATS_TEST_TMPDIR/pf-values.txt"
+  preflight_values "$1" "$2" > "$f" || return 9
+  local -a kv=()
+  local line
+  while IFS= read -r line; do
+    if [ -n "$line" ]; then kv+=("$line"); fi
+  done < "$f"
+  local r p
+  r="$(eval_if reconcile "${kv[@]}")" || return 8
+  p="$(eval_if poll "${kv[@]}")" || return 8
+  printf '%s %s\n' "$r" "$p"
 }
 
 # 실행기 소스에서 파생한 소유권 기대값(name / email 매칭 / app·tag별 커밋 메시지).
@@ -876,6 +974,105 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
     echo "over-correction: bump 루프가 후보 앱에 도달하지 못했다 — bump 도달: '$bumped'(기대 'page trip-mate')"
     step_out; dump_calls; false
   }
+}
+
+# ── ⑨ **회수의 게이트는 writer 하나뿐이다**(structure r9 R-31) ────────────────────────────────────
+# ⑧은 reconcile을 **자기 job**으로 떼어내 reader 토큰·docker·플래너 **스텝**에서 풀었다. 그런데 그 job의
+# **선행 의존**(`needs: preflight` + `if:`)은 그대로 남아 있었다: preflight의 공유 출력 `configured`가
+# `READER && WRITER`였고 reconcile이 거기 걸려 있었다 → **reader App ID가 없거나 회전 중이기만 해도**
+# GitHub이 회수 job을 **깨끗하게 skip**한다(그 job은 writer 자격만 쓰는데도). 무장된 PR은 바로 그
+# reader/planning 열화 구간에서 **낡은 인가를 그대로 유지**한다 — R-27이 떼어내려던 그 구간이다.
+# 계약: **writer 자격만 있으면 reconcile은 돈다.** 두 자격을 다 요구하는 건 **poll뿐**이다.
+# ⚠️ 증인은 문자열 grep이 아니라 **조건식을 실제로 평가**한다 — job 본문만 보는 증인이 이 선행 의존을
+#    놓쳤다는 게 R-31의 요지다.
+
+# bats test_tags=regression
+@test "a missing reader skips ONLY the poll job — revocation runs on writer credentials alone (both job gates evaluated for real)" {
+  # ⓪ reconcile job이 **존재한다**(없으면 게이트를 논할 대상 자체가 없다 — 회수 0).
+  yq -e '.jobs.reconcile' "$F" > /dev/null 2>&1 || {
+    echo "stale authorization survives: reconcile job이 없다 — 회수 경로 자체가 존재하지 않는다"
+    false
+  }
+  # ⓪-b 준비상태가 **둘로 갈려 있다**. 하나(configured)로 합쳐 두면 reader 부재가 회수를 막는다 —
+  #     그 구조에선 조건식을 어떻게 써도 두 게이트를 독립시킬 수 없다(같은 값을 보기 때문이다).
+  nk="$(yq -r '.jobs.preflight.outputs // {} | keys | length' "$F")"
+  [ "$nk" -ge 2 ] || {
+    echo "coupled readiness: preflight이 준비상태를 ${nk}개만 낸다(기대 2개 이상: writer / reader) —"
+    echo "  writer·reader를 한 출력으로 AND하면 **reader 부재가 회수를 skip시킨다**(R-31)."
+    yq -r '.jobs.preflight.outputs' "$F"
+    false
+  }
+
+  # ① ★ 핵심 시나리오: **reader 없음 + writer 있음**(키 회전 중·Phase 0 부분 완료).
+  #    → reconcile은 **돈다**(회수는 writer 자격만 쓴다), poll은 **skip**된다(플래너가 reader를 쓴다).
+  run gates_for "" "writer-app-id"
+  [ "$status" -eq 0 ] || { echo "harness: 게이트 평가가 실패했다"; echo "$output"; false; }
+  [ "$output" = "true false" ] || {
+    echo "starved revocation: reader가 없을 때 두 job의 게이트가 '(reconcile poll) = $output'이다(기대 'true false') —"
+    echo "  reader App ID가 비었거나 회전 중이기만 해도 GitHub이 **회수 job을 통째로 skip**한다."
+    echo "  그 job은 writer 자격만 쓴다 — reader 준비상태에 걸릴 이유가 없다. 무장된 PR이 낡은 인가를 유지한다."
+    echo "  reconcile.if = $(yq -r '.jobs.reconcile.if // "(없음)"' "$F")"
+    echo "  poll.if      = $(yq -r '.jobs.poll.if // "(없음)"' "$F")"
+    echo "  preflight.outputs = $(yq -o=json -I=0 '.jobs.preflight.outputs' "$F")"
+    false
+  }
+
+  # ② 둘 다 있으면 둘 다 돈다(정상 주기 — 과잉 교정으로 poll을 죽이지 않았는가).
+  run gates_for "reader-app-id" "writer-app-id"
+  [ "$status" -eq 0 ] || { echo "harness: 게이트 평가가 실패했다"; echo "$output"; false; }
+  [ "$output" = "true true" ] || {
+    echo "over-correction: 자격이 모두 있는 정상 주기에 '(reconcile poll) = $output'이다(기대 'true true')"
+    false
+  }
+
+  # ③ **writer가 없으면 회수도 못 한다**(`gh pr merge --disable-auto`가 PR write다) → reconcile도 skip.
+  #    ⚠️ 이 단언이 없으면 "reconcile.if를 아예 없앤다(항상 true)"는 구현이 ①②를 통과한다 —
+  #    그건 Phase 0 미완 주기에 매 10분 토큰 민팅 실패 + telegram 스팸이 된다(preflight의 존재 이유).
+  run gates_for "reader-app-id" ""
+  [ "$status" -eq 0 ] || { echo "harness: 게이트 평가가 실패했다"; echo "$output"; false; }
+  [ "$output" = "false false" ] || {
+    echo "phase-0 spam: writer 자격이 없는데 '(reconcile poll) = $output'이다(기대 'false false') —"
+    echo "  회수는 writer(PR write) 없이는 불가능하다. 게이트가 없으면 매 10분 토큰 민팅이 실패한다."
+    false
+  }
+
+  # ④ 아무것도 없으면 둘 다 skip — run은 **깨끗한 성공**이다(Phase 0 계약, 지금도 유효하다).
+  run gates_for "" ""
+  [ "$status" -eq 0 ] || { echo "harness: 게이트 평가가 실패했다"; echo "$output"; false; }
+  [ "$output" = "false false" ] || {
+    echo "phase-0 계약 위반: 자격이 하나도 없는데 '(reconcile poll) = $output'이다(기대 'false false')"
+    false
+  }
+}
+
+@test "the gate evaluator has teeth (a shared writer&&reader readiness output flips the reader-absent scenario RED)" {
+  # ★ 하네스 자기증명. 평가기가 `if`를 **실제로** 계산한다는 걸 재현으로 못박는다 — 이게 없으면 평가기가
+  #   조용히 언제나 "true false"를 뱉어도(예: 컨텍스트 치환이 깨져 false로 접혀도) 위 증인은 GREEN이고
+  #   아무것도 증명하지 못한다.
+  # ⚠️ baseline에서도 GREEN이다(평가기는 이 커밋이 새로 넣은 하네스다) → characterization.
+  #
+  # ── 변이: 옛 구조(공유 `configured` = READER && WRITER)를 그대로 재현한 워크플로 사본 ─────────────
+  MUT="$BATS_TEST_TMPDIR/bump-poll.mut.yaml"
+  yq '
+    .jobs.preflight.outputs = {"configured": "${{ steps.check.outputs.configured }}"} |
+    .jobs.preflight.steps[0].run = "if [ -n \"$READER\" ] && [ -n \"$WRITER\" ]; then\n  echo \"configured=true\" >> \"$GITHUB_OUTPUT\"\nelse\n  echo \"configured=false\" >> \"$GITHUB_OUTPUT\"\nfi\n" |
+    .jobs.reconcile.if = "needs.preflight.outputs.configured == '"'"'true'"'"'" |
+    .jobs.poll.if = "${{ !cancelled() && needs.preflight.outputs.configured == '"'"'true'"'"' }}"
+  ' "$F" > "$MUT"
+
+  # 그 사본으로 같은 시나리오(reader 없음 + writer 있음)를 평가한다 → 회수가 **skip된다**(= 결함 재현).
+  F="$MUT"
+  run gates_for "" "writer-app-id"
+  [ "$status" -eq 0 ] || { echo "harness: 변이본 평가가 실패했다"; echo "$output"; false; }
+  [ "$output" = "false false" ] || {
+    echo "toothless witness: 공유 configured 구조에서도 게이트가 '(reconcile poll) = $output'로 나왔다 —"
+    echo "  평가기가 조건식을 실제로 계산하지 않는다(기대 'false false' — reader 부재가 회수를 skip시킨다)."
+    false
+  }
+  # 그리고 정상 주기(둘 다 있음)에선 그 사본도 둘 다 돈다 — 즉 위 결과는 **reader 부재 때문**이다.
+  run gates_for "reader-app-id" "writer-app-id"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true true" ]
 }
 
 # ---------------------------------------------------------------------------
