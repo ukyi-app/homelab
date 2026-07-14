@@ -177,6 +177,16 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Review Decision Log
 
+### Codex Structure Review — r10: needs-attention → 3건 전부 Accept (owner 2026-07-15)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-33 | high | `Blocker: exhaustive pagination is re-bounded by spawnSync` — `gh api graphql --paginate --slurp`의 **전 페이지를 한 subprocess 캡처**에 담는다. `spawnSync`는 유한 버퍼(기본 1 MiB)이고 스트리밍도 `maxBuffer`도 없다 → **포크 포화 응답이 `gh`를 죽여** 그 앱의 폴링이 반복 억제된다. **R-13에서 없앤 배포 억제 무기가 질의 계층 *아래에서* 부활** | **Accept** | ★ **먼저 실측**(bun 1.3.14 · `node:child_process`): 기본 `maxBuffer` = **1 MiB**, 정확히 1 MiB는 정상, **1 MiB + 1바이트는 자식을 SIGTERM으로 죽인다**(`ENOBUFS`) — 조용한 절단이 아니라 **프로세스 사망** → 매 주기 exit 1. 큰 응답에 **fail-closed 하는 건 해법이 아니다**(그게 곧 억제다) → `--slurp`를 버리고 **페이지를 우리가 따라간다**(`fetchConnection`: 한 페이지 → 축약 → `endCursor`). **캡처 하나 = 한 페이지**라 공격자가 키울 수 없다. 상한 없음·`hasNextPage` 완전성·SEARCH 금지·강한 일관성 전부 보존. `maxBuffer` 4 MiB는 **심층 방어일 뿐** — 1 MiB로 낮춰도 증인은 green(**페이징이 픽스**임을 뮤턴트로 증명). 증인 W70(본 질의 ≈4.5 MiB)·W71(형제 스윕) |
+| R-34 | high | `Blocker: reconcile treats an unobservable author as "not ours"` — **형제 파서는 `author` 키 누락을 `null`(계정 삭제)로 접는데** 메인 파서는 스키마 실패로 본다 → `isTrustedSibling`이 걸러내어 **무장된 writer PR이 회수에서 증발**하고 run은 **exit 0**(`revocationBlind`도 안 탄다). V-2 위반이며 **파서·신뢰 모델을 둘로 유지한 대가** | **Accept** | 파서·신뢰 술어를 **하나로 통일**(`parsePrNode`/`isTrustedPr`). `author` 키는 **존재를 요구**하고, **명시적 `null`만** 계정 삭제로 허용, 누락·불량은 **관측 실패**(본 질의=fail-closed / 형제·reconcile=`revocationBlind` → 비-0 종료 + 대상 이름 보고). 증인 W72·W73. ⚠️ **컨덕터 뮤턴트 검증에서 구현자 주장이 거짓임을 발견**: 키 부재 가드만 지우면 **바로 다음 타입 검사**가 `undefined`를 잡아 증인이 green으로 남는다 → **옛 파서 동작을 충실히 재현한 뮤턴트**(키 부재 → 느슨한 비교로 `null` 접기)를 만들어서야 W72·W73이 RED가 됨을 확인 |
+| R-35 | high | `Blocker: the branch escapes scope[] and publishes the retired seam` — `tools/README.md`가 main 대비 변경됐는데 `scope[]`에 **없다**(단일-flip 규칙 위반). 게다가 그 **공개 계약이 낡았다** — 상한 있는 `gh pr list` 조회와 `BEHIND → skip`을 광고하는데 구현은 완전 GraphQL이고 BEHIND를 rebuild한다. increment 아티팩트도 동일하게 낡음 | **Accept** | `tools/README.md`를 **`scope[]`에 추가**(이 픽스가 바꾸는 비-테스트 표면이 맞다)하고 내용을 **최종 계약으로 정정**. increment·계획서도 동기화(실측 수치 포함). baseline을 **scope 4파일**로 다시 굳혔다. ★ 동기화 과정에서 내 개요의 **오류 4곳이 코드 기준으로 교정**됐다: 레인 출처는 메인 경로에선 `--action`(플래너 verbatim)이고 SSOT 직독은 `--reconcile-only`뿐(그래서 그 모드는 `--action`을 **거부**한다) · 소유권 증명은 force-push만이 아니라 **무장 자체**를 게이트한다(skip 경로 포함, R-23) · `DIRTY|BEHIND`는 **필요조건일 뿐** 사람 흔적이 있으면 skip으로 뒤집힌다(H-4) · hold 라벨은 `hold`·`do-not-close` **2종** |
+
+**최종 baseline**: `red..green` diff = **scope 4파일 정확히**(테스트 변경 0) · `--verify-flip` **flipOk: true**.
+
 ### Codex Structure Review — r9: needs-attention → 3건 전부 Accept (owner 2026-07-15)
 
 | ID | 심각도 | 발견 | 결정 | 반영 |
