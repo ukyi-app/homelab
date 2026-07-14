@@ -12,30 +12,27 @@
 // 안에 있어야 그 순서와 부작용(skip이면 push도 create도 없음)을 테스트로 증명할 수 있다.
 //
 // 관측 사실(변이 이전에 반드시 수집):
-//   gh pr list --head <branch> --state open --limit <PR_QUERY_LIMIT> \
-//     --json number,isCrossRepository,mergeStateStatus,author,headRefOid,autoMergeRequest  ← writer 토큰
+//   gh api graphql --paginate --slurp … (headRefName=<branch>, states:OPEN — **상한 없는 완전 열거**)
 //   git ls-remote --heads origin <branch>                                  ← 원격 브랜치 존재/OID
 //
-// ★ 조회는 **경계**가 있다 — 그래서 "부재"를 증명해야 한다(structure 게이트 high-2) ─────────────
-// `gh pr list`의 기본 상한은 **30건**이고, `--head`는 owner 한정 필터를 지원하지 않는다("<owner>:<branch>"
-// syntax not supported). 실측한 질의 형태(GH_DEBUG=api):
-//   repository.pullRequests(states:$state, headRefName:$headBranch, first:$limit, after:$endCursor,
-//                           orderBy:{field: CREATED_AT, direction: DESC})
-// → 같은 브랜치명으로 **공개 포크가 연 PR도 같은 페이지를 놓고 경쟁**하고, 정렬이 최신순(CREATED_AT DESC)이라
-//   나중에 열린 포크 PR 30건이면 **먼저 열린 writer PR이 페이지 밖으로 밀려난다**. 그러면 실행기는 자기
-//   브랜치를 "고아"로 오인해 force-push하고 PR을 또 만들려 든다 → 공격자가 멱등성을 깬다(억제/교란).
-// 그래서 조회 결과가 **완전한 열거**임을 증명한 뒤에만 판정한다:
-//   · 상한을 legit 상한보다 훨씬 크게 잡는다(PR_QUERY_LIMIT). GitHub은 같은 head→base 쌍에 열린 PR을
-//     **1개만** 허용하므로 신뢰 PR의 legit 최대치는 1이다 — 나머지는 전부 포크다.
-//   · 클라이언트 필터를 **하나도** 걸지 않으므로(전부 서버측 head/state 인자) `count < limit`은
-//     "커넥션이 소진됐다 = 열거가 완전하다"와 동치다 → 그때만 **부재가 권위 있다**.
-//   · `count >= limit`(포화)이면 밀려난 PR이 있을 수 있다 = **부재를 증명할 수 없다** → fail-closed
-//     (push·create·무장·해제 전부 0). 조용한 오탐(고아 오인 → force-push + 중복 create)보다 시끄러운 정지가 낫다.
-// ⚠️ `--author <writer>`(서버측 작성자 필터)는 **쓰지 않는다**. 실측(GH_DEBUG=api): `--author`를 주는 순간
-//    gh가 검색 API(`search(...)`)로 갈아탄다 — 검색 인덱스는 **결과적 일관성**이라, 직전 주기(10분 전)가 만든
-//    PR이 아직 인덱싱되지 않으면 **공격자 없이도** 거짓 부재가 난다(→ 고아 오인 경로). 이 도구의 판정은
-//    강한 일관성이 필요하므로 커넥션 질의(위)를 유지하고, 대신 **완전성**으로 부재를 증명한다.
-// 신뢰 판정은 **서버 필터에 맡기지 않는다**(심층 방어) — 아래 isTrusted가 동일-레포 + writer를 재검증한다.
+// ★ 조회는 **상한이 없어야** 한다 — 경계된 조회는 배포 정지 무기가 된다(structure 게이트 r2/r4) ────
+// 처음엔 `gh pr list --head <b>`를 썼다. 그건 **경계된** 질의다(기본 30건, `--limit`으로만 늘어난다):
+//   repository.pullRequests(headRefName:$h, first:$limit, orderBy:{CREATED_AT, DESC})   ← GH_DEBUG=api 실측
+// 결정적 브랜치명은 **공개**고 `--head`는 owner 한정 필터를 지원하지 않는다 → **포크가 같은 브랜치명으로 연
+// PR이 같은 페이지를 놓고 경쟁**하고, 최신순이라 나중에 열린 포크 PR들이 **먼저 열린 writer PR을 페이지 밖으로
+// 밀어낸다**. 두 가지 실패가 여기서 갈라진다:
+//   ① 상한을 믿고 진행 → 자기 PR을 "고아"로 오인 → force-push + 중복 create (멱등성 파괴)
+//   ② 상한에 닿으면 fail-closed → **포크로 페이지를 채우는 것만으로 모든 폴링이 죽는다**(배포 정지 무기).
+// 둘 다 공격자 통제다. 유일한 출구는 **상한을 없애는 것**이다: 끝까지 페이지네이션해 전부 열거하면,
+// 포크가 몇 건이든 우리 PR은 반드시 그 안에 있다 → 포크는 아무것도 막지 못한다.
+//   `gh api graphql --paginate`가 `pageInfo{hasNextPage,endCursor}` + `$endCursor` 변수를 요구하며
+//   hasNextPage=false까지 자동으로 따라간다(라이브 실증: first:1로도 전 페이지 열거). `--slurp`이 배열로 묶는다.
+//   완전 열거의 증명 = **마지막 페이지의 hasNextPage === false**(아니면 fail-closed).
+// ⚠️ 검색 API는 금지다: `gh pr list --author`는 내부적으로 `search(...)`로 갈아탄다(GH_DEBUG=api 실측).
+//    검색 인덱스는 **결과적 일관성**이라 직전 주기가 만든 PR이 안 잡히면 **공격자 없이도** 거짓 부재가 난다.
+//    connection 질의는 primary datastore = **강한 일관성**이다.
+// ⚠️ 모호성 fail-closed는 유지한다: **신뢰 PR이 2건 이상**이면 에러(GitHub 계약상 불가능 — 무언가 깨진 것이다).
+// 신뢰 판정은 **서버 필터에 맡기지 않는다**(심층 방어) — isTrusted가 동일-레포 + writer Bot + base를 재검증한다.
 //
 // ── 레인(--action)과 판정(action)은 **다른 축**이다 ────────────────────────────────────────────
 // · 레인 = 플래너(poll-ghcr)가 .bindings.json의 autoDeploy로 정한 배포 승인 모델:
@@ -145,11 +142,6 @@ const DEFAULT_WRITER = "ukyi-homelab-writer";
 const APP_RE = /^[a-z0-9-]+$/;
 const OID_RE = /^[0-9a-f]{40}$/;
 
-// 조회 상한 — "부재의 권위"를 만드는 상수다(위 헤더의 ★ 참고). gh 기본값은 30이라 포크 PR 30건이면
-// writer PR이 페이지 밖으로 밀린다. legit 최대치는 1(GitHub은 같은 head→base에 열린 PR을 1개만 허용)이므로
-// 이 상한에 **닿는다는 것 자체가 이상 신호**다 → 닿으면 판정하지 않고 fail-closed한다(아래 포화 가드).
-// 100 = GraphQL 페이지 상한(왕복 1회).
-const PR_QUERY_LIMIT = 100;
 
 // 배포 승인 레인 — poll-ghcr.ts가 내는 값과 **글자 그대로** 같다(`s.autoDeploy ? "bump" : "propose-pr"`).
 // 호출부가 이 값을 재해석하지 않고 그대로 넘기므로, 승인 레인(propose-pr)을 자동 배포로 바꾸려면
@@ -234,60 +226,134 @@ function mutate(cmd: string, a: string[], what: string): void {
   if (out) process.stderr.write(out);
 }
 
-// gh pr list --json이 주는 원시 스키마. author는 봇일 때 {is_bot, login}만 오고(id/name 없음),
-// 사람일 때 {id, is_bot, login, name}이 온다 → login/is_bot만 신뢰한다(라이브 확인 완료).
-// headRefOid는 DIRTY rebuild의 `--force-with-lease=<ref>:<oid>` 기대값이다(R-5) — 없으면 fail-closed.
+// ── 조회 = **상한 없는 완전 열거**(GraphQL connection, 끝까지 페이지네이션) ──────────────────────
+// `gh pr list`는 쓰지 않는다. 그건 `--limit`으로 **경계된** 질의라, 부재를 증명하려면 "상한에 닿으면
+// fail-closed"밖에 방법이 없는데 — 결정적 브랜치명은 **공개**고 같은 head의 **포크 PR은 공격자가 무한정
+// 열 수 있다** → 페이지를 채우는 것만으로 **모든 폴링이 화해 전에 죽는다**(배포 정지 원시 무기).
+// 상한을 없애면 그 무기가 사라진다: 포크가 몇 건이든 전부 열거하고, 그 사이에서 우리 PR을 정확히 찾는다.
 //
-// autoMergeRequest(R-10) — 라이브 실측 스키마(`gh pr list --json autoMergeRequest`, 이 레포):
-//   무장 안 됨: null
-//   무장 됨   : {"authorEmail":null,"commitBody":null,"commitHeadline":null,"mergeMethod":"SQUASH",
-//                "enabledAt":"2026-07-13T06:35:24Z",
-//                "enabledBy":{"is_bot":true,"login":"app/ukyi-homelab-writer"}}
-// → 무장 여부의 유일한 신호는 **null 여부**다(내부 필드는 보지 않는다 — 무장은 있거나 없거나다).
+// `gh api graphql --paginate`는 `pageInfo{hasNextPage,endCursor}` + `$endCursor: String` 변수를 요구하고,
+// hasNextPage가 false가 될 때까지 **자동으로 끝까지** 따라간다(라이브 실증: `first:1`로 강제해도 전 페이지 열거).
+// `--slurp`은 페이지별 응답을 **배열 하나**로 묶어 준다.
+// ⚠️ 검색 API는 금지다 — `gh pr list --author`는 내부적으로 search(...)로 갈아타는데(GH_DEBUG=api 실측),
+//    검색 인덱스는 **결과적 일관성**이라 직전 주기가 만든 PR이 안 잡히면 **거짓 부재**가 난다(고아 오인 →
+//    force-push). connection 질의는 primary datastore = **강한 일관성**이다.
+//
+// ★ base를 **서버 필터로 걸지 않는다**(중요) — head로만 열거하고 base는 **클라이언트에서** 본다.
+//   식별(우리 PR인가?)은 (head, base) 쌍이지만, **소유권**(이 브랜치를 force-push해도 되는가?)은 base와
+//   무관하게 "이 head에 열린 동일-레포 PR이 하나라도 있는가"로 정해진다. base로 서버 필터를 걸면 다른 base를
+//   향한 동일-레포 PR이 **보이지 않게 되고**, 그러면 파괴 가드(r3)가 눈이 멀어 그 PR의 브랜치를 force-push로
+//   덮어쓴다. 그래서 열거는 head 전체, 판정은 base까지 본다.
+const PR_QUERY = `query($owner:String!,$repo:String!,$head:String!,$endCursor:String){
+  repository(owner:$owner,name:$repo){
+    pullRequests(headRefName:$head, states:OPEN, first:100, after:$endCursor){
+      pageInfo{ hasNextPage endCursor }
+      nodes{
+        number isCrossRepository mergeStateStatus headRefOid baseRefName
+        author{ login __typename }
+        autoMergeRequest{ enabledAt }
+      }
+    }
+  }
+}`;
+
+// GraphQL 노드의 원시 스키마(라이브 실측 — 이 레포의 실제 bump PR):
+//   {"number":350,"isCrossRepository":false,"mergeStateStatus":"DIRTY","headRefOid":"5bb77fc…",
+//    "baseRefName":"main","author":{"login":"ukyi-homelab-writer","__typename":"Bot"},
+//    "autoMergeRequest":{"enabledAt":"2026-07-13T06:35:20Z"}}
+// ★★ author 표기는 **표면마다 다르다**(라이브 확인) — 여기서 틀리면 신뢰 판정이 조용히 죽는다:
+//     gh pr list  → "app/ukyi-homelab-writer"     (is_bot: true)
+//     REST        → "ukyi-homelab-writer[bot]"
+//     GraphQL     → "ukyi-homelab-writer"          (__typename: "Bot")   ← 지금 쓰는 표면
+//   normalizeLogin이 셋을 모두 같은 slug로 접는다.
+// ★★ __typename도 **신뢰 조건**이다: GraphQL은 App 봇을 `Bot`으로, 사람을 `User`로 준다. login만 보면
+//   `ukyi-homelab-writer`라는 **사람 계정**(봇 계정은 `<slug>[bot]`이므로 이 이름은 사람이 가질 수 있다)이
+//   writer로 오인될 수 있다 → 타입까지 봐야 신뢰 경계가 닫힌다.
+// autoMergeRequest: 무장=객체({enabledAt}) / 미무장=null — 유일한 신호는 **null 여부**다.
 type RawPr = {
   number: number; isCrossRepository: boolean; mergeStateStatus: string;
-  headRefOid: string; author: { login: string; is_bot?: boolean };
+  headRefOid: string; baseRefName: string;
+  author: { login: string; type: string } | null;
   autoMerge: boolean;
 };
 
-// 비신뢰 입력 검증 — 빈 문자열/깨진 JSON/배열 아님/필드 누락·타입 위반은 전부 fail-closed.
+// `gh api graphql --paginate --slurp` 출력 = **페이지 응답의 배열**. 각 원소는 {data:{repository:{pullRequests:…}}}.
+// 완전 열거의 증명은 **마지막 페이지의 hasNextPage === false**다 — true로 끝났다면 gh가 페이지를 다 따라가지
+// 못한 것이므로 "열린 PR 없음"을 증명할 수 없다 → fail-closed(조용한 create/adopt 금지).
 function parsePrs(raw: string): RawPr[] {
-  if (raw.trim() === "") inputError("gh pr list 빈 출력(--json은 최소 '[]'를 준다 → 조회 실패로 본다)");
+  if (raw.trim() === "") inputError("gh api graphql 빈 출력(조회 실패로 본다)");
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (e) {
-    inputError(`gh pr list JSON 파싱 실패: ${(e as Error).message}`);
+    inputError(`gh api graphql JSON 파싱 실패: ${(e as Error).message}`);
   }
-  if (!Array.isArray(parsed)) inputError("gh pr list 최상위가 배열이 아님");
-  return parsed.map((pr: any, i: number): RawPr => {
-    const at = `[${i}]`;
-    if (pr === null || typeof pr !== "object") inputError(`${at} 객체가 아님`);
-    if (!Number.isInteger(pr.number)) inputError(`${at}.number 정수 아님`);
-    if (typeof pr.isCrossRepository !== "boolean") inputError(`${at}.isCrossRepository 불리언 아님`);
-    if (typeof pr.mergeStateStatus !== "string" || pr.mergeStateStatus === "") inputError(`${at}.mergeStateStatus 문자열 아님`);
-    if (typeof pr.headRefOid !== "string" || !OID_RE.test(pr.headRefOid)) inputError(`${at}.headRefOid가 40-hex OID 아님(lease 기대값 필수)`);
-    if (pr.author === null || typeof pr.author !== "object") inputError(`${at}.author 객체가 아님`);
-    if (typeof pr.author.login !== "string" || pr.author.login === "") inputError(`${at}.author.login 문자열 아님`);
-    // 무장 여부는 **필드 존재**까지 계약이다(R-10). 필드명이 드리프트해 undefined가 되면 "무장 안 됨"으로
-    // 읽혀 매 폴링 재무장(소음)하거나, 반대로 "무장됨"으로 읽혀 무장 갭이 영영 안 닫힌다 → 둘 다 조용한
-    // 오동작이라 fail-closed로 막는다(headRefOid·isCrossRepository 드리프트 가드와 동형).
-    if (!("autoMergeRequest" in pr)) {
-      inputError(`${at}.autoMergeRequest 필드 없음 — 무장 여부를 모르면 재무장을 판정할 수 없다(필드명 드리프트)`);
+  if (!Array.isArray(parsed)) inputError("gh api graphql --slurp 최상위가 배열(페이지 목록)이 아님");
+  const pages = parsed as any[];
+  if (pages.length === 0) inputError("gh api graphql이 페이지를 하나도 주지 않았다(조회 실패로 본다)");
+
+  const out: RawPr[] = [];
+  pages.forEach((page: any, p: number) => {
+    const at = `page[${p}]`;
+    if (page === null || typeof page !== "object") inputError(`${at} 객체가 아님`);
+    if (page.errors !== undefined) inputError(`${at}.errors — GraphQL 오류 응답: ${JSON.stringify(page.errors)}`);
+    const conn = page?.data?.repository?.pullRequests;
+    if (conn === null || typeof conn !== "object") {
+      inputError(`${at}.data.repository.pullRequests 없음(레포 해석 실패 또는 스키마 드리프트)`);
     }
-    const amr = pr.autoMergeRequest;
-    if (amr !== null && (typeof amr !== "object" || Array.isArray(amr))) {
-      inputError(`${at}.autoMergeRequest가 null도 객체도 아님(무장=객체 / 미무장=null)`);
+    // 완전 열거 증명 — 마지막 페이지가 "더 있다"고 하면 열거가 끊긴 것이다.
+    const info = conn.pageInfo;
+    if (info === null || typeof info !== "object" || typeof info.hasNextPage !== "boolean") {
+      inputError(`${at}.pageInfo.hasNextPage 불리언 아님 — 완전 열거를 증명할 수 없다`);
     }
-    return {
-      number: pr.number,
-      isCrossRepository: pr.isCrossRepository,
-      mergeStateStatus: pr.mergeStateStatus,
-      headRefOid: pr.headRefOid,
-      author: { login: pr.author.login, is_bot: pr.author.is_bot },
-      autoMerge: amr !== null,
-    };
+    if (p === pages.length - 1 && info.hasNextPage === true) {
+      inputError(
+        "마지막 페이지가 hasNextPage=true다 — 페이지네이션이 끝까지 가지 못했다. "
+        + "열거가 불완전하면 '열린 PR 없음'을 증명할 수 없다(--paginate 배선 확인)",
+      );
+    }
+    const nodes = conn.nodes;
+    if (!Array.isArray(nodes)) inputError(`${at}.nodes가 배열이 아님`);
+
+    nodes.forEach((pr: any, i: number) => {
+      const nat = `${at}.nodes[${i}]`;
+      if (pr === null || typeof pr !== "object") inputError(`${nat} 객체가 아님`);
+      if (!Number.isInteger(pr.number)) inputError(`${nat}.number 정수 아님`);
+      if (typeof pr.isCrossRepository !== "boolean") inputError(`${nat}.isCrossRepository 불리언 아님`);
+      if (typeof pr.mergeStateStatus !== "string" || pr.mergeStateStatus === "") inputError(`${nat}.mergeStateStatus 문자열 아님`);
+      if (typeof pr.headRefOid !== "string" || !OID_RE.test(pr.headRefOid)) inputError(`${nat}.headRefOid가 40-hex OID 아님(lease 기대값 필수)`);
+      // base는 **식별**의 절반이다(head, base) — 없으면 우리 PR인지 판정할 수 없다.
+      if (typeof pr.baseRefName !== "string" || pr.baseRefName === "") inputError(`${nat}.baseRefName 문자열 아님(식별은 (head, base) 쌍이다)`);
+      // author는 **null일 수 있다**(계정 삭제) → 신뢰하지 않을 뿐, fail-closed는 아니다(영구 억제 방지).
+      let author: { login: string; type: string } | null = null;
+      if (pr.author !== null) {
+        if (typeof pr.author !== "object") inputError(`${nat}.author가 객체도 null도 아님`);
+        if (typeof pr.author.login !== "string" || pr.author.login === "") inputError(`${nat}.author.login 문자열 아님`);
+        // __typename은 신뢰 조건이다(Bot vs User) — 없으면 사람이 writer slug를 사칭할 수 있다.
+        if (typeof pr.author.__typename !== "string" || pr.author.__typename === "") {
+          inputError(`${nat}.author.__typename 없음 — App 봇(Bot)과 사람(User)을 구분할 수 없다(사칭 가드)`);
+        }
+        author = { login: pr.author.login, type: pr.author.__typename };
+      }
+      if (!("autoMergeRequest" in pr)) {
+        inputError(`${nat}.autoMergeRequest 필드 없음 — 무장 여부를 모르면 재무장/해제를 판정할 수 없다(필드명 드리프트)`);
+      }
+      const amr = pr.autoMergeRequest;
+      if (amr !== null && (typeof amr !== "object" || Array.isArray(amr))) {
+        inputError(`${nat}.autoMergeRequest가 null도 객체도 아님(무장=객체 / 미무장=null)`);
+      }
+      out.push({
+        number: pr.number,
+        isCrossRepository: pr.isCrossRepository,
+        mergeStateStatus: pr.mergeStateStatus,
+        headRefOid: pr.headRefOid,
+        baseRefName: pr.baseRefName,
+        author,
+        autoMerge: amr !== null,
+      });
+    });
   });
+  return out;
 }
 
 // `git ls-remote --heads origin <branch>` → "<40-hex>\trefs/heads/<branch>"(없으면 빈 출력).
@@ -333,41 +399,43 @@ function createPr(): number {
   return [...nums][0]!;
 }
 
-// gh는 App 작성자를 `app/<slug>`로, REST/GraphQL은 `<slug>[bot]`로 표기한다 — 둘 다 같은 slug로 정규화.
-// (라이브 확인: `gh pr list --json author` → {"login":"app/ukyi-homelab-writer","is_bot":true})
+// writer App의 login 표기는 **표면마다 다르다**(전부 라이브 확인) → 셋을 같은 slug로 접는다:
+//   gh pr list → "app/ukyi-homelab-writer"  /  REST → "ukyi-homelab-writer[bot]"
+//   GraphQL    → "ukyi-homelab-writer"      (__typename:"Bot" — 지금 쓰는 표면)
+// 한 표기만 인식하면 신뢰 판정이 조용히 0이 되어 중복 PR이 되살아난다(과거에 실제로 밟은 함정).
 function normalizeLogin(login: string): string {
   return login.replace(/^app\//, "").replace(/\[bot\]$/, "").toLowerCase();
 }
 
-// 신뢰하는 제안 = 동일-레포(포크 아님) + writer App 작성자. 그 외(포크·타인)는 사실로만 관측하고
-// 판정 근거로 쓰지 않는다 — 억제(suppression)에 악용될 수 있는 표면이기 때문.
-function isTrusted(pr: RawPr, writer: string): boolean {
+// 신뢰하는 제안 = **(head, base) 쌍이 우리 것** + 동일-레포(포크 아님) + writer **App 봇** 작성자.
+// 그 외(포크·타인·다른 base)는 사실로만 관측하고 판정 근거로 쓰지 않는다.
+//   · base: 식별은 head만으로 부족하다 — 같은 head가 **다른 base**를 향한 PR은 **우리 PR이 아니다**.
+//           그걸 우리 것으로 착각하면 skip/rebuild/무장/해제를 엉뚱한 PR에 하고, 정작 요청된 base의
+//           PR은 영영 안 생긴다.
+//   · type: GraphQL은 App 봇을 `Bot`, 사람을 `User`로 준다. 봇 계정의 실제 login은 `<slug>[bot]`이므로
+//           **`<slug>` 그대로의 사람 계정이 존재할 수 있다** → login만 보면 사칭이 가능하다. 타입까지 본다.
+function isTrusted(pr: RawPr, writer: string, base: string): boolean {
   if (pr.isCrossRepository) return false;
+  if (pr.baseRefName !== base) return false;
+  if (pr.author === null) return false;
+  if (pr.author.type !== "Bot") return false;
   return normalizeLogin(pr.author.login) === normalizeLogin(writer);
 }
 
-// ── ① 조회 — 변이보다 **먼저**, 전부 수집한다(순서 자체가 계약이다: R-4) ─────────────────────
-// `--limit`은 **부재를 권위 있게** 만드는 계약이다(헤더 ★): 클라이언트 필터가 0이므로 반환 수가 상한
-// 미만이면 커넥션이 소진된 것 = 열거가 완전하다. 상한을 빼먹으면 gh 기본값 30으로 조용히 되돌아가
-// 포크 크라우딩에 다시 뚫린다 → 상한은 argv 계약의 일부다(테스트가 argv 배열로 못박는다).
+// ── ① 조회 — 변이보다 **먼저**, 상한 없이 **전부** 수집한다(순서도 완전성도 계약이다: R-4) ────────
+// `--paginate`가 hasNextPage=false까지 따라가고 `--slurp`이 페이지들을 배열로 묶는다. 상한이 없으므로
+// 포크 PR이 몇 건이든(200건이든 2000건이든) 우리 PR은 반드시 이 열거 안에 있다 → 포크로는 배포를
+// 정지시킬 수 없다. owner/repo는 gh의 `{owner}`/`{repo}` 플레이스홀더가 현재 레포에서 채운다(라이브 확인).
 const prs = parsePrs(run(
   "gh",
-  ["pr", "list", "--head", branch, "--state", "open", "--limit", String(PR_QUERY_LIMIT),
-    "--json", "number,isCrossRepository,mergeStateStatus,author,headRefOid,autoMergeRequest"],
-  "gh pr list",
+  ["api", "graphql", "--paginate", "--slurp",
+    "-f", `query=${PR_QUERY}`,
+    "-F", "owner={owner}", "-F", "repo={repo}", "-F", `head=${branch}`],
+  "gh api graphql (pullRequests)",
 ));
-// 포화 가드 — 상한에 닿았다 = 밀려난 PR이 있을 수 있다 = **부재를 증명할 수 없다**.
-// 여기서 조용히 진행하면 신뢰 PR을 못 본 채 "고아 브랜치"로 오인해 force-push + 중복 create를 낸다
-// (= 공격자가 포크 PR 다발로 멱등성을 깨는 경로). 판정도 변이도 하지 않는다.
-if (prs.length >= PR_QUERY_LIMIT) {
-  inputError(
-    `열린 PR이 조회 상한(${PR_QUERY_LIMIT})에 닿았다 — 같은 브랜치명 '${branch}'에 PR이 그만큼 열려 있다(포크 크라우딩?). `
-    + "밀려난 신뢰 PR이 있을 수 있어 '열린 PR 없음'을 증명할 수 없다",
-  );
-}
 const remoteBranch = parseLsRemote(run("git", ["ls-remote", "--heads", args.remote, branch], "git ls-remote"));
 
-const observedPrs = prs.map((pr) => ({ ...pr, trusted: isTrusted(pr, args.writer) }));
+const observedPrs = prs.map((pr) => ({ ...pr, trusted: isTrusted(pr, args.writer, args.base) }));
 const trustedAll = observedPrs.filter((pr) => pr.trusted);
 // GitHub은 같은 head→base 쌍에 열린 PR을 1개만 허용한다 → 신뢰 PR이 2개 이상이면 우리의 신뢰 경계나
 // GitHub의 계약 중 하나가 깨진 것이다. 아무거나 고르면 나머지 하나는 조용히 방치된다(무장 갭·좀비).
@@ -389,9 +457,15 @@ const trusted = trustedAll[0] ?? null;
 // 만약 그렇게 보인다면 우리가 사실을 잘못 읽은 것이다 → 어느 쪽이든 변이하지 않는 게 정답이다.
 // (포크 PR은 여기 걸리지 않는다 — 포크의 head는 우리 레포 ref가 아니라 우리 브랜치를 침해하지 않는다.
 //  그래서 포크만 있는 경우는 기존대로 브랜치 유무로 create/adopt를 고른다.)
+// ⚠️ 소유권은 **base와 무관**하다: 같은 head를 다른 base로 향한 동일-레포 PR도 **그 브랜치를 쓰고 있다**.
+//    그래서 조회를 base로 필터하지 않고(위 PR_QUERY), 여기서 head 전체의 동일-레포 PR을 본다.
+//    (다른 base의 writer PR을 "우리 것"으로 오인하지 않는 건 isTrusted의 base 검사가 맡는다 — 식별과
+//     소유권은 다른 질문이다: "우리 PR인가?"는 (head, base), "이 브랜치를 밀어도 되나?"는 head다.)
 const untrustedSameRepo = observedPrs.filter((pr) => !pr.trusted && !pr.isCrossRepository);
 if (trusted === null && untrustedSameRepo.length > 0) {
-  const who = untrustedSameRepo.map((p) => `#${p.number}(${p.author.login})`).join(", ");
+  const who = untrustedSameRepo
+    .map((p) => `#${p.number}(${p.author?.login ?? "삭제된 계정"} → ${p.baseRefName})`)
+    .join(", ");
   execError(
     `신뢰할 수 없는 동일-레포 PR이 이 브랜치에 열려 있다: ${who} — 브랜치 '${branch}'는 그 PR의 것이다. `
     + "force-push(adopt)로 덮어쓰면 남의 작업을 파괴하고, PR을 새로 열면 중복 제안이 된다",

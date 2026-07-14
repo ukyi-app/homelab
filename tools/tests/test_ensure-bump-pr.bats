@@ -163,6 +163,9 @@ elif mode == "first":
     sys.exit(1)
 elif mode == "hasarg":  # 어떤 레코드든 want[0]과 **정확히 같은 인자 원소**를 갖는가(부분 문자열 아님)
     sys.exit(0 if any(want[0] in r for r in records) else 1)
+elif mode == "hassub":  # 어떤 레코드의 **어떤 인자 원소 안에** want[0]이 부분 문자열로 들어 있는가
+    # (GraphQL 질의문처럼 한 인자에 통째로 실리는 페이로드의 내용을 검사할 때만 쓴다.)
+    sys.exit(0 if any(any(want[0] in a for a in r) for r in records) else 1)
 elif mode == "dump":
     for i, r in enumerate(records, 1):
         print("%2d) argc=%d  %s" % (i, len(r), " ".join(repr(a) for a in r)))
@@ -187,17 +190,16 @@ PY
 # NUL 구분 원장(R-9): 인자 개수·경계 보존. 레코드는 RS(0x1e)로 종단한다.
 { printf '%s\0' gh "$@"; printf '\036'; } >> "$CALLS"
 case "$1:$2" in
-  pr:list)
-    if [ -n "${STUB_GH_LIST_FAIL:-}" ]; then echo "stub: gh pr list 실패(조회 장애 시뮬)" >&2; exit 1; fi
-    # --limit이 없으면 라이브 gh의 **기본 상한 30**을 적용한다(상한을 안 넘긴 구현이 여기서 잘린다).
-    limit=30
-    prev=""
-    for a in "$@"; do
-      if [ "$prev" = "--limit" ]; then limit="$a"; fi
-      prev="$a"
-    done
-    # 배열 픽스처면 최신순 앞에서 limit개만(라이브 절단). 아니면(깨진 JSON·비배열·빈 바이트) 원본 그대로.
-    if out="$(jq -c ".[0:${limit}]" "$STUB_PRS" 2>/dev/null)"; then printf '%s' "$out"; else cat "$STUB_PRS"; fi
+  api:graphql)
+    if [ -n "${STUB_GH_LIST_FAIL:-}" ]; then echo "stub: gh api graphql 실패(조회 장애 시뮬)" >&2; exit 1; fi
+    # 봉투(envelope) 자체를 주입해야 하는 증인(레포 해석 실패·GraphQL errors·페이지네이션 미완)용 탈출구.
+    if [ -n "${STUB_GRAPHQL_RAW+set}" ]; then printf '%s' "$STUB_GRAPHQL_RAW"; exit 0; fi
+    # 기본: 픽스처(=노드 배열)를 `gh api graphql --paginate --slurp`의 **페이지 배열** 봉투에 싸서 낸다.
+    # 라이브 형태(실측): [{"data":{"repository":{"pullRequests":{"pageInfo":{…},"nodes":[…]}}}}]
+    # ★ 상한이 없다 — 노드가 200건이든 2000건이든 그대로 낸다(gh가 hasNextPage=false까지 따라가므로
+    #   도구가 보는 것은 언제나 **완전 열거**다). 옛 `gh pr list` stub의 --limit 절단은 여기서 사라진다.
+    printf '[{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":%s,"endCursor":null},"nodes":%s}}}}]' \
+      "${STUB_HAS_NEXT_PAGE:-false}" "$(cat "$STUB_PRS")"
     ;;
   # gh pr create는 만든 PR의 **URL**을 stdout에 낸다 → 도구가 거기서 번호를 파싱해 무장 셀렉터로 쓴다.
   # STUB_GH_CREATE_OUT으로 출력 형식 드리프트(번호 파싱 불가)를 주입할 수 있다(fail-closed 증인).
@@ -266,16 +268,20 @@ BASH
   AUTOMERGE_SH="$ROOT/scripts/auto-merge-or-fail.sh"
 }
 
-# writer App 작성자의 라이브 표기 — `gh pr list --json author`는 App을 `app/<slug>`로 준다
-# (`<slug>[bot]`이 아니다. 실측: {"is_bot":true,"login":"app/ukyi-homelab-writer"}).
-writer_author() { printf '{"is_bot":true,"login":"app/ukyi-homelab-writer"}'; }
+# writer App 작성자의 **GraphQL 라이브 표기**(실측 — 이 레포의 실제 bump PR #350):
+#   {"login":"ukyi-homelab-writer","__typename":"Bot"}
+# ★★ 표기는 표면마다 다르다 — 이걸 틀리면 신뢰 판정이 조용히 0이 되어 중복 PR이 되살아난다:
+#     gh pr list → "app/ukyi-homelab-writer"(is_bot:true) / REST → "ukyi-homelab-writer[bot]"
+#     GraphQL    → "ukyi-homelab-writer"(__typename:"Bot")   ← 도구가 쓰는 표면
+# ★★ __typename은 **신뢰 조건**이다: 봇 계정의 실제 login은 `<slug>[bot]`이므로 `<slug>` 그대로의
+#    **사람 계정**이 존재할 수 있다 → login만 보면 사칭이 가능하다(아래 사칭 증인이 이걸 고정한다).
+writer_author() { printf '{"login":"ukyi-homelab-writer","__typename":"Bot"}'; }
+human_author()  { printf '{"login":"%s","__typename":"User"}' "${1:-drive-by}"; }
 
-# `gh pr list --json autoMergeRequest`의 **라이브 실측 스키마**(이 레포에서 확인):
-#   무장 안 됨 → null
-#   무장 됨   → {"authorEmail":null,"commitBody":null,"commitHeadline":null,"mergeMethod":"SQUASH",
-#                "enabledAt":"…","enabledBy":{"is_bot":true,"login":"app/ukyi-homelab-writer"}}
+# GraphQL `autoMergeRequest{ enabledAt }`의 라이브 실측:
+#   무장 안 됨 → null            무장 됨 → {"enabledAt":"2026-07-13T06:35:20Z"}
 # 무장 여부의 유일한 신호는 **null 여부**다(내부 필드는 판정에 쓰지 않는다 — 무장은 있거나 없거나).
-amr_armed()  { printf '{"authorEmail":null,"commitBody":null,"commitHeadline":null,"mergeMethod":"SQUASH","enabledAt":"2026-07-13T06:35:24Z","enabledBy":{"is_bot":true,"login":"app/ukyi-homelab-writer"}}'; }
+amr_armed()  { printf '{"enabledAt":"2026-07-13T06:35:20Z"}'; }
 amr_absent() { printf 'null'; }
 
 # gh pr list --head <branch> --state open
@@ -292,10 +298,11 @@ write_prs()   { printf '%s' "$1" > "$STUB_PRS"; }
 #   (포크의 head는 자기 레포 ref다) → 그때만 write_heads를 생략한다.
 write_heads() { printf '%s\t%s\n' "$1" "refs/heads/$BRANCH" > "$STUB_HEADS"; }
 
-# 신뢰 PR(동일-레포 + writer App) 한 건의 원시 JSON — number / mergeStateStatus / autoMergeRequest만 갈린다.
+# 신뢰 PR(동일-레포 + writer App Bot + base=main) 한 건의 GraphQL 노드 — number / state / 무장 / base가 갈린다.
+# base 기본값은 main(도구의 --base 기본값) — 4번째 인자로 **다른 base**를 주면 "우리 PR이 아닌" 노드가 된다.
 writer_pr() {
-  printf '{"number":%s,"isCrossRepository":false,"mergeStateStatus":"%s","headRefOid":"%s","author":%s,"autoMergeRequest":%s}' \
-    "$1" "$2" "$PR_OID" "$(writer_author)" "$3"
+  printf '{"number":%s,"isCrossRepository":false,"mergeStateStatus":"%s","headRefOid":"%s","baseRefName":"%s","author":%s,"autoMergeRequest":%s}' \
+    "$1" "$2" "$PR_OID" "${4:-main}" "$(writer_author)" "$3"
 }
 
 # ── 포크 크라우딩 픽스처 — **경계된 조회**를 공격하는 형태(structure high-2) ────────────────────────
@@ -309,8 +316,8 @@ crowded_prs() {
   printf '['
   while [ "$i" -lt "$n" ]; do
     [ "$i" -eq 0 ] || printf ','
-    printf '{"number":%d,"isCrossRepository":true,"mergeStateStatus":"CLEAN","headRefOid":"%s","author":{"is_bot":false,"login":"drive-by%d"},"autoMergeRequest":null}' \
-      "$((9000 + i))" "$ORPHAN_OID" "$i"
+    printf '{"number":%d,"isCrossRepository":true,"mergeStateStatus":"CLEAN","headRefOid":"%s","baseRefName":"main","author":%s,"autoMergeRequest":null}' \
+      "$((9000 + i))" "$ORPHAN_OID" "$(human_author "drive-by$i")"
     i=$((i + 1))
   done
   if [ -n "$tail_pr" ]; then
@@ -348,6 +355,8 @@ count_calls()    { python3 "$LEDGER_PY" count "$CALLS" "$@"; }
 has_call_exact() { python3 "$LEDGER_PY" exact "$CALLS" "$@"; }
 # 어떤 레코드든 그 **정확한 인자 원소**를 갖는가(예: bare `--force-with-lease` 탐지 — `=…` 형태와 구분된다).
 has_arg_exact()  { python3 "$LEDGER_PY" hasarg "$CALLS" "$@"; }
+# 어떤 인자 **원소 안에** 이 부분 문자열이 있는가 — GraphQL 질의문(한 인자에 통째로 실린다) 검사 전용.
+has_substr()     { python3 "$LEDGER_PY" hassub "$CALLS" "$@"; }
 # 접두 일치 첫 레코드의 1-기반 순번(없으면 빈 문자열).
 first_call()     { python3 "$LEDGER_PY" first "$CALLS" "$@" || true; }
 dump_calls()     { echo "--- 실행된 명령(원장 — argc + 인자 경계 보존) ---"; python3 "$LEDGER_PY" dump "$CALLS"; }
@@ -377,7 +386,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 @test "W1: an open same-repo writer PR suppresses every mutation (no push, no create)" {
   # PR은 **이미 무장**돼 있다 → 이 주기의 옳은 행동은 문자 그대로 "아무것도 하지 않음"이다
   # (무장이 빠진 경우의 재무장은 W4가, 재무장의 멱등성은 W5가 따로 고정한다).
-  write_prs "[{\"number\":350,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
+  write_prs "[{\"number\":350,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure
   [ "$status" -eq 0 ]
@@ -407,7 +416,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 @test "W2: a DIRTY writer PR is recovered by a leased force-push, never by a second create" {
   # DIRTY 교착: 유일한 PR이 충돌나면 이후 폴링이 전부 skip → 깨끗한 대체 PR이 영영 안 생겨
   # 배포가 조용히 멈춘다(pr-sweeper는 DIRTY를 무시). 최신 main에서 재구축해 force-push해야 풀린다.
-  write_prs "[{\"number\":351,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
+  write_prs "[{\"number\":351,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure
   [ "$status" -eq 0 ]
@@ -490,7 +499,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # PR만 다루므로 아무도 이걸 고쳐주지 않는다). 무장은 desired state여야 한다 → 재무장으로 수렴한다.
   #
   # 기대: 무장 1회(공유 스크립트 경유) + push 0 + create 0(PR은 이미 있다 — 새로 열면 그게 중복 PR이다).
-  write_prs "[{\"number\":360,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
+  write_prs "[{\"number\":360,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
@@ -536,7 +545,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # 멱등의 반대편: 무장이 **이미** 있으면 아무것도 하지 않는다. 매 폴링(10분)마다 무장을 다시 걸면
   # `gh pr merge --auto`가 이미 무장된 PR에 대해 무슨 짓을 하든(성공/에러/재무장 이벤트) 그건
   # desired-state 수렴이 아니라 churn이다 — 무장은 "있거나 없거나"이므로 있으면 손대지 않는다.
-  write_prs "[{\"number\":361,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
+  write_prs "[{\"number\":361,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
@@ -565,7 +574,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # 충돌시키면 → **DIRTY + 미무장**이다. 그 상태에서 rebuild만 하고 무장을 건너뛰면 PR은 깨끗해지는데
   # auto-merge가 영영 안 붙어 autoDeploy 배포가 조용히 정지한다(pr-sweeper는 무장된 PR만 다룬다).
   # 계약: 신뢰 PR이 있고 lane=bump인데 무장이 없으면, **그 run의 판정이 무엇이든**(skip이든 rebuild든) 재무장한다.
-  write_prs "[{\"number\":363,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
+  write_prs "[{\"number\":363,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
@@ -614,7 +623,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # W6의 멱등 짝. rebuild가 "무조건 무장"으로 구현되면(판정 축에 무장을 매달면) 충돌난 PR을 되살릴 때마다
   # 이미 살아 있는 무장을 다시 건드린다 — 무장은 desired state지 rebuild의 부작용이 아니다.
   # force-push는 무장을 지우지 않는다(autoMergeRequest는 head OID가 아니라 PR에 붙는다) → 재무장할 게 없다.
-  write_prs "[{\"number\":364,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
+  write_prs "[{\"number\":364,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane bump
   [ "$status" -eq 0 ]
@@ -797,35 +806,153 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 }
 
 # bats test_tags=regression
-@test "W11: a saturated PR page fails closed (absence cannot be proven, so nothing is mutated)" {
-  # 상한을 아무리 올려도 공격자는 그만큼 더 열 수 있다 → **상한에 닿는 것 자체**가 "밀려난 PR이 있을 수 있다"는
-  # 신호다. 그 상태에서 조용히 "열린 PR 없음"으로 판정하면 정확히 그 공격이 성립한다(고아 오인 → force-push +
-  # 중복 create). 부재를 증명할 수 없으면 **판정도 변이도 하지 않는다**(fail-closed).
-  # 포크 200건(어떤 합리적 상한에도 닿는다) + writer PR은 저 뒤에 밀려 보이지 않는다.
-  write_prs "$(crowded_prs 200 "$(writer_pr 381 CLEAN "$(amr_armed)")")"
+@test "W11: 200 fork PRs cannot stall the deployment (unbounded enumeration reconciles right through them)" {
+  # ★★ 이 브랜치의 **핵심 계약**. 경계된 조회의 fail-closed 버전은 파괴적 오분류는 피했지만 **배포 정지
+  # 원시 무기**를 만들었다: 결정적 브랜치명은 공개고, 그 head의 포크 PR은 **공격자가 무한정 열 수 있다** →
+  # 페이지를 채우면 모든 폴링이 화해 전에 죽는다. 상한 없는 완전 열거는 그 무기를 무력화한다 —
+  # 포크가 200건이든 우리 PR은 열거 안에 있고, 폴링은 **정상적으로 화해한다**.
+  write_prs "$(crowded_prs 200 "$(writer_pr 381 BLOCKED "$(amr_absent)")")"
   write_heads "$PR_OID"
   run_ensure_lane bump
-  [ "$status" -ne 0 ] || {
-    echo "unproven absence: 조회가 상한까지 꽉 찼는데(포크 크라우딩) 도구가 성공으로 끝났다 —"
-    echo "  밀려난 신뢰 PR이 있을 수 있으므로 '열린 PR 없음'을 증명할 수 없다 → fail-closed여야 한다."
+  [ "$status" -eq 0 ] || {
+    echo "deployment stalled by forks: 포크 200건 앞에서 도구가 죽었다 — 포크는 배포를 막을 수 없어야 한다"
     echo "$output"; dump_calls; false
   }
 
-  # fail-closed = **변이 0**. (오인 경로의 실제 피해는 force-push와 중복 create다.)
+  # 포크 200건 사이에서 우리 PR을 정확히 찾아 **정상 화해**한다(무장 갭을 닫는다).
+  echo "$output" | jq -e '.observed.trusted.number == 381' > /dev/null \
+    || { echo "hidden writer PR: 포크 200건에 가려 자기 PR(#381)을 보지 못했다"; echo "$output"; dump_calls; false; }
+  run arm_calls_num 381
+  [ "$output" -eq 1 ] || {
+    echo "deployment stalled by forks: 포크에 가려 재무장(#381)이 일어나지 않았다"
+    dump_calls; false
+  }
+  # 고아 오인은 없다 — push·create 0회(신뢰 PR이 이미 열려 있다).
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+  action="$(echo "$JSON" | jq -r '.action')"
+  [ "$action" = "skip" ]
+}
+
+# bats test_tags=regression
+@test "W11b: 200 fork PRs cannot block adopting our own orphan branch either (no trusted PR, forks only)" {
+  # 위의 짝 — 신뢰 PR이 **없을** 때도 포크는 우리를 막지 못한다. 포크 PR은 우리 레포의 ref를 소유하지 않으므로
+  # 남은 브랜치는 여전히 우리 고아다 → 정상적으로 adopt한다(포크 수와 무관).
+  write_prs "$(crowded_prs 200 "")"
+  write_heads "$ORPHAN_OID"
+  run_ensure_lane bump
+  [ "$status" -eq 0 ] || {
+    echo "deployment stalled by forks: 포크 200건이 우리 고아 브랜치의 adopt를 막았다"
+    echo "$output"; dump_calls; false
+  }
+  action="$(echo "$JSON" | jq -r '.action')"
+  [ "$action" = "adopt" ] || {
+    echo "deployment stalled by forks: 포크 200건 앞에서 '$action'로 갔다(기대 adopt)"
+    echo "$JSON"; false
+  }
+  run has_call_exact "${PUSH_ADOPT[@]}"
+  [ "$status" -eq 0 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 1 ]
+}
+
+# bats test_tags=regression
+@test "W11c: an incomplete pagination fails closed (a truncated enumeration cannot prove absence)" {
+  # 완전 열거의 **증명**은 마지막 페이지의 hasNextPage=false다. true로 끝났다면 gh가 페이지를 다 따라가지
+  # 못한 것(--paginate 배선 실수·API 이상) → "열린 PR 없음"을 증명할 수 없다 → 조용히 create/adopt로
+  # 흘리면 안 된다(그게 이 브랜치가 고치는 중복 PR·force-push 버그의 입구다).
+  write_prs '[]'
+  write_heads "$ORPHAN_OID"
+  export STUB_HAS_NEXT_PAGE=true
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "unproven absence: 페이지네이션이 끝나지 않았는데(hasNextPage=true) 도구가 성공으로 끝났다"
+    echo "$output"; dump_calls; false
+  }
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+  merges="$(merge_calls)"
+  [ "$merges" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W11d: a trusted PR is identified by the (head, base) PAIR — another base is not our PR" {
+  # 지적 1: `--base`는 PR **생성**을 제어하는데 식별이 head로만 이뤄지면, 같은 결정적 head를 **다른 base**로
+  # 향한 writer PR을 "우리 PR"로 착각한다 → 그걸 skip/rebuild/무장/해제하고, 정작 요청된 base의 PR은 영영
+  # 안 생긴다. 식별은 (head, base) **쌍**이다.
+  # ⚠️ 다만 그 PR도 **동일-레포**라 이 브랜치를 쓰고 있다(소유권은 base와 무관) → 우리 것이 아니면서 우리가
+  #    덮어쓸 수도 없다 = fail-closed(r3의 파괴 가드). "건드리지 않는다"가 계약이다.
+  write_prs "[$(writer_pr 390 CLEAN "$(amr_armed)" gh-pages)]"
+  write_heads "$PR_OID"
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "misidentification: base가 다른 PR #390(→gh-pages)을 우리 PR로 취급했다"
+    echo "$output"; dump_calls; false
+  }
+  # 우리 PR이 아니다 — 신뢰하지 않는다.
+  echo "$stderr" | grep -q "신뢰할 수 없는 동일-레포 PR" \
+    || { echo "다른 base PR을 신뢰하지 않는다는 사실이 드러나지 않는다"; echo "$stderr"; false; }
+
+  # **건드리지 않는다**: 그 PR을 skip/rebuild하지도, 무장/해제하지도, force-push로 덮어쓰지도 않는다.
+  merges="$(merge_calls)"
+  [ "$merges" -eq 0 ] || {
+    echo "misidentification: base가 다른 PR #390의 auto-merge를 건드렸다"
+    dump_calls; false
+  }
   pushes="$(count_calls git push)"
   [ "$pushes" -eq 0 ] || {
-    echo "idempotency broken by a fork: 부재를 증명하지 못한 채 ${BRANCH}를 force-push했다"
+    echo "destructive: base가 다른 PR #390이 쓰는 브랜치를 force-push로 덮어썼다"
     dump_calls; false
   }
   creates="$(count_calls gh pr create)"
-  [ "$creates" -eq 0 ] || {
-    echo "duplicate bump PR: 부재를 증명하지 못한 채 PR을 또 만들었다"
-    dump_calls; false
+  [ "$creates" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W11e: two trusted PRs on the same (head, base) fail closed (GitHub cannot produce this — something is broken)" {
+  # 모호성 fail-closed는 유지한다. 같은 head→base에 열린 PR은 GitHub이 1건만 허용하므로 2건은 **불가능**하다 →
+  # 보였다면 우리의 신뢰 경계나 GitHub 계약 중 하나가 깨진 것이다. 아무거나 고르면 나머지는 방치된다(무장 갭·좀비).
+  write_prs "[$(writer_pr 391 CLEAN "$(amr_armed)"),$(writer_pr 392 CLEAN "$(amr_absent)")]"
+  write_heads "$PR_OID"
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "ambiguous identity: 신뢰 PR 2건(#391,#392)인데 도구가 하나를 골라 진행했다"
+    echo "$output"; dump_calls; false
   }
-  arms="$(arm_calls_script)"
-  [ "$arms" -eq 0 ]
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
   merges="$(merge_calls)"
   [ "$merges" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W11f: a human account whose login equals the writer slug is NOT trusted (__typename gates the impersonation)" {
+  # ★ GraphQL 표면의 함정: 봇 계정의 실제 login은 `<slug>[bot]`이므로 **`<slug>` 그대로의 사람 계정**이
+  # 존재할 수 있다. login만 정규화해서 비교하면 그 사람이 writer App으로 **사칭**된다 → 그 PR을 신뢰해
+  # 무장(=자동 머지)까지 걸어줄 수 있다. GraphQL이 주는 __typename(Bot vs User)이 그 경계다.
+  write_prs "[{\"number\":393,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(human_author ukyi-homelab-writer),\"autoMergeRequest\":$(amr_absent)}]"
+  write_heads "$PR_OID"
+  run_ensure_lane bump
+  # 사람이 연 동일-레포 PR = 신뢰 불가 + 그 브랜치는 그 사람 것 → 파괴 가드로 fail-closed.
+  [ "$status" -ne 0 ] || {
+    echo "impersonation: __typename=User인 사람 계정('ukyi-homelab-writer')을 writer App으로 신뢰했다"
+    echo "$output"; dump_calls; false
+  }
+  merges="$(merge_calls)"
+  [ "$merges" -eq 0 ] || {
+    echo "impersonation: 사칭 PR #393에 auto-merge를 걸었다 — 사람 코드가 자동 머지된다"
+    dump_calls; false
+  }
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
 }
 
 # ── W12~W16: 무장 셀렉터는 **인증된 PR 번호**다 — 브랜치 셀렉터는 동명 포크 PR을 머지시킨다 ────────
@@ -1074,7 +1201,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   write_prs '[]'
   run_ensure
   [ "$status" -eq 0 ]
-  list_at="$(first_call gh pr list)"
+  list_at="$(first_call gh api graphql)"
   heads_at="$(first_call git ls-remote)"
   push_at="$(first_call git push)"
   create_at="$(first_call gh pr create)"
@@ -1089,46 +1216,84 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   [ "$push_at" -lt "$create_at" ]
 }
 
-@test "the PR query asks for the exact fields the decision needs and bounds the page explicitly (no default-30 truncation)" {
-  # 필드가 빠지면 판정이 조용히 무너진다:
-  #   headRefOid 누락       → lease 기대값이 사라져 회복이 stale 거부로 돌아간다(R-5)
-  #   autoMergeRequest 누락 → 무장 갭/낡은 무장을 관측할 수 없어 무장 수렴이 불가능하다(R-10, high-1)
-  # ★ `--limit`이 빠지면 gh가 **기본 30**으로 되돌아간다 → 포크 PR 30건이면 writer PR이 페이지 밖으로
-  #   밀려 "열린 PR 없음"으로 오독한다(high-2). 상한은 argv **계약**이다 — 빠뜨리면 여기서 죽는다.
-  # 조회 argv도 **배열 계약**이다 — 필드 목록은 한 인자(쉼표 구분)여야 gh가 올바로 읽는다.
+@test "the PR query is an UNBOUNDED paginated connection query (no --limit can be saturated by forks)" {
+  # ★★ 이 증인이 "포크로 배포를 정지시킬 수 없다"는 계약의 **구조적** 절반이다.
+  # 경계된 조회(`gh pr list --limit N`)는 두 갈래로 다 진다: 상한을 믿으면 자기 PR을 고아로 오인하고,
+  # 상한에서 fail-closed하면 **포크로 페이지를 채우는 것만으로 모든 폴링이 죽는다**(배포 정지 무기).
+  # 유일한 출구는 상한을 없애는 것 — `--paginate`가 hasNextPage=false까지 따라간다.
   write_prs '[]'
   run_ensure
   [ "$status" -eq 0 ]
-  run has_call_exact gh pr list --head "$BRANCH" --state open --limit 100 \
-    --json "number,isCrossRepository,mergeStateStatus,author,headRefOid,autoMergeRequest"
-  if [ "$status" -ne 0 ]; then
-    echo "조회 argv 계약 위반 — gh pr list --head <b> --state open --limit 100 --json <6필드 한 인자>"
-    echo "  ⚠️ --limit이 없으면 gh 기본 상한 30 → 포크 크라우딩에 writer PR이 가려진다(부재를 증명할 수 없다)."
+
+  # ① connection 질의를 gh api graphql로, **끝까지 페이지네이션**해서 낸다(argv 접두 배열이 계약).
+  run count_calls gh api graphql --paginate --slurp
+  [ "$output" -eq 1 ] || {
+    echo "조회 argv 계약 위반 — gh api graphql --paginate --slurp … (호출 ${output}회, 기대 1회)"
+    echo "  --paginate가 없으면 첫 페이지만 보고 끝난다 = 경계된 조회로 되돌아간 것이다."
     dump_calls; false
-  fi
+  }
+  # 변수는 **정확한 인자 원소**로 넘어간다(붙여 쓰면 gh가 못 읽는다). owner/repo는 gh 플레이스홀더가 채운다.
+  for want in "owner={owner}" "repo={repo}" "head=$BRANCH"; do
+    run has_arg_exact "$want"
+    [ "$status" -eq 0 ] || { echo "조회 변수 계약 위반: '-F $want' 인자가 없다"; dump_calls; false; }
+  done
+
+  # ② 경계된 조회로 되돌아가지 않았는가(gh pr list·--limit은 존재해선 안 된다).
+  run count_calls gh pr list
+  [ "$output" -eq 0 ] || {
+    echo "bounded query regression: gh pr list(경계된 조회)로 되돌아갔다 — 포크가 페이지를 채우면 배포가 정지한다"
+    dump_calls; false
+  }
+  run has_arg_exact "--limit"
+  [ "$status" -ne 0 ] || {
+    echo "bounded query regression: 조회에 --limit이 붙었다 — 상한은 곧 포크가 채울 수 있는 정지 지점이다"
+    dump_calls; false
+  }
+
+  # ③ 페이지네이션 계약: gh --paginate는 $endCursor 변수 + pageInfo{hasNextPage,endCursor}를 요구한다.
+  #    이게 빠지면 --paginate가 첫 페이지만 주고 조용히 끝난다(= 다시 경계된 조회다).
+  for needle in 'pageInfo' 'hasNextPage' 'endCursor' '$endCursor' 'headRefName' 'states:OPEN'; do
+    run has_substr "$needle"
+    [ "$status" -eq 0 ] || {
+      echo "페이지네이션/필터 계약 위반: GraphQL 질의문에 '$needle'이 없다"
+      dump_calls; false
+    }
+  done
+
+  # ④ 판정에 필요한 필드가 전부 있는가(빠지면 판정이 조용히 무너진다):
+  #    headRefOid=lease 기대값 / autoMergeRequest=무장 관측 / isCrossRepository·__typename=신뢰 경계
+  #    / baseRefName=(head, base) 식별
+  for needle in 'headRefOid' 'autoMergeRequest' 'isCrossRepository' 'baseRefName' '__typename' 'mergeStateStatus'; do
+    run has_substr "$needle"
+    [ "$status" -eq 0 ] || {
+      echo "필드 계약 위반: GraphQL 질의문에 '$needle'이 없다"
+      dump_calls; false
+    }
+  done
 }
 
-@test "the trusted PR is decided client-side, never delegated to a server-side author filter (defense in depth)" {
-  # 심층 방어: 서버측 필터(--author/--app)로 신뢰 경계를 대신하지 않는다.
-  #   ① `--author`를 주는 순간 gh가 **검색 API**로 갈아탄다(실측 GH_DEBUG=api: SearchType 프로브 + search(...)).
-  #      검색 인덱스는 **결과적 일관성**이라 직전 주기(10분 전)가 만든 PR이 아직 안 잡히면 **공격자 없이도**
-  #      거짓 부재가 난다 → 고아 오인 경로. 판정에는 강한 일관성(커넥션 질의)이 필요하다.
-  #   ② 서버 필터를 믿으면 신뢰 판정이 원격 동작에 위임된다 — 필터가 조용히 바뀌면 경계가 통째로 무너진다.
-  # 신뢰는 **관측된 사실**(isCrossRepository + author.login)로 이 도구가 정한다.
+@test "the query never touches the SEARCH api (eventual consistency would fabricate a false absence)" {
+  # 심층 방어 + 강한 일관성:
+  #   ① `gh pr list --author/--app`는 내부적으로 **검색 API**로 갈아탄다(실측 GH_DEBUG=api: SearchType 프로브
+  #      + search(...)). 검색 인덱스는 **결과적 일관성**이라 직전 주기(10분 전)가 만든 PR이 아직 안 잡히면
+  #      **공격자 없이도** 거짓 부재가 난다 → 자기 PR을 고아로 오인해 force-push + 중복 create.
+  #   ② GraphQL로 옮긴 뒤에도 같은 함정이 있다: `search(...)` 커넥션을 쓰면 똑같이 인덱스에 의존한다.
+  # 판정은 primary datastore(=repository.pullRequests connection)만 본다.
   write_prs '[]'
   run_ensure
   [ "$status" -eq 0 ]
   run has_arg_exact "--author"
-  if [ "$status" -eq 0 ]; then
-    echo "search-index dependency: gh pr list에 --author를 넘겼다 — gh가 검색 API(결과적 일관성)로 갈아탄다."
-    echo "  직전 주기가 만든 PR이 인덱싱 전이면 거짓 부재 → 자기 PR을 고아로 오인해 force-push + 중복 create."
-    dump_calls; false
-  fi
+  [ "$status" -ne 0 ] || { echo "search-index dependency: --author(검색 API 경로)"; dump_calls; false; }
   run has_arg_exact "--app"
-  if [ "$status" -eq 0 ]; then
-    echo "search-index dependency: gh pr list에 --app을 넘겼다(위와 같은 검색 API 경로)."
+  [ "$status" -ne 0 ] || { echo "search-index dependency: --app(검색 API 경로)"; dump_calls; false; }
+  run has_substr 'search('
+  [ "$status" -ne 0 ] || {
+    echo "search-index dependency: GraphQL 질의가 search(...) 커넥션을 쓴다 — 결과적 일관성이라 거짓 부재가 난다"
     dump_calls; false
-  fi
+  }
+  # 강한 일관성 표면을 쓰는가(repository.pullRequests connection).
+  run has_substr 'pullRequests('
+  [ "$status" -eq 0 ]
 }
 
 @test "the remote branch is probed with git ls-remote on the deterministic branch" {
@@ -1147,7 +1312,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # 포크 PR 하나로 배포를 무기한 억제할 수 있다(억제 = 공격 표면) → 신뢰 0.
   # ⚠️ 포크의 head는 **자기 레포의 ref**다 — 우리 레포엔 그 브랜치가 없다(그래서 write_heads 없음).
   #    포크 PR은 우리 브랜치를 침해하지 않으므로, 브랜치가 없으면 그대로 create 경로다.
-  write_prs "[{\"number\":400,\"isCrossRepository\":true,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"author\":{\"is_bot\":false,\"login\":\"drive-by\"},\"autoMergeRequest\":$(amr_absent)}]"
+  write_prs "[{\"number\":400,\"isCrossRepository\":true,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(human_author drive-by),\"autoMergeRequest\":$(amr_absent)}]"
   run_ensure
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.observed.trusted == null'
@@ -1167,7 +1332,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # 남의 브랜치를 통째로 덮어쓰고 PR까지 또 연다(작업 파괴). 옛 픽스처는 원격 브랜치를 비워 둬서
   # 그 경로를 숨겼다 — 프로덕션에선 **불가능한 상태**였다.
   # 계약: 신뢰할 수 없는 동일-레포 PR이 이 브랜치에 열려 있으면 **아무것도 변이하지 않는다**(fail-closed).
-  write_prs "[{\"number\":401,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"author\":{\"is_bot\":false,\"login\":\"ukkiee\"},\"autoMergeRequest\":$(amr_absent)}]"
+  write_prs "[{\"number\":401,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(human_author ukkiee),\"autoMergeRequest\":$(amr_absent)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**(프로덕션 불변식)
   run_ensure
   [ "$status" -ne 0 ] || {
@@ -1201,7 +1366,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # 있다). 그러니 포크 PR이 열려 있어도 우리 레포에 남은 그 브랜치는 **여전히 우리 고아**다(앞선 run이 push엔
   # 성공하고 create에서 죽은 잔해). 여기서 fail-closed로 굳으면 포크 PR 하나로 배포를 영구 억제할 수 있다
   # (억제 = 공격 표면) → 포크는 무시하고 정상적으로 adopt한다.
-  write_prs "[{\"number\":400,\"isCrossRepository\":true,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"author\":{\"is_bot\":false,\"login\":\"drive-by\"},\"autoMergeRequest\":$(amr_absent)}]"
+  write_prs "[{\"number\":400,\"isCrossRepository\":true,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(human_author drive-by),\"autoMergeRequest\":$(amr_absent)}]"
   write_heads "$ORPHAN_OID"   # 우리 레포에 남은 고아 브랜치(포크는 이걸 만들 수 없다)
   run_ensure
   [ "$status" -eq 0 ] || {
@@ -1222,7 +1387,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 @test "the writer App is recognized in both gh (app/<slug>) and REST (<slug>[bot]) login forms" {
   # 표기 계약 고정: gh CLI는 `app/ukyi-homelab-writer`, REST/GraphQL은 `ukyi-homelab-writer[bot]`.
   # 한쪽만 인식하면 신뢰 판정이 조용히 무너져(=trusted 0) 중복 PR이 그대로 남는다.
-  write_prs "[{\"number\":352,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"author\":{\"is_bot\":true,\"login\":\"ukyi-homelab-writer[bot]\"},\"autoMergeRequest\":$(amr_armed)}]"
+  write_prs "[{\"number\":352,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":{\"login\":\"ukyi-homelab-writer[bot]\",\"__typename\":\"Bot\"},\"autoMergeRequest\":$(amr_armed)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure
   [ "$status" -eq 0 ]
@@ -1259,7 +1424,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 @test "a PR object missing the schema fields fails closed (field-name drift guard)" {
   # gh --json 필드명이 바뀌거나 오타가 나면(예: crossRepository) 조용히 trusted 0이 되어
   # 중복 PR이 되살아난다 → 스키마 위반은 판정하지도, 변이하지도 않는다.
-  write_prs "[{\"number\":350,\"crossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"author\":{\"login\":\"app/ukyi-homelab-writer\"},\"autoMergeRequest\":$(amr_absent)}]"
+  write_prs "[{\"number\":350,\"crossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":{\"login\":\"app/ukyi-homelab-writer\",\"__typename\":\"Bot\"},\"autoMergeRequest\":$(amr_absent)}]"
   run_ensure
   [ "$status" -ne 0 ]
   creates="$(count_calls gh pr create)"
@@ -1280,7 +1445,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   #   undefined를 "미무장"으로 읽으면 → 매 폴링 재무장(소음, 남의 PR까지 건드릴 수 있음)
   #   undefined를 "무장됨"으로 읽으면 → 무장 갭이 영영 안 닫혀 autoDeploy 배포가 조용히 정지
   # 둘 다 조용한 오동작이라 판정도 변이도 하지 않는다(headRefOid·isCrossRepository 가드와 동형).
-  write_prs "[{\"number\":350,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author)}]"
+  write_prs "[{\"number\":350,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(writer_author)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure
   [ "$status" -ne 0 ]
@@ -1319,7 +1484,10 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   run_ensure
   [ "$status" -eq 0 ]
   echo "$output" | jq -e --arg b "$BRANCH" '.branch == $b'
-  lists="$(count_calls gh pr list --head "$BRANCH")"
+  # 결정적 브랜치가 조회의 **대상**이다 — head 변수로 정확히 한 번 질의한다.
+  lists="$(count_calls gh api graphql)"
+  run has_arg_exact "head=$BRANCH"
+  [ "$status" -eq 0 ]
   [ "$lists" -eq 1 ]
 }
 
@@ -1364,7 +1532,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 @test "the propose-pr lane does not arm on the SKIP path (a trusted un-armed PR is left alone)" {
   # W4(재무장)가 레인을 넘어 새지 않는가 — 승인 PR에 무장이 없는 건 **정상**이다(그게 승인 레인이다).
   # 재무장은 bump 레인의 desired state일 뿐, "무장 없음"을 보편적 결함으로 취급하면 승인 게이트가 무너진다.
-  write_prs "[{\"number\":362,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
+  write_prs "[{\"number\":362,\"isCrossRepository\":false,\"mergeStateStatus\":\"BLOCKED\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane propose-pr
   [ "$status" -eq 0 ]
@@ -1403,7 +1571,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 
 @test "the propose-pr lane does not arm on the REBUILD path (a DIRTY PR is rebuilt, never armed)" {
   # DIRTY 회복 → PR을 재사용하며 force-push. 무장 갭이 있어도(승인 레인에선 정상) 재무장하지 않는다.
-  write_prs "[{\"number\":365,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
+  write_prs "[{\"number\":365,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
   run_ensure_lane propose-pr
   [ "$status" -eq 0 ]
