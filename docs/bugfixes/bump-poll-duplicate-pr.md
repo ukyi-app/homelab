@@ -177,6 +177,25 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Review Decision Log
 
+### Codex Structure Review — r7: needs-attention → 1건 Accept (owner 2026-07-14)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-25 | high | `Blocker: pr-sweeper can win the autoDeploy-off race` — `pr-sweeper`(30분 크론)가 **레인을 모른 채** 무장+BEHIND인 `bump-poll/*` PR을 `update-branch`로 수렴시킨다. autoDeploy가 true→false로 뒤집혀도 이미 무장된 PR은 그대로라, 체크가 green이 되는 순간 **사람 승인 없이 auto-merge** 된다. 신뢰된 내부 자동화만으로 성립하므로 F-0 ruleset으로는 못 막는다 | **Accept**(scope 확장) | ★★ 적대 검증이 **더 큰 것**을 찾았다: `gh pr update-branch`는 head에 **머지 커밋**을 만든다 → `proveOurCommit`의 메시지 검사가 **반드시** 실패 → 다음 주기부터 disarm + exit 1 영구 반복 → 그 앱의 bump **하드 스톨**. 즉 R-25는 보안 이전에 **정합성** 문제이며, 스위퍼 제거는 선택이 아니다. 그래서 BEHIND도 DIRTY와 **같은 leased force-push**로 푼다(실행기는 `gh pr update-branch`를 한 번도 부르지 않는다). scope에 `.github/workflows/pr-sweeper.yaml` 추가, RED baseline 재구성 |
+
+**적대 검증(3렌즈 반증 + 완결성 비평)이 구현에서 추가로 잡아낸 4건 — 전부 수정:**
+
+| # | 결함 | 수정 |
+|---|---|---|
+| H-1 | 해제 스윕이 "그 앱에 이번 주기 **후보가 있을 때**"만 돈다(`bump-poll.yaml`이 `select(.action=="bump" or =="propose-pr")`로 거른다) → `noop`/`refuse` 주기엔 실행기가 아예 호출되지 않아 **낡은 무장이 무기한 생존** | **`--reconcile-only`** 모드 — 해제는 **가용성이 아니라 보안 속성**이다. 후보가 없어도 **매 주기 전 앱**에 대해 돈다. 레인은 `.bindings.json`/`.image-pin.json`에서 **직접** 읽는다(워크플로가 레인을 지어내면 그게 승인 게이트 우회다) |
+| H-2 | 루프가 `jq \| while read` + `bash -e` → 한 앱의 fail-closed(미증명 head = 사람이 고칠 때까지 **영구**)가 파이프라인을 죽여 **뒤따르는 모든 앱이 매 주기 실행기에 도달조차 못 한다** → 스위퍼가 빠진 지금 이 기아는 **인가 회수의 실패**다 | 항목별 **서브셸 격리** + 실패는 모아 **맨 끝에서** 비-0 종료(run은 빨갛고 telegram 발화). ⚠️ `if ! ( … )`의 조건 문맥은 errexit를 **서브셸까지** 끄므로 안에서 `set -e`를 다시 켠다 |
+| H-3 | close 스윕이 **REOPENED 이벤트를 보지 않는다** — reopen은 author·createdAt·head를 바꾸지 않고 유일한 코멘트는 **봇 자신의 close 코멘트**다 → 사람이 reopen하면 **10분마다 다시 닫힌다**. 게다가 close 코멘트가 바로 그 reopen을 구제책으로 안내한다(함정) | `timelineItems(itemTypes:[REOPENED_EVENT])` 관측 → `humanTouchOf`에 편입(**관측 불가 = 흔적 있음**). close 코멘트는 **실효 탈출구(hold 라벨)** 를 명시 |
+| H-4 | BEHIND가 rebuild 트리거가 되면서 strict main에선 **머지마다** 발생 → 승인 레인의 열린 PR이 10분마다 force-push되어 **사람의 리뷰가 dismiss되고 인라인 코멘트가 outdated** 된다(close엔 humanTouch 가드가 있는데 rebuild엔 없었다) | rebuild에도 **같은 흔적 가드** — 리뷰·코멘트·담당자·리뷰요청·draft·hold 라벨·reopen 중 하나라도 있으면 **밀지 않는다** |
+
+**뮤턴트 증명(컨덕터 직접 실행)**: `--reconcile-only` 스윕 제거 → W47·W48 RED · reopen 절 제거 → W53·W54 RED · rebuild 흔적 가드 제거 → W56·W57·W58 RED · 루프 격리 제거 → 호출부 기아 증인 RED · reconcile 스텝 제거/비-0 종료 → 각 호출부 증인 RED.
+
+**RED baseline 재구성 실측**: regression **94건 전부 baseline RED**(공짜 통과 0 — 부정 증인 5건 W35·W36·W40·W45·W50은 양 끝단 불변식이라 characterization으로 재분류), characterization **60건 양 끝단 green**, symptomToken 3/3. `red..HEAD`의 비-테스트 변경 = scope 3파일 정확히 일치.
+
 ### Codex Structure Review — r6: needs-attention → 3건 전부 Accept (owner 2026-07-14)
 
 | ID | 심각도 | 발견 | 결정 | 반영 |
