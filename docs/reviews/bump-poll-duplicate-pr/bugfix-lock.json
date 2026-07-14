@@ -8,7 +8,7 @@
     },
     {
       "testId": "W3: an orphan remote branch (push ok, pr create failed) is adopted with a leased push, not collided with",
-      "symptomToken": "orphan bump branch: ensure-bump-pr pushed"
+      "symptomToken": "orphan bump branch: ensure-bump-pr did not adopt the orphan"
     },
     {
       "testId": "bump-poll never calls gh pr create directly (PR creation goes through ensure-bump-pr)",
