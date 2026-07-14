@@ -3,7 +3,7 @@ bugfix: bump-poll-duplicate-pr
 invariant-class: bugfix
 entry-track: incident
 review-track: standard
-pipeline-stage: design
+pipeline-stage: executing
 issue-tracker: local
 symptom: "같은 앱 커밋(page sha-815abb…)에 대해 bump-poll이 11분 사이 PR 3개(#348·#350·#353)를 열었다. 각 PR이 15분짜리 required 게이트를 태우고, 먼저 머지된 하나를 뺀 나머지는 DIRTY(충돌)+auto-merge 무장 상태로 영구 잔류한다(pr-sweeper는 BEHIND만 처리)."
 red-baseline: b9d294d464a5c864ad679af0707ac77442216e29
@@ -161,6 +161,18 @@ update 성공**(기대 OID의 로컬 오브젝트가 없어도 된다 — 40-hex
   (buildx attestation 비결정성 — 원래 F-1의 다른 절반). 별도 파이프라인.
 
 ## Review Decision Log
+
+### Codex Plan Review — r8: clean — **approve**(발견 0). "Ship the plan to GREEN." (2026-07-14)
+
+아티팩트: `docs/reviews/bump-poll-duplicate-pr/plan-r8.json`. 락·계획서·state가 `b9d294d`로 정합하고 그
+트리가 커밋된 verify-record와 일치한다. 그 baseline이 mixed-lane hermetic 증인 · 단일-대입 가드 ·
+공백 구분 `--action` 계약 · propose-pr × 네 결정 경로 증인을 포함한다.
+
+### Codex Plan Review — r7: needs-attention → Accept (owner 2026-07-14)
+
+`Blocker: the r6 witness is outside the locked RED baseline` — 북키핑 스크립트가 **파이썬 인코딩 오류로
+조용히 죽어** 락이 옛 sha(`4fd7c55`)에 머물렀고, 그 baseline에는 hermetic 증인이 **없었다**. → 락·계획서·
+state를 `b9d294d`로 재고정하고 그 트리에서 verify-record를 재생성했다(회귀 15 · characterization 79).
 
 ### Codex Plan Review — r6: needs-attention → 1건 Accept (owner 2026-07-14)
 

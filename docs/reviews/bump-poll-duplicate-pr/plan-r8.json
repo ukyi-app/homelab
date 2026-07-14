@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "approve",
+  "summary": "Ship the plan to GREEN. The lock, plan, and state pin b9d294d; its tree matches the committed verify-record. That baseline contains the mixed-lane hermetic witness, single-assignment guard, strict space-separated --action contract, and propose-pr witnesses for create/skip/adopt/rebuild. No new critical issue found. The record and static suite count show 73 characterization cases, not the stated 79, but no r6 coverage is missing; this is non-blocking bookkeeping. Simpler alternative: none materially simpler. Open question: none.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": true,
+  "reviewedFileCount": 22,
+  "target": "branch diff against main",
+  "reviewedSha": "200f53141c1c5d1c6fd9a0ce88d3a140d6b9a25d",
+  "reviewedTree": "16141e73630530ddf9989a95d88b0ef9ac7cf85d",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [
+    "Proceed with B-1 implementation and use the machine-owned GREEN gate for verification."
+  ]
+}
