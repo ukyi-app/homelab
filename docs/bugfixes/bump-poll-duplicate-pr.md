@@ -6,7 +6,7 @@ review-track: standard
 pipeline-stage: design
 issue-tracker: local
 symptom: "같은 앱 커밋(page sha-815abb…)에 대해 bump-poll이 11분 사이 PR 3개(#348·#350·#353)를 열었다. 각 PR이 15분짜리 required 게이트를 태우고, 먼저 머지된 하나를 뺀 나머지는 DIRTY(충돌)+auto-merge 무장 상태로 영구 잔류한다(pr-sweeper는 BEHIND만 처리)."
-red-baseline: 4fd7c5576a34c9740f38168c16a9c22fedefc12f
+red-baseline: b9d294d464a5c864ad679af0707ac77442216e29
 bugfix-lock: red
 first-increment: [B-1]
 increments: [B-1]
@@ -161,6 +161,12 @@ update 성공**(기대 OID의 로컬 오브젝트가 없어도 된다 — 40-hex
   (buildx attestation 비결정성 — 원래 F-1의 다른 절반). 별도 파이프라인.
 
 ## Review Decision Log
+
+### Codex Plan Review — r6: needs-attention → 1건 Accept (owner 2026-07-14)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-12 | high | `Blocker: R-11's structural approval seal still permits false GREENs` — 호출부 게이트가 "`.action` 대입 존재 + 각 `--action` 인자가 `$action`"만 보므로 **읽은 뒤 덮어쓰기**(`action=$(jq …); action=bump;`)를 통과시킨다. 실행기 테스트도 `propose-pr`을 create·skip 경로에서만 덮어 **adopt/rebuild에서 무장하는 구현**이 GREEN이 된다 | **Accept** | **hermetic 루프 증인** 신설: `bump-poll.yaml`의 bump 스텝 `.run` 본문을 yq로 추출해 `git`/`gh`/`bun` stub 아래에서 **두 레인의 plan.json**으로 실제 실행하고 실행기에 전달된 **실제 argv**를 원장으로 단언한다(하네스 자기증명 포함). + **단일-대입 가드**(post-read 덮어쓰기 금지). + `propose-pr` × **네 결정 경로 전부** 무장 0회 증인. **실측**: 후보 B(읽은 뒤 덮어쓰기)·G(조건부 덮어쓰기)가 **구 정적 봉인을 통과**했고 hermetic 실행에서 `trip-mate → --action bump`(승인 앱을 자동 배포 레인으로 위조)를 냈다 — r6의 지적이 실증됐다. 덤: `--action=<val>` 등호 형태는 도구 파서가 **exit 2로 죽는데** 게이트가 통과시키던 결함도 교정 |
 
 ### Codex Plan Review — r5: needs-attention → 2건 전부 Accept (owner 2026-07-14)
 
