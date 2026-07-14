@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "No ship: the root-cause fix and RED lock are structurally sound, but a competing reconciler can still use stale auto-merge authorization to bypass the approval lane.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 33,
+  "target": "branch diff against main",
+  "reviewedSha": "f15b5e78e6a57a7ce40ae49d59220c42ebc36bf8",
+  "reviewedTree": "12fba3057e9979c00eef7c17623048cd55e8958c",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: pr-sweeper can win the autoDeploy-off race",
+      "body": "New evidence beyond the accepted stale-authorization finding: `pr-sweeper` independently selects every armed, BEHIND `bump-poll/*` PR and updates its branch without consulting the current lane. If `autoDeploy` changes true→false, that main update makes the still-armed PR BEHIND. The sweeper can update it and restart checks before the next bump-poll run invokes `shouldDisarm`; once checks pass, GitHub auto-merges without the newly required human approval. This uses only trusted internal automation—F-0's anti-forgery ruleset does not address it.",
+      "file": ".github/workflows/pr-sweeper.yaml",
+      "line_start": 13,
+      "line_end": 55,
+      "confidence": 0.98,
+      "recommendation": "Give `bump-poll/*` one policy-aware reconciler: remove it from the generic sweeper and handle BEHIND reconciliation inside `ensure-bump-pr` only after lane evaluation, ownership proof, and any required disarm. Expand scope and rebuild the locked RED baseline with an autoDeploy-off/BEHIND interleaving witness.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Eliminate the split ownership of bump-poll branch updates before shipping."
+  ]
+}

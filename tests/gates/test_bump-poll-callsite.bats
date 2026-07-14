@@ -55,6 +55,7 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   F="$ROOT/.github/workflows/bump-poll.yaml"
+  SWEEPER="$ROOT/.github/workflows/pr-sweeper.yaml"
   EXECUTOR="$ROOT/tools/ensure-bump-pr.ts"
   # 전체-줄 주석을 **빈 줄로 치환**한 뷰(줄 번호는 보존) — 주석 속 설명 문구("…auto-merge-or-fail…",
   # "…bump-tag.ts가 재검증한다" 등)가 순서·금지 증인에 오탐되는 걸 막는다(test_mutation-dispatch의 선례).
@@ -114,6 +115,17 @@ expect_of() { python3 "$EXPECT_PY" "$EXECUTOR" "$@"; }
 # 주석 제거 뷰에서 ERE가 처음 등장한 줄 번호(없으면 빈 문자열 → 단언이 [ -n ]로 잡는다).
 first_line() { grep -nE "$1" "$CODE" | head -1 | cut -d: -f1; }
 
+# ── 순서 계약은 **bump 스텝 본문 안에서만** 의미가 있다(H-1 이후) ─────────────────────────────────
+# 파일 전체를 훑으면 다른 스텝의 실행기 호출(reconcile 패스는 후보가 없어도 매 주기 돌아야 하므로
+# bump 스텝보다 **앞에** 있다)이 "커밋 전에 실행기를 불렀다"로 오탐된다. 계약의 대상은 언제나
+# "브랜치를 재구축해 커밋을 얹은 그 스텝"이다 → 그 스텝의 `.run` 본문만 뽑아서 순서를 본다.
+step_code() {
+  local out="$BATS_TEST_TMPDIR/bump-step.code.sh"
+  extract_step | sed 's/^[[:space:]]*#.*$//' > "$out"
+  printf '%s' "$out"
+}
+first_line_in() { grep -nE "$2" "$1" | head -1 | cut -d: -f1; }
+
 # ── hermetic 루프 하네스(plan r6) ───────────────────────────────────────────────────────────
 # 왜 필요한가: 정적 grep 증인은 **문자열 모양**만 본다. `action=$(… jq -r .action)` … `action=bump` …
 # `--action "$action"`처럼 **읽은 뒤 덮어쓰는** 호출부는 모든 grep 증인을 통과하면서 승인 레인(propose-pr)
@@ -130,18 +142,28 @@ extract_step() {
   # (실측: 맵을 그대로 실행하면 `syntax error near unexpected token '('`로 죽는다).
   yq -r '[.jobs.poll.steps[] | select(.run) | select(.run | test("bump-tag"))] | .[0].run // ""' "$F"
 }
+# reconcile 패스(인가 회수 — 후보 유무 무관·전 앱)의 셸 본문. 선택자는 그 모드의 이름 자체다.
+extract_reconcile_step() {
+  yq -r '[.jobs.poll.steps[] | select(.run) | select(.run | test("--reconcile-only"))] | .[0].run // ""' "$F"
+}
 
 setup_hermetic() {
   STUB="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$STUB"
   export CALLS="$BATS_TEST_TMPDIR/calls.nul"   # NUL 구분 argv 원장(인자 경계 보존 — tools 스위트와 동형)
   : > "$CALLS"
+  # 스텝이 쓰는 `/tmp/*` 경로를 통째로 하네스 안으로 돌린다(plan·apps·bump-items·mutation-failures) —
+  # 진짜 /tmp에 쓰면 테스트끼리 상태가 샌다(특히 스텝 간에 넘기는 실패 파일).
+  TMPD="$BATS_TEST_TMPDIR/tmp"
+  mkdir -p "$TMPD"
 
   # 두 레인이 **섞인** plan — 이게 이 증인의 핵심이다. 한 레인만 돌리면 "둘 다 bump로 넘기는" 우회가 안 죽는다.
+  # ★ 여기에 **noop·refuse 항목도 넣는다**(H-1): bump 루프는 이 둘을 걸러내지만, reconcile 패스는
+  #   **전 항목**을 돌아야 한다(해제는 후보 생성에 의존해선 안 된다 — 보안 속성이다).
   # ⚠️ 아래 후보 tag는 소유권 증인(effective 커밋 메시지)의 기대값에도 쓰인다 — plan JSON과 **같은 값**이다.
   PAGE_TAG="sha-2222222222222222222222222222222222222222"
   TRIP_TAG="sha-4444444444444444444444444444444444444444"
-  PLAN="$BATS_TEST_TMPDIR/plan.json"
+  PLAN="$TMPD/plan.json"
   cat > "$PLAN" <<'JSON'
 [
   {"app":"page","action":"bump","writePath":"apps/page/deploy/prod/values.yaml",
@@ -149,19 +171,44 @@ setup_hermetic() {
    "candidate":{"tag":"sha-2222222222222222222222222222222222222222","digest":"sha256:aaaa"}},
   {"app":"trip-mate","action":"propose-pr","writePath":"apps/trip-mate/deploy/prod/values.yaml",
    "current":{"tag":"sha-3333333333333333333333333333333333333333"},
-   "candidate":{"tag":"sha-4444444444444444444444444444444444444444","digest":"sha256:bbbb"}}
+   "candidate":{"tag":"sha-4444444444444444444444444444444444444444","digest":"sha256:bbbb"}},
+  {"app":"files","action":"noop","reason":"배포 이후 빌드된 main 커밋 없음",
+   "current":{"tag":"sha-5555555555555555555555555555555555555555"},"candidate":null},
+  {"app":"broken-api","action":"refuse","reason":"manifest 조회 일시 오류(transient)",
+   "current":null,"candidate":null}
 ]
 JSON
 
-  # bun/gh stub — argv를 원장에 남기고 성공만 흉내낸다(실제 변이 0).
-  for c in bun gh; do
-    cat > "$STUB/$c" <<STUBEOF
+  # gh stub — argv를 원장에 남기고 성공만 흉내낸다(실제 변이 0).
+  cat > "$STUB/gh" <<'GHEOF'
 #!/bin/sh
-{ printf '%s\0' "$c" "\$@"; printf '\036'; } >> "\$CALLS"
+{ printf '%s\0' gh "$@"; printf '\036'; } >> "$CALLS"
 exit 0
-STUBEOF
-    chmod +x "$STUB/$c"
+GHEOF
+  chmod +x "$STUB/gh"
+
+  # ── bun stub — 한 앱만 **fail-closed로 죽이는 주입점**을 갖는다(H-2 격리 증인) ─────────────────
+  # 라이브의 fail-closed(증명되지 않은 head 등)는 사람이 개입할 때까지 **영구히** 지속된다. 그래서
+  # "한 앱의 실패가 뒤따르는 앱들을 굶기는가"가 실제 질문이다 — 그걸 주입해서 실측한다.
+  cat > "$STUB/bun" <<'BUNEOF'
+#!/bin/sh
+{ printf '%s\0' bun "$@"; printf '\036'; } >> "$CALLS"
+if [ -n "${STUB_FAIL_APP:-}" ] && [ "$1" = "tools/ensure-bump-pr.ts" ]; then
+  take=""
+  for a in "$@"; do
+    if [ "$take" = "1" ]; then
+      if [ "$a" = "$STUB_FAIL_APP" ]; then
+        echo "stub bun: ${a} 실행기 fail-closed(주입)" >&2
+        exit 1
+      fi
+      take=""
+    fi
+    case "$a" in --app) take=1 ;; esac
   done
+fi
+exit 0
+BUNEOF
+  chmod +x "$STUB/bun"
 
   # ── git stub — argv 원장에 더해 **effective 상태**를 기록한다(structure r6 R-24) ────────────────
   # 왜 argv 원장만으론 부족한가: 소유권 계약이 걸린 값은 "워크플로 어딘가에 이런 줄이 있다"가 아니라
@@ -224,11 +271,16 @@ exit 0
 GITEOF
   chmod +x "$STUB/git"
 
-  # 스텝 본문 추출 → /tmp/plan.json(하드코딩 경로)만 픽스처로 치환해 hermetic하게 만든다.
+  # 스텝 본문 추출 → 스텝이 쓰는 `/tmp/` 경로를 통째로 하네스 안(TMPD)으로 돌려 hermetic하게 만든다
+  # (plan.json 픽스처는 이미 그 안에 있다). 스텝 간에 넘기는 실패 파일도 이 안에 남는다.
   STEP="$BATS_TEST_TMPDIR/bump-step.sh"
   extract_step > "$STEP.raw"
   [ -s "$STEP.raw" ] || return 9   # 추출 실패는 호출부에서 시끄럽게 잡는다
-  sed "s#/tmp/plan.json#$PLAN#g" "$STEP.raw" > "$STEP"
+  sed "s#/tmp/#$TMPD/#g" "$STEP.raw" > "$STEP"
+  # reconcile 패스 본문(H-1) — 없으면 빈 파일이 되고, 그걸 새 증인이 시끄럽게 잡는다.
+  RSTEP="$BATS_TEST_TMPDIR/reconcile-step.sh"
+  extract_reconcile_step > "$RSTEP.raw"
+  sed "s#/tmp/#$TMPD/#g" "$RSTEP.raw" > "$RSTEP"
 
   # 실행기에 실제로 간 argv를 원장에서 되읽는 파서(NUL 경계 보존 — 붙여 쓴 인자와 구분된다).
   LEDGER_PY="$BATS_TEST_TMPDIR/ledger.py"
@@ -269,6 +321,12 @@ elif mode == "bumptag":  # 하네스 자체의 증명: 루프가 두 후보를 *
 elif mode == "lane":  # want[0] = app 이름 → 그 앱의 --action 값(정확히 1건이 아니면 빈 문자열)
     hits = [r for r in ensure if opt(r, "--app") == want[0]]
     print(opt(hits[0], "--action") if len(hits) == 1 else "")
+elif mode == "reconciled":  # `--reconcile-only`로 실행기에 **도달한** 앱들(정렬·중복 제거)
+    print(" ".join(sorted({opt(r, "--app") for r in ensure if "--reconcile-only" in r} - {""})))
+elif mode == "bumped":  # `--reconcile-only` **없이**(= bump 경로) 실행기에 도달한 앱들
+    print(" ".join(sorted({opt(r, "--app") for r in ensure if "--reconcile-only" not in r} - {""})))
+elif mode == "argcount":  # want[0] 인자를 포함하는 실행기 레코드 수(예: reconcile 패스의 `--action` = 0이어야 한다)
+    print(sum(1 for r in ensure if want[0] in r))
 elif mode == "dump":
     for i, r in enumerate(records, 1):
         print("%2d) argc=%d  %s" % (i, len(r), " ".join(repr(a) for a in r)))
@@ -283,6 +341,9 @@ PY
 ensure_calls()  { python3 "$LEDGER_PY" count "$CALLS"; }
 bumptag_calls() { python3 "$LEDGER_PY" bumptag "$CALLS"; }
 lane_of()       { python3 "$LEDGER_PY" lane "$CALLS" "$1"; }
+reconciled_apps() { python3 "$LEDGER_PY" reconciled "$CALLS"; }
+bumped_apps()     { python3 "$LEDGER_PY" bumped "$CALLS"; }
+arg_calls()       { python3 "$LEDGER_PY" argcount "$CALLS" "$1"; }
 dump_calls()    { echo "--- 스텝이 실행한 명령(원장) ---"; python3 "$LEDGER_PY" dump "$CALLS"; }
 
 # git stub이 기록한 **effective** 값 — "워크플로 어딘가에 그런 줄이 있다"가 아니라 "커밋이 실제로 갖는 값".
@@ -303,6 +364,16 @@ run_step() {
   : > "$GIT_COMMIT_LOG"
   PATH="$STUB:$PATH" GH_TOKEN=stub-token RUN_ID=999 bash -e "$1" > "$BATS_TEST_TMPDIR/step.out" 2>&1 || true
 }
+# 같은 실행이되 **종료 코드를 삼키지 않는다**(H-2: "run이 여전히 빨간가"가 계약의 절반이다).
+# 스텝은 GHA에서 `bash -e {0}`로 돈다(레포 함정 원장) → 같은 셸 의미로 돌린다.
+run_step_rc() {
+  : > "$CALLS"
+  : > "$GIT_CONFIG_LOG"
+  : > "$GIT_COMMIT_LOG"
+  PATH="$STUB:$PATH" GH_TOKEN=stub-token RUN_ID=999 STUB_FAIL_APP="${STUB_FAIL_APP:-}" \
+    bash -e "$1" > "$BATS_TEST_TMPDIR/step.out" 2>&1
+}
+step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
 
 # bats test_tags=regression
 @test "bump-poll never calls gh pr create directly (PR creation goes through ensure-bump-pr)" {
@@ -348,10 +419,14 @@ run_step() {
   # plan r4 R-8: ①②③은 "도구를 부른다"까지만 본다 — **언제** 부르는지는 안 본다. 그래서 커밋 전에(또는
   # bump-tag 전에) 도구를 부르는 구현도 GREEN이 된다. 그런 호출부는 라이브에서 diff 0짜리 PR을 열거나
   # (빈 커밋) 갱신을 통째로 빠뜨린다 — 도구의 push argv 계약이 `HEAD:refs/heads/<b>`(=로컬 커밋)이기 때문.
-  branch_at="$(first_line 'git (switch -c|checkout -b)')"
-  bump_at="$(first_line 'bun tools/bump-tag\.ts')"
-  commit_at="$(first_line 'git commit')"
-  ensure_at="$(first_line 'bun tools/ensure-bump-pr\.ts')"
+  # ⚠️ 대상은 **bump 스텝 본문**이다(파일 전체가 아니다) — reconcile 패스는 후보 없이도 매 주기 돌아야 해서
+  #    이 스텝보다 앞에 있고, 파일 전체를 훑으면 그 실행기 호출이 "커밋보다 앞"으로 오탐된다.
+  SC="$(step_code)"
+  [ -s "$SC" ] || { echo "호출부 순서 계약: bump 스텝(.run에 bump-tag 포함)을 추출하지 못했다"; false; }
+  branch_at="$(first_line_in "$SC" 'git (switch -c|checkout -b)')"
+  bump_at="$(first_line_in "$SC" 'bun tools/bump-tag\.ts')"
+  commit_at="$(first_line_in "$SC" 'git commit')"
+  ensure_at="$(first_line_in "$SC" 'bun tools/ensure-bump-pr\.ts')"
 
   [ -n "$branch_at" ] || { echo "호출부 순서 계약: 브랜치 생성(git switch -c | git checkout -b)이 없다"; false; }
   [ -n "$bump_at" ]   || { echo "호출부 순서 계약: bun tools/bump-tag.ts 호출이 없다"; false; }
@@ -517,6 +592,205 @@ run_step() {
     echo "lane provenance: 그 단 한 번의 대입이 플래너의 .action이 아니다 —"
     echo "  레인의 출처는 poll-ghcr(.bindings.json의 autoDeploy)여야 한다."
     false
+  }
+}
+
+# ── ⑦ `bump-poll/*` 원격 상태의 **소유자는 실행기 하나**다(structure r7 R-25) ────────────────────
+# pr-sweeper는 30분 크론으로 "무장 + BEHIND"인 봇 PR을 `gh pr update-branch`로 전진시킨다. 그 선택 접두에
+# `bump-poll/`이 있으면 두 가지가 동시에 깨진다:
+#   ① **승인 게이트 우회**: 스위퍼는 **레인을 보지 않는다**. autoDeploy가 true→false로 바뀌어도 이미 무장된
+#      PR은 무장된 채 남는데, 스위퍼가 브랜치를 갱신해 체크를 재시작시키면 green 시점에 GitHub이 **사람 승인
+#      없이 머지**한다. (게다가 실행기의 해제는 (app,tag) 키로만 도니, 더 새 태그가 나오면 옛 armed PR은
+#      영영 방문되지 않는다 — 라이브 좀비 #348·#350·#351.)
+#   ② **소유권 인터록 파괴**: update-branch는 head에 **머지 커밋**을 얹는다 → 실행기의 proveOurCommit이
+#      영구 실패 → 무장 회수 + fail-closed → 그 앱의 bump가 **영원히 멈춘다**. 스위퍼 접두 제거는 선택이
+#      아니라 실행기의 **동작 전제조건**이다.
+# 계약: 스위퍼의 head 접두 정규식이 `bump-poll/…`를 **선택하지 않는다**. 다른 접두는 그대로 둔다.
+
+# bats test_tags=regression
+@test "the pr-sweeper no longer selects bump-poll branches (the executor owns that namespace)" {
+  # ★ 문자열 grep이 아니라 **정규식을 실제로 실행**해 판정한다. `^(bump|…)/`의 `bump` 대안이 `bump-poll/`을
+  #   접두 매치하지 않는다는 사실에 **의존하지 않고** 실측한다 — 누군가 앵커를 풀거나 `bump.*`로 고치면
+  #   문자열 증인은 통과하지만 라이브에선 다시 bump-poll PR을 골라 간다.
+  #   워크플로에서 jq 셀렉터의 **그 줄**을 뽑아 실제 브랜치명을 통과시킨다.
+  sel="$(grep -oE 'test\("[^"]+"\)' "$SWEEPER" | head -1)"
+  [ -n "$sel" ] || { echo "pr-sweeper.yaml에서 head 접두 정규식(test(\"…\"))을 찾지 못했다"; false; }
+  re="$(printf '%s' "$sel" | sed -E 's/^test\("//; s/"\)$//')"
+  [ -n "$re" ] || { echo "정규식을 추출하지 못했다: $sel"; false; }
+
+  # ① bump-poll 브랜치는 **선택되지 않는다**(실측: 그 정규식에 실제로 통과시켜 본다).
+  hit="$(printf '%s' '[{"headRefName":"bump-poll/page-sha-abc1234"}]' \
+    | jq -r --arg re "$re" '.[] | select(.headRefName | test($re)) | .headRefName')"
+  [ -z "$hit" ] || {
+    echo "approval gate bypass: pr-sweeper의 정규식이 여전히 bump-poll 브랜치를 고른다('$hit', 정규식 '$re') —"
+    echo "  스위퍼는 레인을 모른다 → autoDeploy:false로 뒤집힌 뒤에도 낡은 무장을 green으로 밀어 **승인 없이 머지**한다."
+    echo "  또 update-branch의 머지 커밋이 실행기의 소유권 증명을 영구 파괴해 그 앱의 bump가 멈춘다."
+    false
+  }
+
+  # ② 다른 봇 접두는 **그대로 골라야** 한다 — 스위퍼를 통째로 죽이면 그 PR들의 BEHIND 수렴이 사라진다.
+  for b in bump/pg-tools create-database/foo create-cache/foo create-app/foo update-secrets/foo; do
+    keep="$(printf '%s' "[{\"headRefName\":\"$b\"}]" \
+      | jq -r --arg re "$re" '.[] | select(.headRefName | test($re)) | .headRefName')"
+    [ "$keep" = "$b" ] || {
+      echo "over-correction: pr-sweeper가 '$b'를 더 이상 고르지 않는다 — bump-poll만 빼야 한다(정규식 '$re')"
+      false
+    }
+  done
+}
+
+# bats test_tags=regression
+@test "no workflow advances a bump-poll PR (gh pr update-branch and gh pr merge never see that namespace)" {
+  # ★ 호출부 게이트의 확장(전 워크플로). `bump-poll` 브랜치/PR을 `gh pr merge`·`gh pr update-branch`·
+  # `auto-merge-or-fail.sh`에 넘기는 워크플로가 **하나도 없어야** 한다 — 있으면 실행기의 단일 소유가 깨지고
+  # 승인 게이트가 그 경로로 우회된다. 실행기(tools/ensure-bump-pr.ts)만이 그 네임스페이스를 변이한다.
+  bad=""
+  for wf in "$ROOT"/.github/workflows/*.yaml; do
+    # 주석은 뺀 뷰에서 본다(이 파일들의 주석은 bump-poll을 **설명**한다).
+    code="$BATS_TEST_TMPDIR/$(basename "$wf").code"
+    sed 's/^[[:space:]]*#.*$//' "$wf" > "$code"
+    if grep -qE 'gh pr update-branch' "$code"; then
+      if grep -qE 'bump-poll' "$code"; then
+        bad="$bad $(basename "$wf")"
+      fi
+    fi
+  done
+  [ -z "$bad" ] || {
+    echo "single-owner violated: 다음 워크플로가 bump-poll 네임스페이스를 update-branch로 전진시킨다:$bad"
+    echo "  전진은 tools/ensure-bump-pr.ts의 leased force-push만이 한다(머지 커밋 0 — 소유권 증명 보존)."
+    false
+  }
+
+  # 실행기 자신도 `gh pr update-branch`를 **부르지 않는다**(머지 커밋 head = 소유권 증명 영구 파괴).
+  # ⚠️ 주석/에러 문구는 그 금지를 **설명**하므로 전체-줄 주석을 지운 뷰에서, **argv 토큰 형태**
+  #    (따옴표로 감싼 "update-branch")만 겨냥한다 — 산문이 증인을 오탐시키면 게이트가 죽은 텍스트가 된다.
+  #    (실제 이빨은 도구 스위트의 원장 단언이다: W29~W32가 `gh pr update-branch` 실행 0회를 못박는다.)
+  ECODE="$BATS_TEST_TMPDIR/executor.code.ts"
+  sed 's#^[[:space:]]*//.*$##' "$EXECUTOR" > "$ECODE"
+  run grep -nE "[\"']update-branch[\"']" "$ECODE"
+  if [ "$status" -eq 0 ]; then
+    echo "ownership interlock destroyed: 실행기가 'gh pr update-branch'를 argv로 넘긴다 — head가 머지 커밋이 되어"
+    echo "  다음 주기 proveOurCommit이 영구 실패한다(무장 회수 + fail-closed = 그 앱의 bump 영구 정지)."
+    echo "$output"
+    false
+  fi
+}
+
+# ── ⑧ **해제는 후보에 의존하지 않는다** — reconcile 패스는 매 주기 전 앱을 돈다(H-1) ──────────────
+# bump 루프는 플래너가 후보를 낸 앱(action = bump | propose-pr)만 돈다. `noop`(핀이 이미 최신·동일 digest)이나
+# `refuse`(GHCR 일시 장애·compare 실패·앱 레포 이력 재작성)인 주기엔 그 앱의 실행기가 **한 번도 호출되지 않는다**
+# → 그 사이 autoDeploy가 true→false로 뒤집혀도 이미 무장된 PR이 **낡은 머지 인가를 무기한** 들고 있는다.
+# ★★ 해제는 **가용성이 아니라 보안 속성**이다 — 플래너가 후보를 만들어 주느냐에 의존해선 안 된다.
+# 계약: `--reconcile-only`가 plan의 **모든 항목**(action 무관)에 대해, **후보 없이**, 매 주기 실행기에 도달한다.
+
+# bats test_tags=regression
+@test "the reconcile pass reaches the executor for EVERY plan item, including noop and refuse (disarm cannot wait for a candidate)" {
+  setup_hermetic
+  rc=$?
+  [ "$rc" -ne 9 ] || { echo "hermetic harness: bump 스텝 추출 실패"; false; }
+  [ -s "$RSTEP" ] || {
+    echo "stale authorization survives: bump-poll.yaml에 **인가 회수 패스가 없다**(--reconcile-only를 부르는 스텝 0개) —"
+    echo "  bump 루프는 후보가 있는 앱만 돈다 → noop/refuse 주기엔 실행기가 호출조차 되지 않고,"
+    echo "  autoDeploy가 true→false로 뒤집힌 뒤에도 낡은 무장이 **영구히** 살아남는다."
+    false
+  }
+
+  run run_step_rc "$RSTEP"
+  [ "$status" -eq 0 ] || {
+    echo "reconcile 스텝이 정상 경로에서 죽었다(exit $status)"
+    step_out; dump_calls; false
+  }
+
+  # ① plan의 **네 항목 전부**가 실행기에 도달했다 — noop(files)·refuse(broken-api)도 포함이다.
+  got="$(reconciled_apps)"
+  [ "$got" = "broken-api files page trip-mate" ] || {
+    echo "stale authorization survives: reconcile 패스가 plan의 전 항목을 돌지 않았다"
+    echo "  도달: '$got'"
+    echo "  기대: 'broken-api files page trip-mate' (noop·refuse 포함 — 그 주기가 정확히 회수가 필요한 주기다)"
+    step_out; dump_calls; false
+  }
+
+  # ② 이 패스는 **레인을 넘기지 않는다**. 넘기는 순간 호출부가 레인을 지어낼 수 있고(승인 게이트 우회),
+  #    게다가 noop/refuse 항목의 `.action`은 레인이 아니라 "후보가 없다"는 뜻이라 애초에 쓸 수 없다.
+  #    레인은 실행기가 autoDeploy SSOT(.bindings.json / .image-pin.json)에서 직접 읽는다.
+  n="$(arg_calls --action)"
+  [ "$n" -eq 0 ] || {
+    echo "lane injection: reconcile 패스가 실행기에 --action을 넘긴다(${n}회, 기대 0회) —"
+    echo "  noop/refuse 항목의 .action은 레인이 아니다. 레인은 autoDeploy SSOT에서만 나온다."
+    dump_calls; false
+  }
+}
+
+# bats test_tags=regression
+@test "one app's fail-closed never starves the apps after it (each bump item is isolated, the run still goes red)" {
+  # ★★ H-2. 옛 루프는 `jq … | while read`를 `bash -e` 아래서 돌렸다 → 한 앱이 fail-closed로 죽으면
+  # (예: 증명되지 않은 head — 사람이 개입할 때까지 **영구히** 그 상태다) 파이프라인이 통째로 죽어
+  # **그 뒤의 모든 앱이 매 주기 실행기에 도달조차 못 했다**. pr-sweeper가 이 네임스페이스에서 빠진 지금,
+  # 이 루프의 생존성은 가용성이 아니라 **인가 회수의 전제조건**이다(낡은 무장은 방문해야만 회수된다).
+  setup_hermetic
+  rc=$?
+  [ "$rc" -ne 9 ] || { echo "hermetic harness: bump 스텝 추출 실패"; false; }
+
+  # plan의 **첫** 항목(page)의 실행기를 fail-closed 시킨다 — 그 뒤의 trip-mate가 굶는지가 질문이다.
+  export STUB_FAIL_APP=page
+  run run_step_rc "$STEP"
+  unset STUB_FAIL_APP
+
+  # ① 뒤따르는 앱이 **여전히 실행기에 도달했다**(굶기지 않았다).
+  got="$(bumped_apps)"
+  [ "$got" = "page trip-mate" ] || {
+    echo "starvation: page의 fail-closed가 뒤따르는 앱을 굶겼다 — 실행기에 도달한 앱: '$got'(기대 'page trip-mate')"
+    echo "  그 앱들은 **매 주기** 실행기에 도달하지 못한다(page의 fail-closed는 사람이 고칠 때까지 지속된다)"
+    echo "  → 낡은 무장 회수도, DIRTY/BEHIND 수렴도, 중복 PR 억제도 전부 멈춘다."
+    step_out; dump_calls; false
+  }
+
+  # ② 그래도 run은 **빨갛다** — 실패를 삼키면 telegram 알림이 안 가고 fail-closed가 조용히 묻힌다.
+  [ "$status" -ne 0 ] || {
+    echo "silent failure: 한 앱이 fail-closed로 죽었는데 스텝이 성공(exit 0)으로 끝났다 —"
+    echo "  실패는 모아서 **맨 끝에서** 비-0으로 내야 한다(그래야 failure() telegram이 발화한다)."
+    step_out; dump_calls; false
+  }
+}
+
+# bats test_tags=regression
+@test "a failing reconcile pass never starves the bump loop, but still turns the run red" {
+  # ★ 두 방향의 균형. reconcile 스텝이 비-0으로 끝나면 GHA가 **bump 스텝을 아예 실행하지 않는다** →
+  # 앱 하나의 SSOT가 깨진 것만으로 **모든 배포가 정지**한다(억제 = 공격 표면). 그러니 그 스텝은
+  # 죽지 않는다 — 대신 실패 사실을 넘겨 bump 스텝이 run을 빨갛게 만든다.
+  setup_hermetic
+  rc=$?
+  [ "$rc" -ne 9 ] || { echo "hermetic harness: bump 스텝 추출 실패"; false; }
+  [ -s "$RSTEP" ] || { echo "reconcile 패스가 없다"; false; }
+
+  export STUB_FAIL_APP=page
+  run run_step_rc "$RSTEP"
+  unset STUB_FAIL_APP
+
+  # ① reconcile 스텝은 **비-0으로 끝나지 않는다**(끝나면 bump 스텝이 안 돈다 = 배포 정지).
+  [ "$status" -eq 0 ] || {
+    echo "deployment suppressed: reconcile 스텝이 비-0(exit $status)으로 끝났다 —"
+    echo "  GHA는 그 뒤 스텝을 건너뛴다 → 앱 하나의 SSOT/API 장애가 **모든 앱의 배포**를 정지시킨다."
+    step_out; dump_calls; false
+  }
+  # ② 실패한 앱 하나가 나머지의 회수를 굶기지도 않았다.
+  got="$(reconciled_apps)"
+  [ "$got" = "broken-api files page trip-mate" ] || {
+    echo "starvation: reconcile 루프에서 page의 실패가 뒤따르는 앱을 굶겼다 — 도달: '$got'"
+    step_out; dump_calls; false
+  }
+
+  # ③ 그런데 그 실패는 **묻히지 않는다**: bump 스텝이(자기 앱들은 전부 성공했는데도) run을 빨갛게 만든다.
+  run run_step_rc "$STEP"
+  [ "$status" -ne 0 ] || {
+    echo "silent failure: reconcile 실패가 run 판정에 합류하지 않았다(bump 스텝 exit 0) —"
+    echo "  낡은 무장을 회수하지 못했는데 아무도 모르는 상태가 된다(telegram 무발화)."
+    step_out; dump_calls; false
+  }
+  bumped="$(bumped_apps)"
+  [ "$bumped" = "page trip-mate" ] || {
+    echo "over-correction: reconcile 실패가 bump 루프까지 막았다 — bump 도달: '$bumped'(기대 'page trip-mate')"
+    step_out; dump_calls; false
   }
 }
 
