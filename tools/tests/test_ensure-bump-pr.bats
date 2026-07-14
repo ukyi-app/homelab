@@ -67,8 +67,25 @@
 #   W7 rebuild 멱등  : bump + DIRTY + **이미 무장** → rebuild push 1회 + 무장 0회.
 #                  현재: create 경로가 무조건 무장 → 1회. (무장을 rebuild의 부작용으로 매달면 여기서 걸린다.)
 #
-# 보존(태그 없음 — baseline에서 GREEN): 하네스 자체의 증명(인자 경계·계약 밖 argv 거부)·신뢰 경계
-# (포크·타인 불신)·fail-closed·조회-우선 순서·**레인 격리**(propose-pr은 무장 0 / `--auto-merge` 플래그 부재).
+# ── 파티션의 기준: **픽스 이전 프로덕션에도 있었는가** ──────────────────────────────────────────
+# RED baseline = 픽스 이전 bump-poll.yaml의 bump 스텝을 이 seam으로 옮긴 것뿐이다:
+#     git push -u origin <b>  →  gh pr create(무조건)  →  (bump 레인) auto-merge-or-fail.sh <b>
+# **조회가 없다** — 열린 PR도, 원격 브랜치도, 커밋 소유권도 묻지 않는다. 따라서 판정도, lease도,
+# 소유권 증명도, 해제도, fail-closed도 없다.
+#
+# 보존(태그 없음 — **baseline에서도 GREEN**)은 그래서 딱 이만큼이다:
+#   · 하네스 자체의 증명(인자 경계 보존 · 계약 밖 push argv 거부)
+#   · bare lease 금지(양 끝단 모두 bare lease를 내지 않는다)
+#   · create 경로의 레인 격리(propose-pr은 무장 0 / 무장은 PR 생성 **뒤**)
+#   · CLI 표면(레인 필수·기본값 없음 · 알 수 없는 옵션 exit 2 · `--auto-merge` 플래그 부재 · --help)
+# 그 밖의 **모든 실행기 계약은 회귀다** — 조회(완전 열거·검색 API 금지·ls-remote·조회-우선 순서)·
+# 신뢰 경계·판정(create/adopt/skip/rebuild)·완전 push argv·인가 reconcile(재무장·해제)·소유권·
+# fail-closed는 **전부 픽스가 만든다**. baseline엔 존재하지 않으므로 여기서 전부 RED다.
+#
+# ⚠️ 증인 설계 규칙(이 파티션을 정직하게 유지하는 것): **증상은 원장(argv)만으로 단언한다.**
+#    `.observed.*`(=픽스의 조회 설계)를 증상 단언의 **전제조건**으로 두면, 아무것도 조회하지 않는
+#    실행기(= 픽스 이전 프로덕션)가 그 가드에서 먼저 죽어 **엉뚱한 이유의 RED**가 된다. 관측 단언은
+#    증상 단언 **뒤**에 온다(W1·W3 참고).
 #
 # ⚠️ 중간 복합 단언 금지([[ ]]·중간 `!`는 bats에서 침묵 통과) → 한 줄에 [ ] 하나씩.
 # ⚠️ @test 이름은 영어(디렉토리 단위 실행 시 한글 인코딩 깨짐 — 검증된 버그).
@@ -443,10 +460,12 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   run_ensure
   [ "$status" -eq 0 ]
 
-  # 하네스 확인: 도구가 그 사실을 관측은 했는가(배선이 죽었다면 버그가 아니라 테스트 결함이다).
-  echo "$output" | jq -e '.observed.trusted.number == 350' > /dev/null \
-    || { echo "harness: 도구가 열린 PR 사실을 관측하지 못했다(gh pr list 배선 확인)"; echo "$output"; dump_calls; false; }
-
+  # ⚠️ 증상은 **원장(argv)만으로** 단언한다 — `.observed.*`에 **어떤 전제도 두지 않는다**.
+  #    예전엔 여기 "도구가 그 PR을 관측했는가" 하네스 가드가 **증상 단언보다 먼저** 있었다. 그건
+  #    **픽스의 설계(조회)를 버그 관측의 전제조건으로 삼는 것**이다: 아무것도 조회하지 않는 실행기
+  #    (= 픽스 이전 프로덕션 그 자체)는 그 가드에서 먼저 죽어 **증상 토큰을 출력하지 못한다**
+  #    → RED이긴 하되 **엉뚱한 이유의 RED**다. 증인은 "아무것도 안 보고 그냥 PR을 또 여는 실행기"를
+  #    잡을 수 있어야 한다. 배선(관측) 단언은 **증상 단언 뒤로** 옮겼다.
   creates="$(count_calls gh pr create)"
   [ "$creates" -eq 0 ] || {
     echo "duplicate bump PR: ensure-bump-pr executed 'gh pr create' while PR #350 (same-repo, writer) is already open"
@@ -457,11 +476,16 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
     echo "duplicate bump PR: ensure-bump-pr pushed ${BRANCH} while PR #350 (same-repo, writer) is already open"
     dump_calls; false
   }
-  action="$(echo "$output" | jq -r '.action')"
+  action="$(echo "$JSON" | jq -r '.action')"
   [ "$action" = "skip" ] || {
     echo "duplicate bump PR: ensure-bump-pr decided '$action' while PR #350 (same-repo, writer) is already open (expected skip)"
-    echo "$output"; false
+    echo "$JSON"; false
   }
+
+  # 변이 0을 확인한 **뒤에야** 배선을 본다: skip이 "조회해서 그 PR을 찾았기 때문"임을 못박는다
+  # (변이 0이 조회 없이 우연히 나온 것이 아니라는 증명 — 예: 아무것도 안 하는 no-op 실행기 배제).
+  echo "$JSON" | jq -e '.observed.trusted.number == 350' > /dev/null \
+    || { echo "duplicate bump PR: 변이는 없지만 도구가 열린 PR #350을 **관측하지도 않았다** — skip이 사실에 근거하지 않는다"; echo "$JSON"; dump_calls; false; }
 }
 
 # bats test_tags=regression
@@ -517,9 +541,9 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   run_ensure
   [ "$status" -eq 0 ]
 
-  echo "$output" | jq -e --arg o "$ORPHAN_OID" '.observed.remoteBranch.oid == $o' > /dev/null \
-    || { echo "harness: 도구가 고아 원격 브랜치를 관측하지 못했다(git ls-remote 배선 확인)"; echo "$output"; dump_calls; false; }
-
+  # ⚠️ W1과 같은 이유로 배선(관측) 단언은 **증상 단언 뒤**다 — 아무것도 조회하지 않는 실행기
+  #    (= 픽스 이전 프로덕션)도 반드시 **이 증상 메시지로** 죽어야 한다. 관측 가드를 앞에 두면
+  #    "조회를 한다"는 픽스의 설계가 버그 관측의 전제조건이 되어 엉뚱한 이유의 RED가 된다.
   # 완전 argv 배열 단언(plan r3/r4) — 고아 OID를 기대값으로 한 lease + 완전 목적지 refspec.
   # (bare 원격 실측: 이 형태만이 원격 추적 참조 없이도 고아를 덮어쓴다. 접두만 맞거나 붙여 쓰면 라이브는 무동작.)
   run has_call_exact "${PUSH_ADOPT[@]}"
@@ -540,6 +564,10 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
     echo "orphan bump branch: ensure-bump-pr decided '$action' with an orphan remote branch present (expected adopt)"
     echo "$JSON"; false
   }
+
+  # adopt의 lease 기대값이 **관측된 원격 OID**에서 왔음을 못박는다(증상 단언 뒤 — 전제가 아니다).
+  echo "$JSON" | jq -e --arg o "$ORPHAN_OID" '.observed.remoteBranch.oid == $o' > /dev/null \
+    || { echo "orphan bump branch: adopt는 했지만 고아 원격 브랜치를 **관측하지 않았다**(git ls-remote 배선 확인)"; echo "$JSON"; dump_calls; false; }
 }
 
 # bats test_tags=regression
@@ -1498,7 +1526,8 @@ foreign_head_commit() {
 }
 
 # ---------------------------------------------------------------------------
-# 보존 — red baseline에서 이미 GREEN(수정 후에도 GREEN이어야 한다)
+# 아래부터 — 보존(태그 없음: baseline에서도 GREEN)과 회귀가 섞여 있다. 태그가 SSOT다.
+# baseline이 **조회를 하지 않으므로**, 사실을 근거로 하는 계약(조회·신뢰·판정·fail-closed)은 전부 회귀다.
 # ---------------------------------------------------------------------------
 
 @test "the lease is never bare (a bare --force-with-lease is stale-rejected on a fresh checkout)" {
@@ -1521,7 +1550,11 @@ foreign_head_commit() {
   [ "$tool_status" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "no open PR and no remote branch: pushes the branch (exact argv) and opens exactly one PR" {
+  # ⚠️ baseline에서 RED다 — 픽스 이전 프로덕션의 push는 `git push -u origin <branch>`(미수식 목적지)라
+  #    계약 argv(`git push origin HEAD:refs/heads/<b>`)와 **다른 배열**이다. 정상 create 경로의 완전 argv는
+  #    픽스가 새로 못박는 계약이다(목적지를 refs/heads/로 완전 수식 — lease의 <refname>과 글자 그대로 같은 ref).
   write_prs '[]'
   run_ensure
   [ "$status" -eq 0 ]
@@ -1539,6 +1572,7 @@ foreign_head_commit() {
   [ "$creates" -eq 1 ]
 }
 
+# bats test_tags=regression
 @test "facts are queried before any mutation (query then decide then mutate)" {
   # R-4의 핵심 순서 계약: 조회가 push/create보다 **먼저** 일어나야 판정이 의미를 갖는다.
   write_prs '[]'
@@ -1559,6 +1593,7 @@ foreign_head_commit() {
   [ "$push_at" -lt "$create_at" ]
 }
 
+# bats test_tags=regression
 @test "the PR query is an UNBOUNDED paginated connection query (no --limit can be saturated by forks)" {
   # ★★ 이 증인이 "포크로 배포를 정지시킬 수 없다"는 계약의 **구조적** 절반이다.
   # 경계된 조회(`gh pr list --limit N`)는 두 갈래로 다 진다: 상한을 믿으면 자기 PR을 고아로 오인하고,
@@ -1615,6 +1650,7 @@ foreign_head_commit() {
   done
 }
 
+# bats test_tags=regression
 @test "the query never touches the SEARCH api (eventual consistency would fabricate a false absence)" {
   # 심층 방어 + 강한 일관성:
   #   ① `gh pr list --author/--app`는 내부적으로 **검색 API**로 갈아탄다(실측 GH_DEBUG=api: SearchType 프로브
@@ -1639,6 +1675,7 @@ foreign_head_commit() {
   [ "$status" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "the remote branch is probed with git ls-remote on the deterministic branch" {
   write_prs '[]'
   run_ensure
@@ -1650,6 +1687,7 @@ foreign_head_commit() {
   fi
 }
 
+# bats test_tags=regression
 @test "a fork (cross-repo) PR on the same branch name is never trusted (and does not own our branch)" {
   # 공개 레포 — 포크 PR은 같은 브랜치명 + 그럴듯한 본문을 아무나 올릴 수 있다. 이걸 신뢰하면
   # 포크 PR 하나로 배포를 무기한 억제할 수 있다(억제 = 공격 표면) → 신뢰 0.
@@ -1702,8 +1740,9 @@ foreign_head_commit() {
   [ "$merges" -eq 0 ]
 }
 
-# ⚠️ 보존(태그 없음) — baseline에서도 GREEN이다. W18의 파괴 가드가 **포크까지 삼켜** 배포를 억제하는
-#    과잉 반응(포크 PR 하나로 영구 정지)을 막는 게 목적이다.
+# ⚠️ baseline에서 RED다(adopt 판정 자체가 없다 — 언제나 create). W18의 파괴 가드가 **포크까지 삼켜**
+#    배포를 억제하는 과잉 반응(포크 PR 하나로 영구 정지)을 막는 게 목적이다.
+# bats test_tags=regression
 @test "a fork-only PR does NOT block adopting our own orphan branch (the fork does not own our ref)" {
   # 위 W18의 정확한 반대편 — **과잉 반응 금지**. 포크 PR은 우리 레포의 ref를 소유할 수 없다(head가 자기 레포에
   # 있다). 그러니 포크 PR이 열려 있어도 우리 레포에 남은 그 브랜치는 **여전히 우리 고아**다(앞선 run이 push엔
@@ -1727,6 +1766,7 @@ foreign_head_commit() {
   [ "$creates" -eq 1 ]
 }
 
+# bats test_tags=regression
 @test "the writer App is recognized in both gh (app/<slug>) and REST (<slug>[bot]) login forms" {
   # 표기 계약 고정: gh CLI는 `app/ukyi-homelab-writer`, REST/GraphQL은 `ukyi-homelab-writer[bot]`.
   # 한쪽만 인식하면 신뢰 판정이 조용히 무너져(=trusted 0) 중복 PR이 그대로 남는다.
@@ -1737,6 +1777,11 @@ foreign_head_commit() {
   echo "$output" | jq -e '.observed.trusted.number == 352'
 }
 
+# ── fail-closed 6종 — **전부 baseline에서 RED**(회귀) ──────────────────────────────────────────
+# 픽스 이전 프로덕션은 사실을 **읽지 않았다** → 읽은 사실이 깨졌을 때 어떻게 할지도 없었다. 조회 실패·
+# 깨진 JSON·스키마 드리프트에 **조용히 create로 흘러가는 것**이 바로 이 버그의 재발 경로다(중복 PR).
+# fail-closed는 픽스가 **새로 만드는** 계약이다 → 회귀 파티션.
+# bats test_tags=regression
 @test "malformed PR JSON fails closed and mutates nothing" {
   write_prs 'not json at all'
   run_ensure
@@ -1747,6 +1792,7 @@ foreign_head_commit() {
   [ "$creates" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "empty gh output fails closed (an empty read is not 'no open PRs')" {
   # `gh pr list --json`은 PR이 없어도 '[]'를 준다 → 빈 출력은 조회 실패다. 조용히 create로 흘리면 버그 재현.
   write_prs ''
@@ -1756,6 +1802,7 @@ foreign_head_commit() {
   [ "$creates" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "a non-array top level fails closed (gh pr list --json returns an array)" {
   write_prs '{"number":350}'
   run_ensure
@@ -1764,6 +1811,7 @@ foreign_head_commit() {
   [ "$creates" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "a PR object missing the schema fields fails closed (field-name drift guard)" {
   # gh --json 필드명이 바뀌거나 오타가 나면(예: crossRepository) 조용히 trusted 0이 되어
   # 중복 PR이 되살아난다 → 스키마 위반은 판정하지도, 변이하지도 않는다.
@@ -1774,6 +1822,7 @@ foreign_head_commit() {
   [ "$creates" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "a PR without headRefOid fails closed (no lease expectation means no safe recovery)" {
   write_prs "[{\"number\":350,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
   write_heads "$PR_OID"   # 동일-레포 PR ⇒ 그 head 브랜치는 **이 레포에 존재한다**
@@ -1783,6 +1832,7 @@ foreign_head_commit() {
   [ "$pushes" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "a PR without autoMergeRequest fails closed (arming state unknown means re-arm cannot be decided)" {
   # R-10 필드 드리프트 가드. 이 필드가 조용히 사라지면(필드명 변경·오타) 두 갈래로 다 나쁘다:
   #   undefined를 "미무장"으로 읽으면 → 매 폴링 재무장(소음, 남의 PR까지 건드릴 수 있음)
@@ -1800,6 +1850,7 @@ foreign_head_commit() {
   [ "$arms" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "a failing PR query fails closed and mutates nothing" {
   export STUB_GH_LIST_FAIL=1
   run_ensure
@@ -1810,6 +1861,7 @@ foreign_head_commit() {
   [ "$creates" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "a failing remote-branch probe fails closed and mutates nothing" {
   export STUB_GIT_LSREMOTE_FAIL=1
   write_prs '[]'
@@ -1821,6 +1873,7 @@ foreign_head_commit() {
   [ "$creates" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "the branch name is deterministic per bump (no RUN_ID — same bump converges to one branch)" {
   # 결정적 브랜치가 중복 PR 픽스의 토대다: run마다 브랜치가 달라지면 조회할 대상 자체가 없다.
   write_prs '[]'
@@ -1872,6 +1925,7 @@ foreign_head_commit() {
   }
 }
 
+# bats test_tags=regression
 @test "the propose-pr lane does not arm on the SKIP path (a trusted un-armed PR is left alone)" {
   # W4(재무장)가 레인을 넘어 새지 않는가 — 승인 PR에 무장이 없는 건 **정상**이다(그게 승인 레인이다).
   # 재무장은 bump 레인의 desired state일 뿐, "무장 없음"을 보편적 결함으로 취급하면 승인 게이트가 무너진다.
@@ -1890,11 +1944,13 @@ foreign_head_commit() {
 }
 
 # ── propose-pr × **네 결정 경로 전부** 무장 0(plan r6) ───────────────────────────────────────
-# 위 두 증인은 create·skip 경로만 덮는다 → 무장을 **adopt/rebuild 분기 안에** 심은 구현이 GREEN이 된다
-# (그 두 경로는 라이브에서 실제로 밟힌다: 고아 브랜치 접수·DIRTY 회복). 레인 격리는 **경로별**로 증명한다.
-# ⚠️ 지금은 판정이 동결(항상 create)이라 아래 두 증인은 "그 사실 아래 create를 돌린" 셈이지만, fix가
-#    판정을 켜는 순간 같은 픽스처가 진짜 adopt/rebuild 경로로 들어간다(W2·W3가 그 판정을 못박는다).
+# 위 "NEVER arms" 증인은 create 경로만 덮는다 → 무장을 **skip/adopt/rebuild 분기 안에** 심은 구현이
+# GREEN이 된다(그 세 경로는 라이브에서 실제로 밟힌다: 이미 열린 PR·고아 브랜치 접수·DIRTY 회복).
+# 레인 격리는 **경로별**로 증명한다.
+# ⚠️ 아래 세 증인(skip/adopt/rebuild)은 **회귀**다 — baseline엔 그 경로 자체가 없다(언제나 create).
+#    create 경로의 레인 격리("NEVER arms")만이 양 끝단에서 GREEN이다(픽스 이전에도 propose-pr은 무장 0).
 
+# bats test_tags=regression
 @test "the propose-pr lane does not arm on the ADOPT path (orphan branch is adopted, never armed)" {
   # 고아 원격 브랜치 접수 → PR을 새로 연다. bump 레인이면 생성 직후 무장하지만, 승인 레인은 열기만 한다.
   write_prs '[]'
@@ -1912,6 +1968,7 @@ foreign_head_commit() {
   [ "$gh_arms" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "the propose-pr lane does not arm on the REBUILD path (a DIRTY PR is rebuilt, never armed)" {
   # DIRTY 회복 → PR을 재사용하며 force-push. 무장 갭이 있어도(승인 레인에선 정상) 재무장하지 않는다.
   write_prs "[{\"number\":365,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_absent)}]"
@@ -1932,9 +1989,13 @@ foreign_head_commit() {
 # ── 해제(disarm)의 반대편 — **과잉 반응 금지**(W8/W9가 새 방향으로 새지 않는가) ────────────────────
 # 해제는 "승인 레인 + 무장이 **실제로 남아 있을 때**"만이다. 이 두 증인이 없으면 fix가 해제를 무차별로
 # 걸어(매 폴링 churn) 또는 bump 레인의 정상 무장까지 회수해(autoDeploy 배포 정지) 반대 방향으로 깨진다.
+# ⚠️ 아래 네 증인은 **전부 baseline에서 RED**다(회귀). 해제(disarm)도, 무장 멱등도 baseline엔 없다:
+#    동결된 실행기는 열린 신뢰 PR을 **보지도 않고** 중복 PR을 새로 열어 **무조건 무장**하므로
+#    `gh pr merge` 총 호출이 0이 아니다. "무장·해제는 desired state"(양방향 수렴)는 픽스가 만드는 계약이다.
 # ⚠️ create/adopt 경로엔 **해제할 대상이 자체가 없다**(신뢰 PR이 없으니 무장도 없다) — 위 두 증인
 #    ("NEVER arms" / "does not arm on the ADOPT path")이 `gh pr merge` 총 0회로 이미 그걸 못박는다.
 
+# bats test_tags=regression
 @test "the propose-pr lane does not disarm a PR that was never armed (disarming is idempotent)" {
   # 승인 PR에 무장이 없는 건 **정상 상태**다 → 회수할 인가가 없다. 매 폴링 --disable-auto를 때리면
   # 무의미한 API 호출(그리고 gh 에러)로 run이 시끄러워지거나 죽는다.
@@ -1952,6 +2013,7 @@ foreign_head_commit() {
   [ "$merges" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "the bump lane NEVER disarms (the reverse direction must not misfire on autoDeploy apps)" {
   # ★ bump 레인의 desired state는 무장 **있음**이다. 해제 로직이 레인을 넘어 새면 autoDeploy 앱의 무장을
   # 매 폴링 회수해 배포가 조용히 정지한다 — W5(무장 멱등)의 정확한 거울상 결함이다.
@@ -1970,6 +2032,7 @@ foreign_head_commit() {
   [ "$merges" -eq 0 ]
 }
 
+# bats test_tags=regression
 @test "the bump lane does not disarm on the REBUILD path either (a DIRTY armed autoDeploy PR keeps its arming)" {
   # W7(rebuild + 이미 무장 → 재무장 0)의 해제 짝. rebuild 경로에 해제가 새면 DIRTY 회복이 자동 배포를 죽인다.
   write_prs "[$(writer_pr 374 DIRTY "$(amr_armed)")]"

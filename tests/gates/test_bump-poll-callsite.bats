@@ -612,6 +612,10 @@ run_step() {
   }
 }
 
+# ⚠️ 하네스 자기증명이지만 **baseline에서 RED**다(회귀): 기대값을 실행기 소스에서 파생하는데(EXPECT_PY),
+#    동결된 실행기엔 WRITER_BOT_NAME/BUMP_COMMIT_MESSAGE 자체가 없다(소유권 증명이 픽스의 산물이다) →
+#    expect가 exit 2로 죽는다. "찾지 못했으니 통과"를 허용하지 않는 게 이 게이트의 설계다.
+# bats test_tags=regression
 @test "the effective-ownership witness has teeth (a later git config override and a --amend both flip it RED)" {
   # ★ 하네스 자기증명(R-24). 위 증인이 **실효값**을 본다는 걸 재현으로 못박는다 — 그리고 같은 변이가
   # **옛 문자열 grep 증인은 그대로 통과**한다는 것도 함께 보인다(그게 R-24가 지적한 사각지대다).
