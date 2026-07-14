@@ -1,13 +1,17 @@
 {
-  "regressionCmd": "bats tools/tests/test_poll-ghcr.bats --filter-tags regression",
-  "characterizationCmd": "bats --filter-tags '!regression' tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_bump-poll-toctou.bats",
+  "regressionCmd": "bats tools/tests/test_ensure-bump-pr.bats --filter-tags regression",
+  "characterizationCmd": "bats --filter-tags '!regression' tools/tests/test_ensure-bump-pr.bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_bump-poll-toctou.bats",
   "flips": [
     {
-      "testId": "an open bump PR proposing the same candidate suppresses the duplicate bump (dedupe)",
-      "symptomToken": "duplicate bump PR: planner still says 'bump' while PR #350 already proposes the same candidate"
+      "testId": "an open same-repo writer PR for the same bump suppresses a duplicate create (skip)",
+      "symptomToken": "duplicate bump PR: ensure-bump-pr still says 'create' while PR #350 (same-repo, writer) already proposes"
+    },
+    {
+      "testId": "an open same-repo writer PR that went DIRTY is rebuilt, not duplicated (rebuild)",
+      "symptomToken": "duplicate bump PR: ensure-bump-pr still says 'create' while PR #351 (same-repo, writer) is DIRTY"
     }
   ],
-  "scope": ["tools/poll-ghcr.ts", ".github/workflows/bump-poll.yaml"],
-  "red": { "sha": "32c9c7ca8ef9a3ed243865e8d8c11f063a2be25d" },
+  "scope": ["tools/ensure-bump-pr.ts", ".github/workflows/bump-poll.yaml"],
+  "red": { "sha": "7373cdf4916e5e8b49d89a8dc4e0b8a92b47c8db" },
   "green": { "sha": "" }
 }
