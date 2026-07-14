@@ -1260,6 +1260,176 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   [ "$pushes" -eq 0 ]
 }
 
+# ── W25~W28: 소유권은 **force-push 허가**가 아니라 **인가(auto-merge) 조정의 입력**이다(structure r6 R-23) ──
+# W20~W24는 소유권을 force-push 경로(adopt·rebuild)에만 걸었다. 그래서 두 구멍이 남았다:
+#   ① **skip 경로**: writer가 연 PR인데 그 head 커밋을 **다른 행위자가 갈아치웠다**. 상태가 CLEAN/BLOCKED/
+#      UNKNOWN이면 판정은 skip이고 소유권은 **아예 검사되지 않는다** → bump 레인은 그 PR을 계속 신뢰해
+#      **무장을 유지하거나 새로 건다**. 그건 **남의 커밋에 머지 인가를 부여**한 것이다: auto-merge는 head OID가
+#      아니라 **PR에 붙으므로**, gate가 green이 되는 순간 그 낯선 head가 main으로 들어간다. force-push를
+#      안 했다고 안전한 게 아니다 — 인가는 push만큼 강력한 변이다.
+#   ② **propose-pr 해제 경로**: ARMED + DIRTY + 낯선 head는 소유권 검증에서 **먼저 죽어** `--disable-auto`에
+#      닿지 못했다 → **낡은 인가가 가장 회수돼야 할 때 살아남았다**(정확히 뒤집힌 결과다).
+# 계약:
+#   · 증명되지 않은 head엔 **절대 무장하지 않는다**(레인 무관).
+#   · 이미 무장돼 있으면 **해제한다** — 인가 회수는 언제나 안전한 방향이다.
+#   · **순서**: 회수(해제)가 **abort할 수 있는 소유권 검사보다 먼저**다. 안전 방향 행동이 앞, 중단 가능한
+#     검사가 뒤다(안 그러면 ②가 그대로 재현된다).
+#   · 그 뒤 변이 쪽은 fail-closed(force-push 0 · create 0 · 무장 0).
+
+# 낯선 행위자가 이 브랜치 head에 올린 커밋(정체성·메시지 둘 다 우리 것이 아니다).
+foreign_head_commit() {
+  export STUB_COMMIT_NAME="ukkiee"
+  export STUB_COMMIT_EMAIL="ukkiee@users.noreply.github.com"
+  export STUB_COMMIT_MSG="fix: 내가 이 브랜치 head에 올린 커밋"
+}
+
+# bats test_tags=regression
+@test "W25: an ARMED trusted PR whose head is NOT ours is DISARMED on the bump lane (authorization is revoked, never kept)" {
+  # 판정은 skip(CLEAN)이라 force-push는 애초에 없다 — 그런데 **무장은 살아 있다**. 옛 코드는 소유권을
+  # skip 경로에서 검사하지 않아 그 무장을 **그대로 뒀다** = 남의 커밋에 머지 인가를 유지한 것이다.
+  write_prs "[$(writer_pr 396 CLEAN "$(amr_armed)")]"
+  write_heads "$PR_OID"
+  foreign_head_commit
+  run_ensure_lane bump
+
+  # 변이 쪽은 fail-closed — 하지만 그 전에 인가는 회수돼 있어야 한다.
+  [ "$status" -ne 0 ] || {
+    echo "unproven head authorized: 낯선 head를 가진 PR #396을 신뢰한 채로 성공했다"
+    echo "$output"; dump_calls; false
+  }
+
+  # ① 회수(해제) 1회 — 대상은 **인증된 PR 번호**다.
+  run disarm_calls 396
+  [ "$output" -eq 1 ] || {
+    echo "stale authorization survives: 낯선 head(PR #396)의 auto-merge를 해제하지 않았다(해제 ${output}회, 기대 1회)"
+    echo "  auto-merge는 head OID가 아니라 **PR**에 붙는다 — gate가 green이 되는 순간 남의 커밋이 머지된다."
+    dump_calls; false
+  }
+  # 브랜치 셀렉터 금지(동명 포크 PR 오조준).
+  run disarm_calls "$BRANCH"
+  [ "$output" -eq 0 ]
+
+  # ② 무장은 0회 — 회수해야 할 자리에서 무장하면 정반대다.
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ] || {
+    echo "unproven head authorized: 증명되지 않은 head에 auto-merge를 무장했다"
+    dump_calls; false
+  }
+  # `gh pr merge` 총 호출은 **해제 1회뿐**(무장이 다른 표기로 새지 않았는가).
+  merges="$(merge_calls)"
+  [ "$merges" -eq 1 ]
+
+  # ③ 변이 0 — 남의 커밋을 밀어내지도, PR을 또 열지도 않는다.
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W26: an UN-ARMED trusted PR whose head is NOT ours is never armed on the bump lane (no authorization is granted)" {
+  # W25의 짝. 무장 갭(R-10)만 보면 "재무장하라"는 신호지만, 그 head는 **우리 것이 아니다** →
+  # 재무장은 남의 커밋에 머지 인가를 **새로 부여**하는 짓이다. 갭보다 소유권이 우선한다.
+  write_prs "[$(writer_pr 397 CLEAN "$(amr_absent)")]"
+  write_heads "$PR_OID"
+  foreign_head_commit
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "unproven head authorized: 낯선 head를 가진 PR #397에서 도구가 성공으로 끝났다"
+    echo "$output"; dump_calls; false
+  }
+
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ] || {
+    echo "unproven head authorized: 무장 갭을 이유로 **낯선 head**(PR #397)에 auto-merge를 걸었다(무장 ${arms}회, 기대 0회)"
+    echo "  재무장은 desired state지만, 그 전제는 'head가 우리 것'이다 — 갭은 소유권을 대신하지 못한다."
+    dump_calls; false
+  }
+  # 무장된 적이 없으니 회수할 것도 없다 → gh pr merge 총 0회(해제 churn 금지).
+  merges="$(merge_calls)"
+  [ "$merges" -eq 0 ]
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W27: a DIRTY ARMED PR with a foreign head is disarmed BEFORE the ownership abort (bump lane)" {
+  # W21은 "force-push하지 않는다"까지만 고정한다 — 그 PR에 **무장이 살아 있다는 사실**은 건드리지 않는다.
+  # 옛 코드는 소유권 검증에서 **먼저 죽어** 무장을 그대로 남겼다: 그 PR은 낯선 head + 머지 인가를 든 채
+  # 영원히 열려 있고, main이 움직여 충돌이 풀리는 순간(또는 누가 브랜치를 갱신하는 순간) 머지된다.
+  # 계약: 회수(안전 방향)를 먼저 하고, 그 다음에 fail-closed한다.
+  write_prs "[$(writer_pr 398 DIRTY "$(amr_armed)")]"
+  write_heads "$PR_OID"
+  foreign_head_commit
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "destructive force-push: 낯선 head를 가진 DIRTY PR #398에서 도구가 성공으로 끝났다"
+    echo "$output"; dump_calls; false
+  }
+
+  # ① 인가 회수가 **실제로 실행됐다** — 원장에 남아 있다는 것 자체가 "abort보다 먼저"의 증거다.
+  run disarm_calls 398
+  [ "$output" -eq 1 ] || {
+    echo "stale authorization survives the abort: 낯선 head의 DIRTY PR #398을 해제하지 않고 죽었다(해제 ${output}회, 기대 1회)"
+    echo "  소유권 검사가 회수보다 먼저 abort하면, 인가가 **가장 위험한 상태 그대로** 남는다."
+    dump_calls; false
+  }
+  disarm_at="$(first_call gh pr merge --disable-auto)"
+  [ -n "$disarm_at" ]
+
+  # ② 파괴는 0 — 남의 커밋을 force-push로 지우지 않는다(W21의 계약을 유지한다).
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || {
+    echo "destructive force-push: PR #398의 head(남의 커밋)를 force-push로 지웠다"
+    dump_calls; false
+  }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ]
+  merges="$(merge_calls)"
+  [ "$merges" -eq 1 ]
+}
+
+# bats test_tags=regression
+@test "W28: an ARMED DIRTY PR with a foreign head is disarmed on the propose-pr lane too (revocation precedes the abort)" {
+  # ★★ 두 결함이 정확히 겹치는 자리다: **승인 레인**(사람 머지 = 배포 승인)인데 **낡은 무장**이 살아 있고,
+  # 게다가 그 head는 **남의 커밋**이다. 옛 코드는 rebuild 판정 → 소유권 검증 → abort 순서라 `--disable-auto`에
+  # 닿지 못했다: 인가를 **가장 회수해야 할 상태**에서 정확히 회수하지 못한 것이다.
+  # 계약: 회수는 판정·소유권·레인 어느 것에도 가로막히지 않는다(안전 방향 행동이 먼저다).
+  write_prs "[$(writer_pr 399 DIRTY "$(amr_armed)")]"
+  write_heads "$PR_OID"
+  foreign_head_commit
+  run_ensure_lane propose-pr
+  [ "$status" -ne 0 ] || {
+    echo "destructive force-push: 승인 레인이 낯선 head의 DIRTY PR #399을 rebuild했다"
+    echo "$output"; dump_calls; false
+  }
+
+  # ① 회수 1회 — **인증된 PR 번호**로.
+  run disarm_calls 399
+  [ "$output" -eq 1 ] || {
+    echo "approval gate bypass: 승인 레인이 낯선 head의 무장된 PR #399을 해제하지 못한 채 죽었다(해제 ${output}회, 기대 1회)"
+    echo "  소유권 fail-closed가 회수보다 먼저 실행되면, 낡은 인가가 살아남아 사람 승인 없이 머지된다."
+    dump_calls; false
+  }
+  # 브랜치 셀렉터는 금지다(동명 포크 PR이 해제/머지 대상으로 오조준될 수 있다).
+  run disarm_calls "$BRANCH"
+  [ "$output" -eq 0 ]
+
+  # ② 무장 0 · 변이 0 — 회수만 하고 조용히 죽는다.
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ]
+  merges="$(merge_calls)"
+  [ "$merges" -eq 1 ]
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+}
+
 # ---------------------------------------------------------------------------
 # 하네스 자체의 증명 — 이게 GREEN이 아니면 위 증인들은 아무것도 증명하지 못한다
 # ---------------------------------------------------------------------------

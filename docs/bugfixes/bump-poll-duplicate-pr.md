@@ -177,6 +177,28 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Review Decision Log
 
+### Codex Structure Review — r6: needs-attention → 3건 전부 Accept (owner 2026-07-14)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-22 | high | `Blocker: the locked regression partition changes between RED and HEAD` — 커밋된 RED 레코드는 regression **15**케이스를 돌렸는데, 태그 필터가 그대로인 채 HEAD에선 **37**케이스를 고른다. W8/W9·W20~W24는 `red.sha` **이후에** 추가돼 잠긴 baseline에서 **RED였던 적이 없다** → GREEN 레코드가 **다른 테스트 집합**과 비교되어 동일-테스트 단일-flip을 증명하지 못한다 | **Accept**(권고 대신 대안 이행) | **RED baseline 재구성**: `main` + **최종 테스트 전량** + 동결 executor 로 pre-fix 커밋을 만들고 `--verify-red` 재실행 → `red.sha`·`red-baseline` 재핀. 양 끝단이 **같은 파티션**을 돈다. ⚠️ Codex의 "쪼개서 별도 버그픽스로" 권고는 **Reject**: disarm·ownership은 *이 픽스가 만든* 위험(멱등 브랜치가 force-push 표면을 새로 연다)을 막는 **방어물**이라 분리하면 그 사이 구간이 무방비다 — 단일 flip의 **안전 전제조건**이지 두 번째 관측 행위가 아니다 |
+| R-23 | high | `Blocker: ownership proof does not protect auto-merge authorization` — `assertOurCommit`이 force-push 경로에서만 돈다. head가 **교체된** writer PR은 skip 경로에서 여전히 신뢰돼 **미검증 head에 auto-merge가 유지·추가**되고, 반대로 **무장된 DIRTY propose-pr**은 ownership 실패로 `--disable-auto` **이전에 죽어** 낡은 인가가 살아남는다 | **Accept** | provenance를 **인가 reconcile의 입력**으로 승격 — 미검증 head엔 무장 금지 + **이미 무장돼 있으면 회수**. **순서 규칙**: 회수(안전 방향)는 **중단 가능한 ownership 검사보다 먼저**. 증인: foreign-head skip(무장 0·회수 1) · foreign-head DIRTY(push 0 + 회수) · **무장된 propose-pr은 ownership fail-closed여도 disarm 수행** |
+| R-24 | medium | `Test-quality: the ownership call-site witness checks dead text` — 워크플로의 `git config`·`git commit` **리터럴 grep** + `BUMP_COMMIT_MESSAGE` 존재 확인뿐 → 이후 config/env 오버라이드·`--amend`가 **실효 커밋을 바꿔도 전부 green** → adopt/rebuild가 **영구 fail-closed**(조용한 배포 정지) | **Accept** | hermetic 루프 증인의 `git` stub이 **실효 user.name/user.email(마지막 쓰기 승)** 과 **실효 최종 커밋 메시지**(amend 반영)를 원장에 기록하고 executor의 ownership 기대식과 대조. 리터럴 grep 단언 제거 |
+
+### Codex Structure Review — r1~r5: needs-attention → 전건 Accept (owner 2026-07-14)
+
+| ID | 라운드·심각도 | 발견 | 반영 |
+|---|---|---|---|
+| R-12 | r1 · high | `Blocker: propose-pr preserves stale auto-merge authorization` — `.bindings.json`이 `autoDeploy: true→false`로 바뀌어도 **이전에 무장된 PR이 그대로** 남아 **승인 없이 머지**된다 | propose-pr 레인에서 무장된 신뢰 PR을 **disarm**(`gh pr merge --disable-auto <number>`). 무장은 결정과 **직교하는 축**이자 **양방향 reconcile** |
+| R-13 | r1 · high | `Blocker: bounded fork results can hide the writer PR` — 상한 있는 조회(`--limit N`)는 포크 PR이 결과를 채우면 우리 PR을 **가린다** → create 중복 or force-push 고아 경로. **포크 포화 = 배포 억제 무기** | **상한 없는 완전 페이지네이션**(GraphQL connection + `--paginate --slurp`). 마지막 페이지가 `hasNextPage:true`면 **fail-closed** |
+| R-14 | r2 · high | `Test-quality: arming drops the authenticated PR identity` — 무장 셀렉터가 브랜치면 `gh pr merge <branch>`가 **동명 포크 PR로 해석**될 수 있다(공격자 PR에 auto-merge) | **인증된 PR 번호**만 셀렉터로 전달(기존=`trusted.number`, 신규=`gh pr create` URL 파싱). 파싱 실패 시 fail-closed(브랜치 폴백 금지) |
+| R-15 | r3 · high | `Test-quality: the non-writer PR witness models the wrong seam` — 비-writer PR 증인이 검색 API 응답을 흉내내 **실제 seam(강한 일관성 connection)** 을 검증하지 못한다 | stub을 **GraphQL connection 응답 형태**로 재작성. 검색 API(`--author`/`search(`) 사용을 호출부 게이트가 금지 |
+| R-16 | r4 · high | `Blocker: PR identity drops the requested base branch` — head만으로 식별하면 **다른 base를 향하는 동일-레포 PR**을 우리 PR로 오인해 재사용한다 | **식별 = `(head, base)` 쌍**(클라이언트 매칭). 단 **소유권**(force-push 가부)은 base 무관 — base를 서버 필터로 넣으면 브랜치를 점유한 타 PR을 못 보고 파괴한다 |
+| R-17 | r4 · high | `Blocker: fork saturation remains a deployment-suppression primitive` — 포크 PR 존재만으로 결정이 막히면 외부인이 **배포를 정지**시킬 수 있다 | **포크는 결정을 막지 못한다**(면제) — `isCrossRepository === true`는 신뢰 후보에서 제외될 뿐, create/adopt/skip/rebuild 판정을 차단하지 않는다 |
+| R-18 | r5 · medium | `Accepted structure decisions are absent from the authoritative contract` — 계획서가 확정 설계와 어긋난다(낡은 "비-writer → create" 행 포함) | 계획서를 최종 상태 기계로 **동기화**(`8efcb42`) |
+| R-19 | r5 · high | `Blocker: PR authorship is treated as branch ownership` — `adopt`가 PR 없는 ref를 무조건 force-push하고, writer PR도 **다른 동일-레포 actor가 head에 push한 뒤** 계속 신뢰된다 → **남의 커밋이 지워진다** | force-push **직전에 원격 head 커밋의 소유권 검증**(author·committer = `<writer>[bot]` + 결정적 bump 커밋 메시지). 아니면 fail-closed. ⚠️ **커밋은 서명되지 않으므로 이는 안전 인터록이지 인증이 아니다**(적대적 `contents:write`는 위조 가능) → 강제 가능한 불변식은 `bump-poll/**` ruleset(**F-0**, 별건) |
+| R-20 | r5 · high | `Test-quality: the fork-saturation witness never crosses a page boundary` — stub이 모든 노드를 **단일 종단 페이지**로 감싸 첫 페이지만 소비하는 구현도 통과 | stub이 노드를 **실제 `first:100` 페이지**로 분할(`hasNextPage`/`endCursor`). 포화 증인은 **신뢰 PR을 마지막 페이지에** 배치 → 첫-페이지-only 구현이 RED임을 뮤테이션으로 확인 |
+
 ### Codex Plan Review — r8: clean — **approve**(발견 0). "Ship the plan to GREEN." (2026-07-14)
 
 아티팩트: `docs/reviews/bump-poll-duplicate-pr/plan-r8.json`. 락·계획서·state가 `b9d294d`로 정합하고 그

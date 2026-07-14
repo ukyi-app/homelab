@@ -75,16 +75,22 @@
 // 정지한다. 그래서 무장 여부(`autoMergeRequest`)를 사실로 관측한다.
 //
 // ★ 무장 계약(정확히) — 무장 축은 위 판정표와 **직교**하고, **양방향**이다. 판정은 브랜치/PR의 존재로,
-//   무장은 레인과 `autoMergeRequest`로 각각 독립적으로 정해진다:
-//     lane=bump      + 신뢰 PR + 무장 없음 → 그 run의 **판정이 무엇이든**(skip이든 rebuild든) 재무장한다
-//     lane=bump      + 신뢰 PR + 무장 있음 → 손대지 않는다(멱등 — force-push는 무장을 지우지 않는다:
-//                                            autoMergeRequest는 head OID가 아니라 PR에 붙는다)
+//   무장은 레인 · `autoMergeRequest` · **head 소유권**으로 각각 독립적으로 정해진다:
+//     lane=bump      + 신뢰 PR + 무장 없음 + head **우리 것** → 그 run의 **판정이 무엇이든** 재무장한다
+//     lane=bump      + 신뢰 PR + 무장 있음 + head **우리 것** → 손대지 않는다(멱등 — force-push는 무장을 지우지
+//                                            않는다: autoMergeRequest는 head OID가 아니라 PR에 붙는다)
 //     lane=bump      + create/adopt(PR 신규) → 생성 직후 무장한다
 //     lane=propose-pr + 신뢰 PR + 무장 **있음** → **해제한다**(gh pr merge --disable-auto <번호>)
 //     lane=propose-pr + 그 외                   → 무장하지 않는다(멱등 — 해제할 것도 없다)
+//     **head가 우리 것임이 증명되지 않음**(레인 무관) → 무장하지 않는다. 무장돼 있으면 **해제한다**(R-23).
+//                                            그 뒤 변이 쪽은 fail-closed(push·create 0).
 // ⚠️ 재무장을 skip 경로에만 매달면 **DIRTY + 미무장**에서 새 나간다(라이브에서 실제로 겹치는 조합이다:
 //    run 1이 무장에서 죽어 무장 없는 PR이 남고, 이후 main 이동이 그 PR을 충돌시킨다). rebuild만 하고
 //    무장 갭을 남기면 PR은 깨끗해지는데 auto-merge가 영영 안 붙어 배포가 정지한다.
+// ⚠️⚠️ 소유권은 **force-push 허가**가 아니라 **인가(auto-merge)의 전제조건**이다(R-23). 소유권 검증을
+//    force-push 경로에만 걸면, writer가 연 PR의 head를 **다른 행위자가 갈아치운** 경우 상태가 CLEAN이면
+//    판정이 skip이라 검증이 아예 돌지 않고 → 그 **남의 커밋에 auto-merge가 무장된 채 유지된다**(= 머지 인가
+//    부여). 그래서 소유권은 판정과 무관하게 확인하고, 증명 실패 시 **무장을 거둔다**(회수가 안전 방향).
 //
 // ★★ 무장이 desired state라면 **해제도 desired state여야 한다**(structure 게이트 high-1) ────────────
 // 무장을 "arm만 있고 disarm은 없는" 단방향으로 다루면 **낡은 머지 인가가 살아남는다**:
@@ -213,12 +219,21 @@ const ref = `refs/heads/${branch}`;
 const executed: string[] = [];
 
 function run(cmd: string, a: string[], what: string): string {
+  const r = runSoft(cmd, a);
+  if (r.failure !== null) execError(`${what} ${r.failure}`);
+  return r.stdout;
+}
+// 실패를 **값으로** 돌려주는 실행기 — 소유권 조회 전용이다. 왜 `run`(즉시 abort)이 아닌가:
+// 소유권 판정은 이제 **인가 조정(auto-merge 무장/해제)의 입력**이라, 그 실패조차 "해제(안전 방향)"보다
+// 먼저 프로세스를 죽이면 안 된다(★★ 아래 순서 규칙 참고). 여기선 실패를 값으로 받아 두고,
+// 해제를 먼저 낸 다음에 fail-closed한다.
+function runSoft(cmd: string, a: string[]): { failure: string | null; stdout: string } {
   executed.push([cmd, ...a].join(" "));
   const r = spawnSync(cmd, a, { encoding: "utf8" });
-  if (r.error) execError(`${what} 실행 실패: ${r.error.message}`);
+  if (r.error) return { failure: `실행 실패: ${r.error.message}`, stdout: "" };
   if (r.stderr) process.stderr.write(r.stderr);
-  if (r.status !== 0) execError(`${what} 실패(exit ${r.status})`);
-  return r.stdout ?? "";
+  if (r.status !== 0) return { failure: `실패(exit ${r.status})`, stdout: r.stdout ?? "" };
+  return { failure: null, stdout: r.stdout ?? "" };
 }
 // 변이 명령의 stdout은 stderr로 흘린다 — 이 도구의 stdout은 결과 JSON 전용(호출부가 jq로 읽는다).
 function mutate(cmd: string, a: string[], what: string): void {
@@ -499,31 +514,27 @@ if (trusted !== null) {
   reason = "열린 신뢰 PR도 원격 브랜치도 없다 — 정상 경로(push → PR 생성)";
 }
 
-// 축 2(무장) — **판정과 직교**하고 **양방향**이다(R-10/R-11 + structure high-1). 레인이 원하는 무장 상태를
-// 정하고, 관측된 무장 상태를 그쪽으로 **수렴**시킨다(단방향 arm-only는 낡은 인가를 보존한다 — 헤더 ★★).
-//   lane=bump       의 desired = 무장 **있음**
-//     · create/adopt = PR을 새로 만든다 → 생성 직후 무장(그 PR엔 무장이 있을 수 없다)
-//     · skip/rebuild = 이미 있는 신뢰 PR → 무장이 **없을 때만** 재무장(있으면 손대지 않음 — 멱등)
-//   lane=propose-pr 의 desired = 무장 **없음**(사람 머지 = 배포 승인)
-//     · 신뢰 PR에 무장이 **남아 있으면**(autoDeploy:true 시절에 열려 무장된 PR이 그대로 열려 있는 경우)
-//       → **해제**한다. 판정이 skip이든 rebuild든 똑같다(무장은 PR에 붙지 head OID에 붙지 않는다).
-//     · 무장이 없으면 아무것도 하지 않는다(멱등 — 승인 레인의 정상 상태다).
-//     · create/adopt엔 해제할 대상이 없다(방금 만든 PR은 이 레인에서 무장되지 않는다).
-const createsPr = action === "create" || action === "adopt";
-const armGap = trusted !== null && !trusted.autoMerge;
-const shouldArm = lane === "bump" && (createsPr || armGap);
-// 낡은 머지 인가(stale authorization) — 승인 레인인데 무장이 살아 있다.
-const staleArm = trusted !== null && trusted.autoMerge;
-const shouldDisarm = lane === "propose-pr" && staleArm;
-
-// ── ②-b **ref 소유권** 검증 — force-push 직전에 "덮어쓸 커밋이 우리 것인가"를 확인한다 ──────────
+// ── ②-b **ref 소유권** 검증 — "그 head 커밋이 우리 것인가"를 사실로 확정한다 ─────────────────────
 // ★ PR 작성자 인증(isTrusted)은 **누가 PR을 열었는지**만 증명한다 — **그 ref를 누가 마지막으로 썼는지**는
 //   증명하지 않는다. 두 구멍이 남아 있었다:
 //     · adopt : PR이 안 보이는 원격 ref를 **무조건** force-push로 덮어썼다(그 브랜치가 우리 잔해라는 근거 0).
 //     · rebuild: writer가 연 PR이라도, **다른 동일-레포 행위자가 그 head에 push**하면 PR 작성자는 그대로
 //                writer다 → 신뢰된 채로 남고, 우리는 그 사람의 커밋을 force-push로 지운다.
-//   그래서 force-push하는 두 경로(adopt·rebuild)는 **밀어낼 커밋의 소유권**을 먼저 확인한다.
-// 우리 커밋의 조건(전부 만족해야 한다 — 하나라도 아니면 fail-closed):
+//
+// ★★ 소유권은 **force-push 허가**만이 아니라 **인가 조정(auto-merge)의 입력**이다(structure r6 R-23) ──
+// 예전엔 이 검증을 force-push 경로(adopt/rebuild)에만 걸었다. 그래서 두 구멍이 남았다:
+//   ① skip 경로: writer가 연 PR인데 **head 커밋이 다른 행위자로 교체**됐다. 상태가 CLEAN/BLOCKED/UNKNOWN이면
+//      판정은 skip이고, 소유권은 아예 검사되지 않는다 → bump 레인이 그 **증명되지 않은 head에 auto-merge를
+//      무장**하거나(무장 갭이면) **이미 걸린 무장을 그대로 둔다**. 그건 남의 커밋에 **머지 인가를 부여**한
+//      것이다(auto-merge는 PR에 붙고, gate가 green이 되는 순간 그 head가 main으로 들어간다).
+//   ② propose-pr 해제 경로: ARMED + DIRTY + 낯선 head인 PR은 소유권 검증에서 **먼저 죽어** `--disable-auto`에
+//      닿지 못했다 → **낡은 인가가 가장 필요할 때 살아남았다**.
+// → 계약: **증명되지 않은 head는 무장하지 않고, 이미 무장돼 있으면 해제한다**(인가 회수 = 안전 방향).
+//   그 뒤에 변이 쪽을 fail-closed한다(force-push 0 · create 0).
+// ⚠️ **순서 규칙**: 회수(해제)는 **abort할 수 있는 소유권 검사보다 먼저** 실행한다. 안전 방향 행동이 앞,
+//   중단 가능한 검사가 뒤다. 그래서 조회(probe)는 값을 돌려줄 뿐 **죽지 않고**(runSoft), 죽는 건 ③-b다.
+//
+// 우리 커밋의 조건(전부 만족해야 한다 — 하나라도 아니면 "증명되지 않음"):
 //   · author·committer의 name = `<writer>[bot]`, email = `<id>+<writer>[bot]@users.noreply.github.com`
 //     (호출부가 `git config user.name/user.email`로 심는 바로 그 정체성 — bump-poll.yaml과 계약이 묶여 있고,
 //      그 드리프트는 tests/gates/test_bump-poll-callsite.bats가 잡는다)
@@ -559,63 +570,93 @@ function isWriterIdent(id: { name: string; email: string }): boolean {
   return id.name === WRITER_BOT_NAME && WRITER_BOT_EMAIL_RE.test(id.email);
 }
 
-// 이 OID의 커밋이 **우리가 만든 bump 커밋**임을 증명한다. 아니면 fail-closed(force-push 0회).
-function assertOurCommit(oid: string, what: string): void {
-  const raw = run("gh", [
+// 이 OID의 커밋이 **우리가 만든 bump 커밋**인지 조회한다. **죽지 않는다** — 판정을 값으로 돌려준다
+// (순서 규칙: 회수(해제)가 abort보다 먼저다. 여기서 죽으면 낡은 인가를 회수할 기회가 사라진다).
+// 증명 실패의 종류(조회 장애·스키마 드리프트·OID 미발견·낯선 커밋)를 구분하지 않는다:
+// **"우리 것임을 증명하지 못했다"는 하나의 사실**이고, 그 사실의 안전한 귀결은 언제나 같다
+// (무장하지 않는다 / 무장돼 있으면 회수한다 / 변이하지 않는다).
+type Proof = { ok: true } | { ok: false; why: string };
+function proveOurCommit(oid: string, what: string): Proof {
+  const no = (why: string): Proof => ({ ok: false, why: `${what}(${oid}) — ${why}` });
+
+  const r = runSoft("gh", [
     "api", "graphql",
     "-f", `query=${COMMIT_QUERY}`,
     "-F", "owner={owner}", "-F", "repo={repo}", "-F", `oid=${oid}`,
-  ], "gh api graphql (commit)");
+  ]);
+  if (r.failure !== null) return no(`gh api graphql (commit) ${r.failure} — 무엇인지 모르는 커밋은 우리 것이 아니다`);
 
   let parsed: any;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(r.stdout);
   } catch (e) {
-    inputError(`커밋 조회 JSON 파싱 실패(${what} ${oid}): ${(e as Error).message}`);
+    return no(`커밋 조회 JSON 파싱 실패: ${(e as Error).message}`);
   }
-  if (parsed?.errors !== undefined) inputError(`커밋 조회 GraphQL 오류(${what}): ${JSON.stringify(parsed.errors)}`);
+  if (parsed?.errors !== undefined) return no(`커밋 조회 GraphQL 오류: ${JSON.stringify(parsed.errors)}`);
   const c = parsed?.data?.repository?.object;
-  // object가 null이면 그 OID를 못 찾은 것이다(다른 레포의 커밋·GC됨·오타) → 덮어쓰지 않는다.
-  if (c === null || typeof c !== "object") {
-    inputError(`커밋을 찾을 수 없다(${what} ${oid}) — 무엇을 덮어쓰는지 모르면 force-push하지 않는다`);
-  }
-  // 스키마 드리프트(필드 누락·Commit이 아님)는 "우리 것"의 증명이 아니다 → fail-closed.
-  if (typeof c.oid !== "string" || c.oid !== oid) inputError(`커밋 조회 결과의 oid 불일치(${what}: 기대 ${oid}, 받음 ${String(c.oid)})`);
-  if (typeof c.message !== "string") inputError(`커밋 message 문자열 아님(${what} ${oid}) — Commit이 아니거나 스키마 드리프트`);
-  for (const [k, v] of [["author", c.author], ["committer", c.committer]] as const) {
+  // object가 null이면 그 OID를 못 찾은 것이다(다른 레포의 커밋·GC됨·오타) → 우리 것이라는 증명이 없다.
+  if (c === null || typeof c !== "object") return no("커밋을 찾을 수 없다(GC됨·다른 레포·스키마 드리프트)");
+  // 스키마 드리프트(필드 누락·Commit이 아님)도 "우리 것"의 증명이 아니다.
+  if (typeof c.oid !== "string" || c.oid !== oid) return no(`커밋 조회 결과의 oid 불일치(받음 ${String(c.oid)})`);
+  if (typeof c.message !== "string") return no("커밋 message 문자열 아님(Commit이 아니거나 스키마 드리프트)");
+  for (const k of ["author", "committer"] as const) {
+    const v = c[k];
     if (v === null || typeof v !== "object" || typeof v.name !== "string" || typeof v.email !== "string") {
-      inputError(`커밋 ${k}.name/email 문자열 아님(${what} ${oid}) — 소유권을 증명할 수 없다`);
+      return no(`커밋 ${k}.name/email 문자열 아님 — 소유권을 증명할 수 없다`);
     }
   }
 
   const ident = isWriterIdent(c.author) && isWriterIdent(c.committer);
   const msg = c.message.trim() === BUMP_COMMIT_MESSAGE;
-  if (!ident || !msg) {
-    execError(
-      `${what}의 head 커밋(${oid})은 **우리 bump 커밋이 아니다** — force-push로 덮어쓰지 않는다.\n`
-      + `  관측: author=${c.author.name} <${c.author.email}> / committer=${c.committer.name} <${c.committer.email}>\n`
-      + `        message=${JSON.stringify(c.message.trim())}\n`
-      + `  기대: author·committer=${WRITER_BOT_NAME} <<id>+${WRITER_BOT_NAME}@users.noreply.github.com>\n`
-      + `        message=${JSON.stringify(BUMP_COMMIT_MESSAGE)}\n`
-      + "  누군가 이 ref에 자기 커밋을 올렸다(또는 우리 것이 아닌 브랜치다). 그 작업을 지우지 않는다.",
-    );
-  }
+  if (ident && msg) return { ok: true };
+  return no(
+    "**우리 bump 커밋이 아니다**.\n"
+    + `  관측: author=${c.author.name} <${c.author.email}> / committer=${c.committer.name} <${c.committer.email}>\n`
+    + `        message=${JSON.stringify(c.message.trim())}\n`
+    + `  기대: author·committer=${WRITER_BOT_NAME} <<id>+${WRITER_BOT_NAME}@users.noreply.github.com>\n`
+    + `        message=${JSON.stringify(BUMP_COMMIT_MESSAGE)}\n`
+    + "  누군가 이 ref에 자기 커밋을 올렸다(또는 우리 것이 아닌 브랜치다).",
+  );
 }
 
-// force-push하는 두 경로만 검증한다. create는 **없는 브랜치**를 만드는 plain push라 덮어쓸 커밋이 없다.
-if (action === "adopt") {
-  assertOurCommit(remoteBranch!.oid, "고아 원격 브랜치");
-} else if (action === "rebuild") {
-  assertOurCommit(trusted!.headRefOid, `신뢰 PR #${trusted!.number}`);
-}
+// 신뢰 PR의 head 소유권 — **판정과 무관하게 언제나** 확인한다(R-23). skip이어도 확인하는 이유:
+// 그 head는 무장(=머지 인가)의 **대상**이다. force-push를 하지 않는다고 해서 남의 커밋에 auto-merge를
+// 걸어도 되는 건 아니다 — 인가는 push만큼이나 강력한 변이다.
+const headProof: Proof = trusted === null
+  ? { ok: true } // 신뢰 PR이 없으면 무장/해제할 대상 자체가 없다(create/adopt는 아래 고아 증명이 맡는다)
+  : proveOurCommit(trusted.headRefOid, `신뢰 PR #${trusted.number}의 head`);
+
+// 축 2(무장) — **판정과 직교**하고 **양방향**이다(R-10/R-11 + structure high-1/R-23). 레인 + **소유권**이
+// 원하는 무장 상태를 정하고, 관측된 무장 상태를 그쪽으로 **수렴**시킨다(단방향 arm-only는 낡은 인가를 보존한다).
+//   lane=bump       의 desired = 무장 **있음** — 단, **증명된 head에 한해서다**
+//     · create/adopt = PR을 새로 만든다 → 생성 직후 무장(그 PR엔 무장이 있을 수 없다)
+//     · skip/rebuild = 이미 있는 신뢰 PR → 무장이 **없고 head가 우리 것일 때만** 재무장(있으면 손대지 않음 — 멱등)
+//   lane=propose-pr 의 desired = 무장 **없음**(사람 머지 = 배포 승인)
+//     · 신뢰 PR에 무장이 **남아 있으면**(autoDeploy:true 시절에 열려 무장된 PR이 그대로 열려 있는 경우)
+//       → **해제**한다. 판정이 skip이든 rebuild든 똑같다(무장은 PR에 붙지 head OID에 붙지 않는다).
+//     · 무장이 없으면 아무것도 하지 않는다(멱등 — 승인 레인의 정상 상태다).
+//   **증명되지 않은 head**의 desired = 무장 **없음**(레인 무관 — R-23)
+//     · 무장하지 않는다. 이미 무장돼 있으면 **회수한다**. 인가를 거두는 쪽이 언제나 안전한 방향이다.
+const createsPr = action === "create" || action === "adopt";
+const armGap = trusted !== null && !trusted.autoMerge;
+// 증명되지 않은 head엔 절대 무장하지 않는다 — 남의 커밋에 머지 인가를 주는 것과 같다.
+const shouldArm = lane === "bump" && (createsPr || (armGap && headProof.ok));
+// 낡은 머지 인가(stale authorization) — 무장이 살아 있다.
+const staleArm = trusted !== null && trusted.autoMerge;
+// 회수 조건은 둘이다: ① 승인 레인(사람 머지 = 배포 승인) ② **증명되지 않은 head**(레인 무관).
+const shouldDisarm = staleArm && (lane === "propose-pr" || !headProof.ok);
 
 // ── ③ 변이(원격) — 판정이 허락한 것만, 계약된 argv 그대로 ───────────────────────────────────
 // push는 세 경로의 argv가 **완전 형태**로 못박혀 있다(plan r3): 목적지를 `refs/heads/<b>`로 완전 수식하고
 // lease는 항상 `<ref>:<기대 OID>` 명시 형태다(bare lease는 원격 추적 참조 없는 checkout에서 stale 거부).
 // skip은 여기서 **아무것도 하지 않는다** — 그게 이 픽스의 flip이다(중복 PR 금지).
 //
-// 해제가 **첫 변이**다: 낡은 인가를 들고 있는 시간을 최소화한다. rebuild(force-push)를 먼저 하면 그 push가
-// 체크를 다시 돌려 green으로 만들고, 해제하기 전에 GitHub이 **사람 승인 없이** 머지해버릴 수 있다.
+// ── ③-a 해제(인가 회수) = **첫 변이**이자 **abort보다 먼저**다 ─────────────────────────────────
+// 두 가지 이유로 맨 앞이다:
+//   · 낡은 인가를 들고 있는 시간을 최소화한다. rebuild(force-push)를 먼저 하면 그 push가 체크를 다시 돌려
+//     green으로 만들고, 해제하기 전에 GitHub이 **사람 승인 없이** 머지해버릴 수 있다.
+//   · 소유권 fail-closed(③-b)보다 먼저다(R-23). 낯선 head + 무장이라는 **최악의 조합**에서, 검증이 먼저
+//     죽어버리면 그 인가가 영영 회수되지 않는다 — 가장 회수해야 할 때 회수하지 못하는 셈이다.
 // 대상은 브랜치명이 아니라 **관측된 신뢰 PR 번호**다(같은 브랜치명의 포크 PR 오조준 방지).
 // 무장(arm)과 달리 공유 스크립트(auto-merge-or-fail.sh)를 쓰지 않는다 — 그 스크립트는 races-6 폴백
 // ("--auto는 이미 CLEAN인 PR에 에러" → 직접 머지)이 본질이고, 그건 **머지를 성사시키는** 경로다.
@@ -623,6 +664,25 @@ if (action === "adopt") {
 if (shouldDisarm) {
   mutate("gh", ["pr", "merge", "--disable-auto", String(trusted!.number)], "gh pr merge --disable-auto");
 }
+
+// ── ③-b 소유권 fail-closed — 증명되지 않은 head는 **어떤 변이도** 하지 않는다 ─────────────────
+// 여기부터가 "중단 가능한 검사"다. 인가 회수(③-a)는 이미 끝났으므로 안전하게 죽을 수 있다.
+if (!headProof.ok) {
+  execError(
+    `${headProof.why}\n`
+    + "  이 head는 우리 것임이 증명되지 않았다 — 무장(머지 인가)도, force-push도, PR 생성도 하지 않는다"
+    + (staleArm ? " (기존 무장은 위에서 회수했다)." : "."),
+  );
+}
+// 고아 원격 브랜치(adopt)는 **PR이 없다** → 회수할 인가도 없다. 여기서 바로 fail-closed해도 잃는 게 없다.
+// create는 **없는 브랜치**를 만드는 plain push라 덮어쓸 커밋 자체가 없다(검증 대상 없음).
+if (action === "adopt") {
+  const orphanProof = proveOurCommit(remoteBranch!.oid, "고아 원격 브랜치의 head");
+  if (!orphanProof.ok) {
+    execError(`${orphanProof.why}\n  그 작업을 force-push로 지우지 않는다.`);
+  }
+}
+
 if (action === "create") {
   mutate("git", ["push", args.remote, `HEAD:${ref}`], "git push");
 } else if (action === "adopt") {
@@ -644,7 +704,8 @@ let prNumber: number | null = trusted?.number ?? null;
 if (createsPr) {
   prNumber = createPr();
 }
-// 무장은 **레인만** 본다 — propose-pr(승인 레인)은 어떤 경로로도 여기 들어오지 못한다(R-11).
+// 무장의 입력은 **레인 + 소유권** 둘뿐이다 — propose-pr(승인 레인)은 어떤 경로로도 여기 들어오지 못하고(R-11),
+// **증명되지 않은 head**도 여기 오지 못한다(R-23 — 애초에 ③-b에서 죽는다).
 // 새 PR이면 생성 직후, 기존 PR이면 무장 갭이 있을 때만(판정이 skip이든 rebuild든) 수렴시킨다(R-10).
 if (shouldArm) {
   // 번호를 모르면 **무장하지 않는다**. 브랜치로 폴백하는 순간 위의 모호성이 되살아난다(폴백 금지).
@@ -670,6 +731,9 @@ console.log(JSON.stringify({
         headRefOid: trusted.headRefOid,
         // R-10: 무장은 **양방향** desired state다 — bump는 없으면 무장(armGap), propose-pr은 있으면 해제(staleArm).
         autoMerge: trusted.autoMerge,
+        // R-23: 그 head가 **우리 bump 커밋임이 증명됐는가**. 무장(머지 인가)의 전제조건이다
+        // (증명 실패면 여기까지 오지 못하고 ③-b에서 죽는다 → 이 값은 성공 출력에선 항상 true다).
+        headProven: headProof.ok,
       }
       : null,
     remoteBranch,
