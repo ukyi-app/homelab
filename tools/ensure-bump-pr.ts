@@ -101,8 +101,19 @@
 // ⚠️ 해제는 **첫 변이**다(push/create보다 먼저). 무장된 PR은 gate가 green이 되는 어느 순간에도 머지될 수
 //    있으므로, 낡은 인가를 들고 있는 시간을 최소화한다. 특히 rebuild(force-push)를 먼저 하면 그 push가
 //    체크를 green으로 만들어 **해제하기 전에** 머지가 성사될 수 있다.
-// ⚠️ 해제 대상은 브랜치명이 아니라 **관측된 신뢰 PR 번호**다. `gh pr merge <branch>`는 같은 브랜치명의
-//    포크 PR로 해석될 여지가 있다 — 번호는 그 모호성이 0이다.
+//
+// ★★★ 무장·해제의 대상은 **언제나 인증된 PR 번호**다(브랜치명 금지) ────────────────────────────
+// `gh pr merge <branch>` / `gh pr view <branch>`는 브랜치명을 **셀렉터**로 해석한다 — 그런데 이 레포는
+// 공개고, 포크는 **같은 결정적 브랜치명**으로 PR을 열 수 있다. 브랜치 셀렉터로 무장하면 그 조회가
+// **동명 포크 PR을 지목**할 수 있고, 그러면 **공격자의 코드가 auto-merge된다**(신뢰 경계를 조회 단계에서만
+// 지키고 변이 단계에서 흘린 셈이다). 그래서 인증된 셀렉터를 변이 경로 **끝까지** 들고 간다:
+//     skip/rebuild(기존 PR) → trusted.number          (조회에서 신뢰 판정을 통과한 그 PR)
+//     create/adopt(새 PR)   → gh pr create가 낸 URL의 번호 (gh가 "방금 내가 만든 PR"이라고 알려준 값)
+//     해제(propose-pr)      → trusted.number
+// 번호를 확정할 수 없으면 **fail-closed** — 브랜치명으로 폴백하지 않는다(폴백이 곧 이 결함이다).
+// 공유 스크립트 `auto-merge-or-fail.sh`는 인자를 `gh pr merge`/`gh pr view`에 그대로 넘기는 **패스스루**라
+// (브랜치명 자체를 쓰는 로직이 없다) 번호를 넘기는 것만으로 모호성이 사라진다 — 스크립트는 손대지 않는다.
+// (다른 호출자 bump.yaml·pr-first-commit은 계속 브랜치를 넘긴다 — 그 경로엔 포크 PR이 끼어들 수 없다.)
 //
 // 사실은 파싱·검증해 stdout의 `observed`에(무장 여부 포함), 실제 실행한 명령은 `executed`에 실어
 // 호출부/테스트가 "무엇을 관측하고 무엇을 변이했는가"를 검증할 수 있게 한다
@@ -295,6 +306,33 @@ function parseLsRemote(raw: string): { oid: string } | null {
   return null;
 }
 
+// `gh pr create`는 성공 시 **만든 PR의 URL**을 stdout에 낸다(라이브: "https://github.com/<o>/<r>/pull/<n>").
+// 그 번호가 create/adopt 경로의 **인증된 셀렉터**다 — 우리가 방금 만든 PR이라는 사실을 gh가 직접 알려준 값이다.
+// 브랜치명으로 되짚는 재조회는 하지 않는다: 동명 포크 PR로 해석될 수 있는 바로 그 모호성으로 되돌아간다.
+const PR_URL_RE = /^https?:\/\/\S+\/pull\/(\d+)$/;
+function createPr(): number {
+  const out = run("gh", [
+    "pr", "create", "--base", args.base, "--head", branch,
+    "--title", args.title!, "--body", args.body!,
+  ], "gh pr create");
+  process.stderr.write(out); // 이 도구의 stdout은 결과 JSON 전용
+  const nums = new Set(
+    out.split("\n")
+      .map((l) => PR_URL_RE.exec(l.trim()))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => Number(m[1])),
+  );
+  // 파싱 실패(출력 형식 드리프트·경고 혼입·URL 여러 개)는 **fail-closed**다 — 브랜치명 폴백 금지.
+  // 여기서 브랜치로 폴백하면 무장이 동명 포크 PR을 지목할 수 있다(= 이 가드가 막으려는 결함 그 자체).
+  if (nums.size !== 1) {
+    execError(
+      `gh pr create 출력에서 PR 번호를 확정할 수 없다(URL ${nums.size}개) — 무장 대상을 모른 채 `
+      + `브랜치명으로 폴백하지 않는다(동명 포크 PR 오조준). 출력: ${JSON.stringify(out)}`,
+    );
+  }
+  return [...nums][0]!;
+}
+
 // gh는 App 작성자를 `app/<slug>`로, REST/GraphQL은 `<slug>[bot]`로 표기한다 — 둘 다 같은 slug로 정규화.
 // (라이브 확인: `gh pr list --json author` → {"login":"app/ukyi-homelab-writer","is_bot":true})
 function normalizeLogin(login: string): string {
@@ -408,18 +446,28 @@ if (action === "create") {
   // DIRTY 회복: 기대값은 **그 PR의 head OID**(gh pr list 관측값)다 — PR은 재사용하므로 create는 없다.
   mutate("git", ["push", `--force-with-lease=${ref}:${trusted!.headRefOid}`, args.remote, `HEAD:${ref}`], "git push");
 }
+// ── 변이 대상 PR의 **인증된 셀렉터** = 번호 ────────────────────────────────────────────────────
+// 브랜치명은 셀렉터로 쓰면 안 된다: `gh pr merge <branch>`/`gh pr view <branch>`는 **같은 브랜치명의
+// 포크 PR**로도 해석될 수 있다(공개 레포 — 아무나 같은 결정적 브랜치명으로 PR을 연다). 그 경로로 무장하면
+// **공격자의 PR이 auto-merge된다**. 그래서 무장/해제는 전부 "우리가 인증한 번호"만 지목한다:
+//   · skip/rebuild = 조회로 신뢰 판정을 통과한 PR      → trusted.number
+//   · create/adopt = 방금 우리가 만든 PR              → gh pr create가 돌려준 URL에서 파싱한 번호
+// 공유 스크립트(auto-merge-or-fail.sh)는 인자를 `gh pr merge`/`gh pr view`에 **그대로 넘기는 패스스루**라
+// (브랜치명 자체를 쓰는 로직이 없다) 번호를 넘기는 것만으로 모호성이 사라진다 — 스크립트 변경 불필요.
+let prNumber: number | null = trusted?.number ?? null;
 if (createsPr) {
-  mutate("gh", [
-    "pr", "create", "--base", args.base, "--head", branch,
-    "--title", args.title, "--body", args.body,
-  ], "gh pr create");
+  prNumber = createPr();
 }
 // 무장은 **레인만** 본다 — propose-pr(승인 레인)은 어떤 경로로도 여기 들어오지 못한다(R-11).
 // 새 PR이면 생성 직후, 기존 PR이면 무장 갭이 있을 때만(판정이 skip이든 rebuild든) 수렴시킨다(R-10).
 if (shouldArm) {
+  // 번호를 모르면 **무장하지 않는다**. 브랜치로 폴백하는 순간 위의 모호성이 되살아난다(폴백 금지).
+  if (prNumber === null) {
+    execError("무장 대상 PR 번호를 모른다 — 브랜치명으로는 무장하지 않는다(동명 포크 PR 오조준)");
+  }
   // races-6 폴백(gh pr merge --auto는 이미 CLEAN인 PR에 에러) — 검증된 공유 스크립트를 재사용한다.
   const script = path.join(import.meta.dir, "..", "scripts", "auto-merge-or-fail.sh");
-  mutate("bash", [script, branch], "auto-merge-or-fail");
+  mutate("bash", [script, String(prNumber)], "auto-merge-or-fail");
 }
 
 console.log(JSON.stringify({
