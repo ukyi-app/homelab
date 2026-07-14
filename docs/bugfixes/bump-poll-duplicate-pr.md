@@ -177,6 +177,23 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Review Decision Log
 
+### Codex Structure Review — r8: needs-attention → 4건 전부 Accept (owner 2026-07-14)
+
+세 결함(R-26·R-27·R-28)은 **같은 교훈의 세 얼굴**이다 — 인가(authorization)에서 fail-closed는
+"아무것도 하지 않음"이 아니라 **"권한을 회수함"**이고, 회수의 **대상 목록**은 회수와 무관한 것의
+성공에 의존해선 안 되며, **상한 있는 조회는 거짓 부재를 만든다**.
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-26 | high | `Blocker: missing bindings has conflicting authorization semantics` — 플래너는 `.bindings.json` 부재를 `autoDeploy:false`/`propose-pr`로 보는데 `probeLane`은 "레인 불명 → **회수 안 함**"으로 처리했다 → 바인딩이 제거되면 무장된 PR의 **낡은 인가가 그대로 생존**. 하나의 SSOT가 인가 경계에서 **다른 해석**으로 갈라졌다 | **Accept** | 플래너(`poll-ghcr.ts:156-162` — 부재·손상·false를 **모두** `propose-pr`)와 같은 해석으로 통일. `probeLane`은 **언제나 레인을 준다**: 부재 → `propose-pr`(회수, exit 0 — 플래너가 정상 상태로 취급) / 손상 → `propose-pr`(회수 + **실패 기록** → run 빨강). **부재와 손상은 보고에서만 갈리고, 인가 경계에선 동일하다.** 증인 W49(재작성)·W59 |
+| R-27 | high | `Blocker: revocation still depends on successful planning` — 회수 대상 인벤토리를 `/tmp/plan.json`(reader 토큰 + GHCR 플래너의 산출물)에서 뽑았다 → 토큰 스텝 실패·플래너 예외·앱이 출력에서 누락되면 **회수에 도달조차 못 한다**. H-1이 의존성을 한 칸(`action` 필터 → `plan.json`) 옮겼을 뿐이다 | **Accept** | 회수를 **독립 job**으로 분리 — **writer 토큰만** 쓰고 reader·docker·플래너 스텝을 **하나도 갖지 않는다**. 대상은 `bump-poll/*` **네임스페이스에서 직접 열거**(`git ls-remote` → 브랜치명에서 app 유도; `--reconcile-only`는 `--app`을 **거부**한다). `poll`의 `needs: [preflight, reconcile]`는 **직렬화 전용**(`if: !cancelled()`) — 성공 요구가 아니다. **양방향 비-기아**: reconcile이 죽어도 poll은 돌고, poll이 죽어도 reconcile은 돈다 |
+| R-28 | high | `Blocker: truncated human-trace queries can authorize destructive mutation` — 흔적 가드가 **코멘트 100·라벨 50 첫 페이지**만 보고 `totalCount`·페이지네이션·절단 신호가 없다 → 사람 코멘트나 hold 라벨이 **뒤 페이지**에 있으면 "흔적 없음"으로 읽혀 **리뷰 중인 PR을 force-push**하거나 **사람이 보호한 PR을 close**한다 | **Accept** | 두 질의에 `totalCount` 추가 + `connectionOf()`가 **절단 또는 관측불가 ⇒ 사람 흔적 있음**으로 접는다(close 0·force-push 0). ★ **PR 열거에서 이미 배운 함정(상한 있는 조회 = 거짓 부재)을 흔적 조회에는 적용하지 않았다** — 같은 덫에 두 번 걸렸다. 증인 W62(코멘트 뒤 페이지)·W63(hold 라벨 뒤 페이지)·W64(close)·W57(확장) |
+| R-29 | high | `Blocker: HEAD has no committed machine-owned GREEN proof` — 락의 `green.sha`가 비어 있어, 아티팩트는 baseline RED만 증명할 뿐 **프로덕션 코드 때문에 flip이 일어났고 HEAD에서 characterization이 여전히 green**임을 증명하지 못한다 | **Accept**(순서대로) | R-26~R-28 커밋 후 `bugfix-status.mjs --verify-flip` 실행 → **flipOk: true**(red에서 regression FAIL + symptomToken, green에서 PASS, 양단 characterization green, 원 repro 소멸) → RED·GREEN 레코드 커밋 + `green.sha` 핀 |
+
+**뮤턴트 증명(에이전트 10종 + 컨덕터 직접 재실행 2종)**: 부재 SSOT → `bump` 레인 = **W49 RED** · 손상 SSOT → `bump` 레인 / 실패 미보고 = **W59 RED** · reconcile이 다시 `plan.json`에서 대상을 뽑음 = 호출부 증인 2건 RED · reconcile job을 `poll`에 다시 접음 = 호출부 3건 RED · `poll`이 reconcile **성공**을 요구 = 기아 증인 RED · `connectionOf`가 절단을 보고 안 함 = **W62·W63·W64 RED** · `totalCount` 미요청 = W62·W64 RED · `totalCount` 부재를 "절단 아님"으로 읽음 = **W57 RED**(절단 가드와 관측불가 가드가 **독립적으로** 고정됐음을 증명).
+
+**파티션 재측정**: baseline에서 regression **100/100 RED**(공짜 통과 0), characterization **60/60 GREEN**. W61(`--reconcile-only`가 `--action`/`--app`/`--tag`를 거부)은 baseline에서 **공짜로 통과**(baseline은 미지의 `--reconcile-only` 플래그 자체로 exit 2)하므로 **양 끝단 불변식 → characterization**으로 둔다.
+
 ### Codex Structure Review — r7: needs-attention → 1건 Accept (owner 2026-07-14)
 
 | ID | 심각도 | 발견 | 결정 | 반영 |
