@@ -39,70 +39,76 @@ spike-1:
 
 ## The fix
 
-**PR 생성을 멱등하게** 만든다(plan 게이트 r1이 제시한 더 단순한 대안 채택).
+**PR 생성을 멱등하게** 만든다. 설계는 structure 게이트 5라운드에서 확정됐다(아래 Review Decision Log).
 
-1. **결정적 브랜치**: `bump-poll/<app>-<tag>` (RUN_ID 제거). **같은 bump = 같은 브랜치**.
-2. **PR 생성 직전** writer 토큰으로 **자기 레포의 그 브랜치 PR만** 조회:
-   `gh pr list --head "bump-poll/<app>-<tag>" --state open --json number,isCrossRepository,mergeStateStatus,author`
-3. `tools/ensure-bump-pr.ts`가 **결정 + 원격 변이를 모두 수행하는 실행기**다(plan 게이트 r2의 R-4 반영 —
-   워크플로가 `gh pr create`/`git push`를 **직접 하지 않는다**). 관측 사실:
-   `gh pr list --head <branch> --state open --json number,isCrossRepository,mergeStateStatus,author,headRefOid`
-   + `git ls-remote --heads origin <branch>`(고아 브랜치 탐지). 판정:
+### 1. 결정적 브랜치 + 실행기
 
-| 관측 | 결정 | 근거 |
-|---|---|---|
-| 열린 PR 없음 + 원격 브랜치 없음 | **create** | 정상 경로(push → PR 생성) |
-| 열린 PR 없음 + **원격 브랜치 있음(고아)** | **adopt** | 이전 run이 push 후 `gh pr create`에서 실패한 흔적 → 최신 main에서 재구축 → **leased push** → PR 생성. 이게 없으면 다음 폴링이 고아 브랜치와 충돌해 **배포가 정지**한다(r2 R-4) |
-| 동일-레포(`isCrossRepository=false`) + **writer 작성자** + 상태 정상(`CLEAN`/`BEHIND`/`BLOCKED`/**`UNKNOWN`**) | **skip** | 이미 진행 중 — 중복 금지 |
-| 동일-레포 + writer + **`DIRTY`**(충돌) | **rebuild** | 최신 main에서 재구축 → **`--force-with-lease=refs/heads/<branch>:<headRefOid>`** push → **같은 PR이 깨끗해진다**(create 금지). ⚠️ **bare lease 금지** — 원격 추적 참조가 없으면 stale로 거부돼 회복이 반복 실패한다(r2 R-5) → 기대 OID를 `headRefOid`로 관측해 명시한다 |
-| **cross-repo(포크) PR만** 존재 | **create** | 포크는 신뢰하지 않는다 |
-| 동일-레포지만 **writer가 아닌 작성자** | **create** | 신뢰하지 않는다 |
-| 잘못된/빈 JSON | **fail-closed(에러)** | 조용한 create 금지 |
+- 브랜치명 `bump-poll/<app>-<tag>`(RUN_ID 제거) — **같은 bump = 같은 브랜치**.
+- `tools/ensure-bump-pr.ts`가 **조회·결정·원격 변이를 모두** 수행한다. 워크플로는 **로컬 브랜치·커밋만**
+  준비하고 도구를 호출한다(직접 `git push`·`gh pr create`·`auto-merge-or-fail.sh` 금지 — 호출부 게이트가 강제).
 
-**auto-merge 무장은 결정과 직교하는 축이다**(plan 게이트 r5 R-10/R-11):
+### 2. 조회 — 완전 열거 + 강한 일관성
 
-| 레인 | 상태 | 무장 |
-|---|---|---|
-| `bump`(autoDeploy) | 신뢰된 PR + **미무장** | **재무장**(그 run의 결정이 skip이든 rebuild든) |
-| `bump` | 신뢰된 PR + 이미 무장 | 손대지 않음(멱등 — force-push는 무장을 지우지 않는다: `autoMergeRequest`는 PR에 붙지 head OID에 붙지 않는다) |
-| `bump` | create/adopt(새 PR) | 생성 직후 무장 |
-| **`propose-pr`(승인 레인)** | — | **절대 무장하지 않는다** |
+```
+gh api graphql --paginate --slurp
+  repository.pullRequests(headRefName:<branch>, states:OPEN, first:100, after:$endCursor)
+    { pageInfo{hasNextPage endCursor}
+      nodes{ number isCrossRepository mergeStateStatus headRefOid baseRefName
+             author{login __typename} autoMergeRequest{enabledAt} } }
+```
 
-**승인 게이트 우회가 구조적으로 불가능한 이유**: `--auto-merge` 플래그를 **제거**하고 **`--action <bump\|propose-pr>`(필수·기본값 없음)** 으로 대체했다. 레인은 `tools/poll-ghcr.ts`가 `.bindings.json`의 `autoDeploy`에서 유도하는 값이고(SSOT), 호출부 게이트가 **워크플로는 그 값을 그대로 전달**할 것을 강제한다(하드코딩 `--action bump` 거부). 따라서 `autoDeploy:false` 앱을 자동 배포하려면 **`.bindings.json`을 고쳐야** 하며 워크플로만으로는 불가능하다.
+- **상한 없는 완전 페이지네이션**. 마지막 페이지가 `hasNextPage:true`면 **fail-closed**(완전성 증명).
+  이전의 `gh pr list --limit N`은 **포크 포화 = 배포 정지 무기**여서 폐기했다.
+- **검색 API 금지**(`--author`/`--app`/`search(`) — 최종 일관성이라 방금 만든 PR이 **거짓 부재**가 되어
+  고아 경로(force-push)로 빠진다. 강한 일관성의 connection API만 쓴다.
 
-**push argv 계약(완전 형태 — plan r3)**: 도구가 낼 수 있는 push는 **정확히 이 셋뿐**이고, 회귀 증인은
-원장 줄 **전체**를 `grep -Fx`로 단언하며 테스트의 git stub은 계약 밖 push argv를 **exit 3**으로 죽인다
-(접두만 맞고 목적지 refspec을 빠뜨린 구현이 GREEN이 되는 걸 막는다 — 라이브에선 아무것도 밀지 못한다).
+### 3. 신뢰 경계 (모두 클라이언트 재검증)
 
-| 경로 | argv |
+| 조건 | 이유 |
 |---|---|
-| create | `git push origin HEAD:refs/heads/<branch>` |
-| rebuild | `git push --force-with-lease=refs/heads/<branch>:<PR headRefOid> origin HEAD:refs/heads/<branch>` |
-| adopt | `git push --force-with-lease=refs/heads/<branch>:<고아 원격 OID> origin HEAD:refs/heads/<branch>` |
+| `isCrossRepository === false` | 포크는 우리 ref를 만들 수 없다 |
+| **`author.__typename === "Bot"`** + login 정규화(`app/<slug>`·`<slug>[bot]`·평문 `<slug>` 3표기) | ⚠️ GraphQL은 봇 login을 **평문**으로 준다. 봇의 실계정은 `<slug>[bot]`이므로 **사람이 평문 username을 등록**할 수 있다 → `__typename` 없이는 **사람 PR이 신뢰되어 auto-merge까지 무장**된다 |
+| 신뢰된 PR이 **2건 이상** → fail-closed | 정상적으로 불가능 |
 
-근거 — git-push(1): `--force-with-lease=<refname>:<expect>`만이 "…or we do not even have to have such a
-remote-tracking branch when this form is used". **bare 원격 레포로 실측(git 2.50, main만 single-branch
-clone = 워크플로 checkout 재현)**: bare lease → `! [rejected] (stale info)` / lease 없는 push(두 표기 모두)
-→ `! [rejected] (fetch first)`(고아와 non-fast-forward) / **명시 OID lease + `HEAD:refs/heads/<b>` → forced
-update 성공**(기대 OID의 로컬 오브젝트가 없어도 된다 — 40-hex는 파싱만 한다). 목적지를 `refs/heads/`로 완전
-수식해 lease의 `<refname>`과 **글자 그대로 같은 ref**로 만든다. `-u`(upstream)는 소비자가 없어 뺀다
-(PR 생성은 `gh pr create --head`, auto-merge는 브랜치명이 몫).
+**식별**(우리 PR인가) = `(head, base)` 쌍 — 클라이언트에서 매칭.
+**소유권**(이 ref를 force-push해도 되는가) = 그 head의 **동일-레포 PR 존재 여부**(base 무관).
+→ base를 **서버 필터로 넣지 않는다**: 다른 base를 향하는 동일-레포 PR도 **우리 브랜치를 점유**하는데,
+서버에서 숨기면 그것을 못 보고 force-push로 파괴한다.
 
-### plan 게이트 r1의 3개 high 지적이 이 설계에서 해소되는 방식
+### 4. 결정
 
-- **R-2(공개 레포 — 포크가 배포를 억제)**: 조회를 **`--head <우리 브랜치>` + `isCrossRepository=false` +
-  writer 작성자**로 좁힌다. 포크는 우리 레포에 브랜치를 push할 수 없고, 같은 이름의 포크 PR은
-  `isCrossRepository=true`로 걸러진다. **본문 파싱을 아예 하지 않는다**(공격 표면 제거).
-  ⚠️ **실측 교정**: writer 봇의 `author.login`은 **`app/ukyi-homelab-writer`** 다(`<slug>[bot]`이 아니다 —
-  red-capture에서 라이브로 확인). 도구는 두 표기를 정규화하고 보존 테스트가 그 계약을 락한다.
-- **R-3(DIRTY 교착)**: DIRTY는 **skip이 아니라 rebuild**다 → 깨끗한 대체가 자동으로 생긴다(같은 PR).
-  ⚠️ **`UNKNOWN`은 DIRTY가 아니다**(GitHub가 mergeability를 지연 계산 — 라이브에서 흔하다). `UNKNOWN`에
-  rebuild하면 **매 폴링마다 force-push**가 난다 → `UNKNOWN`은 **skip**으로 못박고 테스트가 락한다.
-- **R-1(RED가 프로덕션 입력을 우회)**: 회귀 테스트가 **`gh pr list --json`의 원시 스키마 그대로**를 먹인다
-  (본문·digest 파싱 없음 — 애초에 안 쓴다). `skip`·`rebuild` 두 증인을 모두 RED로 고정했다.
+| 신뢰된 PR | 동일-레포 PR(비신뢰) | 원격 브랜치 | 결정 |
+|---|---|---|---|
+| 없음 | **있음** | (필연적으로 있음) | **fail-closed** — 사람/다른 봇의 브랜치를 절대 덮지 않는다 |
+| 없음 | 없음 | 있음(고아) | **adopt** — leased push(원격 OID) → PR 생성 |
+| 없음 | 없음 | 없음 | **create** — `git push origin HEAD:refs/heads/<b>` → PR 생성 |
+| 있음 · CLEAN/BEHIND/BLOCKED/**UNKNOWN** | — | — | **skip** — 변이 0 |
+| 있음 · **DIRTY** | — | — | **rebuild** — leased push(`headRefOid`) → PR 재사용(create 금지) |
 
-**force-push 안전성**: `bump-poll/<app>-<tag>`는 writer 소유·비보호 브랜치이고, 워크플로는
-`concurrency: homelab-mutation` + `queue: max`로 직렬화된다. 그래도 `--force-with-lease`를 쓴다.
+**포크는 결정을 막지 못한다**(면제) — 포크가 배포를 억제하는 지렛대가 되면 안 된다.
+
+**push argv 계약**(stub이 계약 밖 형태를 거부): create = `git push origin HEAD:refs/heads/<b>` ·
+adopt/rebuild = `git push --force-with-lease=refs/heads/<b>:<expected OID> origin HEAD:refs/heads/<b>`.
+⚠️ bare lease는 원격 추적 참조가 없어 **stale로 거부**된다(bare 원격 실측) → 기대 OID 명시가 필수.
+
+### 5. auto-merge 무장 — 결정과 **직교하는 축**, 양방향 reconcile
+
+| lane | 상태 | 행동 |
+|---|---|---|
+| `bump` | 새 PR(create/adopt) | 생성 직후 무장 |
+| `bump` | 신뢰 PR + **미무장** | **재무장**(결정이 skip이든 rebuild든) — 무장이 유실되면 배포가 조용히 정지한다 |
+| `bump` | 신뢰 PR + 무장됨 | 손대지 않음(멱등 — force-push는 무장을 지우지 않는다) |
+| **`propose-pr`** | 신뢰 PR + 무장됨 | **disarm**(`gh pr merge --disable-auto <number>`) — `.bindings.json`이 `autoDeploy: true→false`로 바뀌어도 **낡은 인가로 승인 없이 머지**되지 않게 |
+| `propose-pr` | — | **절대 무장하지 않는다** |
+
+**인증된 셀렉터를 변이 경로 전체에 전달**한다: 기존 PR은 `trusted.number`, 새 PR은 `gh pr create`의 URL에서
+파싱한 번호. **브랜치 셀렉터 금지** — `gh pr merge <branch>`는 **동명 포크 PR로 해석**될 수 있다(= 공격자
+PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지).
+
+**승인 게이트 우회 차단**: `--auto-merge` 플래그를 **제거**하고 **`--action <bump|propose-pr>`(필수·기본값
+없음)** 로 대체. lane은 `tools/poll-ghcr.ts`가 `.bindings.json`의 `autoDeploy`에서 유도하며(SSOT), 호출부
+게이트가 워크플로의 **verbatim 전달**을 강제(하드코딩·읽은 뒤 덮어쓰기 거부). 따라서 `autoDeploy:false` 앱을
+자동 배포하려면 **`.bindings.json`을 고쳐야** 한다.
 
 ## Single-Flip Contract
 
@@ -126,7 +132,9 @@ update 성공**(기대 OID의 로컬 오브젝트가 없어도 된다 — 40-hex
 |---|---|
 | 열린 PR 0건 → **create** | 정상 bump가 막히면 배포가 멈춘다 |
 | **포크 PR만** 존재 → **create** | 포크가 배포를 억제하면 안 된다(R-2) |
-| 동일-레포지만 **비-writer 작성자** → **create** | 사람 PR이 봇 파이프라인을 막으면 안 된다 |
+| 동일-레포지만 **비-writer 작성자**(사람·다른 봇) → **fail-closed** | ⚠️ structure 게이트 r3에서 교정: 동일-레포 PR의 head ref는 **반드시 우리 레포에 존재**하므로, 예전 계약(create)은 실제로는 그 브랜치를 **force-push로 파괴**하고 중복 PR을 여는 경로였다. 이제 변이 0으로 죽는다 |
+| **포크 PR만** 존재 → 결정을 막지 않는다(create/adopt) | 포크는 우리 ref를 만들 수 없다. 포크가 배포를 억제하는 지렛대가 되면 안 된다(r3·r4) |
+| **포크가 몇 개든**(포화) 배포가 계속 진행된다 | 완전 페이지네이션 — 상한 fail-closed는 **DoS 무기**였다(r4) |
 | writer login **두 표기**(`app/<slug>`·`<slug>[bot]`) 인식 | 표기 하나만 맞추면 프로덕션에서 dedupe가 조용히 죽는다 |
 | 잘못된 JSON → **fail-closed** | 조용한 create = 중복 재발 |
 | `poll-ghcr` 판정 전부(bump/propose-pr/noop/refuse·TOCTOU 가드) | 플래너는 이 픽스에서 **건드리지 않는다** |
