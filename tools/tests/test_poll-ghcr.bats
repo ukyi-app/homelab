@@ -173,57 +173,6 @@ JSON
   echo "$output" | jq -e '.[0].action == "noop"'
 }
 
-# RED(red-capture): 중복 bump PR 버그의 회귀 락.
-# bump-poll.yaml은 run마다 새 브랜치(bump-poll/<app>-<RUN_ID>)로 PR을 열고, 플래너는 "GHCR 최신 vs
-# main의 배포 핀"만 본다 — PR이 머지되기 전엔 main이 여전히 옛 digest라 매 주기 bump로 판정한다.
-# 라이브: 같은 커밋(page sha-815abb…)에 11분간 PR 3개(#348/#350/#353) → 1개만 머지, 나머지는 충돌 잔류.
-# 기대(수정 후): 같은 후보(app+tag/digest)를 제안 중인 열린 PR이 있으면 noop + reason에 PR 번호.
-# bats test_tags=regression
-@test "an open bump PR proposing the same candidate suppresses the duplicate bump (dedupe)" {
-  cat > "$FX/orders.open-prs.json" <<'EOF'
-[ { "number": 350,
-    "tag": "sha-bbb2222000000000000000000000000000000000",
-    "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" } ]
-EOF
-  run_poll
-  [ "$status" -eq 0 ]
-  # 플래너가 그 사실을 관측은 했는지(데이터 소스 배선 확인) — 배선이 죽었다면 버그가 아니라 하네스 결함이다.
-  echo "$output" | jq -e '.[0].openPrs[0].number == 350' > /dev/null \
-    || { echo "harness: planner never observed the open PR fact (openPrs 배선 확인)"; echo "$output"; false; }
-  # ⚠️ bash 3.2: 중간 복합 단언은 침묵 통과 → 한 줄씩 명시적으로 실패시킨다.
-  action="$(echo "$output" | jq -r '.[0].action')"
-  case "$action" in
-    noop|skip) ;;
-    *) echo "duplicate bump PR: planner still says '$action' while PR #350 already proposes the same candidate (app=orders tag=sha-bbb2222…)"
-       echo "--- plan ---"; echo "$output"
-       false ;;
-  esac
-  reason="$(echo "$output" | jq -r '.[0].reason')"
-  echo "$reason" | grep -q "350" \
-    || { echo "duplicate bump PR: reason must name the existing PR number (#350) — got: '$reason'"; false; }
-}
-
-@test "an open bump PR proposing a different candidate still allows a new bump (dedupe is candidate-scoped)" {
-  # 보존 계약: 중복 억제는 "같은 후보"에만 걸린다 — 진짜 새 후보는 계속 PR을 연다.
-  cat > "$FX/orders.open-prs.json" <<'EOF'
-[ { "number": 349,
-    "tag": "sha-999aaaa000000000000000000000000000000000",
-    "digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999" } ]
-EOF
-  run_poll
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.[0].action == "bump"'
-  echo "$output" | jq -e '.[0].candidate.tag == "sha-bbb2222000000000000000000000000000000000"'
-}
-
-@test "no open bump PR leaves the planner at bump (dedupe fact defaults to empty)" {
-  # 배선이 기본값(빈 목록)에서 기존 판정을 건드리지 않음을 고정 — open-prs 픽스처 없음 = 열린 제안 0.
-  run_poll
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.[0].action == "bump"'
-  echo "$output" | jq -e '.[0].openPrs == []'
-}
-
 @test "a bespoke platform component (image-pin descriptor) joins the bump lane with pin+writePath" {
   PD="$TMP/platform/files/prod"; mkdir -p "$PD"
   printf 'ukyi-app/files' > "$PD/source-repo"

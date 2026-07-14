@@ -51,15 +51,6 @@ function isNotFound(msg: string | undefined) {
   return /not found|manifest unknown|no such manifest|404/i.test(msg ?? "");
 }
 
-// 열린 bump PR이 제안 중인 후보(플래너가 이미 낸 제안 = homelab 쪽 사실).
-// bump-poll.yaml은 run마다 새 브랜치 `bump-poll/<app>-<RUN_ID>`로 PR을 열기 때문에, 같은 후보를
-// 제안하는 PR이 이미 열려 있어도 main 핀은 아직 옛 digest다 → 폴링이 매 주기 중복 PR을 낸다.
-// 그 중복을 끊으려면 "열린 제안"도 사실로 물어야 한다.
-type OpenPr = { number: number; tag: string | null; digest: string | null };
-
-const TAG_IN_TEXT = /sha-[0-9a-f]{40}/;      // 커밋 헤드라인/본문에서 제안 tag 복원
-const DIGEST_IN_TEXT = /sha256:[0-9a-f]{64}/; // 본문에 digest가 있으면 채우고, 없으면 null(미상)
-
 function makeQuery(app: string) {
   if (args.fixtures) {
     const fixturesDir = args.fixtures;
@@ -79,8 +70,6 @@ function makeQuery(app: string) {
         }
         return fx(`manifest-${t}`);
       },
-      // 테스트 소스: <app>.open-prs.json (없으면 열린 제안 0)
-      openPrs: (_app: string): OpenPr[] => fx("open-prs") ?? [],
     };
   }
   const gh = (p: string) => JSON.parse(execFileSync("gh", ["api", p], { encoding: "utf8" }));
@@ -100,23 +89,6 @@ function makeQuery(app: string) {
         throw new Error(`manifest 조회 일시 오류(transient, rethrow→refuse): ${stderr || e.message}`);
       }
     },
-    // 라이브 소스: homelab의 열린 PR 중 브랜치 규약 `bump-poll/<app>-*`만 이 앱의 제안이다.
-    // 제안 tag는 bump-poll이 만드는 커밋 헤드라인("… 이미지를 sha-<40>(digest 핀)로 갱신 …")에서
-    // 복원한다(본문 포맷 무관). digest는 본문에 있으면 채우고 없으면 null = 미상.
-    // 조회 실패(인증/네트워크/5xx)는 삼키지 않고 rethrow → planApp outer catch가 refuse로 fail-closed.
-    openPrs: (a: string): OpenPr[] => {
-      const out = execFileSync(
-        "gh", ["pr", "list", "--state", "open", "--limit", "100", "--json", "number,headRefName,body,commits"],
-        { encoding: "utf8" },
-      );
-      const prefix = `bump-poll/${a}-`;
-      return JSON.parse(out)
-        .filter((pr: any) => String(pr.headRefName ?? "").startsWith(prefix))
-        .map((pr: any) => {
-          const text = [...(pr.commits ?? []).map((c: any) => c.messageHeadline ?? ""), pr.body ?? ""].join("\n");
-          return { number: pr.number, tag: text.match(TAG_IN_TEXT)?.[0] ?? null, digest: text.match(DIGEST_IN_TEXT)?.[0] ?? null };
-        });
-    },
   };
 }
 
@@ -129,7 +101,6 @@ type Plan = {
   src?: string;
   writePath?: string; // git add 대상(apps: values.yaml / 베스포크: deployment.yaml)
   pin?: string;       // 베스포크 핀 디스크립터 경로(apps 레인은 미설정 → bump-poll이 apps 분기)
-  openPrs?: OpenPr[]; // 이 앱에 대해 열려 있는 bump PR들(관측된 사실 — 중복 제안 판정 근거)
 };
 
 // 인라인 핀 스칼라 경로 추적용(yaml parse는 순수 객체/배열 반환 — 배열 인덱스 포함 traverse)
@@ -157,10 +128,7 @@ function computeBump(result: Plan, s: { key: string; src: string; repo: string; 
   if (!candCmp || candCmp.status !== "ahead")
     return { ...result, action: "refuse", reason: `후보(${short(candidate.gitsha)})가 배포 SHA의 descendant가 아님(status=${candCmp?.status ?? "?"})` };
   if (candidate.digest === s.digest) return { ...result, reason: "동일 digest — 멱등 no-op" };
-  // (d) 열린 bump PR 사실을 관측한다. ⚠️ 현재는 배선만 — 판정에는 쓰지 않는다(중복 PR 버그가 재현되는 상태).
-  //     같은 후보를 제안 중인 PR이 이미 있으면 noop이어야 하지만, 지금은 그대로 bump/propose-pr가 난다.
-  const openPrs = q.openPrs(s.key);
-  return { ...result, action: s.autoDeploy ? "bump" : "propose-pr", candidate, openPrs, reason: s.autoDeploy ? "" : "autoDeploy 아님(fail-closed) — 승인 PR만" };
+  return { ...result, action: s.autoDeploy ? "bump" : "propose-pr", candidate, reason: s.autoDeploy ? "" : "autoDeploy 아님(fail-closed) — 승인 PR만" };
 }
 
 function planApp(dir: string, app: string): Plan {
