@@ -177,6 +177,25 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Review Decision Log
 
+### Codex Structure Review — r9: needs-attention → 3건 전부 Accept (owner 2026-07-15)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-30 | high | `Blocker: the final RED→GREEN lock compares different test contracts` — 핀된 red/green 사이에서 `regressionCmd`가 지목한 **두 테스트 파일이 모두 수정**됐다(W49 재작성, W59·W60·W62~W64는 green 쪽에만 존재). RED 레코드는 `1..94`인데 GREEN은 `ok 100` → R-26~R-28의 행위는 **최종 단언 아래에서 RED로 증명된 적이 없고**, green의 일부가 프로덕션이 아니라 **테스트 변경**에 귀속될 수 있다 | **Accept** | 컨덕터의 북키핑 오류(baseline을 R-26~R-28 **전에** 세웠다). **최종 테스트 트리를 고정한 뒤** baseline을 다시 세우고 두 레코드를 재생성 → `red..green` diff가 **scope 3파일뿐**(테스트 변경 0), `--verify-flip` **flipOk: true** |
+| R-31 | high | `Blocker: reader configuration still gates the independent revocation job` — 공유 `configured` 출력이 **READER && WRITER**를 요구하는데 `reconcile`이 거기 걸려 있다 → **reader가 없거나 회전 중**이면 writer 자격이 멀쩡해도 GitHub이 revocation을 깨끗이 **skip**한다. R-27이 떼어내려던 **바로 그 열화 구간**에서 무장이 살아남는다 | **Accept** | preflight를 **`writer`/`reader` 두 출력**으로 분리 — reconcile은 `writer`만, poll은 둘 다 요구. R-27을 **반쪽만** 고쳤었다(job 본문에서 reader를 뺐지만 **선행 job의 게이트**에 남아 있었다) |
+| R-32 | high | `Blocker: the two revocation paths have conflicting failure contracts` — `--reconcile-only`는 실패를 모아 비-0 종료하는데 메인 경로의 **superseded 스윕은 warn하고 계속**한다. `autoDeploy:true` 앱에선 reconcile-only가 무장을 건드리지 않으므로 **이 스윕이 유일한 회수자**인데, disable-auto 실패 + close 차단이 겹치면 **프로세스는 성공, 알림 0, 옛 PR은 무장된 채** 남는다 | **Accept** | 회수를 **결과를 나르는 단일 연산**으로 통일 — 두 경로가 같은 집계·같은 비-0 종료를 쓴다. 변이는 계속 수행(억제는 공격 표면), 실패는 끝에서 알린다 |
+
+**적대 검증(2렌즈)이 R-32 수정에서 더 깊은 구멍을 실측 재현 — V-1·V-2로 함께 수정:**
+
+| # | 결함 | 수정 |
+|---|---|---|
+| V-1 | **`--reconcile-only`가 bump 레인을 통째로 건너뛴다**(`if (laneHere === "bump") continue`). 회수 트리거는 셋(레인 뒤집힘·**superseded 형제**·**미증명 head**)인데 reconcile은 **하나만** 담당했다 → `autoDeploy:true` 앱의 superseded 무장 PR을 회수하는 **유일한 주체는 메인 경로 형제 스윕**이고, 그건 **플래너가 후보를 낸 주기에만** 돈다. **bump가 머지되면 그 앱은 곧장 `noop`** — 스윕이 필요한 **바로 그 다음 주기부터** 스윕이 굶는다. 옛 태그의 무장 PR이 **영구 잔류**하고 run은 **계속 초록**(하네스 실측: `armed:true, disarmed:false, exit 0`). 그 뒤 누구든 브랜치를 전진시키면 **무승인 롤백** = R-25가 막으려던 바로 그 피해 | reconcile이 **네임스페이스를 완결**한다: bump 레인은 그 앱의 **가장 최신** 열린 신뢰 PR만 무장을 유지하고 **더 오래된 형제는 전부 회수**. `createdAt` 순서를 세울 수 없으면 **전부 회수**한다 — 이 분기는 **한 앱에 열린 신뢰 PR이 2개 이상**일 때만 도달하므로 **최소 하나는 확실히 superseded**다. ★ 비대칭: **과잉 회수는 다음 주기가 재무장**(R-10)하지만 **과소 회수는 무승인 머지**다. 미증명 head 회수(R-23 패리티)도 이 패스에 넣는다. 단독 PR은 제외(churn 방지 = W48의 원래 의도) |
+| V-2 | 형제 스윕의 **관측 실패**(ref 열거·PR 조회·파싱·모호성)가 `closeAbandoned` + warn만 하고 **exit 0**. `closeAbandoned`는 **close만** 막고 종료코드엔 **영향이 없다** → "회수 실패는 보안 사실"이 거짓이었다. ★ **W42가 그 구멍을 GREEN으로 고정**하고 있었다(무장된 형제 + 조회 실패를 주입하고 `status -eq 0`을 단언) | **회수 대상을 가릴 수 있는 관측 실패는 그 자체가 회수 실패다** → 두 경로가 같은 집계로 모아 비-0 종료. W42를 정정된 계약으로 재작성(메인 변이는 수행 · run은 빨강 · 실패한 대상이 보고에 이름으로 남는다) |
+
+**뮤턴트(컨덕터 직접 재실행 포함)**: bump 레인 건너뛰기 복원 → **W48·W67·W68·W69 RED** · `uniqueNewest` fail-open(순서 불명이면 유지) → W68 RED · reconcile의 R-23 패리티 제거 → W69 RED · `revocationBlind` 미집계 → **W42 RED**.
+
+**최종 baseline 실측**: regression **106/106 RED**(공짜 통과 0), characterization **63/63 GREEN**, 양 끝단 동일 파티션. `red..green` diff = **scope 3파일 정확히**(테스트 변경 0) → `--verify-flip` **flipOk: true**.
+
 ### Codex Structure Review — r8: needs-attention → 4건 전부 Accept (owner 2026-07-14)
 
 세 결함(R-26·R-27·R-28)은 **같은 교훈의 세 얼굴**이다 — 인가(authorization)에서 fail-closed는
