@@ -1,11 +1,11 @@
 ---
 id: B-1
 title: ensure-bump-pr을 실제 상태 기계로(create/adopt/skip/rebuild + 무장 축) + bump-poll 배선
-status: open
+status: done
 blocked-by: [none]
 plan: docs/bugfixes/bump-poll-duplicate-pr.md
 created: 2026-07-14
-closed:
+closed: 2026-07-14
 ---
 
 ## What to build
@@ -36,3 +36,19 @@ closed:
 ## Blocked by
 
 None - can start immediately
+
+## Result
+
+커밋 `73b546a`. 회귀 **15건 전부 RED→GREEN**, 보존 79건 유지, 비-테스트 변경 2파일(B4).
+
+- **상태 기계**: 신뢰 PR 존재가 최우선 → DIRTY면 `rebuild`(leased force-push, create 금지) / 그 외
+  (CLEAN·BEHIND·BLOCKED·UNKNOWN 및 미지 상태)는 `skip`(변이 0 — 미지 상태도 비변이 쪽으로 fail-safe).
+  신뢰 PR 없음 + 고아 원격 브랜치 → `adopt`(leased push) / 둘 다 없음 → `create`.
+- **무장 축(직교)**: `shouldArm = lane === "bump" && (createsPr || armGap)` — 판정 분기 **밖에서** 계산.
+  `propose-pr`은 어느 경로로도 무장에 닿지 못한다(승인 게이트 구조적 보존).
+- **워크플로**: 결정적 브랜치(`bump-poll/<app>-<tag>`, RUN_ID 제거) + 로컬 커밋만 준비 → 실행기 호출.
+  직접 `git push`·`gh pr create`·`auto-merge-or-fail.sh` 전부 제거. 레인은 verbatim 전달.
+- **하네스 결함 수리**(fix 전 별도 커밋으로 red에 고정): bats `run`이 `$output`을 덮어써 W2/W3/W6의
+  `.action` 단언이 **어떤 구현으로도 통과 불가**였다 → 보존된 `$JSON`에서 읽도록 복구(약화 아님, 강화).
+  그 baseline에서도 회귀는 RED임을 재증명했다.
+- 검증: `make ci` rc=0(1316 ok) · `actionlint` clean · typecheck clean.
