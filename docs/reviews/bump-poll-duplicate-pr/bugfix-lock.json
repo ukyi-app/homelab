@@ -21,7 +21,7 @@
     ".github/workflows/pr-sweeper.yaml"
   ],
   "red": {
-    "sha": "c5417bb597b03ec9cd68f6c1b140791410e8d0c6"
+    "sha": "6484e4b1ee5313ae5d2bf04c94a4897c8f2f2b46"
   },
   "green": {
     "sha": ""
