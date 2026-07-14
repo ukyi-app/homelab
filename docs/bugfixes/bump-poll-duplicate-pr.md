@@ -6,7 +6,7 @@ review-track: standard
 pipeline-stage: design
 issue-tracker: local
 symptom: "같은 앱 커밋(page sha-815abb…)에 대해 bump-poll이 11분 사이 PR 3개(#348·#350·#353)를 열었다. 각 PR이 15분짜리 required 게이트를 태우고, 먼저 머지된 하나를 뺀 나머지는 DIRTY(충돌)+auto-merge 무장 상태로 영구 잔류한다(pr-sweeper는 BEHIND만 처리)."
-red-baseline: e9f4d59731a0822855ab1e045b145e613be5c55e
+red-baseline: 15c8556a0e4814a7a8ce2f486d829fa6e2b0cd64
 bugfix-lock: red
 first-increment: [B-1]
 increments: [B-1]
@@ -140,7 +140,7 @@ update 성공**(기대 OID의 로컬 오브젝트가 없어도 된다 — 40-hex
 
 | id | what the fix does here | blocked-by | notes |
 |---|---|---|---|
-| **B-1** | **(a)** `tools/ensure-bump-pr.ts`: 동결된 `create`를 **실제 판정**으로 교체(위 표). **(b)** `bump-poll.yaml`: 브랜치명을 `bump-poll/<app>-<tag>`로, writer 토큰 스텝에서 `gh pr list --head …`로 사실 수집 → 도구 호출 → `create`면 PR 생성(+auto-merge), `skip`이면 생략, `rebuild`면 최신 main에서 브랜치 재구축 후 `--force-with-lease` push | none | `first-increment`. ⚠️ 워크플로 변경은 `actionlint`가 검사(로컬 `make ci`엔 없음 → 푸시 전 수동 실행) |
+| **B-1** | **(a)** `tools/ensure-bump-pr.ts`: 동결된 create 경로를 **실제 상태 기계**로 교체(create / adopt / skip / rebuild). **원격에 대한 모든 변이(조회·push·PR 생성·auto-merge)는 이 도구 안에서만** 일어난다. **(b)** `.github/workflows/bump-poll.yaml`: **로컬 브랜치·커밋만 준비**하고(`git switch -c bump-poll/<app>-<tag> origin/main` → `bump-tag.ts` → `git commit`) 도구를 호출한다. 워크플로는 **`gh pr create`도 `git push`도 직접 하지 않는다**(호출부 게이트가 강제). 브랜치명에서 `RUN_ID` 제거 | none | `first-increment`. r3 R-6 정정: 이전 문구는 push/PR 생성을 워크플로에 배정해 실행기 계약과 모순됐다 |
 
 ## Follow-up backlog
 
@@ -150,6 +150,13 @@ update 성공**(기대 OID의 로컬 오브젝트가 없어도 된다 — 40-hex
   (buildx attestation 비결정성 — 원래 F-1의 다른 절반). 별도 파이프라인.
 
 ## Review Decision Log
+
+### Codex Plan Review — r3: needs-attention → 2건 전부 Accept (owner 2026-07-14)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-6 | high | `Blocker: B-1 contradicts the executor contract` — B-1이 `gh pr list`·PR 생성·rebuild push를 **워크플로에 배정**해 "모든 원격 변이는 도구가 한다"는 계약과 모순 → 구현자가 호출부 게이트에서 죽거나 R-4의 분리 순서를 재현한다 | **Accept** | B-1 정정: 워크플로는 **로컬 브랜치·커밋만 준비**하고 도구를 호출. 조회·push·PR 생성·auto-merge는 **전부 도구 안** |
+| R-7 | high | `Blocker: lease witnesses accept an unusable push target` — 증인이 lease **접두만** grep하고 git stub이 다른 argv를 수용 → `origin <branch>`를 빼먹은 구현도 GREEN이 되고 **라이브 회복은 실패**한다 | **Accept** | push argv를 **완전 형태로 계약화**(create/rebuild/adopt 3종) + **git stub이 계약 밖 형태를 exit 3으로 거부**. 증인은 원장 줄 **전체 일치**로 단언. **실측(bare 원격)**: bare lease = `stale info` 거부 / 명시 OID lease + `origin HEAD:refs/heads/<b>` = fetch 없이 성공 |
 
 ### Codex Plan Review — r2: needs-attention → 2건 전부 Accept (owner 2026-07-14)
 
