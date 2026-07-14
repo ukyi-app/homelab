@@ -20,15 +20,23 @@
 // 절대 신뢰하지 않는다. 신뢰하면 포크 PR 하나로 배포를 무기한 억제할 수 있다(억제 = 공격 표면).
 // 신뢰하는 제안은 **동일-레포(isCrossRepository=false) + writer App 작성자**뿐이다.
 //
-// 판정표(수정 후 목표 — 지금은 아래 red-capture 블록이 이걸 무시한다):
-//   신뢰 PR 없음 + 원격 브랜치 없음            → create   push(-u) → gh pr create
-//   신뢰 PR 없음 + 원격 브랜치 **있음**(고아)   → adopt    push --force-with-lease=<ref>:<원격 OID> → gh pr create
+// 판정표(수정 후 목표 — 지금은 아래 red-capture 블록이 이걸 무시한다). push는 **정확히 이 세 argv뿐**:
+//   신뢰 PR 없음 + 원격 브랜치 없음            → create   git push origin HEAD:refs/heads/<b>                                → gh pr create
+//   신뢰 PR 없음 + 원격 브랜치 **있음**(고아)   → adopt    git push --force-with-lease=refs/heads/<b>:<원격 OID> origin HEAD:refs/heads/<b> → gh pr create
 //   신뢰 PR + CLEAN/BEHIND/BLOCKED/UNKNOWN    → skip     push·create 둘 다 하지 않는다
-//   신뢰 PR + DIRTY(충돌)                     → rebuild  push --force-with-lease=<ref>:<headRefOid> (PR 재사용 — create 금지)
+//   신뢰 PR + DIRTY(충돌)                     → rebuild  git push --force-with-lease=refs/heads/<b>:<headRefOid> origin HEAD:refs/heads/<b> (PR 재사용 — create 금지)
 //   조회 실패·깨진 JSON                        → fail-closed(비-0 종료 — 조용한 create 금지)
 // ⚠️ UNKNOWN은 DIRTY가 아니다(GitHub 지연 계산 — 라이브에서 흔하다). rebuild로 오분류하면 매 폴링 force-push.
+// ⚠️ push argv는 **완전 형태**가 계약이다(plan r3): lease 플래그만 맞고 `origin HEAD:refs/heads/<b>`를
+//    빠뜨리면 라이브에선 아무것도 밀지 못한다 → 테스트 stub이 계약 밖 push argv를 exit 3으로 죽인다.
+//    · 목적지를 `refs/heads/<b>`로 완전 수식 → lease의 <refname>과 **글자 그대로 같은 ref**(refname_match 모호성 0).
+//    · 소스는 `HEAD`(호출부가 재구축해 체크아웃해 둔 상태) → 로컬 브랜치명 표기에 의존하지 않는다.
+//    · `-u`(upstream)는 소비자가 없다 — PR 생성은 `gh pr create --head <b>`가, auto-merge는 브랜치명이 몫.
 // ⚠️ `--force-with-lease`는 반드시 `<ref>:<expected-oid>` 형태다(plan r2 R-5). bare lease는 그 브랜치의
 //    원격 추적 참조가 없으면(워크플로 checkout은 main만 가져온다) stale로 거부돼 회복이 영구 실패한다.
+//    반대로 명시 형태는 원격 추적 참조도, 그 OID의 로컬 오브젝트도 필요 없다 — git-push(1):
+//    "…or we do not even have to have such a remote-tracking branch when this form is used"
+//    (bare 원격 레포로 실측: bare lease=stale 거부 / 명시 lease=forced update 성공).
 // DIRTY를 rebuild로 되살리지 않으면 유일한 PR이 충돌난 순간 이후 폴링이 영원히 skip →
 // 깨끗한 대체 PR이 영영 안 생겨 배포가 조용히 멈춘다(pr-sweeper는 DIRTY를 안 건드린다).
 //
@@ -213,8 +221,9 @@ const reason =
   "red-capture: 판정 미구현 — 신뢰 PR·고아 브랜치와 무관하게 항상 create(중복 PR·lease 없는 push 재현)";
 
 // ── ③ 변이(원격) ───────────────────────────────────────────────────────────────────────────
-// 동결된 create 경로: lease 없는 push + 무조건 PR 생성. (수정 후: skip이면 이 블록을 통째로 건너뛴다.)
-mutate("git", ["push", "-u", args.remote, branch], "git push");
+// 동결된 create 경로: **lease 없는** push + 무조건 PR 생성 → 고아 브랜치와 non-fast-forward 충돌
+// (bare 원격으로 실측: `! [rejected] … (fetch first)`). (수정 후: skip이면 이 블록을 통째로 건너뛴다.)
+mutate("git", ["push", args.remote, `HEAD:${ref}`], "git push");
 mutate("gh", [
   "pr", "create", "--base", args.base, "--head", branch,
   "--title", args.title, "--body", args.body,

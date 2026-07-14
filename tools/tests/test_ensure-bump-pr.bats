@@ -7,11 +7,20 @@
 # 하네스 관용구는 이 레포의 선례를 따른다 — tests/test_sealed-secrets-restore.bats(kubectl stub),
 # tests/gates/test_digest-exporter-producer.bats(skopeo/curl stub).
 #
+# push argv 계약(완전 형태 — plan r3). 증인은 이 **원장 줄 전체**를 `grep -Fx`로 단언하고,
+# git stub은 이 셋 말고는 전부 exit 3으로 죽인다(접두만 맞는 구현이 GREEN이 되는 걸 막는다):
+#   create : git push origin HEAD:refs/heads/<b>
+#   rebuild: git push --force-with-lease=refs/heads/<b>:<PR headRefOid> origin HEAD:refs/heads/<b>
+#   adopt  : git push --force-with-lease=refs/heads/<b>:<고아 원격 OID> origin HEAD:refs/heads/<b>
+# 근거(git-push(1) + bare 원격 실측): `<refname>:<expect>` 명시 형태만이 **원격 추적 참조 없이**(워크플로
+# checkout은 main만 가져온다) 동작한다 — "…or we do not even have to have such a remote-tracking branch
+# when this form is used". bare lease는 stale 거부, lease 없는 push는 고아와 non-fast-forward 충돌.
+#
 # 회귀(test_tags=regression) — 지금 RED:
 #   W1 중복 금지  : 신뢰 PR(CLEAN)이 열려 있으면 push·create 0회(skip).  현재: 둘 다 실행 → 중복 PR.
-#   W2 DIRTY 회복 : 신뢰 PR이 DIRTY면 `--force-with-lease=<ref>:<headRefOid>` push 1회 + create 0회.
+#   W2 DIRTY 회복 : 신뢰 PR이 DIRTY면 위 rebuild argv push 1회 + create 0회.
 #                  현재: create → 중복 PR(게다가 lease 없음 → R-5 stale 거부).
-#   W3 고아 브랜치: 열린 PR 0 + 원격 브랜치 있음 → 원격 OID lease push + create 1회.
+#   W3 고아 브랜치: 열린 PR 0 + 원격 브랜치 있음 → 위 adopt argv push + create 1회.
 #                  현재: lease 없는 plain push → 고아와 non-fast-forward 충돌 → 배포 정지.
 #
 # 보존(태그 없음 — baseline에서 GREEN): 신뢰 경계(포크·타인 불신)·fail-closed·조회-우선 순서.
@@ -44,6 +53,17 @@ setup() {
   printf '[]' > "$STUB_PRS"    # 기본: 열린 PR 0건
   : > "$STUB_HEADS"            # 기본: 원격 브랜치 없음
 
+  # ── push argv 계약(완전 형태 3종). 이 세 개 **말고는 전부 하네스가 죽인다**(exit 3).
+  #    왜 완전 형태인가(plan r3): 접두만 보면 `origin HEAD:refs/heads/<b>`를 빠뜨린 구현도 GREEN이 되는데,
+  #    라이브에선 아무것도 밀지 못해(또는 엉뚱한 ref를 밀어) DIRTY/고아 회복이 실패하고 배포가 정지한다.
+  #    bare 원격 레포 실측(git 2.50): 목적지 refspec 없는 push는 push.default(=simple) 해석에 맡겨져
+  #    lease의 <refname>과 같은 ref라는 보장이 사라진다 → 목적지·lease 모두 refs/heads/로 완전 수식한다.
+  #    소스는 HEAD(호출부가 최신 main에서 재구축해 체크아웃해 둔 상태) — 로컬 브랜치명 표기에 의존 0.
+  PUSH_DEST="origin HEAD:refs/heads/${BRANCH}"
+  export PUSH_CREATE="git push ${PUSH_DEST}"
+  export PUSH_REBUILD="git push --force-with-lease=refs/heads/${BRANCH}:${PR_OID} ${PUSH_DEST}"
+  export PUSH_ADOPT="git push --force-with-lease=refs/heads/${BRANCH}:${ORPHAN_OID} ${PUSH_DEST}"
+
   # ── gh stub: pr list는 픽스처를 그대로 내보내고, 변이 서브커맨드는 성공만 흉내낸다.
   #    알 수 없는 서브커맨드는 exit 3 — 도구의 gh 표면이 조용히 넓어지는 걸 막는다.
   cat > "$STUB/gh" <<'GH'
@@ -61,7 +81,11 @@ case "$1:$2" in
 esac
 GH
 
-  # ── git stub: ls-remote만 픽스처를 내보내고 나머지(push 등)는 성공만 흉내낸다.
+  # ── git stub: ls-remote만 픽스처를 내보내고, **push는 계약된 정확한 argv에만** 성공한다.
+  #    계약 밖 push(목적지 refspec 누락·bare lease·엉뚱한 ref/OID·plain force 등)는 exit 3 —
+  #    "하네스가 거부한 호출"이지 프로덕션 성공이 아니다. 이게 없으면 argv를 빼먹은 구현이 GREEN이 된다.
+  #    알 수 없는 git 서브커맨드도 exit 3 — 도구의 git 표면(fetch 후 bare lease 같은 우회)이 조용히
+  #    넓어지는 걸 막는다(gh stub의 unknown-subcommand 처리와 동형).
   cat > "$STUB/git" <<'GIT'
 #!/bin/sh
 printf 'git %s\n' "$*" >> "$CALLS"
@@ -70,7 +94,19 @@ case "$1" in
     if [ -n "${STUB_GIT_LSREMOTE_FAIL:-}" ]; then echo "stub: git ls-remote 실패(원격 장애 시뮬)" >&2; exit 1; fi
     if [ -f "$STUB_HEADS" ]; then cat "$STUB_HEADS"; fi
     ;;
-  *) : ;;
+  push)
+    got="git $*"
+    if [ "$got" = "$PUSH_CREATE" ]; then exit 0; fi
+    if [ "$got" = "$PUSH_REBUILD" ]; then exit 0; fi
+    if [ "$got" = "$PUSH_ADOPT" ]; then exit 0; fi
+    echo "stub git: 계약 밖 push argv(라이브에선 밀리지 않거나 엉뚱한 ref를 민다):" >&2
+    echo "  받음: $got" >&2
+    echo "  허용: $PUSH_CREATE" >&2
+    echo "  허용: $PUSH_REBUILD" >&2
+    echo "  허용: $PUSH_ADOPT" >&2
+    exit 3
+    ;;
+  *) echo "stub git: 예상치 못한 호출: $*" >&2; exit 3 ;;
 esac
 exit 0
 GIT
@@ -96,6 +132,8 @@ run_ensure() {
 
 # 원장에서 특정 명령의 호출 횟수(매치 0에도 0을 출력).
 count_calls() { grep -c "$1" "$CALLS" || true; }
+# 원장에 **정확히 그 argv 줄**이 있는가(-F -x: 접두/부분 일치 금지 — 완전 argv 계약을 그대로 단언).
+has_call_exact() { grep -Fx -- "$1" "$CALLS" > /dev/null; }
 # 원장에서 특정 명령이 처음 등장한 줄 번호(없으면 빈 문자열).
 first_call()  { grep -n "$1" "$CALLS" | head -1 | cut -d: -f1; }
 dump_calls()  { echo "--- 실행된 명령(원장) ---"; cat "$CALLS"; }
@@ -153,10 +191,12 @@ dump_calls()  { echo "--- 실행된 명령(원장) ---"; cat "$CALLS"; }
 
   # ⚠️ R-5: bare `--force-with-lease`는 그 브랜치의 원격 추적 참조가 없으면(checkout은 main만 가져온다)
   # stale로 거부돼 회복이 영구 실패한다 → 기대 OID를 명시한 `<ref>:<oid>` 형태여야 한다.
-  expect_push="git push --force-with-lease=refs/heads/${BRANCH}:${PR_OID}"
-  run grep -F -- "$expect_push" "$CALLS"
+  # ⚠️ plan r3: **완전 argv**를 단언한다(접두 grep 금지) — lease만 맞고 `origin HEAD:refs/heads/<b>`를
+  # 빠뜨리면 라이브에선 아무것도 밀지 못해 DIRTY가 그대로 남는다(테스트만 GREEN).
+  run has_call_exact "$PUSH_REBUILD"
   if [ "$status" -ne 0 ]; then
-    echo "stale lease: ensure-bump-pr did not force-push with an explicit lease — expected '${expect_push} origin ${BRANCH}'"
+    echo "stale lease: ensure-bump-pr did not force-push the rebuilt branch with the exact leased argv"
+    echo "  expected: ${PUSH_REBUILD}"
     dump_calls; false
   fi
   pushes="$(count_calls '^git push')"
@@ -182,10 +222,12 @@ dump_calls()  { echo "--- 실행된 명령(원장) ---"; cat "$CALLS"; }
   echo "$output" | jq -e --arg o "$ORPHAN_OID" '.observed.remoteBranch.oid == $o' > /dev/null \
     || { echo "harness: 도구가 고아 원격 브랜치를 관측하지 못했다(git ls-remote 배선 확인)"; echo "$output"; dump_calls; false; }
 
-  expect_push="git push --force-with-lease=refs/heads/${BRANCH}:${ORPHAN_OID}"
-  run grep -F -- "$expect_push" "$CALLS"
+  # 완전 argv 단언(plan r3) — 고아 OID를 기대값으로 한 lease + 완전 목적지 refspec.
+  # (bare 원격 실측: 이 형태만이 원격 추적 참조 없이도 고아를 덮어쓴다. 접두만 맞으면 라이브는 무동작.)
+  run has_call_exact "$PUSH_ADOPT"
   if [ "$status" -ne 0 ]; then
-    echo "orphan bump branch: ensure-bump-pr pushed ${BRANCH} without a lease while an orphan remote branch (${ORPHAN_OID}) exists — expected '${expect_push} origin ${BRANCH}'"
+    echo "orphan bump branch: ensure-bump-pr did not adopt the orphan (${ORPHAN_OID}) with the exact leased argv"
+    echo "  expected: ${PUSH_ADOPT}"
     dump_calls; false
   fi
   pushes="$(count_calls '^git push')"
@@ -208,19 +250,46 @@ dump_calls()  { echo "--- 실행된 명령(원장) ---"; cat "$CALLS"; }
 @test "the lease is never bare (a bare --force-with-lease is stale-rejected on a fresh checkout)" {
   # ⚠️ baseline에서도 GREEN이다(지금은 lease 자체가 없다) → regression 태그를 붙이지 않는다.
   #    수정이 lease를 **넣되 기대 OID를 빼먹는** 회귀(R-5의 정확한 실패 모드)를 잡는 게 목적이다:
-  #    bare lease는 원격 추적 참조가 없는 새 checkout(main만 fetch)에서 항상 stale로 거부된다.
+  #    bare lease는 원격 추적 참조가 없는 새 checkout(main만 fetch)에서 항상 stale로 거부된다
+  #    (bare 원격 실측: `! [rejected] … (stale info)`).
   write_prs '[]'
   write_heads "$ORPHAN_OID"
   run_ensure
-  [ "$status" -eq 0 ]
+  tool_status="$status"
+  # 원장은 stub의 거부(exit 3)보다 **먼저** argv를 기록한다 → 죽은 push도 여기서 잡힌다.
   run grep -E '^git push .*--force-with-lease( |$)' "$CALLS"
   if [ "$status" -eq 0 ]; then
     echo "stale lease: bare --force-with-lease(기대 OID 없음) — 새 checkout엔 원격 추적 참조가 없어 항상 stale 거부된다"
     dump_calls; false
   fi
+  [ "$tool_status" -eq 0 ]
 }
 
-@test "no open PR and no remote branch: pushes the branch and opens exactly one PR" {
+@test "the harness kills any push argv outside the contract (a witness cannot pass with an unusable push)" {
+  # 하네스 자체의 증명(plan r3): stub이 계약 밖 push를 exit 3으로 죽이지 않으면, `origin HEAD:refs/heads/<b>`를
+  # 빠뜨린 구현도 lease 단언을 통과해 GREEN이 되고 **라이브 DIRTY/고아 회복은 실패**한다.
+  run "$STUB/git" push --force-with-lease=refs/heads/${BRANCH}:${PR_OID}          # 목적지 refspec 누락
+  [ "$status" -eq 3 ]
+  run "$STUB/git" push --force-with-lease=refs/heads/${BRANCH}:${PR_OID} origin   # 목적지 refspec 누락(원격만)
+  [ "$status" -eq 3 ]
+  run "$STUB/git" push --force-with-lease=refs/heads/${BRANCH}:${PR_OID} origin "${BRANCH}"  # 미수식 목적지
+  [ "$status" -eq 3 ]
+  run "$STUB/git" push --force-with-lease origin HEAD:refs/heads/${BRANCH}        # bare lease
+  [ "$status" -eq 3 ]
+  run "$STUB/git" push --force origin HEAD:refs/heads/${BRANCH}                   # lease 없는 force
+  [ "$status" -eq 3 ]
+  run "$STUB/git" push -u origin "${BRANCH}"                                      # 미수식 create(구 형태)
+  [ "$status" -eq 3 ]
+  # 반대로 계약된 세 형태는 통과한다(가드가 과하게 조여 정상 구현을 막지 않는가).
+  run "$STUB/git" push origin "HEAD:refs/heads/${BRANCH}"
+  [ "$status" -eq 0 ]
+  run "$STUB/git" push "--force-with-lease=refs/heads/${BRANCH}:${PR_OID}" origin "HEAD:refs/heads/${BRANCH}"
+  [ "$status" -eq 0 ]
+  run "$STUB/git" push "--force-with-lease=refs/heads/${BRANCH}:${ORPHAN_OID}" origin "HEAD:refs/heads/${BRANCH}"
+  [ "$status" -eq 0 ]
+}
+
+@test "no open PR and no remote branch: pushes the branch (exact argv) and opens exactly one PR" {
   write_prs '[]'
   run_ensure
   [ "$status" -eq 0 ]
@@ -228,6 +297,12 @@ dump_calls()  { echo "--- 실행된 명령(원장) ---"; cat "$CALLS"; }
   echo "$output" | jq -e '.observed.remoteBranch == null'
   pushes="$(count_calls '^git push')"
   [ "$pushes" -eq 1 ]
+  # create 경로의 push argv도 **완전 형태**로 못박는다 — lease만 없을 뿐 목적지 계약은 세 경로가 같다.
+  run has_call_exact "$PUSH_CREATE"
+  if [ "$status" -ne 0 ]; then
+    echo "create push argv 계약 위반 — expected: ${PUSH_CREATE}"
+    dump_calls; false
+  fi
   creates="$(count_calls '^gh pr create')"
   [ "$creates" -eq 1 ]
   run grep -F -- "gh pr create --base main --head ${BRANCH}" "$CALLS"
