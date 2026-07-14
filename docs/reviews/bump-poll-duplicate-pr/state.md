@@ -9,7 +9,7 @@ worktree:
 branch: fix/bump-poll-duplicate-pr
 consent-scope:
 symptom: "같은 앱 커밋(page sha-815abb…)에 대해 bump-poll이 11분 사이 PR 3개(#348·#350·#353)를 열었다. 각 PR이 15분짜리 required 게이트를 태우고, 먼저 머지된 하나를 뺀 나머지는 DIRTY(충돌)+auto-merge 무장 상태로 영구 잔류한다(pr-sweeper는 BEHIND만 처리)."
-red-baseline: 6484e4b1ee5313ae5d2bf04c94a4897c8f2f2b46
+red-baseline: 616750ae95ca961b9f71d1c098d827ea5f14a49b
 bugfix-lock: red
 spike-1:
 ---
