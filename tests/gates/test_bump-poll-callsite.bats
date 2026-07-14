@@ -142,9 +142,10 @@ extract_step() {
   # (실측: 맵을 그대로 실행하면 `syntax error near unexpected token '('`로 죽는다).
   yq -r '[.jobs.poll.steps[] | select(.run) | select(.run | test("bump-tag"))] | .[0].run // ""' "$F"
 }
-# reconcile 패스(인가 회수 — 후보 유무 무관·전 앱)의 셸 본문. 선택자는 그 모드의 이름 자체다.
+# reconcile 패스(인가 회수)의 셸 본문. ★ 이제 **별도 job**이다(R-27) — poll job의 스텝이 아니다:
+# 그 안에 있으면 reader 토큰·docker·플래너 스텝의 성공에 묶여, 그것들이 죽는 순간 회수도 죽는다.
 extract_reconcile_step() {
-  yq -r '[.jobs.poll.steps[] | select(.run) | select(.run | test("--reconcile-only"))] | .[0].run // ""' "$F"
+  yq -r '[.jobs.reconcile.steps[] | select(.run) | select(.run | test("--reconcile-only"))] | .[0].run // ""' "$F"
 }
 
 setup_hermetic() {
@@ -204,6 +205,15 @@ if [ -n "${STUB_FAIL_APP:-}" ] && [ "$1" = "tools/ensure-bump-pr.ts" ]; then
       take=""
     fi
     case "$a" in --app) take=1 ;; esac
+  done
+fi
+# 인가 회수 패스의 실패 주입(R-27) — 이 모드엔 `--app`이 없다(대상은 네임스페이스가 준다).
+if [ -n "${STUB_FAIL_RECONCILE:-}" ] && [ "$1" = "tools/ensure-bump-pr.ts" ]; then
+  for a in "$@"; do
+    if [ "$a" = "--reconcile-only" ]; then
+      echo "stub bun: 인가 회수 패스 실패(주입 — 한 앱의 SSOT 파손·API 장애)" >&2
+      exit 1
+    fi
   done
 fi
 exit 0
@@ -321,8 +331,8 @@ elif mode == "bumptag":  # 하네스 자체의 증명: 루프가 두 후보를 *
 elif mode == "lane":  # want[0] = app 이름 → 그 앱의 --action 값(정확히 1건이 아니면 빈 문자열)
     hits = [r for r in ensure if opt(r, "--app") == want[0]]
     print(opt(hits[0], "--action") if len(hits) == 1 else "")
-elif mode == "reconciled":  # `--reconcile-only`로 실행기에 **도달한** 앱들(정렬·중복 제거)
-    print(" ".join(sorted({opt(r, "--app") for r in ensure if "--reconcile-only" in r} - {""})))
+elif mode == "reconciled":  # 인가 회수 패스가 실행기에 **도달한 횟수**(대상 목록은 인자가 아니다 — R-27)
+    print(sum(1 for r in ensure if "--reconcile-only" in r))
 elif mode == "bumped":  # `--reconcile-only` **없이**(= bump 경로) 실행기에 도달한 앱들
     print(" ".join(sorted({opt(r, "--app") for r in ensure if "--reconcile-only" not in r} - {""})))
 elif mode == "argcount":  # want[0] 인자를 포함하는 실행기 레코드 수(예: reconcile 패스의 `--action` = 0이어야 한다)
@@ -341,7 +351,8 @@ PY
 ensure_calls()  { python3 "$LEDGER_PY" count "$CALLS"; }
 bumptag_calls() { python3 "$LEDGER_PY" bumptag "$CALLS"; }
 lane_of()       { python3 "$LEDGER_PY" lane "$CALLS" "$1"; }
-reconciled_apps() { python3 "$LEDGER_PY" reconciled "$CALLS"; }
+# 인가 회수 패스가 실행기에 도달한 **횟수**(앱 목록이 아니다 — 대상은 네임스페이스가 준다: R-27).
+reconcile_calls() { python3 "$LEDGER_PY" reconciled "$CALLS"; }
 bumped_apps()     { python3 "$LEDGER_PY" bumped "$CALLS"; }
 arg_calls()       { python3 "$LEDGER_PY" argcount "$CALLS" "$1"; }
 dump_calls()    { echo "--- 스텝이 실행한 명령(원장) ---"; python3 "$LEDGER_PY" dump "$CALLS"; }
@@ -371,6 +382,7 @@ run_step_rc() {
   : > "$GIT_CONFIG_LOG"
   : > "$GIT_COMMIT_LOG"
   PATH="$STUB:$PATH" GH_TOKEN=stub-token RUN_ID=999 STUB_FAIL_APP="${STUB_FAIL_APP:-}" \
+    STUB_FAIL_RECONCILE="${STUB_FAIL_RECONCILE:-}" \
     bash -e "$1" > "$BATS_TEST_TMPDIR/step.out" 2>&1
 }
 step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
@@ -676,48 +688,103 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
   fi
 }
 
-# ── ⑧ **해제는 후보에 의존하지 않는다** — reconcile 패스는 매 주기 전 앱을 돈다(H-1) ──────────────
-# bump 루프는 플래너가 후보를 낸 앱(action = bump | propose-pr)만 돈다. `noop`(핀이 이미 최신·동일 digest)이나
-# `refuse`(GHCR 일시 장애·compare 실패·앱 레포 이력 재작성)인 주기엔 그 앱의 실행기가 **한 번도 호출되지 않는다**
-# → 그 사이 autoDeploy가 true→false로 뒤집혀도 이미 무장된 PR이 **낡은 머지 인가를 무기한** 들고 있는다.
-# ★★ 해제는 **가용성이 아니라 보안 속성**이다 — 플래너가 후보를 만들어 주느냐에 의존해선 안 된다.
-# 계약: `--reconcile-only`가 plan의 **모든 항목**(action 무관)에 대해, **후보 없이**, 매 주기 실행기에 도달한다.
+# ── ⑧ **회수는 후보에도, 플래너에도 의존하지 않는다**(H-1 · structure r8 R-27) ────────────────────
+# bump 루프는 플래너가 후보를 낸 앱(action = bump | propose-pr)만 돈다. `noop`·`refuse` 주기엔 그 앱의
+# 실행기가 **한 번도 호출되지 않는다** → autoDeploy가 true→false로 뒤집혀도 이미 무장된 PR이 낡은 머지
+# 인가를 **무기한** 들고 있는다(H-1).
+# ★★ R-27이 그 위에 한 겹 더 얹었다: H-1의 첫 수정은 대상 목록을 `/tmp/plan.json`에서 뽑았다 —
+#    즉 회수가 여전히 **reader 토큰 + GHCR 플래너의 성공과 완전성**에 묶여 있었다(의존을 `.action` 필터에서
+#    plan.json 존재로 한 칸 옮겼을 뿐이다). 플래너가 죽으면? 어떤 앱이 그 출력에서 빠지면? **그 앱은
+#    방문되지 않고 낡은 무장이 산다.** 회수는 보안 속성이라 **후보 계획의 가용성에도 완전성에도** 의존해선 안 된다.
+# 계약(셋 다 필요하다):
+#   ⓐ 회수는 **자기 job**이다 — reader 토큰·docker·플래너 스텝을 하나도 갖지 않는다(그것들이 죽어도 돈다).
+#   ⓑ 대상 목록을 **넘기지 않는다**(`--app` 0회) — 실행기가 `bump-poll/*` 네임스페이스에서 직접 열거한다.
+#   ⓒ 레인도 넘기지 않는다(`--action` 0회) — autoDeploy SSOT가 유일한 출처다(승인 게이트 우회 방지).
 
 # bats test_tags=regression
-@test "the reconcile pass reaches the executor for EVERY plan item, including noop and refuse (disarm cannot wait for a candidate)" {
+@test "the reconcile pass runs with NO planner output at all (no plan.json, no reader token) — its subjects come from the namespace" {
   setup_hermetic
   rc=$?
   [ "$rc" -ne 9 ] || { echo "hermetic harness: bump 스텝 추출 실패"; false; }
   [ -s "$RSTEP" ] || {
-    echo "stale authorization survives: bump-poll.yaml에 **인가 회수 패스가 없다**(--reconcile-only를 부르는 스텝 0개) —"
-    echo "  bump 루프는 후보가 있는 앱만 돈다 → noop/refuse 주기엔 실행기가 호출조차 되지 않고,"
-    echo "  autoDeploy가 true→false로 뒤집힌 뒤에도 낡은 무장이 **영구히** 살아남는다."
+    echo "stale authorization survives: bump-poll.yaml에 **인가 회수 패스가 없다**(reconcile job에서"
+    echo "  --reconcile-only를 부르는 스텝 0개) — 낡은 무장을 회수하는 경로가 아예 없다."
     false
   }
 
+  # ★ 플래너가 **아무것도 남기지 않은** 세계를 그대로 만든다: plan.json이 없다(reader 토큰 스텝이
+  #   실패했거나 플래너가 죽었다). 그 주기에도 회수는 **반드시** 돈다.
+  rm -f "$PLAN"
   run run_step_rc "$RSTEP"
   [ "$status" -eq 0 ] || {
-    echo "reconcile 스텝이 정상 경로에서 죽었다(exit $status)"
+    echo "starved revocation: plan.json이 없다는 이유로 reconcile 패스가 죽었다(exit $status) —"
+    echo "  reader 토큰/플래너가 죽은 주기가 바로 **회수가 필요한 주기**다(그 앱들은 방문조차 되지 않는다)."
+    step_out; dump_calls; false
+  }
+  n="$(reconcile_calls)"
+  [ "$n" -eq 1 ] || {
+    echo "starved revocation: plan.json 없이 실행기에 도달한 회수 패스가 ${n}회다(기대 1회) —"
+    echo "  대상은 플래너가 아니라 `bump-poll/*` 네임스페이스가 준다(git ls-remote)."
     step_out; dump_calls; false
   }
 
-  # ① plan의 **네 항목 전부**가 실행기에 도달했다 — noop(files)·refuse(broken-api)도 포함이다.
-  got="$(reconciled_apps)"
-  [ "$got" = "broken-api files page trip-mate" ] || {
-    echo "stale authorization survives: reconcile 패스가 plan의 전 항목을 돌지 않았다"
-    echo "  도달: '$got'"
-    echo "  기대: 'broken-api files page trip-mate' (noop·refuse 포함 — 그 주기가 정확히 회수가 필요한 주기다)"
-    step_out; dump_calls; false
+  # ⓑ **대상 목록을 넘기지 않는다** — 넘기는 순간 회수의 완전성이 호출부의 목록(=플래너 출력)에 의존한다.
+  a="$(arg_calls --app)"
+  [ "$a" -eq 0 ] || {
+    echo "subject injection: reconcile 패스가 실행기에 --app을 넘긴다(${a}회, 기대 0회) —"
+    echo "  그 목록의 출처가 플래너면 R-27이 그대로 재발한다(플래너가 죽으면 회수도 죽는다)."
+    dump_calls; false
   }
-
-  # ② 이 패스는 **레인을 넘기지 않는다**. 넘기는 순간 호출부가 레인을 지어낼 수 있고(승인 게이트 우회),
-  #    게다가 noop/refuse 항목의 `.action`은 레인이 아니라 "후보가 없다"는 뜻이라 애초에 쓸 수 없다.
-  #    레인은 실행기가 autoDeploy SSOT(.bindings.json / .image-pin.json)에서 직접 읽는다.
+  # ⓒ 레인도 넘기지 않는다(승인 게이트 우회 방지 — 레인은 autoDeploy SSOT에서만 나온다).
   n="$(arg_calls --action)"
   [ "$n" -eq 0 ] || {
-    echo "lane injection: reconcile 패스가 실행기에 --action을 넘긴다(${n}회, 기대 0회) —"
-    echo "  noop/refuse 항목의 .action은 레인이 아니다. 레인은 autoDeploy SSOT에서만 나온다."
+    echo "lane injection: reconcile 패스가 실행기에 --action을 넘긴다(${n}회, 기대 0회)"
     dump_calls; false
+  }
+
+  # 플래너가 **빈 계획**을 낸 주기도 같다(후보 0 = 회수 0이 아니다).
+  printf '[]' > "$PLAN"
+  run run_step_rc "$RSTEP"
+  [ "$status" -eq 0 ] || { echo "빈 plan.json에서 reconcile 패스가 죽었다"; step_out; dump_calls; false; }
+  n="$(reconcile_calls)"
+  [ "$n" -eq 1 ] || {
+    echo "starved revocation: 빈 plan.json 주기에 회수가 돌지 않았다(${n}회, 기대 1회)"
+    step_out; dump_calls; false
+  }
+}
+
+# bats test_tags=regression
+@test "the reconcile job carries no reader token and no planner step (revocation cannot be starved by candidate planning)" {
+  # ⓐ **구조**가 이 속성을 준다: 회수가 poll job 안의 스텝이면 reader 토큰·docker·플래너 스텝이 그 앞에
+  #    서고, 그중 하나만 실패해도 GHA는 뒤 스텝을 **건너뛴다** → 그 주기의 회수는 0이 된다.
+  #    그래서 회수는 **자기 job**이고, 그 job엔 writer 토큰 말고는 아무 자격도 없다.
+  yq -e '.jobs.reconcile' "$F" > /dev/null 2>&1 || {
+    echo "structure: reconcile이 별도 job이 아니다 — poll job 안의 스텝이면 reader/플래너 실패에 함께 죽는다"
+    false
+  }
+  # 이 job의 스텝 어디에도 플래너·reader·docker가 없다(= 그것들의 실패에 묶일 수 없다).
+  # ⚠️ `grep -q … && { …; false; }`는 **쓰지 않는다** — 매치 0(정상)일 때 그 리스트가 비-0을 돌려줘
+  #    bats의 errexit가 테스트를 죽인다(중간 복합 단언 금지 규칙 그대로다). 조건 문맥(`if`)으로만 쓴다.
+  body="$(yq -o=json '.jobs.reconcile' "$F")"
+  for forbidden in poll-ghcr plan.json docker/login-action ukyi-app; do
+    if printf '%s' "$body" | grep -qF -- "$forbidden"; then
+      echo "coupled revocation: reconcile job이 '$forbidden'에 의존한다 —"
+      echo "  회수는 후보 계획(planning)의 가용성·완전성에 의존해선 안 된다(R-27)."
+      printf '%s\n' "$body"
+      false
+    fi
+  done
+  # reader App 토큰 스텝(permission-contents: read + owner)이 이 job에 없어야 한다.
+  n="$(yq -r '[.jobs.reconcile.steps[] | select(.with."permission-contents" == "read")] | length' "$F")"
+  [ "$n" -eq 0 ] || {
+    echo "coupled revocation: reconcile job이 reader App 토큰 스텝을 갖는다(${n}개) — 그 스텝이 실패하면 회수가 굶는다"
+    false
+  }
+  # 그런데 writer 자격은 **있어야** 한다(회수 = gh pr merge --disable-auto = PR write).
+  w="$(yq -r '[.jobs.reconcile.steps[] | select(.with."permission-pull-requests" == "write")] | length' "$F")"
+  [ "$w" -eq 1 ] || {
+    echo "reconcile job에 writer App 토큰 스텝이 없다(${w}개, 기대 1개) — 무장을 회수할 자격이 없다"
+    false
   }
 }
 
@@ -754,42 +821,59 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
 }
 
 # bats test_tags=regression
-@test "a failing reconcile pass never starves the bump loop, but still turns the run red" {
-  # ★ 두 방향의 균형. reconcile 스텝이 비-0으로 끝나면 GHA가 **bump 스텝을 아예 실행하지 않는다** →
-  # 앱 하나의 SSOT가 깨진 것만으로 **모든 배포가 정지**한다(억제 = 공격 표면). 그러니 그 스텝은
-  # 죽지 않는다 — 대신 실패 사실을 넘겨 bump 스텝이 run을 빨갛게 만든다.
+@test "a failing reconcile job never starves the bump loop, and a failing bump loop never starves revocation (and both still turn the run red)" {
+  # ★ 두 방향의 균형이 **job 구조**로 성립한다(R-27):
+  #   · 회수가 poll의 스텝이면: 그 스텝이 비-0으로 끝나는 순간 GHA가 bump 스텝을 건너뛴다 → 앱 하나의
+  #     SSOT 파손이 **모든 배포를 정지**시킨다(억제 = 공격 표면). 그래서 poll은 reconcile의 **성공을 요구하지
+  #     않는다**(`if: !cancelled()`).
+  #   · bump 루프가 죽어도 회수는 **이미 돌았다**(별도 job, 앞선다).
+  #   · 그런데 회수 실패는 **묻히지 않는다**: 그 job이 비-0으로 끝나 run이 빨개진다(telegram 발화).
   setup_hermetic
   rc=$?
   [ "$rc" -ne 9 ] || { echo "hermetic harness: bump 스텝 추출 실패"; false; }
   [ -s "$RSTEP" ] || { echo "reconcile 패스가 없다"; false; }
 
-  export STUB_FAIL_APP=page
+  # ① poll은 reconcile의 **성공에 묶이지 않는다** — needs는 순서일 뿐이고 if가 그 성공 요구를 푼다.
+  cond="$(yq -r '.jobs.poll.if // ""' "$F")"
+  case "$cond" in
+    *'!cancelled()'*|*'always()'*) : ;;
+    *)
+      echo "deployment suppressed: poll job이 reconcile의 **성공**을 요구한다(if='$cond') —"
+      echo "  회수 실패(앱 하나의 SSOT 파손·API 장애) 하나로 **모든 앱의 배포가 정지**한다(억제 = 공격 표면)."
+      echo "  needs는 순서를 위한 것이고, 성공 요구는 !cancelled()로 풀어야 한다."
+      false
+      ;;
+  esac
+  # 그리고 reconcile은 poll을 기다리지 않는다(bump 루프의 실패가 회수를 굶길 수 없다).
+  rneeds="$(yq -r '[.jobs.reconcile.needs] | flatten | join(" ")' "$F")"
+  case "$rneeds" in
+    *poll*)
+      echo "starved revocation: reconcile job이 poll을 needs로 기다린다('$rneeds') — bump 루프가 죽으면 회수도 죽는다"
+      false
+      ;;
+    *) : ;;
+  esac
+
+  # ② 회수 실패는 **묻히지 않는다**: 그 스텝은 실패를 삼키지 않고 비-0으로 끝난다.
+  export STUB_FAIL_RECONCILE=1
   run run_step_rc "$RSTEP"
-  unset STUB_FAIL_APP
-
-  # ① reconcile 스텝은 **비-0으로 끝나지 않는다**(끝나면 bump 스텝이 안 돈다 = 배포 정지).
-  [ "$status" -eq 0 ] || {
-    echo "deployment suppressed: reconcile 스텝이 비-0(exit $status)으로 끝났다 —"
-    echo "  GHA는 그 뒤 스텝을 건너뛴다 → 앱 하나의 SSOT/API 장애가 **모든 앱의 배포**를 정지시킨다."
-    step_out; dump_calls; false
-  }
-  # ② 실패한 앱 하나가 나머지의 회수를 굶기지도 않았다.
-  got="$(reconciled_apps)"
-  [ "$got" = "broken-api files page trip-mate" ] || {
-    echo "starvation: reconcile 루프에서 page의 실패가 뒤따르는 앱을 굶겼다 — 도달: '$got'"
-    step_out; dump_calls; false
-  }
-
-  # ③ 그런데 그 실패는 **묻히지 않는다**: bump 스텝이(자기 앱들은 전부 성공했는데도) run을 빨갛게 만든다.
-  run run_step_rc "$STEP"
+  unset STUB_FAIL_RECONCILE
   [ "$status" -ne 0 ] || {
-    echo "silent failure: reconcile 실패가 run 판정에 합류하지 않았다(bump 스텝 exit 0) —"
+    echo "silent failure: 인가 회수가 실패했는데 스텝이 성공(exit 0)으로 끝났다 —"
     echo "  낡은 무장을 회수하지 못했는데 아무도 모르는 상태가 된다(telegram 무발화)."
+    step_out; dump_calls; false
+  }
+
+  # ③ 그런데 그 실패가 bump 루프를 굶기지는 않는다 — bump 스텝은 그 파일/스텝에 **의존하지 않는다**
+  #    (예전엔 reconcile이 실패 파일을 남기고 bump 스텝이 그걸 읽었다 → 두 경로가 한 job에 엮여 있었다).
+  run run_step_rc "$STEP"
+  [ "$status" -eq 0 ] || {
+    echo "coupled failure: 회수 실패와 무관하게 bump 루프는 자기 앱들만 보고 판정해야 한다(exit $status)"
     step_out; dump_calls; false
   }
   bumped="$(bumped_apps)"
   [ "$bumped" = "page trip-mate" ] || {
-    echo "over-correction: reconcile 실패가 bump 루프까지 막았다 — bump 도달: '$bumped'(기대 'page trip-mate')"
+    echo "over-correction: bump 루프가 후보 앱에 도달하지 못했다 — bump 도달: '$bumped'(기대 'page trip-mate')"
     step_out; dump_calls; false
   }
 }

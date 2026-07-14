@@ -423,10 +423,20 @@ write_image_pin() {
   mkdir -p "$SSOT_ROOT/platform/$APP/prod"
   printf '%s' "$1" > "$SSOT_ROOT/platform/$APP/prod/.image-pin.json"
 }
-# 인가 회수 전용 패스 — **후보(tag)도, 레인 인자도 넘기지 않는다**(그게 이 모드의 요점이다).
+# 인가 회수 전용 패스 — **후보(tag)도, 레인 인자도, 대상 앱도 넘기지 않는다**(그게 이 모드의 요점이다).
+# ★ `--app`이 없다(R-27): 대상은 `bump-poll/*` **네임스페이스**(git ls-remote)가 권위이고 app은
+#   브랜치명에서 유도된다. 호출부가 대상 목록을 정하면 그 목록의 출처(플래너)가 죽는 순간 회수가 굶는다.
 run_reconcile() {
-  run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --app "$APP" --root "$SSOT_ROOT"
+  run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --root "$SSOT_ROOT"
+  # ⚠️ bats의 `run`은 호출할 때마다 $output/$status를 **덮어쓴다** — 원장 질의(`run disarm_calls …`)를
+  #    한 번이라도 하면 $status는 그 질의의 것이 된다. 종료 코드도 결과 JSON처럼 **보존**해야 단언이 산다.
   JSON="$output"
+  RCODE="$status"
+}
+# 다른 앱의 SSOT(교차-앱 증인용) — reconcile은 앱마다 레인을 **따로** 푼다.
+write_bindings_for() {
+  mkdir -p "$SSOT_ROOT/apps/$1/deploy/prod"
+  printf '%s' "$2" > "$SSOT_ROOT/apps/$1/deploy/prod/.bindings.json"
 }
 
 # writer App 작성자의 **GraphQL 라이브 표기**(실측 — 이 레포의 실제 bump PR #350):
@@ -452,7 +462,10 @@ amr_absent() { printf 'null'; }
 #   명시 필드가 이긴다(`$d + .`) → 흔적을 심는 증인은 그 키만 직접 준다.
 # ⚠️ jq가 실패하는 픽스처(깨진 JSON·비배열 — fail-closed 증인)는 **원본 바이트 그대로** 흘린다.
 #    그래야 "malformed JSON은 fail-closed" 같은 증인이 하네스에 의해 조용히 고쳐지지 않는다.
-HUMAN_NONE='{"isDraft":false,"labels":{"nodes":[]},"assignees":{"totalCount":0},"reviewRequests":{"totalCount":0},"reviews":{"totalCount":0},"comments":{"nodes":[]},"timelineItems":{"totalCount":0}}'
+# ⚠️ `comments`/`labels`는 **경계된 연결**이다(first:100 / first:50) → 라이브 응답은 `totalCount`를 함께
+#    준다. 그게 잘림의 유일한 신호다(R-28): totalCount > 받은 nodes 수 = **첫 페이지 밖에 무언가 있다**.
+#    기본 픽스처의 뜻은 "사람의 흔적 0 · **잘림 없음**"이므로 totalCount 0을 명시한다.
+HUMAN_NONE='{"isDraft":false,"labels":{"totalCount":0,"nodes":[]},"assignees":{"totalCount":0},"reviewRequests":{"totalCount":0},"reviews":{"totalCount":0},"comments":{"totalCount":0,"nodes":[]},"timelineItems":{"totalCount":0}}'
 write_prs() {
   local out
   if out="$(printf '%s' "$1" | jq -c --argjson d "$HUMAN_NONE" 'map($d + .)' 2>/dev/null)"; then
@@ -528,7 +541,7 @@ SIB_OID="3333333333333333333333333333333333333333"
 #   → 이 필드가 없으면 사람이 되살린 PR을 다음 주기가 **조용히 다시 닫는다**(영원히).
 sib_node() {
   local number="$1" oid="$2" created="$3" armed="$4" filter="${5:-.}"
-  printf '{"number":%s,"isCrossRepository":false,"isDraft":false,"createdAt":"%s","headRefOid":"%s","baseRefName":"main","author":{"login":"ukyi-homelab-writer","__typename":"Bot"},"autoMergeRequest":%s,"labels":{"nodes":[]},"assignees":{"totalCount":0},"reviewRequests":{"totalCount":0},"reviews":{"totalCount":0},"comments":{"nodes":[]},"timelineItems":{"totalCount":0}}' \
+  printf '{"number":%s,"isCrossRepository":false,"isDraft":false,"createdAt":"%s","headRefOid":"%s","baseRefName":"main","author":{"login":"ukyi-homelab-writer","__typename":"Bot"},"autoMergeRequest":%s,"labels":{"totalCount":0,"nodes":[]},"assignees":{"totalCount":0},"reviewRequests":{"totalCount":0},"reviews":{"totalCount":0},"comments":{"totalCount":0,"nodes":[]},"timelineItems":{"totalCount":0}}' \
     "$number" "$created" "$oid" "$armed" | jq -c "$filter"
 }
 
@@ -2100,16 +2113,26 @@ setup_closable_sibling() {
   [ "$merges" -eq 0 ]   # 이미 무장돼 있고 우리 PR이다 → 아무것도 하지 않는다
 }
 
-# ── W47~W53: `--reconcile-only` — **해제는 후보에 의존하지 않는다**(H-1) ────────────────────────
+# ── W47~W52 · W59~W61: `--reconcile-only` — **회수는 후보에도, 플래너에도 의존하지 않는다**(H-1 · R-27) ──
 # 위의 모든 증인은 "플래너가 이번 주기에 후보를 냈다"를 전제로 한다(--tag가 있어야 도구가 돈다).
 # 그런데 호출부의 bump 루프는 action이 bump|propose-pr인 앱만 돈다 — `noop`(핀이 이미 최신)이나
 # `refuse`(GHCR 일시 장애·앱 레포 이력 재작성)인 주기엔 그 앱의 실행기가 **한 번도 호출되지 않는다**.
 # 그 사이 autoDeploy가 true→false로 뒤집히면, 이미 무장된 PR이 **낡은 머지 인가를 무기한** 들고 있는다.
-# ★★ 해제는 **가용성이 아니라 보안 속성**이다 — 플래너가 후보를 내주느냐에 의존해선 안 된다.
+# ★★ 회수는 **가용성이 아니라 보안 속성**이다 — 플래너가 후보를 내주느냐에 의존해선 안 된다.
+#
+# ★★★ 그리고 **주체 목록도 플래너에서 오면 안 된다**(R-27). 예전엔 호출부가 `/tmp/plan.json`에서 앱을
+#      뽑아 `--reconcile-only --app <app>`로 넘겼다 → reader 토큰이 죽거나·플래너가 죽거나·어떤 앱이
+#      플래너 출력에서 빠지기만 해도 그 앱은 **방문조차 되지 않았다**(낡은 무장 생존). 의존을 한 칸
+#      옮겼을 뿐(`.action` 필터 → plan.json 존재)이지 끊은 게 아니었다.
+#      → 대상은 **`bump-poll/*` 원격 ref**가 권위이고(git ls-remote), `<app>`은 **브랜치명에서 유도**한다.
+#      이 모드는 `--app`을 **받지 않는다**(호출부가 대상을 좁히면 그게 곧 회수의 기아다).
+#
 # 계약(좁다 — "이번 후보가 무엇인지" 알 필요조차 없다):
-#   autoDeploy:false → 열린 `bump-poll/<app>-*` 신뢰 PR의 무장을 **전부** 회수한다.
-#   autoDeploy:true  → 아무것도 하지 않는다(그 무장은 인가된 것이다).
-#   SSOT 없음/깨짐   → **아무것도 하지 않고** 시끄럽게 실패한다(조용히 true로 간주하지 않는다).
+#   lane=propose-pr → 그 브랜치의 열린 신뢰 PR 무장을 회수한다.
+#   lane=bump       → 아무것도 하지 않는다(그 무장은 인가된 것이다).
+#   SSOT 없음/깨짐  → **그것도 propose-pr이다**(플래너와 같은 결론) → **회수한다**(R-26).
+#                     인가 문맥의 fail-closed는 "아무것도 하지 않는다"가 아니라 **"권한을 거둔다"**이다.
+#                     둘은 보고에서만 갈린다: absent(정상 상태 — 조용히) / unreadable(결함 — run이 빨개진다).
 # 그리고 이 모드의 변이는 **해제 하나뿐**이다: push·create·무장·close는 어떤 경로로도 일어나지 않는다.
 
 # bats test_tags=regression
@@ -2149,11 +2172,14 @@ setup_closable_sibling() {
   ub="$(update_branch_calls)"
   [ "$ub" -eq 0 ]
 
-  # ③ 레인은 **파일에서** 왔다(플래너의 .action이 아니라).
+  # ③ 레인은 **파일에서** 왔다(플래너의 .action이 아니라). 그리고 주체는 **네임스페이스**에서 왔다.
   echo "$JSON" | jq -e '.mode == "reconcile-only"' > /dev/null
-  echo "$JSON" | jq -e '.lane == "propose-pr"' > /dev/null \
+  echo "$JSON" | jq -e '[.subjects[] | select(.lane == "propose-pr")] | length == 2' > /dev/null \
     || { echo "레인이 autoDeploy SSOT에서 파생되지 않았다"; echo "$JSON"; false; }
-  echo "$JSON" | jq -e '[.superseded[] | select(.disarmed)] | length == 2' > /dev/null
+  echo "$JSON" | jq -e '[.subjects[] | select(.disarmed)] | length == 2' > /dev/null
+  # app은 **브랜치명에서 유도**됐다(호출부가 준 게 아니다 — --app을 넘기지도 않았다).
+  echo "$JSON" | jq -e --arg a "$APP" '[.subjects[] | select(.app == $a)] | length == 2' > /dev/null \
+    || { echo "브랜치명에서 app을 유도하지 못했다"; echo "$JSON"; false; }
 }
 
 # bats test_tags=regression
@@ -2172,56 +2198,126 @@ setup_closable_sibling() {
   }
   total="$(close_calls_total)"
   [ "$total" -eq 0 ]
-  echo "$JSON" | jq -e '.lane == "bump"' > /dev/null
-  echo "$JSON" | jq -e '[.superseded[] | select(.disarmed)] | length == 0' > /dev/null
+  echo "$JSON" | jq -e '.subjects[0].lane == "bump"' > /dev/null
+  echo "$JSON" | jq -e '[.subjects[] | select(.disarmed)] | length == 0' > /dev/null
 }
 
 # bats test_tags=regression
-@test "W49: --reconcile-only with an unreadable autoDeploy SSOT disarms nothing and fails closed (never silently true)" {
-  # SSOT가 없거나 깨졌다 = "autoDeploy:true"가 아니라 **모른다**. 모르면 변이하지 않는다 — 그리고
-  # 그 사실을 **시끄럽게** 보고한다(비-0). 조용히 지나가면 낡은 무장이 무기한 살아남는데 아무도 모른다.
-  setup_closable_sibling   # 무장된 형제는 있다 — 그런데 레인을 모른다
-  # ① SSOT 파일 자체가 없다
+@test "W49: --reconcile-only DISARMS an armed PR whose app has NO .bindings.json (a missing SSOT is the propose-pr lane, not 'do nothing')" {
+  # ★★ R-26. 플래너의 계약은 하나다(tools/poll-ghcr.ts planApp — 읽기 전용):
+  #       let autoDeploy = false;
+  #       if (existsSync(bindingsPath)) { try { … } catch { autoDeploy = false; } }
+  #       … action: s.autoDeploy ? "bump" : "propose-pr"
+  #    즉 **파일 없음 = autoDeploy:false = propose-pr**(fail-closed). 그런데 옛 probeLane은 같은 상태를
+  #    "레인을 알 수 없다"로 읽고 **아무것도 회수하지 않았다** → 바인딩이 사라진 앱(철거·오삭제)에 이미
+  #    무장된 PR이 있으면 그 **낡은 머지 인가가 그대로 살아남는다**. 한 SSOT, 두 해석 — 그것도 인가 경계에서.
+  # ⚠️ 인가 문맥의 fail-closed는 "아무것도 하지 않는다"가 아니라 **"권한을 거둔다"**이다.
+  setup_closable_sibling   # 무장된 열린 writer PR이 있다 — 그런데 이 앱엔 .bindings.json이 **없다**
   run_reconcile
-  [ "$status" -ne 0 ] || {
-    echo "silent lane assumption: autoDeploy SSOT가 없는데 도구가 조용히 성공했다"
-    echo "$JSON"; dump_calls; false
+  [ "$status" -eq 0 ] || {
+    echo "SSOT 부재는 **정상 상태**다(플래너가 그렇게 규정한다 — 바인딩 없는 앱 = 승인 레인) — run을 죽이지 않는다"
+    echo "$JSON"; echo "$stderr"; dump_calls; false
   }
-  merges="$(merge_calls)"
-  [ "$merges" -eq 0 ] || { echo "레인을 모르는 채로 변이했다(gh pr merge ${merges}회)"; dump_calls; false; }
-  echo "$JSON" | jq -e '.lane == null' > /dev/null \
-    || { echo "레인을 모르는데 lane이 null이 아니다 — 조용히 한쪽으로 가정했다"; echo "$JSON"; false; }
-  echo "$JSON" | jq -e '.failures | length > 0' > /dev/null
 
-  # ② SSOT는 있는데 **깨졌다**(파싱 불가) — 같은 귀결이다.
-  : > "$CALLS"
-  write_bindings 'not json at all'
-  run_reconcile
-  [ "$status" -ne 0 ] || {
-    echo "silent lane assumption: 깨진 autoDeploy SSOT를 읽고 도구가 조용히 성공했다"
+  run disarm_calls 348
+  [ "$output" -eq 1 ] || {
+    echo "stale authorization survives: .bindings.json이 **없는** 앱의 무장된 PR #348을 회수하지 않았다 —"
+    echo "  플래너는 같은 상태를 propose-pr(승인 레인)로 확정한다. 회수만 '모른다'며 손을 떼면"
+    echo "  그 PR은 gate가 green이 되는 순간 **사람 승인 없이 머지**된다(낡은 인가)."
     echo "$JSON"; dump_calls; false
   }
-  merges="$(merge_calls)"
-  [ "$merges" -eq 0 ]
+  # 레인은 propose-pr로 **확정**됐다(null이 아니다) — 다만 어떻게 확정됐는지는 구분해 보고한다.
+  echo "$JSON" | jq -e '.subjects[0].lane == "propose-pr"' > /dev/null \
+    || { echo "SSOT 부재를 propose-pr로 접지 않았다(플래너와 갈라진 두 번째 진실)"; echo "$JSON"; false; }
+  echo "$JSON" | jq -e '.subjects[0].laneResolution == "absent"' > /dev/null \
+    || { echo "absent와 unreadable을 구분해 보고하지 않는다"; echo "$JSON"; false; }
+  # 이 모드의 변이는 여전히 **해제 하나뿐**이다.
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+  total="$(close_calls_total)"
+  [ "$total" -eq 0 ]
 }
 
-@test "W50: --reconcile-only refuses an injected lane (--action cannot reach this mode)" {
-  # ★ 승인 게이트 우회 봉인(R-11)의 연장. 이 모드가 레인을 **인자로** 받으면 호출부가 레인을 지어낼 수
-  # 있고(그리고 noop/refuse 주기엔 플래너가 레인을 말해주지도 않는다) → 회수가 조용히 꺼진다.
-  # 레인의 출처는 autoDeploy SSOT **파일 하나뿐**이다.
+# bats test_tags=regression
+@test "W59: an UNREADABLE autoDeploy SSOT also revokes, and says so loudly (absent and corrupt differ in the report, never in the authorization)" {
+  # 같은 R-26의 다른 절반: 깨진 SSOT도 플래너는 `catch { autoDeploy = false; }`로 **propose-pr**에 접는다.
+  # → 회수는 **한다**. 다만 이건 사람이 고쳐야 하는 **결함**이므로 run을 빨갛게 만든다(absent와 갈리는 축은
+  #   "인가"가 아니라 "보고"다).
+  write_bindings 'not json at all'
+  setup_closable_sibling
+  run_reconcile
+
+  run disarm_calls 348
+  [ "$output" -eq 1 ] || {
+    echo "stale authorization survives: **깨진** autoDeploy SSOT 아래에서 무장된 PR #348을 회수하지 않았다 —"
+    echo "  '읽을 수 없다'는 'autoDeploy:true'가 아니다. 증명할 수 없는 인가는 거둬야 한다."
+    echo "$JSON"; dump_calls; false
+  }
+  echo "$JSON" | jq -e '.subjects[0].lane == "propose-pr"' > /dev/null
+  echo "$JSON" | jq -e '.subjects[0].laneResolution == "unreadable"' > /dev/null \
+    || { echo "깨진 SSOT를 absent와 구분해 보고하지 않는다"; echo "$JSON"; false; }
+  # 그리고 **시끄럽다** — 깨진 SSOT는 조용히 지나가면 안 된다(사람이 고쳐야 한다).
+  echo "$JSON" | jq -e '.failures | length > 0' > /dev/null \
+    || { echo "깨진 SSOT를 failures로 보고하지 않았다"; echo "$JSON"; false; }
+  # ⚠️ $status가 아니라 $RCODE다 — 위의 `run disarm_calls`가 $status를 이미 덮어썼다(하네스 함정).
+  [ "$RCODE" -ne 0 ] || {
+    echo "silent corruption: 깨진 autoDeploy SSOT인데 run이 초록이다(telegram 무발화)"
+    echo "$JSON"; false
+  }
+}
+
+# bats test_tags=regression
+@test "W60: --reconcile-only takes its subjects from the bump-poll namespace and resolves each app's lane on its own (no caller-supplied app list)" {
+  # ★★ R-27. 대상 목록의 출처가 **플래너**면(호출부가 plan.json에서 앱을 뽑아 --app으로 넘기면),
+  #    플래너가 죽거나 어떤 앱이 그 출력에서 빠지는 순간 그 앱은 **방문조차 되지 않는다** → 낡은 무장 생존.
+  #    그래서 대상은 `bump-poll/*` **원격 ref**가 권위이고, app은 **브랜치명에서 유도**한다.
+  # 두 앱이 네임스페이스에 있고 **레인이 서로 다르다** — 한 번의 호출로 각각 옳게 처리돼야 한다.
+  write_bindings '{"autoDeploy": false}'                 # page       → 승인 레인 → 회수
+  write_bindings_for other '{"autoDeploy": true}'        # other      → 자동 레인 → 그대로 둔다
+  add_sibling "$(SIB_BRANCH_OF)" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
+  add_sibling "bump-poll/other-${SIB_TAG}" "$ORPHAN_OID" "$(sib_node 501 "$ORPHAN_OID" "2026-07-13T06:00:00Z" "$(amr_armed)")"
+  run_reconcile
+  [ "$status" -eq 0 ] || { echo "$output"; echo "$stderr"; dump_calls; false; }
+
+  # ① 승인 레인 앱의 무장은 회수됐다 — 호출부는 이 앱의 이름을 **한 번도 말한 적이 없다**.
+  run disarm_calls 348
+  [ "$output" -eq 1 ] || {
+    echo "stale authorization survives: 네임스페이스에서 유도한 앱(page)의 무장을 회수하지 않았다"
+    dump_calls; false
+  }
+  # ② 자동 레인 앱의 무장은 그대로다(레인은 **앱마다** SSOT에서 따로 풀린다 — 하나로 뭉뚱그리지 않는다).
+  run disarm_calls 501
+  [ "$output" -eq 0 ] || {
+    echo "arming churn: autoDeploy:true 앱(other)의 무장까지 회수했다 — 레인을 앱별로 풀지 않았다"
+    dump_calls; false
+  }
+  echo "$JSON" | jq -e '[.subjects[] | select(.app == "page")   | .lane] == ["propose-pr"]' > /dev/null
+  echo "$JSON" | jq -e '[.subjects[] | select(.app == "other")  | .lane] == ["bump"]' > /dev/null
+}
+
+@test "W61: --reconcile-only refuses an injected lane OR an injected subject list (--action and --app cannot reach this mode)" {
+  # ★ 승인 게이트 우회 봉인(R-11)의 연장 + 회수 기아 봉인(R-27).
+  #   · 레인을 인자로 받으면 호출부가 레인을 지어낼 수 있다(autoDeploy:false인데 bump로 넘겨 회수를 끈다).
+  #   · **대상(--app)을 인자로 받으면 호출부가 목록을 좁힐 수 있다** — 그 목록의 출처가 플래너면,
+  #     플래너가 죽는 순간 회수도 죽는다. 대상은 네임스페이스가 정한다.
   write_bindings '{"autoDeploy": false}'
   setup_closable_sibling
-  run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --app "$APP" --root "$SSOT_ROOT" --action bump
+  run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --root "$SSOT_ROOT" --action bump
   [ "$status" -eq 2 ] || {
-    echo "lane injection: --reconcile-only가 --action을 받아들였다(exit $status, 기대 2) —"
-    echo "  호출부가 레인을 넘길 수 있으면 'autoDeploy:false인데 bump로 넘겨서' 회수를 꺼버릴 수 있다."
+    echo "lane injection: --reconcile-only가 --action을 받아들였다(exit $status, 기대 2)"
     echo "$output$stderr"; false
   }
+  run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --root "$SSOT_ROOT" --app "$APP"
+  [ "$status" -eq 2 ] || {
+    echo "subject injection: --reconcile-only가 --app을 받아들였다(exit $status, 기대 2) —"
+    echo "  호출부가 대상 목록을 정할 수 있으면 그 목록(= 플래너 출력)이 비는 순간 회수가 굶는다."
+    echo "$output$stderr"; false
+  }
+  # 후보(tag)도 받지 않는다 — 이 모드엔 '이번 후보'라는 개념이 없다.
+  run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --root "$SSOT_ROOT" --tag "$TAG"
+  [ "$status" -eq 2 ]
   merges="$(merge_calls)"
   [ "$merges" -eq 0 ]
-  # 후보(tag)도 받지 않는다 — 이 모드엔 '이번 후보'라는 개념이 없다.
-  run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --app "$APP" --root "$SSOT_ROOT" --tag "$TAG"
-  [ "$status" -eq 2 ]
 }
 
 # bats test_tags=regression
@@ -2233,7 +2329,8 @@ setup_closable_sibling() {
   setup_closable_sibling
   run_reconcile
   [ "$status" -eq 0 ] || { echo "$output"; echo "$stderr"; dump_calls; false; }
-  echo "$JSON" | jq -e '.lane == "propose-pr"' > /dev/null
+  echo "$JSON" | jq -e '.subjects[0].lane == "propose-pr"' > /dev/null
+  echo "$JSON" | jq -e '.subjects[0].laneResolution == "present"' > /dev/null
   run disarm_calls 348
   [ "$output" -eq 1 ] || {
     echo "stale authorization survives: 베스포크 핀 레인(.image-pin.json)의 autoDeploy:false를 읽지 못했다"
@@ -2244,12 +2341,13 @@ setup_closable_sibling() {
 # bats test_tags=regression
 @test "W52: --reconcile-only never touches forks, humans, or other namespaces" {
   # 회수도 변이다 — 신뢰 경계는 주 경로와 **같다**(동일-레포 + writer Bot + 같은 base + 리터럴 접두).
+  # ⚠️ **다른 앱**의 bump-poll 브랜치는 여기 없다 — 그건 이제 정당한 주체다(W60). 경계는 앱이 아니라
+  #    "포크·사람·다른 접두"다.
   write_bindings '{"autoDeploy": false}'
   add_sibling "$(SIB_BRANCH_OF)" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)" '.isCrossRepository=true')"
   local t2="sha-8888888$(printf '%033d' 0)"
   add_sibling "$(SIB_BRANCH_OF "$t2")" "$ORPHAN_OID" "$(sib_node 349 "$ORPHAN_OID" "2026-07-13T06:35:00Z" "$(amr_armed)" '.author={"login":"ukkiee","__typename":"User"}')"
   add_sibling "bump/pg-tools" "$SIB_OID" "$(sib_node 500 "$SIB_OID" "2026-07-13T06:00:00Z" "$(amr_armed)")"
-  add_sibling "bump-poll/other-${SIB_TAG}" "$SIB_OID" "$(sib_node 501 "$SIB_OID" "2026-07-13T06:00:00Z" "$(amr_armed)")"
   run_reconcile
   [ "$status" -eq 0 ] || { echo "$output"; echo "$stderr"; dump_calls; false; }
   merges="$(merge_calls)"
@@ -2379,12 +2477,18 @@ setup_closable_sibling() {
 }
 
 # bats test_tags=regression
-@test "W57: every human trace blocks the rebuild of a BEHIND PR (review, comment, assignee, request, draft, hold, reopen)" {
+@test "W57: every human trace blocks the rebuild of a BEHIND PR (review, comment, assignee, request, draft, hold, reopen, and an unobservable connection)" {
   # ★ strict 보호 main에서는 **머지가 일어날 때마다** 열린 PR이 전부 BEHIND가 된다 → 이 경로가
-  # 사람이 리뷰 중인 PR을 10분마다 짓밟는 그 경로다. 일곱 신호가 **각각 독립적으로** 막아야 한다.
+  # 사람이 리뷰 중인 PR을 10분마다 짓밟는 그 경로다. 신호들이 **각각 독립적으로** 막아야 한다.
+  # ★ 마지막 두 필터(R-28): 연결이 `totalCount` **없이** 돌아오면 잘렸는지조차 알 수 없다 = 관측 불가.
+  #   같은 관용구로 접는다(관측 불가 ⇒ 흔적 있음 ⇒ 밀지 않는다) — 스키마 드리프트가 force-push를
+  #   인가하는 일은 없다. (잘림이 **관측된** 경우는 W62·W63이 따로 못박는다.)
+  # ⚠️ 연결 **객체 전체**를 준다(`del(.comments.totalCount)`가 아니라) — write_prs의 기본값 병합(`$d + .`)은
+  #    키 단위라, 노드에 그 키가 없으면 기본값(totalCount 0)이 되살아나 필터가 no-op이 된다(실측).
   for f in '.reviews.totalCount=1' '.comments.nodes=[{"author":{"__typename":"User"}}]' \
            '.assignees.totalCount=1' '.reviewRequests.totalCount=1' \
-           '.isDraft=true' '.labels.nodes=[{"name":"hold"}]' '.timelineItems.totalCount=1'; do
+           '.isDraft=true' '.labels.nodes=[{"name":"hold"}]' '.timelineItems.totalCount=1' \
+           '.comments={"nodes":[]}' '.labels={"nodes":[]}'; do
     : > "$CALLS"
     write_prs "[$(writer_pr 441 BEHIND "$(amr_armed)" main "$f")]"
     write_heads "$PR_OID"
@@ -2417,6 +2521,121 @@ setup_closable_sibling() {
   }
   action="$(echo "$JSON" | jq -r '.action')"
   [ "$action" = "skip" ]
+}
+
+# ── W62~W64: **경계된 흔적 조회는 부재를 날조한다**(R-28) ────────────────────────────────────────
+# humanTouchOf의 입력 중 둘은 **상한 있는 연결**이다: `comments(first:100)` · `labels(first:50)`.
+# 그 nodes만 보고 "사람 흔적 0"이라고 결론 내리면, 101번째 코멘트나 51번째 라벨에 있는 흔적은
+# **보이지 않는 것이 아니라 없는 것**으로 읽힌다 → 실행기가 **리뷰된 PR을 force-push**하고(승인 stale,
+# 인라인 코멘트 outdated) **사람이 hold로 지킨 PR을 닫는다**. 우리는 PR 열거에서 정확히 이 함정을 이미
+# 고쳤다(상한 → 완전 페이지네이션) — 흔적 조회는 그때 같이 고쳐지지 않았다.
+# 중첩 연결은 `--paginate`로 따라갈 수 없으므로(바깥 연결 하나만 민다) **`totalCount`로 잘림을 관측**한다:
+#   totalCount > 받은 nodes 수  ⇒ 잘렸다 ⇒ **관측 불가** ⇒ 모듈의 관용구대로 "흔적 있음" ⇒ 닫지도, 밀지도 않는다.
+# ⚠️ 그래서 증인은 **두 가지를 함께** 못박는다: ① 잘린 응답에서 파괴하지 않는다(행동) ② 질의가 실제로
+#    `totalCount`를 **요청한다**(계약). ②가 없으면 질의에서 totalCount를 지워도 stub이 픽스처를 그대로
+#    주므로 아무 증인도 죽지 않는다(거짓 GREEN) — 라이브에선 **모든 PR이 영원히 "흔적 있음"**이 되어
+#    DIRTY/BEHIND 수렴과 close가 통째로 멈춘다.
+
+# bats test_tags=regression
+@test "W62: a human comment beyond the first page of comments blocks the rebuild (a bounded read fabricates a false absence)" {
+  # 첫 페이지(100건)는 **전부 봇 코멘트**다 — nodes만 훑는 구현은 "흔적 없음"으로 읽는다.
+  # 그런데 totalCount=101이다: 사람의 코멘트가 그 너머에 **있다**. 그걸 모른 채 force-push하면
+  # 그 사람의 리뷰 코멘트가 outdated로 접히고 승인이 stale로 취소된다.
+  write_prs "[$(writer_pr 443 DIRTY "$(amr_armed)" main \
+    '.comments.nodes=[range(100)|{author:{__typename:"Bot"}}] | .comments.totalCount=101')]"
+  write_heads "$PR_OID"
+  run_ensure_lane bump
+  [ "$status" -eq 0 ] || { echo "$output"; echo "$stderr"; dump_calls; false; }
+
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || {
+    echo "false absence authorized a force-push: 코멘트 연결이 **잘렸는데**(totalCount=101 > nodes=100)"
+    echo "  DIRTY PR #443을 force-push했다 — 사람의 코멘트는 첫 페이지 밖에 있었다."
+    dump_calls; false
+  }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+  action="$(echo "$JSON" | jq -r '.action')"
+  [ "$action" = "skip" ] || { echo "잘린 코멘트 연결 → '$action'(기대 skip)"; echo "$JSON"; false; }
+  echo "$JSON" | jq -e '.observed.trusted.humanTouch != null' > /dev/null \
+    || { echo "잘림을 '흔적 있음'으로 접지 않았다 — skip이 사실에 근거하지 않는다"; echo "$JSON"; false; }
+
+  # ★ 질의 계약: **본 질의**가 comments/labels의 totalCount를 요청해야 잘림이 관측된다.
+  #   (하네스는 질의문과 무관하게 픽스처를 주므로, 이걸 못박지 않으면 필드를 지워도 아무도 안 죽는다.)
+  run query_has 'mergeStateStatus' 'comments(first:100){ totalCount'
+  [ "$status" -eq 0 ] || {
+    echo "필드 계약 위반: 본 PR 질의가 comments의 totalCount를 조회하지 않는다 — 잘림을 **관측할 수 없다**"
+    echo "  (경계된 읽기가 부재를 날조한다: 첫 페이지 밖의 사람 코멘트가 '없음'이 되어 force-push된다)"
+    dump_calls; false
+  }
+  run query_has 'mergeStateStatus' 'labels(first:50){ totalCount'
+  [ "$status" -eq 0 ] || {
+    echo "필드 계약 위반: 본 PR 질의가 labels의 totalCount를 조회하지 않는다 — hold 라벨의 잘림을 관측할 수 없다"
+    dump_calls; false
+  }
+}
+
+# bats test_tags=regression
+@test "W63: a hold label beyond the first page of labels blocks the rebuild too (the escape hatch cannot depend on page size)" {
+  # `hold`는 사람이 "건드리지 마라"고 말하는 **명시적 탈출구**다(close 코멘트가 바로 그걸 안내한다).
+  # 그 라벨이 51번째라는 이유로 무시되면 그 안내는 거짓말이 된다 — 그리고 BEHIND는 strict 보호 main에서
+  # **머지마다** 발생하므로, 그 PR은 10분마다 force-push당한다.
+  write_prs "[$(writer_pr 444 BEHIND "$(amr_armed)" main \
+    '.labels.nodes=[range(50)|{name:("l"+tostring)}] | .labels.totalCount=51')]"
+  write_heads "$PR_OID"
+  run_ensure_lane bump
+  [ "$status" -eq 0 ] || { echo "$output"; echo "$stderr"; dump_calls; false; }
+
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || {
+    echo "false absence authorized a force-push: 라벨 연결이 **잘렸는데**(totalCount=51 > nodes=50)"
+    echo "  BEHIND PR #444를 force-push했다 — hold 라벨은 첫 페이지 밖에 있었다."
+    dump_calls; false
+  }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+  action="$(echo "$JSON" | jq -r '.action')"
+  [ "$action" = "skip" ] || { echo "잘린 라벨 연결 → '$action'(기대 skip)"; echo "$JSON"; false; }
+  echo "$JSON" | jq -e '.observed.trusted.humanTouch != null' > /dev/null
+}
+
+# bats test_tags=regression
+@test "W64: a truncated trace connection never authorizes a close either (the sibling is disarmed, never destroyed)" {
+  # 같은 결함의 파괴 쪽 절반: close는 **되돌릴 수 있지만**(reopen) 사람의 판단을 짓밟는다.
+  # 두 연결(코멘트·라벨)이 **각각 독립적으로** close를 막아야 한다.
+  for f in '.comments.nodes=[range(100)|{author:{__typename:"Bot"}}] | .comments.totalCount=101' \
+           '.labels.nodes=[range(50)|{name:("l"+tostring)}] | .labels.totalCount=51'; do
+    : > "$CALLS"
+    : > "$STUB_SIBLINGS"
+    write_prs '[]'
+    local sb; sb="$(SIB_BRANCH_OF)"
+    add_sibling "$sb" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)" "$f")"
+    sibling_commit "$SIB_OID" "$(sib_commit_msg "$SIB_TAG")"
+    run_ensure_lane bump
+    [ "$status" -eq 0 ] || { echo "필터=$f"; echo "$output"; echo "$stderr"; dump_calls; false; }
+
+    total="$(close_calls_total)"
+    [ "$total" -eq 0 ] || {
+      echo "destroyed on a truncated read: 흔적 연결이 **잘렸는데**(필터=$f) 형제 PR #348을 닫았다 —"
+      echo "  사람의 코멘트/hold 라벨이 첫 페이지 밖에 있었을 수 있다. 모르는 것을 근거로 파괴하지 않는다."
+      dump_calls; false
+    }
+    # 회수는 그대로 한다(피해 차단은 close가 아니라 해제가 한다 — 안전 방향은 언제나 실행된다).
+    run disarm_calls 348
+    [ "$output" -eq 1 ] || { echo "필터=$f: 형제의 낡은 무장을 회수하지 않았다"; dump_calls; false; }
+  done
+
+  # ★ 질의 계약: **형제 질의**도 totalCount를 요청해야 한다(본 질의와 따로 관리되는 질의문이다).
+  run query_has 'isDraft createdAt' 'comments(first:100){ totalCount'
+  [ "$status" -eq 0 ] || {
+    echo "필드 계약 위반: 형제 PR 질의가 comments의 totalCount를 조회하지 않는다 — close가 잘린 읽기로 인가된다"
+    dump_calls; false
+  }
+  run query_has 'isDraft createdAt' 'labels(first:50){ totalCount'
+  [ "$status" -eq 0 ] || {
+    echo "필드 계약 위반: 형제 PR 질의가 labels의 totalCount를 조회하지 않는다 — hold 라벨의 잘림을 관측할 수 없다"
+    dump_calls; false
+  }
 }
 
 # ---------------------------------------------------------------------------

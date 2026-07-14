@@ -58,9 +58,14 @@
 //   조회 실패·깨진 JSON                        → fail-closed(비-0 종료 — 조용한 create 금지)
 // ⚠️ UNKNOWN은 DIRTY도 BEHIND도 아니다(GitHub 지연 계산 — 라이브에서 흔하다). rebuild로 오분류하면 매 폴링 force-push.
 //
-// ★ 모드가 하나 더 있다: `--reconcile-only`(H-1) — **해제 스윕만** 한다(push·create·무장·close 전부 0).
-//   후보(tag)가 없어도 돌고, 레인은 autoDeploy SSOT에서 **직접** 읽는다. 왜 필요한가는 아래 그 블록의 주석 참고:
-//   요약하면 "해제는 보안 속성이라 플래너가 후보를 내주는지에 의존해선 안 된다".
+// ★ 모드가 하나 더 있다: `--reconcile-only`(H-1 · R-27) — **해제 스윕만** 한다(push·create·무장·close 전부 0).
+//   요약하면 "해제는 보안 속성이라 **후보 계획(planning)의 가용성·완전성에 의존해선 안 된다**":
+//     · 후보(tag)가 없어도 돈다(noop/refuse 주기).
+//     · **대상 목록을 인자로 받지 않는다** — `bump-poll/*` 원격 ref를 직접 열거하고 app을 브랜치명에서
+//       유도한다. 플래너가 죽든, reader 토큰이 죽든, 어떤 앱이 plan.json에서 빠지든 그 앱은 방문된다.
+//     · 레인은 autoDeploy SSOT에서 직접 읽고, **부재·파손도 레인이다**(플래너와 같은 결론 = propose-pr →
+//       무장 회수). 인가 문맥의 fail-closed는 "아무것도 하지 않는다"가 아니라 "권한을 거둔다"이다(R-26).
+//   자세한 근거는 아래 그 블록의 주석 참고.
 //
 // ★★ BEHIND 수렴은 **이 실행기 몫**이다(structure r7 R-25) — `gh pr update-branch`는 쓰지 않는다 ────
 // 예전엔 `pr-sweeper.yaml`이 30분 크론으로 "무장 + BEHIND"인 봇 PR을 `gh pr update-branch`로 전진시켰고,
@@ -182,7 +187,7 @@ import { TAG_RE, descriptorAutoDeploy } from "./lib/image-pin.ts";
 
 const USAGE = `ensure-bump-pr — bump PR 멱등 실행기(조회 → 결정 → 변이; 같은 bump = 같은 브랜치 = 열린 PR 1개)
 사용법: bun tools/ensure-bump-pr.ts --app <app> --tag <sha-tag> --action <lane> --title <t> --body <b> [옵션]
-       bun tools/ensure-bump-pr.ts --reconcile-only --app <app>          (인가 회수 전용 패스)
+       bun tools/ensure-bump-pr.ts --reconcile-only                      (인가 회수 전용 패스 — 대상은 네임스페이스)
   --app <app>       앱 이름(소문자/숫자/하이픈)
   --tag <tag>       후보 배포 핀 tag(sha-<7..40 hex>) — 브랜치는 bump-poll/<app>-<tag>(RUN_ID 없음)
   --action <lane>   플래너(poll-ghcr)의 .action을 **그대로** — bump | propose-pr (필수, 기본값 없음)
@@ -193,9 +198,11 @@ const USAGE = `ensure-bump-pr — bump PR 멱등 실행기(조회 → 결정 →
   --base <branch>   PR base (기본 main)
   --remote <name>   git 원격 (기본 origin)
   --writer <slug>   신뢰하는 writer App slug(기본 ukyi-homelab-writer)
-  --reconcile-only  **해제 스윕만** 수행한다(push·PR 생성·무장·close 전부 0). 후보(tag)가 없어도 돈다 —
+  --reconcile-only  **해제 스윕만** 수행한다(push·PR 생성·무장·close 전부 0). 후보(tag)가 없어도,
+                    플래너가 죽어도 돈다 — **대상은 \`bump-poll/*\` 원격 ref 전체**(app은 브랜치명에서 유도)이고,
                     레인은 autoDeploy SSOT(.bindings.json / .image-pin.json)에서 **직접** 읽는다.
-                    이 모드에선 --tag/--title/--body/--action을 받지 않는다(레인 주입 금지).
+                    SSOT 부재·파손 = 플래너와 같은 결론(autoDeploy:false) → **무장을 회수한다**.
+                    이 모드에선 --app/--tag/--title/--body/--action을 받지 않는다(대상·레인 주입 금지).
   --root <dir>      autoDeploy SSOT 탐색 루트(기본 = 레포 루트) — --reconcile-only 전용
   --help, -h        이 도움말
 ⚠️ auto-merge를 켜는 **별도 플래그는 없다** — 레인이 유일한 입력이다(승인 게이트 우회 방지, plan r5 R-11).
@@ -275,24 +282,29 @@ function execError(msg: string): never {
   process.exit(1);
 }
 
-if (!args.app) usageError("--app 필수");
-if (!APP_RE.test(args.app)) usageError(`--app 형식 위반: '${args.app}' (소문자/숫자/하이픈만)`);
-
-// ── --reconcile-only의 인자 표면은 **의도적으로 다르다**(H-1) ────────────────────────────────────
+// ── --reconcile-only의 인자 표면은 **의도적으로 다르다**(H-1 · R-27) ────────────────────────────
 // 이 모드엔 후보(tag)가 없다 — 애초에 "플래너가 후보를 내지 못한 주기에도 인가를 회수한다"가 존재 이유다.
-// 그리고 **레인을 인자로 받지 않는다**: 받는 순간 호출부가 레인을 지어낼 수 있고(승인 게이트 우회, R-11),
-// 게다가 noop/refuse 주기엔 플래너의 `.action`이 레인을 말해주지도 않는다. 레인은 아래 probeLane()이
-// autoDeploy SSOT에서 **직접** 읽는다. 계약 위반(레인·후보 주입 시도)은 exit 2로 시끄럽게 죽인다.
+// 그리고 **레인도, 앱도 인자로 받지 않는다**:
+//   · 레인을 받으면 호출부가 레인을 지어낼 수 있다(승인 게이트 우회, R-11). 레인은 probeLane()이
+//     autoDeploy SSOT에서 **직접** 읽는다.
+//   · **앱을 받으면 호출부가 대상 목록을 정한다**(R-27). 그러면 회수의 완전성이 **호출부의 목록**에
+//     의존한다 — 플래너가 죽거나 어떤 앱이 그 출력에서 빠지면 그 앱은 **방문되지 않고**, 낡은 무장이
+//     그대로 산다. 회수는 보안 속성이라 **가용성에도, 다른 스텝의 성공에도 의존해선 안 된다**.
+//     → 대상은 **네임스페이스가 권위**다: `bump-poll/*` 원격 ref를 열거하고 `<app>`을 브랜치명에서 유도한다.
+// 계약 위반(레인·후보·대상 주입 시도)은 exit 2로 시끄럽게 죽인다.
 if (args.reconcileOnly) {
-  for (const forbidden of ["--tag", "--title", "--body", "--action"]) {
+  for (const forbidden of ["--app", "--tag", "--title", "--body", "--action"]) {
     if (argv.includes(forbidden)) {
       usageError(
-        `--reconcile-only에는 ${forbidden}을 넘기지 않는다 — 이 모드는 후보(tag)도 레인 인자도 받지 않는다. `
+        `--reconcile-only에는 ${forbidden}을 넘기지 않는다 — 이 모드는 후보(tag)도, 레인 인자도, **대상 앱**도 받지 않는다. `
+        + "대상은 `bump-poll/*` 네임스페이스(원격 ref)가 권위이고(호출부가 목록을 좁히면 회수가 굶는다), "
         + "레인은 autoDeploy SSOT(.bindings.json / .image-pin.json)에서만 나온다(호출부의 레인 주입 = 승인 게이트 우회)",
       );
     }
   }
 } else {
+  if (!args.app) usageError("--app 필수");
+  if (!APP_RE.test(args.app)) usageError(`--app 형식 위반: '${args.app}' (소문자/숫자/하이픈만)`);
   if (!args.tag) usageError("--tag 필수");
   if (!args.title) usageError("--title 필수");
   if (!args.body) usageError("--body 필수");
@@ -303,19 +315,16 @@ if (args.reconcileOnly) {
 }
 
 // 검증을 통과한 필수 인자 — 함수 안에서도 좁혀진 타입으로 쓰기 위해 상수로 고정한다.
-const APP: string = args.app;
-// reconcile 모드엔 후보가 없다 → TAG는 빈 문자열이고, 그 결과 "우리 브랜치"라는 개념도 없다(아래 branch).
+// ⚠️ reconcile 모드엔 **앱도 후보도 없다**(둘 다 빈 문자열) — 그 모드의 주체는 네임스페이스가 정한다.
+const APP: string = args.app ?? "";
 const TAG: string = args.tag ?? "";
 const lane: Lane = args.lane ?? "propose-pr"; // reconcile 모드에선 쓰이지 않는다(probeLane이 레인을 정한다)
 
 // 결정적 브랜치명 — 같은 bump는 항상 같은 브랜치로 수렴한다(RUN_ID 제거가 중복 PR 픽스의 토대다:
 // run마다 브랜치가 달라지면 "이 bump의 열린 PR"을 조회할 대상 자체가 없다).
-// ⚠️ reconcile 모드엔 후보가 없으므로 **자기 브랜치가 없다**(빈 문자열). 그래서 형제 열거의 자기-제외
-//    (`b === branch`)가 아무것도 제외하지 않는다 = `bump-poll/<app>-*` **전체**가 회수 대상이다. 의도한 바다.
+// ⚠️ reconcile 모드엔 후보가 없으므로 **자기 브랜치가 없다**(빈 문자열) — 그 모드는 아래 주 경로를 타지 않는다.
 const branch = args.reconcileOnly ? "" : `bump-poll/${APP}-${TAG}`;
 const ref = `refs/heads/${branch}`;
-// 형제(같은 앱, 다른 tag) 브랜치의 리터럴 접두 — superseded 스윕의 유일한 이름 경계다.
-const SIBLING_PREFIX = `bump-poll/${APP}-`;
 
 // 실행한 명령 원장 — stdout JSON에 실어 호출부/테스트가 "무엇을 변이했는가"를 검증한다.
 const executed: string[] = [];
@@ -376,6 +385,12 @@ function mutate(cmd: string, a: string[], what: string): void {
 // ⚠️ 이 필드들은 판정의 **완화** 방향으로만 쓰인다(있으면 force-push를 **하지 않는다**) → 파싱은
 //    fail-closed가 아니라 humanTouchOf의 관용구를 따른다: **관측할 수 없으면 "흔적 있음"으로 읽는다**.
 //    필드 드리프트의 안전한 귀결은 "force-push하지 않는다"이지 "배포 파이프라인이 죽는다"가 아니다.
+// ⚠️⚠️ 흔적 조회는 **잘려선 안 된다**(R-28) — `comments`/`labels`는 nodes를 `first:N`으로만 가져오는
+//    **경계된 읽기**다. nodes만 보고 "사람 흔적 없음"이라고 결론 내리면, N+1번째에 있는 사람의 코멘트나
+//    `hold` 라벨이 **거짓 부재**가 되고 → 실행기가 **리뷰된 PR을 force-push**하거나 **사람이 지킨 PR을 닫는다**.
+//    이건 PR 열거에서 이미 고친 그 함정이다(경계된 읽기는 부재를 날조한다 — R-13/R-17). 그래서 두 연결에
+//    **`totalCount`를 함께 조회**해 잘림을 **사실로 관측**하고, 잘렸거나 관측할 수 없으면 "흔적 있음"으로 읽는다
+//    (⇒ 절대 닫지 않고, 절대 force-push하지 않는다 — 모듈의 기존 관용구와 같은 방향).
 const PR_QUERY = `query($owner:String!,$repo:String!,$head:String!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequests(headRefName:$head, states:OPEN, first:100, after:$endCursor){
@@ -384,11 +399,11 @@ const PR_QUERY = `query($owner:String!,$repo:String!,$head:String!,$endCursor:St
         number isCrossRepository mergeStateStatus headRefOid baseRefName createdAt isDraft
         author{ login __typename }
         autoMergeRequest{ enabledAt }
-        labels(first:50){ nodes{ name } }
+        labels(first:50){ totalCount nodes{ name } }
         assignees{ totalCount }
         reviewRequests{ totalCount }
         reviews{ totalCount }
-        comments(first:100){ nodes{ author{ __typename } } }
+        comments(first:100){ totalCount nodes{ author{ __typename } } }
         timelineItems(itemTypes:[REOPENED_EVENT], last:1){ totalCount }
       }
     }
@@ -582,10 +597,34 @@ function isTrusted(pr: RawPr, writer: string, base: string): boolean {
 // ⚠️ ls-remote에 **패턴을 넘기지 않는다**: 패턴 매칭 의미(fnmatch/tail-match)에 열거 완전성을 걸면
 //    **과소 열거 = 해제 누락**이 되고, 그건 곧 R-25(낡은 인가 생존)의 재발이다. 전부 받아 클라이언트에서 자른다.
 type SiblingRef = { branch: string; tag: string; oid: string };
-function enumerateSiblingRefs(): { ok: true; refs: SiblingRef[] } | { ok: false; why: string } {
+
+// ── 네임스페이스 이름 파서 — `bump-poll/<app>-<tag>` ⇄ (app, tag) ───────────────────────────────
+// ★ 이 파서가 **reconcile 패스의 주체 목록**을 만든다(R-27): 대상은 플래너의 plan.json이 아니라
+//   **원격 ref 자체**이고, `<app>`은 브랜치명에서 유도한다. 그래서 플래너가 죽어도, reader 토큰이 죽어도,
+//   어떤 앱이 플래너 출력에서 빠져도 그 앱의 낡은 무장은 **반드시 방문된다**.
+// ⚠️ 분해는 **모호하지 않다**: TAG_RE는 `sha-` 뒤에 **순수 hex**만 허용하므로, `-sha-`가 여러 번 나와도
+//    꼬리가 TAG_RE에 걸리는 분기점은 **마지막 것 하나뿐**이다(앞에서 자르면 꼬리에 `-`가 섞여 반드시 실패).
+//    그래서 `x-sha-abc1234`처럼 앱 이름이 tag 모양을 품어도 정확히 갈린다(APP_RE가 그런 이름을 허용한다).
+const NS_PREFIX = "bump-poll/";
+function parseNsBranch(b: string): { app: string; tag: string } | null {
+  if (!b.startsWith(NS_PREFIX)) return null;
+  const rest = b.slice(NS_PREFIX.length);
+  const cut = rest.lastIndexOf("-sha-");
+  if (cut <= 0) return null;                 // 접두 뒤에 앱 이름이 없다(또는 `-sha-`가 없다)
+  const app = rest.slice(0, cut);
+  const tag = rest.slice(cut + 1);
+  if (!APP_RE.test(app)) return null;
+  if (!TAG_RE.test(tag)) return null;        // 앵커 완전일치 — 아니면 이 브랜치는 우리 형식이 아니다
+  return { app, tag };
+}
+
+// `bump-poll/*` 네임스페이스의 **전체** 열거. app/tag는 파싱 실패 시 null이다(그 사실도 대상이다 —
+// reconcile은 "앱을 모르는 브랜치"에서도 인가를 회수한다: 인가를 **증명할 수 없으면** 거둔다).
+type NsRef = { branch: string; app: string | null; tag: string | null; oid: string };
+function enumerateNsRefs(): { ok: true; refs: NsRef[] } | { ok: false; why: string } {
   const r = runSoft("git", ["ls-remote", "--heads", args.remote]);
   if (r.failure !== null) return { ok: false, why: `git ls-remote(네임스페이스 열거) ${r.failure}` };
-  const refs: SiblingRef[] = [];
+  const refs: NsRef[] = [];
   for (const line of r.stdout.split("\n")) {
     const t = line.trim();
     if (t === "") continue;
@@ -596,14 +635,24 @@ function enumerateSiblingRefs(): { ok: true; refs: SiblingRef[] } | { ok: false;
     if (!OID_RE.test(oid)) return { ok: false, why: `git ls-remote OID 형식 위반: '${oid}'` };
     if (!refName.startsWith("refs/heads/")) continue;
     const b = refName.slice("refs/heads/".length);
-    if (b === branch) continue;                   // 자기 자신은 형제가 아니다
-    if (!b.startsWith(SIBLING_PREFIX)) continue;  // 리터럴 접두만 — 다른 앱·다른 접두(bump/…)는 대상 밖
-    const tag = b.slice(SIBLING_PREFIX.length);
-    // ⚠️ 모호 파싱 방지: APP_RE는 `x-sha-abc1234` 같은 앱 이름을 허용한다 → 접두를 벗긴 나머지가
-    //    TAG_RE **앵커 완전일치**가 아니면 이 브랜치는 우리 것이라고 말할 수 없다.
-    if (!TAG_RE.test(tag)) continue;
-    if (tag === TAG) continue;                    // (방어) 이번 후보는 형제가 아니다
-    refs.push({ branch: b, tag, oid });
+    if (!b.startsWith(NS_PREFIX)) continue;   // 다른 접두(bump/…·create-app/…)는 이 실행기의 것이 아니다
+    const parsed = parseNsBranch(b);
+    refs.push({ branch: b, app: parsed?.app ?? null, tag: parsed?.tag ?? null, oid });
+  }
+  return { ok: true, refs };
+}
+
+// 형제(같은 앱, **다른 tag**) — 주 경로 전용. 이름 경계는 위 파서가 강제한다(접두 + APP_RE + TAG_RE 완전일치).
+function enumerateSiblingRefs(): { ok: true; refs: SiblingRef[] } | { ok: false; why: string } {
+  const all = enumerateNsRefs();
+  if (!all.ok) return all;
+  const refs: SiblingRef[] = [];
+  for (const r of all.refs) {
+    if (r.app === null || r.tag === null) continue; // 파싱 불가 = 이 앱의 형제라고 말할 수 없다
+    if (r.branch === branch) continue;              // 자기 자신은 형제가 아니다
+    if (r.app !== APP) continue;                    // 다른 앱은 대상 밖(주 경로는 app-스코프다)
+    if (r.tag === TAG) continue;                    // (방어) 이번 후보는 형제가 아니다
+    refs.push({ branch: r.branch, tag: r.tag, oid: r.oid });
   }
   return { ok: true, refs };
 }
@@ -621,11 +670,11 @@ const SIBLING_PR_QUERY = `query($owner:String!,$repo:String!,$head:String!,$endC
         number isCrossRepository isDraft createdAt headRefOid baseRefName
         author{ login __typename }
         autoMergeRequest{ enabledAt }
-        labels(first:50){ nodes{ name } }
+        labels(first:50){ totalCount nodes{ name } }
         assignees{ totalCount }
         reviewRequests{ totalCount }
         reviews{ totalCount }
-        comments(first:100){ nodes{ author{ __typename } } }
+        comments(first:100){ totalCount nodes{ author{ __typename } } }
         timelineItems(itemTypes:[REOPENED_EVENT], last:1){ totalCount }
       }
     }
@@ -646,15 +695,22 @@ function totalCountOf(v: any): number | null {
   if (v === null || typeof v !== "object" || !Number.isInteger(v.totalCount)) return null;
   return v.totalCount as number;
 }
-function labelsOf(pr: any): string[] | null {
-  const l = pr.labels;
-  if (l === null || typeof l !== "object" || !Array.isArray(l.nodes)) return null;
-  const out: string[] = [];
-  for (const n of l.nodes) {
-    if (n === null || typeof n !== "object" || typeof n.name !== "string") return null;
-    out.push(n.name);
-  }
-  return out;
+
+// ── **경계된 읽기는 부재를 날조한다**(R-28) — 연결은 잘림까지 함께 읽는다 ────────────────────────
+// `comments(first:100)` / `labels(first:50)`은 **상한 있는** 조회다. nodes만 세고 "사람 흔적 0"이라고
+// 결론 내리면, 101번째 코멘트나 51번째 라벨에 있는 사람의 흔적(`hold` 라벨·리뷰 코멘트)이 **보이지 않는
+// 것이 아니라 없는 것**으로 읽힌다 → 실행기가 그 PR을 **force-push**하거나 **닫는다**. 우리는 PR 열거에서
+// 정확히 이 함정을 이미 고쳤다(상한 → 완전 페이지네이션). 흔적 조회는 그때 같이 고쳐지지 않았다.
+// 중첩 연결은 `gh api graphql --paginate`로 따라갈 수 없으므로(--paginate는 **바깥** 연결 하나만 민다)
+// **`totalCount`로 잘림을 관측**한다: totalCount > 받은 nodes 수면 **잘린 것**이고, 잘린 연결은 곧
+// **관측 불가**다 → 모듈의 관용구대로 "흔적 있음"으로 접는다(⇒ 닫지 않는다 · force-push하지 않는다).
+// totalCount 자체가 없으면(스키마 드리프트·권한) 그것도 관측 불가 → 같은 귀결(null 반환).
+function connectionOf(v: any): { nodes: any[]; truncated: boolean } | null {
+  if (v === null || typeof v !== "object") return null;
+  if (!Array.isArray(v.nodes)) return null;
+  const total = totalCountOf(v);
+  if (total === null) return null;             // 잘렸는지조차 알 수 없다 = 관측 불가
+  return { nodes: v.nodes, truncated: total > v.nodes.length };
 }
 // 사람이 이 PR을 만졌는가. **하나라도 있으면 닫지 않는다**(그리고 H-4 이후로는 **force-push도 하지 않는다**) —
 // 승인 대기 PR을 사람 발밑에서 닫는 것, 그리고 리뷰 중인 PR의 head를 갈아치우는 것이 이 스윕의 가장 아픈
@@ -677,17 +733,24 @@ function humanTouchOf(pr: any): string | null {
   const asg = totalCountOf(pr.assignees);
   if (asg === null) return "assignees를 관측할 수 없다";
   if (asg > 0) return `assignee ${asg}명`;
-  const c = pr.comments;
-  if (c === null || typeof c !== "object" || !Array.isArray(c.nodes)) return "comments를 관측할 수 없다";
+  // ★ 코멘트는 **잘림을 먼저 본다**(R-28): 첫 페이지에 봇 코멘트만 있어도, 그 뒤에 사람의 코멘트가
+  //   있으면 "흔적 없음"은 거짓이다. 잘린 연결로 파괴(close)나 force-push를 인가하지 않는다.
+  const c = connectionOf(pr.comments);
+  if (c === null) return "comments를 관측할 수 없다";
+  if (c.truncated) return "코멘트 연결이 잘렸다(첫 페이지 밖은 관측할 수 없다 — 사람 코멘트가 그 너머에 있을 수 있다)";
   for (const n of c.nodes) {
     const t = n?.author?.__typename;
     if (typeof t !== "string") return "코멘트 작성자 타입을 관측할 수 없다";
     if (t === "User") return "사람 코멘트";
   }
-  const labels = labelsOf(pr);
+  // ★ 라벨도 같다 — `hold`는 사람이 "이건 건드리지 마라"고 말하는 **명시적 탈출구**다(close 코멘트가
+  //   안내하는 바로 그것). 그 라벨이 첫 페이지 밖에 있다는 이유로 무시되면 탈출구가 거짓말이 된다.
+  const labels = connectionOf(pr.labels);
   if (labels === null) return "labels를 관측할 수 없다";
-  for (const l of labels) {
-    if (HOLD_LABELS.includes(l.toLowerCase())) return `hold 라벨(${l})`;
+  if (labels.truncated) return "라벨 연결이 잘렸다(첫 페이지 밖은 관측할 수 없다 — hold 라벨이 그 너머에 있을 수 있다)";
+  for (const n of labels.nodes) {
+    if (n === null || typeof n !== "object" || typeof n.name !== "string") return "라벨 이름을 관측할 수 없다";
+    if (HOLD_LABELS.includes(n.name.toLowerCase())) return `hold 라벨(${n.name})`;
   }
   // reopen — 마지막에 본다(가장 새로 붙은 신호). 같은 관용구: 관측 불가 ⇒ 흔적 있음.
   const reopened = totalCountOf(pr.timelineItems);
@@ -787,9 +850,8 @@ type SiblingState = {
 //    그래서 호출부는 **바인딩된 전 앱**에 대해 **매 주기** 이 모드를 돌린다(후보 유무·plan action 무관).
 //
 // 이 모드의 규칙은 의도적으로 **좁다**(무엇이 "이번 후보"인지 알 필요조차 없다):
-//   · autoDeploy:false → 열린 `bump-poll/<app>-*` 신뢰 PR의 무장을 **전부** 회수한다.
-//   · autoDeploy:true  → **아무것도 하지 않는다**(그 무장은 인가된 것이다).
-//   · SSOT를 읽을 수 없다 → **아무것도 하지 않고** 시끄럽게 실패한다(exit 1). 조용히 true로 간주하지 않는다.
+//   · lane=propose-pr → 열린 `bump-poll/<app>-*` 신뢰 PR의 무장을 **전부** 회수한다.
+//   · lane=bump       → **아무것도 하지 않는다**(그 무장은 인가된 것이다).
 // 변이는 **해제 하나뿐**이다: push·PR 생성·무장·close는 이 모드에서 **어떤 경로로도** 일어나지 않는다
 // (그래서 레인을 잘못 읽어도 인가를 **부여**할 길이 없다 — 최악이 "회수 누락"이거나 "과잉 회수"다).
 //
@@ -798,11 +860,33 @@ type SiblingState = {
 //   베스포크 핀 레인: platform/<app>/prod/.image-pin.json
 // plan의 `.action`을 쓰지 않는 이유: noop/refuse 항목엔 레인이 담기지 않는다(그 값은 "후보가 없다"는 뜻이지
 // "승인 레인"이라는 뜻이 아니다). 그리고 호출부가 레인을 지어내면 그게 곧 승인 게이트 우회다(R-11).
-type LaneProbe = { ok: true; lane: Lane; source: string } | { ok: false; why: string };
-function probeLane(): LaneProbe {
+//
+// ★★ **SSOT 부재·파손도 레인이다 — `propose-pr`이다**(R-26) ─────────────────────────────────────
+// 예전엔 "SSOT를 못 읽으면 레인을 모른다 → **아무것도 하지 않는다**"였다. 그건 인가 경계에서 **두 개의
+// 진실**을 만든 것이다: 플래너(SSOT)는 같은 상태를 **`propose-pr`로 확정**하는데(아래 인용), 회수만
+// "모른다"며 손을 뗐다 → `.bindings.json`이 사라진 앱에 **이미 무장된 PR이 있으면 그 낡은 인가가 그대로
+// 살아남는다**. 인가 문맥에서 fail-closed는 "아무것도 하지 않는다"가 아니라 **"권한을 거둔다"**이다.
+//
+// 플래너의 실제 코드(tools/poll-ghcr.ts planApp — 이 도구가 **맞춰야 할** 계약, 읽기 전용):
+//     // 승인 정책: autoDeploy === true만 자동, 그 외(false/누락/파싱 불가)는 전부 fail-closed
+//     let autoDeploy = false;
+//     const bindingsPath = path.join(dir, ".bindings.json");
+//     if (existsSync(bindingsPath)) {
+//       try { autoDeploy = descriptorAutoDeploy(JSON.parse(readFileSync(bindingsPath, "utf8"))); }
+//       catch { autoDeploy = false; }
+//     }
+//     …  action: s.autoDeploy ? "bump" : "propose-pr"
+// 즉 **파일 없음 = 파싱 불가 = autoDeploy:false = propose-pr**. 세 상태가 하나의 레인으로 접힌다.
+// → probeLane도 **언제나 레인을 준다**. 다만 어떻게 정해졌는지는 구분해 보고한다(resolution):
+//     present    : SSOT를 읽었다(autoDeploy 값 그대로)
+//     absent     : SSOT가 없다 → propose-pr. 플래너 계약상 **정상 상태**다(앱이 철거됐거나 바인딩이 없다) → 조용히 회수만.
+//     unreadable : SSOT가 깨졌다 → propose-pr. 회수는 **하고**, 그 사실은 실패로 **시끄럽게** 보고한다(사람이 고쳐야 한다).
+type LaneResolution = "present" | "absent" | "unreadable";
+type LaneProbe = { lane: Lane; resolution: LaneResolution; source: string | null; why: string | null };
+function probeLane(app: string): LaneProbe {
   const candidates = [
-    path.join(args.root, "apps", APP, "deploy", "prod", ".bindings.json"),
-    path.join(args.root, "platform", APP, "prod", ".image-pin.json"),
+    path.join(args.root, "apps", app, "deploy", "prod", ".bindings.json"),
+    path.join(args.root, "platform", app, "prod", ".image-pin.json"),
   ];
   for (const file of candidates) {
     if (!existsSync(file)) continue;
@@ -810,81 +894,122 @@ function probeLane(): LaneProbe {
     try {
       parsed = JSON.parse(readFileSync(file, "utf8"));
     } catch (e) {
-      // 깨진 SSOT는 "autoDeploy:true"가 아니다 — 무엇인지 모르는 것이다. 회수도 하지 않고 시끄럽게 죽는다.
-      return { ok: false, why: `autoDeploy SSOT 파싱 실패(${file}): ${(e as Error).message}` };
+      // 깨진 SSOT는 "autoDeploy:true"가 **아니다**. 플래너도 여기서 false로 접는다(위 인용의 catch) →
+      // 레인은 propose-pr이고, 그러므로 **무장은 회수한다**. 파손 사실은 failures로 올려 run을 빨갛게 만든다.
+      return {
+        lane: "propose-pr",
+        resolution: "unreadable",
+        source: file,
+        why: `autoDeploy SSOT 파싱 실패(${file}): ${(e as Error).message} — 플래너와 같은 결론(autoDeploy:false)으로 접고 **인가를 회수한다**`,
+      };
     }
     // descriptorAutoDeploy = poll-ghcr.ts가 쓰는 그 함수다(`d?.autoDeploy === true`) — 두 번째 진실을 만들지 않는다.
-    return { ok: true, lane: descriptorAutoDeploy(parsed as any) ? "bump" : "propose-pr", source: file };
+    return {
+      lane: descriptorAutoDeploy(parsed as any) ? "bump" : "propose-pr",
+      resolution: "present",
+      source: file,
+      why: null,
+    };
   }
   return {
-    ok: false,
-    why: `autoDeploy SSOT를 찾을 수 없다(${candidates.join(" | ")}) — 레인을 모르면 회수 여부를 정할 수 없다`,
+    lane: "propose-pr",
+    resolution: "absent",
+    source: null,
+    why: `autoDeploy SSOT 없음(${candidates.join(" | ")}) — 플래너 계약상 autoDeploy:false(= propose-pr) → 무장은 인가되지 않았다`,
   };
 }
 
-if (args.reconcileOnly) {
-  const probe = probeLane();
-  const states: SiblingState[] = [];
-  // 실패는 **모아서** 끝에서 비-0으로 낸다(회수는 보안 속성이다 — 못 했으면 run이 빨개야 한다).
-  // ⚠️ 단, 호출부는 이 스텝의 실패로 bump 루프를 굶기지 않는다(억제 = 공격 표면) — bump-poll.yaml 주석 참고.
-  const failures: string[] = [];
-  if (!probe.ok) {
-    failures.push(probe.why);
-    warn(`${APP}: ${probe.why} — 이 앱은 **아무것도 해제하지 않는다**(조용한 true 간주 금지)`);
-  }
+// 이 모드가 관측·회수한 주체(브랜치) 하나의 상태 — 테스트/운영이 stdout으로 검증한다.
+type SubjectState = {
+  branch: string; app: string | null; tag: string | null;
+  lane: Lane; laneResolution: LaneResolution | "unparsed-branch"; laneSource: string | null;
+  number: number | null; trusted: boolean; armed: boolean; headRefOid: string | null;
+  humanTouch: string | null;
+  disarmed: boolean;
+};
 
-  const refsResult = enumerateSiblingRefs();
+if (args.reconcileOnly) {
+  const subjects: SubjectState[] = [];
+  // 실패는 **모아서** 끝에서 비-0으로 낸다(회수는 보안 속성이다 — 못 했으면 run이 빨개야 한다).
+  // ⚠️ 단, 이 패스의 실패가 bump 루프를 굶겨선 안 된다(억제 = 공격 표면) → 호출부에서 **별도 job**이다.
+  const failures: string[] = [];
+  // 앱마다 SSOT를 한 번만 읽는다(한 앱에 형제 브랜치가 여러 개 있을 수 있다).
+  const laneCache = new Map<string, LaneProbe>();
+  const corruptReported = new Set<string>();
+  const laneOf = (app: string): LaneProbe => {
+    let p = laneCache.get(app);
+    if (p === undefined) {
+      p = probeLane(app);
+      laneCache.set(app, p);
+    }
+    return p;
+  };
+
+  // ★ 주체는 **네임스페이스가 준다**(R-27) — 플래너의 plan.json도, 호출부의 앱 목록도 입력이 아니다.
+  //   그래서 플래너 스텝이 죽든, reader 토큰이 죽든, 어떤 앱이 플래너 출력에서 빠지든 이 스윕은 그대로 돈다.
+  const refsResult = enumerateNsRefs();
   if (!refsResult.ok) {
     failures.push(refsResult.why);
-    warn(`${APP}: 브랜치 열거 실패 — 회수를 증명할 수 없다: ${refsResult.why}`);
+    warn(`bump-poll/* 네임스페이스 열거 실패 — 회수를 증명할 수 없다: ${refsResult.why}`);
   } else {
-    for (const sref of refsResult.refs) {
+    for (const nref of refsResult.refs) {
+      // ── 레인 결정 ────────────────────────────────────────────────────────────────────────
+      // 앱을 유도할 수 없는 브랜치(`bump-poll/` 아래인데 `<app>-<tag>` 형식이 아니다)는 **인가를 증명할 수
+      // 없는 브랜치**다 → 같은 관용구로 접는다: 증명할 수 없으면 **거둔다**(propose-pr 쪽). 과잉 회수는
+      // 안전하다(autoDeploy 앱이면 다음 주기의 bump 경로가 desired state로 **재무장**한다 — R-10).
+      const probe = nref.app !== null ? laneOf(nref.app) : null;
+      const laneHere: Lane = probe?.lane ?? "propose-pr";
+      const resolution: LaneResolution | "unparsed-branch" = probe?.resolution ?? "unparsed-branch";
+      if (probe !== null && probe.resolution === "unreadable" && !corruptReported.has(nref.app!)) {
+        // 깨진 SSOT는 **회수는 하되**(위 probeLane 참고) 사람이 고쳐야 하는 결함이다 → run을 빨갛게 만든다.
+        corruptReported.add(nref.app!);
+        failures.push(probe.why!);
+        warn(`${nref.app}: ${probe.why}`);
+      }
+      if (probe === null) {
+        warn(`${nref.branch}: 브랜치명에서 앱을 유도할 수 없다 — 인가를 증명할 수 없는 브랜치이므로 **무장이 있으면 회수한다**`);
+      }
+
       const q = runSoft("gh", [
         "api", "graphql", "--paginate", "--slurp",
         "-f", `query=${SIBLING_PR_QUERY}`,
-        "-F", "owner={owner}", "-F", "repo={repo}", "-F", `head=${sref.branch}`,
+        "-F", "owner={owner}", "-F", "repo={repo}", "-F", `head=${nref.branch}`,
       ]);
       if (q.failure !== null) {
-        failures.push(`PR 조회 실패(${sref.branch}) ${q.failure}`);
-        warn(`${sref.branch}: PR 조회 실패 ${q.failure} — 이 브랜치는 건드리지 않는다`);
+        failures.push(`PR 조회 실패(${nref.branch}) ${q.failure}`);
+        warn(`${nref.branch}: PR 조회 실패 ${q.failure} — 이 브랜치는 건드리지 않는다`);
         continue;
       }
       const parsedSib = parseSiblingPrs(q.stdout);
       if (!parsedSib.ok) {
-        failures.push(`PR 조회 파싱 실패(${sref.branch}): ${parsedSib.why}`);
-        warn(`${sref.branch}: PR 조회 파싱 실패 — ${parsedSib.why}`);
+        failures.push(`PR 조회 파싱 실패(${nref.branch}): ${parsedSib.why}`);
+        warn(`${nref.branch}: PR 조회 파싱 실패 — ${parsedSib.why}`);
         continue;
       }
       const mine = parsedSib.prs.filter(isTrustedSibling);
       if (mine.length > 1) {
-        failures.push(`${sref.branch}에 신뢰 PR이 ${mine.length}건 — 모호해서 건드리지 않는다`);
-        warn(`${sref.branch}: 신뢰 PR이 ${mine.length}건이다(GitHub 계약상 불가능) — 건드리지 않는다`);
+        failures.push(`${nref.branch}에 신뢰 PR이 ${mine.length}건 — 모호해서 건드리지 않는다`);
+        warn(`${nref.branch}: 신뢰 PR이 ${mine.length}건이다(GitHub 계약상 불가능) — 건드리지 않는다`);
         continue;
       }
       const pr = mine[0] ?? null;
-      if (pr === null) {
-        // 우리가 만질 수 있는 PR이 없다(고아 ref · 포크 · 사람 · 다른 base) → 아무것도 하지 않는다.
-        states.push({
-          branch: sref.branch, tag: sref.tag, number: null, trusted: false, armed: false,
-          createdAt: null, headRefOid: null, humanTouch: null,
-          disarmed: false, closed: false, closeBlocked: "reconcile-only — close는 이 모드에 존재하지 않는다",
-        });
-        continue;
-      }
-      const st: SiblingState = {
-        branch: sref.branch, tag: sref.tag, number: pr.number, trusted: true, armed: pr.autoMerge,
-        createdAt: pr.createdAt, headRefOid: pr.headRefOid, humanTouch: pr.humanTouch,
-        disarmed: false, closed: false, closeBlocked: "reconcile-only — close는 이 모드에 존재하지 않는다",
+      const st: SubjectState = {
+        branch: nref.branch, app: nref.app, tag: nref.tag,
+        lane: laneHere, laneResolution: resolution, laneSource: probe?.source ?? null,
+        number: pr?.number ?? null, trusted: pr !== null, armed: pr?.autoMerge ?? false,
+        headRefOid: pr?.headRefOid ?? null, humanTouch: pr?.humanTouch ?? null,
+        disarmed: false,
       };
-      states.push(st);
-      if (!probe.ok) continue;              // 레인을 모른다 → 회수하지 않는다(위에서 이미 fail로 기록됐다)
-      if (probe.lane === "bump") continue;  // autoDeploy:true → 이 무장은 인가된 것이다(멱등: 손대지 않는다)
-      if (!pr.autoMerge) continue;          // 이미 무장 없음 → 회수할 것도 없다(멱등)
+      subjects.push(st);
+      // 우리가 만질 수 있는 PR이 없다(고아 ref · 포크 · 사람 · 다른 base) → 아무것도 하지 않는다.
+      if (pr === null) continue;
+      if (laneHere === "bump") continue;  // autoDeploy:true → 이 무장은 인가된 것이다(멱등: 손대지 않는다)
+      if (!pr.autoMerge) continue;        // 이미 무장 없음 → 회수할 것도 없다(멱등)
       // 대상은 언제나 **인증된 PR 번호**다(브랜치 셀렉터는 동명 포크 PR로 오조준될 수 있다).
       const r = runSoft("gh", ["pr", "merge", "--disable-auto", String(pr.number)]);
       if (r.failure !== null) {
-        failures.push(`PR #${pr.number}(${sref.branch}) 해제 실패 ${r.failure}`);
-        warn(`PR #${pr.number}(${sref.branch}) auto-merge 해제 실패 ${r.failure} — 다음 주기가 재시도한다`);
+        failures.push(`PR #${pr.number}(${nref.branch}) 해제 실패 ${r.failure}`);
+        warn(`PR #${pr.number}(${nref.branch}) auto-merge 해제 실패 ${r.failure} — 다음 주기가 재시도한다`);
         continue;
       }
       st.disarmed = true;
@@ -893,11 +1018,8 @@ if (args.reconcileOnly) {
 
   console.log(JSON.stringify({
     mode: "reconcile-only",
-    app: APP,
-    // 레인은 **관측된 사실**이다(입력이 아니다) — 못 읽었으면 null이고, 그 run은 아무것도 회수하지 않는다.
-    lane: probe.ok ? probe.lane : null,
-    laneSource: probe.ok ? probe.source : null,
-    superseded: states,
+    // 주체는 **관측된 네임스페이스**다(입력이 아니다) — 레인은 주체마다 SSOT에서 따로 정해진다.
+    subjects,
     failures,
     executed,
   }, null, 2));

@@ -37,9 +37,61 @@ jobs:
             echo "::notice::Phase 0 미완(HOMELAB_*_APP_ID 미설정) — bump-poll skip"
           fi
 
-  poll:
+  # ── 인가 회수(reconcile) — **독립 job**이다(structure r8 R-27) ────────────────────────────────
+  # 왜 job인가(스텝이 아니라): 회수는 **보안 속성**이라 "후보 계획(planning)"의 **가용성에도 완전성에도**
+  # 의존해선 안 된다. 예전엔 poll job의 한 스텝이었고 대상 목록을 `/tmp/plan.json`(reader 토큰 + GHCR
+  # 플래너의 출력)에서 뽑았다 → **reader 토큰 스텝이 실패하거나, 플래너가 죽거나, 어떤 앱이 플래너 출력에서
+  # 빠지기만 해도** 그 앱의 회수는 **아예 시도조차 되지 않았다**(낡은 무장 생존). 의존을 한 칸 옮겼을 뿐
+  # (`.action` 필터 → plan.json 존재)이지 끊은 게 아니었다.
+  # → 이 job은 **writer 토큰만** 쓰고, reader·docker·플래너 스텝을 **하나도 갖지 않는다**. 대상은 실행기가
+  #   `bump-poll/*` **원격 ref**에서 직접 열거한다(app은 브랜치명에서 유도 — 플래너는 입력이 아니다).
+  # ⚠️ 양방향 비-기아: 이 job이 실패해도 poll은 돈다(poll의 `if: !cancelled()`), poll이 실패해도 이 job은
+  #    이미 돌았다. 실패는 그대로 run을 빨갛게 만든다(telegram 발화).
+  # ⚠️ poll이 이 job을 `needs`로 **뒤따르는** 이유는 순서(직렬화)뿐이다 — 두 job이 동시에 같은 PR을
+  #    해제하면 한쪽이 "이미 해제됨"으로 실패해 거짓 red가 난다. 성공을 요구하지는 않는다.
+  reconcile:
     needs: preflight
     if: needs.preflight.outputs.configured == 'true'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      # writer App: PR 조회 + auto-merge 해제 (이 job이 쓰는 **유일한** 자격 — reader는 여기 없다)
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: writer
+        with:
+          app-id: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+          private-key: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: main
+          token: ${{ steps.writer.outputs.token }}
+      - uses: ./.github/actions/setup-bun
+      - name: reconcile (낡은 auto-merge 인가 회수 — 대상은 bump-poll/* 네임스페이스, 플래너 무관)
+        env:
+          GH_TOKEN: ${{ steps.writer.outputs.token }} # writer: PR 조회 + auto-merge 해제
+        run: |
+          # 대상 목록은 **넘기지 않는다**(--app 없음). 넘기는 순간 회수의 완전성이 호출부의 목록에 의존하고,
+          # 그 목록이 곧 플래너 출력이면 R-27이 그대로 재발한다. 실행기가 `git ls-remote`로 네임스페이스를
+          # 직접 열거하고, 레인은 autoDeploy SSOT(.bindings.json / .image-pin.json)에서 직접 읽는다.
+          # 항목별 격리·실패 수집·비-0 종료는 전부 실행기 안에 있다(한 앱의 실패가 나머지를 굶기지 않는다).
+          bun tools/ensure-bump-pr.ts --reconcile-only
+      - name: telegram notify (실패 시)
+        if: failure()
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: failure
+          source: 변이
+          title: 이미지 폴링 인가 회수
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+  poll:
+    # ⚠️ `!cancelled()` — reconcile이 **실패해도** bump 루프는 돈다(회수 실패가 배포를 정지시키면
+    #    억제가 곧 공격 표면이 된다). needs는 **순서**를 위한 것이지 성공 조건이 아니다.
+    needs: [preflight, reconcile]
+    if: ${{ !cancelled() && needs.preflight.outputs.configured == 'true' }}
     runs-on: ubuntu-24.04-arm
     steps:
       # reader App: 앱 레포 main 커밋/compare 조회 (Contents:read, 앱 레포에만 설치)
@@ -74,35 +126,6 @@ jobs:
         run: |
           bun tools/poll-ghcr.ts --root . > /tmp/plan.json
           jq -r '.[] | "\(.app): \(.action) \(.reason // "")"' /tmp/plan.json
-      # ── 인가 회수(reconcile) — **후보 유무와 무관하게, 바인딩된 전 앱, 매 주기** ──────────────────
-      # 왜 bump 루프와 분리했나: 아래 bump 루프는 플래너가 후보를 낸 앱(action = bump | propose-pr)만 돈다.
-      # 그런데 `noop`(핀이 이미 최신·동일 digest)이나 `refuse`(GHCR 일시 장애·compare 실패·앱 레포 이력
-      # 재작성)인 주기엔 그 앱의 실행기가 **한 번도 호출되지 않는다** → 그 사이 `.bindings.json`의 autoDeploy가
-      # true→false로 뒤집혀도, 이미 열려 **무장된** PR이 낡은 머지 인가를 **무기한** 들고 있는다.
-      # ★★ **해제는 가용성이 아니라 보안 속성이다** — 플래너가 후보를 만들어 주느냐에 의존해선 안 된다.
-      #    그래서 plan의 **모든 항목**(action 무관)에 대해 해제 스윕만 하는 `--reconcile-only`를 돌린다.
-      # 레인은 실행기가 autoDeploy SSOT(`.bindings.json` / `.image-pin.json`)에서 **직접** 읽는다:
-      # plan의 `.action`은 noop/refuse에선 레인을 말해주지 않고(그건 "후보가 없다"는 뜻이다), 워크플로가
-      # 레인을 지어내면 그게 곧 승인 게이트 우회다(R-11). 그래서 이 스텝은 `--action`을 넘기지 않는다.
-      - name: reconcile (낡은 auto-merge 인가 회수 — 후보가 없어도 매 주기 전 앱)
-        env:
-          GH_TOKEN: ${{ steps.writer.outputs.token }} # writer: PR 조회 + auto-merge 해제
-        run: |
-          # ⚠️ **이 루프의 생존성은 인가 회수의 전제조건이다**(한 앱의 실패가 나머지 앱의 회수를 굶기면,
-          #    낡은 무장이 그 앱들에 그대로 남는다) → 항목마다 격리하고, 실패는 모아 둔다.
-          # ⚠️ 그리고 이 스텝은 **비-0으로 끝나지 않는다**: 여기서 죽으면 아래 bump 루프가 아예 실행되지
-          #    않아 **배포가 정지**한다(억제 = 공격 표면). 실패는 파일로 넘겨 bump 스텝이 run 판정에 합류시킨다.
-          : > /tmp/mutation-failures.txt
-          jq -r '.[].app' /tmp/plan.json > /tmp/apps.txt
-          while IFS= read -r app; do
-            [ -n "$app" ] || continue
-            # 플래너 출력도 한 번 더 정제(심층 방어) — 실행기가 --app 형식을 재검증한다.
-            case "$app" in ''|*[!a-z0-9-]*) echo "skip suspicious app: '$app'"; continue ;; esac
-            if ! bun tools/ensure-bump-pr.ts --reconcile-only --app "$app"; then
-              echo "::warning::${app}: 인가 회수 패스 실패 — 낡은 무장이 남아 있을 수 있다(다음 주기가 재시도)"
-              printf '%s ' "$app" >> /tmp/mutation-failures.txt
-            fi
-          done < /tmp/apps.txt
       # 이 스텝은 **로컬 브랜치·커밋만 준비**한다. 원격 변이(브랜치 push·PR 생성·auto-merge 무장)는
       # 전부 tools/ensure-bump-pr.ts(멱등 실행기 — 조회 → 결정 → 변이)가 한다:
       # 워크플로가 스스로 push/create하면 "열린 PR 확인"이 무의미해져 매 주기 중복 PR이 열린다
@@ -114,10 +137,10 @@ jobs:
         run: |
           git config user.name "ukyi-homelab-writer[bot]"
           git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
-          # 앞선 reconcile 패스의 실패도 이 run의 판정에 합류한다(그 스텝은 bump 루프를 굶기지 않으려고
-          # 비-0으로 끝나지 않는다 → 실패 사실은 여기서 run을 빨갛게 만든다).
+          # ⚠️ 인가 회수(reconcile)의 실패는 여기 합류하지 않는다 — 그건 **별도 job**이고 스스로 비-0으로
+          #    끝나 run을 빨갛게 만든다(R-27). 두 경로는 서로를 굶기지 않는다: 회수가 죽어도 bump는 돌고,
+          #    bump가 죽어도 회수는 이미 돌았다.
           failed=""
-          if [ -f /tmp/mutation-failures.txt ]; then failed="$(cat /tmp/mutation-failures.txt)"; fi
           jq -c '.[] | select(.action == "bump" or .action == "propose-pr")' /tmp/plan.json > /tmp/bump-items.jsonl
           # ⚠️⚠️ **항목마다 격리한다**(서브셸). 예전엔 `jq … | while read`를 `bash -e` 아래서 돌려, 한 앱이
           #   fail-closed로 죽으면(예: 증명되지 않은 head — 사람이 개입할 때까지 **영구히** 그 상태다)

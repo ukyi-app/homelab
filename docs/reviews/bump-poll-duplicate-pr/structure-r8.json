@@ -1,0 +1,68 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "No ship: authorization revocation still has two structural escape paths, destructive reconciliation trusts truncated human-trace data, and the committed records do not prove HEAD GREEN.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 36,
+  "target": "branch diff against main",
+  "reviewedSha": "77dfc11ba1d847b0c4241be6d7be4a754a85bd7d",
+  "reviewedTree": "393c49133f2af12a89b64bebae4cb55991132fe1",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 4,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: missing bindings has conflicting authorization semantics",
+      "body": "The established planner contract treats a missing `.bindings.json` as `autoDeploy:false`/`propose-pr`, but `probeLane` treats the same state as an unreadable lane and performs no revocation. If an armed PR exists when the binding is removed, `--reconcile-only` leaves its stale auto-merge authorization intact. This splits one SSOT into incompatible interpretations at the authorization boundary.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 802,
+      "line_end": 822,
+      "confidence": 0.99,
+      "recommendation": "Centralize lane resolution with the planner’s semantics. A bound app without `.bindings.json` must resolve to `propose-pr` and disarm its open writer bump PRs. Add a cross-seam regression witness for missing bindings plus an already armed PR.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: revocation still depends on successful planning",
+      "body": "The reconciliation pass derives its entire app inventory from `/tmp/plan.json`, produced by the preceding reader-token/GHCR planner step. If token creation or planning fails—or an app disappears from planner output—the workflow never reaches revocation for that app. Thus the claimed security property remains coupled to the availability and completeness of candidate planning, despite being separated from the bump-action filter.",
+      "file": ".github/workflows/bump-poll.yaml",
+      "line_start": 71,
+      "line_end": 101,
+      "confidence": 0.95,
+      "recommendation": "Move revocation into an independently runnable writer-side reconciliation job that obtains subjects from an authoritative inventory or enumerates open writer-owned `bump-poll/*` PRs directly. Prove that planner failure and empty planner output cannot prevent disarming.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: truncated human-trace queries can authorize destructive mutation",
+      "body": "The rebuild/close guard queries only the first 100 comments and first 50 labels, without `totalCount`, pagination, or another completeness signal. `humanTouchOf` can therefore see only bot comments or ordinary labels and conclude there is no human trace even when a later human comment or hold label exists. The executor may then force-push a reviewed PR or automatically close one that a human explicitly protected.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 379,
+      "line_end": 392,
+      "confidence": 0.97,
+      "recommendation": "Fully paginate comments and labels, or request counts/page information and treat any truncated connection as human-touched and non-destructive. Add witnesses where the human comment and hold label occur beyond the fetched page.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: HEAD has no committed machine-owned GREEN proof",
+      "body": "The lock still has an empty `green.sha`, and the review directory contains RED records but no committed GREEN verify-record. Because this review is forbidden from rerunning tests, the supplied artifacts prove the regression was RED and characterization was green at the baseline, but do not prove that the unchanged regression partition flipped because of production code or that characterization remains green at HEAD.",
+      "file": "docs/reviews/bump-poll-duplicate-pr/bugfix-lock.json",
+      "line_start": 26,
+      "line_end": 27,
+      "confidence": 1,
+      "recommendation": "Run the repository’s conductor-owned GREEN verification, commit its record for the current tree, and populate `green.sha` without modifying the locked tests.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Unify lane resolution and decouple revocation from planner availability.",
+    "Make human-touch evidence complete or conservatively fail closed on truncation.",
+    "Commit the machine-generated HEAD GREEN verification record before another structure review."
+  ]
+}
