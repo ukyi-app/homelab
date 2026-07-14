@@ -12,9 +12,30 @@
 // 안에 있어야 그 순서와 부작용(skip이면 push도 create도 없음)을 테스트로 증명할 수 있다.
 //
 // 관측 사실(변이 이전에 반드시 수집):
-//   gh pr list --head <branch> --state open \
+//   gh pr list --head <branch> --state open --limit <PR_QUERY_LIMIT> \
 //     --json number,isCrossRepository,mergeStateStatus,author,headRefOid,autoMergeRequest  ← writer 토큰
 //   git ls-remote --heads origin <branch>                                  ← 원격 브랜치 존재/OID
+//
+// ★ 조회는 **경계**가 있다 — 그래서 "부재"를 증명해야 한다(structure 게이트 high-2) ─────────────
+// `gh pr list`의 기본 상한은 **30건**이고, `--head`는 owner 한정 필터를 지원하지 않는다("<owner>:<branch>"
+// syntax not supported). 실측한 질의 형태(GH_DEBUG=api):
+//   repository.pullRequests(states:$state, headRefName:$headBranch, first:$limit, after:$endCursor,
+//                           orderBy:{field: CREATED_AT, direction: DESC})
+// → 같은 브랜치명으로 **공개 포크가 연 PR도 같은 페이지를 놓고 경쟁**하고, 정렬이 최신순(CREATED_AT DESC)이라
+//   나중에 열린 포크 PR 30건이면 **먼저 열린 writer PR이 페이지 밖으로 밀려난다**. 그러면 실행기는 자기
+//   브랜치를 "고아"로 오인해 force-push하고 PR을 또 만들려 든다 → 공격자가 멱등성을 깬다(억제/교란).
+// 그래서 조회 결과가 **완전한 열거**임을 증명한 뒤에만 판정한다:
+//   · 상한을 legit 상한보다 훨씬 크게 잡는다(PR_QUERY_LIMIT). GitHub은 같은 head→base 쌍에 열린 PR을
+//     **1개만** 허용하므로 신뢰 PR의 legit 최대치는 1이다 — 나머지는 전부 포크다.
+//   · 클라이언트 필터를 **하나도** 걸지 않으므로(전부 서버측 head/state 인자) `count < limit`은
+//     "커넥션이 소진됐다 = 열거가 완전하다"와 동치다 → 그때만 **부재가 권위 있다**.
+//   · `count >= limit`(포화)이면 밀려난 PR이 있을 수 있다 = **부재를 증명할 수 없다** → fail-closed
+//     (push·create·무장·해제 전부 0). 조용한 오탐(고아 오인 → force-push + 중복 create)보다 시끄러운 정지가 낫다.
+// ⚠️ `--author <writer>`(서버측 작성자 필터)는 **쓰지 않는다**. 실측(GH_DEBUG=api): `--author`를 주는 순간
+//    gh가 검색 API(`search(...)`)로 갈아탄다 — 검색 인덱스는 **결과적 일관성**이라, 직전 주기(10분 전)가 만든
+//    PR이 아직 인덱싱되지 않으면 **공격자 없이도** 거짓 부재가 난다(→ 고아 오인 경로). 이 도구의 판정은
+//    강한 일관성이 필요하므로 커넥션 질의(위)를 유지하고, 대신 **완전성**으로 부재를 증명한다.
+// 신뢰 판정은 **서버 필터에 맡기지 않는다**(심층 방어) — 아래 isTrusted가 동일-레포 + writer를 재검증한다.
 //
 // ── 레인(--action)과 판정(action)은 **다른 축**이다 ────────────────────────────────────────────
 // · 레인 = 플래너(poll-ghcr)가 .bindings.json의 autoDeploy로 정한 배포 승인 모델:
@@ -56,16 +77,32 @@
 // skip해버리고, pr-sweeper는 `autoMergeRequest`가 **이미 있는** PR만 다룬다 → autoDeploy 배포가 조용히
 // 정지한다. 그래서 무장 여부(`autoMergeRequest`)를 사실로 관측한다.
 //
-// ★ 무장 계약(정확히) — 무장 축은 위 판정표와 **직교**한다. 판정은 브랜치/PR의 존재로, 무장은 레인과
-//   `autoMergeRequest`로 각각 독립적으로 정해진다:
+// ★ 무장 계약(정확히) — 무장 축은 위 판정표와 **직교**하고, **양방향**이다. 판정은 브랜치/PR의 존재로,
+//   무장은 레인과 `autoMergeRequest`로 각각 독립적으로 정해진다:
 //     lane=bump      + 신뢰 PR + 무장 없음 → 그 run의 **판정이 무엇이든**(skip이든 rebuild든) 재무장한다
 //     lane=bump      + 신뢰 PR + 무장 있음 → 손대지 않는다(멱등 — force-push는 무장을 지우지 않는다:
 //                                            autoMergeRequest는 head OID가 아니라 PR에 붙는다)
 //     lane=bump      + create/adopt(PR 신규) → 생성 직후 무장한다
-//     lane=propose-pr                        → **어떤 경우에도 무장하지 않는다**(사람 머지 = 배포 승인)
+//     lane=propose-pr + 신뢰 PR + 무장 **있음** → **해제한다**(gh pr merge --disable-auto <번호>)
+//     lane=propose-pr + 그 외                   → 무장하지 않는다(멱등 — 해제할 것도 없다)
 // ⚠️ 재무장을 skip 경로에만 매달면 **DIRTY + 미무장**에서 새 나간다(라이브에서 실제로 겹치는 조합이다:
 //    run 1이 무장에서 죽어 무장 없는 PR이 남고, 이후 main 이동이 그 PR을 충돌시킨다). rebuild만 하고
 //    무장 갭을 남기면 PR은 깨끗해지는데 auto-merge가 영영 안 붙어 배포가 정지한다.
+//
+// ★★ 무장이 desired state라면 **해제도 desired state여야 한다**(structure 게이트 high-1) ────────────
+// 무장을 "arm만 있고 disarm은 없는" 단방향으로 다루면 **낡은 머지 인가가 살아남는다**:
+//   run 1: .bindings.json에 autoDeploy:true → 플래너가 bump 레인 → PR을 열고 **무장**한다.
+//   그 사이 owner가 autoDeploy를 **false로 바꾼다**(= 이제부터 사람 머지 = 배포 승인). 그런데 그 결정적
+//   PR은 **아직 열려 있다**(같은 app+tag = 같은 브랜치 = 같은 PR).
+//   run 2: 플래너가 이제 propose-pr 레인을 준다. 단방향 구현은 "propose-pr이니 무장하지 않는다"로 끝낸다 —
+//          그런데 **기존 무장은 그대로 살아 있다** → gate가 green이 되는 순간 GitHub이 **사람 승인 없이 머지**한다.
+//          skip(CLEAN/BLOCKED)이든 rebuild(DIRTY)든 똑같이 샌다: 무장은 PR에 붙지 head OID에 붙지 않는다.
+// → 승인 레인의 desired state는 "무장 없음"이다. 관측된 무장이 있으면 **그 run에서 즉시 해제**한다.
+// ⚠️ 해제는 **첫 변이**다(push/create보다 먼저). 무장된 PR은 gate가 green이 되는 어느 순간에도 머지될 수
+//    있으므로, 낡은 인가를 들고 있는 시간을 최소화한다. 특히 rebuild(force-push)를 먼저 하면 그 push가
+//    체크를 green으로 만들어 **해제하기 전에** 머지가 성사될 수 있다.
+// ⚠️ 해제 대상은 브랜치명이 아니라 **관측된 신뢰 PR 번호**다. `gh pr merge <branch>`는 같은 브랜치명의
+//    포크 PR로 해석될 여지가 있다 — 번호는 그 모호성이 0이다.
 //
 // 사실은 파싱·검증해 stdout의 `observed`에(무장 여부 포함), 실제 실행한 명령은 `executed`에 실어
 // 호출부/테스트가 "무엇을 관측하고 무엇을 변이했는가"를 검증할 수 있게 한다
@@ -96,6 +133,12 @@ const USAGE = `ensure-bump-pr — bump PR 멱등 실행기(조회 → 결정 →
 const DEFAULT_WRITER = "ukyi-homelab-writer";
 const APP_RE = /^[a-z0-9-]+$/;
 const OID_RE = /^[0-9a-f]{40}$/;
+
+// 조회 상한 — "부재의 권위"를 만드는 상수다(위 헤더의 ★ 참고). gh 기본값은 30이라 포크 PR 30건이면
+// writer PR이 페이지 밖으로 밀린다. legit 최대치는 1(GitHub은 같은 head→base에 열린 PR을 1개만 허용)이므로
+// 이 상한에 **닿는다는 것 자체가 이상 신호**다 → 닿으면 판정하지 않고 fail-closed한다(아래 포화 가드).
+// 100 = GraphQL 페이지 상한(왕복 1회).
+const PR_QUERY_LIMIT = 100;
 
 // 배포 승인 레인 — poll-ghcr.ts가 내는 값과 **글자 그대로** 같다(`s.autoDeploy ? "bump" : "propose-pr"`).
 // 호출부가 이 값을 재해석하지 않고 그대로 넘기므로, 승인 레인(propose-pr)을 자동 배포로 바꾸려면
@@ -266,16 +309,37 @@ function isTrusted(pr: RawPr, writer: string): boolean {
 }
 
 // ── ① 조회 — 변이보다 **먼저**, 전부 수집한다(순서 자체가 계약이다: R-4) ─────────────────────
+// `--limit`은 **부재를 권위 있게** 만드는 계약이다(헤더 ★): 클라이언트 필터가 0이므로 반환 수가 상한
+// 미만이면 커넥션이 소진된 것 = 열거가 완전하다. 상한을 빼먹으면 gh 기본값 30으로 조용히 되돌아가
+// 포크 크라우딩에 다시 뚫린다 → 상한은 argv 계약의 일부다(테스트가 argv 배열로 못박는다).
 const prs = parsePrs(run(
   "gh",
-  ["pr", "list", "--head", branch, "--state", "open",
+  ["pr", "list", "--head", branch, "--state", "open", "--limit", String(PR_QUERY_LIMIT),
     "--json", "number,isCrossRepository,mergeStateStatus,author,headRefOid,autoMergeRequest"],
   "gh pr list",
 ));
+// 포화 가드 — 상한에 닿았다 = 밀려난 PR이 있을 수 있다 = **부재를 증명할 수 없다**.
+// 여기서 조용히 진행하면 신뢰 PR을 못 본 채 "고아 브랜치"로 오인해 force-push + 중복 create를 낸다
+// (= 공격자가 포크 PR 다발로 멱등성을 깨는 경로). 판정도 변이도 하지 않는다.
+if (prs.length >= PR_QUERY_LIMIT) {
+  inputError(
+    `열린 PR이 조회 상한(${PR_QUERY_LIMIT})에 닿았다 — 같은 브랜치명 '${branch}'에 PR이 그만큼 열려 있다(포크 크라우딩?). `
+    + "밀려난 신뢰 PR이 있을 수 있어 '열린 PR 없음'을 증명할 수 없다",
+  );
+}
 const remoteBranch = parseLsRemote(run("git", ["ls-remote", "--heads", args.remote, branch], "git ls-remote"));
 
 const observedPrs = prs.map((pr) => ({ ...pr, trusted: isTrusted(pr, args.writer) }));
-const trusted = observedPrs.find((pr) => pr.trusted) ?? null;
+const trustedAll = observedPrs.filter((pr) => pr.trusted);
+// GitHub은 같은 head→base 쌍에 열린 PR을 1개만 허용한다 → 신뢰 PR이 2개 이상이면 우리의 신뢰 경계나
+// GitHub의 계약 중 하나가 깨진 것이다. 아무거나 고르면 나머지 하나는 조용히 방치된다(무장 갭·좀비).
+if (trustedAll.length > 1) {
+  inputError(
+    `신뢰 PR이 ${trustedAll.length}건이다(#${trustedAll.map((p) => p.number).join(", #")}) — `
+    + "같은 브랜치의 열린 신뢰 PR은 1건이어야 한다(어느 하나를 고르면 나머지가 방치된다)",
+  );
+}
+const trusted = trustedAll[0] ?? null;
 
 // ── ② 결정 — 관측 사실만으로 정한다(부작용 0) ──────────────────────────────────────────────
 // 축 1(판정): 신뢰 PR의 **존재**가 최우선이다. 신뢰 PR이 있으면 원격 브랜치는 당연히 있으므로
@@ -304,18 +368,37 @@ if (trusted !== null) {
   reason = "열린 신뢰 PR도 원격 브랜치도 없다 — 정상 경로(push → PR 생성)";
 }
 
-// 축 2(무장) — **판정과 직교**한다(R-10/R-11). propose-pr(승인 레인)은 어떤 경로로도 무장하지 않는다:
-// 사람 머지가 곧 배포 승인이므로 무장 없음이 그 레인의 **정상 상태**다(재무장 대상이 아니다).
-//   · create/adopt = PR을 새로 만든다 → 생성 직후 무장(그 PR엔 무장이 있을 수 없다)
-//   · skip/rebuild = 이미 있는 신뢰 PR → 무장이 **없을 때만** 재무장(desired state 수렴, 있으면 손대지 않음)
+// 축 2(무장) — **판정과 직교**하고 **양방향**이다(R-10/R-11 + structure high-1). 레인이 원하는 무장 상태를
+// 정하고, 관측된 무장 상태를 그쪽으로 **수렴**시킨다(단방향 arm-only는 낡은 인가를 보존한다 — 헤더 ★★).
+//   lane=bump       의 desired = 무장 **있음**
+//     · create/adopt = PR을 새로 만든다 → 생성 직후 무장(그 PR엔 무장이 있을 수 없다)
+//     · skip/rebuild = 이미 있는 신뢰 PR → 무장이 **없을 때만** 재무장(있으면 손대지 않음 — 멱등)
+//   lane=propose-pr 의 desired = 무장 **없음**(사람 머지 = 배포 승인)
+//     · 신뢰 PR에 무장이 **남아 있으면**(autoDeploy:true 시절에 열려 무장된 PR이 그대로 열려 있는 경우)
+//       → **해제**한다. 판정이 skip이든 rebuild든 똑같다(무장은 PR에 붙지 head OID에 붙지 않는다).
+//     · 무장이 없으면 아무것도 하지 않는다(멱등 — 승인 레인의 정상 상태다).
+//     · create/adopt엔 해제할 대상이 없다(방금 만든 PR은 이 레인에서 무장되지 않는다).
 const createsPr = action === "create" || action === "adopt";
 const armGap = trusted !== null && !trusted.autoMerge;
 const shouldArm = lane === "bump" && (createsPr || armGap);
+// 낡은 머지 인가(stale authorization) — 승인 레인인데 무장이 살아 있다.
+const staleArm = trusted !== null && trusted.autoMerge;
+const shouldDisarm = lane === "propose-pr" && staleArm;
 
 // ── ③ 변이(원격) — 판정이 허락한 것만, 계약된 argv 그대로 ───────────────────────────────────
 // push는 세 경로의 argv가 **완전 형태**로 못박혀 있다(plan r3): 목적지를 `refs/heads/<b>`로 완전 수식하고
 // lease는 항상 `<ref>:<기대 OID>` 명시 형태다(bare lease는 원격 추적 참조 없는 checkout에서 stale 거부).
 // skip은 여기서 **아무것도 하지 않는다** — 그게 이 픽스의 flip이다(중복 PR 금지).
+//
+// 해제가 **첫 변이**다: 낡은 인가를 들고 있는 시간을 최소화한다. rebuild(force-push)를 먼저 하면 그 push가
+// 체크를 다시 돌려 green으로 만들고, 해제하기 전에 GitHub이 **사람 승인 없이** 머지해버릴 수 있다.
+// 대상은 브랜치명이 아니라 **관측된 신뢰 PR 번호**다(같은 브랜치명의 포크 PR 오조준 방지).
+// 무장(arm)과 달리 공유 스크립트(auto-merge-or-fail.sh)를 쓰지 않는다 — 그 스크립트는 races-6 폴백
+// ("--auto는 이미 CLEAN인 PR에 에러" → 직접 머지)이 본질이고, 그건 **머지를 성사시키는** 경로다.
+// 해제는 정반대(인가 회수)라 폴백이 있어선 안 된다: 실패하면 fail-closed로 시끄럽게 죽는 게 맞다.
+if (shouldDisarm) {
+  mutate("gh", ["pr", "merge", "--disable-auto", String(trusted!.number)], "gh pr merge --disable-auto");
+}
 if (action === "create") {
   mutate("git", ["push", args.remote, `HEAD:${ref}`], "git push");
 } else if (action === "adopt") {
@@ -351,7 +434,7 @@ console.log(JSON.stringify({
         number: trusted.number,
         mergeStateStatus: trusted.mergeStateStatus,
         headRefOid: trusted.headRefOid,
-        // R-10: 무장이 desired state라는 걸 판정이 쓸 수 있게 사실로 싣는다(지금은 아무 분기도 안 한다).
+        // R-10: 무장은 **양방향** desired state다 — bump는 없으면 무장(armGap), propose-pr은 있으면 해제(staleArm).
         autoMerge: trusted.autoMerge,
       }
       : null,

@@ -170,8 +170,18 @@ else:
     sys.exit(2)
 PY
 
-  # ── gh stub: pr list는 픽스처를 그대로 내보내고, 변이 서브커맨드는 성공만 흉내낸다.
+  # ── gh stub: pr list는 픽스처를 내보내되 **라이브 gh처럼 --limit에서 잘라낸다**, 변이 서브커맨드는 성공만 흉내낸다.
   #    알 수 없는 서브커맨드는 exit 3 — 도구의 gh 표면이 조용히 넓어지는 걸 막는다.
+  #
+  # ★ 왜 stub이 --limit을 **지켜야** 하는가(structure high-2): 라이브 질의는 경계가 있다.
+  #   실측(GH_DEBUG=api): repository.pullRequests(states:$state, headRefName:$headBranch, first:$limit,
+  #                                               orderBy:{field: CREATED_AT, direction: DESC})
+  #   기본 상한은 **30**이고 `--head`는 owner 한정 필터를 지원하지 않는다 → **공개 포크가 같은 브랜치명으로 연
+  #   PR도 같은 페이지를 놓고 경쟁**하고, 최신순 정렬이라 나중에 열린 포크 PR들이 **먼저 열린 writer PR을
+  #   페이지 밖으로 밀어낸다**. stub이 픽스처를 통째로 뱉으면 이 절단이 하네스에서 사라져, 경계 없는 조회를
+  #   가정한 구현이 GREEN이 된다(라이브에선 자기 PR을 못 보고 고아로 오인 → force-push + 중복 create).
+  #   → 픽스처는 **최신순 목록**(앞 = 최신)으로 쓰고, stub은 앞에서 limit개만 준다(라이브와 같은 절단).
+  #   비-JSON/비-배열 픽스처(fail-closed 증인)는 자를 수 없으므로 원본 바이트를 그대로 흘린다.
   cat > "$STUB/gh" <<'GH'
 #!/bin/sh
 # NUL 구분 원장(R-9): 인자 개수·경계 보존. 레코드는 RS(0x1e)로 종단한다.
@@ -179,7 +189,15 @@ PY
 case "$1:$2" in
   pr:list)
     if [ -n "${STUB_GH_LIST_FAIL:-}" ]; then echo "stub: gh pr list 실패(조회 장애 시뮬)" >&2; exit 1; fi
-    cat "$STUB_PRS"
+    # --limit이 없으면 라이브 gh의 **기본 상한 30**을 적용한다(상한을 안 넘긴 구현이 여기서 잘린다).
+    limit=30
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "--limit" ]; then limit="$a"; fi
+      prev="$a"
+    done
+    # 배열 픽스처면 최신순 앞에서 limit개만(라이브 절단). 아니면(깨진 JSON·비배열·빈 바이트) 원본 그대로.
+    if out="$(jq -c ".[0:${limit}]" "$STUB_PRS" 2>/dev/null)"; then printf '%s' "$out"; else cat "$STUB_PRS"; fi
     ;;
   pr:create) echo "https://github.com/ukyi/homelab/pull/999" ;;
   pr:merge)  : ;;
@@ -263,6 +281,41 @@ amr_absent() { printf 'null'; }
 write_prs()   { printf '%s' "$1" > "$STUB_PRS"; }
 # git ls-remote --heads origin <branch> 의 원시 출력("<oid>\trefs/heads/<branch>").
 write_heads() { printf '%s\t%s\n' "$1" "refs/heads/$BRANCH" > "$STUB_HEADS"; }
+
+# 신뢰 PR(동일-레포 + writer App) 한 건의 원시 JSON — number / mergeStateStatus / autoMergeRequest만 갈린다.
+writer_pr() {
+  printf '{"number":%s,"isCrossRepository":false,"mergeStateStatus":"%s","headRefOid":"%s","author":%s,"autoMergeRequest":%s}' \
+    "$1" "$2" "$PR_OID" "$(writer_author)" "$3"
+}
+
+# ── 포크 크라우딩 픽스처 — **경계된 조회**를 공격하는 형태(structure high-2) ────────────────────────
+# 이 레포는 공개다 → 아무나 포크에서 **같은 결정적 브랜치명**(bump-poll/<app>-<tag>)으로 PR을 열 수 있다.
+# 라이브 질의는 최신순(CREATED_AT DESC)으로 `first: $limit`만 가져오므로, **나중에 열린 포크 PR**들이
+# 앞을 차지하고 **먼저 열린 writer PR**을 페이지 밖으로 밀어낸다 → 실행기가 자기 PR을 못 보고
+# "고아 브랜치"로 오인해 force-push + 중복 create를 낸다(공격자에 의한 멱등성 파괴).
+# 픽스처는 그 최신순 목록 그대로다: 포크 n건(앞 = 최신) + writer PR(뒤 = 가장 먼저 열림).
+crowded_prs() {
+  local n="$1" tail_pr="$2" i=0
+  printf '['
+  while [ "$i" -lt "$n" ]; do
+    [ "$i" -eq 0 ] || printf ','
+    printf '{"number":%d,"isCrossRepository":true,"mergeStateStatus":"CLEAN","headRefOid":"%s","author":{"is_bot":false,"login":"drive-by%d"},"autoMergeRequest":null}' \
+      "$((9000 + i))" "$ORPHAN_OID" "$i"
+    i=$((i + 1))
+  done
+  if [ -n "$tail_pr" ]; then
+    [ "$n" -eq 0 ] || printf ','
+    printf '%s' "$tail_pr"
+  fi
+  printf ']'
+}
+
+# ── 무장 **해제**(gh pr merge --disable-auto <번호>) 횟수 ──────────────────────────────────────
+# 대상은 브랜치명이 아니라 **관측된 신뢰 PR 번호**다 — `gh pr merge <branch>`는 같은 브랜치명의 포크 PR로
+# 오조준될 수 있다. 그래서 argv 배열을 **번호까지** 못박는다.
+disarm_calls() { count_calls gh pr merge --disable-auto "$1"; }
+# 무장·해제를 합친 총 `gh pr merge` 호출 수(어느 쪽도 몰래 새지 않았는지 교차 검증).
+merge_calls()  { count_calls gh pr merge; }
 
 # 레인(--action)은 **필수**다 — 기본값이 없다(승인 게이트 우회 방지, plan r5 R-11).
 # 테스트 기본 레인은 bump(autoDeploy) — 라이브에서 중복 PR 3개가 터진 바로 그 레인이다.
@@ -567,6 +620,188 @@ arm_calls_gh()     { count_calls gh pr merge; }
   [ "$gh_arms" -eq 0 ]
 }
 
+# ── W8~W9: 무장 **해제** — 승인 레인의 desired state는 "무장 없음"이다(structure high-1) ──────────
+# 실행기가 무장을 **단방향**(arm만, disarm 없음)으로 다루면 **낡은 머지 인가가 살아남는다**:
+#   run 1: autoDeploy:true → bump 레인 → PR을 열고 무장한다.
+#   그 뒤 owner가 .bindings.json의 autoDeploy를 **false로** 바꾼다(= 이제부터 사람 머지 = 배포 승인).
+#          그런데 그 **결정적 PR은 아직 열려 있다**(같은 app+tag = 같은 브랜치 = 같은 PR).
+#   run 2: 플래너가 propose-pr을 준다. 단방향 구현은 "승인 레인이니 무장하지 않는다"로 끝내는데,
+#          **기존 무장은 그대로 살아 있다** → gate가 green이 되는 순간 GitHub이 **사람 승인 없이 머지**한다.
+#          = 승인 게이트 우회. skip이든 rebuild든 똑같이 샌다(무장은 PR에 붙지 head OID에 붙지 않는다).
+# 계약: lane=propose-pr + 신뢰 PR + 무장 있음 → **그 run의 판정이 무엇이든** 해제한다(정확히 1회).
+
+# bats test_tags=regression
+@test "W8: the propose-pr lane disarms a stale auto-merge on the SKIP path (autoDeploy was turned off under an open armed PR)" {
+  # autoDeploy:true 시절에 열려 **무장된** PR이, autoDeploy:false로 바뀐 뒤에도 그대로 열려 있다.
+  # 이 주기의 옳은 행동: 판정은 skip(변이 0)이되 **낡은 인가는 회수**한다.
+  write_prs "[$(writer_pr 370 CLEAN "$(amr_armed)")]"
+  run_ensure_lane propose-pr
+  [ "$status" -eq 0 ]
+
+  # 하네스 확인: 무장이 살아 있다는 **사실**을 관측했는가.
+  echo "$output" | jq -e '.observed.trusted.autoMerge == true' > /dev/null \
+    || { echo "harness: 도구가 기존 무장을 관측하지 못했다(--json autoMergeRequest 배선 확인)"; echo "$output"; dump_calls; false; }
+
+  # ① 해제 1회 — 대상은 **관측된 PR 번호**(브랜치명 아님).
+  run disarm_calls 370
+  disarms="$output"
+  [ "$disarms" -eq 1 ] || {
+    echo "approval gate bypass: propose-pr 레인이 무장된 PR #370의 auto-merge를 해제하지 않았다(해제 ${disarms}회, 기대 1회)"
+    echo "  autoDeploy:true 시절의 무장이 살아남으면 gate green 순간 GitHub이 **사람 승인 없이** 머지한다."
+    echo "  기대 argv: gh pr merge --disable-auto 370"
+    dump_calls; false
+  }
+  # ② 무장은 0회 — 해제해야 할 자리에서 무장하면 정반대다.
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ] || {
+    echo "approval gate bypass: 승인 레인이 auto-merge를 무장했다"
+    dump_calls; false
+  }
+  # ③ `gh pr merge` 총 호출은 해제 1회뿐(무장이 다른 표기로 몰래 새지 않았는가).
+  merges="$(merge_calls)"
+  [ "$merges" -eq 1 ]
+
+  # ④ 판정 축은 그대로 skip — 해제는 판정과 **직교**한다(PR을 새로 열거나 push하지 않는다).
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+  action="$(echo "$JSON" | jq -r '.action')"
+  [ "$action" = "skip" ] || {
+    echo "ensure-bump-pr decided '$action' — 무장만 회수하면 되는 자리다(expected skip + 해제)"
+    echo "$JSON"; false
+  }
+}
+
+# bats test_tags=regression
+@test "W9: the propose-pr lane disarms a stale auto-merge on the REBUILD path too (the two axes are independent)" {
+  # ★ W8만 있으면 해제를 **skip 분기 안에** 심은 구현이 GREEN이 된다. 그런데 라이브에서 겹치는 조합이다:
+  # 무장된 채 열려 있던 PR이 main 이동으로 DIRTY가 되고, 그 사이 autoDeploy가 false로 바뀐다.
+  # rebuild(force-push)만 하고 해제를 건너뛰면, 그 push가 체크를 다시 green으로 만들어 **바로 그 순간**
+  # 낡은 무장이 머지를 성사시킨다 — 승인 게이트가 통째로 우회된다.
+  write_prs "[$(writer_pr 371 DIRTY "$(amr_armed)")]"
+  run_ensure_lane propose-pr
+  [ "$status" -eq 0 ]
+
+  echo "$output" | jq -e '.observed.trusted.mergeStateStatus == "DIRTY"' > /dev/null \
+    || { echo "harness: DIRTY 상태를 관측하지 못했다"; echo "$output"; dump_calls; false; }
+  echo "$output" | jq -e '.observed.trusted.autoMerge == true' > /dev/null \
+    || { echo "harness: 기존 무장을 관측하지 못했다"; echo "$output"; dump_calls; false; }
+
+  # ① 해제 축: 판정이 rebuild여도 해제한다.
+  run disarm_calls 371
+  disarms="$output"
+  [ "$disarms" -eq 1 ] || {
+    echo "approval gate bypass: propose-pr 레인이 rebuild 경로에서 무장된 PR #371을 해제하지 않았다(해제 ${disarms}회, 기대 1회)"
+    echo "  해제는 skip 경로 전용이 아니다 — 무장은 PR에 붙지 head OID에 붙지 않는다(force-push로 지워지지 않는다)."
+    dump_calls; false
+  }
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ]
+  merges="$(merge_calls)"
+  [ "$merges" -eq 1 ]
+
+  # ② 판정 축: rebuild(정확한 lease argv) + create 0 — 승인 PR은 재사용한다.
+  run has_call_exact "${PUSH_REBUILD[@]}"
+  if [ "$status" -ne 0 ]; then
+    echo "stale lease: rebuild가 계약된 leased argv 배열로 force-push하지 않았다"
+    echo "  expected(argc=${#PUSH_REBUILD[@]}): ${H_PUSH_REBUILD}"
+    dump_calls; false
+  fi
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 1 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+
+  # ③ 해제는 **첫 변이**여야 한다 — force-push가 체크를 green으로 되돌리기 **전에** 인가를 회수한다.
+  #    (rebuild를 먼저 하면 그 push가 gate를 통과시키는 순간 낡은 무장이 머지를 성사시킬 수 있다.)
+  disarm_at="$(first_call gh pr merge --disable-auto)"
+  push_at="$(first_call git push)"
+  [ -n "$disarm_at" ]
+  [ -n "$push_at" ]
+  [ "$disarm_at" -lt "$push_at" ] || {
+    echo "stale authorization window: 해제(줄 $disarm_at)가 force-push(줄 $push_at)보다 늦다 —"
+    echo "  push가 체크를 green으로 만들면 해제 전에 머지가 성사될 수 있다. 해제가 첫 변이여야 한다."
+    dump_calls; false
+  }
+}
+
+# ── W10~W11: **경계된 조회**가 writer PR을 가린다(structure high-2) ────────────────────────────
+# 라이브 질의(GH_DEBUG=api 실측):
+#   repository.pullRequests(states:$state, headRefName:$headBranch, first:$limit, after:$endCursor,
+#                           orderBy:{field: CREATED_AT, direction: DESC})
+# 기본 상한 **30**, `--head`는 owner 한정 필터 **미지원**. 공개 레포라 포크가 같은 브랜치명으로 PR을 열 수 있고,
+# 최신순 정렬이라 **나중에 열린 포크 PR이 먼저 열린 writer PR을 페이지 밖으로 밀어낸다**.
+# → 실행기가 "열린 신뢰 PR 없음 + 원격 브랜치 있음"으로 읽어 **고아로 오인** → force-push + 중복 create.
+# 계약: 부재는 **권위 있어야** 한다 — 완전히 열거했거나(상한 미만), 아니면 **모호하다고 죽거나**(fail-closed).
+# 어느 쪽이든 force-push·중복 create는 **0회**다.
+
+# bats test_tags=regression
+@test "W10: a writer PR crowded out of the default page is still found (the query bound is raised)" {
+  # 포크 60건(최신) + writer PR(가장 먼저 열려 꼬리에 있다). 기본 상한 30이면 writer PR은 **보이지 않는다**.
+  # 상한을 legit 최대치보다 크게 잡으면(그리고 클라이언트 필터를 안 걸면) 열거가 완전해져 자기 PR을 찾는다.
+  write_prs "$(crowded_prs 60 "$(writer_pr 380 CLEAN "$(amr_armed)")")"
+  write_heads "$PR_OID"   # 그 PR의 head — 원격 브랜치는 당연히 있다(고아가 **아니다**)
+  run_ensure_lane bump
+  [ "$status" -eq 0 ]
+
+  # ① 밀려나지 않고 관측됐는가.
+  echo "$output" | jq -e '.observed.trusted.number == 380' > /dev/null \
+    || { echo "hidden writer PR: 포크 PR 60건에 가려 자기 PR(#380)을 보지 못했다 — 조회 상한(gh 기본 30)에서 밀려났다"; echo "$output"; dump_calls; false; }
+
+  # ② 고아 오인의 결과(force-push + 중복 create)가 **0회**인가 — 이게 공격자가 깨려는 멱등성이다.
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || {
+    echo "idempotency broken by a fork: 포크 크라우딩에 속아 ${BRANCH}를 force-push했다(자기 PR을 고아로 오인)"
+    dump_calls; false
+  }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ] || {
+    echo "duplicate bump PR: 포크 크라우딩에 속아 PR을 또 만들었다(#380이 이미 열려 있다)"
+    dump_calls; false
+  }
+  action="$(echo "$JSON" | jq -r '.action')"
+  [ "$action" = "skip" ] || {
+    echo "ensure-bump-pr decided '$action' — 신뢰 PR #380이 열려 있다(expected skip)"
+    echo "$JSON"; false
+  }
+  # ③ 포크 PR은 **관측은 하되 신뢰하지 않는다**(신뢰 경계는 서버 필터가 아니라 클라이언트가 정한다).
+  echo "$JSON" | jq -e '[.observed.prs[] | select(.trusted)] | length == 1' > /dev/null
+  echo "$JSON" | jq -e '.observed.prs[0].trusted == false' > /dev/null
+}
+
+# bats test_tags=regression
+@test "W11: a saturated PR page fails closed (absence cannot be proven, so nothing is mutated)" {
+  # 상한을 아무리 올려도 공격자는 그만큼 더 열 수 있다 → **상한에 닿는 것 자체**가 "밀려난 PR이 있을 수 있다"는
+  # 신호다. 그 상태에서 조용히 "열린 PR 없음"으로 판정하면 정확히 그 공격이 성립한다(고아 오인 → force-push +
+  # 중복 create). 부재를 증명할 수 없으면 **판정도 변이도 하지 않는다**(fail-closed).
+  # 포크 200건(어떤 합리적 상한에도 닿는다) + writer PR은 저 뒤에 밀려 보이지 않는다.
+  write_prs "$(crowded_prs 200 "$(writer_pr 381 CLEAN "$(amr_armed)")")"
+  write_heads "$PR_OID"
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "unproven absence: 조회가 상한까지 꽉 찼는데(포크 크라우딩) 도구가 성공으로 끝났다 —"
+    echo "  밀려난 신뢰 PR이 있을 수 있으므로 '열린 PR 없음'을 증명할 수 없다 → fail-closed여야 한다."
+    echo "$output"; dump_calls; false
+  }
+
+  # fail-closed = **변이 0**. (오인 경로의 실제 피해는 force-push와 중복 create다.)
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || {
+    echo "idempotency broken by a fork: 부재를 증명하지 못한 채 ${BRANCH}를 force-push했다"
+    dump_calls; false
+  }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ] || {
+    echo "duplicate bump PR: 부재를 증명하지 못한 채 PR을 또 만들었다"
+    dump_calls; false
+  }
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ]
+  merges="$(merge_calls)"
+  [ "$merges" -eq 0 ]
+}
+
 # ---------------------------------------------------------------------------
 # 하네스 자체의 증명 — 이게 GREEN이 아니면 위 증인들은 아무것도 증명하지 못한다
 # ---------------------------------------------------------------------------
@@ -696,18 +931,44 @@ arm_calls_gh()     { count_calls gh pr merge; }
   [ "$push_at" -lt "$create_at" ]
 }
 
-@test "the PR query asks for the exact fields the decision needs (headRefOid for the lease, autoMergeRequest for re-arming)" {
+@test "the PR query asks for the exact fields the decision needs and bounds the page explicitly (no default-30 truncation)" {
   # 필드가 빠지면 판정이 조용히 무너진다:
   #   headRefOid 누락       → lease 기대값이 사라져 회복이 stale 거부로 돌아간다(R-5)
-  #   autoMergeRequest 누락 → 무장 갭을 관측할 수 없어 재무장 수렴이 불가능하다(R-10)
+  #   autoMergeRequest 누락 → 무장 갭/낡은 무장을 관측할 수 없어 무장 수렴이 불가능하다(R-10, high-1)
+  # ★ `--limit`이 빠지면 gh가 **기본 30**으로 되돌아간다 → 포크 PR 30건이면 writer PR이 페이지 밖으로
+  #   밀려 "열린 PR 없음"으로 오독한다(high-2). 상한은 argv **계약**이다 — 빠뜨리면 여기서 죽는다.
   # 조회 argv도 **배열 계약**이다 — 필드 목록은 한 인자(쉼표 구분)여야 gh가 올바로 읽는다.
   write_prs '[]'
   run_ensure
   [ "$status" -eq 0 ]
-  run has_call_exact gh pr list --head "$BRANCH" --state open \
+  run has_call_exact gh pr list --head "$BRANCH" --state open --limit 100 \
     --json "number,isCrossRepository,mergeStateStatus,author,headRefOid,autoMergeRequest"
   if [ "$status" -ne 0 ]; then
-    echo "조회 argv 계약 위반 — gh pr list --head <b> --state open --json <6필드 한 인자>"
+    echo "조회 argv 계약 위반 — gh pr list --head <b> --state open --limit 100 --json <6필드 한 인자>"
+    echo "  ⚠️ --limit이 없으면 gh 기본 상한 30 → 포크 크라우딩에 writer PR이 가려진다(부재를 증명할 수 없다)."
+    dump_calls; false
+  fi
+}
+
+@test "the trusted PR is decided client-side, never delegated to a server-side author filter (defense in depth)" {
+  # 심층 방어: 서버측 필터(--author/--app)로 신뢰 경계를 대신하지 않는다.
+  #   ① `--author`를 주는 순간 gh가 **검색 API**로 갈아탄다(실측 GH_DEBUG=api: SearchType 프로브 + search(...)).
+  #      검색 인덱스는 **결과적 일관성**이라 직전 주기(10분 전)가 만든 PR이 아직 안 잡히면 **공격자 없이도**
+  #      거짓 부재가 난다 → 고아 오인 경로. 판정에는 강한 일관성(커넥션 질의)이 필요하다.
+  #   ② 서버 필터를 믿으면 신뢰 판정이 원격 동작에 위임된다 — 필터가 조용히 바뀌면 경계가 통째로 무너진다.
+  # 신뢰는 **관측된 사실**(isCrossRepository + author.login)로 이 도구가 정한다.
+  write_prs '[]'
+  run_ensure
+  [ "$status" -eq 0 ]
+  run has_arg_exact "--author"
+  if [ "$status" -eq 0 ]; then
+    echo "search-index dependency: gh pr list에 --author를 넘겼다 — gh가 검색 API(결과적 일관성)로 갈아탄다."
+    echo "  직전 주기가 만든 PR이 인덱싱 전이면 거짓 부재 → 자기 PR을 고아로 오인해 force-push + 중복 create."
+    dump_calls; false
+  fi
+  run has_arg_exact "--app"
+  if [ "$status" -eq 0 ]; then
+    echo "search-index dependency: gh pr list에 --app을 넘겼다(위와 같은 검색 API 경로)."
     dump_calls; false
   fi
 }
@@ -936,6 +1197,64 @@ arm_calls_gh()     { count_calls gh pr merge; }
   }
   gh_arms="$(arm_calls_gh)"
   [ "$gh_arms" -eq 0 ]
+}
+
+# ── 해제(disarm)의 반대편 — **과잉 반응 금지**(W8/W9가 새 방향으로 새지 않는가) ────────────────────
+# 해제는 "승인 레인 + 무장이 **실제로 남아 있을 때**"만이다. 이 두 증인이 없으면 fix가 해제를 무차별로
+# 걸어(매 폴링 churn) 또는 bump 레인의 정상 무장까지 회수해(autoDeploy 배포 정지) 반대 방향으로 깨진다.
+# ⚠️ create/adopt 경로엔 **해제할 대상이 자체가 없다**(신뢰 PR이 없으니 무장도 없다) — 위 두 증인
+#    ("NEVER arms" / "does not arm on the ADOPT path")이 `gh pr merge` 총 0회로 이미 그걸 못박는다.
+
+@test "the propose-pr lane does not disarm a PR that was never armed (disarming is idempotent)" {
+  # 승인 PR에 무장이 없는 건 **정상 상태**다 → 회수할 인가가 없다. 매 폴링 --disable-auto를 때리면
+  # 무의미한 API 호출(그리고 gh 에러)로 run이 시끄러워지거나 죽는다.
+  write_prs "[$(writer_pr 372 BLOCKED "$(amr_absent)")]"
+  run_ensure_lane propose-pr
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.observed.trusted.autoMerge == false' > /dev/null
+  run disarm_calls 372
+  [ "$output" -eq 0 ] || {
+    echo "disarm churn: 무장된 적 없는 승인 PR #372에 --disable-auto를 걸었다(해제는 무장이 있을 때만)"
+    dump_calls; false
+  }
+  merges="$(merge_calls)"
+  [ "$merges" -eq 0 ]
+}
+
+@test "the bump lane NEVER disarms (the reverse direction must not misfire on autoDeploy apps)" {
+  # ★ bump 레인의 desired state는 무장 **있음**이다. 해제 로직이 레인을 넘어 새면 autoDeploy 앱의 무장을
+  # 매 폴링 회수해 배포가 조용히 정지한다 — W5(무장 멱등)의 정확한 거울상 결함이다.
+  write_prs "[$(writer_pr 373 CLEAN "$(amr_armed)")]"
+  run_ensure_lane bump
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.observed.trusted.autoMerge == true' > /dev/null
+  run disarm_calls 373
+  [ "$output" -eq 0 ] || {
+    echo "stalled autoDeploy: bump 레인이 무장된 PR #373의 auto-merge를 **해제**했다 — 자동 배포가 멈춘다"
+    dump_calls; false
+  }
+  # 이미 무장돼 있으니 재무장도 없다(W5) → gh pr merge 총 0회.
+  merges="$(merge_calls)"
+  [ "$merges" -eq 0 ]
+}
+
+@test "the bump lane does not disarm on the REBUILD path either (a DIRTY armed autoDeploy PR keeps its arming)" {
+  # W7(rebuild + 이미 무장 → 재무장 0)의 해제 짝. rebuild 경로에 해제가 새면 DIRTY 회복이 자동 배포를 죽인다.
+  write_prs "[$(writer_pr 374 DIRTY "$(amr_armed)")]"
+  run_ensure_lane bump
+  [ "$status" -eq 0 ]
+  run disarm_calls 374
+  [ "$output" -eq 0 ] || {
+    echo "stalled autoDeploy: bump 레인이 rebuild 경로에서 무장된 PR #374을 해제했다"
+    dump_calls; false
+  }
+  merges="$(merge_calls)"
+  [ "$merges" -eq 0 ]
+  # 판정 축은 그대로 rebuild(해제 로직이 판정을 오염시키지 않았는가).
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 1 ]
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
 }
 
 @test "there is no flag that can arm auto-merge outside the bump lane (--auto-merge does not exist)" {
