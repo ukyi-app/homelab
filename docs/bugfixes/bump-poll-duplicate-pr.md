@@ -177,6 +177,21 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Review Decision Log
 
+### Codex Structure Review — r11: needs-attention → 2건 전부 Accept (owner 2026-07-15)
+
+> ⚠️ **게이트 실행 함정(재발 주의)**: r11의 첫 3회 실행이 `review-incomplete`로 나왔는데, capacity가 아니라
+> **직전 실패 아티팩트(`structure-r11.json`)가 미커밋**이라 무결성 preflight가 `stale-branch-review`로 리뷰를
+> **아예 실행하지 않은** 것이었다 — 브랜치-스코프 게이트 전에 트리를 클린하게(아티팩트 커밋) 만들어야 한다.
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-36 | high | `Blocker: exhaustive pagination is re-bounded by the parent process` — `fetchConnection`이 **모든 페이지 전체를 `pages`에 보관**했다가 사후 일괄 파싱·직렬화한다 → R-33에서 subprocess 캡처는 페이지 단위로 잡았지만 **부모 Bun 힙·워크플로 로그**는 여전히 포크 수에 **선형**. 억제 무기가 한 계층 위로 올라갔을 뿐. 승인 설계는 "page → reduce → cursor"인데 구현은 "page → 전량 보관 → 전량 파싱/출력" | **Accept** | `foldConnection`이 각 페이지를 **받는 즉시 접어** 결정에 필요한 신뢰 PR 후보 + 경계 있는 카운터만 남기고 **원본 페이지·미신뢰 포크 노드는 버린다**. 상한 없음·`hasNextPage` fail-closed·SEARCH 금지·강한 일관성 유지. ★ 적대 검증(2렌즈)이 **잔여 누출**을 추가 발견: `runSoft`가 페이지마다 **719바이트 PR_QUERY를 `executed` 감사 배열**에 쌓고 `.executed`로 로그에 직렬화 → 읽기 전용 조회는 감사 대상이 아니다(감사 대상은 변이) → `foldConnection` 조회를 `executed`에서 빼고 **O(1) `graphqlPages` 카운터**로 대체. (구현자 판단: `api graphql`이 아니라 `pullRequests`로 매칭 — 커밋 소유권 증명 쿼리도 `gh api graphql`이라 false-RED 회피) |
+| R-37 | medium | `Test-quality: W70 pins the vulnerable representation instead of public behavior` — W70이 `.observed.prs`에 **651 노드 전량**을 요구 → R-36이 없애려는 **전량 보관·직렬화를 동결**. 미래 작업이 "자원 고갈 표면 보존 vs 잠긴 regression 편집" 중 택일하게 강요 | **Accept** | W70/W71을 **공개 행위**로 재작성 — 전량 노드 배열 대신 **경계 있는 총계 요약 + 마지막 페이지 신뢰 PR + 종단 결정(skip·push 0·create 0 / reconcile=disarm)**. `.executed`에 `pullRequests` 페이지 조회가 **0건**임을 단언(감사 출력이 포크 수와 무관함을 고정). 포화 입력·4 MiB 경계 넘김은 유지, RED→GREEN 바이트 동일 |
+
+**뮤턴트(컨덕터 직접 재실행)**: `foldConnection` 조회를 `executed`에 되살림 → **W70·W71 RED** · `--slurp` 단일 캡처로 복원 → W70·W71 RED · 전량 보관 출력(M5) → W70의 `has("prs")|not` 단언에서 정확히 RED.
+
+**최종 baseline**: `red..green` diff = **scope 4파일 정확히**(테스트 변경 0) · regression 110/110 baseline RED · characterization 63/63 green · `--verify-flip` **flipOk: true**.
+
 ### Codex Structure Review — r10: needs-attention → 3건 전부 Accept (owner 2026-07-15)
 
 | ID | 심각도 | 발견 | 결정 | 반영 |
