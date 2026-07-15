@@ -1165,8 +1165,11 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
     echo "$JSON"; false
   }
   # ③ 포크 PR은 **관측은 하되 신뢰하지 않는다**(신뢰 경계는 서버 필터가 아니라 클라이언트가 정한다).
-  echo "$JSON" | jq -e '[.observed.prs[] | select(.trusted)] | length == 1' > /dev/null
-  echo "$JSON" | jq -e '.observed.prs[0].trusted == false' > /dev/null
+  #    포크 노드는 **버려지고 카운터로만** 남는다(R-36) → 요약으로 관측한다: 포크 60건 관측 + 신뢰 정확히 1건.
+  echo "$JSON" | jq -e '.observed.summary.crossRepo == 60' > /dev/null \
+    || { echo "포크 60건이 요약에 관측되지 않았다(summary.crossRepo)"; echo "$JSON"; false; }
+  echo "$JSON" | jq -e '.observed.summary.sameRepoTrusted == 1' > /dev/null \
+    || { echo "신뢰 PR이 정확히 1건으로 관측되지 않았다(summary.sameRepoTrusted)"; echo "$JSON"; false; }
 }
 
 # bats test_tags=regression
@@ -1271,8 +1274,33 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   # ① 마지막 페이지 꼬리의 우리 PR을 **찾아냈다**(열거가 끝까지 갔다).
   echo "$output" | jq -e '.observed.trusted.number == 382' > /dev/null \
     || { echo "hidden writer PR: 1 MiB를 넘는 응답 뒤편의 자기 PR(#382)을 보지 못했다"; echo "$output"; dump_calls; false; }
-  echo "$output" | jq -e '.observed.prs | length == 651' > /dev/null \
-    || { echo "incomplete enumeration: 651건(포크 650 + 우리 1)을 다 열거하지 못했다"; echo "$output"; false; }
+  # ★ 완전 열거는 **경계 있는 총계 요약**으로 증명한다 — 전량 노드 배열(`.observed.prs`)을 요구하지 않는다.
+  #   (R-37) 옛 증인은 `.observed.prs | length == 651`로 **전량 보관·직렬화를 동결**했다: 그건 R-36이
+  #   없애려는 바로 그 상주 메모리·로그 선형 증가다. 포크 650건은 **카운터로만**(crossRepo) 관측되고 노드는
+  #   버려졌으며, 신뢰 1건만 결정에 쓰였다 — 그래도 총 651건을 다 접었다(totalOpen)는 사실이 완전성의 증거다.
+  echo "$output" | jq -e '.observed.summary.totalOpen == 651' > /dev/null \
+    || { echo "incomplete enumeration: 651건(포크 650 + 우리 1)을 다 접지 못했다(summary.totalOpen)"; echo "$output"; false; }
+  echo "$output" | jq -e '.observed.summary.crossRepo == 650' > /dev/null \
+    || { echo "포크 650건이 카운터로 관측되지 않았다(summary.crossRepo)"; echo "$output"; false; }
+  echo "$output" | jq -e '.observed.summary.sameRepoTrusted == 1' > /dev/null \
+    || { echo "신뢰 PR이 정확히 1건으로 관측되지 않았다(summary.sameRepoTrusted)"; echo "$output"; false; }
+  # ★ 포화 응답에서도 **전량 노드 배열은 직렬화되지 않는다**(R-36 출력 경계) — `.observed.prs`는 없다.
+  echo "$output" | jq -e '.observed | has("prs") | not' > /dev/null \
+    || { echo "unbounded output: 포화 응답에서 전량 노드 배열(.observed.prs)이 직렬화됐다(R-36 위반)"; echo "$output"; false; }
+  # ★★ (R-37) **직렬화되는 audit 출력도 포크 수에 무관하다**(O(1)) — 이 픽스가 지키는 자기 불변식이다.
+  #   `observed`뿐 아니라 **`executed` 원장**도 경계 있어야 한다: read-only PR 열거(pullRequests 페이지 조회)를
+  #   원장에 담으면 executed가 페이지 수(=포크 수/100)에 비례해 워크플로 로그·부모 힙을 다시 키운다(억제 표면의
+  #   한 칸 아래 재현). 변이만 담기므로 pullRequests 페이지 조회는 executed에 **하나도** 없다(포크를 아무리
+  #   열어도 이 부분집합은 언제나 0 — commit-proof(object(oid)) 조회는 변이 인접 read라 그대로 남지만
+  #   pullRequests를 담지 않는다).
+  echo "$output" | jq -e '[.executed[] | select(contains("pullRequests"))] | length == 0' > /dev/null \
+    || { echo "unbounded audit: read-only PR 페이지 조회(pullRequests)가 executed에 기록됐다(포크 수에 비례 — R-36 위반)"; echo "$output"; false; }
+  # ★ 페이지네이션은 **경계 있는 카운터**(정수 하나 — 질의 문자열 배열이 아니다)로만 관측한다: 포크 650건이
+  #   7페이지로 접혔고(카운터=7), 그 값은 포크 수(crossRepo=650)보다 훨씬 작다 → audit 출력은 O(1)이다.
+  echo "$output" | jq -e '.graphqlPages == 7' > /dev/null \
+    || { echo "graphqlPages가 접은 페이지 수(7)로 관측되지 않았다"; echo "$output"; false; }
+  echo "$output" | jq -e '.graphqlPages < .observed.summary.crossRepo' > /dev/null \
+    || { echo "unbounded audit: graphqlPages(페이지 카운터)가 포크 수(crossRepo)에 비례해 커졌다"; echo "$output"; false; }
 
   # ② 그 결과 **정확한 판정**에 도달한다(고아 오인 0 — push·create 0회 + 무장 갭 수렴).
   action="$(echo "$JSON" | jq -r '.action')"
@@ -1325,6 +1353,11 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   }
   echo "$JSON" | jq -e '[.superseded[] | select(.number == 340 and .disarmed)] | length == 1' > /dev/null \
     || { echo "보고 누락: 회수한 형제가 superseded 보고에 없다"; echo "$JSON"; false; }
+  # ★★ (R-37) 회수 경로의 형제 열거도 **직렬화 audit 출력을 포크 수만큼 키우지 않는다**(O(1)): 포화된 형제
+  #   head의 read-only PR 페이지 조회(pullRequests)는 executed 원장에 하나도 남지 않는다 — 남으면 원장이
+  #   페이지 수(=포크 수/100)에 비례해 로그·힙을 다시 키운다(R-36 위반). 페이지네이션은 graphqlPages로만 관측한다.
+  echo "$JSON" | jq -e '[.executed[] | select(contains("pullRequests"))] | length == 0' > /dev/null \
+    || { echo "unbounded audit: 포화 형제의 read-only PR 조회(pullRequests)가 executed에 기록됐다(R-36 위반)"; echo "$JSON"; false; }
   # ② 메인 판정은 그대로 진행됐다(포화가 배포를 막지 못한다).
   action="$(echo "$JSON" | jq -r '.action')"
   [ "$action" = "create" ]
@@ -1500,7 +1533,8 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   [ "$status" -eq 0 ]
 
   # 하네스 확인: 포크 PR이 실제로 섞여 있고(관측됨), 신뢰받지 못했는가.
-  echo "$output" | jq -e '.observed.prs[0].trusted == false' > /dev/null
+  #   포크 노드는 버려지고 카운터로만 남는다(R-36) → 포크 5건이 요약에 관측되고 신뢰 PR이 따로 잡힌다.
+  echo "$output" | jq -e '.observed.summary.crossRepo == 5' > /dev/null
   echo "$output" | jq -e '.observed.trusted.number == 380' > /dev/null
 
   run arm_calls_num 380
@@ -3507,7 +3541,9 @@ setup_closable_sibling() {
   run_ensure
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.observed.trusted == null'
-  echo "$output" | jq -e '.observed.prs[0].trusted == false'
+  # 포크 노드는 버려지고 카운터로만 남는다(R-36) → 포크 1건이 요약에 관측되고 동일-레포 신뢰는 0건이다.
+  echo "$output" | jq -e '.observed.summary.crossRepo == 1'
+  echo "$output" | jq -e '.observed.summary.sameRepoTrusted == 0'
   echo "$output" | jq -e '.observed.remoteBranch == null'
   creates="$(count_calls gh pr create)"
   [ "$creates" -eq 1 ]

@@ -34,8 +34,20 @@
 // 열면 응답 총량이 그 버퍼를 넘고 gh가 죽는다** → 그 앱의 폴링이 매 주기 fail-closed한다.
 // **GraphQL 계층에서 없앤 포크 포화 무기가 프로세스 계층에 그대로 재현된 것이다.**
 // → 이제 `--paginate --slurp`을 쓰지 않는다: 한 페이지 받고 → 줄이고 → `endCursor`로 다음 페이지
-//   (fetchConnection). **캡처 하나 = 한 페이지(first:100)** 라 공격자가 키울 수 없고, 열거의 완전성·강한
+//   (foldConnection). **캡처 하나 = 한 페이지(first:100)** 라 공격자가 키울 수 없고, 열거의 완전성·강한
 //   일관성·검색 API 금지는 하나도 바뀌지 않는다. 버퍼를 키우는 건 답이 아니다(더 큰 포화로 다시 넘긴다).
+//
+// ★★★ 그런데 그 상한은 **또 한 층 위에서 되살아난다**(structure r11 R-36) — 그래서 페이지를 **접는다** ──
+// 캡처를 페이지로 경계지어도, 예전 구현은 **모든 페이지를 pages[]에** 모으고 열거가 끝난 **뒤에야**
+// **모든 노드를 out[]에** 쌓은 다음 그 전량을 파싱·직렬화했다. 그러면 같은 head의 포크 PR이 **부모
+// 프로세스의 Bun 힙과 워크플로 로그를 노드 수에 선형으로** 키운다 → executor가 죽거나 로그가 고갈될 때까지
+// 간다. **억제 무기가 이번엔 부모 프로세스로 올라간 것이다.** → 이제 페이지를 받는 **즉시** 파싱·검증·접어
+//   결정에 필요한 사실만 남기고(신뢰 PR + 경계 카운터) **원본 페이지·미신뢰 포크 노드는 버린다**
+//   (foldConnection/scanReducer). → **직렬화되는 출력**(`observed`와 `executed` 원장 **둘 다**)에는 결정에
+//   필요한 경계 있는 사실만 남는다: 포크는 요약 카운터로, 페이지네이션은 `graphqlPages`(정수 하나)로만 관측하고,
+//   read-only 페이지 조회는 원장에 **남기지 않는다**(남기면 executed가 페이지 수에 비례해 로그·힙을 다시 키운다).
+//   힙에 남는 건 사이클 검출용 커서 집합(seenCursors)뿐이고 그건 **페이지 수** 경계다 — "상주 메모리가 포크
+//   수와 무관"이라고 넘겨짚지 않는다(정직한 진술 = 직렬화되는 상태만 경계 있는 결정 사실이다).
 // ⚠️ 검색 API는 금지다: `gh pr list --author`는 내부적으로 `search(...)`로 갈아탄다(GH_DEBUG=api 실측).
 //    검색 인덱스는 **결과적 일관성**이라 직전 주기가 만든 PR이 안 잡히면 **공격자 없이도** 거짓 부재가 난다.
 //    connection 질의는 primary datastore = **강한 일관성**이다.
@@ -366,7 +378,16 @@ const branch = args.reconcileOnly ? "" : `bump-poll/${APP}-${TAG}`;
 const ref = `refs/heads/${branch}`;
 
 // 실행한 명령 원장 — stdout JSON에 실어 호출부/테스트가 "무엇을 변이했는가"를 검증한다.
+// ⚠️ 여기 담는 건 **변이**(create/push/arm/disarm/close·ls-remote)뿐이다 — 그 수는 경계 있다.
+//    read-only GraphQL 페이지 조회(foldConnection)는 **여기 남기지 않는다**(runSoft audit=false): 남기면
+//    원장이 포크 수(=페이지 수)에 비례해 커져 **부모 힙과 워크플로 로그를 다시** 키운다(R-36이 없앤 억제
+//    표면의 한 칸 아래 재현). 페이지네이션은 아래 graphqlPages 카운터 하나로만 관측한다.
 const executed: string[] = [];
+
+// GraphQL 페이지네이션의 **경계 있는 관측**(R-36): 이번 run에서 몇 페이지를 접었는가 — **정수 하나**다
+// (질의 문자열의 배열이 아니다). 값은 페이지 수(≈ 열린 PR 총수/100)라 포크가 많으면 커지지만, 직렬화·힙
+// 비용은 언제나 O(1)이다(한 정수). read-only 조회를 executed에서 뺀 자리를 이 카운터가 대신 관측한다.
+let graphqlPages = 0;
 
 function run(cmd: string, a: string[], what: string): string {
   const r = runSoft(cmd, a);
@@ -414,8 +435,10 @@ const MAX_CAPTURE = 4 * 1024 * 1024;
 // 해제를 먼저 낸 다음에 fail-closed한다.
 // ⚠️ 캡처 실패(ENOBUFS)는 `r.error`로 선다 → 아래 첫 가드가 잡는다. 살해된 자식은 status=null이라
 //    둘째 가드(`status !== 0`)에도 걸린다. **잘린 stdout을 성공으로 읽는 경로는 없다.**
-function runSoft(cmd: string, a: string[]): { failure: string | null; stdout: string } {
-  executed.push([cmd, ...a].join(" "));
+// audit=false는 **read-only 페이지 조회 전용**(foldConnection) — 그 조회만 원장에서 뺀다. 변이 경로는
+// 전부 기본값(audit=true)으로 예전 그대로 원장에 남는다(create/push/arm/disarm/close·ls-remote 무변경).
+function runSoft(cmd: string, a: string[], audit = true): { failure: string | null; stdout: string } {
+  if (audit) executed.push([cmd, ...a].join(" "));
   const r = spawnSync(cmd, a, { encoding: "utf8", maxBuffer: MAX_CAPTURE });
   if (r.error) return { failure: `실행 실패: ${r.error.message}`, stdout: "" };
   if (r.stderr) process.stderr.write(r.stderr);
@@ -751,42 +774,24 @@ function parsePrNode(pr: any, at: string, requireMergeState: boolean): ParseResu
   };
 }
 
-// 수집된 페이지들 → 관측 사실 목록. **완전 열거의 증명은 마지막 페이지의 hasNextPage === false**다:
-// true로 끝났다면 우리가 커서를 더 따라가지 못한 것이므로(아래 fetchConnection의 이탈 조건) "열린 PR 없음"을
-// 증명할 수 없다 → 실패다(조용한 create/adopt 금지).
-function parsePrPages(pages: any[], requireMergeState: boolean): ParseResult<ObservedPr[]> {
-  if (pages.length === 0) return parseFail("gh api graphql이 페이지를 하나도 주지 않았다(조회 실패로 본다)");
-  const out: ObservedPr[] = [];
-  for (let p = 0; p < pages.length; p++) {
-    const page = pages[p];
-    const at = `page[${p}]`;
-    if (page === null || typeof page !== "object" || Array.isArray(page)) return parseFail(`${at} 객체가 아님`);
-    if (page.errors !== undefined) return parseFail(`${at}.errors — GraphQL 오류 응답: ${JSON.stringify(page.errors)}`);
-    const conn = page?.data?.repository?.pullRequests;
-    if (conn === null || typeof conn !== "object") {
-      return parseFail(`${at}.data.repository.pullRequests 없음(레포 해석 실패 또는 스키마 드리프트)`);
-    }
-    const info = conn.pageInfo;
-    if (info === null || typeof info !== "object" || typeof info.hasNextPage !== "boolean") {
-      return parseFail(`${at}.pageInfo.hasNextPage 불리언 아님 — 완전 열거를 증명할 수 없다`);
-    }
-    // 마지막 페이지가 "더 있다"고 하면 열거가 끊긴 것이다 — 우리가 커서를 더 따라가지 못했다는 뜻이다.
-    if (p === pages.length - 1 && info.hasNextPage === true) {
-      return parseFail(
-        "마지막 페이지가 hasNextPage=true다 — 페이지네이션이 끝까지 가지 못했다"
-        + `(endCursor를 이어받지 못했다: ${JSON.stringify(info.endCursor ?? null)}). `
-        + "열거가 불완전하면 '열린 PR 없음'을 증명할 수 없다",
-      );
-    }
-    if (!Array.isArray(conn.nodes)) return parseFail(`${at}.nodes가 배열이 아님`);
-    for (let i = 0; i < conn.nodes.length; i++) {
-      const node = parsePrNode(conn.nodes[i], `${at}.nodes[${i}]`, requireMergeState);
-      if (!node.ok) return node;
-      out.push(node.value);
-    }
-  }
-  return { ok: true, value: out };
-}
+// ══ PR 관측은 **스트리밍 fold**다 — 페이지를 받는 즉시 접고, 원본을 버린다(structure r11 R-36) ═══════
+// R-33에서 subprocess **캡처**는 페이지로 경계지었지만, 조회는 여전히 **모든 페이지를 pages[]에** 모아
+// 두고 열거가 끝난 **뒤에야** 그것을 훑어 **모든 노드를 out[]에** 쌓았다(옛 parsePrPages). 그러면 같은
+// head의 포크 PR이 **부모 프로세스의 Bun 힙과 stdout(로그)을 노드 수에 선형으로** 키운다 → executor가
+// 죽거나 워크플로 로그가 고갈될 때까지 간다. **억제 무기가 한 계층 위(부모 프로세스)로 올라갔을 뿐이다.**
+// 승인된 설계는 "page → reduce → cursor"인데 구현은 "page → 전량 보관 → 전량 파싱·출력"이었다.
+// → 이제 각 페이지를 받는 **즉시** 파싱·검증·접어서 **결정에 필요한 사실만** 남긴다(신뢰 PR 후보 +
+//   **경계 있는 카운터**). **원본 페이지와 미신뢰 포크 노드는 버린다**(누적 보관 금지) → **직렬화되는 출력**
+//   (`observed`와 `executed` 원장 둘 다)은 포크 수와 **무관**하다(포크는 요약 카운터로, 페이지네이션은
+//   graphqlPages 정수 하나로만 관측). 힙에 남는 건 사이클 검출용 커서 집합뿐 — 그건 **페이지 수** 경계라
+//   포크 수 자체와 무관하다고 넘겨짚지 않는다.
+// ⚠️ 완전 열거의 증명은 여전히 **마지막 페이지의 hasNextPage === false**다(아래 foldConnection이 그 판정을
+//    한 곳에 둔다). true로 끝났다면 커서를 더 못 따라간 것 → "열린 PR 없음"을 증명할 수 없다(조용한 create/adopt 금지).
+// ⚠️ 관측 실패(파싱·스키마 드리프트·author 부재)는 fold 안에서도 지금 계약 그대로 전파한다:
+//    본 질의 = fail-closed / 형제·reconcile = revocationBlind. 어느 페이지에서 나든 즉시 값으로 돌려세운다.
+
+// 한 페이지의 노드 배열을 누적기 A에 접는다. 실패는 그대로 전파한다(호출부가 경로별로 처리한다).
+type PageReducer<A> = (acc: A, nodes: any[], at: string) => ParseResult<A>;
 
 // ══ 조회는 **한 페이지씩** 소비한다 — 캡처의 경계가 곧 조회의 상한이다(R-33) ═══════════════════
 // 예전엔 `gh api graphql --paginate --slurp`로 **전 페이지를 한 subprocess 캡처에** 받았다. 그건 위 상한
@@ -803,10 +808,18 @@ function parsePrPages(pages: any[], requireMergeState: boolean): ParseResult<Obs
 // ⚠️ 커서는 `-f`(raw-field)로 넘긴다 — `-F`는 값이 숫자꼴이면 **정수로 타입 추론**해 `$endCursor:String`과
 //    타입이 어긋난다(그러면 gh가 죽고, 그 실패는 곧 배포 정지다).
 // ⚠️ 검색 API 금지·강한 일관성은 그대로다: 질의는 여전히 repository.pullRequests connection 하나뿐이다.
-function fetchConnection(query: string, head: string, what: string): ParseResult<any[]> {
-  const pages: any[] = [];
+// ⚠️ 페이지를 받는 즉시 **접는다**(R-36): 원본 page·포크 노드는 이 반복이 끝나며 GC된다(pages[]·out[]
+//    누적 제거) → 부모 프로세스가 **포크 노드를 노드 수만큼 쌓아두지 않는다**. 힙에 남는 상태는 사이클
+//    검출용 커서 집합(seenCursors)과 카운터뿐이고 그건 페이지 수 경계다 — read-only 조회는 원장(executed)에
+//    남기지 않고 graphqlPages 카운터로만 관측한다(그래서 직렬화되는 audit 출력도 포크 수에 비례하지 않는다).
+function foldConnection<A>(
+  query: string, head: string, what: string,
+  init: () => A, reduce: PageReducer<A>,
+): ParseResult<A> {
+  let acc = init();
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
+  let pageIndex = 0;
   for (;;) {
     const a = [
       "api", "graphql",
@@ -815,7 +828,10 @@ function fetchConnection(query: string, head: string, what: string): ParseResult
     ];
     // 첫 페이지는 커서를 넘기지 않는다($endCursor는 nullable → after:null = 처음부터).
     if (cursor !== null) a.push("-f", `endCursor=${cursor}`);
-    const r = runSoft("gh", a);
+    // read-only 페이지 조회 — **원장에 남기지 않는다**(audit=false, R-36): 이 조회를 executed에 담으면
+    // 페이지(=포크) 수에 비례해 로그·힙이 커진다. 관측은 graphqlPages(정수 하나)로만 한다.
+    const r = runSoft("gh", a, false);
+    graphqlPages++; // 이번 run이 접은 페이지 수(경계 있는 카운터 — 질의 문자열은 버린다).
     if (r.failure !== null) return parseFail(`${what} ${r.failure}`);
     if (r.stdout.trim() === "") return parseFail(`${what} 빈 출력(조회 실패로 본다)`);
     let page: any;
@@ -824,16 +840,67 @@ function fetchConnection(query: string, head: string, what: string): ParseResult
     } catch (e) {
       return parseFail(`${what} JSON 파싱 실패: ${(e as Error).message}`);
     }
-    pages.push(page);
+    // ── 페이지 구조 검증 → **즉시 접기**. 이 반복이 끝나면 page(포크 노드 포함)는 참조가 끊겨 버려진다.
+    const at = `page[${pageIndex}]`;
+    if (page === null || typeof page !== "object" || Array.isArray(page)) return parseFail(`${at} 객체가 아님`);
+    if (page.errors !== undefined) return parseFail(`${at}.errors — GraphQL 오류 응답: ${JSON.stringify(page.errors)}`);
+    const conn = page?.data?.repository?.pullRequests;
+    if (conn === null || typeof conn !== "object") {
+      return parseFail(`${at}.data.repository.pullRequests 없음(레포 해석 실패 또는 스키마 드리프트)`);
+    }
+    const info = conn.pageInfo;
+    if (info === null || typeof info !== "object" || typeof info.hasNextPage !== "boolean") {
+      return parseFail(`${at}.pageInfo.hasNextPage 불리언 아님 — 완전 열거를 증명할 수 없다`);
+    }
+    if (!Array.isArray(conn.nodes)) return parseFail(`${at}.nodes가 배열이 아님`);
+    const stepped = reduce(acc, conn.nodes, at);
+    if (!stepped.ok) return stepped;
+    acc = stepped.value;
 
-    // 다음 페이지로 갈 수 있는가. **여기선 판정하지 않는다** — 못 가면 멈추고, 완전성은 파서가 본다.
-    const info = page?.data?.repository?.pullRequests?.pageInfo;
-    if (info === null || typeof info !== "object" || info.hasNextPage !== true) return { ok: true, value: pages };
+    // ── 완전성 판정은 **한 곳에만** 산다: 더 못 가면 마지막 페이지의 hasNextPage로 결정한다.
+    // 상한(페이지 캡)은 **두지 않는다** — 그게 곧 되살아난 배포 정지 무기다. 종료는 오직 hasNextPage === false다.
+    if (info.hasNextPage !== true) return { ok: true, value: acc }; // 완전 열거 증명(hasNextPage=false)
     const next = info.endCursor;
-    if (typeof next !== "string" || next === "" || seenCursors.has(next)) return { ok: true, value: pages };
+    // 커서를 이어받지 못하면(누락·빈 문자열·**전진하지 않는 커서**) 마지막 페이지가 hasNextPage=true인 채
+    // 끝난 것이다 = 열거 불완전 → fail-closed. 무한 루프는 여기서 구조적으로 불가능하다.
+    if (typeof next !== "string" || next === "" || seenCursors.has(next)) {
+      return parseFail(
+        "마지막 페이지가 hasNextPage=true다 — 페이지네이션이 끝까지 가지 못했다"
+        + `(endCursor를 이어받지 못했다: ${JSON.stringify(next ?? null)}). `
+        + "열거가 불완전하면 '열린 PR 없음'을 증명할 수 없다",
+      );
+    }
     seenCursors.add(next);
     cursor = next;
+    pageIndex++;
   }
+}
+
+// ── 관측 사실의 접이식 누적기 — **포크 노드는 카운터로만**(R-36) ──────────────────────────────────
+// 동일-레포 PR(신뢰·비신뢰)은 **쓰기 권한이 필요**해 포화될 수 없다 → 배열로 남겨도 경계 있다.
+// 포크(cross-repo)는 공격자가 무한정 열 수 있다 → **노드는 버리고 수만 센다**(포화 벡터를 힙·로그에서 없앤다).
+type PrScan = {
+  trusted: ObservedPr[];            // 동일-레포 + writer Bot + 같은 base(식별·판정·무장 대상 — 정상 ≤ 1)
+  untrustedSameRepo: ObservedPr[];  // 동일-레포 비신뢰(사람·다른 봇·다른 base) — 파괴 가드의 입력
+  totalOpen: number;                // 열린 PR 총수(포크 포함) — 카운터
+  crossRepo: number;                // 포크(cross-repo) 수 — 노드는 버렸다
+};
+const newScan = (): PrScan => ({ trusted: [], untrustedSameRepo: [], totalOpen: 0, crossRepo: 0 });
+// requireMergeState는 **본 질의 전용**(그 질의만 mergeStateStatus를 묻는다) → 파서 인자로 넘긴다.
+function scanReducer(requireMergeState: boolean): PageReducer<PrScan> {
+  return (acc, nodes, at) => {
+    for (let i = 0; i < nodes.length; i++) {
+      const parsed = parsePrNode(nodes[i], `${at}.nodes[${i}]`, requireMergeState);
+      if (!parsed.ok) return parsed; // 스키마 드리프트·author 부재 = 관측 실패(호출부가 fail-closed / revocationBlind)
+      const pr = parsed.value;
+      acc.totalOpen++;
+      // ★ 포크 노드는 접는 즉시 **버린다** — 포화 벡터가 힙·로그를 노드 수에 비례해 키우지 못하게(R-36).
+      if (pr.isCrossRepository) { acc.crossRepo++; continue; }
+      if (isTrustedPr(pr, args.writer, args.base)) acc.trusted.push(pr);
+      else acc.untrustedSameRepo.push(pr);
+    }
+    return { ok: true, value: acc };
+  };
 }
 
 // `git ls-remote --heads origin <branch>` → "<40-hex>\trefs/heads/<branch>"(없으면 빈 출력).
@@ -1083,16 +1150,16 @@ function humanTouchOf(pr: any): string | null {
 // 것이 아니다(포크·사람·다른 base)"를 보고에서 가른다. 둘 다 변이는 0이다.
 type BranchObservation = { pr: ObservedPr | null; openCount: number };
 function observeBranchPr(head: string): ParseResult<BranchObservation> {
-  const fetched = fetchConnection(SIBLING_PR_QUERY, head, `PR 조회(${head})`);
-  if (!fetched.ok) return fetched;
-  // mergeStateStatus는 이 질의에 없다(회수·close엔 필요 없다) → requireMergeState=false.
-  const parsed = parsePrPages(fetched.value, false);
-  if (!parsed.ok) return parseFail(`PR 조회 파싱 실패(${head}): ${parsed.why}`);
-  const mine = parsed.value.filter((pr) => isTrustedPr(pr, args.writer, args.base));
+  // 스트리밍 fold(R-36): mergeStateStatus는 이 질의에 없다(회수·close엔 필요 없다) → requireMergeState=false.
+  // 포크 노드는 scanReducer가 카운터로만 접는다 → 포화된 형제 head도 상주 메모리를 키우지 못한다(W71).
+  const scanned = foldConnection<PrScan>(SIBLING_PR_QUERY, head, `PR 조회(${head})`, newScan, scanReducer(false));
+  // 조회·파싱 실패 모두 head 문맥을 실어 돌려준다(호출부가 revocationBlind로 접을 때 어느 브랜치인지 남긴다).
+  if (!scanned.ok) return parseFail(`PR 조회 파싱 실패(${head}): ${scanned.why}`);
+  const mine = scanned.value.trusted;
   if (mine.length > 1) {
     return parseFail(`${head}에 신뢰 PR이 ${mine.length}건이다(GitHub 계약상 불가능) — 모호해서 건드리지 않는다`);
   }
-  return { ok: true, value: { pr: mine[0] ?? null, openCount: parsed.value.length } };
+  return { ok: true, value: { pr: mine[0] ?? null, openCount: scanned.value.totalOpen } };
 }
 
 // 스윕이 관측·변이한 형제의 상태(테스트/운영이 stdout으로 검증한다).
@@ -1390,23 +1457,25 @@ if (args.reconcileOnly) {
     // R-32: **회수만** 따로 뽑은 목록(두 모드가 같은 키로 보고한다) — 무엇을 회수하지 못했는가.
     revocationFailures,
     executed,
+    // R-36: 페이지네이션의 **경계 있는 관측**(정수 하나) — read-only 조회는 executed에 담지 않는다.
+    graphqlPages,
   }, null, 2));
   // 회수는 보안 속성이다 → 한 건이라도 못 했으면 run은 **빨개야** 한다(telegram 알림이 발화한다).
   process.exit(allFailures.length > 0 ? 1 : 0);
 }
 
-// ── ① 조회 — 변이보다 **먼저**, 상한 없이 **전부** 수집한다(순서도 완전성도 계약이다: R-4) ────────
-// fetchConnection이 hasNextPage=false까지 **한 페이지씩** 따라간다(R-33: 캡처 하나 = 한 페이지).
+// ── ① 조회 — 변이보다 **먼저**, 상한 없이 **전부** 접는다(순서도 완전성도 계약이다: R-4) ────────
+// foldConnection이 hasNextPage=false까지 **한 페이지씩** 따라가며 페이지를 받는 즉시 접는다(R-33: 캡처
+// 하나 = 한 페이지 / R-36: 원본 페이지·포크 노드는 버려 **직렬화되는 출력**(observed·executed 둘 다)이
+// 포크 수와 무관하다 — read-only 조회는 원장 대신 graphqlPages 카운터로만 관측한다).
 // 상한이 없으므로 포크 PR이 몇 건이든(200건이든 2000건이든, 응답 총량이 몇 MiB든) 우리 PR은 반드시 이
 // 열거 안에 있다 → 포크로는 배포를 정지시킬 수 없다.
 // owner/repo는 gh의 `{owner}`/`{repo}` 플레이스홀더가 현재 레포에서 채운다(라이브 확인).
 // ⚠️ 본 경로의 관측 실패는 **즉시 fail-closed**다(회수 경로와 갈리는 유일한 지점 — 여기서 계속 가면
 //    그건 곧 "사실을 모른 채 create/adopt"이고, 그게 이 픽스가 없애는 중복 PR 버그 그 자체다).
-const fetchedPrs = fetchConnection(PR_QUERY, branch, "gh api graphql (pullRequests)");
-if (!fetchedPrs.ok) inputError(fetchedPrs.why);
-const parsedPrs = parsePrPages(fetchedPrs.value, true);
-if (!parsedPrs.ok) inputError(parsedPrs.why);
-const prs = parsedPrs.value;
+const scannedPrs = foldConnection<PrScan>(PR_QUERY, branch, "gh api graphql (pullRequests)", newScan, scanReducer(true));
+if (!scannedPrs.ok) inputError(scannedPrs.why);
+const mainScan = scannedPrs.value;
 const remoteBranch = parseLsRemote(run("git", ["ls-remote", "--heads", args.remote, branch], "git ls-remote"));
 
 // ── ①-b superseded 형제 열거(관측) — 변이 0. 실패는 **계속하되 조용하지 않다** ────────────────
@@ -1490,8 +1559,13 @@ for (const s of siblings) {
   s.disarmed = true;
 }
 
-const observedPrs = prs.map((pr) => ({ ...pr, trusted: isTrustedPr(pr, args.writer, args.base) }));
-const trustedAll = observedPrs.filter((pr) => pr.trusted);
+// 판정 입력은 fold가 이미 접어 둔 사실뿐이다(R-36): 신뢰 PR·동일-레포 비신뢰 PR·경계 카운터.
+// 동일-레포 PR에만 진단용 `trusted` 플래그를 붙인다 — 포크 노드는 애초에 버려졌다(요약 카운터로만 관측).
+const trustedAll = mainScan.trusted;
+const sameRepoPrs = [
+  ...mainScan.trusted.map((pr) => ({ ...pr, trusted: true })),
+  ...mainScan.untrustedSameRepo.map((pr) => ({ ...pr, trusted: false })),
+];
 // GitHub은 같은 head→base 쌍에 열린 PR을 1개만 허용한다 → 신뢰 PR이 2개 이상이면 우리의 신뢰 경계나
 // GitHub의 계약 중 하나가 깨진 것이다. 아무거나 고르면 나머지 하나는 조용히 방치된다(무장 갭·좀비).
 if (trustedAll.length > 1) {
@@ -1516,7 +1590,7 @@ const trusted = trustedAll[0] ?? null;
 //    그래서 조회를 base로 필터하지 않고(위 PR_QUERY), 여기서 head 전체의 동일-레포 PR을 본다.
 //    (다른 base의 writer PR을 "우리 것"으로 오인하지 않는 건 isTrusted의 base 검사가 맡는다 — 식별과
 //     소유권은 다른 질문이다: "우리 PR인가?"는 (head, base), "이 브랜치를 밀어도 되나?"는 head다.)
-const untrustedSameRepo = observedPrs.filter((pr) => !pr.trusted && !pr.isCrossRepository);
+const untrustedSameRepo = mainScan.untrustedSameRepo;
 if (trusted === null && untrustedSameRepo.length > 0) {
   const who = untrustedSameRepo
     .map((p) => `#${p.number}(${p.author?.login ?? "삭제된 계정"} → ${p.baseRefName})`)
@@ -1562,8 +1636,8 @@ if (trusted === null && untrustedSameRepo.length > 0) {
 //                     새 커밋도, close도 전부 사람의 선택지다. 우리는 보고만 한다(skip + reason).
 //    (관측 불가도 "흔적 있음"으로 접힌다 — 모르는 상태에서 남의 리뷰를 파괴하지 않는다.)
 const STALE_STATES = new Set(["DIRTY", "BEHIND"]);
-// ⚠️ 본 질의는 mergeStateStatus를 **반드시** 담는다(parsePrPages(…, requireMergeState=true)가 없으면
-//    fail-closed) → 여기 도달한 값은 non-null이다. 타입만 nullable인 이유는 파서를 형제 질의와
+// ⚠️ 본 질의는 mergeStateStatus를 **반드시** 담는다(scanReducer(true)의 parsePrNode requireMergeState가
+//    없으면 fail-closed) → 여기 도달한 값은 non-null이다. 타입만 nullable인 이유는 파서를 형제 질의와
 //    **공유**하기 때문이다(그 질의는 이 필드를 묻지 않는다 — R-34의 통합). 판정에 쓰기 전에 좁힌다.
 const staleState = (pr: ObservedPr): boolean => pr.mergeStateStatus !== null && STALE_STATES.has(pr.mergeStateStatus);
 type Decision = "create" | "adopt" | "skip" | "rebuild";
@@ -1790,7 +1864,16 @@ console.log(JSON.stringify({
   reason,
   branch,
   observed: {
-    prs: observedPrs,
+    // R-36: 출력은 **경계 있게** — 미신뢰 포크 노드 배열은 직렬화하지 않는다(포화 응답이 로그를 노드 수에
+    // 비례해 키우지 못하게). 대신 **총계 요약** + **결정에 쓰인 동일-레포 PR**(쓰기 권한 필요 → 경계)만 싣는다.
+    summary: {
+      totalOpen: mainScan.totalOpen,      // 열린 PR 총수(포크 포함)
+      crossRepo: mainScan.crossRepo,      // 포크(cross-repo) 수 — 노드는 접는 즉시 버렸다
+      sameRepoTrusted: mainScan.trusted.length,
+      sameRepoUntrusted: mainScan.untrustedSameRepo.length,
+    },
+    // 동일-레포 PR만(진단용 trusted 플래그 포함). 포크는 위 summary.crossRepo로만 관측한다.
+    sameRepoPrs,
     trusted: trusted
       ? {
         number: trusted.number,
@@ -1812,6 +1895,10 @@ console.log(JSON.stringify({
   // R-32: **회수하지 못한 무장**(두 모드가 같은 키로 보고한다). 비어 있지 않으면 아래에서 비-0 종료다.
   revocationFailures,
   executed,
+  // R-36: 페이지네이션의 **경계 있는 관측**(정수 하나 — 질의 문자열 배열이 아니다). read-only 페이지
+  // 조회는 executed(원장)에 남기지 않으므로, 몇 페이지를 접었는지는 이 카운터로만 관측한다. 포화 응답에서도
+  // 직렬화 비용은 O(1)이다 → audit 출력(executed·graphqlPages)은 포크 수에 비례해 커지지 않는다(W70).
+  graphqlPages,
 }, null, 2));
 
 // ── ③-f 회수 실패 = **보안 사실** → 처리는 다 끝내고, run은 빨갛게 끝낸다(R-32) ──────────────────

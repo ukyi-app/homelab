@@ -1,20 +1,46 @@
 {
-  "ok": false,
-  "status": "review-incomplete",
+  "ok": true,
+  "status": "ok",
   "kind": "structure",
-  "verdict": null,
-  "summary": null,
+  "verdict": "needs-attention",
+  "summary": "No-ship: pagination is subprocess-bounded but still unbounded in Bun heap and output, preserving the fork-saturation suppression path.",
   "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
   "planInDiff": null,
-  "reviewedFileCount": 45,
+  "reviewedFileCount": 46,
   "target": "branch diff against main",
-  "reviewedSha": "dc54c0bf895daeea03f1e95497651902aa861dfc",
-  "reviewedTree": "b7e514bac03ed73ef34c1237364da7bef2c00e85",
-  "codexStatus": 1,
-  "parseError": "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Jul 20th, 2026 4:42 AM.",
-  "findingCount": 0,
+  "reviewedSha": "a4f0b8a1c452a6ca2d2d0b21688f69962ee5f692",
+  "reviewedTree": "28810360ad23b7236eab149b35597e7af504430a",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
   "planFindingCount": 0,
-  "findings": [],
-  "next_steps": [],
-  "hint": "Codex returned no usable verdict (codex run failed, was empty, or output did not parse). Re-run; if it persists, check `/codex:setup`."
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: exhaustive pagination is re-bounded by the parent process",
+      "body": "`fetchConnection` retains every full attacker-controlled page in `pages` and parses them only after enumeration. The normalized records are subsequently retained and serialized too. Same-head fork PRs can therefore grow Bun heap and workflow output linearly until the executor is killed or logs are exhausted, suppressing polling every cycle. This is new evidence beyond R-33: the accepted design said “page → reduce → cursor,” but the implementation performs “page → retain all → parse/output all.”",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 806,
+      "line_end": 827,
+      "confidence": 0.99,
+      "recommendation": "Fold and validate each page immediately, retaining only decision-relevant trusted/same-repository facts plus bounded counters. Discard raw pages and emit bounded diagnostics; do not introduce a page cap.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "medium",
+      "title": "Test-quality: W70 pins the vulnerable representation instead of public behavior",
+      "body": "The meaningful contract is already covered by finding PR #382 on the last page and reaching skip with no push/create. Requiring `.observed.prs` to contain all 651 nodes additionally freezes retention and serialization of every untrusted fork. This wrong-seam assertion makes the bounded streaming design fail and forces future work to choose between preserving the resource-exhaustion surface or editing a locked regression.",
+      "file": "tools/tests/test_ensure-bump-pr.bats",
+      "line_start": 1271,
+      "line_end": 1275,
+      "confidence": 0.98,
+      "recommendation": "Rebuild the RED baseline with the same saturated input and end-to-end behavior, but assert a bounded total-count summary and last-page trusted result instead of the full node array. Keep that revised contract byte-identical across RED→GREEN.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Implement a streaming page reducer with bounded result/output state.",
+    "Re-freeze the corrected saturation witness before applying the production fix.",
+    "Regenerate the RED/GREEN lock and verification records, then rerun the structure gate."
+  ]
 }
