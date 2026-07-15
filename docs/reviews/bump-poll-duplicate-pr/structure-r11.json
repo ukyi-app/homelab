@@ -1,0 +1,20 @@
+{
+  "ok": false,
+  "status": "review-incomplete",
+  "kind": "structure",
+  "verdict": null,
+  "summary": null,
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 45,
+  "target": "branch diff against main",
+  "reviewedSha": "dc54c0bf895daeea03f1e95497651902aa861dfc",
+  "reviewedTree": "b7e514bac03ed73ef34c1237364da7bef2c00e85",
+  "codexStatus": 1,
+  "parseError": "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Jul 20th, 2026 4:42 AM.",
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [],
+  "hint": "Codex returned no usable verdict (codex run failed, was empty, or output did not parse). Re-run; if it persists, check `/codex:setup`."
+}
