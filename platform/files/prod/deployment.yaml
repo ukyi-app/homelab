@@ -25,7 +25,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: files
-          image: ghcr.io/ukyi-app/files:sha-d941a22f39557a0bc0b474e1d3fb35d79d8f9343@sha256:7c38b5b1dffb94bcc26620756a6ba130d8dfe9ec12675ffd77485b60749a1c3b # sha-d941a22 + digest 인라인 핀(불변)
+          image: ghcr.io/ukyi-app/files:sha-7796b81c1f3303ff6d7719af1d1eb72789878dfc@sha256:46fac73eaeeee483a0ffbbaa71a7f80674e8f00e6a0f06bac92904912b1b2bb7 # sha-7796b81 (F-14 reconcile-vanished-entry-aborts-pass 픽스) + digest 인라인 핀(불변)
           ports:
             - { name: internal, containerPort: 8080 }
             - { name: public, containerPort: 8081 }
