@@ -183,6 +183,21 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Review Decision Log
 
+### Codex Structure Review — r12: needs-attention → 4건 전부 Accept (owner 2026-07-15)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-38 | high | `Blocker: per-item isolation shares the Git transaction` — 서브셸이 **종료 상태**는 격리하지만 매 반복이 **하나의 worktree·index를 공유**한다. `bump-tag`가 앱 파일 + **항상 add되는 digest-exporter**를 쓴 뒤 이후 명령이 실패하면 상태가 남고, 다음 항목이 **정리 없이** `git checkout main`을 해 앞 앱 변경을 물려받거나 checkout 실패로 이후 앱을 굶긴다. H-2가 만든 누출. `CONTRIBUTING.md:39-41`이 이 루프를 "테스트된 도구 경계"로 명시 | **Accept (in-band)** | 각 항목 시작에 **`git checkout -f main`** finally 식 정리로 tracked+staged+untracked 잔여를 복원. 정리 실패는 그 항목만 fail-closed(다른 항목 안 굶김), 실패는 집계해 끝에서 run 빨강. "테스트된 worktree-격리 러너"는 **F-1로 분리** |
+| R-39 | medium | `Test-quality: H-2 proves continuation, not transaction isolation` — 증인이 stub commit **이후에만** 실패를 주입해 **연속성**만 증명, FS/index 상태 누출을 탐지 못함 | **Accept** | 증인을 **임시 실제 git repo** 하네스로 격상 — `bump-tag` 쓰기 후·`git add` 후 실패를 주입하고 **다음 항목 커밋·diff에 앞 항목 경로 0**임을 검증. "teeth" 메타 증인이 정리 제거 시 누출 발생을 증명(regression) |
+| R-40 | high | `Blocker: fork suppression moved to API and wall-clock budgets` — `foldConnection`이 바이트는 바운드했지만 여전히 **공격자 통제 페이지마다 `gh api graphql`을 하나씩** `hasNextPage=false`까지 태운다 → 폴링·회수가 포크 수에 비례해 API 예산·서브프로세스·벽시계 소모 → 충분한 포크면 writer PR 찾기 전 매 주기 사망 | **Accept (종결)** | `pullRequests(headRefName:)` 이름-매치(포크 오염 가능)를 **`repository.ref(refs/heads/<branch>).associatedPullRequests`** 로 대체. ★ **라이브 실측**: `associatedPullRequests`는 **head-연결**이다(`refs/heads/main` = 열린 PR 9건의 base지만 associated **0건**; 실제 열린 PR head로는 그 PR + 필드 전부 반환). fork PR의 head는 우리 `refs/heads/*`가 아니므로 **구조적으로 배제** → **질의 작업이 포크 수와 무관**. 형제 스윕도 `git ls-remote`(우리 ref만)로 열거 후 각각 ref-조회. 사람-흔적은 신뢰 후보 확정 후에만. 완전성·강한 일관성·검색 금지·소유권·사람흔적·스트리밍 fold·감사 경계 보존 |
+| R-41 | medium | `Test-quality: W70 freezes attacker-linear enumeration` — W70이 650 포크 전량 카운트·7페이지·특정 커서를 요구 → `graphqlPages < crossRepo`가 여전히 선형 알고리즘을 통과. 취약 메커니즘을 고정 | **Accept** | W70/W71을 **fork-독립 질의-작업 경계**로 재작성 — `graphqlPages == 1`(우리 PR 1건 = 1페이지)·`crossRepo == 0`(구조적 배제)·`ref=refs/heads/<branch>` 질의·`headRefName:` 부재를 단언. 포화 입력·종단 결정 유지, RED→GREEN 바이트 동일 |
+
+**★ 실행 환경 사건**: R-38/R-40 워크플로가 **월 지출 한도**로 5 에이전트 전부 실패 — 다만 구현자가 파일을 다 쓴 뒤 검증 단계에서 죽어, 코드는 트리에 **일관된 상태로 남아 있었다**. 서브에이전트가 막혀 **컨덕터가 직접 전량 검증**: typecheck·양 파티션·make ci·R-38 정리 뮤턴트(정리 제거 → 격리 증인 RED)·**R-40 라이브 실측 3종**(head-연결 확정·실제 좀비 PR #331 반환·fork 배제)·헤더 주석·README 동기화 완료. (Codex 게이트는 별도 예산이라 정상.)
+
+**북키핑 교정**: 첫 baseline에서 `flipOk: false` — "teeth" 메타 증인(`git checkout -f main` 제거 시 누출 증명)이 characterization인데 baseline(정리 라인 부재)에서 실패 → **regression으로 재분류**(fix-특정 flip 증인). 재구성 후 `flipOk: true`.
+
+**최종 baseline**: regression baseline 전량 RED · characterization 63 green(양 끝단) · `red..green` = **scope 4파일 정확히** · `--verify-flip` **flipOk: true**.
+
 ### Codex Structure Review — r11: needs-attention → 2건 전부 Accept (owner 2026-07-15)
 
 > ⚠️ **게이트 실행 함정(재발 주의)**: r11의 첫 3회 실행이 `review-incomplete`로 나왔는데, capacity가 아니라
