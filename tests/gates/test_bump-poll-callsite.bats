@@ -1055,6 +1055,7 @@ rg_dirty()        { "$REALGIT" -C "$RG" status --short; }
   }
 }
 
+# bats test_tags=regression
 @test "the real-git isolation witness has teeth (removing 'git checkout -f main' lets page's staged residue leak into trip-mate's commit)" {
   # ★ 이빨 증인(R-39). 위 격리가 **`-f` 정리 덕분**임을 재현으로 못박는다: 정리를 뺀 변이본(MUT_STEP —
   #   `git checkout -f main` → `git checkout main`)을 같은 시나리오 B로 돌리면 trip-mate 커밋이 page의 staged
