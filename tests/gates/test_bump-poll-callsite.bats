@@ -886,35 +886,200 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
   }
 }
 
+# ── R-39: **실제 git 저장소** 항목-격리 하네스(structure r12) ─────────────────────────────────────
+# H-2 증인의 옛 버전은 git이 전부 stub이라(argv만 기록) 항목 격리를 **연속성**으로만 증명했다: 다음 앱이
+# 실행기에 도달했는가. 그러나 실제 결함은 **공유 worktree/index**에 있다(R-38) — 서브셸은 종료 상태만
+# 격리하지 앞 항목이 남긴 index/worktree는 격리하지 못한다. bump-tag가 앱 values + **항상 add되는
+# digest-exporter**를 쓴 뒤 실패하면(commit 전) 그 부분 상태가 공유 worktree에 남고, 다음 항목의 평범한
+# `git checkout main`은 그 **staged 잔여를 물려받아** 다음 앱 커밋에 앞 앱 경로가 섞인다(실측 확인).
+# → 실제 git repo(앱 values + digest-exporter 존재)에서 추출한 bump 스텝을 돌리고, 두 지점에 실패를
+#   주입한다: (a) bump-tag **쓰기 후** 실패(unstaged 잔여) · (b) git add **후** 실패(=commit 실패, staged 잔여).
+#   그리고 **다음 항목(trip-mate)의 커밋·worktree에 앞 항목(page) 경로가 0**임을 단언한다.
+#   `git checkout -f main` 정리를 제거하면(mut) 이 격리가 무너진다 — 아래 이빨 증인이 그걸 재현한다.
+setup_realgit_isolation() {
+  # 실제 git은 stub 뒤에서도 **절대 경로**로 부른다(stub이 PATH의 git을 가린다). 두 값은 export해서
+  # git wrapper(런타임)와 하위 셸이 그대로 읽게 한다.
+  export REALGIT="$(command -v git)"
+  RG="$BATS_TEST_TMPDIR/realrepo"
+  STUB="$BATS_TEST_TMPDIR/rgbin"
+  mkdir -p "$STUB"
+  export CALLS="$BATS_TEST_TMPDIR/rg-calls.nul"
+  : > "$CALLS"
+  TMPD="$BATS_TEST_TMPDIR/rg-tmp"
+  mkdir -p "$TMPD"
+  PAGE_TAG="sha-2222222222222222222222222222222222222222"
+  TRIP_TAG="sha-4444444444444444444444444444444444444444"
+
+  # ── git wrapper: 진짜 git으로 통과시키되, **commit만** 주입으로 죽인다(= git add 후 실패 → staged 잔여). ──
+  cat > "$STUB/git" <<'GITEOF'
+#!/bin/sh
+{ printf '%s\0' git "$@"; printf '\036'; } >> "$CALLS"
+if [ "$1" = "commit" ] && [ -n "${STUB_FAIL_COMMIT_APP:-}" ]; then
+  for a in "$@"; do
+    case "$a" in
+      *"chore: ${STUB_FAIL_COMMIT_APP} "*) echo "stub git: commit 실패 주입(${STUB_FAIL_COMMIT_APP}) — git add는 이미 스테이지됐다" >&2; exit 1 ;;
+    esac
+  done
+fi
+exec "$REALGIT" "$@"
+GITEOF
+  chmod +x "$STUB/git"
+
+  # ── bun stub: bump-tag은 앱 values + 공유 digest-exporter를 **실제로 쓴다**(bump-tag 의미 모사). ──
+  #    STUB_FAIL_BUMPTAG_APP이면 **쓰고 나서** 실패(= bump-tag 쓰기 후 실패 → unstaged 잔여). ensure는 no-op.
+  cat > "$STUB/bun" <<'BUNEOF'
+#!/bin/sh
+{ printf '%s\0' bun "$@"; printf '\036'; } >> "$CALLS"
+if [ "$1" = "tools/bump-tag.ts" ]; then
+  app="$2"; tag="$3"
+  printf 'image:\n  tag: %s\n' "$tag" > "apps/$app/deploy/prod/values.yaml"
+  printf 'APPS:\n  %s: %s\n' "$app" "$tag" > platform/victoria-stack/prod/digest-exporter.yaml
+  if [ -n "${STUB_FAIL_BUMPTAG_APP:-}" ] && [ "$app" = "$STUB_FAIL_BUMPTAG_APP" ]; then
+    echo "stub bun: bump-tag $app 쓰기 후 실패(주입)" >&2; exit 1
+  fi
+  exit 0
+fi
+exit 0
+BUNEOF
+  chmod +x "$STUB/bun"
+
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/gh"; chmod +x "$STUB/gh"
+
+  # plan.json — writePath는 실제 repo 경로와 일치한다(page → propose 이후 순서로 처리된다).
+  PLAN="$TMPD/plan.json"
+  cat > "$PLAN" <<'JSON'
+[
+  {"app":"page","action":"bump","writePath":"apps/page/deploy/prod/values.yaml",
+   "current":{"tag":"sha-1111111111111111111111111111111111111111"},
+   "candidate":{"tag":"sha-2222222222222222222222222222222222222222","digest":"sha256:aaaa"}},
+  {"app":"trip-mate","action":"propose-pr","writePath":"apps/trip-mate/deploy/prod/values.yaml",
+   "current":{"tag":"sha-3333333333333333333333333333333333333333"},
+   "candidate":{"tag":"sha-4444444444444444444444444444444444444444","digest":"sha256:bbbb"}}
+]
+JSON
+
+  # 추출한 bump 스텝(원본) + `-f` 제거 변이본(이빨 증인용). /tmp → TMPD로 hermetic.
+  STEP="$BATS_TEST_TMPDIR/rg-step.sh"
+  extract_step | sed "s#/tmp/#$TMPD/#g" > "$STEP"
+  [ -s "$STEP" ] || return 9
+  MUT_STEP="$BATS_TEST_TMPDIR/rg-step.mut.sh"
+  sed 's/git checkout -f main/git checkout main/' "$STEP" > "$MUT_STEP"
+  return 0
+}
+
+# 깨끗한 main에서 시작하는 새 repo를 만든다(시나리오마다 재생성 — 상태 누수 방지).
+fresh_realgit() {
+  rm -rf "$RG"
+  mkdir -p "$RG/apps/page/deploy/prod" "$RG/apps/trip-mate/deploy/prod" "$RG/platform/victoria-stack/prod"
+  printf 'image:\n  tag: sha-old\n' > "$RG/apps/page/deploy/prod/values.yaml"
+  printf 'image:\n  tag: sha-old\n' > "$RG/apps/trip-mate/deploy/prod/values.yaml"
+  printf 'APPS: base\n' > "$RG/platform/victoria-stack/prod/digest-exporter.yaml"
+  "$REALGIT" -C "$RG" init -q -b main
+  "$REALGIT" -C "$RG" config user.name t
+  "$REALGIT" -C "$RG" config user.email t@t
+  "$REALGIT" -C "$RG" add -A
+  "$REALGIT" -C "$RG" commit -qm base
+}
+# 스텝을 **실제 repo 안에서**(cwd=$RG) stub 아래 돌린다. 종료 코드를 보존한다.
+run_bump_realgit() {
+  : > "$CALLS"
+  ( cd "$RG" && PATH="$STUB:$PATH" GH_TOKEN=stub RUN_ID=999 \
+      STUB_FAIL_COMMIT_APP="${STUB_FAIL_COMMIT_APP:-}" STUB_FAIL_BUMPTAG_APP="${STUB_FAIL_BUMPTAG_APP:-}" \
+      bash -e "$1" ) > "$BATS_TEST_TMPDIR/rg-step.out" 2>&1
+}
+rg_step_out() { echo "--- realgit 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/rg-step.out"; }
+# 그 브랜치 접미사(bump-poll/<suffix>)에 우리 커밋이 만들어졌는가(= 연속성).
+rg_committed()    { "$REALGIT" -C "$RG" rev-parse -q --verify "refs/heads/bump-poll/$1" >/dev/null 2>&1 && echo yes || echo no; }
+# 그 브랜치 마지막 커밋이 만진 경로.
+rg_commit_paths() { "$REALGIT" -C "$RG" show --name-only --format= "refs/heads/bump-poll/$1" 2>/dev/null; }
+# 현재 worktree의 dirty 경로.
+rg_dirty()        { "$REALGIT" -C "$RG" status --short; }
+
 # bats test_tags=regression
-@test "one app's fail-closed never starves the apps after it (each bump item is isolated, the run still goes red)" {
-  # ★★ H-2. 옛 루프는 `jq … | while read`를 `bash -e` 아래서 돌렸다 → 한 앱이 fail-closed로 죽으면
-  # (예: 증명되지 않은 head — 사람이 개입할 때까지 **영구히** 그 상태다) 파이프라인이 통째로 죽어
-  # **그 뒤의 모든 앱이 매 주기 실행기에 도달조차 못 했다**. pr-sweeper가 이 네임스페이스에서 빠진 지금,
-  # 이 루프의 생존성은 가용성이 아니라 **인가 회수의 전제조건**이다(낡은 무장은 방문해야만 회수된다).
-  setup_hermetic
-  rc=$?
-  [ "$rc" -ne 9 ] || { echo "hermetic harness: bump 스텝 추출 실패"; false; }
+@test "one app's half-written worktree never leaks into the next item's commit, and never starves it (real git isolation, run still red)" {
+  # ★★ H-2 + R-38/R-39. 서브셸은 종료 상태만 격리한다 — index/worktree는 공유다. bump-tag가 쓰고 실패하면
+  # 그 잔여를 다음 항목이 물려받아(특히 **staged digest-exporter**) 다음 앱 커밋에 앞 앱 경로가 섞인다.
+  # `git checkout -f main`이 각 항목 시작에서 tracked/staged 잔여를 되돌려 그 누출을 막는다(그리고 굶기지 않는다).
+  setup_realgit_isolation
+  [ "$?" -ne 9 ] || { echo "hermetic harness: bump 스텝(.run에 bump-tag 포함)을 추출하지 못했다"; false; }
 
-  # plan의 **첫** 항목(page)의 실행기를 fail-closed 시킨다 — 그 뒤의 trip-mate가 굶는지가 질문이다.
-  export STUB_FAIL_APP=page
-  run run_step_rc "$STEP"
-  unset STUB_FAIL_APP
+  # ══ 시나리오 B — **git add 후 실패**(page commit 주입 실패) → staged 잔여(page values + digest-exporter). ══
+  fresh_realgit
+  export STUB_FAIL_COMMIT_APP=page
+  run run_bump_realgit "$STEP"
+  rc="$status"
+  unset STUB_FAIL_COMMIT_APP
 
-  # ① 뒤따르는 앱이 **여전히 실행기에 도달했다**(굶기지 않았다).
-  got="$(bumped_apps)"
-  [ "$got" = "page trip-mate" ] || {
-    echo "starvation: page의 fail-closed가 뒤따르는 앱을 굶겼다 — 실행기에 도달한 앱: '$got'(기대 'page trip-mate')"
-    echo "  그 앱들은 **매 주기** 실행기에 도달하지 못한다(page의 fail-closed는 사람이 고칠 때까지 지속된다)"
-    echo "  → 낡은 무장 회수도, DIRTY/BEHIND 수렴도, 중복 PR 억제도 전부 멈춘다."
-    step_out; dump_calls; false
+  # ① 연속성: 뒤따르는 trip-mate가 **여전히** 자기 커밋을 만들었다(page의 실패가 굶기지 않았다).
+  [ "$(rg_committed "trip-mate-$TRIP_TAG")" = "yes" ] || {
+    echo "starvation(B): page commit 실패가 trip-mate를 굶겼다 — trip-mate 커밋이 없다"
+    rg_step_out; dump_calls; false
+  }
+  # ② ★ 격리: trip-mate 커밋에 **앞 항목(page) 경로가 0**이다(staged 잔여를 물려받지 않았다).
+  rg_commit_paths "trip-mate-$TRIP_TAG" > "$BATS_TEST_TMPDIR/rg-paths-b.txt"
+  if grep -q 'apps/page/' "$BATS_TEST_TMPDIR/rg-paths-b.txt"; then
+    echo "contamination(B): trip-mate 커밋이 앞 항목 page의 staged 잔여를 물려받았다 — 항목 격리 실패(R-38)"
+    cat "$BATS_TEST_TMPDIR/rg-paths-b.txt"; rg_step_out; false
+  fi
+  # ③ run은 **빨갛다**(page 실패 집계 — telegram 발화 전제).
+  [ "$rc" -ne 0 ] || {
+    echo "silent failure(B): page commit 실패인데 스텝이 성공(exit 0)으로 끝났다 — 실패는 끝에서 비-0으로 내야 한다"
+    rg_step_out; false
   }
 
-  # ② 그래도 run은 **빨갛다** — 실패를 삼키면 telegram 알림이 안 가고 fail-closed가 조용히 묻힌다.
-  [ "$status" -ne 0 ] || {
-    echo "silent failure: 한 앱이 fail-closed로 죽었는데 스텝이 성공(exit 0)으로 끝났다 —"
-    echo "  실패는 모아서 **맨 끝에서** 비-0으로 내야 한다(그래야 failure() telegram이 발화한다)."
-    step_out; dump_calls; false
+  # ══ 시나리오 A — **bump-tag 쓰기 후 실패**(page bump-tag 주입 실패) → unstaged 잔여. ══
+  fresh_realgit
+  export STUB_FAIL_BUMPTAG_APP=page
+  run run_bump_realgit "$STEP"
+  rc="$status"
+  unset STUB_FAIL_BUMPTAG_APP
+
+  [ "$(rg_committed "trip-mate-$TRIP_TAG")" = "yes" ] || {
+    echo "starvation(A): page bump-tag 실패가 trip-mate를 굶겼다 — trip-mate 커밋이 없다"
+    rg_step_out; dump_calls; false
+  }
+  rg_commit_paths "trip-mate-$TRIP_TAG" > "$BATS_TEST_TMPDIR/rg-paths-a.txt"
+  if grep -q 'apps/page/' "$BATS_TEST_TMPDIR/rg-paths-a.txt"; then
+    echo "contamination(A): trip-mate 커밋이 앞 항목 page 경로를 물려받았다"
+    cat "$BATS_TEST_TMPDIR/rg-paths-a.txt"; rg_step_out; false
+  fi
+  # ★ worktree에도 앞 항목 잔여가 남지 않았다 — `-f` 정리가 page의 unstaged 변경을 되돌린다(안 그러면 dirty로 산다).
+  rg_dirty > "$BATS_TEST_TMPDIR/rg-dirty-a.txt"
+  if grep -q 'apps/page/' "$BATS_TEST_TMPDIR/rg-dirty-a.txt"; then
+    echo "leftover(A): page의 unstaged 잔여가 정리되지 않아 worktree에 dirty로 남았다(격리 실패)"
+    cat "$BATS_TEST_TMPDIR/rg-dirty-a.txt"; rg_step_out; false
+  fi
+  [ "$rc" -ne 0 ] || {
+    echo "silent failure(A): page bump-tag 실패인데 스텝이 성공(exit 0)으로 끝났다"
+    rg_step_out; false
+  }
+}
+
+@test "the real-git isolation witness has teeth (removing 'git checkout -f main' lets page's staged residue leak into trip-mate's commit)" {
+  # ★ 이빨 증인(R-39). 위 격리가 **`-f` 정리 덕분**임을 재현으로 못박는다: 정리를 뺀 변이본(MUT_STEP —
+  #   `git checkout -f main` → `git checkout main`)을 같은 시나리오 B로 돌리면 trip-mate 커밋이 page의 staged
+  #   잔여를 **물려받는다**(오염). ⚠️ baseline(옛 워크플로)도 `-f`가 없으므로 여기서 오염이 관측된다 →
+  #   양 끝단 green(characterization). 이게 없으면 위 증인이 무엇을 지키는지 알 수 없다.
+  setup_realgit_isolation
+  [ "$?" -ne 9 ] || { echo "hermetic harness: bump 스텝 추출 실패"; false; }
+  # MUT_STEP이 실제로 `-f`를 뺐는가(변이가 no-op이면 이빨이 없다).
+  if grep -q 'git checkout -f main' "$MUT_STEP"; then
+    echo "toothless: 변이본에 아직 'git checkout -f main'이 남아 있다 — 정리를 제거하지 못했다"
+    false
+  fi
+  grep -q 'git checkout main' "$MUT_STEP" || { echo "toothless: 변이본에 'git checkout main'이 없다"; false; }
+
+  fresh_realgit
+  export STUB_FAIL_COMMIT_APP=page
+  run run_bump_realgit "$MUT_STEP"
+  unset STUB_FAIL_COMMIT_APP
+
+  # 정리가 없으면 trip-mate 커밋이 page 경로를 물려받는다(오염 재현). 그래야 위 증인이 무언가를 지킨다.
+  [ "$(rg_committed "trip-mate-$TRIP_TAG")" = "yes" ] || { echo "harness: MUT에서 trip-mate 커밋이 아예 안 생겼다"; rg_step_out; false; }
+  rg_commit_paths "trip-mate-$TRIP_TAG" > "$BATS_TEST_TMPDIR/rg-paths-mut.txt"
+  grep -q 'apps/page/' "$BATS_TEST_TMPDIR/rg-paths-mut.txt" || {
+    echo "toothless witness: 정리를 제거해도 오염이 재현되지 않았다 — 위 격리 증인이 실은 아무것도 지키지 않는다"
+    cat "$BATS_TEST_TMPDIR/rg-paths-mut.txt"; rg_step_out; false
   }
 }
 

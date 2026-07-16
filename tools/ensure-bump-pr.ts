@@ -12,7 +12,8 @@
 // 안에 있어야 그 순서와 부작용(skip이면 push도 create도 없음)을 테스트로 증명할 수 있다.
 //
 // 관측 사실(변이 이전에 반드시 수집):
-//   gh api graphql … (headRefName=<branch>, states:OPEN — **상한 없는 완전 열거**, 한 페이지씩)
+//   gh api graphql … repository.ref(qualifiedName:refs/heads/<branch>).associatedPullRequests(states:OPEN)
+//     — **ref-연결**이라 포크를 구조적으로 배제한다(아래 ★★★★). 상한 없이 한 페이지씩 완전 열거.
 //   git ls-remote --heads origin <branch>                                  ← 원격 브랜치 존재/OID
 //
 // ★ 조회는 **상한이 없어야** 한다 — 경계된 조회는 배포 정지 무기가 된다(structure 게이트 r2/r4) ────
@@ -48,6 +49,19 @@
 //   read-only 페이지 조회는 원장에 **남기지 않는다**(남기면 executed가 페이지 수에 비례해 로그·힙을 다시 키운다).
 //   힙에 남는 건 사이클 검출용 커서 집합(seenCursors)뿐이고 그건 **페이지 수** 경계다 — "상주 메모리가 포크
 //   수와 무관"이라고 넘겨짚지 않는다(정직한 진술 = 직렬화되는 상태만 경계 있는 결정 사실이다).
+//
+// ★★★★ 그런데 상한은 **또 되살아난다**(structure r12 R-40) — 바이트가 아니라 **질의 작업(API 호출·벽시계)** 으로.
+// 위까지는 전부 `pullRequests(headRefName:<branch>)` 이름-매치 connection을 **완전 열거**하는 전제였다. 그런데
+// 결정적 브랜치명은 공개고, 포크 PR(head가 포크 레포의 ref)도 headRefName이 일치하면 **이 connection에 담긴다**.
+// 그래서 fold로 바이트를 경계지어도, **포크 페이지마다 `gh api graphql` 서브프로세스를 하나씩** hasNextPage=false
+// 까지 태운다 → 폴링·회수가 포크 수에 비례해 GraphQL 예산·서브프로세스·벽시계를 태우고, 충분한 포크면
+// writer PR을 찾기 전에 매 주기 죽는다. **완전 열거 자체가 공격 표면이었다.** → 종결: 이름-매치를 버리고
+//   **우리 ref에 연결된 PR**만 조회한다(`repository.ref(refs/heads/<branch>).associatedPullRequests`). 포크 PR의
+//   head는 우리 `refs/heads/*`가 **아니므로** 이 connection에 **구조적으로 담기지 않는다**(라이브 실측: base=main
+//   에도 0건 = head-연결). 형제 스윕도 `git ls-remote --heads origin 'bump-poll/*'`(권위 있는 same-repo ref, 포크
+//   불변)로 **우리 ref만** 열거해 각각 ref-조회한다 → **질의 작업이 포크 수와 무관**하다(우리 ref 수에만 비례,
+//   그건 우리가 통제한다). 사람-흔적(comments/labels) 상세는 신뢰 후보를 고른 **뒤에만** 가져와 페이지를 가볍게.
+//   (완전 열거·hasNextPage 완전성·강한 일관성·검색 금지는 그대로 — ref-연결에도 페이지네이션이 있으면 동일 적용.)
 // ⚠️ 검색 API는 금지다: `gh pr list --author`는 내부적으로 `search(...)`로 갈아탄다(GH_DEBUG=api 실측).
 //    검색 인덱스는 **결과적 일관성**이라 직전 주기가 만든 PR이 안 잡히면 **공격자 없이도** 거짓 부재가 난다.
 //    connection 질의는 primary datastore = **강한 일관성**이다.
@@ -648,20 +662,22 @@ function proveOurCommit(oid: string, what: string, expectMessage: string = BUMP_
 //    이건 PR 열거에서 이미 고친 그 함정이다(경계된 읽기는 부재를 날조한다 — R-13/R-17). 그래서 두 연결에
 //    **`totalCount`를 함께 조회**해 잘림을 **사실로 관측**하고, 잘렸거나 관측할 수 없으면 "흔적 있음"으로 읽는다
 //    (⇒ 절대 닫지 않고, 절대 force-push하지 않는다 — 모듈의 기존 관용구와 같은 방향).
-const PR_QUERY = `query($owner:String!,$repo:String!,$head:String!,$endCursor:String){
+const PR_QUERY = `query($owner:String!,$repo:String!,$ref:String!,$endCursor:String){
   repository(owner:$owner,name:$repo){
-    pullRequests(headRefName:$head, states:OPEN, first:100, after:$endCursor){
-      pageInfo{ hasNextPage endCursor }
-      nodes{
-        number isCrossRepository mergeStateStatus headRefOid baseRefName createdAt isDraft
-        author{ login __typename }
-        autoMergeRequest{ enabledAt }
-        labels(first:50){ totalCount nodes{ name } }
-        assignees{ totalCount }
-        reviewRequests{ totalCount }
-        reviews{ totalCount }
-        comments(first:100){ totalCount nodes{ author{ __typename } } }
-        timelineItems(itemTypes:[REOPENED_EVENT], last:1){ totalCount }
+    ref(qualifiedName:$ref){
+      associatedPullRequests(states:OPEN, first:100, after:$endCursor){
+        pageInfo{ hasNextPage endCursor }
+        nodes{
+          number isCrossRepository mergeStateStatus headRefOid baseRefName createdAt isDraft
+          author{ login __typename }
+          autoMergeRequest{ enabledAt }
+          labels(first:50){ totalCount nodes{ name } }
+          assignees{ totalCount }
+          reviewRequests{ totalCount }
+          reviews{ totalCount }
+          comments(first:100){ totalCount nodes{ author{ __typename } } }
+          timelineItems(itemTypes:[REOPENED_EVENT], last:1){ totalCount }
+        }
       }
     }
   }
@@ -813,7 +829,7 @@ type PageReducer<A> = (acc: A, nodes: any[], at: string) => ParseResult<A>;
 //    검출용 커서 집합(seenCursors)과 카운터뿐이고 그건 페이지 수 경계다 — read-only 조회는 원장(executed)에
 //    남기지 않고 graphqlPages 카운터로만 관측한다(그래서 직렬화되는 audit 출력도 포크 수에 비례하지 않는다).
 function foldConnection<A>(
-  query: string, head: string, what: string,
+  query: string, ref: string, what: string,
   init: () => A, reduce: PageReducer<A>,
 ): ParseResult<A> {
   let acc = init();
@@ -824,7 +840,7 @@ function foldConnection<A>(
     const a = [
       "api", "graphql",
       "-f", `query=${query}`,
-      "-F", "owner={owner}", "-F", "repo={repo}", "-F", `head=${head}`,
+      "-F", "owner={owner}", "-F", "repo={repo}", "-f", `ref=${ref}`,
     ];
     // 첫 페이지는 커서를 넘기지 않는다($endCursor는 nullable → after:null = 처음부터).
     if (cursor !== null) a.push("-f", `endCursor=${cursor}`);
@@ -844,9 +860,22 @@ function foldConnection<A>(
     const at = `page[${pageIndex}]`;
     if (page === null || typeof page !== "object" || Array.isArray(page)) return parseFail(`${at} 객체가 아님`);
     if (page.errors !== undefined) return parseFail(`${at}.errors — GraphQL 오류 응답: ${JSON.stringify(page.errors)}`);
-    const conn = page?.data?.repository?.pullRequests;
+    const data = page.data;
+    if (data === null || typeof data !== "object") return parseFail(`${at}.data 없음(스키마 드리프트)`);
+    const repo = data.repository;
+    if (repo === null || typeof repo !== "object") return parseFail(`${at}.data.repository 없음(레포 해석 실패 또는 스키마 드리프트)`);
+    // ★ ref === null = **우리 브랜치가 원격에 없다** = 우리 것 PR 0건(고아/create 경로) — 조회 실패가 아니다.
+    //   git ls-remote가 그 브랜치를 못 찾는 것과 정합한다: 여기서 fail-closed하면 정상 create가 막힌다.
+    //   ★★ 이 null-분기가 곧 **포크 배제의 구조적 근거**다: 이 connection은 `repository(우리)`의 **우리 ref**에
+    //      연결된 PR만 준다. 포크 PR의 head는 포크 레포의 ref라(우리 refs/heads/…가 아니다) 이 노드에 절대
+    //      들어오지 못한다(라이브 실측: associatedPullRequests는 **head-연결**이라 base=main에도 0건). 그래서
+    //      질의 작업(서브프로세스·페이지 수)이 **포크 수와 무관**하다 — 예전 pullRequests(headRefName) 이름-매치는
+    //      포크가 같은 이름으로 오염시킬 수 있었다(structure r12 R-40).
+    if (repo.ref === null) return { ok: true, value: acc };
+    if (typeof repo.ref !== "object" || Array.isArray(repo.ref)) return parseFail(`${at}.data.repository.ref가 객체도 null도 아님`);
+    const conn = repo.ref.associatedPullRequests;
     if (conn === null || typeof conn !== "object") {
-      return parseFail(`${at}.data.repository.pullRequests 없음(레포 해석 실패 또는 스키마 드리프트)`);
+      return parseFail(`${at}.data.repository.ref.associatedPullRequests 없음(스키마 드리프트)`);
     }
     const info = conn.pageInfo;
     if (info === null || typeof info !== "object" || typeof info.hasNextPage !== "boolean") {
@@ -1052,20 +1081,22 @@ function enumerateSiblingRefs(): { ok: true; refs: SiblingRef[] } | { ok: false;
 // assignees/labels(**사람의 흔적**). 본 질의(PR_QUERY)를 넓히지 않고 **따로** 둔다 — 본 판정 경로의
 // fail-closed 계약(필드 드리프트 = 죽는다)에 파괴 전용 필드를 끌어들이면, 그 필드 하나가 사라질 때
 // **배포가 멈춘다**(파괴를 못 하는 게 아니라). 스윕의 드리프트는 "닫지 않는다"로 끝나야 한다.
-const SIBLING_PR_QUERY = `query($owner:String!,$repo:String!,$head:String!,$endCursor:String){
+const SIBLING_PR_QUERY = `query($owner:String!,$repo:String!,$ref:String!,$endCursor:String){
   repository(owner:$owner,name:$repo){
-    pullRequests(headRefName:$head, states:OPEN, first:100, after:$endCursor){
-      pageInfo{ hasNextPage endCursor }
-      nodes{
-        number isCrossRepository isDraft createdAt headRefOid baseRefName
-        author{ login __typename }
-        autoMergeRequest{ enabledAt }
-        labels(first:50){ totalCount nodes{ name } }
-        assignees{ totalCount }
-        reviewRequests{ totalCount }
-        reviews{ totalCount }
-        comments(first:100){ totalCount nodes{ author{ __typename } } }
-        timelineItems(itemTypes:[REOPENED_EVENT], last:1){ totalCount }
+    ref(qualifiedName:$ref){
+      associatedPullRequests(states:OPEN, first:100, after:$endCursor){
+        pageInfo{ hasNextPage endCursor }
+        nodes{
+          number isCrossRepository isDraft createdAt headRefOid baseRefName
+          author{ login __typename }
+          autoMergeRequest{ enabledAt }
+          labels(first:50){ totalCount nodes{ name } }
+          assignees{ totalCount }
+          reviewRequests{ totalCount }
+          reviews{ totalCount }
+          comments(first:100){ totalCount nodes{ author{ __typename } } }
+          timelineItems(itemTypes:[REOPENED_EVENT], last:1){ totalCount }
+        }
       }
     }
   }
@@ -1151,8 +1182,11 @@ function humanTouchOf(pr: any): string | null {
 type BranchObservation = { pr: ObservedPr | null; openCount: number };
 function observeBranchPr(head: string): ParseResult<BranchObservation> {
   // 스트리밍 fold(R-36): mergeStateStatus는 이 질의에 없다(회수·close엔 필요 없다) → requireMergeState=false.
-  // 포크 노드는 scanReducer가 카운터로만 접는다 → 포화된 형제 head도 상주 메모리를 키우지 못한다(W71).
-  const scanned = foldConnection<PrScan>(SIBLING_PR_QUERY, head, `PR 조회(${head})`, newScan, scanReducer(false));
+  // ★ 조회는 **우리 ref에 연결된 PR**만 본다(R-40): `refs/heads/<head>`를 associatedPullRequests에 넘긴다 →
+  //   포크가 같은 브랜치명으로 열어도 그 PR의 head는 포크 레포 ref라 이 connection에 **구조적으로** 없다.
+  //   그래서 포화된 형제 head라도 질의 작업(페이지 수)이 포크 수와 무관하다(W71). ref 부재(null)는
+  //   foldConnection이 "우리 것 PR 0건"으로 정확히 접는다(고아 ref — git ls-remote가 브랜치는 보고한다).
+  const scanned = foldConnection<PrScan>(SIBLING_PR_QUERY, `refs/heads/${head}`, `PR 조회(${head})`, newScan, scanReducer(false));
   // 조회·파싱 실패 모두 head 문맥을 실어 돌려준다(호출부가 revocationBlind로 접을 때 어느 브랜치인지 남긴다).
   if (!scanned.ok) return parseFail(`PR 조회 파싱 실패(${head}): ${scanned.why}`);
   const mine = scanned.value.trusted;
@@ -1473,7 +1507,7 @@ if (args.reconcileOnly) {
 // owner/repo는 gh의 `{owner}`/`{repo}` 플레이스홀더가 현재 레포에서 채운다(라이브 확인).
 // ⚠️ 본 경로의 관측 실패는 **즉시 fail-closed**다(회수 경로와 갈리는 유일한 지점 — 여기서 계속 가면
 //    그건 곧 "사실을 모른 채 create/adopt"이고, 그게 이 픽스가 없애는 중복 PR 버그 그 자체다).
-const scannedPrs = foldConnection<PrScan>(PR_QUERY, branch, "gh api graphql (pullRequests)", newScan, scanReducer(true));
+const scannedPrs = foldConnection<PrScan>(PR_QUERY, ref, "gh api graphql (associatedPullRequests)", newScan, scanReducer(true));
 if (!scannedPrs.ok) inputError(scannedPrs.why);
 const mainScan = scannedPrs.value;
 const remoteBranch = parseLsRemote(run("git", ["ls-remote", "--heads", args.remote, branch], "git ls-remote"));

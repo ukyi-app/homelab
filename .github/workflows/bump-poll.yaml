@@ -171,14 +171,20 @@ jobs:
           #   pr-sweeper가 이 네임스페이스에서 빠진 지금, 이 루프의 생존성은 가용성이 아니라 **인가 회수의
           #   전제조건**이다(위 reconcile 스텝과 같은 이유 — 낡은 무장은 누군가 방문해야만 회수된다).
           #   실패는 모아 두고 **맨 끝에서** 비-0으로 끝낸다(run은 빨갛게 남고 telegram 알림이 발화한다).
-          # ⚠️ `if ! ( … )`의 조건 문맥은 errexit를 끄고 **그 서브셸까지** 전파된다(bash 함정) →
-          #   서브셸 안에서 `set -e`를 **명시적으로 다시 켠다**. 안 그러면 bump-tag 실패 뒤에도 커밋·push가 계속된다.
+          # ⚠️⚠️ **errexit 관용구**(bash 함정 — 실측: bash 3.2·5.3 동일): `if ! ( set -e; … )`·`( … ) || rc=$?`
+          #   처럼 서브셸을 **조건/`||` 문맥**에 두면 그 안에서 `set -e`를 다시 켜도 **중간 명령 실패가 서브셸을
+          #   중단시키지 않는다**(마지막 명령만 exit status를 정한다). 그러면 bump-tag·git commit·정리(checkout)
+          #   같은 **중간 실패**가 삼켜져 그 항목이 실패로 집계되지 않고, 심지어 실행기가 반쯤 만든 상태 위에서 돈다.
+          #   R-38의 "정리 실패 → 집계 → run 빨강"이 그래서 깨진다. → 서브셸을 **문장으로** 돌려 안쪽 `set -e`가
+          #   살아 있게 하고, 바깥 errexit만 잠시 끄고(`set +e`) 종료 코드를 값으로 받은 뒤 다시 켠다. 이러면
+          #   어떤 중간 실패든 그 항목만 fail-closed로 집계되고 나머지 앱은 계속 처리된다(다른 항목을 굶기지 않는다).
           while IFS= read -r item; do
             [ -n "$item" ] || continue
             app=$(echo "$item" | jq -r .app)
             # 플래너 출력도 한 번 더 정제(심층 방어) — bump-tag.ts가 재검증한다
             case "$app" in ''|*[!a-z0-9-]*) echo "skip suspicious app: '$app'"; continue ;; esac
-            if ! (
+            set +e   # 바깥 errexit만 잠시 끈다(항목 실패가 루프 전체를 죽이지 않도록) — 안쪽 set -e는 살아 있다
+            (
               set -e
               tag=$(echo "$item" | jq -r .candidate.tag)
               digest=$(echo "$item" | jq -r .candidate.digest)
@@ -187,7 +193,17 @@ jobs:
               action=$(echo "$item" | jq -r .action)
               pin=$(echo "$item" | jq -r '.pin // empty')          # 베스포크 레인만 세팅(apps는 empty)
               writePath=$(echo "$item" | jq -r .writePath)          # git add 대상(두 레인 통일)
-              git checkout main
+              # ⚠️⚠️ **항목 트랜잭션 격리**(R-38): 서브셸은 종료 상태만 격리하지 앞 항목이 남긴
+              #   worktree/index는 격리하지 못한다. bump-tag는 앱 values + **항상 add되는
+              #   digest-exporter.yaml**을 쓰고, 그 뒤 명령이 실패하면(commit 전 fail-closed 등) 그 부분
+              #   상태가 공유 worktree에 남는다 → 다음 항목이 평범한 `git checkout main`을 하면 **staged
+              #   digest-exporter가 checkout을 거부하게 해 이후 앱을 굶기거나**(H-2 회귀), 그 변경을
+              #   **물려받아** 앞 앱의 digest-exporter 수정이 다음 앱 커밋에 섞인다. 그래서 각 항목은
+              #   **강제 정리로 깨끗한 main에서 시작**한다: `-f`가 tracked/staged 잔여를 전부 되돌린다
+              #   (digest-exporter는 tracked라 `-f`로 unstage+복원된다 — untracked는 bump-tag가 만들지 않는다).
+              #   정리 자체가 실패하면 set -e가 이 서브셸을 죽여 **이 항목만** fail-closed로 건너뛰고
+              #   나머지 앱은 계속 처리된다(실패는 아래에서 집계돼 run을 빨갛게 만든다 — 다른 항목을 굶기지 않는다).
+              git checkout -f main
               # 결정적 브랜치 — 같은 bump(app+tag)는 언제나 같은 브랜치로 수렴한다(RUN_ID 제거).
               # run마다 브랜치가 달라지면 "이 bump의 열린 PR"을 조회할 대상 자체가 사라진다(중복 PR의 뿌리).
               branch="bump-poll/${app}-${tag}"
@@ -219,10 +235,13 @@ jobs:
               # 실행기: 열린 PR·원격 브랜치를 관측한 뒤에만 변이한다(create/adopt/skip/rebuild + 무장 수렴).
               bun tools/ensure-bump-pr.ts --app "$app" --tag "$tag" --action "$action" \
                 --title "$title" --body "$body"
-            ); then
-              # 이 앱은 이 주기에 아무것도 변이하지 못했다(실행기의 fail-closed는 "이 앱을 건드리지 않는다"는
-              # 뜻이지 "run을 죽인다"는 뜻이 아니다) — 나머지 앱은 계속 처리한다.
-              echo "::warning::${app}: bump 실행기가 실패했다(fail-closed) — 다른 앱 처리는 계속한다"
+            )
+            rc=$?          # 서브셸의 종료 코드 — 안쪽 set -e가 **어떤 중간 실패든**(정리·bump-tag·commit·실행기) 여기로 전달한다
+            set -e         # 바깥 errexit 복원
+            if [ "$rc" -ne 0 ]; then
+              # 이 앱은 이 주기에 아무것도(또는 일부만) 변이하고 fail-closed됐다 — "이 앱을 못 건드렸다"는
+              # 뜻이지 "run을 죽인다"는 뜻이 아니다. 나머지 앱은 계속 처리하고, 실패는 아래에서 집계한다.
+              echo "::warning::${app}: bump 항목이 실패했다(fail-closed, exit $rc) — 다른 앱 처리는 계속한다"
               failed="$failed $app"
             fi
           done < /tmp/bump-items.jsonl

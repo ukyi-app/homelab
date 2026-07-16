@@ -243,61 +243,39 @@ PY
 # NUL 구분 원장(R-9): 인자 개수·경계 보존. 레코드는 RS(0x1e)로 종단한다.
 { printf '%s\0' gh "$@"; printf '\036'; } >> "$CALLS"
 
-# ── 이 stub은 **라이브 gh의 두 모드를 모두** 흉내낸다(structure r10 R-33) ─────────────────────────
-# 응답 형태를 정하는 건 stub이 아니라 **도구가 고른 argv**다:
-#   `--paginate --slurp` → 전 페이지를 **한 응답**으로(배열). 총량이 크면 그대로 크게 나간다.
-#   그 외                → **한 페이지만**(first:100). `endCursor` 변수가 가리키는 페이지.
-# ★ 이게 하네스의 정직성이다: 도구가 `--slurp`로 되돌아가면 라이브와 **똑같이** 응답 전체가 한 subprocess
-#   캡처로 들어가고, spawnSync의 기본 버퍼(bun 1.3.14 실측 = **1 MiB**)를 넘는 순간 gh가 SIGTERM으로
-#   살해된다(ENOBUFS) → 그 앱의 폴링이 죽는다. stub이 항상 페이지만 주면 그 결함이 하네스에서 사라진다.
-# 커서 규약(라이브 gh의 opaque 커서를 흉내낸다): 없음 = 0페이지, "cursorN" = N+1페이지.
+# ── 이 stub은 라이브 gh의 **ref-연결 페이지 조회**를 흉내낸다(structure r12 R-40) ─────────────────
+# 도구는 `repository.ref(qualifiedName:$ref).associatedPullRequests` connection을 **한 페이지씩** 소비한다
+# (`endCursor` 변수가 가리키는 페이지). 커서 규약(라이브 opaque 커서 흉내): 없음 = 0페이지, "cursorN" = N+1페이지.
+# ★ 라이브 실측(gh api graphql): associatedPullRequests는 **head-연결**이라(base=main에도 0건 — 라이브 확인)
+#   우리 ref가 head인 same-repo PR만 준다 → 포크(isCrossRepository:true)는 이 응답에 **구조적으로** 들어올 수
+#   없다(포크 PR의 head는 포크 레포 ref다). gh_pages가 픽스처에서 포크 노드를 걸러 그 사실을 모델한다 —
+#   그래서 질의 작업(페이지 수)이 **포크 수와 무관**하다(R-40). 옛 이름-매치 질의(pullRequests(headRefName))로
+#   되돌아가면 stub이 exit 3으로 거부한다(그 질의는 포크가 같은 이름으로 오염시킬 수 있는 취약 표면이다).
 gh_pages() {
   f="$1"; shift
-  slurp=""; cursor=""
+  cursor=""
   for a in "$@"; do
-    case "$a" in
-      --slurp) slurp=1 ;;
-      endCursor=*) cursor="${a#endCursor=}" ;;
-    esac
+    case "$a" in endCursor=*) cursor="${a#endCursor=}" ;; esac
   done
   if [ -z "$cursor" ]; then i=0; else i=$(( ${cursor#cursor} + 1 )); fi
+  # ★ 포크 배제: isCrossRepository:true 노드는 라이브 ref-조회에 없으므로 픽스처에서 걸러 낸다(R-40).
   PAGE='
-    . as $all
+    map(select(.isCrossRepository != true)) as $all
     | ($all | length) as $n
     | (if $n == 0 then 1 else (($n + 99) / 100 | floor) end) as $np
-    | { data: { repository: { pullRequests: {
+    | { data: { repository: { ref: { associatedPullRequests: {
           pageInfo: {
             hasNextPage: (if $i < $np - 1 then true else $forcelast end),
             endCursor: (if $i < $np - 1 then "cursor\($i)" else null end)
           },
           nodes: $all[($i * 100):(($i + 1) * 100)]
-        } } } }'
-  if [ -n "$slurp" ]; then
-    if out="$(jq -c --argjson forcelast "${FORCE_LAST:-false}" "
-          . as \$all
-          | (\$all | length) as \$n
-          | (if \$n == 0 then 1 else ((\$n + 99) / 100 | floor) end) as \$np
-          | [ range(0; \$np) as \$i
-              | { data: { repository: { pullRequests: {
-                    pageInfo: {
-                      hasNextPage: (if \$i < \$np - 1 then true else \$forcelast end),
-                      endCursor: (if \$i < \$np - 1 then \"cursor\\(\$i)\" else null end)
-                    },
-                    nodes: \$all[(\$i * 100):((\$i + 1) * 100)]
-                  } } } } ]" "$f" 2>/dev/null)"; then
-      printf '%s' "$out"
-      return 0
-    fi
-    # 깨진 JSON·비배열 픽스처(fail-closed 증인)는 쪼갤 수 없다 → 원본을 봉투에 그대로 실어 흘린다.
-    printf '[{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":%s,"endCursor":null},"nodes":%s}}}}]' \
-      "${FORCE_LAST:-false}" "$(cat "$f")"
-    return 0
-  fi
+        } } } } }'
   if out="$(jq -c --argjson i "$i" --argjson forcelast "${FORCE_LAST:-false}" "$PAGE" "$f" 2>/dev/null)"; then
     printf '%s' "$out"
     return 0
   fi
-  printf '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":%s,"endCursor":null},"nodes":%s}}}}' \
+  # 깨진 JSON·비배열 픽스처(fail-closed 증인)는 쪼갤 수 없다 → ref 봉투에 원본을 그대로 실어 흘린다.
+  printf '{"data":{"repository":{"ref":{"associatedPullRequests":{"pageInfo":{"hasNextPage":%s,"endCursor":null},"nodes":%s}}}}}' \
     "${FORCE_LAST:-false}" "$(cat "$f")"
 }
 
@@ -334,22 +312,36 @@ case "$1:$2" in
       *mergeStateStatus*)
         # ── 본 PR 열거(PR_QUERY) ──────────────────────────────────────────────────────────
         # mergeStateStatus는 **판정(create/adopt/skip/rebuild)에만** 필요하다 → 본 질의의 지문이다.
+        # ★ R-40: 반드시 **ref-연결 질의**(associatedPullRequests)여야 한다. 옛 이름-매치(pullRequests(headRefName))로
+        #   되돌아가면 포크가 같은 브랜치명으로 이 connection을 오염시킬 수 있다 → 그런 질의는 라이브가 우리 ref로
+        #   주는 응답이 아니므로 stub이 거부한다(exit 3 → 도구 fail-closed). "포크 배제는 구조적"의 하네스 절반이다.
+        case "$q" in
+          *associatedPullRequests*) : ;;
+          *) echo "stub gh: 본 질의가 ref-연결(associatedPullRequests)이 아니다 — 이름-매치 질의는 포크가 오염시킨다(R-40): $q" >&2; exit 3 ;;
+        esac
         if [ -n "${STUB_GH_LIST_FAIL:-}" ]; then echo "stub: gh api graphql 실패(조회 장애 시뮬)" >&2; exit 1; fi
+        # ref === null = 우리 브랜치가 원격에 없다(라이브 응답: {repository:{ref:null}}) → 도구는 "우리 것 PR 0건"으로
+        # 접어야 한다(고아/create 경로 — 조회 실패가 아니다). 이 주입으로 그 스키마 응답을 그대로 재현한다.
+        if [ -n "${STUB_REF_NULL:-}" ]; then printf '{"data":{"repository":{"ref":null}}}'; exit 0; fi
         if [ -n "${STUB_GRAPHQL_RAW+set}" ]; then printf '%s' "$STUB_GRAPHQL_RAW"; exit 0; fi
-        # ★ 라이브처럼 **first:100 페이지 경계**로 쪼갠다(structure r5): 첫 페이지만 소비하는 구현이
-        #   통과하면 안 된다(뒷 페이지 집계를 시험하지 못한다 = 거짓 GREEN).
+        # ★ 라이브처럼 **first:100 페이지 경계**로 쪼갠다: 첫 페이지만 소비하는 구현이 통과하면 안 된다.
         FORCE_LAST="${STUB_HAS_NEXT_PAGE:-false}" gh_pages "$STUB_PRS" "$@"
         ;;
       *isDraft*)
-        # ── 형제 PR 조회(SIBLING_PR_QUERY — head별 exact 질의) ──────────────────────────────
+        # ── 형제 PR 조회(SIBLING_PR_QUERY — ref별 exact 질의) ──────────────────────────────
         # 본 질의와 달리 mergeStateStatus가 없다(형제는 판정 대상이 아니라 회수·close 대상이다).
-        # ★ 이 질의도 **같은 페이지 경계**를 갖는다(R-33): 형제 브랜치명도 공개라 포크가 같은 head로
-        #   PR을 열 수 있다 → 회수 경로의 열거도 포화 대상이다. 하네스가 그 사실을 감추면 안 된다.
+        # ★ 이 질의도 **ref-연결**이라(R-40) 형제 브랜치명이 공개여도 포크가 같은 head로 연 PR은 회수 경로의
+        #   열거에 구조적으로 들어오지 못한다 — 그래서 회수의 질의 작업도 포크 수와 무관하다(W71).
+        case "$q" in
+          *associatedPullRequests*) : ;;
+          *) echo "stub gh: 형제 질의가 ref-연결(associatedPullRequests)이 아니다(R-40): $q" >&2; exit 3 ;;
+        esac
         if [ -n "${STUB_SIB_FAIL:-}" ]; then echo "stub: 형제 PR 조회 실패(조회 장애 시뮬)" >&2; exit 1; fi
-        head=""
-        for a in "$@"; do case "$a" in head=*) head="${a#head=}" ;; esac; done
-        f="$SIB_DIR/$(printf '%s' "$head" | tr '/' '_').json"
-        if [ ! -f "$f" ]; then f="$SIB_DIR/.none.json"; fi   # 그 head에 열린 PR 0건
+        ref=""
+        for a in "$@"; do case "$a" in ref=*) ref="${a#ref=}" ;; esac; done
+        branch="${ref#refs/heads/}"
+        f="$SIB_DIR/$(printf '%s' "$branch" | tr '/' '_').json"
+        if [ ! -f "$f" ]; then f="$SIB_DIR/.none.json"; fi   # 그 ref에 열린 PR 0건(형제 ref는 ls-remote에 있으므로 존재한다)
         FORCE_LAST=false gh_pages "$f" "$@"
         ;;
       *)
@@ -580,52 +572,12 @@ crowded_prs() {
   printf ']'
 }
 
-# ── 포화 픽스처(**바이트**로 포화시킨다) — subprocess 캡처 경계를 실제로 넘긴다(R-33) ──────────────
-# crowded_prs는 노드 **수**로 포화시킨다(페이지 경계 시험). 이건 **응답 총 바이트**로 포화시킨다:
-# 라이브 노드가 큰 이유는 PR 하나가 **사람의 흔적 연결**(comments first:100 · labels first:50)을 함께
-# 실어 오기 때문이다(H-4/R-28) → 질의의 상한을 다 채운 PR 하나가 **약 6.9 KB**다(실측).
-# 공격자 비용은 그대로다(포크 PR을 열고 코멘트를 다는 것뿐 — 우리 레포 권한 0). **응답 총량은 포크 수에
-# 비례해 무한정 자란다** — 그게 R-33의 핵심이다: 캡처 하나에 전부 담으면 그 총량이 곧 살해 조건이 된다.
-# ⚠️ 증인은 경계를 **가정하지 않고 측정한다**(아래 assert_crosses_capture_bound).
-fat_fork_prs() {
-  local n="$1" tail_pr="${2:-null}"
-  jq -cn --argjson n "$n" --argjson tail "$tail_pr" --arg oid "$ORPHAN_OID" '
-    [ range(0; $n) as $i
-      | { number: (9000 + $i), isCrossRepository: true, mergeStateStatus: "CLEAN",
-          headRefOid: $oid, baseRefName: "main", createdAt: "2026-07-13T06:00:00Z",
-          author: { login: "drive-by-attacker-account-\($i)", __typename: "User" },
-          autoMergeRequest: null, isDraft: false,
-          labels: { totalCount: 50, nodes: [ range(0; 50) | { name: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } ] },
-          assignees: { totalCount: 0 }, reviewRequests: { totalCount: 0 }, reviews: { totalCount: 0 },
-          comments: { totalCount: 100, nodes: [ range(0; 100) | { author: { __typename: "User" } } ] },
-          timelineItems: { totalCount: 0 } } ]
-    + (if $tail == null then [] else [ $tail ] end)'
-}
-# ── 캡처 경계는 **도구의 소스에서 읽는다**(하네스가 조용히 무뎌지지 않도록) ────────────────────────
-# 상한을 키우면(예: 64 MiB) 이 픽스처는 더 이상 그 경계를 넘지 못한다 → 아래 단언이 **RED**가 된다.
-# 즉 "상한을 키우려면 그 경계를 실제로 넘는 증인을 함께 키워라"가 강제된다. 상수를 못 찾아도 RED다.
-capture_bound() {
-  local mib
-  mib="$(sed -n 's/^const MAX_CAPTURE = \([0-9]*\) \* 1024 \* 1024;.*/\1/p' tools/ensure-bump-pr.ts)"
-  [ -n "$mib" ] || { echo "MAX_CAPTURE 상수를 tools/ensure-bump-pr.ts에서 찾지 못했다"; return 1; }
-  echo $(( mib * 1024 * 1024 ))
-}
-# 이 픽스처가 **정말로** 경계를 넘는가 — stub에게 옛 프로토콜(`--paginate --slurp`)로 물어 바이트를 잰다.
-# (넘지 않는 증인은 아무것도 증명하지 못한다. 그래서 증인이 스스로 확인한다.)
-#   $1 = 질의 지문(mergeStateStatus = 본 질의 / isDraft = 형제 질의) · $2 = head(형제 질의일 때)
-# ⚠️ 프로브 호출은 원장에서 지운다 — 증인의 호출 수 단언을 오염시키지 않는다.
-assert_crosses_capture_bound() {
-  local bytes bound
-  bound="$(capture_bound)"
-  bytes="$(gh api graphql --paginate --slurp -f "query=${1:-mergeStateStatus}" -F "head=${2:-$BRANCH}" | wc -c | tr -d ' ')"
-  : > "$CALLS"
-  [ "$bytes" -gt "$bound" ] || {
-    echo "witness is toothless: 픽스처의 응답 총량이 ${bytes}B로 캡처 경계(${bound}B)를 넘지 못한다"
-    echo "  → 이 증인은 R-33(전 페이지를 한 캡처에 받으면 gh가 살해된다)을 재현하지 못한다."
-    echo "  → 픽스처를 키우거나(포크 수), MAX_CAPTURE를 되돌릴 것."
-    false
-  }
-}
+# ── R-40 이후: 포화 바이트 픽스처/캡처-경계 헬퍼는 사라졌다 ─────────────────────────────────────
+# 옛 W70/W71은 포크로 **응답 총 바이트**를 부풀려 subprocess 캡처 경계(R-33)를 넘겼다. 이제 조회가
+# ref-연결(associatedPullRequests)이라 포크는 응답에 **구조적으로** 없다 → 응답 크기가 포크 수와 무관하고
+# 캡처 경계는 공격자가 닿을 수 없다. 그래서 fat_fork_prs·capture_bound·assert_crosses_capture_bound는
+# 삭제했다(도구의 MAX_CAPTURE는 심층 방어로 남는다 — 이제 포크는 그 상한을 채울 수 없다).
+# 포화는 여전히 crowded_prs(포크 노드 수)로 표현하고, 새 W70/W71은 **질의 작업이 포크 수와 무관**함을 단언한다.
 
 # ── 무장 **해제**(gh pr merge --disable-auto <번호>) 횟수 ──────────────────────────────────────
 # 대상은 브랜치명이 아니라 **관측된 신뢰 PR 번호**다 — `gh pr merge <branch>`는 같은 브랜치명의 포크 PR로
@@ -1136,27 +1088,29 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 # 어느 쪽이든 force-push·중복 create는 **0회**다.
 
 # bats test_tags=regression
-@test "W10: a writer PR crowded out of the default page is still found (the query bound is raised)" {
-  # 포크 60건(최신) + writer PR(가장 먼저 열려 꼬리에 있다). 기본 상한 30이면 writer PR은 **보이지 않는다**.
-  # 상한을 legit 최대치보다 크게 잡으면(그리고 클라이언트 필터를 안 걸면) 열거가 완전해져 자기 PR을 찾는다.
+@test "W10: forks with the same branch name (in the wild) are structurally excluded from the ref query — our writer PR is found regardless" {
+  # ★★ R-40: 옛 이름-매치 조회(pullRequests(headRefName))는 포크가 같은 브랜치명으로 결과를 채워
+  #   writer PR을 가릴 수 있었다(경계된 조회면 밀려나고, 상한 없으면 포크 수만큼 페이지를 태운다). 이제
+  #   조회는 **우리 ref에 연결된 PR**만 본다(associatedPullRequests) → 포크 60건이 세상에 있어도 그 PR의
+  #   head는 포크 레포 ref라 이 응답에 **하나도 들어오지 못한다**. 자기 PR은 언제나 그 안에 있다.
   write_prs "$(crowded_prs 60 "$(writer_pr 380 CLEAN "$(amr_armed)")")"
   write_heads "$PR_OID"   # 그 PR의 head — 원격 브랜치는 당연히 있다(고아가 **아니다**)
   run_ensure_lane bump
   [ "$status" -eq 0 ]
 
-  # ① 밀려나지 않고 관측됐는가.
+  # ① 자기 PR을 찾았는가(포크 유무와 무관).
   echo "$output" | jq -e '.observed.trusted.number == 380' > /dev/null \
-    || { echo "hidden writer PR: 포크 PR 60건에 가려 자기 PR(#380)을 보지 못했다 — 조회 상한(gh 기본 30)에서 밀려났다"; echo "$output"; dump_calls; false; }
+    || { echo "hidden writer PR: ref-연결 조회가 자기 PR(#380)을 보지 못했다"; echo "$output"; dump_calls; false; }
 
   # ② 고아 오인의 결과(force-push + 중복 create)가 **0회**인가 — 이게 공격자가 깨려는 멱등성이다.
   pushes="$(count_calls git push)"
   [ "$pushes" -eq 0 ] || {
-    echo "idempotency broken by a fork: 포크 크라우딩에 속아 ${BRANCH}를 force-push했다(자기 PR을 고아로 오인)"
+    echo "idempotency broken by a fork: 포크에 속아 ${BRANCH}를 force-push했다(자기 PR을 고아로 오인)"
     dump_calls; false
   }
   creates="$(count_calls gh pr create)"
   [ "$creates" -eq 0 ] || {
-    echo "duplicate bump PR: 포크 크라우딩에 속아 PR을 또 만들었다(#380이 이미 열려 있다)"
+    echo "duplicate bump PR: 포크에 속아 PR을 또 만들었다(#380이 이미 열려 있다)"
     dump_calls; false
   }
   action="$(echo "$JSON" | jq -r '.action')"
@@ -1164,10 +1118,9 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
     echo "ensure-bump-pr decided '$action' — 신뢰 PR #380이 열려 있다(expected skip)"
     echo "$JSON"; false
   }
-  # ③ 포크 PR은 **관측은 하되 신뢰하지 않는다**(신뢰 경계는 서버 필터가 아니라 클라이언트가 정한다).
-  #    포크 노드는 **버려지고 카운터로만** 남는다(R-36) → 요약으로 관측한다: 포크 60건 관측 + 신뢰 정확히 1건.
-  echo "$JSON" | jq -e '.observed.summary.crossRepo == 60' > /dev/null \
-    || { echo "포크 60건이 요약에 관측되지 않았다(summary.crossRepo)"; echo "$JSON"; false; }
+  # ③ ★ 포크는 **관측조차 되지 않는다**(ref-연결의 구조적 배제 — R-40): crossRepo == 0, 신뢰 정확히 1건.
+  echo "$JSON" | jq -e '.observed.summary.crossRepo == 0' > /dev/null \
+    || { echo "포크가 ref-연결 조회에서 배제되지 않았다(summary.crossRepo != 0)"; echo "$JSON"; false; }
   echo "$JSON" | jq -e '.observed.summary.sameRepoTrusted == 1' > /dev/null \
     || { echo "신뢰 PR이 정확히 1건으로 관측되지 않았다(summary.sameRepoTrusted)"; echo "$JSON"; false; }
 }
@@ -1246,63 +1199,71 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   [ "$merges" -eq 0 ]
 }
 
-# ── R-33: 상한 없는 열거가 **subprocess 캡처**에서 다시 경계된다 ────────────────────────────────
-# W11/W11b는 노드 **수**로 포화시켰다(페이지 경계). 그런데 진짜 경계는 한 층 아래에 있었다:
-# `--paginate --slurp`은 **전 페이지를 한 응답**으로 받고, spawnSync의 출력 버퍼는 유한하다
-# (bun 1.3.14 실측: 기본 1 MiB → 초과 시 자식 SIGTERM + ENOBUFS). PR 하나가 흔적 연결까지 실어 오므로
-# 포크 수백 건이면 총량이 그 버퍼를 넘긴다 → gh가 죽고, 그 앱의 폴링이 **매 주기** fail-closed한다.
-# **GraphQL 계층에서 없앤 포화 무기가 프로세스 계층에서 되살아난 것이다.**
-# 픽스는 버퍼가 아니라 **페이지 단위 소비**다(캡처 하나 = 한 페이지 = 공격자가 못 키운다).
+# bats test_tags=regression
+@test "W74: a null ref (our branch does not exist) means 'no PR of ours', not a query failure — plain create" {
+  # ★ R-40: ref-연결 조회는 `repository.ref(qualifiedName)`로 시작한다. 우리 브랜치가 원격에 **없으면**
+  #   라이브 GitHub은 `{data:{repository:{ref:null}}}`을 준다(라이브 실측). 그건 **조회 실패가 아니라**
+  #   "우리 것 PR 0건"이다 — git ls-remote가 그 브랜치를 못 찾는 신호와 정합해야 한다. 여기서 fail-closed하면
+  #   정상 create(첫 bump)가 영구히 막힌다. (ref null을 스키마 위반으로 접으면 이 증인이 RED가 된다.)
+  export STUB_REF_NULL=1
+  : > "$STUB_HEADS"          # 원격 브랜치도 없다 → 정상 create 경로
+  run_ensure_lane bump
+  [ "$status" -eq 0 ] || {
+    echo "null ref mis-read as failure: 브랜치가 없다는 정상 신호(ref:null)에 도구가 fail-closed했다 — 첫 bump가 막힌다"
+    echo "$output"; dump_calls; false
+  }
+  echo "$output" | jq -e '.observed.trusted == null' > /dev/null \
+    || { echo "null ref: 신뢰 PR을 null로 접지 않았다"; echo "$output"; false; }
+  echo "$output" | jq -e '.observed.summary.totalOpen == 0' > /dev/null \
+    || { echo "null ref: 우리 것 PR 0건으로 접지 않았다(totalOpen != 0)"; echo "$output"; false; }
+  action="$(echo "$output" | jq -r '.action')"
+  [ "$action" = "create" ] || { echo "null ref: '$action'로 갔다(기대 create)"; echo "$output"; false; }
+  run has_call_exact git push origin "HEAD:refs/heads/${BRANCH}"
+  [ "$status" -eq 0 ] || { echo "null ref: 정상 create push가 나가지 않았다"; dump_calls; false; }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 1 ]
+}
 
 # bats test_tags=regression
-@test "W70: an aggregate response larger than the subprocess capture buffer still enumerates completely (the fork saturation weapon is not recreated one layer below the query)" {
-  # 포크 650건(각각 질의 상한을 다 채운 노드 ≈ 6.9 KB) + 우리 writer PR이 **마지막 페이지 꼬리**에 있다.
-  # 총량 ≈ 4.5 MiB > 캡처 경계(4 MiB). **한 페이지**(100건 ≈ 690 KB)는 그 경계의 1/6이다 —
-  # 즉 페이지 단위로 소비하면 포크가 몇 건이든 캡처는 절대 경계에 닿지 않는다(그게 픽스의 요점이다).
-  write_prs "$(fat_fork_prs 650 "$(writer_pr 382 CLEAN "$(amr_absent)")")"
+@test "W75: a null ref with an orphan remote branch is adopted (ref:null folds to 'no PR', ls-remote decides create vs adopt)" {
+  # null ref는 "우리 것 PR 0건"으로만 접힌다 — create/adopt를 가르는 건 여전히 git ls-remote다(원격 브랜치 존재).
+  # 원격에 고아 브랜치가 남아 있으면(앞 run이 push엔 성공, create에서 죽음) ref:null이어도 adopt로 접수한다.
+  export STUB_REF_NULL=1
+  write_heads "$ORPHAN_OID"   # 원격 고아 브랜치 존재 → adopt
+  run_ensure_lane bump
+  [ "$status" -eq 0 ] || { echo "null ref + orphan: 도구가 fail-closed했다"; echo "$output"; dump_calls; false; }
+  action="$(echo "$JSON" | jq -r '.action')"
+  [ "$action" = "adopt" ] || { echo "null ref + orphan: '$action'로 갔다(기대 adopt)"; echo "$JSON"; false; }
+  run has_call_exact "${PUSH_ADOPT[@]}"
+  [ "$status" -eq 0 ] || { echo "null ref + orphan: adopt lease push가 나가지 않았다"; dump_calls; false; }
+}
+
+# ── R-40/R-41: 포크 억제가 **질의 작업(API·서브프로세스·벽시계) 예산**으로 이동했다 ────────────────
+# 옛 이름-매치 조회(pullRequests(headRefName))는 바이트는 foldConnection이 경계지었지만, **공격자 통제
+# 페이지마다 gh api graphql 서브프로세스를 하나씩** hasNextPage=false까지 띄웠다 → 폴링·회수가 **포크 수에
+# 비례**해 GraphQL 예산·서브프로세스·벽시계를 태운다(충분한 포크면 writer PR을 찾기 전에 매 주기 실패).
+# 종결 픽스: ref-연결 조회(associatedPullRequests)는 포크를 **구조적으로 배제**한다 → 질의 작업이 **우리 ref에
+# 연결된 PR 수**에만 비례하고(여기선 1건), 포크가 세상에 몇 건이든 상수다. 아래 두 증인이 그 성질을 못박는다.
+# ★ 취약 메커니즘을 고정하지 않는다: 정확한 포크 카운트·페이지 수·커서 대신 **포크-독립 질의-작업 경계**만
+#   단언한다 → fork를 열거하지 않는 안전한 구현이 종단 결정을 만족하면 통과한다(R-41).
+
+# bats test_tags=regression
+@test "W70: the main query's work is independent of fork count (a ref-connection query cannot be saturated by same-named forks)" {
+  # 포크 650건이 세상에 열려 있고(같은 결정적 브랜치명 bump-poll/<app>-<tag>) + 우리 writer PR 1건이 열려 있다.
+  # ref-연결 조회는 포크 PR(head가 포크 레포 ref)을 **응답에 담지 않는다** → 포크 650건은 질의에 **아무 비용도
+  # 부과하지 못한다**. 옛 이름-매치 조회였다면 650/100 = 7페이지 = 7 서브프로세스를 태웠을 것이다.
+  write_prs "$(crowded_prs 650 "$(writer_pr 382 CLEAN "$(amr_absent)")")"
   write_heads "$PR_OID"
-  # ★ 증인이 스스로 증명한다: 이 픽스처는 **정말로** 옛 프로토콜의 캡처 경계를 넘는다.
-  assert_crosses_capture_bound
 
   run_ensure_lane bump
   [ "$status" -eq 0 ] || {
-    echo "deployment suppressed below the query: 응답 총량이 캡처 버퍼를 넘자 도구가 죽었다"
-    echo "  (전 페이지를 한 subprocess 캡처에 받으면 gh가 ENOBUFS로 살해된다 — 포크 650건이면 충분하다)"
+    echo "deployment suppressed by fork budget: 포크 650건 앞에서 도구가 죽었다 — ref-연결 조회는 포크에 비용을 주지 않아야 한다"
     echo "$output"; dump_calls; false
   }
 
-  # ① 마지막 페이지 꼬리의 우리 PR을 **찾아냈다**(열거가 끝까지 갔다).
+  # ① 종단 결정: 자기 PR을 찾아 정상 화해(고아 오인 0 — push·create 0회 + 무장 갭 수렴).
   echo "$output" | jq -e '.observed.trusted.number == 382' > /dev/null \
-    || { echo "hidden writer PR: 1 MiB를 넘는 응답 뒤편의 자기 PR(#382)을 보지 못했다"; echo "$output"; dump_calls; false; }
-  # ★ 완전 열거는 **경계 있는 총계 요약**으로 증명한다 — 전량 노드 배열(`.observed.prs`)을 요구하지 않는다.
-  #   (R-37) 옛 증인은 `.observed.prs | length == 651`로 **전량 보관·직렬화를 동결**했다: 그건 R-36이
-  #   없애려는 바로 그 상주 메모리·로그 선형 증가다. 포크 650건은 **카운터로만**(crossRepo) 관측되고 노드는
-  #   버려졌으며, 신뢰 1건만 결정에 쓰였다 — 그래도 총 651건을 다 접었다(totalOpen)는 사실이 완전성의 증거다.
-  echo "$output" | jq -e '.observed.summary.totalOpen == 651' > /dev/null \
-    || { echo "incomplete enumeration: 651건(포크 650 + 우리 1)을 다 접지 못했다(summary.totalOpen)"; echo "$output"; false; }
-  echo "$output" | jq -e '.observed.summary.crossRepo == 650' > /dev/null \
-    || { echo "포크 650건이 카운터로 관측되지 않았다(summary.crossRepo)"; echo "$output"; false; }
-  echo "$output" | jq -e '.observed.summary.sameRepoTrusted == 1' > /dev/null \
-    || { echo "신뢰 PR이 정확히 1건으로 관측되지 않았다(summary.sameRepoTrusted)"; echo "$output"; false; }
-  # ★ 포화 응답에서도 **전량 노드 배열은 직렬화되지 않는다**(R-36 출력 경계) — `.observed.prs`는 없다.
-  echo "$output" | jq -e '.observed | has("prs") | not' > /dev/null \
-    || { echo "unbounded output: 포화 응답에서 전량 노드 배열(.observed.prs)이 직렬화됐다(R-36 위반)"; echo "$output"; false; }
-  # ★★ (R-37) **직렬화되는 audit 출력도 포크 수에 무관하다**(O(1)) — 이 픽스가 지키는 자기 불변식이다.
-  #   `observed`뿐 아니라 **`executed` 원장**도 경계 있어야 한다: read-only PR 열거(pullRequests 페이지 조회)를
-  #   원장에 담으면 executed가 페이지 수(=포크 수/100)에 비례해 워크플로 로그·부모 힙을 다시 키운다(억제 표면의
-  #   한 칸 아래 재현). 변이만 담기므로 pullRequests 페이지 조회는 executed에 **하나도** 없다(포크를 아무리
-  #   열어도 이 부분집합은 언제나 0 — commit-proof(object(oid)) 조회는 변이 인접 read라 그대로 남지만
-  #   pullRequests를 담지 않는다).
-  echo "$output" | jq -e '[.executed[] | select(contains("pullRequests"))] | length == 0' > /dev/null \
-    || { echo "unbounded audit: read-only PR 페이지 조회(pullRequests)가 executed에 기록됐다(포크 수에 비례 — R-36 위반)"; echo "$output"; false; }
-  # ★ 페이지네이션은 **경계 있는 카운터**(정수 하나 — 질의 문자열 배열이 아니다)로만 관측한다: 포크 650건이
-  #   7페이지로 접혔고(카운터=7), 그 값은 포크 수(crossRepo=650)보다 훨씬 작다 → audit 출력은 O(1)이다.
-  echo "$output" | jq -e '.graphqlPages == 7' > /dev/null \
-    || { echo "graphqlPages가 접은 페이지 수(7)로 관측되지 않았다"; echo "$output"; false; }
-  echo "$output" | jq -e '.graphqlPages < .observed.summary.crossRepo' > /dev/null \
-    || { echo "unbounded audit: graphqlPages(페이지 카운터)가 포크 수(crossRepo)에 비례해 커졌다"; echo "$output"; false; }
-
-  # ② 그 결과 **정확한 판정**에 도달한다(고아 오인 0 — push·create 0회 + 무장 갭 수렴).
+    || { echo "hidden writer PR: ref-연결 조회가 자기 PR(#382)을 보지 못했다"; echo "$output"; dump_calls; false; }
   action="$(echo "$JSON" | jq -r '.action')"
   [ "$action" = "skip" ] || { echo "ensure-bump-pr decided '$action' — 신뢰 PR #382이 열려 있다(expected skip)"; echo "$JSON"; false; }
   pushes="$(count_calls git push)"
@@ -1312,53 +1273,67 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   run arm_calls_num 382
   [ "$output" -eq 1 ]
 
-  # ③ 캡처가 **페이지 단위로 경계**됐다: 7페이지(651건)를 각각 **별도 호출**로 가져왔고, 2페이지부터는
-  #    endCursor를 이어받았다(= 한 캡처에 전부 받지 않았다).
-  run has_arg_exact "endCursor=cursor0"
-  [ "$status" -eq 0 ] || { echo "capture not paged: 두 번째 페이지를 endCursor로 이어받지 않았다"; dump_calls; false; }
-  run has_arg_exact "endCursor=cursor5"
-  [ "$status" -eq 0 ] || { echo "capture not paged: 마지막(7번째) 페이지까지 커서를 따라가지 않았다"; dump_calls; false; }
-  run has_arg_exact "--slurp"
-  [ "$status" -ne 0 ] || { echo "capture-bound regression: 전 페이지를 한 캡처(--slurp)로 받았다"; dump_calls; false; }
+  # ② ★ 포크는 **관측조차 되지 않는다**(ref-연결의 구조적 배제): crossRepo == 0, 신뢰 정확히 1건.
+  echo "$JSON" | jq -e '.observed.summary.crossRepo == 0' > /dev/null \
+    || { echo "포크가 ref-연결 조회에서 배제되지 않았다(summary.crossRepo != 0)"; echo "$JSON"; false; }
+  echo "$JSON" | jq -e '.observed.summary.sameRepoTrusted == 1' > /dev/null \
+    || { echo "신뢰 PR이 정확히 1건으로 관측되지 않았다(summary.sameRepoTrusted)"; echo "$JSON"; false; }
+  # ★ 전량 노드 배열은 직렬화되지 않는다(R-36 출력 경계 유지) — `.observed.prs`는 없다.
+  echo "$JSON" | jq -e '.observed | has("prs") | not' > /dev/null \
+    || { echo "unbounded output: 전량 노드 배열(.observed.prs)이 직렬화됐다(R-36 위반)"; echo "$JSON"; false; }
+
+  # ③ ★★ **질의 작업이 포크 수와 무관**하다(R-41의 핵심). 페이지네이션은 경계 있는 카운터(정수 하나)로만
+  #    관측하는데, 포크 650건이 세상에 있어도 조회는 **우리 PR 1건 = 1페이지 = 1 서브프로세스**로 끝난다.
+  #    (이름-매치 조회였다면 7페이지였고, stub이 그 질의를 exit 3으로 거부해 fail-closed → RED가 된다.)
+  echo "$JSON" | jq -e '.graphqlPages == 1' > /dev/null \
+    || { echo "query work NOT fork-independent: graphqlPages != 1 — 포크 수에 비례해 페이지를 태웠다(R-40)"; echo "$JSON"; false; }
+  # read-only PR 페이지 조회는 감사 원장에 하나도 남지 않는다(포크 수에 무관 — R-36 유지).
+  echo "$JSON" | jq -e '[.executed[] | select(contains("associatedPullRequests"))] | length == 0' > /dev/null \
+    || { echo "unbounded audit: read-only PR 조회(associatedPullRequests)가 executed에 기록됐다(R-36 위반)"; echo "$JSON"; false; }
+
+  # ④ ★ 조회가 **ref-연결**임을 못박는다(포크가 오염시킬 수 있는 이름-매치 표면이 아니다 — R-40).
+  run has_arg_exact "ref=refs/heads/$BRANCH"
+  [ "$status" -eq 0 ] || { echo "fork-taintable query: 우리 ref로 질의하지 않았다(ref=refs/heads/$BRANCH 없음)"; dump_calls; false; }
+  run has_substr 'headRefName:'
+  [ "$status" -ne 0 ] || { echo "fork-taintable query regression: 조회가 headRefName 이름-매치로 되돌아갔다 — 포크가 오염시킬 수 있다"; dump_calls; false; }
 }
 
 # bats test_tags=regression
-@test "W71: the revocation sweep's enumeration is not capture-bound either (a fork-saturated sibling head cannot hide an armed zombie)" {
-  # 같은 무기를 **회수 경로**에 겨눈다: 형제 브랜치명도 공개다(포크가 같은 head로 PR을 연다).
-  # 형제 조회가 한 캡처에 묶여 있으면 포크 포화가 그 조회를 죽이고 → 무장된 좀비를 **보지도 못한 채**
-  # (V-2 이후) run만 빨개진다. 즉 **회수 자체가 영구히 불가능**해진다 — 그게 R-25가 막으려던 피해다.
+@test "W71: the revocation sweep's query work is fork-independent too (a fork-saturated sibling head cannot hide an armed zombie or burn the budget)" {
+  # 같은 성질을 **회수 경로**에 겨눈다: 형제 브랜치명도 공개라 포크가 같은 head로 PR을 연다. ref-연결 조회는
+  # 그 포크들을 **응답에 담지 않는다** → 포화된 형제 head라도 (a) 무장된 좀비를 가리지 못하고, (b) 회수의
+  # 질의 작업을 포크 수만큼 태우지 못한다. 이름-매치로 되돌아가면 stub이 exit 3 → 관측 실패 → revocationBlind → RED.
   local sib armed_node
   sib="$(SIB_BRANCH_OF)"
-  # 그 형제 head에 열린 PR: 포크 650건(총량 ≈ 4.5 MiB > 캡처 경계) + **무장된 우리 writer PR**(꼬리).
+  # 그 형제 head에 포크 650건(같은 브랜치명) + **무장된 우리 writer PR**(꼬리). ref-연결 조회가 포크를 배제한다.
   armed_node="$(sib_node 340 "$SIB_OID" "2026-07-13T06:30:00Z" "$(amr_armed)")"
   printf '%s\t%s\n' "$SIB_OID" "refs/heads/$sib" >> "$STUB_SIBLINGS"
-  fat_fork_prs 650 "$armed_node" > "$SIB_DIR/$(printf '%s' "$sib" | tr '/' '_').json"
+  crowded_prs 650 "$armed_node" > "$SIB_DIR/$(printf '%s' "$sib" | tr '/' '_').json"
   sibling_commit "$SIB_OID" "$(sib_commit_msg "$SIB_TAG")"
-  # ★ 이 형제 응답도 **정말로** 캡처 경계를 넘는다(증인이 스스로 측정한다).
-  assert_crosses_capture_bound isDraft "$sib"
 
   write_prs '[]'   # 이번 후보는 아직 PR이 없다(정상 create 경로)
   run_ensure_lane bump
   [ "$status" -eq 0 ] || {
-    echo "revocation blinded by fork saturation: 형제 head가 포화되자 스윕이 그 브랜치를 관측하지 못했다"
+    echo "revocation blinded/starved by forks: 형제 head가 포화되자 스윕이 그 브랜치를 관측하지 못했다"
     echo "$output"; dump_calls; false
   }
 
-  # ① 포화 뒤편의 **무장된 형제**를 찾아 회수했다.
+  # ① 포크 뒤에 숨지 못한 **무장된 형제**를 찾아 회수했다.
   run disarm_calls 340
   [ "$output" -eq 1 ] || {
-    echo "armed zombie survived: 포크 350건에 가려 형제 PR #340의 무장을 회수하지 못했다"
+    echo "armed zombie survived: 포크 650건에 가려 형제 PR #340의 무장을 회수하지 못했다"
     echo "  → 낡은 머지 인가가 살아남는다(누군가 그 브랜치를 전진시키면 무승인 롤백 — R-25)."
     dump_calls; false
   }
   echo "$JSON" | jq -e '[.superseded[] | select(.number == 340 and .disarmed)] | length == 1' > /dev/null \
     || { echo "보고 누락: 회수한 형제가 superseded 보고에 없다"; echo "$JSON"; false; }
-  # ★★ (R-37) 회수 경로의 형제 열거도 **직렬화 audit 출력을 포크 수만큼 키우지 않는다**(O(1)): 포화된 형제
-  #   head의 read-only PR 페이지 조회(pullRequests)는 executed 원장에 하나도 남지 않는다 — 남으면 원장이
-  #   페이지 수(=포크 수/100)에 비례해 로그·힙을 다시 키운다(R-36 위반). 페이지네이션은 graphqlPages로만 관측한다.
-  echo "$JSON" | jq -e '[.executed[] | select(contains("pullRequests"))] | length == 0' > /dev/null \
-    || { echo "unbounded audit: 포화 형제의 read-only PR 조회(pullRequests)가 executed에 기록됐다(R-36 위반)"; echo "$JSON"; false; }
-  # ② 메인 판정은 그대로 진행됐다(포화가 배포를 막지 못한다).
+  # ② ★ 형제 조회도 **ref-연결**이라(우리 ref로 질의) 질의 작업이 포크 수와 무관하다 — read-only PR 조회는
+  #    감사 원장에 하나도 남지 않는다(O(1) — R-36 유지).
+  run has_arg_exact "ref=refs/heads/$sib"
+  [ "$status" -eq 0 ] || { echo "fork-taintable sibling query: 형제 ref로 질의하지 않았다(ref=refs/heads/$sib 없음)"; dump_calls; false; }
+  echo "$JSON" | jq -e '[.executed[] | select(contains("associatedPullRequests"))] | length == 0' > /dev/null \
+    || { echo "unbounded audit: 포화 형제의 read-only PR 조회(associatedPullRequests)가 executed에 기록됐다(R-36 위반)"; echo "$JSON"; false; }
+  # ③ 메인 판정은 그대로 진행됐다(포화가 배포를 막지 못한다).
   action="$(echo "$JSON" | jq -r '.action')"
   [ "$action" = "create" ]
 }
@@ -1532,9 +1507,9 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   run_ensure_lane bump
   [ "$status" -eq 0 ]
 
-  # 하네스 확인: 포크 PR이 실제로 섞여 있고(관측됨), 신뢰받지 못했는가.
-  #   포크 노드는 버려지고 카운터로만 남는다(R-36) → 포크 5건이 요약에 관측되고 신뢰 PR이 따로 잡힌다.
-  echo "$output" | jq -e '.observed.summary.crossRepo == 5' > /dev/null
+  # 하네스 확인: 포크는 ref-연결 조회에서 **구조적으로 배제**되고(관측 0건), 신뢰 PR만 잡혔는가(R-40).
+  #   무장 셀렉터가 브랜치가 아니라 번호여야 한다는 계약은 그대로다 — 포크가 없어도 브랜치 셀렉터는 금지다.
+  echo "$output" | jq -e '.observed.summary.crossRepo == 0' > /dev/null
   echo "$output" | jq -e '.observed.trusted.number == 380' > /dev/null
 
   run arm_calls_num 380
@@ -3422,9 +3397,11 @@ setup_closable_sibling() {
     dump_calls; false
   }
   # 변수는 **정확한 인자 원소**로 넘어간다(붙여 쓰면 gh가 못 읽는다). owner/repo는 gh 플레이스홀더가 채운다.
-  for want in "owner={owner}" "repo={repo}" "head=$BRANCH"; do
+  # ★ R-40: 조회 대상은 브랜치명(head)이 아니라 **우리 ref의 qualifiedName**(refs/heads/<b>)이다 — 포크가
+  #   같은 이름으로 오염시킬 수 없는 권위 있는 same-repo ref. `-f ref=`(raw-field)로 넘긴다.
+  for want in "owner={owner}" "repo={repo}" "ref=refs/heads/$BRANCH"; do
     run has_arg_exact "$want"
-    [ "$status" -eq 0 ] || { echo "조회 변수 계약 위반: '-F $want' 인자가 없다"; dump_calls; false; }
+    [ "$status" -eq 0 ] || { echo "조회 변수 계약 위반: '$want' 인자가 없다"; dump_calls; false; }
   done
 
   # ①-b ★★ **전 페이지를 한 subprocess 캡처에 담지 않는다**(structure r10 R-33) ────────────────
@@ -3460,15 +3437,23 @@ setup_closable_sibling() {
     dump_calls; false
   }
 
-  # ③ 페이지네이션 계약: gh --paginate는 $endCursor 변수 + pageInfo{hasNextPage,endCursor}를 요구한다.
-  #    이게 빠지면 --paginate가 첫 페이지만 주고 조용히 끝난다(= 다시 경계된 조회다).
-  for needle in 'pageInfo' 'hasNextPage' 'endCursor' '$endCursor' 'headRefName' 'states:OPEN'; do
+  # ③ 페이지네이션 계약: 도구가 endCursor를 직접 따라가려면 $endCursor 변수 + pageInfo{hasNextPage,endCursor}가
+  #    질의에 있어야 한다. 그리고 조회는 **ref-연결**이어야 한다(R-40): ref(qualifiedName:$ref) +
+  #    associatedPullRequests. `headRefName`(이름-매치)은 없어야 한다 — 그게 포크 오염 표면이었다.
+  for needle in 'pageInfo' 'hasNextPage' 'endCursor' '$endCursor' 'ref(qualifiedName' 'associatedPullRequests' 'states:OPEN'; do
     run has_substr "$needle"
     [ "$status" -eq 0 ] || {
       echo "페이지네이션/필터 계약 위반: GraphQL 질의문에 '$needle'이 없다"
       dump_calls; false
     }
   done
+  # ③-b ★ 이름-매치 조회(pullRequests(headRefName))로 되돌아가지 않았는가 — 그건 포크가 같은 이름으로
+  #     오염시킬 수 있는 취약 표면이다(R-40의 결함 그 자체).
+  run has_substr 'headRefName:'
+  [ "$status" -ne 0 ] || {
+    echo "fork-taintable query regression: 조회가 headRefName 이름-매치로 되돌아갔다 — 포크가 같은 브랜치명으로 오염시킬 수 있다(R-40)"
+    dump_calls; false
+  }
 
   # ④ 판정에 필요한 필드가 전부 있는가(빠지면 판정이 조용히 무너진다):
   #    headRefOid=lease 기대값 / autoMergeRequest=무장 관측 / isCrossRepository·__typename=신뢰 경계
@@ -3514,8 +3499,8 @@ setup_closable_sibling() {
     echo "search-index dependency: GraphQL 질의가 search(...) 커넥션을 쓴다 — 결과적 일관성이라 거짓 부재가 난다"
     dump_calls; false
   }
-  # 강한 일관성 표면을 쓰는가(repository.pullRequests connection).
-  run has_substr 'pullRequests('
+  # 강한 일관성 표면을 쓰는가(repository.ref(...).associatedPullRequests — primary datastore, R-40).
+  run has_substr 'associatedPullRequests('
   [ "$status" -eq 0 ]
 }
 
@@ -3535,14 +3520,17 @@ setup_closable_sibling() {
 @test "a fork (cross-repo) PR on the same branch name is never trusted (and does not own our branch)" {
   # 공개 레포 — 포크 PR은 같은 브랜치명 + 그럴듯한 본문을 아무나 올릴 수 있다. 이걸 신뢰하면
   # 포크 PR 하나로 배포를 무기한 억제할 수 있다(억제 = 공격 표면) → 신뢰 0.
+  # ★★ R-40: 이제 포크는 **관측조차 되지 않는다**. 조회는 `repository.ref(우리 ref).associatedPullRequests`라
+  #    포크 PR의 head(포크 레포 ref)는 이 connection에 **구조적으로** 들어오지 못한다(라이브 실측: head-연결).
+  #    그래서 포크 노드는 응답에 없다(crossRepo == 0) — "관측했으나 신뢰 안 함"보다 강한 보장이다.
   # ⚠️ 포크의 head는 **자기 레포의 ref**다 — 우리 레포엔 그 브랜치가 없다(그래서 write_heads 없음).
   #    포크 PR은 우리 브랜치를 침해하지 않으므로, 브랜치가 없으면 그대로 create 경로다.
   write_prs "[{\"number\":400,\"isCrossRepository\":true,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(human_author drive-by),\"autoMergeRequest\":$(amr_absent)}]"
   run_ensure
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.observed.trusted == null'
-  # 포크 노드는 버려지고 카운터로만 남는다(R-36) → 포크 1건이 요약에 관측되고 동일-레포 신뢰는 0건이다.
-  echo "$output" | jq -e '.observed.summary.crossRepo == 1'
+  # 포크는 ref-연결 조회에 **애초에 없다**(R-40) → 관측된 포크 0건 · 동일-레포 신뢰 0건.
+  echo "$output" | jq -e '.observed.summary.crossRepo == 0'
   echo "$output" | jq -e '.observed.summary.sameRepoTrusted == 0'
   echo "$output" | jq -e '.observed.remoteBranch == null'
   creates="$(count_calls gh pr create)"
@@ -3726,9 +3714,9 @@ setup_closable_sibling() {
   run_ensure
   [ "$status" -eq 0 ]
   echo "$output" | jq -e --arg b "$BRANCH" '.branch == $b'
-  # 결정적 브랜치가 조회의 **대상**이다 — head 변수로 정확히 한 번 질의한다.
+  # 결정적 브랜치가 조회의 **대상**이다 — 그 브랜치의 **ref**로 정확히 한 번 질의한다(R-40: ref-연결).
   lists="$(count_calls gh api graphql)"
-  run has_arg_exact "head=$BRANCH"
+  run has_arg_exact "ref=refs/heads/$BRANCH"
   [ "$status" -eq 0 ]
   [ "$lists" -eq 1 ]
 }
