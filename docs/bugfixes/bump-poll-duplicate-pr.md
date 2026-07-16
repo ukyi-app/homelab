@@ -207,6 +207,16 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Review Decision Log
 
+### Codex Structure Review — r14: needs-attention → 1건 Accept (owner 2026-07-16)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-43 | high | `Blocker: ref absence and an empty PR connection collapse into the same state` — `foldConnection`이 `repository.ref === null`을 곧장 빈 `PrScan`으로 매핑해 **"ref 부재"와 "ref 존재 + 완전 열거된 빈 connection"**을 뭉갠다. main 경로는 별도 `git ls-remote`로 ref를 관측해 그게 찾으면 adopt한다. reconcile은 `ls-remote`가 준 ref인데 `ref:null`이 `pr:null`이 되어 성공 종료한다. **비원자적** 두 읽기라, ref 재생성·stale/저하된 GraphQL 뷰가 **존재하는 PR을 숨길 수 있다** → executor가 force-push+중복 create, reconcile은 무장된 PR을 놓치고 run도 안 빨갛다. **W75가 그 모순 상태(`ref:null`+브랜치 존재→adopt)를 성공으로 못박고 있었다** | **Accept**(R-40이 만든 회귀) | ref-조회에 **`target{oid}`** 추가 → `foldConnection`이 ref presence+OID를 **discriminated 관측**으로 나른다. main create/adopt는 GraphQL ref와 ls-remote가 **합의**할 때만: 둘 다 부재→create · 둘 다 존재+OID 일치→adopt · 한쪽만 존재·OID 상이→**fail-closed**(변이 0). reconcile은 ls-remote가 보고한 형제인데 ref-조회가 `ref:null`이면 관측 실패로 접어 **`revocationBlind`**(run 빨강). **W75 재작성**(adopt→fail-closed) + **W76**(reconcile 불일치)·**W77**(OID 상이) 신설, W74/W3 유지. 세 가드 전부 컨덕터 뮤테이션으로 이빨 확인 |
+
+> ★ **실행 환경**: 이 라운드는 서브에이전트 **월 지출 한도**로 막혀, 컨덕터가 직접 구현·검증했다(Codex 게이트는 별도 예산이라 정상). ref-조회 GraphQL(`ref.target.oid`)의 head-연결·OID 획득을 라이브로 재확정하고, 뮤테이션 3종을 직접 재실행했다.
+
+**최종 baseline**: `red..green` diff = **scope 4파일 정확히** · regression 115 baseline RED · characterization 63 green(양 끝단) · `--verify-flip` **flipOk: true**.
+
 ### Codex Structure Review — r13: needs-attention → 1건 Accept (owner 2026-07-16)
 
 | ID | 심각도 | 발견 | 결정 | 반영 |
