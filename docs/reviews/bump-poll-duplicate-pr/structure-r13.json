@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "No-ship: the code addresses the root cause and the committed records show a clean frozen-test RED→GREEN flip, but the authoritative plan still publishes the retired pre-r12 architecture.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 53,
+  "target": "branch diff against main",
+  "reviewedSha": "60e7e0cf8f4985c08883b5ca401377011095f2d2",
+  "reviewedTree": "56476e4ac5736e885901aab77228e24e40d2b5c9",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: authoritative plan still publishes the retired fork-taintable seam",
+      "body": "The final `The fix` section prescribes `--paginate --slurp` over `repository.pullRequests(headRefName:)`, exactly the capture-bound, attacker-linear mechanism R-33/R-40 removed. The implementation and README instead use page-wise `repository.ref(...).associatedPullRequests`. The same authoritative section also says BEHIND is skipped (line 85) and lists only two scope paths (line 121), while the implementation rebuilds BEHIND and the lock declares four paths. This is new post-r12 evidence: the r12 decision log was appended without synchronizing the plan that remaining work is expected to follow. Building from it would either reintroduce the fork-suppression failure or fight the current executor and tests.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 53,
+      "line_end": 54,
+      "confidence": 0.99,
+      "recommendation": "Synchronize the plan's `The fix`, decision table, scope, and B-1 result with the final ref-associated, page-wise implementation and four-path lock. Keep superseded designs only in the dated decision log.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Update the authoritative plan and increment artifact without changing the frozen regression tests.",
+    "Re-run the structure gate after the documentation contract matches the final implementation."
+  ]
+}

@@ -47,20 +47,30 @@ spike-1:
 - `tools/ensure-bump-pr.ts`가 **조회·결정·원격 변이를 모두** 수행한다. 워크플로는 **로컬 브랜치·커밋만**
   준비하고 도구를 호출한다(직접 `git push`·`gh pr create`·`auto-merge-or-fail.sh` 금지 — 호출부 게이트가 강제).
 
-### 2. 조회 — 완전 열거 + 강한 일관성
+### 2. 조회 — fork-불변 ref-연결, 페이지 단위 완전 열거
 
 ```
-gh api graphql --paginate --slurp
-  repository.pullRequests(headRefName:<branch>, states:OPEN, first:100, after:$endCursor)
+gh api graphql  (한 페이지씩 우리가 endCursor로 따라간다 — --paginate --slurp 아님)
+  repository.ref(qualifiedName:refs/heads/<branch>).associatedPullRequests(states:OPEN, first:100, after:$endCursor)
     { pageInfo{hasNextPage endCursor}
       nodes{ number isCrossRepository mergeStateStatus headRefOid baseRefName
              author{login __typename} autoMergeRequest{enabledAt} } }
+git ls-remote --heads origin <branch> | 'bump-poll/*'   ← 원격 ref 존재/OID + 형제 열거(우리 ref만)
 ```
 
-- **상한 없는 완전 페이지네이션**. 마지막 페이지가 `hasNextPage:true`면 **fail-closed**(완전성 증명).
-  이전의 `gh pr list --limit N`은 **포크 포화 = 배포 정지 무기**여서 폐기했다.
+- **fork-불변 조회**(structure 게이트 r12/R-40의 종결 픽스). `associatedPullRequests`는 **head-연결**이라
+  (라이브 실측: `refs/heads/main`은 열린 PR 9건의 base지만 associated 0건) **우리 ref를 head로 하는 same-repo
+  PR만** 준다 — fork PR의 head는 포크 레포의 ref이므로 **구조적으로 배제**된다. 그래서 질의 작업(서브프로세스·
+  페이지 수)이 **포크 수와 무관**하다. 이전의 `pullRequests(headRefName:)` 이름-매치는 포크가 같은 브랜치명으로
+  connection을 채워 **매 페이지 gh 서브프로세스를 태우는 배포 정지 무기**였다(r2/r4→r10/R-33→r11/R-36의 후퇴사).
+- **페이지 단위 소비**(r10/R-33·r11/R-36): 한 페이지 받고 → 즉시 접어 신뢰 PR 후보 + 경계 카운터만 남기고
+  원본 페이지·미신뢰 노드는 버린다(`--paginate --slurp`는 전 페이지를 한 subprocess 캡처에 담아 힙·로그를
+  포화시켰다). 마지막 페이지가 `hasNextPage:true`면 **fail-closed**(완전성 증명). 상한은 어디에도 없다.
+- **사람-흔적(comments/labels) 상세는 경계 있는 신뢰 후보를 고른 뒤에만** 조회한다(페이지를 가볍게).
 - **검색 API 금지**(`--author`/`--app`/`search(`) — 최종 일관성이라 방금 만든 PR이 **거짓 부재**가 되어
   고아 경로(force-push)로 빠진다. 강한 일관성의 connection API만 쓴다.
+- 형제 스윕은 `git ls-remote --heads origin 'bump-poll/*'`(권위 있는 same-repo ref, fork-불변)로 **우리 ref만**
+  열거해 각각 ref-조회한다 → 대상 수 = 우리 ref 수(우리가 통제).
 
 ### 3. 신뢰 경계 (모두 클라이언트 재검증)
 
@@ -82,10 +92,16 @@ gh api graphql --paginate --slurp
 | 없음 | **있음** | (필연적으로 있음) | **fail-closed** — 사람/다른 봇의 브랜치를 절대 덮지 않는다 |
 | 없음 | 없음 | 있음(고아) | **adopt** — leased push(원격 OID) → PR 생성 |
 | 없음 | 없음 | 없음 | **create** — `git push origin HEAD:refs/heads/<b>` → PR 생성 |
-| 있음 · CLEAN/BEHIND/BLOCKED/**UNKNOWN** | — | — | **skip** — 변이 0 |
-| 있음 · **DIRTY** | — | — | **rebuild** — leased push(`headRefOid`) → PR 재사용(create 금지) |
+| 있음 · CLEAN/BLOCKED/**UNKNOWN** | — | — | **skip** — 변이 0 |
+| 있음 · **DIRTY 또는 BEHIND** | — | — | **rebuild** — leased push(`headRefOid`) → PR 재사용(create 금지) |
 
-**포크는 결정을 막지 못한다**(면제) — 포크가 배포를 억제하는 지렛대가 되면 안 된다.
+⚠️ **`STALE_STATES = {DIRTY, BEHIND}`은 rebuild의 *필요조건*일 뿐이다**(structure r12/H-4): strict main에선
+BEHIND가 **머지마다** 발생하므로, 그 PR에 **사람의 흔적**(review·review request·assignee·human comment·
+`hold`/`do-not-close` 라벨·draft·REOPENED)이 하나라도 있으면 **skip으로 뒤집힌다**(force-push가 승인을
+dismiss하고 인라인 코멘트를 outdated하는 것을 막는다). 흔적 조회는 **절단 불가**(comments/labels totalCount로
+절단·관측불가를 감지 → "사람 흔적 있음"으로 접어 파괴 금지).
+
+**포크는 결정을 막지 못한다**(면제) — 그리고 이제 ref-연결 조회가 포크를 **애초에 관측하지 않는다**(§2).
 
 **push argv 계약**(stub이 계약 밖 형태를 거부): create = `git push origin HEAD:refs/heads/<b>` ·
 adopt/rebuild = `git push --force-with-lease=refs/heads/<b>:<expected OID> origin HEAD:refs/heads/<b>`.
@@ -100,6 +116,8 @@ adopt/rebuild = `git push --force-with-lease=refs/heads/<b>:<expected OID> origi
 | `bump` | 신뢰 PR + 무장됨 | 손대지 않음(멱등 — force-push는 무장을 지우지 않는다) |
 | **`propose-pr`** | 신뢰 PR + 무장됨 | **disarm**(`gh pr merge --disable-auto <number>`) — `.bindings.json`이 `autoDeploy: true→false`로 바뀌어도 **낡은 인가로 승인 없이 머지**되지 않게 |
 | `propose-pr` | — | **절대 무장하지 않는다** |
+| **모든 레인** · **미검증 head** | 무장됨 | **disarm**(r8/R-26) — 소유권(`proveOurCommit`)이 증명되지 않은 head에 붙은 무장은 인가가 아니다. 회수(안전 방향)는 중단 가능한 소유권 검사보다 **먼저** 실행한다(r6/R-23) |
+| **superseded 형제**(같은 앱의 더 오래된 PR) | 무장됨 | **disarm**(r12/V-1) — 회수는 **보안 속성**이라 `--reconcile-only`가 후보 없이도 매 주기 네임스페이스 전체를 훑어, 앱별 **가장 최신 PR 1건만** 무장을 유지하고 나머지는 회수한다. 관측 실패는 시끄럽게 실패(`revocationBlind` → 비-0 종료) |
 
 **인증된 셀렉터를 변이 경로 전체에 전달**한다: 기존 PR은 `trusted.number`, 새 PR은 `gh pr create`의 URL에서
 파싱한 번호. **브랜치 셀렉터 금지** — `gh pr merge <branch>`는 **동명 포크 PR로 해석**될 수 있다(= 공격자
@@ -118,7 +136,9 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 - **before**: 폴링마다 중복 PR(게이트 소모 + 좀비 누적 + 충돌 PR에 auto-merge 무장).
 - **after**: bump당 PR 1개. 충돌 시 그 PR이 최신 main 위로 재구축된다.
 
-**변경 표면(`scope[]`)**: `tools/ensure-bump-pr.ts` · `.github/workflows/bump-poll.yaml`.
+**변경 표면(`scope[]`)** (structure r7/R-25·r10/R-35에서 확장): `tools/ensure-bump-pr.ts` ·
+`.github/workflows/bump-poll.yaml` · `.github/workflows/pr-sweeper.yaml`(실행기가 `bump-poll/*` 네임스페이스의
+**유일한 소유자** — 스위퍼는 그 접두를 더 이상 수렴시키지 않는다) · `tools/README.md`(공개 계약 서술).
 
 **워크플로 호출부 계약**(신규 게이트 `tests/gates/test_bump-poll-callsite.bats`가 강제): bump-poll은
 `gh pr create`·`git push`를 **직접 호출하지 않고** `tools/ensure-bump-pr.ts`를 통해서만 원격을 변이하며,
@@ -134,7 +154,7 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 | **포크 PR만** 존재 → **create** | 포크가 배포를 억제하면 안 된다(R-2) |
 | 동일-레포지만 **비-writer 작성자**(사람·다른 봇) → **fail-closed** | ⚠️ structure 게이트 r3에서 교정: 동일-레포 PR의 head ref는 **반드시 우리 레포에 존재**하므로, 예전 계약(create)은 실제로는 그 브랜치를 **force-push로 파괴**하고 중복 PR을 여는 경로였다. 이제 변이 0으로 죽는다 |
 | **포크 PR만** 존재 → 결정을 막지 않는다(create/adopt) | 포크는 우리 ref를 만들 수 없다. 포크가 배포를 억제하는 지렛대가 되면 안 된다(r3·r4) |
-| **포크가 몇 개든**(포화) 배포가 계속 진행된다 | 완전 페이지네이션 — 상한 fail-closed는 **DoS 무기**였다(r4) |
+| **포크가 몇 개든**(포화) 배포가 계속 진행된다 | ref-연결 조회가 포크를 **구조적으로 배제**해 질의 작업이 포크 수와 무관하다(r12/R-40). 이전엔 완전 페이지네이션이 포크를 *통과*했고 그 자체가 API·벽시계 예산 DoS였다(r2/r4→r10→r11의 후퇴사) |
 | writer login **두 표기**(`app/<slug>`·`<slug>[bot]`) 인식 | 표기 하나만 맞추면 프로덕션에서 dedupe가 조용히 죽는다 |
 | 잘못된 JSON → **fail-closed** | 조용한 create = 중복 재발 |
 | `poll-ghcr` 판정 전부(bump/propose-pr/noop/refuse·TOCTOU 가드) | 플래너는 이 픽스에서 **건드리지 않는다** |
@@ -142,7 +162,7 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 ## Regression test (already RED at red.sha)
 
 - **seam**: `tools/ensure-bump-pr.ts`(PR 생성 결정) + `tools/tests/test_ensure-bump-pr.bats`(원시
-  `gh pr list --json` 스키마를 fixtures로 주입하는 hermetic 테스트).
+  `gh api graphql` ref-연결 응답(`ref.associatedPullRequests`) 스키마를 fixtures로 주입하는 hermetic 테스트).
 - **stub 하네스**: 테스트가 `gh`·`git`을 PATH stub으로 가로채 **argv를 원장에 기록**한다(레포 관용구 —
   kubectl/skopeo/curl stub 선례). 호출 **횟수·순서·플래그**를 단언한다.
 - `regressionCmd`: `bats tools/tests/test_ensure-bump-pr.bats tests/gates/test_bump-poll-callsite.bats --filter-tags regression`
@@ -153,7 +173,11 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 - **보존 22건**: 정상 create 경로(**완전 argv 단언**) · **조회가 변이보다 먼저**(순서 단언) · 조회 argv 정확성
   (headRefOid 포함) · 포크·비-writer 불신 · writer login 두 표기 정규화 · fail-closed 6종 ·
   **bare-lease 금지 가드** · **하네스 증명**(계약 밖 push argv 6종을 stub이 exit 3으로 죽이고 계약 3종만 통과 — r3).
-- RED verify-record 커밋됨(회귀 exit=1 + 증상토큰, characterization exit=0 / 보존 22 + 기존 41 = 63).
+- RED verify-record 커밋됨(회귀 exit=1 + 증상토큰, characterization exit=0).
+
+> ⚠️ 위 "증인 7 / 보존 22"는 **r1 초기 계획값**이다. structure 게이트 r1~r13의 하드닝을 거치며 증인이
+> 크게 늘어, **최종 파티션은 regression 113 · characterization 63**이다(W1~W73 + 호출부 계약). 각 라운드의
+> 증인 추가·재분류·baseline 재구성은 아래 Review Decision Log가 권위다.
 
 ## Increment plan
 
@@ -182,6 +206,12 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
   (buildx attestation 비결정성 — 원래 F-1의 다른 절반). 별도 파이프라인.
 
 ## Review Decision Log
+
+### Codex Structure Review — r13: needs-attention → 1건 Accept (owner 2026-07-16)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-42 | high | `Blocker: authoritative plan still publishes the retired fork-taintable seam` — 계획 본문의 `The fix` 섹션이 아직 **`pullRequests(headRefName:)` 위의 `--paginate --slurp`**(r33/r40이 제거한 캡처-바운드·공격자-선형 메커니즘)를 규정하고, **BEHIND는 skip**(85행)·**scope 2경로**(121행)라 한다. 구현·락은 페이지 단위 `ref.associatedPullRequests`·BEHIND rebuild·4경로다. Decision Log는 갱신했지만 **남은 작업이 따를 계획 본문**을 동기화하지 않았다 → 이걸 근거로 작업하면 포크-억제 실패를 재도입하거나 현 executor·테스트와 싸운다 | **Accept** | 계획 본문을 최종 계약과 동기화(문서-only, scope·테스트·baseline 불변): §2 조회 → **fork-불변 ref-연결·페이지 단위**(라이브 실측 근거 포함) · 판정표 → **`DIRTY|BEHIND → rebuild`**(사람 흔적 있으면 skip, H-4) · scope → **4경로**(pr-sweeper·README) · §5 무장 축에 **미검증 head·superseded 회수**(R-23·R-26·V-1) 추가 · B-1 수치 → **최종 파티션(regression 113·characterization 63)** + 진화 경로 명시 · seam 서술 `gh pr list` → `gh api graphql` ref-연결. 폐기된 설계는 날짜 있는 Decision Log에만 잔존 |
 
 ### Codex Structure Review — r12: needs-attention → 4건 전부 Accept (owner 2026-07-15)
 
