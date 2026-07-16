@@ -163,6 +163,12 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Follow-up backlog
 
+- **F-1 (구조 개선, structure r12 R-38에서 분리)**: bump-poll.yaml의 항목별 오케스트레이션(브랜치 생성·
+  bump-tag·add·commit·실행기 호출)을 **테스트된 도구 + 격리 worktree**로 이관. 현재는 인-워크플로 셸 루프이고,
+  R-38에서 `git checkout -f main` finally 식 정리로 트랜잭션 격리는 복원했지만, `CONTRIBUTING.md:39-41`은 이 루프를
+  "테스트된 도구에 속하는 경계"로 명시한다 — 셸 루프를 worktree-격리 도구로 대체하면 항목 간 상태 공유 표면
+  자체가 사라진다. 별도 파이프라인.
+
 - **F-0 (권장, 이 픽스의 한계)**: `bump-poll/**` ref를 **writer App 전용으로 예약하는 GitHub ruleset**
   (`infra/github` terraform). 이 픽스의 커밋 소유권 검증은 **안전 인터록이지 인증이 아니다** — 워크플로의
   `git commit` + 토큰 push는 **서명되지 않으므로**(GitHub은 API로 만든 커밋만 서명한다) git author/committer는
