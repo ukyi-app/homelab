@@ -259,24 +259,27 @@ gh_pages() {
   done
   if [ -z "$cursor" ]; then i=0; else i=$(( ${cursor#cursor} + 1 )); fi
   # ★ 포크 배제: isCrossRepository:true 노드는 라이브 ref-조회에 없으므로 픽스처에서 걸러 낸다(R-40).
+  # ★ ref.target.oid(R-43): 라이브 ref-조회는 브랜치 tip OID를 함께 준다 → ls-remote OID와 교차 검증한다.
+  #   REF_OID(호출부가 STUB_HEADS에서 유도)를 실어, GraphQL과 ls-remote가 **합의**하는 정상 케이스를 모델한다.
+  refoid="${REF_OID:-1111111111111111111111111111111111111111}"
   PAGE='
     map(select(.isCrossRepository != true)) as $all
     | ($all | length) as $n
     | (if $n == 0 then 1 else (($n + 99) / 100 | floor) end) as $np
-    | { data: { repository: { ref: { associatedPullRequests: {
+    | { data: { repository: { ref: { target: { oid: $refoid }, associatedPullRequests: {
           pageInfo: {
             hasNextPage: (if $i < $np - 1 then true else $forcelast end),
             endCursor: (if $i < $np - 1 then "cursor\($i)" else null end)
           },
           nodes: $all[($i * 100):(($i + 1) * 100)]
         } } } } }'
-  if out="$(jq -c --argjson i "$i" --argjson forcelast "${FORCE_LAST:-false}" "$PAGE" "$f" 2>/dev/null)"; then
+  if out="$(jq -c --argjson i "$i" --argjson forcelast "${FORCE_LAST:-false}" --arg refoid "$refoid" "$PAGE" "$f" 2>/dev/null)"; then
     printf '%s' "$out"
     return 0
   fi
   # 깨진 JSON·비배열 픽스처(fail-closed 증인)는 쪼갤 수 없다 → ref 봉투에 원본을 그대로 실어 흘린다.
-  printf '{"data":{"repository":{"ref":{"associatedPullRequests":{"pageInfo":{"hasNextPage":%s,"endCursor":null},"nodes":%s}}}}}' \
-    "${FORCE_LAST:-false}" "$(cat "$f")"
+  printf '{"data":{"repository":{"ref":{"target":{"oid":"%s"},"associatedPullRequests":{"pageInfo":{"hasNextPage":%s,"endCursor":null},"nodes":%s}}}}}' \
+    "$refoid" "${FORCE_LAST:-false}" "$(cat "$f")"
 }
 
 case "$1:$2" in
@@ -321,11 +324,21 @@ case "$1:$2" in
         esac
         if [ -n "${STUB_GH_LIST_FAIL:-}" ]; then echo "stub: gh api graphql 실패(조회 장애 시뮬)" >&2; exit 1; fi
         # ref === null = 우리 브랜치가 원격에 없다(라이브 응답: {repository:{ref:null}}) → 도구는 "우리 것 PR 0건"으로
-        # 접어야 한다(고아/create 경로 — 조회 실패가 아니다). 이 주입으로 그 스키마 응답을 그대로 재현한다.
+        # 접는다. **STUB_REF_NULL은 강제 부재**(R-43 불일치 증인 W75: ls-remote는 브랜치를 보고하는데 GraphQL만
+        # ref:null인 stale/저하 뷰를 재현한다 → 도구는 fail-closed여야 한다).
         if [ -n "${STUB_REF_NULL:-}" ]; then printf '{"data":{"repository":{"ref":null}}}'; exit 0; fi
         if [ -n "${STUB_GRAPHQL_RAW+set}" ]; then printf '%s' "$STUB_GRAPHQL_RAW"; exit 0; fi
+        # ★ ref 존재는 ls-remote(STUB_HEADS)와 **합의**한다(R-43): 브랜치가 heads에 있으면 그 OID로 ref 존재,
+        #   없으면서 STUB_PRS가 **유효하게 비었으면** ref:null(둘 다 부재 → create). same-repo PR이 있으면 브랜치는
+        #   반드시 존재하므로(라이브 불변) ref 존재로 친다(그 영역은 cross-check에 닿지 않는다 — trusted≠null).
+        #   ⚠️ 깨진 JSON 픽스처(prcount 빈값)는 ref:null로 접지 않는다 — gh_pages 폴백으로 흘려보내 fail-closed시킨다.
+        refarg=""; for a in "$@"; do case "$a" in ref=*) refarg="${a#ref=}" ;; esac; done
+        refoid="$(awk -v r="$refarg" '$2==r{print $1; exit}' "$STUB_HEADS" 2>/dev/null)"
+        prcount="$(jq 'map(select(.isCrossRepository != true)) | length' "$STUB_PRS" 2>/dev/null)"
+        if [ -z "$refoid" ] && [ "$prcount" = "0" ]; then printf '{"data":{"repository":{"ref":null}}}'; exit 0; fi
         # ★ 라이브처럼 **first:100 페이지 경계**로 쪼갠다: 첫 페이지만 소비하는 구현이 통과하면 안 된다.
-        FORCE_LAST="${STUB_HAS_NEXT_PAGE:-false}" gh_pages "$STUB_PRS" "$@"
+        # STUB_REF_OID: GraphQL ref.target.oid를 ls-remote와 **다르게** 강제하는 훅(R-43 OID-상이 불일치 증인 W77).
+        REF_OID="${STUB_REF_OID:-${refoid:-$PR_OID}}" FORCE_LAST="${STUB_HAS_NEXT_PAGE:-false}" gh_pages "$STUB_PRS" "$@"
         ;;
       *isDraft*)
         # ── 형제 PR 조회(SIBLING_PR_QUERY — ref별 exact 질의) ──────────────────────────────
@@ -337,6 +350,10 @@ case "$1:$2" in
           *) echo "stub gh: 형제 질의가 ref-연결(associatedPullRequests)이 아니다(R-40): $q" >&2; exit 3 ;;
         esac
         if [ -n "${STUB_SIB_FAIL:-}" ]; then echo "stub: 형제 PR 조회 실패(조회 장애 시뮬)" >&2; exit 1; fi
+        # ★ R-43 불일치: 형제 ref는 `git ls-remote`가 **존재를 보고했기에** 회수 대상이 됐는데, ref-조회가
+        #   ref:null(부재)을 주면 두 읽기가 어긋난 것이다(stale/저하 뷰·재생성) → observeBranchPr가 fail-closed
+        #   → revocationBlind(무장 여부를 모르는데 조용히 넘어가지 않는다). STUB_SIB_REF_NULL로 그 상태를 재현한다.
+        if [ -n "${STUB_SIB_REF_NULL:-}" ]; then printf '{"data":{"repository":{"ref":null}}}'; exit 0; fi
         ref=""
         for a in "$@"; do case "$a" in ref=*) ref="${a#ref=}" ;; esac; done
         branch="${ref#refs/heads/}"
@@ -1225,17 +1242,64 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 }
 
 # bats test_tags=regression
-@test "W75: a null ref with an orphan remote branch is adopted (ref:null folds to 'no PR', ls-remote decides create vs adopt)" {
-  # null ref는 "우리 것 PR 0건"으로만 접힌다 — create/adopt를 가르는 건 여전히 git ls-remote다(원격 브랜치 존재).
-  # 원격에 고아 브랜치가 남아 있으면(앞 run이 push엔 성공, create에서 죽음) ref:null이어도 adopt로 접수한다.
-  export STUB_REF_NULL=1
-  write_heads "$ORPHAN_OID"   # 원격 고아 브랜치 존재 → adopt
+@test "W75: a GraphQL ref:null contradicting an ls-remote-present branch fails closed (two non-atomic reads must agree — R-43)" {
+  # ★ R-43: ref-조회(GraphQL)와 git ls-remote는 **두 번의 비원자적 읽기**다. GraphQL이 ref:null(브랜치 부재)을
+  #   주는데 ls-remote는 그 브랜치를 보고하면(존재), 두 읽기가 **어긋난** 것이다 — GraphQL 뷰가 stale/저하됐거나
+  #   ref가 그 사이 재생성됐다. 예전엔 ref:null을 "PR 0건"으로 접은 뒤 ls-remote만 보고 **무조건 adopt(force-push)**
+  #   했다 → GraphQL이 **실재하는 열린 PR을 숨긴** 경우 남의 커밋을 덮고 중복 PR을 열었다. 이제는 **fail-closed**다:
+  #   한쪽만 존재하면 사실을 모르는 것이므로 force-push도 create도 하지 않는다(다음 주기가 다시 읽는다).
+  export STUB_REF_NULL=1       # GraphQL: ref:null(부재)
+  write_heads "$ORPHAN_OID"    # ls-remote: 브랜치 존재 → **불일치**
   run_ensure_lane bump
-  [ "$status" -eq 0 ] || { echo "null ref + orphan: 도구가 fail-closed했다"; echo "$output"; dump_calls; false; }
-  action="$(echo "$JSON" | jq -r '.action')"
-  [ "$action" = "adopt" ] || { echo "null ref + orphan: '$action'로 갔다(기대 adopt)"; echo "$JSON"; false; }
-  run has_call_exact "${PUSH_ADOPT[@]}"
-  [ "$status" -eq 0 ] || { echo "null ref + orphan: adopt lease push가 나가지 않았다"; dump_calls; false; }
+  [ "$status" -ne 0 ] || {
+    echo "ref disagreement mis-adopted: GraphQL ref:null인데 ls-remote는 브랜치 존재 → 도구가 fail-closed하지 않았다"
+    echo "  (stale/저하된 GraphQL 뷰가 실재하는 PR을 숨겼다면 이건 force-push로 남의 커밋을 덮는 경로다 — R-43)"
+    echo "$output"; dump_calls; false
+  }
+  # ★ 변이 0: force-push(adopt)도, plain push도, create도 하지 않는다.
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || { echo "ref disagreement: push가 나갔다($pushes회) — 사실을 모른 채 밀면 안 된다"; dump_calls; false; }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ] || { echo "ref disagreement: gh pr create가 나갔다($creates회)"; dump_calls; false; }
+}
+
+# bats test_tags=regression
+@test "W76: a sibling ls-remote reports but whose ref:null in GraphQL turns the run red (revocation cannot silently miss an armed zombie — R-43)" {
+  # ★ R-43(회수 경로): 형제 ref는 `git ls-remote`가 **존재를 보고했기에** 회수 스윕의 대상이 됐다. 그런데
+  #   ref-조회가 ref:null(부재)을 주면 어긋난 것이다 — 그 브랜치에 무장된 좀비 PR이 있는지 **알 수 없다**.
+  #   예전 관용구("ref:null = PR 0건")를 그대로 쓰면 **무장된 PR을 못 본 채 run이 초록**이 된다. 이제는
+  #   관측 실패로 접어(revocationBlind) run을 빨갛게 만든다 — 회수 대상을 가릴 수 있는 관측 실패는 회수 실패다(V-2).
+  local sib; sib="$(SIB_BRANCH_OF)"
+  write_bindings '{"autoDeploy":false}'   # 승인 레인 — 이 네임스페이스의 무장은 회수 대상이다
+  add_sibling "$sib" "$SIB_OID" "$(sib_node 361 "$SIB_OID" "2026-07-13T06:30:00Z" "$(amr_armed)")"
+  export STUB_SIB_REF_NULL=1               # 형제 ref-조회가 ref:null(ls-remote는 위 add_sibling로 존재 보고) → 불일치
+  run_reconcile
+  [ "$RCODE" -ne 0 ] || {
+    echo "revocation silently missed: 형제 ref-조회가 ref:null인데(ls-remote는 존재) run이 초록으로 끝났다 — 무장된 좀비를 못 본 것이다(R-43)"
+    echo "$JSON"; dump_calls; false
+  }
+  # 불일치는 revocationFailures에 그 브랜치가 이름으로 남는다(무엇을 보지 못했는지).
+  echo "$JSON" | jq -e --arg b "$sib" '[.revocationFailures[] | select(contains($b))] | length >= 1' > /dev/null \
+    || { echo "보고 누락: 불일치한 형제($sib)가 revocationFailures에 없다"; echo "$JSON"; false; }
+}
+
+# bats test_tags=regression
+@test "W77: a GraphQL ref whose OID differs from ls-remote fails closed (the ref moved between the two reads — R-43)" {
+  # ★ R-43: 두 읽기가 **둘 다 브랜치를 보고**해도, tip OID가 어긋나면 ref가 그 사이 이동/재생성된 것이다.
+  #   그 상태로 adopt(원격 OID를 lease 기대값으로 force-push)하면 잘못된 baseline 위에서 밀거나, 다른
+  #   내용을 덮을 수 있다 → OID가 일치할 때만 adopt하고, 어긋나면 fail-closed(다음 주기가 다시 읽는다).
+  write_prs '[]'                                                       # 열린 신뢰 PR 없음
+  write_heads "$ORPHAN_OID"                                            # ls-remote tip = ORPHAN_OID
+  export STUB_REF_OID="4444444444444444444444444444444444444444"      # GraphQL ref.target.oid = 다른 OID → 불일치
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "ref OID mismatch mis-adopted: GraphQL과 ls-remote의 tip OID가 다른데 도구가 fail-closed하지 않았다(R-43)"
+    echo "$output"; dump_calls; false
+  }
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || { echo "ref OID mismatch: push가 나갔다($pushes회)"; dump_calls; false; }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
 }
 
 # ── R-40/R-41: 포크 억제가 **질의 작업(API·서브프로세스·벽시계) 예산**으로 이동했다 ────────────────

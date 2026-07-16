@@ -665,6 +665,7 @@ function proveOurCommit(oid: string, what: string, expectMessage: string = BUMP_
 const PR_QUERY = `query($owner:String!,$repo:String!,$ref:String!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     ref(qualifiedName:$ref){
+      target{ oid }
       associatedPullRequests(states:OPEN, first:100, after:$endCursor){
         pageInfo{ hasNextPage endCursor }
         nodes{
@@ -828,14 +829,21 @@ type PageReducer<A> = (acc: A, nodes: any[], at: string) => ParseResult<A>;
 //    누적 제거) → 부모 프로세스가 **포크 노드를 노드 수만큼 쌓아두지 않는다**. 힙에 남는 상태는 사이클
 //    검출용 커서 집합(seenCursors)과 카운터뿐이고 그건 페이지 수 경계다 — read-only 조회는 원장(executed)에
 //    남기지 않고 graphqlPages 카운터로만 관측한다(그래서 직렬화되는 audit 출력도 포크 수에 비례하지 않는다).
+// GraphQL ref 관측 — **부재/존재+OID**를 구분해 나른다(R-43). `git ls-remote`(비원자적 두 번째 읽기)와
+// 교차 검증하기 위해서다: `ref === null`(부재)과 `ref 존재 + 빈 connection`이 이전엔 둘 다 "우리 것 PR 0건"으로
+// 뭉개졌고, 그 위에서 ls-remote가 브랜치를 보고하면 무조건 adopt(force-push)로 갔다 — GraphQL의 stale/저하된
+// 뷰가 실재하는 PR을 숨기면 그게 곧 남의 커밋 파괴·중복 create였다.
+type RefObs = { present: boolean; oid: string | null };
+type FoldResult<A> = { value: A; ref: RefObs };
 function foldConnection<A>(
   query: string, ref: string, what: string,
   init: () => A, reduce: PageReducer<A>,
-): ParseResult<A> {
+): ParseResult<FoldResult<A>> {
   let acc = init();
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
   let pageIndex = 0;
+  let refObs: RefObs = { present: false, oid: null };
   for (;;) {
     const a = [
       "api", "graphql",
@@ -871,8 +879,15 @@ function foldConnection<A>(
     //      들어오지 못한다(라이브 실측: associatedPullRequests는 **head-연결**이라 base=main에도 0건). 그래서
     //      질의 작업(서브프로세스·페이지 수)이 **포크 수와 무관**하다 — 예전 pullRequests(headRefName) 이름-매치는
     //      포크가 같은 이름으로 오염시킬 수 있었다(structure r12 R-40).
-    if (repo.ref === null) return { ok: true, value: acc };
+    if (repo.ref === null) return { ok: true, value: { value: acc, ref: { present: false, oid: null } } };
     if (typeof repo.ref !== "object" || Array.isArray(repo.ref)) return parseFail(`${at}.data.repository.ref가 객체도 null도 아님`);
+    // ref 존재 → target.oid를 관측한다(R-43). 브랜치의 tip OID다 — ls-remote OID와 교차 검증한다.
+    // 부재(ref:null)와 "존재 + 빈 connection"을 여기서 갈라 낸다: 전자는 present:false, 후자는 present:true.
+    const tgt = repo.ref.target;
+    if (tgt === null || typeof tgt !== "object" || typeof tgt.oid !== "string" || !OID_RE.test(tgt.oid)) {
+      return parseFail(`${at}.data.repository.ref.target.oid 형식 위반 — 브랜치 tip을 관측할 수 없다(교차 검증 불가)`);
+    }
+    refObs = { present: true, oid: tgt.oid };
     const conn = repo.ref.associatedPullRequests;
     if (conn === null || typeof conn !== "object") {
       return parseFail(`${at}.data.repository.ref.associatedPullRequests 없음(스키마 드리프트)`);
@@ -888,7 +903,7 @@ function foldConnection<A>(
 
     // ── 완전성 판정은 **한 곳에만** 산다: 더 못 가면 마지막 페이지의 hasNextPage로 결정한다.
     // 상한(페이지 캡)은 **두지 않는다** — 그게 곧 되살아난 배포 정지 무기다. 종료는 오직 hasNextPage === false다.
-    if (info.hasNextPage !== true) return { ok: true, value: acc }; // 완전 열거 증명(hasNextPage=false)
+    if (info.hasNextPage !== true) return { ok: true, value: { value: acc, ref: refObs } }; // 완전 열거 증명(hasNextPage=false)
     const next = info.endCursor;
     // 커서를 이어받지 못하면(누락·빈 문자열·**전진하지 않는 커서**) 마지막 페이지가 hasNextPage=true인 채
     // 끝난 것이다 = 열거 불완전 → fail-closed. 무한 루프는 여기서 구조적으로 불가능하다.
@@ -1084,6 +1099,7 @@ function enumerateSiblingRefs(): { ok: true; refs: SiblingRef[] } | { ok: false;
 const SIBLING_PR_QUERY = `query($owner:String!,$repo:String!,$ref:String!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     ref(qualifiedName:$ref){
+      target{ oid }
       associatedPullRequests(states:OPEN, first:100, after:$endCursor){
         pageInfo{ hasNextPage endCursor }
         nodes{
@@ -1184,16 +1200,22 @@ function observeBranchPr(head: string): ParseResult<BranchObservation> {
   // 스트리밍 fold(R-36): mergeStateStatus는 이 질의에 없다(회수·close엔 필요 없다) → requireMergeState=false.
   // ★ 조회는 **우리 ref에 연결된 PR**만 본다(R-40): `refs/heads/<head>`를 associatedPullRequests에 넘긴다 →
   //   포크가 같은 브랜치명으로 열어도 그 PR의 head는 포크 레포 ref라 이 connection에 **구조적으로** 없다.
-  //   그래서 포화된 형제 head라도 질의 작업(페이지 수)이 포크 수와 무관하다(W71). ref 부재(null)는
-  //   foldConnection이 "우리 것 PR 0건"으로 정확히 접는다(고아 ref — git ls-remote가 브랜치는 보고한다).
+  //   그래서 포화된 형제 head라도 질의 작업(페이지 수)이 포크 수와 무관하다(W71).
   const scanned = foldConnection<PrScan>(SIBLING_PR_QUERY, `refs/heads/${head}`, `PR 조회(${head})`, newScan, scanReducer(false));
   // 조회·파싱 실패 모두 head 문맥을 실어 돌려준다(호출부가 revocationBlind로 접을 때 어느 브랜치인지 남긴다).
   if (!scanned.ok) return parseFail(`PR 조회 파싱 실패(${head}): ${scanned.why}`);
-  const mine = scanned.value.trusted;
+  // ⚠️ **불일치 = 관측 실패**(R-43): 형제 ref는 `git ls-remote`가 **존재를 보고했기에** 여기 왔다. 그런데
+  //    ref-조회가 `ref:null`(부재)을 주면 두 읽기가 어긋난 것이다 — GraphQL 뷰가 stale/저하됐거나 ref가 그
+  //    사이에 재생성됐다. 이때 "PR 0건 → 회수할 것 없음"으로 접으면 **무장된 좀비를 못 본 채 exit 0**이 된다.
+  //    그러니 fail-closed로 돌려 호출부가 revocationBlind로 접게 한다(회수 대상을 가릴 수 있는 관측 실패 = V-2).
+  if (!scanned.value.ref.present) {
+    return parseFail(`PR 조회 불일치(${head}): ls-remote는 ref를 보고했는데 GraphQL은 ref:null이다 — 무장 여부를 알 수 없다(stale 뷰·재생성)`);
+  }
+  const mine = scanned.value.value.trusted;
   if (mine.length > 1) {
     return parseFail(`${head}에 신뢰 PR이 ${mine.length}건이다(GitHub 계약상 불가능) — 모호해서 건드리지 않는다`);
   }
-  return { ok: true, value: { pr: mine[0] ?? null, openCount: scanned.value.totalOpen } };
+  return { ok: true, value: { pr: mine[0] ?? null, openCount: scanned.value.value.totalOpen } };
 }
 
 // 스윕이 관측·변이한 형제의 상태(테스트/운영이 stdout으로 검증한다).
@@ -1509,7 +1531,8 @@ if (args.reconcileOnly) {
 //    그건 곧 "사실을 모른 채 create/adopt"이고, 그게 이 픽스가 없애는 중복 PR 버그 그 자체다).
 const scannedPrs = foldConnection<PrScan>(PR_QUERY, ref, "gh api graphql (associatedPullRequests)", newScan, scanReducer(true));
 if (!scannedPrs.ok) inputError(scannedPrs.why);
-const mainScan = scannedPrs.value;
+const mainScan = scannedPrs.value.value;
+const refObserved = scannedPrs.value.ref; // GraphQL이 본 ref: 부재/존재+OID (R-43)
 const remoteBranch = parseLsRemote(run("git", ["ls-remote", "--heads", args.remote, branch], "git ls-remote"));
 
 // ── ①-b superseded 형제 열거(관측) — 변이 0. 실패는 **계속하되 조용하지 않다** ────────────────
@@ -1695,12 +1718,32 @@ if (trusted !== null) {
     action = "skip";
     reason = `열린 신뢰 PR #${trusted.number}(${trusted.mergeStateStatus}) — 이미 진행 중이므로 변이하지 않는다(중복 PR 금지)`;
   }
-} else if (remoteBranch !== null) {
-  action = "adopt";
-  reason = `열린 신뢰 PR은 없는데 원격 브랜치가 남아 있다(고아 ${remoteBranch.oid}) — 원격 OID를 기대값으로 leased force-push 후 PR 생성`;
 } else {
-  action = "create";
-  reason = "열린 신뢰 PR도 원격 브랜치도 없다 — 정상 경로(push → PR 생성)";
+  // ── 신뢰 PR 없음 → create/adopt는 **두 비원자적 읽기**(GraphQL ref-조회 · git ls-remote)가 **합의**할 때만
+  //    한다(R-43). 예전엔 `remoteBranch` 유무만 보고 갈랐다: `ref:null`(GraphQL 부재)이 "PR 0건"으로 접힌 뒤
+  //    ls-remote가 브랜치를 보고하면 무조건 adopt(force-push)였다 → GraphQL 뷰가 stale/저하돼 **실재하는 PR을
+  //    숨기면** 남의 커밋을 덮고 중복 PR을 열었다. 이제 presence + OID를 교차 검증한다:
+  //      · 둘 다 부재                                   → create
+  //      · 둘 다 존재 + OID 일치(+ 빈 connection)        → adopt (정당한 고아 — push 성공, PR 생성 실패)
+  //      · 그 외(한쪽만 존재 / OID 상이)                 → fail-closed (변이 0 — 사실을 모른 채 밀지 않는다)
+  const graphqlPresent = refObserved.present;
+  const lsPresent = remoteBranch !== null;
+  if (!graphqlPresent && !lsPresent) {
+    action = "create";
+    reason = "열린 신뢰 PR도 원격 브랜치도 없다(GraphQL ref:null + ls-remote 부재 합의) — 정상 경로(push → PR 생성)";
+  } else if (graphqlPresent && lsPresent && refObserved.oid === remoteBranch!.oid) {
+    action = "adopt";
+    reason = `열린 신뢰 PR은 없고 원격 브랜치가 고아로 남아 있다(GraphQL·ls-remote 합의, OID ${remoteBranch!.oid}) — 원격 OID를 기대값으로 leased force-push 후 PR 생성`;
+  } else {
+    // 불일치: GraphQL만/ls-remote만 존재, 또는 OID 상이(두 읽기 사이 ref 이동·재생성·stale 뷰).
+    execError(
+      `ref 관측 불일치 — 밀지 않는다(R-43): GraphQL ref=${graphqlPresent ? `존재(${refObserved.oid})` : "null(부재)"}, `
+      + `ls-remote=${lsPresent ? `존재(${remoteBranch!.oid})` : "부재"}. `
+      + "한쪽만 존재하거나 OID가 어긋나면 실재하는 PR을 숨긴 stale/저하된 뷰일 수 있다 → force-push도 create도 하지 않는다(다음 주기가 다시 읽는다)",
+    );
+    action = "skip"; // 도달하지 않는다(execError가 프로세스를 끝낸다) — 타입 만족용
+    reason = "unreachable";
+  }
 }
 
 // ── ②-b **ref 소유권** 검증 — 정의는 위(proveOurCommit)에 있다 ────────────────────────────────

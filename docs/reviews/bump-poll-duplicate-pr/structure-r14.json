@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: the RED→GREEN lock is intact, but the shared PR-observation seam treats conflicting ref facts as authoritative absence, reopening the destructive adopt/create path and a silent revocation gap.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 54,
+  "target": "branch diff against main",
+  "reviewedSha": "149d0355246f95ee057ccb5887b8fa7e665bcc52",
+  "reviewedTree": "fe4095f2f607ba6164d4b1b9b4e8196a6917c96e",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: ref absence and an empty PR connection collapse into the same state",
+      "body": "`foldConnection` maps `repository.ref === null` directly to an empty `PrScan`, losing the distinction between “ref absent” and “ref present with a completely enumerated empty PR connection.” The main path later observes the ref independently with `git ls-remote` and selects `adopt` whenever that second read finds it (lines 1510-1513 and 1698-1700). Reconciliation is worse: it starts with refs returned by `ls-remote`, yet a subsequent `ref:null` becomes `pr:null` and exits successfully (lines 1183-1196 and 1405-1417). Because these reads are non-atomic, ref recreation or a stale/degraded GraphQL view can hide an existing PR. Commit ownership proves only the head shape, not PR absence, so the executor may force-push and attempt another PR creation, while reconciliation may leave an armed PR untouched without turning the run red. W75 at `tools/tests/test_ensure-bump-pr.bats:1228-1238` explicitly locks the contradictory `ref:null` plus branch-present state as successful adoption.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 867,
+      "line_end": 874,
+      "confidence": 0.97,
+      "recommendation": "Represent the read as a discriminated ref observation including presence and target OID, then cross-check it against `ls-remote`. Permit create only when both report absence; permit adopt only when GraphQL reports a present ref with a fully enumerated empty connection and matching OID. Treat disagreement as zero-mutation failure, and as `revocationBlind` in reconciliation. Strengthen W75 accordingly, add the reconciliation mismatch witness, retain W74/W3, and rebuild the fixed-test RED/GREEN pins.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Fix the ref-observation seam before building further on the executor.",
+    "Regenerate machine-owned RED/GREEN records with the strengthened tests and unchanged four-path production scope."
+  ]
+}
