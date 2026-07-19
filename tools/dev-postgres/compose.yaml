@@ -1,7 +1,7 @@
 name: homelab-dev
 services:
   db:
-    image: postgres:16-bookworm
+    image: postgres:16-bookworm@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55
     environment:
       POSTGRES_USER: dev
       POSTGRES_PASSWORD: dev

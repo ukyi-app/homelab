@@ -1,8 +1,8 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # kubectl/psql/rclone 기반 운영(ops) 이미지 (Postgres 백업/복구 + 캐시 백업).
 # Milestone 4의 restore-drill CronJob·pg_dump→rclone→R2 헤지와 캐시(Valkey) 백업 CronJob이 사용한다.
 # ghcr.io/<owner>/pg-tools:18-rclone으로 게시된다 (Task 6.15 matrix 참조).
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
 
 ARG TARGETARCH=arm64
 ENV DEBIAN_FRONTEND=noninteractive
