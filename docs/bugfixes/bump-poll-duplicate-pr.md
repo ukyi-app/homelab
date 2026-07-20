@@ -207,6 +207,16 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Review Decision Log
 
+### Codex Structure Review — r15: needs-attention → 1건 Accept (owner 2026-07-20)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-44 | high | `Blocker: reconciliation drops the ref OID at its observation seam` — `enumerate*Refs`는 `ls-remote` OID를 보존하는데 `observeBranchPr(head)`는 **이름만** 받고 ref **존재 여부만** 검사한다. ls-remote가 OID A를 보는데 stale GraphQL 뷰가 OID B(빈 connection)를 주면 `pr:null`을 반환 → **A에 무장 좀비가 있어도 reconcile이 성공 종료**. 신뢰-PR 경로도 OID를 create/adopt에서만 비교 → **stale head에 auto-merge 유지·부여**. R-43의 `ref:null` 케이스를 넘는 OID-불일치 케이스. 형제 stub OID 기본값(111 vs 실제 333)이 갭을 가림 | **Accept**(R-43의 반쪽 완성) | 열거한 OID를 **공유 씸에 전달**: `observeBranchPr(head, expectedOid)` — GraphQL ref tip과 대조, 불일치 시 parseFail→`revocationBlind`. **3자 합의**(GraphQL ref tip·ls-remote tip·신뢰 PR `headRefOid`)를 무장 유지·부여·회수·rebuild 전 요구(main·reconcile). `foldConnection`이 **페이지 간 OID 변화·ref 사라짐 거부**, `RefObs`를 진짜 discriminated union으로. 형제 stub이 target.oid를 **STUB_SIBLINGS(실제 ls-remote OID)** 에서 유도(갭 가리던 픽스처 교정). 증인 W78(빈 connection+OID 상이)·W79(PR headRefOid 상이)·W80(main 3자) — 네 가드 전부 뮤테이션으로 **격리** 확인 |
+
+> ★ 이 라운드도 서브에이전트 지출 한도로 컨덕터가 직접 구현·검증. ★ **북키핑 함정**: 스크래치패드의 `frozen-executor.ts`가 날짜 경과로 GC돼 첫 baseline 재구성이 pre-fix executor를 적용하지 못했다(flipOk:false·symptomToken:false) → **직전 red.sha 커밋(`6e23f9b`)에서 frozen executor를 복구**해 다시 세웠다. (교훈: frozen 모델은 red.sha 커밋에 이미 영속화돼 있으므로 언제든 복구 가능.)
+
+**최종 baseline**: `red..green` diff = **scope 4파일 정확히** · regression 118 baseline RED · characterization 63 green(양 끝단) · `--verify-flip` **flipOk: true**.
+
 ### Codex Structure Review — r14: needs-attention → 1건 Accept (owner 2026-07-16)
 
 | ID | 심각도 | 발견 | 결정 | 반영 |
