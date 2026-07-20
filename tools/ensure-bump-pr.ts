@@ -833,7 +833,8 @@ type PageReducer<A> = (acc: A, nodes: any[], at: string) => ParseResult<A>;
 // 교차 검증하기 위해서다: `ref === null`(부재)과 `ref 존재 + 빈 connection`이 이전엔 둘 다 "우리 것 PR 0건"으로
 // 뭉개졌고, 그 위에서 ls-remote가 브랜치를 보고하면 무조건 adopt(force-push)로 갔다 — GraphQL의 stale/저하된
 // 뷰가 실재하는 PR을 숨기면 그게 곧 남의 커밋 파괴·중복 create였다.
-type RefObs = { present: boolean; oid: string | null };
+// **진짜 discriminated union**(R-44): 부재면 oid 자체가 없다(존재할 때만 oid가 의미 있다).
+type RefObs = { present: false } | { present: true; oid: string };
 type FoldResult<A> = { value: A; ref: RefObs };
 function foldConnection<A>(
   query: string, ref: string, what: string,
@@ -843,7 +844,7 @@ function foldConnection<A>(
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
   let pageIndex = 0;
-  let refObs: RefObs = { present: false, oid: null };
+  let refObs: RefObs = { present: false };
   for (;;) {
     const a = [
       "api", "graphql",
@@ -879,13 +880,22 @@ function foldConnection<A>(
     //      들어오지 못한다(라이브 실측: associatedPullRequests는 **head-연결**이라 base=main에도 0건). 그래서
     //      질의 작업(서브프로세스·페이지 수)이 **포크 수와 무관**하다 — 예전 pullRequests(headRefName) 이름-매치는
     //      포크가 같은 이름으로 오염시킬 수 있었다(structure r12 R-40).
-    if (repo.ref === null) return { ok: true, value: { value: acc, ref: { present: false, oid: null } } };
+    if (repo.ref === null) {
+      // ⚠️ 페이지 간 일관성(R-44): 앞 페이지가 ref 존재를 봤는데 뒤 페이지가 ref:null이면 뷰가 흔들린 것이다.
+      //    (정상적으로 null ref는 페이지네이션 자체가 없다 → 이건 stale/저하 신호다) → fail-closed.
+      if (refObs.present) return parseFail(`${at} ref가 페이지 사이에 사라졌다(앞: 존재 ${refObs.oid} → 지금: null) — 뷰 불안정, 교차 검증 불가`);
+      return { ok: true, value: { value: acc, ref: { present: false } } };
+    }
     if (typeof repo.ref !== "object" || Array.isArray(repo.ref)) return parseFail(`${at}.data.repository.ref가 객체도 null도 아님`);
     // ref 존재 → target.oid를 관측한다(R-43). 브랜치의 tip OID다 — ls-remote OID와 교차 검증한다.
     // 부재(ref:null)와 "존재 + 빈 connection"을 여기서 갈라 낸다: 전자는 present:false, 후자는 present:true.
     const tgt = repo.ref.target;
     if (tgt === null || typeof tgt !== "object" || typeof tgt.oid !== "string" || !OID_RE.test(tgt.oid)) {
       return parseFail(`${at}.data.repository.ref.target.oid 형식 위반 — 브랜치 tip을 관측할 수 없다(교차 검증 불가)`);
+    }
+    // ⚠️ 페이지 간 OID 변화 거부(R-44): 열거 도중 브랜치 tip이 바뀌면 여러 tip에 걸친 뷰를 섞어 읽는 것이다.
+    if (refObs.present && refObs.oid !== tgt.oid) {
+      return parseFail(`${at} ref tip이 페이지 사이에 바뀌었다(${refObs.oid} → ${tgt.oid}) — 열거가 원자적이지 않다, fail-closed`);
     }
     refObs = { present: true, oid: tgt.oid };
     const conn = repo.ref.associatedPullRequests;
@@ -1196,7 +1206,11 @@ function humanTouchOf(pr: any): string | null {
 // openCount = 그 head에 열린 PR 총수(신뢰 여부 무관) — "고아 ref(열린 PR 0)"와 "열린 PR은 있는데 우리
 // 것이 아니다(포크·사람·다른 base)"를 보고에서 가른다. 둘 다 변이는 0이다.
 type BranchObservation = { pr: ObservedPr | null; openCount: number };
-function observeBranchPr(head: string): ParseResult<BranchObservation> {
+// ★ expectedOid(R-44): 이 head는 `git ls-remote`(네임스페이스 열거)가 **그 OID로 존재를 보고했기에** 왔다.
+//   그 OID를 씸에 넘겨, GraphQL ref의 tip과 **합의**하는지 확인한다. 예전엔 head 이름만 받아 **존재 여부만**
+//   봤다 — ls-remote가 OID A를 보는데 stale GraphQL 뷰가 OID B(빈 connection)를 주면 "PR 0건"으로 접혀,
+//   A에 무장된 좀비가 있어도 조용히 넘어갔다(R-43의 ref:null 케이스를 넘는 OID 불일치 케이스).
+function observeBranchPr(head: string, expectedOid: string): ParseResult<BranchObservation> {
   // 스트리밍 fold(R-36): mergeStateStatus는 이 질의에 없다(회수·close엔 필요 없다) → requireMergeState=false.
   // ★ 조회는 **우리 ref에 연결된 PR**만 본다(R-40): `refs/heads/<head>`를 associatedPullRequests에 넘긴다 →
   //   포크가 같은 브랜치명으로 열어도 그 PR의 head는 포크 레포 ref라 이 connection에 **구조적으로** 없다.
@@ -1204,18 +1218,28 @@ function observeBranchPr(head: string): ParseResult<BranchObservation> {
   const scanned = foldConnection<PrScan>(SIBLING_PR_QUERY, `refs/heads/${head}`, `PR 조회(${head})`, newScan, scanReducer(false));
   // 조회·파싱 실패 모두 head 문맥을 실어 돌려준다(호출부가 revocationBlind로 접을 때 어느 브랜치인지 남긴다).
   if (!scanned.ok) return parseFail(`PR 조회 파싱 실패(${head}): ${scanned.why}`);
-  // ⚠️ **불일치 = 관측 실패**(R-43): 형제 ref는 `git ls-remote`가 **존재를 보고했기에** 여기 왔다. 그런데
-  //    ref-조회가 `ref:null`(부재)을 주면 두 읽기가 어긋난 것이다 — GraphQL 뷰가 stale/저하됐거나 ref가 그
-  //    사이에 재생성됐다. 이때 "PR 0건 → 회수할 것 없음"으로 접으면 **무장된 좀비를 못 본 채 exit 0**이 된다.
-  //    그러니 fail-closed로 돌려 호출부가 revocationBlind로 접게 한다(회수 대상을 가릴 수 있는 관측 실패 = V-2).
-  if (!scanned.value.ref.present) {
-    return parseFail(`PR 조회 불일치(${head}): ls-remote는 ref를 보고했는데 GraphQL은 ref:null이다 — 무장 여부를 알 수 없다(stale 뷰·재생성)`);
+  // ⚠️ **불일치 = 관측 실패**(R-43·R-44): 형제 ref는 `git ls-remote`가 OID `expectedOid`로 **존재를 보고했다**.
+  //    ref-조회가 어긋나면(ref:null이거나 tip OID가 다르면) 두 비원자적 읽기가 갈린 것이다 — stale/저하 뷰·
+  //    재생성. "PR 0건 → 회수할 것 없음"으로 접으면 **무장된 좀비를 못 본 채 exit 0**이 된다. → fail-closed로
+  //    돌려 호출부가 revocationBlind로 접게 한다(회수 대상을 가릴 수 있는 관측 실패 = V-2).
+  const refObs = scanned.value.ref;
+  if (!refObs.present) {
+    return parseFail(`PR 조회 불일치(${head}): ls-remote는 ref(${expectedOid})를 보고했는데 GraphQL은 ref:null이다 — 무장 여부를 알 수 없다(stale 뷰·재생성)`);
+  }
+  if (refObs.oid !== expectedOid) {
+    return parseFail(`PR 조회 OID 불일치(${head}): ls-remote tip=${expectedOid} vs GraphQL tip=${refObs.oid} — ref가 두 읽기 사이 이동했다, 무장 여부를 알 수 없다(R-44)`);
   }
   const mine = scanned.value.value.trusted;
   if (mine.length > 1) {
     return parseFail(`${head}에 신뢰 PR이 ${mine.length}건이다(GitHub 계약상 불가능) — 모호해서 건드리지 않는다`);
   }
-  return { ok: true, value: { pr: mine[0] ?? null, openCount: scanned.value.value.totalOpen } };
+  // ★ 3자 합의(R-44): 신뢰 PR이 있으면 그 head도 관측된 ref tip과 같아야 한다(GraphQL 응답 내부 정합성).
+  //   섞인 뷰가 tip=A인데 headRefOid=B인 PR을 주면, 그 PR의 무장을 유지·회수할 근거가 흔들린다.
+  const pr = mine[0] ?? null;
+  if (pr !== null && pr.headRefOid !== refObs.oid) {
+    return parseFail(`신뢰 PR head 불일치(${head}): PR #${pr.number} headRefOid=${pr.headRefOid} vs ref tip=${refObs.oid} — 인가 근거가 흔들린다(R-44)`);
+  }
+  return { ok: true, value: { pr, openCount: scanned.value.value.totalOpen } };
 }
 
 // 스윕이 관측·변이한 형제의 상태(테스트/운영이 stdout으로 검증한다).
@@ -1423,7 +1447,7 @@ if (args.reconcileOnly) {
       // 관측 실패는 **전부** 같은 결론이다(V-2 · R-34): 조회 장애 · 파싱/스키마 드리프트(**author 부재
       // 포함**) · 신뢰 PR 모호성 — 셋 다 "이 브랜치에 무장된 PR이 있는지 **알 수 없다**"이지 "없다"가 아니다.
       // ⚠️ 특히 author 부재를 "우리 것이 아니다"로 접으면 **무장된 writer PR이 여기서 증발한다**(R-34).
-      const observed = observeBranchPr(nref.branch);
+      const observed = observeBranchPr(nref.branch, nref.oid);
       if (!observed.ok) {
         revocationBlind(observed.why);
         continue;
@@ -1558,7 +1582,7 @@ if (!refsResult.ok) {
     // 신뢰 PR 모호성): "이 형제에 무장된 PR이 있는지 모른다". 두 결과가 함께 따라온다 —
     //   · closeAbandoned  = 이 run의 close는 전부 포기(과소 열거로 **일부만** 닫는 것보다 안 닫는 게 안전)
     //   · revocationBlind = 종료 코드·보고(회수 대상을 가릴 수 있는 관측 실패 = 회수 실패 — V-2)
-    const observed = observeBranchPr(sref.branch);
+    const observed = observeBranchPr(sref.branch, sref.oid);
     if (!observed.ok) {
       closeAbandoned = observed.why;
       revocationBlind(`${observed.why} — 이 형제의 무장 여부를 모른다`);
@@ -1632,6 +1656,23 @@ if (trustedAll.length > 1) {
   );
 }
 const trusted = trustedAll[0] ?? null;
+
+// ★ 3자 OID 합의(R-44) — 신뢰 PR의 무장 유지/재무장·rebuild는 **세 관측이 같은 tip을 가리킬 때만** 한다.
+//   신뢰 PR이 있으면 그 head는 이 레포의 ref이므로 GraphQL ref도 ls-remote도 존재해야 하고, 셋(PR headRefOid
+//   · GraphQL ref tip · ls-remote tip)이 모두 같아야 한다. stale/섞인 뷰가 tip을 달리 보고하면, 우리는 잘못된
+//   baseline 위로 force-push하거나(rebuild) 낡은 head에 auto-merge를 걸 수 있다 → fail-closed(변이 0).
+if (trusted !== null) {
+  if (!refObserved.present) {
+    execError(`신뢰 PR #${trusted.number}이 열려 있는데 GraphQL ref는 null이다 — 뷰 불일치, 인가 근거가 없다(R-44): force-push도 무장도 하지 않는다`);
+  } else if (remoteBranch === null) {
+    execError(`신뢰 PR #${trusted.number}이 열려 있는데 ls-remote는 브랜치를 못 봤다 — 뷰 불일치(R-44): 변이하지 않는다`);
+  } else if (trusted.headRefOid !== refObserved.oid || refObserved.oid !== remoteBranch.oid) {
+    execError(
+      `신뢰 PR #${trusted.number} 3자 OID 불일치(R-44): PR headRefOid=${trusted.headRefOid} · GraphQL ref=${refObserved.oid} · ls-remote=${remoteBranch.oid}. `
+      + "셋이 같은 tip을 가리키지 않으면 stale/섞인 뷰다 → 잘못된 baseline에 force-push하거나 낡은 head에 auto-merge를 걸 수 없다(변이 0, 다음 주기가 다시 읽는다)",
+    );
+  }
+}
 
 // ★★ 파괴 가드 — `adopt`(force-push)는 **우리 자신의 고아 브랜치**일 때만 정당하다 ────────────────
 // 동일-레포(isCrossRepository:false) PR의 head는 **반드시 이 레포의 ref**다(포크와 달리 남의 레포에 있을 수
@@ -1726,18 +1767,17 @@ if (trusted !== null) {
   //      · 둘 다 부재                                   → create
   //      · 둘 다 존재 + OID 일치(+ 빈 connection)        → adopt (정당한 고아 — push 성공, PR 생성 실패)
   //      · 그 외(한쪽만 존재 / OID 상이)                 → fail-closed (변이 0 — 사실을 모른 채 밀지 않는다)
-  const graphqlPresent = refObserved.present;
   const lsPresent = remoteBranch !== null;
-  if (!graphqlPresent && !lsPresent) {
+  if (!refObserved.present && !lsPresent) {
     action = "create";
     reason = "열린 신뢰 PR도 원격 브랜치도 없다(GraphQL ref:null + ls-remote 부재 합의) — 정상 경로(push → PR 생성)";
-  } else if (graphqlPresent && lsPresent && refObserved.oid === remoteBranch!.oid) {
+  } else if (refObserved.present && lsPresent && refObserved.oid === remoteBranch!.oid) {
     action = "adopt";
     reason = `열린 신뢰 PR은 없고 원격 브랜치가 고아로 남아 있다(GraphQL·ls-remote 합의, OID ${remoteBranch!.oid}) — 원격 OID를 기대값으로 leased force-push 후 PR 생성`;
   } else {
     // 불일치: GraphQL만/ls-remote만 존재, 또는 OID 상이(두 읽기 사이 ref 이동·재생성·stale 뷰).
     execError(
-      `ref 관측 불일치 — 밀지 않는다(R-43): GraphQL ref=${graphqlPresent ? `존재(${refObserved.oid})` : "null(부재)"}, `
+      `ref 관측 불일치 — 밀지 않는다(R-43): GraphQL ref=${refObserved.present ? `존재(${refObserved.oid})` : "null(부재)"}, `
       + `ls-remote=${lsPresent ? `존재(${remoteBranch!.oid})` : "부재"}. `
       + "한쪽만 존재하거나 OID가 어긋나면 실재하는 PR을 숨긴 stale/저하된 뷰일 수 있다 → force-push도 create도 하지 않는다(다음 주기가 다시 읽는다)",
     );

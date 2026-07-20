@@ -359,7 +359,11 @@ case "$1:$2" in
         branch="${ref#refs/heads/}"
         f="$SIB_DIR/$(printf '%s' "$branch" | tr '/' '_').json"
         if [ ! -f "$f" ]; then f="$SIB_DIR/.none.json"; fi   # 그 ref에 열린 PR 0건(형제 ref는 ls-remote에 있으므로 존재한다)
-        FORCE_LAST=false gh_pages "$f" "$@"
+        # ★ R-44: 형제 GraphQL ref.target.oid는 그 형제의 **실제 ls-remote OID**(STUB_SIBLINGS)에서 유도한다 —
+        #   111 기본값을 쓰면 ls-remote(333…)와 어긋나 정상 케이스가 거짓 불일치가 된다(또는 갭을 가린다).
+        #   STUB_SIB_REF_OID로 그 OID를 **일부러 어긋나게** 강제하면 reconcile OID-불일치 증인이 된다.
+        sibref="$(awk -v r="$ref" '$2==r{print $1; exit}' "$STUB_SIBLINGS" 2>/dev/null)"
+        REF_OID="${STUB_SIB_REF_OID:-${sibref:-$SIB_OID}}" FORCE_LAST=false gh_pages "$f" "$@"
         ;;
       *)
         # 알 수 없는 GraphQL 질의 — **조용한 빈 응답을 주지 않는다**. 질의문이 드리프트해 stub의
@@ -1284,6 +1288,43 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
 }
 
 # bats test_tags=regression
+@test "W78: an EMPTY GraphQL connection at a tip that differs from ls-remote turns the run red (a stale view's 0-PR is not evidence — R-44)" {
+  # ★ R-44(finding의 정확한 시나리오): ls-remote는 tip A를 보는데 stale GraphQL 뷰가 tip B에서 **빈 connection**을
+  #   준다 → 예전엔 "PR 0건 → 회수할 것 없음"으로 접혔다. 하지만 **A에 무장된 좀비가 있어도** B의 빈 응답은 그걸
+  #   증명하지 못한다. 열거한 OID(A)를 씸에 넘겨 GraphQL tip(B)과 대조 → 어긋나면 revocationBlind(run 빨강).
+  #   ★ 여기선 **형제에 열린 PR을 심지 않는다**(빈 connection) → 3자 가드(PR headRefOid)는 관여하지 않고
+  #     **expectedOid 대조 가드만** 이 케이스를 잡는다(뮤턴트 격리).
+  local sib; sib="$(SIB_BRANCH_OF)"
+  write_bindings '{"autoDeploy":false}'
+  add_sibling "$sib" "$SIB_OID" ""                                    # ls-remote tip = SIB_OID(A), 열린 PR 0건
+  export STUB_SIB_REF_OID="5555555555555555555555555555555555555555"  # GraphQL ref tip = B(≠A) + 빈 connection
+  run_reconcile
+  [ "$RCODE" -ne 0 ] || {
+    echo "stale empty view trusted: GraphQL tip(B)이 ls-remote(A)와 다른데 빈 connection을 '회수할 것 없음'으로 접고 run이 초록이 됐다 — A의 무장 좀비를 놓칠 수 있다(R-44)"
+    echo "$JSON"; dump_calls; false
+  }
+  echo "$JSON" | jq -e --arg b "$sib" '[.revocationFailures[] | select(contains($b))] | length >= 1' > /dev/null \
+    || { echo "보고 누락: OID 불일치 형제($sib)가 revocationFailures에 없다"; echo "$JSON"; false; }
+}
+
+# bats test_tags=regression
+@test "W79: a sibling PR whose headRefOid disagrees with the ref tip turns the run red (three-way OID agreement — R-44)" {
+  # ★ R-44 3자 합의: GraphQL ref tip과 ls-remote tip이 **일치**해도(expectedOid 가드 통과), 그 응답 안의 신뢰
+  #   PR headRefOid가 ref tip과 어긋나면 섞인/부분 뷰다 → 그 PR의 무장을 유지·회수할 근거가 흔들린다. fail-closed.
+  local sib; sib="$(SIB_BRANCH_OF)"
+  write_bindings '{"autoDeploy":false}'
+  # ls-remote tip = SIB_OID, GraphQL ref tip = SIB_OID(기본 유도 — 일치) 이지만 PR headRefOid는 **다른 OID**.
+  add_sibling "$sib" "$SIB_OID" "$(sib_node 363 "6666666666666666666666666666666666666666" "2026-07-13T06:30:00Z" "$(amr_armed)")"
+  run_reconcile
+  [ "$RCODE" -ne 0 ] || {
+    echo "mixed view trusted: 신뢰 PR headRefOid(6666)이 ref tip(SIB_OID)과 다른데 run이 초록으로 끝났다 — 인가 근거가 흔들린다(R-44)"
+    echo "$JSON"; dump_calls; false
+  }
+  echo "$JSON" | jq -e --arg b "$sib" '[.revocationFailures[] | select(contains($b))] | length >= 1' > /dev/null \
+    || { echo "보고 누락: head 불일치 형제($sib)가 revocationFailures에 없다"; echo "$JSON"; false; }
+}
+
+# bats test_tags=regression
 @test "W77: a GraphQL ref whose OID differs from ls-remote fails closed (the ref moved between the two reads — R-43)" {
   # ★ R-43: 두 읽기가 **둘 다 브랜치를 보고**해도, tip OID가 어긋나면 ref가 그 사이 이동/재생성된 것이다.
   #   그 상태로 adopt(원격 OID를 lease 기대값으로 force-push)하면 잘못된 baseline 위에서 밀거나, 다른
@@ -1300,6 +1341,25 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   [ "$pushes" -eq 0 ] || { echo "ref OID mismatch: push가 나갔다($pushes회)"; dump_calls; false; }
   creates="$(count_calls gh pr create)"
   [ "$creates" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W80: a trusted PR whose head/ref/ls-remote OIDs disagree is never rebuilt or re-armed (main-path three-way agreement — R-44)" {
+  # ★ R-44: 신뢰 PR(무장·DIRTY)이 있어도, GraphQL ref tip이 ls-remote/PR headRefOid와 어긋나면 stale/섞인 뷰다.
+  #   그 상태로 rebuild(force-push)하면 잘못된 baseline 위로 밀고, 재무장하면 낡은 head에 auto-merge를 건다.
+  #   셋이 합의할 때만 진행 → 어긋나면 fail-closed(변이 0). (예전엔 OID를 create/adopt에서만 비교했다.)
+  write_prs "[{\"number\":390,\"isCrossRepository\":false,\"mergeStateStatus\":\"DIRTY\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"main\",\"author\":$(writer_author),\"autoMergeRequest\":$(amr_armed)}]"
+  write_heads "$PR_OID"                                                 # ls-remote tip = PR_OID = PR headRefOid
+  export STUB_REF_OID="7777777777777777777777777777777777777777"      # GraphQL ref tip = 다른 OID → 3자 불일치
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "stale-head mutated: 신뢰 PR의 head/ref/ls-remote OID가 어긋나는데 rebuild·재무장을 진행했다(R-44)"
+    echo "$output"; dump_calls; false
+  }
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || { echo "3자 불일치: force-push가 나갔다($pushes회) — 잘못된 baseline"; dump_calls; false; }
+  arms="$(count_calls gh pr merge)"
+  [ "$arms" -eq 0 ] || { echo "3자 불일치: 낡은 head에 auto-merge를 걸었다($arms회)"; dump_calls; false; }
 }
 
 # ── R-40/R-41: 포크 억제가 **질의 작업(API·서브프로세스·벽시계) 예산**으로 이동했다 ────────────────
