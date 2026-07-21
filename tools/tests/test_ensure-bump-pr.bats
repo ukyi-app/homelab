@@ -3765,6 +3765,46 @@ setup_closable_sibling() {
   [ "$arms" -eq 0 ]
 }
 
+# bats test_tags=regression
+@test "W83: human touch appearing on the trusted PR AFTER the initial scan blocks the rebuild (H-4 preserved across the TOCTOU window — R-47)" {
+  # ★ R-47: 초기 판정은 humanTouch가 있으면 rebuild를 억제한다(H-4). 그런데 force-push 직전 재확인이 **경합만**
+  #   보면, 초기 스캔 뒤 리뷰어가 리뷰·코멘트·hold 라벨을 달아도(ref OID·소유권 불변) 그대로 밀어 **리뷰된
+  #   head를 재작성**한다 — H-4가 보존을 약속한 상태를 무효화. 재확인이 humanTouch도 재검증해 막는다.
+  #   ★ 초기 스캔: 흔적 0 → rebuild 판정 / 재확인 시점: 같은 PR에 리뷰가 생김 → fail-closed.
+  write_prs "[$(writer_pr 520 DIRTY "$(amr_armed)")]"                                        # 초기: 흔적 0 → rebuild
+  write_prs_recheck "[$(writer_pr 520 DIRTY "$(amr_armed)" main '.reviews.totalCount=1')]"    # 재확인: 사람 리뷰 등장
+  write_heads "$PR_OID"
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "H-4 violated across TOCTOU: 초기 스캔 뒤 PR #520에 리뷰가 생겼는데 rebuild force-push가 그 head를 재작성했다(R-47)"
+    echo "$output"; dump_calls; false
+  }
+  echo "$output$stderr" | grep -q "사람의 흔적이 생겼다" \
+    || { echo "에러 메시지가 재확인 시점 사람 흔적을 말하지 않는다"; echo "$output$stderr"; false; }
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || { echo "R-47: 리뷰된 head를 force-push했다($pushes회)"; dump_calls; false; }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+}
+
+# bats test_tags=regression
+@test "W84: the trusted rebuild target vanishing between the scan and the push fails closed (no stale-lease force-push — R-47)" {
+  # ★ R-47: rebuild 대상 신뢰 PR이 초기 스캔 뒤 닫히거나 head가 바뀌면, 낡은 lease 기대값(초기 headRefOid)으로
+  #   미는 것은 잘못된 baseline 위 force-push다. 재확인이 **같은 PR·같은 head**를 요구해 사라지면 fail-closed.
+  write_prs "[$(writer_pr 521 DIRTY "$(amr_armed)")]"   # 초기: rebuild 판정
+  write_prs_recheck "[]"                                 # 재확인 시점: 그 PR이 사라졌다
+  write_heads "$PR_OID"
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "stale-lease rebuild: 대상 PR #521이 사라졌는데 낡은 lease로 force-push했다(R-47)"
+    echo "$output"; dump_calls; false
+  }
+  echo "$output$stderr" | grep -q "사라졌다" \
+    || { echo "에러 메시지가 대상 소멸을 말하지 않는다"; echo "$output$stderr"; false; }
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ]
+}
+
 # ⚠️ baseline에서 RED다(adopt 판정 자체가 없다 — 언제나 create). W18의 파괴 가드가 **포크까지 삼켜**
 #    배포를 억제하는 과잉 반응(포크 PR 하나로 영구 정지)을 막는 게 목적이다.
 # bats test_tags=regression

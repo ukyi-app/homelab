@@ -1922,9 +1922,15 @@ if (action === "adopt") {
 // ⚠️ 이건 **완화이지 닫힘이 아니다**: git ref lease는 동시 PR 생성을 원리적으로 막을 수 없다(재확인과 push
 //    사이에도 창이 남는다). **환원 불가능한 잔여 TOCTOU의 진짜 닫힘은 F-0**(bump-poll/** ref를 writer App에
 //    예약하는 서버-강제 룰셋 — 그러면 남이 그 네임스페이스에 PR/ref를 못 만든다)이다. 이건 도구 밖 IaC다.
+// ⚠️ 재확인은 **경합(untrustedSameRepo)만이 아니라 인가 전체를 액션별로 재검증**한다(R-47). 초기 판정은
+//    rebuild를 `humanTouch !== null`이면 억제한다(H-4) — 그런데 초기 스캔 뒤 리뷰어가 리뷰·코멘트·담당자·
+//    hold 라벨을 달아도 ref OID도 PR 소유권도 안 바뀐다 → 경합만 보는 재확인은 이를 통과시키고 leased
+//    force-push가 **리뷰된 head를 재작성**해 H-4가 보존을 약속한 상태를 무효화한다. F-0(네임스페이스 예약)로도
+//    못 막는다(우리 신뢰 PR에 대한 정당한 사람 상호작용이다) → 도구가 재검증으로 닫는다.
 if (action === "adopt" || action === "rebuild") {
   const recheck = foldConnection<PrScan>(PR_QUERY, ref, "gh api graphql (associatedPullRequests) — force-push 직전 재확인", newScan, scanReducer(true));
   if (!recheck.ok) inputError(`force-push 직전 재확인 실패: ${recheck.why}`);
+  // (a) 경합 — 초기 스캔 뒤 비신뢰 동일-레포 PR이 head를 점유했는가(R-46).
   if (recheck.value.value.untrustedSameRepo.length > 0) {
     const who = recheck.value.value.untrustedSameRepo
       .map((p) => `#${p.number}(${p.author?.login ?? "삭제된 계정"} → ${p.baseRefName})`)
@@ -1933,6 +1939,21 @@ if (action === "adopt" || action === "rebuild") {
       `force-push 직전 재확인: 초기 스캔 뒤 비신뢰 동일-레포 PR이 이 head를 점유했다: ${who} — 브랜치 '${branch}'는 더 이상 배타적으로 우리 것이 아니다. `
       + "밀지 않는다(그 PR의 head·리뷰를 재작성한다). TOCTOU 창을 좁혔을 뿐 진짜 닫힘은 F-0(bump-poll/** writer App 예약 룰셋)이다 — R-46",
     );
+  }
+  // (b) rebuild 전용 액션별 재검증(R-47) — 그 힘은 **같은 신뢰 PR + 같은 head + 사람 흔적 없음**에서만 나온다.
+  if (action === "rebuild") {
+    const nowTrusted = recheck.value.value.trusted;
+    const same = nowTrusted.find((p) => p.number === trusted!.number) ?? null;
+    if (same === null) {
+      execError(`force-push 직전 재확인(R-47): 대상 신뢰 PR #${trusted!.number}이 사라졌다(닫힘·병합·소유권 상실) — rebuild하지 않는다`);
+    } else if (same.headRefOid !== trusted!.headRefOid) {
+      execError(`force-push 직전 재확인(R-47): PR #${trusted!.number}의 head가 초기 스캔 뒤 바뀌었다(${trusted!.headRefOid} → ${same.headRefOid}) — 낡은 lease 기대값으로 밀지 않는다`);
+    } else if (same.humanTouch !== null) {
+      execError(
+        `force-push 직전 재확인(R-47): 초기 스캔 뒤 PR #${trusted!.number}에 사람의 흔적이 생겼다(${same.humanTouch}) — force-push하면 그 리뷰·승인 상태를 파괴한다(H-4). 밀지 않는다`
+        + " (관측 불가도 '흔적 있음'으로 접힌다 — 모르는 상태에서 리뷰를 파괴하지 않는다)",
+      );
+    }
   }
 }
 

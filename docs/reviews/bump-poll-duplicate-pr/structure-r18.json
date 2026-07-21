@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "No-ship: the root-cause flip and frozen RED/GREEN contract are grounded, but the destructive mutation seam still permits newly added human review state to be overwritten.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 67,
+  "target": "branch diff against main",
+  "reviewedSha": "d62a560f9aaa0480e1333c1b2493d2eb48302501",
+  "reviewedTree": "33138a063c0dbd430125fc9bfce9bba292da0a99",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: pre-push recheck lets the human-touch guard expire",
+      "body": "The initial decision suppresses rebuild when `humanTouch` exists, but after sibling reconciliation and ownership-query round trips the final query checks only `untrustedSameRepo`. If a reviewer adds a review, comment, assignee, or hold label after the initial scan, neither the ref OID nor PR ownership changes; this check passes and the following leased force-push rewrites the reviewed head, invalidating precisely the state H-4 promises to preserve. This is new evidence beyond accepted R-46: F-0 can reserve ref and PR creation, but cannot prevent human interaction with an existing trusted PR. F-1 would merely wrap and inherit this unsafe executor seam.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 1925,
+      "line_end": 1936,
+      "confidence": 0.99,
+      "recommendation": "Make the final query an action-specific authorization revalidation. Before rebuild, require the same trusted PR and head, `humanTouch === null`, and no contested owner; abort if the target vanished or changed. Add a temporal witness where human touch appears only on the second query and assert zero push/create/arm.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Add complete pre-push revalidation at the executor mutation boundary.",
+    "Freeze the temporal witness, then regenerate the RED/GREEN records without weakening existing assertions."
+  ]
+}
