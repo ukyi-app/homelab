@@ -1914,6 +1914,28 @@ if (action === "adopt") {
   }
 }
 
+// ── ③-b2 **force-push 직전 배타적 소유권 재확인**(R-46 — TOCTOU 창 최소화) ────────────────────
+// `contestedHead`는 ③ 초반의 초기 스캔에서 계산됐고, 그 뒤 형제 reconcile·커밋 소유권 조회(GraphQL 왕복
+// 여러 번)를 거쳤다. 그 사이에 사용자/다른 봇이 이 **결정적 head**에서 다른 base로 동일-레포 PR을 열 수
+// 있다 — PR 생성은 git ref를 움직이지 않으므로 `--force-with-lease`(OID만 본다)는 여전히 성공해 그 새 PR의
+// head·리뷰를 재작성한다. → force-push 직전에 **다시 조회**해 창을 마이크로초로 좁힌다.
+// ⚠️ 이건 **완화이지 닫힘이 아니다**: git ref lease는 동시 PR 생성을 원리적으로 막을 수 없다(재확인과 push
+//    사이에도 창이 남는다). **환원 불가능한 잔여 TOCTOU의 진짜 닫힘은 F-0**(bump-poll/** ref를 writer App에
+//    예약하는 서버-강제 룰셋 — 그러면 남이 그 네임스페이스에 PR/ref를 못 만든다)이다. 이건 도구 밖 IaC다.
+if (action === "adopt" || action === "rebuild") {
+  const recheck = foldConnection<PrScan>(PR_QUERY, ref, "gh api graphql (associatedPullRequests) — force-push 직전 재확인", newScan, scanReducer(true));
+  if (!recheck.ok) inputError(`force-push 직전 재확인 실패: ${recheck.why}`);
+  if (recheck.value.value.untrustedSameRepo.length > 0) {
+    const who = recheck.value.value.untrustedSameRepo
+      .map((p) => `#${p.number}(${p.author?.login ?? "삭제된 계정"} → ${p.baseRefName})`)
+      .join(", ");
+    execError(
+      `force-push 직전 재확인: 초기 스캔 뒤 비신뢰 동일-레포 PR이 이 head를 점유했다: ${who} — 브랜치 '${branch}'는 더 이상 배타적으로 우리 것이 아니다. `
+      + "밀지 않는다(그 PR의 head·리뷰를 재작성한다). TOCTOU 창을 좁혔을 뿐 진짜 닫힘은 F-0(bump-poll/** writer App 예약 룰셋)이다 — R-46",
+    );
+  }
+}
+
 if (action === "create") {
   mutate("git", ["push", args.remote, `HEAD:${ref}`], "git push");
 } else if (action === "adopt") {

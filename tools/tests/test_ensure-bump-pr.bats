@@ -323,6 +323,14 @@ case "$1:$2" in
           *) echo "stub gh: 본 질의가 ref-연결(associatedPullRequests)이 아니다 — 이름-매치 질의는 포크가 오염시킨다(R-40): $q" >&2; exit 3 ;;
         esac
         if [ -n "${STUB_GH_LIST_FAIL:-}" ]; then echo "stub: gh api graphql 실패(조회 장애 시뮬)" >&2; exit 1; fi
+        # ★ R-46 시간적 훅: 본 질의(PR_QUERY)는 rebuild/adopt 경로에서 **두 번** 불린다 — 초기 스캔 + force-push
+        #   직전 재확인. STUB_PRS_RECHECK가 있으면 **2번째 호출부터** 그 픽스처를 쓴다(첫 스캔 뒤 새 PR이 나타나는
+        #   TOCTOU를 재현). 페이지 경계로 한 질의가 여러 페이지면 그 호출들도 세지만, 이 증인들은 1페이지라 무해.
+        MAINQ_N_FILE="${BATS_TEST_TMPDIR:-/tmp}/mainq-count"
+        mainq_n=$(( $(cat "$MAINQ_N_FILE" 2>/dev/null || echo 0) + 1 ))
+        echo "$mainq_n" > "$MAINQ_N_FILE"
+        prfile="$STUB_PRS"
+        if [ -n "${STUB_PRS_RECHECK:-}" ] && [ "$mainq_n" -ge 2 ]; then prfile="$STUB_PRS_RECHECK"; fi
         # ref === null = 우리 브랜치가 원격에 없다(라이브 응답: {repository:{ref:null}}) → 도구는 "우리 것 PR 0건"으로
         # 접는다. **STUB_REF_NULL은 강제 부재**(R-43 불일치 증인 W75: ls-remote는 브랜치를 보고하는데 GraphQL만
         # ref:null인 stale/저하 뷰를 재현한다 → 도구는 fail-closed여야 한다).
@@ -334,11 +342,11 @@ case "$1:$2" in
         #   ⚠️ 깨진 JSON 픽스처(prcount 빈값)는 ref:null로 접지 않는다 — gh_pages 폴백으로 흘려보내 fail-closed시킨다.
         refarg=""; for a in "$@"; do case "$a" in ref=*) refarg="${a#ref=}" ;; esac; done
         refoid="$(awk -v r="$refarg" '$2==r{print $1; exit}' "$STUB_HEADS" 2>/dev/null)"
-        prcount="$(jq 'map(select(.isCrossRepository != true)) | length' "$STUB_PRS" 2>/dev/null)"
+        prcount="$(jq 'map(select(.isCrossRepository != true)) | length' "$prfile" 2>/dev/null)"
         if [ -z "$refoid" ] && [ "$prcount" = "0" ]; then printf '{"data":{"repository":{"ref":null}}}'; exit 0; fi
         # ★ 라이브처럼 **first:100 페이지 경계**로 쪼갠다: 첫 페이지만 소비하는 구현이 통과하면 안 된다.
         # STUB_REF_OID: GraphQL ref.target.oid를 ls-remote와 **다르게** 강제하는 훅(R-43 OID-상이 불일치 증인 W77).
-        REF_OID="${STUB_REF_OID:-${refoid:-$PR_OID}}" FORCE_LAST="${STUB_HAS_NEXT_PAGE:-false}" gh_pages "$STUB_PRS" "$@"
+        REF_OID="${STUB_REF_OID:-${refoid:-$PR_OID}}" FORCE_LAST="${STUB_HAS_NEXT_PAGE:-false}" gh_pages "$prfile" "$@"
         ;;
       *isDraft*)
         # ── 형제 PR 조회(SIBLING_PR_QUERY — ref별 exact 질의) ──────────────────────────────
@@ -551,6 +559,16 @@ write_prs() {
 }
 # 사람의 흔적 필드를 **의도적으로 빼는** 드리프트 증인 전용(정규화 없이 바이트 그대로).
 write_prs_raw() { printf '%s' "$1" > "$STUB_PRS"; }
+# R-46 시간적 증인: force-push 직전 **재확인** 시점(본 질의 2번째 호출부터)에 쓸 PR 픽스처.
+write_prs_recheck() {
+  export STUB_PRS_RECHECK="$BATS_TEST_TMPDIR/prs-recheck.json"
+  local out
+  if out="$(printf '%s' "$1" | jq -c --argjson d "$HUMAN_NONE" 'map($d + .)' 2>/dev/null)"; then
+    printf '%s' "$out" > "$STUB_PRS_RECHECK"
+  else
+    printf '%s' "$1" > "$STUB_PRS_RECHECK"
+  fi
+}
 # git ls-remote --heads origin <branch> 의 원시 출력("<oid>\trefs/heads/<branch>").
 #
 # ★ 픽스처 불변식(structure r3): **열린 동일-레포 PR이 있으면 그 브랜치는 이 레포에 존재한다.**
@@ -3720,6 +3738,31 @@ setup_closable_sibling() {
   [ "$creates" -eq 0 ] || { echo "contested head: 중복 PR을 만들었다($creates회)"; dump_calls; false; }
   arms="$(arm_calls_script)"
   [ "$arms" -eq 0 ] || { echo "contested head: 애매한 상태에서 무장했다($arms회)"; dump_calls; false; }
+}
+
+# bats test_tags=regression
+@test "W82: an untrusted different-base PR appearing AFTER the initial scan is caught by the pre-push re-check (TOCTOU window — R-46)" {
+  # ★ R-46: 배타적 소유권을 **초기 스캔의 계획 사실로 캐시**하면, 스캔~force-push 사이(형제 reconcile·커밋
+  #   조회 왕복)에 남이 이 결정적 head로 다른 base PR을 열 수 있다 — PR 생성은 ref를 안 움직이므로 lease는
+  #   여전히 성공해 그 PR의 head·리뷰를 재작성한다. force-push 직전 재확인이 그 창을 좁혀 잡는다.
+  #   ★ 초기 스캔엔 신뢰 DIRTY PR만(경합 없음 → rebuild 판정) / 재확인 시점엔 비신뢰 다른-base PR이 추가된다.
+  write_prs "[$(writer_pr 510 DIRTY "$(amr_armed)")]"                        # 초기 스캔: 경합 없음 → rebuild 판정
+  write_prs_recheck "[$(writer_pr 510 DIRTY "$(amr_armed)"), {\"number\":511,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"gh-pages\",\"author\":$(human_author latecomer),\"autoMergeRequest\":$(amr_absent)}]"
+  write_heads "$PR_OID"
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "TOCTOU rewrite: 초기 스캔 뒤 나타난 비신뢰 PR #511(→gh-pages)의 head를 rebuild force-push가 재작성했다(R-46)"
+    echo "$output"; dump_calls; false
+  }
+  echo "$output$stderr" | grep -q "force-push 직전 재확인" \
+    || { echo "에러 메시지가 pre-push 재확인 위반을 말하지 않는다"; echo "$output$stderr"; false; }
+  # ★ 파괴 0: 재확인이 잡아 force-push가 나가지 않는다.
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || { echo "TOCTOU: 재확인을 뚫고 force-push가 나갔다($pushes회)"; dump_calls; false; }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ]
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ]
 }
 
 # ⚠️ baseline에서 RED다(adopt 판정 자체가 없다 — 언제나 create). W18의 파괴 가드가 **포크까지 삼켜**
