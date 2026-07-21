@@ -207,6 +207,16 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Review Decision Log
 
+### Codex Structure Review — r16: needs-attention → 1건 Accept (owner 2026-07-21)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-45 | high | `Blocker: a trusted target bypasses base-independent branch ownership` — 스캔이 다른 base를 향한 동일-레포 PR을 보존하는 건 그것도 **공유 head ref를 점유**하기 때문인데, 파괴 가드가 이를 **`trusted === null`일 때만** 거부한다. main을 향한 신뢰 writer PR과 같은 head에서 다른 base를 향한 비신뢰 PR이 공존하면, 신뢰 PR이 선택돼 DIRTY/BEHIND 판정 시 **공유 ref를 force-push** → 그 비신뢰 PR의 head(리뷰·사람 상태)를 재작성한다. 계획의 base-무관 소유권 불변식과 모순. W11d는 비신뢰 다른-base PR 단독만 덮어 이 조합을 놓친다 | **Accept** | 파괴 가드를 판정·trusted 유무에서 **분리**해, 안전한 회수(①-c 형제 스윕·③-a disarm) 뒤·force-push/create/arm 앞(③-a2)에 **head 점유 여부만으로** 발동. 비신뢰 동일-레포 PR이 head를 점유하면 신뢰 PR 공존 여부와 무관하게 force-push·create·arm 금지, fail-closed(변이 head 0·run 비-0). 증인 W81(신뢰 main DIRTY+armed + 비신뢰 gh-pages PR → push/create/arm 0), W18·W11d 보존. 뮤테이션으로 격리(옛 `trusted===null` 복원 → W81 RED, W18 green) |
+
+> ★ 게이트 함정(재발): r16 첫 실행이 뒤늦게 쓴 미커밋 아티팩트가 재실행의 `stale-branch-review`를 유발 → 무효 아티팩트 삭제 후 클린 재실행. (그 stale 실행이 표면화한 별개 소견 "app/platform 네임스페이스 충돌"은 클린 실행에서 재현되지 않아 이 라운드 대상 아님 — codex는 라운드마다 다른 소견을 표면화한다.) ★ 서브에이전트 지출 한도로 컨덕터 직접 구현·검증.
+
+**최종 baseline**: `red..green` diff = **scope 4파일 정확히** · regression 119 baseline RED · characterization 63 green(양 끝단) · `--verify-flip` **flipOk: true**.
+
 ### Codex Structure Review — r15: needs-attention → 1건 Accept (owner 2026-07-20)
 
 | ID | 심각도 | 발견 | 결정 | 반영 |
