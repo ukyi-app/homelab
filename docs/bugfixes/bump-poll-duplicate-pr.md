@@ -212,6 +212,16 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
 
 ## Review Decision Log
 
+### Codex Structure Review — r17: needs-attention → 1건 Accept(축소본) (owner 2026-07-21)
+
+| ID | 심각도 | 발견 | 결정 | 반영 |
+|---|---|---|---|---|
+| R-46 | high | `Blocker: exclusive head ownership expires before the force-push` — `contestedHead`가 초기 스캔에서 한 번 계산돼 형제 reconcile·커밋 조회를 거친 뒤 재사용된다. 그 사이 사용자/다른 봇이 이 결정적 head로 다른 base 동일-레포 PR을 열 수 있고, PR 생성은 git ref를 안 움직이므로 `--force-with-lease`(OID만 본다)는 여전히 성공해 그 새 PR의 head·리뷰를 재작성한다(실제 인터리빙 하의 R-45). W81은 스캔 **전**에 경합을 심어 이 레이스를 못 태운다 | **Accept(축소본) → 랜딩** | ★ **리뷰어가 소견 안에서 인정**: *"a Git ref lease cannot guard concurrent PR creation"* — 이 TOCTOU는 **도구 계층에서 원리적으로 완전히 닫을 수 없다**. 권고안 둘(불변 content-addressed head 재설계 / 서버-강제 프로토콜)은 각각 과도한 재설계 / **바로 F-0**(이미 파일됨)이다. → 도구 계층 **best-effort 완화**만 채택: force-push(rebuild/adopt) **직전에 재조회**해 창을 마이크로초로 좁힌다(③-b2). 시간적 증인 W82(초기 스캔엔 경합 없음→rebuild, 재확인 시점에 비신뢰 PR 추가→push/create/arm 0). **환원 불가능한 잔여 TOCTOU는 F-0**(bump-poll/** writer App 예약 룰셋 — 남이 그 네임스페이스에 PR/ref를 못 만듦)으로 명시. owner 결정: 여기서 **랜딩**(r11 이후 6라운드가 전부 공유 head force-push 안전의 좁은 엣지였고, 리뷰어가 도구로는 못 닫는다고 확인) |
+
+> ★ 서브에이전트 지출 한도로 컨덕터 직접 구현·검증. 뮤테이션 격리: 재확인 제거 → W82 RED(W81은 초기 스캔이 잡아 green). ★ make ci는 `test_sealed-secrets-restore.bats` 환경 행으로 타임아웃 → 나머지 전량(bats 0 실패·verify·typecheck·actionlint) 개별 통과로 대체 확인.
+
+**최종 baseline**: `red..green` diff = **scope 4파일 정확히** · regression 120 baseline RED · characterization 63 green(양 끝단) · `--verify-flip` **flipOk: true**.
+
 ### Codex Structure Review — r16: needs-attention → 1건 Accept (owner 2026-07-21)
 
 | ID | 심각도 | 발견 | 결정 | 반영 |
