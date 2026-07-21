@@ -193,6 +193,13 @@ PR에 auto-merge 무장). 파싱 실패 시 fail-closed(브랜치 폴백 금지)
   "테스트된 도구에 속하는 경계"로 명시한다 — 셸 루프를 worktree-격리 도구로 대체하면 항목 간 상태 공유 표면
   자체가 사라진다. 별도 파이프라인.
 
+- **F-2 (release r1 R-48에서 분리)**: superseded 형제 PR **자동 close**. 이 버그픽스의 단일 flip은 "같은
+  app+tag 중복 PR을 열지 않는다"뿐인데, 같은 앱 **다른 태그** 형제를 `gh pr close`로 닫는 것은 **두 번째 관측
+  변이**였다(release 게이트가 단일-flip 위반으로 포착). 게다가 close 자격·humanTouch가 close 한참 전에 캐시돼
+  R-46/R-47과 **동일한 TOCTOU 클래스**를 안고 있었다. 그래서 이 픽스에서 **auto-merge 회수(disarm)만 남기고
+  close는 전부 제거**했다(disarm은 무장된 좀비를 막는 단일-flip의 안전에 속한다). close가 여전히 필요하면
+  **명시적 인가 + 연산 직전 신선한 state/head/human-touch 검사 + owner 승인 유지보수 워크플로**로 별도 배포. 별건.
+
 - **F-0 (권장, 이 픽스의 한계)**: `bump-poll/**` ref를 **writer App 전용으로 예약하는 GitHub ruleset**
   (`infra/github` terraform). 이 픽스의 커밋 소유권 검증은 **안전 인터록이지 인증이 아니다** — 워크플로의
   `git commit` + 토큰 push는 **서명되지 않으므로**(GitHub은 API로 만든 커밋만 서명한다) git author/committer는

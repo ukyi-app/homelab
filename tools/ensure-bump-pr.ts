@@ -92,7 +92,7 @@
 //   조회 실패·깨진 JSON                        → fail-closed(비-0 종료 — 조용한 create 금지)
 // ⚠️ UNKNOWN은 DIRTY도 BEHIND도 아니다(GitHub 지연 계산 — 라이브에서 흔하다). rebuild로 오분류하면 매 폴링 force-push.
 //
-// ★ 모드가 하나 더 있다: `--reconcile-only`(H-1 · R-27) — **해제 스윕만** 한다(push·create·무장·close 전부 0).
+// ★ 모드가 하나 더 있다: `--reconcile-only`(H-1 · R-27) — **해제 스윕만** 한다(push·create·무장 전부 0).
 //   요약하면 "해제는 보안 속성이라 **후보 계획(planning)의 가용성·완전성에 의존해선 안 된다**":
 //     · 후보(tag)가 없어도 돈다(noop/refuse 주기).
 //     · **대상 목록을 인자로 받지 않는다** — `bump-poll/*` 원격 ref를 직접 열거하고 app을 브랜치명에서
@@ -190,45 +190,30 @@
 // 그 낡은 인가는 살아 있다: 누가(사람의 "Update branch" 버튼, 다른 워크플로) 그 브랜치를 전진시키면
 // **옛 이미지가 승인 없이 배포**된다(= 무승인 롤백). 그래서 실행기는 `bump-poll/<app>-*` **전체**를 소유한다.
 //
-// 두 행동을 **분리**한다(파괴는 언제나 뒤, 증거는 언제나 앞):
-//   ① **해제 스윕(넓게·약한 증거·중단 불가)** — 이번 후보가 아닌 모든 형제 writer PR의 무장을 회수한다.
-//      **레인을 읽지 않는다**: superseded PR은 레인과 무관하게 머지될 자격이 없다. 회수는 안전 방향이라
-//      소유권 증명도 필요 없다. R-25의 피해는 **이 스윕 하나로 100% 사라진다**.
-//   ② **close 스윕(좁게·강한 증거·언제든 포기)** — 순수 위생이다(좀비 누적 방지). 파괴 방향이므로
-//      증거가 하나라도 모자라면 **아무것도 닫지 않는다**. 브랜치는 **어떤 경우에도 삭제하지 않는다**
-//      (close는 reopen으로 되돌아가지만 ref 삭제는 되돌아가지 않는다).
-// ⚠️ **"더 새로운 태그"는 증명할 수 없다**: 실행기의 GH_TOKEN은 writer(homelab 전용)라 앱 레포 compare를
-//    호출할 수 없고, 애초에 T1과 T2 사이엔 git 순서가 없다(GHCR 빌드 완료 역전·앱 레포 revert). 유일하게
-//    건전한 명제는 "플래너가 **이번 run에** 승인한 후보는 T 하나이며 이 PR은 T가 아니다"뿐이다.
-//    close의 순서 근거는 그래서 **PR의 createdAt**이다(전순서를 갖는 유일한 관측 사실): **우리 PR보다
-//    엄격히 오래된** 형제만 닫는다 → 두 실행기가 동시에 돌아도 서로를 닫는 flip-flop이 구조적으로 불가능하다.
-// close의 증거(**전부** 만족해야 한다 — 하나라도 아니면 close 0):
-//   포크 아님 · writer **Bot** 작성 · 같은 base · 리터럴 접두 `bump-poll/<app>-` + TAG_RE 완전일치 ·
-//   tag ≠ 우리 tag · **그 PR 자신의 tag로 재계산한 커밋 메시지·ident로 head 소유권 증명** ·
-//   createdAt < 우리 PR · **사람의 흔적 0**(리뷰·사람 코멘트·리뷰어 요청·assignee·draft·hold 라벨) ·
-//   **우리 PR이 이미 열려 있음**(후계자 없는 제거 금지) · 후보 수 ≤ CLOSE_MAX · 레인 = bump.
-// ⚠️ 승인 레인(propose-pr)의 형제는 **해제만 하고 닫지 않는다** — 그 레인의 존재 이유가 사람의 판단이다.
-// ⚠️ 스윕의 조회·close 실패는 **abort시키지 않는다**(주 판정은 끝까지 간다). 안 그러면 아무나
+// 그 피해를 없애는 행동은 **해제 스윕 하나**다(넓게·약한 증거·중단 불가): 이번 후보가 아닌 모든 형제
+// writer PR의 auto-merge 무장을 회수한다.
+//   · **레인을 읽지 않는다** — superseded PR은 레인과 무관하게 머지될 자격이 없다(옛 이미지 배포).
+//   · **소유권 증명도 요구하지 않는다** — 인가 회수는 언제나 안전 방향이다. R-25의 피해는 **이 스윕
+//     하나로 100% 사라진다**. (좀비 PR을 **닫지는 않는다** — 자동 close는 이 도구의 계약이 아니다.
+//     낡은 인가를 거두는 것으로 피해는 이미 0이고, 파괴는 사람/owner의 몫으로 남긴다.)
+// ⚠️ 스윕의 조회·회수 실패는 **abort시키지 않는다**(주 판정은 끝까지 간다). 안 그러면 아무나
 //    `bump-poll/<app>-*` 브랜치 하나를 만들어 **배포를 영구 정지**시킬 수 있다(억제 = 공격 표면).
 //    다만 **조용하지도 않다** — 아래 두 별표 블록(R-32 · V-2)이 그 결과 계약을 정한다.
 //
 // ★★★★★ 그런데 **회수 실패는 조용히 지나갈 수 없다**(structure r9 R-32) ─────────────────────────
 // 계속하는 것(비-기아)과 성공으로 끝나는 것(비-보고)은 **다른 이야기**인데 예전 코드는 그 둘을 한 덩어리로
 // 묶었다: 형제 해제가 실패하면 warn만 하고 exit 0으로 끝났다 → 옛 PR이 **열린 채 무장된 채** 남는데
-// (close는 사람 흔적·불완전 열거·CLOSE_MAX 캡·킬 스위치로 **정상적으로** 막힐 수 있다) 프로세스는 **성공**으로
-// 끝나고 telegram도 울리지 않는다. "회수 실패는 보안 사실이다"라는 불변식과 정면으로 모순된다.
+// 프로세스는 **성공**으로 끝나고 telegram도 울리지 않는다. "회수 실패는 보안 사실이다"라는 불변식과
+// 정면으로 모순된다.
 // → 회수는 **결과를 나르는 하나의 공유 연산**이다(revokeArming): 두 경로(--reconcile-only · 형제 스윕)가
 //   같은 실패 계약을 쓴다 —
 //     ① **모든 대상과 메인 변이는 끝까지 처리한다**(억제 = 공격 표면 — 한 실패가 다른 앱·다른 변이를 굶기면 안 된다),
 //     ② 실패한 회수를 **전부 집계**해 처리가 끝난 뒤 **비-0으로 종료**한다(run이 빨개지고 telegram이 발화한다),
 //     ③ **무엇을 회수하지 못했는지 보고에 남긴다**(stdout JSON의 `revocationFailures`).
-// ⚠️ 이 계약은 close의 성공 여부에 **의존하지 않는다** — 위생(close)의 성공에 보안 사실(회수)의 보고를
-//    매다는 것이 바로 이 결함이었다.
 //
 // ★★★★★★ 그리고 **회수 대상을 보는 일(관측)에도 같은 계약이 걸린다**(V-2) ────────────────────────
 // R-32는 회수 **호출**에만 실패 계약을 줬다. 그 바로 앞 단계 — 형제 ref 열거 · 형제 PR 조회 · 파싱 ·
-// 신뢰 PR 모호성 — 은 여전히 warn + `closeAbandoned`로 끝났는데, `closeAbandoned`는 **close만** 막고
-// 종료 코드엔 아무 영향이 없다(종료 코드는 오직 revocationFailures가 정한다). 즉 형제 하나의 조회가 깨지면
+// 신뢰 PR 모호성 — 은 예전엔 warn만 하고 종료 코드에 아무 영향이 없었다. 즉 형제 하나의 조회가 깨지면
 // **그 브랜치의 무장된 좀비를 보지도 못한 채 run이 초록**이었다. 반대편(`--reconcile-only`)은 같은 넷을
 // 실패로 집계해 exit 1이었다 → "두 경로가 같은 실패 계약을 쓴다"는 이 헤더의 주장이 **거짓**이었다.
 // → **회수 대상을 가릴 수 있는 관측 실패는 그 자체로 회수 실패다**(revocationBlind). 모르는 것을 근거로
@@ -262,7 +247,7 @@ const USAGE = `ensure-bump-pr — bump PR 멱등 실행기(조회 → 결정 →
   --base <branch>   PR base (기본 main)
   --remote <name>   git 원격 (기본 origin)
   --writer <slug>   신뢰하는 writer App slug(기본 ukyi-homelab-writer)
-  --reconcile-only  **해제 스윕만** 수행한다(push·PR 생성·무장·close 전부 0). 후보(tag)가 없어도,
+  --reconcile-only  **해제 스윕만** 수행한다(push·PR 생성·무장 전부 0). 후보(tag)가 없어도,
                     플래너가 죽어도 돈다 — **대상은 \`bump-poll/*\` 원격 ref 전체**(app은 브랜치명에서 유도)이고,
                     레인은 autoDeploy SSOT(.bindings.json / .image-pin.json)에서 **직접** 읽는다.
                     SSOT 부재·파손 = 플래너와 같은 결론(autoDeploy:false) → **무장을 회수한다**.
@@ -280,15 +265,9 @@ const DEFAULT_WRITER = "ukyi-homelab-writer";
 const APP_RE = /^[a-z0-9-]+$/;
 const OID_RE = /^[0-9a-f]{40}$/;
 
-// ── superseded 스윕의 블라스트 반경 상수 ───────────────────────────────────────────────────────
-// close 후보가 이보다 많으면 **한 건도 닫지 않는다**. 접두 파싱 버그 한 글자가 열린 봇 PR을 무더기로
-// 닫는 사고를 상수로 묶는다(선례: teardown DNS 가드의 allow_max 대량삭제 캡).
-const CLOSE_MAX = 3;
-// 사람이 "이건 닫지 마라"고 말할 수 있는 명시적 탈출구(문서화된 라벨).
+// 사람이 "이건 자동으로 건드리지 마라"고 말하는 명시적 hold 라벨(문서화된 라벨) — humanTouchOf가 읽어
+// rebuild(force-push) 가드에 쓴다. 이 라벨이 붙은 신뢰 PR은 DIRTY/BEHIND여도 force-push하지 않는다(H-4).
 const HOLD_LABELS = ["hold", "do-not-close"];
-// 킬 스위치 — **close만** 끈다(해제 스윕은 계속 돈다). 인가(무장/레인)엔 어떤 영향도 주지 않는다:
-// 인가를 바꾸는 플래그를 또 만들면 승인 게이트 우회가 재발한다(R-11의 교훈).
-const CLOSE_ENABLED = (process.env.BUMP_PR_CLOSE ?? "on") !== "off";
 
 
 // 배포 승인 레인 — poll-ghcr.ts가 내는 값과 **글자 그대로** 같다(`s.autoDeploy ? "bump" : "propose-pr"`).
@@ -392,7 +371,7 @@ const branch = args.reconcileOnly ? "" : `bump-poll/${APP}-${TAG}`;
 const ref = `refs/heads/${branch}`;
 
 // 실행한 명령 원장 — stdout JSON에 실어 호출부/테스트가 "무엇을 변이했는가"를 검증한다.
-// ⚠️ 여기 담는 건 **변이**(create/push/arm/disarm/close·ls-remote)뿐이다 — 그 수는 경계 있다.
+// ⚠️ 여기 담는 건 **변이**(create/push/arm/disarm·ls-remote)뿐이다 — 그 수는 경계 있다.
 //    read-only GraphQL 페이지 조회(foldConnection)는 **여기 남기지 않는다**(runSoft audit=false): 남기면
 //    원장이 포크 수(=페이지 수)에 비례해 커져 **부모 힙과 워크플로 로그를 다시** 키운다(R-36이 없앤 억제
 //    표면의 한 칸 아래 재현). 페이지네이션은 아래 graphqlPages 카운터 하나로만 관측한다.
@@ -450,7 +429,7 @@ const MAX_CAPTURE = 4 * 1024 * 1024;
 // ⚠️ 캡처 실패(ENOBUFS)는 `r.error`로 선다 → 아래 첫 가드가 잡는다. 살해된 자식은 status=null이라
 //    둘째 가드(`status !== 0`)에도 걸린다. **잘린 stdout을 성공으로 읽는 경로는 없다.**
 // audit=false는 **read-only 페이지 조회 전용**(foldConnection) — 그 조회만 원장에서 뺀다. 변이 경로는
-// 전부 기본값(audit=true)으로 예전 그대로 원장에 남는다(create/push/arm/disarm/close·ls-remote 무변경).
+// 전부 기본값(audit=true)으로 예전 그대로 원장에 남는다(create/push/arm/disarm·ls-remote 무변경).
 function runSoft(cmd: string, a: string[], audit = true): { failure: string | null; stdout: string } {
   if (audit) executed.push([cmd, ...a].join(" "));
   const r = spawnSync(cmd, a, { encoding: "utf8", maxBuffer: MAX_CAPTURE });
@@ -472,7 +451,7 @@ function mutate(cmd: string, a: string[], what: string): void {
 //   · 실패는 **여기 한 곳에** 모인다 → 처리가 끝난 뒤 호출부가 이 배열로 **비-0 종료**를 결정하고,
 //     **무엇을 회수하지 못했는지**를 stdout JSON(`revocationFailures`)에 남긴다.
 // ⚠️ 이 배열이 비지 않았는데 exit 0으로 끝나는 경로는 **하나도 없어야 한다** — 그게 R-32의 결함이었다
-//    (해제 실패 + close 차단 = 무장된 좀비 PR이 남는데 run은 초록, telegram 무발화).
+//    (해제 실패 = 무장된 좀비 PR이 남는데 run은 초록, telegram 무발화).
 // ⚠️ 대상은 언제나 **인증된 PR 번호**다(브랜치 셀렉터는 동명 포크 PR로 오조준될 수 있다).
 const revocationFailures: string[] = [];
 function revokeArming(number: number, where: string): boolean {
@@ -491,8 +470,8 @@ function revokeArming(number: number, where: string): boolean {
 
 // ══ 회수 대상을 **가릴 수 있는 관측 실패**는 그 자체로 회수 실패다(V-2) ═══════════════════════════
 // R-32는 회수 **호출**(gh pr merge --disable-auto)에 실패 계약을 줬지만, **무엇을 회수해야 하는지 보는 일**
-// (형제 ref 열거 · 형제 PR 조회 · 파싱 · 신뢰 PR 모호성)엔 주지 않았다. 그 넷은 warn + `closeAbandoned`만
-// 세우고 **exit 0으로 끝났다** — 그런데 `closeAbandoned`는 **close(위생)만** 막고 종료 코드엔 아무 영향이 없다.
+// (형제 ref 열거 · 형제 PR 조회 · 파싱 · 신뢰 PR 모호성)엔 주지 않았다. 그 넷은 예전엔 warn만 하고
+// **exit 0으로 끝났다** — 종료 코드엔 아무 영향이 없었다.
 // 결과: 형제 하나의 PR 조회가 깨지면 **그 브랜치의 무장된 좀비 PR을 보지도 못한 채** run이 초록으로 끝난다.
 // 반대편(`--reconcile-only`)은 같은 넷을 실패로 집계해 exit 1이었다 → **두 경로의 계약이 갈라져 있었다**.
 // → 관측 실패도 `revocationFailures`에 모은다. 두 경로가 이제 **하나의 결과 계약**을 공유한다:
@@ -564,11 +543,6 @@ function bumpCommitMessageOf(app: string, tag: string): string {
   return `chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)`;
 }
 const BUMP_COMMIT_MESSAGE = bumpCommitMessageOf(APP, TAG);
-// 형제 브랜치의 기대 메시지는 **그 PR 자신의 tag**로 재계산한다(우리 tag가 아니다) — 그래야 그 head가
-// "그 bump의 우리 커밋"임을 증명할 수 있다. 브랜치명 파싱만으로는 소유권의 증거가 되지 못한다.
-function bumpCommitMessageFor(tag: string): string {
-  return bumpCommitMessageOf(APP, tag);
-}
 const WRITER_BOT_NAME = `${normalizeLogin(args.writer)}[bot]`;
 const WRITER_BOT_EMAIL_RE = new RegExp(`^\\d+\\+${escapeRe(WRITER_BOT_NAME)}@users\\.noreply\\.github\\.com$`);
 
@@ -652,7 +626,7 @@ function proveOurCommit(oid: string, what: string, expectMessage: string = BUMP_
 // BEHIND가 된다 → 승인 레인(propose-pr)의 PR은 사람이 리뷰하는 동안 **10분마다** BEHIND가 되고, 가드가
 // 없으면 그때마다 force-push당한다: **stale review로 승인이 취소되고**, 인라인 리뷰 코멘트가 outdated로
 // 접히고, required 체크가 처음부터 다시 돈다. 그건 리뷰를 사실상 불가능하게 만든다.
-// → 그래서 close 스윕이 쓰던 것과 **같은 흔적 신호**를 rebuild 경로에도 건다(아래 humanTouchOf).
+// → 그래서 사람의 흔적 신호를 rebuild 경로에 건다(아래 humanTouchOf).
 // ⚠️ 이 필드들은 판정의 **완화** 방향으로만 쓰인다(있으면 force-push를 **하지 않는다**) → 파싱은
 //    fail-closed가 아니라 humanTouchOf의 관용구를 따른다: **관측할 수 없으면 "흔적 있음"으로 읽는다**.
 //    필드 드리프트의 안전한 귀결은 "force-push하지 않는다"이지 "배포 파이프라인이 죽는다"가 아니다.
@@ -697,13 +671,13 @@ const PR_QUERY = `query($owner:String!,$repo:String!,$ref:String!,$endCursor:Str
 //   `ukyi-homelab-writer`라는 **사람 계정**(봇 계정은 `<slug>[bot]`이므로 이 이름은 사람이 가질 수 있다)이
 //   writer로 오인될 수 있다 → 타입까지 봐야 신뢰 경계가 닫힌다.
 // autoMergeRequest: 무장=객체({enabledAt}) / 미무장=null — 유일한 신호는 **null 여부**다.
-// createdAt은 **superseded 판정(close·회수)의 순서 근거**로만 쓴다(T1 vs T2 사이엔 git 순서가 없다 →
+// createdAt은 **superseded 회수(reconcile uniqueNewest)의 순서 근거**로만 쓴다(T1 vs T2 사이엔 git 순서가 없다 →
 // PR 나이가 전순서를 갖는 유일한 관측 사실이다). 그래서 여기선 **선택 필드**다: 없거나 형식이 깨지면
 // null로 두고 그 run은 아무것도 닫지 않는다(파괴는 증거가 완전할 때만).
 // 판정·무장·해제는 이 값을 전혀 보지 않으므로 여기서 fail-closed로 죽이면 배포만 멈춘다.
 // humanTouch: 사람이 이 PR을 만졌는가(있으면 사유 문자열). **관측 불가 = 흔적 있음**(H-4) —
 // rebuild(force-push)를 막는 방향으로만 쓰이므로 fail-closed의 안전 방향이 여기선 "밀지 않는다"다.
-// mergeStateStatus: **본 질의에만** 있다(판정 전용) — 형제/reconcile 질의는 판정 대상이 아니라 회수·close
+// mergeStateStatus: **본 질의에만** 있다(판정 전용) — 형제/reconcile 질의는 판정 대상이 아니라 회수
 // 대상이라 이 필드를 묻지 않는다. 그래서 타입은 nullable이고, **요구 여부는 파서의 인자**다(아래).
 type ObservedPr = {
   number: number; isCrossRepository: boolean; mergeStateStatus: string | null;
@@ -1102,10 +1076,10 @@ function enumerateSiblingRefs(): { ok: true; refs: SiblingRef[] } | { ok: false;
 }
 
 // ── 형제 ref → 그 head의 열린 PR. 조회는 본 질의와 같은 **강한 일관성 + 상한 없는 완전 열거**다.
-// close 증거에 필요한 사실이 더 붙는다: createdAt(순서) · isDraft/reviews/comments/reviewRequests/
-// assignees/labels(**사람의 흔적**). 본 질의(PR_QUERY)를 넓히지 않고 **따로** 둔다 — 본 판정 경로의
-// fail-closed 계약(필드 드리프트 = 죽는다)에 파괴 전용 필드를 끌어들이면, 그 필드 하나가 사라질 때
-// **배포가 멈춘다**(파괴를 못 하는 게 아니라). 스윕의 드리프트는 "닫지 않는다"로 끝나야 한다.
+// 회수·보고에 쓰는 사실이 더 붙는다: createdAt(reconcile uniqueNewest의 순서 근거) · isDraft/reviews/
+// comments/reviewRequests/assignees/labels(**사람의 흔적** — 보고용 humanTouch). 본 질의(PR_QUERY)를 넓히지
+// 않고 **따로** 둔다 — 본 판정 경로의 fail-closed 계약(필드 드리프트 = 죽는다)에 이 부가 필드를 끌어들이면,
+// 그 필드 하나가 사라질 때 **배포가 멈춘다**. 스윕의 드리프트는 회수(revocationBlind)로 끝나야 한다.
 const SIBLING_PR_QUERY = `query($owner:String!,$repo:String!,$ref:String!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     ref(qualifiedName:$ref){
@@ -1150,16 +1124,15 @@ function connectionOf(v: any): { nodes: any[]; truncated: boolean } | null {
   if (total === null) return null;             // 잘렸는지조차 알 수 없다 = 관측 불가
   return { nodes: v.nodes, truncated: total > v.nodes.length };
 }
-// 사람이 이 PR을 만졌는가. **하나라도 있으면 닫지 않는다**(그리고 H-4 이후로는 **force-push도 하지 않는다**) —
-// 승인 대기 PR을 사람 발밑에서 닫는 것, 그리고 리뷰 중인 PR의 head를 갈아치우는 것이 이 스윕의 가장 아픈
-// 오작동이다(리뷰 중인 PR·머지 버튼을 누르려던 순간과의 레이스 / stale review dismissal).
-// 관용구: **관측할 수 없으면 "흔적 있음"으로 읽는다** — 모르는 것을 근거로 파괴하지 않는다.
+// 사람이 이 PR을 만졌는가. **하나라도 있으면 force-push하지 않는다**(H-4) — 리뷰 중인 PR의 head를
+// 갈아치우면 승인이 stale로 취소되고 인라인 코멘트가 outdated로 접힌다(리뷰 중인 PR·머지 버튼을 누르려던
+// 순간과의 레이스 / stale review dismissal). 관용구: **관측할 수 없으면 "흔적 있음"으로 읽는다** — 모르는
+// 것을 근거로 리뷰 상태를 파괴하지 않는다. (형제/reconcile 관측에도 같은 신호를 붙여 보고에 humanTouch로
+//  싣지만, 형제 disarm 판정은 이 값을 보지 않는다 — 회수는 사람 흔적과 무관하게 안전 방향이다.)
 //
-// ★ REOPENED_EVENT(H-3) — 이게 없으면 close 스윕은 **사람의 reopen을 무한히 되닫는다**.
-//   reopen은 author도, createdAt도, head도 바꾸지 않고, 그 PR의 유일한 코멘트는 **우리 봇이 남긴 close 코멘트**다
-//   → 위의 어떤 신호에도 걸리지 않는다. 그래서 사람이 일부러 되살린 PR이 다음 폴링(≤10분)에 조용히 다시 닫힌다.
-//   더 나쁜 건 close 코멘트가 **바로 그 reopen을 해법으로 안내**했다는 점이다(사람을 함정으로 걸어 들어가게 했다).
-//   → reopen 이력을 **사실로 관측**하고, 관측되면 그 PR은 사람의 것이다(두 번 다시 닫지 않는다).
+// ★ REOPENED_EVENT(H-3) — reopen은 author도, createdAt도, head도 바꾸지 않는 사람의 흔적이다. 이 신호가
+//   없으면 사람이 되살린 신뢰 PR을 rebuild가 조용히 force-push해 그 상태를 파괴할 수 있다. → reopen 이력을
+//   **사실로 관측**하고, 관측되면 그 PR은 사람이 다루는 것이다(force-push하지 않는다).
 function humanTouchOf(pr: any): string | null {
   if (pr.isDraft !== false) return "draft이거나 isDraft를 관측할 수 없다"; // 우리는 draft를 만들지 않는다
   const reviews = totalCountOf(pr.reviews);
@@ -1172,7 +1145,7 @@ function humanTouchOf(pr: any): string | null {
   if (asg === null) return "assignees를 관측할 수 없다";
   if (asg > 0) return `assignee ${asg}명`;
   // ★ 코멘트는 **잘림을 먼저 본다**(R-28): 첫 페이지에 봇 코멘트만 있어도, 그 뒤에 사람의 코멘트가
-  //   있으면 "흔적 없음"은 거짓이다. 잘린 연결로 파괴(close)나 force-push를 인가하지 않는다.
+  //   있으면 "흔적 없음"은 거짓이다. 잘린 연결로 force-push를 인가하지 않는다.
   const c = connectionOf(pr.comments);
   if (c === null) return "comments를 관측할 수 없다";
   if (c.truncated) return "코멘트 연결이 잘렸다(첫 페이지 밖은 관측할 수 없다 — 사람 코멘트가 그 너머에 있을 수 있다)";
@@ -1181,8 +1154,8 @@ function humanTouchOf(pr: any): string | null {
     if (typeof t !== "string") return "코멘트 작성자 타입을 관측할 수 없다";
     if (t === "User") return "사람 코멘트";
   }
-  // ★ 라벨도 같다 — `hold`는 사람이 "이건 건드리지 마라"고 말하는 **명시적 탈출구**다(close 코멘트가
-  //   안내하는 바로 그것). 그 라벨이 첫 페이지 밖에 있다는 이유로 무시되면 탈출구가 거짓말이 된다.
+  // ★ 라벨도 같다 — `hold`는 사람이 "이건 자동으로 건드리지 마라"고 말하는 **명시적 탈출구**다(force-push
+  //   를 막는다). 그 라벨이 첫 페이지 밖에 있다는 이유로 무시되면 탈출구가 거짓말이 된다.
   const labels = connectionOf(pr.labels);
   if (labels === null) return "labels를 관측할 수 없다";
   if (labels.truncated) return "라벨 연결이 잘렸다(첫 페이지 밖은 관측할 수 없다 — hold 라벨이 그 너머에 있을 수 있다)";
@@ -1203,15 +1176,15 @@ function humanTouchOf(pr: any): string | null {
 // `revocationBlind`로 접는다: **회수 대상을 가릴 수 있는 관측 실패는 그 자체가 회수 실패다**(V-2).
 // ⚠️ 신뢰 PR이 2건 이상 = GitHub 계약상 불가능 → 그것도 관측 실패다(어느 것도 건드리지 않는다).
 //    같은 head→base에 열린 PR은 1건뿐이므로, 2건이 보인다는 건 사실을 잘못 읽었다는 뜻이다.
-// openCount = 그 head에 열린 PR 총수(신뢰 여부 무관) — "고아 ref(열린 PR 0)"와 "열린 PR은 있는데 우리
-// 것이 아니다(포크·사람·다른 base)"를 보고에서 가른다. 둘 다 변이는 0이다.
-type BranchObservation = { pr: ObservedPr | null; openCount: number };
+// pr === null = 그 head에 우리가 만질 신뢰 PR이 없다(고아 ref이거나 열린 PR이 포크·사람·다른 base) →
+// 어느 경우든 회수 대상이 아니다(변이 0).
+type BranchObservation = { pr: ObservedPr | null };
 // ★ expectedOid(R-44): 이 head는 `git ls-remote`(네임스페이스 열거)가 **그 OID로 존재를 보고했기에** 왔다.
 //   그 OID를 씸에 넘겨, GraphQL ref의 tip과 **합의**하는지 확인한다. 예전엔 head 이름만 받아 **존재 여부만**
 //   봤다 — ls-remote가 OID A를 보는데 stale GraphQL 뷰가 OID B(빈 connection)를 주면 "PR 0건"으로 접혀,
 //   A에 무장된 좀비가 있어도 조용히 넘어갔다(R-43의 ref:null 케이스를 넘는 OID 불일치 케이스).
 function observeBranchPr(head: string, expectedOid: string): ParseResult<BranchObservation> {
-  // 스트리밍 fold(R-36): mergeStateStatus는 이 질의에 없다(회수·close엔 필요 없다) → requireMergeState=false.
+  // 스트리밍 fold(R-36): mergeStateStatus는 이 질의에 없다(회수엔 필요 없다) → requireMergeState=false.
   // ★ 조회는 **우리 ref에 연결된 PR**만 본다(R-40): `refs/heads/<head>`를 associatedPullRequests에 넘긴다 →
   //   포크가 같은 브랜치명으로 열어도 그 PR의 head는 포크 레포 ref라 이 connection에 **구조적으로** 없다.
   //   그래서 포화된 형제 head라도 질의 작업(페이지 수)이 포크 수와 무관하다(W71).
@@ -1239,15 +1212,15 @@ function observeBranchPr(head: string, expectedOid: string): ParseResult<BranchO
   if (pr !== null && pr.headRefOid !== refObs.oid) {
     return parseFail(`신뢰 PR head 불일치(${head}): PR #${pr.number} headRefOid=${pr.headRefOid} vs ref tip=${refObs.oid} — 인가 근거가 흔들린다(R-44)`);
   }
-  return { ok: true, value: { pr, openCount: scanned.value.value.totalOpen } };
+  return { ok: true, value: { pr } };
 }
 
-// 스윕이 관측·변이한 형제의 상태(테스트/운영이 stdout으로 검증한다).
+// 해제 스윕이 관측·변이한 형제의 상태(테스트/운영이 stdout으로 검증한다).
 type SiblingState = {
   branch: string; tag: string; number: number | null;
   trusted: boolean; armed: boolean; createdAt: string | null; headRefOid: string | null;
   humanTouch: string | null;
-  disarmed: boolean; closed: boolean; closeBlocked: string | null;
+  disarmed: boolean;
 };
 
 // ══ --reconcile-only — **인가 회수 전용 패스**(H-1) ══════════════════════════════════════════════
@@ -1286,7 +1259,7 @@ type SiblingState = {
 //    이 패스는 의도적으로 플래너에 의존하지 않는다). 그 경우는 후보가 다시 생기는 주기에 주 경로가 잡는다.
 //    이 패스가 좁히는 것은 "형제가 둘 이상인데 아무도 방문하지 않는" 구간이다(라이브 좀비 #348·#350·#351).
 //
-// 변이는 여전히 **해제 하나뿐**이다: push·PR 생성·무장·close는 이 모드에서 **어떤 경로로도** 일어나지 않는다
+// 변이는 여전히 **해제 하나뿐**이다: push·PR 생성·무장은 이 모드에서 **어떤 경로로도** 일어나지 않는다
 // (그래서 레인을 잘못 읽어도 인가를 **부여**할 길이 없다 — 최악이 "회수 누락"이거나 "과잉 회수"다).
 //
 // 레인의 출처는 플래너가 아니라 **autoDeploy SSOT 파일 그 자체**다(poll-ghcr.ts와 **같은 파일, 같은 헬퍼**):
@@ -1354,7 +1327,7 @@ function probeLane(app: string): LaneProbe {
 }
 
 // 이 모드가 관측·회수한 주체(브랜치) 하나의 상태 — 테스트/운영이 stdout으로 검증한다.
-// createdAt: superseded 판정의 **유일한 순서 근거**(주 경로의 close 스윕과 같은 사실을 쓴다).
+// createdAt: superseded 회수(uniqueNewest)의 **유일한 순서 근거**.
 // headProven: R-23 패리티의 결과(null = 검사하지 않았다 — 어차피 회수할 대상이었다).
 // revokeReason: 왜 회수했는가(null이면 "인가된 무장이라 손대지 않았다").
 type SubjectState = {
@@ -1370,10 +1343,8 @@ type SubjectState = {
 
 // 한 앱의 열린 신뢰 PR들 중 **유일한 최신**(createdAt 전순서)을 고른다. 증명할 수 없으면 null이다.
 // ⚠️ **애매하면 회수한다** — 여기서 null을 돌려준다는 건 "이 앱의 어떤 무장도 인가됐다고 말할 수 없다"는
-//    뜻이고, 호출부는 그 앱의 무장을 **전부 회수한다**. 이 판단은 close 스윕의 관용구("관측할 수 없으면
-//    아무것도 하지 않는다")와 **일부러 반대 방향**이다. 두 연산의 안전 방향이 반대이기 때문이다:
-//      · close = **파괴** → 모르면 하지 않는다(되돌릴 수 없는 것을 추측으로 하지 않는다).
-//      · 회수 = **인가 박탈** → 모르면 **한다**(모듈 전체가 반복해 말한다: 회수는 언제나 안전 방향이다).
+//    뜻이고, 호출부는 그 앱의 무장을 **전부 회수한다**. 회수(인가 박탈)는 **안전 방향**이라 모르면 **한다**
+//    (모듈 전체가 반복해 말한다: 회수는 언제나 안전 방향이다).
 //    결정적 근거: 한 앱에 열린 신뢰 PR이 **2건 이상**이면 그중 **최소 하나는 확실히 superseded**다
 //    (이번 후보는 하나뿐이다). 순서를 모른다고 손을 떼면 **낡은 인가가 확실히 하나 살아남는다**.
 //    반대로 전부 회수하면 최악이 "정당한 최신 PR의 무장이 한 주기 늦게 복구된다"이고, 그건 R-10의
@@ -1560,64 +1531,46 @@ const refObserved = scannedPrs.value.ref; // GraphQL이 본 ref: 부재/존재+O
 const remoteBranch = parseLsRemote(run("git", ["ls-remote", "--heads", args.remote, branch], "git ls-remote"));
 
 // ── ①-b superseded 형제 열거(관측) — 변이 0. 실패는 **계속하되 조용하지 않다** ────────────────
-// 두 가지가 여기서 **갈라진다**(예전엔 한 덩어리였고 그게 결함이었다 — V-2):
-//   · `closeAbandoned` = **위생(close)의 게이트**. 열거·조회가 한 곳이라도 깨지면 그 run의 close는 전부
-//     포기한다(과소 열거로 **일부만** 닫는 것보다 아예 안 닫는 게 안전하다 — 파괴는 완전한 증거 위에서만).
-//   · `revocationBlind()` = **결과(종료 코드·보고)**. 같은 실패는 "이 브랜치에 무장된 PR이 있는지 **모른다**"는
-//     뜻이기도 하다. 그건 close의 문제가 아니라 **회수의 문제**다.
-// 예전 코드는 `closeAbandoned`만 세우고 exit 0으로 끝냈다 — 그런데 종료 코드는 오직 revocationFailures가
-// 정한다 → **형제 조회가 깨지면 무장된 좀비를 보지도 못한 채 run이 초록**이었다(그리고 `--reconcile-only`는
-// 같은 상황에서 exit 1이었다 → 두 경로의 계약이 갈라져 있었다). 이제 둘 다 같은 결과 계약을 쓴다.
+// 관측 실패(형제 ref 열거·형제 PR 조회·파싱(**author 부재 포함** — R-34)·신뢰 PR 모호성)는 "이 브랜치에
+// 무장된 PR이 있는지 **모른다**"는 뜻이다 → `revocationBlind()`로 접어 종료 코드·보고에 싣는다(회수 대상을
+// 가릴 수 있는 관측 실패 = 회수 실패 — V-2). 예전엔 이 실패를 warn만 하고 exit 0으로 끝냈다 → **형제 조회가
+// 깨지면 무장된 좀비를 보지도 못한 채 run이 초록**이었다(그리고 `--reconcile-only`는 같은 상황에서 exit 1).
+// 이제 둘 다 같은 결과 계약을 쓴다.
 // ⚠️ 그래도 **abort하지 않는다**: 아무나 `bump-poll/<app>-*` ref 하나로 배포를 정지시킬 수 있으면 안 된다
 //    (억제 = 공격 표면). 메인 변이는 끝까지 하고, run만 맨 끝에서 빨개진다.
 const siblings: SiblingState[] = [];
-let closeAbandoned: string | null = null;
 const refsResult = enumerateSiblingRefs();
 if (!refsResult.ok) {
-  closeAbandoned = refsResult.why;
   revocationBlind(`형제 브랜치 열거 실패 — superseded 스윕이 아무도 방문하지 못했다: ${refsResult.why}`);
 } else {
   for (const sref of refsResult.refs) {
-    // 관측 실패는 **하나의 사실**이다(조회 장애 · 파싱/스키마 드리프트(**author 부재 포함** — R-34) ·
-    // 신뢰 PR 모호성): "이 형제에 무장된 PR이 있는지 모른다". 두 결과가 함께 따라온다 —
-    //   · closeAbandoned  = 이 run의 close는 전부 포기(과소 열거로 **일부만** 닫는 것보다 안 닫는 게 안전)
-    //   · revocationBlind = 종료 코드·보고(회수 대상을 가릴 수 있는 관측 실패 = 회수 실패 — V-2)
     const observed = observeBranchPr(sref.branch, sref.oid);
     if (!observed.ok) {
-      closeAbandoned = observed.why;
       revocationBlind(`${observed.why} — 이 형제의 무장 여부를 모른다`);
       continue;
     }
     const pr = observed.value.pr;
     if (pr === null) {
-      // 우리가 만질 수 있는 PR이 없다. 두 경우가 있고, **둘 다 아무것도 하지 않는다**:
-      //   · 열린 PR이 아예 없다(고아 ref) → 브랜치는 **지우지 않는다**(ref 삭제는 되돌아가지 않는다).
-      //     그 tag가 다시 후보가 되면 adopt가 접수한다.
-      //   · 열린 PR은 있는데 우리 것이 아니다(포크·사람·다른 봇·다른 base) → 접두 일치는 소유권의 증거가
-      //     아니다(`bump-poll/**` ruleset이 없으므로 그 접두는 예약돼 있지 않다).
-      const why = observed.value.openCount > 0
-        ? "열린 PR이 있으나 우리 것이 아니다(포크·비-writer·다른 base) — 건드리지 않는다"
-        : "열린 PR 없음(고아 ref — 브랜치는 지우지 않는다)";
+      // 우리가 만질 수 있는 PR이 없다(고아 ref이거나, 열린 PR이 포크·사람·다른 base) → 아무것도 하지 않는다.
+      // 접두 일치는 소유권의 증거가 아니다(`bump-poll/**` ruleset이 없으므로 그 접두는 예약돼 있지 않다).
       siblings.push({
         branch: sref.branch, tag: sref.tag, number: null, trusted: false, armed: false,
-        createdAt: null, headRefOid: null, humanTouch: null,
-        disarmed: false, closed: false, closeBlocked: why,
+        createdAt: null, headRefOid: null, humanTouch: null, disarmed: false,
       });
       continue;
     }
     siblings.push({
       branch: sref.branch, tag: sref.tag, number: pr.number, trusted: true, armed: pr.autoMerge,
       createdAt: pr.createdAt, headRefOid: pr.headRefOid, humanTouch: pr.humanTouch,
-      disarmed: false, closed: false, closeBlocked: null,
+      disarmed: false,
     });
   }
 }
 
 // ── ①-c **형제 해제 스윕** = 첫 변이(안전 방향 · 넓은 대상 · 약한 증거 · 중단 불가) ──────────────
-// R-25의 피해(낡은 인가로 승인 없이 머지)는 **이 스윕 하나로 100% 사라진다**. 그래서 close(파괴)의
-// 증거 요건이 여기 커버리지를 깎아먹지 않게 **두 축을 분리**한다:
+// R-25의 피해(낡은 인가로 승인 없이 머지)는 **이 스윕 하나로 100% 사라진다**:
 //   · 해제는 **레인을 읽지 않는다** — superseded PR은 레인과 무관하게 머지될 자격이 없다(옛 이미지 배포).
-//   · 해제는 **소유권 증명도 요구하지 않는다** — 인가 회수는 언제나 안전한 방향이다.
+//   · 해제는 **소유권 증명도, 사람 흔적도 보지 않는다** — 인가 회수는 언제나 안전한 방향이다.
 // 대상은 언제나 **인증된 PR 번호**다(브랜치 셀렉터 금지 — 동명 포크 PR 오조준).
 // ⚠️ 이 스윕은 아래 fail-closed 검사들(신뢰 PR 모호성·비신뢰 동일-레포 PR·소유권)보다 **먼저** 실행한다:
 //    중단 가능한 검사가 앞서면, 인가를 **가장 회수해야 할 상태**에서 정확히 회수하지 못한다(R-23의 순서 규칙).
@@ -1626,9 +1579,8 @@ if (!refsResult.ok) {
 //   · **중단하지 않는다**: 나머지 형제도, **이번 주기의 메인 변이(push/create/skip)도 그대로 진행**한다.
 //     한 PR의 해제 실패가 배포를 멈추면 억제가 곧 공격 표면이 되고, 다른 형제의 회수까지 굶긴다.
 //   · **그러나 조용하지도 않다**: 실패는 revocationFailures에 모여 이 run을 **비-0으로 끝낸다**(맨 아래).
-//     여기서 실패를 삼키면(그리고 close가 사람 흔적·캡·킬 스위치로 막히면) **무장된 좀비 PR이 남는데
-//     아무도 모른다** — 그리고 그건 "다음 주기가 고친다"의 전제조건(누군가 그 PR을 **방문한다**)이
-//     성립하지 않는 상태다.
+//     여기서 실패를 삼키면 **무장된 좀비 PR이 남는데 아무도 모른다** — 그리고 그건 "다음 주기가 고친다"의
+//     전제조건(누군가 그 PR을 **방문한다**)이 성립하지 않는 상태다.
 // ★ 이 스윕은 이제 **유일한 회수자가 아니다**(V-1): `--reconcile-only`도 bump 레인의 superseded 형제를
 //   회수한다(후보가 없는 noop/refuse 주기에도). 그래서 위 revokeArming의 "다음 주기가 재시도한다"는
 //   약속이 **비로소 참이 됐다** — 예전엔 그 재시도가 "플래너가 이 앱의 후보를 또 내주면"이라는 조건에
@@ -1719,7 +1671,7 @@ const contestedHead = untrustedSameRepo.length > 0;
 // 열린 PR이 전부 BEHIND가 된다 → 승인 레인(propose-pr)의 PR은 사람이 리뷰하는 내내 ~10분마다 BEHIND고,
 // 가드가 없으면 그때마다 force-push당한다. 그 결과: **승인이 stale review로 취소되고**, 인라인 리뷰 코멘트가
 // outdated로 접히고, required 체크가 처음부터 다시 돈다 — 리뷰가 사실상 불가능해진다.
-// close 스윕엔 humanTouch 가드가 있었는데 rebuild엔 없었다. 같은 가드를 건다.
+// 그래서 사람의 흔적이 있으면 rebuild(force-push)를 하지 않는다.
 //
 // ⚠️ **승인 레인을 아예 rebuild하지 않으면 되지 않나?** — 안 된다. strict 보호에서는 사람이 **BEHIND한 PR을
 //    머지할 수 없다**(머지 버튼이 잠긴다). 승인 레인의 PR을 영영 전진시키지 않으면 그 레인은 **구조적으로 막힌다**
@@ -1728,7 +1680,7 @@ const contestedHead = untrustedSameRepo.length > 0;
 //      흔적 **없음** → rebuild한다(두 레인 모두). 파괴할 리뷰 상태가 애초에 없다 — 잃는 게 0이고,
 //                     승인 레인은 사람이 머지 버튼을 누를 수 있는 상태로 유지된다.
 //      흔적 **있음** → **밀지 않는다**(두 레인 모두). 그 PR은 사람이 다루는 중이다 — "Update branch" 버튼도,
-//                     새 커밋도, close도 전부 사람의 선택지다. 우리는 보고만 한다(skip + reason).
+//                     새 커밋도, 수동 close도 전부 사람의 선택지다. 우리는 보고만 한다(skip + reason).
 //    (관측 불가도 "흔적 있음"으로 접힌다 — 모르는 상태에서 남의 리뷰를 파괴하지 않는다.)
 const STALE_STATES = new Set(["DIRTY", "BEHIND"]);
 // ⚠️ 본 질의는 mergeStateStatus를 **반드시** 담는다(scanReducer(true)의 parsePrNode requireMergeState가
@@ -1856,46 +1808,6 @@ if (contestedHead) {
   );
 }
 
-// ── ③-c superseded **close 자격**(파괴 — 증거는 전부, 하나라도 모자라면 닫지 않는다) ────────────
-// 여기서 **판정만** 한다(close 호출 자체는 맨 마지막 ③-e). 위치가 여기인 이유: 이 판정은 형제마다
-// GraphQL 커밋 조회를 한 번씩 때리는 **비싼** 단계다 — 인가 회수(①-c 형제 해제 · ③-a 현 PR 해제)를
-// 그 뒤로 미루면 낡은 인가를 들고 있는 시간이 그만큼 늘어난다. **안전 방향 변이가 먼저, 파괴 준비는 뒤.**
-// run 전체를 막는 사유가 있으면 형제별 증거 조회조차 하지 않는다(닫지 않을 것을 확인하려고 API를 두드릴 이유가 없다).
-//
-// ⚠️ 순서 근거는 **PR의 나이**다: T_old와 T 사이엔 git 순서가 없고(빌드 완료 역전·앱 레포 revert),
-//    실행기의 writer 토큰으론 앱 레포 compare도 못 한다. `createdAt`은 전순서를 갖는 유일한 관측 사실이고,
-//    "**더 나중에 만들어진 PR만 더 오래된 PR을 닫는다**"는 단조 규칙이라 두 실행기가 동시에 돌아도
-//    서로를 닫는 flip-flop이 **구조적으로 불가능**하다.
-const ourCreatedAt = trusted?.createdAt ?? null;
-function siblingIsOlder(s: SiblingState): boolean {
-  // create/adopt = 우리 PR을 **지금** 만든다 → 이미 열려 있던 형제는 전부 우리보다 오래됐다.
-  if (createsPr) return true;
-  if (ourCreatedAt === null || s.createdAt === null) return false; // 나이를 모르면 닫지 않는다
-  const ours = Date.parse(ourCreatedAt);
-  const theirs = Date.parse(s.createdAt);
-  if (Number.isNaN(ours) || Number.isNaN(theirs)) return false;
-  return theirs < ours; // **엄격** 부등호 — 동률이면 닫지 않는다(flip-flop 방지)
-}
-// run 전체를 막는 사유(형제별 증거보다 앞선다).
-const closeGate: string | null = !CLOSE_ENABLED
-  ? "killswitch(BUMP_PR_CLOSE=off) — 해제만 수행한다"
-  : lane !== "bump"
-    ? "승인 레인(propose-pr) — 사람의 판단이 그 PR의 존재 이유다(해제까지만, close는 owner 몫)"
-    : closeAbandoned !== null
-      ? `형제 열거/조회가 불완전하다(${closeAbandoned}) — 이 run의 close는 전부 포기한다`
-      : null;
-for (const s of siblings) {
-  if (s.closeBlocked !== null) continue;            // 이미 사유가 있다(고아 ref·우리 것이 아닌 PR 등)
-  if (closeGate !== null) { s.closeBlocked = closeGate; continue; }
-  if (!s.trusted) { s.closeBlocked = "신뢰 대상 아님(포크·비-writer·다른 base)"; continue; }
-  if (s.humanTouch !== null) { s.closeBlocked = `사람의 흔적: ${s.humanTouch}`; continue; }
-  if (!siblingIsOlder(s)) { s.closeBlocked = "우리 PR보다 오래됐음을 증명할 수 없다(createdAt)"; continue; }
-  // 마지막이자 가장 비싼 증거: **그 PR 자신의 tag로 재계산한** 커밋 메시지 + writer ident로 head 소유권 증명.
-  // 이게 "head가 갈아치워진 우리 PR"과 "접두를 도용한 남의 브랜치"를 동시에 막는 유일한 실질 증거다.
-  const proof = proveOurCommit(s.headRefOid!, `형제 PR #${s.number}의 head`, bumpCommitMessageFor(s.tag));
-  if (!proof.ok) { s.closeBlocked = `head 소유권 미증명 — ${proof.why}`; continue; }
-}
-
 // ── ③-b 소유권 fail-closed — 증명되지 않은 head는 **어떤 변이도** 하지 않는다 ─────────────────
 // 여기부터가 "중단 가능한 검사"다. 인가 회수(③-a)는 이미 끝났으므로 안전하게 죽을 수 있다.
 if (!headProof.ok) {
@@ -1991,47 +1903,6 @@ if (shouldArm) {
   mutate("bash", [script, String(prNumber)], "auto-merge-or-fail");
 }
 
-// ── ③-e superseded **close 스윕** = **맨 마지막 변이**(파괴는 언제나 뒤) ──────────────────────
-// close는 제거가 아니라 **교체**다 — **후계자가 확정된 뒤에만** 닫는다(prNumber !== null). 우리 판정이
-// fail-closed로 죽었거나 `gh pr create`가 실패했다면 여기 도달하지 못한다 → close 0(열린 제안이 0이 되는
-// 상태를 만들지 않는다).
-// ⚠️ **브랜치는 지우지 않는다**: `--delete-branch`도, `git push --delete`도 없다. close는 reopen으로
-//    되돌아가지만 ref 삭제는 되돌아가지 않는다. 고아 ref는 남겨 둔다(그 tag가 다시 후보가 되면 adopt가 접수).
-// ⚠️ **캡**: 후보가 CLOSE_MAX를 넘으면 **한 건도 닫지 않는다** — 접두 파싱 버그 한 글자의 반경을 상수로 묶는다.
-const closable = siblings.filter((s) => s.closeBlocked === null && s.number !== null);
-if (closable.length > 0 && prNumber === null) {
-  warn(`superseded 형제 ${closable.length}건을 닫지 않는다 — 우리 PR이 열려 있지 않다(후계자 없는 제거 금지)`);
-  for (const s of closable) s.closeBlocked = "후계자 없음(우리 PR 번호를 확정하지 못했다)";
-} else if (closable.length > CLOSE_MAX) {
-  warn(
-    `superseded close 후보가 ${closable.length}건으로 캡(${CLOSE_MAX})을 넘었다 — **한 건도 닫지 않는다**. `
-    + `대상: ${closable.map((s) => `#${s.number}(${s.branch})`).join(", ")}. 파싱 버그를 의심하고 수동 확인할 것`,
-  );
-  for (const s of closable) s.closeBlocked = `cap 초과(${closable.length} > ${CLOSE_MAX}) — 수동 확인 필요`;
-} else {
-  for (const s of closable) {
-    // ⚠️ 코멘트는 **실제로 작동하는 탈출구**를 말해야 한다(H-3). 예전 문구는 reopen만 안내했는데, 그때는
-    //    reopen 이력을 관측하지 않아 **다음 주기(≤10분)가 그 PR을 다시 닫았다** — 사람을 함정으로 안내한 셈이다.
-    //    지금은 reopen도 관측하지만(humanTouchOf), **영속적이고 명시적인** 탈출구는 hold 라벨이다:
-    //    라벨은 브랜치가 다시 후보가 되든 실행기가 바뀌든 그대로 남는다. 그래서 라벨을 **먼저** 안내한다.
-    const holdHint = HOLD_LABELS.map((l) => `\`${l}\``).join(" 또는 ");
-    const r = runSoft("gh", [
-      "pr", "close", String(s.number),
-      "--comment",
-      `superseded by #${prNumber} — bump-poll이 이 앱의 후보를 \`${TAG}\`로 갱신했다. `
-      + "브랜치는 지우지 않았다.\n\n"
-      + `이 PR을 살려 두려면 ${holdHint} 라벨을 붙여라 — 그러면 다음 주기부터 이 스윕이 건드리지 않는다. `
-      + "(reopen만 해도 다음 주기는 그 이력을 보고 다시 닫지 않지만, 라벨이 더 명시적이고 오래 간다.)",
-    ]);
-    if (r.failure !== null) {
-      warn(`superseded 형제 PR #${s.number} close 실패 ${r.failure} — 다음 주기가 재시도한다`);
-      s.closeBlocked = `close 실패: ${r.failure}`;
-      continue;
-    }
-    s.closed = true;
-  }
-}
-
 console.log(JSON.stringify({
   action,
   lane, // 배포 승인 레인(입력) — 판정(action)과 다른 축이다
@@ -2064,7 +1935,7 @@ console.log(JSON.stringify({
       : null,
     remoteBranch,
   },
-  // R-25: `bump-poll/<app>-*` 네임스페이스의 형제들 — 해제(무조건·안전 방향)와 close(증거 완비 시에만).
+  // R-25: `bump-poll/<app>-*` 네임스페이스의 형제들 — 무장 해제(무조건·안전 방향)로 낡은 인가만 거둔다.
   superseded: siblings,
   // R-32: **회수하지 못한 무장**(두 모드가 같은 키로 보고한다). 비어 있지 않으면 아래에서 비-0 종료다.
   revocationFailures,
@@ -2076,11 +1947,9 @@ console.log(JSON.stringify({
 }, null, 2));
 
 // ── ③-f 회수 실패 = **보안 사실** → 처리는 다 끝내고, run은 빨갛게 끝낸다(R-32) ──────────────────
-// 여기까지 왔다는 건 이번 주기의 메인 변이(push/create/skip + 무장/해제 + close)가 **전부 제 일을 했다**는
+// 여기까지 왔다는 건 이번 주기의 메인 변이(push/create/skip + 무장/해제)가 **전부 제 일을 했다**는
 // 뜻이다 — 회수 실패가 그것들을 굶기지 않았다(억제 = 공격 표면). 그러나 낡은 머지 인가를 **거두지 못한 채**
 // 성공으로 끝나면, 무장된 좀비 PR이 남았는데 아무도 모르는 상태가 된다(telegram 무발화).
-// ⚠️ 이 판정은 close의 성공 여부를 **보지 않는다**: 위생(close)의 성공에 보안 사실(회수)의 보고를 매다는 것이
-//    바로 R-32의 결함이었다. 회수를 못 했으면 close가 어떻게 됐든 이 run은 실패다.
 if (revocationFailures.length > 0) {
   console.error(
     `ensure-bump-pr: auto-merge 회수 ${revocationFailures.length}건 실패 — 낡은 머지 인가가 살아 있다:\n`
