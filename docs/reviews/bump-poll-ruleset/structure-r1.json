@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "Do not ship yet: the Terraform resource matches the intended structure, but its load-bearing CI regression gate does not actually preserve that structure.",
+  "planFile": "docs/reviews/bump-poll-ruleset/spec.md",
+  "planInDiff": null,
+  "reviewedFileCount": 9,
+  "target": "branch diff against main",
+  "reviewedSha": "8b71257c214938efcbd2d0eea4cc64921a078788",
+  "reviewedTree": "ef08f8bba649e20e16e1538feccaa8c2baf61d5d",
+  "headMovedDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "The regression gate stays green when the protected boundary is disabled or widened",
+      "body": "Every assertion searches for independent tokens across the entire file rather than validating the named resource. The tests never require `target = \"branch\"`, the exact include/exclude lists, or exactly one bypass actor. A mutation changing the target to `tag` and adding `refs/heads/main` to the include list still passed every current assertion; an additional Integration bypass can likewise coexist with the expected strings. Later increments could therefore retain a green required gate while the namespace protection is ineffective or grants another actor access.",
+      "file": "tests/gates/test_bump_poll_ruleset.bats",
+      "line_start": 14,
+      "line_end": 71,
+      "confidence": 0.99,
+      "recommendation": "Scope validation to `github_repository_ruleset.bump_poll_writer_only` and assert its exact repository, target, include/exclude lists, creation/update rules, enforcement, and exactly one bypass block wired through `tonumber(data.github_app.writer.id)`. Add mutation witnesses proving that target changes, extra patterns, commented-out settings, and additional bypass actors fail.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Replace the file-wide token checks with resource-scoped structural validation and adversarial mutation tests.",
+    "Rerun the targeted Bats suite and `terraform validate` in an environment where the provider can start."
+  ]
+}

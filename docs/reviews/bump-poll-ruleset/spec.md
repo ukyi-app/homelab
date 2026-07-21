@@ -144,15 +144,21 @@ owner가 원하는 것: **강제 가능한 서버측 불변식**으로 방어를
 - **Seam A — `terraform validate` (기존 seam 재사용, CI gate)**: 신규 리소스·데이터 소스가 유효한 HCL이고 github
   루트가 계속 검증됨을 보장. 기존 `infra/_tests/test_tf_validate.bats`("github: validated")가 이미 이 seam을
   소유한다 — 별도 테스트 불요, 리소스가 통과하기만 하면 된다.
-- **Seam B — 구조 회귀 가드 bats (신규 seam 1개, CI gate)**: `tests/gates/test_branch_protection.bats`를 본보기로,
-  ruleset .tf 파일에 대한 grep 단언으로 **불변식이 약화되지 못하게** 잠근다. 단언: (1) `refs/heads/bump-poll/**`
-  타깃, (2) `creation`·`update` 둘 다 true, (3) bypass가 `github_app`(writer) data source로 배선되고
-  actor_type=`Integration`, (4) enforcement=`active`(disabled/evaluate로 강등되지 않음), (5) bypass에 광범위
-  역할(RepositoryRole/OrganizationAdmin)이 추가되지 않음, (6) 패턴이 넓어지지 않음(`**`가 전 브랜치를 삼키는
-  형태로 변형되지 않음). 이 테스트는 라이브 API를 호출하지 않고 파일 구조만 본다 — CI-safe. `bats` `@test` 이름은
-  영어(디렉토리 단위 실행 시 한글 인코딩 버그 회피). deletion은 이번 increment에 없으므로 단언하지 않는다(후속
-  increment가 deletion+정리 경로를 추가할 때 그 테스트를 함께 넣는다).
-- **Seam C — 적대 라이브 검증 (owner-local, CI seam 아님)**: 실제 강제 동작은 아키텍처상 CI에서 관측 불가하다
+- **Seam B — 정규형(canonical) freeze 가드 bats (신규 seam 1개, CI gate)**: ⚠️ **정직한 한계**: 정적 텍스트 가드는
+  terraform HCL의 *resolved 의미*를 검증할 수 없다(structure 게이트 S-1 + 8각도 red-team으로 입증). 개별 grep 토큰
+  단언은 decoy 블록(locals/변수/data), 간접화(var/local/함수), meta-argument(`count=0`/`for_each={}` → 리소스 0개
+  인스턴스=룰셋 통째 제거), 인라인 `/* */` 주석 카운트 회피, cross-file 값 배치로 **전부 우회되며 terraform validate도
+  통과한다**. 그래서 이 가드는 블랙리스트(공격 열거)가 아니라 **화이트리스트(정규형 freeze)**다: 보안 핵심 3블록
+  (`data github_app.writer` · `resource ruleset` · `variable writer_app_slug`)을 추출→주석 제거→공백 정규화한 뒤
+  **핀된 canonical과 정확히 일치**해야 한다. 세 블록 밖 decoy는 무관하고, 블록 안 어떤 간접화·meta-arg·추가 actor·값
+  변경도 canonical을 바꿔 잡힌다. 즉 **변경 감지기** — 보안 블록에 손대면 CI가 red가 되어 owner 재검토·재검증을
+  강제한다. red-team이 찾은 각 우회 클래스(간접화·case-evasion·meta-arg·주석 2차 bypass·identity redirect·cross-file
+  slug redirect·decoy-locals include/exclude)를 **뮤테이션 증인**으로 못박고, 무해한 주석 변경은 canonical 불변(대조군)
+  임을 확인한다. 라이브 API 미호출 — CI-safe. `@test` 이름 영어(한글 인코딩 버그 회피). deletion은 이번 increment
+  canonical에 없다(spec R-2 — 후속이 정리경로와 함께 추가).
+- **Seam C — 적대 라이브 검증 (owner-local, CI seam 아님) — resolved 의미의 권위 검증**: Seam B는 커밋된 *소스*가
+  리뷰된 정규형인지만 본다(변경 감지기). *실제 강제 동작*(resolved plan·apply-time tfvars·provider/owner)은 아키텍처상
+  CI에서 관측 불가하다
   (신뢰 앵커 — CI에 admin PAT를 두지 않는다). 대신 owner-local 절차 + 캡처된 증거로 분리한다. 검증 항목:
   ①non-writer(owner PAT)로 `bump-poll/probe-*` push→거부(creation) ②writer App 토큰으로 동일 push→성공(bypass)
   ③기존 bump-poll 브랜치에 non-writer force-push→거부(update) ④apply가 성공하고 룰셋에 writer App이 bypass로
