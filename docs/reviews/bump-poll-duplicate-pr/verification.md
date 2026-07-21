@@ -13,9 +13,9 @@
 ```
 $ bats tools/tests/test_ensure-bump-pr.bats tests/gates/test_bump-poll-callsite.bats --filter-tags regression
 ...
-ok 122 the effective-ownership witness has teeth (a later git config override and a --amend both flip it RED)
+ok 118 …
 ```
-122/122 ok. baseline(`6b2513d`)에서는 전량 RED(증상토큰 존재)임을 재구성 시 확인했다.
+118/118 ok(release r1/R-48로 close 전용 증인 4건 제거). baseline(`6b2513d`)에서는 전량 RED(증상토큰 존재)임을 재구성 시 확인했다.
 
 ## 2. characterization 파티션 — 양 끝단 GREEN (나머지 보존)
 
@@ -52,7 +52,7 @@ $ make verify (skeleton·ledger·sops) → rc=0
 
 공유 head force-push/회수 안전을 라운드마다 증인화했다(요지 — 전문은 Review Decision Log):
 W1~W3(중복 방지 core)·W20~W28(소유권 인터록)·W47~W58(reconcile 완결·실패 계약)·W70~W71(fork-불변
-질의)·W74~W80(ref 교차검증·3자 OID 합의)·W81~W84(배타적 head 소유권·TOCTOU 재확인·H-4 보존).
+질의)·W74~W80(ref 교차검증·3자 OID 합의)·W81~W84(배타적 head 소유권·TOCTOU 재확인·H-4 보존). release r1/R-48로 형제 **close** 전용 증인은 제거(자동 close를 픽스에서 들어냄 — F-2).
 
 ## 잔여(환원 불가능) — F-0 / F-1
 
