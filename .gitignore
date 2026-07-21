@@ -28,6 +28,9 @@ override.tf.json
 # --- 외부(비신뢰) 앱 레포 sparse-checkout 경로 — create-app/update-secrets가 여기에 푼다 ---
 .apprepo/
 
+# --- 컨덕터 임시 상태(feature/bugfix 파이프라인 conductor·로컬 티켓) — 커밋 아티팩트는 docs/reviews/ ---
+.scratch/
+
 # --- Kubeconfig / cluster creds ---
 kubeconfig
 *.kubeconfig
