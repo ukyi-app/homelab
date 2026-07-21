@@ -19,27 +19,102 @@ permissions:
 
 jobs:
   # Phase 0(App secrets 등록) 전에 이 브랜치가 머지되면 스케줄이 매 10분 실패+Telegram 스팸 →
-  # 시크릿 부재 시 poll을 skip해 run을 깨끗한 성공으로 만든다(설정되면 자동 활성).
+  # 시크릿 부재 시 해당 job을 skip해 run을 깨끗한 성공으로 만든다(설정되면 자동 활성).
+  #
+  # ★★ 준비상태는 **하나가 아니라 둘**이다(structure r9 R-31) ────────────────────────────────────
+  # 예전엔 `configured = READER && WRITER` **한 개**였고 reconcile·poll이 **둘 다** 거기 걸려 있었다.
+  # 그러면 reader App ID가 없거나 **회전 중**이기만 해도 GitHub이 회수(reconcile) job을 **깨끗하게 skip**한다 —
+  # 그 job은 writer 자격만 쓰는데도. 즉 R-27이 떼어내려던 바로 그 **reader/planning 열화 구간**에서
+  # 무장된 PR이 **낡은 머지 인가를 그대로 유지**한다(회수는 가용성이 아니라 **보안 속성**이다).
+  # → 두 자격을 **서로 독립인 두 출력**으로 쪼갠다. 무엇이 무엇을 막는지가 여기서 끝난다:
+  #     writer → **reconcile의 유일한 전제**(회수는 writer 자격만 쓴다) + poll의 전제(브랜치 push·PR 생성)
+  #     reader → **poll만의 추가 전제**(앱 레포 main/compare 조회 = 후보 계획)
+  #   reader가 없어도 **reconcile은 돈다**. reader가 없으면 **poll만** skip된다.
+  #   (tests/gates/test_bump-poll-callsite.bats가 두 job의 `if`를 **실제로 평가**해 이 독립성을 증명한다.)
   preflight:
     runs-on: ubuntu-24.04-arm
     outputs:
-      configured: ${{ steps.check.outputs.configured }}
+      writer: ${{ steps.check.outputs.writer }} # 회수(reconcile) 게이트 — reader와 무관하다
+      reader: ${{ steps.check.outputs.reader }} # 폴링(poll)의 추가 게이트 — 회수를 막지 않는다
     steps:
       - id: check
         env:
           READER: ${{ secrets.HOMELAB_READER_APP_ID }}
           WRITER: ${{ secrets.HOMELAB_WRITER_APP_ID }}
         run: |
-          if [ -n "$READER" ] && [ -n "$WRITER" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
+          if [ -n "$WRITER" ]; then
+            echo "writer=true" >> "$GITHUB_OUTPUT"
           else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Phase 0 미완(HOMELAB_*_APP_ID 미설정) — bump-poll skip"
+            echo "writer=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Phase 0 미완(HOMELAB_WRITER_APP_ID 미설정) — 회수·bump 모두 skip"
+          fi
+          if [ -n "$READER" ]; then
+            echo "reader=true" >> "$GITHUB_OUTPUT"
+          else
+            # reader만 없는 상태(Phase 0 미완·키 회전 중)에서도 **회수는 돈다** — 그게 R-31의 요점이다.
+            echo "reader=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::HOMELAB_READER_APP_ID 미설정 — bump 폴링만 skip한다(인가 회수는 그대로 돈다)"
           fi
 
-  poll:
+  # ── 인가 회수(reconcile) — **독립 job**이다(structure r8 R-27) ────────────────────────────────
+  # 왜 job인가(스텝이 아니라): 회수는 **보안 속성**이라 "후보 계획(planning)"의 **가용성에도 완전성에도**
+  # 의존해선 안 된다. 예전엔 poll job의 한 스텝이었고 대상 목록을 `/tmp/plan.json`(reader 토큰 + GHCR
+  # 플래너의 출력)에서 뽑았다 → **reader 토큰 스텝이 실패하거나, 플래너가 죽거나, 어떤 앱이 플래너 출력에서
+  # 빠지기만 해도** 그 앱의 회수는 **아예 시도조차 되지 않았다**(낡은 무장 생존). 의존을 한 칸 옮겼을 뿐
+  # (`.action` 필터 → plan.json 존재)이지 끊은 게 아니었다.
+  # → 이 job은 **writer 토큰만** 쓰고, reader·docker·플래너 스텝을 **하나도 갖지 않는다**. 대상은 실행기가
+  #   `bump-poll/*` **원격 ref**에서 직접 열거한다(app은 브랜치명에서 유도 — 플래너는 입력이 아니다).
+  # ⚠️ 양방향 비-기아: 이 job이 실패해도 poll은 돈다(poll의 `if: !cancelled()`), poll이 실패해도 이 job은
+  #    이미 돌았다. 실패는 그대로 run을 빨갛게 만든다(telegram 발화).
+  # ⚠️ poll이 이 job을 `needs`로 **뒤따르는** 이유는 순서(직렬화)뿐이다 — 두 job이 동시에 같은 PR을
+  #    해제하면 한쪽이 "이미 해제됨"으로 실패해 거짓 red가 난다. 성공을 요구하지는 않는다.
+  # ⚠️ 게이트는 **writer 하나뿐**이다(R-31) — reader 준비상태를 여기 걸면, reader가 비었거나 회전 중인
+  #    주기에 GitHub이 이 job을 skip하고 낡은 무장이 살아남는다. 이 job은 reader를 **쓰지도 않는다**.
+  reconcile:
     needs: preflight
-    if: needs.preflight.outputs.configured == 'true'
+    if: needs.preflight.outputs.writer == 'true'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      # writer App: PR 조회 + auto-merge 해제 (이 job이 쓰는 **유일한** 자격 — reader는 여기 없다)
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: writer
+        with:
+          app-id: ${{ secrets.HOMELAB_WRITER_APP_ID }}
+          private-key: ${{ secrets.HOMELAB_WRITER_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: main
+          token: ${{ steps.writer.outputs.token }}
+      - uses: ./.github/actions/setup-bun
+      - name: reconcile (낡은 auto-merge 인가 회수 — 대상은 bump-poll/* 네임스페이스, 플래너 무관)
+        env:
+          GH_TOKEN: ${{ steps.writer.outputs.token }} # writer: PR 조회 + auto-merge 해제
+        run: |
+          # 대상 목록은 **넘기지 않는다**(--app 없음). 넘기는 순간 회수의 완전성이 호출부의 목록에 의존하고,
+          # 그 목록이 곧 플래너 출력이면 R-27이 그대로 재발한다. 실행기가 `git ls-remote`로 네임스페이스를
+          # 직접 열거하고, 레인은 autoDeploy SSOT(.bindings.json / .image-pin.json)에서 직접 읽는다.
+          # 항목별 격리·실패 수집·비-0 종료는 전부 실행기 안에 있다(한 앱의 실패가 나머지를 굶기지 않는다).
+          bun tools/ensure-bump-pr.ts --reconcile-only
+      - name: telegram notify (실패 시)
+        if: failure()
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: failure
+          source: 변이
+          title: 이미지 폴링 인가 회수
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+  poll:
+    # ⚠️ `!cancelled()` — reconcile이 **실패해도** bump 루프는 돈다(회수 실패가 배포를 정지시키면
+    #    억제가 곧 공격 표면이 된다). needs는 **순서**를 위한 것이지 성공 조건이 아니다.
+    # ⚠️ 게이트는 **writer + reader 둘 다**다(R-31): 이 job만이 플래너(앱 레포 조회 = reader)를 돌린다.
+    #    reader가 없으면 **이 job만** skip된다 — 위 reconcile은 그것과 무관하게 계속 돈다.
+    needs: [preflight, reconcile]
+    if: ${{ !cancelled() && needs.preflight.outputs.writer == 'true' && needs.preflight.outputs.reader == 'true' }}
     runs-on: ubuntu-24.04-arm
     steps:
       # reader App: 앱 레포 main 커밋/compare 조회 (Contents:read, 앱 레포에만 설치)
@@ -74,56 +149,104 @@ jobs:
         run: |
           bun tools/poll-ghcr.ts --root . > /tmp/plan.json
           jq -r '.[] | "\(.app): \(.action) \(.reason // "")"' /tmp/plan.json
-      - name: bump → PR (autoDeploy만 auto-merge; 승인 앱은 사람 머지 = 승인)
+      # 이 스텝은 **로컬 브랜치·커밋만 준비**한다. 원격 변이(브랜치 push·PR 생성·auto-merge 무장)는
+      # 전부 tools/ensure-bump-pr.ts(멱등 실행기 — 조회 → 결정 → 변이)가 한다:
+      # 워크플로가 스스로 push/create하면 "열린 PR 확인"이 무의미해져 매 주기 중복 PR이 열린다
+      # (실측: 같은 커밋에 11분 사이 PR 3개 — 좀비 2개가 DIRTY + auto-merge 무장으로 잔류).
+      # 호출부 계약은 tests/gates/test_bump-poll-callsite.bats가 강제한다.
+      - name: bump → PR (멱등 실행기 경유 — 레인은 플래너의 .action 그대로)
         env:
-          GH_TOKEN: ${{ steps.writer.outputs.token }}
-          RUN_ID: ${{ github.run_id }}
+          GH_TOKEN: ${{ steps.writer.outputs.token }} # writer: PR 조회·생성·무장 + 브랜치 push
         run: |
           git config user.name "ukyi-homelab-writer[bot]"
           git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
-          count=$(jq 'map(select(.action == "bump" or .action == "propose-pr")) | length' /tmp/plan.json)
-          [ "$count" -gt 0 ] || { echo "변경 없음 — no-op"; exit 0; }
-          jq -c '.[] | select(.action == "bump" or .action == "propose-pr")' /tmp/plan.json |
-          while read -r item; do
+          # ⚠️ 인가 회수(reconcile)의 실패는 여기 합류하지 않는다 — 그건 **별도 job**이고 스스로 비-0으로
+          #    끝나 run을 빨갛게 만든다(R-27). 두 경로는 서로를 굶기지 않는다: 회수가 죽어도 bump는 돌고,
+          #    bump가 죽어도 회수는 이미 돌았다.
+          failed=""
+          jq -c '.[] | select(.action == "bump" or .action == "propose-pr")' /tmp/plan.json > /tmp/bump-items.jsonl
+          # ⚠️⚠️ **항목마다 격리한다**(서브셸). 예전엔 `jq … | while read`를 `bash -e` 아래서 돌려, 한 앱이
+          #   fail-closed로 죽으면(예: 증명되지 않은 head — 사람이 개입할 때까지 **영구히** 그 상태다)
+          #   파이프라인이 통째로 죽어 **그 뒤의 모든 앱이 매 주기 실행기에 도달조차 못 했다**.
+          #   pr-sweeper가 이 네임스페이스에서 빠진 지금, 이 루프의 생존성은 가용성이 아니라 **인가 회수의
+          #   전제조건**이다(위 reconcile 스텝과 같은 이유 — 낡은 무장은 누군가 방문해야만 회수된다).
+          #   실패는 모아 두고 **맨 끝에서** 비-0으로 끝낸다(run은 빨갛게 남고 telegram 알림이 발화한다).
+          # ⚠️⚠️ **errexit 관용구**(bash 함정 — 실측: bash 3.2·5.3 동일): `if ! ( set -e; … )`·`( … ) || rc=$?`
+          #   처럼 서브셸을 **조건/`||` 문맥**에 두면 그 안에서 `set -e`를 다시 켜도 **중간 명령 실패가 서브셸을
+          #   중단시키지 않는다**(마지막 명령만 exit status를 정한다). 그러면 bump-tag·git commit·정리(checkout)
+          #   같은 **중간 실패**가 삼켜져 그 항목이 실패로 집계되지 않고, 심지어 실행기가 반쯤 만든 상태 위에서 돈다.
+          #   R-38의 "정리 실패 → 집계 → run 빨강"이 그래서 깨진다. → 서브셸을 **문장으로** 돌려 안쪽 `set -e`가
+          #   살아 있게 하고, 바깥 errexit만 잠시 끄고(`set +e`) 종료 코드를 값으로 받은 뒤 다시 켠다. 이러면
+          #   어떤 중간 실패든 그 항목만 fail-closed로 집계되고 나머지 앱은 계속 처리된다(다른 항목을 굶기지 않는다).
+          while IFS= read -r item; do
+            [ -n "$item" ] || continue
             app=$(echo "$item" | jq -r .app)
-            tag=$(echo "$item" | jq -r .candidate.tag)
-            digest=$(echo "$item" | jq -r .candidate.digest)
-            action=$(echo "$item" | jq -r .action)
-            pin=$(echo "$item" | jq -r '.pin // empty')          # 베스포크 레인만 세팅(apps는 empty)
-            writePath=$(echo "$item" | jq -r .writePath)          # git add 대상(두 레인 통일)
             # 플래너 출력도 한 번 더 정제(심층 방어) — bump-tag.ts가 재검증한다
             case "$app" in ''|*[!a-z0-9-]*) echo "skip suspicious app: '$app'"; continue ;; esac
-            git checkout main
-            branch="bump-poll/${app}-${RUN_ID}"
-            git checkout -b "$branch"
-            # races-4 TOCTOU 가드: 플래너가 증명한 from-tag는 plan JSON의 `.current.tag`(plan 시점 스냅샷)다.
-            # ⚠️ codex pass1 F2: checkout main 후 values.yaml에서 다시 읽으면 main이 움직여도 그 값이 같이
-            # 움직여 "자기 자신과 비교"가 돼 가드가 no-op이 된다 → 반드시 플래너 스냅샷($item.current.tag)을 쓴다.
-            # checkout 직후의 실측 image.tag가 이 expect와 다르면(=plan 이후 main 이동) bump-tag가 fail-closed로
-            # 중단(stale 증명 push 방지) — 다음 주기가 새 스냅샷으로 다시 plan한다.
-            expect=$(echo "$item" | jq -r '.current.tag')
-            if [ -n "$pin" ]; then
-              bun tools/bump-tag.ts "$app" "$tag" --digest "$digest" --expect-current "$expect" --pin "$pin"
-            else
-              bun tools/bump-tag.ts "$app" "$tag" --digest "$digest" --expect-current "$expect"
+            set +e   # 바깥 errexit만 잠시 끈다(항목 실패가 루프 전체를 죽이지 않도록) — 안쪽 set -e는 살아 있다
+            (
+              set -e
+              tag=$(echo "$item" | jq -r .candidate.tag)
+              digest=$(echo "$item" | jq -r .candidate.digest)
+              # 레인(배포 승인 모델)의 출처는 플래너뿐이다 — .bindings.json의 autoDeploy가 SSOT다.
+              # 이 값은 **읽은 그대로** 실행기에 넘어간다(재대입·재해석·하드코딩 전부 금지 — 승인 게이트 우회).
+              action=$(echo "$item" | jq -r .action)
+              pin=$(echo "$item" | jq -r '.pin // empty')          # 베스포크 레인만 세팅(apps는 empty)
+              writePath=$(echo "$item" | jq -r .writePath)          # git add 대상(두 레인 통일)
+              # ⚠️⚠️ **항목 트랜잭션 격리**(R-38): 서브셸은 종료 상태만 격리하지 앞 항목이 남긴
+              #   worktree/index는 격리하지 못한다. bump-tag는 앱 values + **항상 add되는
+              #   digest-exporter.yaml**을 쓰고, 그 뒤 명령이 실패하면(commit 전 fail-closed 등) 그 부분
+              #   상태가 공유 worktree에 남는다 → 다음 항목이 평범한 `git checkout main`을 하면 **staged
+              #   digest-exporter가 checkout을 거부하게 해 이후 앱을 굶기거나**(H-2 회귀), 그 변경을
+              #   **물려받아** 앞 앱의 digest-exporter 수정이 다음 앱 커밋에 섞인다. 그래서 각 항목은
+              #   **강제 정리로 깨끗한 main에서 시작**한다: `-f`가 tracked/staged 잔여를 전부 되돌린다
+              #   (digest-exporter는 tracked라 `-f`로 unstage+복원된다 — untracked는 bump-tag가 만들지 않는다).
+              #   정리 자체가 실패하면 set -e가 이 서브셸을 죽여 **이 항목만** fail-closed로 건너뛰고
+              #   나머지 앱은 계속 처리된다(실패는 아래에서 집계돼 run을 빨갛게 만든다 — 다른 항목을 굶기지 않는다).
+              git checkout -f main
+              # 결정적 브랜치 — 같은 bump(app+tag)는 언제나 같은 브랜치로 수렴한다(RUN_ID 제거).
+              # run마다 브랜치가 달라지면 "이 bump의 열린 PR"을 조회할 대상 자체가 사라진다(중복 PR의 뿌리).
+              branch="bump-poll/${app}-${tag}"
+              git checkout -b "$branch"
+              # races-4 TOCTOU 가드: 플래너가 증명한 from-tag는 plan JSON의 `.current.tag`(plan 시점 스냅샷)다.
+              # ⚠️ codex pass1 F2: checkout main 후 values.yaml에서 다시 읽으면 main이 움직여도 그 값이 같이
+              # 움직여 "자기 자신과 비교"가 돼 가드가 no-op이 된다 → 반드시 플래너 스냅샷($item.current.tag)을 쓴다.
+              # checkout 직후의 실측 image.tag가 이 expect와 다르면(=plan 이후 main 이동) bump-tag가 fail-closed로
+              # 중단(stale 증명 push 방지) — 다음 주기가 새 스냅샷으로 다시 plan한다.
+              expect=$(echo "$item" | jq -r '.current.tag')
+              if [ -n "$pin" ]; then
+                bun tools/bump-tag.ts "$app" "$tag" --digest "$digest" --expect-current "$expect" --pin "$pin"
+              else
+                bun tools/bump-tag.ts "$app" "$tag" --digest "$digest" --expect-current "$expect"
+              fi
+              # digest-exporter APPS 신선도(codex pass2 P2-2): sha-* 태그는 불변이라 배포 핀만 갱신하면
+              # ImageDigestDrift(B2)가 stale 참조로 거짓 드리프트를 낸다 — bump-tag.ts가 같은 실행에서
+              # APPS의 동일 앱 항목 태그를 동기 갱신(항목 부재=no-op), 같은 커밋에 포함한다.
+              git add "$writePath" platform/victoria-stack/prod/digest-exporter.yaml
+              git commit -m "chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)"
+              # 레인별로 갈리는 건 **제목/본문뿐**이다 — 레인 자체는 양쪽 모두 플래너 값 그대로 넘어간다.
+              if [ "$action" = "bump" ]; then
+                title="chore: ${app} 이미지 갱신 (자동)"
+                body="GHCR 폴링 bump — main reachable + descendant + digest 핀 검증 통과. gate 통과 시 auto-merge."
+              else
+                title="chore: ${app} 이미지 갱신 (승인 대기)"
+                body="autoDeploy:false — **머지 = 배포 승인**. GHCR 폴링이 검증한 후보(digest 핀)."
+              fi
+              # 실행기: 열린 PR·원격 브랜치를 관측한 뒤에만 변이한다(create/adopt/skip/rebuild + 무장 수렴).
+              bun tools/ensure-bump-pr.ts --app "$app" --tag "$tag" --action "$action" \
+                --title "$title" --body "$body"
+            )
+            rc=$?          # 서브셸의 종료 코드 — 안쪽 set -e가 **어떤 중간 실패든**(정리·bump-tag·commit·실행기) 여기로 전달한다
+            set -e         # 바깥 errexit 복원
+            if [ "$rc" -ne 0 ]; then
+              # 이 앱은 이 주기에 아무것도(또는 일부만) 변이하고 fail-closed됐다 — "이 앱을 못 건드렸다"는
+              # 뜻이지 "run을 죽인다"는 뜻이 아니다. 나머지 앱은 계속 처리하고, 실패는 아래에서 집계한다.
+              echo "::warning::${app}: bump 항목이 실패했다(fail-closed, exit $rc) — 다른 앱 처리는 계속한다"
+              failed="$failed $app"
             fi
-            # digest-exporter APPS 신선도(codex pass2 P2-2): sha-* 태그는 불변이라 배포 핀만 갱신하면
-            # ImageDigestDrift(B2)가 stale 참조로 거짓 드리프트를 낸다 — bump-tag.ts가 같은 실행에서
-            # APPS의 동일 앱 항목 태그를 동기 갱신(항목 부재=no-op), 같은 커밋에 포함한다.
-            git add "$writePath" platform/victoria-stack/prod/digest-exporter.yaml
-            git commit -m "chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)"
-            git push -u origin "$branch"
-            if [ "$action" = "bump" ]; then
-              gh pr create --base main --head "$branch" \
-                --title "chore: ${app} 이미지 갱신 (자동)" \
-                --body "GHCR 폴링 bump — main reachable + descendant + digest 핀 검증 통과. gate 통과 시 auto-merge."
-              bash scripts/auto-merge-or-fail.sh "$branch"
-            else
-              gh pr create --base main --head "$branch" \
-                --title "chore: ${app} 이미지 갱신 (승인 대기)" \
-                --body "autoDeploy:false — **머지 = 배포 승인**. GHCR 폴링이 검증한 후보(digest 핀)."
-            fi
-          done
+          done < /tmp/bump-items.jsonl
+          [ -z "$failed" ] || { echo "::error::이번 주기에 실패한 앱:$failed"; exit 1; }
+          echo "bump 루프 완료"
       - name: telegram notify (실패 시)
         if: failure()
         uses: ./.github/actions/telegram-notify
