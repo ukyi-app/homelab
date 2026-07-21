@@ -1688,16 +1688,13 @@ if (trusted !== null) {
 //    그래서 조회를 base로 필터하지 않고(위 PR_QUERY), 여기서 head 전체의 동일-레포 PR을 본다.
 //    (다른 base의 writer PR을 "우리 것"으로 오인하지 않는 건 isTrusted의 base 검사가 맡는다 — 식별과
 //     소유권은 다른 질문이다: "우리 PR인가?"는 (head, base), "이 브랜치를 밀어도 되나?"는 head다.)
+// ★ 배타적 head 소유권(R-45) — 비신뢰 동일-레포 PR이 **head를 점유**하면 그 검증은 **아래(③-a 뒤)**에서
+//   한다. 여기서 `trusted === null`일 때만 죽이면, **신뢰 main PR + 비신뢰 다른-base PR이 공존**하는 조합에서
+//   신뢰 PR이 선택돼 DIRTY/BEHIND rebuild가 그 **공유 ref를 force-push**한다 → 비신뢰 PR의 head(리뷰·사람
+//   상태)를 파괴한다(base-무관 소유권 불변식과 모순). 그래서 가드를 판정·trusted 유무에서 **분리**해,
+//   force-push/create/arm 직전(안전한 회수 ①-c·③-a 뒤)에 **head 점유 여부만으로** 발동시킨다.
 const untrustedSameRepo = mainScan.untrustedSameRepo;
-if (trusted === null && untrustedSameRepo.length > 0) {
-  const who = untrustedSameRepo
-    .map((p) => `#${p.number}(${p.author?.login ?? "삭제된 계정"} → ${p.baseRefName})`)
-    .join(", ");
-  execError(
-    `신뢰할 수 없는 동일-레포 PR이 이 브랜치에 열려 있다: ${who} — 브랜치 '${branch}'는 그 PR의 것이다. `
-    + "force-push(adopt)로 덮어쓰면 남의 작업을 파괴하고, PR을 새로 열면 중복 제안이 된다",
-  );
-}
+const contestedHead = untrustedSameRepo.length > 0;
 
 // ── ② 결정 — 관측 사실만으로 정한다(부작용 0) ──────────────────────────────────────────────
 // 축 1(판정): 신뢰 PR의 **존재**가 최우선이다. 신뢰 PR이 있으면 원격 브랜치는 당연히 있으므로
@@ -1840,6 +1837,23 @@ const shouldDisarm = staleArm && (lane === "propose-pr" || !headProof.ok);
 //    두 경로 모두 **run은 비-0으로 끝난다**(회수 실패 = 보안 사실). 여기선 그 위에 "밀지 않는다"가 더 붙는다.
 if (shouldDisarm) {
   mutate("gh", ["pr", "merge", "--disable-auto", String(trusted!.number)], "gh pr merge --disable-auto");
+}
+
+// ── ③-a2 **배타적 head 소유권 fail-closed**(R-45) — 안전한 회수(①-c·③-a) 뒤, 어떤 force-push/create/arm보다 앞 ──
+// 비신뢰 동일-레포 PR이 이 head를 점유하면(신뢰 대상 PR이 함께 있든 없든) 그 head는 **우리 배타적 소유가
+// 아니다**: rebuild/adopt의 force-push는 그 PR의 head(리뷰·사람 상태)를 재작성하고, create는 중복 제안이며,
+// 무장(arm)은 이 애매한 상태에서 머지 인가를 거는 불안전 변이다. → 안전한 회수는 위에서 이미 끝냈으니
+// 여기서 **fail-closed**한다(변이 head 0, run 비-0). 식별(우리 PR인가)은 base까지 보지만 소유권(이 ref를
+// 밀어도 되나)은 **base 무관**이다 — 다른 base를 향한 동일-레포 PR도 이 브랜치를 쓰고 있다.
+if (contestedHead) {
+  const who = untrustedSameRepo
+    .map((p) => `#${p.number}(${p.author?.login ?? "삭제된 계정"} → ${p.baseRefName})`)
+    .join(", ");
+  execError(
+    `신뢰할 수 없는 동일-레포 PR이 이 브랜치의 head를 점유한다: ${who} — 브랜치 '${branch}'는 배타적으로 우리 것이 아니다`
+    + (trusted !== null ? ` (신뢰 PR #${trusted.number}이 함께 있어도 마찬가지 — force-push는 그 비신뢰 PR의 head를 재작성한다)` : "")
+    + ". force-push(rebuild/adopt)도, 중복 create도, 이 상태에서의 무장도 하지 않는다(안전한 인가 회수는 위에서 이미 수행). base-무관 소유권(R-45)",
+  );
 }
 
 // ── ③-c superseded **close 자격**(파괴 — 증거는 전부, 하나라도 모자라면 닫지 않는다) ────────────

@@ -3698,6 +3698,30 @@ setup_closable_sibling() {
   [ "$merges" -eq 0 ]
 }
 
+# bats test_tags=regression
+@test "W81: a trusted main PR coexisting with an untrusted different-base PR on the same head is never force-pushed (base-independent ownership — R-45)" {
+  # ★ R-45: 파괴 가드가 trusted===null일 때만 발동하면, **신뢰 main PR + 비신뢰 다른-base PR**이 같은 head를
+  #   공유할 때 신뢰 PR이 선택돼 DIRTY/BEHIND rebuild가 그 **공유 ref를 force-push** → 비신뢰 PR의 head(리뷰·
+  #   사람 상태)를 파괴한다. 소유권은 base-무관 — 비신뢰 PR이 head를 점유하면 신뢰 PR 공존 여부와 무관하게
+  #   force-push·create·arm 금지(안전한 회수만 하고 fail-closed).
+  write_prs "[$(writer_pr 500 DIRTY "$(amr_armed)"), {\"number\":501,\"isCrossRepository\":false,\"mergeStateStatus\":\"CLEAN\",\"headRefOid\":\"$PR_OID\",\"baseRefName\":\"gh-pages\",\"author\":$(human_author reviewer),\"autoMergeRequest\":$(amr_absent)}]"
+  write_heads "$PR_OID"   # 공유 head 브랜치는 이 레포에 존재한다
+  run_ensure_lane bump
+  [ "$status" -ne 0 ] || {
+    echo "destructive rebuild over contested head: 신뢰 PR #500이 DIRTY라 rebuild했는데, 같은 head를 점유한 비신뢰 PR #501(→gh-pages)의 head를 재작성했다(R-45)"
+    echo "$output"; dump_calls; false
+  }
+  echo "$output$stderr" | grep -q "배타적으로 우리 것이 아니다" \
+    || { echo "에러 메시지가 배타적 head 소유권 위반을 말하지 않는다"; echo "$output$stderr"; false; }
+  # ★ 파괴 0: force-push도, 중복 create도, 무장도 없다(안전한 회수만 허용).
+  pushes="$(count_calls git push)"
+  [ "$pushes" -eq 0 ] || { echo "contested head force-push: 공유 ref를 밀어 #501의 head를 파괴했다($pushes회)"; dump_calls; false; }
+  creates="$(count_calls gh pr create)"
+  [ "$creates" -eq 0 ] || { echo "contested head: 중복 PR을 만들었다($creates회)"; dump_calls; false; }
+  arms="$(arm_calls_script)"
+  [ "$arms" -eq 0 ] || { echo "contested head: 애매한 상태에서 무장했다($arms회)"; dump_calls; false; }
+}
+
 # ⚠️ baseline에서 RED다(adopt 판정 자체가 없다 — 언제나 create). W18의 파괴 가드가 **포크까지 삼켜**
 #    배포를 억제하는 과잉 반응(포크 PR 하나로 영구 정지)을 막는 게 목적이다.
 # bats test_tags=regression
