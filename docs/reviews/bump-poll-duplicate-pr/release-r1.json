@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: the branch introduces an out-of-scope, race-prone PR-closing behavior, so the claimed single-flip release contract is false.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 69,
+  "target": "branch diff against main",
+  "reviewedSha": "a858a4173f87399ff1e8179aa866331c50d42479",
+  "reviewedTree": "0172bc0e48bebfca38595094fd6472d06f8257ed",
+  "headMovedDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Single flip violated: cached evidence can close a newly reviewed sibling PR",
+      "body": "The executor selects same-app, different-tag siblings and later runs `gh pr close`, although the stated flip only deduplicates the same app+tag. This is a second externally observable mutation; W34 even classifies closing as a RED→GREEN regression, so 122/122 green does not prove single-flip preservation. The close eligibility and `humanTouch` value are also cached well before the close. A review, comment, hold label, or reopen arriving before `gh pr close` does not change the head OID and will therefore be missed, allowing active work to be closed.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 1887,
+      "line_end": 2025,
+      "confidence": 0.99,
+      "recommendation": "Remove automatic sibling closure from this bugfix and retain only auto-merge revocation. If closure is still wanted, ship it separately with explicit authorization and a fresh state/head/human-touch check immediately before the operation, preferably in an owner-approved maintenance workflow.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Move W34 and the `gh pr close` path into a separately reviewed change.",
+    "Regenerate the RED/GREEN lock and rerun regression and characterization suites after restoring the single-flip scope."
+  ]
+}

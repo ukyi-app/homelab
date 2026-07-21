@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "No ship: the RED gate can pass without exercising the production input shape, and the proposed PR fact is neither authenticated nor checked for viability. The RED verify-record itself matches red.sha/tree and fails for the intended assertion. Simpler alternative: use a deterministic app+tag branch and have the writer-token step idempotently reuse its same-repository PR immediately before creation.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": true,
+  "reviewedFileCount": 1,
+  "target": "working tree diff",
+  "reviewedSha": "5e298b3edc40aaaaa4b7552fd58041c6742d2624",
+  "reviewedTree": "8fbd16c874e9354d91a1972d024753b2dcca0873",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 3,
+  "planFindingCount": 3,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: the RED witness bypasses the production null-digest injection path",
+      "body": "The committed regression uses `--fixtures` with an already-normalized open PR containing a non-null digest. It never exercises the planned raw `--open-prs` file, while the plan explicitly says real PR bodies yield `digest === null` and require tag-only matching. An implementation that matches tag+digest—or a broken raw-file parser/workflow handoff—would therefore make RED green while production continues creating duplicates. It also witnesses only the `bump` action, despite the contract covering `propose-pr`.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 87,
+      "line_end": 92,
+      "confidence": 1,
+      "recommendation": "Re-pin red.sha with a regression that feeds the raw `gh pr list` schema through `--open-prs`, omits the digest exactly like the live PR, and asserts `noop` plus the PR number. Add a witness for `autoDeploy:false` and a workflow contract test for writer-token collection and flag forwarding, then regenerate the RED verify-record.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "high",
+      "title": "The plan trusts attacker-controlled PR metadata as a deployment-suppression fact",
+      "body": "The repository and affected `page` repository are public. The proposed query collects every open PR and authenticates one solely through `headRefName` plus a SHA found anywhere in its body or commit text. A fork can use the expected branch name and place the visible candidate SHA in its PR body without proposing the deployment change; the planner then silently returns `noop`. The writer token authenticates the API request, not the returned PR's origin.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 50,
+      "line_end": 61,
+      "confidence": 0.99,
+      "recommendation": "Collect and validate `isCrossRepository`, `headRepositoryOwner`, and `author`; accept only same-repository PRs created by the writer App. Also verify a machine-owned marker and the actual candidate pin at the PR head. Add fork/spoof fixtures proving such PRs cannot suppress a bump.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "high",
+      "title": "Open question: a DIRTY witness can deadlock polling indefinitely",
+      "body": "The plan suppresses work for any open matching PR, although it already establishes that `pr-sweeper` ignores DIRTY PRs. A sole PR can become DIRTY during the 15-minute gate after an unrelated main change; every later poll will then `noop`, so no clean replacement is proposed and no automated recovery or alert exists. This trades duplicate PRs for a silent deployment stall.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 65,
+      "line_end": 69,
+      "confidence": 0.96,
+      "recommendation": "Decide whether DIRTY matching PRs should be closed and replaced, produce an actionable hard failure/alert, or follow another explicit recovery path. Include `mergeStateStatus` in the injected fact and characterize CLEAN/BLOCKED/BEHIND/DIRTY/UNKNOWN behavior before implementation.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Replace and recapture the RED witness before implementing GREEN.",
+    "Authenticate and validate PR facts rather than trusting branch/body text.",
+    "Record the non-mergeable-PR recovery decision in the Review Decision Log."
+  ]
+}

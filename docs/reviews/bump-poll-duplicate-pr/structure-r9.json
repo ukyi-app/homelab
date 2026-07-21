@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: the committed RED→GREEN proof violates the anti-cheat lock, and authorization revocation still has two structural paths that can be skipped or fail silently.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 39,
+  "target": "branch diff against main",
+  "reviewedSha": "a6326ec5325bae58006c36499af4bf0df92665dc",
+  "reviewedTree": "469c0773381358886e481de7179323576d97b303",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 3,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: the final RED→GREEN lock compares different test contracts",
+      "body": "These SHAs do not run the same regression partition. Between the pinned red and green trees, both files named by regressionCmd are modified. W49 is rewritten from expecting missing/unreadable SSOT to disarm nothing into expecting the opposite behavior, while W59, W60, and W62–W64 exist only on the green side. The committed RED record reports `1..94`, whereas GREEN reaches `ok 100`. Therefore the R-26–R-28 behavior was not demonstrated RED under the final assertions; green can be attributed partly to test changes rather than production changes. This is new evidence because the pinned green commit itself contains those test edits.",
+      "file": "docs/reviews/bump-poll-duplicate-pr/bugfix-lock.json",
+      "line_start": 23,
+      "line_end": 27,
+      "confidence": 1,
+      "recommendation": "Rebuild a RED baseline containing the exact final test tree with pre-fix production code for every scope path. Then regenerate RED and GREEN records without changing tests between the two pinned SHAs.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: reader configuration still gates the independent revocation job",
+      "body": "The shared `configured` output requires both READER and WRITER, and `reconcile` is conditioned on that output. If the reader App ID is absent or rotated while writer credentials remain available, GitHub skips revocation cleanly even though that job uses only writer credentials. Armed PRs can therefore retain stale authorization during precisely the reader/planning degradation R-27 intended to decouple. The current witness inspects only the reconcile job body and misses this predecessor dependency.",
+      "file": ".github/workflows/bump-poll.yaml",
+      "line_start": 25,
+      "line_end": 54,
+      "confidence": 0.99,
+      "recommendation": "Split preflight into writer/reconcile readiness and reader/poll readiness. Run reconcile whenever writer credentials are present, while requiring both credentials only for poll. Add a call-site witness for writer-present/reader-absent execution.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: the two revocation paths have conflicting failure contracts",
+      "body": "`--reconcile-only` accumulates disable-auto failures and exits nonzero, but the main executor's superseded-PR sweep only warns and continues. For an autoDeploy:true app, reconcile-only intentionally leaves armings untouched, so this sweep is the sole revoker once a PR is superseded. If disable-auto fails and close is blocked by human traces, incomplete enumeration, the close cap, or the kill switch, the process still succeeds and no failure notification fires while the old PR remains armed. That contradicts the stated invariant that revocation failure is a security fact.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 1102,
+      "line_end": 1117,
+      "confidence": 0.97,
+      "recommendation": "Give revocation one shared result-bearing operation. Continue processing all subjects and the main mutation, but aggregate every failed revocation and exit nonzero afterward so the workflow alerts without starving other apps.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Reconstruct and repin the unchanged-test RED baseline before accepting any GREEN proof.",
+    "Decouple reconcile readiness from reader/planner readiness.",
+    "Unify revocation failure reporting and add witnesses for both degraded paths."
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "No ship: the root-cause seam is sound, but HEAD no longer proves a single locked RED→GREEN flip, and ref ownership remains detached from auto-merge authorization.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 31,
+  "target": "branch diff against main",
+  "reviewedSha": "5a914e56cf26de8ba11ca03c06c6d0df40b2996b",
+  "reviewedTree": "af3530cfbdaaaa782d8c14781d6d48d61be03902",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 3,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: the locked regression partition changes between RED and HEAD",
+      "body": "The committed RED record ran 15 regression cases, while the unchanged tag-filter command selects 37 at HEAD. W8/W9 and W20-W24 were added after red.sha alongside new disarm and ownership behavior, so those cases were never RED at the locked baseline. A future GREEN record would therefore compare different test sets and cannot prove a same-test, single-behavior flip.",
+      "file": "tools/tests/test_ensure-bump-pr.bats",
+      "line_start": 718,
+      "line_end": 719,
+      "confidence": 1,
+      "recommendation": "Keep the original locked witnesses as this bugfix's stable regression partition. Move the later observable behavior changes into separately RED-pinned bugfixes, or reroute the composite change through the feature pipeline.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: ownership proof does not protect auto-merge authorization",
+      "body": "`assertOurCommit` runs only for adopt/rebuild. A writer-authored PR whose head was replaced by another actor remains trusted on CLEAN/BLOCKED/UNKNOWN skip; the bump lane can preserve or add auto-merge without proving that head. Conversely, an armed DIRTY propose-pr with a foreign head fails ownership validation before reaching `--disable-auto`, leaving stale authorization active. This is the unclosed skip/authorization half of the r5 ownership risk.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 605,
+      "line_end": 610,
+      "confidence": 0.99,
+      "recommendation": "Treat provenance as an input to authorization reconciliation, not only force-push permission. Never retain or add auto-merge for an unproven head, and revoke stale authorization before any ownership check that may abort. Add foreign-head skip and armed propose-pr failure witnesses.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "medium",
+      "title": "Test-quality: the ownership call-site witness checks dead text, not effective commit metadata",
+      "body": "The new witness only greps for expected `git config` and `git commit` literals, then checks that `BUMP_COMMIT_MESSAGE` appears somewhere in the executor. A later config override, environment override, or amend can change the actual remote commit while every assertion remains green, causing adopt/rebuild to fail closed indefinitely.",
+      "file": "tests/gates/test_bump-poll-callsite.bats",
+      "line_start": 415,
+      "line_end": 438,
+      "confidence": 0.99,
+      "recommendation": "Extend the hermetic workflow-step witness to capture the effective author, committer, and final HEAD message passed into the executor ownership path, or centralize commit construction and ownership expectations in one shared typed contract.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Restore a stable single-flip RED/ GREEN partition.",
+    "Close the ownership-to-auto-merge dependency gap.",
+    "Replace the static ownership witness with an effective-behavior witness."
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "regressionCmd": "bats tools/tests/test_ensure-bump-pr.bats tests/gates/test_bump-poll-callsite.bats --filter-tags regression",
+  "characterizationCmd": "bats --filter-tags '!regression' tools/tests/test_ensure-bump-pr.bats tests/gates/test_bump-poll-callsite.bats tools/tests/test_poll-ghcr.bats tools/tests/test_bump.bats tools/tests/test_bump-poll-toctou.bats",
+  "flips": [
+    {
+      "testId": "W1: an open same-repo writer PR suppresses every mutation (no push, no create)",
+      "symptomToken": "duplicate bump PR: ensure-bump-pr executed 'gh pr create' while PR #350 (same-repo, writer) is already open"
+    },
+    {
+      "testId": "W3: an orphan remote branch (push ok, pr create failed) is adopted with a leased push, not collided with",
+      "symptomToken": "orphan bump branch: ensure-bump-pr did not adopt the orphan"
+    },
+    {
+      "testId": "bump-poll never calls gh pr create directly (PR creation goes through ensure-bump-pr)",
+      "symptomToken": "duplicate bump PR: bump-poll.yaml still calls 'gh pr create' directly"
+    }
+  ],
+  "scope": [
+    "tools/ensure-bump-pr.ts",
+    ".github/workflows/bump-poll.yaml",
+    ".github/workflows/pr-sweeper.yaml",
+    "tools/README.md"
+  ],
+  "red": {
+    "sha": "5de984e53a0a248137b170dc9bdb305b1350a9d1"
+  },
+  "green": {
+    "sha": "1f0a53610d83d6f03baaf238ef0604e87424fc4f"
+  }
+}

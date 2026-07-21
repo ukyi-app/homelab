@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: R-43 is incomplete. The frozen RED/GREEN lock is mechanically intact but permits reconciliation to silently trust contradictory ref OIDs.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 57,
+  "target": "branch diff against main",
+  "reviewedSha": "d4c413da0e645f3843fa230a01f3f6e12749bc13",
+  "reviewedTree": "95107c18bf2b367d274ab403e9fb5bb068f147e1",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: reconciliation drops the ref OID at its observation seam",
+      "body": "`enumerateNsRefs` and `enumerateSiblingRefs` retain the OID observed by `ls-remote`, but `observeBranchPr(head)` accepts only the branch name and checks only whether GraphQL reports the ref as present. If `ls-remote` observes OID A while a stale GraphQL view reports present OID B with an empty PR connection, this returns `pr:null`; reconciliation exits successfully although an armed PR on A may have been hidden. The trusted-PR path similarly compares OIDs only for create/adopt, so it can retain or add auto-merge using ownership proof for a stale head. This is new evidence beyond R-43's handled `ref:null` case. The committed fixture is blind to it: sibling GraphQL responses default to OID `111…`, while sibling refs normally use `333…`, yet those reconciliation cases expect success.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 1198,
+      "line_end": 1218,
+      "confidence": 0.99,
+      "recommendation": "Pass the enumerated OID into the shared observation seam and require GraphQL ref OID, `ls-remote` OID, and any trusted PR `headRefOid` to agree before retaining or granting authorization. Treat mismatches as `revocationBlind`, reject OID changes across pagination pages, and make `RefObs` a true discriminated union. Update the sibling stub to derive its normal OID from `STUB_SIBLINGS`, add an explicit reconciliation OID-mismatch witness, then rebuild the fixed-test RED/GREEN records.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Complete the OID consistency invariant across create/adopt, trusted-PR, sibling, and reconciliation paths.",
+    "Strengthen the frozen tests and regenerate verification records without weakening existing assertions."
+  ]
+}

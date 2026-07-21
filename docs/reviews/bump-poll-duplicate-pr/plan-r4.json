@@ -1,0 +1,46 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "No ship: R-6’s prose contradiction is fixed and the RED record matches red.sha/tree, but both r3 proof gaps still permit false GREENs. Simpler alternative: retain the production design and harden these two test contracts. Open question: none.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": true,
+  "reviewedFileCount": 14,
+  "target": "branch diff against main",
+  "reviewedSha": "89e0831cf21724ee7f071d0ff25d57effcc6e737",
+  "reviewedTree": "bc2e484ef92d4f1f28dd5271d781fbe3790d2940",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
+  "planFindingCount": 2,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: executor ownership can still go GREEN with broken workflow ordering",
+      "body": "B-1 now assigns local branch/commit preparation to the workflow and all remote actions to the executor. However, the committed call-site gate only checks for tool presence and absence of direct `git push`, `gh pr create`, and `RUN_ID`. It neither proves `git commit` precedes the executor nor rejects the workflow’s existing direct `scripts/auto-merge-or-fail.sh` call. An implementation can therefore pass all four witnesses while pushing the wrong HEAD or retaining remote mutation outside the executor.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 143,
+      "line_end": 143,
+      "confidence": 0.98,
+      "recommendation": "Add call-site witnesses enforcing branch creation → bump-tag → commit → executor ordering and forbidding direct auto-merge invocation outside `ensure-bump-pr.ts`.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: the exact-argv harness discards argument boundaries",
+      "body": "The plan claims the stub rejects every push argv outside the three contracts, but the red.sha stub records and compares `\"$*\"`, flattening argument boundaries. A call such as `git` with `['push', 'origin HEAD:refs/heads/<branch>']` matches the allowed flattened ledger line and passes `grep -Fx`, while real Git receives one invalid remote argument and fails. Equivalent false-GREEN partitions exist for rebuild and adopt, leaving live recovery stalled.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 62,
+      "line_end": 64,
+      "confidence": 1,
+      "recommendation": "Validate `$#` and each positional argument independently or use a NUL-delimited ledger. Add negative witnesses for combined remote/refspec and combined lease/remote/refspec arguments, then re-pin red.sha and regenerate the RED verify-record.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Strengthen the R-6 workflow ownership and ordering witnesses.",
+    "Make the R-7 harness preserve argv boundaries.",
+    "Regenerate the machine-owned RED record without manually running the regression suite."
+  ]
+}
