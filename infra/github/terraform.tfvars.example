@@ -16,3 +16,7 @@ github_owner = "<GH_USER>"
 
 # repo 이름 (기본값 유지 권장 — terraform이 이 repo의 설정/branch protection/Actions secrets를 관리)
 repo_name = "homelab"
+
+# (선택) bump-poll/** 예약 ruleset의 bypass writer App slug. 시크릿 아님. 기본값 "ukyi-homelab-writer" —
+# App을 리네임한 경우에만 아래 주석을 풀어 override한다.
+# writer_app_slug = "ukyi-homelab-writer"
