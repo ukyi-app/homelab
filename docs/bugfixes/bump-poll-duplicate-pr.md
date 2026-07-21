@@ -6,7 +6,7 @@ review-track: standard
 pipeline-stage: executing
 issue-tracker: local
 symptom: "같은 앱 커밋(page sha-815abb…)에 대해 bump-poll이 11분 사이 PR 3개(#348·#350·#353)를 열었다. 각 PR이 15분짜리 required 게이트를 태우고, 먼저 머지된 하나를 뺀 나머지는 DIRTY(충돌)+auto-merge 무장 상태로 영구 잔류한다(pr-sweeper는 BEHIND만 처리)."
-red-baseline: 6b2513d489635fe6135f45166664598b347dea61
+red-baseline: 5de984e53a0a248137b170dc9bdb305b1350a9d1
 bugfix-lock: red
 first-increment: [B-1]
 increments: [B-1]

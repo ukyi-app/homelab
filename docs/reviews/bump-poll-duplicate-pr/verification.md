@@ -1,12 +1,23 @@
 # Verification — bump-poll-duplicate-pr
 
 단일 flip: **같은 bump에 이미 열린 writer PR이 있으면 새 PR을 열지 않는다**(정상=skip, 충돌=같은 PR rebuild).
-아래는 HEAD(green.sha `c389276`)에서 신선하게 재실행한 증거다.
+아래는 최종 HEAD(green.sha `1f0a536`, R-48 close 제거 포함)에서 신선하게 재실행한 증거다.
 
 > ⚠️ 도구 참고: 세션 중 스킬 세트가 새 세대로 교체돼 `bugfix-status.mjs`(머신 RED→GREEN 락)가 환경에서
 > 사라졌다. flip 자체는 라운드마다 그 스크립트의 자체 재실행으로 증명해 왔고(마지막 커밋된 verify-record는
-> R-46 baseline `b26673d`/`6394ff9` 기준), 아래는 그 대체로 **동일한 파티션을 HEAD에서 수동 재실행**한
-> 증거다. `red..green` 순 diff는 여전히 scope 4파일뿐(테스트 변경 0).
+> ★ release r2/R-49: 락을 **최종 HEAD로 재핀**(red `5de984e` / green `1f0a536`)하고 baseline을 **현재 118-테스트
+> 트리 + frozen pre-fix executor**로 재구성했다. 머신 생성기(`bugfix-status.mjs`)는 세션 중 스킬 교체로 사라져
+> `--verify-flip`을 못 돌리므로, flip을 **수동으로** 증명한다(아래 §0). 그 머신-소유 레코드 잔여는 owner가 waive.
+> `red..green` 순 diff는 scope 4파일뿐(테스트 변경 0).
+>
+> ## 0. 수동 flip 증명 (release r2/R-49 재핀 후)
+>
+> | 지점 | regression | characterization |
+> |---|---|---|
+> | RED baseline `5de984e`(frozen executor + 118-테스트) | **exit 1 — 118/118 RED, 공짜 통과 0**, symptomToken `duplicate bump PR … while PR #350` 존재 | **GREEN** |
+> | GREEN HEAD `1f0a536`(최종 픽스) | **GREEN(118)** | **GREEN(63)** |
+>
+> 임시 워크트리에서 두 지점을 각각 재실행해 확인. 동일 118-테스트 계약이 pre-fix에서 실패·최종에서 통과한다.
 
 ## 1. regression 파티션 — HEAD에서 GREEN (flip이 fixed 쪽)
 
