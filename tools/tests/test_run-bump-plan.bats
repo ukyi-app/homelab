@@ -27,9 +27,26 @@ seed_repo() {  # 2앱(page·trip-mate) values + digest-exporter를 가진 진짜
   echo "branch: $(git rev-parse --abbrev-ref HEAD 2>&1)"
   echo "author: $(git log -1 --format='%an <%ae>' 2>&1)"
   echo "files: $(git show --name-only --format= HEAD 2>&1 | tr '\n' ' ')"
+  echo "msg: $(git log -1 --format=%s 2>&1)"
+  echo "ahead: $(git rev-list --count main..HEAD 2>&1)"
+  # RECORD_PATH가 있을 때만 커밋된 **내용**까지 남긴다(베스포크 핀 증인 전용 — 다른 테스트의 원장 형태는 불변).
+  [ -z "${RECORD_PATH:-}" ] || echo "content: $(git show "HEAD:$RECORD_PATH" 2>&1 | tr '\n' ' ')"
 } >> "$LEDGER"
 exit "${ENSURE_EXIT:-0}"
 EOF
+}
+
+# 베스포크 핀 레인 픽스처(platform 컴포넌트): 디스크립터 + 인라인 핀 스칼라를 가진 deployment.yaml.
+# apps 레인(values.yaml의 image.tag/digest 분리 키)과 달리 `<repo>:<tag>@<digest>` 단일 스칼라다.
+OLD_DIG="sha256:1111111111111111111111111111111111111111111111111111111111111111"
+seed_pin_component() {
+  mkdir -p "$REPO/platform/files/prod"
+  printf '{\n  "file": "deployment.yaml",\n  "path": ["spec","template","spec","containers",0,"image"],\n  "autoDeploy": true\n}\n' \
+    > "$REPO/platform/files/prod/.image-pin.json"
+  printf 'apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: files\n          image: ghcr.io/ukyi-app/files:sha-0000000@%s\n' \
+    "$OLD_DIG" > "$REPO/platform/files/prod/deployment.yaml"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -q -m pin
 }
 
 teardown() { [ -n "${REPO:-}" ] && rm -rf "$REPO"; }
@@ -44,10 +61,95 @@ plan_json() {  # $1=page action, $2=trip-mate action, [$3=page current.tag overr
 EOF
 }
 
-run_runner() {  # $1=ENSURE_EXIT(기본 0)
-  run env ENSURE_EXIT="${1:-0}" LEDGER="$REPO/ensure-ledger" \
+run_runner() {  # $1=ENSURE_EXIT(기본 0) · RECORD_PATH(선택)는 환경에서 그대로 전달
+  run env ENSURE_EXIT="${1:-0}" LEDGER="$REPO/ensure-ledger" RECORD_PATH="${RECORD_PATH:-}" \
     bun tools/run-bump-plan.ts --plan "$REPO/plan.json" --repo-root "$REPO" \
       --ensure-bin bash --ensure-script "$REPO/ensure-stub.sh"
+}
+
+# 원장에서 그 앱의 ensure 호출 **블록 하나**(argv 줄 ~ 다음 '=== call ===' 전까지)를 뽑는다 —
+# `grep -A<n>` 창은 원장에 필드가 늘면 조용히 어긋난다(다음 블록으로 새거나 잘린다).
+block_for() { sed -n "/^argv: --app $1 /,/^=== call ===$/p" "$LEDGER"; }
+
+# ── 소유권 기대값은 **실행기 소스에서 파생한다**(테스트에 베껴 쓰기 금지) ─────────────────────────
+# 실행기(tools/ensure-bump-pr.ts)는 force-push·무장 전에 "이 head가 우리 커밋인가"를 **정체성 + 커밋
+# 메시지**로 증명한다(proveOurCommit). 그 기대는 러너가 실제로 심는 값과 **글자 그대로** 같아야 한다 —
+# 드리프트하면 라이브에서 우리 브랜치를 우리가 못 알아봐 adopt/rebuild/무장이 **영구 fail-closed**된다
+# (조용한 배포 정지). 기대값을 여기 하드코딩하면 양쪽이 함께 드리프트해도 GREEN인 세 번째 진실이 생긴다.
+# 형태(DEFAULT_WRITER/WRITER_BOT_NAME/WRITER_BOT_EMAIL_RE/bumpCommitMessageOf)를 못 찾으면 **exit 2로 죽는다**.
+expect_of() {
+  local root py
+  root="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  py="$BATS_TEST_TMPDIR/expect.py"
+  if [ ! -f "$py" ]; then
+    cat > "$py" <<'PY'
+import re
+import sys
+
+src = open(sys.argv[1], encoding="utf-8").read()
+
+
+def need(pat, what):
+    m = re.search(pat, src)
+    if not m:
+        sys.stderr.write(
+            "expect: 실행기에서 %s를 찾지 못했다(형태 드리프트) — 소유권 기대값을 모르면 통과시키지 않는다\n" % what,
+        )
+        sys.exit(2)
+    return m
+
+
+writer = need(r'DEFAULT_WRITER\s*=\s*"([^"]+)"', "DEFAULT_WRITER").group(1)
+name_tmpl = need(r"WRITER_BOT_NAME\s*=\s*`([^`]*)`", "WRITER_BOT_NAME").group(1)
+email_tmpl = need(r"WRITER_BOT_EMAIL_RE\s*=\s*new RegExp\(`([^`]*)`\)", "WRITER_BOT_EMAIL_RE").group(1)
+msg_tmpl = need(
+    r"function bumpCommitMessageOf\([^)]*\)[^{]*\{\s*return\s*`([^`]*)`",
+    "bumpCommitMessageOf의 커밋 메시지 템플릿",
+).group(1)
+
+bot_name = name_tmpl.replace("${normalizeLogin(args.writer)}", writer)
+# TS 소스의 `\\d`는 정규식 `\d`다 → 언이스케이프 후 escapeRe(WRITER_BOT_NAME)을 채운다.
+email_re = email_tmpl.replace("\\\\", "\\").replace("${escapeRe(WRITER_BOT_NAME)}", re.escape(bot_name))
+
+mode = sys.argv[2]
+if mode == "ident":  # argv[3] = 관측된 "name <email>"(git log %an <%ae>)
+    m = re.match(r"^(.*) <(.*)>$", sys.argv[3])
+    if not m:
+        sys.stderr.write("ident 형식 불량: %s\n" % sys.argv[3])
+        sys.exit(1)
+    sys.exit(0 if m.group(1) == bot_name and re.match(email_re, m.group(2)) else 1)
+elif mode == "msg":  # argv[3] = app, argv[4] = tag
+    print(msg_tmpl.replace("${app}", sys.argv[3]).replace("${tag}", sys.argv[4]))
+else:
+    sys.exit(2)
+PY
+  fi
+  python3 "$py" "$root/tools/ensure-bump-pr.ts" "$@"
+}
+
+# 한 항목의 커밋이 실행기의 소유권 증명과 **실효로** 일치하는가(정체성·메시지·main 대비 1커밋).
+assert_ownership() {  # $1=app $2=tag
+  local blk got_ident exp_msg got_msg ahead
+  blk="$(block_for "$1")"
+  got_ident="$(sed -n 's/^author: //p' <<<"$blk")"
+  expect_of ident "$got_ident" || {
+    echo "ownership drift: $1 커밋의 실효 정체성('$got_ident')이 실행기의 WRITER_BOT_NAME/EMAIL_RE와 다르다 —"
+    echo "  실행기는 이 정체성으로 '우리 커밋'을 증명한다. 드리프트하면 adopt/rebuild/무장이 영구 fail-closed된다."
+    return 1
+  }
+  exp_msg="$(expect_of msg "$1" "$2")"
+  got_msg="$(sed -n 's/^msg: //p' <<<"$blk")"
+  [ "$got_msg" = "$exp_msg" ] || {
+    echo "ownership drift: $1 커밋의 실효 메시지가 실행기의 bumpCommitMessageOf와 다르다"
+    echo "  기대: $exp_msg"
+    echo "  관측: $got_msg"
+    return 1
+  }
+  ahead="$(sed -n 's/^ahead: //p' <<<"$blk")"
+  [ "$ahead" = "1" ] || {
+    echo "ownership drift: $1 브랜치가 main보다 ${ahead}커밋 앞선다(기대 1 — 항목당 정확히 1커밋)"
+    return 1
+  }
 }
 
 no_leftover() {  # 정리 teeth: main worktree만 남고 bump-poll 로컬 브랜치 0
@@ -70,6 +172,36 @@ no_leftover() {  # 정리 teeth: main worktree만 남고 bump-poll 로컬 브랜
   # trip-mate: propose-pr 레인 verbatim(재해석 없음)
   tm="$(grep -A1 'argv: --app trip-mate' "$LEDGER")"
   grep -qF -- "--action propose-pr" <<<"$tm"
+  no_leftover
+}
+
+@test "the commit the runner EFFECTIVELY makes carries the identity and message the executor proves ownership with" {
+  # ★ 이 계약은 워크플로 호출부에서 러너로 **이관**된 것이다(옛 tests/gates/test_bump-poll-callsite.bats의
+  # effective-ownership 증인). 옛 증인은 워크플로 셸 본문을 git **stub** 아래 돌려 last-write-wins·--amend
+  # 의미를 흉내내야 했다(그래서 stub이 그 의미를 정말 흉내내는지 증명하는 이빨 증인이 또 필요했다).
+  # 러너는 커밋마다 `git -c user.name/user.email`로 신원을 **명시**하고, 여기선 **진짜 git**이 만든 커밋
+  # 오브젝트를 그대로 읽는다 — 흉내낼 의미가 없으니 실효값이 곧 관측값이다(옛 이빨 증인의 존재 이유가 소멸).
+  # 남은 계약은 하나: 그 실효값이 **실행기 소스에서 파생한 기대**와 같은가.
+  seed_repo; plan_json bump propose-pr; run_runner 0
+  [ "$status" -eq 0 ]
+  assert_ownership page sha-deadbee
+  assert_ownership trip-mate sha-feedbee
+}
+
+@test "the base main worktree is left untouched — updates happen only inside each item's worktree" {
+  # ★ 옛 호출부 순서 계약의 첫 절(브랜치 생성 → 태그 갱신)의 **실행판**이다. 갱신이 브랜치를 떼기 전에
+  # 일어나면 main 위에서 값이 바뀐다 — 그러면 main 작업트리가 더러워지고, 다음 주기의 plan(=live 값)이
+  # 오염된 상태를 스냅샷으로 잡는다. 공간 격리의 정의상 그럴 수 없어야 한다.
+  seed_repo
+  before="$(git -C "$REPO" rev-parse main)"
+  plan_json bump propose-pr; run_runner 0
+  [ "$status" -eq 0 ]
+  run bash -c "git -C '$REPO' rev-parse main"          # ① main tip 불변(러너는 main에 커밋하지 않는다)
+  [ "$output" = "$before" ]
+  run bash -c "git -C '$REPO' status --porcelain --untracked-files=no"  # ② tracked 변경 0
+  [ -z "$output" ]
+  grep -q 'sha-0000000' "$REPO/apps/page/deploy/prod/values.yaml"       # ③ 값도 옛 tag 그대로
+  grep -q 'sha-0000000' "$REPO/apps/trip-mate/deploy/prod/values.yaml"
   no_leftover
 }
 
@@ -113,6 +245,33 @@ no_leftover() {  # 정리 teeth: main worktree만 남고 bump-poll 로컬 브랜
   seed_repo   # fixture에 origin 없음 — 러너가 직접 push하면 실패했을 것
   plan_json bump bump; run_runner 0
   [ "$status" -eq 0 ]   # ensure(stub)만이 원격 경로 → 러너 직접 push 0
+  no_leftover
+}
+
+@test "a bespoke pin item forwards --pin to bump-tag and commits the rewritten inline pin (both lanes in one plan)" {
+  # 러너는 플래너의 `.pin`(디스크립터 경로) 유무로 레인을 가른다 — apps는 values.yaml의 분리 키,
+  # 베스포크는 deployment.yaml의 인라인 핀 스칼라다. `--pin`을 넘기지 않으면 bump-tag가 apps 모드로
+  # 떨어져 `apps/files/…/values.yaml`(존재하지 않음)을 읽고 죽는다 → 이 증인이 RED가 된다(이빨).
+  # 디스크립터 경로는 **레포 상대**라 bump-tag가 --repo-root(=격리 worktree) 기준으로 풀어야 맞는다.
+  seed_repo; seed_pin_component
+  cat > "$REPO/plan.json" <<EOF
+[
+ {"app":"page","action":"bump","candidate":{"tag":"sha-deadbee","digest":"$DIG"},"current":{"tag":"sha-0000000"},"writePath":"apps/page/deploy/prod/values.yaml"},
+ {"app":"files","action":"bump","candidate":{"tag":"sha-feedbee","digest":"$DIG"},"current":{"tag":"sha-0000000"},"writePath":"platform/files/prod/deployment.yaml","pin":"platform/files/prod/.image-pin.json"}
+]
+EOF
+  RECORD_PATH=platform/files/prod/deployment.yaml run_runner 0
+  [ "$status" -eq 0 ]
+  files="$(block_for files)"
+  grep -qF "branch: bump-poll/files-sha-feedbee" <<<"$files"
+  grep -qF "platform/files/prod/deployment.yaml" <<<"$files"
+  # ★ 커밋된 **내용**: 인라인 핀 스칼라가 제자리에서 새 tag+digest로 교체됐다(핀 모드가 실제로 돌았다).
+  grep -qF "ghcr.io/ukyi-app/files:sha-feedbee@$DIG" <<<"$files"
+  # apps 레인은 같은 plan 안에서도 자기 경로만 커밋한다(레인 분기가 서로를 오염시키지 않는다).
+  page="$(block_for page)"
+  grep -qF "apps/page/deploy/prod/values.yaml" <<<"$page"
+  run grep -qF "platform/files/prod/deployment.yaml" <<<"$page"
+  [ "$status" -ne 0 ]
   no_leftover
 }
 

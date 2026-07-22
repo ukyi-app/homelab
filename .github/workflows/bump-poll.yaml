@@ -153,100 +153,24 @@ jobs:
       # 전부 tools/ensure-bump-pr.ts(멱등 실행기 — 조회 → 결정 → 변이)가 한다:
       # 워크플로가 스스로 push/create하면 "열린 PR 확인"이 무의미해져 매 주기 중복 PR이 열린다
       # (실측: 같은 커밋에 11분 사이 PR 3개 — 좀비 2개가 DIRTY + auto-merge 무장으로 잔류).
-      # 호출부 계약은 tests/gates/test_bump-poll-callsite.bats가 강제한다.
-      - name: bump → PR (멱등 실행기 경유 — 레인은 플래너의 .action 그대로)
+      # 계약은 두 곳이 나눠 강제한다: **호출부 경계**(직접 push·PR 생성·auto-merge 스크립트 0, 러너 배선)는
+      # tests/gates/test_bump-poll-callsite.bats가, **항목 처리**(순서·레인 verbatim·격리·소유권·집계)는
+      # tools/tests/test_run-bump-plan.bats가 — 후자는 진짜 git worktree 위에서 실행으로 증명한다.
+      - name: bump → PR (항목 러너 경유 — 레인은 플래너의 .action 그대로)
         env:
           GH_TOKEN: ${{ steps.writer.outputs.token }} # writer: PR 조회·생성·무장 + 브랜치 push
         run: |
-          git config user.name "ukyi-homelab-writer[bot]"
-          git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
+          # 항목 오케스트레이션은 **테스트된 러너**가 소유한다(F-1). 예전엔 이 자리에 인-워크플로 셸 루프가
+          # 있었고 항목들이 **하나의 worktree/index를 공유**했다: 서브셸은 종료 상태만 격리하지(R-38) 앞
+          # 항목이 남긴 staged 잔여는 격리하지 못해, 그 잔여가 다음 앱 커밋에 섞이거나 checkout을 거부해
+          # 뒤따르는 앱을 굶겼다(H-2). 러너는 **항목마다 격리 worktree**를 떼어 그 공유 표면 자체를 없앤다
+          # (트랜잭션 격리 `checkout -f`가 아니라 공간 격리 — 되돌릴 상태가 애초에 공유되지 않는다).
+          # git 신원도 여기서 config하지 않는다 — 러너가 커밋마다 `git -c`로 명시한다(뒤따르는 config
+          # 덮어쓰기로 실효 정체성이 드리프트할 자리 자체가 없다 = 실행기의 소유권 증명 보존).
           # ⚠️ 인가 회수(reconcile)의 실패는 여기 합류하지 않는다 — 그건 **별도 job**이고 스스로 비-0으로
           #    끝나 run을 빨갛게 만든다(R-27). 두 경로는 서로를 굶기지 않는다: 회수가 죽어도 bump는 돌고,
           #    bump가 죽어도 회수는 이미 돌았다.
-          failed=""
-          jq -c '.[] | select(.action == "bump" or .action == "propose-pr")' /tmp/plan.json > /tmp/bump-items.jsonl
-          # ⚠️⚠️ **항목마다 격리한다**(서브셸). 예전엔 `jq … | while read`를 `bash -e` 아래서 돌려, 한 앱이
-          #   fail-closed로 죽으면(예: 증명되지 않은 head — 사람이 개입할 때까지 **영구히** 그 상태다)
-          #   파이프라인이 통째로 죽어 **그 뒤의 모든 앱이 매 주기 실행기에 도달조차 못 했다**.
-          #   pr-sweeper가 이 네임스페이스에서 빠진 지금, 이 루프의 생존성은 가용성이 아니라 **인가 회수의
-          #   전제조건**이다(위 reconcile 스텝과 같은 이유 — 낡은 무장은 누군가 방문해야만 회수된다).
-          #   실패는 모아 두고 **맨 끝에서** 비-0으로 끝낸다(run은 빨갛게 남고 telegram 알림이 발화한다).
-          # ⚠️⚠️ **errexit 관용구**(bash 함정 — 실측: bash 3.2·5.3 동일): `if ! ( set -e; … )`·`( … ) || rc=$?`
-          #   처럼 서브셸을 **조건/`||` 문맥**에 두면 그 안에서 `set -e`를 다시 켜도 **중간 명령 실패가 서브셸을
-          #   중단시키지 않는다**(마지막 명령만 exit status를 정한다). 그러면 bump-tag·git commit·정리(checkout)
-          #   같은 **중간 실패**가 삼켜져 그 항목이 실패로 집계되지 않고, 심지어 실행기가 반쯤 만든 상태 위에서 돈다.
-          #   R-38의 "정리 실패 → 집계 → run 빨강"이 그래서 깨진다. → 서브셸을 **문장으로** 돌려 안쪽 `set -e`가
-          #   살아 있게 하고, 바깥 errexit만 잠시 끄고(`set +e`) 종료 코드를 값으로 받은 뒤 다시 켠다. 이러면
-          #   어떤 중간 실패든 그 항목만 fail-closed로 집계되고 나머지 앱은 계속 처리된다(다른 항목을 굶기지 않는다).
-          while IFS= read -r item; do
-            [ -n "$item" ] || continue
-            app=$(echo "$item" | jq -r .app)
-            # 플래너 출력도 한 번 더 정제(심층 방어) — bump-tag.ts가 재검증한다
-            case "$app" in ''|*[!a-z0-9-]*) echo "skip suspicious app: '$app'"; continue ;; esac
-            set +e   # 바깥 errexit만 잠시 끈다(항목 실패가 루프 전체를 죽이지 않도록) — 안쪽 set -e는 살아 있다
-            (
-              set -e
-              tag=$(echo "$item" | jq -r .candidate.tag)
-              digest=$(echo "$item" | jq -r .candidate.digest)
-              # 레인(배포 승인 모델)의 출처는 플래너뿐이다 — .bindings.json의 autoDeploy가 SSOT다.
-              # 이 값은 **읽은 그대로** 실행기에 넘어간다(재대입·재해석·하드코딩 전부 금지 — 승인 게이트 우회).
-              action=$(echo "$item" | jq -r .action)
-              pin=$(echo "$item" | jq -r '.pin // empty')          # 베스포크 레인만 세팅(apps는 empty)
-              writePath=$(echo "$item" | jq -r .writePath)          # git add 대상(두 레인 통일)
-              # ⚠️⚠️ **항목 트랜잭션 격리**(R-38): 서브셸은 종료 상태만 격리하지 앞 항목이 남긴
-              #   worktree/index는 격리하지 못한다. bump-tag는 앱 values + **항상 add되는
-              #   digest-exporter.yaml**을 쓰고, 그 뒤 명령이 실패하면(commit 전 fail-closed 등) 그 부분
-              #   상태가 공유 worktree에 남는다 → 다음 항목이 평범한 `git checkout main`을 하면 **staged
-              #   digest-exporter가 checkout을 거부하게 해 이후 앱을 굶기거나**(H-2 회귀), 그 변경을
-              #   **물려받아** 앞 앱의 digest-exporter 수정이 다음 앱 커밋에 섞인다. 그래서 각 항목은
-              #   **강제 정리로 깨끗한 main에서 시작**한다: `-f`가 tracked/staged 잔여를 전부 되돌린다
-              #   (digest-exporter는 tracked라 `-f`로 unstage+복원된다 — untracked는 bump-tag가 만들지 않는다).
-              #   정리 자체가 실패하면 set -e가 이 서브셸을 죽여 **이 항목만** fail-closed로 건너뛰고
-              #   나머지 앱은 계속 처리된다(실패는 아래에서 집계돼 run을 빨갛게 만든다 — 다른 항목을 굶기지 않는다).
-              git checkout -f main
-              # 결정적 브랜치 — 같은 bump(app+tag)는 언제나 같은 브랜치로 수렴한다(RUN_ID 제거).
-              # run마다 브랜치가 달라지면 "이 bump의 열린 PR"을 조회할 대상 자체가 사라진다(중복 PR의 뿌리).
-              branch="bump-poll/${app}-${tag}"
-              git checkout -b "$branch"
-              # races-4 TOCTOU 가드: 플래너가 증명한 from-tag는 plan JSON의 `.current.tag`(plan 시점 스냅샷)다.
-              # ⚠️ codex pass1 F2: checkout main 후 values.yaml에서 다시 읽으면 main이 움직여도 그 값이 같이
-              # 움직여 "자기 자신과 비교"가 돼 가드가 no-op이 된다 → 반드시 플래너 스냅샷($item.current.tag)을 쓴다.
-              # checkout 직후의 실측 image.tag가 이 expect와 다르면(=plan 이후 main 이동) bump-tag가 fail-closed로
-              # 중단(stale 증명 push 방지) — 다음 주기가 새 스냅샷으로 다시 plan한다.
-              expect=$(echo "$item" | jq -r '.current.tag')
-              if [ -n "$pin" ]; then
-                bun tools/bump-tag.ts "$app" "$tag" --digest "$digest" --expect-current "$expect" --pin "$pin"
-              else
-                bun tools/bump-tag.ts "$app" "$tag" --digest "$digest" --expect-current "$expect"
-              fi
-              # digest-exporter APPS 신선도(codex pass2 P2-2): sha-* 태그는 불변이라 배포 핀만 갱신하면
-              # ImageDigestDrift(B2)가 stale 참조로 거짓 드리프트를 낸다 — bump-tag.ts가 같은 실행에서
-              # APPS의 동일 앱 항목 태그를 동기 갱신(항목 부재=no-op), 같은 커밋에 포함한다.
-              git add "$writePath" platform/victoria-stack/prod/digest-exporter.yaml
-              git commit -m "chore: ${app} 이미지를 ${tag}(digest 핀)로 갱신 (GHCR 폴링)"
-              # 레인별로 갈리는 건 **제목/본문뿐**이다 — 레인 자체는 양쪽 모두 플래너 값 그대로 넘어간다.
-              if [ "$action" = "bump" ]; then
-                title="chore: ${app} 이미지 갱신 (자동)"
-                body="GHCR 폴링 bump — main reachable + descendant + digest 핀 검증 통과. gate 통과 시 auto-merge."
-              else
-                title="chore: ${app} 이미지 갱신 (승인 대기)"
-                body="autoDeploy:false — **머지 = 배포 승인**. GHCR 폴링이 검증한 후보(digest 핀)."
-              fi
-              # 실행기: 열린 PR·원격 브랜치를 관측한 뒤에만 변이한다(create/adopt/skip/rebuild + 무장 수렴).
-              bun tools/ensure-bump-pr.ts --app "$app" --tag "$tag" --action "$action" \
-                --title "$title" --body "$body"
-            )
-            rc=$?          # 서브셸의 종료 코드 — 안쪽 set -e가 **어떤 중간 실패든**(정리·bump-tag·commit·실행기) 여기로 전달한다
-            set -e         # 바깥 errexit 복원
-            if [ "$rc" -ne 0 ]; then
-              # 이 앱은 이 주기에 아무것도(또는 일부만) 변이하고 fail-closed됐다 — "이 앱을 못 건드렸다"는
-              # 뜻이지 "run을 죽인다"는 뜻이 아니다. 나머지 앱은 계속 처리하고, 실패는 아래에서 집계한다.
-              echo "::warning::${app}: bump 항목이 실패했다(fail-closed, exit $rc) — 다른 앱 처리는 계속한다"
-              failed="$failed $app"
-            fi
-          done < /tmp/bump-items.jsonl
-          [ -z "$failed" ] || { echo "::error::이번 주기에 실패한 앱:$failed"; exit 1; }
-          echo "bump 루프 완료"
+          bun tools/run-bump-plan.ts --plan /tmp/plan.json
       - name: telegram notify (실패 시)
         if: failure()
         uses: ./.github/actions/telegram-notify
