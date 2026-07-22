@@ -17,3 +17,9 @@ S-1 fix 후 8각도 red-team(workflow, opus)이 강화된 grep 가드도 8/8 우
 
 S-2 accept — canonical extraction ignores HCL module context: (a) 리소스를 /* */로 감싸면 canonical 일치인데 terraform은 주석처리로 봄, (b) 추적 *_override.tf가 count=0/enforcement disable로 병합. 둘 다 실측 확인. → 가드를 3층(canonical freeze + no-block-comments(문자열 blank 후 /* 금지) + no-override(추적 override 파일 0 + .gitignore *_override.tf)}로 확장, 두 클래스 증인 추가(16/16 green). spec Seam B/C를 3층+정직한 잔여(removed/plan/tfvars → CI 검증 불가, Seam C가 완전 보증)로 갱신.
 WAIVED by user: structure re-review(round 3) 면제. 근거 = 정적 CI 가드의 완전성은 신뢰 앵커 root에서 원리적으로 불가(완전 검증=terraform plan=CI에서 배제된 자격 필요). 추가 라운드는 무한 static hole만 더 찾을 뿐이며, resolved 의미의 권위·필수 검증은 owner-local Seam C다. 찾은 전 클래스는 3층+증인으로 차단.
+
+### release r1
+
+RL-1 accept (high) — Seam C 프로브가 auth 실패를 ruleset 거부로 오인 가능 + 토큰 argv/history 유출. verification.md B2-B4를 안전 인증(GIT_ASKPASS+env·GIT_TERMINAL_PROMPT=0·credential.helper 비활성)으로 재작성 + 실패가 ruleset 위반(GH006/repository rule)임을 명시 검증(is_ruleset_reject) + writer ref B4 재사용/정리.
+RL-2 accept (medium) — writer_app_slug 리네임-override가 실행기 신원(bump-poll.yaml git 신원·ensure-bump-pr DEFAULT_WRITER)과 분리돼 end-to-end 미배선. 3곳 배선은 범위 밖 → tfvars.example·variables.tf 주석에서 standalone override 광고 제거, 리네임은 3곳 동시 갱신 필요(아니면 fail-closed)로 정정.
+RL-3 accept (low) — tools/README.md가 여전히 "잔여는 F-0"로 과대주장(현행 운영 문서). ensure-bump-pr.ts와 동일 표현("F-0는 노출을 좁힐 뿐 동시 PR 생성은 수용된 R-46 잔여")으로 정정.

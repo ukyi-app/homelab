@@ -39,30 +39,48 @@ gh api "/repos/$OWNER/$REPO/rulesets/$RID" --jq \
 결과: __(target/include/exclude/rules/bypass 일치 · bypass actor_id = writer App ID = ____)__
 ★ ④ App 능력 실측: data source가 준 id가 Integration bypass로 실제 동작함이 여기서 확증된다(fine-grained App 능력은 실제 시도로만).
 
+### 안전 인증 헬퍼 (토큰은 argv/URL/history 금지)
+push 거부가 **auth 실패**가 아니라 **ruleset 위반**임을 반드시 구분해야 한다(안 그러면 auth 실패를 강제로 오인해
+거짓 인증). 토큰은 env + `GIT_ASKPASS`로만 공급하고, `GIT_TERMINAL_PROMPT=0` + credential.helper 비활성으로
+프롬프트·캐시 신원 재사용을 차단한다.
+```bash
+printf '#!/usr/bin/env bash\necho "$GIT_TOKEN"\n' > /tmp/askpass.sh && chmod +x /tmp/askpass.sh
+gpush() { # $1=token $2=refspec [$3=--force] — 토큰은 env로만, 결합 출력 반환
+  GIT_TOKEN="$1" GIT_ASKPASS=/tmp/askpass.sh GIT_TERMINAL_PROMPT=0 \
+    git -c credential.helper= push ${3:-} "https://x-access-token@github.com/$OWNER/$REPO.git" "$2" 2>&1
+}
+# 실패 사유가 ruleset 위반인지(auth 실패 아님) — GH006/repository rule/ruleset 마커. auth 실패("Authentication
+# failed"/"could not read Username"/403)는 매치 안 됨 → 거짓 인증 방지.
+is_ruleset_reject() { grep -qiE 'GH006|protected by (a )?rule|repository rule|ruleset|creation.*not allowed'; }
+```
+
 ### B2. 적대 push — non-writer 거부(creation)
-owner PAT는 writer App이 아니므로(bypass 아님) bump-poll/* 생성이 거부돼야 한다(네임스페이스 머신 전용).
+owner PAT는 bypass가 아니므로 bump-poll/* 생성이 거부돼야 한다(네임스페이스 머신 전용). 거부가 **ruleset 위반**임을 확인.
 ```bash
-git push "https://<owner-pat>@github.com/$OWNER/$REPO.git" HEAD:refs/heads/bump-poll/probe-$(date +%s)
-# 기대: 거부 (ruleset 위반 — creation restricted; GH가 push 거절)
+probe="bump-poll/probe-$(date +%s)"
+out="$(gpush '<owner-pat>' "HEAD:refs/heads/$probe")"; echo "$out"
+printf '%s' "$out" | is_ruleset_reject && echo "✓ creation 거부 = ruleset 위반" || echo "⚠️ ruleset 위반 아님(auth?) — 위 out 조사"
 ```
-결과: __(거부 확인 — 메시지: ______)__
+결과: __(ruleset 위반으로 거부 확인 — 마커: ______)__
 
-### B3. writer push — 성공(bypass)
-writer App 설치 토큰으로 동일 네임스페이스 push는 성공해야 한다.
+### B3. writer push — 성공(bypass) · B4용 ref 유지
+writer App 설치 토큰(owner-local, App private key로 발급)으로 동일 네임스페이스 push는 성공해야 한다.
 ```bash
-# writer App 토큰 발급(owner-local; App private key로) 후
-git push "https://x-access-token:<writer-app-token>@github.com/$OWNER/$REPO.git" HEAD:refs/heads/bump-poll/probe-writer-$(date +%s)
-# 기대: 성공 (bypass)
+wprobe="bump-poll/probe-writer-$(date +%s)"
+gpush '<writer-app-token>' "HEAD:refs/heads/$wprobe" && echo "✓ writer push 성공(bypass)"
 ```
-결과: __(성공 확인)__ · 정리: `git push ... --delete refs/heads/bump-poll/probe-writer-*`
+결과: __(성공 확인)__  (이 ref는 B4에서 재사용 후 정리)
 
-### B4. 적대 force-push — non-writer 거부(update)
-B3의 writer-생성 브랜치에 owner PAT로 force-push → 거부돼야 한다(update restricted).
+### B4. 적대 force-push — non-writer 거부(update) + 정리
+B3가 만든 writer-생성 ref에 owner PAT로 force-push → update restricted로 거부(다시 ruleset 위반 확인). 끝에 probe ref 정리.
 ```bash
-git push --force "https://<owner-pat>@github.com/$OWNER/$REPO.git" <다른커밋>:refs/heads/bump-poll/probe-writer-<위>
-# 기대: 거부 (update restricted)
+out="$(gpush '<owner-pat>' "<다른커밋>:refs/heads/$wprobe" --force)"; echo "$out"
+printf '%s' "$out" | is_ruleset_reject && echo "✓ update 거부 = ruleset 위반" || echo "⚠️ ruleset 위반 아님(auth?)"
+# 정리(writer 토큰으로 probe ref 삭제):
+gpush '<writer-app-token>' ":refs/heads/$wprobe"; gpush '<owner-pat>' ":refs/heads/$probe" 2>/dev/null || true
+rm -f /tmp/askpass.sh
 ```
-결과: __(거부 확인)__
+결과: __(ruleset 위반으로 거부 확인 · probe ref 정리)__
 
 ### B5. auto-delete-on-merge 무영향(회귀 가드)
 creation/update만 제약하므로 삭제는 무제약 → `delete_branch_on_merge`가 평소대로 동작.

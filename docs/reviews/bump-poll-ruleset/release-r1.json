@@ -1,0 +1,59 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: the authoritative live probe can both misclassify authentication failure as ruleset enforcement and expose trust-anchor credentials. The advertised App-rename path is also not wired end-to-end, and one current R-46 overclaim remains.",
+  "planFile": "docs/reviews/bump-poll-ruleset/spec.md",
+  "planInDiff": null,
+  "reviewedFileCount": 16,
+  "target": "branch diff against main",
+  "reviewedSha": "5a811f51154f19a9f72cb7af6f68d485cbfae98d",
+  "reviewedTree": "669d5f8d69362c0cd1863e7c34ddf2ccac9bb232",
+  "headMovedDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 3,
+  "planFindingCount": 0,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "The authoritative probe neither authenticates safely nor proves a ruleset rejection",
+      "body": "B2 places the owner PAT in the URL's username position, although GitHub HTTPS authentication uses the PAT as the password. Credential-helper state can therefore make this prompt, fail authentication, or reuse another cached identity; any resulting nonzero push could be mistaken for the expected ruleset rejection. B2 and B3 also expose live tokens through command arguments and shell history, contradicting the later no-secret promise. Because Seam C is the accepted authoritative proof, this can falsely certify enforcement while leaking an admin credential. [GitHub PAT guidance](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#using-a-personal-access-token-on-the-command-line)",
+      "file": "docs/reviews/bump-poll-ruleset/verification.md",
+      "line_start": 42,
+      "line_end": 57,
+      "confidence": 0.99,
+      "recommendation": "Use an ephemeral GIT_ASKPASS or credential helper with tokens supplied outside argv/history, disable interactive fallback, and assert that failure is specifically a ruleset violation rather than authentication failure. Retain the exact writer-created ref through B4 and clean it up afterward.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "medium",
+      "title": "The documented App-rename override splits the ruleset identity from the executor identity",
+      "body": "The new configuration explicitly advertises writer_app_slug as the supported override after an App rename. The ruleset will then bypass the renamed App, but `.github/workflows/bump-poll.yaml:161-162` still commits with the old bot identity and `tools/ensure-bump-pr.ts:264,289` still trusts the old default slug. PRs authored under the renamed App are consequently classified as untrusted and the bump state machine fails closed. The only documented non-default configuration is therefore not wired end-to-end.",
+      "file": "infra/github/terraform.tfvars.example",
+      "line_start": 20,
+      "line_end": 22,
+      "confidence": 0.97,
+      "recommendation": "Either make the writer slug a shared configuration consumed by Terraform, the workflow git identity, and ensure-bump-pr's --writer argument, or remove the rename-support claim and fail validation when the slug differs from the fixed runtime identity.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "low",
+      "title": "R-46 is still described as an F-0 residual in current tooling documentation",
+      "body": "The live tooling README still summarizes the force-push recheck as `TOCTOU 창 최소화 — 잔여는 F-0`, implying that F-0 is the remaining closure. That conflicts with the new invariant that F-0 only closes ref creation/push vectors and cannot eliminate concurrent PR creation. This file is current operational documentation, not one of the explicitly exempt historical bugfix artifacts.",
+      "file": "tools/README.md",
+      "line_start": 95,
+      "line_end": 98,
+      "confidence": 0.96,
+      "recommendation": "Replace the phrase with the same explicit wording used in ensure-bump-pr.ts: F-0 narrows the exposure, while concurrent PR creation remains an accepted R-46 residual.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Repair and re-review the Seam C authentication commands before merge.",
+    "Choose a single writer-App slug source or remove the unsupported rename path.",
+    "Correct the remaining current R-46 wording and refresh committed verification if executable procedures change."
+  ]
+}
