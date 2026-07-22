@@ -57,42 +57,43 @@ gpush() { # $1=역할(owner|writer)  $2=refspec  [$3=--force] — 시크릿-값 
 is_ruleset_reject() { grep -qiE 'GH006|protected by (a )?rule|repository rule|ruleset|(creation|update).*not allowed|cannot create'; }
 ```
 
-### B2. 적대 push — non-writer 거부(creation)
-owner PAT는 bypass가 아니므로 bump-poll/* 생성이 거부돼야 한다(네임스페이스 머신 전용). 거부가 **ruleset 위반**임을 확인.
+### B2–B4. 적대 프로브 — **함수로 실행**(최상위 스니펫에선 `return`이 무효라 abort 안 됨 — RL-1b)
+B2(non-writer creation 거부) → B3(writer 성공, 실패 시 abort) → B4(update 거부, ref 실재 확인 후에만) 순서를
+**하나의 함수** `probe_enforcement`에 담는다. 함수 안에서만 `return`이 실제로 실행을 종료하므로, B3 실패나 ref
+부재가 **owner push·성공 메시지에 도달하지 못한다**(거짓 인증 차단). 각 단계는 실패 시 즉시 return.
 ```bash
-probe="bump-poll/probe-$(date +%s)"
-out="$(gpush owner "HEAD:refs/heads/$probe")"; echo "$out"
-printf '%s' "$out" | is_ruleset_reject && echo "✓ creation 거부 = ruleset 위반" || echo "⚠️ ruleset 위반 아님(auth?) — 위 out 조사"
-```
-결과: __(ruleset 위반으로 거부 확인 — 마커: ______)__
+probe_enforcement() {
+  local probe="bump-poll/probe-$(date +%s)" wprobe="bump-poll/probe-writer-$(date +%s)" out oid upd rc
+  echo "== B2: non-writer creation → 거부 기대 =="
+  out="$(gpush owner "HEAD:refs/heads/$probe")"; echo "$out"
+  printf '%s' "$out" | is_ruleset_reject || { echo "⚠️ B2 ruleset 위반 아님(auth?) — 중단"; return 1; }
+  echo "✓ B2 creation 거부 = ruleset 위반"
 
-### B3. writer push — 성공(bypass) · 실패 시 중단
-writer App 토큰으로 동일 네임스페이스 push는 성공해야 한다. **실패하면 B4가 update를 시험할 수 없으므로 즉시 중단**(RL-1b).
-```bash
-wprobe="bump-poll/probe-writer-$(date +%s)"
-gpush writer "HEAD:refs/heads/$wprobe" || { echo "✗ B3 writer push 실패 — 중단(B4 update 검증 불가). bypass 미동작?"; return 1; }
-echo "✓ writer push 성공(bypass)"
-```
-결과: __(성공 확인)__
+  echo "== B3: writer push → 성공 기대 =="
+  gpush writer "HEAD:refs/heads/$wprobe" || { echo "✗ B3 writer push 실패 — 중단(B4 update 검증 불가·bypass 미동작?)"; return 1; }
+  echo "✓ B3 writer push 성공(bypass)"
 
-### B4. 적대 force-push — non-writer 거부(update)
-**먼저** writer-생성 ref가 원격에 실재함을 확인한다(없으면 B4는 update가 아니라 creation을 시험하게 되어 거짓 인증 —
-RL-1b). 그다음 **다른 커밋**(commit-tree — HEAD·워킹트리 무변경)을 owner PAT로 force-push → **nonzero + ruleset
-위반** 둘 다여야 update 강제로 인정.
-```bash
-oid="$(git ls-remote "https://github.com/$OWNER/$REPO.git" "refs/heads/$wprobe" | cut -f1)"
-[ -n "$oid" ] || { echo "✗ writer ref 원격 부재 — B4는 update가 아님, 중단"; return 1; }
-echo "update 대상 확인: refs/heads/$wprobe @ $oid"
-upd="$(git commit-tree "HEAD^{tree}" -p HEAD -m probe-update)"   # HEAD와 다른 OID, 워킹트리·HEAD 무변경
-out="$(gpush owner "$upd:refs/heads/$wprobe" --force)"; rc=$?
-echo "$out"
-{ [ "$rc" -ne 0 ] && printf '%s' "$out" | is_ruleset_reject; } && echo "✓ update 거부 = ruleset 위반(nonzero+ruleset)" || echo "⚠️ update가 안 막혔거나 ruleset 위반 아님 — 조사(false-certify 위험)"
+  echo "== B4: non-writer update → 거부 기대 (ref 실재 확인 후에만) =="
+  oid="$(git ls-remote "https://github.com/$OWNER/$REPO.git" "refs/heads/$wprobe" | cut -f1)"
+  [ -n "$oid" ] || { echo "✗ writer ref 원격 부재 — B4는 update 아님, 중단(creation 재시험 방지)"; return 1; }
+  echo "  update 대상: refs/heads/$wprobe @ $oid"
+  upd="$(git commit-tree "HEAD^{tree}" -p HEAD -m probe-update)"   # HEAD와 다른 OID, 워킹트리·HEAD 무변경
+  out="$(gpush owner "$upd:refs/heads/$wprobe" --force)"; rc=$?; echo "$out"
+  if [ "$rc" -ne 0 ] && printf '%s' "$out" | is_ruleset_reject; then
+    echo "✓ B4 update 거부 = ruleset 위반(nonzero+ruleset)"
+  else
+    echo "⚠️ B4 update가 안 막혔거나 ruleset 위반 아님 — false-certify 위험"
+    gpush writer ":refs/heads/$wprobe" 2>/dev/null; return 1
+  fi
+  gpush writer ":refs/heads/$wprobe" 2>/dev/null || true   # 정리(삭제는 무제약)
+  echo "✓ B2–B4 전부 통과 · probe ref 정리"
+}
+probe_enforcement; echo "probe_enforcement exit=$?"   # exit 0만 = 세 컨트롤 전부 실증
 ```
-결과: __(update가 ruleset 위반으로 거부 확인 — nonzero+마커)__
+결과: __(exit 0 · B2 creation 거부 · B3 writer 성공 · B4 update 거부 전부 ruleset 위반으로 확인)__
 
-### B4b. 정리 + 시크릿 해제
+### B4b. 시크릿 해제 (probe ref는 probe_enforcement가 이미 정리)
 ```bash
-gpush writer ":refs/heads/$wprobe" 2>/dev/null || true   # probe ref 삭제(삭제는 무제약)
 unset OWNER_PAT WRITER_TOKEN; rm -f /tmp/askpass.sh
 ```
 
