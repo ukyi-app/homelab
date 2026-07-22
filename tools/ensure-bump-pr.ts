@@ -1832,8 +1832,10 @@ if (action === "adopt") {
 // 있다 — PR 생성은 git ref를 움직이지 않으므로 `--force-with-lease`(OID만 본다)는 여전히 성공해 그 새 PR의
 // head·리뷰를 재작성한다. → force-push 직전에 **다시 조회**해 창을 마이크로초로 좁힌다.
 // ⚠️ 이건 **완화이지 닫힘이 아니다**: git ref lease는 동시 PR 생성을 원리적으로 막을 수 없다(재확인과 push
-//    사이에도 창이 남는다). **환원 불가능한 잔여 TOCTOU의 진짜 닫힘은 F-0**(bump-poll/** ref를 writer App에
-//    예약하는 서버-강제 룰셋 — 그러면 남이 그 네임스페이스에 PR/ref를 못 만든다)이다. 이건 도구 밖 IaC다.
+//    사이에도 창이 남는다). F-0(bump-poll/** ref를 writer App에 예약하는 서버-강제 룰셋)이 방어를 **더 좁힌다** —
+//    ref 생성/push를 writer 전용으로 만들어 rogue ref 심기를 닫는다. 그러나 **동시 PR 생성 자체(이미 존재하는
+//    head에 다른 base PR)는 룰셋으로도 못 막는 수용된 잔여다** — ruleset은 PR 생성을 게이트하지 않는다. 이건
+//    도구 밖 IaC이고, 강제의 완전 검증은 owner-local 라이브(apply 후 적대 테스트)뿐이다.
 // ⚠️ 재확인은 **경합(untrustedSameRepo)만이 아니라 인가 전체를 액션별로 재검증**한다(R-47). 초기 판정은
 //    rebuild를 `humanTouch !== null`이면 억제한다(H-4) — 그런데 초기 스캔 뒤 리뷰어가 리뷰·코멘트·담당자·
 //    hold 라벨을 달아도 ref OID도 PR 소유권도 안 바뀐다 → 경합만 보는 재확인은 이를 통과시키고 leased
@@ -1849,7 +1851,7 @@ if (action === "adopt" || action === "rebuild") {
       .join(", ");
     execError(
       `force-push 직전 재확인: 초기 스캔 뒤 비신뢰 동일-레포 PR이 이 head를 점유했다: ${who} — 브랜치 '${branch}'는 더 이상 배타적으로 우리 것이 아니다. `
-      + "밀지 않는다(그 PR의 head·리뷰를 재작성한다). TOCTOU 창을 좁혔을 뿐 진짜 닫힘은 F-0(bump-poll/** writer App 예약 룰셋)이다 — R-46",
+      + "밀지 않는다(그 PR의 head·리뷰를 재작성한다). TOCTOU 창을 좁혔을 뿐이다 — F-0(bump-poll/** writer App 예약 룰셋)은 ref 생성/push 벡터를 닫지만 동시 PR 생성 자체는 못 막는 수용된 잔여다 — R-46",
     );
   }
   // (b) rebuild 전용 액션별 재검증(R-47) — 그 힘은 **같은 신뢰 PR + 같은 head + 사람 흔적 없음**에서만 나온다.

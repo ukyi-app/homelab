@@ -21,12 +21,19 @@ backend.hcl
 crash.log
 override.tf
 override.tf.json
+# terraform override 파일은 일반 .tf 뒤에 병합돼 리소스를 재정의/비활성화한다 —
+# 신뢰 앵커(bump-poll ruleset 등) 우회 방지로 전 형태를 무시(bats no-override 가드와 이중화).
+*_override.tf
+*_override.tf.json
 
 # --- SOPS plaintext scratch ---
 *.tmp.yaml
 
 # --- 외부(비신뢰) 앱 레포 sparse-checkout 경로 — create-app/update-secrets가 여기에 푼다 ---
 .apprepo/
+
+# --- 컨덕터 임시 상태(feature/bugfix 파이프라인 conductor·로컬 티켓) — 커밋 아티팩트는 docs/reviews/ ---
+.scratch/
 
 # --- Kubeconfig / cluster creds ---
 kubeconfig

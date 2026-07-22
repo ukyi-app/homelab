@@ -1,0 +1,47 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "Do not ship this plan: it still overstates R-46 mitigation and leaves a known branch-deletion compatibility decision until after activation without a safe rollout path.",
+  "planFile": "docs/reviews/bump-poll-ruleset/spec.md",
+  "planInDiff": true,
+  "reviewedFileCount": 2,
+  "target": "working tree diff",
+  "reviewedSha": "abd1bb9ed3b76d2ef9abefd5f6af2a7fc9a74f7e",
+  "reviewedTree": "9e39eb31c8ef92cde76430af3150ece157ae4b7b",
+  "headMovedDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
+  "planFindingCount": 2,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "R-46 is neither blocked nor neutralized",
+      "body": "The plan correctly admits that rulesets do not gate PR creation, but then claims main protection neutralizes the residual. The actual R-46 interleaving remains: after the final scan, a non-writer can open a different-base PR from an existing writer-created head without mutating the ref; the writer App can then perform its allowed force-push, rewriting that PR's shared head and review state. Main protection neither protects a different base nor prevents this head rewrite. Calling R-46 neutralized would lead implementers and operators to retire a risk that still exists.",
+      "file": "docs/reviews/bump-poll-ruleset/spec.md",
+      "line_start": 42,
+      "line_end": 44,
+      "confidence": 0.99,
+      "recommendation": "State that F-0 closes only non-writer ref creation/update/deletion and leaves R-46 as a narrowed but accepted race. Preserve the executor's last-moment recheck, revise the originating backlog's full-closure claim, and either explicitly accept the residual or choose an architecture that avoids force-pushing shared mutable heads.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "high",
+      "title": "Open question: the rollout has no safe deletion fallback",
+      "body": "The plan treats the writer App as the only required actor while deferring the `deletion=true` fallback until a live post-apply failure. That omits the repository's current automatic head deletion path: GitHub explicitly documents that repository rules can prevent automatic branch deletion ([GitHub documentation](https://docs.github.com/en/enterprise-cloud@latest/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-the-automatic-deletion-of-branches)). The current executor has no explicit deletion path, so failure leaves accumulating orphan heads; removing `deletion=true` violates the non-writer deletion invariant, while adding App-owned deletion is an unsliced code change with retry and authorization decisions. Merely listing those options is not an actionable rollback plan.",
+      "file": "docs/reviews/bump-poll-ruleset/spec.md",
+      "line_start": 154,
+      "line_end": 157,
+      "confidence": 0.98,
+      "recommendation": "Resolve the deletion strategy before ticket slicing. Make the auto-delete probe a pre-activation rollout gate with an exact rollback and orphan-cleanup procedure, or initially ship creation/update restrictions without deletion until an idempotent writer-App cleanup path has been designed and verified.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Correct every R-46 closure/neutralization claim, including the originating backlog document.",
+    "Choose and specify the deletion rollout, rollback, and orphan-cleanup behavior before marking the spec ready-for-agent."
+  ]
+}

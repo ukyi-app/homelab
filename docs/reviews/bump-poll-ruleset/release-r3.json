@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "needs-attention",
+  "summary": "Do not ship yet. RL-1a is closed, but RL-1b remains open: the documented Bash procedure can still continue after writer creation fails and falsely certify creation rejection as update enforcement. No new critical issue was found.",
+  "planFile": "docs/reviews/bump-poll-ruleset/spec.md",
+  "planInDiff": null,
+  "reviewedFileCount": 19,
+  "target": "branch diff against main",
+  "reviewedSha": "f5a50d5e65b0343c3550bf36ce2687a40bfb57ff",
+  "reviewedTree": "e32ebc2af6abb2efa3d87d6657d70f7cd89f3518",
+  "headMovedDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "RL-1b aborts do not stop the documented Bash procedure",
+      "body": "B3 and B4 use `return 1`, but the commands are presented as top-level Bash snippets, not inside a function or sourced script. At top level, Bash reports that `return` is invalid and continues: B3 can print the success message after a failed writer push, and B4 can continue after `ls-remote` finds no ref. The ensuing owner push then exercises creation again; its nonzero ruleset rejection matches `is_ruleset_reject`, falsely reporting update enforcement as verified.",
+      "file": "docs/reviews/bump-poll-ruleset/verification.md",
+      "line_start": 69,
+      "line_end": 89,
+      "confidence": 0.99,
+      "recommendation": "Wrap the complete B3–B4 procedure in a Bash function or executable script where `return`/`exit` truly terminates execution. Add a dry-run proving failed B3 and an empty `ls-remote` result cannot reach `commit-tree`, the owner push, or any success message.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Fix the control-flow aborts and re-run the scoped RL-1b verification."
+  ]
+}
