@@ -21,6 +21,10 @@ backend.hcl
 crash.log
 override.tf
 override.tf.json
+# terraform override 파일은 일반 .tf 뒤에 병합돼 리소스를 재정의/비활성화한다 —
+# 신뢰 앵커(bump-poll ruleset 등) 우회 방지로 전 형태를 무시(bats no-override 가드와 이중화).
+*_override.tf
+*_override.tf.json
 
 # --- SOPS plaintext scratch ---
 *.tmp.yaml
