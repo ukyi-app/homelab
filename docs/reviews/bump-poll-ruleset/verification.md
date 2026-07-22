@@ -85,5 +85,18 @@ gh api --method PUT "/repos/$OWNER/$REPO/rulesets/$RID" -f enforcement=disabled 
 
 ---
 
-## A. CI 검증(브랜치 HEAD) — Stage 5에서 기입
-_(release 게이트 전 전체 스위트 결과·verified SHA/tree를 여기에 추가)_
+## A. CI 검증(브랜치 HEAD) — Stage 5 (2026-07-22)
+
+verified SHA: `0cd1e3b` · tree: `ec9f78a` · 작업트리 클린.
+
+| 검사 | 명령 | 결과 |
+|---|---|---|
+| 전체 bats 게이트 | `./scripts/run-bats.sh` | exit 0 · **1368 ok / 0 not-ok** (canonical 3층 가드 16 + traps-sync 3 포함) |
+| terraform validate(3 루트) | `make tf-validate` | cloudflare·tailscale·**github** 전부 validated |
+| 타입체크 | `bun run typecheck` (tsc --noEmit) | exit 0 |
+| 기반 게이트 | `make verify` | skeleton·doc-index·bats-accounting·resource-limits·alert-rules·netpol·image-pins·sops 왕복 전부 OK |
+| traps 원장 | `bash scripts/verify-traps.sh` · `bats tests/gates/test_traps-sync.bats` | 양방향 tie OK · 3/3 |
+
+랜딩 판정: 브랜치 자체 표면 green(위). required check `gate`는 정상 CI 환경에서 전량 재실행한다.
+(참고: `make ci` 전체는 환경 행 2건 — `test_sealed-secrets-restore.bats`(docker)·`test_dev-postgres.bats`(라이브 postgres) —
+이 브랜치 diff와 무관한 로컬 환경 결손이라 위 개별 게이트로 대체 확인.)
