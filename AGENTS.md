@@ -104,6 +104,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 재부팅 IP churn — instance 라벨 불안정
 - push 주기 > instant 룩백 → 룰 시리즈 구멍 → 무발화
 - rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭
+- bump-poll/** 예약 룰셋 — 인터록≠인증·정적 가드는 변경 감지기
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

@@ -44,3 +44,4 @@
 | 재부팅 IP churn — instance 라벨 불안정(increase 누적 누출·on() 조인 422) | gate | `tools/check-alert-rules.ts`, `tests/test_alert_rules.bats` |
 | push 주기 > instant 룩백(기본 5m) → 룰 시리즈 구멍 → `for:` 영구 리셋 = 무발화(fail-open) | gate | `tests/gates/vmalert-drift-firing-e2e.sh`, `tests/gates/vmalert-bulkssd-firing-e2e.sh`, `tests/gates/vmalert-digest-stale-firing-e2e.sh`, `tests/gates/test_digest-exporter.bats`, `tests/gates/test_digest-exporter-producer.bats`, `tests/gates/skopeo-timeout-smoke.sh`, `tools/check-alert-rules.ts`(모드 C: 레포 전역 정적 lint + push 생산자 완전성 가드), `tests/test_alert_rules.bats` |
 | rollup 윈도 상한(라벨-값 상태 게이지는 W < `for:`) — bump phantom 오발화 + 우변 존재 가드 | gate | `tests/gates/vmalert-drift-firing-e2e.sh` |
+| bump-poll/** writer App 예약(인터록≠인증·R-46 수용 잔여·정적 가드=best-effort 변경감지기·Seam C 권위) | gate | `tests/gates/test_bump_poll_ruleset.bats` |
