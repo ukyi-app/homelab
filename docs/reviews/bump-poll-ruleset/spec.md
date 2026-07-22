@@ -152,14 +152,21 @@ owner가 원하는 것: **강제 가능한 서버측 불변식**으로 방어를
   (`data github_app.writer` · `resource ruleset` · `variable writer_app_slug`)을 추출→주석 제거→공백 정규화한 뒤
   **핀된 canonical과 정확히 일치**해야 한다. 세 블록 밖 decoy는 무관하고, 블록 안 어떤 간접화·meta-arg·추가 actor·값
   변경도 canonical을 바꿔 잡힌다. 즉 **변경 감지기** — 보안 블록에 손대면 CI가 red가 되어 owner 재검토·재검증을
-  강제한다. red-team이 찾은 각 우회 클래스(간접화·case-evasion·meta-arg·주석 2차 bypass·identity redirect·cross-file
-  slug redirect·decoy-locals include/exclude)를 **뮤테이션 증인**으로 못박고, 무해한 주석 변경은 canonical 불변(대조군)
-  임을 확인한다. 라이브 API 미호출 — CI-safe. `@test` 이름 영어(한글 인코딩 버그 회피). deletion은 이번 increment
-  canonical에 없다(spec R-2 — 후속이 정리경로와 함께 추가).
-- **Seam C — 적대 라이브 검증 (owner-local, CI seam 아님) — resolved 의미의 권위 검증**: Seam B는 커밋된 *소스*가
-  리뷰된 정규형인지만 본다(변경 감지기). *실제 강제 동작*(resolved plan·apply-time tfvars·provider/owner)은 아키텍처상
-  CI에서 관측 불가하다
-  (신뢰 앵커 — CI에 admin PAT를 두지 않는다). 대신 owner-local 절차 + 캡처된 증거로 분리한다. 검증 항목:
+  강제한다. structure r2가 canonical조차 **모듈 컨텍스트**로 우회됨을 보였다(S-2): 리소스를 `/* */`로 감싸 terraform
+  에서 사라지게 하기; 추적된 `*_override.tf`로 count=0/enforcement disable 병합. 그래서 가드는 **3층**이다 — (1) canonical
+  freeze(값·구조), (2) **no-block-comments**(문자열 blank 후 `/*`·`*/` 금지 → 주석 wrap), (3) **no-override**(infra/github에
+  추적 override 파일 0 + `.gitignore`가 `*_override.tf[.json]` 무시). red-team/게이트가 찾은 각 클래스(간접화·case-evasion·
+  meta-arg·주석 2차 bypass·identity redirect·cross-file slug redirect·decoy-locals·**주석 wrap·override**)를 **뮤테이션
+  증인**으로 못박고, 무해한 주석 변경은 canonical·block-comment 불변(대조군)임을 확인한다. 라이브 API 미호출 — CI-safe.
+  `@test` 이름 영어. deletion은 이번 increment canonical에 없다(spec R-2).
+  ⚠️ **여전히 best-effort**: `removed` 블록·resolved plan·apply-time tfvars·provider/owner 등은 CI에서 원리적으로 검증
+  불가 — 완전 검증은 terraform plan(GitHub API+자격)이 필요한데 신뢰 앵커 모델이 CI에서 그 자격을 배제한다. 따라서
+  정적 가드는 변경 감지기이고 **완전 보증은 Seam C**다.
+- **Seam C — 적대 라이브 검증 (owner-local, CI seam 아님) — resolved 의미의 권위·필수 검증**: Seam B는 커밋된 *소스*가
+  리뷰된 정규형인지만 본다(best-effort 변경 감지기). *실제 강제 동작*은 HCL 구조·override·주석·plan 결과와 무관하게
+  **라이브 룰셋을 관측해야만** 확증되며, 이는 아키텍처상 CI에서 관측 불가하다
+  (신뢰 앵커 — CI에 admin PAT를 두지 않는다). **owner는 apply 후 이 절차를 반드시 수행한다**(Seam B green ≠ 강제 보증).
+  검증 항목:
   ①non-writer(owner PAT)로 `bump-poll/probe-*` push→거부(creation) ②writer App 토큰으로 동일 push→성공(bypass)
   ③기존 bump-poll 브랜치에 non-writer force-push→거부(update) ④apply가 성공하고 룰셋에 writer App이 bypass로
   표시(data source id가 Integration actor로 유효) ⑤실제 bump PR auto-merge 후 head 브랜치 자동 삭제가 **평소대로**
