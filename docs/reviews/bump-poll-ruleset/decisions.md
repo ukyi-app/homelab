@@ -38,3 +38,7 @@ RL-1a fixed 확인(닫힘). RL-1b는 재적발 — accept:
 RL-1b (high, 재적발) — `return 1`을 최상위 bash 스니펫에 써서 abort 안 됨(최상위 return 무효 → 계속 실행 → B3 실패 후 성공 출력·ls-remote 빈 결과 후 owner push로 creation 재시험→update 오검증). 수정: B2–B4를 함수 `probe_enforcement()`로 감싸 return이 실제 종료하게 함.
 ★ 실행 가능 dry-run 증명(문서 함수 그대로 추출, gpush/git mock): ①B3 실패 rc=1·commit-tree 0·owner-force 0·거짓성공 0 ②ls-remote 빈 rc=1·commit-tree 0·owner-force 0·거짓성공 0 ③정상 rc=0·통과. → B3 실패·ref 부재가 commit-tree/owner-push/성공에 도달 못 함을 실증(리뷰어 요청 충족).
 WAIVED by user: release round 4 면제. 근거 = RL-1b가 판단이 아니라 실행 증거로 닫힘(dry-run이 abort 실증). RL-1a 닫힘·RL-2/RL-3 fixed. 정적 검증은 여기까지, resolved 강제는 owner-local Seam C(이제 안전·정확).
+
+### structure r1 (chore/pin-writer-app-id — App ID 하드코딩)
+
+R-1 accept (as proposed·부분 조정) — Authoritative Seam C still depends on the removed slug resolver. verification.md는 살아있는 owner-local 기록이라 리터럴-ID 설계로 갱신(data source 제거→classic 오버라이드 불요, fine-grained 404 근거는 역사적, id=19598965 apply 보존 + fine-grained·classic No changes 실측·App ID 4043080 신원 추가). spec.md는 F-0 원안 point-in-time 아카이브라 전면 재작성 대신 forward-pointer 노트(재도입 방지)만 추가.

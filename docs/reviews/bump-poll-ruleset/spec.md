@@ -1,5 +1,13 @@
 # Spec — bump-poll/** writer-App 예약 ruleset (F-0)
 
+> ★ **2026-07-23 후속 갱신 — 아래는 F-0 원안(point-in-time 아카이브)이다. 현행 설계와 다름.**
+> owner-local 검증 이후 `chore/pin-writer-app-id`에서 `data.github_app.writer`(slug→ID)와 `variable
+> "writer_app_slug"`를 **제거**하고 bypass `actor_id`에 **App ID 4043080을 리터럴로 핀**했다(fine-grained PAT가
+> `GET /apps/{slug}`를 404로 막아 data source가 못 쓰임). 따라서 canonical freeze도 **3블록 → 1블록(resource
+> ruleset)**으로 축소됐고 identity witness는 actor_id 리터럴 redirect/간접화로 대체됐다. **재도입 금지**: 아래
+> 3블록 설계·slug data source를 되살리지 말 것. **현행 계약의 SSOT는 `infra/github/rulesets.tf` +
+> `tests/gates/test_bump_poll_ruleset.bats`, 라이브 검증은 `verification.md`**다.
+
 status: ready-for-agent
 slug: bump-poll-ruleset
 branch: feat/bump-poll-ruleset
