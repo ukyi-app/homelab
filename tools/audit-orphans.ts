@@ -38,6 +38,11 @@ const CI = process.argv.includes("--ci");
 // 연결=SealedSecret이라 .bindings.json엔 db/redis 참조가 없다(dangling-binding 제거).
 // stale-ledger-row는 제외 — apps/·platform/ 밖 워크로드 오탐 방지. 원장 드리프트는 --strict로만.
 const BLOCKING = new Set(["orphan-dns", "activation-exposure-drift", "missing-activation"]); // pass3 F1: surfaceHash(app-tree) drift는 비차단(이미지 bump 데드락 회피); restale2 F1: 노출 행(host/public) drift=activation-exposure-drift는 차단(데드락 무관 + 미재검증 DNS 노출 막음); missing-activation: 마커 부재=재노출 게이트 사각(차단)
+// REPORT_ONLY: 정보성이면서 **설계상 재발하는** 드리프트 — 텔레그램 페이지에서 제외한다(감사 JSON엔 유지 = 가시성).
+// activation-surface-drift는 이미지 bump마다 apps/<app> 표면 해시가 바뀌어(비차단, autoDeploy 데드락 회피 위해
+// 의도적 비차단) 매 주기 알림을 내던 유일한 노이즈원이다. 실제 노출 재검증은 blocking activation-exposure-drift
+// (apps.json host/public)가 페이지하므로 이건 report-only로 강등한다. audit.yaml이 `alerting`으로 게이트한다.
+const REPORT_ONLY = new Set(["activation-surface-drift"]);
 
 type RegRow = { name: string; active?: boolean; host?: string | null; public?: boolean };
 
@@ -164,7 +169,9 @@ if (existsSync(connKustPath)) {
 }
 
 const blocking = findings.filter((f) => BLOCKING.has(f.type));
-console.log(JSON.stringify({ findings, count: findings.length, blocking: blocking.length }, null, 2));
+// alerting: 텔레그램 페이지 대상 = report-only 제외 전 finding. blocking ⊆ alerting ⊆ count(불변식).
+const alerting = findings.filter((f) => !REPORT_ONLY.has(f.type));
+console.log(JSON.stringify({ findings, count: findings.length, blocking: blocking.length, alerting: alerting.length }, null, 2));
 if (STRICT && findings.length > 0) process.exit(1);
 if (CI && blocking.length > 0) {
   console.error(`audit-orphans: 배포 정합 위반 ${blocking.length}건 — ${blocking.map((f) => `${f.type}:${f.subject}`).join(", ")}`);
