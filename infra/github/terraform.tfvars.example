@@ -17,8 +17,5 @@ github_owner = "<GH_USER>"
 # repo 이름 (기본값 유지 권장 — terraform이 이 repo의 설정/branch protection/Actions secrets를 관리)
 repo_name = "homelab"
 
-# (선택) bump-poll/** 예약 ruleset의 bypass writer App slug. 시크릿 아님. 신뢰 앵커라 기본값에 pin(bats 강제).
-# ⚠️ App 리네임은 이 변수만으로 안 된다 — 룰셋 변수 + bump-poll.yaml git 신원(user.name/email) +
-#    ensure-bump-pr.ts DEFAULT_WRITER를 **동시 갱신**해야 한다. 안 그러면 룰셋은 리네임 App을 bypass하는데
-#    실행기는 옛 신원을 신뢰/커밋해 bump 상태기계가 fail-closed. 그 3곳 조율 없이 이 값만 바꾸지 말 것.
-# writer_app_slug = "ukyi-homelab-writer"
+# bump-poll/** 예약 ruleset의 bypass writer App은 rulesets.tf에서 App ID(4043080)를 직접 핀한다
+# (fine-grained PAT가 GET /apps/{slug} 404 → slug data source 못 씀). 여기 설정할 값 없음.
