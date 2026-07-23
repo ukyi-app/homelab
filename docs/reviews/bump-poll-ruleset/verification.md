@@ -1,5 +1,14 @@
 # Verification — bump-poll/** writer App 예약 ruleset (F-0)
 
+> ★ **2026-07-23 설계 변경 — 아래 B0/전제의 "slug data source·classic 오버라이드" 문구는 역사적이다.**
+> owner-local 검증(2026-07-23, ruleset id=19598965) **이후** `chore/pin-writer-app-id`에서 `data.github_app.writer`
+> (slug→ID 해석)를 제거하고 bypass `actor_id`에 **App ID 4043080을 리터럴로 핀**했다(rulesets.tf). 근거는 아래
+> B0에 기록된 fine-grained PAT의 `GET /apps/{slug}` 404. **현행 설계에서 apply는 어떤 토큰이든 되고 classic
+> 오버라이드가 불요**하다 — 실측: 하드코딩 후 ruleset plan이 **fine-grained·classic 둘 다 `No changes`**(리터럴
+> 4043080 = data source가 리졸브하던 값, 404 소멸). App 신원: `GET /apps/ukyi-homelab-writer` → id=**4043080**,
+> owner=ukyi-app 확인. **아래 apply 결과(id=19598965)·B1~B5는 그대로 유효**(당시 절차가 data source·classic
+> 오버라이드를 쓴 것은 정확한 역사 기록). canonical 게이트도 1블록(actor_id 리터럴)으로 갱신됨.
+
 이 파일은 두 층의 검증을 담는다:
 - **B. owner-local Seam C — resolved 의미의 권위·필수 검증**(아래, 이 티켓 산출): apply 후 owner가 실행한다.
   정적 CI 가드(Seam B)는 커밋 소스가 리뷰된 정규형인지만 보는 **best-effort 변경 감지기**다 — red-team/게이트가

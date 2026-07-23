@@ -10,9 +10,11 @@
 # 필요한데, 신뢰 앵커 보안 모델이 그 자격을 CI에서 의도적으로 배제한다 → 원리적으로 불가.
 #
 # 그래서 이 가드는 **best-effort 변경 감지기**다(완전 의미 검증기 아님). 알려진 클래스를 3층으로 잡는다:
-#   (1) canonical freeze — 보안 핵심 3블록(data github_app.writer · resource ruleset · variable
-#       writer_app_slug)을 추출→주석제거→공백정규화한 뒤 핀된 canonical과 정확일치. 블록 밖 decoy 무관,
-#       블록 안 어떤 간접화·meta-arg·추가 actor·값 변경도 canonical을 바꿔 잡힘.
+#   (1) canonical freeze — 보안 핵심 **1블록(resource ruleset — actor_id=4043080 리터럴 핀)**을
+#       추출→주석제거→공백정규화한 뒤 핀된 canonical과 정확일치. 블록 밖 decoy 무관, 블록 안 어떤
+#       간접화·meta-arg·추가 actor·**actor_id 값 변경**도 canonical을 바꿔 잡힘. (2026-07-23: App ID를
+#       slug data source 대신 직접 핀 — fine-grained PAT가 GET /apps/{slug} 404. data source·writer_app_slug
+#       변수가 사라져 관련 identity 우회 클래스도 소멸, actor_id 리터럴 리다이렉트 witness로 대체.)
 #   (2) no-block-comments — rulesets.tf에서 문자열을 blank한 뒤 남는 /* 또는 */(진짜 블록주석)를 금지 →
 #       리소스를 주석으로 감싸 없애는 wrap을 잡음. (bump-poll/**의 /* 는 문자열 내부라 무해.)
 #   (3) no-override — infra/github에 추적된 terraform override 파일(*_override.tf[.json], override.tf[.json])
@@ -28,17 +30,13 @@
 
 ROOT="$BATS_TEST_DIRNAME/../.."
 TF="$ROOT/infra/github/rulesets.tf"
-VARS="$ROOT/infra/github/variables.tf"
 
-# (1) 보안 3블록의 정규형: 각 블록 header~(컬럼0 }) 추출 → 주석(#, //, 인라인 /* */) 제거 → 공백 정규화.
+# (1) 보안 1블록(ruleset resource)의 정규형: header~(컬럼0 }) 추출 → 주석(#, //, 인라인 /* */) 제거 → 공백 정규화.
 # 인라인 /* */ 는 s:/\*[^*]*\*/: 로 제거(내부에 * 없을 때) — bump-poll/** 의 /** 는 매치 안 됨(문자열 안전).
 extract_block() { sed -n "/$2/,/^}/p" "$1"; }
 canonical_blocks() {
-  {
-    extract_block "$1" '^data "github_app" "writer" {'
-    extract_block "$1" '^resource "github_repository_ruleset" "bump_poll_writer_only" {'
-    extract_block "$2" '^variable "writer_app_slug" {'
-  } | sed -E 's://.*$::; s:#.*$::; s:/\*[^*]*\*/::g' | tr '\n' ' ' | tr -s '[:space:]' ' ' | sed -E 's/^ //; s/ $//'
+  extract_block "$1" '^resource "github_repository_ruleset" "bump_poll_writer_only" {' \
+    | sed -E 's://.*$::; s:#.*$::; s:/\*[^*]*\*/::g' | tr '\n' ' ' | tr -s '[:space:]' ' ' | sed -E 's/^ //; s/ $//'
 }
 
 # (2) 문자열("...")을 blank + 라인주석 제거 후 남는 블록주석(/* 또는 */) 금지 → 주석 wrap 차단.
@@ -51,10 +49,10 @@ no_block_comments() {
 is_override_path() { printf '%s' "$1" | grep -Eq '(^|/)([^/]*_)?override\.tf(\.json)?$'; }
 
 # 핀된 canonical(신뢰 앵커의 리뷰된 형태). 위 재생성 절차로만 갱신한다.
-CANONICAL='data "github_app" "writer" { slug = var.writer_app_slug } resource "github_repository_ruleset" "bump_poll_writer_only" { name = "bump-poll-writer-only" repository = github_repository.homelab.name target = "branch" enforcement = "active" conditions { ref_name { include = ["refs/heads/bump-poll/**"] exclude = [] } } rules { creation = true update = true } bypass_actors { actor_id = tonumber(data.github_app.writer.id) actor_type = "Integration" bypass_mode = "always" } } variable "writer_app_slug" { type = string default = "ukyi-homelab-writer" }'
+CANONICAL='resource "github_repository_ruleset" "bump_poll_writer_only" { name = "bump-poll-writer-only" repository = github_repository.homelab.name target = "branch" enforcement = "active" conditions { ref_name { include = ["refs/heads/bump-poll/**"] exclude = [] } } rules { creation = true update = true } bypass_actors { actor_id = 4043080 actor_type = "Integration" bypass_mode = "always" } }'
 
-@test "security blocks match the pinned canonical form" {
-  got="$(canonical_blocks "$TF" "$VARS")"
+@test "security block matches the pinned canonical form" {
+  got="$(canonical_blocks "$TF")"
   [ "$got" = "$CANONICAL" ] || { echo "canonical 불일치 — 실제:"; echo "$got"; false; }
 }
 
@@ -73,59 +71,57 @@ CANONICAL='data "github_app" "writer" { slug = var.writer_app_slug } resource "g
 @test "witness: indirection — target=var.tgt + decoy locals is caught" {
   c="$(mktemp)"; sed -E 's/^([[:space:]]*target[[:space:]]*=[[:space:]]*)"branch"/\1var.tgt/' "$TF" > "$c"
   printf '\nlocals { target = "branch" }\n' >> "$c"
-  [ "$(canonical_blocks "$c" "$VARS")" != "$CANONICAL" ]; rm -f "$c"
+  [ "$(canonical_blocks "$c")" != "$CANONICAL" ]; rm -f "$c"
 }
 
 @test "witness: case-evasion — enforcement=lower(\"DISABLED\") + decoy is caught" {
   c="$(mktemp)"; sed -E 's/^([[:space:]]*enforcement[[:space:]]*=[[:space:]]*)"active"/\1lower("DISABLED")/' "$TF" > "$c"
   printf '\nlocals { enforcement = "active" }\n' >> "$c"
-  [ "$(canonical_blocks "$c" "$VARS")" != "$CANONICAL" ]; rm -f "$c"
+  [ "$(canonical_blocks "$c")" != "$CANONICAL" ]; rm -f "$c"
 }
 
 @test "witness: meta-arg — for_each={} disabling the resource is caught" {
   c="$(mktemp)"; sed -E 's/^(resource "github_repository_ruleset" "bump_poll_writer_only" \{)/\1\n  for_each = {}/' "$TF" > "$c"
-  [ "$(canonical_blocks "$c" "$VARS")" != "$CANONICAL" ]; rm -f "$c"
+  [ "$(canonical_blocks "$c")" != "$CANONICAL" ]; rm -f "$c"
 }
 
 @test "witness: meta-arg — count=0 disabling the resource is caught" {
   c="$(mktemp)"; sed -E 's/^(resource "github_repository_ruleset" "bump_poll_writer_only" \{)/\1\n  count = 0/' "$TF" > "$c"
-  [ "$(canonical_blocks "$c" "$VARS")" != "$CANONICAL" ]; rm -f "$c"
+  [ "$(canonical_blocks "$c")" != "$CANONICAL" ]; rm -f "$c"
 }
 
 @test "witness: comment-prefixed second bypass actor is caught" {
   c="$(mktemp)"
   awk '/^}/ && !d { print "  bypass_actors {"; print "    actor_id    = 99999"; print "    actor_type  = \"Integration\""; print "    bypass_mode = \"always\""; print "  }"; d=1 } {print}' "$TF" > "$c"
-  [ "$(canonical_blocks "$c" "$VARS")" != "$CANONICAL" ]; rm -f "$c"
+  [ "$(canonical_blocks "$c")" != "$CANONICAL" ]; rm -f "$c"
 }
 
-@test "witness: identity redirect — writer data source slug literal + decoy is caught" {
-  c="$(mktemp)"; sed -E 's/^([[:space:]]*slug[[:space:]]*=[[:space:]]*)var\.writer_app_slug/\1"ukyi-homelab-attacker"/' "$TF" > "$c"
-  printf '\ndata "github_app" "pin_decoy" { slug = var.writer_app_slug }\n' >> "$c"
-  [ "$(canonical_blocks "$c" "$VARS")" != "$CANONICAL" ]; rm -f "$c"
+@test "witness: identity redirect — actor_id changed to an attacker App ID + decoy is caught" {
+  # slug data source가 사라진 뒤의 identity-pin 방어: bypass actor_id(4043080=writer App)를 다른 App ID로
+  # 바꾸면 룰셋이 엉뚱한 App을 bypass시킨다(승인 우회). decoy locals가 있어도 canonical이 바뀌어 잡힌다.
+  c="$(mktemp)"; sed -E 's/^([[:space:]]*actor_id[[:space:]]*=[[:space:]]*)4043080/\199999/' "$TF" > "$c"
+  printf '\nlocals { actor_id = 4043080 }\n' >> "$c"
+  [ "$(canonical_blocks "$c")" != "$CANONICAL" ]; rm -f "$c"
 }
 
-@test "witness: cross-file — writer_app_slug default redirect + decoy var is caught" {
-  c="$(mktemp)"; sed -E 's/^([[:space:]]*default[[:space:]]*=[[:space:]]*)"ukyi-homelab-writer"/\1"attacker-app"/' "$VARS" > "$c"
-  printf '\nvariable "writer_app_slug_note" { type = string\n  default = "ukyi-homelab-writer" }\n' >> "$c"
-  [ "$(canonical_blocks "$TF" "$c")" != "$CANONICAL" ]; rm -f "$c"
-}
-
-@test "witness: cross-file — deleting the writer_app_slug default is caught" {
-  c="$(mktemp)"; sed -E '/^[[:space:]]*default[[:space:]]*=[[:space:]]*"ukyi-homelab-writer"/d' "$VARS" > "$c"
-  printf '\nvariable "pinned_note" { type = string\n  default = "ukyi-homelab-writer" }\n' >> "$c"
-  [ "$(canonical_blocks "$TF" "$c")" != "$CANONICAL" ]; rm -f "$c"
+@test "witness: indirection — actor_id=tonumber(var.x) + decoy var is caught" {
+  # 리터럴을 다시 간접화(변수/함수)로 빼돌리는 우회 — 값이 리졸브돼 같아 보여도 canonical(리터럴 4043080)이
+  # 아니므로 잡힌다. slug data source 시절의 cross-file redirect를 대체하는 in-block 간접화 witness다.
+  c="$(mktemp)"; sed -E 's/^([[:space:]]*actor_id[[:space:]]*=[[:space:]]*)4043080/\1tonumber(var.aid)/' "$TF" > "$c"
+  printf '\nvariable "aid" { type = string\n  default = "4043080" }\n' >> "$c"
+  [ "$(canonical_blocks "$c")" != "$CANONICAL" ]; rm -f "$c"
 }
 
 @test "witness: decoy-locals include redirect to a dead namespace is caught" {
   c="$(mktemp)"; sed -E 's#^([[:space:]]*include[[:space:]]*=[[:space:]]*)\["refs/heads/bump-poll/\*\*"\]#\1["refs/heads/__dead__/**"]#' "$TF" > "$c"
   printf '\nlocals { include = ["refs/heads/bump-poll/**"] }\n' >> "$c"
-  [ "$(canonical_blocks "$c" "$VARS")" != "$CANONICAL" ]; rm -f "$c"
+  [ "$(canonical_blocks "$c")" != "$CANONICAL" ]; rm -f "$c"
 }
 
 @test "witness: decoy-locals exclude carve-out of the namespace is caught" {
   c="$(mktemp)"; sed -E 's#^([[:space:]]*exclude[[:space:]]*=[[:space:]]*)\[\]#\1["refs/heads/bump-poll/**"]#' "$TF" > "$c"
   printf '\nlocals { exclude = [] }\n' >> "$c"
-  [ "$(canonical_blocks "$c" "$VARS")" != "$CANONICAL" ]; rm -f "$c"
+  [ "$(canonical_blocks "$c")" != "$CANONICAL" ]; rm -f "$c"
 }
 
 @test "witness: an enclosing multiline comment wrapping the resource is caught" {
@@ -147,7 +143,7 @@ CANONICAL='data "github_app" "writer" { slug = var.writer_app_slug } resource "g
 
 @test "control: a harmless comment change does not trip the canonical or block-comment guard" {
   c="$(mktemp)"; sed -E 's/# bypass = writer App 하나.*/# 주석만 변경/' "$TF" > "$c"
-  [ "$(canonical_blocks "$c" "$VARS")" = "$CANONICAL" ]
+  [ "$(canonical_blocks "$c")" = "$CANONICAL" ]
   run no_block_comments "$c"; [ "$status" -eq 0 ]
   rm -f "$c"
 }

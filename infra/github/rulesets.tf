@@ -13,10 +13,13 @@
 # apply: 이 루트는 신뢰 앵커 — owner-local apply 전용(CI 무인 apply 금지). 라이브 강제는 실측으로만 확증된다.
 # github_branch_protection.main(repo.tf)과 공존한다 — 서로 다른 ref(main vs bump-poll/**), 무간섭.
 
-# writer App ID를 slug로 해석(하드코딩 회피). GET /apps/{slug}는 공개 엔드포인트라 특수 권한 불요.
-data "github_app" "writer" {
-  slug = var.writer_app_slug
-}
+# writer App ID(4043080 = ukyi-homelab-writer)를 **직접 핀**한다(slug data source 대신 리터럴).
+# 왜(2026-07-23 라이브 실측): GitHub fine-grained PAT는 `GET /apps/{slug}`(공개 엔드포인트인데도)를 404로
+#   막아 `data.github_app.writer`가 죽는다 → apply가 classic 토큰을 강제하고, 만약 tf-reconcile의
+#   TF_GITHUB_TOKEN이 fine-grained면 github plan이 매 주기 깨진다. App ID는 slug보다 안정적이다 —
+#   리네임에도 불변(삭제·재생성 시에만 변하고 그건 전면 재설정 상황). slug(ukyi-homelab-writer)는 실행기
+#   신원 3곳과 같은 App이다(run-bump-plan.ts WRITER_NAME · ensure-bump-pr DEFAULT_WRITER). 이 리터럴
+#   변경은 canonical-freeze 게이트(test_bump_poll_ruleset.bats)가 잡는다.
 
 resource "github_repository_ruleset" "bump_poll_writer_only" {
   name        = "bump-poll-writer-only"
@@ -37,9 +40,9 @@ resource "github_repository_ruleset" "bump_poll_writer_only" {
     # deletion은 이번 increment에서 설정하지 않는다(연기 — 위 헤더 주석 참고).
   }
 
-  # bypass = writer App 하나. github_app data source의 id는 문자열이므로 tonumber로 숫자 actor_id에 맞춘다.
+  # bypass = writer App 하나(ukyi-homelab-writer, App ID 4043080 — 위 주석: slug 해석 대신 ID 직접 핀).
   bypass_actors {
-    actor_id    = tonumber(data.github_app.writer.id)
+    actor_id    = 4043080
     actor_type  = "Integration"
     bypass_mode = "always"
   }
