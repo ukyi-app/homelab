@@ -25,7 +25,7 @@ spec:
             - name: drill
               # digest로 고정(불변): 이 Job은 database ns에서 delete 권한을 가진다; mutable 태그는
               # 몰래 교체될 수 있다. CI가 digest를 기록 — drill 활성화 전에 여기 고정할 것.
-              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:9c4cb3572d07c495647be713bf8bbc58a2bf15bbcdd3fc4fc4ae387239cadecf
+              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:e73682bbb1905f0e7a9800e11cd6f7658842b0c909bc53d7605e3292c0c50eef
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities: { drop: [ALL] }
