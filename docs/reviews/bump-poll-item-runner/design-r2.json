@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "design",
+  "verdict": "approve",
+  "summary": "Ship the design: DG-1 and DG-2 are fully addressed at design level, with all 22 gate witnesses preserved and both staged/post-write residue paths covered. No new critical issue found within scope.",
+  "planFile": "docs/reviews/bump-poll-item-runner/design.md",
+  "planInDiff": true,
+  "reviewedFileCount": 7,
+  "target": "working tree diff",
+  "reviewedSha": "abd1bb9ed3b76d2ef9abefd5f6af2a7fc9a74f7e",
+  "reviewedTree": "9e39eb31c8ef92cde76430af3150ece157ae4b7b",
+  "headMovedDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "triage": "Clean verdict: note it in your report and COMMIT this artifact with the next bookkeeping commit.",
+  "findings": [],
+  "next_steps": []
+}
