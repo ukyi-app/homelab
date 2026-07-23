@@ -2,34 +2,22 @@
   "ok": true,
   "status": "ok",
   "kind": "structure",
-  "verdict": "needs-attention",
-  "summary": "Do not ship: S-1 remains open because the canonical freeze can stay green while Terraform removes or disables the ruleset.",
-  "planFile": "docs/reviews/bump-poll-ruleset/spec.md",
+  "verdict": "approve",
+  "summary": "Ship on the requested Round 2 scope. R-1 is resolved: verification.md:3-10 and spec.md:3-9 clearly supersede the historical slug/classic-token procedure and identify the current SSOT. No new critical/high issue found: enforced code has no dangling resolver reference; GitHub reports App 4043080 as ukyi-app/ukyi-homelab-writer; live ruleset 19598965 uses that sole bypass actor; and the canonical gate passes 15/15 tests.",
+  "planFile": null,
   "planInDiff": null,
-  "reviewedFileCount": 10,
+  "reviewedFileCount": 8,
   "target": "branch diff against main",
-  "reviewedSha": "5ee2c256bf73a7d1ece19752fa0c0fabcbe48ed4",
-  "reviewedTree": "443522603f41ba8bdd55af8267ee1d90d84ad5c6",
+  "reviewedSha": "c36a84d34e44da2b8eaadab93731aa632f75a207",
+  "reviewedTree": "a4e846af9b1d8c27263a424e0347ce0ad8b8cb04",
+  "reviewedPlanSha256": null,
   "headMovedDuringReview": false,
+  "planDriftDuringReview": null,
   "codexStatus": 0,
   "parseError": null,
-  "findingCount": 1,
+  "findingCount": 0,
   "planFindingCount": 0,
-  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
-  "findings": [
-    {
-      "severity": "high",
-      "title": "Canonical extraction ignores the HCL context that determines whether the ruleset exists",
-      "body": "The guard extracts only from the textual resource header through the next column-zero `}`, so context outside that range is invisible. Wrapping the unchanged ruleset block with `/*` and `*/` produced `commented_resource_equals=yes` while `terraform fmt -check -` still parsed successfully; Terraform then sees no ruleset. A second bypass is a tracked `*_override.tf` containing the same resource address with `count = 0` or `enforcement = \"disabled\"`: Terraform merges override files after normal files while both guarded files remain byte-identical ([HashiCorp override semantics](https://developer.hashicorp.com/terraform/language/files/override)). Thus Seam A and all current witnesses can remain green with F-0 absent or disabled.",
-      "file": "tests/gates/test_bump_poll_ruleset.bats",
-      "line_start": 24,
-      "line_end": 35,
-      "confidence": 0.99,
-      "recommendation": "Replace range-based text extraction with an HCL-aware, module-wide structural check that proves the blocks are active top-level definitions and rejects tracked override files for these addresses. Add mutation witnesses for an enclosing multiline comment and a `*_override.tf` that sets `count = 0` or disables enforcement.",
-      "isPlanFinding": false
-    }
-  ],
-  "next_steps": [
-    "Keep S-1 open until both module-context bypasses fail the required gate."
-  ]
+  "triage": "Clean verdict: note it in your report and COMMIT this artifact with the next bookkeeping commit.",
+  "findings": [],
+  "next_steps": []
 }
