@@ -59,14 +59,16 @@ runs:
     - if: ${{ inputs.bats == 'true' }}
       shell: bash
       run: |
-        # bats v1.14.0 핀 — apt(arm64는 ports.ubuntu.com 미러)가 유일한 무핀·SPOF였다(2026-07-16 실장애).
-        # required gate 경로라 다른 툴과 동일한 받기→sha256sum -c→설치 패턴으로 전환(supplychain-5).
-        # bats-core는 순수 셸이라 아키텍처 무관 — 소스 tarball을 install.sh로 /usr/local에 깐다.
-        f=/tmp/bats.tar.gz
-        curl -fsSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.14.0.tar.gz -o "$f"
-        echo "bb537b70b15b732f6d8827dd6578e3d8ce166636ce1f18ea9a074184fcce9177  $f" | sha256sum -c -
-        tar -xz -C /tmp -f "$f"
-        sudo /tmp/bats-core-1.14.0/install.sh /usr/local
+        # bats v1.14.0 — 불변 커밋 SHA content-addressed 핀. apt(arm64는 ports.ubuntu.com 미러)가 유일한
+        # 무핀·SPOF였고(2026-07-16 실장애), bats-core는 업로드 릴리스 에셋이 없다. GitHub 자동생성 아카이브
+        # (/archive/refs/tags/)는 압축 재생성으로 콘텐츠 동일해도 sha256이 변할 수 있어(문서화된 불안정)
+        # required gate를 깰 위험 → 대신 커밋 SHA로 clone+대조한다: git 객체는 불변이고 fetch 시 git이
+        # 객체 SHA를 검증한다(tarball 체크섬보다 강한 무결성). 순수 셸이라 아키텍처 무관, install.sh로 깐다.
+        d=/tmp/bats-core
+        git clone --quiet --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core "$d"
+        got="$(git -C "$d" rev-parse HEAD)"
+        [ "$got" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5" ] || { echo "::error::bats v1.14.0 커밋 SHA 불일치(태그 이동?): $got"; exit 1; }
+        sudo "$d/install.sh" /usr/local
     - if: ${{ inputs.shellcheck == 'true' }}
       shell: bash
       run: |
