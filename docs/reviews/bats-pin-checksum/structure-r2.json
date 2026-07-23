@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "approve",
+  "summary": "Ship. R-1 is resolved: the unstable archive is gone, and lines 68–71 verify the checked-out commit before running `install.sh`; tag movement or tampering fails closed. Git officially supports `--branch` with tags, including detached checkout at the peeled commit ([docs](https://git-scm.com/docs/git-clone.html)). No new critical/high issue was introduced: Git is present on the ARM runner, GitHub and `sudo install.sh` were existing dependencies, and all 10 other tools retain SHA-256 verification.",
+  "planFile": null,
+  "planInDiff": null,
+  "reviewedFileCount": 4,
+  "target": "branch diff against main",
+  "reviewedSha": "f722131e71370265379d9fb2e2318c4983ef3c9b",
+  "reviewedTree": "2a113d3d22076016aae9142a2daacd6cae2e869a",
+  "reviewedPlanSha256": null,
+  "headMovedDuringReview": false,
+  "planDriftDuringReview": null,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "triage": "Clean verdict: note it in your report and COMMIT this artifact with the next bookkeeping commit.",
+  "findings": [],
+  "next_steps": []
+}
