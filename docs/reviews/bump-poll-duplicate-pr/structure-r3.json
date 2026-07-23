@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "No ship: the trusted-PR fix is coherent, but one characterization fixture omits a mandatory live-state fact and hides a destructive adopt path.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 28,
+  "target": "branch diff against main",
+  "reviewedSha": "f3311649ed2ab3d377530fa93b6a77f8f08000b4",
+  "reviewedTree": "d1293f908f690cfee404bcc672197a8967432263",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Test-quality: the non-writer PR witness models the wrong seam",
+      "body": "This fixture injects an open same-repository PR but leaves the remote-branch probe empty. In production, an open `isCrossRepository:false` PR for this head necessarily occupies that repository ref. The executor therefore sees `trusted === null` plus `remoteBranch !== null`, chooses `adopt`, and leased-force-pushes over the untrusted collaborator branch before attempting `gh pr create`. For the normal main base, creation then fails because that head/base PR already exists; the human PR has been rewritten and polling remains stalled. The test proves only an impossible state, so the trust boundary prevents suppression but not mutation.",
+      "file": "tools/tests/test_ensure-bump-pr.bats",
+      "line_start": 1139,
+      "line_end": 1145,
+      "confidence": 0.99,
+      "recommendation": "Keep the locked case unchanged, but add a realistic witness combining a non-writer same-repo PR with its matching `ls-remote` OID and require zero push/create. In the executor, distinguish this occupied untrusted ref from a true orphan and fail closed before mutation.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Add the realistic same-repo collision witness without weakening existing tests.",
+    "Make untrusted same-repo ref occupancy fail closed, then refresh the structure-gate evidence."
+  ]
+}

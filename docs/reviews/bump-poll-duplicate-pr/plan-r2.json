@@ -1,0 +1,46 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "No ship: R-2 is resolved, and the RED record matches 7373cdf and fails for the intended helper assertions. However, R-1 remains too shallow at the workflow call site, and R-3 lacks an executable lease protocol. Simpler alternative: none materially simpler than the deterministic branch design; make its workflow state machine and explicit lease testable.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": true,
+  "reviewedFileCount": 2,
+  "target": "working tree diff",
+  "reviewedSha": "7f7157002432ed19217507c861eaa16c9c254b2b",
+  "reviewedTree": "84c6706ba22c85816c396157f1c701e2dfdc551f",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
+  "planFindingCount": 2,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: GREEN can pass without fixing the production workflow",
+      "body": "The declared regression invokes only `ensure-bump-pr.ts`; neither witness exercises the workflow where query, branch push, and PR creation are ordered. The helper can therefore turn GREEN while `bump-poll.yaml` remains unwired or queries too late. A concrete retry failure is also uncovered: if the deterministic branch push succeeds but `gh pr create` fails, the next poll sees no open PR, chooses `create`, and collides with the orphan remote branch, stalling deployment while both witnesses remain GREEN.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 97,
+      "line_end": 104,
+      "confidence": 0.99,
+      "recommendation": "Re-pin RED with a workflow call-site contract or hermetic integration test proving the query and decision occur before mutation, `skip` performs no push/create, and a push-success/PR-create-failure retry reconciles an existing branch without an open PR.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "high",
+      "title": "DIRTY rebuild has no usable force-with-lease precondition",
+      "body": "The plan requires `--force-with-lease` but neither captures the existing branch head OID nor specifies fetching that branch. The workflow checkout fetches `main`; on a later run, a bare lease push can lack the remote-tracking value needed for the existing DIRTY branch and reject it as stale. Global workflow serialization does not establish a Git lease, so the promised recovery can repeatedly fail and leave the deployment stalled.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 110,
+      "line_end": 110,
+      "confidence": 0.97,
+      "recommendation": "Include the PR head OID in the observed facts and use an explicit `--force-with-lease=<ref>:<expected-oid>`, or fetch the exact branch before rebuilding. Add characterization for successful rebuild and rejection after an intervening head update.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Replace or augment the helper-only RED with workflow-level ordering and retry witnesses.",
+    "Specify the deterministic branch state machine for open PR, orphan branch, and DIRTY rebuild states.",
+    "Recapture the machine-owned RED verify-record after updating the regression contract."
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "kind": "bugfix-verify-red",
+  "bug": "bump-poll-duplicate-pr",
+  "sha": "32c9c7ca8ef9a3ed243865e8d8c11f063a2be25d",
+  "treeSha": "2d18718ee5dbf7d58904f933fb9e932ecd02fdcf",
+  "regression": {
+    "exit": 1,
+    "failed": true,
+    "symptomTokenPresent": true,
+    "outputTail": "1..1\nnot ok 1 an open bump PR proposing the same candidate suppresses the duplicate bump (dedupe)\n# tags: regression\n# (in test file tools/tests/test_poll-ghcr.bats, line 199)\n#   `false ;;' failed\n# duplicate bump PR: planner still says 'bump' while PR #350 already proposes the same candidate (app=orders tag=sha-bbb2222…)\n# --- plan ---\n# [\n#   {\n#     \"app\": \"orders\",\n#     \"action\": \"bump\",\n#     \"reason\": \"\",\n#     \"current\": {\n#       \"tag\": \"sha-aaa1111000000000000000000000000000000000\",\n#       \"digest\": \"sha256:1111111111111111111111111111111111111111111111111111111111111111\"\n#     },\n#     \"candidate\": {\n#       \"gitsha\": \"bbb2222000000000000000000000000000000000\",\n#       \"tag\": \"sha-bbb2222000000000000000000000000000000000\",\n#       \"digest\": \"sha256:2222222222222222222222222222222222222222222222222222222222222222\"\n#     },\n#     \"src\": \"ukyi-app/orders\",\n#     \"writePath\": \"apps/orders/deploy/prod/values.yaml\",\n#     \"openPrs\": [\n#       {\n#         \"number\": 350,\n#         \"tag\": \"sha-bbb2222000000000000000000000000000000000\",\n#         \"digest\": \"sha256:2222222222222222222222222222222222222222222222222222222222222222\"\n#       }\n#     ]\n#   }\n# ]\n"
+  },
+  "characterization": {
+    "exit": 0,
+    "green": true,
+    "outputTail": "7 bespoke descriptor without autoDeploy is fail-closed (propose-pr, never auto bump)\nok 18 bump rewrites only image.tag in the app's values.yaml\nok 19 bump is idempotent (second run is a no-op)\nok 20 bump --digest records image.digest alongside the tag\nok 21 bump rejects a malformed digest with exit 2\nok 22 bump with same tag and digest is a no-op\nok 23 tag-only bump removes a stale digest (image must follow the new tag)\nok 24 bump refuses path traversal outside apps/\nok 25 bump workflow joins the global homelab-mutation queue (no pending loss)\nok 26 bump rejects an unknown flag with exit 2 (typo'd --digest must not silently drop the pin)\nok 27 bump --expect-current aborts when current tag differs (races-4 TOCTOU)\nok 28 bump --expect-current proceeds when current tag matches\nok 29 bump rejects a value-flag with no value (arity, F2 digest-pin downgrade class)\nok 30 bump rejects a value-flag whose value is another --flag (arity)\nok 31 bump: v1 repository_dispatch path fully removed (writeback-dispatch gone)\nok 32 bump --pin edits the inline repo:tag@digest scalar in a bespoke deployment.yaml\nok 33 bump --pin without --digest is refused (bespoke pins are always digest-pinned)\nok 34 bump --pin --expect-current aborts on a tag mismatch (TOCTOU, exit 3)\nok 35 bump --pin is idempotent (same tag+digest is a no-op)\nok 36 bump --pin refuses a descriptor outside platform/ (path traversal guard)\nok 37 bump also refreshes the digest-exporter APPS tag for an app already listed\nok 38 bump leaves the digest-exporter byte-identical for an app not listed in APPS\nok 39 bump-poll passes --expect-current to bump-tag after checkout main (TOCTOU guard)\nok 40 bump-poll still checks out main fresh before each branch (snapshot reset)\nok 41 expect-current is sourced from the planner snapshot, not re-read from live values.yaml (F2)\nok 42 bump-poll branches on the bespoke pin descriptor and passes --pin to bump-tag\nok 43 bump-poll git-adds the planner writePath (unifies apps and bespoke lanes)\n"
+  },
+  "repro": null,
+  "note": "written by bugfix-status.mjs --verify-red (script-owned re-execution)"
+}

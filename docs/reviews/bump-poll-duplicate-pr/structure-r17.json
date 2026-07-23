@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: the R-45 ownership guard is only a stale snapshot, so a concurrent same-repository PR can still have its shared head rewritten.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 64,
+  "target": "branch diff against main",
+  "reviewedSha": "5ddd4e8682e9e242f8cfc2c590dc86097e394d1c",
+  "reviewedTree": "ee4b060b74a308568886ff13dcf2dd0de1f0a61b",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: exclusive head ownership expires before the force-push",
+      "body": "`contestedHead` is calculated once from the initial PR scan and reused after sibling reconciliation and commit checks. During that interval, a user or another bot can open a same-repository PR from this deterministic head to another base. Opening the PR does not move the Git ref, so the later `--force-with-lease` still succeeds and rewrites the new PR's shared head and review state—the exact R-45 failure under a real interleaving. W81 only preloads contention before the scan, so it cannot exercise this race.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 1696,
+      "line_end": 1697,
+      "confidence": 0.98,
+      "recommendation": "Make rebuild ownership mutation-safe rather than caching it as a planning fact. Prefer immutable, base-OID-addressed replacement heads so no ref is rewritten after PRs can reference it; otherwise introduce a server-enforced ownership protocol, since a Git ref lease cannot guard concurrent PR creation. Add a temporal regression witness where an untrusted different-base PR appears after the first scan and require zero push, create, or arm.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Close the PR-occupancy TOCTOU before shipping B-1.",
+    "Freeze the temporal ownership witness and regenerate the RED/GREEN records without changing the test between endpoints."
+  ]
+}

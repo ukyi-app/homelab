@@ -1,0 +1,47 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: RL-2 and RL-3 are fixed, but RL-1 remains open in two release-blocking ways. No new critical issue was found.",
+  "planFile": "docs/reviews/bump-poll-ruleset/spec.md",
+  "planInDiff": null,
+  "reviewedFileCount": 18,
+  "target": "branch diff against main",
+  "reviewedSha": "0a9bbe1fc30ea5147b5c78d326ac2130de38c555",
+  "reviewedTree": "43707b5d2d223ef4bf69ffbcff09c4aa3a612a21",
+  "headMovedDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
+  "planFindingCount": 0,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "RL-1 still exposes trust-anchor tokens through shell history",
+      "body": "The helper claims tokens never enter argv, URLs, or history, but it accepts each token as `$1` and instructs the operator to replace quoted placeholders in the command. Those literal PAT and App tokens are recorded by normal interactive shell history before GIT_ASKPASS is involved. GIT_ASKPASS only keeps them out of Git's URL and process arguments.",
+      "file": "docs/reviews/bump-poll-ruleset/verification.md",
+      "line_start": 42,
+      "line_end": 61,
+      "confidence": 0.99,
+      "recommendation": "Load both credentials from the approved secret environment and make the helper consume them without secret-valued function arguments. The entered commands should contain only environment-variable names; unset the variables afterward.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "RL-1 can falsely certify update enforcement after writer creation fails",
+      "body": "B3 does not abort or otherwise prove that the writer-created ref exists. If that push fails, B4 targets a nonexistent ref and therefore exercises creation again, not update. The generic rejection matcher then accepts the creation ruleset error and reports it as successful update enforcement, allowing authoritative Seam C evidence to certify an untested control.",
+      "file": "docs/reviews/bump-poll-ruleset/verification.md",
+      "line_start": 66,
+      "line_end": 78,
+      "confidence": 0.99,
+      "recommendation": "Make B3 failure abort the procedure, verify the exact remote ref and expected OID with `git ls-remote` before B4, and require B4 to return nonzero plus a ruleset-specific rejection before recording success.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Repair the two RL-1 procedure gaps and re-run the scoped release re-review.",
+    "Retain the RL-2 and RL-3 changes; both are correctly addressed within the accepted scope."
+  ]
+}

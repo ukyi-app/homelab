@@ -1,0 +1,46 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "No ship: R-9 is resolved, but R-8 remains incomplete and auto-merge is not retry-safe. Simpler alternative: keep the deterministic executor, but reconcile auto-merge as desired state. Open question: none.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": true,
+  "reviewedFileCount": 17,
+  "target": "branch diff against main",
+  "reviewedSha": "c1ec50b42cccbdfd12bf6860c7daea6d33f4069c",
+  "reviewedTree": "c6df4c8a1186b8a1e730815f6b58cd7347c975c8",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
+  "planFindingCount": 2,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: auto-merge arming is not idempotent",
+      "body": "Trusted non-DIRTY PRs always become `skip`. If push and PR creation succeed but auto-merge arming fails or the process stops, the next poll finds the unarmed PR and skips forever. `pr-sweeper` only handles PRs already carrying `autoMergeRequest`, so an autoDeploy deployment silently stalls.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 54,
+      "line_end": 57,
+      "confidence": 0.99,
+      "recommendation": "Query `autoMergeRequest` and treat `--auto-merge` as desired state: re-arm a trusted PR when missing, or fail with an actionable alert. Add a two-run witness covering PR-created/arming-failed/retry convergence, then re-pin RED.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: the call-site gate can auto-merge approval PRs",
+      "body": "The plan moves auto-merge into the executor, but the committed gate merely finds a `--auto-merge` token anywhere in the workflow. Passing it unconditionally for both `bump` and `propose-pr` turns `autoDeploy:false` approval PRs into automatic deployments while every new witness can turn GREEN. That is a second observable behavior change outside the single flip.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 143,
+      "line_end": 143,
+      "confidence": 0.99,
+      "recommendation": "Pin the policy mapping at the production seam: `bump` must invoke the executor with auto-merge and `propose-pr` without it. Prefer an explicit action argument interpreted by the executor, or add hermetic call-site witnesses for both lanes.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Add retry-state and conditional auto-merge witnesses.",
+    "Re-pin red.sha and regenerate the machine-owned RED verify-record.",
+    "No further R-9 argv-ledger changes are required."
+  ]
+}

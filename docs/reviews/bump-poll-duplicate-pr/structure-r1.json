@@ -1,0 +1,45 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "No ship: B-1 fixes the duplicate-creation mechanism and the locked tests were not weakened, but its state model still permits an approval bypass and attacker-driven loss of idempotency.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 26,
+  "target": "branch diff against main",
+  "reviewedSha": "ac05c1c95101e8dab1514f48a5add19c662237ee",
+  "reviewedTree": "c347420d463e605f9ad92ff30ea860a9bda25afc",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: propose-pr preserves stale auto-merge authorization",
+      "body": "The executor treats auto-merge as one-way desired state: it arms `bump` PRs but never disarms them. If `.bindings.json` changes from autoDeploy=true to false while the deterministic PR remains open, the next plan supplies `propose-pr`, yet an existing `autoMergeRequest` survives both skip and rebuild. GitHub can therefore merge without the human approval now required by the SSOT.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 311,
+      "line_end": 339,
+      "confidence": 0.99,
+      "recommendation": "Reconcile both directions: derive the desired arming state from the current lane, arm an unarmed `bump` PR, and disable auto-merge on the authenticated PR when the lane is `propose-pr`. Add a bump-to-propose transition witness.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: bounded fork results can hide the writer PR",
+      "body": "The state machine treats `gh pr list` output as complete, but the CLI defaults to 30 results and owner-qualified `--head` filtering is unsupported. Because public forks can open PRs with the same deterministic head name, they can crowd the trusted writer PR out of the returned page. The executor then mistakes its remote branch for an orphan, force-pushes it and attempts another PR creation, potentially resetting checks every poll and stalling deployment indefinitely.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 269,
+      "line_end": 278,
+      "confidence": 0.97,
+      "recommendation": "Make absence authoritative using a server-side writer-App filter and base filter, or exhaustively paginate with fail-closed ambiguity handling. Preserve the same-repo and author validation as defense in depth.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Fix both state-machine gaps within the existing executor seam.",
+    "Refresh machine-owned verification evidence and rerun the structure gate."
+  ]
+}

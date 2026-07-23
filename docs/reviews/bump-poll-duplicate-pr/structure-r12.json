@@ -1,0 +1,68 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "No-ship. The pinned RED→GREEN flip credibly fixes duplicate creation, but two structural blockers remain: item failures are not Git-transaction-isolated, and fork saturation still scales against API/time budgets. Tests were not re-run.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 48,
+  "target": "branch diff against main",
+  "reviewedSha": "394313ac7a3cd5c21a1cf9cd6c6181df62ddc6e1",
+  "reviewedTree": "76345b5b0edea6045a59195c031f922ae6391e93",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 4,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: per-item isolation shares the Git transaction",
+      "body": "The subshells isolate exit status, but every iteration shares one worktree and index. `bump-tag.ts` can write the app file and shared digest-exporter before a later command fails; failure after writing, staging, or committing leaves state behind. The next item checks out `main` without cleanup, so it can inherit the prior app's changes—especially the always-added digest-exporter—or fail checkout and starve later apps. This is new evidence beyond H-2: its witness injects failure only after the stubbed commit and does not model filesystem/index state. The block also violates `CONTRIBUTING.md:39-41`, which explicitly calls this workflow loop a boundary that belongs in a tested tool.",
+      "file": ".github/workflows/bump-poll.yaml",
+      "line_start": 176,
+      "line_end": 228,
+      "confidence": 0.99,
+      "recommendation": "Move per-item orchestration into a tested tool and run each item in an isolated worktree, or guarantee index/worktree restoration in a finally-style cleanup. Add failures after file writes and after staging, then assert the next PR contains only its own paths.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "medium",
+      "title": "Test-quality: H-2 proves continuation, not transaction isolation",
+      "body": "The witness fails only the `ensure-bump-pr` stub after checkout, bump, add, and commit have all been stubbed successfully. It proves that the shell reaches the next executor, but cannot detect dirty or staged state leaking between items, despite claiming each item is isolated.",
+      "file": "tests/gates/test_bump-poll-callsite.bats",
+      "line_start": 890,
+      "line_end": 919,
+      "confidence": 0.99,
+      "recommendation": "Exercise the extracted item runner against a temporary Git repository. Inject failures after `bump-tag` writes and after `git add`, then verify the following item's commit and diff contain no prior-item state.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: fork suppression moved to API and wall-clock budgets",
+      "body": "`foldConnection` discards raw pages, but still launches one `gh api graphql` subprocess per attacker-controlled page until `hasNextPage=false`. Both polling and revocation therefore consume GraphQL budget, subprocesses, and wall time proportional to fork PR count. Enough same-head forks can still make every cycle fail before finding the writer PR. This is distinct from R-36/R-37, which bounded retained and serialized bytes. GitHub documents finite point, compute, resource, and timeout limits in its [GraphQL limits](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api).",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 823,
+      "line_end": 875,
+      "confidence": 0.99,
+      "recommendation": "Replace the public-fork-filled connection with a strongly consistent lookup keyed by authoritative same-repository ref or persisted PR identity. Fetch human-trace details only after selecting bounded trusted candidates; do not add a page cap to the current query.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "medium",
+      "title": "Test-quality: W70 freezes attacker-linear enumeration",
+      "body": "W70 requires all 650 forks to be counted, exactly seven pages, and specific later cursors. Its assertion `graphqlPages < crossRepo` still passes the linear `ceil(forks/100)` algorithm. A safer lookup that avoids enumerating public forks would satisfy the public outcome but fail this locked test, so the rewritten witness still pins the vulnerable mechanism rather than fork-independent behavior.",
+      "file": "tools/tests/test_ensure-bump-pr.bats",
+      "line_start": 1274,
+      "line_end": 1320,
+      "confidence": 0.99,
+      "recommendation": "Keep saturated fork input and terminal skip/no-push/no-create assertions, but replace exact counts and cursors with a fork-independent query-work bound. Re-freeze identical RED/GREEN tests before applying the production change.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Implement real per-item Git transaction isolation and strengthen the H-2 witness.",
+    "Redesign PR discovery so untrusted fork cardinality cannot determine API work.",
+    "Re-pin and regenerate the committed RED/GREEN verification records, then rerun the structure gate."
+  ]
+}

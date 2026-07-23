@@ -324,3 +324,19 @@
   `TargetDown` 소관). rollup에는 **우변 존재 가드**(`and on (key) (<우변 존재>)`)를 동반시켜라. 반대로 **우변
   셀렉터 자체에는 rollup 금지** — 구 상태가 부활해 진짜 드리프트를 억제하는 fail-open의 거울상이다.
 > 가드: `tests/gates/vmalert-drift-firing-e2e.sh`
+
+### bump-poll/** 예약 룰셋 — 인터록≠인증·정적 가드는 변경 감지기
+- `tools/ensure-bump-pr.ts`의 force-push 소유권 검증은 **안전 인터록이지 인증이 아니다**: 워크플로 `git commit`은
+  미서명이라(GitHub은 API로 만든 커밋만 서명) 적대적 `contents:write`가 author/committer/메시지를 위조할 수 있다.
+  강제 가능한 유일 불변식은 서버측 ruleset(`infra/github`의 `github_repository_ruleset` — writer App 전용
+  bump-poll/** 생성·push 예약). 신뢰 앵커라 **owner-local apply 전용**(CI 무인 apply 금지 — plan-only 드리프트).
+- ⚠️ **R-46은 좁혀진 채 수용된 잔여**: ruleset은 ref 생성/push를 writer 전용으로 닫지만, 이미 존재하는 writer-생성
+  head에 다른 base PR을 **여는 행위 자체(동시 PR 생성)는 못 막는다** — ruleset은 PR 생성을 게이트하지 않는다(git
+  ref lease가 못 막는 것과 동일). 도구의 ③-b2 force-push 직전 재조회가 창을 마이크로초로 좁힐 뿐이다.
+- ⚠️ **정적 CI 가드는 terraform resolved 의미를 완전 검증 불가**: 완전 검증은 `terraform plan`(GitHub API+백엔드
+  자격)이 필요한데 신뢰 앵커 모델이 CI에서 그 자격을 배제한다. 개별 grep 단언은 red-team 8각도(간접화+decoy·
+  meta-arg count/for_each·주석 카운트 회피·identity redirect·cross-file)에 전부 우회됐고, canonical freeze조차 리소스
+  `/* */` wrap·추적 `*_override.tf` 병합으로 우회됐다. 그래서 가드는 **best-effort 3층 변경 감지기**(canonical freeze
+  + no-block-comments + no-override; `.gitignore`가 `*_override.tf` 이중화)이고, **완전 보증은 owner-local 라이브
+  검증**(apply 후 적대 push 거부 실측 + `gh api /repos/{o}/{r}/rulesets` 관측). 절차는 `docs/reviews/bump-poll-ruleset/verification.md`.
+> 가드: `tests/gates/test_bump_poll_ruleset.bats`

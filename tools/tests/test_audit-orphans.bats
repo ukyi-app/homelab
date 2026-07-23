@@ -102,6 +102,58 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | grep -q "activation-surface-drift"
 }
 
+@test "activation-surface-drift is report-only — excluded from the alerting count (still in findings)" {
+  # B: surface-drift는 설계상 비차단·정보성이고 **이미지 bump마다 재발**한다 → 텔레그램 페이지 대상에서 제외.
+  # 감사 JSON엔 남아(findings/count) 가시성 유지하되 alerting=0이라 audit.yaml이 페이지하지 않는다.
+  G="$TMP/git-ro"; mkdir -p "$G"; cp -R "$FR/." "$G/"
+  # surface-drift **단독**으로 격리 — 다른 finding 원천 제거: ledger의 stale-app 행 삭제(orders만 남김).
+  printf '<!-- ledger:meta VM_ALLOCATABLE_MIB=11264 LIMIT_BUDGET_MIB=8704 -->\n| <!-- ledger:row --> orders | prod | 64 | 128 |\n' \
+    > "$G/docs/memory-ledger.md"
+  git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
+  git -C "$G" add -A; git -C "$G" commit -qm init
+  oldhash=$(bun "$ROOT/tools/lib/surface-hash.ts" "$G" HEAD orders)
+  printf '{"app":"orders","sha":"abc1234","syncedRev":"abc1234","surfaceHash":"%s","registry":{"name":"orders","host":"orders.example.com","public":true}}\n' "$oldhash" \
+    > "$G/apps/orders/deploy/prod/.activation"
+  printf 'image: {repo: x, tag: sha-NEW9999}\nroute: {public: true, host: orders.example.com}\n' \
+    > "$G/apps/orders/deploy/prod/values.yaml"
+  git -C "$G" add -A; git -C "$G" commit -qm "surface change post-activation"
+  # apps.json: orders만 active(ghost 제거해 다른 finding 배제) → 유일 finding = activation-surface-drift
+  echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
+    > "$G/infra/cloudflare/apps.json"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$G"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.findings | any(.type == "activation-surface-drift")'   # findings엔 남는다
+  echo "$output" | jq -e '.count >= 1'
+  echo "$output" | jq -e '.alerting == 0'                                          # 페이지 대상 0
+}
+
+@test "a co-occurring alerting drift is NOT hidden by a report-only surface-drift (alerting counts only the pageable)" {
+  # surface-drift(report-only) + orphan-dns(blocking·alerting) 공존 → count=2, alerting=1(orphan-dns만).
+  # report-only가 다른 실측 finding의 페이지를 삼키지 않음을 못박는다.
+  G="$TMP/git-mix"; mkdir -p "$G"; cp -R "$FR/." "$G/"
+  git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
+  git -C "$G" add -A; git -C "$G" commit -qm init
+  oldhash=$(bun "$ROOT/tools/lib/surface-hash.ts" "$G" HEAD orders)
+  printf '{"app":"orders","sha":"abc1234","syncedRev":"abc1234","surfaceHash":"%s","registry":{"name":"orders","host":"orders.example.com","public":true}}\n' "$oldhash" \
+    > "$G/apps/orders/deploy/prod/.activation"
+  printf 'image: {repo: x, tag: sha-NEW9999}\nroute: {public: true, host: orders.example.com}\n' \
+    > "$G/apps/orders/deploy/prod/values.yaml"
+  git -C "$G" add -A; git -C "$G" commit -qm "surface change"
+  # apps.json: orders(surface-drift) + ghost(active·매니페스트 부재=orphan-dns 차단)
+  cat > "$G/infra/cloudflare/apps.json" <<'EOF'
+[
+  { "name": "orders", "host": "orders.example.com", "public": true, "active": true },
+  { "name": "ghost", "host": "ghost.example.com", "public": true, "active": true }
+]
+EOF
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$G"
+  echo "$output" | jq -e '.findings | any(.type == "activation-surface-drift")'
+  echo "$output" | jq -e '.findings | any(.type == "orphan-dns" and .subject == "ghost")'
+  echo "$output" | jq -e '.alerting >= 1'    # orphan-dns는 페이지된다(surface-drift가 안 삼킴)
+  # alerting = count - (report-only 건수). surface-drift 1건 제외됨을 확인.
+  echo "$output" | jq -e '(.alerting) == (.count - 1)'
+}
+
 @test "audit does NOT flag an active app whose surface matches AFTER the .activation marker is committed (F3 regression)" {
   G="$TMP/git2"; mkdir -p "$G"; cp -R "$FR/." "$G/"
   git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t

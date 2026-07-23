@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "Do not ship yet. The literal ID and resource-only canonical are structurally sound, and GitHub confirms 4043080 is ukyi-app/ukyi-homelab-writer, but the authoritative operating contract still prescribes the deleted resolver.",
+  "planFile": null,
+  "planInDiff": null,
+  "reviewedFileCount": 4,
+  "target": "branch diff against main",
+  "reviewedSha": "aa2728288718c344ae992139ddf58ba9dad060a4",
+  "reviewedTree": "f29b46931b6a962617bc497f3da6fd2e6a4c2ce7",
+  "reviewedPlanSha256": null,
+  "headMovedDuringReview": false,
+  "planDriftDuringReview": null,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "medium",
+      "title": "Authoritative Seam C still depends on the removed slug resolver",
+      "body": "The procedure linked from docs/traps-detail.md as the authoritative live verification still requires a token capable of resolving `data.github_app.writer`, overrides the fine-grained token with a broader classic token, and says the ruleset depends on that data source. The active spec likewise freezes the old three-block design. Operators following this contract will unnecessarily use broader credentials, while future increments may reintroduce the exact dependency this seam removes.",
+      "file": "docs/reviews/bump-poll-ruleset/verification.md",
+      "line_start": 14,
+      "line_end": 35,
+      "confidence": 0.99,
+      "recommendation": "Update verification.md and spec.md for the literal-ID/resource-only design. Preserve the prior apply results as dated history, then record the supplied fine-grained/classic `No changes` result and current App identity evidence.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Synchronize the active spec and Seam C procedure in this branch.",
+    "Rerun the 15 canonical gate tests after the documentation update."
+  ]
+}

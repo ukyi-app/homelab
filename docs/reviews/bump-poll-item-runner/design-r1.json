@@ -1,0 +1,47 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "design",
+  "verdict": "needs-attention",
+  "summary": "No-ship: the declared scope cannot pass the existing required gate, and the replacement test strategy misses the dirty-index failure central to H-2.",
+  "planFile": "docs/reviews/bump-poll-item-runner/design.md",
+  "planInDiff": true,
+  "reviewedFileCount": 5,
+  "target": "working tree diff",
+  "reviewedSha": "abd1bb9ed3b76d2ef9abefd5f6af2a7fc9a74f7e",
+  "reviewedTree": "9e39eb31c8ef92cde76430af3150ece157ae4b7b",
+  "headMovedDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
+  "planFindingCount": 2,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "The design omits migration of the enforced call-site contract gate",
+      "body": "The design reduces the workflow to a one-line runner call but lists only `test_bump-poll-toctou.bats` for migration. The existing `tests/gates/test_bump-poll-callsite.bats` extracts a workflow step containing `bump-tag` and requires the inline branch→bump→commit→ensure order, verbatim lane forwarding, effective writer identity, remote-mutation ownership, and real-git isolation witnesses. The proposed workflow necessarily makes those required tests fail; deleting or weakening them would instead remove approval-gate and mutation-ownership evidence.",
+      "file": "docs/reviews/bump-poll-item-runner/design.md",
+      "line_start": 66,
+      "line_end": 69,
+      "confidence": 0.99,
+      "recommendation": "Add `tests/gates/test_bump-poll-callsite.bats` to the migration scope. Split its assertions between the thin workflow→runner boundary and runner-level execution tests, preserving every existing contract and mutation witness.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "medium",
+      "title": "The test matrix never creates the staged-residue state it claims to contain",
+      "body": "The proposed failure cases stop at a `bump-tag` failure or a stubbed `ensure-bump-pr` failure. The latter occurs after a successful commit, when the index is already clean; ordinary `bump-tag` validation failures occur before `git add`. Nothing forces failure after `git add` or after the first real file write, so cleanup can be incorrectly scoped around only the executor and still pass. That leaves the exact H-2 path—commit failure with staged writePath and digest-exporter changes—unproved.",
+      "file": "docs/reviews/bump-poll-item-runner/design.md",
+      "line_start": 57,
+      "line_end": 62,
+      "confidence": 0.97,
+      "recommendation": "Add a real-git scenario that fails `git commit` after staging, plus a post-write `bump-tag` failure. Assert the next item’s commit contains only its paths, all worktrees are removed, the run continues, and the final exit is non-zero; retain a cleanup-removal mutation witness.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Revise the design’s change surface to migrate the existing call-site gate.",
+    "Expand the isolation test matrix to cover post-write and post-stage failures before implementation."
+  ]
+}

@@ -13,6 +13,9 @@ setup() {
   # B6a: 4 변이 디스패처(create-app/update-secrets/create-database/create-cache)는 notify를
   # .github/actions/mutation-notify composite로 위임(→내부에서 telegram-notify) → 직접 카운트 0.
   # 위임 자체는 test_mutation-dispatch.bats가 검증(composite uses + job.status 직접참조 금지).
+  # bump-poll=2: bump 루프(poll job)와 **인가 회수(reconcile job)** 가 각각 알린다(structure r8 R-27).
+  # 회수는 독립 job이라 자기 실패를 스스로 알려야 한다 — poll의 알림에 얹으면 그 job의 성공에 묶인다
+  # (그리고 회수 실패는 "낡은 auto-merge 인가가 살아남았다"는 **보안** 사실이라 조용하면 안 된다).
   EXPECTED="$(cat <<'EOF'
 _create-app.yaml 1
 _create-database.yaml 1
@@ -24,7 +27,7 @@ create-database.yaml 0
 create-cache.yaml 0
 audit.yaml 1
 bump.yaml 1
-bump-poll.yaml 1
+bump-poll.yaml 2
 iac.yaml 1
 tf-reconcile.yaml 3
 dns-drift.yaml 1

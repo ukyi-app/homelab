@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "No ship: R-10 and the RED verify-record are sound, and no new critical issue was found. R-11 remains false-GREENable, however. Simpler alternative: none materially simpler than the mandatory lane design; strengthen its proof. Open question: none.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": true,
+  "reviewedFileCount": 19,
+  "target": "branch diff against main",
+  "reviewedSha": "53b02b59f430b47884b24d537ed57cdcc1d2251e",
+  "reviewedTree": "dcf566ac843b29f17bedb3521717b5542638ff27",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: R-11's structural approval seal still permits false GREENs",
+      "body": "The plan claims `propose-pr` can never arm and the workflow gate enforces verbatim planner forwarding. The committed gate only proves that an `.action` assignment exists and each `--action` argument is textually `$action`; it accepts `action=$(...jq -r .action); action=bump; ... --action \"$action\"`. The executor tests also cover `propose-pr` only for create and skip, so an implementation that arms it only during adopt/rebuild can pass. Either path makes an `autoDeploy:false` PR auto-merge while the suite is GREEN, reproducing R-11's approval bypass.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 69,
+      "line_end": 71,
+      "confidence": 0.99,
+      "recommendation": "Add a hermetic call-site witness that feeds both planner lanes through the production loop and asserts the executor's actual argv, including a post-read `action=bump` negative candidate. Add `propose-pr` witnesses for adopt and rebuild, then re-pin red.sha and regenerate the machine-owned RED record.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Close both R-11 false-GREEN paths in the committed witnesses.",
+    "Re-pin red.sha and regenerate the RED verify-record without manually running the regression suite."
+  ]
+}

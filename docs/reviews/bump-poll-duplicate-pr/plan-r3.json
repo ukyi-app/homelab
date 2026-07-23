@@ -1,0 +1,45 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "No ship: the RED record matches e9f4d59/tree f873f240, but R-4 remains contradictory and R-5 can still turn GREEN with an unusable push command. No materially simpler alternative or additional critical issue found.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": true,
+  "reviewedFileCount": 3,
+  "target": "working tree diff",
+  "reviewedSha": "c95024f41ddeb59d4047e80940ddf4a5a6ba7287",
+  "reviewedTree": "43d6d448dc3507915db5a2858c424939ef418354",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
+  "planFindingCount": 2,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: B-1 contradicts the executor contract",
+      "body": "B-1 assigns `gh pr list`, PR creation, and rebuild pushing to `bump-poll.yaml`, directly contradicting the earlier requirement that `ensure-bump-pr.ts` alone performs query, decision, and every remote mutation. An engineer following this increment either fails the new call-site gates or recreates R-4's split ordering and partial-failure window.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 124,
+      "line_end": 124,
+      "confidence": 1,
+      "recommendation": "Rewrite B-1 so the workflow only prepares the deterministic local branch and commit, then invokes `ensure-bump-pr.ts`; place `gh pr list`, `git ls-remote`, push, PR creation, and auto-merge entirely inside the executor.",
+      "isPlanFinding": true
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: lease witnesses accept an unusable push target",
+      "body": "The plan claims call flags are pinned, but W2/W3 at red.sha only grep the `git push --force-with-lease=<ref>:<oid>` prefix, while the git stub accepts every non-query argv. A GREEN implementation can therefore omit or misname `origin <branch>` and still satisfy count, lease, and action assertions; live DIRTY/orphan recovery can then fail and stall deployment, leaving R-5 insufficiently proven.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 109,
+      "line_end": 117,
+      "confidence": 0.98,
+      "recommendation": "Specify and assert the complete argv, such as `git push --force-with-lease=refs/heads/<branch>:<oid> origin HEAD:refs/heads/<branch>`, and make the git stub reject every unexpected push form. Re-pin red.sha and regenerate the script-owned RED record.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Resolve the executor ownership contradiction in B-1.",
+    "Strengthen W2/W3 to validate the complete push command, then recapture RED evidence."
+  ]
+}

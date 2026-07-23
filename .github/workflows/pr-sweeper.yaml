@@ -48,11 +48,23 @@ jobs:
         run: |
           # 열린 PR 중 봇 head prefix만 — autoMergeRequest!=null(무장됨) && mergeStateStatus=BEHIND.
           # update-branch는 main을 머지해 BEHIND를 풀고, gate 재실행 → green이면 auto-merge가 머지한다.
+          #
+          # ★★ `bump-poll/`은 이 목록에 **없다**(structure r7 R-25). 그 네임스페이스의 원격 상태는
+          #    **tools/ensure-bump-pr.ts가 유일한 소유자**다. 이유 둘:
+          #    ① 승인 게이트 우회 — 스위퍼는 **레인을 보지 않는다**. `.bindings.json`의 autoDeploy가
+          #       true→false로 바뀌어도 이미 무장된 PR은 무장된 채 남는데, 스위퍼가 브랜치를 갱신해
+          #       체크를 재시작시키면 green 시점에 GitHub이 **사람 승인 없이 auto-merge** 한다.
+          #       레인 reconcile(무장/해제)은 실행기만 할 수 있다 — 그러니 전진(advance)도 실행기 몫이다.
+          #    ② 소유권 인터록 파괴 — `gh pr update-branch`는 head에 **머지 커밋**을 만든다. 실행기는
+          #       head가 자기 bump 커밋(결정적 메시지 + writer ident)임을 증명해야 무장/force-push하는데,
+          #       머지 커밋이 얹히면 그 증명이 **영구 실패**한다 → 해당 앱의 bump가 영구 fail-closed.
+          #    실행기는 BEHIND를 **최신 main에서 재구축한 leased force-push**로 수렴시킨다(머지 커밋 0).
+          #    나머지 접두(bump·create-*·update-secrets)는 그대로 — 그 PR들엔 레인 개념이 없다.
           gh pr list --repo "$REPO" --state open \
             --json number,headRefName,mergeStateStatus,autoMergeRequest \
             --jq '.[] | select(.autoMergeRequest != null)
                        | select(.mergeStateStatus == "BEHIND")
-                       | select(.headRefName | test("^(bump|bump-poll|create-database|create-cache|create-app|update-secrets)/"))
+                       | select(.headRefName | test("^(bump|create-database|create-cache|create-app|update-secrets)/"))
                        | .number' > /tmp/behind.txt
           if [ ! -s /tmp/behind.txt ]; then echo "behind한 봇 PR 없음 — no-op"; exit 0; fi
           # ⚠️ codex restale3 F2: 실패를 ::warning::로 삼키고 green으로 끝내면 멈춘 PR(이 스위퍼가 잡으려던 모드)이

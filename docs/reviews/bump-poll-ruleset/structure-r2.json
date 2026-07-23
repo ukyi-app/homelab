@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "approve",
+  "summary": "Ship on the requested Round 2 scope. R-1 is resolved: verification.md:3-10 and spec.md:3-9 clearly supersede the historical slug/classic-token procedure and identify the current SSOT. No new critical/high issue found: enforced code has no dangling resolver reference; GitHub reports App 4043080 as ukyi-app/ukyi-homelab-writer; live ruleset 19598965 uses that sole bypass actor; and the canonical gate passes 15/15 tests.",
+  "planFile": null,
+  "planInDiff": null,
+  "reviewedFileCount": 8,
+  "target": "branch diff against main",
+  "reviewedSha": "c36a84d34e44da2b8eaadab93731aa632f75a207",
+  "reviewedTree": "a4e846af9b1d8c27263a424e0347ce0ad8b8cb04",
+  "reviewedPlanSha256": null,
+  "headMovedDuringReview": false,
+  "planDriftDuringReview": null,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "triage": "Clean verdict: note it in your report and COMMIT this artifact with the next bookkeeping commit.",
+  "findings": [],
+  "next_steps": []
+}
