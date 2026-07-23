@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: mixed trusted/untrusted PRs bypass the executor’s branch-ownership boundary and permit a destructive rebuild.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 61,
+  "target": "branch diff against main",
+  "reviewedSha": "33543ee4f5978262093185aacc7528bd82cfaff6",
+  "reviewedTree": "212ca427abcdd73bb390861fb19f4d613d9e8c63",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: a trusted target bypasses base-independent branch ownership",
+      "body": "The scan deliberately retains same-repository PRs for other bases because they also occupy the shared head ref, but this guard rejects them only when `trusted === null`. A trusted writer PR targeting `main` can coexist with an untrusted PR from the same head targeting another base; the trusted PR then wins selection, and a DIRTY/BEHIND decision force-pushes that shared ref. This rewrites the untrusted PR’s head without considering its reviews or other human state, contradicting the plan’s explicit base-independent ownership invariant. W11d covers only an untrusted other-base PR by itself, so it misses this composition.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 1691,
+      "line_end": 1699,
+      "confidence": 0.99,
+      "recommendation": "Model target identity and exclusive head ownership separately. If any untrusted same-repository PR occupies the head, prohibit force-push and other unsafe mutations regardless of whether a trusted target PR also exists; perform only explicitly safe revocations and exit nonzero. Add a mixed fixture containing a stale trusted main PR plus an untrusted different-base PR and require zero push/create/arm before rebuilding the fixed-test RED/GREEN records.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Fix the mixed-occupancy ownership guard and add the missing regression witness.",
+    "Regenerate the machine-owned RED/GREEN verification records without changing existing tests."
+  ]
+}

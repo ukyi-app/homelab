@@ -16,3 +16,6 @@ github_owner = "<GH_USER>"
 
 # repo 이름 (기본값 유지 권장 — terraform이 이 repo의 설정/branch protection/Actions secrets를 관리)
 repo_name = "homelab"
+
+# bump-poll/** 예약 ruleset의 bypass writer App은 rulesets.tf에서 App ID(4043080)를 직접 핀한다
+# (fine-grained PAT가 GET /apps/{slug} 404 → slug data source 못 씀). 여기 설정할 값 없음.

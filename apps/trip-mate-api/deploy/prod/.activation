@@ -1,12 +1,12 @@
 {
   "app": "trip-mate-api",
-  "sha": null,
-  "syncedRev": null,
-  "surfaceHash": "e6bec2ca01f45fb8d47115f501da49fa4b46072e816602086493728e9ea059aa",
+  "sha": "4d980062e3dd831362563d0cab9c9ab93a055a6a",
+  "syncedRev": "4d980062e3dd831362563d0cab9c9ab93a055a6a",
+  "surfaceHash": "c33f9758fdcc8292fbd890187db723c1bfdc91adc36d82152e10a5f2b59f7490",
   "registry": {
     "name": "trip-mate-api",
     "host": "trip-mate-api.ukyi.app",
     "public": true
   },
-  "activatedAt": "2026-07-06T00:00:00.000Z"
+  "activatedAt": "2026-07-23T07:02:24.299Z"
 }

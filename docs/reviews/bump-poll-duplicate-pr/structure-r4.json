@@ -1,0 +1,45 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "No ship: PR discovery still has two macro-level identity/trust flaws that can target the wrong PR or let public forks halt deployment.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 29,
+  "target": "branch diff against main",
+  "reviewedSha": "6e26b371b55f2c1e132a66a6a13abf19c68f821f",
+  "reviewedTree": "1388718e37e12a7d07e56fe7a3667e78d4f9a993",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 2,
+  "planFindingCount": 0,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: PR identity drops the requested base branch",
+      "body": "The public `--base` option controls PR creation, but discovery filters only by head. A trusted writer PR using the same deterministic head against another base can therefore be skipped, rebuilt, armed, or disarmed instead of creating the requested-base PR. Multiple valid head/base PRs also incorrectly trigger the `trustedAll > 1` fail-closed path. The state machine models PR identity too narrowly.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 353,
+      "line_end": 357,
+      "confidence": 0.98,
+      "recommendation": "Include `--base args.base` in authoritative discovery and add cross-base behavioral witnesses, or remove `--base` and make `main` an explicit invariant.",
+      "isPlanFinding": false
+    },
+    {
+      "severity": "high",
+      "title": "Blocker: fork saturation remains a deployment-suppression primitive",
+      "body": "The fixed-size query fails closed whenever 100 matching PRs are returned. Because matching fork PRs are attacker-controlled and deterministic branch names are public, filling the page makes every poll exit before reconciliation. This avoids the earlier destructive orphan misclassification but violates the preserved trust rule that fork-only PRs cannot suppress deployment; W11 explicitly locks this denial-of-service behavior.",
+      "file": "tools/ensure-bump-pr.ts",
+      "line_start": 353,
+      "line_end": 367,
+      "confidence": 0.97,
+      "recommendation": "Replace the fixed-page absence proof with exhaustive cursor pagination or an authoritative same-repository head/base query, then require fork crowding to preserve reconciliation rather than fail permanently.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Correct the PR identity and discovery boundary within the existing executor seam.",
+    "Refresh the committed verification evidence without weakening or retargeting the original RED witnesses."
+  ]
+}

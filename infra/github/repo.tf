@@ -31,7 +31,7 @@ resource "github_repository" "app_template" {
   visibility  = "public"
   is_template = true
   auto_init   = true # main 브랜치 생성(내용 push 대상)
-  has_issues  = false
+  has_issues  = true # 라이브와 정합(온보딩 이슈 트래킹 허용 — owner 결정 2026-07-23)
 }
 
 resource "github_branch_protection" "main" {

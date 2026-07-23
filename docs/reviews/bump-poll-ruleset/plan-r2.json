@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "approve",
+  "summary": "Ship the plan. R-1 now explicitly preserves R-46 as an accepted residual and the executor recheck; R-2 limits this increment to creation/update and safely defers deletion. This matches GitHub’s independent creation, update, and deletion rule model. No new critical issue was introduced. [GitHub ruleset documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)",
+  "planFile": "docs/reviews/bump-poll-ruleset/spec.md",
+  "planInDiff": true,
+  "reviewedFileCount": 4,
+  "target": "working tree diff",
+  "reviewedSha": "abd1bb9ed3b76d2ef9abefd5f6af2a7fc9a74f7e",
+  "reviewedTree": "9e39eb31c8ef92cde76430af3150ece157ae4b7b",
+  "headMovedDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "triage": "Clean verdict: note it in your report and COMMIT this artifact with the next bookkeeping commit.",
+  "findings": [],
+  "next_steps": []
+}

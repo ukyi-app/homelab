@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "verdict": "needs-attention",
+  "summary": "Do not ship yet: R-48 is fixed in code and the current 118/118 regression plus 63/63 characterization suites pass, but the committed GREEN lock still certifies the pre-R-48 implementation containing automatic PR closure.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": null,
+  "reviewedFileCount": 70,
+  "target": "branch diff against main",
+  "reviewedSha": "b8b14dd5eb5f61638d103b640bb6ed430e73557b",
+  "reviewedTree": "394277c446c06ef4775ec3fb6d1f22537495fb45",
+  "headMovedDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Release proof still pins the R-48-broken implementation",
+      "body": "The GREEN SHA remains `c389276`, an ancestor of `de739bb` whose executor still contains `CLOSE_MAX`, `BUMP_PR_CLOSE`, and `gh pr close`. The final executor and regression tests both changed afterward. Consequently, the committed same-test RED→GREEN proof ends at the implementation rejected by R-48; `verification.md:4-9` also calls this stale SHA HEAD. Fresh HEAD tests establish current behavior, but they do not restore the composite gate's machine-owned proof that the final test contract fails on the pre-fix source and passes on the final source.",
+      "file": "docs/reviews/bump-poll-duplicate-pr/bugfix-lock.json",
+      "line_start": 27,
+      "line_end": 29,
+      "confidence": 0.99,
+      "recommendation": "Reconstruct the RED baseline with the exact current 118-test tree, generate a GREEN record for `de739bb` or the final HEAD, repin `green.sha`, and update `verification.md` before rerunning the release gate.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Regenerate and commit the final RED/GREEN lock against the post-R-48 production and test trees."
+  ]
+}

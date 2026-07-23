@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "verdict": "needs-attention",
+  "summary": "No ship: r6’s implementation is present at HEAD but absent from the authoritative RED baseline. No separate new critical issue found. Simpler alternative: none; correctly pin the existing hermetic witness. Open question: none.",
+  "planFile": "docs/bugfixes/bump-poll-duplicate-pr.md",
+  "planInDiff": true,
+  "reviewedFileCount": 20,
+  "target": "branch diff against main",
+  "reviewedSha": "b9d294d464a5c864ad679af0707ac77442216e29",
+  "reviewedTree": "45398d9e4a867cb6314dde476ea54b345b3a4fa5",
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Blocker: the r6 witness is outside the locked RED baseline",
+      "body": "The plan claims a committed RED record proves the call-site contract, but `bugfix-lock.json` still pins `4fd7c557…`. That commit predates `489ef77`, which added the mixed-lane hermetic witness, single-assignment guard, and remaining `propose-pr` paths. The matching record consequently reports 14 regression and 70 characterization tests, not the asserted 15/79. Thus the machine-owned RED does not prove that planner-action overwrites remain red, allowing an approval-lane bypass to appear covered when it is not.",
+      "file": "docs/bugfixes/bump-poll-duplicate-pr.md",
+      "line_start": 140,
+      "line_end": 148,
+      "confidence": 1,
+      "recommendation": "Re-pin `red.sha` to a commit containing the r6 witnesses, regenerate the script-owned verify-record for that exact tree, confirm the record includes the 15th hermetic regression, and record the accepted r6 decision in the plan log.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Repair the RED pin and verify-record before implementation begins.",
+    "Do not re-run GREEN; regenerate only through the machine-owned RED verification workflow."
+  ]
+}
