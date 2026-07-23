@@ -40,10 +40,14 @@ jobs:
           bun tools/audit-orphans.ts --repo-root . | tee /tmp/audit.json
           # 명령치환을 echo 인자에 인라인하면 jq 실패가 echo exit 0에 삼켜진다 → 대입 분리(-e가 잡음)
           count=$(jq -r .count /tmp/audit.json)
+          # alerting = 페이지 대상(report-only 제외 — activation-surface-drift는 이미지 bump마다 재발하는
+          # 정보성 노이즈라 텔레그램에서 뺀다). count는 body에 그대로 표시(페이지 시 전 finding 가시).
+          alerting=$(jq -r .alerting /tmp/audit.json)
           echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "alerting=$alerting" >> "$GITHUB_OUTPUT"
       - name: build audit summary
         id: report
-        if: always() && (steps.audit.outcome == 'failure' || steps.audit.outputs.count != '0')
+        if: always() && (steps.audit.outcome == 'failure' || steps.audit.outputs.alerting != '0')
         env:
           OUTCOME: ${{ steps.audit.outcome }}
           COUNT: ${{ steps.audit.outputs.count }}
@@ -57,11 +61,11 @@ jobs:
           fi
           { echo "body<<EOF"; printf '%s\n' "$body"; echo "EOF"; } >> "$GITHUB_OUTPUT"
       - name: telegram report (드리프트/실패 시에만)
-        if: always() && (steps.audit.outcome == 'failure' || steps.audit.outputs.count != '0')
+        if: always() && (steps.audit.outcome == 'failure' || steps.audit.outputs.alerting != '0')
         uses: ./.github/actions/telegram-notify
         with:
           # status는 outcome 우선 — 실패를 drift로 오표기하지 않는다(C-F2)
-          status: ${{ steps.audit.outcome == 'failure' && 'failure' || (steps.audit.outputs.count != '0' && 'drift' || 'success') }}
+          status: ${{ steps.audit.outcome == 'failure' && 'failure' || (steps.audit.outputs.alerting != '0' && 'drift' || 'success') }}
           source: 감사
           title: 드리프트 감사
           ident: ${{ steps.audit.outcome == 'failure' && '실행 실패' || format('{0}건', steps.audit.outputs.count) }}
@@ -69,6 +73,7 @@ jobs:
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
-      - name: drift 0건 — skip 알림
-        if: success() && steps.audit.outputs.count == '0'
-        run: echo "::notice::드리프트 0건 — 알림 skip"
+      - name: 알림 대상 0건 — skip 알림
+        if: success() && steps.audit.outputs.alerting == '0'
+        # count>0·alerting=0(report-only 드리프트만, 예: activation-surface-drift)도 여기 — 감사 JSON엔 남지만 페이지 안 함.
+        run: echo "::notice::알림 대상 0건(전체 ${{ steps.audit.outputs.count }}건 중 report-only 제외) — 알림 skip"
