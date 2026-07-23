@@ -1,0 +1,37 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "structure",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: the required gate now depends on a checksum that GitHub does not guarantee will remain stable.",
+  "planFile": null,
+  "planInDiff": null,
+  "reviewedFileCount": 2,
+  "target": "branch diff against main",
+  "reviewedSha": "fe326b8990bcbf125f9c9ab2f5c4d15b2b9c68a6",
+  "reviewedTree": "87ffc40a5ed1481d6ead53c55583f433dd537b9f",
+  "reviewedPlanSha256": null,
+  "headMovedDuringReview": false,
+  "planDriftDuringReview": null,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Generated tag archive can invalidate the pinned checksum and block every required gate",
+      "body": "The Bats download is an automatically generated GitHub source archive, unlike the uploaded release assets used by the sibling installers. GitHub regenerates these archives, permits tags to move, and explicitly states that compression changes can alter the archive checksum without changing its contents ([GitHub documentation](https://docs.github.com/en/enterprise-cloud@latest/repositories/working-with-files/using-files/downloading-source-code-archives#stability-of-source-code-archives)). `sha256sum` therefore fails closed after such a regeneration, blocking both `gate` and `verify` until this repository is patched—the same required-check availability class this change intends to eliminate. The new test at lines 22–24 additionally locks this unstable artifact type into the contract.",
+      "file": ".github/actions/setup-toolchain/action.yml",
+      "line_start": 66,
+      "line_end": 67,
+      "confidence": 0.98,
+      "recommendation": "Install from an immutable uploaded release asset and verify its digest. If Bats publishes no such asset, vendor or mirror the verified v1.14.0 source as an immutable controlled artifact. Change the regression test to require an immutable artifact plus checksum rather than specifically requiring `/archive/refs/tags/`.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Replace the generated tag archive, update its checksum, and rerun the arm64 install smoke plus the gate suite."
+  ]
+}
