@@ -16,8 +16,10 @@
 - **`check-bats-accounting.sh`** — 모든 추적 `test_*.bats`가 정확히 한 도메인(gate / chart-test /
   `.ci-exclude`)에 배정됐는지 검사(고아·이중소유 차단). `make verify`가 호출. `run-bats.sh --list`를 읽는다.
 - **`check-app-deploy.sh`** — `apps/<name>/deploy/prod/` 배포 계약 가드. 필수 산출물 목록을
-  `tools/app-deploy-schema.json`(SSOT)에서 읽어 강제(`source-repo` 누락/공백 = fail-closed). `make verify`가 호출.
-  인레포 앱 0개면 vacuous pass.
+  `tools/app-deploy-schema.json`(SSOT)에서 읽어 강제(`source-repo` 누락/공백 = fail-closed) + **봉인 배선
+  all-or-none 불변식**(봉인본⇔envFrom `<app>-secrets`⇔kustomization 등재⇔checksum/secrets, 부분 상태 거부)
+  + `S → checksum 정합`(#277 재발 방지) + **strict scope**(namespace-wide/cluster-wide 어노테이션 거부, patch는
+  통과) + **파일명 규약**(`<app>-secrets.sealed.yaml` 하나만 허용). `make verify`가 호출. 인레포 앱 0개면 vacuous pass.
 - **`run-bats.sh`** — **단일 테스트 수집·실행기(required GATE)**. `make ci`·`ci.yaml`(gate)이 공통 호출(이중 SSOT 제거).
   스코프 = git-tracked `test_*.bats` − `platform/charts/*`(chart-test 별도) − `tests/.ci-exclude`. `--list`는 수집 목록만.
 - **`verify-secrets.sh`** — 추적 `*.enc.yaml` 무결성(암호화됨 + age recipient 신원이 canonical(.sops.yaml

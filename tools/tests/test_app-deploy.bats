@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # apps/<name>/deploy/prod 배포 계약 가드 — 필수 4산출물(values.yaml·.bindings.json·source-repo·
-# kustomization.yaml) + source-repo 발견 계약. 인레포 배포앱 0개라 양성/음성 fixture로 체커를 검증. bash 3.2: 단언은 [ ]만.
+# kustomization.yaml) + source-repo 발견 계약 + **봉인 배선 all-or-none 불변식**(sealed-wiring #01).
+# 인레포 배포앱 0개라 양성/음성 fixture로 체커를 검증. bash 3.2: 중간 단언은 [ ]만(check-bats-style).
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   CHECK="$ROOT/scripts/check-app-deploy.sh"
@@ -9,28 +10,39 @@ setup() {
 # 봉인본 원본 바이트 sha256 앞 16자 — 게이트 재산출 규약(create-app/update-secrets와 동일)
 sha16() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -c1-16; else sha256sum "$1" | cut -c1-16; fi; }
 
-# apps/<app>/deploy/prod 레이아웃 fixture 생성(app 이름은 조부모 디렉토리명) — 4산출물 + 봉인본
-make_app_fixture() {
-  app="$1"; base="$BATS_TEST_TMPDIR/$2"; d="$base/$app/deploy/prod"; mkdir -p "$d"
+# 봉인 배선 상태 fixture — S·E·K·C_present 4비트를 받아 apps/<app>/deploy/prod 레이아웃을 조립한다.
+#   S=봉인본 존재 · E=envFrom에 <app>-secrets · K=kustomization.resources에 봉인본 · C=checksum/secrets annotation
+# 필수 4산출물은 항상 존재(필수-산출물 검사와 배선 불변식을 분리). C=1 & S=1이면 checksum을 **일치**시켜
+# 불변식 ②(S→C_match)가 ①의 진리표를 오염시키지 않게 한다(S=0이면 ②는 vacuous라 더미 hex 허용).
+build_state() {
+  s="$1"; e="$2"; k="$3"; c="$4"; d="$5"; app="myapp"
+  mkdir -p "$d"
   echo "{}" > "$d/.bindings.json"
   echo "ukyi-app/$app" > "$d/source-repo"
-  printf 'resources:\n  - %s-secrets.sealed.yaml\n' "$app" > "$d/kustomization.yaml"
-  printf 'kind: SealedSecret\nmetadata:\n  name: %s-secrets\nspec:\n  encryptedData:\n    FOO: AgABC\n' "$app" > "$d/$app-secrets.sealed.yaml"
-  echo "$d"
+  if [ "$s" -eq 1 ]; then
+    printf 'kind: SealedSecret\nmetadata:\n  name: %s-secrets\n  namespace: prod\nspec:\n  encryptedData:\n    FOO: AgABC\n' "$app" > "$d/$app-secrets.sealed.yaml"
+  fi
+  if [ "$k" -eq 1 ]; then
+    printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources:\n  - %s-secrets.sealed.yaml\n' "$app" > "$d/kustomization.yaml"
+  else
+    printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources: []\n' > "$d/kustomization.yaml"
+  fi
+  {
+    echo "image: {}"
+    if [ "$e" -eq 1 ]; then
+      printf 'envFrom:\n  - secretRef:\n      name: %s-secrets\n' "$app"
+    fi
+    if [ "$c" -eq 1 ]; then
+      if [ "$s" -eq 1 ]; then csum="$(sha16 "$d/$app-secrets.sealed.yaml")"; else csum="deadbeefdeadbeef"; fi
+      printf 'podAnnotations:\n  checksum/secrets: %s\n' "$csum"
+    fi
+  } > "$d/values.yaml"
 }
 
-@test "check-app-deploy passes on the real tree (in-repo deploy apps vacuously satisfy contract)" {
+# ── 필수-산출물 계약(배선 불변식과 직교) ──────────────────────────────────────────────
+
+@test "check-app-deploy passes on the real tree (in-repo deploy apps satisfy contract)" {
   run bash "$CHECK"
-  [ "$status" -eq 0 ]
-}
-
-@test "positive fixture: deploy/prod with all 4 artifacts passes" {
-  d="$BATS_TEST_TMPDIR/app/deploy/prod"; mkdir -p "$d"
-  echo "image: {}" > "$d/values.yaml"
-  echo "{}" > "$d/.bindings.json"
-  echo "ukyi-app/myapp" > "$d/source-repo"
-  echo "resources: []" > "$d/kustomization.yaml"
-  run bash "$CHECK" "$d"
   [ "$status" -eq 0 ]
 }
 
@@ -38,6 +50,7 @@ make_app_fixture() {
   d="$BATS_TEST_TMPDIR/bad/deploy/prod"; mkdir -p "$d"
   echo "image: {}" > "$d/values.yaml"
   echo "{}" > "$d/.bindings.json"
+  echo "resources: []" > "$d/kustomization.yaml"
   run bash "$CHECK" "$d"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'source-repo'
@@ -47,6 +60,7 @@ make_app_fixture() {
   d="$BATS_TEST_TMPDIR/empty/deploy/prod"; mkdir -p "$d"
   echo "image: {}" > "$d/values.yaml"
   echo "{}" > "$d/.bindings.json"
+  echo "resources: []" > "$d/kustomization.yaml"
   : > "$d/source-repo"
   run bash "$CHECK" "$d"
   [ "$status" -ne 0 ]
@@ -63,8 +77,6 @@ make_app_fixture() {
 }
 
 @test "app-deploy .bindings.json contract is autoDeploy-centric (db/redis dropped)" {
-  # 연결=SealedSecret 이후 .bindings.json은 autoDeploy만 기록 — 계약 설명에서 db/redis 제거 회귀 가드.
-  # 단일 run+status로 검사(bats는 마지막 명령만 평가하므로 중간 grep 단언은 함정).
   run jq -e '.properties.".bindings.json".description | test("autoDeploy") and (test("db/redis") | not)' \
     "$ROOT/tools/app-deploy-schema.json"
   [ "$status" -eq 0 ]
@@ -76,45 +88,193 @@ make_app_fixture() {
   echo "$output" | grep -q 'continue'
 }
 
-@test "checksum gate: matching checksum passes (sha256(sealed raw bytes) == values checksum/secrets)" {
-  d="$(make_app_fixture myapp match)"
-  want="$(sha16 "$d/myapp-secrets.sealed.yaml")"
-  printf 'image: {}\npodAnnotations:\n  checksum/secrets: %s\n' "$want" > "$d/values.yaml"
+# ── 봉인 배선 all-or-none 불변식 ① — 16상태 진리표(0000·1111만 PASS, 혼합 14 FAIL) ──────────
+
+@test "wiring invariant: 16-state truth table — only 0000 and 1111 pass" {
+  bits=0
+  while [ "$bits" -le 15 ]; do
+    s=$(( (bits >> 3) & 1 )); e=$(( (bits >> 2) & 1 )); k=$(( (bits >> 1) & 1 )); c=$(( bits & 1 ))
+    d="$BATS_TEST_TMPDIR/tt-$bits/myapp/deploy/prod"
+    build_state "$s" "$e" "$k" "$c" "$d"
+    run bash "$CHECK" "$d"
+    sum=$(( s + e + k + c ))
+    if [ "$sum" -eq 0 ] || [ "$sum" -eq 4 ]; then
+      [ "$status" -eq 0 ] || { echo "상태 S$s E$e K$k C$c 은 PASS여야 함 (status=$status): $output"; return 1; }
+    else
+      [ "$status" -ne 0 ] || { echo "상태 S$s E$e K$k C$c 은 FAIL여야 함(부분 상태): $output"; return 1; }
+    fi
+    bits=$(( bits + 1 ))
+  done
+}
+
+# 대표 혼합 상태 — 진리표 루프가 이미 덮지만 회귀 진단을 위해 이름을 남긴다.
+
+@test "wiring invariant: S=0 E=1 K=0 C=0 fails (design-r3 R-3 counterexample — old biconditional passed this)" {
+  d="$BATS_TEST_TMPDIR/r3/myapp/deploy/prod"
+  build_state 0 1 0 0 "$d"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '부분 상태'
+}
+
+@test "wiring invariant: S=0 E=0 K=1 C=0 fails (dangling resources entry breaks kustomize render)" {
+  d="$BATS_TEST_TMPDIR/dangling/myapp/deploy/prod"
+  build_state 0 0 1 0 "$d"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '부분 상태'
+}
+
+@test "wiring invariant: S=1 E=0 K=1 C=1 fails (sealed present but not consumed via envFrom)" {
+  d="$BATS_TEST_TMPDIR/unconsumed/myapp/deploy/prod"
+  build_state 1 0 1 1 "$d"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '부분 상태'
+}
+
+# ── 불변식 ② — S → C_match (checksum 값 정합, 기존 #277 회귀 보존) ───────────────────────
+
+@test "checksum gate: fully wired app with matching checksum passes (1111)" {
+  d="$BATS_TEST_TMPDIR/match/myapp/deploy/prod"
+  build_state 1 1 1 1 "$d"
   run bash "$CHECK" "$d"
   [ "$status" -eq 0 ]
 }
 
-@test "checksum gate: mismatched checksum fails (re-sealed without bumping checksum = #277 regression)" {
-  d="$(make_app_fixture myapp mismatch)"
-  printf 'image: {}\npodAnnotations:\n  checksum/secrets: deadbeefdeadbeef\n' > "$d/values.yaml"
+@test "checksum gate: fully wired app with mismatched checksum fails (re-sealed w/o bumping = #277)" {
+  d="$BATS_TEST_TMPDIR/mism/myapp/deploy/prod"
+  build_state 1 0 1 0 "$d"
+  printf 'image: {}\nenvFrom:\n  - secretRef:\n      name: myapp-secrets\npodAnnotations:\n  checksum/secrets: deadbeefdeadbeef\n' > "$d/values.yaml"
   run bash "$CHECK" "$d"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '불일치'
 }
 
-@test "checksum gate: sealed present but no checksum/secrets fails (secret change would not roll the pod)" {
-  d="$(make_app_fixture myapp nochecksum)"
-  echo "image: {}" > "$d/values.yaml"
+@test "checksum gate: comment lines above checksum/secrets are tolerated (trip-mate-api layout)" {
+  # build_state로 S(봉인본)+K(kustomization)만 스캐폴딩하고 values.yaml은 직접 조립(E·C를 이 테스트가 소유).
+  d="$BATS_TEST_TMPDIR/comments/myapp/deploy/prod"
+  build_state 1 0 1 0 "$d"
+  want="$(sha16 "$d/myapp-secrets.sealed.yaml")"
+  printf 'image: {}\nenvFrom:\n  - secretRef:\n      name: myapp-secrets\npodAnnotations:\n  # 재봉인 주석 1\n  # 재봉인 주석 2\n  checksum/secrets: %s\n' "$want" > "$d/values.yaml"
+  run bash "$CHECK" "$d"
+  [ "$status" -eq 0 ]
+}
+
+@test "E/K axes tolerate quoted YAML values (hand-edited but validly wired app passes)" {
+  # 게이트는 손편집 표면을 정찰하므로 name: \"myapp-secrets\" 같은 정당한 따옴표 변형에 false-FAIL하면 안 된다.
+  d="$BATS_TEST_TMPDIR/quoted/myapp/deploy/prod"
+  build_state 1 0 0 0 "$d"
+  want="$(sha16 "$d/myapp-secrets.sealed.yaml")"
+  printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources:\n  - "myapp-secrets.sealed.yaml"\n' > "$d/kustomization.yaml"
+  printf 'image: {}\nenvFrom:\n  - secretRef:\n      name: "myapp-secrets"\npodAnnotations:\n  checksum/secrets: %s\n' "$want" > "$d/values.yaml"
+  run bash "$CHECK" "$d"
+  [ "$status" -eq 0 ]
+}
+
+# ── E 판정 정밀 — envFrom은 공유 리스트(conn 시크릿과 공존) ────────────────────────────
+
+@test "E axis: <app>-secrets among other secretRefs still counts (shared envFrom with conn secret)" {
+  d="$BATS_TEST_TMPDIR/shared/myapp/deploy/prod"
+  build_state 1 0 1 0 "$d"
+  want="$(sha16 "$d/myapp-secrets.sealed.yaml")"
+  printf 'image: {}\nenvFrom:\n  - secretRef:\n      name: myapp-secrets\n  - secretRef:\n      name: db-myapp-conn\npodAnnotations:\n  checksum/secrets: %s\n' "$want" > "$d/values.yaml"
+  run bash "$CHECK" "$d"
+  [ "$status" -eq 0 ]
+}
+
+@test "E axis: only a conn secretRef (no <app>-secrets) does not satisfy E — sealed present is a partial state" {
+  d="$BATS_TEST_TMPDIR/connonly/myapp/deploy/prod"
+  build_state 1 0 1 0 "$d"
+  want="$(sha16 "$d/myapp-secrets.sealed.yaml")"
+  printf 'image: {}\nenvFrom:\n  - secretRef:\n      name: db-myapp-conn\npodAnnotations:\n  checksum/secrets: %s\n' "$want" > "$d/values.yaml"
   run bash "$CHECK" "$d"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q 'checksum/secrets 없음'
+  echo "$output" | grep -q '부분 상태'
 }
 
-@test "checksum gate: comment lines above checksum/secrets are tolerated (trip-mate-api layout)" {
-  # trip-mate-api values.yaml은 podAnnotations와 checksum 사이에 한국어 주석 3줄 — sed 추출이 이를 건너뛰어야 한다.
-  d="$(make_app_fixture myapp comments)"
-  want="$(sha16 "$d/myapp-secrets.sealed.yaml")"
-  printf 'image: {}\npodAnnotations:\n  # 재봉인 주석 1\n  # 재봉인 주석 2\n  checksum/secrets: %s\n' "$want" > "$d/values.yaml"
-  run bash "$CHECK" "$d"
-  [ "$status" -eq 0 ]
-}
-
-@test "checksum gate: no sealed file means no checksum requirement (secretless app passes)" {
-  d="$BATS_TEST_TMPDIR/plain/app/deploy/prod"; mkdir -p "$d"
-  echo "image: {}" > "$d/values.yaml"
+# ── strict scope 강제(sealed-wiring #02, design-r1 R-2) ────────────────────────────────
+# 완전 배선(1111) 앱을 조립하되 봉인본 metadata.annotations에 $anno 줄을 넣는다(checksum은 정합) —
+# 배선 불변식은 통과시키고 scope 검사만 태우기 위함.
+build_wired_with_anno() {
+  d="$1"; anno="$2"; app="myapp"; mkdir -p "$d"
   echo "{}" > "$d/.bindings.json"
-  echo "ukyi-app/app" > "$d/source-repo"
-  echo "resources: []" > "$d/kustomization.yaml"
+  echo "ukyi-app/$app" > "$d/source-repo"
+  printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources:\n  - %s-secrets.sealed.yaml\n' "$app" > "$d/kustomization.yaml"
+  {
+    echo "apiVersion: bitnami.com/v1alpha1"
+    echo "kind: SealedSecret"
+    echo "metadata:"
+    printf '  name: %s-secrets\n' "$app"
+    echo "  namespace: prod"
+    if [ -n "$anno" ]; then
+      echo "  annotations:"
+      printf '    %s\n' "$anno"
+    fi
+    printf 'spec:\n  encryptedData:\n    FOO: AgABC\n'
+  } > "$d/$app-secrets.sealed.yaml"
+  want="$(sha16 "$d/$app-secrets.sealed.yaml")"
+  printf 'image: {}\nenvFrom:\n  - secretRef:\n      name: %s-secrets\npodAnnotations:\n  checksum/secrets: %s\n' "$app" "$want" > "$d/values.yaml"
+}
+
+@test "scope: cluster-wide annotation is rejected (ciphertext reusable outside the intended Secret)" {
+  d="$BATS_TEST_TMPDIR/cw/myapp/deploy/prod"
+  build_wired_with_anno "$d" 'sealedsecrets.bitnami.com/cluster-wide: "true"'
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "scope: namespace-wide annotation is rejected (name isolation broken within the namespace)" {
+  d="$BATS_TEST_TMPDIR/nw/myapp/deploy/prod"
+  build_wired_with_anno "$d" 'sealedsecrets.bitnami.com/namespace-wide: "true"'
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "scope: patch annotation passes (patch mode is not scope — argocd extras precedent)" {
+  d="$BATS_TEST_TMPDIR/patch/myapp/deploy/prod"
+  build_wired_with_anno "$d" 'sealedsecrets.bitnami.com/patch: "true"'
   run bash "$CHECK" "$d"
   [ "$status" -eq 0 ]
+}
+
+@test "scope: cluster-wide with false value is not scope-widening (strict, passes)" {
+  d="$BATS_TEST_TMPDIR/cwf/myapp/deploy/prod"
+  build_wired_with_anno "$d" 'sealedsecrets.bitnami.com/cluster-wide: "false"'
+  run bash "$CHECK" "$d"
+  [ "$status" -eq 0 ]
+}
+
+@test "scope: a trailing YAML comment does not let a scope annotation evade the check" {
+  # E/K 축과 동일한 주석 관용 — scope 확대가 손편집 주석 하나로 우회되면 안 된다(fail-open 방지).
+  d="$BATS_TEST_TMPDIR/cwcomment/myapp/deploy/prod"
+  build_wired_with_anno "$d" 'sealedsecrets.bitnami.com/cluster-wide: "true"  # 손편집 주석'
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "scope: annotation under spec.template.metadata is also caught (not only top-level metadata)" {
+  # kubeseal은 scope 어노테이션을 SealedSecret metadata에 두지만, whole-file 검사라 template 배치도 잡아야 한다.
+  d="$BATS_TEST_TMPDIR/tmplscope/myapp/deploy/prod"; app="myapp"; mkdir -p "$d"
+  echo "{}" > "$d/.bindings.json"
+  echo "ukyi-app/$app" > "$d/source-repo"
+  printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources:\n  - %s-secrets.sealed.yaml\n' "$app" > "$d/kustomization.yaml"
+  printf 'apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nmetadata:\n  name: %s-secrets\n  namespace: prod\nspec:\n  encryptedData:\n    FOO: AgABC\n  template:\n    metadata:\n      name: %s-secrets\n      namespace: prod\n      annotations:\n        sealedsecrets.bitnami.com/namespace-wide: "true"\n' "$app" "$app" > "$d/$app-secrets.sealed.yaml"
+  want="$(sha16 "$d/$app-secrets.sealed.yaml")"
+  printf 'image: {}\nenvFrom:\n  - secretRef:\n      name: %s-secrets\npodAnnotations:\n  checksum/secrets: %s\n' "$app" "$want" > "$d/values.yaml"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "filename convention: a non-<app>-secrets *.sealed.yaml in the deploy dir is rejected" {
+  d="$BATS_TEST_TMPDIR/rogue/myapp/deploy/prod"
+  build_state 1 1 1 1 "$d"
+  echo "kind: SealedSecret" > "$d/rogue.sealed.yaml"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '규약 외'
 }
