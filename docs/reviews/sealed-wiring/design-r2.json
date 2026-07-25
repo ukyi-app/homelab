@@ -1,0 +1,37 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "design",
+  "verdict": "needs-attention",
+  "summary": "Do not ship. (1) R-1 is still open: the invariant at lines 174-175 contradicts its all-or-none intent and reverse fixtures. R-2 is resolved: lines 140-153 and 188-191 enforce strict scope through both adapters, lines 225-229 cover broad-scope and patch cases, and line 295 isolates the policy change in PR-C. (2) No separate new critical/high issue was found in the scope or PR-slicing fixes.",
+  "planFile": "docs/reviews/sealed-wiring/design.md",
+  "planInDiff": true,
+  "reviewedFileCount": 3,
+  "target": "working tree diff",
+  "reviewedSha": "b1ad5ba339dee7711d3221db28203bedbcdd547a",
+  "reviewedTree": "4a987d3a9630cd2a3bb030000dd3f9c1af0cf352",
+  "reviewedPlanSha256": "23d80f1fd3b3dcf46cb53de38f3cecc4c815a6b1dcfb9a0187928a5922204e15",
+  "headMovedDuringReview": false,
+  "planDriftDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "R-1 remains open because the biconditional permits partial states",
+      "body": "`S ⟺ (E ∧ K ∧ C)` is not an all-or-none invariant. For example, with S=false, E=true, K=false, and C=false, both sides evaluate false, so the biconditional passes—even though the reverse fixture at line 248 says this state must fail. An implementation following the stated formula therefore remains fail-open for most partial-removal combinations, retaining the stale-secret restart failure and dangling-reference risks from Round 1.",
+      "file": "docs/reviews/sealed-wiring/design.md",
+      "line_start": 174,
+      "line_end": 175,
+      "confidence": 0.99,
+      "recommendation": "Replace the formula with explicit equality of all four facts, such as `(S && E && K && C) || (!S && !E && !K && !C)`, and require the gate tests to reject all 14 mixed truth-table states.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Correct the R-1 invariant and align the gate description, implementation contract, and truth-table tests before shipping."
+  ]
+}
