@@ -41,9 +41,18 @@ _Avoid_: 자동 머지 플래그
 
 **봉인 계약**:
 SealedSecret이 앱 배포에 편입되기 위해 만족해야 하는 규약 — `kind: SealedSecret` ·
-`namespace: prod` · `name: <app>-secrets` · `encryptedData` 비었음 금지 · 키 UPPER_SNAKE.
-커널 `tools/lib/sealed-contract.ts`의 `readSealed`가 판정·문구·checksum·바이트를 소유한다.
+`namespace: prod` · `name: <app>-secrets` · `encryptedData` 비었음 금지 · 키 UPPER_SNAKE ·
+**strict scope**(아래). 커널 `tools/lib/sealed-contract.ts`의 `readSealed`가 판정·문구·checksum·
+바이트를 소유한다.
 _Avoid_: 시크릿 검증, sealed 스키마
+
+**strict scope**:
+봉인본이 **그 이름·그 네임스페이스에서만** 복호화된다는 성질. kubeseal 기본값이며,
+`sealedsecrets.bitnami.com/namespace-wide`·`cluster-wide` 어노테이션이 이를 넓힌다 — 봉인 계약은
+그 어노테이션(truthy)을 **거부**한다(`readSealed` 6번째 조항 + `check-app-deploy.sh` 게이트, 두 adapter).
+`namespace: prod` 등호는 strict scope를 함의하지 않는다(등호만으론 scope 확대 어노테이션을 못 잡는다 —
+design-r1 R-2). patch(`sealedsecrets.bitnami.com/patch`)는 scope가 아니라 통과.
+_Avoid_: prod 스코프, 네임스페이스 검증
 
 **봉인 원본 바이트**:
 디스크에 기록되고 checksum이 계산되는 바로 그 바이트. 커널이 `checksum`과 함께 한 값으로

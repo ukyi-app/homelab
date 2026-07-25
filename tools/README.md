@@ -152,9 +152,11 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   콜사이트가 소유한다 — **정책이 콜사이트마다 갈리기** 때문이다(poll-ghcr는 null을 refuse로,
   bump-tag는 exit 2로). 콜사이트마다 정규식이 갈리는 오배포 표면을 SSOT로 없앤다.
   소비자: `poll-ghcr`·`bump-tag`·`create-app`.
-- **`lib/sealed-contract.ts`** — 봉인 계약 커널(`readSealed(raw, app)` 단일 함수). 5검증(kind·
-  namespace=prod·name=`<app>-secrets`·encryptedData 비었음·키 UPPER_SNAKE)의 **판정과 에러 문구** +
-  checksum + **디스크에 쓸 바이트**를 소유한다. image-pin과 달리 **에러 문구까지** 커널이 갖는 이유:
+- **`lib/sealed-contract.ts`** — 봉인 계약 커널(`readSealed(raw, app)` 단일 함수). 6검증(kind·
+  namespace=prod·name=`<app>-secrets`·encryptedData 비었음·키 UPPER_SNAKE·**strict scope**)의 **판정과
+  에러 문구** + checksum + **디스크에 쓸 바이트**를 소유한다. strict scope = scope 확대 어노테이션
+  (namespace-wide/cluster-wide) 거부(`check-app-deploy.sh` 게이트와 같은 정책의 툴-경로 adapter).
+  image-pin과 달리 **에러 문구까지** 커널이 갖는 이유:
   두 소비자가 **같은 정책을 같은 문구로** 판정하기 때문이다(정책이 콜사이트마다 갈리지 않는다).
   콜사이트가 남기는 것: `::error::<tool>:` 접두·exit·파일 I/O·optionality·envFrom/kustomization 배선 모드.
   `facts.bytes`/`facts.checksum`이 한 값이라 "해시한 것 ≠ 디스크에 쓴 것"이 구조적으로 불가능(#299).
