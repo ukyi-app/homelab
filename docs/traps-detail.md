@@ -340,3 +340,24 @@
   + no-block-comments + no-override; `.gitignore`가 `*_override.tf` 이중화)이고, **완전 보증은 owner-local 라이브
   검증**(apply 후 적대 push 거부 실측 + `gh api /repos/{o}/{r}/rulesets` 관측). 절차는 `docs/reviews/bump-poll-ruleset/verification.md`.
 > 가드: `tests/gates/test_bump_poll_ruleset.bats`
+
+### emptyDir sizeLimit vs 런타임 다운로드 페이로드
+- 컨테이너가 **부팅할 때마다 볼륨으로 받아오는** 페이로드(플러그인·모델·데이터셋)는 이미지 digest를 핀해도
+  고정되지 않는다 — 업스트림이 키우면 그대로 커진다. `emptyDir.sizeLimit`을 실측치에 바짝 붙여 잡으면
+  업스트림 릴리스 하나에 kubelet이 파드를 evict하고, Deployment가 즉시 새 파드를 만들어 **부팅↔evict 무한
+  루프**가 된다. 노드 압박이 아니라 볼륨 단위 초과라 `DiskPressure`는 False로 남는다 — 노드 지표만 보면 원인을
+  놓친다. 종료 사유도 OOMKill이 아니라 `Evicted`(+SIGTERM 정상종료 시 exit 0/`Succeeded`)라 OOM 알림에도 안 잡힌다.
+- 라이브 사례(2026-07-25 grafana): 선언 256Mi(262,144 KiB) vs 실측 262,844 KiB — **0.27%(700 KiB) 초과**.
+  18일간 잠복하다 VM 재부팅으로 emptyDir이 소멸하며 커진 세트를 재다운로드해 터졌다(도화선은 코드 변경이
+  아니라 재부팅). 60초 주기로 파드 오브젝트가 400개 넘게 쌓였고, 파드마다 새 로그 스트림이 생겨 VictoriaLogs
+  인제스트가 5.1배(28.5k→145k rows/h)·스트림 생성 18배로 뛰며 **victorialogs OOMKill 연쇄**까지 갔다.
+  즉 이 함정은 단일 파드가 아니라 로그 파이프라인을 함께 무너뜨린다.
+- ⚠️ **페이로드 축소가 항상 가능하진 않다**: grafana 13.1.0은 기본 preinstall 목록이 바이너리에 컴파일돼
+  `GF_PLUGINS_PREINSTALL=""`로는 안 사라지고, 유일한 킬스위치 `GF_PLUGINS_PREINSTALL_DISABLED=true`는 명시
+  요청한 데이터소스까지 함께 제거한다(프로브 3종 실측). 그런 경우 방어 수단은 **용량 마진뿐**이다.
+- 대응: 선언값은 실측 페이로드의 **1.5배 이상**. cf. `vmagent`는 앱 내부 상한(`maxDiskUsagePerURL=450MiB`)을
+  sizeLimit(512Mi) 아래에 둬 앱 쪽에서 같은 함정을 막는다 — 그 대응물이 없는 워크로드가 무방비다.
+- ⚠️ **가드는 정적이다**: 선언값이 *기록된* 실측치 대비 마진을 지키는지만 본다. 미래 업스트림 증가 자체는
+  못 잡으므로 페이로드 불변화(플러그인을 구운 핀 이미지)나 emptyDir 사용률 관측이 후속 과제로 남아 있다
+  (release 게이트 R-1 defer, `docs/reviews/grafana-emptydir-plugin-overflow/`).
+> 가드: `platform/victoria-stack/prod/test_grafana_plugin_budget.bats`

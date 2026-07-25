@@ -45,7 +45,13 @@ spec:
         - { name: datasources, configMap: { name: grafana-datasources } }
         - { name: providers, configMap: { name: grafana-dashboard-providers } }
         - { name: dashboards, configMap: { name: grafana-dashboard-resources } }
-        - { name: data, emptyDir: { sizeLimit: 256Mi } } # 설계상 휘발성 SQLite (§8)
+        # 설계상 휘발성 SQLite (§8). 512Mi는 grafana가 **매 부팅마다 이 볼륨으로 런타임 다운로드하는**
+        # 플러그인 페이로드(2026-07-25 실측 262,844 KiB — VL 데이터소스가 단일 zip에 8개 플랫폼
+        # 바이너리를 동봉 + grafana 내장 preinstall 앱 4종)에 1.5배 이상 마진을 두기 위한 값이다.
+        # 256Mi는 한계치의 99.7%였고 업스트림 릴리스 한 번에 kubelet eviction 루프로 터졌다.
+        # 페이로드 축소는 13.1.0에서 불가(preinstall 킬스위치가 요구 데이터소스까지 제거) — 용량으로만 방어.
+        # 가드: test_grafana_plugin_budget.bats. cf. vmagent는 앱 내부 상한(450MiB<512Mi)으로 같은 함정 방어.
+        - { name: data, emptyDir: { sizeLimit: 512Mi } }
 ---
 apiVersion: v1
 kind: Service
