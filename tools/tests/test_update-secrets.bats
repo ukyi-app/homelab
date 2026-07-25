@@ -49,22 +49,25 @@ teardown() { rm -rf "$TMP"; }
   [ -f "$FR/apps/example-api/deploy/prod/example-api-secrets.sealed.yaml" ]
 }
 
-@test "update-secrets rejects invalid sealed key names" {
+# 봉인 계약 정책 매트릭스(kind/namespace/name/empty/UPPER_SNAKE)는 커널이 소유한다
+# (tools/tests/test_sealed-contract.bats). 여기선 커널 거부가 이 툴의 ::error:: 접두 + exit 1로
+# 전파되는지만 증인한다(위임 증인 — 중복 정책 단언은 커널로 이관).
+@test "update-secrets: a sealed-contract rejection surfaces as exit 1 with the tool's ::error:: prefix" {
   cat > "$APPREPO/deploy/example-api-secrets.sealed.yaml" <<'EOF'
 apiVersion: bitnami.com/v1alpha1
 kind: SealedSecret
 metadata:
   name: example-api-secrets
-  namespace: prod
+  namespace: default
 spec:
   encryptedData:
-    bad-key: AgX...
+    ENV_TEST: AgX...
 EOF
 
   run bun "$ROOT/tools/update-secrets.ts" --app example-api --repo-root "$FR" --app-repo-root "$APPREPO"
 
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q "bad-key"
+  echo "$output" | grep -q '::error::update-secrets: sealed namespace는 prod여야 한다'
 }
 
 @test "update-secrets accepts key removal from the sealed secret" {
@@ -84,24 +87,6 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | grep -q '"A"'
   ! echo "$output" | grep -q '"B"'
-}
-
-@test "update-secrets allows DATABASE_ADMIN_URL when it is already sealed" {
-  cat > "$APPREPO/deploy/example-api-secrets.sealed.yaml" <<'EOF'
-apiVersion: bitnami.com/v1alpha1
-kind: SealedSecret
-metadata:
-  name: example-api-secrets
-  namespace: prod
-spec:
-  encryptedData:
-    DATABASE_ADMIN_URL: AgX...
-EOF
-
-  run bun "$ROOT/tools/update-secrets.ts" --app example-api --repo-root "$FR" --app-repo-root "$APPREPO"
-
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q "DATABASE_ADMIN_URL"
 }
 
 @test "update-secrets workflow only needs the deploy directory from the app repo" {

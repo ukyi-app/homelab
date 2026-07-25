@@ -167,7 +167,10 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "create-app rejects a sealed secret with wrong namespace or name" {
+# 봉인 계약 정책 매트릭스(kind/namespace/name/empty/UPPER_SNAKE)는 커널이 소유한다
+# (tools/tests/test_sealed-contract.bats). 여기선 커널 거부가 이 툴의 ::error:: 접두 + exit 1로
+# 전파되는지만 증인한다(위임 증인 — 중복 정책 단언은 커널로 이관).
+@test "create-app: a sealed-contract rejection surfaces as exit 1 with the tool's ::error:: prefix" {
   cat > "$TMP/sealed.yaml" <<'EOF'
 apiVersion: bitnami.com/v1alpha1
 kind: SealedSecret
@@ -179,35 +182,7 @@ spec:
 EOF
   gen --sealed "$TMP/sealed.yaml"
   [ "$status" -ne 0 ]
-}
-
-@test "create-app rejects invalid sealed encryptedData key names" {
-  cat > "$TMP/sealed.yaml" <<'EOF'
-apiVersion: bitnami.com/v1alpha1
-kind: SealedSecret
-metadata:
-  name: orders-secrets
-  namespace: prod
-spec:
-  encryptedData: { bad-key: AgX... }
-EOF
-  gen --sealed "$TMP/sealed.yaml"
-  [ "$status" -ne 0 ]
-}
-
-@test "create-app allows DATABASE_ADMIN_URL when it is already sealed" {
-  cat > "$TMP/sealed.yaml" <<'EOF'
-apiVersion: bitnami.com/v1alpha1
-kind: SealedSecret
-metadata:
-  name: orders-secrets
-  namespace: prod
-spec:
-  encryptedData: { DATABASE_ADMIN_URL: AgX... }
-EOF
-  gen --sealed "$TMP/sealed.yaml"
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q "DATABASE_ADMIN_URL"
+  echo "$output" | grep -q '::error::create-app: sealed namespace는 prod여야 한다'
 }
 
 @test "create-app disables metrics by default for web apps" {

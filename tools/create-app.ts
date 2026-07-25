@@ -4,10 +4,10 @@
 // SealedSecret 시크릿·digest 핀 이미지·권위 바인딩 레지스트리(.bindings.json=autoDeploy)를 다룬다.
 // _create-app.yaml(homelab-initiated workflow_dispatch)이 호출 — 결과물은 PR(사람 머지 = 승인).
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { TAG_RE, DIGEST_RE } from "./lib/image-pin.ts";
+import { readSealed, type SealedFacts } from "./lib/sealed-contract.ts";
 import { analyzeLedger, appendRowWithTotals, budgetViolation, type LedgerAgg } from "./lib/ledger-budget.ts";
 import { parseFlags } from "./lib/cli.ts";
 import { addApp } from "./lib/digest-exporter.ts";
@@ -133,21 +133,14 @@ if (served && pub) {
   if (registry.some((r: any) => r.host === host)) fail(`apps.json에 host '${host}' 이미 존재(오라우팅 차단)`);
 }
 
-// SealedSecret 시크릿: 봉인본이 있으면 encryptedData 키 목록을 권위로 삼아 배선한다.
-// 원본 바이트는 그대로 보존한다(디스크 기록·checksum 해시 모두 원본 기준 — update-secrets.ts 규약과 통일).
-let sealedDoc = null;
-let sealedRaw = "";
-let secretKeys: string[] = [];
+// SealedSecret 시크릿: 봉인본이 있으면 봉인 계약 커널이 검증·checksum·디스크 바이트를 소유한다.
+// optionality(봉인본 유무)와 ::error:: 접두는 콜사이트 소유. facts.bytes/checksum이 한 값이라
+// 디스크 기록과 checksum이 갈라질 수 없다(#299 클래스 소멸).
+let sealedFacts: SealedFacts | null = null;
 if (sealedPath) {
-  sealedRaw = readFileSync(sealedPath, "utf8");
-  sealedDoc = parseYaml(sealedRaw); // 검증 전용(kind/namespace/name/키) — 재직렬화본은 디스크·해시에 쓰지 않는다
-  if (sealedDoc?.kind !== "SealedSecret") fail("sealed 파일이 kind: SealedSecret이 아니다");
-  if (sealedDoc?.metadata?.namespace !== "prod") fail(`sealed namespace는 prod여야 한다(strict-scope): ${sealedDoc?.metadata?.namespace}`);
-  if (sealedDoc?.metadata?.name !== `${app}-secrets`) fail(`sealed name은 ${app}-secrets여야 한다: ${sealedDoc?.metadata?.name}`);
-  secretKeys = Object.keys(sealedDoc?.spec?.encryptedData ?? {}).sort();
-  if (secretKeys.length === 0) fail("sealed encryptedData가 비어 있다");
-  const badKeys = secretKeys.filter((key) => !/^[A-Z][A-Z0-9_]*$/.test(key));
-  if (badKeys.length) fail(`sealed encryptedData 키는 UPPER_SNAKE여야 한다: ${badKeys.join(", ")}`);
+  const r = readSealed(readFileSync(sealedPath, "utf8"), app);
+  if (!r.ok) fail(r.why);
+  sealedFacts = r.facts;
 }
 
 // ---------- 4) values.yaml 구성 ----------
@@ -156,7 +149,7 @@ const values: Record<string, any> = {
   kind, replicas,
   resources: { requests: { cpu: rq.cpu, memory: rq.memory }, limits: { cpu: lm.cpu, memory: lm.memory } },
 };
-const envFrom = sealedDoc ? [{ secretRef: { name: `${app}-secrets` } }] : [];
+const envFrom = sealedFacts ? [{ secretRef: { name: sealedFacts.secretName } }] : [];
 if (envFrom.length) values.envFrom = envFrom;
 if (served) values.route = { host, paths: config.route?.paths ?? ["/"], public: pub };
 if (config.probes) values.probes = config.probes;
@@ -167,9 +160,9 @@ values.metrics = { enabled: config.metrics?.enabled ?? false };
 // 선언적 회전: 봉인 콘텐츠 해시를 pod template annotation으로 둔다 → update-secrets가 봉인본을
 // 갱신하면 이 해시가 바뀌어 ArgoCD가 Deployment를 롤링한다(envFrom 변경은 재시작 필요 —
 // 명령형 rollout restart는 취소/실패 시 옛 값 유지라 선언적으로). 해시는 디스크에 기록될 봉인본
-// 원본 바이트 기준(update-secrets.ts와 동일 규약 — check-app-deploy 게이트가 정합을 강제).
-if (sealedDoc) {
-  values.podAnnotations = { "checksum/secrets": createHash("sha256").update(sealedRaw).digest("hex").slice(0, 16) };
+// 원본 바이트 기준(커널 facts.checksum — check-app-deploy 게이트가 정합을 강제).
+if (sealedFacts) {
+  values.podAnnotations = { "checksum/secrets": sealedFacts.checksum };
 }
 
 // 권위 정책 레지스트리 — 폴러(poll-ghcr) autoDeploy 승인 게이트의 유일 소스
@@ -179,7 +172,7 @@ const bindings = { autoDeploy: config.deploy?.autoDeploy ?? true };
 const plan = {
   app, repo, tag, digest, kind, host: served ? host : null, replicas,
   reqMi, limitMi, ledger: { before: sumLimit, after: sumLimit + limitMi, budget },
-  bindings, secretKeys,
+  bindings, secretKeys: sealedFacts ? sealedFacts.keys : [],
   checklist: [
     `이미지 pull: ghcr-pull imagePullSecret(prod NS)로 private 패키지 pull — 패키지 가시성 public 전환 불필요`,
   ],
@@ -195,9 +188,9 @@ if (!DRY) {
   writeFileSync(`${appDir}/deploy/prod/kustomization.yaml`, toYaml({
     apiVersion: "kustomize.config.k8s.io/v1beta1", kind: "Kustomization",
     namespace: "prod",
-    ...(sealedDoc ? { resources: [`${app}-secrets.sealed.yaml`] } : {}),
+    ...(sealedFacts ? { resources: [sealedFacts.sealedFile] } : {}),
   }));
-  if (sealedDoc) writeFileSync(`${appDir}/deploy/prod/${app}-secrets.sealed.yaml`, sealedRaw); // 원본 바이트 그대로(checksum과 정합)
+  if (sealedFacts) writeFileSync(`${appDir}/deploy/prod/${sealedFacts.sealedFile}`, sealedFacts.bytes); // 원본 바이트 그대로(checksum과 정합)
   if (served && pub) {
     // create-app PR 머지가 첫 공개 승인이다. 머지 후 iac.yaml이 이 active:true 행을 DNS/tunnel에 적용한다.
     registry.push({ name: app, host, public: true, active: true });

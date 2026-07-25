@@ -1,11 +1,11 @@
 // update-secrets 생성기 — 앱 레포의 SealedSecret을 homelab 배포에 검증·복사하고
 // values.yaml/envFrom + kustomization.yaml/resources까지 선언적으로 배선한다.
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { parseFlags } from "./lib/cli.ts";
 import { addResource } from "./lib/kustomization.ts";
+import { readSealed } from "./lib/sealed-contract.ts";
 
 let flags: Record<string, string | boolean>;
 try {
@@ -44,20 +44,10 @@ if (!existsSync(sealedPath)) fail(`${sealedPath} 없음 — 앱 레포에서 bun
 if (!existsSync(valuesPath)) fail(`${valuesPath} 없음`);
 if (!existsSync(kustomizationPath)) fail(`${kustomizationPath} 없음`);
 
-const sealedYaml = readFileSync(sealedPath, "utf8");
-const sealedDoc = parseYaml(sealedYaml) ?? {};
-if (sealedDoc?.kind !== "SealedSecret") fail("sealed 파일이 kind: SealedSecret이 아니다");
-if (sealedDoc?.metadata?.namespace !== "prod") fail(`sealed namespace는 prod여야 한다(strict-scope): ${sealedDoc?.metadata?.namespace}`);
-if (sealedDoc?.metadata?.name !== `${app}-secrets`) fail(`sealed name은 ${app}-secrets여야 한다: ${sealedDoc?.metadata?.name}`);
-
-const sealedKeys = Object.keys(sealedDoc?.spec?.encryptedData ?? {}).sort();
-if (sealedKeys.length === 0) fail("sealed encryptedData가 비어 있다");
-const badKeys = sealedKeys.filter((key) => !/^[A-Z][A-Z0-9_]*$/.test(key));
-if (badKeys.length) fail(`sealed encryptedData 키는 UPPER_SNAKE여야 한다: ${badKeys.join(", ")}`);
-
-const checksum = createHash("sha256").update(sealedYaml).digest("hex").slice(0, 16);
-const secretName = `${app}-secrets`;
-const sealedFile = `${secretName}.sealed.yaml`;
+// 봉인 계약 커널이 검증·checksum·디스크 바이트를 소유(create-app과 같은 구현). ::error:: 접두는 콜사이트 소유.
+const r = readSealed(readFileSync(sealedPath, "utf8"), app);
+if (!r.ok) fail(r.why);
+const { keys: sealedKeys, checksum, secretName, sealedFile, bytes } = r.facts;
 
 const values = parseYaml(readFileSync(valuesPath, "utf8")) ?? {};
 if (values.envFrom != null && !Array.isArray(values.envFrom)) fail("values.yaml envFrom은 배열이어야 한다");
@@ -74,7 +64,7 @@ values.podAnnotations["checksum/secrets"] = checksum;
 const kustomization = addResource(readFileSync(kustomizationPath, "utf8"), sealedFile);
 
 if (!dryRun) {
-  copyFileSync(sealedPath, dstSealedPath);
+  writeFileSync(dstSealedPath, bytes); // 원본 바이트 그대로(facts.bytes = checksum 소스와 동일 — #299 정합)
   writeFileSync(valuesPath, toYaml(values));
   writeFileSync(kustomizationPath, kustomization);
 }
