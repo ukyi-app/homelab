@@ -36,3 +36,26 @@ _Avoid_: 핀 설정, 핀 메타데이터
 파싱 불가는 전부 수동 승인(fail-closed) — apps 레인(`.bindings.json`)과
 베스포크 레인(descriptor)이 같은 해석을 공유한다.
 _Avoid_: 자동 머지 플래그
+
+### 봉인 계약 (sealed contract)
+
+**봉인 계약**:
+SealedSecret이 앱 배포에 편입되기 위해 만족해야 하는 규약 — `kind: SealedSecret` ·
+`namespace: prod` · `name: <app>-secrets` · `encryptedData` 비었음 금지 · 키 UPPER_SNAKE.
+커널 `tools/lib/sealed-contract.ts`의 `readSealed`가 판정·문구·checksum·바이트를 소유한다.
+_Avoid_: 시크릿 검증, sealed 스키마
+
+**봉인 원본 바이트**:
+디스크에 기록되고 checksum이 계산되는 바로 그 바이트. 커널이 `checksum`과 함께 한 값으로
+내어 "해시한 것 ≠ 디스크에 쓴 것"이 구조적으로 불가능하다(#299 클래스 소멸).
+_Avoid_: 봉인본 내용
+
+**checksum/secrets**:
+선언적 회전 트리거 pod annotation = `sha256(봉인 원본 바이트)` 앞 16자. 봉인본이 갱신되면
+이 값이 바뀌어 ArgoCD가 Deployment를 롤링한다(envFrom 변경은 재시작 필요라 선언적으로).
+_Avoid_: 시크릿 해시
+
+**배선 (wiring)**:
+봉인본을 `values.envFrom`(secretRef `<app>-secrets`)과 `kustomization.resources`가 참조하게
+만드는 것. `check-app-deploy.sh`가 all-or-none 불변식으로 부분 상태를 fail-closed로 막는다.
+_Avoid_: 연결, 등록
