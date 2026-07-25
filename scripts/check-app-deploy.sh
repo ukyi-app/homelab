@@ -12,6 +12,11 @@
 # 부분 상태의 실 파손: 봉인본만 지우고 envFrom 잔존 → ArgoCD가 Secret prune → 파드가 낡은 값으로 생존하다
 # 재시작 사망 / 없는 파일 가리키는 resources 항목 → kustomize 렌더 파손.
 #
+# ── strict scope + 파일명 규약(sealed-wiring #02, design-r1 R-2) ──
+# 봉인본에 scope 확대 어노테이션(namespace-wide/cluster-wide=true)이 있으면 거부 — 이름/네임스페이스 격리
+# 붕괴(암호문 재사용). patch 어노테이션은 scope 아니라 통과. 또 앱 배포 디렉토리 봉인본은
+# <app>-secrets.sealed.yaml 하나만 허용(규약 외 *.sealed.yaml 거부).
+#
 # 인자로 deploy/prod 디렉토리들을 받으면 그것만, 없으면 apps/*/deploy/prod 전체를 검사(인레포 앱 0개면 vacuous).
 # bash 3.2 호환: `cmd && x`(set -e 함정)·mapfile·[[ ]] 금지 — if-블록·for로. yq는 버전차 함정이라 값 추출은 sed/grep으로.
 # 현재 인레포 앱(page·trip-mate-api)은 각 봉인본 1개 — 앱당 <app>-secrets.sealed.yaml 단일 규약.
@@ -72,6 +77,26 @@ check_one() {
       echo "FAIL: $d checksum/secrets 불일치 — values.yaml=$want vs sha256($app-secrets.sealed.yaml)앞16=$got (재봉인 후 update-secrets 재실행 필요)"; rc=1
     fi
   fi
+
+  # ── strict scope 강제(sealed-wiring #02, design-r1 R-2) — 봉인 계약의 6번째 조항 ──
+  # kubeseal은 namespace-wide/cluster-wide 어노테이션으로 복호화 범위를 넓힌다. 기대 name·namespace를
+  # 그대로 두고 scope만 넓힌 봉인본은 배선 불변식을 전부 통과하면서 실제로는 아무 이름·아무 NS에서
+  # 복호화된다(암호문 재사용 → 이름/네임스페이스 격리 붕괴). value가 truthy일 때만 실 위험(=strict 위반)이라
+  # false/미설정은 통과. patch(sealedsecrets.bitnami.com/patch)는 scope 아님 — 키가 달라 애초에 미매치.
+  if [ "$s" -eq 1 ] && grep -qiE 'sealedsecrets\.bitnami\.com/(namespace-wide|cluster-wide):[[:space:]]*["'"'"']?true["'"'"']?[[:space:]]*(#.*)?$' "$sealed" 2>/dev/null; then
+    echo "FAIL: $d $app-secrets.sealed.yaml scope 확대 어노테이션(namespace-wide/cluster-wide=true) — strict scope 위반: 이름/네임스페이스 격리가 붕괴돼 암호문이 다른 Secret으로 재사용될 수 있다. kubeseal 기본(strict)로 재봉인 필요"; rc=1
+  fi
+
+  # ── 파일명 규약(sealed-wiring #02) — 앱 배포 디렉토리 봉인본은 <app>-secrets.sealed.yaml 하나뿐 ──
+  # 규약 외 *.sealed.yaml은 kustomize 렌더가 죽기(resources 미참조 파일 방치·오참조) 전에 CI에서 차단.
+  # (conn 봉인본은 platform/data-conn·platform/cnpg에 살아 여기 없다 — 오탐 없음.)
+  for sf in "$d"/*.sealed.yaml; do
+    [ -e "$sf" ] || continue   # glob 미매치 시 리터럴 → [ -e ]로 가드
+    bn="$(basename "$sf")"
+    if [ "$bn" != "$app-secrets.sealed.yaml" ]; then
+      echo "FAIL: $d 에 규약 외 봉인본 '$bn' — 앱 배포 디렉토리 봉인본은 <app>-secrets.sealed.yaml 하나만 허용"; rc=1
+    fi
+  done
 }
 
 if [ "$#" -gt 0 ]; then
@@ -84,5 +109,5 @@ else
   done
 fi
 
-if [ "$rc" -eq 0 ]; then echo "check-app-deploy: 배포 계약(필수 산출물 + 봉인 배선 all-or-none + checksum 정합) OK"; fi
+if [ "$rc" -eq 0 ]; then echo "check-app-deploy: 배포 계약(필수 산출물 + 봉인 배선 all-or-none + checksum 정합 + strict scope + 파일명 규약) OK"; fi
 exit $rc

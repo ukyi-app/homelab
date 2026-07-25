@@ -192,3 +192,89 @@ build_state() {
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '부분 상태'
 }
+
+# ── strict scope 강제(sealed-wiring #02, design-r1 R-2) ────────────────────────────────
+# 완전 배선(1111) 앱을 조립하되 봉인본 metadata.annotations에 $anno 줄을 넣는다(checksum은 정합) —
+# 배선 불변식은 통과시키고 scope 검사만 태우기 위함.
+build_wired_with_anno() {
+  d="$1"; anno="$2"; app="myapp"; mkdir -p "$d"
+  echo "{}" > "$d/.bindings.json"
+  echo "ukyi-app/$app" > "$d/source-repo"
+  printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources:\n  - %s-secrets.sealed.yaml\n' "$app" > "$d/kustomization.yaml"
+  {
+    echo "apiVersion: bitnami.com/v1alpha1"
+    echo "kind: SealedSecret"
+    echo "metadata:"
+    printf '  name: %s-secrets\n' "$app"
+    echo "  namespace: prod"
+    if [ -n "$anno" ]; then
+      echo "  annotations:"
+      printf '    %s\n' "$anno"
+    fi
+    printf 'spec:\n  encryptedData:\n    FOO: AgABC\n'
+  } > "$d/$app-secrets.sealed.yaml"
+  want="$(sha16 "$d/$app-secrets.sealed.yaml")"
+  printf 'image: {}\nenvFrom:\n  - secretRef:\n      name: %s-secrets\npodAnnotations:\n  checksum/secrets: %s\n' "$app" "$want" > "$d/values.yaml"
+}
+
+@test "scope: cluster-wide annotation is rejected (ciphertext reusable outside the intended Secret)" {
+  d="$BATS_TEST_TMPDIR/cw/myapp/deploy/prod"
+  build_wired_with_anno "$d" 'sealedsecrets.bitnami.com/cluster-wide: "true"'
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "scope: namespace-wide annotation is rejected (name isolation broken within the namespace)" {
+  d="$BATS_TEST_TMPDIR/nw/myapp/deploy/prod"
+  build_wired_with_anno "$d" 'sealedsecrets.bitnami.com/namespace-wide: "true"'
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "scope: patch annotation passes (patch mode is not scope — argocd extras precedent)" {
+  d="$BATS_TEST_TMPDIR/patch/myapp/deploy/prod"
+  build_wired_with_anno "$d" 'sealedsecrets.bitnami.com/patch: "true"'
+  run bash "$CHECK" "$d"
+  [ "$status" -eq 0 ]
+}
+
+@test "scope: cluster-wide with false value is not scope-widening (strict, passes)" {
+  d="$BATS_TEST_TMPDIR/cwf/myapp/deploy/prod"
+  build_wired_with_anno "$d" 'sealedsecrets.bitnami.com/cluster-wide: "false"'
+  run bash "$CHECK" "$d"
+  [ "$status" -eq 0 ]
+}
+
+@test "scope: a trailing YAML comment does not let a scope annotation evade the check" {
+  # E/K 축과 동일한 주석 관용 — scope 확대가 손편집 주석 하나로 우회되면 안 된다(fail-open 방지).
+  d="$BATS_TEST_TMPDIR/cwcomment/myapp/deploy/prod"
+  build_wired_with_anno "$d" 'sealedsecrets.bitnami.com/cluster-wide: "true"  # 손편집 주석'
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "scope: annotation under spec.template.metadata is also caught (not only top-level metadata)" {
+  # kubeseal은 scope 어노테이션을 SealedSecret metadata에 두지만, whole-file 검사라 template 배치도 잡아야 한다.
+  d="$BATS_TEST_TMPDIR/tmplscope/myapp/deploy/prod"; app="myapp"; mkdir -p "$d"
+  echo "{}" > "$d/.bindings.json"
+  echo "ukyi-app/$app" > "$d/source-repo"
+  printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources:\n  - %s-secrets.sealed.yaml\n' "$app" > "$d/kustomization.yaml"
+  printf 'apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nmetadata:\n  name: %s-secrets\n  namespace: prod\nspec:\n  encryptedData:\n    FOO: AgABC\n  template:\n    metadata:\n      name: %s-secrets\n      namespace: prod\n      annotations:\n        sealedsecrets.bitnami.com/namespace-wide: "true"\n' "$app" "$app" > "$d/$app-secrets.sealed.yaml"
+  want="$(sha16 "$d/$app-secrets.sealed.yaml")"
+  printf 'image: {}\nenvFrom:\n  - secretRef:\n      name: %s-secrets\npodAnnotations:\n  checksum/secrets: %s\n' "$app" "$want" > "$d/values.yaml"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "filename convention: a non-<app>-secrets *.sealed.yaml in the deploy dir is rejected" {
+  d="$BATS_TEST_TMPDIR/rogue/myapp/deploy/prod"
+  build_state 1 1 1 1 "$d"
+  echo "kind: SealedSecret" > "$d/rogue.sealed.yaml"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '규약 외'
+}
