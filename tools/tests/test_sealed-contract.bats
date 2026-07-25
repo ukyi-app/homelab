@@ -109,3 +109,73 @@ valid_sealed() {  # $1=파일 $2=name $3=keys-block(YAML, \n 허용)
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
+
+# ── strict scope 강제(sealed-wiring #04, design-r1 R-2) — 봉인 계약의 6번째 조항 ──
+# metadata.annotations에 scope 확대 어노테이션(truthy)이 있는 유효 봉인본을 파일로 쓴다.
+scoped_sealed() {  # $1=파일 $2=어노테이션-줄
+  printf 'apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nmetadata:\n  name: myapp-secrets\n  namespace: prod\n  annotations:\n    %s\nspec:\n  encryptedData:\n    FOO: AgA\n' "$2" > "$1"
+}
+
+@test "readSealed rejects a cluster-wide scope annotation (strict scope)" {
+  f="$BATS_TEST_TMPDIR/s.yaml"
+  scoped_sealed "$f" 'sealedsecrets.bitnami.com/cluster-wide: "true"'
+  run rs "$f" myapp 'r.ok ? "OK" : r.why'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "readSealed rejects a namespace-wide scope annotation (strict scope)" {
+  f="$BATS_TEST_TMPDIR/s.yaml"
+  scoped_sealed "$f" 'sealedsecrets.bitnami.com/namespace-wide: "true"'
+  run rs "$f" myapp 'r.ok ? "OK" : r.why'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "readSealed rejects scope with a bare (unquoted) bool value" {
+  f="$BATS_TEST_TMPDIR/s.yaml"
+  scoped_sealed "$f" 'sealedsecrets.bitnami.com/cluster-wide: true'
+  run rs "$f" myapp 'r.ok ? "OK" : r.why'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "readSealed rejects scope with an uppercase value (TRUE)" {
+  f="$BATS_TEST_TMPDIR/s.yaml"
+  scoped_sealed "$f" 'sealedsecrets.bitnami.com/cluster-wide: "TRUE"'
+  run rs "$f" myapp 'r.ok ? "OK" : r.why'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "readSealed rejects scope with an uppercase annotation key (adapter parity with gate's grep -i)" {
+  f="$BATS_TEST_TMPDIR/s.yaml"
+  scoped_sealed "$f" 'sealedsecrets.bitnami.com/CLUSTER-WIDE: "true"'
+  run rs "$f" myapp 'r.ok ? "OK" : r.why'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "readSealed catches a scope annotation under spec.template.metadata too" {
+  f="$BATS_TEST_TMPDIR/s.yaml"
+  printf 'apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nmetadata:\n  name: myapp-secrets\n  namespace: prod\nspec:\n  encryptedData:\n    FOO: AgA\n  template:\n    metadata:\n      name: myapp-secrets\n      namespace: prod\n      annotations:\n        sealedsecrets.bitnami.com/cluster-wide: "true"\n' > "$f"
+  run rs "$f" myapp 'r.ok ? "OK" : r.why'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'scope'
+}
+
+@test "readSealed accepts the patch annotation (patch mode is not scope — argocd extras precedent)" {
+  f="$BATS_TEST_TMPDIR/s.yaml"
+  scoped_sealed "$f" 'sealedsecrets.bitnami.com/patch: "true"'
+  run rs "$f" myapp 'r.ok'
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
+@test "readSealed accepts cluster-wide with a false value (strict, not scope-widening)" {
+  f="$BATS_TEST_TMPDIR/s.yaml"
+  scoped_sealed "$f" 'sealedsecrets.bitnami.com/cluster-wide: "false"'
+  run rs "$f" myapp 'r.ok'
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
