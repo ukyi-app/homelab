@@ -36,6 +36,12 @@
   (`app.kubernetes.io/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). **`make verify`**가 호출. 인레포 앱 0개면 vacuous pass.
 - **`check-bats-style.sh`** — bats 단언-스타일 가드: `@test` 본문의 중간(마지막 아님) 부정(`! `)·조건(`[[ `)
   단언을 잡는다(bats가 침묵 통과시키는 false-green 가드 차단; NEG=hard-zero·BB=ratchet). `tests/gates/test_bats-style.bats`가 호출.
+  스캔 대상이 0건이면 통과가 아니라 **SKIP 신호**(exit 4 + 마커) — 수집이 깨진 것과 "검사했고 깨끗함"을 가른다.
+- **`check-skip-signalling.sh`** — 가드 skip 신호 규약(CONTRIBUTING '가드 skip 신호')의 정적 가드:
+  `SKIP: <가드>: <이유>` 마커와 skip 종료코드(셸 `exit 4` / TS `process.exit(4)`)가 **같은 줄에서 짝**을
+  이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + Makefile
+  전수(자기 자신 제외 — 패턴 리터럴이 위반과 같은 모양). 열거 붕괴 차단용 `MIN_SCAN`(기본 70) 보유.
+  `tests/gates/test_guard-skip-signalling.bats`가 호출(양방향 mutation 테스트로 탐지기 생존 실측).
 - **`check-credential-expiry.sh`** — 자격증명 만료 원장(`policy/credential-expiry.json`) 검사. `--days N`
   (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). `credential-expiry.yaml`(주간)이 D-14 telegram 경고로
   중계, `tests/gates/test_credential_expiry.bats`가 가드. jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)
@@ -46,7 +52,8 @@
 - **`verify-ledger.sh`** — 메모리 원장 예산 게이트 SSOT. `bun tools/ledger-to-json.ts` 출력을
   `conftest … policy/ledger.rego`로 검사. **`bun run verify:ledger`**·`make verify`·`make ci`·`ci.yaml`(gate)이 호출.
 - **`verify-runbook-index.sh`** — `docs/runbooks/`(gitignored) ↔ AGENTS.md 런북 인덱스 정합(로컬 전용).
-  런북 부재 시 skip(required gate 아님 — repo/CI엔 런북 없음). **`make verify-runbook-index`**가 호출.
+  런북 부재 시 **SKIP 신호**(exit 4 + `SKIP:` 마커 — CONTRIBUTING '가드 skip 신호'; exit 0은 "실제로
+  대조했고 정합"만 뜻한다). **`make verify-runbook-index`**가 호출.
 - **`audit-orphan-pv.sh`** — 고아 Released PV 감사(storageclass Retain이라 PVC 삭제 시 PV 누수). 나열만
   (비파괴), reclaim은 owner 수동. **`make audit-orphan-pv`**(라이브 ops)가 호출. `tests/gates/test_audit-orphan-pv.bats`가
   가드. ★fail-closed(도구/쿼리 실패=비-0).
@@ -62,7 +69,8 @@
   preflight fail-closed(break-glass `--offline-ok`). 평문·해시·토큰은 kubeseal stdin 전용(값 미출력).
 - **`secret-cert-check.sh`** — 봉인 전 preflight: 커밋된 `tools/sealed-secrets-cert.pem`이 라이브
   컨트롤러 cert와 fingerprint 일치하는지(stale 차단) 검사. **`make secret-cert-check`**가 호출.
-  read-only(fetch만); 오프라인이면 검증 스킵(에러 아님). `sealing-key-dr-gate.sh` 로직 재사용.
+  read-only(fetch만); 오프라인/kubeseal 부재면 **SKIP 신호**(exit 4 + 마커 — 예전 2는 unknown-option과
+  같은 코드였다). 호출자(`seal-batch.ts`)는 4=미평가와 1=stale을 구별해 보고한다. `sealing-key-dr-gate.sh` 로직 재사용.
 
 ## DR / owner 전용 — 파괴적 (직접 실행, Makefile/워크플로 배선 주의)
 
