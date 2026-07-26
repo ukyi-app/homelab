@@ -35,6 +35,9 @@ _fixture() {
   echo 'kind: Deployment' > "$t/platform/comp/prod/fixtures-bad/x.yaml"  # 제외 fixtures*/ (charts/ 밖)
   echo 'kind: CustomResourceDefinition' > "$t/platform/traefik/prod/gateway-api-crds.yaml" # 제외
   echo 'not yaml'         > "$t/platform/comp/prod/notes.txt"            # 제외(include 정규식)
+  mkdir -p "$t/apps/probe/deploy/prod"
+  echo 'image: {}'        > "$t/apps/probe/deploy/prod/values.yaml"      # apps-values 대상
+  echo 'x: 1'             > "$t/apps/probe/deploy/prod/kustomization.yaml" # 제외(values.yaml 아님)
   git -C "$t" init -q; git -C "$t" add -A
   echo 'kind: Deployment' > "$t/platform/comp/prod/untracked.yaml"       # 제외(추적 안 됨)
   echo "$t"
@@ -116,9 +119,78 @@ _fixture() {
 }
 
 @test "SCOPE_NAMES exposes the registered scopes" {
-  run walk 'console.log(SCOPE_NAMES.join(","))'
+  run walk 'console.log(SCOPE_NAMES.slice().sort().join(","))'
   [ "$status" -eq 0 ]
-  [ "$output" == "platform-manifests" ]
+  [ "$output" == "apps-values,platform-image-refs,platform-manifests" ]
+}
+
+# `platform-manifests`와 `platform-image-refs`는 **다른 질문**에 답한다.
+#   manifests = "이 파일이 배포되는 매니페스트인가" → 차트 소스 제외. 템플릿은 렌더 전이라
+#     `{{ }}` 때문에 YAML 파싱이 깨진다(실측: 공유 차트 deployment.yaml에 파싱 에러 509건).
+#   image-refs = "이 파일이 이미지 참조를 담을 수 있는가" → **추적된 차트 소스 포함**.
+#     check-image-pins는 공급망 가드다 — 조용히 좁히면 D-2 클래스(차트 내부 이미지 무소유)를 키운다.
+@test "platform-image-refs keeps tracked chart sources that platform-manifests drops" {
+  tmp="$(_fixture)"
+  run walk 'const m = walkManifests("platform-manifests", ROOT).map(e => e.path);
+    const i = walkManifests("platform-image-refs", ROOT).map(e => e.path);
+    console.log([
+      m.includes("platform/comp/prod/charts/vendored.yaml"),
+      i.includes("platform/comp/prod/charts/vendored.yaml"),
+    ].join(","))' "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "false,true" ]
+}
+
+# image-refs도 벤더·픽스처 제외는 공유한다 — 차트 규칙 하나만 다르다.
+@test "platform-image-refs still excludes vendor and fixture paths" {
+  tmp="$(_fixture)"
+  run walk 'const p = walkManifests("platform-image-refs", ROOT).map(e => e.path);
+    console.log([
+      p.includes("platform/cnpg/barman-plugin/manifest.yaml"),
+      p.includes("platform/comp/prod/tests/fixture.yaml"),
+      p.includes("platform/comp/prod/fixtures-bad/x.yaml"),
+      p.includes("platform/traefik/prod/gateway-api-crds.yaml"),
+    ].join(","))' "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "false,false,false,false" ]
+}
+
+@test "apps-values enumerates only tracked app deploy values files" {
+  tmp="$(_fixture)"
+  run walk 'console.log(walkManifests("apps-values", ROOT).map(e => e.path).join(","))' "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "apps/probe/deploy/prod/values.yaml" ]
+}
+
+# ── CLI 진입점: 셸 가드가 열거만 받아 쓰는 경로 ──
+# 셸 가드는 TS로 이관하지 않는다(CONTRIBUTING이 grep/yq 필터를 셸 영역으로 규정). 대신 열거·제외·
+# 바닥값만 워커에서 받고 추출 로직은 셸이 유지한다 → 제외 어휘의 사본이 원리적으로 없어진다.
+@test "CLI emits newline-delimited paths for a manifests scope" {
+  tmp="$(_fixture)"
+  run bun "$ROOT/tools/lib/repo-walk.ts" --manifests apps-values --root "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "apps/probe/deploy/prod/values.yaml" ]
+}
+
+@test "CLI rejects an unknown flag with the usage exit code" {
+  run bun "$ROOT/tools/lib/repo-walk.ts" --nope x
+  [ "$status" -eq 2 ]
+}
+
+@test "CLI rejects an unknown scope with the usage exit code" {
+  run bun "$ROOT/tools/lib/repo-walk.ts" --manifests no-such-scope
+  [ "$status" -eq 2 ]
+}
+
+@test "CLI fails loudly when enumeration collapses" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/platform"; git -C "$tmp" init -q
+  run bun "$ROOT/tools/lib/repo-walk.ts" --manifests platform-manifests --root "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 1 ]
 }
 
 # 실 레포 스모크 — 픽스처가 증명하지 못하는 것 하나: 스코프가 실제 트리에서 붕괴하지 않는다.

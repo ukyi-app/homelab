@@ -154,7 +154,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   ⚠️ 스코프는 **의미론적 필터를 담지 않는다**: 어떤 소비자에겐 맞는 필터가 다른 소비자에겐
   치명적이다(audit-orphans는 `values.yaml` 있는 앱만 보면 되지만 check-app-deploy는 그 파일의
   **부재**를 잡아야 한다 — 열거자가 미리 거르면 위반이 사라진다). 미등록 스코프·열거 붕괴는
-  throw(exit·문구는 콜사이트 소유). 소비자: `check-resource-limits`(이후 티켓에서 확대).
+  throw(exit·문구는 콜사이트 소유). 셸 가드용 CLI(`--manifests <scope> --root <path>`)가 경로 목록만
+  내보내므로 셸은 자기 grep/yq 추출을 유지한다 — 종료코드 0/1(붕괴)/2(사용법·미등록 스코프).
+  등록 스코프: `platform-manifests`(차트 소스 **제외** — 렌더 전 템플릿은 YAML 파싱 불가) ·
+  `platform-image-refs`(차트 소스 **포함** — 공급망 가드는 조용히 좁히면 안 된다) · `apps-values`.
+  같은 트리를 보는 두 스코프가 다른 이유는 **질문이 다르기** 때문이다("배포되는 매니페스트인가"
+  vs "이미지 참조를 담을 수 있는가"). 소비자: `check-resource-limits`·`check-image-pins`.
 - **`lib/image-pin.ts`** — 배포 핀 형식 커널(TAG_RE/DIGEST_RE·인라인 핀 parse/format·descriptor
   타입·autoDeploy fail-closed). 순수 형식 판정과 왕복만 소유하고 파일 I/O·exit·에러 문구는
   콜사이트가 소유한다 — **정책이 콜사이트마다 갈리기** 때문이다(poll-ghcr는 null을 refuse로,

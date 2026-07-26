@@ -40,23 +40,50 @@ type ScopeDef = {
   floor: number;
 };
 
+// 벤더·픽스처 제외 — 두 platform 스코프가 공유한다. 차트 규칙만 스코프마다 다르다.
+const VENDOR_AND_FIXTURES: RegExp[] = [
+  /(^|\/)barman-plugin\//, // CNPG barman 벤더 디렉토리(수정 금지)
+  // 픽스처 매니페스트를 실 워크로드로 세지 않는다. `tests?/`로 단수형도 받는다(방어적 확장 —
+  // 현재 platform 아래 `test/`는 0건이라 무영향).
+  /(^|\/)tests?\//,
+  /(^|\/)fixtures[^/]*\//, // fixtures-bad 등 접미 변형 포함(check-image-pins가 경험적으로 얻은 형태)
+  /(^|\/)gateway-api-crds\.yaml$/, // 벤더 CRD(1MB, re-vendor 전용)
+];
+
+// `.yml`도 받는다 — check-image-pins.sh(`*.yaml|*.yml`)와 어휘를 맞춘다. 현재 platform 아래
+// 추적된 `.yml`은 0건이라 차이 리포트에 안 잡혔다(무영향 확장, 의도).
+const YAML_EXT = /\.ya?ml$/;
+
 const SCOPES: Record<string, ScopeDef> = {
+  // "이 파일이 **배포되는 매니페스트**인가" — 차트 소스는 제외한다. 템플릿은 렌더 전이라
+  // `{{ }}` 때문에 YAML로 파싱되지 않는다(실측: 공유 차트 deployment.yaml에 파싱 에러 509건).
   "platform-manifests": {
     kind: "manifests",
     source: "tracked",
     root: "platform",
-    // `.yml`도 받는다 — check-image-pins.sh(`*.yaml|*.yml`)와 어휘를 맞춘다. 현재 platform 아래
-    // 추적된 `.yml`은 0건이라 차이 리포트에 안 잡혔다(무영향 확장, 의도).
-    include: /\.ya?ml$/,
-    exclude: [
-      /(^|\/)charts\//, // 원격 helm 벤더 + 공유 차트(platform/charts/app)
-      /(^|\/)barman-plugin\//, // CNPG barman 벤더 디렉토리(수정 금지)
-      // 픽스처 매니페스트를 상주 워크로드로 세지 않는다. `tests?/`로 단수형도 받는다(방어적 확장 —
-      // 현재 platform 아래 `test/`는 0건이라 무영향).
-      /(^|\/)tests?\//,
-      /(^|\/)fixtures[^/]*\//, // fixtures-bad 등 접미 변형 포함(check-image-pins가 경험적으로 얻은 형태)
-      /(^|\/)gateway-api-crds\.yaml$/, // 벤더 CRD(1MB, re-vendor 전용)
-    ],
+    include: YAML_EXT,
+    exclude: [/(^|\/)charts\//, ...VENDOR_AND_FIXTURES],
+    floor: 1,
+  },
+  // "이 파일이 **이미지 참조**를 담을 수 있는가" — 추적된 차트 소스를 **포함**한다.
+  // untracked helm 캐시(platform/*/prod/charts/, gitignored)는 tracked 열거가 자동으로 뺀다.
+  // 공급망 가드를 조용히 좁히면 D-2 클래스(차트 내부 이미지 무소유)를 키운다 — 공유 차트
+  // values.yaml에 리터럴 이미지가 생기면 잡아야 한다.
+  "platform-image-refs": {
+    kind: "manifests",
+    source: "tracked",
+    root: "platform",
+    include: YAML_EXT,
+    exclude: VENDOR_AND_FIXTURES,
+    floor: 1,
+  },
+  // 앱 배포 핀(apps 레인)이 사는 파일. 디렉토리 구조 자체가 필터라 별도 제외가 없다.
+  "apps-values": {
+    kind: "manifests",
+    source: "tracked",
+    root: "apps",
+    include: /\/deploy\/prod\/values\.yaml$/,
+    exclude: [],
     floor: 1,
   },
 };
@@ -137,4 +164,37 @@ export function listUnits(scope: string, root = "."): Unit[] {
   const paths = enumerate(def, root);
   enforceFloor(scope, def, paths.length);
   return paths.map((p) => ({ name: p.split("/").pop() ?? p, dir: p }));
+}
+
+// ── CLI: 셸 가드가 열거 결과만 받아 쓰는 진입점 ──
+// 셸 가드는 TS로 이관하지 않는다 — CONTRIBUTING이 "라인 지향 검사(grep/yq/jq 필터)"를 셸의 명시된
+// 영역으로 규정하고, check-app-deploy.sh:21은 "yq는 버전차 함정이라 값 추출은 sed/grep으로"라는
+// 의도적 선택을 적어 뒀다. 셸은 자기 추출 로직을 유지하고 **열거·제외·바닥값만** 받는다 —
+// 셸이 추가 제외를 하지 않으므로 제외 어휘의 사본이 원리적으로 존재하지 않게 된다.
+// 종료코드는 tools/lib/cli.ts 규약: 0=성공 · 1=검증(열거 붕괴) · 2=사용법/미등록 스코프.
+if (import.meta.main) {
+  const argv = process.argv.slice(2);
+  let mode: "manifests" | "units" | "" = "";
+  let scope = "";
+  let root = ".";
+  for (let i = 0; i < argv.length; i += 2) {
+    const [flag, val] = [argv[i], argv[i + 1]];
+    if (val === undefined) { console.error(`값 없는 플래그: ${flag}`); process.exit(2); }
+    if (flag === "--manifests") { mode = "manifests"; scope = val; }
+    else if (flag === "--units") { mode = "units"; scope = val; }
+    else if (flag === "--root") root = val;
+    else { console.error(`알 수 없는 플래그: ${flag}\n허용: --manifests <scope> | --units <scope> | --root <path>`); process.exit(2); }
+  }
+  if (!mode) { console.error("사용법: repo-walk.ts --manifests <scope> | --units <scope> [--root <path>]"); process.exit(2); }
+  // 미등록 스코프(사용법 오류, exit 2)와 열거 붕괴(검증 실패, exit 1)를 구분해 보고한다.
+  if (!SCOPES[scope]) { console.error(`미등록 스코프 '${scope}' (등록: ${SCOPE_NAMES.join(", ")})`); process.exit(2); }
+  try {
+    const paths = mode === "manifests"
+      ? walkManifests(scope, root).map((e) => e.path)
+      : listUnits(scope, root).map((u) => u.dir);
+    if (paths.length) console.log(paths.join("\n"));
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
 }
