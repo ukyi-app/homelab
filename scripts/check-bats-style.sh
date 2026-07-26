@@ -16,7 +16,7 @@ FILES=()
 if [ "$#" -gt 0 ]; then FILES=("$@"); else
   while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.bats')
 fi
-[ "${#FILES[@]}" -gt 0 ] || { echo "check-bats-style: 대상 bats 없음"; exit 0; }
+[ "${#FILES[@]}" -gt 0 ] || { echo "SKIP: check-bats-style: 스캔 대상 *.bats 0건 — 단언 스타일 미평가"; exit 4; }
 DETECT=""
 IFS='' read -r -d '' DETECT <<'AWK' || true
 function flush(){ if(pend!=""){ print pend; pend="" } }

@@ -17,9 +17,14 @@ export function parseFlags(argv: string[], spec: FlagSpec): Record<string, strin
   return out;
 }
 
-// 종료코드 규약(tools/*.ts 공통):
-//   0=성공 · 1=검증/게이트 실패(fail()) · 2=사용법/플래그 파싱 오류(parseFlags catch) · 3=race(전제 상태
-//   변동 — bump-tag expect-current). 워크플로는 비-0만 보지만 래퍼/사람이 원인 계층을 구분하도록 유지한다.
+// 종료코드 규약(tools/*.ts + scripts/*.sh 가드 공통 — CONTRIBUTING '가드 skip 신호' 절이 산문 SSOT):
+//   0=성공(평가했고 통과) · 1=검증/게이트 실패(fail()) · 2=사용법/플래그 파싱 오류(parseFlags catch) ·
+//   3=race(전제 상태 변동 — bump-tag expect-current) · 4=skip(검사할 도메인 부재 — 불변식을 **평가하지 않음**).
+//   워크플로는 비-0만 보지만 래퍼/사람이 원인 계층을 구분하도록 유지한다.
+// 4가 0과 갈라져야 하는 이유: 대상이 없어 건너뛴 것과 검사해서 통과한 것이 같은 코드면 가드가 실제 실행
+//   경로를 잃어도 CI가 초록이다(verify-runbook-index 실측 — CI에선 런북이 gitignored라 무조건 skip이었다).
+//   4를 낼 때는 같은 줄에서 `SKIP: <가드>: <이유>` 마커를 함께 낸다(정적 짝 검증 —
+//   tests/gates/test_guard-skip-signalling.bats).
 export type TypedFlags = {
   str: (k: string, d?: string) => string | undefined;
   bool: (k: string) => boolean;

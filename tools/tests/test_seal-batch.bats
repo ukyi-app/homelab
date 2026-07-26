@@ -98,9 +98,9 @@ teardown() { rm -rf "$TMP"; }
   [ -f "$TMP/platform/ghcr-pull/prod/ghcr-pull.sealed.yaml" ]
 }
 
-@test "preflight fails closed when the live cert cannot be fetched (offline exit 2 -> abort)" {
+@test "preflight fails closed when the live cert cannot be fetched (offline skip exit 4 -> abort)" {
   export ADGUARD_PASSWORD="p1"
-  # --fetch-cert가 실패(빈 출력)하도록 kubeseal 스텁 교체 → secret-cert-check exit 2
+  # --fetch-cert가 실패(빈 출력)하도록 kubeseal 스텁 교체 → secret-cert-check exit 4(SKIP=미평가)
   printf '#!/bin/sh\ncase "$*" in *--fetch-cert*) exit 1;; *) cat;; esac\n' > "$TMP/bin/kubeseal"; chmod +x "$TMP/bin/kubeseal"
   PATH="$TMP/bin:$PATH" run bun tools/seal-batch.ts --only adguard-auth --cert "$TMP/certA.pem" --out-dir "$TMP"
   [ "$status" -ne 0 ]

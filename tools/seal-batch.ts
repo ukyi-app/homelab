@@ -83,8 +83,11 @@ if (dry) {
 {
   const p = spawnSync("bash", ["scripts/secret-cert-check.sh", "--cert", cert], { stdio: "inherit" });
   if (p.status !== 0) {
-    if (!offlineOk) { console.error("seal-batch: preflight(secret-cert-check) 실패 — 봉인 중단(stale/offline). break-glass: --offline-ok 또는 SEAL_OFFLINE=1"); process.exit(1); }
-    console.error("seal-batch: ⚠️ preflight 실패했으나 --offline-ok로 진행(break-glass)");
+    // 4=skip(미평가: 오프라인/kubeseal 부재) vs 그 외(stale 등 실제 판정) — 둘 다 fail-closed지만
+    // 사람이 원인을 구별해야 대처가 갈린다(전자는 클러스터 접근 복구, 후자는 cert 갱신/키 복원).
+    const why = p.status === 4 ? "미평가(오프라인/kubeseal 부재)" : "실패(stale 등)";
+    if (!offlineOk) { console.error(`seal-batch: preflight(secret-cert-check) ${why} — 봉인 중단. break-glass: --offline-ok 또는 SEAL_OFFLINE=1`); process.exit(1); }
+    console.error(`seal-batch: ⚠️ preflight ${why}였으나 --offline-ok로 진행(break-glass)`);
   }
 }
 
