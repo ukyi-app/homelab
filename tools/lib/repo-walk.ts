@@ -46,19 +46,33 @@ type ScopeDef = {
   exclude: RegExp[];
 };
 
-// 벤더·픽스처 제외 — 두 platform 스코프가 공유한다. 차트 규칙만 스코프마다 다르다.
-const VENDOR_AND_FIXTURES: RegExp[] = [
+// ── 제외 어휘: 무엇을 공유하고 무엇을 나눌 것인가 ──
+// **테스트 하네스**는 진짜 공통 개념이다 — platform 스코프들도 producers도 "픽스처를 실물로 세지
+// 않는다"는 같은 이유로 뺀다. 그래서 한 곳에 둔다.
+// 반면 `charts/`·벤더 규칙은 **스코프마다 답이 다르다**(platform-image-refs는 차트 소스를 일부러
+// 포함한다). 공유하면 그 차이가 지워지므로 나눈 채로 둔다.
+const TEST_HARNESS: RegExp[] = [
+  /(^|\/)tests?\//, // `tests?/`로 단수형도 받는다(방어적 — 현재 추적된 `test/`는 0건)
+  /(^|\/)fixtures[^/]*\//, // fixtures-bad 등 접미 변형(check-image-pins가 경험적으로 얻은 형태)
+  /(^|\/)test_[^/]*$/, // 파일명 하네스
+  /\.bats$/,
+];
+
+// platform 전용 벤더 — producers와 공유하지 않는다(레포 전역 스캔엔 무관한 특수 규칙).
+const PLATFORM_VENDOR: RegExp[] = [
   /(^|\/)barman-plugin\//, // CNPG barman 벤더 디렉토리(수정 금지)
-  // 픽스처 매니페스트를 실 워크로드로 세지 않는다. `tests?/`로 단수형도 받는다(방어적 확장 —
-  // 현재 platform 아래 `test/`는 0건이라 무영향).
-  /(^|\/)tests?\//,
-  /(^|\/)fixtures[^/]*\//, // fixtures-bad 등 접미 변형 포함(check-image-pins가 경험적으로 얻은 형태)
   /(^|\/)gateway-api-crds\.yaml$/, // 벤더 CRD(1MB, re-vendor 전용)
 ];
+
+const VENDOR_AND_FIXTURES: RegExp[] = [...PLATFORM_VENDOR, ...TEST_HARNESS];
 
 // `.yml`도 받는다 — check-image-pins.sh(`*.yaml|*.yml`)와 어휘를 맞춘다. 현재 platform 아래
 // 추적된 `.yml`은 0건이라 차이 리포트에 안 잡혔다(무영향 확장, 의도).
 const YAML_EXT = /\.ya?ml$/;
+
+// 알림 룰이 사는 곳 — `rules` 스코프의 root이자 **SSOT**. 소비자가 "이 경로는 생산자가 아니라
+// 검사 대상"이라고 판단할 때도 이 값을 쓴다(CONTRIBUTING: 콜사이트 인라인 사본 금지).
+export const RULES_ROOT = "platform/victoria-stack/prod/rules";
 
 const SCOPES: Record<string, ScopeDef> = {
   // "이 파일이 **배포되는 매니페스트**인가" — 차트 소스는 제외한다. 템플릿은 렌더 전이라
@@ -96,6 +110,26 @@ const SCOPES: Record<string, ScopeDef> = {
     root: "apps",
     include: YAML_EXT,
     exclude: [],
+  },
+  // 알림 룰 매니페스트. 이 디렉토리를 "무엇으로 볼 것인가"(검사 대상인지 생산자인지)는 소비자가
+  // 정한다 — 스코프는 "어디에 있는가"만 안다.
+  rules: {
+    kind: "manifests",
+    source: "tracked",
+    root: RULES_ROOT,
+    include: YAML_EXT,
+    exclude: [],
+  },
+  // 메트릭을 push할 수 있는 파일 — **레포 전역**. tracked 열거라 .git·node_modules·.terraform·dist가
+  // 자동으로 빠진다(구 SKIP_DIRS 6개 중 4개가 추적 파일 0건 — 실측). 남는 charts/만 명시 규칙이다.
+  // ⚠️ 룰 디렉토리·린터 자신·PRODUCER_EXEMPT 제외는 **소비자 몫**이다 — 그건 "이 파일이 생산자인가"
+  // 라는 도메인 판단이지 "레포에 무엇이 있는가"가 아니다. 스코프가 걸러버리면 다른 소비자가 못 본다.
+  producers: {
+    kind: "manifests",
+    source: "tracked",
+    root: "",
+    include: /\.(ya?ml|sh|m?[jt]s|py)$/,
+    exclude: [/(^|\/)charts\//, ...TEST_HARNESS],
   },
   // 앱 유닛. **필수 산출물로 거르지 않는다**(design-r1 R-1) — audit-orphans에겐 values.yaml 필터가
   // 맞지만 check-app-deploy는 그 파일의 **부재**를 잡아야 한다. 의미론적 필터는 소비자 쪽이다.
@@ -143,7 +177,10 @@ function scopeDef(scope: string, kind: ScopeDef["kind"]): ScopeDef {
 // 소비자 출력에 섞이면 노이즈다. 진단은 바닥값 에러가 더 정확한 문구로 대신한다.
 function trackedPaths(root: string, sub: string): string[] {
   try {
-    const out = execFileSync("git", ["ls-files", "--", sub], {
+    // sub가 비면(레포 전역 스코프) pathspec을 아예 주지 않는다 — `git ls-files -- ""`는 빈
+    // pathspec이라 아무것도 매치하지 않는다.
+    const args = sub ? ["ls-files", "--", sub] : ["ls-files"];
+    const out = execFileSync("git", args, {
       cwd: root,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
