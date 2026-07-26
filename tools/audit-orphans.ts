@@ -15,6 +15,7 @@ import { parse as parseYaml } from "yaml";
 import { surfaceHash } from "./lib/surface-hash.ts";
 import { registryProjection } from "./lib/activation-marker.ts";
 import { parseLedgerRows } from "./lib/ledger-totals.ts";
+import { listUnits } from "./lib/repo-walk.ts";
 
 const USAGE = `audit-orphans — registry↔매니페스트↔원장 교차 드리프트 리포트(읽기 전용)
 사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict]
@@ -53,7 +54,11 @@ const readJson = (p: string, d: any): any => (existsSync(p) ? JSON.parse(readFil
 // 레포 사실 수집
 const registry: RegRow[] = readJson(`${ROOT}/infra/cloudflare/apps.json`, []);
 const appsRoot = `${ROOT}/apps`;
-const appDirs = (existsSync(appsRoot) ? readdirSync(appsRoot) : [])
+// 열거는 공유 워커의 `apps` 유닛 스코프가 소유한다. **의미론적 필터(values.yaml 실재)는 여기 남는다** —
+// 스코프가 그걸 걸러버리면 check-app-deploy가 잡아야 할 "필수 산출물 부재"가 열거에서 사라진다
+// (design-r1 R-1). 이 가드는 배포 가능한 앱만 보면 되므로 필터가 정당하다.
+const appDirs = listUnits("apps", ROOT)
+  .map((u) => u.name)
   .filter((a) => existsSync(`${appsRoot}/${a}/deploy/prod/values.yaml`));
 const cacheDirs = existsSync(`${ROOT}/platform/cache/prod`)
   ? readdirSync(`${ROOT}/platform/cache/prod`, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)

@@ -109,10 +109,9 @@ YAML
   [ "$status" -ne 0 ]
 }
 
-# 두 바닥값은 성격이 다르고 **각각 따로** 증명해야 한다:
-#   ① 워커의 열거 붕괴 바닥값 — 스코프가 아무것도 못 잡음(platform에 YAML 0건)
-#   ② 이 가드의 MIN_SCAN — 열거는 성공했는데 **워크로드 kind 매치**가 부족함
-# ②를 ①로 덮으면(빈 platform) 커널이 먼저 throw해서 MIN_SCAN 경로가 영영 실행되지 않는다.
+# scan-floor는 **이 가드가** 소유한다 — 워커는 비어 있으면 조용히 빈 목록을 준다(열거자는 "글롭이
+# 깨져 0건"과 "정당하게 0건"을 구별할 도메인 지식이 없다). 열거가 성공했는데 워크로드 kind 매치가
+# 부족한 경우와, 열거 자체가 0건인 경우 **둘 다** 이 MIN_SCAN이 잡는다.
 @test "resource guard enforces a minimum scan count (selector collapse = fail-loud)" {
   tmp="$(mktemp -d)"
   mkdir -p "$tmp/scripts" "$tmp/policy" "$tmp/platform/probe/prod"
@@ -129,18 +128,6 @@ YAML
   echo "$output" | grep -q '스캔 대상'
 }
 
-# 워커의 열거 붕괴는 콜사이트가 소유한다 — raw 스택 트레이스가 아니라 이 가드의 `FAIL:` 규약으로.
-@test "enumeration collapse surfaces as the guard's FAIL line and not a stack trace" {
-  tmp="$(mktemp -d)"
-  mkdir -p "$tmp/scripts" "$tmp/policy" "$tmp/platform"   # platform에 YAML 0건 = 열거 붕괴
-  : > "$tmp/policy/memory-limit-allowlist.txt"
-  _track "$tmp"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp"
-  echo "$output"
-  rm -rf "$tmp"
-  [ "$status" -eq 1 ]
-  echo "$output" | grep -q '^FAIL: repo-walk'
-}
 
 @test "resource guard honors the allowlist exemption" {
   tmp="$(mktemp -d)"

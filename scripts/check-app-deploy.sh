@@ -103,10 +103,14 @@ if [ "$#" -gt 0 ]; then
   for d in "$@"; do check_one "$d"; done
 else
   cd "$ROOT"
-  for d in apps/*/deploy/prod; do
-    [ -d "$d" ] || continue   # 인레포 배포앱 0개면 글롭 미매치 → vacuous PASS
-    check_one "$d"
-  done
+  # 열거는 공유 워커의 `apps` 유닛 스코프가 소유한다. ⚠️ 그 스코프는 **필수 산출물로 거르지 않는다** —
+  # 이 게이트가 잡아야 할 게 정확히 그 부재이기 때문이다(design-r1 R-1). deploy/prod 미존재는
+  # 기존 `[ -d ]` 스킵과 동일하게 여기서 처리한다(행위 보존).
+  while IFS= read -r u; do
+    [ -n "$u" ] || continue
+    [ -d "$u/deploy/prod" ] || continue
+    check_one "$u/deploy/prod"
+  done < <(bun "$(dirname "$0")/../tools/lib/repo-walk.ts" --units apps --root "$ROOT")
 fi
 
 if [ "$rc" -eq 0 ]; then echo "check-app-deploy: 배포 계약(필수 산출물 + 봉인 배선 all-or-none + checksum 정합 + strict scope + 파일명 규약) OK"; fi

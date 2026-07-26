@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 저장소 스캔 워커(tools/lib/repo-walk.ts) 단위 — 스코프별 열거·제외 어휘·열거 붕괴 바닥값.
+# 저장소 스캔 워커(tools/lib/repo-walk.ts) 단위 — 스코프별 열거·제외 어휘·유닛 파생.
 # 가드 15개가 9가지 방식으로 트리를 걷던 것을 한 곳으로 모으는 커널이라, 이 파일이 후속 호출자들의
 # 열거 정확성을 대신 증명한다.
 #
@@ -35,9 +35,13 @@ _fixture() {
   echo 'kind: Deployment' > "$t/platform/comp/prod/fixtures-bad/x.yaml"  # 제외 fixtures*/ (charts/ 밖)
   echo 'kind: CustomResourceDefinition' > "$t/platform/traefik/prod/gateway-api-crds.yaml" # 제외
   echo 'not yaml'         > "$t/platform/comp/prod/notes.txt"            # 제외(include 정규식)
-  mkdir -p "$t/apps/probe/deploy/prod"
+  mkdir -p "$t/apps/probe/deploy/prod" "$t/apps/naked/deploy/prod"
   echo 'image: {}'        > "$t/apps/probe/deploy/prod/values.yaml"      # apps-values 대상
   echo 'x: 1'             > "$t/apps/probe/deploy/prod/kustomization.yaml" # 제외(values.yaml 아님)
+  echo 'kind: NetworkPolicy' > "$t/apps/probe/deploy/prod/netpol.yaml"   # apps-manifests 대상
+  # values.yaml **없는** 앱 — R-1 회귀 가드: 유닛 열거가 필수 산출물로 거르면 안 된다.
+  echo '{}'               > "$t/apps/naked/deploy/prod/.bindings.json"
+  echo 'readme'           > "$t/apps/README.md"                          # 유닛 아님(디렉토리 미형성)
   git -C "$t" init -q; git -C "$t" add -A
   echo 'kind: Deployment' > "$t/platform/comp/prod/untracked.yaml"       # 제외(추적 안 됨)
   echo "$t"
@@ -78,18 +82,15 @@ _fixture() {
   [ "$output" == "false" ]
 }
 
-# 바닥값은 **열거 붕괴**(스코프가 아무것도 못 잡음)만 본다. 레포 규모 단언이 아니다 —
-# 실 레포 크기에 맞춘 상수를 박으면 모든 픽스처 트리가 깨진다(구현 중 실제로 겪은 회귀).
-@test "enumeration floor fails loudly when the scope matches nothing" {
-  tmp="$(mktemp -d)"
-  mkdir -p "$tmp/platform"
-  echo 'not yaml' > "$tmp/platform/notes.txt"
-  git -C "$tmp" init -q; git -C "$tmp" add -A
-  run walk 'try { walkManifests("platform-manifests", ROOT); console.log("NO_THROW"); }
-    catch (e) { console.log("THREW:" + (e instanceof Error && e.message.includes("platform-manifests"))); }' "$tmp"
+# 바닥값(scan-floor)은 워커에 두지 않는다 — 열거자는 "글롭이 깨져 0건"과 "정당하게 0건"을 구별할
+# 도메인 지식이 없다. 비어 있으면 **조용히 빈 배열**을 주고, 그게 고장인지는 소비자가 판단한다
+# (소비자들은 이미 MIN_SCAN을 갖고 있고 그건 의미론적 필터 이후를 세므로 더 정확하다).
+@test "an empty scope yields an empty list rather than a spurious failure" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/platform"; git -C "$tmp" init -q
+  run walk 'console.log(walkManifests("platform-manifests", ROOT).length)' "$tmp"
   rm -rf "$tmp"
   [ "$status" -eq 0 ]
-  [ "$output" == "THREW:true" ]
+  [ "$output" == "0" ]
 }
 
 @test "docs parse lazily and yield the manifest kind" {
@@ -109,19 +110,64 @@ _fixture() {
   [ "$output" == "THREW" ]
 }
 
-# listUnits는 진입점으로 존재하되 유닛 스코프는 티켓 04에서 등록된다. 지금 호출하면 미등록 스코프로
-# 거부돼야 한다 — 조용히 빈 배열을 주면 소비자가 vacuous하게 통과한다.
-@test "listUnits rejects scopes that are not registered yet" {
-  run walk 'try { listUnits("apps", ROOT); console.log("NO_THROW"); }
+@test "listUnits rejects a manifests scope passed to the units entrypoint" {
+  run walk 'try { listUnits("apps-values", ROOT); console.log("NO_THROW"); }
     catch (e) { console.log("THREW"); }'
   [ "$status" -eq 0 ]
   [ "$output" == "THREW" ]
 }
 
+# ⚠️ R-1 회귀 가드(design-r1 R-1의 핵심). 유닛 열거는 **필수 산출물로 거르면 안 된다** —
+# audit-orphans에겐 values.yaml 필터가 맞지만 check-app-deploy는 그 파일의 **부재**를 잡아야 한다.
+# 열거자가 미리 거르면 위반이 검사 대상에서 사라져 배포를 깨뜨리는 false green이 된다.
+@test "apps units include an app that is missing its required artifacts" {
+  tmp="$(_fixture)"
+  run walk 'console.log(listUnits("apps", ROOT).map(u => u.name + "@" + u.dir).join(","))' "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "naked@apps/naked,probe@apps/probe" ]
+}
+
+# 유닛 파생은 **디렉토리 패턴 매치를 강제**한다. apps/README.md처럼 유닛 디렉토리를 형성하지 않는
+# 추적 파일이 유닛으로 새어 나오면 안 된다(차이 리포트가 잡은 실제 파생 버그).
+@test "unit derivation drops tracked paths that form no unit directory" {
+  tmp="$(_fixture)"
+  run walk 'console.log(listUnits("apps", ROOT).some(u => u.dir.includes("README")))' "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "false" ]
+}
+
+@test "platform units exclude the shared chart directory" {
+  tmp="$(_fixture)"
+  run walk 'const u = listUnits("platform", ROOT).map(x => x.name);
+    console.log([u.includes("comp"), u.includes("charts")].join(","))' "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "true,false" ]
+}
+
+@test "apps-manifests enumerates tracked YAML under apps" {
+  tmp="$(_fixture)"
+  run walk 'console.log(walkManifests("apps-manifests", ROOT).map(e => e.path).sort().join(","))' "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "apps/probe/deploy/prod/kustomization.yaml,apps/probe/deploy/prod/netpol.yaml,apps/probe/deploy/prod/values.yaml" ]
+}
+
+@test "CLI emits unit directories for a units scope" {
+  tmp="$(_fixture)"
+  run bun "$ROOT/tools/lib/repo-walk.ts" --units apps --root "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "apps/naked
+apps/probe" ]
+}
+
 @test "SCOPE_NAMES exposes the registered scopes" {
   run walk 'console.log(SCOPE_NAMES.slice().sort().join(","))'
   [ "$status" -eq 0 ]
-  [ "$output" == "apps-values,platform-image-refs,platform-manifests" ]
+  [ "$output" == "apps,apps-manifests,apps-values,platform,platform-image-refs,platform-manifests" ]
 }
 
 # `platform-manifests`와 `platform-image-refs`는 **다른 질문**에 답한다.
@@ -186,11 +232,12 @@ _fixture() {
   [ "$status" -eq 2 ]
 }
 
-@test "CLI fails loudly when enumeration collapses" {
+@test "CLI emits nothing and succeeds for an empty scope" {
   tmp="$(mktemp -d)"; mkdir -p "$tmp/platform"; git -C "$tmp" init -q
   run bun "$ROOT/tools/lib/repo-walk.ts" --manifests platform-manifests --root "$tmp"
   rm -rf "$tmp"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
+  [ "$output" == "" ]
 }
 
 # 실 레포 스모크 — 픽스처가 증명하지 못하는 것 하나: 스코프가 실제 트리에서 붕괴하지 않는다.

@@ -149,17 +149,23 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 
 - **`lib/repo-walk.ts`** — 저장소 스캔 워커(`walkManifests(scope)`·`listUnits(scope)`). 가드들이
   각자 갖던 **열거 의미론**(tracked=git ls-files vs filesystem)·**제외 어휘**·**YAML 파싱**·
-  **열거 붕괴 바닥값**을 한 곳에 모은다. 스코프는 **이름 붙인 고정 집합**이다 — 조합 가능한
+  **유닛 파생**을 한 곳에 모은다. ⚠️ scan-floor는 **두지 않는다** — 열거자는 "글롭이 깨져 0건"과
+  "정당하게 0건"(앱 0개 = 첫 온보딩 전)을 구별할 도메인 지식이 없다. 소비자가 이미 자기 바닥값을
+  갖고 있고(MIN_SCAN), 그건 의미론적 필터 이후를 세므로 더 정확하다. 스코프는 **이름 붙인 고정 집합**이다 — 조합 가능한
   기술자로 열면 제외 어휘가 호출자로 되밀려 지금의 9벌 중복이 API로 승격된다.
   ⚠️ 스코프는 **의미론적 필터를 담지 않는다**: 어떤 소비자에겐 맞는 필터가 다른 소비자에겐
   치명적이다(audit-orphans는 `values.yaml` 있는 앱만 보면 되지만 check-app-deploy는 그 파일의
   **부재**를 잡아야 한다 — 열거자가 미리 거르면 위반이 사라진다). 미등록 스코프·열거 붕괴는
   throw(exit·문구는 콜사이트 소유). 셸 가드용 CLI(`--manifests <scope> --root <path>`)가 경로 목록만
-  내보내므로 셸은 자기 grep/yq 추출을 유지한다 — 종료코드 0/1(붕괴)/2(사용법·미등록 스코프).
+  내보내므로 셸은 자기 grep/yq 추출을 유지한다 — 종료코드 0/2(사용법·미등록 스코프).
   등록 스코프: `platform-manifests`(차트 소스 **제외** — 렌더 전 템플릿은 YAML 파싱 불가) ·
-  `platform-image-refs`(차트 소스 **포함** — 공급망 가드는 조용히 좁히면 안 된다) · `apps-values`.
+  `platform-image-refs`(차트 소스 **포함** — 공급망 가드는 조용히 좁히면 안 된다) · `apps-values` ·
+  `apps-manifests` · 유닛 스코프 `apps`/`platform`(디렉토리 존재 질문이라 **filesystem** 열거 —
+  실측상 tracked와 결과 동일하고 픽스처 비용만 크다).
   같은 트리를 보는 두 스코프가 다른 이유는 **질문이 다르기** 때문이다("배포되는 매니페스트인가"
-  vs "이미지 참조를 담을 수 있는가"). 소비자: `check-resource-limits`·`check-image-pins`.
+  vs "이미지 참조를 담을 수 있는가"). 소비자: `check-resource-limits`·`check-image-pins`·`check-app-deploy`·`check-skeleton`·
+  `check-app-netpol`·`audit-orphans`·`poll-ghcr`. (`surface-hash`는 **대상 아님** — 워킹트리
+  해시라 미커밋 파일을 포함해야 커밋 후 값과 일치한다.)
 - **`lib/image-pin.ts`** — 배포 핀 형식 커널(TAG_RE/DIGEST_RE·인라인 핀 parse/format·descriptor
   타입·autoDeploy fail-closed). 순수 형식 판정과 왕복만 소유하고 파일 I/O·exit·에러 문구는
   콜사이트가 소유한다 — **정책이 콜사이트마다 갈리기** 때문이다(poll-ghcr는 null을 refuse로,
