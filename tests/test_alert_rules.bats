@@ -77,7 +77,17 @@ JSON
   } > "$root/platform/victoria-stack/prod/rules/probe.yaml"
 }
 
-_lint() {   # $1=root — 픽스처 레지스트리를 주입해 린터 실행
+# 픽스처를 추적 상태로 만든다. 열거는 공유 워커의 `rules`/`producers` 스코프가 소유하고 둘 다
+# **tracked**(git ls-files)다 — 레포 전역 스캔에서 .scratch/·워크트리 잔재를 구조적으로 배제하는
+# 대가로 픽스처도 추적 파일이어야 한다. 실패를 삼키지 않는다: git이 실패하면 열거가 0건이 되어
+# 원인과 무관한 곳에서 터진다.
+_track_fixture() {
+  git -C "$1" init -q || { echo "git init 실패: $1"; return 1; }
+  git -C "$1" add -A || { echo "git add 실패: $1"; return 1; }
+}
+
+_lint() {   # $1=root — 픽스처를 추적 상태로 만든 뒤 픽스처 레지스트리를 주입해 린터 실행
+  _track_fixture "$1"
   run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json"
   echo "$output"
 }

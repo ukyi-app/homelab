@@ -88,9 +88,10 @@
 //    보고된다.
 //
 // check-resource-limits.ts를 미러한다(--repo-root · scan-floor · allowlist · 한국어 메시지).
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { parse, parseAllDocuments } from "yaml";
 import { parseFlags } from "./lib/cli.ts";
+import { RULES_ROOT, walkManifests } from "./lib/repo-walk.ts";
 
 let f: Record<string, string | boolean>;
 try { f = parseFlags(process.argv.slice(2), { value: ["--repo-root", "--registry"], bool: [] }); }
@@ -100,7 +101,8 @@ const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string)
 // 레지스트리(DEFAULT_REGISTRY)로 돈다 — 부분 레포 루트를 쓰느라 프로덕션 검증을 약화시키지 않기 위함(F-4).
 const REGISTRY_FILE = typeof f["--registry"] === "string" ? (f["--registry"] as string) : "";
 
-const RULES_DIR = "platform/victoria-stack/prod/rules";
+// 룰 디렉토리 경로의 SSOT는 워커의 `rules` 스코프 root다(콜사이트 인라인 사본 금지).
+const RULES_DIR = RULES_ROOT;
 const DENYLIST = "policy/alert-instance-stability-denylist.txt";
 const ALLOWLIST = "policy/alert-instance-stability-allowlist.txt";
 const MIN_SCAN = 30;   // 실 룰 41건(40 alert + 1 record) — 셀렉터 붕괴 false-green 차단
@@ -147,11 +149,6 @@ const PRODUCER_EXEMPT: Record<string, string> = {
   "platform/victoria-stack/prod/vmalert.yaml":
     "recording rule 결과 remoteWrite — 이름은 룰 파일이 소유하고 이 린터가 직접 검사한다. 기록 주기 = vmalert 평가 간격(≤ 룩백).",
 };
-// 생산자가 살 수 있는 표면(큐레이트) — 레포 전체 walk는 금물(루트에 scratch/워크트리 잔재가 있다).
-const PRODUCER_ROOTS = ["platform", "scripts", "infra", "tools", "apps", "ops", ".github"];
-const PRODUCER_EXT = [".yaml", ".yml", ".sh", ".ts", ".mts", ".js", ".mjs", ".py"];
-// 스캔 제외 디렉토리: 벤더 helm 캐시(charts) · 하네스(tests) · 의존성.
-const SKIP_DIRS = new Set([".git", "node_modules", "charts", "tests", ".terraform", "dist"]);
 const VMALERT_MANIFEST = "platform/victoria-stack/prod/vmalert.yaml";
 
 // **연속성 보존 rollup**(F-2): 윈도 안 샘플이 **1개뿐이어도 값을 내는** 함수만 push 구멍을 메운다.
@@ -374,19 +371,25 @@ function producerSignal(text: string): { why: string; viaUrl: boolean } | null {
 // 생산자 표면 walk — 메트릭을 push하는 파일을 찾는다(하네스·벤더·자기 자신·룰 디렉토리 제외).
 // 룰 디렉토리는 **소비자** 표면이다(이 린터의 검사 대상) — 생산자로 오인하면 안 된다.
 type Candidate = { path: string; why: string; viaUrl: boolean; metrics: string[] };
-function walkProducers(rel: string, out: Candidate[]): void {
-  let ents;
-  try { ents = readdirSync(`${ROOT}/${rel}`, { withFileTypes: true }); } catch { return; }
-  for (const e of ents.sort((a, b) => a.name.localeCompare(b.name))) {
-    const r = `${rel}/${e.name}`;
-    if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name) && r !== RULES_DIR) walkProducers(r, out); continue; }
-    if (!e.isFile() || r === SELF || PRODUCER_EXEMPT[r]) continue;   // 면제는 사유와 함께 코드에 명시
-    if (e.name.startsWith("test_") || e.name.endsWith(".bats")) continue;   // 하네스/픽스처는 생산자가 아니다
-    if (!PRODUCER_EXT.some((x) => e.name.endsWith(x))) continue;
-    const text = readFileSync(`${ROOT}/${r}`, "utf8");
+// 생산자 표면은 **레포 전역**이다. 예전엔 7개 루트(PRODUCER_ROOTS)를 큐레이트했는데 그 유일한
+// 근거가 "레포 전체 walk는 금물(루트에 scratch/워크트리 잔재가 있다)"였다 — 공유 워커는 **tracked**
+// 열거(`git ls-files`)라 .scratch/는 gitignored, 워크트리 잔재는 untracked로 애초에 안 잡힌다.
+// 근거가 사라져 목록도 없앴다: 손실 0, 표면 3건 확대(.claude/hooks/manifest-guard.sh ·
+// .pre-commit-config.yaml · .sops.yaml). 큐레이트 목록은 **완전성 가드가 막으려는 바로 그
+// staleness**(빠진 항목이 조용히 안 보임)를 스스로 갖고 있었다.
+// 열거(레포 전역·하네스/charts 제외·생산자 확장자)는 공유 워커의 `producers` 스코프가 소유한다.
+// 여기 남는 것은 전부 **의미론적 판정**이다 — "이 파일이 생산자인가"는 도메인 질문이지 "레포에
+// 무엇이 있는가"가 아니다(design-r1 R-1). 특히 룰 디렉토리는 이 린터의 **검사 대상**(소비자 표면)
+// 이라 생산자로 오인하면 안 되는 것이지, 존재하지 않는 파일이 아니다.
+function collectProducers(): Candidate[] {
+  const out: Candidate[] = [];
+  for (const { path: r, text } of walkManifests("producers", ROOT)) {
+    if (r === SELF || PRODUCER_EXEMPT[r]) continue;          // 면제는 사유와 함께 코드에 명시
+    if (r.startsWith(`${RULES_DIR}/`)) continue;             // 소비자 표면 — 생산자 아님
     const sig = producerSignal(text);
     if (sig) out.push({ path: r, why: sig.why, viaUrl: sig.viaUrl, metrics: extractMetrics(text) });
   }
+  return out;
 }
 
 // 생산자에서 **실제 push되는 메트릭 이름**을 추출한다(F-3). Prometheus exposition 페이로드 조립부의
@@ -602,8 +605,7 @@ for (const e of REGISTRY) {
 }
 
 // (b) 완전성 가드: push하는 표면을 전부 스캔해 **파일 단위 + 메트릭 단위** 등록을 강제(F-3·G-1·G-2).
-const found: Candidate[] = [];
-for (const root of PRODUCER_ROOTS) walkProducers(root, found);
+const found: Candidate[] = collectProducers();
 const foundProducers = found.map((x) => x.path);
 const registeredProducers = new Set(REGISTRY.map((e) => e.producer));
 for (const { path: p, why, viaUrl, metrics } of found) {
@@ -626,7 +628,7 @@ for (const { path: p, why, viaUrl, metrics } of found) {
 }
 for (const p of registeredProducers) {
   if (!foundProducers.includes(p)) {
-    producerViol.push(`${p} — 레지스트리 생산자인데 스캔 표면(${PRODUCER_ROOTS.join("·")}) 밖이다 — 완전성 가드가 못 본다`);
+    producerViol.push(`${p} — 레지스트리 생산자인데 스캔에서 안 잡혔다(추적 안 됨·하네스/charts 제외·push 시그널 미검출 중 하나) — 완전성 가드가 못 본다`);
   }
 }
 
@@ -644,8 +646,9 @@ readList(ALLOWLIST).forEach((line, i) => {
   allowed.add(key);
 });
 
-const dir = `${ROOT}/${RULES_DIR}`;
-const files = (existsSync(dir) ? readdirSync(dir) : []).filter((p) => p.endsWith(".yaml")).sort();
+// 열거는 공유 워커의 `rules` 스코프가 소유한다(tracked + YAML). MIN_SCAN은 이 린터에 남는다 —
+// 워커 바닥값은 없다(열거자는 "글롭이 깨져 0건"과 "정당하게 0건"을 구별할 도메인 지식이 없다).
+const ruleEntries = walkManifests("rules", ROOT);
 
 let ruleCount = 0;
 const viol: string[] = [];
@@ -757,10 +760,8 @@ function checkExpr(rel: string, name: string, expr: string): void {
   }
 }
 
-for (const fn of files) {
-  const rel = `${RULES_DIR}/${fn}`;
-  const text = readFileSync(`${ROOT}/${rel}`, "utf8");
-  for (const doc of parseAllDocuments(text)) {
+for (const { path: rel, text, docs } of ruleEntries) {
+  for (const doc of docs) {
     if (doc.errors.length) { console.error(`FAIL: YAML 파싱 실패: ${rel}: ${doc.errors[0].message}`); process.exit(1); }
     const o = doc.toJS() as any;
     if (!o || o.kind !== "ConfigMap" || !o.data) continue;

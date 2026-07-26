@@ -167,7 +167,7 @@ apps/probe" ]
 @test "SCOPE_NAMES exposes the registered scopes" {
   run walk 'console.log(SCOPE_NAMES.slice().sort().join(","))'
   [ "$status" -eq 0 ]
-  [ "$output" == "apps,apps-manifests,apps-values,platform,platform-image-refs,platform-manifests" ]
+  [ "$output" == "apps,apps-manifests,apps-values,platform,platform-image-refs,platform-manifests,producers,rules" ]
 }
 
 # `platform-manifests`와 `platform-image-refs`는 **다른 질문**에 답한다.
@@ -245,4 +245,80 @@ apps/probe" ]
   run walk 'console.log(walkManifests("platform-manifests", ROOT).length > 0)'
   [ "$status" -eq 0 ]
   [ "$output" == "true" ]
+}
+
+# ── 티켓 05: rules / producers 스코프 ──
+# 별도 픽스처를 쓴다 — 위 _fixture에 rules 디렉토리를 넣으면 platform-manifests의 정확-일치 단언이
+# 깨져 두 관심사가 결합된다.
+_fixture_repo() {
+  local t; t="$(mktemp -d)"
+  mkdir -p "$t/platform/victoria-stack/prod/rules" "$t/platform/charts/app" \
+           "$t/scripts" "$t/tools/tests" "$t/tests/gates" "$t/docs"
+  echo 'groups: []'   > "$t/platform/victoria-stack/prod/rules/r1.yaml"
+  echo 'groups: []'   > "$t/platform/victoria-stack/prod/rules/r2.yaml"
+  echo 'notes'        > "$t/platform/victoria-stack/prod/rules/README.md"   # 룰 아님(확장자)
+  echo 'echo push'    > "$t/scripts/push.sh"                                # producer 대상(.sh)
+  echo 'x'            > "$t/docs/gen.py"                                    # producer 대상(.py)
+  echo 'y'            > "$t/tools/tests/test_x.ts"                          # 제외 tests/
+  echo 'z'            > "$t/tests/gates/e2e.sh"                             # 제외 tests/
+  echo 'w'            > "$t/platform/charts/app/values.yaml"                # 제외 charts/
+  echo 'v'            > "$t/scripts/test_helper.sh"                         # 제외 test_* 파일명
+  echo 'u'            > "$t/scripts/thing.bats"                             # 제외 *.bats
+  # ⚠️ platform **안쪽** 하네스 — platform 스코프의 root가 platform이라 밖에만 두면 그 스코프에
+  # 대해 아무것도 증명하지 못한다(리뷰가 잡은 vacuous 테스트의 원인).
+  echo 't'            > "$t/platform/victoria-stack/prod/test_probe.yaml"   # 제외 test_* 파일명
+  mkdir -p "$t/platform/victoria-stack/prod/tests"
+  echo 's'            > "$t/platform/victoria-stack/prod/tests/f.yaml"      # 제외 tests/
+  echo 'readme'       > "$t/docs/x.md"                                      # 제외(확장자)
+  git -C "$t" init -q; git -C "$t" add -A
+  echo "$t"
+}
+
+@test "rules scope enumerates only the alert rule manifests" {
+  tmp="$(_fixture_repo)"
+  run walk 'console.log(walkManifests("rules", ROOT).map(e => e.path).join(","))' "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "platform/victoria-stack/prod/rules/r1.yaml,platform/victoria-stack/prod/rules/r2.yaml" ]
+}
+
+# producers는 레포 전역이고 확장자가 넓다(.sh/.ts/.py 등). tracked 열거를 쓰므로 .git·node_modules·
+# .terraform·dist는 **자동으로** 빠진다 — 구 SKIP_DIRS 6개 중 4개가 이렇게 사라진다(추적 파일 0건 실측).
+# 남는 charts/·tests/만 명시 규칙으로 둔다.
+@test "producers scope spans the repo and drops harness, charts and non-producer extensions" {
+  tmp="$(_fixture_repo)"
+  run walk 'console.log(walkManifests("producers", ROOT).map(e => e.path).sort().join(","))' "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "docs/gen.py,platform/victoria-stack/prod/rules/r1.yaml,platform/victoria-stack/prod/rules/r2.yaml,scripts/push.sh" ]
+}
+
+# ⚠️ 룰 디렉토리와 린터 자신의 제외는 **소비자 몫**이다(의미론적 필터). 룰 디렉토리는 이 린터의
+# *검사 대상*(소비자 표면)이지 "레포에 존재하지 않는 파일"이 아니다 — 스코프가 걸러버리면 다른
+# 소비자가 그 파일을 볼 수 없게 된다(design-r1 R-1과 같은 함정).
+@test "producers scope does not apply the linter's own semantic exemptions" {
+  tmp="$(_fixture_repo)"
+  run walk 'const p = walkManifests("producers", ROOT).map(e => e.path);
+    console.log(p.some(x => x.includes("/rules/")))' "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "true" ]
+}
+
+# 공유 어휘: 테스트 하네스 제외(tests?/ · fixtures*/ · test_* 파일 · *.bats)는 platform 스코프들과
+# producers가 **같은 개념**을 쓴다. charts/·벤더 규칙은 스코프마다 다르므로 공유하지 않는다.
+@test "platform scopes keep the shared test-harness vocabulary" {
+  tmp="$(_fixture_repo)"
+  run walk 'const p = walkManifests("platform-image-refs", ROOT).map(e => e.path);
+    console.log([
+      p.includes("platform/victoria-stack/prod/test_probe.yaml"),
+      p.includes("platform/victoria-stack/prod/tests/f.yaml"),
+      p.includes("platform/charts/app/values.yaml"),
+    ].join(","))' "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  # 하네스 둘은 빠지고(공유 어휘), 차트는 남는다(이 스코프만의 규칙) — 두 축을 한 번에 고정한다.
+  [ "$output" == "false,false,true" ]
 }
