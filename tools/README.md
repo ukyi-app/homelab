@@ -147,6 +147,14 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 
 ## 공유 커널 (lib/ — 콜사이트가 정책 소유, 단 정책이 콜사이트마다 갈릴 때)
 
+- **`lib/repo-walk.ts`** — 저장소 스캔 워커(`walkManifests(scope)`·`listUnits(scope)`). 가드들이
+  각자 갖던 **열거 의미론**(tracked=git ls-files vs filesystem)·**제외 어휘**·**YAML 파싱**·
+  **열거 붕괴 바닥값**을 한 곳에 모은다. 스코프는 **이름 붙인 고정 집합**이다 — 조합 가능한
+  기술자로 열면 제외 어휘가 호출자로 되밀려 지금의 9벌 중복이 API로 승격된다.
+  ⚠️ 스코프는 **의미론적 필터를 담지 않는다**: 어떤 소비자에겐 맞는 필터가 다른 소비자에겐
+  치명적이다(audit-orphans는 `values.yaml` 있는 앱만 보면 되지만 check-app-deploy는 그 파일의
+  **부재**를 잡아야 한다 — 열거자가 미리 거르면 위반이 사라진다). 미등록 스코프·열거 붕괴는
+  throw(exit·문구는 콜사이트 소유). 소비자: `check-resource-limits`(이후 티켓에서 확대).
 - **`lib/image-pin.ts`** — 배포 핀 형식 커널(TAG_RE/DIGEST_RE·인라인 핀 parse/format·descriptor
   타입·autoDeploy fail-closed). 순수 형식 판정과 왕복만 소유하고 파일 I/O·exit·에러 문구는
   콜사이트가 소유한다 — **정책이 콜사이트마다 갈리기** 때문이다(poll-ghcr는 null을 refuse로,
