@@ -10,9 +10,10 @@
 # 스코프 한계(성공 메시지도 이 경계를 반영): (a) substrate(infra/k3s-bootstrap/** — versions.env + renovate
 #   custom manager 관할, LOCAL_PATH_PROVISIONER digest 핀은 Task 9 후속), (b) helmrelease 차트-내부 기본
 #   이미지(traefik/sealed-secrets/tailscale/cnpg-operator 등 — 레포에 image: 스칼라로 없음, Renovate pinDigests 관할).
-# 제외(스캐너 하드코딩 — allowlist 아님): 벤더 수정금지(platform/cnpg/barman-plugin/** · gateway-api CRD),
-#   테스트/픽스처(**/tests/** · **/fixtures*/** — fixtures-bad 포함 접미 와일드카드). 픽스처 글롭은 라이브 실측 확정:
-#   */fixtures/*는 fixtures-bad를 놓치고 */tests/*는 루트 tests/를 놓친다 → **/tests/** + **/fixtures*/**.
+# 열거·제외는 **공유 워커의 스코프**가 소유한다(tools/lib/repo-walk.ts) — 이 파일에 제외 어휘의 사본이
+#   없다. 레인1=`platform-image-refs`(추적된 차트 소스 **포함**), 레인2=`apps-values`.
+#   제외 내역(벤더 barman-plugin/·gateway-api CRD, 테스트/픽스처 tests?/·fixtures*/)과 그 글롭이
+#   라이브 실측으로 확정된 경위는 스코프 정의의 주석이 SSOT다.
 # 예외: policy/image-pin-allowlist.txt(라인당 이미지 값 또는 app:<name>, # 사유 주석 **강제** — 인라인 또는 직전 줄).
 #   수용 기준 = allowlist 0(핀 후).
 #
@@ -36,8 +37,13 @@ if [ -z "$ROOT" ]; then ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd
 
 # 앵커된 이미지 키 정규식 — `logo_image:`·경로 내 `my-image:` 부분매치 방지(리스트 아이템 `- ` 허용).
 IMG_KEY='^[[:space:]]*(-[[:space:]]+)?(image|imageName):[[:space:]]*'
-# 제외 경로(repo-relative). 벤더 + 테스트/픽스처.
-EXCLUDE_RE='(^|/)tests/|(^|/)fixtures[^/]*/|^platform/cnpg/barman-plugin/|gateway-api-crds\.yaml$'
+
+# 열거는 공유 워커(tools/lib/repo-walk.ts)가 소유한다 — tracked 열거·제외 어휘·열거 붕괴 바닥값이
+# 전부 스코프 정의 안에 있다. 여기서 추가 제외를 하지 않으므로 제외 어휘의 사본이 존재하지 않는다.
+# 레인1은 `platform-image-refs`(추적된 **차트 소스 포함** — 공유 차트 values.yaml에 리터럴 이미지가
+# 생기면 잡아야 한다. cf. `platform-manifests`는 렌더 전 템플릿이 YAML 파싱 불가라 차트를 뺀다).
+# 값 추출(grep/sed/awk)은 셸이 그대로 소유한다 — CONTRIBUTING이 라인 지향 필터를 셸 영역으로 규정.
+walk_scope() { bun "$(dirname "$0")/../tools/lib/repo-walk.ts" --manifests "$1" --root "$ROOT"; }
 
 # --- allowlist: 사유 주석 강제(config lint) + 멤버십 ---
 # 각 비주석·비공백 엔트리는 인라인 `# 사유` 또는 직전 줄 `#` 주석을 가져야 한다.
@@ -93,11 +99,9 @@ lint_allowlist || exit 2
 scanned=0
 fail=0
 
-# --- 레인1: platform 문자열 이미지(git ls-files=추적 파일만, untracked helm 캐시 자동 제외) ---
+# --- 레인1: platform 문자열 이미지 (열거·제외는 platform-image-refs 스코프 소유) ---
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  case "$f" in *.yaml|*.yml) : ;; *) continue ;; esac
-  echo "$f" | grep -qE "$EXCLUDE_RE" && continue
   while IFS= read -r val; do
     [ -n "$val" ] || continue
     printf '%s' "$val" | grep -qE '^[a-z0-9]' || continue
@@ -107,12 +111,11 @@ while IFS= read -r f; do
     echo "UNPINNED(lane1): $f — $val"
     fail=$((fail + 1))
   done < <(extract_string_images "$ROOT/$f")
-done < <(cd "$ROOT" && git ls-files -- 'platform' 2>/dev/null || true)
+done < <(walk_scope platform-image-refs)
 
-# --- 레인2: apps 구조체 이미지 ---
+# --- 레인2: apps 구조체 이미지 (열거는 apps-values 스코프 소유) ---
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  case "$f" in */deploy/prod/values.yaml) : ;; *) continue ;; esac
   # (a) 인라인 문자열 image가 있으면 @sha256 강제(struct 규약 이탈 대비).
   while IFS= read -r val; do
     [ -n "$val" ] || continue
@@ -143,7 +146,7 @@ while IFS= read -r f; do
     echo "UNPINNED(lane2-flow): $f — flow-style image에 digest: sha256: 부재"
     fail=$((fail + 1))
   done < <(grep -hE '^[[:space:]]*image:[[:space:]]*\{' "$ROOT/$f" 2>/dev/null || true)
-done < <(cd "$ROOT" && git ls-files -- 'apps' 2>/dev/null || true)
+done < <(walk_scope apps-values)
 
 # --- scan-floor: 스캔이 의심스럽게 적으면(글롭/제외 파손) fail-loud ---
 if [ "$scanned" -lt "$MIN_SCAN" ]; then

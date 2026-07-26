@@ -17,6 +17,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { parse } from "yaml";
 import { TAG_RE, parseInlinePin, parseDescriptor, descriptorAutoDeploy } from "./lib/image-pin.ts";
+import { listUnits } from "./lib/repo-walk.ts";
 
 const USAGE = `poll-ghcr — GHCR 폴링 bump 플래너(읽기 전용, update-image 권위 경로)
 사용법: bun tools/poll-ghcr.ts [--dry-run] [--root <dir>] [--owner <org>] [--fixtures <dir>]
@@ -186,10 +187,12 @@ function planComponent(dir: string, name: string): Plan {
   return computeBump(result, { key: name, src, repo, deployed: tag.slice(4), digest, autoDeploy: descriptorAutoDeploy(pin) });
 }
 
-// apps/*/deploy/prod 중 source-repo 바인딩이 있는 앱만 순회
+// apps/*/deploy/prod 중 source-repo 바인딩이 있는 앱만 순회.
+// 열거는 공유 워커의 `apps` 유닛 스코프가 소유하고, `source-repo` 실재라는 **의미론적 필터는 여기**
+// 남는다 — 스코프가 거르면 다른 소비자(check-app-deploy)가 잡아야 할 상태가 사라진다(design-r1 R-1).
 const appsRoot = path.join(args.root, "apps");
 const plans = [];
-for (const name of existsSync(appsRoot) ? readdirSync(appsRoot) : []) {
+for (const { name } of listUnits("apps", args.root)) {
   const dir = path.join(appsRoot, name, "deploy", "prod");
   if (!existsSync(path.join(dir, "source-repo"))) continue;
   try {
@@ -201,7 +204,7 @@ for (const name of existsSync(appsRoot) ? readdirSync(appsRoot) : []) {
 
 // platform/*/prod 중 베스포크 핀 디스크립터(.image-pin.json)가 있는 컴포넌트 2차 순회
 const platformRoot = path.join(args.root, "platform");
-for (const name of existsSync(platformRoot) ? readdirSync(platformRoot) : []) {
+for (const { name } of listUnits("platform", args.root)) {
   const dir = path.join(platformRoot, name, "prod");
   if (!existsSync(path.join(dir, ".image-pin.json"))) continue;
   try {

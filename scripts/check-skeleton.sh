@@ -39,11 +39,12 @@ fi
 # README 디렉토리 지도 드리프트 가드: 모든 platform 컴포넌트(charts 제외)가 README 지도에 나열돼야 한다.
 # 새 컴포넌트 추가 시 지도 갱신을 강제(가상명·누락 차단). tools/tests/test_dirmap.bats와 동일 불변식.
 # glob 루프(ls 파싱 회피 — SC2011). bash 3.2 안전.
-for d in platform/*/; do
+# 열거는 공유 워커의 `platform` 유닛 스코프가 소유한다(공유 차트 제외도 그 안에 있다).
+while IFS= read -r d; do
+  [ -n "$d" ] || continue
   c="$(basename "$d")"
-  case "$c" in charts) continue;; esac
   if ! grep -q "$c" "$README"; then echo "FAIL: README 디렉토리 지도에 platform 컴포넌트 누락: $c"; rc=1; fi
-done
+done < <(bun "$(dirname "$0")/../tools/lib/repo-walk.ts" --units platform)
 
 # 역방향(README 컴포넌트 표 → 디렉토리): 표에 나열된 각 컴포넌트가 platform/<c>/로 실재하는지.
 # 정방향(dir→표)과 합쳐 양방향 — phantom/리네임 항목을 잡고 신규 컴포넌트를 자동 편입한다.

@@ -26,10 +26,14 @@ EOF
 | <!-- ledger:row --> orders | prod | 64 | 128 |
 | <!-- ledger:row --> stale-app | prod | 64 | 128 |
 EOF
+  # 워커의 `apps` 유닛 스코프는 tracked 열거다 — 픽스처도 추적 파일이어야 한다.
+  # ⚠️ 커밋은 하지 않는다: HEAD가 없어야 surfaceHash(HEAD)가 ""를 유지해 surface-drift가 안 나온다
+  # (위 주석의 성질 보존).
   printf 'kind: Database\n' > "$FR/platform/cnpg/prod/databases/shared.yaml"
   touch "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml"
   printf 'kind: Database\n' > "$FR/platform/cnpg/prod/databases/lonely.yaml"
   touch "$FR/platform/data-conn/prod/db-lonely-conn.sealed.yaml"
+  git -C "$FR" init -q; git -C "$FR" add -A
 }
 teardown() { rm -rf "$TMP"; }
 

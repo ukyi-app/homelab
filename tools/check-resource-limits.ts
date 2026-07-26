@@ -5,9 +5,9 @@
 // (allowlist 키 Cluster/<name>/postgres), kind:Pooler는 spec.template.spec.containers[](pgbouncer)로 검사한다.
 // 구 scripts/check-resource-limits.sh(bash+yq+python3 3언어)를 bun/TS 단일로 이관 — 메시지·scan-floor 동일.
 // 원격-helm 벤더(platform/*/prod/charts/)·barman-plugin은 스캔 밖. make verify가 호출, bats가 행동 검증.
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { parseAllDocuments } from "yaml";
+import { existsSync, readFileSync } from "node:fs";
 import { parseFlags } from "./lib/cli.ts";
+import { walkManifests } from "./lib/repo-walk.ts";
 
 let f: Record<string, string | boolean>;
 try { f = parseFlags(process.argv.slice(2), { value: ["--repo-root"], bool: [] }); }
@@ -40,11 +40,19 @@ const allowed = new Set(
     : [],
 );
 
-const platformDir = `${ROOT}/platform`;
-const files = (existsSync(platformDir) ? readdirSync(platformDir, { recursive: true }) : [])
-  .map((p) => `platform/${String(p)}`)
-  .filter((p) => p.endsWith(".yaml") && !p.includes("/charts/") && !p.includes("barman-plugin"))
-  .sort();
+// 열거는 공유 워커의 `platform-manifests` 스코프가 소유한다 — 제외 어휘와 tracked 열거,
+// 열거 붕괴 바닥값이 전부 그 안에 있다(제외 목록은 스코프 정의가 SSOT — 여기 복창하지 않는다).
+// 아래 MIN_SCAN은 **워크로드 kind 매치 이후**의 바닥값이라 성격이 다르다(소비자 소유).
+// 커널은 열거 붕괴·미등록 스코프를 throw로만 알린다 — 종료코드와 문구는 콜사이트 소유다
+// (lib/image-pin.ts와 같은 규율). 잡지 않으면 이 파일의 다른 실패가 쓰는 `FAIL:` + exit(1) 대신
+// raw 스택 트레이스가 나가 게이트 출력 규약이 깨진다.
+let entries: ReturnType<typeof walkManifests>;
+try {
+  entries = walkManifests("platform-manifests", ROOT);
+} catch (e) {
+  console.error(`FAIL: ${e instanceof Error ? e.message : String(e)}`);
+  process.exit(1);
+}
 
 let count = 0;
 const viol: string[] = [];
@@ -75,11 +83,10 @@ function checkBlock(
   if (!allowed.has(key)) viol.push(`${key} [missing: ${missing.join(",")}]  (${rel})`);
 }
 
-for (const rel of files) {
-  const text = readFileSync(`${ROOT}/${rel}`, "utf8");
+for (const { path: rel, text, docs } of entries) {
   if (!KIND_RE.test(text)) continue;
   count++;
-  for (const doc of parseAllDocuments(text)) {
+  for (const doc of docs) {
     if (doc.errors.length) { console.error(`FAIL: YAML 파싱 실패: ${rel}: ${doc.errors[0].message}`); process.exit(1); }
     const o = doc.toJS() as any;
     if (!o || typeof o !== "object" || !KINDS.has(o.kind)) continue;
