@@ -59,11 +59,16 @@ const readJson = (p: string, d: any): any => (existsSync(p) ? JSON.parse(readFil
 // 진짜 missing-activation 위반이 있는 상태에서 apps.json만 치우면 blocking 1→0 · rc 1→0(stderr 0줄).
 // 레포 밖 cwd에서 기본 `--repo-root .`로 부르면(Makefile:102 · ci.yaml:72의 형태) 전 도메인이 0건이었다.
 // ⚠️ 나머지 readJson 폴백 2곳(.tombstones.json · .activation 마커)은 **부재가 정상 상태**라 건드리지 않는다.
-const MIN_REGISTRY = Number(arg("--min-registry", "1"));
-if (!Number.isFinite(MIN_REGISTRY) || MIN_REGISTRY < 0) {
-  console.error(`audit-orphans: --min-registry 값이 숫자가 아니다 — 바닥값이 조용히 무력화되는 자리다`);
+// ⚠️ `Number()` + `Number.isFinite()` 조합만으로는 부족하다 — JS는 `Number("") === 0`,
+// `Number(" ") === 0`, `Number("\n") === 0`이라 **빈 값/공백이 유효한 0으로 통과해 바닥값이 조용히 꺼진다**
+// (`--min-registry ""` 또는 값 없이 마지막 인자로 두는 경우). 적대 검토가 실측으로 잡은 자리다.
+// 정수 리터럴만 받는다 — "숫자로 해석 가능"이 아니라 "숫자로 쓰였다"를 요구한다.
+const rawMinRegistry = String(arg("--min-registry", "1") ?? "");
+if (!/^\d+$/.test(rawMinRegistry)) {
+  console.error(`audit-orphans: --min-registry 값이 음이 아닌 정수가 아니다(받은 값: ${JSON.stringify(rawMinRegistry)}) — 바닥값이 조용히 무력화되는 자리다`);
   process.exit(2); // 사용법 오류(CONTRIBUTING 종료코드 규약)
 }
+const MIN_REGISTRY = Number(rawMinRegistry);
 const registryPath = `${ROOT}/infra/cloudflare/apps.json`;
 let registry: RegRow[];
 try {

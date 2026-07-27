@@ -312,6 +312,19 @@ KEOF
   [ "$status" -eq 2 ]
 }
 
+@test "an empty or blank --min-registry is a usage error too (Number('') is 0, not NaN)" {
+  # ⚠️ `Number("")===0`·`Number(" ")===0`이라 isFinite 검사만으로는 **빈 값이 유효한 0으로 통과**해
+  # 바닥값이 조용히 꺼진다. 위 @test가 불가능하다고 선언한 상태가 실제로 가능했다(적대 검토 실측).
+  echo '[]' > "$FR/infra/cloudflare/apps.json"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry ""
+  [ "$status" -eq 2 ]
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry " "
+  [ "$status" -eq 2 ]
+  # 값 없이 마지막 인자로 두면 undefined — 같은 경로로 막혀야 한다
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry
+  [ "$status" -eq 2 ]
+}
+
 @test "unreferenced-conn is informational and never blocks --ci" {
   # ghost(orphan-dns, 차단 유형)를 제거해 --ci 판정을 unreferenced-conn만으로 격리
   echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
