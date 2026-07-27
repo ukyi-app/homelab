@@ -592,3 +592,39 @@ YAML
   echo "$output" | grep -q 'PodOOMKilled'
   echo "$output" | grep -q 'WALVolumeFilling'
 }
+
+# ── 정책 파일 열거 붕괴(ownership-accounting 08) ─────────────────────────────────
+# 옛 `existsSync ? … : []` 폴백은 denylist 부재를 '항목 0개'로 위장했다. denyMetrics가 비면
+# 모드 A의 find()가 상시 미스라 위반 0이 되는데, 성공 메시지는 '모드 A/B/C 위반 0'이라며
+# 검사했다고 주장한다 — 적대 검토가 A/B 대조로 실측한 fail-open이다.
+
+@test "a missing denylist file is a hard failure, not a silently empty mode A" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
+  rm -f "$tmp/policy/alert-instance-stability-denylist.txt"
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '정책 파일 읽기 실패'
+}
+
+@test "a denylist that still exists but holds no entries trips the entry floor" {
+  # 필수 읽기는 파일 부재만 잡는다 — 주석만 남는 부분 드리프트는 항목 바닥값이 잡는다.
+  tmp="$(mktemp -d)"
+  _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
+  printf '# 주석만 남은 상태\n' > "$tmp/policy/alert-instance-stability-denylist.txt"
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'denylist 항목 0건'
+}
+
+@test "a missing allowlist file is a hard failure too (absence is drift on both lists)" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp" PodCrashLoopingProbe 'increase(max by (namespace,pod,container,uid) (kube_pod_container_status_restarts_total)[15m:1m]) > 3'
+  rm -f "$tmp/policy/alert-instance-stability-allowlist.txt"
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '정책 파일 읽기 실패'
+}

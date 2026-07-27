@@ -383,3 +383,60 @@ GNU make는 recipe 실패를 자기 규약(2 = errors)으로 보고한다. 따�
 - 2는 tools 규약에서 "사용법/파싱 오류"라 의미가 겹친다. make 계층에서 2를 원인으로 읽지 말 것.
 
 > 가드: `tests/gates/test_guard-skip-signalling.bats`
+
+### 열거 붕괴 → vacuous green (프로세스 치환·커맨드 치환·부정 카운트)
+
+가드가 **열거 단계에서 조용히 0건을 받고 끝까지 떨어져 성공 메시지를 출력한다.** 명시적 skip 분기가
+없으므로 skip 신호 규약(exit 4 + `SKIP:` 마커)으로는 안 잡힌다 — 루프가 0회 돌고 OK가 찍힐 뿐이다.
+셋 다 라이브 재현했다.
+
+**① 프로세스 치환은 열거자 실패를 전파하지 않는다.** `set -euo pipefail`이어도 `done < <(cmd)`의
+`cmd` 종료코드는 셸에 보이지 않는다.
+
+```
+$ printf '#!/bin/sh\nexit 1\n' > shim/bun          # 워커를 실패시킨다
+$ PATH=shim:$PATH bash scripts/check-app-netpol.sh
+check-app-netpol OK (0 app-owned NetworkPolicy 검사, 위반 0)      rc=0
+```
+
+**② 커맨드 치환은 stdout만 캡처한다.** `bad=$(grep -r … dir/ || true)`에서 디렉토리가 사라지면 grep은
+rc=2 + stderr로 죽는데, `|| true`가 rc를, 치환이 stderr를 삼켜 `bad=""`가 된다 → `[ -z "$bad" ]` 무조건 참.
+`.github/workflows`를 리네임했을 때 `test_action-pinning`의 출력이 **baseline과 바이트 단위로 동일**했다.
+⚠️ 같은 파일의 형제 단언이 `run bash -c`를 쓰면 bats가 stderr를 `$output`에 병합해 **우연히** fail-loud가
+된다 — 한 스위트에서 일부만 무너지는 비대칭은 대개 이 차이다. 우연에 기대지 말 것.
+
+**③ 부정 카운트는 "매치 0"과 "대상 0"을 구별하지 못한다.** `run grep -r … dir/; [ "$status" -ne 0 ]`은
+grep rc=1(매치 없음)뿐 아니라 rc=2(디렉토리 부재)도 통과시킨다. 매치 없음은 정확히 rc=1이다.
+
+**처방** — 열거를 **변수로** 받아 rc를 캡처하고(`scripts/lib/scan-floor.sh`의 `scan_enumerate`),
+건수 바닥값을 건다(`scan_floor`). 바닥값 **수치는 소비자가 소유한다** — 열거자는 "글롭이 깨져 0건"과
+"정당하게 0건"을 구별할 도메인 지식이 없다. 부정 카운트=0 형태에는 바닥값만으론 부족하고
+**양성 대조**(같은 술어가 어딘가에서는 매치한다)가 함께 필요하다. 셀 때 `grep -c .`는 0건에서 rc=1이라
+`set -e` 콜사이트의 함정이다 — `scan_count`가 그걸 흡수한다.
+
+⚠️ **이건 skip 규약과 다른 채널이다.** 저긴 "검사할 도메인이 정당하게 없음"(exit 4 + `SKIP:`)이고
+여긴 "열거를 못 했다"는 검증 실패(**exit 1**)다. 마커를 내면 사람이 정반대 뜻으로 읽는다.
+⚠️ 바닥값은 **기본 모드에만** 적용한다. 픽스처 모드(`--root`/`--min-*`)는 정당하게 1~2건이라
+무조건 적용하면 음성 테스트가 전부 red가 된다(실측). ⚠️ 바닥값은 래칫이 아니다 — 도메인이 줄지
+않는 한 손댈 일이 없다.
+
+> 가드: `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `policy/ledger.rego`, `tests/test_ledger.bats`
+
+### PreToolUse 훅 종료코드 — fail-closed는 exit 2뿐
+
+Claude Code PreToolUse 훅의 종료코드 어휘는 다른 가드 계층과 **다르다**: 0=허용 · 2=차단(stderr가
+Claude에 전달) · **그 외 비-0 = 비차단 에러**(사용자에게 stderr만 보이고 도구는 그대로 실행된다).
+
+따라서 레포 종료코드 규약(1=검증 실패 · 4=skip)을 이 계층에 복사하면 **경고만 찍히고 편집이 통과한다.**
+`set -e`도 같은 이유로 위험하다 — 무엇이든 -e로 죽으면 rc=1(=비차단)이 되어 조용히 통과한다.
+`manifest-guard.sh`가 실제로 그랬다: jq 부재/실패 시 `*.enc.yaml` 직접 편집이 rc=0으로 허용됐고
+(stderr 0줄), 그건 AGENTS.md 최상위 금칙의 **유일한 자동 차단선**이었다.
+
+- 훅 안의 파서 붕괴는 "도메인 밖"이 아니라 **차단 사유**다. matcher가 `Edit|Write|MultiEdit` 전용이면
+  그 도구들은 항상 `file_path`를 가지므로, 키는 있는데 값이 없으면 언제나 파서가 죽은 것이다.
+- 외부 명령 의존을 0으로 줄인다(bash 내장 파싱 폴백). `input="$(cat)"`조차 cat이 PATH에 없으면
+  비차단 rc가 된다.
+- blanket `command -v jq || exit 2` 프리플라이트는 쓰지 않는다 — 도구 없는 환경에서 모든 편집을
+  막아 세션을 못 쓰게 만든다. 오탐 0 원칙과 fail-closed는 **폴백**으로 양립시킨다.
+
+> 가드: `tests/gates/test_manifest-guard.bats`

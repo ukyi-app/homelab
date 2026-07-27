@@ -44,11 +44,21 @@ check_one() {
 if [ "$#" -gt 0 ]; then
   for f in "$@"; do check_one "$f" || fail=1; done
 else
+  # ⚠️ 전수 모드는 (a) `git ls-files`가 **cwd 상대**라 ROOT로 내려가야 하고(서브디렉토리에서 실행하면
+  # 0건이었다), (b) 열거 실패를 rc로 잡아야 한다(프로세스 치환이 삼켰다). 둘 다 라이브 재현됨 —
+  # `cd docs && bash ../scripts/verify-secrets.sh` → "모든 *.enc.yaml 무결성 OK" rc=0.
+  # 0건이면 recipient canonical 검사까지 함께 무발화된다(이중 vacuity). 현재 추적 9건 — 래칫 아님.
+  # shellcheck source=scripts/lib/scan-floor.sh
+  . "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
+  cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+  tracked="$(scan_enumerate verify-secrets git ls-files '*.enc.yaml')" || exit 1
+  scanned="$(scan_count "$tracked")"
+  scan_floor verify-secrets "$scanned" "${VERIFY_SECRETS_MIN_SCAN:-6}" || exit 1
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     check_one "$f" || fail=1
-  done < <(git ls-files '*.enc.yaml')
+  done <<< "$tracked"
 fi
 
 if [ "$fail" -ne 0 ]; then echo "verify-secrets: 무결성 검사 실패" >&2; exit 1; fi
-echo "verify-secrets: 모든 *.enc.yaml 무결성 OK"
+echo "verify-secrets: 모든 *.enc.yaml 무결성 OK${scanned:+ (${scanned}건 스캔)}"

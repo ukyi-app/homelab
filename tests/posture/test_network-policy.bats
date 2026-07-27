@@ -36,9 +36,18 @@ probe() {
 
 @test "prod app pods are Ready under default-deny (kubelet probes survive the policy)" {
   # 프로브 ipBlock이 잘못돼 있다면 default-deny-ingress 때문에 앱이 crash-loop에 빠진다.
-  run bash -c "kubectl -n prod get pods -l app.kubernetes.io/name -o jsonpath='{range .items[*]}{.status.conditions[?(@.type==\"Ready\")].status}{\"\n\"}{end}'"
+  # 이 테스트는 candidate NetworkPolicy가 kubelet 프로브 경로를 막는지를 잡는 **유일한** 검사이고,
+  # scripts/netpol-rehearsal.sh가 머지 전 판정으로 이걸 그대로 쓴다.
+  #
+  # ⚠️ 옛 jsonpath 형태는 두 겹으로 vacuous했다. (a) 라벨 파드가 0건이면(DR 재구축 직후·전 앱 scale-0·
+  # app.kubernetes.io/name 라벨 드리프트) 빈 출력이 `!= *False*`를 만족한다. (b) Ready condition을
+  # **아직 못 쓴** 파드도 빈 문자열이라 같이 통과한다. -o json 3단 단언으로 둘 다 닫는다.
+  run bash -c "kubectl -n prod get pods -l app.kubernetes.io/name -o json"
   [ "$status" -eq 0 ]
-  [[ "$output" != *"False"* ]]
+  pods="$(jq '.items|length' <<<"$output")"
+  [ "$pods" -ge 1 ]              # 열거 바닥값 — 현재 2건. 래칫 아님
+  ready="$(jq '[.items[]|select(any(.status.conditions[]?; .type=="Ready" and .status=="True"))]|length' <<<"$output")"
+  [ "$ready" -eq "$pods" ]       # Ready=True가 아닌 파드(False·condition 부재 포함) 0건
 }
 
 # ⚠️ 모든 nc는 `sleep 8` 후 실행한다: kube-router는 새 파드의 POD-FW 룰을 파드 생성 후

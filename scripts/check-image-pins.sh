@@ -23,15 +23,18 @@
 # bash 3.2 호환: [[ ]]·mapfile 금지(중간 단언 [ ]/grep). --root로 픽스처 tmp git 레포 지정 가능.
 set -euo pipefail
 
-ROOT=""; ALLOWLIST=""; MIN_SCAN=20
+ROOT=""; ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=1; ROOT_OVERRIDDEN=0; MIN_SCAN_APPS_SET=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --root) ROOT="$2"; shift 2 ;;
+    --root) ROOT="$2"; ROOT_OVERRIDDEN=1; shift 2 ;;
     --allowlist) ALLOWLIST="$2"; shift 2 ;;
     --min-scan) MIN_SCAN="$2"; shift 2 ;;   # scan-floor(글롭/제외 파손 감지). 픽스처만 낮춰 호출.
+    --min-scan-apps) MIN_SCAN_APPS="$2"; MIN_SCAN_APPS_SET=1; shift 2 ;;   # 레인2 전용 바닥값(아래 참조)
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+# shellcheck source=scripts/lib/scan-floor.sh
+. "$(dirname "$0")/lib/scan-floor.sh"
 if [ -z "$ROOT" ]; then ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; fi
 [ -z "$ALLOWLIST" ] && ALLOWLIST="$ROOT/policy/image-pin-allowlist.txt"
 
@@ -99,6 +102,12 @@ lint_allowlist || exit 2
 scanned=0
 fail=0
 
+# ⚠️ 열거를 **변수로** 받는다 — `done < <(walk_scope …)` 프로세스 치환은 워커(bun) 실패를
+# `set -euo pipefail`로 전파하지 않는다. 실측: walk_scope가 경로를 못 찾아 죽자 두 레인이 조용히
+# 0건이 됐다(그때 합계 바닥값이 잡아 주긴 했지만, 그건 우연히 큰 레인이 함께 죽었기 때문이다).
+platform_files="$(scan_enumerate check-image-pins:platform walk_scope platform-image-refs)" || exit 1
+apps_files="$(scan_enumerate check-image-pins:apps walk_scope apps-values)" || exit 1
+
 # --- 레인1: platform 문자열 이미지 (열거·제외는 platform-image-refs 스코프 소유) ---
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -111,7 +120,8 @@ while IFS= read -r f; do
     echo "UNPINNED(lane1): $f — $val"
     fail=$((fail + 1))
   done < <(extract_string_images "$ROOT/$f")
-done < <(walk_scope platform-image-refs)
+done <<< "$platform_files"
+scanned_lane1="$scanned"
 
 # --- 레인2: apps 구조체 이미지 (열거는 apps-values 스코프 소유) ---
 while IFS= read -r f; do
@@ -146,16 +156,31 @@ while IFS= read -r f; do
     echo "UNPINNED(lane2-flow): $f — flow-style image에 digest: sha256: 부재"
     fail=$((fail + 1))
   done < <(grep -hE '^[[:space:]]*image:[[:space:]]*\{' "$ROOT/$f" 2>/dev/null || true)
-done < <(walk_scope apps-values)
+done <<< "$apps_files"
+scanned_lane2=$((scanned - scanned_lane1))
 
 # --- scan-floor: 스캔이 의심스럽게 적으면(글롭/제외 파손) fail-loud ---
+# ⚠️ 종료코드는 1이다. 2는 CONTRIBUTING이 **사용법/파싱 오류**로 예약했고(위 `unknown arg`가 그 용법),
+# 같은 scan-floor 클래스의 다른 가드는 전부 1이다(check-resource-limits·check-alert-rules·
+# check-guard-authority·check-skip-signalling·scripts/lib/scan-floor.sh). 여기만 2였다 — 같은 클래스에
+# 두 코드를 남기는 것이 정확히 이 캠페인이 지우는 병이라 1로 수렴시켰다.
 if [ "$scanned" -lt "$MIN_SCAN" ]; then
   echo "ERROR: 스캔 무결성 의심 — 이미지 ${scanned}건(<${MIN_SCAN}). 글롭/제외 경로 파손 가능(scan-floor)." >&2
-  exit 2
+  exit 1
+fi
+# ⚠️ **합계 바닥값은 작은 레인의 붕괴를 원리적으로 못 잡는다.** 실측 분해: 레인1(platform) 34건 ·
+# 레인2(apps) 2건. 레인2가 0이 돼도 레인1만으로 34 ≥ 20이라 위 검사는 절대 발화하지 않는다 —
+# 그동안 apps 레인의 digest 핀 강제가 통째로 사라져도 초록이었다는 뜻이다. 레인마다 자기 바닥값이 필요하다.
+# (레인1은 합계 바닥값이 사실상 전담한다 — 레인2 최대치가 한 자릿수라 34가 무너지면 합계가 먼저 걸린다.)
+# 픽스처 모드(--root)엔 **기본값을** 적용하지 않는다 — 픽스처는 정당하게 한 레인만 만든다
+# (선례: check-app-netpol). 단 `--min-scan-apps`를 **명시하면** 픽스처에서도 적용한다 —
+# 그렇지 않으면 이 바닥값 자체를 red-green으로 실증할 방법이 없다(가드가 자기 검증을 못 받는 자리).
+if [ "$ROOT_OVERRIDDEN" -eq 0 ] || [ "$MIN_SCAN_APPS_SET" -eq 1 ]; then
+  scan_floor check-image-pins:apps "$scanned_lane2" "$MIN_SCAN_APPS" || exit 1
 fi
 
 if [ "$fail" -gt 0 ]; then
   echo "핀 안 된 이미지 ${fail}건 (스캔 ${scanned}건). @sha256 digest 핀 또는 allowlist 등재(사유 주석) 필요."
   exit 1
 fi
-echo "스캔된 platform/apps 런타임 이미지 전부 digest 핀됨 (스캔 ${scanned}건). [helm 차트 내부=Renovate·substrate=versions.env 관할]"
+echo "스캔된 platform/apps 런타임 이미지 전부 digest 핀됨 (스캔 ${scanned}건 = platform ${scanned_lane1} + apps ${scanned_lane2}). [helm 차트 내부=Renovate·substrate=versions.env 관할]"

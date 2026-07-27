@@ -25,5 +25,11 @@ kubectl -n argocd patch app "$APP" --type merge -p '{"spec":{"syncPolicy":{"auto
 make -s render COMP="$COMP" | kubectl apply -f -                    # candidate 적용(-s: make 명령 에코 억제 — 안 하면 echo가 line1이라 kubectl YAML 파싱 실패)
 kubectl -n "$NS" get netpol "$NETPOL" -o yaml | grep -q "$NEEDLE"  # 반영 확인(F3)
 sleep 8                                                                      # kube-router 룰 갭(검증 함정)
+# 판정 전 도메인 확인 — verify-posture의 프로브 단언은 prod 라벨 파드 위에서만 의미가 있다.
+# 파드 0건(DR 재구축 직후·전 앱 scale-0·라벨 드리프트)이면 candidate가 kubelet 프로브를 막아도
+# 'rehearsal PASS'가 찍히고 그대로 머지된다. ⚠️ skip이 아니라 **전제 불충족**이라 exit 1이다
+# (exit 4를 쓰면 호출자가 '평가 안 함, 정상'으로 읽는다 — 정반대 뜻).
+pods="$(kubectl -n "$NS" get pods -l app.kubernetes.io/name --no-headers 2>/dev/null | grep -c . || true)"
+[ "$pods" -ge 1 ] || { echo "✗ 리허설 무효: $NS 앱 파드 0건 — verify-posture가 vacuous. 앱 배포 후 재실행" >&2; exit 1; }
 make verify-posture                                                          # pg-rw + pg-pooler-rw(F4b, fail-closed)
-echo "==> rehearsal PASS — candidate 안전(trap이 곧 main 복원)"
+echo "==> rehearsal PASS — candidate 안전(trap이 곧 main 복원 · $NS 앱 파드 ${pods}건 위에서 판정)"

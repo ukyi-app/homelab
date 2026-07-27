@@ -90,11 +90,58 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "scan-floor fails loud (exit 2) when the scan finds too few images" {
+@test "scan-floor fails loud (exit 1) when the scan finds too few images" {
+  # ⚠️ 1이다 — 2는 CONTRIBUTING이 사용법/파싱 오류로 예약했고, scan-floor 클래스의 다른 가드는
+  # 전부 1이다. 여기만 2로 이탈해 있었다(같은 클래스에 두 코드 = 이 캠페인이 지우는 병).
   wf platform/x/deployment.yaml <<'EOF'
 image: nginx:1.0@sha256:abcdef
 EOF
   run bash "$CHK" --root "$REPO" --min-scan 99
+  [ "$status" -eq 1 ]
+}
+
+@test "the apps lane has its own scan-floor (an aggregate floor cannot see a small lane collapse)" {
+  # 실측 분해: platform 34건 · apps 2건. 합계 바닥값 20은 apps가 0이 돼도 34 >= 20이라 **원리적으로**
+  # 발화하지 않는다 — 그동안 apps 레인의 digest 핀 강제가 통째로 사라져도 초록이었다는 뜻이다.
+  wf platform/x/deployment.yaml <<'EOF'
+image: nginx:1.0@sha256:abcdef
+EOF
+  run bash "$CHK" --root "$REPO" --min-scan 1 --min-scan-apps 1
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "check-image-pins:apps" <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
+@test "the apps lane floor passes once the apps lane actually has an image to scan" {
+  wf platform/x/deployment.yaml <<'EOF'
+image: nginx:1.0@sha256:abcdef
+EOF
+  wf apps/orders/deploy/prod/values.yaml <<'EOF'
+image: { repo: ghcr.io/x/orders, digest: sha256:abcdef }
+EOF
+  run bash "$CHK" --root "$REPO" --min-scan 1 --min-scan-apps 1
+  [ "$status" -eq 0 ]
+}
+
+@test "a dead enumerator is a hard failure, not a silent zero-image scan" {
+  # `done < <(walk_scope …)` 프로세스 치환이 워커 실패를 삼키던 자리 — 이제 rc를 캡처한다.
+  wf platform/x/deployment.yaml <<'EOF'
+image: nginx:1.0@sha256:abcdef
+EOF
+  SHIM="$REPO/../shim-$$"; mkdir -p "$SHIM"
+  printf '#!/bin/sh\nexit 1\n' > "$SHIM/bun"; chmod +x "$SHIM/bun"
+  PATH="$SHIM:$PATH" run bash "$CHK" --root "$REPO" --min-scan 1
+  rm -rf "$SHIM"
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "열거 실패" <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
+@test "an unknown flag is still a usage error (exit 2), distinct from a scan-floor failure" {
+  # 두 코드가 각자 의미를 갖는다는 대조 — scan-floor를 1로 옮긴 뒤에도 2는 사용법 전용이다.
+  run bash "$CHK" --root "$REPO" --bogus-flag
   [ "$status" -eq 2 ]
 }
 

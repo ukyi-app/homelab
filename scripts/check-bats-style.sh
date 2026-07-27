@@ -9,6 +9,8 @@
 # 인자로 파일을 주면 그 파일만 스캔하고 NEG·BB 아무거나 있으면 실패(픽스처/ad-hoc 탐지 모드).
 # bash 3.2 호환: mapfile 금지(while read). shellcheck 클린.
 set -euo pipefail
+# shellcheck source=scripts/lib/scan-floor.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 BB_BASELINE="${BB_BASELINE_OVERRIDE:-53}"   # 현재 트리 중간 [[ ]] 수(B13.4 차트 bats 정비로 65→53). 신규 증가 차단, 0 수렴 목표.
@@ -16,7 +18,15 @@ FILES=()
 if [ "$#" -gt 0 ]; then FILES=("$@"); else
   while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.bats')
 fi
-[ "${#FILES[@]}" -gt 0 ] || { echo "SKIP: check-bats-style: 스캔 대상 *.bats 0건 — 단언 스타일 미평가"; exit 4; }
+# ⚠️ 기본 모드의 도메인(추적 *.bats — 현재 229건)은 **정당하게 0이 될 수 없다**: 0건은 열거 붕괴다.
+# 여기에 skip 규약(exit 4 + `SKIP:`)을 쓰면 같은 `git ls-files '*.bats'` 도메인을 쓰는
+# check-skeleton·check-bats-accounting(둘 다 바닥값 + exit 1)과 **정반대 신호**가 된다 —
+# 커널 주석(lib/scan-floor.sh)이 "마커를 내면 사람이 정반대 뜻으로 읽는다"고 금지한 채널 혼동이다.
+# 명시-파일 모드($# > 0)는 원소가 항상 ≥1이라 이 분기에 도달하지 않지만, 픽스처가 1건짜리로
+# 부를 수 있으므로 바닥값은 기본 모드에만 건다(선례: check-app-netpol의 --root 면제). 래칫 아님.
+if [ "$#" -eq 0 ]; then
+  scan_floor check-bats-style "${#FILES[@]}" "${BATS_STYLE_MIN_SCAN:-150}" || exit 1
+fi
 DETECT=""
 IFS='' read -r -d '' DETECT <<'AWK' || true
 function flush(){ if(pend!=""){ print pend; pend="" } }

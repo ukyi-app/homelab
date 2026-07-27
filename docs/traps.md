@@ -47,3 +47,5 @@
 | rollup 윈도 상한(라벨-값 상태 게이지는 W < `for:`) — bump phantom 오발화 + 우변 존재 가드 | gate | `tests/gates/vmalert-drift-firing-e2e.sh` |
 | bump-poll/** writer App 예약(인터록≠인증·R-46 수용 잔여·정적 가드=best-effort 변경감지기·Seam C 권위) | gate | `tests/gates/test_bump_poll_ruleset.bats` |
 | emptyDir sizeLimit vs 런타임 다운로드 페이로드(부팅↔evict 루프·DiskPressure=False·로그 파이프라인 연쇄) | gate | `platform/victoria-stack/prod/test_grafana_plugin_budget.bats` |
+| 열거 붕괴 → vacuous green(프로세스 치환 rc 미전파·커맨드 치환 stderr 삼킴·부정 카운트 rc=2) | gate+verify | `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `policy/ledger.rego`, `tests/test_ledger.bats` |
+| PreToolUse 훅 종료코드(0=허용·2=차단·그 외=비차단) — 1/4 복사 시 fail-open | local | `tests/gates/test_manifest-guard.bats` |
