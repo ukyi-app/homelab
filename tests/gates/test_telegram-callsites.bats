@@ -21,6 +21,7 @@ _create-app.yaml 1
 _create-database.yaml 1
 _create-cache.yaml 1
 _update-secrets.yaml 1
+_teardown-app.yaml 1
 create-app.yaml 0
 update-secrets.yaml 0
 create-database.yaml 0
@@ -49,6 +50,27 @@ EOF
   expected=$(printf '%s\n' "$EXPECTED" | awk '{ s += $2 } END { print s }')
   [ "$total" -eq "$expected" ]
   ! grep -rq "api.telegram.org" "$WF"   # raw curl 0 — 모든 인라인 curl이 액션으로 이행됨
+}
+
+@test "yq selector sees every grep-visible call site (positive control, self-deriving)" {
+  # 열거 붕괴 → vacuous green 차단. 아래 @test들은 yq 셀렉터 결과를 **부정 카운트로만** 판정해
+  # '위반 0'과 '아무것도 안 봤다'가 같은 초록이 된다(실측: 빈 출력 yq 셰임에서 5/5 ok).
+  # 더 중요한 건 **부분 실명**이다 — @test 1의 grep은 substring, 아래 yq는 `==`라 한 콜사이트만
+  # `telegram-notify/`(후행 슬래시)로 드리프트하면 grep은 세고 yq는 못 봐서 그 스텝의 계약 4건이
+  # 조용히 0건 평가된다(client_payload 신뢰 경계 포함). 실측: 그 상태로 run-bats 전량 rc=0이었다.
+  # yq 매치 수 == grep 리터럴 수 교차검증이 그 다리를 잇는다.
+  # ⚠️ 2>/dev/null·|| true 금지 — yq 하드 실패는 set -e로 여기서 죽어야 한다.
+  # ⚠️ 절대값 prebake 금지(@test 1과 같은 규율) — 양쪽 다 self-deriving.
+  yqn=0; gn=0
+  for f in "$WF"/*.yml "$WF"/*.yaml; do
+    [ -e "$f" ] || continue
+    n=$(yq -r '[.jobs[].steps[]? | select(.uses=="./.github/actions/telegram-notify")] | length' "$f")
+    yqn=$(( yqn + ${n:-0} ))
+    g=$(grep -c "uses: ./.github/actions/telegram-notify" "$f" || true)
+    gn=$(( gn + ${g:-0} ))
+  done
+  [ "$yqn" -gt 0 ]
+  [ "$yqn" -eq "$gn" ] || { echo "yq 매치 $yqn != grep 리터럴 $gn — 셀렉터가 콜사이트를 놓쳤다(아래 계약이 0건 평가된다)"; false; }
 }
 
 @test "every call site passes required with: keys (status, source, title, bot-token, chat-id)" {
