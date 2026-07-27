@@ -161,6 +161,17 @@ const SCOPES: Record<string, ScopeDef> = {
       /^(scripts\/((check|verify)-[^/]+|[^/]+-(guard|check))\.sh|tools\/(check|verify)-[^/]+\.ts|tests\/gates\/[^/]+\.sh)$/,
     exclude: [],
   },
+  // GHA 워크플로 — "이 레포에서 CI가 무엇을 실행하는가". 준비상태 회계(G-09)의 열거 대상.
+  // tracked 열거라 로컬 잔재(에디터 백업·워크트리)가 안 섞이고, 글롭이 깨지면 소비자 바닥값이 잡는다.
+  // ⚠️ 제외가 **비어 있는 게 맞다** — `_*.yaml`(내부 reusable)·`reusable-*.yaml`(cross-repo 계약)도
+  // 자기 job을 실행하므로 회계 대상이다. 이름으로 거르면 정확히 그 둘이 조용히 회계 밖으로 빠진다.
+  workflows: {
+    kind: "manifests",
+    source: "tracked",
+    root: ".github/workflows",
+    include: YAML_EXT,
+    exclude: [],
+  },
   // 앱 유닛. **필수 산출물로 거르지 않는다**(design-r1 R-1) — audit-orphans에겐 values.yaml 필터가
   // 맞지만 check-app-deploy는 그 파일의 **부재**를 잡아야 한다. 의미론적 필터는 소비자 쪽이다.
   // dir은 앱 루트(apps/<app>)다 — 소비자가 필요하면 /deploy/prod를 덧붙인다(컴포넌트 유닛과 동형).
