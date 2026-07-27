@@ -5,6 +5,15 @@
 # egress는 cloudflared 하나뿐이다. 공개 접근은 오직 Gateway homelab/gateway의
 # 'web-public' 리스너에 붙은 HTTPRoute로만 부여된다 — 이 서비스들은 그것을 가져선 안 된다.
 # LIVE: kubectl 컨텍스트 = M3가 sync된 k3s VM 필요.
+#
+# ⚠️ 아래 두 공개면 단언은 **부정 카운트=0** 형태다. 셀렉터가 도메인을 잃으면(Gateway 리스너 개명,
+# HTTPRoute CRD 그룹 이동, parentRef 드리프트, 네임스페이스 RBAC 축소) "위반 0"과 "아무것도 안 봤다"가
+# 같은 초록이 된다. 그래서 판정 전에 (a) 열거 바닥값과 (b) 술어 유효성 양성 대조를 둔다.
+# 실측: web-public 리스너에 붙은 rule 4건 · 그중 argocd 백엔드 1건 · grafana 백엔드 0건(영구).
+WEB_PUBLIC_RULES_MIN=3   # 현재 4건 — rule 1개 철거를 견딘다. 래칫 아님
+
+# web-public 리스너에 붙은 전체 rule 수(열거 바닥값의 분모).
+web_public_rules() { jq '[.items[]|select(any(.spec.parentRefs[]?;.sectionName=="web-public"))|.spec.rules[]?]|length'; }
 
 @test "servicelb LoadBalancer Services are exactly traefik + adguard-dns" {
   # adguard-dns LB는 R7 설계상 필수(LAN DHCP option 6 대상 — lan-dns 런북): servicelb가
@@ -22,6 +31,18 @@
   # matches 생략 시 Gateway API 기본값은 PathPrefix '/'(전면 노출)이므로 위반으로 센다.
   run kubectl get httproute -A -o json
   [ "$status" -eq 0 ]
+  routes="$output"
+  # (a) 열거 바닥값 — 셀렉터가 web-public 도메인을 잃으면 아래 count는 언제나 0이다.
+  scanned="$(web_public_rules <<<"$routes")"
+  [ "$scanned" -ge "$WEB_PUBLIC_RULES_MIN" ]
+  # (b) 양성 대조 — argocd 백엔드 rule이 실제로 1건(=argocd-webhook) 보여야 술어가 살아 있다는 증거다.
+  argocd_rules="$(jq '[
+      .items[]
+      | select(any(.spec.parentRefs[]?; .sectionName=="web-public"))
+      | .spec.rules[]?
+      | select(any(.backendRefs[]?; (.name // "") | startswith("argocd")))
+    ] | length' <<<"$routes")"
+  [ "$argocd_rules" -eq 1 ]
   count="$(jq '[
       .items[]
       | select(any(.spec.parentRefs[]?; .sectionName=="web-public"))
@@ -29,19 +50,33 @@
       | select(any(.backendRefs[]?; (.name // "") | startswith("argocd")))
       | (if (.matches // [] | length)==0 then ["/"] else (.matches | map(.path.value // "/")) end) as $paths
       | select(any($paths[]; . != "/api/webhook"))
-    ] | length' <<<"$output")"
+    ] | length' <<<"$routes")"
   [ "$count" = "0" ]   # /api/webhook 이외 경로로 argocd를 web-public에 노출하는 rule 0
 }
 
 @test "Grafana has no public HTTPRoute" {
+  # ⚠️ 이 단언은 라이브에서 단 한 번도 실질 평가된 적이 없다 — grafana rule이 영구 0이라
+  # 술어가 죽어도(백엔드 이름 규약 변경, 셀렉터 오타) 언제나 0/0 초록이다. 바닥값만으로는 부족하고
+  # **술어 자신이 어딘가에서는 매치한다**는 양성 대조가 필요하다.
   run kubectl get httproute -A -o json
   [ "$status" -eq 0 ]
+  routes="$output"
+  scanned="$(web_public_rules <<<"$routes")"
+  [ "$scanned" -ge "$WEB_PUBLIC_RULES_MIN" ]
+  # 양성 대조 — 같은 셀렉터(backendRefs 이름 접두 "grafana")가 리스너 무관하게 ≥1건 매치해야 한다.
+  # grafana는 web-internal-tls에 붙어 있다(internal-by-default의 의도된 상태).
+  grafana_any="$(jq '[
+      .items[]
+      | .spec.rules[]?
+      | select(any(.backendRefs[]?; (.name // "") | startswith("grafana")))
+    ] | length' <<<"$routes")"
+  [ "$grafana_any" -ge 1 ]
   count="$(jq '[
       .items[]
       | select(any(.spec.parentRefs[]?; .sectionName=="web-public"))
       | .spec.rules[]?
       | select(any(.backendRefs[]?; (.name // "") | startswith("grafana")))
-    ] | length' <<<"$output")"
+    ] | length' <<<"$routes")"
   [ "$count" = "0" ]   # grafana 백엔드는 web-public 리스너에 절대 없어야 한다(내부 전용)
 }
 
