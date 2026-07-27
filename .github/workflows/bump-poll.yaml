@@ -181,3 +181,35 @@ jobs:
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+  # ── 준비상태 회계 — 게이트 **밖**의 감시자 (G-09) ───────────────────────────────────────────
+  # 위 두 job은 `needs.preflight.outputs.*`에 걸려 있다. 자격이 비거나 **회전 중**이면 GitHub이 job을
+  # 통째로 skip하고 run은 초록으로 끝난다 — 그 job 안의 `if: failure()` 알림도 함께 skip되므로 신호가 0이다.
+  # 정확히 그 구간이 R-31이 겨냥한 위험 구간이다: 인가 회수(reconcile)가 조용히 멈추면 bump-poll/*의
+  # 무장된 PR이 낡은 머지 인가를 그대로 유지한다(회수는 가용성이 아니라 **보안 속성**).
+  # 심각도는 원장(policy/workflow-readiness.json)이 가른다 — reconcile=error(run red, 면제 불가) ·
+  # poll=warning(가용성이라 telegram만). ⚠️ `if: !cancelled()` 필수(위 tf-reconcile 주석과 동일 이유).
+  accounting:
+    needs: [preflight, reconcile, poll]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with: { ref: main } # 원장의 권위는 머지된 상태다
+      - uses: ./.github/actions/setup-bun
+      - id: acct
+        env:
+          WORKFLOW_NEEDS: ${{ toJSON(needs) }}
+        run: bun tools/check-workflow-readiness.ts --workflow bump-poll.yaml
+      - name: telegram notify (required 미실행 · 원장 불일치 시에만 — 선언된 갭은 제외)
+        if: always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ steps.acct.outcome == 'failure' && 'failure' || 'drift' }}
+          source: 준비상태
+          title: 워크플로 준비상태
+          ident: "bump-poll — 원장 대비 미실행/불일치"
+          body: ${{ steps.acct.outputs.body }}
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

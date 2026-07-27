@@ -48,6 +48,11 @@ jobs:
   iac-plan:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04-arm
+    # 스텝-레벨 게이트라 시크릿이 없으면 스텝만 skip되고 job은 success다 — 그 상태의 **빈 job summary**를
+    # 리뷰어가 "변경 없음"으로 오독한다(정보 부재가 정보로 읽힌다). 준비상태 회계(accounting job)가
+    # 볼 수 있는 유일한 신호가 이 승격이다.
+    outputs:
+      executed: ${{ steps.plan.outputs.executed }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       # 시크릿 부재(Phase 0 미완/외부 기여) 시 skip — 깨끗한 성공(required 아님).
@@ -78,12 +83,15 @@ jobs:
           root: cloudflare
           state-key: cloudflare/prod/terraform.tfstate
       - name: terraform plan → job summary
+        id: plan
         if: steps.pf.outputs.configured == 'true'
         env:
           TF_VAR_cloudflare_api_token: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
           TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
         run: |
+          # 준비상태 회계 신호 — 첫 줄에 둔다(실패는 이미 loud하다; 회계는 *조용한* 미실행만 잡는다).
+          echo "executed=true" >> "$GITHUB_OUTPUT"
           set +e
           terraform -chdir=infra/cloudflare plan -input=false -lock-timeout=120s -no-color \
             -detailed-exitcode -out=tf.plan > plan.txt 2>&1
@@ -115,6 +123,26 @@ jobs:
           plan: tf.plan
           allow: '^cloudflare_dns_record\.app\['
           allow_max: '1'
+
+  # ── 준비상태 회계 — 게이트 **밖**의 감시자 (G-09) ───────────────────────────────────────────
+  # iac-plan이 시크릿 부재로 스텝을 전부 skip하면 job은 success이고 summary만 비는데, 그 빈 summary가
+  # "변경 없음"으로 읽힌다. 이 job이 needs.iac-plan.outputs.executed를 봐 그 침묵을 red로 바꾼다.
+  # ⚠️ fork PR은 **구조적으로** 시크릿을 못 받는다 — 원장 면제가 아니라 트리거 경계라 여기서 제외한다
+  #    (원장에 넣으면 same-repo PR의 진짜 미설정까지 함께 면제된다). 판정은 `head.repo.fork`가 아니라
+  #    **head 레포 == 이 레포**로 한다: 시크릿 가용성을 정하는 것은 "PR이 같은 레포에서 왔는가"이고,
+  #    `.fork`는 *이 레포 자신이 어딘가의 fork인지*를 함께 참으로 만들어 회계를 통째로 끌 수 있다.
+  # ⚠️ `if: !cancelled()` 필수(tf-reconcile 회계 job 주석과 동일 이유).
+  accounting:
+    needs: [iac-plan]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: ./.github/actions/setup-bun
+      - env:
+          WORKFLOW_NEEDS: ${{ toJSON(needs) }}
+        # telegram 없음 — PR 컨텍스트라 red 체크 자체가 사람이 보는 신호다(매 PR 알림은 소음이 된다).
+        run: bun tools/check-workflow-readiness.ts --workflow iac.yaml
 
   # ── push-to-main: cloudflare 루트 plan→apply (R2 state) ─────────────────────────────
   apply:
