@@ -21,6 +21,8 @@
 # bash 3.2 호환: `cmd && x`(set -e 함정)·mapfile·[[ ]] 금지 — if-블록·for로. yq는 버전차 함정이라 값 추출은 sed/grep으로.
 # 현재 인레포 앱(page·trip-mate-api)은 각 봉인본 1개 — 앱당 <app>-secrets.sealed.yaml 단일 규약.
 set -euo pipefail
+# shellcheck source=scripts/lib/scan-floor.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCHEMA="$ROOT/tools/app-deploy-schema.json"
 required="$(jq -r '.required[]' "$SCHEMA")"   # 개행구분 → for 워드분할
@@ -106,11 +108,16 @@ else
   # 열거는 공유 워커의 `apps` 유닛 스코프가 소유한다. ⚠️ 그 스코프는 **필수 산출물로 거르지 않는다** —
   # 이 게이트가 잡아야 할 게 정확히 그 부재이기 때문이다(design-r1 R-1). deploy/prod 미존재는
   # 기존 `[ -d ]` 스킵과 동일하게 여기서 처리한다(행위 보존).
+  # ⚠️ 열거를 **변수로** 받는다 — 프로세스 치환은 워커 실패를 set -e로 전파하지 않아, bun이 죽으면
+  # 배포 계약 5개 조항 전부가 0건 평가된 채 `OK`가 찍혔다(라이브 재현). 현재 앱 2개 — 래칫 아님.
+  units="$(scan_enumerate check-app-deploy bun "$(dirname "$0")/../tools/lib/repo-walk.ts" --units apps --root "$ROOT")" || exit 1
+  scanned="$(scan_count "$units")"
+  scan_floor check-app-deploy "$scanned" "${APP_DEPLOY_MIN_SCAN:-1}" || exit 1
   while IFS= read -r u; do
     [ -n "$u" ] || continue
     [ -d "$u/deploy/prod" ] || continue
     check_one "$u/deploy/prod"
-  done < <(bun "$(dirname "$0")/../tools/lib/repo-walk.ts" --units apps --root "$ROOT")
+  done <<< "$units"
 fi
 
 if [ "$rc" -eq 0 ]; then echo "check-app-deploy: 배포 계약(필수 산출물 + 봉인 배선 all-or-none + checksum 정합 + strict scope + 파일명 규약) OK"; fi

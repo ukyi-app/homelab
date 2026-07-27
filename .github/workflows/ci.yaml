@@ -58,7 +58,9 @@ jobs:
           gitleaks detect --no-git --source . --redact --no-banner --exit-code 1
       - name: sops-guard — 추적된 모든 *.enc.yaml 구조 검증
         # 평문 *.enc.yaml(또는 부분 암호화)을 차단. gate는 setup-toolchain에서 yq를 이미 설치했다.
-        run: git ls-files '*.enc.yaml' | xargs -r scripts/sops-guard.sh
+        # 무인자 = 가드가 자기 도메인을 열거하고 바닥값을 건다. 예전의 `git ls-files … | xargs -r`는
+        # 글롭이 깨지면 스크립트를 **아예 호출하지 않아** 이 스텝이 조용히 초록이었다.
+        run: bash scripts/sops-guard.sh
       - name: chart render + validate (all kinds)
         run: make chart-test
       - name: memory ledger onboarding gate (M0-owned)
