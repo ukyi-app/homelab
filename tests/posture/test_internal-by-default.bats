@@ -9,8 +9,13 @@
 # ⚠️ 아래 두 공개면 단언은 **부정 카운트=0** 형태다. 셀렉터가 도메인을 잃으면(Gateway 리스너 개명,
 # HTTPRoute CRD 그룹 이동, parentRef 드리프트, 네임스페이스 RBAC 축소) "위반 0"과 "아무것도 안 봤다"가
 # 같은 초록이 된다. 그래서 판정 전에 (a) 열거 바닥값과 (b) 술어 유효성 양성 대조를 둔다.
-# 실측: web-public 리스너에 붙은 rule 4건 · 그중 argocd 백엔드 1건 · grafana 백엔드 0건(영구).
-WEB_PUBLIC_RULES_MIN=3   # 현재 4건 — rule 1개 철거를 견딘다. 래칫 아님
+# 실측: web-public rule 4건 = **플랫폼 2건**(argocd/argocd-webhook · files/files-public) +
+# 앱 2건(prod/page · prod/trip-mate-api) · 그중 argocd 백엔드 1건 · grafana 백엔드 0건(영구).
+# ⚠️ 앱 rule은 분모에 넣지 않는다 — 공유 차트의 `route.public` 기본값이 false라 앱은 teardown 없이도
+# 0이 될 수 있다(이 파일이 단언하는 internal-by-default가 곧 앱의 기본 상태다). 바닥값이 앱 개수에
+# 결합되면 "앱을 전부 내부로 돌렸다"가 "열거 붕괴"와 같은 red가 된다(적대 검토 실측 — 라이브 셰임으로
+# 재현). 붕괴는 0으로 떨어지는 사건이라 플랫폼 2건만으로도 전부 잡힌다.
+WEB_PUBLIC_RULES_MIN=2   # 레포에 고정된 플랫폼 소유 2건이 불변식. 앱 rule은 그 위 헤드룸. 래칫 아님
 
 # web-public 리스너에 붙은 전체 rule 수(열거 바닥값의 분모).
 web_public_rules() { jq '[.items[]|select(any(.spec.parentRefs[]?;.sectionName=="web-public"))|.spec.rules[]?]|length'; }

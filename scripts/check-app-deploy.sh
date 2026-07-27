@@ -17,7 +17,8 @@
 # 붕괴(암호문 재사용). patch 어노테이션은 scope 아니라 통과. 또 앱 배포 디렉토리 봉인본은
 # <app>-secrets.sealed.yaml 하나만 허용(규약 외 *.sealed.yaml 거부).
 #
-# 인자로 deploy/prod 디렉토리들을 받으면 그것만, 없으면 apps/*/deploy/prod 전체를 검사(인레포 앱 0개면 vacuous).
+# 인자로 deploy/prod 디렉토리들을 받으면 그것만, 없으면 apps/*/deploy/prod 전체를 검사
+# (인자 없는 기본 모드에서 앱 열거 0건은 scan-floor로 **실패** — vacuous 아님).
 # bash 3.2 호환: `cmd && x`(set -e 함정)·mapfile·[[ ]] 금지 — if-블록·for로. yq는 버전차 함정이라 값 추출은 sed/grep으로.
 # 현재 인레포 앱(page·trip-mate-api)은 각 봉인본 1개 — 앱당 <app>-secrets.sealed.yaml 단일 규약.
 set -euo pipefail
