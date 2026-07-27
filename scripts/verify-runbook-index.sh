@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # 런북 인덱스 드리프트 로컬 가드 — docs/runbooks/(gitignored)에 .md가 있으면 AGENTS.md 런북 인덱스와 일치.
-# 런북은 비공개 로컬이라 CI/repo엔 부재 → skip(required gate 아님). cf. verify-runbooks=DR bats 러너(별도, 불변).
+# 런북은 비공개 로컬이라 CI/repo엔 부재 → **SKIP 신호**(exit 4 + `SKIP:` 마커, CONTRIBUTING 규약).
+# exit 0이면 "인덱스를 실제로 대조했고 정합"이라는 뜻이다 — 부재로 건너뛴 것과 절대 같은 코드를 쓰지 않는다.
+# cf. verify-runbooks=DR bats 러너(별도, 불변).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RB="$ROOT/docs/runbooks"
 shopt -s nullglob
 files=("$RB"/*.md)
-if [ ${#files[@]} -eq 0 ]; then echo "verify-runbook-index: 런북 부재(gitignored 로컬) — skip"; exit 0; fi
+if [ ${#files[@]} -eq 0 ]; then echo "SKIP: verify-runbook-index: docs/runbooks/*.md 0건(gitignored 로컬 전용) — 인덱스 정합 미평가"; exit 4; fi
 fail=0
 for f in "${files[@]}"; do
   b="$(basename "$f")"

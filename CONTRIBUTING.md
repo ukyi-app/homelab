@@ -42,8 +42,40 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
   스텝은 **한 줄**이 됐다(F-1). 이관 원칙은 계약도 함께 옮기는 것이다: 워크플로 게이트가 강제하던
   실행 증인(순서·레인 verbatim·격리·소유권)은 러너 스위트로 가고, 워크플로엔 **경계**만 남는다
   (그 스텝의 명령이 러너 호출 하나뿐 — 남기지 않으면 계약이 조용히 증발한다).
-- **종료코드 규약(tools 공통)** — `tools/lib/cli.ts` 주석이 SSOT: 0=성공 · 1=검증/게이트 실패 ·
-  2=사용법/플래그 파싱 · 3=race.
+- **종료코드 규약(가드·도구 공통)** — `tools/lib/cli.ts` 주석이 SSOT: 0=성공 · 1=검증/게이트 실패 ·
+  2=사용법/플래그 파싱 · 3=race · **4=skip**(도메인 부재 — 아래 절).
+
+### 가드 skip 신호 — `exit 4` + `SKIP:` 마커
+
+**병.** 가드가 "검사할 도메인이 없어서 건너뜀"과 "검사했고 통과함"을 **둘 다 exit 0**으로 냈다.
+호출자·CI·사람 누구도 구별할 수 없으니 가드가 실제 실행 경로를 잃어도 전 게이트가 초록이다.
+실측: `scripts/verify-runbook-index.sh`는 `docs/runbooks/`가 gitignored라 CI에서 무조건 skip이었고,
+그 bats 래퍼는 `[ "$status" -eq 0 ]`만 단언했다 — **skip 경로가 그 단언을 만족**했다.
+
+**규약.**
+- 도메인 부재로 불변식을 평가하지 못하면 `SKIP: <가드>: <이유>`를 stdout에 내고 **exit 4**.
+- 마커와 `exit 4`는 **같은 줄**에 둔다. 짝을 정적으로 검증할 수 있게 하려는 제약이다
+  (`tests/gates/test_guard-skip-signalling.bats`가 강제 — mutation 테스트로 load-bearing 실측).
+- 평가한 실행은 마커를 내지 않는다: 0=평가·통과, 1=평가·실패.
+- 각 가드의 bats 래퍼는 **두 갈래를 각각 단언**한다. `[ "$status" -eq 0 ]` 하나만 두면 skip이
+  그 단언을 만족해 래퍼가 vacuous해진다. 도메인을 주입할 시임(픽스처 트리·`RUNBOOK_DIR` 같은
+  변수 오버라이드)이 없으면 만들어서 두 갈래를 실증한다.
+
+**왜 마커만으로 끝내지 않는가.** stdout 마커만 두면 기본 종료코드가 여전히 0이라 이 규약을 모르는
+호출자에게는 병이 그대로 남는다. 4는 `set -e`·make·CI에서 저절로 드러난다. 실제로
+`scripts/netpol-rehearsal.sh`는 candidate NetworkPolicy를 적용한 뒤 `make verify-posture`로 검증하는데,
+skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS를 찍을 수 있었다**.
+
+**왜 2를 재사용하지 않는가.** 2는 사용법/파싱 오류다. `scripts/secret-cert-check.sh`가 skip에 2를
+쓰고 있었는데 같은 파일이 unknown-option에도 2를 쓴다 — 한 코드에 두 의미였다. 4로 갈랐다.
+
+**make 계층 예외.** GNU make는 recipe 종료코드를 자기 Error 2로 뭉갠다. `make verify-posture` 같은
+가드 타깃은 recipe에서 `exit 4`를 내지만 make 프로세스는 2로 끝난다 — 이 계층에서 관측 가능한 신호는
+**마커 + 비-0**까지다(원래 코드는 make의 `Error 4` 메시지에만 남는다).
+
+**적용 범위 = 가드 진입점.** 집계자(`make ci`·`make verify`)는 대상이 아니다. 자식을 조건부로
+건너뛰는 것은 도메인 부재가 아니라 실행처 선택이고(`make ci`의 docker 분기는 gate가 실제로 평가한다),
+집계자가 4를 내면 push 전 진입점이 못 쓰게 된다.
 
 ## 커밋 메시지 (한국어 conventional commits)
 `type: 설명` — type ∈ `feat | fix | refactor | style | docs | test | chore`.

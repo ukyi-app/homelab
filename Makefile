@@ -32,6 +32,7 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@bash scripts/check-app-deploy.sh
 	@bun tools/check-resource-limits.ts
 	@bun tools/check-alert-rules.ts
+	@bun tools/check-guard-authority.ts
 	@bash scripts/check-app-netpol.sh
 	@bash scripts/check-image-pins.sh
 	@scripts/verify-ledger.sh
@@ -110,31 +111,43 @@ ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate'를 �
 reset-pg-archive: ## [DR ④] R2 serverName pg 아카이브 정리(재구축 후 아카이빙 재개). 기본 dry-run; 실제 정리는 ARGS=--purge
 	@scripts/reset-pg-r2-archive.sh $(ARGS)
 
+# --- 도메인 부재 시 SKIP 신호를 내는 가드 진입점 ---
+# 규약(CONTRIBUTING '가드 skip 신호'): 도메인이 없으면 `SKIP: <타깃>: <이유>` 마커 + recipe exit 4.
+# ⚠️ GNU make는 recipe 종료코드를 자기 Error 2로 뭉갠다 — make 계층에서 관측 가능한 신호는 **마커 + 비-0**이다.
+#
+# 아래 3쌍(전제 · 대상 스위트)은 **테스트 시임**이다 — 게이트가 skip 갈래와 평가 갈래를 둘 다 실증하려면
+# 도메인을 주입할 수 있어야 한다. 시임 없이 skip 갈래만 단언하면 "무조건 skip"인 죽은 타깃이 통과한다
+# (실측: `@if false; then`으로 바꿔도 전 테스트가 초록이었다 — 이 티켓이 잡으려던 바로 그 병).
+# ⚠️ `?=`가 아니라 `:=` — `?=`면 환경변수가 새어 들어와 스위트가 환경 의존이 된다(실측: RUNBOOK_DIR을
+#   export한 셸에서 test_make-runbooks가 red). `:=`도 명령행 오버라이드(`make X=…`)는 그대로 받는다.
+RUNBOOK_DIR   := docs/runbooks
+POSTURE_BATS  := tests/posture/test_*.bats
+KSOPS_BATS    := platform/cnpg/prod/test_creds_reference.bats \
+                 platform/cnpg/prod/test_drill_alerting.bats \
+                 platform/cnpg/prod/test_kustomize_build.bats \
+                 platform/cache/prod/test_ksops_render.bats
+
 .PHONY: verify-runbooks
-verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored 로컬 전용, CI 미배선)
-	@if [ -d docs/runbooks ] && ls docs/runbooks/*.bats >/dev/null 2>&1; then \
-	  bats docs/runbooks/*.bats; \
-	else echo "verify-runbooks: docs/runbooks/*.bats 없음(로컬 전용 — 러너/fresh checkout엔 부재)"; fi
+verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored 로컬 전용, CI 미배선). 부재=SKIP
+	@if [ -d "$(RUNBOOK_DIR)" ] && ls $(RUNBOOK_DIR)/*.bats >/dev/null 2>&1; then \
+	  bats $(RUNBOOK_DIR)/*.bats; \
+	else echo "SKIP: verify-runbooks: $(RUNBOOK_DIR)/*.bats 0건(gitignored 로컬 전용) — 런북 회귀 미평가"; exit 4; fi
 
 .PHONY: verify-runbook-index
-verify-runbook-index: ## [local] 런북 인덱스↔docs/runbooks 정합(gitignored라 CI skip — verify-runbooks와 별개)
+verify-runbook-index: ## [local] 런북 인덱스↔docs/runbooks 정합(런북 부재=SKIP — verify-runbooks와 별개)
 	@bash scripts/verify-runbook-index.sh
 
 .PHONY: verify-posture
-verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 필요(없으면 skip)
+verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 부재=SKIP
 	@if [ -f "$(KUBECONFIG_LIVE)" ]; then \
-	  KUBECONFIG=$(KUBECONFIG_LIVE) bats tests/posture/test_*.bats; \
-	else echo "verify-posture: $(KUBECONFIG_LIVE) 없음 — 라이브 클러스터 필요(skip). 먼저 make up"; fi
+	  KUBECONFIG=$(KUBECONFIG_LIVE) bats $(POSTURE_BATS); \
+	else echo "SKIP: verify-posture: $(KUBECONFIG_LIVE) 부재 — 라이브 posture 미평가. 먼저 make up"; exit 4; fi
 
 .PHONY: verify-ksops
-verify-ksops: ## [local] KSOPS 렌더 bats(cnpg×3·cache×1) — 실 age 키 있으면 실행/없으면 skip(.ci-exclude 그룹)
+verify-ksops: ## [local] KSOPS 렌더 bats(cnpg×3·cache×1) — 실 age 키 있으면 실행/부재=SKIP(.ci-exclude 그룹)
 	@if [ -f "$(SOPS_AGE_KEY_FILE)" ]; then \
-	  SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) bats \
-	    platform/cnpg/prod/test_creds_reference.bats \
-	    platform/cnpg/prod/test_drill_alerting.bats \
-	    platform/cnpg/prod/test_kustomize_build.bats \
-	    platform/cache/prod/test_ksops_render.bats; \
-	else echo "verify-ksops: $(SOPS_AGE_KEY_FILE) 없음 — 실 age 키 필요(skip). SOPS_AGE_KEY_FILE 지정 후 재실행"; fi
+	  SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) bats $(KSOPS_BATS); \
+	else echo "SKIP: verify-ksops: $(SOPS_AGE_KEY_FILE) 부재 — KSOPS 렌더 미평가. SOPS_AGE_KEY_FILE 지정 후 재실행"; exit 4; fi
 
 .PHONY: verify-traps
 verify-traps: ## docs/traps.md 함정 원장의 guard 경로가 실재하는지(enforced 드리프트 차단)
