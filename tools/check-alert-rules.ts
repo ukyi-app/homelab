@@ -106,6 +106,9 @@ const RULES_DIR = RULES_ROOT;
 const DENYLIST = "policy/alert-instance-stability-denylist.txt";
 const ALLOWLIST = "policy/alert-instance-stability-allowlist.txt";
 const MIN_SCAN = 30;   // 실 룰 41건(40 alert + 1 record) — 셀렉터 붕괴 false-green 차단
+// denylist 항목 바닥값 — 파일이 남아 있는데 **내용만** 비거나 주석만 남는 부분 드리프트를 잡는다
+// (필수 읽기는 파일 부재만 잡는다). 실 원장 1항목 — 이 목록은 줄어들 이유가 없다. 래칫 아님.
+const MIN_DENY = 1;
 
 // rollup(range) 함수 — 이들만 시계열 첫 샘플을 "0에서 증가"로 취급할 수 있다.
 const ROLLUP = "increase|increase_pure|increase_prometheus|rate|rate_prometheus|irate|delta|idelta|deriv|resets|changes";
@@ -204,9 +207,19 @@ const DEFAULT_REGISTRY: PushEntry[] = [
 
 function fatal(msg: string): never { console.error(`FAIL: ${msg}`); process.exit(1); }
 
+// ⚠️ 정책 파일은 **필수 읽기**다. 옛 `existsSync(p) ? … : []` 폴백은 파일 부재/이동/오타 경로를
+// "항목 0개"로 위장했다. denyMetrics가 비면 모드 A의 `denyMetrics.find(...)`가 상시 미스라
+// `continue`로 빠지고, 성공 메시지는 여전히 "모드 A/B/C 위반 0"이라며 **검사했다고 주장한다**.
+// 적대 검토가 A/B 대조로 실측: 같은 위반 룰을 둔 채 denylist 파일만 치우면 rc 1 → 0, stderr 0줄.
+// 모드 A가 지키는 것은 라이브에서 4회 재발한 instance 라벨 churn phantom-increase다(denylist 헤더 참조).
+// allowlist는 부재 시 면제 0 = 더 엄격(fail-closed)이라 성격이 다르지만, **부재 자체는 양쪽 다 드리프트**다.
 function readList(rel: string): string[] {
   const p = `${ROOT}/${rel}`;
-  return existsSync(p) ? readFileSync(p, "utf8").split("\n") : [];
+  try {
+    return readFileSync(p, "utf8").split("\n");
+  } catch (e) {
+    fatal(`정책 파일 읽기 실패(${rel}) — 검사 불가(이 자리가 0건 검사 후 초록이 되던 곳이다): ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 // 문자열 리터럴 내부를 같은 길이의 채움문자로 마스킹 — 괄호/연산자 구조 스캔이 라벨 값에 속지 않게.
@@ -558,6 +571,9 @@ function rollupWindow(s: string, metricPos: number, metricLen: number, owner: { 
 }
 
 const denyMetrics = readList(DENYLIST).map((l) => l.split("#", 1)[0].trim()).filter(Boolean);
+if (denyMetrics.length < MIN_DENY) {
+  fatal(`denylist 항목 ${denyMetrics.length}건 < ${MIN_DENY}(${DENYLIST}) — 열거 붕괴 의심(모드 A가 통째로 무발화한다)`);
+}
 
 // ── 레지스트리 로드 + 완전성 가드(모드 C 전처리) ──
 function loadRegistry(): PushEntry[] {
