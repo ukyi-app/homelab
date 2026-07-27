@@ -65,6 +65,13 @@ fixture_suite() {   # $1: 하위 디렉토리명
   echo "$output" | grep -q "skip 종료코드인데 SKIP 마커 없음"
 }
 
+# 주석줄 제외 규칙의 커버 — 규약을 설명하는 산문이 곳곳에 있어서 이 규칙이 없으면 전부 오탐이다.
+@test "a marker inside a shell comment line is not a violation" {
+  printf '%s\n' '# echo "SKIP: fake: 규약을 설명하는 주석일 뿐"' 'true' > "$BATS_TEST_TMPDIR/cmt.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/cmt.sh"
+  [ "$status" -eq 0 ]
+}
+
 @test "a Makefile help tail mentioning SKIP is not a false positive" {
   printf '%s\n' 'verify-x: ## [local] 도메인 부재면 SKIP: 신호' '	@true' > "$BATS_TEST_TMPDIR/Makefile"
   run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/Makefile"

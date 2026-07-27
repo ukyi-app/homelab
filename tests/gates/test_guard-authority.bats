@@ -124,7 +124,8 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - run: |
-          # scripts/check-orphan.sh 는 여기서 부르지 않는다(주석일 뿐)
+          #scripts/check-orphan.sh 는 여기서 부르지 않는다(주석일 뿐 — 공백 없는 형태라야
+          # commandHeads 토큰화가 아니라 stripComment이 load-bearing이 된다)
           true
 YAML
   rm "$FIX/scripts/check-real.sh" "$FIX/scripts/check-mirrored.sh"

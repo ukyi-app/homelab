@@ -53,10 +53,19 @@ scan_one() {
       if (ISMK) sub(/##.*$/, "", line)
       if (ISTS) hasExit = (line ~ /process\.exit\(4\)/)
       else      hasExit = (line ~ /exit 4([^0-9]|$)/)
-      # 마커 쪽은 **낼 때**만 짝을 요구한다 — 출력 동사가 있어야 emission이다. 없으면 그건 마커를
-      # 다루는 코드(정규식·패턴 상수)이지 skip 신호가 아니다. 이 구분이 없으면 규약을 구현하는
+      # 마커 쪽은 **낼 때**만 짝을 요구한다: 출력 동사가 있고, 마커가 **문자열 리터럴 안**에 있어야
+      # emission이다. 둘 다 없으면 그건 마커를 *다루는* 코드(정규식 상수)이지 skip 신호가 아니다.
+      # 실측으로 두 번 좁혔다 — 동사만 요구했을 때 `const SKIP_EMISSION = /(echo|…)…SKIP: …/`가
+      # 자기 규칙에 걸렸다(정규식 리터럴은 `/…/`라 따옴표가 없다). 이 구분이 없으면 규약을 구현하는
       # 파일마다 자기 자신을 제외 목록에 넣어야 하고, 그 목록이 곧 아무도 대조하지 않는 주장이 된다.
-      hasMark = (line ~ /SKIP:/ && line ~ /(echo|printf|console\.log)/)
+      hasMark = 0
+      mi = index(line, "SKIP:")
+      if (mi > 0 && line ~ /(echo|printf|console\.log)/) {
+        pre = substr(line, 1, mi - 1)
+        # \042=쌍따옴표 \047=홑따옴표. ⚠️ 이 주석에 홑따옴표 문자를 쓰면 awk 프로그램을 감싼
+        # 셸 인용이 거기서 끊긴다(실측: 그 한 글자로 스크립트 전체가 문법 오류가 됐다).
+        if (index(pre, "\042") > 0 || index(pre, "\047") > 0) hasMark = 1
+      }
       if (hasExit && !hasMark) print F":"FNR": skip 종료코드인데 SKIP 마커 없음: "$0
       if (hasMark && !hasExit) print F":"FNR": SKIP 마커인데 skip 종료코드 아님: "$0
     }

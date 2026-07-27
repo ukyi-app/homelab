@@ -143,15 +143,22 @@ const SCOPES: Record<string, ScopeDef> = {
   // 제외 규칙을 두지 않는다** — include의 `[^/]+`가 이미 하위 디렉토리를 못 넘는다. 처음엔 명시
   // 제외를 뒀다가 mutation(규칙 삭제 → red여야 함)이 초록이라 죽은 규칙임이 드러나 지웠다.
   // 지키는 것 없는 규칙을 남기면 그게 곧 "아무도 대조하지 않는 주장"이다.
-  // 접두 규약(`check-`/`verify-`)이 곧 필터다 — 규약 밖 이름은 열거되지 않으므로, 새 가드는 규약을
-  // 따르거나 이 스코프를 고쳐야 한다.
+  // ⚠️ **이름 규약은 프록시이고, 강제되지 않는다.** 규약 밖 이름의 새 가드는 조용히 열거에서 빠진다 —
+  // 이 스코프가 아는 것은 "이 레포가 가드에 쓰는 이름 모양"뿐이다. 실제 성질(불변식을 판정하고
+  // 비-0으로 막는가)로 열거하려면 실행 관측이 필요하고 그건 후속(티켓 08)이다.
+  // 최소 방어로 `test_repo-walk.bats`에 **역방향 단언**을 둔다: 규약 모양의 추적 파일은 반드시 열거된다
+  // (정방향만 두면 include가 좁아져도 "규약 밖 0건"은 계속 참이라 통과한다 — 실제로 그렇게 뚫렸다).
   guards: {
     kind: "manifests",
     source: "tracked",
     root: "",
     // `tools/`도 `scripts/`와 **같은 접두 쌍**을 받는다 — 비대칭이면 `tools/verify-*.ts`가 조용히
     // 회계 밖에 남는다(실측: `tools/verify-db-marker.ts`가 그렇게 빠져 있었다).
-    include: /^(scripts\/(check|verify)-[^/]+\.sh|tools\/(check|verify)-[^/]+\.ts|tests\/gates\/[^/]+\.sh)$/,
+    // 접두(`check-`/`verify-`)뿐 아니라 **접미(`-guard.sh`/`-check.sh`)도 받는다** — 레포가 실제로
+    // 쓰는 가드 이름 모양이 둘이다. 접두만 보던 동안 `sops-guard.sh`(ci.yaml required 스텝)와
+    // `secret-cert-check.sh`(skip 규약 대상)가 회계 밖에 있었다(리뷰 실측).
+    include:
+      /^(scripts\/((check|verify)-[^/]+|[^/]+-(guard|check))\.sh|tools\/(check|verify)-[^/]+\.ts|tests\/gates\/[^/]+\.sh)$/,
     exclude: [],
   },
   // 앱 유닛. **필수 산출물로 거르지 않는다**(design-r1 R-1) — audit-orphans에겐 values.yaml 필터가

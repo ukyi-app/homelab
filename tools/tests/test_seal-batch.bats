@@ -108,6 +108,25 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | grep -qiE "preflight|중단|offline-ok"
 }
 
+# exit 4(미평가) ↔ 그 외(stale 등)를 **보고에서 구별**하는지. 이 구별이 새 종료코드 4를 도입한
+# 근거였는데 단언이 없어, `p.status === 4`를 `false`로 바꿔도 전 테스트가 초록이었다(리뷰 mutation).
+# 대처가 갈리기 때문에 중요하다 — 전자는 클러스터 접근 복구, 후자는 cert 갱신/키 복원.
+@test "preflight distinguishes skip (exit 4) from a real stale verdict (exit 1)" {
+  export ADGUARD_PASSWORD="p1"
+  # (a) 오프라인 = fetch 실패 → secret-cert-check exit 4 → '미평가'로 보고
+  printf '#!/bin/sh\ncase "$*" in *--fetch-cert*) exit 1;; *) cat;; esac\n' > "$TMP/bin/kubeseal"; chmod +x "$TMP/bin/kubeseal"
+  PATH="$TMP/bin:$PATH" run bun tools/seal-batch.ts --only adguard-auth --cert "$TMP/certA.pem" --out-dir "$TMP"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "미평가"
+
+  # (b) stale = 라이브 cert가 커밋본과 다름 → secret-cert-check exit 1 → '실패(stale' 로 보고
+  openssl req -x509 -newkey rsa:2048 -keyout /dev/null -out "$TMP/certB.pem" -days 1 -nodes -subj "/CN=b" 2>/dev/null
+  printf '#!/bin/sh\ncase "$*" in *--fetch-cert*) cat %s;; *) cat;; esac\n' "$TMP/certB.pem" > "$TMP/bin/kubeseal"; chmod +x "$TMP/bin/kubeseal"
+  PATH="$TMP/bin:$PATH" run bun tools/seal-batch.ts --only adguard-auth --cert "$TMP/certA.pem" --out-dir "$TMP"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "stale"
+}
+
 @test "break-glass --offline-ok proceeds despite an offline preflight" {
   export ADGUARD_PASSWORD="p1"
   printf '#!/bin/sh\ncase "$*" in *--fetch-cert*) exit 1;; *) printf "apiVersion: bitnami.com/v1alpha1\\nkind: SealedSecret\\nmetadata:\\n  name: STUB\\nspec:\\n  encryptedData:\\n    STUB: xxx\\n";; esac\n' > "$TMP/bin/kubeseal"; chmod +x "$TMP/bin/kubeseal"

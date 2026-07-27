@@ -56,9 +56,11 @@ const GATE_JOB = "gate";
 //      유일한 권위다. 01이 06의 선행 티켓인 이유가 정확히 이것이다.
 // 그 외는 mirror다(폴백이 default-deny로 뒤집힌다). `make verify`·`make ci`는 규약을 쓰는 가드를
 // 부르지 않으므로 자동으로 mirror가 된다 — 이름을 적어둘 필요가 없다.
-// ⚠️ 앞에 공백을 요구하면 안 된다 — 실제 마커는 `echo "SKIP: verify-runbook-index: …"`처럼
-// **따옴표 뒤**에 온다(요구했다가 skipGuards가 0건이 됐다).
-const SKIP_MARKER = /SKIP: [a-z0-9-]+:/;
+// ⚠️ 마커를 **내는** 줄만 센다(출력 동사 필요). 두 번 틀렸던 자리다:
+//   · 앞에 공백을 요구했다가 skipGuards가 0건 — 실제 마커는 `echo "SKIP: …"`처럼 따옴표 뒤에 온다.
+//   · 출력 동사를 안 보다가 이 파일 자신의 **정규식 상수**가 마커로 잡혀 `make verify`가 권위로
+//     승격됐다(규약을 다루는 코드 ≠ 규약을 쓰는 가드).
+const SKIP_EMISSION = /(echo|printf|console\.log)[^\n]*SKIP: [a-z0-9-]+:/;
 
 // 명령 세그먼트의 '실행 대상'을 찾을 때 건너뛰는 실행 동사·래퍼.
 const EXEC_VERBS = new Set([
@@ -225,7 +227,7 @@ export function collectVenues(root: string, guards: { path: string; text: string
   const venues: Venue[] = [];
   const workflowText: string[] = [];   // 워크플로 `run:` 텍스트만 — make 호출 판정용(bats 제외)
   // skip 신호 규약을 쓰는 가드 = 도메인이 CI에 없을 수 있다고 스스로 선언한 가드.
-  const skipGuards = guards.filter((g) => SKIP_MARKER.test(g.text)).map((g) => g.path);
+  const skipGuards = guards.filter((g) => SKIP_EMISSION.test(g.text)).map((g) => g.path);
 
   // ① ci.yaml의 gate job — 유일한 required check.
   const ciPath = `${root}/${CI_WORKFLOW}`;
@@ -275,7 +277,7 @@ export function collectVenues(root: string, guards: { path: string; text: string
     if (!text) continue;
     const authoritative =
       ciInvoked.has(t) ||                                  // ① 워크플로가 실제로 부른다
-      SKIP_MARKER.test(text) ||                            // ② recipe 자신이 skip 규약을 쓴다
+      SKIP_EMISSION.test(text) ||                          // ② recipe 자신이 skip 규약을 쓴다
       skipGuards.some((g) => text.includes(g));            //   또는 규약을 쓰는 가드를 부른다
     venues.push({ id: `make:${t}`, kind: authoritative ? "owner-local" : "mirror", text });
   }

@@ -186,7 +186,7 @@ apps/probe" ]
 # 역방향 — 규약 접두를 가진 추적 파일은 **반드시** 열거돼야 한다. 정방향만 두면 include가 좁아져도
 # "규약 밖 파일 0건"은 계속 참이라 통과한다(실측: tools 쪽이 check-만 받아 verify-db-marker.ts가 빠져 있었다).
 @test "guards enumerates every tracked file that follows the naming convention" {
-  run walk 'const got=new Set(walkManifests("guards").map(e=>e.path)); const {execFileSync}=require("node:child_process"); const want=execFileSync("git",["ls-files"],{encoding:"utf8"}).split("\n").filter(p=>/^(scripts\/(check|verify)-[^/]+\.sh|tools\/(check|verify)-[^/]+\.ts|tests\/gates\/[^/]+\.sh)$/.test(p)); console.log(want.filter(p=>!got.has(p)).join(","))'
+  run walk 'const got=new Set(walkManifests("guards").map(e=>e.path)); const {execFileSync}=require("node:child_process"); const want=execFileSync("git",["ls-files"],{encoding:"utf8"}).split("\n").filter(p=>/^(scripts\/((check|verify)-[^/]+|[^/]+-(guard|check))\.sh|tools\/(check|verify)-[^/]+\.ts|tests\/gates\/[^/]+\.sh)$/.test(p)); console.log(want.filter(p=>!got.has(p)).join(","))'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
@@ -198,7 +198,7 @@ apps/probe" ]
 }
 
 @test "guards enumerates the three declared families and nothing else" {
-  run walk 'console.log(walkManifests("guards").map(e=>e.path).filter(p=>!/^(scripts\/(check|verify)-|tools\/(check|verify)-|tests\/gates\/)/.test(p)).join(","))'
+  run walk 'console.log(walkManifests("guards").map(e=>e.path).filter(p=>!/^(scripts\/((check|verify)-|[^/]+-(guard|check)\.sh)|tools\/(check|verify)-|tests\/gates\/)/.test(p)).join(","))'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
