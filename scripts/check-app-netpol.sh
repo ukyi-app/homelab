@@ -39,7 +39,13 @@ scanned="$(scan_count "$manifests")"
 # 적용하면 red가 되는 건 **양성** 테스트(clean 셀렉터=통과 기대) 1건뿐이다 — 음성 3건은 단언이
 # `-ne 0`이라 바닥값 exit 1도 만족해 green을 유지한다(실측 4 ok / 1 not ok).
 # 즉 열거 붕괴를 실제로 증언하는 건 양성 2건(실-레포·clean 픽스처)뿐이다.
-[ "$ROOT_OVERRIDDEN" -eq 1 ] || scan_floor check-app-netpol "$scanned" "$MIN_SCAN" || exit 1
+if [ "$ROOT_OVERRIDDEN" -eq 1 ]; then
+  # 바닥값은 면제하되 **신호는 낸다** — 신호가 아예 없으면 06이 "픽스처 호출"과 "가드 미실행"을
+  # 구별할 수 없다. 건수(픽스처는 소수 · 실 트리는 기준선 근처)가 곧 그 판별자다.
+  scan_signal check-app-netpol "$scanned"
+else
+  scan_floor check-app-netpol "$scanned" "$MIN_SCAN" || exit 1
+fi
 
 netpol_files=""
 while IFS= read -r p; do

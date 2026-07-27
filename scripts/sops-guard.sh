@@ -22,6 +22,9 @@ CANON="$(sops_canonical_recipients)"
 # 이제 무인자면 **자기 도메인을 스스로 열거**하고 바닥값을 건다(현재 추적 9건 — 래칫 아님).
 # shellcheck source=scripts/lib/scan-floor.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
+if [ "$#" -gt 0 ]; then
+  scan_signal sops-guard "$#"   # 인자(pre-commit·픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
+fi
 if [ "$#" -eq 0 ]; then
   cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1   # git ls-files는 cwd 상대다
   tracked="$(scan_enumerate sops-guard git ls-files '*.enc.yaml')" || exit 1

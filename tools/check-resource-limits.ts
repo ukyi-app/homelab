@@ -111,6 +111,11 @@ if (count < MIN_SCAN) {
   console.error(`FAIL: 스캔 대상 ${count}건 < ${MIN_SCAN} — grep 셀렉터 회귀 의심(platform 재배치/kind 들여쓰기?)`);
   process.exit(1);
 }
+// SCAN 신호(scripts/lib/scan-floor.sh와 같은 규약) — 실행 관측용 균일 마커.
+// ⚠️ **위반 검사보다 앞**이다. 규약상 "도메인을 평가한 실행"은 위반 여부와 무관하게 신호를 낸다
+// (유일한 면제는 바닥값 실패 경로 — 그건 위에서 이미 exit 1). 셸 가드는 커널이 바닥값 시점에
+// 내므로 자동으로 이 위치인데, TS는 콜사이트라 순서를 손으로 맞춰야 한다.
+console.log(`SCAN: check-resource-limits: ${count}`);
 if (viol.length) {
   console.log("FAIL: cpu·memory request 또는 memory limit 없는 상주 워크로드 main 컨테이너 — 선언 후 (memory는) 원장 행 동반, 또는 " + ALLOW + "에 이유와 함께 등재:");
   for (const v of viol) console.log("  " + v);

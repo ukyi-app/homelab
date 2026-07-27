@@ -798,6 +798,11 @@ for (const { path: rel, text, docs } of ruleEntries) {
   }
 }
 
+// SCAN 신호(scripts/lib/scan-floor.sh 규약) — 실행 관측용 균일 마커. **위반 검사보다 앞**이다:
+// 규약상 도메인을 평가한 실행은 위반 여부와 무관하게 신호를 낸다(면제는 바닥값 실패 경로뿐).
+// 라벨 = 바닥값이 걸린 열거 도메인 하나 — 여긴 룰(MIN_SCAN)과 denylist(MIN_DENY) 둘이다.
+console.log(`SCAN: check-alert-rules:rules: ${ruleCount}`);
+console.log(`SCAN: check-alert-rules:denylist: ${denyMetrics.length}`);
 if (allowErrors.length) {
   console.log(`FAIL: ${ALLOWLIST} 항목에 사유 주석이 없다 — 무근거 면제는 금지:`);
   for (const e of allowErrors) console.log("  " + e);
