@@ -90,11 +90,19 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "scan-floor fails loud (exit 2) when the scan finds too few images" {
+@test "scan-floor fails loud (exit 1) when the scan finds too few images" {
+  # ⚠️ 1이다 — 2는 CONTRIBUTING이 사용법/파싱 오류로 예약했고, scan-floor 클래스의 다른 가드는
+  # 전부 1이다. 여기만 2로 이탈해 있었다(같은 클래스에 두 코드 = 이 캠페인이 지우는 병).
   wf platform/x/deployment.yaml <<'EOF'
 image: nginx:1.0@sha256:abcdef
 EOF
   run bash "$CHK" --root "$REPO" --min-scan 99
+  [ "$status" -eq 1 ]
+}
+
+@test "an unknown flag is still a usage error (exit 2), distinct from a scan-floor failure" {
+  # 두 코드가 각자 의미를 갖는다는 대조 — scan-floor를 1로 옮긴 뒤에도 2는 사용법 전용이다.
+  run bash "$CHK" --root "$REPO" --bogus-flag
   [ "$status" -eq 2 ]
 }
 

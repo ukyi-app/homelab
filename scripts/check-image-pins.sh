@@ -149,9 +149,13 @@ while IFS= read -r f; do
 done < <(walk_scope apps-values)
 
 # --- scan-floor: 스캔이 의심스럽게 적으면(글롭/제외 파손) fail-loud ---
+# ⚠️ 종료코드는 1이다. 2는 CONTRIBUTING이 **사용법/파싱 오류**로 예약했고(위 `unknown arg`가 그 용법),
+# 같은 scan-floor 클래스의 다른 가드는 전부 1이다(check-resource-limits·check-alert-rules·
+# check-guard-authority·check-skip-signalling·scripts/lib/scan-floor.sh). 여기만 2였다 — 같은 클래스에
+# 두 코드를 남기는 것이 정확히 이 캠페인이 지우는 병이라 1로 수렴시켰다.
 if [ "$scanned" -lt "$MIN_SCAN" ]; then
   echo "ERROR: 스캔 무결성 의심 — 이미지 ${scanned}건(<${MIN_SCAN}). 글롭/제외 경로 파손 가능(scan-floor)." >&2
-  exit 2
+  exit 1
 fi
 
 if [ "$fail" -gt 0 ]; then
