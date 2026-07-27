@@ -191,6 +191,15 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   reconciler)이 호출. `--ci`(orphan-dns/activation-exposure-drift만 비-0)·`--strict`(전부 비-0)·기본(리포트만).
 - **`ledger-to-json.ts`** — `docs/memory-ledger.md` 표 → conftest 입력 JSON(행 파서 SSOT=`lib/ledger-totals.ts`).
   `scripts/verify-ledger.sh`(= `bun run verify:ledger`, gate)가 호출. 라이브 무관.
+- **`check-guard-authority.ts`** — G1 권위 경로 회계: 모든 가드(`lib/repo-walk.ts`의 `guards` 스코프)가
+  **실제로 실행되는 경로를 최소 하나** 갖는지 계산한다. 가드가 추가되고 README에 등재되고 전 게이트가
+  초록인데 **CI에서 한 번도 안 도는** 상태를 막는다. **계산하되 선언하지 않는다** — 소유권 레지스트리를
+  만들지 않고 멤버십을 실제로 정하는 것에게 묻는다: `ci.yaml`의 `gate` job(로컬 composite action 전개) ·
+  `run-bats.sh --list`(수집 bats) · `on.schedule` 워크플로 · `make -n <타깃>`(Makefile 텍스트 파싱 아님) ·
+  `package.json` 별칭 전이 해소(`bun run verify:ledger` → `verify-ledger.sh`).
+  **`make verify`·`make ci`는 비권위**(CI에서 돌지 않는 로컬 mirror)로 분리해 센다. 판정은
+  `authoritative >= 1` — venue는 의도적으로 겹치므로 정확히-하나 모델이면 오탐이 난다.
+  `tests/gates/test_guard-authority.bats`가 호출(픽스처 red-green + 실 레포 전건).
 - **`check-resource-limits.ts`** — 상주 워크로드 main 컨테이너 cpu·memory request + memory limit +
   GOMEMLIMIT≤limit×0.95 강제(구 bash+yq+python3 이관). **`make verify`**·gate가 호출. `--repo-root`로 스캔 루트 지정.
 - **`check-alert-rules.ts`** — vmalert 룰 expr의 eval-time 안티패턴 정적 lint(`-dryRun`은 파싱만 해서 못 잡는

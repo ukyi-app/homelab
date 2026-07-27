@@ -167,7 +167,32 @@ apps/probe" ]
 @test "SCOPE_NAMES exposes the registered scopes" {
   run walk 'console.log(SCOPE_NAMES.slice().sort().join(","))'
   [ "$status" -eq 0 ]
-  [ "$output" == "apps,apps-manifests,apps-values,platform,platform-image-refs,platform-manifests,producers,rules" ]
+  [ "$output" == "apps,apps-manifests,apps-values,guards,platform,platform-image-refs,platform-manifests,producers,rules" ]
+}
+
+# `guards` 스코프는 "이 레포에서 무엇이 불변식을 강제한다고 주장하는가"에 답한다(G1 권위 회계의 열거 대상).
+# ⚠️ 공용 TEST_HARNESS 제외 어휘를 쓰면 안 된다 — 그 어휘의 `tests?/`가 `tests/gates/*.sh`를 통째로 지운다.
+# 그 8개(ci.yaml이 직접 부르는 e2e 하네스)가 정확히 지금까지 회계 커버리지 0이던 대상이라,
+# 지워지면 이 스코프가 존재 이유를 잃는다.
+@test "guards includes the ci-invoked e2e harnesses under tests/gates" {
+  run walk 'console.log(walkManifests("guards").map(e=>e.path).filter(p=>p.startsWith("tests/gates/")).length)'
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 8 ]
+}
+
+# 하네스가 source하는 프리미티브는 진입점이 아니다 — 세면 "권위 경로 0"이 영원히 참인 항목이 생긴다.
+# 이 성질은 명시 제외가 아니라 include의 `[^/]+`(하위 디렉토리를 못 넘는다)가 준다 — 명시 제외를
+# 뒀다가 mutation이 초록이라 죽은 규칙임을 실측하고 지웠다. 단언은 메커니즘과 무관하게 성질을 지킨다.
+@test "guards excludes tests/gates/lib primitives that are sourced, not entrypoints" {
+  run walk 'console.log(walkManifests("guards").map(e=>e.path).filter(p=>p.includes("/gates/lib/")).join(","))'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "guards enumerates the three declared families and nothing else" {
+  run walk 'console.log(walkManifests("guards").map(e=>e.path).filter(p=>!/^(scripts\/(check|verify)-|tools\/check-|tests\/gates\/)/.test(p)).join(","))'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # `platform-manifests`와 `platform-image-refs`는 **다른 질문**에 답한다.
