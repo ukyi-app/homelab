@@ -5,6 +5,12 @@
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 
 @test "every tracked *.bats starts with test_ (collection convention guard)" {
+  # ⚠️ 바닥값이 먼저다 — 열거가 0건이면 "전건 접두 준수"와 "아무것도 안 봤다"가 같은 초록이다.
+  # 이 가드 위에 check-bats-accounting(F6: 테스트가 어느 harness에도 안 묶여 조용히 죽는 것)이 얹혀 있어
+  # 여기가 무너지면 그 전제까지 함께 사라진다.
+  run bash -c "git -C '$ROOT' ls-files '*.bats' | grep -c . || true"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 120 ]   # 현재 추적 229건 — 절반으로 줄어도 안 걸린다. 래칫 아님
   run bash -c "git -C '$ROOT' ls-files '*.bats' | grep -vE '(^|/)test_[^/]*\.bats$' || true"
   [ -z "$output" ]   # 접두 없는 bats가 하나라도 있으면 실패
 }
