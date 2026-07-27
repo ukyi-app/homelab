@@ -50,6 +50,13 @@ PRECOMMIT="$BATS_TEST_DIRNAME/../../.pre-commit-config.yaml"
   # 이제 가드가 자기 도메인을 소유한다(무인자 = 자가 열거 + 바닥값) — 계약을 그쪽에 단언한다.
   run grep -q "git ls-files '\\*.enc.yaml'" "$ROOT/scripts/sops-guard.sh"
   [ "$status" -eq 0 ]
+  # ⚠️ 위 두 단언만으로는 ci.yaml을 **옛 배관으로 되돌려도** 아무 게이트가 red가 되지 않는다
+  # (적대 검토 실측: `git show <이전>:.github/workflows/ci.yaml` 한 줄 복사로 vacuous 경로 재개방).
+  # 배선이 열거를 다시 떠맡으면(파일 목록을 파이프로 주입) 글롭이 깨질 때 스크립트가 아예
+  # 호출되지 않아 스텝이 조용히 초록이다 — ci.yaml은 **무인자 호출만** 허용한다.
+  out="$(grep -n 'scripts/sops-guard.sh' "$CI")"
+  run grep -qF '|' <<<"$out"
+  [ "$status" -ne 0 ]
 }
 
 # 배관을 옮긴 자리의 실측 증인 — 무인자 호출이 실제로 전수 검사인가.
