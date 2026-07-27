@@ -440,3 +440,42 @@ Claude에 전달) · **그 외 비-0 = 비차단 에러**(사용자에게 stderr
   막아 세션을 못 쓰게 만든다. 오탐 0 원칙과 fail-closed는 **폴백**으로 양립시킨다.
 
 > 가드: `tests/gates/test_manifest-guard.bats`
+
+### GHA job-level skip은 run conclusion에 안 보인다 — 스텝 전부 skip이어도 job은 success
+
+GHA job conclusion 어휘는 `success|failure|cancelled|skipped`뿐이고, 여기엔 **"자격이 없어 아무것도
+안 했다"가 없다.** 두 게이트 계층이 서로 다른 흔적을 남긴다:
+
+- **job-level 게이트**(`if: needs.preflight.outputs.configured == 'true'`) → job이 `skipped`로 남는다.
+  `needs.<job>.result`로 **관측 가능**하다.
+- **스텝-레벨 게이트**(각 스텝의 `if: steps.pf.outputs.configured == 'true'`) → job이 뜨고, 스텝을
+  전부 skip한 뒤 **`success`로 끝난다.** run conclusion·job conclusion 어디에도 흔적이 없다.
+
+라이브 실측(2026-07-27, `gh run view <id> --json jobs`): `tf-reconcile`의 `drift-github`·`drift-tailscale`은
+`TF_GITHUB_TOKEN`·`TF_TAILSCALE_OAUTH_ID`가 Actions 시크릿에 **없어서** 스텝 1(preflight) 외 전부
+skipped인데 job conclusion은 둘 다 `success`였다. 즉 신뢰 앵커(branch protection `contexts=["gate"]` ·
+CI Actions 시크릿 · tailscale ACL/auth-key)의 드리프트 감시가 **한 번도 실행된 적 없이** 매 30분
+초록을 보고하고 있었다. 앞선 세션의 감사는 job conclusion만 봐서 이걸 "잠복 경로"로 오판했다 —
+**스텝 conclusion까지 봐야 한다.**
+
+⚠️ **알림을 감시 대상 job 안에 두면 함께 죽는다.** skip된 job은 스텝을 **0개** 실행한다 —
+`if: always()`도 예외가 아니다(그 job이 아예 스케줄되지 않는다). 그래서 실패 알림을 그 job에 얹어
+두면 정확히 신호가 필요한 순간에 0이 된다.
+
+⚠️ **이 계층엔 `exit 4`(skip) 채널이 없다.** 규약을 쓸 스텝 자체가 실행되지 않기 때문이다. 관측은
+게이트 **밖의 별도 job**에서만 가능하다:
+
+- 게이트 밖 `accounting` job + `if: ${{ !cancelled() }}`. 상태함수를 빼면 기본 `success()`가 걸려
+  **감시자가 감시 대상과 같은 운명에 묶인다**(needs 중 하나가 skip되면 회계도 skip).
+- 스텝-레벨 게이트는 `outputs.executed` 승격이 필수다 — 없으면 회계가 볼 수 있는 값이 존재하지 않는다.
+- 판정 기준은 원장(`policy/workflow-readiness.json`)이고, **선언되지 않은 미설정은 통과할 수 없다**.
+  선언된 갭은 면제가 아니라 **계상**이다(매 run 로그·job summary에 남고 원장이 이유를 진다).
+- **실패는 미실행으로 세지 않는다** — 이미 run을 빨갛게 만들고 자기 알림을 낸다. 회계가 잡는 것은
+  *조용한* 미실행뿐이고, 실패를 겹쳐 세면 원인이 두 번 오귀속된다.
+
+⚠️ **자격 게이트 ≠ 도메인-크기 게이트.** "검사 대상이 0건이라 skip"은 열거 붕괴 클래스라 처방이
+바닥값이다(위 「열거 붕괴 → vacuous green」). 탐지기가 둘을 가르는 선은 **자격 변수의 공백 검사**다 —
+`secrets.*`/`vars.*`에서 온 env를 `[ -n "$X" ]`로 재는 형태만 준비상태 게이트로 센다. 이 선이 없으면
+terraform `drift=false` 같은 **결과 플래그**가 전부 준비상태로 오탐된다(실측: 한 워크플로에 3곳).
+
+> 가드: `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats`
