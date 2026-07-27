@@ -42,6 +42,9 @@ check_one() {
 }
 
 if [ "$#" -gt 0 ]; then
+  # shellcheck source=scripts/lib/scan-floor.sh
+  . "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
+  scan_signal verify-secrets "$#"   # 인자(픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
   for f in "$@"; do check_one "$f" || fail=1; done
 else
   # ⚠️ 전수 모드는 (a) `git ls-files`가 **cwd 상대**라 ROOT로 내려가야 하고(서브디렉토리에서 실행하면

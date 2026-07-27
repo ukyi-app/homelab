@@ -798,6 +798,11 @@ for (const { path: rel, text, docs } of ruleEntries) {
   }
 }
 
+// SCAN 신호(scripts/lib/scan-floor.sh 규약) — 실행 관측용 균일 마커. **위반 검사보다 앞**이다:
+// 규약상 도메인을 평가한 실행은 위반 여부와 무관하게 신호를 낸다(면제는 바닥값 실패 경로뿐).
+// 라벨 = 바닥값이 걸린 열거 도메인 하나 — 여긴 룰(MIN_SCAN)과 denylist(MIN_DENY) 둘이다.
+console.log(`SCAN: check-alert-rules:rules: ${ruleCount}`);
+console.log(`SCAN: check-alert-rules:denylist: ${denyMetrics.length}`);
 if (allowErrors.length) {
   console.log(`FAIL: ${ALLOWLIST} 항목에 사유 주석이 없다 — 무근거 면제는 금지:`);
   for (const e of allowErrors) console.log("  " + e);
@@ -821,7 +826,5 @@ if (viol.length) {
   for (const v of viol) console.log("  " + v);
   process.exit(1);
 }
-// SCAN 신호(scripts/lib/scan-floor.sh 규약) — 실행 관측용 균일 마커.
-console.log(`SCAN: check-alert-rules: ${ruleCount}`);
 console.log(`check-alert-rules OK (${ruleCount} 룰 스캔, push 생산자 ${foundProducers.length}건 / 등록 메트릭 ` +
   `${REGISTRY.length}건[모드 C 대상 ${modeCMetrics.length}], 룩백 ${LOOKBACK}s, 모드 A/B/C 위반 0)`);

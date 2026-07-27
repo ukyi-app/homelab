@@ -91,30 +91,82 @@ c" ]
   run bash -c '. "$1"; scan_floor demo 10 5' _ "$LIB"
   [ "$status" -eq 0 ]
   out="$output"
+  # ⚠️ 마커 존재를 먼저 단언한다 — 이게 없으면 "SKIP이 없다"는 마커가 **아예 없어도** 참이라
+  # 이 테스트가 자기 자신 vacuous가 된다(적대 검토 지목).
+  run grep -q "^SCAN: demo: 10$" <<<"$out"
+  [ "$status" -eq 0 ]
   run grep -q "SKIP:" <<<"$out"
   [ "$status" -ne 0 ]
 }
 
-# 커버리지 증인 — 커널을 타는 셸 가드는 **전부** 잘 형성된 신호를 낸다.
-# 커널 emit이 사라지거나 콜사이트 하나가 빠지면 여기서 red가 된다(조용한 커버리지 축소 차단).
-@test "every kernel-backed shell guard emits a well-formed scan marker" {
-  bad=""
-  for g in check-app-netpol check-app-deploy check-skeleton check-bats-accounting \
-           check-bats-style sops-guard verify-secrets check-image-pins; do
-    n=$(bash "$ROOT/scripts/$g.sh" 2>/dev/null | grep -cE '^SCAN: [a-z0-9:-]+: [0-9]+$' || true)
-    [ "${n:-0}" -ge 1 ] || bad="$bad $g"
+# 커버리지 증인 — **정적 콜사이트 라벨 집합 == 런타임 방출 라벨 집합**.
+# ⚠️ 앞선 판(가드당 마커 ≥1인지만 보는 하드코딩 목록)은 세 가지를 통과시켰다(적대 검토 실측):
+#    라벨 하나 삭제(가드는 다른 라벨로 여전히 ≥1) · 픽스처 콜사이트 삭제(기본 모드만 돌았다) ·
+#    9번째 커널 가드 추가(목록이 하드코딩이라 모른다). 집합 대조는 셋 다 잡는다.
+# 라벨을 하나 추가/삭제하면 정적 쪽이 먼저 바뀌고 런타임이 따라오지 않으면 red다 — 목록을 손으로
+# 관리하지 않으므로 래칫이 아니다.
+@test "the emitted scan labels exactly match the kernel call sites (no hardcoded roster)" {
+  # 정적: 커널 호출의 첫 인자(주석 줄 제외 — 설명 문장의 라벨이 섞이면 대조가 무의미해진다)
+  static="$(grep -hE '^[^#]*\b(scan_floor|scan_signal) ' "$ROOT"/scripts/*.sh \
+            | grep -oE '(scan_floor|scan_signal) [a-z0-9:-]+' | awk '{print $2}' | sort -u)"
+  # ⚠️ 집합 대조만으로는 **양쪽이 같이 사라지는** 삭제를 못 잡는다(콜사이트를 지우면 정적·런타임이
+  # 함께 줄어 등식이 유지된다 — 적대 검토가 실측). 라벨 수 바닥값이 그 구멍을 막는다.
+  # ⚠️ 이 바닥값은 **여유가 없다**(오늘 로스터와 같은 값). 도메인 바닥값은 도메인이 정당하게 줄 수
+  #    있어 여유를 두지만, 라벨이 사라지는 것은 드리프트가 아니라 언제나 **의도적 커버리지 변경**이고
+  #    그때는 CONTRIBUTING·PROGRESS의 커버리지 수치도 같이 고쳐야 하므로 diff에 보여야 한다.
+  labels=$(printf '%s\n' "$static" | grep -c . || true)
+  [ "$labels" -ge 10 ]
+  guards="$(grep -lE '^[^#]*\b(scan_floor|scan_signal) ' "$ROOT"/scripts/*.sh)"
+  [ -n "$guards" ]
+  runtime=""
+  for f in $guards; do
+    out="$(bash "$f" 2>/dev/null)" || { echo "가드가 비-0으로 죽었다: $f"; false; }
+    runtime="${runtime}$(printf '%s\n' "$out" | sed -n 's/^SCAN: \(.*\): [0-9][0-9]*$/\1/p')
+"
   done
+  runtime="$(printf '%s' "$runtime" | grep -v '^$' | sort -u)"
+  [ "$static" = "$runtime" ] || { echo "정적:"; echo "$static"; echo "런타임:"; echo "$runtime"; false; }
+}
+
+# 콜사이트 증인 — 바닥값 면제(픽스처·인자) 모드와 바닥값 없는 레인도 **자기** 신호를 낸다.
+# 위 집합 대조는 기본 모드만 돌리므로 이 네 자리를 못 본다. 신호가 없으면 06은 "픽스처 호출"과
+# "가드 미실행"을 구별할 수 없다 — 08-a의 명시 산출물이 그 구별이다.
+@test "floor-exempt call sites emit their own scan marker" {
+  FX="$BATS_TEST_TMPDIR/cs"
+  mkdir -p "$FX/apps/x/deploy/prod"
+  printf 'kind: NetworkPolicy\n' > "$FX/apps/x/deploy/prod/np.yaml"
+  git -C "$FX" init -q
+  git -C "$FX" add -A
+  bad=""
+  bash "$ROOT/scripts/check-app-netpol.sh" --root "$FX" 2>/dev/null \
+    | grep -qE '^SCAN: check-app-netpol: [0-9]+$' || bad="$bad app-netpol"
+  bash "$ROOT/scripts/check-app-deploy.sh" "$FX/apps/x/deploy/prod" 2>/dev/null \
+    | grep -qE '^SCAN: check-app-deploy: [0-9]+$' || bad="$bad app-deploy"
+  bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_FILENAME" 2>/dev/null \
+    | grep -qE '^SCAN: check-bats-style: [0-9]+$' || bad="$bad bats-style"
+  bash "$ROOT/scripts/sops-guard.sh" "$ROOT/platform/cnpg/prod/ukkiee.enc.yaml" 2>/dev/null \
+    | grep -qE '^SCAN: sops-guard: [0-9]+$' || bad="$bad sops-guard"
+  bash "$ROOT/scripts/verify-secrets.sh" "$ROOT/platform/cnpg/prod/ukkiee.enc.yaml" 2>/dev/null \
+    | grep -qE '^SCAN: verify-secrets: [0-9]+$' || bad="$bad verify-secrets"
   [ -z "$bad" ]   # 비어야 통과. 디버깅: echo "$bad"
 }
 
 # TS 가드도 같은 규약을 쓴다(커널이 셸 전용이라 마커는 콜사이트에 있다).
-@test "the TypeScript guards emit the same marker shape" {
+# TS 가드도 같은 규약을 쓴다(커널이 셸 전용이라 마커는 콜사이트에 있다).
+# 라벨은 도메인 단위라 접미사가 붙을 수 있다 — 가드명 접두로 확인하고, 기대 라벨 수를 고정한다.
+@test "the TypeScript guards emit the same marker shape, one label per floored domain" {
   bad=""
-  for t in check-resource-limits check-alert-rules check-guard-authority; do
-    n=$(bun "$ROOT/tools/$t.ts" 2>/dev/null | grep -cE "^SCAN: ${t}: [0-9]+$" || true)
-    [ "${n:-0}" -eq 1 ] || bad="$bad $t"
-  done
-  [ -z "$bad" ]
+  # <도구> <기대 라벨 수>
+  while read -r t want; do
+    [ -n "$t" ] || continue
+    n=$(bun "$ROOT/tools/$t.ts" 2>/dev/null | grep -cE "^SCAN: ${t}(:[a-z]+)?: [0-9]+$" || true)
+    [ "${n:-0}" -eq "$want" ] || bad="$bad ${t}(want=${want},got=${n:-0})"
+  done <<EOF
+check-resource-limits 1
+check-alert-rules 2
+check-guard-authority 2
+EOF
+  [ -z "$bad" ]   # 비어야 통과. 디버깅: echo "$bad"
 }
 
 # 기계 판독 stdout 모드는 마커가 오염시키면 안 된다.

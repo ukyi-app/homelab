@@ -339,6 +339,14 @@ if (import.meta.main) {
   const asJson = flags.bool("--json");
   if (asJson) console.log(JSON.stringify({ guards: guards.length, venues: venues.length, report }, null, 2));
 
+  // SCAN 신호(scripts/lib/scan-floor.sh 규약) — **위반 검사보다 앞**이다: 규약상 도메인을 평가한
+  // 실행은 위반 여부와 무관하게 신호를 낸다(면제는 바닥값 실패 경로뿐 — 위 fail()이 이미 처리).
+  // 라벨 = 바닥값이 걸린 열거 도메인 하나 — 여긴 가드(minScan)와 venue(붕괴 0건 검사) 둘이다.
+  // --json 모드에선 stdout이 기계 판독 JSON이라 내지 않는다(마커가 JSON을 오염시킨다).
+  if (!asJson) {
+    console.log(`SCAN: check-guard-authority:guards: ${guards.length}`);
+    console.log(`SCAN: check-guard-authority:venues: ${venues.length}`);
+  }
   const orphans = report.filter((r) => r.authoritative.length === 0);
   if (orphans.length) {
     console.error("FAIL: 권위 있는 실행 경로가 0인 가드 — 삭제되거나 조용히 죽어도 아무도 모른다:");
@@ -349,8 +357,5 @@ if (import.meta.main) {
     console.error("  권위 = ci.yaml gate 스텝 · gate 수집 bats · 스케줄 워크플로 · owner-local make 타깃");
     process.exit(1);
   }
-  // SCAN 신호(scripts/lib/scan-floor.sh 규약) — 실행 관측용 균일 마커. --json 모드에선 stdout이
-  // 기계 판독 JSON이라 내지 않는다(마커가 JSON을 오염시킨다).
-  if (!asJson) console.log(`SCAN: check-guard-authority: ${guards.length}`);
   if (!asJson) console.log(`check-guard-authority OK (가드 ${guards.length}건, venue ${venues.length}건, 전건 권위 경로 ≥1)`);
 }
