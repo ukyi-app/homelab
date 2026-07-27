@@ -134,6 +134,71 @@ YAML
   echo "$output" | grep -q "scripts/check-orphan.sh"
 }
 
+# 리뷰 실측: mirror를 이름(`verify`/`ci`)으로 선언하던 동안 타깃을 `verify-all`로 개명하기만 해도
+# "로컬에만 있고 CI엔 없는 가드"가 통과했다. mirror는 이름이 아니라 성질로 판정해야 한다.
+@test "a local mirror is non-authoritative under any target name (not a hardcoded name list)" {
+  rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-orphan.sh"
+  for name in verify verify-all local-checks; do
+    printf '%s: ## local mirror\n\t@bash scripts/check-mirrored.sh\n' "$name" > "$FIX/Makefile"
+    git -C "$FIX" add -A
+    run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+    [ "$status" -eq 1 ]
+    echo "$output" | grep -q "scripts/check-mirrored.sh"
+  done
+}
+
+# 반대 갈래 — skip 신호 규약(티켓 01)을 쓰는 가드를 부르는 make 타깃은 권위다. 그 마커가
+# "이 도메인은 CI에 없을 수 있다"는 선언이고, 그때 owner-local 엔트리포인트가 유일한 권위이기 때문.
+@test "a make target invoking a SKIP-convention guard is authoritative (owner-local)" {
+  printf '#!/usr/bin/env bash\necho "SKIP: mirrored: 도메인 없음"; exit 4\n' > "$FIX/scripts/check-mirrored.sh"
+  printf 'whatever: ## owner-local\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-orphan.sh"
+  git -C "$FIX" add -A
+  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  [ "$status" -eq 0 ]
+}
+
+# 리뷰 실측: 따옴표 안의 `|`·`;`·`()`를 연산자로 쪼개는 바람에 grep/yq **패턴**이 명령 head로
+# 승격돼, 호출이 0건인 가드가 권위를 얻었다(vacuous pass).
+@test "a guard path inside a quoted pattern is not an invocation" {
+  rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-mirrored.sh"
+  printf 'verify: ## mirror\n\t@true\n' > "$FIX/Makefile"
+  cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
+name: ci
+on: [pull_request]
+jobs:
+  gate:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - run: |
+          grep -qE "foo|scripts/check-orphan.sh" some-file
+          yq -e '.jobs.gate.steps[] | select((.run // "") | test("scripts/check-orphan.sh"))' f.yaml
+YAML
+  git -C "$FIX" add -A
+  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "scripts/check-orphan.sh"
+}
+
+# 반대 방향의 실패(거짓 red)가 더 나쁘다 — 셸 키워드 뒤 호출을 못 보면 정당한 가드가 고아로 오탐된다.
+@test "an invocation behind a shell keyword (then/do) is detected" {
+  rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-mirrored.sh"
+  printf 'verify: ## mirror\n\t@true\n' > "$FIX/Makefile"
+  cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
+name: ci
+on: [pull_request]
+jobs:
+  gate:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - run: |
+          if [ -f x ]; then bash scripts/check-orphan.sh; fi
+YAML
+  git -C "$FIX" add -A
+  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  [ "$status" -eq 0 ]
+}
+
 @test "the enumeration floor fires when the guard scope collapses" {
   run bun "$TOOL" --repo-root "$FIX" --min-scan 9999
   [ "$status" -eq 1 ]

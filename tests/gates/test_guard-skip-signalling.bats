@@ -56,6 +56,29 @@ fixture_suite() {   # $1: 하위 디렉토리명
   echo "$output" | grep -q "SKIP 마커인데 skip 종료코드 아님"
 }
 
+# 리뷰 실측: `##` 절단이 셸에도 적용돼 `${f##*/}` 가 있는 줄의 skip 종료코드가 통째로 잘려
+# **위반이 조용히 통과**했다(이 가드가 막으려는 바로 그 병). 이제 Makefile에만 적용된다.
+@test "a shell parameter expansion (##) does not hide a marker-less skip exit" {
+  printf '%s\n' 'b="${f##*/}"; exit 4' > "$BATS_TEST_TMPDIR/pe.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/pe.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "skip 종료코드인데 SKIP 마커 없음"
+}
+
+@test "a Makefile help tail mentioning SKIP is not a false positive" {
+  printf '%s\n' 'verify-x: ## [local] 도메인 부재면 SKIP: 신호' '	@true' > "$BATS_TEST_TMPDIR/Makefile"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/Makefile"
+  [ "$status" -eq 0 ]
+}
+
+# TS 짝의 **정방향** — 마커와 process.exit(4)가 같은 줄이면 위반이 아니다. 이 갈래가 없으면
+# TS 종료코드 인식 로직이 무커버로 남는다(리뷰가 mutation 생존으로 지적).
+@test "a TypeScript skip site with both marker and exit code is accepted" {
+  printf '%s\n' 'console.log("SKIP: fake-ts: 도메인 없음"); process.exit(4);' > "$BATS_TEST_TMPDIR/ok.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/ok.ts"
+  [ "$status" -eq 0 ]
+}
+
 @test "the enumeration floor fires when the scan domain collapses" {
   run env SKIP_SIGNAL_MIN_SCAN=99999 bash "$ROOT/scripts/check-skip-signalling.sh"
   [ "$status" -ne 0 ]

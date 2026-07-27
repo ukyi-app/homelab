@@ -163,11 +163,14 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `apps-manifests` · `rules`(알림 룰 매니페스트 — 그 디렉토리를 검사 대상으로 볼지 생산자로
   볼지는 소비자가 정한다) · `producers`(레포 전역 — tracked라 .scratch/·워크트리 잔재가 구조적으로
   빠진다. 구 큐레이트 7-루트 목록은 그 잔재 때문이었으므로 근거가 사라져 제거) ·
+  `guards`(가드 진입점 3계열 = `scripts/(check|verify)-*.sh` · `tools/(check|verify)-*.ts` ·
+  `tests/gates/*.sh` — **공용 TEST_HARNESS 제외 어휘 금지**: 그 어휘의 `tests?/`가 ci.yaml이 직접
+  부르는 e2e 하네스 8개를 통째로 지운다. 그 8개가 정확히 회계 커버리지 0이던 대상이다) ·
   유닛 스코프 `apps`/`platform`(디렉토리 존재 질문이라 **filesystem** 열거 —
   실측상 tracked와 결과 동일하고 픽스처 비용만 크다).
   같은 트리를 보는 두 스코프가 다른 이유는 **질문이 다르기** 때문이다("배포되는 매니페스트인가"
   vs "이미지 참조를 담을 수 있는가"). 소비자: `check-resource-limits`·`check-image-pins`·`check-app-deploy`·`check-skeleton`·
-  `check-app-netpol`·`audit-orphans`·`poll-ghcr`·`check-alert-rules`. (`surface-hash`는 **대상 아님** — 워킹트리
+  `check-app-netpol`·`audit-orphans`·`poll-ghcr`·`check-alert-rules`·`check-guard-authority`. (`surface-hash`는 **대상 아님** — 워킹트리
   해시라 미커밋 파일을 포함해야 커밋 후 값과 일치한다.)
 - **`lib/image-pin.ts`** — 배포 핀 형식 커널(TAG_RE/DIGEST_RE·인라인 핀 parse/format·descriptor
   타입·autoDeploy fail-closed). 순수 형식 판정과 왕복만 소유하고 파일 I/O·exit·에러 문구는
@@ -201,7 +204,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `authoritative >= 1` — venue는 의도적으로 겹치므로 정확히-하나 모델이면 오탐이 난다.
   `tests/gates/test_guard-authority.bats`가 호출(픽스처 red-green + 실 레포 전건).
 - **`check-resource-limits.ts`** — 상주 워크로드 main 컨테이너 cpu·memory request + memory limit +
-  GOMEMLIMIT≤limit×0.95 강제(구 bash+yq+python3 이관). **`make verify`**·gate가 호출. `--repo-root`로 스캔 루트 지정.
+  GOMEMLIMIT≤limit×0.95 강제(구 bash+yq+python3 이관). **`make verify`**(로컬 mirror)·gate 수집 bats(`tests/test_resource_limits.bats`)가 호출 — ci.yaml gate 스텝이 직접 부르지는 않는다(`check-guard-authority` 실측). `--repo-root`로 스캔 루트 지정.
 - **`check-alert-rules.ts`** — vmalert 룰 expr의 eval-time 안티패턴 정적 lint(`-dryRun`은 파싱만 해서 못 잡는
   클래스). 모드 A=상태-파생 카운터(`policy/alert-instance-stability-denylist.txt`) 위 rollup이 instance를
   안 벗김 / 모드 B=산술 `on()`·`ignoring()` 조인 피연산자가 집계 미포함 raw 셀렉터(422) — 둘 다 재부팅 IP

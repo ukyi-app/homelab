@@ -183,6 +183,14 @@ apps/probe" ]
 # 하네스가 source하는 프리미티브는 진입점이 아니다 — 세면 "권위 경로 0"이 영원히 참인 항목이 생긴다.
 # 이 성질은 명시 제외가 아니라 include의 `[^/]+`(하위 디렉토리를 못 넘는다)가 준다 — 명시 제외를
 # 뒀다가 mutation이 초록이라 죽은 규칙임을 실측하고 지웠다. 단언은 메커니즘과 무관하게 성질을 지킨다.
+# 역방향 — 규약 접두를 가진 추적 파일은 **반드시** 열거돼야 한다. 정방향만 두면 include가 좁아져도
+# "규약 밖 파일 0건"은 계속 참이라 통과한다(실측: tools 쪽이 check-만 받아 verify-db-marker.ts가 빠져 있었다).
+@test "guards enumerates every tracked file that follows the naming convention" {
+  run walk 'const got=new Set(walkManifests("guards").map(e=>e.path)); const {execFileSync}=require("node:child_process"); const want=execFileSync("git",["ls-files"],{encoding:"utf8"}).split("\n").filter(p=>/^(scripts\/(check|verify)-[^/]+\.sh|tools\/(check|verify)-[^/]+\.ts|tests\/gates\/[^/]+\.sh)$/.test(p)); console.log(want.filter(p=>!got.has(p)).join(","))'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "guards excludes tests/gates/lib primitives that are sourced, not entrypoints" {
   run walk 'console.log(walkManifests("guards").map(e=>e.path).filter(p=>p.includes("/gates/lib/")).join(","))'
   [ "$status" -eq 0 ]
@@ -190,7 +198,7 @@ apps/probe" ]
 }
 
 @test "guards enumerates the three declared families and nothing else" {
-  run walk 'console.log(walkManifests("guards").map(e=>e.path).filter(p=>!/^(scripts\/(check|verify)-|tools\/check-|tests\/gates\/)/.test(p)).join(","))'
+  run walk 'console.log(walkManifests("guards").map(e=>e.path).filter(p=>!/^(scripts\/(check|verify)-|tools\/(check|verify)-|tests\/gates\/)/.test(p)).join(","))'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }

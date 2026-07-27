@@ -41,7 +41,7 @@
   `SKIP: <가드>: <이유>` 마커와 skip 종료코드(셸 `exit 4` / TS `process.exit(4)`)가 **같은 줄에서 짝**을
   이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + Makefile
   전수(자기 자신 제외 — 패턴 리터럴이 위반과 같은 모양). 열거 붕괴 차단용 `MIN_SCAN`(기본 70) 보유.
-  `tests/gates/test_guard-skip-signalling.bats`가 호출(양방향 mutation 테스트로 탐지기 생존 실측).
+  `tests/gates/test_guard-skip-signalling.bats`가 호출(양방향 픽스처 음성 테스트 + 열거 바닥값).
 - **`check-credential-expiry.sh`** — 자격증명 만료 원장(`policy/credential-expiry.json`) 검사. `--days N`
   (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). `credential-expiry.yaml`(주간)이 D-14 telegram 경고로
   중계, `tests/gates/test_credential_expiry.bats`가 가드. jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)

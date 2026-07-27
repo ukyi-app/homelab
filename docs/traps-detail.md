@@ -361,3 +361,25 @@
   못 잡으므로 페이로드 불변화(플러그인을 구운 핀 이미지)나 emptyDir 사용률 관측이 후속 과제로 남아 있다
   (release 게이트 R-1 defer, `docs/reviews/grafana-emptydir-plugin-overflow/`).
 > 가드: `platform/victoria-stack/prod/test_grafana_plugin_budget.bats`
+
+### GNU make가 recipe 종료코드를 자기 Error 2로 뭉갠다
+
+가드 진입점이 도메인 부재를 `SKIP: <가드>: <이유>` 마커 + **exit 4**로 신호하는 규약을 세웠는데
+(CONTRIBUTING '가드 skip 신호'), **make 타깃은 그 코드를 그대로 전달하지 못한다.**
+
+```
+$ make verify-posture KUBECONFIG_LIVE=/nonexistent
+SKIP: verify-posture: /nonexistent 부재 — 라이브 posture 미평가. 먼저 make up
+make: *** [verify-posture] Error 4     ← 메시지엔 4가 남는다
+$ echo $?
+2                                       ← 그러나 프로세스 종료코드는 2다
+```
+
+GNU make는 recipe 실패를 자기 규약(2 = errors)으로 보고한다. 따라서:
+
+- **make 계층에서 관측 가능한 skip 신호는 `SKIP:` 마커 + 비-0까지다.** 종료코드 4는 스크립트를
+  직접 부를 때만 보인다.
+- 새 make 가드 타깃의 bats 래퍼에 `[ "$status" -eq 4 ]`를 쓰면 **반드시 실패한다** — `-ne 0` + 마커 grep으로 쓸 것.
+- 2는 tools 규약에서 "사용법/파싱 오류"라 의미가 겹친다. make 계층에서 2를 원인으로 읽지 말 것.
+
+> 가드: `tests/gates/test_guard-skip-signalling.bats`

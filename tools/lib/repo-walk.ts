@@ -149,7 +149,9 @@ const SCOPES: Record<string, ScopeDef> = {
     kind: "manifests",
     source: "tracked",
     root: "",
-    include: /^(scripts\/(check|verify)-[^/]+\.sh|tools\/check-[^/]+\.ts|tests\/gates\/[^/]+\.sh)$/,
+    // `tools/`도 `scripts/`와 **같은 접두 쌍**을 받는다 — 비대칭이면 `tools/verify-*.ts`가 조용히
+    // 회계 밖에 남는다(실측: `tools/verify-db-marker.ts`가 그렇게 빠져 있었다).
+    include: /^(scripts\/(check|verify)-[^/]+\.sh|tools\/(check|verify)-[^/]+\.ts|tests\/gates\/[^/]+\.sh)$/,
     exclude: [],
   },
   // 앱 유닛. **필수 산출물로 거르지 않는다**(design-r1 R-1) — audit-orphans에겐 values.yaml 필터가

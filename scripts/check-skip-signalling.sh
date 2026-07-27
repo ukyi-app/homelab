@@ -39,17 +39,24 @@ fi
 
 # 한 파일의 짝 위반을 stdout으로. 언어별로 주석 접두와 skip 종료코드 표기가 다르다.
 scan_one() {
-  ists=0
+  ists=0; ismk=0
   case "$1" in *.ts|*.mts) ists=1 ;; esac
-  awk -v F="$1" -v ISTS="$ists" '
+  case "$1" in */Makefile|Makefile) ismk=1 ;; esac
+  awk -v F="$1" -v ISTS="$ists" -v ISMK="$ismk" '
     ISTS  && /^[[:space:]]*\/\// { next }
     !ISTS && /^[[:space:]]*#/    { next }
     {
       line = $0
-      sub(/##.*$/, "", line)            # make 도움말 꼬리(= 주석) 제거
+      # ⚠️ `##` 절단은 **Makefile 도움말 꼬리 전용**이다. 셸에서 `##`는 파라미터 확장(`${f##*/}`)·
+      # sed 구분자로 정상 쓰이므로, 무차별 적용하면 그런 줄의 skip 종료코드가 통째로 잘려
+      # **위반이 조용히 통과**한다(이 가드가 막으려는 바로 그 병 — 리뷰가 실측으로 잡았다).
+      if (ISMK) sub(/##.*$/, "", line)
       if (ISTS) hasExit = (line ~ /process\.exit\(4\)/)
       else      hasExit = (line ~ /exit 4([^0-9]|$)/)
-      hasMark = (line ~ /SKIP:/)
+      # 마커 쪽은 **낼 때**만 짝을 요구한다 — 출력 동사가 있어야 emission이다. 없으면 그건 마커를
+      # 다루는 코드(정규식·패턴 상수)이지 skip 신호가 아니다. 이 구분이 없으면 규약을 구현하는
+      # 파일마다 자기 자신을 제외 목록에 넣어야 하고, 그 목록이 곧 아무도 대조하지 않는 주장이 된다.
+      hasMark = (line ~ /SKIP:/ && line ~ /(echo|printf|console\.log)/)
       if (hasExit && !hasMark) print F":"FNR": skip 종료코드인데 SKIP 마커 없음: "$0
       if (hasMark && !hasExit) print F":"FNR": SKIP 마커인데 skip 종료코드 아님: "$0
     }

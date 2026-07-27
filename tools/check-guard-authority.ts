@@ -44,14 +44,55 @@ const WORKFLOW_DIR = ".github/workflows";
 const CI_WORKFLOW = `${WORKFLOW_DIR}/ci.yaml`;
 const GATE_JOB = "gate";
 
-// 로컬 mirror — **권위가 아니다**. 둘 다 "ci.yaml gate를 로컬에서 재현"이 목적이라 CI에서 돌지 않는다.
-// 이걸 권위로 세면 "make verify에만 있고 CI엔 없는 가드"라는 정확히 그 병이 통과한다.
-const MIRROR_TARGETS = new Set(["verify", "ci"]);
+// make 타깃의 권위 여부는 **이름으로 선언하지 않는다**. 처음엔 `new Set(["verify","ci"])`로 mirror를
+// 지목했는데, 그건 (a) 아무것도 대조하지 않는 레지스트리이고 (b) 폴백이 default-allow라
+// 문서화된 나머지 타깃 37개가 무조건 권위가 됐다 — `verify`를 `verify-all`로 개명하거나
+// 로컬 전용 타깃을 새로 만들기만 해도 "로컬에만 있고 CI엔 없는 가드"가 통과했다(리뷰가 실측).
+//
+// 대신 **계산한다**: make 타깃이 권위인 경우는 정확히 둘이다.
+//   ① 워크플로가 그 타깃을 실제로 부른다(`run: make chart-test`) — CI에서 도는 것이 증명된다.
+//   ② 그 타깃이 **skip 신호 규약을 쓰는 가드**를 부른다 — 티켓 01의 `SKIP:` 마커는 "이 가드의
+//      도메인은 없을 수 있다"는 뜻이고, 도메인이 CI에 없는 가드에겐 owner-local 엔트리포인트가
+//      유일한 권위다. 01이 06의 선행 티켓인 이유가 정확히 이것이다.
+// 그 외는 mirror다(폴백이 default-deny로 뒤집힌다). `make verify`·`make ci`는 규약을 쓰는 가드를
+// 부르지 않으므로 자동으로 mirror가 된다 — 이름을 적어둘 필요가 없다.
+// ⚠️ 앞에 공백을 요구하면 안 된다 — 실제 마커는 `echo "SKIP: verify-runbook-index: …"`처럼
+// **따옴표 뒤**에 온다(요구했다가 skipGuards가 0건이 됐다).
+const SKIP_MARKER = /SKIP: [a-z0-9-]+:/;
 
 // 명령 세그먼트의 '실행 대상'을 찾을 때 건너뛰는 실행 동사·래퍼.
 const EXEC_VERBS = new Set([
   "run", "bash", "sh", "bun", "node", "exec", "sudo", "env", "timeout", "xargs", "command", "time",
 ]);
+
+// 셸 **키워드**도 건너뛴다. 안 그러면 `if …; then bash scripts/check-x.sh; fi`의 세그먼트 head가
+// `then`이 되어 뒤의 진짜 실행 대상이 버려지고 **정당한 가드가 고아로 오탐**된다 —
+// 이 게이트가 절대 내면 안 되는 방향(거짓 red)이다. 실측으로 확인한 형태: then · do · `!`.
+const SHELL_KEYWORDS = new Set([
+  "if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done",
+  "case", "esac", "in", "select", "function", "{", "}", "!", "[[", "[",
+]);
+
+// 따옴표 안의 `;`·`|`·`&`·`()`는 **연산자가 아니라 리터럴**이다. 마스킹하지 않으면 세그먼트 분리가
+// 문자열 안쪽을 쪼개 그 조각이 명령 head로 승격된다 — 실측된 오탐:
+//   `grep -qE "foo|scripts/check-x.sh" f`  → `scripts/check-x.sh" f` 가 head가 되어 **권위로 둔갑**
+//   `yq -e '… test("scripts/check-x.sh")'` → 같은 경로로 호출 0건인 가드가 고아 판정을 피한다
+// 따옴표는 없애고(그래야 `bash "$C"`의 head가 산다) 그 안의 연산자만 무해 문자로 바꾼다.
+const NEUTRAL = "";
+function neutralizeQuoted(line: string): string {
+  let out = "";
+  let quote: string | null = null;
+  for (const ch of line) {
+    if (quote) {
+      if (ch === quote) { quote = null; continue; } // 따옴표 자체는 버린다
+      out += /[;|&()]/.test(ch) ? NEUTRAL : ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    out += ch;
+  }
+  return out;
+}
 
 type Venue = { id: string; kind: "gate" | "schedule" | "owner-local" | "mirror"; text: string };
 
@@ -62,13 +103,13 @@ type Venue = { id: string; kind: "gate" | "schedule" | "owner-local" | "mirror";
 // (tools/tests/test_app-deploy.bats:7,45 — 직접 경로만 보면 이 가드가 고아로 오탐된다).
 function commandHeads(line: string): string[] {
   const heads: string[] = [];
-  for (const seg of line.split(/\|\||&&|[;|&()]/)) {
+  for (const seg of neutralizeQuoted(line).split(/\|\||&&|[;|&()]/)) {
     const toks = seg.trim().split(/\s+/).filter(Boolean);
     for (let i = 0; i < toks.length; i++) {
-      const t = toks[i].replace(/^["']+|["']+$/g, "");
+      const t = toks[i];
       if (t === "") continue;
       if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) continue; // 앞머리 env 할당(FOO=bar cmd)
-      if (EXEC_VERBS.has(t)) continue;
+      if (EXEC_VERBS.has(t) || SHELL_KEYWORDS.has(t)) continue;
       if (t.startsWith("-")) continue; // 래퍼 플래그
       heads.push(t);
       break;
@@ -77,15 +118,38 @@ function commandHeads(line: string): string[] {
   return heads;
 }
 
-function stripComment(line: string, hash: boolean): string {
-  return hash ? line.replace(/^\s*#.*$/, "") : line.replace(/^\s*\/\/.*$/, "");
+// venue 텍스트는 전부 셸(워크플로 `run:` · bats · `make -n` 출력)이라 해시 주석만 있다.
+// 처음엔 `//` 갈래도 뒀는데 호출처가 전부 hash=true라 한 번도 평가되지 않는 죽은 분기였다(리뷰 지적).
+function stripComment(line: string): string {
+  return line.replace(/^\s*#.*$/, "");
 }
+// 텍스트가 **실행하는** make 타깃 이름. 주석과 따옴표를 앞서와 같은 규율로 걸러
+// `make <target>`의 인자를 뽑는다(`make -s render COMP=x` → render).
+function makeInvocations(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const raw of text.split("\n")) {
+    const line = stripComment(raw);
+    for (const seg of neutralizeQuoted(line).split(/\|\||&&|[;|&()]/)) {
+      const toks = seg.trim().split(/\s+/).filter(Boolean);
+      const i = toks.indexOf("make");
+      if (i < 0) continue;
+      for (let j = i + 1; j < toks.length; j++) {
+        const t = toks[j];
+        if (t.startsWith("-") || t.includes("=")) continue;   // 플래그 · 변수 오버라이드
+        if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(t)) out.add(t);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 
 // 한 텍스트에서 변수 → 가드경로 바인딩을 수집한다(`CHECK="$ROOT/scripts/check-x.sh"`).
 function bindings(text: string, guardPaths: string[]): Map<string, string> {
   const out = new Map<string, string>();
   for (const raw of text.split("\n")) {
-    const line = stripComment(raw, true);
+    const line = stripComment(raw);
     const m = /^\s*(?:local\s+|export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.+)$/.exec(line);
     if (!m) continue;
     const hit = guardPaths.find((g) => m[2].includes(g));
@@ -105,7 +169,7 @@ function headRefs(head: string, guard: string, bound: Map<string, string>): bool
 export function invokesGuard(text: string, guard: string, allGuards: string[]): boolean {
   const bound = bindings(text, allGuards);
   for (const raw of text.split("\n")) {
-    const line = stripComment(raw, true);
+    const line = stripComment(raw);
     if (!line.trim()) continue;
     for (const head of commandHeads(line)) {
       if (headRefs(head, guard, bound)) return true;
@@ -157,15 +221,22 @@ function makeTargets(root: string): string[] {
   return [...names].sort();
 }
 
-export function collectVenues(root: string): Venue[] {
+export function collectVenues(root: string, guards: { path: string; text: string }[] = []): Venue[] {
   const venues: Venue[] = [];
+  const workflowText: string[] = [];   // 워크플로 `run:` 텍스트만 — make 호출 판정용(bats 제외)
+  // skip 신호 규약을 쓰는 가드 = 도메인이 CI에 없을 수 있다고 스스로 선언한 가드.
+  const skipGuards = guards.filter((g) => SKIP_MARKER.test(g.text)).map((g) => g.path);
 
   // ① ci.yaml의 gate job — 유일한 required check.
   const ciPath = `${root}/${CI_WORKFLOW}`;
   if (existsSync(ciPath)) {
     const ci = parse(readFileSync(ciPath, "utf8")) as { jobs?: Record<string, { steps?: Step[] }> };
     const gate = ci?.jobs?.[GATE_JOB];
-    if (gate) venues.push({ id: `${CI_WORKFLOW}:${GATE_JOB}`, kind: "gate", text: stepTexts(gate.steps, root) });
+    if (gate) {
+      const text = stepTexts(gate.steps, root);
+      venues.push({ id: `${CI_WORKFLOW}:${GATE_JOB}`, kind: "gate", text });
+      workflowText.push(text);
+    }
   }
 
   // ② gate가 **실제로 수집하는** bats — 각 파일 전체가 호출면이다.
@@ -184,14 +255,29 @@ export function collectVenues(root: string): Venue[] {
     if (!on || typeof on !== "object" || !("schedule" in on)) continue;
     const text = Object.values(doc.jobs ?? {}).map((j) => stepTexts(j?.steps, root)).join("\n");
     venues.push({ id: `schedule:${f}`, kind: "schedule", text });
+    workflowText.push(text);
   }
 
-  // ④ make 타깃 — owner-local 전용 엔트리포인트(도메인이 CI에 없는 가드에겐 이것이 유일한 권위).
-  //    `make verify`·`make ci`는 로컬 mirror라 비권위로 분리해 기록한다(디버깅용 — 판정엔 안 센다).
+  // ④ make 타깃 — 권위는 **계산한다**(위 SKIP_MARKER 주석 참조). 비권위는 mirror로 분리해 기록한다
+  //    (판정엔 안 세지만 진단 출력에는 남긴다 — "make verify에만 있다"를 사람이 읽을 수 있게).
+  // ⚠️ **워크플로 텍스트만** 본다. gate venue에는 수집 bats도 들어 있는데, 그 안의 `run make -n help`
+  //    같은 테스트 호출까지 세면 거의 모든 타깃이 "CI가 부른다"가 되어 default-deny가 무너진다
+  //    (실측: 폴루션으로 16개 타깃이 권위로 승격됐다).
+  for (const f of sh("git", ["ls-files", "--", `${WORKFLOW_DIR}/*.yaml`], root).split("\n").filter(Boolean)) {
+    try {
+      const doc = parse(readFileSync(`${root}/${f}`, "utf8")) as { jobs?: Record<string, { steps?: Step[] }> };
+      workflowText.push(Object.values(doc?.jobs ?? {}).map((j) => stepTexts(j?.steps, root)).join("\n"));
+    } catch { /* 파싱 실패는 venue 바닥값이 잡는다 */ }
+  }
+  const ciInvoked = makeInvocations(workflowText.join("\n"));
   for (const t of makeTargets(root)) {
     const text = sh("make", ["-n", t], root);
     if (!text) continue;
-    venues.push({ id: `make:${t}`, kind: MIRROR_TARGETS.has(t) ? "mirror" : "owner-local", text });
+    const authoritative =
+      ciInvoked.has(t) ||                                  // ① 워크플로가 실제로 부른다
+      SKIP_MARKER.test(text) ||                            // ② recipe 자신이 skip 규약을 쓴다
+      skipGuards.some((g) => text.includes(g));            //   또는 규약을 쓰는 가드를 부른다
+    venues.push({ id: `make:${t}`, kind: authoritative ? "owner-local" : "mirror", text });
   }
 
   // ⑤ 별칭 전이 해소 — `bun run verify:ledger` → package.json → scripts/verify-ledger.sh.
@@ -228,12 +314,13 @@ if (import.meta.main) {
   // 열거 붕괴 바닥값 — 소비자 소유(repo-walk는 scan-floor를 갖지 않는다). 현재 가드 23개.
   const minScan = Number(flags.str("--min-scan", "15"));
 
-  const guards = walkManifests("guards", root).map((e) => e.path);
+  const guardEntries = walkManifests("guards", root).map((e) => ({ path: e.path, text: e.text }));
+  const guards = guardEntries.map((e) => e.path);
   if (guards.length < minScan) {
     fail(`가드 열거 ${guards.length}건 < ${minScan} — 열거 붕괴(이 회계가 vacuous해진다)`);
   }
 
-  const venues = collectVenues(root);
+  const venues = collectVenues(root, guardEntries);
   const authoritativeVenues = venues.filter((v) => v.kind !== "mirror");
   if (authoritativeVenues.length === 0) fail("권위 venue 0건 — venue 수집 붕괴(ci.yaml/run-bats/make 확인)");
 
