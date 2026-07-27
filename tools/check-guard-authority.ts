@@ -349,5 +349,8 @@ if (import.meta.main) {
     console.error("  권위 = ci.yaml gate 스텝 · gate 수집 bats · 스케줄 워크플로 · owner-local make 타깃");
     process.exit(1);
   }
+  // SCAN 신호(scripts/lib/scan-floor.sh 규약) — 실행 관측용 균일 마커. --json 모드에선 stdout이
+  // 기계 판독 JSON이라 내지 않는다(마커가 JSON을 오염시킨다).
+  if (!asJson) console.log(`SCAN: check-guard-authority: ${guards.length}`);
   if (!asJson) console.log(`check-guard-authority OK (가드 ${guards.length}건, venue ${venues.length}건, 전건 권위 경로 ≥1)`);
 }

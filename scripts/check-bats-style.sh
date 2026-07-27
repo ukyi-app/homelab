@@ -26,6 +26,8 @@ fi
 # 부를 수 있으므로 바닥값은 기본 모드에만 건다(선례: check-app-netpol의 --root 면제). 래칫 아님.
 if [ "$#" -eq 0 ]; then
   scan_floor check-bats-style "${#FILES[@]}" "${BATS_STYLE_MIN_SCAN:-150}" || exit 1
+else
+  scan_signal check-bats-style "${#FILES[@]}"   # 바닥값 면제 모드도 신호는 낸다(06 판별자)
 fi
 DETECT=""
 IFS='' read -r -d '' DETECT <<'AWK' || true

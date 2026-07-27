@@ -116,4 +116,7 @@ if (viol.length) {
   for (const v of viol) console.log("  " + v);
   process.exit(1);
 }
+// SCAN 신호(scripts/lib/scan-floor.sh와 같은 규약) — 실행 관측용 균일 마커.
+// 성공 메시지의 건수는 사람이 읽는 문장 안에 있어 파싱이 문구 드리프트에 묶인다. 마커는 그 밖에 둔다.
+console.log(`SCAN: check-resource-limits: ${count}`);
 console.log(`check-resource-limits OK (${count} 워크로드 매니페스트 스캔, cpu·memory request + memory limit 위반 0)`);

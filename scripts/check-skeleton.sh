@@ -21,7 +21,7 @@ done
 # ⚠️ 열거를 변수로 받아 rc를 잡는다. 이 도메인이 비면 네이밍 가드와 CJK 가드가 **둘 다** 0회 돈다
 # (CJK는 3회 재발한 검증된 함정이라 조용히 꺼지면 특히 위험하다). 현재 추적 228건 — 래칫 아님.
 all_bats="$(scan_enumerate check-skeleton git ls-files '*.bats')" || exit 1
-scan_floor check-skeleton "$(scan_count "$all_bats")" "${SKELETON_BATS_MIN_SCAN:-150}" || exit 1
+scan_floor check-skeleton:bats "$(scan_count "$all_bats")" "${SKELETON_BATS_MIN_SCAN:-150}" || exit 1
 unprefixed="$(printf '%s\n' "$all_bats" | grep -vE '(^|/)test_[^/]*\.bats$' || true)"
 if [ -n "$unprefixed" ]; then
   echo "FAIL: test_ 접두 없는 bats (네이밍 컨벤션 위반):"
@@ -49,7 +49,7 @@ fi
 # ⚠️ 프로세스 치환은 워커 실패를 전파하지 않아, bun이 죽으면 정방향(dir→표) 검사가 0회 돌고
 # 역방향만 남은 채 통과했다(부분 degrade — 실측). 현재 컴포넌트 16개 — 래칫 아님.
 comp_units="$(scan_enumerate check-skeleton bun "$(dirname "$0")/../tools/lib/repo-walk.ts" --units platform)" || exit 1
-scan_floor check-skeleton "$(scan_count "$comp_units")" "${SKELETON_PLATFORM_MIN_SCAN:-10}" || exit 1
+scan_floor check-skeleton:platform "$(scan_count "$comp_units")" "${SKELETON_PLATFORM_MIN_SCAN:-10}" || exit 1
 while IFS= read -r d; do
   [ -n "$d" ] || continue
   c="$(basename "$d")"

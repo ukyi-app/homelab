@@ -103,6 +103,7 @@ check_one() {
 }
 
 if [ "$#" -gt 0 ]; then
+  scan_signal check-app-deploy "$#"   # 인자(픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
   for d in "$@"; do check_one "$d"; done
 else
   cd "$ROOT"

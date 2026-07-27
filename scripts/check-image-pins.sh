@@ -177,7 +177,12 @@ fi
 # 그렇지 않으면 이 바닥값 자체를 red-green으로 실증할 방법이 없다(가드가 자기 검증을 못 받는 자리).
 if [ "$ROOT_OVERRIDDEN" -eq 0 ] || [ "$MIN_SCAN_APPS_SET" -eq 1 ]; then
   scan_floor check-image-pins:apps "$scanned_lane2" "$MIN_SCAN_APPS" || exit 1
+else
+  scan_signal check-image-pins:apps "$scanned_lane2"
 fi
+# 레인1은 자기 바닥값이 없다(합계 MIN_SCAN이 사실상 전담 — 레인2 최대치가 한 자릿수다).
+# 그래도 실행 관측 신호는 내야 한다 — 06이 "이 호출이 실 도메인에 닿았는가"를 판정하는 입력이다.
+scan_signal check-image-pins:platform "$scanned_lane1"
 
 if [ "$fail" -gt 0 ]; then
   echo "핀 안 된 이미지 ${fail}건 (스캔 ${scanned}건). @sha256 digest 핀 또는 allowlist 등재(사유 주석) 필요."
