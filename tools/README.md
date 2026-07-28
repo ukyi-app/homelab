@@ -241,6 +241,14 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   게이트 탐지는 **자격 변수의 공백 검사**(`secrets.*`/`vars.*` env를 `[ -n "$X" ]`로 재고 플래그를
   내림)를 요구한다 — 이 선이 도메인-크기 게이트(열거 붕괴 클래스, 처방=scan-floor)와 결과 플래그
   (terraform `drift=false` 등)를 갈라낸다. `tests/gates/test_workflow-readiness.bats`가 호출.
+- **`check-ci-parity.ts`** — `make ci` ↔ `ci.yaml` job `gate` **패리티 회계**. Makefile은 `ci`를 "gate를
+  로컬에서 재현"이라 선언하는데, 그 주장을 검증하던 것은 `test_make-ci-parity.bats`의 **하드코딩된 5개
+  토큰**뿐이었다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 `make ci`에 없었는데 전 검사가 초록이었다
+  (하필 그 5개가 전부 미러된 것들이라 우연히 통과했다). 이제 스텝 목록을 `ci.yaml`에서 **파생**해
+  `policy/ci-parity.json`과 대조한다: 미계상 red · 죽은 선언 red · `mirrored`는 **`make -n ci` 실제 출력**
+  대조(Makefile 텍스트를 파싱하지 않는다 — 조건부·전제 타깃을 사람이 재구현하면 그 재구현이 다음 드리프트다).
+  ⚠️ 그래서 `make -n`은 **부수효과가 없어야** 한다: 레시피에 `$(MAKE)`가 있으면 GNU make는 `-n`에서도 그 줄을
+  실행하므로 서브-make 금지(`test_make-ci-parity.bats`가 강제).
 - **`check-resource-limits.ts`** — 상주 워크로드 main 컨테이너 cpu·memory request + memory limit +
   GOMEMLIMIT≤limit×0.95 강제(구 bash+yq+python3 이관). **`make verify`**(로컬 mirror)·gate 수집 bats(`tests/test_resource_limits.bats`)가 호출 — ci.yaml gate 스텝이 직접 부르지는 않는다(`check-guard-authority` 실측). `--repo-root`로 스캔 루트 지정.
 - **`check-alert-rules.ts`** — vmalert 룰 expr의 eval-time 안티패턴 정적 lint(`-dryRun`은 파싱만 해서 못 잡는

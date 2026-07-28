@@ -559,3 +559,47 @@ r6(체인 있음)·r4(체인 없음) 양쪽을 대조군으로 쓴다. 또한 �
 변이가 통과했었다(mutation으로 발견) — 단언은 대입문이 아니라 **소비 지점**에 걸어야 한다.
 
 > 가드: `tests/gates/test_vmalert-e2e-replay-timing.bats`, `tests/gates/lib/vmalert-e2e.sh`
+
+### make -n은 드라이런이 아니다 — 레시피의 $(MAKE)는 -n에서도 실행된다
+
+GNU make는 레시피 줄에 `$(MAKE)`(또는 `${MAKE}`)가 있으면 `-n`·`-t`·`-q`에서도 **그 줄을 실제로 실행한다**.
+문서화된 동작이다 — 재귀 make에 플래그를 전파해 서브-make가 자기 몫을 출력하게 하려는 것이다. 그래서
+`$(MAKE)`가 붙은 줄만은 "출력"이 아니라 "실행"이 된다.
+
+⚠️ 이 레포에서 그게 위험한 이유는 `make -n <target>` 출력을 **데이터로 읽기 때문**이다:
+`tools/check-ci-parity.ts`(mirrored 스텝이 실제로 `make ci`에 있는지 대조)와
+`tools/check-guard-authority.ts`(venue 수집 — Makefile 텍스트 파싱 대신 make 자신에게 해소를 맡긴다)가
+둘 다 그 출력을 파싱한다. 즉 정적 검사여야 할 것이 갑자기 부수효과를 갖는다.
+
+라이브 실측(2026-07-28): 게이트 스텝을 가독성 때문에 `ci-containerized`/`ci-firing-e2e` 서브 타깃으로
+묶고 `@$(MAKE) --no-print-directory ci-containerized`로 호출했더니, **`make -n ci` 한 번에** telegram
+render e2e·vector validate·vmalert validate가 통째로 실행되고 vector 이미지 pull까지 일어났다.
+`bun tools/check-ci-parity.ts`(내부에서 `make -n ci` 호출)를 돌린 것뿐인데 docker가 움직였다.
+
+✅ 처방: 게이트 스텝은 **각자 자기 레시피 줄에** 둔다. 장황해지지만 (a) 드라이런이 안전하고
+(b) 패리티 대조가 래퍼가 아니라 **스텝 단위로 구체적**이 된다(`local: "vector-validate.sh"`가
+`make -n ci` 출력에 실재하는지 볼 수 있다 — 래퍼 하나로 묶으면 "래퍼가 호출된다"까지밖에 증명 못 한다).
+가드는 레시피 줄(탭 시작)에 `$(MAKE)`가 없음을 강제한다 — 주석의 설명 문구는 대상이 아니다.
+
+> 가드: `tests/gates/test_make-ci-parity.bats`, `tools/check-ci-parity.ts`, `policy/ci-parity.json`
+
+### tracked 열거 게이트는 untracked 파일을 아예 안 본다 — 로컬 초록이 CI를 예고하지 못한다
+
+이 레포의 게이트는 대부분 `git ls-files`로 대상을 열거한다. 하드코딩 글롭이 리네임에 조용히 0매치되는
+것을 피하려는 **의도적 선택**이고 그 자체는 옳다. 부작용이 하나 있다: **untracked 파일은 측정 대상이
+아니다.** 그런데 커밋하는 순간 CI에서는 측정된다 — 즉 `make ci` 초록과 `gate` red가 양립한다.
+
+라이브 실측(2026-07-28): 새 `tools/check-ci-parity.ts`를 `git add` 전에 `make ci`로 검증해
+**1671건 전건 초록**을 받고 커밋했는데, 직후 CI가 `tools/*.ts` shebang 금지 규약 위반으로 red를 냈다.
+로컬이 그 파일을 **아예 보지 않은** 것이지 검사가 느슨했던 게 아니다. 하필 그 PR이 "make ci가 gate를
+재현한다"를 강제하는 PR이었다.
+
+⚠️ 이건 "재현했는데 실패"가 아니라 **"재현하지 못했다"**이다. 그래서 실패가 아니라 **skip 신호**
+(마커 + exit 4)가 맞다 — CONTRIBUTING '가드 skip 신호' 규약 그대로다.
+
+✅ `make ci`의 **첫 전제**(`ci-guard-tracked`)가 게이트 대상 디렉토리의 untracked 파일을 찾아 마커 + exit 4를
+낸다. 첫 전제인 이유는 1분짜리 `chart-test` 앞에서 끊기 위해서다. 가드에는 양성 대조가 붙어 있다 —
+깨끗한 트리에서 통과해야 한다(항상 죽는 가드는 아무도 안 쓰고 곧 제거된다).
+
+> 가드: `tests/gates/test_make-ci-parity.bats`, `Makefile`
+

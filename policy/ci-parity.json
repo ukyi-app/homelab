@@ -1,0 +1,117 @@
+{
+  "$comment": [
+    "make ci ↔ ci.yaml job 'gate' 패리티 원장. 강제: tools/check-ci-parity.ts (필수 게이트).",
+    "게이트의 모든 run 스텝은 여기 계상돼야 한다. 미계상도 red, 죽은 선언(gate에 없는 이름)도 red.",
+    "status: mirrored = make ci가 같은 걸 돈다(local 문자열이 `make -n ci` 출력에 실재해야 한다) /",
+    "        covered  = 로컬의 다른 메커니즘이 덮는다(covered_by.file에 contains가 실재해야 한다) /",
+    "        excluded = 로컬에선 안 돈다(why·since·owner_action 필수).",
+    "⚠️ 이 원장은 '차이가 없다'가 아니라 '모든 차이가 의도된 것이다'를 강제한다. 완전 일치를 요구하면",
+    "   docker 없는 환경에서 make ci가 못 돌고 결국 아무도 안 쓴다 — 그게 패리티 붕괴의 실제 경로다."
+  ],
+  "steps": [
+    {
+      "name": "typecheck (tsc --noEmit — erasableSyntaxOnly 게이트, make ci 패리티)",
+      "status": "mirrored",
+      "local": "bun run typecheck"
+    },
+    {
+      "name": "secret-guard — gitleaks(누출) + sops-guard(평문 enc.yaml) 강제",
+      "status": "covered",
+      "why": "gitleaks는 pre-commit 훅이 커밋마다 돈다(.pre-commit-config.yaml). make ci에서 재실행하려면 릴리스 tarball 다운로드+체크섬 검증이 필요한데, 그건 게이트가 러너에서 하는 일이고 로컬에 옮기면 오프라인에서 make ci가 죽는다. 같은 스텝의 sops-guard 쪽은 별도 스텝으로 mirrored다.",
+      "covered_by": {
+        "file": ".pre-commit-config.yaml",
+        "contains": "gitleaks"
+      }
+    },
+    {
+      "name": "sops-guard — 추적된 모든 *.enc.yaml 구조 검증",
+      "status": "mirrored",
+      "local": "scripts/sops-guard.sh"
+    },
+    {
+      "name": "chart render + validate (all kinds)",
+      "status": "mirrored",
+      "local": "platform/charts/app/tests/render.sh"
+    },
+    {
+      "name": "memory ledger onboarding gate (M0-owned)",
+      "status": "mirrored",
+      "local": "bun run verify:ledger"
+    },
+    {
+      "name": "registry/binding 정합 게이트 (배포 깨는 드리프트 차단)",
+      "status": "mirrored",
+      "local": "tools/audit-orphans.ts --ci"
+    },
+    {
+      "name": "skeleton + 네이밍/CJK/dirmap 가드 (required — 기존 verify.yaml non-required서 승격)",
+      "status": "mirrored",
+      "local": "scripts/check-skeleton.sh"
+    },
+    {
+      "name": "가드 권위 경로 회계 (G1 — 가드가 CI에서 한 번도 안 도는 상태 차단)",
+      "status": "mirrored",
+      "local": "tools/check-guard-authority.ts"
+    },
+    {
+      "name": "이미지 소유권 회계 (G2 — 아티팩트가 권위 있는 핀 소유자를 갖는지)",
+      "status": "mirrored",
+      "local": "tools/check-image-ownership.ts"
+    },
+    {
+      "name": "워크플로 준비상태 회계 (G-09 — 자격 부재로 job이 조용히 skip되는 것 차단)",
+      "status": "mirrored",
+      "local": "tools/check-workflow-readiness.ts"
+    },
+    {
+      "name": "make ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)",
+      "status": "mirrored",
+      "local": "check-ci-parity.ts"
+    },
+    {
+      "name": "gate bats suite (run-bats.sh — 단일 수집 SSOT)",
+      "status": "mirrored",
+      "local": "run-bats.sh"
+    },
+    {
+      "name": "shell script lint (전 추적 .sh)",
+      "status": "mirrored",
+      "local": "shellcheck"
+    },
+    {
+      "name": "actionlint — 워크플로 정적 검사(run 셸인젝션·표현식·문법)",
+      "status": "mirrored",
+      "local": "actionlint"
+    },
+    {
+      "name": "telegram 메시지 렌더 e2e (containerized AM v0.27)",
+      "status": "mirrored",
+      "local": "alertmanager-render-e2e.sh"
+    },
+    {
+      "name": "vector config validate (containerized — render 미차단 vector 의미오류)",
+      "status": "mirrored",
+      "local": "vector-validate.sh"
+    },
+    {
+      "name": "vmalert rule validate (containerized — render/grep 미차단 룰 expr 오류)",
+      "status": "mirrored",
+      "local": "vmalert-rules-validate.sh"
+    },
+    {
+      "name": "vmalert 발화 e2e (전량 병렬 — 순차 실행이 gate 시간의 77%였다)",
+      "status": "mirrored",
+      "local": "vmalert-*-firing-e2e.sh"
+    },
+    {
+      "name": "skopeo 실물 타임아웃 스모크 (핀된 이미지 + 제어된 블랙홀)",
+      "status": "mirrored",
+      "local": "skopeo-timeout-smoke.sh"
+    },
+    {
+      "name": "app-shared .mts strip-types 스모크 (node 계약 하한)",
+      "status": "mirrored",
+      "local": "app-shared-node-smoke.sh"
+    }
+  ]
+}
