@@ -141,9 +141,14 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   베스포크 `--pin` 레인을 실증(`tools/tests/test_run-bump-plan.bats`). races-4 TOCTOU의 정적 절반은
   `tools/tests/test_bump-poll-toctou.bats`, 워크플로 call-site **경계**(bump 스텝의 명령 = 러너 호출 하나)는
   `tests/gates/test_bump-poll-callsite.bats`.
-- **`repin-pgtools.ts`** — ops 이미지 `pg-tools:18-rclone`의 5개 소비처(4파일: cache backup ×2·cnpg
-  ensure-role-password/restore-drill/pgdump-hedge)의 인라인 `@sha256` 핀을 새 digest로 일괄 재핀(부분 갱신
-  skew=PgDumpHedgeStale 차단). `bump.yaml`이 build 완료 후 호출. digest 형식 검증·멱등(불변 시 no-op). `--root`로 스캔 루트.
+- **`repin-pgtools.ts`** — ops 이미지 `pg-tools:18-rclone`의 인라인 `@sha256` 핀을 새 digest로 일괄
+  재핀(부분 갱신 skew=PgDumpHedgeStale 차단). `bump.yaml`이 build 완료 후 호출. digest 형식 검증·멱등.
+  ⚠️ **대상을 하드코딩하지 않고 레포에서 파생한다**(D-1). 예전엔 `CONSUMERS` 4파일이 상수였고 같은 4개를
+  `tests/gates/test_pgtools-digest.bats`가 다시 하드코딩했으며 헤더 주석은 "5개 소비처(4파일)"였다 —
+  **세 산출물이 서로는 일치하고 레포와는 어긋났다**. 실측(2026-07-28): 목록 밖의 `adguard/rewrite-reconciler`
+  ·`victoria-stack/pvc-du-exporter`가 낡은 digest에 묶인 채 재핀 대상이 아니었고, 그런데도 도구는
+  `changed/CONSUMERS.length`로 **성공을 보고**했다. 이제 `repo-walk`의 `image-ownership` 스코프로 열거하고
+  참조 0건이면 **비-0으로 죽는다**(조용한 no-op 금지). `--root`로 스캔 루트.
 
 ## 공유 커널 (lib/ — 콜사이트가 정책 소유, 단 정책이 콜사이트마다 갈릴 때)
 
@@ -203,6 +208,23 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   **`make verify`·`make ci`는 비권위**(CI에서 돌지 않는 로컬 mirror)로 분리해 센다. 판정은
   `authoritative >= 1` — venue는 의도적으로 겹치므로 정확히-하나 모델이면 오탐이 난다.
   `tests/gates/test_guard-authority.bats`가 호출(픽스처 red-green + 실 레포 전건).
+- **`check-image-ownership.ts`** — G2 이미지 **소유권 회계**: 레포의 모든 이미지 참조가 **권위 있는 핀
+  소유자**를 갖는지 계산한다. `scripts/check-image-pins.sh`와 **다른 질문**이다 — 저건 "digest로
+  핀됐는가", 여긴 "그 digest를 **누가 갱신하는가**". 둘은 독립이다(실측: `pg-tools:18-rclone`이 두
+  digest로 갈렸는데 핀 게이트는 **둘 다 통과**시켰다 — 핀의 *존재*만 보고 *일치*는 안 본다).
+  **두 축을 분리한다**: freshness 소유자(새 버전을 가져오는 것) ≠ digest 소유자(immutable 핀을
+  보증하는 것). helm 차트 내부 이미지가 그 전형 — 차트 **버전**은 Renovate 소유지만 내부 이미지는
+  렌더 시점 mutable tag라 digest 소유자가 **없다**.
+  소유자는 **계산한다**: `pg-tools`→`repin-pgtools` · `apps/*/deploy/prod/values.yaml`·`.image-pin.json`
+  descriptor→`bump-poll` · 그 외 추적 매니페스트→**Renovate 도달성 실측**(`renovate.json`의
+  managerFilePatterns 매치 ∧ ignorePaths 비매치 — 분류표를 믿지 않는다. 근사이므로 알려진 매치/논매치를
+  센티넬 테스트로 박아 붕괴를 감지한다).
+  불변식: **같은 `repo:tag`는 같은 digest**(핀 게이트가 못 보는 축) · **base64 안에 숨은 참조**도 회계
+  대상(벤더 manifest의 `SIDECAR_IMAGE`가 Secret 안 base64 tag-only라 커버리지가 0이었다) · 차트 선언
+  완전성(레포에 파일이 없는 차트 내부 이미지 클래스).
+  무소유는 `policy/image-ownership.json`에 **why·freshness·since·owner_action과 함께 선언 필수**이고
+  매치되지 않는 선언(죽은 선언)도 red다. 벤더 파일을 **포함**해 본다(수정 금지여도 소유자 질문엔 답이
+  있어야 한다 — repo-walk `image-ownership` 스코프). `tests/gates/test_image-ownership.bats`가 호출.
 - **`check-workflow-readiness.ts`** — G-09 준비상태 회계: 자격/설정 부재로 **job이 통째로 skip됐는데
   run은 초록**인 경로를 닫는다. GHA job conclusion 어휘엔 "안 돌았다"가 없고, 스텝-레벨로 게이트된
   job은 스텝을 전부 skip해도 **success**로 끝난다(2026-07-27 라이브 실측: tf-reconcile의 신뢰 앵커

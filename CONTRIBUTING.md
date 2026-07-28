@@ -136,6 +136,28 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
 fail-closed) 바닥값으로 대체했다. 예약 platform host는 구조적으로 항상 ≥1이라 0은 "대상 없음"이
 아니라 SSOT 부재/키 변경이기 때문이다.
 
+### 이미지 소유권 회계 — freshness 소유자 ≠ digest 소유자
+
+**병.** "핀이 있는가"(`scripts/check-image-pins.sh`)와 "핀이 **일치**하는가"와 "그 digest를 **누가
+갱신하는가**"는 서로 다른 질문인데 하나로 뭉뚱그려져 있었다. 실측(2026-07-28): `pg-tools:18-rclone`이
+두 digest로 갈렸는데 핀 게이트는 **둘 다 통과**시켰고, 갱신 도구는 하드코딩 4파일만 재핀하면서
+성공을 보고했다. 그 4파일을 다시 하드코딩한 bats가 "단일 digest"를 확인해 초록이었다.
+
+**규약.**
+- 이미지 참조를 추가하면 **소유자가 계산되어야** 한다: `pg-tools`→`repin-pgtools` ·
+  `apps/*/deploy/prod/values.yaml`·`.image-pin.json` descriptor→`bump-poll` · 그 외 추적 매니페스트→
+  **Renovate 도달성 실측**(`managerFilePatterns` 매치 ∧ `ignorePaths` 비매치 — 분류표를 믿지 않는다).
+- **소유자 없음은 결함이 아니라 선언 대상**이다. `policy/image-ownership.json`에 why·freshness·since·
+  owner_action과 함께 적는다. **선언되지 않은 무소유는 통과할 수 없고**, 매치되지 않는 선언도 red다.
+- **소비처 목록을 하드코딩하지 않는다.** 하드코딩은 자기 자신에 대해서만 정확하다 — 위 사례에서
+  산출물 셋(도구 상수·bats 목록·헤더 주석)이 서로는 일치하고 레포와는 어긋났다. 레포에서 파생하고
+  열거 붕괴는 바닥값으로 막는다.
+- **freshness 소유자와 digest 소유자를 구별해 적는다.** helm 차트 내부 이미지는 차트 버전이 Renovate
+  소유(freshness 있음)지만 렌더 시점 mutable tag라 digest 소유자가 없다. "Renovate 관할"이라고만
+  적으면 그 차이가 지워진다.
+- 벤더 파일도 **포함해** 본다. 수정 금지여도 소유자 질문에는 답(re-vendor 절차)이 있어야 하고,
+  답이 없으면 그게 곧 결함이다.
+
 ## 커밋 메시지 (한국어 conventional commits)
 `type: 설명` — type ∈ `feat | fix | refactor | style | docs | test | chore`.
 AI 마커 금지, Co-Authored-By 금지. 커밋 하나에 논리적 변경 하나.
