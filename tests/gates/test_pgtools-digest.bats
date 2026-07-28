@@ -61,3 +61,24 @@ refs() { git ls-files -- 'platform/**.yaml' 'platform/**.yml' 'apps/**.yaml' 'op
   run grep -qF "$new" "$d/platform/victoria-stack/prod/pvc-du-exporter.yaml"
   [ "$status" -eq 0 ]
 }
+
+@test "no consumer whitelist survives anywhere in the bump path (the fourth-copy regression)" {
+  # 이 목록은 **네 번** 하드코딩돼 있었다: repin 도구의 CONSUMERS · 이 파일의 옛 FILES · 도구 헤더 주석 ·
+  # 그리고 `.github/workflows/bump.yaml`의 `git add` 화이트리스트. 앞의 셋을 고친 뒤에도 네 번째가 남아
+  # **도구는 6파일을 고치는데 4개만 커밋**됐고, 그러면 재빌드마다 드리프트가 그대로 되돌아온다
+  # (적대 검토가 실측). 파일 열거가 어디에도 없어야 그 클래스가 닫힌다.
+  run grep -nE 'platform/(cache|cnpg)/prod/[a-z-]+\.yaml' "$ROOT/.github/workflows/bump.yaml"
+  [ "$status" -ne 0 ] || { echo "bump.yaml에 소비처 파일 열거가 남아 있다:"; echo "$output"; false; }
+  # 그리고 재핀 산출물이 실제로 스테이지되는 경로가 있어야 한다(위 검사가 '전부 지우기'로 만족되면 안 된다).
+  run grep -qE '^ +git add .*platform' "$ROOT/.github/workflows/bump.yaml"
+  [ "$status" -eq 0 ] || { echo "bump.yaml이 platform 변경을 스테이지하지 않는다 — 재핀이 커밋되지 않는다"; false; }
+}
+
+@test "no live site-count claim remains in the bump path (a number here becomes the next stale copy)" {
+  # "5-site" 같은 건수 주장은 파생 모델에서 곧 낡은 사본이 된다(실측: bump.yaml에 2곳 남아 있었다).
+  # ⚠️ 대상은 **bump.yaml만**이다. `tools/repin-pgtools.ts` 헤더는 옛 주장을 **따옴표로 인용해** 무엇이
+  #    왜 틀렸는지 설명한다 — 그건 살아 있는 주장이 아니라 기록이고, 지우면 재발 방지 근거가 사라진다.
+  #    (처음엔 두 파일을 함께 검사했다가 그 인용을 오탐으로 잡아 이 경계를 명시하게 됐다.)
+  run grep -nE '[0-9]+-site|[0-9]+개 소비처' "$ROOT/.github/workflows/bump.yaml"
+  [ "$status" -ne 0 ] || { echo "낡은 건수 주장이 남아 있다:"; echo "$output"; false; }
+}

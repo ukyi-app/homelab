@@ -87,14 +87,15 @@ jobs:
             case "$app" in
               ''|*[!a-z0-9-]*) echo "skip suspicious app name: '$app'"; continue ;;
             esac
-            # 배포되는 앱은 values.yaml을 bump, ops 이미지(pg-tools)는 5-site 인라인 digest를 재핀
+            # 배포되는 앱은 values.yaml을 bump, ops 이미지(pg-tools)는 인라인 digest를 **레포에서 파생한 전 사이트**에 재핀
             if [ -f "apps/$app/deploy/prod/values.yaml" ]; then
               echo "verify ghcr.io/$OWNER/$app:$SHA exists BEFORE bumping"
               docker manifest inspect "ghcr.io/$OWNER/$app:$SHA" >/dev/null 2>&1 \
                 || { echo "::error::ghcr.io/$OWNER/$app:$SHA missing — refusing to bump (would ImagePullBackOff)"; exit 1; }
               bun tools/bump-tag.ts "$app" "$SHA"
             elif [ "$app" = "pg-tools" ]; then
-              # ops 이미지: values.yaml 없음 — pg-tools:18-rclone 새 digest를 5-site 인라인 핀에 재핀(부분 갱신 skew 차단)
+              # ops 이미지: values.yaml 없음 — pg-tools:18-rclone 새 digest를 인라인 핀 전 사이트에 재핀(부분 갱신 skew 차단).
+              # 대상 수를 여기 적지 않는다 — 도구가 레포에서 파생하므로 주석의 숫자가 곧 다섯 번째 사본이 된다.
               digest="$(docker buildx imagetools inspect "ghcr.io/$OWNER/pg-tools:18-rclone" --format '{{.Manifest.Digest}}')"
               case "$digest" in sha256:*) : ;; *) echo "::error::pg-tools digest 해석 실패: '$digest'"; exit 1 ;; esac
               bun tools/repin-pgtools.ts "$digest"
@@ -107,12 +108,14 @@ jobs:
           git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
           branch="bump/build-${RUN_ID}"
           git checkout -b "$branch"
-          # apps는 디렉토리 형식(인레포 앱 0일 때 glob 미매치 pathspec 에러 회피 — pg-tools 전용 bump 대응)
-          git add apps \
-                  platform/cache/prod/backup-cronjob.yaml \
-                  platform/cnpg/prod/ensure-role-password-job.yaml \
-                  platform/cnpg/prod/restore-drill-cronjob.yaml \
-                  platform/cnpg/prod/pgdump-hedge-cronjob.yaml
+          # ⚠️ **파일 화이트리스트를 쓰지 않는다.** 예전엔 여기 pg-tools 소비처 4개가 박혀 있었는데,
+          #    그건 `tools/repin-pgtools.ts`의 옛 하드코딩 `CONSUMERS`와 같은 목록의 **네 번째 사본**이었다.
+          #    재핀이 대상을 레포에서 파생하도록 바뀐 뒤(D-1) 도구는 6파일을 고치는데 이 목록은 4개만
+          #    스테이지해서, **다음 재빌드마다 방금 고친 드리프트가 그대로 되돌아온다**(적대 검토가 실측).
+          #    디렉토리 스코프로만 제한하고 파일 열거는 하지 않는다 — 러너는 fresh checkout이라
+          #    이 두 루트의 변경은 위 도구들이 만든 것뿐이다.
+          #    (apps를 디렉토리로 주는 이유는 그대로다: 인레포 앱 0일 때 glob 미매치 pathspec 에러 회피.)
+          git add -A -- apps platform
           git commit -m "chore: 빌드 산출물 이미지 핀 갱신 (${APPS})"
           git push -u origin "$branch"
           # PR-first 쓰기 모델: gate 통과 시 자동 머지(squash). 머지 후 브랜치는 자동 삭제(repo 설정).
