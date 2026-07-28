@@ -102,3 +102,51 @@ data:
             annotations:
               summary: "실행 중인 이미지가 최신 GHCR digest와 불일치: {{ $labels.app }}"
               description: "빌드가 새 이미지를 푸시했지만 실행 중인 파드가 반영하지 못했습니다(R6 write-back/sync staleness). 발화했다면 **실제 드리프트**입니다 — ArgoCD sync 지연/실패 또는 태그 write-back 고장을 확인하세요. 이미지 bump 직후의 일시 phantom(구 digest가 rollup 윈도 동안 되살아나는 상태 래치)은 윈도 불변식 push(10m) ≤ W(15m) < for(20m)이 구조적으로 차단하며 회귀 게이트가 매 실행 강제합니다."
+          # ── GHA 워크플로 liveness (티켓 10) ──────────────────────────────────────────────────
+          # 09(준비상태 회계)는 *run 안에서* job이 조용히 skip되는 것을 닫았다. 남은 표면은 **run이 아예
+          # 발생하지 않는 것**이다 — GitHub의 60일 스케줄 자동 비활성화·Actions 비활성화·스케줄러 유실.
+          # 그건 run conclusion으로 원리적으로 볼 수 없다(없는 run은 색이 없다). 관측자가 run **밖**에
+          # 있어야 하고, GitHub-hosted 러너는 internal-by-default 때문에 vmsingle에 도달할 수 없으므로
+          # 방향은 클러스터가 GitHub을 폴링하는 쪽뿐이다(gha-liveness-exporter, */30).
+          #
+          # ★ 임계값을 룰에 **하드코딩하지 않는다**. 감시 대상 8종의 주기가 10분~1주로 두 자릿수 배
+          #   차이라 단일 임계값이 성립하지 않고, 워크플로별 룰을 8개 쓰면 목록이 레포와 어긋나는
+          #   클래스(티켓 07 D-1)를 되풀이한다. exporter가 예산을 **메트릭으로 함께 push**하고 룰은
+          #   그 둘을 비교한다 — 예산이 바뀌면 룰 수정 없이 따라온다.
+          # ★ 윈도 [3h]: push 주기(30m)보다 크고, 값이 **타임스탬프**라 rollup 윈도 상한 함정
+          #   (라벨-값 상태 게이지의 phantom 잔존)이 적용되지 않는다 — r4 하트비트 계열과 같은 비대칭.
+          - alert: GHAWorkflowStale
+            expr: |
+              (time() - max by (workflow) (last_over_time(gha_workflow_last_success_timestamp[3h])))
+              > max by (workflow) (last_over_time(gha_workflow_max_age_seconds[3h]))
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "GHA 워크플로 {{ $labels.workflow }}가 예산을 넘도록 성공 run이 없다"
+              description: "스케줄 워크플로가 예산 시간 안에 한 번도 성공하지 못했습니다. run이 **아예 발생하지 않는** 경우(GitHub의 60일 스케줄 자동 비활성화·Actions 비활성화·스케줄러 유실)는 run conclusion으로 볼 수 없어 이 알림이 유일한 신호입니다. Actions 탭에서 해당 워크플로가 비활성화됐는지 먼저 확인하세요."
+          # 감시견의 감시견 — exporter가 죽으면 위 알림이 조용히 실명한다(시리즈가 [3h] 윈도에서 만료).
+          # ★ 부트스트랩 안전성: 첫 하트비트 ≤ cron(1800s) + ADS(120s) + 파드 예산(60s) = 1980s < 5400s.
+          #   최초 배포에 거짓 페이지가 나지 않는다(digest-exporter가 같은 자리에서 배운 계약).
+          # ★ bare 시리즈여야 하는 이유: 좌·우 브랜치가 같은 (빈) 라벨셋을 내야 시리즈 만료 시 알림
+          #   identity가 유지돼 for: pending이 리셋되지 않는다.
+          - alert: GHALivenessExporterStale
+            expr: |
+              (time() - last_over_time(gha_liveness_last_success_timestamp[6h])) > 5400
+              or absent(last_over_time(gha_liveness_last_success_timestamp[6h]))
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "gha-liveness-exporter 하트비트가 90분+ 침묵 — GHAWorkflowStale 실명 위험"
+              description: "CronJob(*/30)이 vmsingle에 하트비트를 못 보냅니다 — 크론 미실행/파드 기동 실패/push 경로 장애. 공급이 끊기면 GHAWorkflowStale이 조용히 실명해([3h] 윈도 만료) 워크플로 정지를 놓칩니다. Job 로그와 vmsingle 도달성을 확인하세요."
+          # 하트비트와 **직교하는 축** — push는 살아 있는데 GitHub 조회가 일부/전부 실패하는 부분 고장.
+          # (rate limit 403·API 장애·워크플로 파일 리네임) 그 상태에서 하트비트만 보면 조용하다.
+          # ★ zero-watch는 의도된 공백이다: WORKFLOWS가 비면 configured=0·scraped=0이고 `0 < 0`은 거짓이라
+          #   침묵한다 — 감시 대상이 0이면 그게 정답이다. `<=`로 바꾸거나 가드를 덧붙이지 마라.
+          - alert: GHALivenessScrapeIncomplete
+            expr: |
+              last_over_time(gha_liveness_scraped[3h]) < last_over_time(gha_liveness_configured[3h])
+            for: 90m
+            labels: { severity: warning }
+            annotations:
+              summary: "gha-liveness-exporter가 일부 워크플로를 조회하지 못했다"
+              description: "push는 살아 있는데 GitHub Actions 조회가 실패한 워크플로가 있습니다(미인증 rate limit 60/hr 초과·API 장애·워크플로 파일 리네임). 해당 워크플로는 GHAWorkflowStale 감시에서 조용히 빠집니다 — Job 로그의 'gha run lookup failed: workflow=' 줄을 확인하세요."

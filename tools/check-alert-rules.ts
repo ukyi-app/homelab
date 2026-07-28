@@ -179,6 +179,7 @@ type PushEntry = { metric: string; producer: string; schedule: Schedule };
 
 const DIGEST_EXPORTER = "platform/victoria-stack/prod/digest-exporter.yaml";
 const DU_EXPORTER = "platform/victoria-stack/prod/pvc-du-exporter.yaml";
+const GHA_LIVENESS = "platform/victoria-stack/prod/gha-liveness-exporter.yaml";
 const ADGUARD_RECONCILER = "platform/adguard/prod/rewrite-reconciler.yaml";
 const RESTORE_DRILL = "platform/cnpg/prod/restore-drill-script.sh";
 const FILES_BACKUP = "scripts/backup-files-data.sh";
@@ -196,6 +197,13 @@ const DEFAULT_REGISTRY: PushEntry[] = [
     .map((metric): PushEntry => ({ metric, producer: DIGEST_EXPORTER, schedule: { kind: "cron", file: DIGEST_EXPORTER } })),
   ...["pvc_dir_size_bytes", "storage_tier_size_bytes", "storage_tier_avail_bytes", "pvc_du_last_success_timestamp"]
     .map((metric): PushEntry => ({ metric, producer: DU_EXPORTER, schedule: { kind: "cron", file: DU_EXPORTER } })),
+  // gha-liveness-exporter(*/30) — GHA 스케줄 워크플로의 **마지막 성공 시각**을 GitHub API에서 읽어 push.
+  // 09가 닫지 못한 표면(run이 아예 발생하지 않는 것)의 유일한 관측자라, 이 push가 끊기면 그 감시가
+  // 통째로 실명한다 → GHALivenessExporterStale(r6)이 하트비트를 읽고, ScrapeIncomplete가 부분 고장을 읽는다.
+  // 예산(max_age)도 메트릭으로 함께 싣는다 — 룰이 워크플로별 임계값을 하드코딩하지 않게 하려는 것이다.
+  ...["gha_workflow_last_success_timestamp", "gha_workflow_max_age_seconds",
+    "gha_liveness_configured", "gha_liveness_scraped", "gha_liveness_last_success_timestamp"]
+    .map((metric): PushEntry => ({ metric, producer: GHA_LIVENESS, schedule: { kind: "cron", file: GHA_LIVENESS } })),
   ...["adguard_rewrite_reconcile_timestamp", "adguard_rewrite_last_fix_timestamp"]
     .map((metric): PushEntry => ({ metric, producer: ADGUARD_RECONCILER, schedule: { kind: "cron", file: ADGUARD_RECONCILER } })),
   // push는 스크립트가, 크론(`0 5 * * 0` 주 1회)은 별도 CronJob 매니페스트가 들고 있다.
