@@ -97,10 +97,44 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
 `SCAN:`은 “n건 평가했다”(정상 경로)다. 바닥값 **실패** 경로도 마커를 내지 않는다 — 그때의 건수는
 “검사했다”가 아니라 “붕괴했다”는 뜻이라 같은 마커로 내면 정반대로 읽힌다.
 
-**⚠️ 커버리지는 완전하지 않다.** 오늘 신호를 내는 것은 가드 27종 중 **11종**(셸 8 + TS 3),
-라벨로는 **15개**(셸 10 + TS 5)다.
+**⚠️ 커버리지는 완전하지 않다.** 오늘 신호를 내는 것은 가드 28종 중 **12종**(셸 8 + TS 4),
+라벨로는 **17개**(셸 10 + TS 7)다(`check-workflow-readiness`의 런타임 전용 라벨 `:accounted`는
+회계 job에서만 나오므로 이 표에 포함하지 않는다).
 소비자는 “SCAN 없음”을 “픽스처”나 “0건”으로 읽으면 **안 된다** — 그건 **미지(unknown)** 다.
 신호가 없는 가드에 대한 판정은 종전대로 과다 계상(있는 호출을 권위로 셈)에 머문다.
+
+### 워크플로 준비상태 회계 — 원장 + 게이트 밖 accounting job
+
+**병.** 자격/설정이 없어 GHA job이 통째로 skip되면 run은 **초록**이다. GHA job conclusion 어휘
+(`success|failure|cancelled|skipped`)에는 "안 돌았다"가 없고, **스텝-레벨로 게이트된 job은 스텝을
+전부 skip해도 `success`로 끝난다**. 게다가 skip된 job은 스텝을 0개 실행하므로 그 안의 실패 알림은
+`if: always()`여도 함께 죽는다 → owner 신호가 정확히 **0**이다. 실측(2026-07-27): `tf-reconcile`의
+`drift-github`·`drift-tailscale`은 시크릿 미등록으로 **한 번도 실행된 적이 없는데** 매 30분 초록이었다.
+
+**규약.**
+- 준비상태 게이트 = **자격 변수의 공백 검사**로 job/스텝을 끄는 것(`secrets.*`/`vars.*` env를
+  `[ -n "$X" ]`로 재고 `<key>=false`를 `$GITHUB_OUTPUT`에 씀). 이 게이트를 가진 job은 **반드시**
+  `policy/workflow-readiness.json`에 선언한다 — `required`(severity `error`/`warning`) ·
+  `unconfigured`(알려진 갭, `since`+`owner_action` 필수) · `optional`(백스톱이 따로 있어 정당).
+  **선언되지 않은 미설정은 정적 가드가 red로 막는다.**
+- 스텝-레벨 게이트는 job에 `outputs.executed`를 승격한다. 승격 없이는 job이 항상 success라
+  회계가 **원리적으로** 아무것도 관측할 수 없다.
+- 각 워크플로는 게이트 **밖**에 `accounting` job을 둔다: `if: ${{ !cancelled() }}`(상태함수가 없으면
+  기본 `success()`가 걸려 감시자가 감시 대상과 함께 skip된다) + 선언된 전 job을 `needs` + 
+  `bun tools/check-workflow-readiness.ts --workflow <file>`.
+- 알림 스텝은 **절대 감시 대상 job 안에 두지 않는다**(위 병의 정의 그 자체다).
+- 선언된 갭(`unconfigured`)은 telegram을 울리지 않는다 — 매 주기 재발해 진짜 신호를 덮는다. 갭의
+  venue는 run 로그 + job summary + 원장이다. 반대로 갭이 **닫히면**(선언은 unconfigured인데 실제로
+  실행됨) 회계가 exit 1을 낸다: 현실과 어긋난 원장은 다음 사람에게 "원래 안 도는 것"으로 읽힌다.
+
+**skip 신호(exit 4)를 쓰지 않는 이유.** 워크플로 계층엔 그 채널이 없다. `exit 4`를 낼 스텝 자체가
+실행되지 않기 때문이다 — 관측은 job 밖에서만 가능하다.
+
+**도메인-크기 게이트는 이 규약의 대상이 아니다.** "검사 대상이 0건이라 skip"은 자격 부재가 아니라
+열거 붕괴 클래스이고 처방이 다르다(**바닥값** — 위 '가드 스캔 신호' 절). `dns-drift`가 그 예다:
+`active&&public + platform_hosts == 0 → clean skip`이던 게이트를 없애고 `--min-reserved`(기본 1,
+fail-closed) 바닥값으로 대체했다. 예약 platform host는 구조적으로 항상 ≥1이라 0은 "대상 없음"이
+아니라 SSOT 부재/키 변경이기 때문이다.
 
 ## 커밋 메시지 (한국어 conventional commits)
 `type: 설명` — type ∈ `feat | fix | refactor | style | docs | test | chore`.

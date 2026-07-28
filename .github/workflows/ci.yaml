@@ -77,6 +77,12 @@ jobs:
         # 추가하는 것만으로 **회계 전체가 초록인 채 꺼진다** — 다른 가드는 이 도구가 지키는데
         # 이 도구를 지키는 것이 없어지는 자기 사각지대다(적대적 리뷰가 실측으로 지목).
         run: bun tools/check-guard-authority.ts
+      - name: 워크플로 준비상태 회계 (G-09 — 자격 부재로 job이 조용히 skip되는 것 차단)
+        # ⚠️ check-guard-authority와 같은 이유로 **명시 스텝**이다. 이 회계의 권위가 자기 bats
+        # 하나뿐이면 tests/.ci-exclude에 한 줄 추가하는 것만으로 회계 전체가 초록인 채 꺼진다.
+        # 여긴 정적 방향(원장 ↔ 워크플로 양방향 대조)만 본다 — 런타임 판정은 각 워크플로의
+        # accounting job이 `--workflow <file>`로 수행한다.
+        run: bun tools/check-workflow-readiness.ts
       - name: gate bats suite (run-bats.sh — 단일 수집 SSOT)
         # 수집은 scripts/run-bats.sh 단일 진입점: git-tracked test_*.bats − platform/charts(chart-test 별도) −
         # tests/.ci-exclude(라이브/docker/age/terraform). make ci 와 동일 호출 → 이중 SSOT 제거.

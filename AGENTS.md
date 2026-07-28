@@ -109,6 +109,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - emptyDir sizeLimit vs 런타임 다운로드 페이로드
 - 열거 붕괴 → vacuous green (프로세스 치환·커맨드 치환·부정 카운트)
 - PreToolUse 훅 종료코드 — fail-closed는 exit 2뿐
+- GHA job-level skip은 run conclusion에 안 보인다 — 스텝 전부 skip이어도 job은 success
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

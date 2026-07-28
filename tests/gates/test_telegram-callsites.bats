@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# 15개 호출처가 telegram-notify 계약을 지키는지 검사. ⚠️ 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵통과).
+# 모든 호출처가 telegram-notify 계약을 지키는지 검사(건수는 아래 EXPECTED here-doc이 유일한 SSOT —
+# 헤더에 숫자를 박으면 그 자체가 낡은 주장이 된다. 실제로 '15개'로 굳어 있던 것을 걷어냈다). ⚠️ 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵통과).
 # ⚠️ declare -A 금지(bash 3.2 미지원) — 기대 목록은 here-doc로.
 # ⚠️ @test 이름은 영어만(한글이면 bats 파싱 깨짐 — 검증된 버그, AGENTS.md).
 setup() {
@@ -7,15 +8,21 @@ setup() {
   command -v yq >/dev/null || skip "yq required"
 }
 
-@test "exactly the expected workflows notify via the action (self-deriving sum, bump=1, tf-reconcile=3)" {
+# ⚠️ 테스트 이름에 건수를 박지 않는다 — 이름이 곧 낡은 주장이 된다(이 이름은 실제로 bump=1·
+# tf-reconcile=3으로 굳어 있었고 그 사이 둘 다 바뀌었다). 권위는 아래 here-doc 하나다.
+@test "exactly the expected workflows notify via the action (self-deriving sum)" {
   # ⚠️ codex restale3 F1: 합계는 here-doc 줄의 self-deriving sum(절대값 prebake 금지) — 새 콜사이트(P6 pr-sweeper·
   # P8 build.yaml)는 EXPECTED here-doc 줄만 더하면 된다(머지 순서 의존 절대값 무수정).
   # B6a: 4 변이 디스패처(create-app/update-secrets/create-database/create-cache)는 notify를
   # .github/actions/mutation-notify composite로 위임(→내부에서 telegram-notify) → 직접 카운트 0.
   # 위임 자체는 test_mutation-dispatch.bats가 검증(composite uses + job.status 직접참조 금지).
-  # bump-poll=2: bump 루프(poll job)와 **인가 회수(reconcile job)** 가 각각 알린다(structure r8 R-27).
+  # bump-poll=3: bump 루프(poll job) + **인가 회수(reconcile job)** + **준비상태 회계(accounting job)**.
   # 회수는 독립 job이라 자기 실패를 스스로 알려야 한다 — poll의 알림에 얹으면 그 job의 성공에 묶인다
   # (그리고 회수 실패는 "낡은 auto-merge 인가가 살아남았다"는 **보안** 사실이라 조용하면 안 된다).
+  # 회계 job의 알림이 **별도**인 이유는 더 근본적이다(G-09): 감시 대상 job이 skip되면 그 안의 알림 스텝은
+  # `if: always()`여도 실행되지 않는다 — 게이트 밖 job만이 그 침묵을 알릴 수 있다.
+  # tf-reconcile=4(수렴 + github/tailscale 드리프트 + 회계) · renovate=1(회계 전용 — 이 워크플로의 첫 알림).
+  # iac는 회계가 있어도 0→1이 아니다: PR 컨텍스트라 red 체크 자체가 사람이 보는 신호이고 매 PR 알림은 소음이다.
   EXPECTED="$(cat <<'EOF'
 _create-app.yaml 1
 _create-database.yaml 1
@@ -28,10 +35,11 @@ create-database.yaml 0
 create-cache.yaml 0
 audit.yaml 1
 bump.yaml 1
-bump-poll.yaml 2
+bump-poll.yaml 3
 iac.yaml 1
-tf-reconcile.yaml 3
+tf-reconcile.yaml 4
 dns-drift.yaml 1
+renovate.yaml 1
 contract-drift.yaml 1
 pr-sweeper.yaml 1
 build.yaml 1

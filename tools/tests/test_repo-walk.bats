@@ -167,7 +167,22 @@ apps/probe" ]
 @test "SCOPE_NAMES exposes the registered scopes" {
   run walk 'console.log(SCOPE_NAMES.slice().sort().join(","))'
   [ "$status" -eq 0 ]
-  [ "$output" == "apps,apps-manifests,apps-values,guards,platform,platform-image-refs,platform-manifests,producers,rules" ]
+  [ "$output" == "apps,apps-manifests,apps-values,guards,platform,platform-image-refs,platform-manifests,producers,rules,workflows" ]
+}
+
+# `workflows` 스코프의 위험은 **이름 기반 축소**다 — `_*.yaml`(내부 reusable)과 `reusable-*.yaml`
+# (cross-repo 계약)도 자기 job을 실행하므로 준비상태 회계 대상이다. 역방향 단언으로 못박는다:
+# 추적된 워크플로 YAML은 전부 열거된다(정방향 "규약 밖 0건"만 두면 include가 좁아져도 계속 참이다).
+@test "workflows enumerates every tracked workflow YAML including reusable ones" {
+  run walk 'const got=new Set(walkManifests("workflows").map(e=>e.path)); const {execFileSync}=require("node:child_process"); const want=execFileSync("git",["ls-files","--",".github/workflows"],{encoding:"utf8"}).split("\n").filter(p=>/\.ya?ml$/.test(p)); console.log(want.filter(p=>!got.has(p)).join(","))'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "workflows does not collapse against the real repository" {
+  run walk 'console.log(walkManifests("workflows").length)'
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 20 ]
 }
 
 # `guards` 스코프는 "이 레포에서 무엇이 불변식을 강제한다고 주장하는가"에 답한다(G1 권위 회계의 열거 대상).

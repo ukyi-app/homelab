@@ -203,6 +203,22 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   **`make verify`·`make ci`는 비권위**(CI에서 돌지 않는 로컬 mirror)로 분리해 센다. 판정은
   `authoritative >= 1` — venue는 의도적으로 겹치므로 정확히-하나 모델이면 오탐이 난다.
   `tests/gates/test_guard-authority.bats`가 호출(픽스처 red-green + 실 레포 전건).
+- **`check-workflow-readiness.ts`** — G-09 준비상태 회계: 자격/설정 부재로 **job이 통째로 skip됐는데
+  run은 초록**인 경로를 닫는다. GHA job conclusion 어휘엔 "안 돌았다"가 없고, 스텝-레벨로 게이트된
+  job은 스텝을 전부 skip해도 **success**로 끝난다(2026-07-27 라이브 실측: tf-reconcile의 신뢰 앵커
+  드리프트 감시 2개가 한 번도 실행된 적 없이 매 30분 초록). skip된 job은 `if: always()` 스텝조차
+  실행하지 않으므로 신호는 **게이트 밖의 별도 accounting job**에서만 낼 수 있다.
+  두 모드가 한 파일에 있는 이유는 게이트 탐지 규칙이 SSOT여야 하기 때문이다:
+  - **정적**(무인자, `ci.yaml` gate 명시 스텝 + `make verify`) — `policy/workflow-readiness.json`
+    원장 ↔ 실제 워크플로 **양방향** 대조. 미선언 게이트(역방향)·죽은 선언(정방향)·`outputs.executed`
+    미승격·회계 job 부재/`!cancelled()` 누락/`needs` 누락·`expect_executed` 바닥값·**면제 불가
+    보안 항목**(`bump-poll.reconcile`은 required+error 고정)을 강제.
+  - **런타임**(`--workflow <file>`, env `WORKFLOW_NEEDS`=`toJSON(needs)`) — 각 워크플로 accounting
+    job이 호출. `needs.*.result`(job-level) / `needs.*.outputs.executed`(step-level)로 판정하고
+    severity에 따라 `::error::`+exit 1 또는 `::warning::`. **실패는 실행된 것으로 센다**(이미 loud).
+  게이트 탐지는 **자격 변수의 공백 검사**(`secrets.*`/`vars.*` env를 `[ -n "$X" ]`로 재고 플래그를
+  내림)를 요구한다 — 이 선이 도메인-크기 게이트(열거 붕괴 클래스, 처방=scan-floor)와 결과 플래그
+  (terraform `drift=false` 등)를 갈라낸다. `tests/gates/test_workflow-readiness.bats`가 호출.
 - **`check-resource-limits.ts`** — 상주 워크로드 main 컨테이너 cpu·memory request + memory limit +
   GOMEMLIMIT≤limit×0.95 강제(구 bash+yq+python3 이관). **`make verify`**(로컬 mirror)·gate 수집 bats(`tests/test_resource_limits.bats`)가 호출 — ci.yaml gate 스텝이 직접 부르지는 않는다(`check-guard-authority` 실측). `--repo-root`로 스캔 루트 지정.
 - **`check-alert-rules.ts`** — vmalert 룰 expr의 eval-time 안티패턴 정적 lint(`-dryRun`은 파싱만 해서 못 잡는
@@ -240,6 +256,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   표면 무변경 + 행 고정을 검증해 재노출을 재승인한다(런북 `app-platform.md`). 라이브 무변경(게이트만).
 - **`dns-drift-check.ts`** — active&&public 앱 host + 예약 platform host(`reserved-hosts.json`)가 실제
   resolve되는지(apply 누락=NXDOMAIN, transient는 별도 버킷) 검사. `dns-drift.yaml`(주기)이 호출. resolver 주입(`--fixture`)으로 테스트. 읽기 전용.
+  **레인별 바닥값** `--min-reserved`(기본 1, fail-closed) — 예약 platform host는 구조적으로 항상 ≥1이라
+  0은 "대상 없음"이 아니라 SSOT 부재/키 변경이다. 픽스처만 `--min-reserved 0`으로 **명시** 해제한다
+  (기본을 0으로 두면 조용히 꺼진 바닥값이 된다). 출력의 `scanned`가 스캔 신호다 — stdout이 기계 판독
+  JSON이라 `SCAN:` 마커를 못 낸다.
 - **`contract-drift-check.ts`** — 동봉 계약(vendored `seal-secret.mts`·`sealed-secrets-cert.pem`)이 다운스트림
   3위치(template scaffold·page·trip-mate-api)와 어긋나는지 정규화 diff(`vendored-contract.json` SSOT). files(Rust)는 대상 아님.
   `contract-drift.yaml`(주 1회)이 호출·telegram 알림. `--self-test` 오프라인 유닛, 라이브 raw fetch는 워크플로 전용. 읽기 전용.

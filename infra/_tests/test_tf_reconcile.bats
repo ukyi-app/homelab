@@ -2,7 +2,8 @@
 # tf-reconcile.yaml의 안전 불변식 가드:
 #  - github/tailscale 루트는 plan-only(무인 apply 절대 금지 — 신뢰 앵커/고-blast-radius).
 #  - cloudflare 루트만 apply하며 destroy 가드를 유지한다.
-#  - 각 드리프트 잡은 시크릿 부재 시 skip(preflight)되어야 한다.
+#  - 시크릿 부재로 인한 skip은 **관측 가능해야 한다**(G-09 준비상태 회계) — 예전엔 그 skip을
+#    "바람직한 상태"로 못박고 있었는데, 실제로는 신뢰 앵커 감시가 통째로 죽는 상태였다.
 
 WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
 
@@ -26,11 +27,38 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
   [ "$status" -eq 0 ]
 }
 
-@test "drift jobs skip when secrets absent (preflight gate)" {
-  # 두 드리프트 잡 모두 configured 플래그로 게이트된다(+ 기존 reconcile preflight).
-  run grep -c 'configured=true' "$WF"
+# ⚠️ 이 자리엔 "drift jobs skip when secrets absent (preflight gate)"가 있었다. 두 가지가 틀렸다:
+#   ① 이름이 **skip을 바람직한 상태로 못박았다.** 실제로 그 skip은 신뢰 앵커(branch protection·CI
+#      시크릿·tailscale ACL) 드리프트 감시가 **통째로 죽는** 상태다 — 2026-07-27 실측으로 두 job이
+#      한 번도 실행된 적이 없음이 확인됐고, 그동안 매 30분 run은 초록이었다.
+#   ② 단언이 이름과 달랐다. `grep -c 'configured=true' >= 3`은 **게이트가 몇 개 있는지**만 셌고
+#      skip 자체는 검증하지 않았다(프록시 단언). accounting job을 추가해도 이 수는 줄지 않는다.
+# 대체 계약: 게이트가 있다는 사실이 아니라 그 게이트가 **관측 가능한가**를 본다(G-09).
+@test "step-level gated drift jobs promote outputs.executed (observability of a silent skip)" {
+  # 스텝-레벨 게이트는 job이 항상 success다 — 이 승격이 없으면 회계가 원리적으로 아무것도 못 잡는다.
+  run grep -c 'executed: ${{ steps.drift.outputs.executed }}' "$WF"
   [ "$status" -eq 0 ]
-  [ "$output" -ge 3 ]
+  [ "$output" -eq 2 ]
+  # 승격의 소스 — plan 스텝이 실제로 진입했을 때만 true가 된다.
+  run grep -c 'echo "executed=true" >> "\$GITHUB_OUTPUT"' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 2 ]
+}
+
+@test "an accounting job outside the gates observes every readiness-gated job" {
+  # 게이트 **밖**이어야 한다: skip된 job 안의 스텝은 if: always()여도 실행되지 않는다(라이브 실측).
+  run grep -qE '^  accounting:' "$WF"
+  [ "$status" -eq 0 ]
+  run grep -q 'needs: \[preflight, reconcile, drift-github, drift-tailscale\]' "$WF"
+  [ "$status" -eq 0 ]
+  run grep -q 'if: ${{ !cancelled() }}' "$WF"
+  [ "$status" -eq 0 ]
+  run grep -q 'check-workflow-readiness.ts --workflow tf-reconcile.yaml' "$WF"
+  [ "$status" -eq 0 ]
+  # 권위 계약(원장 ↔ 워크플로 양방향 + 런타임 판정)은 required gate가 지킨다 —
+  # 이 파일은 tests/.ci-exclude라 iac.yaml advisory에서만 돈다.
+  run grep -q 'check-workflow-readiness' "$BATS_TEST_DIRNAME/../../.github/workflows/ci.yaml"
+  [ "$status" -eq 0 ]
 }
 
 @test "cloudflare reconcile keeps the destroy guard" {

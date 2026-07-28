@@ -33,6 +33,7 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@bun tools/check-resource-limits.ts
 	@bun tools/check-alert-rules.ts
 	@bun tools/check-guard-authority.ts
+	@bun tools/check-workflow-readiness.ts
 	@bash scripts/check-app-netpol.sh
 	@bash scripts/check-image-pins.sh
 	@scripts/verify-ledger.sh
