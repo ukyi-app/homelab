@@ -524,7 +524,7 @@ mutable tag였다(argocd ×5 · cert-manager ×3 · tailscale ×3 · sealed-secr
 
 > 가드: `tools/check-image-ownership.ts`, `policy/image-ownership.json`, `tests/gates/test_image-ownership.bats`, `tests/gates/test_pgtools-digest.bats`
 
-## vmalert replay의 rulesDelay — 게이트 시간의 전부이자, 비율이 아니라 절대 지연이 계약
+### vmalert replay rulesDelay — 비율 아닌 절대 지연·체인 없으면 순수 낭비
 
 `--replay.rulesDelay`는 vmalert replay가 **룰마다 한 번씩** 자는 값이라, 이 계열 게이트(발화 e2e)의
 벽시계는 사실상 그 sleep의 총합이다:
