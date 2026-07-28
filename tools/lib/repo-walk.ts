@@ -161,6 +161,23 @@ const SCOPES: Record<string, ScopeDef> = {
       /^(scripts\/((check|verify)-[^/]+|[^/]+-(guard|check))\.sh|tools\/(check|verify)-[^/]+\.ts|tests\/gates\/[^/]+\.sh)$/,
     exclude: [],
   },
+  // "이 파일이 이미지 참조를 담을 수 있는가" — **소유권 회계(G2)** 전용. `platform-image-refs`와
+  // 겹쳐 보이지만 **다른 질문에 답한다**:
+  //   platform-image-refs = "digest로 핀해야 하는가" → 벤더(barman-plugin·gateway-api CRD)를 **뺀다**.
+  //     수정 금지 파일이라 핀 요구의 대상이 아니기 때문이다.
+  //   image-ownership     = "누가 이걸 최신으로 유지하는가" → 벤더를 **포함한다**. 수정 금지여도
+  //     답이 있어야 하고(re-vendor 절차), 답이 없으면 그게 곧 결함이다. 실측(2026-07-28):
+  //     barman-plugin manifest의 `SIDECAR_IMAGE`가 base64로 Secret 안에 tag-only로 들어 있어
+  //     핀 게이트·Renovate·grep 어디에도 안 걸린 채 데이터 내구성 경로에 있었다(D-3).
+  // apps·ops도 함께 본다 — 소유자 질문은 platform에 국한되지 않는다(ops/는 빌드 소스, apps/는 bump-poll).
+  // ⚠️ 테스트 하네스는 뺀다: 픽스처 안의 이미지 문자열은 실물이 아니라 **주장**이라 소유자가 없는 게 정상이다.
+  "image-ownership": {
+    kind: "manifests",
+    source: "tracked",
+    root: "",
+    include: /^(platform|apps|ops)\/.*\.ya?ml$/,
+    exclude: TEST_HARNESS,
+  },
   // GHA 워크플로 — "이 레포에서 CI가 무엇을 실행하는가". 준비상태 회계(G-09)의 열거 대상.
   // tracked 열거라 로컬 잔재(에디터 백업·워크트리)가 안 섞이고, 글롭이 깨지면 소비자 바닥값이 잡는다.
   // ⚠️ 제외가 **비어 있는 게 맞다** — `_*.yaml`(내부 reusable)·`reusable-*.yaml`(cross-repo 계약)도

@@ -1,0 +1,78 @@
+{
+  "_readme": [
+    "이미지 소유권 원장 — '이 이미지를 누가 최신으로 유지하고, 누가 immutable 핀을 보증하는가'의 SSOT.",
+    "가드: tools/check-image-ownership.ts (ci.yaml gate + make verify). 산문 SSOT: CONTRIBUTING.md.",
+    "",
+    "두 축은 다르다. **freshness 소유자**(새 버전을 가져오는 것)와 **digest 소유자**(immutable 핀을",
+    "보증하는 것)가 자주 갈린다. helm 차트 내부 기본 이미지가 그 전형이다 — 차트 **버전**은 Renovate가",
+    "소유하지만 내부 이미지는 렌더 시점에 mutable tag로 해석되므로 digest 소유자가 **없다**.",
+    "'Renovate 관할'이라고만 적으면 그 차이가 지워진다(scripts/check-image-pins.sh 헤더가 실제로",
+    "그렇게 적혀 있었고, 그건 절반만 참이었다).",
+    "",
+    "이 파일은 **digest 소유자가 없는 아티팩트**만 담는다. 소유자가 있는 참조는 가드가 계산한다",
+    "(pg-tools→repin-pgtools · apps/베스포크→bump-poll · 추적 매니페스트→Renovate 도달성 실측).",
+    "**선언되지 않은 무소유는 통과할 수 없다.** 선언은 면제가 아니라 계상이다 — why·freshness·since·",
+    "owner_action이 전부 필수이고, 매치되지 않는 선언(죽은 선언)도 red다.",
+    "",
+    "artifact 형식: '<파일경로>#<이미지참조>' · '<파일경로>'(그 파일의 모든 무소유 참조) ·",
+    "'chart:<차트이름>'(레포에 파일이 없는 차트 내부 이미지 클래스)."
+  ],
+  "unowned": [
+    {
+      "artifact": "platform/cnpg/barman-plugin/manifest.yaml#ghcr.io/cloudnative-pg/plugin-barman-cloud:v0.13.0",
+      "why": "barman-cloud CNPG-I 플러그인 컨트롤러. 업스트림 릴리스 manifest를 통째로 벤더링한 파일이라(AGENTS.md '벤더 파일 수정 금지') digest 핀을 직접 넣을 수 없고, renovate.json ignorePaths가 platform/cnpg/barman-plugin/**를 배제한다. WAL 아카이빙 = 데이터 내구성 경로에 있다.",
+      "freshness": "수동 re-vendor 전용 — 자동 채널이 없다. 업스트림 릴리스를 사람이 확인해 manifest.yaml 전체를 교체해야 한다(ArgoCD Application platform/argocd/root/apps/cnpg-barman-plugin.yaml이 이 경로를 싱크한다).",
+      "since": "2026-07-28",
+      "owner_action": "선택지 둘. ① 재벤더 시 릴리스 manifest의 tag를 digest로 치환하고 그 절차를 런북에 고정한다(벤더 파일을 수정하게 되므로 '벤더 무수정' 규약의 예외를 명시해야 한다). ② manifest를 그대로 두고 kustomize images 트랜스포머로 digest를 덮어써 digest 소유권을 레포로 가져온다(권장 — 벤더 파일 무수정 유지). 어느 쪽이든 CNPG 호환성(v0.13.0 ↔ CNPG 1.29)을 먼저 확인할 것."
+    },
+    {
+      "artifact": "platform/cnpg/barman-plugin/manifest.yaml#ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0",
+      "why": "⚠️ 이 참조는 **base64로 인코딩되어 Secret의 data.SIDECAR_IMAGE 안에** 있다. 그래서 (a) image: grep에 안 걸리고 (b) Secret이라 스캐너가 안 보고 (c) 벤더 경로라 핀 게이트·Renovate 양쪽에서 배제됐다 — 이 회계 이전 커버리지가 **정확히 0**이었다. CNPG가 이 값을 읽어 Cluster 파드에 사이드카로 주입하므로 WAL 아카이빙 경로 자체다.",
+      "freshness": "위 컨트롤러와 동일 — 수동 re-vendor 전용. 컨트롤러와 사이드카는 같은 릴리스에서 나오므로 함께 움직여야 한다(따로 움직이면 플러그인 프로토콜 skew).",
+      "since": "2026-07-28",
+      "owner_action": "컨트롤러 항목과 함께 처리한다. kustomize images 트랜스포머는 base64 Secret 값을 못 고치므로, 이 참조만은 재벤더 시 인코딩된 값을 digest 포함으로 다시 만들거나 CNPG 플러그인 설정으로 사이드카 이미지를 오버라이드하는 경로를 확인해야 한다."
+    },
+    {
+      "artifact": "chart:traefik",
+      "why": "gateway 인그레스 컨트롤러. 차트가 렌더하는 기본 이미지(docker.io/traefik:v3.7.6 — 라이브 실측)는 mutable tag다. 차트 tarball은 platform/traefik/prod/charts/에 캐시되는데 그 경로는 gitignored이고 renovate.json ignorePaths의 **/charts/**에도 걸려 **원리적으로** 도달 불가다.",
+      "freshness": "platform/traefik/prod/helmrelease.yaml의 version 핀 — renovate.json customManagers의 HelmChartInflationGenerator 정규식이 소유한다(automerge 금지, 리뷰 후 수동 머지).",
+      "since": "2026-07-28",
+      "owner_action": "digest 소유권을 원하면 values-traefik.yaml에서 image.repository/tag(차트가 지원하면 digest)를 명시 오버라이드해 레포로 끌어온다. 그러면 Renovate helm-values가 그 값을 관리한다. 비용: 차트 업그레이드마다 오버라이드가 차트 기본값과 어긋나지 않는지 확인해야 한다."
+    },
+    {
+      "artifact": "chart:tailscale-operator",
+      "why": "내부 인입 경계(tailscale passthrough)를 담당하는 operator + proxy 파드. 라이브 실측 이미지 tailscale/k8s-operator:v1.98.4 · tailscale/tailscale:v1.98.4 모두 mutable tag. 차트 캐시가 gitignored + ignorePaths라 도달 불가.",
+      "freshness": "platform/tailscale/prod/helmrelease.yaml의 version 핀(renovate customManagers). proxy 이미지는 operator가 ProxyClass/기본값으로 정하므로 operator 버전을 따라 움직인다.",
+      "since": "2026-07-28",
+      "owner_action": "values-tailscale.yaml의 operatorConfig.image / proxyConfig.image 오버라이드로 레포에 끌어올 수 있다. 네트워크 경계 컴포넌트라 업그레이드 시 라이브 검증(tailscale 도달성·pg 노출)을 함께 계획할 것."
+    },
+    {
+      "artifact": "chart:sealed-secrets",
+      "why": "SealedSecret 복호화 컨트롤러 — 클러스터의 모든 앱 시크릿이 이 이미지를 통과한다. 라이브 실측 docker.io/bitnami/sealed-secrets-controller:0.38.4, mutable tag. 차트 캐시 gitignored + ignorePaths.",
+      "freshness": "platform/sealed-secrets/prod/helmrelease.yaml의 version 핀(renovate customManagers). ⚠️ kubeseal CLI 버전이 .github/actions/setup-toolchain에 별도로 핀돼 있어 함께 움직여야 한다.",
+      "since": "2026-07-28",
+      "owner_action": "values-sealed-secrets.yaml에서 image 오버라이드. 시크릿 복호화 경로라 롤아웃 실패가 전 앱에 파급되므로 sealing key 백업 확인(scripts/backup-sealed-secrets-key.sh) 후 진행할 것."
+    },
+    {
+      "artifact": "chart:cert-manager",
+      "why": "TLS 발급 체인. 라이브 실측 quay.io/jetstack/cert-manager-{controller,webhook,cainjector}:v1.20.3 — 3개 모두 mutable tag. 차트 캐시 gitignored + ignorePaths.",
+      "freshness": "platform/argocd/root/apps/cert-manager.yaml의 targetRevision — renovate.json의 argocd manager가 소유한다.",
+      "since": "2026-07-28",
+      "owner_action": "cert-manager 차트는 image.repository/tag 오버라이드를 지원한다. 컨트롤러·webhook·cainjector 3개를 함께 핀해야 하며(부분 핀은 버전 skew), webhook 미준비 시 Certificate 발급이 막히므로 롤아웃 순서를 확인할 것."
+    },
+    {
+      "artifact": "chart:cloudnative-pg",
+      "why": "CNPG operator — DB 수명주기·백업·복구를 관장한다. 라이브 실측 ghcr.io/cloudnative-pg/cloudnative-pg:1.29.1, mutable tag. 차트 캐시 gitignored + ignorePaths. ⚠️ operator는 자기 버전에 맞는 PostgreSQL 이미지를 기대하므로 platform/cnpg/prod/cluster.yaml의 imageName(digest 핀됨)과 호환 쌍을 이룬다.",
+      "freshness": "platform/argocd/root/apps/cnpg-operator.yaml의 targetRevision(renovate argocd manager).",
+      "since": "2026-07-28",
+      "owner_action": "values.yaml(platform/cnpg/operator/values.yaml)에서 image 오버라이드. PG 메이저 업그레이드는 3-이미지 동시 갱신 함정(docs/traps-detail.md)에 걸리므로 operator·server·pg-tools를 한 묶음으로 계획할 것."
+    },
+    {
+      "artifact": "chart:argo-cd",
+      "why": "GitOps 컨트롤러 자신 — 이 레포를 클러스터에 적용하는 주체다. 라이브 실측 quay.io/argoproj/argocd:v3.4.4(5개 파드) + 번들 redis. 차트 캐시 gitignored + ignorePaths. ⚠️ argocd는 self-manage라 잘못된 핀이 자기 수렴을 막을 수 있다(부트스트랩 복구 경로 필요).",
+      "freshness": "platform/argocd/CHART_VERSION(renovate customManagers, datasource=helm argo-helm).",
+      "since": "2026-07-28",
+      "owner_action": "platform/argocd/bootstrap-values.yaml에서 global.image 오버라이드로 끌어올 수 있다. self-manage 컴포넌트라 롤백 경로(make bootstrap)를 먼저 확인하고, redis 등 번들 의존 이미지도 함께 볼 것."
+    }
+  ]
+}

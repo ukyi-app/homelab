@@ -167,7 +167,7 @@ apps/probe" ]
 @test "SCOPE_NAMES exposes the registered scopes" {
   run walk 'console.log(SCOPE_NAMES.slice().sort().join(","))'
   [ "$status" -eq 0 ]
-  [ "$output" == "apps,apps-manifests,apps-values,guards,platform,platform-image-refs,platform-manifests,producers,rules,workflows" ]
+  [ "$output" == "apps,apps-manifests,apps-values,guards,image-ownership,platform,platform-image-refs,platform-manifests,producers,rules,workflows" ]
 }
 
 # `workflows` 스코프의 위험은 **이름 기반 축소**다 — `_*.yaml`(내부 reusable)과 `reusable-*.yaml`
@@ -369,4 +369,27 @@ _fixture_repo() {
   [ "$status" -eq 0 ]
   # 하네스 둘은 빠지고(공유 어휘), 차트는 남는다(이 스코프만의 규칙) — 두 축을 한 번에 고정한다.
   [ "$output" == "false,false,true" ]
+}
+
+# `image-ownership`와 `platform-image-refs`는 **다른 질문**에 답한다.
+#   image-refs      = "digest로 핀해야 하는가" → 벤더를 뺀다(수정 금지라 핀 요구 대상이 아니다).
+#   image-ownership = "누가 최신으로 유지하는가" → 벤더를 **포함한다**(수정 금지여도 답이 있어야 한다).
+# 실측: barman-plugin manifest의 SIDECAR_IMAGE가 base64 Secret 안 tag-only라 핀 게이트·Renovate 어디에도
+# 안 걸린 채 데이터 내구성 경로에 있었다 — 벤더를 빼면 그 클래스가 영원히 안 보인다.
+@test "image-ownership includes vendored paths that platform-image-refs deliberately drops" {
+  run walk 'const own = walkManifests("image-ownership").map(e=>e.path);
+    const refs = walkManifests("platform-image-refs").map(e=>e.path);
+    const v = "platform/cnpg/barman-plugin/manifest.yaml";
+    console.log([own.includes(v), refs.includes(v)].join(","))'
+  [ "$status" -eq 0 ]
+  [ "$output" == "true,false" ]
+}
+
+@test "image-ownership spans platform, apps and ops and drops test harnesses" {
+  run walk 'const p = walkManifests("image-ownership").map(e=>e.path);
+    const roots = new Set(p.map(x=>x.split("/")[0]));
+    const harness = p.filter(x=>/(^|\/)tests?\/|(^|\/)fixtures|(^|\/)test_[^/]*$|\.bats$/.test(x));
+    console.log([...roots].sort().join("+") + "|" + harness.length)'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^(apps\+)?(ops\+)?platform.*\|0$'
 }
