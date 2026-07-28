@@ -51,3 +51,4 @@
 | PreToolUse 훅 종료코드(0=허용·2=차단·그 외=비차단) — 1/4 복사 시 fail-open | local | `tests/gates/test_manifest-guard.bats` |
 | GHA job-level skip은 run conclusion에 안 보인다(스텝 전부 skip이어도 job은 success) | gate+iac | `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats` |
 | 이미지 핀의 존재≠일치≠소유자(하드코딩 소비처 목록·base64 은닉·차트 내부 mutable tag) | gate | `tools/check-image-ownership.ts`, `policy/image-ownership.json`, `tests/gates/test_image-ownership.bats`, `tests/gates/test_pgtools-digest.bats` |
+| vmalert replay rulesDelay = 게이트 시간의 전부(비율 아닌 절대 지연·체인 없으면 순수 낭비) | gate | `tests/gates/test_vmalert-e2e-replay-timing.bats`, `tests/gates/lib/vmalert-e2e.sh` |

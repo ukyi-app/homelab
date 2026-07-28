@@ -80,6 +80,43 @@ vme_flush() {
   curl -sf -X POST "$VME_BASE/internal/force_flush" >/dev/null
 }
 
+# ── replay 지연 파생 ────────────────────────────────────────────────────────────────────────────
+# `--replay.rulesDelay`는 이 계열 게이트의 **wall-clock 그 자체**다. 룰마다 한 번씩 자므로
+#     벽시계 ≈ (룰 파일의 룰 수) × rulesDelay × (레그 수)
+# 이고, 실측이 이 모델과 3% 이내로 맞는다(drift: r6 6룰 × 8레그 × 4s = 192s 예측 / 194s 실측).
+# 즉 이 하네스들의 시간은 계산이 아니라 **거의 전부 sleep**이었다.
+#
+# 그런데 그 sleep이 존재하는 이유는 **딱 하나**다 — 체이닝 레이스:
+#   alert 룰이 record 룰의 remoteWrite 결과를 query_range **1회**로 읽는데, record 샘플이 아직 적재 전이면
+#   결과가 통째로 비어 ALERTS=0 → 버그가 아닌데 RED다(vmalert-drift-firing-e2e.sh:265, 실측된 실패).
+# ⇒ **체인이 없는 룰 파일에서는 그 대기가 순수 낭비다.** 그래서 파일에서 파생한다.
+#
+# ★ 실측이 "비율이면 된다"는 가설을 기각했다(2026-07-28): rulesDelay 4s→1s를 하면서 flushInterval을
+#   500ms→100ms로 함께 줄여 비율을 8×→10×로 **키웠는데도** drift가 위 FAULT로 죽었다. 구속 조건은 비율이
+#   아니라 **절대 지연 예산**이다(적재→질의 가능까지의 실제 시간은 flushInterval이 아니라 HTTP+인입 지연이
+#   지배한다). 그러니 체인이 있는 파일에서 이 값을 낮추려는 시도는 하지 마라 — 돌아오는 것은 조용한 오답이
+#   아니라 **간헐적 거짓 RED**이고, 그건 게이트를 신뢰 불가로 만들어 결국 꺼지게 만든다.
+VME_DELAY_CHAINED=4s   # 체인 있음 — 실측으로 안전이 확인된 값(낮추지 말 것)
+VME_DELAY_PLAIN=1s     # 체인 없음 — vmalert 기본값
+
+# $1=룰 파일 → 4s(체인 있음) | 1s(체인 없음). **fail-closed**: 파싱이 실패하면 보수값(4s)이다.
+# 판정: 어떤 `record:` 이름이 **다른 룰의 expr에 등장**하면 체인이다.
+vme_rules_delay() {
+  local rules="${1:-}" rec exprs
+  [ -s "$rules" ] || { printf '%s' "$VME_DELAY_CHAINED"; return 0; }
+  rec="$(yq '.groups[].rules[] | select(has("record")) | .record' "$rules" 2>/dev/null | grep -v '^null$' || true)"
+  # record 룰이 하나도 없으면 체인은 성립할 수 없다(가장 흔한 경우 — r4 계열).
+  [ -n "$rec" ] || { printf '%s' "$VME_DELAY_PLAIN"; return 0; }
+  exprs="$(yq '.groups[].rules[].expr' "$rules" 2>/dev/null || true)"
+  # expr 추출이 실패했는데 record는 있다 → 체인 여부를 판정 못 한다 → 보수값.
+  [ -n "$exprs" ] || { printf '%s' "$VME_DELAY_CHAINED"; return 0; }
+  local r
+  for r in $rec; do
+    case "$exprs" in *"$r"*) printf '%s' "$VME_DELAY_CHAINED"; return 0 ;; esac
+  done
+  printf '%s' "$VME_DELAY_PLAIN"
+}
+
 vme_replay() { # $1=vmsingle 컨테이너명 $2=vmalert 버전 $3=룰파일(호스트) $4=eval $5=lookback $6=from(epoch) $7=to(epoch)
   # ⚠️ ?max_lookback=<queryStep> — **룩백 핀**. vmalert replay는 instant 질의가 아니라 /api/v1/query_range를
   #    쓰는데, VM의 range 질의 룩백(staleness)은 **플래그가 아니라 휴리스틱**이다(데이터 간격·질의 창에 따라
@@ -90,9 +127,14 @@ vme_replay() { # $1=vmsingle 컨테이너명 $2=vmalert 버전 $3=룰파일(호�
   #    ⚠️ 단, 이 핀이 **모든 소비자에서 load-bearing인 것은 아니다**(vmalert-bulkssd: 일 1회 push에선 VM이
   #    애초에 24h 구멍을 보간하지 않아 핀 유무가 판정 동일 — 실측). 보간 방지의 **최종 보증은 각 하네스의
   #    "결함 픽스처가 발화하면 FAIL" 레그**이지 이 핀이 아니다. 핀은 방어선이지 증명이 아니다.
-  local vm="$1" ver="$2" rules="$3" eval_iv="$4" lookback="$5" from="$6" to="$7" dir base
+  #
+  # rulesDelay는 **룰 파일에서 파생**한다(위 vme_rules_delay 참고 — 체인 없으면 그 대기는 순수 낭비다).
+  # flushInterval은 500ms 그대로 둔다: 실측상 이걸 줄여도 레이스는 안 사라졌고(구속 조건이 비율이 아니라
+  # 절대 지연이다), 지금 값은 이미 rulesDelay보다 훨씬 작아 제약이 아니다.
+  local vm="$1" ver="$2" rules="$3" eval_iv="$4" lookback="$5" from="$6" to="$7" dir base delay
   dir="$(cd "$(dirname "$rules")" && pwd)"
   base="$(basename "$rules")"
+  delay="$(vme_rules_delay "$rules")"
   docker run --rm --network "$VME_NET" -v "$dir:/rules:ro" \
     "victoriametrics/vmalert:${ver}" \
     --rule="/rules/$base" \
@@ -104,7 +146,7 @@ vme_replay() { # $1=vmsingle 컨테이너명 $2=vmalert 버전 $3=룰파일(호�
     --replay.timeFrom="$(vme_iso "$from")" \
     --replay.timeTo="$(vme_iso "$to")" \
     --replay.disableProgressBar \
-    --replay.rulesDelay=4s \
+    --replay.rulesDelay="$delay" \
     --loggerLevel=WARN >/dev/null
   # remoteWrite flush를 눌러 판정 전에 ALERTS가 확실히 질의 가능해지도록.
   vme_flush
