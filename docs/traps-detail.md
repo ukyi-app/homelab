@@ -479,3 +479,47 @@ CI Actions 시크릿 · tailscale ACL/auth-key)의 드리프트 감시가 **한 
 terraform `drift=false` 같은 **결과 플래그**가 전부 준비상태로 오탐된다(실측: 한 워크플로에 3곳).
 
 > 가드: `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats`
+
+### 이미지 핀의 *존재* ≠ *일치* ≠ *소유자*
+
+세 가지 서로 다른 질문이 하나로 뭉뚱그려져 있었다.
+
+1. **핀이 있는가** — `scripts/check-image-pins.sh`가 본다. `@sha256:`이 붙어 있으면 통과다.
+2. **핀이 일치하는가** — 아무도 안 봤다. 같은 `repo:tag`가 서로 다른 digest로 갈려 있어도 ①은 통과한다.
+3. **그 digest를 누가 갱신하는가** — 아무도 안 봤다.
+
+라이브 실측(2026-07-28): `pg-tools:18-rclone`이 두 digest로 갈려 있었다. `tools/repin-pgtools.ts`의
+`CONSUMERS`에 등록된 4파일은 GHCR 현재값이었고, 등록 안 된 2파일
+(`platform/adguard/prod/rewrite-reconciler.yaml` · `platform/victoria-stack/prod/pvc-du-exporter.yaml`)은
+**낡은 digest에 영구히 묶여** 있었다 — 재핀 대상이 아니므로 새 빌드가 나와도 영원히 그 상태다.
+
+⚠️ **하드코딩 목록은 자기 자신에 대해서만 정확하다.** 이 사례에서 산출물 **세 개**가 서로는 일치하고
+레포와는 어긋났다: 재핀 도구의 `CONSUMERS` 4파일 · 그 4파일을 다시 하드코딩한 `test_pgtools-digest.bats`의
+`FILES` · "5개 소비처(4파일)"이라는 헤더 주석. 가드는 **이미 일치하도록 갱신된 닫힌 집합 안에서** 일치를
+확인했고, 재핀은 `changed/CONSUMERS.length`로 성공을 보고했다. 두 번째 @test는 이름이
+"registry drift guard"였지만 목록에 **없는** 사이트가 새로 생기는 것을 원리적으로 탐지할 수 없었다.
+⇒ 목록을 **계산하면**(레포 열거) 그 드리프트가 원리적으로 불가능해진다. 남는 위험은 열거 붕괴뿐이고
+그건 바닥값이 막는다.
+
+⚠️ **freshness 소유자 ≠ digest 소유자.** helm 차트 내부 기본 이미지는 차트 **버전**이 Renovate 소유라
+freshness는 있지만, 렌더 시점에 mutable tag로 해석되므로 **digest 소유자가 없다**. `check-image-pins.sh`
+헤더는 이를 "Renovate pinDigests 관할"이라고만 적었는데 그건 절반만 참이다 — 차트 tarball은
+`platform/*/prod/charts/`에 캐시되고 그 경로는 **gitignored**이며 `renovate.json`의 `ignorePaths`에도
+`**/charts/**`로 들어 있다. Renovate는 **없는 파일을 핀할 수 없다**. 라이브 실측: 구동 컨테이너 22개가
+mutable tag였다(argocd ×5 · cert-manager ×3 · tailscale ×3 · sealed-secrets · cnpg-operator · traefik 등).
+
+⚠️ **base64 안의 이미지 참조는 어떤 스캐너에도 안 걸린다.** `platform/cnpg/barman-plugin/manifest.yaml`의
+`SIDECAR_IMAGE`는 Secret의 `data:`에 base64로 들어 있어 (a) `image:` grep에 안 걸리고 (b) Secret이라
+스캐너가 안 보고 (c) 벤더 경로라 핀 게이트·Renovate 양쪽에서 배제됐다 — **커버리지가 정확히 0**이었고
+디코드하면 tag-only(`plugin-barman-cloud-sidecar:v0.13.0`)다. CNPG가 이 값을 읽어 Cluster 파드에
+사이드카로 주입하므로 WAL 아카이빙 경로 자체다.
+⚠️ 디코드는 **줄바꿈 조각을 이어 붙여야** 한다. YAML 블록 스칼라라 둘째 줄이 10자였고, 줄 길이 하한을
+16으로 두면 첫 줄만 디코드돼 `…sidecar:v`로 **잘린 값**이 나온다(참조는 잡되 값이 틀리면 태그 일치
+검사·원장 대조가 전부 어긋난다). 판정은 길이가 아니라 디코드 결과의 **모양**이 해야 한다.
+
+⚠️ **소유자 없음은 결함이 아니라 선언 대상이다.** 벤더 파일·차트 내부 이미지는 정당하게 무소유일 수
+있다. 원장(`policy/image-ownership.json`)에 why·freshness·since·owner_action과 함께 적고, **선언되지
+않은 무소유는 통과할 수 없다**. 매치되지 않는 선언(죽은 선언)도 red다 — 아무도 대조하지 않는 주장은
+원장이 아니다.
+
+> 가드: `tools/check-image-ownership.ts`, `policy/image-ownership.json`, `tests/gates/test_image-ownership.bats`, `tests/gates/test_pgtools-digest.bats`

@@ -77,6 +77,11 @@ jobs:
         # 추가하는 것만으로 **회계 전체가 초록인 채 꺼진다** — 다른 가드는 이 도구가 지키는데
         # 이 도구를 지키는 것이 없어지는 자기 사각지대다(적대적 리뷰가 실측으로 지목).
         run: bun tools/check-guard-authority.ts
+      - name: 이미지 소유권 회계 (G2 — 아티팩트가 권위 있는 핀 소유자를 갖는지)
+        # 핀 게이트(check-image-pins)와 **다른 질문**이다: 저건 'digest로 핀됐는가', 여긴 '그 digest를
+        # 누가 갱신하는가'. 명시 스텝인 이유는 check-guard-authority와 같다 — 권위가 자기 bats 하나뿐이면
+        # tests/.ci-exclude 한 줄로 회계 전체가 초록인 채 꺼진다.
+        run: bun tools/check-image-ownership.ts
       - name: 워크플로 준비상태 회계 (G-09 — 자격 부재로 job이 조용히 skip되는 것 차단)
         # ⚠️ check-guard-authority와 같은 이유로 **명시 스텝**이다. 이 회계의 권위가 자기 bats
         # 하나뿐이면 tests/.ci-exclude에 한 줄 추가하는 것만으로 회계 전체가 초록인 채 꺼진다.
