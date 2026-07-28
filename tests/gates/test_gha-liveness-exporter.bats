@@ -181,3 +181,22 @@ EOF
   run grep -q 'gha_workflow_max_age_seconds' "$R6"
   [ "$status" -eq 0 ]
 }
+
+@test "the timestamp extractor handles the real GitHub response shape (colon-space)" {
+  # ⚠️ 라이브 실측(2026-07-28)으로 잡은 결함: GitHub API는 `"run_started_at": "..."`처럼 **콜론 뒤에
+  #    공백**을 넣는데 초기 정규식은 `":"`로 붙여 놨다 → 8종 전부 매치 0 → scraped=0. Job은 성공으로
+  #    끝나고(하트비트는 설계상 나간다) 정적 게이트도 전부 초록이었다 — **실제 응답 모양에 대한 증인이
+  #    없었기 때문**이다. 여기서 두 형태(공백 있음/없음)를 모두 픽스처로 박는다.
+  #    ⚠️ 이 증인은 "정규식이 이 두 모양을 처리한다"까지만 말한다. 실제 API가 또 다른 모양으로 바뀌면
+  #    여전히 못 잡는다 — 그건 라이브 검증의 몫이다(원장이 아니라 배포 후 확인 절차).
+  extract() {
+    printf '%s' "$1" | grep -o '"run_started_at": *"[^"]*"' | head -1 | sed 's/.*"\([0-9][^"]*\)"$/\1/'
+  }
+  spaced='{"total_count":1,"workflow_runs":[{"id":1,"run_started_at": "2026-07-28T02:35:18Z","status":"completed"}]}'
+  tight='{"total_count":1,"workflow_runs":[{"id":1,"run_started_at":"2026-07-28T02:35:18Z","status":"completed"}]}'
+  [ "$(extract "$spaced")" == "2026-07-28T02:35:18Z" ]
+  [ "$(extract "$tight")" == "2026-07-28T02:35:18Z" ]
+  # 매니페스트가 실제로 그 정규식을 쓰는지 — 픽스처만 고치고 제품은 안 고치는 것을 막는다.
+  run grep -qF '"run_started_at": *"[^"]*"' "$MF"
+  [ "$status" -eq 0 ]
+}

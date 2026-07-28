@@ -42,8 +42,11 @@ data:
       BODY=$(curl -fsS --max-time "$CURL_MAX_TIME" \
         -H 'Accept: application/vnd.github+json' \
         "$API/repos/$REPO/actions/workflows/$WF/runs?status=success&per_page=1" 2>/dev/null || true)
-      # ⚠️ `.*` 탐욕 매치 금지 — API는 개행 없는 한 줄 JSON을 준다. grep -o로 **첫** 필드만 꺼낸다.
-      TS_ISO=$(printf '%s' "$BODY" | grep -o '"run_started_at":"[^"]*"' | head -1 | sed 's/.*:"//; s/"$//')
+      # ⚠️ `.*` 탐욕 매치 금지 — grep -o로 **첫** 필드만 꺼낸다.
+      # ⚠️ **콜론 뒤 공백을 반드시 허용한다** — GitHub API는 `"run_started_at": "..."`처럼 공백을 넣는다
+      #    (라이브 실측 2026-07-28: 공백 없는 정규식이 8종 전부 매치 0 → scraped=0이었다. 응답을 실제로
+      #    보지 않고 "한 줄 압축 JSON"이라 가정한 것이 원인이다).
+      TS_ISO=$(printf '%s' "$BODY" | grep -o '"run_started_at": *"[^"]*"' | head -1 | sed 's/.*"\([0-9][^"]*\)"$/\1/')
       if [ -z "$TS_ISO" ]; then
         # ★ 조용한 스킵 금지 — 어느 워크플로가 실패했는지 로그에 남아야 진단이 된다.
         #   ⚠️ 형식은 `key=value`로 쓴다(모드 C 린터의 exposition 추출기가 메트릭 라인으로 오인하지 않도록).
