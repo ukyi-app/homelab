@@ -385,11 +385,30 @@ _fixture_repo() {
   [ "$output" == "true,false" ]
 }
 
-@test "image-ownership spans platform, apps and ops and drops test harnesses" {
+# ⚠️ 이 단언은 예전에 루트를 **옵셔널**로 써서(`(ops\+)?`) 실제로는 아무 루트도 강제하지 못했다 —
+# `ops` 분기가 죽어 있어도 초록이었다(적대 검토 지적). 이제 **정확한 집합**으로 못박는다.
+# 루트가 하나라도 빠지면 그 경로의 이미지가 "전건 소유자 확정"이라는 초록 아래에서 조용히 사라진다.
+@test "image-ownership covers exactly platform, apps, ops and infra (no root silently missing)" {
   run walk 'const p = walkManifests("image-ownership").map(e=>e.path);
-    const roots = new Set(p.map(x=>x.split("/")[0]));
+    const roots = [...new Set(p.map(x=>x.split("/")[0]))].sort();
     const harness = p.filter(x=>/(^|\/)tests?\/|(^|\/)fixtures|(^|\/)test_[^/]*$|\.bats$/.test(x));
-    console.log([...roots].sort().join("+") + "|" + harness.length)'
+    console.log(roots.join("+") + "|" + harness.length)'
   [ "$status" -eq 0 ]
-  echo "$output" | grep -qE '^(apps\+)?(ops\+)?platform.*\|0$'
+  [ "$output" == "apps+infra+ops+platform|0" ]
+}
+
+@test "image-ownership includes Dockerfiles (base images are supply chain, and ops/ would be dead without them)" {
+  # `ops/` 아래 추적 파일은 Dockerfile·README뿐이다 — Dockerfile을 빼면 그 루트가 0건을 기여해
+  # 스코프의 `ops` 분기가 **죽은 규칙**이 된다(주석·테스트·README는 커버리지를 주장하는 채로).
+  run walk 'const p=walkManifests("image-ownership").map(e=>e.path); console.log(p.filter(x=>/Dockerfile$/.test(x)).length + "|" + p.filter(x=>x.startsWith("ops/")).length)'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^[1-9][0-9]*\|[1-9][0-9]*$'
+}
+
+@test "image-ownership includes shell scripts (manifests embedded in heredocs)" {
+  # `.yaml`만 보던 동안 `platform/cnpg/prod/restore-drill-script.sh`의 CNPG imageName: digest가
+  # 통째로 빠져 있었다 — 그 값을 바꿔도 레포의 어떤 게이트도 red가 되지 않았다(D-1의 확장자 재현).
+  run walk 'console.log(walkManifests("image-ownership").filter(e=>e.path.endsWith(".sh")).length)'
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
 }

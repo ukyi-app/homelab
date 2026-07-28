@@ -9,7 +9,13 @@
 #
 # 스코프 한계(성공 메시지도 이 경계를 반영): (a) substrate(infra/k3s-bootstrap/** — versions.env + renovate
 #   custom manager 관할, LOCAL_PATH_PROVISIONER digest 핀은 Task 9 후속), (b) helmrelease 차트-내부 기본
-#   이미지(traefik/sealed-secrets/tailscale/cnpg-operator 등 — 레포에 image: 스칼라로 없음, Renovate pinDigests 관할).
+#   이미지(traefik/sealed-secrets/tailscale/cnpg-operator 등 — 레포에 image: 스칼라로 없음).
+#   ⚠️ **"Renovate pinDigests 관할"이라고 적혀 있었는데 그건 절반만 참이었다.** 차트 tarball은
+#   platform/*/prod/charts/에 캐시되고 그 경로는 gitignored이며 renovate.json ignorePaths의
+#   `**/charts/**`에도 걸린다 — Renovate는 **없는 파일을 핀할 수 없다**. 차트 **버전**은 Renovate가
+#   소유하지만(helmrelease/CHART_VERSION/argocd manager) 내부 이미지는 렌더 시점 mutable tag라
+#   **digest 소유자가 없다**. 그 구분과 각 차트의 근거는 policy/image-ownership.json 원장에 있고
+#   tools/check-image-ownership.ts가 선언을 강제한다(미선언 = red).
 # 열거·제외는 **공유 워커의 스코프**가 소유한다(tools/lib/repo-walk.ts) — 이 파일에 제외 어휘의 사본이
 #   없다. 레인1=`platform-image-refs`(추적된 차트 소스 **포함**), 레인2=`apps-values`.
 #   제외 내역(벤더 barman-plugin/·gateway-api CRD, 테스트/픽스처 tests?/·fixtures*/)과 그 글롭이
@@ -188,4 +194,6 @@ if [ "$fail" -gt 0 ]; then
   echo "핀 안 된 이미지 ${fail}건 (스캔 ${scanned}건). @sha256 digest 핀 또는 allowlist 등재(사유 주석) 필요."
   exit 1
 fi
-echo "스캔된 platform/apps 런타임 이미지 전부 digest 핀됨 (스캔 ${scanned}건 = platform ${scanned_lane1} + apps ${scanned_lane2}). [helm 차트 내부=Renovate·substrate=versions.env 관할]"
+# 성공 메시지도 헤더의 경계를 그대로 반영한다(헤더 10행이 그걸 계약으로 건다) — 차트 내부는
+# "Renovate 관할"이 아니라 **digest 소유자 없음(원장 선언)** 이다.
+echo "스캔된 platform/apps 런타임 이미지 전부 digest 핀됨 (스캔 ${scanned}건 = platform ${scanned_lane1} + apps ${scanned_lane2}). [helm 차트 내부=digest 소유자 없음(policy/image-ownership.json 선언)·substrate=versions.env 관할]"

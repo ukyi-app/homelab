@@ -31,7 +31,7 @@ const POLICY_PATH = "policy/image-ownership.json";
 const RENOVATE_PATH = "renovate.json";
 
 // `image:`/`imageName:` 스칼라. 앵커해서 `logo_image:`·경로 속 부분매치를 막는다(핀 게이트와 같은 어휘).
-const IMG_KEY = /^[ \t]*(?:-[ \t]+)?(?:image|imageName):[ \t]*["']?([a-z0-9][^\s"'#]*)/gm;
+const IMG_KEY = /^[ \t]*(?:-[ \t]+)?(image|imageName):[ \t]*["']?([a-z0-9][^\s"'#]*)/gm;
 // 이미지처럼 생긴 문자열 — 숨은(base64) 참조 판정용. 최소 `<호스트|경로>/<이름>:<태그>` 또는 `<이름>:<태그>`.
 const IMG_SHAPE = /^[a-z0-9][a-z0-9._/-]*[a-z0-9](?::[\w][\w.-]*)?(?:@sha256:[0-9a-f]{64})?$/;
 // base64 후보 — YAML 블록 스칼라로 **줄바꿈**될 수 있어 조각을 이어 붙인 뒤 판정한다.
@@ -41,14 +41,33 @@ const IMG_SHAPE = /^[a-z0-9][a-z0-9._/-]*[a-z0-9](?::[\w][\w.-]*)?(?:@sha256:[0-
 // **디코드 결과의 모양**(IMG_SHAPE)이 한다.
 const B64_RUN = /(?:^[ \t]*[A-Za-z0-9+/=]{4,}[ \t]*$\n?)+/gm;
 
-type Ref = { file: string; ref: string; hidden: boolean };
+// `key`가 필요한 이유(확정 9/17): Renovate 도달성은 **경로만으로 결정되지 않는다**. kubernetes manager는
+// 표준 `image:` 키만 추출하므로 CNPG Cluster CR의 `imageName:`은 같은 파일 안에 있어도 **추출되지 않는다**.
+// 이건 추측이 아니라 이 레포가 이미 라이브에서 겪은 것이다 — 커밋 ba9bc2a(#373): "Renovate #362는 표준
+// image: 키인 basebackup만 갱신하고 CNPG imageName:(cluster/restore-drill)을 누락해 digest 드리프트를 유발".
+// 경로만 보면 그 참조가 **거짓으로 소유됨** 판정을 받아 stale-pin이 초록으로 통과한다.
+type RefKey = "image" | "imageName" | "block" | "hidden";
+type Ref = { file: string; ref: string; hidden: boolean; key: RefKey };
 
 export function visibleRefs(path: string, text: string): Ref[] {
   const out: Ref[] = [];
   for (const m of text.matchAll(IMG_KEY)) {
-    const v = m[1];
+    const v = m[2];
     if (v.includes("{{") || v.startsWith("$")) continue; // 템플릿·변수는 렌더 전이라 참조가 아니다
-    out.push({ file: path, ref: v, hidden: false });
+    out.push({ file: path, ref: v, hidden: false, key: m[1] === "imageName" ? "imageName" : "image" });
+  }
+  return out;
+}
+
+// Dockerfile의 `FROM` — base 이미지도 공급망이다(`ops/pg-tools/Dockerfile`이 유일한 실사용처).
+// ⚠️ 멀티스테이지의 `FROM <stage>`(앞 스테이지 별칭)는 이미지가 아니다 — `/`나 `:`가 있어야 참조로 본다.
+export function dockerfileRefs(path: string, text: string): Ref[] {
+  if (!/(^|\/)Dockerfile$/.test(path)) return [];
+  const out: Ref[] = [];
+  for (const m of text.matchAll(/^FROM[ \t]+(?:--platform=\S+[ \t]+)?(\S+)/gm)) {
+    const v = m[1];
+    if (v.startsWith("$") || (!v.includes("/") && !v.includes(":"))) continue;
+    out.push({ file: path, ref: v, hidden: false, key: "image" });
   }
   return out;
 }
@@ -64,7 +83,7 @@ export function blockRefs(path: string, text: string): Ref[] {
   if (!repo) return [];
   const tag = /^[ \t]+tag:[ \t]*["']?([^\s"'#]+)/m.exec(m[1])?.[1];
   const digest = /^[ \t]+digest:[ \t]*["']?(sha256:[0-9a-f]{64})/m.exec(m[1])?.[1];
-  return [{ file: path, ref: `${repo}${tag ? `:${tag}` : ""}${digest ? `@${digest}` : ""}`, hidden: false }];
+  return [{ file: path, ref: `${repo}${tag ? `:${tag}` : ""}${digest ? `@${digest}` : ""}`, hidden: false, key: "block" }];
 }
 
 // base64 안에 숨은 이미지 참조. **이 클래스가 어떤 스캐너에도 안 걸린다는 것이 요점**이므로 별도로 본다.
@@ -86,7 +105,7 @@ export function hiddenRefs(path: string, text: string): Ref[] {
     if (!t || t.includes("\n") || t.length > 300) continue;
     if (!t.includes("/") && !t.includes(":")) continue;
     if (!IMG_SHAPE.test(t)) continue;
-    out.push({ file: path, ref: t, hidden: true });
+    out.push({ file: path, ref: t, hidden: true, key: "hidden" });
   }
   return out;
 }
@@ -131,10 +150,24 @@ export function loadRenovate(root: string): Renovate {
     }
   };
   for (const key of ["kubernetes", "argocd", "helmv3", "dockerfile"]) {
-    collect((cfg[key] as Record<string, unknown> | undefined)?.managerFilePatterns);
+    const mgr = cfg[key] as Record<string, unknown> | undefined;
+    // ⚠️ `enabled: false`는 패턴을 지우는 것과 **의미가 같다**(그 manager가 아무것도 추출하지 않는다).
+    // 모델하지 않으면 한 줄로 수십 건의 소유자가 유령이 된다 — 적대 검토가 실측: `"kubernetes":
+    // {"enabled": false}`에서 가드가 26건을 여전히 `renovate` 소유로 보고하며 exit 0이었다.
+    // (packageRules의 `enabled:false`는 **dep 단위** 스코프라 파일 단위 판정으로 표현할 수 없다 —
+    //  그건 이 근사의 한계로 남기고 원장·주석에 적는다.)
+    if (mgr?.enabled === false) continue;
+    collect(mgr?.managerFilePatterns);
   }
   for (const cm of (cfg.customManagers as Record<string, unknown>[] | undefined) ?? []) {
     collect(cm.managerFilePatterns);
+  }
+  // ⚠️ **기본 manager도 모델한다.** `loadRenovate`가 명시 `managerFilePatterns`만 모으면, Renovate가
+  // 자동 감지하는 파일(Dockerfile 등)이 "도달 불가"로 판정돼 **거짓 무소유**가 된다. 이 레포는
+  // kubernetes/argocd처럼 자동 감지가 안 되는 것만 패턴을 명시하고, dockerfile은 config:recommended의
+  // 기본값에 맡긴다. 명시적으로 끈 경우(enabled:false)는 위에서 이미 걸러진다.
+  if ((cfg.dockerfile as Record<string, unknown> | undefined)?.enabled !== false) {
+    include.push(/(^|\/)Dockerfile$/);
   }
   const ignore = ((cfg.ignorePaths as string[] | undefined) ?? []).map(globToRe);
   return { include, ignore };
@@ -167,6 +200,12 @@ export function resolveOwner(r: Ref, renovate: Renovate, bespoke: Set<string>): 
   if (bespoke.has(r.file)) return "bump-poll";
   // 숨은 참조는 Renovate가 원리적으로 추출할 수 없다 — base64 안이라 어떤 manager도 파싱하지 못한다.
   if (r.hidden) return "none";
+  // ⚠️ 경로가 매치돼도 **키가 추출 가능해야** 소유다(위 RefKey 주석 — #373이 라이브로 증명했다).
+  if (r.key === "imageName") return "none";
+  // ⚠️ 여기 `.sh` 전용 판정을 두지 않는다. mutation이 **죽은 규칙**임을 드러냈고(현재 manager 패턴이
+  // 전부 `\.ya?ml$`로 끝나 `.sh`는 경로 매치 자체가 안 된다) 더 나쁘게는 **틀릴 수 있다** — 누군가
+  // `.sh`를 잡는 customManager를 추가하면 그 참조는 정당하게 Renovate 소유가 되는데 그 판정이
+  // 그걸 막아 버린다. 도달성은 설정에서 계산하는 것으로 충분하다.
   return renovateReaches(r.file, renovate) ? "renovate" : "none";
 }
 
@@ -204,7 +243,7 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
 
   const refs: Ref[] = [];
   for (const e of walkManifests("image-ownership", root)) {
-    refs.push(...visibleRefs(e.path, e.text), ...blockRefs(e.path, e.text), ...hiddenRefs(e.path, e.text));
+    refs.push(...visibleRefs(e.path, e.text), ...blockRefs(e.path, e.text), ...dockerfileRefs(e.path, e.text), ...hiddenRefs(e.path, e.text));
   }
 
   // I1 — 같은 `repo:tag`는 같은 digest여야 한다. 핀 게이트가 못 보는 축이다(D-1).
@@ -250,7 +289,10 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
   // 죽은 선언 — 아무도 대조하지 않는 주장은 원장이 아니다. 단 차트-내부 클래스는 레포에 파일이 없으므로
   // `chart:` 접두로 표시하고 이 검사에서 제외한다(그건 아래 차트 선언 완전성이 대신 지킨다).
   for (const a of declared) {
-    if (a.startsWith("chart:")) continue;
+    // `chart:`·`operator-injected:` 접두는 **레포에 문자열이 없는** 클래스다(차트 내부 기본 이미지,
+    // operator가 런타임에 주입하는 이미지). 참조 스캔으로는 원리적으로 매치될 수 없으므로 죽은-선언
+    // 검사에서 제외한다 — 이 면제가 없으면 정당한 선언이 red가 된다(적대 검토가 mutation으로 실증).
+    if (a.startsWith("chart:") || a.startsWith("operator-injected:")) continue;
     if (!usedDecls.has(a)) bad.push(`${POLICY_PATH}: '${a}' 선언이 어떤 무소유 참조와도 매치되지 않는다(죽은 선언)`);
   }
 
@@ -262,15 +304,29 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
     const files = execFileSync("git", ["ls-files", "--", "platform"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
       .split("\n").filter(Boolean);
     for (const f of files) {
+      // ⚠️ 모양을 **파일명이 아니라 kind/스키마로** 판정한다. 경로 패턴으로 좁히면 실존하는 모양이
+      // 조용히 빠진다 — 적대 검토 실측: `platform/argocd/root/newchart-app.yaml`(root-app이 recurse로
+      // **실제 싱크한다**)와 `Chart.yaml`의 `dependencies:`가 둘 다 선언 강제를 빠져나갔고, 그 상태에서
+      // 가드는 refs 38·rc=0으로 초록이었다(바닥값도 무력 — 참조 수가 안 변한다).
+      // ⚠️ 기존 세 모양을 **교체하지 않고 추가**한다: helmrelease.yaml(HelmChartInflationGenerator)에서
+      //    나오는 traefik·tailscale-operator·sealed-secrets 3종이 다른 모양 어디에도 없기 때문이다.
       if (/\/helmrelease\.yaml$/.test(f)) {
         const t = readFileSync(`${root}/${f}`, "utf8");
         const n = /^name:\s*(\S+)/m.exec(t);
         if (n) charts.push(n[1]);
-      } else if (/^platform\/argocd\/root\/apps\/.+\.yaml$/.test(f)) {
-        const t = readFileSync(`${root}/${f}`, "utf8");
-        for (const m of t.matchAll(/^\s*chart:\s*(\S+)/gm)) charts.push(m[1]);
       } else if (/^platform\/argocd\/CHART_VERSION$/.test(f)) {
         charts.push("argo-cd");
+      } else if (/\.ya?ml$/.test(f)) {
+        const t = readFileSync(`${root}/${f}`, "utf8");
+        // ArgoCD Application의 인라인 helm chart — 경로 무관(root/apps 밖도 recurse로 싱크된다).
+        if (/^kind:\s*Application\s*$/m.test(t) || /\nkind:\s*Application\s*\n/.test(t)) {
+          for (const m of t.matchAll(/^\s*chart:\s*(\S+)/gm)) charts.push(m[1]);
+        }
+        // Helm 차트의 `dependencies:` — 서브차트도 자기 기본 이미지를 들여온다.
+        if (/^apiVersion:\s*v[12]\s*$/m.test(t) && /^dependencies:/m.test(t)) {
+          const dep = /^dependencies:\n([\s\S]*?)(?=^\S|\Z)/m.exec(t);
+          if (dep) for (const m of dep[1].matchAll(/^\s*-\s*name:\s*(\S+)/gm)) charts.push(m[1]);
+        }
       }
     }
   } catch { /* git 부재 — 아래 바닥값이 잡는다 */ }
