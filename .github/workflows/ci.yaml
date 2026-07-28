@@ -113,24 +113,68 @@ jobs:
       - name: vmalert rule validate (containerized — render/grep 미차단 룰 expr 오류)
         # grep만으론 오류 PromQL/MetricsQL이 통과(test_vmalert-config는 존재 grep) → vmalert -dryRun으로 파싱 검증.
         run: bash tests/gates/vmalert-rules-validate.sh
-      - name: vmalert 발화 e2e (containerized replay — dryRun 미차단 "영원히 발화 못 하는 룰")
-        # 위 -dryRun은 expr 파싱만 본다 → 문법은 멀쩡한데 라이브에서 발화 0인 룰(ImageDigestDrift:
-        # push 메트릭 rollup 누락 → record 구멍 → for: 리셋)을 통과시켰다. 이 게이트가 실제 발화를 증명한다.
-        # ⚠️ bats 아님 — run-bats.sh는 tests/.ci-exclude로 docker 의존 테스트를 빼므로 죽은 커버리지가 된다.
-        run: bash tests/gates/vmalert-drift-firing-e2e.sh
-      - name: vmalert 발화 e2e — bulk SSD 용량 (일 1회 push 메트릭)
-        # 같은 클래스의 두 번째 죽은 알림(FilesBulkSSDLow): files_data_bulk_*는 호스트 launchd가 **하루 1회**
-        # push하는데 룩백은 5m → 하루 1440분 중 5분만 보인다 → for: 30m(연속 61회 평가)에 구조적 도달 불가.
-        # 형제 BulkStorageLow(rollup 착용)는 같은 매체·같은 결핍에 정상 발화한다 — 그 대조를 L4가 매 실행 증명한다.
-        run: bash tests/gates/vmalert-bulkssd-firing-e2e.sh
-      - name: vmalert 발화 e2e — digest-exporter 하트비트 (감시견의 감시견)
-        # digest-exporter는 ImageDigestDrift의 **먹이 공급선**이다. exporter가 조용히 죽으면(크론 미실행·push
-        # 실패·파드 기동 실패 — 전부 초록 Job(exit 0)이라 KubeJobFailed가 원리적으로 못 잡는다) 기록 룰의
-        # [15m] 윈도가 만료돼 ImageDigestDrift가 **조용히 실명**한다(원 버그와 같은 실패 양식의 2차 실명).
-        # L1/L5=발화(stale·absent 두 가지) · L2=정상 침묵(대조 알림으로 vacuity 차단) · L3=결함 픽스처(하네스
-        # 이빨) · L7=최초 배포 거짓 페이지 불가(첫 하트비트가 강제 상한 840s에 도착). preflight가 부트스트랩
-        # 부등식을 매니페스트에서 파생해 강제(위반 = exit 2).
-        run: bash tests/gates/vmalert-digest-stale-firing-e2e.sh
+      # ── vmalert 발화 e2e (전량 **병렬**) ────────────────────────────────────────────────────────
+      # 이 하네스들은 "룰이 파싱된다"가 아니라 "실제로 발화한다"를 증명한다 — `-dryRun`이 통과시킨
+      # 죽은 알림이 이 레포에 두 번 있었다(ImageDigestDrift·FilesBulkSSDLow: push 주기 > 룩백으로
+      # 시리즈에 구멍 → `for:` pending이 매 주기 리셋 → 영구 무발화).
+      #
+      # ⚠️ **왜 병렬인가**: 실측(run 30332565823) gate 총 1048초 중 이 셋이 805초(77%)였다. 네 번째가
+      # 들어오면 순차로는 ~1250초가 된다. 하네스는 서로 완전히 독립이고(각자 자기 docker 네트워크·
+      # 컨테이너를 `$$` 접미로 만든다) 시간의 대부분이 CPU가 아니라 replay 대기라 병렬 효과가 크다.
+      # 총합이 아니라 **최댓값**으로 수렴한다.
+      #
+      # ⚠️ 목록은 **리터럴 경로로 적는다**(글롭 파생이 아니라). 언뜻 "하드코딩 목록"으로 보이지만
+      # 이 자리에선 반대다 — `tools/check-guard-authority.ts`가 모든 `tests/gates/*.sh`에 **권위 실행
+      # 경로 ≥1**을 요구하므로, 하네스를 추가하고 여기 안 적으면 그 가드가 즉시 red를 낸다(실측:
+      # 글롭 변수로 바꿨더니 네 하네스 전부 "권위 0"으로 잡혔다). 즉 이 목록은 **대조되는** 목록이고,
+      # 리터럴이어야 그 대조가 성립한다. pg-tools 소비처 목록과의 차이가 정확히 이것이다.
+      #
+      # ⚠️ **rc는 PID별로 걷는다.** `a & b & wait`는 마지막 잡의 상태만 돌려줘 앞 하네스의 실패가
+      # 조용히 삼켜진다 — 이 레포가 프로세스 치환에서 이미 겪은 클래스다(vacuous green).
+      - name: vmalert 발화 e2e (전량 병렬 — 순차 실행이 gate 시간의 77%였다)
+        run: |
+          # 이미지는 먼저 한 번만 당긴다(넷이 동시에 같은 이미지를 당기는 변동 제거).
+          # 버전은 **매니페스트에서 파생** — 하드코딩하면 배포와 갈린다.
+          vm="$(grep -oE 'victoriametrics/victoria-metrics:v[0-9.]+' platform/victoria-stack/prod/vmsingle.yaml | head -1)"
+          va="$(grep -oE 'victoriametrics/vmalert:v[0-9.]+' platform/victoria-stack/prod/vmalert.yaml | head -1)"
+          [ -n "$vm" ] && [ -n "$va" ] || { echo "::error::e2e 이미지 버전 파생 실패(vmsingle/vmalert 매니페스트)"; exit 1; }
+          docker pull -q "$vm" >/dev/null
+          docker pull -q "$va" >/dev/null
+
+          # ⚠️ 첫 경로를 대입문과 **같은 줄에 두지 않는다** — check-guard-authority는 `NAME=…` 줄을
+          #    할당으로 보고 건너뛰므로 그 하네스만 "권위 0"으로 잡힌다(실측: drift 하나만 빠졌다).
+          harnesses="
+          tests/gates/vmalert-drift-firing-e2e.sh
+          tests/gates/vmalert-bulkssd-firing-e2e.sh
+          tests/gates/vmalert-digest-stale-firing-e2e.sh
+          tests/gates/vmalert-gha-liveness-firing-e2e.sh
+          "
+          harnesses="$(printf '%s\n' "$harnesses" | tr -d ' ' | grep -v '^$' || true)"
+          # 추적 글롭과 **교차 대조** — 목록에 없는 하네스가 생기면 여기서 먼저 드러난다(가드보다 이른 신호).
+          want="$(git ls-files 'tests/gates/vmalert-*-firing-e2e.sh' | sort)"
+          got="$(printf '%s\n' "$harnesses" | sort)"
+          [ "$want" = "$got" ] || { echo "::error::발화 e2e 목록이 레포와 불일치"; diff <(echo "$want") <(echo "$got") || true; exit 1; }
+          n="$(printf '%s\n' "$harnesses" | grep -c . || true)"
+          [ "${n:-0}" -ge 3 ] || { echo "::error::발화 e2e 하네스 ${n:-0}건 < 3 — 열거 붕괴(무측정 초록)"; exit 1; }
+          echo "발화 e2e ${n}건 병렬 실행"
+
+          pids=""
+          for h in $harnesses; do
+            bash "$h" > "/tmp/$(basename "$h").log" 2>&1 &
+            pids="$pids $!:$h"
+          done
+          fail=0
+          for p in $pids; do
+            pid="${p%%:*}"; h="${p#*:}"
+            if wait "$pid"; then echo "PASS $h"; else echo "::error::FAIL $h"; fail=1; fi
+          done
+          # 로그는 하네스별로 접어서 낸다(병렬 인터리브 방지 — 진단 가능성이 곧 이 게이트의 값이다).
+          for h in $harnesses; do
+            echo "::group::$(basename "$h")"
+            cat "/tmp/$(basename "$h").log"
+            echo "::endgroup::"
+          done
+          exit "$fail"
       - name: skopeo 실물 타임아웃 스모크 (핀된 이미지 + 제어된 블랙홀)
         # PATH stub은 진짜 타임아웃을 증명할 수 없다(stub이 skopeo를 대체하므로 stub 자신을 테스트할 뿐).
         # digest-exporter의 인-데드라인 예산(POD_START + N×SKOPEO_TIMEOUT + CURL_MAX_TIME + EXEC_SLACK <
