@@ -131,6 +131,12 @@ jobs:
         # 이빨) · L7=최초 배포 거짓 페이지 불가(첫 하트비트가 강제 상한 840s에 도착). preflight가 부트스트랩
         # 부등식을 매니페스트에서 파생해 강제(위반 = exit 2).
         run: bash tests/gates/vmalert-digest-stale-firing-e2e.sh
+      - name: vmalert 발화 e2e — GHA 워크플로 liveness (run이 아예 안 도는 것)
+        # push-메트릭 알림에는 발화 e2e가 규율이다(죽은 알림 2건에서 배운 것) — GHA liveness 3종만
+        # 그게 없었다(#389의 '알려진 경계'). ★ 고유 레그 L7: 같은 나이인데 **예산만 큰** 워크플로가
+        # 침묵하는지 봐서, 임계값이 룰 하드코딩이 아니라 **push된 예산 메트릭**에서 온다는 설계를 증명한다.
+        # ⚠️ bats 아님 — run-bats.sh는 docker 의존을 .ci-exclude로 빼므로 명시 스텝이어야 죽은 커버리지가 안 된다.
+        run: bash tests/gates/vmalert-gha-liveness-firing-e2e.sh
       - name: skopeo 실물 타임아웃 스모크 (핀된 이미지 + 제어된 블랙홀)
         # PATH stub은 진짜 타임아웃을 증명할 수 없다(stub이 skopeo를 대체하므로 stub 자신을 테스트할 뿐).
         # digest-exporter의 인-데드라인 예산(POD_START + N×SKOPEO_TIMEOUT + CURL_MAX_TIME + EXEC_SLACK <
