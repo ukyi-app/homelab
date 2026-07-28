@@ -523,3 +523,39 @@ mutable tag였다(argocd ×5 · cert-manager ×3 · tailscale ×3 · sealed-secr
 원장이 아니다.
 
 > 가드: `tools/check-image-ownership.ts`, `policy/image-ownership.json`, `tests/gates/test_image-ownership.bats`, `tests/gates/test_pgtools-digest.bats`
+
+### vmalert replay rulesDelay — 비율 아닌 절대 지연·체인 없으면 순수 낭비
+
+`--replay.rulesDelay`는 vmalert replay가 **룰마다 한 번씩** 자는 값이라, 이 계열 게이트(발화 e2e)의
+벽시계는 사실상 그 sleep의 총합이다:
+
+    벽시계 ≈ (룰 파일의 룰 수) × rulesDelay × (레그 수)
+
+라이브 실측이 이 모델과 1~3% 안에서 맞는다 — drift = r6(6룰) × 8레그 × 4s → **192s 예측 / 194s 실측**,
+digest-stale = r4(18룰) × 7레그 × 4s → 504s 예측 / 459s 실측. 즉 이 게이트들이 느린 이유는 계산량도
+네트워크도 아니고 **전부 대기**다. 그래서 이 값은 "CI가 느리다"는 압력을 상시로 받는다.
+
+⚠️ **비율(rulesDelay ÷ flushInterval)을 지키면 낮춰도 된다 — 는 틀렸다. 실측으로 기각됐다.**
+4s→1s로 내리면서 `--remoteWrite.flushInterval`을 500ms→100ms로 함께 줄여 비율을 8×에서 **10×로 키웠는데도**
+drift 하네스가 죽었다: `HARNESS FAULT (L1): app:image_digest_drift record produced 0 samples`. 이유는
+방지선이 지키려는 대상이 비율이 아니기 때문이다 — alert 룰은 record 룰이 remoteWrite한 시리즈를
+query_range **1회**로 읽고, 그 사이에 필요한 것은 "flush가 몇 번 일어났나"가 아니라 **적재→질의 가능까지의
+절대 시간**이다(HTTP + vmsingle 인입 지연이 지배한다). flushInterval은 이미 rulesDelay보다 훨씬 작아
+제약이 아니었다.
+
+⚠️ 이 실패는 **조용한 오답이 아니라 간헐적 거짓 RED**다. 그래서 더 나쁘다 — 무발화는 아무도 못 보지만,
+가끔 빨개지는 게이트는 사람이 "또 그거네" 하고 재실행하다가 결국 끈다. 속도를 위해 이 값을 만지는
+변경은 **1회 통과로 검증됐다고 말할 수 없다**(반복 실행이 필요하다).
+
+✅ **속도는 값을 깎아서가 아니라 대기가 불필요한 곳을 찾아서 얻는다.** rulesDelay가 존재하는 이유는
+오직 record→alert 체이닝뿐이므로, **체인이 없는 룰 파일에서는 그 대기가 순수 낭비다**. 실측: `r4`는
+record 룰이 **0개**라 체인이 성립할 수 없고(digest-stale·bulkssd), `r6`만 `app:image_digest_drift` 체인을
+가진다(drift·gha-liveness). 그래서 지연을 룰 파일에서 **파생**한다(`vme_rules_delay` — 체인 4s / 무체인 1s /
+파싱 실패 4s fail-closed). 결과: 병렬 e2e 459s → **195s**(3회 반복 194/195/196s, 실패 0), 레그 판정은 동일.
+
+⚠️ 파생기는 **양방향 대조**가 없으면 무력하다 — 항상 보수값을 돌려주면 속도 이득이 조용히 사라지고
+(red가 나지 않는다), 항상 빠른 값을 돌려주면 레이스가 돌아온다. 그래서 게이트는 실제 배포 룰
+r6(체인 있음)·r4(체인 없음) 양쪽을 대조군으로 쓴다. 또한 파생값을 **계산만 하고 플래그엔 리터럴을 넘기는**
+변이가 통과했었다(mutation으로 발견) — 단언은 대입문이 아니라 **소비 지점**에 걸어야 한다.
+
+> 가드: `tests/gates/test_vmalert-e2e-replay-timing.bats`, `tests/gates/lib/vmalert-e2e.sh`

@@ -265,6 +265,16 @@ replay() { # $1=label $2=rules-file $3=scenario [$4=pods_expected(yes|no) — ks
   # ⚠️ 체이닝 레이스(비결정성의 유일한 원천): alert 룰은 record 룰이 remoteWrite한 시리즈를 **query_range
   #    1회**로 읽는다. record 샘플이 그 시점에 아직 flush 전이면 결과가 통째로 비어 ALERTS=0 → 버그가 아닌데도
   #    RED로 보이는 거짓 실패(실측함). vmalert 문서 요구대로 rulesDelay ≥ flushInterval을 **넉넉히**(8×) 준다.
+  #
+  # ⚠️ **이 4s는 낮추지 마라 — 시도했고 실측으로 기각됐다(2026-07-28).**
+  #    rulesDelay는 룰마다 한 번씩 자므로 이 계열 게이트의 wall-clock은 ≈ (룰 수) × rulesDelay × (레그 수)로
+  #    사실상 전부 sleep이다(여기: r6 6룰 × 8레그 × 4s = 192s 예측 / 194s 실측 — 1% 이내). 그래서 속도를
+  #    노리고 4s→1s로 내리되 flushInterval을 500ms→100ms로 함께 줄여 **비율을 8×에서 10×로 키웠다**.
+  #    그런데도 이 하네스는 위 체이닝 레이스로 죽었다(L1: record 샘플 0). ⇒ 구속 조건은 **비율이 아니라
+  #    절대 지연 예산**이다(적재→질의 가능까지는 flushInterval이 아니라 HTTP+인입 지연이 지배한다).
+  #    ⇒ 속도는 **체인이 없는 룰 파일**에서만 얻을 수 있고, 그건 lib의 vme_rules_delay가 파일에서 파생한다.
+  #      이 하네스의 r6는 record→alert 체인이 있으므로 여기서는 보수값 그대로다.
+  #    tests/gates/test_vmalert-e2e-replay-timing.bats가 이 하한(체인 있는 사이트 ≥4s)을 강제한다.
   docker run --rm --network "$NET" -v "$TMP:/rules:ro" \
     "victoriametrics/vmalert:${VA_VER}" \
     --rule="/rules/$(basename "$rules")" \
