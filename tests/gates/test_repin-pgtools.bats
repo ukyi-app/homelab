@@ -8,6 +8,10 @@ setup() {
     printf 'image: ghcr.io/ukyi-app/pg-tools:18-rclone@%s\n' "$OLD" > "$FX/$f"
   done
   printf 'image: ghcr.io/ukyi-app/pg-tools:18-rclone@%s\ninit: ghcr.io/ukyi-app/pg-tools:18-rclone@%s\n' "$OLD" "$OLD" > "$FX/platform/cache/prod/backup-cronjob.yaml"
+  # ⚠️ 도구가 대상을 **레포에서 파생**하므로(하드코딩 목록 폐기 — D-1) 픽스처도 git 레포여야 한다.
+  # tracked 열거라 add 없이는 0건이 되고, 그러면 바닥값이 정상적으로 발화한다(그 자체가 의도한 동작).
+  git -C "$FX" init -q
+  git -C "$FX" add -A
 }
 teardown() { rm -rf "$FX"; }
 
