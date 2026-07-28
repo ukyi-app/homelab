@@ -221,3 +221,101 @@ FIXTURE_ARGS="--min-refs 1"
   [ "$status" -eq 2 ]
   echo "$output" | grep -q "알 수 없는 옵션"
 }
+
+@test "a Dockerfile FROM is extracted and owned, and a stage alias is not mistaken for an image" {
+  # 스코프에 들어오는 것과 **참조를 실제로 뽑는 것**은 다르다 — mutation이 추출기에 증인이 없음을 드러냈다.
+  # 멀티스테이지의 `FROM builder`(앞 스테이지 별칭)는 이미지가 아니므로 잡으면 안 된다.
+  t="$(_fixture dockerfile)"
+  mkdir -p "$t/ops/thing"
+  printf 'FROM debian:bookworm-slim@sha256:7777777777777777777777777777777777777777777777777777777777777777 AS builder\nRUN true\nFROM builder\nCOPY --from=builder /x /x\n' \
+    > "$t/ops/thing/Dockerfile"
+  git -C "$t" add -A
+  run bun "$ROOT/tools/check-image-ownership.ts" --repo-root "$t" $FIXTURE_ARGS --report
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'ops/thing/Dockerfile — debian:bookworm-slim@sha256:7777'
+  out="$output"
+  # 스테이지 별칭이 참조로 새면 안 된다.
+  run grep -qE 'Dockerfile — builder$' <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+# ── 적대 재검토 확정 결함의 증인 (PR #388 후속) ──────────────────────────────
+
+@test "a manager disabled with enabled:false loses ownership (not just a missing pattern)" {
+  # `enabled: false`는 패턴을 지우는 것과 **의미가 같다**. 모델하지 않으면 한 줄로 수십 건의
+  # 소유자가 유령이 된다 — 실측: kubernetes manager를 끄고도 26건이 renovate 소유로 보고되며 exit 0이었다.
+  t="$(_fixture disabled)"
+  python3 - "$t/renovate.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p, encoding="utf-8"))
+d["kubernetes"]["enabled"] = False
+json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PY
+  git -C "$t" add -A
+  run GUARD --repo-root "$t" $FIXTURE_ARGS
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "무소유 이미지 참조"
+}
+
+@test "an imageName: reference is never counted as Renovate-owned (the repo already proved this live)" {
+  # kubernetes manager는 표준 `image:`만 추출한다 — 커밋 ba9bc2a(#373)가 라이브로 증명했다:
+  # "Renovate #362는 표준 image: 키인 basebackup만 갱신하고 CNPG imageName:를 누락해 digest 드리프트를 유발".
+  # 경로만 보고 판정하면 이 참조가 거짓으로 소유돼 stale-pin이 초록으로 통과한다.
+  t="$(_fixture imagename)"
+  printf 'imageName: registry.example.com/db:v1@sha256:5555555555555555555555555555555555555555555555555555555555555555\n' \
+    > "$t/platform/comp/prod/cr.yaml"
+  git -C "$t" add -A
+  run GUARD --repo-root "$t" $FIXTURE_ARGS
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "cr.yaml"
+}
+
+@test "a shell script embedding a manifest is in scope (extension filters reproduce D-1)" {
+  # `.yaml`만 보던 동안 heredoc으로 매니페스트를 임베드한 .sh가 통째로 빠졌다 — 그 안의 digest를
+  # 바꿔도 어떤 게이트도 red가 되지 않았다(같은 repo:tag 두 digest = D-1 클래스의 확장자 재현).
+  t="$(_fixture shellembed)"
+  printf 'imageName: registry.example.com/thing:v1@sha256:8888888888888888888888888888888888888888888888888888888888888888\n' \
+    > "$t/platform/comp/prod/drill.sh"
+  git -C "$t" add -A
+  run GUARD --repo-root "$t" $FIXTURE_ARGS
+  [ "$status" -eq 1 ]
+  # 같은 태그가 두 digest로 갈린 것도 함께 잡혀야 한다(픽스처의 thing:v1은 1111…이다).
+  echo "$output" | grep -q "digest 2종으로 갈렸다"
+}
+
+@test "an ArgoCD Application outside root/apps is enumerated (kind, not filename)" {
+  # 경로 패턴으로 좁히면 실존하는 모양이 빠진다 — root-app이 recurse로 **실제 싱크하는** 경로에
+  # Application을 두면 예전 가드는 못 봤다(refs 수도 안 변해 바닥값도 무력).
+  t="$(_fixture appshape)"
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata: { name: x }\nspec:\n  source:\n    chart: some-chart\n' \
+    > "$t/platform/elsewhere.yaml"
+  git -C "$t" add -A
+  run GUARD --repo-root "$t" $FIXTURE_ARGS
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "chart:some-chart"
+}
+
+@test "operator-injected declarations are exempt from the dead-claim check (no repo string exists)" {
+  # operator가 런타임에 주입하는 이미지는 레포에 문자열이 없다 — 참조 스캔으로 원리적으로 매치될 수
+  # 없으므로 죽은-선언 검사에서 면제해야 한다. 면제가 없으면 정당한 선언이 red가 된다(실증됨).
+  t="$(_fixture opinj)"
+  _ledger "$t" "d['unowned'].append({'artifact':'operator-injected:demo/sidecar','why':'operator 주입','freshness':'operator 버전 종속','since':'2026-07-28','owner_action':'오버라이드'})"
+  run GUARD --repo-root "$t" $FIXTURE_ARGS
+  [ "$status" -eq 0 ]
+}
+
+@test "the pin gate no longer claims chart internals are Renovate-owned (header and success message)" {
+  # 이 PR이 거짓이라 문서화한 주장이 **원래 자리**에 남으면 서술 불일치다. 헤더 10행이 "성공 메시지도
+  # 이 경계를 반영"을 계약으로 걸고 있으므로 둘을 함께 본다.
+  # ⚠️ **인용된 기록은 살아 있는 주장이 아니다.** 헤더는 무엇이 왜 틀렸는지 설명하려고 옛 문구를
+  #    따옴표로 인용하는데(지우면 재발 방지 근거가 사라진다), 단순 grep은 그것도 매치한다 —
+  #    `repin-pgtools` 헤더에서 이미 같은 경계를 그었다. 따옴표 없는 줄만 본다.
+  run bash -c "grep -n 'Renovate pinDigests 관할' '$ROOT/scripts/check-image-pins.sh' | grep -v '\"'"
+  [ "$status" -ne 0 ]
+  run grep -n 'helm 차트 내부=Renovate' "$ROOT/scripts/check-image-pins.sh"
+  [ "$status" -ne 0 ]
+  # 그리고 실제 소유 모델(원장 선언)을 가리켜야 한다.
+  run grep -q 'image-ownership.json' "$ROOT/scripts/check-image-pins.sh"
+  [ "$status" -eq 0 ]
+}

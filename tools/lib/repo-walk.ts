@@ -171,11 +171,23 @@ const SCOPES: Record<string, ScopeDef> = {
   //     핀 게이트·Renovate·grep 어디에도 안 걸린 채 데이터 내구성 경로에 있었다(D-3).
   // apps·ops도 함께 본다 — 소유자 질문은 platform에 국한되지 않는다(ops/는 빌드 소스, apps/는 bump-poll).
   // ⚠️ 테스트 하네스는 뺀다: 픽스처 안의 이미지 문자열은 실물이 아니라 **주장**이라 소유자가 없는 게 정상이다.
+  // ⚠️ 스코프가 곧 회계의 지평이다 — 여기서 끊기면 그 밖의 이미지는 **"전건 소유자 확정"이라는
+  // 초록 아래에서 조용히 사라진다**. 적대 검토가 두 갈래를 실측했다:
+  //   · `infra/` 제외 → `infra/k3s-bootstrap/storage/local-path-provisioner.yaml`의 mutable tag
+  //     (`rancher/local-path-provisioner:v0.0.36`)가 회계 밖이었다. 라이브에서 **모든 PV 데이터 경로**를
+  //     담당하는 파드다. renovate.json의 kubernetes manager도 `^platform/`·`^apps/`뿐이라 미도달이다.
+  //   · `.yaml`만 → `platform/cnpg/prod/restore-drill-script.sh`가 heredoc으로 매니페스트를 임베드해
+  //     런타임에 apply하는데(그 안에 CNPG `imageName:` digest가 있다) 확장자 필터가 통째로 놓쳤다.
+  //     실측: 그 digest를 다른 값으로 바꿔도 레포의 **어떤 게이트도 red가 되지 않았다**(42건 전건 ok).
+  //     같은 `repo:tag`가 두 digest로 갈리는 D-1 클래스가 확장자 하나로 재현된 것이다.
   "image-ownership": {
     kind: "manifests",
     source: "tracked",
     root: "",
-    include: /^(platform|apps|ops)\/.*\.ya?ml$/,
+    //   · `.yaml`/`.sh`만 → `ops/`가 **죽은 분기**였다(그 아래 추적 파일은 Dockerfile·README뿐이라
+    //     스코프가 0건을 기여했는데 주석·테스트·README는 커버리지를 주장했다 — 적대 검토 지적).
+    //     Dockerfile의 `FROM`도 이미지 참조이고 base 이미지는 공급망이다. 넣어서 분기를 **살린다**.
+    include: /^(platform|apps|ops|infra)\/(.*\.(ya?ml|sh)|(.*\/)?Dockerfile)$/,
     exclude: TEST_HARNESS,
   },
   // GHA 워크플로 — "이 레포에서 CI가 무엇을 실행하는가". 준비상태 회계(G-09)의 열거 대상.
