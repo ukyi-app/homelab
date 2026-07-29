@@ -88,6 +88,13 @@ jobs:
         # 여긴 정적 방향(원장 ↔ 워크플로 양방향 대조)만 본다 — 런타임 판정은 각 워크플로의
         # accounting job이 `--workflow <file>`로 수행한다.
         run: bun tools/check-workflow-readiness.ts
+      - name: make ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)
+        # 병: Makefile은 `ci`를 "gate를 로컬에서 그대로 재현"이라 선언했지만 그 주장을 검증하던 것은
+        # 하드코딩된 5개 토큰뿐이었다 — 실측 시점에 이 job의 run 스텝 19건 중 8건이 make ci에 없었는데
+        # 전 검사가 초록이었다(하필 그 5개가 전부 미러된 것들이라 우연히 통과했다).
+        # 이제 스텝 목록을 이 파일에서 **파생**해 원장(policy/ci-parity.json)과 대조한다 —
+        # 스텝을 추가하는 사람은 "이건 로컬에서 어떻게 도는가"를 반드시 답해야 한다.
+        run: bun tools/check-ci-parity.ts
       - name: gate bats suite (run-bats.sh — 단일 수집 SSOT)
         # 수집은 scripts/run-bats.sh 단일 진입점: git-tracked test_*.bats − platform/charts(chart-test 별도) −
         # tests/.ci-exclude(라이브/docker/age/terraform). make ci 와 동일 호출 → 이중 SSOT 제거.
@@ -189,4 +196,5 @@ jobs:
         # package.json packageManager 필드 감지 시 자동 캐시를 켜는데, bun은 setup-node 캐시 미지원이라 lockfile 부재로
         # 깨질 수 있다(v6은 npm으로 한정해 bun이면 트립 안 되지만 의도를 명시해 못박는다).
         with: { node-version: "24.14.0", package-manager-cache: false }
-      - run: tests/gates/app-shared-node-smoke.sh
+      - name: app-shared .mts strip-types 스모크 (node 계약 하한)
+        run: tests/gates/app-shared-node-smoke.sh

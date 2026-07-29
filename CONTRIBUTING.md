@@ -171,11 +171,43 @@ AI 마커 금지, Co-Authored-By 금지. 커밋 하나에 논리적 변경 하�
 
 ## push 전에
 ```
-make ci              # ci.yaml job 'gate'(유일 required check)을 로컬에서 그대로 재현
+make ci              # ci.yaml job 'gate'(유일 required check) 재현 — 차이는 policy/ci-parity.json에 계상
 make verify          # (보조) skeleton + 메모리 원장 + sops 왕복 — 로컬 age 키 필요
 pre-commit run -a    # (보조) 평문 시크릿 가드 + gitleaks
 ```
 `make ci`가 통과하면 머지를 막는 required check는 통과한다(branch protection `contexts=[gate]`).
+
+### 패리티 회계 — "재현한다"는 주장은 검증 대상이다
+
+`make ci`가 gate를 재현한다는 **주장**은 오랫동안 검증되지 않았다. 대조하던 것이
+`test_make-ci-parity.bats`의 **하드코딩된 5개 토큰**뿐이라, 목록에 없는 게이트 스텝은 아무리 늘어나도
+보이지 않았다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 `make ci`에 없었는데 전 검사가 초록이었다
+(하필 그 5개가 전부 미러된 것들이라 우연히 통과했다). 티켓 07의 하드코딩 소비처 목록과 같은 클래스다.
+
+이제 `tools/check-ci-parity.ts`가 **스텝 목록을 `ci.yaml`에서 파생해** 원장(`policy/ci-parity.json`)과
+대조한다. **게이트 스텝을 추가하면 원장에 계상하기 전까지 red**다. 상태는 셋:
+
+| status | 뜻 | 검증 방식 |
+|---|---|---|
+| `mirrored` | `make ci`가 같은 것을 돈다 | 선언한 `local` 문자열이 **`make -n ci` 실제 출력**에 있어야 한다 |
+| `covered` | 로컬의 **다른 수단**이 덮는다 | `covered_by.file`에 `contains`가 실재해야 한다 |
+| `excluded` | 로컬에선 안 돈다 | `why`·`since`·`owner_action` 전부 필수 |
+
+⚠️ 이 원장은 "차이가 없다"가 아니라 **"모든 차이가 의도된 것이다"**를 강제한다. 완전 일치를 요구하면
+docker 없는 환경에서 `make ci`가 못 돌고, 그러면 아무도 안 쓴다 — 그게 패리티가 실제로 무너지는 경로다.
+
+⚠️ 도구가 없는 스텝은 `SKIP:` 마커를 내고 넘어간다(`actionlint`·docker·`node`). **조용히 건너뛰지 않는
+이유**는 "로컬 초록"이 gate가 잡을 것을 못 본 채 push되는 것을 막기 위해서다.
+
+⚠️ **`git add` 전에 `make ci`를 돌리면 새 파일은 측정되지 않는다.** 게이트가 `git ls-files`로 열거하기
+때문이다 — untracked 파일은 로컬에서 대상 밖인데 커밋되면 CI에서는 측정된다. 실측: 새 `tools/*.ts`를
+add 전에 검증해 1671건 전건 초록을 받고 커밋했더니 CI가 shebang 규약 위반으로 red를 냈다. `make ci`의
+첫 전제(`ci-guard-tracked`)가 이 상태를 마커 + exit 4로 끊는다.
+
+⚠️ **`make` 레시피에서 `$(MAKE)`를 쓰지 마라.** GNU make는 `$(MAKE)`가 있는 레시피 줄을 `-n`에서도
+**실제로 실행한다**. 이 레포는 `make -n ci` 출력을 데이터로 읽으므로(패리티 미러 대조 ·
+`check-guard-authority`의 venue 수집) 서브-make 하나가 드라이런을 부수효과로 바꾼다 —
+실측: 게이트 스텝을 서브-make로 묶었더니 `make -n ci` 한 번에 docker e2e가 통째로 돌았다.
 verify·pre-commit은 sops/시크릿 안전망이다. `make ci`는 시스템 PATH의 `bun`(1.3.14 핀)을 쓴다 —
 설치는 `docs/runbooks-public/toolchain-setup.md` 참고(`m6-tools`가 버전 게이트).
 
