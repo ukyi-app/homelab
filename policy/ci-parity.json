@@ -69,11 +69,6 @@
       "local": "check-ci-parity.ts"
     },
     {
-      "name": "gate bats suite (run-bats.sh — 단일 수집 SSOT)",
-      "status": "mirrored",
-      "local": "run-bats.sh"
-    },
-    {
       "name": "shell script lint (전 추적 .sh)",
       "status": "mirrored",
       "local": "shellcheck"
@@ -99,9 +94,12 @@
       "local": "vmalert-rules-validate.sh"
     },
     {
-      "name": "vmalert 발화 e2e (전량 병렬 — 순차 실행이 gate 시간의 77%였다)",
+      "name": "무거운 스위트 동시 실행 (bats CPU-bound ∥ 발화 e2e 대기-bound)",
       "status": "mirrored",
-      "local": "vmalert-*-firing-e2e.sh"
+      "local": [
+        "run-bats.sh",
+        "vmalert-*-firing-e2e.sh"
+      ]
     },
     {
       "name": "skopeo 실물 타임아웃 스모크 (핀된 이미지 + 제어된 블랙홀)",
