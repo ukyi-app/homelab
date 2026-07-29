@@ -40,7 +40,7 @@ type Status = "mirrored" | "covered" | "excluded";
 interface Entry {
   name: string;
   status: Status;
-  local?: string;
+  local?: string | string[];
   covered_by?: { file: string; contains: string };
   why?: string;
   since?: string;
@@ -137,12 +137,19 @@ if (needMake) {
 for (const e of byName.values()) {
   switch (e.status) {
     case "mirrored": {
-      if (!e.local) { fail(`"${e.name}": mirrored인데 local(대조할 커맨드 문자열)이 없다.`); break; }
-      if (makeOut && !makeOut.includes(e.local)) {
-        fail(
-          `"${e.name}": mirrored로 선언됐지만 \`make -n ci\` 출력에 '${e.local}'이 없다.\n` +
-            `    → make ci에서 빠졌거나 커맨드가 바뀌었다. Makefile을 고치거나 원장 상태를 바꿔라.`,
-        );
+      // local은 문자열 하나 또는 **배열**이다. 배열이 필요한 이유: 게이트 스텝 하나가 여러 스위트를
+      // 덮을 수 있다(예: bats ∥ 발화 e2e 동시 실행). 그때 문자열 하나만 대조하면 나머지가 make ci에서
+      // 빠져도 통과한다 — 부분 대조는 대조가 아니다. **전건**이 있어야 한다.
+      const wants = Array.isArray(e.local) ? e.local : e.local ? [e.local] : [];
+      if (wants.length === 0) { fail(`"${e.name}": mirrored인데 local(대조할 커맨드 문자열)이 없다.`); break; }
+      for (const w of wants) {
+        if (typeof w !== "string" || w.length === 0) { fail(`"${e.name}": local 항목이 빈 문자열이다.`); continue; }
+        if (makeOut && !makeOut.includes(w)) {
+          fail(
+            `"${e.name}": mirrored로 선언됐지만 \`make -n ci\` 출력에 '${w}'이(가) 없다.\n` +
+              `    → make ci에서 빠졌거나 커맨드가 바뀌었다. Makefile을 고치거나 원장 상태를 바꿔라.`,
+          );
+        }
       }
       break;
     }
