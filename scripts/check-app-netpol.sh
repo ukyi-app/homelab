@@ -42,9 +42,9 @@ scanned="$(scan_count "$manifests")"
 if [ "$ROOT_OVERRIDDEN" -eq 1 ]; then
   # 바닥값은 면제하되 **신호는 낸다** — 신호가 아예 없으면 06이 "픽스처 호출"과 "가드 미실행"을
   # 구별할 수 없다. 건수(픽스처는 소수 · 실 트리는 기준선 근처)가 곧 그 판별자다.
-  scan_signal check-app-netpol "$scanned"
+  scan_signal check-app-netpol:manifests "$scanned"
 else
-  scan_floor check-app-netpol "$scanned" "$MIN_SCAN" || exit 1
+  scan_floor check-app-netpol:manifests "$scanned" "$MIN_SCAN" || exit 1
 fi
 
 netpol_files=""
@@ -64,6 +64,12 @@ while IFS= read -r f; do
     viol="${viol}  ${f}: NetworkPolicy podSelector instance='${inst}' (앱 '${app}'와 불일치/비유니크/빈 셀렉터)"$'\n'
   done < <(yq ea "select(.kind==\"NetworkPolicy\") | .spec.podSelector.matchLabels.\"app.kubernetes.io/instance\" // \"\"" "$f")
 done <<< "$netpol_files"
+# ⚠️ **열거 건수와 불변식 평가 횟수는 다른 수다.** 마커를 하나만 내면 "매니페스트 6건 스캔"이
+#    증언되는데 정작 셀렉터 불변식은 0회 평가된 상태가 초록으로 통과한다 — 티켓 08이 잡으려던
+#    vacuous green이 마커 계층에서 재현되는 자리다. 두 수를 **다른 라벨로** 낸다.
+#    (netpols=0은 정당할 수 있다 — 앱 소유 NetworkPolicy가 아직 없다는 뜻이다. 그래서 바닥값은
+#     manifests에만 걸고 여기엔 걸지 않는다. 중요한 건 "몇 번 평가됐나"가 보이는 것이다.)
+scan_signal check-app-netpol:netpols "$count"
 if [ -n "$viol" ]; then
   echo "FAIL: app-owned NetworkPolicy는 app-scoped 셀렉터(app.kubernetes.io/instance=<app>) 필수 — 빈/name-only/불일치 금지:"
   printf '%s' "$viol"

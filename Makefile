@@ -127,6 +127,16 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	bun tools/check-image-ownership.ts
 	bun tools/check-workflow-readiness.ts
 	bun tools/check-ci-parity.ts
+# 실 도메인 가드 — ci.yaml gate의 같은 이름 스텝과 짝이다(패리티 원장이 전건 대조한다).
+# 이 7종은 CI에서 bats를 통해서만 돌았고, 같은 bats 파일에 픽스처 @test가 섞여 있어 "실 레포를 검사하는
+# 한 줄"이 지워져도 G1이 초록을 유지했다. 여기서도 레포 자신에 대해 직접 돌린다.
+	bash scripts/check-doc-index.sh
+	bash scripts/check-bats-accounting.sh
+	bash scripts/check-app-deploy.sh
+	bash scripts/check-app-netpol.sh
+	bash scripts/check-image-pins.sh
+	bun tools/check-resource-limits.ts
+	bun tools/check-alert-rules.ts
 	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
 	@bash scripts/sops-guard.sh

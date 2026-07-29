@@ -64,4 +64,32 @@ while IFS= read -r c; do
   [ -d "platform/$c" ] || { echo "FAIL: README 컴포넌트 표에 있으나 platform/ 디렉토리 부재: $c"; rc=1; }
 done <<< "$comps"
 
+# ── 소스에 리터럴 NUL 금지 — grep이 그 파일을 **바이너리로 판정해 통째로 건너뛴다** ────────────────
+# ⚠️ 라이브 실측(2026-07-29): tools/check-image-ownership.ts가 맵 키 구분자로 **리터럴 NUL 바이트**를
+#    소스에 박고 있었다(`${file}<NUL>${ref}`). 동작은 정상이지만 grep이 "Binary file … matches"만 내고
+#    **내용을 한 줄도 출력하지 않는다** → 이 레포의 grep 기반 가드 전부에게 그 파일이 **투명해진다**.
+#    발견 경위: SCAN 마커 파생 로스터가 이 파일의 라벨만 조용히 누락했다(정적 8 vs 런타임 9).
+#    즉 "가드가 돌았고 초록인데 대상 하나를 아예 안 본" 전형적 무측정이다.
+# 처방: 구분자는 이스케이프(`\u0000`)로 쓴다 — 런타임 값은 같고 파일은 텍스트로 남는다.
+# 대상은 **확장자로 파생**한다(손 관리 목록 금지). 이미지 등 정당한 바이너리 자산은 자연히 빠진다.
+nul_scanned=0
+nul_bad=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  nul_scanned=$((nul_scanned + 1))
+  # ⚠️ `grep "$(printf '\000')"`로 찾으면 안 된다 — 명령 치환이 NUL을 삼켜 **빈 패턴**이 되고,
+  #    빈 패턴은 **모든 파일에 매치**한다(실측: 878건 전건 red). 열거가 아니라 패턴이 붕괴하는 형태다.
+  #    tr로 NUL만 지운 스트림과 원본을 비교한다 — POSIX 도구만 쓰고 GNU/BSD 양쪽에서 같다.
+  # NUL을 지운 바이트 수와 원본 바이트 수를 비교한다 — 다르면 NUL이 있다.
+  # (`tr … | cmp - "$f"`는 같은 파일을 한 파이프라인에서 두 번 읽어 shellcheck SC2094가 붙는다.)
+  if [ "$(LC_ALL=C tr -d '\000' < "$f" | wc -c)" -ne "$(wc -c < "$f")" ]; then nul_bad="${nul_bad}  $f"$'\n'; fi
+done <<< "$(git ls-files '*.ts' '*.mts' '*.sh' '*.bats' '*.yaml' '*.yml' '*.json' '*.md' '*.py' '*.tf' '*.rego' 'Makefile')"
+scan_floor check-skeleton:nul-scan "$nul_scanned" "${SKELETON_NUL_MIN_SCAN:-200}" || exit 1
+if [ -n "$nul_bad" ]; then
+  echo "FAIL: 소스에 리터럴 NUL 바이트 — grep이 이 파일들을 바이너리로 보고 내용을 건너뛴다(가드에 투명해짐):"
+  printf '%s' "$nul_bad"
+  printf '  -> 구분자가 필요하면 리터럴 NUL 대신 이스케이프를 써라 (TS: \\u0000 / bash: ANSI-C 인용).\n'
+  rc=1
+fi
+
 exit $rc

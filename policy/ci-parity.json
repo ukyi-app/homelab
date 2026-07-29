@@ -64,6 +64,19 @@
       "local": "tools/check-workflow-readiness.ts"
     },
     {
+      "name": "실 도메인 가드 (레포 자신에 대해 돌린다 — bats 픽스처가 아니라)",
+      "status": "mirrored",
+      "local": [
+        "scripts/check-doc-index.sh",
+        "scripts/check-bats-accounting.sh",
+        "scripts/check-app-deploy.sh",
+        "scripts/check-app-netpol.sh",
+        "scripts/check-image-pins.sh",
+        "tools/check-resource-limits.ts",
+        "tools/check-alert-rules.ts"
+      ]
+    },
+    {
       "name": "make ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)",
       "status": "mirrored",
       "local": "check-ci-parity.ts"

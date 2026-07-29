@@ -418,10 +418,10 @@ function checkStatic(root: string, minWorkflows: number, minDeclarations: number
   if (declarations < minDeclarations) {
     bad.push(`원장 선언 ${declarations}건 < ${minDeclarations} — 원장 붕괴(대조 대상이 사라졌다)`);
   }
-  if (!bad.length) {
-    console.log(`SCAN: check-workflow-readiness:workflows: ${entries.length}`);
-    console.log(`SCAN: check-workflow-readiness:declarations: ${declarations}`);
-  }
+  // ⚠️ 위반 유무와 **무관하게** 낸다. `if (!bad.length)` 안에 두면 위반 실행에서 마커가 사라져
+  //    "마커 부재 = 미실행" 해석이 깨진다 — 열거는 정상이었고 위반이 있었을 뿐인데도 '안 돌았다'로 읽힌다.
+  console.log(`SCAN: check-workflow-readiness:workflows: ${entries.length}`);
+  console.log(`SCAN: check-workflow-readiness:declarations: ${declarations}`);
   return bad;
 }
 

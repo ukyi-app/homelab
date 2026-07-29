@@ -275,7 +275,10 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
   const usedDecls = new Set<string>();
   for (const r of refs) {
     const owner = resolveOwner(r, renovate, bespoke);
-    owners.set(`${r.file} ${r.ref}`, owner);
+    // ⚠️ 구분자는 **이스케이프**로 쓴다(`\u0000`) — 리터럴 NUL 바이트를 소스에 박으면 grep이 그 파일을
+    //    **바이너리로 판정해 내용을 통째로 건너뛴다**. 그러면 이 레포의 grep 기반 가드 전부에게 이 파일이
+    //    보이지 않게 되고, 그건 조용한 무측정이다(실측: 이 파일의 마커가 파생 로스터에서 누락됐다).
+    owners.set(`${r.file}\u0000${r.ref}`, owner);
     if (owner !== "none") continue;
     // 무소유 — 원장에 파일 또는 `파일#참조`로 선언돼 있어야 한다.
     const keys = [`${r.file}#${r.ref}`, r.file];
@@ -376,16 +379,19 @@ if (import.meta.main) {
 
   if (flags.bool("--report")) {
     for (const [k, owner] of [...res.owners].sort()) {
-      const [file, ref] = k.split(" ");
+      const [file, ref] = k.split("\u0000");
       console.log(`${owner.padEnd(14)} ${file} — ${ref}`);
     }
   }
 
+  // ⚠️ SCAN 마커는 **위반 검사보다 먼저** 낸다. 뒤에 두면 위반 실행에서 마커가 아예 안 나오고,
+  //    그러면 "마커 부재 = 미실행"이라는 해석이 깨진다(열거는 됐는데 위반이 있었을 뿐인데도
+  //    '안 돌았다'로 읽힌다). 규약은 scripts/lib/scan-floor.sh + CONTRIBUTING '열거 바닥값' 절.
+  console.log(`SCAN: check-image-ownership:refs: ${res.refs.length}`);
   if (res.bad.length) {
     console.error("FAIL: 이미지 소유권 회계 위반:");
     for (const b of res.bad) console.error(`  ${b}`);
     process.exit(1);
   }
-  console.log(`SCAN: check-image-ownership:refs: ${res.refs.length}`);
   console.log(`check-image-ownership OK (참조 ${res.refs.length}건 전건 소유자 확정 또는 원장 선언)`);
 }

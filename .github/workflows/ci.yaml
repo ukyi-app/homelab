@@ -88,6 +88,30 @@ jobs:
         # 여긴 정적 방향(원장 ↔ 워크플로 양방향 대조)만 본다 — 런타임 판정은 각 워크플로의
         # accounting job이 `--workflow <file>`로 수행한다.
         run: bun tools/check-workflow-readiness.ts
+      - name: 실 도메인 가드 (레포 자신에 대해 돌린다 — bats 픽스처가 아니라)
+        # 티켓 06이 **의도적으로 미구현**으로 남긴 조항("그 실행이 가드의 실제 도메인에 닿을 때만 권위")을
+        # 관측 기계를 짓지 않고 **모호성 제거**로 닫는다.
+        #
+        # 병: 아래 7종은 CI에서 **bats를 통해서만** 돌았는데, 같은 bats 파일에 픽스처 @test가 20여 개씩
+        # 섞여 있다. 그래서 "실 레포를 검사하는 @test 한 줄"이 지워져도 픽스처들이 venue를 살려
+        # G1(check-guard-authority)은 초록을 유지한다 — 실측: check-image-pins의 실 트리 강제는
+        # `tests/gates/test_image_pins.bats:236` **단 한 줄**이 CI의 유일한 권위였다.
+        # (`make verify`는 G1 기준 mirror라 권위가 아니고, `make ci` 목록에도 없었다.)
+        #
+        # 처방: ci.yaml이 **직접** 부르면 정의상 실 도메인에 닿는다 → fixture↔real 질문 자체가 사라진다.
+        # 레포가 이미 같은 해법을 3건(G1·G2·G-09)에 적용해 놨고 그 스텝들의 주석이 같은 이유를 적고 있다.
+        # ⚠️ 대안이었던 "실행 관측"(SCAN 마커를 사이드 채널로 걷어 도메인 도달을 판정)은 기각했다 —
+        #    bats `run`이 자식 stdout을 `$output`으로 삼켜 마커가 밖에 도달하지 않고, 스캔 **건수**로는
+        #    픽스처와 실 트리를 가를 수 없다(픽스처를 6건으로 만들면 실 트리 값과 정확히 충돌한다).
+        # ⚠️ bats에서도 계속 돈다(픽스처 @test와 같은 파일이라 뗄 수 없다). 중복 실행 1.6초는 의도된 대가다.
+        run: |
+          bash scripts/check-doc-index.sh
+          bash scripts/check-bats-accounting.sh
+          bash scripts/check-app-deploy.sh
+          bash scripts/check-app-netpol.sh
+          bash scripts/check-image-pins.sh
+          bun tools/check-resource-limits.ts
+          bun tools/check-alert-rules.ts
       - name: make ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)
         # 병: Makefile은 `ci`를 "gate를 로컬에서 그대로 재현"이라 선언했지만 그 주장을 검증하던 것은
         # 하드코딩된 5개 토큰뿐이었다 — 실측 시점에 이 job의 run 스텝 19건 중 8건이 make ci에 없었는데
