@@ -139,7 +139,7 @@ c" ]
   git -C "$FX" add -A
   bad=""
   bash "$ROOT/scripts/check-app-netpol.sh" --root "$FX" 2>/dev/null \
-    | grep -qE '^SCAN: check-app-netpol: [0-9]+$' || bad="$bad app-netpol"
+    | grep -qE '^SCAN: check-app-netpol:manifests: [0-9]+$' || bad="$bad app-netpol"
   bash "$ROOT/scripts/check-app-deploy.sh" "$FX/apps/x/deploy/prod" 2>/dev/null \
     | grep -qE '^SCAN: check-app-deploy: [0-9]+$' || bad="$bad app-deploy"
   bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_FILENAME" 2>/dev/null \
@@ -152,21 +152,35 @@ c" ]
 }
 
 # TS 가드도 같은 규약을 쓴다(커널이 셸 전용이라 마커는 콜사이트에 있다).
-# TS 가드도 같은 규약을 쓴다(커널이 셸 전용이라 마커는 콜사이트에 있다).
-# 라벨은 도메인 단위라 접미사가 붙을 수 있다 — 가드명 접두로 확인하고, 기대 라벨 수를 고정한다.
-@test "the TypeScript guards emit the same marker shape, one label per floored domain" {
-  bad=""
-  # <도구> <기대 라벨 수>
-  while read -r t want; do
-    [ -n "$t" ] || continue
-    n=$(bun "$ROOT/tools/$t.ts" 2>/dev/null | grep -cE "^SCAN: ${t}(:[a-z]+)?: [0-9]+$" || true)
-    [ "${n:-0}" -eq "$want" ] || bad="$bad ${t}(want=${want},got=${n:-0})"
-  done <<EOF
-check-resource-limits 1
-check-alert-rules 2
-check-guard-authority 2
-EOF
-  [ -z "$bad" ]   # 비어야 통과. 디버깅: echo "$bad"
+# ⚠️ **앞선 판은 하드코딩 로스터였고 이미 드리프트했다** — 3행(resource-limits·alert-rules·
+#    guard-authority)만 적혀 있었는데 실제 방출 TS는 5종이었다(image-ownership·workflow-readiness가
+#    누락). "하드코딩 소비처 목록은 자기 자신에게만 정확하다"(AGENTS.md 함정)의 살아있는 사례다.
+#    ⇒ 셸 레인과 **동형**으로 바꾼다: 정적 콜사이트 라벨 집합 == 런타임 방출 라벨 집합.
+@test "the TypeScript guards emit the same marker shape (derived roster, not hardcoded)" {
+  # 정적: 주석(//) 줄을 제외한 `SCAN: <라벨>:` 콜사이트. 라벨은 도메인 단위라 접미사가 붙을 수 있다.
+  static="$(grep -hE '^[^/]*SCAN: ' "$ROOT"/tools/*.ts \
+            | grep -oE 'SCAN: [a-z0-9:-]+:' | sed 's/^SCAN: //; s/:$//' | sort -u)"
+  # 바닥값: 콜사이트가 통째로 사라지면 정적·런타임이 함께 줄어 등식이 유지된다(적대 검토가 실측한 구멍).
+  n=$(printf '%s\n' "$static" | grep -c . || true)
+  [ "$n" -ge 6 ]
+  # 방출 TS 파일 전량을 **파생**한다 — 목록을 손으로 적지 않는다.
+  files="$(grep -lE '^[^/]*SCAN: ' "$ROOT"/tools/*.ts)"
+  [ -n "$files" ]
+  runtime=""
+  for f in $files; do
+    out="$(bun "$f" 2>/dev/null)" || { echo "TS 가드가 비-0으로 죽었다: $f"; false; }
+    runtime="${runtime}$(printf '%s\n' "$out" | sed -n 's/^SCAN: \(.*\): [0-9][0-9]*$/\1/p')
+"
+  done
+  # ⚠️ 모드 의존 콜사이트도 **호출해서** 덮는다 — 제외 목록을 만들지 않는다.
+  #    check-workflow-readiness의 `accounted` 라벨은 런타임 모드(`--workflow <f>`)에서만 나온다.
+  #    제외하면 그 콜사이트가 죽어도 아무도 모른다(제외 목록이야말로 이 캠페인이 지우는 것이다).
+  rt="$(WORKFLOW_NEEDS='{}' bun "$ROOT/tools/check-workflow-readiness.ts" --workflow bump-poll.yaml 2>/dev/null || true)"
+  runtime="${runtime}$(printf '%s\n' "$rt" | sed -n 's/^SCAN: \(.*\): [0-9][0-9]*$/\1/p')
+"
+  runtime="$(printf '%s' "$runtime" | grep -v '^$' | sort -u)"
+  # 핵심 단언(마지막): 정적 콜사이트와 런타임 방출이 **정확히 같은 집합**이어야 한다.
+  [ "$static" = "$runtime" ] || { echo "정적:"; echo "$static"; echo "런타임:"; echo "$runtime"; false; }
 }
 
 # 기계 판독 stdout 모드는 마커가 오염시키면 안 된다.
@@ -185,8 +199,8 @@ EOF
   printf 'kind: NetworkPolicy\n' > "$FX/apps/x/deploy/prod/np.yaml"
   git -C "$FX" init -q
   git -C "$FX" add -A
-  fix=$(bash "$ROOT/scripts/check-app-netpol.sh" --root "$FX" 2>/dev/null | sed -n 's/^SCAN: check-app-netpol: //p')
-  real=$(bash "$ROOT/scripts/check-app-netpol.sh" 2>/dev/null | sed -n 's/^SCAN: check-app-netpol: //p')
+  fix=$(bash "$ROOT/scripts/check-app-netpol.sh" --root "$FX" 2>/dev/null | sed -n 's/^SCAN: check-app-netpol:manifests: //p')
+  real=$(bash "$ROOT/scripts/check-app-netpol.sh" 2>/dev/null | sed -n 's/^SCAN: check-app-netpol:manifests: //p')
   [ -n "$fix" ]
   [ -n "$real" ]
   [ "$fix" -ne "$real" ]

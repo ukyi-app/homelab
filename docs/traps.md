@@ -55,3 +55,4 @@
 | make -n은 드라이런이 아니다 — 레시피의 $(MAKE)는 -n에서도 실행(그 출력을 데이터로 읽는 가드 2종이 오염) | gate | `tests/gates/test_make-ci-parity.bats`, `tools/check-ci-parity.ts`, `policy/ci-parity.json` |
 | tracked 열거 게이트는 untracked 파일을 안 본다(로컬 초록 ↔ CI red 양립 — `git add` 전 make ci는 무측정) | gate | `tests/gates/test_make-ci-parity.bats`, `Makefile` |
 | 체이닝 레이스의 두 번째 얼굴 — record는 있는데 ALERTS 전무(대조 알림은 비체이닝이라 못 막음·병렬화가 깨운 flake) | gate | `tests/gates/vmalert-drift-firing-e2e.sh` |
+| 소스의 리터럴 NUL 1바이트 → 그 파일이 모든 grep 가드에 투명(매치 수는 1이라 스캔한 것처럼 보인다) | gate | `scripts/check-skeleton.sh`, `tests/gates/test_scan-floor.bats` |
