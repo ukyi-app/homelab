@@ -137,6 +137,7 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	bash scripts/check-image-pins.sh
 	bun tools/check-resource-limits.ts
 	bun tools/check-alert-rules.ts
+	bun tools/check-disk-caps.ts
 	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
 	@bash scripts/sops-guard.sh

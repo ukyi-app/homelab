@@ -669,3 +669,50 @@ red(대상은 확장자로 파생한다. 손 관리 목록을 두면 그 목록�
 
 > 가드: `scripts/check-skeleton.sh`, `tests/gates/test_scan-floor.bats`
 
+### 디스크 자기-상한이 자기 볼륨 선언보다 크다 — GB(10⁹) vs Gi(2³⁰)
+
+워크로드가 **자기 데이터 크기 상한**을 바이트로 선언할 때(VictoriaLogs `-retention.maxDiskSpaceUsageBytes`,
+vmagent `-remoteWrite.maxDiskUsagePerURL`), 그 값이 **자기가 쓰는 볼륨의 선언 용량보다 클 수 있다**.
+그러면 같은 파일이 모순된 두 숫자를 말한다 — "이 볼륨은 10Gi다"와 "내 데이터가 15GB 될 때까지 축출하지
+않는다". 라이브 실측(2026-07-29): `victorialogs.yaml`이 정확히 그 상태였다(**139.7%**).
+
+⚠️ **단위 혼동이 핵심이다.** `GB`=10⁹ · `Gi`=2³⁰. 15GB(1.50e10) > 10Gi(1.074e10)인데, 접미사만 훑으면
+"15 > 10"으로도 "GB < Gi"로도 잘못 읽힌다. 판정은 반드시 **바이트로 환산**해서 해야 한다.
+
+⚠️ **"언젠가 터진다"가 아니라 지금 결함이다.** 그 상한은 한 번도 발동한 적이 없었다 — 축출은 전부
+`retentionPeriod=14d`가 하고 실사용은 상한의 1/69였다. 그래도 결함인 이유는 셋이다: ① 용량 계획이
+PVC 숫자를 읽으면 틀린 답을 얻는다 ② 쿼터를 강제하는 provisioner로 바뀌는 순간 앱은 15GB까지 쓸 수
+있다고 믿는 채로 볼륨 한계에서 ENOSPC를 맞는다 ③ 형제 선언(vmagent 450MiB < 512Mi emptyDir)은 올바른
+방향이라 **비대칭 자체가 갭의 증거**다.
+
+⚠️ **PVC `requests.storage`는 축소 불가**(확장 전용)다. 그래서 "볼륨을 올려 맞추기"는 되돌릴 수 없는
+방향이고, 이미 실사용의 49배인 선언을 더 부풀리는 순환 논리다. **상한 쪽을 내리는 것이 정답**이다.
+
+⚠️ **존재 grep으로 만들면 안 된다.** `tests/gates/test_vmalert-config.bats`가 이미
+`grep -q maxDiskUsagePerURL` 형태였는데 450MiB를 900MiB로 바꿔도 초록이고 victorialogs 위반도 못 잡았다.
+규범은 이 문서에 **문장으로는 이미 있었다** — 빠진 것은 규범이 아니라 **강제**다.
+
+> 가드: `tools/check-disk-caps.ts`, `tests/gates/test_disk-caps.bats`
+
+### 고아 PVC는 Bound다 — `phase == Released`만 보는 감사는 원리적으로 못 잡는다
+
+`kubectl delete sts --cascade=orphan`은 **PVC를 지우지 않는다**. 그래서 그렇게 생긴 고아는 PVC가 살아
+있고 PV는 계속 `Bound`다. 그런데 `scripts/audit-orphan-pv.sh`는 `.status.phase == "Released"`만 봤다 —
+그 술어의 전제는 "PVC를 지우면 PV가 Released로 남는다"이고, 이 발생 경로에는 해당되지 않는다.
+
+라이브 실측(2026-07-29): 고아 2건(`storage-vmsingle-0` 20Gi 선언/1.0GiB 사용 · `vlogs-victorialogs-0`
+10Gi 선언/118MiB 사용)이 **21일간** 남아 있는 상태에서 이 감사가 **"고아 없음(Released 0건)" + rc=0**을
+냈다. 게이트가 없는 것보다 나쁘다 — **감사했다는 착각**을 만든다.
+
+⚠️ ArgoCD도 이 클래스를 **구조적으로 prune 못 한다**: STS 컨트롤러가 `volumeClaimTemplates`로 만든
+객체라 tracking 어노테이션이 없고, 앱은 Synced/Healthy 초록이다. GitOps 감시망 밖이다.
+
+✅ 판정은 **phase가 아니라 소비 여부**로 한다 — "어떤 파드도 마운트하지 않는 PVC". 그리고 소비 집합은
+**파드 기준**이어야 한다(STS/Deployment 스펙만 보면 스케일 0이나 삭제된 컨트롤러의 PVC를 '사용 중'으로
+오판한다). 열거 바닥값도 함께 둔다 — PVC가 0건으로 읽히면 "고아 없음"과 구별할 수 없다.
+
+⚠️ reclaim은 **PVC → PV → hostPath 디렉토리 3단계 전부** 완주해야 한다(두 storageClass 모두 Retain).
+중간에 멈추면 PV 없는 디스크 잔재가 남고, 그건 어느 k8s 질의로도 안 보인다.
+
+> 가드: `scripts/audit-orphan-pv.sh`
+

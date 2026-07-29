@@ -56,3 +56,5 @@
 | tracked 열거 게이트는 untracked 파일을 안 본다(로컬 초록 ↔ CI red 양립 — `git add` 전 make ci는 무측정) | gate | `tests/gates/test_make-ci-parity.bats`, `Makefile` |
 | 체이닝 레이스의 두 번째 얼굴 — record는 있는데 ALERTS 전무(대조 알림은 비체이닝이라 못 막음·병렬화가 깨운 flake) | gate | `tests/gates/vmalert-drift-firing-e2e.sh` |
 | 소스의 리터럴 NUL 1바이트 → 그 파일이 모든 grep 가드에 투명(매치 수는 1이라 스캔한 것처럼 보인다) | gate | `scripts/check-skeleton.sh`, `tests/gates/test_scan-floor.bats` |
+| 디스크 자기-상한 > 자기 볼륨 선언(GB=10⁹ vs Gi=2³⁰ 혼동·PVC는 축소 불가·존재 grep은 못 잡음) | gate | `tools/check-disk-caps.ts`, `tests/gates/test_disk-caps.bats` |
+| 고아 PVC는 Bound다 — `phase == Released` 감사는 cascade=orphan 잔재를 원리적으로 못 잡는다 | local | `scripts/audit-orphan-pv.sh` |

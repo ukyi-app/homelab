@@ -249,6 +249,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   대조(Makefile 텍스트를 파싱하지 않는다 — 조건부·전제 타깃을 사람이 재구현하면 그 재구현이 다음 드리프트다).
   ⚠️ 그래서 `make -n`은 **부수효과가 없어야** 한다: 레시피에 `$(MAKE)`가 있으면 GNU make는 `-n`에서도 그 줄을
   실행하므로 서브-make 금지(`test_make-ci-parity.bats`가 강제).
+- **`check-disk-caps.ts`** — 디스크 **자기-상한 ↔ 볼륨 선언** 정합(D-4). 워크로드가 바이트로 선언하는
+  자기 데이터 상한(`-retention.maxDiskSpaceUsageBytes` 등)이 자기 볼륨의 선언 용량보다 **작은지** 본다.
+  라이브 실측(2026-07-29): `victorialogs`가 15GB / 10Gi = **139.7%**였고 전 게이트가 초록이었다.
+  ⚠️ 판정은 **바이트 환산**으로 한다 — `GB`=10⁹ · `Gi`=2³⁰라 접미사만 보면 15GB < 10Gi로 잘못 읽힌다.
+  ⚠️ 플래그는 `maxDisk` 패턴으로 **발견**한다(하드코딩 목록 금지). 열거 바닥값 + "볼륨 선언 없으면
+  fail-closed"까지 둔다 — 비교 대상이 없는 것은 통과가 아니라 판정 불가다.
 - **`check-resource-limits.ts`** — 상주 워크로드 main 컨테이너 cpu·memory request + memory limit +
   GOMEMLIMIT≤limit×0.95 강제(구 bash+yq+python3 이관). **`make verify`**(로컬 mirror)·gate 수집 bats(`tests/test_resource_limits.bats`)가 호출 — ci.yaml gate 스텝이 직접 부르지는 않는다(`check-guard-authority` 실측). `--repo-root`로 스캔 루트 지정.
 - **`check-alert-rules.ts`** — vmalert 룰 expr의 eval-time 안티패턴 정적 lint(`-dryRun`은 파싱만 해서 못 잡는
