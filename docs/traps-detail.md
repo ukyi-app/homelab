@@ -603,3 +603,41 @@ render e2e·vector validate·vmalert validate가 통째로 실행되고 vector �
 
 > 가드: `tests/gates/test_make-ci-parity.bats`, `Makefile`
 
+### 체이닝 레이스의 두 번째 얼굴 — record는 있는데 ALERTS가 전무(병렬화가 깨운 flake)
+
+vmalert replay에서 alert 룰은 record 룰이 remoteWrite한 시리즈를 `query_range` **1회**로 읽는다. record가
+아직 질의 가능하지 않으면 결과가 통째로 비어 **버그가 아닌데 RED**가 된다. 그래서 `--replay.rulesDelay`를
+넉넉히(4s) 준다 — 여기까지는 기존 항목(「vmalert replay rulesDelay」)과 같다.
+
+⚠️ 그런데 하네스의 fail-closed 가드는 **`record == 0`만** 보고 있었다. 라이브 CI 실패(2026-07-28,
+run 30340280961)는 정확히 그 반대편이었다:
+
+| | record 샘플 | firing | pending |
+|---|---:|---:|---:|
+| 로컬 | 58 | 19 | 40 |
+| CI(실패) | **58** | **0** | **0** |
+
+record 데이터는 **완전히 동일**한데 alert이 그걸 하나도 못 읽었다. `pending=0`이라 "발화 창이 좁았다"가
+아니라 **한 번도 참이 안 됐다**는 뜻이다.
+
+⚠️ **대조 알림이 이 축을 못 막는다.** 이 하네스의 생존 대조군(`ArgoCDOutOfSync`)은 **체이닝되지 않은**
+룰이라 레이스에 걸려도 정상 발화한다 — "vmalert가 아무것도 안 썼다"는 잡지만 "체인의 하류만 비었다"는
+못 잡는다.
+
+⚠️ **왜 지금 나타났나: 병렬화가 깨웠다.** 발화 e2e 4종을 병렬로 돌리기 시작하면서(gate 시간의 77%였다)
+러너 경합이 커졌고, 4s가 덮던 적재 지연을 가끔 초과하게 됐다. 병렬 도입 이후 약 6회 중 1회(~17%).
+값을 올리는 대안(4s→6s)은 drift를 196s→292s로 만들어 방금 줄인 gate 시간을 그만큼 되돌린다.
+
+✅ 처방: `require_engaged <leg> <alert>` — engage를 기대하는 레그에서 **ALERTS 시리즈가 통째로 0**이면
+replay를 **1회 재시도**하고, 그래도 0이면 HARNESS FAULT(exit 2)로 죽는다.
+★ 이 서명이 실제 룰 결함과 **구별되기 때문에** 재시도가 정당하다: 룰이 rollup을 잃는 등 진짜로 깨지면
+알림은 *engage는 한다*(결함 픽스처 L4가 `pending=132 / firing=0`을 낸다). "ALERTS가 통째로 0"은 룰이
+아니라 **하네스가 아무것도 못 읽은 것**이다. 즉 재시도는 실패를 숨기는 장치가 아니라 **레이스인지
+결함인지를 판별하는 장치**다 — 레이스면 재시도가 성공하고, 결함이면 두 번 다 0이라 죽는다.
+재시도 발생 사실은 `RETRY (…)` 로그로 반드시 남긴다(조용한 재시도 금지).
+
+⚠️ 재시도는 같은 레그를 다시 돌리므로 컨테이너 이름(`$label-$$`)이 충돌한다 → replay 진입 시
+기존 컨테이너를 먼저 제거한다.
+
+> 가드: `tests/gates/vmalert-drift-firing-e2e.sh`
+

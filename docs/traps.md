@@ -54,3 +54,4 @@
 | vmalert replay rulesDelay = 게이트 시간의 전부(비율 아닌 절대 지연·체인 없으면 순수 낭비) | gate | `tests/gates/test_vmalert-e2e-replay-timing.bats`, `tests/gates/lib/vmalert-e2e.sh` |
 | make -n은 드라이런이 아니다 — 레시피의 $(MAKE)는 -n에서도 실행(그 출력을 데이터로 읽는 가드 2종이 오염) | gate | `tests/gates/test_make-ci-parity.bats`, `tools/check-ci-parity.ts`, `policy/ci-parity.json` |
 | tracked 열거 게이트는 untracked 파일을 안 본다(로컬 초록 ↔ CI red 양립 — `git add` 전 make ci는 무측정) | gate | `tests/gates/test_make-ci-parity.bats`, `Makefile` |
+| 체이닝 레이스의 두 번째 얼굴 — record는 있는데 ALERTS 전무(대조 알림은 비체이닝이라 못 막음·병렬화가 깨운 flake) | gate | `tests/gates/vmalert-drift-firing-e2e.sh` |

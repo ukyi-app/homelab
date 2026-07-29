@@ -234,7 +234,11 @@ docker network create "$NET" >/dev/null
 BASE=""
 replay() { # $1=label $2=rules-file $3=scenario [$4=pods_expected(yes|no) — ksmdown 레그는 no]
   local label="$1" rules="$2" scenario="$3" pods="${4:-yes}" vm port ready
+  # 재실행(require_engaged의 레이스 재시도)을 위해 인자를 보존한다. 레그마다 컨테이너 이름이
+  # `$label-$$`이므로 재시도는 **같은 이름**을 다시 만든다 → 아래에서 기존 컨테이너를 먼저 지운다.
+  LAST_REPLAY_ARGS=("$1" "$2" "$3" "${4:-yes}")
   vm="r6drift-e2e-$label-$$"
+  docker rm -f "$vm" >/dev/null 2>&1 || true
   CONTAINERS="$CONTAINERS $vm"
   docker run -d --name "$vm" --network "$NET" -p 127.0.0.1:0:8428 \
     "victoriametrics/victoria-metrics:${VM_VER}" \
@@ -319,10 +323,40 @@ require_record() {
   }
 }
 
+# ── 체이닝 레이스의 **두 번째 얼굴**: record는 있는데 ALERTS가 전무 ──────────────────────────────
+# require_record는 `record == 0`만 잡는다. 라이브 CI에서 관측된(2026-07-28, run 30340280961) 실패는
+# 그 반대편이었다 — **record=58로 로컬과 완전히 동일**한데 `firing=0 pending=0`. 즉 record는 안착했지만
+# alert 룰이 그걸 query_range **1회**로 읽는 순간에 아직 질의 가능하지 않았다.
+#
+# ★ 이 서명은 실제 룰 결함과 **구별된다**: 룰이 rollup을 잃는 등 진짜로 깨지면 알림은 *engage는 한다*
+#   (pending > 0 — L4의 결함 픽스처가 정확히 pending=132/firing=0을 낸다). "ALERTS 시리즈가 통째로 0"은
+#   룰이 아니라 **하네스가 아무것도 못 읽은 것**이다. 그래서 여기서만 재시도가 정당하다.
+#
+# ⚠️ 왜 지금 필요해졌나: 발화 e2e를 4종 **병렬**로 돌리면서(PR #392) 러너 경합이 커졌고, rulesDelay=4s가
+#    덮던 적재 지연을 가끔 초과하게 됐다. 병렬 도입 이후 약 6회 중 1회 실패(~17%).
+#    값을 올리는 대안(4s→6s)은 drift를 196s→292s로 만들어 gate 시간을 그만큼 되돌린다.
+# ⚠️ 재시도는 **소리 없이 하지 않는다** — 발생 사실을 로그에 남긴다. 그리고 두 번 모두 전무하면
+#    통과시키지 않고 HARNESS FAULT(exit 2)로 죽는다. 즉 재시도는 실패를 숨기는 장치가 아니라
+#    "레이스인가 결함인가"를 **판별하는 장치**다(레이스면 재시도가 성공하고, 결함이면 두 번 다 0이다).
+require_engaged() { # $1=레그 $2=alertname — 이 레그는 알림이 최소한 engage(pending 또는 firing)해야 한다
+  local leg="$1" alert="$2" s
+  s="$(series "$alert")"
+  [ "$s" -eq 0 ] || return 0
+  echo "RETRY ($leg): record=${RECORD_SAMPLES}인데 ALERTS{$alert} 시리즈가 0 — record→alert 체이닝 레이스 서명. replay 1회 재시도한다." >&2
+  replay "${LAST_REPLAY_ARGS[@]}"
+  s="$(series "$alert")"
+  [ "$s" -gt 0 ] || {
+    echo "HARNESS FAULT ($leg): 재시도 후에도 ALERTS{$alert} 시리즈가 0이다(record=$RECORD_SAMPLES). 두 번 모두 전무하면 레이스가 아니라 실제 결함일 수 있다 — 알림 이름 변경·룰 삭제·datasource 배선을 확인하라." >&2
+    exit 2
+  }
+  echo "RETRY ($leg): 재시도에서 ALERTS{$alert} 시리즈 ${s}건 — 레이스였다(룰 판정을 계속한다)." >&2
+}
+
 # ── L1(RED 락) + L6(하네스 생존): 지속 드리프트 + 배포 룰 ───────────────────────────────────────────
 if want L1; then
 replay l1-drift "$TMP/r6-deployed.yaml" drift
 require_record L1
+require_engaged L1 ImageDigestDrift
 F1="$(firing ImageDigestDrift)"; P1="$(pending ImageDigestDrift)"
 F6="$(firing ArgoCDOutOfSync)"
 echo "  [L1] deployed rules + sustained drift → record=$RECORD_SAMPLES firing=$F1 pending=$P1"
@@ -353,6 +387,7 @@ fi
 # ── L3(phantom-drift): bump 수렴 후 오발화 금지 ─────────────────────────────────────────────────────
 if want L3; then
 replay l3-phantom "$TMP/r6-deployed.yaml" phantom
+require_engaged L3 ImageDigestDrift
 F3="$(firing ImageDigestDrift)"; P3="$(pending ImageDigestDrift)"
 echo "  [L3] deployed rules + coherent image bump → record=$RECORD_SAMPLES firing=$F3 pending=$P3"
 if [ "$F3" -eq 0 ]; then pass "L3 no phantom page after a coherent image bump (pending=$P3, firing=0)"
@@ -363,6 +398,7 @@ fi
 # ── L4(하네스 이빨 ①): 결함 expr 픽스처는 지속 드리프트에도 발화 못 함 ──────────────────────────────
 if want L4; then
 replay l4-buggy "$TMP/r6-buggy.yaml" drift
+require_engaged L4 ImageDigestDrift
 require_record L4
 F4="$(firing ImageDigestDrift)"; P4="$(pending ImageDigestDrift)"
 echo "  [L4] fixtures/r6-buggy-expr.yaml + sustained drift → record=$RECORD_SAMPLES firing=$F4 pending=$P4"
@@ -375,6 +411,7 @@ fi
 # ── L5(하네스 이빨 ②): rollup 밖 `or absent()` 가짜 픽스도 통과 못 함 ───────────────────────────────
 if want L5; then
 replay l5-fakefix "$TMP/r6-fakefix.yaml" drift
+require_engaged L5 ImageDigestDrift
 require_record L5
 F5="$(firing ImageDigestDrift)"; P5="$(pending ImageDigestDrift)"
 echo "  [L5] fixtures/r6-fakefix.yaml + sustained drift → record=$RECORD_SAMPLES firing=$F5 pending=$P5"
@@ -417,6 +454,7 @@ fi
 # 매 실행 증명한다(수동 1회 관측을 회귀 게이트로 승격). 산술은 §3의 phantom 유도 참조: W−룩백 > for.
 if want L8; then
 replay l8-overwide "$TMP/r6-overwide.yaml" phantom
+require_engaged L8 ImageDigestDrift
 F8="$(firing ImageDigestDrift)"; P8="$(pending ImageDigestDrift)"
 PH8=$(( W_OW_S - LOOKBACK_S ))
 echo "  [L8] fixtures/r6-overwide-window.yaml (W=$W_OW) + coherent image bump → record=$RECORD_SAMPLES firing=$F8 pending=$P8 (expected phantom ≈ ${PH8}s > for ${FOR_S}s)"
@@ -470,6 +508,8 @@ fi
 #    회귀(RED)가 아니라 **characterization(보존 계약)**이다. red에서 RED가 나오면 전제가 틀린 것이다.
 if want L10; then
 replay l10-rollout-stuck "$TMP/r6-deployed.yaml" rollout-stuck
+require_engaged L10 ImageDigestDrift   # ⚠️ 대조 알림(ArgoCDOutOfSync)은 **체이닝되지 않은** 룰이라
+                                       #    이 레이스에 걸려도 발화한다 — 대조군이 못 막는 축이다.
 # ⚠️ require_record는 **쓰지 않는다**. fail-open 룰에서는 막힌 파드가 `unless` 우변을 채워 record가 **0으로
 #    떨어지는 것이 바로 그 버그의 모습**이다 — require_record를 걸면 그 실패가 "체이닝 레이스"라는 **엉뚱한
 #    사유의 HARNESS FAULT(exit 2)**로 나가 진단을 오도한다(실측 확인). 대신 L7/L9와 같은 관용구로 vacuity를
