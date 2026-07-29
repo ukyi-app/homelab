@@ -45,7 +45,16 @@ spec:
           args:
             - --storageDataPath=/vlogs
             - --retentionPeriod=14d
-            - --retention.maxDiskSpaceUsageBytes=15GB
+            # ⚠️ 이 값은 **자기 볼륨 선언(위 PVC 10Gi)보다 작아야** 한다 — tools/check-disk-caps.ts가 강제.
+            #    이전 값 15GB는 10Gi(=10.74e9 B)의 **139.7%**였다: 같은 파일이 "이 볼륨은 10Gi"와
+            #    "내 데이터가 15e9 B 될 때까지 축출 안 함"이라는 모순된 두 숫자를 말하고 있었다.
+            #    ⚠️ 단위: GB=10⁹ · Gi=2³⁰ — 접미사만 보면 15GB < 10Gi로 잘못 읽힌다.
+            # 8GB = 74.5% (선례 vmagent 450MiB/512Mi = 87.9%보다 보수적).
+            # ★ **동작 변화 0**: 실측 사용량 208MiB로 이 상한의 1/38이고, 축출은 전부 아래 retentionPeriod가
+            #   한다(라이브 로그가 파티션 삭제 사유를 14d로 귀속). 이 변경은 순수 **선언 정정**이다.
+            # ⚠️ 반대 방향(PVC를 16Gi로 상향)을 택하지 않은 이유: PVC requests.storage는 **축소 불가**
+            #   (확장 전용)라 되돌릴 수 없고, 이미 실사용의 49배인 선언을 더 부풀리는 순환 논리다.
+            - --retention.maxDiskSpaceUsageBytes=8GB
             - --memory.allowedPercent=60
             - --httpListenAddr=:9428
           env:
