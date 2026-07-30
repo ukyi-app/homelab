@@ -5,8 +5,10 @@
 # 다르지만 **골격은 동일**하다 — vmsingle 기동 → 합성 시계열 import → vmalert replay(⚠️ max_lookback
 # 주입) → ALERTS 질의. 그 골격만 여기 모은다. 알림별 산술/레그/픽스처는 각 하네스에 남는다.
 #
-# ⚠️ 형제 tests/gates/vmalert-drift-firing-e2e.sh는 **인라인 사본을 유지한다**(이미 머지된 회귀 가드 —
-#    행위 무변경 이관은 이 버그픽스의 범위 밖이다). 이 lib을 고칠 때 소비자는 재실행해 확인할 것.
+# ⚠️ 이 lib은 발화 e2e **6종 전부**의 replay 경로 SSOT다 — 인라인 사본은 0이다(마지막 사본이던
+#    tests/gates/vmalert-drift-firing-e2e.sh도 흡수됐다). 그 "사본 0"은 문서가 아니라
+#    tests/gates/test_vmalert-e2e-replay-timing.bats가 적극 단언한다. 고치면 소비자 전량이
+#    영향권이니 재실행해 확인할 것.
 #
 # 사용: source 후 caller가 `set -euo pipefail`을 소유한다(lib은 셸 옵션을 건드리지 않는다).
 
@@ -55,12 +57,16 @@ vme_cleanup() { # trap EXIT에서 호출
   [ -n "$VME_NET" ] && docker network rm "$VME_NET" >/dev/null 2>&1 || true
 }
 
-vme_start_vmsingle() { # $1=container name $2=vmsingle version → VME_BASE 설정
+# $3.. = vmsingle에 그대로 넘길 **추가 플래그**(선택). 하네스 고유 스토리지 의미(예: 드리프트 하네스의
+# `--dedup.minScrapeInterval` — 합성 KSM 시계열을 scrape 그리드에 정렬)를 인라인 사본 없이 표현하기 위한
+# 통로다. 넘기지 않으면 `"$@"`가 0개로 전개돼 기존 소비자의 명령줄은 **바이트 불변**이다.
+vme_start_vmsingle() { # $1=container name $2=vmsingle version [$3.. = 추가 플래그] → VME_BASE 설정
   local name="$1" ver="$2" port ready
+  shift 2
   VME_CONTAINERS="$VME_CONTAINERS $name"
   docker run -d --name "$name" --network "$VME_NET" -p 127.0.0.1:0:8428 \
     "victoriametrics/victoria-metrics:${ver}" \
-    --storageDataPath=/storage --retentionPeriod=100y --httpListenAddr=:8428 >/dev/null
+    --storageDataPath=/storage --retentionPeriod=100y --httpListenAddr=:8428 "$@" >/dev/null
   port="$(docker port "$name" 8428/tcp | head -1 | sed 's/.*://')"
   VME_BASE="http://127.0.0.1:${port}"
   ready=0
@@ -176,9 +182,9 @@ vme_alert_series() { vme_promql "count(count_over_time(ALERTS{alertname=\"$1\"}[
 
 # ── 하네스-무관 공통 골격 ───────────────────────────────────────────────────────────────────────────
 # 아래는 알림별 산술과 무관한 하네스 골격이다(종료 규약·룰 추출·매니페스트 파생·판정 집계·작업공간).
-# ⚠️ 형제 tests/gates/vmalert-bulkssd-firing-e2e.sh·vmalert-drift-firing-e2e.sh는 **인라인 사본을 유지한다**
-#    (이미 머지된 보존 계약의 측정 도구 — 다른 기능 작업 중에 바꾸지 않는다: 미착수 백로그). 그쪽은 접두사 없는
-#    동명 함수를 source **뒤에** 자체 정의하므로 그쪽 정의가 이긴다 → 아래 `vme_` 접두 추가는 무해하다.
+# ⚠️ 형제 bulkssd·drift 하네스는 접두사 없는 `fault`/`contract`/`fail`/`pass`를 source **뒤에** 자체
+#    정의한다 — 진단 라벨("(preflight)")과 판정 집계는 **하네스-로컬 정책**이라 남긴 것이고, 동명이므로
+#    그쪽 정의가 이긴다. 프리미티브(질의·docker·매니페스트 파생·작업공간)는 전부 여기로 흡수됐다.
 
 # 종료 규약: 2 = HARNESS FAULT/CONTRACT(전제 붕괴·vacuity) · 1 = leg FAIL · 0 = OK
 vme_fault()    { echo "HARNESS FAULT: $*" >&2; exit 2; }
