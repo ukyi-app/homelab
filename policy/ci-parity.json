@@ -24,6 +24,24 @@
       }
     },
     {
+      "name": "SOPS 왕복 (ephemeral CI 키)",
+      "status": "covered",
+      "why": "게이트는 실 age 키가 없어 즉석 키로 왕복을 증명한다. 로컬은 반대로 실 키가 있으므로 make verify가 tests/test_sops-roundtrip.bats로 같은 불변식(암호화 후 평문 부재 + 복호 왕복)을 더 강하게 검증한다. make ci에 미러하면 age 키 없는 환경에서 make ci가 죽는다(그래서 그 bats가 tests/.ci-exclude에 있다).",
+      "covered_by": {
+        "file": "Makefile",
+        "contains": "tests/test_sops-roundtrip.bats"
+      }
+    },
+    {
+      "name": "pre-commit 배선 확인 (훅 정의가 실제로 도는가)",
+      "status": "covered",
+      "why": "pre-commit 훅은 로컬에서 커밋마다 실제로 돌므로(설치돼 있으면) 배선 유효성은 로컬에서 상시 증명된다. make ci에서 pre-commit을 재실행하면 pip 설치가 오프라인 환경의 진입점을 깬다.",
+      "covered_by": {
+        "file": ".pre-commit-config.yaml",
+        "contains": "sops-guard"
+      }
+    },
+    {
       "name": "sops-guard — 추적된 모든 *.enc.yaml 구조 검증",
       "status": "mirrored",
       "local": "scripts/sops-guard.sh"

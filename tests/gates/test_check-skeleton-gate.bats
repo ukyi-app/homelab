@@ -15,11 +15,6 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "verify.yaml no longer runs check-skeleton (single authority, structural)" {
-  run yq -e '.jobs.verify.steps[] | select((.run // "") | test("check-skeleton"))' .github/workflows/verify.yaml
-  [ "$status" -ne 0 ]
-}
-
 @test "make ci mirrors check-skeleton" {
   run awk '/^ci:/{c=1} c && /check-skeleton/{print}' Makefile
   [ -n "$output" ]

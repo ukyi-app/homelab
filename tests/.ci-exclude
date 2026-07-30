@@ -10,7 +10,10 @@ tests/posture/test_networking-e2e.bats
 tests/posture/test_storage-reclaim.bats
 # docker 의존
 tools/tests/test_dev-postgres.bats
-# 실 age 키 의존 (verify.yaml의 ephemeral 키 셸이 대체 커버)
+# 실 age 키 의존 — 실행처는 owner-local `make verify`. gate의 커버리지는 항목마다 다르다:
+#   sops-roundtrip: gate의 'SOPS 왕복 (ephemeral CI 키)' 스텝이 같은 불변식을 즉석 키로 커버.
+#   sops-guard:     gate의 sops-guard 스텝 + tests/gates/test_gate-secret-guard.bats가 커버(왕복 아님).
+#   makefile:       왕복과 무관 — 실 키가 있어야 도는 make 타깃 단언이라 gate 대응물이 없다.
 tests/test_sops-roundtrip.bats
 tests/test_sops-guard.bats
 tests/test_makefile.bats
