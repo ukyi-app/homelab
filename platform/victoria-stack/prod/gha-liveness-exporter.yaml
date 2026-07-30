@@ -96,6 +96,10 @@ spec:
   # 않으므로, Forbid이면 구(무제한) Job이 살아 있을 때 새(제한된) Job이 계속 스킵돼 지연 상한이 무너진다.
   # 잡은 멱등이라(조회 + push) 중도 종료로 잃는 것이 없다.
   concurrencyPolicy: Replace
+  # ⚠️ CronJobFlapping(core.yaml)의 **관측 창**이다 — 기본값 1이면 "최근 창에 N회 실패"를 원리적으로
+  #    셀 수 없어 이 워크로드가 그 알림에서 통째로 빠진다(무성). 이 exporter는 주기 1800s에 하트비트
+  #    임계가 5400s(3주기)라 교대 실패가 하트비트로도 안 잡히는 사각지대였다.
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 1

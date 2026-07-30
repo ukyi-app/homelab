@@ -101,6 +101,10 @@ spec:
   #    죽이고 새 Job을 반드시 띄우므로 상한이 레거시 상태와 무관하게 성립한다(잡은 멱등 — GHCR 조회 +
   #    메트릭 push라 중도 종료로 잃는 것이 없다).
   concurrencyPolicy: Replace
+  # ⚠️ CronJobFlapping(core.yaml)의 **관측 창**이다 — 기본값 1이면 "최근 창에 N회 실패"를 원리적으로
+  #    셀 수 없어 이 워크로드가 그 알림에서 통째로 빠진다(무성). 룰 임계와의 정합은
+  #    tests/gates/test_cronjob-flapping.bats가 레포에서 계산해 강제한다.
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 1

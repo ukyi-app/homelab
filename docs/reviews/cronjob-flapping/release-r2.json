@@ -1,0 +1,41 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "release",
+  "ack": "human-triage",
+  "triageMode": "human",
+  "verdict": "needs-attention",
+  "summary": "NO-SHIP. R-1 resolved by the 7200s window, 2×period+for gate, and real 3600s GHA fixture; R-2 resolved by the recovery comparison and L10; R-3 resolved—L11 genuinely locks owner_name using two independently resolved CronJobs; R-4's quoted/commented/flow-YAML omission is resolved by yq parsing. However, a new high-severity lifecycle bug leaves the headline adguard flapping case silent. Also, plan.md:42 still says one hour despite the claimed plan update. Static gates passed; container replay could not run because this read-only environment rejects mktemp.",
+  "planFile": "docs/reviews/cronjob-flapping/plan.md",
+  "planInDiff": null,
+  "reviewedFileCount": 9,
+  "target": "working tree diff",
+  "reviewedSha": "e0ef3f485373451468b1353b84ee611b88545d27",
+  "reviewedTree": "69f739927c5e764116b5ae893aafcfa60661e611",
+  "reviewedPlanSha256": "4b90c9f2da430cd74e7e2f6f9c6ed45a98fd4599ed206e66c37e55ea2befc893",
+  "headMovedDuringReview": false,
+  "planDriftDuringReview": false,
+  "codexStatus": 0,
+  "parseError": null,
+  "findingCount": 1,
+  "planFindingCount": 0,
+  "triage": "review-gate SKILL.md rules govern: render EVERY finding as a full table row, the human decides each row (accept/reject/defer/question — free text), echo back before applying, max 2 rounds, append decisions.md and COMMIT it with this artifact.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "History cleanup resets the adguard alert before its 15-minute `for` completes",
+      "body": "The implementation assumes `failedJobsHistoryLimit >= threshold` is sufficient. It is not once the rule counts only recovered failures. `adguard-rewrite-reconciler` runs every 600s with limit 2 and a 120s deadline. After F1/S1/F2/S2, the count reaches 2 and becomes pending; when F3 fails at most about 720s later, the CronJob controller deletes F1 to retain only two failed Jobs, leaving F2 recovered and F3 unresolved—count 1—before the 900s `for` completes. This repeats indefinitely, so the feature's worst documented case remains silent. Kubernetes explicitly retains only the configured number of failed Jobs and deletes the oldest excess Jobs ([controller implementation](https://github.com/kubernetes/kubernetes/blob/master/pkg/controller/cronjob/cronjob_controllerv2.go#L651-L710)). L7 cannot expose this because it holds exactly two recovered failures for the whole replay and never models F3 or controller cleanup.",
+      "file": "platform/victoria-stack/prod/rules/core.yaml",
+      "line_start": 254,
+      "line_end": 257,
+      "confidence": 0.99,
+      "recommendation": "Make retention cover the pending interval—safest is `failedJobsHistoryLimit >= threshold + 1` for in-scope CronJobs, raising adguard and digest to at least 3. Add a lifecycle replay containing F1/S1/F2/S2 followed by F3 and deletion of F1; mutation back to limit 2 must fail.",
+      "isPlanFinding": false
+    }
+  ],
+  "next_steps": [
+    "Correct the retention invariant and affected CronJob limits.",
+    "Add the third-failure/history-cleanup regression fixture and rerun the containerized firing E2E.",
+    "Update plan.md's stale one-hour requirement to the implemented two-hour design."
+  ]
+}
