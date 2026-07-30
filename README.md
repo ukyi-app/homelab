@@ -112,3 +112,4 @@ make ci           # push 전 단일 진입점 — CI 'gate' job을 로컬에서 
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — 황금률(검증 우선 · 평문 시크릿 금지 · env는 경로에)
 - `docs/runbooks/` — 운영 런북 (로컬 전용, **gitignored** — 신규 체크아웃엔 부재. 디스크 유실 대비 별도 백업)
 - `docs/runbooks-public/toolchain-setup.md` — 호스트 툴체인 최소 설치 가이드 (tracked — gitignored 런북 대체본)
+- `docs/runbooks-public/github-ruleset-verify.md` — bump-poll/** 예약 ruleset owner-local 라이브 강제 검증·롤백 (tracked)

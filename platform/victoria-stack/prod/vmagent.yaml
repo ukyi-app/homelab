@@ -32,6 +32,9 @@ spec:
       labels: { app.kubernetes.io/name: vmagent }
       annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8429" } # 자기관측 remoteWrite 메트릭
     spec:
+      # ⚠️ automountServiceAccountToken을 false로 바꾸지 마라 — vmagent는 k8s **service discovery**로
+      #    스크레이프 대상(파드/엔드포인트/노드)을 찾으므로 API 접근이 필수다. 관측성 스택의 다른
+      #    워크로드(grafana·vmsingle·victorialogs·vmalert)가 false인 것은 그것들이 API를 안 쓰기 때문이다.
       serviceAccountName: vmagent
       securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:

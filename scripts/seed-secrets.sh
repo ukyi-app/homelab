@@ -26,7 +26,7 @@ R2_ENDPOINT=$(jq -r '.r2_account_endpoint.value' <<<"$CF_OUT")
 TS_ID=$(jq -r '.operator_oauth_client_id.value' <<<"$TS_OUT")
 TS_SECRET=$(jq -r '.operator_oauth_client_secret.value' <<<"$TS_OUT")
 
-write_enc() { # $1=path; 평문 yaml을 stdin으로 받음 -> 원자적: 평문이 $path에 닿는 일은 절대 없음
+write_enc() { # $1=path; 평문 yaml을 stdin으로 받음 -> 원자적: 평문이 ${path}에 닿는 일은 절대 없음
   local path="$1"
   mkdir -p "$(dirname "$path")"
   local tmp
@@ -36,7 +36,7 @@ write_enc() { # $1=path; 평문 yaml을 stdin으로 받음 -> 원자적: 평문�
   cat >"$tmp" # 평문은 0600 임시 파일에만 머문다
   sops --encrypt --filename-override "$path" "$tmp" >"$tmp.enc" \
     || { echo "sops failed for $path — NO plaintext written to the target"; return 1; }
-  mv "$tmp.enc" "$path" # 원자적: 암호화된 파일만 $path에 놓인다
+  mv "$tmp.enc" "$path" # 원자적: 암호화된 파일만 ${path}에 놓인다
   echo "sealed $path"
 }
 

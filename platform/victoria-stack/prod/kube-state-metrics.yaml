@@ -48,6 +48,8 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
     spec:
+      # ⚠️ automountServiceAccountToken을 false로 바꾸지 마라 — 이 워크로드의 존재 이유가 k8s API를
+      #    읽어 오브젝트 상태를 메트릭으로 내보내는 것이다(kube_* 전 계열의 유일한 생산자).
       serviceAccountName: kube-state-metrics
       securityContext: { runAsNonRoot: true, runAsUser: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:
