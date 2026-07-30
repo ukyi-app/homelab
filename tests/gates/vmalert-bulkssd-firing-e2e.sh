@@ -127,7 +127,7 @@ EXPR="$(alert_expr "$TMP/r4-deployed.yaml" FilesBulkSSDLow)"
 #    레그는 "rollup을 입어야만 발화한다"를 관측으로 못박는다 — 둘은 상보적이다.
 VISIBLE_EVALS=$(( LOOKBACK_S / EVAL_S + 1 ))
 NEEDED_EVALS=$(( FOR_S / EVAL_S + 1 ))
-[ "$VISIBLE_EVALS" -lt "$NEEDED_EVALS" ] || fault "가시 평가($VISIBLE_EVALS회) ≥ for: 요구 평가($NEEDED_EVALS회) — 맨 참조로도 hold가 성립해 버그가 재현되지 않는다(룩백/eval/for 조합 변경). 레그 산술 재설계 필요."
+[ "$VISIBLE_EVALS" -lt "$NEEDED_EVALS" ] || fault "가시 평가(${VISIBLE_EVALS}회) ≥ for: 요구 평가(${NEEDED_EVALS}회) — 맨 참조로도 hold가 성립해 버그가 재현되지 않는다(룩백/eval/for 조합 변경). 레그 산술 재설계 필요."
 [ $(( FOR_S % EVAL_S )) -eq 0 ] || fault "for:($FOR)가 evaluationInterval($EVAL)의 정수배가 아님 — 발화 경계가 비결정적"
 
 # ④ rollup 불변식(픽스 후에만 적용). rollup 부재 = **이 버그 자체**다 → 여기서 죽으면 RED 경로를 스스로

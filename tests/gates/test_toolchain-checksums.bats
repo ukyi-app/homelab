@@ -34,6 +34,21 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   [ "$status" -eq 0 ]
 }
 
+@test "no workflow installs a toolchain binary via apt (the composite pin is the only path)" {
+  # composite만 검사하면 **워크플로가 자기 손으로 apt를 부르는 경로**가 열린 채 남는다 — 실측:
+  # #372가 setup-toolchain의 apt bats를 커밋 SHA 핀으로 바꿨는데 iac.yaml만 마이그레이션에서 빠져
+  # `sudo apt-get install -y bats`가 그대로 있었고, 위 @test는 composite만 보므로 초록이었다.
+  # arm64 러너의 ports.ubuntu.com은 미러 SPOF다(2026-07-16 실장애 — 그 워크플로 실패 2건의 유일 원인).
+  # 도구는 setup-toolchain 한 곳에서만 온다: 그래야 핀·체크섬 규율이 실제로 전 경로를 덮는다.
+  run bash -c "git ls-files '.github/workflows/*.yaml' '.github/actions/**' | xargs grep -nE 'apt-get +(install|update)' || true"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || {
+    echo "워크플로/액션이 apt로 도구를 깐다 — setup-toolchain(핀+체크섬)을 쓸 것:"
+    printf '%s\n' "$output"
+    false
+  }
+}
+
 @test "every download step verifies a sha256 checksum" {
   # sha256 핀 도구 10종(yq/kubeconform/helm/kustomize/conftest/shellcheck/sops/age/kubeseal/actionlint) 전부
   # sha256sum -c를 호출하는지 — 한 번이라도 누락이면 fail. **실제 호출**(`| sha256sum -c -`)만 센다 —

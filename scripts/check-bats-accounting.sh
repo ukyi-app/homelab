@@ -27,7 +27,7 @@ in_excl() { case "$EXCL" in *" $1 "*) return 0;; *) return 1;; esac; }
 rc=0
 # ⚠️ 열거를 **변수로** — 자기 글롭이 비면 이 가드가 막으려던 F6 클래스(테스트가 어느 harness에도
 # 안 묶여 조용히 죽음)에 **자기가 걸린다**(라이브 재현: 글롭만 비우는 셰임으로 같은 OK + rc=0).
-# 현재 추적 228건 — 래칫 아님.
+# 래칫이 아니다 — 건수는 여기 적지 않는다(손 관리 수치는 반드시 드리프트한다, scan-floor.sh 규약).
 all_bats="$(scan_enumerate check-bats-accounting git ls-files '*test_*.bats')" || exit 1
 scanned="$(scan_count "$all_bats")"
 scan_floor check-bats-accounting "$scanned" "${BATS_ACCOUNTING_MIN_SCAN:-150}" || exit 1

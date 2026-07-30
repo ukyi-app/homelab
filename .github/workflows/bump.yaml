@@ -108,13 +108,12 @@ jobs:
           git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
           branch="bump/build-${RUN_ID}"
           git checkout -b "$branch"
-          # ⚠️ **파일 화이트리스트를 쓰지 않는다.** 예전엔 여기 pg-tools 소비처 4개가 박혀 있었는데,
-          #    그건 `tools/repin-pgtools.ts`의 옛 하드코딩 `CONSUMERS`와 같은 목록의 **네 번째 사본**이었다.
-          #    재핀이 대상을 레포에서 파생하도록 바뀐 뒤(D-1) 도구는 6파일을 고치는데 이 목록은 4개만
-          #    스테이지해서, **다음 재빌드마다 방금 고친 드리프트가 그대로 되돌아온다**(적대 검토가 실측).
-          #    디렉토리 스코프로만 제한하고 파일 열거는 하지 않는다 — 러너는 fresh checkout이라
-          #    이 두 루트의 변경은 위 도구들이 만든 것뿐이다.
-          #    (apps를 디렉토리로 주는 이유는 그대로다: 인레포 앱 0일 때 glob 미매치 pathspec 에러 회피.)
+          # ⚠️ **파일 화이트리스트를 쓰지 않는다.** 재핀 도구가 대상을 레포에서 파생하므로 여기 목록을
+          #    두면 사본이 하나 더 생기고, 어긋나는 순간 **다음 재빌드가 방금 고친 드리프트를 되돌린다**
+          #    (실측: 도구는 6파일을 고치는데 목록은 4개만 스테이지했다). 디렉토리 스코프만 준다 —
+          #    러너는 fresh checkout이라 이 두 루트의 변경은 위 도구들이 만든 것뿐이다.
+          #    (apps를 디렉토리로 주는 이유: 인레포 앱 0일 때 glob 미매치 pathspec 에러 회피.)
+          #    cf. docs/traps.md 「이미지 핀의 존재 ≠ 일치 ≠ 소유자」
           git add -A -- apps platform
           git commit -m "chore: 빌드 산출물 이미지 핀 갱신 (${APPS})"
           git push -u origin "$branch"
