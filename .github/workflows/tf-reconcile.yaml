@@ -286,11 +286,9 @@ jobs:
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
 
   # ── 준비상태 회계 — 게이트 **밖**의 감시자 (G-09) ───────────────────────────────────────────
-  # 위 job들이 자격 부재로 skip되면 GHA는 run을 **초록**으로 끝낸다. 그 job 안의 알림 스텝은
-  # `if: always()`여도 함께 skip된다(skip된 job은 스텝을 0개 실행한다 — 라이브 실측) → owner 신호 0.
-  # 이 job만이 게이트 밖에 있어 needs.*.result / needs.*.outputs.executed를 관측할 수 있다.
-  # ⚠️ `if: !cancelled()` 필수 — 상태함수가 없으면 기본 success()가 걸려 감시 대상이 skip될 때
-  #    감시자도 함께 skip된다(감시견이 감시 대상과 같은 운명에 묶이는 것이 이 병의 정체다).
+  # 위 job들이 자격 부재로 skip되면 run은 **초록**이고, 그 job 안의 알림은 `if: always()`여도 함께
+  # skip된다(skip된 job은 스텝을 0개 실행한다) → owner 신호 0. 게이트 밖에서만 관측할 수 있다.
+  # ⚠️ `if: !cancelled()` 필수 — 기본 success()가 걸리면 감시자가 감시 대상과 같은 운명에 묶인다.
   # 판정 기준은 policy/workflow-readiness.json(원장) — 원장↔워크플로 정합은 ci.yaml gate가 강제한다.
   accounting:
     needs: [preflight, reconcile, drift-github, drift-tailscale]
