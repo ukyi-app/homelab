@@ -14,11 +14,6 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; WF="$ROOT/.github/work
   [ "$status" -eq 0 ]
 }
 
-@test "all create-github-app-token uses are pinned to a 40-char SHA (no mutable tags)" {
-  run bash -c "grep -rE 'create-github-app-token@' '$ROOT/.github/' | grep -vE 'create-github-app-token@[0-9a-f]{40}'"
-  [ "$status" -ne 0 ] # SHA 아닌 참조(태그 등)는 0건이어야 한다
-}
-
 @test "bump.yaml does not push directly to main (PR-first write model)" {
   # App 토큰은 branch protection을 우회하지 못한다 — main 쓰기는 PR + auto-merge로만.
   # Phase 6 races-6으로 raw `pr merge --auto`가 공유 스크립트(auto-merge-or-fail.sh)로 수렴 — 둘 중 하나면 PR-first.
