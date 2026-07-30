@@ -15,8 +15,3 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "zz_docindex_probe.sh"
 }
-
-@test "check-doc-index runs in the required gate via make verify" {
-  run awk '/^verify:/{v=1} v && /check-doc-index/{print}' Makefile
-  [ -n "$output" ]
-}

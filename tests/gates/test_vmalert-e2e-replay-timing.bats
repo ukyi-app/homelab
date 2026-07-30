@@ -28,8 +28,28 @@ sites() { git ls-files 'tests/gates/*.sh' 'tests/gates/lib/*.sh' | xargs grep -l
 
 @test "replay sites are enumerated (floor guards against a collapsed scope)" {
   n="$(sites | grep -c .)"
-  # 바닥값: lib + drift 인라인 사본 = 2. 0건이면 아래 검사가 전부 vacuous하게 통과한다.
-  [ "$n" -ge 2 ]
+  # 바닥값 1 = lib 단독. 인라인 사본은 전부 흡수됐다(마지막이 drift 하네스였다) → 남는 사이트는 lib뿐이다.
+  # 0건이면 아래 검사가 전부 vacuous하게 통과한다.
+  # ⚠️ 바닥값을 2→1로 내린 대가는 **아래 "사본 0" 단언이 갚는다**. 바닥값만 내리면 인라인 사본이
+  #    되살아나도 아무도 안 본다(사본은 하한 검사만 만족시키면 되고, 그러면 "파생이 살아 있다"는
+  #    이 파일의 나머지 단언이 그 사본에 대해서는 통째로 무의미해진다).
+  [ "$n" -ge 1 ]
+}
+
+@test "no firing-e2e harness runs vmalert replay outside the shared lib" {
+  hs="$(git ls-files 'tests/gates/vmalert-*-firing-e2e.sh')"
+  n="$(printf '%s\n' "$hs" | grep -c .)"
+  # 열거 붕괴 방어 — 글롭이 깨져 0건이 되면 아래 루프가 vacuous하게 통과한다(ci.yaml의 같은 목록도 ≥3).
+  [ "$n" -ge 3 ] || { echo "발화 e2e 하네스 ${n}건 < 3 — 열거 붕괴(무측정 초록)"; return 1; }
+  for f in $hs; do
+    if grep -q -- '--replay.rulesDelay' "$f"; then
+      echo "$f: vmalert replay를 **인라인**한다 — lib의 vme_replay를 쓰라."
+      echo "  인라인 사본은 vme_rules_delay 파생을 통째로 우회하므로, 체인 없는 룰 파일에서 얻을 수 있는"
+      echo "  속도도 못 얻고 리터럴이 lib과 갈리기만 한다(그 갈림은 red를 내지 않는다)."
+      return 1
+    fi
+    grep -q 'vme_replay ' "$f" || { echo "$f: vme_replay 호출이 없다 — replay 경로가 lib을 통하지 않는다"; return 1; }
+  done
 }
 
 @test "no replay site hardcodes a rulesDelay below the measured-safe floor" {

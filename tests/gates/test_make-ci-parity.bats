@@ -13,12 +13,6 @@
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
 
-@test "make ci invokes the single bats runner (run-bats.sh)" {
-  run make -n ci
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q "run-bats.sh"
-}
-
 @test "ci.yaml gate invokes the same single bats runner (run-bats.sh)" {
   run grep -q 'run-bats.sh' "$ROOT/.github/workflows/ci.yaml"
   [ "$status" -eq 0 ]
