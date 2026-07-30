@@ -206,21 +206,12 @@ data:
           #      조인을 하면 KSM 시리즈가 잠깐이라도 겹칠 때(재시작 중 두 인스턴스·instance 라벨 churn)
           #      many-to-one이 many-to-many가 되어 **422로 룰 평가가 통째로 죽는다** — 알림이 틀리는 게
           #      아니라 사라진다. `tests/test_alert_rules.bats`(모드 B)가 이 형태를 강제한다.
-          #    ⚠️ **알려진 한계(이번 범위 밖 · 후속 대상)**: 억제는 실패 **빈도**를 보지 않는다. CronJob
-          #      주기 P가 `for:`(900s)보다 짧으면 실패 Job은 최대 P초 만에 억제되므로 `for:`를 **원리적으로
-          #      채우지 못한다** → 실패↔성공이 교대하는 **만성 flapping이 영구 무성**이 된다(해당:
-          #      adguard-rewrite-reconciler `*/10`, digest-exporter `*/10`). 개별 실패 관점에서는 "그 뒤
-          #      성공했다"가 참이라 억제 자체는 옳고, 이 축을 닫으려면 **실패율이라는 다른 축의 알림**이
-          #      필요하다(현재 레포에 부재). 연속 2회 이상 실패는 여전히 발화한다. 수정 전에는 (주석 문구는
-          #      틀렸어도) 이 상태가 발화했으므로 **탐지 폭이 좁아진 것은 사실**이다 — 의식적 트레이드오프다.
-          #    회귀 게이트: tests/gates/vmalert-jobfailed-firing-e2e.sh
-          #      L1 창 이전 실패 + CronJob 정상 가동 = 침묵(라이브 adguard 그 자체) /
-          #      L2a 복구 전 = 발화 · L2b 복구 후 = 해소(창 **안**에서 겪는 전이) /
-          #      L3 미해소 = 발화 / L4 비-CronJob 소유 = 발화(owner_kind 좁힘) /
-          #      L5a·L5b 같은 ns의 두 CronJob(조인 키가 job 단위임) / L6 실패 없음 = 침묵.
-          #      ★ 뮤테이션 실측(2026-07-30) — 각 레그가 무엇을 실제로 무는지: 억제 절 제거 → L1·L2b red ·
-          #        `owner_kind="CronJob"` 제거 → L4 red · `on (namespace)`로 뭉갬 → L5b red ·
-          #        픽스처에 창 밖 미래 타임스탬프 → preflight CONTRACT(exit 2).
+          #    ⚠️ 억제는 실패 **빈도**를 보지 않는다. CronJob 주기 P가 `for:`(900s)보다 짧으면 실패 Job은
+          #      최대 P초 만에 억제되므로 `for:`를 **원리적으로 채우지 못한다** → 실패↔성공이 교대하는
+          #      만성 flapping을 이 룰은 못 본다. 그 축은 아래 **CronJobFlapping**이 담당한다(상보 관계 —
+          #      "지금 고장인가" ↔ "자주 깨지는가"). 연속 2회 이상 실패는 여전히 이 룰이 발화한다.
+          #    회귀 게이트: tests/gates/vmalert-jobfailed-firing-e2e.sh — 억제 절·`owner_kind` 필터·
+          #      조인 키 단위(job)·창 밖 미래 타임스탬프 거부를 각각 별개 레그가 문다.
           - alert: KubeJobFailed
             expr: |
               kube_job_failed{condition="true", namespace!~"kube-system|kube-public|kube-node-lease", job_name!~"cnpg-local-basebackup.*|pg-dump-hedge-r2.*|pg-restore-drill.*"} > 0

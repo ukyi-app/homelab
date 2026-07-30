@@ -22,11 +22,9 @@
 #   CNPG 1.27 managed-role 재적용이 안 됐고, Cluster annotate가 reconcile을 트리거해 복구됐다).
 #   annotate는 reconcile 트리거일 뿐 비번 값은 불변 — CNPG 소유권과 무충돌·멱등.
 #
-# ★구현 노트: 계획은 tools/ensure-role-password.ts(.ts)를 제안했으나, (a) kustomize load-restrictor가
-#   cross-dir 파일 참조를 막아 스크립트는 이 kustomization과 same-dir여야 하고, (b) 인클러스터 이미지는
-#   restore-drill과 동일한 pg-tools(bash+kubectl; bun 없음)를 재사용한다. .ts의 목적(테스트 가능한
-#   폴링/nudge/타임아웃 상태머신)은 PATH-stub 단위테스트(test_ensure_role_password.bats, 기존 kubeseal
-#   스텁 패턴과 동일)로 보존했다 — restore-drill-script.sh 컨벤션을 따른 정당한 편차.
+# ★ 왜 .ts가 아니라 셸인가: kustomize load-restrictor가 cross-dir 참조를 막아 이 스크립트는
+#   kustomization과 same-dir여야 하고, 인클러스터 이미지 pg-tools에는 bun이 없다(bash+kubectl뿐).
+#   테스트 가능성은 PATH-stub 단위테스트로 보존한다(test_ensure_role_password.bats).
 set -euo pipefail
 
 NS="${ERP_NAMESPACE:-database}"
