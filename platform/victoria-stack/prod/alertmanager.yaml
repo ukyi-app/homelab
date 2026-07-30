@@ -1,3 +1,21 @@
+# ⚠️ 이 ConfigMap 변경은 **실행 중 파드에 도달하지 않는다** — 아래 Deployment의 initContainer
+#    `render-config`가 __CHAT_ID__를 치환해 emptyDir(`config-out`)로 복사하는 것은 **파드 기동 시 1회뿐**이고,
+#    pod template에 config checksum 어노테이션도 reloader 사이드카도 없다. ArgoCD가 ConfigMap을 적용해도
+#    Deployment spec은 무변경 → 롤아웃이 안 나고 기존 파드는 옛 렌더 결과를 무기한 사용한다.
+#    (함정 원장: docs/traps-detail.md 「ConfigMap 변경 파드 자동 재시작 없음」의 구체 사례)
+#
+#    → 라우트·리시버·제목 매핑 등 **여기를 고쳤으면 싱크 후 반드시**:
+#         kubectl rollout restart deploy/alertmanager -n observability
+#         kubectl rollout status  deploy/alertmanager -n observability
+#       적용 확인(제목 매핑을 추가한 경우):
+#         kubectl exec deploy/alertmanager -n observability -c alertmanager -- \
+#           cat /etc/alertmanager/alertmanager.yml | grep -c '<새 alertname>'
+#
+#    ⚠️ 재기동을 빠뜨리면 새 알림이 **제목 매핑 없이**(alertname 그대로) 텔레그램에 나간다 — red가 아니라
+#       조용한 품질 저하다. 라이브 실측(2026-07-13): 재기동 **전** 매핑 grep 0건 → **후** 2건.
+#
+#    미착수 후속: pod template에 config checksum 어노테이션을 넣어 변경 시 자동 롤아웃되게 한다
+#    (수동 절차를 구조로 대체). 현재는 위 수동 스텝이 유일한 보장이다.
 apiVersion: v1
 kind: ConfigMap
 metadata: { name: alertmanager-config }

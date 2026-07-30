@@ -73,6 +73,8 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9598"
     spec:
+      # ⚠️ automountServiceAccountToken을 false로 바꾸지 마라 — kubernetes_logs 소스가 파드 메타데이터
+      #    (네임스페이스·라벨·컨테이너)를 API에서 읽어 로그에 붙인다. 토큰을 떼면 수집이 죽는다.
       serviceAccountName: vector
       # k3s가 쓰는 /var/log/pods/**/*.log는 root:root 0640이라 비root는 읽지 못한다 —
       # nobody(65534)로는 로그 수집이 전혀 되지 않는다. 노드 로그 수집 DaemonSet의
