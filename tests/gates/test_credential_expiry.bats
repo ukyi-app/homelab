@@ -9,9 +9,11 @@ setup() {
   command -v jq >/dev/null || skip "jq required"
 }
 
+# ⚠️ 1항목 픽스처는 `--min-entries 1`로 자기 크기를 명시한다 — 기본 바닥값(2)은 **커밋된 원장**의
+#    크기이고, 픽스처가 그걸 물려받으면 여기서 재는 축(만료 판정)이 아니라 바닥값 때문에 죽는다.
 @test "expiry checker exits 0 when nothing expires within window" {
   tmp="$(mktemp)"; printf '[{"name":"far","expires":"2099-01-01"}]' > "$tmp"
-  run bash "$s" --file "$tmp" --days 14
+  run bash "$s" --file "$tmp" --days 14 --min-entries 1
   [ "$status" -eq 0 ]
 }
 
@@ -19,7 +21,7 @@ setup() {
   tmp="$(mktemp)"
   soon="$(date -v+3d +%Y-%m-%d 2>/dev/null || date -d "+3 days" +%Y-%m-%d)"
   printf '[{"name":"ghcr-pull-pat","expires":"%s"}]' "$soon" > "$tmp"
-  run bash "$s" --file "$tmp" --days 14
+  run bash "$s" --file "$tmp" --days 14 --min-entries 1
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "ghcr-pull-pat"
 }
@@ -36,9 +38,44 @@ setup() {
   [ "$status" -eq 2 ]
 }
 
-@test "empty ledger lints OK (vacuous array is valid)" {
+# ── 열거 붕괴 바닥값 (구 "empty ledger lints OK"의 반전) ──────────────────────────────────────────
+# 이 @test는 정확히 뒤집힌 것이다. 예전에는 빈 원장이 lint OK였고(체커 주석이 "빈 배열은 vacuous true
+# 허용"이라고 선언했다), 그래서 원장이 통째로 비어도 주간 감시가 "만료 임박 없음" + exit 0을 냈다.
+@test "an emptied ledger is an enumeration collapse, not a valid ledger" {
   tmp="$(mktemp)"; printf '[]' > "$tmp"
   run bash "$s" --file "$tmp" --lint
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "열거 붕괴"
+}
+
+# ⚠️ **종료코드가 계약이다.** credential-expiry.yaml은 rc=1을 "만료 임박"으로 읽어
+# 「자격증명 만료 임박」 제목의 telegram을 보내고 job은 **성공**시킨다(rc≥2만 hard-fail).
+# 붕괴를 1로 내면 거짓 제목의 알림이 나가고 job이 초록으로 남는다 — 값 자체를 못박는다.
+@test "the collapse exit code is the fail-loud one (2), not the expiring-soon one (1)" {
+  tmp="$(mktemp)"; printf '[]' > "$tmp"
+  run bash "$s" --file "$tmp" --days 14
+  [ "$status" -eq 2 ]
+}
+
+@test "the floor is load-bearing: a ledger below the requested floor fails" {
+  tmp="$(mktemp)"; printf '[{"name":"only-one","expires":"2099-01-01"}]' > "$tmp"
+  run bash "$s" --file "$tmp" --lint --min-entries 2
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "열거 붕괴"
+}
+
+# 바닥값을 통과한 실행은 커널 규약대로 SCAN 마커를 낸다(06 권위 경로 회계가 "가드가 자기 도메인에
+# 닿았는가"를 판정하는 유일한 기계 입력 — tests/gates/test_scan-floor.bats의 집합 대조가 전건 강제).
+@test "a passing run emits the scan marker for its ledger domain" {
+  run bash "$s" --file "$ROOT/policy/credential-expiry.json" --lint
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^SCAN: credential-expiry: [0-9]+$'
+}
+
+# 커밋된 원장이 **기본 바닥값**을 실제로 만족하는가 — 픽스처가 아니라 실 원장에 대한 판정이다.
+# 이게 없으면 위 @test들이 전부 픽스처만 재고 실 원장은 아무도 안 보는 상태가 될 수 있다.
+@test "the committed ledger satisfies the default floor with no override" {
+  run bash "$s" --lint
   [ "$status" -eq 0 ]
 }
 
