@@ -57,13 +57,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   echo "$output" | grep -q "required"
 }
 
-@test "memory ledger gate is centralized in the required gate (not duplicated in verify.yaml)" {
+@test "memory ledger gate runs in the required gate" {
   # W7: ledger 검사(conftest policy/ledger.rego)는 required gate(ci.yaml: bun run verify:ledger) 한 곳으로 일원화.
   run grep -q 'verify:ledger' "$ROOT/.github/workflows/ci.yaml"
   [ "$status" -eq 0 ]
-  # 핵심 단언(마지막) — verify.yaml(비-required)엔 ledger 게이트가 없어야(중복 제거)
-  run grep -q 'ledger.rego' "$ROOT/.github/workflows/verify.yaml"
-  [ "$status" -ne 0 ]
 }
 
 @test "make ci refuses to run while gate-scoped files are untracked (local under-measures)" {

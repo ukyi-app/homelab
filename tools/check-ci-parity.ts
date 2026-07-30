@@ -37,7 +37,7 @@ const GATE_JOB = "gate";
 // ⚠️ 스텝이 늘면 이 값도 함께 올린다 — 안 올리면 바닥이 조용히 느슨해진다(현재 20스텝 / 바닥 18).
 //    **래칫이 아니다**: 스텝을 정당하게 줄이는 변경에서는 같이 내리면 된다. 목적은 "0에 가까운 붕괴"를
 //    잡는 것이지 스텝 수를 고정하는 게 아니다.
-const MIN_STEPS = 18;
+const MIN_STEPS = 19;
 
 type Status = "mirrored" | "covered" | "excluded";
 interface Entry {
