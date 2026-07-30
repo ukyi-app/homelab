@@ -58,3 +58,5 @@
 | 소스의 리터럴 NUL 1바이트 → 그 파일이 모든 grep 가드에 투명(매치 수는 1이라 스캔한 것처럼 보인다) | gate | `scripts/check-skeleton.sh`, `tests/gates/test_scan-floor.bats` |
 | 디스크 자기-상한 > 자기 볼륨 선언(GB=10⁹ vs Gi=2³⁰ 혼동·PVC는 축소 불가·존재 grep은 못 잡음) | gate | `tools/check-disk-caps.ts`, `tests/gates/test_disk-caps.bats` |
 | 고아 PVC는 Bound다 — `phase == Released` 감사는 cascade=orphan 잔재를 원리적으로 못 잡는다 | local | `scripts/audit-orphan-pv.sh` |
+| bats 중간 `[[ ]]`는 침묵 통과 — 거짓인데 ok (grep -qF 변환 시 `--` 종결자 필수) | gate | `scripts/check-bats-style.sh` |
+| 셸 문자열의 `$VAR한글` — bash 3.2만 죽고 CI(5.2)는 초록이라 게이트가 원리적으로 못 잡는다 | gate | `tests/gates/test_shell-bash32-traps.bats` |

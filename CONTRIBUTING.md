@@ -222,8 +222,6 @@ verify·pre-commit은 sops/시크릿 안전망이다. `make ci`는 시스템 PAT
 설치는 `docs/runbooks-public/toolchain-setup.md` 참고(`m6-tools`가 버전 게이트).
 
 ## 문서 관례
-- **계획 문서 크기**: `docs/plans/`는 검색 노이즈를 줄이기 위해 간결히(권장 상한 ~1500줄/문서). 대형
-  산출물은 요약 SSOT + 링크로 분리한다. 히스토리 재작성은 하지 않고 `.rgignore`가 검색에서 제외한다.
 
 ### conductor 파이프라인 산출물 — 착지와 함께 지운다
 
