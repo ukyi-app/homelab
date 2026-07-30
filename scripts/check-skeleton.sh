@@ -9,7 +9,7 @@ BT='`'                              # 백틱 리터럴
 dirs=(
   infra/cloudflare infra/github infra/tailscale infra/k3s-bootstrap
   platform/argocd/root platform/charts/app
-  apps tools docs/plans
+  apps tools
 )
 rc=0
 for d in "${dirs[@]}"; do

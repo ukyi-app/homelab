@@ -162,6 +162,31 @@
 ### bats bash 3.2 중간 [[ ]] 침묵 통과
 - **bats가 bash 3.2(macOS 기본)로 돌면 테스트 중간의 `[[ ]]` 실패가 침묵 통과된다**(set -e가
   compound command 실패를 무시 — 마지막 명령 status만으로 ok). 중간 단언은 `[ ]`(단순 명령)로.
+- 실측: `[[ "$x" == *ABSENT* ]]`는 거짓인데 `ok`, 같은 자리를 `printf '%s' "$x" | grep -qF -- 'ABSENT'`로
+  바꾸면 정확히 `not ok`. 레포에 이 형태가 53건 있었고 **전부 죽은 단언이었다**(0으로 수렴, 이제 hard-zero).
+- ⚠️ `grep -qF`에는 **`--` 종결자**를 붙여라 — `--kubelet-arg=…`처럼 `-`로 시작하는 패턴을 grep이
+  옵션으로 해석해 status 2로 죽는다(변환 직후 6개 스위트가 그렇게 깨졌다).
+> 가드: `scripts/check-bats-style.sh`
+
+### 셸 문자열의 `$VAR한글` — bash 3.2가 멀티바이트를 변수명에 삼킨다
+- `$VAR` 바로 뒤에 비-ASCII가 붙으면 **bash 3.2(macOS 기본)가 그 바이트를 변수명에 포함**시킨다.
+  실측(`V=7; echo "평가($V회)"`):
+
+  | 인터프리터 | `LC_ALL=C` | UTF-8 로케일(C.UTF-8·en_US·ko_KR) |
+  |---|---|---|
+  | bash 3.2 (macOS `/bin/bash`) | `평가(7회)` | **`V<byte>: unbound variable`, exit 127** |
+  | bash 5.2 (CI 러너 ubuntu-24.04) | `평가(7회)` | `평가(7회)` |
+
+- **그래서 CI가 원리적으로 못 잡는다.** 게이트는 bash 5.2라 영원히 초록이고, 터지는 것은 오너의
+  macOS 로컬뿐이다. `shellcheck`도 못 잡는다(파서는 `$VAR` + 리터럴로 읽고 경고 0).
+- `set -u`가 없으면 더 나쁘다: 죽지 않고 **`평가(??)`로 숫자와 한글이 함께 깨진 채 통과**한다.
+- 이 레포는 진단 메시지가 전부 한국어라 발현 밀도가 높은데 대부분 실패 경로(`|| fault …`)에 있어
+  **휴면**한다 — 정작 진단이 필요한 순간에 진단 대신 unbound variable을 본다(DR 스크립트
+  `scripts/reset-pg-r2-archive.sh`의 FATAL 경로가 실례였다).
+- **규약: 셸 문자열 안의 변수는 항상 `${VAR}`로 감싼다.**
+- ⚠️ 가드의 검출은 **`LC_ALL=C grep -E '[^ -~]'`**로 쓴다. `grep -P`를 쓰면 macOS BSD grep이 `-P`를
+  지원하지 않아 **가드가 조용히 0건을 찾는다**(첫 구현이 그랬고, 버그를 되돌려 넣어도 초록이었다).
+> 가드: `tests/gates/test_shell-bash32-traps.bats`
 
 ### helm 차트 CRD includeCRDs
 - helm 차트 CRD가 `crds/` 디렉토리에 있으면 kustomize HelmChartInflationGenerator 기본 렌더에서
@@ -371,7 +396,7 @@
   sizeLimit(512Mi) 아래에 둬 앱 쪽에서 같은 함정을 막는다 — 그 대응물이 없는 워크로드가 무방비다.
 - ⚠️ **가드는 정적이다**: 선언값이 *기록된* 실측치 대비 마진을 지키는지만 본다. 미래 업스트림 증가 자체는
   못 잡으므로 페이로드 불변화(플러그인을 구운 핀 이미지)나 emptyDir 사용률 관측이 후속 과제로 남아 있다
-  (release 게이트 R-1 defer, `docs/reviews/grafana-emptydir-plugin-overflow/`).
+  (릴리스 게이트에서 의식적으로 defer한 항목이다).
 > 가드: `platform/victoria-stack/prod/test_grafana_plugin_budget.bats`
 
 ### GNU make가 recipe 종료코드를 자기 Error 2로 뭉갠다

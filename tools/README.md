@@ -29,7 +29,8 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
 - **멱등(idempotent) 강제** — 동일 마이그레이션이 재시작·재배포로 여러 번 돌아도 안전해야 한다
   (이미 적용된 변경은 no-op). 부분 실패 후 재실행도 수렴해야 한다.
 - **검증 위치** — 마이그레이션 정합성·멱등성은 **앱 레포 CI**에서 검증한다(homelab은 강제하지 않음;
-  homelab 측은 수동 확인). 설계 근거: `docs/plans/2026-06-25-data-connection-as-secret-design.md` §5.8(F3).
+  homelab 측은 수동 확인). 앱 self-migrate는 expand/contract + 멱등이 전제이고 순서를 강제하는 Job이
+  없으므로 **규칙 준수에 의존한다**(잔여 위험 — `docs/decisions/0005-data-connection-residual-risk.md`).
 
 ## App Platform 변이 도구 (변이 디스패처 경유 — 직접 실행 금지)
 

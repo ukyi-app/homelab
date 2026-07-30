@@ -43,7 +43,6 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 내부 호스트 접미사는 `home.<도메인>` (Gateway `web-internal-tls` 리스너 규약 — 내부 인입은 tailscale passthrough→:8443뿐).
 - 벤더 파일 수정 금지: `platform/*/prod/charts/`(helm 캐시, untracked), barman-plugin manifest,
   gateway-api CRD. `Chart.yaml`의 파스칼케이스는 Helm 고정 규약이다.
-- `docs/plans/`는 역사 기록 — 수정하지 않는다.
 - **네이밍 규약**: 워크플로는 전부 `.yaml`(reusable 포함). `_*.yaml`=내부 reusable(동명 변이 디스패처가
   호출) vs `<action>.yaml`=공개 변이 디스패처(workflow_dispatch) vs `reusable-*.yaml`=cross-repo 공개 계약(외부 앱 레포가 `@main`으로 호출 — 파일명·입력이 계약).
   스키마 `*-schema.json`=tools 계약(`app-config`/`app-deploy`) vs `values.schema.json`=Helm 고정.
@@ -88,6 +87,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - Alertmanager telegram 전송 검증 메트릭
 - ConfigMap 변경 파드 자동 재시작 없음
 - bats bash 3.2 중간 [[ ]] 침묵 통과
+- 셸 문자열의 `$VAR한글` — bash 3.2가 멀티바이트를 변수명에 삼킨다
 - helm 차트 CRD includeCRDs
 - sealed-secrets patch-mode 대상 Secret 어노테이션
 - gh pr merge --auto clean PR 에러
