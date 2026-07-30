@@ -177,6 +177,7 @@ jobs:
           tests/gates/vmalert-digest-stale-firing-e2e.sh
           tests/gates/vmalert-gha-liveness-firing-e2e.sh
           tests/gates/vmalert-adguard-rewrite-firing-e2e.sh
+          tests/gates/vmalert-jobfailed-firing-e2e.sh
           "
           harnesses="$(printf '%s\n' "$harnesses" | tr -d ' ' | grep -v '^$' || true)"
           # 추적 글롭과 **교차 대조** — 목록에 없는 하네스가 생기면 여기서 먼저 드러난다(가드보다 이른 신호).

@@ -189,6 +189,25 @@ _seed_frozen_fixture() {   # $1=root $2=픽스처 경로
   echo "$output" | grep -q '우변'
 }
 
+@test "mode B sees past a group_left modifier to the aggregated right operand (a matching modifier is not an operand)" {
+  # `group_left(...)`/`group_right(...)`는 PromQL 문법상 on()/ignoring() 뒤에 붙는 **매칭 수식어**이지
+  # 피연산자가 아니다. 그걸 피연산자의 시작으로 읽으면 **정상적으로 사전 집계된 우변을 raw로 오판**한다.
+  # 이 오판은 조용하지 않다: many-to-one 조인은 group_left 없이 표현할 수 없으므로, 그 형태를 쓰는 룰은
+  # 전부 allowlist로 밀려나고 allowlist는 룰 단위라 **모드 A/C 검사까지 함께 꺼진다**.
+  _run_probe JoinProbe '(max by (namespace, job_name) (a_metric) * on (namespace, job_name) group_left (owner_name) max by (namespace, job_name, owner_name) (b_metric{k="v"})) > 0'
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+@test "mode B still flags a raw right operand behind a group_left modifier (the skip must not become a hole)" {
+  # 위 수식어 건너뛰기가 **검사 자체를 건너뛰는 것으로 퇴화하면** 모드 B에 group_left 모양의 구멍이 생긴다.
+  # 수식어만 벗기고 그 뒤 피연산자는 그대로 판정해야 한다.
+  _run_probe JoinProbe '(max by (namespace, job_name) (a_metric) * on (namespace, job_name) group_left (owner_name) b_metric{k="v"}) > 0'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '우변'
+}
+
 # ── 모드 C: push 주기 > instant 룩백(300s)인 메트릭은 윈도 ≥ 주기인 rollup 필수 ──
 
 @test "mode C flags the frozen r6 buggy fixture (real historical bug: ImageDigestDrift)" {

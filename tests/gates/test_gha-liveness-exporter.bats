@@ -15,6 +15,8 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   MF="platform/victoria-stack/prod/gha-liveness-exporter.yaml"
   R6="platform/victoria-stack/prod/rules/r6-ci-staleness.yaml"
+  # GitHub 스케줄러가 스케줄 워크플로를 미룰 수 있는 관측 상한(초). 아래 lag-ceiling 테스트의 근거 참조.
+  LAG_CEILING=21600
 }
 
 # WORKFLOWS env를 "파일=예산" 줄로 뽑는다.
@@ -80,6 +82,59 @@ scheduled() {
 $(scheduled)
 EOF
   [ -z "$bad" ] || { echo "예산이 3주기 미만:$bad"; false; }
+}
+
+@test "every age budget also clears the GitHub scheduler lag ceiling (declared cron is not the real period)" {
+  # ★ 위 형제 테스트(3주기 하한)는 **선언 cron이 실제 실행 간격의 대리 변수**라고 전제한다. 짧은 주기에서
+  #   그 전제는 거짓이다 — GitHub은 `*/10`을 10분마다 실행하지 않고, `*/10`과 `*/30`의 실측 분포가 사실상
+  #   같다(도달 간격을 지배하는 것은 선언 cron이 아니라 스케줄러 지연이다). 그래서 하한을 둘 두고 **큰 쪽**을
+  #   강제한다 — 긴 주기는 3주기 규칙이, 짧은 주기는 이 천장이 지배한다.
+  #
+  #   라이브 실패(2026-07-30): bump-poll 예산 3600s가 실측 **중앙값 4996s보다도 작아** 시간의 절반 이상
+  #   조건이 참이었다. 발화 시점의 마지막 성공은 3분 전이었고 워크플로는 `active`였다 — 정상 동작 중인
+  #   워크플로를 두고 페이징했다. 3주기 하한(3×600=1800s)은 그때도 초록이었다: 검사식의 기준량이 현상과
+  #   무관하면 통과 여부가 오탐을 예고하지 못한다.
+  #
+  #   천장 21600s(6h)의 근거 — 성공 run 59건·4일치 실측(`gh run list --event=schedule --status=success`의
+  #   인접 간격, 2026-07-30):
+  #     bump-poll(*/10)    min 3103s  p50 4996s  p90 10649s  MAX 13001s
+  #     tf-reconcile(*/30) min 2936s  p50 5549s  p90 11484s  MAX 14120s
+  #     pr-sweeper(*/30)   min 3427s  p50 5243s  p90 11793s  MAX 14134s
+  #   실측 상한 14134s(3.93h)에 ~1.5배 여유를 얹었다. 이 알림이 잡으려는 것은 **영구 정지**(60일 자동
+  #   비활성화·Actions 비활성화·스케줄러 유실)이므로 6시간 감지 지연은 목적에 부합한다.
+  #   ⚠️ 천장을 올리면 감지가 그만큼 늦어지고, 내리면 오탐이 돌아온다 — 실측을 다시 뜨고 함께 판단하라.
+  # ⚠️ 기준량 자기검사 — 이게 없으면 이 테스트는 **소리 없이 형제 테스트로 퇴화한다**. LAG_CEILING이
+  #   unset/빈 값이면 `[ 1800 -lt "" ]`가 stderr로 에러를 내고 종료코드 2를 반환하는데, `if`의 조건부는
+  #   errexit 면제 구간이라 bats가 죽지 않고 **조건이 거짓으로 읽혀 floor가 3주기 그대로 남는다**.
+  #   테스트는 통과하므로 bats가 stderr를 찍지도 않아 화면에 아무 흔적이 없다 → 결함 B가 게이트 초록인
+  #   채로 완전히 회귀한다(자체 감사 S-9). 열거에는 바닥값을 심어 놓고 정작 **유일한 새 기준량**에는
+  #   같은 규율을 적용하지 않은 비대칭이었다.
+  [ "${LAG_CEILING:-0}" -ge 21600 ] || { echo "LAG_CEILING이 소실/축소됐다: '${LAG_CEILING:-<unset>}'"; false; }
+
+  bad=""
+  n=0
+  ceiling_applied=0
+  while read -r wf period; do
+    [ -n "$wf" ] || continue
+    n=$(( n + 1 ))
+    budget="$(watched | grep "^${wf}=" | sed 's/.*=//')"
+    [ -n "$budget" ] || { echo "예산 없음: $wf"; false; }
+    floor=$(( period * 3 ))
+    if [ "$floor" -lt "$LAG_CEILING" ]; then floor="$LAG_CEILING"; ceiling_applied=$(( ceiling_applied + 1 )); fi
+    if [ "$budget" -lt "$floor" ]; then bad="$bad ${wf}(budget=${budget} < floor=${floor})"; fi
+  done <<EOF
+$(scheduled)
+EOF
+  # 열거 붕괴 바닥값 — 0건이면 '위반 없음'이 아니라 파싱이 깨진 것이다(빈 루프는 bad=""로 vacuous green).
+  # ⚠️ 상수가 아니라 **레포에서 센다** — 고정 하한은 silent-skip으로 3건이 유실돼도 통과한다(S-8).
+  want_n="$(grep -lE '^\s*-\s*cron:' .github/workflows/*.yaml 2>/dev/null | grep -c . || true)"
+  [ "$want_n" -ge 5 ] || { echo "워크플로 디렉토리에서 cron 워크플로를 ${want_n}건밖에 못 찾았다 — 열거 붕괴"; false; }
+  [ "$n" -eq "$want_n" ] \
+    || { echo "scheduled() 열거 ${n}건 != 레포의 cron 워크플로 ${want_n}건 — 파서가 일부를 조용히 건너뛰었다"; false; }
+  # 천장이 **실제로 채택된 항목이 있어야** 한다 — 0건이면 이 테스트는 형제(3주기)와 동치다.
+  [ "$ceiling_applied" -ge 1 ] \
+    || { echo "천장이 한 항목에도 적용되지 않았다 — 이 테스트가 3주기 테스트와 동치로 퇴화했다"; false; }
+  [ -z "$bad" ] || { echo "예산이 하한 미만(3주기와 GitHub 지연 천장 중 큰 쪽):$bad"; false; }
 }
 
 @test "the unauthenticated GitHub rate limit budget holds (watched x polls-per-hour <= 60)" {

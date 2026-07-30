@@ -115,6 +115,13 @@ const ROLLUP = "increase|increase_pure|increase_prometheus|rate|rate_prometheus|
 // 라벨을 벗길 수 있는 집계 연산자.
 const AGG = "max|min|sum|avg|count|group|topk|bottomk|quantile|stddev|stdvar";
 const OPERAND_AGG_RE = new RegExp(`^[\\s(]*(?:${AGG})\\s+(?:by|without)\\s*\\(`);
+// on()/ignoring() 뒤에 올 수 있는 **매칭 수식어** — 피연산자가 아니다. 우변을 읽기 전에 벗겨야 한다.
+// 벗기지 않으면 `on(...) group_left(x) max by (...) (m)`의 우변이 `group_left…`로 시작하는 것으로 보여
+// **정상적으로 사전 집계된 우변을 raw로 오판**한다. many-to-one 조인은 group_left 없이 표현할 수 없으므로
+// 그 오판은 해당 조인 형태 전체를 allowlist(=룰 단위 → 모드 A/C까지 동반 해제)로 밀어낸다.
+// ⚠️ 수식어만 벗기고 그 뒤 피연산자는 그대로 판정한다 — 검사 자체를 건너뛰면 group_left 모양의 구멍이 된다
+//    (tests/test_alert_rules.bats가 두 방향을 모두 잠근다).
+const GROUP_MOD_RE = /^\s*group_(?:left|right)\s*(?:\([^)]*\))?/;
 // 집합 연산자 — on()을 써도 422가 불가능하다.
 const SET_OP_RE = /(?:^|[^\w])(and|or|unless)\s*$/;
 // 산술·비교 이항 연산자(on() 직전에 올 수 있는 것).
@@ -717,7 +724,7 @@ function checkExpr(rel: string, name: string, expr: string): void {
     const onOpen = mt.index + mt[0].length - 1;
     const onClose = matchParen(m, onOpen);
     if (onClose < 0) { viol.push(`${rel} ${name} [모드 B: ${mt[1]}() 괄호 불균형 — 파싱 실패]`); return; }
-    const rhs = m.slice(onClose + 1, operandEnd(m, onClose + 1));
+    const rhs = m.slice(onClose + 1, operandEnd(m, onClose + 1)).replace(GROUP_MOD_RE, "");
     const bare: string[] = [];
     if (!OPERAND_AGG_RE.test(lhs)) bare.push("좌변");
     if (!OPERAND_AGG_RE.test(rhs)) bare.push("우변");
