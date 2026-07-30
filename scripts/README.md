@@ -14,7 +14,13 @@
 - **`check-skeleton.sh`** — 필수 디렉토리 스켈레톤 존재 검사. `make verify`·**`bun run verify:skeleton`**·
   `ci.yaml`(gate)이 호출. 라이브 무관.
 - **`check-bats-accounting.sh`** — 모든 추적 `test_*.bats`가 정확히 한 도메인(gate / chart-test /
-  `.ci-exclude`)에 배정됐는지 검사(고아·이중소유 차단). `make verify`가 호출. `run-bats.sh --list`를 읽는다.
+  `.ci-exclude`)에 배정됐는지 검사(고아·이중소유 차단). `make verify`·`ci.yaml`(gate 명시 스텝)이 호출.
+  `run-bats.sh --list`를 읽는다. 도메인 회계만으로는 **gate → `.ci-exclude` 이동**이 원리적으로 안 보이므로
+  (옮겨도 여전히 "정확히 한 도메인") 레지스트리 계약 두 가지가 더 붙는다: 항목은 빈 줄로 끊긴 직전 주석
+  블록의 지배를 받고 그 블록이 `실행처`를 명시 + 항목 수 **상한**(`BATS_EXCLUDE_MAX`). 여기에 gate 도메인
+  바닥값(`BATS_ACCOUNTING_MIN_GATE` — 러너 붕괴·대량 삭제)까지 셋이 각각 다른 축이다.
+  `--lint-excludes <파일>`은 레지스트리 계약만 보는 픽스처 모드다(그 외 인자는 exit 2 — 맨 인자로 회계를
+  끄는 off-switch를 두지 않는다).
 - **`check-app-deploy.sh`** — `apps/<name>/deploy/prod/` 배포 계약 가드. 필수 산출물 목록을
   `tools/app-deploy-schema.json`(SSOT)에서 읽어 강제(`source-repo` 누락/공백 = fail-closed) + **봉인 배선
   all-or-none 불변식**(봉인본⇔envFrom `<app>-secrets`⇔kustomization 등재⇔checksum/secrets, 부분 상태 거부)

@@ -1,14 +1,21 @@
 # not-CI-safe 테스트의 단일 레지스트리 — gate(required)에서 제외할 bats.
 # scripts/run-bats.sh가 이 목록을 읽어 수집에서 뺀다. 각 줄 = 레포 루트 상대 경로.
-# 각 그룹 주석이 '왜 제외인지 + 어디서 실행되는지'(실행처)를 명시한다(accounting 가드가 강제).
+#
+# ⚠️ **제외는 부채다** — CI가 안 보는 테스트는 죽어도 아무도 모른다. scripts/check-bats-accounting.sh가
+#    두 가지를 강제한다(예전엔 "가드가 강제한다"고 적혀만 있었고 실제로는 아무도 안 봤다):
+#      · 항목은 **빈 줄로 끊긴 직전 주석 블록**의 지배를 받고, 그 블록에 `실행처` 표기가 없으면 red.
+#        (헤더는 빈 줄 아래 항목을 지배하지 않는다. 항목 뒤의 주석은 새 그룹을 연다.)
+#      · 항목 수 **상한**(BATS_EXCLUDE_MAX, 기본 = 현재 건수). 늘리려면 같은 PR에서 상한을 올려야 한다.
+#    실행처 표기는 텍스트 계약이다 — 단어만 적고 실제 경로가 없어도 통과하니, 적을 때 정직할 것.
 # platform/charts/*는 여기 두지 않는다 — 러너가 도메인 prune(make chart-test 별도 harness).
 
-# 라이브 클러스터 의존 (수동: make verify-posture)
+# 라이브 클러스터 의존 — 실행처: owner-local `make verify-posture`(KUBECONFIG 부재=SKIP)
 tests/posture/test_internal-by-default.bats
 tests/posture/test_network-policy.bats
 tests/posture/test_networking-e2e.bats
 tests/posture/test_storage-reclaim.bats
-# docker 의존
+# docker 의존(gate 러너에 docker 없음) — 실행처: owner-local `bats tools/tests/test_dev-postgres.bats`
+#   ⚠️ 자동 실행 경로가 0이다(실측) — 아무 워크플로·make 타깃도 부르지 않는다.
 tools/tests/test_dev-postgres.bats
 # 실 age 키 의존 — 실행처는 owner-local `make verify`. gate의 커버리지는 항목마다 다르다:
 #   sops-roundtrip: gate의 'SOPS 왕복 (ephemeral CI 키)' 스텝이 같은 불변식을 즉석 키로 커버.
@@ -22,9 +29,10 @@ platform/cnpg/prod/test_creds_reference.bats
 platform/cnpg/prod/test_drill_alerting.bats
 platform/cnpg/prod/test_kustomize_build.bats
 platform/cache/prod/test_ksops_render.bats
-# terraform 의존 (gate엔 terraform 미설치 — iac.yaml advisory가 실행)
+# terraform 의존(gate엔 terraform 미설치) — 실행처: .github/workflows/iac.yaml (advisory 잡)
 infra/_tests/test_tf_validate.bats
 infra/_tests/test_tf_reconcile.bats
 infra/cloudflare/test_apps_data.bats
-# 라이브 전용 (infra 부트스트랩 — make bootstrap)
+# 라이브 전용(VM/k3s 재구축 substrate) — 실행처: owner-local `bats infra/_tests/test_bootstrap.bats`(DR 드릴)
+#   ⚠️ 자동 실행 경로가 0이다(실측) — DR 드릴 때 사람이 직접 부른다.
 infra/_tests/test_bootstrap.bats
