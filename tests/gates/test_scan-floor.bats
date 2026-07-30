@@ -148,6 +148,11 @@ c" ]
     | grep -qE '^SCAN: sops-guard: [0-9]+$' || bad="$bad sops-guard"
   bash "$ROOT/scripts/verify-secrets.sh" "$ROOT/platform/cnpg/prod/ukkiee.enc.yaml" 2>/dev/null \
     | grep -qE '^SCAN: verify-secrets: [0-9]+$' || bad="$bad verify-secrets"
+  # ⚠️ 픽스처 레지스트리로 부른다 — 실 `.ci-exclude`를 인자로 주면 건수가 기본 모드와 같아져
+  #    "이 호출이 실 도메인에 닿았는가"를 가르는 대비(아래 마지막 @test의 취지)가 사라진다.
+  printf '%s\n' '# 사유 — 실행처: owner-local' 'tests/gates/test_scan-floor.bats' > "$FX/ci-exclude"
+  bash "$ROOT/scripts/check-bats-accounting.sh" --lint-excludes "$FX/ci-exclude" 2>/dev/null \
+    | grep -qE '^SCAN: check-bats-accounting:excludes: [0-9]+$' || bad="$bad bats-accounting"
   [ -z "$bad" ]   # 비어야 통과. 디버깅: echo "$bad"
 }
 
