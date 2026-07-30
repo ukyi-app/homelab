@@ -1,14 +1,83 @@
 #!/usr/bin/env bats
-# 런북 인덱스 가드: 로컬 전용·런북 부재 시 clean skip. ⚠️ 중간 단언 [ ]만.
-setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
+# 런북 인덱스 가드 — 로컬 전용(docs/runbooks/는 gitignored). 이 래퍼의 계약은 **skip과 판정의 구별**이다:
+# 도메인(런북 *.md)이 비면 exit 4 + `SKIP:` 마커, 있으면 exit 0/1의 실제 판정.
+# 예전엔 `[ "$status" -eq 0 ]` 하나였고 **skip 경로가 그 단언을 만족**해서 — CI엔 런북이 없으므로 —
+# 가드가 실제 실행 경로를 잃어도 이 래퍼가 초록이었다(vacuous). 아래는 두 갈래를 각각 단언한다.
+# 픽스처는 스크립트를 복사한 임시 트리 — 스크립트가 ROOT를 BASH_SOURCE/.. 로 잡으므로 --root 플래그가 불필요하다.
+# ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 
-@test "runbook-index guard exists, is local-only, and skips cleanly when runbooks absent" {
+setup() {
+  ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  FIX="$BATS_TEST_TMPDIR/fix"
+  mkdir -p "$FIX/scripts" "$FIX/docs/runbooks"
+  cp "$ROOT/scripts/verify-runbook-index.sh" "$FIX/scripts/"
+}
+
+# 픽스처 AGENTS.md — `## 런북` 절 아래 백틱 파일명이 인덱스(실 AGENTS.md와 같은 모양).
+write_index() {   # $@: 인덱스에 나열할 런북 파일명
+  {
+    echo "# fixture AGENTS"
+    echo
+    echo "## 런북 (로컬 전용)"
+    echo
+    for m in "$@"; do echo "| \`$m\` | 설명 |"; done
+  } > "$FIX/AGENTS.md"
+}
+
+@test "signals skip (exit 4 + SKIP marker) when the runbook domain is empty" {
+  write_index
+  run bash "$FIX/scripts/verify-runbook-index.sh"
+  [ "$status" -eq 4 ]
+  echo "$output" | grep -q "^SKIP: verify-runbook-index:"
+}
+
+@test "evaluates (exit 0, no SKIP marker) when the domain exists and matches the index" {
+  write_index alpha.md
+  : > "$FIX/docs/runbooks/alpha.md"
+  run bash "$FIX/scripts/verify-runbook-index.sh"
+  [ "$status" -eq 0 ]
+  out="$output"
+  run grep -q "^SKIP:" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+@test "evaluates and fails when a runbook is missing from the index (forward drift)" {
+  write_index alpha.md
+  : > "$FIX/docs/runbooks/alpha.md"
+  : > "$FIX/docs/runbooks/orphan.md"
+  run bash "$FIX/scripts/verify-runbook-index.sh"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "orphan.md"
+}
+
+@test "evaluates and fails when the index lists a runbook that is absent (reverse drift)" {
+  write_index alpha.md ghost.md
+  : > "$FIX/docs/runbooks/alpha.md"
+  run bash "$FIX/scripts/verify-runbook-index.sh"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "ghost.md"
+}
+
+@test "runbook-index guard exists and is local-only" {
   S="$ROOT/scripts/verify-runbook-index.sh"
   [ -f "$S" ]
   run grep -Eq 'docs/runbooks|AGENTS.md' "$S"; [ "$status" -eq 0 ]
-  run bash "$S"; [ "$status" -eq 0 ]   # 런북 부재(CI/repo)면 skip(exit 0). bash 호출=exec비트 무의존(F3)
+}
+
+# 실 레포 실행 — venue에 따라 갈린다(owner 머신=런북 실재, CI/fresh checkout=부재).
+# 두 갈래를 각각 단언해야 skip이 판정으로 위장하지 못한다. bash 호출=exec비트 무의존(F3).
+@test "against the real repo it either evaluates or announces skip, never both" {
+  S="$ROOT/scripts/verify-runbook-index.sh"
+  run bash "$S"
+  if ls "$ROOT"/docs/runbooks/*.md >/dev/null 2>&1; then
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "정합 OK"
+  else
+    [ "$status" -eq 4 ]
+    echo "$output" | grep -q "^SKIP: verify-runbook-index:"
+  fi
 }
 
 @test "existing verify-runbooks DR bats runner target is preserved (not replaced, F2)" {
-  run grep -Eq 'bats docs/runbooks' "$ROOT/Makefile"; [ "$status" -eq 0 ]
+  run grep -Eq 'bats .*docs/runbooks|bats "\$\$RB"' "$ROOT/Makefile"; [ "$status" -eq 0 ]
 }

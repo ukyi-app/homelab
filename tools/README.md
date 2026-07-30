@@ -29,7 +29,8 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
 - **멱등(idempotent) 강제** — 동일 마이그레이션이 재시작·재배포로 여러 번 돌아도 안전해야 한다
   (이미 적용된 변경은 no-op). 부분 실패 후 재실행도 수렴해야 한다.
 - **검증 위치** — 마이그레이션 정합성·멱등성은 **앱 레포 CI**에서 검증한다(homelab은 강제하지 않음;
-  homelab 측은 수동 확인). 설계 근거: `docs/plans/2026-06-25-data-connection-as-secret-design.md` §5.8(F3).
+  homelab 측은 수동 확인). 앱 self-migrate는 expand/contract + 멱등이 전제이고 순서를 강제하는 Job이
+  없으므로 **규칙 준수에 의존한다**(잔여 위험 — `docs/decisions/0005-data-connection-residual-risk.md`).
 
 ## App Platform 변이 도구 (변이 디스패처 경유 — 직접 실행 금지)
 
@@ -141,9 +142,14 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   베스포크 `--pin` 레인을 실증(`tools/tests/test_run-bump-plan.bats`). races-4 TOCTOU의 정적 절반은
   `tools/tests/test_bump-poll-toctou.bats`, 워크플로 call-site **경계**(bump 스텝의 명령 = 러너 호출 하나)는
   `tests/gates/test_bump-poll-callsite.bats`.
-- **`repin-pgtools.ts`** — ops 이미지 `pg-tools:18-rclone`의 5개 소비처(4파일: cache backup ×2·cnpg
-  ensure-role-password/restore-drill/pgdump-hedge)의 인라인 `@sha256` 핀을 새 digest로 일괄 재핀(부분 갱신
-  skew=PgDumpHedgeStale 차단). `bump.yaml`이 build 완료 후 호출. digest 형식 검증·멱등(불변 시 no-op). `--root`로 스캔 루트.
+- **`repin-pgtools.ts`** — ops 이미지 `pg-tools:18-rclone`의 인라인 `@sha256` 핀을 새 digest로 일괄
+  재핀(부분 갱신 skew=PgDumpHedgeStale 차단). `bump.yaml`이 build 완료 후 호출. digest 형식 검증·멱등.
+  ⚠️ **대상을 하드코딩하지 않고 레포에서 파생한다**(D-1). 예전엔 `CONSUMERS` 4파일이 상수였고 같은 4개를
+  `tests/gates/test_pgtools-digest.bats`가 다시 하드코딩했으며 헤더 주석은 "5개 소비처(4파일)"였다 —
+  **세 산출물이 서로는 일치하고 레포와는 어긋났다**. 실측(2026-07-28): 목록 밖의 `adguard/rewrite-reconciler`
+  ·`victoria-stack/pvc-du-exporter`가 낡은 digest에 묶인 채 재핀 대상이 아니었고, 그런데도 도구는
+  `changed/CONSUMERS.length`로 **성공을 보고**했다. 이제 `repo-walk`의 `image-ownership` 스코프로 열거하고
+  참조 0건이면 **비-0으로 죽는다**(조용한 no-op 금지). `--root`로 스캔 루트.
 
 ## 공유 커널 (lib/ — 콜사이트가 정책 소유, 단 정책이 콜사이트마다 갈릴 때)
 
@@ -163,11 +169,14 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `apps-manifests` · `rules`(알림 룰 매니페스트 — 그 디렉토리를 검사 대상으로 볼지 생산자로
   볼지는 소비자가 정한다) · `producers`(레포 전역 — tracked라 .scratch/·워크트리 잔재가 구조적으로
   빠진다. 구 큐레이트 7-루트 목록은 그 잔재 때문이었으므로 근거가 사라져 제거) ·
+  `guards`(가드 진입점 3계열 = `scripts/(check|verify)-*.sh` · `tools/(check|verify)-*.ts` ·
+  `tests/gates/*.sh` — **공용 TEST_HARNESS 제외 어휘 금지**: 그 어휘의 `tests?/`가 ci.yaml이 직접
+  부르는 e2e 하네스 8개를 통째로 지운다. 그 8개가 정확히 회계 커버리지 0이던 대상이다) ·
   유닛 스코프 `apps`/`platform`(디렉토리 존재 질문이라 **filesystem** 열거 —
   실측상 tracked와 결과 동일하고 픽스처 비용만 크다).
   같은 트리를 보는 두 스코프가 다른 이유는 **질문이 다르기** 때문이다("배포되는 매니페스트인가"
   vs "이미지 참조를 담을 수 있는가"). 소비자: `check-resource-limits`·`check-image-pins`·`check-app-deploy`·`check-skeleton`·
-  `check-app-netpol`·`audit-orphans`·`poll-ghcr`·`check-alert-rules`. (`surface-hash`는 **대상 아님** — 워킹트리
+  `check-app-netpol`·`audit-orphans`·`poll-ghcr`·`check-alert-rules`·`check-guard-authority`. (`surface-hash`는 **대상 아님** — 워킹트리
   해시라 미커밋 파일을 포함해야 커밋 후 값과 일치한다.)
 - **`lib/image-pin.ts`** — 배포 핀 형식 커널(TAG_RE/DIGEST_RE·인라인 핀 parse/format·descriptor
   타입·autoDeploy fail-closed). 순수 형식 판정과 왕복만 소유하고 파일 I/O·exit·에러 문구는
@@ -191,8 +200,64 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   reconciler)이 호출. `--ci`(orphan-dns/activation-exposure-drift만 비-0)·`--strict`(전부 비-0)·기본(리포트만).
 - **`ledger-to-json.ts`** — `docs/memory-ledger.md` 표 → conftest 입력 JSON(행 파서 SSOT=`lib/ledger-totals.ts`).
   `scripts/verify-ledger.sh`(= `bun run verify:ledger`, gate)가 호출. 라이브 무관.
+- **`check-guard-authority.ts`** — G1 권위 경로 회계: 모든 가드(`lib/repo-walk.ts`의 `guards` 스코프)가
+  **실제로 실행되는 경로를 최소 하나** 갖는지 계산한다. 가드가 추가되고 README에 등재되고 전 게이트가
+  초록인데 **CI에서 한 번도 안 도는** 상태를 막는다. **계산하되 선언하지 않는다** — 소유권 레지스트리를
+  만들지 않고 멤버십을 실제로 정하는 것에게 묻는다: `ci.yaml`의 `gate` job(로컬 composite action 전개) ·
+  `run-bats.sh --list`(수집 bats) · `on.schedule` 워크플로 · `make -n <타깃>`(Makefile 텍스트 파싱 아님) ·
+  `package.json` 별칭 전이 해소(`bun run verify:ledger` → `verify-ledger.sh`).
+  **`make verify`·`make ci`는 비권위**(CI에서 돌지 않는 로컬 mirror)로 분리해 센다. 판정은
+  `authoritative >= 1` — venue는 의도적으로 겹치므로 정확히-하나 모델이면 오탐이 난다.
+  `tests/gates/test_guard-authority.bats`가 호출(픽스처 red-green + 실 레포 전건).
+- **`check-image-ownership.ts`** — G2 이미지 **소유권 회계**: 레포의 모든 이미지 참조가 **권위 있는 핀
+  소유자**를 갖는지 계산한다. `scripts/check-image-pins.sh`와 **다른 질문**이다 — 저건 "digest로
+  핀됐는가", 여긴 "그 digest를 **누가 갱신하는가**". 둘은 독립이다(실측: `pg-tools:18-rclone`이 두
+  digest로 갈렸는데 핀 게이트는 **둘 다 통과**시켰다 — 핀의 *존재*만 보고 *일치*는 안 본다).
+  **두 축을 분리한다**: freshness 소유자(새 버전을 가져오는 것) ≠ digest 소유자(immutable 핀을
+  보증하는 것). helm 차트 내부 이미지가 그 전형 — 차트 **버전**은 Renovate 소유지만 내부 이미지는
+  렌더 시점 mutable tag라 digest 소유자가 **없다**.
+  소유자는 **계산한다**: `pg-tools`→`repin-pgtools` · `apps/*/deploy/prod/values.yaml`·`.image-pin.json`
+  descriptor→`bump-poll` · 그 외 추적 매니페스트→**Renovate 도달성 실측**(`renovate.json`의
+  managerFilePatterns 매치 ∧ ignorePaths 비매치 — 분류표를 믿지 않는다. 근사이므로 알려진 매치/논매치를
+  센티넬 테스트로 박아 붕괴를 감지한다).
+  불변식: **같은 `repo:tag`는 같은 digest**(핀 게이트가 못 보는 축) · **base64 안에 숨은 참조**도 회계
+  대상(벤더 manifest의 `SIDECAR_IMAGE`가 Secret 안 base64 tag-only라 커버리지가 0이었다) · 차트 선언
+  완전성(레포에 파일이 없는 차트 내부 이미지 클래스).
+  무소유는 `policy/image-ownership.json`에 **why·freshness·since·owner_action과 함께 선언 필수**이고
+  매치되지 않는 선언(죽은 선언)도 red다. 벤더 파일을 **포함**해 본다(수정 금지여도 소유자 질문엔 답이
+  있어야 한다 — repo-walk `image-ownership` 스코프). `tests/gates/test_image-ownership.bats`가 호출.
+- **`check-workflow-readiness.ts`** — G-09 준비상태 회계: 자격/설정 부재로 **job이 통째로 skip됐는데
+  run은 초록**인 경로를 닫는다. GHA job conclusion 어휘엔 "안 돌았다"가 없고, 스텝-레벨로 게이트된
+  job은 스텝을 전부 skip해도 **success**로 끝난다(2026-07-27 라이브 실측: tf-reconcile의 신뢰 앵커
+  드리프트 감시 2개가 한 번도 실행된 적 없이 매 30분 초록). skip된 job은 `if: always()` 스텝조차
+  실행하지 않으므로 신호는 **게이트 밖의 별도 accounting job**에서만 낼 수 있다.
+  두 모드가 한 파일에 있는 이유는 게이트 탐지 규칙이 SSOT여야 하기 때문이다:
+  - **정적**(무인자, `ci.yaml` gate 명시 스텝 + `make verify`) — `policy/workflow-readiness.json`
+    원장 ↔ 실제 워크플로 **양방향** 대조. 미선언 게이트(역방향)·죽은 선언(정방향)·`outputs.executed`
+    미승격·회계 job 부재/`!cancelled()` 누락/`needs` 누락·`expect_executed` 바닥값·**면제 불가
+    보안 항목**(`bump-poll.reconcile`은 required+error 고정)을 강제.
+  - **런타임**(`--workflow <file>`, env `WORKFLOW_NEEDS`=`toJSON(needs)`) — 각 워크플로 accounting
+    job이 호출. `needs.*.result`(job-level) / `needs.*.outputs.executed`(step-level)로 판정하고
+    severity에 따라 `::error::`+exit 1 또는 `::warning::`. **실패는 실행된 것으로 센다**(이미 loud).
+  게이트 탐지는 **자격 변수의 공백 검사**(`secrets.*`/`vars.*` env를 `[ -n "$X" ]`로 재고 플래그를
+  내림)를 요구한다 — 이 선이 도메인-크기 게이트(열거 붕괴 클래스, 처방=scan-floor)와 결과 플래그
+  (terraform `drift=false` 등)를 갈라낸다. `tests/gates/test_workflow-readiness.bats`가 호출.
+- **`check-ci-parity.ts`** — `make ci` ↔ `ci.yaml` job `gate` **패리티 회계**. Makefile은 `ci`를 "gate를
+  로컬에서 재현"이라 선언하는데, 그 주장을 검증하던 것은 `test_make-ci-parity.bats`의 **하드코딩된 5개
+  토큰**뿐이었다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 `make ci`에 없었는데 전 검사가 초록이었다
+  (하필 그 5개가 전부 미러된 것들이라 우연히 통과했다). 이제 스텝 목록을 `ci.yaml`에서 **파생**해
+  `policy/ci-parity.json`과 대조한다: 미계상 red · 죽은 선언 red · `mirrored`는 **`make -n ci` 실제 출력**
+  대조(Makefile 텍스트를 파싱하지 않는다 — 조건부·전제 타깃을 사람이 재구현하면 그 재구현이 다음 드리프트다).
+  ⚠️ 그래서 `make -n`은 **부수효과가 없어야** 한다: 레시피에 `$(MAKE)`가 있으면 GNU make는 `-n`에서도 그 줄을
+  실행하므로 서브-make 금지(`test_make-ci-parity.bats`가 강제).
+- **`check-disk-caps.ts`** — 디스크 **자기-상한 ↔ 볼륨 선언** 정합(D-4). 워크로드가 바이트로 선언하는
+  자기 데이터 상한(`-retention.maxDiskSpaceUsageBytes` 등)이 자기 볼륨의 선언 용량보다 **작은지** 본다.
+  라이브 실측(2026-07-29): `victorialogs`가 15GB / 10Gi = **139.7%**였고 전 게이트가 초록이었다.
+  ⚠️ 판정은 **바이트 환산**으로 한다 — `GB`=10⁹ · `Gi`=2³⁰라 접미사만 보면 15GB < 10Gi로 잘못 읽힌다.
+  ⚠️ 플래그는 `maxDisk` 패턴으로 **발견**한다(하드코딩 목록 금지). 열거 바닥값 + "볼륨 선언 없으면
+  fail-closed"까지 둔다 — 비교 대상이 없는 것은 통과가 아니라 판정 불가다.
 - **`check-resource-limits.ts`** — 상주 워크로드 main 컨테이너 cpu·memory request + memory limit +
-  GOMEMLIMIT≤limit×0.95 강제(구 bash+yq+python3 이관). **`make verify`**·gate가 호출. `--repo-root`로 스캔 루트 지정.
+  GOMEMLIMIT≤limit×0.95 강제(구 bash+yq+python3 이관). **`make verify`**(로컬 mirror)·gate 수집 bats(`tests/test_resource_limits.bats`)가 호출 — ci.yaml gate 스텝이 직접 부르지는 않는다(`check-guard-authority` 실측). `--repo-root`로 스캔 루트 지정.
 - **`check-alert-rules.ts`** — vmalert 룰 expr의 eval-time 안티패턴 정적 lint(`-dryRun`은 파싱만 해서 못 잡는
   클래스). 모드 A=상태-파생 카운터(`policy/alert-instance-stability-denylist.txt`) 위 rollup이 instance를
   안 벗김 / 모드 B=산술 `on()`·`ignoring()` 조인 피연산자가 집계 미포함 raw 셀렉터(422) — 둘 다 재부팅 IP
@@ -228,6 +293,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   표면 무변경 + 행 고정을 검증해 재노출을 재승인한다(런북 `app-platform.md`). 라이브 무변경(게이트만).
 - **`dns-drift-check.ts`** — active&&public 앱 host + 예약 platform host(`reserved-hosts.json`)가 실제
   resolve되는지(apply 누락=NXDOMAIN, transient는 별도 버킷) 검사. `dns-drift.yaml`(주기)이 호출. resolver 주입(`--fixture`)으로 테스트. 읽기 전용.
+  **레인별 바닥값** `--min-reserved`(기본 1, fail-closed) — 예약 platform host는 구조적으로 항상 ≥1이라
+  0은 "대상 없음"이 아니라 SSOT 부재/키 변경이다. 픽스처만 `--min-reserved 0`으로 **명시** 해제한다
+  (기본을 0으로 두면 조용히 꺼진 바닥값이 된다). 출력의 `scanned`가 스캔 신호다 — stdout이 기계 판독
+  JSON이라 `SCAN:` 마커를 못 낸다.
 - **`contract-drift-check.ts`** — 동봉 계약(vendored `seal-secret.mts`·`sealed-secrets-cert.pem`)이 다운스트림
   3위치(template scaffold·page·trip-mate-api)와 어긋나는지 정규화 diff(`vendored-contract.json` SSOT). files(Rust)는 대상 아님.
   `contract-drift.yaml`(주 1회)이 호출·telegram 알림. `--self-test` 오프라인 유닛, 라이브 raw fetch는 워크플로 전용. 읽기 전용.

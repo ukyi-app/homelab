@@ -71,7 +71,7 @@ assert_recoverable_before_destroy() {
   if [ "$rc" -ne 0 ] && [ "${SEALED_DR_ALLOW_OFFLINE:-0}" != "1" ]; then
     echo "DR ABORT: 권위 소스 조회/파싱 실패(kubectl 또는 origin/main yq) — fail-closed(소비자 0 단정 안 함)"; return 1; fi
   local n cert=0; n="$(printf '%s' "$merged" | grep -c . || true)"; [ -f "$repo/$CERT_REL" ] && cert=1
-  echo "    sealing-key DR 검출(라이브 ∪ $ref): 소비자 $n개, committed_cert=$cert"
+  echo "    sealing-key DR 검출(라이브 ∪ $ref): 소비자 ${n}개, committed_cert=$cert"
   if [ "$n" -eq 0 ] && [ "$cert" -eq 0 ]; then
     echo "    sealing-key DR: dormant (소비자 0 + committed cert 없음)"; return 0; fi
   # 소비자 ≥1 또는 cert 존재 → 파괴 전 키 연속성 증명 강제

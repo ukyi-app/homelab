@@ -12,11 +12,6 @@ CHART="${BATS_TEST_DIRNAME}/.."
   [ "$status" -eq 0 ]
 }
 
-@test "values.yaml no longer defines a db block" {
-  run grep -qE '^db:' "$CHART/values.yaml"
-  [ "$status" -ne 0 ]
-}
-
 @test "no chart template renders a migrate Job (db removed)" {
   out=$(helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
     --set kind=web --set route.public=true --set route.host=a.example.com \

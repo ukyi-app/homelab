@@ -40,6 +40,11 @@
 ### fine-grained PAT 능력은 실제 push 테스트로만
 - fine-grained PAT의 능력은 **실제 push 테스트로만** 확인 가능 — repo GET의 `permissions`
   필드는 사용자 역할을 보여줄 뿐이다. Resource owner를 org로 지정해야 org 리포에 쓴다.
+- ⚠️ **읽기 능력도 같다 — fine-grained PAT는 "공개" App 엔드포인트 `GET /apps/{slug}`조차 404로 막는다.**
+  terraform `data.github_app`이 그 위에 서 있으면 데이터 소스가 죽고 그것을 참조하는 리소스가 계획에서
+  통째로 빠져, `plan`이 에러가 아니라 조용히 **`0 to add`(=무변경)**를 낸다 — 룰셋이 안 걸렸는데 초록으로 보인다.
+  해법은 slug 해석을 없애고 **App ID를 리터럴로 핀**하는 것(`infra/github/rulesets.tf`). App ID는 리네임에도
+  불변이고, tf-reconcile 토큰이 fine-grained여도 plan이 매 주기 깨지지 않는다.
 
 ### runAsUser /etc/passwd 부재 시 libpq PGUSER
 - `runAsUser`가 이미지 `/etc/passwd`에 없으면 libpq가 기본 사용자명을 못 정해
@@ -157,6 +162,31 @@
 ### bats bash 3.2 중간 [[ ]] 침묵 통과
 - **bats가 bash 3.2(macOS 기본)로 돌면 테스트 중간의 `[[ ]]` 실패가 침묵 통과된다**(set -e가
   compound command 실패를 무시 — 마지막 명령 status만으로 ok). 중간 단언은 `[ ]`(단순 명령)로.
+- 실측: `[[ "$x" == *ABSENT* ]]`는 거짓인데 `ok`, 같은 자리를 `printf '%s' "$x" | grep -qF -- 'ABSENT'`로
+  바꾸면 정확히 `not ok`. 레포에 이 형태가 53건 있었고 **전부 죽은 단언이었다**(0으로 수렴, 이제 hard-zero).
+- ⚠️ `grep -qF`에는 **`--` 종결자**를 붙여라 — `--kubelet-arg=…`처럼 `-`로 시작하는 패턴을 grep이
+  옵션으로 해석해 status 2로 죽는다(변환 직후 6개 스위트가 그렇게 깨졌다).
+> 가드: `scripts/check-bats-style.sh`
+
+### 셸 문자열의 `$VAR한글` — bash 3.2가 멀티바이트를 변수명에 삼킨다
+- `$VAR` 바로 뒤에 비-ASCII가 붙으면 **bash 3.2(macOS 기본)가 그 바이트를 변수명에 포함**시킨다.
+  실측(`V=7; echo "평가($V회)"`):
+
+  | 인터프리터 | `LC_ALL=C` | UTF-8 로케일(C.UTF-8·en_US·ko_KR) |
+  |---|---|---|
+  | bash 3.2 (macOS `/bin/bash`) | `평가(7회)` | **`V<byte>: unbound variable`, exit 127** |
+  | bash 5.2 (CI 러너 ubuntu-24.04) | `평가(7회)` | `평가(7회)` |
+
+- **그래서 CI가 원리적으로 못 잡는다.** 게이트는 bash 5.2라 영원히 초록이고, 터지는 것은 오너의
+  macOS 로컬뿐이다. `shellcheck`도 못 잡는다(파서는 `$VAR` + 리터럴로 읽고 경고 0).
+- `set -u`가 없으면 더 나쁘다: 죽지 않고 **`평가(??)`로 숫자와 한글이 함께 깨진 채 통과**한다.
+- 이 레포는 진단 메시지가 전부 한국어라 발현 밀도가 높은데 대부분 실패 경로(`|| fault …`)에 있어
+  **휴면**한다 — 정작 진단이 필요한 순간에 진단 대신 unbound variable을 본다(DR 스크립트
+  `scripts/reset-pg-r2-archive.sh`의 FATAL 경로가 실례였다).
+- **규약: 셸 문자열 안의 변수는 항상 `${VAR}`로 감싼다.**
+- ⚠️ 가드의 검출은 **`LC_ALL=C grep -E '[^ -~]'`**로 쓴다. `grep -P`를 쓰면 macOS BSD grep이 `-P`를
+  지원하지 않아 **가드가 조용히 0건을 찾는다**(첫 구현이 그랬고, 버그를 되돌려 넣어도 초록이었다).
+> 가드: `tests/gates/test_shell-bash32-traps.bats`
 
 ### helm 차트 CRD includeCRDs
 - helm 차트 CRD가 `crds/` 디렉토리에 있으면 kustomize HelmChartInflationGenerator 기본 렌더에서
@@ -338,7 +368,14 @@
   meta-arg count/for_each·주석 카운트 회피·identity redirect·cross-file)에 전부 우회됐고, canonical freeze조차 리소스
   `/* */` wrap·추적 `*_override.tf` 병합으로 우회됐다. 그래서 가드는 **best-effort 3층 변경 감지기**(canonical freeze
   + no-block-comments + no-override; `.gitignore`가 `*_override.tf` 이중화)이고, **완전 보증은 owner-local 라이브
-  검증**(apply 후 적대 push 거부 실측 + `gh api /repos/{o}/{r}/rulesets` 관측). 절차는 `docs/reviews/bump-poll-ruleset/verification.md`.
+  검증**(apply 후 적대 push 거부 실측 + `gh api /repos/{o}/{r}/rulesets` 관측). 절차는
+  `docs/runbooks-public/github-ruleset-verify.md`(tracked).
+- ⚠️ **ruleset 거부 코드는 `GH006`이 아니라 `GH013`이다** — 실측 문구는 `GH013: Repository rule violations …
+  Cannot create ref due to creations being restricted` / `… Cannot update this protected ref`(GH006은 구 분기보호 계열).
+  GH006만 매칭하는 프로브·로그 파서는 룰셋 거부를 못 알아보고 **auth 실패와 구분하지 못해 거짓 인증**한다
+  ("거부됐다"가 아니라 "ruleset 때문에 거부됐다"를 확증해야 한다). 매처는 GH013·`repository rule`·
+  `cannot create`를 함께 커버하라. **org owner/repo admin에도 암묵 bypass는 없다** — 선언된 `bypass_actors`가
+  유일한 경로다(owner PAT push가 실제로 GH013으로 거부됨을 실측).
 > 가드: `tests/gates/test_bump_poll_ruleset.bats`
 
 ### emptyDir sizeLimit vs 런타임 다운로드 페이로드
@@ -359,5 +396,360 @@
   sizeLimit(512Mi) 아래에 둬 앱 쪽에서 같은 함정을 막는다 — 그 대응물이 없는 워크로드가 무방비다.
 - ⚠️ **가드는 정적이다**: 선언값이 *기록된* 실측치 대비 마진을 지키는지만 본다. 미래 업스트림 증가 자체는
   못 잡으므로 페이로드 불변화(플러그인을 구운 핀 이미지)나 emptyDir 사용률 관측이 후속 과제로 남아 있다
-  (release 게이트 R-1 defer, `docs/reviews/grafana-emptydir-plugin-overflow/`).
+  (릴리스 게이트에서 의식적으로 defer한 항목이다).
 > 가드: `platform/victoria-stack/prod/test_grafana_plugin_budget.bats`
+
+### GNU make가 recipe 종료코드를 자기 Error 2로 뭉갠다
+
+가드 진입점이 도메인 부재를 `SKIP: <가드>: <이유>` 마커 + **exit 4**로 신호하는 규약을 세웠는데
+(CONTRIBUTING '가드 skip 신호'), **make 타깃은 그 코드를 그대로 전달하지 못한다.**
+
+```
+$ make verify-posture KUBECONFIG_LIVE=/nonexistent
+SKIP: verify-posture: /nonexistent 부재 — 라이브 posture 미평가. 먼저 make up
+make: *** [verify-posture] Error 4     ← 메시지엔 4가 남는다
+$ echo $?
+2                                       ← 그러나 프로세스 종료코드는 2다
+```
+
+GNU make는 recipe 실패를 자기 규약(2 = errors)으로 보고한다. 따라서:
+
+- **make 계층에서 관측 가능한 skip 신호는 `SKIP:` 마커 + 비-0까지다.** 종료코드 4는 스크립트를
+  직접 부를 때만 보인다.
+- 새 make 가드 타깃의 bats 래퍼에 `[ "$status" -eq 4 ]`를 쓰면 **반드시 실패한다** — `-ne 0` + 마커 grep으로 쓸 것.
+- 2는 tools 규약에서 "사용법/파싱 오류"라 의미가 겹친다. make 계층에서 2를 원인으로 읽지 말 것.
+
+> 가드: `tests/gates/test_guard-skip-signalling.bats`
+
+### 열거 붕괴 → vacuous green (프로세스 치환·커맨드 치환·부정 카운트)
+
+가드가 **열거 단계에서 조용히 0건을 받고 끝까지 떨어져 성공 메시지를 출력한다.** 명시적 skip 분기가
+없으므로 skip 신호 규약(exit 4 + `SKIP:` 마커)으로는 안 잡힌다 — 루프가 0회 돌고 OK가 찍힐 뿐이다.
+셋 다 라이브 재현했다.
+
+**① 프로세스 치환은 열거자 실패를 전파하지 않는다.** `set -euo pipefail`이어도 `done < <(cmd)`의
+`cmd` 종료코드는 셸에 보이지 않는다.
+
+```
+$ printf '#!/bin/sh\nexit 1\n' > shim/bun          # 워커를 실패시킨다
+$ PATH=shim:$PATH bash scripts/check-app-netpol.sh
+check-app-netpol OK (0 app-owned NetworkPolicy 검사, 위반 0)      rc=0
+```
+
+**② 커맨드 치환은 stdout만 캡처한다.** `bad=$(grep -r … dir/ || true)`에서 디렉토리가 사라지면 grep은
+rc=2 + stderr로 죽는데, `|| true`가 rc를, 치환이 stderr를 삼켜 `bad=""`가 된다 → `[ -z "$bad" ]` 무조건 참.
+`.github/workflows`를 리네임했을 때 `test_action-pinning`의 출력이 **baseline과 바이트 단위로 동일**했다.
+⚠️ 같은 파일의 형제 단언이 `run bash -c`를 쓰면 bats가 stderr를 `$output`에 병합해 **우연히** fail-loud가
+된다 — 한 스위트에서 일부만 무너지는 비대칭은 대개 이 차이다. 우연에 기대지 말 것.
+
+**③ 부정 카운트는 "매치 0"과 "대상 0"을 구별하지 못한다.** `run grep -r … dir/; [ "$status" -ne 0 ]`은
+grep rc=1(매치 없음)뿐 아니라 rc=2(디렉토리 부재)도 통과시킨다. 매치 없음은 정확히 rc=1이다.
+
+**처방** — 열거를 **변수로** 받아 rc를 캡처하고(`scripts/lib/scan-floor.sh`의 `scan_enumerate`),
+건수 바닥값을 건다(`scan_floor`). 바닥값 **수치는 소비자가 소유한다** — 열거자는 "글롭이 깨져 0건"과
+"정당하게 0건"을 구별할 도메인 지식이 없다. 부정 카운트=0 형태에는 바닥값만으론 부족하고
+**양성 대조**(같은 술어가 어딘가에서는 매치한다)가 함께 필요하다. 셀 때 `grep -c .`는 0건에서 rc=1이라
+`set -e` 콜사이트의 함정이다 — `scan_count`가 그걸 흡수한다.
+
+⚠️ **이건 skip 규약과 다른 채널이다.** 저긴 "검사할 도메인이 정당하게 없음"(exit 4 + `SKIP:`)이고
+여긴 "열거를 못 했다"는 검증 실패(**exit 1**)다. 마커를 내면 사람이 정반대 뜻으로 읽는다.
+⚠️ 바닥값은 **기본 모드에만** 적용한다. 픽스처 모드(`--root`/`--min-*`)는 정당하게 1~2건이라
+무조건 적용하면 음성 테스트가 전부 red가 된다(실측). ⚠️ 바닥값은 래칫이 아니다 — 도메인이 줄지
+않는 한 손댈 일이 없다.
+
+> 가드: `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `policy/ledger.rego`, `tests/test_ledger.bats`
+
+### PreToolUse 훅 종료코드 — fail-closed는 exit 2뿐
+
+Claude Code PreToolUse 훅의 종료코드 어휘는 다른 가드 계층과 **다르다**: 0=허용 · 2=차단(stderr가
+Claude에 전달) · **그 외 비-0 = 비차단 에러**(사용자에게 stderr만 보이고 도구는 그대로 실행된다).
+
+따라서 레포 종료코드 규약(1=검증 실패 · 4=skip)을 이 계층에 복사하면 **경고만 찍히고 편집이 통과한다.**
+`set -e`도 같은 이유로 위험하다 — 무엇이든 -e로 죽으면 rc=1(=비차단)이 되어 조용히 통과한다.
+`manifest-guard.sh`가 실제로 그랬다: jq 부재/실패 시 `*.enc.yaml` 직접 편집이 rc=0으로 허용됐고
+(stderr 0줄), 그건 AGENTS.md 최상위 금칙의 **유일한 자동 차단선**이었다.
+
+- 훅 안의 파서 붕괴는 "도메인 밖"이 아니라 **차단 사유**다. matcher가 `Edit|Write|MultiEdit` 전용이면
+  그 도구들은 항상 `file_path`를 가지므로, 키는 있는데 값이 없으면 언제나 파서가 죽은 것이다.
+- 외부 명령 의존을 0으로 줄인다(bash 내장 파싱 폴백). `input="$(cat)"`조차 cat이 PATH에 없으면
+  비차단 rc가 된다.
+- blanket `command -v jq || exit 2` 프리플라이트는 쓰지 않는다 — 도구 없는 환경에서 모든 편집을
+  막아 세션을 못 쓰게 만든다. 오탐 0 원칙과 fail-closed는 **폴백**으로 양립시킨다.
+
+> 가드: `tests/gates/test_manifest-guard.bats`
+
+### GHA job-level skip은 run conclusion에 안 보인다 — 스텝 전부 skip이어도 job은 success
+
+GHA job conclusion 어휘는 `success|failure|cancelled|skipped`뿐이고, 여기엔 **"자격이 없어 아무것도
+안 했다"가 없다.** 두 게이트 계층이 서로 다른 흔적을 남긴다:
+
+- **job-level 게이트**(`if: needs.preflight.outputs.configured == 'true'`) → job이 `skipped`로 남는다.
+  `needs.<job>.result`로 **관측 가능**하다.
+- **스텝-레벨 게이트**(각 스텝의 `if: steps.pf.outputs.configured == 'true'`) → job이 뜨고, 스텝을
+  전부 skip한 뒤 **`success`로 끝난다.** run conclusion·job conclusion 어디에도 흔적이 없다.
+
+라이브 실측(2026-07-27, `gh run view <id> --json jobs`): `tf-reconcile`의 `drift-github`·`drift-tailscale`은
+`TF_GITHUB_TOKEN`·`TF_TAILSCALE_OAUTH_ID`가 Actions 시크릿에 **없어서** 스텝 1(preflight) 외 전부
+skipped인데 job conclusion은 둘 다 `success`였다. 즉 신뢰 앵커(branch protection `contexts=["gate"]` ·
+CI Actions 시크릿 · tailscale ACL/auth-key)의 드리프트 감시가 **한 번도 실행된 적 없이** 매 30분
+초록을 보고하고 있었다. 앞선 세션의 감사는 job conclusion만 봐서 이걸 "잠복 경로"로 오판했다 —
+**스텝 conclusion까지 봐야 한다.**
+
+⚠️ **알림을 감시 대상 job 안에 두면 함께 죽는다.** skip된 job은 스텝을 **0개** 실행한다 —
+`if: always()`도 예외가 아니다(그 job이 아예 스케줄되지 않는다). 그래서 실패 알림을 그 job에 얹어
+두면 정확히 신호가 필요한 순간에 0이 된다.
+
+⚠️ **이 계층엔 `exit 4`(skip) 채널이 없다.** 규약을 쓸 스텝 자체가 실행되지 않기 때문이다. 관측은
+게이트 **밖의 별도 job**에서만 가능하다:
+
+- 게이트 밖 `accounting` job + `if: ${{ !cancelled() }}`. 상태함수를 빼면 기본 `success()`가 걸려
+  **감시자가 감시 대상과 같은 운명에 묶인다**(needs 중 하나가 skip되면 회계도 skip).
+- 스텝-레벨 게이트는 `outputs.executed` 승격이 필수다 — 없으면 회계가 볼 수 있는 값이 존재하지 않는다.
+- 판정 기준은 원장(`policy/workflow-readiness.json`)이고, **선언되지 않은 미설정은 통과할 수 없다**.
+  선언된 갭은 면제가 아니라 **계상**이다(매 run 로그·job summary에 남고 원장이 이유를 진다).
+- **실패는 미실행으로 세지 않는다** — 이미 run을 빨갛게 만들고 자기 알림을 낸다. 회계가 잡는 것은
+  *조용한* 미실행뿐이고, 실패를 겹쳐 세면 원인이 두 번 오귀속된다.
+
+⚠️ **자격 게이트 ≠ 도메인-크기 게이트.** "검사 대상이 0건이라 skip"은 열거 붕괴 클래스라 처방이
+바닥값이다(위 「열거 붕괴 → vacuous green」). 탐지기가 둘을 가르는 선은 **자격 변수의 공백 검사**다 —
+`secrets.*`/`vars.*`에서 온 env를 `[ -n "$X" ]`로 재는 형태만 준비상태 게이트로 센다. 이 선이 없으면
+terraform `drift=false` 같은 **결과 플래그**가 전부 준비상태로 오탐된다(실측: 한 워크플로에 3곳).
+
+> 가드: `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats`
+
+### 이미지 핀의 *존재* ≠ *일치* ≠ *소유자*
+
+세 가지 서로 다른 질문이 하나로 뭉뚱그려져 있었다.
+
+1. **핀이 있는가** — `scripts/check-image-pins.sh`가 본다. `@sha256:`이 붙어 있으면 통과다.
+2. **핀이 일치하는가** — 아무도 안 봤다. 같은 `repo:tag`가 서로 다른 digest로 갈려 있어도 ①은 통과한다.
+3. **그 digest를 누가 갱신하는가** — 아무도 안 봤다.
+
+라이브 실측(2026-07-28): `pg-tools:18-rclone`이 두 digest로 갈려 있었다. `tools/repin-pgtools.ts`의
+`CONSUMERS`에 등록된 4파일은 GHCR 현재값이었고, 등록 안 된 2파일
+(`platform/adguard/prod/rewrite-reconciler.yaml` · `platform/victoria-stack/prod/pvc-du-exporter.yaml`)은
+**낡은 digest에 영구히 묶여** 있었다 — 재핀 대상이 아니므로 새 빌드가 나와도 영원히 그 상태다.
+
+⚠️ **하드코딩 목록은 자기 자신에 대해서만 정확하다.** 이 사례에서 산출물 **세 개**가 서로는 일치하고
+레포와는 어긋났다: 재핀 도구의 `CONSUMERS` 4파일 · 그 4파일을 다시 하드코딩한 `test_pgtools-digest.bats`의
+`FILES` · "5개 소비처(4파일)"이라는 헤더 주석. 가드는 **이미 일치하도록 갱신된 닫힌 집합 안에서** 일치를
+확인했고, 재핀은 `changed/CONSUMERS.length`로 성공을 보고했다. 두 번째 @test는 이름이
+"registry drift guard"였지만 목록에 **없는** 사이트가 새로 생기는 것을 원리적으로 탐지할 수 없었다.
+⇒ 목록을 **계산하면**(레포 열거) 그 드리프트가 원리적으로 불가능해진다. 남는 위험은 열거 붕괴뿐이고
+그건 바닥값이 막는다.
+
+⚠️ **freshness 소유자 ≠ digest 소유자.** helm 차트 내부 기본 이미지는 차트 **버전**이 Renovate 소유라
+freshness는 있지만, 렌더 시점에 mutable tag로 해석되므로 **digest 소유자가 없다**. `check-image-pins.sh`
+헤더는 이를 "Renovate pinDigests 관할"이라고만 적었는데 그건 절반만 참이다 — 차트 tarball은
+`platform/*/prod/charts/`에 캐시되고 그 경로는 **gitignored**이며 `renovate.json`의 `ignorePaths`에도
+`**/charts/**`로 들어 있다. Renovate는 **없는 파일을 핀할 수 없다**. 라이브 실측: 구동 컨테이너 22개가
+mutable tag였다(argocd ×5 · cert-manager ×3 · tailscale ×3 · sealed-secrets · cnpg-operator · traefik 등).
+
+⚠️ **base64 안의 이미지 참조는 어떤 스캐너에도 안 걸린다.** `platform/cnpg/barman-plugin/manifest.yaml`의
+`SIDECAR_IMAGE`는 Secret의 `data:`에 base64로 들어 있어 (a) `image:` grep에 안 걸리고 (b) Secret이라
+스캐너가 안 보고 (c) 벤더 경로라 핀 게이트·Renovate 양쪽에서 배제됐다 — **커버리지가 정확히 0**이었고
+디코드하면 tag-only(`plugin-barman-cloud-sidecar:v0.13.0`)다. CNPG가 이 값을 읽어 Cluster 파드에
+사이드카로 주입하므로 WAL 아카이빙 경로 자체다.
+⚠️ 디코드는 **줄바꿈 조각을 이어 붙여야** 한다. YAML 블록 스칼라라 둘째 줄이 10자였고, 줄 길이 하한을
+16으로 두면 첫 줄만 디코드돼 `…sidecar:v`로 **잘린 값**이 나온다(참조는 잡되 값이 틀리면 태그 일치
+검사·원장 대조가 전부 어긋난다). 판정은 길이가 아니라 디코드 결과의 **모양**이 해야 한다.
+
+⚠️ **소유자 없음은 결함이 아니라 선언 대상이다.** 벤더 파일·차트 내부 이미지는 정당하게 무소유일 수
+있다. 원장(`policy/image-ownership.json`)에 why·freshness·since·owner_action과 함께 적고, **선언되지
+않은 무소유는 통과할 수 없다**. 매치되지 않는 선언(죽은 선언)도 red다 — 아무도 대조하지 않는 주장은
+원장이 아니다.
+
+> 가드: `tools/check-image-ownership.ts`, `policy/image-ownership.json`, `tests/gates/test_image-ownership.bats`, `tests/gates/test_pgtools-digest.bats`
+
+### vmalert replay rulesDelay — 비율 아닌 절대 지연·체인 없으면 순수 낭비
+
+`--replay.rulesDelay`는 vmalert replay가 **룰마다 한 번씩** 자는 값이라, 이 계열 게이트(발화 e2e)의
+벽시계는 사실상 그 sleep의 총합이다:
+
+    벽시계 ≈ (룰 파일의 룰 수) × rulesDelay × (레그 수)
+
+라이브 실측이 이 모델과 1~3% 안에서 맞는다 — drift = r6(6룰) × 8레그 × 4s → **192s 예측 / 194s 실측**,
+digest-stale = r4(18룰) × 7레그 × 4s → 504s 예측 / 459s 실측. 즉 이 게이트들이 느린 이유는 계산량도
+네트워크도 아니고 **전부 대기**다. 그래서 이 값은 "CI가 느리다"는 압력을 상시로 받는다.
+
+⚠️ **비율(rulesDelay ÷ flushInterval)을 지키면 낮춰도 된다 — 는 틀렸다. 실측으로 기각됐다.**
+4s→1s로 내리면서 `--remoteWrite.flushInterval`을 500ms→100ms로 함께 줄여 비율을 8×에서 **10×로 키웠는데도**
+drift 하네스가 죽었다: `HARNESS FAULT (L1): app:image_digest_drift record produced 0 samples`. 이유는
+방지선이 지키려는 대상이 비율이 아니기 때문이다 — alert 룰은 record 룰이 remoteWrite한 시리즈를
+query_range **1회**로 읽고, 그 사이에 필요한 것은 "flush가 몇 번 일어났나"가 아니라 **적재→질의 가능까지의
+절대 시간**이다(HTTP + vmsingle 인입 지연이 지배한다). flushInterval은 이미 rulesDelay보다 훨씬 작아
+제약이 아니었다.
+
+⚠️ 이 실패는 **조용한 오답이 아니라 간헐적 거짓 RED**다. 그래서 더 나쁘다 — 무발화는 아무도 못 보지만,
+가끔 빨개지는 게이트는 사람이 "또 그거네" 하고 재실행하다가 결국 끈다. 속도를 위해 이 값을 만지는
+변경은 **1회 통과로 검증됐다고 말할 수 없다**(반복 실행이 필요하다).
+
+✅ **속도는 값을 깎아서가 아니라 대기가 불필요한 곳을 찾아서 얻는다.** rulesDelay가 존재하는 이유는
+오직 record→alert 체이닝뿐이므로, **체인이 없는 룰 파일에서는 그 대기가 순수 낭비다**. 실측: `r4`는
+record 룰이 **0개**라 체인이 성립할 수 없고(digest-stale·bulkssd), `r6`만 `app:image_digest_drift` 체인을
+가진다(drift·gha-liveness). 그래서 지연을 룰 파일에서 **파생**한다(`vme_rules_delay` — 체인 4s / 무체인 1s /
+파싱 실패 4s fail-closed). 결과: 병렬 e2e 459s → **195s**(3회 반복 194/195/196s, 실패 0), 레그 판정은 동일.
+
+⚠️ 파생기는 **양방향 대조**가 없으면 무력하다 — 항상 보수값을 돌려주면 속도 이득이 조용히 사라지고
+(red가 나지 않는다), 항상 빠른 값을 돌려주면 레이스가 돌아온다. 그래서 게이트는 실제 배포 룰
+r6(체인 있음)·r4(체인 없음) 양쪽을 대조군으로 쓴다. 또한 파생값을 **계산만 하고 플래그엔 리터럴을 넘기는**
+변이가 통과했었다(mutation으로 발견) — 단언은 대입문이 아니라 **소비 지점**에 걸어야 한다.
+
+> 가드: `tests/gates/test_vmalert-e2e-replay-timing.bats`, `tests/gates/lib/vmalert-e2e.sh`
+
+### make -n은 드라이런이 아니다 — 레시피의 $(MAKE)는 -n에서도 실행된다
+
+GNU make는 레시피 줄에 `$(MAKE)`(또는 `${MAKE}`)가 있으면 `-n`·`-t`·`-q`에서도 **그 줄을 실제로 실행한다**.
+문서화된 동작이다 — 재귀 make에 플래그를 전파해 서브-make가 자기 몫을 출력하게 하려는 것이다. 그래서
+`$(MAKE)`가 붙은 줄만은 "출력"이 아니라 "실행"이 된다.
+
+⚠️ 이 레포에서 그게 위험한 이유는 `make -n <target>` 출력을 **데이터로 읽기 때문**이다:
+`tools/check-ci-parity.ts`(mirrored 스텝이 실제로 `make ci`에 있는지 대조)와
+`tools/check-guard-authority.ts`(venue 수집 — Makefile 텍스트 파싱 대신 make 자신에게 해소를 맡긴다)가
+둘 다 그 출력을 파싱한다. 즉 정적 검사여야 할 것이 갑자기 부수효과를 갖는다.
+
+라이브 실측(2026-07-28): 게이트 스텝을 가독성 때문에 `ci-containerized`/`ci-firing-e2e` 서브 타깃으로
+묶고 `@$(MAKE) --no-print-directory ci-containerized`로 호출했더니, **`make -n ci` 한 번에** telegram
+render e2e·vector validate·vmalert validate가 통째로 실행되고 vector 이미지 pull까지 일어났다.
+`bun tools/check-ci-parity.ts`(내부에서 `make -n ci` 호출)를 돌린 것뿐인데 docker가 움직였다.
+
+✅ 처방: 게이트 스텝은 **각자 자기 레시피 줄에** 둔다. 장황해지지만 (a) 드라이런이 안전하고
+(b) 패리티 대조가 래퍼가 아니라 **스텝 단위로 구체적**이 된다(`local: "vector-validate.sh"`가
+`make -n ci` 출력에 실재하는지 볼 수 있다 — 래퍼 하나로 묶으면 "래퍼가 호출된다"까지밖에 증명 못 한다).
+가드는 레시피 줄(탭 시작)에 `$(MAKE)`가 없음을 강제한다 — 주석의 설명 문구는 대상이 아니다.
+
+> 가드: `tests/gates/test_make-ci-parity.bats`, `tools/check-ci-parity.ts`, `policy/ci-parity.json`
+
+### tracked 열거 게이트는 untracked 파일을 아예 안 본다 — 로컬 초록이 CI를 예고하지 못한다
+
+이 레포의 게이트는 대부분 `git ls-files`로 대상을 열거한다. 하드코딩 글롭이 리네임에 조용히 0매치되는
+것을 피하려는 **의도적 선택**이고 그 자체는 옳다. 부작용이 하나 있다: **untracked 파일은 측정 대상이
+아니다.** 그런데 커밋하는 순간 CI에서는 측정된다 — 즉 `make ci` 초록과 `gate` red가 양립한다.
+
+라이브 실측(2026-07-28): 새 `tools/check-ci-parity.ts`를 `git add` 전에 `make ci`로 검증해
+**1671건 전건 초록**을 받고 커밋했는데, 직후 CI가 `tools/*.ts` shebang 금지 규약 위반으로 red를 냈다.
+로컬이 그 파일을 **아예 보지 않은** 것이지 검사가 느슨했던 게 아니다. 하필 그 PR이 "make ci가 gate를
+재현한다"를 강제하는 PR이었다.
+
+⚠️ 이건 "재현했는데 실패"가 아니라 **"재현하지 못했다"**이다. 그래서 실패가 아니라 **skip 신호**
+(마커 + exit 4)가 맞다 — CONTRIBUTING '가드 skip 신호' 규약 그대로다.
+
+✅ `make ci`의 **첫 전제**(`ci-guard-tracked`)가 게이트 대상 디렉토리의 untracked 파일을 찾아 마커 + exit 4를
+낸다. 첫 전제인 이유는 1분짜리 `chart-test` 앞에서 끊기 위해서다. 가드에는 양성 대조가 붙어 있다 —
+깨끗한 트리에서 통과해야 한다(항상 죽는 가드는 아무도 안 쓰고 곧 제거된다).
+
+> 가드: `tests/gates/test_make-ci-parity.bats`, `Makefile`
+
+### 체이닝 레이스의 두 번째 얼굴 — record는 있는데 ALERTS가 전무(병렬화가 깨운 flake)
+
+vmalert replay에서 alert 룰은 record 룰이 remoteWrite한 시리즈를 `query_range` **1회**로 읽는다. record가
+아직 질의 가능하지 않으면 결과가 통째로 비어 **버그가 아닌데 RED**가 된다. 그래서 `--replay.rulesDelay`를
+넉넉히(4s) 준다 — 여기까지는 기존 항목(「vmalert replay rulesDelay」)과 같다.
+
+⚠️ 그런데 하네스의 fail-closed 가드는 **`record == 0`만** 보고 있었다. 라이브 CI 실패(2026-07-28,
+run 30340280961)는 정확히 그 반대편이었다:
+
+| | record 샘플 | firing | pending |
+|---|---:|---:|---:|
+| 로컬 | 58 | 19 | 40 |
+| CI(실패) | **58** | **0** | **0** |
+
+record 데이터는 **완전히 동일**한데 alert이 그걸 하나도 못 읽었다. `pending=0`이라 "발화 창이 좁았다"가
+아니라 **한 번도 참이 안 됐다**는 뜻이다.
+
+⚠️ **대조 알림이 이 축을 못 막는다.** 이 하네스의 생존 대조군(`ArgoCDOutOfSync`)은 **체이닝되지 않은**
+룰이라 레이스에 걸려도 정상 발화한다 — "vmalert가 아무것도 안 썼다"는 잡지만 "체인의 하류만 비었다"는
+못 잡는다.
+
+⚠️ **왜 지금 나타났나: 병렬화가 깨웠다.** 발화 e2e 4종을 병렬로 돌리기 시작하면서(gate 시간의 77%였다)
+러너 경합이 커졌고, 4s가 덮던 적재 지연을 가끔 초과하게 됐다. 병렬 도입 이후 약 6회 중 1회(~17%).
+값을 올리는 대안(4s→6s)은 drift를 196s→292s로 만들어 방금 줄인 gate 시간을 그만큼 되돌린다.
+
+✅ 처방: `require_engaged <leg> <alert>` — engage를 기대하는 레그에서 **ALERTS 시리즈가 통째로 0**이면
+replay를 **1회 재시도**하고, 그래도 0이면 HARNESS FAULT(exit 2)로 죽는다.
+★ 이 서명이 실제 룰 결함과 **구별되기 때문에** 재시도가 정당하다: 룰이 rollup을 잃는 등 진짜로 깨지면
+알림은 *engage는 한다*(결함 픽스처 L4가 `pending=132 / firing=0`을 낸다). "ALERTS가 통째로 0"은 룰이
+아니라 **하네스가 아무것도 못 읽은 것**이다. 즉 재시도는 실패를 숨기는 장치가 아니라 **레이스인지
+결함인지를 판별하는 장치**다 — 레이스면 재시도가 성공하고, 결함이면 두 번 다 0이라 죽는다.
+재시도 발생 사실은 `RETRY (…)` 로그로 반드시 남긴다(조용한 재시도 금지).
+
+⚠️ 재시도는 같은 레그를 다시 돌리므로 컨테이너 이름(`$label-$$`)이 충돌한다 → replay 진입 시
+기존 컨테이너를 먼저 제거한다.
+
+> 가드: `tests/gates/vmalert-drift-firing-e2e.sh`
+
+### 소스의 리터럴 NUL 한 바이트가 그 파일을 모든 grep 가드에게 투명하게 만든다
+
+`grep`은 NUL 바이트가 있는 파일을 **바이너리로 판정**하고 `Binary file … matches` 한 줄만 낸다 —
+**내용은 한 줄도 출력하지 않는다.** 그래서 `grep -o`로 값을 뽑는 가드에게 그 파일은 존재하지만
+**아무것도 들어 있지 않은 파일**이 된다. 매치 여부(`grep -c`)는 1을 돌려주므로 "파일은 스캔했다"는
+착시까지 준다.
+
+라이브 실측(2026-07-29): `tools/check-image-ownership.ts`가 맵 키 구분자로 **리터럴 NUL 바이트**를
+소스에 박고 있었다 — `owners.set(\`${r.file}<NUL>${r.ref}\`, owner)`. join·split이 일관돼 **동작은
+정상**이었고 typecheck·전 게이트가 초록이었다. 발견 경위는 우연에 가깝다: SCAN 마커의 파생 로스터를
+만들자 정적 콜사이트 집합에서 이 파일의 라벨만 조용히 빠졌다(정적 8 vs 런타임 9). 파생 대조가 없었다면
+"가드가 돌았고 초록인데 대상 하나를 아예 안 본" 상태가 그대로 남았다.
+
+⚠️ 영향 범위는 이 레포에서 넓다 — venue 수집·마커 추출·핀 검사 등 **grep 기반 가드 전부**가 그 파일을
+건너뛴다. 파일 하나가 조용히 회계 밖으로 나가는 것이고, 그건 이 캠페인이 지우려는 무측정의 전형이다.
+
+✅ 처방: 구분자가 필요하면 **이스케이프**를 쓴다(TS `\u0000` · 셸 `$'\000'`). 런타임 값은 같고 파일은
+텍스트로 남는다. 재발 가드는 `check-skeleton`이 소유한다 — 추적된 **소스 확장자** 파일에 NUL이 있으면
+red(대상은 확장자로 파생한다. 손 관리 목록을 두면 그 목록이 다음 드리프트다. 이미지 등 정당한
+바이너리 자산은 확장자로 자연히 빠진다).
+
+⚠️ 검출을 `grep "$(printf '\000')"`로 짜면 안 된다 — **명령 치환이 NUL을 삼켜 빈 패턴**이 되고, 빈
+패턴은 **모든 파일에 매치**한다(실측: 추적 878건 전건 red). 열거가 아니라 **패턴이 붕괴**하는 형태라
+증상이 정반대(전건 통과가 아니라 전건 실패)이지만 뿌리는 같다. 검출은 `tr -d '\000'`으로 지운 스트림과
+원본을 `cmp`하는 방식이 POSIX 범위에서 안전하다.
+
+> 가드: `scripts/check-skeleton.sh`, `tests/gates/test_scan-floor.bats`
+
+### 디스크 자기-상한이 자기 볼륨 선언보다 크다 — GB(10⁹) vs Gi(2³⁰)
+
+워크로드가 **자기 데이터 크기 상한**을 바이트로 선언할 때(VictoriaLogs `-retention.maxDiskSpaceUsageBytes`,
+vmagent `-remoteWrite.maxDiskUsagePerURL`), 그 값이 **자기가 쓰는 볼륨의 선언 용량보다 클 수 있다**.
+그러면 같은 파일이 모순된 두 숫자를 말한다 — "이 볼륨은 10Gi다"와 "내 데이터가 15GB 될 때까지 축출하지
+않는다". 라이브 실측(2026-07-29): `victorialogs.yaml`이 정확히 그 상태였다(**139.7%**).
+
+⚠️ **단위 혼동이 핵심이다.** `GB`=10⁹ · `Gi`=2³⁰. 15GB(1.50e10) > 10Gi(1.074e10)인데, 접미사만 훑으면
+"15 > 10"으로도 "GB < Gi"로도 잘못 읽힌다. 판정은 반드시 **바이트로 환산**해서 해야 한다.
+
+⚠️ **"언젠가 터진다"가 아니라 지금 결함이다.** 그 상한은 한 번도 발동한 적이 없었다 — 축출은 전부
+`retentionPeriod=14d`가 하고 실사용은 상한의 1/69였다. 그래도 결함인 이유는 셋이다: ① 용량 계획이
+PVC 숫자를 읽으면 틀린 답을 얻는다 ② 쿼터를 강제하는 provisioner로 바뀌는 순간 앱은 15GB까지 쓸 수
+있다고 믿는 채로 볼륨 한계에서 ENOSPC를 맞는다 ③ 형제 선언(vmagent 450MiB < 512Mi emptyDir)은 올바른
+방향이라 **비대칭 자체가 갭의 증거**다.
+
+⚠️ **PVC `requests.storage`는 축소 불가**(확장 전용)다. 그래서 "볼륨을 올려 맞추기"는 되돌릴 수 없는
+방향이고, 이미 실사용의 49배인 선언을 더 부풀리는 순환 논리다. **상한 쪽을 내리는 것이 정답**이다.
+
+⚠️ **존재 grep으로 만들면 안 된다.** `tests/gates/test_vmalert-config.bats`가 이미
+`grep -q maxDiskUsagePerURL` 형태였는데 450MiB를 900MiB로 바꿔도 초록이고 victorialogs 위반도 못 잡았다.
+규범은 이 문서에 **문장으로는 이미 있었다** — 빠진 것은 규범이 아니라 **강제**다.
+
+> 가드: `tools/check-disk-caps.ts`, `tests/gates/test_disk-caps.bats`
+
+### 고아 PVC는 Bound다 — `phase == Released`만 보는 감사는 원리적으로 못 잡는다
+
+`kubectl delete sts --cascade=orphan`은 **PVC를 지우지 않는다**. 그래서 그렇게 생긴 고아는 PVC가 살아
+있고 PV는 계속 `Bound`다. 그런데 `scripts/audit-orphan-pv.sh`는 `.status.phase == "Released"`만 봤다 —
+그 술어의 전제는 "PVC를 지우면 PV가 Released로 남는다"이고, 이 발생 경로에는 해당되지 않는다.
+
+라이브 실측(2026-07-29): 고아 2건(`storage-vmsingle-0` 20Gi 선언/1.0GiB 사용 · `vlogs-victorialogs-0`
+10Gi 선언/118MiB 사용)이 **21일간** 남아 있는 상태에서 이 감사가 **"고아 없음(Released 0건)" + rc=0**을
+냈다. 게이트가 없는 것보다 나쁘다 — **감사했다는 착각**을 만든다.
+
+⚠️ ArgoCD도 이 클래스를 **구조적으로 prune 못 한다**: STS 컨트롤러가 `volumeClaimTemplates`로 만든
+객체라 tracking 어노테이션이 없고, 앱은 Synced/Healthy 초록이다. GitOps 감시망 밖이다.
+
+✅ 판정은 **phase가 아니라 소비 여부**로 한다 — "어떤 파드도 마운트하지 않는 PVC". 그리고 소비 집합은
+**파드 기준**이어야 한다(STS/Deployment 스펙만 보면 스케일 0이나 삭제된 컨트롤러의 PVC를 '사용 중'으로
+오판한다). 열거 바닥값도 함께 둔다 — PVC가 0건으로 읽히면 "고아 없음"과 구별할 수 없다.
+
+⚠️ reclaim은 **PVC → PV → hostPath 디렉토리 3단계 전부** 완주해야 한다(두 storageClass 모두 Retain).
+중간에 멈추면 PV 없는 디스크 잔재가 남고, 그건 어느 k8s 질의로도 안 보인다.
+
+> 가드: `scripts/audit-orphan-pv.sh`
+

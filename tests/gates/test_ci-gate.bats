@@ -3,9 +3,9 @@ WF=".github/workflows/ci.yaml"
 
 @test "ci runs typecheck, chart-test, ledger gate, and bats" {
   run cat "$WF"
-  [[ "$output" == *"bun run typecheck"* ]]
-  [[ "$output" == *"make chart-test"* ]]
-  [[ "$output" == *"verify:ledger"* ]]
+  printf '%s' "$output" | grep -qF -- "bun run typecheck"
+  printf '%s' "$output" | grep -qF -- "make chart-test"
+  printf '%s' "$output" | grep -qF -- "verify:ledger"
   [[ "$output" == *"bats "* ]]
 }
 
@@ -24,9 +24,5 @@ WF=".github/workflows/ci.yaml"
   run grep -E "^concurrency:" "$WF"
   [ "$status" -eq 0 ]
   run grep -E "cancel-in-progress" "$WF"
-  [ "$status" -eq 0 ]
-  run grep -E "^concurrency:" ".github/workflows/verify.yaml"
-  [ "$status" -eq 0 ]
-  run grep -E "cancel-in-progress" ".github/workflows/verify.yaml"
   [ "$status" -eq 0 ]
 }

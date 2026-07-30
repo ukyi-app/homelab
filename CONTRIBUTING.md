@@ -42,8 +42,131 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
   스텝은 **한 줄**이 됐다(F-1). 이관 원칙은 계약도 함께 옮기는 것이다: 워크플로 게이트가 강제하던
   실행 증인(순서·레인 verbatim·격리·소유권)은 러너 스위트로 가고, 워크플로엔 **경계**만 남는다
   (그 스텝의 명령이 러너 호출 하나뿐 — 남기지 않으면 계약이 조용히 증발한다).
-- **종료코드 규약(tools 공통)** — `tools/lib/cli.ts` 주석이 SSOT: 0=성공 · 1=검증/게이트 실패 ·
-  2=사용법/플래그 파싱 · 3=race.
+- **종료코드 규약(가드·도구 공통)** — `tools/lib/cli.ts` 주석이 SSOT: 0=성공 · 1=검증/게이트 실패 ·
+  2=사용법/플래그 파싱 · 3=race · **4=skip**(도메인 부재 — 아래 절).
+
+### 가드 skip 신호 — `exit 4` + `SKIP:` 마커
+
+**병.** 가드가 "검사할 도메인이 없어서 건너뜀"과 "검사했고 통과함"을 **둘 다 exit 0**으로 냈다.
+호출자·CI·사람 누구도 구별할 수 없으니 가드가 실제 실행 경로를 잃어도 전 게이트가 초록이다.
+실측: `scripts/verify-runbook-index.sh`는 `docs/runbooks/`가 gitignored라 CI에서 무조건 skip이었고,
+그 bats 래퍼는 `[ "$status" -eq 0 ]`만 단언했다 — **skip 경로가 그 단언을 만족**했다.
+
+**규약.**
+- 도메인 부재로 불변식을 평가하지 못하면 `SKIP: <가드>: <이유>`를 stdout에 내고 **exit 4**.
+- 마커와 `exit 4`는 **같은 줄**에 둔다. 짝을 정적으로 검증할 수 있게 하려는 제약이다
+  (`tests/gates/test_guard-skip-signalling.bats`가 강제 — mutation 테스트로 load-bearing 실측).
+- 평가한 실행은 마커를 내지 않는다: 0=평가·통과, 1=평가·실패.
+- 각 가드의 bats 래퍼는 **두 갈래를 각각 단언**한다. `[ "$status" -eq 0 ]` 하나만 두면 skip이
+  그 단언을 만족해 래퍼가 vacuous해진다. 도메인을 주입할 시임(픽스처 트리·`RUNBOOK_DIR` 같은
+  변수 오버라이드)이 없으면 만들어서 두 갈래를 실증한다.
+
+**왜 마커만으로 끝내지 않는가.** stdout 마커만 두면 기본 종료코드가 여전히 0이라 이 규약을 모르는
+호출자에게는 병이 그대로 남는다. 4는 `set -e`·make·CI에서 저절로 드러난다. 실제로
+`scripts/netpol-rehearsal.sh`는 candidate NetworkPolicy를 적용한 뒤 `make verify-posture`로 검증하는데,
+skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS를 찍을 수 있었다**.
+
+**왜 2를 재사용하지 않는가.** 2는 사용법/파싱 오류다. `scripts/secret-cert-check.sh`가 skip에 2를
+쓰고 있었는데 같은 파일이 unknown-option에도 2를 쓴다 — 한 코드에 두 의미였다. 4로 갈랐다.
+
+**make 계층 예외.** GNU make는 recipe 종료코드를 자기 Error 2로 뭉갠다. `make verify-posture` 같은
+가드 타깃은 recipe에서 `exit 4`를 내지만 make 프로세스는 2로 끝난다 — 이 계층에서 관측 가능한 신호는
+**마커 + 비-0**까지다(원래 코드는 make의 `Error 4` 메시지에만 남는다).
+
+**적용 범위 = 가드 진입점.** 집계자(`make ci`·`make verify`)는 대상이 아니다. 자식을 조건부로
+건너뛰는 것은 도메인 부재가 아니라 실행처 선택이고(`make ci`의 docker 분기는 gate가 실제로 평가한다),
+집계자가 4를 내면 push 전 진입점이 못 쓰게 된다.
+
+### 가드 스캔 신호 — `SCAN: <가드>: <n>`
+
+**병.** 가드가 CI에서 **돈다는 사실**(권위 실행 경로 — `tools/check-guard-authority.ts`)과 그 호출이
+**가드의 실제 도메인에 닿았다는 사실**은 다른데, 텍스트로는 갈리지 않는다. 실측 반례 둘:
+`tests/test_alert_rules.bats:116`은 루트 인자가 **실 레포**를 가리키고(“인자가 있으면 픽스처”가 거짓),
+`tools/tests/test_app-deploy.bats`는 한 파일 안에 픽스처 호출과 실 트리 호출이 섞여 있다.
+그래서 회계가 과다 계상 쪽으로 기울어 있다 — 픽스처 전용 호출도 권위로 센다.
+
+**규약.**
+- 도메인을 평가한 실행은 `SCAN: <가드>: <건수>`를 **stdout**에 낸다(`SKIP:`과 같은 채널·같은 모양).
+- 셸 가드는 커널이 대신 낸다 — `scan_floor`가 바닥값을 통과하면 자동, 바닥값 없는 카운트 자리는
+  `scan_signal <라벨> <n>`을 직접 부른다(`scripts/lib/scan-floor.sh`).
+- 한 실행이 **두 도메인**을 검사하면 라벨을 나눈다(`check-skeleton:bats` · `check-skeleton:platform`).
+  같은 라벨로 두 줄을 내면 소비자가 어느 쪽인지 모른다.
+- 기계 판독 stdout을 내는 모드(`--json`)에선 마커를 내지 않는다 — 출력을 오염시킨다.
+
+**`SKIP:`과 배타적이다.** 한 실행이 둘을 같이 내면 안 된다: `SKIP:`은 “평가하지 않았다”(exit 4),
+`SCAN:`은 “n건 평가했다”(정상 경로)다. 바닥값 **실패** 경로도 마커를 내지 않는다 — 그때의 건수는
+“검사했다”가 아니라 “붕괴했다”는 뜻이라 같은 마커로 내면 정반대로 읽힌다.
+
+**⚠️ 커버리지는 완전하지 않다** — 가드 전부가 신호를 내지는 않는다.
+
+⚠️ **여기에 건수를 적지 않는다.** 예전엔 "28종 중 12종 · 라벨 17개"라고 적혀 있었는데 실측은
+13종/31종 · 라벨 21개였고, `scripts/lib/scan-floor.sh`와 `PROGRESS.md`에는 **또 다른 숫자**가 박혀
+있었다 — 아무도 대조하지 않는 손 관리 주장은 반드시 드리프트한다(티켓 09의 "원장 텍스트도 검증
+대상"과 같은 모양). 현재값이 필요하면 세어라:
+
+```
+grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh; grep -lE '^[^/]*SCAN: ' tools/*.ts
+```
+
+정합은 `tests/gates/test_scan-floor.bats`가 **정적 콜사이트 집합 == 런타임 방출 집합**으로 강제한다
+(셸·TS 양쪽 레인. 런타임 전용 라벨 `:accounted`도 그 모드를 실제로 호출해 덮는다 — 제외 목록 금지).
+소비자는 “SCAN 없음”을 “픽스처”나 “0건”으로 읽으면 **안 된다** — 그건 **미지(unknown)** 다.
+신호가 없는 가드에 대한 판정은 종전대로 과다 계상(있는 호출을 권위로 셈)에 머문다.
+
+### 워크플로 준비상태 회계 — 원장 + 게이트 밖 accounting job
+
+**병.** 자격/설정이 없어 GHA job이 통째로 skip되면 run은 **초록**이다. GHA job conclusion 어휘
+(`success|failure|cancelled|skipped`)에는 "안 돌았다"가 없고, **스텝-레벨로 게이트된 job은 스텝을
+전부 skip해도 `success`로 끝난다**. 게다가 skip된 job은 스텝을 0개 실행하므로 그 안의 실패 알림은
+`if: always()`여도 함께 죽는다 → owner 신호가 정확히 **0**이다. 실측(2026-07-27): `tf-reconcile`의
+`drift-github`·`drift-tailscale`은 시크릿 미등록으로 **한 번도 실행된 적이 없는데** 매 30분 초록이었다.
+
+**규약.**
+- 준비상태 게이트 = **자격 변수의 공백 검사**로 job/스텝을 끄는 것(`secrets.*`/`vars.*` env를
+  `[ -n "$X" ]`로 재고 `<key>=false`를 `$GITHUB_OUTPUT`에 씀). 이 게이트를 가진 job은 **반드시**
+  `policy/workflow-readiness.json`에 선언한다 — `required`(severity `error`/`warning`) ·
+  `unconfigured`(알려진 갭, `since`+`owner_action` 필수) · `optional`(백스톱이 따로 있어 정당).
+  **선언되지 않은 미설정은 정적 가드가 red로 막는다.**
+- 스텝-레벨 게이트는 job에 `outputs.executed`를 승격한다. 승격 없이는 job이 항상 success라
+  회계가 **원리적으로** 아무것도 관측할 수 없다.
+- 각 워크플로는 게이트 **밖**에 `accounting` job을 둔다: `if: ${{ !cancelled() }}`(상태함수가 없으면
+  기본 `success()`가 걸려 감시자가 감시 대상과 함께 skip된다) + 선언된 전 job을 `needs` + 
+  `bun tools/check-workflow-readiness.ts --workflow <file>`.
+- 알림 스텝은 **절대 감시 대상 job 안에 두지 않는다**(위 병의 정의 그 자체다).
+- 선언된 갭(`unconfigured`)은 telegram을 울리지 않는다 — 매 주기 재발해 진짜 신호를 덮는다. 갭의
+  venue는 run 로그 + job summary + 원장이다. 반대로 갭이 **닫히면**(선언은 unconfigured인데 실제로
+  실행됨) 회계가 exit 1을 낸다: 현실과 어긋난 원장은 다음 사람에게 "원래 안 도는 것"으로 읽힌다.
+
+**skip 신호(exit 4)를 쓰지 않는 이유.** 워크플로 계층엔 그 채널이 없다. `exit 4`를 낼 스텝 자체가
+실행되지 않기 때문이다 — 관측은 job 밖에서만 가능하다.
+
+**도메인-크기 게이트는 이 규약의 대상이 아니다.** "검사 대상이 0건이라 skip"은 자격 부재가 아니라
+열거 붕괴 클래스이고 처방이 다르다(**바닥값** — 위 '가드 스캔 신호' 절). `dns-drift`가 그 예다:
+`active&&public + platform_hosts == 0 → clean skip`이던 게이트를 없애고 `--min-reserved`(기본 1,
+fail-closed) 바닥값으로 대체했다. 예약 platform host는 구조적으로 항상 ≥1이라 0은 "대상 없음"이
+아니라 SSOT 부재/키 변경이기 때문이다.
+
+### 이미지 소유권 회계 — freshness 소유자 ≠ digest 소유자
+
+**병.** "핀이 있는가"(`scripts/check-image-pins.sh`)와 "핀이 **일치**하는가"와 "그 digest를 **누가
+갱신하는가**"는 서로 다른 질문인데 하나로 뭉뚱그려져 있었다. 실측(2026-07-28): `pg-tools:18-rclone`이
+두 digest로 갈렸는데 핀 게이트는 **둘 다 통과**시켰고, 갱신 도구는 하드코딩 4파일만 재핀하면서
+성공을 보고했다. 그 4파일을 다시 하드코딩한 bats가 "단일 digest"를 확인해 초록이었다.
+
+**규약.**
+- 이미지 참조를 추가하면 **소유자가 계산되어야** 한다: `pg-tools`→`repin-pgtools` ·
+  `apps/*/deploy/prod/values.yaml`·`.image-pin.json` descriptor→`bump-poll` · 그 외 추적 매니페스트→
+  **Renovate 도달성 실측**(`managerFilePatterns` 매치 ∧ `ignorePaths` 비매치 — 분류표를 믿지 않는다).
+- **소유자 없음은 결함이 아니라 선언 대상**이다. `policy/image-ownership.json`에 why·freshness·since·
+  owner_action과 함께 적는다. **선언되지 않은 무소유는 통과할 수 없고**, 매치되지 않는 선언도 red다.
+- **소비처 목록을 하드코딩하지 않는다.** 하드코딩은 자기 자신에 대해서만 정확하다 — 위 사례에서
+  산출물 셋(도구 상수·bats 목록·헤더 주석)이 서로는 일치하고 레포와는 어긋났다. 레포에서 파생하고
+  열거 붕괴는 바닥값으로 막는다.
+- **freshness 소유자와 digest 소유자를 구별해 적는다.** helm 차트 내부 이미지는 차트 버전이 Renovate
+  소유(freshness 있음)지만 렌더 시점 mutable tag라 digest 소유자가 없다. "Renovate 관할"이라고만
+  적으면 그 차이가 지워진다.
+- 벤더 파일도 **포함해** 본다. 수정 금지여도 소유자 질문에는 답(re-vendor 절차)이 있어야 하고,
+  답이 없으면 그게 곧 결함이다.
 
 ## 커밋 메시지 (한국어 conventional commits)
 `type: 설명` — type ∈ `feat | fix | refactor | style | docs | test | chore`.
@@ -58,14 +181,67 @@ AI 마커 금지, Co-Authored-By 금지. 커밋 하나에 논리적 변경 하�
 
 ## push 전에
 ```
-make ci              # ci.yaml job 'gate'(유일 required check)을 로컬에서 그대로 재현
+make ci              # ci.yaml job 'gate'(유일 required check) 재현 — 차이는 policy/ci-parity.json에 계상
 make verify          # (보조) skeleton + 메모리 원장 + sops 왕복 — 로컬 age 키 필요
 pre-commit run -a    # (보조) 평문 시크릿 가드 + gitleaks
 ```
 `make ci`가 통과하면 머지를 막는 required check는 통과한다(branch protection `contexts=[gate]`).
+
+### 패리티 회계 — "재현한다"는 주장은 검증 대상이다
+
+`make ci`가 gate를 재현한다는 **주장**은 오랫동안 검증되지 않았다. 대조하던 것이
+`test_make-ci-parity.bats`의 **하드코딩된 5개 토큰**뿐이라, 목록에 없는 게이트 스텝은 아무리 늘어나도
+보이지 않았다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 `make ci`에 없었는데 전 검사가 초록이었다
+(하필 그 5개가 전부 미러된 것들이라 우연히 통과했다). 티켓 07의 하드코딩 소비처 목록과 같은 클래스다.
+
+이제 `tools/check-ci-parity.ts`가 **스텝 목록을 `ci.yaml`에서 파생해** 원장(`policy/ci-parity.json`)과
+대조한다. **게이트 스텝을 추가하면 원장에 계상하기 전까지 red**다. 상태는 셋:
+
+| status | 뜻 | 검증 방식 |
+|---|---|---|
+| `mirrored` | `make ci`가 같은 것을 돈다 | 선언한 `local` 문자열이 **`make -n ci` 실제 출력**에 있어야 한다 |
+| `covered` | 로컬의 **다른 수단**이 덮는다 | `covered_by.file`에 `contains`가 실재해야 한다 |
+| `excluded` | 로컬에선 안 돈다 | `why`·`since`·`owner_action` 전부 필수 |
+
+⚠️ 이 원장은 "차이가 없다"가 아니라 **"모든 차이가 의도된 것이다"**를 강제한다. 완전 일치를 요구하면
+docker 없는 환경에서 `make ci`가 못 돌고, 그러면 아무도 안 쓴다 — 그게 패리티가 실제로 무너지는 경로다.
+
+⚠️ 도구가 없는 스텝은 `SKIP:` 마커를 내고 넘어간다(`actionlint`·docker·`node`). **조용히 건너뛰지 않는
+이유**는 "로컬 초록"이 gate가 잡을 것을 못 본 채 push되는 것을 막기 위해서다.
+
+⚠️ **`git add` 전에 `make ci`를 돌리면 새 파일은 측정되지 않는다.** 게이트가 `git ls-files`로 열거하기
+때문이다 — untracked 파일은 로컬에서 대상 밖인데 커밋되면 CI에서는 측정된다. 실측: 새 `tools/*.ts`를
+add 전에 검증해 1671건 전건 초록을 받고 커밋했더니 CI가 shebang 규약 위반으로 red를 냈다. `make ci`의
+첫 전제(`ci-guard-tracked`)가 이 상태를 마커 + exit 4로 끊는다.
+
+⚠️ **`make` 레시피에서 `$(MAKE)`를 쓰지 마라.** GNU make는 `$(MAKE)`가 있는 레시피 줄을 `-n`에서도
+**실제로 실행한다**. 이 레포는 `make -n ci` 출력을 데이터로 읽으므로(패리티 미러 대조 ·
+`check-guard-authority`의 venue 수집) 서브-make 하나가 드라이런을 부수효과로 바꾼다 —
+실측: 게이트 스텝을 서브-make로 묶었더니 `make -n ci` 한 번에 docker e2e가 통째로 돌았다.
 verify·pre-commit은 sops/시크릿 안전망이다. `make ci`는 시스템 PATH의 `bun`(1.3.14 핀)을 쓴다 —
 설치는 `docs/runbooks-public/toolchain-setup.md` 참고(`m6-tools`가 버전 게이트).
 
 ## 문서 관례
-- **계획 문서 크기**: `docs/plans/`는 검색 노이즈를 줄이기 위해 간결히(권장 상한 ~1500줄/문서). 대형
-  산출물은 요약 SSOT + 링크로 분리한다. 히스토리 재작성은 하지 않고 `.rgignore`가 검색에서 제외한다.
+
+### conductor 파이프라인 산출물 — 착지와 함께 지운다
+
+`feature`/`bugfix`/`deepen` 컨덕터는 `docs/reviews/<slug>/`에 게이트 아티팩트(`<kind>-r<n>.json` ·
+`decisions.md` · `verification.md` 등)를 쌓는다. 이건 **작업 중 상태**이지 레포의 산출물이 아니다.
+
+- **gitignore하지 마라.** 컨덕터의 `plan-not-in-diff` preflight가 문서를 diff에서 찾는데, ignored
+  파일은 diff에 영원히 안 나타난다(`--scope branch` 라운드는 오히려 전 bookkeeping 커밋을 요구한다).
+  산출물은 tracked·커밋된 채로 살아야 파이프라인이 돈다.
+- **PR 머지 직후 같은 브랜치에서 삭제한다** — 랜딩 체크리스트의 마지막 항목. 지우지 않으면
+  라운드 수만큼 파일이 누적된다(실측: 한 슬러그에 `structure-r1`~`r18` + `bugfix-verify-*` 62파일).
+- **삭제 전에 내구 지식을 승격한다.** 목적지는 셋 중 하나뿐: 되돌림이 쓰여질 바로 그 **코드 지점의
+  주석** / `docs/traps-detail.md`(라이브에서 검증된 함정) / `docs/decisions/`(ADR). 어디에도 안 맞으면
+  그건 과정 서사이므로 승격하지 않는다.
+- 승격하지 않은 것은 git 히스토리에만 남는다. 그걸 감수한다는 뜻이다.
+
+산출물 복구는 **삭제 커밋의 부모**에서 꺼낸다 — 삭제 커밋 자신에는 그 경로가 없다:
+
+```bash
+git log --diff-filter=D --name-only --format='%h %s' -- 'docs/reviews/**'   # 무엇이 언제 지워졌나
+sha=$(git rev-list -n1 HEAD -- docs/reviews/<slug>/decisions.md)
+git show "$sha^:docs/reviews/<slug>/decisions.md"                          # ^ 없으면 "path does not exist"
+```

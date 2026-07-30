@@ -19,7 +19,7 @@ teardown() { rm -rf "$FIX"; }
   before=$(yq '.kind' "$f")
   bun tools/bump-tag.ts blog sha-deadbee --repo-root "$FIX"
   run yq '.image.tag' "$f"
-  [[ "$output" == "sha-deadbee" ]]
+  [ "$output" = "sha-deadbee" ]
   after=$(yq '.kind' "$f")
   [ "$before" == "$after" ] # 그 외에는 아무것도 안 바뀜
 }

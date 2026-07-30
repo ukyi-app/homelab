@@ -128,6 +128,12 @@ jobs:
   # 드리프트를 알리며 수렴은 owner 로컬 apply로 한다. read 토큰이 시크릿에 없으면 preflight가 skip(Phase-0 토글).
   drift-github:
     runs-on: ubuntu-24.04-arm
+    # 스텝-레벨 게이트라 시크릿이 없으면 **스텝만** 전부 skip되고 job은 그대로 success로 끝난다 —
+    # run conclusion만 보는 관측자에겐 "돌았다"와 구별이 안 된다(2026-07-27 라이브 실측: 이 job은
+    # TF_GITHUB_TOKEN 미등록으로 한 번도 실행된 적이 없는데 매 30분 초록이었다).
+    # 이 승격이 회계 job(accounting)이 볼 수 있는 **유일한** 신호다 — plan 스텝이 실제로 진입했을 때만 true.
+    outputs:
+      executed: ${{ steps.drift.outputs.executed }}
     steps:
       # needs: preflight 금지 — preflight의 actor 가드 스텝은 if: workflow_dispatch 조건부라
       # schedule 경로에서 preflight가 skip되면 의존 잡도 통째로 skip된다. 가드 스텝을 잡별로 복제한다.
@@ -178,6 +184,9 @@ jobs:
           TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TF_VAR_telegram_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          # 준비상태 회계 신호 — 첫 줄에 둔다. 뒤로 미루면 plan이 죽었을 때 "안 돌았다"로 오귀속된다
+          # (실패는 이미 job을 빨갛게 만들어 loud하다 — 회계가 잡는 것은 *조용한* 미실행뿐이다).
+          echo "executed=true" >> "$GITHUB_OUTPUT"
           set +e
           terraform -chdir=infra/github plan -input=false -lock-timeout=120s -detailed-exitcode -no-color
           rc=$?
@@ -201,6 +210,9 @@ jobs:
 
   drift-tailscale:
     runs-on: ubuntu-24.04-arm
+    # drift-github와 같은 이유의 승격(위 주석) — 이 job도 스텝-레벨 게이트다.
+    outputs:
+      executed: ${{ steps.drift.outputs.executed }}
     steps:
       # needs: preflight 금지 — preflight의 actor 가드 스텝은 if: workflow_dispatch 조건부라
       # schedule 경로에서 preflight가 skip되면 의존 잡도 통째로 skip된다. 가드 스텝을 잡별로 복제한다.
@@ -250,6 +262,8 @@ jobs:
           TF_VAR_ts_bootstrap_oauth_secret: ${{ secrets.TF_TAILSCALE_OAUTH_SECRET }}
           TF_VAR_dns_nameserver_tailscale_ip: ${{ secrets.TF_TAILSCALE_DNS_NAMESERVER_IP }}
         run: |
+          # 준비상태 회계 신호(drift-github와 동일 규약 — 그 주석 참고).
+          echo "executed=true" >> "$GITHUB_OUTPUT"
           set +e
           terraform -chdir=infra/tailscale plan -input=false -lock-timeout=120s -detailed-exitcode -no-color
           rc=$?
@@ -267,6 +281,38 @@ jobs:
           source: IaC드리프트
           title: tailscale 루트 드리프트
           ident: "root=tailscale drift=${{ steps.drift.outputs.drift }} (수렴은 owner 로컬 apply)"
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+  # ── 준비상태 회계 — 게이트 **밖**의 감시자 (G-09) ───────────────────────────────────────────
+  # 위 job들이 자격 부재로 skip되면 run은 **초록**이고, 그 job 안의 알림은 `if: always()`여도 함께
+  # skip된다(skip된 job은 스텝을 0개 실행한다) → owner 신호 0. 게이트 밖에서만 관측할 수 있다.
+  # ⚠️ `if: !cancelled()` 필수 — 기본 success()가 걸리면 감시자가 감시 대상과 같은 운명에 묶인다.
+  # 판정 기준은 policy/workflow-readiness.json(원장) — 원장↔워크플로 정합은 ci.yaml gate가 강제한다.
+  accounting:
+    needs: [preflight, reconcile, drift-github, drift-tailscale]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with: { ref: main } # 원장의 권위는 머지된 상태다(브랜치 로컬 수정이 회계를 무르게 하지 못한다)
+      - uses: ./.github/actions/setup-bun
+      - id: acct
+        env:
+          WORKFLOW_NEEDS: ${{ toJSON(needs) }} # 비신뢰 입력 아님(자기 job 출력) — 그래도 with: 보간 대신 env로
+        run: bun tools/check-workflow-readiness.ts --workflow tf-reconcile.yaml
+      # 선언된 갭(gaps)은 telegram에 넣지 않는다 — 매 30분 재발해 진짜 신호를 덮는다. 갭의 venue는
+      # 로그 + job summary + 원장이고, 알림은 **선언되지 않은** 미실행(failures/warnings)에만 쓴다.
+      - name: telegram notify (required 미실행 · 원장 불일치 시에만 — 선언된 갭은 제외)
+        if: always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ steps.acct.outcome == 'failure' && 'failure' || 'drift' }}
+          source: 준비상태
+          title: 워크플로 준비상태
+          ident: "tf-reconcile — 원장 대비 미실행/불일치"
+          body: ${{ steps.acct.outputs.body }}
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

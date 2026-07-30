@@ -66,7 +66,10 @@ spec:
   concurrencyPolicy: Forbid    # 중첩 실행 금지 — stale have/want로 이중 변이(플래핑) 차단(F6)
   startingDeadlineSeconds: 300 # 스케줄 밀림 시 오래된 잡 기동 포기(다음 주기에 맡김)
   successfulJobsHistoryLimit: 1
-  failedJobsHistoryLimit: 2
+  # ⚠️ CronJobFlapping(core.yaml)의 관측 창이다. **임계+1**이어야 한다 — 임계와 같으면 새 실패가
+  #    도착하는 순간 가장 오래된 '해소된' 실패가 회수돼 count가 임계 아래로 떨어지고, 그 리셋이
+  #    `for:`를 채우기 전에 매번 일어나 **영구 무발화**가 된다(적대적 리뷰 r2가 실측 지목).
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 0          # 재시도 없이 다음 주기 — staleness 알림이 침묵을 잡는다
@@ -84,7 +87,7 @@ spec:
           containers:
             - name: reconciler
               # digest 핀: pgdump-hedge-cronjob.yaml과 동일 값(curl+sed 보유 — 라이브 확인). 의도적 커밋으로만 갱신.
-              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:9c4cb3572d07c495647be713bf8bbc58a2bf15bbcdd3fc4fc4ae387239cadecf
+              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:e73682bbb1905f0e7a9800e11cd6f7658842b0c909bc53d7605e3292c0c50eef
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

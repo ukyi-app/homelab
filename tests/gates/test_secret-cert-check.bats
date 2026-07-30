@@ -33,12 +33,21 @@ stub_kubeseal() { # $1: cat할 cert 파일(없으면 exit 1로 fetch 실패 모�
   echo "$output" | grep -qiE "STALE|불일치"
 }
 
-@test "skips with a distinct exit 2 when the live cert cannot be fetched (offline)" {
+@test "skips with a distinct exit 4 when the live cert cannot be fetched (offline)" {
   # exit 0(검증됨)·1(stale)과 구분되는 SKIP 신호 → 자동화가 fail-open을 '검증됨'으로 오인하지 않음.
+  # 4는 규약(CONTRIBUTING '가드 skip 신호') — 예전 2는 아래 unknown-option과 같은 코드였다.
   stub_kubeseal ""
   PATH="$TMP/bin:$PATH" run bash scripts/secret-cert-check.sh --cert "$TMP/certA.pem"
+  [ "$status" -eq 4 ]
+  echo "$output" | grep -q "^SKIP: secret-cert-check:"
+}
+
+@test "an unknown option still exits 2 (usage), distinct from the skip code" {
+  run bash scripts/secret-cert-check.sh --bogus
   [ "$status" -eq 2 ]
-  echo "$output" | grep -qiE "fetch 실패|검증 못|SKIP"
+  out="$output"
+  run grep -q "^SKIP:" <<<"$out"
+  [ "$status" -ne 0 ]
 }
 
 @test "never prints private key material" {

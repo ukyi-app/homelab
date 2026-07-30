@@ -49,17 +49,25 @@ jobs:
           # 열린 PR 중 봇 head prefix만 — autoMergeRequest!=null(무장됨) && mergeStateStatus=BEHIND.
           # update-branch는 main을 머지해 BEHIND를 풀고, gate 재실행 → green이면 auto-merge가 머지한다.
           #
-          # ★★ `bump-poll/`은 이 목록에 **없다**(structure r7 R-25). 그 네임스페이스의 원격 상태는
-          #    **tools/ensure-bump-pr.ts가 유일한 소유자**다. 이유 둘:
-          #    ① 승인 게이트 우회 — 스위퍼는 **레인을 보지 않는다**. `.bindings.json`의 autoDeploy가
-          #       true→false로 바뀌어도 이미 무장된 PR은 무장된 채 남는데, 스위퍼가 브랜치를 갱신해
-          #       체크를 재시작시키면 green 시점에 GitHub이 **사람 승인 없이 auto-merge** 한다.
-          #       레인 reconcile(무장/해제)은 실행기만 할 수 있다 — 그러니 전진(advance)도 실행기 몫이다.
+          # ★★ `bump-poll/`은 이 목록에 **없다** — 그 네임스페이스의 원격 상태는 tools/ensure-bump-pr.ts가
+          #    유일하게 소유한다. 이유 둘:
+          #    ① 승인 게이트 우회 — 스위퍼는 **레인을 보지 않는다**. autoDeploy가 true→false로 바뀌어도
+          #       무장된 PR은 무장된 채인데, 브랜치를 갱신해 체크를 재시작시키면 green 시점에 GitHub이
+          #       **사람 승인 없이 머지**한다. 레인 무장/해제는 실행기만 하므로 전진도 실행기 몫이다.
           #    ② 소유권 인터록 파괴 — `gh pr update-branch`는 head에 **머지 커밋**을 만든다. 실행기는
-          #       head가 자기 bump 커밋(결정적 메시지 + writer ident)임을 증명해야 무장/force-push하는데,
-          #       머지 커밋이 얹히면 그 증명이 **영구 실패**한다 → 해당 앱의 bump가 영구 fail-closed.
-          #    실행기는 BEHIND를 **최신 main에서 재구축한 leased force-push**로 수렴시킨다(머지 커밋 0).
+          #       head가 자기 bump 커밋임을 증명해야 무장/force-push하는데 머지 커밋이 얹히면 그 증명이
+          #       **영구 실패**한다 → 해당 앱 bump가 영구 fail-closed.
+          #    실행기는 BEHIND를 최신 main에서 재구축한 leased force-push로 수렴시킨다(머지 커밋 0).
           #    나머지 접두(bump·create-*·update-secrets)는 그대로 — 그 PR들엔 레인 개념이 없다.
+          #
+          # ⚠️ **DIRTY는 이 스위퍼의 사각지대다**(알려진 갭 — 별도 flip이라 미착수). 무장된 봇 PR이 BEHIND가
+          #    아니라 **DIRTY(충돌)** 로 굳으면 위 select에서 걸러져 아무도 손대지 않는다 → auto-merge가 무장된
+          #    채 영구 잔류하는 좀비가 된다. 라이브 실측(2026-07-13): 같은 앱 커밋에 중복 생성된 bump-poll PR
+          #    #348·#350·#351이 형제 머지로 DIRTY가 되어 무장된 채 남았다. `bump-poll/`은 그 뒤 실행기
+          #    (tools/ensure-bump-pr.ts)가 leased force-push rebuild로 해소했지만, **여기 남은 접두**
+          #    (bump·create-*·update-secrets)에는 여전히 DIRTY 소유자가 없다.
+          # ⚠️ 고칠 때 `update-branch`로 밀면 안 된다 — DIRTY는 충돌이라 update-branch가 실패한다. 올바른
+          #    형태는 **탐지+경고(telegram)** 이거나 소유 도구의 rebuild이지 자동 전진이 아니다.
           gh pr list --repo "$REPO" --state open \
             --json number,headRefName,mergeStateStatus,autoMergeRequest \
             --jq '.[] | select(.autoMergeRequest != null)

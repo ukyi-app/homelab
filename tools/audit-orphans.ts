@@ -18,10 +18,11 @@ import { parseLedgerRows } from "./lib/ledger-totals.ts";
 import { listUnits } from "./lib/repo-walk.ts";
 
 const USAGE = `audit-orphans — registry↔매니페스트↔원장 교차 드리프트 리포트(읽기 전용)
-사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict]
+사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict] [--min-registry <n>]
   --repo-root <dir>  레포 루트(기본 .)
   --ci               배포를 깨는 유형만 비-0 종료(orphan-dns/activation-exposure-drift/missing-activation) — PR 게이트용
   --strict           모든 드리프트 유형을 비-0 종료(수동 점검)
+  --min-registry <n> apps.json 행 수 바닥값(기본 1) — 열거 붕괴 감지. 빈 registry 픽스처만 0으로 낮춘다
   --help, -h         이 도움말`;
 if (process.argv.includes("--help") || process.argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 
@@ -52,7 +53,41 @@ const add = (type: string, subject: string, detail: string) => findings.push({ t
 const readJson = (p: string, d: any): any => (existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : d);
 
 // 레포 사실 수집
-const registry: RegRow[] = readJson(`${ROOT}/infra/cloudflare/apps.json`, []);
+// ⚠️ registry는 **필수 읽기**다(create-app.ts:126과 같은 규율 — bare readFileSync). `readJson(…, [])`로
+// 접으면 apps.json 부재/파싱 실패가 "행 0개"로 위장돼 BLOCKING 3종(orphan-dns · activation-exposure-drift ·
+// missing-activation)이 전부 0건 평가되고 required check `gate`가 조용히 초록이 된다. 라이브 재현:
+// 진짜 missing-activation 위반이 있는 상태에서 apps.json만 치우면 blocking 1→0 · rc 1→0(stderr 0줄).
+// 레포 밖 cwd에서 기본 `--repo-root .`로 부르면(Makefile:102 · ci.yaml:72의 형태) 전 도메인이 0건이었다.
+// ⚠️ 나머지 readJson 폴백 2곳(.tombstones.json · .activation 마커)은 **부재가 정상 상태**라 건드리지 않는다.
+// ⚠️ `Number()` + `Number.isFinite()` 조합만으로는 부족하다 — JS는 `Number("") === 0`,
+// `Number(" ") === 0`, `Number("\n") === 0`이라 **빈 값/공백이 유효한 0으로 통과해 바닥값이 조용히 꺼진다**
+// (`--min-registry ""` 또는 값 없이 마지막 인자로 두는 경우). 적대 검토가 실측으로 잡은 자리다.
+// 정수 리터럴만 받는다 — "숫자로 해석 가능"이 아니라 "숫자로 쓰였다"를 요구한다.
+const rawMinRegistry = String(arg("--min-registry", "1") ?? "");
+if (!/^\d+$/.test(rawMinRegistry)) {
+  console.error(`audit-orphans: --min-registry 값이 음이 아닌 정수가 아니다(받은 값: ${JSON.stringify(rawMinRegistry)}) — 바닥값이 조용히 무력화되는 자리다`);
+  process.exit(2); // 사용법 오류(CONTRIBUTING 종료코드 규약)
+}
+const MIN_REGISTRY = Number(rawMinRegistry);
+const registryPath = `${ROOT}/infra/cloudflare/apps.json`;
+let registry: RegRow[];
+try {
+  registry = JSON.parse(readFileSync(registryPath, "utf8"));
+} catch (e) {
+  console.error(`audit-orphans: registry 읽기 실패(${registryPath}) — 감사 불가: ${e instanceof Error ? e.message : String(e)}`);
+  process.exit(1);
+}
+if (!Array.isArray(registry)) {
+  console.error(`audit-orphans: registry(${registryPath})가 배열이 아니다 — 감사 불가`);
+  process.exit(1);
+}
+// scan-floor — 소비자가 바닥값 수치를 소유한다(선례: check-image-pins=20 · check-alert-rules=30 ·
+// check-resource-limits=10 · check-guard-authority=15). 실 registry 2행 → 기본 1(앱 1개 teardown을 견딘다).
+// 래칫 아님. 픽스처가 빈 registry를 정당하게 쓰려면 `--min-registry 0`으로 낮춰 부른다.
+if (registry.length < MIN_REGISTRY) {
+  console.error(`audit-orphans: registry ${registry.length}행 < ${MIN_REGISTRY} — 열거 붕괴 의심(scan-floor). 이 자리가 0건 검사 후 초록이 되던 곳이다`);
+  process.exit(1);
+}
 const appsRoot = `${ROOT}/apps`;
 // 열거는 공유 워커의 `apps` 유닛 스코프가 소유한다. **의미론적 필터(values.yaml 실재)는 여기 남는다** —
 // 스코프가 그걸 걸러버리면 check-app-deploy가 잡아야 할 "필수 산출물 부재"가 열거에서 사라진다

@@ -24,6 +24,34 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   echo "$output" | grep -q '\[BB\]'
 }
 
+# 도메인(추적 *.bats)이 비면 통과가 아니라 SKIP이다 — 수집이 깨져 0건이 된 것과 "검사했고 깨끗함"을
+# 가르지 못하면 이 가드가 죽어도 게이트가 초록이다.
+# ⚠️ 채널은 **skip이 아니라 열거 붕괴**다 — 기본 모드 도메인(추적 *.bats 229건)은 정당하게 0이 될 수
+# 없다. 같은 도메인의 형제(check-skeleton·check-bats-accounting)가 exit 1 바닥값이라, 여기서 exit 4 +
+# `SKIP:`를 내면 "정당하게 대상 없음(미평가·정상)"으로 정반대로 읽힌다(적대 검토 확정).
+# 픽스처 = 스크립트 + 커널을 복사한 빈 git 레포(스크립트가 ROOT를 BASH_SOURCE/..로 잡는다).
+@test "fails as enumeration collapse (not skip) when no bats files are tracked" {
+  FIX="$BATS_TEST_TMPDIR/emptyrepo"
+  mkdir -p "$FIX/scripts/lib"
+  cp "$ROOT/scripts/check-bats-style.sh" "$FIX/scripts/"
+  cp "$ROOT/scripts/lib/scan-floor.sh" "$FIX/scripts/lib/"
+  git -C "$FIX" init -q
+  run bash "$FIX/scripts/check-bats-style.sh"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "열거 붕괴"
+  out="$output"
+  run grep -q "^SKIP:" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+@test "evaluates (no SKIP marker, no collapse) when the tracked bats domain is non-empty" {
+  run bash "$ROOT/scripts/check-bats-style.sh"
+  [ "$status" -eq 0 ]
+  out="$output"
+  run grep -q "^SKIP:" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
 @test "detector allows a LAST-command negation (valid bats idiom)" {
   printf '%s\n' \
     '@test "good last-line negation" {' \

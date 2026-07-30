@@ -1,0 +1,106 @@
+{
+  "_readme": [
+    "이미지 소유권 원장 — '이 이미지를 누가 최신으로 유지하고, 누가 immutable 핀을 보증하는가'의 SSOT.",
+    "가드: tools/check-image-ownership.ts (ci.yaml gate + make verify). 산문 SSOT: CONTRIBUTING.md.",
+    "",
+    "두 축은 다르다. **freshness 소유자**(새 버전을 가져오는 것)와 **digest 소유자**(immutable 핀을",
+    "보증하는 것)가 자주 갈린다. helm 차트 내부 기본 이미지가 그 전형이다 — 차트 **버전**은 Renovate가",
+    "소유하지만 내부 이미지는 렌더 시점에 mutable tag로 해석되므로 digest 소유자가 **없다**.",
+    "'Renovate 관할'이라고만 적으면 그 차이가 지워진다(scripts/check-image-pins.sh 헤더가 실제로",
+    "그렇게 적혀 있었고, 그건 절반만 참이었다).",
+    "",
+    "이 파일은 **digest 소유자가 없는 아티팩트**만 담는다. 소유자가 있는 참조는 가드가 계산한다",
+    "(pg-tools→repin-pgtools · apps/베스포크→bump-poll · 추적 매니페스트→Renovate 도달성 실측).",
+    "**선언되지 않은 무소유는 통과할 수 없다.** 선언은 면제가 아니라 계상이다 — why·freshness·since·",
+    "owner_action이 전부 필수이고, 매치되지 않는 선언(죽은 선언)도 red다.",
+    "",
+    "artifact 형식: '<파일경로>#<이미지참조>' · '<파일경로>'(그 파일의 모든 무소유 참조) ·",
+    "'chart:<차트이름>'(레포에 파일이 없는 차트 내부 이미지 클래스)."
+  ],
+  "unowned": [
+    {
+      "artifact": "platform/cnpg/barman-plugin/manifest.yaml#ghcr.io/cloudnative-pg/plugin-barman-cloud:v0.13.0",
+      "why": "barman-cloud CNPG-I 플러그인 컨트롤러. 업스트림 릴리스 manifest를 통째로 벤더링한 파일이라(AGENTS.md '벤더 파일 수정 금지') digest 핀을 직접 넣을 수 없고, renovate.json ignorePaths가 platform/cnpg/barman-plugin/**를 배제한다. WAL 아카이빙 = 데이터 내구성 경로에 있다.",
+      "freshness": "수동 re-vendor 전용 — 자동 채널이 없다. 업스트림 릴리스를 사람이 확인해 manifest.yaml 전체를 교체해야 한다(ArgoCD Application platform/argocd/root/apps/cnpg-barman-plugin.yaml이 이 경로를 싱크한다).",
+      "since": "2026-07-28",
+      "owner_action": "선택지 둘. ① 재벤더 시 릴리스 manifest의 tag를 digest로 치환하고 그 절차를 런북에 고정한다(벤더 파일을 수정하게 되므로 '벤더 무수정' 규약의 예외를 명시해야 한다). ② manifest를 그대로 두고 kustomize images 트랜스포머로 digest를 덮어써 digest 소유권을 레포로 가져온다(권장 — 벤더 파일 무수정 유지). 어느 쪽이든 CNPG 호환성(v0.13.0 ↔ CNPG 1.29)을 먼저 확인할 것."
+    },
+    {
+      "artifact": "platform/cnpg/barman-plugin/manifest.yaml#ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0",
+      "why": "⚠️ 이 참조는 **base64로 인코딩되어 Secret의 data.SIDECAR_IMAGE 안에** 있다. 그래서 (a) image: grep에 안 걸리고 (b) Secret이라 스캐너가 안 보고 (c) 벤더 경로라 핀 게이트·Renovate 양쪽에서 배제됐다 — 이 회계 이전 커버리지가 **정확히 0**이었다. CNPG가 이 값을 읽어 Cluster 파드에 사이드카로 주입하므로 WAL 아카이빙 경로 자체다.",
+      "freshness": "위 컨트롤러와 동일 — 수동 re-vendor 전용. 컨트롤러와 사이드카는 같은 릴리스에서 나오므로 함께 움직여야 한다(따로 움직이면 플러그인 프로토콜 skew).",
+      "since": "2026-07-28",
+      "owner_action": "컨트롤러 항목과 함께 처리한다. kustomize images 트랜스포머는 base64 Secret 값을 못 고치므로, 이 참조만은 재벤더 시 인코딩된 값을 digest 포함으로 다시 만들거나 CNPG 플러그인 설정으로 사이드카 이미지를 오버라이드하는 경로를 확인해야 한다."
+    },
+    {
+      "artifact": "platform/cnpg/prod/cluster.yaml#ghcr.io/cloudnative-pg/postgresql:18.4@sha256:b38bee8f92acd6d7276d5be32e9af36a0ea72c9d339945f1ae205a2acc3cbb89",
+      "why": "CNPG Cluster CR의 DB 본체 이미지. digest로 핀돼 있지만 **Renovate가 갱신하지 못한다** — kubernetes manager는 표준 `image:` 키만 추출하고 이건 `imageName:`이다. 추측이 아니라 이 레포가 라이브에서 겪은 것이다: 커밋 ba9bc2a(#373) 본문 — 'Renovate #362는 표준 image: 키인 basebackup만 갱신하고 CNPG imageName:(cluster/restore-drill)을 누락해 digest 드리프트를 유발'. 경로만 보고 소유를 판정하면 이 참조가 거짓으로 소유됨 처리돼 stale-pin이 초록으로 통과한다.",
+      "freshness": "간접 — 같은 태그(`postgresql:18.4`)를 쓰는 `platform/cnpg/prod/basebackup-cronjob.yaml`의 `image:`는 Renovate가 갱신하고, 이 회계의 **'같은 repo:tag는 같은 digest'** 불변식이 이 파일을 강제로 따라오게 한다(어긋나면 red). 즉 freshness는 있고 **직접 소유자만 없다**.",
+      "since": "2026-07-28",
+      "owner_action": "PG 메이저 업그레이드는 3-이미지 동시 갱신 함정(docs/traps-detail.md)이라 어차피 수동 조율 대상이다. 직접 소유를 원하면 renovate.json에 `imageName:`을 잡는 customManager를 추가한다(정규식 + datasource=docker). 그때 이 항목과 아래 restore-drill 항목을 함께 제거해야 죽은 선언이 되지 않는다."
+    },
+    {
+      "artifact": "platform/cnpg/prod/restore-drill-script.sh#ghcr.io/cloudnative-pg/postgresql:18.4@sha256:b38bee8f92acd6d7276d5be32e9af36a0ea72c9d339945f1ae205a2acc3cbb89",
+      "why": "복원 드릴이 heredoc으로 **임베드한 Cluster 매니페스트** 안의 `imageName:`. 셸 스크립트라 어떤 Renovate manager도 파싱하지 않고, `.yaml` 확장자 필터를 쓰던 동안에는 이 회계에서도 통째로 빠져 있었다 — 적대 검토 실측: 이 digest를 다른 값으로 바꿔도 레포의 **어떤 게이트도 red가 되지 않았다**(42건 전건 ok). 복원 경로라 여기가 어긋나면 드릴이 프로덕션과 다른 이미지로 복구를 '증명'한다.",
+      "freshness": "위 cluster.yaml과 동일 — 같은 태그 불변식이 셋(cluster·basebackup·이 스크립트)을 한 값으로 묶는다. 스코프에 `.sh`를 넣은 것이 그 묶음을 성립시킨 조건이다.",
+      "since": "2026-07-28",
+      "owner_action": "cluster.yaml 항목과 함께 처리한다. PG 메이저 업그레이드 시 이 파일도 3-이미지 묶음에 포함할 것."
+    },
+    {
+      "artifact": "infra/k3s-bootstrap/storage/local-path-provisioner.yaml",
+      "why": "local-path provisioner — **모든 PV 데이터 경로**를 담당한다(라이브: internal·bulk 두 파드가 v0.0.36 mutable tag로 구동 중). tag-only라 digest 소유자가 없고, renovate.json의 kubernetes manager는 `^platform/`·`^apps/`만 보므로 이 경로에 도달하지 않는다. 적대 검토 실측: 회계 스코프가 `platform|apps|ops`에서 끊겨 이 참조가 **'전건 소유자 확정'이라는 초록 아래에서 통째로 빠져** 있었다.",
+      "freshness": "`infra/k3s-bootstrap/versions.env`의 `LOCAL_PATH_PROVISIONER_VERSION` — renovate.json customManagers(datasource=github-releases)가 소유하고, `infra/k3s-bootstrap/tests/`의 bats가 매니페스트 태그 ↔ versions.env 정합을 강제한다(Renovate bump가 조용히 무시되지 않는다). digest 소유자만 없다.",
+      "since": "2026-07-28",
+      "owner_action": "digest 핀을 원하면 versions.env의 `LOCAL_PATH_HELPER_IMAGE`처럼 `LOCAL_PATH_PROVISIONER_IMAGE=\"repo:tag@sha256:...\"` 형태로 올리고 매니페스트를 그 값으로 치환한다(헬퍼 이미지가 이미 그 방식이라 선례가 있다). substrate 계층이라 부트스트랩 스크립트와 함께 검증할 것."
+    },
+    {
+      "artifact": "operator-injected:cloudnative-pg/pgbouncer",
+      "why": "CNPG operator가 Pooler 파드에 **런타임에 주입**하는 이미지(라이브: `ghcr.io/cloudnative-pg/pgbouncer:1.25.1`, mutable tag). `platform/cnpg/prod/pooler.yaml`에는 `resources:`만 있고 `image:` 필드가 아예 없어 **레포에 문자열이 존재하지 않는다** — 참조 스캔으로는 원리적으로 볼 수 없다(barman sidecar와 같은 클래스인데 PR #388에서는 비대칭으로 빠져 있었다). 앱↔DB 접속 경로다.",
+      "freshness": "operator 버전에 종속 — `chart:cloudnative-pg`(platform/argocd/root/apps/cnpg-operator.yaml의 targetRevision, Renovate argocd manager)가 올라가면 함께 움직인다. digest 소유자는 없다.",
+      "since": "2026-07-28",
+      "owner_action": "CNPG는 Pooler 이미지를 `.spec.template.spec.containers[name=pgbouncer].image`로 오버라이드할 수 있다 — pooler.yaml에 digest 핀을 명시하면 소유권이 레포로 온다. 다만 operator 버전과의 호환 쌍이 깨지면 Pooler가 기동하지 않으므로 operator 업그레이드와 함께 검증할 것."
+    },
+    {
+      "artifact": "chart:traefik",
+      "why": "gateway 인그레스 컨트롤러. 차트가 렌더하는 기본 이미지(docker.io/traefik:v3.7.6 — 라이브 실측)는 mutable tag다. 차트 tarball은 platform/traefik/prod/charts/에 캐시되는데 그 경로는 gitignored이고 renovate.json ignorePaths의 **/charts/**에도 걸려 **원리적으로** 도달 불가다.",
+      "freshness": "platform/traefik/prod/helmrelease.yaml의 version 핀 — renovate.json customManagers의 HelmChartInflationGenerator 정규식이 소유한다(automerge 금지, 리뷰 후 수동 머지).",
+      "since": "2026-07-28",
+      "owner_action": "digest 소유권을 원하면 values-traefik.yaml에서 image.repository/tag(차트가 지원하면 digest)를 명시 오버라이드해 레포로 끌어온다. 그러면 Renovate helm-values가 그 값을 관리한다. 비용: 차트 업그레이드마다 오버라이드가 차트 기본값과 어긋나지 않는지 확인해야 한다."
+    },
+    {
+      "artifact": "chart:tailscale-operator",
+      "why": "내부 인입 경계(tailscale passthrough)를 담당하는 operator + proxy 파드. 라이브 실측 이미지 tailscale/k8s-operator:v1.98.4 · tailscale/tailscale:v1.98.4 모두 mutable tag. 차트 캐시가 gitignored + ignorePaths라 도달 불가.",
+      "freshness": "platform/tailscale/prod/helmrelease.yaml의 version 핀(renovate customManagers). proxy 이미지는 operator가 ProxyClass/기본값으로 정하므로 operator 버전을 따라 움직인다.",
+      "since": "2026-07-28",
+      "owner_action": "values-tailscale.yaml의 operatorConfig.image / proxyConfig.image 오버라이드로 레포에 끌어올 수 있다. 네트워크 경계 컴포넌트라 업그레이드 시 라이브 검증(tailscale 도달성·pg 노출)을 함께 계획할 것."
+    },
+    {
+      "artifact": "chart:sealed-secrets",
+      "why": "SealedSecret 복호화 컨트롤러 — 클러스터의 모든 앱 시크릿이 이 이미지를 통과한다. 라이브 실측 docker.io/bitnami/sealed-secrets-controller:0.38.4, mutable tag. 차트 캐시 gitignored + ignorePaths.",
+      "freshness": "platform/sealed-secrets/prod/helmrelease.yaml의 version 핀(renovate customManagers). ⚠️ kubeseal CLI 버전이 .github/actions/setup-toolchain에 별도로 핀돼 있어 함께 움직여야 한다.",
+      "since": "2026-07-28",
+      "owner_action": "values-sealed-secrets.yaml에서 image 오버라이드. 시크릿 복호화 경로라 롤아웃 실패가 전 앱에 파급되므로 sealing key 백업 확인(scripts/backup-sealed-secrets-key.sh) 후 진행할 것."
+    },
+    {
+      "artifact": "chart:cert-manager",
+      "why": "TLS 발급 체인. 라이브 실측 quay.io/jetstack/cert-manager-{controller,webhook,cainjector}:v1.20.3 — 3개 모두 mutable tag. 차트 캐시 gitignored + ignorePaths.",
+      "freshness": "platform/argocd/root/apps/cert-manager.yaml의 targetRevision — renovate.json의 argocd manager가 소유한다.",
+      "since": "2026-07-28",
+      "owner_action": "cert-manager 차트는 image.repository/tag 오버라이드를 지원한다. 컨트롤러·webhook·cainjector 3개를 함께 핀해야 하며(부분 핀은 버전 skew), webhook 미준비 시 Certificate 발급이 막히므로 롤아웃 순서를 확인할 것."
+    },
+    {
+      "artifact": "chart:cloudnative-pg",
+      "why": "CNPG operator — DB 수명주기·백업·복구를 관장한다. 라이브 실측 ghcr.io/cloudnative-pg/cloudnative-pg:1.29.1, mutable tag. 차트 캐시 gitignored + ignorePaths. ⚠️ operator는 자기 버전에 맞는 PostgreSQL 이미지를 기대하므로 platform/cnpg/prod/cluster.yaml의 imageName(digest 핀됨)과 호환 쌍을 이룬다.",
+      "freshness": "platform/argocd/root/apps/cnpg-operator.yaml의 targetRevision(renovate argocd manager).",
+      "since": "2026-07-28",
+      "owner_action": "values.yaml(platform/cnpg/operator/values.yaml)에서 image 오버라이드. PG 메이저 업그레이드는 3-이미지 동시 갱신 함정(docs/traps-detail.md)에 걸리므로 operator·server·pg-tools를 한 묶음으로 계획할 것."
+    },
+    {
+      "artifact": "chart:argo-cd",
+      "why": "GitOps 컨트롤러 자신 — 이 레포를 클러스터에 적용하는 주체다. 라이브 실측 quay.io/argoproj/argocd:v3.4.4(5개 파드) + 번들 redis. 차트 캐시 gitignored + ignorePaths. ⚠️ argocd는 self-manage라 잘못된 핀이 자기 수렴을 막을 수 있다(부트스트랩 복구 경로 필요).",
+      "freshness": "platform/argocd/CHART_VERSION(renovate customManagers, datasource=helm argo-helm).",
+      "since": "2026-07-28",
+      "owner_action": "platform/argocd/bootstrap-values.yaml에서 global.image 오버라이드로 끌어올 수 있다. self-manage 컴포넌트라 롤백 경로(make bootstrap)를 먼저 확인하고, redis 등 번들 의존 이미지도 함께 볼 것."
+    }
+  ]
+}

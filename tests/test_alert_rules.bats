@@ -189,6 +189,25 @@ _seed_frozen_fixture() {   # $1=root $2=픽스처 경로
   echo "$output" | grep -q '우변'
 }
 
+@test "mode B sees past a group_left modifier to the aggregated right operand (a matching modifier is not an operand)" {
+  # `group_left(...)`/`group_right(...)`는 PromQL 문법상 on()/ignoring() 뒤에 붙는 **매칭 수식어**이지
+  # 피연산자가 아니다. 그걸 피연산자의 시작으로 읽으면 **정상적으로 사전 집계된 우변을 raw로 오판**한다.
+  # 이 오판은 조용하지 않다: many-to-one 조인은 group_left 없이 표현할 수 없으므로, 그 형태를 쓰는 룰은
+  # 전부 allowlist로 밀려나고 allowlist는 룰 단위라 **모드 A/C 검사까지 함께 꺼진다**.
+  _run_probe JoinProbe '(max by (namespace, job_name) (a_metric) * on (namespace, job_name) group_left (owner_name) max by (namespace, job_name, owner_name) (b_metric{k="v"})) > 0'
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+@test "mode B still flags a raw right operand behind a group_left modifier (the skip must not become a hole)" {
+  # 위 수식어 건너뛰기가 **검사 자체를 건너뛰는 것으로 퇴화하면** 모드 B에 group_left 모양의 구멍이 생긴다.
+  # 수식어만 벗기고 그 뒤 피연산자는 그대로 판정해야 한다.
+  _run_probe JoinProbe '(max by (namespace, job_name) (a_metric) * on (namespace, job_name) group_left (owner_name) b_metric{k="v"}) > 0'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '우변'
+}
+
 # ── 모드 C: push 주기 > instant 룩백(300s)인 메트릭은 윈도 ≥ 주기인 rollup 필수 ──
 
 @test "mode C flags the frozen r6 buggy fixture (real historical bug: ImageDigestDrift)" {
@@ -591,4 +610,40 @@ YAML
   echo "$output" | grep -q 'PodCrashLooping'
   echo "$output" | grep -q 'PodOOMKilled'
   echo "$output" | grep -q 'WALVolumeFilling'
+}
+
+# ── 정책 파일 열거 붕괴(ownership-accounting 08) ─────────────────────────────────
+# 옛 `existsSync ? … : []` 폴백은 denylist 부재를 '항목 0개'로 위장했다. denyMetrics가 비면
+# 모드 A의 find()가 상시 미스라 위반 0이 되는데, 성공 메시지는 '모드 A/B/C 위반 0'이라며
+# 검사했다고 주장한다 — 적대 검토가 A/B 대조로 실측한 fail-open이다.
+
+@test "a missing denylist file is a hard failure, not a silently empty mode A" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
+  rm -f "$tmp/policy/alert-instance-stability-denylist.txt"
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '정책 파일 읽기 실패'
+}
+
+@test "a denylist that still exists but holds no entries trips the entry floor" {
+  # 필수 읽기는 파일 부재만 잡는다 — 주석만 남는 부분 드리프트는 항목 바닥값이 잡는다.
+  tmp="$(mktemp -d)"
+  _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
+  printf '# 주석만 남은 상태\n' > "$tmp/policy/alert-instance-stability-denylist.txt"
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'denylist 항목 0건'
+}
+
+@test "a missing allowlist file is a hard failure too (absence is drift on both lists)" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp" PodCrashLoopingProbe 'increase(max by (namespace,pod,container,uid) (kube_pod_container_status_restarts_total)[15m:1m]) > 3'
+  rm -f "$tmp/policy/alert-instance-stability-allowlist.txt"
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '정책 파일 읽기 실패'
 }

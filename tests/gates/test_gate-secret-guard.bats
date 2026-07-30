@@ -2,6 +2,7 @@
 # supplychain-3: 시크릿 누출 가드(gitleaks + sops-guard)가 required `gate` 잡에 강제되는지 단언.
 # verify.yaml은 required가 아니므로(분기보호 contexts=["gate"]) gate 잡 자체에 폴딩돼야 한다.
 
+ROOT="$BATS_TEST_DIRNAME/../.."
 CI="$BATS_TEST_DIRNAME/../../.github/workflows/ci.yaml"
 PRECOMMIT="$BATS_TEST_DIRNAME/../../.pre-commit-config.yaml"
 
@@ -44,9 +45,31 @@ PRECOMMIT="$BATS_TEST_DIRNAME/../../.pre-commit-config.yaml"
 @test "gate job runs sops-guard over all tracked enc.yaml" {
   run grep -q 'scripts/sops-guard.sh' "$CI"
   [ "$status" -eq 0 ]
-  # 추적된 *.enc.yaml을 ls-files로 넘겨야 한다(스테이징 아닌 전 추적 파일).
-  run grep -qE "git ls-files '\\*\\.enc\\.yaml'" "$CI"
+  # 계약은 "추적된 *.enc.yaml 전수 검사"다. 예전엔 그걸 ci.yaml의 파이프 배관으로 단언했는데,
+  # 그 배관은 **글롭이 깨지면 스크립트를 아예 호출하지 않아** 스텝이 조용히 초록이었다.
+  # 이제 가드가 자기 도메인을 소유한다(무인자 = 자가 열거 + 바닥값) — 계약을 그쪽에 단언한다.
+  run grep -q "git ls-files '\\*.enc.yaml'" "$ROOT/scripts/sops-guard.sh"
   [ "$status" -eq 0 ]
+  # ⚠️ 위 두 단언만으로는 ci.yaml을 **옛 배관으로 되돌려도** 아무 게이트가 red가 되지 않는다
+  # (적대 검토 실측: `git show <이전>:.github/workflows/ci.yaml` 한 줄 복사로 vacuous 경로 재개방).
+  # 배선이 열거를 다시 떠맡으면(파일 목록을 파이프로 주입) 글롭이 깨질 때 스크립트가 아예
+  # 호출되지 않아 스텝이 조용히 초록이다 — ci.yaml은 **무인자 호출만** 허용한다.
+  out="$(grep -n 'scripts/sops-guard.sh' "$CI")"
+  run grep -qF '|' <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+# 배관을 옮긴 자리의 실측 증인 — 무인자 호출이 실제로 전수 검사인가.
+@test "sops-guard with no arguments enumerates the tracked domain (not a silent no-op)" {
+  run bash "$ROOT/scripts/sops-guard.sh"
+  [ "$status" -eq 0 ]
+  # 도메인이 붕괴하면 조용한 성공이 아니라 실패여야 한다.
+  shim="$BATS_TEST_TMPDIR/bin"; mkdir -p "$shim"
+  printf '#!/bin/sh\nif [ "$1" = "ls-files" ] && [ "$2" = "*.enc.yaml" ]; then exit 0; fi\nexec /usr/bin/git "$@"\n' > "$shim/git"
+  chmod +x "$shim/git"
+  PATH="$shim:$PATH" run bash "$ROOT/scripts/sops-guard.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "열거 붕괴"
 }
 
 @test "secret guard step lives in the gate job (required check), not only verify" {

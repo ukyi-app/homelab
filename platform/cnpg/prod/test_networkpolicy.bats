@@ -16,7 +16,7 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
   [ "$(yq 'select(.kind=="NetworkPolicy") | .metadata.namespace' "$NP" | grep -v '^---' | sort -u)" = "database" ]
   run bash -c "kubeconform -strict -summary '$NP'"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Invalid: 0"* ]]
+  printf '%s' "$output" | grep -qF -- "Invalid: 0"
   [[ "$output" == *"Errors: 0"* ]]
 }
 
@@ -28,12 +28,12 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
 
 @test "only prod:5432, cnpg-system, observability:9187, and intra may reach the database" {
   prod="$(yq 'select(.metadata.name=="database-allow-ingress-from-prod")' "$NP")"
-  [[ "$prod" == *"kubernetes.io/metadata.name: prod"* ]]
-  [[ "$prod" == *"port: 5432"* ]]
+  printf '%s' "$prod" | grep -qF -- "kubernetes.io/metadata.name: prod"
+  printf '%s' "$prod" | grep -qF -- "port: 5432"
   yq 'select(.metadata.name=="database-allow-ingress-from-cnpg-system")' "$NP" | grep -q 'cnpg-system'
   obs="$(yq 'select(.metadata.name=="database-allow-ingress-metrics-from-observability")' "$NP")"
-  [[ "$obs" == *"observability"* ]]
-  [[ "$obs" == *"port: 9187"* ]]
+  printf '%s' "$obs" | grep -qF -- "observability"
+  printf '%s' "$obs" | grep -qF -- "port: 9187"
   yq 'select(.metadata.name=="database-allow-ingress-intra")' "$NP" | grep -q 'podSelector'
 }
 
@@ -45,8 +45,8 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
 
 @test "kubelet probe ingress is node-only (pod-CIDR-wide ipBlock would defeat default-deny)" {
   p="$(yq 'select(.metadata.name=="database-allow-ingress-kubelet-probes")' "$NP")"
-  [[ "$p" == *"cidr: 10.42.0.1/32"* ]]   # 노드(cni0)만 — /16은 전 파드에 5432 개방
-  [[ "$p" != *"cidr: 10.42.0.0/16"* ]]
-  [[ "$p" == *"port: 8000"* ]]
+  printf '%s' "$p" | grep -qF -- "cidr: 10.42.0.1/32"   # 노드(cni0)만 — /16은 전 파드에 5432 개방
+  case "$p" in *"cidr: 10.42.0.0/16"*) false ;; *) true ;; esac
+  printf '%s' "$p" | grep -qF -- "port: 8000"
   [[ "$p" != *"port: 5432"* ]]           # probe 정책에 5432가 되살아나면 안 된다
 }

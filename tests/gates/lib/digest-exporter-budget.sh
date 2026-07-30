@@ -25,7 +25,8 @@
 #    ㆍ현재 여유: N=2에서 60 + 2×10 + 30 + 10 = 120 < 180(ADS) → startup이 실제로 120s까지 늘어져도 push가 산다.
 #    ㆍ가정이 깨져도 **fail-open이 아니다**: startup이 예산을 초과하면 Job이 ADS에 걸려 죽고 → 하트비트가
 #      미발행되고 → DigestExporterStale이 운다(fail-closed). 즉 최악은 "거짓 페이지"이지 "무성 실패"가 아니다.
-#    ㆍ강제 가능한 제약에서 파생하는 것(startup SLA 도입 또는 ADS/N_MAX 재산정)은 PRD Follow-up **F-7**.
+#    ㆍ강제 가능한 제약에서 파생하는 것(startup SLA 도입 또는 ADS/N_MAX 재산정)은 **미착수 백로그**다.
+#    ㆍ라이브 실측: 첫 하트비트 지연 115초 = 강제 상한 840초의 13.7% — 가정에 큰 여유가 있다.
 DEB_POD_START_BUDGET_S=60   # 파드 스케줄 + 이미지 pull 예산(관측 기반 **가정** — 위 ⚠️ 참조)
 DEB_EXEC_SLACK_S=10         # sed/head/셸 오버헤드
 

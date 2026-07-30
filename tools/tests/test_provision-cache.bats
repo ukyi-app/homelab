@@ -158,7 +158,7 @@ provision() {
   [ "$status" -eq 0 ]
   run bash -c "kustomize build '$FIX/platform/cache/prod' | kubeconform -strict -ignore-missing-schemas -summary"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -qF "Invalid: 0"
+  echo "$output" | grep -qF -- "Invalid: 0"
   run bash -c "kustomize build '$FIX/platform/cache/prod' | yq 'select(.kind==\"Deployment\") | .metadata.namespace'"
   [ "$output" = "cache" ]
 }

@@ -31,12 +31,13 @@
 
 run-name에 트리거 출처(`스케줄`/`수동(actor)`)가 박혀 이력에서 구분된다.
 
+**준비상태 회계(G-09)** — 자격/설정이 없어 job이 통째로 skip되면 GHA는 run을 **초록**으로 끝내고, 그 job 안의 알림 스텝은 `if: always()`여도 함께 skip된다(skip된 job은 스텝을 0개 실행한다). 그래서 `tf-reconcile`·`bump-poll`·`renovate`·`iac`에는 게이트 **밖**의 `accounting` job이 있다: `if: ${{ !cancelled() }}`로 항상 뜨고, `needs.*.result`/`needs.*.outputs.executed`를 `policy/workflow-readiness.json` 원장과 대조해 미실행을 `::error::`(run red) 또는 `::warning::`으로 낸다. telegram은 스케줄 reconciler 3종(tf-reconcile·bump-poll·renovate)만 발화하고, `iac`는 PR 컨텍스트라 red 체크 자체가 신호다(매 PR 알림은 소음). 원장에 **선언된 갭**은 알림에 넣지 않는다 — 매 주기 재발해 진짜 신호를 덮는다. 선언되지 않은 미설정은 required gate(`ci.yaml`의 `bun tools/check-workflow-readiness.ts`)가 정적으로 막는다. ⚠️ 새 job에 시크릿 준비상태 게이트를 달면 **원장 선언이 필수**다(안 하면 gate red).
+
 ## 🤖 자동 — 이벤트 트리거 (건들지 말 것)
 
 | 워크플로 | 트리거 | 역할 |
 |---|---|---|
 | ci | PR·push | 권위 게이트(job `gate` = 유일 required check) |
-| verify | PR·push | 보조 점검(sops 왕복·pre-commit) |
 | iac | PR·push(cloudflare) | terraform apply |
 | build | push(`ops/**`)·수동 | 플랫폼 ops 이미지 빌드(pg-tools → GHCR, `:sha-<sha>`+`:18-rclone`) — 배포-전용 apps/는 외부 레포에서 빌드 |
 | bump | build 완료(workflow_run) | 이미지 write-back |

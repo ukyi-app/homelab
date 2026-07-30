@@ -35,12 +35,9 @@ data:
     for entry in $APPS; do
       APP="${entry%%=*}"; REF="${entry#*=}"
       CONFIGURED=$((CONFIGURED+1))
-      # ⚠️ --command-timeout은 **글로벌 옵션**이므로 서브커맨드(inspect) **앞**에 둔다.
-      #    (실측 2026-07-13: 핀된 v1.22.2는 cobra persistent flag 상속 덕에 `inspect` 뒤에 둬도 상한을
-      #     강제한다 — 계획이 가정한 "뒤=무효"는 사실이 아니다. 그럼에도 앞 배치를 계약으로 못박는 이유는
-      #     ⓐ 그게 tests/gates/skopeo-timeout-smoke.sh가 **실제로 증명한** 배치이고 ⓑ 뒤 배치의 수용은
-      #     cobra 플래그 상속이라는 구현 세부라 CLI 재구성 한 번에 사라질 수 있기 때문이다.
-      #     게이트는 존재가 아니라 argv **순서**를 단언한다.)
+      # ⚠️ --command-timeout은 글로벌 옵션이라 서브커맨드(inspect) **앞**에 둔다. 뒤에 둬도 현재는
+      #    cobra 플래그 상속으로 먹히지만 그건 구현 세부라 CLI 재구성 한 번에 사라진다 —
+      #    skopeo-timeout-smoke.sh가 증명한 배치는 앞이고, 게이트는 존재가 아니라 argv **순서**를 단언한다.
       DIGEST=$(skopeo --command-timeout="$SKOPEO_TIMEOUT" inspect --authfile /auth/config.json --no-tags "docker://$REF" 2>/dev/null | sed -n 's/.*"Digest": "\(sha256:[a-f0-9]*\)".*/\1/p' | head -1 || true)
       # ⚠️ SCRAPED 증가는 **반드시 이 검사 뒤**다 — 앞에 두면 skopeo가 전부 실패해도 scraped == configured로
       #    오보고되어 문법 검사·레지스트리 완전성·발화 e2e·라이브 전건성공 확인을 **전부 통과하면서** US2가
@@ -101,6 +98,10 @@ spec:
   #    죽이고 새 Job을 반드시 띄우므로 상한이 레거시 상태와 무관하게 성립한다(잡은 멱등 — GHCR 조회 +
   #    메트릭 push라 중도 종료로 잃는 것이 없다).
   concurrencyPolicy: Replace
+  # ⚠️ CronJobFlapping(core.yaml)의 **관측 창**이다 — 기본값 1이면 "최근 창에 N회 실패"를 원리적으로
+  #    셀 수 없어 이 워크로드가 그 알림에서 통째로 빠진다(무성). 룰 임계와의 정합은
+  #    tests/gates/test_cronjob-flapping.bats가 레포에서 계산해 강제한다.
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 1
@@ -121,8 +122,9 @@ spec:
               command: ["/bin/sh", "/script/run.sh"]
               env:
                 # 배포된 외부 앱의 "name=ghcr.io/owner/name:tag" 공백 구분 목록 — apps/ 디렉토리와 parity
-                # (게이트: tests/gates/test_digest-exporter.bats). 갱신 주체: create-app/teardown-app(tools) +
-                # bump 경로(B9 bump-tag 배선 예정 — 그 전까지 이미지 bump 직후 일시 오발화 가능, for:20m 완충).
+                # (게이트: tests/gates/test_digest-exporter.bats). 갱신 주체 셋: create-app · teardown-app ·
+                # bump-tag.ts의 syncDigestExporter(bump한 앱이 이 목록에 있으면 태그를 같이 옮긴다 —
+                # 안 옮기면 stale 참조가 거짓 ImageDigestDrift를 낸다).
                 - name: APPS
                   value: "page=ghcr.io/ukyi-app/page:sha-468dd508610b0f5eccaac84837036e01afa22d6c trip-mate-api=ghcr.io/ukyi-app/trip-mate-api:sha-c48be0254cdc6855ae92fb015e8592020d2c4406" # 공개 git SHA 이미지 태그(시크릿 아님) — gitleaks:allow
               resources:

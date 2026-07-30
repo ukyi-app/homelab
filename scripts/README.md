@@ -3,7 +3,7 @@
 부트스트랩·CI 게이트·시크릿 봉인·DR 운영 스크립트 모음. 각 스크립트의 **호출 경로**와
 **파괴성**을 명시한다. 크게 세 부류:
 
-- **CI 게이트** — `make verify`/`make ci` 또는 `ci.yaml`/`verify.yaml`이 호출하는 순수 검사(읽기 전용).
+- **CI 게이트** — `make verify`/`make ci` 또는 `ci.yaml`이 호출하는 순수 검사(읽기 전용).
 - **시크릿/부트스트랩** — `make` 타겟이 호출, 라이브 클러스터에 쓰거나 봉인본을 산출.
 - **DR/owner 전용(파괴적)** — Makefile/워크플로에 배선 없이 **사람이 직접 실행**. 잘못 쓰면 데이터 유실.
 
@@ -19,7 +19,7 @@
   `tools/app-deploy-schema.json`(SSOT)에서 읽어 강제(`source-repo` 누락/공백 = fail-closed) + **봉인 배선
   all-or-none 불변식**(봉인본⇔envFrom `<app>-secrets`⇔kustomization 등재⇔checksum/secrets, 부분 상태 거부)
   + `S → checksum 정합`(#277 재발 방지) + **strict scope**(namespace-wide/cluster-wide 어노테이션 거부, patch는
-  통과) + **파일명 규약**(`<app>-secrets.sealed.yaml` 하나만 허용). `make verify`가 호출. 인레포 앱 0개면 vacuous pass.
+  통과) + **파일명 규약**(`<app>-secrets.sealed.yaml` 하나만 허용). `make verify`가 호출. 인자 없는 기본 모드에서 앱 열거 0건은 **scan-floor로 실패**(vacuous pass 아님).
 - **`run-bats.sh`** — **단일 테스트 수집·실행기(required GATE)**. `make ci`·`ci.yaml`(gate)이 공통 호출(이중 SSOT 제거).
   스코프 = git-tracked `test_*.bats` − `platform/charts/*`(chart-test 별도) − `tests/.ci-exclude`. `--list`는 수집 목록만.
 - **`verify-secrets.sh`** — 추적 `*.enc.yaml` 무결성(암호화됨 + age recipient 신원이 canonical(.sops.yaml
@@ -33,9 +33,16 @@
 - **`check-doc-index.sh`** — `scripts/`·`tools/`·`.github/workflows/` 산출물이 해당 README에 등재됐는지
   검사(가드 없는 인덱스 드리프트 소멸). **`make verify`**·gate(`tests/gates/test_check-doc-index.bats`)가 호출. 순수 문자열 검사.
 - **`check-app-netpol.sh`** — `apps/<app>/deploy/**`의 app-owned NetworkPolicy가 app-scoped 셀렉터
-  (`app.kubernetes.io/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). **`make verify`**가 호출. 인레포 앱 0개면 vacuous pass.
+  (`app.kubernetes.io/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). **`make verify`**가 호출. netpol 0건은 통과지만 **매니페스트 열거 0건은 scan-floor로 실패**(vacuous pass 아님).
 - **`check-bats-style.sh`** — bats 단언-스타일 가드: `@test` 본문의 중간(마지막 아님) 부정(`! `)·조건(`[[ `)
   단언을 잡는다(bats가 침묵 통과시키는 false-green 가드 차단; NEG=hard-zero·BB=ratchet). `tests/gates/test_bats-style.bats`가 호출.
+  기본 모드에서 스캔 대상이 0건이면 통과가 아니라 **열거 붕괴**(scan-floor, exit 1) — 같은 도메인을 쓰는
+  check-skeleton·check-bats-accounting과 같은 채널이다(skip 규약 아님).
+- **`check-skip-signalling.sh`** — 가드 skip 신호 규약(CONTRIBUTING '가드 skip 신호')의 정적 가드:
+  `SKIP: <가드>: <이유>` 마커와 skip 종료코드(셸 `exit 4` / TS `process.exit(4)`)가 **같은 줄에서 짝**을
+  이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + Makefile
+  전수(자기 자신 제외 — 패턴 리터럴이 위반과 같은 모양). 열거 붕괴 차단용 `MIN_SCAN`(기본 70) 보유.
+  `tests/gates/test_guard-skip-signalling.bats`가 호출(양방향 픽스처 음성 테스트 + 열거 바닥값).
 - **`check-credential-expiry.sh`** — 자격증명 만료 원장(`policy/credential-expiry.json`) 검사. `--days N`
   (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). `credential-expiry.yaml`(주간)이 D-14 telegram 경고로
   중계, `tests/gates/test_credential_expiry.bats`가 가드. jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)
@@ -46,7 +53,8 @@
 - **`verify-ledger.sh`** — 메모리 원장 예산 게이트 SSOT. `bun tools/ledger-to-json.ts` 출력을
   `conftest … policy/ledger.rego`로 검사. **`bun run verify:ledger`**·`make verify`·`make ci`·`ci.yaml`(gate)이 호출.
 - **`verify-runbook-index.sh`** — `docs/runbooks/`(gitignored) ↔ AGENTS.md 런북 인덱스 정합(로컬 전용).
-  런북 부재 시 skip(required gate 아님 — repo/CI엔 런북 없음). **`make verify-runbook-index`**가 호출.
+  런북 부재 시 **SKIP 신호**(exit 4 + `SKIP:` 마커 — CONTRIBUTING '가드 skip 신호'; exit 0은 "실제로
+  대조했고 정합"만 뜻한다). **`make verify-runbook-index`**가 호출.
 - **`audit-orphan-pv.sh`** — 고아 Released PV 감사(storageclass Retain이라 PVC 삭제 시 PV 누수). 나열만
   (비파괴), reclaim은 owner 수동. **`make audit-orphan-pv`**(라이브 ops)가 호출. `tests/gates/test_audit-orphan-pv.bats`가
   가드. ★fail-closed(도구/쿼리 실패=비-0).
@@ -62,7 +70,8 @@
   preflight fail-closed(break-glass `--offline-ok`). 평문·해시·토큰은 kubeseal stdin 전용(값 미출력).
 - **`secret-cert-check.sh`** — 봉인 전 preflight: 커밋된 `tools/sealed-secrets-cert.pem`이 라이브
   컨트롤러 cert와 fingerprint 일치하는지(stale 차단) 검사. **`make secret-cert-check`**가 호출.
-  read-only(fetch만); 오프라인이면 검증 스킵(에러 아님). `sealing-key-dr-gate.sh` 로직 재사용.
+  read-only(fetch만); 오프라인/kubeseal 부재면 **SKIP 신호**(exit 4 + 마커 — 예전 2는 unknown-option과
+  같은 코드였다). 호출자(`seal-batch.ts`)는 4=미평가와 1=stale을 구별해 보고한다. `sealing-key-dr-gate.sh` 로직 재사용.
 
 ## DR / owner 전용 — 파괴적 (직접 실행, Makefile/워크플로 배선 주의)
 

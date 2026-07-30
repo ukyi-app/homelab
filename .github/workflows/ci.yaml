@@ -37,6 +37,8 @@ jobs:
           bats: 'true'
           shellcheck: 'true'
           actionlint: 'true'
+          sops: 'true'
+          age: 'true'
       - name: secret-guard — gitleaks(누출) + sops-guard(평문 enc.yaml) 강제
         # verify.yaml의 gitleaks/sops-guard는 required가 아니라(분기보호 contexts=["gate"]),
         # 누출 PR이 gate만 통과하면 머지된다 → required `gate` 잡에 폴딩(코드 전용, 머지 즉시 발효).
@@ -44,21 +46,48 @@ jobs:
         run: |
           ver=$(yq '.repos[] | select(.repo == "https://github.com/gitleaks/gitleaks") | .rev' .pre-commit-config.yaml | sed 's/^v//')
           [ -n "$ver" ] || { echo "::error::gitleaks rev를 .pre-commit-config.yaml에서 못 찾음"; exit 1; }   # fail-loud(빈 버전 차단)
-          # ⚠️ codex pass5 F3 + restale F1: curl|tar 직접 추출은 체크섬 없는 실행체 공급망 표면(supplychain-5 동일).
-          # 하드코딩 SHA256 placeholder 금지(게이트 깨짐) — 릴리스 **공식 checksums.txt**를 받아 그 라인으로 검증 후
-          # 추출한다(버전 핀 v${ver}만 Renovate가 갱신; 해시는 매니페스트에서 자동 일치, stale 위험 0).
+          # ⚠️ 해시는 릴리스 **공식 checksums.txt**로 검증한다 — SHA256 하드코딩 금지(버전 bump마다
+          #    stale이 되어 게이트가 깨진다). 핀은 v${ver}뿐이고 Renovate가 그것만 갱신한다.
           ( cd /tmp
             curl -fsSL -O "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_arm64.tar.gz"
             curl -fsSL -O "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_checksums.txt"
             grep "  gitleaks_${ver}_linux_arm64.tar.gz$" "gitleaks_${ver}_checksums.txt" | sha256sum -c -
             sudo tar -xz -C /usr/local/bin -f "gitleaks_${ver}_linux_arm64.tar.gz" gitleaks )
-          # git 히스토리 전체 스캔(pre-commit 훅과 동등). --redact: 발견 시 시크릿 평문 미출력.
-          # ⚠️ codex pass4 F2: bare 'gitleaks detect'는 git 히스토리 전체 스캔 → 과거 false-positive/회전된
-          # 옛 시크릿 하나가 모든 PR을 영구 머지불가(게이트 red)로 만든다. pre-commit 훅처럼 작업트리만 스캔.
+          # ⚠️ `--no-git` 필수(작업트리만 스캔) — 히스토리 전체를 스캔하면 과거 false-positive나 이미
+          #    회전된 옛 시크릿 하나가 모든 PR을 영구 red로 만든다. --redact: 발견 시 평문 미출력.
           gitleaks detect --no-git --source . --redact --no-banner --exit-code 1
+      - name: SOPS 왕복 (ephemeral CI 키)
+        # verify.yaml에서 이식(그 잡의 유일한 고유 책임이었다). 실 age 키 없이 자기완결로 왕복을 증명한다 —
+        # 암호화 후 평문이 남지 않는지 + 복호가 원문을 되돌리는지. 로컬 대응은 `make verify`의
+        # tests/test_sops-roundtrip.bats(실 키 사용)라 policy/ci-parity.json에 covered로 계상한다.
+        run: |
+          age-keygen -o /tmp/ci.agekey
+          export SOPS_AGE_KEY_FILE=/tmp/ci.agekey
+          CIKEY=$(age-keygen -y /tmp/ci.agekey)
+          cat > /tmp/sops-ci.yaml <<EOF
+          creation_rules:
+            - path_regex: \.enc\.yaml\$
+              encrypted_regex: "^(data|stringData)\$"
+              age: "$CIKEY"
+          EOF
+          cp tests/fixtures/sample-secret.yaml /tmp/ci.enc.yaml
+          sops --config /tmp/sops-ci.yaml --encrypt --in-place /tmp/ci.enc.yaml
+          if grep -q 'super-secret-value-123' /tmp/ci.enc.yaml; then echo "::error::암호화 후 평문 잔존"; exit 1; fi
+          sops --config /tmp/sops-ci.yaml --decrypt /tmp/ci.enc.yaml | grep -q 'super-secret-value-123'
+      - name: pre-commit 배선 확인 (훅 정의가 실제로 도는가)
+        # ⚠️ gate가 gitleaks·sops-guard를 직접 부르는 것과 **다른 질문**이다: 저건 "검사가 도는가",
+        #    여긴 "`.pre-commit-config.yaml`의 훅 배선이 유효한가"(files 정규식·entry 경로·language).
+        #    ci.yaml:45가 이 파일에서 gitleaks rev를 파생하므로 배선이 깨지면 그 파생도 조용히 죽는다.
+        #    전체 훅 실행은 하지 않는다 — gitleaks 훅은 `--staged` 대상이라 CI(staged 0)에서 vacuous다.
+        run: |
+          pip install --quiet pre-commit
+          pre-commit validate-config .pre-commit-config.yaml
+          pre-commit run sops-guard --all-files
       - name: sops-guard — 추적된 모든 *.enc.yaml 구조 검증
         # 평문 *.enc.yaml(또는 부분 암호화)을 차단. gate는 setup-toolchain에서 yq를 이미 설치했다.
-        run: git ls-files '*.enc.yaml' | xargs -r scripts/sops-guard.sh
+        # 무인자 = 가드가 자기 도메인을 열거하고 바닥값을 건다. 예전의 `git ls-files … | xargs -r`는
+        # 글롭이 깨지면 스크립트를 **아예 호출하지 않아** 이 스텝이 조용히 초록이었다.
+        run: bash scripts/sops-guard.sh
       - name: chart render + validate (all kinds)
         run: make chart-test
       - name: memory ledger onboarding gate (M0-owned)
@@ -70,12 +99,40 @@ jobs:
         run: bun tools/audit-orphans.ts --ci
       - name: skeleton + 네이밍/CJK/dirmap 가드 (required — 기존 verify.yaml non-required서 승격)
         run: bash scripts/check-skeleton.sh
-      - name: gate bats suite (run-bats.sh — 단일 수집 SSOT)
-        # 수집은 scripts/run-bats.sh 단일 진입점: git-tracked test_*.bats − platform/charts(chart-test 별도) −
-        # tests/.ci-exclude(라이브/docker/age/terraform). make ci 와 동일 호출 → 이중 SSOT 제거.
-        # 하드코딩/글롭 누락 클래스를 구조적으로 차단(미접두는 check-skeleton 네이밍 가드가 별도 차단).
-        # CI-safe infra 정적 가드(k3s-bootstrap·argocd lint)도 이제 required gate가 보호(죽은 커버리지 해소).
-        run: ./scripts/run-bats.sh
+      # ── 회계 3종 ─────────────────────────────────────────────────────────────────────────
+      # ⚠️ 셋 다 bats가 아니라 **명시 스텝**이다. 회계의 권위가 자기 bats 하나뿐이면 tests/.ci-exclude에
+      #    한 줄 추가하는 것만으로 **회계 전체가 초록인 채 꺼진다** — 다른 가드는 이들이 지키는데
+      #    이들을 지키는 것이 없어지는 자기 사각지대다.
+      - name: 가드 권위 경로 회계 (G1 — 가드가 CI에서 한 번도 안 도는 상태 차단)
+        run: bun tools/check-guard-authority.ts
+      - name: 이미지 소유권 회계 (G2 — 아티팩트가 권위 있는 핀 소유자를 갖는지)
+        # 핀 게이트(check-image-pins)와 **다른 질문**이다: 저건 'digest로 핀됐는가', 여긴 '그 digest를
+        # 누가 갱신하는가'.
+        run: bun tools/check-image-ownership.ts
+      - name: 워크플로 준비상태 회계 (G-09 — 자격 부재로 job이 조용히 skip되는 것 차단)
+        # 정적 방향(원장 ↔ 워크플로 양방향 대조)만 본다 — 런타임 판정은 각 워크플로의
+        # accounting job이 `--workflow <file>`로 수행한다.
+        run: bun tools/check-workflow-readiness.ts
+      - name: 실 도메인 가드 (레포 자신에 대해 돌린다 — bats 픽스처가 아니라)
+        # ⚠️ 아래 7종을 **여기서 직접** 부르는 이유: bats로만 돌면 같은 파일의 픽스처 @test 20여 개가
+        #    venue를 살려, 실 트리를 검사하는 @test 한 줄이 지워져도 G1이 초록을 유지한다(실측:
+        #    check-image-pins의 실 트리 강제는 단 한 줄이 CI의 유일한 권위였다). ci.yaml이 직접 부르면
+        #    정의상 실 도메인에 닿으므로 fixture↔real 질문 자체가 사라진다 — G1·G2·G-09와 같은 해법.
+        # ⚠️ bats에서도 계속 돈다(픽스처 @test와 같은 파일이라 뗄 수 없다). 중복 1.6초는 의도된 대가다.
+        run: |
+          bash scripts/check-doc-index.sh
+          bash scripts/check-bats-accounting.sh
+          bash scripts/check-app-deploy.sh
+          bash scripts/check-app-netpol.sh
+          bash scripts/check-image-pins.sh
+          bun tools/check-resource-limits.ts
+          bun tools/check-alert-rules.ts
+          bun tools/check-disk-caps.ts
+      - name: make ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)
+        # 스텝 목록을 이 파일에서 **파생**해 원장(policy/ci-parity.json)과 대조한다 — 스텝을 추가하는
+        # 사람은 "이건 로컬에서 어떻게 도는가"를 반드시 답해야 한다. 하드코딩 토큰 대조였을 땐 19스텝 중
+        # 8건이 make ci에 없는데도 전 검사가 초록이었다(대조하던 5개가 하필 전부 미러된 것들이었다).
+        run: bun tools/check-ci-parity.ts
       - name: shell script lint (전 추적 .sh)
         # 전 추적 *.sh를 shellcheck — scripts/(DR/파괴적)뿐 아니라 notify.sh(알림 경로)·
         # restore-drill-script.sh·infra/k3s-bootstrap·e2e까지. 벤더 charts/는 untracked라 git ls-files에 안 잡힘.
@@ -95,36 +152,88 @@ jobs:
       - name: vmalert rule validate (containerized — render/grep 미차단 룰 expr 오류)
         # grep만으론 오류 PromQL/MetricsQL이 통과(test_vmalert-config는 존재 grep) → vmalert -dryRun으로 파싱 검증.
         run: bash tests/gates/vmalert-rules-validate.sh
-      - name: vmalert 발화 e2e (containerized replay — dryRun 미차단 "영원히 발화 못 하는 룰")
-        # 위 -dryRun은 expr 파싱만 본다 → 문법은 멀쩡한데 라이브에서 발화 0인 룰(ImageDigestDrift:
-        # push 메트릭 rollup 누락 → record 구멍 → for: 리셋)을 통과시켰다. 이 게이트가 실제 발화를 증명한다.
-        # ⚠️ bats 아님 — run-bats.sh는 tests/.ci-exclude로 docker 의존 테스트를 빼므로 죽은 커버리지가 된다.
-        run: bash tests/gates/vmalert-drift-firing-e2e.sh
-      - name: vmalert 발화 e2e — bulk SSD 용량 (일 1회 push 메트릭)
-        # 같은 클래스의 두 번째 죽은 알림(FilesBulkSSDLow): files_data_bulk_*는 호스트 launchd가 **하루 1회**
-        # push하는데 룩백은 5m → 하루 1440분 중 5분만 보인다 → for: 30m(연속 61회 평가)에 구조적 도달 불가.
-        # 형제 BulkStorageLow(rollup 착용)는 같은 매체·같은 결핍에 정상 발화한다 — 그 대조를 L4가 매 실행 증명한다.
-        run: bash tests/gates/vmalert-bulkssd-firing-e2e.sh
-      - name: vmalert 발화 e2e — digest-exporter 하트비트 (감시견의 감시견)
-        # digest-exporter는 ImageDigestDrift의 **먹이 공급선**이다. exporter가 조용히 죽으면(크론 미실행·push
-        # 실패·파드 기동 실패 — 전부 초록 Job(exit 0)이라 KubeJobFailed가 원리적으로 못 잡는다) 기록 룰의
-        # [15m] 윈도가 만료돼 ImageDigestDrift가 **조용히 실명**한다(원 버그와 같은 실패 양식의 2차 실명).
-        # L1/L5=발화(stale·absent 두 가지) · L2=정상 침묵(대조 알림으로 vacuity 차단) · L3=결함 픽스처(하네스
-        # 이빨) · L7=최초 배포 거짓 페이지 불가(첫 하트비트가 강제 상한 840s에 도착). preflight가 부트스트랩
-        # 부등식을 매니페스트에서 파생해 강제(위반 = exit 2).
-        run: bash tests/gates/vmalert-digest-stale-firing-e2e.sh
+      # ── vmalert 발화 e2e (전량 **병렬**) ────────────────────────────────────────────────────────
+      # "룰이 파싱된다"가 아니라 "실제로 발화한다"를 증명한다 — `-dryRun`이 통과시킨 죽은 알림이 이
+      # 레포에 두 번 있었다(push 주기 > 룩백 → 시리즈 구멍 → `for:` 매 주기 리셋 → 영구 무발화).
+      #
+      # ⚠️ **병렬이 안전한 전제**: 하네스는 서로 완전히 독립이다 — 각자 자기 docker 네트워크·컨테이너를
+      # `$$` 접미로 만든다. 시간의 대부분이 CPU가 아니라 replay **대기**라 벽시계가 총합이 아니라
+      # **최댓값**으로 수렴한다(실측 시점 gate 1048초 중 이 스위트가 805초였다).
+      #
+      # ⚠️ 목록은 **리터럴 경로로 적는다**(글롭 파생이 아니라). `tools/check-guard-authority.ts`가 모든
+      # `tests/gates/*.sh`에 권위 실행 경로 ≥1을 요구하므로 하네스를 추가하고 여기 안 적으면 즉시 red다
+      # (실측: 글롭 변수로 바꿨더니 네 하네스 전부 "권위 0"으로 잡혔다). 이건 **대조되는** 목록이라
+      # 리터럴이어야 대조가 성립한다 — 하드코딩 소비처 목록과 정반대의 자리다.
+      #
+      # ⚠️ **rc는 PID별로 걷는다.** `a & b & wait`는 마지막 잡의 상태만 돌려줘 앞 하네스의 실패를
+      # 조용히 삼킨다(이 레포가 프로세스 치환에서 이미 겪은 vacuous green 클래스).
+      - name: 무거운 스위트 동시 실행 (bats CPU-bound ∥ 발화 e2e 대기-bound)
+        # ⚠️ 한 스텝에 합친 이유: GHA 스텝은 각자 별도 셸이라 **스텝 간 background job을 wait할 수 없다**.
+        #    동시 실행하려면 한 스텝 안이어야 한다.
+        run: |
+          # 이미지는 먼저 한 번만 당긴다(넷이 동시에 같은 이미지를 당기는 변동 제거).
+          # 버전은 **매니페스트에서 파생** — 하드코딩하면 배포와 갈린다.
+          vm="$(grep -oE 'victoriametrics/victoria-metrics:v[0-9.]+' platform/victoria-stack/prod/vmsingle.yaml | head -1)"
+          va="$(grep -oE 'victoriametrics/vmalert:v[0-9.]+' platform/victoria-stack/prod/vmalert.yaml | head -1)"
+          [ -n "$vm" ] && [ -n "$va" ] || { echo "::error::e2e 이미지 버전 파생 실패(vmsingle/vmalert 매니페스트)"; exit 1; }
+          docker pull -q "$vm" >/dev/null
+          docker pull -q "$va" >/dev/null
+
+          # ⚠️ 첫 경로를 대입문과 **같은 줄에 두지 않는다** — check-guard-authority는 `NAME=…` 줄을
+          #    할당으로 보고 건너뛰므로 그 하네스만 "권위 0"으로 잡힌다(실측: drift 하나만 빠졌다).
+          harnesses="
+          tests/gates/vmalert-drift-firing-e2e.sh
+          tests/gates/vmalert-bulkssd-firing-e2e.sh
+          tests/gates/vmalert-digest-stale-firing-e2e.sh
+          tests/gates/vmalert-gha-liveness-firing-e2e.sh
+          tests/gates/vmalert-adguard-rewrite-firing-e2e.sh
+          tests/gates/vmalert-jobfailed-firing-e2e.sh
+          "
+          harnesses="$(printf '%s\n' "$harnesses" | tr -d ' ' | grep -v '^$' || true)"
+          # 추적 글롭과 **교차 대조** — 목록에 없는 하네스가 생기면 여기서 먼저 드러난다(가드보다 이른 신호).
+          want="$(git ls-files 'tests/gates/vmalert-*-firing-e2e.sh' | sort)"
+          got="$(printf '%s\n' "$harnesses" | sort)"
+          [ "$want" = "$got" ] || { echo "::error::발화 e2e 목록이 레포와 불일치"; diff <(echo "$want") <(echo "$got") || true; exit 1; }
+          n="$(printf '%s\n' "$harnesses" | grep -c . || true)"
+          [ "${n:-0}" -ge 3 ] || { echo "::error::발화 e2e 하네스 ${n:-0}건 < 3 — 열거 붕괴(무측정 초록)"; exit 1; }
+          echo "발화 e2e ${n}건 병렬 실행"
+
+          pids=""
+          # bats 스위트를 **같이** 띄운다. 수집은 scripts/run-bats.sh 단일 SSOT 그대로다(make ci와 동일 호출).
+          # 왜 같이 도는가: bats는 CPU-bound(~165s), 발화 e2e는 거의 전부 replay **대기**(~195s)라 자원이
+          # 겹치지 않는다 → 합계(~360s)가 아니라 최댓값(~195s)으로 수렴한다.
+          ./scripts/run-bats.sh > /tmp/gate-bats.log 2>&1 &
+          pids="$pids $!:bats(run-bats.sh)"
+          for h in $harnesses; do
+            bash "$h" > "/tmp/$(basename "$h").log" 2>&1 &
+            pids="$pids $!:$h"
+          done
+          fail=0
+          for p in $pids; do
+            pid="${p%%:*}"; h="${p#*:}"
+            if wait "$pid"; then echo "PASS $h"; else echo "::error::FAIL $h"; fail=1; fi
+          done
+          # 로그는 스위트별로 접어서 낸다(병렬 인터리브 방지 — 진단 가능성이 곧 이 게이트의 값이다).
+          echo "::group::bats (run-bats.sh)"
+          cat /tmp/gate-bats.log
+          echo "::endgroup::"
+          for h in $harnesses; do
+            echo "::group::$(basename "$h")"
+            cat "/tmp/$(basename "$h").log"
+            echo "::endgroup::"
+          done
+          exit "$fail"
       - name: skopeo 실물 타임아웃 스모크 (핀된 이미지 + 제어된 블랙홀)
-        # PATH stub은 진짜 타임아웃을 증명할 수 없다(stub이 skopeo를 대체하므로 stub 자신을 테스트할 뿐).
-        # digest-exporter의 인-데드라인 예산(POD_START + N×SKOPEO_TIMEOUT + CURL_MAX_TIME + EXEC_SLACK <
-        # activeDeadlineSeconds) 전체가 "skopeo가 실제로 t에 끊긴다"는 전제 위에 서 있으므로, 그 전제를
-        # 핀된 이미지에 대해 직접 증명한다(응답 없는 TCP sink → 경과가 --command-timeout 값을 따라감).
+        # digest-exporter의 인-데드라인 예산 전체가 "skopeo가 실제로 t에 끊긴다"는 전제 위에 서 있다.
+        # PATH stub으로는 그 전제를 증명할 수 없어(stub이 skopeo를 대체하니 stub 자신을 테스트할 뿐)
+        # 핀된 이미지 + 응답 없는 TCP sink로 직접 잰다.
         run: bash tests/gates/skopeo-timeout-smoke.sh
-      # app-shared .mts가 node strip-types(앱 레포 secret:seal 경로)에서도 실행됨을 required gate가 보장 (A.5 F1·pass3) —
-      # 별도 잡이면 비-required라 무성 회귀라 gate 잡 안 스텝으로. node는 strip-types 실행용 의식적 예외(setup-bun ban 유일 예외).
-      # CI는 현 LTS node 24로 실행(strip-types는 node 23.6+ 무플래그 기본). .mts 계약 하한은 여전히 node 22.18(앱 레포 secret:seal 경로).
+      # app-shared `.mts`가 node strip-types(앱 레포 secret:seal 경로)에서도 도는지를 required gate가 보장한다
+      # — 별도 잡이면 비-required라 무성 회귀다. node는 setup-bun ban의 유일한 의식적 예외.
+      # CI는 node 24로 돌지만 **계약 하한은 node 22.18**이다(앱 레포가 그걸 쓴다).
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0 — node strip-types 실행용
-        # package-manager-cache:false — 이 스텝은 strip-types 스모크 전용(deps 캐시 불요). setup-node v5+는
-        # package.json packageManager 필드 감지 시 자동 캐시를 켜는데, bun은 setup-node 캐시 미지원이라 lockfile 부재로
-        # 깨질 수 있다(v6은 npm으로 한정해 bun이면 트립 안 되지만 의도를 명시해 못박는다).
+        # package-manager-cache:false — strip-types 스모크 전용이라 deps 캐시가 불필요하고, bun은
+        # setup-node 캐시 미지원이라 lockfile 부재로 깨질 수 있다(의도를 명시해 못박는다).
         with: { node-version: "24.14.0", package-manager-cache: false }
-      - run: tests/gates/app-shared-node-smoke.sh
+      - name: app-shared .mts strip-types 스모크 (node 계약 하한)
+        run: tests/gates/app-shared-node-smoke.sh

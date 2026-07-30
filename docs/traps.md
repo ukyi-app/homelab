@@ -7,7 +7,7 @@
 - **검사 방향**: `scripts/verify-traps.sh`는 아래 `guard` 열의 백틱 경로가 **실재하는지** + `docs/traps-detail.md`의
   `> 가드:` 주석 경로가 **이 원장에도 추적되는지**(역방향 guard-path-tie — SSOT↔원장 내용 드리프트 차단)를 본다(enforced인데
   파일 없음 = 거짓 안심 → 실패). 가드의 *내용 정확성*은 각 가드 테스트 자신이 책임진다.
-- **where**: `gate`=ci.yaml job `gate`가 수집 · `verify`=verify.yaml(pre-commit/sops/ledger) · `iac`=iac/tf-reconcile · `local`=make/pre-commit 로컬.
+- **where**: `gate`=ci.yaml job `gate`가 수집 · `iac`=iac/tf-reconcile · `local`=make/pre-commit 로컬.
 - 새 가드 테스트를 추가하면 이 표에도 한 줄 추가한다(리네임 시 verify-traps가 강제로 알려준다).
 
 | 함정 (traps-detail.md) | where | guard |
@@ -39,6 +39,7 @@
 | bats @test 이름 한글/CJK 디렉토리실행 침묵스킵 | gate | `tests/gates/test_check-skeleton-cjk.bats`, `tests/gates/test_check-skeleton-gate.bats` |
 | homepage EROFS(RO config)·apiserver egress(노드서브넷:6443 not ClusterIP) | gate | `platform/homepage/prod/test_homepage_render.bats`, `platform/homepage/prod/test_homepage_netpol.bats` |
 | GHA run 기본 셸 pipefail 부재(bash -e {0}) — tee 파이프 fail-open | gate | `tests/gates/test_workflow-pipefail.bats` |
+| GNU make가 recipe 종료코드를 자기 Error 2로 뭉갬 — make 계층 skip 신호는 마커+비-0까지 | gate | `tests/gates/test_guard-skip-signalling.bats` |
 | PG 메이저 업그레이드 3-이미지 동시 갱신(pg-tools digest 일관성) | gate | `tests/gates/test_pgtools-digest.bats`, `tests/test_dr-drill.bats` |
 | 로컬 자산 백업 체인(런북 tarball age 백업·인덱스 양방향) | gate | `scripts/backup-local-asset.sh`, `scripts/verify-runbook-index.sh`, `tests/test_backup-local-asset.bats` |
 | 재부팅 IP churn — instance 라벨 불안정(increase 누적 누출·on() 조인 422) | gate | `tools/check-alert-rules.ts`, `tests/test_alert_rules.bats` |
@@ -46,3 +47,16 @@
 | rollup 윈도 상한(라벨-값 상태 게이지는 W < `for:`) — bump phantom 오발화 + 우변 존재 가드 | gate | `tests/gates/vmalert-drift-firing-e2e.sh` |
 | bump-poll/** writer App 예약(인터록≠인증·R-46 수용 잔여·정적 가드=best-effort 변경감지기·Seam C 권위) | gate | `tests/gates/test_bump_poll_ruleset.bats` |
 | emptyDir sizeLimit vs 런타임 다운로드 페이로드(부팅↔evict 루프·DiskPressure=False·로그 파이프라인 연쇄) | gate | `platform/victoria-stack/prod/test_grafana_plugin_budget.bats` |
+| 열거 붕괴 → vacuous green(프로세스 치환 rc 미전파·커맨드 치환 stderr 삼킴·부정 카운트 rc=2) | gate+verify | `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `policy/ledger.rego`, `tests/test_ledger.bats` |
+| PreToolUse 훅 종료코드(0=허용·2=차단·그 외=비차단) — 1/4 복사 시 fail-open | local | `tests/gates/test_manifest-guard.bats` |
+| GHA job-level skip은 run conclusion에 안 보인다(스텝 전부 skip이어도 job은 success) | gate+iac | `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats` |
+| 이미지 핀의 존재≠일치≠소유자(하드코딩 소비처 목록·base64 은닉·차트 내부 mutable tag) | gate | `tools/check-image-ownership.ts`, `policy/image-ownership.json`, `tests/gates/test_image-ownership.bats`, `tests/gates/test_pgtools-digest.bats` |
+| vmalert replay rulesDelay = 게이트 시간의 전부(비율 아닌 절대 지연·체인 없으면 순수 낭비) | gate | `tests/gates/test_vmalert-e2e-replay-timing.bats`, `tests/gates/lib/vmalert-e2e.sh` |
+| make -n은 드라이런이 아니다 — 레시피의 $(MAKE)는 -n에서도 실행(그 출력을 데이터로 읽는 가드 2종이 오염) | gate | `tests/gates/test_make-ci-parity.bats`, `tools/check-ci-parity.ts`, `policy/ci-parity.json` |
+| tracked 열거 게이트는 untracked 파일을 안 본다(로컬 초록 ↔ CI red 양립 — `git add` 전 make ci는 무측정) | gate | `tests/gates/test_make-ci-parity.bats`, `Makefile` |
+| 체이닝 레이스의 두 번째 얼굴 — record는 있는데 ALERTS 전무(대조 알림은 비체이닝이라 못 막음·병렬화가 깨운 flake) | gate | `tests/gates/vmalert-drift-firing-e2e.sh` |
+| 소스의 리터럴 NUL 1바이트 → 그 파일이 모든 grep 가드에 투명(매치 수는 1이라 스캔한 것처럼 보인다) | gate | `scripts/check-skeleton.sh`, `tests/gates/test_scan-floor.bats` |
+| 디스크 자기-상한 > 자기 볼륨 선언(GB=10⁹ vs Gi=2³⁰ 혼동·PVC는 축소 불가·존재 grep은 못 잡음) | gate | `tools/check-disk-caps.ts`, `tests/gates/test_disk-caps.bats` |
+| 고아 PVC는 Bound다 — `phase == Released` 감사는 cascade=orphan 잔재를 원리적으로 못 잡는다 | local | `scripts/audit-orphan-pv.sh` |
+| bats 중간 `[[ ]]`는 침묵 통과 — 거짓인데 ok (grep -qF 변환 시 `--` 종결자 필수) | gate | `scripts/check-bats-style.sh` |
+| 셸 문자열의 `$VAR한글` — bash 3.2만 죽고 CI(5.2)는 초록이라 게이트가 원리적으로 못 잡는다 | gate | `tests/gates/test_shell-bash32-traps.bats` |

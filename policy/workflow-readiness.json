@@ -1,0 +1,92 @@
+{
+  "_readme": [
+    "워크플로 준비상태 원장 — '자격/설정이 없어 job이 통째로 skip됐는데 run은 초록'인 경로의 SSOT.",
+    "가드: tools/check-workflow-readiness.ts (정적 = ci.yaml gate · 런타임 = 각 워크플로의 accounting job).",
+    "산문 SSOT: CONTRIBUTING.md '워크플로 준비상태 회계' 절 · docs/traps-detail.md 「GHA job-level skip은 run conclusion에 안 보인다」 항목.",
+    "",
+    "왜 원장인가: GHA job conclusion 어휘(success|failure|cancelled|skipped)에는 '자격이 없어 안 돌았다'가",
+    "없다. 스텝-레벨로 게이트된 job은 스텝을 전부 skip해도 job이 **success**로 끝난다(2026-07-27 라이브",
+    "실측: tf-reconcile drift-github/drift-tailscale). 그래서 '무엇이 반드시 돌아야 하는가'를 여기 선언하고,",
+    "accounting job이 needs.*.result / needs.*.outputs.executed로 매 run 대조한다.",
+    "",
+    "state 어휘 — **선언되지 않은 준비상태 게이트는 정적 가드가 red로 막는다**(미선언 = 통과 불가):",
+    "  required     … 반드시 실행돼야 한다. 미실행 = severity에 따라 error(exit 1) 또는 warning(telegram).",
+    "  unconfigured … 자격 미등록이 **알려진 갭**이다. since·owner_action 필수. 경고만 내고 run은 초록.",
+    "                 (선언은 면제가 아니라 **계상**이다 — 매 run 로그·job summary에 남고 원장이 이유를 진다.)",
+    "  optional     … 조건부 skip이 **설계상 정당**하다(백스톱이 따로 있다). 회계 대상 아님.",
+    "severity는 required 전용이다: error=보안/권위 경로(run을 빨갛게) · warning=가용성(telegram만).",
+    "expect_executed는 required 항목 수와 **일치해야 한다**(정적 가드가 강제) — 원장에서 항목이 조용히",
+    "사라지는 열거 붕괴를 막는 바닥값이다."
+  ],
+  "workflows": {
+    "tf-reconcile.yaml": {
+      "accounting_job": "accounting",
+      "expect_executed": 1,
+      "jobs": {
+        "reconcile": {
+          "state": "required",
+          "severity": "error",
+          "why": "cloudflare DNS/tunnel 수렴의 최후 보루 — push-apply(iac.yaml)가 취소·실패해도 30분마다 수렴시킨다. CF 토큰/R2 키가 회전 중이거나 회수되면 apps.json↔라이브 드리프트가 조용히 정지한다(teardown 후 DNS 자동 회수·create-app 공개가 모두 멈춘다)."
+        },
+        "drift-github": {
+          "state": "unconfigured",
+          "since": "2026-07-27",
+          "why": "github 루트(branch protection contexts=[\"gate\"] · CI Actions 시크릿)의 plan-only 드리프트 감시. TF_GITHUB_TOKEN이 Actions 시크릿에 없어 **한 번도 실행된 적이 없다**(2026-07-27 gh 실측: 스텝 전부 skip, job은 success). 즉 신뢰 앵커가 무감시 상태다.",
+          "owner_action": "⚠️ owner-local .env.secrets의 TF_VAR_github_token(policy/credential-expiry.json 'github-tf-root-pat')을 **재사용하지 말 것** — 그건 Administration/Secrets R&W라 CI에 넣으면 tf-reconcile.yaml이 명시한 보안 모델(광범위 PAT를 CI에 저장 금지)을 정면으로 위반하고, 이 레포의 모든 워크플로가 읽을 수 있는 자리에 repo-admin 자격을 놓는 것이 된다. **별도의 읽기 전용 fine-grained PAT**를 새로 만들어(homelab 레포 한정 · Metadata:read + Administration:read + Secrets:read — plan 대상은 github_repository·github_branch_protection·github_repository_ruleset·github_actions_secret이다. 정확한 최소 집합은 실제 plan 1회로 확인할 것) TF_GITHUB_TOKEN·TF_GITHUB_OWNER에 등록하고, credential-expiry.json에 만료 원장을 추가한 뒤 이 항목을 state=required/severity=error로 승격."
+        },
+        "drift-tailscale": {
+          "state": "unconfigured",
+          "since": "2026-07-27",
+          "why": "tailscale 루트(ACL·auth-key·DNS nameserver)의 plan-only 드리프트 감시. TF_TAILSCALE_OAUTH_ID 미등록으로 실행된 적이 없다 — 내부 인입 경계(tailscale passthrough→:8443)와 노드 접근 ACL이 바뀌어도 CI 신호가 0이다.",
+          "owner_action": "**읽기 전용 스코프의 별도 Tailscale OAuth 클라이언트**를 새로 만들어(owner-local apply용 클라이언트를 재사용하지 말 것 — write 스코프를 CI에 두면 github 루트와 같은 이유로 보안 모델 위반) TF_TAILSCALE_OAUTH_ID·TF_TAILSCALE_OAUTH_SECRET·TF_TAILSCALE_DNS_NAMESERVER_IP를 Actions 시크릿에 등록하고, credential-expiry.json에 만료 원장을 추가한 뒤 state=required/severity=error로 승격. (plan만 돌므로 write 스코프는 불필요하다.)"
+        }
+      }
+    },
+    "bump-poll.yaml": {
+      "accounting_job": "accounting",
+      "expect_executed": 2,
+      "jobs": {
+        "reconcile": {
+          "state": "required",
+          "severity": "error",
+          "why": "낡은 auto-merge 인가 회수 — 워크플로 주석 자신이 '회수는 가용성이 아니라 **보안 속성**'이라고 못박은 대상이다(R-27/R-31). writer 자격이 비거나 회전 중이면 이 job이 통째로 skip되고, 그동안 bump-poll/* 브랜치의 무장된 PR이 낡은 머지 인가를 그대로 유지한다. **면제 불가** — tools/check-workflow-readiness.ts의 SECURITY_CRITICAL이 required+error를 정적으로 못박는다."
+        },
+        "poll": {
+          "state": "required",
+          "severity": "warning",
+          "why": "GHCR 폴링 bump(가용성). reader/writer 자격 회전 구간에 이미지 bump가 정지하는데 CI는 초록이다. 백스톱 ImageDigestDrift는 (a) 새 빌드가 푸시된 앱에만 발화하고 (b) 원인을 'ArgoCD sync 지연/태그 write-back 고장'으로 오귀속한다 — 실제 원인(reader 자격 만료)에 도달하지 못한다. 배포를 막지는 않으므로 run은 초록으로 두고 telegram으로 알린다."
+        }
+      }
+    },
+    "renovate.yaml": {
+      "accounting_job": "accounting",
+      "expect_executed": 1,
+      "jobs": {
+        "renovate": {
+          "state": "required",
+          "severity": "error",
+          "why": "주 1회 의존성·보안 갱신 PR의 유일한 생산자다. writer App 자격이 비면 갱신이 전면 정지하는데 신호가 0이고, **백스톱이 아예 없다**(bump-poll에는 ImageDigestDrift가 오귀속으로나마 있다). 주 1회 실행이라 red의 노이즈 비용도 낮다."
+        }
+      }
+    },
+    "iac.yaml": {
+      "accounting_job": "accounting",
+      "expect_executed": 1,
+      "jobs": {
+        "iac-plan": {
+          "state": "required",
+          "severity": "error",
+          "why": "PR 머지 전 cloudflare plan 미리보기. 시크릿이 없으면 스텝이 전부 skip되고 job summary가 비는데, 리뷰어는 빈 summary를 '변경 없음'으로 오독한다(정보 부재가 정보로 읽힌다). required check는 아니지만 PR에 red로 보이는 것이 정확한 신호다. ⚠️ fork PR은 구조적으로 시크릿을 못 받으므로 accounting job 자신이 fork를 제외한다(원장 면제가 아니라 트리거 경계)."
+        }
+      }
+    },
+    "reusable-app-build.yaml": {
+      "jobs": {
+        "deploy-trigger": {
+          "state": "optional",
+          "why": "앱 레포가 HOMELAB_DISPATCH_APP 시크릿 쌍을 넘기지 않으면 즉시 디스패치를 skip하는데, 이건 **설계된 백스톱 경로**다 — homelab bump-poll 크론(10분)이 같은 일을 하므로 skip해도 배포가 멈추지 않는다(쌍 중 하나만 오는 부분 설정은 그 자리에서 exit 1로 이미 fail-closed). 게다가 workflow_call이라 accounting job을 두면 caller(앱 레포) 컨텍스트에서 도는데, homelab 원장이 외부 레포의 시크릿 등록 여부를 판정하는 것은 경계 위반이다."
+        }
+      }
+    }
+  }
+}

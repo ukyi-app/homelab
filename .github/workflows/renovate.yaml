@@ -83,3 +83,32 @@ jobs:
           RENOVATE_REQUIRE_CONFIG: "required" # 기본값이지만 명시한다 — 위 opt-in 메커니즘이 이 값에 걸려 있다
           RENOVATE_ONBOARDING: "false" # 온보딩 PR 금지(설정 없는 레포는 스킵이지 온보딩 대상이 아니다)
           LOG_LEVEL: info
+
+  # ── 준비상태 회계 — 게이트 **밖**의 감시자 (G-09) ───────────────────────────────────────────
+  # writer App 자격이 비거나 회전 중이면 renovate job이 통째로 skip되고 run은 초록이다. 이 워크플로는
+  # 의존성·보안 갱신 PR의 **유일한 생산자**이고 백스톱이 아예 없다(bump-poll엔 ImageDigestDrift가
+  # 오귀속으로나마 있다) — 주 1회라 red의 노이즈 비용도 낮으므로 원장에서 severity=error다.
+  # ⚠️ `if: !cancelled()` 필수(tf-reconcile 회계 job 주석과 동일 이유).
+  accounting:
+    needs: [preflight, renovate]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: ./.github/actions/setup-bun
+      - id: acct
+        env:
+          WORKFLOW_NEEDS: ${{ toJSON(needs) }}
+        run: bun tools/check-workflow-readiness.ts --workflow renovate.yaml
+      - name: telegram notify (required 미실행 · 원장 불일치 시에만 — 선언된 갭은 제외)
+        if: always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')
+        uses: ./.github/actions/telegram-notify
+        with:
+          status: ${{ steps.acct.outcome == 'failure' && 'failure' || 'drift' }}
+          source: 준비상태
+          title: 워크플로 준비상태
+          ident: "renovate — 원장 대비 미실행/불일치"
+          body: ${{ steps.acct.outputs.body }}
+          link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}

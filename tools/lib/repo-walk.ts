@@ -131,6 +131,76 @@ const SCOPES: Record<string, ScopeDef> = {
     include: /\.(ya?ml|sh|m?[jt]s|py)$/,
     exclude: [/(^|\/)charts\//, ...TEST_HARNESS],
   },
+  // 가드 진입점 — "이 레포에서 무엇이 불변식을 강제한다고 주장하는가". 권위 경로 회계(G1)의 열거 대상.
+  // 세 계열이 **하나의 스코프**인 이유: 셋 다 "실행되면 불변식을 판정하고 비-0으로 막는" 같은 종류이고,
+  // 회계가 묻는 질문("권위 경로가 하나라도 있는가")이 계열과 무관하게 동일하다. 계열별로 쪼개면
+  // 소비자가 세 번 열거하고 합치는 사본이 생긴다.
+  // ⚠️ `tests/gates/*.sh`를 **포함**한다 — ci.yaml이 직접 부르는 8개 e2e 하네스가 여기 산다. 이들은
+  // `*test_*.bats`가 아니라 check-bats-accounting의 도메인 밖이고, 그래서 지금까지 회계 커버리지가 0이었다
+  // (9번째가 추가되고 잊혀도, 기존 하나가 삭제되고 파일만 남아도 감지되지 않는다 — 이 스코프가 그 구멍이다).
+  //   그래서 공용 TEST_HARNESS 제외를 쓰면 안 된다: 그 어휘의 `tests?/`가 이 8개를 통째로 지운다.
+  // ⚠️ `tests/gates/lib/`(하네스가 source하는 프리미티브)는 진입점이 아니라 빠져야 하는데, **별도
+  // 제외 규칙을 두지 않는다** — include의 `[^/]+`가 이미 하위 디렉토리를 못 넘는다. 처음엔 명시
+  // 제외를 뒀다가 mutation(규칙 삭제 → red여야 함)이 초록이라 죽은 규칙임이 드러나 지웠다.
+  // 지키는 것 없는 규칙을 남기면 그게 곧 "아무도 대조하지 않는 주장"이다.
+  // ⚠️ **이름 규약은 프록시이고, 강제되지 않는다.** 규약 밖 이름의 새 가드는 조용히 열거에서 빠진다 —
+  // 이 스코프가 아는 것은 "이 레포가 가드에 쓰는 이름 모양"뿐이다. 실제 성질(불변식을 판정하고
+  // 비-0으로 막는가)로 열거하려면 실행 관측이 필요하고 그건 후속(티켓 08)이다.
+  // 최소 방어로 `test_repo-walk.bats`에 **역방향 단언**을 둔다: 규약 모양의 추적 파일은 반드시 열거된다
+  // (정방향만 두면 include가 좁아져도 "규약 밖 0건"은 계속 참이라 통과한다 — 실제로 그렇게 뚫렸다).
+  guards: {
+    kind: "manifests",
+    source: "tracked",
+    root: "",
+    // `tools/`도 `scripts/`와 **같은 접두 쌍**을 받는다 — 비대칭이면 `tools/verify-*.ts`가 조용히
+    // 회계 밖에 남는다(실측: `tools/verify-db-marker.ts`가 그렇게 빠져 있었다).
+    // 접두(`check-`/`verify-`)뿐 아니라 **접미(`-guard.sh`/`-check.sh`)도 받는다** — 레포가 실제로
+    // 쓰는 가드 이름 모양이 둘이다. 접두만 보던 동안 `sops-guard.sh`(ci.yaml required 스텝)와
+    // `secret-cert-check.sh`(skip 규약 대상)가 회계 밖에 있었다(리뷰 실측).
+    include:
+      /^(scripts\/((check|verify)-[^/]+|[^/]+-(guard|check))\.sh|tools\/(check|verify)-[^/]+\.ts|tests\/gates\/[^/]+\.sh)$/,
+    exclude: [],
+  },
+  // "이 파일이 이미지 참조를 담을 수 있는가" — **소유권 회계(G2)** 전용. `platform-image-refs`와
+  // 겹쳐 보이지만 **다른 질문에 답한다**:
+  //   platform-image-refs = "digest로 핀해야 하는가" → 벤더(barman-plugin·gateway-api CRD)를 **뺀다**.
+  //     수정 금지 파일이라 핀 요구의 대상이 아니기 때문이다.
+  //   image-ownership     = "누가 이걸 최신으로 유지하는가" → 벤더를 **포함한다**. 수정 금지여도
+  //     답이 있어야 하고(re-vendor 절차), 답이 없으면 그게 곧 결함이다. 실측(2026-07-28):
+  //     barman-plugin manifest의 `SIDECAR_IMAGE`가 base64로 Secret 안에 tag-only로 들어 있어
+  //     핀 게이트·Renovate·grep 어디에도 안 걸린 채 데이터 내구성 경로에 있었다(D-3).
+  // apps·ops도 함께 본다 — 소유자 질문은 platform에 국한되지 않는다(ops/는 빌드 소스, apps/는 bump-poll).
+  // ⚠️ 테스트 하네스는 뺀다: 픽스처 안의 이미지 문자열은 실물이 아니라 **주장**이라 소유자가 없는 게 정상이다.
+  // ⚠️ 스코프가 곧 회계의 지평이다 — 여기서 끊기면 그 밖의 이미지는 **"전건 소유자 확정"이라는
+  // 초록 아래에서 조용히 사라진다**. 적대 검토가 두 갈래를 실측했다:
+  //   · `infra/` 제외 → `infra/k3s-bootstrap/storage/local-path-provisioner.yaml`의 mutable tag
+  //     (`rancher/local-path-provisioner:v0.0.36`)가 회계 밖이었다. 라이브에서 **모든 PV 데이터 경로**를
+  //     담당하는 파드다. renovate.json의 kubernetes manager도 `^platform/`·`^apps/`뿐이라 미도달이다.
+  //   · `.yaml`만 → `platform/cnpg/prod/restore-drill-script.sh`가 heredoc으로 매니페스트를 임베드해
+  //     런타임에 apply하는데(그 안에 CNPG `imageName:` digest가 있다) 확장자 필터가 통째로 놓쳤다.
+  //     실측: 그 digest를 다른 값으로 바꿔도 레포의 **어떤 게이트도 red가 되지 않았다**(42건 전건 ok).
+  //     같은 `repo:tag`가 두 digest로 갈리는 D-1 클래스가 확장자 하나로 재현된 것이다.
+  "image-ownership": {
+    kind: "manifests",
+    source: "tracked",
+    root: "",
+    //   · `.yaml`/`.sh`만 → `ops/`가 **죽은 분기**였다(그 아래 추적 파일은 Dockerfile·README뿐이라
+    //     스코프가 0건을 기여했는데 주석·테스트·README는 커버리지를 주장했다 — 적대 검토 지적).
+    //     Dockerfile의 `FROM`도 이미지 참조이고 base 이미지는 공급망이다. 넣어서 분기를 **살린다**.
+    include: /^(platform|apps|ops|infra)\/(.*\.(ya?ml|sh)|(.*\/)?Dockerfile)$/,
+    exclude: TEST_HARNESS,
+  },
+  // GHA 워크플로 — "이 레포에서 CI가 무엇을 실행하는가". 준비상태 회계(G-09)의 열거 대상.
+  // tracked 열거라 로컬 잔재(에디터 백업·워크트리)가 안 섞이고, 글롭이 깨지면 소비자 바닥값이 잡는다.
+  // ⚠️ 제외가 **비어 있는 게 맞다** — `_*.yaml`(내부 reusable)·`reusable-*.yaml`(cross-repo 계약)도
+  // 자기 job을 실행하므로 회계 대상이다. 이름으로 거르면 정확히 그 둘이 조용히 회계 밖으로 빠진다.
+  workflows: {
+    kind: "manifests",
+    source: "tracked",
+    root: ".github/workflows",
+    include: YAML_EXT,
+    exclude: [],
+  },
   // 앱 유닛. **필수 산출물로 거르지 않는다**(design-r1 R-1) — audit-orphans에겐 values.yaml 필터가
   // 맞지만 check-app-deploy는 그 파일의 **부재**를 잡아야 한다. 의미론적 필터는 소비자 쪽이다.
   // dir은 앱 루트(apps/<app>)다 — 소비자가 필요하면 /deploy/prod를 덧붙인다(컴포넌트 유닛과 동형).

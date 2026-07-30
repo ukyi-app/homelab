@@ -5,8 +5,10 @@
 # 다르지만 **골격은 동일**하다 — vmsingle 기동 → 합성 시계열 import → vmalert replay(⚠️ max_lookback
 # 주입) → ALERTS 질의. 그 골격만 여기 모은다. 알림별 산술/레그/픽스처는 각 하네스에 남는다.
 #
-# ⚠️ 형제 tests/gates/vmalert-drift-firing-e2e.sh는 **인라인 사본을 유지한다**(이미 머지된 회귀 가드 —
-#    행위 무변경 이관은 이 버그픽스의 범위 밖이다). 이 lib을 고칠 때 소비자는 재실행해 확인할 것.
+# ⚠️ 이 lib은 발화 e2e **6종 전부**의 replay 경로 SSOT다 — 인라인 사본은 0이다(마지막 사본이던
+#    tests/gates/vmalert-drift-firing-e2e.sh도 흡수됐다). 그 "사본 0"은 문서가 아니라
+#    tests/gates/test_vmalert-e2e-replay-timing.bats가 적극 단언한다. 고치면 소비자 전량이
+#    영향권이니 재실행해 확인할 것.
 #
 # 사용: source 후 caller가 `set -euo pipefail`을 소유한다(lib은 셸 옵션을 건드리지 않는다).
 
@@ -55,12 +57,16 @@ vme_cleanup() { # trap EXIT에서 호출
   [ -n "$VME_NET" ] && docker network rm "$VME_NET" >/dev/null 2>&1 || true
 }
 
-vme_start_vmsingle() { # $1=container name $2=vmsingle version → VME_BASE 설정
+# $3.. = vmsingle에 그대로 넘길 **추가 플래그**(선택). 하네스 고유 스토리지 의미(예: 드리프트 하네스의
+# `--dedup.minScrapeInterval` — 합성 KSM 시계열을 scrape 그리드에 정렬)를 인라인 사본 없이 표현하기 위한
+# 통로다. 넘기지 않으면 `"$@"`가 0개로 전개돼 기존 소비자의 명령줄은 **바이트 불변**이다.
+vme_start_vmsingle() { # $1=container name $2=vmsingle version [$3.. = 추가 플래그] → VME_BASE 설정
   local name="$1" ver="$2" port ready
+  shift 2
   VME_CONTAINERS="$VME_CONTAINERS $name"
   docker run -d --name "$name" --network "$VME_NET" -p 127.0.0.1:0:8428 \
     "victoriametrics/victoria-metrics:${ver}" \
-    --storageDataPath=/storage --retentionPeriod=100y --httpListenAddr=:8428 >/dev/null
+    --storageDataPath=/storage --retentionPeriod=100y --httpListenAddr=:8428 "$@" >/dev/null
   port="$(docker port "$name" 8428/tcp | head -1 | sed 's/.*://')"
   VME_BASE="http://127.0.0.1:${port}"
   ready=0
@@ -80,6 +86,36 @@ vme_flush() {
   curl -sf -X POST "$VME_BASE/internal/force_flush" >/dev/null
 }
 
+# ── replay 지연 파생 ────────────────────────────────────────────────────────────────────────────
+# `--replay.rulesDelay`는 룰마다 한 번씩 자므로 이 계열 게이트의 **벽시계 그 자체**다. sleep이 필요한
+# 이유는 딱 하나 — 체이닝 레이스: alert 룰이 record 룰의 remoteWrite 결과를 query_range 1회로 읽는데
+# 샘플이 아직 적재 전이면 결과가 통째로 비어 ALERTS=0(버그가 아닌데 RED)이 된다.
+# ⇒ **체인 없는 룰 파일에선 그 대기가 순수 낭비**라 파일에서 파생한다.
+# ⚠️ 체인 있는 파일에서 이 값을 낮추지 마라. "비율(rulesDelay ÷ flushInterval)만 지키면 된다"는 가설은
+#    실측으로 기각됐다 — 구속 조건은 비율이 아니라 **절대 지연 예산**이다. 돌아오는 것은 조용한 오답이
+#    아니라 **간헐적 거짓 RED**이고 그건 게이트를 신뢰 불가로 만든다.
+#    전문·실측치는 docs/traps-detail.md 「vmalert replay rulesDelay」가 SSOT.
+VME_DELAY_CHAINED=4s   # 체인 있음 — 실측으로 안전이 확인된 값(낮추지 말 것)
+VME_DELAY_PLAIN=1s     # 체인 없음 — vmalert 기본값
+
+# $1=룰 파일 → 4s(체인 있음) | 1s(체인 없음). **fail-closed**: 파싱이 실패하면 보수값(4s)이다.
+# 판정: 어떤 `record:` 이름이 **다른 룰의 expr에 등장**하면 체인이다.
+vme_rules_delay() {
+  local rules="${1:-}" rec exprs
+  [ -s "$rules" ] || { printf '%s' "$VME_DELAY_CHAINED"; return 0; }
+  rec="$(yq '.groups[].rules[] | select(has("record")) | .record' "$rules" 2>/dev/null | grep -v '^null$' || true)"
+  # record 룰이 하나도 없으면 체인은 성립할 수 없다(가장 흔한 경우 — r4 계열).
+  [ -n "$rec" ] || { printf '%s' "$VME_DELAY_PLAIN"; return 0; }
+  exprs="$(yq '.groups[].rules[].expr' "$rules" 2>/dev/null || true)"
+  # expr 추출이 실패했는데 record는 있다 → 체인 여부를 판정 못 한다 → 보수값.
+  [ -n "$exprs" ] || { printf '%s' "$VME_DELAY_CHAINED"; return 0; }
+  local r
+  for r in $rec; do
+    case "$exprs" in *"$r"*) printf '%s' "$VME_DELAY_CHAINED"; return 0 ;; esac
+  done
+  printf '%s' "$VME_DELAY_PLAIN"
+}
+
 vme_replay() { # $1=vmsingle 컨테이너명 $2=vmalert 버전 $3=룰파일(호스트) $4=eval $5=lookback $6=from(epoch) $7=to(epoch)
   # ⚠️ ?max_lookback=<queryStep> — **룩백 핀**. vmalert replay는 instant 질의가 아니라 /api/v1/query_range를
   #    쓰는데, VM의 range 질의 룩백(staleness)은 **플래그가 아니라 휴리스틱**이다(데이터 간격·질의 창에 따라
@@ -90,9 +126,14 @@ vme_replay() { # $1=vmsingle 컨테이너명 $2=vmalert 버전 $3=룰파일(호�
   #    ⚠️ 단, 이 핀이 **모든 소비자에서 load-bearing인 것은 아니다**(vmalert-bulkssd: 일 1회 push에선 VM이
   #    애초에 24h 구멍을 보간하지 않아 핀 유무가 판정 동일 — 실측). 보간 방지의 **최종 보증은 각 하네스의
   #    "결함 픽스처가 발화하면 FAIL" 레그**이지 이 핀이 아니다. 핀은 방어선이지 증명이 아니다.
-  local vm="$1" ver="$2" rules="$3" eval_iv="$4" lookback="$5" from="$6" to="$7" dir base
+  #
+  # rulesDelay는 **룰 파일에서 파생**한다(위 vme_rules_delay 참고 — 체인 없으면 그 대기는 순수 낭비다).
+  # flushInterval은 500ms 그대로 둔다: 실측상 이걸 줄여도 레이스는 안 사라졌고(구속 조건이 비율이 아니라
+  # 절대 지연이다), 지금 값은 이미 rulesDelay보다 훨씬 작아 제약이 아니다.
+  local vm="$1" ver="$2" rules="$3" eval_iv="$4" lookback="$5" from="$6" to="$7" dir base delay
   dir="$(cd "$(dirname "$rules")" && pwd)"
   base="$(basename "$rules")"
+  delay="$(vme_rules_delay "$rules")"
   docker run --rm --network "$VME_NET" -v "$dir:/rules:ro" \
     "victoriametrics/vmalert:${ver}" \
     --rule="/rules/$base" \
@@ -104,7 +145,7 @@ vme_replay() { # $1=vmsingle 컨테이너명 $2=vmalert 버전 $3=룰파일(호�
     --replay.timeFrom="$(vme_iso "$from")" \
     --replay.timeTo="$(vme_iso "$to")" \
     --replay.disableProgressBar \
-    --replay.rulesDelay=4s \
+    --replay.rulesDelay="$delay" \
     --loggerLevel=WARN >/dev/null
   # remoteWrite flush를 눌러 판정 전에 ALERTS가 확실히 질의 가능해지도록.
   vme_flush
@@ -141,9 +182,9 @@ vme_alert_series() { vme_promql "count(count_over_time(ALERTS{alertname=\"$1\"}[
 
 # ── 하네스-무관 공통 골격 ───────────────────────────────────────────────────────────────────────────
 # 아래는 알림별 산술과 무관한 하네스 골격이다(종료 규약·룰 추출·매니페스트 파생·판정 집계·작업공간).
-# ⚠️ 형제 tests/gates/vmalert-bulkssd-firing-e2e.sh·vmalert-drift-firing-e2e.sh는 **인라인 사본을 유지한다**
-#    (이미 머지된 보존 계약의 측정 도구 — 다른 기능 작업 중에 바꾸지 않는다: 백로그 F-5). 그쪽은 접두사 없는
-#    동명 함수를 source **뒤에** 자체 정의하므로 그쪽 정의가 이긴다 → 아래 `vme_` 접두 추가는 무해하다.
+# ⚠️ 형제 bulkssd·drift 하네스는 접두사 없는 `fault`/`contract`/`fail`/`pass`를 source **뒤에** 자체
+#    정의한다 — 진단 라벨("(preflight)")과 판정 집계는 **하네스-로컬 정책**이라 남긴 것이고, 동명이므로
+#    그쪽 정의가 이긴다. 프리미티브(질의·docker·매니페스트 파생·작업공간)는 전부 여기로 흡수됐다.
 
 # 종료 규약: 2 = HARNESS FAULT/CONTRACT(전제 붕괴·vacuity) · 1 = leg FAIL · 0 = OK
 vme_fault()    { echo "HARNESS FAULT: $*" >&2; exit 2; }

@@ -12,7 +12,7 @@ k3s 단일 노드(Mac mini, OrbStack VM) 홈랩의 GitOps 모노레포. ArgoCD�
 | `platform/` | ArgoCD가 싱크하는 GitOps 컴포넌트 — **전체 목록은 README 디렉토리 지도**(check-skeleton 강제) |
 | `platform/charts/app` | 모든 앱이 쓰는 공유 Helm 차트 (SSOT) |
 | `apps/<name>/deploy/prod/` | 앱별 values + SealedSecret + `.bindings.json`(db/redis·autoDeploy SSOT) + `source-repo`(외부 레포 바인딩) |
-| `tools/` | 앱 플랫폼 DX **Bun/TS CLI** (`create-app`/`activate-app`·`audit-orphans` 등 — 변이 디스패처·`bump-poll`이 호출) + 단위 테스트(`tools/tests/`). top-level 24개 + `lib/` 12개 `.ts`(bun 전용) + app-shared 2개 `.mts`(bun + node≥22.18 strip-types 양립) |
+| `tools/` | 앱 플랫폼 DX **Bun/TS CLI** (`create-app`/`activate-app`·`audit-orphans` 등 — 변이 디스패처·`bump-poll`이 호출) + 단위 테스트(`tools/tests/`). top-level 37개 + `lib/` 12개 `.ts`(bun 전용) + app-shared 2개 `.mts`(bun + node≥22.18 strip-types 양립) |
 | `scripts/` | 클러스터/DR 운영·시크릿 **셸 스크립트** (bootstrap·seed/seal·dr-drill·`check-*` 게이트·run-bats — `make`/CI 게이트가 호출). cf. `infra/k3s-bootstrap/*.sh` = VM·k3s·스토리지 substrate 부트스트랩 |
 | `policy/` | 메모리 원장 OPA 정책 (`bun run verify:ledger` 게이트) |
 | `docs/memory-ledger.md` | 메모리 예산 SSOT — limit 합계 ≤ 10240Mi, CI 강제 |
@@ -26,7 +26,7 @@ make verify        # 기반 게이트: skeleton + 원장(conftest) + sops 라운
 make chart-test    # 공유 차트: 3 kind(web/worker/site) 렌더 + kubeconform + bats
 make tf-validate   # terraform fmt+validate (3 루트)
 bats tools/tests/ infra/k3s-bootstrap/tests/          # 툴링/부트스트랩 테스트
-make verify-posture   # [live] posture 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 필요(없으면 skip)
+make verify-posture   # [live] posture 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 필요(부재=SKIP 신호·비-0)
 export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt
 kustomize build --enable-helm --enable-alpha-plugins --enable-exec platform/<comp>/prod  # KSOPS 풀 렌더
 export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터 접근
@@ -43,7 +43,6 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 내부 호스트 접미사는 `home.<도메인>` (Gateway `web-internal-tls` 리스너 규약 — 내부 인입은 tailscale passthrough→:8443뿐).
 - 벤더 파일 수정 금지: `platform/*/prod/charts/`(helm 캐시, untracked), barman-plugin manifest,
   gateway-api CRD. `Chart.yaml`의 파스칼케이스는 Helm 고정 규약이다.
-- `docs/plans/`는 역사 기록 — 수정하지 않는다.
 - **네이밍 규약**: 워크플로는 전부 `.yaml`(reusable 포함). `_*.yaml`=내부 reusable(동명 변이 디스패처가
   호출) vs `<action>.yaml`=공개 변이 디스패처(workflow_dispatch) vs `reusable-*.yaml`=cross-repo 공개 계약(외부 앱 레포가 `@main`으로 호출 — 파일명·입력이 계약).
   스키마 `*-schema.json`=tools 계약(`app-config`/`app-deploy`) vs `values.schema.json`=Helm 고정.
@@ -88,6 +87,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - Alertmanager telegram 전송 검증 메트릭
 - ConfigMap 변경 파드 자동 재시작 없음
 - bats bash 3.2 중간 [[ ]] 침묵 통과
+- 셸 문자열의 `$VAR한글` — bash 3.2가 멀티바이트를 변수명에 삼킨다
 - helm 차트 CRD includeCRDs
 - sealed-secrets patch-mode 대상 Secret 어노테이션
 - gh pr merge --auto clean PR 에러
@@ -97,6 +97,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - tf 루트 관리 모델 CI vs 로컬
 - 상주 워크로드 자원 limit 블라인드스팟
 - GHA run 기본 셸 pipefail 부재(bash -e {0})
+- GNU make가 recipe 종료코드를 자기 Error 2로 뭉갠다
 - ArgoCD Notifications telegram native 함정
 - PG 메이저 업그레이드 3-이미지 동시 갱신
 - 베스포크 공개 노출은 platform_hosts
@@ -106,6 +107,17 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭
 - bump-poll/** 예약 룰셋 — 인터록≠인증·정적 가드는 변경 감지기
 - emptyDir sizeLimit vs 런타임 다운로드 페이로드
+- 열거 붕괴 → vacuous green (프로세스 치환·커맨드 치환·부정 카운트)
+- PreToolUse 훅 종료코드 — fail-closed는 exit 2뿐
+- vmalert replay rulesDelay — 비율 아닌 절대 지연·체인 없으면 순수 낭비
+- make -n은 드라이런이 아니다 — 레시피의 $(MAKE)는 -n에서도 실행된다
+- tracked 열거 게이트는 untracked 파일을 아예 안 본다 — 로컬 초록이 CI를 예고하지 못한다
+- 체이닝 레이스의 두 번째 얼굴 — record는 있는데 ALERTS가 전무(병렬화가 깨운 flake)
+- 소스의 리터럴 NUL 한 바이트가 그 파일을 모든 grep 가드에게 투명하게 만든다
+- 디스크 자기-상한이 자기 볼륨 선언보다 크다 — GB(10⁹) vs Gi(2³⁰)
+- 고아 PVC는 Bound다 — `phase == Released`만 보는 감사는 원리적으로 못 잡는다
+- GHA job-level skip은 run conclusion에 안 보인다 — 스텝 전부 skip이어도 job은 success
+- 이미지 핀의 *존재* ≠ *일치* ≠ *소유자* — 하드코딩 소비처 목록은 자기 자신에게만 정확하다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

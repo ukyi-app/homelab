@@ -32,6 +32,9 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@bash scripts/check-app-deploy.sh
 	@bun tools/check-resource-limits.ts
 	@bun tools/check-alert-rules.ts
+	@bun tools/check-guard-authority.ts
+	@bun tools/check-workflow-readiness.ts
+	@bun tools/check-image-ownership.ts
 	@bash scripts/check-app-netpol.sh
 	@bash scripts/check-image-pins.sh
 	@scripts/verify-ledger.sh
@@ -94,47 +97,135 @@ chart-test: ## 모든 kind에 대해 app 차트 렌더+검증
 	bats platform/charts/app/tests/
 	bash platform/charts/app/tests/render.sh
 
+# make ci가 도구 부재로 건너뛴 게이트 스텝을 모으는 원장(마지막 줄이 SKIP 마커 + exit 4로 낸다).
+CI_UNEVAL := .make-ci-uneval
+
+
+.PHONY: ci-guard-tracked
+ci-guard-tracked:
+# ⚠️ **추적되지 않은 게이트 대상 파일이 있으면 여기서 멈춘다**(ci의 첫 전제 — 1분짜리 chart-test 앞에서 끊는다).
+#    이 레포의 게이트는 대부분 `git ls-files`로 열거한다(하드코딩 글롭이 리네임에 조용히 0매치되는 것을
+#    피하려는 의도적 선택). 그 결과 untracked 파일은
+#    **로컬에서 측정 대상 밖**인데 커밋되는 순간 CI에서는 측정된다 → `make ci` 초록이 gate 실패를 예고하지
+#    못한다. 실측(2026-07-28): 새 tools/*.ts를 `git add` 전에 make ci로 검증해 1671건 전건 초록이었는데,
+#    커밋 직후 CI에서 shebang 규약 위반으로 red가 났다. 로컬이 그 파일을 **아예 안 본** 것이다.
+#    ⇒ 이건 "재현했는데 실패"가 아니라 **"재현하지 못했다"**이므로 skip 신호(마커 + exit 4)가 맞다.
+	@u="$$(git ls-files --others --exclude-standard -- tools scripts tests platform apps policy infra .github docs Makefile | head -20)"; if [ -n "$$u" ]; then echo "SKIP: ci: 추적되지 않은 게이트 대상 파일이 있어 재현이 성립하지 않는다(게이트는 tracked 열거를 쓴다 — 이 파일들은 로컬에서 측정되지 않고 커밋 후 CI에서만 측정된다). \`git add\` 후 다시 실행하라: $$(echo $$u)" >&2; exit 4; fi
+
 .PHONY: ci
-ci: m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate'를 로컬에서 그대로 재현(bats 수집은 run-bats.sh SSOT)
+ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yaml job 'gate' 재현(차이는 policy/ci-parity.json에 계상)
+# ⚠️ "그대로 재현"이라고 쓰지 않는다 — 그건 오랫동안 거짓이었다(실측: gate run 스텝 19건 중 8건이 여기
+#    없었는데 패리티 테스트는 초록이었다. 하드코딩된 5개 토큰만 대조했고 하필 그 5개가 전부 미러돼 있었다).
+#    이제 **모든 차이는 policy/ci-parity.json에 계상**되고 tools/check-ci-parity.ts가 강제한다:
+#    여기서 스텝이 빠지면 mirrored 대조가 red, gate에 스텝이 늘면 미계상으로 red다.
+	@rm -f $(CI_UNEVAL)
 	bun run typecheck
 	bun run verify:ledger
 	bun tools/audit-orphans.ts --ci
 	@./scripts/check-skeleton.sh
+	bun tools/check-guard-authority.ts
+	bun tools/check-image-ownership.ts
+	bun tools/check-workflow-readiness.ts
+	bun tools/check-ci-parity.ts
+# 실 도메인 가드 — ci.yaml gate의 같은 이름 스텝과 짝이다(패리티 원장이 전건 대조한다).
+# 이 7종은 CI에서 bats를 통해서만 돌았고, 같은 bats 파일에 픽스처 @test가 섞여 있어 "실 레포를 검사하는
+# 한 줄"이 지워져도 G1이 초록을 유지했다. 여기서도 레포 자신에 대해 직접 돌린다.
+	bash scripts/check-doc-index.sh
+	bash scripts/check-bats-accounting.sh
+	bash scripts/check-app-deploy.sh
+	bash scripts/check-app-netpol.sh
+	bash scripts/check-image-pins.sh
+	bun tools/check-resource-limits.ts
+	bun tools/check-alert-rules.ts
+	bun tools/check-disk-caps.ts
 	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
-	@files=$$(git ls-files '*.enc.yaml'); if [ -n "$$files" ]; then scripts/sops-guard.sh $$files; fi
+	@bash scripts/sops-guard.sh
+# ⚠️⚠️ 게이트 스텝을 **서브-make로 묶지 않는다.** GNU make는 `$(MAKE)`가 있는 recipe 줄을 `-n`에서도
+#    **실제로 실행한다**(재귀 make 플래그 전파를 위한 문서화된 동작). 이 레포는 `make -n ci` 출력을
+#    데이터로 읽으므로(check-ci-parity 미러 대조 · check-guard-authority venue 수집) 서브-make 하나가
+#    드라이런을 부수효과로 바꾼다 — 실측: `make -n ci` 한 번에 docker e2e가 통째로 돌았다.
+#    ⇒ 각 스텝은 **자기 줄에** 둔다. cf. docs/traps.md 「make -n은 드라이런이 아니다」
+#
+# 아래 도구들(actionlint·docker·node)은 m6-tools 필수가 아니다(gate 러너엔 항상 있다). 부재 시 그 스텝은
+# **미평가 원장에 이름을 남기고** 넘어가고, 마지막 줄이 규약대로 `SKIP:` 마커 + exit 4를 낸다.
+# ⚠️ 여기서 개별적으로 `SKIP:`를 내면 안 된다 — 마커를 내면서 종료코드가 0이면 **호출자에겐 여전히 성공**이고,
+#    그게 이 레포가 금지한 패턴이다(CONTRIBUTING '가드 skip 신호', scripts/check-skip-signalling.sh가 강제).
+#    docker가 없으면 make ci는 gate를 재현하지 **못한** 것이고, 0으로 끝나는 것이 이 원장이 없애려는 거짓말이다.
+	@if command -v actionlint >/dev/null 2>&1; then actionlint; \
+	  else echo "actionlint(워크플로 정적 검사)" >> $(CI_UNEVAL); fi
 	@if command -v docker >/dev/null 2>&1; then bash tests/gates/alertmanager-render-e2e.sh; \
-	  else echo "ci: docker 없음 → telegram-render-e2e 스킵(gate에선 실행됨)" >&2; fi
+	  else echo "telegram-render-e2e" >> $(CI_UNEVAL); fi
+	@if command -v docker >/dev/null 2>&1; then bash tests/gates/vector-validate.sh; \
+	  else echo "vector-validate" >> $(CI_UNEVAL); fi
+	@if command -v docker >/dev/null 2>&1; then bash tests/gates/vmalert-rules-validate.sh; \
+	  else echo "vmalert-rules-validate" >> $(CI_UNEVAL); fi
+	@if command -v docker >/dev/null 2>&1; then bash tests/gates/skopeo-timeout-smoke.sh; \
+	  else echo "skopeo-timeout-smoke" >> $(CI_UNEVAL); fi
+	@if command -v node >/dev/null 2>&1; then bash tests/gates/app-shared-node-smoke.sh; \
+	  else echo "app-shared-node-smoke" >> $(CI_UNEVAL); fi
+# 발화 e2e는 전량 **병렬**이다(병렬이 안전한 전제는 ci.yaml의 같은 스위트 주석이 SSOT).
+# ⚠️ 여긴 글롭, ci.yaml은 **리터럴 경로**다. 중복이 아니라 역할 분담이다 — check-guard-authority가
+#    venue(ci.yaml run 텍스트 · `make -n` 출력)에서 가드 경로를 찾으므로 하네스의 "권위 경로"는
+#    ci.yaml이 제공한다. 그래서 여기선 글롭을 써도 권위가 유지되고, ci.yaml 쪽 목록이 레포와
+#    어긋나면 거기 교차 대조가 red를 낸다.
+	@if ! command -v docker >/dev/null 2>&1; then \
+	  echo "vmalert-*-firing-e2e.sh 전량" >> $(CI_UNEVAL); \
+	else \
+	  hs="$$(git ls-files 'tests/gates/vmalert-*-firing-e2e.sh')"; \
+	  n="$$(printf '%s\n' "$$hs" | grep -c . || true)"; \
+	  if [ "$${n:-0}" -lt 3 ]; then echo "발화 e2e 하네스 $${n:-0}건 < 3 — 열거 붕괴(무측정 초록)" >&2; exit 1; fi; \
+	  echo "발화 e2e $$n건 병렬 실행"; d="$$(mktemp -d)"; pids=""; \
+	  for h in $$hs; do bash "$$h" > "$$d/$$(basename $$h).log" 2>&1 & pids="$$pids $$!:$$h"; done; \
+	  fail=0; \
+	  for p in $$pids; do pid="$${p%%:*}"; h="$${p#*:}"; \
+	    if wait "$$pid"; then echo "PASS $$h"; else echo "FAIL $$h" >&2; fail=1; fi; done; \
+	  for h in $$hs; do echo "----- $$h"; cat "$$d/$$(basename $$h).log"; done; \
+	  rm -rf "$$d"; exit $$fail; \
+	fi
 
+	@if [ -s $(CI_UNEVAL) ]; then echo "SKIP: ci: 로컬에 도구가 없어 평가하지 못한 게이트 스텝이 있다 — $$(tr '\n' ' ' < $(CI_UNEVAL))(gate에선 전부 실행된다)" >&2; rm -f $(CI_UNEVAL); exit 4; fi
 .PHONY: reset-pg-archive
 reset-pg-archive: ## [DR ④] R2 serverName pg 아카이브 정리(재구축 후 아카이빙 재개). 기본 dry-run; 실제 정리는 ARGS=--purge
 	@scripts/reset-pg-r2-archive.sh $(ARGS)
 
+# --- 도메인 부재 시 SKIP 신호를 내는 가드 진입점 ---
+# 규약(CONTRIBUTING '가드 skip 신호'): 도메인이 없으면 `SKIP: <타깃>: <이유>` 마커 + recipe exit 4.
+# ⚠️ GNU make는 recipe 종료코드를 자기 Error 2로 뭉갠다 — make 계층에서 관측 가능한 신호는 **마커 + 비-0**이다.
+#
+# 아래 3쌍(전제 · 대상 스위트)은 **테스트 시임**이다 — 게이트가 skip 갈래와 평가 갈래를 둘 다 실증하려면
+# 도메인을 주입할 수 있어야 한다. 시임 없이 skip 갈래만 단언하면 "무조건 skip"인 죽은 타깃이 통과한다
+# (실측: `@if false; then`으로 바꿔도 전 테스트가 초록이었다 — 이 티켓이 잡으려던 바로 그 병).
+# ⚠️ `?=`가 아니라 `:=` — `?=`면 환경변수가 새어 들어와 스위트가 환경 의존이 된다(실측: RUNBOOK_DIR을
+#   export한 셸에서 test_make-runbooks가 red). `:=`도 명령행 오버라이드(`make X=…`)는 그대로 받는다.
+RUNBOOK_DIR   := docs/runbooks
+POSTURE_BATS  := tests/posture/test_*.bats
+KSOPS_BATS    := platform/cnpg/prod/test_creds_reference.bats \
+                 platform/cnpg/prod/test_drill_alerting.bats \
+                 platform/cnpg/prod/test_kustomize_build.bats \
+                 platform/cache/prod/test_ksops_render.bats
+
 .PHONY: verify-runbooks
-verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored 로컬 전용, CI 미배선)
-	@if [ -d docs/runbooks ] && ls docs/runbooks/*.bats >/dev/null 2>&1; then \
-	  bats docs/runbooks/*.bats; \
-	else echo "verify-runbooks: docs/runbooks/*.bats 없음(로컬 전용 — 러너/fresh checkout엔 부재)"; fi
+verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored 로컬 전용, CI 미배선). 부재=SKIP
+	@if [ -d "$(RUNBOOK_DIR)" ] && ls $(RUNBOOK_DIR)/*.bats >/dev/null 2>&1; then \
+	  bats $(RUNBOOK_DIR)/*.bats; \
+	else echo "SKIP: verify-runbooks: $(RUNBOOK_DIR)/*.bats 0건(gitignored 로컬 전용) — 런북 회귀 미평가"; exit 4; fi
 
 .PHONY: verify-runbook-index
-verify-runbook-index: ## [local] 런북 인덱스↔docs/runbooks 정합(gitignored라 CI skip — verify-runbooks와 별개)
+verify-runbook-index: ## [local] 런북 인덱스↔docs/runbooks 정합(런북 부재=SKIP — verify-runbooks와 별개)
 	@bash scripts/verify-runbook-index.sh
 
 .PHONY: verify-posture
-verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 필요(없으면 skip)
+verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 부재=SKIP
 	@if [ -f "$(KUBECONFIG_LIVE)" ]; then \
-	  KUBECONFIG=$(KUBECONFIG_LIVE) bats tests/posture/test_*.bats; \
-	else echo "verify-posture: $(KUBECONFIG_LIVE) 없음 — 라이브 클러스터 필요(skip). 먼저 make up"; fi
+	  KUBECONFIG=$(KUBECONFIG_LIVE) bats $(POSTURE_BATS); \
+	else echo "SKIP: verify-posture: $(KUBECONFIG_LIVE) 부재 — 라이브 posture 미평가. 먼저 make up"; exit 4; fi
 
 .PHONY: verify-ksops
-verify-ksops: ## [local] KSOPS 렌더 bats(cnpg×3·cache×1) — 실 age 키 있으면 실행/없으면 skip(.ci-exclude 그룹)
+verify-ksops: ## [local] KSOPS 렌더 bats(cnpg×3·cache×1) — 실 age 키 있으면 실행/부재=SKIP(.ci-exclude 그룹)
 	@if [ -f "$(SOPS_AGE_KEY_FILE)" ]; then \
-	  SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) bats \
-	    platform/cnpg/prod/test_creds_reference.bats \
-	    platform/cnpg/prod/test_drill_alerting.bats \
-	    platform/cnpg/prod/test_kustomize_build.bats \
-	    platform/cache/prod/test_ksops_render.bats; \
-	else echo "verify-ksops: $(SOPS_AGE_KEY_FILE) 없음 — 실 age 키 필요(skip). SOPS_AGE_KEY_FILE 지정 후 재실행"; fi
+	  SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) bats $(KSOPS_BATS); \
+	else echo "SKIP: verify-ksops: $(SOPS_AGE_KEY_FILE) 부재 — KSOPS 렌더 미평가. SOPS_AGE_KEY_FILE 지정 후 재실행"; exit 4; fi
 
 .PHONY: verify-traps
 verify-traps: ## docs/traps.md 함정 원장의 guard 경로가 실재하는지(enforced 드리프트 차단)

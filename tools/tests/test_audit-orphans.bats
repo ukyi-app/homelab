@@ -273,6 +273,58 @@ KEOF
   [ "$status" -ne 0 ]
 }
 
+@test "a missing apps.json fails loudly instead of collapsing the registry to zero rows" {
+  # 병(라이브 재현): registry가 `readJson(…, [])`로 접히면 **진짜 BLOCKING 위반이 있는 상태에서도**
+  # --ci가 rc=0이었다 — BLOCKING 3종이 전부 registry 순회 안에 있어 0행이면 동시에 무발화한다.
+  # 대조군 — 마커를 지워 missing-activation(BLOCKING)을 심으면 게이트가 막는다.
+  echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
+    > "$FR/infra/cloudflare/apps.json"
+  rm -f "$FR/apps/orders/deploy/prod/.activation"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci
+  [ "$status" -ne 0 ]
+  out="$output"
+  run grep -q "missing-activation" <<<"$out"
+  [ "$status" -eq 0 ]
+  # 실험군 — 같은 위반 상태에서 apps.json만 치운다. 예전엔 blocking 0 + rc=0(stderr 0줄)이었다.
+  rm -f "$FR/infra/cloudflare/apps.json"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "registry 읽기 실패" <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
+@test "an empty registry trips the scan-floor, and --min-registry 0 lets a fixture opt out" {
+  echo '[]' > "$FR/infra/cloudflare/apps.json"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "scan-floor" <<<"$out"
+  [ "$status" -eq 0 ]
+  # 바닥값 **수치**는 소비자가 소유한다 — 빈 registry가 정당한 픽스처는 낮춰 부른다(래칫 아님).
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry 0
+  [ "$status" -eq 0 ]
+}
+
+@test "a non-numeric --min-registry is a usage error, never a silently disabled floor" {
+  # NaN 비교는 항상 false다 — 오타 하나로 바닥값이 조용히 사라지는 자리(이 캠페인이 지우는 바로 그 병).
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry abc
+  [ "$status" -eq 2 ]
+}
+
+@test "an empty or blank --min-registry is a usage error too (Number('') is 0, not NaN)" {
+  # ⚠️ `Number("")===0`·`Number(" ")===0`이라 isFinite 검사만으로는 **빈 값이 유효한 0으로 통과**해
+  # 바닥값이 조용히 꺼진다. 위 @test가 불가능하다고 선언한 상태가 실제로 가능했다(적대 검토 실측).
+  echo '[]' > "$FR/infra/cloudflare/apps.json"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry ""
+  [ "$status" -eq 2 ]
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry " "
+  [ "$status" -eq 2 ]
+  # 값 없이 마지막 인자로 두면 undefined — 같은 경로로 막혀야 한다
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry
+  [ "$status" -eq 2 ]
+}
+
 @test "unreferenced-conn is informational and never blocks --ci" {
   # ghost(orphan-dns, 차단 유형)를 제거해 --ci 판정을 unreferenced-conn만으로 격리
   echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \

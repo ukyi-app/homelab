@@ -184,14 +184,111 @@ data:
           # 블랙리스트(시스템 ns만 제외) — 화이트리스트는 신규 ns(files 등)를 흘렸다(PodCrashLooping :108과 동일 회귀).
           # honor_labels(#20)로 kube_job_* namespace가 실제값이라 블랙리스트가 모든 워크로드 ns를 자동 포함한다.
           # 백업 CronJob류(전용 staleness 보유)는 job_name으로 제외(화이트리스트 회귀 금지).
+          # ★★ `unless` 절이 없으면 이 룰은 **해소된 과거 실패를 영구히** 발화한다(라이브 2026-07-26~30).
+          #    `kube_job_failed`는 Job **오브젝트가 존재하는 한** 계속 1이다 — 시간 개념이 없다. 그 오브젝트의
+          #    수명은 `failedJobsHistoryLimit`이 지배하는데 그 회수는 **뒤이은 실패가 더 쌓여야만** 일어난다.
+          #    즉 **정상 운영(= 이후 전부 성공)일수록 실패 Job이 영원히 남는다**(클러스터의 CronJob 전부
+          #    `ttlSecondsAfterFinished`가 없어 회수 경로도 없다). adguard-rewrite-reconciler가 재부팅 직후
+          #    DNS 미준비로 **1회** 실패한 뒤 `*/10`으로 약 430회 성공했는데 이 알림이 **3일 넘게 연속
+          #    firing**했다. `for: 15m`은 "실패가 15분 지속됐다"가 아니라 "실패 Job 오브젝트가 15분 존재했다"만
+          #    증명한다 — 주석의 문장과 실제 의미가 갈라지던 지점이다.
+          # ★ 억제 조건 = **그 실패 Job이 시작한 뒤에 소유 CronJob이 성공했다**(= 정기 작업이 자가 복구됐다).
+          #    시간 창(`time() - start_time < N`)이 아니라 후속 성공을 쓰는 이유: 창은 **미해결 실패도** N초 뒤
+          #    조용해져 진짜 고장을 놓친다(특히 재시도가 없는 단발 Job). 후속 성공은 해소를 **증명**한다.
+          #    ⚠️ `owner_kind="CronJob"`으로 좁히는 것이 핵심이다 — 단발 Job에는 억제 재료(소유 CronJob의
+          #      마지막 성공)가 원리적으로 없으므로 기존 백스톱이 그대로 남아야 한다(게이트 L4가 락한다 —
+          #      픽스처가 억제 재료를 **전부 갖춘 채** owner_kind만 다르게 두므로 이 필터를 지우면 red다).
+          #    ⚠️ CronJob이 한 번도 성공한 적 없으면 우변이 빈 벡터라 아무것도 지우지 못한다 = fail-closed.
+          #    ⚠️ 조인 키가 두 단계인 이유: `kube_job_owner`가 job_name↔owner_name을 잇고(group_left),
+          #      `kube_cronjob_status_last_successful_time`은 `cronjob` 라벨만 가지므로 label_replace로
+          #      owner_name 축에 올려야 매칭된다. 한 CronJob에 실패 Job이 여럿일 수 있어 many-to-one이다.
+          #    ⚠️ 세 피연산자 모두 `max by (...)`로 **사전 집계**한다(모드 B 규율). raw 셀렉터끼리 on() 산술
+          #      조인을 하면 KSM 시리즈가 잠깐이라도 겹칠 때(재시작 중 두 인스턴스·instance 라벨 churn)
+          #      many-to-one이 many-to-many가 되어 **422로 룰 평가가 통째로 죽는다** — 알림이 틀리는 게
+          #      아니라 사라진다. `tests/test_alert_rules.bats`(모드 B)가 이 형태를 강제한다.
+          #    ⚠️ 억제는 실패 **빈도**를 보지 않는다. CronJob 주기 P가 `for:`(900s)보다 짧으면 실패 Job은
+          #      최대 P초 만에 억제되므로 `for:`를 **원리적으로 채우지 못한다** → 실패↔성공이 교대하는
+          #      만성 flapping을 이 룰은 못 본다. 그 축은 아래 **CronJobFlapping**이 담당한다(상보 관계 —
+          #      "지금 고장인가" ↔ "자주 깨지는가"). 연속 2회 이상 실패는 여전히 이 룰이 발화한다.
+          #    회귀 게이트: tests/gates/vmalert-jobfailed-firing-e2e.sh — 억제 절·`owner_kind` 필터·
+          #      조인 키 단위(job)·창 밖 미래 타임스탬프 거부를 각각 별개 레그가 문다.
           - alert: KubeJobFailed
             expr: |
               kube_job_failed{condition="true", namespace!~"kube-system|kube-public|kube-node-lease", job_name!~"cnpg-local-basebackup.*|pg-dump-hedge-r2.*|pg-restore-drill.*"} > 0
+              unless on (namespace, job_name) (
+                (
+                  max by (namespace, job_name) (kube_job_status_start_time)
+                  * on (namespace, job_name) group_left (owner_name)
+                    max by (namespace, job_name, owner_name) (kube_job_owner{owner_kind="CronJob"})
+                )
+                < on (namespace, owner_name) group_left ()
+                max by (namespace, owner_name) (
+                  label_replace(kube_cronjob_status_last_successful_time, "owner_name", "$1", "cronjob", "(.+)")
+                )
+              )
             for: 15m
             labels: { severity: warning }
             annotations:
               summary: "Job 실패: {{ $labels.namespace }}/{{ $labels.job_name }}"
-              description: "Job이 실패 상태로 15분 이상 머뭅니다 — 전용 staleness 알림이 없는 정기 작업의 실패입니다."
+              description: "Job이 실패한 뒤 15분이 지나도록 **복구되지 않았습니다** — 전용 staleness 알림이 없는 정기 작업의 실패입니다. CronJob 소유 Job은 그 실패 이후 한 번이라도 성공하면 자동으로 해소되므로, 이 알림이 살아 있다는 것은 마지막 성공이 이 실패보다 앞선다는 뜻입니다(단발 Job은 해소 재료가 없어 계속 발화합니다)."
+          # ★★ 위 KubeJobFailed 억제가 **구조적으로 삼키는 영역**을 잡는 짝 알림이다(S-6 후속).
+          #    CronJob 주기 P가 위 룰의 `for:`(900s)보다 짧으면 실패 Job은 최대 P초 만에 억제되므로
+          #    `for:`를 **원리적으로 채우지 못한다** → 실패↔성공이 교대하는 만성 flapping은 영구 무성이다.
+          #    라이브 사각지대: adguard-rewrite-reconciler(P=600, 하트비트 임계 1800=3주기)와
+          #    gha-liveness-exporter(P=1800, 임계 5400=3주기). 전자는 *.home split-horizon rewrite가
+          #    절반의 시간 stale인데 모든 알림이 초록이었다. (digest-exporter는 임계가 1.5주기라 잡힌다.)
+          # ★ 왜 성공 기반 지표로 못 닫는가(기각한 대안): 교대 실패에서 `time() - last_success`는 주기가
+          #    일정한 **톱니파**다. 임계를 어디 두든 그 위에 머무는 구간이 P보다 짧아 `for:`를 못 채우고,
+          #    P 아래로 낮추면 정상 동작에서도 매 주기 발화한다 — 단발 miss와 지속 flapping을 가르는
+          #    성분이 그 신호에 없다. KSM에 `kube_cronjob_status_last_failed_time`도 없다(실측).
+          #    ⇒ 실패를 **사건으로 세는 것**이 유일한 경로다.
+          # ★ 관측 창은 `failedJobsHistoryLimit`다 — 임계 2를 세려면 그 값이 **2 이상**이어야 한다.
+          #    digest-exporter·gha-liveness-exporter가 1이었고 이 작업에서 2로 올렸다. 이 전제는
+          #    tests/gates/test_cronjob-flapping.bats가 룰 임계와 각 CronJob spec을 **레포에서 계산해**
+          #    강제한다(하드코딩 목록이 레포와 어긋나는 클래스를 되풀이하지 않는다).
+          # ★★ 세는 대상은 **"실패했다가 복구된"** 실행뿐이다(마지막 `and` 절 = KubeJobFailed 억제 조건과
+          #    동일한 부등식). 그래서 두 룰은 같은 신호 위에서 **정확히 상보적**이다:
+          #      KubeJobFailed  = 해소되지 **않은** 실패가 있다        → "지금 고장인가"
+          #      CronJobFlapping = 해소**된** 실패가 창 안에 N회 있다   → "자주 깨지는가"
+          #    ⚠️ 이 절이 없으면 **연속 미해소 실패에서 두 알림이 동시에 발화**한다. Alertmanager가
+          #      alertname으로 그룹핑하므로 텔레그램 알림이 2건 가고, 알림 노이즈를 줄이려던 작업이
+          #      새 노이즈를 만든다(적대적 리뷰 R-2가 지목). 상보성은 회귀 레그가 락한다.
+          # ★ 창(2h)의 하한은 **`2 × 주기 + for`**다 — 교대 실패는 실패 간격이 **2주기**이므로, 창이 그보다
+          #    좁으면 두 번째 실패가 나타나는 바로 그 순간 첫 번째가 창 밖으로 밀려 count가 2에 **영원히
+          #    도달하지 못한다**(적대적 리뷰 R-1: 창 1h + gha-liveness 주기 1800s에서 실제로 그랬다 —
+          #    실패 간격 3600s가 창 3600s와 정확히 같아 이 알림이 그 워크로드를 원리적으로 못 봤다).
+          #    현행 하한: gha-liveness(1800s) → 2×1800+900 = 4500s < 7200s ✓. 이 부등식은
+          #    tests/gates/test_cronjob-flapping.bats가 대상 CronJob마다 레포에서 계산해 강제한다.
+          # ★ **주기 > 창인 저빈도 CronJob은 대상 밖**이다(창 안에 2회가 물리적으로 불가능 — 일 1회
+          #    백업류는 전용 staleness 알림이 지킨다).
+          # ★ 단발 실패는 이 룰 소관이 아니다(임계 2) — 그건 KubeJobFailed가 보고 후속 성공에 해소된다.
+          #    회귀 게이트 L7이 같은 픽스처로 역할 분리를 증명한다(flapping 발화 ↔ KubeJobFailed 침묵).
+          - alert: CronJobFlapping
+            expr: |
+              count by (namespace, owner_name) (
+                max by (namespace, job_name) (kube_job_failed{condition="true", namespace!~"kube-system|kube-public|kube-node-lease"} == 1)
+                * on (namespace, job_name) group_left (owner_name)
+                  max by (namespace, job_name, owner_name) (kube_job_owner{owner_kind="CronJob"})
+                and on (namespace, job_name) (
+                  (time() - max by (namespace, job_name) (kube_job_status_start_time)) < 7200
+                )
+                and on (namespace, job_name) (
+                  (
+                    max by (namespace, job_name) (kube_job_status_start_time)
+                    * on (namespace, job_name) group_left (owner_name)
+                      max by (namespace, job_name, owner_name) (kube_job_owner{owner_kind="CronJob"})
+                  )
+                  < on (namespace, owner_name) group_left ()
+                  max by (namespace, owner_name) (
+                    label_replace(kube_cronjob_status_last_successful_time, "owner_name", "$1", "cronjob", "(.+)")
+                  )
+                )
+              ) >= 2
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "CronJob 반복 실패: {{ $labels.namespace }}/{{ $labels.owner_name }}"
+              description: "최근 2시간 안에 **실패했다가 복구된** 실행이 2회 이상입니다 — 매번 다음 주기에 되살아나더라도 자주 깨지고 있습니다. KubeJobFailed는 실패마다 후속 성공에 억제되므로 이 상태를 원리적으로 볼 수 없습니다(주기가 그 룰의 for:보다 짧을 때). 실패 원인이 간헐적 의존성(DNS·네트워크·레지스트리)인지 확인하세요. 관측 창은 해당 CronJob의 failedJobsHistoryLimit이며, 그 값이 2 미만이면 이 알림은 그 워크로드를 볼 수 없습니다."
           # 워크로드-불가용(NotReady) — Deployment Available=False. 구독 라벨 없는 플랫폼 컴포넌트
           # (files·adguard·homepage)의 1차 실패모드(재시작 없는 NotReady)는 PodCrashLooping·TargetDown·
           # ArgoCD on-health-degraded 어디에도 안 잡히던 공백(M13). Available 조건은 KSM이 Deployment에만

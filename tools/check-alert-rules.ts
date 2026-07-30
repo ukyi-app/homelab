@@ -26,39 +26,26 @@
 //            발화 0 · `FilesBulkSSDLow` 동일). 시리즈가 "없다"는 게 증상이라 **아무 신호도 나지 않는다**.
 //            → `last_over_time(m[W])`류로 감싸야 한다(**W ≥ push 주기**).
 //
-// 모드 C가 **fail-open으로 뚫렸던 4개 구멍**(적대 검증에서 실증 — 전부 회귀 프로브가 지킨다):
-//   F-1 셀렉터 우회: `{__name__="m"}` · `{"m"}`(VM 축약) · `{__name__=~"m_.*"}`는 메트릭명을 **문자열 안에**
-//       숨긴다 → 리터럴 토큰 스캔이 못 본다. → 마스킹 **전에** 셀렉터를 `m{...}`로 정규화한다. 정규식/부정
-//       형태(`=~`·`!~`·`!=`)는 이름 집합이 열려 있어 정적 판정 불가 → **fail-closed**(위반; 정당하면 allowlist).
-//   F-2 가짜 rollup: 아무 `[W]` 범위나 인정하면 `irate(m[10m])`·`idelta(m[1d])`가 통과한다 — 이들은 윈도 안에
-//       **샘플 2개 이상**을 요구하는데 push 주기상 1개뿐이라 결과가 비고, 알림은 여전히 죽는다.
-//       → 셀렉터가 **단일 샘플로도 값을 내는 `*_over_time` 계열**(ROLLUP_OK)에 소유돼야 한다.
-//       rate/increase/irate/idelta/delta/deriv 등 2샘플 요구 함수는 rollup으로 **인정하지 않는다**.
-//   F-3 메트릭 등록 누락: 완전성 가드가 생산자 **파일 경로**만 보면, 이미 등록된 exporter에 메트릭을 **추가**
-//       하는 가장 흔한 경로가 전 방어를 우회한다. → 생산자에서 실제 push되는 **메트릭 이름을 추출**해
-//       전부 레지스트리에 있어야 한다(양방향).
-//   F-4 cron 권위 강등: schedule 파일이 없을 때 조용히 상수로 폴백하면, CronJob을 옮기거나 리네임하는 것만으로
-//       교차검증과 생산자 발견을 동시에 우회한다. → schedule은 **판별 가능한 소스**다: `cron`(레포 내
-//       CronJob — 파일 부재/파싱불가 = FAIL, 주기는 여기서만 파생) 또는 `external`(레포 밖 스케줄 —
-//       상수 + 근거 필수).
-//   G-1 생산자 발견이 단일 엔드포인트에 묶임: `api/v1/import` 문자열 하나로 찾으면 remote_write(`/api/v1/write`)·
-//       InfluxDB(`/influx`)·datadog·opentsdb·vmagent 경유·**URL 합성**(호스트가 변수) push가 **발견 자체를**
-//       우회한다. → 신호 (1) VM 수집 경로 조각, (2) vmsingle/vmagent 호스트 + 쓰기 동사
-//       (`--data-binary`/`-X POST`/`remoteWrite` 등). 읽기 전용 소비자(homepage 위젯·grafana·netpol)는 쓰기
-//       신호가 없어 후보가 되지 않는다 — 읽기 경로 "제외 목록"은 두지 않는다(제외 목록 자체가 우회 경로다).
-//   G-2 URL 신호 자체가 우회 가능: `VM_URL="$(cat /etc/secret/vm-url)"`처럼 **호스트도 경로도 전부 변수/시크릿**
-//       이면 (1)·(2) 어느 쪽도 안 걸린다. → **페이로드 모양**이 세 번째 신호다: 쓰기 동사 + Prometheus
-//       exposition 페이로드 조립(= exposition 추출 성공(EXPO_INLINE·EXPO_LINE))이면 URL이 어디서 오든 **메트릭 push다**.
-//       판정표: [URL 있음·추출 성공]=생산자 / [URL 있음·추출 실패]=**fail-closed FAIL**(VM에 쓰는 게 확실한데
-//       해석 불가) / [URL 없음·쓰기동사+추출 성공]=생산자 / [URL 없음·추출 실패]=후보 아님(exposition이 아닌
-//       그냥 다른 API 호출 — AdGuard API JSON·telegram·alertmanager는 조용히 통과).
-//   S-1 rollup 윈도 귀속이 위치 기반: 메트릭에 직접 `[W]`가 없으면(서브쿼리 안 맨몸) 폴백이 owner 본문에서
-//       **아무 형제 서브쿼리의 첫 `[W:step]`**를 긁어 검증했다 → 미끼 윈도(`[1h:1m]`)로 죽은 알림이 통과하고,
-//       역으로 정당한 룰이 형제의 작은 윈도로 오검출됐다. → `rollupWindow`가 **메트릭을 실제로 감싸는**
-//       depth-0 종료 서브쿼리만 집는다(스코프 인식). 실 레포 `app:image_digest_drift`가 다중 서브쿼리 중첩.
-//   S-2 heredoc 메트릭 누락: `EXPO_RE`가 **진짜 개행**을 못 봐서 heredoc(`<<EOF\nname 7\nEOF`)으로 push하는
-//       정적 리터럴 메트릭을 놓쳤다(파일에 다른 메트릭이 있으면 fail-closed도 안 걸림). → `EXPO_LINE`(줄 전체를
-//       `name{labels} value [ts]$`로 앵커링)을 추가. 임의 셸 텍스트의 줄-시작 단어 오탐은 값+줄끝 앵커로 차단.
+// 모드 C가 **fail-open으로 뚫렸던 구멍 8개**. 아래 라벨은 본문 곳곳에서 인용되니 **이름을 유지한다**
+// (각 구멍마다 회귀 프로브가 있다 — 지우기 전에 그 프로브부터 보라).
+//   F-1 셀렉터 우회: `{__name__="m"}`·`{"m"}`(VM 축약)은 메트릭명을 문자열 안에 숨겨 토큰 스캔을 피한다.
+//       → 마스킹 **전에** `m{...}`로 정규화. 정규식/부정(`=~`·`!~`·`!=`)은 이름 집합이 열려 fail-closed.
+//   F-2 가짜 rollup: `irate`·`idelta` 등 **2샘플 요구** 함수는 push 주기상 결과가 비어 알림이 여전히 죽는다.
+//       → 단일 샘플로도 값을 내는 `*_over_time` 계열(ROLLUP_OK)만 rollup으로 인정한다.
+//   F-3 메트릭 등록 누락: 생산자 **파일 경로**만 보면 기존 exporter에 메트릭을 추가하는 최다 경로가 우회된다.
+//       → 생산자에서 실제 push되는 **이름을 추출**해 레지스트리와 양방향 대조.
+//   F-4 cron 권위 강등: schedule 파일 부재 시 상수 폴백하면 CronJob 이동·리네임만으로 교차검증이 뚫린다.
+//       → schedule은 판별 가능한 소스다: `cron`(레포 내 — 부재/파싱불가 = FAIL) 또는 `external`(근거 필수).
+//   G-1 생산자 발견이 단일 엔드포인트에 묶임: `api/v1/import` 하나로 찾으면 remote_write·influx·datadog·
+//       opentsdb·URL 합성 push가 **발견 자체를** 우회한다. → 신호 = VM 수집 경로 조각 ∪ (VM 호스트 + 쓰기 동사).
+//       읽기 전용 소비자는 쓰기 신호가 없어 후보가 안 된다 — **제외 목록을 두지 않는다**(그 자체가 우회로다).
+//   G-2 URL 신호도 우회 가능: 호스트·경로가 전부 변수/시크릿이면 위 둘 다 안 걸린다. → 세 번째 신호는
+//       **페이로드 모양**(쓰기 동사 + exposition 조립 성공). 판정표: [URL 있음·추출 성공]=생산자 /
+//       [URL 있음·추출 실패]=**fail-closed FAIL** / [URL 없음·쓰기동사+추출 성공]=생산자 / 나머지=후보 아님.
+//   S-1 rollup 윈도 귀속이 위치 기반: 폴백이 **아무 형제 서브쿼리의 첫 `[W:step]`**를 긁으면 미끼 윈도로
+//       죽은 알림이 통과한다. → 메트릭을 **실제로 감싸는** depth-0 종료 서브쿼리만 집는다(스코프 인식).
+//   S-2 heredoc 메트릭 누락: `EXPO_RE`가 진짜 개행을 못 봐 heredoc push를 놓쳤다(다른 메트릭이 있으면
+//       fail-closed도 안 걸린다). → 줄 전체를 `name{labels} value [ts]$`로 앵커링하는 `EXPO_LINE` 추가.
 //
 // 한계(의도적 — 여전히 못 잡는 것):
 //  - 정적 패턴 검사라 remediation의 **정확성**은 보장하지 않는다. 모드 A의 집계자는 `max`여야 한다 —
@@ -106,12 +93,22 @@ const RULES_DIR = RULES_ROOT;
 const DENYLIST = "policy/alert-instance-stability-denylist.txt";
 const ALLOWLIST = "policy/alert-instance-stability-allowlist.txt";
 const MIN_SCAN = 30;   // 실 룰 41건(40 alert + 1 record) — 셀렉터 붕괴 false-green 차단
+// denylist 항목 바닥값 — 파일이 남아 있는데 **내용만** 비거나 주석만 남는 부분 드리프트를 잡는다
+// (필수 읽기는 파일 부재만 잡는다). 실 원장 1항목 — 이 목록은 줄어들 이유가 없다. 래칫 아님.
+const MIN_DENY = 1;
 
 // rollup(range) 함수 — 이들만 시계열 첫 샘플을 "0에서 증가"로 취급할 수 있다.
 const ROLLUP = "increase|increase_pure|increase_prometheus|rate|rate_prometheus|irate|delta|idelta|deriv|resets|changes";
 // 라벨을 벗길 수 있는 집계 연산자.
 const AGG = "max|min|sum|avg|count|group|topk|bottomk|quantile|stddev|stdvar";
 const OPERAND_AGG_RE = new RegExp(`^[\\s(]*(?:${AGG})\\s+(?:by|without)\\s*\\(`);
+// on()/ignoring() 뒤에 올 수 있는 **매칭 수식어** — 피연산자가 아니다. 우변을 읽기 전에 벗겨야 한다.
+// 벗기지 않으면 `on(...) group_left(x) max by (...) (m)`의 우변이 `group_left…`로 시작하는 것으로 보여
+// **정상적으로 사전 집계된 우변을 raw로 오판**한다. many-to-one 조인은 group_left 없이 표현할 수 없으므로
+// 그 오판은 해당 조인 형태 전체를 allowlist(=룰 단위 → 모드 A/C까지 동반 해제)로 밀어낸다.
+// ⚠️ 수식어만 벗기고 그 뒤 피연산자는 그대로 판정한다 — 검사 자체를 건너뛰면 group_left 모양의 구멍이 된다
+//    (tests/test_alert_rules.bats가 두 방향을 모두 잠근다).
+const GROUP_MOD_RE = /^\s*group_(?:left|right)\s*(?:\([^)]*\))?/;
 // 집합 연산자 — on()을 써도 422가 불가능하다.
 const SET_OP_RE = /(?:^|[^\w])(and|or|unless)\s*$/;
 // 산술·비교 이항 연산자(on() 직전에 올 수 있는 것).
@@ -176,6 +173,7 @@ type PushEntry = { metric: string; producer: string; schedule: Schedule };
 
 const DIGEST_EXPORTER = "platform/victoria-stack/prod/digest-exporter.yaml";
 const DU_EXPORTER = "platform/victoria-stack/prod/pvc-du-exporter.yaml";
+const GHA_LIVENESS = "platform/victoria-stack/prod/gha-liveness-exporter.yaml";
 const ADGUARD_RECONCILER = "platform/adguard/prod/rewrite-reconciler.yaml";
 const RESTORE_DRILL = "platform/cnpg/prod/restore-drill-script.sh";
 const FILES_BACKUP = "scripts/backup-files-data.sh";
@@ -193,6 +191,13 @@ const DEFAULT_REGISTRY: PushEntry[] = [
     .map((metric): PushEntry => ({ metric, producer: DIGEST_EXPORTER, schedule: { kind: "cron", file: DIGEST_EXPORTER } })),
   ...["pvc_dir_size_bytes", "storage_tier_size_bytes", "storage_tier_avail_bytes", "pvc_du_last_success_timestamp"]
     .map((metric): PushEntry => ({ metric, producer: DU_EXPORTER, schedule: { kind: "cron", file: DU_EXPORTER } })),
+  // gha-liveness-exporter(*/30) — GHA 스케줄 워크플로의 **마지막 성공 시각**을 GitHub API에서 읽어 push.
+  // 09가 닫지 못한 표면(run이 아예 발생하지 않는 것)의 유일한 관측자라, 이 push가 끊기면 그 감시가
+  // 통째로 실명한다 → GHALivenessExporterStale(r6)이 하트비트를 읽고, ScrapeIncomplete가 부분 고장을 읽는다.
+  // 예산(max_age)도 메트릭으로 함께 싣는다 — 룰이 워크플로별 임계값을 하드코딩하지 않게 하려는 것이다.
+  ...["gha_workflow_last_success_timestamp", "gha_workflow_max_age_seconds",
+    "gha_liveness_configured", "gha_liveness_scraped", "gha_liveness_last_success_timestamp"]
+    .map((metric): PushEntry => ({ metric, producer: GHA_LIVENESS, schedule: { kind: "cron", file: GHA_LIVENESS } })),
   ...["adguard_rewrite_reconcile_timestamp", "adguard_rewrite_last_fix_timestamp"]
     .map((metric): PushEntry => ({ metric, producer: ADGUARD_RECONCILER, schedule: { kind: "cron", file: ADGUARD_RECONCILER } })),
   // push는 스크립트가, 크론(`0 5 * * 0` 주 1회)은 별도 CronJob 매니페스트가 들고 있다.
@@ -204,9 +209,19 @@ const DEFAULT_REGISTRY: PushEntry[] = [
 
 function fatal(msg: string): never { console.error(`FAIL: ${msg}`); process.exit(1); }
 
+// ⚠️ 정책 파일은 **필수 읽기**다. 옛 `existsSync(p) ? … : []` 폴백은 파일 부재/이동/오타 경로를
+// "항목 0개"로 위장했다. denyMetrics가 비면 모드 A의 `denyMetrics.find(...)`가 상시 미스라
+// `continue`로 빠지고, 성공 메시지는 여전히 "모드 A/B/C 위반 0"이라며 **검사했다고 주장한다**.
+// 적대 검토가 A/B 대조로 실측: 같은 위반 룰을 둔 채 denylist 파일만 치우면 rc 1 → 0, stderr 0줄.
+// 모드 A가 지키는 것은 라이브에서 4회 재발한 instance 라벨 churn phantom-increase다(denylist 헤더 참조).
+// allowlist는 부재 시 면제 0 = 더 엄격(fail-closed)이라 성격이 다르지만, **부재 자체는 양쪽 다 드리프트**다.
 function readList(rel: string): string[] {
   const p = `${ROOT}/${rel}`;
-  return existsSync(p) ? readFileSync(p, "utf8").split("\n") : [];
+  try {
+    return readFileSync(p, "utf8").split("\n");
+  } catch (e) {
+    fatal(`정책 파일 읽기 실패(${rel}) — 검사 불가(이 자리가 0건 검사 후 초록이 되던 곳이다): ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 // 문자열 리터럴 내부를 같은 길이의 채움문자로 마스킹 — 괄호/연산자 구조 스캔이 라벨 값에 속지 않게.
@@ -558,6 +573,9 @@ function rollupWindow(s: string, metricPos: number, metricLen: number, owner: { 
 }
 
 const denyMetrics = readList(DENYLIST).map((l) => l.split("#", 1)[0].trim()).filter(Boolean);
+if (denyMetrics.length < MIN_DENY) {
+  fatal(`denylist 항목 ${denyMetrics.length}건 < ${MIN_DENY}(${DENYLIST}) — 열거 붕괴 의심(모드 A가 통째로 무발화한다)`);
+}
 
 // ── 레지스트리 로드 + 완전성 가드(모드 C 전처리) ──
 function loadRegistry(): PushEntry[] {
@@ -693,7 +711,7 @@ function checkExpr(rel: string, name: string, expr: string): void {
     const onOpen = mt.index + mt[0].length - 1;
     const onClose = matchParen(m, onOpen);
     if (onClose < 0) { viol.push(`${rel} ${name} [모드 B: ${mt[1]}() 괄호 불균형 — 파싱 실패]`); return; }
-    const rhs = m.slice(onClose + 1, operandEnd(m, onClose + 1));
+    const rhs = m.slice(onClose + 1, operandEnd(m, onClose + 1)).replace(GROUP_MOD_RE, "");
     const bare: string[] = [];
     if (!OPERAND_AGG_RE.test(lhs)) bare.push("좌변");
     if (!OPERAND_AGG_RE.test(rhs)) bare.push("우변");
@@ -782,6 +800,11 @@ for (const { path: rel, text, docs } of ruleEntries) {
   }
 }
 
+// SCAN 신호(scripts/lib/scan-floor.sh 규약) — 실행 관측용 균일 마커. **위반 검사보다 앞**이다:
+// 규약상 도메인을 평가한 실행은 위반 여부와 무관하게 신호를 낸다(면제는 바닥값 실패 경로뿐).
+// 라벨 = 바닥값이 걸린 열거 도메인 하나 — 여긴 룰(MIN_SCAN)과 denylist(MIN_DENY) 둘이다.
+console.log(`SCAN: check-alert-rules:rules: ${ruleCount}`);
+console.log(`SCAN: check-alert-rules:denylist: ${denyMetrics.length}`);
 if (allowErrors.length) {
   console.log(`FAIL: ${ALLOWLIST} 항목에 사유 주석이 없다 — 무근거 면제는 금지:`);
   for (const e of allowErrors) console.log("  " + e);

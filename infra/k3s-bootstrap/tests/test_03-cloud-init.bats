@@ -17,7 +17,7 @@ CI="$BOOTSTRAP_DIR/cloud-init.yaml"
 @test "zram is configured via systemd-zram-generator with zstd" {
   run yq -e '.write_files[] | select(.path == "/etc/systemd/zram-generator.conf") | .content' "$CI"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"zram0"* ]]
+  printf '%s' "$output" | grep -qF -- "zram0"
   [[ "$output" == *"zstd"* ]]
 }
 
@@ -29,13 +29,13 @@ CI="$BOOTSTRAP_DIR/cloud-init.yaml"
 
 @test "both storage dirs are created" {
   run yq -e '.runcmd | @json' "$CI"
-  [[ "$output" == *"/var/lib/rancher/k3s-storage/internal"* ]]
+  printf '%s' "$output" | grep -qF -- "/var/lib/rancher/k3s-storage/internal"
   [[ "$output" == *"/var/lib/rancher/k3s-storage/bulk"* ]]
 }
 
 @test "zram-generator package is installed and sshd enabled" {
   run yq -e '.packages | @json' "$CI"
-  [[ "$output" == *"systemd-zram-generator"* ]]
+  printf '%s' "$output" | grep -qF -- "systemd-zram-generator"
   [[ "$output" == *"openssh-server"* ]]
 }
 
@@ -44,10 +44,10 @@ CI="$BOOTSTRAP_DIR/cloud-init.yaml"
   # 이 더미 유닛이 없으면 LAN/라우터가 AdGuard에 닿을 수 없다.
   run yq -e '.write_files[] | select(.path == "/usr/local/lib/dns-forward-trigger.py") | .content' "$CI"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'("0.0.0.0", 53)'* ]]
+  printf '%s' "$output" | grep -qF -- '("0.0.0.0", 53)'
   run yq -e '.write_files[] | select(.path == "/etc/systemd/system/dns-forward-trigger.service") | .content' "$CI"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"CAP_NET_BIND_SERVICE"* ]]
+  printf '%s' "$output" | grep -qF -- "CAP_NET_BIND_SERVICE"
   run yq -e '.runcmd | @json' "$CI"
   [[ "$output" == *"dns-forward-trigger.service"* ]]
 }

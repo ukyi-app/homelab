@@ -7,6 +7,8 @@
 # 매치 수 ≠ 1 → 실패(0=고아, 2+=이중소유). + .ci-exclude 유효성: (a) git-tracked 실재, (b) gate 미포함(모순).
 # bash 3.2 호환: mapfile·[[ ]]·`cmd && n++`(set -e 함정) 금지 — if-블록·case·카운터로.
 set -euo pipefail
+# shellcheck source=scripts/lib/scan-floor.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
@@ -23,6 +25,13 @@ done < tests/.ci-exclude
 in_excl() { case "$EXCL" in *" $1 "*) return 0;; *) return 1;; esac; }
 
 rc=0
+# ⚠️ 열거를 **변수로** — 자기 글롭이 비면 이 가드가 막으려던 F6 클래스(테스트가 어느 harness에도
+# 안 묶여 조용히 죽음)에 **자기가 걸린다**(라이브 재현: 글롭만 비우는 셰임으로 같은 OK + rc=0).
+# 래칫이 아니다 — 건수는 여기 적지 않는다(손 관리 수치는 반드시 드리프트한다, scan-floor.sh 규약).
+all_bats="$(scan_enumerate check-bats-accounting git ls-files '*test_*.bats')" || exit 1
+scanned="$(scan_count "$all_bats")"
+scan_floor check-bats-accounting "$scanned" "${BATS_ACCOUNTING_MIN_SCAN:-150}" || exit 1
+
 # (1) 모든 추적 test_*.bats가 정확히 한 도메인
 while IFS= read -r f; do
   n=0
@@ -33,7 +42,7 @@ while IFS= read -r f; do
     echo "FAIL: $f 가 정확히 한 도메인에 없음 (매치=$n; 0=고아, 2+=이중소유)"
     rc=1
   fi
-done < <(git ls-files '*test_*.bats')
+done <<< "$all_bats"
 
 # (2) .ci-exclude 유효성: 실재 추적 파일 & gate 미포함(제외인데 gate면 모순)
 while IFS= read -r line; do
@@ -46,5 +55,5 @@ while IFS= read -r line; do
   fi
 done < tests/.ci-exclude
 
-if [ "$rc" -eq 0 ]; then echo "check-bats-accounting: 전 bats가 정확히 한 도메인(gate/chart-test/.ci-exclude) OK"; fi
+if [ "$rc" -eq 0 ]; then echo "check-bats-accounting: 전 bats가 정확히 한 도메인(gate/chart-test/.ci-exclude) OK (${scanned}건 스캔)"; fi
 exit $rc

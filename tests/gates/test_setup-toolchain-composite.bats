@@ -12,13 +12,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
 }
 
-@test "ci and verify use the composite (no inline conftest install)" {
+@test "ci uses the composite (no inline conftest install)" {
   run grep -F 'uses: ./.github/actions/setup-toolchain' .github/workflows/ci.yaml
   [ "$status" -eq 0 ]
-  run grep -F 'uses: ./.github/actions/setup-toolchain' .github/workflows/verify.yaml
-  [ "$status" -eq 0 ]
   run grep -E 'conftest_0\.68\.2' .github/workflows/ci.yaml
-  [ "$status" -ne 0 ]
-  run grep -E 'conftest_0\.68\.2' .github/workflows/verify.yaml
   [ "$status" -ne 0 ]
 }

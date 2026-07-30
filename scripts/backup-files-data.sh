@@ -133,6 +133,14 @@ echo "==> 승격 완료: $man (${new_count}개 파일, 직전 스냅샷 data.pre
 # --- 성공/용량 메트릭 push (FilesBackupStale·FilesBulkSSDLow 게이트) ---
 push_metrics() {
   local url="$1" avail size
+  # ⚠️ 아래 `${avail:-0}`/`${size:-0}` 폴백은 **fail-loud 갭이다**(미해결 백로그). df가 실패해도 0을 대입한
+  #    채 성공 하트비트(files_backup_last_success_timestamp)를 **함께** 발행하고, 호출부도 `|| WARN`이라
+  #    abort하지 않는다 → FilesBackupStale는 초록인데 avail=0이 흘러들어 FilesBulkSSDLow가 "여유 0%"로
+  #    **오귀속 페이지**를 낸다(진실은 "df가 실패했다"). size까지 0이면 0/0=NaN이라 반대로 **침묵**한다.
+  #    ⚠️ 읽는 쪽(r4 expr)에 absent()나 `size > 0` 가드를 다는 우회는 금지 — 전자는 FilesBackupStale와
+  #    중복 페이지, 후자는 **진짜 결핍(avail=0)** 까지 억제해 알림을 다시 죽인다(근거 전문:
+  #    platform/victoria-stack/prod/rules/r4-storage-backup.yaml의 FilesBulkSSDLow 주석).
+  #    올바른 픽스는 **쓰는 쪽인 여기서** df 값을 검증(비어있지 않음 · size > 0)한 뒤에만 push하는 것이다.
   avail="$(df -k "$vmpath" 2>/dev/null | awk 'NR==2{print $4*1024}')"   # 외장 SSD 여유 bytes
   size="$(df -k "$vmpath" 2>/dev/null | awk 'NR==2{print $2*1024}')"    # 총량 bytes
   printf 'files_backup_last_success_timestamp %s\nfiles_data_bulk_avail_bytes %s\nfiles_data_bulk_size_bytes %s\n' \

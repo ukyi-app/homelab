@@ -27,15 +27,11 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0 — 로컬 telegram-notify 액션 resolve + 체커 실행(F8 가드 충족)
       - uses: ./.github/actions/setup-bun
         with: { install: 'false' }     # dns 체크는 deps 불요
-      - id: pf   # active&&public + platform_hosts가 모두 0이면 skip(깨끗한 성공)
-        run: |
-          # 검사기(dns-drift-check.ts)는 apps.json active&&public + reserved-hosts.json platform_hosts를 둘 다 검사한다.
-          # go 게이트도 양쪽을 합산 — apps.json이 비어도 platform_hosts가 있으면 검사(argocd-webhook/files 갭 재발 방지).
-          n=$(bun -e 'const a=JSON.parse(require("fs").readFileSync("infra/cloudflare/apps.json","utf8"));process.stdout.write(String(a.filter(r=>r.public&&r.active).length))')
-          p=$(bun -e 'let n=0;try{n=(JSON.parse(require("fs").readFileSync("infra/cloudflare/reserved-hosts.json","utf8")).platform_hosts||[]).length}catch{}process.stdout.write(String(n))')
-          if [ "$n" -gt 0 ] || [ "$p" -gt 0 ]; then echo "go=true" >> "$GITHUB_OUTPUT"; else echo "go=false" >> "$GITHUB_OUTPUT"; echo "::notice::active&&public + platform_hosts 0 — dns-drift skip"; fi
+      # ⚠️ "대상 0건이면 skip" 게이트를 두지 않는다 — 예약 platform host는 구조적으로 항상 ≥1이라
+      #    0은 "대상 없음"이 아니라 **열거 붕괴**다(그 형태는 파싱 실패를 0으로 흡수해 fail-open이었다).
+      #    검사기가 `--min-reserved`(기본 1) 바닥값으로 exit 1을 낸다. 준비상태 클래스가 아니라
+      #    열거 붕괴 클래스라 처방이 accounting job이 아니다. cf. docs/traps.md 「열거 붕괴」
       - id: check
-        if: steps.pf.outputs.go == 'true'
         run: |
           bun tools/dns-drift-check.ts --apps infra/cloudflare/apps.json > /tmp/drift.json
           # ⚠️ codex pass4 F3: drift 알림은 .drift(NXDOMAIN)만 센다 — transient(SERVFAIL/timeout)는 거짓 알림 방지.
@@ -46,7 +42,7 @@ jobs:
           [ "$t" -gt 0 ] && echo "::warning::DNS resolve 일시 실패 ${t}건(transient — drift 아님, 재확인)"
           cat /tmp/drift.json
       - name: telegram notify (드리프트/실패 시에만)
-        if: steps.pf.outputs.go == 'true' && (failure() || steps.check.outputs.count != '0')
+        if: failure() || steps.check.outputs.count != '0'
         uses: ./.github/actions/telegram-notify
         with:
           # check 스텝 크래시 시 count가 미설정('')이라 count!='0'이 참→'drift'로 오라벨된다.

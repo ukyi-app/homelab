@@ -167,7 +167,55 @@ apps/probe" ]
 @test "SCOPE_NAMES exposes the registered scopes" {
   run walk 'console.log(SCOPE_NAMES.slice().sort().join(","))'
   [ "$status" -eq 0 ]
-  [ "$output" == "apps,apps-manifests,apps-values,platform,platform-image-refs,platform-manifests,producers,rules" ]
+  [ "$output" == "apps,apps-manifests,apps-values,guards,image-ownership,platform,platform-image-refs,platform-manifests,producers,rules,workflows" ]
+}
+
+# `workflows` 스코프의 위험은 **이름 기반 축소**다 — `_*.yaml`(내부 reusable)과 `reusable-*.yaml`
+# (cross-repo 계약)도 자기 job을 실행하므로 준비상태 회계 대상이다. 역방향 단언으로 못박는다:
+# 추적된 워크플로 YAML은 전부 열거된다(정방향 "규약 밖 0건"만 두면 include가 좁아져도 계속 참이다).
+@test "workflows enumerates every tracked workflow YAML including reusable ones" {
+  run walk 'const got=new Set(walkManifests("workflows").map(e=>e.path)); const {execFileSync}=require("node:child_process"); const want=execFileSync("git",["ls-files","--",".github/workflows"],{encoding:"utf8"}).split("\n").filter(p=>/\.ya?ml$/.test(p)); console.log(want.filter(p=>!got.has(p)).join(","))'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "workflows does not collapse against the real repository" {
+  run walk 'console.log(walkManifests("workflows").length)'
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 20 ]
+}
+
+# `guards` 스코프는 "이 레포에서 무엇이 불변식을 강제한다고 주장하는가"에 답한다(G1 권위 회계의 열거 대상).
+# ⚠️ 공용 TEST_HARNESS 제외 어휘를 쓰면 안 된다 — 그 어휘의 `tests?/`가 `tests/gates/*.sh`를 통째로 지운다.
+# 그 8개(ci.yaml이 직접 부르는 e2e 하네스)가 정확히 지금까지 회계 커버리지 0이던 대상이라,
+# 지워지면 이 스코프가 존재 이유를 잃는다.
+@test "guards includes the ci-invoked e2e harnesses under tests/gates" {
+  run walk 'console.log(walkManifests("guards").map(e=>e.path).filter(p=>p.startsWith("tests/gates/")).length)'
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 8 ]
+}
+
+# 하네스가 source하는 프리미티브는 진입점이 아니다 — 세면 "권위 경로 0"이 영원히 참인 항목이 생긴다.
+# 이 성질은 명시 제외가 아니라 include의 `[^/]+`(하위 디렉토리를 못 넘는다)가 준다 — 명시 제외를
+# 뒀다가 mutation이 초록이라 죽은 규칙임을 실측하고 지웠다. 단언은 메커니즘과 무관하게 성질을 지킨다.
+# 역방향 — 규약 접두를 가진 추적 파일은 **반드시** 열거돼야 한다. 정방향만 두면 include가 좁아져도
+# "규약 밖 파일 0건"은 계속 참이라 통과한다(실측: tools 쪽이 check-만 받아 verify-db-marker.ts가 빠져 있었다).
+@test "guards enumerates every tracked file that follows the naming convention" {
+  run walk 'const got=new Set(walkManifests("guards").map(e=>e.path)); const {execFileSync}=require("node:child_process"); const want=execFileSync("git",["ls-files"],{encoding:"utf8"}).split("\n").filter(p=>/^(scripts\/((check|verify)-[^/]+|[^/]+-(guard|check))\.sh|tools\/(check|verify)-[^/]+\.ts|tests\/gates\/[^/]+\.sh)$/.test(p)); console.log(want.filter(p=>!got.has(p)).join(","))'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "guards excludes tests/gates/lib primitives that are sourced, not entrypoints" {
+  run walk 'console.log(walkManifests("guards").map(e=>e.path).filter(p=>p.includes("/gates/lib/")).join(","))'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "guards enumerates the three declared families and nothing else" {
+  run walk 'console.log(walkManifests("guards").map(e=>e.path).filter(p=>!/^(scripts\/((check|verify)-|[^/]+-(guard|check)\.sh)|tools\/(check|verify)-|tests\/gates\/)/.test(p)).join(","))'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # `platform-manifests`와 `platform-image-refs`는 **다른 질문**에 답한다.
@@ -321,4 +369,46 @@ _fixture_repo() {
   [ "$status" -eq 0 ]
   # 하네스 둘은 빠지고(공유 어휘), 차트는 남는다(이 스코프만의 규칙) — 두 축을 한 번에 고정한다.
   [ "$output" == "false,false,true" ]
+}
+
+# `image-ownership`와 `platform-image-refs`는 **다른 질문**에 답한다.
+#   image-refs      = "digest로 핀해야 하는가" → 벤더를 뺀다(수정 금지라 핀 요구 대상이 아니다).
+#   image-ownership = "누가 최신으로 유지하는가" → 벤더를 **포함한다**(수정 금지여도 답이 있어야 한다).
+# 실측: barman-plugin manifest의 SIDECAR_IMAGE가 base64 Secret 안 tag-only라 핀 게이트·Renovate 어디에도
+# 안 걸린 채 데이터 내구성 경로에 있었다 — 벤더를 빼면 그 클래스가 영원히 안 보인다.
+@test "image-ownership includes vendored paths that platform-image-refs deliberately drops" {
+  run walk 'const own = walkManifests("image-ownership").map(e=>e.path);
+    const refs = walkManifests("platform-image-refs").map(e=>e.path);
+    const v = "platform/cnpg/barman-plugin/manifest.yaml";
+    console.log([own.includes(v), refs.includes(v)].join(","))'
+  [ "$status" -eq 0 ]
+  [ "$output" == "true,false" ]
+}
+
+# ⚠️ 이 단언은 예전에 루트를 **옵셔널**로 써서(`(ops\+)?`) 실제로는 아무 루트도 강제하지 못했다 —
+# `ops` 분기가 죽어 있어도 초록이었다(적대 검토 지적). 이제 **정확한 집합**으로 못박는다.
+# 루트가 하나라도 빠지면 그 경로의 이미지가 "전건 소유자 확정"이라는 초록 아래에서 조용히 사라진다.
+@test "image-ownership covers exactly platform, apps, ops and infra (no root silently missing)" {
+  run walk 'const p = walkManifests("image-ownership").map(e=>e.path);
+    const roots = [...new Set(p.map(x=>x.split("/")[0]))].sort();
+    const harness = p.filter(x=>/(^|\/)tests?\/|(^|\/)fixtures|(^|\/)test_[^/]*$|\.bats$/.test(x));
+    console.log(roots.join("+") + "|" + harness.length)'
+  [ "$status" -eq 0 ]
+  [ "$output" == "apps+infra+ops+platform|0" ]
+}
+
+@test "image-ownership includes Dockerfiles (base images are supply chain, and ops/ would be dead without them)" {
+  # `ops/` 아래 추적 파일은 Dockerfile·README뿐이다 — Dockerfile을 빼면 그 루트가 0건을 기여해
+  # 스코프의 `ops` 분기가 **죽은 규칙**이 된다(주석·테스트·README는 커버리지를 주장하는 채로).
+  run walk 'const p=walkManifests("image-ownership").map(e=>e.path); console.log(p.filter(x=>/Dockerfile$/.test(x)).length + "|" + p.filter(x=>x.startsWith("ops/")).length)'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^[1-9][0-9]*\|[1-9][0-9]*$'
+}
+
+@test "image-ownership includes shell scripts (manifests embedded in heredocs)" {
+  # `.yaml`만 보던 동안 `platform/cnpg/prod/restore-drill-script.sh`의 CNPG imageName: digest가
+  # 통째로 빠져 있었다 — 그 값을 바꿔도 레포의 어떤 게이트도 red가 되지 않았다(D-1의 확장자 재현).
+  run walk 'console.log(walkManifests("image-ownership").filter(e=>e.path.endsWith(".sh")).length)'
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
 }
