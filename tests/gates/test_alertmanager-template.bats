@@ -116,6 +116,6 @@ setup() {
 
 @test "disk-scoped inhibit rule lets a critical suppress the same-disk warning" {
   am="$(yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' "$AM")"
-  printf '%s' "$am" | grep -qF "equal: ['disk']"   # alertname이 다른 Bulk warning/critical을 disk로 묶어 억제
+  printf '%s' "$am" | grep -qF -- "equal: ['disk']"   # alertname이 다른 Bulk warning/critical을 disk로 묶어 억제
   printf '%s' "$am" | grep -q 'disk =~'             # disk 라벨 보유 알림만 한정(비-디스크 과억제 방지)
 }
