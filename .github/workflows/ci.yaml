@@ -176,6 +176,7 @@ jobs:
           tests/gates/vmalert-bulkssd-firing-e2e.sh
           tests/gates/vmalert-digest-stale-firing-e2e.sh
           tests/gates/vmalert-gha-liveness-firing-e2e.sh
+          tests/gates/vmalert-adguard-rewrite-firing-e2e.sh
           tests/gates/vmalert-jobfailed-firing-e2e.sh
           "
           harnesses="$(printf '%s\n' "$harnesses" | tr -d ' ' | grep -v '^$' || true)"
