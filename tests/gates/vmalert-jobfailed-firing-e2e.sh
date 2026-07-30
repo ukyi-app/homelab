@@ -43,6 +43,7 @@ RULES_CM="$STACK/rules/core.yaml"
 . "$ROOT/tests/gates/lib/vmalert-e2e.sh"
 
 ALERT=KubeJobFailed
+FLAP_ALERT=CronJobFlapping
 
 # 시나리오 상수 — 진단 산문과 시리즈 생성이 **같은 변수**를 읽는다(따로 적으면 둘이 갈린다).
 NS=edge                 # 시스템 ns 블랙리스트에 걸리지 않는 워크로드 ns
@@ -65,13 +66,29 @@ yq '.data["core.yaml"]' "$RULES_CM" > "$VME_TMP/core-deployed.yaml"
 [ -s "$VME_TMP/core-deployed.yaml" ] || vme_fault "룰 추출 실패: $RULES_CM"
 
 # fail-closed: 하네스가 겨냥하는 룰이 실제로 존재하는지(리네임 시 무성 무측정 방지)
-grep -q "alert: $ALERT" "$VME_TMP/core-deployed.yaml" \
-  || vme_fault "배포 룰에 'alert: $ALERT' 부재 — 하네스가 아무것도 측정하지 않는다"
+for a in "$ALERT" "$FLAP_ALERT"; do
+  grep -q "alert: $a" "$VME_TMP/core-deployed.yaml" \
+    || vme_fault "배포 룰에 'alert: $a' 부재 — 하네스가 아무것도 측정하지 않는다"
+done
 
 EXPR="$(vme_alert_expr "$VME_TMP/core-deployed.yaml" "$ALERT")"
 [ -n "$EXPR" ] || vme_fault "$ALERT: 배포 룰에서 expr 추출 실패"
 FOR_S="$(vme_to_s "$(vme_alert_for "$VME_TMP/core-deployed.yaml" "$ALERT")")"
 [ "$FOR_S" -gt 0 ] || vme_fault "$ALERT: for: 부재 또는 0 — 지속성 계약이 없다"
+
+# ── flapping 룰의 창·임계는 **룰에서 파생**한다(하드코딩 금지 — 룰을 바꾸면 픽스처가 따라온다) ──
+FLAP_EXPR="$(vme_alert_expr "$VME_TMP/core-deployed.yaml" "$FLAP_ALERT")"
+[ -n "$FLAP_EXPR" ] || vme_fault "$FLAP_ALERT: 배포 룰에서 expr 추출 실패"
+FLAP_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_TMP/core-deployed.yaml" "$FLAP_ALERT")")"
+[ "$FLAP_FOR_S" -gt 0 ] || vme_fault "$FLAP_ALERT: for: 부재 또는 0"
+# 최근성 창 — `(time() - …) < <초>` 형태에서 뽑는다.
+FLAP_WINDOW_S="$(grep -oE '\)\s*<\s*[0-9]+' <<<"$FLAP_EXPR" | grep -oE '[0-9]+$' | head -1)"
+[ -n "$FLAP_WINDOW_S" ] || vme_fault "$FLAP_ALERT: 최근성 창 상수를 추출하지 못했다(expr 형태 변경?)"
+# 발화 임계 — 말미 `>= N`.
+FLAP_THRESHOLD="$(grep -oE '>=\s*[0-9]+' <<<"$FLAP_EXPR" | grep -oE '[0-9]+$' | tail -1)"
+[ -n "$FLAP_THRESHOLD" ] || vme_fault "$FLAP_ALERT: 발화 임계를 추출하지 못했다(expr 형태 변경?)"
+[ "$FLAP_THRESHOLD" -ge 2 ] \
+  || vme_contract "$FLAP_ALERT 임계가 ${FLAP_THRESHOLD} — 1 이하면 단발 실패가 발화해 KubeJobFailed와 역할이 겹친다"
 
 # ── 2b) preflight: 시나리오가 룰의 셀렉터를 실제로 통과하는지 기계가 확인 ──────────────────────────
 # 픽스처가 룰의 블랙리스트에 걸리면 전 레그가 조용히 침묵해 **vacuous green**이 된다(L2/L3이 '발화 없음'
@@ -101,9 +118,33 @@ SAMPLE_S="$VME_EVAL_S"
 [ "$SAMPLE_S" -gt 0 ] || vme_fault "eval 간격 파생 실패(VME_EVAL=$VME_EVAL)"
 
 # ── 3) 합성 시계열 ────────────────────────────────────────────────────────────────────────────────
+# ★ 실패 간격은 임의 상수가 아니라 **감시 대상 중 최장 주기의 2배**다 — 교대 실패(성공↔실패)에서
+#   연속한 두 실패는 2주기 떨어지기 때문이다. 초판은 창/6이라는 임의값(600s)을 써서 **가장 불리한
+#   대상을 시험하지 않았고**, 그래서 창이 1h일 때 gha-liveness(주기 1800s → 간격 3600s)가 원리적으로
+#   발화 불가였는데도 전건 green이었다(적대적 리뷰 R-1). 여기서 그 최악 케이스를 픽스처로 만든다.
+#   ⚠️ 최장 주기 대상은 gha-liveness-exporter다(다른 대상은 600s). 그 가정이 깨지면(더 긴 주기의
+#     대상이 생기면) 정적 게이트 test_cronjob-flapping.bats의 `2×주기+for` 부등식이 먼저 red를 낸다.
+# lifecycle 레그(L12)는 **가장 짧은 주기** 대상을 쓴다 — 회수가 가장 빨리 일어나 pending을 가장
+# 자주 리셋하는 최악 케이스다. 주기와 limit 둘 다 매니페스트에서 파생한다(하드코딩 0).
+AG_MF="$ROOT/platform/adguard/prod/rewrite-reconciler.yaml"
+LC_CRON_MIN="$(grep -oE '^  schedule: "\*/([0-9]+) ' "$AG_MF" | grep -oE '[0-9]+' || true)"
+[ -n "$LC_CRON_MIN" ] || vme_fault "adguard 리컨실러 크론 주기 추출 실패 — lifecycle 레그를 파생할 수 없다"
+LIFECYCLE_PERIOD_S=$(( LC_CRON_MIN * 60 ))
+LIFECYCLE_FAILLIMIT="$(grep -oE '^  failedJobsHistoryLimit: [0-9]+' "$AG_MF" | grep -oE '[0-9]+' || true)"
+[ -n "$LIFECYCLE_FAILLIMIT" ] || vme_fault "adguard 리컨실러 failedJobsHistoryLimit 추출 실패"
+
+GHA_CRON_MIN="$(grep -oE '^  schedule: "\*/([0-9]+) ' "$STACK/gha-liveness-exporter.yaml" | grep -oE '[0-9]+' || true)"
+[ -n "$GHA_CRON_MIN" ] || vme_fault "gha-liveness-exporter 크론 주기 추출 실패 — 최악 케이스 간격을 파생할 수 없다"
+MAX_TARGET_PERIOD_S=$(( GHA_CRON_MIN * 60 ))
+FLAP_SPREAD_S=$(( MAX_TARGET_PERIOD_S * 2 ))
+
 # 창은 **전이 레그(L2)가 지배**한다: 복구 전에 for:를 채워 발화하고, 복구 후에도 해소를 관측할 구간이
 # 남아야 한다. FOR_S×4 = [발화 구간 2×for] + [해소 관측 구간 2×for].
+# ⚠️ flapping 레그의 요구가 더 크면 그쪽이 창을 지배한다 — 실패 간격(2×최장주기) 이후에도 겹침 구간이
+#    for: 를 채울 만큼 남아야 한다. 이 max()가 없으면 R-1 최악 케이스 픽스처가 창에 안 들어간다.
 SPAN_S=$(( FOR_S * 4 ))
+FLAP_SPAN_NEED_S=$(( FLAP_SPREAD_S + FLAP_FOR_S * 2 ))
+[ "$SPAN_S" -ge "$FLAP_SPAN_NEED_S" ] || SPAN_S="$FLAP_SPAN_NEED_S"
 TO_EPOCH="$(date +%s)"
 FROM_EPOCH=$(( TO_EPOCH - SPAN_S ))
 # L2의 복구 시각 — 창 **안**이어야 한다. 이 오프셋 이전엔 미해소(발화), 이후엔 해소(침묵)다.
@@ -127,7 +168,21 @@ AFTER_WIN_S=$(( TO_EPOCH - RECOVERY_AT - AFTER_GUARD_S ))
   || vme_contract "L2 무의미: 복구 후 관측 구간이 없다(AFTER_WIN=${AFTER_WIN_S}s) — 해소를 볼 수 없다"
 [ "$STALE_AGE_S" -gt 0 ] \
   || vme_contract "L1 무의미: 실패 Job이 창 시작 이전이 아니다(STALE_AGE=${STALE_AGE_S}s)"
+
+# ── L7/L8 산술: 실패 N건이 flapping 룰의 최근성 창 안에서 for:를 채울 만큼 **겹쳐야** 한다 ────────
+# 실패 Job들은 replay 창 시작(FROM) 이전부터 FROM 사이에 흩뿌린다 — 시작 시각이 샘플 시각보다
+# 미래일 수 없기 때문이다(그 위반은 assert_no_future_timestamps가 잡는다). 가장 오래된 실패는
+# FROM - FLAP_SPREAD_S에 있으므로, 그것이 창 밖으로 밀려나기 전까지의 겹침 구간은
+#   overlap = FLAP_WINDOW_S - FLAP_SPREAD_S
+# 이고 이게 for:보다 커야 발화를 관측할 수 있다.
+#
+FLAP_OVERLAP_S=$(( FLAP_WINDOW_S - FLAP_SPREAD_S ))
+[ "$FLAP_OVERLAP_S" -gt "$FLAP_FOR_S" ] \
+  || vme_contract "L7 무의미: 실패들이 창 안에 함께 머무는 구간(${FLAP_OVERLAP_S}s) <= for:(${FLAP_FOR_S}s) — 발화를 관측할 수 없다"
+[ "$SPAN_S" -gt "$FLAP_FOR_S" ] \
+  || vme_contract "L7 무의미: replay 창(${SPAN_S}s) <= flapping for:(${FLAP_FOR_S}s)"
 echo "[preflight] 산술 OK: 창 ${SPAN_S}s · for ${FOR_S}s · 복구 +${RECOVERY_OFFSET_S}s(창 안) · 해소 관측 ${AFTER_WIN_S}s · L1 실패는 창 시작 -${STALE_AGE_S}s"
+echo "[preflight] flapping OK: 창 ${FLAP_WINDOW_S}s · 임계 ${FLAP_THRESHOLD} · for ${FLAP_FOR_S}s · 실패 간격 ${FLAP_SPREAD_S}s · 겹침 ${FLAP_OVERLAP_S}s"
 
 # ★★ 물리 불변식 — **생성된 시계열 자체**를 검사한다. 이게 R-2류의 진짜 방어선이다.
 #    타임스탬프를 값으로 갖는 KSM 메트릭은 "아직 일어나지 않은 일"을 내보낼 수 없다. 즉 어떤 샘플에서도
@@ -159,13 +214,15 @@ PY
 gen() { # $1=출력파일 $2=시나리오(stale_resolved|transition|two_jobs|unresolved|standalone|healthy)
   python3 - "$1" "$2" "$FROM_EPOCH" "$TO_EPOCH" "$SAMPLE_S" \
     "$NS" "$CRONJOB" "$JOB_CRON" "$JOB_SOLO" "$STALE_AGE_S" "$STALE_LEAD_S" "$RECOVERY_AT" \
-    "$CRONJOB2" "$JOB_CRON2" <<'PY'
+    "$CRONJOB2" "$JOB_CRON2" "$FLAP_THRESHOLD" "$FLAP_SPREAD_S" \
+    "$LIFECYCLE_PERIOD_S" "$LIFECYCLE_FAILLIMIT" <<'PY'
 import json, sys
 (out, scen, frm, to, step, ns, cj, job_cron, job_solo, stale_age, stale_lead, recovery_at,
- cj2, job_cron2) = (
+ cj2, job_cron2, flap_threshold, flap_spread, lifecycle_period, lifecycle_faillimit) = (
     sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]),
     sys.argv[6], sys.argv[7], sys.argv[8], sys.argv[9], int(sys.argv[10]), int(sys.argv[11]),
-    int(sys.argv[12]), sys.argv[13], sys.argv[14])
+    int(sys.argv[12]), sys.argv[13], sys.argv[14], int(sys.argv[15]), int(sys.argv[16]),
+    int(sys.argv[17]), int(sys.argv[18]))
 
 ts = list(range(frm, to + 1, step))
 lines = []
@@ -173,6 +230,17 @@ def series(metric, labels, values):
     m = {"__name__": metric}; m.update(labels)
     lines.append(json.dumps({"metric": m, "values": values,
                              "timestamps": [t * 1000 for t in ts]}))
+
+# ★ Job은 **생성되고 회수된다** — 그 수명을 시계열의 존재 구간으로 표현한다. `series()`가 전 구간에
+#   값을 싣는 것과 달리, 여기서는 [t_from, t_until) 밖에서 시리즈가 **없다**(KSM이 없는 오브젝트를
+#   내보내지 않는 것과 같다). CronJob 컨트롤러의 failedJobsHistoryLimit 회수를 모델링하는 데 쓴다.
+def series_window(metric, labels, value, t_from, t_until):
+    idx = [i for i, tt in enumerate(ts) if tt >= t_from and (t_until is None or tt < t_until)]
+    if not idx:
+        return
+    m = {"__name__": metric}; m.update(labels)
+    lines.append(json.dumps({"metric": m, "values": [value] * len(idx),
+                             "timestamps": [ts[i] * 1000 for i in idx]}))
 
 # ⚠️ 타임스탬프 값은 **관측 시점보다 미래일 수 없다.** KSM은 "아직 일어나지 않은 성공"을 내보내지
 #    않는다. 그래서 last-success는 상수로 박지 않고 **각 샘플 시점 t의 함수**로 만든다 — 이 규율을
@@ -230,6 +298,92 @@ elif scen == "two_jobs":
     series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj2},
            [frm - stale_lead] * len(ts))
 
+elif scen in ("flapping", "single_failure"):
+    # ★ S-6 갭: 실패↔성공이 **교대**하면 각 실패는 다음 주기 성공에 억제돼 `for:`를 채우지 못한다 →
+    #   KubeJobFailed는 영구 무성이다. 그 영역을 CronJobFlapping이 **실패를 사건으로 세어** 잡는다.
+    #   두 시나리오는 실패 **개수**만 다르다(2 vs 1) — 임계가 실제로 2인지 가르는 대조다.
+    #   ⚠️ 두 실패 모두 창 안에서 시작하고, 그 뒤 CronJob이 성공한다(= KubeJobFailed는 억제된다).
+    #     그래야 "억제가 삼키는 바로 그 상태"를 재현한다.
+    #   실패 개수는 **룰 임계에서 파생**한다: flapping = 임계, single = 임계-1. 임계를 바꾸면
+    #   두 픽스처가 함께 따라오므로 "임계가 실제로 N인가"라는 대조가 유지된다.
+    n_fail = flap_threshold if scen == "flapping" else flap_threshold - 1
+    #   시작 시각은 replay 창 시작 **이전**에 흩뿌린다 — 샘플 시각보다 미래일 수 없기 때문이다.
+    #   가장 오래된 것이 frm - spread, 가장 최근이 frm. (겹침 산술은 §3b preflight가 강제한다.)
+    for k in range(n_fail):
+        off = flap_spread * (n_fail - 1 - k) // max(n_fail - 1, 1)
+        failed_job(f"{job_cron}-f{k}", frm - off, "CronJob", cj)
+    # 소유 CronJob은 창 내내 성공 중 — 마지막 성공이 항상 최신이라 KubeJobFailed 억제가 걸린다.
+    # ⚠️ 이 줄이 빠지면 억제식 우변이 빈 벡터가 되어 **억제가 아예 안 걸리고**, L7b가 "억제 회귀"라는
+    #   틀린 사유로 red를 낸다(실제로 한 번 그렇게 만들었다 — 픽스처 결손을 룰 결함으로 오독하게 된다).
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj}, list(ts))
+
+elif scen == "lifecycle_flap":
+    # ★★ 교대 flapping의 **전체 수명주기**를 재생한다: F1 → S1 → F2 → S2 → F3 → … 그리고 CronJob
+    #   컨트롤러가 failedJobsHistoryLimit개만 남기고 **오래된 실패를 회수**한다.
+    #   이 레그가 없으면 "해소된 실패 2건을 창 내내 고정"이라는 정적 스냅샷만 보게 되는데, 라이브에서는
+    #   그 2건이 유지되지 않는다 — 새 실패가 오면 가장 오래된 것이 사라지고 그 새 실패는 아직 미해소라
+    #   세어지지 않아 count가 임계 아래로 떨어진다(적대적 리뷰 r2가 지목한 pending 리셋).
+    #   ⚠️ 주기·limit은 **adguard 매니페스트에서 파생**한다 — 최악 케이스(가장 짧은 주기)가 대상이다.
+    P = lifecycle_period
+    fails = []
+    k = 0
+    while True:
+        fs = frm - 2 * P + k * 2 * P     # 실패는 2주기 간격(성공↔실패 교대)
+        if fs > to:
+            break
+        fails.append(fs)
+        k += 1
+    for i, fs in enumerate(fails):
+        # i번째 실패는 (i + limit)번째 실패가 생길 때 회수된다.
+        del_at = fails[i + lifecycle_faillimit] if i + lifecycle_faillimit < len(fails) else None
+        jn = f"{job_cron}-lc{i}"
+        series_window("kube_job_failed", {"condition": "true", "namespace": ns, "job_name": jn}, 1, fs, del_at)
+        series_window("kube_job_status_start_time", {"namespace": ns, "job_name": jn}, fs, fs, del_at)
+        series_window("kube_job_owner",
+                      {"namespace": ns, "job_name": jn, "owner_kind": "CronJob", "owner_name": cj},
+                      1, fs, del_at)
+    # 각 실패 P초 뒤에 성공한다 — last_success는 그 계단이다.
+    def last_ok_at(tt):
+        best = frm - 3 * P
+        for fs in fails:
+            s = fs + P
+            if s <= tt:
+                best = s
+        return best
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj},
+           [last_ok_at(tt) for tt in ts])
+
+elif scen == "two_cronjobs_resolved":
+    # ★ `count by (…, owner_name)`의 **그룹핑 키**를 잠근다: 같은 ns의 **서로 다른 두 CronJob**이 각각
+    #   해소된 실패를 1건씩 갖는다. owner_name으로 그룹핑하면 각 1건이라 임계(2) 미만 → 침묵.
+    #   그 키를 빼면 두 무관한 실패가 하나로 합쳐져 임계에 도달 → 오발화한다.
+    #   ⚠️ L5(two_jobs)로는 이걸 못 잠근다 — 거기는 한쪽이 미해소라 해소 조건에서 걸러져 count가 1이다
+    #     (적대적 리뷰 R-3의 뮤테이션이 L5에서 통과해 버린 이유). 두 건 모두 **해소**여야 대조가 산다.
+    failed_job(f"{job_cron}-r0", frm, "CronJob", cj)
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj}, list(ts))
+    failed_job(f"{job_cron2}-r0", frm, "CronJob", cj2)
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj2}, list(ts))
+
+elif scen == "consecutive_unresolved":
+    # ★ 두 룰의 **상보성**을 잠근다: 같은 CronJob에 미해소 실패가 임계 개수만큼 있다(마지막 성공이 둘보다
+    #   앞선다). KubeJobFailed는 발화해야 하고, CronJobFlapping은 **침묵**해야 한다 — 세는 대상이
+    #   "실패했다가 복구된" 것뿐이기 때문이다.
+    #   해소 조건을 지우면 여기서 둘 다 발화하고, Alertmanager가 alertname으로 그룹핑하므로 텔레그램
+    #   알림이 2건 간다(적대적 리뷰 R-2가 지목한 중복 통지). 이 레그가 그 회귀를 red로 만든다.
+    for k in range(flap_threshold):
+        off = flap_spread * (flap_threshold - 1 - k) // max(flap_threshold - 1, 1)
+        failed_job(f"{job_cron}-u{k}", frm - off, "CronJob", cj)
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj},
+           [frm - flap_spread - stale_lead] * len(ts))
+
+elif scen == "stale_failures":
+    # ★ 최근성 필터를 잠근다: 임계 개수만큼의 실패가 **전부 창 밖**(오래됨)에 있다. 필터가 있으면
+    #   세어지지 않아 침묵하고, 필터를 지우면 그대로 세어져 오발화한다 — #401이 고친 "과거를 현재로
+    #   알리는" 병의 재발이다. 라이브 의미도 같다: 3일 전 2회 실패가 남아 있어도 지금 문제는 아니다.
+    for k in range(flap_threshold):
+        failed_job(f"{job_cron}-s{k}", frm - stale_age - k * flap_spread, "CronJob", cj)
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj}, list(ts))
+
 else:  # unresolved — 마지막 성공이 실패 **이전**에 멈춰 있다 = 아직 고장 중.
     job_start = frm
     failed_job(job_cron, job_start, "CronJob", cj)
@@ -251,6 +405,17 @@ run_scenario() { # $1=시나리오 → vmsingle 기동 + import + replay
   vme_replay "$vm" "$VME_VA_VER" "$VME_TMP/core-deployed.yaml" "$VME_EVAL" "$VME_LOOKBACK" "$FROM_EPOCH" "$TO_EPOCH"
 }
 
+# L1~L6은 전부 "flapping이 아닌" 상태다 — 그 레그들에서 CronJobFlapping이 울면 오탐이다.
+# ⚠️ 계획서가 이 커버리지를 약속했는데 초판은 KubeJobFailed만 질의했다(적대적 리뷰 R-3).
+#   특히 L5(같은 ns의 두 CronJob이 각 1건)는 `count by`에서 owner_name을 빼면 두 실패가 합쳐져
+#   임계에 도달한다 — 그 그룹핑 키를 잠그는 유일한 픽스처다.
+assert_no_flap() { # $1=레그 이름
+  local n
+  n="$(vme_firing "$FLAP_ALERT")"
+  if [ "$n" -eq 0 ]; then vme_pass "$1 $FLAP_ALERT 침묵(flapping 상태가 아니다)"
+  else vme_fail "$1 $FLAP_ALERT 오발화 ${n}회 — 이 상태는 반복 실패가 아니다(그룹핑 키/해소 조건 회귀)"; fi
+}
+
 firing_for_job() { # $1=job_name [$2=eval time] [$3=윈도(초)] → 그 Job에 대한 firing 샘플 수
   # 시점·윈도를 주면 **구간별** 발화를 본다(전이 레그의 before/after 판정). 미지정이면 창 전체.
   vme_promql "sum(count_over_time(ALERTS{alertname=\"$ALERT\",alertstate=\"firing\",job_name=\"$1\"}[${3:-7d}${3:+s}]))" "${2:-}"
@@ -263,6 +428,7 @@ run_scenario stale_resolved
 n="$(firing_for_job "$JOB_CRON")"
 if [ "$n" -eq 0 ]; then vme_pass "L1 $ALERT 침묵(${STALE_AGE_S}s 묵은 실패 Job + CronJob 정상 가동 — 자가 복구된 상태)"
 else vme_fail "L1 해소된 실패가 발화한다 — 실패 Job **오브젝트의 존재**를 재고 있다(라이브에서 3일 연속 firing한 그 결함)"; fi
+assert_no_flap L1f
 
 echo "── L2: 창 **안에서** 발화 → 복구 → 해소를 실제로 겪는다(전이 — 상태 스냅샷이 아니라 변화를 본다) ──"
 # ★ 이 레그가 release-r1 R-2의 답이다. L1은 '이미 해소된 상태'의 스냅샷만 보므로, 억제가 **해소 시점에**
@@ -275,18 +441,21 @@ if [ "$before" -gt 0 ]; then vme_pass "L2a $ALERT 발화(복구 이전 ${RECOVER
 else vme_fail "L2a 복구 이전에도 무성 — 억제가 미해소 상태까지 삼킨다(전이의 앞쪽이 죽었다)"; fi
 if [ "$after" -eq 0 ]; then vme_pass "L2b $ALERT 해소(복구 이후 ${AFTER_WIN_S}s 구간 — 성공 한 번으로 조용해진다)"
 else vme_fail "L2b 복구 후에도 ${after}회 발화 — 후속 성공이 알림을 해소하지 못한다(이 픽스의 본체가 동작 안 함)"; fi
+assert_no_flap L2f
 
 echo "── L3: 마지막 성공이 그 실패 **이전**이면 발화한다(억제가 진짜 고장을 삼키지 않는다) ──"
 run_scenario unresolved
 n="$(firing_for_job "$JOB_CRON")"
 if [ "$n" -gt 0 ]; then vme_pass "L3 $ALERT 발화(마지막 성공이 실패보다 ${STALE_LEAD_S}s 앞 — 미해소)"
 else vme_fail "L3 미해소 실패가 무성 — 억제가 fail-open이다(L1을 통과시키려고 알림을 죽였다)"; fi
+assert_no_flap L3f
 
 echo "── L4: CronJob 소유가 **아닌** Job은 억제 재료가 다 있어도 발화한다(owner_kind 좁힘을 잠근다) ──"
 run_scenario standalone
 n="$(firing_for_job "$JOB_SOLO")"
 if [ "$n" -gt 0 ]; then vme_pass "L4 $ALERT 발화(owner_name은 CronJob과 같지만 owner_kind=Workflow — 필터가 억제를 막는다)"
 else vme_fail "L4 비-CronJob 소유 Job이 무성 — 억제가 owner_kind 밖으로 새어 기존 백스톱을 지웠다"; fi
+assert_no_flap L4f
 
 echo "── L5: 같은 ns의 두 CronJob — 해소된 쪽만 침묵하고 미해소 쪽은 발화한다(조인 키가 job 단위) ──"
 # ★ 억제가 `on (namespace)`로 뭉개지면 앞 CronJob의 최신 성공이 뒤 CronJob의 실패까지 삼킨다.
@@ -298,12 +467,62 @@ if [ "$n_res" -eq 0 ]; then vme_pass "L5a 해소된 Job 침묵($JOB_CRON — 소
 else vme_fail "L5a 해소된 Job이 발화 — 억제가 job 단위로 걸리지 않는다"; fi
 if [ "$n_unres" -gt 0 ]; then vme_pass "L5b 미해소 Job 발화($JOB_CRON2 — 같은 ns의 형제 성공에 삼켜지지 않는다)"
 else vme_fail "L5b 같은 ns의 다른 CronJob 성공이 이 실패를 삼켰다 — 조인 키가 ns 단위로 뭉개졌다(fail-open)"; fi
+assert_no_flap L5f
 
 echo "── L6: 실패가 없으면 침묵(vacuity 차단 — 위 발화가 '항상 발화'가 아님) ──"
 run_scenario healthy
 n="$(vme_firing "$ALERT")"
 if [ "$n" -eq 0 ]; then vme_pass "L6 $ALERT 침묵(실패 Job 없음)"
 else vme_fail "L6 실패가 없는데 발화했다 — 위 레그가 무의미해진다"; fi
+assert_no_flap L6f
+
+echo "── L7: 교대 flapping — $FLAP_ALERT 발화 · $ALERT 는 침묵(억제가 삼키는 영역을 다른 축이 잡는다) ──"
+# ★ S-6의 본체. 실패↔성공 교대에서 각 실패는 다음 성공에 억제되므로 $ALERT는 원리적으로 침묵한다.
+#   그 침묵이 "정상"이 아니라 "사각지대"임을 같은 픽스처 안에서 증명한다 — 한쪽만 보면 둘 중 어느
+#   룰이 일하는지 알 수 없고, $ALERT의 침묵을 오탐 해소로 오독하게 된다.
+run_scenario flapping
+n_flap="$(vme_firing "$FLAP_ALERT")"
+n_job="$(vme_promql "sum(count_over_time(ALERTS{alertname=\"$ALERT\",alertstate=\"firing\",namespace=\"$NS\"}[7d]))")"
+if [ "$n_flap" -gt 0 ]; then vme_pass "L7a $FLAP_ALERT 발화(창 내 실패 2회 — 교대 flapping)"
+else vme_fail "L7a $FLAP_ALERT 무성 — 만성 flapping이 여전히 어떤 알림에도 안 잡힌다(S-6 미해결)"; fi
+if [ "$n_job" -eq 0 ]; then vme_pass "L7b $ALERT 는 침묵(억제가 정상 동작 — 두 룰의 역할 분리)"
+else vme_fail "L7b $ALERT 가 교대 상태에서 발화 — 억제가 안 걸렸다(#401 회귀)"; fi
+
+echo "── L8: 창 내 실패 1회는 $FLAP_ALERT 침묵(임계가 실제로 2인지 — 단발은 이 룰 소관이 아니다) ──"
+run_scenario single_failure
+n="$(vme_firing "$FLAP_ALERT")"
+if [ "$n" -eq 0 ]; then vme_pass "L8 $FLAP_ALERT 침묵(창 내 실패 1회 — 사고이지 패턴이 아니다)"
+else vme_fail "L8 단발 실패에 $FLAP_ALERT 발화 — 임계가 2가 아니다(#401이 고친 단발 노이즈로 회귀)"; fi
+
+echo "── L9: 창 **밖**의 오래된 실패는 세지 않는다(최근성 필터를 잠근다) ──"
+run_scenario stale_failures
+n="$(vme_firing "$FLAP_ALERT")"
+if [ "$n" -eq 0 ]; then vme_pass "L9 $FLAP_ALERT 침묵(${FLAP_THRESHOLD}건이 전부 창 ${FLAP_WINDOW_S}s 밖 — 과거는 현재가 아니다)"
+else vme_fail "L9 창 밖 오래된 실패가 발화 — 최근성 필터가 없다(#401이 고친 '과거를 현재로 알리는' 병의 재발)"; fi
+
+echo "── L12: 교대 flapping의 **전체 수명주기**(회수 포함) — 그래도 발화해야 한다 ──"
+# ★ 정적 스냅샷(L7)이 못 보는 것: 새 실패가 도착하면 컨트롤러가 가장 오래된 실패를 회수하고, 그 새
+#   실패는 아직 미해소라 세어지지 않는다 → count가 임계 아래로 떨어져 pending이 리셋된다. limit이
+#   임계+1이어야 그 순간에도 해소분이 임계만큼 남는다. 이 레그가 그 여유를 실측한다.
+run_scenario lifecycle_flap
+n="$(vme_firing "$FLAP_ALERT")"
+if [ "$n" -gt 0 ]; then vme_pass "L12 $FLAP_ALERT 발화(주기 ${LIFECYCLE_PERIOD_S}s · limit ${LIFECYCLE_FAILLIMIT} — 회수가 있어도 for:를 채운다)"
+else vme_fail "L12 수명주기 재생에서 무성 — 회수가 pending을 리셋한다(limit이 임계+1 미만이면 이 상태다)"; fi
+
+echo "── L11: 같은 ns의 두 CronJob이 각각 해소된 실패 1건 — 합쳐 세면 안 된다(그룹핑 키를 잠근다) ──"
+run_scenario two_cronjobs_resolved
+n="$(vme_firing "$FLAP_ALERT")"
+if [ "$n" -eq 0 ]; then vme_pass "L11 $FLAP_ALERT 침묵(CronJob마다 1건씩 — 임계 ${FLAP_THRESHOLD} 미만)"
+else vme_fail "L11 무관한 두 CronJob의 실패가 합쳐져 발화 — count by에서 owner_name이 빠졌다(fail-open)"; fi
+
+echo "── L10: 연속 **미해소** 실패는 KubeJobFailed만 발화한다(두 룰의 상보성 — 중복 통지 금지) ──"
+run_scenario consecutive_unresolved
+n_job="$(vme_promql "sum(count_over_time(ALERTS{alertname=\"$ALERT\",alertstate=\"firing\",namespace=\"$NS\"}[7d]))")"
+n_flap="$(vme_firing "$FLAP_ALERT")"
+if [ "$n_job" -gt 0 ]; then vme_pass "L10a $ALERT 발화(미해소 ${FLAP_THRESHOLD}건 — 지금 고장이다)"
+else vme_fail "L10a 미해소 연속 실패가 무성 — KubeJobFailed가 죽었다"; fi
+if [ "$n_flap" -eq 0 ]; then vme_pass "L10b $FLAP_ALERT 침묵(복구된 실행이 0건 — '자주 깨진다'가 아니라 '지금 고장'이다)"
+else vme_fail "L10b 미해소 상태에 $FLAP_ALERT 도 발화 — 해소 조건이 없어 두 알림이 중복 통지된다(R-2 회귀)"; fi
 
 [ "$VME_FAILED" -eq 0 ] || { echo "vmalert-jobfailed-firing-e2e: ${VME_FAILED}개 레그 실패" >&2; exit 1; }
-echo "vmalert-jobfailed-firing-e2e OK (L1/L2a/L2b/L3/L4/L5a/L5b/L6 전건 통과)"
+echo "vmalert-jobfailed-firing-e2e OK (L1~L6(+오발화 확인)/L7~L12 전건 통과)"
