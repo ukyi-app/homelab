@@ -16,7 +16,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; F="$ROOT/platform/a
 }
 
 @test "telegram-notify subscription label is wired on apps appset, platform templatePatch, and cnpg-data" {
-  has() { printf '%s' "$1" | grep -qF "$2" || { echo "miss: $2"; false; }; }
+  has() { printf '%s' "$1" | grep -qF -- "$2" || { echo "miss: $2"; false; }; }
   C="$ROOT/platform/argocd/root/apps/cnpg-data.yaml"
   # apps appset: 모든 앱에 정적 라벨
   run yq 'select(.kind=="ApplicationSet" and .metadata.name=="apps") | .spec.template.metadata.labels."notify.homelab/telegram"' "$F"

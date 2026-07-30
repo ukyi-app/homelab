@@ -8,10 +8,10 @@ tpl() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   out=$(tpl --set kind=web --set route.host=api.example.com --set route.public=true)
   echo "$out" | yq 'select(.kind=="Service")' | grep -q "port: 8080"
   rt=$(echo "$out" | yq 'select(.kind=="HTTPRoute")')
-  echo "$rt" | grep -qF 'name: homelab'
-  echo "$rt" | grep -qF 'namespace: gateway'
-  echo "$rt" | grep -qF 'sectionName: web-public'
-  echo "$rt" | grep -qF 'api.example.com'
+  echo "$rt" | grep -qF -- 'name: homelab'
+  echo "$rt" | grep -qF -- 'namespace: gateway'
+  echo "$rt" | grep -qF -- 'sectionName: web-public'
+  echo "$rt" | grep -qF -- 'api.example.com'
 }
 
 @test "internal app binds to the internal HTTPS listener" {

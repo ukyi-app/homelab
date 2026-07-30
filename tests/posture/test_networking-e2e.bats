@@ -11,7 +11,7 @@ setup() {
 
 @test "Gateway 'homelab' is Accepted + Programmed" {
   run bash -c "kubectl -n gateway get gateway homelab -o jsonpath='{range .status.conditions[*]}{.type}={.status};{end}'"
-  [[ "$output" == *"Accepted=True"* ]]
+  printf '%s' "$output" | grep -qF -- "Accepted=True"
   [[ "$output" == *"Programmed=True"* ]]
 }
 
@@ -22,7 +22,7 @@ setup() {
 
 @test "whoami HTTPRoute is Accepted + ResolvedRefs" {
   run bash -c "kubectl -n gateway get httproute whoami -o jsonpath='{range .status.parents[*].conditions[*]}{.type}={.status};{end}'"
-  [[ "$output" == *"Accepted=True"* ]]
+  printf '%s' "$output" | grep -qF -- "Accepted=True"
   [[ "$output" == *"ResolvedRefs=True"* ]]
 }
 

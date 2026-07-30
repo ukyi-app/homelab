@@ -16,12 +16,12 @@ render() { helm template "$1" "$CHART" -f "$2"; }
 
 @test "web (Node standalone) renders Service+HTTPRoute" {
   out=$(render web "$FIX/web.yaml")
-  [[ "$out" == *"HTTPRoute"* ]]
+  printf '%s' "$out" | grep -qF -- "HTTPRoute"
   [[ "$out" == *"Deployment"* ]]
 }
 
 @test "site served by static-web-server, no metrics port" {
   out=$(render console "$FIX/site.yaml")
-  [[ "$out" == *"static-web-server"* ]] || [[ "$out" == *"page-fallback"* ]]
+  printf '%s' "$out" | grep -qF -- "static-web-server" || [[ "$out" == *"page-fallback"* ]]
   [ -z "$(echo "$out" | yq 'select(.kind=="Deployment").spec.template.spec.containers[0].ports[] | select(.name=="metrics")')" ]
 }

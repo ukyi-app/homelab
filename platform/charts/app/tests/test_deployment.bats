@@ -7,14 +7,14 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
 
 @test "web Deployment is wave2, non-root, with one health probe endpoint" {
   out=$(dep --set kind=web --set route.public=true --set route.host=api.example.com)
-  echo "$out" | grep -qF 'argocd.argoproj.io/sync-wave: "2"'
-  echo "$out" | grep -qF 'runAsNonRoot: true'
-  echo "$out" | grep -qF 'runAsUser: 65532'
-  echo "$out" | grep -qF 'path: /health'
+  echo "$out" | grep -qF -- 'argocd.argoproj.io/sync-wave: "2"'
+  echo "$out" | grep -qF -- 'runAsNonRoot: true'
+  echo "$out" | grep -qF -- 'runAsUser: 65532'
+  echo "$out" | grep -qF -- 'path: /health'
   run grep -qF 'path: /healthz' <<<"$out"; [ "$status" -ne 0 ]
   run grep -qF 'path: /readyz' <<<"$out"; [ "$status" -ne 0 ]
   run grep -qF 'sleep' <<<"$out"; [ "$status" -ne 0 ]
-  echo "$out" | grep -qF 'terminationGracePeriodSeconds: 30'
+  echo "$out" | grep -qF -- 'terminationGracePeriodSeconds: 30'
 }
 
 @test "worker Deployment has no readiness HTTP probe (no route)" {
@@ -39,8 +39,8 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   out=$(dep --set kind=site --set route.public=true --set route.host=app.example.com --set static.server=sws)
   # SWS 서빙 여부는 args(--page-fallback + --root /public)로 검증 — 주석 내용과 무관.
   echo "$out" | grep -qF -- '--page-fallback'
-  echo "$out" | grep -qF '/public'
-  echo "$out" | grep -qF 'readOnlyRootFilesystem: true'
+  echo "$out" | grep -qF -- '/public'
+  echo "$out" | grep -qF -- 'readOnlyRootFilesystem: true'
 }
 
 @test "Deployment defaults imagePullSecrets to ghcr-pull (private GHCR pull, no public toggle)" {

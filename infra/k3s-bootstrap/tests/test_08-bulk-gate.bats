@@ -25,7 +25,7 @@ teardown() { rm -rf "$STUBDIR" "$WORK"; }
 @test "passes on a writable virtiofs share (and thereby proves the probe uses findmnt -T)" {
   BULK_EXTERNAL_MOUNT="/mnt/mac/Volumes/homelab" BULK_STORAGE_PATH="$WORK/bulk" run sh "$PROBE"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"external-bulk-probe-ok"* ]]
+  printf '%s' "$output" | grep -qF -- "external-bulk-probe-ok"
   [ -d "$WORK/bulk" ]                       # 베이스 디렉토리가 생성됨
   [ -z "$(ls -A "$WORK/bulk")" ]            # sentinel이 정리됨
 }
