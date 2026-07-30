@@ -57,8 +57,8 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
               "local-path-provisioner-bulk:local-path-config-bulk"; do
     dep="${pair%%:*}"; cm="${pair##*:}"
     args="$(yq "select(.kind==\"Deployment\" and .metadata.name==\"$dep\") | .spec.template.spec.containers[0].args" "$PROV")"
-    [[ "$args" == *"--configmap-name=$cm"* ]]
-    [[ "$args" == *"--helper-pod-file=/etc/config/helperPod.yaml"* ]]
+    printf '%s' "$args" | grep -qF -- "--configmap-name=$cm"
+    printf '%s' "$args" | grep -qF -- "--helper-pod-file=/etc/config/helperPod.yaml"
     vol="$(yq "select(.kind==\"Deployment\" and .metadata.name==\"$dep\") | .spec.template.spec.volumes[] | select(.name==\"config-volume\") | .configMap.name" "$PROV")"
     [ "$vol" = "$cm" ]   # 플래그는 실제로 마운트된 configmap과 일치해야 한다
   done

@@ -23,7 +23,7 @@ build() { kustomize build "$DIR"; }
 @test "manifests are kubeconform-valid (strict)" {
   run bash -c "kustomize build \"$DIR\" | kubeconform -strict -summary"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Invalid: 0"* ]]
+  printf '%s' "$output" | grep -qF -- "Invalid: 0"
   [[ "$output" == *"Errors: 0"* ]]
 }
 
@@ -37,12 +37,12 @@ build() { kustomize build "$DIR"; }
 @test "egress allows DNS and database:5432 (no general internet egress by default)" {
   # DNS allow는 kube-system kube-dns의 53 포트를 대상으로 한다
   dns="$(build | yq 'select(.metadata.name=="allow-dns-egress")')"
-  [[ "$dns" == *"kubernetes.io/metadata.name: kube-system"* ]]
-  [[ "$dns" == *"k8s-app: kube-dns"* ]]
-  [[ "$dns" == *"port: 53"* ]]
+  printf '%s' "$dns" | grep -qF -- "kubernetes.io/metadata.name: kube-system"
+  printf '%s' "$dns" | grep -qF -- "k8s-app: kube-dns"
+  printf '%s' "$dns" | grep -qF -- "port: 53"
   # database egress는 database namespace로 5432만 허용
   db="$(build | yq 'select(.metadata.name=="allow-egress-to-database")')"
-  [[ "$db" == *"kubernetes.io/metadata.name: database"* ]]
+  printf '%s' "$db" | grep -qF -- "kubernetes.io/metadata.name: database"
   [[ "$db" == *"port: 5432"* ]]
 }
 
@@ -71,21 +71,21 @@ build() { kustomize build "$DIR"; }
 
 @test "ingress allows are gateway:8080, observability:9090, and node probes" {
   gw="$(build | yq 'select(.metadata.name=="allow-ingress-from-gateway")')"
-  [[ "$gw" == *"kubernetes.io/metadata.name: gateway"* ]]
-  [[ "$gw" == *"port: 8080"* ]]
+  printf '%s' "$gw" | grep -qF -- "kubernetes.io/metadata.name: gateway"
+  printf '%s' "$gw" | grep -qF -- "port: 8080"
   obs="$(build | yq 'select(.metadata.name=="allow-ingress-metrics-from-observability")')"
-  [[ "$obs" == *"kubernetes.io/metadata.name: observability"* ]]
-  [[ "$obs" == *"port: 9090"* ]]
+  printf '%s' "$obs" | grep -qF -- "kubernetes.io/metadata.name: observability"
+  printf '%s' "$obs" | grep -qF -- "port: 9090"
   probes="$(build | yq 'select(.metadata.name=="allow-ingress-kubelet-probes")')"
-  [[ "$probes" == *"ipBlock"* ]]
-  [[ "$probes" == *"cidr: 10.42.0.1/32"* ]]   # 노드(cni0)만 — /16은 default-deny 무력화
+  printf '%s' "$probes" | grep -qF -- "ipBlock"
+  printf '%s' "$probes" | grep -qF -- "cidr: 10.42.0.1/32"   # 노드(cni0)만 — /16은 default-deny 무력화
   [[ "$probes" != *"cidr: 10.42.0.0/16"* ]]
 }
 
 @test "intra-prod app-to-app on http 8080 is allowed (SSR->API server-side calls)" {
   p="$(build | yq 'select(.metadata.name=="allow-intra-prod-http")')"
-  [[ "$p" == *"kubernetes.io/metadata.name: prod"* ]]
-  [[ "$p" == *"port: 8080"* ]]
+  printf '%s' "$p" | grep -qF -- "kubernetes.io/metadata.name: prod"
+  printf '%s' "$p" | grep -qF -- "port: 8080"
   echo "$p" | yq -e '.spec.policyTypes' | grep -q Ingress
   echo "$p" | yq -e '.spec.policyTypes' | grep -q Egress
 }

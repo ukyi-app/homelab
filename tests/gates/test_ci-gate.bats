@@ -3,9 +3,9 @@ WF=".github/workflows/ci.yaml"
 
 @test "ci runs typecheck, chart-test, ledger gate, and bats" {
   run cat "$WF"
-  [[ "$output" == *"bun run typecheck"* ]]
-  [[ "$output" == *"make chart-test"* ]]
-  [[ "$output" == *"verify:ledger"* ]]
+  printf '%s' "$output" | grep -qF -- "bun run typecheck"
+  printf '%s' "$output" | grep -qF -- "make chart-test"
+  printf '%s' "$output" | grep -qF -- "verify:ledger"
   [[ "$output" == *"bats "* ]]
 }
 

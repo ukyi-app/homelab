@@ -79,14 +79,14 @@ teardown() { rm -rf "$STUBDIR"; }
   # 디렉토리가 이게 없으면 통과해서 bulk가 VM 디스크에 놓이게 된다.
   DISKUTIL_STUB_INTERNAL=1 run "$BOOTSTRAP_DIR/apply-storage.sh"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"not on an EXTERNAL disk"* ]]
+  printf '%s' "$output" | grep -qF -- "not on an EXTERNAL disk"
   [ ! -s "$RENDERED" ]
 }
 
 @test "aborts when the VM-side probe fails (no silent VM-disk fallback)" {
   ORB_STUB_FAIL=1 run "$BOOTSTRAP_DIR/apply-storage.sh"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"external bulk SSD"* ]]
+  printf '%s' "$output" | grep -qF -- "external bulk SSD"
   [ ! -s "$RENDERED" ]                          # 게이트가 apply보다 먼저 돈다 — 렌더된 것 없음
 }
 

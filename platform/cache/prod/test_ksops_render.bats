@@ -15,8 +15,8 @@ build() { kustomize build --enable-alpha-plugins --enable-exec "$DIR"; }
 @test "manifests are kubeconform-valid (strict)" {
   run bash -c "kustomize build --enable-alpha-plugins --enable-exec \"$DIR\" | kubeconform -strict -ignore-missing-schemas -summary"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -qF "Invalid: 0"
-  echo "$output" | grep -qF "Errors: 0"
+  echo "$output" | grep -qF -- "Invalid: 0"
+  echo "$output" | grep -qF -- "Errors: 0"
 }
 
 @test "cache-r2-creds Secret renders with the rclone R2 key schema (KSOPS decrypt)" {

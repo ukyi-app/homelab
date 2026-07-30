@@ -68,7 +68,7 @@ V="platform/argocd/bootstrap-values.yaml"
 }
 
 @test "notifications cm has native telegram service, Markdown line1 templates, deployed+degraded triggers, central selector subscription" {
-  has() { printf '%s' "$1" | grep -qF "$2" || { echo "miss: $2"; false; }; }
+  has() { printf '%s' "$1" | grep -qF -- "$2" || { echo "miss: $2"; false; }; }
   v=platform/argocd/bootstrap-values.yaml
   # native telegram service — 토큰만($telegram-token, tgbotapi에 직접 전달·URL 미로깅 → webhook의 토큰 로그 유출 회피).
   run yq '.notifications.notifiers."service.telegram"' "$v"
@@ -98,12 +98,12 @@ V="platform/argocd/bootstrap-values.yaml"
   run yq '.extraObjects[] | select(.metadata.name=="argocd-notifications-default-deny-egress") | .metadata.annotations."argocd.argoproj.io/sync-wave"' "$v"
   [ "$output" = "-1" ] || { echo "default-deny sync-wave != -1: $output"; false; }
   run yq '.extraObjects[] | select(.metadata.name=="argocd-notifications-default-deny-egress") | .spec.policyTypes[]' "$v"
-  printf '%s' "$output" | grep -qF 'Egress' || { echo "default-deny egress 없음"; false; }
+  printf '%s' "$output" | grep -qF -- 'Egress' || { echo "default-deny egress 없음"; false; }
   run yq '.extraObjects[] | select(.metadata.name=="argocd-notifications-allow-egress")' "$v"
   # trap-safe: 누락을 플래그로 모아 최종 단언이 권위를 갖게(bats 중간 false 침묵통과 회피).
   miss=0
   for n in '0.0.0.0/0' '192.168.0.0/16' '192.168.139.0/24' '6443'; do
-    printf '%s' "$output" | grep -qF "$n" || { echo "miss in netpol: $n"; miss=1; }
+    printf '%s' "$output" | grep -qF -- "$n" || { echo "miss in netpol: $n"; miss=1; }
   done
   [ "$miss" -eq 0 ] || { echo "allow-egress netpol missing required needles"; false; }
 }
@@ -117,6 +117,6 @@ V="platform/argocd/bootstrap-values.yaml"
 @test "on-deployed oncePer gates on the actual sync-job revision, not observed HEAD (#224 noise regression guard)" {
   v=platform/argocd/bootstrap-values.yaml
   run yq '.notifications.triggers."trigger.on-deployed"' "$v"
-  printf '%s' "$output" | grep -qF 'operationState.syncResult != nil'      # #224 nil 가드(when)
-  printf '%s' "$output" | grep -qF 'operationState.syncResult.revision'    # oncePer가 실 sync 작업 revision(sync.revision 아님)
+  printf '%s' "$output" | grep -qF -- 'operationState.syncResult != nil'      # #224 nil 가드(when)
+  printf '%s' "$output" | grep -qF -- 'operationState.syncResult.revision'    # oncePer가 실 sync 작업 revision(sync.revision 아님)
 }
