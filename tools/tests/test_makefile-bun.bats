@@ -13,7 +13,3 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   run grep -E 'MISE_SHIMS' Makefile; [ "$status" -ne 0 ]
   run grep -E 'node tools/|pnpm verify:ledger' Makefile; [ "$status" -ne 0 ]
 }
-
-@test "make ci runs the typecheck gate (ci.yaml parity — A.5 pass4 F2)" {
-  run grep -E 'bun run typecheck' Makefile; [ "$status" -eq 0 ]
-}

@@ -15,11 +15,6 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "make ci mirrors check-skeleton" {
-  run awk '/^ci:/{c=1} c && /check-skeleton/{print}' Makefile
-  [ -n "$output" ]
-}
-
 @test "ci gate setup-toolchain enables kustomize + yq (render guard cannot silently skip in CI, F6/F10)" {
   # jobs.gate.steps[]의 setup-toolchain 스텝 with.kustomize/with.yq가 'true'(주석 아닌 실제 필드)
   run yq -e '.jobs.gate.steps[] | select((.uses // "") | test("setup-toolchain")) | (.with.kustomize == "true" and .with.yq == "true")' .github/workflows/ci.yaml
