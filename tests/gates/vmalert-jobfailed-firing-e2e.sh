@@ -1,0 +1,309 @@
+#!/usr/bin/env bash
+# KubeJobFailed **발화** e2e — "실패 Job 오브젝트가 남아 있다"가 아니라 "정기 작업이 지금 고장이다"를
+# 알리는지 증명한다.
+#
+# 병(라이브, 2026-07-26~30): `kube_job_failed`는 Job **오브젝트가 존재하는 한** 계속 1이다 — 시간 개념이
+# 없다. 그 오브젝트의 수명은 `failedJobsHistoryLimit`이 지배하는데 그 회수는 **뒤이은 실패가 더 쌓여야만**
+# 일어난다. 즉 **정상 운영(= 이후 전부 성공)일수록 실패 Job이 영원히 남는다.** 클러스터의 CronJob 8개
+# 전부 `ttlSecondsAfterFinished`가 없어 회수 경로가 하나도 없었다.
+#   → adguard-rewrite-reconciler가 재부팅 직후 DNS 미준비로 **1회** 실패한 뒤 `*/10`으로 약 430회 성공했는데
+#     KubeJobFailed가 **3일 넘게 연속 firing**했다. `for: 15m`은 "실패가 15분 지속됐다"가 아니라 "실패 Job
+#     오브젝트가 15분 존재했다"만 증명한다 — 룰 주석의 문장과 실제 의미가 갈라지는 지점이다.
+#
+# ★ 이 하네스의 고유 레그는 **L2(전이)**다: 하나의 시계열 안에서 발화 → 복구 → 해소를 실제로 겪게 하고
+#   경계 전후를 따로 판정한다(L2a 복구 전 발화 / L2b 복구 후 침묵).
+#   ⚠️ 상태 스냅샷 레그만으로는 부족하다 — 초판은 L1(해소된 상태) 하나로 이 픽스를 증명하려 했는데,
+#     복구 시각을 창 **밖 미래**(job_start+3600 > replay 종료)에 두고 그 값을 **모든 샘플에** 실어서
+#     첫 평가부터 억제가 걸렸다. 통과했지만 증명한 것은 "KSM이 낼 수 없는 타임라인에서 억제식이
+#     참이더라"였고 전이는 한 번도 실행되지 않았다(적대적 리뷰 release-r1 R-2가 잡았다). 그 재발은
+#     이제 §3b preflight가 전제 붕괴로 끊는다.
+#   L1은 **라이브 그 자체**(창 이전에 실패해 남은 Job + 계속 성공하는 CronJob)를 재현하고,
+#   L3은 억제가 미해소 고장을 삼키지 않음을, L4는 억제가 **CronJob 소유 Job에만** 걸림을,
+#   L5는 조인 키가 **job 단위**임을 잠근다.
+#   ⚠️ 레그가 "그 불변식을 잠근다"는 주장은 **뮤테이션으로만** 성립한다. 초판의 L4는 픽스처가 억제식
+#     우변 메트릭을 아예 내지 않아 `owner_kind` 필터를 지워도 6/6 green이었고(주석은 잠근다고 광고했다),
+#     같은 이유로 조인 키를 `on (namespace)`로 뭉개도 전건 green이었다 — 자체 감사 S-1/S-2/S-5/S-11이
+#     실측으로 잡았다. 그래서 두 픽스처를 "억제 재료를 **전부 갖춘 채 한 변수만** 다르게" 두도록 고쳤다.
+#   ★ 이빨 실측(2026-07-30) — 각 레그가 실제로 무는 것:
+#       억제 절 제거              → L1·L2b red (L2b는 복구 후에도 58회 발화)
+#       owner_kind="CronJob" 제거 → L4 red
+#       on (namespace)로 뭉갬     → L5b red
+#       픽스처에 창 밖 미래 TS    → preflight CONTRACT(exit 2)
+#     네 경우 모두 나머지 레그는 green이다 — 하네스가 살아 있으면서 정확히 그 결함만 문다.
+#
+# 종료 규약(공유 하네스): 2 = HARNESS FAULT/CONTRACT(전제 붕괴·vacuity) · 1 = leg FAIL · 0 = OK
+# ⚠️ 이 하네스는 docker가 필요하다 — ci.yaml gate 스텝이 리터럴 경로로 직접 부른다(형제와 같은 규율).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+STACK="$ROOT/platform/victoria-stack/prod"
+RULES_CM="$STACK/rules/core.yaml"
+
+# shellcheck source=tests/gates/lib/vmalert-e2e.sh
+. "$ROOT/tests/gates/lib/vmalert-e2e.sh"
+
+ALERT=KubeJobFailed
+
+# 시나리오 상수 — 진단 산문과 시리즈 생성이 **같은 변수**를 읽는다(따로 적으면 둘이 갈린다).
+NS=edge                 # 시스템 ns 블랙리스트에 걸리지 않는 워크로드 ns
+CRONJOB2=recon-sibling  # L5: **같은 ns의 두 번째** CronJob(조인 키가 job 단위임을 잠근다)
+JOB_CRON2=recon-sibling-29751321
+CRONJOB=recon           # 소유 CronJob 이름
+JOB_CRON=recon-29751320 # CronJob 소유 Job(라이브 명명 규약과 같은 모양)
+JOB_SOLO=oneoff-import  # CronJob 소유가 아닌 단발 Job
+STALE_AGE_S=259200      # L1: 실패 Job이 replay 창 **시작보다 이만큼 전**에 시작했다(라이브 adguard = 3일)
+STALE_LEAD_S=3600       # 실패 Job 시작 **이전**이 마지막 성공(미해소 시나리오)
+
+# ── 1) 배포 매니페스트에서 파라미터 파생(하드코딩 0) ───────────────────────────────────────────────
+vme_derive_stack_params "$STACK"
+
+vme_workspace "corejob-e2e-net-$$"
+
+# ── 2) 배포 ConfigMap에서 룰 바이트 그대로 추출 ────────────────────────────────────────────────────
+# ⚠️ 룰을 여기에 재작성하면 "배포된 것"이 아니라 "내가 적은 것"을 검증하게 된다.
+yq '.data["core.yaml"]' "$RULES_CM" > "$VME_TMP/core-deployed.yaml"
+[ -s "$VME_TMP/core-deployed.yaml" ] || vme_fault "룰 추출 실패: $RULES_CM"
+
+# fail-closed: 하네스가 겨냥하는 룰이 실제로 존재하는지(리네임 시 무성 무측정 방지)
+grep -q "alert: $ALERT" "$VME_TMP/core-deployed.yaml" \
+  || vme_fault "배포 룰에 'alert: $ALERT' 부재 — 하네스가 아무것도 측정하지 않는다"
+
+EXPR="$(vme_alert_expr "$VME_TMP/core-deployed.yaml" "$ALERT")"
+[ -n "$EXPR" ] || vme_fault "$ALERT: 배포 룰에서 expr 추출 실패"
+FOR_S="$(vme_to_s "$(vme_alert_for "$VME_TMP/core-deployed.yaml" "$ALERT")")"
+[ "$FOR_S" -gt 0 ] || vme_fault "$ALERT: for: 부재 또는 0 — 지속성 계약이 없다"
+
+# ── 2b) preflight: 시나리오가 룰의 셀렉터를 실제로 통과하는지 기계가 확인 ──────────────────────────
+# 픽스처가 룰의 블랙리스트에 걸리면 전 레그가 조용히 침묵해 **vacuous green**이 된다(L2/L3이 '발화 없음'
+# 으로 통과하는 게 아니라 애초에 측정이 없었던 것). 그 상태를 판정이 아니라 전제 붕괴로 끊는다.
+# ⚠️ **부분 문자열로 검사하지 마라** — 첫 구현이 `case $EXPR in *"$NS"*)`였는데 ns `edge`가
+#    `pg-dump-hedge-r2`의 "h**edge**"에 걸려 거짓 CONTRACT를 냈다(가드가 자기 병에 걸린 자리다).
+#    셀렉터의 정규식을 **추출해** 픽스처 값이 실제로 그 정규식에 매치되는지만 본다(앵커 필수 — PromQL의
+#    `!~`는 완전 일치 의미론이다).
+assert_not_excluded() { # $1=라벨명 $2=픽스처 값
+  local re
+  re="$(grep -oE "$1!~\"[^\"]*\"" <<<"$EXPR" | head -1 | sed "s/.*!~\"//; s/\"\$//")"
+  [ -n "$re" ] || return 0   # 그 라벨에 블랙리스트가 없으면 검사할 것이 없다
+  if printf '%s' "$2" | grep -qE "^($re)\$"; then
+    vme_contract "픽스처 $1='$2'가 룰의 블랙리스트 '$re'에 매치된다 — 전 레그가 무측정(vacuous green)이 된다"
+  fi
+}
+assert_not_excluded namespace "$NS"
+assert_not_excluded job_name "$JOB_CRON"
+assert_not_excluded job_name "$JOB_SOLO"
+grep -q 'kube_job_failed' <<<"$EXPR" \
+  || vme_fault "$ALERT expr이 kube_job_failed를 읽지 않는다 — 하네스의 픽스처 메트릭이 룰과 무관하다"
+
+# KSM 메트릭은 **scrape**이지 push가 아니다 — 모드 C(push 주기 > 룩백) 구멍이 원리적으로 없으므로
+# rollup 불변식 검사 대상이 아니다. 샘플 간격은 vmalert eval 간격과 같게 둔다(라이브 scrape보다 촘촘하면
+# 발화가 샘플 밀도 덕에 성립하는 인공물이 생긴다).
+SAMPLE_S="$VME_EVAL_S"
+[ "$SAMPLE_S" -gt 0 ] || vme_fault "eval 간격 파생 실패(VME_EVAL=$VME_EVAL)"
+
+# ── 3) 합성 시계열 ────────────────────────────────────────────────────────────────────────────────
+# 창은 **전이 레그(L2)가 지배**한다: 복구 전에 for:를 채워 발화하고, 복구 후에도 해소를 관측할 구간이
+# 남아야 한다. FOR_S×4 = [발화 구간 2×for] + [해소 관측 구간 2×for].
+SPAN_S=$(( FOR_S * 4 ))
+TO_EPOCH="$(date +%s)"
+FROM_EPOCH=$(( TO_EPOCH - SPAN_S ))
+# L2의 복구 시각 — 창 **안**이어야 한다. 이 오프셋 이전엔 미해소(발화), 이후엔 해소(침묵)다.
+RECOVERY_OFFSET_S=$(( FOR_S * 2 ))
+RECOVERY_AT=$(( FROM_EPOCH + RECOVERY_OFFSET_S ))
+# 해소 관측 구간 — 복구 직후 eval 두 주기는 완충으로 뺀다(그 경계에서 발화가 끊긴다).
+AFTER_GUARD_S=$(( VME_EVAL_S * 2 ))
+AFTER_WIN_S=$(( TO_EPOCH - RECOVERY_AT - AFTER_GUARD_S ))
+
+# ── 3b) preflight: 시나리오 산술이 레그를 의미 있게 만드는지 ───────────────────────────────────────
+# ⚠️ 이 넷은 **셸 스칼라끼리의 검사**이고, 전부 FOR_S에서 파생돼 사실상 `FOR_S > eval` 한 문장이다.
+#    시나리오 상수를 손댔을 때의 안전망일 뿐, **생성된 시계열은 보지 못한다** — R-2의 몸통은 파이썬
+#    생성기 안(전 샘플에 창 밖 미래 상수 적재)에 있었으므로 이 블록으로는 원리적으로 못 막는다.
+#    (자체 감사 S-3이 실증: last-success를 `to+3600` 상수로 되돌려도 여기는 침묵하고 전건 green이었다.)
+#    실제 물리 불변식은 아래 `assert_no_future_timestamps`가 **생성된 JSONL을 읽어** 강제한다.
+[ "$RECOVERY_OFFSET_S" -gt "$FOR_S" ] \
+  || vme_contract "L2 무의미: 복구 오프셋(${RECOVERY_OFFSET_S}s) <= for:(${FOR_S}s) — 복구 전에 발화할 시간이 없다"
+[ "$RECOVERY_AT" -lt "$TO_EPOCH" ] \
+  || vme_contract "L2 무의미: 복구 시각이 replay 창 밖이다(RECOVERY_AT=${RECOVERY_AT} >= TO=${TO_EPOCH})"
+[ "$AFTER_WIN_S" -gt 0 ] \
+  || vme_contract "L2 무의미: 복구 후 관측 구간이 없다(AFTER_WIN=${AFTER_WIN_S}s) — 해소를 볼 수 없다"
+[ "$STALE_AGE_S" -gt 0 ] \
+  || vme_contract "L1 무의미: 실패 Job이 창 시작 이전이 아니다(STALE_AGE=${STALE_AGE_S}s)"
+echo "[preflight] 산술 OK: 창 ${SPAN_S}s · for ${FOR_S}s · 복구 +${RECOVERY_OFFSET_S}s(창 안) · 해소 관측 ${AFTER_WIN_S}s · L1 실패는 창 시작 -${STALE_AGE_S}s"
+
+# ★★ 물리 불변식 — **생성된 시계열 자체**를 검사한다. 이게 R-2류의 진짜 방어선이다.
+#    타임스탬프를 값으로 갖는 KSM 메트릭은 "아직 일어나지 않은 일"을 내보낼 수 없다. 즉 어떤 샘플에서도
+#    `값 ≤ 그 샘플의 시각`이어야 한다. R-2는 정확히 이 규칙을 어겼다(값이 replay 종료보다 900s 뒤인데
+#    첫 샘플부터 실려 억제가 소급 적용됐다). 산술 preflight로는 못 잡으므로 여기서 데이터를 직접 본다.
+assert_no_future_timestamps() { # $1=jsonl
+  python3 - "$1" <<'PY' || return 1
+import json, sys
+# 값이 epoch 타임스탬프인 메트릭 — 이들만 "미래 금지"가 의미를 갖는다(카운터/게이지는 무관).
+TS_VALUED = {"kube_cronjob_status_last_successful_time", "kube_job_status_start_time"}
+bad = []
+for line in open(sys.argv[1], encoding="utf-8"):
+    s = json.loads(line)
+    name = s["metric"].get("__name__", "")
+    if name not in TS_VALUED:
+        continue
+    for v, t_ms in zip(s["values"], s["timestamps"]):
+        t = t_ms / 1000
+        if v > t:
+            bad.append(f"{name}{ {k: x for k, x in s['metric'].items() if k != '__name__'} }: "
+                       f"값 {int(v)} > 샘플 시각 {int(t)} (미래 {int(v - t)}s)")
+            break
+if bad:
+    print("\n".join(bad))
+    sys.exit(1)
+PY
+}
+
+gen() { # $1=출력파일 $2=시나리오(stale_resolved|transition|two_jobs|unresolved|standalone|healthy)
+  python3 - "$1" "$2" "$FROM_EPOCH" "$TO_EPOCH" "$SAMPLE_S" \
+    "$NS" "$CRONJOB" "$JOB_CRON" "$JOB_SOLO" "$STALE_AGE_S" "$STALE_LEAD_S" "$RECOVERY_AT" \
+    "$CRONJOB2" "$JOB_CRON2" <<'PY'
+import json, sys
+(out, scen, frm, to, step, ns, cj, job_cron, job_solo, stale_age, stale_lead, recovery_at,
+ cj2, job_cron2) = (
+    sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]),
+    sys.argv[6], sys.argv[7], sys.argv[8], sys.argv[9], int(sys.argv[10]), int(sys.argv[11]),
+    int(sys.argv[12]), sys.argv[13], sys.argv[14])
+
+ts = list(range(frm, to + 1, step))
+lines = []
+def series(metric, labels, values):
+    m = {"__name__": metric}; m.update(labels)
+    lines.append(json.dumps({"metric": m, "values": values,
+                             "timestamps": [t * 1000 for t in ts]}))
+
+# ⚠️ 타임스탬프 값은 **관측 시점보다 미래일 수 없다.** KSM은 "아직 일어나지 않은 성공"을 내보내지
+#    않는다. 그래서 last-success는 상수로 박지 않고 **각 샘플 시점 t의 함수**로 만든다 — 이 규율을
+#    깨면 창 밖 미래값이 첫 평가부터 소급 적용돼 전이를 건너뛴 vacuous green이 된다(release-r1 R-2).
+def failed_job(job_name, job_start, owner_kind, owner_name):
+    series("kube_job_failed", {"condition": "true", "namespace": ns, "job_name": job_name},
+           [1] * len(ts))
+    series("kube_job_status_start_time", {"namespace": ns, "job_name": job_name},
+           [job_start] * len(ts))
+    series("kube_job_owner",
+           {"namespace": ns, "job_name": job_name,
+            "owner_kind": owner_kind, "owner_name": owner_name},
+           [1] * len(ts))
+
+if scen == "healthy":
+    # 실패 시리즈 자체가 없다. CronJob은 창 내내 성공 중(마지막 성공 = 그 시점).
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj}, list(ts))
+
+elif scen == "standalone":
+    # CronJob 소유가 **아닌** Job의 실패 — 억제는 여기 걸리면 안 된다.
+    # ⚠️ owner_name을 **소유 CronJob과 같은 이름**으로 두고 그 CronJob의 최신 성공도 함께 내보낸다.
+    #    이게 이 레그의 이빨이다: 억제 재료를 **전부 갖춰 놓고** 오직 `owner_kind="CronJob"` 필터
+    #    하나만이 억제를 막게 만든다. (초판은 owner_kind/owner_name을 둘 다 `<none>`으로 두고
+    #    cronjob 성공 시리즈를 아예 안 냈는데, 그러면 억제식 우변이 빈 벡터라 **필터를 지워도**
+    #    결과가 같아 L4가 그 필터를 전혀 잠그지 못했다 — 자체 감사 S-1/S-5/S-11이 뮤테이션으로 실증.)
+    #    owner_kind는 비-CronJob 컨트롤러(Argo Workflow·Tekton 등)가 Job을 소유하는 현실 형태를 쓴다.
+    failed_job(job_solo, frm, "Workflow", cj)
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj}, list(ts))
+
+elif scen == "stale_resolved":
+    # ★ 라이브 adguard 그 자체: 실패 Job은 창 **시작보다 훨씬 전**(3일)에 시작해 그대로 남아 있고,
+    #   소유 CronJob은 창 내내 정상 가동한다(마지막 성공이 매 샘플 갱신). 창의 어느 시점을 봐도
+    #   `job_start < last_success`이므로 억제가 걸려야 한다 — 수정 전 룰은 여기서 3일 내내 발화했다.
+    failed_job(job_cron, frm - stale_age, "CronJob", cj)
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj}, list(ts))
+
+elif scen == "transition":
+    # ★ 창 **안에서** 발화 → 복구 → 해소를 실제로 겪는다. 복구 전에는 마지막 성공이 실패보다 앞서고
+    #   (미해소 → for: 를 채워 발화), 복구 시점부터는 그 시점의 성공으로 갱신된다(해소 → 침묵).
+    job_start = frm
+    failed_job(job_cron, job_start, "CronJob", cj)
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj},
+           [(job_start - stale_lead) if t < recovery_at else t for t in ts])
+
+elif scen == "two_jobs":
+    # ★ 조인 키 granularity를 잠근다: **같은 네임스페이스**에 해소된 실패와 미해소 실패를 하나씩 둔다.
+    #   억제가 job 단위(`on (namespace, job_name)`)면 앞의 것만 침묵하고 뒤의 것은 발화한다.
+    #   억제가 ns 단위(`on (namespace)`)로 뭉개지면 정상 CronJob의 최신 성공 하나가 **같은 ns의 고장
+    #   난 CronJob 실패까지 삼켜** 뒤의 것도 침묵한다 — 이 픽스가 막으려던 것의 정반대 fail-open이다.
+    #   라이브에 실재하는 형태다: observability ns 하나에 digest-exporter·gha-liveness-exporter·
+    #   pvc-du-exporter 세 CronJob이 공존한다. (자체 감사 S-2가 뮤테이션으로 실증한 공백.)
+    failed_job(job_cron, frm, "CronJob", cj)          # 해소 — 소유 CronJob이 창 내내 성공
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj}, list(ts))
+    failed_job(job_cron2, frm, "CronJob", cj2)        # 미해소 — 마지막 성공이 실패보다 앞
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj2},
+           [frm - stale_lead] * len(ts))
+
+else:  # unresolved — 마지막 성공이 실패 **이전**에 멈춰 있다 = 아직 고장 중.
+    job_start = frm
+    failed_job(job_cron, job_start, "CronJob", cj)
+    series("kube_cronjob_status_last_successful_time", {"namespace": ns, "cronjob": cj},
+           [job_start - stale_lead] * len(ts))
+
+open(out, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+PY
+}
+
+run_scenario() { # $1=시나리오 → vmsingle 기동 + import + replay
+  local scen="$1"
+  local vm="vm-corejob-$scen-$$"
+  vme_start_vmsingle "$vm" "$VME_VM_VER"
+  gen "$VME_TMP/$scen.jsonl" "$scen"
+  assert_no_future_timestamps "$VME_TMP/$scen.jsonl" \
+    || vme_contract "시나리오 '$scen'이 KSM이 낼 수 없는 타임라인을 만든다(위 목록) — 미래 타임스탬프는 첫 평가부터 소급 적용돼 전이를 건너뛴 vacuous green을 만든다(R-2)"
+  vme_import "$VME_TMP/$scen.jsonl"
+  vme_replay "$vm" "$VME_VA_VER" "$VME_TMP/core-deployed.yaml" "$VME_EVAL" "$VME_LOOKBACK" "$FROM_EPOCH" "$TO_EPOCH"
+}
+
+firing_for_job() { # $1=job_name [$2=eval time] [$3=윈도(초)] → 그 Job에 대한 firing 샘플 수
+  # 시점·윈도를 주면 **구간별** 발화를 본다(전이 레그의 before/after 판정). 미지정이면 창 전체.
+  vme_promql "sum(count_over_time(ALERTS{alertname=\"$ALERT\",alertstate=\"firing\",job_name=\"$1\"}[${3:-7d}${3:+s}]))" "${2:-}"
+}
+
+# ── 4) 레그 ───────────────────────────────────────────────────────────────────────────────────────
+
+echo "── L1: 창 이전에 실패해 그대로 남은 Job은, 소유 CronJob이 계속 성공하는 한 침묵한다(라이브 adguard) ──"
+run_scenario stale_resolved
+n="$(firing_for_job "$JOB_CRON")"
+if [ "$n" -eq 0 ]; then vme_pass "L1 $ALERT 침묵(${STALE_AGE_S}s 묵은 실패 Job + CronJob 정상 가동 — 자가 복구된 상태)"
+else vme_fail "L1 해소된 실패가 발화한다 — 실패 Job **오브젝트의 존재**를 재고 있다(라이브에서 3일 연속 firing한 그 결함)"; fi
+
+echo "── L2: 창 **안에서** 발화 → 복구 → 해소를 실제로 겪는다(전이 — 상태 스냅샷이 아니라 변화를 본다) ──"
+# ★ 이 레그가 release-r1 R-2의 답이다. L1은 '이미 해소된 상태'의 스냅샷만 보므로, 억제가 **해소 시점에**
+#   걸리는지는 증명하지 못한다(창 밖 미래값으로도 통과해 버린다). 여기서 같은 시계열 안에 두 상태를
+#   모두 넣고 경계 전후를 따로 판정한다.
+run_scenario transition
+before="$(firing_for_job "$JOB_CRON" "$RECOVERY_AT" "$RECOVERY_OFFSET_S")"
+after="$(firing_for_job "$JOB_CRON" "$TO_EPOCH" "$AFTER_WIN_S")"
+if [ "$before" -gt 0 ]; then vme_pass "L2a $ALERT 발화(복구 이전 ${RECOVERY_OFFSET_S}s 구간 — 미해소 동안은 페이징한다)"
+else vme_fail "L2a 복구 이전에도 무성 — 억제가 미해소 상태까지 삼킨다(전이의 앞쪽이 죽었다)"; fi
+if [ "$after" -eq 0 ]; then vme_pass "L2b $ALERT 해소(복구 이후 ${AFTER_WIN_S}s 구간 — 성공 한 번으로 조용해진다)"
+else vme_fail "L2b 복구 후에도 ${after}회 발화 — 후속 성공이 알림을 해소하지 못한다(이 픽스의 본체가 동작 안 함)"; fi
+
+echo "── L3: 마지막 성공이 그 실패 **이전**이면 발화한다(억제가 진짜 고장을 삼키지 않는다) ──"
+run_scenario unresolved
+n="$(firing_for_job "$JOB_CRON")"
+if [ "$n" -gt 0 ]; then vme_pass "L3 $ALERT 발화(마지막 성공이 실패보다 ${STALE_LEAD_S}s 앞 — 미해소)"
+else vme_fail "L3 미해소 실패가 무성 — 억제가 fail-open이다(L1을 통과시키려고 알림을 죽였다)"; fi
+
+echo "── L4: CronJob 소유가 **아닌** Job은 억제 재료가 다 있어도 발화한다(owner_kind 좁힘을 잠근다) ──"
+run_scenario standalone
+n="$(firing_for_job "$JOB_SOLO")"
+if [ "$n" -gt 0 ]; then vme_pass "L4 $ALERT 발화(owner_name은 CronJob과 같지만 owner_kind=Workflow — 필터가 억제를 막는다)"
+else vme_fail "L4 비-CronJob 소유 Job이 무성 — 억제가 owner_kind 밖으로 새어 기존 백스톱을 지웠다"; fi
+
+echo "── L5: 같은 ns의 두 CronJob — 해소된 쪽만 침묵하고 미해소 쪽은 발화한다(조인 키가 job 단위) ──"
+# ★ 억제가 `on (namespace)`로 뭉개지면 앞 CronJob의 최신 성공이 뒤 CronJob의 실패까지 삼킨다.
+#   라이브 형태다: observability ns 하나에 CronJob 3개가 공존한다.
+run_scenario two_jobs
+n_res="$(firing_for_job "$JOB_CRON")"
+n_unres="$(firing_for_job "$JOB_CRON2")"
+if [ "$n_res" -eq 0 ]; then vme_pass "L5a 해소된 Job 침묵($JOB_CRON — 소유 CronJob이 계속 성공)"
+else vme_fail "L5a 해소된 Job이 발화 — 억제가 job 단위로 걸리지 않는다"; fi
+if [ "$n_unres" -gt 0 ]; then vme_pass "L5b 미해소 Job 발화($JOB_CRON2 — 같은 ns의 형제 성공에 삼켜지지 않는다)"
+else vme_fail "L5b 같은 ns의 다른 CronJob 성공이 이 실패를 삼켰다 — 조인 키가 ns 단위로 뭉개졌다(fail-open)"; fi
+
+echo "── L6: 실패가 없으면 침묵(vacuity 차단 — 위 발화가 '항상 발화'가 아님) ──"
+run_scenario healthy
+n="$(vme_firing "$ALERT")"
+if [ "$n" -eq 0 ]; then vme_pass "L6 $ALERT 침묵(실패 Job 없음)"
+else vme_fail "L6 실패가 없는데 발화했다 — 위 레그가 무의미해진다"; fi
+
+[ "$VME_FAILED" -eq 0 ] || { echo "vmalert-jobfailed-firing-e2e: ${VME_FAILED}개 레그 실패" >&2; exit 1; }
+echo "vmalert-jobfailed-firing-e2e OK (L1/L2a/L2b/L3/L4/L5a/L5b/L6 전건 통과)"
