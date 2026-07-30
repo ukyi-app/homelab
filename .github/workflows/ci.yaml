@@ -37,6 +37,8 @@ jobs:
           bats: 'true'
           shellcheck: 'true'
           actionlint: 'true'
+          sops: 'true'
+          age: 'true'
       - name: secret-guard — gitleaks(누출) + sops-guard(평문 enc.yaml) 강제
         # verify.yaml의 gitleaks/sops-guard는 required가 아니라(분기보호 contexts=["gate"]),
         # 누출 PR이 gate만 통과하면 머지된다 → required `gate` 잡에 폴딩(코드 전용, 머지 즉시 발효).
@@ -54,6 +56,33 @@ jobs:
           # ⚠️ `--no-git` 필수(작업트리만 스캔) — 히스토리 전체를 스캔하면 과거 false-positive나 이미
           #    회전된 옛 시크릿 하나가 모든 PR을 영구 red로 만든다. --redact: 발견 시 평문 미출력.
           gitleaks detect --no-git --source . --redact --no-banner --exit-code 1
+      - name: SOPS 왕복 (ephemeral CI 키)
+        # verify.yaml에서 이식(그 잡의 유일한 고유 책임이었다). 실 age 키 없이 자기완결로 왕복을 증명한다 —
+        # 암호화 후 평문이 남지 않는지 + 복호가 원문을 되돌리는지. 로컬 대응은 `make verify`의
+        # tests/test_sops-roundtrip.bats(실 키 사용)라 policy/ci-parity.json에 covered로 계상한다.
+        run: |
+          age-keygen -o /tmp/ci.agekey
+          export SOPS_AGE_KEY_FILE=/tmp/ci.agekey
+          CIKEY=$(age-keygen -y /tmp/ci.agekey)
+          cat > /tmp/sops-ci.yaml <<EOF
+          creation_rules:
+            - path_regex: \.enc\.yaml\$
+              encrypted_regex: "^(data|stringData)\$"
+              age: "$CIKEY"
+          EOF
+          cp tests/fixtures/sample-secret.yaml /tmp/ci.enc.yaml
+          sops --config /tmp/sops-ci.yaml --encrypt --in-place /tmp/ci.enc.yaml
+          if grep -q 'super-secret-value-123' /tmp/ci.enc.yaml; then echo "::error::암호화 후 평문 잔존"; exit 1; fi
+          sops --config /tmp/sops-ci.yaml --decrypt /tmp/ci.enc.yaml | grep -q 'super-secret-value-123'
+      - name: pre-commit 배선 확인 (훅 정의가 실제로 도는가)
+        # ⚠️ gate가 gitleaks·sops-guard를 직접 부르는 것과 **다른 질문**이다: 저건 "검사가 도는가",
+        #    여긴 "`.pre-commit-config.yaml`의 훅 배선이 유효한가"(files 정규식·entry 경로·language).
+        #    ci.yaml:45가 이 파일에서 gitleaks rev를 파생하므로 배선이 깨지면 그 파생도 조용히 죽는다.
+        #    전체 훅 실행은 하지 않는다 — gitleaks 훅은 `--staged` 대상이라 CI(staged 0)에서 vacuous다.
+        run: |
+          pip install --quiet pre-commit
+          pre-commit validate-config .pre-commit-config.yaml
+          pre-commit run sops-guard --all-files
       - name: sops-guard — 추적된 모든 *.enc.yaml 구조 검증
         # 평문 *.enc.yaml(또는 부분 암호화)을 차단. gate는 setup-toolchain에서 yq를 이미 설치했다.
         # 무인자 = 가드가 자기 도메인을 열거하고 바닥값을 건다. 예전의 `git ls-files … | xargs -r`는

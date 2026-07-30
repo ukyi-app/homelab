@@ -141,13 +141,11 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
 	@bash scripts/sops-guard.sh
-# ⚠️⚠️ 아래 스텝들은 **서브-make로 묶지 않는다**. GNU make는 recipe 줄에 `$(MAKE)`가 있으면 `-n`에서도
-#    그 줄을 **실제로 실행한다**(재귀 make에 플래그를 전파하려는 문서화된 동작). 그런데 이 레포는
-#    `make -n ci` 출력을 **데이터로 읽는다** — tools/check-ci-parity.ts(미러 대조)와
-#    tools/check-guard-authority.ts(venue 수집) 둘 다. 서브-make로 묶었더니 `make -n ci` 한 번에
-#    docker e2e가 통째로 돌았다(실측). 즉 `$(MAKE)`는 여기서 드라이런을 부수효과로 바꾼다.
-#    ⇒ 각 게이트 스텝은 **자기 줄에** 둔다. 장황하지만 (a) 드라이런이 안전하고 (b) 패리티 대조가
-#      래퍼가 아니라 스텝 단위로 구체적이다.
+# ⚠️⚠️ 게이트 스텝을 **서브-make로 묶지 않는다.** GNU make는 `$(MAKE)`가 있는 recipe 줄을 `-n`에서도
+#    **실제로 실행한다**(재귀 make 플래그 전파를 위한 문서화된 동작). 이 레포는 `make -n ci` 출력을
+#    데이터로 읽으므로(check-ci-parity 미러 대조 · check-guard-authority venue 수집) 서브-make 하나가
+#    드라이런을 부수효과로 바꾼다 — 실측: `make -n ci` 한 번에 docker e2e가 통째로 돌았다.
+#    ⇒ 각 스텝은 **자기 줄에** 둔다. cf. docs/traps.md 「make -n은 드라이런이 아니다」
 #
 # 아래 도구들(actionlint·docker·node)은 m6-tools 필수가 아니다(gate 러너엔 항상 있다). 부재 시 그 스텝은
 # **미평가 원장에 이름을 남기고** 넘어가고, 마지막 줄이 규약대로 `SKIP:` 마커 + exit 4를 낸다.
@@ -166,12 +164,11 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	  else echo "skopeo-timeout-smoke" >> $(CI_UNEVAL); fi
 	@if command -v node >/dev/null 2>&1; then bash tests/gates/app-shared-node-smoke.sh; \
 	  else echo "app-shared-node-smoke" >> $(CI_UNEVAL); fi
-# 발화 e2e는 전량 **병렬**이다(각 하네스가 자기 docker 네트워크·컨테이너를 쓰고, 시간의 대부분이 CPU가
-# 아니라 replay 대기라 합계가 아니라 최댓값으로 수렴한다 — gate와 같은 이유·같은 방식).
-# ⚠️ ci.yaml은 같은 하네스를 **리터럴 경로**로 적는다. 중복이 아니라 역할 분담이다 —
-#    check-guard-authority는 venue(ci.yaml run 텍스트·`make -n` 출력)에서 가드 경로를 찾으므로 하네스의
-#    "권위 경로"는 ci.yaml이 제공한다. 여기서 글롭을 써도 권위는 유지되고, ci.yaml 쪽 목록이 레포와
-#    어긋나면 거기 있는 교차 대조가 red를 낸다.
+# 발화 e2e는 전량 **병렬**이다(병렬이 안전한 전제는 ci.yaml의 같은 스위트 주석이 SSOT).
+# ⚠️ 여긴 글롭, ci.yaml은 **리터럴 경로**다. 중복이 아니라 역할 분담이다 — check-guard-authority가
+#    venue(ci.yaml run 텍스트 · `make -n` 출력)에서 가드 경로를 찾으므로 하네스의 "권위 경로"는
+#    ci.yaml이 제공한다. 그래서 여기선 글롭을 써도 권위가 유지되고, ci.yaml 쪽 목록이 레포와
+#    어긋나면 거기 교차 대조가 red를 낸다.
 	@if ! command -v docker >/dev/null 2>&1; then \
 	  echo "vmalert-*-firing-e2e.sh 전량" >> $(CI_UNEVAL); \
 	else \

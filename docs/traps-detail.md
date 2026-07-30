@@ -40,6 +40,11 @@
 ### fine-grained PAT 능력은 실제 push 테스트로만
 - fine-grained PAT의 능력은 **실제 push 테스트로만** 확인 가능 — repo GET의 `permissions`
   필드는 사용자 역할을 보여줄 뿐이다. Resource owner를 org로 지정해야 org 리포에 쓴다.
+- ⚠️ **읽기 능력도 같다 — fine-grained PAT는 "공개" App 엔드포인트 `GET /apps/{slug}`조차 404로 막는다.**
+  terraform `data.github_app`이 그 위에 서 있으면 데이터 소스가 죽고 그것을 참조하는 리소스가 계획에서
+  통째로 빠져, `plan`이 에러가 아니라 조용히 **`0 to add`(=무변경)**를 낸다 — 룰셋이 안 걸렸는데 초록으로 보인다.
+  해법은 slug 해석을 없애고 **App ID를 리터럴로 핀**하는 것(`infra/github/rulesets.tf`). App ID는 리네임에도
+  불변이고, tf-reconcile 토큰이 fine-grained여도 plan이 매 주기 깨지지 않는다.
 
 ### runAsUser /etc/passwd 부재 시 libpq PGUSER
 - `runAsUser`가 이미지 `/etc/passwd`에 없으면 libpq가 기본 사용자명을 못 정해
@@ -338,7 +343,14 @@
   meta-arg count/for_each·주석 카운트 회피·identity redirect·cross-file)에 전부 우회됐고, canonical freeze조차 리소스
   `/* */` wrap·추적 `*_override.tf` 병합으로 우회됐다. 그래서 가드는 **best-effort 3층 변경 감지기**(canonical freeze
   + no-block-comments + no-override; `.gitignore`가 `*_override.tf` 이중화)이고, **완전 보증은 owner-local 라이브
-  검증**(apply 후 적대 push 거부 실측 + `gh api /repos/{o}/{r}/rulesets` 관측). 절차는 `docs/reviews/bump-poll-ruleset/verification.md`.
+  검증**(apply 후 적대 push 거부 실측 + `gh api /repos/{o}/{r}/rulesets` 관측). 절차는
+  `docs/runbooks-public/github-ruleset-verify.md`(tracked).
+- ⚠️ **ruleset 거부 코드는 `GH006`이 아니라 `GH013`이다** — 실측 문구는 `GH013: Repository rule violations …
+  Cannot create ref due to creations being restricted` / `… Cannot update this protected ref`(GH006은 구 분기보호 계열).
+  GH006만 매칭하는 프로브·로그 파서는 룰셋 거부를 못 알아보고 **auth 실패와 구분하지 못해 거짓 인증**한다
+  ("거부됐다"가 아니라 "ruleset 때문에 거부됐다"를 확증해야 한다). 매처는 GH013·`repository rule`·
+  `cannot create`를 함께 커버하라. **org owner/repo admin에도 암묵 bypass는 없다** — 선언된 `bypass_actors`가
+  유일한 경로다(owner PAT push가 실제로 GH013으로 거부됨을 실측).
 > 가드: `tests/gates/test_bump_poll_ruleset.bats`
 
 ### emptyDir sizeLimit vs 런타임 다운로드 페이로드
