@@ -59,6 +59,15 @@ jobs:
           #       **영구 실패**한다 → 해당 앱 bump가 영구 fail-closed.
           #    실행기는 BEHIND를 최신 main에서 재구축한 leased force-push로 수렴시킨다(머지 커밋 0).
           #    나머지 접두(bump·create-*·update-secrets)는 그대로 — 그 PR들엔 레인 개념이 없다.
+          #
+          # ⚠️ **DIRTY는 이 스위퍼의 사각지대다**(알려진 갭 — 별도 flip이라 미착수). 무장된 봇 PR이 BEHIND가
+          #    아니라 **DIRTY(충돌)** 로 굳으면 위 select에서 걸러져 아무도 손대지 않는다 → auto-merge가 무장된
+          #    채 영구 잔류하는 좀비가 된다. 라이브 실측(2026-07-13): 같은 앱 커밋에 중복 생성된 bump-poll PR
+          #    #348·#350·#351이 형제 머지로 DIRTY가 되어 무장된 채 남았다. `bump-poll/`은 그 뒤 실행기
+          #    (tools/ensure-bump-pr.ts)가 leased force-push rebuild로 해소했지만, **여기 남은 접두**
+          #    (bump·create-*·update-secrets)에는 여전히 DIRTY 소유자가 없다.
+          # ⚠️ 고칠 때 `update-branch`로 밀면 안 된다 — DIRTY는 충돌이라 update-branch가 실패한다. 올바른
+          #    형태는 **탐지+경고(telegram)** 이거나 소유 도구의 rebuild이지 자동 전진이 아니다.
           gh pr list --repo "$REPO" --state open \
             --json number,headRefName,mergeStateStatus,autoMergeRequest \
             --jq '.[] | select(.autoMergeRequest != null)

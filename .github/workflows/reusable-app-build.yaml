@@ -76,6 +76,19 @@ jobs:
       # tags: push=false에선 아무 데도 안 밀리는 로컬 메타데이터일 뿐이라 그대로 둔다(스펙 분기 최소화).
       # cache: gha 캐시는 두 모드 공용 — PR run이 쓰는 캐시는 그 PR ref 스코프에 격리돼 main 스코프를 오염시킬 수
       #        없고(GHA 캐시 스코프 규칙), 반대로 main 캐시는 PR이 읽는다 → PR 게이트가 웜 캐시로 돈다.
+      # ⚠️ buildx 기본 attestation(provenance/SBOM)을 끄지 않는다 → 태그에 push되는 것은 OCI **인덱스**
+      #    (arm64 이미지 매니페스트 + attestation 매니페스트)이고, attestation은 빌드 타임스탬프 등으로
+      #    **비결정적**이라 **콘텐츠가 동일한 재빌드에도 인덱스 digest가 새로 생긴다**. 낙진 둘:
+      #    ① **무의미한 배포 회전(미해결)** — bump-poll 플래너의 멱등 no-op(tools/poll-ghcr.ts의
+      #       `candidate.digest === s.digest`)은 **인덱스** digest를 비교한다. arm64 자식이 바이트 동일해도
+      #       인덱스가 갈리면 no-op에 안 걸려 PR·머지·롤아웃이 한 바퀴 돈다(빌드 산출물 무변경 = 헛회전).
+      #    ② **ImageDigestDrift 오탐(해소됨)** — containerd는 동일 콘텐츠를 재사용하며 `image_id`로 **구**
+      #       인덱스 digest를 계속 보고한다. 그래서 r6 룰은 `image_id`가 아니라 `image_spec`과 비교한다
+      #       (근거 전문: platform/victoria-stack/prod/rules/r6-ci-staleness.yaml:35-44).
+      #    ⇒ ①을 없애려면 in-repo 빌드 선례처럼 `provenance: false`(.github/workflows/build.yaml:86)를 켠다 —
+      #      단일 플랫폼이라 인덱스 없이 이미지 매니페스트가 직접 push돼 digest가 콘텐츠에 결정적이 된다.
+      #      **미적용 이유**: 이 파일은 외부 앱 레포가 `@main`으로 부르는 cross-repo 공개 계약이라 아티팩트
+      #      형태 변경은 별도 결정이다. 켠다면 r6 룰·digest-exporter(skopeo inspect 대상 digest)를 함께 실측하라.
       - name: build (+ push to GHCR when inputs.push)
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
         with:

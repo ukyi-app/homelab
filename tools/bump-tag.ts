@@ -11,9 +11,22 @@ function syncDigestExporter(root: string, appName: string, newTag: string): void
   const p = resolve(root, "platform/victoria-stack/prod/digest-exporter.yaml");
   let raw: string;
   try { raw = readFileSync(p, "utf8"); } catch { return; } // 파일 부재 = no-op
+  // ⚠️ 아래 정규식만 형식 커널(tools/lib/image-pin.ts)을 **의도적으로 안 쓴다**(arch-deepen F-3).
+  //    여기는 파일 본문 **부분치환**(g 플래그)이라 언앵커드 본문이 필요한데, 커널이 export하는 TAG_RE는
+  //    `^…$` 앵커드다 — 그대로 갈아끼우면 매치 0건이 되어 **조용한 동기 실패**가 된다(APPS가 stale 태그로
+  //    남고 거짓 ImageDigestDrift가 난다). 커널은 부분매치용 TAG_BODY를 일부러 노출하지 않는다(인터페이스
+  //    확장 = 별도 판단). 안티드리프트 grep-guard도 이 형태는 검사 대상 밖이다
+  //    (tools/tests/test_image-pin-lib.bats:94-101). ⇒ 배포 핀 tag 형식(`sha-` + 7..40 hex)을 바꾸면
+  //    image-pin.ts의 TAG_BODY와 **이 줄을 같이** 고쳐라 — 어느 게이트도 이 skew를 잡지 못한다.
   const esc = appName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`(ghcr\\.io/ukyi-app/${esc}:)sha-[0-9a-f]{7,40}`, "g");
   const next = raw.replace(re, `$1${newTag}`);
+  // ⚠️ 이 skip은 **"APPS에 없는 미감시 앱(정상 no-op)"** 과 **"APPS에 있는데 위 정규식이 못 맞춘 포맷
+  //    드리프트(진짜 고장)"** 를 같은 무성 경로로 뭉갠다(arch-deepen F-1 — 행위 변경이라 미착수).
+  //    후자면 APPS가 stale 태그에 묶인 채 남아 digest-exporter가 옛 태그의 digest를 push하고 → 거짓
+  //    ImageDigestDrift가 난다. tests/gates/test_digest-exporter.bats의 APPS parity 게이트는 **이름 집합**만
+  //    대조하므로 태그 포맷 드리프트를 못 잡는다. fail-loud화하려면 앱이 APPS 목록에 있는지를 먼저 판정한
+  //    뒤(있는데 미매치 = 비-0 종료), 없을 때만 조용히 return하라.
   if (next === raw) { console.log(`digest-exporter: APPS에 ${appName} 없음(또는 이미 최신) — 동기 skip`); return; }
   writeFileSync(p, next);
   console.log(`digest-exporter: APPS ${appName} 태그 동기 → ${newTag}`);
