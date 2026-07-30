@@ -30,7 +30,7 @@ dest="$(kubectl -n "$NS" get objectstore "$OBJSTORE" -o jsonpath='{.spec.configu
 ep="$(kubectl -n "$NS" get objectstore "$OBJSTORE" -o jsonpath='{.spec.configuration.endpointURL}')"
 bucket="${dest#s3://}"
 bucket="${bucket%%/*}"
-{ [ -n "$bucket" ] && [ -n "$ep" ]; } || { echo "FATAL: ObjectStore $OBJSTORE에서 bucket/endpoint를 못 읽음" >&2; exit 1; }
+{ [ -n "$bucket" ] && [ -n "$ep" ]; } || { echo "FATAL: ObjectStore ${OBJSTORE}에서 bucket/endpoint를 못 읽음" >&2; exit 1; }
 
 # R2 자격증명(라이브 secret) → rclone env. 평문 키는 출력하지 않는다.
 AWS_ACCESS_KEY_ID="$(kubectl -n "$NS" get secret cnpg-r2-creds -o go-template='{{index .data "AWS_ACCESS_KEY_ID" | base64decode}}')"
