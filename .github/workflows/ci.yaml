@@ -44,17 +44,15 @@ jobs:
         run: |
           ver=$(yq '.repos[] | select(.repo == "https://github.com/gitleaks/gitleaks") | .rev' .pre-commit-config.yaml | sed 's/^v//')
           [ -n "$ver" ] || { echo "::error::gitleaks rev를 .pre-commit-config.yaml에서 못 찾음"; exit 1; }   # fail-loud(빈 버전 차단)
-          # ⚠️ codex pass5 F3 + restale F1: curl|tar 직접 추출은 체크섬 없는 실행체 공급망 표면(supplychain-5 동일).
-          # 하드코딩 SHA256 placeholder 금지(게이트 깨짐) — 릴리스 **공식 checksums.txt**를 받아 그 라인으로 검증 후
-          # 추출한다(버전 핀 v${ver}만 Renovate가 갱신; 해시는 매니페스트에서 자동 일치, stale 위험 0).
+          # ⚠️ 해시는 릴리스 **공식 checksums.txt**로 검증한다 — SHA256 하드코딩 금지(버전 bump마다
+          #    stale이 되어 게이트가 깨진다). 핀은 v${ver}뿐이고 Renovate가 그것만 갱신한다.
           ( cd /tmp
             curl -fsSL -O "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_arm64.tar.gz"
             curl -fsSL -O "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_checksums.txt"
             grep "  gitleaks_${ver}_linux_arm64.tar.gz$" "gitleaks_${ver}_checksums.txt" | sha256sum -c -
             sudo tar -xz -C /usr/local/bin -f "gitleaks_${ver}_linux_arm64.tar.gz" gitleaks )
-          # git 히스토리 전체 스캔(pre-commit 훅과 동등). --redact: 발견 시 시크릿 평문 미출력.
-          # ⚠️ codex pass4 F2: bare 'gitleaks detect'는 git 히스토리 전체 스캔 → 과거 false-positive/회전된
-          # 옛 시크릿 하나가 모든 PR을 영구 머지불가(게이트 red)로 만든다. pre-commit 훅처럼 작업트리만 스캔.
+          # ⚠️ `--no-git` 필수(작업트리만 스캔) — 히스토리 전체를 스캔하면 과거 false-positive나 이미
+          #    회전된 옛 시크릿 하나가 모든 PR을 영구 red로 만든다. --redact: 발견 시 평문 미출력.
           gitleaks detect --no-git --source . --redact --no-banner --exit-code 1
       - name: sops-guard — 추적된 모든 *.enc.yaml 구조 검증
         # 평문 *.enc.yaml(또는 부분 암호화)을 차단. gate는 setup-toolchain에서 yq를 이미 설치했다.
@@ -72,38 +70,26 @@ jobs:
         run: bun tools/audit-orphans.ts --ci
       - name: skeleton + 네이밍/CJK/dirmap 가드 (required — 기존 verify.yaml non-required서 승격)
         run: bash scripts/check-skeleton.sh
+      # ── 회계 3종 ─────────────────────────────────────────────────────────────────────────
+      # ⚠️ 셋 다 bats가 아니라 **명시 스텝**이다. 회계의 권위가 자기 bats 하나뿐이면 tests/.ci-exclude에
+      #    한 줄 추가하는 것만으로 **회계 전체가 초록인 채 꺼진다** — 다른 가드는 이들이 지키는데
+      #    이들을 지키는 것이 없어지는 자기 사각지대다.
       - name: 가드 권위 경로 회계 (G1 — 가드가 CI에서 한 번도 안 도는 상태 차단)
-        # ⚠️ 명시 스텝으로 둔다. 이 회계의 권위가 자기 bats 하나뿐이면 tests/.ci-exclude에 한 줄
-        # 추가하는 것만으로 **회계 전체가 초록인 채 꺼진다** — 다른 가드는 이 도구가 지키는데
-        # 이 도구를 지키는 것이 없어지는 자기 사각지대다(적대적 리뷰가 실측으로 지목).
         run: bun tools/check-guard-authority.ts
       - name: 이미지 소유권 회계 (G2 — 아티팩트가 권위 있는 핀 소유자를 갖는지)
         # 핀 게이트(check-image-pins)와 **다른 질문**이다: 저건 'digest로 핀됐는가', 여긴 '그 digest를
-        # 누가 갱신하는가'. 명시 스텝인 이유는 check-guard-authority와 같다 — 권위가 자기 bats 하나뿐이면
-        # tests/.ci-exclude 한 줄로 회계 전체가 초록인 채 꺼진다.
+        # 누가 갱신하는가'.
         run: bun tools/check-image-ownership.ts
       - name: 워크플로 준비상태 회계 (G-09 — 자격 부재로 job이 조용히 skip되는 것 차단)
-        # ⚠️ check-guard-authority와 같은 이유로 **명시 스텝**이다. 이 회계의 권위가 자기 bats
-        # 하나뿐이면 tests/.ci-exclude에 한 줄 추가하는 것만으로 회계 전체가 초록인 채 꺼진다.
-        # 여긴 정적 방향(원장 ↔ 워크플로 양방향 대조)만 본다 — 런타임 판정은 각 워크플로의
+        # 정적 방향(원장 ↔ 워크플로 양방향 대조)만 본다 — 런타임 판정은 각 워크플로의
         # accounting job이 `--workflow <file>`로 수행한다.
         run: bun tools/check-workflow-readiness.ts
       - name: 실 도메인 가드 (레포 자신에 대해 돌린다 — bats 픽스처가 아니라)
-        # 티켓 06이 **의도적으로 미구현**으로 남긴 조항("그 실행이 가드의 실제 도메인에 닿을 때만 권위")을
-        # 관측 기계를 짓지 않고 **모호성 제거**로 닫는다.
-        #
-        # 병: 아래 7종은 CI에서 **bats를 통해서만** 돌았는데, 같은 bats 파일에 픽스처 @test가 20여 개씩
-        # 섞여 있다. 그래서 "실 레포를 검사하는 @test 한 줄"이 지워져도 픽스처들이 venue를 살려
-        # G1(check-guard-authority)은 초록을 유지한다 — 실측: check-image-pins의 실 트리 강제는
-        # `tests/gates/test_image_pins.bats:236` **단 한 줄**이 CI의 유일한 권위였다.
-        # (`make verify`는 G1 기준 mirror라 권위가 아니고, `make ci` 목록에도 없었다.)
-        #
-        # 처방: ci.yaml이 **직접** 부르면 정의상 실 도메인에 닿는다 → fixture↔real 질문 자체가 사라진다.
-        # 레포가 이미 같은 해법을 3건(G1·G2·G-09)에 적용해 놨고 그 스텝들의 주석이 같은 이유를 적고 있다.
-        # ⚠️ 대안이었던 "실행 관측"(SCAN 마커를 사이드 채널로 걷어 도메인 도달을 판정)은 기각했다 —
-        #    bats `run`이 자식 stdout을 `$output`으로 삼켜 마커가 밖에 도달하지 않고, 스캔 **건수**로는
-        #    픽스처와 실 트리를 가를 수 없다(픽스처를 6건으로 만들면 실 트리 값과 정확히 충돌한다).
-        # ⚠️ bats에서도 계속 돈다(픽스처 @test와 같은 파일이라 뗄 수 없다). 중복 실행 1.6초는 의도된 대가다.
+        # ⚠️ 아래 7종을 **여기서 직접** 부르는 이유: bats로만 돌면 같은 파일의 픽스처 @test 20여 개가
+        #    venue를 살려, 실 트리를 검사하는 @test 한 줄이 지워져도 G1이 초록을 유지한다(실측:
+        #    check-image-pins의 실 트리 강제는 단 한 줄이 CI의 유일한 권위였다). ci.yaml이 직접 부르면
+        #    정의상 실 도메인에 닿으므로 fixture↔real 질문 자체가 사라진다 — G1·G2·G-09와 같은 해법.
+        # ⚠️ bats에서도 계속 돈다(픽스처 @test와 같은 파일이라 뗄 수 없다). 중복 1.6초는 의도된 대가다.
         run: |
           bash scripts/check-doc-index.sh
           bash scripts/check-bats-accounting.sh
@@ -114,11 +100,9 @@ jobs:
           bun tools/check-alert-rules.ts
           bun tools/check-disk-caps.ts
       - name: make ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)
-        # 병: Makefile은 `ci`를 "gate를 로컬에서 그대로 재현"이라 선언했지만 그 주장을 검증하던 것은
-        # 하드코딩된 5개 토큰뿐이었다 — 실측 시점에 이 job의 run 스텝 19건 중 8건이 make ci에 없었는데
-        # 전 검사가 초록이었다(하필 그 5개가 전부 미러된 것들이라 우연히 통과했다).
-        # 이제 스텝 목록을 이 파일에서 **파생**해 원장(policy/ci-parity.json)과 대조한다 —
-        # 스텝을 추가하는 사람은 "이건 로컬에서 어떻게 도는가"를 반드시 답해야 한다.
+        # 스텝 목록을 이 파일에서 **파생**해 원장(policy/ci-parity.json)과 대조한다 — 스텝을 추가하는
+        # 사람은 "이건 로컬에서 어떻게 도는가"를 반드시 답해야 한다. 하드코딩 토큰 대조였을 땐 19스텝 중
+        # 8건이 make ci에 없는데도 전 검사가 초록이었다(대조하던 5개가 하필 전부 미러된 것들이었다).
         run: bun tools/check-ci-parity.ts
       - name: shell script lint (전 추적 .sh)
         # 전 추적 *.sh를 shellcheck — scripts/(DR/파괴적)뿐 아니라 notify.sh(알림 경로)·
@@ -140,23 +124,20 @@ jobs:
         # grep만으론 오류 PromQL/MetricsQL이 통과(test_vmalert-config는 존재 grep) → vmalert -dryRun으로 파싱 검증.
         run: bash tests/gates/vmalert-rules-validate.sh
       # ── vmalert 발화 e2e (전량 **병렬**) ────────────────────────────────────────────────────────
-      # 이 하네스들은 "룰이 파싱된다"가 아니라 "실제로 발화한다"를 증명한다 — `-dryRun`이 통과시킨
-      # 죽은 알림이 이 레포에 두 번 있었다(ImageDigestDrift·FilesBulkSSDLow: push 주기 > 룩백으로
-      # 시리즈에 구멍 → `for:` pending이 매 주기 리셋 → 영구 무발화).
+      # "룰이 파싱된다"가 아니라 "실제로 발화한다"를 증명한다 — `-dryRun`이 통과시킨 죽은 알림이 이
+      # 레포에 두 번 있었다(push 주기 > 룩백 → 시리즈 구멍 → `for:` 매 주기 리셋 → 영구 무발화).
       #
-      # ⚠️ **왜 병렬인가**: 실측(run 30332565823) gate 총 1048초 중 이 셋이 805초(77%)였다. 네 번째가
-      # 들어오면 순차로는 ~1250초가 된다. 하네스는 서로 완전히 독립이고(각자 자기 docker 네트워크·
-      # 컨테이너를 `$$` 접미로 만든다) 시간의 대부분이 CPU가 아니라 replay 대기라 병렬 효과가 크다.
-      # 총합이 아니라 **최댓값**으로 수렴한다.
+      # ⚠️ **병렬이 안전한 전제**: 하네스는 서로 완전히 독립이다 — 각자 자기 docker 네트워크·컨테이너를
+      # `$$` 접미로 만든다. 시간의 대부분이 CPU가 아니라 replay **대기**라 벽시계가 총합이 아니라
+      # **최댓값**으로 수렴한다(실측 시점 gate 1048초 중 이 스위트가 805초였다).
       #
-      # ⚠️ 목록은 **리터럴 경로로 적는다**(글롭 파생이 아니라). 언뜻 "하드코딩 목록"으로 보이지만
-      # 이 자리에선 반대다 — `tools/check-guard-authority.ts`가 모든 `tests/gates/*.sh`에 **권위 실행
-      # 경로 ≥1**을 요구하므로, 하네스를 추가하고 여기 안 적으면 그 가드가 즉시 red를 낸다(실측:
-      # 글롭 변수로 바꿨더니 네 하네스 전부 "권위 0"으로 잡혔다). 즉 이 목록은 **대조되는** 목록이고,
-      # 리터럴이어야 그 대조가 성립한다. pg-tools 소비처 목록과의 차이가 정확히 이것이다.
+      # ⚠️ 목록은 **리터럴 경로로 적는다**(글롭 파생이 아니라). `tools/check-guard-authority.ts`가 모든
+      # `tests/gates/*.sh`에 권위 실행 경로 ≥1을 요구하므로 하네스를 추가하고 여기 안 적으면 즉시 red다
+      # (실측: 글롭 변수로 바꿨더니 네 하네스 전부 "권위 0"으로 잡혔다). 이건 **대조되는** 목록이라
+      # 리터럴이어야 대조가 성립한다 — 하드코딩 소비처 목록과 정반대의 자리다.
       #
-      # ⚠️ **rc는 PID별로 걷는다.** `a & b & wait`는 마지막 잡의 상태만 돌려줘 앞 하네스의 실패가
-      # 조용히 삼켜진다 — 이 레포가 프로세스 치환에서 이미 겪은 클래스다(vacuous green).
+      # ⚠️ **rc는 PID별로 걷는다.** `a & b & wait`는 마지막 잡의 상태만 돌려줘 앞 하네스의 실패를
+      # 조용히 삼킨다(이 레포가 프로세스 치환에서 이미 겪은 vacuous green 클래스).
       - name: 무거운 스위트 동시 실행 (bats CPU-bound ∥ 발화 e2e 대기-bound)
         # ⚠️ 한 스텝에 합친 이유: GHA 스텝은 각자 별도 셸이라 **스텝 간 background job을 wait할 수 없다**.
         #    동시 실행하려면 한 스텝 안이어야 한다.
@@ -214,18 +195,16 @@ jobs:
           done
           exit "$fail"
       - name: skopeo 실물 타임아웃 스모크 (핀된 이미지 + 제어된 블랙홀)
-        # PATH stub은 진짜 타임아웃을 증명할 수 없다(stub이 skopeo를 대체하므로 stub 자신을 테스트할 뿐).
-        # digest-exporter의 인-데드라인 예산(POD_START + N×SKOPEO_TIMEOUT + CURL_MAX_TIME + EXEC_SLACK <
-        # activeDeadlineSeconds) 전체가 "skopeo가 실제로 t에 끊긴다"는 전제 위에 서 있으므로, 그 전제를
-        # 핀된 이미지에 대해 직접 증명한다(응답 없는 TCP sink → 경과가 --command-timeout 값을 따라감).
+        # digest-exporter의 인-데드라인 예산 전체가 "skopeo가 실제로 t에 끊긴다"는 전제 위에 서 있다.
+        # PATH stub으로는 그 전제를 증명할 수 없어(stub이 skopeo를 대체하니 stub 자신을 테스트할 뿐)
+        # 핀된 이미지 + 응답 없는 TCP sink로 직접 잰다.
         run: bash tests/gates/skopeo-timeout-smoke.sh
-      # app-shared .mts가 node strip-types(앱 레포 secret:seal 경로)에서도 실행됨을 required gate가 보장 (A.5 F1·pass3) —
-      # 별도 잡이면 비-required라 무성 회귀라 gate 잡 안 스텝으로. node는 strip-types 실행용 의식적 예외(setup-bun ban 유일 예외).
-      # CI는 현 LTS node 24로 실행(strip-types는 node 23.6+ 무플래그 기본). .mts 계약 하한은 여전히 node 22.18(앱 레포 secret:seal 경로).
+      # app-shared `.mts`가 node strip-types(앱 레포 secret:seal 경로)에서도 도는지를 required gate가 보장한다
+      # — 별도 잡이면 비-required라 무성 회귀다. node는 setup-bun ban의 유일한 의식적 예외.
+      # CI는 node 24로 돌지만 **계약 하한은 node 22.18**이다(앱 레포가 그걸 쓴다).
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0 — node strip-types 실행용
-        # package-manager-cache:false — 이 스텝은 strip-types 스모크 전용(deps 캐시 불요). setup-node v5+는
-        # package.json packageManager 필드 감지 시 자동 캐시를 켜는데, bun은 setup-node 캐시 미지원이라 lockfile 부재로
-        # 깨질 수 있다(v6은 npm으로 한정해 bun이면 트립 안 되지만 의도를 명시해 못박는다).
+        # package-manager-cache:false — strip-types 스모크 전용이라 deps 캐시가 불필요하고, bun은
+        # setup-node 캐시 미지원이라 lockfile 부재로 깨질 수 있다(의도를 명시해 못박는다).
         with: { node-version: "24.14.0", package-manager-cache: false }
       - name: app-shared .mts strip-types 스모크 (node 계약 하한)
         run: tests/gates/app-shared-node-smoke.sh

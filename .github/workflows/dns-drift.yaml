@@ -27,12 +27,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0 — 로컬 telegram-notify 액션 resolve + 체커 실행(F8 가드 충족)
       - uses: ./.github/actions/setup-bun
         with: { install: 'false' }     # dns 체크는 deps 불요
-      # ⚠️ 예전엔 여기 "대상 0건이면 깨끗한 skip" 게이트(`go`)가 있었다. 그 형태의 병은 **대상 열거가
-      #    깨져도 0건**이고 그때 run이 초록이라는 것이다 — 게다가 그 게이트의 platform_hosts 계산은
-      #    `try{}catch{}`로 파싱 실패를 0으로 흡수해 정확히 fail-open이었다(reserved-hosts.json이 깨지면
-      #    "검사할 게 없음"이 된다). skip을 없애고 **바닥값**으로 대체했다: 예약 platform host는 구조적으로
-      #    항상 ≥1이므로 0은 "대상 없음"이 아니라 붕괴이고, 검사기가 exit 1로 낸다(--min-reserved 기본 1).
-      #    ⇒ 이건 준비상태(자격 부재) 클래스가 아니라 열거 붕괴 클래스라 처방이 accounting job이 아니다.
+      # ⚠️ "대상 0건이면 skip" 게이트를 두지 않는다 — 예약 platform host는 구조적으로 항상 ≥1이라
+      #    0은 "대상 없음"이 아니라 **열거 붕괴**다(그 형태는 파싱 실패를 0으로 흡수해 fail-open이었다).
+      #    검사기가 `--min-reserved`(기본 1) 바닥값으로 exit 1을 낸다. 준비상태 클래스가 아니라
+      #    열거 붕괴 클래스라 처방이 accounting job이 아니다. cf. docs/traps.md 「열거 붕괴」
       - id: check
         run: |
           bun tools/dns-drift-check.ts --apps infra/cloudflare/apps.json > /tmp/drift.json
