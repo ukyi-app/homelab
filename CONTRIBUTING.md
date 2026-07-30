@@ -224,3 +224,26 @@ verify·pre-commit은 sops/시크릿 안전망이다. `make ci`는 시스템 PAT
 ## 문서 관례
 - **계획 문서 크기**: `docs/plans/`는 검색 노이즈를 줄이기 위해 간결히(권장 상한 ~1500줄/문서). 대형
   산출물은 요약 SSOT + 링크로 분리한다. 히스토리 재작성은 하지 않고 `.rgignore`가 검색에서 제외한다.
+
+### conductor 파이프라인 산출물 — 착지와 함께 지운다
+
+`feature`/`bugfix`/`deepen` 컨덕터는 `docs/reviews/<slug>/`에 게이트 아티팩트(`<kind>-r<n>.json` ·
+`decisions.md` · `verification.md` 등)를 쌓는다. 이건 **작업 중 상태**이지 레포의 산출물이 아니다.
+
+- **gitignore하지 마라.** 컨덕터의 `plan-not-in-diff` preflight가 문서를 diff에서 찾는데, ignored
+  파일은 diff에 영원히 안 나타난다(`--scope branch` 라운드는 오히려 전 bookkeeping 커밋을 요구한다).
+  산출물은 tracked·커밋된 채로 살아야 파이프라인이 돈다.
+- **PR 머지 직후 같은 브랜치에서 삭제한다** — 랜딩 체크리스트의 마지막 항목. 지우지 않으면
+  라운드 수만큼 파일이 누적된다(실측: 한 슬러그에 `structure-r1`~`r18` + `bugfix-verify-*` 62파일).
+- **삭제 전에 내구 지식을 승격한다.** 목적지는 셋 중 하나뿐: 되돌림이 쓰여질 바로 그 **코드 지점의
+  주석** / `docs/traps-detail.md`(라이브에서 검증된 함정) / `docs/decisions/`(ADR). 어디에도 안 맞으면
+  그건 과정 서사이므로 승격하지 않는다.
+- 승격하지 않은 것은 git 히스토리에만 남는다. 그걸 감수한다는 뜻이다.
+
+산출물 복구는 **삭제 커밋의 부모**에서 꺼낸다 — 삭제 커밋 자신에는 그 경로가 없다:
+
+```bash
+git log --diff-filter=D --name-only --format='%h %s' -- 'docs/reviews/**'   # 무엇이 언제 지워졌나
+sha=$(git rev-list -n1 HEAD -- docs/reviews/<slug>/decisions.md)
+git show "$sha^:docs/reviews/<slug>/decisions.md"                          # ^ 없으면 "path does not exist"
+```
