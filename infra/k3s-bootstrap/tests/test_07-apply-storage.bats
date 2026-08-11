@@ -52,13 +52,16 @@ EOF
 teardown() { rm -rf "$STUBDIR"; }
 
 # versions.env는 무조건 export 하므로 환경으로 덮을 수 없다 — 샌드박스 사본을 만들어 값을 바꾼다.
-# ($1 = BULK_MIGRATION_WINDOW_UNTIL 값, 빈 문자열이면 그대로 둔다)
+# ($1 = BULK_MIGRATION_WINDOW_UNTIL 값. 생략 = 빈 창)
+#
+# ⚠️ 창 값은 **항상 명시적으로 쓴다.** 예전 판은 인자가 없으면 레포 값을 그대로 뒀는데, 그러면
+#    owner가 국면 A에 진입하며 versions.env에 날짜를 채우는 순간 "플래그만으로는 안 열린다"
+#    @test가 조용히 뒤집힌다 — 테스트가 **레포 상태에 의존**하고 있었던 것이다.
+#    (같은 클래스의 선례: `main`을 리터럴로 쓴 테스트가 마이그레이션 브랜치에서 vacuous green이 됐다.)
 _sandbox() {
   BS="$BATS_TEST_TMPDIR/bs"; rm -rf "$BS"; cp -R "$BOOTSTRAP_DIR" "$BS"
   sed -i.bak "s#^export BULK_STORAGE_PATH=.*#export BULK_STORAGE_PATH=\"$BULKDIR\"#" "$BS/versions.env"
-  if [ -n "${1:-}" ]; then
-    sed -i.bak "s#^export BULK_MIGRATION_WINDOW_UNTIL=.*#export BULK_MIGRATION_WINDOW_UNTIL=\"$1\"#" "$BS/versions.env"
-  fi
+  sed -i.bak "s#^export BULK_MIGRATION_WINDOW_UNTIL=.*#export BULK_MIGRATION_WINDOW_UNTIL=\"${1:-}\"#" "$BS/versions.env"
   export BS
 }
 _apply() { BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" run "$BS/apply-storage.sh"; }
@@ -116,7 +119,7 @@ _apply() { BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" run "$B
 
 # ── 국면 A 진입은 **둘 다** 있어야 한다 ────────────────────────────────────────────────────
 @test "the phase-A flag ALONE does not open the gate (an unbounded window is not temporary)" {
-  _sandbox                                   # BULK_MIGRATION_WINDOW_UNTIL="" 그대로
+  _sandbox                                   # 창 비움 (레포 값과 무관하게 명시)
   FM_BULK_SRC=/dev/mapper/vg-root BULK_TEMPORARY_ALLOWED=1 BULK_RUN="$STUBDIR/asroot" \
     run "$BS/apply-storage.sh"
   [ "$status" -ne 0 ]
