@@ -22,6 +22,16 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; C="$ROOT/platform/s
   echo "$output" | grep -q "name: sealed-secrets-controller"
 }
 
+@test "key rotation is pinned off for the migration window (--key-renew-period 0)" {
+  # NUC 이전 기간 한정. values에서 keyrenewperiod가 사라지면 차트가 플래그 자체를 생략하고
+  # 컨트롤러 기본 30일 회전으로 '조용히' 복귀한다 — 반출한 sealing key 백업이 stale이 되는 경로다.
+  # 이전 완료 후 values의 keyrenewperiod와 함께 이 테스트도 제거한다.
+  run kustomize build --enable-helm "$C"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- "--key-renew-period"
+  echo "$output" | grep -A1 -- "--key-renew-period" | grep -q '"0"'
+}
+
 @test "sealed-secrets is excluded from the platform appset (no double-ownership)" {
   run grep -E "path: platform/sealed-secrets/\*, exclude: true" "$ROOT/platform/argocd/root/appset.yaml"
   [ "$status" -eq 0 ]
