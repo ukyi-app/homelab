@@ -40,8 +40,8 @@ spec:
 ---
 # Egress: apiserver — controller/cainjector/webhook가 Certificate/Issuer/Order/Secret watch·생성.
 # ★kube-router가 ClusterIP(10.43.0.1:443)를 노드 InternalIP:6443으로 DNAT하고 netpol egress는 DNAT '후'
-#   dest를 평가하므로 ClusterIP가 아니라 노드 서브넷:6443을 허용한다(라이브: 노드IP 192.168.139.92).
-#   OrbStack VM /24라 VM IP 변경에 durable. DR로 대역 자체가 바뀌면 갱신.
+#   dest를 평가하므로 ClusterIP가 아니라 노드 서브넷:6443을 허용한다(라이브: 노드IP 192.168.117.15).
+#   NUC LAN /24라 DHCP 임대 변경에 durable. 대역 자체가 바뀌면 갱신.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -52,7 +52,7 @@ spec:
   egress:
     - to:
         - ipBlock:
-            cidr: 192.168.139.0/24 # 노드 InternalIP 192.168.139.92 — DNAT 후 apiserver
+            cidr: 192.168.117.0/24 # 노드 InternalIP 192.168.117.15 — DNAT 후 apiserver
       ports:
         - { protocol: TCP, port: 6443 }
 ---

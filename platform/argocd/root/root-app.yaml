@@ -11,7 +11,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/ukyi-app/homelab.git
-    targetRevision: main
+    targetRevision: nuc-migration
     path: platform/argocd/root
     directory:
       recurse: true # appset.yaml과 root/ 아래 수동 작성 Application들(M4/M5)을 모두 포착

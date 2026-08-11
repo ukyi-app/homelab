@@ -14,7 +14,7 @@ spec:
   project: platform
   source:
     repoURL: https://github.com/ukyi-app/homelab.git
-    targetRevision: main
+    targetRevision: nuc-migration
     path: platform/argocd/extras
   destination:
     server: https://kubernetes.default.svc

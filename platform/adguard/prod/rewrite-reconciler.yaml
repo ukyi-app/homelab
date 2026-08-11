@@ -45,7 +45,7 @@ spec:
       ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
     - to: # apiserver — kube-router가 ClusterIP(10.43.0.1:443)를 노드 InternalIP:6443으로 DNAT하고 netpol은
           # DNAT 후 dest를 평가하므로 ClusterIP가 아니라 노드서브넷:6443을 허용(NetworkPolicy egress apiserver 함정).
-        - ipBlock: { cidr: 192.168.139.0/24 } # OrbStack VM 서브넷(노드 InternalIP 192.168.139.92)
+        - ipBlock: { cidr: 192.168.117.0/24 } # NUC LAN 서브넷(노드 InternalIP 192.168.117.15, wlo1)
       ports: [{ protocol: TCP, port: 6443 }]
     - to: # adguard-ui(같은 ns) — /control/rewrite/*. svc port 80 → targetPort 3000(DNAT 후 targetPort 평가 함정)
         - podSelector: { matchLabels: { app: adguard } }
