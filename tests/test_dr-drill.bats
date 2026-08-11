@@ -8,6 +8,51 @@ sh=scripts/dr-drill.sh
   [ "$status" -eq 0 ]
 }
 
+# ── bulk 국면 A(D4 한시) 거부 게이트 ───────────────────────────────────────────────────────
+# ⚠️ 아래 두 @test는 dr-drill.sh를 **실제로 실행한다.** 진짜 레포 루트에서는 절대 안 된다(:108이
+#    노드를 파괴한다) — 대신 **복사본을 픽스처 REPO_ROOT 위에서** 돌린다. 그 트리에는
+#    scripts/sealing-key-dr-gate.sh가 없으므로 가드가 깨져 있으면 바로 다음 줄에서 죽는다.
+#    즉 파괴 지점에 닿을 길이 원리적으로 없다. grep만으로는 "가드가 **맨 앞**에 있는가"를
+#    증명할 수 없어서 이 형태를 골랐다.
+_drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
+  fx="$BATS_TEST_TMPDIR/fx$RANDOM"
+  mkdir -p "$fx/scripts" "$fx/infra/k3s-bootstrap"
+  cp "$sh" "$fx/scripts/dr-drill.sh"
+  printf 'export BULK_MIGRATION_WINDOW_UNTIL="%s"\n' "$1" > "$fx/infra/k3s-bootstrap/versions.env"
+  echo "$fx"
+}
+
+@test "dr-drill REFUSES to run while the phase-A bulk window is open" {
+  fx="$(_drill_fixture 2026-12-31)"
+  run bash "$fx/scripts/dr-drill.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'DR ABORT: 국면 A'
+  printf '%s' "$output" | grep -qF -- '2026-12-31'
+}
+
+@test "the phase-A refusal does NOT fire once the window is cleared (positive control)" {
+  # 이게 없으면 '항상 거부하는' 가드도 위 @test를 통과한다.
+  fx="$(_drill_fixture '')"
+  run bash "$fx/scripts/dr-drill.sh"
+  [ "$status" -ne 0 ]                       # 픽스처엔 sealing-key 게이트가 없어 어차피 죽는다
+  ! printf '%s' "$output" | grep -qF -- 'DR ABORT: 국면 A'
+}
+
+@test "the phase-A gate precedes every side effect (source, yq derivation, destruction)" {
+  # ⚠️ 앵커를 `orb delete`에 걸지 않는다 — D-j(베어메탈 파괴 프리미티브)가 그 줄을 교체하는 순간
+  #    이 @test까지 같이 무너진다. 단계 마커 `==> [1]`은 그 교체를 넘어 살아남는다.
+  # ⚠️ `^[^#]*` — 이 파일과 dr-drill.sh 양쪽의 **주석이 같은 문자열을 담고 있어서**, 전체 줄
+  #    grep은 주석 줄번호를 집어 순서 단언을 거짓 red로 만든다(실측: 처음 작성했을 때 그랬다).
+  gate=$(grep -nE '^[^#]*DR ABORT: 국면 A' "$sh" | head -1 | cut -d: -f1)
+  src=$(grep -nE '^[^#]*sealing-key-dr-gate\.sh' "$sh" | head -1 | cut -d: -f1)
+  yqline=$(grep -nE '^[^#]*PG_IMAGE=' "$sh" | head -1 | cut -d: -f1)
+  destroy=$(grep -nE '^[^#]*==> \[1\]' "$sh" | head -1 | cut -d: -f1)
+  [ -n "$gate" ] && [ -n "$src" ] && [ -n "$yqline" ] && [ -n "$destroy" ]
+  [ "$gate" -lt "$src" ]
+  [ "$gate" -lt "$yqline" ]
+  [ "$gate" -lt "$destroy" ]
+}
+
 @test "dr-drill requires the out-of-band age key (R5 input that survives node loss)" {
   grep -q 'SOPS_AGE_KEY_FILE' "$sh"
   grep -q 'age key missing' "$sh"

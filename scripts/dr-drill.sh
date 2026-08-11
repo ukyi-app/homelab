@@ -13,6 +13,25 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
+# ── bulk 국면 A(D4 한시) 동안에는 드릴 자체를 거부한다 ─────────────────────────────────────
+# ⚠️ 이 드릴의 안전 설계 전체가 **"파괴 대상 밖에 bulk가 있다"**는 전제 위에 서 있다(:141-143의
+#    주석이 "외장 SSD는 VM 파괴에도 살아남는다"고 명시한다). 국면 A는 정확히 그 전제를 깬다 —
+#    bulk가 부트 디스크 위의 bind 마운트라 노드 파괴가 **files-data를 실제로 지운다.**
+#    복구 증명([0.5])은 CNPG/R2만 덮으므로 이 손실을 잡지 못한다.
+# ⚠️ 다른 어떤 검사보다 먼저 둔다(yq 파생·클러스터 변이·백업 생성 전부보다 앞). 그래야 거부가
+#    부작용 0으로 끝난다. `. sealing-key-dr-gate.sh` 소스보다도 앞이다.
+_bulk_window="$(sed -n 's/^export BULK_MIGRATION_WINDOW_UNTIL="\(.*\)"$/\1/p' \
+  "$REPO_ROOT/infra/k3s-bootstrap/versions.env" 2>/dev/null || true)"
+if [ -n "$_bulk_window" ]; then
+  echo "DR ABORT: 국면 A(D4 한시) 진행 중 — bulk가 파괴 대상과 같은 디스크에 있다(만료 ${_bulk_window})." >&2
+  echo "          이 드릴은 노드를 파괴하고, 그 파괴가 bulk의 사용자 데이터(files-data)를 함께 지운다." >&2
+  echo "          [0.5]의 복구 증명은 CNPG/R2만 덮으므로 이 손실을 막지 못한다." >&2
+  echo "          국면 B(2TB M.2를 /mnt/bulk에 마운트) 후 versions.env의" >&2
+  echo "          BULK_MIGRATION_WINDOW_UNTIL을 비우면 다시 열린다." >&2
+  exit 1
+fi
+
 # shellcheck disable=SC1091
 . "$REPO_ROOT/scripts/sealing-key-dr-gate.sh"
 SEALED_KEY_BACKUP_DIR="${SEALED_KEY_BACKUP_DIR:-}"  # 소비자 ≥1 또는 committed cert 존재 시 필요(git 밖 백업)

@@ -232,14 +232,18 @@ _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RU
   printf '%s' "$(cat "$REC_LOG")" | grep -qF -- "install -d -m 0700 -o root -g root ${FX}${INTERNAL_STORAGE_PATH}"
 }
 
-@test "apply does NOT create the bulk dir (phase A path and expiry are undecided — D-g)" {
+@test "apply does NOT create or mount the bulk path (that belongs to the storage layer)" {
+  # bulk는 **마운트포인트**여야 하고(versions.env), 그 마운트를 만드는 것은 국면 A 진입 절차다.
+  # host-config가 여기서 디렉토리를 만들어 두면 apply-storage의 마운트포인트 검사가 통과할
+  # 껍데기를 미리 깔아 주는 셈이라, 정확히 그 게이트를 무력화한다.
   _sandbox
   _apply
   [ "$status" -eq 0 ]
   # 양성 대조: 같은 로그에서 internal은 잡힌다 — 즉 '대상 0'이 아니라 '매치 0'이다.
   run grep -F -- "$INTERNAL_STORAGE_PATH" "$REC_LOG"
   [ "$status" -eq 0 ]
-  run grep -F -- "$BULK_VM_DISK_FALLBACK" "$REC_LOG"
+  [ -n "$BULK_STORAGE_PATH" ]
+  run grep -F -- "$BULK_STORAGE_PATH" "$REC_LOG"
   [ "$status" -ne 0 ]
 }
 
