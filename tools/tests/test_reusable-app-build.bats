@@ -6,9 +6,42 @@
 # ⚠️ 중간 부정 단언은 run+[ ]만(bash3.2 침묵 통과 함정). yq는 CI/로컬 버전차 방어적 추출.
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; F="$ROOT/.github/workflows/reusable-app-build.yaml"; }
 
-@test "reusable-app-build: workflow_call build stage present (arm64 GHCR push)" {
+@test "reusable-app-build: workflow_call build stage present (multi-arch GHCR push)" {
   grep -q 'workflow_call' "$F"
-  grep -q 'linux/arm64' "$F"
+  command -v yq >/dev/null || skip "yq required"
+  # NUC(amd64) 이전 — 한쪽만 남으면 그 노드에서 앱이 못 돈다. 이전엔 arm64만 단언했다.
+  # ⚠️ 파일 전체 grep을 쓰지 않는다 — 측정 근거를 적은 **주석**에 같은 문자열이 있어
+  #   platforms 값을 지워도 통과한다(자체 뮤테이션으로 실측). .with.platforms 값만 본다.
+  # ⚠️ `[[ ]]`를 쓰지 않는다 — bats는 [[ 실패를 errexit 면제로 **침묵 통과**시켜(이 파일 헤더 :6,
+  #   scripts/check-bats-style.sh:3) 마지막 문장이 아닌 단언이 무력화된다. 자체 뮤테이션에서
+  #   amd64를 지웠는데 초록이 나와 실측 확인했다. 평범한 명령(grep)이라야 errexit이 잡는다.
+  run yq '.jobs.build.steps[] | select(.uses | test("build-push-action")) | .with.platforms' "$F"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -q "linux/amd64"
+  printf '%s' "$output" | grep -q "linux/arm64"
+}
+
+@test "reusable-app-build: setup-qemu present and before setup-buildx" {
+  command -v yq >/dev/null || skip "yq required"
+  # buildx 빌더는 **생성 시점**에 등록된 binfmt 핸들러만 본다. 뒤집히면 amd64 leg가
+  # 'exec format error'로 죽고 그 실패는 빌드 로그 깊숙이에서만 보인다.
+  # ⚠️ grep -n 줄번호 비교는 쓰지 않는다 — 이 함정을 설명하는 주석이 먼저 잡혀 공허해진다
+  #   (build.yaml 게이트에서 자체 뮤테이션으로 실측). steps[].uses 인덱스로 구조 비교한다.
+  q="$(yq '[.jobs.build.steps[].uses // ""] | to_entries | map(select(.value|test("setup-qemu"))) | .[0].key // "null"' "$F")"
+  b="$(yq '[.jobs.build.steps[].uses // ""] | to_entries | map(select(.value|test("setup-buildx"))) | .[0].key // "null"' "$F")"
+  [ "$q" != "null" ]
+  [ "$b" != "null" ]
+  [ "$q" -lt "$b" ]
+}
+
+@test "reusable-app-build: provenance false — index digest must be deterministic" {
+  command -v yq >/dev/null || skip "yq required"
+  # attestation이 켜지면 인덱스에 unknown/unknown 자식이 붙고 그 매니페스트가 run마다 달라져
+  # 인덱스 digest가 비결정적이 된다(실측: provenance=false 2회 468db06f… 동일 / 기본값 2회 상이).
+  # 그러면 tools/poll-ghcr.ts computeBump의 멱등 no-op이 영영 안 걸려 Docker 컨텍스트 밖 커밋마다
+  # PR·머지·롤아웃이 헛돈다. 이 파일은 cross-repo 공개 계약이라 되돌리면 3개 앱 레포에 동시 파급된다.
+  run yq '.jobs.build.steps[] | select(.uses | test("build-push-action")) | .with.provenance' "$F"
+  [ "$output" = "false" ]
 }
 
 @test "reusable-app-build: v1 dispatch path stays retired (no repository_dispatch / dispatch-pat / environment)" {
