@@ -107,7 +107,7 @@ assert_recoverable_before_destroy "$REPO_ROOT" "$SEALED_KEY_BACKUP_DIR" "origin/
 echo "==> [1] VM 파괴(cattle) — 전체 노드 유실 시뮬레이션"
 orb delete -f k3s || true
 
-echo "==> [2] 커밋된 cloud-init/install에서 VM + k3s + StorageClass 재구축(M1)"
+echo "==> [2] 커밋된 host-config/install에서 노드 + k3s + StorageClass 재구축(M1)"
 bash infra/k3s-bootstrap/host-up.sh
 use_live_kubeconfig # host-up.sh가 kubeconfig를 재생성한다
 

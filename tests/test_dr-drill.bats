@@ -27,10 +27,14 @@ sh=scripts/dr-drill.sh
   grep -q 'COMPLETE되지 않음' "$sh"
 }
 
-@test "dr-drill destroys the VM (cattle) and rebuilds from committed cloud-init" {
+@test "dr-drill destroys the node (cattle) and rebuilds from committed host-config + install" {
   grep -q 'orb delete -f k3s' "$sh"
   grep -q 'infra/k3s-bootstrap/host-up.sh' "$sh"
   grep -q 'make bootstrap' "$sh"
+  # ⚠️ 이름이 주장하는 "커밋된 것에서 재구축"을 실제로 앵커한다. 예전 이름은 `cloud-init`을
+  #    말했지만 본문은 그 문자열을 한 번도 보지 않았다 — 그래서 `cloud-init.yaml`을 지워도 이
+  #    @test는 초록으로 남았다(복사본 트리에서 실증: red는 test_03의 7건뿐이었다).
+  grep -q 'host-config/install' "$sh"
 }
 
 @test "dr-drill recovers the DB from R2 on the rebuilt node and checks the canary" {

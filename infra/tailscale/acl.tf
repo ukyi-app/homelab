@@ -41,6 +41,14 @@ resource "tailscale_acl" "homelab" {
 # nameserver = 맥미니 tailscale IP: 맥미니 :53(OrbStack가 모든 인터페이스에 바인딩) →
 # dns-forward-trigger/servicelb DNAT → AdGuard. 전용 tailscale LB 디바이스(Service 재생성
 # 시 IP 변동)보다 맥미니 IP가 안정적이라 사용자 선택.
+# ⚠️ **컷오버 의존**: 이 값은 gitignored `terraform.tfvars`에 있어 diff에 보이지 않는다. 지금은
+#    맥미니를 가리키고, 그 :53은 OrbStack 포워딩이 만들어 준 것이다 — Mac을 끄면 tailscale을 켠
+#    **모든 기기**의 이름해석이 죽는데 `terraform apply`는 성공한다(가드 0건). NUC으로 옮길 때
+#    이 값을 함께 바꿔야 한다.
+# ⚠️ 그리고 **k3s 노드 자신은 이 전역 nameserver를 받으면 안 된다.** `~.` 라우팅 도메인이 노드의
+#    모든 질의를 MagicDNS로 끌어가 이름해석이 클러스터를 경유하게 되고, 그게 §2.4 콜드스타트
+#    교착이다. 노드에서는 `tailscale set --accept-dns=false`로 끊는다
+#    (`infra/k3s-bootstrap/host-config.sh --apply`가 걸고, `host-preflight.sh` [3]이 검사한다).
 resource "tailscale_dns_nameservers" "global" {
   nameservers = [var.dns_nameserver_tailscale_ip]
 }

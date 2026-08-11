@@ -5,12 +5,18 @@ SHELL := /usr/bin/env bash
 KUBECONFIG_LIVE := $(PWD)/infra/k3s-bootstrap/kubeconfig
 SOPS_AGE_KEY_FILE ?= $(HOME)/.config/sops/age/keys.txt
 
-.PHONY: help bootstrap up down verify host-up
+.PHONY: help bootstrap up down verify host-up host-config
 
 help: ## 사용 가능한 타겟 목록 출력
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  %-22s %s\n", $$1, $$2}' \
 	  | sort
+
+host-config: ## [runtime] 호스트 설정 드리프트 검사(sudo 불요). **적용은 여기가 아니다** — 아래 주석 참조
+# ⚠️ `--apply`를 make에 걸지 않는다: owner의 sudo가 패스워드를 요구해(실측) 비대화형으로 못 돌고,
+#    make 뒤에 숨기면 "무엇이 바뀌는지 모른 채 도는" 경로가 된다. 적용은 노드에서 손으로:
+#        infra/k3s-bootstrap/host-config.sh --apply
+	@infra/k3s-bootstrap/host-config.sh --check
 
 up: ## [runtime] 호스트 전제 확인 + k3s + 스토리지 기동 (멱등, = host-up)
 	@infra/k3s-bootstrap/host-up.sh

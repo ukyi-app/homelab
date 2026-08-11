@@ -60,3 +60,6 @@
 | 고아 PVC는 Bound다 — `phase == Released` 감사는 cascade=orphan 잔재를 원리적으로 못 잡는다 | local | `scripts/audit-orphan-pv.sh` |
 | bats 중간 `[[ ]]`는 침묵 통과 — 거짓인데 ok (grep -qF 변환 시 `--` 종결자 필수) | gate | `scripts/check-bats-style.sh` |
 | 셸 문자열의 `$VAR한글` — bash 3.2만 죽고 CI(5.2)는 초록이라 게이트가 원리적으로 못 잡는다 | gate | `tests/gates/test_shell-bash32-traps.bats` |
+| sshd_config.d는 먼저 읽힌 값이 이긴다(systemd와 반대) — 600 드롭인 때문에 실효값은 sudo 없이 못 읽는다 | gate | `infra/k3s-bootstrap/tests/test_03-host-config.bats` |
+| Ubuntu 26.04에 /etc/timezone 부재 — 그 파일을 읽는 검사는 정상 호스트에서도 죽고 처방이 고치지 못한다 | gate | `infra/k3s-bootstrap/tests/test_02-host-preflight.bats` |
+| tailscale `~.` 라우팅 도메인 → 노드 이름해석이 MagicDNS 경유 클러스터 의존(routable이라 loopback 검사는 통과) | gate | `infra/k3s-bootstrap/tests/test_02-host-preflight.bats` |

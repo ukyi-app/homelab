@@ -118,6 +118,9 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 고아 PVC는 Bound다 — `phase == Released`만 보는 감사는 원리적으로 못 잡는다
 - GHA job-level skip은 run conclusion에 안 보인다 — 스텝 전부 skip이어도 job은 success
 - 이미지 핀의 *존재* ≠ *일치* ≠ *소유자* — 하드코딩 소비처 목록은 자기 자신에게만 정확하다
+- sshd_config.d는 먼저 읽힌 값이 이긴다 — systemd 드롭인과 정반대다
+- Ubuntu 26.04에 /etc/timezone이 없다 — 그 파일을 읽는 게이트는 출구가 없다
+- tailscale의 ~. 라우팅 도메인 — 노드 이름해석이 조용히 클러스터 의존이 된다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 
