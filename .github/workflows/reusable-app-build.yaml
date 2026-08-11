@@ -49,7 +49,9 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm # native arm64 — QEMU 불필요 (homelab build.yaml과 동일)
+    # 네이티브 arm64 runner 유지 — arm64 leg는 에뮬레이션 없이 돈다. amd64 leg만 QEMU를 탄다
+    # (homelab build.yaml과 동일 계약). files는 Dockerfile 크로스컴파일로 그 QEMU마저 우회한다.
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - id: meta
@@ -60,6 +62,11 @@ jobs:
             ''|*[!a-z0-9-]*) echo "::error::app 이름 불량: '$APP'"; exit 1 ;;
           esac
           echo "tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      # ⚠️ setup-buildx **앞**에 와야 한다 — buildx 빌더는 생성 시점에 등록된 binfmt 핸들러만 본다.
+      #   순서가 뒤집히면 amd64 leg가 "exec format error"로 죽는다(build.yaml과 동일 계약).
+      #   ukyi-app/files는 Dockerfile이 `FROM --platform=$BUILDPLATFORM` + rust-lld 크로스컴파일이라
+      #   Rust 빌드 자체는 에뮬레이션을 타지 않는다 — QEMU는 bun 계열 앱의 amd64 leg에만 쓰인다.
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
       # GHCR 로그인은 push 경로 전용이다. build-only에선 (a) 밀 게 없고, (b) 베이스 이미지가 전부 공개라
       # (oven/bun·gcr.io distroless·ghcr.io SWS) 익명 pull로 충분하며, (c) 그 토큰엔 packages 스코프도 없다.
@@ -76,25 +83,33 @@ jobs:
       # tags: push=false에선 아무 데도 안 밀리는 로컬 메타데이터일 뿐이라 그대로 둔다(스펙 분기 최소화).
       # cache: gha 캐시는 두 모드 공용 — PR run이 쓰는 캐시는 그 PR ref 스코프에 격리돼 main 스코프를 오염시킬 수
       #        없고(GHA 캐시 스코프 규칙), 반대로 main 캐시는 PR이 읽는다 → PR 게이트가 웜 캐시로 돈다.
-      # ⚠️ buildx 기본 attestation(provenance/SBOM)을 끄지 않는다 → 태그에 push되는 것은 OCI **인덱스**
-      #    (arm64 이미지 매니페스트 + attestation 매니페스트)이고, attestation은 빌드 타임스탬프 등으로
-      #    **비결정적**이라 **콘텐츠가 동일한 재빌드에도 인덱스 digest가 새로 생긴다**. 낙진 둘:
-      #    ① **무의미한 배포 회전(미해결)** — bump-poll 플래너의 멱등 no-op(tools/poll-ghcr.ts의
-      #       `candidate.digest === s.digest`)은 **인덱스** digest를 비교한다. arm64 자식이 바이트 동일해도
-      #       인덱스가 갈리면 no-op에 안 걸려 PR·머지·롤아웃이 한 바퀴 돈다(빌드 산출물 무변경 = 헛회전).
-      #    ② **ImageDigestDrift 오탐(해소됨)** — containerd는 동일 콘텐츠를 재사용하며 `image_id`로 **구**
-      #       인덱스 digest를 계속 보고한다. 그래서 r6 룰은 `image_id`가 아니라 `image_spec`과 비교한다
+      # ⚠️ `provenance: false` — 위 문단이 예전엔 "미적용"이었다. 근거였던 "단일 플랫폼이라 결정적"이
+      #    **틀렸음이 아니라 범위가 좁았음**이 실측으로 드러나 2026-08(NUC 이전)에 적용했다.
+      #    측정: 동일 콘텐츠 2회 빌드, `--provenance=false --platform linux/amd64,linux/arm64`
+      #      → 인덱스 digest 2회 **동일** (sha256:468db06f…, 자식 [amd64, arm64])
+      #    attestation을 켠 채 같은 2회
+      #      → sha256:eb86bc32… / sha256:d1533096… **상이**, 자식 4개(+ unknown/unknown ×2)
+      #    blob diff로 기전 확인: 실제 플랫폼 자식 2개는 run 간 바이트 동일했고 attestation 매니페스트만
+      #    갈렸다. 즉 **인덱스는 attestation 자식이 없을 때 결정적**이며, 플랫폼 수와는 무관하다.
+      #    ⇒ 낙진 ①(무의미한 배포 회전)이 해소된다: tools/poll-ghcr.ts computeBump의
+      #       `candidate.digest === s.digest` 멱등 no-op이 다시 걸린다. 그전엔 Docker 컨텍스트 밖 커밋
+      #       (README·CI 설정·문서)마다 인덱스 digest가 새로 생겨 PR·머지·롤아웃이 헛돌았다.
+      #    ⇒ 낙진 ②(ImageDigestDrift)의 `image_id` vs `image_spec` 분리는 **그대로 둔다** — 비교 항이
+      #       양쪽 모두 top-level이라 bare-manifest→2자식-인덱스 전환에 같이 움직인다
       #       (근거 전문: platform/victoria-stack/prod/rules/r6-ci-staleness.yaml:35-44).
-      #    ⇒ ①을 없애려면 in-repo 빌드 선례처럼 `provenance: false`(.github/workflows/build.yaml:86)를 켠다 —
-      #      단일 플랫폼이라 인덱스 없이 이미지 매니페스트가 직접 push돼 digest가 콘텐츠에 결정적이 된다.
-      #      **미적용 이유**: 이 파일은 외부 앱 레포가 `@main`으로 부르는 cross-repo 공개 계약이라 아티팩트
-      #      형태 변경은 별도 결정이다. 켠다면 r6 룰·digest-exporter(skopeo inspect 대상 digest)를 함께 실측하라.
+      #    ⚠️ 이 파일은 외부 앱 레포가 `@main`으로 부르는 cross-repo 공개 계약이다. 아티팩트 형태가
+      #       bare arm64 manifest → 2-플랫폼 인덱스로 바뀌므로, 앱 Dockerfile이 arch-parametrized된
+      #       **뒤에** 이 플립이 와야 한다(ukyi-app/{files,trip-mate-api} 선행 머지 완료).
       - name: build (+ push to GHCR when inputs.push)
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
         with:
           context: .
-          platforms: linux/arm64
+          # 멀티아치(NUC 이전, amd64 노드). 앱 Dockerfile은 TARGETARCH에서 triple을 파생하며
+          # ARG에 기본값이 없어야 한다 — 기본값은 BuildKit predefined platform arg를 이겨서
+          # OCI config만 amd64인 이미지를 조용히 만든다(ukyi-app/files, trip-mate-api에서 선행 수정).
+          platforms: linux/amd64,linux/arm64
           push: ${{ inputs.push }}
+          provenance: false
           tags: ghcr.io/${{ github.repository_owner }}/${{ inputs.app }}:${{ steps.meta.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
