@@ -88,7 +88,10 @@ fi
 # ⚠️ OrbStack 시절엔 `orb -m <machine> -u root`로 VM 안에 들어갔다. 베어메탈에서는 **여기가 곧
 #    노드**이므로 그 간접이 사라진다. 대신 권한 상승이 필요하고, `ukyi`의 sudo는 패스워드를
 #    요구하므로(실측) 이 스크립트는 **대화형으로** 실행된다 — 비대화형 자동화 경로가 아니다.
-echo "==> k3s ${K3S_VERSION} 설치 (node=$(hostname), node-ip=${K3S_NODE_IP}, SAN ${san_n}건)…"
+# ⚠️ 여기서 리눅스 hostname을 찍지 않는다. 이 노드는 hostname이 `homelab`이고 k8s 노드명은
+#    `k3s`다(D-h) — 설치 로그가 `node=homelab`이라 말하면 D-h가 피하려던 바로 그 혼동을
+#    우리 손으로 다시 만드는 셈이다. 둘 다 찍되 무엇이 무엇인지 이름을 붙인다.
+echo "==> k3s ${K3S_VERSION} 설치 (k8s node-name=${K3S_NODE_NAME}, node-ip=${K3S_NODE_IP}, SAN ${san_n}건; linux hostname=$(hostname))…"
 curl -sfL "$K3S_INSTALLER_URL" | $K3S_RUN env \
   INSTALL_K3S_VERSION="$K3S_VERSION" \
   INSTALL_K3S_EXEC="$INSTALL_K3S_EXEC" \
