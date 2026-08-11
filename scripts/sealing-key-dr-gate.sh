@@ -104,6 +104,14 @@ prove_backup_restorable() {
   echo "    실복원 증명 OK: committed cert 일치 + tls.key/tls.crt modulus 일치(유효 키쌍)"
 }
 
+# 리허설 임시 ns 정리. ⚠️ `trap ... RETURN`을 쓰지 않는다 — RETURN은 **bash 전용**이고 이 파일은
+#   스스로 sourceable lib이라 선언한다(:2). zsh에서 source하면 `trap:12: undefined signal: RETURN`으로
+#   트랩 등록 자체가 실패해 임시 ns가 조용히 남는다(실측: zsh 잔류 / bash 정리). 이 호스트 기본 셸이
+#   zsh이므로 사람이 프롬프트에서 함수를 직접 부르는 경로가 정확히 그 조건이다. 명시 호출로 정리한다.
+_rehearsal_cleanup() {
+  kubectl delete namespace "sealed-dr-rehearsal" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+}
+
 # 비파괴 라이브 리허설(파괴 전, 라이브 클러스터 생존 시): 백업 List 적용성 + committed cert canary unseal.
 rehearse_restore_on_live() {
   local repo="$1" backup_dir="$2"
@@ -117,17 +125,18 @@ rehearse_restore_on_live() {
   local ns="sealed-dr-rehearsal" rnd name want
   rnd="$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"; name="dr-canary-$rnd"; want="v-$rnd"
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
-  trap 'kubectl delete namespace "sealed-dr-rehearsal" --ignore-not-found --wait=false >/dev/null 2>&1' RETURN
+  # 이 아래 모든 이탈 경로는 _rehearsal_cleanup을 명시 호출한다(위 주석 참조 — trap RETURN 금지).
   kubectl -n "$ns" create secret generic "$name" --from-literal=v="$want" --dry-run=client -o yaml \
     | kubeseal --cert "$repo/$CERT_REL" --format yaml 2>/dev/null | kubectl apply -f - >/dev/null 2>&1 \
-    || { echo "    리허설: committed cert로 canary 봉인/적용 실패"; return 1; }
+    || { echo "    리허설: committed cert로 canary 봉인/적용 실패"; _rehearsal_cleanup; return 1; }
   local got=""
   for _ in $(seq 1 24); do
     got="$(kubectl -n "$ns" get secret "$name" -o jsonpath='{.data.v}' 2>/dev/null | base64 -d 2>/dev/null || true)"
     [ "$got" = "$want" ] && break
     sleep 5
   done
-  [ "$got" = "$want" ] || { echo "    리허설: 라이브 컨트롤러가 이번 run canary 값을 unseal 못 함(stale/단절)"; return 1; }
+  [ "$got" = "$want" ] || { echo "    리허설: 라이브 컨트롤러가 이번 run canary 값을 unseal 못 함(stale/단절)"; _rehearsal_cleanup; return 1; }
+  _rehearsal_cleanup
   echo "    리허설 OK: 백업(sanitized) apply 가능 + run-unique canary가 라이브에서 값 일치 unseal"
 }
 

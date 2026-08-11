@@ -225,3 +225,22 @@ EOF
   PATH="$STUB:$PATH" SEALED_DR_ALLOW_OFFLINE=1 run verify_all_sealedsecrets_unsealed "$REPO" "HEAD"
   [ "$status" -ne 0 ]
 }
+
+@test "sealing-key-dr-gate is source-safe: no bash-only 'trap ... RETURN'" {
+  # 이 파일은 스스로 sourceable lib이라 선언한다(sealing-key-dr-gate.sh:2). RETURN 트랩은 bash
+  # 전용이라 zsh에서 source하면 `trap: undefined signal: RETURN`으로 등록 자체가 실패하고,
+  # rehearse_restore_on_live가 만든 임시 ns(sealed-dr-rehearsal)가 클러스터에 조용히 남는다.
+  # 실측 대조: zsh source → 잔류 / bash source → 정리. 이 호스트 기본 셸이 zsh이므로 사람이
+  # 프롬프트에서 함수를 직접 부르는 경로가 정확히 그 조건이다. 정리는 명시 호출로만 한다.
+  # 주석에서 이 함정을 설명하는 문장은 걸리면 안 되므로, 줄 머리의 실제 trap 문만 본다.
+  run grep -nE '^[[:space:]]*trap[[:space:]].*RETURN' "$ROOT/scripts/sealing-key-dr-gate.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "rehearse_restore_on_live cleans up on every exit path after ns creation" {
+  # ns 생성 이후 이탈 경로는 실패 2 + 성공 1 = 3개다. 하나라도 빠지면 잔류한다.
+  run bash -c "grep -c '_rehearsal_cleanup' '$ROOT/scripts/sealing-key-dr-gate.sh'"
+  [ "$status" -eq 0 ]
+  # 정의 1 + 호출 3 = 4 이상
+  [ "$output" -ge 4 ]
+}
