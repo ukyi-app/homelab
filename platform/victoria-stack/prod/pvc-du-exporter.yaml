@@ -70,7 +70,7 @@ spec:
           containers:
             - name: du
               # digest 핀: pgdump-hedge-cronjob.yaml과 동일 값(의도적 커밋으로만 갱신, bump 체인 비대상).
-              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:e73682bbb1905f0e7a9800e11cd6f7658842b0c909bc53d7605e3292c0c50eef
+              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:327a5fb867a84c5090d454384bf9c2e2d4eb286a38e543b80812261350227562
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
