@@ -40,6 +40,13 @@
   검사(가드 없는 인덱스 드리프트 소멸). **`make verify`**·gate(`tests/gates/test_check-doc-index.bats`)가 호출. 순수 문자열 검사.
 - **`check-app-netpol.sh`** — `apps/<app>/deploy/**`의 app-owned NetworkPolicy가 app-scoped 셀렉터
   (`app.kubernetes.io/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). **`make verify`**가 호출. netpol 0건은 통과지만 **매니페스트 열거 0건은 scan-floor로 실패**(vacuous pass 아님).
+- **`check-argocd-revision.sh`** — ArgoCD **자기레포** 리비전 핀 정합. `repoURL`을 가진 맵 노드를 **재귀로**
+  뽑아(Application 단일/다중 소스 · ApplicationSet template 소스 · git generator `revision` — 모양을 세지 않는다)
+  자기레포 참조 전건이 **같은 값**인지 강제한다(A). `EXPECT_REVISION`(또는 `--expect`)이 주어지면 그 값과의
+  일치까지 본다(B) — ci.yaml이 **main으로 들어갈 때만** 채운다. (B)를 기본으로 켜면 마이그레이션 브랜치의
+  gate가 영구 red가 되고 `test_scan-floor.bats`(무인자 rc=0 요구)까지 같이 죽는다. 자기레포 판정은 앵커
+  (`platform/argocd/root/root-app.yaml`의 repoURL) **정규화 후 비교** — 리터럴 대조는 `.git` 접미사 하나로 눈이 먼다.
+  **`make ci`**·gate(`tests/gates/test_argocd-revision.bats`)가 호출.
 - **`check-bats-style.sh`** — bats 단언-스타일 가드: `@test` 본문의 중간(마지막 아님) 부정(`! `)·조건(`[[ `)
   단언을 잡는다(bats가 침묵 통과시키는 false-green 가드 차단; NEG=hard-zero·BB=ratchet). `tests/gates/test_bats-style.bats`가 호출.
   기본 모드에서 스캔 대상이 0건이면 통과가 아니라 **열거 붕괴**(scan-floor, exit 1) — 같은 도메인을 쓰는

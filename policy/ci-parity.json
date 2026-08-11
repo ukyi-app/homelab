@@ -96,6 +96,11 @@
       ]
     },
     {
+      "name": "ArgoCD 자기레포 리비전 핀 정합 (main 진입 시 main 고정)",
+      "status": "mirrored",
+      "local": "scripts/check-argocd-revision.sh"
+    },
+    {
       "name": "make ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)",
       "status": "mirrored",
       "local": "check-ci-parity.ts"
