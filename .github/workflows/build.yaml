@@ -62,9 +62,16 @@ jobs:
           # → 전체 빌드. 첫 라이브에서 둘 다 build=false로 빠져 이미지 0개가 됐던 버그.
           if [ "$EVENT" = "workflow_dispatch" ] || [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
-          # ops/ 소스(Dockerfile 등) 변경만 "changed"로 간주 (ops 이미지엔 deploy/ 없음 — 자기-루프 무관)
+          # ops/ 소스(Dockerfile 등) **또는 이 워크플로 자신**의 변경을 "changed"로 간주한다.
+          # ⚠️ 이 워크플로가 빠져 있었다. on.push.paths는 build.yaml 변경을 트리거로 삼는데
+          #   감지는 ops/만 봐서, 워크플로만 바뀐 push는 **트리거되고 빌드는 skip**된 채 잡이
+          #   success로 끝났다. 2026-08 멀티아치 전환(#430)에서 실측: 머지 후 run은 초록인데
+          #   `build & push`가 skipped라 GHCR 이미지는 그대로 단일 아키텍처 bare manifest였다.
+          #   워크플로는 빌드 스펙(platforms·provenance·setup-qemu)을 정의하므로 그 변경은
+          #   이미지 내용 변경이다 — 트리거와 감지가 같은 집합을 봐야 침묵이 없다.
+          #   (ops 이미지엔 deploy/가 없어 자기-루프 무관)
           elif git diff --name-only "$BEFORE" "$SHA" \
-               | grep -qE "^ops/${APP}/"; then
+               | grep -qE "^ops/${APP}/|^\.github/workflows/build\.yaml$"; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
             echo "build=false" >> "$GITHUB_OUTPUT"
