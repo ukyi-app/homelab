@@ -117,8 +117,12 @@
 
 ### OrbStack LISTEN 포트만 포워딩
 - OrbStack은 VM에서 **LISTEN 중인 포트만** Mac으로 포워딩한다(바인드는 Mac 전 인터페이스).
-  servicelb/hostPort는 iptables DNAT뿐이라 트리거가 안 된다 — `dns-forward-trigger.service`
-  (cloud-init) 참고. VM IP(192.168.139.x)는 Mac에서 직접 라우팅되지 않는다.
+  servicelb/hostPort는 iptables DNAT뿐이라 트리거가 안 된다 — 그래서 `:53`을 점유하기만 하는
+  더미 유닛(`dns-forward-trigger.service`)이 있었다. VM IP(192.168.139.x)는 Mac에서 직접
+  라우팅되지 않는다.
+- ⚠️ **베어메탈에서는 이 함정도, 그 우회도 없다.** 노드가 곧 호스트라 svclb hostPort가 노드
+  실주소에 직접 걸린다. 그 유닛은 `infra/k3s-bootstrap/cloud-init.yaml`에 살았고 NUC 이식
+  브랜치에서 삭제됐다(후계는 `host-config/` 트리 — 담지 않는다). `main`(라이브 Mac)에는 남아 있다.
 
 ### AdGuard ConfigMap 첫 부팅 시드 전용
 - AdGuard ConfigMap은 첫 부팅 시드 전용(initContainer `cp -n`) — 갱신 시 PVC 안의
@@ -753,3 +757,64 @@ PVC 숫자를 읽으면 틀린 답을 얻는다 ② 쿼터를 강제하는 provi
 
 > 가드: `scripts/audit-orphan-pv.sh`
 
+
+### sshd_config.d는 먼저 읽힌 값이 이긴다 — systemd 드롭인과 정반대다
+
+systemd 드롭인(`*.conf.d/`)은 **마지막** 선언이 이긴다. `sshd_config.d`는 **반대**다 —
+`man sshd_config`: *"for each keyword, the first obtained value will be used"* 이고
+`Include /etc/ssh/sshd_config.d/*.conf`는 본 파일 **앞에** 놓인다. 즉 글롭 사전순으로 먼저 읽힌
+파일이 이긴다. 하드닝 드롭인을 `60-`으로 지으면 `50-cloud-init.conf`에 **조용히 진다**.
+
+⚠️ NUC 실측(2026-08-11): `/etc/ssh/sshd_config.d/`는 `755`라 열람되지만 그 안의
+`50-cloud-init.conf`는 **`600 root:root`**다. 그래서 sudo 없이는 **실효 설정을 얻는 모든 경로가
+EACCES로 죽는다** — `sshd -T`, `sshd -G`, 심지어 단순 `cat`까지. 디렉토리가 열린다고 내용을
+비교할 수 있다고 착각하기 쉽다.
+
+✅ 그러므로 sudo-free 드리프트 검사는 **이름만으로** 불변식을 건다: "우리 드롭인보다 사전순 앞선
+`.conf`가 없다". 내용 열람이 필요 없다는 것이 이 설계의 요점이다.
+
+> 가드: `infra/k3s-bootstrap/tests/test_03-host-config.bats`
+
+### Ubuntu 26.04에 /etc/timezone이 없다 — 그 파일을 읽는 게이트는 출구가 없다
+
+Debian 고유 파일인 `/etc/timezone`은 Ubuntu 26.04에 **존재하지 않는다**. 어떤 패키지도 소유하지
+않는다(실측: `dpkg-query -S /etc/timezone` → `no path found`, `tzdata 2026c` 설치돼 있음에도).
+타임존의 진실원은 `/etc/localtime` 심링크와 `timedatectl`뿐이다.
+
+⚠️ 그 파일을 읽는 검사는 **정상 설정된 호스트에서도** "타임존을 읽지 못했다"로 죽는다. 그리고 그
+진단이 제안하는 `timedatectl set-timezone`은 systemd-timedated가 `/etc/localtime`만 갱신하므로
+**그 실패를 고치지 못한다** — fail-loud이지만 출구가 없는 게이트다. `host-preflight.sh`가 정확히 그
+상태였고, `[1]`이 먼저 죽어서 `[2]`·`[3]`의 진짜 위험(콜드스타트 교착 경로가 열려 있음)이
+**보고되지도 않았다**.
+
+⚠️ 반대로 그 파일을 host-config 관리 대상으로 **만들면** 두 진실원이 갈린다 —
+`timedatectl set-timezone`은 그 파일을 갱신하지 않으므로 드리프트 검사가 stale한 값을 보고 "일치"라
+답한다.
+
+> 가드: `infra/k3s-bootstrap/tests/test_02-host-preflight.bats`
+
+### tailscale의 ~. 라우팅 도메인 — 노드 이름해석이 조용히 클러스터 의존이 된다
+
+`DNSStubListener=no`로 스텁을 끄고 `/etc/resolv.conf`를 실업스트림 목록으로 돌려도, tailscale이
+`~.`(모든 도메인) 라우팅 도메인을 선언하면 **1순위 nameserver가 `100.100.100.100`(MagicDNS)** 이
+된다. 그 뒤의 실제 리졸버는 tailnet coordination server가 정하고, 이 tailnet에서 그 값은
+`infra/tailscale/acl.tf`의 `tailscale_dns_nameservers` = **맥미니**, 즉 라이브 클러스터의 AdGuard다.
+
+즉 노드의 이름해석이 **클러스터를 경유한다** — Mac을 끄는 순간 노드가 `github.com`조차 못 풀고,
+이미지 pull이 불가능해진다. 콜드스타트 교착의 두 번째 얼굴이며, `DNSStubListener=no` 하나로는
+닫히지 않는다.
+
+⚠️ `100.100.100.100`은 **LOCAL 주소가 아니다**(실측: `ip route get` → `dev tailscale0 table 52`,
+local 테이블에는 노드 자신의 `/32`만). 그래서 CNI hostPort DNAT(`--dst-type LOCAL`)는 **피한다** —
+그 교착과는 다른 경로다. "routable하니까 안전하다"는 판정이 정확히 여기서 틀린다.
+
+✅ 처방은 `tailscale set --accept-dns=false`(디바이스 로컬, tailnet 전역 설정 무변경). 검사는
+resolv.conf의 nameserver가 tailnet 대역(CGNAT `100.64.0.0/10` · tailscale ULA
+`fd7a:115c:a1e0::/48`)에 있으면 거부한다. tailscaled 자신의 동작에는 영향이 없다(자기 내부
+리졸버를 쓴다).
+
+⚠️ 남은 절반: tailnet 전역 nameserver가 컷오버 후에도 맥미니를 가리키면 **tailscale을 켠 모든
+기기**의 이름해석이 죽는다. 그 값은 gitignored `terraform.tfvars`에 있어 diff에 보이지 않고,
+`terraform apply`는 성공한다.
+
+> 가드: `infra/k3s-bootstrap/tests/test_02-host-preflight.bats`
