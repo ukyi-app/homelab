@@ -45,6 +45,9 @@ done
 case "${K3S_NODE_IP:-}" in
   "") fail "K3S_NODE_IP 미설정 — versions.env 확인. 핀이 없으면 노드 IP가 DHCP/인터페이스 변경을 따라 움직여 netpol 노드 서브넷 allow가 무효가 된다." ;;
 esac
+case "${K3S_NODE_NAME:-}" in
+  "") fail "K3S_NODE_NAME 미설정 — versions.env 확인. 핀이 없으면 노드명이 리눅스 hostname(homelab)이 되는데, 그 이름은 이미 tailnet 프록시 디바이스와 레포를 뜻한다. 게다가 사후 변경은 노드 재등록이라 hostPath PV의 nodeAffinity가 통째로 깨진다." ;;
+esac
 
 # --- 플래그 계약 (single source of truth) ---------------------------------------
 # servicelb는 유지한다(--disable에 없음). SQLite/kine이 기본 데이터스토어다
@@ -63,6 +66,7 @@ esac
 #    nodefs가 아니었다). 상세는 nuc-port-g2.md B1.
 INSTALL_K3S_EXEC="server \
 --node-ip=${K3S_NODE_IP} \
+--node-name=${K3S_NODE_NAME} \
 ${san_args}\
 --disable=traefik,local-storage,metrics-server \
 --disable-helm-controller \
