@@ -190,6 +190,24 @@ EOF
   printf '%s' "$output" | grep -qF -- '헤더가 아니다'
 }
 
+@test "rejects an EMPTY /proc/swaps — zero swap still emits the header (measured on the NUC)" {
+  # 실측 2026-08-11(D-f 적용 직후, 스왑 0건): 39바이트 / 1줄로 헤더가 **항상** 나온다.
+  # 그러므로 빈 파일은 '스왑 없음'이 아니라 픽스처/파서 문제다. 이전 판은 이걸 통과시켰다.
+  : > "$FX/proc/swaps"
+  run_pf
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '헤더가 아니다'
+}
+
+@test "accepts the exact zero-swap shape the kernel emits (byte-for-byte from the NUC)" {
+  # 양성 대조 — 위 두 음성이 '항상 거부'로 퇴화하는 것을 막는다.
+  printf 'Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n' > "$FX/proc/swaps"
+  [ "$(wc -c < "$FX/proc/swaps" | tr -d ' ')" -eq 39 ]
+  run_pf
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF -- 'swap 활성 0건/fstab 0건'
+}
+
 @test "rejects an unreadable /etc/fstab (cannot claim swap stays gone across reboot)" {
   rm -f "$FX/etc/fstab"
   run_pf
