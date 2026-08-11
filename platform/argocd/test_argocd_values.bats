@@ -99,13 +99,24 @@ V="platform/argocd/bootstrap-values.yaml"
   [ "$output" = "-1" ] || { echo "default-deny sync-wave != -1: $output"; false; }
   run yq '.extraObjects[] | select(.metadata.name=="argocd-notifications-default-deny-egress") | .spec.policyTypes[]' "$v"
   printf '%s' "$output" | grep -qF -- 'Egress' || { echo "default-deny egress 없음"; false; }
-  run yq '.extraObjects[] | select(.metadata.name=="argocd-notifications-allow-egress")' "$v"
-  # trap-safe: 누락을 플래그로 모아 최종 단언이 권위를 갖게(bats 중간 false 침묵통과 회피).
-  miss=0
-  for n in '0.0.0.0/0' '192.168.0.0/16' '192.168.139.0/24' '6443'; do
-    printf '%s' "$output" | grep -qF -- "$n" || { echo "miss in netpol: $n"; miss=1; }
-  done
-  [ "$miss" -eq 0 ] || { echo "allow-egress netpol missing required needles"; false; }
+  # ⚠️ 텍스트 needle 금지 — yq는 **주석을 보존**하고 이 블록의 주석이 '192.168.0.0/16'과 '6443'을
+  #    문자 그대로 담고 있다. 예전 `grep -qF` 루프는 그래서 죽은 단언이었다(뮤테이션 실증:
+  #    except에서 192.168.0.0/16을 지워 사설대역 lateral 차단을 무력화해도, port를 6443→16443으로
+  #    오타내도 **통과**했다). 값이 아니라 구조를 본다.
+  NODE_SUBNET='192.168.139.0/24' # 노드 InternalIP 서브넷 — NUC 이전 시 6개 매니페스트·6개 bats와 함께 이동
+  # (1) apiserver 레인 — CIDR과 TCP/6443이 **같은 egress 규칙 안에** 있어야 한다(별개 규칙이면 무의미).
+  yq -e '.extraObjects[] | select(.metadata.name=="argocd-notifications-allow-egress") | .spec.egress[]
+         | select(.to[].ipBlock.cidr == "'"$NODE_SUBNET"'")
+         | select(.ports[] | (.port == 6443 and .protocol == "TCP")) | .ports' "$v" >/dev/null \
+    || { echo "allow-egress: ipBlock=$NODE_SUBNET + TCP/6443 규칙 없음"; false; }
+  # (2) telegram 레인 — 0.0.0.0/0 + TCP/443, except는 사설 3대역 **정확히**(과부족 둘 다 잡는다).
+  ex="$(yq -e '.extraObjects[] | select(.metadata.name=="argocd-notifications-allow-egress") | .spec.egress[]
+               | select(.to[].ipBlock.cidr == "0.0.0.0/0")
+               | select(.ports[] | (.port == 443 and .protocol == "TCP"))
+               | .to[].ipBlock.except | sort | join(",")' "$v")" \
+    || { echo "allow-egress: 0.0.0.0/0 + TCP/443 규칙 없음"; false; }
+  printf '%s' "$ex" | grep -qxF '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16' \
+    || { echo "allow-egress except 집합 불일치: got=[$ex]"; false; }
 }
 
 @test "application-controller is scraped by pod-annotations (R6 argocd_app_info source)" {
