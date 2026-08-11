@@ -4,7 +4,12 @@
 # ghcr.io/<owner>/pg-tools:18-rclone으로 게시된다 (Task 6.15 matrix 참조).
 FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
 
-ARG TARGETARCH=arm64
+# ⚠️ 기본값을 주지 않는다. stage-level ARG 기본값은 BuildKit predefined platform arg를 **이긴다**
+#   (실측: `ARG TARGETARCH=arm64` + `--platform linux/amd64` → TARGETARCH=[arm64]).
+#   기본값이 있으면 amd64 빌드가 OCI config만 amd64이고 아래 kubectl·rclone은 arm64 바이너리인
+#   이미지를 만든다 — pull·기동은 성공하고 CronJob이 처음 실행될 때 exec format error로 죽는다.
+#   비워두면 TARGETARCH가 비어 URL이 404 → curl -f가 즉시 실패한다(요란한 실패가 옳다).
+ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
