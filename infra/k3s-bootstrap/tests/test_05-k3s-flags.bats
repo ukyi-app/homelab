@@ -123,8 +123,12 @@ _run_install() {
   run _run_install env
   [ "$status" -eq 0 ]
   [ -s "$SB/kubeconfig.out" ]
-  run stat -f '%Lp' "$SB/kubeconfig.out"
-  printf '%s' "$output" | grep -qx '600'
+  # ⚠️ `stat -f '%Lp'`(BSD/macOS)도 `stat -c '%a'`(GNU)도 쓰지 않는다 — 둘은 서로의 플랫폼에서
+  #    **다른 뜻이거나 에러**다. 실측: 로컬 macOS에서 전 스위트가 green이었는데 CI(ubuntu-24.04-arm)에서
+  #    이 @test만 red였다(`stat -f`가 GNU에선 "파일시스템 상태"다). 이전이 끝나면 실행 환경이
+  #    영구히 Linux가 되므로 이 클래스는 **한 번 밟으면 계속 밟는다**. `find -perm`은 POSIX라 양쪽 동일.
+  run bash -c "find '$SB/kubeconfig.out' -perm 600 | grep -c ."
+  printf '%s' "$output" | grep -qx '1'
   run bash -c "ls '$SB'/kubeconfig.out.tmp.* 2>/dev/null | grep -c ."
   printf '%s' "$output" | grep -qx '0'
 }
