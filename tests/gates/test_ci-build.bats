@@ -44,6 +44,28 @@ WF=".github/workflows/build.yaml"
   [ "$output" = "false" ]
 }
 
+@test "detect-changed covers every on.push.paths entry (trigger ⊆ detection)" {
+  command -v yq >/dev/null || skip "yq required"
+  # 트리거는 되는데 감지가 못 보면 잡이 **success인 채** build & push가 skip된다.
+  # 실측(#430): 워크플로만 바꾼 머지의 run이 초록이었는데 GHCR 이미지는 단일 아키텍처
+  # bare manifest 그대로였다 — imagetools inspect를 하기 전까지 아무도 몰랐다.
+  # 하드코딩하지 않고 on.push.paths에서 **파생**한다(derive-don't-declare).
+  detect="$(yq -r '.jobs.build.steps[] | select(.id == "changed") | .run' "$WF")"
+  [ -n "$detect" ]
+  # 감지식은 정규식이라 이스케이프가 섞인다(`\.github`) — 비교 전에 백슬래시를 벗긴다.
+  plain="$(printf '%s' "$detect" | tr -d '\\')"
+  missing=""
+  n=0
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    n=$((n + 1))
+    base="${p%%\**}"   # "ops/**" → "ops/" ;  글롭 없는 항목은 그대로
+    printf '%s' "$plain" | grep -qF "$base" || missing="$missing $p"
+  done < <(yq -r '.on.push.paths[]' "$WF")
+  [ "$n" -ge 2 ]        # 열거 붕괴 방지 바닥값
+  [ -z "$missing" ]
+}
+
 @test "matrix builds only the platform ops image pg-tools (no in-repo apps)" {
   run yq '.jobs.build.strategy.matrix.app' "$WF"
   printf '%s' "$output" | grep -qF -- "pg-tools"
