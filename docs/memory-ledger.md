@@ -38,7 +38,7 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
   타이트(≥1.3x 미달) — 축소 금지, cnpg-operator는 near-OOM이라 관찰 필요(ContainerMemoryNearLimit이 backstop).
 - **owner 결정(2026-07-07, F23 게이트): (b) VM RAM 증설 확정** — right-size로 ≥256 불가 확정에 따라 VM
   증설이 온보딩 차단의 유일 실효 해소책으로 채택. 착수 = W2 병행 owner-local 태스크(VM 재시작 필요):
-  `infra/k3s-bootstrap/versions.env` ORB_MEMORY_MIB 11264→12288 + 이 원장 meta VM_ALLOCATABLE_MIB
+  ~~`infra/k3s-bootstrap/versions.env` ORB_MEMORY_MIB~~(베어메탈 이전으로 삭제) 11264→12288 + 이 원장 meta VM_ALLOCATABLE_MIB
   11264→12288·LIMIT_BUDGET_MIB 9216→10240(reserve 2048 유지). 반영 후 명목 잔여 ≈ 1028Mi(온보딩 차단 해소).
   ⚠️ config 변경은 VM resize와 **커플링** — VM 재시작 전 cap 선행 상향 시 page-cache/burst 리저브 침식이라,
   cap 상향은 VM 재시작 후에만 적용했다(resize와 동일 커밋). 동시 peak ≪ allocatable라 노드-OOM 안전.
