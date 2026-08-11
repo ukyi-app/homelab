@@ -26,9 +26,13 @@ WF=".github/workflows/build.yaml"
 @test "build pushes immutable :sha-<gitsha> to GHCR for both architectures" {
   run grep -E "ghcr.io/.*:sha-" "$WF"
   [ "$status" -eq 0 ]
+  # ⚠️ `[[ ]]`를 쓰지 않는다 — bats는 [[ 실패를 errexit 면제로 **침묵 통과**시켜
+  #   (scripts/check-bats-style.sh:3) 마지막이 아닌 단언이 무력화된다. 자체 뮤테이션에서
+  #   실측: arm64만 지웠는데 초록. 평범한 명령(grep)이라야 errexit이 잡는다.
   run yq '.jobs.build.steps[] | select(.uses | test("build-push-action")) | .with.platforms' "$WF"
-  [[ "$output" == *"linux/arm64"* ]]
-  [[ "$output" == *"linux/amd64"* ]] # NUC(amd64) 이전 — 한쪽만 남으면 그 노드에서 못 돈다
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -q "linux/arm64"
+  printf '%s' "$output" | grep -q "linux/amd64" # NUC(amd64) 이전 — 한쪽만 남으면 그 노드에서 못 돈다
 }
 
 @test "provenance stays false — 2-platform index digest must be deterministic" {
