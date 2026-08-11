@@ -13,8 +13,11 @@ data:
           # PVC(pg-1 PGDATA/WAL·adguard·vmsingle·vlogs)는 전부 루트 fs '/'(btrfs /dev/vdb1, ~224GiB 실측)를 쿼터 없이 공유하므로
           # '/' 포화 = 모든 standard PVC 동시 위험. node_filesystem 절대값으로 3티어(조기 warning/추세/critical) 감시한다.
           # mountpoint="/"는 정확일치 — '/run/k3s/.../shm'·tmpfs·virtiofs(/mnt/mac) 노이즈를 배제하는 단일 btrfs series.
-          # (외장 bulk-ssd는 virtiofs /mnt/mac 하위라 VM node-exporter가 별도 series로 못 봐 직접 측정 불가 — 죽은
-          #  BulkSSD 알림은 제거했다. 미마운트/포화의 권위 backstop은 같은 group의 LocalBasebackupStale(CronJob 실패).)
+          # (bulk-ssd를 node_filesystem으로 직접 재지 않는 이유가 국면마다 다르다: OrbStack 시절엔 virtiofs
+          #  /mnt/mac 하위라 VM node-exporter가 별도 series를 못 만들었고, **국면 A(D4 한시)에는 bulk가 루트 LV의
+          #  bind 마운트라 애초에 같은 fs**다. 어느 쪽이든 in-cluster 신호는 du exporter의 statfs가 유일하다.
+          #  국면 B(2TB M.2)에서는 /mnt/bulk가 진짜 별도 디바이스라 node_filesystem series가 생긴다 — 그때
+          #  여기에 티어를 추가할 수 있다. 미마운트/포화의 권위 backstop은 같은 group의 LocalBasebackupStale.)
           - alert: StandardSSDWarning
             expr: |
               (node_filesystem_avail_bytes{mountpoint="/"}
@@ -219,8 +222,8 @@ data:
             for: 30m
             labels: { severity: warning, disk: bulk }
             annotations:
-              summary: "외장(bulk-ssd) 여유 15% 미만 또는 in-cluster 신호 소실"
-              description: "du exporter가 본 bulk 티어 여유가 15% 미만이거나 storage_tier_avail_bytes{tier=bulk} 신호가 소실됐습니다 — W3에서 관측 TSDB가 bulk에 얹히므로 이전 착수 전 반드시 여유를 확인하세요(FilesBulkSSDLow의 in-cluster 짝)."
+              summary: "bulk-ssd 티어 여유 15% 미만 또는 in-cluster 신호 소실"
+              description: "du exporter가 본 bulk 티어 여유가 15% 미만이거나 storage_tier_avail_bytes{tier=bulk} 신호가 소실됐습니다 — W3에서 관측 TSDB가 bulk에 얹히므로 이전 착수 전 반드시 여유를 확인하세요(FilesBulkSSDLow의 in-cluster 짝). ⚠️ 국면 A(D4 한시 — versions.env의 BULK_MIGRATION_WINDOW_UNTIL이 비어 있지 않으면 진행 중) 동안 bulk는 루트 LV의 bind 마운트라 **이 수치는 루트 파일시스템 여유와 같습니다**. 그 기간에는 StandardSSDWarning/Filling과 같은 사건에 함께 발화하는 것이 정상이며, 원인은 '외장 디스크'가 아니라 루트 포화입니다."
           # ★ digest-exporter 자기관측(감시견의 감시견) — ImageDigestDrift(r6)의 **먹이 공급선**이 죽으면
           #   그 알림이 조용히 실명한다(ghcr_latest_digest 시리즈가 끊긴 뒤 [15m] 윈도가 만료되면 좌변이 빈
           #   벡터 → 드리프트가 있어도 무발화). exporter의 조용한 실패 3모드(크론 미실행·push 실패·파드 기동

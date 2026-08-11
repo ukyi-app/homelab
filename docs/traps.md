@@ -63,3 +63,4 @@
 | sshd_config.d는 먼저 읽힌 값이 이긴다(systemd와 반대) — 600 드롭인 때문에 실효값은 sudo 없이 못 읽는다 | gate | `infra/k3s-bootstrap/tests/test_03-host-config.bats` |
 | Ubuntu 26.04에 /etc/timezone 부재 — 그 파일을 읽는 검사는 정상 호스트에서도 죽고 처방이 고치지 못한다 | gate | `infra/k3s-bootstrap/tests/test_02-host-preflight.bats` |
 | tailscale `~.` 라우팅 도메인 → 노드 이름해석이 MagicDNS 경유 클러스터 의존(routable이라 loopback 검사는 통과) | gate | `infra/k3s-bootstrap/tests/test_02-host-preflight.bats` |
+| `findmnt -T`는 마운트 여부를 증명 못 한다(감싸는 마운트로 resolve) + bind SOURCE의 `[subpath]` 미제거 시 디바이스 오판 | gate | `infra/k3s-bootstrap/tests/test_08-bulk-gate.bats` |

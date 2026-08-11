@@ -24,11 +24,11 @@ echo "===> [1/4] 호스트 전제 확인 (타임존 · resolved · 노드 IP)"
 echo "===> [2/4] k3s 설치 + kubeconfig"
 "$BIN/k3s-install.sh"
 echo "===> [3/4] StorageClasses"
-# ⚠️ **아직 이식 전이다.** `apply-storage.sh`는 여전히 `orb -m` + macOS `diskutil`로 외장 SSD를
-#    검사한다(bulk 게이트). 2TB M.2 물리 장착 전에는 "디바이스 정체성" 설계를 실물로 확정할 수
-#    없어서 의도적으로 남겨 뒀다 — 계획서 §3.3 · nuc-port-g2.md B7.
-#    베어메탈에서 이 줄에 도달하면 실패한다. 그래도 **[1]이 먼저 막으므로** 반쯤 설정된 노드에
-#    k3s가 올라가는 일은 없다(그게 이 순서의 요점이다).
+# ⚠️ bulk 게이트가 여기서 돈다 — 기본은 **거부**다. `BULK_STORAGE_PATH`(=/mnt/bulk)가 마운트포인트가
+#    아니거나 루트와 같은 디바이스면 멈춘다. D4 한시 운용(국면 A)으로 진입하려면
+#    `BULK_TEMPORARY_ALLOWED=1` + versions.env의 `BULK_MIGRATION_WINDOW_UNTIL`이 **둘 다** 필요하다.
+#    2TB M.2 장착 전에는 국면 A가 유일한 경로다 — 그리고 그 창이 열려 있는 동안 `dr-drill.sh`는
+#    실행을 거부한다(bulk가 파괴 대상과 같은 디스크에 있다).
 "$BIN/apply-storage.sh"
 echo "===> [4/4] 라이브 계약 검증"
 "$BIN/verify-cluster.sh"

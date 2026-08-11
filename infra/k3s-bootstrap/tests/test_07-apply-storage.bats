@@ -1,98 +1,177 @@
 #!/usr/bin/env bats
+# apply-storage.sh — 렌더 + apply, 그리고 그 앞의 bulk 게이트.
+#
+# ⚠️ 이 스위트의 핵심은 렌더가 아니라 **게이트가 apply보다 먼저 돌고, 기본이 거부라는 것**이다.
+#    OrbStack 시절 그 증명은 macOS `diskutil` stub이었고(`@test "aborts when the host volume is on
+#    an INTERNAL disk"`), 베어메탈에서는 **디바이스 정체성**으로 옮겼다. 국면 A(D4 한시)가 바로 그
+#    금지 상태를 한시 허용하므로, 여기서 증명까지 같이 잃기 쉽다 — 그래서 음성 @test가 더 많다.
 load test_helper
 
 setup() {
   STUBDIR="$(mktemp -d)"; RENDERED="$STUBDIR/rendered.yaml"
-  PATH="$STUBDIR:$PATH"; export PATH STUBDIR RENDERED
-  source "$BOOTSTRAP_DIR/versions.env"
+  BULKDIR="$STUBDIR/bulk"; mkdir -p "$BULKDIR"
+  PATH="$STUBDIR:$PATH"; export PATH STUBDIR RENDERED BULKDIR
   cat >"$STUBDIR/kubectl" <<'EOF'
 #!/usr/bin/env bash
 # '-f -'로 파이프되든 '-f <file>'로 읽히든, apply된 모든 매니페스트를 $RENDERED에
-# 누적해 단언이 apply 전체 집합을 보게 한다 (StorageClass apply는 stdin이 아니라
-# 파일을 쓰며, 파이프된 provisioner를 덮어쓰면 안 된다).
+# 누적해 단언이 apply 전체 집합을 보게 한다.
 if [ "$1" = "apply" ]; then
   src=""
   while [ $# -gt 0 ]; do
     if [ "$1" = "-f" ]; then src="$2"; shift; fi
     shift
   done
-  if [ "$src" = "-" ] || [ -z "$src" ]; then
-    cat >> "$RENDERED"
-  else
-    cat "$src" >> "$RENDERED"
-  fi
+  if [ "$src" = "-" ] || [ -z "$src" ]; then cat >> "$RENDERED"; else cat "$src" >> "$RENDERED"; fi
 fi
 exit 0
 EOF
   chmod +x "$STUBDIR/kubectl"
-  # 게이트의 호스트 측 `diskutil` 검사를 stub한다 (기본은 External).
-  # DISKUTIL_STUB_INTERNAL=1 은 /Volumes/homelab 이 내장 디스크의 맨 디렉토리인 상황을 시뮬레이션한다.
-  cat >"$STUBDIR/diskutil" <<'EOF'
-#!/usr/bin/env bash
-if [ "$1" = "info" ]; then
-  if [ "${DISKUTIL_STUB_INTERNAL:-0}" = "1" ]; then echo "   Device Location:           Internal"
-  else echo "   Device Location:           External"; fi
+  # 권한 상승 대역 — 실제 probe가 그대로 돌게 둔다(스텁하지 않는다. probe 로직이 이 게이트의 전부다).
+  printf '#!/usr/bin/env bash\nexec "$@"\n' > "$STUBDIR/asroot"; chmod +x "$STUBDIR/asroot"
+  # 가짜 findmnt — 기본은 국면 B 형태(bulk가 마운트포인트 + 루트와 다른 디바이스).
+  cat >"$STUBDIR/findmnt" <<'EOF'
+#!/usr/bin/env sh
+col=""; path=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -no) col="$2"; shift 2 ;;
+    -*) shift ;;
+    *) path="$1"; shift ;;
+  esac
+done
+if [ "$path" = "/" ]; then
+  if [ "$col" = "TARGET" ]; then echo "/"; else echo "/dev/mapper/vg-root"; fi
+  exit 0
 fi
-exit 0
+[ "${FM_BULK_IS_MP:-1}" = "1" ] || exit 1
+if [ "$col" = "TARGET" ]; then echo "$path"; else echo "${FM_BULK_SRC:-/dev/nvme1n1p1}"; fi
 EOF
-  chmod +x "$STUBDIR/diskutil"
-  # 게이트의 VM 측 `orb` probe를 stub해 스위트를 밀폐(hermetic)시킨다 (실제 VM 없음). probe는
-  # stdin으로 파이프된다(orb … sh -s < bulk-gate-probe.sh); 실제 probe 로직은 08-bulk-gate.bats가 커버한다.
-  # ORB_STUB_FAIL=1 은 VM 내부에서 virtiofs가 아니거나 쓰기 불가한 외장 SSD를 시뮬레이션한다.
-  cat >"$STUBDIR/orb" <<'EOF'
-#!/usr/bin/env bash
-cat >/dev/null 2>&1 || true                 # 파이프된 probe 스크립트를 소비한다
-[ "${ORB_STUB_FAIL:-0}" = "1" ] && { echo "stub: external bulk not available" >&2; exit 11; }
-exit 0
-EOF
-  chmod +x "$STUBDIR/orb"
+  chmod +x "$STUBDIR/findmnt"
   export KUBECONFIG_PATH="$STUBDIR/kubeconfig"; : > "$KUBECONFIG_PATH"
 }
 teardown() { rm -rf "$STUBDIR"; }
 
+# versions.env는 무조건 export 하므로 환경으로 덮을 수 없다 — 샌드박스 사본을 만들어 값을 바꾼다.
+# ($1 = BULK_MIGRATION_WINDOW_UNTIL 값, 빈 문자열이면 그대로 둔다)
+_sandbox() {
+  BS="$BATS_TEST_TMPDIR/bs"; rm -rf "$BS"; cp -R "$BOOTSTRAP_DIR" "$BS"
+  sed -i.bak "s#^export BULK_STORAGE_PATH=.*#export BULK_STORAGE_PATH=\"$BULKDIR\"#" "$BS/versions.env"
+  if [ -n "${1:-}" ]; then
+    sed -i.bak "s#^export BULK_MIGRATION_WINDOW_UNTIL=.*#export BULK_MIGRATION_WINDOW_UNTIL=\"$1\"#" "$BS/versions.env"
+  fi
+  export BS
+}
+_apply() { BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" run "$BS/apply-storage.sh"; }
+
+# ── 국면 B 형태(별도 디바이스) — 플래그 없이 통과해야 한다 ─────────────────────────────────
 @test "renders manifests with the helper image substituted (no literal placeholder)" {
-  run "$BOOTSTRAP_DIR/apply-storage.sh"
+  _sandbox; _apply
   [ "$status" -eq 0 ]
+  source "$BS/versions.env"
   run grep -F '${LOCAL_PATH_HELPER_IMAGE}' "$RENDERED"
-  [ "$status" -ne 0 ]                          # 플레이스홀더는 사라져야 한다
+  [ "$status" -ne 0 ]
   run grep -F "$LOCAL_PATH_HELPER_IMAGE" "$RENDERED"
-  [ "$status" -eq 0 ]                          # 실제 digest 존재
+  [ "$status" -eq 0 ]
 }
 
 @test "applies both StorageClasses" {
-  run "$BOOTSTRAP_DIR/apply-storage.sh"
+  _sandbox; _apply
+  [ "$status" -eq 0 ]
   grep -q 'name: standard' "$RENDERED"
   grep -q 'name: bulk-ssd' "$RENDERED"
 }
 
-@test "renders the external-SSD bulk path into the provisioner (no literal placeholder)" {
-  run "$BOOTSTRAP_DIR/apply-storage.sh"
+@test "renders the bulk mountpoint into the provisioner (no literal placeholder)" {
+  _sandbox; _apply
   [ "$status" -eq 0 ]
   run grep -F '${BULK_STORAGE_PATH}' "$RENDERED"
-  [ "$status" -ne 0 ]                          # 플레이스홀더 치환됨
-  run grep -F "$BULK_STORAGE_PATH" "$RENDERED" # 실제 외장 경로 존재
+  [ "$status" -ne 0 ]
+  run grep -F "$BULKDIR" "$RENDERED"
   [ "$status" -eq 0 ]
 }
 
-@test "aborts when the host volume is on an INTERNAL disk (diskutil external-device check)" {
-  # virtiofs FSTYPE만으로는 절대 할 수 없는 검사다: 내장 디스크 위의 맨 /Volumes/homelab
-  # 디렉토리가 이게 없으면 통과해서 bulk가 VM 디스크에 놓이게 된다.
-  DISKUTIL_STUB_INTERNAL=1 run "$BOOTSTRAP_DIR/apply-storage.sh"
+@test "a separate device needs no phase-A flag (phase B is the normal path)" {
+  _sandbox; _apply
+  [ "$status" -eq 0 ]
+  run grep -F -- '국면 A' "$RENDERED"
   [ "$status" -ne 0 ]
-  printf '%s' "$output" | grep -qF -- "not on an EXTERNAL disk"
+}
+
+# ── 기본 거부 — 이 스위트의 존재 이유 ──────────────────────────────────────────────────────
+@test "aborts when bulk shares the device with / and no phase-A opt-in (nothing is applied)" {
+  _sandbox
+  FM_BULK_SRC=/dev/mapper/vg-root _apply
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'SAME device'
   [ ! -s "$RENDERED" ]
 }
 
-@test "aborts when the VM-side probe fails (no silent VM-disk fallback)" {
-  ORB_STUB_FAIL=1 run "$BOOTSTRAP_DIR/apply-storage.sh"
+@test "aborts when the bulk path is not a mountpoint (nothing is applied)" {
+  _sandbox
+  FM_BULK_IS_MP=0 _apply
   [ "$status" -ne 0 ]
-  printf '%s' "$output" | grep -qF -- "external bulk SSD"
-  [ ! -s "$RENDERED" ]                          # 게이트가 apply보다 먼저 돈다 — 렌더된 것 없음
+  printf '%s' "$output" | grep -qF -- 'not a mountpoint'
+  [ ! -s "$RENDERED" ]
 }
 
-@test "BULK_ALLOW_VM_DISK=1 skips the gate and renders the VM-disk fallback path" {
-  ORB_STUB_FAIL=1 BULK_ALLOW_VM_DISK=1 run "$BOOTSTRAP_DIR/apply-storage.sh"
-  [ "$status" -eq 0 ]                           # orb stub이 실패해도 게이트는 건너뛰어짐
-  run grep -F "$BULK_VM_DISK_FALLBACK" "$RENDERED"
-  [ "$status" -eq 0 ]                           # 폴백 경로가 bulk provisioner에 렌더됨
+# ── 국면 A 진입은 **둘 다** 있어야 한다 ────────────────────────────────────────────────────
+@test "the phase-A flag ALONE does not open the gate (an unbounded window is not temporary)" {
+  _sandbox                                   # BULK_MIGRATION_WINDOW_UNTIL="" 그대로
+  FM_BULK_SRC=/dev/mapper/vg-root BULK_TEMPORARY_ALLOWED=1 BULK_RUN="$STUBDIR/asroot" \
+    run "$BS/apply-storage.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '한시 운용에 끝이 없으면'
+  [ ! -s "$RENDERED" ]
+}
+
+@test "rejects a malformed migration window instead of guessing" {
+  _sandbox "2026-8-1"
+  FM_BULK_SRC=/dev/mapper/vg-root BULK_TEMPORARY_ALLOWED=1 BULK_RUN="$STUBDIR/asroot" \
+    run "$BS/apply-storage.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'YYYY-MM-DD가 아니다'
+}
+
+@test "phase A opens with BOTH the flag and the window, and says so loudly" {
+  _sandbox "2026-12-31"
+  FM_BULK_SRC=/dev/mapper/vg-root BULK_TEMPORARY_ALLOWED=1 BULK_TODAY=2026-08-11 \
+    BULK_RUN="$STUBDIR/asroot" run "$BS/apply-storage.sh"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF -- '국면 A'
+  printf '%s' "$output" | grep -qF -- 'WARN: bulk is on the SAME device'
+  run grep -F "$BULKDIR" "$RENDERED"
+  [ "$status" -eq 0 ]
+}
+
+@test "an EXPIRED window barks loudly but does not block bring-up" {
+  # 만료 하나로 클러스터가 안 뜨는 것은 이 창의 목적이 아니다(선례: check-credential-expiry.sh).
+  _sandbox "2026-08-01"
+  FM_BULK_SRC=/dev/mapper/vg-root BULK_TEMPORARY_ALLOWED=1 BULK_TODAY=2026-09-15 \
+    BULK_RUN="$STUBDIR/asroot" run "$BS/apply-storage.sh"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF -- '만료됐다'
+  run grep -F "$BULKDIR" "$RENDERED"
+  [ "$status" -eq 0 ]
+}
+
+@test "a window that has NOT expired does not print the expiry warning" {
+  # 양성 대조 — 위 @test가 '항상 짖는' 상태여도 통과하는 것을 막는다.
+  _sandbox "2026-12-31"
+  FM_BULK_SRC=/dev/mapper/vg-root BULK_TEMPORARY_ALLOWED=1 BULK_TODAY=2026-08-11 \
+    BULK_RUN="$STUBDIR/asroot" run "$BS/apply-storage.sh"
+  [ "$status" -eq 0 ]
+  ! printf '%s' "$output" | grep -qF -- '만료됐다'
+}
+
+# ── OrbStack 잔재가 되살아나지 않는다 ──────────────────────────────────────────────────────
+@test "no OrbStack or macOS binding remains in the storage layer (code, not prose)" {
+  # ⚠️ 전체 파일 grep은 **자기 주석에 걸린다** — 두 파일의 헤더가 무엇이 왜 사라졌는지 설명하며
+  #    그 단어들을 그대로 담고 있다(실측: 처음 작성했을 때 이 @test가 거짓 red를 냈다).
+  #    레포가 문서화한 함정의 거울상이다: 거기선 vacuous green, 여기선 false red.
+  #    단언 대상은 **코드**이므로 비-주석 줄만 본다.
+  run grep -n 'BULK_STORAGE_PATH' "$BOOTSTRAP_DIR/apply-storage.sh"
+  [ "$status" -eq 0 ]                        # 양성 대조: 대상 파일이 실재하고 grep이 동작한다
+  run grep -nE '^[^#]*(diskutil|orb -m|virtiofs|/mnt/mac|BULK_ALLOW_VM_DISK)' \
+    "$BOOTSTRAP_DIR/apply-storage.sh" "$BOOTSTRAP_DIR/bulk-gate-probe.sh"
+  [ "$status" -ne 0 ]
 }

@@ -121,6 +121,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - sshd_config.d는 먼저 읽힌 값이 이긴다 — systemd 드롭인과 정반대다
 - Ubuntu 26.04에 /etc/timezone이 없다 — 그 파일을 읽는 게이트는 출구가 없다
 - tailscale의 ~. 라우팅 도메인 — 노드 이름해석이 조용히 클러스터 의존이 된다
+- findmnt -T는 마운트 여부를 증명하지 못한다 — 그리고 bind 마운트의 SOURCE엔 대괄호가 붙는다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

@@ -818,3 +818,20 @@ resolv.conf의 nameserver가 tailnet 대역(CGNAT `100.64.0.0/10` · tailscale U
 `terraform apply`는 성공한다.
 
 > 가드: `infra/k3s-bootstrap/tests/test_02-host-preflight.bats`
+
+### findmnt -T는 마운트 여부를 증명하지 못한다 — 그리고 bind 마운트의 SOURCE엔 대괄호가 붙는다
+
+"이 경로가 별도 스토리지 위에 있는가"를 `findmnt -T <path>`로 판정하면 **정확히 반대의 답**을 얻는다.
+`-T`는 경로를 **감싸는** 마운트로 resolve하므로, `/mnt/bulk`가 마운트가 아니라 루트 위 평범한
+디렉토리여도 `/`를 성공적으로 돌려준다 — 잡으려던 바로 그 상태가 통과한다. 마운트포인트 판정은
+인자 없는 `findmnt <path>`(그것이 마운트포인트일 때만 매치)로 해야 한다.
+
+⚠️ OrbStack 시절에는 **`-T`가 필수**였다(mac 공유의 하위 디렉토리는 자체 마운트포인트가 아니라
+`findmnt <subdir>`가 빈 출력 + rc=1). 즉 이식에서 요구사항이 **뒤집혔다** — 옛 주석("-T를 반드시
+쓸 것")을 그대로 옮기면 게이트가 조용히 무력화된다.
+
+⚠️ 두 번째 함정: bind 마운트의 `SOURCE`는 `/dev/mapper/vg-root[/var/lib/rancher/...]`처럼 **서브패스가
+대괄호로 붙는다.** 디바이스 동일성을 비교할 때 대괄호를 떼지 않으면 문자열이 달라져 "다른 디바이스"로
+읽힌다 — 루트 LV의 bind 마운트를 별도 디스크로 오판하는 것이고, 그게 국면 A의 정확한 모양이다.
+
+> 가드: `infra/k3s-bootstrap/tests/test_08-bulk-gate.bats`
