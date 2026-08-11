@@ -13,23 +13,31 @@ setup() {
   printf 'standard\nbulk-ssd\n' > "$STUBDIR/sc.txt"
   source "$BOOTSTRAP_DIR/versions.env"; echo "$K3S_VERSION" > "$STUBDIR/kubeletversion.txt"  # 건강한 기본값 = 핀 버전
 
-  cat >"$STUBDIR/orb" <<'EOF'
+  # 노드 명령 시임(K3S_RUN) 스텁 — 베어메탈에서는 `sudo`가 들어가는 자리다.
+  # OrbStack 시절의 `orb -m k3s -u root <cmd>` 간접이 사라졌으므로 스텁도 그 모양을 버린다.
+  echo "$K3S_NODE_IP" > "$STUBDIR/nodeip.txt"
+  printf 'X509v3 Subject Alternative Name:\n    DNS:localhost, DNS:homelab, IP Address:127.0.0.1' > "$STUBDIR/certsans.txt"
+  for s in $K3S_TLS_SANS; do printf ', SAN:%s' "$s" >> "$STUBDIR/certsans.txt"; done
+  cat >"$STUBDIR/noderun" <<'EOF'
 #!/usr/bin/env bash
-# `orb -m k3s -u root k3s secrets-encrypt status` 를 에뮬레이트
-shift 4 2>/dev/null || true
-if printf '%s ' "$@" | grep -q 'secrets-encrypt status'; then
-  if [ "$(cat "$STUBDIR/encryption.txt")" = "true" ]; then
-    echo "Encryption Status: Enabled"; else echo "Encryption Status: Disabled"; fi
-fi
+# `$K3S_RUN <cmd...>` 대역. 알려진 하위 명령만 흉내낸다.
+case "$*" in
+  *"secrets-encrypt status"*)
+    if [ "$(cat "$STUBDIR/encryption.txt")" = "true" ]; then
+      echo "Encryption Status: Enabled"; else echo "Encryption Status: Disabled"; fi ;;
+  *"openssl"*|*"x509"*) cat "$STUBDIR/certsans.txt" ;;
+esac
 exit 0
 EOF
-  chmod +x "$STUBDIR/orb"
+  chmod +x "$STUBDIR/noderun"
+  export K3S_RUN="$STUBDIR/noderun"
 
   cat >"$STUBDIR/kubectl" <<'EOF'
 #!/usr/bin/env bash
 args="$*"
 case "$args" in
   *"nodeInfo.kubeletVersion"*) cat "$STUBDIR/kubeletversion.txt" ;;
+  *"InternalIP"*)        cat "$STUBDIR/nodeip.txt" ;;
   *"get nodes"*)         cat "$STUBDIR/nodestatus.txt" ;;
   *"get pods"*)          cat "$STUBDIR/pods.txt" ;;
   *"get sc"*|*"get storageclass"*) cat "$STUBDIR/sc.txt" ;;
@@ -91,4 +99,43 @@ EOF
   run "$BOOTSTRAP_DIR/verify-cluster.sh"
   [ "$status" -ne 0 ]
   [[ "$output" == *"version"* ]]
+}
+
+# ── 베어메탈 신규 검사 ───────────────────────────────────────────────────────────────────────
+@test "fails when the live node InternalIP drifts from the versions.env pin" {
+  # netpol의 노드 서브넷 allow 6곳이 이 값의 /24를 전제한다 — 표류하면 워크로드가 apiserver를 잃는다.
+  echo "192.168.9.9" > "$STUBDIR/nodeip.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'InternalIP drift'
+}
+
+@test "fails when a pinned SAN is missing from the LIVE serving cert (not just the flag string)" {
+  # ⚠️ 이 @test가 [8]의 존재 이유다. 스크립트가 방출하는 플래그를 grep하면 "스크립트가 그렇게 낼
+  #    것이다"만 증명된다. --tls-san은 설치 시점에만 정해지므로 **라이브 cert**를 봐야 한다.
+  printf 'X509v3 Subject Alternative Name:\n    DNS:localhost, IP Address:127.0.0.1' > "$STUBDIR/certsans.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'serving cert에 없는 SAN'
+}
+
+@test "fails when the serving cert cannot be read at all (empty SAN output is not a pass)" {
+  : > "$STUBDIR/certsans.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'SAN을 읽지 못했다'
+}
+
+@test "an emptied SAN list trips THIS script's own floor, not just the installer's" {
+  # 루프가 0회 도는 것은 통과가 아니다(scan-floor와 같은 규약).
+  # ⚠️ `K3S_INSTALL_SCRIPT`를 스텁으로 바꾼다. 안 그러면 [4]가 부르는 진짜 k3s-install.sh의
+  #    **자기 바닥값**이 먼저 죽어서, verify-cluster의 바닥값을 지워도 이 @test가 통과한다 —
+  #    역방향 뮤테이션에서 실제로 그랬다(죽은 규칙으로 보였다). 스텁이 그 그늘을 걷어낸다.
+  cp -R "$BOOTSTRAP_DIR" "$STUBDIR/bs"
+  sed -i.bak 's/^export K3S_TLS_SANS=.*/export K3S_TLS_SANS=""/' "$STUBDIR/bs/versions.env"
+  STUB="$STUBDIR/ok-install.sh"
+  printf '#!/usr/bin/env bash\necho "server --secrets-encryption"\n' > "$STUB"; chmod +x "$STUB"
+  K3S_INSTALL_SCRIPT="$STUB" run "$STUBDIR/bs/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'K3S_TLS_SANS'
 }
