@@ -16,7 +16,9 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm # 네이티브 arm64 runner — QEMU 불필요
+    # 네이티브 arm64 runner 유지 — arm64 leg는 에뮬레이션 없이 돈다. amd64 leg만 QEMU를 탄다
+    # (NUC 이전, 2026-08). pg-tools는 apt + curl뿐이라 컴파일이 없어 에뮬레이션 비용이 감당 가능하다.
+    runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
       matrix:
@@ -39,6 +41,9 @@ jobs:
           # 변경 감지가 git diff $BEFORE..$SHA를 쓴다 — 기본 depth=1이면 BEFORE 커밋이 없어
           # diff가 항상 실패(빌드 스킵)한다.
           fetch-depth: 0
+      # ⚠️ setup-buildx **앞**에 와야 한다 — buildx 빌더는 생성 시점에 등록된 binfmt 핸들러만 본다.
+      #   순서가 뒤집히면 amd64 leg가 "exec format error"로 죽는다. tests/gates/test_ci-build.bats가 순서를 고정.
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
       - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
         with:
@@ -81,8 +86,16 @@ jobs:
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
         with:
           context: ops/${{ matrix.app }}
-          platforms: linux/arm64
+          # 멀티아치(NUC 이전). ⚠️ ops/pg-tools/Dockerfile:7의 `ARG TARGETARCH`에 **기본값이 없어야**
+          #   한다 — stage-level 기본값은 BuildKit predefined platform arg를 이겨서 OCI config만
+          #   amd64이고 kubectl/rclone은 arm64인 이미지를 조용히 만든다(#424에서 실측·제거).
+          platforms: linux/amd64,linux/arm64
           push: true
+          # ⚠️ 2플랫폼이 된 지금 이 값이 **더** 중요하다. attestation이 켜지면 index에
+          #   unknown/unknown child 2개가 붙고 그 매니페스트가 run마다 달라져 index digest가
+          #   비결정적이 된다(실측: provenance=false 2회 동일 468db06f… / 기본값 2회 상이).
+          #   그러면 tools/poll-ghcr.ts computeBump의 "동일 digest — 멱등 no-op"이 영영 안 걸려
+          #   내용 무변경 커밋마다 PR→머지→rollout이 헛돈다.
           provenance: false
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha,scope=${{ matrix.app }}
