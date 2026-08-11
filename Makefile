@@ -12,14 +12,18 @@ help: ## 사용 가능한 타겟 목록 출력
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  %-22s %s\n", $$1, $$2}' \
 	  | sort
 
-up: ## [runtime] OrbStack VM + k3s + 스토리지 기동 (멱등, = host-up)
+up: ## [runtime] 호스트 전제 확인 + k3s + 스토리지 기동 (멱등, = host-up)
 	@infra/k3s-bootstrap/host-up.sh
 
 host-up: ## [runtime] `up`의 별칭 — 호스트 기반층 기동 (M1)
 	@infra/k3s-bootstrap/host-up.sh
 
-down: ## [TODO: M1] OrbStack VM 내리기
-	@echo "down: not implemented yet (owned by M1 runtime foundation)" >&2
+down: ## [미구현] 클러스터 내리기 — 베어메탈에선 파괴 프리미티브 결정이 선행이다
+# ⚠️ OrbStack 시절엔 `orb delete -f k3s`가 값싼 전손이었다(VM은 cattle). 물리 노드는 cattle이 아니다:
+#    `k3s-uninstall.sh` + /var/lib/rancher 삭제는 **모든 standard 클래스 PV를 실제로 파괴**하고
+#    되돌릴 수 없다. G5(일회용 클러스터로 R2 복구)·G11(콜드스타트 증명) 설계와 얽혀 있어
+#    owner 판단(D-j)이 선행이다. 그때까지 스텁으로 둔다 — 있는 척하는 것보다 낫다.
+	@echo "down: 미구현 — 베어메탈 파괴 프리미티브(D-j) 미결정. nuc-port-g2.md §6 참조" >&2
 	@exit 1
 
 bootstrap: ## 멱등 DR 진입점: ArgoCD + sops-age Secret + root app 설치
