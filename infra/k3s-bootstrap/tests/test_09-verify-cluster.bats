@@ -16,6 +16,7 @@ setup() {
   # 노드 명령 시임(K3S_RUN) 스텁 — 베어메탈에서는 `sudo`가 들어가는 자리다.
   # OrbStack 시절의 `orb -m k3s -u root <cmd>` 간접이 사라졌으므로 스텁도 그 모양을 버린다.
   echo "$K3S_NODE_IP" > "$STUBDIR/nodeip.txt"
+  echo "$K3S_NODE_NAME" > "$STUBDIR/nodename.txt"
   printf 'X509v3 Subject Alternative Name:\n    DNS:localhost, DNS:homelab, IP Address:127.0.0.1' > "$STUBDIR/certsans.txt"
   for s in $K3S_TLS_SANS; do printf ', SAN:%s' "$s" >> "$STUBDIR/certsans.txt"; done
   cat >"$STUBDIR/noderun" <<'EOF'
@@ -38,6 +39,7 @@ args="$*"
 case "$args" in
   *"nodeInfo.kubeletVersion"*) cat "$STUBDIR/kubeletversion.txt" ;;
   *"InternalIP"*)        cat "$STUBDIR/nodeip.txt" ;;
+  *"metadata.name"*)     cat "$STUBDIR/nodename.txt" ;;
   *"get nodes"*)         cat "$STUBDIR/nodestatus.txt" ;;
   *"get pods"*)          cat "$STUBDIR/pods.txt" ;;
   *"get sc"*|*"get storageclass"*) cat "$STUBDIR/sc.txt" ;;
@@ -108,6 +110,22 @@ EOF
   run "$BOOTSTRAP_DIR/verify-cluster.sh"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -q 'InternalIP drift'
+}
+
+@test "fails when the live node name drifts from the versions.env pin" {
+  # ⚠️ hostPath PV의 nodeAffinity가 이 값을 담는다. 사후 변경은 노드 재등록 + PV 재작성이라
+  #    표류를 늦게 발견할수록 비싸다 — 그래서 [8]과 같이 **라이브 오브젝트**를 본다.
+  echo "homelab" > "$STUBDIR/nodename.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'node name drift'
+}
+
+@test "fails when the live node name cannot be read at all (empty is not a pass)" {
+  : > "$STUBDIR/nodename.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q '라이브 노드명을 읽지 못했다'
 }
 
 @test "fails when a pinned SAN is missing from the LIVE serving cert (not just the flag string)" {

@@ -55,6 +55,21 @@ setup() { EXEC="$(K3S_PRINT_EXEC=1 "$BOOTSTRAP_DIR/k3s-install.sh")"; }
   printf '%s' "$EXEC" | grep -qF -- "--node-ip=${K3S_NODE_IP}"
 }
 
+@test "node-name is pinned from versions.env (D-h: the linux hostname 'homelab' means three other things)" {
+  # ⚠️ 설치 시점에만 정할 수 있고, 사후 변경은 노드 재등록이라 hostPath PV가 깨진다.
+  source "$BOOTSTRAP_DIR/versions.env"
+  [ -n "$K3S_NODE_NAME" ]
+  printf '%s' "$EXEC" | grep -qF -- "--node-name=${K3S_NODE_NAME}"
+}
+
+@test "refuses to install when K3S_NODE_NAME is empty (silent fallback to the hostname is the bug)" {
+  cp -R "$BOOTSTRAP_DIR" "$BATS_TEST_TMPDIR/bs2"
+  sed -i.bak 's/^export K3S_NODE_NAME=.*/export K3S_NODE_NAME=""/' "$BATS_TEST_TMPDIR/bs2/versions.env"
+  K3S_PRINT_EXEC=1 run "$BATS_TEST_TMPDIR/bs2/k3s-install.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'K3S_NODE_NAME 미설정'
+}
+
 @test "every SAN in versions.env reaches the flag string, and the list cannot silently empty" {
   # ⚠️ `for san in $LIST; do grep; done`만 쓰면 LIST가 비었을 때 루프가 0회 돌고 종료 0이라
   #    **vacuous green**이다. `--tls-san`은 설치 후 교정이 serving cert 삭제를 요구하는 불변식이라

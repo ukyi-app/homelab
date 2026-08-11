@@ -74,4 +74,12 @@ done
 [ "$san_checked" -ge 3 ] || fail "K3S_TLS_SANS가 ${san_checked}건뿐이다(최소 3) — versions.env 확인"
 [ -z "$san_missing" ] || fail "serving cert에 없는 SAN:${san_missing} — 사후 추가는 serving cert 삭제·재생성이 필요하다"
 
-echo "OK: host substrate verified (node Ready, both SCs, traefik/metrics-server absent, servicelb kept, secrets-encryption enabled, k3s ver pinned, node-ip pinned, ${san_checked} SANs on the live cert)."
+echo "==> [9] live node name matches the pin (hostPath PV nodeAffinity depends on it)?"
+# ⚠️ [8]과 같은 이유로 **라이브 노드 오브젝트**를 본다. `--node-name`은 설치 시점에만 정해지고,
+#    사후 변경은 노드 재등록이라 hostPath PV의 nodeAffinity가 통째로 깨진다 — 즉 표류를 늦게
+#    발견할수록 비싸다. 플래그 문자열 grep으로는 "설치가 실제로 그 이름으로 됐다"를 못 증명한다.
+nname="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+[ -n "$nname" ] || fail "라이브 노드명을 읽지 못했다 — 이름 핀을 대조할 수 없다"
+[ "$nname" = "$K3S_NODE_NAME" ] || fail "node name drift: live '${nname}' != pinned '$K3S_NODE_NAME' (versions.env). hostPath PV의 nodeAffinity가 이 값을 담으므로, 지금 고치려면 노드 재등록 + PV 재작성이다."
+
+echo "OK: host substrate verified (node Ready, both SCs, traefik/metrics-server absent, servicelb kept, secrets-encryption enabled, k3s ver pinned, node-ip pinned, node-name ${nname} pinned, ${san_checked} SANs on the live cert)."
