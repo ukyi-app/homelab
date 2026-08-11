@@ -119,18 +119,19 @@ printf '%s\n' "$addrs" | grep -qxF "$K3S_NODE_IP" \
 #   (b) fstab 경유로 돌아오는가     → /etc/fstab  (systemd-fstab-generator → *.swap 유닛)
 #   (c) zram 경유로 돌아오는가      → /etc/systemd/zram-generator.conf
 # ⚠️ 여기서는 **열거 0건이 곧 원하는 상태**라 [3]식 "0건은 통과가 아니다" 바닥값을 쓸 수 없다.
-#    대신 형식 검사가 그 역할을 한다: 파일이 비어 있지 않은데 첫 줄이 헤더가 아니면 파서가
-#    물리지 않은 것이므로 fail-loud다. (비어 있는 경우를 허용하는 이유: 스왑 0건일 때 커널이
-#    헤더만 내는지 0바이트를 내는지 이 세션에서 실측하지 못했다 — 접근 가능한 리눅스가 전부
-#    스왑 활성이었다. fail-closed로 두면 D-f를 **정확히 실행한 순간** make up이 막힌다.)
+#    대신 헤더 존재가 그 역할을 한다 — 파서가 실제 파일에 물렸다는 양성 증거다.
+# ✅ **실측 2026-08-11**(D-f를 NUC에 적용한 직후, 스왑 0건 상태): 커널은 스왑이 하나도 없어도
+#    헤더 1줄을 낸다 — 정확히 **39바이트 / 1줄**,
+#    `Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority`.
+#    (`swap_start`가 `*pos==0`에서 항상 `SEQ_START_TOKEN`을 돌려주고 `swap_show`가 그때 헤더를
+#     찍는다.) 그러므로 헤더 부재는 "스왑 없음"이 아니라 **"파서가 안 물렸다"**로 읽는 것이 옳다.
+#    → 조건 없이 요구한다. 이전 판은 "빈 파일도 허용"했는데, 그 관용은 실측 전의 보험이었고
+#      실제로는 도달 불가능한 분기였다(= 죽은 코드).
 sw="${R}/proc/swaps"
 [ -r "$sw" ] || fail "${sw}를 읽지 못했다 — 스왑 부재를 단언할 수 없다(열거 0건을 '스왑 없음'으로 읽으면 안 된다)"
-sw_lines="$(awk 'END { print NR+0 }' "$sw")"
-if [ "$sw_lines" -gt 0 ]; then
-  sw_hdr="$(awk 'NR == 1 && $1 == "Filename" { print 1 }' "$sw")"
-  [ "${sw_hdr:-0}" = "1" ] \
-    || fail "${sw}의 첫 줄이 'Filename …' 헤더가 아니다 — 형식이 예상과 달라 열거를 믿을 수 없다"
-fi
+sw_hdr="$(awk 'NR == 1 && $1 == "Filename" { print 1 }' "$sw")"
+[ "${sw_hdr:-0}" = "1" ] \
+  || fail "${sw}의 첫 줄이 'Filename …' 헤더가 아니다 — 형식이 예상과 달라 열거를 믿을 수 없다(스왑 0건이어도 커널은 헤더를 낸다 — 실측)"
 sw_n="$(awk 'NR == 1 && $1 == "Filename" { next } NF { n++ } END { print n+0 }' "$sw")"
 sw_names="$(awk 'NR == 1 && $1 == "Filename" { next } NF { printf "%s ", $1 }' "$sw")"
 [ "$sw_n" -eq 0 ] \
