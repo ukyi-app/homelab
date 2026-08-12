@@ -89,9 +89,16 @@ spec:
                 - |
                   set -euo pipefail
                   TS="$(date -u +%Y%m%dT%H%M%SZ)"
+                  # ⚠️ **클러스터별 prefix.** `last_success.json`은 **고정 키**라 병행 운용 중 두
+                  #    클러스터가 같은 객체를 덮어쓴다 — 그리고 그 파일은 teardown-resource
+                  #    --delete-data의 **파괴 게이트 입력**이다(이 파일 헤더 주석 참조). 라이브의
+                  #    신선도 메타가 NUC 값으로 바뀌면, 라이브 백업이 실제로 낡았는데도 파괴가 통과한다.
+                  #    아래 `rclone delete .../rdb/ --min-age 14d`도 상대편 RDB를 지운다.
+                  #    계획서 §3.4 표에 캐시는 아예 열거되지 않았다.
+                  CACHE_PREFIX="r2:homelab-cache-backups-prod/nuc"
                   while read -r name; do
                     [ -n "$name" ] || continue
-                    KEY="r2:homelab-cache-backups-prod/${name}/rdb/dump-${TS}.rdb"
+                    KEY="${CACHE_PREFIX}/${name}/rdb/dump-${TS}.rdb"
                     echo "[backup] ${name} -> ${KEY}"
                     rclone copyto "/work/${name}.rdb" "$KEY" --s3-region auto
                     # pg-tools 이미지에는 python3가 없다 — sed로 파싱 (pgdump-hedge와 동일)
@@ -109,8 +116,8 @@ spec:
                     # 신선도 메타 — teardown --delete-data 게이트 소스 (시각/체크섬/크기/객체 키)
                     printf '{"instance":"%s","ts":"%s","object":"rdb/dump-%s.rdb","sha256":"%s","bytes":%s}\n' \
                       "$name" "$TS" "$TS" "$SHA" "$SIZE" \
-                      | rclone rcat "r2:homelab-cache-backups-prod/${name}/last_success.json" --s3-region auto
-                    rclone delete "r2:homelab-cache-backups-prod/${name}/rdb/" --min-age 14d
+                      | rclone rcat "${CACHE_PREFIX}/${name}/last_success.json" --s3-region auto
+                    rclone delete "${CACHE_PREFIX}/${name}/rdb/" --min-age 14d
                     echo "[backup] ${name} OK bytes=${SIZE} sha256=${SHA}"
                   done < /work/targets
               env:
