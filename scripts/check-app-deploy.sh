@@ -18,9 +18,10 @@
 # <app>-secrets.sealed.yaml 하나만 허용(규약 외 *.sealed.yaml 거부).
 #
 # 인자로 deploy/prod 디렉토리들을 받으면 그것만, 없으면 apps/*/deploy/prod 전체를 검사
-# (인자 없는 기본 모드에서 앱 열거 0건은 scan-floor로 **실패** — vacuous 아님).
+# (인자 없는 기본 모드의 앱 열거 0건은 scan-floor가 판정한다 — 아래 바닥값 주석 참조).
 # bash 3.2 호환: `cmd && x`(set -e 함정)·mapfile·[[ ]] 금지 — if-블록·for로. yq는 버전차 함정이라 값 추출은 sed/grep으로.
-# 현재 인레포 앱(page·trip-mate-api)은 각 봉인본 1개 — 앱당 <app>-secrets.sealed.yaml 단일 규약.
+# 현재 인레포 배포 앱은 **0개**다(page #455 · trip-mate-api 철거). 앱이 있던 시절의 규약은
+# 앱당 <app>-secrets.sealed.yaml 봉인본 1개 — 새 앱 온보딩 시 그대로 적용된다.
 set -euo pipefail
 # shellcheck source=scripts/lib/scan-floor.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
