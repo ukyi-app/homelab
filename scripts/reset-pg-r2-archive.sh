@@ -20,6 +20,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export KUBECONFIG="${KUBECONFIG:-$REPO_ROOT/infra/k3s-bootstrap/kubeconfig}"
+# ⚠️ **PONR 1이 이 스크립트에 있다.** --purge는 되돌릴 수 없다(R2 버킷에 버저닝이 없다). 그런데
+#    위 줄이 KUBECONFIG를 **ambient로 채택**하므로, 셸에 반대편 클러스터 값이 남아 있으면 아카이브
+#    범위를 그쪽 기준으로 계산한다. dry-run도 마찬가지로 틀린 답을 준다 — 그래서 모드와 무관하게
+#    여기서 fail-closed로 막는다(D-i). make를 거치지 않는 직접 실행 경로다.
+bash "$REPO_ROOT/infra/k3s-bootstrap/assert-cluster-identity.sh"
 NS=database
 OBJSTORE=pg-r2
 # ⚠️ **k8s Cluster 이름과 아카이브 serverName은 다른 것이다.** 예전엔 `SERVER` 하나가 셋을 겸직했다

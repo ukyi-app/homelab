@@ -11,8 +11,14 @@ resource "tailscale_acl" "homelab" {
       # 멤버는 내부 서비스에 Traefik ingress 프록시(HTTP/HTTPS)를 통해서만 도달한다.
       # 전역 DNS(AdGuard)는 맥미니 tailscale IP:53으로 도달하며, 맥미니는 멤버 자기 소유
       # 기기라 위 autogroup:self:* 규칙이 이미 허용한다 — tag:k8s에 53은 불필요.
-      # kubelet/etcd/NodePort는 닫힌 상태 유지; kubectl은 Tailscale이 아니라 OrbStack
-      # 경유 로컬이므로 여기서 kube-apiserver 포트는 노출되지 않는다.
+      # kubelet/etcd/NodePort는 아래 tag:k8s 규칙으로 **열지 않는다**(80,443과 5432만 연다).
+      # ⚠️ 그렇다고 apiserver가 닫혀 있다는 뜻은 아니다 — 예전 주석은 "kubectl은 OrbStack 경유
+      #    로컬이라 kube-apiserver 포트가 노출되지 않는다"고 적었는데 **거짓이다**. 위
+      #    `autogroup:self:*` 한 줄이 owner 소유 기기의 **모든 포트**를 열기 때문이다.
+      #    실측(2026-08-12): Mac에서 `curl -k https://100.109.208.81:6443/version` → HTTP 401
+      #    (= 인증 전 단계까지 도달). D-i의 Mac 사본 원격 kubectl이 정확히 이 경로를 탄다.
+      #    ⇒ tag:k8s에 6443을 **더할 필요가 없다**. 반대로 apiserver를 tailnet에서 막고 싶다면
+      #    tag:k8s 규칙이 아니라 저 self 규칙을 좁혀야 한다(그러면 Tailscale SSH도 함께 끊긴다).
       { action = "accept", src = ["autogroup:member"], dst = ["tag:k8s:80,443"] },
       # GUI(TablePlus)+로컬 CLI: CNPG pg(5432)에 tailscale 직결 — **owner(autogroup:admin)만**.
       # ★F2: crown-jewel DB는 autogroup:member 금지(전 tailnet 멤버 노출 방지). autogroup:admin =
@@ -24,6 +30,10 @@ resource "tailscale_acl" "homelab" {
       { action = "accept", src = ["tag:k8s-operator"], dst = ["tag:k8s:*"] }
     ]
     # Tailscale SSH(데몬 가로채기형) 사용 시 ssh 섹션도 필요 — 자기 소유 기기로만 허용.
+    # ⚠️ users에 `root`가 있어 `ssh root@<기기>`가 **패스워드 없이** 된다(실측 2026-08-12:
+    #    `ssh root@100.109.208.81 'id'` → uid=0). D-i는 이것을 verify-cluster [5]의 비대화형
+    #    에스케이프로 쓴다(`K3S_RUN="ssh root@…"`) — NOPASSWD sudoers 드롭인이 **불필요한 이유**다.
+    #    이 줄을 좁히면 그 경로가 사라지므로 D-i 결정을 함께 재검토할 것.
     ssh = [
       { action = "accept", src = ["autogroup:member"], dst = ["autogroup:self"],
       users = ["autogroup:nonroot", "root"] }
