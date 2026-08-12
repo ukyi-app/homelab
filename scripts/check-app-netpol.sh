@@ -24,14 +24,16 @@ cd "$ROOT"
 # 바닥값은 apps-manifests 스캔 건수에 건다 — NetworkPolicy 인스턴스 수가 아니다.
 # 인-레포 앱이 netpol을 선언하지 않는 건 정당하지만(0건 통과가 계약), **매니페스트 열거가 0건인 건
 # 붕괴다**. 두 0을 가르는 자리가 여기다.
-# ⚠️ 값은 **붕괴 경계 1**이지 현재 도메인 크기(6)가 아니다 — 앱당 추적 YAML은 2~3건이다
+# ⚠️ 값은 **붕괴 경계**이지 현재 도메인 크기가 아니다 — 앱당 추적 YAML은 2~3건이다
 # (봉인본은 선택: `create-app --sealed` 미지정 = values+kustomization 2건, check-app-deploy의
 # all-or-none 불변식이 그 상태를 정당하다고 명시한다). 스냅샷을 굳히면 봉인본 없는 앱 1개짜리
-# 정당한 트리를 "열거 붕괴"로 오탐한다(적대 검토 실측). 형제 가드도 같은 경계다 —
-# APP_DEPLOY_MIN_SCAN=1 · check-image-pins MIN_SCAN_APPS=1. 래칫 아님.
+# 정당한 트리를 "열거 붕괴"로 오탐한다(적대 검토 실측). 래칫 아님.
+# ⚠️ 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거). 앱이 0개인
+#    동안은 매니페스트 열거 0건이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
+#    형제 가드도 같은 경계다 — APP_DEPLOY_MIN_SCAN=0 · check-image-pins MIN_SCAN_APPS=0.
 # shellcheck source=scripts/lib/scan-floor.sh
 . "$HERE/lib/scan-floor.sh"
-MIN_SCAN="${APP_NETPOL_MIN_SCAN:-1}"
+MIN_SCAN="${APP_NETPOL_MIN_SCAN:-0}"
 
 manifests="$(scan_enumerate check-app-netpol bun "$HERE/../tools/lib/repo-walk.ts" --manifests apps-manifests --root "$ROOT")" || exit 1
 scanned="$(scan_count "$manifests")"

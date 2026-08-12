@@ -111,10 +111,13 @@ else
   # 이 게이트가 잡아야 할 게 정확히 그 부재이기 때문이다(design-r1 R-1). deploy/prod 미존재는
   # 기존 `[ -d ]` 스킵과 동일하게 여기서 처리한다(행위 보존).
   # ⚠️ 열거를 **변수로** 받는다 — 프로세스 치환은 워커 실패를 set -e로 전파하지 않아, bun이 죽으면
-  # 배포 계약 5개 조항 전부가 0건 평가된 채 `OK`가 찍혔다(라이브 재현). 현재 앱 2개 — 래칫 아님.
+  # 배포 계약 5개 조항 전부가 0건 평가된 채 `OK`가 찍혔다(라이브 재현). 래칫 아님.
+  # ⚠️ 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거).
+  #    앱이 0개인 동안은 열거 0건이 정당한 상태라 붕괴와 구별되지 않는다. 앱을 다시 온보딩하면
+  #    이 값을 1로 되돌릴 것 — 그래야 워커가 죽었을 때의 0건이 다시 red가 된다.
   units="$(scan_enumerate check-app-deploy bun "$(dirname "$0")/../tools/lib/repo-walk.ts" --units apps --root "$ROOT")" || exit 1
   scanned="$(scan_count "$units")"
-  scan_floor check-app-deploy "$scanned" "${APP_DEPLOY_MIN_SCAN:-1}" || exit 1
+  scan_floor check-app-deploy "$scanned" "${APP_DEPLOY_MIN_SCAN:-0}" || exit 1
   while IFS= read -r u; do
     [ -n "$u" ] || continue
     [ -d "$u/deploy/prod" ] || continue

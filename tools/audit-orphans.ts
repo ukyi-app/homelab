@@ -22,7 +22,7 @@ const USAGE = `audit-orphans — registry↔매니페스트↔원장 교차 드�
   --repo-root <dir>  레포 루트(기본 .)
   --ci               배포를 깨는 유형만 비-0 종료(orphan-dns/activation-exposure-drift/missing-activation) — PR 게이트용
   --strict           모든 드리프트 유형을 비-0 종료(수동 점검)
-  --min-registry <n> apps.json 행 수 바닥값(기본 1) — 열거 붕괴 감지. 빈 registry 픽스처만 0으로 낮춘다
+  --min-registry <n> apps.json 행 수 바닥값(기본 0 — 인-레포 앱 0개) — 열거 붕괴 감지. 앱 온보딩 시 1로 되돌린다
   --help, -h         이 도움말`;
 if (process.argv.includes("--help") || process.argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 
@@ -63,7 +63,7 @@ const readJson = (p: string, d: any): any => (existsSync(p) ? JSON.parse(readFil
 // `Number(" ") === 0`, `Number("\n") === 0`이라 **빈 값/공백이 유효한 0으로 통과해 바닥값이 조용히 꺼진다**
 // (`--min-registry ""` 또는 값 없이 마지막 인자로 두는 경우). 적대 검토가 실측으로 잡은 자리다.
 // 정수 리터럴만 받는다 — "숫자로 해석 가능"이 아니라 "숫자로 쓰였다"를 요구한다.
-const rawMinRegistry = String(arg("--min-registry", "1") ?? "");
+const rawMinRegistry = String(arg("--min-registry", "0") ?? "");
 if (!/^\d+$/.test(rawMinRegistry)) {
   console.error(`audit-orphans: --min-registry 값이 음이 아닌 정수가 아니다(받은 값: ${JSON.stringify(rawMinRegistry)}) — 바닥값이 조용히 무력화되는 자리다`);
   process.exit(2); // 사용법 오류(CONTRIBUTING 종료코드 규약)
@@ -82,8 +82,10 @@ if (!Array.isArray(registry)) {
   process.exit(1);
 }
 // scan-floor — 소비자가 바닥값 수치를 소유한다(선례: check-image-pins=20 · check-alert-rules=30 ·
-// check-resource-limits=10 · check-guard-authority=15). 실 registry 2행 → 기본 1(앱 1개 teardown을 견딘다).
-// 래칫 아님. 픽스처가 빈 registry를 정당하게 쓰려면 `--min-registry 0`으로 낮춰 부른다.
+// check-resource-limits=10 · check-guard-authority=15). 래칫 아님.
+// ⚠️ 기본 0 — 인-레포 배포 앱이 **0개**라 실 registry가 빈 배열이다(page #455 · trip-mate-api 철거).
+//    앱이 0개인 동안은 0행이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
+//    바닥값이 실제로 작동함은 `--min-registry 1`을 명시해 부르는 test_audit-orphans.bats가 계속 증명한다.
 if (registry.length < MIN_REGISTRY) {
   console.error(`audit-orphans: registry ${registry.length}행 < ${MIN_REGISTRY} — 열거 붕괴 의심(scan-floor). 이 자리가 0건 검사 후 초록이 되던 곳이다`);
   process.exit(1);

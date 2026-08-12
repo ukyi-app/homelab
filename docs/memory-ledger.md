@@ -87,10 +87,9 @@ check-resource-limits 스캔 밖이라 여기 수기 계상). 신규/변경 상�
 | <!-- ledger:row --> homepage       | homepage       |    128 |      192 |
 | <!-- ledger:row --> glances        | observability  |     64 |      128 |
 | <!-- ledger:row --> cache-trip-mate | cache          |     96 |      160 |
-| <!-- ledger:row --> trip-mate-api  | prod           |    128 |      256 |
 | <!-- ledger:row --> files          | files          |     32 |      128 |
 
-**합계:** req ≈ 4803 Mi · limit ≈ 8956 Mi (반드시 ≤ 10240 Mi 유지).
+**합계:** req ≈ 4675 Mi · limit ≈ 8700 Mi (반드시 ≤ 10240 Mi 유지).
 (`pg-tools`는 CronJob용 ops 이미지 — 일시적이므로 상주 워크로드 행이 없다. worker/web/console
 values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 앱은 온보딩 PR이 행을 추가한다.)
 
