@@ -5,6 +5,17 @@ SHELL := /usr/bin/env bash
 KUBECONFIG_LIVE := $(PWD)/infra/k3s-bootstrap/kubeconfig
 SOPS_AGE_KEY_FILE ?= $(HOME)/.config/sops/age/keys.txt
 
+# 클러스터 정체성 대조(D-i). 라이브 Mac과 NUC의 kubeconfig는 경로·포트가 같고 노드명까지 `k3s`로
+# 같다 — KUBECONFIG를 잘못 잡으면 아무 경고 없이 반대편을 때린다. context 이름·InternalIP·arch
+# 셋을 라이브로 대조한다.
+# ⚠️ **prerequisite로 달지 말 것.** prerequisite는 recipe보다 먼저 도는데,
+#    tests/gates/test_guard-skip-signalling.bats가 `make verify-posture`를 `-n` 없이 **실제로**
+#    실행한다(CI 러너에는 클러스터가 없다). prerequisite로 달면 그 @test 2건이 죽는다.
+#    ⇒ 반드시 **recipe 줄**로 넣는다.
+# 변이/파괴 경로 = fail-closed · 읽기/관측 경로 = warn(새벽 3시에 관측 수단까지 잠그지 않는다).
+ASSERT_IDENTITY      := KUBECONFIG=$(KUBECONFIG_LIVE) bash infra/k3s-bootstrap/assert-cluster-identity.sh
+ASSERT_IDENTITY_WARN := $(ASSERT_IDENTITY) --warn
+
 .PHONY: help bootstrap up down verify host-up host-config
 
 help: ## 사용 가능한 타겟 목록 출력
@@ -33,6 +44,7 @@ down: ## [미구현] 클러스터 내리기 — 베어메탈에선 파괴 프리
 	@exit 1
 
 bootstrap: ## 멱등 DR 진입점: ArgoCD + sops-age Secret + root app 설치
+	@$(ASSERT_IDENTITY)
 	@bash scripts/bootstrap.sh
 
 verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포계약 + 자원 limit + 원장 + sops 왕복)
@@ -84,6 +96,12 @@ bootstrap-deadmanswitch: ## [M5] 노드 외부 dead-man's-switch ping URL 시드
 	@echo ">> DEAD-MAN'S-SWITCH (R8): ensure healthchecks.io check 'homelab-watchdog' exists"
 	@echo ">> and HEALTHCHECKS_URL is set in platform/victoria-stack/prod/alerting.enc.yaml (M2-seeded)"
 	@echo ">> Full procedure: docs/runbooks/observability-bootstrap.md"
+	@# ⚠️ sops 부재를 **비밀 부재로 오진하지 않는다.** 아래 `2>/dev/null`이 command-not-found까지
+	@#    삼키므로, sops가 없으면 파이프가 빈 입력을 내고 grep이 실패해 "HEALTHCHECKS_URL missing"이
+	@#    찍힌다 — 있지도 않은 시딩 사고를 쫓게 된다. D-i에서 NUC 툴체인을 make+sops 둘로 좁혔으므로
+	@#    이 진단은 컷오버 후 NUC에서 실제로 마주칠 자리다.
+	@command -v sops >/dev/null 2>&1 \
+		|| { echo "FAIL: sops 미설치 — HEALTHCHECKS_URL 시딩 여부를 확인할 수 없다(부재로 단정하지 않는다)"; exit 1; }
 	@sops --decrypt platform/victoria-stack/prod/alerting.enc.yaml 2>/dev/null | grep -q 'HEALTHCHECKS_URL' \
 		|| { echo "FAIL: HEALTHCHECKS_URL missing from M2-seeded SOPS secret"; exit 1; }
 	@echo "OK: dead-man's-switch ping URL present (armed once relay pod runs)"
@@ -232,6 +250,7 @@ verify-runbook-index: ## [local] 런북 인덱스↔docs/runbooks 정합(런북 
 .PHONY: verify-posture
 verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 부재=SKIP
 	@if [ -f "$(KUBECONFIG_LIVE)" ]; then \
+	  $(ASSERT_IDENTITY_WARN); \
 	  KUBECONFIG=$(KUBECONFIG_LIVE) bats $(POSTURE_BATS); \
 	else echo "SKIP: verify-posture: $(KUBECONFIG_LIVE) 부재 — 라이브 posture 미평가. 먼저 make up"; exit 4; fi
 
@@ -283,18 +302,22 @@ backup-local-asset: ## [DR] 런북 tarball을 age 백업(OUT=<git 밖 경로>). 
 .PHONY: argo-status argo-sync argo-terminate argo-wait render kubeconfig audit audit-orphan-pv
 
 argo-status: ## [ops] ArgoCD Application 목록 — sync/health/멈춘 operation phase
+	@$(ASSERT_IDENTITY_WARN)
 	@KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd get applications \
 	  -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,OPERATION:.status.operationState.phase
 
 argo-sync: ## [ops] APP= 명시 sync 트리거(retry 소진 후 재시도). 예: make argo-sync APP=cnpg
 	@test -n "$(APP)" || { echo "APP=<application> 필요 (make argo-status로 이름 확인)"; exit 1; }
+	@$(ASSERT_IDENTITY)
 	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd patch app $(APP) --type merge -p '{"operation":{"sync":{}}}'
 
 argo-terminate: ## [ops] APP= 멈춘 operation 종료(phase=Terminating). 예: make argo-terminate APP=cnpg
 	@test -n "$(APP)" || { echo "APP=<application> 필요"; exit 1; }
+	@$(ASSERT_IDENTITY)
 	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd patch app $(APP) --subresource status --type merge -p '{"status":{"operationState":{"phase":"Terminating"}}}'
 
 argo-wait: ## [ops] Application이 Healthy 될 때까지 대기(APP= 미지정 시 전체)
+	@$(ASSERT_IDENTITY_WARN)
 	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy application $(if $(APP),$(APP),--all) --timeout=300s
 
 render: ## [ops] COMP= KSOPS 풀 렌더(복호 읽기, 라이브 무영향). 예: make render COMP=cnpg
@@ -308,6 +331,7 @@ audit: ## [ops] 레포 정적 드리프트 감사(registry↔매니페스트↔�
 	@bun tools/audit-orphans.ts
 
 audit-orphan-pv: ## [ops][live] 고아 Released PV 감사(PVC 삭제+Retain hostPath 누수 나열, 파괴 없음)
+	@$(ASSERT_IDENTITY_WARN)
 	@KUBECONFIG=$(KUBECONFIG_LIVE) bash scripts/audit-orphan-pv.sh
 
 .PHONY: teardown-app teardown-resource
