@@ -294,9 +294,12 @@ KEOF
   [ "$status" -eq 0 ]
 }
 
-@test "an empty registry trips the scan-floor, and --min-registry 0 lets a fixture opt out" {
+@test "an empty registry trips the scan-floor at any positive floor, and 0 lets it through" {
+  # ⚠️ 바닥값을 **명시해서** 부른다 — 기본값은 인-레포 앱 0개에 맞춰 0이라(page #455 ·
+  #    trip-mate-api 철거) 무인자 호출로는 트립을 볼 수 없다. 수치를 박아야 "바닥값이 실제로
+  #    작동한다"는 계약이 앱 개수와 무관하게 증명된다.
   echo '[]' > "$FR/infra/cloudflare/apps.json"
-  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry 1
   [ "$status" -eq 1 ]
   out="$output"
   run grep -q "scan-floor" <<<"$out"

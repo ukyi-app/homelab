@@ -29,7 +29,9 @@
 # bash 3.2 호환: [[ ]]·mapfile 금지(중간 단언 [ ]/grep). --root로 픽스처 tmp git 레포 지정 가능.
 set -euo pipefail
 
-ROOT=""; ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=1; ROOT_OVERRIDDEN=0; MIN_SCAN_APPS_SET=0
+# ⚠️ MIN_SCAN_APPS 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거).
+#    앱이 0개인 동안은 레인2 열거 0건이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
+ROOT=""; ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; ROOT_OVERRIDDEN=0; MIN_SCAN_APPS_SET=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT="$2"; ROOT_OVERRIDDEN=1; shift 2 ;;
@@ -174,8 +176,8 @@ if [ "$scanned" -lt "$MIN_SCAN" ]; then
   echo "ERROR: 스캔 무결성 의심 — 이미지 ${scanned}건(<${MIN_SCAN}). 글롭/제외 경로 파손 가능(scan-floor)." >&2
   exit 1
 fi
-# ⚠️ **합계 바닥값은 작은 레인의 붕괴를 원리적으로 못 잡는다.** 실측 분해: 레인1(platform) 34건 ·
-# 레인2(apps) 2건. 레인2가 0이 돼도 레인1만으로 34 ≥ 20이라 위 검사는 절대 발화하지 않는다 —
+# ⚠️ **합계 바닥값은 작은 레인의 붕괴를 원리적으로 못 잡는다.** 실측 분해(앱 철거 전): 레인1
+# (platform) 34건 · 레인2(apps) 2건. 레인2가 0이 돼도 레인1만으로 34 ≥ 20이라 위 검사는 절대 발화하지 않는다 —
 # 그동안 apps 레인의 digest 핀 강제가 통째로 사라져도 초록이었다는 뜻이다. 레인마다 자기 바닥값이 필요하다.
 # (레인1은 합계 바닥값이 사실상 전담한다 — 레인2 최대치가 한 자릿수라 34가 무너지면 합계가 먼저 걸린다.)
 # 픽스처 모드(--root)엔 **기본값을** 적용하지 않는다 — 픽스처는 정당하게 한 레인만 만든다
