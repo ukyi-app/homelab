@@ -34,10 +34,14 @@ setup() {
 }
 
 @test "public path serves through Traefik via the tunnel" {
-  # whoami는 설계상 내부 전용(web-internal-tls) — 공개 DNS 레코드는 apex/www + 활성 앱 host(현재 page)다.
-  # 공개 경로 증명은 page 앱의 /health로 한다 (DNS→Cloudflare→tunnel→Traefik web-public→page).
-  # (구 'api' 앱은 미배포 — apps.json의 활성 public 앱이 권위. page.${DOMAIN}/health=200 확인.)
-  run bash -c "curl -s -o /dev/null -w '%{http_code}' https://page.${DOMAIN}/health"
+  # whoami는 설계상 내부 전용(web-internal-tls) — 공개 DNS 레코드는 apex/www + platform_hosts + 활성 앱 host다.
+  # ⚠️ 인-레포 배포 앱이 **0개**가 되어(page #455 · trip-mate-api 철거) 활성 앱 host가 없다.
+  #    공개 경로 증명을 `files`로 옮긴다(reserved-hosts.json의 platform_hosts — dns.tf:18 "베스포크
+  #    컴포넌트 다운로드 표면"). 경로는 동일하다: DNS→Cloudflare→tunnel→Traefik web-public→files.
+  #    files의 /healthz·/readyz는 **internal 포트** 전용이라 공개 표면이 아니다 → 루트(GET /)로 친다
+  #    (라이브 실측 2026-08-12: files.ukyi.app/ = 200 · /health = 404 · page.ukyi.app/health = 000).
+  #    앱을 다시 온보딩하면 활성 public 앱 host로 되돌리는 편이 증명력이 높다(앱 경로를 실제로 탄다).
+  run bash -c "curl -s -o /dev/null -w '%{http_code}' https://files.${DOMAIN}/"
   [ "$output" = "200" ]
 }
 

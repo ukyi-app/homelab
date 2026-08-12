@@ -126,7 +126,7 @@ spec:
                 # bump-tag.ts의 syncDigestExporter(bump한 앱이 이 목록에 있으면 태그를 같이 옮긴다 —
                 # 안 옮기면 stale 참조가 거짓 ImageDigestDrift를 낸다).
                 - name: APPS
-                  value: "page=ghcr.io/ukyi-app/page:sha-e0f16c719673120721a092a6c0c22229b2034f9c trip-mate-api=ghcr.io/ukyi-app/trip-mate-api:sha-e6047855d8ed99bea2c798d84f284deb2d1f3352" # 공개 git SHA 이미지 태그(시크릿 아님) — gitleaks:allow
+                  value: "" # 공개 git SHA 이미지 태그(시크릿 아님) — gitleaks:allow
               resources:
                 requests: { cpu: 20m, memory: 32Mi }
                 limits: { memory: 64Mi }

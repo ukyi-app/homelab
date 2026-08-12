@@ -20,4 +20,7 @@ ArgoCD appset(`platform/argocd/root/appset.yaml`)이 `apps/*/deploy/prod`를 싱
 CronJob 등이 참조하는 빌드-전용 이미지(예: `pg-tools`)는 **`ops/<name>/`**(Dockerfile만, `deploy/` 없음 — GHCR로
 이미지만 발행). `apps/`는 ArgoCD가 워크로드로 싱크하는 배포 앱 전용이다. `build.yaml`은 `ops/**`만 빌드한다.
 
-> 현재 인레포 배포 앱 1개(page) — 계약 가드가 필수 산출물을 강제한다.
+> 현재 인레포 배포 앱 **0개** — `page`(#455)·`trip-mate-api`를 철거했다. 이 디렉토리는 빈 채로 남는다
+> (`check-skeleton`이 `apps` 존재를 요구하고 git은 빈 디렉토리를 추적하지 않으므로 이 README가 그 자리를 지킨다).
+> 앱 개수에 걸린 바닥값 4개(`APP_DEPLOY_MIN_SCAN`·`APP_NETPOL_MIN_SCAN`·`MIN_SCAN_APPS`·`--min-registry`)를
+> 그에 맞춰 0으로 낮춰 뒀다 — **새 앱을 온보딩하면 1로 되돌릴 것**(각 소스의 ⚠️ 주석에 표시).
