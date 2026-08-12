@@ -40,6 +40,7 @@
   검사(가드 없는 인덱스 드리프트 소멸). **`make verify`**·gate(`tests/gates/test_check-doc-index.bats`)가 호출. 순수 문자열 검사.
 - **`check-app-netpol.sh`** — `apps/<app>/deploy/**`의 app-owned NetworkPolicy가 app-scoped 셀렉터
   (`app.kubernetes.io/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). **`make verify`**가 호출. netpol 0건은 통과지만 **매니페스트 열거 0건은 scan-floor로 실패**(vacuous pass 아님).
+- **`check-pg-servername.sh`** — CNPG **아카이브 serverName** 분리 가드. `serverName` 한 줄이 `s3://<bucket>/<serverName>/`를 통째로 정하고, 두 primary가 같은 값을 쓰면 타임라인이 섞여 오프사이트 PITR 경로가 망가진다(R2 버저닝 없음 = 되돌릴 수 없음). (A) 쓰기 ≠ 읽기 정합은 항상, (B) `EXPECT_PG_SERVERNAME` 고정은 **main 진입 시에만**(`check-argocd-revision.sh`와 같은 이유로 분리).
 - **`check-argocd-revision.sh`** — ArgoCD **자기레포** 리비전 핀 정합. `repoURL`을 가진 맵 노드를 **재귀로**
   뽑아(Application 단일/다중 소스 · ApplicationSet template 소스 · git generator `revision` — 모양을 세지 않는다)
   자기레포 참조 전건이 **같은 값**인지 강제한다(A). `EXPECT_REVISION`(또는 `--expect`)이 주어지면 그 값과의

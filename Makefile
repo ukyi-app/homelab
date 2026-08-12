@@ -151,6 +151,7 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 # ArgoCD 자기레포 리비전 정합. 로컬은 (A)만 — (B) main 고정은 "어느 브랜치로 들어가는가"라는
 # CI 개념이라 EXPECT_REVISION을 ci.yaml이 채운다(로컬에서 재현할 대상이 없다).
 	bash scripts/check-argocd-revision.sh
+	bash scripts/check-pg-servername.sh
 	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
 	@bash scripts/sops-guard.sh
