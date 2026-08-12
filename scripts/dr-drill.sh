@@ -37,6 +37,12 @@ fi
 SEALED_KEY_BACKUP_DIR="${SEALED_KEY_BACKUP_DIR:-}"  # 소비자 ≥1 또는 committed cert 존재 시 필요(git 밖 백업)
 NS="database"
 LIVE_CLUSTER="pg"
+# ⚠️ k8s Cluster 이름과 아카이브 serverName은 다른 것이다(restore-drill-script.sh와 같은 이유).
+#    [0.5]의 "파괴 전 복구 가능성 증명"이 **엉뚱한 아카이브**를 복구하면, 그 증명이 통과한 뒤
+#    노드를 파괴한다 — 증명 대상과 파괴 대상이 어긋난다.
+ARCHIVE_SERVER="$(kubectl -n "$NS" get cluster "$LIVE_CLUSTER" \
+  -o jsonpath='{.spec.plugins[?(@.name=="barman-cloud.cloudnative-pg.io")].parameters.serverName}' 2>/dev/null || true)"
+[ -n "$ARCHIVE_SERVER" ] || { echo "DR DRILL FAIL: Cluster ${LIVE_CLUSTER}에서 아카이브 serverName을 파생하지 못했다 — 무엇을 복구할지 모른 채 파괴할 수 없다" >&2; exit 1; }
 DB="app"
 KUBECONFIG_PATH="$REPO_ROOT/infra/k3s-bootstrap/kubeconfig"
 
@@ -80,7 +86,7 @@ spec:
     - name: r2-source
       plugin:
         name: barman-cloud.cloudnative-pg.io
-        parameters: { barmanObjectName: pg-r2, serverName: ${LIVE_CLUSTER} }
+        parameters: { barmanObjectName: pg-r2, serverName: ${ARCHIVE_SERVER} }
 YAML
   local phase=""
   for _ in $(seq 1 80); do
