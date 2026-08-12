@@ -17,8 +17,18 @@ setup() {
   # OrbStack 시절의 `orb -m k3s -u root <cmd>` 간접이 사라졌으므로 스텁도 그 모양을 버린다.
   echo "$K3S_NODE_IP" > "$STUBDIR/nodeip.txt"
   echo "$K3S_NODE_NAME" > "$STUBDIR/nodename.txt"
+  # ⚠️ **실제 openssl 출력 형식이어야 한다.** 예전 픽스처는 `SAN:<값>`이라는 존재하지 않는 접두를
+  #    썼는데, 검사가 부분일치(grep -F)라 그래도 통과했다. 정확일치로 바꾸면 그 가짜 형식이 곧바로
+  #    드러난다 — 픽스처가 실물과 다르면 게이트는 아무것도 증명하지 못한다.
+  #    라이브 실측: `DNS:kubernetes, …, DNS:nuc-15-pro, DNS:nuc-15-pro.tailcf1ac6.ts.net,
+  #                  IP Address:192.168.117.15, IP Address:100.109.208.81, …`
   printf 'X509v3 Subject Alternative Name:\n    DNS:localhost, DNS:homelab, IP Address:127.0.0.1' > "$STUBDIR/certsans.txt"
-  for s in $K3S_TLS_SANS; do printf ', SAN:%s' "$s" >> "$STUBDIR/certsans.txt"; done
+  for s in $K3S_TLS_SANS; do
+    case "$s" in
+      [0-9]*) printf ', IP Address:%s' "$s" >> "$STUBDIR/certsans.txt" ;;
+      *)      printf ', DNS:%s' "$s" >> "$STUBDIR/certsans.txt" ;;
+    esac
+  done
   cat >"$STUBDIR/noderun" <<'EOF'
 #!/usr/bin/env bash
 # `$K3S_RUN <cmd...>` 대역. 알려진 하위 명령만 흉내낸다.
@@ -33,11 +43,17 @@ EOF
   chmod +x "$STUBDIR/noderun"
   export K3S_RUN="$STUBDIR/noderun"
 
+  # 라이브 설치 argv — [4]가 보는 권위다. 건강한 기본값은 실제 노드에서 뜬 것과 같은 모양으로 둔다
+  # (servicelb 없음 · --secrets-encryption 있음). 개별 @test가 이 파일을 덮어쓴다.
+  printf '["server","--node-ip","%s","--node-name","%s","--disable","traefik,local-storage,metrics-server","--secrets-encryption"]' \
+    "$K3S_NODE_IP" "$K3S_NODE_NAME" > "$STUBDIR/nodeargs.txt"
+
   cat >"$STUBDIR/kubectl" <<'EOF'
 #!/usr/bin/env bash
 args="$*"
 case "$args" in
   *"nodeInfo.kubeletVersion"*) cat "$STUBDIR/kubeletversion.txt" ;;
+  *"node-args"*)         cat "$STUBDIR/nodeargs.txt" ;;
   *"InternalIP"*)        cat "$STUBDIR/nodeip.txt" ;;
   *"metadata.name"*)     cat "$STUBDIR/nodename.txt" ;;
   *"get nodes"*)         cat "$STUBDIR/nodestatus.txt" ;;
@@ -69,18 +85,30 @@ teardown() { rm -rf "$STUBDIR"; }
   [[ "$output" == *"traefik"* ]]
 }
 
-@test "fails when servicelb is disabled in the k3s install flags (must be kept)" {
-  # 스크립트는 플래그 계약을 단언한다 (svclb pod는 M3에서 온디맨드). servicelb를
-  # 비활성화하는 잘못된 install 스크립트는 반드시 가드에 걸려야 한다.
-  BAD="$STUBDIR/bad-k3s-install.sh"
-  cat >"$BAD" <<'EOF'
-#!/usr/bin/env bash
-echo "server --disable=traefik,servicelb,local-storage,metrics-server --secrets-encryption"
-EOF
-  chmod +x "$BAD"
-  K3S_INSTALL_SCRIPT="$BAD" run "$BOOTSTRAP_DIR/verify-cluster.sh"
+@test "fails when servicelb is disabled in the LIVE k3s flags (must be kept)" {
+  # 스크립트는 플래그 계약을 단언한다 (svclb pod는 M3에서 온디맨드).
+  # ⚠️ 예전엔 레포의 k3s-install.sh를 스텁으로 갈아끼워 검사했다 — 그건 "스크립트가 무엇을 낼
+  #    것인가"만 증명하고 **라이브가 그 플래그로 설치됐는가**는 전혀 증명하지 않았다. 지금은
+  #    k3s가 설치 시 남기는 node-args 어노테이션이 권위다(같은 파일 [8]·[9]와 같은 기조).
+  printf '["server","--disable","traefik,servicelb,local-storage,metrics-server","--secrets-encryption"]' > "$STUBDIR/nodeargs.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
   [ "$status" -ne 0 ]
   [[ "$output" == *"servicelb"* ]]
+}
+
+@test "fails when the live node-args annotation is unreadable (empty is not a pass)" {
+  # 어노테이션을 못 읽으면 servicelb 부재를 '확인'한 것이 아니라 아무것도 안 본 것이다.
+  : > "$STUBDIR/nodeargs.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'node-args'
+}
+
+@test "fails when the live flags lack --secrets-encryption" {
+  printf '["server","--disable","traefik,local-storage,metrics-server"]' > "$STUBDIR/nodeargs.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'secrets-encryption'
 }
 
 @test "fails when secrets-encryption is disabled" {
@@ -131,10 +159,21 @@ EOF
 @test "fails when a pinned SAN is missing from the LIVE serving cert (not just the flag string)" {
   # ⚠️ 이 @test가 [8]의 존재 이유다. 스크립트가 방출하는 플래그를 grep하면 "스크립트가 그렇게 낼
   #    것이다"만 증명된다. --tls-san은 설치 시점에만 정해지므로 **라이브 cert**를 봐야 한다.
-  printf 'X509v3 Subject Alternative Name:\n    DNS:localhost, IP Address:127.0.0.1' > "$STUBDIR/certsans.txt"
+  # ⚠️ 픽스처는 k3s가 기본으로 넣는 SAN들로 채운다 — 핀만 빠진 cert여야 이 @test가 "핀 부재"를
+  #    보는 것이지, 토큰이 몇 개 없으면 형식 바닥값에 먼저 걸려 **다른 이유로 red**가 된다
+  #    (그러면 status는 여전히 비-0이라 단언이 통과해 버려, 무엇을 증명했는지 알 수 없어진다).
+  printf 'X509v3 Subject Alternative Name:\n    DNS:kubernetes, DNS:kubernetes.default, DNS:kubernetes.default.svc, DNS:localhost, DNS:k3s, IP Address:127.0.0.1, IP Address:10.43.0.1' > "$STUBDIR/certsans.txt"
   run "$BOOTSTRAP_DIR/verify-cluster.sh"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -q 'serving cert에 없는 SAN'
+}
+
+@test "a mangled SAN format is reported as a format problem, not as missing pins" {
+  # 토큰화가 깨지면(openssl 출력 형식 변화 등) 핀 전건이 missing으로 보인다 — 그 오진을 막는 바닥값.
+  printf 'X509v3 Subject Alternative Name:\n    DNS:localhost' > "$STUBDIR/certsans.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q '토큰'
 }
 
 @test "fails when the serving cert cannot be read at all (empty SAN output is not a pass)" {
@@ -146,14 +185,29 @@ EOF
 
 @test "an emptied SAN list trips THIS script's own floor, not just the installer's" {
   # 루프가 0회 도는 것은 통과가 아니다(scan-floor와 같은 규약).
-  # ⚠️ `K3S_INSTALL_SCRIPT`를 스텁으로 바꾼다. 안 그러면 [4]가 부르는 진짜 k3s-install.sh의
-  #    **자기 바닥값**이 먼저 죽어서, verify-cluster의 바닥값을 지워도 이 @test가 통과한다 —
-  #    역방향 뮤테이션에서 실제로 그랬다(죽은 규칙으로 보였다). 스텁이 그 그늘을 걷어낸다.
+  # ⚠️ 예전엔 여기서 `K3S_INSTALL_SCRIPT`를 스텁으로 갈아끼워야 했다 — [4]가 진짜 k3s-install.sh를
+  #    실행했고 그 **자기 바닥값**이 먼저 죽어서, verify-cluster의 바닥값을 지워도 이 @test가
+  #    통과했기 때문이다(역방향 뮤테이션에서 죽은 규칙으로 보였다). [4]가 라이브 어노테이션을
+  #    보게 된 지금은 그 그늘 자체가 없어서 스텁이 필요 없다.
   cp -R "$BOOTSTRAP_DIR" "$STUBDIR/bs"
   sed -i.bak 's/^export K3S_TLS_SANS=.*/export K3S_TLS_SANS=""/' "$STUBDIR/bs/versions.env"
-  STUB="$STUBDIR/ok-install.sh"
-  printf '#!/usr/bin/env bash\necho "server --secrets-encryption"\n' > "$STUB"; chmod +x "$STUB"
-  K3S_INSTALL_SCRIPT="$STUB" run "$STUBDIR/bs/verify-cluster.sh"
+  run "$STUBDIR/bs/verify-cluster.sh"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -q 'K3S_TLS_SANS'
+}
+
+@test "a SAN that is only a prefix of a longer one does not count as present" {
+  # ⚠️ 라이브 SAN은 `DNS:nuc-15-pro, DNS:nuc-15-pro.tailcf1ac6.ts.net` 형태다. 부분일치로 보면
+  #    짧은 이름이 cert에서 **빠져도** 긴 이름에 매치돼 초록이 된다 — 정확일치가 그것을 막는다.
+  printf 'X509v3 Subject Alternative Name:\n    DNS:localhost, IP Address:127.0.0.1' > "$STUBDIR/certsans.txt"
+  for s in $K3S_TLS_SANS; do
+    case "$s" in
+      nuc-15-pro) : ;;                                  # 짧은 이름만 뺀다(FQDN은 남긴다)
+      [0-9]*) printf ', IP Address:%s' "$s" >> "$STUBDIR/certsans.txt" ;;
+      *)      printf ', DNS:%s' "$s" >> "$STUBDIR/certsans.txt" ;;
+    esac
+  done
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'nuc-15-pro'
 }
