@@ -39,7 +39,7 @@ f=platform/cnpg/prod/cluster.yaml
   [ "$status" -ne 0 ]
 }
 
-@test "the archive WRITE serverName differs from the recovery READ serverName (dual-run separation)" {
+@test "the archive WRITE serverName differs from the recovery READ serverName (archive separation — PERMANENT, not a cutover revert item)" {
   # ⚠️ 이 레포에서 되돌리기가 가장 비싼 불변식이다. 같아지면 라이브 Mac과 NUC 두 primary가 같은 R2
   #    prefix에 아카이브해 타임라인이 섞이고, 오프사이트 PITR 경로(restore.md 경로 A)가 망가진다.
   #    R2에 버저닝이 없어(infra/cloudflare/r2.tf) 되돌릴 수 없다. 계획서 §3.4의 ❌ 항목.

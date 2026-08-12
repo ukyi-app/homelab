@@ -23,7 +23,13 @@ resources:
   - digest-exporter.yaml
   - gha-liveness-exporter.yaml # GHA 스케줄 워크플로 liveness 하트비트(티켓 10 — run 밖 관측자)
   - pvc-du-exporter.yaml  # per-PVC 용량 가시화 CronJob + 전용 egress netpol(메타갭 ③ W1-A)
-  - deadmanswitch-relay.yaml
+  # ── dual-run: 라이브 Mac과 병행 운용하는 동안만 비활성 (컷오버에서 주석을 푼다) ──
+# ⚠️ Watchdog는 **항상** 발화하므로 relay는 healthchecks.io를 계속 ping한다. 두 클러스터가 같은
+#    체크를 ping하면 **라이브 Mac이 죽어도 체크가 초록으로 남는다** — 라이브 장애를 감지하는
+#    마지막 오프노드 안전망이 침묵한다. HEALTHCHECKS_URL은 KSOPS(age)라 NUC에서 그대로 복호화된다.
+#    계획서 §3.4는 바로 이 성질 때문에 healthchecks를 '최종 게이트'로 쓰라고 한다 — 그렇다면
+#    더더욱 그 전에 오염시키면 안 된다.
+# - deadmanswitch-relay.yaml # dual-run
   - grafana-provisioning.yaml
   - grafana-dashboards.yaml
   - grafana.yaml
