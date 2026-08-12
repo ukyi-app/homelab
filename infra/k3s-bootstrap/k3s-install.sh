@@ -13,6 +13,10 @@
 #   K3S_KUBECONFIG_SERVER 설정 시 회수한 kubeconfig의 server URL을 이 값으로 재작성.
 #                         (원격 워크스테이션에서 쓰려면 필요 — 미설정 시 노드 로컬 127.0.0.1 그대로)
 #
+# kubeconfig 정체성: 회수 직후 `kubeconfig-identity.sh`가 context·cluster·user 6필드를
+# versions.env의 K3S_KUBECONFIG_NAME으로 각인한다(D-i). 시임이 아니라 **핀**이다 — 라이브 Mac의
+# kubeconfig와 경로·포트·노드명이 전부 같아서, 이 이름이 두 클러스터를 가르는 첫 단서다.
+#
 # ⚠️ 이식 전 이 파일의 :39-63은 **테스트가 한 줄도 없었다**. `test_05-k3s-flags.bats`와
 #    `verify-cluster.sh`가 **둘 다** `K3S_PRINT_EXEC=1` 경로만 썼고 그 모드는 플래그를 찍고 조기
 #    종료했기 때문이다. 이식에서 가장 크게 바뀌는 절반이 무방비였다 — 위 시임들이 그 구멍을 닫는다.
@@ -115,11 +119,17 @@ _tmp="${KUBECONFIG_PATH}.tmp.$$"
 trap "rm -f '$_tmp'" EXIT
 $K3S_RUN cat /etc/rancher/k3s/k3s.yaml > "$_tmp" || fail "kubeconfig 회수 실패 — /etc/rancher/k3s/k3s.yaml"
 [ -s "$_tmp" ] || fail "회수한 kubeconfig가 비어 있다"
+# 정체성 각인(D-i) — k3s의 기본 이름(context·cluster·user 전부 `default`)을 이 클러스터 이름으로
+# 바꾼다. 라이브 Mac의 kubeconfig와 경로·포트·노드명이 전부 같아서, 이 이름이 두 클러스터를 가르는
+# 첫 텍스트 단서다. 위임하는 이유: 소급 적용(이미 회수된 파일)이 **같은 구현**을 써야 하기 때문이다.
+# ⚠️ server는 노드 로컬에서 127.0.0.1을 그대로 둔다 — k3s는 tailscaled와 순서 관계가 없어
+#    부팅 직후 tailscale0이 아직 없는 창이 있다. 원격용 사본에만 K3S_KUBECONFIG_SERVER를 준다.
 if [ -n "$K3S_KUBECONFIG_SERVER" ]; then
-  # 노드 로컬 기본값은 https://127.0.0.1:6443 이다. 원격에서 쓰려면 SAN에 있는 이름으로 바꾼다.
-  sed -i.bak "s#server: https://127.0.0.1:6443#server: ${K3S_KUBECONFIG_SERVER}#" "$_tmp"
-  rm -f "${_tmp}.bak"
-  grep -qF "server: ${K3S_KUBECONFIG_SERVER}" "$_tmp" || fail "kubeconfig server 재작성 실패 — ${K3S_KUBECONFIG_SERVER}"
+  "$SCRIPT_DIR/kubeconfig-identity.sh" --file "$_tmp" --name "$K3S_KUBECONFIG_NAME" --server "$K3S_KUBECONFIG_SERVER" \
+    || fail "kubeconfig 정체성 각인 실패(server=${K3S_KUBECONFIG_SERVER})"
+else
+  "$SCRIPT_DIR/kubeconfig-identity.sh" --file "$_tmp" --name "$K3S_KUBECONFIG_NAME" \
+    || fail "kubeconfig 정체성 각인 실패"
 fi
 mv "$_tmp" "$KUBECONFIG_PATH"
 chmod 0600 "$KUBECONFIG_PATH"

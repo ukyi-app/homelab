@@ -110,7 +110,25 @@ esac
 REC
   chmod +x "$SB/bin/rec"
   printf '#!/bin/sh\necho fake-installer\n' > "$SB/installer.sh"
-  printf 'apiVersion: v1\nclusters:\n- cluster:\n    server: https://127.0.0.1:6443\n' > "$SB/kubeconfig.src"
+  # ⚠️ **k3s가 실제로 내는 형태여야 한다.** 회수 직후 kubeconfig-identity.sh가 이름 6필드를 각인하는데
+  #    (context·cluster·user 전부 `default`), 픽스처에 그 필드가 없으면 각인기가 "형태가 예상과
+  #    다르다"로 정지한다 — 그건 스크립트의 결함이 아니라 픽스처가 실물과 다른 것이다.
+  #    라이브 실측 형태 그대로 둔다(주석/데이터 줄만 뺐다).
+  printf '%s\n' \
+    'apiVersion: v1' \
+    'clusters:' \
+    '- cluster:' \
+    '    server: https://127.0.0.1:6443' \
+    '  name: default' \
+    'contexts:' \
+    '- context:' \
+    '    cluster: default' \
+    '    user: default' \
+    '  name: default' \
+    'current-context: default' \
+    'kind: Config' \
+    'users:' \
+    '- name: default' > "$SB/kubeconfig.src"
   export REC_LOG="$SB/argv.log" SB
   : > "$REC_LOG"
 }
@@ -131,6 +149,19 @@ _run_install() {
   printf '%s' "$(cat "$REC_LOG")" | grep -qF -- "INSTALL_K3S_VERSION=${K3S_VERSION}"
   printf '%s' "$(cat "$REC_LOG")" | grep -qF -- "--secrets-encryption"
   printf '%s' "$(cat "$REC_LOG")" | grep -qF -- "--node-ip=${K3S_NODE_IP}"
+}
+
+@test "install path: stamps the cluster identity into the retrieved kubeconfig" {
+  # D-i: 회수한 kubeconfig는 k3s 기본 이름(`default`)으로 남으면 안 된다. 라이브 Mac의 kubeconfig와
+  # 경로·포트·노드명이 전부 같아서, 이 이름이 두 클러스터를 가르는 첫 텍스트 단서이기 때문이다.
+  # ⚠️ 이 @test가 없으면 위임 호출을 통째로 지워도 나머지 install-path @test가 전부 통과한다.
+  _sandbox; touch "$SB/ready"
+  run _run_install env
+  [ "$status" -eq 0 ]
+  source "$BOOTSTRAP_DIR/versions.env"
+  grep -qx "current-context: ${K3S_KUBECONFIG_NAME}" "$SB/kubeconfig.out"
+  run grep -cE '^(  name|- name|    cluster|    user|current-context): default$' "$SB/kubeconfig.out"
+  [ "$output" = "0" ]
 }
 
 @test "install path: writes the kubeconfig 0600 and does not leave a temp file" {
