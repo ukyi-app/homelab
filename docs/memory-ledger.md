@@ -9,7 +9,7 @@ limit 합계가 이를 초과하면 새 앱 온보딩은 CI에서 실패한다 (
 ## 모델 주석 — 명목 잔여 ≠ 실 헤드룸 (의도적 보수성)
 
 이 합계는 **limit-합 가드(cap)**이지 실제 RAM 예약이 아니다. k8s는 requests만 스케줄에 강제하고
-limit over-commit을 허용하므로, limit 합(현재 9212)은 *동시-peak 상한*일 뿐 실사용이 아니다.
+limit over-commit을 허용하므로, limit 합(현재 8700)은 *동시-peak 상한*일 뿐 실사용이 아니다.
 실측(2026-06-22): 전 파드 working_set ≈ 2244Mi · 동시 peak(라이브 limit합) ≈ 6586Mi · MemAvailable
 ≈ 7925Mi(66%) — 물리 RAM은 막대히 여유다. 10240 cap은 의도적 보수치(VM 12GiB에서 page-cache/burst·
 OS reserve를 떼어둠)로 "OOM 전에 예산 경계에서 시끄럽게 실패"시키는 가드다. (원래 8704였으나 명목
@@ -57,7 +57,8 @@ standalone PVC `vmsingle-data-bulk`·`vlogs-bulk`**로 이전 — 메모리 예�
 pod만 ~170Mi). (`edge`·`cnpg` limit 보수 버퍼는 2026-06-22 right-size에서 라이브 정합 회수 — 단 `edge`
 req는 176으로 stale하게 남아 있어 2026-07-06 실측(adguard 48 + cloudflared 48 = 96)으로 정정(−80 req);
 `cert-manager`· tailscale proxy는 무제한이었으나 같은 날 거버넌스 캡 신설해 예산에 편입.) 따라서 명목
-잔여(10240−9212 = 1028, VM 12 GiB 증설 후)는 실 헤드룸을 과소표현한다(여전히 동시 peak ≈ 6586 ≪ allocatable ~10744).
+잔여(10240−8700 = 1540, VM 12 GiB 증설 + 앱 2개 철거 후)는 실 헤드룸을 과소표현한다
+(2026-06-22 실측 동시 peak ≈ 6586 ≪ allocatable ~10744 — 그 뒤 앱 철거로 더 내려갔다).
 더 많은 명목 헤드룸이 필요하면 (a) 상주 워크로드를 라이브 peak 실측에 맞게 right-size해 limit을 회수한다
 (2026-06-22 observability/argocd/edge/cnpg 808Mi 회수; postgres·최근 OOM 수정분은 보호. 2026-07 B10에서
 sealed-secrets 128→96·vmsingle 1Gi→896으로 −160Mi 추가 회수, 명목 잔여 196→356(당시 ≥256 온보딩 차단 해소 —
@@ -87,10 +88,9 @@ check-resource-limits 스캔 밖이라 여기 수기 계상). 신규/변경 상�
 | <!-- ledger:row --> homepage       | homepage       |    128 |      192 |
 | <!-- ledger:row --> glances        | observability  |     64 |      128 |
 | <!-- ledger:row --> cache-trip-mate | cache          |     96 |      160 |
-| <!-- ledger:row --> trip-mate-api  | prod           |    128 |      256 |
 | <!-- ledger:row --> files          | files          |     32 |      128 |
 
-**합계:** req ≈ 4803 Mi · limit ≈ 8956 Mi (반드시 ≤ 10240 Mi 유지).
+**합계:** req ≈ 4675 Mi · limit ≈ 8700 Mi (반드시 ≤ 10240 Mi 유지).
 (`pg-tools`는 CronJob용 ops 이미지 — 일시적이므로 상주 워크로드 행이 없다. worker/web/console
 values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 앱은 온보딩 PR이 행을 추가한다.)
 

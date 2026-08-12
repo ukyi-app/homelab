@@ -388,13 +388,16 @@ _fixture_repo() {
 # ⚠️ 이 단언은 예전에 루트를 **옵셔널**로 써서(`(ops\+)?`) 실제로는 아무 루트도 강제하지 못했다 —
 # `ops` 분기가 죽어 있어도 초록이었다(적대 검토 지적). 이제 **정확한 집합**으로 못박는다.
 # 루트가 하나라도 빠지면 그 경로의 이미지가 "전건 소유자 확정"이라는 초록 아래에서 조용히 사라진다.
-@test "image-ownership covers exactly platform, apps, ops and infra (no root silently missing)" {
+@test "image-ownership covers exactly platform, ops and infra (no root silently missing)" {
+  # ⚠️ `apps`가 빠진 것은 스코프 파손이 아니라 **인-레포 배포 앱이 0개**이기 때문이다
+  #    (page #455 · trip-mate-api 철거). 루트는 매니페스트가 있을 때만 나타난다.
+  #    앱을 다시 온보딩하면 이 기대 집합에 `apps+`를 되돌려야 한다 — 그때 이 단언이 red로 알려준다.
   run walk 'const p = walkManifests("image-ownership").map(e=>e.path);
     const roots = [...new Set(p.map(x=>x.split("/")[0]))].sort();
     const harness = p.filter(x=>/(^|\/)tests?\/|(^|\/)fixtures|(^|\/)test_[^/]*$|\.bats$/.test(x));
     console.log(roots.join("+") + "|" + harness.length)'
   [ "$status" -eq 0 ]
-  [ "$output" == "apps+infra+ops+platform|0" ]
+  [ "$output" == "infra+ops+platform|0" ]
 }
 
 @test "image-ownership includes Dockerfiles (base images are supply chain, and ops/ would be dead without them)" {
