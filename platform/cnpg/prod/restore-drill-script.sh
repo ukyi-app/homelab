@@ -10,6 +10,14 @@ set -euo pipefail
 
 NS="database"
 LIVE_CLUSTER="pg"
+# ⚠️ k8s Cluster 이름(`LIVE_CLUSTER`)과 **아카이브 serverName**은 다른 것이다. NUC 이전에서 갈렸다:
+#    k8s Cluster는 `pg`인데 아카이브는 `pg-nuc`다. 여기서 겸직하면 이 드릴이 **라이브 Mac의 아카이브**를
+#    복구해 NUC의 row와 비교한다 → Mac이 살아 있는 동안 **초록**이 뜨고, 계획서 G7("NUC 자체 백업
+#    체인이 독립적으로 살아있음")이 거짓 통과한다. PONR 1로 `pg/`를 purge한 뒤에야 무너진다.
+#    → 라이브 Cluster에서 파생한다. 파생 실패는 fail-closed(무엇을 복구할지 모른 채 증명할 수 없다).
+ARCHIVE_SERVER="$(kubectl -n "$NS" get cluster "$LIVE_CLUSTER" \
+  -o jsonpath='{.spec.plugins[?(@.name=="barman-cloud.cloudnative-pg.io")].parameters.serverName}' 2>/dev/null || true)"
+[ -n "$ARCHIVE_SERVER" ] || { echo "[drill] FATAL: Cluster ${LIVE_CLUSTER}에서 아카이브 serverName을 파생하지 못했다 — 어느 아카이브를 복구할지 알 수 없다" >&2; exit 1; }
 DRILL_CLUSTER="pg-restore-drill"
 DB="app"
 TABLE="${DRILL_TABLE:-restore_canary}" # 라이브 앱/시드가 유지하는 canary 테이블
@@ -107,7 +115,7 @@ spec:
         name: barman-cloud.cloudnative-pg.io
         parameters:
           barmanObjectName: pg-r2
-          serverName: ${LIVE_CLUSTER}
+          serverName: ${ARCHIVE_SERVER}
 YAML
 
 echo "[drill] waiting for ${DRILL_CLUSTER} to reach healthy phase"

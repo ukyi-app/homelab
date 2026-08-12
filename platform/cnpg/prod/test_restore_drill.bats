@@ -47,3 +47,19 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   grep -qF 'drop: [ALL]' "$cj"
   grep -q 'type: RuntimeDefault' "$cj"
 }
+
+@test "drill recovers THIS cluster's archive — serverName is derived, never the k8s Cluster name" {
+  # ⚠️ 예전엔 `serverName: ${LIVE_CLUSTER}`였다. NUC에서 k8s Cluster는 `pg`인데 아카이브는 `pg-nuc`라
+  #    그 겸직이 깨진다 — 드릴이 **라이브 Mac의 아카이브**를 복구해 NUC row와 비교하고, Mac이 살아
+  #    있는 동안 초록이 뜬다. 계획서 G7("NUC 자체 백업 체인 독립 생존")이 거짓 통과하는 경로다.
+  grep -q 'ARCHIVE_SERVER=' "$sh"
+  grep -q 'parameters.serverName' "$sh"          # 라이브 Cluster에서 파생
+  grep -q 'serverName: ${ARCHIVE_SERVER}' "$sh"  # 그 값을 실제로 쓴다
+  run grep -nE '^[^#]*serverName: \$\{LIVE_CLUSTER\}' "$sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "drill fails closed when the archive serverName cannot be derived" {
+  # 무엇을 복구할지 모른 채 '복구 가능하다'를 증명할 수는 없다.
+  grep -q '어느 아카이브를 복구할지 알 수 없다' "$sh"
+}

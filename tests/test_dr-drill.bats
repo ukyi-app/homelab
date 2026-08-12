@@ -127,3 +127,13 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   grep -q 'files-data PV 미바운드' "$sh"
   grep -q 'files 카탈로그 비어있음' "$sh"
 }
+
+@test "dr-drill proves recovery of THIS cluster's archive (serverName derived, not the k8s name)" {
+  # [0.5]의 '파괴 전 복구 가능성 증명'이 엉뚱한 아카이브를 복구하면, 그 증명이 통과한 뒤 노드를
+  # 파괴한다 — 증명 대상과 파괴 대상이 어긋난다.
+  grep -q 'ARCHIVE_SERVER=' "$sh"
+  grep -q 'parameters.serverName' "$sh"
+  grep -q 'serverName: ${ARCHIVE_SERVER}' "$sh"
+  run grep -nE '^[^#]*serverName: \$\{LIVE_CLUSTER\}' "$sh"
+  [ "$status" -ne 0 ]
+}
