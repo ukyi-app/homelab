@@ -3,6 +3,19 @@ kind: ObjectStore
 metadata:
   name: pg-r2
   namespace: database
+  annotations:
+    # ⚠️ **Cluster CR(wave -1)보다 먼저 apply되어야 한다.** 이 값이 없으면 기본 wave 0이 되어
+    #    Cluster가 먼저 올라가는데, barman-cloud 플러그인은 참조된 ObjectStore가 없으면
+    #    "barman object configuration not found"로 **무한 requeue**하며 pre-reconcile hook이
+    #    reconciliation을 멈춘다 → Cluster가 영원히 Healthy가 되지 않는다 → ArgoCD가 wave -1에서
+    #    대기하므로 **wave 0의 이 ObjectStore는 영원히 apply되지 않는다**(완전한 교착).
+    #    2026-08-13 NUC 첫 bootstrap에서 실측: Cluster가 33분간 INSTANCES/READY 빈 채로 정지.
+    # ⚠️ Mac(main)에서 드러나지 않은 이유 — 그 클러스터는 initdb로 시작해 **점진적으로** 구축됐고
+    #    ObjectStore가 추가될 때 Cluster는 이미 떠 있었다. 즉 이 순서는 **콜드스타트에서만** 문제가
+    #    된다. G11(콜드스타트 증명)이 잡아야 할 결함이 첫 실행에서 드러난 것이다.
+    # generator 산출 Secret(cnpg-r2-creds 등)도 -2다(kustomization.yaml:39). 같은 wave 안에서는
+    # ArgoCD가 Secret을 CRD 인스턴스보다 먼저 적용하므로 s3Credentials 참조가 깨지지 않는다.
+    argocd.argoproj.io/sync-wave: "-2"
 spec:
   retentionPolicy: "14d"
   configuration:
