@@ -44,3 +44,29 @@
   grep -qE 'argocd.argoproj.io/sync-wave:\s*"-3"' "$f"             # 시드(-2)·Cluster(-1)보다 먼저 라벨 적용
   grep -q 'namespace.yaml' platform/cnpg/prod/kustomization.yaml   # kustomization에 배선됨
 }
+
+# ── KSOPS 산출 Secret의 sync-wave (2026-08-13 NUC 첫 bootstrap 교착에서 나온 가드) ──────────
+# ⚠️ **`generatorOptions`는 `generators:`(KSOPS exec plugin) 산출물에 적용되지 않는다.**
+#    kustomize의 generatorOptions는 내장 generator(configMapGenerator/secretGenerator) 전용이다.
+#    그래서 네 시드 Secret은 annotation 없이(= ArgoCD 기본 wave 0) 렌더됐고, Cluster(wave -1)가
+#    자격 Secret보다 먼저 올라가 barman이 R2 자격을 못 얻었다 → recovery 실패 → Cluster가 영원히
+#    Healthy 아님 → ArgoCD가 wave 0으로 넘어가지 않음 → **Secret이 영원히 apply되지 않는 교착**.
+#    kustomization.yaml의 명시적 patch가 그 wave를 붙인다. 이 @test가 그 patch를 고정한다.
+@test "KSOPS-generated seed Secrets carry a sync-wave earlier than the Cluster" {
+  run bash -c 'kustomize build --enable-alpha-plugins --enable-exec platform/cnpg/prod'
+  [ "$status" -eq 0 ]
+  out="$output"
+  # Cluster의 wave를 기준으로 삼는다(하드코딩하지 않는다 — 둘의 관계가 계약이다).
+  # ⚠️ 문서 블록으로 나눠 읽는다 — 렌더 출력에서 `kind:`는 첫 줄이 아니고(apiVersion 다음),
+  #    `name:`도 annotations 뒤에 온다. 줄 순서를 전제하면 조용히 빈 값을 집는다.
+  cw="$(printf '%s' "$out" | awk 'BEGIN{RS="\n---\n"} index($0,"\nkind: Cluster\n")||index($0,"kind: Cluster\n")==1 { if (match($0,/sync-wave: "?-?[0-9]+/)) { t=substr($0,RSTART,RLENGTH); sub(/^sync-wave: "?/,"",t); print t; exit } }')"
+  [ -n "$cw" ]
+  bad=""
+  for s in cnpg-r2-creds pg-app-credentials pg-admin-credentials restore-drill-alerting; do
+    # 해당 Secret 문서 블록만 떼어 wave를 읽는다(이름은 index로 정확 매치).
+    w="$(printf '%s' "$out" | awk -v n="$s" 'BEGIN{RS="\n---\n"} (index($0,"\nkind: Secret\n")||index($0,"kind: Secret\n")==1) && index($0,"\n  name: " n "\n"){ if (match($0,/sync-wave: "?-?[0-9]+/)) { t=substr($0,RSTART,RLENGTH); sub(/^sync-wave: "?/,"",t); print t } }')"
+    [ -n "$w" ] || { bad="$bad $s(wave없음)"; continue; }
+    [ "$w" -lt "$cw" ] || bad="$bad $s(wave=$w>=Cluster$cw)"
+  done
+  [ -z "$bad" ]   # 비어야 통과. 디버깅: echo "$bad"
+}
