@@ -70,6 +70,15 @@ sealed-secrets 128→96·vmsingle 1Gi→896으로 −160Mi 추가 회수, 명목
 주의: 행은 라이브 manifest와 자동 교차검증되지 않는다(verify:ledger는 마크다운만; local-helm traefik 등은
 check-resource-limits 스캔 밖이라 여기 수기 계상). 신규/변경 상주 워크로드는 반드시 행+산문 동반 갱신.
 
+2026-08-14: observability 행 상향(limit 2080→2400 **+320**, req 1152→1184 **+32**) — NUC 콜드스타트에서
+`victorialogs`(128→256Mi)와 `vector`(320→512Mi)가 실제로 OOMKilled 루프를 돌았다(2시간에 각 16회·22회).
+근거는 커널 OOM 기록의 anon-rss(vlogs ~129MiB · vector ~325MiB)이고, 두 값 모두 limit에 정확히 붙어
+있었다 — 누수가 아니라 작업집합이다. **코어 수(GOMAXPROCS/--threads)를 원인으로 본 최초 진단은
+반증됐다**: 핀을 넣어 vector 워커를 15→8로 줄였는데 OOM anon-rss는 그대로였다(핀 자체는 위생 조치로
+유지). vlogs 쪽이 1차 원인이고 vector는 sink 백프레셔로 끌려 죽는 결합 루프였다.
+⬜ **이 두 값은 "OOM을 멈추는 안전한 상한"이지 right-size가 아니다** — G4 부하가 걷힌 뒤 steady
+working_set을 재측정해 옵션 (a)로 회수할 것. 상향 후 명목 잔여 = 10240 − 9020 = 1220(cap 무변경).
+
 <!-- ledger:meta VM_ALLOCATABLE_MIB=12288 LIMIT_BUDGET_MIB=10240 -->
 
 | component                          | namespace      | req_mi | limit_mi |
@@ -79,7 +88,7 @@ check-resource-limits 스캔 밖이라 여기 수기 계상). 신규/변경 상�
 | <!-- ledger:row --> cnpg           | database       |    900 |     1152 |
 | <!-- ledger:row --> cnpg-operator  | cnpg-system    |    100 |      160 |
 | <!-- ledger:row --> cert-manager   | cert-manager   |     88 |      384 |
-| <!-- ledger:row --> observability  | observability  |   1152 |     2080 |
+| <!-- ledger:row --> observability  | observability  |   1184 |     2400 |
 | <!-- ledger:row --> edge           | edge           |     96 |      288 |
 | <!-- ledger:row --> tailscale      | tailscale      |    192 |      512 |
 | <!-- ledger:row --> whoami         | gateway        |     16 |       16 |
