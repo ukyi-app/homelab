@@ -21,8 +21,7 @@
   "이 리소스를 Healthy로 만들어 주는 것이 더 앞 wave에 있는가?"**
 - ⚠️ **이 클래스는 라이브에서 원리적으로 안 보인다** — 리소스가 이미 전부 존재해 순서가 무의미하기
   때문이다. 점진 구축으로 만든 레포는 콜드스타트를 한 번도 통과하지 않은 채 초록일 수 있다.
-> 가드: `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`,
-> `platform/traefik/prod/test_gateway_sync_wave.bats`
+> 가드: `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`, `platform/traefik/prod/test_gateway_sync_wave.bats`
 
 ### ArgoCD retry 소진 후 명시 sync
 - ArgoCD는 retry 소진 후 실패 리소스를 재시도하지 않는다 — 명시 sync:
@@ -105,7 +104,34 @@
 - SSA + atomic 리스트(HTTPRoute `parentRefs`/`backendRefs`, STS `volumeClaimTemplates`)는 서버 주입
   기본값이 영구 OutOfSync를 만든다 — manifest에 기본값(group/kind/weight)을 명시하거나, status까지
   주입되는 vCT는 `ignoreDifferences`(+`RespectIgnoreDifferences=true`)로 제외.
-> 가드: `platform/adguard/prod/test_adguard_route.bats`
+- ⚠️ **형제 자리를 함께 고칠 것 — 한 곳만 고치면 나머지가 조용히 남는다.** CNPG Cluster의
+  `spec.plugins[]`에는 webhook 주입 기본값(`enabled`·`isWALArchiver`)을 명시해 뒀는데 **같은 클래스인
+  `spec.externalClusters[].plugin`만 빠져 있었다**(2026-08-14 NUC 실측: cnpg-data가 Healthy인 채로
+  5분마다 partial sync를 반복했고 라이브 diff는 그 두 필드뿐이었다). 한 kind에서 이 함정을 만나면
+  같은 파일의 **모든 atomic 리스트**를 훑을 것.
+- ⚠️ "미기재로 막는다"는 반대 방향의 가드가 이 함정과 충돌한다. `isWALArchiver`는 *켜면* 안 되는
+  필드라 원래 가드가 "존재하면 red"였는데, 그 규칙이 곧 OutOfSync의 원인이었다. 올바른 불변식은
+  **명시적 `false`**다 — 위험은 값이지 존재가 아니다.
+> 가드: `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats`
+
+### hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다
+- Pod `securityContext.fsGroup`은 kubelet이 소유권을 관리하는 볼륨에만 걸린다. **local-path류의
+  hostPath 백엔드 PV는 대상이 아니다** — 2026-08-14 NUC 실측: `fsGroup: 65532`인데 PVC 디렉토리가
+  `root:root 0777`이었다. 디렉토리가 0777이라 non-root도 **생성**은 되므로 문제가 없어 보이지만,
+  **root로 도는 컨테이너가 만든 파일은 `0644 root:root`**라 뒤따르는 non-root 컨테이너가 열지 못한다.
+  AdGuard의 `seed-config`(root) → `inject-auth`(65532)가 `permission denied`로 죽어 파드가
+  Init:CrashLoopBackOff에 빠졌다.
+- ⚠️ **빈 PVC에서만 드러난다.** 라이브에서는 파일이 이미 있어 `cp -n`이 건너뛰므로 소유권이 문제될
+  일이 없다. sync-wave 교착과 같은 부류의 "콜드스타트 전용" 결함이다.
+  ⇒ 처방: **PVC에 파일을 만드는 컨테이너를 최종 소비자와 같은 uid로 돌린다**(fsGroup에 기대지 말 것).
+> 가드: `platform/adguard/prod/test_adguard_auth.bats`
+
+### yq -e는 값이 false면 exit 1이다
+- `yq -e`의 종료코드는 "출력이 truthy인가"다 — **키가 없을 때(`null`)와 값이 `false`일 때를 구별하지
+  않는다.** 그래서 올바른 매니페스트(`isWALArchiver: false`)에서 bats가 red가 된다.
+  `-e` 없이 읽고 `printf '%s' "$v" | grep -qxF -- 'false'`로 정확 일치를 단언하면 미기재(`null`)와
+  `false`가 갈린다. 불리언을 읽는 모든 단언에 해당한다.
+> 가드: `platform/cnpg/prod/test_cluster_params.bats`
 
 ### Application zero-value selfHeal 플립플롭
 - Application spec의 zero-value(예: `directory.recurse: false`)는 컨트롤러 정규화가 매번 삭제 →
