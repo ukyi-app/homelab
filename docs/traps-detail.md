@@ -114,22 +114,29 @@
   **명시적 `false`**다 — 위험은 값이지 존재가 아니다.
 > 가드: `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats`
 
-### 메모리 limit은 코어 수에 묶여 있다 — 노드를 바꾸면 그 limit이 OOM 선이 된다
-- vector(tokio)·VictoriaLogs(Go) 같은 런타임은 **가용 코어 수만큼 워커/P를 띄우고 그만큼 버퍼를
-  잡는다.** 그런데 이 레포의 limit은 전부 **라이브 Mac(6코어) 실측**으로 산정됐다. 코어가 더 많은
-  노드에 같은 매니페스트를 얹으면 limit이 그대로 OOM 선이 된다.
-  2026-08-14 NUC(14코어) 실측 — 커널 OOM 기록(`dmesg -T | grep 'Memory cgroup out of memory'`)의
-  `anon-rss`: vector ~325MiB(limit 320Mi·worker 스레드 **15개**)·victorialogs ~128MiB(limit 128Mi).
-  2시간에 각각 22회·16회 OOMKilled. **같은 매니페스트가 Mac에서는 steady ~145Mi / peak 59Mi다.**
-- ⚠️ **`GOMEMLIMIT`은 이것을 못 막는다** — 힙 소프트 리밋이라 P별 mcache·스택 캐시·비-힙 버퍼가
-  그 밖에서 자란다. victorialogs는 `GOMEMLIMIT=115MiB`가 걸린 채로 128MiB에서 죽었다.
-- ⚠️ **RSS가 매번 같은 값에서 죽으면 누수가 아니라 고정 오버헤드다.** vector의 anon-rss는
-  325080·325136·325160·325056 kB로 평탄했다 — 커널 OOM 기록을 보면 누수/버스트와 즉시 갈린다.
-  `kubectl top`은 metrics-server가 없으면 안 나오지만 `dmesg`는 항상 있다.
-- ⇒ 처방(D-e, 2026-08-14 owner 결정 = **핀 우선**): 동시성을 기준선 코어 수에 핀한다 —
-  vector는 `--threads 6`(env `VECTOR_THREADS` 대신 **CLI 플래그**: 이름이 틀리면 즉시 기동
-  실패로 드러난다), victorialogs는 `GOMAXPROCS=6`. limit·`docs/memory-ledger.md`를 안 건드리므로
-  CI cap과 main 백포트가 모두 안전하다. 핀으로 모자라면 그때 limit + 원장을 함께 재산정한다.
+### 상주 워크로드 OOM 진단 — 코어 수는 그럴듯한 오답이다 (D-e)
+- 2026-08-14 NUC 콜드스타트에서 `vector`·`victorialogs`가 OOM 루프를 돌았다(2시간에 22회·16회).
+  **1차 진단은 "노드 코어 수(6→14)가 늘어 런타임이 워커/P를 더 띄운 탓"이었고, 틀렸다.**
+  핀(`--threads 6`·`GOMAXPROCS=6`)을 넣어 vector 워커를 15→8로 줄였는데 커널 OOM 기록의
+  `anon-rss`는 **325324 kB로 핀 전(325080·325136·325160·325056)과 동일**했다. 그럴듯한 인과였지만
+  숫자가 안 움직였다. ⇒ **처방을 넣은 뒤 같은 지표를 다시 재라. 안 움직이면 원인이 아니다.**
+- 실제 원인 둘:
+  1. **victorialogs는 128Mi 안에 인제스션 작업집합이 안 들어갔다.** 오감지가 아니다 — 기동 로그가
+     `system memory limit 134217728 bytes`(=128Mi)를 정확히 감지하고 `-memory.allowedPercent=60`으로
+     캐시를 80530636 bytes(80.5MB)로 제한한다. 남는 47.5MB에 Go 힙 + 인제스션 버퍼 + 비-힙(mmap된
+     part·스택)이 다 들어가야 하는데 안 된다. 저장량 문제도 아니었다(smallPartRows 110427 / 1.9MB).
+  2. **vector는 sink 백프레셔로 끌려 죽었다.** vlogs가 죽어 있으면 elasticsearch sink가
+     `Endpoint is unhealthy` + 무한 재시도로 미전송 배치를 메모리에 쌓는다 — **결합 루프**다.
+     로그량이 원인이라 오해하기 쉬운데 `/var/log/pods` 총량은 69MB에 불과했다.
+- ⚠️ **`GOMEMLIMIT`은 이것을 못 막는다** — 힙 소프트 리밋이라 캐시·비-힙이 그 밖에서 자란다.
+  victorialogs는 `GOMEMLIMIT=115MiB`가 걸린 채로 129MiB에서 죽었다.
+- ⚠️ **RSS가 매번 같은 값에서 죽으면 누수가 아니라 작업집합이다.** 커널 OOM 기록을 보면 즉시 갈린다.
+  `kubectl top`은 metrics-server가 없으면 안 나오지만 `dmesg -T | grep 'Memory cgroup out of memory'`는
+  항상 있고 `anon-rss`/`file-rss`를 정확히 준다. **`kubectl describe`의 OOMKilled보다 훨씬 정보량이 많다.**
+- ⇒ 처방: limit 상향(vlogs 128→256Mi·vector 320→512Mi) + `docs/memory-ledger.md` 행 동반.
+  핀은 **위생 조치로 유지**한다(코어 많은 노드에서 워커 수를 기준선에 묶는다) — 다만 OOM 처방이
+  아니라는 것을 주석에 남겼다. 두 limit은 "OOM을 멈추는 안전한 상한"이지 right-size가 아니다 —
+  부하가 걷힌 뒤 재측정해 회수할 것.
 > 가드: `platform/victoria-stack/prod/test_concurrency_pin.bats`
 
 ### hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다
