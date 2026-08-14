@@ -13,7 +13,9 @@
 | 함정 (traps-detail.md) | where | guard |
 |---|---|---|
 | ArgoCD sync-wave 순서/교착 + 원장 드리프트 | gate | `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`, `platform/traefik/prod/test_gateway_sync_wave.bats` |
-| SSA atomic 리스트(HTTPRoute group/kind/weight) 영구 OutOfSync | gate | `platform/adguard/prod/test_adguard_route.bats` |
+| SSA atomic 리스트(HTTPRoute group/kind/weight · CNPG externalClusters plugin) 영구 OutOfSync | gate | `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats` |
+| hostPath 백엔드 PV에는 fsGroup 미적용 — root가 만든 파일을 non-root가 못 연다 | gate | `platform/adguard/prod/test_adguard_auth.bats` |
+| `yq -e`는 값이 false면 exit 1 — null과 구별하지 않는다 | gate | `platform/cnpg/prod/test_cluster_params.bats` |
 | PSA baseline가 hostPath/hostPID 금지(privileged 전용) | gate | `platform/namespaces/prod/test_psa.bats` |
 | NetworkPolicy ipBlock pod-CIDR → default-deny 무력화 | gate | `platform/network-policies/prod/test_netpol.bats`, `platform/cnpg/prod/test_networkpolicy.bats` |
 | CNPG Pooler 예약 파라미터(pool_mode) → poolMode 필드 | gate | `platform/cnpg/prod/test_pooler.bats` |

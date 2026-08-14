@@ -80,11 +80,18 @@ spec:
 
   # 읽기 전용 복구 원본 — 라이브 Mac이 써 온 아카이브(`pg/`). ObjectStore는 같은 것을 공유하고
   # serverName만 다르다(읽기/쓰기가 서로 다른 필드라 한 ObjectStore로 동시에 표현된다).
-  # ⚠️ 여기에 `isWALArchiver`를 **넣지 않는다** — 스키마엔 있지만 켜면 이 원본에도 쓰기가 붙는다.
+  # ⚠️ 여기의 `isWALArchiver`는 **반드시 false**다 — 스키마엔 있지만 켜면 이 원본에도 쓰기가 붙는다.
+  #    다만 **생략하면 안 된다**: `externalClusters`도 listType 미지정(SSA atomic)이라 webhook이
+  #    주입하는 기본값(`enabled: true`·`isWALArchiver: false`)이 매니페스트에 없으면 ArgoCD가
+  #    영구 OutOfSync를 낸다 — 위 `plugins:` 리스트와 **같은 클래스인데 이 자리만 빠져 있었다**
+  #    (2026-08-14 NUC 실측: cnpg-data가 Healthy인 채로 5분마다 partial sync를 반복하며
+  #     Cluster/pg만 OutOfSync로 남았다. 라이브 diff는 이 두 필드뿐이었다).
   externalClusters:
     - name: pg-mac
       plugin:
         name: barman-cloud.cloudnative-pg.io
+        enabled: true # webhook 주입 기본값 — 명시하지 않으면 SSA atomic 리스트가 영구 OutOfSync
+        isWALArchiver: false # 읽기 전용 원본이므로 false. 명시는 OutOfSync 방지용이지 동작 변경이 아니다
         parameters:
           barmanObjectName: pg-r2
           serverName: pg # 읽기: s3://homelab-pg-backups-prod/pg/

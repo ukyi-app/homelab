@@ -53,8 +53,25 @@ f=platform/cnpg/prod/cluster.yaml
   ! printf '%s' "$w" | grep -qxF -- "$r"
 }
 
-@test "the recovery source is READ-ONLY (isWALArchiver must not be set on externalClusters)" {
-  # 스키마엔 있지만 켜면 복구 원본(=Mac 아카이브)에도 쓰기가 붙어 분리가 통째로 무의미해진다.
-  run yq -e '.spec.externalClusters[].plugin.isWALArchiver' "$f"
-  [ "$status" -ne 0 ]
+@test "the recovery source is READ-ONLY (isWALArchiver on externalClusters is explicitly false)" {
+  # 켜면 복구 원본(=Mac 아카이브)에도 쓰기가 붙어 아카이브 분리가 통째로 무의미해진다.
+  # ⚠️ 불변식은 "미기재"가 아니라 **명시적 false**다. externalClusters는 listType 미지정(SSA atomic)이라
+  #    webhook 주입 기본값이 매니페스트에 없으면 ArgoCD가 영구 OutOfSync를 낸다 — 2026-08-14 NUC 실측:
+  #    cnpg-data가 Healthy인 채 5분마다 partial sync를 반복했고, 라이브와의 diff는 이 두 필드뿐이었다.
+  # ⚠️ 여기서 `yq -e`를 쓰지 말 것 — `-e`는 **값이 false면 exit 1**이라(null과 구별하지 않는다)
+  #    올바른 매니페스트에서 테스트가 red가 된다. `-e` 없이 읽고 정확 일치로 단언하면
+  #    미기재(`null`)와 `false`가 갈린다.
+  v="$(yq '.spec.externalClusters[] | select(.name == "pg-mac") | .plugin.isWALArchiver' "$f")"
+  printf '%s' "$v" | grep -qxF -- 'false'
+}
+
+@test "externalClusters plugin spells out the webhook-injected defaults (SSA atomic list — permanent OutOfSync otherwise)" {
+  # plugins[] 리스트는 이미 enabled/isWALArchiver를 명시하고 있었는데 **형제인 externalClusters[]만
+  # 빠져 있었다**. 같은 클래스의 결함이므로 두 자리를 함께 잠근다.
+  e="$(yq -e '.spec.externalClusters[] | select(.name == "pg-mac") | .plugin.enabled' "$f")"
+  printf '%s' "$e" | grep -qxF -- 'true'
+  pe="$(yq -e '.spec.plugins[] | select(.name == "barman-cloud.cloudnative-pg.io") | .enabled' "$f")"
+  printf '%s' "$pe" | grep -qxF -- 'true'
+  pw="$(yq -e '.spec.plugins[] | select(.name == "barman-cloud.cloudnative-pg.io") | .isWALArchiver' "$f")"
+  printf '%s' "$pw" | grep -qxF -- 'true'
 }
