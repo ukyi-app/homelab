@@ -114,6 +114,24 @@
   **명시적 `false`**다 — 위험은 값이지 존재가 아니다.
 > 가드: `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats`
 
+### 메모리 limit은 코어 수에 묶여 있다 — 노드를 바꾸면 그 limit이 OOM 선이 된다
+- vector(tokio)·VictoriaLogs(Go) 같은 런타임은 **가용 코어 수만큼 워커/P를 띄우고 그만큼 버퍼를
+  잡는다.** 그런데 이 레포의 limit은 전부 **라이브 Mac(6코어) 실측**으로 산정됐다. 코어가 더 많은
+  노드에 같은 매니페스트를 얹으면 limit이 그대로 OOM 선이 된다.
+  2026-08-14 NUC(14코어) 실측 — 커널 OOM 기록(`dmesg -T | grep 'Memory cgroup out of memory'`)의
+  `anon-rss`: vector ~325MiB(limit 320Mi·worker 스레드 **15개**)·victorialogs ~128MiB(limit 128Mi).
+  2시간에 각각 22회·16회 OOMKilled. **같은 매니페스트가 Mac에서는 steady ~145Mi / peak 59Mi다.**
+- ⚠️ **`GOMEMLIMIT`은 이것을 못 막는다** — 힙 소프트 리밋이라 P별 mcache·스택 캐시·비-힙 버퍼가
+  그 밖에서 자란다. victorialogs는 `GOMEMLIMIT=115MiB`가 걸린 채로 128MiB에서 죽었다.
+- ⚠️ **RSS가 매번 같은 값에서 죽으면 누수가 아니라 고정 오버헤드다.** vector의 anon-rss는
+  325080·325136·325160·325056 kB로 평탄했다 — 커널 OOM 기록을 보면 누수/버스트와 즉시 갈린다.
+  `kubectl top`은 metrics-server가 없으면 안 나오지만 `dmesg`는 항상 있다.
+- ⇒ 처방(D-e, 2026-08-14 owner 결정 = **핀 우선**): 동시성을 기준선 코어 수에 핀한다 —
+  vector는 `--threads 6`(env `VECTOR_THREADS` 대신 **CLI 플래그**: 이름이 틀리면 즉시 기동
+  실패로 드러난다), victorialogs는 `GOMAXPROCS=6`. limit·`docs/memory-ledger.md`를 안 건드리므로
+  CI cap과 main 백포트가 모두 안전하다. 핀으로 모자라면 그때 limit + 원장을 함께 재산정한다.
+> 가드: `platform/victoria-stack/prod/test_concurrency_pin.bats`
+
 ### hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다
 - Pod `securityContext.fsGroup`은 kubelet이 소유권을 관리하는 볼륨에만 걸린다. **local-path류의
   hostPath 백엔드 PV는 대상이 아니다** — 2026-08-14 NUC 실측: `fsGroup: 65532`인데 PVC 디렉토리가

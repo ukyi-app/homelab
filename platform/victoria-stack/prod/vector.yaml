@@ -83,7 +83,16 @@ spec:
       containers:
         - name: vector
           image: timberio/vector:0.56.0-distroless-libc@sha256:58c37f908648388a8a771426451476d60ebbd393fe52cc08a94573bcbb1c629a
-          args: ["--config", "/etc/vector/vector.yaml"]
+          # ⚠️ **--threads는 반드시 핀한다(D-e).** vector는 tokio 워커를 노드 코어 수만큼 띄우고
+          #    워커마다 버퍼를 잡는다 — 아래 limit은 **6코어 노드 실측**으로 산정된 값이라 코어가
+          #    늘면 그대로 OOM이다. 2026-08-14 NUC(14코어) 실측: worker 스레드 15개,
+          #    커널 OOM 기록의 anon-rss가 매번 ~325MiB로 평탄(누수 아님, 고정 오버헤드) →
+          #    limit 320Mi를 넘겨 2시간에 22회 OOMKilled. 같은 매니페스트가 Mac(6코어)에서는
+          #    steady ~145Mi로 돈다. env(VECTOR_THREADS) 대신 **CLI 플래그**를 쓰는 이유는
+          #    이름이 틀리면 즉시 기동 실패로 드러나기 때문이다(env 오타는 조용히 무시된다).
+          # ⚠️ 6은 라이브 Mac의 코어 수 = 아래 limit을 검증한 기준선이다. 이 값을 올리려면
+          #    limit과 docs/memory-ledger.md 행을 함께 재산정할 것.
+          args: ["--config", "/etc/vector/vector.yaml", "--threads", "6"]
           ports: [{ name: metrics, containerPort: 9598 }]   # vector 메트릭 노출
           env:
             - { name: VECTOR_SELF_NODE_NAME, valueFrom: { fieldRef: { fieldPath: spec.nodeName } } }

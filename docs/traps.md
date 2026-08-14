@@ -14,6 +14,7 @@
 |---|---|---|
 | ArgoCD sync-wave 순서/교착 + 원장 드리프트 | gate | `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`, `platform/traefik/prod/test_gateway_sync_wave.bats` |
 | SSA atomic 리스트(HTTPRoute group/kind/weight · CNPG externalClusters plugin) 영구 OutOfSync | gate | `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats` |
+| 메모리 limit은 코어 수에 묶여 있다 — 노드를 바꾸면 그 limit이 OOM 선이 된다 (D-e) | gate | `platform/victoria-stack/prod/test_concurrency_pin.bats` |
 | hostPath 백엔드 PV에는 fsGroup 미적용 — root가 만든 파일을 non-root가 못 연다 | gate | `platform/adguard/prod/test_adguard_auth.bats` |
 | `yq -e`는 값이 false면 exit 1 — null과 구별하지 않는다 | gate | `platform/cnpg/prod/test_cluster_params.bats` |
 | PSA baseline가 hostPath/hostPID 금지(privileged 전용) | gate | `platform/namespaces/prod/test_psa.bats` |
