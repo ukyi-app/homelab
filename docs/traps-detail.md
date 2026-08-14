@@ -8,12 +8,40 @@
 - **ArgoCD sync-wave는 "이전 wave가 healthy"를 기다린다** — 한 Application 안에서 워크로드(-6)가
   Secret(기본 0)보다 빠르면 영구 교착. `generatorOptions.annotations`는 KSOPS(exec) 출력에
   **적용되지 않는다**. 내부 wave는 꼭 필요할 때만.
-> 가드: `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`
+- ⚠️ **"의존"은 apply 순서만이 아니다 — health를 세워 주는 주체도 의존 대상이다.** 어떤 CR의
+  health가 컨트롤러/오퍼레이터가 붙어야 서는 종류라면, 그 컨트롤러가 **더 앞 wave**에 있어야 한다.
+  아니면 ArgoCD가 그 CR의 health를 기다리며 멈추고 → 컨트롤러는 영원히 apply되지 않는다.
+  2026-08-14 NUC 콜드스타트 실측: `Gateway/homelab`(wave -8)이 traefik 컨트롤러(Helm 차트
+  Deployment, wave 0)를 기다려 **17시간** `waiting for healthy state of
+  gateway.networking.k8s.io/Gateway/homelab`에 머물렀다. `Gateway`는 `Accepted=Unknown
+  Pending: Waiting for controller` 상태였다. 같은 이유로 TLS 리스너의 cert Secret(Certificate
+  발급물)도 Gateway보다 앞 wave여야 한다.
+  ⇒ 처방: gateway ns의 순서를 CRD(-9) → RBAC(-8) → 컨트롤러/cert(0) → GatewayClass(1) →
+  Gateway(2) → HTTPRoute(3)로 뒤집었다. **음수 wave를 새로 붙일 때 반드시 이 질문을 할 것:
+  "이 리소스를 Healthy로 만들어 주는 것이 더 앞 wave에 있는가?"**
+- ⚠️ **이 클래스는 라이브에서 원리적으로 안 보인다** — 리소스가 이미 전부 존재해 순서가 무의미하기
+  때문이다. 점진 구축으로 만든 레포는 콜드스타트를 한 번도 통과하지 않은 채 초록일 수 있다.
+> 가드: `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`,
+> `platform/traefik/prod/test_gateway_sync_wave.bats`
 
 ### ArgoCD retry 소진 후 명시 sync
 - ArgoCD는 retry 소진 후 실패 리소스를 재시도하지 않는다 — 명시 sync:
   `kubectl -n argocd patch app <x> --type merge -p '{"operation":{"sync":{}}}'`,
   멈춘 op 종료는 `status.operationState.phase=Terminating` patch.
+- ⚠️ **그 patch에 `--subresource status`를 붙이면 안 된다.** ArgoCD의 Application CRD는 status
+  서브리소스를 선언하지 않는다(`.spec.versions[*].subresources` = `{}` — NUC v3.4.4·라이브 Mac
+  양쪽 실측). 없는 서브리소스에 patch하면 kubectl이 **`Error from server (NotFound):
+  applications.argoproj.io "<app>" not found`** 를 낸다 — 바로 앞의 `get`은 성공하므로
+  "Application이 사라졌다"로 오독하게 된다. status는 본체의 일부라 서브리소스 지정 없이 patch한다.
+- ⚠️ **좀비 operation은 진단을 통째로 오도한다.** `phase=Running`인 채 몇 시간씩 남은 operation은
+  이후의 모든 sync를 삼키고, `syncResult`는 **그 operation이 시작된 시점의 revision** 기준 결과를
+  계속 보여준다. 그래서 "수정을 머지했는데 라이브가 그대로다"가 된다 — 실은 수정본이 한 번도
+  실행되지 않은 것이다. `hard refresh`·`force sync`·controller 재시작은 듣지 않는다.
+  ⇒ **진단 첫 줄에서 `startedAt`을 커밋 시각과 비교할 것**:
+  `kubectl -n argocd get app <x> -o jsonpath='{.status.operationState.phase} {.status.operationState.startedAt}'`
+  (2026-08-14 실측: operation `startedAt`이 수정 커밋보다 **8시간 31분 빨랐다**.)
+  처방은 위 Terminating patch(= `make argo-terminate APP=<x>`), 그래도 안 되면
+  `kubectl delete application` → root 재생성.
 
 ### k8s SSA 중복 env 키/스키마 밖 필드 거부
 - k8s SSA는 중복 env 키/스키마 밖 필드를 거부한다 (argo-helm `ARGOCD_CONTROLLER_REPLICAS`,

@@ -1,6 +1,8 @@
+# ⚠️ wave 3 — Gateway(wave 2)가 Programmed가 된 **뒤**에 온다. HTTPRoute의 Accepted는 parentRef가
+#    가리키는 Gateway가 있어야 서고, Deployment/Service는 그 HTTPRoute의 backend라 같은 wave에 묶는다.
 apiVersion: apps/v1
 kind: Deployment
-metadata: { name: whoami, namespace: gateway, annotations: { argocd.argoproj.io/sync-wave: "-7" } }
+metadata: { name: whoami, namespace: gateway, annotations: { argocd.argoproj.io/sync-wave: "3" } }
 spec:
   replicas: 1
   selector: { matchLabels: { app: whoami } }
@@ -24,7 +26,7 @@ spec:
 ---
 apiVersion: v1
 kind: Service
-metadata: { name: whoami, namespace: gateway }
+metadata: { name: whoami, namespace: gateway, annotations: { argocd.argoproj.io/sync-wave: "3" } }
 spec:
   selector: { app: whoami }
   ports: [{ port: 80, targetPort: 80 }]
@@ -34,7 +36,7 @@ kind: HTTPRoute
 metadata:
   name: whoami
   namespace: gateway
-  annotations: { argocd.argoproj.io/sync-wave: "-7" }
+  annotations: { argocd.argoproj.io/sync-wave: "3" }
 spec:
   parentRefs:
     # group/kind/weight는 CRD 기본값이지만 명시 — SSA atomic 리스트의 서버 주입 기본값으로 인한
