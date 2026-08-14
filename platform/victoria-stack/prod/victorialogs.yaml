@@ -59,6 +59,13 @@ spec:
             - --httpListenAddr=:9428
           env:
             - { name: GOMEMLIMIT, value: "115MiB" } # 128Mi의 약 90% (right-size 2026-06-22, peak 59Mi)
+            # ⚠️ **GOMAXPROCS를 핀한다(D-e).** Go 런타임은 P마다 mcache·스택 캐시를 잡고 VictoriaLogs는
+            #    내부 작업 버퍼도 P 수에 비례해 잡는다. GOMEMLIMIT은 **힙 소프트 리밋**이라 이 비-힙
+            #    증가를 막지 못한다. 2026-08-14 NUC(14코어) 실측: 커널 OOM 기록의 anon-rss가 매번
+            #    ~128MiB로 limit(128Mi)에 딱 붙어 2시간에 16회 OOMKilled. 같은 매니페스트가
+            #    Mac(6코어)에서는 peak 59Mi다.
+            # ⚠️ 6은 라이브 Mac의 코어 수 = 위 GOMEMLIMIT/limit을 검증한 기준선이다.
+            - { name: GOMAXPROCS, value: "6" }
           ports: [{ name: http, containerPort: 9428 }]
           resources:
             requests: { cpu: 50m, memory: 64Mi }
