@@ -4,6 +4,16 @@
 올라오고, 그 다음 stateful 계층(cert-manager -3 → cnpg -2/-1)이며, edge(cloudflared/
 tailscale/adguard, sync-wave 미지정 = 기본 0)와 observability(+2)는 그 뒤에 온다.
 
+🔴 **이 표의 wave는 Application 하나 *안*에서만 강제된다 — Application들 사이에는 순서가 없다.**
+두 가지 이유가 겹친다: (1) ArgoCD 1.8에서 `argoproj.io/Application`의 health 평가가 제거됐고 이 레포는
+`argocd-cm`에 `resource.customizations`로 복원하지 않았다 → app-of-apps의 wave는 자식 Application의
+*생성* 순서만 정하고 **Healthy를 기다리지 않는다**. (2) `platform-components`·`apps` ApplicationSet이
+만드는 Application은 ApplicationSet 컨트롤러가 직접 만들어 **root의 sync 대상이 아니다** → 템플릿에
+Application-level sync-wave를 붙여도 무효다. ⇒ 아래 표는 **의도한 계층**의 기록이지 강제되는 순서가
+아니다. 순서가 필요하면 그 Application 안으로 끌어오거나(traefik의 CRD처럼), 실패를 수렴으로 바꾸는
+`retry:`(appset 템플릿에 있다)에 기대야 한다. 2026-08-14 NUC 콜드스타트에서 이 갭으로 5개 앱이
+`resource mapping not found for kind "HTTPRoute"` 뒤 Missing에 고착했다.
+
 ⚠️ **ArgoCD는 wave N의 전 리소스가 Healthy가 될 때까지 wave N+1로 넘어가지 않는다.** 그래서
 "health가 늦은 wave의 무언가를 기다리는 리소스"를 앞 wave에 두면 **자기 자신을 기다리는 교착**이 된다
 (콜드스타트에서만 드러난다 — 라이브에서는 전부 이미 존재해 순서가 무의미하다). 2026-08-14 NUC
