@@ -133,6 +133,17 @@
 - ⚠️ **RSS가 매번 같은 값에서 죽으면 누수가 아니라 작업집합이다.** 커널 OOM 기록을 보면 즉시 갈린다.
   `kubectl top`은 metrics-server가 없으면 안 나오지만 `dmesg -T | grep 'Memory cgroup out of memory'`는
   항상 있고 `anon-rss`/`file-rss`를 정확히 준다. **`kubectl describe`의 OOMKilled보다 훨씬 정보량이 많다.**
+- ⚠️ **방아쇠는 장애 자체였다 — 장애가 길수록 복구 부하가 커진다.** traefik이 17시간 막혀 있는 동안
+  쌓인 로그가 복구 순간 **백로그 버스트**가 됐다. 실측: 기동 2분 된 vector가 이미 151,135 이벤트를
+  전송했고 `vector_source_lag_time_seconds_sum / _count` = 평균 지연 **27,000초(7.5시간)**였다 —
+  실시간 로그가 아니라 과거를 읽고 있었다는 뜻이다. 그 버스트가 vlogs 힙을 밀어올리고
+  (`go_memstats_heap_alloc_bytes` 116MB, 저장 데이터는 1.9MB뿐), vlogs가 죽으면 vector가
+  미전송 배치를 쌓다 죽는 결합 루프가 됐다.
+  **백로그를 다 소화한 뒤 정상 유입은 3 KiB/s · 약 1.7 events/s에 불과했고 OOM은 즉시 멈췄다**
+  (재시작 간격 5분 → 0). ⇒ 상향한 limit은 **버스트 흡수용 여유**이지 정상 부하 기준이 아니다.
+- ⚠️ **판별법**: `vector_source_lag_time_seconds_sum ÷ _count`가 크면(수천 초 이상) 그것은
+  "로그가 많다"가 아니라 **"과거를 읽고 있다"**는 신호다. `du /var/log/pods`로 잰 *생산량*은
+  정상인데 파이프라인만 터지는 모순이 여기서 풀린다(이번에 그 모순으로 두 번 오진했다).
 - ⇒ 처방: limit 상향(vlogs 128→256Mi·vector 320→512Mi) + `docs/memory-ledger.md` 행 동반.
   핀은 **위생 조치로 유지**한다(코어 많은 노드에서 워커 수를 기준선에 묶는다) — 다만 OOM 처방이
   아니라는 것을 주석에 남겼다. 두 limit은 "OOM을 멈추는 안전한 상한"이지 right-size가 아니다 —
