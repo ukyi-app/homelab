@@ -1,8 +1,13 @@
+# ⚠️ wave 1 — **traefik 컨트롤러(wave 0)보다 뒤여야 한다.** GatewayClass의 Accepted 조건은
+#    controllerName이 가리키는 컨트롤러가 붙어야 채워진다(컨트롤러 부재 시 `Accepted=Unknown
+#    Pending: Waiting for controller`로 영원히 머문다). 컨트롤러는 Helm 차트가 내는 Deployment라
+#    wave 0이므로, GatewayClass를 그보다 앞 wave에 두면 ArgoCD가 그 wave에서 멈춰
+#    **컨트롤러가 영원히 apply되지 않는다**(2026-08-14 NUC 콜드스타트 실측).
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
 metadata:
   name: traefik
   annotations:
-    argocd.argoproj.io/sync-wave: "-8"
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   controllerName: traefik.io/gateway-controller

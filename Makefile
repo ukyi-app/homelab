@@ -281,7 +281,14 @@ argo-sync: ## [ops] APP= 명시 sync 트리거(retry 소진 후 재시도). 예:
 
 argo-terminate: ## [ops] APP= 멈춘 operation 종료(phase=Terminating). 예: make argo-terminate APP=cnpg
 	@test -n "$(APP)" || { echo "APP=<application> 필요"; exit 1; }
-	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd patch app $(APP) --subresource status --type merge -p '{"status":{"operationState":{"phase":"Terminating"}}}'
+# ⚠️ --subresource status를 쓰지 말 것. ArgoCD의 Application CRD는 status 서브리소스를 선언하지
+#    않는다(`kubectl get crd applications.argoproj.io -o jsonpath='{.spec.versions[*].subresources}'`
+#    → `{}`; 라이브 Mac·NUC v3.4.4 양쪽 실측). 없는 서브리소스에 patch하면 kubectl이
+#    `Error from server (NotFound): applications.argoproj.io "<app>" not found`를 낸다 —
+#    바로 앞 get은 성공하므로 "앱이 사라졌다"로 오독하기 딱 좋다. status는 본체의 일부라
+#    서브리소스 지정 없이 그냥 patch한다. (2026-08-14: 이 오진 때문에 좀비 operation을
+#    17시간 방치했다 — terminate가 "안 먹는다"고 결론냈으나 실은 명령이 도달조차 안 했다.)
+	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd patch app $(APP) --type merge -p '{"status":{"operationState":{"phase":"Terminating"}}}'
 
 argo-wait: ## [ops] Application이 Healthy 될 때까지 대기(APP= 미지정 시 전체)
 	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy application $(if $(APP),$(APP),--all) --timeout=300s
