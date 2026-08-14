@@ -45,6 +45,23 @@ spec:
       syncPolicy:
         automated: { prune: true, selfHeal: true }
         syncOptions: [CreateNamespace=true, ServerSideApply=true]
+        # ⚠️ **retry가 없으면 콜드스타트에서 고착한다.** appset이 만드는 Application끼리는
+        #    sync-wave 관계가 **아예 없다**(ApplicationSet 컨트롤러가 직접 만들어 root app-of-apps의
+        #    sync 대상이 아니다 — 템플릿에 Application-level sync-wave를 붙여도 무효다).
+        #    그래서 Gateway API CRD를 소유한 traefik-prod보다 소비자(adguard·files·homepage·
+        #    victoria-stack의 HTTPRoute)가 먼저 도달할 수 있고, 그러면 dry-run에서
+        #    `resource mapping not found for kind "HTTPRoute" — ensure CRDs are installed first`로
+        #    **그 Application의 전 리소스가 하나도 apply되지 않는다**.
+        #    auto-sync는 같은 revision에 대해 직전 시도가 실패했으면 재시도하지 않고, selfHeal은
+        #    성공 이후의 drift 복구에만 걸린다 ⇒ 새 커밋이나 명시 sync 전까지 자가복구가 없다.
+        #    (2026-08-14 NUC 콜드스타트 실측: adguard·argocd-extras·files·homepage·victoria-stack
+        #     5개가 이 상태로 Missing에 머물렀다.)
+        #    traefik의 CRD는 wave -9라 수 초 안에 등록되므로 첫 재시도(15s)면 대개 붙는다.
+        #    ⚠️ 이것은 순서 **보장**이 아니라 수렴 보장이다 — 순서가 필요해지면 SYNC-WAVES.md의
+        #       "appset 생성 Application 사이에는 순서가 없다" 항목부터 다시 볼 것.
+        retry: # 수동 Application(argocd-extras·sealed-secrets·cnpg-data 등)과 같은 값
+          limit: 5
+          backoff: { duration: 15s, factor: 2, maxDuration: 5m }
   # data-conn/cache/files Application에만 알림 라벨 — 데이터서비스 + files(NotReady 구독).
   # templatePatch(문자열 goTemplate)라 template.metadata의 inline `{{if}}`/미정의 `.X` 함정(missingkey=error) 없음.
   templatePatch: |
@@ -104,3 +121,8 @@ spec:
       syncPolicy:
         automated: { prune: true, selfHeal: true }
         syncOptions: [CreateNamespace=true, ServerSideApply=true]
+        # 위 platform-components와 같은 이유 — 앱의 HTTPRoute도 traefik-prod의 Gateway API CRD에
+        # 의존하고, appset 생성 Application 사이에는 순서가 없다. retry 없으면 콜드스타트에서 고착.
+        retry:
+          limit: 5
+          backoff: { duration: 15s, factor: 2, maxDuration: 5m }

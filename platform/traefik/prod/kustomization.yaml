@@ -15,3 +15,34 @@ resources:
 generators:
   - helmrelease.yaml
   - secret-generator.yaml # cloudflare-api-token (cert-manager DNS-01)
+
+# ⚠️ **이 컴포넌트의 콜드스타트 wave 순서 (전부 실측으로 확정 — 임의로 바꾸지 말 것)**
+#
+#    | wave | 리소스                                              | 왜 여기인가 |
+#    |------|-----------------------------------------------------|-------------|
+#    |  -9  | Gateway API CRD 8개 (아래 patch가 붙인다)            | 모든 Gateway API 리소스의 전제 |
+#    |  -8  | ServiceAccount + ClusterRole/Binding (`rbac-gateway.yaml`) | 컨트롤러 파드가 뜨려면 SA가 먼저 있어야 한다 |
+#    |   0  | Helm 차트(traefik Deployment/Service) + Issuer/Certificate + KSOPS Secret | 기본 wave. 여기서 컨트롤러와 cert가 생긴다 |
+#    |   1  | GatewayClass (`gatewayclass.yaml`)                   | Accepted를 세우려면 컨트롤러가 떠 있어야 한다 |
+#    |   2  | Gateway (`gateway.yaml`)                             | Programmed는 컨트롤러 + `home-wildcard-tls` Secret 둘 다 필요 |
+#    |   3  | whoami 스모크 Deployment/Service/HTTPRoute            | HTTPRoute는 Programmed된 Gateway에 attach된다 |
+#
+#    ArgoCD는 **wave N의 전 리소스가 Healthy가 될 때까지 wave N+1로 넘어가지 않는다.** 따라서
+#    "health가 늦은 wave의 무언가를 기다리는 리소스"를 앞 wave에 두면 **자기 자신을 기다리는 교착**이 된다.
+#    이 컴포넌트는 그 교착을 두 번 밟았다:
+#      1. `#462` — CRD가 wave 0, GatewayClass/Gateway가 wave -8이었다 →
+#         `resource mapping not found for kind "GatewayClass" — ensure CRDs are installed first`
+#      2. 그 다음 고리 — CRD는 풀렸지만 Gateway(-8)의 health가 traefik 컨트롤러(0)를 기다렸다 →
+#         17시간 `waiting for healthy state of gateway.networking.k8s.io/Gateway/homelab`
+#    (`#460`·`#461`과 같은 클래스다: "의존 대상이 의존자보다 늦은 wave".)
+# ⚠️ 라이브 Mac에서는 원리적으로 드러나지 않는다 — CRD도 컨트롤러도 cert도 이미 있어 순서가 무의미하다.
+#    **콜드스타트에서만 보이는 결함이다.**
+# ⚠️ CRD 번들 파일(`gateway-api-crds.yaml`)은 **upstream 재벤더링 대상**이라 직접 편집하지 않는다.
+#    위 주석의 curl 명령으로 갱신해도 이 patch가 계속 wave를 붙인다.
+patches:
+  - target:
+      kind: CustomResourceDefinition
+    patch: |
+      - op: add
+        path: /metadata/annotations/argocd.argoproj.io~1sync-wave
+        value: "-9"
