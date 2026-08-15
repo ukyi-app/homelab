@@ -9,6 +9,7 @@ resources:
   - pooler.yaml
   - scheduled-backup.yaml
   - basebackup-pvc.yaml
+  - basebackup-pvc-warmup.yaml # Sync hook: WaitForFirstConsumer PVC를 sync 중에 Bound로(파일 주석 참조)
   - basebackup-cronjob.yaml
   - pgdump-hedge-cronjob.yaml
   - restore-drill-rbac.yaml
