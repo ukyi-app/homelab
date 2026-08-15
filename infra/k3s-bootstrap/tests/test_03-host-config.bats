@@ -94,6 +94,34 @@ run_hc() { HOSTCFG_ROOT="$FX" run "$BOOTSTRAP_DIR/host-config.sh" "$@"; }
   [ "$status" -eq 0 ]
 }
 
+# ── NVMe ASPM L1 (2026-08-15 A/B 실측) ─────────────────────────────────────────────────────
+@test "the tree disables NVMe ASPM L1 through the driver glob, not a pinned PCI address" {
+  T="$TREE/etc/tmpfiles.d/10-k3s-node.conf"
+  [ -f "$T" ]
+  # systemd-tmpfiles `w` = "있으면 쓴다"(생성하지 않는다) — 디스크가 빠져도 실패하지 않는다.
+  run grep -qE '^w[[:space:]]+/sys/bus/pci/drivers/nvme/\*/link/l1_aspm[[:space:]].*[[:space:]]0$' "$T"
+  [ "$status" -eq 0 ]
+  # ⚠️ PCI 주소를 박으면 슬롯 변경·두 번째 M.2에서 조용히 빗나간다.
+  #    ⚠️ **비주석 줄만 본다** — 헤더 주석이 "이렇게 하지 말 것"의 예시로 그 경로를 들고 있다.
+  #       파일 전체에 부정 grep을 걸면 그 예시에 걸려 red가 난다(이 @test가 실제로 그렇게 잡혔다).
+  run sh -c "grep -vE '^[[:space:]]*#' '$T' | grep -qE '/sys/bus/pci/devices/[0-9a-f]{4}:'"
+  [ "$status" -ne 0 ]
+  # 양성 대조 — 비주석 줄이 실제로 존재하는가(대상 0을 '매치 0'으로 오독하지 않는다).
+  run sh -c "grep -vE '^[[:space:]]*#' '$T' | grep -qF 'l1_aspm'"
+  [ "$status" -eq 0 ]
+}
+
+@test "the tmpfiles drop-in is enumerable by the installer (a .rules/.cfg name would be silently ignored)" {
+  # 설치기의 열거는 `find . -type f -name '*.conf'`다 — 확장자가 곧 검사 도메인 편입 조건이다.
+  n="$( (cd "$TREE" && find . -type f -name '*.conf') | grep -c 'tmpfiles.d' )"
+  [ "$n" -eq 1 ]
+  # 바닥값이 트리 증가를 따라왔는가 — 안 따라오면 바닥값이 의미를 잃는다.
+  total="$( (cd "$TREE" && find . -type f -name '*.conf') | wc -l | tr -d ' ' )"
+  floor="$(grep -oE '^TREE_MIN=[0-9]+' "$BOOTSTRAP_DIR/host-config.sh" | grep -oE '[0-9]+')"
+  [ -n "$floor" ]
+  [ "$floor" -eq "$total" ] || { echo "TREE_MIN=$floor · 트리 .conf $total건 — 바닥값이 트리를 따라오지 않았다"; false; }
+}
+
 # ── 이식 계약: 버려야 할 것이 트리에 되살아나지 않는다 ─────────────────────────────────────
 @test "the tree declares no swap or zram (owner decision D-f)" {
   # zram은 OrbStack VM에서 한 번도 적용된 적이 없었고(LXC 드롭인이 유닛을 죽였다), 베어메탈에서
@@ -173,6 +201,18 @@ _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RU
   [ -f "$FX/etc/systemd/resolved.conf.d/10-k3s-node.conf" ]
   [ -f "$FX/etc/systemd/journald.conf.d/10-k3s-node.conf" ]
   [ -f "$FX/etc/ssh/sshd_config.d/10-k3s-node.conf" ]
+}
+
+@test "apply makes the tmpfiles line effective now (a reboot requirement would make 'applied' a lie)" {
+  # 부팅 때는 systemd-tmpfiles-setup.service가 걸지만, --apply가 재부팅을 요구하면
+  # "적용 완료"가 거짓이 된다. 설치만 하고 반영을 빠뜨리는 회귀를 이 @test가 막는다.
+  _sandbox
+  _apply
+  [ "$status" -eq 0 ]
+  log="$(cat "$REC_LOG")"
+  printf '%s' "$log" | grep -qF -- 'systemd-tmpfiles --create'
+  printf '%s' "$log" | grep -qF -- '/etc/tmpfiles.d/10-k3s-node.conf'
+  [ -f "$FX/etc/tmpfiles.d/10-k3s-node.conf" ]
 }
 
 @test "apply detaches the node from tailnet DNS (its upstream is the LIVE Mac AdGuard)" {
