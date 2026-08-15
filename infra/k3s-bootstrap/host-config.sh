@@ -47,7 +47,9 @@ SSHD_DROPIN="10-k3s-node.conf"
 
 # 트리가 선언하는 파일 수의 **바닥값**. 열거가 깨져 0건이 되면 "드리프트 없음"으로 조용히
 # 통과한다 — 레포가 scan-floor로 도처에서 막는 그 클래스다. 수치는 소비자(=이 파일)가 소유한다.
-TREE_MIN=3
+# ⚠️ 트리에 파일을 더하면 **이 값도 같이 올려야** 바닥값이 계속 의미를 갖는다.
+#    (3 → 4: 2026-08-15 `etc/tmpfiles.d/10-k3s-node.conf` 추가 — NVMe ASPM L1 비활성)
+TREE_MIN=4
 
 fail() { echo "FAIL: host-config: $*" >&2; exit 1; }
 
@@ -190,6 +192,9 @@ echo "==> [5/6] 노드 로컬 스토리지 디렉토리"
 $RUN install -d -m 0700 -o root -g root "${R}${INTERNAL_STORAGE_PATH}"
 
 echo "==> [6/6] 유닛 반영"
+# tmpfiles 줄은 부팅 때 systemd-tmpfiles-setup.service가 걸지만, --apply는 **지금** 상태를
+# 만들어야 한다(재부팅을 요구하면 "적용했다"가 거짓이 된다). 대상이 없으면 `w`는 no-op이다.
+$RUN systemd-tmpfiles --create "${R}/etc/tmpfiles.d/10-k3s-node.conf"
 $RUN systemctl daemon-reload
 $RUN systemctl restart systemd-resolved
 $RUN systemctl restart systemd-journald

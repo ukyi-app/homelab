@@ -150,6 +150,34 @@
   부하가 걷힌 뒤 재측정해 회수할 것.
 > 가드: `platform/victoria-stack/prod/test_concurrency_pin.bats`
 
+### PCIe correctable RxErr 폭주는 ASPM L1이다 — 유휴에서만 나고, 하드웨어 열화가 아니다
+- NUC의 부팅 NVMe(`0000:01:00.0`)에서 `PCIe Bus Error: severity=Correctable, type=Physical Layer,
+  (Receiver ID)`가 대량으로 났다. AER 카운터 기준 부팅 후 **`RxErr` 3만 건대**(dmesg는 rate-limit돼
+  수백 줄만 보이므로 **`/sys/bus/pci/devices/<addr>/aer_dev_correctable`을 볼 것** — dmesg 줄 수로
+  규모를 판단하면 ~85배 과소평가한다).
+- ⚠️ **열화로 오독하기 쉽다.** 판별 3종:
+  `aer_dev_fatal`/`aer_dev_nonfatal`이 **0**이고 · `LnkCap`=`LnkSta`(속도·폭 강등 없음)이며 ·
+  `LnkCtl: ASPM L1 Enabled`이면 링크 마진이 아니라 **전력 상태 전이**를 보고 있는 것이다.
+- ⭐ **결정적 A/B (2026-08-15 실측)** — per-device 노브 `/sys/bus/pci/devices/<addr>/link/l1_aspm`을
+  껐다 켜며 같은 창에서 카운터를 쟀다:
+
+  | | 유휴 60초 | 부하(8GiB direct read) | 처리량 |
+  |---|---|---|---|
+  | ASPM L1 ON | **+9** | +0 | 1.2~1.3 GB/s |
+  | ASPM L1 OFF | **+0** | +0 | 1.2 GB/s |
+
+  ⇒ **에러는 부하가 아니라 유휴에서만 난다**(L1 진입→기상 시 발생). **처리량 손실은 0**이고
+  대가는 유휴 전력뿐이다. "I/O가 많아서 링크가 힘들다"는 정반대의 직관이 틀린 자리다.
+- ⚠️ **장애가 카운터를 튀게 한다.** 2026-08-14 콜드스타트 OOM 루프가 만든 잦은 유휴↔활성 전환이
+  버스트를 만들었다 — 카운터 급증을 보고 디스크를 의심하기 전에 **그 시간대에 무슨 장애가 있었는지**
+  먼저 볼 것.
+- ⇒ 처방: `etc/tmpfiles.d/10-k3s-node.conf`의 `w /sys/bus/pci/drivers/nvme/*/link/l1_aspm - - - - 0`.
+  **PCI 주소가 아니라 드라이버 경유 글롭**을 쓴다 — 슬롯이 바뀌거나 두 번째 M.2를 달아도 따라간다.
+  ⚠️ `host-config.sh`의 트리 열거는 `find . -type f -name '*.conf'`다. udev 룰(`.rules`)이나
+  grub 조각(`.cfg`)으로 두면 **조용히 무시된다**(레포의 "열거 붕괴 → vacuous green" 클래스).
+  그래서 `.conf`로 표현 가능한 tmpfiles를 골랐다. 트리에 파일을 더하면 `TREE_MIN`도 같이 올릴 것.
+> 가드: `infra/k3s-bootstrap/tests/test_03-host-config.bats`
+
 ### hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다
 - Pod `securityContext.fsGroup`은 kubelet이 소유권을 관리하는 볼륨에만 걸린다. **local-path류의
   hostPath 백엔드 PV는 대상이 아니다** — 2026-08-14 NUC 실측: `fsGroup: 65532`인데 PVC 디렉토리가
