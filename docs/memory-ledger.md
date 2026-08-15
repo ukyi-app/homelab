@@ -76,8 +76,27 @@ check-resource-limits 스캔 밖이라 여기 수기 계상). 신규/변경 상�
 있었다 — 누수가 아니라 작업집합이다. **코어 수(GOMAXPROCS/--threads)를 원인으로 본 최초 진단은
 반증됐다**: 핀을 넣어 vector 워커를 15→8로 줄였는데 OOM anon-rss는 그대로였다(핀 자체는 위생 조치로
 유지). vlogs 쪽이 1차 원인이고 vector는 sink 백프레셔로 끌려 죽는 결합 루프였다.
-⬜ **이 두 값은 "OOM을 멈추는 안전한 상한"이지 right-size가 아니다** — G4 부하가 걷힌 뒤 steady
-working_set을 재측정해 옵션 (a)로 회수할 것. 상향 후 명목 잔여 = 10240 − 9020 = 1220(cap 무변경).
+✅ **2026-08-15 재기준선 완료 — 회수하지 않기로 했다.** 버스트가 걷힌 뒤 **27시간 steady** 구간을
+NUC에서 cgroup으로 실측했다(`memory.current`/`memory.peak`, 컨테이너 시작 2026-08-14T05:34Z):
+
+| | steady(current) | **peak** | limit | peak/limit |
+|---|---|---|---|---|
+| `vector` | 71 Mi | **418 Mi** | 512 Mi | 82% |
+| `victorialogs` | 75 Mi | **181 Mi** | 256 Mi | 71% |
+
+steady만 보면 7배 과다로 보이지만 **peak가 판단 기준이다.** 이 원장은 스스로 적었듯 limit 합이
+*동시-peak 상한*이고, 위 peak는 **현재 limit으로 실제 백로그 버스트를 겪으며 살아남은 값**이다.
+⚠️ 그리고 **버스트 크기는 장애 지속시간에 비례한다** — 418 Mi는 17시간 장애가 만든 것이고 더 긴
+장애면 더 크다. peak 위 여유(vector 94 Mi · vlogs 75 Mi)는 낭비가 아니라 **더 나쁜 장애에 대한
+보험**이며, steady에 맞춰 깎으면 관측이 가장 필요한 순간에 파이프라인이 죽는다.
+⚠️ vlogs는 깎으면 **캐시 예산도 같이 준다**(`-memory.allowedPercent=60`이 limit에 비례).
+⚠️ `go_memstats_heap_sys`(166 MB)를 RSS로 읽지 말 것 — Go가 예약만 하고 반납 안 한 주소공간이다
+(실제 RSS 66.8 MB).
+
+명목 잔여 = 10240 − 9020 = **1220 Mi(11%)** — 신규 온보딩을 막는 수준이 아니다.
+**회수를 다시 검토할 조건**: 잔여가 수십 Mi까지 떨어질 때. 그때도 limit을 깎기 전에 **버스트 자체를
+줄이는 쪽**(vector sink `request.concurrency` 고정)을 먼저 볼 것 — 미검증이므로 넣으면 반드시
+같은 지표를 다시 재라(`docs/traps-detail.md`의 "상주 워크로드 OOM 진단").
 
 <!-- ledger:meta VM_ALLOCATABLE_MIB=12288 LIMIT_BUDGET_MIB=10240 -->
 
