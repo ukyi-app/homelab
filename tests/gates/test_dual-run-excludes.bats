@@ -33,10 +33,25 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   grep -q 'deadmanswitch-relay.yaml' platform/victoria-stack/prod/kustomization.yaml   # 주석으로 남아 있어야 컷오버에 되살린다
 }
 
+@test "the restore drill is suspended while dual-running (same green-wash as the relay)" {
+  # drill은 PASS 시 HEALTHCHECKS_URL을 ping하고, 그 시드는 main과 바이트 동일이다 —
+  # 두 클러스터가 같은 체크를 ping하면 **라이브 Mac의 drill이 안 돌아도 초록으로 남는다.**
+  # ⚠️ 아카이브 원본은 문제가 아니다(drill이 라이브 Cluster의 serverName에서 파생 — NUC은 pg-nuc).
+  #    막는 것은 ping 하나뿐이고, 그래서 삭제가 아니라 **suspend**다: 수동 실행(G5)은 계속 된다.
+  s="$(yq '.spec.suspend' platform/cnpg/prod/restore-drill-cronjob.yaml)"
+  printf '%s' "$s" | grep -qxF -- 'true'
+  # 마커가 그 줄에 붙어 있어야 아래 되돌림 집합 @test가 이 파일을 잡는다.
+  run grep -nE '^[[:space:]]*suspend:[[:space:]]*true[[:space:]]*#[[:space:]]*dual-run' platform/cnpg/prod/restore-drill-cronjob.yaml
+  [ "$status" -eq 0 ]
+  # 양성 대조 — CronJob이 실재하고 스케줄을 여전히 들고 있다(컷오버에 되살릴 대상).
+  run grep -qE '^[[:space:]]*schedule:' platform/cnpg/prod/restore-drill-cronjob.yaml
+  [ "$status" -eq 0 ]
+}
+
 @test "every dual-run divergence carries the marker, and the revert set is exactly these files" {
   # ⚠️ 이 @test가 이 파일의 존재 이유다. 마커 없는 한시 divergence가 생기면 컷오버에서 빠뜨린다.
   #    목록이 늘거나 줄면 red — 늘었다면 마커를 달고 여기에 추가하고, 줄었다면 컷오버가 진행 중이다.
   got="$(git grep -l -- 'dual-run' | LC_ALL=C sort | tr '\n' ' ')"
-  want="platform/argocd/root/appset.yaml platform/victoria-stack/prod/kustomization.yaml tests/gates/test_dual-run-excludes.bats "
+  want="platform/argocd/root/appset.yaml platform/cnpg/prod/restore-drill-cronjob.yaml platform/victoria-stack/prod/kustomization.yaml tests/gates/test_dual-run-excludes.bats "
   printf '%s' "$got" | grep -qxF -- "$want"
 }

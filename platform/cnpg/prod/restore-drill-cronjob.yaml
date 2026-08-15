@@ -4,7 +4,25 @@ metadata:
   name: pg-restore-drill
   namespace: database
 spec:
-  schedule: "0 5 * * 0" # 일요일 05:00 — 반복 실행, 모니터링 대상
+  schedule: "0 5 * * 0" # 일요일 05:00 UTC(=14:00 KST — `timeZone` 미지정이라 UTC로 평가된다)
+  # ⚠️ **dual-run 동안 정지한다.** 이 drill은 PASS 시 `HEALTHCHECKS_URL`을 ping하는데
+  #    (`restore-drill-script.sh` 말미), 그 시드(`restore-drill-alerting.enc.yaml`)는 main과
+  #    **바이트 동일**이다 — 즉 NUC이 ping하면 **라이브 Mac의 drill이 아예 안 돌아도 체크가 초록으로
+  #    남는다.** `deadmanswitch-relay`를 dual-run에서 뺀 것과 **정확히 같은 이유**다
+  #    (`tests/gates/test_dual-run-excludes.bats`의 "green-wash the live check").
+  #    Telegram도 같은 chat이라 PASS가 두 건 온다.
+  # ⚠️ **아카이브 원본은 문제가 아니다** — drill은 라이브 Cluster의 plugin `serverName`에서
+  #    파생하므로 NUC은 `pg-nuc`, Mac은 `pg`를 복구한다(스크립트 헤더 주석 참조). 교차 오염 없다.
+  # ⚠️ **새 알림을 만들지 않는다**: `CNPGRestoreDrillStale`은 NUC에서 이미 발화 중이다
+  #    (metric이 한 번도 push된 적 없어 `absent()`가 참 — 2026-08-15 실측). suspend가 그 상태를
+  #    바꾸지 않는다. `DeadmanswitchRelayUnreachable`이 relay 제외의 대가로 떠 있는 것과 같은 성질이다.
+  # ⚠️ **G5(R2 → 일회용 클러스터 복구 증명)는 이 drill이 그대로 수행한다.** 정지시킨 뒤에도
+  #    `kubectl -n database create job --from=cronjob/pg-restore-drill <name>`으로 **수동 실행**은 된다
+  #    (suspend는 스케줄러만 막는다). 수동 실행 시 `HEALTHCHECKS_URL`을 빈 값으로 덮어 ping만 죽이면
+  #    오염 없이 증거를 얻는다.
+  # ⚠️ 컷오버에서 **`false`로 되돌린다.** 이 줄이 `dual-run` 마커를 달고 있어야
+  #    `test_dual-run-excludes.bats`의 되돌림 집합에 잡힌다.
+  suspend: true # dual-run
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 4
   failedJobsHistoryLimit: 4
