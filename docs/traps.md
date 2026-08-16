@@ -36,6 +36,7 @@
 | `.claude/` 선택적 un-ignore(하네스 추적/런타임 무시) | gate | `tests/gates/test_claude-harness-tracked.bats` |
 | make ci ↔ ci.yaml gate 8스텝 패리티 | gate | `tests/gates/test_make-ci-parity.bats` |
 | DR drill 안전 불변식(R5, 라이브 파괴 없이) | gate | `tests/test_dr-drill.bats` |
+| 파괴 프리미티브는 전용 파일 + 확인 env로 분리한다(드릴 본문의 한 줄이면 '그 줄만 떼어 돌려보는' 경로가 생긴다) · bulk 안전은 경로가 아니라 **bind 소스**로 판정한다 | gate | `tests/test_destroy-node.bats` |
 | R2 pg 아카이브 reset --purge 가드(④) | gate | `tests/test_reset-pg-r2-archive.bats` |
 | sealing key 백업 체인 DR fail-closed 게이트 | gate | `tests/test_sealed-secrets-restore.bats` |
 | tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | iac | `infra/_tests/test_tf_reconcile.bats` |

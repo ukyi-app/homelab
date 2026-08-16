@@ -22,11 +22,15 @@ sudo mount --bind /var/lib/rancher/k3s-storage/bulk /mnt/bulk
 echo '/var/lib/rancher/k3s-storage/bulk /mnt/bulk none bind 0 0' | sudo tee -a /etc/fstab
 #   → versions.env의 BULK_MIGRATION_WINDOW_UNTIL="YYYY-MM-DD" 를 채우고(커밋),
 #   → BULK_TEMPORARY_ALLOWED=1 make up
-#   ⚠️ 이 창이 열려 있는 동안 scripts/dr-drill.sh 는 실행을 거부한다(bulk가 파괴 대상과 같은 디스크).
+#   ⚠️ 이 창이 열려 있는 동안 scripts/dr-drill.sh 와 scripts/destroy-node.sh 가 둘 다 실행을 거부한다
+#      (bulk가 파괴 대상과 같은 디스크 — 정확히는 bind 소스가 /var/lib/rancher 밑에 있다).
 
 # 국면 B (PONR 3 이후). 위 bind 줄을 fstab에서 빼고 실제 M.2로 갈아끼운다.
 #   → versions.env의 BULK_MIGRATION_WINDOW_UNTIL 을 비우면 dr-drill이 다시 열리고,
 #     플래그 없이 make up 이 통과한다(디바이스가 / 와 다르므로).
+#   ⚠️ **창을 비우는 것만으로는 국면 B가 아니다.** destroy-node.sh 는 선언과 별개로 findmnt 으로
+#      bulk 의 bind 소스를 실측해, /var/lib/rancher 밑이면 창이 비어 있어도 거부한다.
+#      즉 M.2 를 실제로 마운트하지 않은 채 창만 비우는 사고가 가드로 막힌다.
 ```
 
 **라이브 디버그** — 셸 스크립트 로그 + `verify-cluster.sh`. 런북 `docs/runbooks/host-substrate.md`(OrbStack VM/k3s 계층), `docs/runbooks/external-ssd.md`, `docs/runbooks/storage-verify.md`. 테스트는 `infra/k3s-bootstrap/tests/`.

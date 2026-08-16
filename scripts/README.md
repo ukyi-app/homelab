@@ -92,7 +92,14 @@
 - **`reset-pg-r2-archive.sh`** — **파괴적**. fresh initdb `pg`가 R2의 옛 barman 아카이브와 충돌할 때
   serverName `pg` 아카이브(base/+wals/)만 정리해 아카이빙 재개. **`make reset-pg-archive`**가 호출하되
   **기본 dry-run** — 실제 삭제는 `ARGS=--purge`. 라이브 ObjectStore에서 bucket/endpoint를 읽음.
-- **`dr-drill.sh`** — **극도로 파괴적(owner 전용)**. OrbStack VM(cattle)을 DESTROY→RECREATE하고
+- **`destroy-node.sh`** — **극도로 파괴적(owner 전용, D-j)**. 베어메탈 노드 파괴 프리미티브:
+  `k3s-uninstall.sh` + `/var/lib/rancher` 삭제(= standard 클래스 PV 전량 소멸, 복구 불가).
+  OrbStack 시절 `orb delete -f k3s` 한 줄을 대체한다. `dr-drill.sh`의 [1]이 유일한 자동 호출자이고
+  그 밖에는 사람이 직접 실행한다 — Makefile/워크플로 **배선 없음**(`make down`은 의도적 비배선).
+  3중 fail-closed: 확인 env `DR_DRILL_DESTROY_CONFIRM=1` · 국면 A(`BULK_MIGRATION_WINDOW_UNTIL`이
+  비어있지 않으면) 거부 · `k3s-uninstall.sh` 부재 fail-loud. **`|| true` 없음** — 파괴 실패를 삼키면
+  드릴이 거짓 PASS를 찍는다. 시임 `K3S_RUN`(기본 sudo)·`K3S_UNINSTALL`. 가드 `tests/test_destroy-node.bats`.
+- **`dr-drill.sh`** — **극도로 파괴적(owner 전용)**. 노드를 DESTROY→RECREATE(`destroy-node.sh`에 위임)하고
   git+R2+age 키만으로 전 플랫폼 재구축 + R2 DB 복구(canary 일치)를 증명하는 풀 DR 드릴(R5). Makefile/워크플로
   **배선 없음** — 직접 실행. 파괴 전 canary 캡처 + 복구 증명 후에만 노드 파괴. `sealing-key-dr-gate.sh`를 source.
 - **`sealing-key-dr-gate.sh`** — sealing-key DR 게이트 **라이브러리(source 전용 — top-level 실행 없음)**.
