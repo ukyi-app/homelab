@@ -23,13 +23,14 @@ resources:
   - digest-exporter.yaml
   - gha-liveness-exporter.yaml # GHA 스케줄 워크플로 liveness 하트비트(티켓 10 — run 밖 관측자)
   - pvc-du-exporter.yaml  # per-PVC 용량 가시화 CronJob + 전용 egress netpol(메타갭 ③ W1-A)
-  # ── dual-run: 라이브 Mac과 병행 운용하는 동안만 비활성 (컷오버에서 주석을 푼다) ──
-# ⚠️ Watchdog는 **항상** 발화하므로 relay는 healthchecks.io를 계속 ping한다. 두 클러스터가 같은
-#    체크를 ping하면 **라이브 Mac이 죽어도 체크가 초록으로 남는다** — 라이브 장애를 감지하는
-#    마지막 오프노드 안전망이 침묵한다. HEALTHCHECKS_URL은 KSOPS(age)라 NUC에서 그대로 복호화된다.
-#    계획서 §3.4는 바로 이 성질 때문에 healthchecks를 '최종 게이트'로 쓰라고 한다 — 그렇다면
-#    더더욱 그 전에 오염시키면 안 된다.
-# - deadmanswitch-relay.yaml # dual-run
+  # ⚠️ **relay 비활성(`#454`)은 2026-08-17 컷오버로 해제됐다.** 근거는 "두 클러스터가 같은 healthchecks
+  #    체크를 ping하면 라이브 Mac이 죽어도 초록으로 남는다"였는데, 라이브 Mac 클러스터가 더 이상
+  #    존재하지 않으므로 **경쟁 pinger가 원리적으로 없다.** 두 번째 클러스터를 다시 세우게 되면
+  #    이 줄을 **먼저 다시 주석 처리해야 한다** — 그 순간부터 오프노드 dead-man이 거짓 초록이 된다.
+  # ⚠️ 반대로 이 줄이 빠지면 Watchdog → AM webhook → healthchecks.io 체인이 통째로 끊긴다.
+  #    끊김은 조용하다(오프노드 스위치는 ping **부재**를 페이징하므로 레포 안에 증거가 없다) —
+  #    유일한 in-band 조기 신호가 `rules/core.yaml`의 `DeadmanswitchRelayUnreachable`이다.
+  - deadmanswitch-relay.yaml
   - grafana-provisioning.yaml
   - grafana-dashboards.yaml
   - grafana.yaml
