@@ -35,12 +35,20 @@ up: ## [runtime] 호스트 전제 확인 + k3s + 스토리지 기동 (멱등, = 
 host-up: ## [runtime] `up`의 별칭 — 호스트 기반층 기동 (M1)
 	@infra/k3s-bootstrap/host-up.sh
 
-down: ## [미구현] 클러스터 내리기 — 베어메탈에선 파괴 프리미티브 결정이 선행이다
-# ⚠️ OrbStack 시절엔 `orb delete -f k3s`가 값싼 전손이었다(VM은 cattle). 물리 노드는 cattle이 아니다:
-#    `k3s-uninstall.sh` + /var/lib/rancher 삭제는 **모든 standard 클래스 PV를 실제로 파괴**하고
-#    되돌릴 수 없다. G5(일회용 클러스터로 R2 복구)·G11(콜드스타트 증명) 설계와 얽혀 있어
-#    owner 판단(D-j)이 선행이다. 그때까지 스텁으로 둔다 — 있는 척하는 것보다 낫다.
-	@echo "down: 미구현 — 베어메탈 파괴 프리미티브(D-j) 미결정. nuc-port-g2.md §6 참조" >&2
+down: ## [비배선] 클러스터 내리기 — 파괴 프리미티브는 scripts/destroy-node.sh(직접 실행)
+# ⚠️ D-j는 **확정됐다**(프리미티브 = scripts/destroy-node.sh). 그런데도 여기 배선하지 않는다. 이유 셋:
+#      (1) `tests/test_makefile.bats`가 `make down`을 **실제로 실행한다.** 배선하면 그 @test가
+#          owner 머신(=라이브 NUC)에서 파괴 스크립트를 실행하게 되고, 안전이 확인 env 하나에만
+#          걸린다. 테스트가 파괴 경로에 발을 들이는 형태를 만들지 않는다.
+#      (2) 선례가 있다: `host-config --apply`도 make에 걸지 않는다(위 주석) — "make 뒤에 숨기면
+#          무엇이 바뀌는지 모른 채 도는 경로가 된다". `dr-drill.sh`·`backup-files-data.sh`도
+#          같은 이유로 배선 없음(scripts/README.md).
+#      (3) `make down`은 짧고 무해해 보이는 이름이다. 그 이름 뒤에 전손을 두는 것이
+#          정확히 이 레포가 반복해 밟은 함정이다.
+#    ⇒ 스텁을 유지하되 **미구현이라고 거짓말하지 않는다** — 무엇을 어떻게 부르는지 알려준다.
+	@echo "down: make에 배선하지 않는다 — 파괴 프리미티브는 scripts/destroy-node.sh다(D-j 확정)." >&2
+	@echo "      DR_DRILL_DESTROY_CONFIRM=1 scripts/destroy-node.sh   # 노드 전손(k3s-uninstall + /var/lib/rancher)" >&2
+	@echo "      국면 A(versions.env의 BULK_MIGRATION_WINDOW_UNTIL)가 열려 있는 동안엔 그 스크립트도 거부한다." >&2
 	@exit 1
 
 bootstrap: ## 멱등 DR 진입점: ArgoCD + sops-age Secret + root app 설치

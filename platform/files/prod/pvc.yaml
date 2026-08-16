@@ -4,7 +4,11 @@
 # 내구성 등급 = 비재생성(non-regenerable): files-data는 git+R2+age로 재구축 불가한 유일 자산.
 #   · 오삭제/침묵유실 방어: Retain + Prune=false + /readyz free-space + FilesBackup/FilesBulkSSD 알림(r4).
 #   · 매체(SSD) 유실 방어: 호스트 오프-SSD rsync 사본(scripts/backup-files-data.sh, RPO=일1회/24h launchd).
-#   · R2 미사용(무료티어)은 '백업 없음'이 아니라 '백업 = 호스트 내장 디스크 사본'. DR 재결합=external-ssd.md.
+#   · R2 미사용(무료티어)은 '백업 없음'이 아니라 '백업 = 호스트 내장 디스크 사본'.
+#   ⚠️ **DR 재결합 절차의 정본 문서가 없다**(2026-08-17 실측). 옛 포인터 `external-ssd.md`는 macOS APFS
+#      외장 볼륨 **생성** 런북이라 재결합 절차를 담은 적이 없고 `storage-verify.md`에도 없다.
+#      요건은 `scripts/dr-drill.sh`의 [6.5] 주석이 인라인으로 들고 있다(기존 bulk 데이터 디렉토리를
+#      가리키는 hostPath PV를 claimRef로 정적 바인딩). 두 런북의 베어메탈 재작성은 미착수다.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

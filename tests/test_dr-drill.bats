@@ -9,8 +9,10 @@ sh=scripts/dr-drill.sh
 }
 
 # ── bulk 국면 A(D4 한시) 거부 게이트 ───────────────────────────────────────────────────────
-# ⚠️ 아래 두 @test는 dr-drill.sh를 **실제로 실행한다.** 진짜 레포 루트에서는 절대 안 된다(:108이
-#    노드를 파괴한다) — 대신 **복사본을 픽스처 REPO_ROOT 위에서** 돌린다. 그 트리에는
+# ⚠️ 아래 두 @test는 dr-drill.sh를 **실제로 실행한다.** 진짜 레포 루트에서는 절대 안 된다
+#    (`==> [1]`이 노드를 파괴한다) — 대신 **복사본을 픽스처 REPO_ROOT 위에서** 돌린다. 그 트리에는
+#    ⚠️ 줄번호로 부르지 않는다: 이 자리는 예전에 `:108`이라 적혀 있었고 그 줄은 이미 두 번 밀렸다
+#       (같은 이유로 dr-drill.sh의 상호참조도 단계 마커로 바꿨다).
 #    scripts/sealing-key-dr-gate.sh가 없으므로 가드가 깨져 있으면 바로 다음 줄에서 죽는다.
 #    즉 파괴 지점에 닿을 길이 원리적으로 없다. grep만으로는 "가드가 **맨 앞**에 있는가"를
 #    증명할 수 없어서 이 형태를 골랐다.
@@ -59,9 +61,13 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
 }
 
 @test "dr-drill PROVES recoverability BEFORE any destruction (refuses to destroy otherwise)" {
-  # 파괴 전 복구 증명이 'orb delete'보다 먼저 와야 한다 — 핵심 안전 불변식.
-  proof_line=$(grep -n 'DR ABORT: 파괴 전 복구 실패' "$sh" | head -1 | cut -d: -f1)
-  destroy_line=$(grep -n 'orb delete -f k3s' "$sh" | head -1 | cut -d: -f1)
+  # 파괴 전 복구 증명이 **실제 파괴 호출**보다 먼저 와야 한다 — 핵심 안전 불변식.
+  # ⚠️ 앵커를 배너(`==> [1]`)가 아니라 destroy-node.sh **호출 줄**에 건다: 지켜야 할 것은
+  #    "증명이 echo보다 먼저"가 아니라 "증명이 파괴보다 먼저"다.
+  # ⚠️ `^[^#]*` — dr-drill.sh의 **주석에도 같은 경로가 들어 있어서**(헤더 :3) 전체 줄 grep은
+  #    주석 줄번호를 집어 순서 단언을 거짓 red로 만든다(:44-45가 기록한 실측과 같은 클래스).
+  proof_line=$(grep -nE '^[^#]*DR ABORT: 파괴 전 복구 실패' "$sh" | head -1 | cut -d: -f1)
+  destroy_line=$(grep -nE '^[^#]*scripts/destroy-node\.sh' "$sh" | head -1 | cut -d: -f1)
   [ -n "$proof_line" ] && [ -n "$destroy_line" ]
   [ "$proof_line" -lt "$destroy_line" ]
 }
@@ -72,8 +78,20 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   grep -q 'COMPLETE되지 않음' "$sh"
 }
 
-@test "dr-drill destroys the node (cattle) and rebuilds from committed host-config + install" {
-  grep -q 'orb delete -f k3s' "$sh"
+@test "dr-drill destroys the node via the dedicated primitive and rebuilds from committed host-config + install" {
+  # ⚠️ **문자열만 갈아끼우면 또 다른 거짓 초록이다.** D-j 이후 이 @test가 지켜야 할 실질은 셋이다:
+  #    (a) 파괴가 전용 프리미티브를 거친다(드릴 본문에 파괴 명령이 인라인되지 않는다),
+  #    (b) 확인 env를 **명시적으로** 준다(주입이 사라지면 드릴이 [1]에서 조용히 멈춘다),
+  #    (c) 그 호출이 실패를 삼키지 않는다 — `|| true`가 되살아나면 [2] 이후가 '재구축'이 아니라
+  #        멀쩡한 노드 재확인이 되고 드릴이 아무것도 증명하지 않은 채 PASS를 찍는다.
+  #        그것이 예전 `orb delete -f k3s || true`의 정확한 고장 모드였다.
+  grep -qE '^[^#]*DR_DRILL_DESTROY_CONFIRM=1[[:space:]]+bash[[:space:]].*scripts/destroy-node\.sh' "$sh"
+  [ -x scripts/destroy-node.sh ]
+  run grep -nE '^[^#]*destroy-node\.sh.*\|\|[[:space:]]*true' "$sh"
+  [ "$status" -ne 0 ]
+  # ⚠️ 한 줄 안에서만 보면 **줄바꿈 연결로 우회된다**(`… destroy-node.sh \` + 다음 줄 `|| true`).
+  run grep -nE '^[^#]*bash[^#]*destroy-node\.sh[^#]*\\$' "$sh"
+  [ "$status" -ne 0 ]
   grep -q 'infra/k3s-bootstrap/host-up.sh' "$sh"
   grep -q 'make bootstrap' "$sh"
   # ⚠️ 이름이 주장하는 "커밋된 것에서 재구축"을 실제로 앵커한다. 예전 이름은 `cloud-init`을
@@ -126,6 +144,25 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   grep -q 'rollout status deploy/files' "$sh"
   grep -q 'files-data PV 미바운드' "$sh"
   grep -q 'files 카탈로그 비어있음' "$sh"
+  # ⚠️ 열거를 **권한 상승해서** 한다. /mnt/bulk는 0700 root라(infra/k3s-bootstrap/README.md의 국면 A
+  #    절차) 비권한 읽기의 EACCES가 빈 출력으로 둔갑해 '비어 있음'이라는 거짓 진단을 낸다.
+  grep -qE '^[^#]*\$K3S_RUN find ' "$sh"
+  # 열거 실패와 '항목 0'은 다른 사건이다 — 분기가 둘 다 있어야 한다.
+  grep -q '열거하지 못했다' "$sh"
+}
+
+@test "no OrbStack binding remains in the DR destruction path (code, not prose)" {
+  # 감사 12가 요구한 '가드 1건 신설'. 이 자리가 사고의 진원이다 — `orb delete -f k3s || true`가
+  # 리눅스에서 조용히 no-op이라 드릴이 아무것도 파괴하지 않은 채 흐르는 것이 원래 결함이었고,
+  # 그것을 실증하려고 명령을 실제로 실행한 것이 2026-08-16 사고였다.
+  # ⚠️ 전체 파일 grep은 **자기 주석에 걸린다** — 두 파일의 헤더가 무엇이 왜 사라졌는지 설명하며
+  #    그 단어들을 그대로 담는다. 단언 대상은 산문이 아니라 **코드**다.
+  # ⚠️ 양성 대조를 **두 파일 모두**에 건다. 하나만 걸면, 두 번째 파일이 삭제/리네임됐을 때
+  #    grep이 exit 2(비-0)로 죽고 `[ "$status" -ne 0 ]`가 통과해 **vacuous green**이 된다.
+  grep -qE '^[^#]*scripts/destroy-node\.sh' "$sh"
+  grep -qE '^[^#]*\$K3S_RUN' scripts/destroy-node.sh
+  run grep -nE '^[^#]*(orb |orbctl|virtiofs|/mnt/mac)' "$sh" scripts/destroy-node.sh
+  [ "$status" -ne 0 ]
 }
 
 @test "dr-drill proves recovery of THIS cluster's archive (serverName derived, not the k8s name)" {
