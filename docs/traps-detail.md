@@ -271,6 +271,23 @@
 ### VictoriaLogs distroless 라이브 질의
 - VictoriaLogs/일부 VM 컴포넌트는 distroless(wget/sh 없음) — 라이브 질의는 vmagent 등
   다른 파드에서 service DNS로. vmalert 그룹 조회는 `/api/v1/rules`(신버전, groups는 400).
+- ⚠️ **`vmalert`도 distroless라 `kubectl exec ... sh -c` 가 조용히 빈 출력을 낸다**(2026-08-16 실측).
+  `vmsingle`은 셸이 있어 되는데 vmalert는 안 된다 — 한쪽이 됐다고 다른 쪽도 될 것으로 넘기지 말 것.
+  룰 상태는 vmsingle에 `ALERTS` / `ALERTS_FOR_STATE` 시계열로 물으면 exec 없이 얻는다.
+
+### VM 질의 URL에서 `[...]`를 인코딩하지 않으면 조용히 빈 결과가 온다
+- ⚠️ **`{"status":"success", ... "result":[]}`가 돌아온다 — 에러가 아니라 성공이다.**
+  그래서 "메트릭이 없다"로 읽히고, 그 위에 서 있던 알림 판단이 통째로 뒤집힌다.
+  2026-08-16 실측: `files_backup_last_success_timestamp[10d]`를 인코딩 없이 물어 0건을 받고
+  **"라이브 Mac의 files 백업이 죽었다"는 결론까지 갔다.** `%5B10d%5D`로 다시 물으니 6.3시간 전
+  값이 정상으로 있었다 — 라이브는 멀쩡했다.
+- ⇒ range selector가 든 질의는 **항상 `%5B`/`%5D`로 인코딩**한다:
+  `curl "http://<vmsingle>:8428/api/v1/query?query=last_over_time(metric%5B10d%5D)"`
+- ⚠️ **`/api/v1/label/__name__/values`로 "메트릭 존재"를 판정하지 말 것** — 기본 조회창 밖의
+  **하루 1회 push 같은 단발 시리즈는 목록에 안 나온다.** 존재 판정은 반드시
+  `last_over_time(<metric>[<충분한 창>])`으로 한다(알림 룰들이 `[10d]`를 쓰는 것과 같은 이유).
+- ⚠️ 같은 성질이 **알림에도 그대로 있다** — 단발 push 메트릭에 bare `absent()`를 걸면 영구 오발화한다.
+  `r4-storage-backup.yaml`의 주석이 그 실측을 이미 적어 두었다.
 
 ### Alertmanager telegram 전송 검증 메트릭
 - Alertmanager telegram 전송 검증은 로그가 아니라 `alertmanager_notifications_total{integration="telegram"}`

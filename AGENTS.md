@@ -84,6 +84,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - vector는 root로 실행
 - busybox nc -q 없음
 - VictoriaLogs distroless 라이브 질의
+- VM 질의 URL에서 `[...]`를 인코딩하지 않으면 조용히 빈 결과가 온다
 - Alertmanager telegram 전송 검증 메트릭
 - ConfigMap 변경 파드 자동 재시작 없음
 - bats bash 3.2 중간 [[ ]] 침묵 통과
