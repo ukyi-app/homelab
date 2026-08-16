@@ -10,11 +10,22 @@
 #    시끄럽고 1커밋으로 되돌아온다. serverName은 반대로 **조용하고 되돌릴 수 없어서** 가드를 뒀다.
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
 
-@test "cloudflared is excluded from the platform appset while dual-running" {
-  # 같은 터널 토큰 → 두 번째 커넥터 → 공개 요청이 비결정적으로 갈린다 → 두 DB로 세션 발산(되돌릴 수 없다).
-  run yq -e '[.spec.generators[0].git.directories[] | select(.exclude == true) | .path] | contains(["platform/cloudflared/*"])' platform/argocd/root/appset.yaml
-  [ "$status" -eq 0 ]
-  printf '%s' "$output" | grep -qxF -- 'true'
+@test "cloudflared is NO LONGER excluded (cutover 2026-08-17 — the competing connector is gone)" {
+  # 제외의 근거는 "같은 터널 토큰의 두 번째 커넥터"였다. 라이브 Mac 클러스터가 사라져 경쟁 커넥터가
+  # 원리적으로 없으므로 제외를 걷었다. 이 @test는 방향을 뒤집어 **되살아나면 red**로 만든다 —
+  # 제외가 되돌아왔다는 건 누군가 두 번째 클러스터를 세웠다는 뜻이고, 그때는 이 파일도 함께 봐야 한다.
+  # ⚠️ appset.yaml은 **문서가 둘**이다(platform-components · apps). `yq`(eval)는 문서마다 결과를
+  #    내므로 `select`로 걸러도 **비매치 문서가 빈 결과를 보태** 출력이 두 줄이 되고 정수 비교가
+  #    `integer expression expected`로 깨진다(이번에 두 번 밟았다). **`yq ea`(eval-all)**로
+  #    스트림 전체를 한 번에 다뤄야 단일 값이 나온다.
+  q='select(.kind == "ApplicationSet" and .metadata.name == "platform-components") | [.spec.generators[0].git.directories[] | select(.exclude == true) | .path]'
+  run yq ea "$q | contains([\"platform/cloudflared/*\"])" platform/argocd/root/appset.yaml
+  printf '%s' "$output" | grep -qxF -- 'false'
+  # 양성 대조 — 제외 목록 자체는 살아 있다(열거가 깨진 것을 'false'로 오독하지 않는다).
+  # ⚠️ 바닥값(`-ge N`)으로는 부족하다: 6→5로 하나가 사라져도 통과한다(뮤테이션으로 확인).
+  #    **정확한 집합**으로 잠근다 — 제외를 더하거나 빼면 red가 나고, 그때 이 줄을 의식적으로 고친다.
+  run yq ea "$q | sort | join(\",\")" platform/argocd/root/appset.yaml
+  printf '%s' "$output" | grep -qxF -- 'platform/argocd/*,platform/charts/*,platform/cnpg/*,platform/namespaces/*,platform/sealed-secrets/*,platform/victoria-stack/*'
 }
 
 @test "no apps/ path is excluded from the platform appset (app exclusion is never the dual-run lever)" {
@@ -52,6 +63,6 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # ⚠️ 이 @test가 이 파일의 존재 이유다. 마커 없는 한시 divergence가 생기면 컷오버에서 빠뜨린다.
   #    목록이 늘거나 줄면 red — 늘었다면 마커를 달고 여기에 추가하고, 줄었다면 컷오버가 진행 중이다.
   got="$(git grep -l -- 'dual-run' | LC_ALL=C sort | tr '\n' ' ')"
-  want="platform/argocd/root/appset.yaml platform/cnpg/prod/restore-drill-cronjob.yaml platform/victoria-stack/prod/kustomization.yaml tests/gates/test_dual-run-excludes.bats "
+  want="platform/cnpg/prod/restore-drill-cronjob.yaml platform/victoria-stack/prod/kustomization.yaml tests/gates/test_dual-run-excludes.bats "
   printf '%s' "$got" | grep -qxF -- "$want"
 }
