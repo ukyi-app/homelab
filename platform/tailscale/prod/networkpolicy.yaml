@@ -43,7 +43,14 @@ spec:
 # Egress: operator → kube-apiserver. operator는 proxy StatefulSet/Service/Secret을 reconcile한다.
 # ★kube-router가 ClusterIP(10.43.0.1:443)를 노드 InternalIP:6443으로 DNAT하고 netpol egress는 DNAT
 #   '후' dest를 평가하므로 ClusterIP가 아니라 노드 서브넷:6443을 허용한다(homepage F5와 동일 함정).
-#   OrbStack VM /24라 VM IP 변경에 durable. DR로 OrbStack 대역이 바뀌면 갱신.
+#   NUC LAN /24라 DHCP 임대 변경에 durable. 대역 자체가 바뀌면 갱신.
+#   ⚠️ **위험 모델이 컷오버로 바뀌었다(2026-08-17 주석 정정).** Mac 시대의 192.168.139.0/24는
+#      사실상 노드 하나뿐인 격리된 OrbStack VM 대역이었다. NUC의 192.168.117.0/24는 라우터(.1)·
+#      맥미니(.19)·아이폰 등이 함께 사는 **가정 LAN**이다. 즉 이 ns(enforce=privileged, operator +
+#      ts-* proxy — 클러스터 최강 권한)의 apiserver egress가 "노드 하나의 6443"에서
+#      "집 안 모든 기기의 6443"으로 넓어졌다. 값은 컷오버에 필요한 값이 맞지만, 좁히려면
+#      노드 /32로 가야 한다(DHCP 임대가 바뀌면 깨지므로 예약 IP가 선행 조건).
+#      ⚠️ `test_tailscale_netpol.bats`는 리터럴 존재만 grep해서 **대역의 넓이를 보지 못한다.**
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
