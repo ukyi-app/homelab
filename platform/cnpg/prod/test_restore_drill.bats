@@ -23,11 +23,16 @@ sh=platform/cnpg/prod/restore-drill-script.sh
 @test "drill pushes the restore_drill_last_success_timestamp breadcrumb (M5 alert metric)" {
   grep -q 'restore_drill_last_success_timestamp' "$sh"
 }
-@test "drill tears the throwaway cluster down — PVC delete + Delete-reclaim SC (no ~50GiB/run leak)" {
+@test "drill tears the throwaway cluster down — Cluster + PVC + Delete-reclaim SC (no ~50GiB/run leak)" {
+  # ⚠️ 여기서는 **정적 계약만** 본다. "정리가 apply보다 **먼저** 돈다"·"복구가 실제로 일어났다"·
+  #    "열거 실패를 0건으로 읽지 않는다"는 grep으로 원리적으로 증명할 수 없다(파일 어디에 있든
+  #    substring은 매치된다). 그 축은 test_restore_drill_behavior.bats가 스텁 kubectl의 **호출
+  #    순서·횟수**와 FAIL 문구로 문다 — 이 @test를 늘리지 말고 그쪽에 추가할 것.
   grep -q 'delete cluster' "$sh"
   grep -q 'delete pvc -l "cnpg.io/cluster=' "$sh"  # Cluster CR만이 아니라 PVC도 삭제
   grep -q 'storageClass: drill-ssd' "$sh"          # Delete reclaim → PVC 삭제 시 PV 자동 제거(수동 delete pv 불필요)
-  grep -q 'residual drill PVC' "$sh"               # cleanup 후 잔여 PVC 0 검증 가드(거짓통과 'delete pv' substring 제거)
+  grep -q 'preflight_purge' "$sh"                  # apply 이전 정리 진입점이 실재한다 (M17)
+  grep -q 'SAW_NONHEALTHY' "$sh"                   # 복구가 일어났다는 양성 증인이 실재한다 (M17)
 }
 @test "drill script passes shellcheck" {
   run shellcheck "$sh"
