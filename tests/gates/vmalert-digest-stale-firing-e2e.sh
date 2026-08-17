@@ -44,7 +44,7 @@
 # 판정 레그(exit 규약: 2 = HARNESS FAULT/CONTRACT(전제 붕괴·vacuity) · 1 = leg FAIL · 0 = OK):
 #   preflight  부트스트랩 불변식 4 + 룰 산술 3 + 카운트 룰 산술 2 (위반 = exit 2 — 룰 판정이 아니라 전제 붕괴다)
 #   L1 stale 하트비트(끊김)        → DigestExporterStale **발화**        (stale-샘플 가지)
-#   L2 정상 하트비트 + 같은 카운트 → **두 알림 모두 firing==0 AND pending==0** + 대조 알림 FilesBackupStale firing>0
+#   L2 정상 하트비트 + 같은 카운트 → **두 알림 모두 firing==0 AND pending==0** + 대조 알림 CNPGRestoreDrillStale firing>0
 #   L3 결함 픽스처(맨 참조) + 정상 → **firing==0 AND pending>0**        (하네스의 이빨 — 거짓 GREEN 최종 보증)
 #   L4 scraped(1) < configured(2)  → DigestExporterScrapeIncomplete **발화** (하트비트는 정상 — Stale이
 #      원리적으로 못 잡는 **직교 축**: push는 살아 있는데 GHCR 수집만 부분 실패)
@@ -71,7 +71,11 @@ START_EPOCH="$(date +%s)"
 
 ALERT=DigestExporterStale
 SCRAPE_ALERT=DigestExporterScrapeIncomplete   # 수집 카운트 축(US2) — 하트비트와 직교
-CONTROL=FilesBackupStale   # 같은 r4 그룹의 absent 가드 알림 — 음성 레그의 vacuity 대조군
+# 음성 레그의 vacuity 대조군 = 같은 r4 그룹의 absent 가드 알림. **시각 게이트가 없어야** 한다 —
+# FilesBackupStale은 국면 A 한시 억제(absent 가지에 `and on() (vector(time()) >= …)`)가 걸려
+# 현재 시각 replay에서 구조적으로 발화하지 않는다(2026-08-17 교체). CNPGRestoreDrillStale은
+# 형태·for:(30m)가 동일해 대체 시 RP_LEN 산술이 바뀌지 않고, 생성기가 그 메트릭을 심지 않는다.
+CONTROL=CNPGRestoreDrillStale
 # ⚠️ 아래 셋은 **메트릭 이름**이다(값이 아니다) — run.sh의 동명 셸 변수 CONFIGURED/SCRAPED는 **카운트 값**을
 #    담는다. 같은 이름이 두 층에서 다른 것을 뜻하면 읽는 쪽이 반드시 헷갈리므로 여기선 `_METRIC` 접미로 못박는다.
 HB=digest_exporter_last_success_timestamp
@@ -182,7 +186,7 @@ esac
 # ── 3) 시간창 — eval 격자에 정렬(결정성) ───────────────────────────────────────────────────────────
 # RP_LEN: 모든 레그를 동시에 만족하는 최소 길이 + 여유
 #   · L1/L5: > for:                        (픽스된 룰이 발화할 시간)
-#   · L2/L6: > 대조 알림 for:(${CTRL_FOR})      (FilesBackupStale이 발화해 vacuity를 배제)
+#   · L2/L6: > 대조 알림 for:(${CTRL_FOR})      (${CONTROL}이 발화해 vacuity를 배제)
 #   · L4   : > 카운트 알림 for:(${SCRAPE_FOR})  (부분 고장이 발화 경계를 넘길 시간)
 #   · L7   : > 강제 상한 + for:             (첫 하트비트 도착 후 발화 경계를 **넘겨** replay)
 NEED_L7=$(( BOUND_S + FOR_S ))

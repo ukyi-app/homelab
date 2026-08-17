@@ -113,8 +113,11 @@
   외장 SSD → Mac 내장 디스크로 rsync 오프-SSD 백업. `<dest>`(백업)/`--dry-run <dest>`/`--verify <dest>`
   (백업서 전 파일 복원+sha256 대조 — 매체 판독성 게이트). dest는 반드시 내장 디스크(외장이면 거부),
   스테이징→sanity(빈/급감 중단)→승격(data.prev 1개 보존). 성공 시 `files_backup_last_success_timestamp`·
-  용량을 vmsingle에 push(r4의 FilesBackupStale/FilesBulkSSDLow). launchd 일1회 배선(RPO=24h)은
-  owner-local(external-ssd.md). Makefile 배선 없음 — 직접 실행.
+  용량을 vmsingle에 push(r4의 FilesBackupStale/FilesBulkSSDLow). Makefile 배선 없음 — 직접 실행.
+  ⚠️ **국면 A에는 실행자가 없다**(배선이던 launchd plist는 Mac mini 로컬 · NUC엔 launchd/diskutil 부재).
+  게다가 국면 A의 `/mnt/bulk`는 루트 LV bind 마운트라 **2차 매체가 원리적으로 없다** — 지금 이식하면
+  false-green이다. 국면 B(2TB M.2) 이후 매체 판별 재작성 + systemd timer 배선이 정답이고,
+  그때까지 `FilesBackupStale`의 absent 가지는 한시 억제 상태다(`tests/gates/test_files-backup-phase-a.bats`).
 - **`teardown.sh`** — **파괴적(owner 전용)**. `make teardown-app`/`teardown-resource` 래퍼가 호출 —
   clean-worktree 가드 → origin/main fetch → `teardown/<target>-<ts>` fresh-main 전용브랜치 → 툴(plan) →
   allowlist staging → PR(owner gh 자격). 앱/리소스 매니페스트·apps.json·원장 행 제거(리소스 purge는

@@ -970,3 +970,36 @@ resolv.conf의 nameserver가 tailnet 대역(CGNAT `100.64.0.0/10` · tailscale U
 읽힌다 — 루트 LV의 bind 마운트를 별도 디스크로 오판하는 것이고, 그게 국면 A의 정확한 모양이다.
 
 > 가드: `infra/k3s-bootstrap/tests/test_08-bulk-gate.bats`
+
+### 한시 억제는 자기 만료를 품어야 한다 — 그리고 억제한 알림을 vacuity 대조군으로 쓰던 e2e가 함께 죽는다
+
+**영구 발화하는 critical은 무음보다 나쁘다.** `FilesBackupStale`은 NUC 이식 후 producer(호스트
+launchd + macOS 전용 `backup-files-data.sh`)가 **존재조차 하지 않아** absent 가지가 24/7 참이었다.
+`severity=critical` 라우트의 `repeat_interval: 1h`를 타고 하루 24건이 나간다. 상시 소음은 채널 전체를
+둔감화해 **진짜 페이지를 묻는다** — "알림이 있다"가 "감시가 있다"를 뜻하지 않게 된다.
+
+**억제의 만료는 룰 자신이 들고 있어야 한다.** 사람이 기억해야 하는 억제는 영구 침묵이 된다.
+expr에 `and on() (vector(time()) >= <재무장 unixtime>)`을 달면 만료가 자동이고 상한이 명시된다.
+
+⚠️ **결합 순서를 거꾸로 알기 쉽다.** PromQL은 `and`가 `or`보다 **강하게** 결합하므로
+`A or B and on() C`는 `A or (B and on() C)`로 파싱된다 — 즉 절을 expr **끝에 괄호 없이** 붙이면
+정확히 뒤쪽(absent) 가지에만 걸린다. 위험한 것은 그 반대 형태 `(A or B) and on() C`(전체를 괄호로
+묶는 것)로, 그러면 staleness 가지까지 함께 죽어 **producer가 되살아나도 감시가 안 돌아온다.**
+**두 형태 모두 문법상 유효해 `-dryRun`이 구별하지 못한다** — 그래서 형태를 잠그는 가드가 필요하다.
+실측(VictoriaMetrics v1.145.0): 끝에 붙인 형태에서 실행자 없음 → 무발화 / 배선 + stale → **발화** /
+배선 + fresh → 무발화 / 억제 없는 원본 + 실행자 없음 → 발화.
+
+**시각 상수는 SSOT의 파생값이다.** 창의 SSOT는 `versions.env`의 `BULK_MIGRATION_WINDOW_UNTIL`이고
+룰은 YAML이라 런타임 파생이 불가능하다 → 하드코딩을 허용하되 **양방향 정합 가드**로 잠근다.
+특히 "창을 비웠는데 억제 절이 남음"을 잡는 방향이 더 중요하다 — 그게 국면 전환에서 알림이 죽은 채
+넘어가는 경로다. ⚠️ 그 가드는 **`yq`로 expr만 파싱해서** 봐야 한다. 같은 파일의 주석이 같은 리터럴을
+담으므로 파일 전체 grep은 주석의 상수를 검증하고 배포되는 expr은 안 보는 거짓 초록을 만든다.
+
+**★ 동반 파괴 — 억제된 알림을 vacuity 대조군으로 쓰던 하네스가 시끄럽게 죽는다.**
+음성 레그("발화 없음"이 판정)는 vmalert가 애초에 아무것도 안 썼을 때도 통과하므로, 이 레포의 e2e들은
+"확실히 발화하는 같은 그룹의 absent 가드 알림"을 대조군으로 세워 vacuity를 배제한다. 그 대조군에
+시각 게이트를 걸면 replay(=현재 시각)에서 발화가 불가능해져 하네스가 HARNESS FAULT(exit 2)로 죽는다.
+⇒ **대조군은 시각 게이트가 없는 알림이어야 한다**는 계약이 생겼다. 억제를 도입하는 커밋은 대조군
+이동을 **같은 커밋에** 포함해야 한다(안 하면 required gate 2개가 동시에 RED).
+
+> 가드: `tests/gates/test_files-backup-phase-a.bats`
