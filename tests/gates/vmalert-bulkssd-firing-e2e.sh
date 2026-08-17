@@ -91,7 +91,13 @@ yq '.data["r4.yaml"]' "$RULES_CM" > "$TMP/r4-deployed.yaml"
 cp "$FIXTURES/r4-bulkssd-buggy-expr.yaml" "$TMP/r4-buggy.yaml"
 
 # fail-closed: 하네스가 겨냥하는 룰이 실제로 존재하는지(리네임 시 무성 무측정 방지)
-for want in 'alert: FilesBulkSSDLow' 'alert: BulkStorageLow' 'alert: FilesBackupStale'; do
+# ⚠️ 대조군이 FilesBackupStale → CNPGRestoreDrillStale로 바뀌었다(2026-08-17): FilesBackupStale은
+#    국면 A 한시 억제(absent 가지에 `and on() (vector(time()) >= <국면B 재무장 시각>)`)가 걸려 있어
+#    **현재 시각으로 도는 replay에서 절대 발화하지 않는다** → vacuity 대조군으로 쓰면 이 하네스가
+#    HARNESS FAULT(exit 2)로 죽는다. **대조군은 시각 게이트가 없는 알림이어야 한다.**
+#    CNPGRestoreDrillStale은 같은 r4 그룹 · 같은 형태(`time() - last_over_time[10d] > T or absent`) ·
+#    같은 for:(30m)이고, 생성기가 restore_drill_last_success_timestamp를 심지 않으므로 매 replay에서 발화한다.
+for want in 'alert: FilesBulkSSDLow' 'alert: BulkStorageLow' 'alert: CNPGRestoreDrillStale'; do
   grep -q "$want" "$TMP/r4-deployed.yaml" || fault "배포 룰에 '$want' 부재 — 하네스가 아무것도 측정하지 않는다"
 done
 
@@ -239,12 +245,14 @@ docker rm -f "r4bulk-e2e-l1-low-$$" >/dev/null 2>&1 || true
 run_leg l2-healthy "$TMP/r4-deployed.yaml" healthy
 S2="$(vme_alert_series FilesBulkSSDLow)"
 B2="$(vme_firing BulkStorageLow)"
-C2="$(vme_firing FilesBackupStale)"
-echo "  [L2] deployed rules + 99% free → FilesBulkSSDLow series=$S2, BulkStorageLow firing=$B2 (control FilesBackupStale firing=$C2)"
+C2="$(vme_firing CNPGRestoreDrillStale)"
+echo "  [L2] deployed rules + 99% free → FilesBulkSSDLow series=$S2, BulkStorageLow firing=$B2 (control CNPGRestoreDrillStale firing=$C2)"
 # 이 레그의 판정은 "발화 부재"(음성)다 → vmalert가 애초에 아무것도 안 썼어도 통과해버릴 수 있다.
-# 같은 그룹의 absent 가드 알림(FilesBackupStale — 생성기가 의도적으로 심지 않는 메트릭)이 같은 replay에서
-# 발화했는지로 그 vacuous 통과를 막는다.
-[ "$C2" -gt 0 ] || fault "L2: control alert FilesBackupStale did not fire in the healthy replay — vmalert wrote nothing, so 'FilesBulkSSDLow absent' proves nothing (vacuous pass)."
+# 같은 그룹의 absent 가드 알림(CNPGRestoreDrillStale — 생성기가 의도적으로 심지 않는 메트릭)이 같은
+# replay에서 발화했는지로 그 vacuous 통과를 막는다.
+# ⚠️ 예전 대조군 FilesBackupStale은 쓸 수 없다 — 국면 A 한시 억제가 걸려 있어 현재 시각 replay에서
+#    구조적으로 발화하지 않는다. 대조군은 **시각 게이트가 없는** 알림이어야 한다.
+[ "$C2" -gt 0 ] || fault "L2: control alert CNPGRestoreDrillStale did not fire in the healthy replay — vmalert wrote nothing, so 'FilesBulkSSDLow absent' proves nothing (vacuous pass)."
 if [ "$S2" -eq 0 ] && [ "$B2" -eq 0 ]; then
   pass "L2 no false bulk-SSD page when the medium is 99% free (FilesBulkSSDLow series=0, BulkStorageLow firing=0)"
 elif [ "$S2" -ne 0 ]; then

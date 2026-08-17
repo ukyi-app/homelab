@@ -5,9 +5,11 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
 
 @test "all required versions are pinned and non-empty" {
   [ -n "$K3S_VERSION" ]
-  [ -n "$DEBIAN_RELEASE" ]
   [ -n "$LOCAL_PATH_PROVISIONER_VERSION" ]
   [ -n "$LOCAL_PATH_HELPER_IMAGE" ]
+  # 베어메탈 호스트 좌표 — 없으면 k3s가 잘못된 주소/SAN으로 설치된다(사후 교정이 비싸다).
+  [ -n "$K3S_NODE_IP" ]
+  [ -n "$K3S_TLS_SANS" ]
 }
 
 @test "k3s version is a pinned channel tag, not 'stable' or 'latest'" {

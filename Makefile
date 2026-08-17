@@ -5,24 +5,54 @@ SHELL := /usr/bin/env bash
 KUBECONFIG_LIVE := $(PWD)/infra/k3s-bootstrap/kubeconfig
 SOPS_AGE_KEY_FILE ?= $(HOME)/.config/sops/age/keys.txt
 
-.PHONY: help bootstrap up down verify host-up
+# 클러스터 정체성 대조(D-i). 라이브 Mac과 NUC의 kubeconfig는 경로·포트가 같고 노드명까지 `k3s`로
+# 같다 — KUBECONFIG를 잘못 잡으면 아무 경고 없이 반대편을 때린다. context 이름·InternalIP·arch
+# 셋을 라이브로 대조한다.
+# ⚠️ **prerequisite로 달지 말 것.** prerequisite는 recipe보다 먼저 도는데,
+#    tests/gates/test_guard-skip-signalling.bats가 `make verify-posture`를 `-n` 없이 **실제로**
+#    실행한다(CI 러너에는 클러스터가 없다). prerequisite로 달면 그 @test 2건이 죽는다.
+#    ⇒ 반드시 **recipe 줄**로 넣는다.
+# 변이/파괴 경로 = fail-closed · 읽기/관측 경로 = warn(새벽 3시에 관측 수단까지 잠그지 않는다).
+ASSERT_IDENTITY      := KUBECONFIG=$(KUBECONFIG_LIVE) bash infra/k3s-bootstrap/assert-cluster-identity.sh
+ASSERT_IDENTITY_WARN := $(ASSERT_IDENTITY) --warn
+
+.PHONY: help bootstrap up down verify host-up host-config
 
 help: ## 사용 가능한 타겟 목록 출력
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  %-22s %s\n", $$1, $$2}' \
 	  | sort
 
-up: ## [runtime] OrbStack VM + k3s + 스토리지 기동 (멱등, = host-up)
+host-config: ## [runtime] 호스트 설정 드리프트 검사(sudo 불요). **적용은 여기가 아니다** — 아래 주석 참조
+# ⚠️ `--apply`를 make에 걸지 않는다: owner의 sudo가 패스워드를 요구해(실측) 비대화형으로 못 돌고,
+#    make 뒤에 숨기면 "무엇이 바뀌는지 모른 채 도는" 경로가 된다. 적용은 노드에서 손으로:
+#        infra/k3s-bootstrap/host-config.sh --apply
+	@infra/k3s-bootstrap/host-config.sh --check
+
+up: ## [runtime] 호스트 전제 확인 + k3s + 스토리지 기동 (멱등, = host-up)
 	@infra/k3s-bootstrap/host-up.sh
 
 host-up: ## [runtime] `up`의 별칭 — 호스트 기반층 기동 (M1)
 	@infra/k3s-bootstrap/host-up.sh
 
-down: ## [TODO: M1] OrbStack VM 내리기
-	@echo "down: not implemented yet (owned by M1 runtime foundation)" >&2
+down: ## [비배선] 클러스터 내리기 — 파괴 프리미티브는 scripts/destroy-node.sh(직접 실행)
+# ⚠️ D-j는 **확정됐다**(프리미티브 = scripts/destroy-node.sh). 그런데도 여기 배선하지 않는다. 이유 셋:
+#      (1) `tests/test_makefile.bats`가 `make down`을 **실제로 실행한다.** 배선하면 그 @test가
+#          owner 머신(=라이브 NUC)에서 파괴 스크립트를 실행하게 되고, 안전이 확인 env 하나에만
+#          걸린다. 테스트가 파괴 경로에 발을 들이는 형태를 만들지 않는다.
+#      (2) 선례가 있다: `host-config --apply`도 make에 걸지 않는다(위 주석) — "make 뒤에 숨기면
+#          무엇이 바뀌는지 모른 채 도는 경로가 된다". `dr-drill.sh`·`backup-files-data.sh`도
+#          같은 이유로 배선 없음(scripts/README.md).
+#      (3) `make down`은 짧고 무해해 보이는 이름이다. 그 이름 뒤에 전손을 두는 것이
+#          정확히 이 레포가 반복해 밟은 함정이다.
+#    ⇒ 스텁을 유지하되 **미구현이라고 거짓말하지 않는다** — 무엇을 어떻게 부르는지 알려준다.
+	@echo "down: make에 배선하지 않는다 — 파괴 프리미티브는 scripts/destroy-node.sh다(D-j 확정)." >&2
+	@echo "      DR_DRILL_DESTROY_CONFIRM=1 scripts/destroy-node.sh   # 노드 전손(k3s-uninstall + /var/lib/rancher)" >&2
+	@echo "      국면 A(versions.env의 BULK_MIGRATION_WINDOW_UNTIL)가 열려 있는 동안엔 그 스크립트도 거부한다." >&2
 	@exit 1
 
 bootstrap: ## 멱등 DR 진입점: ArgoCD + sops-age Secret + root app 설치
+	@$(ASSERT_IDENTITY)
 	@bash scripts/bootstrap.sh
 
 verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포계약 + 자원 limit + 원장 + sops 왕복)
@@ -74,6 +104,12 @@ bootstrap-deadmanswitch: ## [M5] 노드 외부 dead-man's-switch ping URL 시드
 	@echo ">> DEAD-MAN'S-SWITCH (R8): ensure healthchecks.io check 'homelab-watchdog' exists"
 	@echo ">> and HEALTHCHECKS_URL is set in platform/victoria-stack/prod/alerting.enc.yaml (M2-seeded)"
 	@echo ">> Full procedure: docs/runbooks/observability-bootstrap.md"
+	@# ⚠️ sops 부재를 **비밀 부재로 오진하지 않는다.** 아래 `2>/dev/null`이 command-not-found까지
+	@#    삼키므로, sops가 없으면 파이프가 빈 입력을 내고 grep이 실패해 "HEALTHCHECKS_URL missing"이
+	@#    찍힌다 — 있지도 않은 시딩 사고를 쫓게 된다. D-i에서 NUC 툴체인을 make+sops 둘로 좁혔으므로
+	@#    이 진단은 컷오버 후 NUC에서 실제로 마주칠 자리다.
+	@command -v sops >/dev/null 2>&1 \
+		|| { echo "FAIL: sops 미설치 — HEALTHCHECKS_URL 시딩 여부를 확인할 수 없다(부재로 단정하지 않는다)"; exit 1; }
 	@sops --decrypt platform/victoria-stack/prod/alerting.enc.yaml 2>/dev/null | grep -q 'HEALTHCHECKS_URL' \
 		|| { echo "FAIL: HEALTHCHECKS_URL missing from M2-seeded SOPS secret"; exit 1; }
 	@echo "OK: dead-man's-switch ping URL present (armed once relay pod runs)"
@@ -141,6 +177,7 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 # ArgoCD 자기레포 리비전 정합. 로컬은 (A)만 — (B) main 고정은 "어느 브랜치로 들어가는가"라는
 # CI 개념이라 EXPECT_REVISION을 ci.yaml이 채운다(로컬에서 재현할 대상이 없다).
 	bash scripts/check-argocd-revision.sh
+	bash scripts/check-pg-servername.sh
 	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
 	@bash scripts/sops-guard.sh
@@ -221,6 +258,7 @@ verify-runbook-index: ## [local] 런북 인덱스↔docs/runbooks 정합(런북 
 .PHONY: verify-posture
 verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 부재=SKIP
 	@if [ -f "$(KUBECONFIG_LIVE)" ]; then \
+	  $(ASSERT_IDENTITY_WARN); \
 	  KUBECONFIG=$(KUBECONFIG_LIVE) bats $(POSTURE_BATS); \
 	else echo "SKIP: verify-posture: $(KUBECONFIG_LIVE) 부재 — 라이브 posture 미평가. 먼저 make up"; exit 4; fi
 
@@ -272,18 +310,21 @@ backup-local-asset: ## [DR] 런북 tarball을 age 백업(OUT=<git 밖 경로>). 
 .PHONY: argo-status argo-sync argo-terminate argo-wait render kubeconfig audit audit-orphan-pv
 
 argo-status: ## [ops] ArgoCD Application 목록 — sync/health/멈춘 operation phase
+	@$(ASSERT_IDENTITY_WARN)
 	@KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd get applications \
 	  -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,OPERATION:.status.operationState.phase
 
 argo-sync: ## [ops] APP= 명시 sync 트리거(retry 소진 후 재시도). 예: make argo-sync APP=cnpg
 	@test -n "$(APP)" || { echo "APP=<application> 필요 (make argo-status로 이름 확인)"; exit 1; }
+	@$(ASSERT_IDENTITY)
 	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd patch app $(APP) --type merge -p '{"operation":{"sync":{}}}'
 
 argo-terminate: ## [ops] APP= 멈춘 operation 종료(phase=Terminating). 예: make argo-terminate APP=cnpg
 	@test -n "$(APP)" || { echo "APP=<application> 필요"; exit 1; }
+	@$(ASSERT_IDENTITY)
 # ⚠️ --subresource status를 쓰지 말 것. ArgoCD의 Application CRD는 status 서브리소스를 선언하지
 #    않는다(`kubectl get crd applications.argoproj.io -o jsonpath='{.spec.versions[*].subresources}'`
-#    → `{}`; 라이브 Mac·NUC v3.4.4 양쪽 실측). 없는 서브리소스에 patch하면 kubectl이
+#    → `{}`; NUC v3.4.4·라이브 Mac 양쪽 실측). 없는 서브리소스에 patch하면 kubectl이
 #    `Error from server (NotFound): applications.argoproj.io "<app>" not found`를 낸다 —
 #    바로 앞 get은 성공하므로 "앱이 사라졌다"로 오독하기 딱 좋다. status는 본체의 일부라
 #    서브리소스 지정 없이 그냥 patch한다. (2026-08-14: 이 오진 때문에 좀비 operation을
@@ -291,6 +332,7 @@ argo-terminate: ## [ops] APP= 멈춘 operation 종료(phase=Terminating). 예: m
 	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd patch app $(APP) --type merge -p '{"status":{"operationState":{"phase":"Terminating"}}}'
 
 argo-wait: ## [ops] Application이 Healthy 될 때까지 대기(APP= 미지정 시 전체)
+	@$(ASSERT_IDENTITY_WARN)
 	KUBECONFIG=$(KUBECONFIG_LIVE) kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy application $(if $(APP),$(APP),--all) --timeout=300s
 
 render: ## [ops] COMP= KSOPS 풀 렌더(복호 읽기, 라이브 무영향). 예: make render COMP=cnpg
@@ -304,6 +346,7 @@ audit: ## [ops] 레포 정적 드리프트 감사(registry↔매니페스트↔�
 	@bun tools/audit-orphans.ts
 
 audit-orphan-pv: ## [ops][live] 고아 Released PV 감사(PVC 삭제+Retain hostPath 누수 나열, 파괴 없음)
+	@$(ASSERT_IDENTITY_WARN)
 	@KUBECONFIG=$(KUBECONFIG_LIVE) bash scripts/audit-orphan-pv.sh
 
 .PHONY: teardown-app teardown-resource

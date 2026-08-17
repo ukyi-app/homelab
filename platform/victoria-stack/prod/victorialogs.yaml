@@ -58,11 +58,37 @@ spec:
             - --memory.allowedPercent=60
             - --httpListenAddr=:9428
           env:
-            - { name: GOMEMLIMIT, value: "115MiB" } # 128Mi의 약 90% (right-size 2026-06-22, peak 59Mi)
+            - { name: GOMEMLIMIT, value: "230MiB" } # 256Mi의 약 90%
+            # GOMAXPROCS 핀 — 노드 코어 수만큼 P를 띄우지 않도록 기준선(Mac 6코어)에 묶는 **위생 조치**다.
+            # ⚠️ **이것은 OOM의 원인이 아니었다**(2026-08-14 반증). 핀을 넣자 vector의 워커 스레드는
+            #    15→8로 줄었지만 **커널 OOM 기록의 anon-rss는 그대로였다**(vector 325MiB · vlogs 129MiB).
+            #    코어 수를 원인으로 지목했던 최초 진단은 틀렸다 — 아래 limit 주석이 실제 원인이다.
+            - { name: GOMAXPROCS, value: "6" }
           ports: [{ name: http, containerPort: 9428 }]
           resources:
-            requests: { cpu: 50m, memory: 64Mi }
-            limits: { memory: 128Mi }
+            # ⚠️ **128Mi로는 이 인제스션 작업집합이 안 들어간다** (2026-08-14 NUC 실측, 2시간에 16회
+            #    OOMKilled). 오진하기 쉬운 자리라 기제를 적어 둔다:
+            #    기동 로그가 `system memory limit 134217728 bytes`(=128Mi)를 **정확히 감지**하고
+            #    `-memory.allowedPercent=60`으로 캐시를 80530636 bytes(80.5MB)로 제한한다 —
+            #    즉 cgroup 오감지가 아니다. 남는 47.5MB 안에 Go 힙 + 인제스션 버퍼 + 비-힙(mmap된
+            #    part·스택)이 전부 들어가야 하는데 그게 안 된다. 커널 OOM 기록의 anon-rss는
+            #    매번 ~129MiB로 평탄했다(누수가 아니라 작업집합).
+            #    ⚠️ `GOMEMLIMIT`은 **힙 소프트 리밋**이라 이것을 못 막는다 — 115MiB가 걸린 채 죽었다.
+            #    ⚠️ 저장량 문제도 아니다: 같은 시점 storage는 smallPartRows 110427 / 1.9MB뿐이었다.
+            # 256Mi = 실측 OOM 지점(129MiB)의 약 2배. allowedPercent 60 → 캐시 154MB · 여유 102MB.
+            # ✅ **재기준선 완료 (2026-08-15, 버스트 후 27시간 steady 실측)** — 회수하지 않는다.
+            #    cgroup 실측: `memory.current` **75Mi** · `memory.peak` **181Mi** / limit 256Mi (71%).
+            #    자기 메트릭: `process_resident_memory_bytes` 66.8MB · `vm_allowed_memory_bytes`
+            #    153.6MB(=60%) · 저장량 `/vlogs` 18.2MB. peak는 이 limit으로 **실제 버스트를 겪으며
+            #    살아남은 값**이다.
+            #    ⚠️ **깎으면 캐시 예산도 같이 줄어든다** — `-memory.allowedPercent=60`이 limit에
+            #    비례하므로, limit을 내리면 버스트 때 쓸 수 있는 여유가 이중으로 줄어든다.
+            #    ⚠️ 버스트 크기는 **장애 지속시간에 비례**한다(181Mi는 17시간 장애의 산물).
+            #    ⚠️ `go_memstats_heap_sys`(166MB)를 RSS로 읽지 말 것 — Go가 OS에서 예약만 하고
+            #    반납하지 않은 주소공간이다. 실제 RSS는 그 절반 이하였다(66.8MB).
+            #    예산도 쪼들리지 않는다: 원장 limit 합 9020 / cap 10240 = 명목 잔여 1220Mi.
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { memory: 256Mi }
           readinessProbe: { httpGet: { path: /health, port: 9428 } }
           securityContext:
             allowPrivilegeEscalation: false

@@ -177,9 +177,27 @@ const GHA_LIVENESS = "platform/victoria-stack/prod/gha-liveness-exporter.yaml";
 const ADGUARD_RECONCILER = "platform/adguard/prod/rewrite-reconciler.yaml";
 const RESTORE_DRILL = "platform/cnpg/prod/restore-drill-script.sh";
 const FILES_BACKUP = "scripts/backup-files-data.sh";
-// 호스트 launchd(owner-local, 레포 밖)에서 일 1회 — RPO=24h. 근거: scripts/backup-files-data.sh 헤더
-// ("launchd 배선(일1회, RPO=24h)은 owner-local") · 런북 docs/runbooks/external-ssd.md.
-const LAUNCHD_DAILY: Schedule = { kind: "external", periodSec: 86400, why: "호스트 launchd 일 1회(RPO=24h) — 레포 밖 스케줄" };
+// ⚠️ **국면 A(NUC 이식) 동안 이 스케줄에는 실행자가 없다.** 생산자는 macOS 전용이고(dest 매체 판별
+//    권위가 `diskutil`), 배선이던 launchd plist는 Mac mini 로컬이라 어느 레포에도 없다. NUC엔 launchd도
+//    diskutil도 없으므로 periodSec=86400은 **관측된 주기가 아니라 계약상의 주기**다 — 이 레지스트리는
+//    external을 "레포 밖 스케줄"로만 정의하고 그 스케줄이 실제로 도는지는 원리적으로 검사하지 않는다.
+// ⚠️ 그래도 **86400을 유지한다.** 이 값이 모드 C의 rollup 윈도 하한(W ≥ 주기)을 만들고 r4의
+//    FilesBackupStale [10d] · FilesBulkSSDLow [3d]가 그 하한 위에 서 있다. 낮추거나 지우면 국면 B에서
+//    생산자가 돌아올 때 윈도 검사가 이미 헐거워져 있다(죽은 알림 재발).
+// ⚠️ **스크립트를 지우는 것도 답이 아니다** — 생산자 파일 부재는 이 도구가 fatal로 잡고, 무엇보다
+//    국면 B에서 되살릴 원본이 없어진다. 부재의 기록은 여기 why + r4 룰 주석 +
+//    `tests/gates/test_files-backup-phase-a.bats`(억제 절 ↔ 창 양방향 정합)가 나눠 진다.
+// ⚠️ 근거 인용에서 `docs/runbooks/external-ssd.md`를 뺐다 — 그 런북에 launchd도 RPO도 한 글자도 없다
+//    (실측 2026-08-17. 전량 OrbStack/virtiofs/APFS 절차). 잘못된 인용을 물려받지 않는다.
+const LAUNCHD_DAILY: Schedule = {
+  kind: "external",
+  periodSec: 86400,
+  why: "계약상 일 1회(RPO=24h) — 근거: scripts/backup-files-data.sh 헤더. " +
+    "⚠️ 국면 A(infra/k3s-bootstrap/versions.env의 BULK_MIGRATION_WINDOW_UNTIL이 비어 있지 않은 동안)에는 " +
+    "**이 스케줄의 실행자가 없다**(생산자는 macOS 전용 · launchd plist는 Mac mini 로컬). 이 값은 rollup " +
+    "윈도 하한을 지키기 위한 계약 상수이지 관측된 주기가 아니다 — 국면 B에서 NUC 실행자를 배선할 때 " +
+    "실제 주기로 재확인하고 이 문구를 갱신하라.",
+};
 
 const DEFAULT_REGISTRY: PushEntry[] = [
   // digest-exporter는 같은 curl 페이로드에 수집 결과(ghcr_latest_digest)와 자기관측 메트릭 3종을 함께 싣는다.

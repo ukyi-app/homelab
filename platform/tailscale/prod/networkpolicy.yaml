@@ -55,7 +55,7 @@ spec:
   egress:
     - to:
         - ipBlock:
-            cidr: 192.168.139.0/24 # 노드 InternalIP 192.168.139.92 — DNAT 후 apiserver
+            cidr: 192.168.117.0/24 # 노드 InternalIP 192.168.117.15 — DNAT 후 apiserver
       ports:
         - { protocol: TCP, port: 6443 }
 ---

@@ -8,16 +8,27 @@ data:
     groups:
       - name: ci-staleness
         rules:
-          # ArgoCD 앱이 15분 넘게 OutOfSync → write-back/sync 고장 가능성 (R6).
+          # ArgoCD 앱이 15분 넘게 Synced가 아님 → write-back/sync 고장 또는 **소스 ref 소실** (R6).
+          # ⚠️ **`sync_status="OutOfSync"`가 아니라 `!~"Synced"`다** (2026-08-17 컷오버). ArgoCD의
+          #    sync_status는 Synced / OutOfSync / **Unknown** 셋인데, 예전 매처는 Unknown을 놓쳤다.
+          #    Unknown은 "repoURL/targetRevision을 resolve하지 못했다"의 주된 표면이다 — 컷오버에서
+          #    리비전 핀을 main으로 넘긴 뒤 `nuc-migration` 브랜치를 지우면, 재지정을 **놓친** 객체가
+          #    바로 이 상태가 된다. 특히 `Application/argocd`는 어떤 Application의 source path에도
+          #    없어 root sync로 자동 수렴하지 않으므로(감사 13), 그 누락을 알려주는 유일한 채널이다.
+          #    ⇒ 브랜치 삭제 자체가 검출기가 되고, 이 룰이 그 신호를 페이징으로 바꾼다.
+          # ⚠️ `argocd_app_info`엔 targetRevision 라벨이 **없다** — "main을 보는가"를 직접 물을 수는
+          #    없다. 그래서 "resolve에 실패했는가"를 대신 묻는 이 우회 경로가 최선이다.
+          # ⚠️ 이 알림은 tests/gates/vmalert-drift-firing-e2e.sh의 **L6 vacuity 대조군**(하네스 생존
+          #    증인)이다. OutOfSync는 `!~"Synced"`의 부분집합이라 그 대조군은 그대로 발화한다.
           - alert: ArgoCDOutOfSync
             expr: |
-              argocd_app_info{sync_status="OutOfSync"} == 1
+              argocd_app_info{sync_status!~"Synced"} == 1
               or absent(argocd_app_info)
             for: 15m
             labels: { severity: warning }
             annotations:
-              summary: "ArgoCD 앱 {{ $labels.name }} OutOfSync 15분 초과"
-              description: "태그 write-back webhook 또는 sync가 조용히 실패했을 수 있습니다 — 클러스터가 어제 이미지로 돌고 있을 수 있습니다. 메트릭이 통째로 사라지면(scrape 단절) absent 가드가 fail-closed로 페이징합니다."
+              summary: "ArgoCD 앱 {{ $labels.name }} Synced 아님({{ $labels.sync_status }}) 15분 초과"
+              description: "태그 write-back webhook 또는 sync가 조용히 실패했을 수 있습니다 — 클러스터가 어제 이미지로 돌고 있을 수 있습니다. sync_status=Unknown이면 소스 ref를 resolve하지 못한 것입니다(삭제된 브랜치를 가리키는 targetRevision 등 — 컷오버 후 재지정 누락을 의심하십시오). 메트릭이 통째로 사라지면(scrape 단절) absent 가드가 fail-closed로 페이징합니다."
           # Recording rule: 실행 중인 이미지 digest가 최신 GHCR digest와 다르면 1.
           # ⚠️ 정정(B2): (a) max by (app)은 digest 라벨을 떨궈 join 키 소실, (b) 우변(pod info)에 app 라벨
           #    부재 → on(app,digest) 매칭 영구 미스 → 채우면 drift 상시 1(오발화). 좌변은 by(app,digest)로 digest

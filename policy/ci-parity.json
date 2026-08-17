@@ -101,6 +101,11 @@
       "local": "scripts/check-argocd-revision.sh"
     },
     {
+      "name": "CNPG 아카이브 serverName 분리 (main 진입 시 값 고정)",
+      "status": "mirrored",
+      "local": "scripts/check-pg-servername.sh"
+    },
+    {
       "name": "make ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)",
       "status": "mirrored",
       "local": "check-ci-parity.ts"

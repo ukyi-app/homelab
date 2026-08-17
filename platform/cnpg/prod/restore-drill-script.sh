@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # 복원 drill (R1): R2 백업이 실제로 복구 가능함을 증명한다.
+# 0) **apply 이전에** 이전 실행의 잔여물(Cluster + PVC)을 전량 제거하고 0을 확인한다.
+#    생존자가 있으면 apply가 no-op이 되어 R2를 만지지 않은 채 PASS가 난다(아래 pre-flight 주석).
+#    정리에 성공하면 이번 회차는 **계속 진행한다** — 청소된 상태에서 진짜 복구가 돌기 때문이다.
 # 1) 라이브 클러스터에서 안정적인 row count를 읽는다
 # 2) R2에서 복구한 일회용 클러스터를 띄운다
 # 3) Ready가 될 때까지 기다린 뒤 같은 row count를 읽는다
@@ -17,6 +20,19 @@ TG="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
 # vmsingle의 Prometheus import 엔드포인트 (M5). 클러스터 내 service를 기본값으로 해 메트릭이
 # 항상 전달되게 한다 — M5의 CNPGRestoreDrillStale은 absent()를 쓰므로 시계열이 없으면 영원히 페이징된다.
 PUSHGW="${METRICS_PUSH_URL:-http://vmsingle.observability.svc:8428}"
+
+# ─── 폴링 노브 ─────────────────────────────────────────────────────────────────────
+# 기본값은 현행 동작과 동일하다(phase 15s×60 = 15분). 스텁 단위테스트가 fake-clock으로 돌리기
+# 위한 주입점이다 — 선례: ensure-role-password.sh:30-33(ERP_POLL_INTERVAL_SECONDS/ERP_MAX_POLLS).
+POLL_INTERVAL="${DRILL_POLL_INTERVAL_SECONDS:-15}"
+MAX_POLLS="${DRILL_MAX_POLLS:-60}"
+PURGE_POLL_INTERVAL="${DRILL_PURGE_POLL_SECONDS:-5}"
+# 5s × 120 = 10분. CNPG finalizer + 인스턴스 파드 graceful shutdown + PV 회수 여유.
+# ⚠️ 예전 `delete --wait=true`의 실질 상한은 activeDeadlineSeconds 3600이었고 그 초과는
+#    SIGKILL → EXIT trap 미실행 → 고아, 즉 M17이 지목한 생성 경로 자체다. 유계화는 개선이다.
+#    실제 소요는 `purge attempt N: 잔여 M건` 로그로 첫 몇 주 확인하고 필요하면 CronJob env로 올린다.
+PURGE_MAX_POLLS="${DRILL_PURGE_MAX_POLLS:-120}"
+ORPHAN_NOTE="" # pre-flight가 고아를 치웠으면 PASS 보고 본문에 실린다(ORPHAN-FOUND 토큰)
 
 # >>> notify-block (test-extracted)
 # HTML-escape: parse_mode=HTML에서 동적 값의 & < > 를 엔티티로. & 를 먼저 치환한다.
@@ -61,18 +77,173 @@ fail() {
   exit 1
 }
 
+# ⚠️ k8s Cluster 이름(`LIVE_CLUSTER`)과 **아카이브 serverName**은 다른 것이다. NUC 이전에서 갈렸다:
+#    k8s Cluster는 `pg`인데 아카이브는 `pg-nuc`다. 여기서 겸직하면 이 드릴이 **라이브 Mac의 아카이브**를
+#    복구해 NUC의 row와 비교한다 → Mac이 살아 있는 동안 **초록**이 뜨고, 계획서 G7("NUC 자체 백업
+#    체인이 독립적으로 살아있음")이 거짓 통과한다. PONR 1로 `pg/`를 purge한 뒤에야 무너진다.
+#    → 라이브 Cluster에서 파생한다. 파생 실패는 fail-closed(무엇을 복구할지 모른 채 증명할 수 없다).
+# ⚠️ 이 블록을 **notify()/fail() 정의 뒤로 옮겼다.** 예전엔 스크립트 최상단이라 파생 실패가
+#    `echo … >&2; exit 1`로 끝났다 — 이 CronJob은 in-band 무음이므로(KubeJobFailed가
+#    `pg-restore-drill.*` 제외 + backoffLimit 0) Telegram도 알림도 없이 사라졌다. 이제 FAIL이 나간다.
+ARCHIVE_SERVER="$(kubectl -n "$NS" get cluster "$LIVE_CLUSTER" \
+  -o jsonpath='{.spec.plugins[?(@.name=="barman-cloud.cloudnative-pg.io")].parameters.serverName}' 2>/dev/null || true)"
+[ -n "$ARCHIVE_SERVER" ] || fail "Cluster ${LIVE_CLUSTER}에서 아카이브 serverName을 파생하지 못했다 — 어느 아카이브를 복구할지 알 수 없다"
+
 push_success_metric() { # M5의 CNPGRestoreDrillStale이 읽는 정식 시계열 (vmsingle import API)
   printf 'restore_drill_last_success_timestamp %s\n' "$(date -u +%s)" \
     | curl -fsS --data-binary @- "${PUSHGW}/api/v1/import/prometheus" \
     || fail "could not push restore_drill_last_success_timestamp to ${PUSHGW} (M5 would page on the absent series)"
 }
 
-# cleanup은 drill의 Cluster + PVC를 제거한다. drill은 `drill-ssd` StorageClass
-# (reclaimPolicy=Delete)를 쓰므로 PVC 삭제 시 PV가 자동 삭제된다 — 클러스터 전역 PV 권한도,
-# 실행당 ~50 GiB 누수도 없음. (CNPG는 Cluster 삭제 시 PVC를 지우지 않으므로 직접 지운다.)
+# ─── drill 잔여물 회계 ────────────────────────────────────────────────────────────
+# drill은 `drill-ssd` StorageClass(reclaimPolicy=Delete)를 쓰므로 PVC 삭제 시 PV가 자동 삭제된다 —
+# 클러스터 전역 PV 권한도, 실행당 ~50 GiB 누수도 없다. (CNPG는 Cluster 삭제 시 PVC를 지우지 않는다.)
+# ⚠️ 열거를 **라벨이 아니라 이름 접두**로 한다. 예전 셀렉터 `cnpg.io/cluster=pg-restore-drill`은
+#    이 레포 어디에서도 양성 관측된 적이 없다 — 세 소비처(이 파일의 구 cleanup/구 RESID,
+#    scripts/dr-drill.sh:103)가 전부 '0건=정상' 구조라 셀렉터가 빗나가도 rc 0 + 0줄이라
+#    '잔여 없음'과 구별되지 않는다. 그러면 PGDATA가 살아남아 새 Cluster가 재사용하고 거짓 PASS가
+#    다른 문으로 재현된다. (라이브 확인된 CNPG 자동 라벨은 networkpolicies.yaml:59의 **Pod** 라벨뿐이다.)
+# ⚠️ 컬렉션 list를 쓴다 — `get <name>`은 부재 시 rc 1이지만 컬렉션은 항상 rc 0이라 "없다"와
+#    "못 읽었다"가 rc로 갈린다(실측 2026-08-17 라이브: `get cluster -o name` → `cluster.postgresql.cnpg.io/pg`).
+#    Role은 clusters/pvc 둘 다 `list`를 이미 갖고 있다(restore-drill-rbac.yaml:11,18).
+# ⚠️ kubectl 실패를 빈 출력으로 **위장하지 않는다** — rc 2로 전파한다. 예전 잔여 검사
+#    (`RESID=$(kubectl … 2>/dev/null | wc -l)`)는 API 접근이 죽어도 0을 내어 '잔여 없음'으로 읽혔다.
+#    "열거할 수 없다"와 "잔여가 없다"는 다른 사실이다(같은 클래스를 scripts/audit-orphan-pv.sh:34-39가
+#    '열거 바닥값'으로 막는다). 그 아이디어의 양성 대조판이 아래 verify_enumeration_positive다.
+list_clusters() {
+  local out
+  out="$(kubectl -n "$NS" get cluster -o name)" || return 2
+  printf '%s\n' "$out" | grep -x -E "cluster[^/]*/${DRILL_CLUSTER}" || true
+}
+
+list_pvcs() {
+  local out
+  out="$(kubectl -n "$NS" get pvc -o name)" || return 2
+  printf '%s\n' "$out" | grep -x -E "persistentvolumeclaim/${DRILL_CLUSTER}(-.*)?" || true
+}
+
+# 두 열거를 **각각** 실행한다 — 앞이 실패해도 뒤의 부분 결과를 반드시 낸다. FAIL 알림이
+# best-effort Telegram 한 줄뿐인 잡이라, 무엇이 남았는지가 로그에서 사라지면 재구성이 불가능하다.
+list_remnants() {
+  local rc=0
+  list_clusters || rc=2
+  list_pvcs || rc=2
+  return "$rc"
+}
+
+count_remnants() { # stdout=건수. 열거 실패는 rc 2로 전파된다(0건과 구별).
+  local rem
+  rem="$(list_remnants)" || return 2
+  [ -n "$rem" ] || { printf '0\n'; return 0; }
+  printf '%s\n' "$rem" | grep -c .
+}
+
+# Cluster CR + PVC를 지우고 **사라졌음을 확인**한다. rc 0=잔여 0, 1=수렴 실패, 2=열거 실패.
+# ⚠️ delete는 best-effort(`|| true`)이고 **판정은 폴링이 한다.** 삭제 호출의 rc를 믿지 않는 이유:
+#    (1) `--ignore-not-found`는 없는 것도 성공이라 rc만으로 "지웠다"를 증명하지 못하고,
+#    (2) CNPG finalizer 때문에 delete 반환 시점에 오브젝트가 아직 살아 있을 수 있다.
+# ⚠️ `--wait=true`를 쓰지 않는다. restore-drill Role의 clusters 절에는 `watch`가 **없고**
+#    (restore-drill-rbac.yaml:9-11. PVC 절 :15-18에만 :17 주석과 함께 watch가 있다 — 라이브
+#    `kubectl auth can-i watch clusters… --as=…:restore-drill` → **no**, 실측 2026-08-17),
+#    kubectl의 `--wait`는 대상이 즉시 사라지지 않으면 watch로 소멸을 추적한다. 지금까지 이 경로가
+#    터지지 않은 것은 CNPG Cluster CR에 finalizer가 없어 삭제가 즉시 끝났기 때문이고(라이브 실측),
+#    즉 **잠재 결함**이다 — finalizer가 붙는 순간 인가 오류가 나고 구 cleanup의 `|| true`가 그것을
+#    통째로 삼킨다. Role이 이미 가진 `get/list` 폴링이면 같은 사실을 인가 경계 안에서 확인할 수 있고,
+#    PATH-stub 테스트로도 관측된다.
+# ⚠️ delete를 **매 반복 재발사**한다. Cluster를 `--wait=false`로 지운 직후에 PVC를 지우면 operator가
+#    아직 deletionTimestamp를 관측하기 전이라 PVC가 재생성될 수 있고, 1회 발사 + 세기만 하면
+#    그 경로에서 원리적으로 수렴하지 못한다. `--ignore-not-found`라 재발사는 멱등이다.
+purge_drill() {
+  # 자기방어: 이 프리미티브는 database ns의 **모든** Cluster를 지울 수 있다
+  # (restore-drill-rbac.yaml:9-11에 resourceNames 없음). 유일한 방어가 '값이 리터럴이라서'인
+  # 상태를 코드에 고정한다 — 누가 DRILL_CLUSTER를 변수화하면 이 단언이 먼저 죽는다.
+  [ -n "$DRILL_CLUSTER" ] && [ "$DRILL_CLUSTER" != "$LIVE_CLUSTER" ] ||
+    fail "purge 대상 이름이 비었거나 라이브 클러스터와 같다 — 중단"
+  local i n p pvcs
+  for i in $(seq 1 "$PURGE_MAX_POLLS"); do
+    kubectl -n "$NS" delete cluster "$DRILL_CLUSTER" --ignore-not-found --wait=false || true
+    kubectl -n "$NS" delete pvc -l "cnpg.io/cluster=${DRILL_CLUSTER}" --ignore-not-found --wait=false || true
+    # 라벨이 빗나가도 지워지도록 이름으로도 지운다(라벨 삭제는 저비용 이중화로 남긴다).
+    if pvcs="$(list_pvcs)"; then
+      while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        kubectl -n "$NS" delete "$p" --ignore-not-found --wait=false || true
+      done <<<"$pvcs"
+    fi
+    if ! n="$(count_remnants)"; then return 2; fi
+    if [ "$n" = "0" ]; then return 0; fi
+    echo "  purge attempt ${i}: 잔여 ${n}건" >&2
+    sleep "$PURGE_POLL_INTERVAL"
+  done
+  return 1
+}
+
+# 열거자 양성 대조 — 이 실행이 **방금 만든** 오브젝트가 열거에 잡히는지 본다.
+# 잡히지 않으면 스윕이 눈이 먼 것이고(셀렉터/접두 드리프트), 그 상태에서는 '잔여 0 확인'이
+# 무측정 초록이다 — audit-orphan-pv.sh:34-39의 '열거 바닥값'과 같은 방어를 in-band로 세운다.
+verify_enumeration_positive() {
+  local c p
+  c="$(list_clusters)" || fail "cleanup 양성 대조: Cluster를 열거하지 못했다(kubectl/API 실패)"
+  p="$(list_pvcs)" || fail "cleanup 양성 대조: PVC를 열거하지 못했다(kubectl/API 실패)"
+  [ -n "$c" ] || fail "열거자 실명 의심: 방금 만든 drill Cluster가 열거에 안 잡힌다 — 잔여물 스윕이 항상 0건을 내는 무측정 상태다"
+  [ -n "$p" ] || fail "열거자 실명 의심: 방금 만든 drill PVC가 열거에 안 잡힌다 — PVC 스윕이 무측정이면 PGDATA가 살아남아 다음 회차가 그것을 재사용한다(거짓 PASS)"
+}
+
+# ─── pre-flight: 이전 실행의 잔여물을 지운 뒤에 진행한다 ────────────────────────────
+# ⚠️ **이 드릴의 유일한 정리는 `trap cleanup EXIT`였다.** 비정상 종료(노드 재부팅·OOM·evict·
+#    SIGKILL·activeDeadlineSeconds 3600 초과)에서는 EXIT trap이 돌지 않아 고아 Cluster가 남는다.
+#    그 상태에서 다음 실행의 `kubectl apply`는 생존자에 대해 **no-op**이다: 힙독 텍스트가 매주
+#    바이트 동일이라 3-way merge patch가 비고, 무엇보다 CNPG는 `bootstrap`을 **초기화 시점에만**
+#    읽고 이후 무시한다(cluster.yaml의 bootstrap 주석에 적힌 라이브 CRD 실측 — 불변 CEL도 없다). 그러면 아래 phase
+#    루프가 첫 시도에서 통과하고 canary 행 수는 지난 회차 값 그대로라 `>=` 비교도 통과해
+#    → **R2를 한 번도 만지지 않은 drill이 '검증된 복원'을 보고한다.**
+# ⚠️ Cluster CR만 지우는 것으론 부족하다. CNPG는 Cluster 삭제 시 PVC를 남기므로 `<cluster>-<serial>`
+#    PGDATA가 살아 있으면 새 Cluster가 그것을 재사용해 bootstrap.recovery가 생략될 수 있다.
+#    Cluster + PVC를 함께 지우고 0을 확인한다.
+# ⚠️ **정리에 성공하면 이번 회차는 계속 진행한다.** 앞선 판은 여기서 fail-closed로 중단했는데,
+#    그 근거("거짓 PASS가 staleness 타이머를 매주 리셋해 영구 초록")가 코드와 달랐다 — 구 말미의
+#    성공 경로 `cleanup`이 **자기가 재사용한 고아를 지우므로** 성공 간격이 7일이 아니라 14일이 되고
+#    CNPGRestoreDrillStale(8.1일)은 그 사이 ~5.9일간 이미 발화한다. 중단은 이미 울고 있는 알림에
+#    정보를 더하지 않으면서 R2 복원 가능성 증명을 14일간 비운다 — 국면 A에서 순손실이다.
+#    정리 후 계속하면 이 회차는 **청소된 상태에서 진짜 복구를 수행**해 그 알림을 정당하게 해소한다.
+#    사건 기록은 PASS 본문의 `ORPHAN-FOUND` 토큰이 진다(검색 가능한 고정 문자열).
+# ⚠️ 중단은 **purge 실패에만** 건다. 그때는 생존자 위의 apply가 실제로 no-op이 되므로 진행이 무의미하다.
+#    그리고 purge가 성공했다는 착각(눈먼 열거)은 아래 phase 루프의 SAW_NONHEALTHY 증인이 잡는다.
+preflight_purge() {
+  local n rem rc=0
+  if ! n="$(count_remnants)"; then
+    fail "pre-flight: drill 잔여물을 열거하지 못했다(kubectl/API 실패) — 생존자 유무를 모르는 채 apply하면 no-op 거짓 PASS가 난다"
+  fi
+  if [ "$n" != "0" ]; then
+    rem="$(list_remnants)" || rem="(부분 열거 — 일부 kubectl 실패)"
+    echo "[drill] pre-flight: 이전 실행의 잔여물 ${n}건" >&2
+    printf '%s\n' "$rem" >&2
+    ORPHAN_NOTE=" · ORPHAN-FOUND: 이전 실행 잔여물 ${n}건을 정리하고 진행했다(직전 회차 비정상 종료)"
+  fi
+  # ⚠️ 잔여가 0이어도 **무조건** 지운다. 조건부로 지우면 "apply 직전 상태가 비어 있다"는 불변식이
+  #    열거 결과에 의존하게 되고, 무엇보다 정상 경로에 delete가 사라져 그 순서 자체를 행위 테스트가
+  #    물 수 없다. `--ignore-not-found`라 잔여 0에서는 무해한 no-op 호출이 전부다.
+  purge_drill || rc=$?
+  case "$rc" in
+  0) : ;;
+  2) fail "pre-flight: purge 중 drill 잔여물을 열거하지 못했다(kubectl/API 실패) — 지웠는지 확인할 수 없다" ;;
+  *) fail "pre-flight: drill 잔여물이 수렴하지 않는다(finalizer 잔류/CNPG operator 의심) — 생존자 위의 apply는 no-op(=R2 미접촉 거짓 PASS)이 되므로 진행하지 않는다" ;;
+  esac
+  echo "[drill] pre-flight: 잔여물 0 확인"
+}
+
+preflight_purge
+
+# EXIT trap 정리. 종료 중이므로 rc로 흐름을 바꾸지 않고 로그만 남긴다 — 실패한 정리의 **판정**은
+# 성공 경로의 명시 호출(맨 아래)이 하고, 그것마저 못 돈 경우의 안전망은 **다음 실행의 pre-flight**다.
+# ⚠️ trap을 pre-flight **뒤에** 무장한다. 그 이전에는 이 실행이 만든 것이 아무것도 없어 정리할
+#    대상 자체가 없고, 앞에 걸면 pre-flight의 fail 경로에서 purge가 한 번 더 돌아 이미 내린 결정
+#    뒤에 delete가 재발사되고 activeDeadlineSeconds 예산을 두 배로 태운다.
+# ⚠️ 여기에 INT/TERM을 붙이지 않는다. terminationGracePeriodSeconds 기본 30초 안에 10분짜리 purge
+#    폴링이 완주할 수 없어 반쪽 삭제만 남기고, SIGKILL 경로(deadline 초과·OOM·evict)는 애초에 trap이
+#    못 돈다. 그 경로의 안전망은 trap이 아니라 pre-flight라는 것이 이 설계의 요지다.
 cleanup() {
-  kubectl -n "$NS" delete cluster "$DRILL_CLUSTER" --ignore-not-found --wait=true || true
-  kubectl -n "$NS" delete pvc -l "cnpg.io/cluster=${DRILL_CLUSTER}" --ignore-not-found --wait=true || true
+  purge_drill || echo "[drill] cleanup 미완: drill 잔여물이 남았다 — 다음 실행의 pre-flight가 잡는다" >&2
 }
 trap cleanup EXIT
 
@@ -107,18 +278,36 @@ spec:
         name: barman-cloud.cloudnative-pg.io
         parameters:
           barmanObjectName: pg-r2
-          serverName: ${LIVE_CLUSTER}
+          serverName: ${ARCHIVE_SERVER}
 YAML
 
 echo "[drill] waiting for ${DRILL_CLUSTER} to reach healthy phase"
 PHASE=""
-for i in $(seq 1 60); do
+SAW_NONHEALTHY=0
+for i in $(seq 1 "$MAX_POLLS"); do
   PHASE="$(kubectl -n "$NS" get cluster "$DRILL_CLUSTER" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
   echo "  attempt ${i}: phase=${PHASE:-<none>}"
-  [ "$PHASE" = "Cluster in healthy state" ] && break
-  sleep 15
+  if [ "$PHASE" = "Cluster in healthy state" ]; then break; fi
+  SAW_NONHEALTHY=1
+  sleep "$POLL_INTERVAL"
 done
 [ "$PHASE" = "Cluster in healthy state" ] || fail "drill cluster never became healthy (phase=${PHASE:-none})"
+# ⚠️ **복구가 실제로 일어났다는 양성 증인.** 판정에 쓰이는 관측은 `.status.phase`와 canary 행 수뿐인데,
+#    전자는 생존자에게 즉시 참이고, 후자는 restore_canary의 시드가 **initdb 1회성**이라
+#    (cluster.yaml의 `.spec.bootstrap.initdb.postInitApplicationSQL` — 부트스트랩 때 한 번 INSERT하고
+#    그 뒤로는 아무도 쓰지 않는다) 행 수가 상수여서 사실상 항상 참이다 — 라이브 실측
+#    2026-08-17: 테이블 1행 고정, 그날 drill 로그도 `EXPECTED_ROWS=1`/`ACTUAL_ROWS=1`. 즉 pre-flight를
+#    우회하는 임의의 경로(동시 실행 창, 눈먼 열거, CNPG 동작 변경)는 이 두 관측점에서 진짜 복구와
+#    구별되지 않는다. R2에서의 진짜 복구는 첫 폴링에 healthy가 될 수 없으므로(같은 실측 로그:
+#    1회차 phase=<none> → Setting up primary → … → 5회차에 healthy), healthy가 아닌 phase를
+#    한 번도 못 봤다는 것 자체가 **생존자 재사용의 증거**다. 무-RBAC·무지연.
+#    ⚠️ 위 한 줄에 백틱을 쓰지 마라. 이 파일은 push 메트릭 생산자라 `tools/check-alert-rules.ts`의
+#       EXPO_INLINE이 **주석까지 포함해** 전문을 스캔하는데, 백틱/따옴표 **직후**에 소문자 식별자와
+#       공백과 값 토큰이 오면 exposition 라인으로 읽힌다. 실제로 이 자리에서 위 로그 예시를 백틱으로
+#       감쌌다가 그 식별자가 미등록 메트릭으로 잡혀 F-3(레지스트리 완전성)가 났다.
+#    (cluster.yaml의 bootstrap 주석: "증명은 매니페스트나 ArgoCD 상태가 아니라 PGDATA 출처로만 세울 것" —
+#     그 기준의 최소 실행체다. 인스턴스 로그 증인은 Role에 `pods/log`가 없어 별건이다 — rbac :12-14.)
+[ "$SAW_NONHEALTHY" = "1" ] || fail "drill cluster가 **첫 폴링에 이미 healthy**였다 — R2 복구가 일어나지 않았다(생존자 재사용/동시 실행 의심). pre-flight가 무엇을 놓쳤는지 확인할 것: 잔여물 열거 접두, 수동 drill-now 동시 실행"
 
 echo "[drill] actual row count from recovered cluster"
 ACTUAL_ROWS="$(kubectl -n "$NS" exec "${DRILL_CLUSTER}-1" -c postgres -- \
@@ -129,7 +318,7 @@ echo "[drill] ACTUAL_ROWS=${ACTUAL_ROWS}"
 # WAL replay가 base backup 이후 쓰인 row를 포함할 수 있으므로 >= 허용.
 if [ "$ACTUAL_ROWS" -ge "$EXPECTED_ROWS" ] && [ "$ACTUAL_ROWS" -gt 0 ]; then
   push_success_metric # PASS notify 전에 실행: 메트릭 적재 실패 시 즉시 실패 (아니면 M5의 absent() 알림이 영원히 페이징)
-  notify PASS "복구 ${ACTUAL_ROWS}행 (라이브 ${EXPECTED_ROWS}행) — R2"
+  notify PASS "복구 ${ACTUAL_ROWS}행 (라이브 ${EXPECTED_ROWS}행) — R2${ORPHAN_NOTE}"
   # dead-man's switch: 진짜 PASS일 때만 ping (healthcheck 정의는 M5 소유)
   curl -fsS -m 10 "${HEALTHCHECKS_URL}" >/dev/null || true
   echo "[drill] PASS"
@@ -137,7 +326,25 @@ else
   fail "row mismatch: recovered=${ACTUAL_ROWS} expected>=${EXPECTED_ROWS}"
 fi
 
-cleanup
-RESID=$(kubectl -n "$NS" get pvc -l "cnpg.io/cluster=${DRILL_CLUSTER}" -o name 2>/dev/null | wc -l | tr -d ' ')
-[ "$RESID" = "0" ] || fail "drill cleanup INCOMPLETE: ${RESID} residual drill PVC(s) — storage would leak; check the restore-drill RBAC (pvc/pv delete perms)"
-echo "[drill] cleanup done (cluster + PVCs + released PVs — zero residual verified)"
+# 이 실행이 방금 만든 오브젝트가 열거에 잡히는지 먼저 본다(양성 대조) — 잡히지 않으면
+# 아래 '잔여 0 확인'은 무측정 초록이다.
+verify_enumeration_positive
+# ⚠️ `trap - EXIT`로 EXIT trap을 해제하고 명시 정리에 인계한다 — 해제하지 않으면 정리가 두 번 돈다
+#    (레포 선례: scripts/backup-local-asset.sh:54, scripts/backup-sealed-secrets-key.sh:79).
+trap - EXIT
+PURGE_RC=0
+purge_drill || PURGE_RC=$?
+# ⚠️ 실패 문구에서 RBAC 오귀속을 걷어냈다. 예전 문구는 "check the restore-drill RBAC (pvc/pv delete
+#    perms)"였는데 **둘 다 틀렸다**: Role은 PVC delete를 이미 갖고 있고(restore-drill-rbac.yaml:15-18),
+#    PV 권한은 설계상 없다·필요 없다(:20-24 — drill-ssd가 reclaimPolicy=Delete라 PVC 삭제로 PV가
+#    자동 회수된다). 틀린 진단을 남기면 사람이 없는 권한을 찾다가 진짜 원인을 지나친다.
+#    같은 이유로 '열거 실패'와 '수렴 실패'도 갈라 보고한다 — 전자에 finalizer를 보라고 하면 정확히
+#    반대 방향이다.
+case "$PURGE_RC" in
+0) : ;;
+2) fail "drill cleanup: 잔여물을 열거하지 못했다(kubectl/API 실패) — 지워졌는지 확인할 수 없다. 먼저 볼 것: API 서버 도달성, ServiceAccount 토큰, database ns의 Role 바인딩" ;;
+*) fail "drill cleanup INCOMPLETE: drill Cluster/PVC가 남았다 — storage 누수이자 다음 실행이 이 생존자를 재사용할 씨앗이다. RBAC는 원인이 아니다: Role은 clusters/pvc delete를 이미 갖고 있고 PV 권한은 설계상 없다·필요 없다(drill-ssd reclaimPolicy=Delete). 먼저 볼 것: Cluster/PVC의 finalizer 잔류, CNPG operator 로그, drill-ssd StorageClass의 reclaimPolicy 드리프트" ;;
+esac
+# ⚠️ 검증 범위를 정확히 쓴다. 이 스크립트는 PV를 한 번도 열거하지 않는다(그럴 수도 없다 —
+#    restore-drill-rbac.yaml:20-24가 PV 권한을 설계상 두지 않는다). 잔여 PV는 감사 도구 몫이다.
+echo "[drill] cleanup done (Cluster + PVC 잔여 0 확인 — PV는 drill-ssd reclaimPolicy=Delete에 위임, 잔여 PV 감사는 scripts/audit-orphan-pv.sh)"

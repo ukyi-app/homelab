@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # DR drill (R5, POST-M6 수락): 전체 플랫폼이 git + R2 + age 키만으로 재구축됨을 증명한다.
-# OrbStack VM(cattle)을 DESTROY하고 RECREATE한 뒤, 플랫폼을 git에서 재부트스트랩하고,
+# 노드를 DESTROY하고(scripts/destroy-node.sh) RECREATE한 뒤, 플랫폼을 git에서 재부트스트랩하고,
 # 워크로드가 돌아오며, 재구축된 노드에서 R2로 DB가 복구됨을(canary 일치) 확인한다.
 #
 # 안전 설계: 파괴 BEFORE에 canary를 캡처하고 온디맨드 백업을 받아 "복구 가능"을 먼저
@@ -13,11 +13,39 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
+# ── bulk 국면 A(D4 한시) 동안에는 드릴 자체를 거부한다 ─────────────────────────────────────
+# ⚠️ 이 드릴의 안전 설계 전체가 **"파괴 대상 밖에 bulk가 있다"**는 전제 위에 서 있다([6.5]의
+#    주석이 "bulk 디스크는 노드 파괴에도 살아남는다"고 명시한다). 국면 A는 정확히 그 전제를 깬다 —
+#    bulk가 부트 디스크 위의 bind 마운트라 노드 파괴가 **files-data를 실제로 지운다.**
+#    복구 증명([0.5])은 CNPG/R2만 덮으므로 이 손실을 잡지 못한다.
+# ⚠️ 다른 어떤 검사보다 먼저 둔다(yq 파생·클러스터 변이·백업 생성 전부보다 앞). 그래야 거부가
+#    부작용 0으로 끝난다. `. sealing-key-dr-gate.sh` 소스보다도 앞이다.
+_bulk_window="$(sed -n 's/^export BULK_MIGRATION_WINDOW_UNTIL="\(.*\)"$/\1/p' \
+  "$REPO_ROOT/infra/k3s-bootstrap/versions.env" 2>/dev/null || true)"
+if [ -n "$_bulk_window" ]; then
+  echo "DR ABORT: 국면 A(D4 한시) 진행 중 — bulk가 파괴 대상과 같은 디스크에 있다(만료 ${_bulk_window})." >&2
+  echo "          이 드릴은 노드를 파괴하고, 그 파괴가 bulk의 사용자 데이터(files-data)를 함께 지운다." >&2
+  echo "          [0.5]의 복구 증명은 CNPG/R2만 덮으므로 이 손실을 막지 못한다." >&2
+  echo "          국면 B(2TB M.2를 /mnt/bulk에 마운트) 후 versions.env의" >&2
+  echo "          BULK_MIGRATION_WINDOW_UNTIL을 비우면 다시 열린다." >&2
+  exit 1
+fi
+
 # shellcheck disable=SC1091
 . "$REPO_ROOT/scripts/sealing-key-dr-gate.sh"
 SEALED_KEY_BACKUP_DIR="${SEALED_KEY_BACKUP_DIR:-}"  # 소비자 ≥1 또는 committed cert 존재 시 필요(git 밖 백업)
+# 노드 권한 명령 시임 — 베어메탈에서는 **여기가 곧 노드**라 로컬 sudo다(k3s-install.sh·apply-storage.sh와
+# 같은 규약). [6.5]가 bulk 백킹 디렉토리를 읽을 때 쓴다. 테스트는 argv 기록기를 꽂는다.
+K3S_RUN="${K3S_RUN:-sudo}"
 NS="database"
 LIVE_CLUSTER="pg"
+# ⚠️ k8s Cluster 이름과 아카이브 serverName은 다른 것이다(restore-drill-script.sh와 같은 이유).
+#    [0.5]의 "파괴 전 복구 가능성 증명"이 **엉뚱한 아카이브**를 복구하면, 그 증명이 통과한 뒤
+#    노드를 파괴한다 — 증명 대상과 파괴 대상이 어긋난다.
+ARCHIVE_SERVER="$(kubectl -n "$NS" get cluster "$LIVE_CLUSTER" \
+  -o jsonpath='{.spec.plugins[?(@.name=="barman-cloud.cloudnative-pg.io")].parameters.serverName}' 2>/dev/null || true)"
+[ -n "$ARCHIVE_SERVER" ] || { echo "DR DRILL FAIL: Cluster ${LIVE_CLUSTER}에서 아카이브 serverName을 파생하지 못했다 — 무엇을 복구할지 모른 채 파괴할 수 없다" >&2; exit 1; }
 DB="app"
 KUBECONFIG_PATH="$REPO_ROOT/infra/k3s-bootstrap/kubeconfig"
 
@@ -61,7 +89,7 @@ spec:
     - name: r2-source
       plugin:
         name: barman-cloud.cloudnative-pg.io
-        parameters: { barmanObjectName: pg-r2, serverName: ${LIVE_CLUSTER} }
+        parameters: { barmanObjectName: pg-r2, serverName: ${ARCHIVE_SERVER} }
 YAML
   local phase=""
   for _ in $(seq 1 80); do
@@ -104,10 +132,15 @@ echo "==> [0.6] sealing-key DR: 도구 + fail-closed 검출 + 키 연속성(--ve
 assert_recoverable_before_destroy "$REPO_ROOT" "$SEALED_KEY_BACKUP_DIR" "origin/main" \
   || { echo "DR ABORT: sealing key 복구 가능성 미증명 — 라이브 노드 파괴 거부"; exit 1; }
 
-echo "==> [1] VM 파괴(cattle) — 전체 노드 유실 시뮬레이션"
-orb delete -f k3s || true
+echo "==> [1] 노드 파괴(k3s 전손 + /var/lib/rancher 소멸) — 전체 노드 유실 시뮬레이션"
+# ⚠️ 확인 env를 여기서 자동 주입한다. 그 env의 목적은 **직접 실행/복붙 오발사 차단**이고,
+#    이 지점은 [0.5]·[0.6]이 복구 가능성을 이미 증명하고 위쪽 국면 A 게이트를 통과한 뒤다.
+# ⚠️ `|| true`를 붙이지 않는다. 파괴 실패를 삼키면 [2] 이후가 '재구축'이 아니라 멀쩡한 노드
+#    재확인이 되고, 드릴이 아무것도 증명하지 않은 채 PASS를 찍는다. 그것이 예전 한 줄
+#    (`orb delete -f k3s || true`)의 정확한 고장 모드였다.
+DR_DRILL_DESTROY_CONFIRM=1 bash "$REPO_ROOT/scripts/destroy-node.sh"
 
-echo "==> [2] 커밋된 cloud-init/install에서 VM + k3s + StorageClass 재구축(M1)"
+echo "==> [2] 커밋된 host-config/install에서 노드 + k3s + StorageClass 재구축(M1)"
 bash infra/k3s-bootstrap/host-up.sh
 use_live_kubeconfig # host-up.sh가 kubeconfig를 재생성한다
 
@@ -138,15 +171,28 @@ echo "==> [6] 재구축된 플랫폼의 코어 워크로드가 실제 서빙되�
 kubectl -n edge rollout status deploy/adguard --timeout=300s
 
 echo "==> [6.5] files 데이터 재결합 검증: files pod Ready + 재바운드 PV 백킹 디렉토리 비어있지 않음(침묵 빈-복귀 모드 차단, M14)"
-# 외장 SSD(virtiofs)는 VM 파괴에도 살아남지만, 동적 PV 메타데이터(etcd)는 유실된다 → 신규 PVC가 빈 디렉토리를
-# 새로 파 조용히 '빈 카탈로그'로 정상 복귀할 수 있다. owner는 재부팅 후 external-ssd.md의 재결합 절차(기존 SSD
-# 데이터 디렉토리에 정적 PV 바인딩)를 수행해야 하며, 이 단언이 그 수행 여부를 fail-loud로 검증한다.
+# bulk 디스크(국면 B의 별도 2TB M.2)는 노드 파괴에도 살아남지만, 동적 PV 메타데이터는 k3s 데이터스토어에
+# 있어 `/var/lib/rancher`와 함께 사라진다 → 신규 PVC가 bulk 위에 **빈 디렉토리를 새로 파** 조용히
+# '빈 카탈로그'로 정상 복귀할 수 있다. owner는 재구축 후 기존 bulk 데이터 디렉토리에 정적 PV를
+# 바인딩하는 재결합을 수행해야 하며, 이 단언이 그 수행 여부를 fail-loud로 검증한다.
+# ⚠️ **정본 절차 문서가 아직 없다.** 옛 포인터 `external-ssd.md`는 macOS APFS 외장 볼륨 **생성**
+#    런북이라 재결합 절차를 담은 적이 없고(실측 2026-08-17), `storage-verify.md`에도 없다. 두 런북의
+#    베어메탈 재작성은 미착수다 — 그때까지 이 주석이 요건의 유일한 서술이다:
+#      기존 `/mnt/bulk/<pvc-dir>`를 가리키는 `hostPath` PV를 `claimRef`로 files/files-data에
+#      **정적 바인딩**한 뒤 PVC를 만든다(동적 프로비저닝에 맡기면 빈 디렉토리를 새로 판다).
 kubectl -n files rollout status deploy/files --timeout=300s
-FILES_VMPATH="$(kubectl get pv -o json | yq -r '.items[] | select(.spec.claimRef.namespace=="files" and .spec.claimRef.name=="files-data") | (.spec.hostPath.path // .spec.local.path // "")' | head -1)"
-[ -n "$FILES_VMPATH" ] || { echo "DR DRILL FAIL: files-data PV 미바운드 — 재결합 런북(external-ssd.md) 미수행"; exit 1; }
-# shellcheck disable=SC2016  # 단일따옴표 의도적: FILES_VMPATH는 env로 inner sh에 전달돼 그쪽서 확장
-orb -m k3s -u root env FILES_VMPATH="$FILES_VMPATH" sh -c 'test -n "$(ls -A "$FILES_VMPATH" 2>/dev/null)"' \
-  || { echo "DR DRILL FAIL: files 카탈로그 비어있음($FILES_VMPATH) — 재결합이 기존 데이터를 복원하지 못함(침묵 유실 모드)"; exit 1; }
-echo "    files 카탈로그 비어있지 않음 — 외장 SSD 데이터 재결합 확인"
+FILES_PVPATH="$(kubectl get pv -o json | yq -r '.items[] | select(.spec.claimRef.namespace=="files" and .spec.claimRef.name=="files-data") | (.spec.hostPath.path // .spec.local.path // "")' | head -1)"
+[ -n "$FILES_PVPATH" ] || { echo "DR DRILL FAIL: files-data PV 미바운드 — 정적 PV 재결합 미수행"; exit 1; }
+# ⚠️ **권한 상승해서 센다.** `/mnt/bulk`는 0700 root다(infra/k3s-bootstrap/README.md의 국면 A 절차가
+#    `install -d -m 0700 -o root -g root`로 만든다) — owner 신원으로 읽으면 EACCES가 빈 출력으로 둔갑해
+#    "읽을 수 없었다"가 "비어 있다"가 된다. apply-storage.sh가 probe를 $BULK_RUN으로 돌리는 것과 같은 이유다.
+# ⚠️ `ls`가 아니라 `find`인 이유: 파이프 파싱 경고(SC2012)와 파일명 함정을 함께 피한다.
+# ⚠️ `|| true`를 붙이지 않는다. 열거 실패(경로 부재·권한)는 '비어 있음'과 **다른 사건**이고,
+#    아래 두 분기가 그 둘을 갈라 각각 다른 메시지로 죽는다.
+FILES_ENTRIES="$($K3S_RUN find "$FILES_PVPATH" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" \
+  || { echo "DR DRILL FAIL: PV 백킹 디렉토리를 열거하지 못했다($FILES_PVPATH) — 경로 부재 또는 권한(위 find 오류 참조). '비어 있음'과 다른 사건이다."; exit 1; }
+[ "$FILES_ENTRIES" -gt 0 ] \
+  || { echo "DR DRILL FAIL: files 카탈로그 비어있음($FILES_PVPATH, 항목 0) — 재결합이 기존 데이터를 복원하지 못했다(침묵 유실 모드)"; exit 1; }
+echo "    files 카탈로그 항목 ${FILES_ENTRIES}건 — bulk 데이터 재결합 확인"
 
-echo "DR DRILL PASS — VM 재구축; 플랫폼 + 워크로드가 git에서 복귀, 재구축 노드에서 R2 데이터 복구 증명됨(prod 데이터는 docs/runbooks/restore.md로 복구)"
+echo "DR DRILL PASS — 노드 재구축; 플랫폼 + 워크로드가 git에서 복귀, 재구축 노드에서 R2 데이터 복구 증명됨(prod 데이터는 docs/runbooks/restore.md로 복구)"
