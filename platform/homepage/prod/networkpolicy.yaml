@@ -44,7 +44,9 @@ spec:
 # kube-router가 ClusterIP(10.43.0.1:443)를 apiserver endpoint(노드 InternalIP:6443)로 DNAT하고,
 # netpol egress는 DNAT '후' dest를 평가하므로 ClusterIP가 아니라 노드 서브넷:6443을 허용해야 한다.
 # (10.43.0.1/32로는 자동발견이 Connection refused로 막혀 전체 실패 — 라이브 확인됨.)
-# OrbStack VM 서브넷 /24라 VM IP 변경에 durable. DR로 OrbStack 대역 자체가 바뀌면 갱신.
+# NUC LAN 서브넷 /24라 DHCP 임대 변경에 durable. 대역 자체가 바뀌면 갱신.
+# ⚠️ 2026-08-17 정정 — 이 줄이 «OrbStack VM 서브넷»이라 적혀 있어 **같은 룰 안의 인라인 주석
+#    («NUC LAN 서브넷»)과 자기모순**이었다. 값은 처음부터 맞았고 설명만 이전 국면을 가리켰다.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

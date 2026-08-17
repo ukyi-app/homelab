@@ -5,7 +5,10 @@ metadata:
   namespace: database
 spec:
   accessModes: ["ReadWriteOnce"]
-  storageClassName: bulk-ssd # 1TB 외장 SSD, 스테이징 전용 — Postgres PGDATA에는 절대 금지
+  # ⚠️ bulk 티어의 **물리 매체는 국면에 따라 다르다** — 국면 A(현재)는 NUC 내장 디스크의 bind이고,
+  #    국면 B에서 별도 2TB M.2가 된다. 옛 주석 «1TB 외장 SSD»는 Mac 시대 서술이라 걷어냈다(2026-08-17).
+  #    불변인 것은 **용도**다: 스테이징 전용 — Postgres PGDATA에는 절대 금지.
+  storageClassName: bulk-ssd
   resources:
     requests:
       storage: 100Gi

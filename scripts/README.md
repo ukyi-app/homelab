@@ -110,8 +110,12 @@
   `--verify <outdir>`(최신 백업이 라이브 키 셋을 담는지 — 회전 게이트). `sealing-key-dr-gate.sh`가 `--verify`로 호출.
   평문 private key를 디스크에 비기록(kubectl→sops 직행), git 작업트리 안 보관 거부.
 - **`backup-files-data.sh`** — **owner 전용(내구성 불변식, 비파괴)**. files-data(비재생성 사용자 데이터)를
-  외장 SSD → Mac 내장 디스크로 rsync 오프-SSD 백업. `<dest>`(백업)/`--dry-run <dest>`/`--verify <dest>`
+  bulk 티어 → 별도 매체로 rsync 오프-SSD 백업. `<dest>`(백업)/`--dry-run <dest>`/`--verify <dest>`
   (백업서 전 파일 복원+sha256 대조 — 매체 판독성 게이트). dest는 반드시 내장 디스크(외장이면 거부),
+  🔴 **이 스크립트는 현재 실행자가 없다(2026-08-17 실측).** macOS 결박이고(`diskutil`로 매체를 판정한다)
+  유일한 실행자였던 Mac mini launchd `app.homelab.files-backup`은 **exit 2로 실패 중**이다 —
+  Mac 클러스터 소멸로 그 경로가 끊겼다. `FilesBackupStale`이 국면 A 한시 억제로 가려 놓았을 뿐이고
+  **2026-10-01에 자동 재무장**한다. 리눅스 이식 + NUC 스케줄러(systemd timer/CronJob) 배선이 국면 B 선행 조건이다.
   스테이징→sanity(빈/급감 중단)→승격(data.prev 1개 보존). 성공 시 `files_backup_last_success_timestamp`·
   용량을 vmsingle에 push(r4의 FilesBackupStale/FilesBulkSSDLow). Makefile 배선 없음 — 직접 실행.
   ⚠️ **국면 A에는 실행자가 없다**(배선이던 launchd plist는 Mac mini 로컬 · NUC엔 launchd/diskutil 부재).

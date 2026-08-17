@@ -1,5 +1,8 @@
 # per-PVC 용량 가시화(메타갭 ③ W1-A) — 모든 PV가 hostPath(local-path)라 kubelet_volume_stats가 원천
-# 부재하고(r4 상단 주석), 외장 bulk(virtiofs)는 VM node-exporter가 별도 series로 못 본다(F10). 이 CronJob이
+# 부재하고(r4 상단 주석), bulk 티어는 node-exporter가 별도 series로 못 본다(F10). 이 CronJob이
+# ⚠️ 2026-08-17 정정: 옛 문구는 «외장 bulk(virtiofs)»였다 — virtiofs는 OrbStack VM 시절의 전달 방식이고
+#    베어메탈 이전으로 소멸했다. 국면 A의 bulk는 NUC 내장 디스크의 bind이고, 국면 B에서 별도 2TB M.2가 된다.
+#    관측이 필요한 이유(별도 series로 안 보인다)는 전달 방식과 무관하게 그대로다.
 # 두 provisioner 루트를 파드 내부에서 직접 du/df해 per-PVC 사용량(pvc_dir_size_bytes)과 티어 용량
 # (storage_tier_{size,avail}_bytes)을 vmsingle에 push한다. 후자는 W3(관측 데이터 bulk 이전)의 선행 용량 신호다.
 #

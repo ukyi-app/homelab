@@ -175,11 +175,11 @@ echo "==> [6.5] files 데이터 재결합 검증: files pod Ready + 재바운드
 # 있어 `/var/lib/rancher`와 함께 사라진다 → 신규 PVC가 bulk 위에 **빈 디렉토리를 새로 파** 조용히
 # '빈 카탈로그'로 정상 복귀할 수 있다. owner는 재구축 후 기존 bulk 데이터 디렉토리에 정적 PV를
 # 바인딩하는 재결합을 수행해야 하며, 이 단언이 그 수행 여부를 fail-loud로 검증한다.
-# ⚠️ **정본 절차 문서가 아직 없다.** 옛 포인터 `external-ssd.md`는 macOS APFS 외장 볼륨 **생성**
-#    런북이라 재결합 절차를 담은 적이 없고(실측 2026-08-17), `storage-verify.md`에도 없다. 두 런북의
-#    베어메탈 재작성은 미착수다 — 그때까지 이 주석이 요건의 유일한 서술이다:
+# ✅ **정본 절차는 `docs/runbooks/external-ssd.md` §3 「DR 재결합」이다** (2026-08-17 감사 16으로
+#    두 스토리지 런북을 베어메탈 재작성하면서 이 주석의 요건을 그리로 옮겼다). 요지만 남긴다:
 #      기존 `/mnt/bulk/<pvc-dir>`를 가리키는 `hostPath` PV를 `claimRef`로 files/files-data에
 #      **정적 바인딩**한 뒤 PVC를 만든다(동적 프로비저닝에 맡기면 빈 디렉토리를 새로 판다).
+#    ⚠️ 그 런북은 gitignored라 CI가 못 본다 — 이 단언이 수행 여부를 검증하는 유일한 기계다.
 kubectl -n files rollout status deploy/files --timeout=300s
 FILES_PVPATH="$(kubectl get pv -o json | yq -r '.items[] | select(.spec.claimRef.namespace=="files" and .spec.claimRef.name=="files-data") | (.spec.hostPath.path // .spec.local.path // "")' | head -1)"
 [ -n "$FILES_PVPATH" ] || { echo "DR DRILL FAIL: files-data PV 미바운드 — 정적 PV 재결합 미수행"; exit 1; }
