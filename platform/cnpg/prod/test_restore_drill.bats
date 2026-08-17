@@ -68,3 +68,20 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   # 무엇을 복구할지 모른 채 '복구 가능하다'를 증명할 수는 없다.
   grep -q '어느 아카이브를 복구할지 알 수 없다' "$sh"
 }
+
+@test "the CNPG backup/verify CronJobs are Burstable, not BestEffort (pressure must not evict the janitor first)" {
+  # ⚠️ resources가 전무하면 파드가 **BestEffort QoS**가 되어 노드 압박 시 **가장 먼저 evict**된다.
+  #    restore-drill은 자기 쓰레기(고아 Cluster + ~50GiB PVC)를 치우는 청소부이기도 하므로,
+  #    압박이 청소부를 먼저 죽이고 쓰레기를 남기는 되먹임이 생긴다. 형제 둘은 백업 생산자다.
+  # ⚠️ **limits는 요구하지 않는다** — 이 kind를 읽는 게이트가 없어(check-resource-limits.ts의
+  #    KINDS에 CronJob/Job 부재) 틀린 limit이 무측정으로 출하되기 때문이다. requests만 잠근다.
+  for f in restore-drill-cronjob basebackup-cronjob pgdump-hedge-cronjob; do
+    y="platform/cnpg/prod/${f}.yaml"
+    cpu="$(yq -e '.spec.jobTemplate.spec.template.spec.containers[0].resources.requests.cpu' "$y")"
+    mem="$(yq -e '.spec.jobTemplate.spec.template.spec.containers[0].resources.requests.memory' "$y")"
+    [ -n "$cpu" ]
+    [ -n "$mem" ]
+    printf '%s' "$cpu" | grep -qv '^null$'
+    printf '%s' "$mem" | grep -qv '^null$'
+  done
+}

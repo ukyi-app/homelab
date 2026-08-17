@@ -30,6 +30,15 @@ spec:
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities: { drop: [ALL] }
+              # ⚠️ **requests만 둔다 — limits는 의도적으로 없다.** 없으면 BestEffort QoS가 되어
+              #    노드 압박 시 가장 먼저 evict된다. 이 잡은 백업 생산자다 — 압박이 백업을 먼저
+              #    죽이는 순서는 정확히 반대다. requests를 주면 Burstable이 되어 그 순서가 뒤집힌다.
+              # ⚠️ limits를 두지 않는 이유: 이 kind는 어떤 게이트도 읽지 않아(check-resource-limits.ts의
+              #    KINDS에 CronJob/Job 부재) 틀린 limit이 무측정으로 출하된다. requests는
+              #    스케줄링·evict 순서에만 영향을 주므로 틀려도 죽이지 않는다.
+              #    (memory-ledger는 상주 워크로드만 회계한다 — :122가 전이 워크로드 제외를 명시.)
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
               command: ["/bin/bash", "-c"]
               args:
                 - |

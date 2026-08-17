@@ -174,3 +174,30 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   run grep -nE '^[^#]*serverName: \$\{LIVE_CLUSTER\}' "$sh"
   [ "$status" -ne 0 ]
 }
+
+@test "dr-drill purges a leftover drill cluster BEFORE apply (the false-proof that authorizes node destruction)" {
+  # 🔴 M17과 같은 기전인데 결과가 더 무겁다: [0.5]의 PRE 판정이 **노드 파괴를 승인**한다.
+  #    정리가 함수 말미에만 있으면 비정상 종료가 고아를 남기고, 다음 실행의 apply가 그 생존자에
+  #    대해 no-op이 되어 R2를 만지지 않은 채 "복구 가능"으로 통과한다 → 거짓 증거로 라이브 파괴.
+  # ⚠️ 정적 grep은 순서를 증명하지 못한다 — 여기서는 **구조**만 잠근다(진입점 존재 + apply 앞).
+  grep -q '_purge_drill_cluster' "$sh"
+  # pre-flight 호출이 heredoc의 apply보다 앞선다(줄 번호 비교 — 파일 어디에 있든이 아니라 순서다).
+  p="$(grep -n '_purge_drill_cluster "\$1"' "$sh" | head -1 | cut -d: -f1)"
+  a="$(grep -n 'kubectl apply -f - >/dev/null <<YAML' "$sh" | head -1 | cut -d: -f1)"
+  [ -n "$p" ]
+  [ -n "$a" ]
+  [ "$p" -lt "$a" ]
+}
+
+@test "dr-drill requires a positive witness that recovery actually ran (not just a healthy phase)" {
+  # .status.phase는 생존자에게 즉시 참이고, canary 행 수는 initdb 1회성 시드라 상수다.
+  # 두 관측점 모두 진짜 복구와 생존자 재사용을 구별하지 못한다 — 첫 폴링 healthy가 그 증거다.
+  grep -q 'saw_nonhealthy' "$sh"
+  grep -q '첫 폴링에 이미 healthy' "$sh"
+}
+
+@test "dr-drill deletes drill PVCs by NAME as well as by label (the label was never positively observed)" {
+  # 라벨 셀렉터는 빗나가도 rc 0 + 0줄이라 '잔여 없음'과 원리적으로 구별되지 않는다.
+  # 이름 접두 삭제가 그 실명을 이중화한다.
+  grep -q 'persistentvolumeclaim/\$1' "$sh"
+}
