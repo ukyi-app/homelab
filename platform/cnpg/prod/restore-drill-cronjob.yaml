@@ -53,6 +53,20 @@ spec:
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities: { drop: [ALL] }
+              # ⚠️ **requests만 둔다 — limits는 의도적으로 없다.**
+              #    없으면 이 파드가 **BestEffort QoS**가 되어 노드 압박 시 **가장 먼저 evict**된다.
+              #    이 잡은 drill의 **청소부**이기도 하다(pre-flight + 말미 purge) — 압박이 청소부를
+              #    먼저 죽이고 쓰레기(고아 Cluster + ~50GiB PVC)를 남기는 되먹임이 생긴다.
+              #    requests를 주면 Burstable이 되어 그 순서가 뒤집힌다.
+              # ⚠️ limits를 두지 않는 이유: 이 kind는 어떤 게이트도 읽지 않는다
+              #    (`tools/check-resource-limits.ts`의 KINDS에 CronJob/Job 부재 — 실측).
+              #    즉 틀린 limit이 **무측정으로 출하**되고, 그 클래스가 라이브에서 이미 한 번 데였다
+              #    (victorialogs GOMEMLIMIT=115MiB인데 129MiB에서 사망 — docs/traps-detail.md).
+              #    requests는 스케줄링·evict 순서에만 영향을 주므로 틀려도 죽이지 않는다.
+              # ⚠️ `docs/memory-ledger.md`는 **상주 워크로드**만 회계한다(:122가 전이 워크로드 제외를
+              #    명시) — requests-only는 그 원장에 행을 만들지 않는다.
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
               command: ["/bin/bash", "/scripts/drill.sh"]
               env:
                 - name: TELEGRAM_BOT_TOKEN

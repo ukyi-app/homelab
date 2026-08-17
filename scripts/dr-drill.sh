@@ -71,7 +71,34 @@ terraform -chdir=infra/cloudflare state list >/dev/null \
 
 # recover_and_check NAME → R2에서 verify 클러스터를 복구하고 canary count를 echo한 뒤 정리한다.
 # drill-ssd(reclaimPolicy=Delete)라 PVC 삭제 시 PV 자동 제거 — 누수 없음, PV RBAC 불필요.
+#
+# ⚠️ **M17과 같은 기전이 여기에도 있었다(2026-08-17 수정).** 정리가 함수 말미에만 있어서 비정상
+#    종료(스크립트 중단·노드 재부팅·타임아웃) 시 고아 Cluster가 남고, 다음 실행의 `kubectl apply`가
+#    그 생존자에 대해 **no-op**이 된다 → phase 루프가 첫 폴링에 통과 → 생존자에서 canary를 읽어
+#    **R2를 만지지 않은 채 "복구 가능"으로 보고**한다.
+#    🔴 여기서는 결과가 restore-drill보다 무겁다: `[0.5]`의 PRE 판정이 **노드 파괴를 승인**한다
+#    (`:126-128`). 거짓 증거로 라이브 노드를 파괴하는 경로다.
+#    처방은 restore-drill과 동일하다 — apply 이전 pre-flight 정리 + 복구가 실제로 일어났다는
+#    양성 증인(SAW_NONHEALTHY). 상세 근거는 platform/cnpg/prod/restore-drill-script.sh와
+#    docs/traps-detail.md의 「드릴의 정리가 EXIT trap뿐이면…」 항목.
+# ⚠️ 이름별로 돈다 — 이 함수는 pg-dr-precheck과 pg-dr-verify 두 이름으로 호출된다.
+_purge_drill_cluster() {
+  kubectl -n "$NS" delete cluster "$1" --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  kubectl -n "$NS" delete pvc -l "cnpg.io/cluster=$1" --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  # 라벨이 빗나가도 지워지도록 이름으로도 지운다(라벨 셀렉터는 '0건=정상' 구조라 빗나가도 조용하다).
+  kubectl -n "$NS" get pvc -o name 2>/dev/null | grep -x -E "persistentvolumeclaim/$1(-.*)?" \
+    | while IFS= read -r p; do kubectl -n "$NS" delete "$p" --ignore-not-found --wait=true >/dev/null 2>&1 || true; done
+  # 사라짐을 확인한다 — 삭제 호출의 rc는 `--ignore-not-found` 때문에 "지웠다"를 증명하지 못한다.
+  local left
+  left="$(kubectl -n "$NS" get cluster -o name 2>/dev/null | grep -c -x -E "cluster[^/]*/$1" || true)"
+  [ "$left" = "0" ]
+}
+
 recover_and_check() {
+  # pre-flight: 이전 실행의 잔여물을 지운 뒤에만 apply한다. 생존자 위의 apply는 no-op이고,
+  # 그 no-op이 곧 "R2 미접촉 거짓 PASS"다.
+  _purge_drill_cluster "$1" \
+    || { echo "DR ABORT: 이전 드릴 클러스터 $1을 정리하지 못했다 — 생존자 위의 apply는 no-op(=거짓 복구 증명)이 된다" >&2; return 1; }
   kubectl apply -f - >/dev/null <<YAML
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -91,16 +118,24 @@ spec:
         name: barman-cloud.cloudnative-pg.io
         parameters: { barmanObjectName: pg-r2, serverName: ${ARCHIVE_SERVER} }
 YAML
-  local phase=""
+  local phase="" saw_nonhealthy=0
   for _ in $(seq 1 80); do
     phase="$(kubectl -n "$NS" get cluster "$1" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
     [ "$phase" = "Cluster in healthy state" ] && break
+    saw_nonhealthy=1
     sleep 15
   done
+  # ⚠️ **복구가 실제로 일어났다는 양성 증인.** 판정에 쓰이는 관측은 `.status.phase`와 canary 행 수뿐인데,
+  #    전자는 생존자에게 즉시 참이고 후자는 시드가 initdb 1회성이라 상수다(라이브는 영구히 1행).
+  #    R2에서의 진짜 복구는 첫 폴링에 healthy가 될 수 없으므로, healthy가 아닌 phase를 한 번도
+  #    못 봤다는 것 자체가 생존자 재사용의 증거다. 무-RBAC·무지연.
+  if [ "$saw_nonhealthy" != "1" ]; then
+    echo "DR ABORT: $1이 **첫 폴링에 이미 healthy**였다 — R2 복구가 일어나지 않았다(생존자 재사용 의심). pre-flight가 무엇을 놓쳤는지 확인할 것" >&2
+    return 1
+  fi
   local n
   n=$(kubectl -n "$NS" exec "${1}-1" -c postgres -- psql -U postgres -d "$DB" -tAc 'SELECT count(*) FROM restore_canary;' 2>/dev/null || echo 0)
-  kubectl -n "$NS" delete cluster "$1" --ignore-not-found --wait=true || true
-  kubectl -n "$NS" delete pvc -l "cnpg.io/cluster=$1" --ignore-not-found --wait=true || true
+  _purge_drill_cluster "$1" || echo "  경고: $1 정리 미완 — 다음 실행의 pre-flight가 잡는다" >&2
   echo "$n"
 }
 
