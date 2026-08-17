@@ -25,9 +25,18 @@ echo '/var/lib/rancher/k3s-storage/bulk /mnt/bulk none bind 0 0' | sudo tee -a /
 #   ⚠️ 이 창이 열려 있는 동안 scripts/dr-drill.sh 와 scripts/destroy-node.sh 가 둘 다 실행을 거부한다
 #      (bulk가 파괴 대상과 같은 디스크 — 정확히는 bind 소스가 /var/lib/rancher 밑에 있다).
 
-# 국면 B (PONR 3 이후). 위 bind 줄을 fstab에서 빼고 실제 M.2로 갈아끼운다.
-#   → versions.env의 BULK_MIGRATION_WINDOW_UNTIL 을 비우면 dr-drill이 다시 열리고,
-#     플래그 없이 make up 이 통과한다(디바이스가 / 와 다르므로).
+# 국면 B (PONR 3 이후). 위 bind 줄을 fstab에서 빼고 실제 M.2로 갈아끼운다. **순서가 곧 안전이다.**
+#   → ① files 백업 **실행자를 먼저 배선**한다(국면 A 내내 부재였다 — scripts/backup-files-data.sh 는
+#        macOS 전용 launchd 배선이었고 그 plist 는 어느 레포에도 없었다). 매체 판별을 diskutil 이
+#        아니라 **디바이스 정체성**으로 재작성하고 systemd timer 로 건다. 커밋된 배선이어야 한다.
+#   → ② r4-storage-backup.yaml 의 FilesBackupStale 에서 국면 A 억제 절
+#        `and on() (vector(time()) >= ...)` 를 제거한다.
+#   → ③ versions.env의 BULK_MIGRATION_WINDOW_UNTIL 을 비우면 dr-drill 과 destroy-node.sh 가 다시
+#        열리고, 플래그 없이 make up 이 통과한다(디바이스가 / 와 다르므로).
+#   ⚠️ **강제 장치는 이 주석이 아니라 게이트다** — ③을 ②보다 먼저 하면
+#      tests/gates/test_files-backup-phase-a.bats 가 "창은 비었는데 억제 절이 남아 있음"으로 RED 를 낸다.
+#      억제 절의 자동 만료(창 만료 다음날 00:00 KST)는 백스톱일 뿐이다 — 그때까지 손 놓고 있으면
+#      알림이 배선 없이 되살아나 다시 24/7 critical 로 운다.
 #   ⚠️ **창을 비우는 것만으로는 국면 B가 아니다.** destroy-node.sh 는 선언과 별개로 findmnt 으로
 #      bulk 의 bind 소스를 실측해, /var/lib/rancher 밑이면 창이 비어 있어도 거부한다.
 #      즉 M.2 를 실제로 마운트하지 않은 채 창만 비우는 사고가 가드로 막힌다.
