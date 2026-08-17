@@ -47,54 +47,54 @@ spec:
     size: 10Gi
     storageClass: standard # 분리된 WAL PVC, 역시 내장 SSD
 
-  # ⚠️ **NUC 이전 브랜치 전용 형태** — 계획서 G6("NUC의 primary pg가 initdb가 아니라 **recovery로**
-  #    기동 + serverName 분리")의 실행체다. main(라이브 Mac)은 여전히 initdb 형태다.
   # ⚠️ CNPG는 `bootstrap`을 **초기화 시점에만** 읽고 이후 무시한다(라이브 CRD에 불변 CEL 없음 — 실측).
-  #    즉 이 블록이 틀린 채로 sync돼도 ArgoCD는 **Synced+Healthy**다. G6의 통과 증명은 매니페스트나
-  #    ArgoCD 상태가 아니라 **라이브 Cluster의 PGDATA 출처**(인스턴스 로그의 복구 경로)로만 세울 것.
+  #    즉 이 블록이 무엇이든 **이미 떠 있는 클러스터에는 no-op**이다. 라이브 `pg`는 2026-08-13에
+  #    `recovery`(source: pg-mac)로 기동해 timeline=2로 살아 있고, 이 편집은 그것을 건드리지 않는다.
+  #    증명이 필요하면 매니페스트나 ArgoCD 상태가 아니라 **PGDATA 출처**(인스턴스 로그)로 세울 것.
+  # ✅ **감사 9 — 컷오버에서 `recovery`(pg-mac)를 걷어내고 initdb로 되돌렸다 (2026-08-17).**
+  #    되돌리는 이유는 PONR 1의 `pg/` purge를 기다리는 것이 아니다. **지금 남겨두는 것 자체가 위험**이다:
+  #    `Cluster/pg`가 볼륨을 잃고 재생성되면 `pg-mac`(컷오버 시점에 얼어붙은 Mac 아카이브)에서
+  #    **낡은 데이터로 조용히 복구된 뒤 그것을 `pg-nuc/`에 아카이브**해 살아 있는 아카이브의
+  #    타임라인을 오염시킨다. initdb면 **빈 DB로 요란하게** 떠서 사람이 알아채고
+  #    `docs/runbooks/restore.md` 경로 A로 복구한다 — main이 Mac 시대 내내 갖고 있던 설계 그대로다.
+  # ⚠️ 제3안(`recovery.source`를 `pg-nuc` 자기참조)은 채택하지 않았다. 가드가 막기 때문만이 아니라,
+  #    복구본이 **자기가 복구해 온 prefix에 다시 아카이브를 시작**해 타임라인이 겹치고 R2엔
+  #    버저닝이 없어(`infra/cloudflare/r2.tf`) 되돌릴 수 없다. 근거 전문은 ADR 0006.
   bootstrap:
-    recovery:
-      source: pg-mac # -> 아래 externalClusters[].name (읽기 전용 복구 원본)
+    initdb:
       database: app
       owner: app
       secret:
         name: pg-app-credentials # M2가 시드 (platform/cnpg/prod/app-credentials.enc.yaml, ns database); bootstrap 전에 반드시 존재해야 함 — 이 kustomization의 KSOPS generator가 sync-wave -2에서 렌더 (Cluster의 -1보다 먼저)
-      # ⚠️ `postInitApplicationSQL`은 recovery 스키마에 **없다**(CNPG 1.29.1 CRD 실측 — initdb 전용).
-      #    restore_canary는 Mac base backup에 이미 들어 있어 복구와 함께 딸려온다. 컷오버 후
-      #    initdb로 되돌아갈 일이 생기면 그때 이 3줄을 되살릴 것.
+      # restore_canary를 git으로 시드한다 — DR 재구축(initdb)에서 자동 복원돼 주간 restore-drill이
+      # 수동 재시드 없이 동작한다. postInitApplicationSQL은 app DB에 initdb 시 1회만 실행되고,
+      # 기존 클러스터엔 no-op이다(R2 recovery 경로는 base backup의 테이블을 그대로 가져온다).
+      # ⚠️ 이 시드가 **1회성**이라는 사실이 중요하다 — 라이브 canary는 영구히 1행이고(실측 2026-08-17)
+      #    아무도 여기에 INSERT하지 않는다. 따라서 restore-drill의 행 수 비교는 상수 비교이고
+      #    **아카이브 신선도(RPO)를 증명하지 못한다.** 드릴이 진짜 복구를 했는지는 그 스크립트의
+      #    `SAW_NONHEALTHY` 증인이 본다(M17/PR #482). RPO 증명은 별건이다.
+      postInitApplicationSQL:
+        - CREATE TABLE IF NOT EXISTS restore_canary (id serial primary key, ts timestamptz default now())
+        - INSERT INTO restore_canary DEFAULT VALUES
 
   plugins:
     # enabled는 webhook 주입 기본값이지만 명시 — plugins는 listType 미지정(SSA atomic)이라
     # 미기재 시 영구 OutOfSync (HTTPRoute group/kind/weight와 동일 클래스)
-    # ⚠️ 여기가 **쓰기** serverName이다. 아래 externalClusters의 **읽기**와 반드시 달라야 한다 —
-    #    같으면 두 primary(라이브 Mac + NUC)가 같은 R2 prefix에 아카이브해 타임라인이 섞이고
-    #    유일한 오프사이트 PITR 경로가 망가진다(계획서 §3.4의 ❌ 항목).
+    # ⚠️ 여기가 이 클러스터의 **유일한 아카이브 serverName**이다(쓰기).
     #    ObjectStore CRD는 serverName을 CEL로 **금지**하므로(barman-plugin/manifest.yaml:409-413)
-    #    분리는 반드시 이 자리에서 한다 — ObjectStore를 하나 더 만드는 방법은 라이브에서 거부된다.
+    #    이 값이 `s3://homelab-pg-backups-prod/<serverName>/{base,wals}/`를 통째로 정한다.
+    # ⚠️ **`pg`로 되돌리지 마라.** 그 prefix에는 Mac 시대 아카이브가 남아 있고(PONR 1 미실행),
+    #    같아지면 타임라인이 섞인다. R2엔 버저닝이 없어(`infra/cloudflare/r2.tf`) 되돌릴 수 없다.
+    #    `ci.yaml`의 `EXPECT_PG_SERVERNAME=pg-nuc`가 main 진입 시 이 값을 고정한다.
+    # ⚠️ 2026-08-17 감사 9로 `externalClusters`(읽기 원본 `pg-mac`)를 걷어냈다 —
+    #    `check-pg-servername.sh`의 (A)는 "복구 원본이 **있다면** 쓰기와 다르다"라 원본이 없는
+    #    형태도 green이다(`tests/gates/test_pg-servername.bats`가 그 케이스를 이미 픽스처로 갖고 있다).
     - name: barman-cloud.cloudnative-pg.io
       enabled: true
       isWALArchiver: true
       parameters:
         barmanObjectName: pg-r2 # -> object-store.yaml의 ObjectStore (버킷 루트만 담는다)
         serverName: pg-nuc # 쓰기: s3://homelab-pg-backups-prod/pg-nuc/
-
-  # 읽기 전용 복구 원본 — 라이브 Mac이 써 온 아카이브(`pg/`). ObjectStore는 같은 것을 공유하고
-  # serverName만 다르다(읽기/쓰기가 서로 다른 필드라 한 ObjectStore로 동시에 표현된다).
-  # ⚠️ 여기의 `isWALArchiver`는 **반드시 false**다 — 스키마엔 있지만 켜면 이 원본에도 쓰기가 붙는다.
-  #    다만 **생략하면 안 된다**: `externalClusters`도 listType 미지정(SSA atomic)이라 webhook이
-  #    주입하는 기본값(`enabled: true`·`isWALArchiver: false`)이 매니페스트에 없으면 ArgoCD가
-  #    영구 OutOfSync를 낸다 — 위 `plugins:` 리스트와 **같은 클래스인데 이 자리만 빠져 있었다**
-  #    (2026-08-14 NUC 실측: cnpg-data가 Healthy인 채로 5분마다 partial sync를 반복하며
-  #     Cluster/pg만 OutOfSync로 남았다. 라이브 diff는 이 두 필드뿐이었다).
-  externalClusters:
-    - name: pg-mac
-      plugin:
-        name: barman-cloud.cloudnative-pg.io
-        enabled: true # webhook 주입 기본값 — 명시하지 않으면 SSA atomic 리스트가 영구 OutOfSync
-        isWALArchiver: false # 읽기 전용 원본이므로 false. 명시는 OutOfSync 방지용이지 동작 변경이 아니다
-        parameters:
-          barmanObjectName: pg-r2
-          serverName: pg # 읽기: s3://homelab-pg-backups-prod/pg/
 
   # GUI/로컬 직결 전용 admin superuser 롤 — pg_basebackup용 관리형 pg-superuser(enableSuperuserAccess)와
   # 분리된 별도 자격(owner가 TablePlus 등으로 붙는다). 비번은 pg-admin-credentials(KSOPS, wave -2).
