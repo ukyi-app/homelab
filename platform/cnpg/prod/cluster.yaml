@@ -7,7 +7,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "-1" # Cluster CR; -1이라 앱(wave 0+)보다 먼저 Ready — 앱은 부팅 시 self-migrate
 spec:
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.4@sha256:b38bee8f92acd6d7276d5be32e9af36a0ea72c9d339945f1ae205a2acc3cbb89
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4@sha256:6138f19539304b585c6cafd1af82ca407f184139459a8e06f0880df4556d3588
   primaryUpdateStrategy: unsupervised
   enableSuperuserAccess: true # pg_basebackup이 쓰는 관리형 `pg-superuser` Secret(REPLICATION 가능)을 생성 — app 롤과는 별개의 자격증명
   postgresUID: 26

@@ -263,7 +263,7 @@ metadata:
   labels: { cnpg.io/drill: "true" }
 spec:
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.4@sha256:b38bee8f92acd6d7276d5be32e9af36a0ea72c9d339945f1ae205a2acc3cbb89
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4@sha256:6138f19539304b585c6cafd1af82ca407f184139459a8e06f0880df4556d3588
   storage: { size: 40Gi, storageClass: drill-ssd }      # Delete reclaim → PVC 삭제 시 PV 자동 제거 (누수 없음, PV RBAC 불필요)
   walStorage: { size: 10Gi, storageClass: drill-ssd }
   resources:
