@@ -232,12 +232,12 @@ extraObjects:
               podSelector: { matchLabels: { k8s-app: kube-dns } }
           ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
         - to: # apiserver — Application/Secret watch. ClusterIP 아닌 node-subnet:6443(kube-router DNAT-후 트랩)
-            - ipBlock: { cidr: 192.168.139.0/24 }
+            - ipBlock: { cidr: 192.168.117.0/24 } # NUC LAN 서브넷(노드 InternalIP 192.168.117.15)
           ports: [{ protocol: TCP, port: 6443 }]
         - to: # 외부 telegram(api.telegram.org:443) — 사설대역 except로 내부 lateral 차단
             - ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16] }
           ports: [{ protocol: TCP, port: 443 }]
-        # ⚠️ apiserver allow는 별도 to 블록 — 위 telegram except의 192.168.0.0/16이 apiserver(192.168.139.x)도 제외하기 때문.
+        # ⚠️ apiserver allow는 별도 to 블록 — 위 telegram except의 192.168.0.0/16이 apiserver(192.168.117.x)도 제외하기 때문.
         # (Step 5.1: repo-server는 기본 미사용 → 제외. Task 6.1 연결 테스트가 막히면 아래 주석 해제.)
         # - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: argocd-repo-server } } }]
         #   ports: [{ protocol: TCP, port: 8081 }]

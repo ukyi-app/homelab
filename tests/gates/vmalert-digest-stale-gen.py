@@ -12,9 +12,11 @@
 ⚠️ 카운트 2종도 **bare**여야 한다 — 룰이 on()/ignoring() 없이 1:1 스칼라 비교(scraped < configured)를 하므로
    한쪽에만 라벨이 붙으면 매치가 사라져 빈 벡터 = 조용한 무발화가 된다(producer의 계약과 동형).
 
-⚠️ files_backup_last_success_timestamp는 **어느 시나리오에서도 심지 않는다** — 같은 r4 그룹의 absent 가드
-   알림(FilesBackupStale)이 매 replay에서 확실히 발화해 **vacuity 대조군**이 된다(L2/L6처럼 "발화 없음"이
+⚠️ restore_drill_last_success_timestamp는 **어느 시나리오에서도 심지 않는다** — 같은 r4 그룹의 absent 가드
+   알림(CNPGRestoreDrillStale)이 매 replay에서 확실히 발화해 **vacuity 대조군**이 된다(L2/L6처럼 "발화 없음"이
    판정인 음성 레그에서 vmalert가 애초에 아무것도 안 쓴 경우를 가려낸다).
+   ⚠️ 대조군은 **시각 게이트가 없는** 알림이어야 한다 — FilesBackupStale은 국면 A 한시 억제로
+   현재 시각 replay에서 발화하지 못한다(2026-08-17 교체).
 
 ⚠️ 카운트 쌍(configured/scraped)은 **하네스가 argv로 준다**(SSOT는 e2e). 예전엔 시나리오마다 리터럴로
    하드코딩돼 있어 같은 숫자가 gen·셸 sanity·메시지 산문에 3중으로 흩어졌다. 대신 여기서 **시나리오 의미와

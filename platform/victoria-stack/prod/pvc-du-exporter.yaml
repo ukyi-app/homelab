@@ -86,7 +86,8 @@ spec:
                   BODY=""
                   # 듀얼 provisioner 루트 둘 다 스캔(F9 — 경로 SSOT = versions.env:
                   #   INTERNAL_STORAGE_PATH=/var/lib/rancher/k3s-storage/internal,
-                  #   BULK_STORAGE_PATH=/mnt/mac/Volumes/homelab/k3s-bulk(라이브 실측)).
+                  #   BULK_STORAGE_PATH=/mnt/bulk — **마운트포인트**여야 한다. 국면 A(D4 한시)는
+                  #   루트 LV의 bind 마운트, 국면 B는 실제 2TB M.2. 경로는 두 국면에 걸쳐 불변이다).
                   # local-path PVC 디렉토리명 = pvc-<uid>_<ns>_<pvcname> (k8s 이름엔 '_' 불가라 '_'가 유일 구분자).
                   # ⚠️ F20: 카운트는 티어별 — 전역 카운트는 bulk 경로가 틀려도 internal만으로 녹색이 된다.
                   N_internal=0; N_bulk=0
@@ -104,8 +105,11 @@ spec:
                         bulk) N_bulk=$((N_bulk+1)) ;;
                       esac
                     done
-                    # 티어별 fs 지표(F10) — virtiofs는 node-exporter가 못 본다. 파드 내 statfs(df)로 대체 계측
-                    # (라이브 dry-run: bulk df size=2TB·avail=~2TB로 신뢰값 확인 → du-합산 폴백 불요).
+                    # 티어별 fs 지표(F10) — 파드 내 statfs(df)로 계측한다.
+                    # ⚠️ **국면 A(D4 한시) 동안 tier="bulk"의 df는 루트 파일시스템을 잰다** — bind
+                    #    마운트라 같은 fs다. 즉 그 기간의 bulk 용량 신호는 internal과 같은 값이고,
+                    #    이건 버그가 아니라 그 기간의 사실이다(bulk가 실제로 부트 디스크 위에 있다).
+                    #    r4의 BulkStorageLow 문구가 이 사실을 반영한다. 국면 B에서 저절로 갈라진다.
                     read -r fs_size fs_avail <<< "$(df -B1 --output=size,avail "$root" | tail -1)"
                     BODY="${BODY}storage_tier_size_bytes{tier=\"${tier}\"} ${fs_size}\n"
                     BODY="${BODY}storage_tier_avail_bytes{tier=\"${tier}\"} ${fs_avail}\n"
@@ -125,5 +129,7 @@ spec:
             - name: storage-internal
               hostPath: { path: /var/lib/rancher/k3s-storage/internal, type: Directory }
             - name: storage-bulk
-              # 라이브 provisioner 실경로(local-path-config-bulk nodePathMap) — 외장 SSD virtiofs 마운트.
-              hostPath: { path: /mnt/mac/Volumes/homelab/k3s-bulk, type: Directory }
+              # provisioner 실경로(local-path-config-bulk nodePathMap) = versions.env의 BULK_STORAGE_PATH.
+              # ⚠️ `type: Directory`가 여기서 **두 번째 가드**로 일한다: bulk 마운트가 없으면 kubelet이
+              #    이 파드를 아예 기동시키지 않는다 — 용량 신호가 조용히 0이 되는 대신 요란하게 멈춘다.
+              hostPath: { path: /mnt/bulk, type: Directory }

@@ -5,10 +5,14 @@
   [ "$status" -eq 0 ]
 }
 
-@test "unimplemented targets still exit non-zero (cannot fake success)" {
-  # bootstrap (M2) and up/host-up (M1) are now implemented; only down remains a stub.
+@test "the deliberately-unwired down target still exits non-zero and names the primitive" {
+  # `down`은 이제 '미구현'이 아니라 **의도적 비배선**이다: 파괴 프리미티브는 scripts/destroy-node.sh이고
+  # make에 걸지 않는다(Makefile의 down 주석이 이유 3가지를 적는다).
+  # ⚠️ 이 @test는 `make down`을 **실제로 실행한다** — 그래서 배선하지 않는 것이 결정의 일부다.
+  #    배선하면 이 줄이 owner 머신(=라이브 NUC)에서 파괴 스크립트를 부르게 된다.
   run make down
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'scripts/destroy-node.sh'
 }
 
 @test "bootstrap delegates to scripts/bootstrap.sh (dry-run)" {
