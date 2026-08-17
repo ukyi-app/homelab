@@ -10,14 +10,31 @@ spec:
     spec:
       automountServiceAccountToken: false # SA 토큰 불요(k8s API 미사용) — 토큰 탈취 표면 제거(보안 감사 SA-2)
       securityContext:
+        # ⚠️ **hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다**(kubelet의 소유권 관리 대상이 아니다 —
+        #    2026-08-14 NUC 실측: PVC 디렉토리가 fsGroup 소유가 아니라 `root:root 0777`이었다).
+        #    그래서 이 값에 기대지 말고, **PVC에 파일을 만드는 컨테이너가 65532로 돌아야 한다**(아래).
+        #    디렉토리가 0777이라 65532도 생성은 되지만, root가 만든 **파일**은 0644 root 소유라
+        #    뒤따르는 65532 컨테이너가 열지 못한다.
         fsGroup: 65532 # PVC(conf/work)를 65532 그룹 쓰기 가능으로 — non-root AdGuard의 설정 저장용
       initContainers:
+        # ⚠️ **65532로 돌아야 한다.** root로 돌면 `cp`가 AdGuardHome.yaml을 `0644 root:root`로 만들고,
+        #    다음 init인 inject-auth(65532)가 `permission denied`로 죽어 파드가 Init:CrashLoopBackOff에
+        #    빠진다(2026-08-14 NUC 콜드스타트 실측 — 메인 컨테이너도 같은 이유로 설정을 못 쓴다).
+        #    ⚠️ 라이브 Mac에서는 원리적으로 안 보인다: 파일이 이미 있어 `cp -n`이 건너뛰므로
+        #       소유권이 문제될 일이 없다. **빈 PVC에서만 드러난다.**
         - name: seed-config
           image: busybox:1.38@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d
           command: ["sh", "-c", "cp -n /seed/AdGuardHome.yaml /opt/adguardhome/conf/AdGuardHome.yaml || true"]
           volumeMounts:
             - { name: seed, mountPath: /seed }
             - { name: data, mountPath: /opt/adguardhome/conf, subPath: conf }
+          securityContext: # inject-auth와 동일 — 같은 uid가 만들고 같은 uid가 고쳐야 한다
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true # cp는 마운트된 PVC에만 쓴다
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
         # GitOps 강제 UI 인증: AdGuard는 users:만 인증 수단(secret/env 네이티브 미지원)이라 PVC의
         # AdGuardHome.yaml .users를 SealedSecret의 bcrypt 해시로 매 시작 set한다(yq 멱등 — UI에서 바꿔도
         # 재시작 시 sealed 값으로 수렴, DR/재배포 일관). seed-config가 먼저 PVC를 채운 뒤 실행돼야 한다(순서 의존).

@@ -21,8 +21,7 @@
   "이 리소스를 Healthy로 만들어 주는 것이 더 앞 wave에 있는가?"**
 - ⚠️ **이 클래스는 라이브에서 원리적으로 안 보인다** — 리소스가 이미 전부 존재해 순서가 무의미하기
   때문이다. 점진 구축으로 만든 레포는 콜드스타트를 한 번도 통과하지 않은 채 초록일 수 있다.
-> 가드: `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`,
-> `platform/traefik/prod/test_gateway_sync_wave.bats`
+> 가드: `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`, `platform/traefik/prod/test_gateway_sync_wave.bats`
 
 ### ArgoCD retry 소진 후 명시 sync
 - ArgoCD는 retry 소진 후 실패 리소스를 재시도하지 않는다 — 명시 sync:
@@ -105,7 +104,105 @@
 - SSA + atomic 리스트(HTTPRoute `parentRefs`/`backendRefs`, STS `volumeClaimTemplates`)는 서버 주입
   기본값이 영구 OutOfSync를 만든다 — manifest에 기본값(group/kind/weight)을 명시하거나, status까지
   주입되는 vCT는 `ignoreDifferences`(+`RespectIgnoreDifferences=true`)로 제외.
-> 가드: `platform/adguard/prod/test_adguard_route.bats`
+- ⚠️ **형제 자리를 함께 고칠 것 — 한 곳만 고치면 나머지가 조용히 남는다.** CNPG Cluster의
+  `spec.plugins[]`에는 webhook 주입 기본값(`enabled`·`isWALArchiver`)을 명시해 뒀는데 **같은 클래스인
+  `spec.externalClusters[].plugin`만 빠져 있었다**(2026-08-14 NUC 실측: cnpg-data가 Healthy인 채로
+  5분마다 partial sync를 반복했고 라이브 diff는 그 두 필드뿐이었다). 한 kind에서 이 함정을 만나면
+  같은 파일의 **모든 atomic 리스트**를 훑을 것.
+- ⚠️ "미기재로 막는다"는 반대 방향의 가드가 이 함정과 충돌한다. `isWALArchiver`는 *켜면* 안 되는
+  필드라 원래 가드가 "존재하면 red"였는데, 그 규칙이 곧 OutOfSync의 원인이었다. 올바른 불변식은
+  **명시적 `false`**다 — 위험은 값이지 존재가 아니다.
+- ⚠️ **2026-08-17 컷오버 이후 `cluster.yaml`에 `externalClusters`가 없다**(감사 9 / ADR 0006 —
+  복구 원본을 걷어내고 initdb로 되돌렸다). 따라서 위 externalClusters 사례는 **역사이고, 현재
+  강제되는 실행체가 없다** — 그 자리를 재던 @test 2건이 같은 커밋으로 삭제됐다. 남아 있는 강제는
+  `spec.plugins[]` 쪽뿐이다(`test_cluster_params.bats`의 webhook 기본값 @test).
+  ⇒ **복구 원본을 되살릴 때는 `enabled: true`와 `isWALArchiver: false`를 반드시 함께 명시하고,
+  그것을 재는 @test도 같은 커밋에 되살려라.** 지금은 빠뜨려도 CI가 초록이다(`verify-traps.sh`는
+  가드 **파일의 존재**만 보지 @test 이름까지 보지 않는다 — 그래서 이 문단이 그 구멍을 메운다).
+> 가드: `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats`
+
+### 상주 워크로드 OOM 진단 — 코어 수는 그럴듯한 오답이다 (D-e)
+- 2026-08-14 NUC 콜드스타트에서 `vector`·`victorialogs`가 OOM 루프를 돌았다(2시간에 22회·16회).
+  **1차 진단은 "노드 코어 수(6→14)가 늘어 런타임이 워커/P를 더 띄운 탓"이었고, 틀렸다.**
+  핀(`--threads 6`·`GOMAXPROCS=6`)을 넣어 vector 워커를 15→8로 줄였는데 커널 OOM 기록의
+  `anon-rss`는 **325324 kB로 핀 전(325080·325136·325160·325056)과 동일**했다. 그럴듯한 인과였지만
+  숫자가 안 움직였다. ⇒ **처방을 넣은 뒤 같은 지표를 다시 재라. 안 움직이면 원인이 아니다.**
+- 실제 원인 둘:
+  1. **victorialogs는 128Mi 안에 인제스션 작업집합이 안 들어갔다.** 오감지가 아니다 — 기동 로그가
+     `system memory limit 134217728 bytes`(=128Mi)를 정확히 감지하고 `-memory.allowedPercent=60`으로
+     캐시를 80530636 bytes(80.5MB)로 제한한다. 남는 47.5MB에 Go 힙 + 인제스션 버퍼 + 비-힙(mmap된
+     part·스택)이 다 들어가야 하는데 안 된다. 저장량 문제도 아니었다(smallPartRows 110427 / 1.9MB).
+  2. **vector는 sink 백프레셔로 끌려 죽었다.** vlogs가 죽어 있으면 elasticsearch sink가
+     `Endpoint is unhealthy` + 무한 재시도로 미전송 배치를 메모리에 쌓는다 — **결합 루프**다.
+     로그량이 원인이라 오해하기 쉬운데 `/var/log/pods` 총량은 69MB에 불과했다.
+- ⚠️ **`GOMEMLIMIT`은 이것을 못 막는다** — 힙 소프트 리밋이라 캐시·비-힙이 그 밖에서 자란다.
+  victorialogs는 `GOMEMLIMIT=115MiB`가 걸린 채로 129MiB에서 죽었다.
+- ⚠️ **RSS가 매번 같은 값에서 죽으면 누수가 아니라 작업집합이다.** 커널 OOM 기록을 보면 즉시 갈린다.
+  `kubectl top`은 metrics-server가 없으면 안 나오지만 `dmesg -T | grep 'Memory cgroup out of memory'`는
+  항상 있고 `anon-rss`/`file-rss`를 정확히 준다. **`kubectl describe`의 OOMKilled보다 훨씬 정보량이 많다.**
+- ⚠️ **방아쇠는 장애 자체였다 — 장애가 길수록 복구 부하가 커진다.** traefik이 17시간 막혀 있는 동안
+  쌓인 로그가 복구 순간 **백로그 버스트**가 됐다. 실측: 기동 2분 된 vector가 이미 151,135 이벤트를
+  전송했고 `vector_source_lag_time_seconds_sum / _count` = 평균 지연 **27,000초(7.5시간)**였다 —
+  실시간 로그가 아니라 과거를 읽고 있었다는 뜻이다. 그 버스트가 vlogs 힙을 밀어올리고
+  (`go_memstats_heap_alloc_bytes` 116MB, 저장 데이터는 1.9MB뿐), vlogs가 죽으면 vector가
+  미전송 배치를 쌓다 죽는 결합 루프가 됐다.
+  **백로그를 다 소화한 뒤 정상 유입은 3 KiB/s · 약 1.7 events/s에 불과했고 OOM은 즉시 멈췄다**
+  (재시작 간격 5분 → 0). ⇒ 상향한 limit은 **버스트 흡수용 여유**이지 정상 부하 기준이 아니다.
+- ⚠️ **판별법**: `vector_source_lag_time_seconds_sum ÷ _count`가 크면(수천 초 이상) 그것은
+  "로그가 많다"가 아니라 **"과거를 읽고 있다"**는 신호다. `du /var/log/pods`로 잰 *생산량*은
+  정상인데 파이프라인만 터지는 모순이 여기서 풀린다(이번에 그 모순으로 두 번 오진했다).
+- ⇒ 처방: limit 상향(vlogs 128→256Mi·vector 320→512Mi) + `docs/memory-ledger.md` 행 동반.
+  핀은 **위생 조치로 유지**한다(코어 많은 노드에서 워커 수를 기준선에 묶는다) — 다만 OOM 처방이
+  아니라는 것을 주석에 남겼다. 두 limit은 "OOM을 멈추는 안전한 상한"이지 right-size가 아니다 —
+  부하가 걷힌 뒤 재측정해 회수할 것.
+> 가드: `platform/victoria-stack/prod/test_concurrency_pin.bats`
+
+### PCIe correctable RxErr 폭주는 ASPM L1이다 — 유휴에서만 나고, 하드웨어 열화가 아니다
+- NUC의 부팅 NVMe(`0000:01:00.0`)에서 `PCIe Bus Error: severity=Correctable, type=Physical Layer,
+  (Receiver ID)`가 대량으로 났다. AER 카운터 기준 부팅 후 **`RxErr` 3만 건대**(dmesg는 rate-limit돼
+  수백 줄만 보이므로 **`/sys/bus/pci/devices/<addr>/aer_dev_correctable`을 볼 것** — dmesg 줄 수로
+  규모를 판단하면 ~85배 과소평가한다).
+- ⚠️ **열화로 오독하기 쉽다.** 판별 3종:
+  `aer_dev_fatal`/`aer_dev_nonfatal`이 **0**이고 · `LnkCap`=`LnkSta`(속도·폭 강등 없음)이며 ·
+  `LnkCtl: ASPM L1 Enabled`이면 링크 마진이 아니라 **전력 상태 전이**를 보고 있는 것이다.
+- ⭐ **결정적 A/B (2026-08-15 실측)** — per-device 노브 `/sys/bus/pci/devices/<addr>/link/l1_aspm`을
+  껐다 켜며 같은 창에서 카운터를 쟀다:
+
+  | | 유휴 60초 | 부하(8GiB direct read) | 처리량 |
+  |---|---|---|---|
+  | ASPM L1 ON | **+9** | +0 | 1.2~1.3 GB/s |
+  | ASPM L1 OFF | **+0** | +0 | 1.2 GB/s |
+
+  ⇒ **에러는 부하가 아니라 유휴에서만 난다**(L1 진입→기상 시 발생). **처리량 손실은 0**이고
+  대가는 유휴 전력뿐이다. "I/O가 많아서 링크가 힘들다"는 정반대의 직관이 틀린 자리다.
+- ⚠️ **장애가 카운터를 튀게 한다.** 2026-08-14 콜드스타트 OOM 루프가 만든 잦은 유휴↔활성 전환이
+  버스트를 만들었다 — 카운터 급증을 보고 디스크를 의심하기 전에 **그 시간대에 무슨 장애가 있었는지**
+  먼저 볼 것.
+- ⇒ 처방: `etc/tmpfiles.d/10-k3s-node.conf`의 `w /sys/bus/pci/drivers/nvme/*/link/l1_aspm - - - - 0`.
+  **PCI 주소가 아니라 드라이버 경유 글롭**을 쓴다 — 슬롯이 바뀌거나 두 번째 M.2를 달아도 따라간다.
+  ⚠️ `host-config.sh`의 트리 열거는 `find . -type f -name '*.conf'`다. udev 룰(`.rules`)이나
+  grub 조각(`.cfg`)으로 두면 **조용히 무시된다**(레포의 "열거 붕괴 → vacuous green" 클래스).
+  그래서 `.conf`로 표현 가능한 tmpfiles를 골랐다. 트리에 파일을 더하면 `TREE_MIN`도 같이 올릴 것.
+> 가드: `infra/k3s-bootstrap/tests/test_03-host-config.bats`
+
+### hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다
+- Pod `securityContext.fsGroup`은 kubelet이 소유권을 관리하는 볼륨에만 걸린다. **local-path류의
+  hostPath 백엔드 PV는 대상이 아니다** — 2026-08-14 NUC 실측: `fsGroup: 65532`인데 PVC 디렉토리가
+  `root:root 0777`이었다. 디렉토리가 0777이라 non-root도 **생성**은 되므로 문제가 없어 보이지만,
+  **root로 도는 컨테이너가 만든 파일은 `0644 root:root`**라 뒤따르는 non-root 컨테이너가 열지 못한다.
+  AdGuard의 `seed-config`(root) → `inject-auth`(65532)가 `permission denied`로 죽어 파드가
+  Init:CrashLoopBackOff에 빠졌다.
+- ⚠️ **빈 PVC에서만 드러난다.** 라이브에서는 파일이 이미 있어 `cp -n`이 건너뛰므로 소유권이 문제될
+  일이 없다. sync-wave 교착과 같은 부류의 "콜드스타트 전용" 결함이다.
+  ⇒ 처방: **PVC에 파일을 만드는 컨테이너를 최종 소비자와 같은 uid로 돌린다**(fsGroup에 기대지 말 것).
+> 가드: `platform/adguard/prod/test_adguard_auth.bats`
+
+### yq -e는 값이 false면 exit 1이다
+- `yq -e`의 종료코드는 "출력이 truthy인가"다 — **키가 없을 때(`null`)와 값이 `false`일 때를 구별하지
+  않는다.** 그래서 올바른 매니페스트(`isWALArchiver: false`)에서 bats가 red가 된다.
+  `-e` 없이 읽고 `printf '%s' "$v" | grep -qxF -- 'false'`로 정확 일치를 단언하면 미기재(`null`)와
+  `false`가 갈린다. 불리언을 읽는 모든 단언에 해당한다.
+> 가드: `platform/cnpg/prod/test_cluster_params.bats`
 
 ### Application zero-value selfHeal 플립플롭
 - Application spec의 zero-value(예: `directory.recurse: false`)는 컨트롤러 정규화가 매번 삭제 →
@@ -145,8 +242,12 @@
 
 ### OrbStack LISTEN 포트만 포워딩
 - OrbStack은 VM에서 **LISTEN 중인 포트만** Mac으로 포워딩한다(바인드는 Mac 전 인터페이스).
-  servicelb/hostPort는 iptables DNAT뿐이라 트리거가 안 된다 — `dns-forward-trigger.service`
-  (cloud-init) 참고. VM IP(192.168.139.x)는 Mac에서 직접 라우팅되지 않는다.
+  servicelb/hostPort는 iptables DNAT뿐이라 트리거가 안 된다 — 그래서 `:53`을 점유하기만 하는
+  더미 유닛(`dns-forward-trigger.service`)이 있었다. VM IP(192.168.139.x)는 Mac에서 직접
+  라우팅되지 않는다.
+- ⚠️ **베어메탈에서는 이 함정도, 그 우회도 없다.** 노드가 곧 호스트라 svclb hostPort가 노드
+  실주소에 직접 걸린다. 그 유닛은 `infra/k3s-bootstrap/cloud-init.yaml`에 살았고 NUC 이식
+  브랜치에서 삭제됐다(후계는 `host-config/` 트리 — 담지 않는다). `main`(라이브 Mac)에는 남아 있다.
 
 ### AdGuard ConfigMap 첫 부팅 시드 전용
 - AdGuard ConfigMap은 첫 부팅 시드 전용(initContainer `cp -n`) — 갱신 시 PVC 안의
@@ -177,6 +278,23 @@
 ### VictoriaLogs distroless 라이브 질의
 - VictoriaLogs/일부 VM 컴포넌트는 distroless(wget/sh 없음) — 라이브 질의는 vmagent 등
   다른 파드에서 service DNS로. vmalert 그룹 조회는 `/api/v1/rules`(신버전, groups는 400).
+- ⚠️ **`vmalert`도 distroless라 `kubectl exec ... sh -c` 가 조용히 빈 출력을 낸다**(2026-08-16 실측).
+  `vmsingle`은 셸이 있어 되는데 vmalert는 안 된다 — 한쪽이 됐다고 다른 쪽도 될 것으로 넘기지 말 것.
+  룰 상태는 vmsingle에 `ALERTS` / `ALERTS_FOR_STATE` 시계열로 물으면 exec 없이 얻는다.
+
+### VM 질의 URL에서 `[...]`를 인코딩하지 않으면 조용히 빈 결과가 온다
+- ⚠️ **`{"status":"success", ... "result":[]}`가 돌아온다 — 에러가 아니라 성공이다.**
+  그래서 "메트릭이 없다"로 읽히고, 그 위에 서 있던 알림 판단이 통째로 뒤집힌다.
+  2026-08-16 실측: `files_backup_last_success_timestamp[10d]`를 인코딩 없이 물어 0건을 받고
+  **"라이브 Mac의 files 백업이 죽었다"는 결론까지 갔다.** `%5B10d%5D`로 다시 물으니 6.3시간 전
+  값이 정상으로 있었다 — 라이브는 멀쩡했다.
+- ⇒ range selector가 든 질의는 **항상 `%5B`/`%5D`로 인코딩**한다:
+  `curl "http://<vmsingle>:8428/api/v1/query?query=last_over_time(metric%5B10d%5D)"`
+- ⚠️ **`/api/v1/label/__name__/values`로 "메트릭 존재"를 판정하지 말 것** — 기본 조회창 밖의
+  **하루 1회 push 같은 단발 시리즈는 목록에 안 나온다.** 존재 판정은 반드시
+  `last_over_time(<metric>[<충분한 창>])`으로 한다(알림 룰들이 `[10d]`를 쓰는 것과 같은 이유).
+- ⚠️ 같은 성질이 **알림에도 그대로 있다** — 단발 push 메트릭에 bare `absent()`를 걸면 영구 오발화한다.
+  `r4-storage-backup.yaml`의 주석이 그 실측을 이미 적어 두었다.
 
 ### Alertmanager telegram 전송 검증 메트릭
 - Alertmanager telegram 전송 검증은 로그가 아니라 `alertmanager_notifications_total{integration="telegram"}`
@@ -781,3 +899,214 @@ PVC 숫자를 읽으면 틀린 답을 얻는다 ② 쿼터를 강제하는 provi
 
 > 가드: `scripts/audit-orphan-pv.sh`
 
+
+### sshd_config.d는 먼저 읽힌 값이 이긴다 — systemd 드롭인과 정반대다
+
+systemd 드롭인(`*.conf.d/`)은 **마지막** 선언이 이긴다. `sshd_config.d`는 **반대**다 —
+`man sshd_config`: *"for each keyword, the first obtained value will be used"* 이고
+`Include /etc/ssh/sshd_config.d/*.conf`는 본 파일 **앞에** 놓인다. 즉 글롭 사전순으로 먼저 읽힌
+파일이 이긴다. 하드닝 드롭인을 `60-`으로 지으면 `50-cloud-init.conf`에 **조용히 진다**.
+
+⚠️ NUC 실측(2026-08-11): `/etc/ssh/sshd_config.d/`는 `755`라 열람되지만 그 안의
+`50-cloud-init.conf`는 **`600 root:root`**다. 그래서 sudo 없이는 **실효 설정을 얻는 모든 경로가
+EACCES로 죽는다** — `sshd -T`, `sshd -G`, 심지어 단순 `cat`까지. 디렉토리가 열린다고 내용을
+비교할 수 있다고 착각하기 쉽다.
+
+✅ 그러므로 sudo-free 드리프트 검사는 **이름만으로** 불변식을 건다: "우리 드롭인보다 사전순 앞선
+`.conf`가 없다". 내용 열람이 필요 없다는 것이 이 설계의 요점이다.
+
+> 가드: `infra/k3s-bootstrap/tests/test_03-host-config.bats`
+
+### Ubuntu 26.04에 /etc/timezone이 없다 — 그 파일을 읽는 게이트는 출구가 없다
+
+Debian 고유 파일인 `/etc/timezone`은 Ubuntu 26.04에 **존재하지 않는다**. 어떤 패키지도 소유하지
+않는다(실측: `dpkg-query -S /etc/timezone` → `no path found`, `tzdata 2026c` 설치돼 있음에도).
+타임존의 진실원은 `/etc/localtime` 심링크와 `timedatectl`뿐이다.
+
+⚠️ 그 파일을 읽는 검사는 **정상 설정된 호스트에서도** "타임존을 읽지 못했다"로 죽는다. 그리고 그
+진단이 제안하는 `timedatectl set-timezone`은 systemd-timedated가 `/etc/localtime`만 갱신하므로
+**그 실패를 고치지 못한다** — fail-loud이지만 출구가 없는 게이트다. `host-preflight.sh`가 정확히 그
+상태였고, `[1]`이 먼저 죽어서 `[2]`·`[3]`의 진짜 위험(콜드스타트 교착 경로가 열려 있음)이
+**보고되지도 않았다**.
+
+⚠️ 반대로 그 파일을 host-config 관리 대상으로 **만들면** 두 진실원이 갈린다 —
+`timedatectl set-timezone`은 그 파일을 갱신하지 않으므로 드리프트 검사가 stale한 값을 보고 "일치"라
+답한다.
+
+> 가드: `infra/k3s-bootstrap/tests/test_02-host-preflight.bats`
+
+### tailscale의 ~. 라우팅 도메인 — 노드 이름해석이 조용히 클러스터 의존이 된다
+
+`DNSStubListener=no`로 스텁을 끄고 `/etc/resolv.conf`를 실업스트림 목록으로 돌려도, tailscale이
+`~.`(모든 도메인) 라우팅 도메인을 선언하면 **1순위 nameserver가 `100.100.100.100`(MagicDNS)** 이
+된다. 그 뒤의 실제 리졸버는 tailnet coordination server가 정하고, 이 tailnet에서 그 값은
+`infra/tailscale/acl.tf`의 `tailscale_dns_nameservers` = **맥미니**, 즉 라이브 클러스터의 AdGuard다.
+
+즉 노드의 이름해석이 **클러스터를 경유한다** — Mac을 끄는 순간 노드가 `github.com`조차 못 풀고,
+이미지 pull이 불가능해진다. 콜드스타트 교착의 두 번째 얼굴이며, `DNSStubListener=no` 하나로는
+닫히지 않는다.
+
+⚠️ `100.100.100.100`은 **LOCAL 주소가 아니다**(실측: `ip route get` → `dev tailscale0 table 52`,
+local 테이블에는 노드 자신의 `/32`만). 그래서 CNI hostPort DNAT(`--dst-type LOCAL`)는 **피한다** —
+그 교착과는 다른 경로다. "routable하니까 안전하다"는 판정이 정확히 여기서 틀린다.
+
+✅ 처방은 `tailscale set --accept-dns=false`(디바이스 로컬, tailnet 전역 설정 무변경). 검사는
+resolv.conf의 nameserver가 tailnet 대역(CGNAT `100.64.0.0/10` · tailscale ULA
+`fd7a:115c:a1e0::/48`)에 있으면 거부한다. tailscaled 자신의 동작에는 영향이 없다(자기 내부
+리졸버를 쓴다).
+
+⚠️ 남은 절반: tailnet 전역 nameserver가 컷오버 후에도 맥미니를 가리키면 **tailscale을 켠 모든
+기기**의 이름해석이 죽는다. 그 값은 gitignored `terraform.tfvars`에 있어 diff에 보이지 않고,
+`terraform apply`는 성공한다.
+
+> 가드: `infra/k3s-bootstrap/tests/test_02-host-preflight.bats`
+
+### findmnt -T는 마운트 여부를 증명하지 못한다 — 그리고 bind 마운트의 SOURCE엔 대괄호가 붙는다
+
+"이 경로가 별도 스토리지 위에 있는가"를 `findmnt -T <path>`로 판정하면 **정확히 반대의 답**을 얻는다.
+`-T`는 경로를 **감싸는** 마운트로 resolve하므로, `/mnt/bulk`가 마운트가 아니라 루트 위 평범한
+디렉토리여도 `/`를 성공적으로 돌려준다 — 잡으려던 바로 그 상태가 통과한다. 마운트포인트 판정은
+인자 없는 `findmnt <path>`(그것이 마운트포인트일 때만 매치)로 해야 한다.
+
+⚠️ OrbStack 시절에는 **`-T`가 필수**였다(mac 공유의 하위 디렉토리는 자체 마운트포인트가 아니라
+`findmnt <subdir>`가 빈 출력 + rc=1). 즉 이식에서 요구사항이 **뒤집혔다** — 옛 주석("-T를 반드시
+쓸 것")을 그대로 옮기면 게이트가 조용히 무력화된다.
+
+⚠️ 두 번째 함정: bind 마운트의 `SOURCE`는 `/dev/mapper/vg-root[/var/lib/rancher/...]`처럼 **서브패스가
+대괄호로 붙는다.** 디바이스 동일성을 비교할 때 대괄호를 떼지 않으면 문자열이 달라져 "다른 디바이스"로
+읽힌다 — 루트 LV의 bind 마운트를 별도 디스크로 오판하는 것이고, 그게 국면 A의 정확한 모양이다.
+
+> 가드: `infra/k3s-bootstrap/tests/test_08-bulk-gate.bats`
+
+### 한시 억제는 자기 만료를 품어야 한다 — 그리고 억제한 알림을 vacuity 대조군으로 쓰던 e2e가 함께 죽는다
+
+**영구 발화하는 critical은 무음보다 나쁘다.** `FilesBackupStale`은 NUC 이식 후 producer(호스트
+launchd + macOS 전용 `backup-files-data.sh`)가 **존재조차 하지 않아** absent 가지가 24/7 참이었다.
+`severity=critical` 라우트의 `repeat_interval: 1h`를 타고 하루 24건이 나간다. 상시 소음은 채널 전체를
+둔감화해 **진짜 페이지를 묻는다** — "알림이 있다"가 "감시가 있다"를 뜻하지 않게 된다.
+
+**억제의 만료는 룰 자신이 들고 있어야 한다.** 사람이 기억해야 하는 억제는 영구 침묵이 된다.
+expr에 `and on() (vector(time()) >= <재무장 unixtime>)`을 달면 만료가 자동이고 상한이 명시된다.
+
+⚠️ **결합 순서를 거꾸로 알기 쉽다.** PromQL은 `and`가 `or`보다 **강하게** 결합하므로
+`A or B and on() C`는 `A or (B and on() C)`로 파싱된다 — 즉 절을 expr **끝에 괄호 없이** 붙이면
+정확히 뒤쪽(absent) 가지에만 걸린다. 위험한 것은 그 반대 형태 `(A or B) and on() C`(전체를 괄호로
+묶는 것)로, 그러면 staleness 가지까지 함께 죽어 **producer가 되살아나도 감시가 안 돌아온다.**
+**두 형태 모두 문법상 유효해 `-dryRun`이 구별하지 못한다** — 그래서 형태를 잠그는 가드가 필요하다.
+실측(VictoriaMetrics v1.145.0): 끝에 붙인 형태에서 실행자 없음 → 무발화 / 배선 + stale → **발화** /
+배선 + fresh → 무발화 / 억제 없는 원본 + 실행자 없음 → 발화.
+
+**시각 상수는 SSOT의 파생값이다.** 창의 SSOT는 `versions.env`의 `BULK_MIGRATION_WINDOW_UNTIL`이고
+룰은 YAML이라 런타임 파생이 불가능하다 → 하드코딩을 허용하되 **양방향 정합 가드**로 잠근다.
+특히 "창을 비웠는데 억제 절이 남음"을 잡는 방향이 더 중요하다 — 그게 국면 전환에서 알림이 죽은 채
+넘어가는 경로다. ⚠️ 그 가드는 **`yq`로 expr만 파싱해서** 봐야 한다. 같은 파일의 주석이 같은 리터럴을
+담으므로 파일 전체 grep은 주석의 상수를 검증하고 배포되는 expr은 안 보는 거짓 초록을 만든다.
+
+**★ 동반 파괴 — 억제된 알림을 vacuity 대조군으로 쓰던 하네스가 시끄럽게 죽는다.**
+음성 레그("발화 없음"이 판정)는 vmalert가 애초에 아무것도 안 썼을 때도 통과하므로, 이 레포의 e2e들은
+"확실히 발화하는 같은 그룹의 absent 가드 알림"을 대조군으로 세워 vacuity를 배제한다. 그 대조군에
+시각 게이트를 걸면 replay(=현재 시각)에서 발화가 불가능해져 하네스가 HARNESS FAULT(exit 2)로 죽는다.
+⇒ **대조군은 시각 게이트가 없는 알림이어야 한다**는 계약이 생겼다. 억제를 도입하는 커밋은 대조군
+이동을 **같은 커밋에** 포함해야 한다(안 하면 required gate 2개가 동시에 RED).
+
+> 가드: `tests/gates/test_files-backup-phase-a.bats`
+
+### 드릴의 정리가 EXIT trap뿐이면 고아가 남고, pre-flight 없는 apply가 그 고아를 재사용해 '검증된 복원'이 거짓말한다
+
+> 가드: `platform/cnpg/prod/test_restore_drill_behavior.bats`
+
+**정리를 `trap … EXIT`에만 맡긴 배치 잡은 비정상 종료에서 정리하지 않는다.** 노드 재부팅·OOM·
+evict·`activeDeadlineSeconds` 초과는 SIGTERM→SIGKILL이라 EXIT trap이 돌지 않는다. 남는 것은 고아
+`Cluster`다.
+
+**그 다음 실행의 `kubectl apply`는 복구를 다시 돌리지 않는다.** 힙독 텍스트가 매 실행 바이트
+동일이면 클라이언트-사이드 3-way merge patch가 비어 진짜 no-op이 되고, 설령 patch가 나가도
+CNPG는 `bootstrap`을 **초기화 시점에만** 읽고 이후 무시한다(`platform/cnpg/prod/cluster.yaml`의 bootstrap 주석).
+그러면 phase 루프가 첫 시도에서 통과하고, 검증 대상 테이블의 행 수는 지난 회차 값 그대로라 비교도
+통과한다 → **오브젝트 스토리지를 한 번도 만지지 않은 드릴이 '검증된 복원'을 보고한다.**
+
+⚠️ **거짓 PASS의 서명을 정확히 알아야 한다 — 여기서 한 번 틀렸다.** 성공 경로의 정리가 그 고아를
+**자기가 지우기 때문에** 거짓 PASS는 매주 반복되지 않는다. 실제 서명은 성공 간격이 7일 → 14일로
+벌어지는 것이고, staleness 임계(8.1일)가 그 사이 약 5.9일간 발화한다 = **플랩**이지 영구 초록이
+아니다. 영구 초록이 되는 경로는 둘로 좁다: (1) 고아가 **수동 out-of-band 실행**에서 생기면 자동
+회차의 거짓 PASS가 주간 리듬을 깨지 않아 staleness가 한 번도 안 뜬다(조용한 단발 거짓 PASS),
+(2) 잔여물 스윕이 눈이 멀어 PGDATA가 매주 살아남으면 매 회차가 그것을 재사용한다.
+⇒ 처방을 "정리하고 **중단**"으로 잡으면 이미 울고 있는 알림에 정보를 더하지 못하면서 한 주기치
+복원 증명을 버린다. **정리하고 계속**이 옳다 — 청소된 상태에서 그 회차가 진짜 복구를 수행해
+알림을 정당하게 해소한다. 중단은 **정리 자체가 실패했을 때만** 건다(그때는 apply가 실제로 no-op이다).
+
+⚠️ **Cluster CR만 지우면 반쪽이다.** CNPG는 Cluster 삭제 시 PVC를 남기므로 `<cluster>-<serial>`
+PGDATA가 살아 있으면 새 Cluster가 그것을 재사용해 `bootstrap.recovery`가 생략될 수 있다 — 같은
+거짓 PASS가 다른 문으로 재현된다. pre-flight는 Cluster + PVC를 함께 지우고 **0을 확인**해야 한다.
+
+⚠️ **삭제의 rc는 정리를 증명하지 못한다.** `--ignore-not-found`는 없는 것도 성공이고, finalizer
+때문에 반환 시점에 오브젝트가 살아 있을 수 있다. 그리고 `kubectl delete --wait=true`는 대상이 즉시
+사라지지 않으면 소멸을 **watch로 추적**하므로 해당 리소스에 `watch` 동사가 없으면 실패한다 — 그
+실패를 `|| true`로 덮으면 "정리했다"가 관측되지 않은 채 참으로 통과한다(실측: restore-drill SA는
+clusters에 `watch`가 **없고**, CNPG Cluster CR에 finalizer가 없어 아직 안 터진 **잠재** 결함이었다).
+판정은 `get` 폴링이 해야 하고, **삭제는 폴링마다 재발사**해야 한다(오퍼레이터가 삭제를 관측하기
+전이면 자식 오브젝트가 재생성돼 1회 발사로는 수렴하지 않는다).
+
+⚠️ **잔여물 열거의 실패를 0건으로 읽지 마라, 그리고 셀렉터를 믿지 마라.**
+`n=$(kubectl get … 2>/dev/null | wc -l)` 형태는 API 접근이 죽어도 0을 내어 '잔여 없음'으로 읽힌다.
+더 나쁜 것은 라벨 셀렉터다 — 빗나가도 rc 0 + 0줄이라 '잔여 없음'과 **원리적으로 구별되지 않는다**.
+'0건=정상'인 검사는 그 자체로 셀렉터를 한 번도 양성 관측하지 않는다. 이름 접두로 열거하고,
+**방금 만든 것이 열거에 잡히는지**를 정리 직전에 양성 대조하라.
+
+⚠️ **'복구가 일어났다'는 양성 증인이 없으면 어떤 처방도 단층 방어다.** 상태 필드(`.status.phase`)는
+생존자에게 즉시 참이고, 시드되지 않는 canary의 행 수 비교는 항상 참이다(실측: `restore_canary`는
+1행 고정이고 레포에 INSERT 주체가 없다) — 두 관측점 모두 진짜 복구와 생존자 재사용을 구별하지
+못한다. 공짜 증인이 있다: 진짜 복구는 첫 폴링에 healthy가 될 수 없으므로(실측 로그는
+`phase=<none>` → `Setting up primary` → … 순), **healthy 아닌 상태를 한 번도 못 봤다면 그것이 곧
+생존자의 증거**다.
+
+⚠️ **동시 실행이 pre-flight를 우회한다.** `concurrencyPolicy: Forbid`는 CronJob이 만든 Job에만
+걸리고 `kubectl create job --from=cronjob/…`은 그 밖이다. 두 실행이 서로의 pre-flight를 통과한 뒤
+apply하면 나중 apply가 no-op이 된다. **정기 실행 시각 근처에 수동 드릴을 돌리지 마라** — 런북은
+gitignored라 그 규칙을 게이트가 못 보므로 여기(추적되는 SSOT)에 적는다. 위의 첫-폴링 증인이 이
+경로의 최종 방어다.
+
+⚠️ **grep 단언은 이 함정을 못 잡는다.** `delete` 문자열이 파일 어딘가에 있다는 것은 그것이
+`apply` **앞에서** 실행된다는 것을 증명하지 않는다. 순서는 스텁 바이너리를 PATH 선두에 얹고
+스크립트를 통짜 실행해 호출 로그의 줄 번호로 비교해야 하고, 폴링/갈래는 **호출 횟수와 실패 문구**로
+물어야 한다(상태 코드만 보는 단언은 폴링을 통째로 지워도 초록이다 — 뮤테이션으로 실증할 것).
+
+### `kubectl apply --dry-run=server`는 ArgoCD가 SSA로 관리하는 오브젝트에 대해 거짓 실패를 낸다
+
+사람이 손으로 도는 dry-run은 **자기 field manager**(`kubectl`)로 apply한다. Server-Side Apply에서
+필드 제거는 **그 필드를 소유한 매니저가** 그것을 더 이상 선언하지 않을 때만 일어나므로, 매니저가
+다른 손 dry-run은 **제거를 재현하지 못하고 병합만 한다.** 그러면 "지우려던 필드"와 "새로 넣는 필드"가
+동시에 존재하는 중간 상태가 만들어지고, CRD 웹훅이 그것을 거절한다.
+
+실측 (2026-08-17, 컷오버에서 `Cluster/pg`의 `bootstrap.recovery` → `bootstrap.initdb` 전환):
+
+```
+# ① 사람의 client-side apply → 거짓 실패
+kubectl apply --dry-run=server -f cluster.yaml
+  The Cluster "pg" is invalid: spec.bootstrap: Forbidden: Only one bootstrap method can be specified at a time
+
+# ② 사람의 SSA(기본 field manager) → 같은 거짓 실패 (이유는 다르다: 소유권이 없어 병합된다)
+kubectl apply --server-side --dry-run=server -f cluster.yaml
+  ... Only one bootstrap method can be specified at a time
+
+# ③ ArgoCD의 field manager를 흉내 내면 → 통과
+kubectl apply --server-side --field-manager=argocd-controller --force-conflicts \
+  --dry-run=server -f cluster.yaml
+  cluster.postgresql.cnpg.io/pg serverside-applied (server dry run)
+```
+
+⚠️ **거짓 실패를 믿고 매니페스트를 "고치면" 진짜 사고가 된다** — 이 경우 두 bootstrap 방법을
+모두 남기거나 전환 자체를 포기하게 되는데, 둘 다 ArgoCD의 실제 apply에서는 필요 없던 일이다.
+
+**올바른 검증 절차**: 라이브 오브젝트의 소유자를 먼저 확인하고 그 이름으로 dry-run한다.
+
+```
+kubectl -n <ns> get <kind> <name> -o jsonpath='{range .metadata.managedFields[*]}{.manager} {.operation}{"\n"}{end}'
+```
+
+⚠️ `--force-conflicts`는 **dry-run에서만** 안전하다. 실제 실행은 ArgoCD에 맡기고 사람이 apply하지 마라
+— 손으로 apply하면 그 필드의 소유권이 `kubectl`로 넘어가 이후 ArgoCD sync가 conflict를 내거나
+selfHeal과 플립플롭한다.
+
+⚠️ 이 레포는 자기레포 Application 대부분이 `ServerSideApply=true`다(`platform/argocd/root/apps/*.yaml` ·
+`appset.yaml` · `root-app.yaml` · `argocd-app.yaml`). 즉 이 함정은 예외가 아니라 **기본 경로**다.

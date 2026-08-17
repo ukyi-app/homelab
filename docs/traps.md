@@ -13,7 +13,11 @@
 | 함정 (traps-detail.md) | where | guard |
 |---|---|---|
 | ArgoCD sync-wave 순서/교착 + 원장 드리프트 | gate | `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`, `platform/traefik/prod/test_gateway_sync_wave.bats` |
-| SSA atomic 리스트(HTTPRoute group/kind/weight) 영구 OutOfSync | gate | `platform/adguard/prod/test_adguard_route.bats` |
+| SSA atomic 리스트(HTTPRoute group/kind/weight · CNPG plugins) 영구 OutOfSync | gate | `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats` |
+| 상주 워크로드 OOM 진단 — 코어 수는 그럴듯한 오답이다 (D-e) | gate | `platform/victoria-stack/prod/test_concurrency_pin.bats` |
+| PCIe correctable RxErr 폭주는 ASPM L1이다 — 유휴에서만 나고 열화가 아니다 | gate | `infra/k3s-bootstrap/tests/test_03-host-config.bats` |
+| hostPath 백엔드 PV에는 fsGroup 미적용 — root가 만든 파일을 non-root가 못 연다 | gate | `platform/adguard/prod/test_adguard_auth.bats` |
+| `yq -e`는 값이 false면 exit 1 — null과 구별하지 않는다 | gate | `platform/cnpg/prod/test_cluster_params.bats` |
 | PSA baseline가 hostPath/hostPID 금지(privileged 전용) | gate | `platform/namespaces/prod/test_psa.bats` |
 | NetworkPolicy ipBlock pod-CIDR → default-deny 무력화 | gate | `platform/network-policies/prod/test_netpol.bats`, `platform/cnpg/prod/test_networkpolicy.bats` |
 | CNPG Pooler 예약 파라미터(pool_mode) → poolMode 필드 | gate | `platform/cnpg/prod/test_pooler.bats` |
@@ -32,6 +36,8 @@
 | `.claude/` 선택적 un-ignore(하네스 추적/런타임 무시) | gate | `tests/gates/test_claude-harness-tracked.bats` |
 | make ci ↔ ci.yaml gate 8스텝 패리티 | gate | `tests/gates/test_make-ci-parity.bats` |
 | DR drill 안전 불변식(R5, 라이브 파괴 없이) | gate | `tests/test_dr-drill.bats` |
+| 파괴 프리미티브는 전용 파일 + 확인 env로 분리한다(드릴 본문의 한 줄이면 '그 줄만 떼어 돌려보는' 경로가 생긴다) · bulk 안전은 경로가 아니라 **bind 소스**로 판정한다 | gate | `tests/test_destroy-node.bats` |
+| 한시 억제의 자기 만료(시각 상수 ↔ 창 SSOT 양방향 정합) + 억제한 알림을 vacuity 대조군으로 쓰던 e2e 동반 사망 | gate | `tests/gates/test_files-backup-phase-a.bats` |
 | R2 pg 아카이브 reset --purge 가드(④) | gate | `tests/test_reset-pg-r2-archive.bats` |
 | sealing key 백업 체인 DR fail-closed 게이트 | gate | `tests/test_sealed-secrets-restore.bats` |
 | tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | iac | `infra/_tests/test_tf_reconcile.bats` |
@@ -60,3 +66,8 @@
 | 고아 PVC는 Bound다 — `phase == Released` 감사는 cascade=orphan 잔재를 원리적으로 못 잡는다 | local | `scripts/audit-orphan-pv.sh` |
 | bats 중간 `[[ ]]`는 침묵 통과 — 거짓인데 ok (grep -qF 변환 시 `--` 종결자 필수) | gate | `scripts/check-bats-style.sh` |
 | 셸 문자열의 `$VAR한글` — bash 3.2만 죽고 CI(5.2)는 초록이라 게이트가 원리적으로 못 잡는다 | gate | `tests/gates/test_shell-bash32-traps.bats` |
+| sshd_config.d는 먼저 읽힌 값이 이긴다(systemd와 반대) — 600 드롭인 때문에 실효값은 sudo 없이 못 읽는다 | gate | `infra/k3s-bootstrap/tests/test_03-host-config.bats` |
+| Ubuntu 26.04에 /etc/timezone 부재 — 그 파일을 읽는 검사는 정상 호스트에서도 죽고 처방이 고치지 못한다 | gate | `infra/k3s-bootstrap/tests/test_02-host-preflight.bats` |
+| tailscale `~.` 라우팅 도메인 → 노드 이름해석이 MagicDNS 경유 클러스터 의존(routable이라 loopback 검사는 통과) | gate | `infra/k3s-bootstrap/tests/test_02-host-preflight.bats` |
+| `findmnt -T`는 마운트 여부를 증명 못 한다(감싸는 마운트로 resolve) + bind SOURCE의 `[subpath]` 미제거 시 디바이스 오판 | gate | `infra/k3s-bootstrap/tests/test_08-bulk-gate.bats` |
+| 드릴의 정리가 EXIT trap뿐이면 고아가 남고, pre-flight 없는 apply가 그 고아를 재사용해 '검증된 복원'이 거짓말한다 | gate | `platform/cnpg/prod/test_restore_drill_behavior.bats` |

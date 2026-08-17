@@ -6,9 +6,16 @@ f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
   run grep -q 'barman' "$f"
   [ "$status" -ne 0 ]
 }
-@test "hedge writes a SEPARATE R2 prefix and prunes to 14 days" {
-  grep -q 'r2:homelab-pg-backups-prod/pgdump/' "$f"
-  grep -qE 'rclone delete .*--min-age 14d' "$f"
+@test "hedge writes a CLUSTER-SPECIFIC R2 prefix and prunes only that prefix" {
+  # ⚠️ 프루닝(`--min-age 14d`)이 prefix 전체를 훑는다. 라이브 Mac과 prefix를 공유하면 **상대편의
+  #    덤프를 지운다** — 파일명이 `${DB}-${TS}`라 두 클러스터를 구별할 수 없다.
+  #    계획서 §3.4의 공유 자원 표에 빠져 있던 충돌이다(pgdump·캐시 2건 누락).
+  grep -qE '^[^#]*DUMP_PREFIX=' "$f"
+  grep -q 'pgdump-nuc' "$f"
+  grep -qE 'rclone delete .*\$\{DUMP_PREFIX\}.*--min-age 14d' "$f"
+  # 공유 prefix로 되돌아가면 red — 비-주석 줄만 본다(주석이 옛 경로를 설명한다).
+  run grep -nE '^[^#]*r2:homelab-pg-backups-prod/pgdump/' "$f"
+  [ "$status" -ne 0 ]
 }
 @test "hedge pulls rclone+aws creds from cnpg-r2-creds secret" {
   grep -q 'name: cnpg-r2-creds' "$f"

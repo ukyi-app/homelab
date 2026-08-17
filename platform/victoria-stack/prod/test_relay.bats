@@ -53,3 +53,18 @@ setup() {
   [ -n "$ann" ]
   [ "$ann" = "$expected" ]
 }
+
+@test "relay is wired into the victoria-stack kustomization" {
+  # ⚠️ 이 파일의 나머지 @test는 전부 deadmanswitch-relay.yaml **원문**만 읽는다 — relay가
+  #    kustomization에서 빠져 클러스터에 존재하지 않는 동안에도 전건 초록이었다(2026-08-12~17 실측).
+  #    배선 단언이 컷오버 전용 가드(tests/gates/의 병행운용 divergence 파일)에만 있으면 그 파일의
+  #    은퇴와 함께 이 갭이 되돌아온다. 그래서 relay 자신의 도메인 가드에 둔다
+  #    (선례: test_pvc_du_exporter.bats의 "du exporter is wired into kustomization").
+  # ⚠️ 그 가드 파일을 **이름으로 부르지 않는다** — 파일명 자체가 컷오버 마커 문자열을 담고 있어
+  #    부르는 순간 이 파일이 마커 원장에 잡힌다(방금 실제로 밟았다).
+  # ⚠️ 원문 grep이 아니라 `yq` 파싱이다 — 주석 줄과 들여쓰기가 어긋나 시퀀스 원소가 아닌 줄을
+  #    통과시키지 않기 위해서다(둘 다 이 항목이 실제로 누워 있던 형태다).
+  command -v yq >/dev/null || skip "yq required"
+  run yq '.resources | contains(["deadmanswitch-relay.yaml"])' "$ROOT/platform/victoria-stack/prod/kustomization.yaml"
+  printf '%s' "$output" | grep -qxF -- 'true'
+}

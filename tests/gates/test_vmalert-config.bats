@@ -175,6 +175,35 @@ setup() {
   grep -q 'absent(argocd_app_info)' "$R"   # scrape 재단절 시 silent 무발화 방지
 }
 
+@test "R6 ArgoCDOutOfSync matches Unknown too — the only channel for a missed post-cutover repin" {
+  # ⚠️ sync_status는 Synced / OutOfSync / **Unknown** 셋이다. `="OutOfSync"`는 Unknown을 놓치는데,
+  #    Unknown이야말로 "repoURL/targetRevision을 resolve하지 못했다"의 주된 표면이다 — 컷오버로
+  #    핀을 main으로 넘긴 뒤 `nuc-migration`을 지우면 재지정을 놓친 객체가 바로 그 상태가 된다.
+  #    특히 `Application/argocd`는 어떤 Application의 source path에도 없어 root sync로 자동
+  #    수렴하지 않으므로(감사 13) 이 룰이 그 누락을 알려주는 유일한 채널이다.
+  # ⚠️ 이 @test가 없으면 매처를 되돌려도 전 게이트가 초록이다 — drift e2e의 L6는 이 알림을
+  #    대조군으로 쓰지만 `absent(argocd_app_info)` 가지로 발화하므로 sync_status 매처를 한 번도
+  #    태우지 않는다(리플레이 픽스처에 argocd_app_info 시리즈가 없다). 무증인 상태를 여기서 막는다.
+  # ⚠️ 음성 단언은 **주석을 제외한 줄**에만 건다. 이 룰 파일의 주석이 전환 이유를 설명하느라
+  #    옛 매처 문자열을 그대로 인용하고 있어, 파일 전체 grep으로 짜면 그 설명이 가드를 깨뜨린다
+  #    (실제로 밟았다 — 배포되는 것은 expr이지 주석이 아니다).
+  R="$ROOT/platform/victoria-stack/prod/rules/r6-ci-staleness.yaml"
+  run bash -c "grep -vE '^[[:space:]]*#' '$R' | grep -cF 'sync_status!~\"Synced\"'"
+  [ "$output" = "1" ]
+  run bash -c "grep -vE '^[[:space:]]*#' '$R' | grep -cF 'sync_status=\"OutOfSync\"'"
+  [ "$output" = "0" ]
+}
+
+@test "the homepage ArgoCD widget asks the same question as the alert (matcher parity)" {
+  # ⚠️ 알림만 넓히고 대시보드를 두면, 사람이 컷오버 중에 실제로 들여다보는 화면이 Unknown에
+  #    눈이 먼 채로 남는다. 두 자리가 갈리면 다음에 매처를 옮길 때 어느 쪽이 SSOT인지 알 수 없다.
+  S="$ROOT/platform/homepage/prod/config/services.yaml"
+  run bash -c "grep -vE '^[[:space:]]*#' '$S' | grep -cF 'sync_status!~\"Synced\"'"
+  [ "$output" = "1" ]
+  run bash -c "grep -vE '^[[:space:]]*#' '$S' | grep -cF 'sync_status=\"OutOfSync\"'"
+  [ "$output" = "0" ]
+}
+
 @test "workload-unavailable alert covers subscription-less platform components (files/adguard/homepage gap)" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
   grep -q 'alert: WorkloadUnavailable' "$C"

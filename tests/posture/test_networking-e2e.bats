@@ -56,6 +56,13 @@ setup() {
   # adguard-dns LB IP(=VM IP)는 Mac에서 직접 라우팅되지 않는다 — 실제 소비 경로는
   # OrbStack 포워딩(dns-forward-trigger 유닛이 트리거, Mac의 localhost/LAN/tailnet IP에
   # 바인드)이다. 이 스위트는 Mac mini(호스트)에서 돌므로 127.0.0.1이 그 경로다.
+  #
+  # ⚠️ **NUC 이전 후 이 전제는 거짓이 된다.** 베어메탈에는 OrbStack 포워딩도 그 더미 유닛도
+  #    없고(host-config 계층이 승계하지 않는다), svclb hostPort가 노드 실주소에 직접 걸린다.
+  #    이 파일은 tests/.ci-exclude(posture 그룹)라 게이트가 보지 않으므로 그 순간에도 red가
+  #    나지 않는다 — KUBECONFIG를 NUC로 돌린 뒤 `make verify-posture`를 처음 돌릴 때
+  #    이 한 건만 실패하고, 메시지는 원인을 전혀 시사하지 않는다. 그때 전송 경로를 노드 IP로
+  #    바꿀 것(G4 이후, nuc-port-g2.md B8).
   tsip=$(tailscale ip -4 homelab)
   run bash -c "dig +short +time=3 @127.0.0.1 whoami.home.${DOMAIN}"
   [ "$output" = "$tsip" ]

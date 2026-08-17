@@ -37,6 +37,14 @@ spec:
                   # CR 전부 + 부트스트랩 app(restore_canary)을 나열한다. test_pgdump_hedge.bats가
                   # databases/ 와의 정합을 강제한다(누락 = CI 실패).
                   DBS="app page trip-mate"
+                  # ⚠️ **클러스터별 prefix.** 라이브 Mac과 병행 운용하는 동안 같은 prefix를 쓰면
+                  #    아래 `rclone delete --min-age 14d`가 **상대편의 덤프를 지운다**(파일명이
+                  #    ${DB}-${TS}라 두 클러스터를 구별할 수 없다). 계획서 §3.4 표에 빠져 있던 충돌이다.
+                  #    덮어쓰기는 없지만(타임스탬프) 프루닝은 prefix 전체를 훑는다.
+                  # ⚠️ 컷오버 후에도 되돌리지 않는다(serverName pg-nuc와 같은 판단 — 이름 미관보다
+                  #    전환 한 번을 줄이는 쪽). 대신 Mac 시대 `pgdump/`는 컷오버 체크리스트에서
+                  #    한 번 정리한다 — 아무도 프루닝하지 않아 영원히 남는다.
+                  DUMP_PREFIX="r2:homelab-pg-backups-prod/pgdump-nuc"
                   # kube-router가 새 파드의 네트워크 룰(ClusterIP 라우팅)을 설치하기 전, 파드 첫
                   # 동작으로 pg-rw에 접속하면 RST(Connection refused)가 나고 libpq는 즉시 포기한다
                   # (라이브 검증). pg-rw:5432가 연결 가능해질 때까지 짧게 대기한 뒤 진행한다.
@@ -45,7 +53,7 @@ spec:
                     echo "[hedge] waiting for pg-rw:5432 (attempt ${i}/30)"; sleep 1
                   done
                   for DB in ${DBS}; do
-                    KEY="r2:homelab-pg-backups-prod/pgdump/${DB}-${TS}.dump.gz"
+                    KEY="${DUMP_PREFIX}/${DB}-${TS}.dump.gz"
                     echo "[hedge] pg_dump (custom format) ${DB} -> ${KEY}"
                     pg_dump --host=pg-rw.database.svc --port=5432 \
                             --username="$PGUSER" --dbname="${DB}" \
@@ -59,7 +67,7 @@ spec:
                     echo "[hedge] OK db=${DB} size=${SIZE}"
                   done
                   echo "[hedge] prune dumps older than 14 days"
-                  rclone delete r2:homelab-pg-backups-prod/pgdump/ --min-age 14d
+                  rclone delete "${DUMP_PREFIX}/" --min-age 14d
                   echo "[hedge] done dbs=[${DBS}]"
               envFrom:
                 - secretRef: { name: cnpg-r2-creds } # M2 시드: RCLONE_CONFIG_R2_* + AWS_* (AWS_REGION=auto)
