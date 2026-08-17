@@ -65,6 +65,17 @@ env를 채우므로 로컬·브랜치에서는 무방비였는데, 이제 매니
 
 - 콜드 재구축(G11)에서 `Cluster/pg`는 **빈 DB로 뜬다.** 데이터 복구는 `docs/runbooks/restore.md`
   경로 A로 사람이 수행한다. 이것은 회귀가 아니라 복원된 원설계다.
+- 🔴 **이 결정이 그 런북을 유일 복구 경로로 승격시키므로, 런북의 `serverName`이 정본과 일치하는지가
+  이제 데이터 보존의 문제다.** 컷오버 전 `restore.md` 경로 A는 `serverName: pg`(Mac 아카이브)를
+  적고 있었고 그건 **당시 main 기준으로는 옳았다** — 이 PR이 main의 쓰기 prefix를 `pg-nuc`로
+  옮기면서 그 런북이 처음으로 틀려진다. 두 prefix가 공존하고(PONR 1 미실행) `pg`로의 복구는
+  **실패하지 않고 성공**하므로, 틀린 채로 두면 컷오버 이후 전 기간의 쓰기가 조용히 사라진다.
+  ⇒ 같은 작업에서 `restore.md`를 **라이브 파생**(`.spec.plugins[].parameters.serverName`)으로
+  고쳤고, 경로 B의 `pgdump/` → `pgdump-nuc/`도 함께 정정했다.
+  ⚠️ **그 수정은 CI가 볼 수 없다** — `docs/runbooks/`는 gitignored다(`.gitignore`). 자동 드릴
+  (`restore-drill-script.sh`)만 파생을 쓰고 사람 경로는 원리적으로 무가드다. 이 문단이 그 결합을
+  추적되는 자리에 남기는 유일한 기록이다. 다음에 `serverName`을 옮기는 사람은 **반드시** 런북
+  경로 A·B를 함께 고쳐라.
 - `s3://homelab-pg-backups-prod/pg/`(Mac 아카이브)는 **삭제되지 않는다.** PONR 1은 별도 결정으로
   G11 뒤로 미뤄져 있고, 그때까지 그 prefix는 단일 NVMe 위에 올라간 NUC에 대한 마지막 독립 사본이다.
 - `restore-drill`의 canary 행 수 비교는 여전히 **상수**다(시드가 1회성이라 라이브는 영구히 1행).

@@ -13,7 +13,7 @@
 | 함정 (traps-detail.md) | where | guard |
 |---|---|---|
 | ArgoCD sync-wave 순서/교착 + 원장 드리프트 | gate | `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`, `platform/traefik/prod/test_gateway_sync_wave.bats` |
-| SSA atomic 리스트(HTTPRoute group/kind/weight · CNPG externalClusters plugin) 영구 OutOfSync | gate | `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats` |
+| SSA atomic 리스트(HTTPRoute group/kind/weight · CNPG plugins) 영구 OutOfSync | gate | `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats` |
 | 상주 워크로드 OOM 진단 — 코어 수는 그럴듯한 오답이다 (D-e) | gate | `platform/victoria-stack/prod/test_concurrency_pin.bats` |
 | PCIe correctable RxErr 폭주는 ASPM L1이다 — 유휴에서만 나고 열화가 아니다 | gate | `infra/k3s-bootstrap/tests/test_03-host-config.bats` |
 | hostPath 백엔드 PV에는 fsGroup 미적용 — root가 만든 파일을 non-root가 못 연다 | gate | `platform/adguard/prod/test_adguard_auth.bats` |

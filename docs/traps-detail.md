@@ -112,6 +112,13 @@
 - ⚠️ "미기재로 막는다"는 반대 방향의 가드가 이 함정과 충돌한다. `isWALArchiver`는 *켜면* 안 되는
   필드라 원래 가드가 "존재하면 red"였는데, 그 규칙이 곧 OutOfSync의 원인이었다. 올바른 불변식은
   **명시적 `false`**다 — 위험은 값이지 존재가 아니다.
+- ⚠️ **2026-08-17 컷오버 이후 `cluster.yaml`에 `externalClusters`가 없다**(감사 9 / ADR 0006 —
+  복구 원본을 걷어내고 initdb로 되돌렸다). 따라서 위 externalClusters 사례는 **역사이고, 현재
+  강제되는 실행체가 없다** — 그 자리를 재던 @test 2건이 같은 커밋으로 삭제됐다. 남아 있는 강제는
+  `spec.plugins[]` 쪽뿐이다(`test_cluster_params.bats`의 webhook 기본값 @test).
+  ⇒ **복구 원본을 되살릴 때는 `enabled: true`와 `isWALArchiver: false`를 반드시 함께 명시하고,
+  그것을 재는 @test도 같은 커밋에 되살려라.** 지금은 빠뜨려도 CI가 초록이다(`verify-traps.sh`는
+  가드 **파일의 존재**만 보지 @test 이름까지 보지 않는다 — 그래서 이 문단이 그 구멍을 메운다).
 > 가드: `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats`
 
 ### 상주 워크로드 OOM 진단 — 코어 수는 그럴듯한 오답이다 (D-e)
@@ -1014,7 +1021,7 @@ evict·`activeDeadlineSeconds` 초과는 SIGTERM→SIGKILL이라 EXIT trap이 �
 
 **그 다음 실행의 `kubectl apply`는 복구를 다시 돌리지 않는다.** 힙독 텍스트가 매 실행 바이트
 동일이면 클라이언트-사이드 3-way merge patch가 비어 진짜 no-op이 되고, 설령 patch가 나가도
-CNPG는 `bootstrap`을 **초기화 시점에만** 읽고 이후 무시한다(`platform/cnpg/prod/cluster.yaml:52-54`).
+CNPG는 `bootstrap`을 **초기화 시점에만** 읽고 이후 무시한다(`platform/cnpg/prod/cluster.yaml`의 bootstrap 주석).
 그러면 phase 루프가 첫 시도에서 통과하고, 검증 대상 테이블의 행 수는 지난 회차 값 그대로라 비교도
 통과한다 → **오브젝트 스토리지를 한 번도 만지지 않은 드릴이 '검증된 복원'을 보고한다.**
 

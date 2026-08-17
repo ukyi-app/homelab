@@ -84,9 +84,13 @@ f=platform/cnpg/prod/cluster.yaml
   # 영구 OutOfSync를 낸다 — 2026-08-14 NUC 실측: cnpg-data가 Healthy인 채 5분마다 partial sync를
   # 반복했고 라이브와의 diff는 이 필드들뿐이었다. (형제인 externalClusters도 같은 클래스였는데
   # 컷오버로 그 리스트 자체가 사라졌다 — 되살릴 일이 생기면 거기도 반드시 명시할 것.)
-  # ⚠️ `yq -e`는 **값이 false면 exit 1**이라(null과 구별하지 않는다) 불리언엔 `-e` 없이 읽는다.
-  pe="$(yq -e '.spec.plugins[] | select(.name == "barman-cloud.cloudnative-pg.io") | .enabled' "$f")"
+  # ⚠️ `yq -e`는 **값이 false면 exit 1**이라(null과 구별하지 않는다) 불리언엔 `-e` **없이** 읽는다.
+  #    `-e`로 읽으면 `enabled: false` 회귀에서 단언 실패가 아니라 **명령 치환 실패**로 죽어
+  #    진단이 "false여야 하는데 true다"가 아니라 "yq가 죽었다"로 흐려진다. 미기재(null)와 false를
+  #    가르는 것도 이 형태뿐이다 — `docs/traps.md`가 이 파일을 그 함정의 가드로 지목하고 있고,
+  #    컷오버로 externalClusters가 사라지면서 **이 두 줄이 그 원장 행의 유일한 실행체가 됐다.**
+  pe="$(yq '.spec.plugins[] | select(.name == "barman-cloud.cloudnative-pg.io") | .enabled' "$f")"
   printf '%s' "$pe" | grep -qxF -- 'true'
-  pw="$(yq -e '.spec.plugins[] | select(.name == "barman-cloud.cloudnative-pg.io") | .isWALArchiver' "$f")"
+  pw="$(yq '.spec.plugins[] | select(.name == "barman-cloud.cloudnative-pg.io") | .isWALArchiver' "$f")"
   printf '%s' "$pw" | grep -qxF -- 'true'
 }

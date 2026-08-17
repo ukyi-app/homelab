@@ -194,7 +194,7 @@ verify_enumeration_positive() {
 #    SIGKILL·activeDeadlineSeconds 3600 초과)에서는 EXIT trap이 돌지 않아 고아 Cluster가 남는다.
 #    그 상태에서 다음 실행의 `kubectl apply`는 생존자에 대해 **no-op**이다: 힙독 텍스트가 매주
 #    바이트 동일이라 3-way merge patch가 비고, 무엇보다 CNPG는 `bootstrap`을 **초기화 시점에만**
-#    읽고 이후 무시한다(cluster.yaml:52-54의 라이브 CRD 실측 — 불변 CEL도 없다). 그러면 아래 phase
+#    읽고 이후 무시한다(cluster.yaml의 bootstrap 주석에 적힌 라이브 CRD 실측 — 불변 CEL도 없다). 그러면 아래 phase
 #    루프가 첫 시도에서 통과하고 canary 행 수는 지난 회차 값 그대로라 `>=` 비교도 통과해
 #    → **R2를 한 번도 만지지 않은 drill이 '검증된 복원'을 보고한다.**
 # ⚠️ Cluster CR만 지우는 것으론 부족하다. CNPG는 Cluster 삭제 시 PVC를 남기므로 `<cluster>-<serial>`
@@ -293,8 +293,9 @@ for i in $(seq 1 "$MAX_POLLS"); do
 done
 [ "$PHASE" = "Cluster in healthy state" ] || fail "drill cluster never became healthy (phase=${PHASE:-none})"
 # ⚠️ **복구가 실제로 일어났다는 양성 증인.** 판정에 쓰이는 관측은 `.status.phase`와 canary 행 수뿐인데,
-#    전자는 생존자에게 즉시 참이고 후자는 restore_canary가 레포 어디에서도 시드·갱신되지 않아
-#    (cluster.yaml:62-64가 postInitApplicationSQL 부재를 명시) 사실상 항상 참이다 — 라이브 실측
+#    전자는 생존자에게 즉시 참이고, 후자는 restore_canary의 시드가 **initdb 1회성**이라
+#    (cluster.yaml의 `.spec.bootstrap.initdb.postInitApplicationSQL` — 부트스트랩 때 한 번 INSERT하고
+#    그 뒤로는 아무도 쓰지 않는다) 행 수가 상수여서 사실상 항상 참이다 — 라이브 실측
 #    2026-08-17: 테이블 1행 고정, 그날 drill 로그도 `EXPECTED_ROWS=1`/`ACTUAL_ROWS=1`. 즉 pre-flight를
 #    우회하는 임의의 경로(동시 실행 창, 눈먼 열거, CNPG 동작 변경)는 이 두 관측점에서 진짜 복구와
 #    구별되지 않는다. R2에서의 진짜 복구는 첫 폴링에 healthy가 될 수 없으므로(같은 실측 로그:
@@ -304,7 +305,7 @@ done
 #       EXPO_INLINE이 **주석까지 포함해** 전문을 스캔하는데, 백틱/따옴표 **직후**에 소문자 식별자와
 #       공백과 값 토큰이 오면 exposition 라인으로 읽힌다. 실제로 이 자리에서 위 로그 예시를 백틱으로
 #       감쌌다가 그 식별자가 미등록 메트릭으로 잡혀 F-3(레지스트리 완전성)가 났다.
-#    (cluster.yaml:52-54: "증명은 매니페스트나 ArgoCD 상태가 아니라 PGDATA 출처로만 세울 것" —
+#    (cluster.yaml의 bootstrap 주석: "증명은 매니페스트나 ArgoCD 상태가 아니라 PGDATA 출처로만 세울 것" —
 #     그 기준의 최소 실행체다. 인스턴스 로그 증인은 Role에 `pods/log`가 없어 별건이다 — rbac :12-14.)
 [ "$SAW_NONHEALTHY" = "1" ] || fail "drill cluster가 **첫 폴링에 이미 healthy**였다 — R2 복구가 일어나지 않았다(생존자 재사용/동시 실행 의심). pre-flight가 무엇을 놓쳤는지 확인할 것: 잔여물 열거 접두, 수동 drill-now 동시 실행"
 
