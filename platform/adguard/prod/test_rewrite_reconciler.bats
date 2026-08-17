@@ -94,7 +94,7 @@ setup() {
 }
 
 @test "reconciler egress is locked: apiserver node-subnet + vmsingle + DNS, no internet (F13)" {
-  grep -q '192.168.139.0/24' "$F"   # apiserver=노드서브넷(ClusterIP egress 불가 함정)
+  grep -q '192.168.117.0/24' "$F"   # apiserver=노드서브넷(ClusterIP egress 불가 함정)
   grep -q '6443' "$F"
   grep -q '8428' "$F"               # vmsingle import
   grep -q 'k8s-app: kube-dns' "$F"  # DNS

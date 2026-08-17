@@ -16,12 +16,26 @@ setup() {
 }
 
 @test "du exporter mounts BOTH provisioner roots read-only (versions.env is the path SSOT)" {
-  # 경로 SSOT = infra/k3s-bootstrap/versions.env (F9/F15):
-  #   INTERNAL_STORAGE_PATH=/var/lib/rancher/k3s-storage/internal, bulk=/mnt/mac/Volumes/homelab/k3s-bulk(라이브 실측)
+  # 경로 SSOT = infra/k3s-bootstrap/versions.env (F9/F15). 리터럴로 박지 않고 **거기서 파생**한다 —
+  # 예전엔 두 값을 리터럴로 적어 두 곳이 갈라져도 이 @test가 초록이었다(bulk 경로 이식이 그 증거).
+  source "$ROOT/infra/k3s-bootstrap/versions.env"
+  [ -n "$INTERNAL_STORAGE_PATH" ]
+  [ -n "$BULK_STORAGE_PATH" ]
   grep -q 'readOnly: true' "$F"
-  grep -q '/var/lib/rancher/k3s-storage/internal' "$F"
-  grep -q '/mnt/mac/Volumes/homelab/k3s-bulk' "$F"
-  grep -q 'storage-bulk' "$F"
+  # ⚠️ 파일 전체 `grep -qF "$BULK_STORAGE_PATH"`는 **자기 주석에 걸린다** — 경로 SSOT를 설명하는
+  #    주석이 같은 값을 담고 있어서, hostPath를 옛 경로로 되돌려도 초록이었다(뮤테이션으로 실측).
+  #    구조로 단언한다. `V=$(yq …)` 후 `grep -qxF`인 이유는 `[ "$a" = "$b" ]`가 bats 중간에서
+  #    errexit 면제로 침묵 통과하기 때문이다(check-bats-style).
+  vb="$(yq -e 'select(.kind=="CronJob") | .spec.jobTemplate.spec.template.spec.volumes[] | select(.name=="storage-bulk") | .hostPath.path' "$F")"
+  printf '%s' "$vb" | grep -qxF -- "$BULK_STORAGE_PATH"
+  vi="$(yq -e 'select(.kind=="CronJob") | .spec.jobTemplate.spec.template.spec.volumes[] | select(.name=="storage-internal") | .hostPath.path' "$F")"
+  printf '%s' "$vi" | grep -qxF -- "$INTERNAL_STORAGE_PATH"
+}
+
+@test "du exporter carries no OrbStack/virtiofs binding (bare metal has no /mnt/mac)" {
+  grep -q 'hostPath' "$F"                    # 양성 대조 — 대상이 실재하고 grep이 동작한다
+  run grep -nE '^[^#]*(/mnt/mac|virtiofs)' "$F"
+  [ "$status" -ne 0 ]
 }
 
 @test "du exporter never references the stale pre-dual-provisioner path" {
