@@ -4,25 +4,31 @@ metadata:
   name: pg-restore-drill
   namespace: database
 spec:
-  schedule: "0 5 * * 0" # 일요일 05:00 UTC(=14:00 KST — `timeZone` 미지정이라 UTC로 평가된다)
-  # ⚠️ **dual-run 동안 정지한다.** 이 drill은 PASS 시 `HEALTHCHECKS_URL`을 ping하는데
-  #    (`restore-drill-script.sh` 말미), 그 시드(`restore-drill-alerting.enc.yaml`)는 main과
-  #    **바이트 동일**이다 — 즉 NUC이 ping하면 **라이브 Mac의 drill이 아예 안 돌아도 체크가 초록으로
-  #    남는다.** `deadmanswitch-relay`를 dual-run에서 뺀 것과 **정확히 같은 이유**다
-  #    (`tests/gates/test_dual-run-excludes.bats`의 "green-wash the live check").
-  #    Telegram도 같은 chat이라 PASS가 두 건 온다.
-  # ⚠️ **아카이브 원본은 문제가 아니다** — drill은 라이브 Cluster의 plugin `serverName`에서
-  #    파생하므로 NUC은 `pg-nuc`, Mac은 `pg`를 복구한다(스크립트 헤더 주석 참조). 교차 오염 없다.
-  # ⚠️ **새 알림을 만들지 않는다**: `CNPGRestoreDrillStale`은 NUC에서 이미 발화 중이다
-  #    (metric이 한 번도 push된 적 없어 `absent()`가 참 — 2026-08-15 실측). suspend가 그 상태를
-  #    바꾸지 않는다. `DeadmanswitchRelayUnreachable`이 relay 제외의 대가로 떠 있는 것과 같은 성질이다.
-  # ⚠️ **G5(R2 → 일회용 클러스터 복구 증명)는 이 drill이 그대로 수행한다.** 정지시킨 뒤에도
-  #    `kubectl -n database create job --from=cronjob/pg-restore-drill <name>`으로 **수동 실행**은 된다
-  #    (suspend는 스케줄러만 막는다). 수동 실행 시 `HEALTHCHECKS_URL`을 빈 값으로 덮어 ping만 죽이면
-  #    오염 없이 증거를 얻는다.
-  # ⚠️ 컷오버에서 **`false`로 되돌린다.** 이 줄이 `dual-run` 마커를 달고 있어야
-  #    `test_dual-run-excludes.bats`의 되돌림 집합에 잡힌다.
-  suspend: true # dual-run
+  schedule: "0 5 * * 0" # 일요일 05:00 KST(k3s 호스트 TZ=Asia/Seoul, 다른 CronJob과 동일 규약 — timeZone 미지정)
+  # ⚠️ **병행 운용 정지(#474)는 2026-08-17 컷오버로 해제됐다.** 정지의 근거는 "PASS 시
+  #    `HEALTHCHECKS_URL` ping(`restore-drill-script.sh` 말미)이 라이브 Mac의 체크를 green-wash한다"
+  #    였는데, 라이브 Mac 클러스터가 더 이상 존재하지 않으므로 **경쟁 drill이 원리적으로 없다.**
+  #    두 번째 클러스터를 다시 세우게 되면 이 정지를 **먼저 되살려야 한다** — 시드
+  #    (`restore-drill-alerting.enc.yaml`)가 main과 바이트 동일이라 어느 쪽이 ping해도 체크가 초록이
+  #    되고, Telegram도 같은 chat이라 PASS가 두 건 온다.
+  # ⚠️ `CNPGRestoreDrillStale`(임계 700000s ≈ 8.1일)의 **상시** 해소 경로는 이 주간 실행뿐이다.
+  #    수동 실행 1회는 8.1일치 초록만 산다 — 다시 정지시키면 그 뒤 조용히 되살아난다(CronJob
+  #    오브젝트는 suspend 상태로도 Healthy라 in-band 증거가 없다).
+  # ⚠️ **실패한 drill Job은 in-band 무음이다.** `KubeJobFailed`(victoria-stack rules/core.yaml)가
+  #    `job_name!~"…|pg-restore-drill.*"`로 이 CronJob을 **명시적으로 제외**하고, `backoffLimit: 0`이라
+  #    재시도도 없다. 남는 신호는 스크립트 자신의 Telegram FAIL notify와 8.1일 뒤
+  #    `CNPGRestoreDrillStale`뿐이다 — 자동 재개가 되살리는 침묵이므로 알아두고 볼 것.
+  # ⚠️ `suspend`는 API 기본값(false)과 같아도 **명시로 둔다** — "이 drill은 돈다"가 선언이어야
+  #    가드가 그 값을 읽는다. 필드를 지우면 `yq`가 `null`을 내고 가드가 red를 낸다.
+  #    ⚠️ `docs/traps-detail.md`의 "zero-value 필드는 기재하지 않는다"는 ArgoCD **Application** CR
+  #    한정이다 — 거긴 컨트롤러 정규화가 zero-value를 **지워서** selfHeal과 플립플롭한다. CronJob의
+  #    `.spec.suspend`는 `*bool` + API 기본값 false라 라이브 오브젝트에도 false로 저장돼 일치한다.
+  #    (이 판별을 여기 적어 두지 않으면 원장을 grep한 다음 사람이 필드를 지우고 근거 없는 red를 맞는다.)
+  # ⚠️ 국면 A(versions.env의 `BULK_MIGRATION_WINDOW_UNTIL`) 동안 이 drill의 일회용 PVC
+  #    (40Gi + WAL 10Gi, `drill-ssd`)는 `/var/lib/rancher/k3s-storage/internal`에 잡히는데,
+  #    그건 `/mnt/bulk`가 bind로 얹힌 **같은 루트 LV**다. local-path는 쿼터를 강제하지 않으므로
+  #    실사용은 복구된 DB 크기이지 40Gi가 아니지만, 루트 포화 시 bulk와 함께 압박받는다.
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 4
   failedJobsHistoryLimit: 4

@@ -1,13 +1,18 @@
 #!/usr/bin/env bats
-# 병행 운용(라이브 Mac + NUC) 한시 divergence의 **발견 가능성**을 강제한다.
+# 컷오버(2026-08-17)로 **닫힌** 병행 운용 divergence의 재발을 잡는다.
 #
-# ⚠️ 이 가드가 지키는 것은 "제외가 옳다"가 아니라 **"컷오버에서 무엇을 되돌려야 하는지 한 번의
-#    grep으로 전부 찾을 수 있다"**이다. 한시 divergence가 마커 없이 늘어나면 컷오버 때 빠뜨린다.
-#    `git grep dual-run` = 되돌릴 목록 전부.
+# ⚠️ **이 파일은 목적이 한 번 바뀌었다.** 원래는 "되돌릴 목록의 원장"이었다 —
+#    `git grep dual-run` = 되돌릴 파일 전부. 라이브 Mac 클러스터가 사라져 divergence 3건
+#    (cloudflared 제외 · relay 비활성 · drill 정지)이 전부 걷혔으므로, 이제는 **방향이 뒤집힌
+#    드리프트 가드**다: divergence가 되살아나면 red다.
 #
-# ⚠️ serverName(`check-pg-servername.sh`)처럼 main 진입을 막는 가드를 두지 **않은** 이유:
-#    이 divergence를 안 되돌리고 컷오버하면 NUC에 공개 인입이 없어 **사이트가 즉시 죽는다** —
-#    시끄럽고 1커밋으로 되돌아온다. serverName은 반대로 **조용하고 되돌릴 수 없어서** 가드를 뒀다.
+# ⚠️ 셋은 근거 하나를 공유한다 — "두 번째 클러스터가 **같은 외부 자원**(터널 토큰 · healthchecks
+#    체크)을 비결정적으로/거짓 초록으로 오염시킨다." 그래서 하나가 되살아나면 셋을 **함께** 봐야 한다.
+#    즉 red는 "이 줄을 고쳐라"가 아니라 "이 파일 전체를 다시 읽어라"라는 신호다.
+#
+# ⚠️ 마지막 @test는 마커 원장을 **닫는** 자리다: 마커 문자열이 이 파일 밖 어디에도 없어야 한다.
+#    새 한시 divergence가 생기면 마커를 달고 그 @test를 의식적으로 고쳐라 — 그게 컷오버에서
+#    빠뜨리지 않는 유일한 장치다(원장을 지우면 그 장치가 사라진다).
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
 
 @test "cloudflared is NO LONGER excluded (cutover 2026-08-17 — the competing connector is gone)" {
@@ -37,32 +42,49 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   ! printf '%s' "$ex" | grep -qF -- 'apps/'
 }
 
-@test "the deadmanswitch relay is disabled while dual-running (it would green-wash the live check)" {
-  # 두 클러스터가 같은 healthchecks URL을 ping하면 라이브 Mac이 죽어도 체크가 초록으로 남는다.
-  run grep -nE '^[[:space:]]*- deadmanswitch-relay\.yaml' platform/victoria-stack/prod/kustomization.yaml
-  [ "$status" -ne 0 ]
-  grep -q 'deadmanswitch-relay.yaml' platform/victoria-stack/prod/kustomization.yaml   # 주석으로 남아 있어야 컷오버에 되살린다
+@test "the deadmanswitch relay is wired back in (cutover 2026-08-17 — the competing pinger is gone)" {
+  # 비활성의 근거는 "두 클러스터가 같은 healthchecks 체크를 ping하면 라이브 Mac이 죽어도 초록으로
+  # 남는다"였다. 라이브 Mac 클러스터가 사라져 경쟁 pinger가 원리적으로 없으므로 되살렸다.
+  # 이 @test는 방향을 뒤집어 **다시 빠지면 red**로 만든다 — relay가 빠지면 Watchdog → AM webhook →
+  # healthchecks.io 체인이 통째로 침묵하고, 그 침묵은 조용하다(오프노드 스위치는 ping **부재**를
+  # 페이징하므로 레포 안에는 증거가 없다).
+  # ⚠️ 반드시 `yq`로 **파싱된** resources를 본다. 원문 grep은 (a) 주석 줄과 (b) 들여쓰기가 어긋나
+  #    시퀀스의 원소가 아닌 줄을 통과시킨다 — 되살릴 때 실제로 밟는 두 가지다(이 항목은 0칸
+  #    주석으로 누워 있었고 다른 항목은 전부 2칸이다).
+  # ⚠️ 양성 대조를 **함께** 요구한다. relay 하나만 물으면 `resources`에서 나머지 20여 항목을
+  #    전부 지워도 통과한다 — `#476`이 "바닥값으로는 부족했다(6→5 붕괴가 통과)"고 실측한 그 형태다.
+  #    다만 `resources`는 정당하게 늘어나는 목록이라 **정확한 집합 고정은 곧 드리프트**한다.
+  #    그래서 중간 형태를 쓴다: 붕괴하면 반드시 함께 사라질 앵커 2개를 같이 묻는다.
+  run yq '.resources | contains(["namespace.yaml","alertmanager.yaml","deadmanswitch-relay.yaml"])' platform/victoria-stack/prod/kustomization.yaml
+  printf '%s' "$output" | grep -qxF -- 'true'
+  # 참조 대상이 실재한다(kustomize build를 깨는 dangling 참조를 초록으로 넘기지 않는다).
+  [ -f platform/victoria-stack/prod/deadmanswitch-relay.yaml ]
 }
 
-@test "the restore drill is suspended while dual-running (same green-wash as the relay)" {
-  # drill은 PASS 시 HEALTHCHECKS_URL을 ping하고, 그 시드는 main과 바이트 동일이다 —
-  # 두 클러스터가 같은 체크를 ping하면 **라이브 Mac의 drill이 안 돌아도 초록으로 남는다.**
-  # ⚠️ 아카이브 원본은 문제가 아니다(drill이 라이브 Cluster의 serverName에서 파생 — NUC은 pg-nuc).
-  #    막는 것은 ping 하나뿐이고, 그래서 삭제가 아니라 **suspend**다: 수동 실행(G5)은 계속 된다.
+@test "the restore drill runs on schedule again (cutover 2026-08-17 — the competing drill is gone)" {
+  # 정지의 근거는 "PASS 시 HEALTHCHECKS_URL ping이 라이브 Mac의 체크를 green-wash한다"였다.
+  # 라이브 Mac 클러스터가 사라져 경쟁 drill이 원리적으로 없으므로 재개했다. 이 @test는 방향을
+  # 뒤집어 **다시 정지되면 red**로 만든다 — suspend는 조용하다: CronJob 오브젝트는 그대로 Healthy로
+  # 남고, CNPGRestoreDrillStale은 마지막 성공으로부터 8.1일이 지나야 뜬다.
+  # ⚠️ 'false' **정확 일치**다. 필드를 지워도(기본값 false라 동작은 같다) yq가 'null'을 내 red다 —
+  #    선언이 사라지는 것 자체가 "이 drill은 돈다"는 진술의 소실이라 통과시키지 않는다.
   s="$(yq '.spec.suspend' platform/cnpg/prod/restore-drill-cronjob.yaml)"
-  printf '%s' "$s" | grep -qxF -- 'true'
-  # 마커가 그 줄에 붙어 있어야 아래 되돌림 집합 @test가 이 파일을 잡는다.
-  run grep -nE '^[[:space:]]*suspend:[[:space:]]*true[[:space:]]*#[[:space:]]*dual-run' platform/cnpg/prod/restore-drill-cronjob.yaml
-  [ "$status" -eq 0 ]
-  # 양성 대조 — CronJob이 실재하고 스케줄을 여전히 들고 있다(컷오버에 되살릴 대상).
-  run grep -qE '^[[:space:]]*schedule:' platform/cnpg/prod/restore-drill-cronjob.yaml
+  printf '%s' "$s" | grep -qxF -- 'false'
+  # 양성 대조 — CronJob이 실재하고 **주간** 스케줄을 그대로 들고 있다(재개의 대상 그 자체).
+  # ⚠️ 바닥값(`schedule:` 존재)으로는 부족하다: 스케줄이 통째로 바뀌어도 통과한다. 값을 잠근다.
+  run grep -nE '^[[:space:]]*schedule:[[:space:]]*"0 5 \* \* 0"' platform/cnpg/prod/restore-drill-cronjob.yaml
   [ "$status" -eq 0 ]
 }
 
-@test "every dual-run divergence carries the marker, and the revert set is exactly these files" {
-  # ⚠️ 이 @test가 이 파일의 존재 이유다. 마커 없는 한시 divergence가 생기면 컷오버에서 빠뜨린다.
-  #    목록이 늘거나 줄면 red — 늘었다면 마커를 달고 여기에 추가하고, 줄었다면 컷오버가 진행 중이다.
+@test "the marker ledger is closed — no file but this one still carries it" {
+  # ⚠️ 이 @test가 이 파일의 존재 이유다. 컷오버 전에는 "되돌릴 목록"이었고, 컷오버 후에는
+  #    **"목록이 비었다"**를 잠근다. 마커가 이 파일 밖에 다시 나타나면 red — 새 한시 divergence가
+  #    생겼다는 뜻이고, 그때 마커를 달고 여기 want에 추가한 뒤 위 @test들의 방향도 함께 재검토한다.
+  # ⚠️ 이 파일 자신이 마커를 들고 있다는 사실이 **양성 대조를 겸한다** — git grep이 깨져 0건이 되면
+  #    got이 빈 문자열이 되어 여기서 red다(빈 결과를 '깨끗하다'로 오독하는 vacuous green을 닫는다).
+  # ⚠️ 매니페스트 축약 주석은 마커 리터럴도, **이 파일의 경로도** 부르지 않는다 —
+  #    경로 자체에 마커 문자열이 들어 있어 이름을 부르는 순간 그 파일이 다시 잡힌다.
   got="$(git grep -l -- 'dual-run' | LC_ALL=C sort | tr '\n' ' ')"
-  want="platform/cnpg/prod/restore-drill-cronjob.yaml platform/victoria-stack/prod/kustomization.yaml tests/gates/test_dual-run-excludes.bats "
+  want="tests/gates/test_dual-run-excludes.bats "
   printf '%s' "$got" | grep -qxF -- "$want"
 }
