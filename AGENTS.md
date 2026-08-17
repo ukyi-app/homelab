@@ -129,6 +129,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - yq -e는 값이 false면 exit 1이다 — 키 부재(null)와 구별하지 않아 올바른 매니페스트에서 red가 난다
 - 한시 억제는 자기 만료를 품어야 한다 — 그리고 억제한 알림을 vacuity 대조군으로 쓰던 e2e가 함께 죽는다
 - 드릴의 정리가 EXIT trap뿐이면 고아가 남고, pre-flight 없는 apply가 그 고아를 재사용해 '검증된 복원'이 거짓말한다
+- `kubectl apply --dry-run=server`는 ArgoCD가 SSA로 관리하는 오브젝트에 대해 거짓 실패를 낸다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

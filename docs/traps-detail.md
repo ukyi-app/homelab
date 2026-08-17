@@ -1063,3 +1063,43 @@ gitignored라 그 규칙을 게이트가 못 보므로 여기(추적되는 SSOT)
 `apply` **앞에서** 실행된다는 것을 증명하지 않는다. 순서는 스텁 바이너리를 PATH 선두에 얹고
 스크립트를 통짜 실행해 호출 로그의 줄 번호로 비교해야 하고, 폴링/갈래는 **호출 횟수와 실패 문구**로
 물어야 한다(상태 코드만 보는 단언은 폴링을 통째로 지워도 초록이다 — 뮤테이션으로 실증할 것).
+
+### `kubectl apply --dry-run=server`는 ArgoCD가 SSA로 관리하는 오브젝트에 대해 거짓 실패를 낸다
+
+사람이 손으로 도는 dry-run은 **자기 field manager**(`kubectl`)로 apply한다. Server-Side Apply에서
+필드 제거는 **그 필드를 소유한 매니저가** 그것을 더 이상 선언하지 않을 때만 일어나므로, 매니저가
+다른 손 dry-run은 **제거를 재현하지 못하고 병합만 한다.** 그러면 "지우려던 필드"와 "새로 넣는 필드"가
+동시에 존재하는 중간 상태가 만들어지고, CRD 웹훅이 그것을 거절한다.
+
+실측 (2026-08-17, 컷오버에서 `Cluster/pg`의 `bootstrap.recovery` → `bootstrap.initdb` 전환):
+
+```
+# ① 사람의 client-side apply → 거짓 실패
+kubectl apply --dry-run=server -f cluster.yaml
+  The Cluster "pg" is invalid: spec.bootstrap: Forbidden: Only one bootstrap method can be specified at a time
+
+# ② 사람의 SSA(기본 field manager) → 같은 거짓 실패 (이유는 다르다: 소유권이 없어 병합된다)
+kubectl apply --server-side --dry-run=server -f cluster.yaml
+  ... Only one bootstrap method can be specified at a time
+
+# ③ ArgoCD의 field manager를 흉내 내면 → 통과
+kubectl apply --server-side --field-manager=argocd-controller --force-conflicts \
+  --dry-run=server -f cluster.yaml
+  cluster.postgresql.cnpg.io/pg serverside-applied (server dry run)
+```
+
+⚠️ **거짓 실패를 믿고 매니페스트를 "고치면" 진짜 사고가 된다** — 이 경우 두 bootstrap 방법을
+모두 남기거나 전환 자체를 포기하게 되는데, 둘 다 ArgoCD의 실제 apply에서는 필요 없던 일이다.
+
+**올바른 검증 절차**: 라이브 오브젝트의 소유자를 먼저 확인하고 그 이름으로 dry-run한다.
+
+```
+kubectl -n <ns> get <kind> <name> -o jsonpath='{range .metadata.managedFields[*]}{.manager} {.operation}{"\n"}{end}'
+```
+
+⚠️ `--force-conflicts`는 **dry-run에서만** 안전하다. 실제 실행은 ArgoCD에 맡기고 사람이 apply하지 마라
+— 손으로 apply하면 그 필드의 소유권이 `kubectl`로 넘어가 이후 ArgoCD sync가 conflict를 내거나
+selfHeal과 플립플롭한다.
+
+⚠️ 이 레포는 자기레포 Application 대부분이 `ServerSideApply=true`다(`platform/argocd/root/apps/*.yaml` ·
+`appset.yaml` · `root-app.yaml` · `argocd-app.yaml`). 즉 이 함정은 예외가 아니라 **기본 경로**다.
