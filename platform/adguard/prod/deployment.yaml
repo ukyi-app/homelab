@@ -23,7 +23,7 @@ spec:
         #    ⚠️ 라이브 Mac에서는 원리적으로 안 보인다: 파일이 이미 있어 `cp -n`이 건너뛰므로
         #       소유권이 문제될 일이 없다. **빈 PVC에서만 드러난다.**
         - name: seed-config
-          image: busybox:1.38@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d
+          image: busybox:1.38@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
           command: ["sh", "-c", "cp -n /seed/AdGuardHome.yaml /opt/adguardhome/conf/AdGuardHome.yaml || true"]
           volumeMounts:
             - { name: seed, mountPath: /seed }
