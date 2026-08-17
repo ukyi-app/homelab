@@ -15,3 +15,19 @@ setup() { ACL="${BATS_TEST_DIRNAME}/acl.tf"; }
   run grep -E 'autogroup:member.*5432|5432.*autogroup:member' "$ACL"
   [ "$status" -ne 0 ]
 }
+
+# D-i(2026-08-12) 의존 가드 — 아래 두 줄이 사라지면 D-i의 두 경로가 조용히 죽는다.
+# ⚠️ 이 @test들은 "이 접근이 옳다"가 아니라 **"이 접근에 기대는 결정이 있다"**를 고정한다.
+#    좁히고 싶다면 먼저 D-i(핸드오프 §1.9)를 재검토할 것.
+
+@test "members keep full access to their own devices (D-i remote kubectl rides this)" {
+  # apiserver 6443은 tag:k8s 규칙이 아니라 이 self 규칙으로 도달한다(실측: Mac에서 401).
+  # 이 줄을 좁히면 Mac 사본의 원격 kubectl과 Tailscale SSH가 함께 끊긴다.
+  run grep -Eq 'autogroup:member.*autogroup:self' "$ACL"; [ "$status" -eq 0 ]
+}
+
+@test "tailscale ssh still allows root (D-i uses it as the non-interactive escape for check 5)" {
+  # verify-cluster [5]는 노드 root를 요구한다. `ssh root@<node>`가 패스워드 없이 되는 것이
+  # NOPASSWD sudoers 드롭인을 불필요하게 만든 근거다(D-i 확정).
+  run grep -Eq '"root"' "$ACL"; [ "$status" -eq 0 ]
+}

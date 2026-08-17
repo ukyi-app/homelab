@@ -103,7 +103,7 @@ V="platform/argocd/bootstrap-values.yaml"
   #    문자 그대로 담고 있다. 예전 `grep -qF` 루프는 그래서 죽은 단언이었다(뮤테이션 실증:
   #    except에서 192.168.0.0/16을 지워 사설대역 lateral 차단을 무력화해도, port를 6443→16443으로
   #    오타내도 **통과**했다). 값이 아니라 구조를 본다.
-  NODE_SUBNET='192.168.139.0/24' # 노드 InternalIP 서브넷 — NUC 이전 시 6개 매니페스트·6개 bats와 함께 이동
+  NODE_SUBNET='192.168.117.0/24' # 노드 InternalIP 서브넷 — NUC 이전 시 6개 매니페스트·6개 bats와 함께 이동
   # (1) apiserver 레인 — CIDR과 TCP/6443이 **같은 egress 규칙 안에** 있어야 한다(별개 규칙이면 무의미).
   yq -e '.extraObjects[] | select(.metadata.name=="argocd-notifications-allow-egress") | .spec.egress[]
          | select(.to[].ipBlock.cidr == "'"$NODE_SUBNET"'")

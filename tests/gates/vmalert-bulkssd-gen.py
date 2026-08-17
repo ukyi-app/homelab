@@ -60,9 +60,12 @@ out = [
     series("storage_tier_avail_bytes", AVAIL, du_ts, BULK),
     series("storage_tier_size_bytes", SIZE, du_ts, BULK),
 ]
-# ⚠️ files_backup_last_success_timestamp / pvc_du_last_success_timestamp는 **의도적으로 심지 않는다** —
-#    같은 r4 그룹의 absent 가드 알림(FilesBackupStale)이 매 replay에서 확실히 발화해 **vacuity 대조군**
-#    역할을 한다("발화 없음"이 판정인 음성 레그에서 vmalert가 애초에 아무것도 안 쓴 경우를 가려낸다).
+# ⚠️ restore_drill_last_success_timestamp / files_backup_last_success_timestamp /
+#    pvc_du_last_success_timestamp는 **의도적으로 심지 않는다** — 같은 r4 그룹의 absent 가드 알림
+#    (CNPGRestoreDrillStale)이 매 replay에서 확실히 발화해 **vacuity 대조군** 역할을 한다
+#    ("발화 없음"이 판정인 음성 레그에서 vmalert가 애초에 아무것도 안 쓴 경우를 가려낸다).
+#    ⚠️ 대조군은 **시각 게이트가 없는** 알림이어야 한다 — FilesBackupStale은 국면 A 한시 억제로
+#    현재 시각 replay에서 발화하지 못하므로 더는 대조군으로 쓸 수 없다(2026-08-17 교체).
 
 for o in out:
     if not o["timestamps"]:

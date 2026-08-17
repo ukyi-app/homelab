@@ -89,8 +89,11 @@
               query: count(ALERTS{alertstate="firing", alertname!="Watchdog"}) or vector(0)
               format:
                 type: number
-            - label: OutOfSync
-              query: count(argocd_app_info{sync_status="OutOfSync"} == 1) or vector(0)
+            # ⚠️ 매처는 r6-ci-staleness.yaml의 ArgoCDOutOfSync와 **같아야 한다**(test_vmalert-config.bats가 강제).
+            #    `="OutOfSync"`는 Unknown(소스 ref resolve 실패)을 놓치는데, 그게 컷오버 재지정 누락의
+            #    주된 표면이다 — 알림만 넓히고 이 타일을 두면 사람이 보는 화면만 눈이 먼다.
+            - label: Not Synced
+              query: count(argocd_app_info{sync_status!~"Synced"} == 1) or vector(0)
               format:
                 type: number
             - label: Cert Days

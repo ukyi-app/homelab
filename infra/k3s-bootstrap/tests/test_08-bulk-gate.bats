@@ -1,8 +1,10 @@
 #!/usr/bin/env bats
-# 진짜 VM 내부 bulk 게이트 로직(bulk-gate-probe.sh)을 직접 검증한다 — orb도 VM도 없이 —
-# 그래서 findmnt/sentinel 동작이 실제로 커버된다. 가짜
-# `findmnt`는 OrbStack의 실제 동작을 흉내낸다: mac 공유의 하위 디렉토리는 자체 마운트포인트가
-# 아니라서 `-T`로만 resolve된다. 따라서 `-T`를 빼먹은 probe는 이 스위트에서 실패한다.
+# bulk 게이트의 노드 측 로직(bulk-gate-probe.sh)을 직접 검증한다 — 라이브 노드 없이.
+#
+# ⚠️ 이 스위트가 지키는 것은 **단 하나의 불변식**이다: bulk-ssd가 부트 디스크에 조용히 놓이지
+#    않는다. OrbStack 시절 그 증명의 권위는 macOS `diskutil`(Device Location=External) stub이었고,
+#    베어메탈에서는 **디바이스 정체성**(bulk의 백킹 디바이스 vs `/`)으로 옮겼다.
+#    국면 A(D4 한시)가 바로 그 금지 상태를 한시 허용하므로, 여기서 증명까지 같이 잃기 쉽다.
 load test_helper
 
 PROBE="$BOOTSTRAP_DIR/bulk-gate-probe.sh"
@@ -10,41 +12,95 @@ PROBE="$BOOTSTRAP_DIR/bulk-gate-probe.sh"
 setup() {
   STUBDIR="$(mktemp -d)"; WORK="$(mktemp -d)"
   PATH="$STUBDIR:$PATH"; export PATH STUBDIR WORK
+  # 가짜 findmnt — `-no TARGET <path>` / `-no SOURCE <path>` 두 형태만 흉내낸다.
+  #   FM_BULK_IS_MP=0  bulk 경로가 마운트포인트가 아닌 상태(= 루트 위 평범한 디렉토리)
+  #   FM_BULK_SRC      bulk의 백킹 디바이스. 기본은 루트와 **다른** 디바이스(국면 B 형태)
   cat >"$STUBDIR/findmnt" <<'EOF'
 #!/usr/bin/env sh
-# 실제 OrbStack: `findmnt <subdir>`는 아무것도 출력하지 않고 1로 종료; `findmnt -T <subdir>`만 resolve된다.
-[ "${FINDMNT_NORESOLVE:-0}" = "1" ] && exit 1
-hasT=0; for a in "$@"; do [ "$a" = "-T" ] && hasT=1; done
-[ "$hasT" = "1" ] || exit 1
-echo "${FINDMNT_FSTYPE:-virtiofs}"
+col=""; path=""; hasT=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -T) hasT=1; shift ;;
+    -no) col="$2"; shift 2 ;;
+    -*) shift ;;
+    *) path="$1"; shift ;;
+  esac
+done
+root_out() { if [ "$col" = "TARGET" ]; then echo "/"; else echo "${FM_ROOT_SRC:-/dev/mapper/vg-root}"; fi; }
+[ "$path" = "/" ] && { root_out; exit 0; }
+if [ "${FM_BULK_IS_MP:-1}" != "1" ]; then
+  # 실제 findmnt 동작: 인자 없이 주면 마운트포인트가 아니라 매치 실패(rc=1). `-T`를 주면
+  # **감싸는 마운트로 resolve**되어 `/`를 성공 반환한다 — 즉 `-T`는 "여기가 마운트인가"에
+  # 답하지 못한다. 스텁이 이 비대칭을 그대로 모사해야 게이트의 진짜 방어선이 드러난다.
+  [ "$hasT" = "1" ] || exit 1
+  root_out; exit 0
+fi
+if [ "$col" = "TARGET" ]; then echo "$path"; else echo "${FM_BULK_SRC:-/dev/nvme1n1p1}"; fi
 EOF
   chmod +x "$STUBDIR/findmnt"
 }
 teardown() { rm -rf "$STUBDIR" "$WORK"; }
 
-@test "passes on a writable virtiofs share (and thereby proves the probe uses findmnt -T)" {
-  BULK_EXTERNAL_MOUNT="/mnt/mac/Volumes/homelab" BULK_STORAGE_PATH="$WORK/bulk" run sh "$PROBE"
+@test "passes when bulk is a mountpoint on a DIFFERENT device (phase B shape)" {
+  BULK_STORAGE_PATH="$WORK" run sh "$PROBE"
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | grep -qF -- "external-bulk-probe-ok"
-  [ -d "$WORK/bulk" ]                       # 베이스 디렉토리가 생성됨
-  [ -z "$(ls -A "$WORK/bulk")" ]            # sentinel이 정리됨
+  printf '%s' "$output" | grep -qF -- 'bulk-probe-ok'
+  printf '%s' "$output" | grep -qF -- 'dev=/dev/nvme1n1p1'
+  [ -z "$(ls -A "$WORK")" ]                 # sentinel이 정리됐다
 }
 
-@test "exit 11 when the mount cannot be resolved (fails closed)" {
-  FINDMNT_NORESOLVE=1 BULK_EXTERNAL_MOUNT="/mnt/mac/Volumes/homelab" BULK_STORAGE_PATH="$WORK/bulk" run sh "$PROBE"
+@test "exit 11 when the bulk path is NOT a mountpoint (a plain dir means the boot disk)" {
+  # ⚠️ 이 게이트의 진짜 방어선은 "`-T`를 안 쓴다"가 아니라 **TARGET을 경로와 등호 비교한다**는
+  #    것이다. `-T`를 쓰더라도 평범한 디렉토리는 TARGET=`/`를 돌려주므로 등호가 깨진다.
+  #    반대로 `findmnt -T … >/dev/null`의 **성공 여부**만 보는 순진한 형태는 통과시킨다 —
+  #    그 형태는 bats로 표현할 수 없어서 뮤테이션으로 확인했다(PR 본문 참조).
+  #    OrbStack 시절엔 `-T`가 **필수**였다(mac 공유 하위 디렉토리는 자체 마운트포인트가 아니다).
+  #    이식에서 요구사항이 정반대로 뒤집힌 자리다.
+  FM_BULK_IS_MP=0 BULK_STORAGE_PATH="$WORK" run sh "$PROBE"
   [ "$status" -eq 11 ]
+  printf '%s' "$output" | grep -qF -- 'not a mountpoint'
 }
 
-@test "exit 12 when the share is not virtiofs (e.g. an ext4 VM-disk path)" {
-  FINDMNT_FSTYPE=ext4 BULK_EXTERNAL_MOUNT="/var/lib/rancher/k3s-storage/bulk" BULK_STORAGE_PATH="$WORK/bulk" run sh "$PROBE"
+@test "exit 12 when bulk shares the device with / and phase A is NOT explicitly allowed" {
+  # `test_07:77-84`("INTERNAL 디스크면 abort")의 후계. 권위가 macOS diskutil → 디바이스 정체성.
+  FM_BULK_SRC=/dev/mapper/vg-root BULK_STORAGE_PATH="$WORK" run sh "$PROBE"
+  [ "$status" -eq 12 ]
+  printf '%s' "$output" | grep -qF -- 'SAME device'
+  printf '%s' "$output" | grep -qF -- 'BULK_TEMPORARY_ALLOWED=1'
+}
+
+@test "a bind mount off the root LV is still the same device (bracketed SOURCE is stripped)" {
+  # bind 마운트의 SOURCE는 `/dev/…[/sub/path]`다. 대괄호를 안 떼면 문자열이 달라져 **통과한다** —
+  # 국면 A가 바로 이 모양이므로 이 한 줄이 게이트 전체의 의미를 좌우한다.
+  FM_BULK_SRC='/dev/mapper/vg-root[/var/lib/rancher/k3s-storage/bulk]' \
+    BULK_STORAGE_PATH="$WORK" run sh "$PROBE"
   [ "$status" -eq 12 ]
 }
 
-@test "exit 13 when the bulk path cannot be created (unwritable parent)" {
-  ro="$WORK/ro"; mkdir -p "$ro"; chmod 555 "$ro"
-  BULK_EXTERNAL_MOUNT="/mnt/mac/Volumes/homelab" BULK_STORAGE_PATH="$ro/bulk" run sh "$PROBE"
+@test "phase A opt-in allows the same-device shape but barks loudly" {
+  FM_BULK_SRC=/dev/mapper/vg-root BULK_TEMPORARY_ALLOWED=1 BULK_STORAGE_PATH="$WORK" run sh "$PROBE"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF -- 'WARN: bulk is on the SAME device'
+  printf '%s' "$output" | grep -qF -- 'dr-drill'
+}
+
+@test "exit 11 when the backing device cannot be resolved (fails closed)" {
+  cat >"$STUBDIR/findmnt" <<'EOF'
+#!/usr/bin/env sh
+for a in "$@"; do case "$a" in TARGET) echo "$3"; exit 0 ;; esac; done
+exit 1
+EOF
+  chmod +x "$STUBDIR/findmnt"
+  BULK_STORAGE_PATH="$WORK" run sh "$PROBE"
+  [ "$status" -eq 11 ]
+  printf '%s' "$output" | grep -qF -- 'could not resolve backing devices'
+}
+
+@test "exit 13 when the mountpoint is not writable" {
+  chmod 555 "$WORK"
+  BULK_STORAGE_PATH="$WORK" run sh "$PROBE"
+  chmod 755 "$WORK"
   [ "$status" -eq 13 ]
-  chmod 755 "$ro"
 }
 
 @test "errors when required env is missing" {

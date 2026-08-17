@@ -4,6 +4,11 @@
 # ★머지 전 필수 — GitOps selfHeal라 pre-merge verify-posture는 main(broad)을 테스트, candidate가 아니다.
 # 재사용: COMP/NETPOL/NEEDLE env override로 다른 netpol 리허설(기본=CNPG pooler netpol).
 set -euo pipefail
+# ⚠️ 이 스크립트는 selfHeal을 끄고 candidate netpol을 apply한다 — **변이**다. 잘못된 클러스터에서
+#    돌면 그쪽 prod의 네트워크 정책을 갈아엎고, 아래 trap의 복원도 그 잘못된 쪽에 걸린다.
+#    ⇒ trap을 걸기 **전에** 정체성부터 확인한다(D-i). make를 거치지 않는 직접 실행 경로라
+#    Makefile 주입이 못 덮는 자리다.
+bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/infra/k3s-bootstrap/assert-cluster-identity.sh"
 APP=network-policies-prod; NS=prod
 COMP="${COMP:-network-policies}"; NETPOL="${NETPOL:-allow-egress-to-database}"; NEEDLE="${NEEDLE:-cnpg.io/poolerName}"
 restore() {   # trap: 성공/실패/STOP 어떤 EXIT에도 복원(F5)
