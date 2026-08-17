@@ -14,7 +14,7 @@ spec:
   generators:
     - git:
         repoURL: https://github.com/ukyi-app/homelab.git
-        revision: nuc-migration
+        revision: main
         directories:
           - path: platform/*/prod
           # 제외: argocd(자기 관리), cnpg + victoria-stack(M4/M5에서 root/apps/ 아래
@@ -45,7 +45,7 @@ spec:
       project: platform
       source:
         repoURL: https://github.com/ukyi-app/homelab.git
-        targetRevision: nuc-migration
+        targetRevision: main
         path: '{{ .path.path }}' # platform/<component>/prod — kustomization 디렉토리
         # destination.namespace 없음: 각 컴포넌트의 kustomization이 `namespace:`를
         # 직접 지정한다(gateway, edge, ...). 최초 apply는 CreateNamespace가 커버.
@@ -92,7 +92,7 @@ spec:
   generators:
     - git:
         repoURL: https://github.com/ukyi-app/homelab.git
-        revision: nuc-migration
+        revision: main
         directories:
           - path: apps/*/deploy/prod # 배포되는 앱만 deploy/ 디렉토리를 가진다 (pg-tools는 없음)
   template:
@@ -108,7 +108,7 @@ spec:
       sources:
         # source #1: 공유 deploy 차트 (앱 렌더 방식의 SSOT)
         - repoURL: https://github.com/ukyi-app/homelab.git
-          targetRevision: nuc-migration
+          targetRevision: main
           path: platform/charts/app
           helm:
             releaseName: '{{ index .path.segments 1 }}'
@@ -116,13 +116,13 @@ spec:
               - '$values/{{ .path.path }}/values.yaml'
         # source #2: 같은 repo를 $values로 노출해 차트가 앱의 values를 읽게 함
         - repoURL: https://github.com/ukyi-app/homelab.git
-          targetRevision: nuc-migration
+          targetRevision: main
           ref: values
         # source #3: 앱의 deploy 디렉토리를 KUSTOMIZE source로 렌더한다. Helm 차트(source #1)는
         # 앱의 secret을 담지 않으므로, 이것이 없으면 Deployment/migration의 envFrom secret이 누락된다.
         # 앱 시크릿 표준 경로는 create-app(v2) + SealedSecret(`<app>-secrets.sealed.yaml`을 resources:에).
         - repoURL: https://github.com/ukyi-app/homelab.git
-          targetRevision: nuc-migration
+          targetRevision: main
           path: '{{ .path.path }}' # apps/<name>/deploy/prod: kustomization.yaml + (v2) <app>-secrets.sealed.yaml
       destination:
         server: https://kubernetes.default.svc

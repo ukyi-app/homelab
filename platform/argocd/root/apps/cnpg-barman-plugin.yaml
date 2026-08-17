@@ -14,7 +14,7 @@ spec:
   # 참고: 라이브 apply 전에 v0.13.0 ↔ CNPG 1.26 호환성을 확인할 것 (Task 4.1b).
   source:
     repoURL: https://github.com/ukyi-app/homelab.git
-    targetRevision: nuc-migration
+    targetRevision: main
     path: platform/cnpg/barman-plugin
     # directory.recurse=false(zero-value)를 명시하면 컨트롤러의 spec 정규화가 매번 삭제하고
     # root의 selfHeal이 되살리는 플립플롭이 된다(라이브 generation 1111 검증) — 기본값이므로 생략.

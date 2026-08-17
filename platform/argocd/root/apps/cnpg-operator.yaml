@@ -22,7 +22,7 @@ spec:
         valueFiles:
           - $values/platform/cnpg/operator/values.yaml
     - repoURL: https://github.com/ukyi-app/homelab.git
-      targetRevision: nuc-migration
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc

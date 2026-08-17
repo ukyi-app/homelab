@@ -141,11 +141,14 @@ jobs:
         run: bash scripts/check-argocd-revision.sh
       - name: CNPG 아카이브 serverName 분리 (main 진입 시 값 고정)
         # (A) 쓰기 serverName ≠ 복구 원본 serverName — 인자 없이 항상. 두 브랜치 형태 모두 green.
-        # (B) 그 값이 EXPECT_PG_SERVERNAME. **main으로 들어갈 때만** 채운다 — 라이브 Mac이 살아 있는
-        #     동안 `pg-nuc`가 main에 들어가면 Mac의 ArgoCD가 selfHeal로 아카이브를 갈아탄다.
-        #     컷오버 시점에는 이 기대값을 `pg-nuc`로 바꾸는 **같은 PR**이어야 통과한다.
+        # (B) 그 값이 EXPECT_PG_SERVERNAME. **main으로 들어갈 때만** 채운다.
+        # ✅ **컷오버 완료 (2026-08-17)** — 기대값을 `pg` → `pg-nuc`로 바꿨다. 이 PR이 리비전 핀
+        #     15곳을 main으로 넘기는 바로 그 PR이고, 계약대로 **같은 PR**에서 함께 바뀐다.
+        #     되돌림 금지: 라이브 NUC의 쓰기 serverName이 `pg-nuc`이므로 `pg`로 되돌리면 (B)가 red다.
+        #     (컷오버 이전의 근거: 라이브 Mac이 살아 있는 동안 `pg-nuc`가 main에 들어가면 Mac의
+        #      ArgoCD가 selfHeal로 아카이브를 갈아탄다 — 그 위험은 Mac k3s 파괴로 소멸했다.)
         env:
-          EXPECT_PG_SERVERNAME: ${{ (github.base_ref == 'main' || github.ref == 'refs/heads/main') && 'pg' || '' }}
+          EXPECT_PG_SERVERNAME: ${{ (github.base_ref == 'main' || github.ref == 'refs/heads/main') && 'pg-nuc' || '' }}
         run: bash scripts/check-pg-servername.sh
       - name: make ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)
         # 스텝 목록을 이 파일에서 **파생**해 원장(policy/ci-parity.json)과 대조한다 — 스텝을 추가하는
