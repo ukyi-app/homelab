@@ -84,6 +84,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - vector는 root로 실행
 - busybox nc -q 없음
 - VictoriaLogs distroless 라이브 질의
+- VM 질의 URL에서 `[...]`를 인코딩하지 않으면 조용히 빈 결과가 온다
 - Alertmanager telegram 전송 검증 메트릭
 - ConfigMap 변경 파드 자동 재시작 없음
 - bats bash 3.2 중간 [[ ]] 침묵 통과
@@ -118,6 +119,17 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 고아 PVC는 Bound다 — `phase == Released`만 보는 감사는 원리적으로 못 잡는다
 - GHA job-level skip은 run conclusion에 안 보인다 — 스텝 전부 skip이어도 job은 success
 - 이미지 핀의 *존재* ≠ *일치* ≠ *소유자* — 하드코딩 소비처 목록은 자기 자신에게만 정확하다
+- sshd_config.d는 먼저 읽힌 값이 이긴다 — systemd 드롭인과 정반대다
+- Ubuntu 26.04에 /etc/timezone이 없다 — 그 파일을 읽는 게이트는 출구가 없다
+- tailscale의 ~. 라우팅 도메인 — 노드 이름해석이 조용히 클러스터 의존이 된다
+- findmnt -T는 마운트 여부를 증명하지 못한다 — 그리고 bind 마운트의 SOURCE엔 대괄호가 붙는다
+- 상주 워크로드 OOM 진단 — 코어 수는 그럴듯한 오답이다 (D-e) · 처방 후 같은 지표를 다시 재라
+- PCIe correctable RxErr 폭주는 ASPM L1이다 — 유휴에서만 나고, 하드웨어 열화가 아니다
+- hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다 — root가 만든 파일을 non-root가 못 연다(빈 PVC 전용)
+- yq -e는 값이 false면 exit 1이다 — 키 부재(null)와 구별하지 않아 올바른 매니페스트에서 red가 난다
+- 한시 억제는 자기 만료를 품어야 한다 — 그리고 억제한 알림을 vacuity 대조군으로 쓰던 e2e가 함께 죽는다
+- 드릴의 정리가 EXIT trap뿐이면 고아가 남고, pre-flight 없는 apply가 그 고아를 재사용해 '검증된 복원'이 거짓말한다
+- `kubectl apply --dry-run=server`는 ArgoCD가 SSA로 관리하는 오브젝트에 대해 거짓 실패를 낸다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

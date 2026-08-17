@@ -15,7 +15,7 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
 }
 
 @test "apiserver egress is scoped to node-subnet on 6443 (kube-router DNAT, F5)" {
-  run grep -q '192.168.139.0/24' "$P"; [ "$status" -eq 0 ]
+  run grep -q '192.168.117.0/24' "$P"; [ "$status" -eq 0 ]
   run grep -q 'port: 6443' "$P"; [ "$status" -eq 0 ]
 }
 

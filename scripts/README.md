@@ -40,6 +40,7 @@
   검사(가드 없는 인덱스 드리프트 소멸). **`make verify`**·gate(`tests/gates/test_check-doc-index.bats`)가 호출. 순수 문자열 검사.
 - **`check-app-netpol.sh`** — `apps/<app>/deploy/**`의 app-owned NetworkPolicy가 app-scoped 셀렉터
   (`app.kubernetes.io/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). **`make verify`**가 호출. netpol 0건은 통과지만 **매니페스트 열거 0건은 scan-floor로 실패**(vacuous pass 아님).
+- **`check-pg-servername.sh`** — CNPG **아카이브 serverName** 분리 가드. `serverName` 한 줄이 `s3://<bucket>/<serverName>/`를 통째로 정하고, 두 primary가 같은 값을 쓰면 타임라인이 섞여 오프사이트 PITR 경로가 망가진다(R2 버저닝 없음 = 되돌릴 수 없음). (A) 쓰기 ≠ 읽기 정합은 항상, (B) `EXPECT_PG_SERVERNAME` 고정은 **main 진입 시에만**(`check-argocd-revision.sh`와 같은 이유로 분리).
 - **`check-argocd-revision.sh`** — ArgoCD **자기레포** 리비전 핀 정합. `repoURL`을 가진 맵 노드를 **재귀로**
   뽑아(Application 단일/다중 소스 · ApplicationSet template 소스 · git generator `revision` — 모양을 세지 않는다)
   자기레포 참조 전건이 **같은 값**인지 강제한다(A). `EXPECT_REVISION`(또는 `--expect`)이 주어지면 그 값과의
@@ -91,7 +92,14 @@
 - **`reset-pg-r2-archive.sh`** — **파괴적**. fresh initdb `pg`가 R2의 옛 barman 아카이브와 충돌할 때
   serverName `pg` 아카이브(base/+wals/)만 정리해 아카이빙 재개. **`make reset-pg-archive`**가 호출하되
   **기본 dry-run** — 실제 삭제는 `ARGS=--purge`. 라이브 ObjectStore에서 bucket/endpoint를 읽음.
-- **`dr-drill.sh`** — **극도로 파괴적(owner 전용)**. OrbStack VM(cattle)을 DESTROY→RECREATE하고
+- **`destroy-node.sh`** — **극도로 파괴적(owner 전용, D-j)**. 베어메탈 노드 파괴 프리미티브:
+  `k3s-uninstall.sh` + `/var/lib/rancher` 삭제(= standard 클래스 PV 전량 소멸, 복구 불가).
+  OrbStack 시절 `orb delete -f k3s` 한 줄을 대체한다. `dr-drill.sh`의 [1]이 유일한 자동 호출자이고
+  그 밖에는 사람이 직접 실행한다 — Makefile/워크플로 **배선 없음**(`make down`은 의도적 비배선).
+  3중 fail-closed: 확인 env `DR_DRILL_DESTROY_CONFIRM=1` · 국면 A(`BULK_MIGRATION_WINDOW_UNTIL`이
+  비어있지 않으면) 거부 · `k3s-uninstall.sh` 부재 fail-loud. **`|| true` 없음** — 파괴 실패를 삼키면
+  드릴이 거짓 PASS를 찍는다. 시임 `K3S_RUN`(기본 sudo)·`K3S_UNINSTALL`. 가드 `tests/test_destroy-node.bats`.
+- **`dr-drill.sh`** — **극도로 파괴적(owner 전용)**. 노드를 DESTROY→RECREATE(`destroy-node.sh`에 위임)하고
   git+R2+age 키만으로 전 플랫폼 재구축 + R2 DB 복구(canary 일치)를 증명하는 풀 DR 드릴(R5). Makefile/워크플로
   **배선 없음** — 직접 실행. 파괴 전 canary 캡처 + 복구 증명 후에만 노드 파괴. `sealing-key-dr-gate.sh`를 source.
 - **`sealing-key-dr-gate.sh`** — sealing-key DR 게이트 **라이브러리(source 전용 — top-level 실행 없음)**.
@@ -105,8 +113,11 @@
   외장 SSD → Mac 내장 디스크로 rsync 오프-SSD 백업. `<dest>`(백업)/`--dry-run <dest>`/`--verify <dest>`
   (백업서 전 파일 복원+sha256 대조 — 매체 판독성 게이트). dest는 반드시 내장 디스크(외장이면 거부),
   스테이징→sanity(빈/급감 중단)→승격(data.prev 1개 보존). 성공 시 `files_backup_last_success_timestamp`·
-  용량을 vmsingle에 push(r4의 FilesBackupStale/FilesBulkSSDLow). launchd 일1회 배선(RPO=24h)은
-  owner-local(external-ssd.md). Makefile 배선 없음 — 직접 실행.
+  용량을 vmsingle에 push(r4의 FilesBackupStale/FilesBulkSSDLow). Makefile 배선 없음 — 직접 실행.
+  ⚠️ **국면 A에는 실행자가 없다**(배선이던 launchd plist는 Mac mini 로컬 · NUC엔 launchd/diskutil 부재).
+  게다가 국면 A의 `/mnt/bulk`는 루트 LV bind 마운트라 **2차 매체가 원리적으로 없다** — 지금 이식하면
+  false-green이다. 국면 B(2TB M.2) 이후 매체 판별 재작성 + systemd timer 배선이 정답이고,
+  그때까지 `FilesBackupStale`의 absent 가지는 한시 억제 상태다(`tests/gates/test_files-backup-phase-a.bats`).
 - **`teardown.sh`** — **파괴적(owner 전용)**. `make teardown-app`/`teardown-resource` 래퍼가 호출 —
   clean-worktree 가드 → origin/main fetch → `teardown/<target>-<ts>` fresh-main 전용브랜치 → 툴(plan) →
   allowlist staging → PR(owner gh 자격). 앱/리소스 매니페스트·apps.json·원장 행 제거(리소스 purge는

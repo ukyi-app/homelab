@@ -24,6 +24,18 @@ setup() {
 # 픽스처를 원상태로 (뮤테이션 간 오염 차단)
 fx_reset() { git -C "$FX" checkout -q -- . ; git -C "$FX" clean -qfd ; }
 
+# ⚠️ 기준 리비전을 **리터럴로 쓰지 않는다.** 이 파일이 사는 브랜치마다 값이 다르다 —
+#    main에서는 `main`, NUC 마이그레이션 브랜치에서는 `nuc-migration`이다. 리터럴 'main'을 쓰면
+#    그 브랜치에서 sed가 **no-op이 되어** 음성 @test는 red, 양성 @test는 **조용히 vacuous green**이
+#    된다(실측: nuc-migration에서 4 red + 3 vacuous). 앵커에서 파생한다.
+fx_rev() { yq -r '.spec.source.targetRevision' "$FX/platform/argocd/root/root-app.yaml"; }
+# fx_rewrite <old> <new> — 자기레포 리비전 참조 전건(targetRevision + generator revision)을 바꾼다.
+fx_rewrite() {
+  for f in $(git -C "$FX" grep -l "evision: $1" -- 'platform/argocd'); do
+    sed -i.bak "s|targetRevision: $1\$|targetRevision: $2|; s|^\\( *\\)revision: $1\$|\\1revision: $2|" "$FX/$f"
+  done
+}
+
 @test "real repo: every self-repo ArgoCD reference pins the same revision" {
   run "$GUARD"
   [ "$status" -eq 0 ]
@@ -60,7 +72,7 @@ fx_reset() { git -C "$FX" checkout -q -- . ; git -C "$FX" clean -qfd ; }
 
 # ── (A) 정합 ────────────────────────────────────────────────────────────────────────────────
 @test "partial edit: one targetRevision moved to a branch is rejected (skew)" {
-  sed -i.bak 's/targetRevision: main/targetRevision: nuc-migration/' \
+  sed -i.bak "s|targetRevision: $(fx_rev)|targetRevision: OTHER-BRANCH|" \
     "$FX/platform/argocd/root/apps/namespaces.yaml"
   run "$GUARD" --root "$FX"
   [ "$status" -ne 0 ]
@@ -71,8 +83,9 @@ fx_reset() { git -C "$FX" checkout -q -- . ; git -C "$FX" clean -qfd ; }
   # ⚠️ 이 @test가 이 가드의 존재 이유에 가장 가깝다. generator는 `targetRevision`이 아니라
   #    `revision`이라, 마이그레이션 편집이 **구조적으로 빠뜨리는** 자리다. 재귀 열거가 아니라
   #    모양을 하나씩 적었다면 여기가 조용히 빠진다.
-  for f in $(git -C "$FX" grep -l 'targetRevision: main' -- 'platform/argocd'); do
-    sed -i.bak 's/targetRevision: main/targetRevision: nuc-migration/' "$FX/$f"
+  base="$(fx_rev)"
+  for f in $(git -C "$FX" grep -l "targetRevision: $base" -- 'platform/argocd'); do
+    sed -i.bak "s|targetRevision: $base|targetRevision: OTHER-BRANCH|" "$FX/$f"
   done
   run "$GUARD" --root "$FX"
   [ "$status" -ne 0 ]
@@ -80,7 +93,7 @@ fx_reset() { git -C "$FX" checkout -q -- . ; git -C "$FX" clean -qfd ; }
 }
 
 @test "a self-repo source with no revision pin at all is rejected (ArgoCD would follow HEAD)" {
-  sed -i.bak '/targetRevision: main/d' "$FX/platform/argocd/root/apps/victoria-stack.yaml"
+  sed -i.bak "/targetRevision: $(fx_rev)\$/d" "$FX/platform/argocd/root/apps/victoria-stack.yaml"
   run "$GUARD" --root "$FX"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -q '리비전 핀이 없다'
@@ -89,28 +102,24 @@ fx_reset() { git -C "$FX" checkout -q -- . ; git -C "$FX" clean -qfd ; }
 # ── (B) 고정 · (A)/(B) 분리 계약 ────────────────────────────────────────────────────────────
 @test "migration-branch shape is GREEN without --expect (so gate survives on that branch)" {
   # 이 계약이 깨지면 마이그레이션 브랜치에서 gate와 test_scan-floor가 같이 죽어 G4를 못 한다.
-  for f in $(git -C "$FX" grep -l 'evision: main' -- 'platform/argocd'); do
-    sed -i.bak 's/targetRevision: main/targetRevision: nuc-migration/; s/^\( *\)revision: main/\1revision: nuc-migration/' "$FX/$f"
-  done
+  fx_rewrite "$(fx_rev)" OTHER-BRANCH
   run "$GUARD" --root "$FX"
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | grep -qF "nuc-migration"
+  printf '%s' "$output" | grep -qF "OTHER-BRANCH"
 }
 
-@test "migration-branch shape is REJECTED with --expect main (the merge guard itself)" {
-  for f in $(git -C "$FX" grep -l 'evision: main' -- 'platform/argocd'); do
-    sed -i.bak 's/targetRevision: main/targetRevision: nuc-migration/; s/^\( *\)revision: main/\1revision: nuc-migration/' "$FX/$f"
-  done
-  run "$GUARD" --root "$FX" --expect main
+@test "migration-branch shape is REJECTED with --expect <original> (the merge guard itself)" {
+  base="$(fx_rev)"           # 뒤집기 **전에** 잡는다 — 뒤집은 뒤엔 fx_rev가 새 값을 낸다
+  fx_rewrite "$base" OTHER-BRANCH
+  run "$GUARD" --root "$FX" --expect "$base"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -q '라이브 ArgoCD가 그 브랜치를 따라간다'
 }
 
 @test "EXPECT_REVISION env is honored the same as --expect (ci.yaml uses the env form)" {
-  for f in $(git -C "$FX" grep -l 'evision: main' -- 'platform/argocd'); do
-    sed -i.bak 's/targetRevision: main/targetRevision: nuc-migration/; s/^\( *\)revision: main/\1revision: nuc-migration/' "$FX/$f"
-  done
-  EXPECT_REVISION=main run "$GUARD" --root "$FX"
+  base="$(fx_rev)"
+  fx_rewrite "$base" OTHER-BRANCH
+  EXPECT_REVISION="$base" run "$GUARD" --root "$FX"
   [ "$status" -ne 0 ]
 }
 
@@ -140,7 +149,7 @@ fx_reset() { git -C "$FX" checkout -q -- . ; git -C "$FX" clean -qfd ; }
     printf '%s' "$f" | grep -q 'root-app.yaml' && continue
     sed -i.bak 's|https://github.com/ukyi-app/homelab.git|https://github.com/ukyi-app/homelab|g' "$FX/$f"
   done
-  sed -i.bak 's/^\( *\)revision: main/\1revision: migrate\/nuc/' "$FX/platform/argocd/root/appset.yaml"
+  sed -i.bak "s|^\\( *\\)revision: $(fx_rev)\$|\\1revision: OTHER-BRANCH|" "$FX/platform/argocd/root/appset.yaml"
   run "$GUARD" --root "$FX"
   [ "$status" -ne 0 ]
 }

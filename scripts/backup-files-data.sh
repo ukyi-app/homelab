@@ -14,7 +14,15 @@
 #   scripts/backup-files-data.sh <dest(내장 디스크, git 밖)>      # 백업 + 매니페스트 + 메트릭 push
 #   scripts/backup-files-data.sh --dry-run <dest>                # rsync -n (무변경, push 없음)
 #   scripts/backup-files-data.sh --verify  <dest>                # 최신 백업서 파일 1개 복원 + sha256 대조(매체 판독성 게이트)
-# launchd 배선(일1회, RPO=24h)은 owner-local — docs/runbooks/external-ssd.md.
+# 배선(일1회, RPO=24h)은 **레포 밖**이었다: Mac mini 로컬 launchd plist `app.homelab.files-backup`.
+# ⚠️ **국면 A(NUC 이식) 동안 이 스크립트에는 실행자가 없다.** NUC엔 launchd도 `diskutil`도 없어
+#    :2의 매체 판별에서 하드 실패한다. 그리고 국면 A에는 **2차 매체가 원리적으로 없다** — NUC은
+#    디스크가 하나이고 `/mnt/bulk`는 루트 LV의 bind 마운트라 source와 dest가 같은 물리 매체다.
+#    지금 이식하고 타이머만 걸면 알림은 초록이 되지만 사본은 같은 매체에 놓인다(정직한 red보다
+#    나쁜 false-green). 국면 B(2TB M.2) 이후에 ① 매체 판별을 디바이스 정체성으로 재작성하고
+#    ② systemd timer를 배선한다. 그때까지 `FilesBackupStale`의 absent 가지는 한시 억제돼 있고,
+#    `tests/gates/test_files-backup-phase-a.bats`가 창을 비우는 순간 억제 제거를 강제한다.
+# ⚠️ 옛 인용 `docs/runbooks/external-ssd.md`를 뺐다 — 그 런북에 launchd도 RPO도 한 글자도 없다(실측).
 set -euo pipefail
 umask 077
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

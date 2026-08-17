@@ -56,7 +56,7 @@ setup() {
 @test "apiserver egress regression guard (#66): one egress rule binds node CIDR + TCP/6443, no ClusterIP" {
   N='select(.kind == "NetworkPolicy" and .metadata.name == "allow-egress-to-apiserver")'
   # 한 egress 규칙이 노드 CIDR + (protocol=TCP, port=6443) 포트 엔트리를 동시에(체인 select = 같은 규칙·같은 엔트리 결속, F9)
-  run yq -e "$N | .spec.egress[] | select(.to[].ipBlock.cidr == \"192.168.139.0/24\") | select(.ports[] | (.port == 6443 and .protocol == \"TCP\")) | .ports" "$RENDERED"
+  run yq -e "$N | .spec.egress[] | select(.to[].ipBlock.cidr == \"192.168.117.0/24\") | select(.ports[] | (.port == 6443 and .protocol == \"TCP\")) | .ports" "$RENDERED"
   [ "$status" -eq 0 ]
   # apiserver egress에 ClusterIP 10.43.0.1/32 미사용(있으면 select 매치=exit0 → 회귀)
   run yq -e "$N | .spec.egress[].to[].ipBlock.cidr | select(. == \"10.43.0.1/32\")" "$RENDERED"

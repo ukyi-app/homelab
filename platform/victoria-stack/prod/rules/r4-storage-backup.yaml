@@ -13,8 +13,11 @@ data:
           # PVC(pg-1 PGDATA/WAL·adguard·vmsingle·vlogs)는 전부 루트 fs '/'(btrfs /dev/vdb1, ~224GiB 실측)를 쿼터 없이 공유하므로
           # '/' 포화 = 모든 standard PVC 동시 위험. node_filesystem 절대값으로 3티어(조기 warning/추세/critical) 감시한다.
           # mountpoint="/"는 정확일치 — '/run/k3s/.../shm'·tmpfs·virtiofs(/mnt/mac) 노이즈를 배제하는 단일 btrfs series.
-          # (외장 bulk-ssd는 virtiofs /mnt/mac 하위라 VM node-exporter가 별도 series로 못 봐 직접 측정 불가 — 죽은
-          #  BulkSSD 알림은 제거했다. 미마운트/포화의 권위 backstop은 같은 group의 LocalBasebackupStale(CronJob 실패).)
+          # (bulk-ssd를 node_filesystem으로 직접 재지 않는 이유가 국면마다 다르다: OrbStack 시절엔 virtiofs
+          #  /mnt/mac 하위라 VM node-exporter가 별도 series를 못 만들었고, **국면 A(D4 한시)에는 bulk가 루트 LV의
+          #  bind 마운트라 애초에 같은 fs**다. 어느 쪽이든 in-cluster 신호는 du exporter의 statfs가 유일하다.
+          #  국면 B(2TB M.2)에서는 /mnt/bulk가 진짜 별도 디바이스라 node_filesystem series가 생긴다 — 그때
+          #  여기에 티어를 추가할 수 있다. 미마운트/포화의 권위 backstop은 같은 group의 LocalBasebackupStale.)
           - alert: StandardSSDWarning
             expr: |
               (node_filesystem_avail_bytes{mountpoint="/"}
@@ -139,22 +142,56 @@ data:
             annotations:
               summary: "캐시 백업이 stale(27시간 초과)이거나 누락됨"
               description: "공용 Valkey 백업(cache-backup CronJob → R2)이 갱신되지 않았습니다 — Job 오브젝트 소실/CronJob suspend/미스케줄 가능. last_success.json 신선도는 teardown 시점에만 검사되므로 이 룰이 상시 backstop입니다. 캐시는 LRU 휘발 티어라 warning."
-          # files 오프-SSD 백업 생존성(H2/M14): 호스트 launchd(scripts/backup-files-data.sh, 일1회)가
+          # files 오프-노드 백업 생존성(H2/M14): 백업 스크립트(scripts/backup-files-data.sh, 일1회)가
           # rsync 성공 시 files_backup_last_success_timestamp를 vmsingle에 단발 import한다. instant query는
           # staleness 윈도(~분) 밖의 단발 샘플을 못 봐 bare absent()가 영구 오발화하므로(CNPGRestoreDrillStale과
           # 동형), [10d] last_over_time으로 마지막 성공을 찾아 임계(180000s≈2.08일 — 일1회 RPO의 2배 여유)로 판정.
-          # 값 없음(첫 push 전)은 absent가로 fail-loud — launchd 미설치/미실행을 페이징(백업 필수화 강제).
+          # 값 없음(첫 push 전)은 absent가로 fail-loud — 실행자 미설치/미실행을 페이징(백업 필수화 강제).
+          #
+          # ★ **국면 A 한시 억제 — expr 끝의 시각 절이 `absent` 가지에만 걸려 있다.**
+          #   왜: NUC 이식으로 이 백업의 **실행자가 사라졌다.** 생산자는 macOS 전용이고(dest 매체 판별
+          #   권위가 `diskutil`), 배선이던 launchd plist는 Mac mini 로컬이라 어느 레포에도 없었다 —
+          #   NUC엔 launchd도 diskutil도 없다. 즉 국면 A 동안 absent 가지는 **영구 참**이고 이 룰은
+          #   24/7 critical로 운다(alertmanager `severity=critical` 라우트의 repeat_interval: 1h를 타고
+          #   하루 24건). 그건 무음보다 나쁘다: 상시 소음이 채널 전체를 둔감화해 **진짜 페이지를 묻는다.**
+          #   ⚠️ 그리고 국면 A에는 **2차 매체가 원리적으로 존재할 수 없다** — NUC은 디스크가 하나이고
+          #   `/mnt/bulk`는 루트 LV의 bind 마운트다. 지금 스크립트를 이식하고 타이머만 걸면 알림은
+          #   초록이 되지만 사본은 같은 매체에 놓인다 — **정직한 red보다 나쁜 false-green이다.**
+          #   진짜 2차 매체는 국면 B(2TB M.2 장착) 이후에나 생긴다.
+          #
+          #   ⚠️ **억제 대상은 absent 가지 뿐이다(최소 표면).** PromQL은 `and`가 `or`보다 강하게
+          #   결합하므로 `A or B and on() C`는 `A or (B and on() C)`로 파싱된다 — 그래서 시각 절을
+          #   expr **끝에 괄호 없이** 붙이면 정확히 absent 가지만 걸린다. 전체를 괄호로 묶으면
+          #   (`(A or B) and on() C`) staleness 가지까지 함께 죽는다. **그 두 형태는 문법상 둘 다
+          #   유효해 `-dryRun`이 구별하지 못한다** — 그래서 아래 가드가 형태를 잠근다.
+          #   덕분에 국면 A 중 누군가 실행자를 배선하면 그 순간부터 신선도 감시가 **자동 복귀**한다.
+          #   실측(VictoriaMetrics v1.145.0): 실행자 없음 → 무발화 / 배선 + 백업 stale → **발화** /
+          #   배선 + 백업 fresh → 무발화 / 억제 없는 원본 + 실행자 없음 → 발화(원래의 병).
+          #
+          #   ⚠️ **만료는 자동이다 — 사람의 기억에 의존하지 않는다.** 1790780400 =
+          #   2026-10-01T00:00:00+09:00 = 국면 A 창(`infra/k3s-bootstrap/versions.env`의
+          #   BULK_MIGRATION_WINDOW_UNTIL)의 **다음날 0시 KST**. 그 시각 이후엔 배선 여부와 무관하게
+          #   다시 critical로 페이징한다 — 억제의 상한을 룰 자신이 들고 있다(창을 연장하고 여기를
+          #   안 고치면 시끄러워질 뿐 조용해지지 않는다). 두 값의 정합과 "창을 비웠는데 억제가 남음"은
+          #   `tests/gates/test_files-backup-phase-a.bats`가 **양방향**으로 강제한다.
           - alert: FilesBackupStale
             expr: |
               (time() - last_over_time(files_backup_last_success_timestamp[10d])) > 180000
               or absent(last_over_time(files_backup_last_success_timestamp[10d]))
+              and on() (vector(time()) >= 1790780400)
             for: 30m
             labels: { severity: critical }
             annotations:
-              summary: "files 오프-SSD 백업이 stale(≈2일 초과)이거나 없음"
-              description: "files-data(비재생성 사용자 데이터)의 유일한 2차 매체(Mac 내장 디스크 rsync 사본)가 갱신되지 않았습니다 — launchd 미실행 또는 외장 SSD 미마운트. 매체 유실 시 전손 위험(R2 미사용). scripts/backup-files-data.sh를 확인하세요."
-          # bulk-ssd(외장 SSD) 용량: 호스트 df를 백업 잡이 함께 push(files_data_bulk_avail/size_bytes). VM node-exporter는
-          # 외장 virtiofs(/mnt/mac 하위)를 별도 series로 못 봐(r4 상단 주석) 직접 측정 불가 — 호스트 push가 유일 관측.
+              summary: "files 오프-노드 백업이 stale(≈2일 초과)이거나 없음"
+              description: "files-data(비재생성 사용자 데이터)의 2차 매체 사본이 갱신되지 않았습니다 — 백업 실행자 미실행 또는 bulk 매체 미마운트. 매체 유실 시 전손 위험(R2 미사용). scripts/backup-files-data.sh와 그 실행자 배선을 확인하세요. ⚠️ 국면 A(versions.env의 BULK_MIGRATION_WINDOW_UNTIL이 비어 있지 않으면 진행 중)에는 '값 없음' 가지가 의도적으로 억제돼 있다 — 이 알림이 떴다면 실행자는 있는데 백업이 stale하다는 뜻이다."
+          # bulk 티어 용량: 호스트 df를 백업 잡이 함께 push(files_data_bulk_avail/size_bytes).
+          #
+          # ⚠️ **국면 A 정정(2026-08-17)**: 아래 서술의 "호스트 launchd pusher"는 Mac 시대의 실행자다.
+          #   NUC 이식으로 그 실행자가 사라져 **국면 A 동안 이 알림은 양변이 빈 벡터라 구조적으로 무성**이다.
+          #   그 축의 유일한 생존 신호는 in-cluster 짝인 `BulkStorageLow`(du exporter · absent 가드 착용 ·
+          #   15%)다 — 그쪽을 지우거나 약화시키면 안 된다. 국면 B에서 실행자가 배선되면 자동 복귀한다.
+          #   여기 expr은 손대지 않는다(absent 가드를 안 다는 결정은 국면 B에서 여전히 옳다 — 중복 페이지).
+          #   아래 rollup 논거는 실행자가 있는 국면(과거·미래) 모두에 유효하므로 그대로 둔다.
           #
           # ★ 양변 rollup은 필수다(맨 참조 금지 — 이게 이 알림이 죽어 있던 이유다). files_data_bulk_*의 pusher는
           #   호스트 launchd(app.homelab.files-backup, scripts/backup-files-data.sh)라 **하루 1회(04:30)** 단발
@@ -172,9 +209,11 @@ data:
           #      상한 제약은 **적용되지 않는다**(그 룰의 W는 구 상태를 되살리는 래치라 for:보다 작아야 한다 —
           #      혼동 주의). 여기서 rollup이 되살리는 건 "마지막으로 측정된 여유율"이고, 그건 값 자체다.
           #
-          # ★ absent() 가드를 **의도적으로 달지 않는다**: launchd/push의 **전면** 실패(미실행·크래시·push 불가)는
+          # ★ absent() 가드를 **의도적으로 달지 않는다**: 실행자/push의 **전면** 실패(미실행·크래시·push 불가)는
           #   같은 스크립트가 함께 발행하는 files_backup_last_success_timestamp를 통해 위 FilesBackupStale
           #   (severity critical, absent 착용)이 fail-loud로 페이징한다. 여기 또 달면 동일 고장에 중복 페이지가 난다.
+          #   ⚠️ **국면 A 동안은 그 backstop 논거가 성립하지 않는다** — FilesBackupStale의 absent 가지가
+          #   억제돼 있기 때문이다(위 룰 주석). 그 기간의 bulk 결핍 신호는 `BulkStorageLow` 하나뿐이다.
           #   ⚠️ **다만 그 백스톱은 부분 고장(값 오염)까지는 못 잡는다** — 정직한 한계다. backup-files-data.sh의
           #   push_metrics()는 df가 실패해도 `${avail:-0}`/`${size:-0}`로 **0을 대입한 채** 성공 하트비트를 함께
           #   발행하고, 호출부도 `|| WARN`이라 abort하지 않는다 → FilesBackupStale는 **초록**인데 여기 avail=0이
@@ -191,8 +230,8 @@ data:
             for: 30m
             labels: { severity: warning, disk: bulk }
             annotations:
-              summary: "외장 bulk SSD 여유 공간 10% 미만"
-              description: "files-data·pg-basebackup-local이 공유하는 2TB 외장 SSD 여유가 부족합니다 — files 쓰기 실패(/readyz NotReady) 및 로컬 base-backup 적체 위험. 최대 소비자를 정리하세요."
+              summary: "bulk 티어 여유 공간 10% 미만(호스트 df 판독)"
+              description: "files-data·pg-basebackup-local이 공유하는 bulk 티어의 여유가 부족합니다 — files 쓰기 실패(/readyz NotReady) 및 로컬 base-backup 적체 위험. ⚠️ 매체는 국면에 따라 다르다: 국면 A(versions.env의 BULK_MIGRATION_WINDOW_UNTIL이 비어 있지 않으면 진행 중)에는 /mnt/bulk가 루트 LV의 bind 마운트라 **이 수치는 루트 파일시스템 여유와 같고**, 원인은 '외장 디스크'가 아니라 루트 포화다(StandardSSDWarning/Filling 동반 발화가 정상). 진짜 별도 2TB M.2는 국면 B부터다. 최대 소비자를 정리하세요."
           # per-PVC du exporter(pvc-du-exporter.yaml, 일 1회 05:00 KST) 생존 — pvc_du_last_success_timestamp를
           # 단발 push한다. instant query는 staleness 윈도(~분) 밖 단발 샘플을 못 보므로(CNPGRestoreDrillStale과
           # 동형) [3d] last_over_time으로 마지막 성공을 찾아 판정. 값 없음(첫 push 전)은 absent가로 fail-loud.
@@ -219,8 +258,8 @@ data:
             for: 30m
             labels: { severity: warning, disk: bulk }
             annotations:
-              summary: "외장(bulk-ssd) 여유 15% 미만 또는 in-cluster 신호 소실"
-              description: "du exporter가 본 bulk 티어 여유가 15% 미만이거나 storage_tier_avail_bytes{tier=bulk} 신호가 소실됐습니다 — W3에서 관측 TSDB가 bulk에 얹히므로 이전 착수 전 반드시 여유를 확인하세요(FilesBulkSSDLow의 in-cluster 짝)."
+              summary: "bulk-ssd 티어 여유 15% 미만 또는 in-cluster 신호 소실"
+              description: "du exporter가 본 bulk 티어 여유가 15% 미만이거나 storage_tier_avail_bytes{tier=bulk} 신호가 소실됐습니다 — W3에서 관측 TSDB가 bulk에 얹히므로 이전 착수 전 반드시 여유를 확인하세요(FilesBulkSSDLow의 in-cluster 짝). ⚠️ 국면 A(D4 한시 — versions.env의 BULK_MIGRATION_WINDOW_UNTIL이 비어 있지 않으면 진행 중) 동안 bulk는 루트 LV의 bind 마운트라 **이 수치는 루트 파일시스템 여유와 같습니다**. 그 기간에는 StandardSSDWarning/Filling과 같은 사건에 함께 발화하는 것이 정상이며, 원인은 '외장 디스크'가 아니라 루트 포화입니다."
           # ★ digest-exporter 자기관측(감시견의 감시견) — ImageDigestDrift(r6)의 **먹이 공급선**이 죽으면
           #   그 알림이 조용히 실명한다(ghcr_latest_digest 시리즈가 끊긴 뒤 [15m] 윈도가 만료되면 좌변이 빈
           #   벡터 → 드리프트가 있어도 무발화). exporter의 조용한 실패 3모드(크론 미실행·push 실패·파드 기동

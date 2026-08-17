@@ -38,7 +38,7 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
   타이트(≥1.3x 미달) — 축소 금지, cnpg-operator는 near-OOM이라 관찰 필요(ContainerMemoryNearLimit이 backstop).
 - **owner 결정(2026-07-07, F23 게이트): (b) VM RAM 증설 확정** — right-size로 ≥256 불가 확정에 따라 VM
   증설이 온보딩 차단의 유일 실효 해소책으로 채택. 착수 = W2 병행 owner-local 태스크(VM 재시작 필요):
-  `infra/k3s-bootstrap/versions.env` ORB_MEMORY_MIB 11264→12288 + 이 원장 meta VM_ALLOCATABLE_MIB
+  ~~`infra/k3s-bootstrap/versions.env` ORB_MEMORY_MIB~~(베어메탈 이전으로 삭제) 11264→12288 + 이 원장 meta VM_ALLOCATABLE_MIB
   11264→12288·LIMIT_BUDGET_MIB 9216→10240(reserve 2048 유지). 반영 후 명목 잔여 ≈ 1028Mi(온보딩 차단 해소).
   ⚠️ config 변경은 VM resize와 **커플링** — VM 재시작 전 cap 선행 상향 시 page-cache/burst 리저브 침식이라,
   cap 상향은 VM 재시작 후에만 적용했다(resize와 동일 커밋). 동시 peak ≪ allocatable라 노드-OOM 안전.
@@ -70,6 +70,34 @@ sealed-secrets 128→96·vmsingle 1Gi→896으로 −160Mi 추가 회수, 명목
 주의: 행은 라이브 manifest와 자동 교차검증되지 않는다(verify:ledger는 마크다운만; local-helm traefik 등은
 check-resource-limits 스캔 밖이라 여기 수기 계상). 신규/변경 상주 워크로드는 반드시 행+산문 동반 갱신.
 
+2026-08-14: observability 행 상향(limit 2080→2400 **+320**, req 1152→1184 **+32**) — NUC 콜드스타트에서
+`victorialogs`(128→256Mi)와 `vector`(320→512Mi)가 실제로 OOMKilled 루프를 돌았다(2시간에 각 16회·22회).
+근거는 커널 OOM 기록의 anon-rss(vlogs ~129MiB · vector ~325MiB)이고, 두 값 모두 limit에 정확히 붙어
+있었다 — 누수가 아니라 작업집합이다. **코어 수(GOMAXPROCS/--threads)를 원인으로 본 최초 진단은
+반증됐다**: 핀을 넣어 vector 워커를 15→8로 줄였는데 OOM anon-rss는 그대로였다(핀 자체는 위생 조치로
+유지). vlogs 쪽이 1차 원인이고 vector는 sink 백프레셔로 끌려 죽는 결합 루프였다.
+✅ **2026-08-15 재기준선 완료 — 회수하지 않기로 했다.** 버스트가 걷힌 뒤 **27시간 steady** 구간을
+NUC에서 cgroup으로 실측했다(`memory.current`/`memory.peak`, 컨테이너 시작 2026-08-14T05:34Z):
+
+| | steady(current) | **peak** | limit | peak/limit |
+|---|---|---|---|---|
+| `vector` | 71 Mi | **418 Mi** | 512 Mi | 82% |
+| `victorialogs` | 75 Mi | **181 Mi** | 256 Mi | 71% |
+
+steady만 보면 7배 과다로 보이지만 **peak가 판단 기준이다.** 이 원장은 스스로 적었듯 limit 합이
+*동시-peak 상한*이고, 위 peak는 **현재 limit으로 실제 백로그 버스트를 겪으며 살아남은 값**이다.
+⚠️ 그리고 **버스트 크기는 장애 지속시간에 비례한다** — 418 Mi는 17시간 장애가 만든 것이고 더 긴
+장애면 더 크다. peak 위 여유(vector 94 Mi · vlogs 75 Mi)는 낭비가 아니라 **더 나쁜 장애에 대한
+보험**이며, steady에 맞춰 깎으면 관측이 가장 필요한 순간에 파이프라인이 죽는다.
+⚠️ vlogs는 깎으면 **캐시 예산도 같이 준다**(`-memory.allowedPercent=60`이 limit에 비례).
+⚠️ `go_memstats_heap_sys`(166 MB)를 RSS로 읽지 말 것 — Go가 예약만 하고 반납 안 한 주소공간이다
+(실제 RSS 66.8 MB).
+
+명목 잔여 = 10240 − 9020 = **1220 Mi(11%)** — 신규 온보딩을 막는 수준이 아니다.
+**회수를 다시 검토할 조건**: 잔여가 수십 Mi까지 떨어질 때. 그때도 limit을 깎기 전에 **버스트 자체를
+줄이는 쪽**(vector sink `request.concurrency` 고정)을 먼저 볼 것 — 미검증이므로 넣으면 반드시
+같은 지표를 다시 재라(`docs/traps-detail.md`의 "상주 워크로드 OOM 진단").
+
 <!-- ledger:meta VM_ALLOCATABLE_MIB=12288 LIMIT_BUDGET_MIB=10240 -->
 
 | component                          | namespace      | req_mi | limit_mi |
@@ -79,7 +107,7 @@ check-resource-limits 스캔 밖이라 여기 수기 계상). 신규/변경 상�
 | <!-- ledger:row --> cnpg           | database       |    900 |     1152 |
 | <!-- ledger:row --> cnpg-operator  | cnpg-system    |    100 |      160 |
 | <!-- ledger:row --> cert-manager   | cert-manager   |     88 |      384 |
-| <!-- ledger:row --> observability  | observability  |   1152 |     2080 |
+| <!-- ledger:row --> observability  | observability  |   1184 |     2400 |
 | <!-- ledger:row --> edge           | edge           |     96 |      288 |
 | <!-- ledger:row --> tailscale      | tailscale      |    192 |      512 |
 | <!-- ledger:row --> whoami         | gateway        |     16 |       16 |
