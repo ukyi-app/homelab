@@ -36,7 +36,7 @@ spec:
             #    인증 자격 추출. 자격 값은 로그에 출력하지 않는다(파일로만, umask 077).
             - name: discover
               # digest 핀: mutable 태그는 push 때마다 움직인다 (pgdump-hedge와 동일 규약).
-              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:3378c346d97885e0fbf9d459aa339e12fb68bd46a5192c5dc8ee4adfc36623f0
+              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:c6349f899e3cd6eb5cf4a560cd32b3863402d81b747319c9510b762133fa26ee
               command: ["/bin/bash", "-c"]
               env:
                 - { name: HOME, value: /work } # kubectl 캐시 경로 (read-only rootfs 대비)
@@ -83,7 +83,7 @@ spec:
           containers:
             # 3) 업로드: rclone → R2 + 신선도 메타(last_success.json) + 14일 초과분 프루닝.
             - name: upload
-              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:3378c346d97885e0fbf9d459aa339e12fb68bd46a5192c5dc8ee4adfc36623f0
+              image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:c6349f899e3cd6eb5cf4a560cd32b3863402d81b747319c9510b762133fa26ee
               command: ["/bin/bash", "-c"]
               args:
                 - |
