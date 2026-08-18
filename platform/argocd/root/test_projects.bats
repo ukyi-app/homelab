@@ -215,6 +215,29 @@ setup() {
   [ "$total" = "$pf" ]
 }
 
+@test "EVERY Namespace declared anywhere in the repo is non-prunable (class guard)" {
+  # 🔴 2026-08-18: 위 테스트는 `platform/namespaces/prod` **하나만** build하므로, 컴포넌트가
+  #    자기 디렉터리에서 선언하는 Namespace를 원리적으로 못 본다. 실제로 둘이 무방비였다:
+  #      - observability (platform/victoria-stack/prod/namespace.yaml) — 소유 App이 prune:true인데
+  #        `CreateNamespace=false`라 prune되면 ArgoCD가 **재생성조차 못 한다**
+  #      - database (platform/cnpg/prod/namespace.yaml) — ns prune이 Cluster·PVC를 통째로 데려간다
+  #    ⚠️ appset의 exclude 목록을 따라가는 발견 루프로는 이 둘을 못 잡는다 — appset.yaml이
+  #       `platform/cnpg/*`와 `platform/victoria-stack/*`를 정확히 exclude하기 때문이다.
+  #       그래서 exclude와 무관한 **소스 전수 스캔**으로 짠다(kustomize/ksops 불필요 = CI에서 돈다).
+  files="$(cd "$ROOT" && grep -rl '^kind: Namespace' platform apps 2>/dev/null | sort)"
+  [ -n "$files" ]
+  missing=""
+  for f in $files; do
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      case "$line" in *"-> Prune=false"*) ;; *) missing="${missing}${f}: ${line}"$'\n' ;; esac
+    done <<EOF
+$(cd "$ROOT" && yq 'select(.kind=="Namespace") | [.metadata.name, (.metadata.annotations."argocd.argoproj.io/sync-options" // "MISSING")] | join(" -> ")' "$f" | grep -v '^---$' | grep .)
+EOF
+  done
+  if [ -n "$missing" ]; then echo "Prune=false 없는 Namespace:"; echo "$missing"; return 1; fi
+}
+
 # --- appset finalizer (설계 §D, teardown cascade prune) ---
 @test "both ApplicationSet templates carry resources-finalizer" {
   run yq '.spec.template.metadata.finalizers[]' "$APPSET"
