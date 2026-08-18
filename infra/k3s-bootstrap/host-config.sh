@@ -49,7 +49,10 @@ SSHD_DROPIN="10-k3s-node.conf"
 # 통과한다 — 레포가 scan-floor로 도처에서 막는 그 클래스다. 수치는 소비자(=이 파일)가 소유한다.
 # ⚠️ 트리에 파일을 더하면 **이 값도 같이 올려야** 바닥값이 계속 의미를 갖는다.
 #    (3 → 4: 2026-08-15 `etc/tmpfiles.d/10-k3s-node.conf` 추가 — NVMe ASPM L1 비활성)
-TREE_MIN=4
+#    (4 → 5: 2026-08-18 `etc/systemd/network/10-netplan-wlo1.network.d/10-k3s-node.conf` 추가 —
+#           R7이 여는 콜드스타트 교착 차단. DHCP가 광고하는 AdGuard(=노드 자신의 LAN IP)를
+#           링크가 받지 않게 해 resolved.conf.d의 `DNS=`가 governing이 되게 한다.)
+TREE_MIN=5
 
 fail() { echo "FAIL: host-config: $*" >&2; exit 1; }
 

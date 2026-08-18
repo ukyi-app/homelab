@@ -295,3 +295,26 @@ _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RU
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -qF -- 'tailscale이 PATH에 없다'
 }
+
+@test "the networkd drop-in refuses DHCP-provided DNS (R7 cold-start deadlock guard)" {
+  # ⚠️ R7(LAN DNS를 AdGuard로)은 라우터가 노드에게 **노드 자신의 IP**를 DNS로 광고하게 만든다.
+  #    그 주소는 LOCAL이라 CNI hostPort DNAT(--dst-type LOCAL, 목적지 제한 없음)에 걸려
+  #    노드 이름해석이 AdGuard 파드에 의존한다 — 콜드스타트에서 이미지 pull 불가 = 교착.
+  #    resolved.conf.d의 DNSStubListener=no가 막은 것과 같은 교착의 다른 문이다.
+  f="$TREE/etc/systemd/network/10-netplan-wlo1.network.d/10-k3s-node.conf"
+  [ -f "$f" ]
+  grep -qxF 'UseDNS=false' "$f"
+  grep -qxF '[DHCP]' "$f"
+}
+
+@test "the resolved DNS pin and the DHCP refusal are a pair (one without the other is inert)" {
+  # `DNS=`는 링크별 DNS가 **없을 때**의 폴백이다. UseDNS=false가 그 조건을 성립시킨다 —
+  # 하나만 있으면 링크 DNS가 이겨서 핀이 무효이거나, 링크가 비어도 갈 곳이 없다.
+  r="$TREE/etc/systemd/resolved.conf.d/10-k3s-node.conf"
+  n="$TREE/etc/systemd/network/10-netplan-wlo1.network.d/10-k3s-node.conf"
+  grep -qE '^DNS=' "$r"
+  grep -qxF 'UseDNS=false' "$n"
+  # 핀 값은 versions.env SSOT와 같아야 한다(기존 @test와 같은 계약 — 여기서는 쌍의 존재만 본다).
+  [ -n "$HOST_UPSTREAM_DNS" ]
+  grep -qxF "DNS=${HOST_UPSTREAM_DNS}" "$r"
+}

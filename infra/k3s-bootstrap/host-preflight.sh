@@ -102,6 +102,28 @@ EOF
 [ "$ns_routable" -ge 1 ] || fail "${rc}의 nameserver ${ns_total}건이 전부 loopback이다 — hostPort DNAT(--dst-type LOCAL)에 걸려 노드 이름해석이 클러스터에 의존하게 된다"
 [ "$ns_tailnet" -eq 0 ] || fail "${rc}의 nameserver ${ns_tailnet}건이 tailnet 대역이다(${ns_tailnet_list% }) — MagicDNS의 업스트림은 tailnet이 정하고 지금 그 값은 라이브 Mac의 AdGuard다. 노드 이름해석이 클러스터에 의존한다. 처방: tailscale set --accept-dns=false"
 
+# ⚠️ **노드 자신의 IP도 거부한다 — R7(LAN DNS를 AdGuard로)이 여는 세 번째 문이다.**
+#    라우터의 DHCP option 6을 AdGuard(=이 노드의 LAN IP)로 바꾸면 노드도 그 값을 받는다.
+#    그 주소는 노드에게 **LOCAL**이라 위 두 검사와 정확히 같은 DNAT에 걸린다(실측 2026-08-18):
+#        -A OUTPUT -m addrtype --dst-type LOCAL -j CNI-HOSTPORT-DNAT
+#        -A CNI-DN-… -p udp --dport 53 -j DNAT --to-destination <AdGuard 파드>:53   ← 목적지 제한 없음
+#    콜드스타트에서 AdGuard 파드가 없으면 그 질의는 블랙홀로 가고, 이름해석 없이는 이미지를
+#    pull하지 못해 AdGuard가 영영 못 뜬다. loopback을 거르면서 자기 IP를 통과시키면 같은 교착이
+#    다른 주소로 재현된다 — 그래서 **같은 검사의 일부**로 둔다.
+#    처방: 링크가 DHCP DNS를 받지 않게 하고(host-config의 networkd 드롭인 `UseDNS=false`)
+#          resolved.conf.d의 `DNS=`(=versions.env HOST_UPSTREAM_DNS)가 governing이 되게 한다.
+self_addrs="$($PREFLIGHT_IP -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1)" \
+  || fail "인터페이스 주소를 열거하지 못했다(${PREFLIGHT_IP}) — 자기참조 리졸버를 판별할 수 없다"
+[ -n "$self_addrs" ] || fail "인터페이스 주소가 0건이다 — 열거가 붕괴했다(자기참조 검사가 무측정이 된다)"
+ns_self_list=""
+while IFS= read -r addr; do
+  [ -n "$addr" ] || continue
+  if printf '%s\n' "$self_addrs" | grep -qxF "$addr"; then ns_self_list="${ns_self_list}${addr} "; fi
+done <<EOF
+$(grep -E '^[[:space:]]*nameserver[[:space:]]+' "$rc" | awk '{print $2}')
+EOF
+[ -z "$ns_self_list" ] || fail "${rc}의 nameserver가 **노드 자신의 주소**다(${ns_self_list% }) — LOCAL이라 CNI hostPort DNAT에 걸려 노드 이름해석이 AdGuard 파드에 의존한다(콜드스타트 교착). R7로 DHCP가 AdGuard를 광고했다면 링크에서 UseDNS=false로 끊을 것"
+
 # ── [4] 핀한 노드 IP가 실제로 인터페이스에 있는가 ──────────────────────────────────────────
 case "${K3S_NODE_IP:-}" in "") fail "K3S_NODE_IP 미설정 — versions.env 확인" ;; esac
 addrs="$($PREFLIGHT_IP -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1)" \

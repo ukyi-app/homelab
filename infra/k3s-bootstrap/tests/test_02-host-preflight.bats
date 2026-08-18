@@ -230,3 +230,33 @@ EOF
   # engagement 단언: 카운터가 OK 줄에 실제로 나온다(검사가 돌았다는 증거).
   printf '%s' "$output" | grep -qF -- 'swap 활성 0건/fstab 0건'
 }
+
+@test "rejects a resolver that is the node's OWN address (R7 opens this door)" {
+  # ⚠️ R7(LAN DNS를 AdGuard로)은 라우터가 노드에게 노드 자신의 LAN IP를 DNS로 광고하게 만든다.
+  #    그 주소는 LOCAL이라 CNI hostPort DNAT(--dst-type LOCAL, 목적지 제한 없음)에 걸려
+  #    노드 이름해석이 AdGuard 파드에 의존한다 — 콜드스타트에서 이미지 pull 불가 = 교착.
+  #    loopback·tailnet을 거르면서 자기 IP를 통과시키면 같은 교착이 다른 주소로 재현된다.
+  printf 'nameserver %s\n' "$K3S_NODE_IP" > "$FX/etc/resolv.conf"
+  run_pf
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '노드 자신의 주소'
+}
+
+@test "a healthy non-self routable resolver still passes (the self check is not vacuous)" {
+  # 양성 대조 — 위 검사가 '모든 routable 리졸버'를 거부하는 것이 아님을 못박는다.
+  printf 'nameserver %s\n' "$HOST_UPSTREAM_DNS" > "$FX/etc/resolv.conf"
+  run_pf
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF -- 'OK: host-preflight'
+}
+
+@test "an interface enumeration that returns nothing is refused, not read as 'no self-reference'" {
+  # ⚠️ 열거 붕괴 → vacuous green. `ip`가 빈 출력을 내면 자기참조 검사가 비교할 대상 없이
+  #    조용히 통과한다 — 이 레포가 원장에 등재한 클래스다("열거 0건은 통과가 아니다").
+  #    R7 이후에는 그 침묵이 곧 콜드스타트 교착을 못 잡는다는 뜻이다.
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$IPSTUB"   # rc 0인데 출력 0줄 — 가장 나쁜 형태
+  chmod +x "$IPSTUB"
+  run_pf
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '열거가 붕괴했다'
+}
