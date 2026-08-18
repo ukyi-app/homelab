@@ -281,3 +281,38 @@ EOF
   [ "$status" -ne 0 ]
   echo "$output" | grep -Fq "이미 배선"
 }
+
+@test "every file create-app writes is covered by the workflow's add-paths (staging guard)" {
+  # 🔴 2026-08-18: `_create-app.yaml`의 add-paths에 `platform`이 빠져 있었다. create-app.ts는
+  #    digest-exporter의 APPS 목록(`platform/victoria-stack/prod/digest-exporter.yaml`)에도 쓰는데,
+  #    pr-first-commit의 `git add $ADD_PATHS`가 그 수정을 스테이징하지 않아 커밋에서 조용히 유실되고
+  #    parity 게이트가 want≠got으로 red가 된다. `apps/`가 비어 있어 잠복해 있었을 뿐이다.
+  # 정적 경로 추출은 거짓 양성을 낸다(도구가 `${ROOT}/tools/...`를 읽기로도 쓴다) → 실제 쓰기를 관측한다.
+  sig() { (cd "$FR" && find . -type f -exec cksum {} \; | sed 's|^\([0-9]* [0-9]*\) \./|\1 |' | sort); }
+  before="$(sig)"
+  gen
+  [ "$status" -eq 0 ]
+  after="$(sig)"
+  # 추가·변경된 파일 경로(체크섬이 다르거나 새로 생긴 것)
+  changed="$(comm -13 <(echo "$before") <(echo "$after") | sed 's|^[0-9]* [0-9]* ||' | sort -u)"
+  [ -n "$changed" ]
+
+  # 워크플로가 선언한 add-paths — GitHub 표현식은 픽스처 앱명으로 치환
+  wf="$ROOT/.github/workflows/_create-app.yaml"
+  paths="$(sed -n 's/^ *add-paths: *//p' "$wf" | sed 's/\${{[^}]*}}/orders/g')"
+  [ -n "$paths" ]
+
+  uncovered=""
+  for c in $changed; do
+    ok=0
+    for p in $paths; do
+      case "$c" in "$p" | "$p"/*) ok=1; break ;; esac
+    done
+    [ "$ok" = 1 ] || uncovered="$uncovered $c"
+  done
+  if [ -n "$uncovered" ]; then
+    echo "create-app이 쓰지만 add-paths가 안 덮는 경로:$uncovered"
+    echo "선언된 add-paths: $paths"
+    return 1
+  fi
+}
