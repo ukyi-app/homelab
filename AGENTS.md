@@ -71,6 +71,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - CNPG Pooler 예약 파라미터 pool_mode → poolMode
 - SSA atomic 리스트 영구 OutOfSync
 - Application zero-value selfHeal 플립플롭
+- selfHeal이 라이브 실험을 무력화한다 — 끄는 레버는 git뿐
 - PSA baseline hostPath/hostPID 금지
 - CNPG pg_hba replication pg_basebackup
 - CronJob k3s VM TZ(Asia/Seoul)
