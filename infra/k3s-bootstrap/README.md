@@ -42,6 +42,6 @@ echo '/var/lib/rancher/k3s-storage/bulk /mnt/bulk none bind 0 0' | sudo tee -a /
 #      즉 M.2 를 실제로 마운트하지 않은 채 창만 비우는 사고가 가드로 막힌다.
 ```
 
-**라이브 디버그** — 셸 스크립트 로그 + `verify-cluster.sh`. 런북 `docs/runbooks/host-substrate.md`(OrbStack VM/k3s 계층), `docs/runbooks/external-ssd.md`, `docs/runbooks/storage-verify.md`. 테스트는 `infra/k3s-bootstrap/tests/`.
+**라이브 디버그** — 셸 스크립트 로그 + `verify-cluster.sh`. 런북 `docs/runbooks/host-substrate.md`(베어메탈 NUC/k3s 계층), `docs/runbooks/external-ssd.md`, `docs/runbooks/storage-verify.md`. 테스트는 `infra/k3s-bootstrap/tests/`.
 
 **함정 SSOT** — docs/traps-detail.md. 베어메탈 이전으로 OrbStack 고유 함정(포트포워드·VM IP 비라우팅·virtiofs)은 소멸했고, 대신 **CNI hostPort DNAT가 `--dst-type LOCAL`로 노드 자신의 :53 질의까지 끌어가는** 콜드스타트 교착이 자리를 대신한다(`host-preflight.sh` 헤더가 기전의 SSOT). 모든 PV가 hostPath라 `kubelet_volume_stats`는 여전히 부재.
