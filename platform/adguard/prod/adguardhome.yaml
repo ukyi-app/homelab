@@ -13,6 +13,19 @@ data:
         - https://dns.quad9.net/dns-query
       bootstrap_dns: ["1.1.1.1", "9.9.9.9"]
       upstream_mode: load_balance
+      # 🔴 레이트리밋 — R7(LAN DNS 전환) 이후 기본값 20이 집 전체를 조인다.
+      #    라우터(Orbi RBR350)가 클라이언트에게 광고할 DNS를 따로 못 정하는 기종이라(런북 §2 "경우 B")
+      #    **집 전체 질의가 라우터 IP 하나로 도착**한다. 게다가 ratelimit_subnet_len_ipv4 기본값이 24라
+      #    LAN 전체가 한 버킷이다 → 실측 2026-08-18: 40건 동시 질의 중 **정확히 20건이 무응답**,
+      #    30 q/s에서 4/30, 50 q/s에서 15/50이 버려졌다(AdGuard는 이 드롭을 로그에 남기지도 않는다).
+      #    ⚠️ 차단이 "새는" 것이 아니라 질의가 **실패**한다 — 같은 실측에서 차단 누수는 0건이었다
+      #       (라우터가 보조 1.1.1.1로 넘어가는 문턱이 높다). 증상은 페이지 로드 지연·간헐 실패다.
+      #    R7 이전에는 LAN 기기가 AdGuard를 안 써서 이 버킷이 비어 있었다 — R7이 만든 문제다.
+      ratelimit: 100
+      # 라우터는 경우 B에서 **LAN의 유일한 DNS 클라이언트**다. 여기가 조여지면 집 전체가 함께 조여지므로
+      # 예외로 둔다. 기기별 직접 질의(tailnet 100.x 등)에는 위 100/s가 그대로 적용된다.
+      ratelimit_whitelist:
+        - 192.168.117.1
     filtering:
       rewrites:
         # split-horizon: 모든 *.home 이름 → Traefik tailscale 디바이스(gateway/traefik-ts LB)의 tailscale IP.
