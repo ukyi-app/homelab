@@ -177,7 +177,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 | `app-platform.md` | App Platform 트리거 경계·Phase 0 체크리스트·activate-app/purge 절차 |
 | `app-onboarding.md` | 앱 온보딩 체인(외부 레포 + 인레포) |
 | `external-ssd.md` | `bulk-ssd` 티어 매체 배치 + DR 재결합(베어메탈 — 2026-08-17 재작성) |
-| `host-substrate.md` | OrbStack VM/k3s 호스트 계층 |
+| `host-substrate.md` | 베어메탈 NUC/k3s 호스트 계층 — 계층 경계·재구축 프리미티브·수용 증거 |
 | `lan-dns.md` | AdGuard split-horizon + 라우터 DNS(R7) |
 | `observability-bootstrap.md` / `observability-verify.md` | 관측성 셋업/검증 스윕 |
 | `restore.md` | CNPG 복구(R1) — DR 핵심 |
