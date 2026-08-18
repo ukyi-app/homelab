@@ -69,10 +69,12 @@ spec:
       # restore_canary를 git으로 시드한다 — DR 재구축(initdb)에서 자동 복원돼 주간 restore-drill이
       # 수동 재시드 없이 동작한다. postInitApplicationSQL은 app DB에 initdb 시 1회만 실행되고,
       # 기존 클러스터엔 no-op이다(R2 recovery 경로는 base backup의 테이블을 그대로 가져온다).
-      # ⚠️ 이 시드가 **1회성**이라는 사실이 중요하다 — 라이브 canary는 영구히 1행이고(실측 2026-08-17)
-      #    아무도 여기에 INSERT하지 않는다. 따라서 restore-drill의 행 수 비교는 상수 비교이고
-      #    **아카이브 신선도(RPO)를 증명하지 못한다.** 드릴이 진짜 복구를 했는지는 그 스크립트의
-      #    `SAW_NONHEALTHY` 증인이 본다(M17/PR #482). RPO 증명은 별건이다.
+      # ⚠️ 이 시드는 **initdb 1회성**이다 — 콜드 재구축에서만 실행되고 기존 클러스터엔 no-op이다.
+      #    ✅ 2026-08-18부터 **restore-drill이 매 실행 1행씩 INSERT한다**(restore-drill-script.sh의
+      #    RPO 마커 블록). 그전까지는 라이브가 영구히 1행이라 드릴의 행 수 비교가 상수 비교였고
+      #    아카이브 신선도를 증명하지 못했다 — 그 구멍을 마커가 닫았다.
+      #    부수 효과: 행 수가 매주 늘어 `ACTUAL >= EXPECTED` 비교도 처음으로 의미를 갖는다
+      #    (지난 주 생존자 복구본은 EXPECTED에 못 미쳐 걸린다 — SAW_NONHEALTHY 증인의 이중화).
       postInitApplicationSQL:
         - CREATE TABLE IF NOT EXISTS restore_canary (id serial primary key, ts timestamptz default now())
         - INSERT INTO restore_canary DEFAULT VALUES
