@@ -1,6 +1,6 @@
 # homelab
 
-k3s 단일 노드(Mac mini · OrbStack VM · arm64) **GitOps 모노레포**. ArgoCD가 이 레포의 `main`을
+k3s 단일 노드(**Intel NUC15CRHU5 베어메탈** · Ubuntu 26.04 LTS · amd64) **GitOps 모노레포**. ArgoCD가 이 레포의 `main`을
 싱크해 전 스택을 운영한다 — 클러스터에서 손으로 바꾸는 것은 없다(**SSOT는 git**). 앱 코드는
 별도 레포(`ukyi-app/<app>`)에 살고 GHCR로 이미지를 올리며, 이 레포에는 **배포 설정만** 둔다.
 모든 `main` 변경은 PR-first + 게이트 통과 후 머지, 인프라는 Terraform·k3s 부트스트랩으로 코드화한다.
@@ -11,7 +11,7 @@ k3s 단일 노드(Mac mini · OrbStack VM · arm64) **GitOps 모노레포**. Arg
    ukyi-app/<app> ──image(GHCR)──┐        ┌── git(main) ──▶ ArgoCD ──sync──▶ 전 스택
    (앱 코드 · 별도 레포)             │        │                 (SSOT — 클러스터 수동변경 0)
                                  ▼        │
-   ══════════════════  k3s 단일 노드 · OrbStack VM (arm64 · 11GiB · 6 vCPU)  ══════════════════
+   ═════════  k3s 단일 노드 · NUC 베어메탈 (amd64 · 60GiB · 14 vCPU · NVMe 931G)  ═════════
 
      공개 경로                                     내부 경로 (tailscale 전용)
      ─────────                                     ─────────────────────────
@@ -51,7 +51,7 @@ k3s 단일 노드(Mac mini · OrbStack VM · arm64) **GitOps 모노레포**. Arg
 
 | 영역 | 기술 |
 |---|---|
-| 호스트 · 오케스트레이션 | OrbStack VM(Debian 12 · arm64) · **k3s** v1.36 · local-path-provisioner(내장 btrfs SSD + 외장 bulk SSD via virtiofs) |
+| 호스트 · 오케스트레이션 | **Intel NUC15CRHU5 베어메탈**(Ubuntu 26.04 LTS · amd64 · 14 vCPU · 60 GiB · NVMe 931G) · **k3s** v1.36 · containerd 2.3 · local-path-provisioner 3티어(`standard`/`bulk-ssd`/`drill-ssd`) |
 | GitOps · CD | **ArgoCD** v3.4 — app-of-apps + ApplicationSet |
 | IaC | **Terraform** ≥1.9 — `cloudflare` · `github` · `tailscale` provider · **R2**(S3 호환) state backend |
 | 엣지 · 네트워크 | **Cloudflare**(DNS · Tunnel · WAF · zone hardening) · **cloudflared** · **tailscale-operator** v1.98 · **AdGuard Home** · kube-router NetworkPolicy |

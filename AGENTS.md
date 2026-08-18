@@ -1,6 +1,6 @@
 # AGENTS.md — 에이전트/개발자 작업 가이드
 
-k3s 단일 노드(Mac mini, OrbStack VM) 홈랩의 GitOps 모노레포. ArgoCD가 이 레포의 `main`을
+k3s 단일 노드(**Intel NUC 베어메탈** · Ubuntu 26.04 LTS · amd64) 홈랩의 GitOps 모노레포. ArgoCD가 이 레포의 `main`을
 싱크해 전 스택을 운영한다. 앱 코드는 **별도 레포**(`ukyi-app/<app>`, 템플릿:
 `ukyi-app/homelab-app-template`)에 살고, 이 레포에는 배포 설정만 둔다.
 
@@ -139,7 +139,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 (App 토큰은 branch protection 우회 불가; required check `gate` 통과 시 자동 머지).
 
 - **빌드:** 템플릿으로 레포 생성 → `.app-config.yml` 작성(계약: `tools/app-config-schema.json`)
-  → main push → `reusable-app-build.yaml`(arm64→GHCR push + deploy-trigger 잡: `HOMELAB_DISPATCH_APP`
+  → main push → `reusable-app-build.yaml`(amd64+arm64 멀티아치→GHCR push + deploy-trigger 잡: `HOMELAB_DISPATCH_APP`
     시크릿 쌍 전달 시 homelab bump-poll 1회 디스패치로 크론 지연 제거, 미전달=clean skip·크론 백스톱).
 - **생성 변이:** owner가 homelab에서 액션별 디스패처(workflow_dispatch) 실행 (변이 디스패처는 `vars.HOMELAB_OWNER` actor 가드로 owner 전용 — bump-poll/audit reconciler는 비대상) —
   `create-app`/`update-secrets`/`create-database`/`create-cache`/`teardown-app`(각 전용 워크플로). **파괴: `teardown-app`은
@@ -175,7 +175,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 | `age-keys.md` | age 2-recipient 키 모델/보관 |
 | `app-platform.md` | App Platform 트리거 경계·Phase 0 체크리스트·activate-app/purge 절차 |
 | `app-onboarding.md` | 앱 온보딩 체인(외부 레포 + 인레포) |
-| `external-ssd.md` | 외장 SSD APFS 볼륨 + bulk-ssd 게이트 |
+| `external-ssd.md` | `bulk-ssd` 티어 매체 배치 + DR 재결합(베어메탈 — 2026-08-17 재작성) |
 | `host-substrate.md` | OrbStack VM/k3s 호스트 계층 |
 | `lan-dns.md` | AdGuard split-horizon + 라우터 DNS(R7) |
 | `observability-bootstrap.md` / `observability-verify.md` | 관측성 셋업/검증 스윕 |
