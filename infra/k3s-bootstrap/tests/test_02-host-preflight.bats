@@ -28,6 +28,16 @@ echo "2: wlo1    inet ${K3S_NODE_IP}/24 brd 192.168.117.255 scope global dynamic
 echo "3: lo      inet 127.0.0.1/8 scope host lo"
 EOF
   chmod +x "$IPSTUB"
+  # networkd 링크 상태 — [6]의 진실원. IPSTUB이 wlo1을 ifindex 2로 낸다.
+  # 건강한 shape(실측 2026-08-18, systemd 259): UseDNS=false가 걸리면 DNS=가 비고
+  # NETWORK_FILE_DROPINS에 우리 드롭인이 실린다.
+  mkdir -p "$FX/run/systemd/netif/links"
+  cat > "$FX/run/systemd/netif/links/2" <<'EOF'
+ADMIN_STATE=configured
+NETWORK_FILE=/run/systemd/network/10-netplan-wlo1.network
+NETWORK_FILE_DROPINS="/etc/systemd/network/10-netplan-wlo1.network.d/10-k3s-node.conf"
+DNS=
+EOF
   export FX IPSTUB
 }
 run_pf() { PREFLIGHT_ROOT="$FX" PREFLIGHT_IP="$IPSTUB" run "$BOOTSTRAP_DIR/host-preflight.sh"; }
@@ -259,4 +269,44 @@ EOF
   run_pf
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -qF -- '열거가 붕괴했다'
+}
+
+# ── [6] 링크가 DHCP DNS를 실제로 거부하는가 (설치 ≠ 활성) ────────────────────────────────
+# 🔴 2026-08-18 발견: host-config.sh는 networkd 드롭인을 설치만 하고 반영하지 않는다
+#    (레포 전체에 `networkctl` 호출 0건). 그동안 링크는 DHCP DNS를 받고, **링크별 DNS는
+#    전역 DNS=보다 우선**하므로 HOST_UPSTREAM_DNS가 무효화된다 → R7 이후 그 값은 라우터이고
+#    라우터는 AdGuard로 포워딩하므로 콜드스타트 교착이 부활한다(#494가 닫은 문).
+#    --check(파일 내용만 봄)도 [3](loopback/tailnet/자기주소만 봄)도 못 잡는 false-green이었다.
+
+@test "rejects a link that is still receiving DNS from DHCP (drop-in installed but inert)" {
+  printf 'NETWORK_FILE_DROPINS="/etc/systemd/network/10-netplan-wlo1.network.d/10-k3s-node.conf"\nDNS=192.168.117.1\n' \
+    > "$FX/run/systemd/netif/links/2"
+  run_pf
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '192.168.117.1'
+  printf '%s' "$output" | grep -qF -- 'networkctl'
+}
+
+@test "rejects a link whose k3s drop-in was never loaded (empty DNS today is not proof)" {
+  # 지금 비어 있어도 드롭인이 없으면 DHCP 갱신 순간 채워진다 — fail-closed.
+  printf 'NETWORK_FILE_DROPINS=""\nDNS=\n' > "$FX/run/systemd/netif/links/2"
+  run_pf
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '10-k3s-node.conf'
+}
+
+@test "rejects a missing networkd link-state file (cannot assert the effective value)" {
+  rm -f "$FX/run/systemd/netif/links/2"
+  run_pf
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'links/2'
+}
+
+@test "rejects a link-state file without the DNS key (parser did not bite)" {
+  # [5]의 swaps 헤더와 같은 논거 — 키 부재를 '값 없음'으로 읽지 않는다.
+  printf 'NETWORK_FILE_DROPINS="/etc/systemd/network/10-netplan-wlo1.network.d/10-k3s-node.conf"\nADMIN_STATE=configured\n' \
+    > "$FX/run/systemd/netif/links/2"
+  run_pf
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'DNS= 키가 없다'
 }

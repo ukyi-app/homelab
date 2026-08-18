@@ -204,4 +204,28 @@ $RUN systemctl restart systemd-journald
 # 소켓 활성화(ssh.socket)면 연결마다 설정을 새로 읽으므로 try-*가 정확히 no-op이다.
 $RUN systemctl try-reload-or-restart ssh.service
 
+# 🔴 networkd 드롭인 반영 (2026-08-18 신설 — 그전까지 **설치만 하고 잠들어 있었다**).
+#    위 주석의 원칙("재부팅을 요구하면 '적용했다'가 거짓이 된다")을 network 드롭인만 어기고 있었다:
+#    `daemon-reload`도 `restart systemd-resolved`도 networkd에는 아무 영향이 없다.
+#    그동안 링크는 DHCP가 준 DNS를 계속 쓰고, **링크별 DNS는 전역 `DNS=`보다 우선**하므로
+#    resolved.conf.d의 `DNS=`(=HOST_UPSTREAM_DNS)가 무효였다. R7 이후 그 DHCP DNS는 라우터이고
+#    라우터는 AdGuard로 포워딩하므로 결과는 **콜드스타트 교착의 부활**이다(#494가 닫은 문).
+#    → host-preflight.sh [6]이 이제 실효값(`/run/systemd/netif/links/<ifindex>`)으로 이걸 잡는다.
+#    ⚠️ `networkctl reload`만으로는 부족하다 — .network 파일을 다시 읽을 뿐 링크에 재적용하지 않는다.
+#       `reconfigure`가 실제 적용이고, 그 사이 **주소가 약 5초 사라졌다 돌아온다**(DHCP 재획득).
+#       그 주소는 K3S_NODE_IP이자 AdGuard LoadBalancer VIP다 — 그래서 미리 알린다.
+#       `--apply`는 프로비저닝 시 1회 대화형 실행이므로(README) 이 순간 blip은 수용 가능하다.
+if ls "$TREE"/etc/systemd/network/*.network.d/*.conf >/dev/null 2>&1; then
+  $RUN networkctl reload
+  cfg_iface="$(ip -o -4 addr show 2>/dev/null \
+    | awk -v ip="${K3S_NODE_IP:-}" 'ip != "" && $4 ~ ("^" ip "/") { print $2; exit }')"
+  if [ -n "$cfg_iface" ]; then
+    echo "    ⚠️ networkctl reconfigure ${cfg_iface} — ${K3S_NODE_IP}가 약 5초간 사라졌다 돌아온다"
+    $RUN networkctl reconfigure "$cfg_iface"
+  else
+    echo "    ⚠️ K3S_NODE_IP=${K3S_NODE_IP:-미설정}를 가진 인터페이스를 찾지 못했다 —" \
+         "네트워크 드롭인이 **비활성인 채로 남았다**. 수동으로: sudo networkctl reconfigure <iface> (또는 재부팅)"
+  fi
+fi
+
 echo "==> host-config 적용 완료. 다음: ${SCRIPT_DIR}/host-preflight.sh 로 실효값을 확인할 것"

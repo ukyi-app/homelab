@@ -175,4 +175,41 @@ for zc in "${R}/etc/systemd/zram-generator.conf" "${R}"/etc/systemd/zram-generat
   fail "${zc}가 있다 — zram은 도입하지 않기로 확정됐다(D-f). 재부팅하면 스왑이 돌아온다"
 done
 
-echo "OK: host-preflight (tz=${tz} · DNSStubListener=${stub} · routable nameserver ${ns_routable}/${ns_total}(tailnet ${ns_tailnet}) · node-ip ${K3S_NODE_IP} 존재 · swap 활성 ${sw_n}건/fstab ${fs_n}건)"
+# ── [6] 링크가 DHCP DNS를 **실제로** 거부하고 있는가 (설치 ≠ 활성) ────────────────────────
+# 🔴 이 검사가 없으면 "설치됐지만 비활성인 드롭인"이 어디에도 안 잡힌다(2026-08-18 발견).
+#    host-config.sh는 `10-netplan-<if>.network.d/10-k3s-node.conf`(`[DHCP] UseDNS=false`)를
+#    설치하지만 [6/6] 유닛 반영이 `daemon-reload` + `restart systemd-resolved/journald`뿐이라
+#    **networkd에 반영되지 않는다**(레포 전체에 `networkctl` 호출 0건). 그 파일은 다음 재부팅이나
+#    수동 `networkctl reconfigure` 전까지 **잠들어 있다.**
+#    그동안 링크는 DHCP가 준 DNS를 그대로 받고, **링크별 DNS는 전역 `DNS=`보다 우선한다** →
+#    resolved.conf.d의 `DNS=`(=HOST_UPSTREAM_DNS)가 무효화된다.
+#    R7 이후 그 DHCP DNS는 라우터이고 라우터는 AdGuard로 포워딩하므로, 결과는 노드의 이름해석이
+#    다시 AdGuard에 종속되는 것 = **콜드스타트 교착의 부활**(#494가 닫은 바로 그 문).
+#    ⚠️ `--check`도 preflight의 [3]도 이걸 못 잡는다 — `--check`는 파일 내용만 보고,
+#       [3]은 nameserver가 loopback/tailnet/자기주소인지만 보는데 라우터 주소는 그 셋이 아니다.
+#       전형적인 false-green이라 **실효값을 직접 본다.**
+#
+# 진실원은 networkd의 링크 상태 파일이다(실측 2026-08-18, systemd 259):
+#     /run/systemd/netif/links/<ifindex>
+#       DNS=                       ← 링크에 **실효로 걸린** DNS. UseDNS=false면 빈다
+#       NETWORK_FILE_DROPINS="…"   ← networkd가 **실제로 로드한** 드롭인 목록
+#   ⚠️ `/run/systemd/netif/leases/<ifindex>`의 `DNS=`와 혼동하지 말 것 — 그건 DHCP가 준 raw 리스라
+#      UseDNS=false여도 값이 그대로 있다(R7 후 클라이언트 수신 확인용이지 실효값이 아니다).
+lf_idx="$($PREFLIGHT_IP -o -4 addr show 2>/dev/null \
+  | awk -v ip="$K3S_NODE_IP" '$4 ~ ("^" ip "/") { sub(/:$/, "", $1); print $1; exit }')"
+[ -n "$lf_idx" ] || fail "K3S_NODE_IP=${K3S_NODE_IP}를 가진 링크의 ifindex를 못 찾았다 — 링크 DNS 실효값을 단언할 수 없다"
+lf="${R}/run/systemd/netif/links/${lf_idx}"
+[ -r "$lf" ] || fail "${lf}를 읽지 못했다 — 링크가 DHCP DNS를 거부하는지 단언할 수 없다(networkd 상태 파일 부재)"
+# 키 부재를 '값 없음'으로 읽지 않는다 — [5]의 swaps 헤더와 같은 논거(파서가 물렸다는 양성 증거).
+grep -q '^DNS=' "$lf" || fail "${lf}에 DNS= 키가 없다 — 형식이 예상과 달라 링크 DNS를 믿을 수 없다"
+grep -q '^NETWORK_FILE_DROPINS=' "$lf" || fail "${lf}에 NETWORK_FILE_DROPINS= 키가 없다 — 드롭인 로드 여부를 믿을 수 없다"
+lf_dns="$(sed -n 's/^DNS=//p' "$lf" | head -1 | tr -d '"')"
+[ -z "$lf_dns" ] \
+  || fail "링크 ${lf_idx}가 DNS를 받고 있다(${lf_dns}) — 링크별 DNS는 전역 DNS=보다 **우선**하므로 HOST_UPSTREAM_DNS(${HOST_UPSTREAM_DNS})가 무효다. networkd 드롭인(UseDNS=false)이 설치만 되고 반영되지 않은 상태다: sudo networkctl reload && sudo networkctl reconfigure <iface> (주소가 5초쯤 사라졌다 돌아온다) 또는 재부팅"
+lf_dropins="$(sed -n 's/^NETWORK_FILE_DROPINS=//p' "$lf" | head -1 | tr -d '"')"
+case "$lf_dropins" in
+  *10-k3s-node.conf*) : ;;
+  *) fail "링크 ${lf_idx}에 10-k3s-node.conf 드롭인이 로드돼 있지 않다(NETWORK_FILE_DROPINS=${lf_dropins:-빈값}) — 지금 링크 DNS가 비어 있어도 그건 DHCP가 아직 안 준 것일 수 있고, 갱신되는 순간 전역 DNS=가 무효화된다" ;;
+esac
+
+echo "OK: host-preflight (tz=${tz} · DNSStubListener=${stub} · routable nameserver ${ns_routable}/${ns_total}(tailnet ${ns_tailnet}) · node-ip ${K3S_NODE_IP} 존재 · link-dns 비었음(드롭인 로드됨) · swap 활성 ${sw_n}건/fstab ${fs_n}건)"
