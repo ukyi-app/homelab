@@ -27,6 +27,8 @@ setup() {
   printf '0' >"$OUT/pvc"
   printf '0' >"$OUT/phasepolls"
   printf '0' >"$OUT/pvclists"
+  printf '0' >"$OUT/walpolls"
+  printf '0' >"$OUT/failpolls"
 
   cat >"$BIN/kubectl" <<'STUB'
 #!/usr/bin/env bash
@@ -56,6 +58,30 @@ case "$*" in
     [ "${DRILL_DELETE_FAILS:-0}" = "1" ] || printf '0' > "$OUT/pvc" ;;
   *"apply -f -"*)
     cat >> "$APPLIED"; printf '1' > "$OUT/cluster"; printf '1' > "$OUT/pvc" ;;
+  # ── RPO 축(마커 write → WAL 전환 → 아카이브 대기 → 복구본에서 확인) ──
+  # ⚠️ 순서가 있는 케이스가 먼저 와야 한다 — 아래 일반 exec 갈래가 삼키면 안 된다.
+  *"exec pg-restore-drill-1"*"WHERE id ="*)
+    printf '%s' "${DRILL_MARKER_FOUND:-1}" ;;                       # 복구본의 마커 유무
+  *"exec pg-restore-drill-1"*"max(ts)"*)
+    printf '%s' "${DRILL_RPO_LAG:-12}" ;;                           # RPO 실측 초
+  *"exec pg-1"*"INSERT INTO"*)
+    [ "${DRILL_INSERT_FAILS:-0}" = "1" ] && exit 1                  # 프로덕션 write 실패 경로
+    printf '%s|%s' "${DRILL_MARKER_ID:-42}" "${DRILL_MARKER_TS:-1700000000}" ;;
+  *"exec pg-1"*"pg_walfile_name(pg_switch_wal())"*)
+    [ "${DRILL_SWITCH_FAILS:-0}" = "1" ] && exit 1                  # 전환+이름을 한 문장으로
+    printf '%s' "${DRILL_MARKER_WAL:-000000010000000000000009}" ;;
+  *"exec pg-1"*"failed_count"*)
+    n="$(cat "$OUT/failpolls" 2>/dev/null || echo 0)"; n=$((n + 1)); printf '%s' "$n" > "$OUT/failpolls"
+    # DRILL_ARCHIVE_FAILS=1 이면 2회차부터 실패 카운터가 오른다(아카이브가 깨진 상태 재현)
+    if [ "${DRILL_ARCHIVE_FAILS:-0}" = "1" ] && [ "$n" -gt 1 ]; then printf '9'; else printf '3'; fi ;;
+  *"exec pg-1"*"last_archived_wal"*)
+    n="$(cat "$OUT/walpolls" 2>/dev/null || echo 0)"; n=$((n + 1)); printf '%s' "$n" > "$OUT/walpolls"
+    # 기본: 즉시 따라잡음. DRILL_ARCHIVE_LAGS=1 이면 영원히 뒤처진다(RPO 위반 재현).
+    if [ "${DRILL_ARCHIVE_LAGS:-0}" = "1" ]; then printf '000000010000000000000001'
+    elif [ "${DRILL_ARCHIVE_AHEAD:-0}" = "1" ]; then printf '00000001000000000000000A'  # 마커를 지나침(>= 판별)
+    elif [ "${DRILL_ARCHIVE_HISTORY:-0}" = "1" ]; then printf '00000003.history'        # 형식 가드 대상
+    elif [ "${DRILL_ARCHIVE_TIMELINE:-0}" = "1" ]; then printf '000000030000000000000009'
+    else printf '%s' "${DRILL_MARKER_WAL:-000000010000000000000009}"; fi ;;
   *"exec pg-restore-drill-1"*) printf '%s' "${DRILL_ROWS_DRILL:-7}" ;;
   *"exec pg-1"*)               printf '%s' "${DRILL_ROWS_LIVE:-5}" ;;
 esac
@@ -83,6 +109,7 @@ run_drill() {
     HEALTHCHECKS_URL='http://hc.invalid/ping' METRICS_PUSH_URL='http://vm.invalid:8428' \
     DRILL_POLL_INTERVAL_SECONDS=0 DRILL_MAX_POLLS=4 \
     DRILL_PURGE_POLL_SECONDS=0 DRILL_PURGE_MAX_POLLS=3 \
+    DRILL_RPO_POLL_SECONDS=0 DRILL_RPO_MAX_POLLS=3 \
     "$@" bash "$SH"
 }
 kline() { grep -nF -- "$1" "$KLOG" | head -1 | cut -d: -f1; }
@@ -228,4 +255,128 @@ kcount() { grep -cF -- "$1" "$KLOG" || true; }
   # 주석이 아니라 **배포되는 문자열**임을 고정한다 — 주석에도 같은 문구가 있어 단순 grep은 공허하다.
   run bash -c "grep -nF 'PV 권한은 설계상 없다' '$SH' | grep -v '^[0-9]*:[[:space:]]*#'"
   [ "$status" -eq 0 ]
+}
+
+@test "RPO: the marker is written to LIVE and its WAL segment is closed BEFORE the restore starts" {
+  # 순서가 전부다. 마커를 apply 뒤에 쓰면 그 쓰기는 복구본에 있을 수 없고,
+  # 세그먼트를 닫기 전에 이름을 잡지 않으면 다음 세그먼트를 기다리게 된다.
+  run_drill
+  [ "$status" -eq 0 ]
+  ins="$(kline 'INSERT INTO restore_canary')"
+  sw="$(kline 'pg_switch_wal')"
+  a="$(kline 'apply -f -')"
+  [ -n "$ins" ]
+  [ -n "$sw" ]
+  [ "$ins" -lt "$sw" ]   # 마커 먼저, 그 다음 세그먼트 닫기
+  [ "$sw" -lt "$a" ]     # 둘 다 복구 시작 전
+}
+
+@test "RPO: the recovered copy is checked for THAT marker id (not just a row count)" {
+  run_drill
+  [ "$status" -eq 0 ]
+  # 복구본 대상 조회에 마커 id가 실려야 한다 — 행 수 비교로는 신선도를 증명하지 못한다.
+  grep -qF 'exec pg-restore-drill-1' "$KLOG"
+  run grep -cE 'exec pg-restore-drill-1.*WHERE id = 42' "$KLOG"
+  [ "$output" = "1" ]
+  grep -qF '마커 42' "$CLOG"            # PASS 본문에 마커 id가 실린다
+  grep -qF 'RPO 12초' "$CLOG"           # 이분법이 아니라 **실측 수치**가 실린다
+}
+
+@test "RPO: a recovered copy MISSING the marker fails closed (archive is stale)" {
+  run_drill DRILL_MARKER_FOUND=0
+  [ "$status" -ne 0 ]
+  [ ! -s "$METRICS" ]
+  grep -qF 'RPO 위반' "$CLOG"
+  run grep -cF 'hc.invalid' "$CLOG"
+  [ "$output" = "0" ]
+}
+
+@test "RPO: a lagging archive is reported but does not abort (the marker check decides)" {
+  # ⚠️ 설계 변경(적대 검증 수용): 여기서 죽으면 "R2 복구가 되는가"라는 주 1회짜리 유일 신호까지
+  #    함께 버린다. 아카이브 정체는 WALArchiveStalled(critical, 15분)가 이미 상시 감시한다.
+  #    복구본 마커 판정이 이 대기보다 엄격하게 강한 단언이므로 최종 판정을 잃지 않는다.
+  run_drill DRILL_ARCHIVE_LAGS=1
+  [ "$status" -eq 0 ]
+  [ -s "$APPLIED" ]
+  printf '%s' "$output" | grep -qF 'rpo attempt'   # 폴링이 실재한다
+  grep -qF 'RPO-WAIT-TIMEOUT' "$CLOG"              # 사건은 보고에 남는다
+}
+
+@test "RPO: a rising archiver failure_count does NOT abort — it is a cumulative counter, not a level" {
+  # ⚠️ 적대 검증 수용: failed_count는 누적이라 재시도로 결국 성공할 일시적 오류에도 오른다.
+  #    이 레포는 같은 사실에 이미 판별을 내려놨다 — r4의 WALArchiveStalled는 레벨
+  #    (last_failed_time > last_archived_time) + for:15m이다. 증분 1로 끊으면 R2 블립 한 번이
+  #    주간 드릴을 통째로 죽인다(backoffLimit 0 · 주 1회 · in-band 무음). 진단 문구로만 쓴다.
+  run_drill DRILL_ARCHIVE_LAGS=1 DRILL_ARCHIVE_FAILS=1
+  [ "$status" -eq 0 ]
+  [ -s "$APPLIED" ]
+  grep -qF 'RPO-WAIT-TIMEOUT' "$CLOG"
+  run grep -cF '아카이브가 실패하고 있다' "$CLOG"
+  [ "$output" = "0" ]                              # 옛 조기중단 문구는 사라졌다
+}
+
+@test "RPO: failing to CLOSE the WAL segment fails closed" {
+  run_drill DRILL_SWITCH_FAILS=1
+  [ "$status" -ne 0 ]
+  [ ! -s "$APPLIED" ]
+  grep -qF '세그먼트를 닫지 못했다' "$CLOG"
+}
+
+@test "RPO: failing to WRITE the marker to production fails closed" {
+  # 이 변경의 명분이 "프로덕션 DB에 쓰기를 시작한다"인데, 그 쓰기의 실패 처리가 무검증이었다.
+  run_drill DRILL_INSERT_FAILS=1
+  [ "$status" -ne 0 ]
+  [ ! -s "$APPLIED" ]
+  [ ! -s "$METRICS" ]
+  grep -qF '라이브에 쓰지 못했다' "$CLOG"
+}
+
+@test "RPO: a non-numeric marker id fails closed (schema drift)" {
+  run_drill DRILL_MARKER_ID=oops
+  [ "$status" -ne 0 ]
+  [ ! -s "$APPLIED" ]
+  grep -qF '숫자 id를 반환하지 않았다' "$CLOG"
+}
+
+@test "RPO: the marker id flows from the INSERT to the recovered-copy query (parameterised, not hardcoded)" {
+  # 스텁 기본값 우연이 아니라 '반환받은 값을 그대로 쓴다'를 증명한다.
+  run_drill DRILL_MARKER_ID=777 DRILL_MARKER_TS=1699999999
+  [ "$status" -eq 0 ]
+  run grep -cE 'exec pg-restore-drill-1.*WHERE id = 777 AND .* = 1699999999' "$KLOG"
+  [ "$output" = "1" ]
+  grep -qF '마커 777' "$CLOG"
+}
+
+@test "RPO: an archiver already PAST the marker segment passes (>= not strict equality)" {
+  # 앱 동시 쓰기로 아카이버가 마커 세그먼트를 지나치는 것은 정상이다 — 그걸 FAIL로 읽으면 매주 거짓 FAIL이다.
+  run_drill DRILL_ARCHIVE_AHEAD=1
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF '아카이브 확인'
+  grep -qF 'restore_drill_last_success_timestamp' "$METRICS"
+}
+
+@test "RPO: a .history filename never satisfies the comparison (it sorts high and would pass falsely)" {
+  # 히스토리 파일은 큐를 앞질러 아카이브된다. 형식 가드가 없으면 00000003.history > 00000001…이라
+  # 마커가 안 실렸는데 통과한다 — 이 변경이 없애려는 바로 그 거짓 PASS다.
+  run_drill DRILL_ARCHIVE_HISTORY=1
+  [ "$status" -eq 0 ]                      # 대기는 타임아웃하지만 마커 판정으로 계속한다
+  printf '%s' "$output" | grep -qF 'rpo attempt'
+  grep -qF 'RPO-WAIT-TIMEOUT' "$CLOG"      # 조용히 통과하지 않았다는 증거
+}
+
+@test "RPO: a timeline change during the drill aborts loudly instead of comparing across timelines" {
+  run_drill DRILL_ARCHIVE_TIMELINE=1
+  [ "$status" -ne 0 ]
+  [ ! -s "$APPLIED" ]
+  grep -qF '타임라인이 드릴 중 바뀌었다' "$CLOG"
+}
+
+@test "RPO: the wait timing out does NOT kill the run — the marker check still decides" {
+  # 아카이브 정체는 WALArchiveStalled가 이미 상시 감시한다. 여기서 죽으면 주 1회짜리
+  # "R2 복구가 되는가"라는 유일 신호까지 함께 버린다.
+  run_drill DRILL_ARCHIVE_LAGS=1
+  [ "$status" -eq 0 ]
+  [ -s "$APPLIED" ]                        # 복구를 진행한다
+  grep -qF 'RPO-WAIT-TIMEOUT' "$CLOG"      # 사건은 보고에 남는다
+  grep -qF 'restore_drill_last_success_timestamp' "$METRICS"
 }

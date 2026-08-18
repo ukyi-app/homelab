@@ -247,9 +247,97 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# ─── RPO 증명: 지금 쓴 것이 아카이브에 실렸는가 ────────────────────────────────────
+# ⚠️ **이것이 없으면 이 드릴은 "어떤 백업이 복구된다"까지만 증명한다.** 행 수 비교는 시드가
+#    initdb 1회성이라(cluster.yaml의 postInitApplicationSQL) 라이브가 영구히 1행이었고,
+#    `ACTUAL >= EXPECTED && > 0`은 6개월 전 base backup으로도 통과한다 — 즉 **아카이브 신선도를
+#    원리적으로 검사하지 못했다**(실측 2026-08-17: EXPECTED_ROWS=1/ACTUAL_ROWS=1).
+#    지금 쓴 행이 복구본에 나타나야만 "아카이브가 최신이다"가 증명된다.
+# ⚠️ **이 잡이 프로덕션 DB에 쓰기를 시작한다**(owner 승인 2026-08-18). 범위는 최소다:
+#    `restore_canary`는 이 용도로 존재하는 전용 테이블이고, initdb 시드도 같은 INSERT를 한다.
+#    주 1행(연 52행). 스키마는 건드리지 않는다 — `id serial`을 그대로 마커로 쓴다.
+#    RBAC 확대도 없다: 이미 `pods/exec`로 psql을 돌리고 있었다(restore-drill-rbac.yaml:12-14).
+# ⚠️ 실패 방향이 안전하다 — 쓰지 못하거나 아카이브가 못 따라오면 **시끄럽게 FAIL**한다.
+#    조용해지는 방향이 아니다.
+# 폴링 예산. ⚠️ 회차마다 kubectl exec가 도는 비싼 폴링이라 간격을 넓게 잡는다 —
+#    5s로 잡았더니 프로덕션 primary에 최대 120회 exec가 갔다(적대 검증 지적). 20×15s = 5분으로
+#    같은 상한을 유지하면서 호출을 1/3로 줄인다. archive_timeout=300s(라이브 실측)와 같은 크기라
+#    pg_switch_wal이 어떤 이유로 no-op이어도 강제 전환이 이 창 안에 들어온다.
+RPO_MAX_POLLS="${DRILL_RPO_MAX_POLLS:-20}"
+RPO_POLL_INTERVAL="${DRILL_RPO_POLL_SECONDS:-15}"
+RPO_NOTE="" # 대기가 타임아웃했으면 최종 보고 본문에 실린다
+
+# ⚠️ **타임아웃을 건다.** 이 헬퍼는 이제 프로덕션 primary에 **쓰기**도 한다 — 무타임아웃이면
+#    테이블 락이나 반쯤 죽은 API에서 fail-closed가 아니라 **무한 대기**로 끝나고, 그건
+#    activeDeadlineSeconds 초과 → SIGKILL → 고아라는 M17의 생성 경로 그 자체다(이 파일 상단 참조).
+_live_psql() {
+  kubectl --request-timeout=30s -n "$NS" exec "${LIVE_CLUSTER}-1" -c postgres -- \
+    env PGOPTIONS='-c statement_timeout=15s -c lock_timeout=5s' psql -X -v ON_ERROR_STOP=1 -U postgres "$@"
+}
+
+echo "[drill] RPO 마커 기록 — 지금 쓴 행이 복구본에 나타나야 아카이브가 최신이다"
+# 마커는 `id`와 `ts`를 **함께** 받는다. id 단독은 시퀀스가 되감기면(pg_dump 복원의 setval 등)
+# 옛 행과 충돌해 거짓 PASS가 날 수 있고, ts가 있어야 **실제 RPO 수치**를 보고할 수 있다.
+MARKER_ROW="$(_live_psql -d "$DB" -tAF'|' -c "INSERT INTO ${TABLE} DEFAULT VALUES RETURNING id, extract(epoch from ts)::bigint;")" \
+  || fail "RPO 마커를 라이브에 쓰지 못했다 — 아카이브 신선도를 증명할 수 없다(테이블 부재/권한/DB 다운/락 확인)"
+MARKER_ID="${MARKER_ROW%%|*}"
+MARKER_TS="${MARKER_ROW##*|}"
+case "$MARKER_ID" in '' | *[!0-9]*) fail "RPO 마커 INSERT가 숫자 id를 반환하지 않았다(${MARKER_ROW}) — ${TABLE} 스키마 변경 의심" ;; esac
+case "$MARKER_TS" in '' | *[!0-9]*) fail "RPO 마커 INSERT가 숫자 ts를 반환하지 않았다(${MARKER_ROW}) — ${TABLE} 스키마 변경 의심" ;; esac
+echo "[drill] MARKER_ID=${MARKER_ID} MARKER_TS=${MARKER_TS}"
+
+# ⚠️ **전환과 이름 획득을 한 문장으로 묶는다.** 예전엔 `pg_walfile_name(pg_current_wal_lsn())`로
+#    이름을 먼저 잡고 별도 커넥션에서 `pg_switch_wal()`을 불렀는데, 그 사이에 archive_timeout이나
+#    다른 백엔드의 쓰기가 끼면 둘이 어긋난다. `pg_switch_wal()`은 방금 닫은 세그먼트의 end+1 LSN을
+#    반환하고 `pg_walfile_name()`은 경계 LSN에서 **직전** 세그먼트를 내므로(XLByteToPrevSeg),
+#    이 합성이 정확히 "방금 닫혔고 아카이브되어야 할 세그먼트"다. no-op이었어도 현재 세그먼트를 낸다.
+MARKER_WAL="$(_live_psql -tAc "SELECT pg_walfile_name(pg_switch_wal());")" \
+  || fail "WAL 세그먼트를 닫지 못했다 — 마커가 아카이브에 실릴 수 없다"
+case "$MARKER_WAL" in [0-9A-F][0-9A-F]*) : ;; *) fail "WAL 세그먼트 이름이 예상 형식이 아니다(${MARKER_WAL})" ;; esac
+echo "[drill] MARKER_WAL=${MARKER_WAL} — 아카이브 완료 대기"
+
+# 아카이버가 그 세그먼트를 실을 때까지 폴링한다.
+# ⚠️ `last_archived_wal`은 **세그먼트가 아닌 파일명**도 담는다(`<TLI>.history`·`.partial`·`.backup`).
+#    특히 히스토리 파일은 큐를 앞질러 아카이브되므로, 형식 가드 없이 사전식 비교를 하면
+#    `00000003.history` > `00000002…`가 되어 **마커가 안 실렸는데 통과**한다. 24자 hex만 비교에 넣는다.
+# ⚠️ 타임라인이 드릴 중 바뀌면 그 자체가 사건이다 — 조용히 통과시키지 않고 끊는다.
+# ⚠️ `failed_count` 증가로는 **끊지 않는다.** 그건 누적 카운터라 재시도로 결국 성공할 일시적
+#    오류에도 오른다. 이 레포는 같은 사실에 이미 판별을 내려놨다 — r4의 WALArchiveStalled는
+#    레벨(`last_failed_time > last_archived_time`) + `for: 15m`이다. 증분 1로 끊으면 R2 블립 한 번이
+#    주간 드릴을 통째로 죽인다(backoffLimit 0 · 주 1회 · in-band 무음). 진단 문구로만 쓴다.
+FAILED_BEFORE="$(_live_psql -tAc "SELECT failed_count FROM pg_stat_archiver;")" \
+  || fail "pg_stat_archiver를 읽지 못했다 — 아카이브 진행을 판별할 수 없다"
+RPO_OK=0
+for i in $(seq 1 "$RPO_MAX_POLLS"); do
+  last="$(_live_psql -tAc "SELECT coalesce(last_archived_wal,'') FROM pg_stat_archiver;" || true)"
+  case "$last" in
+  [0-9A-F][0-9A-F]*) [ "${#last}" = 24 ] || last="" ;; # .history/.partial/.backup 배제
+  *) last="" ;;
+  esac
+  if [ -n "$last" ] && [ "${last%????????????????}" != "${MARKER_WAL%????????????????}" ]; then
+    fail "라이브 타임라인이 드릴 중 바뀌었다(${MARKER_WAL} → ${last}) — 승격/복구가 일어났다는 뜻이고, 이 회차의 RPO 판정은 성립하지 않는다"
+  fi
+  # last >= MARKER_WAL 을 "NOT (last < MARKER_WAL)"로 쓴다(부정 한 번이 우선순위 함정을 피한다).
+  if [ -n "$last" ] && ! [ "$last" \< "$MARKER_WAL" ]; then
+    RPO_OK=1
+    echo "[drill] 아카이브 확인: last_archived_wal=${last} >= ${MARKER_WAL} (${i}회차)"
+    break
+  fi
+  echo "  rpo attempt ${i}: last_archived_wal=${last:-<none>}"
+  sleep "$RPO_POLL_INTERVAL"
+done
+# ⚠️ 타임아웃이어도 **중단하지 않는다.** 복구본의 마커 판정이 이 대기보다 **엄격하게 강한**
+#    단언이라(아카이브에 있어도 복구본에 없을 수 있다) 최종 판정을 잃지 않고, 여기서 죽으면
+#    "R2 복구가 되는가"라는 **주 1회짜리 유일 신호**까지 함께 버린다. 반면 "아카이브 정체"는
+#    WALArchiveStalled(critical, 15분)가 이미 상시 감시한다 — 중복 신호를 위해 유일 신호를 버리지 않는다.
+if [ "$RPO_OK" != "1" ]; then
+  now_failed="$(_live_psql -tAc "SELECT failed_count FROM pg_stat_archiver;" || echo "?")"
+  RPO_NOTE=" · RPO-WAIT-TIMEOUT(${MARKER_WAL} 미아카이브, failed_count ${FAILED_BEFORE}→${now_failed})"
+  echo "[drill] 경고: ${MARKER_WAL}이 대기 창 안에 아카이브되지 않았다 — 복구본 마커 판정으로 계속한다" >&2
+fi
+
 echo "[drill] expected row count from live cluster"
-EXPECTED_ROWS="$(kubectl -n "$NS" exec "${LIVE_CLUSTER}-1" -c postgres -- \
-  psql -U postgres -d "$DB" -tAc "SELECT count(*) FROM ${TABLE};")" \
+EXPECTED_ROWS="$(_live_psql -d "$DB" -tAc "SELECT count(*) FROM ${TABLE};")" \
   || fail "could not read live row count"
 echo "[drill] EXPECTED_ROWS=${EXPECTED_ROWS}"
 
@@ -293,9 +381,10 @@ for i in $(seq 1 "$MAX_POLLS"); do
 done
 [ "$PHASE" = "Cluster in healthy state" ] || fail "drill cluster never became healthy (phase=${PHASE:-none})"
 # ⚠️ **복구가 실제로 일어났다는 양성 증인.** 판정에 쓰이는 관측은 `.status.phase`와 canary 행 수뿐인데,
-#    전자는 생존자에게 즉시 참이고, 후자는 restore_canary의 시드가 **initdb 1회성**이라
-#    (cluster.yaml의 `.spec.bootstrap.initdb.postInitApplicationSQL` — 부트스트랩 때 한 번 INSERT하고
-#    그 뒤로는 아무도 쓰지 않는다) 행 수가 상수여서 사실상 항상 참이다 — 라이브 실측
+#    전자는 생존자에게 즉시 참이다. 후자(행 수)는 **2026-08-18부터는 상수가 아니다** — 이 드릴이
+#    매 실행 마커 1행을 쓰므로 지난 주 생존자의 복구본은 EXPECTED에 못 미쳐 걸린다. 즉 행 수 비교가
+#    이 증인의 **이중화**가 됐다. 그래도 이 증인을 없애지 않는다: 같은 회차 안의 생존자 재사용
+#    (동시 실행 창)은 행 수가 같아 구별되지 않기 때문이다. 아래는 그 이전의 근거다 — 라이브 실측
 #    2026-08-17: 테이블 1행 고정, 그날 drill 로그도 `EXPECTED_ROWS=1`/`ACTUAL_ROWS=1`. 즉 pre-flight를
 #    우회하는 임의의 경로(동시 실행 창, 눈먼 열거, CNPG 동작 변경)는 이 두 관측점에서 진짜 복구와
 #    구별되지 않는다. R2에서의 진짜 복구는 첫 폴링에 healthy가 될 수 없으므로(같은 실측 로그:
@@ -309,16 +398,33 @@ done
 #     그 기준의 최소 실행체다. 인스턴스 로그 증인은 Role에 `pods/log`가 없어 별건이다 — rbac :12-14.)
 [ "$SAW_NONHEALTHY" = "1" ] || fail "drill cluster가 **첫 폴링에 이미 healthy**였다 — R2 복구가 일어나지 않았다(생존자 재사용/동시 실행 의심). pre-flight가 무엇을 놓쳤는지 확인할 것: 잔여물 열거 접두, 수동 drill-now 동시 실행"
 
+_drill_psql() { kubectl -n "$NS" exec "${DRILL_CLUSTER}-1" -c postgres -- psql -U postgres "$@"; }
+
+# ─── RPO 판정: 복구본에 **그 마커**가 있는가 ────────────────────────────────────────
+# ⚠️ 이 단언이 이 드릴의 성격을 바꾼다. 행 수 비교는 "테이블이 존재하고 비어 있지 않다"까지지만,
+#    **방금 쓴 id가 복구본에 있다**는 것은 "아카이브가 몇 분 전 쓰기까지 담고 있다"는 뜻이다.
+#    앞의 아카이브 대기가 이 단언을 통과 가능하게 만들고, 이 단언이 그 대기를 공허하지 않게 만든다 —
+#    둘 중 하나만 있으면 무의미하다.
+echo "[drill] RPO 판정 — 복구본에서 마커 ${MARKER_ID} 확인"
+# ⚠️ id **와** ts를 함께 본다. id 단독은 시퀀스가 되감기면(pg_dump 복원의 setval 등) 옛 행과
+#    충돌해 거짓 PASS가 날 수 있다 — ts가 그 구멍을 막고, 동시에 실제 RPO 수치를 준다.
+MARKER_FOUND="$(_drill_psql -d "$DB" -tAc "SELECT count(*) FROM ${TABLE} WHERE id = ${MARKER_ID} AND extract(epoch from ts)::bigint = ${MARKER_TS};")" \
+  || fail "복구본에서 마커를 조회하지 못했다(id=${MARKER_ID}) — 먼저 확인: 수동 drill-now 동시 실행(concurrencyPolicy는 --from=cronjob을 덮지 않는다)"
+[ "$MARKER_FOUND" = "1" ] \
+  || fail "RPO 위반: 복구본에 마커 id=${MARKER_ID}(ts=${MARKER_TS})가 없다(count=${MARKER_FOUND}) — 아카이브가 이 드릴 시작 시점의 쓰기를 담고 있지 않다. base backup만 실리고 WAL이 안 실렸거나 복구가 더 과거에 멈췄다. 먼저 확인: 수동 drill-now 동시 실행"
+# 실제 RPO 수치 — r4의 "5분 RPO 목표"를 처음으로 **측정**한다(이분법이 아니라 초 단위).
+RPO_LAG="$(_drill_psql -d "$DB" -tAc "SELECT round(extract(epoch from (now() - max(ts))))::bigint FROM ${TABLE};" || echo "?")"
+echo "[drill] 마커 확인 — 복구본의 최신 쓰기가 ${RPO_LAG}초 전이다(RPO 실측)"
+
 echo "[drill] actual row count from recovered cluster"
-ACTUAL_ROWS="$(kubectl -n "$NS" exec "${DRILL_CLUSTER}-1" -c postgres -- \
-  psql -U postgres -d "$DB" -tAc "SELECT count(*) FROM ${TABLE};")" \
+ACTUAL_ROWS="$(_drill_psql -d "$DB" -tAc "SELECT count(*) FROM ${TABLE};")" \
   || fail "could not read recovered row count"
 echo "[drill] ACTUAL_ROWS=${ACTUAL_ROWS}"
 
 # WAL replay가 base backup 이후 쓰인 row를 포함할 수 있으므로 >= 허용.
 if [ "$ACTUAL_ROWS" -ge "$EXPECTED_ROWS" ] && [ "$ACTUAL_ROWS" -gt 0 ]; then
   push_success_metric # PASS notify 전에 실행: 메트릭 적재 실패 시 즉시 실패 (아니면 M5의 absent() 알림이 영원히 페이징)
-  notify PASS "복구 ${ACTUAL_ROWS}행 (라이브 ${EXPECTED_ROWS}행) — R2${ORPHAN_NOTE}"
+  notify PASS "복구 ${ACTUAL_ROWS}행 (라이브 ${EXPECTED_ROWS}행) · RPO ${RPO_LAG}초 (마커 ${MARKER_ID}) — R2${ORPHAN_NOTE}${RPO_NOTE}"
   # dead-man's switch: 진짜 PASS일 때만 ping (healthcheck 정의는 M5 소유)
   curl -fsS -m 10 "${HEALTHCHECKS_URL}" >/dev/null || true
   echo "[drill] PASS"
