@@ -208,6 +208,26 @@
 - Application spec의 zero-value(예: `directory.recurse: false`)는 컨트롤러 정규화가 매번 삭제 →
   selfHeal과 플립플롭(generation 폭주). zero-value 필드는 기재하지 않는다.
 
+### selfHeal이 라이브 실험을 무력화한다 — 끄는 레버는 git뿐
+- `kubectl scale`·`patch`로 만든 상태는 **약 5초 만에 되돌아간다**(argocd v3.4 기본
+  `--self-heal-timeout-seconds=5`, 컨트롤러 args에 오버라이드 없음 — 실측 2026-08-18).
+  그래서 "죽여 보고 관찰한다" 류의 런북은 **거짓 PASS**를 낸다.
+- 실측 사례: AdGuard 폴백 drill(`scale deploy/adguard --replicas=0` → `dig` → `--replicas=1`).
+  파드 기동이 created→Ready **5초**라 실질 공백이 10~15초인데 SSH 왕복이 그보다 길다 →
+  측정되는 것은 "폴백이 동작했다"가 아니라 **"서비스가 살아 있었다"**다.
+- **임시 해제도 안 된다.** 대부분의 Application이 ApplicationSet `platform-components` 산물이라
+  (`ownerReferences`로 확인) `kubectl patch app`은 appset 컨트롤러가, appset을 patch하면 그 소유자인
+  `root` app(역시 selfHeal=true)이 되돌린다. 실제 레버는 git 변경뿐이다
+  (appset에 `ignoreApplicationDifferences`, `applicationsSync: create-only`, 또는 git에서 replicas:0).
+- ⚠️ 덧붙여 selfHeal은 **안전망**이기도 하다 — 세션이 끊기거나 에이전트가 죽어도 서비스가 자동
+  복구된다. 끈 채로 replicas=0을 두는 것은 그 안전망을 스스로 제거하는 것이다.
+- ✅ **대신 쓸 수 있는 것**: 파드 **삭제**는 스펙 드리프트가 아니라 selfHeal과 무관하고 Deployment가
+  재생성하므로, 자동 복구되는 짧은 창(실측 약 5초)을 안전하게 만든다. 더 긴 창이 필요하면
+  클러스터를 안 건드리는 대체 검증(클라이언트 측 조작 등)이나 git 경유 절차로 설계를 바꾼다.
+- **설계 단계에서 확인할 것**: 라이브 장애 주입 절차를 쓰기 전에 대상의 `.spec.syncPolicy`와
+  `.metadata.ownerReferences`를 먼저 읽어라. `selfHeal: true`면 그 절차는 이미 틀렸다.
+  (실례: `docs/runbooks/lan-dns.md` §4가 이 이유로 폐기·재작성됐다.)
+
 ### PSA baseline hostPath/hostPID 금지
 - PSA는 `baseline`도 hostPath/hostPID를 금지한다(privileged 전용) — node-exporter/Vector류 DS는
   enforce=privileged 네임스페이스 필요.
