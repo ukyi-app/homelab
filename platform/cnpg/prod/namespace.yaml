@@ -8,6 +8,8 @@ metadata:
   name: database
   annotations:
     argocd.argoproj.io/sync-wave: "-3"
+    # ns prune은 그 안의 Cluster·PVC를 통째로 데려간다 — 백업이 있어도 되돌리는 데 몇 시간이다.
+    argocd.argoproj.io/sync-options: Prune=false # 매니페스트서 빠져도 ns prune(삭제) 금지(plan Pass5 #1)
   labels:
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/warn: restricted
