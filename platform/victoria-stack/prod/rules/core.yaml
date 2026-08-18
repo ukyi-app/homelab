@@ -110,6 +110,39 @@ data:
             annotations:
               summary: "PostgreSQL 클러스터 다운(Ready 인스턴스 0)"
               description: "database/pg가 3분 이상 Ready가 아닙니다 — 단일 인스턴스라 전 앱이 의존하는 DB가 중단된 상태입니다. CrashLoop/OOM/Pending/PVC를 확인하세요. 백업 staleness 알림(R2BackupStale 등)은 27시간 뒤에야 발화하므로 이 알림이 1차 페이징입니다."
+          # LAN DNS 생존 — R7 이후 AdGuard는 **집 안 모든 기기**의 유일한 리졸버다(pg보다 폭이 넓다).
+          # ⚠️ 라우터(NETGEAR Orbi RBR350)에 보조 DNS 1.1.1.1이 설정돼 있으나 **실측상 발동하지 않는다**
+          #    (2026-08-18 드릴: AdGuard 파드 삭제 후 15초 타임아웃 프로브 6건 전부 무응답, FALLBACK 0건).
+          #    즉 이 Deployment가 0이면 폴백 없이 **집 전체 DNS가 끊긴다.**
+          # ⚠️ 기존 WorkloadUnavailable(T+10m·warning)이 이미 덮지만 제목이 "워크로드 불가용"이라
+          #    owner가 "집이 끊겼다"로 못 읽는다. 이 알림은 그 창을 T+1m·critical로 좁히고 제목을 바꾼다.
+          #    (WorkloadUnavailable은 그대로 둔다 — 이쪽은 Available 컨디션, 저쪽은 ready 레플리카로 축이 다르다.)
+          # ⚠️ `for: 60s`는 의도적이다 — 정상 롤아웃 공백이 실측 약 5초(created→Ready)라 일상 재시작에는
+          #    발화하지 않는다. 60초 넘게 0이면 그건 롤아웃이 아니라 사고다.
+          # ⚠️ 메트릭 선택: kube_endpoint_address 계열은 백엔드가 0이 되면 **시리즈가 사라져**
+          #    vmagent의 --promscrape.noStaleMarkers와 겹쳐 최대 5분 지연된다. replicas_ready는 값이
+          #    1→0으로 **반전**할 뿐 시리즈가 남아 staleness를 타지 않는다(라이브 실측: namespace=edge ·
+          #    deployment=adguard 라벨이 honor_labels로 실제값이다 — pod 라벨만 KSM 파드로 덮인다).
+          # absent()는 PostgresClusterDown과 같은 fail-closed 규약 — Deployment 소멸/KSM 단절도 페이징.
+          - alert: LanDnsPathDown
+            expr: |
+              kube_deployment_status_replicas_ready{namespace="edge", deployment="adguard"} == 0
+              or absent(kube_deployment_status_replicas_ready{namespace="edge", deployment="adguard"})
+            for: 60s
+            labels: { severity: critical }
+            annotations:
+              summary: "집 LAN DNS 끊김 — AdGuard 백엔드 0"
+              description: >-
+                edge/adguard가 60초 이상 Ready 0입니다 — **집 안 모든 기기의 DNS가 멈춘 상태**입니다.
+                라우터 보조 DNS(1.1.1.1)는 실측상 발동하지 않으므로 폴백이 없습니다.
+                30초 판별(IP 리터럴만 — 이름해석이 죽었으므로):
+                `dig @192.168.117.15 +time=3 +tries=1 zzz.doubleclick.net` →
+                `0.0.0.0`=정상 · NXDOMAIN=1.1.1.1 경유(차단 없음) · 무응답=AdGuard 죽음.
+                이어서 `kubectl -n edge get pods -l app=adguard`(ssh는 tailscale IP라 DNS 없이 붙습니다).
+                우회: 사고 대응 기기는 DNS가 `192.168.117.15,94.140.14.14`로 상시 고정돼 있어 별도 조작이
+                필요 없습니다(2순위도 AdGuard 공개 DNS라 차단은 유지되고 split-horizon만 상실).
+                런북 `docs/runbooks/lan-dns.md` §4-2b.
+                ⚠️ 노드 재부팅 중에는 vmalert도 함께 다운이라 이 알림이 원리적으로 발화하지 못합니다.
           # 비-OOM CrashLoop 백스톱(OOM은 PodOOMKilled가 커버) — config/이미지풀/panic 반복 재시작.
           # 블랙리스트(시스템 ns만 제외) — 화이트리스트는 신규 PSA ns(cache·sealed-secrets)를 흘렸다(회귀).
           # honor_labels(#20)로 kube_* namespace가 실제값이라 블랙리스트가 모든 워크로드 ns를 자동 포함.

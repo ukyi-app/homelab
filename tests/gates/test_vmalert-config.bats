@@ -255,3 +255,46 @@ setup() {
   grep -q 'AdguardRewriteReconcilerStale' "$A"
   grep -q 'AdguardRewriteDriftFixed' "$A"
 }
+
+@test "LAN DNS liveness has a dedicated critical alert (R7 made AdGuard the whole house's resolver)" {
+  C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
+  grep -q 'alert: LanDnsPathDown' "$C"
+  # ⚠️ 메트릭 선택이 본질이다. kube_endpoint_address 계열은 백엔드 0에서 **시리즈가 사라져**
+  #    vmagent --promscrape.noStaleMarkers와 겹쳐 최대 5분 지연된다. replicas_ready는 값이 반전할 뿐
+  #    시리즈가 남아 staleness를 타지 않는다 — 회귀하면 탐지가 조용히 5분 늦어진다.
+  grep -qE 'kube_deployment_status_replicas_ready\{namespace="edge", ?deployment="adguard"\}' "$C"
+  grep -q 'absent(kube_deployment_status_replicas_ready' "$C"    # 소멸/스크레이프 단절 fail-closed
+  # 일상 롤아웃(실측 약 5초)에 발화하면 알림 피로가 된다 — for가 그보다 충분히 길어야 한다.
+  grep -A9 'alert: LanDnsPathDown' "$C" | grep -q 'for: 60s'
+  grep -A12 'alert: LanDnsPathDown' "$C" | grep -q 'severity: critical'
+}
+
+@test "every CRITICAL alert has a Telegram title mapping (silent-degradation class guard)" {
+  # 🔴 alertmanager.yaml 머리말이 스스로 경고한 실패 모드인데 가드가 없었다(2026-08-18 신설):
+  #    "재기동을 빠뜨리면 새 알림이 **제목 매핑 없이** alertname 그대로 텔레그램에 나간다 —
+  #     red가 아니라 조용한 열화."
+  # ⚠️ 범위는 **critical만**이다. warning은 36건 중 16건만 매핑돼 있어 전건 강제는 없는 규약을
+  #    만들어내는 것이 된다. critical은 신설 당시 9건 중 8건이 매핑돼 있었고 빠진 하나가
+  #    FilesBackupStale이었다(2026-10-01 자동 재무장 시 제목 없이 페이징될 뻔했다 — 같은 커밋에서 보충).
+  AM="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
+  [ -f "$AM" ]
+  # 룰 파일에서 (alertname, severity) 쌍을 뽑는다 — alert 줄을 만나면 이름을 기억하고,
+  # 다음 alert 줄 전에 나오는 첫 severity를 그 알림의 것으로 본다.
+  pairs="$(awk '
+    /^[[:space:]]*-[[:space:]]*alert:[[:space:]]*[A-Za-z0-9_]+/ {
+      name=$0; sub(/.*alert:[[:space:]]*/, "", name); sub(/[^A-Za-z0-9_].*/, "", name); sev=""; next
+    }
+    name != "" && /severity:[[:space:]]*[a-z]+/ {
+      if (sev == "") { s=$0; sub(/.*severity:[[:space:]]*/, "", s); sub(/[^a-z].*/, "", s); sev=s; print name, sev; name="" }
+    }
+  ' "$ROOT"/platform/victoria-stack/prod/rules/*.yaml)"
+  [ -n "$pairs" ]
+  missing=""
+  while IFS=' ' read -r n sev; do
+    [ "$sev" = "critical" ] || continue
+    grep -qF "eq \$name \"$n\"" "$AM" || missing="${missing} ${n}"
+  done <<EOF
+$pairs
+EOF
+  if [ -n "$missing" ]; then echo "critical 알림의 텔레그램 제목 매핑 누락:$missing"; return 1; fi
+}

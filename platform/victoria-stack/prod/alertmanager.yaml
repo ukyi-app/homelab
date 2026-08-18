@@ -69,6 +69,8 @@ data:
               {{- else if eq $name "StandardSSDFillingTrend" }}{{ $title = "내장 SSD 포화 추세" }}
               {{- else if eq $name "WALVolumeFilling" }}{{ $title = "WAL 볼륨 충전" }}
               {{- else if eq $name "PostgresClusterDown" }}{{ $title = "PostgreSQL 클러스터 다운" }}
+              {{- else if eq $name "LanDnsPathDown" }}{{ $title = "집 LAN DNS 끊김" }}
+              {{- else if eq $name "FilesBackupStale" }}{{ $title = "files 오프-매체 백업 정체" }}
               {{- else if eq $name "PodCrashLooping" }}{{ $title = "파드 재시작 반복" }}
               {{- else if eq $name "PgDumpHedgeStale" }}{{ $title = "논리 헤지 백업 정체" }}
               {{- else if eq $name "CertWildcardExpiringSoon" }}{{ $title = "와일드카드 인증서 만료 임박" }}
