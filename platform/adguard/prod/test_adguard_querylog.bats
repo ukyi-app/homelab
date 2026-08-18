@@ -63,3 +63,25 @@ inner() { yq -r '.data["AdGuardHome.yaml"]' "$ROOT/$CM"; }
   [ "$status" -eq 0 ]
   [ "$output" != "null" ]
 }
+
+@test "the seed pins the R7-era dns settings (each one overrides an AdGuard default that R7 made harmful)" {
+  # R7(LAN DNS를 AdGuard로 전환) 이후 집 전체 질의가 여기로 몰리면서, 그전까지 무해했던
+  # AdGuard 기본값 셋이 해로워졌다. 시드에 명시가 없으면 콜드 재구축이 그 기본값으로 되돌아간다
+  # — 이 파일의 querylog 사례와 정확히 같은 클래스다(라이브는 멀쩡한데 DR만 다르게 서는 경로).
+
+  # ① ratelimit: 기본 20 + subnet_len 24 → 경우 B에서 LAN 전체가 초당 20건 한 버킷.
+  #    실측 2026-08-18: 40건 동시 질의 중 정확히 20건 무응답(#493).
+  rl="$(inner | yq -r '.dns.ratelimit')"
+  [ "$rl" != "null" ]
+  [ "$rl" -ge 100 ]
+
+  # ② 라우터는 경우 B에서 LAN의 유일한 DNS 클라이언트다 — 여기가 조여지면 집 전체가 함께 조여진다.
+  run bash -c "$(declare -f inner); ROOT='$ROOT' CM='$CM'; inner | yq -r '.dns.ratelimit_whitelist[]'"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qxF '192.168.117.1'
+
+  # ③ use_private_ptr_resolvers: 기본 true + local_ptr_upstreams 비었으면 파드의 resolv.conf
+  #    (= 클러스터 CoreDNS 10.43.0.10)로 사설 PTR을 던지고 전건 connection refused가 난다.
+  #    실측 2026-08-18: 최근 10분 에러 18건 중 14건(78%)이 이 경로였다.
+  [ "$(inner | yq -r '.dns.use_private_ptr_resolvers')" = "false" ]
+}

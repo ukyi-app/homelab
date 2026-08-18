@@ -13,6 +13,20 @@ data:
         - https://dns.quad9.net/dns-query
       bootstrap_dns: ["1.1.1.1", "9.9.9.9"]
       upstream_mode: load_balance
+      # 🔴 사설 역방향(PTR) 조회를 포워딩하지 않는다 — R7이 만든 로그 오염을 닫는다.
+      #    AdGuard는 `use_private_ptr_resolvers: true`(기본값)이고 `local_ptr_upstreams`가 비면
+      #    **파드의 /etc/resolv.conf**를 사설 PTR 업스트림으로 쓴다. 그 값이 클러스터 CoreDNS
+      #    (`10.43.0.10`)인데 CoreDNS는 192.168.x 역방향을 서빙하지 않아 전건 `connection refused`가 난다.
+      #    실측 2026-08-18: 최근 10분 에러 18건 중 **14건(78%)이 이 PTR 실패**였다
+      #    (`18.117.168.192.in-addr.arpa` PTR · `lb._dns-sd._udp.…` 등 LAN 기기의 역방향·Bonjour 질의).
+      #    ⚠️ R7 이전에는 LAN 기기가 AdGuard를 안 써서 이 질의가 도착하지 않았다 — **R7이 만든 부작용이다.**
+      #    실질 피해는 작으나(역방향은 best-effort, 정방향 해석은 무영향) 로그의 대부분을 차지해
+      #    **진짜 에러를 가린다.** false면 AdGuard가 스스로 NXDOMAIN 처리하고 포워딩하지 않는다.
+      #    대가: 질의 로그에서 클라이언트가 이름 대신 IP로 보인다(수용).
+      #    ⚠️ `local_ptr_upstreams: [192.168.117.1]`(라우터)로 가는 선택지는 기각했다 —
+      #       역방향 조회가 실제로 동작하는 대신 PTR 경로에 라우터 의존이 생기고, 라우터가 모르는 PTR을
+      #       다시 AdGuard로 포워딩하면 루프 위험이 있다. 이 홈랩은 라우터 의존을 줄이는 방향이다(#494).
+      use_private_ptr_resolvers: false
       # 🔴 레이트리밋 — R7(LAN DNS 전환) 이후 기본값 20이 집 전체를 조인다.
       #    라우터(Orbi RBR350)가 클라이언트에게 광고할 DNS를 따로 못 정하는 기종이라(런북 §2 "경우 B")
       #    **집 전체 질의가 라우터 IP 하나로 도착**한다. 게다가 ratelimit_subnet_len_ipv4 기본값이 24라
