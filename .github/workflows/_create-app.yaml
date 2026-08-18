@@ -132,7 +132,12 @@ jobs:
         uses: ./.github/actions/pr-first-commit
         with:
           branch: create-app/${{ steps.img.outputs.app }}-${{ github.run_id }}
-          add-paths: apps/${{ steps.img.outputs.app }} docs/memory-ledger.md infra/cloudflare/apps.json
+          # ⚠️ create-app.ts는 digest-exporter의 APPS 목록에도 쓴다(tools/create-app.ts의
+          #    writeFileSync(dePath, addApp(...))). 이 경로가 빠지면 pr-first-commit의
+          #    `git add $ADD_PATHS`가 그 수정을 스테이징하지 않아 커밋에서 조용히 유실되고,
+          #    test_digest-exporter의 parity 게이트가 want≠got으로 red가 된다.
+          #    (2026-08-18 발견 — `apps/`가 비어 있어 잠복 상태였다. _teardown-app은 `platform`을 이미 담고 있었다.)
+          add-paths: apps/${{ steps.img.outputs.app }} docs/memory-ledger.md infra/cloudflare/apps.json platform/victoria-stack/prod/digest-exporter.yaml
           commit-message: "feat: ${{ steps.img.outputs.app }} 앱 생성 (create-app — digest 핀, 공개 활성화)"
           pr-title: "feat: ${{ steps.img.outputs.app }} 앱 생성 (create-app)"
           pr-body-file: /tmp/pr-body.md
