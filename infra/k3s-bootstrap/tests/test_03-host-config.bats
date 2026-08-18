@@ -186,6 +186,13 @@ REC
   ln -sfn ../run/systemd/resolve/stub-resolv.conf "$FX/etc/resolv.conf"
   # tailscale이 PATH에 있어야 [4]가 fail하지 않는다.
   printf '#!/bin/sh\nexit 0\n' > "$SB/bin/tailscale"; chmod +x "$SB/bin/tailscale"
+  # `ip -o -4 addr show` 시임 — [6/6]의 networkd 반영이 K3S_NODE_IP로 인터페이스를 찾는다.
+  # (macOS 개발 머신에는 `ip`가 없어 시임이 없으면 그 분기가 아예 안 돌고 회귀를 못 잡는다.)
+  cat > "$SB/bin/ip" <<EOF
+#!/usr/bin/env bash
+echo "2: wlo1    inet ${K3S_NODE_IP}/24 brd 192.168.117.255 scope global dynamic wlo1"
+EOF
+  chmod +x "$SB/bin/ip"
 }
 _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RUN="$SB/bin/rec" \
              run "$BOOTSTRAP_DIR/host-config.sh" --apply; }
@@ -317,4 +324,33 @@ _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RU
   # 핀 값은 versions.env SSOT와 같아야 한다(기존 @test와 같은 계약 — 여기서는 쌍의 존재만 본다).
   [ -n "$HOST_UPSTREAM_DNS" ]
   grep -qxF "DNS=${HOST_UPSTREAM_DNS}" "$r"
+}
+
+@test "apply makes the networkd drop-in effective now (installed-but-inert was the 2026-08-18 defect)" {
+  # 🔴 그전까지 [6/6]은 daemon-reload + restart systemd-resolved/journald뿐이었다. 둘 다 networkd에는
+  #    아무 영향이 없어서, `10-netplan-<if>.network.d/10-k3s-node.conf`(UseDNS=false)가 **설치만 되고
+  #    다음 재부팅까지 잠들어** 있었다. 그동안 링크는 DHCP DNS를 받고, 링크별 DNS는 전역 DNS=보다
+  #    우선하므로 HOST_UPSTREAM_DNS가 무효였다 → R7 이후 그 값은 라우터 = 콜드스타트 교착 부활.
+  #    바로 위 tmpfiles @test와 같은 논거다: "재부팅을 요구하면 '적용했다'가 거짓이 된다."
+  _sandbox
+  _apply
+  [ "$status" -eq 0 ]
+  log="$(cat "$REC_LOG")"
+  printf '%s' "$log" | grep -qF -- 'networkctl reload'
+  # reload만으로는 링크에 재적용되지 않는다 — reconfigure가 실제 적용이다.
+  printf '%s' "$log" | grep -qE 'networkctl reconfigure [a-z0-9]+'
+  [ -f "$FX/etc/systemd/network/10-netplan-wlo1.network.d/10-k3s-node.conf" ]
+}
+
+@test "apply says so loudly when it cannot find the interface (silence would make 'applied' a lie)" {
+  # 인터페이스를 못 찾으면 드롭인은 **비활성인 채로 남는다**. 조용히 exit 0 하면
+  # host-preflight [6]이 잡기 전까지 아무도 모른다 — 그래서 수동 절차를 반드시 출력한다.
+  _sandbox
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$SB/bin/ip"; chmod +x "$SB/bin/ip"   # 주소 열거가 빈 경우
+  _apply
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF -- 'networkctl reconfigure'
+  printf '%s' "$output" | grep -qF -- '비활성'
+  run bash -c "grep -qE 'networkctl reconfigure [a-z0-9]+' '$REC_LOG'"
+  [ "$status" -ne 0 ]   # 못 찾았으면 reconfigure를 부르지 않는다(엉뚱한 링크를 끊지 않는다)
 }
