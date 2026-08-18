@@ -58,3 +58,16 @@ f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
   grep -qF 'drop: [ALL]' "$f"
   grep -q 'type: RuntimeDefault' "$f"
 }
+
+@test "the r4 hedge alert names the SAME prefix the cronjob writes to (drift guard)" {
+  # 2026-08-18: r4의 PgDumpHedgeStale description이 Mac 시대 `pgdump/`를 가리킨 채 남아 있었다.
+  # #0006이 경로 B를 `pgdump-nuc/`로 정정할 때 런북은 고쳤지만 알림 문구는 놓쳤다 — 온콜이
+  # 새벽에 읽는 문장이 존재하지 않는 prefix를 가리키면 "덤프가 하나도 없다"는 오진으로 이어진다.
+  # 리터럴을 유지하되(문장 가독성) 정본에서 파생해 대조한다.
+  seg=$(sed -n 's|^ *DUMP_PREFIX="[^"]*/\([^"/]*\)".*|\1|p' "$f" | head -1)
+  [ -n "$seg" ]
+  r4=platform/victoria-stack/prod/rules/r4-storage-backup.yaml
+  desc=$(grep -n 'alert: PgDumpHedgeStale' -A8 "$r4" | grep 'description:')
+  [ -n "$desc" ]
+  case "$desc" in *"$seg/"*) ;; *) echo "r4 description이 DUMP_PREFIX의 마지막 세그먼트($seg/)를 안 담는다: $desc"; return 1;; esac
+}

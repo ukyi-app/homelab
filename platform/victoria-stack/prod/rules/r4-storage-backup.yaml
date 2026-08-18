@@ -112,9 +112,14 @@ data:
               or absent(last_over_time(restore_drill_last_success_timestamp[10d]))
             for: 30m
             # ⚠️ **severity는 owner 판단으로 warning에 둔다**(4h repeat). critical로 올리면
-            #    repeat_interval이 1h가 되어 하루 24건이다 — 임계가 이미 8.1일(=주간 실행 2회 실패
-            #    이후)이라 즉시성이 그만큼 높지 않고, 이 조건은 "데이터를 잃었다"가 아니라
-            #    "복원이 미검증이다"이다. 알림 피로와의 거래라 값을 매기는 것은 owner 몫이다.
+            #    repeat_interval이 1h가 되어 하루 24건이다 — 이 조건은 "데이터를 잃었다"가 아니라
+            #    "복원이 미검증이다"이고, 그 값매김은 알림 피로와의 거래라 owner 몫이다.
+            # 🔴 **산술 정정(2026-08-18)**: 이전 주석은 임계 8.1일을 "주간 실행 **2회** 실패 이후"라고
+            #    적었으나 틀렸다. 주기가 7일이므로 700000s(=8.1019일)는 **1회 실패 + 약 26.4시간**에
+            #    발화한다(for: 30m 포함 약 26.9시간). 같은 레포의 restore-drill-script.sh(약 5.9일간
+            #    이미 발화) · restore-drill-cronjob.yaml · traps-detail.md는 모두 1회 기준으로 계산한다 —
+            #    이 줄만 outlier였다. **즉시성은 이전 서술의 약 2배다.** warning 유지 여부는 owner 몫이되,
+            #    그 판단은 이 정정된 값 위에서 다시 내려야 한다(이전 결론은 오염된 입력 위에 있었다).
             labels: { severity: warning }
             annotations:
               summary: "CNPG 복원 drill이 최근에 성공하지 못함"
@@ -126,8 +131,13 @@ data:
                 확인 순서: (1) `kubectl -n database get job -l cnpg.io/job=restore-drill`로 최근 실행,
                 (2) 그 파드 로그의 `[drill]` 줄 — 특히 `pre-flight`와 `첫 폴링에 이미 healthy`,
                 (3) 고아 잔여 `kubectl -n database get cluster,pvc | grep pg-restore-drill`.
-                ⚠️ drill이 PASS해도 증명되는 것은 "어떤 R2 백업이 복구된다"까지이고 **아카이브 신선도(RPO)는
-                별개**입니다 — canary 행 수 비교는 시드가 initdb 1회성이라 상수입니다.
+                ✅ 2026-08-18(PR #487)부터 이 drill은 **RPO까지 증명**합니다 — 라이브에 마커 1행을 INSERT하고
+                pg_switch_wal 후 그 WAL이 아카이브되기를 기다린 뒤, 복구본에서 그 마커가 보여야 PASS입니다.
+                따라서 FAIL은 "복구 경로가 깨졌다"뿐 아니라 **"아카이브가 뒤처졌다"**일 수도 있습니다 —
+                로그의 MARKER_ID / MARKER_WAL / rpo attempt 줄로 구분하세요. PASS 본문의 "RPO N초"가
+                실측 지연이며, RPO-WAIT-TIMEOUT 토큰은 아카이브가 대기 창 안에 못 따라온 것입니다(중단 아님).
+                ⚠️ 이 문구는 #487 이전 판에서 "canary 행 수 비교는 상수라 RPO는 별개"라고 적고 있었습니다 —
+                #487이 r4 룰을 함께 고치지 않아 낡은 채였고 2026-08-18에 정정했습니다.
           # 백업 생존성: 논리 백업(헤지) — pg_dump→R2 CronJob(매일 04:00)이 완료되어야 한다(복원 사본 4).
           # 나머지 3개 백업(로컬 base·R2 barman·복원 drill)은 감시되나 이 4번째만 무감시였다.
           - alert: PgDumpHedgeStale
@@ -138,7 +148,7 @@ data:
             labels: { severity: warning }
             annotations:
               summary: "논리 백업(헤지)이 stale(27시간 초과)이거나 누락됨"
-              description: "pg_dump 헤지 사본(복원 사본 4, R2 pgdump/)이 갱신되지 않았습니다 — barman 실패 시 최후 보루입니다. CronJob/연결을 확인하세요."
+              description: "pg_dump 헤지 사본(복원 사본 4, R2 pgdump-nuc/)이 갱신되지 않았습니다 — barman 실패 시 최후 보루입니다. CronJob/연결을 확인하세요."
           # 백업 생존성: 공용 캐시(Valkey) 백업 CronJob(cache-backup, 매일 03:45 KST)이 완료돼야 한다.
           # pg 4사본과 달리 KubeJobFailed(존재-시-발화)만 있어 Job 오브젝트 소실/미스케줄 시 침묵(fail-open)이던
           # 비대칭 해소 — pg staleness 패턴 복제(absent 가드 fail-closed). 캐시는 LRU 휘발 티어라 warning.
