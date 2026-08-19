@@ -180,9 +180,12 @@
   먼저 볼 것.
 - ⇒ 처방: `etc/tmpfiles.d/10-k3s-node.conf`의 `w /sys/bus/pci/drivers/nvme/*/link/l1_aspm - - - - 0`.
   **PCI 주소가 아니라 드라이버 경유 글롭**을 쓴다 — 슬롯이 바뀌거나 두 번째 M.2를 달아도 따라간다.
-  ⚠️ `host-config.sh`의 트리 열거는 `find . -type f -name '*.conf'`다. udev 룰(`.rules`)이나
-  grub 조각(`.cfg`)으로 두면 **조용히 무시된다**(레포의 "열거 붕괴 → vacuous green" 클래스).
-  그래서 `.conf`로 표현 가능한 tmpfiles를 골랐다. 트리에 파일을 더하면 `TREE_MIN`도 같이 올릴 것.
+  ⚠️ `host-config.sh`의 트리 열거는 **확장자 화이트리스트**다 — 2026-08-19 현재
+  `.conf`·`.service`·`.timer`. 그 밖(udev `.rules`, grub `.cfg`)으로 두면 설치도 드리프트 검사도
+  안 된 채 **조용히 무시된다**(레포의 "열거 붕괴 → vacuous green" 클래스). 그래서 `.conf`로 표현
+  가능한 tmpfiles를 골랐다. 트리에 파일을 더하면 `TREE_MIN`도 같이 올릴 것.
+  ⇒ 같은 날 이 클래스를 **닫았다**: 화이트리스트 밖 파일이 트리에 존재하는 것 자체가 fail-loud다
+  (`TREE_N -eq TREE_ALL_N`). 이제 새 확장자는 조용히 빠지는 대신 글롭을 넓히라고 요란하게 운다.
 > 가드: `infra/k3s-bootstrap/tests/test_03-host-config.bats`
 
 ### hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다
