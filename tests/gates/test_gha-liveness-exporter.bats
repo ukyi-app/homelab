@@ -19,6 +19,37 @@ setup() {
   LAG_CEILING=21600
 }
 
+# GHAWorkflowStale의 expr만 — ConfigMap 안의 룰 문자열을 한 번 더 파싱하고 **주석을 제거**한다.
+# ⚠️ 주석 제거가 없으면 산문에 적힌 함수 이름이 단언을 만족시킨다(공허한 가드). lib의 vme_alert_expr와 같은 규율.
+stale_expr() {
+  yq '.data["r6.yaml"]' "$R6" | yq '.groups[].rules[] | select(.alert=="GHAWorkflowStale") | .expr' - | sed 's/#.*//'
+}
+
+# $1=메트릭명 → 그 메트릭을 감싼 rollup **함수 이름**(없으면 빈 문자열).
+# ⚠️ `(`와 메트릭 사이 공백을 허용한다 — 형제 lib(vme_rollup_windows)와 같은 관용성이다. 붙여 놓으면
+#    expr을 공백 포함으로 재포맷했을 때 "기대 max_over_time"이라는 **틀린 진단**으로 red가 난다.
+stale_rollup_fn() {
+  { grep -oE "[a-z_]+_over_time[[:space:]]*\([[:space:]]*${1}\[" <<<"$(stale_expr)" || true; } \
+    | head -1 | grep -oE '^[a-z_]+_over_time' || true
+}
+
+# $1=메트릭명 → 그 메트릭에 걸린 rollup 윈도(예 3h). 복수면 첫 것.
+stale_rollup_window() {
+  { grep -oE "[a-z_]+_over_time[[:space:]]*\([[:space:]]*${1}[^]]*\]" <<<"$(stale_expr)" || true; } \
+    | { grep -oE '\[[0-9]+[smhd]\]' || true; } | head -1 | tr -d '[]'
+}
+
+# 3h/30m/90s/1d → 초. 알 수 없는 형태는 **0**을 내고 호출부가 fail-closed로 막는다.
+dur_to_s() {
+  case "$1" in
+    *s) echo $(( ${1%s} )) ;;
+    *m) echo $(( ${1%m} * 60 )) ;;
+    *h) echo $(( ${1%h} * 3600 )) ;;
+    *d) echo $(( ${1%d} * 86400 )) ;;
+    *) echo 0 ;;
+  esac
+}
+
 # WORKFLOWS env를 "파일=예산" 줄로 뽑는다.
 watched() {
   bun -e '
@@ -167,6 +198,49 @@ EOF
   run grep -q 'gha_workflow_last_success_timestamp\[3h\]' "$R6"
   [ "$status" -eq 0 ]
   [ $(( cron_min * 60 )) -le 10800 ]
+}
+
+@test "GHAWorkflowStale wraps the timestamp in max_over_time and the budget in last_over_time" {
+  # ⚠️ 이 **비대칭이 의도**다. 판정 기준은 "타임스탬프인가"가 아니라 **"그 값이 내려가는 것이 사실일 수
+  #    있는가"**다.
+  #    · 좌변 `gha_workflow_last_success_timestamp` = "마지막 성공 run의 시각" → **단조 비감소여야 하는 양**.
+  #      GitHub Actions API가 간헐적으로 **낡은 스냅샷을 200으로** 돌려줘 값이 역행하는데(2026-08-19 실측:
+  #      bump-poll −515.3h), `last_over_time`은 그 한 샘플을 그대로 판정에 넣어 페이지를 만들었다.
+  #    · 우변 `gha_workflow_max_age_seconds` = 예산(설정) → **인하가 사실**이라 max를 씌우면 예산을 낮춰도
+  #      옛 큰 값이 윈도만큼 부활한다. 그래서 여기는 `last_over_time`을 **유지해야** 한다.
+  # ⚠️ 이 단언이 없으면 되돌림을 잡는 게이트가 레포에 **0건**이다 — 아래 형제 테스트(:rollup window)는
+  #    메트릭명+윈도만 보고 함수 이름을 보지 않고, lib의 `vme_rollup_windows`와 모드 C 린터의 ROLLUP_OK도
+  #    `*_over_time` 계열이면 어느 것이든 통과시킨다(실측: 좌변을 되돌려도 전 게이트 초록이었다).
+  ts_fn="$(stale_rollup_fn gha_workflow_last_success_timestamp)"
+  bd_fn="$(stale_rollup_fn gha_workflow_max_age_seconds)"
+  # 열거 붕괴 바닥값 — 추출이 깨지면 빈 문자열끼리 비교해 조용히 통과하는 자리다.
+  [ -n "$ts_fn" ] || { echo "좌변 rollup 함수 추출 실패 — expr 파싱이 깨졌다(공허한 가드)"; false; }
+  [ -n "$bd_fn" ] || { echo "우변 rollup 함수 추출 실패 — expr 파싱이 깨졌다(공허한 가드)"; false; }
+  [ "$ts_fn" = "max_over_time" ] \
+    || { echo "좌변이 '$ts_fn'이다 — 단조량엔 max_over_time이어야 한다(API 역행 샘플이 판정에 들어간다)"; false; }
+  [ "$bd_fn" = "last_over_time" ] \
+    || { echo "우변이 '$bd_fn'이다 — 예산은 인하가 사실이라 last_over_time이어야 한다"; false; }
+}
+
+@test "the rollup window absorbs several consecutive backward polls (window over push period)" {
+  # `max_over_time`은 **면역이 아니라 유계 흡수**다 — 창 안에 역행하지 **않은** 샘플이 최소 1개 남아야
+  # 흡수되므로 내성은 `floor(W / push)`폴이다(hermetic replay 실측: W=3h·push=30m에서 n=6 무발화 /
+  # n=7 pending / n=8 발화). 라이브 관측 최장 역행은 **연속 2폴(1h)**이었다.
+  # ⇒ 함수 이름만 못박으면 크론 `*/30`→`*/90`이나 윈도 `[3h]`→`[1h]`가 **위 단언을 통과하면서** 내성을
+  #    2폴로 깎아 픽스 이전 체제로 되돌린다. 그 축을 여기서 막는다.
+  # K=4의 근거: 관측 최장(2폴)의 2배. 현재 배포값 floor(10800/1800)=6폴은 이 하한 위에 있고,
+  # 위 두 회귀는 각각 floor=2폴이 되어 red가 된다.
+  K=4
+  cron_min="$(grep -oE '^  schedule: "\*/([0-9]+) ' "$MF" | grep -oE '[0-9]+')"
+  [ -n "$cron_min" ] || { echo "exporter 크론 주기 추출 실패"; false; }
+  push_s=$(( cron_min * 60 ))
+  w="$(stale_rollup_window gha_workflow_last_success_timestamp)"
+  [ -n "$w" ] || { echo "좌변 rollup 윈도 추출 실패 — 공허한 가드"; false; }
+  w_s="$(dur_to_s "$w")"
+  [ "$w_s" -gt 0 ] || { echo "윈도 '$w'를 초로 환산하지 못했다"; false; }
+  [ "$push_s" -gt 0 ] || { echo "push 주기가 0이다"; false; }
+  [ "$w_s" -ge $(( K * push_s )) ] \
+    || { echo "흡수 여유 부족: W=${w_s}s / push=${push_s}s = $(( w_s / push_s ))폴 < 요구 ${K}폴"; false; }
 }
 
 @test "the heartbeat is the LAST line of the payload (streaming truncation is fail-closed)" {

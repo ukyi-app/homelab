@@ -518,6 +518,10 @@
   - **라벨-값 상태 게이지(identity)** — 값은 무의미한 1이고 **시리즈의 존재와 라벨 자체가 상태**다(r6의 `digest`).
     넓은 윈도는 구·신 상태를 **동시에** 현재라고 주장한다 → **윈도 < `for:`**.
   - 한 줄 규칙: **타임스탬프-값 하트비트 → 윈도 상한 없음 / 라벨-값 상태 게이지 → 윈도 < `for:`.**
+  - ⚠️ **상한이 없다는 것이 하한도 없다는 뜻은 아니다.** 위 문장은 공급원이 **단조**일 때(값을 잡 자신이
+    `date +%s`로 만들 때) 참이다. 값이 클러스터 **밖**에서 오면 공급원이 역행 샘플을 줄 수 있고, 그때는
+    rollup 함수를 `max_over_time`으로 바꿔야 하며 윈도에 **하한**(`W ≥ 흡수할 폴 수 × push`)이 생긴다.
+    ⇒ 「GitHub API는 낡은 스냅샷을 200으로 돌려준다 …」가 그 세 번째 축의 SSOT다.
 - **동반 함정**: 좌변에 rollup을 걸면 시리즈가 **연속**이 되므로, `unless` 조인의 **우변(KSM 텔레메트리)이 사라질 때**
   아무것도 제거되지 않아 **전 대상이 거짓 사유로 발화**한다(원인 오귀속 — 진실은 "KSM이 죽었다"이고 그건
   `TargetDown` 소관). rollup에는 **우변 존재 가드**(`and on (key) (<우변 존재>)`)를 동반시켜라. 반대로 **우변
@@ -1167,3 +1171,61 @@ selfHeal과 플립플롭한다.
 - ⚠️ **Renovate가 이 값을 안 본다** — `renovate.json`에 `terraform_version` customManager가 없고
   github-actions manager도 비활성이다. 즉 자동 갱신 경로가 0이고, 로컬 apply 후 손으로 올려야 한다.
 > 가드: `infra/tailscale/test_provider_scopes.bats`
+
+### GitHub API는 낡은 스냅샷을 200으로 돌려준다 — `last_over_time`은 그 역행 샘플 하나를 그대로 페이지로 바꾼다
+- **같은 URL을 몇 초 간격으로 두 번 부르면 다른 세계가 온다.** 2026-08-19 실측:
+  `GET /repos/ukyi-app/homelab/actions/workflows/bump-poll.yaml/runs?status=success&per_page=1`이 첫 호출에
+  `total_count=319` + 최신 run이 **2026-07-29**(21.5일 낡음)를 돌려줬고, 몇 초 뒤 같은 URL이
+  `total_count=1137` + 신선한 run을 돌려줬다. 에러가 아니라 **200이다** — GitHub 백엔드의 read-replica/인덱스
+  불일치이고 클라이언트가 할 수 있는 것이 없다(exporter의 추출 정규식은 정상이었다).
+- **왜 그것이 곧 페이지가 되나**: `gha-liveness-exporter`는 **상태가 없다**(CronJob `*/30` · 자기 과거를 읽지
+  않는다) → 낡은 응답을 그대로 `gha_workflow_last_success_timestamp`에 싣는데, **값**은 API가 준 EPOCH이고
+  **샘플 타임스탬프**는 push 시각이라 역행 값이 "가장 최근 샘플" 자리에 앉는다. 좌변이 `last_over_time(…[3h])`
+  이면 그 한 샘플이 판정의 전부다.
+- **형제 알림 둘은 원리적으로 못 본다**: 낡은 스냅샷도 200 + 파싱 성공이라 `SCRAPED`가 정상 증가한다 →
+  `GHALivenessScrapeIncomplete`(부분 고장 축)는 침묵하고, push 경로는 멀쩡하니 하트비트
+  (`GHALivenessExporterStale`)도 침묵한다. 셋 중 **정확히 이 알림만** 반응한다.
+- **라이브 시계열**(vmsingle raw export, 7일 · 워크플로당 263샘플 — running max 대비 **역행**한 샘플):
+  `bump-poll.yaml` 4회(−1.9h · −92.9h · −2.4h · −515.3h) · `tf-reconcile.yaml` 1회(−18.0h) ·
+  나머지 6종 **0회**. 최장 연속은 **2폴(1시간)**이고 그 직후 샘플은 매번 신선한 값으로 복귀했다 = **단발 잡음**.
+  역행은 run 수가 많은 워크플로에 몰렸다(bump-poll 1145 · tf-reconcile 996 · pr-sweeper 957).
+  ⚠️ pr-sweeper가 그 창에서 0회였던 것은 **표본이 작아 그렇게 보이는 것**이지 구조적 면역이 아니다
+  (공통 비율 가정 시 0회일 확률 ≈ 3%). 대상을 "역행을 본 워크플로"로 좁히지 마라.
+- **반사실 대조**(같은 라이브 데이터에 두 expr을 나란히 평가): `last_over_time`은 24시간 창에서 22격자
+  (bump-poll 17 · tf-reconcile 5)가 참이었고, `max_over_time`은 **0격자**였다. 반대 방향도 쟀다 — 예산을
+  인위로 21600s까지 낮추면 두 함수가 **진짜로 정지한 5종을 격자 수까지 동일하게**(218/218 · 289/289 · 19/19)
+  잡았다. ⇒ **오탐만 사라지고 감지 능력은 그대로다.**
+- ⇒ **처방: 좌변만 `last_over_time` → `max_over_time`.** 이 값은 "마지막 성공 run의 시각"이라 **단조
+  비감소여야 하는 양**이고 역행은 사실이 아니라 관측 잡음이다. 정상 데이터에서 두 함수는 **같은 값을 낸다** —
+  차이는 잡음이 들어왔을 때뿐이라 교체 비용이 0이다.
+- ⚠️ **우변(`gha_workflow_max_age_seconds`)에는 쓰지 마라.** 그것은 예산(설정)이라 **내려가는 것이 사실**이다 —
+  max를 씌우면 예산을 낮춘 뒤 옛 큰 값이 윈도만큼 부활해 새 예산이 늦게 먹는다. 판정 기준은 "타임스탬프인가"가
+  아니라 **"그 값이 내려가는 것이 사실일 수 있는가"**다.
+- **★ 세 번째 축**: 「rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭」이 값의 종류로 **윈도 크기**를 갈랐다면,
+  여기선 같은 축이 **rollup 함수 선택**을 가른다 — **단조량 → `max_over_time`**(잡음 필터이면서 fail-closed) /
+  **가변 설정값 → `last_over_time`**(최신이 곧 사실) / **라벨-값 상태 게이지 → `last_over_time` + 윈도 < `for:`**.
+- ⚠️ **`max_over_time`은 면역이 아니라 유계 흡수다.** 창 안에 역행하지 **않은** 샘플이 최소 1개 남아야 흡수하므로
+  내성은 `floor(W / push)`폴이고, 침묵 조건은 `n×push ≤ W` **그리고** `(n+1)×push ≤ 예산`이다. W=3h·push=30m에서는
+  **앞 항이 먼저 물어 연속 6폴(3.0h)**이 상한이다(hermetic replay 실측: n=6 무발화 / n=7 pending / n=8 발화 —
+  예산 항이 주는 n≤11은 **도달조차 하지 않는다**). 라이브 최장 2폴 대비 3배 여유다.
+  ⇒ **윈도를 좁히거나 크론을 늘리면 그 여유가 곧바로 줄어든다** — 셋(윈도·크론·예산)은 함께 판단하라.
+- ⚠️ **거울상 잔여 위험**: max는 **뒤로** 튄 잡음만 거른다. 앞으로 튄 값(미래 타임스탬프)은 윈도 동안 붙잡혀
+  알림을 **억제**한다(fail-open 거울상). 낡은 replica는 원리적으로 **과거만** 낸다는 관측에 기댄 선택이고
+  억제 상한이 W로 유계라 수용했다 — 값의 출처(필드·API)가 바뀌면 이 전제를 다시 판단하라.
+- **왜 생산자에서 안 고치나**: exporter에 단조 클램프를 넣으려면 자기 과거를 vmsingle에서 **읽어와야** 하고
+  (현재는 순수 push · 상태 0), 그 읽기의 실패 모드에 "그럼 무엇을 push하나"라는 새 결정이 붙는다. 소비자 쪽
+  한 단어가 같은 불변식을 더 싸게 산다. `per_page`를 올려 응답 안에서 최대값을 고르는 변종도 듣지 않는다 —
+  낡은 것은 **인덱스 스냅샷 전체**라 같은 응답 안의 최대값도 같은 세대다(`total_count`가 함께 낡는다).
+- **왜 게이트를 통과했나**: `-dryRun`은 파싱만 본다. 발화 e2e의 합성 시계열은 **모든 샘플이 같은 age**라 역행
+  샘플이 존재하지 않았고, 정적 bats는 메트릭명+윈도만 grep해 **함수 이름을 보지 않았으며**, 모드 C 린터의
+  `ROLLUP_OK`에는 `last_over_time`과 `max_over_time`이 **둘 다** 들어 있다. ⇒ 좌변을 되돌려도 전 게이트가
+  초록이었다(실측). 함수 선택 축에 가드가 **0건**이었다.
+- **스코프**: 이 레포의 타임스탬프-값 push 메트릭 중 `restore_drill_*`·`files_backup_*`·`pvc_du_*`·
+  `adguard_rewrite_*`·`gha_liveness_last_success_timestamp`는 전부 잡 자신이 `date +%s`로 만들어 **구조적으로
+  단조**다. **제3자 API에서 값이 오는 것은 `gha_workflow_last_success_timestamp` 하나뿐**이라 이 클래스의
+  현재 원소는 1개다. ⚠️ 다만 판별 기준은 "push인가"가 아니라 **"값이 클러스터 밖에서 왔는가"**이므로,
+  스크레이프 경로에도 외부 공급원이 있다 — `barman_cloud_…_last_available_backup_timestamp`(R2 조회,
+  `R2BackupStale`)가 그렇다. 거기에 `max_over_time`을 쓰면 **안 된다**(`reset-pg-r2-archive.sh --purge`가
+  정당한 역행을 만든다). ⚠️ **알려진 잔여**: 이 판별을 레포 전역에서 강제하는 린터 모드는 아직 없다 —
+  새 알림이 같은 모양(`time() - last_over_time(<외부 공급 타임스탬프>[W])`)으로 생기면 아무 가드에도 안 걸린다.
+> 가드: `tests/gates/vmalert-gha-liveness-firing-e2e.sh`, `tests/gates/test_gha-liveness-exporter.bats`, `tests/gates/fixtures/r6-gha-lastovertime.yaml`

@@ -73,3 +73,4 @@
 | 드릴의 정리가 EXIT trap뿐이면 고아가 남고, pre-flight 없는 apply가 그 고아를 재사용해 '검증된 복원'이 거짓말한다 | gate | `platform/cnpg/prod/test_restore_drill_behavior.bats` |
 | 권한 부족이 드리프트로 위장한다 — terraform은 못 읽은 리소스를 "삭제됨"으로 읽어 `Plan: 1 to add`를 낸다 | gate | `infra/tailscale/test_provider_scopes.bats` |
 | owner 로컬 apply 루트는 plan-only CI여도 terraform 핀 ≥ state writer여야 한다(핀 통일이 오히려 고장) | gate | `infra/tailscale/test_provider_scopes.bats` |
+| GitHub API가 낡은 스냅샷을 200으로 반환 → push된 단조 타임스탬프가 역행 → `last_over_time`이 그 한 샘플로 오발화(rollup 함수 선택 축) | gate | `tests/gates/vmalert-gha-liveness-firing-e2e.sh`, `tests/gates/test_gha-liveness-exporter.bats`, `tests/gates/fixtures/r6-gha-lastovertime.yaml` |
