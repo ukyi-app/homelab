@@ -23,7 +23,7 @@
 
 resource "github_repository_ruleset" "bump_poll_writer_only" {
   name        = "bump-poll-writer-only"
-  repository  = github_repository.homelab.name
+  repository  = data.github_repository.homelab.name
   target      = "branch"
   enforcement = "active"
 

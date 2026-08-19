@@ -35,7 +35,7 @@ resource "github_repository" "app_template" {
 }
 
 resource "github_branch_protection" "main" {
-  repository_id = github_repository.homelab.node_id
+  repository_id = data.github_repository.homelab.node_id
   pattern       = "main"
 
   required_status_checks {

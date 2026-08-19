@@ -28,6 +28,15 @@
 # deletion 규칙은 이번 increment canonical에 없다(spec R-2 — 후속이 정리경로와 함께 추가).
 # @test 이름은 영어(디렉토리 단위 실행 시 한글 인코딩 깨짐 — AGENTS.md). bash 3.2 호환([[ ]] 미사용).
 
+# 📌 2026-08-19 canonical 갱신: `repository`가 `github_repository.homelab.name`(리소스 참조)에서
+#    `data.github_repository.homelab.name`(data source)으로 바뀌었다. **의미는 같다**(둘 다 같은
+#    레포 이름으로 해석되고, data source는 레포 부재 시 요란하게 죽어 존재 보장도 유지된다).
+#    바꾼 이유는 보안이 아니라 **감시 가능성**이다: CI의 drift-github는 읽기 전용 PAT로 도는데,
+#    이 블록이 `github_repository` **리소스**를 참조하면 `-target` plan이 그 리소스를 의존성으로
+#    끌어오고, GitHub이 repo merge 설정을 Administration:write에게만 주는 탓에 **영구 허위 드리프트**가
+#    난다(2026-08-19 실측). data source는 diff를 내지 않아 그 경로가 사라진다.
+#    ⚠️ 잃은 것: 리소스 참조가 주던 **생성 순서 보장**. 이 레포는 이미 존재하고 import로 관리되므로
+#    (런북 02) 실운영 영향은 없지만, 무에서 부트스트랩하면 ruleset이 repo보다 먼저 시도될 수 있다.
 ROOT="$BATS_TEST_DIRNAME/../.."
 TF="$ROOT/infra/github/rulesets.tf"
 
@@ -49,7 +58,7 @@ no_block_comments() {
 is_override_path() { printf '%s' "$1" | grep -Eq '(^|/)([^/]*_)?override\.tf(\.json)?$'; }
 
 # 핀된 canonical(신뢰 앵커의 리뷰된 형태). 위 재생성 절차로만 갱신한다.
-CANONICAL='resource "github_repository_ruleset" "bump_poll_writer_only" { name = "bump-poll-writer-only" repository = github_repository.homelab.name target = "branch" enforcement = "active" conditions { ref_name { include = ["refs/heads/bump-poll/**"] exclude = [] } } rules { creation = true update = true } bypass_actors { actor_id = 4043080 actor_type = "Integration" bypass_mode = "always" } }'
+CANONICAL='resource "github_repository_ruleset" "bump_poll_writer_only" { name = "bump-poll-writer-only" repository = data.github_repository.homelab.name target = "branch" enforcement = "active" conditions { ref_name { include = ["refs/heads/bump-poll/**"] exclude = [] } } rules { creation = true update = true } bypass_actors { actor_id = 4043080 actor_type = "Integration" bypass_mode = "always" } }'
 
 @test "security block matches the pinned canonical form" {
   got="$(canonical_blocks "$TF")"
