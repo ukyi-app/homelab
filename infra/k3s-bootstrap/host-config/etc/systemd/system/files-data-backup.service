@@ -1,0 +1,28 @@
+# files-data 오프-매체 백업 — `scripts/backup-files-data.sh`의 실행자.
+#
+# 🔴 **이 유닛은 설치되지만 enable되지 않는다.** `host-config.sh --apply`는 트리를 놓고
+#    `daemon-reload`만 한다(`systemctl enable` 호출이 레포 전체에 0건 — 의도).
+#    국면 A에서는 스크립트가 **의도적으로 거부한다**(source=/mnt/bulk가 루트 LV의 bind라
+#    dest와 같은 물리 디스크다). 지금 켜면 매일 실패하거나, 더 나쁘게는 같은 매체에 사본을 만든다.
+#    국면 B(별도 SSD를 /mnt/bulk에 마운트) 이후 아래 한 줄이 배선의 마지막이다:
+#        sudo systemctl enable --now files-data-backup.timer
+#
+# ⚠️ 경로가 하드코딩이다. 이 레포는 owner 홈의 고정 체크아웃에서 돈다(`/home/ukyi/workspace/homelab`).
+#    체크아웃을 옮기면 이 유닛과 `host-config.sh --check`가 함께 틀어진다 — 옮길 일이 생기면
+#    두 곳을 같이 고칠 것.
+# ⚠️ root로 돈다. `/mnt/bulk`가 `drwx------ root`라 ukyi로는 source를 읽지 못한다(실측).
+#    그래서 스크립트가 `yq`가 아니라 `jq`를 먼저 본다 — root PATH에 yq가 없다(mise shim은 ukyi 전용).
+[Unit]
+Description=files-data 오프-매체 백업 (RPO=24h)
+Documentation=file:///home/ukyi/workspace/homelab/scripts/backup-files-data.sh
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=KUBECONFIG=/home/ukyi/workspace/homelab/infra/k3s-bootstrap/kubeconfig
+# dest는 source와 **다른 물리 디스크**여야 한다(스크립트가 강제). 국면 B에서 source=별도 SSD이므로
+# 여기 내장 루트 디스크 경로를 쓴다 — macOS 시절과 배치가 정확히 뒤집힌 자리다.
+ExecStart=/home/ukyi/workspace/homelab/scripts/backup-files-data.sh /var/backups/files-data
+# 스크립트가 스테이징→sanity→승격으로만 반영하므로 중단돼도 기존 사본은 온전하다.
+TimeoutStartSec=30min

@@ -52,7 +52,10 @@ SSHD_DROPIN="10-k3s-node.conf"
 #    (4 → 5: 2026-08-18 `etc/systemd/network/10-netplan-wlo1.network.d/10-k3s-node.conf` 추가 —
 #           R7이 여는 콜드스타트 교착 차단. DHCP가 광고하는 AdGuard(=노드 자신의 LAN IP)를
 #           링크가 받지 않게 해 resolved.conf.d의 `DNS=`가 governing이 되게 한다.)
-TREE_MIN=5
+#    (5 → 7: 2026-08-19 `etc/systemd/system/files-data-backup.{service,timer}` 추가 — files 백업
+#           국면 B 선행 배선. 이때 열거 글롭도 `.conf`만 보던 것에서 `.service`/`.timer`까지
+#           넓혔다. 바닥값과 글롭을 **함께** 올린 첫 사례다 — 한쪽만 올리면 조용히 어긋난다.)
+TREE_MIN=7
 
 fail() { echo "FAIL: host-config: $*" >&2; exit 1; }
 
@@ -69,10 +72,23 @@ esac
 # ── 트리 열거 ──────────────────────────────────────────────────────────────────────────────
 # 상대경로가 곧 대상 절대경로다(`etc/…` → `${R}/etc/…`). find를 서브셸 cd 안에서 돌려 접두를
 # 만들지 않는다. 열거 실패는 빈 문자열로 나타나고, 바로 아래 바닥값이 그것을 잡는다.
-TREE_FILES="$( (cd "$TREE" && find . -type f -name '*.conf') | sed 's|^\./||' | LC_ALL=C sort )"
+# ⚠️ 확장자가 곧 **검사 도메인 편입 조건**이다. `.service`/`.timer`를 넣지 않으면 systemd 유닛이
+#    트리에 있어도 설치도 드리프트 검사도 안 되고 **조용히 무시된다**(2026-08-19 files 백업
+#    배선을 넣으며 발각). 새 확장자를 쓸 때는 여기와 test_03의 미러를 함께 넓힐 것.
+TREE_FILES="$( (cd "$TREE" && find . -type f \( -name '*.conf' -o -name '*.service' -o -name '*.timer' \)) | sed 's|^\./||' | LC_ALL=C sort )"
 TREE_N="$(printf '%s\n' "$TREE_FILES" | awk 'NF { n++ } END { print n+0 }')"
 [ "$TREE_N" -ge "$TREE_MIN" ] \
   || fail "선언 트리에서 ${TREE_N}건만 열거됐다(최소 ${TREE_MIN}) — 열거가 깨졌거나 파일이 사라졌다. 0건을 '드리프트 없음'으로 읽으면 안 된다"
+
+# 🔴 **확장자 화이트리스트의 완전성** — 넓히기만 하면 다음 확장자가 똑같이 조용히 빠진다.
+#    바닥값(TREE_MIN)은 이걸 못 잡는다: 열거 수와 바닥값이 **같은 글롭에서 나오므로** `.link` 하나를
+#    더해도 둘 다 그대로다 → 통과. 픽스처(test_03의 setup)도 같은 글롭이라 안 들어간다.
+#    그래서 **글롭 밖 파일이 존재하는 것 자체를 실패**로 만든다. 새 확장자가 필요하면 위 글롭을
+#    넓히라고 여기서 요란하게 알려 준다 — 조용한 탈락이 아니라.
+#    (2026-08-19: `.conf`만 보던 글롭 때문에 systemd 유닛이 통째로 빠질 뻔했다. 그 클래스를 닫는다.)
+TREE_ALL_N="$( (cd "$TREE" && find . -type f) | awk 'NF { n++ } END { print n+0 }')"
+[ "$TREE_N" -eq "$TREE_ALL_N" ] \
+  || fail "선언 트리에 파일이 ${TREE_ALL_N}건인데 열거는 ${TREE_N}건이다 — 확장자 화이트리스트 밖의 파일은 **설치도 드리프트 검사도 안 된다**(조용히 탈락, --check는 초록). 위 find의 -name 목록을 넓히거나 그 파일을 트리에서 빼라"
 
 # ── [1] 선언 ↔ 디스크 바이트 대조 ──────────────────────────────────────────────────────────
 drift_n=0

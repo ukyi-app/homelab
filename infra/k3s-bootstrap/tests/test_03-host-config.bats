@@ -20,7 +20,7 @@ setup() {
     mkdir -p "$FX/$(dirname "$f")"
     cp "$TREE/$f" "$FX/$f"
   done <<EOF
-$( (cd "$TREE" && find . -type f -name '*.conf') | sed 's|^\./||' )
+$( (cd "$TREE" && find . -type f \( -name '*.conf' -o -name '*.service' -o -name '*.timer' \)) | sed 's|^\./||' )
 EOF
   export FX
 }
@@ -112,14 +112,14 @@ run_hc() { HOSTCFG_ROOT="$FX" run "$BOOTSTRAP_DIR/host-config.sh" "$@"; }
 }
 
 @test "the tmpfiles drop-in is enumerable by the installer (a .rules/.cfg name would be silently ignored)" {
-  # 설치기의 열거는 `find . -type f -name '*.conf'`다 — 확장자가 곧 검사 도메인 편입 조건이다.
-  n="$( (cd "$TREE" && find . -type f -name '*.conf') | grep -c 'tmpfiles.d' )"
+  # 설치기의 열거는 `find . -type f \( -name '*.conf' -o -name '*.service' -o -name '*.timer' \)`다 — 확장자가 곧 검사 도메인 편입 조건이다.
+  n="$( (cd "$TREE" && find . -type f \( -name '*.conf' -o -name '*.service' -o -name '*.timer' \)) | grep -c 'tmpfiles.d' )"
   [ "$n" -eq 1 ]
   # 바닥값이 트리 증가를 따라왔는가 — 안 따라오면 바닥값이 의미를 잃는다.
-  total="$( (cd "$TREE" && find . -type f -name '*.conf') | wc -l | tr -d ' ' )"
+  total="$( (cd "$TREE" && find . -type f \( -name '*.conf' -o -name '*.service' -o -name '*.timer' \)) | wc -l | tr -d ' ' )"
   floor="$(grep -oE '^TREE_MIN=[0-9]+' "$BOOTSTRAP_DIR/host-config.sh" | grep -oE '[0-9]+')"
   [ -n "$floor" ]
-  [ "$floor" -eq "$total" ] || { echo "TREE_MIN=$floor · 트리 .conf $total건 — 바닥값이 트리를 따라오지 않았다"; false; }
+  [ "$floor" -eq "$total" ] || { echo "TREE_MIN=$floor · 트리 $total건 — 바닥값이 트리를 따라오지 않았다"; false; }
 }
 
 # ── 이식 계약: 버려야 할 것이 트리에 되살아나지 않는다 ─────────────────────────────────────
@@ -353,4 +353,52 @@ _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RU
   printf '%s' "$output" | grep -qF -- '비활성'
   run bash -c "grep -qE 'networkctl reconfigure [a-z0-9]+' '$REC_LOG'"
   [ "$status" -ne 0 ]   # 못 찾았으면 reconfigure를 부르지 않는다(엉뚱한 링크를 끊지 않는다)
+}
+
+# ── files 백업 배선 (국면 B 선행 작업, 2026-08-19) ──────────────────────────────────────────
+@test "the files-backup systemd units are inside the installer's enumeration domain" {
+  # 🔴 이게 이 배선의 핵심 함정이었다. 설치기의 열거가 `*.conf`뿐이면 `.service`/`.timer`는
+  #    트리에 있어도 **설치도 드리프트 검사도 안 되고 조용히 무시된다** — 커밋했는데 배선이
+  #    안 된 상태로 남고, --check는 초록이다(전형적 false-green).
+  enum="$( (cd "$TREE" && find . -type f \( -name '*.conf' -o -name '*.service' -o -name '*.timer' \)) | sed 's|^\./||' )"
+  printf '%s\n' "$enum" | grep -qxF 'etc/systemd/system/files-data-backup.service'
+  printf '%s\n' "$enum" | grep -qxF 'etc/systemd/system/files-data-backup.timer'
+  # ⚠️ 여기 있던 "옛 글롭엔 없다" 대조는 **항진명제였다** — `-name '*.conf'`가 `.timer`에 매치하는
+  #    일은 원리적으로 없으니 트리가 통째로 사라져도 통과했고, "회귀 시 이 줄이 먼저 운다"는
+  #    주석은 거짓이었다(2026-08-19 적대 검증). 지웠다. 실제 커버리지는 위 두 줄(유닛이 도메인
+  #    안에 있는가)과 화이트리스트 완전성 @test가 담당한다 — 지워도 잡는 회귀 집합은 그대로다.
+}
+
+@test "apply installs the backup units but does NOT enable them (phase A would false-green)" {
+  # 국면 A에서는 source(/mnt/bulk, 루트 LV bind)와 dest가 같은 물리 디스크라 스크립트가 거부한다.
+  # 그 상태로 타이머를 켜면 매일 실패하거나 — 더 나쁘게 — 같은 매체에 사본을 만들고 알림만 초록이 된다.
+  # enable은 국면 B의 마지막 한 줄이다: `systemctl enable --now files-data-backup.timer`.
+  _sandbox
+  # ⚠️ **setup()이 트리를 $FX에 미리 복사한다** — 그대로 단언하면 `_apply`가 아무것도 안 해도
+  #    초록이다(설치 로직을 통째로 지워도 통과하는 공허한 가드). 대상을 먼저 지우고,
+  #    `_apply`가 **다시 만들어 내는지**를 본다. 위 "apply then check is green" @test가
+  #    같은 이유로 `rm -rf "$FX/etc/systemd"`를 먼저 하고 있다 — 같은 규율을 따른다.
+  rm -rf "$FX/etc/systemd/system"
+  run bash -c "[ -f '$FX/etc/systemd/system/files-data-backup.timer' ]"
+  [ "$status" -ne 0 ]                                   # 지워졌음을 먼저 확인(뮤테이션 적용 확인)
+  _apply
+  [ "$status" -eq 0 ]
+  [ -f "$FX/etc/systemd/system/files-data-backup.service" ]
+  [ -f "$FX/etc/systemd/system/files-data-backup.timer" ]
+  run grep -qE 'systemctl[[:space:]]+(enable|--now)' "$BOOTSTRAP_DIR/host-config.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "a tree file outside the extension whitelist fails LOUDLY (not silently dropped)" {
+  # 🔴 화이트리스트를 넓히기만 하면 **다음 확장자가 똑같이 조용히 빠진다.** 바닥값은 이걸 못 잡는다 —
+  #    열거 수와 바닥값이 같은 글롭에서 나오므로 `.link` 하나를 더해도 둘 다 그대로다.
+  #    픽스처(setup)도 같은 글롭이라 안 들어간다 → 설치·검사 양쪽에서 탈락하고 --check는 초록.
+  #    그래서 "글롭 밖 파일이 존재하는 것 자체"를 실패로 만들었다. 이 @test가 그 계약을 고정한다.
+  BS="$BATS_TEST_TMPDIR/bs2"
+  cp -R "$BOOTSTRAP_DIR" "$BS"
+  printf '[Match]\nOriginalName=*\n' > "$BS/host-config/etc/systemd/network/10-stray.link"
+  HOSTCFG_ROOT="$FX" HOSTCFG_TREE="$BS/host-config" run "$BS/host-config.sh" --check
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "확장자 화이트리스트 밖"
+  echo "$output" | grep -q "조용히 탈락"
 }
