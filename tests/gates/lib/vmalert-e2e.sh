@@ -60,14 +60,42 @@ vme_cleanup() { # trap EXIT에서 호출
 # $3.. = vmsingle에 그대로 넘길 **추가 플래그**(선택). 하네스 고유 스토리지 의미(예: 드리프트 하네스의
 # `--dedup.minScrapeInterval` — 합성 KSM 시계열을 scrape 그리드에 정렬)를 인라인 사본 없이 표현하기 위한
 # 통로다. 넘기지 않으면 `"$@"`가 0개로 전개돼 기존 소비자의 명령줄은 **바이트 불변**이다.
+# 빈 포트를 **직접** 고른다.
+# ⚠️ `-p 127.0.0.1:0:8428`(호스트 포트 0 = 커널이 임의 배정)은 **docker 전용 관용구다.**
+#    podman 5는 거부한다: `parsing host port: port numbers must be between 1 and 65535 (inclusive), got 0`.
+#    2026-08-19 NUC 이관에서 밟았다 — 맥은 OrbStack이 docker를 제공해 안 밟혔고, 리눅스 노드에는
+#    docker 데몬을 올리지 않는다(docker0 브리지와 FORWARD 체인 조작이 k3s 파드 네트워킹을 깨는
+#    전형적 경로다). 그래서 rootless podman을 쓰고, 포트 배정을 런타임에 맡기지 않는다.
+# ⚠️ `/dev/tcp`는 **bash 전용**이다(이 파일 shebang이 bash라 성립). 새 도구 의존을 만들지 않으려고
+#    파이썬·ss·nc 대신 이걸 쓴다 — m6-tools가 관리하지 않는 도구를 게이트가 조용히 요구하면 안 된다.
+_vme_port_free() { ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+_vme_pick_port() {
+  local p _
+  for _ in $(seq 40); do
+    p=$(( 20000 + RANDOM % 20000 ))
+    if _vme_port_free "$p"; then printf '%s' "$p"; return 0; fi
+  done
+  echo "빈 포트를 찾지 못했다(20000-39999에서 40회) — 판정 불가는 '통과'가 아니다" >&2
+  return 1
+}
+
 vme_start_vmsingle() { # $1=container name $2=vmsingle version [$3.. = 추가 플래그] → VME_BASE 설정
-  local name="$1" ver="$2" port ready
+  local name="$1" ver="$2" port ready got
   shift 2
   VME_CONTAINERS="$VME_CONTAINERS $name"
-  docker run -d --name "$name" --network "$VME_NET" -p 127.0.0.1:0:8428 \
+  port="$(_vme_pick_port)" || exit 2
+  docker run -d --name "$name" --network "$VME_NET" -p "127.0.0.1:${port}:8428" \
     "victoriametrics/victoria-metrics:${ver}" \
     --storageDataPath=/storage --retentionPeriod=100y --httpListenAddr=:8428 "$@" >/dev/null
-  port="$(docker port "$name" 8428/tcp | head -1 | sed 's/.*://')"
+  # 읽어온 포트를 **쓰지 않고 대조한다.** 예전엔 `docker port` 출력을 그대로 믿었는데, 이제는
+  # 우리가 고른 값과 다르면 즉시 죽는다 — 경합으로 매핑이 어긋나면 아래 health 대기가 60×0.5s를
+  # 통째로 태운 뒤에야 "not ready"로 죽어 원인이 안 보인다.
+  got="$(docker port "$name" 8428/tcp 2>/dev/null | head -1 | sed 's/.*://')"
+  [ "$got" = "$port" ] || {
+    echo "포트 매핑 불일치: 요청 ${port} / 실제 '${got}' — 포트 경합이거나 런타임이 매핑을 바꿨다" >&2
+    docker logs "$name" 2>&1 | tail -20 >&2
+    exit 2
+  }
   VME_BASE="http://127.0.0.1:${port}"
   ready=0
   for _ in $(seq 60); do
