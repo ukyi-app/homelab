@@ -108,7 +108,7 @@ rollup_count() { # $1=expr → expr 안의 rollup 함수 호출 수 (⚠️ pipe
 }
 push_rollup_window() { # $1=expr → push 메트릭에 걸린 rollup 윈도(없으면 빈 문자열, 복수면 공백 구분)
   { grep -oE '[a-z_]+_over_time[[:space:]]*\([[:space:]]*ghcr_latest_digest[[:space:]]*\[[0-9]+[smh]\]' <<<"$1" || true; } \
-    | { grep -oE '\[[0-9]+[smh]\]' || true; } | tr -d '[]' | sort -u | tr '\n' ' ' | sed 's/ *$//'
+    | { grep -oE '\[[0-9]+[smh]\]' || true; } | tr -d '[]' | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ *$//'
 }
 
 # ① `for: 20m` 고정 — 이 하네스에서 **유일하게 의도적으로 하드코딩한 상수**다(나머지는 전부 매니페스트 파생).

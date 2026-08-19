@@ -17,7 +17,7 @@ build() { kustomize build "$DIR"; }
     echo "$output" | grep -q "name: $n"
   done
   # namespace 트랜스포머가 prod로 고정 (grep -v는 yq의 문서 간 '---' 구분자를 제거)
-  [ "$(build | yq 'select(.kind=="NetworkPolicy") | .metadata.namespace' | grep -v '^---' | sort -u)" = "prod" ]
+  [ "$(build | yq 'select(.kind=="NetworkPolicy") | .metadata.namespace' | grep -v '^---' | LC_ALL=C sort -u)" = "prod" ]
 }
 
 @test "manifests are kubeconform-valid (strict)" {

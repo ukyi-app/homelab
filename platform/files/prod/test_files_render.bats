@@ -17,7 +17,7 @@ setup() {
   done
   run yq -e 'select(.kind == "Deployment") | .metadata.namespace' "$RENDERED"; [ "$output" = "files" ]
   # SealedSecret 2개(files-keys·ghcr-pull) 모두 files ns — grep -v '---'로 yq 다중문서 구분자 제거 후 sort -u.
-  run bash -c "yq 'select(.kind==\"SealedSecret\") | .metadata.namespace' '$RENDERED' | grep -v '^---\$' | sort -u"
+  run bash -c "yq 'select(.kind==\"SealedSecret\") | .metadata.namespace' '$RENDERED' | grep -v '^---\$' | LC_ALL=C sort -u"
   [ "$output" = "files" ]
 }
 @test "two HTTPRoutes render (internal + public listeners)" {

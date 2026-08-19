@@ -57,7 +57,7 @@ PF_NS=observability; PF_SVC=vmsingle; PF_PORT=8428
 
 sha256() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$@"; else sha256sum "$@"; fi; }
 # find로 최신 매니페스트 선택(SC2012 회피 — ls 대신 find + sort). 파일명은 epoch 정렬 안전.
-latest_manifest() { find "$dest" -maxdepth 1 -name 'files-data.*.sha256' 2>/dev/null | sort | tail -1; }
+latest_manifest() { find "$dest" -maxdepth 1 -name 'files-data.*.sha256' 2>/dev/null | LC_ALL=C sort | tail -1; }
 
 # --- --verify: 최신 매니페스트의 '모든' 항목을 복원 위치서 판독해 sha256 전수 재대조 ---
 # 첫 항목만 검사하면 나머지 파일 손상/삭제를 놓친다(내용-인지 검증 — 매체 판독성 게이트).

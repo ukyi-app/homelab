@@ -35,7 +35,7 @@ ACCEPT='application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manif
 # ⚠️ 제외를 경로로만 하지 말 것: `tools/tests/`처럼 tests가 중간에 오는 경우가 있다.
 PINS="$(git grep -noE '[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+@sha256:[a-f0-9]{64}' -- . \
         | grep -vE '(^|/)tests?/|test_[^/]*\.bats|\.example' \
-        | sed 's/^\([^:]*\):[0-9]*:/\1\t/' | sort -u -k2)"
+        | sed 's/^\([^:]*\):[0-9]*:/\1\t/' | LC_ALL=C sort -u -k2)"
 
 # ⚠️ 열거 0건은 통과가 아니다 — 정규식이 안 물었다는 뜻이다(핀이 사라졌을 리 없다).
 [ -n "$PINS" ] || fault "digest 핀을 하나도 못 찾았다 — 열거가 붕괴했다(가드가 무측정이 된다)"

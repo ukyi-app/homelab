@@ -9,7 +9,7 @@ build() { kustomize build --enable-alpha-plugins --enable-exec "$DIR"; }
 @test "kustomize build (ksops) renders the cache component entirely in namespace cache" {
   run build
   [ "$status" -eq 0 ]
-  [ "$(build | yq '.metadata.namespace' | grep -v '^---' | sort -u)" = "cache" ]
+  [ "$(build | yq '.metadata.namespace' | grep -v '^---' | LC_ALL=C sort -u)" = "cache" ]
 }
 
 @test "manifests are kubeconform-valid (strict)" {

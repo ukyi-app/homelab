@@ -19,9 +19,15 @@ ASSERT_IDENTITY_WARN := $(ASSERT_IDENTITY) --warn
 .PHONY: help bootstrap up down verify host-up host-config
 
 help: ## 사용 가능한 타겟 목록 출력
+# ⚠️ `LC_ALL=C`가 계약이다. 여기서 정렬하는 것은 `  <이름 22폭 패딩> <설명>` **줄 전체**인데,
+#    C에서는 패딩 공백(0x20)이 모든 이름 문자보다 작아 "줄 정렬 == 이름 정렬"이 우연히 성립하지만
+#    en_US 계열은 공백·구두점을 1차 가중에서 무시해 **한국어 설명이 정렬 키로 새어 든다**
+#    (실측 2026-08-20: `bootstrap-deadmanswitch`가 `bootstrap`보다 앞, `verify`가 맨 끝).
+#    ⇒ 이건 테스트의 거짓 red가 아니라 **산출물의 결함**이었다 — 오너의 en_US 셸에서 `make help`가
+#    실제로 이름 순이 아니었다. cf. `docs/traps-detail.md` 「로케일 콜레이션이 게이트를 뒤집는다 …」
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  %-22s %s\n", $$1, $$2}' \
-	  | sort
+	  | LC_ALL=C sort
 
 host-config: ## [runtime] 호스트 설정 드리프트 검사(sudo 불요). **적용은 여기가 아니다** — 아래 주석 참조
 # ⚠️ `--apply`를 make에 걸지 않는다: owner의 sudo가 패스워드를 요구해(실측) 비대화형으로 못 돌고,
@@ -67,6 +73,7 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@bun tools/check-image-ownership.ts
 	@bash scripts/check-app-netpol.sh
 	@bash scripts/check-image-pins.sh
+	@bash scripts/check-locale-collation.sh
 	@scripts/verify-ledger.sh
 	@bats tests/test_sops-roundtrip.bats
 
@@ -171,6 +178,7 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	bash scripts/check-app-deploy.sh
 	bash scripts/check-app-netpol.sh
 	bash scripts/check-image-pins.sh
+	bash scripts/check-locale-collation.sh
 	bun tools/check-resource-limits.ts
 	bun tools/check-alert-rules.ts
 	bun tools/check-disk-caps.ts

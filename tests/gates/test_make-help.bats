@@ -10,9 +10,17 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   #    그 `make:`를 타깃 이름으로 집어 정렬이 깨진다(`m` > `a`). 단독 실행에서는 안 나오므로
   #    "혼자 돌리면 초록, make ci에서만 빨강"이 된다.
   #    맥(GNU Make 3.81)에서는 안 밟혔고 NUC(4.4.1)에서 발각됐다 — 2026-08-19 이관.
+  # ⚠️⚠️ 기대값은 **절대 계약**(`LC_ALL=C sort`)이지 "네 로케일에서 정렬됐는가"가 아니다.
+  #    앞선 판 `"$(echo "$names" | sort)"`는 **자기참조**라 호출 로케일이 질문과 답을 함께 바꿨다 —
+  #    en_US에서는 recipe 출력도 기대값도 함께 흔들려 무엇이 계약인지 말할 수 없었다.
+  #    cf. `docs/traps-detail.md` 「로케일 콜레이션이 게이트를 뒤집는다 …」
+  # ⚠️ `grep -E '^[A-Za-z]'`도 `LC_ALL=C`로 감싼다 — 브래킷 범위는 콜레이션 의존이라 en_US에서
+  #    악센트 소문자를 추가로 매치한다. **가드 자신이 로케일 의존이면 안 된다.**
   run make --no-print-directory help
   [ "$status" -eq 0 ]
-  names="$(echo "$output" | awk '{print $1}' | grep -E '^[a-zA-Z]')"
+  names="$(printf '%s\n' "$output" | awk '{print $1}' | LC_ALL=C grep -E '^[A-Za-z]')"
   [ -n "$names" ]
-  [ "$names" = "$(echo "$names" | sort)" ]
+  # 열거 붕괴 바닥값 — 파싱이 깨져 1~2줄만 남으면 '정렬됨'은 공짜로 참이 된다(2026-08-20 실측 39개).
+  [ "$(printf '%s\n' "$names" | grep -c .)" -ge 25 ]
+  [ "$names" = "$(printf '%s\n' "$names" | LC_ALL=C sort)" ]
 }

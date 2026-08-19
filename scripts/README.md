@@ -52,6 +52,9 @@
   단언을 잡는다(bats가 침묵 통과시키는 false-green 가드 차단; NEG=hard-zero·BB=ratchet). `tests/gates/test_bats-style.bats`가 호출.
   기본 모드에서 스캔 대상이 0건이면 통과가 아니라 **열거 붕괴**(scan-floor, exit 1) — 같은 도메인을 쓰는
   check-skeleton·check-bats-accounting과 같은 채널이다(skip 규약 아님).
+- **`check-locale-collation.sh`** — 로케일 콜레이션 가드: 게이트의 `sort`가 `LC_ALL=C` 접두(또는 숫자
+  정렬)인지, TS/JS가 `localeCompare`·`toLocale*`·`Intl.Collator`를 쓰지 않는지 hard-zero로 강제한다.
+  en_US 계열은 `-1`과 `1`을 같다고 봐 `sort -u`가 하나를 버린다 — 거짓 red가 아니라 **fail-open**이었다.
 - **`check-skip-signalling.sh`** — 가드 skip 신호 규약(CONTRIBUTING '가드 skip 신호')의 정적 가드:
   `SKIP: <가드>: <이유>` 마커와 skip 종료코드(셸 `exit 4` / TS `process.exit(4)`)가 **같은 줄에서 짝**을
   이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + Makefile

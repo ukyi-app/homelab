@@ -23,8 +23,8 @@ refs() { git ls-files -- 'platform/**.yaml' 'platform/**.yml' 'apps/**.yaml' 'op
   total="$(printf '%s\n' "$all" | grep -c . || true)"
   # 열거 붕괴 바닥값 — 0건이면 '위반 없음'이 아니라 글롭이 깨진 것이다(이 가드가 vacuous해진다).
   [ "$total" -ge 5 ]
-  n="$(printf '%s\n' "$all" | sort -u | grep -c . || true)"
-  [ "$n" -eq 1 ] || { echo "digest가 ${n}종으로 갈렸다:"; printf '%s\n' "$all" | sort | uniq -c; false; }
+  n="$(printf '%s\n' "$all" | LC_ALL=C sort -u | grep -c . || true)"
+  [ "$n" -eq 1 ] || { echo "digest가 ${n}종으로 갈렸다:"; printf '%s\n' "$all" | LC_ALL=C sort | uniq -c; false; }
 }
 
 @test "the repin tool targets every reference site the repo actually has (no hardcoded registry)" {

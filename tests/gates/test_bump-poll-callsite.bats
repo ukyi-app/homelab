@@ -459,7 +459,7 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
   setup_hermetic
   rc=$?
   [ "$rc" -ne 9 ] || { echo "hermetic harness: bump 스텝 추출 실패(선택자: .run에 run-bump-plan)"; false; }
-  run bash -c "python3 '$LEDGER_PY' cmds '$CALLS' | sort -u"
+  run bash -c "python3 '$LEDGER_PY' cmds '$CALLS' | LC_ALL=C sort -u"
   [ "$status" -eq 0 ]
   [ "$output" = "bun tools/run-bump-plan.ts" ] || {
     echo "boundary violated: bump 스텝이 러너 말고 다른 명령을 실행했다 —"

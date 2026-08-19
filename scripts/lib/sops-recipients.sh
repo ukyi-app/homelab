@@ -9,6 +9,6 @@ sops_yaml_path() {
   printf '%s' "$p"
 }
 # canonical: .sops.yaml의 _recipients 앵커(cluster+recovery 공개키 집합).
-sops_canonical_recipients() { yq '._recipients[]' "$(sops_yaml_path)" 2>/dev/null | sort; }
+sops_canonical_recipients() { yq '._recipients[]' "$(sops_yaml_path)" 2>/dev/null | LC_ALL=C sort; }
 # 파일별: 대상 *.enc.yaml의 sops.age[].recipient.
-sops_file_recipients() { yq '.sops.age[].recipient' "$1" 2>/dev/null | sort; }
+sops_file_recipients() { yq '.sops.age[].recipient' "$1" 2>/dev/null | LC_ALL=C sort; }

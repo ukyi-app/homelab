@@ -15,7 +15,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 
 @test "every make target referenced by a debug skill exists in the Makefile" {
   local t
-  for t in $(grep -rhoE 'make [a-z][a-z-]+' .claude/skills/*/SKILL.md | sed 's/^make //' | sort -u); do
+  for t in $(grep -rhoE 'make [a-z][a-z-]+' .claude/skills/*/SKILL.md | sed 's/^make //' | LC_ALL=C sort -u); do
     grep -qE "^$t:" Makefile || { echo "스킬이 참조하는 make 타겟 부재: $t"; false; }
   done
 }

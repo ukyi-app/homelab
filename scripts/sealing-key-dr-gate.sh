@@ -55,7 +55,7 @@ merge_consumers() {
   local repo="$1" ref="${2:-origin/main}" ref_list live_list rc_ref=0 rc_live=0
   ref_list="$(consumers_from_ref "$repo" "$ref")" || rc_ref=$?
   live_list="$(consumers_from_live)" || rc_live=$?
-  printf '%s\n%s\n' "$ref_list" "$live_list" | grep -E '.+/.+' | sort -u || true
+  printf '%s\n%s\n' "$ref_list" "$live_list" | grep -E '.+/.+' | LC_ALL=C sort -u || true
   [ "$rc_ref" -ne 0 ] && return "$rc_ref"; [ "$rc_live" -ne 0 ] && return "$rc_live"; return 0
 }
 
@@ -84,7 +84,7 @@ assert_recoverable_before_destroy() {
 # 비파괴 키쌍 증명: committed cert와 fingerprint 일치 + 그 항목의 tls.crt modulus == tls.key modulus.
 prove_backup_restorable() {
   local repo="$1" backup_dir="$2"
-  local latest; latest="$(ls -1 "$backup_dir"/ss-keys.*.enc.yaml 2>/dev/null | sort | tail -1)"
+  local latest; latest="$(ls -1 "$backup_dir"/ss-keys.*.enc.yaml 2>/dev/null | LC_ALL=C sort | tail -1)"
   [ -n "$latest" ] || { echo "    실복원 증명: 백업 없음"; return 1; }
   local decrypted; decrypted="$(sops -d --input-type binary --output-type binary "$latest" 2>/dev/null)" \
     || { echo "    실복원 증명: 백업 복호 실패"; return 1; }
@@ -115,7 +115,7 @@ _rehearsal_cleanup() {
 # 비파괴 라이브 리허설(파괴 전, 라이브 클러스터 생존 시): 백업 List 적용성 + committed cert canary unseal.
 rehearse_restore_on_live() {
   local repo="$1" backup_dir="$2"
-  local latest; latest="$(ls -1 "$backup_dir"/ss-keys.*.enc.yaml 2>/dev/null | sort | tail -1)"
+  local latest; latest="$(ls -1 "$backup_dir"/ss-keys.*.enc.yaml 2>/dev/null | LC_ALL=C sort | tail -1)"
   [ -n "$latest" ] || { echo "    리허설: 백업 없음"; return 1; }
   # (1) sanitize 후 복호 백업 List가 fresh-cluster에 create 가능한지 비변경 검증(P5-3)
   sops -d --input-type binary --output-type binary "$latest" | sanitize_backup_yaml \
@@ -154,7 +154,7 @@ wait_all_applications_healthy() {
 restore_sealing_key() {
   local repo="$1" backup_dir="${2:-}"
   wait_for_controller || return 1
-  local latest=""; [ -n "$backup_dir" ] && latest="$(ls -1 "$backup_dir"/ss-keys.*.enc.yaml 2>/dev/null | sort | tail -1)"
+  local latest=""; [ -n "$backup_dir" ] && latest="$(ls -1 "$backup_dir"/ss-keys.*.enc.yaml 2>/dev/null | LC_ALL=C sort | tail -1)"
   [ -n "$latest" ] || { echo "    sealing-key DR: 복원할 백업 없음 — skip(cert 검증이 stale 판단)"; return 0; }
   echo "    sealing-key 복원: $latest"
   sops -d --input-type binary --output-type binary "$latest" | sanitize_backup_yaml | kubectl apply -f - || { echo "DR DRILL FAIL: 복호/sanitize/apply 실패"; return 1; }

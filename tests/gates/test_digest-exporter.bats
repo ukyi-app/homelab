@@ -78,7 +78,7 @@ load_budget() {
   # 드리프트를 억제한다(= 우리가 고친 fail-open의 재발 경로). 여기서 못박는다.
   sel="$(grep -oE 'kube_pod_container_info\{[^}]*\}' <<<"$EXPR")"
   [ "$(printf '%s\n' "$sel" | wc -l | tr -d ' ')" -eq 2 ]           # 파드 셀렉터는 정확히 2회(unless 우변 + 존재 가드)
-  [ "$(printf '%s\n' "$sel" | sort -u | wc -l | tr -d ' ')" -eq 1 ] # …그리고 둘이 동일(namespace + image_id 정규식)
+  [ "$(printf '%s\n' "$sel" | LC_ALL=C sort -u | wc -l | tr -d ' ')" -eq 1 ] # …그리고 둘이 동일(namespace + image_id 정규식)
   # ── 셀렉터는 **여전히 `image_id`** 여야 한다 = materialization 가드(B-1에서 추출 소스만 image_spec으로 옮겼다) ──
   # 왜 계약인가: 셀렉터를 `image_spec`으로 바꾸면 **fail-open**이다. ImagePullBackOff 파드는 KSM이
   # `image_spec=<최신 digest>` + **`image_id=""`** 로 내보내는데, 그 **실행조차 못 한** 파드가 우변에 들어와
@@ -96,13 +96,13 @@ load_budget() {
   # (소스 라벨은 image_spec — 위 join-alignment 테스트가 그 계약을 소유한다.)
   lr="$(grep -oE '"app", "\$1", "image_spec", "[^"]*"' <<<"$EXPR")"
   [ "$(printf '%s\n' "$lr" | wc -l | tr -d ' ')" -eq 2 ]
-  [ "$(printf '%s\n' "$lr" | sort -u | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(printf '%s\n' "$lr" | LC_ALL=C sort -u | wc -l | tr -d ' ')" -eq 1 ]
 }
 
 @test "digest-exporter APPS tracks exactly the deployed apps/ set (variant-chain parity)" {
   val="$(yq 'select(.kind=="CronJob").spec.jobTemplate.spec.template.spec.containers[].env[] | select(.name=="APPS").value' "$D")"
-  got="$(printf '%s' "$val" | tr ' ' '\n' | sed -n 's/=.*//p' | grep -v '^$' | sort | tr '\n' ' ')"
-  want="$(ls -1 "$ROOT/apps" | grep -vx 'README.md' | sort | tr '\n' ' ')"
+  got="$(printf '%s' "$val" | tr ' ' '\n' | sed -n 's/=.*//p' | grep -v '^$' | LC_ALL=C sort | tr '\n' ' ')"
+  want="$(ls -1 "$ROOT/apps" | grep -vx 'README.md' | LC_ALL=C sort | tr '\n' ' ')"
   [ "$got" = "$want" ] || { echo "APPS names='$got' != apps/='$want'"; false; }
 }
 

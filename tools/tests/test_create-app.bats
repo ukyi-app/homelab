@@ -288,13 +288,13 @@ EOF
   #    pr-first-commit의 `git add $ADD_PATHS`가 그 수정을 스테이징하지 않아 커밋에서 조용히 유실되고
   #    parity 게이트가 want≠got으로 red가 된다. `apps/`가 비어 있어 잠복해 있었을 뿐이다.
   # 정적 경로 추출은 거짓 양성을 낸다(도구가 `${ROOT}/tools/...`를 읽기로도 쓴다) → 실제 쓰기를 관측한다.
-  sig() { (cd "$FR" && find . -type f -exec cksum {} \; | sed 's|^\([0-9]* [0-9]*\) \./|\1 |' | sort); }
+  sig() { (cd "$FR" && find . -type f -exec cksum {} \; | sed 's|^\([0-9]* [0-9]*\) \./|\1 |' | LC_ALL=C sort); }
   before="$(sig)"
   gen
   [ "$status" -eq 0 ]
   after="$(sig)"
   # 추가·변경된 파일 경로(체크섬이 다르거나 새로 생긴 것)
-  changed="$(comm -13 <(echo "$before") <(echo "$after") | sed 's|^[0-9]* [0-9]* ||' | sort -u)"
+  changed="$(comm -13 <(echo "$before") <(echo "$after") | sed 's|^[0-9]* [0-9]* ||' | LC_ALL=C sort -u)"
   [ -n "$changed" ]
 
   # 워크플로가 선언한 add-paths — GitHub 표현식은 픽스처 앱명으로 치환

@@ -36,10 +36,10 @@ cd "$ROOT"
 
 # 파일명은 ss-keys.<epoch>.enc.yaml로 통제돼 비알파뉴메릭 위험 없음 — ls가 의도된 정렬 선택
 # shellcheck disable=SC2012
-latest_backup() { ls -1 "$outdir"/ss-keys.*.enc.yaml 2>/dev/null | sort | tail -1; }
+latest_backup() { ls -1 "$outdir"/ss-keys.*.enc.yaml 2>/dev/null | LC_ALL=C sort | tail -1; }
 live_keys() {
   kubectl -n sealed-secrets get secret -l "$LABEL" \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | LC_ALL=C sort
 }
 
 if [ "$verify" -eq 1 ]; then
@@ -47,7 +47,7 @@ if [ "$verify" -eq 1 ]; then
   [ -n "$latest" ] || { echo "ERROR: 백업 없음 — 먼저 백업을 생성하라" >&2; exit 1; }
   live="$(live_keys)"
   [ -n "$live" ] || { echo "ERROR: 라이브 sealing key 0개 — 컨트롤러/라벨 점검" >&2; exit 1; }
-  backed="$(sops -d --input-type binary --output-type binary "$latest" | grep -oE 'name: sealed-secrets-key[a-z0-9]+' | sed 's/^name: //' | sort -u)"
+  backed="$(sops -d --input-type binary --output-type binary "$latest" | grep -oE 'name: sealed-secrets-key[a-z0-9]+' | sed 's/^name: //' | LC_ALL=C sort -u)"
   if [ "$live" != "$backed" ]; then
     echo "ERROR: sealing key 회전 감지 — 라이브 키 셋과 최신 백업($latest) 불일치." >&2
     echo "       백업을 재생성하고 복구 드릴을 다시 통과하라." >&2

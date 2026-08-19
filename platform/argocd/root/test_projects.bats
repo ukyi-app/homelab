@@ -173,7 +173,7 @@ setup() {
 
 @test "every platform component helm repoURL is in the platform project sourceRepos" {
   cd "$ROOT"
-  repos="$(yq 'select(.metadata.name=="platform") | .spec.sourceRepos[]' platform/argocd/root/projects.yaml | sort -u)"
+  repos="$(yq 'select(.metadata.name=="platform") | .spec.sourceRepos[]' platform/argocd/root/projects.yaml | LC_ALL=C sort -u)"
   miss=""
   for f in platform/argocd/root/apps/*.yaml; do
     [ "$(yq '.spec.project' "$f")" = "platform" ] || continue
@@ -224,7 +224,7 @@ setup() {
   #    ⚠️ appset의 exclude 목록을 따라가는 발견 루프로는 이 둘을 못 잡는다 — appset.yaml이
   #       `platform/cnpg/*`와 `platform/victoria-stack/*`를 정확히 exclude하기 때문이다.
   #       그래서 exclude와 무관한 **소스 전수 스캔**으로 짠다(kustomize/ksops 불필요 = CI에서 돈다).
-  files="$(cd "$ROOT" && grep -rl '^kind: Namespace' platform apps 2>/dev/null | sort)"
+  files="$(cd "$ROOT" && grep -rl '^kind: Namespace' platform apps 2>/dev/null | LC_ALL=C sort)"
   [ -n "$files" ]
   missing=""
   for f in $files; do
