@@ -22,9 +22,16 @@ variable "dns_nameserver_tailscale_ip" {
 #
 # ⚠️ 기본값은 **owner 로컬 apply가 쓰는 write 집합 그대로**다 — 좁히면 apply가 깨진다.
 #    CI는 `TF_VAR_ts_oauth_scopes`로 읽기 전용 집합을 주입한다.
-# ⚠️ 읽기 전용 이름은 `<resource>:read` 규약이다(Tailscale 문서가 `dns:read`를 명시).
-#    다만 **정확한 최소 집합은 추측하지 말고 실제 plan 1회로 확정할 것** —
-#    이 루트는 tailscale_acl · tailscale_dns_nameservers · tailscale_oauth_client 셋을 refresh한다.
+# ✅ **CI용 최소 집합은 실측으로 확정됐다(2026-08-19)** — 추가 실험 불필요:
+#      TF_VAR_ts_oauth_scopes='["policy_file:read","dns:read","oauth_keys:read"]'
+#    이 값으로 plan이 `No changes`로 통과한다. 셋 다 load-bearing임을 하나씩 빼서 확인했다:
+#      · policy_file:read 없음 → `Error: Failed to fetch ACL`
+#      · dns:read 없음        → `Error: Error fetching DNS name servers`
+#      · oauth_keys:read 없음 → 🔴 **에러가 아니라 허위 드리프트다.** terraform이
+#        `tailscale_oauth_client.k8s_operator has been deleted`로 판단해 `Plan: 1 to add`를 낸다.
+#        CI를 그 상태로 켜면 30분마다 허위 드리프트가 뜨고, 그걸 보고 apply하면 k8s-operator
+#        OAuth 클라이언트가 **중복 생성**된다. 실패보다 나쁜 종류의 통과다.
+#    ⚠️ `devices:core`/`auth_keys`는 plan에 불필요하다 — CI 집합에 넣지 마라(권한 과잉).
 variable "ts_oauth_scopes" {
   type        = list(string)
   default     = ["policy_file", "dns", "oauth_keys", "devices:core", "auth_keys"]
