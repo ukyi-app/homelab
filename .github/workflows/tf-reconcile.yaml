@@ -261,6 +261,15 @@ jobs:
           TF_VAR_ts_bootstrap_oauth_id: ${{ secrets.TF_TAILSCALE_OAUTH_ID }}
           TF_VAR_ts_bootstrap_oauth_secret: ${{ secrets.TF_TAILSCALE_OAUTH_SECRET }}
           TF_VAR_dns_nameserver_tailscale_ip: ${{ secrets.TF_TAILSCALE_DNS_NAMESERVER_IP }}
+          # CI 전용 읽기 전용 스코프 — **이 줄이 없으면 이 job은 원리적으로 못 돈다.** provider는
+          # var.ts_oauth_scopes를 그대로 토큰 교환에 요청하는데, 기본값은 owner 로컬 apply용 write
+          # 집합이다(infra/tailscale/variables.tf). 읽기 전용 OAuth 클라이언트로 write 스코프를
+          # 요청하면 교환 자체가 403("cannot grant scopes …")이라 plan이 죽는다 — skip이 아니라 red다.
+          # 값은 2026-08-19 실측으로 확정한 최소 집합이고 셋 다 load-bearing이다(근거·제거 시 증상은
+          # variables.tf의 ts_oauth_scopes 주석). 특히 oauth_keys:read를 빼면 에러가 아니라 **허위
+          # 드리프트**가 난다(tailscale_oauth_client.k8s_operator를 삭제된 것으로 읽어 `1 to add`).
+          # devices:core/auth_keys는 plan에 불필요하다 — 넣지 마라(권한 과잉).
+          TF_VAR_ts_oauth_scopes: '["policy_file:read","dns:read","oauth_keys:read"]'
         run: |
           # 준비상태 회계 신호(drift-github와 동일 규약 — 그 주석 참고).
           echo "executed=true" >> "$GITHUB_OUTPUT"
