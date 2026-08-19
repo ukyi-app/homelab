@@ -152,6 +152,11 @@
       "name": "app-shared .mts strip-types 스모크 (node 계약 하한)",
       "status": "mirrored",
       "local": "app-shared-node-smoke.sh"
+    },
+    {
+      "name": "image pin liveness — 핀한 digest가 레지스트리에 아직 있는가",
+      "status": "mirrored",
+      "local": "bash tests/gates/image-pin-liveness.sh"
     }
   ]
 }

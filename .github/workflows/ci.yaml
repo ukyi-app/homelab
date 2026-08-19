@@ -174,6 +174,13 @@ jobs:
       - name: vmalert rule validate (containerized — render/grep 미차단 룰 expr 오류)
         # grep만으론 오류 PromQL/MetricsQL이 통과(test_vmalert-config는 존재 grep) → vmalert -dryRun으로 파싱 검증.
         run: bash tests/gates/vmalert-rules-validate.sh
+      - name: image pin liveness — 핀한 digest가 레지스트리에 아직 있는가
+        # 2026-08-18: quay.io/skopeo/stable의 핀 digest가 **사라졌다**(태그 200, digest 404 — 상류가
+        # 릴리스 태그를 재푸시해 옛 매니페스트가 GC). 모든 PR이 red였는데 신호가 skopeo **타임아웃
+        # 스모크**의 HARNESS FAULT라 원인 역추적이 필요했다. 여기서 전 핀을 이름으로 짚고 재핀 후보
+        # digest까지 알려 준다. digest-exporter/ImageDigestDrift는 이 축을 못 본다 —
+        # 그쪽은 "우리 빌드가 파드에 반영됐나"(R6)이고 대상도 ghcr.io/ukyi-app/* 자체 앱뿐이다.
+        run: bash tests/gates/image-pin-liveness.sh
       # ── vmalert 발화 e2e (전량 **병렬**) ────────────────────────────────────────────────────────
       # "룰이 파싱된다"가 아니라 "실제로 발화한다"를 증명한다 — `-dryRun`이 통과시킨 죽은 알림이 이
       # 레포에 두 번 있었다(push 주기 > 룩백 → 시리즈 구멍 → `for:` 매 주기 리셋 → 영구 무발화).

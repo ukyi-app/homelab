@@ -204,6 +204,8 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	  else echo "skopeo-timeout-smoke" >> $(CI_UNEVAL); fi
 	@if command -v node >/dev/null 2>&1; then bash tests/gates/app-shared-node-smoke.sh; \
 	  else echo "app-shared-node-smoke" >> $(CI_UNEVAL); fi
+	@if command -v curl >/dev/null 2>&1; then bash tests/gates/image-pin-liveness.sh; \
+	  else echo "image-pin-liveness" >> $(CI_UNEVAL); fi
 # 발화 e2e는 전량 **병렬**이다(병렬이 안전한 전제는 ci.yaml의 같은 스위트 주석이 SSOT).
 # ⚠️ 여긴 글롭, ci.yaml은 **리터럴 경로**다. 중복이 아니라 역할 분담이다 — check-guard-authority가
 #    venue(ci.yaml run 텍스트 · `make -n` 출력)에서 가드 경로를 찾으므로 하네스의 "권위 경로"는
