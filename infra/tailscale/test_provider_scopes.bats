@@ -54,11 +54,25 @@ ts_job() { awk '/^  drift-tailscale:/{f=1;next} f&&/^  [a-z]/{exit} f' "$(WF)"; 
 }
 
 # terraform은 state를 쓴 버전보다 낮은 바이너리로 그 state를 **읽지도 못한다**. 이 루트는 owner
-# 로컬 apply 전용이라 state writer가 owner 머신의 terraform이 되고, 그 머신은 이미 1.15.5다 —
-# 이 잡의 핀이 형제 잡(1.9.8)으로 "통일"되면 다음 로컬 apply 직후 CI가 죽는다. 그 통일을 막는다.
+# 로컬 apply 전용이라 state writer가 owner 머신의 terraform이 된다. 이 잡의 핀이 형제 잡(1.9.8)으로
+# "통일"되면 헤드룸이 사라지므로 그 통일을 막는다.
+# ✅ 2026-08-19 실측 갱신: 세 루트의 state writer는 **전부 ≤1.9.8이다**(terraform 1.9.8 바이너리로
+#    `state list`가 github 8건·tailscale 3건·cloudflare 26건을 정상 열었다 — 더 높은 버전이 썼다면
+#    "created by Terraform vX, which is newer than current v1.9.8"로 죽는다). 초판 주석의
+#    "그 머신은 이미 1.15.5다"는 **owner 머신 바이너리** 이야기였지 writer가 아니었고, 그 머신(맥미니)은
+#    폐기돼 owner 로컬 작업기가 NUC(terraform 1.9.8 정확 핀)로 옮겨갔다. 즉 writer는 1.9.x에 머문다.
+#    그래도 이 핀을 내리지 않는다 — 1.15.5는 어떤 writer보다도 높아 안전 여유이고, 내리는 순간
+#    형제 잡과 같은 값이 되어 "통일" 리팩터와 구별되지 않는다.
+# ⚠️ 핀은 루트마다 독립이다(state writer가 다르므로 통일이 오히려 고장이다).
 @test "the drift-tailscale terraform pin matches the owner-local state writer, not its siblings" {
   run ts_job
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | grep -qF -- 'terraform_version: "1.15.5"'
-  printf '%s' "$output" | grep -qvF -- 'terraform_version: "1.9.8"'
+  block="$output"
+  printf '%s' "$block" | grep -qF -- 'terraform_version: "1.15.5"'
+  # 🔴 여기 있던 `grep -qvF`는 **항진명제였다**(2026-08-19 적대 검증). `-v`는 줄 단위 반전이라
+  #    여러 줄 입력에서는 "1.9.8을 안 가진 줄"이 항상 존재해 exit 0이 되고, 잡 블록이 통째로
+  #    1.9.8로 바뀌어도 통과했다. 즉 이 파일이 막겠다고 선언한 "통일" 회귀를 못 막고 있었다.
+  #    부정 단언은 이 레포 관용구대로 run + [ ] 로만 쓴다(중간 `!`는 bash 3.2에서 조용히 통과).
+  run bash -c 'printf "%s" "$1" | grep -qF -- '"'"'terraform_version: "1.9.8"'"'"'' _ "$block"
+  [ "$status" -ne 0 ]
 }
