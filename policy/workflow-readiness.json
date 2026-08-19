@@ -21,7 +21,7 @@
   "workflows": {
     "tf-reconcile.yaml": {
       "accounting_job": "accounting",
-      "expect_executed": 1,
+      "expect_executed": 2,
       "jobs": {
         "reconcile": {
           "state": "required",
@@ -35,10 +35,9 @@
           "owner_action": "⚠️ owner-local .env.secrets의 TF_VAR_github_token(policy/credential-expiry.json 'github-tf-root-pat')을 **재사용하지 말 것** — 그건 Administration/Secrets R&W라 CI에 넣으면 tf-reconcile.yaml이 명시한 보안 모델(광범위 PAT를 CI에 저장 금지)을 정면으로 위반하고, 이 레포의 모든 워크플로가 읽을 수 있는 자리에 repo-admin 자격을 놓는 것이 된다. **별도의 읽기 전용 fine-grained PAT**를 새로 만들어(homelab 레포 한정 · Metadata:read + Administration:read + Secrets:read — plan 대상은 github_repository·github_branch_protection·github_repository_ruleset·github_actions_secret이다. 정확한 최소 집합은 실제 plan 1회로 확인할 것) TF_GITHUB_TOKEN·TF_GITHUB_OWNER에 등록하고, credential-expiry.json에 만료 원장을 추가한 뒤 이 항목을 state=required/severity=error로 승격."
         },
         "drift-tailscale": {
-          "state": "unconfigured",
-          "since": "2026-07-27",
-          "why": "tailscale 루트(ACL·auth-key·DNS nameserver)의 plan-only 드리프트 감시. TF_TAILSCALE_OAUTH_ID 미등록으로 실행된 적이 없다 — 내부 인입 경계(tailscale passthrough→:8443)와 노드 접근 ACL이 바뀌어도 CI 신호가 0이다.",
-          "owner_action": "**읽기 전용 스코프의 별도 Tailscale OAuth 클라이언트**를 새로 만들어(owner-local apply용 클라이언트를 재사용하지 말 것 — write 스코프를 CI에 두면 github 루트와 같은 이유로 보안 모델 위반) TF_TAILSCALE_OAUTH_ID·TF_TAILSCALE_OAUTH_SECRET·TF_TAILSCALE_DNS_NAMESERVER_IP를 Actions 시크릿에 등록하고, credential-expiry.json에 만료 원장을 추가한 뒤 state=required/severity=error로 승격. 🔴 **정정 2026-08-18 — 이 지시는 현행 코드로 그대로 실행할 수 없다.** 이전 판은 '(plan만 돌므로 write 스코프는 불필요하다)'라고 적었으나, infra/tailscale/provider.tf:6이 scopes = [policy_file, dns, oauth_keys, devices:core, auth_keys]를 **하드코딩**하고 variables.tf에 scopes 변수가 없다. 같은 파일 :4-5가 적었듯 클라이언트에 없는 스코프를 요청하면 **토큰 교환 자체가 403**이라, 읽기 전용 클라이언트를 만들어도 provider 초기화에서 죽는다. 게다가 oauth.tf:1이 tailscale_oauth_client.k8s_operator를 관리 리소스로 들고 있어 refresh에 oauth-client 읽기 권한이 필요하다. 선행 조건 3개 중 **둘이 2026-08-18에 닫혔다**: ~~(1) provider.tf의 scopes를 변수화한다~~ → ✅ 완료(variables.tf의 ts_oauth_scopes, 기본값=owner write 집합. CI는 TF_VAR_ts_oauth_scopes로 :read 변종을 주입한다. ✅ **최소 집합은 2026-08-19에 실측으로 확정했다 — 추가 확인 불필요**: TF_VAR_ts_oauth_scopes=[\"policy_file:read\",\"dns:read\",\"oauth_keys:read\"] 로 plan이 'No changes'로 통과한다. 셋 다 load-bearing임을 하나씩 빼서 확인했다: policy_file:read 없으면 'Failed to fetch ACL', dns:read 없으면 'Error fetching DNS name servers'. 🔴 oauth_keys:read 없으면 **에러가 아니라 허위 드리프트**가 난다 — terraform이 'tailscale_oauth_client.k8s_operator has been deleted'로 판단해 'Plan: 1 to add'를 낸다. 그 상태로 CI를 켜면 30분마다 허위 드리프트가 뜨고, 그걸 보고 apply하면 k8s-operator OAuth 클라이언트가 **중복 생성**된다. devices:core/auth_keys는 plan에 불필요하다(넣지 말 것). admin console에서는 스코프 문자열을 타이핑하지 않는다 — 각 operation에 Read를 고르면 콘솔이 문자열을 만든다). ~~(2) 이월된 infra/tailscale terraform apply를 먼저 끝낸다~~ → ✅ **불필요**(2026-08-18 plan 실측: `No changes. Your infrastructure matches the configuration.` — 라이브 tailnet resolver도 100.109.208.81로 일치). 남은 것은 (3)뿐이다: (3) TF_TAILSCALE_DNS_NAMESERVER_IP를 컷오버 후 NUC 값(terraform.tfvars의 100.109.208.81)으로 고정한다. ⚠️ terraform.tfvars.pre-cutover.bak에는 **맥미니 IP**가 남아 있다 — 그 값을 Actions 시크릿에 넣으면 30분마다 허위 드리프트가 뜨고, 그걸 보고 apply하면 tailnet 전역 DNS가 죽은 Mac으로 되돌아간다(acl.tf:49-50, 폴백 없음)."
+          "state": "required",
+          "severity": "error",
+          "why": "tailscale 루트(ACL·auth-key·tailnet 전역 DNS nameserver)의 plan-only 드리프트 감시. 내부 인입 경계와 노드 접근 ACL, 그리고 전 tailnet 기기의 이름해석이 이 루트의 선언에 걸려 있는데 수렴은 owner 로컬 apply로만 일어난다 — CI 감시가 멈추면 드리프트가 다음 로컬 apply까지 무기한 보이지 않는다(그 사이 admin console에서 ACL이 바뀌어도 신호 0). 2026-08-19 갭이 닫혔다: 읽기 전용 OAuth client(policy_file:read·dns:read·oauth_keys:read) 등록 + provider 스코프 주입(TF_VAR_ts_oauth_scopes) + terraform 핀 정렬. ⚠️ 이 job이 다시 조용해지는 경로는 셋이다 — (a) TF_TAILSCALE_OAUTH_ID/R2_* 회수·회전, (b) 워크플로의 스코프 주입 소실 → provider가 write 집합을 요청해 403, (c) owner 로컬 apply가 state writer 버전을 올려 CI terraform 핀이 낡음. (b)(c)는 infra/tailscale/test_provider_scopes.bats가 정적으로 잠그고, (a)는 이 원장 항목이 잡는다."
         }
       }
     },
