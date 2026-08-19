@@ -16,7 +16,12 @@ teardown() { git reset -q -- "$CJK_FIX" 2>/dev/null || true; rm -f "$CJK_FIX"; }
   # 이름만 캡처 후 $1 검사(F2) — trailing 주석·em-dash·주석언급 제외. 한글(1)+Ext-A 㐀(2)만 HIT.
   run perl -CSDA -ne 'print "$ARGV:$.\n" if /^\s*\@test\s+"([^"]*)"/ && $1 =~ /['"$CJK"']/' "$TMP/test_fx.bats"
   [ "$status" -eq 0 ]
-  [ "$(printf '%s' "$output" | grep -c .)" -eq 2 ]   # 정확히 2줄(한글·㐀 이름 선언)
+  # ⚠️ `grep -c .`(모든 줄)이 아니라 **결과 형태(`파일:행번호`)에 맞는 줄만** 센다. bats의 `run`은
+  #    stderr를 $output에 합치는데, perl은 로케일이 불완전하면 경고를 19줄쯤 쏟는다
+  #    (맥에서 ssh할 때 `LC_CTYPE=UTF-8`이 전달되면 리눅스엔 그런 로케일이 없어 그렇게 된다 —
+  #     2026-08-19 NUC 이관에서 실측). 그러면 잡음이 카운트에 섞여 이 가드가 **환경 탓으로** 빨개진다.
+  #    형태를 특정해도 fail-loud는 유지된다: perl이 진짜로 죽으면 매칭 줄이 0이라 여전히 실패한다.
+  [ "$(printf '%s' "$output" | grep -cE ':[0-9]+$')" -eq 2 ]   # 정확히 2줄(한글·㐀 이름 선언)
   echo "$output" | grep -q ':1$'                      # 한글(라인1)
   echo "$output" | grep -q ':2$'                      # Ext-A 㐀(라인2) — 하드코딩 범위면 놓침
 }

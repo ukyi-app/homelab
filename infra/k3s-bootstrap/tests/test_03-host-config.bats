@@ -151,6 +151,24 @@ run_hc() { HOSTCFG_ROOT="$FX" run "$BOOTSTRAP_DIR/host-config.sh" "$@"; }
 # ── --apply 실행 경로 ──────────────────────────────────────────────────────────────────────
 # 권한 상승 대역을 argv 기록기로 가린다. 파일을 실제로 옮기는 하위 명령만 흉내내어
 # **apply → check 왕복**이 성립하는지까지 본다(= 이 계층이 자기가 선언한 상태를 실제로 만든다).
+# PATH에서 **특정 명령 하나만** 실제로 빼는 팜을 만든다.
+# ⚠️ `rm -f "$SB/bin/tailscale"`만으로는 부재가 재현되지 않는다 — 우분투는 `/usr/bin/tailscale`이라
+#    PATH에 /usr/bin이 남아 있는 한 그대로 잡히고, usrmerge(`/bin -> usr/bin`) 때문에 디렉토리를
+#    빼는 방식으로는 분리할 수도 없다(빼면 find/awk/sed까지 다 사라진다).
+#    맥에는 tailscale이 /usr/bin에 없어서 이 테스트가 **우연히** 초록이었다 — 2026-08-19 NUC 이관에서 발각.
+_path_without() {
+  local drop="$1" farm="$BATS_TEST_TMPDIR/nots" d f
+  mkdir -p "$farm"
+  for d in /usr/bin /bin; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ "${f##*/}" = "$drop" ] && continue
+      ln -sf "$f" "$farm/${f##*/}" 2>/dev/null || true
+    done
+  done
+  printf '%s' "$farm"
+}
+
 _sandbox() {
   SB="$BATS_TEST_TMPDIR/sb"; mkdir -p "$SB/bin"
   cat > "$SB/bin/rec" <<'REC'
@@ -297,7 +315,11 @@ _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RU
 @test "apply fails loudly when tailscale is absent instead of leaving cluster-dependent DNS" {
   _sandbox
   rm -f "$SB/bin/tailscale"
-  REC_LOG="$REC_LOG" PATH="$SB/bin:/usr/bin:/bin" HOSTCFG_ROOT="$FX" HOSTCFG_RUN="$SB/bin/rec" \
+  NOTS="$(_path_without tailscale)"
+  # 팜이 조용히 비면 이 테스트가 통째로 vacuous가 된다 — 양쪽을 다 잠근다.
+  [ ! -e "$NOTS/tailscale" ]        # 빼려던 것이 실제로 빠졌는가
+  [ -x "$NOTS/find" ]               # 나머지는 살아 있는가(팜 생성 실패 감지)
+  REC_LOG="$REC_LOG" PATH="$SB/bin:$NOTS" HOSTCFG_ROOT="$FX" HOSTCFG_RUN="$SB/bin/rec" \
     run "$BOOTSTRAP_DIR/host-config.sh" --apply
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -qF -- 'tailscale이 PATH에 없다'
