@@ -71,3 +71,5 @@
 | tailscale `~.` 라우팅 도메인 → 노드 이름해석이 MagicDNS 경유 클러스터 의존(routable이라 loopback 검사는 통과) | gate | `infra/k3s-bootstrap/tests/test_02-host-preflight.bats` |
 | `findmnt -T`는 마운트 여부를 증명 못 한다(감싸는 마운트로 resolve) + bind SOURCE의 `[subpath]` 미제거 시 디바이스 오판 | gate | `infra/k3s-bootstrap/tests/test_08-bulk-gate.bats` |
 | 드릴의 정리가 EXIT trap뿐이면 고아가 남고, pre-flight 없는 apply가 그 고아를 재사용해 '검증된 복원'이 거짓말한다 | gate | `platform/cnpg/prod/test_restore_drill_behavior.bats` |
+| 권한 부족이 드리프트로 위장한다 — terraform은 못 읽은 리소스를 "삭제됨"으로 읽어 `Plan: 1 to add`를 낸다 | gate | `infra/tailscale/test_provider_scopes.bats` |
+| owner 로컬 apply 루트는 plan-only CI여도 terraform 핀 ≥ state writer여야 한다(핀 통일이 오히려 고장) | gate | `infra/tailscale/test_provider_scopes.bats` |

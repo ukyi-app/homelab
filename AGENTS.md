@@ -131,6 +131,8 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 한시 억제는 자기 만료를 품어야 한다 — 그리고 억제한 알림을 vacuity 대조군으로 쓰던 e2e가 함께 죽는다
 - 드릴의 정리가 EXIT trap뿐이면 고아가 남고, pre-flight 없는 apply가 그 고아를 재사용해 '검증된 복원'이 거짓말한다
 - `kubectl apply --dry-run=server`는 ArgoCD가 SSA로 관리하는 오브젝트에 대해 거짓 실패를 낸다
+- 권한 부족은 에러가 아니라 드리프트로 위장한다 — terraform은 못 읽은 리소스를 "삭제됨"으로 읽는다
+- owner 로컬 apply 루트는 CI가 plan만 해도 terraform 코어 버전이 state writer 이상이어야 한다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

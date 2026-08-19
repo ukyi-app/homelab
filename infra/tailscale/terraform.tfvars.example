@@ -5,11 +5,21 @@
 #    TF_VAR_ts_bootstrap_oauth_id / TF_VAR_ts_bootstrap_oauth_secret (env)로만 공급된다.
 #
 # 이 루트는 owner 로컬 apply 전용(ACL/auth-key 관리 = 고-blast-radius, CI 무인 apply 금지).
-# 선택: tf-reconcile.yaml의 plan-only 드리프트 알림을 켜려면 아래 Actions 시크릿을 등록한다
-#       (없으면 preflight가 skip) — TF_TAILSCALE_OAUTH_ID / TF_TAILSCALE_OAUTH_SECRET /
-#       TF_TAILSCALE_DNS_NAMESERVER_IP. plan만 돌리므로 읽기 가능 OAuth면 되고 apply 권한은 불필요.
+# CI는 tf-reconcile.yaml의 `drift-tailscale`에서 plan-only 드리프트 감시만 하며,
+# **2026-08-19부터 가동 중**이다(policy/workflow-readiness.json에서 required/severity=error).
+# 그 job이 쓰는 Actions 시크릿 3종:
+#   TF_TAILSCALE_OAUTH_ID / TF_TAILSCALE_OAUTH_SECRET / TF_TAILSCALE_DNS_NAMESERVER_IP
+# ⚠️ **"plan만 돌리므로 읽기 가능 OAuth면 된다"로 끝나지 않는다**(구 문장이 그렇게 적어 그대로
+#    따라 하면 403을 맞았다). 읽기 전용 클라이언트는 스코프가 **정확히 3종**이어야 하고
+#    (policy_file:read · dns:read · oauth_keys:read), 워크플로가 TF_VAR_ts_oauth_scopes로 그
+#    집합을 주입해야 한다 — 안 하면 provider가 기본값(owner write 집합)을 요청해 토큰 교환이
+#    403으로 죽는다. 근거·스코프별 증상은 variables.tf의 ts_oauth_scopes 주석.
 
-# split-DNS 네임서버 주소: tailnet 기기들이 home.<DOMAIN> 조회 시 물어볼 DNS(=AdGuard)의
-# 도달 주소. AdGuard :53은 servicelb→VM→OrbStack을 거쳐 Mac mini 호스트로 매핑되므로
-# 'Mac mini의 Tailscale IP'를 넣는다 (`tailscale ip -4`로 확인).
+# tailnet 전역 nameserver로 광고할 주소 = AdGuard가 :53에 서빙하는 노드의 Tailscale IP.
+# **NUC**의 IP를 넣는다 (`tailscale ip -4`로 확인).
+# ⚠️ 정정 2026-08-19: 이전 판은 "AdGuard :53은 servicelb→VM→OrbStack을 거쳐 Mac mini 호스트로
+#    매핑되므로 'Mac mini의 Tailscale IP'를 넣는다"고 적고 있었다 — 컷오버로 그 경로는 소멸했고
+#    대상은 NUC이다. 맥미니 IP를 넣으면 tailnet 전역 DNS가 죽은 기계를 가리켜 tailscale을 켠
+#    **모든 기기**의 이름해석이 끊긴다(acl.tf에 폴백 없음). 같은 값이 CI 시크릿
+#    TF_TAILSCALE_DNS_NAMESERVER_IP에도 들어가며, 어긋나면 30분마다 허위 드리프트가 뜬다.
 dns_nameserver_tailscale_ip = "100.x.y.z"
