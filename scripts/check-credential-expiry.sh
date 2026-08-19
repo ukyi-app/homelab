@@ -2,7 +2,7 @@
 # 자격증명 만료 원장(policy/credential-expiry.json) 검사 — 값(토큰) 없음, {name, expires(YYYY-MM-DD), note}만.
 #   --days N          : N일 이내 만료 항목이 있으면 목록 출력 + exit 1 (주간 워크플로가 telegram 경고로 중계)
 #   --lint            : 스키마 + 열거 바닥값만 검증 후 exit 0/2
-#   --min-entries N   : 항목 수 바닥값(기본 2). 픽스처는 자기 크기에 맞춰 낮춰 쓴다.
+#   --min-entries N   : 항목 수 바닥값(기본 3 = 커밋된 원장의 현재 크기). 픽스처는 자기 크기에 맞춰 낮춰 쓴다.
 # exit: 0=윈도 내 만료 없음/lint OK, 1=만료 임박, 2=인자/원장 형식 오류·열거 붕괴(fail-loud)
 #
 # ⚠️ **바닥값이 왜 필요한가**: 예전엔 "빈 배열은 vacuous true 허용"을 자기 주석에 선언했다. 그래서 원장이
@@ -28,7 +28,7 @@ set -euo pipefail
 # 기본 원장은 **스크립트 기준**으로 잡는다 — 상대경로면 호출자의 cwd에 의존한다(무인자 실행을
 # 레포 밖에서 하면 조용히 "원장 파일 없음"이 된다). `--file`은 호출자 상대 그대로 둔다.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FILE="$ROOT/policy/credential-expiry.json"; DAYS=14; LINT=0; MIN_ENTRIES=2
+FILE="$ROOT/policy/credential-expiry.json"; DAYS=14; LINT=0; MIN_ENTRIES=3
 while [ $# -gt 0 ]; do
   case "$1" in
     --file) FILE="$2"; shift 2 ;;
