@@ -114,17 +114,22 @@
   평문 private key를 디스크에 비기록(kubectl→sops 직행), git 작업트리 안 보관 거부.
 - **`backup-files-data.sh`** — **owner 전용(내구성 불변식, 비파괴)**. files-data(비재생성 사용자 데이터)를
   bulk 티어 → 별도 매체로 rsync 오프-SSD 백업. `<dest>`(백업)/`--dry-run <dest>`/`--verify <dest>`
-  (백업서 전 파일 복원+sha256 대조 — 매체 판독성 게이트). dest는 반드시 내장 디스크(외장이면 거부),
-  🔴 **이 스크립트는 현재 실행자가 없다(2026-08-17 실측).** macOS 결박이고(`diskutil`로 매체를 판정한다)
-  유일한 실행자였던 Mac mini launchd `app.homelab.files-backup`은 **exit 2로 실패 중**이다 —
-  Mac 클러스터 소멸로 그 경로가 끊겼다. `FilesBackupStale`이 국면 A 한시 억제로 가려 놓았을 뿐이고
-  **2026-10-01에 자동 재무장**한다. 리눅스 이식 + NUC 스케줄러(systemd timer/CronJob) 배선이 국면 B 선행 조건이다.
+  (백업서 전 파일 복원+sha256 대조 — 매체 판독성 게이트). dest는 source와 **다른 물리 디스크**여야 한다
+  (판별은 `findmnt --target` → 백킹 디바이스 → `lsblk -nso` TYPE=disk까지 거슬러 올라간다).
   스테이징→sanity(빈/급감 중단)→승격(data.prev 1개 보존). 성공 시 `files_backup_last_success_timestamp`·
-  용량을 vmsingle에 push(r4의 FilesBackupStale/FilesBulkSSDLow). Makefile 배선 없음 — 직접 실행.
-  ⚠️ **국면 A에는 실행자가 없다**(배선이던 launchd plist는 Mac mini 로컬 · NUC엔 launchd/diskutil 부재).
-  게다가 국면 A의 `/mnt/bulk`는 루트 LV bind 마운트라 **2차 매체가 원리적으로 없다** — 지금 이식하면
-  false-green이다. 국면 B(2TB M.2) 이후 매체 판별 재작성 + systemd timer 배선이 정답이고,
-  그때까지 `FilesBackupStale`의 absent 가지는 한시 억제 상태다(`tests/gates/test_files-backup-phase-a.bats`).
+  용량을 vmsingle에 push(r4의 FilesBackupStale/FilesBulkSSDLow).
+  ⚠️ 2026-08-19에 **리눅스로 재작성**됐다(이전 판은 macOS 결박 — `diskutil` 매체 판별 + launchd 배선).
+  실행자는 `infra/k3s-bootstrap/host-config/etc/systemd/system/files-data-backup.{service,timer}`이고
+  🔴 **국면 A 동안 enable하지 않는다** — `/mnt/bulk`가 루트 LV의 bind 마운트라 2차 매체가 원리적으로
+  없고, 스크립트가 같은 물리 디스크를 dest로 주면 거부한다. 국면 B(2TB M.2 장착) 이후
+  `sudo systemctl enable --now files-data-backup.timer`가 배선의 마지막이다.
+  실패는 `OnFailure=`가 `notify-unit-failure.sh`로 즉시 알린다(신선도 알림은 1주기보다 빨리 못 운다).
+  Makefile 배선 없음 — 직접 실행.
+- **`notify-unit-failure.sh`** — **호스트 systemd 전용**(직접 실행하지 않는다).
+  `OnFailure=unit-failure-notify@%n.service`가 호출해 `systemd_unit_last_failure_timestamp{unit=…}`를
+  node-exporter textfile collector 디렉토리에 원자적으로 쓴다(r4 `SystemdUnitFailed`가 읽는다).
+  oneshot 실패의 **유일한 즉시 채널** — 신선도 알림은 원리적으로 주기보다 빨리 울 수 없다.
+  push가 아니라 파일인 이유: kubectl/port-forward 의존이 없어 **자기 트리거와 함께 죽지 않는다**.
 - **`teardown.sh`** — **파괴적(owner 전용)**. `make teardown-app`/`teardown-resource` 래퍼가 호출 —
   clean-worktree 가드 → origin/main fetch → `teardown/<target>-<ts>` fresh-main 전용브랜치 → 툴(plan) →
   allowlist staging → PR(owner gh 자격). 앱/리소스 매니페스트·apps.json·원장 행 제거(리소스 purge는

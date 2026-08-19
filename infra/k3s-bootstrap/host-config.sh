@@ -55,7 +55,9 @@ SSHD_DROPIN="10-k3s-node.conf"
 #    (5 → 7: 2026-08-19 `etc/systemd/system/files-data-backup.{service,timer}` 추가 — files 백업
 #           국면 B 선행 배선. 이때 열거 글롭도 `.conf`만 보던 것에서 `.service`/`.timer`까지
 #           넓혔다. 바닥값과 글롭을 **함께** 올린 첫 사례다 — 한쪽만 올리면 조용히 어긋난다.)
-TREE_MIN=7
+#    (7 → 8: 2026-08-20 `etc/systemd/system/unit-failure-notify@.service` 추가 — oneshot 실패의
+#           **즉시 채널**. 신선도 알림은 원리적으로 주기보다 빨리 울 수 없어 1회 실패가 무성이었다.)
+TREE_MIN=8
 
 fail() { echo "FAIL: host-config: $*" >&2; exit 1; }
 

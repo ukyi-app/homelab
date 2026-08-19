@@ -1271,3 +1271,30 @@ selfHeal과 플립플롭한다.
   오늘 레포의 glob 소비처는 전부 집계이거나 뒤에서 재정렬하므로 라이브 결함은 없지만, `for f in *.yaml;
   do …; done | head -1` 류가 들어오면 스캐너가 못 잡는다.
 > 가드: `scripts/check-locale-collation.sh`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_make-help.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`
+
+### systemd 유닛 파일은 push 생산자 열거 밖이다 — 유닛에 인라인한 curl은 완전성 가드를 통째로 지나간다
+- `check-alert-rules.ts`의 생산자 완전성 가드는 "레포에서 메트릭을 push하는 파일을 **전부** 찾는다"고
+  주장한다. 실제 열거는 `tools/lib/repo-walk.ts`의 `producers` 스코프이고 그 include는
+  `\.(ya?ml|sh|m?[jt]s|py)$`다 — **`.service`·`.timer`·`Makefile`·`.conf`는 확장자에서 탈락한다.**
+- **실측(2026-08-20)**: `files-data-backup.service`에
+  `ExecStopPost=/bin/sh -c '… | curl --data-binary @- …/api/v1/import/prometheus'`로 **레지스트리에 없는**
+  메트릭을 push하게 하고 린터를 돌렸더니 `check-alert-rules OK (… 모드 A/B/C 위반 0)`으로 통과했다.
+  **같은 push를 `scripts/*.sh`에 두면 즉시 FAIL이다** — 차이는 확장자 하나뿐이다.
+- **무엇이 무너지는가**: 그 메트릭은 push 주기가 vmalert instant 룩백(300s)보다 길어도 **모드 C 검사를
+  못 받는다**. 즉 rollup 없이 참조하는 룰이 배포돼도 아무도 막지 않는다 — **죽은 알림이 초록으로 태어난다.**
+  이 레포가 반복해 밟은 「열거 붕괴 → vacuous green」의 새 얼굴이고, 위험한 이유는 열거 대상이 0건이
+  아니라 **원래 있어야 할 파일 종류가 도메인 밖**이라는 점이다. 바닥값으로는 못 잡는다 — 바닥값과
+  열거 수가 **같은 글롭에서 나오기** 때문이다(`host-config.sh`의 확장자 화이트리스트가 같은 자리에서
+  배운 것과 정확히 같은 비대칭).
+- ⇒ **처방: push는 생산자 확장자를 가진 파일에만 둔다.** 유닛은 그 파일을 `ExecStart=`로 부르기만 한다.
+  호스트 계층에서 메트릭을 내보낼 때 "유닛에 curl 한 줄"이 가장 짧은 길처럼 보이지만, 그 한 줄이
+  가드 도메인 밖으로 나가는 문이다.
+- ⚠️ **스코프 include를 넓히는 것은 답이 아니다** — 그러면 `.conf`·`.network`·`Dockerfile` 같은 다음
+  확장자가 똑같이 조용히 빠진다. 대신 **보형(complement)** 을 단언한다: 추적 파일 중 생산자 확장자에
+  매치하지 **않는** 것들(문서·테스트 하네스 제외 — 그 둘은 정당하게 그 문자열을 담는다)에 쓰기 동사가
+  0건임을 강제한다. 열거 바닥값과 양성 대조를 함께 건다.
+- ⚠️ 이 함정의 사촌: **호스트 계층 신호는 애초에 push가 아니어도 된다.** node-exporter가 이미 `/`를
+  마운트하고 있으므로 textfile collector(`.prom` 파일)를 쓰면 신호가 **스크레이프**가 되어 모드 C·
+  rollup 윈도·생산자 레지스트리 문제가 전부 사라진다. 게다가 push 경로는 kubectl/port-forward에
+  의존해 **자기 트리거와 함께 죽는다**(kubectl 불가가 백업 유닛 실패의 주요 원인이다).
+> 가드: `tests/gates/test_unit-failure-notify.bats`
