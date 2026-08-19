@@ -23,7 +23,13 @@ keys.txt
 #    (2026-08-17 컷오버 백업이 실제로 그렇게 막았다).
 *.tfvars.*
 !*.tfvars.example
+# ⚠️ `backend.hcl`도 **똑같이** 접미사 사본이 빠져나간다 — 위 tfvars 교훈이 여기엔 적용돼 있지 않았고,
+#    2026-08-19에 실제로 밟았다: 맥 폐기 절차에서 apply 경로를 닫으려고 `backend.hcl` 3개를
+#    `.MOVED-TO-NUC-20260819`로 rename했더니 `git add -A`가 그걸 **전부 스테이징했다**.
+#    이 파일들엔 R2 state의 access_key/secret_key가 평문으로 들어 있고 레포는 public이다.
 backend.hcl
+backend.hcl.*
+!backend.hcl.example
 crash.log
 override.tf
 override.tf.json
