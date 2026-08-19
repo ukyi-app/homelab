@@ -73,6 +73,6 @@
 | 드릴의 정리가 EXIT trap뿐이면 고아가 남고, pre-flight 없는 apply가 그 고아를 재사용해 '검증된 복원'이 거짓말한다 | gate | `platform/cnpg/prod/test_restore_drill_behavior.bats` |
 | 권한 부족이 드리프트로 위장한다 — terraform은 못 읽은 리소스를 "삭제됨"으로 읽어 `Plan: 1 to add`를 낸다 | gate | `infra/tailscale/test_provider_scopes.bats` |
 | owner 로컬 apply 루트는 plan-only CI여도 terraform 핀 ≥ state writer여야 한다(핀 통일이 오히려 고장) | gate | `infra/tailscale/test_provider_scopes.bats` |
-| GitHub API가 낡은 스냅샷을 200으로 반환 → push된 단조 타임스탬프가 역행 → `last_over_time`이 그 한 샘플로 오발화(rollup 함수 선택 축) | gate | `tests/gates/vmalert-gha-liveness-firing-e2e.sh`, `tests/gates/test_gha-liveness-exporter.bats`, `tests/gates/fixtures/r6-gha-lastovertime.yaml` |
+| GitHub API가 낡은 스냅샷을 200으로 반환 → push된 단조 타임스탬프가 역행 → `last_over_time`이 그 한 샘플로 오발화(rollup 함수 선택 축) | gate | `tests/gates/vmalert-gha-liveness-firing-e2e.sh`, `tests/gates/test_gha-liveness-exporter.bats`, `tests/gates/fixtures/r6-gha-lastovertime.yaml`, `tools/check-alert-rules.ts`, `policy/alert-supply-monotonicity.json`, `tests/test_alert_rules.bats` |
 | 로케일 콜레이션이 게이트를 뒤집는다 — en_US `sort -u`가 `-1`과 `1`(그리고 `_`-접두 워크플로와 동명 공개 디스패처)을 같다고 보고 하나를 버려 fail-open | gate | `scripts/check-locale-collation.sh`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_make-help.bats`, `platform/argocd/root/test_sync_wave_ledger.bats` |
 | systemd 유닛 등 생산자 확장자 밖 파일의 인라인 push — 완전성 가드가 원리적으로 못 봐 죽은 알림이 초록으로 태어난다 | gate | `tests/gates/test_unit-failure-notify.bats` |

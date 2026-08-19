@@ -16,6 +16,15 @@ _seed() {
   local root="$1" name="${2:-}" expr="${3:-}" i
   mkdir -p "$root/platform/victoria-stack/prod/rules" "$root/platform/fake/prod" "$root/scripts" "$root/policy"
   : > "$root/policy/alert-instance-stability-allowlist.txt"
+  # 모드 D 정책 픽스처 — 린터는 이 파일을 **필수 읽기**로 다루므로(부재=fatal) 시드가 반드시 만든다.
+  # 실 원장을 약화시키지 않으려고 `--supply-policy`로 주입한다(--registry와 같은 격리 규약).
+  cat > "$root/supply.json" <<'SUPPLY'
+{ "metrics": [
+  { "metric": "fixture_external_ts",  "supply": "external",   "decreasing": "impossible", "why": "픽스처 — 외부 API 조회 결과" },
+  { "metric": "fixture_local_ts",     "supply": "in-cluster", "decreasing": "impossible", "why": "픽스처 — 잡이 date +%s로 만든다" },
+  { "metric": "fixture_budget",       "supply": "in-cluster", "decreasing": "is-truth",   "why": "픽스처 — 설정값이라 인하가 사실" }
+] }
+SUPPLY
   echo 'kube_pod_container_status_restarts_total   # 테스트 시드' \
     > "$root/policy/alert-instance-stability-denylist.txt"
 
@@ -88,7 +97,7 @@ _track_fixture() {
 
 _lint() {   # $1=root — 픽스처를 추적 상태로 만든 뒤 픽스처 레지스트리를 주입해 린터 실행
   _track_fixture "$1"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json" --supply-policy "$1/supply.json"
   echo "$output"
 }
 
@@ -116,7 +125,10 @@ _seed_frozen_fixture() {   # $1=root $2=픽스처 경로
   run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "${BATS_TEST_DIRNAME}/.."
   echo "$output"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q '모드 A/B/C 위반 0'   # 세 모드 전부 실행됐다는 증거(모드 침묵 스킵 차단)
+  echo "$output" | grep -q '모드 A/B/C/D 위반 0'   # 네 모드 전부 실행됐다는 증거(모드 침묵 스킵 차단)
+  # 모드 D의 두 축이 **실제로** 관측됐는가 — 원장 크기와 판정 참조 수는 다른 축이다.
+  echo "$output" | grep -qE '^SCAN: check-alert-rules:supply: [0-9]+$'
+  echo "$output" | grep -qE '^SCAN: check-alert-rules:supply-refs: [0-9]+$'
 }
 
 # ── 모드 A: rollup이 상태-파생(비-리셋) 카운터를 감쌀 때 instance 제거를 강제 ──
@@ -646,4 +658,86 @@ YAML
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '정책 파일 읽기 실패'
+}
+
+# ── 모드 D: `time()` 비교 피연산자는 공급원 의미론이 요구하는 rollup만 쓸 수 있다 ──
+# ⚠️ 요구는 **화이트리스트**다. "max만 금지"였다면 avg/sum이 통과하는데
+#    `sum_over_time(타임스탬프[W])`는 `time() - 거대값`이 영구 음수라 **조용한 무발화**다.
+
+@test "mode D requires max_over_time for an external monotonic timestamp" {
+  _run_probe ExternalTsProbe '(time() - last_over_time(fixture_external_ts[3h])) > 100'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '모드 D'
+  echo "$output" | grep -q 'max_over_time()여야'
+}
+
+@test "mode D accepts max_over_time for that same external metric (green half)" {
+  _run_probe ExternalTsProbe '(time() - max_over_time(fixture_external_ts[3h])) > 100'
+  [ "$status" -eq 0 ]
+}
+
+@test "mode D forbids max_over_time on an in-cluster monotonic timestamp (mirror-image latch)" {
+  # 흡수할 공급원 잡음이 없으므로 이득은 0이고, 값의 **전진** 점프를 윈도만큼 래치해 알림을 억제한다.
+  _run_probe LocalTsProbe '(time() - max_over_time(fixture_local_ts[10d])) > 100'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'last_over_time()여야'
+}
+
+@test "mode D forbids max_over_time on a value whose decrease is truth (budget)" {
+  _run_probe BudgetProbe '(time() - last_over_time(fixture_local_ts[10d])) > max_over_time(fixture_budget[10d])'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'fixture_budget'
+  echo "$output" | grep -q '내려가는 것이 사실'
+}
+
+@test "mode D rejects non-max rollups too, not just max (whitelist not blacklist)" {
+  # 블랙리스트("max만 금지")였다면 이 둘이 통과한다. sum은 time()-거대값이 영구 음수라 조용한 무발화다.
+  _run_probe AvgProbe '(time() - avg_over_time(fixture_local_ts[10d])) > 100'
+  [ "$status" -ne 0 ]
+  _run_probe SumProbe '(time() - sum_over_time(fixture_local_ts[10d])) > 100'
+  [ "$status" -ne 0 ]
+}
+
+@test "mode D fails closed on a metric that is not declared in the policy" {
+  _run_probe UndeclaredProbe '(time() - last_over_time(fixture_unknown_ts[10d])) > 100'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '기본값은 없다'
+}
+
+@test "mode D does not enumerate join operands that are merely in the same expr" {
+  # ⚠️ 범위는 뺄셈·비교의 **피연산자 span**뿐이다. expr 전체를 훑으면 큰 조인의 라벨/비-타임스탬프
+  #    피연산자까지 미등재로 잡혀 실 레포가 red가 된다(실측: kube_job_failed·owner_name).
+  _run_probe JoinProbe '(time() - last_over_time(fixture_local_ts[10d])) > 100 and on() (fixture_unrelated_gauge > 0)'
+  [ "$status" -eq 0 ]
+}
+
+@test "mode D ignores label names and matcher values when picking metric tokens" {
+  _run_probe LabelProbe '(time() - last_over_time(fixture_local_ts{some_label="some_value"}[10d])) > 100'
+  [ "$status" -eq 0 ]
+}
+
+@test "mode D treats a missing policy file as fatal, never as zero entries" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _track_fixture "$tmp"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp" \
+    --registry "$tmp/registry.json" --supply-policy "$tmp/does-not-exist.json"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "항목 0개"
+  rm -rf "$tmp"
+}
+
+@test "mode D requires a reason on every policy entry" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _track_fixture "$tmp"
+  printf '{ "metrics": [ { "metric": "m", "supply": "external", "decreasing": "impossible", "why": "" } ] }\n' \
+    > "$tmp/nowhy.json"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$tmp" \
+    --registry "$tmp/registry.json" --supply-policy "$tmp/nowhy.json"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '무근거 선언은 금지'
+  rm -rf "$tmp"
 }
