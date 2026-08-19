@@ -133,6 +133,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - `kubectl apply --dry-run=server`는 ArgoCD가 SSA로 관리하는 오브젝트에 대해 거짓 실패를 낸다
 - 권한 부족은 에러가 아니라 드리프트로 위장한다 — terraform은 못 읽은 리소스를 "삭제됨"으로 읽는다
 - owner 로컬 apply 루트는 CI가 plan만 해도 terraform 코어 버전이 state writer 이상이어야 한다
+- GitHub API는 낡은 스냅샷을 200으로 돌려준다 — `last_over_time`은 그 역행 샘플 하나를 그대로 페이지로 바꾼다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

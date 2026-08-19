@@ -19,6 +19,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STACK="$ROOT/platform/victoria-stack/prod"
 RULES_CM="$STACK/rules/r6-ci-staleness.yaml"
 EXPORTER="$STACK/gha-liveness-exporter.yaml"
+FIXTURES="$ROOT/tests/gates/fixtures"
 
 # shellcheck source=tests/gates/lib/vmalert-e2e.sh
 . "$ROOT/tests/gates/lib/vmalert-e2e.sh"
@@ -47,6 +48,12 @@ BUDGET_LARGE=21600      # under: 6h 예산 → 여유
 N_CFG=2
 N_SCRAPED_PARTIAL=1
 N_ZERO=0
+# regress 시나리오(L8/L9) — 공급원이 낡은 스냅샷을 줘 push된 타임스탬프가 **역행**하는 상태.
+# ⚠️ 역행은 `WF_UNDER`에만 심는다. `WF_OVER`(예산 3600s)에 심으면 `max_over_time` 하에서
+#    `time() - max = N_BACK×push = 3600s`가 예산과 **정확히 같아져** 판정이 경계에 앉는다 — 레그가
+#    부동소수·격자 정렬에 흔들린다. WF_OVER는 이 시나리오에서 정상으로 두고 함께 침묵을 요구한다.
+N_BACK=2                # 연속 역행 폴 수. 1이면 지속이 `for:`와 같아 픽스처가 pending에서 멈춘다(실측)
+BACK_S=1855080          # 역행 폭 515.3h — 2026-08-19 라이브 실측 최대치(bump-poll)
 
 # ── 1) 배포 매니페스트에서 파라미터 파생(하드코딩 0) ───────────────────────────────────────────────
 vme_derive_stack_params "$STACK"
@@ -98,6 +105,46 @@ vme_assert_rollup_ok "$STALE_EXPR" "$BUDGET_METRIC" "$PUSH_S" "$STALE_ALERT" fau
 [ "$AGE_S" -lt "$BUDGET_LARGE" ] || vme_contract "시나리오 무의미: AGE(${AGE_S}s) >= BUDGET_LARGE(${BUDGET_LARGE}s)"
 echo "[preflight] 예산 대조 OK: BUDGET_SMALL(${BUDGET_SMALL}s) < AGE(${AGE_S}s) < BUDGET_LARGE(${BUDGET_LARGE}s)"
 
+# ── 2c) preflight: regress 시나리오(L8/L9)의 산술 ──────────────────────────────────────────────────
+# `max_over_time`은 **면역이 아니라 유계 흡수**다 — 창 안에 역행하지 **않은** 샘플이 최소 1개 남아야
+# 흡수한다. 그래서 침묵 조건은 두 항의 **논리곱**이고, 둘 중 어느 하나만 걸어도 시나리오가 거짓말한다.
+[ $(( N_BACK * PUSH_S )) -le "$W_S" ] \
+  || vme_contract "시나리오 무의미: N_BACK×push=$(( N_BACK * PUSH_S ))s > W(${W_S}s) — 창 안에 역행하지 않은 샘플이 남지 않아 max_over_time도 **정당하게** 발화한다(룰의 잘못이 아닌데 L8이 RED가 된다)"
+[ $(( (N_BACK + 1) * PUSH_S )) -le "$BUDGET_LARGE" ] \
+  || vme_contract "시나리오 무의미: (N_BACK+1)×push=$(( (N_BACK + 1) * PUSH_S ))s > BUDGET_LARGE(${BUDGET_LARGE}s) — 흡수 후 남는 나이가 이미 예산을 넘어 L8이 룰과 무관하게 RED가 된다"
+# 역행 폭이 예산을 넘지 않으면 픽스 이전 expr조차 발화하지 않는다 → L9가 무측정(공허한 이빨).
+[ "$BACK_S" -gt "$BUDGET_LARGE" ] \
+  || vme_contract "시나리오 무의미: BACK_S(${BACK_S}s) <= BUDGET_LARGE(${BUDGET_LARGE}s) — 역행이 예산을 못 넘어 결함 픽스처도 침묵한다(L9가 아무것도 증명하지 못한다)"
+# 역행 지속(N_BACK×push)이 `for:`를 못 채우면 픽스처가 pending에서 멈춘다 → 역시 L9 무측정.
+[ $(( N_BACK * PUSH_S )) -ge "$STALE_FOR_S" ] \
+  || vme_contract "시나리오 무의미: 역행 지속 $(( N_BACK * PUSH_S ))s < for:(${STALE_FOR_S}s) — 결함 픽스처가 pending에 머물러 firing이 0이다"
+echo "[preflight] regress 산술 OK: N_BACK=${N_BACK}폴 · 지속 $(( N_BACK * PUSH_S ))s (≥ for: ${STALE_FOR_S}s) · W=${W_S}s 안 흡수 여유 $(( W_S / PUSH_S ))폴 · 역행폭 ${BACK_S}s > 예산 ${BUDGET_LARGE}s"
+
+# ⚠️ **순서가 곧 진단의 정확성이다.** 배포 룰의 좌변부터 본다 — 아래 픽스처 대조를 먼저 걸면, 픽스가
+#    되돌아갔을 때 "픽스처가 고쳐졌다"는 **엉뚱한 파일**을 지목한다(거짓 진단 = 게이트 신뢰 붕괴).
+TS_ROLLUP_FN="$(grep -oE "[a-z_]+_over_time[[:space:]]*\([[:space:]]*${TS_METRIC}\[" <<<"$STALE_EXPR" \
+  | head -1 | grep -oE '^[a-z_]+_over_time' || true)"
+[ -n "$TS_ROLLUP_FN" ] || vme_fault "$STALE_ALERT: 좌변 rollup 함수 추출 실패 — expr 파싱이 깨졌다"
+[ "$TS_ROLLUP_FN" = "max_over_time" ] \
+  || vme_fault "$STALE_ALERT 좌변이 '$TS_ROLLUP_FN'이다 — **배포 룰이 되돌아갔다**($RULES_CM). 단조량인 $TS_METRIC 은 max_over_time이어야 공급원의 역행 샘플을 흡수한다. L8/L9는 이 전제 위에서만 의미가 있다"
+
+# 결함 픽스처는 배포 룰과 **좌변 rollup 함수 하나만** 달라야 한다 — 다른 곳이 함께 드리프트하면
+# L9의 발화를 "역행 때문"으로 귀속할 수 없다(픽스처가 다른 이유로 발화하는 것을 이빨로 착각한다).
+cp "$FIXTURES/r6-gha-lastovertime.yaml" "$VME_TMP/r6-gha-lastovertime.yaml"
+grep -q "alert: $STALE_ALERT" "$VME_TMP/r6-gha-lastovertime.yaml" \
+  || vme_fault "결함 픽스처에 'alert: $STALE_ALERT' 부재 — L9가 무측정"
+FIX_EXPR="$(vme_alert_expr "$VME_TMP/r6-gha-lastovertime.yaml" "$STALE_ALERT")"
+[ -n "$FIX_EXPR" ] || vme_fault "결함 픽스처에서 expr 추출 실패"
+# 배포=max / 픽스처=last 라는 **바로 그 한 토큰**의 차이인지 확인한다. 양쪽을 정규화해 비교한다.
+norm() { tr -s '[:space:]' ' ' <<<"$1" | sed 's/^ *//; s/ *$//'; }
+# ⚠️ 여기 도달했다면 배포 룰은 이미 max_over_time으로 확인됐다 → 동일하다는 것은 **픽스처가 '고쳐졌다'**는
+#    뜻이고 귀속이 모호하지 않다. 이빨 없는 픽스처는 제품 고장(leg FAIL)이 아니라 **하네스 결함**이다.
+[ "$(norm "$FIX_EXPR")" != "$(norm "$STALE_EXPR")" ] \
+  || vme_fault "결함 픽스처가 배포 룰과 동일하다 — 누군가 픽스처를 '고쳤다'($FIXTURES/r6-gha-lastovertime.yaml). L9는 L8의 복사본이 되어 이빨이 없다"
+[ "$(norm "${FIX_EXPR//last_over_time(${TS_METRIC}/max_over_time(${TS_METRIC}}")" = "$(norm "$STALE_EXPR")" ] \
+  || vme_fault "결함 픽스처가 배포 룰과 **좌변 rollup 함수 말고도** 다르다 — 픽스처가 '고쳐졌'거나 배포 룰이 다른 축에서 바뀌었다. 어느 쪽이든 L9의 발화를 역행에 귀속할 수 없다"
+echo "[preflight] 결함 픽스처 OK: 배포 룰(max_over_time)과 좌변 rollup 함수 하나만 다르다"
+
 # ── 3) 합성 시계열 ────────────────────────────────────────────────────────────────────────────────
 # replay 창: for:가 성립하려면 창이 충분히 길어야 한다. 세 알림의 for: 중 최대 + 여유.
 MAX_FOR_S="$STALE_FOR_S"
@@ -107,14 +154,15 @@ SPAN_S=$(( MAX_FOR_S * 3 + W_S ))
 TO_EPOCH="$(date +%s)"
 FROM_EPOCH=$(( TO_EPOCH - SPAN_S ))
 
-gen() { # $1=출력파일 $2=시나리오(stale|healthy|hbstale|hbabsent|partial|zero)
+gen() { # $1=출력파일 $2=시나리오(stale|healthy|hbstale|hbabsent|partial|zero|regress)
   python3 - "$1" "$2" "$FROM_EPOCH" "$TO_EPOCH" "$PUSH_S" "$AGE_S" \
-    "$WF_OVER" "$WF_UNDER" "$BUDGET_SMALL" "$BUDGET_LARGE" "$N_CFG" "$N_SCRAPED_PARTIAL" "$N_ZERO" <<'PY'
+    "$WF_OVER" "$WF_UNDER" "$BUDGET_SMALL" "$BUDGET_LARGE" "$N_CFG" "$N_SCRAPED_PARTIAL" "$N_ZERO" \
+    "$N_BACK" "$BACK_S" <<'PY'
 import json, sys
-out, scen, frm, to, push, age, wf_o, wf_u, b_small, b_large, n_cfg, n_part, n_zero = (
+out, scen, frm, to, push, age, wf_o, wf_u, b_small, b_large, n_cfg, n_part, n_zero, n_back, back_s = (
     sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]),
     int(sys.argv[6]), sys.argv[7], sys.argv[8], int(sys.argv[9]), int(sys.argv[10]),
-    int(sys.argv[11]), int(sys.argv[12]), int(sys.argv[13]))
+    int(sys.argv[11]), int(sys.argv[12]), int(sys.argv[13]), int(sys.argv[14]), int(sys.argv[15]))
 
 ts = list(range(frm, to + 1, push))          # push 주기마다 한 샘플(라이브와 같은 간격)
 lines = []
@@ -125,10 +173,19 @@ def series(metric, labels, values):
                              "timestamps": [t * 1000 for t in ts]}))
 
 # 워크플로 타임스탬프: 각 샘플 시점 기준 age 초 전에 마지막 성공.
-# healthy면 방금 성공(age=0)으로 둔다.
-eff_age = 0 if scen == "healthy" else age
-series("gha_workflow_last_success_timestamp", {"workflow": wf_o}, [t - eff_age for t in ts])
-series("gha_workflow_last_success_timestamp", {"workflow": wf_u}, [t - eff_age for t in ts])
+# healthy·regress면 방금 성공(age=0)으로 둔다 — regress의 결함은 나이가 아니라 **역행**이다.
+eff_age = 0 if scen in ("healthy", "regress") else age
+over_vals = [t - eff_age for t in ts]
+under_vals = [t - eff_age for t in ts]
+# regress: 공급원(GitHub API)이 낡은 스냅샷을 준 상태 — 시계열 **끝**의 n_back 샘플만 back_s 뒤로 튄다.
+# ⚠️ 끝에 두는 것이 최악 배치다. 창 안 뒤쪽에 두면 그 뒤의 신선한 샘플이 last_over_time마저 구제해
+#    결함 픽스처가 발화하지 않는다(= L9 무측정).
+# ⚠️ wf_o(예산이 작은 쪽)에는 심지 않는다 — 흡수 후 남는 나이가 그 예산과 정확히 같아져 경계에 앉는다.
+if scen == "regress":
+    for i in range(len(ts) - n_back, len(ts)):
+        under_vals[i] = ts[i] - back_s
+series("gha_workflow_last_success_timestamp", {"workflow": wf_o}, over_vals)
+series("gha_workflow_last_success_timestamp", {"workflow": wf_u}, under_vals)
 series("gha_workflow_max_age_seconds", {"workflow": wf_o}, [b_small] * len(ts))
 series("gha_workflow_max_age_seconds", {"workflow": wf_u}, [b_large] * len(ts))
 
@@ -155,13 +212,14 @@ open(out, "w", encoding="utf-8").write("\n".join(lines) + "\n")
 PY
 }
 
-run_scenario() { # $1=시나리오 → vmsingle 기동 + import + replay
+run_scenario() { # $1=시나리오 [$2=룰 파일(기본: 배포 룰) $3=vm 이름 접미사]
   local scen="$1"
-  local vm="vm-gha-$scen-$$"
+  local rules="${2:-$VME_TMP/r6-deployed.yaml}"
+  local vm="vm-gha-$scen${3:-}-$$"
   vme_start_vmsingle "$vm" "$VME_VM_VER"
   gen "$VME_TMP/$scen.jsonl" "$scen"
   vme_import "$VME_TMP/$scen.jsonl"
-  vme_replay "$vm" "$VME_VA_VER" "$VME_TMP/r6-deployed.yaml" "$VME_EVAL" "$VME_LOOKBACK" "$FROM_EPOCH" "$TO_EPOCH"
+  vme_replay "$vm" "$VME_VA_VER" "$rules" "$VME_EVAL" "$VME_LOOKBACK" "$FROM_EPOCH" "$TO_EPOCH"
 }
 
 # ── 4) 레그 ───────────────────────────────────────────────────────────────────────────────────────
@@ -210,5 +268,18 @@ n="$(vme_firing "$SCRAPE_ALERT")"
 if [ "$n" -eq 0 ]; then vme_pass "L6 $SCRAPE_ALERT 침묵(configured=0 — 감시 대상이 0이면 그게 정답)"
 else vme_fail "L6 zero-watch에서 발화 — \`<\`를 \`<=\`로 바꿨거나 가드를 덧붙였다"; fi
 
+echo "── L8: 공급원이 낡은 스냅샷을 줘 값이 역행해도 침묵한다(단조 rollup의 유계 흡수) ──"
+run_scenario regress
+n="$(vme_firing "$STALE_ALERT")"
+if [ "$n" -eq 0 ]; then vme_pass "L8 $STALE_ALERT 침묵(역행 ${N_BACK}폴 · 폭 ${BACK_S}s — max_over_time이 창 안 신선 샘플로 흡수)"
+else vme_fail "L8 역행 샘플에 발화했다 — 좌변이 last_over_time으로 되돌아갔거나 흡수 여유(W/push)가 깎였다"; fi
+
+echo "── L9: **하네스의 이빨** — 같은 시계열을 픽스 이전 expr에 먹이면 발화해야 한다 ──"
+# 이게 없으면 L8은 "룰이 옳다"가 아니라 "이 시계열은 아무것도 발화시키지 않는다"의 재진술일 수 있다.
+run_scenario regress "$VME_TMP/r6-gha-lastovertime.yaml" "-fix"
+n="$(vme_firing "$STALE_ALERT")"
+if [ "$n" -gt 0 ]; then vme_pass "L9 결함 픽스처(last_over_time) 발화 — 시계열이 실제로 버그를 재현한다(L8이 공허하지 않다)"
+else vme_fail "L9 결함 픽스처가 침묵했다 — regress 시계열이 버그를 재현하지 못한다(L8은 아무것도 증명하지 않는다)"; fi
+
 [ "$VME_FAILED" -eq 0 ] || { echo "vmalert-gha-liveness-firing-e2e: ${VME_FAILED}개 레그 실패" >&2; exit 1; }
-echo "vmalert-gha-liveness-firing-e2e OK (L1~L7 전건 통과)"
+echo "vmalert-gha-liveness-firing-e2e OK (L1~L9 전건 통과)"

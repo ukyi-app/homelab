@@ -23,6 +23,19 @@ data:
     #      같은 IP의 다른 GitHub 트래픽과 합쳐 한도를 넘길 수 있다(그러면 403이 되고 scraped<configured로
     #      GHALivenessScrapeIncomplete가 발화한다 — fail-closed지만 소음이다).
     #
+    # ⚠️ **이 exporter의 출력은 단조가 아니다 — 그리고 그건 여기서 고치지 않는다.**
+    #    GitHub Actions API는 간헐적으로 **낡은 스냅샷을 200으로** 돌려준다(2026-08-19 실측: 같은 URL을
+    #    몇 초 간격으로 두 번 부르면 `total_count`가 319 ↔ 1137로 갈리고 최신 run이 21.5일 낡은 것으로
+    #    온다). 에러가 아니라 성공 응답이라 아래 두 검사(`-z "$TS_ISO"` · `date -u -d` 실패)가 **원리적으로
+    #    못 잡고**, SCRAPED도 정상 증가한다 ⇒ `GHALivenessScrapeIncomplete`도 침묵한다. 이 잡은
+    #    **상태가 없어서**(CronJob · 자기 과거를 읽지 않는다) 받은 값을 그대로 싣고, 값은 API의 EPOCH인데
+    #    샘플 타임스탬프는 push 시각이라 **역행 값이 "가장 최근 샘플" 자리에 앉는다.**
+    #    ⇒ 클램프는 **소비자 쪽**이 진다: r6 `GHAWorkflowStale` 좌변의 `max_over_time`이 그 역할이다.
+    #    여기에 단조 클램프를 넣으려면 자기 과거를 vmsingle에서 **읽어와야** 하고(현재는 순수 push),
+    #    그 읽기의 실패 모드에 "그럼 뭘 push하나"라는 새 결정이 붙는다 — 소비자 쪽 한 단어가 같은
+    #    불변식을 더 싸게 산다. ⚠️ 크론 주기를 늘리면 그 흡수 여유(`floor(윈도 / push)`폴)가 줄어든다.
+    #    ⇒ 전문·근거는 `docs/traps-detail.md`(SSOT) 「GitHub API는 낡은 스냅샷을 200으로 돌려준다 …」.
+    #
     # ⚠️ POSIX sh(#!/bin/sh + set -eu, pipefail 없음) + readOnlyRootFilesystem: bash-ism·임시파일 불가.
     #    카운터는 `N=$((N+1))` 대입 형태만 — `: $((N++))`는 결과 0에서 non-zero를 반환해 set -e가 죽인다
     #    (digest-exporter가 같은 자리에서 배운 것).

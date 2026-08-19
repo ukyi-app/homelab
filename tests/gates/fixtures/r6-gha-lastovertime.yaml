@@ -1,0 +1,24 @@
+# 픽스처(동결 — 절대 "고치지" 마라): r6 `GHAWorkflowStale`의 **픽스 이전 expr** 스냅샷.
+# 좌변이 `last_over_time`이라 push된 타임스탬프가 한 샘플이라도 **역행**하면 그 값이 그대로 판정에
+# 들어간다. GitHub Actions API는 간헐적으로 **낡은 스냅샷을 200으로** 돌려주고(2026-08-19 실측:
+# bump-poll에서 −515.3h), exporter는 상태가 없어 그 값을 그대로 push하므로 정상 동작 중인 워크플로를
+# 두고 페이징했다.
+#
+# 용도: vmalert-gha-liveness-firing-e2e.sh의 **L9(하네스 이빨)** — `regress` 시계열을 먹였을 때 이
+# expr은 **발화해야** 한다. 그게 나와야 같은 시계열에서 배포 룰이 침묵한 L8이 공허하지 않다는 증인이
+# 선다. (배포 룰이 고쳐진 뒤에도 이 픽스처는 그대로 결함 상태로 남는다 — 하네스의 양성 기준선.)
+#
+# ⚠️ 우변은 배포 룰과 **같다**(`last_over_time`) — 두 파일은 좌변 함수 이름 **하나만** 달라야 한다.
+#    그 동일성은 vmalert-gha-liveness-firing-e2e.sh의 preflight가 강제한다(다른 곳이 함께 드리프트하면
+#    L9의 발화가 "역행 때문"이라는 귀속이 깨진다).
+groups:
+  - name: ci-staleness-fixture-gha-lastovertime
+    rules:
+      - alert: GHAWorkflowStale
+        expr: |
+          (time() - max by (workflow) (last_over_time(gha_workflow_last_success_timestamp[3h])))
+          > max by (workflow) (last_over_time(gha_workflow_max_age_seconds[3h]))
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "픽스처 — 발화해야 정상(하네스의 양성 기준선)"

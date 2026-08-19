@@ -121,9 +121,28 @@ data:
           #   그 둘을 비교한다 — 예산이 바뀌면 룰 수정 없이 따라온다.
           # ★ 윈도 [3h]: push 주기(30m)보다 크고, 값이 **타임스탬프**라 rollup 윈도 상한 함정
           #   (라벨-값 상태 게이지의 phantom 잔존)이 적용되지 않는다 — r4 하트비트 계열과 같은 비대칭.
+          #   ⚠️ 상한이 없다는 것이 **하한도 없다**는 뜻은 아니다 — 아래 ★★가 이 윈도에 하한을 새로 건다.
+          # ★★ 좌변은 `max_over_time`이다 — `last_over_time`이 **아니다**. 이 값은 "마지막 성공 run의
+          #   시각"이라 **단조 비감소여야 하는 양**인데, GitHub Actions API가 간헐적으로 **낡은 스냅샷을
+          #   200으로** 돌려줘 push된 값이 역행한다(2026-08-19 실측: bump-poll에서 −515.3h). 정상
+          #   데이터에서 두 함수는 **같은 값을 낸다** — 차이는 잡음이 들어왔을 때뿐이라 교체 비용이 0이고,
+          #   워크플로가 진짜 멈추면 창 안 모든 샘플이 같은 값이라 max도 오르지 않는다
+          #   ⇒ **fail-closed 유지 · 감지 지연 불변**(라이브 대조 실측: 임계를 인위로 낮추면 두 함수가
+          #   진짜 정지를 격자 수까지 동일하게 잡고, 차이는 오탐 2건뿐이었다).
+          # ⚠️ **우변은 `last_over_time`을 유지한다.** 판정 기준은 "타임스탬프인가"가 아니라
+          #   **"그 값이 내려가는 것이 사실일 수 있는가"**다 — 예산은 설정이라 **인하가 사실**이고,
+          #   max를 씌우면 예산을 낮춰도 옛 큰 값이 윈도만큼 부활해 새 예산이 늦게 먹는다.
+          #   이 **비대칭이 의도**임을 tests/gates/test_gha-liveness-exporter.bats가 양변 따로 못박는다.
+          # ★★ 윈도 [3h]의 하한 — `max_over_time`은 **면역이 아니라 유계 흡수**다. 창 안에 역행하지
+          #   **않은** 샘플이 최소 1개 남아야 흡수되므로 내성은 `floor(W / push)`폴이고, 침묵 조건은
+          #   `n×push ≤ W` **그리고** `(n+1)×push ≤ 예산`이다. W=3h·push=30m이면 앞 항이 먼저 물어
+          #   **연속 6폴(3.0h)**까지 흡수한다(hermetic replay 실측: n=6 무발화 / n=7 pending / n=8 발화).
+          #   라이브 관측 최장 역행은 **연속 2폴(1h)**이라 3배 여유다. ⇒ **윈도를 좁히거나 크론을
+          #   늘리면 그 여유가 곧바로 줄어든다** — 셋(윈도·크론·예산)은 함께 판단하라.
+          #   ⇒ 전문·근거는 `docs/traps-detail.md`(SSOT) 「GitHub API는 낡은 스냅샷을 200으로 돌려준다 …」.
           - alert: GHAWorkflowStale
             expr: |
-              (time() - max by (workflow) (last_over_time(gha_workflow_last_success_timestamp[3h])))
+              (time() - max by (workflow) (max_over_time(gha_workflow_last_success_timestamp[3h])))
               > max by (workflow) (last_over_time(gha_workflow_max_age_seconds[3h]))
             for: 30m
             labels: { severity: warning }
