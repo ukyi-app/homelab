@@ -1,0 +1,17 @@
+# systemd 유닛 실패의 즉시 채널 — 템플릿 유닛. 실패한 유닛이 `OnFailure=unit-failure-notify@%n.service`로
+# 부르고, `%i`에 그 유닛 이름(`foo.service`)이 들어온다.
+#
+# ⚠️ **이 유닛에 `OnFailure=`를 달지 마라** — 자기 자신을 부르는 실패 루프가 된다.
+# ⚠️ 실행체는 반드시 `scripts/*.sh`에 둔다. 유닛에 `ExecStart=/bin/sh -c '… curl …'`로 인라인하면
+#    메트릭 생산자 열거(`tools/lib/repo-walk.ts`의 producers 스코프는 `.ya?ml|.sh|.m?[jt]s|.py`만 본다)
+#    **밖으로 나가** 회계 가드가 그 메트릭을 영영 못 본다. `.service`는 그 확장자 목록에 없다.
+# ⚠️ 경로가 하드코딩이다 — 짝 유닛(files-data-backup.service)과 같은 규약이고, 체크아웃을 옮기면
+#    함께 고쳐야 한다.
+[Unit]
+Description=systemd 유닛 실패 기록 (%i) — node-exporter textfile collector
+Documentation=file:///home/ukyi/workspace/homelab/scripts/notify-unit-failure.sh
+
+[Service]
+Type=oneshot
+# root로 돈다 — /var/lib/node_exporter/textfile는 root 소유다.
+ExecStart=/home/ukyi/workspace/homelab/scripts/notify-unit-failure.sh %i

@@ -31,6 +31,15 @@ spec:
             - --path.sysfs=/host/sys
             - --web.listen-address=:9100
             - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/kubelet/.+)($|/)
+            # 호스트 계층이 메트릭을 **파일로** 내보내는 창구. 첫 소비자는 systemd 유닛 실패의 즉시
+            # 채널(`scripts/notify-unit-failure.sh` ← `OnFailure=`)이고 r4 `SystemdUnitFailed`가 읽는다.
+            # ⚠️ 경로가 `/host/root/...`인 것은 이미 `/`를 그리로 마운트하고 있기 때문이다(volumeMounts
+            #    참조) — **새 마운트도 새 권한도 필요 없다.** 그게 vmsingle push 대신 이 경로를 고른
+            #    이유의 절반이고, 나머지 절반은 push가 kubectl/port-forward에 의존해 **자기 트리거와
+            #    함께 죽는다**는 것이다(kubectl 불가가 백업 유닛 실패의 주요 원인이다).
+            # ⚠️ 디렉토리는 `etc/tmpfiles.d/10-k3s-node.conf`가 부팅마다 보장한다. 없으면 이 콜렉터가
+            #    `node_textfile_scrape_error 1`을 내고 그 축이 통째로 무성이 된다.
+            - --collector.textfile.directory=/host/root/var/lib/node_exporter/textfile
           ports:
             - { name: metrics, containerPort: 9100 }
           resources:

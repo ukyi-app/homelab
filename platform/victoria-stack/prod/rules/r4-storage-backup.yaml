@@ -197,16 +197,51 @@ data:
           #   다시 critical로 페이징한다 — 억제의 상한을 룰 자신이 들고 있다(창을 연장하고 여기를
           #   안 고치면 시끄러워질 뿐 조용해지지 않는다). 두 값의 정합과 "창을 비웠는데 억제가 남음"은
           #   `tests/gates/test_files-backup-phase-a.bats`가 **양방향**으로 강제한다.
+          #
+          #   🔴 **임계 정정(2026-08-20)**: 이전 값 180000s는 주기(86400s)의 **2.083배**였는데,
+          #   형제 일일 백업 4종(LocalBasebackup·R2Backup·PgDumpHedge·CacheBackup)은 전부 100000s
+          #   = **1.157배**다 — 이것만 아웃라이어였다. 대가는 **1회 실패의 완전 무성 + 페이지 T+50.5h**
+          #   였다. 여유 계산: 성공↔성공 최악 간격 = OnCalendar(86400) + RandomizedDelaySec(1800)
+          #   + TimeoutStartSec(1800) = 90000s < 100000s(여유 2.8h) + `for: 30m`.
+          #   ⚠️ 그래도 **신선도는 원리적으로 주기보다 빨리 울 수 없다**(배수를 조여도 하한이 1주기다).
+          #   1회 실패의 즉시 관측은 아래 `SystemdUnitFailed`가 맡는 **직교 축**이다 — 둘은 대체가 아니다.
           - alert: FilesBackupStale
             expr: |
-              (time() - last_over_time(files_backup_last_success_timestamp[10d])) > 180000
+              (time() - last_over_time(files_backup_last_success_timestamp[10d])) > 100000
               or absent(last_over_time(files_backup_last_success_timestamp[10d]))
               and on() (vector(time()) >= 1790780400)
             for: 30m
             labels: { severity: critical }
             annotations:
-              summary: "files 오프-노드 백업이 stale(≈2일 초과)이거나 없음"
+              summary: "files 오프-노드 백업이 stale(≈27.8시간 초과)이거나 없음"
               description: "files-data(비재생성 사용자 데이터)의 2차 매체 사본이 갱신되지 않았습니다 — 백업 실행자 미실행 또는 bulk 매체 미마운트. 매체 유실 시 전손 위험(R2 미사용). scripts/backup-files-data.sh와 그 실행자 배선을 확인하세요. ⚠️ 국면 A(versions.env의 BULK_MIGRATION_WINDOW_UNTIL이 비어 있지 않으면 진행 중)에는 '값 없음' 가지가 의도적으로 억제돼 있다 — 이 알림이 떴다면 실행자는 있는데 백업이 stale하다는 뜻이다."
+          # ── 호스트 systemd 유닛 실패의 **즉시 채널** ────────────────────────────────────────
+          # ★ 위 신선도 룰과 **직교 축**이다. 신선도는 "마지막 성공이 언제였나"만 알고, 원리적으로
+          #   주기(1일)보다 빨리 울 수 없다 — 배수를 조여도 하한이 1주기라 **1회 실패의 즉시 관측이
+          #   구조적으로 불가능**했다. `OnFailure=unit-failure-notify@%n.service`가 실패 즉시
+          #   textfile collector 파일을 쓰고 이 룰이 그것을 중계한다.
+          #   (digest-exporter의 하트비트 ↔ configured/scraped와 같은 직교 축 관용구.)
+          # ★ **rollup이 없는 것이 옳다.** 이 메트릭은 push가 아니라 node-exporter가 파일에서 읽어
+          #   내는 **스크레이프** 시계열이라, 파일이 있는 한 매 스크레이프마다 다시 나온다 — push
+          #   주기 > instant 룩백으로 생기는 구멍(모드 C)이 원리적으로 없다. rollup을 씌우면 오히려
+          #   해소가 윈도만큼 늦어진다.
+          # ★ `absent()` 가드를 **의도적으로 달지 않는다**: 이 메트릭의 부재는 "실패가 없었다"와
+          #   구별할 수 없다(정상 상태가 곧 부재다). 달면 24/7 오발화가 된다. 공급 경로 자체가 죽는
+          #   경우(node-exporter 사망)는 `TargetDown` 소관이고, 백업이 아예 안 도는 경우는 위
+          #   FilesBackupStale이 backstop이다 — 세 축이 서로를 덮는다.
+          # ★ `< 7200`이 **자기 해소**를 만든다: 실패 2시간 뒤 resolved가 나간다(고쳤다는 뜻이 아니라
+          #   "최근 실패가 아니다"라는 뜻이다). 유닛이 계속 실패하면 매 실행마다 값이 갱신돼 재발화한다.
+          #   파일을 지우는 주체를 두지 않는 것도 의도다 — 그 주체의 실패가 새로운 무성 경로가 된다.
+          # ⚠️ 이 룰은 레포 트리에 선언된 유닛만이 아니라 **`OnFailure=`가 달린 모든 호스트 유닛**을
+          #   덮는다. 반대로 그 줄이 없는 유닛(k3s.service·apt-daily·fstrim 등)에는 여전히 채널이 0이다.
+          - alert: SystemdUnitFailed
+            expr: |
+              (time() - systemd_unit_last_failure_timestamp) < 7200
+            for: 1m
+            labels: { severity: critical }
+            annotations:
+              summary: "호스트 systemd 유닛 실패: {{ $labels.unit }}"
+              description: "호스트 systemd oneshot 유닛이 failed로 끝났습니다 — `journalctl -u {{ $labels.unit }} -n 200`으로 원인을 보세요. 이 알림은 **실패 이벤트 기준**이라 2시간 뒤 자동 해소됩니다(고쳤다는 뜻이 아닙니다). 유닛이 계속 실패하면 매 실행마다 재발화하고, 실행 자체가 멈추면 해당 신선도 알림이 backstop입니다."
           # bulk 티어 용량: 호스트 df를 백업 잡이 함께 push(files_data_bulk_avail/size_bytes).
           #
           # ⚠️ **국면 A 정정(2026-08-17)**: 아래 서술의 "호스트 launchd pusher"는 Mac 시대의 실행자다.

@@ -64,7 +64,9 @@ _rearm() { _expr | grep -oE 'vector\(time\(\)\) >= [0-9]+' | grep -oE '[0-9]+' |
   # (a) 억제 절이 expr의 **마지막** 줄이다(= or 뒤에 온다 → absent 가지에만 결합).
   printf '%s' "$e" | grep -v '^[[:space:]]*$' | tail -1 | grep -qF -- 'and on() (vector(time()) >='
   # (b) staleness 가지가 첫 줄에 그대로 살아 있다(양성 대조 — expr이 통째로 바뀌면 red).
-  printf '%s' "$e" | head -1 | grep -qF -- '(time() - last_over_time(files_backup_last_success_timestamp[10d])) > 180000'
+  # ⚠️ 임계는 형제 일일 백업 4종과 같은 100000s(주기의 1.157배)다. 이전 180000s(2.083배)는
+  #    이 가족의 유일한 아웃라이어였고, 대가가 **1회 실패의 완전 무성 + 페이지 T+50.5h**였다.
+  printf '%s' "$e" | head -1 | grep -qF -- '(time() - last_over_time(files_backup_last_success_timestamp[10d])) > 100000'
   # (c) expr 전체를 감싸는 괄호 형태가 아니다 — 첫 줄이 `((`로 시작하면 그 형태일 수 있다.
   run bash -c "printf '%s' \"\$1\" | head -1 | grep -qE '^[[:space:]]*\\(\\('" _ "$e"
   [ "$status" -ne 0 ]

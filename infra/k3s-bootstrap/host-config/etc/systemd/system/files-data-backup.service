@@ -17,6 +17,9 @@ Description=files-data 오프-매체 백업 (RPO=24h)
 Documentation=file:///home/ukyi/workspace/homelab/scripts/backup-files-data.sh
 After=network-online.target k3s.service
 Wants=network-online.target
+# 실패의 **즉시 채널**. 신선도 알림(FilesBackupStale)은 원리적으로 주기(1일)보다 빨리 울 수 없어
+# 1회 실패가 무성이었다 — 이 한 줄이 그 축을 연다. 상세는 짝 유닛 unit-failure-notify@.service.
+OnFailure=unit-failure-notify@%n.service
 
 [Service]
 Type=oneshot
