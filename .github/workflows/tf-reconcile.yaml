@@ -187,8 +187,24 @@ jobs:
           # 준비상태 회계 신호 — 첫 줄에 둔다. 뒤로 미루면 plan이 죽었을 때 "안 돌았다"로 오귀속된다
           # (실패는 이미 job을 빨갛게 만들어 loud하다 — 회계가 잡는 것은 *조용한* 미실행뿐이다).
           echo "executed=true" >> "$GITHUB_OUTPUT"
+          # ⚠️ **`-target`이 계약이다 — 전체 plan은 읽기 전용 자격으로 원리적으로 불가능하다.**
+          #    GitHub은 repo의 merge 설정(allow_squash_merge·allow_auto_merge·delete_branch_on_merge…)을
+          #    **Administration:write 토큰에게만** 응답에 싣는다. 읽기 전용 PAT에는 그 필드가 **null로
+          #    빠지고**, provider가 부재를 `false`로 읽어 `false -> true` **영구 허위 드리프트**를 만든다
+          #    (2026-08-19 실측: 같은 시점에 owner R&W 토큰은 "No changes", 읽기 전용 PAT는 2 to change).
+          #    403이 아니라 **조용한 오답**으로 나타나는 것이 이 함정의 전부다.
+          #    ⇒ write를 주는 우회는 금지다. 이 워크플로가 지키는 것이 바로 그 신뢰 앵커(branch protection·
+          #      ruleset)인데, 그걸 다시 쓸 수 있는 자격을 CI에 놓는 것이 된다.
+          #    ⇒ 그래서 **읽히는 것만** 감시한다. github_repository 두 건은 감시 밖이고, 그 사실은
+          #      policy/workflow-readiness.json이 계상한다(조용한 축소가 아니라 선언된 갭이다).
+          # ⚠️ 이 목록은 `infra/github/*.tf`의 비-repository 리소스 **전건**이어야 한다. 리소스를 더하고
+          #    여기 안 더하면 새 리소스가 조용히 무감시가 된다 — infra/github/test_ci_targets.bats가 막는다.
           set +e
-          terraform -chdir=infra/github plan -input=false -lock-timeout=120s -detailed-exitcode -no-color
+          terraform -chdir=infra/github plan -input=false -lock-timeout=120s -detailed-exitcode -no-color \
+            -target=github_branch_protection.main \
+            -target=github_repository_ruleset.bump_poll_writer_only \
+            -target=github_actions_secret.telegram_bot_token \
+            -target=github_actions_secret.telegram_chat_id
           rc=$?
           set -e
           case "$rc" in
