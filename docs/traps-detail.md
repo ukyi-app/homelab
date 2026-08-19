@@ -1202,8 +1202,18 @@ selfHeal과 플립플롭한다.
   max를 씌우면 예산을 낮춘 뒤 옛 큰 값이 윈도만큼 부활해 새 예산이 늦게 먹는다. 판정 기준은 "타임스탬프인가"가
   아니라 **"그 값이 내려가는 것이 사실일 수 있는가"**다.
 - **★ 세 번째 축**: 「rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭」이 값의 종류로 **윈도 크기**를 갈랐다면,
-  여기선 같은 축이 **rollup 함수 선택**을 가른다 — **단조량 → `max_over_time`**(잡음 필터이면서 fail-closed) /
-  **가변 설정값 → `last_over_time`**(최신이 곧 사실) / **라벨-값 상태 게이지 → `last_over_time` + 윈도 < `for:`**.
+  여기선 같은 축이 **rollup 함수 선택**을 가른다. 판별에는 **두 질문이 필요하다**:
+  - **① 값의 신선도가 클러스터 밖 읽기에 의존하는가**(그 읽기가 낡은 뷰를 줄 수 있는가) —
+    **`external` + 단조량 → `max_over_time`**. 공급원 잡음이 실재하고 max가 그것을 유계 흡수한다.
+  - **② 그 외 전부 → `last_over_time`**(뒤집힌 `X - time()` 만료 모양이면 `min_over_time`).
+    ⚠️ **in-cluster 단조량에 `max_over_time`을 쓰지 마라** — 흡수할 잡음이 없어 이득이 0인데, 대신 값의
+    **전진** 점프를 윈도만큼 래치해 알림을 억제한다(r4의 윈도는 `[2h]`~`[10d]`라 억제 상한이 최대 10일이다).
+    **인하가 사실인 값**(예산·게이지·purge로 작아지는 백업 시각)도 마찬가지로 `last_over_time`이다.
+  - **라벨-값 상태 게이지 → `last_over_time` + 윈도 < `for:`**(위 형제 섹션 소관).
+  ⚠️ **화이트리스트로 강제한다** — "max만 금지"로 두면 `avg_over_time`·`sum_over_time`이 통과하는데,
+  `sum_over_time(타임스탬프[W])`는 `time() - 거대값`이 영구 음수라 **조용한 무발화**다.
+  ⇒ 이 판별은 `policy/alert-supply-monotonicity.json`(메트릭별 `supply`/`decreasing` 선언 + 근거 필수)과
+  `tools/check-alert-rules.ts`의 **모드 D**가 레포 전역에서 강제한다. 미등재 = FAIL(기본값 없음).
 - ⚠️ **`max_over_time`은 면역이 아니라 유계 흡수다.** 창 안에 역행하지 **않은** 샘플이 최소 1개 남아야 흡수하므로
   내성은 `floor(W / push)`폴이고, 침묵 조건은 `n×push ≤ W` **그리고** `(n+1)×push ≤ 예산`이다. W=3h·push=30m에서는
   **앞 항이 먼저 물어 연속 6폴(3.0h)**이 상한이다(hermetic replay 실측: n=6 무발화 / n=7 pending / n=8 발화 —
@@ -1226,9 +1236,10 @@ selfHeal과 플립플롭한다.
   현재 원소는 1개다. ⚠️ 다만 판별 기준은 "push인가"가 아니라 **"값이 클러스터 밖에서 왔는가"**이므로,
   스크레이프 경로에도 외부 공급원이 있다 — `barman_cloud_…_last_available_backup_timestamp`(R2 조회,
   `R2BackupStale`)가 그렇다. 거기에 `max_over_time`을 쓰면 **안 된다**(`reset-pg-r2-archive.sh --purge`가
-  정당한 역행을 만든다). ⚠️ **알려진 잔여**: 이 판별을 레포 전역에서 강제하는 린터 모드는 아직 없다 —
-  새 알림이 같은 모양(`time() - last_over_time(<외부 공급 타임스탬프>[W])`)으로 생기면 아무 가드에도 안 걸린다.
-> 가드: `tests/gates/vmalert-gha-liveness-firing-e2e.sh`, `tests/gates/test_gha-liveness-exporter.bats`, `tests/gates/fixtures/r6-gha-lastovertime.yaml`
+  정당한 역행을 만든다). ✅ **레포 전역 강제(2026-08-20 배선)**: `tools/check-alert-rules.ts` **모드 D**가 룰의 `time()` 비교
+  피연산자를 열거해 `policy/alert-supply-monotonicity.json`의 선언과 대조한다 — 미등재 = FAIL이고,
+  요구는 화이트리스트다. 도입 시 원장 15건 / 판정 29참조.
+> 가드: `tests/gates/vmalert-gha-liveness-firing-e2e.sh`, `tests/gates/test_gha-liveness-exporter.bats`, `tests/gates/fixtures/r6-gha-lastovertime.yaml`, `tools/check-alert-rules.ts`, `policy/alert-supply-monotonicity.json`, `tests/test_alert_rules.bats`
 
 ### 로케일 콜레이션이 게이트를 뒤집는다 — en_US의 `sort -u`는 `-1`과 `1`을 같다고 보고 하나를 버린다
 - glibc의 `en_US.UTF-8`(그리고 대부분의 UTF-8 언어 로케일)은 **구두점·공백을 1차 가중에서 무시**한다.

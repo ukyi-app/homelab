@@ -89,8 +89,8 @@ import { parseFlags } from "./lib/cli.ts";
 import { RULES_ROOT, walkManifests } from "./lib/repo-walk.ts";
 
 let f: Record<string, string | boolean>;
-try { f = parseFlags(process.argv.slice(2), { value: ["--repo-root", "--registry"], bool: [] }); }
-catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root · --registry`); process.exit(2); }
+try { f = parseFlags(process.argv.slice(2), { value: ["--repo-root", "--registry", "--supply-policy"], bool: [] }); }
+catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root · --registry · --supply-policy`); process.exit(2); }
 const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string) : ".";
 // --registry: push 메트릭 레지스트리 주입(**테스트 픽스처 격리 전용**). 실 레포 검증은 항상 기본
 // 레지스트리(DEFAULT_REGISTRY)로 돈다 — 부분 레포 루트를 쓰느라 프로덕션 검증을 약화시키지 않기 위함(F-4).
@@ -100,7 +100,7 @@ const REGISTRY_FILE = typeof f["--registry"] === "string" ? (f["--registry"] as 
 const RULES_DIR = RULES_ROOT;
 const DENYLIST = "policy/alert-instance-stability-denylist.txt";
 const ALLOWLIST = "policy/alert-instance-stability-allowlist.txt";
-const MIN_SCAN = 30;   // 실 룰 41건(40 alert + 1 record) — 셀렉터 붕괴 false-green 차단
+const MIN_SCAN = 30;   // 실 룰 49건(48 alert + 1 record) — 셀렉터 붕괴 false-green 차단
 // denylist 항목 바닥값 — 파일이 남아 있는데 **내용만** 비거나 주석만 남는 부분 드리프트를 잡는다
 // (필수 읽기는 파일 부재만 잡는다). 실 원장 1항목 — 이 목록은 줄어들 이유가 없다. 래칫 아님.
 const MIN_DENY = 1;
@@ -166,6 +166,18 @@ const ROLLUP_OK = new Set([
   "present_over_time", "absent_over_time", "distinct_over_time", "geomean_over_time",
   "tlast_over_time", "tfirst_over_time", "tmin_over_time", "tmax_over_time", "default_rollup",
 ]);
+
+// 모드 D의 메트릭 토큰 필터 — PromQL 내장/키워드는 메트릭이 아니다. 뒤에 `(`가 오는 토큰은 이미
+// 함수 호출로 걸러지지만, 인자 없이 쓰이는 키워드(`bool`·`offset` 등)는 여기서 뺀다.
+const PROMQL_BUILTIN = new Set([
+  "time", "vector", "scalar", "absent", "absent_over_time", "bool", "offset", "start", "end",
+  "max", "min", "sum", "avg", "count", "count_values", "stddev", "stdvar", "topk", "bottomk", "quantile",
+  "group", "rate", "irate", "increase", "delta", "idelta", "deriv", "predict_linear", "resets", "changes",
+  "label_replace", "label_join", "clamp", "clamp_max", "clamp_min", "round", "abs", "ceil", "floor",
+  "histogram_quantile", "timestamp", "day_of_week", "day_of_month", "days_in_month", "hour", "minute",
+  "month", "year", "unless", "ignoring", "group_left", "group_right", "without",
+]);
+let supplyRefs = 0;   // 모드 D가 **실제로 판정한** 참조 수(원장 크기와 다른 축 — 강제 루프가 죽으면 여기가 0이 된다)
 
 // ── push 메트릭 레지스트리 (큐레이트 SSOT) ──
 //   metric   = 룰 expr에서 매칭할 시계열 이름
@@ -599,6 +611,45 @@ function rollupWindow(s: string, metricPos: number, metricLen: number, owner: { 
 }
 
 const denyMetrics = readList(DENYLIST).map((l) => l.split("#", 1)[0].trim()).filter(Boolean);
+
+// ── 모드 D: 공급원 의미론 정책 (알림이 `time()`과 빼서 비교하는 시계열) ──
+//   질문이 모드 C와 **다르다**: 저긴 "이 값이 얼마나 자주 push되는가"(생산자), 여긴 "이 값이 내려갈
+//   수 있는가 · 신선도가 클러스터 밖 읽기에 의존하는가"(의미론)다. 후자가 필요한 메트릭 일부는
+//   스크레이프라 push 레지스트리에 **원리적으로 존재할 수 없다**(barman_cloud_… · certmanager_… ·
+//   kube_job_status_*) — 그래서 SSOT를 나눈다. 정책 파일 헤더가 판별 기준의 SSOT다.
+// --supply-policy: 정책 주입(**테스트 픽스처 격리 전용**). 실 레포 검증은 항상 기본 경로를 쓴다.
+// ⚠️ 주입 모드는 **바닥값만 면제**한다(형제 가드의 확립된 관용구 — check-bats-style의 명시-파일 모드와
+//    같다). 신호는 그대로 내고 강제 로직도 그대로 돈다 — 면제되는 것은 "도메인이 충분히 큰가"뿐이다.
+const SUPPLY_INJECTED = typeof f["--supply-policy"] === "string" ? (f["--supply-policy"] as string) : "";
+const SUPPLY_POLICY = SUPPLY_INJECTED || "policy/alert-supply-monotonicity.json";
+const MIN_SUPPLY = 12;      // 열거 붕괴 바닥값(도입 시 15건). 도메인이 줄지 않는 한 손댈 일이 없다.
+const MIN_SUPPLY_REFS = 12; // **강제**가 실제로 몇 건을 판정했는가 — 원장 크기와 별개 축이다(아래 참조).
+type SupplyEntry = { metric: string; supply: "in-cluster" | "external"; decreasing: "impossible" | "is-truth"; why: string };
+// ⚠️ 정책 파일은 **필수 읽기**다(모드 A의 규율 미러) — 부재/오타 경로를 "항목 0개"로 위장시키지 않는다.
+function loadSupply(): SupplyEntry[] {
+  let raw: string;
+  try { raw = readFileSync(SUPPLY_INJECTED ? SUPPLY_POLICY : `${ROOT}/${SUPPLY_POLICY}`, "utf8"); }
+  catch (e) { fatal(`${SUPPLY_POLICY}를 읽을 수 없다(${(e as Error).message}) — 부재를 '항목 0개'로 위장시키지 않는다`); }
+  let parsed: { metrics?: SupplyEntry[] };
+  try { parsed = JSON.parse(raw); } catch (e) { fatal(`${SUPPLY_POLICY} JSON 파싱 실패: ${(e as Error).message}`); }
+  const list = parsed.metrics;
+  if (!Array.isArray(list)) fatal(`${SUPPLY_POLICY}에 metrics 배열이 없다`);
+  for (const e of list) {
+    if (!e?.metric) fatal(`${SUPPLY_POLICY}: metric 필드가 없는 항목이 있다`);
+    if (e.supply !== "in-cluster" && e.supply !== "external") fatal(`${SUPPLY_POLICY}: ${e.metric}의 supply가 'in-cluster'|'external'이 아니다`);
+    if (e.decreasing !== "impossible" && e.decreasing !== "is-truth") fatal(`${SUPPLY_POLICY}: ${e.metric}의 decreasing이 'impossible'|'is-truth'가 아니다`);
+    if (!e.why || !e.why.trim()) fatal(`${SUPPLY_POLICY}: ${e.metric}에 why(근거)가 없다 — 무근거 선언은 금지`);
+  }
+  return list;
+}
+const SUPPLY = loadSupply();
+const supplyOf = new Map(SUPPLY.map((e) => [e.metric, e]));
+// **화이트리스트**다. "max만 금지"로 두면 avg/sum이 통과하는데 `sum_over_time(타임스탬프[W])`는
+// `time() - 거대값`이 영구 음수라 **조용한 무발화**다(격리 사본 실증).
+function requiredRollup(e: SupplyEntry, flipped: boolean): string {
+  if (e.supply === "external" && e.decreasing === "impossible") return flipped ? "min_over_time" : "max_over_time";
+  return flipped ? "min_over_time" : "last_over_time";
+}
 if (denyMetrics.length < MIN_DENY) {
   fatal(`denylist 항목 ${denyMetrics.length}건 < ${MIN_DENY}(${DENYLIST}) — 열거 붕괴 의심(모드 A가 통째로 무발화한다)`);
 }
@@ -746,6 +797,97 @@ function checkExpr(rel: string, name: string, expr: string): void {
     }
   }
 
+  // ── 모드 D: `time()`과 빼서 비교하는 시계열은 공급원 의미론이 요구하는 rollup만 쓸 수 있다 ──
+  // 열거는 **소비자 표면**에서 뽑는다(생산자가 아니라) — 판별 기준이 "push인가"가 아니라
+  // "값이 클러스터 밖에서 왔는가"라서, 생산자 렌즈로 세면 스크레이프 메트릭이 통째로 빠진다.
+  // ⚠️ 범위는 **뺄셈·비교의 피연산자 span**뿐이다. expr 전체를 훑으면 `CronJobFlapping` 같은 큰
+  //    조인에서 `kube_job_failed`·`kube_job_owner`(타임스탬프가 아닌 조인 피연산자)까지 잡혀
+  //    '미등재 = FAIL'이 실 레포를 red로 만든다(실측).
+  {
+    const { canon: dcanon } = canonicalize(expr);
+    const md = maskComments(maskStrings(dcanon));
+    const spans: Array<[number, number]> = [];
+    const timeRe = /\btime\s*\(\s*\)/g;
+    for (let tm = timeRe.exec(md); tm; tm = timeRe.exec(md)) {
+      const tStart = tm.index, tEnd = tm.index + tm[0].length;
+      // (i) `time() - X` — 뒤쪽 피연산자
+      const after = md.slice(tEnd).match(/^\s*-/);
+      if (after) {
+        const from = tEnd + after[0].length;
+        spans.push([from, operandEnd(md, from)]);
+      }
+      // (ii) `X - time()` — 앞쪽 피연산자(만료 모양)
+      const before = md.slice(0, tStart).match(/-\s*$/);
+      if (before) {
+        const to = tStart - before[0].length;
+        spans.push([operandStart(md, to), to]);
+      }
+      if (!after && !before) continue;
+      // (iii) 그 뺄셈을 감싸는 최근접 비교의 **반대편** — r6 우변(예산)이 여기서 잡힌다.
+      // ⚠️ `operandEnd`는 산술·비교에서만 멈추고 **집합 연산자(and/or/unless)에서는 안 멈춘다**(모드 B가
+      //    그 동작에 의존하므로 공유 헬퍼를 바꾸지 않는다). 여기서 잘라내지 않으면 `… > 100 and on() (X > 0)`
+      //    의 X가 비교 반대편으로 딸려 들어와 **무관한 조인 피연산자가 미등재로 잡힌다**(실측).
+      const cmp = /[<>]=?|[!=]=/g;
+      for (let cm = cmp.exec(md); cm; cm = cmp.exec(md)) {
+        if (cm.index <= tStart) continue;
+        const from = cm.index + cm[0].length;
+        let to = operandEnd(md, from);
+        const setOp = /\b(?:and|or|unless)\b/.exec(md.slice(from, to));
+        if (setOp) to = from + setOp.index;
+        spans.push([from, to]);
+        break;
+      }
+    }
+    const seen = new Set<string>();
+    for (const [a, b] of spans) {
+      const scrub = md.slice(a, b)
+        .replace(/\{[^}]*\}/g, "")
+        .replace(/\b(?:by|without|on|ignoring|group_left|group_right)\s*\([^)]*\)/g, "");
+      for (const mt of scrub.matchAll(/\b([a-z_][a-z0-9_]{4,})\b(\s*\()?/g)) {
+        if (mt[2]) continue;                        // 뒤에 '('가 오면 함수 호출이지 메트릭이 아니다
+        if (/^_+$/.test(mt[1])) continue;           // maskStrings 채움문자(밑줄 런) — 라벨 값의 잔해다
+        if (PROMQL_BUILTIN.has(mt[1])) continue;
+        seen.add(mt[1]);
+      }
+    }
+    for (const metric of [...seen].sort()) {
+      const e = supplyOf.get(metric);
+      if (!e) {
+        if (isAllowed) continue;
+        viol.push(`${rel} ${name} [모드 D: ${metric}가 time() 비교에 쓰이는데 ${SUPPLY_POLICY}에 없다 — ` +
+          `**기본값은 없다**(기본을 하나로 정하면 반대쪽 클래스가 조용히 열린다). supply(값의 신선도가 ` +
+          `클러스터 밖 읽기에 의존하는가)와 decreasing(내려가는 것이 사실일 수 있는가)을 근거와 함께 등재하라]`);
+        continue;
+      }
+      // `X - time()`(만료 모양)이면 부등호 방향이 뒤집혀 요구도 뒤집힌다(max는 fail-open, min이 fail-closed).
+      const flipped = new RegExp(`\\b${metric}\\b[\\s\\S]{0,120}?-\\s*time\\s*\\(\\s*\\)`).test(md);
+      const want = requiredRollup(e, flipped);
+      const re = new RegExp(`\\b${metric}\\b`, "g");
+      for (let mt = re.exec(md); mt; mt = re.exec(md)) {
+        const owner = ownerFn(md, mt.index);
+        const isRollup = !!owner && ROLLUP_OK.has(owner.name);
+        supplyRefs++;
+        if (isAllowed) continue;
+        if (!isRollup) {
+          // external+단조는 **흡수가 0인 것 자체가 위반**이다 — 역행 샘플이 그대로 판정에 들어간다.
+          if (e.supply === "external" && e.decreasing === "impossible") {
+            viol.push(`${rel} ${name} [모드 D: ${metric}(external·단조)가 rollup 밖에서 참조된다 — ` +
+              `공급원이 역행 샘플을 주는데 흡수가 0이다. ${want}(...)로 감싸라]`);
+          }
+          continue;   // 그 외는 rollup 부재가 이 모드의 대상이 아니다(윈도 래치가 없다)
+        }
+        if (owner!.name === want) continue;
+        const why = e.supply === "external" && e.decreasing === "impossible"
+          ? `공급원이 역행 샘플을 준다 — ${want}만이 그것을 유계 흡수한다`
+          : e.decreasing === "is-truth"
+            ? `이 값은 **내려가는 것이 사실**이다 — max 계열은 옛 값을 윈도만큼 부활시켜 새 값이 늦게 먹는다`
+            : `값이 클러스터 안에서 생겨 흡수할 잡음이 없다 — max 계열은 이득 0이고 값의 전진 점프만 윈도만큼 래치한다`;
+        viol.push(`${rel} ${name} [모드 D: ${metric}가 ${owner!.name}()에 감싸였으나 ${want}()여야 한다 — ${why}. ` +
+          `판별 기준과 근거는 ${SUPPLY_POLICY}]`);
+      }
+    }
+  }
+
   // ── 모드 C: push 주기 > 룩백인 메트릭은 윈도 ≥ 주기인 **연속성 보존 rollup** 안에서만 참조 가능 ──
   // 정규화(F-1) → 문자열/주석 마스킹 순서. 마스킹을 먼저 하면 `{__name__="m"}`의 이름이 지워진다.
   const { canon, nameMatchers } = canonicalize(expr);
@@ -774,7 +916,12 @@ function checkExpr(rel: string, name: string, expr: string): void {
     const period = pushPeriod.get(metric) as number;
     const why = `push 주기 ${period}s > vmalert instant 룩백 ${LOOKBACK}s → 매 주기 시리즈에 구멍 → ` +
       `for: pending이 매 주기 리셋 → **어떤 조건에도 발화 불가**`;
-    const fix = `last_over_time(${metric}[≥${fmtSec(period)}])로 감싸라 (전문: docs/traps-detail.md)`;
+    // ⚠️ 처방이 **공급원을 알아야 한다** — 모드 C가 무조건 `last_over_time`을 지시하면, external·단조
+    //    메트릭(공급원이 역행 샘플을 준다)에 대해 그대로 따랐을 때 **모드 D가 red를 낸다**. 두 모드가
+    //    서로 모순되는 지시를 내리면 사람은 게이트를 믿지 않게 된다. 정책 파일이 답을 갖고 있으니 읽는다.
+    const sp = supplyOf.get(metric);
+    const wantFn = sp ? requiredRollup(sp, false) : "last_over_time";
+    const fix = `${wantFn}(${metric}[≥${fmtSec(period)}])로 감싸라 (전문: docs/traps-detail.md)`;
     const re = new RegExp(`\\b${metric}\\b`, "g");
     for (let mt = re.exec(mc); mt; mt = re.exec(mc)) {
       if (isAllowed) continue;
@@ -831,6 +978,11 @@ for (const { path: rel, text, docs } of ruleEntries) {
 // 라벨 = 바닥값이 걸린 열거 도메인 하나 — 여긴 룰(MIN_SCAN)과 denylist(MIN_DENY) 둘이다.
 console.log(`SCAN: check-alert-rules:rules: ${ruleCount}`);
 console.log(`SCAN: check-alert-rules:denylist: ${denyMetrics.length}`);
+// 모드 D는 **두 축**의 신호를 낸다. 원장 크기(supply)는 큐레이션이 사라지는 것을 잡고,
+// 판정 참조 수(supply-refs)는 **강제 루프가 조용히 죽는 것**을 잡는다 — 전자만 있으면
+// 열거가 0건이 돼도 원장은 그대로라 초록이 된다(이 레포가 반복해 밟은 그 비대칭).
+console.log(`SCAN: check-alert-rules:supply: ${SUPPLY.length}`);
+console.log(`SCAN: check-alert-rules:supply-refs: ${supplyRefs}`);
 if (allowErrors.length) {
   console.log(`FAIL: ${ALLOWLIST} 항목에 사유 주석이 없다 — 무근거 면제는 금지:`);
   for (const e of allowErrors) console.log("  " + e);
@@ -841,6 +993,16 @@ if (ruleCount < MIN_SCAN) {
   console.error(`FAIL: 스캔 룰 ${ruleCount}건 < ${MIN_SCAN} — 룰 추출 회귀 의심(${RULES_DIR} 재배치 또는 ConfigMap .data 키 변경?)`);
   process.exit(1);
 }
+if (!SUPPLY_INJECTED) {
+  if (SUPPLY.length < MIN_SUPPLY) {
+    console.error(`FAIL: ${SUPPLY_POLICY} 항목 ${SUPPLY.length}건 < ${MIN_SUPPLY} — 큐레이션이 사라졌다(0건 검사 후 초록이 되는 자리)`);
+    process.exit(1);
+  }
+  if (supplyRefs < MIN_SUPPLY_REFS) {
+    console.error(`FAIL: 모드 D가 판정한 참조 ${supplyRefs}건 < ${MIN_SUPPLY_REFS} — 원장은 그대로인데 **강제 루프가 죽었다**(열거 범위 회귀 의심)`);
+    process.exit(1);
+  }
+}
 // 완전성 가드: 미등록 생산자/메트릭은 모드 C를 **조용히 통과**한다(fail-open) → 여기서 막는다.
 if (producerViol.length) {
   console.log("FAIL: push 메트릭 레지스트리 완전성 위반 — 미등록 메트릭은 모드 C 검사를 빠져나가 죽은 알림으로 " +
@@ -849,10 +1011,11 @@ if (producerViol.length) {
   process.exit(1);
 }
 if (viol.length) {
-  console.log("FAIL: vmalert 룰 expr 안티패턴(모드 A/B=instance 라벨 불안정 · 모드 C=push 주기 > 룩백) — " +
+  console.log("FAIL: vmalert 룰 expr 안티패턴(모드 A/B=instance 라벨 불안정 · 모드 C=push 주기 > 룩백 · 모드 D=공급원 의미론↔rollup 함수 불일치) — " +
     "수정하거나 " + ALLOWLIST + "에 사유와 함께 등재:");
   for (const v of viol) console.log("  " + v);
   process.exit(1);
 }
 console.log(`check-alert-rules OK (${ruleCount} 룰 스캔, push 생산자 ${foundProducers.length}건 / 등록 메트릭 ` +
-  `${REGISTRY.length}건[모드 C 대상 ${modeCMetrics.length}], 룩백 ${LOOKBACK}s, 모드 A/B/C 위반 0)`);
+  `${REGISTRY.length}건[모드 C 대상 ${modeCMetrics.length}], 룩백 ${LOOKBACK}s, ` +
+  `공급원 원장 ${SUPPLY.length}건/판정 ${supplyRefs}참조, 모드 A/B/C/D 위반 0)`);

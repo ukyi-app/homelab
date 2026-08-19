@@ -1,0 +1,128 @@
+{
+  "$comment": [
+    "모드 D 정책 — 알림이 `time()`과 빼서 비교하는 시계열의 **공급원 의미론** SSOT.",
+    "",
+    "왜 push 레지스트리(tools/check-alert-rules.ts의 DEFAULT_REGISTRY)와 별개인가: 저기는 '이 값이",
+    "얼마나 자주 push되는가'라는 **생산자 질문**의 SSOT다. 여기는 '이 값이 내려갈 수 있는가 · 값이",
+    "클러스터 밖에서 왔는가'라는 **의미론 질문**이고, 답이 필요한 메트릭 일부는 스크레이프라",
+    "레지스트리에 원리적으로 존재할 수 없다(barman_cloud_… · certmanager_… · kube_job_status_*).",
+    "레지스트리 필드로 두면 traps-detail이 명시적으로 경고한 바로 그 케이스가 도메인 밖에 남는다.",
+    "",
+    "필드:",
+    "  metric     — 룰 expr에서 매칭할 시계열 이름.",
+    "  supply     — 값의 **신선도가 클러스터 밖 네트워크 읽기에 의존**하고 그 읽기가 낡은/eventually-",
+    "               consistent 뷰를 돌려줄 수 있으면 `external`, 아니면 `in-cluster`.",
+    "               ⚠️ '값이 외부 사실을 서술하는가'가 아니라 '**읽기가 역행 샘플을 줄 수 있는가**'다.",
+    "               인증서 만료 시각은 외부 CA가 정하지만 cert-manager가 로컬 오브젝트에서 읽으므로",
+    "               `in-cluster`다 — 그 구분이 이 필드의 전부다.",
+    "  decreasing — 값이 **내려가는 것이 사실일 수 있으면** `is-truth`, 사실일 수 없으면 `impossible`.",
+    "               traps-detail의 판별 문장과 문자 그대로 같은 질문이다(번역을 거치지 않게 하려는 것).",
+    "  why        — 근거. 공급원 파일을 인용한다. 비면 FAIL.",
+    "",
+    "요구되는 rollup 함수(두 가지뿐 — 화이트리스트다):",
+    "  external + impossible  → `max_over_time` **필수**. 공급원이 역행 샘플을 주고(낡은 스냅샷),",
+    "                           max가 그것을 유계 흡수한다. cf. PR #513.",
+    "  그 외 전부            → `last_over_time` **필수**(뒤집힌 `X - time()` 모양이면 `min_over_time`).",
+    "                           흡수할 공급원 잡음이 없으므로 max는 이득이 0이고, 대신 값의 **전진**",
+    "                           점프를 윈도만큼 래치해 알림을 억제한다(r4의 윈도는 [2h]~[10d]).",
+    "⚠️ **화이트리스트인 것이 계약이다.** '`max_over_time`만 금지'로 두면 `avg_over_time`·`sum_over_time`이",
+    "   통과하는데, `sum_over_time(타임스탬프[10d])`는 `time() - 거대값`이 영구 음수라 **조용한 무발화**다",
+    "   (격리 사본 실측: 블랙리스트 판이 avg를 통과시켰다).",
+    "⚠️ **기본값이 없다.** 미등재 메트릭이 `time()` 비교에 나오면 FAIL이다. 기본을 하나로 정하면 그",
+    "   반대쪽 클래스가 조용히 열린다 — 새 외부 단조량이면 PR #513이 그대로 재현된다.",
+    "⚠️ rollup **없는** 참조는 대상이 아니다(단, external+impossible은 rollup 부재 자체가 위반이다 —",
+    "   흡수가 0이라 역행 샘플이 그대로 판정에 들어간다)."
+  ],
+  "metrics": [
+    {
+      "metric": "gha_workflow_last_success_timestamp",
+      "supply": "external",
+      "decreasing": "impossible",
+      "why": "GitHub Actions REST API의 run_started_at. platform/victoria-stack/prod/gha-liveness-exporter.yaml이 조회해 그대로 push한다 — API가 간헐적으로 낡은 스냅샷을 200으로 돌려줘 값이 역행한다(2026-08-19 실측 −515.3h). '마지막 성공 run의 시각'이라 내려가는 것은 사실일 수 없다."
+    },
+    {
+      "metric": "gha_workflow_max_age_seconds",
+      "supply": "in-cluster",
+      "decreasing": "is-truth",
+      "why": "같은 exporter의 WORKFLOWS env에 적힌 **예산 상수**를 그대로 싣는다(gha-liveness-exporter.yaml). 설정이므로 인하가 사실이고, max를 씌우면 예산을 낮춰도 옛 큰 값이 윈도만큼 부활해 새 예산이 늦게 먹는다."
+    },
+    {
+      "metric": "gha_liveness_last_success_timestamp",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "같은 exporter가 push 직전에 `date +%s`로 만드는 하트비트(gha-liveness-exporter.yaml) — 값이 클러스터 안에서 생겨 역행할 공급원 잡음이 없다."
+    },
+    {
+      "metric": "digest_exporter_last_success_timestamp",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "platform/victoria-stack/prod/digest-exporter.yaml이 `date +%s`로 만드는 하트비트."
+    },
+    {
+      "metric": "pvc_du_last_success_timestamp",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "platform/victoria-stack/prod/pvc-du-exporter.yaml이 `date +%s`로 만드는 하트비트."
+    },
+    {
+      "metric": "restore_drill_last_success_timestamp",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "platform/cnpg/prod/restore-drill-script.sh:93이 `date -u +%s`로 만든다."
+    },
+    {
+      "metric": "files_backup_last_success_timestamp",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "scripts/backup-files-data.sh가 성공 직후 `date -u +%s`로 만든다. ⚠️ 국면 A 동안 실행자가 없어 라이브 시리즈가 0건이다 — 이 항목은 정적 선언이지 관측이 아니다."
+    },
+    {
+      "metric": "adguard_rewrite_reconcile_timestamp",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "platform/adguard/prod/rewrite-reconciler.yaml이 `date +%s`로 만든다."
+    },
+    {
+      "metric": "adguard_rewrite_last_fix_timestamp",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "같은 reconciler가 드리프트를 고친 시각을 `date +%s`로 만든다."
+    },
+    {
+      "metric": "barman_cloud_cloudnative_pg_io_last_available_backup_timestamp",
+      "supply": "external",
+      "decreasing": "is-truth",
+      "why": "barman-cloud plugin이 **R2 버킷을 리스팅해** 채운다(스크레이프 — push 레지스트리에 없다). 읽기가 외부 오브젝트 스토어를 거치므로 external이고, `scripts/reset-pg-r2-archive.sh --purge`가 백업을 지우면 값이 **정당하게 내려간다**. ⇒ max_over_time을 씌우면 purge 후에도 옛 값을 윈도만큼 래치해 DR 경로가 조용히 fail-open이 된다."
+    },
+    {
+      "metric": "certmanager_certificate_expiration_timestamp_seconds",
+      "supply": "in-cluster",
+      "decreasing": "is-truth",
+      "why": "cert-manager가 **클러스터 안 Certificate 오브젝트**에서 읽는다(만료 시각 자체는 외부 CA가 정하지만 읽기는 로컬이라 역행 잡음이 없다). 인증서를 짧은 수명으로 재발급하면 값이 정당하게 내려간다. ⚠️ 이 메트릭은 `X - time()`(뒤집힌) 모양으로 쓰인다 — 그 방향에서는 max가 fail-open이고 min이 fail-closed다."
+    },
+    {
+      "metric": "kube_job_status_completion_time",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "kube-state-metrics가 Job 오브젝트에서 읽는다. 새 Job이 완료될 때마다 전진하고, 오래된 Job이 GC되면 시리즈가 사라질 뿐 값이 내려가지 않는다(룰은 `max()`로 집계해 읽는다)."
+    },
+    {
+      "metric": "kube_job_status_start_time",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "kube-state-metrics가 Job 오브젝트에서 읽는다(CronJobFlapping의 조인 피연산자)."
+    },
+    {
+      "metric": "kube_cronjob_status_last_successful_time",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "kube-state-metrics가 CronJob status에서 읽는다 — 마지막 성공 시각이라 전진만 한다."
+    },
+    {
+      "metric": "systemd_unit_last_failure_timestamp",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "scripts/notify-unit-failure.sh가 실패 순간 `date -u +%s`로 만들어 node-exporter textfile collector 파일에 쓴다 — 호스트에서 생긴 값이고 실패마다 전진한다."
+    }
+  ]
+}
