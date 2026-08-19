@@ -1229,3 +1229,45 @@ selfHeal과 플립플롭한다.
   정당한 역행을 만든다). ⚠️ **알려진 잔여**: 이 판별을 레포 전역에서 강제하는 린터 모드는 아직 없다 —
   새 알림이 같은 모양(`time() - last_over_time(<외부 공급 타임스탬프>[W])`)으로 생기면 아무 가드에도 안 걸린다.
 > 가드: `tests/gates/vmalert-gha-liveness-firing-e2e.sh`, `tests/gates/test_gha-liveness-exporter.bats`, `tests/gates/fixtures/r6-gha-lastovertime.yaml`
+
+### 로케일 콜레이션이 게이트를 뒤집는다 — en_US의 `sort -u`는 `-1`과 `1`을 같다고 보고 하나를 버린다
+- glibc의 `en_US.UTF-8`(그리고 대부분의 UTF-8 언어 로케일)은 **구두점·공백을 1차 가중에서 무시**한다.
+  그래서 `sort`는 `-1`과 `1`, `_create-app.yaml`과 `create-app.yaml`을 **같다고 본다** — `sort -u`가
+  그중 하나를 **조용히 버린다**. `C`/`C.UTF-8`은 바이트 순서라 전부 남는다.
+
+  | 입력 | `LC_ALL=en_US.UTF-8 sort -u` | `LC_ALL=C sort -u` |
+  |---|---|---|
+  | `-1 1 -2 2 -9 9` | `-1 -2 -9` (3줄) | 6줄 전부 |
+  | `git ls-files .github/workflows` | 19 | 24 |
+
+- **이건 거짓 red가 아니라 fail-open이다.** `platform/argocd/root/test_sync_wave_ledger.bats`가 원장의
+  `-1` 행 삭제(= 실제 드리프트)를 en_US에서 **초록**으로 통과시켰다(C에서만 red). 매니페스트 쪽 `sort -u`가
+  `-1`을 삼켜 그 wave가 루프에 **아예 안 들어갔기** 때문이다 — 가드가 존재 이유로 삼는 바로 그 드리프트다.
+- **이 레포의 네이밍 규약이 정확히 이 모양이다**: `_*.yaml`(내부 reusable) ↔ `*.yaml`(공개 디스패처).
+  워크플로 파일명을 `sort -u`로 훑는 게이트는 공개 디스패처 5개(`create-app`·`create-cache`·
+  `create-database`·`teardown-app`·`update-secrets`)를 **보지 못한다**. 오늘 그 도메인을 쓰는 가드가
+  없을 뿐, 데이터는 이미 붕괴 모양이다.
+- **`sort -u`만 데이터를 잃는다.** `sort | uniq`는 uniq가 바이트 비교라 안전하고 `sort -nu`는 정수에
+  안전하다. 중복 제거가 **최적화일 뿐**이면(멱등 루프의 건초더미) **아예 빼는 것**이 가장 안전하다 —
+  콜레이션에 물릴 자리 자체를 없앤다. 붕괴 감지는 열거 바닥값이 맡는다.
+- **두 번째 얼굴: 정렬 키가 줄 전체면 설명이 키로 샌다.** `make help`는 `  <이름 22폭 패딩> <한국어 설명>`
+  줄을 정렬하는데, C에서는 패딩 공백(0x20)이 모든 이름 문자보다 작아 "줄 정렬 == 이름 정렬"이 **우연히**
+  성립하지만 en_US에서는 성립하지 않는다(실측: `bootstrap-deadmanswitch`가 `bootstrap`보다 앞,
+  `verify`가 맨 끝). 즉 테스트의 red가 아니라 **산출물의 결함**이었다.
+- **자기참조 기대값을 쓰지 마라.** 그 테스트의 기대값이 `"$(echo "$names" | sort)"`였다 — 호출 로케일이
+  질문과 답을 **함께** 바꾸므로 무엇이 계약인지 말할 수 없다. 기대값은 절대 계약(`LC_ALL=C sort`)이어야 한다.
+- **가드 자신도 로케일 의존이면 안 된다**: 정규식 브래킷 범위(`[a-z]`)도 콜레이션 의존이라 en_US에서
+  악센트 소문자를 추가로 매치한다. 탐지·비교는 전부 `LC_ALL=C`로 감싼다.
+- **교차도구 축**: JS `localeCompare`(ICU — **`LANG`/`LC_ALL`에 반응하지 않는다**) · glibc `en_US` ·
+  바이트 순서가 **셋 다 다르다**(`ab a-c` vs `a-c ab`). 한쪽이 쓰고 다른 쪽이 대조하면 갈린다.
+  ⇒ 산출물 정렬은 **코드유닛 비교**로 한다(`LC_ALL=C sort`와 동형).
+- **규약: 게이트의 모든 `sort`는 `LC_ALL=C` 접두이거나 숫자 정렬(`-n`)이다.** 이 레포에 로케일 콜레이션이
+  필요한 정렬은 하나도 없다(도입 시 위반 54곳 → 0).
+- ⚠️ **런너 고정은 대체가 아니라 짝이다.** `LC_ALL=C.UTF-8`을 두 venue에 박으면 "로컬 초록이 CI를
+  예고한다"가 성립하지만, **개별 결함의 뮤테이션 감도가 죽는다**(실측: `make help`의 `LC_ALL=C`를
+  되돌려도 C.UTF-8에서는 초록 — 오직 en_US에서만 red다). 그래서 고정 **전에** 원인을 고치고, 재발은
+  정적 스캐너가 막는다. 순서를 뒤집으면 fail-open이 영구히 안 보이게 된다(실측: 고정만 하면 전 스위트 초록).
+- ⚠️ 스캐너가 덮지 않는 인접 클래스: **셸 glob 확장 순서**(`for f in *.md`)도 콜레이션 의존이다.
+  오늘 레포의 glob 소비처는 전부 집계이거나 뒤에서 재정렬하므로 라이브 결함은 없지만, `for f in *.yaml;
+  do …; done | head -1` 류가 들어오면 스캐너가 못 잡는다.
+> 가드: `scripts/check-locale-collation.sh`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_make-help.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`

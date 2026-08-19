@@ -12,6 +12,15 @@ on:
 permissions:
   contents: read
 
+# 콜레이션 고정 — 러너 이미지 기본값에 의존하지 않는다(이 워크플로에 로케일 설정이 0건이었다).
+# 오너 셸(en_US.UTF-8)과 러너가 다른 콜레이션이면 두 venue가 **다른 술어**를 평가한다
+# (실측 2026-08-20: sync-wave 원장 가드가 en_US에서 fail-open이었다). bats 밖 스텝
+# (check-*.sh · TS 가드 · e2e 하네스)까지 덮으려면 job이 아니라 여기여야 한다.
+# ⚠️ 이 고정은 `scripts/check-locale-collation.sh`의 **대체가 아니라 짝**이다 — 고정만 하면
+#    개별 결함의 뮤테이션 감도가 죽는다. cf. `docs/traps-detail.md` 「로케일 콜레이션이 …」
+env:
+  LC_ALL: C.UTF-8
+
 # PR엔 같은 PR의 이전 run을 취소(러너 절약 + gate에 stale 잔류 방지), main push는 sha 고유라 보존.
 # queue:max는 안 쓰므로 cancel-in-progress 병용 함정(AGENTS.md)과 무관.
 concurrency:
@@ -114,7 +123,7 @@ jobs:
         # accounting job이 `--workflow <file>`로 수행한다.
         run: bun tools/check-workflow-readiness.ts
       - name: 실 도메인 가드 (레포 자신에 대해 돌린다 — bats 픽스처가 아니라)
-        # ⚠️ 아래 7종을 **여기서 직접** 부르는 이유: bats로만 돌면 같은 파일의 픽스처 @test 20여 개가
+        # ⚠️ 아래 8종을 **여기서 직접** 부르는 이유: bats로만 돌면 같은 파일의 픽스처 @test 20여 개가
         #    venue를 살려, 실 트리를 검사하는 @test 한 줄이 지워져도 G1이 초록을 유지한다(실측:
         #    check-image-pins의 실 트리 강제는 단 한 줄이 CI의 유일한 권위였다). ci.yaml이 직접 부르면
         #    정의상 실 도메인에 닿으므로 fixture↔real 질문 자체가 사라진다 — G1·G2·G-09와 같은 해법.
@@ -125,6 +134,7 @@ jobs:
           bash scripts/check-app-deploy.sh
           bash scripts/check-app-netpol.sh
           bash scripts/check-image-pins.sh
+          bash scripts/check-locale-collation.sh
           bun tools/check-resource-limits.ts
           bun tools/check-alert-rules.ts
           bun tools/check-disk-caps.ts
@@ -220,8 +230,8 @@ jobs:
           "
           harnesses="$(printf '%s\n' "$harnesses" | tr -d ' ' | grep -v '^$' || true)"
           # 추적 글롭과 **교차 대조** — 목록에 없는 하네스가 생기면 여기서 먼저 드러난다(가드보다 이른 신호).
-          want="$(git ls-files 'tests/gates/vmalert-*-firing-e2e.sh' | sort)"
-          got="$(printf '%s\n' "$harnesses" | sort)"
+          want="$(git ls-files 'tests/gates/vmalert-*-firing-e2e.sh' | LC_ALL=C sort)"
+          got="$(printf '%s\n' "$harnesses" | LC_ALL=C sort)"
           [ "$want" = "$got" ] || { echo "::error::발화 e2e 목록이 레포와 불일치"; diff <(echo "$want") <(echo "$got") || true; exit 1; }
           n="$(printf '%s\n' "$harnesses" | grep -c . || true)"
           [ "${n:-0}" -ge 3 ] || { echo "::error::발화 e2e 하네스 ${n:-0}건 < 3 — 열거 붕괴(무측정 초록)"; exit 1; }

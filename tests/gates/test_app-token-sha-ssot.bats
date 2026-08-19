@@ -17,7 +17,7 @@ CANON="bcd2ba49218906704ab6c1aa796996da409d3eb1"
   n=$(printf '%s\n' "$refs" | grep -c . || true)
   [ "$n" -ge 8 ]     # 현재 14건 — 콜사이트 6개 축소를 견딘다. 래칫 아님
   # 등장하는 모든 @<ref>를 모아 canonical과 다른 게 하나라도 있으면 fail
-  bad=$(printf '%s\n' "$refs" | sed -E 's#.*@##' | sort -u | grep -v "^${CANON}\$" || true)
+  bad=$(printf '%s\n' "$refs" | sed -E 's#.*@##' | LC_ALL=C sort -u | grep -v "^${CANON}\$" || true)
   [ -z "$bad" ]
 }
 

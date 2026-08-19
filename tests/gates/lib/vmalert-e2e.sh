@@ -238,7 +238,7 @@ vme_alert_for() { # $1=룰 yaml $2=alert 이름 → for:(예 15m). **무매치·
 
 vme_rollup_windows() { # $1=expr $2=메트릭명 → 그 메트릭에 걸린 rollup 윈도(공백 구분, 없으면 빈 문자열)
   { grep -oE "[a-z_]+_over_time[[:space:]]*\([[:space:]]*${2}[^]]*\]" <<<"$1" || true; } \
-    | { grep -oE '\[[0-9]+[smhd]\]' || true; } | tr -d '[]' | sort -u | tr '\n' ' ' | sed 's/ *$//'
+    | { grep -oE '\[[0-9]+[smhd]\]' || true; } | tr -d '[]' | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ *$//'
 }
 
 # push 메트릭의 rollup 3검사(**모드 C 방어**의 SSOT) — 알림마다 산문만 다르게 복제되던 것을 한 곳으로 접는다.

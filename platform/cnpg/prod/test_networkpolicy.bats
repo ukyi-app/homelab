@@ -13,7 +13,7 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
 }
 
 @test "every doc is a NetworkPolicy in namespace database, kubeconform-valid" {
-  [ "$(yq 'select(.kind=="NetworkPolicy") | .metadata.namespace' "$NP" | grep -v '^---' | sort -u)" = "database" ]
+  [ "$(yq 'select(.kind=="NetworkPolicy") | .metadata.namespace' "$NP" | grep -v '^---' | LC_ALL=C sort -u)" = "database" ]
   run bash -c "kubeconform -strict -summary '$NP'"
   [ "$status" -eq 0 ]
   printf '%s' "$output" | grep -qF -- "Invalid: 0"

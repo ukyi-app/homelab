@@ -18,7 +18,7 @@ done
 # 역방향(AGENTS 인덱스 → 런북 파일): 인덱스에 나열된 각 *.md가 docs/runbooks/에 실재하는지.
 # owner 머신(런북 실재)에서만 도달 — 위 skip 가드가 CI/fresh-checkout 배제. fail-closed(양방향).
 # shellcheck disable=SC2016  # grep ERE 패턴은 의도적 리터럴(백틱·정규식) — 확장 아님
-idx_md="$(sed -n '/## 런북/,$p' "$ROOT/AGENTS.md" | grep -oE '`[A-Za-z0-9./-]+\.md`' | tr -d '`' | sed 's#.*/##' | sort -u)"
+idx_md="$(sed -n '/## 런북/,$p' "$ROOT/AGENTS.md" | grep -oE '`[A-Za-z0-9./-]+\.md`' | tr -d '`' | sed 's#.*/##' | LC_ALL=C sort -u)"
 while IFS= read -r m; do
   [ -n "$m" ] || continue
   [ -f "$RB/$m" ] || { echo "FAIL: AGENTS 인덱스에 있으나 런북 파일 부재: $m"; fail=1; }

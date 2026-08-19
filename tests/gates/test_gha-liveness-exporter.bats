@@ -91,8 +91,8 @@ scheduled() {
 }
 
 @test "the watched set equals the repo scheduled workflow set (both directions, derived not hardcoded)" {
-  w="$(watched | sed 's/=.*//' | sort)"
-  s="$(scheduled | awk '{print $1}' | sort)"
+  w="$(watched | sed 's/=.*//' | LC_ALL=C sort)"
+  s="$(scheduled | awk '{print $1}' | LC_ALL=C sort)"
   [ -n "$w" ]
   [ -n "$s" ]
   # 열거 붕괴 바닥값 — 0건이면 '차이 없음'이 아니라 파싱이 깨진 것이다.

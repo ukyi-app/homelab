@@ -22,18 +22,18 @@ cd "$ROOT"
 
 # 파일명은 runbooks.<epoch>.enc.tar로 통제 — ls 정렬 안전
 # shellcheck disable=SC2012
-latest_backup() { ls -1 "$outdir"/runbooks.*.enc.tar 2>/dev/null | sort | tail -1; }
+latest_backup() { ls -1 "$outdir"/runbooks.*.enc.tar 2>/dev/null | LC_ALL=C sort | tail -1; }
 sha256() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$@"; else sha256sum "$@"; fi; }
 # 내용 인지 매니페스트(codex pass3 P3-3): '<sha256> <파일명>'. 파일명 셋 비교만으로는
 # 내용만 바뀐 stale 백업이 OK 통과한다 — 신선도 게이트가 무력해지는 구멍.
-src_hash_manifest() { (cd "$SRC" && for f in *.md; do printf '%s %s\n' "$(sha256 "$f" | awk '{print $1}')" "$f"; done | sort -k2); }
+src_hash_manifest() { (cd "$SRC" && for f in *.md; do printf '%s %s\n' "$(sha256 "$f" | awk '{print $1}')" "$f"; done | LC_ALL=C sort -k2); }
 
 if [ "$verify" -eq 1 ]; then
   latest="$(latest_backup)"; [ -n "$latest" ] || { echo "ERROR: 백업 없음 — 먼저 생성하라" >&2; exit 1; }
   tmpv="$(mktemp -d)"; trap 'rm -rf "$tmpv"' EXIT
   sops -d --input-type binary --output-type binary "$latest" | tar -xf - -C "$tmpv"
   [ -f "$tmpv/runbooks.sha256" ] || { echo "ERROR: 백업에 매니페스트(runbooks.sha256) 부재 — 구형/불완전 백업. 재생성하라." >&2; exit 1; }
-  if [ "$(src_hash_manifest)" != "$(sort -k2 "$tmpv/runbooks.sha256")" ]; then
+  if [ "$(src_hash_manifest)" != "$(LC_ALL=C sort -k2 "$tmpv/runbooks.sha256")" ]; then
     echo "ERROR: 런북 드리프트(파일명+내용 sha256) — 최신 백업($latest)이 현재 런북과 불일치. 재생성하라." >&2; exit 1
   fi
   echo "OK: 최신 백업($latest)이 현재 런북과 일치(파일명+내용 sha256 대조)"; exit 0

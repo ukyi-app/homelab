@@ -14,7 +14,12 @@ function splitApps(val: string): Entry[] {
 function edit(text: string, fn: (a: Entry[]) => Entry[]): string {
   const m = text.match(APPS_RE);
   if (!m) throw new Error("digest-exporter APPS(value) 라인을 찾지 못함 — 포맷 드리프트로 갱신 불가");
-  const next = fn(splitApps(m[2])).sort((a, b) => a.name.localeCompare(b.name))
+  // ⚠️ `localeCompare`가 아니라 **코드유닛 비교**다. 이 값은 매니페스트에 쓰이는 산출물이라 순서가
+  //    환경에 따라 흔들리면 안 되는데, `localeCompare`의 기본 로케일은 런타임 ICU가 정하고
+  //    `LANG`/`LC_ALL`에 반응하지도 않는다(실측: en_US/C.UTF-8/tr_TR/de_DE 4종 동일 — 즉 셸 쪽을
+  //    `LC_ALL=C`로 고정해도 이쪽만 따로 논다). 코드유닛 비교는 `LC_ALL=C sort`와 동형이라
+  //    셸 대조와 정의상 일치한다. cf. `docs/traps-detail.md` 「로케일 콜레이션이 게이트를 뒤집는다 …」
+  const next = fn(splitApps(m[2])).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     .map((a) => `${a.name}=${a.ref}`).join(" ");
   return text.replace(APPS_RE, `$1${next}$3`);
 }

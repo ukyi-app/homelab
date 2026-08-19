@@ -41,7 +41,7 @@ n_pvc="$(printf '%s' "$pvcs" | yq -r '.items | length')"
 # 소비 집합: 파드가 실제로 마운트한 (ns, claimName). ⚠️ **파드 기준**이다 — STS/Deployment 스펙만 보면
 # 스케일 0이나 삭제된 컨트롤러의 PVC를 "사용 중"으로 오판한다.
 # shellcheck disable=SC2016  # `$ns`는 **yq 변수**다(셸 확장이 아니라 yq의 `as $ns` 바인딩) — 홑따옴표가 맞다.
-used="$(printf '%s' "$pods" | yq -r '.items[] | .metadata.namespace as $ns | .spec.volumes[]? | select(.persistentVolumeClaim) | $ns + "/" + .persistentVolumeClaim.claimName' | sort -u)"
+used="$(printf '%s' "$pods" | yq -r '.items[] | .metadata.namespace as $ns | .spec.volumes[]? | select(.persistentVolumeClaim) | $ns + "/" + .persistentVolumeClaim.claimName' | LC_ALL=C sort -u)"
 
 unconsumed=""
 while IFS= read -r key; do

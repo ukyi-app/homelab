@@ -9,16 +9,16 @@ PIN_RE='ghcr\.io/cloudnative-pg/postgresql:[0-9][A-Za-z0-9._-]*'
 SSOT_FILE=platform/cnpg/prod/cluster.yaml
 
 @test "cluster.yaml exposes exactly one PG image pin (SSOT sanity)" {
-  run bash -c "grep -Eo '$PIN_RE' $SSOT_FILE | sort -u"
+  run bash -c "grep -Eo '$PIN_RE' $SSOT_FILE | LC_ALL=C sort -u"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | wc -l | tr -d ' ')" -eq 1 ]
 }
 
 @test "all hardcoded PG image pins repo-wide match the cluster.yaml SSOT" {
-  ssot="$(grep -Eo "$PIN_RE" "$SSOT_FILE" | sort -u)"
+  ssot="$(grep -Eo "$PIN_RE" "$SSOT_FILE" | LC_ALL=C sort -u)"
   [ -n "$ssot" ]
   # 전 레포의 리터럴 핀은 SSOT와 동일해야 한다
-  run bash -c "git grep -h -Eo '$PIN_RE' | sort -u"
+  run bash -c "git grep -h -Eo '$PIN_RE' | LC_ALL=C sort -u"
   [ "$status" -eq 0 ]
   [ "$output" = "$ssot" ]
 }

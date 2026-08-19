@@ -106,7 +106,7 @@ alert_expr() { # $1=룰 yaml $2=alert 이름 → expr만(주석 제거 — 주�
 }
 rollup_windows() { # $1=expr $2=메트릭명 → 그 메트릭에 걸린 rollup 윈도(공백 구분, 없으면 빈 문자열)
   { grep -oE "[a-z_]+_over_time[[:space:]]*\([[:space:]]*${2}[^]]*\]" <<<"$1" || true; } \
-    | { grep -oE '\[[0-9]+[smhd]\]' || true; } | tr -d '[]' | sort -u | tr '\n' ' ' | sed 's/ *$//'
+    | { grep -oE '\[[0-9]+[smhd]\]' || true; } | tr -d '[]' | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ *$//'
 }
 
 FOR="$(yq '.groups[].rules[] | select(.alert=="FilesBulkSSDLow") | .for' "$TMP/r4-deployed.yaml" | head -1)"

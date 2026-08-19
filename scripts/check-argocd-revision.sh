@@ -115,7 +115,7 @@ if [ -n "$missing" ]; then
 fi
 
 # ── (A) 정합 — 전건이 같은 값 ───────────────────────────────────────────────────────────────
-values="$(printf '%s' "$refs" | sed 's/.*	//' | sort -u)"
+values="$(printf '%s' "$refs" | sed 's/.*	//' | LC_ALL=C sort -u)"
 n_values="$(printf '%s' "$values" | grep -c . || true)"
 if [ "$n_values" -ne 1 ]; then
   echo "FAIL: check-argocd-revision: 자기레포 리비전이 갈렸다(${n_values}종) — 부분 편집 skew:" >&2

@@ -108,7 +108,7 @@ c" ]
 @test "the emitted scan labels exactly match the kernel call sites (no hardcoded roster)" {
   # 정적: 커널 호출의 첫 인자(주석 줄 제외 — 설명 문장의 라벨이 섞이면 대조가 무의미해진다)
   static="$(grep -hE '^[^#]*\b(scan_floor|scan_signal) ' "$ROOT"/scripts/*.sh \
-            | grep -oE '(scan_floor|scan_signal) [a-z0-9:-]+' | awk '{print $2}' | sort -u)"
+            | grep -oE '(scan_floor|scan_signal) [a-z0-9:-]+' | awk '{print $2}' | LC_ALL=C sort -u)"
   # ⚠️ 집합 대조만으로는 **양쪽이 같이 사라지는** 삭제를 못 잡는다(콜사이트를 지우면 정적·런타임이
   # 함께 줄어 등식이 유지된다 — 적대 검토가 실측). 라벨 수 바닥값이 그 구멍을 막는다.
   # ⚠️ 이 바닥값은 **여유가 없다**(오늘 로스터와 같은 값). 도메인 바닥값은 도메인이 정당하게 줄 수
@@ -124,7 +124,7 @@ c" ]
     runtime="${runtime}$(printf '%s\n' "$out" | sed -n 's/^SCAN: \(.*\): [0-9][0-9]*$/\1/p')
 "
   done
-  runtime="$(printf '%s' "$runtime" | grep -v '^$' | sort -u)"
+  runtime="$(printf '%s' "$runtime" | grep -v '^$' | LC_ALL=C sort -u)"
   [ "$static" = "$runtime" ] || { echo "정적:"; echo "$static"; echo "런타임:"; echo "$runtime"; false; }
 }
 
@@ -164,7 +164,7 @@ c" ]
 @test "the TypeScript guards emit the same marker shape (derived roster, not hardcoded)" {
   # 정적: 주석(//) 줄을 제외한 `SCAN: <라벨>:` 콜사이트. 라벨은 도메인 단위라 접미사가 붙을 수 있다.
   static="$(grep -hE '^[^/]*SCAN: ' "$ROOT"/tools/*.ts \
-            | grep -oE 'SCAN: [a-z0-9:-]+:' | sed 's/^SCAN: //; s/:$//' | sort -u)"
+            | grep -oE 'SCAN: [a-z0-9:-]+:' | sed 's/^SCAN: //; s/:$//' | LC_ALL=C sort -u)"
   # 바닥값: 콜사이트가 통째로 사라지면 정적·런타임이 함께 줄어 등식이 유지된다(적대 검토가 실측한 구멍).
   n=$(printf '%s\n' "$static" | grep -c . || true)
   [ "$n" -ge 6 ]
@@ -183,7 +183,7 @@ c" ]
   rt="$(WORKFLOW_NEEDS='{}' bun "$ROOT/tools/check-workflow-readiness.ts" --workflow bump-poll.yaml 2>/dev/null || true)"
   runtime="${runtime}$(printf '%s\n' "$rt" | sed -n 's/^SCAN: \(.*\): [0-9][0-9]*$/\1/p')
 "
-  runtime="$(printf '%s' "$runtime" | grep -v '^$' | sort -u)"
+  runtime="$(printf '%s' "$runtime" | grep -v '^$' | LC_ALL=C sort -u)"
   # 핵심 단언(마지막): 정적 콜사이트와 런타임 방출이 **정확히 같은 집합**이어야 한다.
   [ "$static" = "$runtime" ] || { echo "정적:"; echo "$static"; echo "런타임:"; echo "$runtime"; false; }
 }

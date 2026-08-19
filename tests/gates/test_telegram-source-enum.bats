@@ -14,13 +14,13 @@ setup() {
   # 그 라인은 ' 알림 복원드릴 … 변이 '를 case subject로 가진 유일한 라인이다.
   ENUM_LINE="$(grep -nE 'case " (알림|복원드릴)' "$SH" | head -1 | cut -d: -f2-)"
   [ -n "$ENUM_LINE" ] || { echo "enum case 라인을 notify.sh에서 못 찾음"; false; }
-  ENUM_TOKENS="$(printf '%s' "$ENUM_LINE" | sed -E 's/.*case " (.*) " in.*/\1/' | tr ' ' '\n' | grep -v '^$' | sort -u)"
+  ENUM_TOKENS="$(printf '%s' "$ENUM_LINE" | sed -E 's/.*case " (.*) " in.*/\1/' | tr ' ' '\n' | grep -v '^$' | LC_ALL=C sort -u)"
   # 워크플로가 telegram-notify 액션에 넘기는 모든 source 리터럴.
   WF_SOURCES="$(
     for f in "$WF"/*.yml "$WF"/*.yaml; do
       [ -e "$f" ] || continue
       yq -r '[.jobs.*.steps[]? | select(.uses == "./.github/actions/telegram-notify") | .with.source] | .[]' "$f" 2>/dev/null
-    done | grep -v '^$' | grep -v '^null$' | sort -u
+    done | grep -v '^$' | grep -v '^null$' | LC_ALL=C sort -u
   )"
   # reverse 방향: 워크플로가 아닌 발화처(예: CNPG restore-drill CronJob)도 enum을 정당하게 쓴다.
   # 워크플로만 보면 false-positive가 나므로, 비-워크플로 발화처는 레포 전역 grep으로 보강하고
