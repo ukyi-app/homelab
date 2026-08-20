@@ -36,12 +36,13 @@
   },
   "allOf": [
     {
-      "description": "verb→result 결합(structure r1 a1·b1): verb별 result 정의를 루트에 강제 — 어긋난 shape는 스키마 차원에서 red. 동사 추가 = 분기 추가(verb enum이 서로 배타라 정확히 1개 분기가 일치).",
+      "description": "verb→(허용 variant 집합, result) 결합(structure r1 a1·b1 + 시도2 A2·B2): verb별로 낼 수 있는 variant와 result 정의를 루트에 강제 — 어긋난 shape·불가능한 verb/variant 쌍(doctor+pending 등)은 스키마 차원에서 red. 동사 추가 = 분기 추가(verb enum이 서로 배타라 정확히 1개 분기가 일치), variant별 result 형상이 갈리는 동사는 그 동사의 분기를 variant 단위로 쪼갠다.",
       "oneOf": [
         {
           "type": "object",
           "properties": {
             "verb": { "enum": ["doctor"] },
+            "variant": { "enum": ["success", "failure"] },
             "result": { "$ref": "#/definitions/doctorResult" }
           }
         }

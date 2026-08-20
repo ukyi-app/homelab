@@ -50,3 +50,16 @@ WAIVED by user: 라운드 상한(2) 도달. r2 재검증에서 14/19 resolved였
 - a2 Accept — VERBS가 transport-neutral operation을 표현하지 못한다 (b3과 한 결정: run이 계약 envelope 반환, 프로세스 관심사는 진입점 소유)
 - b3 Accept — The verb registry is a CLI-only seam that MCP cannot reuse
 - a3 Defer — doctor의 template preflight가 실제 init 계약을 증명하지 않는다; 공용 검사 술어·versioned contract는 두 번째 소비자(init, 티켓 11)가 생길 때 추출 — 지금 만들면 speculative. defer 노트를 티켓 11 파일에 기록
+
+### structure r1 시도2 (codex)
+
+시도2도 readback-incomplete(양 멤버 json-unparseable — 강화한 이스케이프 지시에도 code 필드
+따옴표 미이스케이프 재발). 리뷰는 완주(HRG 토큰·카운트 2/2: a=3ea65a1f·b=dc5ccafa), 판독 원문에서
+무손실 회수(.scratch/homelab-cli/structure-r1t2-salvaged-{a,b}.json), 인용 4건 트리(27db0ae) 대조
+전건 일치. 시도1 수용분이 반영된 트리에 대한 후속 지적 4건(전부 high, consensus 2그룹) —
+인간 트리아지(라운드 결정: 제안 전부 수용).
+
+- A1 Accept — The command catalog is not a reusable source of truth (B1과 한 결정: 계약 리더 lib/contract.ts + operation catalog lib/verbs.ts 추출, bin 모듈은 CLI 셸로)
+- B1 Accept — The operation seam is still CLI-specific (op는 Envelope만 반환, json/human 등 표현 관심사는 셸의 어댑터·렌더러로)
+- A2 Accept — Result shapes are not discriminated by outcome (B2와 한 결정: verb 분기에 허용 variant 집합 선언 — doctor: success·failure만)
+- B2 Accept — The schema does not discriminate state-specific results (전 variant 스윕 테스트를 verb별 허용-결과 행렬로 교체 — 허용 통과·비허용 거부, variant별 증거 필드는 그 variant를 내는 동사 티켓에서 분기 확장)

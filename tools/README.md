@@ -34,9 +34,11 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
 
 ## homelab CLI (통합 진입점 — 워킹 스켈레톤)
 
-- **`homelab.ts`** — `homelab` 서브커맨드 CLI 진입점. 변이는 전부 기존 변이 디스패처를
+- **`homelab.ts`** — `homelab` 서브커맨드 CLI **셸**(argv 파싱·--help·렌더링·stdout 순수성·종료코드만).
+  동사의 실체는 `lib/verbs.ts` operation catalog가 SSOT — 이 bin 모듈은 import하면 main이 실행되므로
+  MCP 등 다른 소비자는 lib 쪽을 import한다. 변이는 전부 기존 변이 디스패처를
   `gh workflow run`으로 트리거하는 래퍼가 될 예정이고(신뢰 경계 불변 — actor 가드·전역 직렬화·
-  PR-first 그대로), 현재 동사는 `doctor` 하나다(워킹 스켈레톤 — 후속 동사는 `VERBS` 배열에 추가).
+  PR-first 그대로), 현재 동사는 `doctor` 하나다(워킹 스켈레톤 — 후속 동사는 catalog에 행 추가).
   **설치**: `bun link`(레포 루트) → package.json `bin`이 `homelab`을 전역 PATH에 심링크. 유일하게
   셰뱅+exec 비트를 갖는 .ts다(test_shebang-exec.bats가 bin 선언에서 예외를 파생). 레포 밖(앱 레포
   디렉토리 포함)에서도 동작한다(자기 위치는 import.meta 기준 해석).
@@ -173,6 +175,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 
 ## 공유 커널 (lib/ — 콜사이트가 정책 소유, 단 정책이 콜사이트마다 갈릴 때)
 
+- **`lib/contract.ts`** — 결과 계약 SSOT 리더: cli-result-schema.json의 x-contract(envelope 버전·
+  종료코드 매핑)를 런타임에 읽어 노출(`ENVELOPE`·`EXIT`·`exitFor`·`Envelope` 타입 — 코드 상수
+  복제 금지). 소비자: `homelab.ts`·`lib/verbs.ts`·(예정) MCP 서버.
+- **`lib/verbs.ts`** — 동사 operation catalog(transport 중립·부수효과 없는 import-safe SSOT).
+  행 = path(라우팅 어휘)+desc(--help)+op(타입 입력→계약 Envelope). argv 파싱·렌더링은 CLI 셸
+  소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1). 후속 동사는 여기 행을 추가.
 - **`lib/doctor.ts`** — homelab CLI doctor 진단 엔진(`runDoctor()`). 점검 항목·상태 판정·detail
   문구를 소유한다(관측 전용 — `gh api` 읽기만, 테스트가 argv 원장으로 강제). 선행 gh-auth 실패로
   판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든

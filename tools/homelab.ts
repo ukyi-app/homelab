@@ -1,44 +1,31 @@
 #!/usr/bin/env bun
-// homelab CLI — 앱 배포·리소스 조작 통합 진입점(워킹 스켈레톤: doctor).
-// 셰뱅+exec 비트는 이 파일만 예외다: package.json bin("homelab")의 대상이라 `bun link`가
-// 전역 PATH에 심링크한다(test_shebang-exec.bats가 bin 선언에서 예외를 파생해 강제).
-// 계약: --json 출력·variant·종료코드 매핑은 tools/cli-result-schema.json(x-contract)이 SSOT —
-// 여기서는 그 파일을 런타임에 읽고 코드 상수로 복제하지 않는다. import.meta.url 기준 해석이라
-// 어느 디렉토리에서 실행해도(앱 레포 안 포함) 동작한다.
-import { readFileSync } from "node:fs";
+// homelab CLI 셸 — 앱 배포·리소스 조작 통합 진입점(워킹 스켈레톤: doctor).
+// 이 파일은 CLI 관심사만 갖는다: argv 파싱·--help·사람용 렌더링·stdout 순수성·종료코드.
+// 동사의 실체(operation catalog)는 lib/verbs.ts, 계약 상수는 lib/contract.ts가 SSOT다 —
+// 이 bin 모듈은 import 시 main이 실행되므로 MCP 등 다른 소비자는 lib 쪽을 import한다
+// (structure r1 A1·B1). 셰뱅+exec 비트는 이 파일만 예외: package.json bin("homelab")의
+// 대상이라 `bun link`가 전역 PATH에 심링크한다(test_shebang-exec.bats가 bin 선언에서 파생).
 import { parseCommand, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
-import { runDoctor } from "./lib/doctor.ts";
+import { USAGE_EXIT, type Envelope } from "./lib/contract.ts";
+import { VERBS, type Verb } from "./lib/verbs.ts";
+import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
 
-const SCHEMA = JSON.parse(readFileSync(new URL("./cli-result-schema.json", import.meta.url), "utf8"));
-const CONTRACT = SCHEMA["x-contract"];
-const ENVELOPE: string = CONTRACT.envelope;
-const EXIT: Record<string, number> = CONTRACT.exitCodes;
-const USAGE_EXIT: number = CONTRACT.usageExit;
-
-// 계약 envelope — 동사 핸들러의 반환 단위이자 MCP tool 결과의 재사용 단위(계약 한 벌).
-export type Envelope = {
-  schema: string;
-  verb: string;
-  variant: string;
-  exitCode: number;
-  omitted: string[];
-  result: unknown;
-};
-
-// 동사 실행의 세 결말 — 프로세스 관심사(stdout 채널·종료코드)는 전부 main이 소유하고,
-// 핸들러는 transport 중립 값만 돌려준다(structure r1 a2·b3: CLI 전용 심이면 MCP가 복제한다).
+// 동사 실행의 세 결말 — 프로세스 관심사(stdout 채널·종료코드)는 전부 main이 소유한다.
 type VerbOutput =
   | { kind: "help"; text: string }
   | { kind: "usage-error"; message: string; usage: string }
   | { kind: "result"; json: boolean; envelope: Envelope; human: string[] };
 
-// 동사 어휘 SSOT — TREE(라우팅)·usage(--help 열거)·디스패치를 전부 여기서 파생한다.
-// 후속 티켓은 이 배열에 행을 추가한다(예: ["app","init"]). run까지 한 행이라
-// "어휘에는 있는데 분기가 없는" 미배선 상태가 표현 불가능하다(종료코드 2 의미 재사용 방지).
-// MCP 노출 정책 필드는 MCP 서버 티켓에서 이 descriptor에 추가한다.
-const VERBS: Array<{ path: string[]; desc: string; run: (rest: string[]) => VerbOutput }> = [
-  { path: ["doctor"], desc: "플랫폼 전제 진단(gh 인증·owner 일치·스코프 / bun·kubeseal / KUBECONFIG / 템플릿 호환성)", run: doctorRun },
-];
+// CLI 어댑터 — catalog 행마다 argv→operation 매핑과 렌더링을 배선한다. totality는 아래 초기화
+// 검사가 강제: 미배선 동사는 어떤 호출이든 즉시 throw(계약 파손 — 종료코드 2의 의미 재사용 금지).
+const CLI_BY_VERB: Record<string, (row: Verb, rest: string[]) => VerbOutput> = {
+  doctor: doctorCli,
+};
+for (const v of VERBS) {
+  if (!CLI_BY_VERB[v.path.join(" ")]) throw new Error(`계약 파손: 동사 '${v.path.join(" ")}'의 CLI 어댑터가 없다`);
+}
+
+// 라우팅 어휘·usage는 catalog에서 파생한다(어휘 SSOT = lib/verbs.ts).
 const TREE: CommandTree = {};
 for (const v of VERBS) {
   let node: CommandTree = TREE;
@@ -76,30 +63,24 @@ function doctorUsage(): string {
 
 const MARK: Record<string, string> = { pass: "✓", fail: "✗", warn: "⚠" };
 
-// variant → 종료코드(스키마 x-contract SSOT). 매핑 부재는 계약 파손이라 fail-closed.
-function exitFor(variant: string): number {
-  const code = EXIT[variant];
-  if (code === undefined) throw new Error(`계약 파손: variant '${variant}'의 종료코드 매핑이 스키마에 없다`);
-  return code;
+function renderDoctor(envelope: Envelope): string[] {
+  const r = envelope.result as { checks: DoctorCheck[]; summary: DoctorSummary };
+  return [
+    ...r.checks.map((c) => `${MARK[c.status]} ${c.id} — ${c.detail}`),
+    "",
+    `진단 결과: pass ${r.summary.pass} · fail ${r.summary.fail} · warn ${r.summary.warn}`,
+  ];
 }
 
-function doctorRun(rest: string[]): VerbOutput {
+function doctorCli(row: Verb, rest: string[]): VerbOutput {
   let flags;
   try { flags = typedFlags(rest, { value: [], bool: ["--json", "--help"] }); }
   catch (e) {
     return { kind: "usage-error", message: `homelab doctor: ${e instanceof Error ? e.message : String(e)}`, usage: doctorUsage() };
   }
   if (flags.bool("--help")) return { kind: "help", text: doctorUsage() };
-
-  const { checks, summary } = runDoctor();
-  const human = [
-    ...checks.map((c) => `${MARK[c.status]} ${c.id} — ${c.detail}`),
-    "",
-    `진단 결과: pass ${summary.pass} · fail ${summary.fail} · warn ${summary.warn}`,
-  ];
-  const variant = summary.fail > 0 ? "failure" : "success";
-  const envelope: Envelope = { schema: ENVELOPE, verb: "doctor", variant, exitCode: exitFor(variant), omitted: [], result: { checks, summary } };
-  return { kind: "result", json: flags.bool("--json"), envelope, human };
+  const envelope = row.op();
+  return { kind: "result", json: flags.bool("--json"), envelope, human: renderDoctor(envelope) };
 }
 
 function main(argv: string[]): number {
@@ -114,8 +95,8 @@ function main(argv: string[]): number {
   }
 
   // parseCommand가 성공한 path는 TREE의 리프이고 TREE는 VERBS에서 파생되므로 항상 찾아진다.
-  const verb = VERBS.find((v) => v.path.length === cmd.path.length && v.path.every((w, i) => w === cmd.path[i]))!;
-  const out = verb.run(cmd.rest);
+  const row = VERBS.find((v) => v.path.length === cmd.path.length && v.path.every((w, i) => w === cmd.path[i]))!;
+  const out = CLI_BY_VERB[row.path.join(" ")]!(row, cmd.rest);
 
   // 프로세스 관심사는 여기서만: --help는 --json보다 우선(계약 stdout 절), usage 오류는 exit 2 +
   // stderr, 결과는 stdout 순수성(--json이면 stdout은 envelope 하나, 사람용은 stderr)을 지킨다.
