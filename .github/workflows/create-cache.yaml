@@ -2,7 +2,7 @@
 # 변이 로직은 _create-cache.yaml(reusable)에 있다 — 이 파일은 trigger+조립+validate+notify 셸.
 # 입력은 평평한 필드(name + 선택 maxmemory) — validate 잡이 spec JSON으로 조립해 reusable에 넘긴다.
 name: "✨ create-cache"
-run-name: "✨ create-cache — ${{ inputs.name }}"
+run-name: "✨ create-cache — ${{ inputs.name }}${{ inputs.correlation != '' && format(' [{0}]', inputs.correlation) || '' }}"
 on:
   workflow_dispatch:
     inputs:
@@ -11,6 +11,10 @@ on:
         required: true
       maxmemory_mi:
         description: "maxmemory (Mi, 16..1024, 비우면 기본 64)"
+        required: false
+        default: ""
+      correlation:
+        description: "상관 nonce (CLI 수령증 — run-name 에코, 비우면 기존 run-name 그대로)"
         required: false
         default: ""
 
@@ -56,8 +60,10 @@ jobs:
       - name: spec 계약 검증 (허용 밖 필드·예약 이름·maxmemory 범위 거부 — fail-closed)
         env:
           SPEC: ${{ steps.assemble.outputs.spec }}
+          CORRELATION: ${{ inputs.correlation }} # 수령증 nonce도 계약 검증 대상(비신뢰 입력 — env 경유)
         run: |
-          jq -n --arg action create-cache --arg spec "$SPEC" '{action: $action, spec: $spec}' > /tmp/payload.json
+          jq -n --arg action create-cache --arg spec "$SPEC" --arg corr "$CORRELATION" \
+            '{action: $action, spec: $spec, correlation: $corr}' > /tmp/payload.json
           bun tools/validate-mutation.ts --action create-cache --payload-file /tmp/payload.json
 
   create-cache:

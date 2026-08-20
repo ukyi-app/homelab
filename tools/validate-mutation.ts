@@ -3,14 +3,14 @@
 // action별 필수/허용 입력 외에는 전부 거부한다. 위반 시 비-0 종료(값은 일부만 출력, 시크릿 없음).
 // update-image는 이 dispatcher가 아니라 GHCR 폴링(bump-poll)이 처리하므로 계약표에 없다.
 import { readFileSync } from "node:fs";
-import { APP_NAME_RE, RESOURCE_NAME_RE, EXT_RE, resourceNameError } from "./lib/identity.ts";
+import { APP_NAME_RE, RESOURCE_NAME_RE, EXT_RE, CORRELATION_RE, resourceNameError } from "./lib/identity.ts";
 
 function die(msg: string): never {
   console.error(`validate-mutation: ${msg}`);
   process.exit(1);
 }
 
-// 계약표: action → 필수 입력 (허용 입력 == 필수 입력; 그 외 비어 있지 않으면 거부)
+// 계약표: action → 필수 입력 (허용 입력 == 필수 입력 + OPTIONAL의 옵션 입력; 그 외 비어 있지 않으면 거부)
 // create-app/update-secrets는 sha를 입력으로 받지 않는다 — reusable이 앱 레포 main HEAD를
 // 체크아웃해 해석한다(sha 입력은 거부). sha는 activate-app 행에만 남지만 그 액션은 이 검증기를 타지 않는다.
 // ⚠️ activate-app·audit 행은 어떤 디스패처도 이 검증기로 라우팅하지 않는다(활성 호출처 0):
@@ -29,14 +29,26 @@ const CONTRACT: Record<string, string[]> = {
   audit: [],
 };
 
+// 옵션 입력: 빈값 = 미제공(웹 UI 수동 실행과 하위호환), 값이 있으면 형식 검증.
+// correlation 수령증은 5개 변이 디스패처만 — 나머지 행(activate-app/teardown-resource/audit)에서는
+// 여전히 비어 있지 않으면 거부한다(fail-closed 유지).
+const OPTIONAL: Record<string, string[]> = {
+  "create-app": ["correlation"],
+  "update-secrets": ["correlation"],
+  "create-database": ["correlation"],
+  "create-cache": ["correlation"],
+  "teardown-app": ["correlation"],
+};
+
 const FIELD_RE: Record<string, RegExp> = {
   app: APP_NAME_RE, // 앱 이름(= ukyi-app/<app> 레포명). slash 불가라 외부 org 표현 자체가 불가능
   confirm: APP_NAME_RE, // teardown-app 파괴 확인 — 형식은 app과 동일, 일치는 교차검증
   sha: /^[0-9a-f]{7,40}$/,
   resource: new RegExp(`^(db|cache):${RESOURCE_NAME_RE.source.slice(1, -1)}$`),
+  correlation: CORRELATION_RE, // run-name 에코 수령증 — 형식은 identity.ts SSOT
 };
 
-const PAYLOAD_KEYS = new Set(["action", "app", "sha", "resource", "spec", "confirm"]);
+const PAYLOAD_KEYS = new Set(["action", "app", "sha", "resource", "spec", "confirm", "correlation"]);
 
 // spec(JSON 문자열) 검증 — 공유 클러스터 지원 필드만 (storage/cpu/mem/version은
 // 클러스터 레벨 속성이라 DB/캐시 생성 API의 입력이 아니다 — 스키마 밖 필드 거부)
@@ -113,9 +125,17 @@ for (const k of required) {
 // teardown-app: confirm은 app과 정확히 일치해야 한다(파괴 오발사 방지 — GitHub repo 삭제 방식)
 if (action === "teardown-app" && get("confirm") !== get("app"))
   die(`confirm이 app과 불일치(파괴 확인 실패): confirm=${get("confirm").slice(0, 40)} ≠ app=${get("app").slice(0, 40)}`);
-// 허용 밖 입력이 비어 있지 않으면 거부 (오입력 = 오동작 신호 — fail-closed)
-for (const k of ["app", "sha", "resource", "spec", "confirm"]) {
-  if (!required.includes(k) && get(k) !== "") die(`action ${action}이 허용하지 않는 입력: ${k}`);
+// 옵션 입력: 값이 있을 때만 형식 검증 (빈값 = 미제공 — 웹 UI 수동 실행 하위호환)
+const optional = OPTIONAL[action] ?? [];
+for (const k of optional) {
+  const v = get(k);
+  if (v !== "" && !FIELD_RE[k].test(v)) die(`${k} 형식 불량: ${v.slice(0, 60)}`);
+}
+// 허용 밖 입력이 비어 있지 않으면 거부 (오입력 = 오동작 신호 — fail-closed). 키 전수는 PAYLOAD_KEYS에서
+// 파생 — 필드 추가 시 수정 지점을 한 곳 줄인다(action은 위의 --action 일치 검증이 별도로 소유).
+for (const k of PAYLOAD_KEYS) {
+  if (k === "action") continue;
+  if (!required.includes(k) && !optional.includes(k) && get(k) !== "") die(`action ${action}이 허용하지 않는 입력: ${k}`);
 }
 
 console.log(JSON.stringify({ ok: true, action, inputs: Object.fromEntries(required.map((k) => [k, k === "spec" ? "(validated)" : get(k)])) }));

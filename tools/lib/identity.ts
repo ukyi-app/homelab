@@ -13,6 +13,11 @@ export const RESOURCE_NAME_RE = /^[a-z]([a-z0-9-]{0,28}[a-z0-9])?$/;
 // postgres extension 이름 — underscore 허용(pg_trgm 등). validate-mutation·provision-db 공유.
 export const EXT_RE = /^[a-z][a-z0-9_-]*$/;
 
+// correlation nonce SSOT — 변이 디스패처 run-name 에코용 수령증(CLI가 호출마다 생성해 자기 run을
+// 권위 있게 특정). 정책: 소문자/숫자/하이픈, 선행·후행 하이픈 금지, 길이 8..64.
+// validate-mutation(디스패처)·CLI 생성기가 공유 — 둘이 다르면 CLI가 만든 nonce를 디스패처가 거부하는 계약 갭.
+export const CORRELATION_RE = /^[a-z0-9][a-z0-9-]{6,62}[a-z0-9]$/;
+
 // db/cache 예약 이름 — 실행기·디스패처 공유(둘이 다르면 디스패처 통과→실행기 거부 갭).
 // db: 시스템 롤/DB·bootstrap initdb(app)와 충돌하면 클러스터가 깨진다.
 const DB_RESERVED_NAMES = new Set(["app", "postgres", "pg", "template0", "template1", "streaming_replica"]);

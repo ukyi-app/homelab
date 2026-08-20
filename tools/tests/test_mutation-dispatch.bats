@@ -202,3 +202,27 @@ setup() {
 @test "bump-poll stays allowlisted WITHOUT the actor guard (intended dispatch target)" {
   run grep -q 'HOMELAB_OWNER' "$WF/bump-poll.yaml"; [ "$status" -ne 0 ]
 }
+
+@test "each dispatcher declares an optional correlation input echoed into run-name (web-UI compat by definition)" {
+  # 하위호환의 정의상 증명: required 아님 + 기본값 빈 문자열 + run-name은 빈값에서 바이트 동일(조건부 에코).
+  run bun -e '
+    const y = require("yaml"), fs = require("fs");
+    const wf = process.argv[1];
+    const dispatchers = process.argv.slice(2);
+    if (dispatchers.length < 5) { console.error("dispatcher 열거 붕괴: " + dispatchers.length); process.exit(1); }
+    const bad = [];
+    for (const d of dispatchers) {
+      const src = fs.readFileSync(wf + "/" + d + ".yaml", "utf8");
+      const doc = y.parse(src);
+      const on = doc?.on ?? doc?.[true];   // 일부 YAML 파서의 on→true 키 함정 방어
+      const inp = on?.workflow_dispatch?.inputs?.correlation;
+      if (!inp) { bad.push(d + ": correlation 입력 부재"); continue; }
+      if (inp.required === true) bad.push(d + ": correlation이 required — 웹 UI 하위호환 위반");
+      if (inp.default !== "") bad.push(d + ": correlation 기본값이 빈 문자열이 아니다");
+      const rn = String(doc["run-name"] ?? "");
+      if (!rn.includes("inputs.correlation != '\''") || !rn.includes("format(")) bad.push(d + ": run-name이 correlation을 조건부 에코하지 않는다");
+    }
+    if (bad.length) { console.error(bad.join("\n")); process.exit(1); }
+  ' "$WF" $DISPATCHERS
+  [ "$status" -eq 0 ]
+}

@@ -2,13 +2,17 @@
 # 트리거 경계(런북 app-platform): 앱 레포는 homelab-write 자격 0 — owner가 여기서 workflow_dispatch로 실행.
 # 변이 로직은 _create-app.yaml(reusable)에 있다 — 이 파일은 trigger+validate+notify 셸.
 name: "✨ create-app"
-run-name: "✨ create-app — ${{ inputs.app }}"
+run-name: "✨ create-app — ${{ inputs.app }}${{ inputs.correlation != '' && format(' [{0}]', inputs.correlation) || '' }}"
 on:
   workflow_dispatch:
     inputs:
       app:
         description: "앱 이름 (= ukyi-app/<app> 레포명)"
         required: true
+      correlation:
+        description: "상관 nonce (CLI 수령증 — run-name 에코, 비우면 기존 run-name 그대로)"
+        required: false
+        default: ""
 
 # 전역 직렬화: 모든 homelab-mutation 워크플로(변이 디스패처/bump-poll/iac/tf-reconcile)가 같은 그룹.
 # queue: max — pending FIFO 큐잉. cancel-in-progress와 병용 불가(AGENTS.md 함정) — 절대 true 금지.
