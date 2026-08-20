@@ -73,7 +73,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$output" = "2" ]
 }
 
-@test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (9 allowed, 12 rejected)" {
+@test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (14 allowed, 14 rejected)" {
   # structure r1 시도2 A2·B2: verb만 result를 고르면 불가능한 variant(doctor+pending 등)가 valid로
   # 남는다 — verb 분기가 허용 variant 집합까지 선언하고, verb별 허용∪비허용 = variant 전체(7종).
   # 한 동사가 variant별 result 형상으로 분기를 여럿 가질 수 있으므로(db create) 허용 집합은 동사
@@ -89,14 +89,19 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     if (verbBranches.length === 0) { console.error("verb 분기 없음"); process.exit(1); }
     const ids = sch.definitions.doctorCheck.properties.id.enum;
     const dbBase = { action: "create-database", name: "mydb", correlation: "corr-fixed-nonce-01" };
+    const cacheBase = { action: "create-cache", name: "mycache", correlation: "corr-fixed-nonce-01" };
+    const mut = (base) => ({
+      ["success"]: { ...base, waited: false, run: { id: 1, url: "u" }, pr: { number: 1, url: "u", merged: false } },
+      ["failure"]: { ...base, error: "x" },
+      ["race"]: { ...base, error: "x", observedRuns: 2 },
+      ["pending"]: { ...base, pendingReason: "x" },
+      ["superseded"]: { ...base, error: "x", pr: { number: 1, url: "u", merged: true, mergeSha: "a" }, applications: [{ name: "cnpg-data" }] },
+    });
     const SAMPLES = {
       doctor: { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } },
       status: { mode: "list", apps: [], count: 0 },
-      "db create|success": { ...dbBase, waited: false, run: { id: 1, url: "u" }, pr: { number: 1, url: "u", merged: false } },
-      "db create|failure": { ...dbBase, error: "x" },
-      "db create|race": { ...dbBase, error: "x", observedRuns: 2 },
-      "db create|pending": { ...dbBase, pendingReason: "x" },
-      "db create|superseded": { ...dbBase, error: "x", pr: { number: 1, url: "u", merged: true, mergeSha: "a" }, applications: [{ name: "cnpg-data" }] },
+      ...Object.fromEntries(Object.entries(mut(dbBase)).map(([v, r]) => ["db create|" + v, r])),
+      ...Object.fromEntries(Object.entries(mut(cacheBase)).map(([v, r]) => ["cache create|" + v, r])),
     };
     const byVerb = {};
     for (const br of verbBranches) (byVerb[br.properties.verb.enum[0]] ??= []).push(br);
@@ -121,11 +126,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     console.log("ok:" + okN + " rej:" + rejN);
   '
   [ "$status" -eq 0 ]
-  # 바닥값: 허용 doctor 2 + status 2 + db create 5 = 9 / 비허용 5+5+2 = 12 — 동사별 variant 7종 전부 커버
-  echo "$output" | grep -q "^ok:9 rej:12$"
+  # 바닥값: 허용 doctor 2 + status 2 + db 5 + cache 5 = 14 / 비허용 5+5+2+2 = 14 — 동사별 variant 7종 전부 커버
+  echo "$output" | grep -q "^ok:14 rej:14$"
 }
 
-@test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, floor 9)" {
+@test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, floor 14)" {
   # structure r1 b2: variant와 exitCode가 독립이면 success+exit 1도 green — 허용 쌍을 스키마가 강제한다.
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
@@ -136,14 +141,19 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     const verbBranches = sch.allOf.find((b) => b.oneOf?.[0]?.properties?.verb)?.oneOf ?? [];
     const ids = sch.definitions.doctorCheck.properties.id.enum;
     const dbBase = { action: "create-database", name: "mydb", correlation: "corr-fixed-nonce-01" };
+    const cacheBase = { action: "create-cache", name: "mycache", correlation: "corr-fixed-nonce-01" };
+    const mut = (base) => ({
+      ["success"]: { ...base, waited: false, run: { id: 1, url: "u" }, pr: { number: 1, url: "u", merged: false } },
+      ["failure"]: { ...base, error: "x" },
+      ["race"]: { ...base, error: "x", observedRuns: 2 },
+      ["pending"]: { ...base, pendingReason: "x" },
+      ["superseded"]: { ...base, error: "x", pr: { number: 1, url: "u", merged: true, mergeSha: "a" }, applications: [{ name: "cnpg-data" }] },
+    });
     const SAMPLES = {
       doctor: { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } },
       status: { mode: "list", apps: [], count: 0 },
-      "db create|success": { ...dbBase, waited: false, run: { id: 1, url: "u" }, pr: { number: 1, url: "u", merged: false } },
-      "db create|failure": { ...dbBase, error: "x" },
-      "db create|race": { ...dbBase, error: "x", observedRuns: 2 },
-      "db create|pending": { ...dbBase, pendingReason: "x" },
-      "db create|superseded": { ...dbBase, error: "x", pr: { number: 1, url: "u", merged: true, mergeSha: "a" }, applications: [{ name: "cnpg-data" }] },
+      ...Object.fromEntries(Object.entries(mut(dbBase)).map(([v, r]) => ["db create|" + v, r])),
+      ...Object.fromEntries(Object.entries(mut(cacheBase)).map(([v, r]) => ["cache create|" + v, r])),
     };
     let n = 0;
     for (const br of verbBranches) {
@@ -160,7 +170,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     console.log("rejected:" + n);
   '
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^rejected:9$"
+  echo "$output" | grep -q "^rejected:14$"
 }
 
 @test "schema rejects a doctor envelope whose result does not match doctorResult (verb-result coupling)" {

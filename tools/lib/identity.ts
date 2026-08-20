@@ -13,6 +13,10 @@ export const RESOURCE_NAME_RE = /^[a-z]([a-z0-9-]{0,28}[a-z0-9])?$/;
 // postgres extension 이름 — underscore 허용(pg_trgm 등). validate-mutation·provision-db 공유.
 export const EXT_RE = /^[a-z][a-z0-9_-]*$/;
 
+// cache maxmemory 범위 SSOT — 디스패처(validate-mutation)·실행기(provision-cache)·CLI(verbs)가
+// 공유한다. 셋이 갈리면 디스패처가 통과시킨 값을 실행기가 거부하는 계약 갭이 생긴다(이름과 동일 원칙).
+export const CACHE_MAXMEMORY_MI = { min: 16, max: 1024 } as const;
+
 // correlation nonce SSOT — 변이 디스패처 run-name 에코용 수령증(CLI가 호출마다 생성해 자기 run을
 // 권위 있게 특정). 정책: 소문자/숫자/하이픈, 선행·후행 하이픈 금지, 길이 8..64.
 // validate-mutation(디스패처)·CLI 생성기가 공유 — 둘이 다르면 CLI가 만든 nonce를 디스패처가 거부하는 계약 갭.

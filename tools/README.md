@@ -38,7 +38,10 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   동사의 실체는 `lib/verbs.ts` operation catalog가 SSOT — 이 bin 모듈은 import하면 main이 실행되므로
   MCP 등 다른 소비자는 lib 쪽을 import한다. 변이는 전부 기존 변이 디스패처를
   `gh workflow run`으로 트리거하는 래퍼가 될 예정이고(신뢰 경계 불변 — actor 가드·전역 직렬화·
-  PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create`·`db url`이다(후속은 catalog에 행 추가).
+  PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`이다(후속은 catalog에 행 추가).
+  `homelab cache create <name> [--maxmemory-mi 16..1024] [--wait]` = 변이 엔진의 두 번째 인스턴스
+  (create-cache 디스패치, 빈 maxmemory=디스패처 기본 64 소유, 수렴 집합 cache-prod·data-conn-prod,
+  표면 = 인스턴스 deployment.yaml + conn 봉인본). `homelab cache url` = cache-url.ts 패스스루 재노출.
   `homelab db create <name> [--ext a,b] [--wait]` = 첫 변이 동사(공유 변이 엔진 `lib/mutation.ts`의
   첫 인스턴스): create-database 디스패처를 correlation 수령증과 함께 트리거 → nonce 에코 run-name으로
   자기 run 특정(정확히 1개, ≥2=race exit 3) → conclusion 추적(실패 잡 열거) → `--wait`면 auto-merge

@@ -28,7 +28,7 @@
   "required": ["schema", "verb", "variant", "exitCode", "omitted", "result"],
   "properties": {
     "schema": { "enum": ["homelab-cli/1"] },
-    "verb": { "enum": ["doctor", "status", "db create"] },
+    "verb": { "enum": ["doctor", "status", "db create", "cache create"] },
     "variant": { "enum": ["success", "failure", "race", "skip", "pending", "no-op", "superseded"] },
     "exitCode": { "enum": [0, 1, 3, 4] },
     "omitted": { "type": "array", "uniqueItems": true, "items": { "enum": ["live"] } },
@@ -36,7 +36,7 @@
   },
   "allOf": [
     {
-      "description": "verb→(허용 variant 집합, result) 결합(structure r1 a1·b1 + 시도2 A2·B2): verb별로 낼 수 있는 variant와 result 정의를 루트에 강제 — 어긋난 shape·불가능한 verb/variant 쌍(doctor+pending 등)은 스키마 차원에서 red. 동사 추가 = 분기 추가(verb enum이 서로 배타라 정확히 1개 분기가 일치), variant별 result 형상이 갈리는 동사는 그 동사의 분기를 variant 단위로 쪼갠다.",
+      "description": "verb→(허용 variant 집합, result) 결합(structure r1 a1·b1 + 시도2 A2·B2): verb별로 낼 수 있는 variant와 result 정의를 루트에 강제 — 어긋난 shape·불가능한 verb/variant 쌍은 스키마 차원에서 red. 변이 동사(db/cache create)는 variant 단위 분기이고 공유 mutation* 정의에 allOf로 verb별 action을 고정한다(verb↔action 교차 배선 차단). 동사 추가 = 분기 추가.",
       "oneOf": [
         {
           "type": "object",
@@ -59,7 +59,10 @@
           "properties": {
             "verb": { "enum": ["db create"] },
             "variant": { "enum": ["success"] },
-            "result": { "$ref": "#/definitions/dbCreateSuccess" }
+            "result": { "allOf": [
+              { "$ref": "#/definitions/mutationSuccess" },
+              { "type": "object", "properties": { "action": { "enum": ["create-database"] } } }
+            ] }
           }
         },
         {
@@ -67,7 +70,10 @@
           "properties": {
             "verb": { "enum": ["db create"] },
             "variant": { "enum": ["failure"] },
-            "result": { "$ref": "#/definitions/dbCreateFailure" }
+            "result": { "allOf": [
+              { "$ref": "#/definitions/mutationFailure" },
+              { "type": "object", "properties": { "action": { "enum": ["create-database"] } } }
+            ] }
           }
         },
         {
@@ -75,7 +81,10 @@
           "properties": {
             "verb": { "enum": ["db create"] },
             "variant": { "enum": ["race"] },
-            "result": { "$ref": "#/definitions/dbCreateRace" }
+            "result": { "allOf": [
+              { "$ref": "#/definitions/mutationRace" },
+              { "type": "object", "properties": { "action": { "enum": ["create-database"] } } }
+            ] }
           }
         },
         {
@@ -83,7 +92,10 @@
           "properties": {
             "verb": { "enum": ["db create"] },
             "variant": { "enum": ["pending"] },
-            "result": { "$ref": "#/definitions/dbCreatePending" }
+            "result": { "allOf": [
+              { "$ref": "#/definitions/mutationPending" },
+              { "type": "object", "properties": { "action": { "enum": ["create-database"] } } }
+            ] }
           }
         },
         {
@@ -91,7 +103,65 @@
           "properties": {
             "verb": { "enum": ["db create"] },
             "variant": { "enum": ["superseded"] },
-            "result": { "$ref": "#/definitions/dbCreateSuperseded" }
+            "result": { "allOf": [
+              { "$ref": "#/definitions/mutationSuperseded" },
+              { "type": "object", "properties": { "action": { "enum": ["create-database"] } } }
+            ] }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["cache create"] },
+            "variant": { "enum": ["success"] },
+            "result": { "allOf": [
+              { "$ref": "#/definitions/mutationSuccess" },
+              { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } }
+            ] }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["cache create"] },
+            "variant": { "enum": ["failure"] },
+            "result": { "allOf": [
+              { "$ref": "#/definitions/mutationFailure" },
+              { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } }
+            ] }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["cache create"] },
+            "variant": { "enum": ["race"] },
+            "result": { "allOf": [
+              { "$ref": "#/definitions/mutationRace" },
+              { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } }
+            ] }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["cache create"] },
+            "variant": { "enum": ["pending"] },
+            "result": { "allOf": [
+              { "$ref": "#/definitions/mutationPending" },
+              { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } }
+            ] }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["cache create"] },
+            "variant": { "enum": ["superseded"] },
+            "result": { "allOf": [
+              { "$ref": "#/definitions/mutationSuperseded" },
+              { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } }
+            ] }
           }
         }
       ]
@@ -129,7 +199,7 @@
         }
       }
     },
-    "dbMutationRun": {
+    "mutationRun": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "url"],
@@ -140,7 +210,7 @@
         "failedJobs": { "type": "array", "items": { "type": "string" } }
       }
     },
-    "dbMutationPr": {
+    "mutationPr": {
       "type": "object",
       "additionalProperties": false,
       "required": ["number", "url", "merged"],
@@ -151,7 +221,7 @@
         "mergeSha": { "type": "string" }
       }
     },
-    "dbMutationApp": {
+    "mutationApp": {
       "description": "--wait 수렴 관측 증거 — 후손·표면 판정 포함(health 단독 판정 금지). error는 그 사이클의 조회 실패.",
       "type": "object",
       "additionalProperties": false,
@@ -166,75 +236,75 @@
         "error": { "type": "string" }
       }
     },
-    "dbCreateSuccess": {
+    "mutationSuccess": {
       "type": "object",
       "additionalProperties": false,
       "required": ["action", "name", "correlation", "waited", "run", "pr"],
       "properties": {
-        "action": { "enum": ["create-database"] },
+        "action": { "enum": ["create-database", "create-cache"] },
         "name": { "type": "string", "minLength": 1 },
         "correlation": { "type": "string", "minLength": 8 },
         "waited": { "type": "boolean" },
-        "run": { "$ref": "#/definitions/dbMutationRun" },
-        "pr": { "$ref": "#/definitions/dbMutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/dbMutationApp" } }
+        "run": { "$ref": "#/definitions/mutationRun" },
+        "pr": { "$ref": "#/definitions/mutationPr" },
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
       }
     },
-    "dbCreateFailure": {
+    "mutationFailure": {
       "type": "object",
       "additionalProperties": false,
       "required": ["action", "name", "correlation", "error"],
       "properties": {
-        "action": { "enum": ["create-database"] },
+        "action": { "enum": ["create-database", "create-cache"] },
         "name": { "type": "string", "minLength": 1 },
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
-        "run": { "$ref": "#/definitions/dbMutationRun" },
-        "pr": { "$ref": "#/definitions/dbMutationPr" }
+        "run": { "$ref": "#/definitions/mutationRun" },
+        "pr": { "$ref": "#/definitions/mutationPr" }
       }
     },
-    "dbCreateRace": {
+    "mutationRace": {
       "description": "신원 판정 불가(같은 nonce의 run ≥2 또는 브랜치 PR ≥2) — 전제 상태 변동 계열(exit 3).",
       "type": "object",
       "additionalProperties": false,
       "required": ["action", "name", "correlation", "error", "observedRuns"],
       "properties": {
-        "action": { "enum": ["create-database"] },
+        "action": { "enum": ["create-database", "create-cache"] },
         "name": { "type": "string", "minLength": 1 },
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
         "observedRuns": { "type": "integer", "minimum": 0 },
-        "run": { "$ref": "#/definitions/dbMutationRun" }
+        "run": { "$ref": "#/definitions/mutationRun" }
       }
     },
-    "dbCreatePending": {
+    "mutationPending": {
       "description": "바운디드 부분 결과 — 도달 지점(run/pr/applications)이 증거로 실리고 핸들 재조회가 재개 경로다.",
       "type": "object",
       "additionalProperties": false,
       "required": ["action", "name", "correlation", "pendingReason"],
       "properties": {
-        "action": { "enum": ["create-database"] },
+        "action": { "enum": ["create-database", "create-cache"] },
         "name": { "type": "string", "minLength": 1 },
         "correlation": { "type": "string", "minLength": 8 },
         "pendingReason": { "type": "string", "minLength": 1 },
-        "run": { "$ref": "#/definitions/dbMutationRun" },
-        "pr": { "$ref": "#/definitions/dbMutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/dbMutationApp" } }
+        "run": { "$ref": "#/definitions/mutationRun" },
+        "pr": { "$ref": "#/definitions/mutationPr" },
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
       }
     },
-    "dbCreateSuperseded": {
+    "mutationSuperseded": {
       "description": "관측 후손 리비전에서 desired-state 표면 부재 — 요청이 추월됨(성공 아님, exit 3).",
       "type": "object",
       "additionalProperties": false,
       "required": ["action", "name", "correlation", "error", "pr", "applications"],
       "properties": {
-        "action": { "enum": ["create-database"] },
+        "action": { "enum": ["create-database", "create-cache"] },
         "name": { "type": "string", "minLength": 1 },
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
-        "run": { "$ref": "#/definitions/dbMutationRun" },
-        "pr": { "$ref": "#/definitions/dbMutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/dbMutationApp" } }
+        "run": { "$ref": "#/definitions/mutationRun" },
+        "pr": { "$ref": "#/definitions/mutationPr" },
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
       }
     },
     "statusResult": {

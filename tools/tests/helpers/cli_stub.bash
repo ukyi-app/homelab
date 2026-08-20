@@ -44,6 +44,10 @@ cli_stub_init() {
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
 
+  # cache create 픽스처 기본값(행복 경로) — 변이 엔진 공유, 디스패처·run만 cache 것.
+  printf '[{"id":601,"name":"✨ create-cache — mycache [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/601"}]\n' "$NONCE" > "$FIX/cache-runs.json"
+  printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cache.json"
+
   # status 픽스처 기본값 — GitHub 응답(빈 목록)·ArgoCD Application. 각 테스트가 덮어써서 조정한다.
   printf '[]\n' > "$FIX/homelab-prs.json"
   printf '[]\n' > "$FIX/runs.json"
@@ -148,6 +152,13 @@ case "$*" in
   "api repos/ukyi-app/homelab-app-template/contents/scaffold/archetypes/worker/Dockerfile --jq .content")
     b64 "$FIX/Dockerfile.worker"
     ;;
+  # ── cache create 케이스 — db와 같은 엔진, 디스패처·runs 목록만 cache 것 ──
+  "workflow run create-cache.yaml -R ukyi-app/homelab "*)
+    if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
+    ;;
+  "api repos/ukyi-app/homelab/actions/workflows/create-cache.yaml/runs?per_page=20 --jq "*)
+    cat "$FIX/cache-runs.json"
+    ;;
   # ── db create 변이 엔진 케이스 — 유일하게 허용되는 변이 argv는 workflow run 하나뿐 ──
   "workflow run create-database.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
@@ -224,6 +235,10 @@ case "$*" in
   "-n argocd get applications.argoproj.io cnpg-data -o json")
     if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
     cat "$FIX/argocd-cnpg-data.json"
+    ;;
+  "-n argocd get applications.argoproj.io cache-prod -o json")
+    if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
+    cat "$FIX/argocd-cache.json"
     ;;
   "-n argocd get applications.argoproj.io data-conn-prod -o json")
     if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi

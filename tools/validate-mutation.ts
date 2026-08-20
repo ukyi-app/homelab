@@ -3,7 +3,7 @@
 // action별 필수/허용 입력 외에는 전부 거부한다. 위반 시 비-0 종료(값은 일부만 출력, 시크릿 없음).
 // update-image는 이 dispatcher가 아니라 GHCR 폴링(bump-poll)이 처리하므로 계약표에 없다.
 import { readFileSync } from "node:fs";
-import { APP_NAME_RE, RESOURCE_NAME_RE, EXT_RE, CORRELATION_RE, resourceNameError } from "./lib/identity.ts";
+import { CACHE_MAXMEMORY_MI, APP_NAME_RE, RESOURCE_NAME_RE, EXT_RE, CORRELATION_RE, resourceNameError } from "./lib/identity.ts";
 
 function die(msg: string): never {
   console.error(`validate-mutation: ${msg}`);
@@ -78,8 +78,8 @@ function validateSpec(action: string, specStr: string): void {
     }
   }
   if (action === "create-cache" && spec.maxmemory_mi !== undefined) {
-    if (!Number.isInteger(spec.maxmemory_mi) || spec.maxmemory_mi < 16 || spec.maxmemory_mi > 1024)
-      die("spec.maxmemory_mi는 16..1024 정수여야 한다");
+    if (!Number.isInteger(spec.maxmemory_mi) || spec.maxmemory_mi < CACHE_MAXMEMORY_MI.min || spec.maxmemory_mi > CACHE_MAXMEMORY_MI.max)
+      die(`spec.maxmemory_mi는 ${CACHE_MAXMEMORY_MI.min}..${CACHE_MAXMEMORY_MI.max} 정수여야 한다`);
   }
 }
 

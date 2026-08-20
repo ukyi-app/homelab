@@ -93,6 +93,10 @@ run_db_create() {
   [ "$(echo "$output" | jq -r '.result.applications | length')" = "2" ]
   [ "$(echo "$output" | jq -r '[.result.applications[].surfaceOk] | unique | join(",")')" = "true" ]
   [ "$(echo "$output" | jq -r '.omitted | length')" = "0" ]
+  # db 고유 계약값의 원장 단언 — 브랜치 명명(_create-database.yaml SSOT)·표면 경로(provision-db 산출).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" -ge 1 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/contents/platform/cnpg/prod/databases/mydb.yaml?ref=feedbee" --jq .sha)" -ge 1 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/contents/platform/data-conn/prod/db-mydb-conn.sealed.yaml?ref=feedbee" --jq .sha)" -ge 1 ]
 }
 
 @test "wait: stale-Healthy (old revision, Healthy+OutOfSync) never counts as success — pending" {
