@@ -114,7 +114,8 @@ jobs:
     if: ${{ !cancelled() && needs.preflight.outputs.writer == 'true' && needs.preflight.outputs.reader == 'true' }}
     runs-on: ubuntu-24.04-arm
     steps:
-      # reader App: 앱 레포 main 커밋/compare 조회 (Contents:read, 앱 레포에만 설치)
+      # reader App: 앱 레포 main 커밋/compare 조회 (Contents:read).
+      # ⚠️ 설치 범위는 org 전체다 — 아래 `owner:`가 그 범위를 실효 스코프로 만든다(설치가 좁은 게 아니다).
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: reader
         with:

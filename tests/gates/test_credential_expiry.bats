@@ -9,8 +9,10 @@ setup() {
   command -v jq >/dev/null || skip "jq required"
 }
 
-# ⚠️ 1항목 픽스처는 `--min-entries 1`로 자기 크기를 명시한다 — 기본 바닥값(2)은 **커밋된 원장**의
-#    크기이고, 픽스처가 그걸 물려받으면 여기서 재는 축(만료 판정)이 아니라 바닥값 때문에 죽는다.
+# ⚠️ 1항목 픽스처는 `--min-entries 1`로 자기 크기를 명시한다 — 기본 바닥값은 **커밋된 원장**의
+#    크기라, 픽스처가 그걸 물려받으면 여기서 재는 축(만료 판정)이 아니라 바닥값 때문에 죽는다.
+# ⚠️ 그 수치를 이 주석에 적지 않는다 — 적으면 드리프트한다. 실측(2026-08-20): 이 주석이 '2'라고
+#    적혀 있는 동안 스크립트 기본값은 3, 커밋된 원장은 4항목이었다. **세 곳이 전부 달랐다.**
 @test "expiry checker exits 0 when nothing expires within window" {
   tmp="$(mktemp)"; printf '[{"name":"far","expires":"2099-01-01"}]' > "$tmp"
   run bash "$s" --file "$tmp" --days 14 --min-entries 1
