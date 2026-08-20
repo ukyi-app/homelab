@@ -66,27 +66,106 @@ vme_cleanup() { # trap EXIT에서 호출
 #    2026-08-19 NUC 이관에서 밟았다 — 맥은 OrbStack이 docker를 제공해 안 밟혔고, 리눅스 노드에는
 #    docker 데몬을 올리지 않는다(docker0 브리지와 FORWARD 체인 조작이 k3s 파드 네트워킹을 깨는
 #    전형적 경로다). 그래서 rootless podman을 쓰고, 포트 배정을 런타임에 맡기지 않는다.
-# ⚠️ `/dev/tcp`는 **bash 전용**이다(이 파일 shebang이 bash라 성립). 새 도구 의존을 만들지 않으려고
-#    파이썬·ss·nc 대신 이걸 쓴다 — m6-tools가 관리하지 않는 도구를 게이트가 조용히 요구하면 안 된다.
-_vme_port_free() { ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+# ── 호스트 포트 밴드 ──────────────────────────────────────────────────────────────
+# 밴드는 상수지만 **검사는 라이브다** — 호스트가 예약 범위를 바꾸면 조용한 회귀가 아니라 즉사한다.
+# 피해야 하는 예약이 둘이고, 예전 픽 범위(20000-39999)는 **둘 다** 밟았다.
+#  ① 커널 ephemeral(`/proc/sys/net/ipv4/ip_local_port_range` — 이 NUC 32768-60999): 7232포트가 겹쳤다.
+#     하네스 **자신의** curl(health 폴 60회 + 매 질의)이 그 대역에 아웃바운드 소스 포트를 계속 만든다
+#     — 즉 혼자 돌아도 자기 포트를 빼앗겼다. 2026-08-19 실측 실패 포트 35704가 정확히 이 구간이다.
+#  ② k8s NodePort(기본 30000-32767): 이 게이트는 k3s가 도는 NUC에서도 돈다. NodePort는 리스너가
+#     아니라 **nat 규칙**이라 **어떤 bind 프로브로도 원리적으로 안 보인다**(실측 2026-08-20:
+#     30953 = gateway/traefik:443인데 `ss -ltnp` 0건 · connect 프로브 FREE · **plain bind도 FREE** ·
+#     그런데 `curl http://127.0.0.1:30953/health`는 Traefik의 `404 page not found`를 받는다).
+#     프로브를 아무리 고쳐도 못 잡는다 — **밴드에서 통째로 빼는 것만이 이걸 닫는다.**
+VME_PORT_LO="${VME_PORT_LO:-20000}"
+VME_PORT_HI="${VME_PORT_HI:-29999}"
+VME_NODEPORT_LO="${VME_NODEPORT_LO:-30000}"   # k8s 기본 --service-node-port-range(이 레포에 override 0건 — 실측)
+VME_NODEPORT_HI="${VME_NODEPORT_HI:-32767}"
+VME_PORT_RANGE_FILE="${VME_PORT_RANGE_FILE:-/proc/sys/net/ipv4/ip_local_port_range}"
+VME_BAND_OK=""
+
+_vme_disjoint() { [ "$VME_PORT_HI" -lt "$1" ] || [ "$VME_PORT_LO" -gt "$2" ]; }
+
+_vme_band_assert() { # 밴드가 두 예약 중 하나라도 건드리면 즉시 죽는다(판정 불가는 '통과'가 아니다)
+  local lo hi
+  [ -z "$VME_BAND_OK" ] || return 0
+  [ "$VME_PORT_LO" -lt "$VME_PORT_HI" ] || vme_fault "포트 밴드 역전(${VME_PORT_LO}-${VME_PORT_HI})"
+  [ -r "$VME_PORT_RANGE_FILE" ] || vme_fault "포트 밴드: ${VME_PORT_RANGE_FILE}를 읽을 수 없다 — ephemeral 범위와의 배타성을 확인할 수 없다."
+  lo="$(awk 'NR==1{print $1}' "$VME_PORT_RANGE_FILE")"
+  hi="$(awk 'NR==1{print $2}' "$VME_PORT_RANGE_FILE")"
+  case "$lo" in ''|*[!0-9]*) vme_fault "포트 밴드: ephemeral 하한 '${lo}' 비수치" ;; esac
+  case "$hi" in ''|*[!0-9]*) vme_fault "포트 밴드: ephemeral 상한 '${hi}' 비수치" ;; esac
+  _vme_disjoint "$lo" "$hi" || vme_fault "포트 밴드 ${VME_PORT_LO}-${VME_PORT_HI}가 커널 ephemeral ${lo}-${hi}와 겹친다 — 하네스 자신의 curl이 그 대역에서 소스 포트를 만든다. VME_PORT_LO/VME_PORT_HI를 옮겨라."
+  _vme_disjoint "$VME_NODEPORT_LO" "$VME_NODEPORT_HI" || vme_fault "포트 밴드 ${VME_PORT_LO}-${VME_PORT_HI}가 k8s NodePort ${VME_NODEPORT_LO}-${VME_NODEPORT_HI}와 겹친다 — NodePort는 리스너가 아니라 nat 규칙이라 bind 프로브가 원리적으로 못 본다."
+  VME_BAND_OK=1
+}
+
+# **bind 프로브**(SO_REUSEADDR 없음) — 런타임이 실제로 던지는 질문을 그대로 던진다.
+# ⚠️ 예전 connect 프로브(`/dev/tcp`)는 **리스너만** 본다. 아웃바운드 연결의 로컬 소스 포트도, 리스너가
+#    닫힌 뒤 살아남은 accepted 소켓도 FREE로 보고하는데 그 포트의 bind는 실패한다
+#    (실측 2026-08-20: 두 경우 모두 connect=FREE / plain bind=EADDRINUSE(98)).
+# ⚠️ **SO_REUSEADDR를 켜지 마라.** accepted 소켓이 잡은 포트에 대해 성공해버려 프로브가 런타임보다
+#    관대해진다(실측: bind+REUSEADDR=FREE(오답), plain bind=BUSY(98)). plain bind는 어떤 런타임보다
+#    같거나 엄격해 "못 쓰는 포트를 배정"하는 방향으로는 틀리지 않는다(TIME_WAIT 포트를 가끔 건너뛸 뿐이다).
+# ⚠️ python3는 새 도구 의존이 **아니다** — 이 파일이 이미 vme_iso/vme_promql/vme_series_count에서
+#    요구한다. `/dev/tcp`를 고른 원래 이유가 "새 의존 금지"였는데 그 제약은 python3로 이미 충족된다.
+_vme_port_free() {
+  python3 -c 'import socket, sys
+s = socket.socket()
+try:
+    s.bind(("127.0.0.1", int(sys.argv[1])))
+except OSError:
+    sys.exit(1)
+finally:
+    s.close()' "$1"
+}
+
 _vme_pick_port() {
-  local p _
+  local p _ span
+  _vme_band_assert
+  span=$(( VME_PORT_HI - VME_PORT_LO + 1 ))
   for _ in $(seq 40); do
-    p=$(( 20000 + RANDOM % 20000 ))
+    p=$(( VME_PORT_LO + RANDOM % span ))
     if _vme_port_free "$p"; then printf '%s' "$p"; return 0; fi
   done
-  echo "빈 포트를 찾지 못했다(20000-39999에서 40회) — 판정 불가는 '통과'가 아니다" >&2
+  echo "빈 포트를 찾지 못했다(${VME_PORT_LO}-${VME_PORT_HI}에서 40회) — 판정 불가는 '통과'가 아니다" >&2
   return 1
 }
 
+VME_BIND_TRIES="${VME_BIND_TRIES:-3}"   # 첫 시도 + 재추첨 2회(판별에 필요한 최소치는 2다)
+
 vme_start_vmsingle() { # $1=container name $2=vmsingle version [$3.. = 추가 플래그] → VME_BASE 설정
-  local name="$1" ver="$2" port ready got
+  local name="$1" ver="$2" port ready got try err log body
   shift 2
   VME_CONTAINERS="$VME_CONTAINERS $name"
-  port="$(_vme_pick_port)" || exit 2
-  docker run -d --name "$name" --network "$VME_NET" -p "127.0.0.1:${port}:8428" \
-    "victoriametrics/victoria-metrics:${ver}" \
-    --storageDataPath=/storage --retentionPeriod=100y --httpListenAddr=:8428 "$@" >/dev/null
+  # 밴드를 좁혀도 프로브~`docker run` 사이의 창은 남는다(TOCTOU). 그 잔여만 재시도가 흡수한다.
+  try=1; log=""
+  while :; do
+    port="$(_vme_pick_port)" || exit 2
+    # ⚠️ 실패한 `docker run -d`는 컨테이너를 **Created로 남긴다** → 같은 이름 재시도가 "name already
+    #    in use"로 죽는다. podman 전용 `--replace`는 docker 양립성이 없으므로 명시적으로 지운다.
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    if err="$(docker run -d --name "$name" --network "$VME_NET" -p "127.0.0.1:${port}:8428" \
+        "victoriametrics/victoria-metrics:${ver}" \
+        --storageDataPath=/storage --retentionPeriod=100y --httpListenAddr=:8428 "$@" 2>&1 >/dev/null)"; then
+      break
+    fi
+    log="${log}
+--- 시도 ${try} (port=${port}) ---
+${err}"
+    # ⚠️ 실패를 **메시지·종료코드로 판별하지 않는다** — 같은 podman도 pasta/rootlessport로 문자열이
+    #    갈리고 CI dockerd는 또 다르다. venue 의존 판별자는 한 venue에서 조용히 무력해진다.
+    #    판별자는 "서로 다른 포트로 다시 하면 되는가" 하나다.
+    if [ "$try" -ge "$VME_BIND_TRIES" ]; then
+      printf '%s\n' "$log" >&2
+      vme_fault "vmsingle(${name}) 기동이 **서로 다른 포트** ${try}개에서 모두 실패했다 — 포트 경합만으로는 설명되지 않는다(위 런타임 stderr가 원인이다)."
+    fi
+    # ⚠️ 조용한 재시도 금지 — 발생 사실이 로그에 없으면 경합 빈도가 관측되지 않는다.
+    echo "RETRY (bind ${try}/${VME_BIND_TRIES}): vmsingle(${name}) port=${port} 기동 실패 — 포트를 새로 뽑아 재시도한다. 런타임 stderr: ${err}" >&2
+    try=$(( try + 1 ))
+  done
+  [ -z "$err" ] || printf '%s\n' "$err" >&2   # 성공 경로의 런타임 경고는 예전처럼 그대로 흘린다
+  [ "$try" -eq 1 ] || echo "RETRY (bind): vmsingle(${name}) ${try}번째 시도에서 성공했다." >&2
   # 읽어온 포트를 **쓰지 않고 대조한다.** 예전엔 `docker port` 출력을 그대로 믿었는데, 이제는
   # 우리가 고른 값과 다르면 즉시 죽는다 — 경합으로 매핑이 어긋나면 아래 health 대기가 60×0.5s를
   # 통째로 태운 뒤에야 "not ready"로 죽어 원인이 안 보인다.
@@ -99,7 +178,17 @@ vme_start_vmsingle() { # $1=container name $2=vmsingle version [$3.. = 추가 �
   VME_BASE="http://127.0.0.1:${port}"
   ready=0
   for _ in $(seq 60); do
-    if curl -sf "$VME_BASE/health" >/dev/null 2>&1; then ready=1; break; fi
+    # ⚠️ 2xx 여부가 아니라 **본문**을 본다. vmsingle의 /health는 `OK`를 준다. 본문이 비면 아직 안 뜬
+    #    것이고, 본문이 있는데 `OK`가 아니면 이 호스트 포트가 **우리 컨테이너로 가지 않는다**는 뜻이다
+    #    — 밴드가 잘못 옮겨져 NodePort와 겹치면 정확히 이 모양이 된다(실측 2026-08-20: `docker run`도
+    #    `docker port` 대조도 통과하는데 curl만 Traefik의 `404 page not found`를 받았다).
+    #    예전 코드는 그 상태를 60×0.5s 태운 뒤 "not ready"로 **오진**했다.
+    body="$(curl -s --max-time 3 "$VME_BASE/health" 2>/dev/null || true)"
+    case "$body" in
+      OK*) ready=1; break ;;
+      '') ;;
+      *) vme_fault "${VME_BASE}/health가 vmsingle이 아닌 응답을 냈다 — 이 호스트 포트가 다른 서비스로 라우팅된다(NodePort DNAT 등). 본문: ${body}" ;;
+    esac
     sleep 0.5
   done
   [ "$ready" = 1 ] || { echo "vmsingle($name) not ready" >&2; docker logs "$name" 2>&1 | tail -20 >&2; exit 2; }
