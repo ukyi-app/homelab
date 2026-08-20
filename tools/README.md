@@ -32,6 +32,26 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   homelab 측은 수동 확인). 앱 self-migrate는 expand/contract + 멱등이 전제이고 순서를 강제하는 Job이
   없으므로 **규칙 준수에 의존한다**(잔여 위험 — `docs/decisions/0005-data-connection-residual-risk.md`).
 
+## homelab CLI (통합 진입점 — 워킹 스켈레톤)
+
+- **`homelab.ts`** — `homelab` 서브커맨드 CLI 진입점. 변이는 전부 기존 변이 디스패처를
+  `gh workflow run`으로 트리거하는 래퍼가 될 예정이고(신뢰 경계 불변 — actor 가드·전역 직렬화·
+  PR-first 그대로), 현재 동사는 `doctor` 하나다(워킹 스켈레톤 — 후속 동사는 `VERBS` 배열에 추가).
+  **설치**: `bun link`(레포 루트) → package.json `bin`이 `homelab`을 전역 PATH에 심링크. 유일하게
+  셰뱅+exec 비트를 갖는 .ts다(test_shebang-exec.bats가 bin 선언에서 예외를 파생). 레포 밖(앱 레포
+  디렉토리 포함)에서도 동작한다(자기 위치는 import.meta 기준 해석).
+  `homelab doctor [--json]` = 플랫폼 전제 진단(관측 전용): gh 인증·로그인=HOMELAB_OWNER 일치(actor
+  가드 사전 검증)·토큰 스코프(repo·workflow, 헤더 부재=fine-grained 추정 warn), bun·kubeseal 존재,
+  KUBECONFIG 유무(부재=warn·깨진 경로=fail), 템플릿 접근성·호환성(스캐폴더 비대화형 계약 +
+  컴파일 아키타입 3종 TARGETARCH — site는 arch 중립이라 대상 아님). fail ≥ 1이면 exit 1.
+  테스트: `tools/tests/test_homelab-cli.bats`(라우팅·계약)·`test_homelab-doctor.bats`(진단 —
+  PATH stub + NUL argv 원장, 하네스 `tools/tests/helpers/cli_stub.bash`).
+- **`cli-result-schema.json`** — CLI `--json` 출력·MCP tool 결과가 공유하는 **결과 계약 SSOT**
+  (envelope `homelab-cli/1`). variant 어휘(success/failure/race/skip/pending/no-op/superseded)·
+  종료코드 매핑(x-contract.exitCodes — pending=1 근거 포함)·stdout 순수성(--json이면 stdout은
+  오브젝트 하나, 사람용은 stderr)·MCP 에러 매핑을 정의한다. CLI가 런타임에 읽는다(코드 상수로
+  복제 금지). 골든 픽스처: `tools/tests/fixtures/homelab/*.golden.json`.
+
 ## App Platform 변이 도구 (변이 디스패처 경유 — 직접 실행 금지)
 
 owner가 homelab에서 액션별 변이 디스패처(`create-app.yaml` 등, workflow_dispatch)를 실행하면
@@ -153,6 +173,17 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 
 ## 공유 커널 (lib/ — 콜사이트가 정책 소유, 단 정책이 콜사이트마다 갈릴 때)
 
+- **`lib/doctor.ts`** — homelab CLI doctor 진단 엔진(`runDoctor()`). 점검 항목·상태 판정·detail
+  문구를 소유한다(관측 전용 — `gh api` 읽기만, 테스트가 argv 원장으로 강제). 선행 gh-auth 실패로
+  판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든
+  픽스처 계약). 소비자: `homelab.ts`(이후 MCP 서버도 같은 엔진 재사용 예정).
+- **`lib/platform.ts`** — 플랫폼 좌표 SSOT(HOMELAB_REPO·TEMPLATE_REPO·ARCHETYPES·
+  COMPILED_ARCHETYPES). doctor가 검증한 대상과 이후 init이 쓰는 대상이 콜사이트마다 갈리지
+  않게 한 곳에서만 정의(identity.ts와 같은 원칙 — 저긴 이름 형식, 여긴 좌표).
+- **`lib/schema-check.ts`** — cli-result-schema.json 전용 미니 검증기(`schemaErrors()`, ajv 무의존).
+  지원 키워드 화이트리스트 밖은 **throw로 fail-closed**(모르는 제약의 조용한 통과 차단).
+  골든 픽스처·계약 테스트 전용 — create-app.ts의 check()는 .app-config.yml 정책 소유가
+  콜사이트라 별개 유지.
 - **`lib/repo-walk.ts`** — 저장소 스캔 워커(`walkManifests(scope)`·`listUnits(scope)`). 가드들이
   각자 갖던 **열거 의미론**(tracked=git ls-files vs filesystem)·**제외 어휘**·**YAML 파싱**·
   **유닛 파생**을 한 곳에 모은다. ⚠️ scan-floor는 **두지 않는다** — 열거자는 "글롭이 깨져 0건"과

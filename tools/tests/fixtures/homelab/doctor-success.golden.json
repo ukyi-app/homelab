@@ -1,0 +1,61 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "doctor",
+  "variant": "success",
+  "exitCode": 0,
+  "omitted": [],
+  "result": {
+    "checks": [
+      {
+        "id": "gh-auth",
+        "status": "pass",
+        "detail": "gh 인증 확인(login: ukyi)"
+      },
+      {
+        "id": "gh-owner",
+        "status": "pass",
+        "detail": "gh 로그인 계정이 HOMELAB_OWNER와 일치(ukyi)"
+      },
+      {
+        "id": "gh-scopes",
+        "status": "pass",
+        "detail": "토큰 스코프 충족(repo, workflow)"
+      },
+      {
+        "id": "bun",
+        "status": "pass",
+        "detail": "bun 발견(PATH)"
+      },
+      {
+        "id": "kubeseal",
+        "status": "pass",
+        "detail": "kubeseal 발견(PATH)"
+      },
+      {
+        "id": "kubeconfig",
+        "status": "pass",
+        "detail": "KUBECONFIG 설정됨(파일 존재)"
+      },
+      {
+        "id": "template-access",
+        "status": "pass",
+        "detail": "템플릿 레포 접근 가능(ukyi-app/homelab-app-template, is_template)"
+      },
+      {
+        "id": "template-scaffold-contract",
+        "status": "pass",
+        "detail": "스캐폴더 비대화형 계약 확인(--archetype·--yes)"
+      },
+      {
+        "id": "template-targetarch",
+        "status": "pass",
+        "detail": "컴파일 아키타입 3종(api·fullstack·worker) Dockerfile TARGETARCH 파라미터화 확인 — site는 arch 중립이라 대상 아님"
+      }
+    ],
+    "summary": {
+      "pass": 9,
+      "fail": 0,
+      "warn": 0
+    }
+  }
+}

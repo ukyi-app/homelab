@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "cli-result-schema",
+  "title": "homelab CLI --json 결과 계약 v1 (SSOT — 전 동사·MCP tool 공용)",
+  "description": "homelab CLI 전 동사의 --json 출력과 MCP tool 결과가 공유하는 결과 오브젝트 계약. 이 파일이 산문 아닌 SSOT다: variant 어휘·종료코드 매핑·stdout 순수성·MCP 매핑을 여기서 정의하고, CLI는 x-contract를 런타임에 읽어 그대로 따른다(코드 상수로 복제하지 않는다). 이후 티켓은 verb enum과 variant·definitions에 항목을 추가할 뿐 기존 필드를 깨지 않는다(v1 내 추가 = 하위호환). '라이브 구간 생략'은 variant가 아니라 직교 축 omitted[]로 모델링한다 — 생략은 success·pending 어느 variant와도 결합 가능해서 variant로 두면 조합이 폭발하고, 빈 배열을 필수로 두어 '생략 없음'이 필드 부재가 아니라 명시 값으로 남는다(생략과 성공의 구분).",
+  "x-contract": {
+    "envelope": "homelab-cli/1",
+    "exitCodes": {
+      "success": 0,
+      "failure": 1,
+      "race": 3,
+      "skip": 4,
+      "pending": 1,
+      "no-op": 0,
+      "superseded": 3
+    },
+    "usageExit": 2,
+    "exitRationale": "기존 도구 규약(tools/lib/cli.ts 주석이 산문 SSOT: 0=성공·1=검증/게이트 실패·2=사용법·3=race·4=skip)에 CLI variant를 매핑한다. no-op=0: 멱등 수렴은 성공의 아종. pending=1: '확인하지 못함'이 0이면 && 체인에 vacuous green이다 — 대기 매트릭스가 배포 오판을 막으려고 존재하는데 종료코드가 거짓말하면 무의미하다(스크립트는 exit로, 에이전트는 variant로 분기). superseded=3: 표면이 이미 다른 값 = 전제 상태 변동(race 계열, variant가 둘을 구분). skip=4: stderr에 'SKIP: homelab <verb>: <이유>' 마커를 같은 실행에서 함께 낸다(가드 skip 신호 규약).",
+    "stdout": "--json이면 stdout은 이 스키마의 오브젝트 정확히 하나(개행 종단)뿐이다. 사람용 텍스트·진행 표시는 전부 stderr. 예외 둘: usage 오류(exit 2)는 오브젝트를 내지 않는다(플래그 해석이 실패한 상태라 --json 여부 자체를 신뢰할 수 없다). --help는 --json보다 우선한다 — 사용법 질의는 동사 실행 결과가 아니므로 사용법 텍스트가 stdout(exit 0)이고 오브젝트는 없다(GNU 관례).",
+    "mcp": {
+      "isErrorVariants": ["failure", "race", "superseded"],
+      "normalVariants": ["success", "no-op", "skip", "pending"],
+      "note": "MCP tool 결과 content = 같은 결과 오브젝트 한 벌(계약 한 벌). pending은 MCP에서 에러가 아니다 — tool 호출은 동기·바운디드이고 재호출(status 핸들 조회·같은 입력 init 재실행)이 재개 경로다. usage 오류는 JSON-RPC invalid params(-32602)로 매핑한다."
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "verb", "variant", "exitCode", "omitted", "result"],
+  "properties": {
+    "schema": { "enum": ["homelab-cli/1"] },
+    "verb": { "enum": ["doctor"] },
+    "variant": { "enum": ["success", "failure", "race", "skip", "pending", "no-op", "superseded"] },
+    "exitCode": { "enum": [0, 1, 3, 4] },
+    "omitted": { "type": "array", "uniqueItems": true, "items": { "enum": ["live"] } },
+    "result": { "type": "object" }
+  },
+  "definitions": {
+    "doctorResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checks", "summary"],
+      "properties": {
+        "checks": {
+          "type": "array",
+          "minItems": 9,
+          "items": { "$ref": "#/definitions/doctorCheck" }
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pass", "fail", "warn"],
+          "properties": {
+            "pass": { "type": "integer", "minimum": 0 },
+            "fail": { "type": "integer", "minimum": 0 },
+            "warn": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "doctorCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "detail"],
+      "properties": {
+        "id": {
+          "enum": [
+            "gh-auth",
+            "gh-owner",
+            "gh-scopes",
+            "bun",
+            "kubeseal",
+            "kubeconfig",
+            "template-access",
+            "template-scaffold-contract",
+            "template-targetarch"
+          ]
+        },
+        "status": { "enum": ["pass", "fail", "warn"] },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
