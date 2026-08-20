@@ -5,8 +5,14 @@ setup() {
   STUBDIR="$(mktemp -d)"; PATH="$STUBDIR:$PATH"; export PATH STUBDIR
   cat >"$STUBDIR/sops" <<'EOF'
 #!/usr/bin/env bash
-# encrypt: stdin→stdout 그대로; decrypt(-d): 그대로 되돌림(왕복 항등 stub)
-cat
+# 왕복 항등 stub — **입력원은 argv가 정한다**(파일 인자는 항상 마지막 위치).
+# 호출부 3곳이 전부 마지막 위치에 피연산자를 준다: backup-local-asset.sh:34 `-d … "$latest"`,
+# :50 encrypt `… --output-type binary /dev/stdin`, :52 `-d … "$tmp"`.
+# ⚠️ 본문이 피연산자 없는 `cat`이면 :34/:52는 파이프의 첫 명령이라 먹일 stdin이 없다 — 실패가 아니라
+#    **hang**이다(호출자의 fd 0에서 EOF를 기다린다). 같은 클래스를 test_sealed-secrets-restore.bats가
+#    실측으로 밟았다(rc=124).
+for f in "$@"; do :; done
+exec cat "$f"
 EOF
   chmod +x "$STUBDIR/sops"
   OUT="$(mktemp -d)"   # git 밖

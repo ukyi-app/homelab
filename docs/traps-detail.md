@@ -1309,3 +1309,43 @@ selfHeal과 플립플롭한다.
   rollup 윈도·생산자 레지스트리 문제가 전부 사라진다. 게다가 push 경로는 kubectl/port-forward에
   의존해 **자기 트리거와 함께 죽는다**(kubectl 불가가 백업 유닛 실패의 주요 원인이다).
 > 가드: `tests/gates/test_unit-failure-notify.bats`
+
+### bats는 stdin을 만지지 않는다 — 스텁이 피연산자 없이 `cat`을 부르면 호출자의 fd 0에서 영구 블록한다
+- **bats는 fd 0을 전혀 건드리지 않는다**(1.14.0 libexec 전체에 `0<`/`</dev/null` 0건 — 실측). `run`도
+  커맨드 치환이라 stdin을 그대로 상속한다. 그래서 @test 안의 스텁이 피연산자 없이 `cat`을 부르면
+  그 `cat`은 **bats를 부른 셸의 stdin**에서 EOF를 기다린다.
+- **실측(2026-08-20)**: `tests/test_sealed-secrets-restore.bats`의 `sops` 스텁이
+  `printf '#!/bin/sh\ncat\n'`이었다. 피시험 코드(`scripts/sealing-key-dr-gate.sh:121`)는
+  `sops -d … "$latest" | sanitize_backup_yaml`로 **파일 인자를 주고 파이프로 먹이지 않는다** —
+  그 `sops`는 파이프의 **첫** 명령이라 먹일 stdin이 없다. never-EOF stdin을 물리면 TAP이 `1..1`에서
+  정지하고 rc=124(`timeout`)다. `</dev/null`이면 같은 파일 22건이 1초에 통과한다.
+  이전 세션은 이 모양으로 **1시간 39분**을 태웠다(자식 프로세스 없이 블록).
+- **왜 red가 아니라 hang인가**: 실패도 출력도 없이 멈춘다. 스위트가 `not ok`를 내면 사람이 읽지만,
+  멈추면 **관측되는 것이 아무것도 없다.** "느린 테스트"와 구별되지 않으므로 CI 타임아웃까지 간다.
+- ⚠️ **venue가 갈리는 자리다.** CI가 이걸 안 밟는 것은 러너의 성질이 아니라 `ci.yaml:245`가 러너를
+  `&`로 띄우기 때문이다(비대화형 bash의 async 명령은 fd 0이 `/dev/null`). `make ci`는 포그라운드라
+  호출자의 fd 0을 그대로 물려받는다. 즉 **로컬만 밟고 CI는 영원히 초록**이다 — 「tracked 열거 게이트는
+  untracked 파일을 아예 안 본다」와 같은 클래스(로컬 초록이 CI를 예고하지 못하는 것의 거울상)다.
+- ⇒ **처방은 3층이고 층마다 막는 것이 다르다.**
+  1. **러너가 스스로 fd 0을 끊는다**(`scripts/run-bats.sh`의 `exec 0</dev/null`) — 클래스 전체를
+     구조적으로 없앤다. 호출면 전량(`Makefile`·`iac.yaml`·`AGENTS.md`)도 `</dev/null`을 붙인다.
+     ⚠️ `>/dev/null`은 stdout이라 격리가 **아니다**.
+  2. **스텁의 입력원을 argv로 못박는다** — 파일 인자는 항상 마지막 위치라는 규약
+     (`for f in "$@"; do :; done; exec cat "$f"`). 이게 결함 자체의 수정이다. 1층만 하면 스텁은
+     여전히 계약을 어기고 있고, `</dev/null`을 빠뜨린 새 호출면에서 되살아난다.
+  3. ⚠️ **per-@test 타임아웃 백스톱은 쓸 수 없다.** 1·2층이 못 덮는 잔여 블로킹(스텁이 스스로 여는
+     fifo·`/dev/tty` 직접 열기)은 열거할 수 없고, 열거 없이 fail-loud하는 유일한 기전이
+     `BATS_TEST_TIMEOUT`이다. 그런데 그 값이 설정돼 있으면 **실패하는 중첩 bats를 부르는 @test가
+     거짓 타임아웃**을 낸다. 최소 재현(2026-08-20): `run bats <통과하는 파일>`은 1초에 끝나고,
+     **같은 구조에서 안쪽 파일만 실패하게 바꾸면** 타임아웃을 꽉 채우고 죽는다. 라이브에서는
+     `tests/gates/test_guard-skip-signalling.bats`의 "reports failure (not skip)…"가 그랬다 —
+     백스톱 없이 0초 통과, `BATS_TEST_TIMEOUT=40`이면 40초 후 red이고 진단은 `echo '}'`라는
+     **도달 불가능한 자리**를 가리킨다(그래서 원인을 코드에서 찾으면 영원히 못 찾는다).
+     이 레포는 **fail-closed를 단언하는 게이트가 다수**라 그런 @test가 우연이 아니라 구조적으로
+     존재한다 ⇒ 보험이 통과하던 게이트를 깨뜨리는 **순손실**이다. 넣지 마라.
+- ⚠️ **정적 스캐너("스텁 본문에 bare `cat` 금지")는 만들지 않았다.** 이 레포의 스텁은 `printf`·
+  heredoc·`cat >`로 제각각 쓰이고 정당한 `cat`(파이프 계약이 확실한 자리)이 다수라, 술어가 넓으면
+  거짓 양성이 쏟아지고 좁히면 곧 vacuous해진다. 대신 **행동 증인**을 쓴다: 스텁 emitter를 헬퍼로
+  묶고, stdin에 **다른 내용을 파이프로 흘린 채** 호출해 출력이 파일 내용인지 단언한다. 헬퍼가 bare
+  `cat`으로 되돌아가면 hang이 아니라 **red**가 된다(파이프에는 EOF가 있다). 실측으로 감도를 확인했다.
+> 가드: `scripts/run-bats.sh`, `tests/test_sealed-secrets-restore.bats`

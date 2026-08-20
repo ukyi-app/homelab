@@ -76,3 +76,4 @@
 | GitHub API가 낡은 스냅샷을 200으로 반환 → push된 단조 타임스탬프가 역행 → `last_over_time`이 그 한 샘플로 오발화(rollup 함수 선택 축) | gate | `tests/gates/vmalert-gha-liveness-firing-e2e.sh`, `tests/gates/test_gha-liveness-exporter.bats`, `tests/gates/fixtures/r6-gha-lastovertime.yaml`, `tools/check-alert-rules.ts`, `policy/alert-supply-monotonicity.json`, `tests/test_alert_rules.bats` |
 | 로케일 콜레이션이 게이트를 뒤집는다 — en_US `sort -u`가 `-1`과 `1`(그리고 `_`-접두 워크플로와 동명 공개 디스패처)을 같다고 보고 하나를 버려 fail-open | gate | `scripts/check-locale-collation.sh`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_make-help.bats`, `platform/argocd/root/test_sync_wave_ledger.bats` |
 | systemd 유닛 등 생산자 확장자 밖 파일의 인라인 push — 완전성 가드가 원리적으로 못 봐 죽은 알림이 초록으로 태어난다 | gate | `tests/gates/test_unit-failure-notify.bats` |
+| bats가 fd 0을 상속시켜 스텁의 피연산자 없는 `cat`이 호출자 stdin에서 영구 블록 — red가 아니라 hang이고 `&`로 띄우는 CI는 우연히 면역이라 로컬만 밟는다 | local | `scripts/run-bats.sh`, `tests/test_sealed-secrets-restore.bats` |

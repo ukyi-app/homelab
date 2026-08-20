@@ -20,6 +20,28 @@ if locale -a 2>/dev/null | grep -qiE '^C\.(UTF-8|utf8)$'; then export LC_ALL=C.U
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# ── fd 0 격리 ───────────────────────────────────────────────────────────────────
+# bats는 stdin을 전혀 만지지 않는다(1.14.0 libexec 전체에 `0<`/`</dev/null` 0건 — 실측). 그래서 @test 안의
+# 스텁이 피연산자 없이 `cat`을 부르면 **bats를 부른 셸의 stdin**에서 EOF를 기다리며 영구 블록한다.
+# 실패도 출력도 없이 멈추므로 red가 아니라 hang이다(실측 2026-08-20: never-EOF stdin을 물린
+# `bats -f rehearse tests/test_sealed-secrets-restore.bats`가 `1..1`에서 정지, rc=124.
+# 같은 명령에 `</dev/null`을 주면 1초에 `ok`. 이전 세션은 이 모양으로 1시간 39분을 태웠다).
+# ⚠️ CI가 이걸 안 밟는 것은 이 러너의 성질이 아니다 — ci.yaml:245가 이 러너를 `&`로 띄우기 때문이다
+#    (비대화형 bash의 async 명령은 fd 0이 /dev/null). `make ci`는 포그라운드라 호출자 fd 0을 그대로
+#    물려받는다. 즉 venue가 갈리는 자리이므로 **러너가 스스로 끊는다**.
+# 아래 수집 루프는 각자 자기 리다이렉트(`< tests/.ci-exclude`, `< <(git ls-files …)`)를 쓰므로 무영향.
+exec 0</dev/null
+
+# ⚠️ **per-@test 타임아웃(`BATS_TEST_TIMEOUT`) 백스톱은 걸지 않는다.** 잔여 블로킹을 열거 없이
+#    fail-loud시키는 유일한 기전이라 매력적이지만, 이 레포와 **양립 불가**다: 값이 설정돼 있으면
+#    **실패하는 중첩 bats를 부르는 @test가 거짓 타임아웃**을 낸다(실측 2026-08-20 최소 재현 —
+#    안쪽 bats가 통과하면 1초, 같은 구조에서 안쪽이 실패하면 타임아웃을 꽉 채우고 죽는다.
+#    `tests/gates/test_guard-skip-signalling.bats`의 "reports failure (not skip)…"가 실제로 그랬다:
+#    백스톱 없이는 0초 통과, `BATS_TEST_TIMEOUT=40`이면 40초 후 red. 진단은 `echo '}'`라는
+#    도달 불가능한 자리를 가리킨다). 이 레포는 **fail-closed를 단언하는 게이트가 다수**라
+#    그런 자리가 우연이 아니라 구조적으로 존재한다 ⇒ 보험이 통과하던 게이트를 깨뜨리는 순손실이다.
+#    잔여 블로킹은 위 fd 0 격리와 스텁의 argv 규약(docs/traps-detail.md)이 실질적으로 덮는다.
+
 # 제외 목록을 공백 구분 문자열로 (배열/ mapfile 미사용 — bash 3.2 안전)
 EXCL=" "
 while IFS= read -r line; do

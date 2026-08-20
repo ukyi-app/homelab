@@ -39,6 +39,20 @@ EOF
   chmod +x "$STUB/kubectl" "$STUB/sops"
 }
 
+# 항등 패스스루 sops 스텁(리허설 경로 전용) — **입력원은 argv가 정한다.**
+# 파일 인자는 항상 마지막 위치 — binary 모드 플래그(--input-type 등)가 끼어도 견고(위 ok 갈래와 같은 규약).
+# ⚠️ 본문을 피연산자 없는 `cat`으로 되돌리면 argv를 무시하고 fd 0을 읽는다. 피시험 코드
+#    (scripts/sealing-key-dr-gate.sh:121)는 **항상** 파일 인자를 주고 파이프로 먹이지 않으므로 그건
+#    실패가 아니라 **hang**이다(실측 2026-08-20: never-EOF stdin에서 rc=124, TAP이 `1..1`에서 정지).
+make_sops_passthrough_stub() {
+  cat > "$STUB/sops" <<'EOF'
+#!/bin/sh
+for f in "$@"; do :; done
+exec cat "$f"
+EOF
+  chmod +x "$STUB/sops"
+}
+
 @test "backup script exists and is executable" {
   [ -x "$S" ]
 }
@@ -204,9 +218,9 @@ EOF
 @test "rehearse_restore_on_live fails when backup List server-dry-run apply fails" {
   REPO="$TMP/repo-rh"; mkdir -p "$REPO/tools" "$TMP/bk"; printf 'CERT\n' > "$REPO/tools/sealed-secrets-cert.pem"
   printf 'dummy' > "$TMP/bk/ss-keys.111.enc.yaml"
-  printf '#!/bin/sh\ncat\n' > "$STUB/sops"
+  make_sops_passthrough_stub
   printf '#!/bin/sh\ncase "$*" in *"--dry-run=server"*) exit 1;; esac\nexit 0\n' > "$STUB/kubectl"
-  chmod +x "$STUB/sops" "$STUB/kubectl"
+  chmod +x "$STUB/kubectl"
   . "$ROOT/scripts/sealing-key-dr-gate.sh"
   PATH="$STUB:$PATH" run rehearse_restore_on_live "$REPO" "$TMP/bk"
   [ "$status" -ne 0 ]; echo "$output" | grep -q "dry-run apply 실패"
@@ -243,4 +257,14 @@ EOF
   [ "$status" -eq 0 ]
   # 정의 1 + 호출 3 = 4 이상
   [ "$output" -ge 4 ]
+}
+
+# 스텁 계약 증인 — 헬퍼의 입력원이 **argv**임을 단언한다. stdin에는 다른 내용을 파이프로 흘려 두므로,
+# 헬퍼 본문이 bare `cat`으로 되돌아가면 hang이 아니라 FROM-STDIN이 나와 **red**가 된다(파이프라 EOF가 있다).
+@test "the shared sops passthrough stub takes its input from the file operand, not stdin" {
+  make_sops_passthrough_stub
+  printf 'FROM-FILE' > "$TMP/probe"
+  run env PATH="$STUB:$PATH" bash -c 'printf FROM-STDIN | sops -d --input-type binary --output-type binary "$1"' _ "$TMP/probe"
+  [ "$status" -eq 0 ]
+  [ "$output" = "FROM-FILE" ]
 }
