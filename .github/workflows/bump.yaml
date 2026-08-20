@@ -34,7 +34,8 @@ jobs:
     # matrix 없음: 직렬화된 단일 job이 실제로 빌드된 앱만 bump하고
     # (build.yaml의 `built-*` 아티팩트에서 도출), 각 digest 실존을 검증한 뒤 한 번만 커밋한다.
     steps:
-      # writer App 토큰(homelab 전용 설치): App 토큰은 branch protection을 우회하지 못하므로
+      # writer App 토큰(설치는 org 전체 — `owner`/`repositories` 생략이 현재 레포로 한정한다):
+      # App 토큰은 branch protection을 우회하지 못하므로
       # main 직접 push가 아니라 PR + auto-merge로 쓴다(required check `gate`가 리뷰 게이트).
       # checkout 자체에 토큰이 필요해 이 첫 step에서 create-github-app-token을 인라인 발급한다
       # (핀 SSOT: tests/gates/test_app-token-sha-ssot.bats가 전 콜사이트 동일 SHA 강제).
