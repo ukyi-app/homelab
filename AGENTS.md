@@ -191,3 +191,17 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 | `db-cache-access.md` | DB/캐시 로컬·GUI 접속 — tailscale 직결·admin superuser·port-forward·롤백/자격 회수(F3) |
 | `token-inventory.md` | 전 자격증명 인벤토리 — 만료 원장(`credential-expiry.json`) 동기화·회전 절차(메타갭 ④) |
 | `toolchain.md` | 호스트 도구 핀 |
+
+## Agent skills
+
+### Issue tracker
+
+이슈·스펙은 `.scratch/<feature-slug>/` 아래 로컬 마크다운 파일로 관리한다. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+기본 5종 라벨(needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix)을 그대로 사용한다. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+단일 컨텍스트 — 루트 `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
