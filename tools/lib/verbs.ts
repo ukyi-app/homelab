@@ -6,6 +6,7 @@
 // MCP 노출 정책 필드는 MCP 티켓에서 이 descriptor에 추가한다.
 import { ENVELOPE, exitFor, type Envelope } from "./contract.ts";
 import { runDoctor } from "./doctor.ts";
+import { runStatus, statusInputError, type StatusInput } from "./status.ts";
 
 // 동사 형상 — I가 그 동사의 타입 입력(structure r2-a1: op를 입력 0개로 고정하면 입력 있는
 // 동사가 catalog를 우회해야 한다). 동사 추가 = 입력 타입 + 구체 Verb 타입 + union 멤버 +
@@ -16,13 +17,23 @@ type VerbShape<I> = { path: readonly string[]; desc: string; op: (input: I) => E
 export type DoctorInput = Record<string, never>;
 export type DoctorVerb = VerbShape<DoctorInput>;
 
-// 전 동사의 union — 후속 동사가 멤버로 추가된다(예: DoctorVerb | DbCreateVerb).
-export type Verb = DoctorVerb;
+export type StatusVerb = VerbShape<StatusInput>;
+
+// 전 동사의 union — 후속 동사가 멤버로 추가된다(예: … | DbCreateVerb).
+export type Verb = DoctorVerb | StatusVerb;
 
 function doctorOp(_input: DoctorInput): Envelope {
   const { checks, summary } = runDoctor();
   const variant = summary.fail > 0 ? "failure" : "success";
   return { schema: ENVELOPE, verb: "doctor", variant, exitCode: exitFor(variant), omitted: [], result: { checks, summary } };
+}
+
+function statusOp(input: StatusInput): Envelope {
+  // 입력 검증은 어댑터(CLI usage 오류)·MCP(invalid params)가 같은 술어로 선행한다 — 도달하면 결함.
+  const bad = statusInputError(input);
+  if (bad) throw new Error(`계약 파손: statusOp에 검증 안 된 입력 — ${bad}`);
+  const { variant, omitted, result } = runStatus(input);
+  return { schema: ENVELOPE, verb: "status", variant, exitCode: exitFor(variant), omitted, result };
 }
 
 // named export — CLI 어댑터·MCP가 정확한 입력 타입으로 호출한다(union 좁히기 불필요).
@@ -32,5 +43,12 @@ export const DOCTOR: DoctorVerb = {
   op: doctorOp,
 };
 
+// named export — CLI 어댑터·MCP가 정확한 입력 타입으로 호출한다.
+export const STATUS: StatusVerb = {
+  path: ["status"],
+  desc: "앱 상태 관찰(목록/단일 앱: 핀·바인딩·run·PR·ArgoCD) + 핸들(run/PR URL) 조회",
+  op: statusOp,
+};
+
 // 열거 SSOT — 라우팅 어휘(TREE)·usage·MCP tool 목록이 여기서 파생된다.
-export const VERBS: readonly Verb[] = [DOCTOR];
+export const VERBS: readonly Verb[] = [DOCTOR, STATUS];

@@ -38,7 +38,11 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   동사의 실체는 `lib/verbs.ts` operation catalog가 SSOT — 이 bin 모듈은 import하면 main이 실행되므로
   MCP 등 다른 소비자는 lib 쪽을 import한다. 변이는 전부 기존 변이 디스패처를
   `gh workflow run`으로 트리거하는 래퍼가 될 예정이고(신뢰 경계 불변 — actor 가드·전역 직렬화·
-  PR-first 그대로), 현재 동사는 `doctor` 하나다(워킹 스켈레톤 — 후속 동사는 catalog에 행 추가).
+  PR-first 그대로), 현재 동사는 `doctor`·`status` 둘이다(후속 동사는 catalog에 행 추가).
+  `homelab status [<app>] [--run <url>|--pr <url>] [--json]` = 상태 관찰(관측 전용): 인자 없음=
+  전체 앱 목록·요약(레포 데이터), `<app>`=핀·바인딩·최근 run·열린 PR(+KUBECONFIG 있으면 ArgoCD
+  `<app>-prod` sync/health, 없으면 라이브 구간 생략 — envelope.omitted=["live"]·exit 0), 핸들
+  조회=run/PR URL로 그 오퍼레이션 단위 상태(대기·conclusion·머지 여부 — MCP tool 입력과 같은 계약).
   **설치**: `bun link`(레포 루트) → package.json `bin`이 `homelab`을 전역 PATH에 심링크. 유일하게
   셰뱅+exec 비트를 갖는 .ts다(test_shebang-exec.bats가 bin 선언에서 예외를 파생). 레포 밖(앱 레포
   디렉토리 포함)에서도 동작한다(자기 위치는 import.meta 기준 해석).
@@ -181,6 +185,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`lib/verbs.ts`** — 동사 operation catalog(transport 중립·부수효과 없는 import-safe SSOT).
   행 = path(라우팅 어휘)+desc(--help)+op(타입 입력→계약 Envelope). argv 파싱·렌더링은 CLI 셸
   소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1). 후속 동사는 여기 행을 추가.
+- **`lib/status.ts`** — homelab CLI status 엔진(`runStatus()`·`statusInputError()`). 계층 계약:
+  레포(핀·바인딩)+GitHub(run·PR)가 기본, 라이브(ArgoCD)는 KUBECONFIG 있을 때만(부재=생략,
+  조회 실패=live.error — 유일한 선택 계층). GitHub 계층 오류는 fail-loud(빈 목록 위장 금지).
+  입력 검증 술어는 CLI(usage exit 2)·MCP(invalid params)가 공유. 관측 전용(gh api·kubectl get만).
 - **`lib/doctor.ts`** — homelab CLI doctor 진단 엔진(`runDoctor()`). 점검 항목·상태 판정·detail
   문구를 소유한다(관측 전용 — `gh api` 읽기만, 테스트가 argv 원장으로 강제). 선행 gh-auth 실패로
   판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든
@@ -215,7 +223,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   실측상 tracked와 결과 동일하고 픽스처 비용만 크다).
   같은 트리를 보는 두 스코프가 다른 이유는 **질문이 다르기** 때문이다("배포되는 매니페스트인가"
   vs "이미지 참조를 담을 수 있는가"). 소비자: `check-resource-limits`·`check-image-pins`·`check-app-deploy`·`check-skeleton`·
-  `check-app-netpol`·`audit-orphans`·`poll-ghcr`·`check-alert-rules`·`check-guard-authority`. (`surface-hash`는 **대상 아님** — 워킹트리
+  `check-app-netpol`·`audit-orphans`·`poll-ghcr`·`check-alert-rules`·`check-guard-authority`·
+  `lib/status`(homelab status — `apps` 유닛 열거). (`surface-hash`는 **대상 아님** — 워킹트리
   해시라 미커밋 파일을 포함해야 커밋 후 값과 일치한다.)
 - **`lib/image-pin.ts`** — 배포 핀 형식 커널(TAG_RE/DIGEST_RE·인라인 핀 parse/format·descriptor
   타입·autoDeploy fail-closed). 순수 형식 판정과 왕복만 소유하고 파일 I/O·exit·에러 문구는

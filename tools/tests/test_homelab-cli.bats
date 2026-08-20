@@ -73,9 +73,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$output" = "2" ]
 }
 
-@test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (doctor: 2 allowed, 5 rejected)" {
+@test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (doctor+status: 4 allowed, 10 rejected)" {
   # structure r1 시도2 A2·B2: verb만 result를 고르면 불가능한 variant(doctor+pending 등)가 valid로
   # 남는다 — verb 분기가 허용 variant 집합까지 선언하고, 허용∪비허용 = variant 전체(7종)여야 한다.
+  # 동사별 유효 표본 result는 SAMPLES가 SSOT — 새 동사 분기를 추가하면 여기에도 표본을 추가해야
+  # 이 테스트가 돈다(누락 = fail-loud).
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
     import { readFileSync } from "node:fs";
@@ -85,10 +87,15 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     const verbBranches = sch.allOf.find((b) => b.oneOf?.[0]?.properties?.verb)?.oneOf ?? [];
     if (verbBranches.length === 0) { console.error("verb 분기 없음"); process.exit(1); }
     const ids = sch.definitions.doctorCheck.properties.id.enum;
-    const result = { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } };
+    const SAMPLES = {
+      doctor: { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } },
+      status: { mode: "list", apps: [], count: 0 },
+    };
     let okN = 0, rejN = 0;
     for (const br of verbBranches) {
       const verb = br.properties.verb.enum[0];
+      const result = SAMPLES[verb];
+      if (result === undefined) { console.error(verb + ": SAMPLES에 유효 표본 없음"); process.exit(1); }
       const allowed = br.properties.variant.enum;
       if (!allowed || allowed.length === 0) { console.error(verb + ": 허용 variant 선언 없음"); process.exit(1); }
       for (const v of allowed) {
@@ -105,11 +112,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     console.log("ok:" + okN + " rej:" + rejN);
   '
   [ "$status" -eq 0 ]
-  # 바닥값: doctor 허용 2(success·failure) + 비허용 5 = variant 7종 전부 커버
-  echo "$output" | grep -q "^ok:2 rej:5$"
+  # 바닥값: (doctor 2 + status 2) 허용 + (doctor 5 + status 5) 비허용 = 두 동사 variant 7종 전부 커버
+  echo "$output" | grep -q "^ok:4 rej:10$"
 }
 
-@test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, floor 2)" {
+@test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, floor 4)" {
   # structure r1 b2: variant와 exitCode가 독립이면 success+exit 1도 green — 허용 쌍을 스키마가 강제한다.
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
@@ -119,10 +126,15 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     const codes = sch.properties.exitCode.enum;
     const verbBranches = sch.allOf.find((b) => b.oneOf?.[0]?.properties?.verb)?.oneOf ?? [];
     const ids = sch.definitions.doctorCheck.properties.id.enum;
-    const result = { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } };
+    const SAMPLES = {
+      doctor: { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } },
+      status: { mode: "list", apps: [], count: 0 },
+    };
     let n = 0;
     for (const br of verbBranches) {
       const verb = br.properties.verb.enum[0];
+      const result = SAMPLES[verb];
+      if (result === undefined) { console.error(verb + ": SAMPLES에 유효 표본 없음"); process.exit(1); }
       for (const v of br.properties.variant.enum) {
         const wrong = codes.find((c) => c !== map[v]);
         const env = { schema: "homelab-cli/1", verb, variant: v, exitCode: wrong, omitted: [], result };
@@ -133,7 +145,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     console.log("rejected:" + n);
   '
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^rejected:2$"
+  echo "$output" | grep -q "^rejected:4$"
 }
 
 @test "schema rejects a doctor envelope whose result does not match doctorResult (verb-result coupling)" {

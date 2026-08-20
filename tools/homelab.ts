@@ -7,8 +7,9 @@
 // 대상이라 `bun link`가 전역 PATH에 심링크한다(test_shebang-exec.bats가 bin 선언에서 파생).
 import { parseCommand, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
 import { USAGE_EXIT, type Envelope } from "./lib/contract.ts";
-import { DOCTOR, VERBS } from "./lib/verbs.ts";
+import { DOCTOR, STATUS, VERBS } from "./lib/verbs.ts";
 import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
+import { statusInputError, type StatusInput } from "./lib/status.ts";
 
 // 동사 실행의 세 결말 — 프로세스 관심사(stdout 채널·종료코드)는 전부 main이 소유한다.
 type VerbOutput =
@@ -21,6 +22,7 @@ type VerbOutput =
 // 호출이든 즉시 throw(계약 파손 — 종료코드 2의 의미 재사용 금지).
 const CLI_BY_VERB: Record<string, (rest: string[]) => VerbOutput> = {
   doctor: doctorCli,
+  status: statusCli,
 };
 for (const v of VERBS) {
   if (!CLI_BY_VERB[v.path.join(" ")]) throw new Error(`계약 파손: 동사 '${v.path.join(" ")}'의 CLI 어댑터가 없다`);
@@ -71,6 +73,72 @@ function renderDoctor(envelope: Envelope): string[] {
     "",
     `진단 결과: pass ${r.summary.pass} · fail ${r.summary.fail} · warn ${r.summary.warn}`,
   ];
+}
+
+function statusUsage(): string {
+  return [
+    "사용법: homelab status [<app>] [--run <url> | --pr <url>] [--json]",
+    "",
+    "앱 상태 관찰 — 인자 없음: 전체 앱 목록·요약(레포 데이터). <app>: 배포 핀·바인딩·최근 run·",
+    "열린 PR에, KUBECONFIG가 있으면 ArgoCD sync/health를 덧붙인다(없으면 라이브 구간 생략 표시).",
+    "핸들 조회: --run/--pr에 GitHub URL을 주면 그 오퍼레이션 단위의 상태를 보고한다.",
+    "  --run <url>   run URL(https://github.com/<o>/<r>/actions/runs/<id>) 핸들 조회",
+    "  --pr <url>    PR URL(https://github.com/<o>/<r>/pull/<n>) 핸들 조회",
+    "  --root <dir>  앱 산출물 루트 오버라이드(기본: CLI 자신의 레포 — 테스트 심)",
+    "  --json        결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
+    "",
+  ].join("\n");
+}
+
+const OX: Record<string, string> = { true: "켜짐", false: "꺼짐" };
+
+function renderStatus(envelope: Envelope): string[] {
+  const r = envelope.result as Record<string, any>;
+  if (typeof r.error === "string") return [`오류: ${r.error}`];
+  if (r.mode === "list") {
+    if (r.count === 0) return ["온보딩된 앱이 없다(그린필드)"];
+    return [
+      `앱 ${r.count}개`,
+      ...r.apps.map((a: Record<string, unknown>) =>
+        `• ${a.name} — tag ${a.tag ?? "(핀 없음)"} · autoDeploy ${OX[String(a.autoDeploy)] ?? "미기록"} · repo ${a.sourceRepo ?? "(인레포)"}`),
+    ];
+  }
+  if (r.mode === "app") {
+    const lines = [
+      `앱: ${r.app.name}`,
+      `배포 핀: tag ${r.app.tag ?? "(없음)"} · digest ${r.app.digest ?? "(없음)"}`,
+      `autoDeploy: ${OX[String(r.app.autoDeploy)] ?? "미기록"} · source repo: ${r.app.sourceRepo ?? "(인레포)"} · 메모리 원장: ${r.app.ledgerMi !== undefined ? `limit ${r.app.ledgerMi}Mi` : "행 없음"}`,
+      r.runs.length === 0 ? "최근 run: 없음"
+        : `최근 run: ${r.runs.map((x: Record<string, unknown>) => `${x.name}[${x.status}${x.conclusion ? `/${x.conclusion}` : ""}]`).join(" · ")}`,
+      r.openPrs.length === 0 ? "열린 PR: 없음"
+        : `열린 PR: ${r.openPrs.map((p: Record<string, unknown>) => `#${p.number}(${p.head})`).join(" · ")}`,
+    ];
+    if (envelope.omitted.includes("live")) lines.push("라이브(ArgoCD): 생략 — KUBECONFIG 미설정");
+    else if (r.live?.error) lines.push(`라이브(ArgoCD): 조회 실패 — ${r.live.error}`);
+    else lines.push(`라이브(ArgoCD): sync ${r.live.argocd.sync} · health ${r.live.argocd.health}${r.live.argocd.revision ? ` · rev ${r.live.argocd.revision}` : ""}`);
+    return lines;
+  }
+  if (r.mode === "run") {
+    return [`run: ${r.run.name ?? "(이름 없음)"} — status ${r.run.status}${r.run.conclusion ? ` · conclusion ${r.run.conclusion}` : " · 진행 중"}`];
+  }
+  return [`PR #${r.pr.number} — ${r.pr.state} · merged ${OX[String(r.pr.merged)]} · auto-merge ${OX[String(r.pr.autoMerge)]}`];
+}
+
+function statusCli(rest: string[]): VerbOutput {
+  let app: string | undefined;
+  let flagArgv = rest;
+  if (rest[0] !== undefined && !rest[0].startsWith("--")) { app = rest[0]; flagArgv = rest.slice(1); }
+  let flags;
+  try { flags = typedFlags(flagArgv, { value: ["--run", "--pr", "--root"], bool: ["--json", "--help"] }); }
+  catch (e) {
+    return { kind: "usage-error", message: `homelab status: ${e instanceof Error ? e.message : String(e)}`, usage: statusUsage() };
+  }
+  if (flags.bool("--help")) return { kind: "help", text: statusUsage() };
+  const input: StatusInput = { app, runUrl: flags.str("--run"), prUrl: flags.str("--pr"), root: flags.str("--root") };
+  const bad = statusInputError(input);
+  if (bad) return { kind: "usage-error", message: `homelab status: ${bad}`, usage: statusUsage() };
+  const envelope = STATUS.op(input);
+  return { kind: "result", json: flags.bool("--json"), envelope, human: renderStatus(envelope) };
 }
 
 function doctorCli(rest: string[]): VerbOutput {

@@ -31,6 +31,18 @@ cli_stub_init() {
     printf 'FROM oven/bun:1 AS build\nARG TARGETARCH\nRUN bun build --compile --target=bun-linux-${TARGETARCH}\n' > "$FIX/Dockerfile.$a"
   done
 
+  # status 픽스처 기본값 — GitHub 응답(빈 목록)·ArgoCD Application. 각 테스트가 덮어써서 조정한다.
+  printf '[]\n' > "$FIX/homelab-prs.json"
+  printf '[]\n' > "$FIX/runs.json"
+  printf '{"name":"release","status":"completed","conclusion":"success","head_sha":"a1b2c3d","html_url":"https://github.com/ukyi-app/page/actions/runs/1"}\n' > "$FIX/run-handle.json"
+  printf '{"number":7,"state":"open","merged":false,"merge_commit_sha":null,"title":"bump","head_ref":"bump-poll/page-sha-1","head_sha":"beef123","auto_merge":true,"html_url":"https://github.com/ukyi-app/homelab/pull/7"}\n' > "$FIX/pr-handle.json"
+  printf '{"status":{"sync":{"status":"Synced","revision":"abc1234"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
+
+  # 앱 배포 산출물 픽스처 루트 — status의 --root 주입 대상(레포 밖 hermetic 검증).
+  APPS_ROOT="$BATS_TEST_TMPDIR/repo-root"
+  export APPS_ROOT
+  mkdir -p "$APPS_ROOT/apps"
+
   # 원장 파서 — NUL/RS 레코드를 배열로 복원해 질의한다. 모드:
   #   count <argv...>  : 접두 일치 레코드 수
   #   gh-readonly      : 모든 gh 레코드가 `gh api` + 변이 수단 없음인지 (위반 시 비-0)
@@ -73,9 +85,12 @@ else:
 PY
 }
 
-# gh stub — doctor가 낼 수 있는 읽기 호출의 완전 목록(계약 밖 호출은 exit 3).
+# gh stub — doctor·status가 낼 수 있는 읽기 호출의 완전 목록(계약 밖 호출은 exit 3).
+# doctor 케이스는 정확 argv 고정, status의 run/PR 케이스는 레포 부분만 글롭이다 — 핸들 모드가
+# 임의 owner/repo URL을 정당한 입력으로 받는 계약이라(좁히면 계약을 거짓으로 검증) 의도적 비대칭.
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
-# STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE. 템플릿 파일 내용은 $FIX 픽스처가 SSOT.
+# STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
+# STUB_GH_HANDLE_404. 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
 make_gh_stub() {
   cat > "$STUB/gh" <<'SH'
 #!/usr/bin/env bash
@@ -118,6 +133,23 @@ case "$*" in
   "api repos/ukyi-app/homelab-app-template/contents/scaffold/archetypes/worker/Dockerfile --jq .content")
     b64 "$FIX/Dockerfile.worker"
     ;;
+  # ── status 동사 케이스 — 응답 픽스처는 $FIX/*.json이 SSOT, 오류 시나리오는 STUB_* env ──
+  "api repos/ukyi-app/homelab/pulls?state=open&per_page=100 --jq "*)
+    if [ -n "${STUB_GH_PRS_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
+    cat "$FIX/homelab-prs.json"
+    ;;
+  "api repos/"*"/actions/runs?per_page=3 --jq "*)
+    if [ -n "${STUB_GH_RUNS_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
+    cat "$FIX/runs.json"
+    ;;
+  "api repos/"*"/actions/runs/"*" --jq "*)
+    if [ -n "${STUB_GH_HANDLE_404:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    cat "$FIX/run-handle.json"
+    ;;
+  "api repos/"*"/pulls/"*" --jq "*)
+    if [ -n "${STUB_GH_HANDLE_404:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    cat "$FIX/pr-handle.json"
+    ;;
   *)
     echo "stub gh: 계약 밖 호출: $*" >&2
     exit 3
@@ -125,6 +157,46 @@ case "$*" in
 esac
 SH
   chmod +x "$STUB/gh"
+}
+
+# kubectl stub — status의 ArgoCD Application 조회 전용(그 외 호출은 exit 3 fail-closed).
+# STUB_KUBECTL_FAIL 설정 시 클러스터 접근 실패를 재현한다.
+make_kubectl_stub() {
+  cat > "$STUB/kubectl" <<'SH'
+#!/usr/bin/env bash
+{ printf '%s\0' kubectl "$@"; printf '\x1e'; } >> "$CALLS"
+case "$*" in
+  "-n argocd get applications.argoproj.io "*" -o json")
+    if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
+    cat "$FIX/argocd-app.json"
+    ;;
+  *)
+    echo "stub kubectl: 계약 밖 호출: $*" >&2
+    exit 3
+    ;;
+esac
+SH
+  chmod +x "$STUB/kubectl"
+}
+
+# 앱 배포 산출물 픽스처 — create-app.ts 산출 형상(values.yaml image.{repo,tag,digest} ·
+# .bindings.json autoDeploy · source-repo 한 줄)을 $APPS_ROOT 아래에 재현한다.
+# 사용: make_app_fixture <name> [autoDeploy(true|false)] [sourceRepo|-]
+make_app_fixture() {
+  name="$1"; auto="${2:-true}"; src="${3:-ukyi-app/$1}"
+  d="$APPS_ROOT/apps/$name/deploy/prod"
+  mkdir -p "$d"
+  printf 'image:\n  repo: ghcr.io/ukyi-app/%s\n  tag: sha-1111111%s\n  digest: sha256:%s\n' \
+    "$name" "$(printf '%033d' 0)" "$(printf 'ab%062d' 0)" > "$d/values.yaml"
+  printf '{ "autoDeploy": %s }\n' "$auto" > "$d/.bindings.json"
+  if [ "$src" != "-" ]; then printf '%s\n' "$src" > "$d/source-repo"; fi
+}
+
+# 메모리 원장 픽스처 행 — 형식 SSOT는 tools/lib/ledger-totals.ts LEDGER_ROW_RE.
+# 사용: make_ledger_row <name> <reqMi> <limitMi>
+make_ledger_row() {
+  mkdir -p "$APPS_ROOT/docs"
+  printf '| <!-- ledger:row --> %s | prod | %s | %s |\n' "$1" "$2" "$3" >> "$APPS_ROOT/docs/memory-ledger.md"
 }
 
 # kubeseal 존재 시나리오 — doctor는 PATH 존재만 보므로(Bun.which) 실행되지 않지만,
