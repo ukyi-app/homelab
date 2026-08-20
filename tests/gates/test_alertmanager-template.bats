@@ -38,7 +38,13 @@ setup() {
 
 @test "message uses an allowed glyph from the lexicon" {
   # allowed: 🔴(발생/실패) 🔵(해소) ⚠️(경고) ✅(성공) ⚪(취소/건너뜀)
-  run bash -c "printf '%s' \"$MSG\" | grep -Eo '🔴|🔵|⚠️|✅|⚪' | head -1"
+  # ⚠️ **bash -c 보간 금지** — MSG는 큰따옴표를 담는다(실측 31개). 보간하면 그 따옴표가 인용 상태를
+  #    토글해 뒤쪽이 비인용 영역에 놓이고, 명령이 재구성돼 grep이 엉뚱한 것을 센다.
+  #    실측 2026-08-20: MSG 끝에 `"; id; echo "`를 담은 줄을 더하자 이 방식이 rc=1 + grep 결과가
+  #    아니라 **MSG 원문 일부**를 뱉었다(here-string은 정상). 그 red는 "글리프가 없다"로 **오독**된다.
+  #    지금 안전한 것은 우연이다 — 제목 분기(`{{ if eq $name "…" }}`)를 하나 더할 때마다 큰따옴표가
+  #    두 개씩 늘어난다. 형제 @test(아래 "no manual escaping")가 같은 이유로 이미 here-string을 쓴다.
+  run grep -Eo '🔴|🔵|⚠️|✅|⚪' <<<"$MSG"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
 }
