@@ -76,7 +76,10 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@bash scripts/check-locale-collation.sh
 	@bash scripts/check-gh-secret-coverage.sh
 	@scripts/verify-ledger.sh
-	@bats tests/test_sops-roundtrip.bats
+# ⚠️ bats 호출은 fd 0을 끊는다(`</dev/null`). @test 안의 스텁이 피연산자 없이 fd 0을 읽으면 호출자의
+#    stdin에서 영구 블록한다 — 실패도 출력도 없는 hang이다(근거·실측은 scripts/run-bats.sh 헤더).
+#    `>/dev/null`은 stdout이라 격리가 아니다. ci.yaml은 `&`로 띄워 우연히 면역이고 여기는 포그라운드다.
+	@bats tests/test_sops-roundtrip.bats </dev/null
 
 TF_ROOTS := cloudflare tailscale github
 
@@ -138,7 +141,7 @@ m6-tools: ## 마일스톤 6용 차트/CI 툴체인 검증
 
 .PHONY: chart-test
 chart-test: ## 모든 kind에 대해 app 차트 렌더+검증
-	bats platform/charts/app/tests/
+	bats platform/charts/app/tests/ </dev/null
 	bash platform/charts/app/tests/render.sh
 
 # make ci가 도구 부재로 건너뛴 게이트 스텝을 모으는 원장(마지막 줄이 SKIP 마커 + exit 4로 낸다).
@@ -260,7 +263,7 @@ KSOPS_BATS    := platform/cnpg/prod/test_creds_reference.bats \
 .PHONY: verify-runbooks
 verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored 로컬 전용, CI 미배선). 부재=SKIP
 	@if [ -d "$(RUNBOOK_DIR)" ] && ls $(RUNBOOK_DIR)/*.bats >/dev/null 2>&1; then \
-	  bats $(RUNBOOK_DIR)/*.bats; \
+	  bats $(RUNBOOK_DIR)/*.bats </dev/null; \
 	else echo "SKIP: verify-runbooks: $(RUNBOOK_DIR)/*.bats 0건(gitignored 로컬 전용) — 런북 회귀 미평가"; exit 4; fi
 
 .PHONY: verify-runbook-index
@@ -271,13 +274,13 @@ verify-runbook-index: ## [local] 런북 인덱스↔docs/runbooks 정합(런북 
 verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 부재=SKIP
 	@if [ -f "$(KUBECONFIG_LIVE)" ]; then \
 	  $(ASSERT_IDENTITY_WARN); \
-	  KUBECONFIG=$(KUBECONFIG_LIVE) bats $(POSTURE_BATS); \
+	  KUBECONFIG=$(KUBECONFIG_LIVE) bats $(POSTURE_BATS) </dev/null; \
 	else echo "SKIP: verify-posture: $(KUBECONFIG_LIVE) 부재 — 라이브 posture 미평가. 먼저 make up"; exit 4; fi
 
 .PHONY: verify-ksops
 verify-ksops: ## [local] KSOPS 렌더 bats(cnpg×3·cache×1) — 실 age 키 있으면 실행/부재=SKIP(.ci-exclude 그룹)
 	@if [ -f "$(SOPS_AGE_KEY_FILE)" ]; then \
-	  SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) bats $(KSOPS_BATS); \
+	  SOPS_AGE_KEY_FILE=$(SOPS_AGE_KEY_FILE) bats $(KSOPS_BATS) </dev/null; \
 	else echo "SKIP: verify-ksops: $(SOPS_AGE_KEY_FILE) 부재 — KSOPS 렌더 미평가. SOPS_AGE_KEY_FILE 지정 후 재실행"; exit 4; fi
 
 .PHONY: verify-traps
