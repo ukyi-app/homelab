@@ -242,7 +242,12 @@ data:
           #   "최근 실패가 아니다"라는 뜻이다). 유닛이 계속 실패하면 매 실행마다 값이 갱신돼 재발화한다.
           #   파일을 지우는 주체를 두지 않는 것도 의도다 — 그 주체의 실패가 새로운 무성 경로가 된다.
           # ⚠️ 이 룰은 레포 트리에 선언된 유닛만이 아니라 **`OnFailure=`가 달린 모든 호스트 유닛**을
-          #   덮는다. 반대로 그 줄이 없는 유닛(k3s.service·apt-daily·fstrim 등)에는 여전히 채널이 0이다.
+          #   덮는다. 그 줄이 **없는** 유닛(apt-daily·fstrim·logrotate·unattended-upgrades 등)의
+          #   전역 표면은 아래 `SystemdHostUnitFailed`(주기 스윕)가 덮는다 — 둘은 직교다.
+          # 🔴 **어느 축도 `Restart=always` 유닛은 못 본다**(라이브 실측 2026-08-20): `k3s.service`는
+          #   RestartUSec=5s · StartLimitIntervalUSec=10s · StartLimitBurst=5라 10초 창에 시도가 최대
+          #   3회 — 시작 rate limit에 도달하지 못해 `failed`에 **진입하지 않는다**(계속 activating).
+          #   그 축은 TargetDown/Watchdog/off-node deadman의 소관이고, systemd 축의 원리적 사각지대다.
           - alert: SystemdUnitFailed
             expr: |
               (time() - systemd_unit_last_failure_timestamp) < 7200
@@ -251,6 +256,67 @@ data:
             annotations:
               summary: "호스트 systemd 유닛 실패: {{ $labels.unit }}"
               description: "호스트 systemd oneshot 유닛이 failed로 끝났습니다 — `journalctl -u {{ $labels.unit }} -n 200`으로 원인을 보세요. 이 알림은 **실패 이벤트 기준**이라 2시간 뒤 자동 해소됩니다(고쳤다는 뜻이 아닙니다). 유닛이 계속 실패하면 매 실행마다 재발화하고, 실행 자체가 멈추면 해당 신선도 알림이 backstop입니다."
+          # ── 호스트 systemd **전역** 스윕(주기 축) ────────────────────────────────────────
+          # ★ 위 SystemdUnitFailed와 **직교하는 축**이다. 저쪽은 `OnFailure=` 한 줄이 달린 유닛만
+          #   덮는 **이벤트** 채널(지연 0 · critical), 이쪽은 `systemctl list-units`를 5분마다 읽는
+          #   **상태** 채널(전역 · 지연 ≤1주기)이다. 라이브 실측(2026-08-20): 로드 `.service` 64건 중
+          #   `OnFailure=` 보유가 vendor 2건 + 레포 1건뿐 — 나머지가 이 스윕의 존재 이유다.
+          # ★ **severity가 warning인 것이 설계다.** 어떤 유닛의 실패가 정말 critical이면 그 유닛
+          #   파일에 `OnFailure=unit-failure-notify@%n.service` 한 줄을 넣어 위 축으로 승격한다.
+          #   스윕은 폭(coverage), 저쪽은 깊이(즉시성·critical)를 맡는다.
+          #   ⚠️ 승격은 **페이지를 늘리지 않는다** — alertmanager.yaml의 unit-scoped inhibit 규칙이
+          #      같은 `unit`의 critical로 이 warning을 억제한다(같은 고장에 두 번 페이징하지 않는다).
+          # ★ `type=~` 필터의 근거: 라이브 629건의 내역은 mount 225 · device 116 · scope 94 ·
+          #   slice 52로 **487건이 kubelet/k3s 트랜지언트**다. `device`(udev 상태)·`scope`(컨테이너
+          #   런타임 소유)·`slice`(cgroup)·`target`(항상 결과이지 원인이 아니다)은 호스트의 일이
+          #   아니고 그 실패는 k8s 알림들의 소관이다. `mount`는 **남긴다** — `/mnt/bulk`가 그 타입이고
+          #   국면 B의 핵심 스토리지다(kubelet subpath mount 실패는 13일 journal에 0건. 노이즈가
+          #   관측되면 그때 `unit!~"var-lib-kubelet.+"`가 레버다 — 선제 allowlist는 썩는다).
+          # ★ **`and on()` 신선도 게이트가 잔상의 역방향을 닫는다.** 스윕이 죽은 시점에 파일에 failed
+          #   시리즈가 남아 있으면 textfile collector가 그것을 영원히 재발행해, 유닛을 고친 뒤에도
+          #   이 알림이 **영구 발화**한다. 게이트가 하트비트 3600s를 넘기면 게이지를 버린다.
+          #   ⚠️ 3600s는 SystemdSweepStale의 발화 시점(1800 + for 5m = 2100s)보다 **뒤**여야 한다 —
+          #      그래야 상태 게이지가 꺼지기 전에 하트비트 알림이 먼저 켜져 **틈이 생기지 않는다.**
+          #      tests/gates/test_systemd-failed-sweep.bats가 이 부등식을 강제한다.
+          # ★ rollup 없음 — 스크레이프 시계열이라 모드 C 구멍이 원리적으로 없다. `max by`는 rollup이
+          #   아니라 **집계**다: node-exporter 파드 재생성으로 instance/pod가 갈리면 같은 unit이 두
+          #   시리즈가 되므로(「재부팅 IP churn」) 라벨을 벗겨 알림 identity를 안정시킨다.
+          # ★ `absent()` 없음 — "지금 failed인 유닛이 없다"가 곧 이 시리즈의 부재(정상)다.
+          #   **미실행**은 아래 SystemdSweepStale이 전담한다(하트비트 ⊥ 상태 게이지 관용구).
+          - alert: SystemdHostUnitFailed
+            expr: |
+              max by (unit, type) (systemd_sweep_unit_failed{type=~"service|timer|socket|path|mount|automount"}) == 1
+              and on() ((time() - max(last_over_time(systemd_sweep_last_success_timestamp[2h]))) < 3600)
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "호스트 systemd 유닛이 failed 상태: {{ $labels.unit }}"
+              description: "주기 스윕(5분)이 failed 상태인 호스트 유닛을 발견했습니다 — `systemctl status {{ $labels.unit }}` · `journalctl -u {{ $labels.unit }} -n 200`. 고친 뒤에도 유닛은 failed로 남으므로 `systemctl reset-failed {{ $labels.unit }}`까지 해야 다음 스윕(≤5분)에 해소됩니다. 이 유닛의 실패가 즉시 페이징돼야 한다면 유닛 파일에 `OnFailure=unit-failure-notify@%n.service`를 넣어 critical 축으로 승격하세요. ⚠️ `Restart=always` 유닛은 이 축에 원리적으로 잡히지 않습니다(failed 상태에 진입하지 않음)."
+          # ── 스윕 하트비트: **0건과 미실행의 구별** ───────────────────────────────────────
+          # 🔴 이 알림의 존재 이유가 그 구별이다. textfile collector는 파일이 남아 있는 한 같은 값을
+          #   **영원히 재발행**하므로 스윕이 죽어도 `systemd_sweep_units_failed 0`이 계속 나온다 —
+          #   **시리즈의 존재는 생존을 증명하지 않는다.** 신선도를 값 안에 실은 타임스탬프만이 그것을
+          #   증명한다. 생산자 쪽 짝은 스크립트의 3중 fail-closed다(열거가 붕괴하면 아무것도 쓰지 않고
+          #   죽어 이 하트비트가 그 자리에 늙는다).
+          # ★ `absent()` 가드는 여기 **필수**다 — 위 SystemdUnitFailed와 정반대 결정이다. 저쪽은
+          #   이벤트 메트릭이라 부재가 곧 정상, 여기는 주기 게이지라 부재가 곧 드리프트다.
+          #   이벤트 메트릭의 '부재=정상' 논거를 연속 게이지에 복사하지 마라.
+          # ★ 모드 D: `in-cluster` + `impossible` → 화이트리스트가 `last_over_time`을 **요구**한다.
+          #   `max_over_time`은 값의 전진 점프를 [2h] 래치해 스윕이 살아나도 알림이 안 꺼진다.
+          # ★ 임계 1800s 산술: 최악 성공↔성공 간격 = OnCalendar(300) + AccuracySec(30) +
+          #   RandomizedDelaySec(30) + TimeoutStartSec(60) = **420s**. 1800s는 4.3배로 노드
+          #   재부팅(다운 + k3s/node-exporter 기동 ≈10분)을 페이지 없이 흡수한다.
+          # ⚠️ 배선의 마지막 한 줄(`systemctl enable --now systemd-failed-sweep.timer`)을 잊으면
+          #   이 알림이 그것을 잡는다 — host-config.sh는 유닛을 설치만 하고 enable하지 않는다(의도).
+          - alert: SystemdSweepStale
+            expr: |
+              (time() - max(last_over_time(systemd_sweep_last_success_timestamp[2h]))) > 1800
+              or absent(last_over_time(systemd_sweep_last_success_timestamp[2h]))
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "systemd 전역 실패 스윕 하트비트가 30분+ 침묵 — 호스트 실패 감시 실명 위험"
+              description: "systemd-failed-sweep.timer(5분)가 textfile collector에 하트비트를 못 씁니다 — 타이머 미enable/미설치 · 스크립트 fail-closed(열거 붕괴) · textfile 디렉토리 소실. 이 값이 늙으면 SystemdHostUnitFailed의 '0건'은 관측이 아니라 잔상입니다. `systemctl status systemd-failed-sweep.timer systemd-failed-sweep.service`와 `/var/lib/node_exporter/textfile/systemd-failed-sweep.prom`의 mtime을 확인하세요. 배선: sudo infra/k3s-bootstrap/host-config.sh --apply 후 sudo systemctl enable --now systemd-failed-sweep.timer"
           # bulk 티어 용량: 호스트 df를 백업 잡이 함께 push(files_data_bulk_avail/size_bytes).
           #
           # ⚠️ **국면 A 정정(2026-08-17)**: 아래 서술의 "호스트 launchd pusher"는 Mac 시대의 실행자다.

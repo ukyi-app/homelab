@@ -116,6 +116,17 @@ data:
       - source_matchers: [ 'severity = critical', 'disk =~ ".+"' ]
         target_matchers: [ 'severity = warning', 'disk =~ ".+"' ]
         equal: ['disk']
+      # 같은 unit의 critical(SystemdUnitFailed — `OnFailure=` 이벤트 축)이 warning
+      # (SystemdHostUnitFailed — 주기 스윕 축)을 억제한다. 두 축은 **직교**라 같은 고장을 양쪽이
+      # 보는 것이 정상이고(이벤트는 지연 0, 스윕은 ≤5분), 그때 페이지가 둘이면 안 된다.
+      # alertname이 다르므로 위 첫 규칙(equal:alertname)으로는 매치되지 않는다.
+      # ⚠️ unit 라벨 보유로 한정(=~".+")한다 — 없으면 라벨이 없는 알림끼리 **빈 문자열로 매칭**돼
+      #    엉뚱한 억제가 생긴다(disk 규칙이 같은 이유로 같은 한정을 건다).
+      # ★ 이 규칙이 있어야 "critical이 필요하면 유닛 파일에 OnFailure= 한 줄을 넣어 승격하라"는
+      #   스윕 알림의 처방이 **페이지를 늘리지 않는다**.
+      - source_matchers: [ 'alertname = SystemdUnitFailed', 'unit =~ ".+"' ]
+        target_matchers: [ 'alertname = SystemdHostUnitFailed', 'unit =~ ".+"' ]
+        equal: ['unit']
 ---
 apiVersion: apps/v1
 kind: Deployment

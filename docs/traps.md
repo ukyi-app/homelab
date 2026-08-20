@@ -78,3 +78,4 @@
 | systemd 유닛 등 생산자 확장자 밖 파일의 인라인 push — 완전성 가드가 원리적으로 못 봐 죽은 알림이 초록으로 태어난다 | gate | `tests/gates/test_unit-failure-notify.bats` |
 | bats가 fd 0을 상속시켜 스텁의 피연산자 없는 `cat`이 호출자 stdin에서 영구 블록 — red가 아니라 hang이고 `&`로 띄우는 CI는 우연히 면역이라 로컬만 밟는다 | local | `scripts/run-bats.sh`, `tests/test_sealed-secrets-restore.bats` |
 | e2e 하네스의 호스트 포트 밴드가 커널 ephemeral·k8s NodePort와 겹침 — 전자는 하네스 자신의 curl과 경합하고 후자는 nat 규칙이라 어떤 bind 프로브로도 안 보여 `docker run`이 통과한 채 남의 서비스로 질의가 간다 | gate | `tests/gates/test_vmalert-e2e-port-allocation.bats`, `tests/gates/lib/vmalert-e2e.sh` |
+| `Restart=always` 유닛은 시작 rate limit에 못 닿으면 `failed`로 확정되지 않아 systemd 상태 축이 원리적으로 못 본다 — 전역 스윕을 넣고 '이제 다 덮었다'로 읽는 것이 위험이다 | gate | `tests/gates/test_systemd-failed-sweep.bats`, `scripts/sweep-systemd-failures.sh` |
