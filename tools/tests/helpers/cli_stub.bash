@@ -31,6 +31,19 @@ cli_stub_init() {
     printf 'FROM oven/bun:1 AS build\nARG TARGETARCH\nRUN bun build --compile --target=bun-linux-${TARGETARCH}\n' > "$FIX/Dockerfile.$a"
   done
 
+  # 변이 엔진 테스트의 고정 nonce — HOMELAB_CORRELATION 주입 심(엔진이 CORRELATION_RE로 검증).
+  NONCE="corr-fixed-nonce-01"
+  export NONCE
+
+  # db create 픽스처 기본값(행복 경로): 디스패치 접수 → nonce 에코 run 1개(성공) → PR 1개(미머지).
+  printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
+  printf '{"status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run.json"
+  printf '[]\n' > "$FIX/db-run-jobs.json"
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
+  printf 'identical\n' > "$FIX/db-compare.txt"
+  printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
+  printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
+
   # status 픽스처 기본값 — GitHub 응답(빈 목록)·ArgoCD Application. 각 테스트가 덮어써서 조정한다.
   printf '[]\n' > "$FIX/homelab-prs.json"
   printf '[]\n' > "$FIX/runs.json"
@@ -70,6 +83,8 @@ def is_prefix(rec, pre):
 
 if mode == "count":
     print(sum(1 for r in records if is_prefix(r, want)))
+elif mode == "exact":  # argc + 각 위치 문자열이 모두 같은 레코드가 있는가(인자 경계 보존 단언)
+    sys.exit(0 if any(r == want for r in records) else 1)
 elif mode == "gh-readonly":
     # doctor는 관측 전용 — 모든 gh 레코드는 `gh api`이고 변이 수단이 없어야 한다.
     MUTATION = {"-X", "--method", "-f", "-F", "--field", "--raw-field", "--input"}
@@ -133,6 +148,46 @@ case "$*" in
   "api repos/ukyi-app/homelab-app-template/contents/scaffold/archetypes/worker/Dockerfile --jq .content")
     b64 "$FIX/Dockerfile.worker"
     ;;
+  # ── db create 변이 엔진 케이스 — 유일하게 허용되는 변이 argv는 workflow run 하나뿐 ──
+  "workflow run create-database.yaml -R ukyi-app/homelab "*)
+    if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
+    ;;
+  "api repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20 --jq "*)
+    cat "$FIX/db-runs.json"
+    ;;
+  "api repos/ukyi-app/homelab/actions/runs/"*"/jobs --jq "*)
+    cat "$FIX/db-run-jobs.json"
+    ;;
+  "api repos/ukyi-app/homelab/actions/runs/"*" --jq {status, conclusion, html_url}")
+    cat "$FIX/db-run.json"
+    ;;
+  "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "*)
+    cat "$FIX/db-prs.json"
+    ;;
+  "api repos/ukyi-app/homelab/compare/"*" --jq .status")
+    # STUB_COMPARE_FLAKY: 첫 호출만 전송 오류 — 미확정 관측을 캐시하지 않음(재평가 수렴)을 증명.
+    # ⚠️ 마커는 셸 내장 리다이렉션으로 만든다 — PATH=$STUB에는 touch가 없다(대체 PATH 하네스).
+    if [ -n "${STUB_COMPARE_FLAKY:-}" ] && [ ! -f "$FIX/.compare-called" ]; then
+      : > "$FIX/.compare-called"
+      echo "gh: connect: connection reset" >&2
+      exit 1
+    fi
+    cat "$FIX/db-compare.txt"
+    ;;
+  # 표면 blob sha(3상) — ref=feedbee(머지 SHA)는 요청값, 그 외 ref는 관측 리비전.
+  "api repos/ukyi-app/homelab/contents/"*" --jq .sha")
+    case "$*" in
+      *"?ref=feedbee --jq .sha")
+        if [ -n "${STUB_SURFACE_MERGE_ABSENT:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+        printf 'blobsha-request\n'
+        ;;
+      *)
+        if [ -n "${STUB_SURFACE_ABSENT:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+        if [ -n "${STUB_SURFACE_ERROR:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
+        if [ -n "${STUB_SURFACE_CHANGED:-}" ]; then printf 'blobsha-other\n'; else printf 'blobsha-request\n'; fi
+        ;;
+    esac
+    ;;
   # ── status 동사 케이스 — 응답 픽스처는 $FIX/*.json이 SSOT, 오류 시나리오는 STUB_* env ──
   "api repos/ukyi-app/homelab/pulls?state=open&per_page=100 --jq "*)
     if [ -n "${STUB_GH_PRS_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
@@ -166,6 +221,14 @@ make_kubectl_stub() {
 #!/usr/bin/env bash
 { printf '%s\0' kubectl "$@"; printf '\x1e'; } >> "$CALLS"
 case "$*" in
+  "-n argocd get applications.argoproj.io cnpg-data -o json")
+    if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
+    cat "$FIX/argocd-cnpg-data.json"
+    ;;
+  "-n argocd get applications.argoproj.io data-conn-prod -o json")
+    if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
+    cat "$FIX/argocd-data-conn.json"
+    ;;
   "-n argocd get applications.argoproj.io "*" -o json")
     if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
     cat "$FIX/argocd-app.json"

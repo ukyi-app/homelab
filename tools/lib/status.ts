@@ -5,10 +5,11 @@
 // 실행 원칙은 doctor와 같다: 관측 전용(gh api 읽기·kubectl get만 — 테스트가 argv 원장으로
 // 강제). GitHub 계층 오류는 fail-loud(빈 목록으로 위장하면 vacuous green — variant=failure),
 // 라이브 계층 오류만 live.error로 보고한다(스펙이 선택 계층으로 선언한 유일한 구간).
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { compact } from "./contract.ts";
+import { ghJson, sh } from "./exec.ts";
 import { TAG_RE } from "./image-pin.ts";
 import { parseLedgerRows } from "./ledger-totals.ts";
 import { HOMELAB_REPO } from "./platform.ts";
@@ -49,25 +50,6 @@ export function statusInputError(input: StatusInput): string | null {
 
 function defaultRoot(): string {
   return fileURLToPath(new URL("../..", import.meta.url));
-}
-
-type Cmd = { ok: boolean; out: string; err: string };
-function sh(cmd: string, args: string[]): Cmd {
-  const r = spawnSync(cmd, args, { encoding: "utf8", timeout: 30_000 });
-  if (r.error) return { ok: false, out: "", err: String((r.error as Error).message) };
-  return { ok: r.status === 0, out: r.stdout ?? "", err: (r.stderr ?? "").trim() };
-}
-
-// gh api + --jq 결과를 파싱한다. 실패는 null — 콜사이트가 fail-loud 여부를 정한다.
-function ghJson(path: string, jq: string): unknown | null {
-  const r = sh("gh", ["api", path, "--jq", jq]);
-  if (!r.ok) return null;
-  try { return JSON.parse(r.out); } catch { return null; }
-}
-
-// null/undefined 값 키 제거 — 계약은 "값 없음 = 키 부재"다(스키마가 JSON null 타입을 두지 않는다).
-function compact(o: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined));
 }
 
 type AppRow = Record<string, unknown>;

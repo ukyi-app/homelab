@@ -28,7 +28,7 @@
   "required": ["schema", "verb", "variant", "exitCode", "omitted", "result"],
   "properties": {
     "schema": { "enum": ["homelab-cli/1"] },
-    "verb": { "enum": ["doctor", "status"] },
+    "verb": { "enum": ["doctor", "status", "db create"] },
     "variant": { "enum": ["success", "failure", "race", "skip", "pending", "no-op", "superseded"] },
     "exitCode": { "enum": [0, 1, 3, 4] },
     "omitted": { "type": "array", "uniqueItems": true, "items": { "enum": ["live"] } },
@@ -52,6 +52,46 @@
             "verb": { "enum": ["status"] },
             "variant": { "enum": ["success", "failure"] },
             "result": { "$ref": "#/definitions/statusResult" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["db create"] },
+            "variant": { "enum": ["success"] },
+            "result": { "$ref": "#/definitions/dbCreateSuccess" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["db create"] },
+            "variant": { "enum": ["failure"] },
+            "result": { "$ref": "#/definitions/dbCreateFailure" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["db create"] },
+            "variant": { "enum": ["race"] },
+            "result": { "$ref": "#/definitions/dbCreateRace" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["db create"] },
+            "variant": { "enum": ["pending"] },
+            "result": { "$ref": "#/definitions/dbCreatePending" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["db create"] },
+            "variant": { "enum": ["superseded"] },
+            "result": { "$ref": "#/definitions/dbCreateSuperseded" }
           }
         }
       ]
@@ -87,6 +127,114 @@
             "warn": { "type": "integer", "minimum": 0 }
           }
         }
+      }
+    },
+    "dbMutationRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "url"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "url": { "type": "string", "minLength": 1 },
+        "conclusion": { "type": "string" },
+        "failedJobs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "dbMutationPr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "url", "merged"],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1 },
+        "url": { "type": "string", "minLength": 1 },
+        "merged": { "type": "boolean" },
+        "mergeSha": { "type": "string" }
+      }
+    },
+    "dbMutationApp": {
+      "description": "--wait 수렴 관측 증거 — 후손·표면 판정 포함(health 단독 판정 금지). error는 그 사이클의 조회 실패.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "sync": { "type": "string" },
+        "health": { "type": "string" },
+        "revision": { "type": "string" },
+        "descendant": { "type": "boolean" },
+        "surfaceOk": { "type": "boolean" },
+        "error": { "type": "string" }
+      }
+    },
+    "dbCreateSuccess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "name", "correlation", "waited", "run", "pr"],
+      "properties": {
+        "action": { "enum": ["create-database"] },
+        "name": { "type": "string", "minLength": 1 },
+        "correlation": { "type": "string", "minLength": 8 },
+        "waited": { "type": "boolean" },
+        "run": { "$ref": "#/definitions/dbMutationRun" },
+        "pr": { "$ref": "#/definitions/dbMutationPr" },
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/dbMutationApp" } }
+      }
+    },
+    "dbCreateFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "name", "correlation", "error"],
+      "properties": {
+        "action": { "enum": ["create-database"] },
+        "name": { "type": "string", "minLength": 1 },
+        "correlation": { "type": "string", "minLength": 8 },
+        "error": { "type": "string", "minLength": 1 },
+        "run": { "$ref": "#/definitions/dbMutationRun" },
+        "pr": { "$ref": "#/definitions/dbMutationPr" }
+      }
+    },
+    "dbCreateRace": {
+      "description": "신원 판정 불가(같은 nonce의 run ≥2 또는 브랜치 PR ≥2) — 전제 상태 변동 계열(exit 3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "name", "correlation", "error", "observedRuns"],
+      "properties": {
+        "action": { "enum": ["create-database"] },
+        "name": { "type": "string", "minLength": 1 },
+        "correlation": { "type": "string", "minLength": 8 },
+        "error": { "type": "string", "minLength": 1 },
+        "observedRuns": { "type": "integer", "minimum": 0 },
+        "run": { "$ref": "#/definitions/dbMutationRun" }
+      }
+    },
+    "dbCreatePending": {
+      "description": "바운디드 부분 결과 — 도달 지점(run/pr/applications)이 증거로 실리고 핸들 재조회가 재개 경로다.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "name", "correlation", "pendingReason"],
+      "properties": {
+        "action": { "enum": ["create-database"] },
+        "name": { "type": "string", "minLength": 1 },
+        "correlation": { "type": "string", "minLength": 8 },
+        "pendingReason": { "type": "string", "minLength": 1 },
+        "run": { "$ref": "#/definitions/dbMutationRun" },
+        "pr": { "$ref": "#/definitions/dbMutationPr" },
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/dbMutationApp" } }
+      }
+    },
+    "dbCreateSuperseded": {
+      "description": "관측 후손 리비전에서 desired-state 표면 부재 — 요청이 추월됨(성공 아님, exit 3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "name", "correlation", "error", "pr", "applications"],
+      "properties": {
+        "action": { "enum": ["create-database"] },
+        "name": { "type": "string", "minLength": 1 },
+        "correlation": { "type": "string", "minLength": 8 },
+        "error": { "type": "string", "minLength": 1 },
+        "run": { "$ref": "#/definitions/dbMutationRun" },
+        "pr": { "$ref": "#/definitions/dbMutationPr" },
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/dbMutationApp" } }
       }
     },
     "statusResult": {

@@ -5,16 +5,20 @@
 // 이 bin 모듈은 import 시 main이 실행되므로 MCP 등 다른 소비자는 lib 쪽을 import한다
 // (structure r1 A1·B1). 셰뱅+exec 비트는 이 파일만 예외: package.json bin("homelab")의
 // 대상이라 `bun link`가 전역 PATH에 심링크한다(test_shebang-exec.bats가 bin 선언에서 파생).
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { parseCommand, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
 import { USAGE_EXIT, type Envelope } from "./lib/contract.ts";
-import { DOCTOR, STATUS, VERBS } from "./lib/verbs.ts";
+import { DB_CREATE, DOCTOR, STATUS, VERBS, dbCreateInputError, type DbCreateInput } from "./lib/verbs.ts";
 import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
 import { statusInputError, type StatusInput } from "./lib/status.ts";
 
-// 동사 실행의 세 결말 — 프로세스 관심사(stdout 채널·종료코드)는 전부 main이 소유한다.
+// 동사 실행의 네 결말 — 프로세스 관심사(stdout 채널·종료코드)는 전부 main이 소유한다.
+// exit = 패스스루 동사(자식 프로세스가 자기 출력·종료코드를 이미 냈다 — 같은 동작 재노출 계약).
 type VerbOutput =
   | { kind: "help"; text: string }
   | { kind: "usage-error"; message: string; usage: string }
+  | { kind: "exit"; code: number }
   | { kind: "result"; json: boolean; envelope: Envelope; human: string[] };
 
 // CLI 어댑터 — catalog 행마다 argv→타입 입력 매핑과 렌더링을 배선한다(어댑터는 named export를
@@ -23,6 +27,8 @@ type VerbOutput =
 const CLI_BY_VERB: Record<string, (rest: string[]) => VerbOutput> = {
   doctor: doctorCli,
   status: statusCli,
+  "db create": dbCreateCli,
+  "db url": dbUrlCli,
 };
 for (const v of VERBS) {
   if (!CLI_BY_VERB[v.path.join(" ")]) throw new Error(`계약 파손: 동사 '${v.path.join(" ")}'의 CLI 어댑터가 없다`);
@@ -141,6 +147,75 @@ function statusCli(rest: string[]): VerbOutput {
   return { kind: "result", json: flags.bool("--json"), envelope, human: renderStatus(envelope) };
 }
 
+function dbCreateUsage(): string {
+  return [
+    "사용법: homelab db create <name> [--ext a,b,...] [--wait] [--json]",
+    "",
+    "공유 CNPG 클러스터에 논리 DB를 생성한다 — create-database 디스패처를 correlation 수령증과",
+    "함께 트리거하고 자기 run을 특정해 conclusion까지 추적한다(PR-first — 머지가 곧 적용).",
+    "  --ext <a,b>        확장 목록(알려진 5종은 체크박스, 그 외는 ext_extra로 — 예: pg_trgm,vector)",
+    "  --wait             auto-merge 머지 + Application 집합(cnpg-data·data-conn-prod) 수렴까지 대기",
+    "  --poll-ms <n>      폴링 간격(기본 5000 — 시간 주입 심)",
+    "  --deadline-ms <n>  전체 데드라인(기본 1200000 — 시간 주입 심)",
+    "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
+    "",
+  ].join("\n");
+}
+
+function renderDbCreate(envelope: Envelope): string[] {
+  const r = envelope.result as Record<string, any>;
+  const lines = [`db create ${r.name} — correlation ${r.correlation}`];
+  if (r.run?.url) lines.push(`run: ${r.run.url}${r.run.conclusion ? ` (${r.run.conclusion})` : ""}${r.run.failedJobs ? ` · 실패 잡: ${r.run.failedJobs.join(", ")}` : ""}`);
+  if (r.pr?.url) lines.push(`PR: ${r.pr.url} · merged ${OX[String(r.pr.merged)]}${r.pr.mergeSha ? ` · merge SHA ${r.pr.mergeSha}` : ""}`);
+  if (Array.isArray(r.applications)) {
+    for (const a of r.applications) {
+      lines.push(a.error
+        ? `Application ${a.name}: 조회 실패 — ${a.error}`
+        : `Application ${a.name}: sync ${a.sync} · health ${a.health} · rev ${a.revision} · 후손 ${OX[String(a.descendant)]}${a.surfaceOk !== undefined ? ` · 표면 ${OX[String(a.surfaceOk)]}` : ""}`);
+    }
+  }
+  if (envelope.omitted.includes("live")) lines.push("라이브(ArgoCD) 수렴: 생략 — KUBECONFIG 미설정(머지까지만 확인)");
+  if (r.pendingReason) lines.push(`대기: ${r.pendingReason}`);
+  if (r.error) lines.push(`오류: ${r.error}`);
+  lines.push(`결과: ${envelope.variant}`);
+  return lines;
+}
+
+function dbCreateCli(rest: string[]): VerbOutput {
+  let name: string | undefined;
+  let flagArgv = rest;
+  if (rest[0] !== undefined && !rest[0].startsWith("--")) { name = rest[0]; flagArgv = rest.slice(1); }
+  let flags;
+  try { flags = typedFlags(flagArgv, { value: ["--ext", "--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }); }
+  catch (e) {
+    return { kind: "usage-error", message: `homelab db create: ${e instanceof Error ? e.message : String(e)}`, usage: dbCreateUsage() };
+  }
+  if (flags.bool("--help")) return { kind: "help", text: dbCreateUsage() };
+  const num = (k: string): number | undefined => {
+    const v = flags.str(k);
+    return v === undefined ? undefined : Number(v);
+  };
+  const input: DbCreateInput = {
+    name: name ?? "",
+    ext: flags.str("--ext")?.split(",").map((s) => s.trim()).filter((s) => s !== ""),
+    wait: flags.bool("--wait"),
+    pollMs: num("--poll-ms"),
+    deadlineMs: num("--deadline-ms"),
+  };
+  const bad = dbCreateInputError(input);
+  if (bad) return { kind: "usage-error", message: `homelab db create: ${bad}`, usage: dbCreateUsage() };
+  const envelope = DB_CREATE.op(input);
+  return { kind: "result", json: flags.bool("--json"), envelope, human: renderDbCreate(envelope) };
+}
+
+// db url 패스스루 — 기존 도구(tools/db-url.ts)를 같은 동작으로 재노출한다: argv 그대로,
+// stdio 상속(평문 비노출 규율 포함 그 도구의 출력 계약 그대로), 종료코드 전파.
+function dbUrlCli(rest: string[]): VerbOutput {
+  const tool = fileURLToPath(new URL("./db-url.ts", import.meta.url));
+  const r = spawnSync(process.execPath, [tool, ...rest], { stdio: "inherit" });
+  return { kind: "exit", code: r.status ?? 1 };
+}
+
 function doctorCli(rest: string[]): VerbOutput {
   let flags;
   try { flags = typedFlags(rest, { value: [], bool: ["--json", "--help"] }); }
@@ -171,6 +246,7 @@ function main(argv: string[]): number {
   // stderr, 결과는 stdout 순수성(--json이면 stdout은 envelope 하나, 사람용은 stderr)을 지킨다.
   if (out.kind === "help") { process.stdout.write(out.text); return 0; }
   if (out.kind === "usage-error") { process.stderr.write(`${out.message}\n\n${out.usage}`); return USAGE_EXIT; }
+  if (out.kind === "exit") return out.code;
   const sink = out.json ? process.stderr : process.stdout;
   for (const line of out.human) sink.write(line + "\n");
   if (out.json) process.stdout.write(JSON.stringify(out.envelope, null, 2) + "\n");

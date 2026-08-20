@@ -21,6 +21,12 @@ export type Envelope = {
   result: unknown;
 };
 
+// null/undefined 값 키 제거 — 계약 규칙 "값 없음 = 키 부재"(스키마가 JSON null 타입을 두지
+// 않는다)의 실행형. 결과 오브젝트를 조립하는 모든 엔진이 공유한다.
+export function compact(o: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined));
+}
+
 // variant → 종료코드(x-contract.exitCodes). 매핑 부재는 계약 파손이라 fail-closed.
 export function exitFor(variant: string): number {
   const code = EXIT[variant];
