@@ -74,6 +74,7 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@bash scripts/check-app-netpol.sh
 	@bash scripts/check-image-pins.sh
 	@bash scripts/check-locale-collation.sh
+	@bash scripts/check-gh-secret-coverage.sh
 	@scripts/verify-ledger.sh
 	@bats tests/test_sops-roundtrip.bats
 
@@ -179,6 +180,7 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	bash scripts/check-app-netpol.sh
 	bash scripts/check-image-pins.sh
 	bash scripts/check-locale-collation.sh
+	bash scripts/check-gh-secret-coverage.sh
 	bun tools/check-resource-limits.ts
 	bun tools/check-alert-rules.ts
 	bun tools/check-disk-caps.ts

@@ -55,6 +55,10 @@
 - **`check-locale-collation.sh`** — 로케일 콜레이션 가드: 게이트의 `sort`가 `LC_ALL=C` 접두(또는 숫자
   정렬)인지, TS/JS가 `localeCompare`·`toLocale*`·`Intl.Collator`를 쓰지 않는지 hard-zero로 강제한다.
   en_US 계열은 `-1`과 `1`을 같다고 봐 `sort -u`가 하나를 버린다 — 거짓 red가 아니라 **fail-open**이었다.
+- **`check-gh-secret-coverage.sh`** — GH Actions secret ↔ 분류 정책 **전단사** 가드.
+  워크플로가 참조하는 secret 전부가 `policy/gh-secret-classification.json`에 정확히 한 번,
+  사유와 함께 분류돼 있어야 한다(ledger/inventory-only/identifier/provided). `ledger` 갈래는
+  `policy/credential-expiry.json` 행과 기계 대조된다. 미분류·stale·이중선언 전부 fail-closed.
 - **`check-skip-signalling.sh`** — 가드 skip 신호 규약(CONTRIBUTING '가드 skip 신호')의 정적 가드:
   `SKIP: <가드>: <이유>` 마커와 skip 종료코드(셸 `exit 4` / TS `process.exit(4)`)가 **같은 줄에서 짝**을
   이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + Makefile
