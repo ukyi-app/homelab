@@ -80,11 +80,13 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
     const map = sch["x-contract"].exitCodes;
     const variants = sch.properties.variant.enum;
+    const ids = sch.definitions.doctorCheck.properties.id.enum;
+    const result = { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } };
     let n = 0;
     for (const v of variants) {
       const code = map[v];
       if (code === undefined) { console.error("exit 매핑 없음: " + v); process.exit(1); }
-      const env = { schema: "homelab-cli/1", verb: "doctor", variant: v, exitCode: code, omitted: [], result: {} };
+      const env = { schema: "homelab-cli/1", verb: "doctor", variant: v, exitCode: code, omitted: [], result };
       const errs = schemaErrors(env, sch, sch);
       if (errs.length) { console.error(v + ": " + errs.join(" | ")); process.exit(1); }
       n++;
@@ -94,6 +96,66 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   # 열거 바닥값: variant 7종 전부 순회(루프 붕괴 → vacuous green 차단)
   echo "$output" | grep -q "^ok:7$"
+}
+
+@test "schema rejects every variant paired with a wrong exit code (coupling enforced, floor 7)" {
+  # structure r1 b2: variant와 exitCode가 독립이면 success+exit 1도 green — 허용 쌍을 스키마가 강제한다.
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const map = sch["x-contract"].exitCodes;
+    const variants = sch.properties.variant.enum;
+    const codes = sch.properties.exitCode.enum;
+    const ids = sch.definitions.doctorCheck.properties.id.enum;
+    const result = { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } };
+    let n = 0;
+    for (const v of variants) {
+      const wrong = codes.find((c) => c !== map[v]);
+      const env = { schema: "homelab-cli/1", verb: "doctor", variant: v, exitCode: wrong, omitted: [], result };
+      const errs = schemaErrors(env, sch, sch);
+      if (errs.length === 0) { console.error("잘못된 쌍이 통과: " + v + "+" + wrong); process.exit(1); }
+      n++;
+    }
+    console.log("rejected:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^rejected:7$"
+}
+
+@test "schema rejects a doctor envelope whose result does not match doctorResult (verb-result coupling)" {
+  # structure r1 a1·b1: result가 열린 object면 doctorResult가 죽은 정의 — verb별 결합을 스키마가 강제한다.
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const env = { schema: "homelab-cli/1", verb: "doctor", variant: "success", exitCode: 0, omitted: [], result: {} };
+    const errs = schemaErrors(env, sch, sch);
+    console.log(errs.length > 0 ? "rejected" : "ACCEPTED");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^rejected$"
+}
+
+@test "exit-code coupling branches restate x-contract.exitCodes exactly (SSOT pinning, floor 7)" {
+  # 결합 분기(allOf/oneOf)는 x-contract.exitCodes의 재진술이다 — 둘이 어긋나면 드리프트.
+  run bun -e '
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const map = sch["x-contract"].exitCodes;
+    const pairBranches = sch.allOf.find((b) => b.oneOf?.[0]?.properties?.variant)?.oneOf ?? [];
+    const fromBranches = {};
+    for (const br of pairBranches) for (const v of br.properties.variant.enum) fromBranches[v] = br.properties.exitCode.enum[0];
+    const variants = Object.keys(map);
+    let n = 0;
+    for (const v of variants) {
+      if (fromBranches[v] !== map[v]) { console.error("드리프트: " + v + " map=" + map[v] + " branch=" + fromBranches[v]); process.exit(1); }
+      n++;
+    }
+    console.log("pinned:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^pinned:7$"
 }
 
 @test "mini validator rejects a broken envelope (not vacuous)" {

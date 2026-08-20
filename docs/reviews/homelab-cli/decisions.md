@@ -35,3 +35,18 @@
 - r2-a2 Accept — The resume predicate can adopt another template repository (invocation marker 소유 증명 + 마커 부재 시 fail-closed·명시 입양 플래그 — a4·b4 잔여 해소)
 
 WAIVED by user: 라운드 상한(2) 도달. r2 재검증에서 14/19 resolved였고 잔여 5건은 위 2건의 수정으로 전부 수렴하므로, 수정 반영을 확인하고 재재검증(r3) 없이 게이트를 종결한다. (판독 실패 2회는 codex 세션 로그 무손실 회수로 보완 — decisions.md r2-salvage 절 참조.)
+
+### structure r1 (codex)
+
+시도1은 readback-incomplete(양 멤버 json-unparseable — 리뷰어의 code 필드 따옴표 미이스케이프,
+리뷰 자체는 HRG 토큰·카운트 3/3으로 완주)로 ok:false. 답은 판독 원문에서 무손실 회수했고
+(.scratch/homelab-cli/structure-r1-salvaged-{a,b}.json, 토큰 a=5e549024·b=653fe7e3), 인용 4건은
+리뷰된 트리(473a734)와 전건 대조 일치. 아래는 회수본 6건의 인간 트리아지(라운드 결정: 제안 전부 수용).
+게이트 아티팩트는 수정 반영 후 r1 재발화로 확보한다.
+
+- a1 Accept — 결과 스키마가 verb별 계약을 판별하지 못한다 (b1과 한 결정: allOf verb→result oneOf 분기)
+- b1 Accept — The root schema ignores every verb-specific result contract
+- b2 Accept — The schema does not enforce variant-to-exit-code mapping (허용 쌍 oneOf 분기 + mismatch-rejection·SSOT pinning 테스트)
+- a2 Accept — VERBS가 transport-neutral operation을 표현하지 못한다 (b3과 한 결정: run이 계약 envelope 반환, 프로세스 관심사는 진입점 소유)
+- b3 Accept — The verb registry is a CLI-only seam that MCP cannot reuse
+- a3 Defer — doctor의 template preflight가 실제 init 계약을 증명하지 않는다; 공용 검사 술어·versioned contract는 두 번째 소비자(init, 티켓 11)가 생길 때 추출 — 지금 만들면 speculative. defer 노트를 티켓 11 파일에 기록

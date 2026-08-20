@@ -8,6 +8,7 @@ const KNOWN = new Set([
   "$schema", "$id", "title", "description", "x-contract", "definitions", "$ref",
   "type", "enum", "required", "properties", "additionalProperties",
   "pattern", "minimum", "maximum", "items", "minItems", "uniqueItems", "minLength",
+  "allOf", "oneOf",
 ]);
 
 // val을 sch로 검증해 위반 목록을 돌려준다(빈 배열 = 유효). root는 $ref(#/definitions/*) 해석용
@@ -24,6 +25,12 @@ export function schemaErrors(val: unknown, sch: unknown, root: unknown, path = "
     }
     for (const k of Object.keys(s)) {
       if (!KNOWN.has(k)) throw new Error(`지원 밖 스키마 키워드 '${k}' (${p}) — schema-check.ts 화이트리스트와 함께 확장해야 검증이 유효하다`);
+    }
+    // 결합 키워드 — verb→result·variant→exitCode 판별(allOf의 각 스키마는 전부, oneOf는 정확히 1개 분기).
+    if (s.allOf) for (const branch of s.allOf) walk(v, branch, p);
+    if (s.oneOf) {
+      const matched = s.oneOf.filter((branch: any) => schemaErrors(v, branch, root, p).length === 0).length;
+      if (matched !== 1) errs.push(`${p}: oneOf 분기 정확히 1개가 아니라 ${matched}개 일치`);
     }
     if (s.enum) {
       if (!s.enum.some((e: any) => e === v)) errs.push(`${p}: ${JSON.stringify(v)}은 enum ${JSON.stringify(s.enum)} 밖`);
