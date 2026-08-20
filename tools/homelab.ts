@@ -7,7 +7,7 @@
 // 대상이라 `bun link`가 전역 PATH에 심링크한다(test_shebang-exec.bats가 bin 선언에서 파생).
 import { parseCommand, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
 import { USAGE_EXIT, type Envelope } from "./lib/contract.ts";
-import { VERBS, type Verb } from "./lib/verbs.ts";
+import { DOCTOR, VERBS } from "./lib/verbs.ts";
 import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
 
 // 동사 실행의 세 결말 — 프로세스 관심사(stdout 채널·종료코드)는 전부 main이 소유한다.
@@ -16,9 +16,10 @@ type VerbOutput =
   | { kind: "usage-error"; message: string; usage: string }
   | { kind: "result"; json: boolean; envelope: Envelope; human: string[] };
 
-// CLI 어댑터 — catalog 행마다 argv→operation 매핑과 렌더링을 배선한다. totality는 아래 초기화
-// 검사가 강제: 미배선 동사는 어떤 호출이든 즉시 throw(계약 파손 — 종료코드 2의 의미 재사용 금지).
-const CLI_BY_VERB: Record<string, (row: Verb, rest: string[]) => VerbOutput> = {
+// CLI 어댑터 — catalog 행마다 argv→타입 입력 매핑과 렌더링을 배선한다(어댑터는 named export를
+// 정확한 입력 타입으로 직접 호출). totality는 아래 초기화 검사가 강제: 미배선 동사는 어떤
+// 호출이든 즉시 throw(계약 파손 — 종료코드 2의 의미 재사용 금지).
+const CLI_BY_VERB: Record<string, (rest: string[]) => VerbOutput> = {
   doctor: doctorCli,
 };
 for (const v of VERBS) {
@@ -72,14 +73,14 @@ function renderDoctor(envelope: Envelope): string[] {
   ];
 }
 
-function doctorCli(row: Verb, rest: string[]): VerbOutput {
+function doctorCli(rest: string[]): VerbOutput {
   let flags;
   try { flags = typedFlags(rest, { value: [], bool: ["--json", "--help"] }); }
   catch (e) {
     return { kind: "usage-error", message: `homelab doctor: ${e instanceof Error ? e.message : String(e)}`, usage: doctorUsage() };
   }
   if (flags.bool("--help")) return { kind: "help", text: doctorUsage() };
-  const envelope = row.op();
+  const envelope = DOCTOR.op({});
   return { kind: "result", json: flags.bool("--json"), envelope, human: renderDoctor(envelope) };
 }
 
@@ -94,9 +95,9 @@ function main(argv: string[]): number {
     return USAGE_EXIT;
   }
 
-  // parseCommand가 성공한 path는 TREE의 리프이고 TREE는 VERBS에서 파생되므로 항상 찾아진다.
-  const row = VERBS.find((v) => v.path.length === cmd.path.length && v.path.every((w, i) => w === cmd.path[i]))!;
-  const out = CLI_BY_VERB[row.path.join(" ")]!(row, cmd.rest);
+  // parseCommand가 성공한 path는 TREE의 리프이고 TREE는 VERBS에서 파생되므로, 초기화의
+  // totality 검사와 합쳐 어댑터가 항상 존재한다.
+  const out = CLI_BY_VERB[cmd.path.join(" ")]!(cmd.rest);
 
   // 프로세스 관심사는 여기서만: --help는 --json보다 우선(계약 stdout 절), usage 오류는 exit 2 +
   // stderr, 결과는 stdout 순수성(--json이면 stdout은 envelope 하나, 사람용은 stderr)을 지킨다.
