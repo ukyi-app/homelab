@@ -1,0 +1,45 @@
+# 호스트 systemd **전역** 실패 스윕 — `scripts/sweep-systemd-failures.sh`의 실행자.
+#
+# ★ 짝 유닛 `unit-failure-notify@.service`와 역할이 다르다: 저쪽은 `OnFailure=`가 달린 유닛의 실패를
+#   지연 0·critical로 잡는 **이벤트** 채널, 이쪽은 전역 failed **상태**를 5분마다 읽는 채널이다.
+#   라이브 실측(2026-08-20): 로드된 `.service` 64건 중 `OnFailure=` 보유는 vendor 2건뿐이고
+#   (`systemd-fsck-root`·`dracut-shutdown`, 둘 다 부팅 경로 전용) 이 레포가 배선한 것은
+#   `files-data-backup.service` 하나다 — 나머지가 이 스윕의 존재 이유다.
+#
+# ⚠️ **`Restart=always` 유닛(k3s.service 등)은 이 축의 커버 대상이 아니다** — 시작 rate limit에
+#    도달하지 못해 `failed`에 진입하지 않는다(계속 activating을 돈다). 산술은 스크립트 머리말에 있다.
+#
+# 🔴 **이 유닛은 설치되지만 enable되지 않는다.** `host-config.sh --apply`는 트리를 놓고
+#    `daemon-reload`만 한다(`systemctl enable` 호출이 레포 전체에 0건 — 의도이고
+#    `test_03-host-config.bats`가 그것을 강제한다). 배선의 마지막 한 줄은 owner가 친다:
+#        sudo systemctl enable --now systemd-failed-sweep.timer
+#    ⚠️ 그 한 줄을 잊어도 **조용하지 않다** — 하트비트가 안 와서 r4의 `SystemdSweepStale`이
+#       발화한다. 짝 유닛(files-data-backup.timer)이 "설치 후 owner 수동"으로 남아 2026-08-19부터
+#       disabled인 것과 대비되는 자리다. 저쪽은 국면 A에서 켜면 **안 되는** 것이고, 이쪽은
+#       읽기 전용·멱등이라 켜지 않을 이유가 없다. 차이는 알림이 그 미배선을 잡느냐다.
+#
+# ⚠️ **이 유닛에는 `OnFailure=`가 달려 있다** — 스윕은 자기 실패를 자기가 기록할 수 없다(실패하면
+#    파일을 쓰지 않는 것이 계약이다). 그 실패는 기존 critical 채널이 즉시 페이징하고, 하트비트가
+#    늙어 `SystemdSweepStale`이 backstop한다. 자기연결이 아니다(`unit-failure-notify@`에는
+#    `OnFailure=`가 없다 — 있으면 실패 루프가 된다).
+# ⚠️ 실행체는 `scripts/*.sh`에 둔다. 여기에 `ExecStart=/bin/sh -c '… curl …'`로 인라인하면 메트릭
+#    생산자 열거(`tools/lib/repo-walk.ts`의 include는 `.ya?ml|.sh|.m?[jt]s|.py`) **밖으로 나간다**
+#    — 함정 원장 「systemd 유닛 파일은 push 생산자 열거 밖이다」가 그 자리다.
+# ⚠️ 샌드박싱 지시자(`ProtectSystem=strict` 등)를 넣지 않는다 — 형제 유닛과 규약이 갈리는 것도
+#    이유지만, 결정적으로 `strict`는 `/run`까지 read-only로 만들어 `systemctl`이 쓰는 D-Bus
+#    private 소켓 연결을 깨뜨릴 수 있다(unix 소켓 connect는 write 권한을 요구한다). 검증 없이
+#    넣으면 5분마다 조용히 실패하는 유닛이 된다.
+# ⚠️ 경로가 하드코딩이다 — 형제 유닛과 같은 규약이고(이 레포는 owner 홈의 고정 체크아웃에서 돈다),
+#    체크아웃을 옮기면 함께 고쳐야 한다.
+[Unit]
+Description=호스트 systemd 전역 실패 스윕 — node-exporter textfile collector
+Documentation=file:///home/ukyi/workspace/homelab/scripts/sweep-systemd-failures.sh
+OnFailure=unit-failure-notify@%n.service
+
+[Service]
+Type=oneshot
+# root로 돈다 — /var/lib/node_exporter/textfile가 root 소유다(짝 스크립트와 같은 이유).
+ExecStart=/home/ukyi/workspace/homelab/scripts/sweep-systemd-failures.sh
+# r4 SystemdSweepStale 임계 산술의 항이다(300+30+30+60=420s).
+# 바꾸면 tests/gates/test_systemd-failed-sweep.bats의 부등식이 먼저 운다.
+TimeoutStartSec=60s

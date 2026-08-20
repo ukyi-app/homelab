@@ -1,0 +1,23 @@
+# 호스트 systemd 전역 실패 스윕 스케줄 — 5분 주기.
+#
+# ★ `OnCalendar=*:0/5`는 **TZ 독립**이다 — 5분 격자는 어느 타임존에서도 같은 순간에 걸린다.
+#   함정 원장 「CronJob k3s VM TZ(Asia/Seoul)」는 이 유닛에 적용되지 않는다. 일/시 단위로 바꾸면
+#   즉시 다시 적용된다(호스트 TZ는 `infra/k3s-bootstrap/versions.env`의 HOST_TIMEZONE).
+# ★ 아래 세 값 + 짝 service의 `TimeoutStartSec`이 r4 `SystemdSweepStale` 임계의 산술 근거다:
+#   최악 성공↔성공 간격 = OnCalendar(300) + AccuracySec(30) + RandomizedDelaySec(30) +
+#   TimeoutStartSec(60) = **420s**. 임계 1800s는 그 4.3배로, 노드 재부팅(다운 + k3s/node-exporter
+#   기동 ≈10분)을 페이지 없이 흡수한다.
+# ★ `Persistent=`를 쓰지 않는다 — 이 스윕은 **현재 상태**를 읽으므로 놓친 슬롯을 따라잡을 것이 없다.
+#   부팅 직후 한 번은 `OnBootSec`이 준다.
+[Unit]
+Description=호스트 systemd 전역 실패 스윕 (5분 주기)
+
+[Timer]
+OnBootSec=2min
+OnCalendar=*:0/5
+AccuracySec=30s
+RandomizedDelaySec=30s
+Unit=systemd-failed-sweep.service
+
+[Install]
+WantedBy=timers.target

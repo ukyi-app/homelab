@@ -138,6 +138,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - systemd 유닛 파일은 push 생산자 열거 밖이다 — 유닛에 인라인한 curl은 완전성 가드를 통째로 지나간다
 - bats는 stdin을 만지지 않는다 — 스텁이 피연산자 없이 `cat`을 부르면 호출자의 fd 0에서 영구 블록한다
 - 호스트 포트 밴드는 ephemeral뿐 아니라 NodePort도 피해야 한다 — NodePort는 리스너가 아니라 nat 규칙이라 어떤 bind 프로브로도 안 보인다
+- `Restart=always` 유닛은 failed 상태에 진입하지 않는다 — 시작 rate limit에 못 닿으면 영원히 activating이다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

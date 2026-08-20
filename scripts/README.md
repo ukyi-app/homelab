@@ -134,6 +134,17 @@
   node-exporter textfile collector 디렉토리에 원자적으로 쓴다(r4 `SystemdUnitFailed`가 읽는다).
   oneshot 실패의 **유일한 즉시 채널** — 신선도 알림은 원리적으로 주기보다 빨리 울 수 없다.
   push가 아니라 파일인 이유: kubectl/port-forward 의존이 없어 **자기 트리거와 함께 죽지 않는다**.
+- **`sweep-systemd-failures.sh`** — **호스트 systemd 전용**(직접 실행하지 않는다).
+  `systemd-failed-sweep.timer`(5분)가 호출해 `systemctl list-units`를 **한 번** 읽고
+  `systemd_sweep_unit_failed{unit,type}`·`systemd_sweep_units_failed`·`systemd_sweep_last_success_timestamp`를
+  textfile collector에 원자적으로 쓴다(r4 `SystemdHostUnitFailed`·`SystemdSweepStale`이 읽는다).
+  위 즉시 채널과 **직교**다: 저쪽은 `OnFailure=`가 달린 유닛만 지연 0·critical로, 이쪽은 전역을
+  주기적으로 warning으로 본다. 라이브 실측 로드 `.service` 64건 중 `OnFailure=` 보유는 3건뿐이다.
+  ⚠️ **`Restart=always` 유닛(k3s 등)은 원리적 사각지대다** — 시작 rate limit에 도달하지 못해
+  `failed`에 진입하지 않는다. 🔴 열거가 붕괴하면(3중 바닥값) **파일을 쓰지 않고 죽는다** —
+  "failed 0건"과 "스윕 미실행"을 구별하는 것이 이 스크립트의 계약이고, 그 구별은 하트비트가 진다.
+  배선: `host-config.sh --apply` 후 `sudo systemctl enable --now systemd-failed-sweep.timer`
+  (잊으면 `SystemdSweepStale`이 운다).
 - **`teardown.sh`** — **파괴적(owner 전용)**. `make teardown-app`/`teardown-resource` 래퍼가 호출 —
   clean-worktree 가드 → origin/main fetch → `teardown/<target>-<ts>` fresh-main 전용브랜치 → 툴(plan) →
   allowlist staging → PR(owner gh 자격). 앱/리소스 매니페스트·apps.json·원장 행 제거(리소스 purge는

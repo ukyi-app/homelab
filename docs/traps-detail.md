@@ -1390,3 +1390,25 @@ selfHeal과 플립플롭한다.
   본문이 기대값이 아니면 그것은 "아직 안 뜸"이 아니라 **라우팅이 우리 것이 아니라는 확정**이므로
   대기가 아니라 즉시 FAULT다.
 > 가드: `tests/gates/test_vmalert-e2e-port-allocation.bats`, `tests/gates/lib/vmalert-e2e.sh`
+
+### `Restart=always` 유닛은 failed 상태에 진입하지 않는다 — 시작 rate limit에 못 닿으면 영원히 activating이다
+- `systemctl list-units`를 읽어 "failed인 유닛"을 감시하는 축을 만들면, **상시 재시작 서비스가 그
+  축에 원리적으로 잡히지 않는다.** systemd는 `Restart=`가 붙은 유닛을 실패 시 `auto-restart`로
+  돌리고, **시작 rate limit(`StartLimitBurst` 회를 `StartLimitIntervalUSec` 안에)에 도달했을 때만**
+  `failed`로 확정한다. 그 한계에 못 닿으면 유닛은 영원히 `activating (auto-restart)`를 오간다.
+- **실측(2026-08-20, 이 NUC)**: `k3s.service`는 `Restart=always` · `RestartUSec=5s` ·
+  `StartLimitIntervalUSec=10s` · `StartLimitBurst=5`다. 10초 창에 5초 간격이면 시도가 **최대 3회**라
+  burst 5에 **구조적으로 도달할 수 없다** ⇒ k3s가 크래시루프에 빠져도 `failed`가 되지 않는다.
+  즉 전역 스윕이 그 장애를 **못 본다**.
+- **무엇이 위험한가**: 위험은 못 보는 것 자체가 아니라 **"이제 전역을 덮었다"는 오해**다.
+  스윕을 넣고 나면 호스트 실패가 전부 커버된 것처럼 읽히는데, 정작 가장 중요한 서비스가
+  그 커버리지 밖이다. 「열거 붕괴 → vacuous green」의 사촌인데, 여기서는 열거가 아니라
+  **상태 정의**가 구멍이다 — 유닛이 목록에 **있고** 상태도 정확한데, 그 상태가 `failed`가 아니다.
+- ⇒ **처방: 축을 나눠 적고, 각 축이 못 보는 것을 그 축의 문서에 적는다.** 상시 재시작 서비스의
+  생존은 systemd가 아니라 **그 서비스가 제공하는 것**으로 본다(k3s면 TargetDown·Watchdog·
+  off-node deadman). 스윕이 커버하는 것은 `Restart=no` 유닛이다 — 이 호스트에서는 `apt-daily`·
+  `apt-daily-upgrade`·`fstrim`·`logrotate`·`man-db`·`unattended-upgrades`·`e2scrub_all` 등이다.
+- ⚠️ **`StartLimitBurst`를 낮춰 "failed에 도달하게 만드는" 것은 처방이 아니다.** 그러면 일시적
+  장애에서 k3s가 재시작을 **포기**하고 죽은 채로 남는다 — 관측을 얻으려고 복원력을 파는 거래다.
+  관측이 필요하면 관측 축을 따로 놓는다.
+> 가드: `tests/gates/test_systemd-failed-sweep.bats`, `scripts/sweep-systemd-failures.sh`
