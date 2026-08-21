@@ -5,7 +5,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VMALERT="$ROOT/platform/victoria-stack/prod/vmalert.yaml"
-VER="$(grep -oE 'victoriametrics/vmalert:v[0-9.]+' "$VMALERT" | head -1 | cut -d: -f2)"  # Deployment 이미지와 동일(드리프트 0)
+# ⚠️ `|| VER=""`가 **필요하다** — `set -o pipefail` 아래에서 grep 0건은 파이프라인 rc=1이라
+#    `set -e`가 **할당 단계에서** 죽인다. 그러면 아래 `[ -n "$VER" ]` 진단이 영원히 실행되지
+#    않고 게이트가 메시지 0줄에 rc=1로 끝난다(형제 alertmanager-render-e2e에서 실측된 클래스).
+VER="$(grep -oE 'victoriametrics/vmalert:v[0-9.]+' "$VMALERT" | head -1 | cut -d: -f2)" || VER=""   # Deployment 이미지와 동일(드리프트 0)
 [ -n "$VER" ] || { echo "vmalert 버전 추출 실패"; exit 1; }
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
