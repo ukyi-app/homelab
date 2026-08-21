@@ -279,6 +279,12 @@ verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored
 verify-runbook-index: ## [local] 런북 인덱스↔docs/runbooks 정합(런북 부재=SKIP — verify-runbooks와 별개)
 	@bash scripts/verify-runbook-index.sh
 
+.PHONY: verify-credential-inventory
+verify-credential-inventory: ## [local] 런북 token-inventory §A ↔ policy/credential-expiry.json 정합(런북 부재=SKIP)
+# ⚠️ CI에서는 **영원히 SKIP**이다(런북이 gitignored). 그래서 이 가드의 유일한 권위 경로가 이 타깃이고,
+#    검출기가 살아 있음을 증명하는 것은 tests/gates/test_credential-inventory.bats의 픽스처 대조뿐이다.
+	@bash scripts/verify-credential-inventory.sh
+
 .PHONY: verify-posture
 verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 부재=SKIP
 	@if [ -f "$(KUBECONFIG_LIVE)" ]; then \

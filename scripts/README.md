@@ -65,6 +65,22 @@
   이 클래스의 결함은 red가 아니라 **오진**으로 나타난다: 예전 AM 렌더 e2e는 mock을 `8089`에 `&`로
   띄워 바인드 실패가 `set -e`에 안 걸렸고, 30초 뒤 "no telegram capture within timeout"으로 죽어
   진단이 포트가 아니라 메시지 템플릿을 가리켰다. 배정 프리미티브는 `tests/gates/lib/host-port.sh`.
+- **`verify-credential-inventory.sh`** — 런북 `token-inventory.md` §A 표 ↔ `policy/credential-expiry.json`
+  **양방향** 정합 + "N건 등재" 수치 대조. 런북이 gitignored라 **로컬 전용**이고 부재는 SKIP(exit 4).
+  병(2026-08-21 실측): 원장에는 `github-tf-ci-pat`·`r2-terraform-state`가 들어갔는데 §A 표는 3건인
+  채였다 — `check-credential-expiry.sh`는 원장 **안**만 보므로 이 방향에 원리적으로 침묵한다.
+  진입점은 `make verify-credential-inventory`.
+- **`verify-credential-inventory.sh`** — 런북 `token-inventory.md` §A 표 ↔ `policy/credential-expiry.json`
+  **양방향** 정합 + "N건 등재" 수치 대조. 런북이 gitignored라 **로컬 전용**이고 부재는 SKIP(exit 4).
+  병(2026-08-21 실측): 원장에는 `github-tf-ci-pat`·`r2-terraform-state`가 들어갔는데 §A 표는 3건인
+  채였다 — `check-credential-expiry.sh`는 원장 **안**만 보므로 이 방향에 원리적으로 침묵한다.
+  진입점은 `make verify-credential-inventory`.
+- **`check-bats-fd0.sh`** — bats 호출면의 `</dev/null` 규약 hard-zero 가드. bats는 stdin을 만지지 않고
+  @test에 그대로 물려주므로, 스텁이 피연산자 없이 fd 0을 읽으면 호출자 stdin에서 **영구 블록**한다
+  (red가 아니라 hang — 이전 세션이 1시간 39분을 태운 형태, PR #520). ⚠️ venue가 갈린다: ci.yaml은
+  러너를 `&`로 띄워 fd 0이 `/dev/null`이라 **CI는 우연히 면역**이고 `make ci`만 밟는다.
+  면제는 파일 목록이 아니라 그 파일이 `exec 0</dev/null`을 하는지로 판정한다.
+  바닥값의 대상은 파일 수가 아니라 **호출면 수**다(파일 수로 걸면 정규식이 깨져도 통과한다).
 - **`check-skip-signalling.sh`** — 가드 skip 신호 규약(CONTRIBUTING '가드 skip 신호')의 정적 가드:
   `SKIP: <가드>: <이유>` 마커와 skip 종료코드(셸 `exit 4` / TS `process.exit(4)`)가 **같은 줄에서 짝**을
   이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + Makefile
