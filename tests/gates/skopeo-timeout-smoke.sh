@@ -46,6 +46,9 @@ fault() { echo "HARNESS FAULT: $*" >&2; exit 2; }
 # 예산 상수·파생은 SSOT lib이 소유한다(세 게이트가 같은 부등식을 독립 판정한다 — 리터럴 복제 금지).
 # shellcheck source=tests/gates/lib/digest-exporter-budget.sh
 . "$ROOT/tests/gates/lib/digest-exporter-budget.sh"
+# 호스트 포트 배정도 SSOT lib이 소유한다 — 리터럴 포트는 형제 하네스에서 두 번 오진을 냈다.
+# shellcheck source=tests/gates/lib/host-port.sh
+. "$ROOT/tests/gates/lib/host-port.sh"
 
 # ── 1) 핀된 skopeo 이미지 + 계약 타임아웃을 매니페스트에서 파생 ──────────────────────────────────────
 IMAGE="$(yq 'select(.kind=="CronJob").spec.jobTemplate.spec.template.spec.containers[].image' "$EXPORTER" | head -1)"
@@ -61,7 +64,11 @@ SKOPEO_T="$DEB_SKOPEO_TIMEOUT_S"
 T_SHORT=3
 T_LONG=9
 SLACK=8   # 컨테이너 기동 + TLS 셋업 오버헤드 여유(이미지는 미리 pull해 타이밍에서 제외한다)
-PORT=18443
+# 블랙홀 sink의 호스트 포트 — 리터럴이 아니라 배정받는다(밴드는 커널 ephemeral·k8s NodePort와 배타).
+# ⚠️ sink는 `0.0.0.0`에 바인드한다(컨테이너가 host-gateway로 붙으므로 루프백 전용이 불가능) — 프로브의
+#    기본 주소가 `0.0.0.0`인 것이 그래서 중요하다. `127.0.0.1` 프로브는 글로벌 인터페이스에만 있는
+#    리스너를 FREE로 오답한다(실측 2026-08-21).
+PORT="$(hp_pick_port)" || fault "블랙홀 sink 포트 배정 실패(위 host-port stderr) — 판정 불가는 '통과'가 아니다."
 
 TMP="$(mktemp -d)"
 SINK_PID=""
