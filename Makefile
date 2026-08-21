@@ -75,6 +75,7 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@bash scripts/check-image-pins.sh
 	@bash scripts/check-locale-collation.sh
 	@bash scripts/check-gh-secret-coverage.sh
+	@bash scripts/check-host-ports.sh
 	@scripts/verify-ledger.sh
 # ⚠️ bats 호출은 fd 0을 끊는다(`</dev/null`). @test 안의 스텁이 피연산자 없이 fd 0을 읽으면 호출자의
 #    stdin에서 영구 블록한다 — 실패도 출력도 없는 hang이다(근거·실측은 scripts/run-bats.sh 헤더).
@@ -175,7 +176,9 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	bun tools/check-workflow-readiness.ts
 	bun tools/check-ci-parity.ts
 # 실 도메인 가드 — ci.yaml gate의 같은 이름 스텝과 짝이다(패리티 원장이 전건 대조한다).
-# 이 7종은 CI에서 bats를 통해서만 돌았고, 같은 bats 파일에 픽스처 @test가 섞여 있어 "실 레포를 검사하는
+# ⚠️ 여기에 **건수를 적지 않는다** — 아무도 대조하지 않는 손 관리 수치는 반드시 드리프트한다(실측:
+#    예전 이 자리는 "7종", ci.yaml 쪽은 "9종"이라 적혀 있었는데 실제는 둘 다 10이었다).
+# 이 가드들은 CI에서 bats를 통해서만 돌았고, 같은 bats 파일에 픽스처 @test가 섞여 있어 "실 레포를 검사하는
 # 한 줄"이 지워져도 G1이 초록을 유지했다. 여기서도 레포 자신에 대해 직접 돌린다.
 	bash scripts/check-doc-index.sh
 	bash scripts/check-bats-accounting.sh
@@ -184,6 +187,7 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	bash scripts/check-image-pins.sh
 	bash scripts/check-locale-collation.sh
 	bash scripts/check-gh-secret-coverage.sh
+	bash scripts/check-host-ports.sh
 	bun tools/check-resource-limits.ts
 	bun tools/check-alert-rules.ts
 	bun tools/check-disk-caps.ts
