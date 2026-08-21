@@ -1007,10 +1007,14 @@ resolv.conf의 nameserver가 tailnet 대역(CGNAT `100.64.0.0/10` · tailscale U
 
 ### 한시 억제는 자기 만료를 품어야 한다 — 그리고 억제한 알림을 vacuity 대조군으로 쓰던 e2e가 함께 죽는다
 
-**영구 발화하는 critical은 무음보다 나쁘다.** `FilesBackupStale`은 NUC 이식 후 producer(호스트
-launchd + macOS 전용 `backup-files-data.sh`)가 **존재조차 하지 않아** absent 가지가 24/7 참이었다.
+**영구 발화하는 critical은 무음보다 나쁘다.** `FilesBackupStale`은 NUC 이식 직후 producer(레포 밖
+launchd 배선 + macOS 전용 `backup-files-data.sh` — NUC엔 launchd도 diskutil도 없어 하드 실패)가
+**실효적으로 존재하지 않아** absent 가지가 24/7 참이었다.
 `severity=critical` 라우트의 `repeat_interval: 1h`를 타고 하루 24건이 나간다. 상시 소음은 채널 전체를
 둔감화해 **진짜 페이지를 묻는다** — "알림이 있다"가 "감시가 있다"를 뜻하지 않게 된다.
+(2026-08-19에 스크립트가 리눅스로 재작성되고 `files-data-backup.{service,timer}`로 **배선까지 끝났다**.
+그래도 억제는 유효하다 — 국면 A 동안 타이머를 의도적으로 enable하지 않으므로 시리즈는 여전히 absent다.
+남은 것은 국면 B의 `systemctl enable --now` 한 줄이고, 그때 억제 절 제거가 함께 가야 한다.)
 
 **억제의 만료는 룰 자신이 들고 있어야 한다.** 사람이 기억해야 하는 억제는 영구 침묵이 된다.
 expr에 `and on() (vector(time()) >= <재무장 unixtime>)`을 달면 만료가 자동이고 상한이 명시된다.
@@ -1020,8 +1024,8 @@ expr에 `and on() (vector(time()) >= <재무장 unixtime>)`을 달면 만료가 
 정확히 뒤쪽(absent) 가지에만 걸린다. 위험한 것은 그 반대 형태 `(A or B) and on() C`(전체를 괄호로
 묶는 것)로, 그러면 staleness 가지까지 함께 죽어 **producer가 되살아나도 감시가 안 돌아온다.**
 **두 형태 모두 문법상 유효해 `-dryRun`이 구별하지 못한다** — 그래서 형태를 잠그는 가드가 필요하다.
-실측(VictoriaMetrics v1.145.0): 끝에 붙인 형태에서 실행자 없음 → 무발화 / 배선 + stale → **발화** /
-배선 + fresh → 무발화 / 억제 없는 원본 + 실행자 없음 → 발화.
+실측(VictoriaMetrics v1.145.0): 끝에 붙인 형태에서 push 없음 → 무발화 / push 있음 + stale → **발화** /
+push 있음 + fresh → 무발화 / 억제 없는 원본 + push 없음 → 발화.
 
 **시각 상수는 SSOT의 파생값이다.** 창의 SSOT는 `versions.env`의 `BULK_MIGRATION_WINDOW_UNTIL`이고
 룰은 YAML이라 런타임 파생이 불가능하다 → 하드코딩을 허용하되 **양방향 정합 가드**로 잠근다.

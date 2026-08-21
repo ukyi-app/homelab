@@ -2,7 +2,8 @@
 """vmalert-bulkssd-firing-e2e 하네스용 합성 시계열 생성기 — VictoriaMetrics /api/v1/import(JSON lines).
 
 라이브 데이터 모델을 그대로 재현한다 — 둘 다 **하루 1회 단발 push**(라벨 없음/tier 라벨만):
-  - files_data_bulk_{avail,size}_bytes          ← 호스트 launchd(scripts/backup-files-data.sh, 04:30, 일 1회)
+  - files_data_bulk_{avail,size}_bytes          ← 호스트 systemd 타이머(scripts/backup-files-data.sh —
+                                                   files-data-backup.timer, OnCalendar=daily, 일 1회)
   - storage_tier_{avail,size}_bytes{tier="bulk"} ← in-cluster pvc-du-exporter CronJob(05:00, 일 1회)
 두 pusher는 **같은 물리 매체(2TB 외장 SSD)**를 본다(라이브: size 2000293007360 바이트 일치). 그래서
 같은 결핍을 먹였을 때 rollup을 착용한 BulkStorageLow는 발화하고, 맨 참조인 FilesBulkSSDLow는 못 하는
@@ -25,7 +26,7 @@ T_LAST = int(sys.argv[2])       # 마지막 호스트 push 시각(replay 창 안
 PUSH_S = int(sys.argv[3])       # 호스트 push 주기(86400)
 DAYS = int(sys.argv[4])         # 백필 일수
 DU_S = int(sys.argv[5])         # du exporter push 주기(CronJob에서 파생)
-DU_OFF = int(sys.argv[6])       # du exporter 오프셋(05:00 − 04:30 = +1800s)
+DU_OFF = int(sys.argv[6])       # du exporter 오프셋(+1800s — 두 pusher의 격자 독립성 재현용, 호출부 DU_OFFSET_S)
 
 # 라이브 실측 bulk SSD 총량(2TB 외장) — 절대값이 그럴듯해야 실패 메시지가 읽힌다.
 SIZE = 2000293007360
@@ -53,7 +54,7 @@ du_ts = daily_grid(T_LAST, DU_S, DAYS, DU_OFF)
 BULK = {"tier": "bulk"}
 
 out = [
-    # 호스트 launchd push(라벨 없음 — /api/v1/import/prometheus, extra_label 미사용).
+    # 호스트 systemd 타이머 push(라벨 없음 — /api/v1/import/prometheus, extra_label 미사용).
     series("files_data_bulk_avail_bytes", AVAIL, host_ts),
     series("files_data_bulk_size_bytes", SIZE, host_ts),
     # in-cluster du exporter push(tier 라벨만).
