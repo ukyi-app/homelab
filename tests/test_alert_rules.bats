@@ -46,7 +46,7 @@ spec:
   schedule: "*/10 * * * *"
   jobTemplate: { spec: { template: { spec: { containers: [] } } } }
 YAML
-  # 생산자 픽스처 ②: 레포 밖(launchd) 일 1회 — files_* 3종을 push(실 backup-files-data.sh와 동형).
+  # 생산자 픽스처 ②: 클러스터 밖(호스트 systemd 타이머) 일 1회 — files_* 3종을 push(실 backup-files-data.sh와 동형).
   cat > "$root/scripts/fake-files-backup.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'files_backup_last_success_timestamp %s\nfiles_data_bulk_avail_bytes %s\nfiles_data_bulk_size_bytes %s\n' \
@@ -58,11 +58,11 @@ SH
   { "metric": "ghcr_latest_digest", "producer": "platform/fake/prod/digest-exporter.yaml",
     "schedule": { "kind": "cron", "file": "platform/fake/prod/digest-exporter.yaml" } },
   { "metric": "files_backup_last_success_timestamp", "producer": "scripts/fake-files-backup.sh",
-    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처 — 호스트 launchd 일 1회" } },
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처 — 호스트 systemd 타이머 일 1회" } },
   { "metric": "files_data_bulk_avail_bytes", "producer": "scripts/fake-files-backup.sh",
-    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처 — 호스트 launchd 일 1회" } },
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처 — 호스트 systemd 타이머 일 1회" } },
   { "metric": "files_data_bulk_size_bytes", "producer": "scripts/fake-files-backup.sh",
-    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처 — 호스트 launchd 일 1회" } }
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처 — 호스트 systemd 타이머 일 1회" } }
 ]
 JSON
 
