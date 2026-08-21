@@ -3,9 +3,22 @@
 # ⚠️ AM telegram sender는 sendMessage를 application/x-www-form-urlencoded로 보낼 수 있어 raw 본문엔
 #    <b>/이모지가 percent-encoded다(교차검증 Pass4 Finding 3). content-type을 보고 form이면 parse_qs,
 #    json이면 json.loads로 디코드해 분리 기록한다(parse_mode=...\ntext=<디코드된 본문>).
+#
+# 사용: python3 tests/gates/mock-telegram.py <출력파일> <포트>
+#       기동 완료 시 stderr에 "mock-telegram: listening on <port>"를 쓴다(호출자가 이 줄을 기다린다).
+# ⚠️ 이 readiness 줄이 **계약이다.** 이 mock은 호출자가 `&`로 띄우므로 `set -euo pipefail`이 종료코드를
+#    보지 않는다 — 바인드가 EADDRINUSE로 실패해도 하네스는 그냥 진행하고, 30초 뒤 "no telegram capture
+#    within timeout"으로 죽어 **진단이 포트가 아니라 메시지 템플릿을 가리킨다**(실측 2026-08-21).
+#    형제 tests/gates/tcp-blackhole-sink.py가 같은 이유로 같은 줄을 갖고 있다.
 import sys, json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs
+
+# ⚠️ argc 가드 — 인자가 모자라면 IndexError 트레이스백이 background job의 stderr로만 나가고 호출자는
+#    그걸 못 본다(형제 sink와 같은 처방).
+if len(sys.argv) != 3:
+    sys.stderr.write("usage: mock-telegram.py <out-file> <port>\n")
+    sys.exit(2)
 
 OUT = sys.argv[1]
 PORT = int(sys.argv[2])
@@ -49,4 +62,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    # 컨테이너가 host-gateway로 붙으므로 루프백 전용 바인드는 불가능하다(0.0.0.0 필수).
+    srv = HTTPServer(("0.0.0.0", PORT), Handler)
+    sys.stderr.write("mock-telegram: listening on %d\n" % PORT)
+    sys.stderr.flush()
+    srv.serve_forever()

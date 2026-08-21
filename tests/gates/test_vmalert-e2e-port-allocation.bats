@@ -193,6 +193,9 @@ PYWITNESS
   # ⚠️ 정규식이 아니라 고정 문자열로 지운다 — 패턴에 `|`·`$`가 들어가면 delimiter/메타문자로 삼켜져
   #    치환이 조용히 실패하고, 그러면 이 lane이 원본 lib을 검사해 vacuous하게 통과한다.
   grep -vF 'docker rm -f "$name"' "$LIB" > "$TMP/lib-norm.sh"
+  # lib은 형제 host-port.sh를 BASH_SOURCE 기준으로 찾는다 — 변이 사본 옆에 같이 둬야 한다.
+  # (없으면 lib이 fail-closed로 죽어 이 레인이 **아래 단언과 무관한 이유로** red가 된다.)
+  cp "$ROOT/tests/gates/lib/host-port.sh" "$TMP/host-port.sh"
   run grep -cF 'docker rm -f "$name"' "$TMP/lib-norm.sh"
   [ "$output" -eq 0 ]
   # cleanup 쪽 `docker rm -f "$c"`는 남아 있어야 한다(지우려던 것만 정확히 지웠다는 대조).
