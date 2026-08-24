@@ -231,6 +231,13 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `isDispatchLaneBranch`/`laneBranchTail`)이 같은 행에서 파생된다. bump-poll은 CLI 동사 없는
   파싱 전용 레인(tail=tag — TAG_RE 조합은 소비자 몫). 워크플로 YAML과의 정적 parity 가드는
   후속 티켓이 이 행을 대조 축으로 쓴다. 왕복·리터럴 앵커는 test_lane-rows.bats.
+- **`lib/resource-layout.ts`** — 리소스 산출물 레이아웃 커널(cli-deepening 심화 4, CONTEXT.md
+  "산출물 레이아웃"): kind+name → 산출물 집합(파일 경로 · kustomization 엔트리 · role 라벨
+  handles/envKeys · 원장 행 · tombstone 키)과 **scope 태그**(purge-제거/공유-잔존/수동-이연 —
+  teardown purge의 의도된 부분집합을 데이터로 성문화). 역방향 `classifyArtifact`(경로/엔트리 →
+  {kind, name, role})가 같은 커널에 산다 — 소스 없는 고아 conn도 분류된다(설계 게이트 r1 D2).
+  순수 문자열 유도만(yaml 편집 비흡수). 왕복·리터럴 앵커는 test_resource-layout.bats.
+  소비자 이행(provision/teardown/audit/url)은 후속 티켓.
 - **`lib/mutation.ts`** — 공유 변이 엔진(`runMutation()`) — 변이 동사들의 공통 골격: correlation
   nonce → 디스패치 → run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정 →
   [--wait] 머지 관측 + Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,
