@@ -75,6 +75,12 @@ FNR==1 { flush_prev(); inhere=0; delim=""; herestart=0; prevfile=FILENAME; nfile
   # 산술 좌시프트 `$(( a << b ))`도 heredoc이 아니다.
   if (hl ~ /\$\(\(/) gsub(/<</, "@SHIFT@", hl)
   if (inhere) { if ($0 ~ ("^[ \t]*"delim"[ \t]*$")) inhere=0; next }
+  # ⚠️ **주석줄은 heredoc을 시작하지 않는다.** 이 가드의 주석 규칙은 아래에 있어 여기까지 닿지 못했다 —
+  #    그래서 `# 예전엔 \`python3 - <<PY\`로 인라인했다` 같은 설명 한 줄이 inhere=1을 세워
+  #    **그 뒤 파일 전체가 검출기에게 투명해졌다**(실측: 진짜 종료줄이 있는 파일은 [E]도 침묵한다).
+  #    AGENTS.md 컨벤션이 "고친 함정을 인용하며 설명"을 권장하므로 밟기 쉬운 자리다.
+  #    `<<<`·`$(( << ))`와 같은 클래스의 세 번째 오인원이다.
+  if ($0 ~ /^[ \t]*#/) next
   if (match(hl, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/)) {
     d=substr(hl,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; herestart=FNR; next
   }
@@ -96,7 +102,13 @@ FNR==1 { flush_prev(); inhere=0; delim=""; herestart=0; prevfile=FILENAME; nfile
     else if (tk[i] ~ /^-p./)                   { cand = substr(tk[i], 3) }
     else if (tk[i] ~ /^--publish=/)            { cand = substr(tk[i], 11) }
     if (cand == "") continue
-    gsub(/^["']|["'].*$/, "", cand)
+    # ⚠️ **두 번의 sub으로 순서를 강제한다.** 한 번의 `gsub(/^["']|["'].*$/, ...)`으로 쓰면
+    #    ERE의 leftmost-longest가 오프셋 0에서 둘째 대안 `["'].*$`를 골라 **토큰 전체**를 먹고,
+    #    cand가 빈 문자열이 돼 아래 `np < 2`에서 빠져나간다(gawk·mawk 동일 실측).
+    #    그러면 레인 A가 침묵하고 binds도 안 서서 **레인 C까지 함께 꺼진다**. 하필 이 레포가
+    #    실제로 쓰는 표기가 따옴표형(`-p "127.0.0.1:${PORT}:9093"`)이라 hard-zero 보증이 거짓이 된다.
+    sub(/^["']/, "", cand)      # 선두 따옴표만 벗긴다
+    sub(/["'].*$/, "", cand)    # 그런 뒤에야 남은 따옴표는 **닫는** 쪽이다
     np = split(cand, part, ":")
     # ⚠️ **콜론이 없으면 publish 인자가 아니다.** 이 조건이 없으면 `mkdir -p "$tmp/bin"`의 `-p`를
     #    publish로 읽어 그 파일을 [C]로 오탐한다(실측 — 도입 때 app-shared-node-smoke.sh가 걸렸다).

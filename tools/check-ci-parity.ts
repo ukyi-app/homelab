@@ -128,7 +128,12 @@ function commandsIn(run: string): string[] {
   for (const raw of run.split("\n")) {
     const line = raw.replace(/#.*$/, "");
     if (!line.trim()) continue;
-    const re = /(?:^|[\s;&|(])(?:bash|bun|sh|\.\/)?\s*((?:scripts|tools|tests)\/[A-Za-z0-9._/-]+\.(?:sh|ts|mts))(?=\s|$|"|')/g;
+    // ⚠️ 후행 lookahead에 `;` `&` `|` `)` `}`가 **반드시** 들어간다 — 예전엔 `(?=\s|$|"|')`뿐이라
+    //    `bash scripts/x.sh; then`·`bash scripts/x.sh|| exit 1`·`(bash scripts/x.sh)` 같은 정상 셸 표기가
+    //    통째로 안 보였다. 방향 ⑦은 "보이는 커맨드가 원장에 있는가"만 보므로, 안 보이는 커맨드는
+    //    대조 대상이 아니라 **침묵**한다 — 로스터가 파생 대조라는 보증이 그 표기에 대해 거짓이 된다.
+    //    (도입 시점 실측으로는 ci.yaml 34건이 전부 잡혀 놓친 것은 0건이었다. 잠복을 닫는 수정이다.)
+    const re = /(?:^|[\s;&|(])(?:bash|bun|sh|\.\/)?\s*((?:scripts|tools|tests)\/[A-Za-z0-9._/-]+\.(?:sh|ts|mts))(?=[\s;&|()}"']|$)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(line)) !== null) {
       if (m[1].includes("*")) continue;

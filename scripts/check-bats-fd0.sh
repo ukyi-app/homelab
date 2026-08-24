@@ -49,12 +49,16 @@ function code(l) {
   return l
 }
 FNR==1 { nfiles++; self = 0 }
-# 파일이 스스로 fd 0을 끊으면 그 안의 호출은 면제다(파일 목록이 아니라 사실로 판정한다).
-/exec[ \t]+0<[ \t]*\/dev\/null/ { self = 1 }
 /^[ \t]*#/            { next }
 /^[ \t]*-?[ \t]*name:/ { next }
 {
   c = code($0)
+  # 파일이 스스로 fd 0을 끊으면 그 안의 호출은 면제다(파일 목록이 아니라 사실로 판정한다).
+  # ⚠️ **이 판정은 주석을 벗긴 뒤에 해야 한다.** 앞서는 이 규칙이 주석·`name:` 스킵보다 **위**에 있어서,
+  #    `# 규약: exec 0</dev/null 을 한다` 같은 설명 한 줄·Makefile `##` 도움말·워크플로 스텝 이름만으로도
+  #    self=1이 서서 **그 파일 전체가 면제**됐다(실측). 가드 자신도 자기 헤더가 그 규약을 설명하므로
+  #    영구 면제 상태였다 — hard-zero 보증이 그대로 거짓이 된다.
+  if (c ~ /exec[ \t]+0<[ \t]*\/dev\/null/) self = 1
   if (match(c, /(^|[ \t;&|(){}])bats[ \t]+[^ \t]+/)) {
     tok = substr(c, RSTART, RLENGTH)
     sub(/.*bats[ \t]+/, "", tok)

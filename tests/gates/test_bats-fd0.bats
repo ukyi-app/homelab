@@ -39,6 +39,22 @@ setup() {
   run bash "$S" "$FX/norunner.sh"; [ "$status" -ne 0 ]
 }
 
+@test "the exemption is decided by real code, not by a comment that merely quotes the exec line" {
+  # ★ 적대적 리뷰가 잡은 자리. self 판정이 주석·`name:` 스킵보다 **위**에 있어, 그 문자열을
+  #   인용하기만 한 줄에도 self=1이 서서 **파일 전체가 면제**됐다. 그리고 이 가드 자신이
+  #   자기 헤더에서 그 규약을 설명하므로 **영구 면제 상태**였다 — hard-zero 보증이 거짓이었다.
+  #   세 표면을 전부 건다: 셸 주석 · Makefile `##` 도움말 · 워크플로 스텝 `name:`.
+  printf '#!/usr/bin/env bash\n# 규약: exec 0</dev/null 을 한다\nbats tools/tests/\n' > "$FX/cmt.sh"
+  run bash "$S" "$FX/cmt.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[FD0]'
+  printf 'x: ## 러너는 exec 0</dev/null 을 한다\n\t@bats tests/foo.bats\n' > "$FX/Makefile"
+  run bash "$S" "$FX/Makefile"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[FD0]'
+  printf 'steps:\n  - name: 러너 (exec 0</dev/null 로 fd 0을 끊는다)\n    run: |\n      bats tests/foo.bats\n' > "$FX/wf.yaml"
+  run bash "$S" "$FX/wf.yaml"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[FD0]'
+  # 음성 대조 — **진짜** exec 줄은 여전히 면제다(위 레인이 면제를 통째로 없앤 것이 아니다).
+  printf '#!/usr/bin/env bash\nexec 0</dev/null\nbats tools/tests/\n' > "$FX/real.sh"
+  run bash "$S" "$FX/real.sh"; [ "$status" -eq 0 ]
+}
+
 @test "the floor counts call sites, not files — a broken regex must not pass on file count" {
   # ★ 파일은 수백 개인데 bats 호출면은 한 자리다. 파일 수로 바닥을 걸면 정규식이 깨져 호출면을
   #   0개 찾아도 그 바닥을 통과한다(무측정 초록). 바닥의 대상이 호출면임을 여기서 문다.
