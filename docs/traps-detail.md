@@ -1537,6 +1537,26 @@ selfHeal과 플립플롭한다.
   `|| arc=$?`를 쓰는 이유가 그것이다.
 > 가드: `tests/gates/test_scan-floor.bats`, `scripts/verify-credential-inventory.sh`
 
+### `findings="$(awk … || true)"` — 검출기가 죽어도 "0곳 OK"를 내는 가드 본체의 fail-open
+- **병(라이브 실측 2026-08-24)**: awk 검출기를 쓰는 정적 가드들이 결과를 `findings="$(awk "$DETECT"
+  "${FILES[@]}" || true)"`로 받았다. 그 `|| true`는 **awk가 fatal로 죽은 rc까지** 삼킨다. 그러면
+  `findings`가 비고, 카운트가 0이 되어 가드는 `"0곳 OK" rc=0`을 낸다 — **검출기가 아무것도 안 봤는데
+  통과**다. 뮤테이션 증인: `check-locale-collation.sh`·`check-bats-style.sh`의 awk 프로그램에
+  syntax error를 한 글자 심으면(`gsub`→`gsub_TYPO`) red 없이 그대로 초록이었다.
+- **왜 `|| true`가 거기 있었는가**: 정당한 이유가 있다 — `set -euo pipefail` 아래에서 awk가 매치 0건에
+  비-0을 내는 구현이 있고(일부), 그걸 실패로 오인하지 않으려 붙였다. 그러나 그 관용구는 **매치 0건**과
+  **검출기 사망**을 구별하지 못한다. 둘 다 rc≠0인데 뜻이 정반대다.
+- ⇒ **처방은 세 겹이다**(형제 `check-host-ports.sh`가 먼저 채택, #525):
+  ① awk rc를 `2>"$errlog"` + `|| arc=$?`로 **포착**하고, 0이 아니면 "판정 불가는 통과가 아니다"로 red.
+  ② 인자를 awk에 넘기기 **전에** `[ -r "$f" ]`로 검증한다 — 읽을 수 없는 파일이 gawk를 fatal로 죽인다.
+  ③ awk가 `END { printf "READFILES=%d\n", nfiles > "/dev/stderr" }`로 **실제로 읽은 파일 수**를 보고하고,
+     셸이 그것을 열거 수와 대조한다. SCAN 신호(scan-floor)는 "열거한" 수라, 검출이 중간에 무너져도
+     그 수는 그대로 나가므로 개수 축만으로는 이 붕괴를 원리적으로 못 본다.
+- ⚠️ **이 처방을 한 가드에만 넣으면 형제가 남는다.** #525가 host-ports에 넣었을 때 핸드오프가
+  "check-locale-collation·check-bats-style에 같은 `|| true`가 그대로다"라고 후속 후보로 남겼고,
+  실측하니 그 두 줄이 문자 그대로 동일했다. 같은 lib(`scan-floor.sh`)를 쓰는 awk 가드는 전부 이
+  패턴을 공유하므로, 새 awk 가드를 추가할 때 이 세 겹을 함께 넣어야 한다.
+> 가드: `scripts/check-host-ports.sh`, `scripts/check-locale-collation.sh`, `scripts/check-bats-style.sh`, `tests/gates/test_host-ports.bats`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_bats-style.bats`
 ### vmalert에 configCheckInterval이 없으면 룰 파일 변경을 감시하지 않는다 — ArgoCD가 갱신해도 옛 룰을 계속 평가한다
 - **병**: vmalert(그리고 vmagent)는 마운트된 룰/스크래이프 설정 파일의 변경을 **기본으로 감시하지 않는다.**
   `-configCheckInterval`(vmagent는 `-promscrape.configCheckInterval`)이 설정돼야 그 주기로 파일을 다시

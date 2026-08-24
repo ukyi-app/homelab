@@ -65,6 +65,15 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
+@test "the detector failing (an unreadable arg) is red, not a silent pass" {
+  # ★ 예전엔 `findings="$(awk … || true)"`라 검출기가 죽어도 "0곳 OK" rc=0이었다 — 가드 본체의
+  #   fail-open이다(2026-08-24 뮤테이션으로 실증: awk에 syntax error를 심으면 red 없이 통과했다).
+  #   형제 check-host-ports.sh가 닫은 것과 같은 클래스. awk fatal의 결정적 경로 — 읽을 수 없는 인자 — 를 쓴다.
+  run bash "$S" "$FX/does-not-exist.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF 'FAIL'
+}
+
 @test "the gate venues pin a collation-stable locale" {
   # 런너 고정은 스캐너의 **대체가 아니라 짝**이다 — 고정이 없으면 오너의 en_US와 러너가 서로 다른
   # 술어를 평가하고(실측: sync-wave 원장 가드가 en_US에서 fail-open이었다), 고정만 하면 개별 결함의
