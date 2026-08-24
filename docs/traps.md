@@ -29,11 +29,11 @@
 | CNPG Pooler 예약 파라미터(pool_mode) → poolMode 필드 | gate | `platform/cnpg/prod/test_pooler.bats` |
 | CNPG pg_hba replication(postgres) — pg_basebackup 허용 | gate | `platform/cnpg/prod/test_basebackup.bats` |
 | busybox nc에 -q 없음(relay 리스너) | gate | `platform/victoria-stack/prod/test_relay.bats` |
-| vmalert configCheckInterval 없으면 룰 자동 reload 안 함 | gate · SSOT없음(승격대상) | `tests/gates/test_vmalert-config.bats` |
+| vmalert configCheckInterval 없으면 룰 자동 reload 안 함 | gate | `tests/gates/test_vmalert-config.bats` |
 | Alertmanager telegram: 자동 HTML-escape(이중 escape 금지) + 계약 | gate | `tests/gates/alertmanager-render-e2e.sh`, `tests/gates/test_telegram-notify.bats`, `tests/gates/test_telegram-alert-korean.bats`, `tests/gates/test_telegram-callsites.bats` |
 | GitHub Actions 비신뢰 입력(env 경유+regex) | gate | `tools/tests/test_mutation-dispatch.bats`, `tools/tests/test_validate-mutation.bats` |
 | concurrency queue:max ↔ cancel-in-progress 병용 불가(변이 디스패처 직렬화) | gate | `tools/tests/test_mutation-dispatch.bats` |
-| 워크플로 YAML colon-in-unquoted-name 문법 깨짐 | gate · SSOT없음(승격대상) | `tests/gates/test_workflow-yaml.bats` |
+| 워크플로 YAML colon-in-unquoted-name 문법 깨짐 | gate | `tests/gates/test_workflow-yaml.bats` |
 | 메모리 원장 예산(limit 합계 ≤ 10240Mi) | gate | `policy/ledger.rego`, `tools/tests/test_ledger-gate.bats` |
 | 상주 워크로드 자원 limit 블라인드스팟(cpu·memory request + memory limit) | gate | `tools/check-resource-limits.ts`, `tests/test_resource_limits.bats` |
 | AdGuard setcap 바이너리 ↔ allowPrivilegeEscalation 양립불가 | gate | `platform/adguard/prod/test_adguard_auth.bats` |
@@ -48,8 +48,8 @@
 | sealing key 백업 체인 DR fail-closed 게이트 | gate | `tests/test_sealed-secrets-restore.bats` |
 | tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | iac | `infra/_tests/test_tf_reconcile.bats` |
 | ArgoCD AppProject 권한경계 + appset finalizer/exclude/default-lockdown 거버넌스 | gate · SSOT없음(불변식) | `platform/argocd/root/test_projects.bats` |
-| bats @test 이름 한글/CJK 디렉토리실행 침묵스킵 | gate · SSOT없음(승격대상) | `tests/gates/test_check-skeleton-cjk.bats`, `tests/gates/test_check-skeleton-gate.bats` |
-| homepage EROFS(RO config)·apiserver egress(노드서브넷:6443 not ClusterIP) | gate · SSOT없음(승격대상) | `platform/homepage/prod/test_homepage_render.bats`, `platform/homepage/prod/test_homepage_netpol.bats` |
+| bats @test 이름 한글/CJK 디렉토리실행 침묵스킵 | gate | `tests/gates/test_check-skeleton-cjk.bats`, `tests/gates/test_check-skeleton-gate.bats` |
+| homepage EROFS(RO config)·apiserver egress(노드서브넷:6443 not ClusterIP) | gate | `platform/homepage/prod/test_homepage_render.bats`, `platform/homepage/prod/test_homepage_netpol.bats` |
 | GHA run 기본 셸 pipefail 부재(bash -e {0}) — tee 파이프 fail-open | gate | `tests/gates/test_workflow-pipefail.bats` |
 | GNU make가 recipe 종료코드를 자기 Error 2로 뭉갬 — make 계층 skip 신호는 마커+비-0까지 | gate | `tests/gates/test_guard-skip-signalling.bats` |
 | PG 메이저 업그레이드 3-이미지 동시 갱신(pg-tools digest 일관성) | gate | `tests/gates/test_pgtools-digest.bats`, `tests/test_dr-drill.bats` |
