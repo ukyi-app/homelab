@@ -1557,3 +1557,59 @@ selfHeal과 플립플롭한다.
   실측하니 그 두 줄이 문자 그대로 동일했다. 같은 lib(`scan-floor.sh`)를 쓰는 awk 가드는 전부 이
   패턴을 공유하므로, 새 awk 가드를 추가할 때 이 세 겹을 함께 넣어야 한다.
 > 가드: `scripts/check-host-ports.sh`, `scripts/check-locale-collation.sh`, `scripts/check-bats-style.sh`, `tests/gates/test_host-ports.bats`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_bats-style.bats`
+### vmalert에 configCheckInterval이 없으면 룰 파일 변경을 감시하지 않는다 — ArgoCD가 갱신해도 옛 룰을 계속 평가한다
+- **병**: vmalert(그리고 vmagent)는 마운트된 룰/스크래이프 설정 파일의 변경을 **기본으로 감시하지 않는다.**
+  `-configCheckInterval`(vmagent는 `-promscrape.configCheckInterval`)이 설정돼야 그 주기로 파일을 다시
+  읽는다. 이 플래그가 없으면 ArgoCD가 ConfigMap을 갱신하고 kubelet이 마운트를 새 내용으로 바꿔도,
+  vmalert는 **메모리상 옛 룰을 계속 평가**한다 — 수동 `rollout restart`나 `-/reload`를 칠 때까지.
+- **왜 위험한가**: 이것은 red가 아니라 **silent staleness**다. 룰을 고치는 커밋이 머지되고 ArgoCD가
+  Synced/Healthy를 보고해도, 정작 발화 판정은 옛 룰로 돈다. "배포됐다"와 "평가에 반영됐다" 사이의
+  간극이 관측되지 않는다 — 알림 룰이라면 그 간극 동안 진짜 사고를 놓칠 수 있다.
+- ⇒ **처방: 두 컴포넌트 모두 configCheckInterval을 명시하고, 그 존재를 게이트로 강제한다.**
+  값 자체보다 **존재**가 계약이다(없으면 감시가 통째로 꺼지므로). ConfigMap 변경이 파드 재시작을
+  자동으로 일으키지 않는다는 인접 함정과 짝이다 — 그쪽은 envFrom 시크릿, 이쪽은 룰 파일이다.
+> 가드: `tests/gates/test_vmalert-config.bats`
+
+### 워크플로 YAML의 따옴표 없는 스텝 이름에 콜론이 들어가면 매핑으로 파싱돼 파일이 조용히 깨진다
+- **병(실측)**: `bump-poll.yaml`의 스텝 `name: 신뢰 경계: ...`가 따옴표가 없어, YAML 파서가 `신뢰 경계`를
+  키로 `...`를 값으로 하는 **중첩 매핑**으로 읽었다. 그 결과 `update-image` 권위 경로(bump-poll) 전체가
+  불능이 됐는데 **CI 게이트가 못 잡았다** — 워크플로가 스스로를 트리거하는 경로라 문법이 깨져도
+  다른 잡의 초록에 묻혔다.
+- **왜 이 클래스가 반복되는가**: YAML에서 따옴표 없는 스칼라 안의 `:`(뒤에 공백이 오면)는 **항상**
+  키-값 구분자다. 한국어 스텝 이름은 "신뢰 경계:", "포트 확인:"처럼 콜론+공백을 자연스럽게 쓰므로
+  이 지뢰를 밟기 쉽다. 그리고 워크플로 파일은 자기 자신을 실행하는 주체라, 깨진 파일이 낸 증상이
+  "그 워크플로가 안 도는 것"이라 사후에 인지하기 어렵다.
+- ⇒ **처방: 전 워크플로 YAML을 파서에 통과시키는 게이트를 둔다.** 개별 문법 규칙을 열거하는 대신
+  실제 YAML 파서(bun yaml)로 파싱해 예외가 나면 red — colon-in-unquoted-name뿐 아니라 모든 문법
+  회귀를 한 그물로 잡는다.
+> 가드: `tests/gates/test_workflow-yaml.bats`
+
+### bats @test 이름에 한글/CJK가 있으면 디렉토리 단위 실행에서 침묵 스킵된다
+- **병**: bats를 **디렉토리 단위**로 실행하면(`bats tests/`) @test 이름의 한글/CJK가 인코딩 처리에서
+  깨져 그 테스트가 **조용히 스킵**된다(단일 파일 실행에서는 재현되지 않아 로컬에서 안 보인다).
+  스킵은 실패가 아니라 "그 검증이 아예 안 돈 것"이라, 회귀 테스트가 CJK 이름을 갖는 순간 그 가드는
+  침묵으로 무력화된다 — dead-green의 한 형태다.
+- **경계**: 깨지는 것은 `@test "이름"`의 **이름**뿐이다. em-dash·트레일링 한국어 주석·본문의 한국어는
+  bats가 정상 처리한다. 그래서 이 레포의 규약은 "@test 이름은 영어만"으로 좁게 고정되고, 본문·주석의
+  한국어는 허용된다.
+- ⇒ **처방: @test 이름에 CJK가 있으면 red를 내는 정적 가드.** CJK 판정은 하드코딩 유니코드 범위가
+  아니라 **스크립트 속성**(`\p{Han}\p{Hangul}\p{Hiragana}\p{Katakana}`)으로 한다 — Ext-A(㐀 U+3400)·
+  compat 이데오그래프·Hangul 확장까지 범위 누락 없이 덮기 위해서다. 검출기가 스스로 vacuous하지
+  않음을 black-box 음성 픽스처(추적 CJK 이름을 넣으면 check-skeleton이 실제로 exit≠0)로 증명한다.
+> 가드: `tests/gates/test_check-skeleton-cjk.bats`, `tests/gates/test_check-skeleton-gate.bats`
+
+### homepage: config 마운트를 readOnly로 두면 EROFS · apiserver egress는 노드 CIDR:6443이지 ClusterIP가 아니다
+- **병 ①(인시던트 #65, EROFS)**: homepage는 시작 시 config를 **써야** 하는데(seed→emptyDir), 그 마운트를
+  `readOnly: true`로 두면 런타임이 `EROFS`(read-only file system)로 죽는다. grep-on-source로는 안 보인다 —
+  kustomize가 조립한 **최종 출력**에서만 readOnly 값이 확정되기 때문이다.
+- **병 ②(인시던트 #66, apiserver egress)**: homepage가 apiserver에 닿는 egress NetworkPolicy를 쓸 때,
+  대상을 **ClusterIP(kubernetes 서비스의 가상 IP)로 적으면 막힌다** — NetworkPolicy egress는 ClusterIP를
+  볼 수 없고(그건 iptables/IPVS DNAT 규칙이지 실제 엔드포인트가 아니다), **노드 서브넷의 실제 IP:6443**을
+  허용해야 apiserver에 도달한다. 이것은 인접 함정 「NetworkPolicy egress는 apiserver ClusterIP 불가」의
+  homepage 구체화다.
+- ⇒ **처방: kustomize 렌더 출력을 yq로 객체-스코프 단언한다.** ① config 마운트가 writable(readOnly!=true)
+  인지, ② `allow-egress-to-apiserver` 규칙 **하나**가 노드 CIDR과 (protocol=TCP, port=6443) 엔트리를
+  **동시에** 묶는지(체인 select로 같은 규칙·같은 엔트리 결속 — 두 조건이 서로 다른 규칙에 흩어져
+  vacuous하게 통과하는 것을 막는다). ⚠️ CI(required gate)에서는 kustomize/yq 부재 시 skip 금지 —
+  fail-closed다(가드가 dead-green이 되면 이 두 인시던트가 그대로 재현된다).
+> 가드: `platform/homepage/prod/test_homepage_render.bats`, `platform/homepage/prod/test_homepage_netpol.bats`
