@@ -25,10 +25,16 @@ export type MutationSpec = {
   branchFor: (runId: number) => string;            // PR 브랜치 명명(reusable이 SSOT)
   applications: Array<{ name: string; surfacePath: string }>; // --wait 수렴 대상 집합 + 표면
   resultBase: Record<string, unknown>;             // 모든 variant에 실리는 공통 필드({action, name, …})
-  // 수동 머지 동사(create-app: 머지 = 공개 승인 — auto-merge:false). --wait의 미머지 pending은
-  // 실패가 아니라 설계된 바운디드 결과라 문구가 다르다. 엔진은 어떤 경로로도 auto-merge를 켜지
-  // 않는다(원장에 gh pr 계열 argv가 아예 없다 — 테스트가 단언).
-  manualMerge?: boolean;
+  // 수동 머지 동사(create-app: 머지 = 공개 승인 · teardown-app: 머지 = 파괴 승인 — 둘 다
+  // auto-merge:false). --wait의 미머지 pending은 실패가 아니라 설계된 바운디드 결과라 문구가
+  // 다르고, 머지가 무엇을 승인하는지는 동사가 안다(approval). 엔진은 어떤 경로로도 auto-merge를
+  // 켜지 않는다(원장에 gh pr 계열 argv가 아예 없다 — 테스트가 단언).
+  manualMerge?: { approval: string };
+  // 종결 술어. presence(기본): 명명된 Application 집합이 수렴(후손 리비전 + Synced + Healthy +
+  // 표면이 요청값)해야 성공. absence(teardown-app): 삭제 대상은 Healthy가 될 수 없다 — 성공 =
+  // Application 부재(appset finalizer cascade prune 완료)이고, 표면 술어의 극성도 함께 뒤집힌다
+  // (철거 머지는 표면을 제거하므로 머지 SHA에서 표면이 사라져 있어야 요청이 반영된 것).
+  converge?: "presence" | "absence";
   // run 성공 + 브랜치 PR 0 = 정당한 no-op(update-secrets: 동일 봉인본 — pr-first-commit 멱등).
   // --wait 검증은 머지 SHA 없이 "관측 리비전의 표면 blob == homelab main의 표면 blob"으로 대체한다
   // (디스패처가 main HEAD와 비교한 그 기준). 미설정이면 PR 0은 명명 드리프트로 failure.
@@ -138,7 +144,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   if (pr !== undefined) {
     while (pr.merged_at === null) {
       if (Date.now() >= endAt) {
-        return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: spec.manualMerge === true ? "사람 머지 대기 — 머지가 곧 공개 승인(PR 검토·머지 후 핸들로 재조회)" : "auto-merge 머지 미관측 — required check 대기 중일 수 있다(핸들로 재조회 가능)" }) };
+        return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: spec.manualMerge !== undefined ? `사람 머지 대기 — 머지가 곧 ${spec.manualMerge.approval}(PR 검토·머지 후 핸들로 재조회)` : "auto-merge 머지 미관측 — required check 대기 중일 수 있다(핸들로 재조회 가능)" }) };
       }
       Bun.sleepSync(opts.pollMs);
       const again = readPr();
@@ -154,6 +160,64 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   if ((process.env.KUBECONFIG ?? "") === "") {
     return { variant: doneVariant, omitted: ["live"], result: compact({ ...base, waited: true, run: runRef(), pr: prRef() }) };
   }
+  // 표면 blob sha — found(sha)/absent(확정 404)/error(전송 오류 — 미확정) 3상. presence·absence 공용.
+  type Blob = { kind: "found"; sha: string } | { kind: "absent" } | { kind: "error" };
+  const blobAt = (ref: string, path: string): Blob => {
+    const r = sh("gh", ["api", `repos/${HOMELAB_REPO}/contents/${path}?ref=${ref}`, "--jq", ".sha"]);
+    if (r.ok) return { kind: "found", sha: r.out.trim() };
+    return /\(HTTP 404\)/.test(r.err) ? { kind: "absent" } : { kind: "error" };
+  };
+  // 요청값 blob(머지 SHA 시점) — 확정 관측만 캐시(전송 오류는 미확정이라 재평가 여지).
+  const requestedBlobCache = new Map<string, Blob>();
+  const requestedBlob = (path: string): Blob => {
+    const hit = requestedBlobCache.get(path);
+    if (hit !== undefined) return hit;
+    const b = blobAt(wantRef, path);
+    if (b.kind !== "error") requestedBlobCache.set(path, b);
+    return b;
+  };
+
+  // 6a) absence 수렴(teardown) — 삭제 대상 Application은 Healthy가 될 수 없다(스펙 대기 매트릭스,
+  //   plan r2 s5). 두 지점에서 극성이 뒤집힌다: (1) 철거 머지는 표면을 제거하므로 기준 ref에서
+  //   표면이 사라져 있어야 요청이 반영된 것 — 남아 있으면 철거 미반영(fail-loud). (2) Application은
+  //   sync/health가 아니라 존재/부재로 판정한다(--ignore-not-found: 부재=빈 stdout·exit 0).
+  //   DNS 회수는 관측 대상이 아니다 — iac/tf-reconcile 소관을 resultBase가 명시한다.
+  if (spec.converge === "absence") {
+    for (;;) {
+      let surfaceUndecided = false;
+      for (const app of spec.applications) {
+        const want = requestedBlob(app.surfacePath);
+        if (want.kind === "found") return fail(`기준 ref(${wantRef})에 표면(${app.surfacePath})이 남아 있다 — 철거가 반영되지 않았다`, { run: runRef(), pr: prRef() });
+        if (want.kind === "error") surfaceUndecided = true; // 미확정 — 이 사이클은 수렴 아님
+      }
+      const states: Array<Record<string, unknown>> = [];
+      let allAbsent = !surfaceUndecided;
+      for (const app of spec.applications) {
+        const k = sh("kubectl", ["-n", "argocd", "get", "applications.argoproj.io", app.name, "-o", "json", "--ignore-not-found"]);
+        if (!k.ok) { states.push({ name: app.name, error: k.err.split("\n")[0] || "kubectl 실패" }); allAbsent = false; continue; }
+        const present = k.out.trim() !== "";
+        states.push({ name: app.name, present });
+        if (present) allAbsent = false;
+      }
+      if (allAbsent) {
+        return { variant: doneVariant, omitted: [], result: compact({ ...base, waited: true, run: runRef(), pr: prRef(), applications: states }) };
+      }
+      if (Date.now() >= endAt) {
+        // pendingReason은 실제 미수렴 원인을 반영한다 — 표면 조회 일시 실패나 kubectl 오류를
+        // "finalizer cascade 진행 중"으로 뭉개면 운영자를 잘못 유도한다(원인별 재조회 판단이 다르다).
+        const kubectlError = states.some((s) => s.error !== undefined);
+        const pendingReason = surfaceUndecided
+          ? "철거 반영 확인 미완 — 표면(git) 조회가 일시 실패했다(핸들로 재조회 가능)"
+          : kubectlError
+            ? "Application 부재 미확정 — 클러스터 조회 일시 실패(핸들로 재조회 가능)"
+            : "Application prune 미완 — appset finalizer cascade 진행 중일 수 있다(핸들로 재조회 가능)";
+        return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), applications: states, pendingReason }) };
+      }
+      Bun.sleepSync(opts.pollMs);
+    }
+  }
+
+  // 6b) presence 수렴(기본) — 후손 + Synced + Healthy + 표면 요청값.
   // 후손 판정 — gh compare(--jq .status는 raw 문자열이다: JSON.parse 금지). 확정 관측만 캐시한다
   // (리비전의 계보는 불변) — 전송 오류를 false로 캐시하면 수렴 완료가 pending으로 접힌다.
   const descendantCache = new Map<string, boolean>();
@@ -168,23 +232,6 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     const yes = status === "identical" || status === "ahead";
     descendantCache.set(revision, yes);
     return yes;
-  };
-  // 표면 blob sha — found(sha)/absent(확정 404)/error(전송 오류 — 미확정) 3상.
-  type Blob = { kind: "found"; sha: string } | { kind: "absent" } | { kind: "error" };
-  const blobAt = (ref: string, path: string): Blob => {
-    const r = sh("gh", ["api", `repos/${HOMELAB_REPO}/contents/${path}?ref=${ref}`, "--jq", ".sha"]);
-    if (r.ok) return { kind: "found", sha: r.out.trim() };
-    return /\(HTTP 404\)/.test(r.err) ? { kind: "absent" } : { kind: "error" };
-  };
-  // 요청값 blob(머지 SHA 시점) — 확정 관측만 캐시. 머지 커밋에 표면이 없으면 요청 자체가
-  // 반영되지 않은 것이라 fail-loud(추월이 아니라 반영 실패).
-  const requestedBlobCache = new Map<string, Blob>();
-  const requestedBlob = (path: string): Blob => {
-    const hit = requestedBlobCache.get(path);
-    if (hit !== undefined) return hit;
-    const b = blobAt(wantRef, path);
-    if (b.kind !== "error") requestedBlobCache.set(path, b);
-    return b;
   };
   for (;;) {
     const states: Array<Record<string, unknown>> = [];

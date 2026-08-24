@@ -6,12 +6,14 @@
 // (structure r1 A1·B1). 셰뱅+exec 비트는 이 파일만 예외: package.json bin("homelab")의
 // 대상이라 `bun link`가 전역 PATH에 심링크한다(test_shebang-exec.bats가 bin 선언에서 파생).
 import { spawnSync } from "node:child_process";
+import { readSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseCommand, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
 import { USAGE_EXIT, type Envelope } from "./lib/contract.ts";
+import { APP_NAME_RE } from "./lib/identity.ts";
 import { WAIT_DEFAULTS } from "./lib/mutation.ts";
 import type { TypedFlags } from "./lib/cli.ts";
-import { APP_CREATE, APP_SECRETS, CACHE_CREATE, DB_CREATE, DOCTOR, STATUS, VERBS, appCreateInputError, cacheCreateInputError, dbCreateInputError, type AppCreateInput, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
+import { APP_CREATE, APP_SECRETS, APP_TEARDOWN, CACHE_CREATE, DB_CREATE, DOCTOR, STATUS, VERBS, appCreateInputError, appTeardownInputError, cacheCreateInputError, dbCreateInputError, type AppCreateInput, type AppTeardownInput, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./lib/secrets.ts";
 import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
 import { statusInputError, type StatusInput } from "./lib/status.ts";
@@ -36,6 +38,7 @@ const CLI_BY_VERB: Record<string, (rest: string[]) => VerbOutput> = {
   "cache url": cacheUrlCli,
   "app create": appCreateCli,
   "app secrets": appSecretsCli,
+  "app teardown": appTeardownCli,
 };
 for (const v of VERBS) {
   if (!CLI_BY_VERB[v.path.join(" ")]) throw new Error(`계약 파손: 동사 '${v.path.join(" ")}'의 CLI 어댑터가 없다`);
@@ -201,11 +204,13 @@ function renderMutation(envelope: Envelope): string[] {
   if (r.pr?.url) lines.push(`PR: ${r.pr.url} · merged ${OX[String(r.pr.merged)]}${r.pr.mergeSha ? ` · merge SHA ${r.pr.mergeSha}` : ""}`);
   if (Array.isArray(r.applications)) {
     for (const a of r.applications) {
-      lines.push(a.error
-        ? `Application ${a.name}: 조회 실패 — ${a.error}`
-        : `Application ${a.name}: sync ${a.sync} · health ${a.health} · rev ${a.revision} · 후손 ${OX[String(a.descendant)]}${a.surfaceOk !== undefined ? ` · 표면 ${OX[String(a.surfaceOk)]}` : ""}`);
+      if (a.error) lines.push(`Application ${a.name}: 조회 실패 — ${a.error}`);
+      // teardown(absence): 존재/부재 판정 — sync/health가 아니라 present 필드를 쓴다.
+      else if (a.present !== undefined) lines.push(`Application ${a.name}: ${a.present ? "아직 존재 — prune 진행 중" : "부재 — prune 완료"}`);
+      else lines.push(`Application ${a.name}: sync ${a.sync} · health ${a.health} · rev ${a.revision} · 후손 ${OX[String(a.descendant)]}${a.surfaceOk !== undefined ? ` · 표면 ${OX[String(a.surfaceOk)]}` : ""}`);
     }
   }
+  if (r.dnsReclaim) lines.push(`DNS 회수: ${r.dnsReclaim} 소관(이 명령의 관측 대상 아님)`);
   if (envelope.omitted.includes("live")) lines.push("라이브(ArgoCD) 수렴: 생략 — KUBECONFIG 미설정(머지까지만 확인)");
   if (r.pendingReason) lines.push(`대기: ${r.pendingReason}`);
   if (r.error) lines.push(`오류: ${r.error}`);
@@ -260,6 +265,54 @@ function appSecretsCli(rest: string[]): VerbOutput {
   const bad = appSecretsInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab app secrets: ${bad}`, usage: appSecretsUsage() };
   const envelope = APP_SECRETS.op(input);
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
+}
+
+function appTeardownUsage(): string {
+  return [
+    "사용법: homelab app teardown <app> --confirm <app> [--wait] [--json]",
+    "",
+    "앱을 철거한다 — teardown-app 디스패처를 correlation 수령증과 함께 트리거한다. teardown-app은",
+    "**수동 머지** 동사다(머지 = 파괴 승인, auto-merge 없음). 파괴 오발사를 막기 위해 앱 이름 재입력을",
+    "요구한다: --confirm 값이 <app>과 정확히 일치해야 하고, 플래그가 없으면 TTY에서 재입력을 프롬프트하며,",
+    "비-TTY(스크립트)에서는 거부한다. --wait의 종결은 다른 동사와 다르다 — 삭제 대상 Application은",
+    "Healthy가 될 수 없으므로, 성공 = 머지 관측 + 생성됐던 Application의 **부재**(prune 완료)다.",
+    "DNS 회수는 iac/tf-reconcile 소관이라 이 명령의 관측 대상이 아니다(결과에 명시).",
+    "  --confirm <app>    파괴 확인 — 철거할 앱 이름 재입력(불일치·비-TTY 무플래그 = 거부)",
+    "  --wait             머지 관측 + Application 부재(prune)까지 대기(미머지 = 바운디드 pending)",
+    ...WAIT_FLAG_LINES,
+  ].join("\n");
+}
+
+// 파괴 확인 — --confirm 플래그가 없을 때. TTY면 앱 이름 재입력을 프롬프트하고 한 줄을 동기로 읽어
+// 반환, 비-TTY(스크립트·파이프)면 undefined(= 거부, 콜사이트가 일치 검사로 처리한다). isTTY를
+// 주입 가능하게 만들지 않는다 — 그러면 프로덕션에 테스트 전용 분기가 생기고 정작 진짜 TTY 동작은
+// 검증되지 않는다. 테스트는 pty(util-linux script)로 실물 터미널을 만든다.
+function promptConfirm(app: string): string | undefined {
+  if (process.stdin.isTTY !== true) return undefined;
+  process.stderr.write(`파괴 확인: 철거할 앱 이름 '${app}'을 다시 입력하세요 > `);
+  const buf = Buffer.alloc(256);
+  let n = 0;
+  try { n = readSync(0, buf, 0, buf.length, null); } catch { return undefined; }
+  return buf.subarray(0, n).toString("utf8").trim();
+}
+
+function appTeardownCli(rest: string[]): VerbOutput {
+  const p = positionalThenFlags(rest, { value: ["--confirm", "--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab app teardown", appTeardownUsage);
+  if (isOutput(p)) return p;
+  if (p.flags.bool("--help")) return { kind: "help", text: appTeardownUsage() };
+  const app = p.positional ?? "";
+  // 앱 이름 형식은 confirm 프롬프트 전에 검증한다(불량 이름으로 프롬프트를 띄우지 않는다).
+  if (!APP_NAME_RE.test(app)) return { kind: "usage-error", message: `homelab app teardown: 앱 이름 형식 불량(소문자 kebab, 2..40): ${app}`, usage: appTeardownUsage() };
+  // 파괴 확인 가드 — 플래그가 있으면 그 값, 없으면 TTY 재입력(비-TTY면 undefined). 일치해야만 진행.
+  const confirm = p.flags.str("--confirm") ?? promptConfirm(app);
+  if (confirm !== app) {
+    return { kind: "usage-error", message: `homelab app teardown: 파괴 확인 실패 — '${app}' 재입력이 일치하지 않는다(입력: ${confirm ?? "(없음 — 비-TTY에는 --confirm 필수)"})`, usage: appTeardownUsage() };
+  }
+  const input: AppTeardownInput = { app, confirm, wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms") };
+  const bad = appTeardownInputError(input);
+  if (bad) return { kind: "usage-error", message: `homelab app teardown: ${bad}`, usage: appTeardownUsage() };
+  const envelope = APP_TEARDOWN.op(input);
   return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
 }
 

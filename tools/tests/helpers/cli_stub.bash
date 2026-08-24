@@ -47,6 +47,10 @@ cli_stub_init() {
   # app create 픽스처 기본값 — create-app run 1개(성공).
   printf '[{"id":801,"name":"✨ create-app — myapp [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/801"}]\n' "$NONCE" > "$FIX/appcreate-runs.json"
 
+  # app teardown 픽스처 기본값 — teardown-app run 1개(성공). 이 동사의 종결은 Application "부재"라
+  # kubectl 쪽 기본값도 부재다(STUB_APP_STILL_PRESENT=1로 prune 미완을 만든다).
+  printf '[{"id":901,"name":"🗑️ teardown-app — myapp [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/901"}]\n' "$NONCE" > "$FIX/teardown-runs.json"
+
   # app secrets 픽스처 기본값 — update-secrets run 1개(성공). PR은 테스트가 db-prs.json으로 배치.
   printf '[{"id":701,"name":"✨ update-secrets — myapp [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/701"}]\n' "$NONCE" > "$FIX/secrets-runs.json"
 
@@ -165,6 +169,13 @@ case "$*" in
   "api repos/ukyi-app/homelab/actions/workflows/create-app.yaml/runs?per_page=20 --jq "*)
     cat "$FIX/appcreate-runs.json"
     ;;
+  # ── app teardown 케이스 — teardown-app 디스패처·runs 목록(수동 머지 = 파괴 승인) ──
+  "workflow run teardown-app.yaml -R ukyi-app/homelab "*)
+    if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
+    ;;
+  "api repos/ukyi-app/homelab/actions/workflows/teardown-app.yaml/runs?per_page=20 --jq "*)
+    cat "$FIX/teardown-runs.json"
+    ;;
   # ── app secrets 케이스 — update-secrets 디스패처·runs 목록 ──
   "workflow run update-secrets.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
@@ -262,6 +273,13 @@ make_kubectl_stub() {
 #!/usr/bin/env bash
 { printf '%s\0' kubectl "$@"; printf '\x1e'; } >> "$CALLS"
 case "$*" in
+  # 부재 조회(absence 수렴 — teardown) : --ignore-not-found가 부재를 exit 0 + 빈 stdout으로 만든다.
+  # 기본 = 부재(prune 완료). STUB_APP_STILL_PRESENT=1이면 존재(prune 미완), STUB_KUBECTL_FAIL이면 미확정.
+  # 이 케이스는 존재 조회 패턴보다 **앞**에 있어야 한다(뒤에 두면 `-o json`으로 끝나는 패턴이 선점).
+  "-n argocd get applications.argoproj.io "*" -o json --ignore-not-found")
+    if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
+    if [ -n "${STUB_APP_STILL_PRESENT:-}" ]; then cat "$FIX/argocd-app.json"; fi
+    ;;
   "-n argocd get applications.argoproj.io cnpg-data -o json")
     if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
     cat "$FIX/argocd-cnpg-data.json"

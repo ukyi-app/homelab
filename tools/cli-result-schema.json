@@ -28,7 +28,7 @@
   "required": ["schema", "verb", "variant", "exitCode", "omitted", "result"],
   "properties": {
     "schema": { "enum": ["homelab-cli/1"] },
-    "verb": { "enum": ["doctor", "status", "db create", "cache create", "app create", "app secrets"] },
+    "verb": { "enum": ["doctor", "status", "db create", "cache create", "app create", "app secrets", "app teardown"] },
     "variant": { "enum": ["success", "failure", "race", "skip", "pending", "no-op", "superseded"] },
     "exitCode": { "enum": [0, 1, 3, 4] },
     "omitted": { "type": "array", "uniqueItems": true, "items": { "enum": ["live"] } },
@@ -308,6 +308,38 @@
               { "type": "object", "required": ["chain"] }
             ] }
           }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["app teardown"] },
+            "variant": { "enum": ["success"] },
+            "result": { "$ref": "#/definitions/teardownSuccess" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["app teardown"] },
+            "variant": { "enum": ["failure"] },
+            "result": { "$ref": "#/definitions/teardownFailure" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["app teardown"] },
+            "variant": { "enum": ["race"] },
+            "result": { "$ref": "#/definitions/teardownRace" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["app teardown"] },
+            "variant": { "enum": ["pending"] },
+            "result": { "$ref": "#/definitions/teardownPending" }
+          }
         }
       ]
     },
@@ -495,6 +527,79 @@
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
         "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
+      }
+    },
+    "mutationAbsentApp": {
+      "description": "absence 수렴 관측(teardown) — Application의 존재/부재. present=false=prune 완료, true=진행 중, error=미확정(그 사이클 조회 실패). sync/health를 종결 근거로 쓰지 않는다 — 삭제 대상은 Healthy가 될 수 없다.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "present": { "type": "boolean" },
+        "error": { "type": "string" }
+      }
+    },
+    "teardownSuccess": {
+      "description": "철거 성공 — 머지 관측 + Application 부재(prune 완료). KUBECONFIG 부재면 applications 생략(omitted=live). dnsReclaim은 DNS 회수가 이 명령의 관측 대상이 아님을 명시(iac/tf-reconcile 소관).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "name", "correlation", "waited", "run", "pr", "dnsReclaim"],
+      "properties": {
+        "action": { "enum": ["teardown-app"] },
+        "name": { "type": "string", "minLength": 1 },
+        "correlation": { "type": "string", "minLength": 8 },
+        "waited": { "type": "boolean" },
+        "run": { "$ref": "#/definitions/mutationRun" },
+        "pr": { "$ref": "#/definitions/mutationPr" },
+        "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationAbsentApp" } }
+      }
+    },
+    "teardownFailure": {
+      "description": "철거 실패 — 디스패치/run 실패 또는 머지 SHA에 표면이 남음(철거 미반영). presence 동사와 달리 표면 잔존이 실패 신호다(극성 반전).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "name", "correlation", "error", "dnsReclaim"],
+      "properties": {
+        "action": { "enum": ["teardown-app"] },
+        "name": { "type": "string", "minLength": 1 },
+        "correlation": { "type": "string", "minLength": 8 },
+        "error": { "type": "string", "minLength": 1 },
+        "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "run": { "$ref": "#/definitions/mutationRun" },
+        "pr": { "$ref": "#/definitions/mutationPr" }
+      }
+    },
+    "teardownRace": {
+      "description": "신원 판정 불가(같은 nonce run ≥2 또는 브랜치 PR ≥2) — 전제 상태 변동 계열(exit 3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "name", "correlation", "error", "observedRuns", "dnsReclaim"],
+      "properties": {
+        "action": { "enum": ["teardown-app"] },
+        "name": { "type": "string", "minLength": 1 },
+        "correlation": { "type": "string", "minLength": 8 },
+        "error": { "type": "string", "minLength": 1 },
+        "observedRuns": { "type": "integer", "minimum": 0 },
+        "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "run": { "$ref": "#/definitions/mutationRun" }
+      }
+    },
+    "teardownPending": {
+      "description": "바운디드 부분 결과 — 사람 머지 대기(파괴 승인) 또는 Application prune 미완. applications는 부재 관측 증거이고 핸들 재조회가 재개 경로다.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "name", "correlation", "pendingReason", "dnsReclaim"],
+      "properties": {
+        "action": { "enum": ["teardown-app"] },
+        "name": { "type": "string", "minLength": 1 },
+        "correlation": { "type": "string", "minLength": 8 },
+        "pendingReason": { "type": "string", "minLength": 1 },
+        "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "run": { "$ref": "#/definitions/mutationRun" },
+        "pr": { "$ref": "#/definitions/mutationPr" },
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationAbsentApp" } }
       }
     },
     "statusResult": {

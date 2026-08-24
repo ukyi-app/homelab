@@ -73,7 +73,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$output" = "2" ]
 }
 
-@test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (25 allowed, 17 rejected)" {
+@test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (29 allowed, 20 rejected)" {
   # structure r1 시도2 A2·B2: verb만 result를 고르면 불가능한 variant(doctor+pending 등)가 valid로
   # 남는다 — verb 분기가 허용 variant 집합까지 선언하고, verb별 허용∪비허용 = variant 전체(7종).
   # 한 동사가 variant별 result 형상으로 분기를 여럿 가질 수 있으므로(db create) 허용 집합은 동사
@@ -99,6 +99,15 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     });
     const secBase = { action: "update-secrets", name: "myapp", correlation: "corr-fixed-nonce-01", chain: { mode: "dispatch-only" } };
     const appBase = { action: "create-app", name: "myapp", correlation: "corr-fixed-nonce-01" };
+    // teardown은 shared mutation* 정의를 쓰지 않는다(dnsReclaim 필수·chain 없음·applications는
+    // mutationAbsentApp) — 표본을 직접 짓는다.
+    const tdBase = { action: "teardown-app", name: "myapp", correlation: "corr-fixed-nonce-01", dnsReclaim: "iac/tf-reconcile" };
+    const td = {
+      ["success"]: { ...tdBase, waited: false, run: { id: 1, url: "u" }, pr: { number: 1, url: "u", merged: false } },
+      ["failure"]: { ...tdBase, error: "x" },
+      ["race"]: { ...tdBase, error: "x", observedRuns: 2 },
+      ["pending"]: { ...tdBase, pendingReason: "x" },
+    };
     const SAMPLES = {
       doctor: { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } },
       status: { mode: "list", apps: [], count: 0 },
@@ -107,6 +116,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
       ...Object.fromEntries(Object.entries(mut(appBase)).map(([v, r]) => ["app create|" + v, r])),
       ...Object.fromEntries(Object.entries(mut(secBase)).map(([v, r]) => ["app secrets|" + v, r])),
       "app secrets|no-op": { ...secBase, waited: false, run: { id: 1, url: "u" } },
+      ...Object.fromEntries(Object.entries(td).map(([v, r]) => ["app teardown|" + v, r])),
     };
     const byVerb = {};
     for (const br of verbBranches) (byVerb[br.properties.verb.enum[0]] ??= []).push(br);
@@ -131,11 +141,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     console.log("ok:" + okN + " rej:" + rejN);
   '
   [ "$status" -eq 0 ]
-  # 바닥값: 허용 doctor 2 + status 2 + db 5 + cache 5 + app create 5 + secrets 6 = 25 / 비허용 5+5+2+2+2+1 = 17
-  echo "$output" | grep -q "^ok:25 rej:17$"
+  # 바닥값: 허용 doctor 2 + status 2 + db 5 + cache 5 + app create 5 + secrets 6 + teardown 4 = 29
+  #        / 비허용 5+5+2+2+2+1+3 = 20
+  echo "$output" | grep -q "^ok:29 rej:20$"
 }
 
-@test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, floor 25)" {
+@test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, floor 29)" {
   # structure r1 b2: variant와 exitCode가 독립이면 success+exit 1도 green — 허용 쌍을 스키마가 강제한다.
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
@@ -156,6 +167,15 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     });
     const secBase = { action: "update-secrets", name: "myapp", correlation: "corr-fixed-nonce-01", chain: { mode: "dispatch-only" } };
     const appBase = { action: "create-app", name: "myapp", correlation: "corr-fixed-nonce-01" };
+    // teardown은 shared mutation* 정의를 쓰지 않는다(dnsReclaim 필수·chain 없음·applications는
+    // mutationAbsentApp) — 표본을 직접 짓는다.
+    const tdBase = { action: "teardown-app", name: "myapp", correlation: "corr-fixed-nonce-01", dnsReclaim: "iac/tf-reconcile" };
+    const td = {
+      ["success"]: { ...tdBase, waited: false, run: { id: 1, url: "u" }, pr: { number: 1, url: "u", merged: false } },
+      ["failure"]: { ...tdBase, error: "x" },
+      ["race"]: { ...tdBase, error: "x", observedRuns: 2 },
+      ["pending"]: { ...tdBase, pendingReason: "x" },
+    };
     const SAMPLES = {
       doctor: { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } },
       status: { mode: "list", apps: [], count: 0 },
@@ -164,6 +184,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
       ...Object.fromEntries(Object.entries(mut(appBase)).map(([v, r]) => ["app create|" + v, r])),
       ...Object.fromEntries(Object.entries(mut(secBase)).map(([v, r]) => ["app secrets|" + v, r])),
       "app secrets|no-op": { ...secBase, waited: false, run: { id: 1, url: "u" } },
+      ...Object.fromEntries(Object.entries(td).map(([v, r]) => ["app teardown|" + v, r])),
     };
     let n = 0;
     for (const br of verbBranches) {
@@ -180,7 +201,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     console.log("rejected:" + n);
   '
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^rejected:25$"
+  echo "$output" | grep -q "^rejected:29$"
 }
 
 @test "schema rejects a doctor envelope whose result does not match doctorResult (verb-result coupling)" {

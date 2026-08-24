@@ -1,0 +1,24 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "app teardown",
+  "variant": "pending",
+  "exitCode": 1,
+  "omitted": [],
+  "result": {
+    "action": "teardown-app",
+    "name": "myapp",
+    "dnsReclaim": "iac/tf-reconcile",
+    "correlation": "corr-fixed-nonce-01",
+    "run": {
+      "id": 901,
+      "url": "https://github.com/ukyi-app/homelab/actions/runs/901",
+      "conclusion": "success"
+    },
+    "pr": {
+      "number": 91,
+      "url": "https://github.com/ukyi-app/homelab/pull/91",
+      "merged": false
+    },
+    "pendingReason": "사람 머지 대기 — 머지가 곧 파괴 승인(PR 검토·머지 후 핸들로 재조회)"
+  }
+}

@@ -14,7 +14,9 @@ import { runStatus, statusInputError, type StatusInput } from "./status.ts";
 // 동사 형상 — I가 그 동사의 타입 입력(structure r2-a1: op를 입력 0개로 고정하면 입력 있는
 // 동사가 catalog를 우회해야 한다). 동사 추가 = 입력 타입 + 구체 Verb 타입 + union 멤버 +
 // named export + VERBS 행 — 전부 이 파일 안이라 우회 표면이 없다.
-type VerbShape<I> = { path: readonly string[]; desc: string; op: (input: I) => Envelope };
+// destructive: 파괴 동사 표시(teardown). MCP 노출 정책(후속 티켓)이 이 표시로 파괴 동사를
+// 제외하고, CLI는 confirm 가드로 사람 확인을 강제한다. 미설정 = 비파괴.
+type VerbShape<I> = { path: readonly string[]; desc: string; op: (input: I) => Envelope; destructive?: boolean };
 
 // doctor는 입력이 없는 동사다 — 입력 필드가 생기면 이 타입에서 확장한다.
 export type DoctorInput = Record<string, never>;
@@ -32,7 +34,7 @@ export type CacheCreateVerb = VerbShape<CacheCreateInput>;
 
 // CLI 전용 패스스루 동사 — 산출이 로컬 파일 기록이라 envelope 계약 밖(같은 동작 재노출이 계약).
 // MCP에서의 형상은 MCP 티켓이 결정한다.
-export type CliOnlyVerb = { path: readonly string[]; desc: string; cliOnly: true };
+export type CliOnlyVerb = { path: readonly string[]; desc: string; cliOnly: true; destructive?: boolean };
 
 // app create — 수동 머지 변이(머지 = 공개 승인, auto-merge:false — _create-app.yaml).
 export type AppCreateInput = WaitInput & { app: string };
@@ -41,8 +43,13 @@ export type AppCreateVerb = VerbShape<AppCreateInput>;
 // app secrets — 이중 모드 변이(lib/secrets.ts 엔진이 연쇄, 디스패치는 공유 변이 엔진).
 export type AppSecretsVerb = VerbShape<AppSecretsInput>;
 
+// app teardown — 파괴 변이(수동 머지 = 파괴 승인, confirm 재입력 가드는 CLI 셸 소유).
+// 종결 = Application 부재(converge: "absence" — 삭제 대상은 Healthy가 될 수 없다).
+export type AppTeardownInput = WaitInput & { app: string; confirm: string };
+export type AppTeardownVerb = VerbShape<AppTeardownInput>;
+
 // 전 동사의 union — 후속 동사가 멤버로 추가된다.
-export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | CacheCreateVerb | AppCreateVerb | AppSecretsVerb | CliOnlyVerb;
+export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | CacheCreateVerb | AppCreateVerb | AppSecretsVerb | AppTeardownVerb | CliOnlyVerb;
 
 function doctorOp(_input: DoctorInput): Envelope {
   const { checks, summary } = runDoctor();
@@ -135,9 +142,36 @@ function appCreateOp(input: AppCreateInput): Envelope {
       { name: `${input.app}-prod`, surfacePath: `apps/${input.app}/deploy/prod/values.yaml` },
     ],
     resultBase: { action: "create-app", name: input.app },
-    manualMerge: true, // 머지 = 공개 승인 — auto-merge를 켜는 어떤 경로도 없다
+    manualMerge: { approval: "공개 승인" }, // 머지 = 공개 승인 — auto-merge를 켜는 어떤 경로도 없다
   }, waitOpts(input));
   return { schema: ENVELOPE, verb: "app create", variant, exitCode: exitFor(variant), omitted, result };
+}
+
+// 입력 검증 술어 — CLI(usage exit 2)·MCP는 노출하지 않는다(파괴는 CLI 전용). confirm 일치는
+// CLI 셸이 TTY 프롬프트/거부로 처리한 뒤 op에 넘기므로, 여기 도달 시 이미 일치해야 한다(불일치면 결함).
+export function appTeardownInputError(input: AppTeardownInput): string | null {
+  if (!APP_NAME_RE.test(input.app ?? "")) return `앱 이름 형식 불량(소문자 kebab, 2..40): ${input.app}`;
+  if (input.confirm !== input.app) return `confirm(${input.confirm})이 앱 이름과 불일치 — 파괴 확인 실패`;
+  return waitInputError(input);
+}
+
+function appTeardownOp(input: AppTeardownInput): Envelope {
+  const bad = appTeardownInputError(input);
+  if (bad) throw new Error(`계약 파손: appTeardownOp에 검증 안 된 입력 — ${bad}`);
+  const { variant, omitted, result } = runMutation({
+    action: "teardown-app",
+    workflow: "teardown-app.yaml",
+    // confirm은 디스패처의 confirm 입력으로 전달(서버 측 재검증은 _teardown-app.yaml이 기존대로).
+    dispatchInputs: [["app", input.app], ["confirm", input.confirm]],
+    branchFor: (runId) => `teardown/teardown-app-${input.app}-${runId}`, // 명명 SSOT: _teardown-app.yaml
+    applications: [ // 철거 대상 앱 Application + 제거될 표면(create-app 산출과 동일 경로)
+      { name: `${input.app}-prod`, surfacePath: `apps/${input.app}/deploy/prod/values.yaml` },
+    ],
+    resultBase: { action: "teardown-app", name: input.app, dnsReclaim: "iac/tf-reconcile" },
+    manualMerge: { approval: "파괴 승인" }, // 머지 = 파괴 승인 — auto-merge를 켜는 어떤 경로도 없다
+    converge: "absence", // 종결 = Application 부재(Healthy 대기 아님)
+  }, waitOpts(input));
+  return { schema: ENVELOPE, verb: "app teardown", variant, exitCode: exitFor(variant), omitted, result };
 }
 
 function appSecretsOp(input: AppSecretsInput): Envelope {
@@ -209,4 +243,12 @@ export const APP_SECRETS: AppSecretsVerb = {
   op: appSecretsOp,
 };
 
-export const VERBS: readonly Verb[] = [DOCTOR, STATUS, DB_CREATE, DB_URL, CACHE_CREATE, CACHE_URL, APP_CREATE, APP_SECRETS];
+// 파괴 동사 — destructive 표시로 MCP 노출에서 제외(파괴는 CLI 전용). confirm 재입력 가드는 CLI 셸.
+export const APP_TEARDOWN: AppTeardownVerb = {
+  path: ["app", "teardown"],
+  desc: "앱 철거(teardown-app 디스패치 — 수동 머지: 머지가 곧 파괴 승인 · confirm 재입력 가드 · 종결 = Application 부재)",
+  op: appTeardownOp,
+  destructive: true,
+};
+
+export const VERBS: readonly Verb[] = [DOCTOR, STATUS, DB_CREATE, DB_URL, CACHE_CREATE, CACHE_URL, APP_CREATE, APP_SECRETS, APP_TEARDOWN];

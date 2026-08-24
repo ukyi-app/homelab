@@ -38,10 +38,20 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   동사의 실체는 `lib/verbs.ts` operation catalog가 SSOT — 이 bin 모듈은 import하면 main이 실행되므로
   MCP 등 다른 소비자는 lib 쪽을 import한다. 변이는 전부 기존 변이 디스패처를
   `gh workflow run`으로 트리거하는 래퍼가 될 예정이고(신뢰 경계 불변 — actor 가드·전역 직렬화·
-  PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`·`app create|secrets`다.
+  PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`·`app create|secrets|teardown`다.
   `homelab app create <app> [--wait]` = 수동 머지 변이(머지 = 공개 승인, auto-merge:false — 엔진은 어떤
   경로로도 auto-merge를 켜지 않는다): 기본은 run 추적+PR URL, --wait는 미머지면 '사람 머지 대기' 바운디드
   pending, 머지 관측 시 라이브 수렴(<app>-prod + values.yaml 표면)으로 전환.
+  `homelab app teardown <app> --confirm <app> [--wait]` = **파괴 동사**(destructive 표시 — MCP 노출 제외).
+  수동 머지 변이(머지 = 파괴 승인, auto-merge:false). 파괴 오발사 가드로 앱 이름 재입력을 요구한다:
+  `--confirm` 값이 앱 이름과 정확히 일치해야 하고, 플래그가 없으면 TTY에서 재입력을 프롬프트하며 비-TTY
+  (스크립트)에서는 거부한다(둘 다 디스패치 전 거부 — 원장에 gh 호출 0건). 확인은 CLI 셸(homelab.ts)이
+  소유하고 서버 측 재검증은 _teardown-app.yaml이 기존대로 유지한다. `--wait`의 종결은 다른 동사와 다르다
+  (`converge: "absence"`): 삭제 대상 Application은 Healthy가 될 수 없으므로, 성공 = 머지 관측 +
+  Application 부재(appset finalizer cascade prune 완료 — `kubectl get … --ignore-not-found`가 빈 stdout)다.
+  극성 반전 두 지점: 철거 머지는 표면(apps/<app>/…)을 제거하므로 머지 SHA에 표면이 남아 있으면 failure
+  (철거 미반영)이고, Application은 sync/health가 아니라 존재/부재로 판정한다. DNS 회수는 iac/tf-reconcile
+  소관이라 이 명령의 관측 대상이 아니다(결과 `dnsReclaim`에 명시).
   `homelab app secrets <app> [--wait]` = 이중 모드(`lib/secrets.ts`): 앱 레포 안(마커 .app-config.yml +
   canonical remote)이면 seal(벤더 tools/seal-secret.mts 위임)→봉인본만 커밋→push→원격 main 도달성 증명→
   update-secrets 디스패치를 연쇄하고 선행 조건(main·클린 트리·canonical) 실패 시 디스패치 없이 거부, 밖이면
