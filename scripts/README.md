@@ -59,6 +59,12 @@
   워크플로가 참조하는 secret 전부가 `policy/gh-secret-classification.json`에 정확히 한 번,
   사유와 함께 분류돼 있어야 한다(ledger/inventory-only/identifier/provided). `ledger` 갈래는
   `policy/credential-expiry.json` 행과 기계 대조된다. 미분류·stale·이중선언 전부 fail-closed.
+- **`check-host-ports.sh`** — 호스트 포트 위생 가드: `tests/gates/**`의 하네스가 호스트 포트를
+  **리터럴로 박는** 자리를 hard-zero로 막는다(레인 A publish 인자 · B 리스너 헬퍼 인자 · C 배정 lib
+  미사용 · D 포트 변수를 자기가 리터럴로 채움 — `HP_` 이름공간만 면제, 밴드 상수의 정의처라서다).
+  이 클래스의 결함은 red가 아니라 **오진**으로 나타난다: 예전 AM 렌더 e2e는 mock을 `8089`에 `&`로
+  띄워 바인드 실패가 `set -e`에 안 걸렸고, 30초 뒤 "no telegram capture within timeout"으로 죽어
+  진단이 포트가 아니라 메시지 템플릿을 가리켰다. 배정 프리미티브는 `tests/gates/lib/host-port.sh`.
 - **`check-skip-signalling.sh`** — 가드 skip 신호 규약(CONTRIBUTING '가드 skip 신호')의 정적 가드:
   `SKIP: <가드>: <이유>` 마커와 skip 종료코드(셸 `exit 4` / TS `process.exit(4)`)가 **같은 줄에서 짝**을
   이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + Makefile
