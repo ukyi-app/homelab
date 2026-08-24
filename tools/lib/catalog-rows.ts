@@ -79,6 +79,45 @@ export const LANES: Record<LaneAction, LaneRow> = {
   },
 };
 
+// ── 결과 계약 행(cli-deepening 심화 3) ──────────────────────────────────────────
+// verb당 한 행: 허용 variant 집합 · (mutation 계열) action 고정·chain 극성 · result 정의 참조.
+// cli-result-schema.json의 행렬 분기(allOf member 0)와 verb enum이 이 행에서 생성된다
+// (tools/generate-result-schema.ts — byte 동일 드리프트 게이트가 강제). 행 순서가 곧 분기·enum
+// 순서다. definitions 본문·x-contract·variant→exitCode 재진술은 생성기 내 수제 조각으로 남고,
+// 열거 붕괴를 막는 손 앵커는 계약 bats가 소유한다(후속 티켓 05).
+
+export type MutationVariantName = "success" | "failure" | "race" | "pending" | "superseded" | "no-op";
+
+export type ContractRow = {
+  verb: string;
+  // mutation 행렬 동사 — 공유 mutation* 정의에 action 고정 + chain 극성 결합으로 전개된다.
+  // refusedOnFailure: failure가 연쇄 거부(mutationRefused)와의 oneOf인 이중 모드 동사(app secrets).
+  mutation?: { action: LaneAction; chain: boolean; variants: readonly MutationVariantName[]; refusedOnFailure?: true };
+  // 단순 동사 — variant 집합별 result 정의 참조.
+  simple?: readonly { variants: readonly string[]; ref: string }[];
+};
+
+export const CONTRACT_ROWS: readonly ContractRow[] = [
+  { verb: "doctor", simple: [{ variants: ["success", "failure"], ref: "doctorResult" }] },
+  { verb: "status", simple: [{ variants: ["success", "failure"], ref: "statusResult" }] },
+  { verb: "db create", mutation: { action: "create-database", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },
+  { verb: "cache create", mutation: { action: "create-cache", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },
+  { verb: "app create", mutation: { action: "create-app", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },
+  { verb: "app secrets", mutation: { action: "update-secrets", chain: true, variants: ["success", "failure", "race", "pending", "superseded", "no-op"], refusedOnFailure: true } },
+  { verb: "app teardown", simple: [
+    { variants: ["success"], ref: "teardownSuccess" },
+    { variants: ["failure"], ref: "teardownFailure" },
+    { variants: ["race"], ref: "teardownRace" },
+    { variants: ["pending"], ref: "teardownPending" },
+  ] },
+  { verb: "app init", simple: [
+    { variants: ["success", "no-op"], ref: "initSuccess" },
+    { variants: ["failure"], ref: "initFailure" },
+  ] },
+  { verb: "db url", simple: [{ variants: ["success", "failure"], ref: "urlResult" }] },
+  { verb: "cache url", simple: [{ variants: ["success", "failure"], ref: "urlResult" }] },
+];
+
 // create-database 디스패처 체크박스 확장 목록 — 행 inputs에서 파생한다(ext_ 접두 규약,
 // ext_extra는 목록 밖 확장 전용 입력이라 제외). 파생 규약은 행 옆(여기)이 소유한다 —
 // 소비자(verbs.ts)가 접두 규약을 재구현하지 않는다.

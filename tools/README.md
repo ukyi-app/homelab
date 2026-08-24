@@ -86,7 +86,16 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   (envelope `homelab-cli/1`). variant 어휘(success/failure/race/skip/pending/no-op/superseded)·
   종료코드 매핑(x-contract.exitCodes — pending=1 근거 포함)·stdout 순수성(--json이면 stdout은
   오브젝트 하나, 사람용은 stderr)·MCP 에러 매핑을 정의한다. CLI가 런타임에 읽는다(코드 상수로
-  복제 금지). 골든 픽스처: `tools/tests/fixtures/homelab/*.golden.json`.
+  복제 금지). ⚠️ **생성물이다 — 직접 편집 금지**: 행렬 분기·verb enum은 `generate-result-schema.ts`가
+  기술자 행에서 생성한다(수정은 기술자/생성기 조각 → `--write` 재생성, byte 드리프트 게이트가 강제).
+  골든 픽스처: `tools/tests/fixtures/homelab/*.golden.json`.
+- **`generate-result-schema.ts`** — cli-result-schema.json **생성기**(cli-deepening 심화 3): 행렬
+  분기(allOf member 0)·verb enum은 기술자 행(lib/catalog-rows `CONTRACT_ROWS`)에서 생성하고,
+  x-contract·variant→exitCode 재진술·definitions 본문은 수제 조각으로 보존한다(컴팩트 스타일 —
+  과거 리뷰의 의도적 결정). 기본 `--check`(byte 대조 — make verify 로컬 보조), `--write`(재생성).
+  **게이트 강제는 bats**(test_result-schema-gen.bats — run-bats 수집)가 담당한다. 기술자 외 무참조라
+  생성물 부재·파손에서도 재생성 성립(설계 게이트 r1 D3). 이름이 가드 열거 규약(check-*)의 밖인 것은
+  의도다 — 생성기 겸 게이트라 check- 접두가 거짓이 된다.
 
 ## App Platform 변이 도구 (변이 디스패처 경유 — 직접 실행 금지)
 
@@ -216,7 +225,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`lib/verbs.ts`** — 동사 operation catalog(transport 중립·부수효과 없는 import-safe SSOT).
   행 = path(라우팅 어휘)+desc(--help)+op(타입 입력→계약 Envelope). argv 파싱·렌더링은 CLI 셸
   소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1). 후속 동사는 여기 행을 추가.
-- **`lib/catalog-rows.ts`** — 변이 레인 신원 행(**순수 기술자, import 0** — 설계 게이트 r1 D3).
+- **`lib/catalog-rows.ts`** — 변이 레인 신원 행 + 결과 계약 행(**순수 기술자, import 0** — 설계 게이트 r1 D3).
   액션별 한 행 = 디스패처/reusable 파일명 · 디스패치 입력 이름 · 브랜치 중립 패턴({key}·{runId}·{tag}) ·
   수렴 Application 집합+표면 패턴. 생성 방향(verbs·secrets의 `laneMutationFields`)과 파싱 방향(status의
   `isDispatchLaneBranch`/`laneBranchTail`)이 같은 행에서 파생된다. bump-poll은 CLI 동사 없는

@@ -4,7 +4,7 @@
 // 계약 Envelope 반환, 프로세스/표현 관심사 없음). argv 파싱·렌더링·stdout·종료코드는 CLI 셸
 // (homelab.ts) 소유이고, MCP 서버(후속 티켓)는 op를 직접 호출해 같은 envelope을 tool 결과로 쓴다.
 // MCP 노출 정책 필드는 MCP 티켓에서 이 descriptor에 추가한다.
-import { DB_CHECKBOX_EXTS, laneMutationFields } from "./catalog-rows.ts";
+import { CONTRACT_ROWS, DB_CHECKBOX_EXTS, laneMutationFields } from "./catalog-rows.ts";
 import { ENVELOPE, exitFor, type Envelope } from "./contract.ts";
 import { runDoctor } from "./doctor.ts";
 import { APP_NAME_RE, CACHE_MAXMEMORY_MI, EXT_RE, resourceNameError } from "./identity.ts";
@@ -252,3 +252,13 @@ export const APP_INIT: AppInitVerb = {
 };
 
 export const VERBS: readonly Verb[] = [DOCTOR, STATUS, DB_CREATE, DB_URL, CACHE_CREATE, CACHE_URL, APP_CREATE, APP_SECRETS, APP_TEARDOWN, APP_INIT];
+
+// 결과 계약 행 totality — catalog의 모든 동사는 계약 행을 갖고, 행의 동사는 catalog에 실재해야
+// 한다(설계 심화 3 "VERBS 행이 이를 참조" 배선). 병렬 배열이 조용히 어긋나면 동사 추가 시
+// 스키마 분기가 빠진 채 초록이 되므로, import 시점에 죽인다(모든 소비자·테스트가 즉시 red).
+{
+  const catalogVerbs = new Set(VERBS.map((v) => v.path.join(" ")));
+  const rowVerbs = new Set(CONTRACT_ROWS.map((r) => r.verb));
+  for (const v of catalogVerbs) if (!rowVerbs.has(v)) throw new Error(`계약 파손: 결과 계약 행 없는 동사 — ${v}`);
+  for (const v of rowVerbs) if (!catalogVerbs.has(v)) throw new Error(`계약 파손: catalog에 없는 결과 계약 행 — ${v}`);
+}
