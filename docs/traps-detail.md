@@ -1516,3 +1516,23 @@ selfHeal과 플립플롭한다.
   표면으로 조용히 빠져나간다. 음성 대조(**진짜** exec 줄은 여전히 면제)를 함께 두어, 수정이 면제
   자체를 없앤 것이 아님을 증인으로 남긴다.
 > 가드: `scripts/check-bats-fd0.sh`, `tests/gates/test_bats-fd0.bats`
+
+### SKIP(exit 4)을 모르는 대조는 gitignored 자산이 있는 로컬에서만 초록이다 — venue가 갈리면 로컬은 CI를 예고하지 못한다
+- **병(2026-08-24 실측)**: `tests/gates/test_scan-floor.bats`의 로스터 대조는 커널 가드를 **실제로 실행**해
+  `SCAN:` 라벨을 모으고 정적 열거와 집합 비교한다. 그런데 `scripts/verify-credential-inventory.sh`는
+  대상 런북이 **gitignored 로컬 전용**이라 CI에서 원리적으로 `exit 4`(SKIP)를 내고 SCAN 라벨을 0개 낸다.
+  대조는 그 rc를 "가드가 비-0으로 죽었다"로 읽었다 ⇒ **로컬 `make ci` rc=0 · PR `gate` FAILURE.**
+- **왜 사전에 안 보였는가**: 로컬에는 런북이 있어 같은 가드가 rc=0을 내고 라벨 2개를 낸다.
+  즉 **로컬 초록이 CI를 예고하지 못하는 형태**다(「tracked 열거 게이트는 untracked 파일을 안 본다」의
+  거울상 — 그쪽은 로컬에만 있는 파일을 CI가 못 보는 것이고, 이쪽은 로컬에만 있는 파일이 rc를 바꾼다).
+  재현은 `git archive HEAD | tar -x -C <스크래치>`면 된다 — gitignored가 빠진 트리가 곧 CI 트리다.
+- ⇒ **처방 ①: SKIP은 실패가 아니고, 대조에서 양쪽이 대칭으로 빠져야 한다.** SKIP한 가드의 라벨을
+  런타임에서만 빼면 정적 쪽이 남아 반대 방향으로 red다. 그 가드의 라벨을 정적 집합에서도 뺀다.
+- ⇒ **처방 ②: SKIP에는 상한을 둔다.** 없으면 "전부 SKIP → 양쪽 공집합 → 등식 성립"이라는 vacuous
+  green이 열린다. SKIP 수는 venue에 따라 달라지므로(로컬 0 · CI 1) 바닥값이 아니라 **상한**이다.
+  그리고 SKIP한 가드 이름을 항상 출력해 커버리지 축소가 diff와 로그에 보이게 한다.
+- ⚠️ **`out="$(...)"; rc=$?`는 bats에서 못 쓴다.** bats는 `set -e` 아래라 **할당이 비-0이면 그 줄에서
+  죽어** 다음 줄의 rc 판정에 도달하지 못한다(이 수정의 첫 판이 정확히 그래서 CI조건 재현에서
+  `failed with status 4`로 깨졌다). `rc=0; out="$(...)" || rc=$?`로 써야 한다 — 형제 가드들이
+  `|| arc=$?`를 쓰는 이유가 그것이다.
+> 가드: `tests/gates/test_scan-floor.bats`, `scripts/verify-credential-inventory.sh`

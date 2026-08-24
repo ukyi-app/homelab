@@ -89,3 +89,4 @@
 | ERE의 leftmost-longest가 `^A|B.*$` 한 방을 토큰 전체 삭제로 바꾼다 — 검출기가 자기 도메인의 실제 표기(따옴표형 publish)에 눈이 멀고, 픽스처가 그 표기를 안 쓰면 대조군까지 vacuous가 된다 | gate | `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats` |
 | heredoc 상태 기계가 주석 규칙보다 먼저 돌면 `<<PY`를 인용한 주석 한 줄이 파일의 나머지를 통째로 지운다 — 진짜 종료줄이 있으면 [E]도 침묵하고, 파일 수 축 회계(SCAN·READFILES)로는 원리적으로 안 보인다 | gate | `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats` |
 | 면제 판정이 주석 스킵보다 먼저 돌면 규약을 *설명한* 파일이 그 규약에서 면제된다 — 가드 자신이 자기 헤더 때문에 영구 면제였다(셸 주석·Makefile `##`·YAML `name:` 세 표면) | gate | `scripts/check-bats-fd0.sh`, `tests/gates/test_bats-fd0.bats` |
+| SKIP(exit 4)을 모르는 대조는 gitignored 자산이 있는 로컬에서만 초록이다 — 로스터 대조가 그 rc를 실패로 읽어 로컬 `make ci` rc=0인데 PR gate만 FAILURE였다(SKIP은 양쪽 대칭 제외 + 상한 필요) | gate | `tests/gates/test_scan-floor.bats`, `scripts/verify-credential-inventory.sh` |
