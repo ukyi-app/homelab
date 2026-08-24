@@ -14,6 +14,7 @@
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { compact } from "./contract.ts";
+import { laneMutationFields } from "./catalog-rows.ts";
 import { ALLOW_PUSH_REWRITE_ENV, git, pushRoutes } from "./exec.ts";
 import { APP_NAME_RE, isCanonicalClone, pushRouteError } from "./identity.ts";
 import { runMutation, waitInputError, waitOpts, type MutationOutcome, type WaitInput } from "./mutation.ts";
@@ -126,15 +127,11 @@ export function runAppSecrets(input: AppSecretsInput, cwd = process.cwd()): Muta
     chain = { mode: "dispatch-only" };
   }
 
+  const lane = laneMutationFields("update-secrets", app); // 레인 신원(workflow·branch·수렴 표면) — 행 파생
   return runMutation({
-    action: "update-secrets",
-    workflow: "update-secrets.yaml",
+    ...lane,
     dispatchInputs: [["app", app]],
-    branchFor: (runId) => `update-secrets/${app}-${runId}`, // 명명 SSOT: _update-secrets.yaml
-    applications: [ // 해당 앱 Application + 봉인본 표면(update-secrets 산출: apps/<app>/deploy/prod/)
-      { name: `${app}-prod`, surfacePath: `apps/${app}/deploy/prod/${app}-secrets.sealed.yaml` },
-    ],
-    resultBase: { action: "update-secrets", name: app, chain },
+    resultBase: { action: lane.action, name: app, chain },
     noopOnMissingPr: true, // 동일 봉인본 = PR 없는 멱등 no-op run(pr-first-commit)
   }, waitOpts(input));
 }

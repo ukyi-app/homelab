@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { LANES, PARSE_ONLY_LANES, isDispatchLaneBranch, laneBranchTail } from "./catalog-rows.ts";
 import { compact } from "./contract.ts";
 import { ghJson, sh } from "./exec.ts";
 import { TAG_RE } from "./image-pin.ts";
@@ -21,22 +22,21 @@ export type StatusOutcome = { variant: "success" | "failure"; omitted: string[];
 const RUN_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/actions\/runs\/(\d+)(?:\/.*)?$/;
 const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?:\/.*)?$/;
 
-// 이 앱을 대상으로 하는 homelab 변이 PR 브랜치 판정 — 명명 SSOT는 각 워크플로:
-//   bump-poll/<app>-<tag>(bump-poll.yaml, tag=TAG_RE) · create-app/<app>-<run_id> ·
-//   update-secrets/<app>-<run_id> · teardown/teardown-app-<app>-<run_id>(_teardown-app.yaml).
-// 접두만 보면 하이픈 앱명에서 형제 앱을 오귀속한다(page의 `bump-poll/page-`가 page-extra의
-// `bump-poll/page-extra-sha-…`에 참) — 접두 뒤 잔여의 형식(tag/run_id)까지 검증한다.
-// db/cache 브랜치는 리소스명 키라 앱 필터 대상이 아니다.
+// 이 앱을 대상으로 하는 homelab 변이 PR 브랜치 판정 — 레인 신원 행(catalog-rows)에서 파생한다.
+// 앱 키 디스패처 레인(keyKind: "app")은 구조+run_id 형식을 행이 소유하고, 파싱 전용 bump-poll
+// 레인은 tail의 tag 형식(SSOT: image-pin TAG_RE)을 여기서 조합한다(기술자 import 0 계약).
+// 접두만 보면 하이픈 앱명에서 형제 앱을 오귀속하므로(page ↔ page-extra) tail 형식까지가 판정이다.
+// db/cache 레인은 리소스명 키(keyKind: "resource")라 앱 필터 대상이 아니다 — 행 데이터가 말한다.
 function isAppLaneBranch(head: string, app: string): boolean {
-  const tail = (prefix: string): string | null => (head.startsWith(prefix) ? head.slice(prefix.length) : null);
-  const bump = tail(`bump-poll/${app}-`);
-  if (bump !== null && TAG_RE.test(bump)) return true;
-  for (const action of ["create-app", "update-secrets"]) {
-    const t = tail(`${action}/${app}-`);
-    if (t !== null && /^\d+$/.test(t)) return true;
+  for (const row of Object.values(LANES)) {
+    if (row.keyKind === "app" && isDispatchLaneBranch(row.branchPattern, app, head)) return true;
   }
-  const td = tail(`teardown/teardown-app-${app}-`);
-  return td !== null && /^\d+$/.test(td);
+  for (const lane of PARSE_ONLY_LANES) {
+    const t = laneBranchTail(lane.branchPattern, app, head);
+    // tailKind가 판별자다 — 미지의 kind는 어떤 검증도 통과 못 한다(fail-closed).
+    if (t !== null && lane.tailKind === "tag" && TAG_RE.test(t)) return true;
+  }
+  return false;
 }
 
 // 모드 상호배타·핸들 URL 형식 검증 — CLI(usage 오류 exit 2)와 MCP(invalid params)가 같은 술어를 쓴다.

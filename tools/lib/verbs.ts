@@ -4,6 +4,7 @@
 // 계약 Envelope 반환, 프로세스/표현 관심사 없음). argv 파싱·렌더링·stdout·종료코드는 CLI 셸
 // (homelab.ts) 소유이고, MCP 서버(후속 티켓)는 op를 직접 호출해 같은 envelope을 tool 결과로 쓴다.
 // MCP 노출 정책 필드는 MCP 티켓에서 이 descriptor에 추가한다.
+import { DB_CHECKBOX_EXTS, laneMutationFields } from "./catalog-rows.ts";
 import { ENVELOPE, exitFor, type Envelope } from "./contract.ts";
 import { runDoctor } from "./doctor.ts";
 import { APP_NAME_RE, CACHE_MAXMEMORY_MI, EXT_RE, resourceNameError } from "./identity.ts";
@@ -61,8 +62,6 @@ function doctorOp(_input: DoctorInput): Envelope {
   return { schema: ENVELOPE, verb: "doctor", variant, exitCode: exitFor(variant), omitted: [], result: { checks, summary } };
 }
 
-// 디스패처 체크박스 5종과 1:1 — 목록 밖 확장은 ext_extra로 간다(디스패처 계약).
-const KNOWN_EXTS = ["pg_trgm", "pgcrypto", "citext", "vector", "postgis"] as const;
 
 // 입력 검증 술어 — CLI(usage exit 2)·MCP(invalid params)가 공유. 이름·확장 형식은 identity SSOT.
 export function dbCreateInputError(input: DbCreateInput): string | null {
@@ -78,21 +77,16 @@ function dbCreateOp(input: DbCreateInput): Envelope {
   const bad = dbCreateInputError(input);
   if (bad) throw new Error(`계약 파손: dbCreateOp에 검증 안 된 입력 — ${bad}`);
   const exts = input.ext ?? [];
-  const extra = exts.filter((e) => !(KNOWN_EXTS as readonly string[]).includes(e));
+  const extra = exts.filter((e) => !DB_CHECKBOX_EXTS.includes(e));
+  const lane = laneMutationFields("create-database", input.name); // 레인 신원(workflow·branch·수렴 집합·표면) — 행 파생
   const { variant, omitted, result } = runMutation({
-    action: "create-database",
-    workflow: "create-database.yaml",
+    ...lane,
     dispatchInputs: [
       ["name", input.name],
-      ...KNOWN_EXTS.map((k): [string, string] => [`ext_${k}`, String(exts.includes(k))]),
+      ...DB_CHECKBOX_EXTS.map((k): [string, string] => [`ext_${k}`, String(exts.includes(k))]),
       ["ext_extra", extra.join(",")],
     ],
-    branchFor: (runId) => `create-database/${input.name}-${runId}`, // 명명 SSOT: _create-database.yaml
-    applications: [ // 명명된 수렴 집합(스펙 대기 매트릭스) + 관측 표면(provision-db 산출 경로)
-      { name: "cnpg-data", surfacePath: `platform/cnpg/prod/databases/${input.name}.yaml` },
-      { name: "data-conn-prod", surfacePath: `platform/data-conn/prod/db-${input.name}-conn.sealed.yaml` },
-    ],
-    resultBase: { action: "create-database", name: input.name },
+    resultBase: { action: lane.action, name: input.name },
   }, waitOpts(input));
   return { schema: ENVELOPE, verb: "db create", variant, exitCode: exitFor(variant), omitted, result };
 }
@@ -110,20 +104,15 @@ export function cacheCreateInputError(input: CacheCreateInput): string | null {
 function cacheCreateOp(input: CacheCreateInput): Envelope {
   const bad = cacheCreateInputError(input);
   if (bad) throw new Error(`계약 파손: cacheCreateOp에 검증 안 된 입력 — ${bad}`);
+  const lane = laneMutationFields("create-cache", input.name); // 레인 신원(workflow·branch·수렴 집합·표면) — 행 파생
   const { variant, omitted, result } = runMutation({
-    action: "create-cache",
-    workflow: "create-cache.yaml",
+    ...lane,
     dispatchInputs: [
       ["name", input.name],
       // 빈 값 = 디스패처 기본(64) 소유 — CLI가 기본값을 복제하지 않는다.
       ["maxmemory_mi", input.maxmemoryMi === undefined ? "" : String(input.maxmemoryMi)],
     ],
-    branchFor: (runId) => `create-cache/${input.name}-${runId}`, // 명명 SSOT: _create-cache.yaml
-    applications: [ // 명명된 수렴 집합(스펙 대기 매트릭스) + 관측 표면(provision-cache 산출 경로)
-      { name: "cache-prod", surfacePath: `platform/cache/prod/${input.name}/deployment.yaml` },
-      { name: "data-conn-prod", surfacePath: `platform/data-conn/prod/cache-${input.name}-conn.sealed.yaml` },
-    ],
-    resultBase: { action: "create-cache", name: input.name },
+    resultBase: { action: lane.action, name: input.name },
   }, waitOpts(input));
   return { schema: ENVELOPE, verb: "cache create", variant, exitCode: exitFor(variant), omitted, result };
 }
@@ -137,15 +126,11 @@ export function appCreateInputError(input: AppCreateInput): string | null {
 function appCreateOp(input: AppCreateInput): Envelope {
   const bad = appCreateInputError(input);
   if (bad) throw new Error(`계약 파손: appCreateOp에 검증 안 된 입력 — ${bad}`);
+  const lane = laneMutationFields("create-app", input.app); // 레인 신원(workflow·branch·수렴 집합·표면) — 행 파생
   const { variant, omitted, result } = runMutation({
-    action: "create-app",
-    workflow: "create-app.yaml",
+    ...lane,
     dispatchInputs: [["app", input.app]],
-    branchFor: (runId) => `create-app/${input.app}-${runId}`, // 명명 SSOT: _create-app.yaml
-    applications: [ // 해당 앱 Application + 배포 핀 표면(create-app 산출)
-      { name: `${input.app}-prod`, surfacePath: `apps/${input.app}/deploy/prod/values.yaml` },
-    ],
-    resultBase: { action: "create-app", name: input.app },
+    resultBase: { action: lane.action, name: input.app },
     manualMerge: { approval: "공개 승인" }, // 머지 = 공개 승인 — auto-merge를 켜는 어떤 경로도 없다
   }, waitOpts(input));
   return { schema: ENVELOPE, verb: "app create", variant, exitCode: exitFor(variant), omitted, result };
@@ -162,16 +147,12 @@ export function appTeardownInputError(input: AppTeardownInput): string | null {
 function appTeardownOp(input: AppTeardownInput): Envelope {
   const bad = appTeardownInputError(input);
   if (bad) throw new Error(`계약 파손: appTeardownOp에 검증 안 된 입력 — ${bad}`);
+  const lane = laneMutationFields("teardown-app", input.app); // 레인 신원(workflow·branch·수렴 집합·표면) — 행 파생
   const { variant, omitted, result } = runMutation({
-    action: "teardown-app",
-    workflow: "teardown-app.yaml",
+    ...lane,
     // confirm은 디스패처의 confirm 입력으로 전달(서버 측 재검증은 _teardown-app.yaml이 기존대로).
     dispatchInputs: [["app", input.app], ["confirm", input.confirm]],
-    branchFor: (runId) => `teardown/teardown-app-${input.app}-${runId}`, // 명명 SSOT: _teardown-app.yaml
-    applications: [ // 철거 대상 앱 Application + 제거될 표면(create-app 산출과 동일 경로)
-      { name: `${input.app}-prod`, surfacePath: `apps/${input.app}/deploy/prod/values.yaml` },
-    ],
-    resultBase: { action: "teardown-app", name: input.app, dnsReclaim: "iac/tf-reconcile" },
+    resultBase: { action: lane.action, name: input.app, dnsReclaim: "iac/tf-reconcile" },
     manualMerge: { approval: "파괴 승인" }, // 머지 = 파괴 승인 — auto-merge를 켜는 어떤 경로도 없다
     converge: "absence", // 종결 = Application 부재(Healthy 대기 아님)
   }, waitOpts(input));
