@@ -23,7 +23,10 @@ jobs:
       fail-fast: false
       matrix:
         # 사용자 앱은 외부 레포(ukyi-app/<app>)에서 빌드된다. homelab은 플랫폼 ops 이미지만 빌드.
-        app: [pg-tools]
+        # skopeo: quay.io/skopeo/stable이 릴리스 태그를 재푸시해 6일에 3번 매니페스트가 GC됐다
+        #   (2026-08-18·21·24) — 그때마다 image-pin-liveness가 모든 PR gate를 red로 만든다.
+        #   Docker Hub alpine 기반 자기 소유 이미지로 대체한다(GC 없음). ops/skopeo/README.md 참조.
+        app: [pg-tools, skopeo]
     outputs:
       sha: ${{ github.sha }}
     steps:
@@ -84,8 +87,11 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           TAGS="ghcr.io/${OWNER}/${APP}:sha-${SHA}"
+          # ops 이미지의 canonical 태그: 소비자 매니페스트가 참조하는 안정 태그. digest는 bump.yaml이 재핀한다.
           if [ "${APP}" = "pg-tools" ]; then
             TAGS="${TAGS},ghcr.io/${OWNER}/pg-tools:18-rclone"
+          elif [ "${APP}" = "skopeo" ]; then
+            TAGS="${TAGS},ghcr.io/${OWNER}/skopeo:alpine"
           fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
       - name: build & push
