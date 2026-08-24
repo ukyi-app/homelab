@@ -7,7 +7,11 @@ services:
       POSTGRES_PASSWORD: dev
       POSTGRES_DB: app_dev
     ports:
-      - "5432:5432"
+      # ⚠️ **루프백 한정.** 접두 없는 `"5432:5432"`는 전 인터페이스에 연다 — 이 compose는 k3s가 도는
+      #    NUC에서 `bun run db:up`으로 뜨고 자격이 dev/dev라, LAN에 그대로 여는 것은 그 자체로 표면이다.
+      #    소비자는 `tools/dev.ts`가 찍는 `postgres://dev:dev@localhost:5432/app_dev` 하나뿐이라 무영향이다.
+      #    (같은 근거로 게이트 하네스의 publish도 `-p 127.0.0.1:…` 한정이다 — tests/gates/lib/host-port.sh)
+      - "127.0.0.1:5432:5432"
     volumes:
       - ./seed.sql:/docker-entrypoint-initdb.d/00-seed.sql:ro
       - pgdata:/var/lib/postgresql/data

@@ -1,5 +1,5 @@
 # 픽스처(동결 — 절대 "고치지" 마라): r4 `FilesBulkSSDLow`의 **결함 expr** 스냅샷.
-# files_data_bulk_*(호스트 launchd, **하루 1회** push)를 rollup 없이 맨 참조 → vmalert instant 질의
+# files_data_bulk_*(호스트 systemd 타이머, **하루 1회** push)를 rollup 없이 맨 참조 → vmalert instant 질의
 # 룩백(5m)을 넘어서면 시리즈가 사라진다 → 하루 1440분 중 **5분만** 조건이 참일 수 있다(최대 11회 연속
 # 평가) → for: 30m(≈61회 연속 필요)에 **구조적으로 도달 불가** → 영구 미발화(라이브 확인).
 #

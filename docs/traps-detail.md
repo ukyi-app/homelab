@@ -1007,10 +1007,14 @@ resolv.conf의 nameserver가 tailnet 대역(CGNAT `100.64.0.0/10` · tailscale U
 
 ### 한시 억제는 자기 만료를 품어야 한다 — 그리고 억제한 알림을 vacuity 대조군으로 쓰던 e2e가 함께 죽는다
 
-**영구 발화하는 critical은 무음보다 나쁘다.** `FilesBackupStale`은 NUC 이식 후 producer(호스트
-launchd + macOS 전용 `backup-files-data.sh`)가 **존재조차 하지 않아** absent 가지가 24/7 참이었다.
+**영구 발화하는 critical은 무음보다 나쁘다.** `FilesBackupStale`은 NUC 이식 직후 producer(레포 밖
+launchd 배선 + macOS 전용 `backup-files-data.sh` — NUC엔 launchd도 diskutil도 없어 하드 실패)가
+**실효적으로 존재하지 않아** absent 가지가 24/7 참이었다.
 `severity=critical` 라우트의 `repeat_interval: 1h`를 타고 하루 24건이 나간다. 상시 소음은 채널 전체를
 둔감화해 **진짜 페이지를 묻는다** — "알림이 있다"가 "감시가 있다"를 뜻하지 않게 된다.
+(2026-08-19에 스크립트가 리눅스로 재작성되고 `files-data-backup.{service,timer}`로 **배선까지 끝났다**.
+그래도 억제는 유효하다 — 국면 A 동안 타이머를 의도적으로 enable하지 않으므로 시리즈는 여전히 absent다.
+남은 것은 국면 B의 `systemctl enable --now` 한 줄이고, 그때 억제 절 제거가 함께 가야 한다.)
 
 **억제의 만료는 룰 자신이 들고 있어야 한다.** 사람이 기억해야 하는 억제는 영구 침묵이 된다.
 expr에 `and on() (vector(time()) >= <재무장 unixtime>)`을 달면 만료가 자동이고 상한이 명시된다.
@@ -1020,8 +1024,8 @@ expr에 `and on() (vector(time()) >= <재무장 unixtime>)`을 달면 만료가 
 정확히 뒤쪽(absent) 가지에만 걸린다. 위험한 것은 그 반대 형태 `(A or B) and on() C`(전체를 괄호로
 묶는 것)로, 그러면 staleness 가지까지 함께 죽어 **producer가 되살아나도 감시가 안 돌아온다.**
 **두 형태 모두 문법상 유효해 `-dryRun`이 구별하지 못한다** — 그래서 형태를 잠그는 가드가 필요하다.
-실측(VictoriaMetrics v1.145.0): 끝에 붙인 형태에서 실행자 없음 → 무발화 / 배선 + stale → **발화** /
-배선 + fresh → 무발화 / 억제 없는 원본 + 실행자 없음 → 발화.
+실측(VictoriaMetrics v1.145.0): 끝에 붙인 형태에서 push 없음 → 무발화 / push 있음 + stale → **발화** /
+push 있음 + fresh → 무발화 / 억제 없는 원본 + push 없음 → 발화.
 
 **시각 상수는 SSOT의 파생값이다.** 창의 SSOT는 `versions.env`의 `BULK_MIGRATION_WINDOW_UNTIL`이고
 룰은 YAML이라 런타임 파생이 불가능하다 → 하드코딩을 허용하되 **양방향 정합 가드**로 잠근다.
@@ -1370,6 +1374,15 @@ selfHeal과 플립플롭한다.
   bind가 실패하는 포트는 그보다 넓다. **실측**: 리스너를 닫고 남은 accepted 소켓이 붙든 포트와
   아웃바운드 연결의 로컬 소스 포트 — 둘 다 connect는 FREE라 답하고 plain bind는 EADDRINUSE(98)다.
   ⇒ **런타임이 실제로 던지는 질문(bind)을 그대로 던져야 한다.**
+- **④ `127.0.0.1` bind 프로브는 특정 인터페이스에만 있는 리스너를 못 본다.** ③에서 프로브를 bind로
+  고쳐도 **바인드 주소**라는 축이 하나 더 남는다. **실측(2026-08-21, 같은 포트)**: 점유가
+  `127.0.0.1`이면 두 프로브 모두 BUSY(98), 점유가 `0.0.0.0`이어도 두 프로브 모두 BUSY, 그런데 점유가
+  **글로벌 IP(192.168.x.x) 하나뿐**이면 `127.0.0.1` 프로브는 **FREE라고 오답**하고 `0.0.0.0` 프로브만
+  BUSY다. `0.0.0.0` bind는 그 포트를 **어느 주소로든** 잡고 있으면 실패하므로 세 경우를 다 맞히는
+  엄격한 상위집합이다. ⇒ 소비자가 루프백 전용으로만 바인드한다면 차이가 안 나지만, 컨테이너가
+  host-gateway로 붙는 헬퍼(telegram mock·블랙홀 sink)는 **`0.0.0.0`에 바인드할 수밖에 없어** 그
+  오답이 곧 EADDRINUSE 사고다. 엄격한 쪽으로 틀리는 대가는 "쓸 수 있는 포트를 가끔 건너뛰는 것"뿐이고
+  재추첨이 흡수한다.
 - ⚠️ **그 bind 프로브에 `SO_REUSEADDR`를 켜지 마라.** 실측: accepted 소켓이 잡은 포트에 대해
   `bind+SO_REUSEADDR`는 **성공**하고 plain bind는 EADDRINUSE다. REUSEADDR를 켜면 프로브가 런타임보다
   **관대**해져 못 쓰는 포트를 배정한다. plain bind는 어떤 런타임보다 같거나 엄격해 안전한 방향으로만
@@ -1389,7 +1402,33 @@ selfHeal과 플립플롭한다.
 - ⚠️ **health 확인은 2xx가 아니라 본문을 봐야 한다.** ②의 서명이 정확히 "HTTP는 200인데 남의 답"이다.
   본문이 기대값이 아니면 그것은 "아직 안 뜸"이 아니라 **라우팅이 우리 것이 아니라는 확정**이므로
   대기가 아니라 즉시 FAULT다.
-> 가드: `tests/gates/test_vmalert-e2e-port-allocation.bats`, `tests/gates/lib/vmalert-e2e.sh`
+- ⚠️ **처방을 한 소비자의 lib 안에 두면 형제 표면은 원리적으로 그 처방을 못 받는다.** 위 세 겹을
+  `lib/vmalert-e2e.sh`에 넣고 완전성 가드를 `vmalert-*-firing-e2e.sh` 글롭으로 걸었는데, 그 글롭
+  **밖**에 호스트 포트를 잡는 표면이 남아 있었다 — 하네스 둘(`alertmanager-render-e2e.sh` ·
+  `skopeo-timeout-smoke.sh`)에 리터럴 포트 셋(AM publish `9093` · telegram mock `8089` ·
+  블랙홀 sink `18443`). 열거가 붕괴한 것이 아니라 **열거 범위가 처음부터 좁았다** — 그래서 바닥값도
+  want/got 대조도 이 갭에 대해 원리적으로 침묵한다. ⇒ 프리미티브는 소비자 중립 lib
+  (`tests/gates/lib/host-port.sh`)이 소유하고, 완전성은 소비자 글롭이 아니라 **"호스트 포트를 잡는
+  행위"** 를 도메인으로 삼는 가드(`scripts/check-host-ports.sh`)가 hard-zero로 강제한다.
+> 가드: `tests/gates/test_vmalert-e2e-port-allocation.bats`, `tests/gates/lib/vmalert-e2e.sh`, `tests/gates/lib/host-port.sh`, `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats`
+
+### `&`로 띄운 헬퍼의 바인드 실패는 `set -e`에 안 걸린다 — readiness 줄이 없으면 30초 뒤 엉뚱한 곳을 가리키는 오진이 된다
+- 하네스가 보조 서버를 `cmd … &`로 띄우면 **`set -euo pipefail`은 그 종료코드를 보지 않는다.**
+  `wait`도 liveness 확인도 없으면, 그 프로세스가 즉사해도 하네스는 그대로 다음 단계로 간다.
+- **실측(2026-08-21)**: `tests/gates/alertmanager-render-e2e.sh`가 telegram mock을 고정 포트 `8089`에
+  `&`로 띄웠다. 그 포트를 미리 점유한 채 같은 argv로 돌리면 mock은 `OSError: [Errno 98] Address
+  already in use` 트레이스백과 함께 rc=1로 죽는다. 그런데 하네스는 진행해서 → AM readiness 통과 →
+  alert inject 8회 재시도 끝에 성공(AM은 실제로 받는다) → `wait_capture`가 60×0.5s를 소진 →
+  `no telegram capture within timeout` + **AM 로그 tail**로 종료한다. 즉 **최종 진단이 포트가 아니라
+  메시지 템플릿을 가리키고**, 진짜 원인인 트레이스백은 그 로그 60줄 위에 있다.
+- ⇒ 처방은 **readiness 줄을 계약으로 만드는 것**이다: 헬퍼가 바인드 성공 직후 stderr에 한 줄을 쓰고,
+  호출자가 그 줄(또는 프로세스 사망)을 기다린다. 형제 `tests/gates/tcp-blackhole-sink.py`가 이미
+  `sink: listening on <port>`로 그렇게 하고 있었다 — **같은 레포 안에서 한쪽만 처방을 받은 상태**였다.
+- ⚠️ 대기 루프는 `kill -0`로 **프로세스 사망도** 탈출 조건에 넣어야 한다. readiness 줄만 기다리면
+  이미 죽은 헬퍼를 상대로 타임아웃을 꽉 채우고, 그러면 오진 시간이 줄어들 뿐 없어지지 않는다.
+- ⚠️ 헬퍼에 **argc 가드**를 넣어라. 인자가 모자라면 `IndexError` 트레이스백이 background job의
+  stderr로만 나가 호출자가 못 본다 — 같은 오진이 다른 입구로 돌아온다.
+> 가드: `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats`
 
 ### `Restart=always` 유닛은 failed 상태에 진입하지 않는다 — 시작 rate limit에 못 닿으면 영원히 activating이다
 - `systemctl list-units`를 읽어 "failed인 유닛"을 감시하는 축을 만들면, **상시 재시작 서비스가 그
@@ -1412,3 +1451,88 @@ selfHeal과 플립플롭한다.
   장애에서 k3s가 재시작을 **포기**하고 죽은 채로 남는다 — 관측을 얻으려고 복원력을 파는 거래다.
   관측이 필요하면 관측 축을 따로 놓는다.
 > 가드: `tests/gates/test_systemd-failed-sweep.bats`, `scripts/sweep-systemd-failures.sh`
+
+### ERE의 leftmost-longest가 `^A|B.*$` 한 방을 토큰 전체 삭제로 바꾼다 — 검출기가 자기 도메인의 표기법에 눈이 먼다
+- **병(2026-08-24 실측, `scripts/check-host-ports.sh` 도입판)**: publish 인자에서 따옴표를 벗기려고
+  `gsub(/^["']|["'].*$/, "", cand)` 한 방을 썼다. 그런데 POSIX ERE는 **오프셋이 앞선 매치를 먼저**
+  고르고, 같은 오프셋이면 **가장 긴 대안**을 고른다(leftmost-longest). `"9093:9093"`은 오프셋 0에서
+  두 대안이 **동시에** 시작하므로 더 긴 `["'].*$`가 이겨 **토큰 전체**를 먹는다 ⇒ `cand=""`.
+  `printf '%s' '-p "9093:9093"' | awk '{c=$2; gsub(/^["'"'"']|["'"'"'].*$/,"",c); print "["c"]"}'` → `[]`
+  (gawk 5.3.2 · mawk 1.3.4 동일).
+- **왜 침묵했는가**: 빈 `cand`는 `split(cand, part, ":")`가 0을 줘 `np < 2`에서 조용히 `continue`된다.
+  그 `continue`가 `binds[FILENAME]=1`보다 **위**라, 레인 A(리터럴 호스트 포트)뿐 아니라
+  레인 C(배정 lib 미사용)까지 **함께 꺼졌다**. 가드 헤더가 「A가 못 보면 C까지 함께 꺼진다」고
+  스스로 적어 둔 그 자리를 정작 정규식이 밟았다.
+- ⚠️ **하필 사각지대가 이 레포의 실제 표기였다.** 하네스는 `-p "127.0.0.1:${PORT}:9093"`처럼 따옴표로
+  쓴다. 즉 가드가 초록인 채로, 그 가드가 없앴다고 선언한 사고를 그대로 되돌릴 수 있었다 —
+  실측: 이 PR이 고친 두 자리를 따옴표를 **유지한 채** 리터럴로 되돌려도 `0곳 OK` rc=0.
+- ⚠️ **bats 대조군이 함께 눈이 멀어 있었다.** dirty 픽스처는 전부 따옴표 **없이**, clean 픽스처만
+  따옴표형이었다. 그래서 clean 레인은 변수를 리터럴로 바꿔도 통과하는 **vacuous 대조**였다.
+  픽스처의 표기가 도메인의 표기와 다르면, 통과한 대조는 아무것도 증명하지 않는다.
+- ⇒ **처방: 벗기기와 자르기를 두 `sub`로 나눠 순서를 강제한다.** `sub(/^["']/,"",c)`로 선두를 먼저
+  벗기면, 남은 따옴표는 정의상 **닫는** 쪽이므로 `sub(/["'].*$/,"",c)`가 안전하다. 대안에 `.*`가
+  들어가는 순간 그 대안은 나머지 전부를 먹을 수 있다고 읽어라. (`$` 앵커만 있고 `.*`가 없는
+  `["'&;)]+$` 형태는 이 함정에 걸리지 않는다 — 같은 파일의 레인 D가 그 형태다.)
+- ⇒ **그리고 픽스처는 도메인이 실제로 쓰는 표기로 적는다.** 양성 픽스처를 표기별로 전부 걸어라
+  (`"…"` · `'…'` · `-p "host:c:h"` · `--publish="…"`). 하나만 걸면 다음 표기로 조용히 빠져나간다.
+> 가드: `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats`
+
+### heredoc 상태 기계가 주석 규칙보다 먼저 돌면, `<<PY`를 인용한 주석 한 줄이 파일의 나머지를 통째로 지운다
+- **병(2026-08-24 실측)**: awk 검출기가 heredoc 본문을 건너뛰려고 상태 기계를 `{ ... }` 무조건
+  블록에 두었는데, 주석 스킵 규칙 `/^[ \t]*#/ { next }`가 그 **아래**에 있었다. awk는 규칙을 적힌
+  순서로 평가하므로 **주석줄도 heredoc 시작 판정을 받는다**. `# 예전엔 \`python3 - <<PY\`로 …`
+  한 줄이 `inhere=1`·`delim="PY"`를 세우고, 그 뒤 모든 줄이 `next`로 빠져 레인이 하나도 안 돈다.
+- ⚠️ **[E](미종료 heredoc) 레인도 침묵한다.** 그 파일에 **진짜** `PY`/`EOF` 종료줄이 이미 있으면
+  가짜 heredoc이 거기서 조용히 닫히기 때문이다. 실측: 추적 도메인 15파일 중 5파일이 그 조건을
+  만족했다 — 즉 절반 가까이가 fail-open, 나머지만 fail-closed라는 **비대칭 침묵**이었다.
+- ⚠️ **파일 수 축 회계로는 원리적으로 못 본다.** `SCAN:` 신호도 `READFILES` 대조도 **파일 개수**를
+  세므로, 파일이 열리기는 했으나 그 안이 통째로 스킵된 붕괴에는 둘 다 정상값을 낸다. 열거 붕괴를
+  파일 수로 막는 규율은 **줄 단위 붕괴에 대해서는 대조군이 아니다.**
+- ⚠️ **AGENTS.md 컨벤션이 이 지뢰를 밟도록 유도한다.** 이 레포의 규율은 "고친 함정을 인용하며
+  설명"하는 것이고, 하네스는 `<<PY`·`<<EOF` 투성이다. 도입 시점에는 히트가 0이었으니 초록이
+  거짓은 아니었다 — **다음 편집 한 줄이 잠복을 깨우는** 형태다.
+- ⇒ **처방: 주석 스킵을 상태 기계 안으로, `inhere` 닫힘 판정 바로 뒤에 올린다.** 닫힘 판정보다
+  앞에 두면 heredoc 본문의 `#` 줄이 종료 판정을 못 받아 반대 방향으로 깨진다.
+- ⇒ **같은 클래스의 세 번째다.** 앞의 둘은 `<<<` herestring(2번째 `<`부터 `<< "foo"`로 읽힌다)과
+  산술 좌시프트 `$(( a << b ))`였다. **`<<`를 문자로 보는 상태 기계는 그것이 heredoc이 아닌 경우를
+  전부 열거해야 하고, 그 열거는 계속 는다** — 새 오인원을 만나면 회귀 픽스처를 함께 남겨라.
+> 가드: `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats`
+
+### 면제 판정이 주석보다 먼저 돌면, 규약을 *설명한* 파일이 그 규약에서 면제된다 — 가드 자신부터
+- **병(2026-08-24 실측, `scripts/check-bats-fd0.sh` 도입판)**: "이 파일이 스스로 `exec 0</dev/null`을
+  하는가"로 면제를 판정하는 규칙(`/exec[ \t]+0<[ \t]*\/dev\/null/ { self = 1 }`)이 주석 스킵
+  `/^[ \t]*#/ { next }`와 `name:` 스킵보다 **위**에 있었다. awk는 규칙을 적힌 순서로 평가하므로
+  **그 문자열을 인용하기만 한 줄도 면제를 세운다.**
+- **세 표면이 모두 걸렸다**(실측, 셋 다 `rc=0` + "전건 fd 0 격리 OK"): 셸 헤더 주석 한 줄 ·
+  Makefile `##` 도움말 · 워크플로 스텝 `name:`. 각 경우 같은 파일에서 그 한 줄만 빼면 즉시 `[FD0]`가 난다.
+- ⚠️ **가드 자신이 영구 면제 상태였다.** 헤더가 규약을 설명하며 `exec 0</dev/null`을 인용하기 때문이다.
+  즉 그 파일에 위반을 넣어도 잡히지 않았다 — hard-zero를 선언한 가드가 자기 자신에게만은 waiver였다.
+- **왜 이 클래스가 반복되는가**: 「면제는 파일 목록이 아니라 **사실**로 판정한다」는 규율은 옳다.
+  그런데 그 "사실"을 **텍스트 매칭**으로 읽는 순간, 규약을 문서화한 산문이 규약 준수의 증거로 오인된다.
+  이 레포는 "고친 함정을 인용하며 설명"하는 컨벤션을 갖고 있어 그 오인원이 도처에 있다.
+- ⇒ **처방: 면제 판정을 주석·이름 스킵 **뒤**로, 그리고 `code()`로 행간 주석을 벗긴 텍스트에 대해 한다.**
+  판정 대상은 "파일에 그 문자열이 있는가"가 아니라 "**코드에** 그 문장이 있는가"다.
+- ⇒ **회귀 픽스처는 세 표면을 전부 건다**(셸 주석 · `##` 도움말 · YAML `name:`). 하나만 걸면 나머지
+  표면으로 조용히 빠져나간다. 음성 대조(**진짜** exec 줄은 여전히 면제)를 함께 두어, 수정이 면제
+  자체를 없앤 것이 아님을 증인으로 남긴다.
+> 가드: `scripts/check-bats-fd0.sh`, `tests/gates/test_bats-fd0.bats`
+
+### SKIP(exit 4)을 모르는 대조는 gitignored 자산이 있는 로컬에서만 초록이다 — venue가 갈리면 로컬은 CI를 예고하지 못한다
+- **병(2026-08-24 실측)**: `tests/gates/test_scan-floor.bats`의 로스터 대조는 커널 가드를 **실제로 실행**해
+  `SCAN:` 라벨을 모으고 정적 열거와 집합 비교한다. 그런데 `scripts/verify-credential-inventory.sh`는
+  대상 런북이 **gitignored 로컬 전용**이라 CI에서 원리적으로 `exit 4`(SKIP)를 내고 SCAN 라벨을 0개 낸다.
+  대조는 그 rc를 "가드가 비-0으로 죽었다"로 읽었다 ⇒ **로컬 `make ci` rc=0 · PR `gate` FAILURE.**
+- **왜 사전에 안 보였는가**: 로컬에는 런북이 있어 같은 가드가 rc=0을 내고 라벨 2개를 낸다.
+  즉 **로컬 초록이 CI를 예고하지 못하는 형태**다(「tracked 열거 게이트는 untracked 파일을 안 본다」의
+  거울상 — 그쪽은 로컬에만 있는 파일을 CI가 못 보는 것이고, 이쪽은 로컬에만 있는 파일이 rc를 바꾼다).
+  재현은 `git archive HEAD | tar -x -C <스크래치>`면 된다 — gitignored가 빠진 트리가 곧 CI 트리다.
+- ⇒ **처방 ①: SKIP은 실패가 아니고, 대조에서 양쪽이 대칭으로 빠져야 한다.** SKIP한 가드의 라벨을
+  런타임에서만 빼면 정적 쪽이 남아 반대 방향으로 red다. 그 가드의 라벨을 정적 집합에서도 뺀다.
+- ⇒ **처방 ②: SKIP에는 상한을 둔다.** 없으면 "전부 SKIP → 양쪽 공집합 → 등식 성립"이라는 vacuous
+  green이 열린다. SKIP 수는 venue에 따라 달라지므로(로컬 0 · CI 1) 바닥값이 아니라 **상한**이다.
+  그리고 SKIP한 가드 이름을 항상 출력해 커버리지 축소가 diff와 로그에 보이게 한다.
+- ⚠️ **`out="$(...)"; rc=$?`는 bats에서 못 쓴다.** bats는 `set -e` 아래라 **할당이 비-0이면 그 줄에서
+  죽어** 다음 줄의 rc 판정에 도달하지 못한다(이 수정의 첫 판이 정확히 그래서 CI조건 재현에서
+  `failed with status 4`로 깨졌다). `rc=0; out="$(...)" || rc=$?`로 써야 한다 — 형제 가드들이
+  `|| arc=$?`를 쓰는 이유가 그것이다.
+> 가드: `tests/gates/test_scan-floor.bats`, `scripts/verify-credential-inventory.sh`

@@ -51,7 +51,9 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
 
 (디스크 위치 참고, 2026-07-08 W3: vmsingle TSDB·victorialogs 데이터는 내장 standard VCT → **외장 bulk-ssd
 standalone PVC `vmsingle-data-bulk`·`vlogs-bulk`**로 이전 — 메모리 예산과 무관하며 이 원장의 계상 대상 아님.
-디스크 가드는 r4 `BulkStorageLow`(in-cluster)와 호스트 launchd df push가 담당, 절차는 runbooks/observability-bootstrap.md §5.)
+디스크 가드는 r4 `BulkStorageLow`(in-cluster)와 호스트 백업 유닛의 df push(2026-08-19 리눅스 재작성 —
+`files-data-backup.timer` → scripts/backup-files-data.sh, 국면 A 동안은 미-enable)가 담당, 절차는
+runbooks/observability-bootstrap.md §5.)
 
 한 행은 라이브 pod limit보다 **의도적으로 크다**: `k3s+os+coredns`(OS/커널 비-pod reserve — 실 coredns
 pod만 ~170Mi). (`edge`·`cnpg` limit 보수 버퍼는 2026-06-22 right-size에서 라이브 정합 회수 — 단 `edge`

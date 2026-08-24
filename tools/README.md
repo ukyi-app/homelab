@@ -265,8 +265,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   윈도 < 주기 → 시리즈 구멍 → `for:` pending 리셋 → **영구 무발화**(죽은 알림 PR #339·#341).
   모드 C의 구성요소(전부 fail-closed):
   - **레지스트리**(in-code `DEFAULT_REGISTRY`): 메트릭 → 생산자 + `schedule`. `schedule`은 **판별 가능한
-    소스** — `cron`(레포 내 CronJob: 주기를 여기서만 파생, 파일 부재/파싱불가=FAIL) 또는 `external`(레포 밖
-    launchd 등: 상수 + **근거(why) 필수**). 룩백도 `vmalert.yaml`의 `-datasource.queryStep`에서 파생(미지정=5m).
+    소스** — `cron`(레포 내 CronJob: 주기를 여기서만 파생, 파일 부재/파싱불가=FAIL) 또는 `external`(CronJob 밖
+    스케줄 — 호스트 systemd timer 등: 상수 + **근거(why) 필수**). 룩백도 `vmalert.yaml`의
+    `-datasource.queryStep`에서 파생(미지정=5m).
   - **완전성 가드(메트릭 단위)**: 생산자 표면(`platform·scripts·infra·tools·apps·ops·.github`, 룰 디렉토리 제외)에서
     **VM에 쓰는 모든 파일**을 찾아 **push되는 메트릭 이름을 추출** — 미등록 생산자/미등록 메트릭/**추출 실패
     (페이로드 정적 해석 불가 = fail-closed)**는 전부 FAIL(기존 exporter에 메트릭만 추가하는 우회 경로 차단).

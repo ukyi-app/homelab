@@ -57,81 +57,55 @@ vme_cleanup() { # trap EXIT에서 호출
   [ -n "$VME_NET" ] && docker network rm "$VME_NET" >/dev/null 2>&1 || true
 }
 
+# ── 호스트 포트 밴드 ──────────────────────────────────────────────────────────────
+# 밴드·프로브·추첨의 **정의처는 `tests/gates/lib/host-port.sh`다**(#521의 처방이 이 lib 안에 갇혀 있어
+# 형제 하네스 둘이 같은 함정 위에 리터럴 포트를 그대로 박은 채 남았던 것을 되돌린 결과다).
+# 여기 남은 것은 그 프리미티브를 이 lib의 **종료 규약(HARNESS FAULT = exit 2)** 으로 감싸는 얇은
+# 어댑터뿐이다 — host-port.sh는 exit하지 않고 비-0 rc만 내므로, 그 rc를 삼키면 vacuous green이 된다.
+# ⚠️ `VME_PORT_*`는 계속 이 lib의 손잡이다(소비자·테스트가 이 이름으로 밴드를 흔든다). 어댑터가
+#    호출 직전에 `HP_*`로 옮긴다 — 두 벌의 기본값을 따로 두면 조용히 갈리므로 기본값은 host-port.sh
+#    한 곳에서만 온다.
+# ⚠️ **이 lib을 다른 위치로 복사해 source하려면 `host-port.sh`도 같이 복사해야 한다** — 형제를
+#    `BASH_SOURCE` 기준으로 찾기 때문이다(레포 루트를 추정하면 워크트리·복사본에서 조용히 엉뚱한
+#    파일을 집는다). 부재는 **fail-closed**다: 조용히 넘어가면 밴드 검사도 프로브도 없는 채로
+#    `_vme_pick_port`가 "command not found"를 내며 재시도 루프를 이상하게 태운다.
+_VME_HP_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/host-port.sh"
+[ -r "$_VME_HP_LIB" ] || {
+  echo "vmalert-e2e: 형제 lib을 읽을 수 없다: ${_VME_HP_LIB} — 이 파일을 복사했다면 host-port.sh도 같은 디렉토리로 복사하라." >&2
+  exit 2
+}
+# shellcheck source=tests/gates/lib/host-port.sh
+. "$_VME_HP_LIB"
+
+VME_PORT_LO="${VME_PORT_LO:-$HP_PORT_LO}"
+VME_PORT_HI="${VME_PORT_HI:-$HP_PORT_HI}"
+VME_NODEPORT_LO="${VME_NODEPORT_LO:-$HP_NODEPORT_LO}"
+VME_NODEPORT_HI="${VME_NODEPORT_HI:-$HP_NODEPORT_HI}"
+VME_PORT_RANGE_FILE="${VME_PORT_RANGE_FILE:-$HP_PORT_RANGE_FILE}"
+
+_vme_hp_sync() {   # VME_* 손잡이 → HP_* 프리미티브 입력
+  HP_PORT_LO="$VME_PORT_LO"; HP_PORT_HI="$VME_PORT_HI"
+  HP_NODEPORT_LO="$VME_NODEPORT_LO"; HP_NODEPORT_HI="$VME_NODEPORT_HI"
+  HP_PORT_RANGE_FILE="$VME_PORT_RANGE_FILE"
+}
+
+_vme_band_assert() { # 밴드가 두 예약 중 하나라도 건드리면 즉시 죽는다(판정 불가는 '통과'가 아니다)
+  _vme_hp_sync
+  hp_band_assert || vme_fault "포트 밴드 검사가 실패했다(직전 host-port stderr가 원인이다) — 판정 불가는 '통과'가 아니다."
+}
+
+_vme_port_free() { hp_port_free "$1"; }
+
+# vmsingle은 컨테이너당 포트를 **하나만** 쓰므로 배제 인자를 넘기지 않는다(넘길 것이 없다).
+# 한 하네스가 포트를 둘 이상 뽑아야 하면 `hp_pick_port <이미-뽑은-포트>`를 직접 부른다.
+_vme_pick_port() {
+  _vme_hp_sync
+  hp_pick_port
+}
+
 # $3.. = vmsingle에 그대로 넘길 **추가 플래그**(선택). 하네스 고유 스토리지 의미(예: 드리프트 하네스의
 # `--dedup.minScrapeInterval` — 합성 KSM 시계열을 scrape 그리드에 정렬)를 인라인 사본 없이 표현하기 위한
 # 통로다. 넘기지 않으면 `"$@"`가 0개로 전개돼 기존 소비자의 명령줄은 **바이트 불변**이다.
-# 빈 포트를 **직접** 고른다.
-# ⚠️ `-p 127.0.0.1:0:8428`(호스트 포트 0 = 커널이 임의 배정)은 **docker 전용 관용구다.**
-#    podman 5는 거부한다: `parsing host port: port numbers must be between 1 and 65535 (inclusive), got 0`.
-#    2026-08-19 NUC 이관에서 밟았다 — 맥은 OrbStack이 docker를 제공해 안 밟혔고, 리눅스 노드에는
-#    docker 데몬을 올리지 않는다(docker0 브리지와 FORWARD 체인 조작이 k3s 파드 네트워킹을 깨는
-#    전형적 경로다). 그래서 rootless podman을 쓰고, 포트 배정을 런타임에 맡기지 않는다.
-# ── 호스트 포트 밴드 ──────────────────────────────────────────────────────────────
-# 밴드는 상수지만 **검사는 라이브다** — 호스트가 예약 범위를 바꾸면 조용한 회귀가 아니라 즉사한다.
-# 피해야 하는 예약이 둘이고, 예전 픽 범위(20000-39999)는 **둘 다** 밟았다.
-#  ① 커널 ephemeral(`/proc/sys/net/ipv4/ip_local_port_range` — 이 NUC 32768-60999): 7232포트가 겹쳤다.
-#     하네스 **자신의** curl(health 폴 60회 + 매 질의)이 그 대역에 아웃바운드 소스 포트를 계속 만든다
-#     — 즉 혼자 돌아도 자기 포트를 빼앗겼다. 2026-08-19 실측 실패 포트 35704가 정확히 이 구간이다.
-#  ② k8s NodePort(기본 30000-32767): 이 게이트는 k3s가 도는 NUC에서도 돈다. NodePort는 리스너가
-#     아니라 **nat 규칙**이라 **어떤 bind 프로브로도 원리적으로 안 보인다**(실측 2026-08-20:
-#     30953 = gateway/traefik:443인데 `ss -ltnp` 0건 · connect 프로브 FREE · **plain bind도 FREE** ·
-#     그런데 `curl http://127.0.0.1:30953/health`는 Traefik의 `404 page not found`를 받는다).
-#     프로브를 아무리 고쳐도 못 잡는다 — **밴드에서 통째로 빼는 것만이 이걸 닫는다.**
-VME_PORT_LO="${VME_PORT_LO:-20000}"
-VME_PORT_HI="${VME_PORT_HI:-29999}"
-VME_NODEPORT_LO="${VME_NODEPORT_LO:-30000}"   # k8s 기본 --service-node-port-range(이 레포에 override 0건 — 실측)
-VME_NODEPORT_HI="${VME_NODEPORT_HI:-32767}"
-VME_PORT_RANGE_FILE="${VME_PORT_RANGE_FILE:-/proc/sys/net/ipv4/ip_local_port_range}"
-VME_BAND_OK=""
-
-_vme_disjoint() { [ "$VME_PORT_HI" -lt "$1" ] || [ "$VME_PORT_LO" -gt "$2" ]; }
-
-_vme_band_assert() { # 밴드가 두 예약 중 하나라도 건드리면 즉시 죽는다(판정 불가는 '통과'가 아니다)
-  local lo hi
-  [ -z "$VME_BAND_OK" ] || return 0
-  [ "$VME_PORT_LO" -lt "$VME_PORT_HI" ] || vme_fault "포트 밴드 역전(${VME_PORT_LO}-${VME_PORT_HI})"
-  [ -r "$VME_PORT_RANGE_FILE" ] || vme_fault "포트 밴드: ${VME_PORT_RANGE_FILE}를 읽을 수 없다 — ephemeral 범위와의 배타성을 확인할 수 없다."
-  lo="$(awk 'NR==1{print $1}' "$VME_PORT_RANGE_FILE")"
-  hi="$(awk 'NR==1{print $2}' "$VME_PORT_RANGE_FILE")"
-  case "$lo" in ''|*[!0-9]*) vme_fault "포트 밴드: ephemeral 하한 '${lo}' 비수치" ;; esac
-  case "$hi" in ''|*[!0-9]*) vme_fault "포트 밴드: ephemeral 상한 '${hi}' 비수치" ;; esac
-  _vme_disjoint "$lo" "$hi" || vme_fault "포트 밴드 ${VME_PORT_LO}-${VME_PORT_HI}가 커널 ephemeral ${lo}-${hi}와 겹친다 — 하네스 자신의 curl이 그 대역에서 소스 포트를 만든다. VME_PORT_LO/VME_PORT_HI를 옮겨라."
-  _vme_disjoint "$VME_NODEPORT_LO" "$VME_NODEPORT_HI" || vme_fault "포트 밴드 ${VME_PORT_LO}-${VME_PORT_HI}가 k8s NodePort ${VME_NODEPORT_LO}-${VME_NODEPORT_HI}와 겹친다 — NodePort는 리스너가 아니라 nat 규칙이라 bind 프로브가 원리적으로 못 본다."
-  VME_BAND_OK=1
-}
-
-# **bind 프로브**(SO_REUSEADDR 없음) — 런타임이 실제로 던지는 질문을 그대로 던진다.
-# ⚠️ 예전 connect 프로브(`/dev/tcp`)는 **리스너만** 본다. 아웃바운드 연결의 로컬 소스 포트도, 리스너가
-#    닫힌 뒤 살아남은 accepted 소켓도 FREE로 보고하는데 그 포트의 bind는 실패한다
-#    (실측 2026-08-20: 두 경우 모두 connect=FREE / plain bind=EADDRINUSE(98)).
-# ⚠️ **SO_REUSEADDR를 켜지 마라.** accepted 소켓이 잡은 포트에 대해 성공해버려 프로브가 런타임보다
-#    관대해진다(실측: bind+REUSEADDR=FREE(오답), plain bind=BUSY(98)). plain bind는 어떤 런타임보다
-#    같거나 엄격해 "못 쓰는 포트를 배정"하는 방향으로는 틀리지 않는다(TIME_WAIT 포트를 가끔 건너뛸 뿐이다).
-# ⚠️ python3는 새 도구 의존이 **아니다** — 이 파일이 이미 vme_iso/vme_promql/vme_series_count에서
-#    요구한다. `/dev/tcp`를 고른 원래 이유가 "새 의존 금지"였는데 그 제약은 python3로 이미 충족된다.
-_vme_port_free() {
-  python3 -c 'import socket, sys
-s = socket.socket()
-try:
-    s.bind(("127.0.0.1", int(sys.argv[1])))
-except OSError:
-    sys.exit(1)
-finally:
-    s.close()' "$1"
-}
-
-_vme_pick_port() {
-  local p _ span
-  _vme_band_assert
-  span=$(( VME_PORT_HI - VME_PORT_LO + 1 ))
-  for _ in $(seq 40); do
-    p=$(( VME_PORT_LO + RANDOM % span ))
-    if _vme_port_free "$p"; then printf '%s' "$p"; return 0; fi
-  done
-  echo "빈 포트를 찾지 못했다(${VME_PORT_LO}-${VME_PORT_HI}에서 40회) — 판정 불가는 '통과'가 아니다" >&2
-  return 1
-}
-
 VME_BIND_TRIES="${VME_BIND_TRIES:-3}"   # 첫 시도 + 재추첨 2회(판별에 필요한 최소치는 2다)
 
 vme_start_vmsingle() { # $1=container name $2=vmsingle version [$3.. = 추가 플래그] → VME_BASE 설정

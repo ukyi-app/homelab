@@ -25,7 +25,12 @@ help: ## 사용 가능한 타겟 목록 출력
 #    (실측 2026-08-20: `bootstrap-deadmanswitch`가 `bootstrap`보다 앞, `verify`가 맨 끝).
 #    ⇒ 이건 테스트의 거짓 red가 아니라 **산출물의 결함**이었다 — 오너의 en_US 셸에서 `make help`가
 #    실제로 이름 순이 아니었다. cf. `docs/traps-detail.md` 「로케일 콜레이션이 게이트를 뒤집는다 …」
-	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+# ⚠️ 문자 클래스에 **숫자와 점이 들어간다.** `[a-zA-Z_-]`였을 때 `m6-tools`가 두 번째 문자 `6`에서
+#    앵커드 매치에 실패해 도움말에서 **조용히 빠져 있었다**(실측 2026-08-21: 선언 40 / 출력 39,
+#    차집합이 정확히 `m6-tools` 하나). 죽은 타깃이 아니라 `ci:`의 선행조건이라 실제로 도는 타깃인데
+#    도움말에는 없는 상태였다. 아래 전단사 단언이 이 누락을 다시 잡는다(바닥값은 못 잡는다 —
+#    39 ≥ 25는 참이므로 열거 완전성을 묻지 않는다).
+	@grep -hE '^[a-zA-Z0-9_.-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  %-22s %s\n", $$1, $$2}' \
 	  | LC_ALL=C sort
 
@@ -75,6 +80,8 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@bash scripts/check-image-pins.sh
 	@bash scripts/check-locale-collation.sh
 	@bash scripts/check-gh-secret-coverage.sh
+	@bash scripts/check-host-ports.sh
+	@bash scripts/check-bats-fd0.sh
 	@scripts/verify-ledger.sh
 # ⚠️ bats 호출은 fd 0을 끊는다(`</dev/null`). @test 안의 스텁이 피연산자 없이 fd 0을 읽으면 호출자의
 #    stdin에서 영구 블록한다 — 실패도 출력도 없는 hang이다(근거·실측은 scripts/run-bats.sh 헤더).
@@ -175,7 +182,9 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	bun tools/check-workflow-readiness.ts
 	bun tools/check-ci-parity.ts
 # 실 도메인 가드 — ci.yaml gate의 같은 이름 스텝과 짝이다(패리티 원장이 전건 대조한다).
-# 이 7종은 CI에서 bats를 통해서만 돌았고, 같은 bats 파일에 픽스처 @test가 섞여 있어 "실 레포를 검사하는
+# ⚠️ 여기에 **건수를 적지 않는다** — 아무도 대조하지 않는 손 관리 수치는 반드시 드리프트한다(실측:
+#    예전 이 자리는 "7종", ci.yaml 쪽은 "9종"이라 적혀 있었는데 실제는 둘 다 10이었다).
+# 이 가드들은 CI에서 bats를 통해서만 돌았고, 같은 bats 파일에 픽스처 @test가 섞여 있어 "실 레포를 검사하는
 # 한 줄"이 지워져도 G1이 초록을 유지했다. 여기서도 레포 자신에 대해 직접 돌린다.
 	bash scripts/check-doc-index.sh
 	bash scripts/check-bats-accounting.sh
@@ -184,6 +193,8 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	bash scripts/check-image-pins.sh
 	bash scripts/check-locale-collation.sh
 	bash scripts/check-gh-secret-coverage.sh
+	bash scripts/check-host-ports.sh
+	bash scripts/check-bats-fd0.sh
 	bun tools/check-resource-limits.ts
 	bun tools/check-alert-rules.ts
 	bun tools/check-disk-caps.ts
@@ -269,6 +280,12 @@ verify-runbooks: ## [DR] 로컬 런북 bats 실행(docs/runbooks/ — gitignored
 .PHONY: verify-runbook-index
 verify-runbook-index: ## [local] 런북 인덱스↔docs/runbooks 정합(런북 부재=SKIP — verify-runbooks와 별개)
 	@bash scripts/verify-runbook-index.sh
+
+.PHONY: verify-credential-inventory
+verify-credential-inventory: ## [local] 런북 token-inventory §A ↔ policy/credential-expiry.json 정합(런북 부재=SKIP)
+# ⚠️ CI에서는 **영원히 SKIP**이다(런북이 gitignored). 그래서 이 가드의 유일한 권위 경로가 이 타깃이고,
+#    검출기가 살아 있음을 증명하는 것은 tests/gates/test_credential-inventory.bats의 픽스처 대조뿐이다.
+	@bash scripts/verify-credential-inventory.sh
 
 .PHONY: verify-posture
 verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 부재=SKIP
