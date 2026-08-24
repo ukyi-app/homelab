@@ -137,6 +137,7 @@ jobs:
           bash scripts/check-locale-collation.sh
           bash scripts/check-gh-secret-coverage.sh
           bash scripts/check-host-ports.sh
+          bash scripts/check-bats-fd0.sh
           bun tools/check-resource-limits.ts
           bun tools/check-alert-rules.ts
           bun tools/check-disk-caps.ts

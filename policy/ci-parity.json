@@ -93,6 +93,7 @@
         "scripts/check-locale-collation.sh",
         "scripts/check-gh-secret-coverage.sh",
         "scripts/check-host-ports.sh",
+        "scripts/check-bats-fd0.sh",
         "tools/check-resource-limits.ts",
         "tools/check-alert-rules.ts",
         "tools/check-disk-caps.ts"

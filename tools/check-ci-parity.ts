@@ -21,6 +21,13 @@
 //   ⑥ `excluded`는 로컬에서 안 도는 것이다. why·since·owner_action이 전부 있어야 한다 — 선언되지 않은
 //      부재는 통과할 수 없고, 사유 없는 선언도 통과할 수 없다.
 //
+//   ⑦ `mirrored`의 `local` 배열이 **ci.yaml 스텝 본문의 커맨드 전건**을 담는지. ④는 원장 → Makefile
+//      한 방향뿐이라, ci.yaml 스텝에 가드를 추가하고 원장에 안 적어도 아무도 red를 못 냈다 —
+//      실측 2026-08-21: `실 도메인 가드` 스텝의 커맨드 10건 중 원장엔 **8건**만 있었고
+//      `check-locale-collation`·`check-gh-secret-coverage`가 빠진 채 오래 초록이었다. 그 목록이
+//      곧 AGENTS.md가 금지하는 **하드코딩 소비처 목록**이었다. ⇒ 목록을 ci.yaml에서 파생해 대조한다.
+//      (④는 그대로 둔다: ⑦은 "원장이 스텝을 다 담았는가", ④는 "담긴 것이 make ci에서 실제로 도는가".)
+//
 // ⚠️ 이 도구는 "gate와 make ci가 같다"를 증명하지 않는다. **모든 차이가 의도된 것인지**를 증명한다.
 //    그 구분이 핵심이다 — 완전 일치를 강제하면 docker 없는 환경에서 make ci가 못 돌고, 결국 아무도 안 쓴다.
 
@@ -70,6 +77,70 @@ try {
   stepNames = out.split("\n").map((s) => s.trim()).filter(Boolean);
 } catch (e) {
   fail(`ci.yaml에서 ${GATE_JOB} 스텝을 읽지 못했다(yq 실패): ${(e as Error).message}`);
+}
+
+// 스텝 본문(run 텍스트)도 함께 파생한다 — ⑦의 대조 원본이다. 이름과 같은 순서로 나온다.
+let stepRuns: string[] = [];
+try {
+  // 스텝 사이 구분자로 NUL을 쓸 수 없으므로 유일한 센티널을 쓴다(본문에 나올 수 없는 형태).
+  const out = sh("yq", [
+    "-r",
+    `.jobs.${GATE_JOB}.steps[] | select(has("run")) | .run + "\n@@STEP@@"`,
+    CI,
+  ]);
+  stepRuns = out.split("@@STEP@@").slice(0, -1);
+} catch (e) {
+  fail(`ci.yaml에서 ${GATE_JOB} 스텝 본문을 읽지 못했다(yq 실패): ${(e as Error).message}`);
+}
+if (stepRuns.length !== stepNames.length) {
+  fail(
+    `스텝 이름 ${stepNames.length}건 ≠ 스텝 본문 ${stepRuns.length}건 — 파생이 어긋났다. ` +
+      `이 상태로 ⑦을 돌리면 엉뚱한 본문을 엉뚱한 이름에 붙여 대조한다.`,
+  );
+  stepRuns = [];
+}
+const runByName = new Map<string, string>();
+stepNames.forEach((n, i) => { if (stepRuns[i] !== undefined) runByName.set(n, stepRuns[i]); });
+
+// run 본문에서 **실행되는 레포 커맨드**만 뽑는다. 주석 줄은 명령이 아니고, 글롭 인자
+// (`git ls-files 'tests/gates/vmalert-*-firing-e2e.sh'`)는 경로가 아니라 패턴이라 제외한다.
+// 원장 항목(basename 또는 글롭)이 스텝의 커맨드를 덮는가. **basename끼리** 비교한다 —
+// 전체 경로 포함 검사는 원장의 정상 표기를 거짓 위반으로 만들고, 느슨한 substring은
+// `sh` 같은 조각이 전부를 덮어 대조를 무의미하게 만든다.
+// 원장 항목은 인터프리터 접두(`bash tests/…`)와 인자(`tools/…​.ts --ci`)를 함께 가질 수 있다.
+// **스크립트 확장자를 가진 첫 토큰**이 경로다. 없으면 첫 토큰으로 떨어진다(`shellcheck`·`actionlint`).
+function base(p: string): string {
+  const toks = p.trim().split(/\s+/);
+  const path = toks.find((t) => /\.(sh|ts|mts)$/.test(t)) ?? toks[0] ?? p;
+  return path.split("/").pop() ?? path;
+}
+function ledgerCovers(want: string, cmd: string): boolean {
+  const w = base(want);
+  const c = base(cmd);
+  if (w === c) return true;
+  if (!w.includes("*")) return false;
+  const re = new RegExp("^" + w.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+  return re.test(c);
+}
+
+function commandsIn(run: string): string[] {
+  const out = new Set<string>();
+  for (const raw of run.split("\n")) {
+    const line = raw.replace(/#.*$/, "");
+    if (!line.trim()) continue;
+    // ⚠️ 후행 lookahead에 `;` `&` `|` `)` `}`가 **반드시** 들어간다 — 예전엔 `(?=\s|$|"|')`뿐이라
+    //    `bash scripts/x.sh; then`·`bash scripts/x.sh|| exit 1`·`(bash scripts/x.sh)` 같은 정상 셸 표기가
+    //    통째로 안 보였다. 방향 ⑦은 "보이는 커맨드가 원장에 있는가"만 보므로, 안 보이는 커맨드는
+    //    대조 대상이 아니라 **침묵**한다 — 로스터가 파생 대조라는 보증이 그 표기에 대해 거짓이 된다.
+    //    (도입 시점 실측으로는 ci.yaml 34건이 전부 잡혀 놓친 것은 0건이었다. 잠복을 닫는 수정이다.)
+    const re = /(?:^|[\s;&|(])(?:bash|bun|sh|\.\/)?\s*((?:scripts|tools|tests)\/[A-Za-z0-9._/-]+\.(?:sh|ts|mts))(?=[\s;&|()}"']|$)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      if (m[1].includes("*")) continue;
+      out.add(m[1]);
+    }
+  }
+  return [...out];
 }
 
 if (stepNames.length < MIN_STEPS) {
@@ -151,6 +222,21 @@ for (const e of byName.values()) {
           fail(
             `"${e.name}": mirrored로 선언됐지만 \`make -n ci\` 출력에 '${w}'이(가) 없다.\n` +
               `    → make ci에서 빠졌거나 커맨드가 바뀌었다. Makefile을 고치거나 원장 상태를 바꿔라.`,
+          );
+        }
+      }
+      // ⑦ 역방향: ci.yaml 스텝 본문의 커맨드가 전부 local에 있는가.
+      // ⚠️ ④(원장 → make)만으로는 **원장에 안 적은 커맨드**가 원리적으로 안 보인다. 그 목록이
+      //    손 관리 로스터가 되는 자리이고, 실제로 10건 중 2건이 빠진 채 오래 초록이었다.
+      // ⚠️ 원장의 `local`은 **basename**이나 **글롭**이다(그 문자열은 `make -n ci` 출력 대조용이라
+      //    Makefile이 쓰는 형태를 따른다 — 예: `vmalert-*-firing-e2e.sh`는 Makefile이 글롭을 쓰기
+      //    때문이다). 전체 경로로만 대조하면 이 방향이 **정상 원장을 물어** 아무도 안 켠다.
+      const inStep = commandsIn(runByName.get(e.name) ?? "");
+      for (const c of inStep) {
+        if (!wants.some((w) => typeof w === "string" && ledgerCovers(w, c))) {
+          fail(
+            `"${e.name}": ci.yaml 스텝이 '${c}'를 부르는데 원장 local에 없다.\n` +
+              `    → local은 스텝 본문의 커맨드를 **전건** 담아야 한다. 부분 대조는 대조가 아니다.`,
           );
         }
       }
