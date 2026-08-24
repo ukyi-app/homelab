@@ -2,7 +2,7 @@
 # 트리거 경계: owner가 여기서 workflow_dispatch로 실행. 변이 로직은 _teardown-app.yaml(reusable).
 # 파괴 가드: confirm===app(validate-mutation) + 수동 머지(auto-merge 안 함).
 name: "🗑️ teardown-app"
-run-name: "🗑️ teardown-app — ${{ inputs.app }}"
+run-name: "🗑️ teardown-app — ${{ inputs.app }}${{ inputs.correlation != '' && format(' [{0}]', inputs.correlation) || '' }}"
 on:
   workflow_dispatch:
     inputs:
@@ -12,6 +12,10 @@ on:
       confirm:
         description: "확인 — 위 앱 이름을 정확히 다시 입력 (불일치 시 거부)"
         required: true
+      correlation:
+        description: "상관 nonce (CLI 수령증 — run-name 에코, 비우면 기존 run-name 그대로)"
+        required: false
+        default: ""
 
 # 전역 직렬화: 모든 homelab-mutation 워크플로가 같은 그룹. queue: max — pending FIFO.
 # cancel-in-progress와 병용 불가(AGENTS.md 함정) — 절대 true 금지.

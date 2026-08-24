@@ -1,0 +1,161 @@
+{
+ "note": "release r1 정식 아티팩트 ok:false(양 멤버 readback-incomplete/json-unparseable). codex 세션 로그에서 무손실 회수 — HRG 토큰 일치, declaredCount 일치.",
+ "members": [
+  {
+   "slot": "a",
+   "readback_token": "903de1a3",
+   "verdict": "needs-attention",
+   "summary": "Do not ship: MCP safety and latency contracts fail; evidence is incomplete.",
+   "findings": [
+    {
+     "severity": "high",
+     "title": "The release-blocking amd64 prerequisite has no evidence",
+     "body": "The table omits the required amd64 template scaffold-build-smoke evidence.",
+     "file": "docs/reviews/homelab-cli/verification.md",
+     "line_start": 19,
+     "line_end": 35,
+     "code": "## 실행한 명령과 결과 (전부 이 HEAD에서 실측, exit code)",
+     "confidence": 1,
+     "recommendation": "Record the template commit and passing amd64 build-smoke evidence."
+    },
+    {
+     "severity": "high",
+     "title": "Mutation calls can block the whole MCP server for 20 minutes",
+     "body": "This sync call uses mutation.ts:47's 20-minute default before wait=false returns.",
+     "file": "tools/lib/mcp.ts",
+     "line_start": 230,
+     "line_end": 246,
+     "code": "const r = tool.call(args);",
+     "confidence": 0.99,
+     "recommendation": "Return a handle quickly; keep list/status responsive during stalled runs."
+    },
+    {
+     "severity": "high",
+     "title": "Malformed explicit paths fall back to the server working directory",
+     "body": "null paths pass this check, become undefined, and invoke process.cwd().",
+     "file": "tools/lib/mcp.ts",
+     "line_start": 239,
+     "line_end": 242,
+     "code": "const missing = required.filter((k) => args[k] === undefined);",
+     "confidence": 1,
+     "recommendation": "Runtime-validate schemas; require absolute paths and no MCP fallback."
+    },
+    {
+     "severity": "high",
+     "title": "URL tools can write plaintext credentials into the server checkout",
+     "body": "envDir is optional, so live URL calls write credentials in the server cwd.",
+     "file": "tools/lib/mcp.ts",
+     "line_start": 159,
+     "line_end": 190,
+     "code": "type: \"object\", additionalProperties: false, required: [\"name\"],",
+     "confidence": 1,
+     "recommendation": "Require envDir on both tools and test a live write from another cwd."
+    },
+    {
+     "severity": "high",
+     "title": "Two advertised tools escape the shared result contract",
+     "body": "db_url and cache_url return text, so agents cannot use the shared Envelope.",
+     "file": "tools/lib/mcp.ts",
+     "line_start": 49,
+     "line_end": 56,
+     "code": "return { kind: \"text\", text, isError: !r.ok };",
+     "confidence": 0.99,
+     "recommendation": "Add URL verbs to the schema and return envelopes for success and failure."
+    }
+   ]
+  },
+  {
+   "slot": "b",
+   "readback_token": "12c7a050",
+   "verdict": "needs-attention",
+   "summary": "Do not ship: MCP can mutate the wrong cwd and block its own progress API.",
+   "findings": [
+    {
+     "severity": "high",
+     "title": "Schema-invalid arguments reach mutating operations",
+     "body": "null parentDir passes the check and falls back to the MCP server cwd.",
+     "file": "tools/lib/mcp.ts",
+     "line_start": 240,
+     "line_end": 240,
+     "code": "const missing = required.filter((k) => args[k] === undefined);",
+     "confidence": 0.99,
+     "recommendation": "Validate every inputSchema and return -32602 before tool.call."
+    },
+    {
+     "severity": "high",
+     "title": "Credential URL tools infer an unsafe destination",
+     "body": "Omitted envDir can write connection secrets in the MCP server cwd.",
+     "file": "tools/lib/mcp.ts",
+     "line_start": 159,
+     "line_end": 159,
+     "code": "type: \"object\", additionalProperties: false, required: [\"name\"],",
+     "confidence": 0.99,
+     "recommendation": "Require non-empty envDir for both URL tools and test the actual write path."
+    },
+    {
+     "severity": "high",
+     "title": "Synchronous calls defeat the bounded progress contract",
+     "body": "wait:false may poll 20 minutes; sync tool.call blocks status and later requests.",
+     "file": "tools/lib/mcp.ts",
+     "line_start": 242,
+     "line_end": 242,
+     "code": "const r = tool.call(args);",
+     "confidence": 0.98,
+     "recommendation": "Return a run handle promptly; make calls async and test overlapping requests."
+    }
+   ]
+  }
+ ],
+ "round2": {
+  "readback_token": "df4c9de6",
+  "verdict": "needs-attention",
+  "summary": "Do not ship: a2/b3, b1, a5 remain open; final evidence predates the fixes.",
+  "findings": [
+   {
+    "severity": "high",
+    "title": "still-open a2/b3: run discovery can block MCP for 20 minutes",
+    "body": "run 미출현 시 공유 deadline 20분까지 동기 루프가 stdio와 status 요청을 막는다.",
+    "file": "tools/lib/mutation.ts",
+    "line_start": 107,
+    "line_end": 111,
+    "code": "if (opts.identifyOnly) {",
+    "confidence": 0.99,
+    "recommendation": "MCP 식별 deadline을 짧게 분리하고 run 미출현 elapsed-time 테스트를 추가하라."
+   },
+   {
+    "severity": "high",
+    "title": "still-open b1: optional schema-invalid values still mutate",
+    "body": "dryRun='true'는 검사 없이 false로 접혀 URL tool의 실제 자격 파일 쓰기를 실행한다.",
+    "file": "tools/lib/mcp.ts",
+    "line_start": 252,
+    "line_end": 261,
+    "code": "const required = (tool.inputSchema.required as string[] | undefined) ?? [];",
+    "confidence": 1,
+    "recommendation": "전체 inputSchema를 검증하고 invalid dryRun에서 subprocess 0건을 단언하라."
+   },
+   {
+    "severity": "high",
+    "title": "still-open a5: cache_url emits a schema-invalid envelope",
+    "body": "cache-url 계획의 host가 urlResult에 없어 성공한 cache_url envelope은 계약 위반이다.",
+    "file": "tools/cli-result-schema.json",
+    "line_start": 687,
+    "line_end": 701,
+    "code": "\"additionalProperties\": false,",
+    "confidence": 1,
+    "recommendation": "urlResult에 host를 모델링하거나 제거하고 실제 cache_url envelope을 검증하라."
+   },
+   {
+    "severity": "high",
+    "title": "New high: release evidence is pinned before the fixes",
+    "body": "문서는 97e8f6f 이후 코드 불변이라 하지만 a19f466이 MCP·mutation·tests를 바꿨다.",
+    "file": "docs/reviews/homelab-cli/verification.md",
+    "line_start": 10,
+    "line_end": 17,
+    "code": "| HEAD 커밋 | `97e8f6f9f1c24db2944a678667ebfbe2e8004e10` |",
+    "confidence": 1,
+    "recommendation": "a19f466 tree에서 전체 명령을 재실측하고 HEAD·tree·count를 갱신하라."
+   }
+  ],
+  "note": "r2도 정식 아티팩트 ok:false(readback-incomplete). 세션 로그 무손실 회수(토큰 df4c9de6, count 4 일치)."
+ }
+}

@@ -1,0 +1,26 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "db create",
+  "variant": "success",
+  "exitCode": 0,
+  "omitted": [
+    "live"
+  ],
+  "result": {
+    "action": "create-database",
+    "name": "mydb",
+    "correlation": "corr-fixed-nonce-01",
+    "waited": true,
+    "run": {
+      "id": 501,
+      "url": "https://github.com/ukyi-app/homelab/actions/runs/501",
+      "conclusion": "success"
+    },
+    "pr": {
+      "number": 21,
+      "url": "https://github.com/ukyi-app/homelab/pull/21",
+      "merged": true,
+      "mergeSha": "feedbee"
+    }
+  }
+}

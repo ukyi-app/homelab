@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { randomBytes, createHash } from "node:crypto";
 import { parseDocument } from "yaml";
 import { analyzeLedger, appendRowWithTotals, budgetViolation, type LedgerAgg } from "./lib/ledger-budget.ts";
-import { resourceNameError } from "./lib/identity.ts";
+import { CACHE_MAXMEMORY_MI, resourceNameError } from "./lib/identity.ts";
 import { sealManifest } from "./lib/seal.ts";
 import { addResource } from "./lib/kustomization.ts";
 import { parseFlags } from "./lib/cli.ts";
@@ -43,8 +43,8 @@ if (!name) {
 // 형식 + '-ro' 접미사를 공유 정책으로 단일 검사(디스패처 validate-mutation과 동일)
 const nameErr = resourceNameError("cache", name);
 if (nameErr) fail(nameErr);
-if (!/^\d+$/.test(rawMaxmemory) || !Number.isInteger(maxmemoryMi) || maxmemoryMi < 16 || maxmemoryMi > 1024)
-  fail(`maxmemory-mi는 16..1024 정수여야 한다: '${rawMaxmemory}'`);
+if (!/^\d+$/.test(rawMaxmemory) || !Number.isInteger(maxmemoryMi) || maxmemoryMi < CACHE_MAXMEMORY_MI.min || maxmemoryMi > CACHE_MAXMEMORY_MI.max)
+  fail(`maxmemory-mi는 ${CACHE_MAXMEMORY_MI.min}..${CACHE_MAXMEMORY_MI.max} 정수여야 한다: '${rawMaxmemory}'`);
 
 // ---------- 사이징 ----------
 // limit는 maxmemory보다 여유를 둔다: BGSAVE fork COW + allocator 단편화 + 클라이언트 버퍼.

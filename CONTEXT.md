@@ -68,3 +68,15 @@ _Avoid_: 시크릿 해시
 봉인본을 `values.envFrom`(secretRef `<app>-secrets`)과 `kustomization.resources`가 참조하게
 만드는 것. `check-app-deploy.sh`가 all-or-none 불변식으로 부분 상태를 fail-closed로 막는다.
 _Avoid_: 연결, 등록
+
+### 앱 플랫폼 조작 (app platform operations)
+
+**변이 디스패처 (mutation dispatcher)**:
+owner 전용 workflow_dispatch 진입점 워크플로. actor 가드·계약표 검증을 통과한 변이를
+reusable 워크플로에 위임해 결과를 PR로 낸다. 전역 직렬화 그룹(homelab-mutation)에 속한다.
+_Avoid_: 변이 워크플로(reusable과 구분 안 됨), 수동 트리거
+
+**아키타입 (archetype)**:
+앱 템플릿 스캐폴더가 생성하는 앱의 형태 — fullstack / api / site / worker.
+kind(web/worker/site)는 아키타입에서 유도되는 파생값이다(fullstack·api→web).
+_Avoid_: 앱 종류(kind와 혼동), 템플릿 타입

@@ -3,7 +3,7 @@
 # 입력은 평평한 필드(name + 확장 체크박스 + 자유입력) — GitHub UI에서 클릭 선택. validate 잡이
 # 이를 spec JSON으로 조립해 reusable(spec 문자열 계약)에 넘긴다(reusable/provision-db는 무변경).
 name: "✨ create-database"
-run-name: "✨ create-database — ${{ inputs.name }}"
+run-name: "✨ create-database — ${{ inputs.name }}${{ inputs.correlation != '' && format(' [{0}]', inputs.correlation) || '' }}"
 on:
   workflow_dispatch:
     inputs:
@@ -32,6 +32,10 @@ on:
         default: false
       ext_extra:
         description: "기타 확장 (쉼표구분, 선택) — 예: hstore,ltree,uuid-ossp"
+        required: false
+        default: ""
+      correlation:
+        description: "상관 nonce (CLI 수령증 — run-name 에코, 비우면 기존 run-name 그대로)"
         required: false
         default: ""
 
@@ -90,8 +94,10 @@ jobs:
       - name: spec 계약 검증 (허용 밖 필드·예약 이름·확장명 거부 — fail-closed)
         env:
           SPEC: ${{ steps.assemble.outputs.spec }}
+          CORRELATION: ${{ inputs.correlation }} # 수령증 nonce도 계약 검증 대상(비신뢰 입력 — env 경유)
         run: |
-          jq -n --arg action create-database --arg spec "$SPEC" '{action: $action, spec: $spec}' > /tmp/payload.json
+          jq -n --arg action create-database --arg spec "$SPEC" --arg corr "$CORRELATION" \
+            '{action: $action, spec: $spec, correlation: $corr}' > /tmp/payload.json
           bun tools/validate-mutation.ts --action create-database --payload-file /tmp/payload.json
 
   create-database:

@@ -1,0 +1,34 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "app create",
+  "variant": "success",
+  "exitCode": 0,
+  "omitted": [],
+  "result": {
+    "action": "create-app",
+    "name": "myapp",
+    "correlation": "corr-fixed-nonce-01",
+    "waited": true,
+    "run": {
+      "id": 801,
+      "url": "https://github.com/ukyi-app/homelab/actions/runs/801",
+      "conclusion": "success"
+    },
+    "pr": {
+      "number": 51,
+      "url": "u51",
+      "merged": true,
+      "mergeSha": "feedbee"
+    },
+    "applications": [
+      {
+        "name": "myapp-prod",
+        "sync": "Synced",
+        "health": "Healthy",
+        "revision": "abc1234",
+        "descendant": true,
+        "surfaceOk": true
+      }
+    ]
+  }
+}

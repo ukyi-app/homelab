@@ -116,3 +116,48 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; V="$ROOT/tools/validat
   run bun "$V" --action create-app --payload '{"app":"orders","confirm":"orders"}'
   [ "$status" -ne 0 ]
 }
+
+# --- correlation 수령증 (옵션 입력 — 5개 변이 디스패처만) ---
+
+@test "accepts empty correlation for toJSON-shaped dispatcher payloads (web UI manual run)" {
+  run bun "$V" --action create-app --payload '{"app":"orders","correlation":""}'
+  [ "$status" -eq 0 ]
+  run bun "$V" --action update-secrets --payload '{"app":"orders","correlation":""}'
+  [ "$status" -eq 0 ]
+  run bun "$V" --action teardown-app --payload '{"app":"orders","confirm":"orders","correlation":""}'
+  [ "$status" -eq 0 ]
+}
+
+@test "accepts a well-formed correlation nonce for app and spec dispatchers" {
+  run bun "$V" --action create-app --payload '{"app":"orders","correlation":"hl-20260820-a1b2c3d4"}'
+  [ "$status" -eq 0 ]
+  run bun "$V" --action create-cache --payload '{"spec":"{\"name\":\"foo\"}","correlation":"hl-20260820-a1b2c3d4"}'
+  [ "$status" -eq 0 ]
+  run bun "$V" --action create-database --payload '{"spec":"{\"name\":\"foo\"}","correlation":"hl-20260820-a1b2c3d4"}'
+  [ "$status" -eq 0 ]
+}
+
+@test "rejects malformed correlation nonces (format whitelist)" {
+  # 인라인 리터럴 열거(커맨드 치환 아님 — 붕괴 불가): 대문자·8자 미만·공백·선행 하이픈·65자 초과
+  for v in "UPPER-NONCE-0" "short" "has space x" "-lead-hyphen0" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; do
+    run bun "$V" --action create-app --payload "{\"app\":\"orders\",\"correlation\":\"$v\"}"
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "rejects correlation for non-dispatcher actions (fail-closed preserved)" {
+  run bun "$V" --action teardown-resource --payload '{"resource":"db:foo","correlation":"hl-20260820-a1b2c3d4"}'
+  [ "$status" -ne 0 ]
+  run bun "$V" --action audit --payload '{"correlation":"hl-20260820-a1b2c3d4"}'
+  [ "$status" -ne 0 ]
+}
+
+@test "still rejects unknown payload keys when correlation is present" {
+  run bun "$V" --action create-app --payload '{"app":"orders","correlation":"hl-20260820-a1b2c3d4","bogus":"x"}'
+  [ "$status" -ne 0 ]
+}
+
+@test "teardown-app confirm cross-check still enforced alongside correlation" {
+  run bun "$V" --action teardown-app --payload '{"app":"orders","confirm":"order","correlation":"hl-20260820-a1b2c3d4"}'
+  [ "$status" -ne 0 ]
+}

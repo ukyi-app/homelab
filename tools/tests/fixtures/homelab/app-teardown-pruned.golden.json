@@ -1,0 +1,31 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "app teardown",
+  "variant": "success",
+  "exitCode": 0,
+  "omitted": [],
+  "result": {
+    "action": "teardown-app",
+    "name": "myapp",
+    "dnsReclaim": "iac/tf-reconcile",
+    "correlation": "corr-fixed-nonce-01",
+    "waited": true,
+    "run": {
+      "id": 901,
+      "url": "https://github.com/ukyi-app/homelab/actions/runs/901",
+      "conclusion": "success"
+    },
+    "pr": {
+      "number": 91,
+      "url": "https://github.com/ukyi-app/homelab/pull/91",
+      "merged": true,
+      "mergeSha": "feedbee"
+    },
+    "applications": [
+      {
+        "name": "myapp-prod",
+        "present": false
+      }
+    ]
+  }
+}

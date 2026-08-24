@@ -1,0 +1,17 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "app init",
+  "variant": "no-op",
+  "exitCode": 0,
+  "omitted": [],
+  "result": {
+    "app": "myapp",
+    "archetype": "api",
+    "public": false,
+    "repo": "ukyi-app/myapp",
+    "existed": true,
+    "scaffolded": true,
+    "pushed": true,
+    "checkpoint": "pushed"
+  }
+}

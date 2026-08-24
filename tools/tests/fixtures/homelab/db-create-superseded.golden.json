@@ -1,0 +1,34 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "db create",
+  "variant": "superseded",
+  "exitCode": 3,
+  "omitted": [],
+  "result": {
+    "action": "create-database",
+    "name": "mydb",
+    "correlation": "corr-fixed-nonce-01",
+    "run": {
+      "id": 501,
+      "url": "https://github.com/ukyi-app/homelab/actions/runs/501",
+      "conclusion": "success"
+    },
+    "pr": {
+      "number": 21,
+      "url": "https://github.com/ukyi-app/homelab/pull/21",
+      "merged": true,
+      "mergeSha": "feedbee"
+    },
+    "applications": [
+      {
+        "name": "cnpg-data",
+        "sync": "Synced",
+        "health": "Healthy",
+        "revision": "afterme",
+        "descendant": true,
+        "surfaceOk": false
+      }
+    ],
+    "error": "관측 리비전(afterme)에서 표면(platform/cnpg/prod/databases/mydb.yaml) 부재 — 요청이 추월됨(superseded)"
+  }
+}

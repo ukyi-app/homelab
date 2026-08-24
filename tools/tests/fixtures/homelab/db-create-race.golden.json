@@ -1,0 +1,14 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "db create",
+  "variant": "race",
+  "exitCode": 3,
+  "omitted": [],
+  "result": {
+    "action": "create-database",
+    "name": "mydb",
+    "correlation": "corr-fixed-nonce-01",
+    "observedRuns": 2,
+    "error": "같은 correlation을 에코하는 run이 2개 — 신원 판정 불가(fail-closed)"
+  }
+}

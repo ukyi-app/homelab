@@ -1,0 +1,236 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "ack": "herdr-human-triage",
+  "triageMode": "human",
+  "verdict": "needs-attention",
+  "summary": "Do not slice or ship this plan yet. Mutation correlation, completion semantics, recovery paths, and machine-readable contracts remain unsafe or undefined.",
+  "planFile": "docs/reviews/homelab-cli/spec.md",
+  "planInDiff": true,
+  "reviewedFileCount": 2,
+  "target": "working tree frozen at bb898489ee73 (HEAD 67d36760b833)",
+  "scope": "working-tree",
+  "requestedScope": "working-tree",
+  "base": null,
+  "reviewer": "codex",
+  "effort": "xhigh",
+  "inputMode": "inline-diff",
+  "reviewedSha": "67d36760b833df8e8b00594007806a18de22604e",
+  "reviewedTree": "d6f9e6b1032ad02214f4702f62c35d787d54142a",
+  "reviewedPlanSha256": "43692e6e2cd548b4e42c5e8f42b6ae8b5b3c7c4a233ce7795f4cd81006e608ce",
+  "headMovedDuringReview": false,
+  "planDriftDuringReview": false,
+  "frozen": {
+    "commit": "a972b3e59c283373604fe384861f72e4dd5bd151",
+    "tree": "bb898489ee7396aa65ede8c3e278364fe05cbb5d",
+    "parent": "67d36760b833df8e8b00594007806a18de22604e",
+    "diffRange": "HEAD..bb898489ee7396aa65ede8c3e278364fe05cbb5d",
+    "ref": "refs/herdr-review/homelabc/plan/r1/a-4cbdacec",
+    "refPinned": true
+  },
+  "herdr": {
+    "workspaceId": "wK",
+    "callerPaneId": "wK:p1",
+    "reviewerPaneId": "wK:p4",
+    "agentName": "hrg-homelabc-p-r1-a-4cbdacec",
+    "agentKind": "codex",
+    "agentSessionId": null
+  },
+  "isolation": {
+    "executedArgv": [
+      "codex",
+      "-C",
+      "/tmp/herdr-review-gate-frozen-wK--homelabc-p-r1-a-4cbdacec--ykNKrO",
+      "-s",
+      "read-only",
+      "-c",
+      "approval_policy=never",
+      "-c",
+      "projects./tmp/herdr-review-gate-frozen-wK--homelabc-p-r1-a-4cbdacec--ykNKrO.trust_level=\"trusted\"",
+      "-c",
+      "model_reasoning_effort=xhigh"
+    ],
+    "requestedArgv": [
+      "-C",
+      "/tmp/herdr-review-gate-frozen-wK--homelabc-p-r1-a-4cbdacec--ykNKrO",
+      "-s",
+      "read-only",
+      "-c",
+      "approval_policy=never",
+      "-c",
+      "projects./tmp/herdr-review-gate-frozen-wK--homelabc-p-r1-a-4cbdacec--ykNKrO.trust_level=\"trusted\"",
+      "-c",
+      "model_reasoning_effort=xhigh"
+    ],
+    "sandbox": {
+      "requested": "read-only",
+      "observedInExecutedArgv": "read-only",
+      "matchesRequest": true
+    },
+    "approval": {
+      "requested": "never",
+      "observedInExecutedArgv": "never",
+      "matchesRequest": true
+    },
+    "confinementAxes": [
+      "sandbox",
+      "approval"
+    ],
+    "confinementConfirmed": true,
+    "workRoot": "/tmp/herdr-review-gate-frozen-wK--homelabc-p-r1-a-4cbdacec--ykNKrO",
+    "mcp": {
+      "overrides": [],
+      "servers": [],
+      "enumerated": true,
+      "verified": true,
+      "note": "No MCP servers are configured for this reviewer."
+    },
+    "canary": {
+      "path": "/tmp/herdr-review-gate-canary-homelabc-p-r1-a-4cbdacec",
+      "asked": true,
+      "wrote": false,
+      "conclusion": "none",
+      "note": "No canary appeared, and that proves NOTHING: the sandbox may have blocked the write, or the reviewer may have declined it, misread it, or run no tool at all. Absence of an effect is not evidence of prevention."
+    },
+    "platformSandboxCheck": {
+      "axis": "permission-profile (-P), the axis `codex sandbox` drives",
+      "reviewerAxis": "sandbox-mode (-s), the axis the reviewer agent is started on",
+      "result": "enforcing",
+      "denied": {
+        "code": 2,
+        "stderr": "sh: 1: cannot create /tmp/hrg-probe-canary-db47b49d: Read-only file system",
+        "wrote": false
+      },
+      "allowed": {
+        "code": 0,
+        "stderr": "",
+        "wrote": true
+      },
+      "note": "PLATFORM CHECK: on this machine `codex sandbox -P :read-only` refused a write outside its frame and `-P :workspace` performed the same write, so the sandbox mechanism is alive and discriminating. Whether those two axes converge on the same policy is UNDETERMINED, so this result is a fact about this MACHINE and does not show that this reviewer was confined."
+    },
+    "sandboxEnforcement": "not-independently-verified",
+    "sandboxEnforcementNote": "The sandbox argument (`-s read-only`) is present in the argv herdr reported executing; see executedArgv. The approval-policy argument (`approval_policy=never`) is present in the argv herdr reported executing; see executedArgv. This gate does NOT independently confirm the CLI enforced it. Extraction removes the reviewer's path to this repository's git metadata and makes the target immutable; it does not remove the repository from the filesystem."
+  },
+  "gateBinding": "gate-binding/1",
+  "deadlines": {
+    "paneReadyMs": 5000,
+    "agentStartMs": 120000,
+    "canaryMs": 60000,
+    "promptAckMs": 5000,
+    "stallCandidateMs": 600000,
+    "stallConfirmMs": 1200000,
+    "panePollMs": 10000,
+    "roundMs": 2400000,
+    "paneReadyPollMs": 100
+  },
+  "deadlineOwners": {
+    "paneReadyMs": "launcher",
+    "agentStartMs": "launcher",
+    "canaryMs": "launcher",
+    "promptAckMs": "herdr",
+    "stallCandidateMs": "launcher",
+    "stallConfirmMs": "launcher",
+    "panePollMs": "launcher",
+    "roundMs": "launcher"
+  },
+  "readback": {
+    "source": "recent-unwrapped",
+    "lines": 4000,
+    "bytes": 52108,
+    "declaredCount": 6,
+    "recoveredCount": 6,
+    "failure": null,
+    "unwrapRepaired": true,
+    "capturedDuring": "post-wait"
+  },
+  "findingCount": 6,
+  "planFindingCount": 6,
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Timestamp-window run discovery can bind to another mutation",
+      "body": "Workflow serialization does not make run discovery unique: multiple requests can be created or queued for the same workflow within one timestamp window, with the same event type and actor. The CLI can thereforefollow another invocation, report its PR, or return success while its own mutation failed. MCP callers would also receive no reliable operation handle.",
+      "file": "docs/reviews/homelab-cli/spec.md",
+      "line_start": 66,
+      "line_end": 68,
+      "code": "- run 특정·추적: workflow_dispatch는 run id를 돌려주지 않으므로, 디스패치 직후 해당 워크플로의\n  run 목록을 짧게 폴링해 자기 run을 특정한다(디스패치 시각 창 + 이벤트 타입 필터). 추적은 run\n  conclusion까지가 기본이고, 실패 시 실패 잡 이름과 run URL을 보고한다.",
+      "confidence": 0.99,
+      "recommendation": "Add an authoritative correlation key carried through dispatcher input, run-name, branch or output, or another unambiguous dispatch receipt. Require overlap, retry, and queued-run tests; do not accepttimestamp matching as the identity mechanism.",
+      "isPlanFinding": true,
+      "quotation": "absent"
+    },
+    {
+      "severity": "high",
+      "title": "The secrets chain can dispatch a commit the workflow never reads",
+      "body": "Repository-directory detection does not establish that the checkout is the canonical app repository on a fresh main branch. The existing update-secrets workflow reads the app repository's main HEAD. Running thisplan from a feature branch can successfully seal, commit, and push, then dispatch against the old main secret. The plan also gives no resumable behavior when push succeeds but dispatch fails, which is especially dangerousduring credential rotation.",
+      "file": "docs/reviews/homelab-cli/spec.md",
+      "line_start": 76,
+      "line_end": 78,
+      "code": "- app secrets 이중 모드: 실행 디렉토리가 대상 앱 레포이면 seal(기존 seal 도구 위임)→커밋→push→\n  update-secrets 디스패치를 연쇄하고, 아니면 디스패치만 한다. 평문은 kubeseal stdin 전용 —\n  값은 어떤 출력에도 나타나지 않는다(봉인 계약 규율 유지).",
+      "confidence": 0.98,
+      "recommendation": "Specify remote identity, clean-worktree, branch and freshness preconditions; stage only the sealed artifact; prove the pushed commit is reachable from main before dispatch; and define retry/resumebehavior for every partial-failure boundary. Test feature branches, dirty trees, divergent remotes, and push-success/dispatch-failure.",
+      "isPlanFinding": true,
+      "quotation": "absent"
+    },
+    {
+      "severity": "high",
+      "title": "Open question: --wait has no correct per-verb completion state machine",
+      "body": "One generic sequence cannot implement the current contracts: create-app is manual-merge, teardown explicitly remains manual, while other mutations auto-merge. Even on auto-merge paths, an ArgoCD Application mayalready be Healthy for the previous revision, so a health-only check can falsely report 'actually deployed'. DB and cache mutations also affect different Application sets. The plan leaves engineers to guess whether manualverbs block, reject --wait, or return an incomplete result.",
+      "file": "docs/reviews/homelab-cli/spec.md",
+      "line_start": 69,
+      "line_end": 71,
+      "code": "- 대기 시맨틱: 기본 = run 완료 + 산출 PR URL 출력. --wait = auto-merge 완료(required check\n  gate 단일 — ADR 0003) 후 ArgoCD healthy까지. KUBECONFIG 부재 시 --wait는 머지까지 확인하고\n  라이브 구간 생략을 명시한다. 폴링 간격·데드라인은 주입 가능(테스트 심).",
+      "confidence": 0.98,
+      "recommendation": "Define a state machine per verb: exact run, exact PR, manual versus automatic merge behavior, merge SHA, affected Application set, observed sync revision or generation, and Healthy state. Define timeoutand partial-result semantics, including how omitted live verification affects success.",
+      "isPlanFinding": true,
+      "quotation": "absent"
+    },
+    {
+      "severity": "medium",
+      "title": "app init has no idempotency or recovery design across irreversible side effects",
+      "body": "The chain crosses GitHub repository creation, local filesystem changes, git push, and two independent secret writes without preflight, compensation, or resume rules. A failure after repository creation leaves aname collision that a retry cannot follow as written; failure after setting one dispatch secret leaves the repository in the known invalid half-configured state.",
+      "file": "docs/reviews/homelab-cli/spec.md",
+      "line_start": 72,
+      "line_end": 75,
+      "code": "- app init 체인: 템플릿 레포에서 새 레포 생성(기본 private, --public 옵트인) → 클론 →\n  스캐폴더 비대화형 실행(--archetype fullstack|api|site|worker — kind는 아키타입 유도값, CONTEXT.md\n  용어) → 커밋 → 첫push. --dispatch-secrets 지정 시에만 App 키 경로를 받아 새 레포에 디스패치\n  시크릿 쌍을 설정한다(기본 미배선 = 크론 백스톱).",
+      "confidence": 0.96,
+      "recommendation": "Define phased preflight and postcondition checks, an explicit policy for compatible existing repositories, cleanup or resume instructions at every boundary, and reconciliation or rollback for apartially written secret pair. Add failure-injection tests after each external side effect.",
+      "isPlanFinding": true,
+      "quotation": "absent"
+    },
+    {
+      "severity": "medium",
+      "title": "The promised stable JSON and MCP contract is not actually specified",
+      "body": "Naming a top-level success flag, verb, and result object does not settle a shared API. Exact per-verb fields and types, error payloads, null versus omitted values, warnings, skipped segments, no-op results,schema versioning, and the mapping from process exit codes to MCP errors are all absent. Independent tickets will have to invent incompatible shapes, and the proposed tests have no authoritative contract to assert.",
+      "file": "docs/reviews/homelab-cli/spec.md",
+      "line_start": 86,
+      "line_end": 89,
+      "code": "- --json 계약: 전 동사가 안정된 최상위 형태(성공 여부·동사·결과 오브젝트: run URL·PR URL·상태\n  등)를 출력한다. MCP tool 결과도 같은 오브젝트를 재사용한다(계약 한 벌).\n- 종료코드: 기존 도구 규약(0=성공 · 1=검증/게이트 실패 · 2=사용법 오류 · 3=race · 4=skip +\n  SKIP 마커) 준수.",
+      "confidence": 0.99,
+      "recommendation": "Add a versioned checked-in schema with discriminated success, failure, skip, no-op, partial, and in-progress variants; define exact per-verb results, stdout purity, compatibility rules, and MCP errormapping; then test every variant as golden JSON.",
+      "isPlanFinding": true,
+      "quotation": "absent"
+    },
+    {
+      "severity": "medium",
+      "title": "The known amd64 blocker is not made a release prerequisite",
+      "body": "The plan acknowledges that the template currently emits arm64-targeted binaries, but places the repair outside the homelab gate without an explicit dependency or pinned compatible template revision. The CLI cantherefore pass all local stub tests and ship before the template fix, causing its first promised NUC deployment to fail with an exec-format error.",
+      "file": "docs/reviews/homelab-cli/spec.md",
+      "line_start": 99,
+      "line_end": 101,
+      "code": "- 크로스레포 티켓 — 템플릿 arm64 수리: 템플릿 아키타입들의 빌드 대상 하드코딩(bun-linux-arm64)을\n  TARGETARCH 파라미터화로 수리한다(선행 수정된 기존 앱 2곳과 같은 방식). 이 작업은 템플릿 레포에서\n  수행되며homelab 브랜치 게이트 범위 밖임을 명시한다.",
+      "confidence": 0.98,
+      "recommendation": "Make the template repair and an automated amd64 scaffold-build-smoke result blocking dependencies of CLI release. Pin or verify the compatible template revision so later template drift cannot silentlyreintroduce the failure.",
+      "isPlanFinding": true,
+      "quotation": "absent"
+    }
+  ],
+  "next_steps": [
+    "Revise the plan with authoritative operation correlation and per-verb completion state machines.",
+    "Specify resumable mutation chains and publish the versioned JSON/MCP contract before ticket slicing.",
+    "Make the template architecture repair a blocking dependency, then rerun the plan gate."
+  ],
+  "member": "a",
+  "composite": "plan-r1.json"
+}

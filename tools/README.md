@@ -32,6 +32,62 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   homelab 측은 수동 확인). 앱 self-migrate는 expand/contract + 멱등이 전제이고 순서를 강제하는 Job이
   없으므로 **규칙 준수에 의존한다**(잔여 위험 — `docs/decisions/0005-data-connection-residual-risk.md`).
 
+## homelab CLI (통합 진입점 — 워킹 스켈레톤)
+
+- **`homelab.ts`** — `homelab` 서브커맨드 CLI **셸**(argv 파싱·--help·렌더링·stdout 순수성·종료코드만).
+  동사의 실체는 `lib/verbs.ts` operation catalog가 SSOT — 이 bin 모듈은 import하면 main이 실행되므로
+  MCP 등 다른 소비자는 lib 쪽을 import한다. 변이는 전부 기존 변이 디스패처를
+  `gh workflow run`으로 트리거하는 래퍼가 될 예정이고(신뢰 경계 불변 — actor 가드·전역 직렬화·
+  PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`·`app init|create|secrets|teardown`·`mcp`다.
+  `homelab app create <app> [--wait]` = 수동 머지 변이(머지 = 공개 승인, auto-merge:false — 엔진은 어떤
+  경로로도 auto-merge를 켜지 않는다): 기본은 run 추적+PR URL, --wait는 미머지면 '사람 머지 대기' 바운디드
+  pending, 머지 관측 시 라이브 수렴(<app>-prod + values.yaml 표면)으로 전환.
+  `homelab app teardown <app> --confirm <app> [--wait]` = **파괴 동사**(destructive 표시 — MCP 노출 제외).
+  수동 머지 변이(머지 = 파괴 승인, auto-merge:false). 파괴 오발사 가드로 앱 이름 재입력을 요구한다:
+  `--confirm` 값이 앱 이름과 정확히 일치해야 하고, 플래그가 없으면 TTY에서 재입력을 프롬프트하며 비-TTY
+  (스크립트)에서는 거부한다(둘 다 디스패치 전 거부 — 원장에 gh 호출 0건). 확인은 CLI 셸(homelab.ts)이
+  소유하고 서버 측 재검증은 _teardown-app.yaml이 기존대로 유지한다. `--wait`의 종결은 다른 동사와 다르다
+  (`converge: "absence"`): 삭제 대상 Application은 Healthy가 될 수 없으므로, 성공 = 머지 관측 +
+  Application 부재(appset finalizer cascade prune 완료 — `kubectl get … --ignore-not-found`가 빈 stdout)다.
+  극성 반전 두 지점: 철거 머지는 표면(apps/<app>/…)을 제거하므로 머지 SHA에 표면이 남아 있으면 failure
+  (철거 미반영)이고, Application은 sync/health가 아니라 존재/부재로 판정한다. DNS 회수는 iac/tf-reconcile
+  소관이라 이 명령의 관측 대상이 아니다(결과 `dnsReclaim`에 명시).
+  `homelab app secrets <app> [--wait]` = 이중 모드(`lib/secrets.ts`): 앱 레포 안(마커 .app-config.yml +
+  canonical remote)이면 seal(벤더 tools/seal-secret.mts 위임)→봉인본만 커밋→push→원격 main 도달성 증명→
+  update-secrets 디스패치를 연쇄하고 선행 조건(main·클린 트리·canonical) 실패 시 디스패치 없이 거부, 밖이면
+  디스패치만. `--no-seal` = 재봉인 없이 이미 커밋·push된 봉인본을 재디스패치(push 성공·디스패치 실패 후
+  재실행 수렴 경로 — kubeseal 암호문은 매번 달라 재봉인은 언제나 새 커밋·새 PR·파드 롤링). 디스패처가
+  변경 없음을 보고하면(PR 0) no-op variant(머지 SHA 없음, --wait는 main 기준 표면 blob 동치로 검증).
+  seal 위임 argv는 벤더 도구 계약 그대로(`--config .app-config.yml --env .env --app <app>`) — 평문은
+  그 도구의 kubeseal stdin 전용, CLI는 .env를 읽지 않는다.
+  `homelab cache create <name> [--maxmemory-mi 16..1024] [--wait]` = 변이 엔진의 두 번째 인스턴스
+  (create-cache 디스패치, 빈 maxmemory=디스패처 기본 64 소유, 수렴 집합 cache-prod·data-conn-prod,
+  표면 = 인스턴스 deployment.yaml + conn 봉인본). `homelab cache url` = cache-url.ts 패스스루 재노출.
+  `homelab db create <name> [--ext a,b] [--wait]` = 첫 변이 동사(공유 변이 엔진 `lib/mutation.ts`의
+  첫 인스턴스): create-database 디스패처를 correlation 수령증과 함께 트리거 → nonce 에코 run-name으로
+  자기 run 특정(정확히 1개, ≥2=race exit 3) → conclusion 추적(실패 잡 열거) → `--wait`면 auto-merge
+  머지 관측 + Application 집합(cnpg-data·data-conn-prod) 수렴(머지 SHA 후손+Synced+Healthy+표면 실존,
+  후손 리비전 표면 부재=superseded). KUBECONFIG 부재=머지까지 확인+omitted=["live"].
+  `homelab db url` = 기존 `db-url.ts` 패스스루 재노출(같은 동작 — argv·stdio·종료코드 그대로).
+  `homelab status [<app>] [--run <url>|--pr <url>] [--json]` = 상태 관찰(관측 전용): 인자 없음=
+  전체 앱 목록·요약(레포 데이터), `<app>`=핀·바인딩·최근 run·열린 PR(+KUBECONFIG 있으면 ArgoCD
+  `<app>-prod` sync/health, 없으면 라이브 구간 생략 — envelope.omitted=["live"]·exit 0), 핸들
+  조회=run/PR URL로 그 오퍼레이션 단위 상태(대기·conclusion·머지 여부 — MCP tool 입력과 같은 계약).
+  **설치**: `bun link`(레포 루트) → package.json `bin`이 `homelab`을 전역 PATH에 심링크. 유일하게
+  셰뱅+exec 비트를 갖는 .ts다(test_shebang-exec.bats가 bin 선언에서 예외를 파생). 레포 밖(앱 레포
+  디렉토리 포함)에서도 동작한다(자기 위치는 import.meta 기준 해석).
+  `homelab doctor [--json]` = 플랫폼 전제 진단(관측 전용): gh 인증·로그인=HOMELAB_OWNER 일치(actor
+  가드 사전 검증)·토큰 스코프(repo·workflow, 헤더 부재=fine-grained 추정 warn), bun·kubeseal 존재,
+  KUBECONFIG 유무(부재=warn·깨진 경로=fail), 템플릿 접근성·호환성(스캐폴더 비대화형 계약 +
+  컴파일 아키타입 3종 TARGETARCH — site는 arch 중립이라 대상 아님). fail ≥ 1이면 exit 1.
+  테스트: `tools/tests/test_homelab-cli.bats`(라우팅·계약)·`test_homelab-doctor.bats`(진단 —
+  PATH stub + NUL argv 원장, 하네스 `tools/tests/helpers/cli_stub.bash`).
+- **`cli-result-schema.json`** — CLI `--json` 출력·MCP tool 결과가 공유하는 **결과 계약 SSOT**
+  (envelope `homelab-cli/1`). variant 어휘(success/failure/race/skip/pending/no-op/superseded)·
+  종료코드 매핑(x-contract.exitCodes — pending=1 근거 포함)·stdout 순수성(--json이면 stdout은
+  오브젝트 하나, 사람용은 stderr)·MCP 에러 매핑을 정의한다. CLI가 런타임에 읽는다(코드 상수로
+  복제 금지). 골든 픽스처: `tools/tests/fixtures/homelab/*.golden.json`.
+
 ## App Platform 변이 도구 (변이 디스패처 경유 — 직접 실행 금지)
 
 owner가 homelab에서 액션별 변이 디스패처(`create-app.yaml` 등, workflow_dispatch)를 실행하면
@@ -154,6 +210,60 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 
 ## 공유 커널 (lib/ — 콜사이트가 정책 소유, 단 정책이 콜사이트마다 갈릴 때)
 
+- **`lib/contract.ts`** — 결과 계약 SSOT 리더: cli-result-schema.json의 x-contract(envelope 버전·
+  종료코드 매핑)를 런타임에 읽어 노출(`ENVELOPE`·`EXIT`·`exitFor`·`Envelope` 타입 — 코드 상수
+  복제 금지). 소비자: `homelab.ts`·`lib/verbs.ts`·(예정) MCP 서버.
+- **`lib/verbs.ts`** — 동사 operation catalog(transport 중립·부수효과 없는 import-safe SSOT).
+  행 = path(라우팅 어휘)+desc(--help)+op(타입 입력→계약 Envelope). argv 파싱·렌더링은 CLI 셸
+  소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1). 후속 동사는 여기 행을 추가.
+- **`lib/mutation.ts`** — 공유 변이 엔진(`runMutation()`) — 변이 동사들의 공통 골격: correlation
+  nonce → 디스패치 → run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정 →
+  [--wait] 머지 관측 + Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,
+  health 단독 판정 금지, 후손 리비전 표면 부재=superseded). 시간 심 pollMs/deadlineMs +
+  HOMELAB_CORRELATION 주입(테스트). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
+- **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghJson` — ghJson은 오브젝트/배열 jq 전용, 스칼라
+  jq는 raw라 sh 직접) — status·mutation 공유. 판정 정책은 콜사이트 소유(doctor의 gh()는
+  ENOENT 판별 자기 정책이 있어 별도 유지).
+- **`lib/secrets.ts`** — app secrets 엔진(`runAppSecrets()`·`appSecretsInputError()`): 이중 모드 판별(git
+  toplevel의 .app-config.yml 마커 → canonical remote 필수, 아니면 fail-closed 거부 / 마커 없음 → 디스패치만),
+  연쇄 각 단계를 사후조건으로 증명(봉인본 외 변경 거부·ls-remote 도달성). 디스패치는 공유 변이 엔진
+  (noopOnMissingPr — pr-first-commit 멱등 no-op를 정당한 no-op variant로).
+- **`lib/status.ts`** — homelab CLI status 엔진(`runStatus()`·`statusInputError()`). 계층 계약:
+  레포(핀·바인딩)+GitHub(run·PR)가 기본, 라이브(ArgoCD)는 KUBECONFIG 있을 때만(부재=생략,
+  조회 실패=live.error — 유일한 선택 계층). GitHub 계층 오류는 fail-loud(빈 목록 위장 금지).
+  입력 검증 술어는 CLI(usage exit 2)·MCP(invalid params)가 공유. 관측 전용(gh api·kubectl get만).
+- **`lib/doctor.ts`** — homelab CLI doctor 진단 엔진(`runDoctor()`). 점검 항목·상태 판정·detail
+  문구를 소유한다(관측 전용 — `gh api` 읽기만, 테스트가 argv 원장으로 강제). 선행 gh-auth 실패로
+  판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든
+  픽스처 계약). 소비자: `homelab.ts`(이후 MCP 서버도 같은 엔진 재사용 예정).
+- **`lib/init.ts`** — app init 엔진(`runAppInit()`·`appInitInputError()`): 앱 레포 시작 로컬 체인
+  (변이 디스패처 아님 — correlation 없음). preflight(부수효과 0) → 레포 생성(기본 private) → 클론 →
+  스캐폴드 → invocation marker(.homelab-init) → 커밋·첫 push → [--dispatch-secrets면 시크릿 쌍].
+  각 단계는 사후조건으로 증명하고 재실행이 그 지점부터 수렴한다(멱등). 소유 증명은 계보가 아니라
+  마커(plan r2 r2-a2) — 마커 없는 기존 레포는 fail-closed(--adopt로만). 시크릿 쌍은 원자적(절반
+  상태 결과 명시·재실행 수렴), private key 값은 --body-file 전용이라 argv/출력에 비노출(엔진이 키를
+  읽지 않는다). variant: success(한 단계 이상 수행)·no-op(이미 완료)·failure(preflight/거부/단계 오류
+  + checkpoint).
+- **`lib/mcp.ts`** — MCP 서버(`runMcpServer()`·`handleRequest()`): stdio JSON-RPC 2.0(개행 구분)
+  위에 파괴 제외 전 동사를 tool로 노출한다. MCP 프레젠테이션 계층(homelab.ts가 CLI를 소유하듯) —
+  tool 이름(verb.path.join("_"))·입력 스키마·인자→op 입력 매핑·JSON-RPC 프레이밍만 갖고 동사 실체는
+  verbs.ts op다. 노출 = VERBS 중 !destructive(teardown 제외, 초기화 totality 가드가 파괴 누출·신규
+  동사 누락을 fail-closed 차단). --wait류 미노출(동기 바운디드)·명시 경로(secrets=repoPath·init=
+  parentDir, cwd 추론 없음)·결과는 CLI --json과 같은 envelope(isError는 x-contract.mcp variant 매핑)·
+  usage 오류는 invalid params(-32602). 무상태 — 동시 호출은 run/PR URL 핸들로 독립, 재시작 후 정상.
+  url 패스스루(db/cache url)는 캡처 실행(stdio 오염 방지)+명시 envDir. `homelab mcp`가 진입점(서버는
+  transport 모드라 catalog 밖 — 자기 자신 비노출).
+- **`lib/template-contract.ts`** — 스캐폴더 비대화형 계약 SSOT(`SCAFFOLD_CONTRACT_MARKERS`·
+  `scaffoldContractError()`): doctor(사전 진단)와 init(실제 실행 preflight)이 **같은 술어**를 공유한다
+  (structure r1 a3 — 두 번째 소비자 init이 생겨 추출). 마커 = --archetype·--name·--yes. 둘이 갈리면
+  doctor가 통과시킨 템플릿을 init이 실행 중 거부하는 계약 갭이 생긴다.
+- **`lib/platform.ts`** — 플랫폼 좌표 SSOT(HOMELAB_REPO·TEMPLATE_REPO·ARCHETYPES·
+  COMPILED_ARCHETYPES). doctor가 검증한 대상과 이후 init이 쓰는 대상이 콜사이트마다 갈리지
+  않게 한 곳에서만 정의(identity.ts와 같은 원칙 — 저긴 이름 형식, 여긴 좌표).
+- **`lib/schema-check.ts`** — cli-result-schema.json 전용 미니 검증기(`schemaErrors()`, ajv 무의존).
+  지원 키워드 화이트리스트 밖은 **throw로 fail-closed**(모르는 제약의 조용한 통과 차단).
+  골든 픽스처·계약 테스트 전용 — create-app.ts의 check()는 .app-config.yml 정책 소유가
+  콜사이트라 별개 유지.
 - **`lib/repo-walk.ts`** — 저장소 스캔 워커(`walkManifests(scope)`·`listUnits(scope)`). 가드들이
   각자 갖던 **열거 의미론**(tracked=git ls-files vs filesystem)·**제외 어휘**·**YAML 파싱**·
   **유닛 파생**을 한 곳에 모은다. ⚠️ scan-floor는 **두지 않는다** — 열거자는 "글롭이 깨져 0건"과
@@ -177,7 +287,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   실측상 tracked와 결과 동일하고 픽스처 비용만 크다).
   같은 트리를 보는 두 스코프가 다른 이유는 **질문이 다르기** 때문이다("배포되는 매니페스트인가"
   vs "이미지 참조를 담을 수 있는가"). 소비자: `check-resource-limits`·`check-image-pins`·`check-app-deploy`·`check-skeleton`·
-  `check-app-netpol`·`audit-orphans`·`poll-ghcr`·`check-alert-rules`·`check-guard-authority`. (`surface-hash`는 **대상 아님** — 워킹트리
+  `check-app-netpol`·`audit-orphans`·`poll-ghcr`·`check-alert-rules`·`check-guard-authority`·
+  `lib/status`(homelab status — `apps` 유닛 열거). (`surface-hash`는 **대상 아님** — 워킹트리
   해시라 미커밋 파일을 포함해야 커밋 후 값과 일치한다.)
 - **`lib/image-pin.ts`** — 배포 핀 형식 커널(TAG_RE/DIGEST_RE·인라인 핀 parse/format·descriptor
   타입·autoDeploy fail-closed). 순수 형식 판정과 왕복만 소유하고 파일 I/O·exit·에러 문구는

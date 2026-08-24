@@ -17,8 +17,31 @@ export function parseFlags(argv: string[], spec: FlagSpec): Record<string, strin
   return out;
 }
 
+// 서브커맨드 라우팅 — 어휘(CommandTree)를 선언한 진입점만 위치 인자를 동사 계층으로 받는다.
+// null 리프 = 라우팅 종점, 객체 = 하위 어휘. rest는 parseFlags/typedFlags로 넘기는 잔여 argv라서
+// 리프 뒤 잉여 위치 인자도 기존 fail-closed 경로("예상치 못한 위치 인자")가 그대로 거부한다.
+// 비선언 소비자(parseFlags 직접 호출)의 의미론은 불변.
+export type CommandTree = { [word: string]: CommandTree | null };
+export type ParsedCommand = { path: string[]; rest: string[] };
+
+export function parseCommand(argv: string[], tree: CommandTree): ParsedCommand {
+  const path: string[] = [];
+  let node = tree;
+  for (let i = 0; ; i++) {
+    const usage = `사용 가능: ${Object.keys(node).map((w) => [...path, w].join(" ")).join(" | ")}`;
+    const a = argv[i];
+    if (a === undefined || a.startsWith("--")) throw new Error(`서브커맨드가 필요하다. ${usage}`);
+    // Object.hasOwn — 프로토타입 상속 단어(constructor 등)를 어휘로 오인하지 않는다(fail-closed).
+    if (!Object.hasOwn(node, a)) throw new Error(`알 수 없는 서브커맨드: ${a}. ${usage}`);
+    path.push(a);
+    const next = node[a];
+    if (next === null) return { path, rest: argv.slice(i + 1) };
+    node = next;
+  }
+}
+
 // 종료코드 규약(tools/*.ts + scripts/*.sh 가드 공통 — CONTRIBUTING '가드 skip 신호' 절이 산문 SSOT):
-//   0=성공(평가했고 통과) · 1=검증/게이트 실패(fail()) · 2=사용법/플래그 파싱 오류(parseFlags catch) ·
+//   0=성공(평가했고 통과) · 1=검증/게이트 실패(fail()) · 2=사용법/플래그 파싱 오류(parseFlags·parseCommand catch) ·
 //   3=race(전제 상태 변동 — bump-tag expect-current) · 4=skip(검사할 도메인 부재 — 불변식을 **평가하지 않음**).
 //   워크플로는 비-0만 보지만 래퍼/사람이 원인 계층을 구분하도록 유지한다.
 // 4가 0과 갈라져야 하는 이유: 대상이 없어 건너뛴 것과 검사해서 통과한 것이 같은 코드면 가드가 실제 실행

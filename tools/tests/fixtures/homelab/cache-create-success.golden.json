@@ -1,0 +1,23 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "cache create",
+  "variant": "success",
+  "exitCode": 0,
+  "omitted": [],
+  "result": {
+    "action": "create-cache",
+    "name": "mycache",
+    "correlation": "corr-fixed-nonce-01",
+    "waited": false,
+    "run": {
+      "id": 601,
+      "url": "https://github.com/ukyi-app/homelab/actions/runs/601",
+      "conclusion": "success"
+    },
+    "pr": {
+      "number": 31,
+      "url": "https://github.com/ukyi-app/homelab/pull/31",
+      "merged": false
+    }
+  }
+}

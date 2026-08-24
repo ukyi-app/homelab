@@ -1,0 +1,61 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "doctor",
+  "variant": "failure",
+  "exitCode": 1,
+  "omitted": [],
+  "result": {
+    "checks": [
+      {
+        "id": "gh-auth",
+        "status": "pass",
+        "detail": "gh 인증 확인(login: ukyi)"
+      },
+      {
+        "id": "gh-owner",
+        "status": "fail",
+        "detail": "gh 로그인(ukyi) ≠ HOMELAB_OWNER(other-owner) — 변이 디스패처 actor 가드가 거부한다"
+      },
+      {
+        "id": "gh-scopes",
+        "status": "pass",
+        "detail": "토큰 스코프 충족(repo, workflow)"
+      },
+      {
+        "id": "bun",
+        "status": "pass",
+        "detail": "bun 발견(PATH)"
+      },
+      {
+        "id": "kubeseal",
+        "status": "fail",
+        "detail": "kubeseal이 PATH에 없다 — 시크릿 봉인(app secrets 연쇄 모드)에 필요"
+      },
+      {
+        "id": "kubeconfig",
+        "status": "warn",
+        "detail": "KUBECONFIG 미설정 — status·--wait의 라이브(ArgoCD) 구간이 생략된다"
+      },
+      {
+        "id": "template-access",
+        "status": "pass",
+        "detail": "템플릿 레포 접근 가능(ukyi-app/homelab-app-template, is_template)"
+      },
+      {
+        "id": "template-scaffold-contract",
+        "status": "pass",
+        "detail": "스캐폴더 비대화형 계약 확인(--archetype·--name·--yes)"
+      },
+      {
+        "id": "template-targetarch",
+        "status": "fail",
+        "detail": "TARGETARCH 파라미터화 부재: fullstack — amd64 노드 exec format error(이 템플릿으로는 init 거부 근거)"
+      }
+    ],
+    "summary": {
+      "pass": 5,
+      "fail": 3,
+      "warn": 1
+    }
+  }
+}
