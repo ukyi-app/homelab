@@ -48,7 +48,7 @@ DETECT=""
 IFS='' read -r -d '' DETECT <<'AWK' || true
 # 단일따옴표 span을 지운다 — yq/jq 표현식 안의 `sort`가 셸 명령으로 오인되지 않게(실측 오탐원 1위).
 function code(l){ gsub(/'[^']*'/,"Q",l); return l }
-FNR==1 { inhere=0; delim="" }
+FNR==1 { inhere=0; delim=""; nfiles++ }
 # heredoc 본문은 명령이 아니다(형제 check-bats-style.sh와 같은 관용구). 이 가드 자신의 awk 프로그램이
 # `<<'AWK'` 본문에 패턴 **리터럴**로 들어 있어, 이게 없으면 검출기가 자기 자신을 위반으로 잡는다.
 # ⚠️ 대가: heredoc으로 **스크립트를 생성**하는 자리는 여기서 안 보인다. 그 생성물이 추적 파일이면
@@ -77,9 +77,37 @@ FNR==1 { inhere=0; delim="" }
   if (c ~ /(^|[|(;&{]|\$\()[ \t]*sort([ \t;)}|&]|$)/) { printf "%s:%d: [B] %s\n", FILENAME, FNR, $0; next }
   if (c ~ /localeCompare|toLocale[A-Z]|Intl\.Collator/) printf "%s:%d: [C] %s\n", FILENAME, FNR, $0
 }
+# 검출기가 **실제로 읽은** 파일 수를 호출자에게 알린다 — 형제 check-host-ports.sh와 같은 계약.
+# awk가 중간에 죽어도 SCAN 신호(열거 수)는 그대로 나가므로, 이 축이 없으면 "몇 건을 검사했는가"가 거짓이 된다.
+END { printf "READFILES=%d\n", nfiles > "/dev/stderr" }
 AWK
 
-findings="$(awk "$DETECT" "${FILES[@]}" || true)"
+# ⚠️ **인자를 먼저 검증한다.** 읽을 수 없는 파일이 awk로 가면 gawk는 fatal로 즉시 죽는데, 예전 코드는
+#    그 rc를 `|| true`로 버려 "0곳 OK" rc=0을 냈다 — 가드 본체가 fail-open이었다(형제
+#    check-host-ports.sh가 같은 구멍을 닫은 것과 같은 클래스, 2026-08-24 뮤테이션으로 실증).
+missing=""
+for f in "${FILES[@]}"; do [ -r "$f" ] || missing="${missing} ${f}"; done
+[ -z "$missing" ] || { echo "FAIL: check-locale-collation: 읽을 수 없는 대상 —${missing}" >&2; exit 1; }
+
+errlog="$(mktemp)"
+trap 'rm -f "$errlog"' EXIT
+arc=0
+findings="$(awk "$DETECT" "${FILES[@]}" 2>"$errlog")" || arc=$?
+if [ "$arc" -ne 0 ]; then
+  echo "FAIL: check-locale-collation: 검출기가 실패했다(awk rc=${arc}) — 판정 불가는 '통과'가 아니다." >&2
+  cat "$errlog" >&2
+  exit 1
+fi
+# 검출기가 실제로 읽은 파일 수를 열거 수와 대조한다 — SCAN 신호가 "열거한 파일 수"이기만 하면
+# 검출이 중간에 무너져도 그 수가 그대로 나가 신호 계약이 깨진다(열거 붕괴 바닥값은 개수만 보므로 못 본다).
+read_files="$(sed -n 's/^READFILES=//p' "$errlog" | head -1)"
+case "$read_files" in
+  '' | *[!0-9]*) echo "FAIL: check-locale-collation: 검출기가 읽은 파일 수를 보고하지 않았다(READFILES 부재) — 끝까지 돌지 않았다." >&2; exit 1 ;;
+esac
+[ "$read_files" -eq "${#FILES[@]}" ] || {
+  echo "FAIL: check-locale-collation: 열거 ${#FILES[@]}파일 != 검출기가 읽은 ${read_files}파일 — 스캔이 중간에 무너졌다." >&2
+  exit 1
+}
 n="$(scan_count "$findings")"
 printf '%s\n' "$findings" | grep -E '\[(A|B|C)\]' || true   # gate bats가 레인 태그를 검증
 if [ "$n" -gt 0 ]; then
