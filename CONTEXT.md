@@ -80,3 +80,21 @@ _Avoid_: 변이 워크플로(reusable과 구분 안 됨), 수동 트리거
 앱 템플릿 스캐폴더가 생성하는 앱의 형태 — fullstack / api / site / worker.
 kind(web/worker/site)는 아키타입에서 유도되는 파생값이다(fullstack·api→web).
 _Avoid_: 앱 종류(kind와 혼동), 템플릿 타입
+
+**레인 신원 (lane identity)**:
+변이 디스패처 한 레인을 식별하는 규약 묶음 — 디스패치 입력 이름 · PR 브랜치 문법 ·
+수렴 Application 집합 · 표면 경로. 생성하는 쪽(디스패치)과 파싱하는 쪽(관측)이
+같은 신원을 공유해야 레인이 성립한다.
+_Avoid_: 브랜치 규약(신원의 한 조각만 가리킴), 레인 설정
+
+**산출물 레이아웃 (artifact layout)**:
+리소스 종류와 이름에서 결정되는 산출물 집합의 명명·배치 — 파일 경로 ·
+kustomization 엔트리 · conn 핸들 · env 키 · 원장 행 · tombstone 키, 그리고 각
+항목의 처분 범위(purge-제거 / 공유-잔존 / 수동-이연). 생성·철거·감사·관측이
+같은 레이아웃을 읽는다.
+_Avoid_: 파일 목록, 명명 규칙(처분 범위가 빠진 부분 개념)
+
+**canonical 클론**:
+origin이 정확히 canonical 앱 레포(`ukyi-app/<app>`)를 가리키는 로컬 클론.
+마커 기록·push·디스패치 같은 앱 동사가 오귀속 없이 작동하기 위한 전제 판정이다.
+_Avoid_: 우리 레포, 앱 클론(판정 없는 서술)
