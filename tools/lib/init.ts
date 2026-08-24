@@ -23,6 +23,7 @@ export type AppInitInput = {
   public?: boolean;
   dispatchSecrets?: string; // App 키 경로(디렉토리: app-id + private-key.pem). 미지정=크론 백스톱.
   adopt?: boolean;          // 마커 없는 기존 레포를 명시 입양(사용자 확인)
+  parentDir?: string;       // 대상 부모 디렉토리(MCP 명시 입력 — stdio 서버 cwd 추론 불가, plan r1 b7). 미설정=process.cwd().
 };
 
 export type InitOutcome = { variant: string; omitted: string[]; result: Record<string, unknown> };

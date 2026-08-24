@@ -11,6 +11,13 @@ export const ENVELOPE: string = CONTRACT.envelope;
 export const EXIT: Record<string, number> = CONTRACT.exitCodes;
 export const USAGE_EXIT: number = CONTRACT.usageExit;
 
+// MCP tool 결과 매핑(x-contract.mcp) — variant → isError. failure/race/superseded=에러,
+// success/no-op/skip/pending=정상(pending은 재호출이 재개 경로라 에러 아님). MCP 서버가 공유한다.
+export const MCP_IS_ERROR_VARIANTS: string[] = CONTRACT.mcp.isErrorVariants;
+export function mcpIsError(variant: string): boolean {
+  return MCP_IS_ERROR_VARIANTS.includes(variant);
+}
+
 // 계약 envelope — 동사 operation의 반환 단위이자 MCP tool 결과의 재사용 단위(계약 한 벌).
 export type Envelope = {
   schema: string;

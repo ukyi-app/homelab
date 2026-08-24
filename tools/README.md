@@ -38,7 +38,7 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   동사의 실체는 `lib/verbs.ts` operation catalog가 SSOT — 이 bin 모듈은 import하면 main이 실행되므로
   MCP 등 다른 소비자는 lib 쪽을 import한다. 변이는 전부 기존 변이 디스패처를
   `gh workflow run`으로 트리거하는 래퍼가 될 예정이고(신뢰 경계 불변 — actor 가드·전역 직렬화·
-  PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`·`app init|create|secrets|teardown`다.
+  PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`·`app init|create|secrets|teardown`·`mcp`다.
   `homelab app create <app> [--wait]` = 수동 머지 변이(머지 = 공개 승인, auto-merge:false — 엔진은 어떤
   경로로도 auto-merge를 켜지 않는다): 기본은 run 추적+PR URL, --wait는 미머지면 '사람 머지 대기' 바운디드
   pending, 머지 관측 시 라이브 수렴(<app>-prod + values.yaml 표면)으로 전환.
@@ -243,6 +243,15 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   상태 결과 명시·재실행 수렴), private key 값은 --body-file 전용이라 argv/출력에 비노출(엔진이 키를
   읽지 않는다). variant: success(한 단계 이상 수행)·no-op(이미 완료)·failure(preflight/거부/단계 오류
   + checkpoint).
+- **`lib/mcp.ts`** — MCP 서버(`runMcpServer()`·`handleRequest()`): stdio JSON-RPC 2.0(개행 구분)
+  위에 파괴 제외 전 동사를 tool로 노출한다. MCP 프레젠테이션 계층(homelab.ts가 CLI를 소유하듯) —
+  tool 이름(verb.path.join("_"))·입력 스키마·인자→op 입력 매핑·JSON-RPC 프레이밍만 갖고 동사 실체는
+  verbs.ts op다. 노출 = VERBS 중 !destructive(teardown 제외, 초기화 totality 가드가 파괴 누출·신규
+  동사 누락을 fail-closed 차단). --wait류 미노출(동기 바운디드)·명시 경로(secrets=repoPath·init=
+  parentDir, cwd 추론 없음)·결과는 CLI --json과 같은 envelope(isError는 x-contract.mcp variant 매핑)·
+  usage 오류는 invalid params(-32602). 무상태 — 동시 호출은 run/PR URL 핸들로 독립, 재시작 후 정상.
+  url 패스스루(db/cache url)는 캡처 실행(stdio 오염 방지)+명시 envDir. `homelab mcp`가 진입점(서버는
+  transport 모드라 catalog 밖 — 자기 자신 비노출).
 - **`lib/template-contract.ts`** — 스캐폴더 비대화형 계약 SSOT(`SCAFFOLD_CONTRACT_MARKERS`·
   `scaffoldContractError()`): doctor(사전 진단)와 init(실제 실행 preflight)이 **같은 술어**를 공유한다
   (structure r1 a3 — 두 번째 소비자 init이 생겨 추출). 마커 = --archetype·--name·--yes. 둘이 갈리면

@@ -16,6 +16,7 @@ import type { TypedFlags } from "./lib/cli.ts";
 import { APP_CREATE, APP_INIT, APP_SECRETS, APP_TEARDOWN, CACHE_CREATE, DB_CREATE, DOCTOR, STATUS, VERBS, appCreateInputError, appTeardownInputError, cacheCreateInputError, dbCreateInputError, type AppCreateInput, type AppTeardownInput, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./lib/secrets.ts";
 import { appInitInputError, type AppInitInput } from "./lib/init.ts";
+import { runMcpServer } from "./lib/mcp.ts";
 import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
 import { statusInputError, type StatusInput } from "./lib/status.ts";
 
@@ -63,6 +64,7 @@ function usage(): string {
     "",
     "동사:",
     rows,
+    `  ${"mcp".padEnd(14)}stdio MCP 서버(파괴 제외 전 동사를 tool로 노출 — JSON-RPC 2.0 over stdin/stdout)`,
     "",
     "공통 옵션:",
     "  --json        결과를 계약 오브젝트로 stdout에 출력(계약: tools/cli-result-schema.json)",
@@ -438,6 +440,18 @@ function doctorCli(rest: string[]): VerbOutput {
   return { kind: "result", json: flags.bool("--json"), envelope, human: renderDoctor(envelope) };
 }
 
+function mcpUsage(): string {
+  return [
+    "사용법: homelab mcp",
+    "",
+    "stdio MCP 서버를 연다(JSON-RPC 2.0, 개행 구분, stdin→stdout). 파괴 제외 전 동사(doctor·status·",
+    "db create/url·cache create/url·app init/create/secrets)를 tool로 노출한다 — teardown은 노출하지 않는다.",
+    "각 tool 호출은 동기·바운디드(--wait류 장기 대기 없음)이고, 결과는 CLI --json과 같은 계약 오브젝트다.",
+    "디렉토리 추론이 없다: app secrets는 repoPath, app init은 parentDir를 명시 입력으로 받는다.",
+    "",
+  ].join("\n");
+}
+
 function main(argv: string[]): number {
   if (argv.length === 0) { process.stderr.write(usage()); return USAGE_EXIT; }
   if (argv[0] === "--help") { process.stdout.write(usage()); return 0; }
@@ -464,4 +478,13 @@ function main(argv: string[]): number {
   return out.envelope.exitCode;
 }
 
-process.exitCode = main(process.argv.slice(2));
+// 진입점 — `mcp`는 동사가 아니라 transport 모드라 catalog 밖에서 특별 라우팅한다(서버가 자기 자신을
+// 노출하지 않도록 VERBS에도 없다). 서버는 비동기(stdin EOF까지)라 main()의 동기 경로와 분리한다.
+const ARGV = process.argv.slice(2);
+if (ARGV[0] === "mcp") {
+  if (ARGV[1] === "--help") { process.stdout.write(mcpUsage()); process.exitCode = 0; }
+  else if (ARGV.length > 1) { process.stderr.write(`homelab mcp: 알 수 없는 인자: ${ARGV.slice(1).join(" ")}\n\n${mcpUsage()}`); process.exitCode = USAGE_EXIT; }
+  else { runMcpServer().then((code) => { process.exitCode = code; }); }
+} else {
+  process.exitCode = main(ARGV);
+}

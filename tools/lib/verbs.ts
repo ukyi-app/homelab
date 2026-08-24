@@ -181,14 +181,16 @@ function appTeardownOp(input: AppTeardownInput): Envelope {
 function appSecretsOp(input: AppSecretsInput): Envelope {
   const bad = appSecretsInputError(input);
   if (bad) throw new Error(`계약 파손: appSecretsOp에 검증 안 된 입력 — ${bad}`);
-  const { variant, omitted, result } = runAppSecrets(input);
+  // input.cwd(MCP repoPath) 미설정이면 runAppSecrets의 기본값(process.cwd())이 쓰인다.
+  const { variant, omitted, result } = runAppSecrets(input, input.cwd);
   return { schema: ENVELOPE, verb: "app secrets", variant, exitCode: exitFor(variant), omitted, result };
 }
 
 function appInitOp(input: AppInitInput): Envelope {
   const bad = appInitInputError(input);
   if (bad) throw new Error(`계약 파손: appInitOp에 검증 안 된 입력 — ${bad}`);
-  const { variant, omitted, result } = runAppInit(input);
+  // input.parentDir(MCP 명시 부모 디렉토리) 미설정이면 runAppInit의 기본값(process.cwd())이 쓰인다.
+  const { variant, omitted, result } = runAppInit(input, input.parentDir);
   return { schema: ENVELOPE, verb: "app init", variant, exitCode: exitFor(variant), omitted, result };
 }
 

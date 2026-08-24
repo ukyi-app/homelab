@@ -22,7 +22,9 @@ import { HOMELAB_REPO } from "./platform.ts";
 // noSeal: 이미 커밋·push된 봉인본을 재봉인 없이 재디스패치한다 — push 성공·디스패치 실패 경계의
 // 재실행 수렴 경로. kubeseal은 같은 평문도 매번 다른 암호문을 내므로(랜덤 세션 키) "재봉인 후
 // 동일성 비교"로는 수렴에 도달할 수 없다 — 재봉인은 언제나 새 커밋·새 PR·파드 롤링이다.
-export type AppSecretsInput = WaitInput & { app: string; noSeal?: boolean };
+// cwd: 앱 레포 경로를 명시 입력으로(CLI는 미설정 → process.cwd(), MCP는 stdio 서버라 cwd 추론
+// 불가하므로 repoPath를 명시로 받는다 — plan r1 b7). runAppSecrets의 cwd 인자로 흐른다.
+export type AppSecretsInput = WaitInput & { app: string; noSeal?: boolean; cwd?: string };
 
 // 입력 검증 술어 — CLI(usage exit 2)·MCP(invalid params)가 공유.
 export function appSecretsInputError(input: AppSecretsInput): string | null {
