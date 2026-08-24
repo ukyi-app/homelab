@@ -74,7 +74,7 @@
       "metric": "files_backup_last_success_timestamp",
       "supply": "in-cluster",
       "decreasing": "impossible",
-      "why": "scripts/backup-files-data.sh가 성공 직후 `date -u +%s`로 만든다. ⚠️ 국면 A 동안 실행자가 없어 라이브 시리즈가 0건이다 — 이 항목은 정적 선언이지 관측이 아니다."
+      "why": "scripts/backup-files-data.sh가 성공 직후 `date -u +%s`로 만든다. ⚠️ 국면 A 동안 실행자(files-data-backup.timer)가 의도적으로 enable되지 않아 라이브 시리즈가 0건이다 — 이 항목은 정적 선언이지 관측이 아니다."
     },
     {
       "metric": "adguard_rewrite_reconcile_timestamp",
