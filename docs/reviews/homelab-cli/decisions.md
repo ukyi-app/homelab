@@ -70,4 +70,5 @@ r2는 정식 완주(ok:true, 판독 성공 — code 필드 이스케이프 예�
 8건 resolved + A1 still-open(신규 r2-a1과 동일 쟁점), 사실 확인으로 코드 대조 완료.
 
 - r2-a1 Accept — The extracted catalog cannot represent the planned operations; VerbShape 제네릭 + 동사별 union·named export로 수리(동사 추가 = union 멤버 추가, catalog 우회 불가)
-- WAIVED by user: 라운드 한도 2 도달, 잔여는 r2-a1 1건뿐이고 수리·검증 완료(typecheck·bats 28/28) — 나머지 9건은 r2가 resolved로 재검증. 수리 커밋은 이 절과 같은 커밋
+
+WAIVED by user: 라운드 한도 2 도달, 잔여는 r2-a1 1건뿐이고 수리·검증 완료(typecheck·bats 28/28) — 나머지 9건은 r2가 resolved로 재검증. 수리 커밋은 이 절과 같은 커밋
