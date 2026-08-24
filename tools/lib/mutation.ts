@@ -2,7 +2,7 @@
 //   correlation nonce 생성 → 디스패치(gh workflow run) → nonce 에코 run-name으로 자기 run 특정
 //   (정확히 1개만 채택: ≥2 = race fail-closed, 0 = 재조회 후 pending — 관측 차분은 신원
 //   메커니즘이 아니다, 스펙 run 특정 절) → run conclusion 추적(실패 시 실패 잡 열거 + run URL)
-//   → run_id 브랜치로 PR 특정 → [--wait] 자동 머지 관측 → 명명된 Application 집합 전체 수렴.
+//   → run_id 브랜치로 PR 특정 → [--wait] 머지 관측(자동/수동 레인) → 명명된 Application 집합 전체 수렴.
 // 수렴 판정(스펙 대기 매트릭스): 관측 sync revision이 머지 SHA와 동일하거나 그 후손(gh compare —
 //   로컬 git 이력 무의존) AND Synced AND Healthy AND 관측 리비전에서 desired-state 표면 실존.
 //   health 단독 판정 금지(stale-Healthy: 이전 리비전 Healthy+OutOfSync에서 성공 오판).
@@ -25,6 +25,10 @@ export type MutationSpec = {
   branchFor: (runId: number) => string;            // PR 브랜치 명명(reusable이 SSOT)
   applications: Array<{ name: string; surfacePath: string }>; // --wait 수렴 대상 집합 + 표면
   resultBase: Record<string, unknown>;             // 모든 variant에 실리는 공통 필드({action, name, …})
+  // 수동 머지 동사(create-app: 머지 = 공개 승인 — auto-merge:false). --wait의 미머지 pending은
+  // 실패가 아니라 설계된 바운디드 결과라 문구가 다르다. 엔진은 어떤 경로로도 auto-merge를 켜지
+  // 않는다(원장에 gh pr 계열 argv가 아예 없다 — 테스트가 단언).
+  manualMerge?: boolean;
   // run 성공 + 브랜치 PR 0 = 정당한 no-op(update-secrets: 동일 봉인본 — pr-first-commit 멱등).
   // --wait 검증은 머지 SHA 없이 "관측 리비전의 표면 blob == homelab main의 표면 blob"으로 대체한다
   // (디스패처가 main HEAD와 비교한 그 기준). 미설정이면 PR 0은 명명 드리프트로 failure.
@@ -128,12 +132,13 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     return { variant: doneVariant, omitted: [], result: compact({ ...base, waited: false, run: runRef(), pr: prRef() }) };
   }
 
-  // 5) 자동 머지 관측 — required check(gate) 통과 후 auto-merge가 머지한다. no-op은 머지가 없다.
+  // 5) 머지 관측 — 자동 머지 동사는 required check(gate) 통과 후 auto-merge가, 수동 머지 동사
+  // (manualMerge: create-app — 머지가 곧 공개 승인)는 사람이 머지한다. no-op은 머지가 없다.
   let mergeSha: string | undefined;
   if (pr !== undefined) {
     while (pr.merged_at === null) {
       if (Date.now() >= endAt) {
-        return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: "auto-merge 머지 미관측 — required check 대기 중일 수 있다(핸들로 재조회 가능)" }) };
+        return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: spec.manualMerge === true ? "사람 머지 대기 — 머지가 곧 공개 승인(PR 검토·머지 후 핸들로 재조회)" : "auto-merge 머지 미관측 — required check 대기 중일 수 있다(핸들로 재조회 가능)" }) };
       }
       Bun.sleepSync(opts.pollMs);
       const again = readPr();

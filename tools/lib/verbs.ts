@@ -6,7 +6,7 @@
 // MCP 노출 정책 필드는 MCP 티켓에서 이 descriptor에 추가한다.
 import { ENVELOPE, exitFor, type Envelope } from "./contract.ts";
 import { runDoctor } from "./doctor.ts";
-import { CACHE_MAXMEMORY_MI, EXT_RE, resourceNameError } from "./identity.ts";
+import { APP_NAME_RE, CACHE_MAXMEMORY_MI, EXT_RE, resourceNameError } from "./identity.ts";
 import { runMutation, waitInputError, waitOpts, type WaitInput } from "./mutation.ts";
 import { appSecretsInputError, runAppSecrets, type AppSecretsInput } from "./secrets.ts";
 import { runStatus, statusInputError, type StatusInput } from "./status.ts";
@@ -34,11 +34,15 @@ export type CacheCreateVerb = VerbShape<CacheCreateInput>;
 // MCP에서의 형상은 MCP 티켓이 결정한다.
 export type CliOnlyVerb = { path: readonly string[]; desc: string; cliOnly: true };
 
+// app create — 수동 머지 변이(머지 = 공개 승인, auto-merge:false — _create-app.yaml).
+export type AppCreateInput = WaitInput & { app: string };
+export type AppCreateVerb = VerbShape<AppCreateInput>;
+
 // app secrets — 이중 모드 변이(lib/secrets.ts 엔진이 연쇄, 디스패치는 공유 변이 엔진).
 export type AppSecretsVerb = VerbShape<AppSecretsInput>;
 
 // 전 동사의 union — 후속 동사가 멤버로 추가된다.
-export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | CacheCreateVerb | AppSecretsVerb | CliOnlyVerb;
+export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | CacheCreateVerb | AppCreateVerb | AppSecretsVerb | CliOnlyVerb;
 
 function doctorOp(_input: DoctorInput): Envelope {
   const { checks, summary } = runDoctor();
@@ -113,6 +117,29 @@ function cacheCreateOp(input: CacheCreateInput): Envelope {
   return { schema: ENVELOPE, verb: "cache create", variant, exitCode: exitFor(variant), omitted, result };
 }
 
+// 입력 검증 술어 — CLI(usage exit 2)·MCP(invalid params)가 공유.
+export function appCreateInputError(input: AppCreateInput): string | null {
+  if (!APP_NAME_RE.test(input.app ?? "")) return `앱 이름 형식 불량(소문자 kebab, 2..40): ${input.app}`;
+  return waitInputError(input);
+}
+
+function appCreateOp(input: AppCreateInput): Envelope {
+  const bad = appCreateInputError(input);
+  if (bad) throw new Error(`계약 파손: appCreateOp에 검증 안 된 입력 — ${bad}`);
+  const { variant, omitted, result } = runMutation({
+    action: "create-app",
+    workflow: "create-app.yaml",
+    dispatchInputs: [["app", input.app]],
+    branchFor: (runId) => `create-app/${input.app}-${runId}`, // 명명 SSOT: _create-app.yaml
+    applications: [ // 해당 앱 Application + 배포 핀 표면(create-app 산출)
+      { name: `${input.app}-prod`, surfacePath: `apps/${input.app}/deploy/prod/values.yaml` },
+    ],
+    resultBase: { action: "create-app", name: input.app },
+    manualMerge: true, // 머지 = 공개 승인 — auto-merge를 켜는 어떤 경로도 없다
+  }, waitOpts(input));
+  return { schema: ENVELOPE, verb: "app create", variant, exitCode: exitFor(variant), omitted, result };
+}
+
 function appSecretsOp(input: AppSecretsInput): Envelope {
   const bad = appSecretsInputError(input);
   if (bad) throw new Error(`계약 파손: appSecretsOp에 검증 안 된 입력 — ${bad}`);
@@ -170,10 +197,16 @@ export const CACHE_URL: CliOnlyVerb = {
 };
 
 // 열거 SSOT — 라우팅 어휘(TREE)·usage·MCP tool 목록이 여기서 파생된다.
+export const APP_CREATE: AppCreateVerb = {
+  path: ["app", "create"],
+  desc: "빌드된 앱을 homelab에 등록(create-app 디스패치 — 수동 머지: 머지가 곧 공개 승인)",
+  op: appCreateOp,
+};
+
 export const APP_SECRETS: AppSecretsVerb = {
   path: ["app", "secrets"],
   desc: "앱 시크릿 봉인본 배선(앱 레포 안: seal→커밋→push→디스패치 연쇄 / 밖: update-secrets 디스패치만)",
   op: appSecretsOp,
 };
 
-export const VERBS: readonly Verb[] = [DOCTOR, STATUS, DB_CREATE, DB_URL, CACHE_CREATE, CACHE_URL, APP_SECRETS];
+export const VERBS: readonly Verb[] = [DOCTOR, STATUS, DB_CREATE, DB_URL, CACHE_CREATE, CACHE_URL, APP_CREATE, APP_SECRETS];

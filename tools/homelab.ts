@@ -11,7 +11,7 @@ import { parseCommand, typedFlags, type CommandTree, type ParsedCommand } from "
 import { USAGE_EXIT, type Envelope } from "./lib/contract.ts";
 import { WAIT_DEFAULTS } from "./lib/mutation.ts";
 import type { TypedFlags } from "./lib/cli.ts";
-import { APP_SECRETS, CACHE_CREATE, DB_CREATE, DOCTOR, STATUS, VERBS, cacheCreateInputError, dbCreateInputError, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
+import { APP_CREATE, APP_SECRETS, CACHE_CREATE, DB_CREATE, DOCTOR, STATUS, VERBS, appCreateInputError, cacheCreateInputError, dbCreateInputError, type AppCreateInput, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./lib/secrets.ts";
 import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
 import { statusInputError, type StatusInput } from "./lib/status.ts";
@@ -34,6 +34,7 @@ const CLI_BY_VERB: Record<string, (rest: string[]) => VerbOutput> = {
   "db url": dbUrlCli,
   "cache create": cacheCreateCli,
   "cache url": cacheUrlCli,
+  "app create": appCreateCli,
   "app secrets": appSecretsCli,
 };
 for (const v of VERBS) {
@@ -210,6 +211,30 @@ function renderMutation(envelope: Envelope): string[] {
   if (r.error) lines.push(`오류: ${r.error}`);
   lines.push(`결과: ${envelope.variant}`);
   return lines;
+}
+
+function appCreateUsage(): string {
+  return [
+    "사용법: homelab app create <app> [--wait] [--json]",
+    "",
+    "빌드된 앱(GHCR 이미지 존재)을 homelab에 등록한다 — create-app 디스패처를 correlation 수령증과",
+    "함께 트리거하고 run을 추적한다. create-app은 **수동 머지** 동사다(머지 = 공개 승인,",
+    "auto-merge 없음): --wait는 승인 경계를 약화하지 않고, 미머지면 '사람 머지 대기' 바운디드",
+    "pending을 반환하며, 대기 중 머지가 관측되면 라이브 수렴(<app>-prod Application + 표면)을 이어간다.",
+    "  --wait             머지 관측 + Application 수렴까지 대기(미머지 = 바운디드 pending)",
+    ...WAIT_FLAG_LINES,
+  ].join("\n");
+}
+
+function appCreateCli(rest: string[]): VerbOutput {
+  const p = positionalThenFlags(rest, { value: ["--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab app create", appCreateUsage);
+  if (isOutput(p)) return p;
+  if (p.flags.bool("--help")) return { kind: "help", text: appCreateUsage() };
+  const input: AppCreateInput = { app: p.positional ?? "", wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms") };
+  const bad = appCreateInputError(input);
+  if (bad) return { kind: "usage-error", message: `homelab app create: ${bad}`, usage: appCreateUsage() };
+  const envelope = APP_CREATE.op(input);
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
 }
 
 function appSecretsUsage(): string {

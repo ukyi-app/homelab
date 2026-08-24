@@ -44,6 +44,9 @@ cli_stub_init() {
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
 
+  # app create 픽스처 기본값 — create-app run 1개(성공).
+  printf '[{"id":801,"name":"✨ create-app — myapp [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/801"}]\n' "$NONCE" > "$FIX/appcreate-runs.json"
+
   # app secrets 픽스처 기본값 — update-secrets run 1개(성공). PR은 테스트가 db-prs.json으로 배치.
   printf '[{"id":701,"name":"✨ update-secrets — myapp [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/701"}]\n' "$NONCE" > "$FIX/secrets-runs.json"
 
@@ -155,6 +158,13 @@ case "$*" in
   "api repos/ukyi-app/homelab-app-template/contents/scaffold/archetypes/worker/Dockerfile --jq .content")
     b64 "$FIX/Dockerfile.worker"
     ;;
+  # ── app create 케이스 — create-app 디스패처·runs 목록(수동 머지 동사) ──
+  "workflow run create-app.yaml -R ukyi-app/homelab "*)
+    if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
+    ;;
+  "api repos/ukyi-app/homelab/actions/workflows/create-app.yaml/runs?per_page=20 --jq "*)
+    cat "$FIX/appcreate-runs.json"
+    ;;
   # ── app secrets 케이스 — update-secrets 디스패처·runs 목록 ──
   "workflow run update-secrets.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
@@ -183,6 +193,15 @@ case "$*" in
     cat "$FIX/db-run.json"
     ;;
   "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "*)
+    # STUB_PR_MERGE_AFTER_FIRST: 첫 조회는 미머지, 이후 머지 — "--wait 중 사람이 머지" 전환 재현
+    # (마커는 셸 내장 리다이렉션 — PATH=$STUB에 touch 없음, STUB_COMPARE_FLAKY와 같은 관용구).
+    if [ -n "${STUB_PR_MERGE_AFTER_FIRST:-}" ]; then
+      if [ ! -f "$FIX/.pr-read-once" ]; then
+        : > "$FIX/.pr-read-once"
+        cat "$FIX/db-prs-unmerged.json"
+        exit 0
+      fi
+    fi
     cat "$FIX/db-prs.json"
     ;;
   "api repos/ukyi-app/homelab/compare/"*" --jq .status")

@@ -38,7 +38,10 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   동사의 실체는 `lib/verbs.ts` operation catalog가 SSOT — 이 bin 모듈은 import하면 main이 실행되므로
   MCP 등 다른 소비자는 lib 쪽을 import한다. 변이는 전부 기존 변이 디스패처를
   `gh workflow run`으로 트리거하는 래퍼가 될 예정이고(신뢰 경계 불변 — actor 가드·전역 직렬화·
-  PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`·`app secrets`다(후속은 catalog에 행 추가).
+  PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`·`app create|secrets`다.
+  `homelab app create <app> [--wait]` = 수동 머지 변이(머지 = 공개 승인, auto-merge:false — 엔진은 어떤
+  경로로도 auto-merge를 켜지 않는다): 기본은 run 추적+PR URL, --wait는 미머지면 '사람 머지 대기' 바운디드
+  pending, 머지 관측 시 라이브 수렴(<app>-prod + values.yaml 표면)으로 전환.
   `homelab app secrets <app> [--wait]` = 이중 모드(`lib/secrets.ts`): 앱 레포 안(마커 .app-config.yml +
   canonical remote)이면 seal(벤더 tools/seal-secret.mts 위임)→봉인본만 커밋→push→원격 main 도달성 증명→
   update-secrets 디스패치를 연쇄하고 선행 조건(main·클린 트리·canonical) 실패 시 디스패치 없이 거부, 밖이면
