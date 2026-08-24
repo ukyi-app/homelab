@@ -282,8 +282,11 @@ EOF
 @test "the exporter image is byte-identical to the digest-exporter reference (intentional reuse)" {
   # 같은 repo:tag@digest를 쓰면 G2 소유권 회계의 '같은 태그는 같은 digest' 불변식이 두 파일을 함께
   # 묶어 준다 — 한쪽만 bump하면 그 가드가 red를 낸다. 새 이미지를 들이면 소유권 항목·핀 갱신 대상이 는다.
-  a="$(grep -oE 'quay\.io/skopeo/stable:[^ ]+' "$MF" | head -1)"
-  b="$(grep -oE 'quay\.io/skopeo/stable:[^ ]+' platform/victoria-stack/prod/digest-exporter.yaml | head -1)"
+  # ⚠️ 레지스트리를 하드코딩하지 않는다 — 예전엔 `quay.io/skopeo/stable`을 박아 뒀는데, GHCR 미러로
+  #    옮기자 정규식이 아무것도 못 잡아 `$a`가 빈 값이 됐다(재푸시 GC 대응, 2026-08-24). `image:` 값을
+  #    그대로 뽑아 비교하면 어느 레지스트리든 "두 exporter가 같은 skopeo 이미지"라는 불변식만 본다.
+  a="$(grep -oE 'image: +[^ ]*skopeo[^ ]+' "$MF" | sed 's/image: *//' | head -1)"
+  b="$(grep -oE 'image: +[^ ]*skopeo[^ ]+' platform/victoria-stack/prod/digest-exporter.yaml | sed 's/image: *//' | head -1)"
   [ -n "$a" ]
   [ "$a" == "$b" ]
 }

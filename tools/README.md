@@ -142,8 +142,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   베스포크 `--pin` 레인을 실증(`tools/tests/test_run-bump-plan.bats`). races-4 TOCTOU의 정적 절반은
   `tools/tests/test_bump-poll-toctou.bats`, 워크플로 call-site **경계**(bump 스텝의 명령 = 러너 호출 하나)는
   `tests/gates/test_bump-poll-callsite.bats`.
-- **`repin-pgtools.ts`** — ops 이미지 `pg-tools:18-rclone`의 인라인 `@sha256` 핀을 새 digest로 일괄
-  재핀(부분 갱신 skew=PgDumpHedgeStale 차단). `bump.yaml`이 build 완료 후 호출. digest 형식 검증·멱등.
+- **`repin-ops-image.ts`** — ops 미러 이미지(`pg-tools:18-rclone`·`skopeo:alpine`)의 인라인 `@sha256`
+  핀을 새 digest로 일괄 재핀(부분 갱신 skew 차단). CLI: `<image-key> <digest>`. 이미지별 canonical 태그·
+  바닥값은 도구 안 CATALOG가 SSOT. `bump.yaml`이 build 완료 후 이미지별로 호출. digest 형식 검증·멱등.
   ⚠️ **대상을 하드코딩하지 않고 레포에서 파생한다**(D-1). 예전엔 `CONSUMERS` 4파일이 상수였고 같은 4개를
   `tests/gates/test_pgtools-digest.bats`가 다시 하드코딩했으며 헤더 주석은 "5개 소비처(4파일)"였다 —
   **세 산출물이 서로는 일치하고 레포와는 어긋났다**. 실측(2026-07-28): 목록 밖의 `adguard/rewrite-reconciler`
@@ -216,7 +217,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   **두 축을 분리한다**: freshness 소유자(새 버전을 가져오는 것) ≠ digest 소유자(immutable 핀을
   보증하는 것). helm 차트 내부 이미지가 그 전형 — 차트 **버전**은 Renovate 소유지만 내부 이미지는
   렌더 시점 mutable tag라 digest 소유자가 **없다**.
-  소유자는 **계산한다**: `pg-tools`→`repin-pgtools` · `apps/*/deploy/prod/values.yaml`·`.image-pin.json`
+  소유자는 **계산한다**: ops 미러 이미지→`repin-ops-image` · `apps/*/deploy/prod/values.yaml`·`.image-pin.json`
   descriptor→`bump-poll` · 그 외 추적 매니페스트→**Renovate 도달성 실측**(`renovate.json`의
   managerFilePatterns 매치 ∧ ignorePaths 비매치 — 분류표를 믿지 않는다. 근사이므로 알려진 매치/논매치를
   센티넬 테스트로 박아 붕괴를 감지한다).

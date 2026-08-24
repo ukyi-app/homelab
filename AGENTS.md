@@ -149,6 +149,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 워크플로 YAML의 따옴표 없는 스텝 이름에 콜론이 들어가면 매핑으로 파싱돼 파일이 조용히 깨진다
 - bats @test 이름에 한글/CJK가 있으면 디렉토리 단위 실행에서 침묵 스킵된다
 - homepage: config 마운트를 readOnly로 두면 EROFS · apiserver egress는 노드 CIDR:6443이지 ClusterIP가 아니다
+- 상류 레지스트리의 릴리스 태그가 불변이 아니다 — 재푸시가 옛 매니페스트를 GC해 모든 PR gate를 red로 만든다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

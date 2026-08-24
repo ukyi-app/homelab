@@ -79,7 +79,7 @@ FIXTURE_ARGS="--min-refs 1"
   t="$(_fixture classes)"
   run bun "$ROOT/tools/check-image-ownership.ts" --repo-root "$t" $FIXTURE_ARGS --report
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q '^repin-pgtools'
+  echo "$output" | grep -q '^repin-ops-image'
   echo "$output" | grep -q '^bump-poll .*apps/demo'
   echo "$output" | grep -q '^bump-poll .*platform/files'
   echo "$output" | grep -q '^renovate'
@@ -310,7 +310,7 @@ PY
   # 이 경계를 반영"을 계약으로 걸고 있으므로 둘을 함께 본다.
   # ⚠️ **인용된 기록은 살아 있는 주장이 아니다.** 헤더는 무엇이 왜 틀렸는지 설명하려고 옛 문구를
   #    따옴표로 인용하는데(지우면 재발 방지 근거가 사라진다), 단순 grep은 그것도 매치한다 —
-  #    `repin-pgtools` 헤더에서 이미 같은 경계를 그었다. 따옴표 없는 줄만 본다.
+  #    `repin-ops-image` 헤더에서 이미 같은 경계를 그었다. 따옴표 없는 줄만 본다.
   run bash -c "grep -n 'Renovate pinDigests 관할' '$ROOT/scripts/check-image-pins.sh' | grep -v '\"'"
   [ "$status" -ne 0 ]
   run grep -n 'helm 차트 내부=Renovate' "$ROOT/scripts/check-image-pins.sh"

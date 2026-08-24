@@ -88,18 +88,27 @@ jobs:
             case "$app" in
               ''|*[!a-z0-9-]*) echo "skip suspicious app name: '$app'"; continue ;;
             esac
-            # 배포되는 앱은 values.yaml을 bump, ops 이미지(pg-tools)는 인라인 digest를 **레포에서 파생한 전 사이트**에 재핀
+            # ops 이미지의 canonical 태그(소비자가 참조하는 안정 태그). 새 ops 이미지를 추가하면 여기와
+            # tools/repin-ops-image.ts의 CATALOG에 함께 등록한다 — 이 case 우변 집합 == CATALOG 키 집합을
+            # test_ops-repin.bats「bump.yaml's opstag case set matches the tool CATALOG keys」가 대조한다
+            # (한쪽에만 추가하면 red — 잊으면 opstag=""로 그 이미지가 조용히 재핀 안 되는 D-1 갭을 닫는다).
+            case "$app" in
+              pg-tools) opstag="pg-tools:18-rclone" ;;
+              skopeo)   opstag="skopeo:alpine" ;;
+              *)        opstag="" ;;
+            esac
+            # 배포되는 앱은 values.yaml을 bump, ops 이미지는 인라인 digest를 **레포에서 파생한 전 사이트**에 재핀
             if [ -f "apps/$app/deploy/prod/values.yaml" ]; then
               echo "verify ghcr.io/$OWNER/$app:$SHA exists BEFORE bumping"
               docker manifest inspect "ghcr.io/$OWNER/$app:$SHA" >/dev/null 2>&1 \
                 || { echo "::error::ghcr.io/$OWNER/$app:$SHA missing — refusing to bump (would ImagePullBackOff)"; exit 1; }
               bun tools/bump-tag.ts "$app" "$SHA"
-            elif [ "$app" = "pg-tools" ]; then
-              # ops 이미지: values.yaml 없음 — pg-tools:18-rclone 새 digest를 인라인 핀 전 사이트에 재핀(부분 갱신 skew 차단).
-              # 대상 수를 여기 적지 않는다 — 도구가 레포에서 파생하므로 주석의 숫자가 곧 다섯 번째 사본이 된다.
-              digest="$(docker buildx imagetools inspect "ghcr.io/$OWNER/pg-tools:18-rclone" --format '{{.Manifest.Digest}}')"
-              case "$digest" in sha256:*) : ;; *) echo "::error::pg-tools digest 해석 실패: '$digest'"; exit 1 ;; esac
-              bun tools/repin-pgtools.ts "$digest"
+            elif [ -n "$opstag" ]; then
+              # ops 이미지: values.yaml 없음 — canonical 태그의 새 digest를 인라인 핀 전 사이트에 재핀(부분 갱신 skew 차단).
+              # 대상 수를 여기 적지 않는다 — 도구가 레포에서 파생하므로 주석의 숫자가 곧 사본이 된다.
+              digest="$(docker buildx imagetools inspect "ghcr.io/$OWNER/$opstag" --format '{{.Manifest.Digest}}')"
+              case "$digest" in sha256:*) : ;; *) echo "::error::$opstag digest 해석 실패: '$digest'"; exit 1 ;; esac
+              bun tools/repin-ops-image.ts "$opstag" "$digest"
             else
               echo "skip $app (no deploy values.yaml, no re-pin registry)"; continue
             fi
