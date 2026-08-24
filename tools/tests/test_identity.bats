@@ -106,6 +106,69 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   echo "$output" | grep -q "ok"
 }
 
+@test "isCanonicalClone anchors host+scheme and rejects every divergence axis" {
+  run bun -e '
+    import { isCanonicalClone } from "./tools/lib/identity.ts";
+    const O = "ukyi-app", A = "myapp";
+    const ok = [
+      "https://github.com/ukyi-app/myapp",          // https
+      "https://github.com/ukyi-app/myapp.git",      // https + .git
+      "git@github.com:ukyi-app/myapp.git",          // scp-like ssh
+      "ssh://git@github.com/ukyi-app/myapp",        // ssh scheme
+      "  https://github.com/ukyi-app/myapp.git\n",  // 관측값 trim
+    ];
+    const bad = [
+      "https://gitlab.com/ukyi-app/myapp.git",           // foreign host
+      "git@gitlab.com:ukyi-app/myapp.git",                // foreign host (ssh)
+      "https://github.com/someone/myapp.git",             // foreign owner
+      "https://github.com/foo/ukyi-app/myapp.git",        // 경로 중첩(접미 매치가 통과시키던 축)
+      "https://user@github.com/ukyi-app/myapp.git",       // credential 포함
+      "ssh://git@github.com:2222/ukyi-app/myapp.git",     // 포트 명시
+      "https://github.com/ukyi-app/myapp2.git",           // 다른 앱
+      "/srv/mirrors/ukyi-app/myapp.git",                  // 로컬 경로(재배선 산물)
+      "",
+    ];
+    for (const s of ok)  if (!isCanonicalClone(O, A, s)) { console.error("FALSE NEG:", JSON.stringify(s)); process.exit(1); }
+    for (const s of bad) if (isCanonicalClone(O, A, s))  { console.error("FALSE POS:", JSON.stringify(s)); process.exit(1); }
+    console.log("ok");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "ok"
+}
+
+@test "isSafePushRoute requires every route canonical and is fail-closed on zero routes" {
+  run bun -e '
+    import { isSafePushRoute } from "./tools/lib/identity.ts";
+    const O = "ukyi-app", A = "myapp";
+    const C = "https://github.com/ukyi-app/myapp.git";
+    if (isSafePushRoute(O, A, []))                       { console.error("0개 경로 통과(fail-open)"); process.exit(1); }
+    if (!isSafePushRoute(O, A, [C]))                     { console.error("canonical 단일 거부"); process.exit(1); }
+    if (!isSafePushRoute(O, A, [C, "git@github.com:ukyi-app/myapp.git"])) { console.error("canonical 복수 거부"); process.exit(1); }
+    if (isSafePushRoute(O, A, [C, "/tmp/evil/myapp.git"])) { console.error("foreign 섞임 통과 — every가 아니다"); process.exit(1); }
+    if (isSafePushRoute(O, A, ["/tmp/evil/myapp.git"]))    { console.error("foreign 단일 통과"); process.exit(1); }
+    console.log("ok");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "ok"
+}
+
+@test "pushRouteError distinguishes observation failure from non-canonical and passes canonical routes" {
+  run bun -e '
+    import { pushRouteError } from "./tools/lib/identity.ts";
+    const O = "ukyi-app", A = "myapp";
+    const C = "https://github.com/ukyi-app/myapp.git";
+    if (pushRouteError(O, A, [C]) !== null)            { console.error("canonical 거부"); process.exit(1); }
+    const obs = pushRouteError(O, A, null);
+    if (obs === null || !obs.includes("관측 실패"))     { console.error("null 진단 불량"); process.exit(1); }
+    const bad = pushRouteError(O, A, [C, "/tmp/evil.git"]);
+    if (bad === null || !bad.includes("/tmp/evil.git")) { console.error("foreign 경로 미표기"); process.exit(1); }
+    if (pushRouteError(O, A, []) === null)              { console.error("0개 통과(fail-open)"); process.exit(1); }
+    console.log("ok");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "ok"
+}
+
 @test "executors use shared reserved policy (no local RESERVED/-ro check left)" {
   run grep -Fq 'resourceNameError' tools/provision-db.ts;        [ "$status" -eq 0 ]
   run grep -Fq '"streaming_replica"' tools/provision-db.ts;      [ "$status" -ne 0 ]   # 로컬 RESERVED 리터럴 제거

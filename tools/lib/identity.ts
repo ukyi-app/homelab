@@ -22,6 +22,33 @@ export const CACHE_MAXMEMORY_MI = { min: 16, max: 1024 } as const;
 // validate-mutation(디스패처)·CLI 생성기가 공유 — 둘이 다르면 CLI가 만든 nonce를 디스패처가 거부하는 계약 갭.
 export const CORRELATION_RE = /^[a-z0-9][a-z0-9-]{6,62}[a-z0-9]$/;
 
+// canonical 클론 판정 SSOT — init(ensureClone)·secrets(runAppSecrets)가 공유한다(cli-deepening 심화 1).
+// 앵커드 3-scheme + .git 허용, host 무앵커/경로 중첩/credential/포트 전부 거부. 판정이 콜사이트마다
+// 다르면 오귀속(엉뚱한 레포에 마커·push·디스패치) 우회 표면이 생긴다 — APP_NAME_RE와 같은 원칙.
+// owner·app은 이름 정책(APP_NAME_RE류)을 통과한 값이라 regex 메타문자가 없다.
+export function isCanonicalClone(owner: string, app: string, originUrl: string): boolean {
+  return new RegExp(`^(https://github\\.com/|git@github\\.com:|ssh://git@github\\.com/)${owner}/${app}(\\.git)?$`).test(originUrl.trim());
+}
+
+// push 라우팅 안전 — push 지향 관측(exec.ts pushRoutes: `git remote get-url --push --all`)이 열거한
+// 목적지 **전부**가 canonical일 때만 통과. 0개 = fail-closed. remote.origin.url(원본 설정값)이
+// canonical이어도 pushurl/insteadOf/pushInsteadOf가 push를 다른 곳으로 보낼 수 있으므로(설계 게이트
+// r1 D1·r2 D1′ — ls-remote --get-url은 fetch 지향이라 pushInsteadOf를 못 본다) 구성 신원과 별개 축이다.
+export function isSafePushRoute(owner: string, app: string, routes: string[]): boolean {
+  return routes.length > 0 && routes.every((r) => isCanonicalClone(owner, app, r));
+}
+
+// push 라우팅 진단 — 관측 결과(routes: 관측 실패면 null)를 받아 거부 사유 또는 null(안전)을 낸다.
+// init·secrets가 같은 진단을 공유해, 관측 실패 vs 비-canonical의 구분이 동사 간에 갈리지 않는다.
+// 관측 자체는 exec.ts pushRoutes 소유 — 이 함수는 순수하다.
+export function pushRouteError(owner: string, app: string, routes: string[] | null): string | null {
+  if (routes === null) return "push 경로 관측 실패(git remote get-url --push --all origin)";
+  if (!isSafePushRoute(owner, app, routes)) {
+    return `push 경로가 canonical ${owner}/${app}가 아니다(${routes.join(", ") || "0개"}) — pushurl/insteadOf 재배선 의심`;
+  }
+  return null;
+}
+
 // db/cache 예약 이름 — 실행기·디스패처 공유(둘이 다르면 디스패처 통과→실행기 거부 갭).
 // db: 시스템 롤/DB·bootstrap initdb(app)와 충돌하면 클러스터가 깨진다.
 const DB_RESERVED_NAMES = new Set(["app", "postgres", "pg", "template0", "template1", "streaming_replica"]);

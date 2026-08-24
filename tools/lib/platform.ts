@@ -3,6 +3,8 @@
 // 표면이 생기므로 한 곳에서만 정의한다(identity.ts와 같은 원칙 — 저긴 이름 형식, 여긴 좌표).
 export const HOMELAB_REPO = "ukyi-app/homelab";
 export const TEMPLATE_REPO = "ukyi-app/homelab-app-template";
+// 레포 owner — 소비자(init·secrets 등)가 각자 split하면 파생 지점이 갈리므로 여기서만 유도한다.
+export const OWNER = HOMELAB_REPO.split("/")[0];
 
 // 아키타입 어휘(CONTEXT.md 용어 — kind는 아키타입 유도값이라 여기 없다).
 export const ARCHETYPES = ["api", "fullstack", "site", "worker"] as const;

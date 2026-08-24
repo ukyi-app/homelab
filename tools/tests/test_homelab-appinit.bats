@@ -22,9 +22,12 @@ setup() {
   printf 'PRIVATE-KEY-%s\n' "$CANARY" > "$SECRETS_DIR/private-key.pem"
 }
 
+# 하네스는 insteadOf로 canonical→로컬 bare 재배선을 쓰므로, push 라우팅 검사(fail-closed)를
+# 명시 플래그로만 완화한다 — 적대 테스트는 이 플래그 없이 돌아 production 기본 경로를 검증한다.
 run_init() {
   run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" \
     GIT_CONFIG_GLOBAL="$INIT_GCFG" GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
     "$BUN" "$ROOT/tools/homelab.ts" app init "$@"
 }
 
@@ -106,6 +109,7 @@ run_init() {
   # run1: 스캐폴드 실패 주입 → 레포는 생성됐으나 마커 없음(push 전).
   run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
     GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_SCAFFOLD_FAIL=1 \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
     "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
@@ -144,6 +148,7 @@ run_init() {
   # run1: private key 설정 실패 주입 → App ID만 설정된 절반 상태.
   run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
     GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_GH_SECRET_FAIL=HOMELAB_DISPATCH_APP_PRIVATE_KEY \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
     "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api --dispatch-secrets "$SECRETS_DIR" --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
@@ -201,6 +206,36 @@ run_init() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold --archetype api --name myapp --yes)" -ge 1 ]
   # 재실행 후 scaffold/는 제거됐다(스캐폴드 완료).
   run git -C "$INIT_REMOTES/myapp.git" show main:scaffold/scaffold.ts
+  [ "$status" -ne 0 ]
+}
+
+@test "a foreign pushInsteadOf is observed and refused before scaffold and push (no bypass flag)" {
+  # 레포는 이미 존재(마커 없음) — --adopt 재개 시나리오로 canonical origin 클론을 준비한다.
+  git clone -q --bare "$INIT_REMOTES/homelab-app-template.git" "$INIT_REMOTES/myapp.git"
+  git -c "url.$INIT_REMOTES/.insteadOf=https://github.com/ukyi-app/" \
+    clone -q https://github.com/ukyi-app/myapp.git "$INIT_PARENT/myapp"
+  # 적대 설정: 전역 pushInsteadOf가 canonical 접두를 **실물** evil bare로 재배선한다.
+  # origin.url(원본 설정값)은 canonical 그대로라 구성 신원 판정만으로는 이 축이 안 보인다(D1).
+  EVIL="$BATS_TEST_TMPDIR/evil-remotes"; mkdir -p "$EVIL"
+  git init -q --bare "$EVIL/myapp.git"
+  EVIL_GCFG="$BATS_TEST_TMPDIR/evil-gitconfig"
+  cat "$INIT_GCFG" > "$EVIL_GCFG"
+  printf '[url "%s/"]\n\tpushInsteadOf = https://github.com/ukyi-app/\n' "$EVIL" >> "$EVIL_GCFG"
+  # 우회 플래그 없이 실행 — production 기본(fail-closed) 경로.
+  run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" \
+    GIT_CONFIG_GLOBAL="$EVIL_GCFG" GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" \
+    "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api --adopt --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "cloned" ]
+  # 관측된 경로가 pushInsteadOf 전개 결과다 — fetch 지향 질의(ls-remote --get-url)는 이걸 못 본다.
+  echo "$output" | jq -r '.result.error' | grep -qF "$EVIL/myapp"
+  # 거부는 스캐폴드 이전이다 — 부수효과 0.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold)" = "0" ]
+  # 오귀속 push 0 — evil 원격은 빈 채로 남는다(미구현이면 마커가 여기 실려 red).
+  run git -C "$EVIL/myapp.git" rev-parse main
+  [ "$status" -ne 0 ]
+  run git -C "$INIT_REMOTES/myapp.git" show main:.homelab-init
   [ "$status" -ne 0 ]
 }
 

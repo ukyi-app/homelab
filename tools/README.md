@@ -222,10 +222,15 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   health 단독 판정 금지, 후손 리비전 표면 부재=superseded). 시간 심 pollMs/deadlineMs +
   HOMELAB_CORRELATION 주입(테스트). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
 - **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghJson` — ghJson은 오브젝트/배열 jq 전용, 스칼라
-  jq는 raw라 sh 직접) — status·mutation 공유. 판정 정책은 콜사이트 소유(doctor의 gh()는
-  ENOENT 판별 자기 정책이 있어 별도 유지).
+  jq는 raw라 sh 직접, `git`·`pushRoutes` — push 지향 관측 `git remote get-url --push --all`:
+  pushurl 복수·insteadOf/pushInsteadOf 전개 반영) — status·mutation·init·secrets 공유. 판정 정책은
+  콜사이트 소유(doctor의 gh()는 ENOENT 판별 자기 정책이 있어 별도 유지). push 라우팅 검사의
+  테스트 전용 완화 플래그 이름(`ALLOW_PUSH_REWRITE_ENV` = HOMELAB_TEST_ALLOW_PUSH_REWRITE)도
+  여기 산다 — HOMELAB_CORRELATION 주입과 같은 부류(테스트 심).
 - **`lib/secrets.ts`** — app secrets 엔진(`runAppSecrets()`·`appSecretsInputError()`): 이중 모드 판별(git
-  toplevel의 .app-config.yml 마커 → canonical remote 필수, 아니면 fail-closed 거부 / 마커 없음 → 디스패치만),
+  toplevel의 .app-config.yml 마커 → canonical remote(identity.isCanonicalClone) + push 라우팅 안전
+  (identity.pushRouteError — pushurl/insteadOf/pushInsteadOf 재배선 fail-closed) 필수, 아니면 거부 /
+  마커 없음 → 디스패치만),
   연쇄 각 단계를 사후조건으로 증명(봉인본 외 변경 거부·ls-remote 도달성). 디스패치는 공유 변이 엔진
   (noopOnMissingPr — pr-first-commit 멱등 no-op를 정당한 no-op variant로).
 - **`lib/status.ts`** — homelab CLI status 엔진(`runStatus()`·`statusInputError()`). 계층 계약:
@@ -237,7 +242,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든
   픽스처 계약). 소비자: `homelab.ts`(이후 MCP 서버도 같은 엔진 재사용 예정).
 - **`lib/init.ts`** — app init 엔진(`runAppInit()`·`appInitInputError()`): 앱 레포 시작 로컬 체인
-  (변이 디스패처 아님 — correlation 없음). preflight(부수효과 0) → 레포 생성(기본 private) → 클론 →
+  (변이 디스패처 아님 — correlation 없음). preflight(부수효과 0) → 레포 생성(기본 private) → 클론
+  (canonical 판정 identity.isCanonicalClone) → push 라우팅 게이트(identity.pushRouteError) →
   스캐폴드 → invocation marker(.homelab-init) → 커밋·첫 push → [--dispatch-secrets면 시크릿 쌍].
   각 단계는 사후조건으로 증명하고 재실행이 그 지점부터 수렴한다(멱등). 소유 증명은 계보가 아니라
   마커(plan r2 r2-a2) — 마커 없는 기존 레포는 fail-closed(--adopt로만). 시크릿 쌍은 원자적(절반
