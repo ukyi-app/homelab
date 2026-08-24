@@ -38,7 +38,15 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   동사의 실체는 `lib/verbs.ts` operation catalog가 SSOT — 이 bin 모듈은 import하면 main이 실행되므로
   MCP 등 다른 소비자는 lib 쪽을 import한다. 변이는 전부 기존 변이 디스패처를
   `gh workflow run`으로 트리거하는 래퍼가 될 예정이고(신뢰 경계 불변 — actor 가드·전역 직렬화·
-  PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`이다(후속은 catalog에 행 추가).
+  PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`·`app secrets`다(후속은 catalog에 행 추가).
+  `homelab app secrets <app> [--wait]` = 이중 모드(`lib/secrets.ts`): 앱 레포 안(마커 .app-config.yml +
+  canonical remote)이면 seal(벤더 tools/seal-secret.mts 위임)→봉인본만 커밋→push→원격 main 도달성 증명→
+  update-secrets 디스패치를 연쇄하고 선행 조건(main·클린 트리·canonical) 실패 시 디스패치 없이 거부, 밖이면
+  디스패치만. `--no-seal` = 재봉인 없이 이미 커밋·push된 봉인본을 재디스패치(push 성공·디스패치 실패 후
+  재실행 수렴 경로 — kubeseal 암호문은 매번 달라 재봉인은 언제나 새 커밋·새 PR·파드 롤링). 디스패처가
+  변경 없음을 보고하면(PR 0) no-op variant(머지 SHA 없음, --wait는 main 기준 표면 blob 동치로 검증).
+  seal 위임 argv는 벤더 도구 계약 그대로(`--config .app-config.yml --env .env --app <app>`) — 평문은
+  그 도구의 kubeseal stdin 전용, CLI는 .env를 읽지 않는다.
   `homelab cache create <name> [--maxmemory-mi 16..1024] [--wait]` = 변이 엔진의 두 번째 인스턴스
   (create-cache 디스패치, 빈 maxmemory=디스패처 기본 64 소유, 수렴 집합 cache-prod·data-conn-prod,
   표면 = 인스턴스 deployment.yaml + conn 봉인본). `homelab cache url` = cache-url.ts 패스스루 재노출.
@@ -202,6 +210,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghJson` — ghJson은 오브젝트/배열 jq 전용, 스칼라
   jq는 raw라 sh 직접) — status·mutation 공유. 판정 정책은 콜사이트 소유(doctor의 gh()는
   ENOENT 판별 자기 정책이 있어 별도 유지).
+- **`lib/secrets.ts`** — app secrets 엔진(`runAppSecrets()`·`appSecretsInputError()`): 이중 모드 판별(git
+  toplevel의 .app-config.yml 마커 → canonical remote 필수, 아니면 fail-closed 거부 / 마커 없음 → 디스패치만),
+  연쇄 각 단계를 사후조건으로 증명(봉인본 외 변경 거부·ls-remote 도달성). 디스패치는 공유 변이 엔진
+  (noopOnMissingPr — pr-first-commit 멱등 no-op를 정당한 no-op variant로).
 - **`lib/status.ts`** — homelab CLI status 엔진(`runStatus()`·`statusInputError()`). 계층 계약:
   레포(핀·바인딩)+GitHub(run·PR)가 기본, 라이브(ArgoCD)는 KUBECONFIG 있을 때만(부재=생략,
   조회 실패=live.error — 유일한 선택 계층). GitHub 계층 오류는 fail-loud(빈 목록 위장 금지).

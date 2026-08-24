@@ -25,9 +25,25 @@ export type MutationSpec = {
   branchFor: (runId: number) => string;            // PR 브랜치 명명(reusable이 SSOT)
   applications: Array<{ name: string; surfacePath: string }>; // --wait 수렴 대상 집합 + 표면
   resultBase: Record<string, unknown>;             // 모든 variant에 실리는 공통 필드({action, name, …})
+  // run 성공 + 브랜치 PR 0 = 정당한 no-op(update-secrets: 동일 봉인본 — pr-first-commit 멱등).
+  // --wait 검증은 머지 SHA 없이 "관측 리비전의 표면 blob == homelab main의 표면 blob"으로 대체한다
+  // (디스패처가 main HEAD와 비교한 그 기준). 미설정이면 PR 0은 명명 드리프트로 failure.
+  noopOnMissingPr?: boolean;
 };
 
 export type MutationOpts = { wait: boolean; pollMs: number; deadlineMs: number };
+
+// 대기 옵션 SSOT — 기본값과 검증 술어를 변이 동사 전부가 공유한다(콜사이트 인라인 사본 금지).
+export const WAIT_DEFAULTS = { pollMs: 5_000, deadlineMs: 1_200_000 } as const;
+export type WaitInput = { wait?: boolean; pollMs?: number; deadlineMs?: number };
+export function waitInputError(input: WaitInput): string | null {
+  if (input.pollMs !== undefined && !(Number.isInteger(input.pollMs) && input.pollMs > 0)) return `--poll-ms는 양의 정수여야 한다: ${input.pollMs}`;
+  if (input.deadlineMs !== undefined && !(Number.isInteger(input.deadlineMs) && input.deadlineMs > 0)) return `--deadline-ms는 양의 정수여야 한다: ${input.deadlineMs}`;
+  return null;
+}
+export function waitOpts(input: WaitInput): MutationOpts {
+  return { wait: input.wait === true, pollMs: input.pollMs ?? WAIT_DEFAULTS.pollMs, deadlineMs: input.deadlineMs ?? WAIT_DEFAULTS.deadlineMs };
+}
 export type MutationOutcome = { variant: string; omitted: string[]; result: Record<string, unknown> };
 
 function newNonce(): string {
@@ -98,37 +114,46 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
       "[.[] | {number, html_url, merged_at, merge_commit_sha}]") as PrRow[] | null;
   let prs = readPr();
   if (prs === null) return fail("PR 조회 실패 — GitHub 계층", { run: runRef() });
-  if (prs.length === 0) return fail(`run은 성공했으나 브랜치(${branch})의 PR이 없다 — 명명 드리프트 또는 no-op`, { run: runRef() });
+  const noop = prs.length === 0 && spec.noopOnMissingPr === true;
+  if (prs.length === 0 && !noop) return fail(`run은 성공했으나 브랜치(${branch})의 PR이 없다 — 명명 드리프트(no-op 동사가 아님)`, { run: runRef() });
   if (prs.length >= 2) {
     return { variant: "race", omitted: [], result: compact({ ...base, run: runRef(), observedRuns: prs.length, error: `브랜치 ${branch}에 PR이 ${prs.length}개 — 신원 판정 불가(fail-closed)` }) };
   }
-  let pr = prs[0];
-  const prRef = () => compact({ number: pr.number, url: pr.html_url, merged: pr.merged_at !== null, mergeSha: pr.merge_commit_sha ?? undefined });
+  let pr: PrRow | undefined = noop ? undefined : prs[0];
+  const prRef = () => (pr === undefined ? undefined
+    : compact({ number: pr.number, url: pr.html_url, merged: pr.merged_at !== null, mergeSha: pr.merge_commit_sha ?? undefined }));
+  const doneVariant = noop ? "no-op" : "success";
 
   if (!opts.wait) {
-    return { variant: "success", omitted: [], result: compact({ ...base, waited: false, run: runRef(), pr: prRef() }) };
+    return { variant: doneVariant, omitted: [], result: compact({ ...base, waited: false, run: runRef(), pr: prRef() }) };
   }
 
-  // 5) 자동 머지 관측 — required check(gate) 통과 후 auto-merge가 머지한다.
-  while (pr.merged_at === null) {
-    if (Date.now() >= endAt) {
-      return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: "auto-merge 머지 미관측 — required check 대기 중일 수 있다(핸들로 재조회 가능)" }) };
+  // 5) 자동 머지 관측 — required check(gate) 통과 후 auto-merge가 머지한다. no-op은 머지가 없다.
+  let mergeSha: string | undefined;
+  if (pr !== undefined) {
+    while (pr.merged_at === null) {
+      if (Date.now() >= endAt) {
+        return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: "auto-merge 머지 미관측 — required check 대기 중일 수 있다(핸들로 재조회 가능)" }) };
+      }
+      Bun.sleepSync(opts.pollMs);
+      const again = readPr();
+      if (again !== null && again.length === 1) pr = again[0];
     }
-    Bun.sleepSync(opts.pollMs);
-    const again = readPr();
-    if (again !== null && again.length === 1) pr = again[0];
+    mergeSha = pr.merge_commit_sha ?? undefined;
+    if (!mergeSha) return fail("머지는 관측됐으나 merge SHA가 비어 있다 — GitHub 응답 이상", { run: runRef(), pr: prRef() });
   }
-  const mergeSha = pr.merge_commit_sha;
-  if (!mergeSha) return fail("머지는 관측됐으나 merge SHA가 비어 있다 — GitHub 응답 이상", { run: runRef(), pr: prRef() });
+  // 요청값의 기준 ref — 머지 SHA(변이) 또는 main(no-op: 디스패처가 비교한 기준).
+  const wantRef: string = mergeSha ?? "main";
 
   // 6) 라이브 수렴 — KUBECONFIG 부재는 생략(성공과 구분되는 명시 축), 집합 전체가 조건을 만족해야 성공.
   if ((process.env.KUBECONFIG ?? "") === "") {
-    return { variant: "success", omitted: ["live"], result: compact({ ...base, waited: true, run: runRef(), pr: prRef() }) };
+    return { variant: doneVariant, omitted: ["live"], result: compact({ ...base, waited: true, run: runRef(), pr: prRef() }) };
   }
   // 후손 판정 — gh compare(--jq .status는 raw 문자열이다: JSON.parse 금지). 확정 관측만 캐시한다
   // (리비전의 계보는 불변) — 전송 오류를 false로 캐시하면 수렴 완료가 pending으로 접힌다.
   const descendantCache = new Map<string, boolean>();
   const isDescendant = (revision: string): boolean => {
+    if (mergeSha === undefined) return true; // no-op: 머지가 없으니 계보 조건이 없다 — 표면 동치가 판정
     if (revision === mergeSha) return true;
     const hit = descendantCache.get(revision);
     if (hit !== undefined) return hit;
@@ -152,7 +177,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   const requestedBlob = (path: string): Blob => {
     const hit = requestedBlobCache.get(path);
     if (hit !== undefined) return hit;
-    const b = blobAt(mergeSha, path);
+    const b = blobAt(wantRef, path);
     if (b.kind !== "error") requestedBlobCache.set(path, b);
     return b;
   };
@@ -174,7 +199,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
       if (descendant) {
         const want = requestedBlob(app.surfacePath);
         if (want.kind === "absent") {
-          return fail(`머지 커밋(${mergeSha})에 표면(${app.surfacePath})이 없다 — 요청이 반영되지 않음`, { run: runRef(), pr: prRef() });
+          return fail(`기준 ref(${wantRef})에 표면(${app.surfacePath})이 없다 — 요청이 반영되지 않음`, { run: runRef(), pr: prRef() });
         }
         if (want.kind === "found") {
           const got = revision === mergeSha ? want : blobAt(revision, app.surfacePath);
@@ -185,17 +210,17 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
         }
         // want.kind === "error" → 미확정: 같은 처리
       }
-      states.push(compact({ name: app.name, sync, health, revision, descendant, surfaceOk }));
-      if (supersededBy !== undefined) {
+      states.push(compact({ name: app.name, sync, health, revision, descendant: mergeSha === undefined ? undefined : descendant, surfaceOk }));
+      if (supersededBy !== undefined && mergeSha !== undefined) {
         return { variant: "superseded", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), applications: states, error: `관측 리비전(${revision})에서 ${supersededBy} — 요청이 추월됨(superseded)` }) };
       }
       if (!(descendant && sync === "Synced" && health === "Healthy" && surfaceOk === true)) allConverged = false;
     }
     if (allConverged) {
-      return { variant: "success", omitted: [], result: compact({ ...base, waited: true, run: runRef(), pr: prRef(), applications: states }) };
+      return { variant: doneVariant, omitted: [], result: compact({ ...base, waited: true, run: runRef(), pr: prRef(), applications: states }) };
     }
     if (Date.now() >= endAt) {
-      return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), applications: states, pendingReason: "Application 집합 미수렴 — 핸들로 재조회 가능" }) };
+      return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), applications: states, pendingReason: noop ? "no-op 검증 미수렴 — 클러스터가 main의 표면을 아직 반영하지 않음(핸들로 재조회 가능)" : "Application 집합 미수렴 — 핸들로 재조회 가능" }) };
     }
     Bun.sleepSync(opts.pollMs);
   }

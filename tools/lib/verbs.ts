@@ -7,7 +7,8 @@
 import { ENVELOPE, exitFor, type Envelope } from "./contract.ts";
 import { runDoctor } from "./doctor.ts";
 import { CACHE_MAXMEMORY_MI, EXT_RE, resourceNameError } from "./identity.ts";
-import { runMutation } from "./mutation.ts";
+import { runMutation, waitInputError, waitOpts, type WaitInput } from "./mutation.ts";
+import { appSecretsInputError, runAppSecrets, type AppSecretsInput } from "./secrets.ts";
 import { runStatus, statusInputError, type StatusInput } from "./status.ts";
 
 // 동사 형상 — I가 그 동사의 타입 입력(structure r2-a1: op를 입력 0개로 고정하면 입력 있는
@@ -22,19 +23,22 @@ export type DoctorVerb = VerbShape<DoctorInput>;
 export type StatusVerb = VerbShape<StatusInput>;
 
 // db create — 첫 변이 동사(공유 변이 엔진 lib/mutation.ts의 첫 인스턴스).
-export type DbCreateInput = { name: string; ext?: string[]; wait?: boolean; pollMs?: number; deadlineMs?: number };
+export type DbCreateInput = WaitInput & { name: string; ext?: string[] };
 export type DbCreateVerb = VerbShape<DbCreateInput>;
 
 // cache create — 변이 엔진의 두 번째 인스턴스(create-cache 디스패처).
-export type CacheCreateInput = { name: string; maxmemoryMi?: number; wait?: boolean; pollMs?: number; deadlineMs?: number };
+export type CacheCreateInput = WaitInput & { name: string; maxmemoryMi?: number };
 export type CacheCreateVerb = VerbShape<CacheCreateInput>;
 
 // CLI 전용 패스스루 동사 — 산출이 로컬 파일 기록이라 envelope 계약 밖(같은 동작 재노출이 계약).
 // MCP에서의 형상은 MCP 티켓이 결정한다.
 export type CliOnlyVerb = { path: readonly string[]; desc: string; cliOnly: true };
 
+// app secrets — 이중 모드 변이(lib/secrets.ts 엔진이 연쇄, 디스패치는 공유 변이 엔진).
+export type AppSecretsVerb = VerbShape<AppSecretsInput>;
+
 // 전 동사의 union — 후속 동사가 멤버로 추가된다.
-export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | CacheCreateVerb | CliOnlyVerb;
+export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | CacheCreateVerb | AppSecretsVerb | CliOnlyVerb;
 
 function doctorOp(_input: DoctorInput): Envelope {
   const { checks, summary } = runDoctor();
@@ -52,9 +56,7 @@ export function dbCreateInputError(input: DbCreateInput): string | null {
   for (const e of input.ext ?? []) {
     if (!EXT_RE.test(e)) return `확장 이름 형식 불량: ${e}`;
   }
-  if (input.pollMs !== undefined && !(Number.isInteger(input.pollMs) && input.pollMs > 0)) return `--poll-ms는 양의 정수여야 한다: ${input.pollMs}`;
-  if (input.deadlineMs !== undefined && !(Number.isInteger(input.deadlineMs) && input.deadlineMs > 0)) return `--deadline-ms는 양의 정수여야 한다: ${input.deadlineMs}`;
-  return null;
+  return waitInputError(input);
 }
 
 function dbCreateOp(input: DbCreateInput): Envelope {
@@ -76,7 +78,7 @@ function dbCreateOp(input: DbCreateInput): Envelope {
       { name: "data-conn-prod", surfacePath: `platform/data-conn/prod/db-${input.name}-conn.sealed.yaml` },
     ],
     resultBase: { action: "create-database", name: input.name },
-  }, { wait: input.wait === true, pollMs: input.pollMs ?? 5_000, deadlineMs: input.deadlineMs ?? 1_200_000 });
+  }, waitOpts(input));
   return { schema: ENVELOPE, verb: "db create", variant, exitCode: exitFor(variant), omitted, result };
 }
 
@@ -87,9 +89,7 @@ export function cacheCreateInputError(input: CacheCreateInput): string | null {
   if (input.maxmemoryMi !== undefined && !(Number.isInteger(input.maxmemoryMi) && input.maxmemoryMi >= CACHE_MAXMEMORY_MI.min && input.maxmemoryMi <= CACHE_MAXMEMORY_MI.max)) {
     return `--maxmemory-mi는 ${CACHE_MAXMEMORY_MI.min}..${CACHE_MAXMEMORY_MI.max} 정수여야 한다: ${input.maxmemoryMi}`;
   }
-  if (input.pollMs !== undefined && !(Number.isInteger(input.pollMs) && input.pollMs > 0)) return `--poll-ms는 양의 정수여야 한다: ${input.pollMs}`;
-  if (input.deadlineMs !== undefined && !(Number.isInteger(input.deadlineMs) && input.deadlineMs > 0)) return `--deadline-ms는 양의 정수여야 한다: ${input.deadlineMs}`;
-  return null;
+  return waitInputError(input);
 }
 
 function cacheCreateOp(input: CacheCreateInput): Envelope {
@@ -109,8 +109,15 @@ function cacheCreateOp(input: CacheCreateInput): Envelope {
       { name: "data-conn-prod", surfacePath: `platform/data-conn/prod/cache-${input.name}-conn.sealed.yaml` },
     ],
     resultBase: { action: "create-cache", name: input.name },
-  }, { wait: input.wait === true, pollMs: input.pollMs ?? 5_000, deadlineMs: input.deadlineMs ?? 1_200_000 });
+  }, waitOpts(input));
   return { schema: ENVELOPE, verb: "cache create", variant, exitCode: exitFor(variant), omitted, result };
+}
+
+function appSecretsOp(input: AppSecretsInput): Envelope {
+  const bad = appSecretsInputError(input);
+  if (bad) throw new Error(`계약 파손: appSecretsOp에 검증 안 된 입력 — ${bad}`);
+  const { variant, omitted, result } = runAppSecrets(input);
+  return { schema: ENVELOPE, verb: "app secrets", variant, exitCode: exitFor(variant), omitted, result };
 }
 
 function statusOp(input: StatusInput): Envelope {
@@ -163,4 +170,10 @@ export const CACHE_URL: CliOnlyVerb = {
 };
 
 // 열거 SSOT — 라우팅 어휘(TREE)·usage·MCP tool 목록이 여기서 파생된다.
-export const VERBS: readonly Verb[] = [DOCTOR, STATUS, DB_CREATE, DB_URL, CACHE_CREATE, CACHE_URL];
+export const APP_SECRETS: AppSecretsVerb = {
+  path: ["app", "secrets"],
+  desc: "앱 시크릿 봉인본 배선(앱 레포 안: seal→커밋→push→디스패치 연쇄 / 밖: update-secrets 디스패치만)",
+  op: appSecretsOp,
+};
+
+export const VERBS: readonly Verb[] = [DOCTOR, STATUS, DB_CREATE, DB_URL, CACHE_CREATE, CACHE_URL, APP_SECRETS];

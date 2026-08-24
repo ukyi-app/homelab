@@ -9,7 +9,10 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseCommand, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
 import { USAGE_EXIT, type Envelope } from "./lib/contract.ts";
-import { CACHE_CREATE, DB_CREATE, DOCTOR, STATUS, VERBS, cacheCreateInputError, dbCreateInputError, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
+import { WAIT_DEFAULTS } from "./lib/mutation.ts";
+import type { TypedFlags } from "./lib/cli.ts";
+import { APP_SECRETS, CACHE_CREATE, DB_CREATE, DOCTOR, STATUS, VERBS, cacheCreateInputError, dbCreateInputError, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
+import { appSecretsInputError, type AppSecretsInput } from "./lib/secrets.ts";
 import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
 import { statusInputError, type StatusInput } from "./lib/status.ts";
 
@@ -31,6 +34,7 @@ const CLI_BY_VERB: Record<string, (rest: string[]) => VerbOutput> = {
   "db url": dbUrlCli,
   "cache create": cacheCreateCli,
   "cache url": cacheUrlCli,
+  "app secrets": appSecretsCli,
 };
 for (const v of VERBS) {
   if (!CLI_BY_VERB[v.path.join(" ")]) throw new Error(`계약 파손: 동사 '${v.path.join(" ")}'의 CLI 어댑터가 없다`);
@@ -71,6 +75,29 @@ function doctorUsage(): string {
     "",
   ].join("\n");
 }
+
+// 변이 어댑터 공용 골격 — "위치 인자 하나 + 플래그" 파싱(cli.ts typedFlags 수렴형과 같은 이유:
+// 콜사이트마다 복제되던 분리·try/catch·--help 분기를 한 곳으로). 실패는 usage-error VerbOutput.
+type Parsed = { positional?: string; flags: TypedFlags };
+function positionalThenFlags(rest: string[], spec: { value: string[]; bool: string[] }, tool: string, usage: () => string): Parsed | VerbOutput {
+  let positional: string | undefined;
+  let flagArgv = rest;
+  if (rest[0] !== undefined && !rest[0].startsWith("--")) { positional = rest[0]; flagArgv = rest.slice(1); }
+  try { return { positional, flags: typedFlags(flagArgv, spec) }; }
+  catch (e) { return { kind: "usage-error", message: `${tool}: ${e instanceof Error ? e.message : String(e)}`, usage: usage() }; }
+}
+const isOutput = (x: Parsed | VerbOutput): x is VerbOutput => "kind" in x;
+// 숫자 플래그 — 부재=undefined, 형식 검증은 동사의 입력 술어(waitInputError 등)가 한다.
+const numFlag = (flags: TypedFlags, k: string): number | undefined => {
+  const v = flags.str(k);
+  return v === undefined ? undefined : Number(v);
+};
+const WAIT_FLAG_LINES = [
+  `  --poll-ms <n>      폴링 간격(기본 ${WAIT_DEFAULTS.pollMs} — 시간 주입 심)`,
+  `  --deadline-ms <n>  전체 데드라인(기본 ${WAIT_DEFAULTS.deadlineMs} — 시간 주입 심)`,
+  "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
+  "",
+];
 
 const MARK: Record<string, string> = { pass: "✓", fail: "✗", warn: "⚠" };
 
@@ -157,16 +184,18 @@ function dbCreateUsage(): string {
     "함께 트리거하고 자기 run을 특정해 conclusion까지 추적한다(PR-first — 머지가 곧 적용).",
     "  --ext <a,b>        확장 목록(알려진 5종은 체크박스, 그 외는 ext_extra로 — 예: pg_trgm,vector)",
     "  --wait             auto-merge 머지 + Application 집합(cnpg-data·data-conn-prod) 수렴까지 대기",
-    "  --poll-ms <n>      폴링 간격(기본 5000 — 시간 주입 심)",
-    "  --deadline-ms <n>  전체 데드라인(기본 1200000 — 시간 주입 심)",
-    "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
-    "",
+    ...WAIT_FLAG_LINES,
   ].join("\n");
 }
 
 function renderMutation(envelope: Envelope): string[] {
   const r = envelope.result as Record<string, any>;
-  const lines = [`${envelope.verb} ${r.name} — correlation ${r.correlation}`];
+  const lines = [`${envelope.verb} ${r.name}${r.correlation ? ` — correlation ${r.correlation}` : ""}`];
+  if (r.chain) {
+    lines.push(r.chain.mode === "chain"
+      ? `연쇄: 앱 레포 안 — ${r.chain.sealSkipped === true ? "재봉인 생략(--no-seal)" : "seal 실행"} · ${r.chain.pushed === true ? "봉인본 갱신 커밋 push됨" : r.chain.pushed === false ? "커밋 없음" : "선행 조건 단계"}${r.chain.headSha ? ` · HEAD ${String(r.chain.headSha).slice(0, 7)}` : ""}`
+      : "연쇄: 앱 레포 밖 — 디스패치만");
+  }
   if (r.run?.url) lines.push(`run: ${r.run.url}${r.run.conclusion ? ` (${r.run.conclusion})` : ""}${r.run.failedJobs ? ` · 실패 잡: ${r.run.failedJobs.join(", ")}` : ""}`);
   if (r.pr?.url) lines.push(`PR: ${r.pr.url} · merged ${OX[String(r.pr.merged)]}${r.pr.mergeSha ? ` · merge SHA ${r.pr.mergeSha}` : ""}`);
   if (Array.isArray(r.applications)) {
@@ -183,6 +212,32 @@ function renderMutation(envelope: Envelope): string[] {
   return lines;
 }
 
+function appSecretsUsage(): string {
+  return [
+    "사용법: homelab app secrets <app> [--wait] [--json]",
+    "",
+    "앱 시크릿 봉인본을 배선한다. 실행 디렉토리가 그 앱 레포(.app-config.yml 마커 + canonical remote)면",
+    "seal(앱 레포의 tools/seal-secret.mts) → 봉인본만 커밋 → push → 원격 main 도달성 확인 → update-secrets",
+    "디스패치를 연쇄하고, 선행 조건(main 브랜치·클린 트리·canonical remote) 중 하나라도 실패면 디스패치",
+    "없이 거부한다. 앱 레포 밖이면 디스패치만 한다(이미 push된 봉인본 재배선). 평문은 출력되지 않는다.",
+    "  --wait             auto-merge 머지 + <app>-prod Application 수렴까지 대기(동일 봉인본이면 no-op 검증)",
+    "  --no-seal          재봉인 없이 이미 커밋·push된 봉인본을 재디스패치(push 성공·디스패치 실패 후 재실행)",
+    "                     — kubeseal 암호문은 매번 달라 재봉인은 언제나 새 커밋·새 PR·파드 롤링이다",
+    ...WAIT_FLAG_LINES,
+  ].join("\n");
+}
+
+function appSecretsCli(rest: string[]): VerbOutput {
+  const p = positionalThenFlags(rest, { value: ["--poll-ms", "--deadline-ms"], bool: ["--wait", "--no-seal", "--json", "--help"] }, "homelab app secrets", appSecretsUsage);
+  if (isOutput(p)) return p;
+  if (p.flags.bool("--help")) return { kind: "help", text: appSecretsUsage() };
+  const input: AppSecretsInput = { app: p.positional ?? "", wait: p.flags.bool("--wait"), noSeal: p.flags.bool("--no-seal"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms") };
+  const bad = appSecretsInputError(input);
+  if (bad) return { kind: "usage-error", message: `homelab app secrets: ${bad}`, usage: appSecretsUsage() };
+  const envelope = APP_SECRETS.op(input);
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
+}
+
 function cacheCreateUsage(): string {
   return [
     "사용법: homelab cache create <name> [--maxmemory-mi 16..1024] [--wait] [--json]",
@@ -191,38 +246,19 @@ function cacheCreateUsage(): string {
     "자기 run을 특정해 conclusion까지 추적한다(PR-first — 머지가 곧 적용).",
     "  --maxmemory-mi <n> maxmemory(Mi, 16..1024 — 생략 시 디스패처 기본 64)",
     "  --wait             auto-merge 머지 + Application 집합(cache-prod·data-conn-prod) 수렴까지 대기",
-    "  --poll-ms <n>      폴링 간격(기본 5000 — 시간 주입 심)",
-    "  --deadline-ms <n>  전체 데드라인(기본 1200000 — 시간 주입 심)",
-    "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
-    "",
+    ...WAIT_FLAG_LINES,
   ].join("\n");
 }
 
 function cacheCreateCli(rest: string[]): VerbOutput {
-  let name: string | undefined;
-  let flagArgv = rest;
-  if (rest[0] !== undefined && !rest[0].startsWith("--")) { name = rest[0]; flagArgv = rest.slice(1); }
-  let flags;
-  try { flags = typedFlags(flagArgv, { value: ["--maxmemory-mi", "--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }); }
-  catch (e) {
-    return { kind: "usage-error", message: `homelab cache create: ${e instanceof Error ? e.message : String(e)}`, usage: cacheCreateUsage() };
-  }
-  if (flags.bool("--help")) return { kind: "help", text: cacheCreateUsage() };
-  const num = (k: string): number | undefined => {
-    const v = flags.str(k);
-    return v === undefined ? undefined : Number(v);
-  };
-  const input: CacheCreateInput = {
-    name: name ?? "",
-    maxmemoryMi: num("--maxmemory-mi"),
-    wait: flags.bool("--wait"),
-    pollMs: num("--poll-ms"),
-    deadlineMs: num("--deadline-ms"),
-  };
+  const p = positionalThenFlags(rest, { value: ["--maxmemory-mi", "--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab cache create", cacheCreateUsage);
+  if (isOutput(p)) return p;
+  if (p.flags.bool("--help")) return { kind: "help", text: cacheCreateUsage() };
+  const input: CacheCreateInput = { name: p.positional ?? "", maxmemoryMi: numFlag(p.flags, "--maxmemory-mi"), wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms") };
   const bad = cacheCreateInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab cache create: ${bad}`, usage: cacheCreateUsage() };
   const envelope = CACHE_CREATE.op(input);
-  return { kind: "result", json: flags.bool("--json"), envelope, human: renderMutation(envelope) };
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
 }
 
 // cache url 패스스루 — 기존 도구(tools/cache-url.ts)를 같은 동작으로 재노출한다.
@@ -233,30 +269,20 @@ function cacheUrlCli(rest: string[]): VerbOutput {
 }
 
 function dbCreateCli(rest: string[]): VerbOutput {
-  let name: string | undefined;
-  let flagArgv = rest;
-  if (rest[0] !== undefined && !rest[0].startsWith("--")) { name = rest[0]; flagArgv = rest.slice(1); }
-  let flags;
-  try { flags = typedFlags(flagArgv, { value: ["--ext", "--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }); }
-  catch (e) {
-    return { kind: "usage-error", message: `homelab db create: ${e instanceof Error ? e.message : String(e)}`, usage: dbCreateUsage() };
-  }
-  if (flags.bool("--help")) return { kind: "help", text: dbCreateUsage() };
-  const num = (k: string): number | undefined => {
-    const v = flags.str(k);
-    return v === undefined ? undefined : Number(v);
-  };
+  const p = positionalThenFlags(rest, { value: ["--ext", "--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab db create", dbCreateUsage);
+  if (isOutput(p)) return p;
+  if (p.flags.bool("--help")) return { kind: "help", text: dbCreateUsage() };
   const input: DbCreateInput = {
-    name: name ?? "",
-    ext: flags.str("--ext")?.split(",").map((s) => s.trim()).filter((s) => s !== ""),
-    wait: flags.bool("--wait"),
-    pollMs: num("--poll-ms"),
-    deadlineMs: num("--deadline-ms"),
+    name: p.positional ?? "",
+    ext: p.flags.str("--ext")?.split(",").map((x) => x.trim()).filter((x) => x !== ""),
+    wait: p.flags.bool("--wait"),
+    pollMs: numFlag(p.flags, "--poll-ms"),
+    deadlineMs: numFlag(p.flags, "--deadline-ms"),
   };
   const bad = dbCreateInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab db create: ${bad}`, usage: dbCreateUsage() };
   const envelope = DB_CREATE.op(input);
-  return { kind: "result", json: flags.bool("--json"), envelope, human: renderMutation(envelope) };
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
 }
 
 // db url 패스스루 — 기존 도구(tools/db-url.ts)를 같은 동작으로 재노출한다: argv 그대로,

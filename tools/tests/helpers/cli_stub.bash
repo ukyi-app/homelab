@@ -17,7 +17,7 @@ cli_stub_init() {
   export CALLS="$BATS_TEST_TMPDIR/calls.nul"
   : > "$CALLS"
   BUN="$(command -v bun)"
-  for t in bun bash base64 cat; do
+  for t in bun bash base64 cat git; do
     ln -s "$(command -v "$t")" "$STUB/$t"
   done
 
@@ -43,6 +43,9 @@ cli_stub_init() {
   printf 'identical\n' > "$FIX/db-compare.txt"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
+
+  # app secrets 픽스처 기본값 — update-secrets run 1개(성공). PR은 테스트가 db-prs.json으로 배치.
+  printf '[{"id":701,"name":"✨ update-secrets — myapp [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/701"}]\n' "$NONCE" > "$FIX/secrets-runs.json"
 
   # cache create 픽스처 기본값(행복 경로) — 변이 엔진 공유, 디스패처·run만 cache 것.
   printf '[{"id":601,"name":"✨ create-cache — mycache [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/601"}]\n' "$NONCE" > "$FIX/cache-runs.json"
@@ -152,6 +155,13 @@ case "$*" in
   "api repos/ukyi-app/homelab-app-template/contents/scaffold/archetypes/worker/Dockerfile --jq .content")
     b64 "$FIX/Dockerfile.worker"
     ;;
+  # ── app secrets 케이스 — update-secrets 디스패처·runs 목록 ──
+  "workflow run update-secrets.yaml -R ukyi-app/homelab "*)
+    if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
+    ;;
+  "api repos/ukyi-app/homelab/actions/workflows/update-secrets.yaml/runs?per_page=20 --jq "*)
+    cat "$FIX/secrets-runs.json"
+    ;;
   # ── cache create 케이스 — db와 같은 엔진, 디스패처·runs 목록만 cache 것 ──
   "workflow run create-cache.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
@@ -188,7 +198,8 @@ case "$*" in
   # 표면 blob sha(3상) — ref=feedbee(머지 SHA)는 요청값, 그 외 ref는 관측 리비전.
   "api repos/ukyi-app/homelab/contents/"*" --jq .sha")
     case "$*" in
-      *"?ref=feedbee --jq .sha")
+      *"?ref=feedbee --jq .sha"|*"?ref=main --jq .sha")
+        # feedbee=머지 SHA(변이 요청값) · main=no-op 기준(디스패처가 비교한 HEAD)
         if [ -n "${STUB_SURFACE_MERGE_ABSENT:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
         printf 'blobsha-request\n'
         ;;
@@ -286,4 +297,47 @@ make_kubeseal_stub() {
 exit 0
 SH
   chmod +x "$STUB/kubeseal"
+}
+
+# 앱 레포 픽스처(보조 심 2: 임시 **실물** git 레포) — bare 원격 + 클론. remote URL은 canonical
+# 텍스트(https://github.com/ukyi-app/<app>.git)로 두고 url.<bare>.insteadOf로 bare 경로에 매핑한다:
+# 엔진은 원본 설정값(`git config --get remote.origin.url`)으로 canonical을 판정하고, push·ls-remote는
+# insteadOf를 따라 실제 bare로 간다(네트워크 0). 초기 커밋에 봉인본 v1이 있다 — SEAL_VERSION=1이면
+# 동일 봉인본(no-op 경로), 2면 갱신 경로. 평문 .env는 gitignored이고 CANARY 값을 담는다(출력 금지 단언용).
+# 사용: make_app_repo_fixture <app> → APP_WORK(클론)·APP_REMOTE(bare) 설정.
+CANARY="CANARY-s3cr3t-value-9f8e7d"
+export CANARY
+make_app_repo_fixture() {
+  app="$1"
+  APP_REMOTE="$BATS_TEST_TMPDIR/remote-$app.git"
+  APP_WORK="$BATS_TEST_TMPDIR/work-$app"
+  export APP_REMOTE APP_WORK
+  git init -q --bare "$APP_REMOTE"
+  git init -q -b main "$APP_WORK"
+  git -C "$APP_WORK" config user.name "fixture"
+  git -C "$APP_WORK" config user.email "fixture@example.com"
+  mkdir -p "$APP_WORK/tools" "$APP_WORK/deploy"
+  printf 'kind: web\n' > "$APP_WORK/.app-config.yml"
+  printf '.env\n' > "$APP_WORK/.gitignore"
+  printf 'SECRET_KEY=%s\n' "$CANARY" > "$APP_WORK/.env"
+  printf 'apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nspec:\n  encryptedData:\n    SECRET_KEY: sealed-v1\n' > "$APP_WORK/deploy/$app-secrets.sealed.yaml"
+  # 벤더 봉인 도구 stub — 실물 계약(tools/seal-secret.mts: --config --env 필수, --app으로 산출 경로,
+  # .env→deploy/<app>-secrets.sealed.yaml, 값 비출력)을 재현한다. 실물처럼 **비결정 암호문**을 낸다
+  # (kubeseal은 같은 평문도 매번 다른 ciphertext) — "재봉인 후 동일성"에 기대는 경로는 여기서 죽는다.
+  # 원장에는 도구명과 argv만 기록한다(값 없음).
+  cat > "$APP_WORK/tools/seal-secret.mts" <<'TS'
+import { appendFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+const argv = process.argv.slice(2);
+appendFileSync(process.env.CALLS!, ["seal-secret", ...argv].join("\0") + "\0\x1e");
+const get = (k: string) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
+if (!get("--config") || !get("--env")) { console.error("seal-secret: --config <.app-config.yml> --env <.env> 필수"); process.exit(1); }
+const app = get("--app") ?? "unknown";
+writeFileSync(`deploy/${app}-secrets.sealed.yaml`, `apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nspec:\n  encryptedData:\n    SECRET_KEY: ct-${randomBytes(6).toString("hex")}\n`);
+TS
+  git -C "$APP_WORK" add -A
+  git -C "$APP_WORK" commit -q -m "init"
+  git -C "$APP_WORK" remote add origin "https://github.com/ukyi-app/$app.git"
+  git -C "$APP_WORK" config "url.$APP_REMOTE.insteadOf" "https://github.com/ukyi-app/$app.git"
+  git -C "$APP_WORK" push -q origin main
 }
