@@ -74,7 +74,7 @@
       "metric": "files_backup_last_success_timestamp",
       "supply": "in-cluster",
       "decreasing": "impossible",
-      "why": "scripts/backup-files-data.sh가 성공 직후 `date -u +%s`로 만든다. ⚠️ 국면 A 동안 실행자가 없어 라이브 시리즈가 0건이다 — 이 항목은 정적 선언이지 관측이 아니다."
+      "why": "scripts/backup-files-data.sh가 성공 직후 `date -u +%s`로 만든다. ⚠️ 국면 A 동안 실행자(files-data-backup.timer)가 의도적으로 enable되지 않아 라이브 시리즈가 0건이다 — 이 항목은 정적 선언이지 관측이 아니다."
     },
     {
       "metric": "adguard_rewrite_reconcile_timestamp",
@@ -123,6 +123,12 @@
       "supply": "in-cluster",
       "decreasing": "impossible",
       "why": "scripts/notify-unit-failure.sh가 실패 순간 `date -u +%s`로 만들어 node-exporter textfile collector 파일에 쓴다 — 호스트에서 생긴 값이고 실패마다 전진한다."
+    },
+    {
+      "metric": "systemd_sweep_last_success_timestamp",
+      "supply": "in-cluster",
+      "decreasing": "impossible",
+      "why": "scripts/sweep-systemd-failures.sh가 호스트에서 systemctl list-units를 읽고 date -u +%s를 node-exporter textfile collector에 쓴다 — 값이 클러스터 밖 네트워크 읽기를 거치지 않으므로 낡은 스냅샷/eventually-consistent 역행이 원리적으로 없다(스크레이프 경로다). '마지막 스윕 성공 시각'이라 내려가는 것은 사실일 수 없다. 스윕이 실패하면 파일을 아예 쓰지 않으므로(3중 fail-closed) 값이 갱신되지 않고 그 자리에 늙는다 — 그 늙음을 SystemdSweepStale이 읽는다."
     }
   ]
 }

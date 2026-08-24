@@ -17,7 +17,10 @@
 #   (sink가 **독립 파일**인 이유: 셸 heredoc에 python을 내장하면 typecheck·lint 사각이 된다 —
 #    CONTRIBUTING.md 「새 코드 배치 규칙」의 명시적 금지. 형제 관용구 = tests/gates/mock-telegram.py.)
 #
-# 증명 3단(단순 "종료했다"로는 부족 — 다른 이유로 즉시 죽어도 통과한다):
+# 증명 단계(단순 "종료했다"로는 부족 — 다른 이유로 즉시 죽어도 통과한다):
+#   S0 이미지 계약: 소비자가 의존하는 GNU date(-d ISO8601)를 이미지가 제공하는가. gha-liveness-exporter가
+#      `date -u -d "$ISO" +%s`로 워크플로 나이를 계산하는데 busybox date는 이를 무성 실패시킨다(실측
+#      2026-08-24: quay Fedora→alpine 미러 전환 회귀). 두 exporter가 같은 이미지라 여기서 한 번 검증한다.
 #   S1 짧은 타임아웃(T_SHORT)  → T_SHORT 근처에서 종료(하한 단언 = 진짜로 기다렸다, 즉시 실패가 아니다)
 #   S2 긴 타임아웃(T_LONG)     → T_LONG 근처에서 종료 **그리고 S1보다 확실히 오래 걸린다**
 #      ↳ 경과가 플래그 **값을 따라간다**는 것이 "타임아웃이 실제로 지배한다"의 유일한 증거다.
@@ -46,6 +49,9 @@ fault() { echo "HARNESS FAULT: $*" >&2; exit 2; }
 # 예산 상수·파생은 SSOT lib이 소유한다(세 게이트가 같은 부등식을 독립 판정한다 — 리터럴 복제 금지).
 # shellcheck source=tests/gates/lib/digest-exporter-budget.sh
 . "$ROOT/tests/gates/lib/digest-exporter-budget.sh"
+# 호스트 포트 배정도 SSOT lib이 소유한다 — 리터럴 포트는 형제 하네스에서 두 번 오진을 냈다.
+# shellcheck source=tests/gates/lib/host-port.sh
+. "$ROOT/tests/gates/lib/host-port.sh"
 
 # ── 1) 핀된 skopeo 이미지 + 계약 타임아웃을 매니페스트에서 파생 ──────────────────────────────────────
 IMAGE="$(yq 'select(.kind=="CronJob").spec.jobTemplate.spec.template.spec.containers[].image' "$EXPORTER" | head -1)"
@@ -61,7 +67,11 @@ SKOPEO_T="$DEB_SKOPEO_TIMEOUT_S"
 T_SHORT=3
 T_LONG=9
 SLACK=8   # 컨테이너 기동 + TLS 셋업 오버헤드 여유(이미지는 미리 pull해 타이밍에서 제외한다)
-PORT=18443
+# 블랙홀 sink의 호스트 포트 — 리터럴이 아니라 배정받는다(밴드는 커널 ephemeral·k8s NodePort와 배타).
+# ⚠️ sink는 `0.0.0.0`에 바인드한다(컨테이너가 host-gateway로 붙으므로 루프백 전용이 불가능) — 프로브의
+#    기본 주소가 `0.0.0.0`인 것이 그래서 중요하다. `127.0.0.1` 프로브는 글로벌 인터페이스에만 있는
+#    리스너를 FREE로 오답한다(실측 2026-08-21).
+PORT="$(hp_pick_port)" || fault "블랙홀 sink 포트 배정 실패(위 host-port stderr) — 판정 불가는 '통과'가 아니다."
 
 TMP="$(mktemp -d)"
 SINK_PID=""
@@ -87,18 +97,37 @@ grep -q 'listening' "$TMP/sink.log" || fault "TCP sink가 기동하지 못했다
 # 이미지 pull을 타이밍에서 제외(pull 시간이 경과에 섞이면 하한/상한 단언이 무의미해진다).
 docker pull -q "$IMAGE" >/dev/null 2>&1 || fault "skopeo 이미지 pull 실패: $IMAGE"
 
+# ── S0: 소비자가 의존하는 GNU date를 이미지가 제공하는가 ──────────────────────────────────────────
+# ⚠️ gha-liveness-exporter의 run.sh는 GitHub 타임스탬프를 `date -u -d "$ISO" +%s`로 파싱한다 — GNU date
+#    문법이다. alpine 기본 date는 busybox라 ISO8601을 거부하고, 그러면 EPOCH가 빈 값이 돼 워크플로
+#    나이 계산이 **조용히 깨진다**(실측 2026-08-24: quay Fedora base→alpine 미러 전환에서 드러난 회귀).
+#    두 exporter가 같은 이미지를 공유하므로 이미지 계약을 여기서 한 번 검증한다. digest-exporter는
+#    `date +%s`만 쓰지만, 이미지가 GNU date를 잃으면 gha-liveness가 무성 사망한다.
+# ⚠️ 소비자와 **같은 호출 형태**로 재현한다. 소비자 매니페스트는 `command: ["/bin/sh", "/script/run.sh"]`인데
+#    k8s의 command:는 이미지 ENTRYPOINT를 **override**하므로 실제 실행은 `/bin/sh`를 직접 돌리고 그 안에서
+#    date를 PATH로 부른다. docker로는 `--entrypoint /bin/sh`가 그 재현이다 — 이게 없으면 quay 이미지의
+#    `ENTRYPOINT ["skopeo"]`가 `/bin/sh`를 skopeo 인자로 삼켜 GNU date가 있는 이미지도 거짓 red가 난다
+#    (실측: 게이트가 실 도메인과 다른 방식으로 부르면 증명하는 것이 실 도메인 동작이 아니다, docs/traps-detail.md).
+GNU_DATE_ISO="2026-08-24T05:45:27Z"
+if ! docker run --rm --entrypoint /bin/sh "$IMAGE" -c "date -u -d '$GNU_DATE_ISO' +%s" >/dev/null 2>&1; then
+  fault "이미지의 date가 ISO8601(-d)을 파싱하지 못한다: $IMAGE — gha-liveness-exporter의 run.sh가 GNU date에 의존한다(busybox date는 무성 실패). Dockerfile에 coreutils를 추가하라."
+fi
+
 # $1=타임아웃(초) $2=placement(global|after-subcommand) → 경과 초를 stdout으로
 run_skopeo() {
   local t="$1" placement="$2" start end
   start="$(date +%s)"
+  # ⚠️ `skopeo`를 명시한다 — 이미지 ENTRYPOINT에 기대지 않는다. 소비자 매니페스트도 `command: [/bin/sh…]`로
+  #   셸을 지정하고 그 안에서 skopeo를 PATH로 부른다(digest-exporter run.sh). GHCR 미러(alpine base)엔
+  #   ENTRYPOINT가 없어 `docker run "$IMAGE" --command-timeout=…`는 그 플래그를 실행 파일로 오인해 죽는다.
   if [ "$placement" = "global" ]; then
     docker run --rm --add-host=host.docker.internal:host-gateway "$IMAGE" \
-      --command-timeout="${t}s" inspect --no-tags --tls-verify=false \
+      skopeo --command-timeout="${t}s" inspect --no-tags --tls-verify=false \
       "docker://host.docker.internal:${PORT}/blackhole/img:latest" >/dev/null 2>"$TMP/err.$t.$placement" || true
   else
     # 음성 대조: 글로벌 옵션을 서브커맨드 **뒤**에 둔다(run.sh가 절대 하면 안 되는 배치)
     docker run --rm --add-host=host.docker.internal:host-gateway "$IMAGE" \
-      inspect --command-timeout="${t}s" --no-tags --tls-verify=false \
+      skopeo inspect --command-timeout="${t}s" --no-tags --tls-verify=false \
       "docker://host.docker.internal:${PORT}/blackhole/img:latest" >/dev/null 2>"$TMP/err.$t.$placement" || true
   fi
   end="$(date +%s)"

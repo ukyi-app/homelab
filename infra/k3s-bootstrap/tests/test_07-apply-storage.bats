@@ -21,7 +21,11 @@ if [ "$1" = "apply" ]; then
     if [ "$1" = "-f" ]; then src="$2"; shift; fi
     shift
   done
-  if [ "$src" = "-" ] || [ -z "$src" ]; then cat >> "$RENDERED"; else cat "$src" >> "$RENDERED"; fi
+  # `-f -`는 stdin을 **명시** 지정한 것이므로 `cat -`로 받는다. `-f`가 아예 없는 apply 호출은 계약
+  # 위반인데, 거기서 fd 0을 읽으면 호출 형태 변경이 red가 아니라 **정지**로 나타난다(호출자의 stdin에서
+  # EOF를 기다린다). 계약 위반은 소리내어 죽는다.
+  if [ -z "$src" ]; then echo "kubectl stub: apply에 -f가 없다: $*" >&2; exit 64; fi
+  if [ "$src" = "-" ]; then cat - >> "$RENDERED"; else cat "$src" >> "$RENDERED"; fi
 fi
 exit 0
 EOF

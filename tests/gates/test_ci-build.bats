@@ -66,10 +66,14 @@ WF=".github/workflows/build.yaml"
   [ -z "$missing" ]
 }
 
-@test "matrix builds only the platform ops image pg-tools (no in-repo apps)" {
+@test "matrix builds only platform ops images (pg-tools + skopeo, no in-repo apps)" {
   run yq '.jobs.build.strategy.matrix.app' "$WF"
   printf '%s' "$output" | grep -qF -- "pg-tools"
+  printf '%s' "$output" | grep -qF -- "skopeo"
   case "$output" in *"api"*) false ;; *) true ;; esac # 사용자 앱은 외부 레포에서 빌드 — homelab matrix엔 없음
+  # 각 ops 이미지의 canonical 태그가 태그 스텝에 배선돼 있어야 한다(소비자가 이 태그를 참조한다).
   run grep -E "pg-tools:18-rclone" "$WF"
+  [ "$status" -eq 0 ]
+  run grep -E "skopeo:alpine" "$WF"
   [ "$status" -eq 0 ]
 }

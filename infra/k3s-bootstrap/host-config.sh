@@ -57,7 +57,11 @@ SSHD_DROPIN="10-k3s-node.conf"
 #           넓혔다. 바닥값과 글롭을 **함께** 올린 첫 사례다 — 한쪽만 올리면 조용히 어긋난다.)
 #    (7 → 8: 2026-08-20 `etc/systemd/system/unit-failure-notify@.service` 추가 — oneshot 실패의
 #           **즉시 채널**. 신선도 알림은 원리적으로 주기보다 빨리 울 수 없어 1회 실패가 무성이었다.)
-TREE_MIN=8
+#    (8 → 10: 2026-08-20 `systemd-failed-sweep.{service,timer}` 추가 — 위 즉시 채널은 `OnFailure=`가
+#           달린 유닛만 덮는다. 라이브 실측 로드 `.service` 64건 중 그 줄을 가진 것은 vendor 2건 +
+#           레포 1건뿐이라, 나머지(apt-daily·fstrim·logrotate·unattended-upgrades…)는 실패해도
+#           아무도 몰랐다. 전역 표면을 주기 스윕이 덮는다 — 두 축은 직교다.)
+TREE_MIN=10
 
 fail() { echo "FAIL: host-config: $*" >&2; exit 1; }
 

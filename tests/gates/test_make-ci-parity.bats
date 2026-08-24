@@ -35,6 +35,52 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
 }
 
+@test "the ledger's local roster is derived from ci.yaml, not hand-maintained (direction 7 bites)" {
+  # ★ ④(원장 → `make -n ci`)만으로는 **원장에 안 적은 커맨드**가 원리적으로 안 보인다. 그래서
+  #   `실 도메인 가드` 스텝의 커맨드 10건 중 원장엔 8건만 있었고, `check-locale-collation`·
+  #   `check-gh-secret-coverage`가 빠진 채 오래 초록이었다(실측 2026-08-21). 그 목록이 곧
+  #   AGENTS.md가 금지하는 하드코딩 소비처 목록이었다.
+  #   여기서는 그 사고를 **재현해** 방향 ⑦이 실제로 무는지 본다(픽스처는 원장 사본에만 가한다).
+  cp "$ROOT/policy/ci-parity.json" "$BATS_TEST_TMPDIR/orig.json"
+  run bun -e '
+    const fs = require("fs");
+    const p = "policy/ci-parity.json";
+    const d = JSON.parse(fs.readFileSync(p, "utf8"));
+    for (const s of d.steps) {
+      if (s.name.includes("실 도메인") && Array.isArray(s.local)) {
+        s.local = s.local.filter((x) => !x.includes("locale-collation"));
+      }
+    }
+    fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");
+  '
+  [ "$status" -eq 0 ]
+  run bun tools/check-ci-parity.ts
+  mutated_status="$status"; mutated_output="$output"
+  cp "$BATS_TEST_TMPDIR/orig.json" "$ROOT/policy/ci-parity.json"   # 무슨 일이 있어도 되돌린다
+  [ "$mutated_status" -ne 0 ]
+  printf '%s' "$mutated_output" | grep -qF 'check-locale-collation.sh'
+  printf '%s' "$mutated_output" | grep -qF '원장 local에 없다'
+  # 음성 대조 — 원복하면 초록이다(원복 실패를 다음 테스트가 떠안지 않게 여기서 확인한다).
+  run bun tools/check-ci-parity.ts
+  [ "$status" -eq 0 ]
+}
+
+@test "direction 7 accepts the ledger's own notation — basenames, globs and interpreter prefixes" {
+  # ★ 원장의 `local`은 `make -n ci` 출력과 대조되므로 Makefile이 쓰는 형태를 따른다:
+  #   basename(`check-ci-parity.ts`) · 글롭(`vmalert-*-firing-e2e.sh`) · 인터프리터 접두
+  #   (`bash tests/gates/image-pin-liveness.sh`) · 인자(`tools/audit-orphans.ts --ci`).
+  #   전체 경로로만 대조하면 이 방향이 **정상 원장을 물어** 아무도 안 켠다 — 그 표기들이 실제로
+  #   원장에 있고 현재 통과한다는 사실로 확인한다.
+  run bash -c "grep -c 'vmalert-\*-firing-e2e.sh' '$ROOT/policy/ci-parity.json'"
+  [ "$output" -ge 1 ]
+  run bash -c "grep -c 'bash tests/gates/image-pin-liveness.sh' '$ROOT/policy/ci-parity.json'"
+  [ "$output" -ge 1 ]
+  run bash -c "grep -c 'tools/audit-orphans.ts --ci' '$ROOT/policy/ci-parity.json'"
+  [ "$output" -ge 1 ]
+  run bun tools/check-ci-parity.ts
+  [ "$status" -eq 0 ]
+}
+
 @test "no recipe line uses recursive make — it executes even under 'make -n'" {
   # ⚠️ GNU make는 recipe 줄에 \$(MAKE)가 있으면 -n에서도 그 줄을 **실제로 실행한다**(재귀 make에 플래그를
   #    전파하려는 문서화된 동작). 그런데 이 레포는 `make -n ci` 출력을 **데이터로 읽는다**

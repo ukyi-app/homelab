@@ -123,7 +123,7 @@ jobs:
         # accounting job이 `--workflow <file>`로 수행한다.
         run: bun tools/check-workflow-readiness.ts
       - name: 실 도메인 가드 (레포 자신에 대해 돌린다 — bats 픽스처가 아니라)
-        # ⚠️ 아래 8종을 **여기서 직접** 부르는 이유: bats로만 돌면 같은 파일의 픽스처 @test 20여 개가
+        # ⚠️ 아래 목록을 **여기서 직접** 부르는 이유: bats로만 돌면 같은 파일의 픽스처 @test 20여 개가
         #    venue를 살려, 실 트리를 검사하는 @test 한 줄이 지워져도 G1이 초록을 유지한다(실측:
         #    check-image-pins의 실 트리 강제는 단 한 줄이 CI의 유일한 권위였다). ci.yaml이 직접 부르면
         #    정의상 실 도메인에 닿으므로 fixture↔real 질문 자체가 사라진다 — G1·G2·G-09와 같은 해법.
@@ -135,6 +135,9 @@ jobs:
           bash scripts/check-app-netpol.sh
           bash scripts/check-image-pins.sh
           bash scripts/check-locale-collation.sh
+          bash scripts/check-gh-secret-coverage.sh
+          bash scripts/check-host-ports.sh
+          bash scripts/check-bats-fd0.sh
           bun tools/check-resource-limits.ts
           bun tools/check-alert-rules.ts
           bun tools/check-disk-caps.ts
@@ -173,7 +176,10 @@ jobs:
         # required gate 잡 안 스텝(별도 잡이면 비-required라 무성 회귀). setup-toolchain이 설치.
         # .github/actionlint.yaml로 queue:max(2026-05 GA) schema-lag 오탐만 좁게 무시(직렬화 계약 유지).
         run: actionlint
-      - name: telegram 메시지 렌더 e2e (containerized AM v0.27)
+      - name: telegram 메시지 렌더 e2e (containerized — 버전은 배포 매니페스트에서 파생)
+        # ⚠️ 스텝 이름에 **버전을 적지 않는다** — 예전엔 "AM v0.27"이라 적혀 있었는데 배포는 이미
+        #    v0.33.0이었다(아무도 대조하지 않는 손 관리 수치는 반드시 드리프트한다). 하네스가
+        #    platform/victoria-stack/prod/alertmanager.yaml에서 태그를 파생하므로 여기 적을 값이 없다.
         # amtool/grep이 못 잡는 inline message Go-template의 실제 컴파일·렌더를 사전 증명한다
         # (한국어 제목·글리프·자동 escape·링크). required gate 잡 스텝 → branch protection이 강제.
         # docker/python3는 ubuntu 러너 기본 제공, yq는 위 install 스텝에서 설치됨.

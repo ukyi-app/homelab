@@ -25,7 +25,7 @@ k3s 단일 노드(**Intel NUC 베어메탈** · Ubuntu 26.04 LTS · amd64) 홈�
 make verify        # 기반 게이트: skeleton + 원장(conftest) + sops 라운드트립
 make chart-test    # 공유 차트: 3 kind(web/worker/site) 렌더 + kubeconform + bats
 make tf-validate   # terraform fmt+validate (3 루트)
-bats tools/tests/ infra/k3s-bootstrap/tests/          # 툴링/부트스트랩 테스트
+bats tools/tests/ infra/k3s-bootstrap/tests/ </dev/null   # 툴링/부트스트랩 테스트(fd 0 격리 — 스텁 hang 방지)
 make verify-posture   # [live] posture 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 필요(부재=SKIP 신호·비-0)
 export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt
 kustomize build --enable-helm --enable-alpha-plugins --enable-exec platform/<comp>/prod  # KSOPS 풀 렌더
@@ -136,12 +136,32 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - GitHub API는 낡은 스냅샷을 200으로 돌려준다 — `last_over_time`은 그 역행 샘플 하나를 그대로 페이지로 바꾼다
 - 로케일 콜레이션이 게이트를 뒤집는다 — en_US의 `sort -u`는 `-1`과 `1`을 같다고 보고 하나를 버린다
 - systemd 유닛 파일은 push 생산자 열거 밖이다 — 유닛에 인라인한 curl은 완전성 가드를 통째로 지나간다
+- bats는 stdin을 만지지 않는다 — 스텁이 피연산자 없이 `cat`을 부르면 호출자의 fd 0에서 영구 블록한다
+- 호스트 포트 밴드는 ephemeral뿐 아니라 NodePort도 피해야 한다 — NodePort는 리스너가 아니라 nat 규칙이라 어떤 bind 프로브로도 안 보인다
+- `Restart=always` 유닛은 failed 상태에 진입하지 않는다 — 시작 rate limit에 못 닿으면 영원히 activating이다
+- `&`로 띄운 헬퍼의 바인드 실패는 `set -e`에 안 걸린다 — readiness 줄이 없으면 30초 뒤 엉뚱한 곳을 가리키는 오진이 된다
+- ERE의 leftmost-longest가 `^A|B.*$` 한 방을 토큰 전체 삭제로 바꾼다 — 검출기가 자기 도메인의 표기법에 눈이 먼다
+- heredoc 상태 기계가 주석 규칙보다 먼저 돌면, `<<PY`를 인용한 주석 한 줄이 파일의 나머지를 통째로 지운다
+- 면제 판정이 주석보다 먼저 돌면, 규약을 *설명한* 파일이 그 규약에서 면제된다 — 가드 자신부터
+- SKIP(exit 4)을 모르는 대조는 gitignored 자산이 있는 로컬에서만 초록이다 — venue가 갈리면 로컬은 CI를 예고하지 못한다
+- `findings="$(awk … || true)"` — 검출기가 죽어도 "0곳 OK"를 내는 가드 본체의 fail-open
+- vmalert에 configCheckInterval이 없으면 룰 파일 변경을 감시하지 않는다 — ArgoCD가 갱신해도 옛 룰을 계속 평가한다
+- 워크플로 YAML의 따옴표 없는 스텝 이름에 콜론이 들어가면 매핑으로 파싱돼 파일이 조용히 깨진다
+- bats @test 이름에 한글/CJK가 있으면 디렉토리 단위 실행에서 침묵 스킵된다
+- homepage: config 마운트를 readOnly로 두면 EROFS · apiserver egress는 노드 CIDR:6443이지 ClusterIP가 아니다
+- 상류 레지스트리의 릴리스 태그가 불변이 아니다 — 재푸시가 옛 매니페스트를 GC해 모든 PR gate를 red로 만든다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 
 **트리거 경계:** 앱 레포는 homelab-write 자격 0 (자기 `GITHUB_TOKEN`으로 GHCR push만).
-인증은 GitHub App 2개 — reader(앱 레포 Contents:read 전용)/writer(homelab Contents+PR write
-전용), 키는 homelab Actions secret에만. **모든 homelab main 쓰기는 PR-first + auto-merge**
+인증은 GitHub App **3개**(2026-08-20 실측 `gh api /orgs/ukyi-app/installations`) —
+reader `contents:read`(4043034) / writer `contents:write`+`pull_requests:write`+`issues:write`(4043080) /
+dispatch `actions:write`(4178609, **키는 homelab이 아니라 앱 레포에** — `reusable-app-build.yaml`이
+`workflow_call` 입력으로 받는다). reader/writer 키만 homelab Actions secret에 있다.
+⚠️ **셋 다 설치 범위는 org 전체**(`repository_selection: all`)다 — "앱 레포 전용"·"homelab 전용"은
+설치가 아니라 **발급 시점 `repositories:`/`owner` 파라미터**로만 성립한다(호출부 14곳 중 9곳은 둘 다
+생략해 현재 레포로 기본 한정, 3곳은 명시, 2곳은 `owner`만 줘 org 범위 — 후자 둘은 의도적이고
+호출부 주석이 근거를 담는다). **모든 homelab main 쓰기는 PR-first + auto-merge**
 (App 토큰은 branch protection 우회 불가; required check `gate` 통과 시 자동 머지).
 
 - **빌드:** 템플릿으로 레포 생성 → `.app-config.yml` 작성(계약: `tools/app-config-schema.json`)

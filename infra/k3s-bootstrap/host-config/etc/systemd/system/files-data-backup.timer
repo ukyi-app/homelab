@@ -1,4 +1,8 @@
-# files-data 백업 스케줄 — RPO=24h (r4의 FilesBackupStale 임계 180000s=2.08일과 짝).
+# files-data 백업 스케줄 — RPO=24h (r4의 FilesBackupStale 임계 **100000s≈27.8시간**과 짝).
+# ⚠️ 이 유닛이 그 여유 산술의 피연산자를 직접 들고 있다: OnCalendar(86400) + RandomizedDelaySec(1800)
+#    + TimeoutStartSec(1800) = 90000s < 100000s. 아래 셋 중 하나라도 늘리면 그 부등식을 다시 세고
+#    r4 쪽 임계를 같은 커밋에서 올려라 — 여기만 늘리면 정상 실행이 알림을 깨운다.
+#    (임계 100000s의 산술 근거는 r4-storage-backup.yaml의 「임계 정정(2026-08-20)」 블록이 SSOT다.)
 # ⚠️ enable은 국면 B 이후다. 짝 유닛 `files-data-backup.service`의 머리말이 이유를 담는다.
 [Unit]
 Description=files-data 오프-매체 백업 (일 1회)

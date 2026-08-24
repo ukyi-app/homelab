@@ -698,7 +698,7 @@ terraform `drift=false` 같은 **결과 플래그**가 전부 준비상태로 �
 2. **핀이 일치하는가** — 아무도 안 봤다. 같은 `repo:tag`가 서로 다른 digest로 갈려 있어도 ①은 통과한다.
 3. **그 digest를 누가 갱신하는가** — 아무도 안 봤다.
 
-라이브 실측(2026-07-28): `pg-tools:18-rclone`이 두 digest로 갈려 있었다. `tools/repin-pgtools.ts`의
+라이브 실측(2026-07-28): `pg-tools:18-rclone`이 두 digest로 갈려 있었다. `tools/repin-ops-image.ts`(당시 `repin-pgtools.ts`)의
 `CONSUMERS`에 등록된 4파일은 GHCR 현재값이었고, 등록 안 된 2파일
 (`platform/adguard/prod/rewrite-reconciler.yaml` · `platform/victoria-stack/prod/pvc-du-exporter.yaml`)은
 **낡은 digest에 영구히 묶여** 있었다 — 재핀 대상이 아니므로 새 빌드가 나와도 영원히 그 상태다.
@@ -1007,10 +1007,14 @@ resolv.conf의 nameserver가 tailnet 대역(CGNAT `100.64.0.0/10` · tailscale U
 
 ### 한시 억제는 자기 만료를 품어야 한다 — 그리고 억제한 알림을 vacuity 대조군으로 쓰던 e2e가 함께 죽는다
 
-**영구 발화하는 critical은 무음보다 나쁘다.** `FilesBackupStale`은 NUC 이식 후 producer(호스트
-launchd + macOS 전용 `backup-files-data.sh`)가 **존재조차 하지 않아** absent 가지가 24/7 참이었다.
+**영구 발화하는 critical은 무음보다 나쁘다.** `FilesBackupStale`은 NUC 이식 직후 producer(레포 밖
+launchd 배선 + macOS 전용 `backup-files-data.sh` — NUC엔 launchd도 diskutil도 없어 하드 실패)가
+**실효적으로 존재하지 않아** absent 가지가 24/7 참이었다.
 `severity=critical` 라우트의 `repeat_interval: 1h`를 타고 하루 24건이 나간다. 상시 소음은 채널 전체를
 둔감화해 **진짜 페이지를 묻는다** — "알림이 있다"가 "감시가 있다"를 뜻하지 않게 된다.
+(2026-08-19에 스크립트가 리눅스로 재작성되고 `files-data-backup.{service,timer}`로 **배선까지 끝났다**.
+그래도 억제는 유효하다 — 국면 A 동안 타이머를 의도적으로 enable하지 않으므로 시리즈는 여전히 absent다.
+남은 것은 국면 B의 `systemctl enable --now` 한 줄이고, 그때 억제 절 제거가 함께 가야 한다.)
 
 **억제의 만료는 룰 자신이 들고 있어야 한다.** 사람이 기억해야 하는 억제는 영구 침묵이 된다.
 expr에 `and on() (vector(time()) >= <재무장 unixtime>)`을 달면 만료가 자동이고 상한이 명시된다.
@@ -1020,8 +1024,8 @@ expr에 `and on() (vector(time()) >= <재무장 unixtime>)`을 달면 만료가 
 정확히 뒤쪽(absent) 가지에만 걸린다. 위험한 것은 그 반대 형태 `(A or B) and on() C`(전체를 괄호로
 묶는 것)로, 그러면 staleness 가지까지 함께 죽어 **producer가 되살아나도 감시가 안 돌아온다.**
 **두 형태 모두 문법상 유효해 `-dryRun`이 구별하지 못한다** — 그래서 형태를 잠그는 가드가 필요하다.
-실측(VictoriaMetrics v1.145.0): 끝에 붙인 형태에서 실행자 없음 → 무발화 / 배선 + stale → **발화** /
-배선 + fresh → 무발화 / 억제 없는 원본 + 실행자 없음 → 발화.
+실측(VictoriaMetrics v1.145.0): 끝에 붙인 형태에서 push 없음 → 무발화 / push 있음 + stale → **발화** /
+push 있음 + fresh → 무발화 / 억제 없는 원본 + push 없음 → 발화.
 
 **시각 상수는 SSOT의 파생값이다.** 창의 SSOT는 `versions.env`의 `BULK_MIGRATION_WINDOW_UNTIL`이고
 룰은 YAML이라 런타임 파생이 불가능하다 → 하드코딩을 허용하되 **양방향 정합 가드**로 잠근다.
@@ -1309,3 +1313,329 @@ selfHeal과 플립플롭한다.
   rollup 윈도·생산자 레지스트리 문제가 전부 사라진다. 게다가 push 경로는 kubectl/port-forward에
   의존해 **자기 트리거와 함께 죽는다**(kubectl 불가가 백업 유닛 실패의 주요 원인이다).
 > 가드: `tests/gates/test_unit-failure-notify.bats`
+
+### bats는 stdin을 만지지 않는다 — 스텁이 피연산자 없이 `cat`을 부르면 호출자의 fd 0에서 영구 블록한다
+- **bats는 fd 0을 전혀 건드리지 않는다**(1.14.0 libexec 전체에 `0<`/`</dev/null` 0건 — 실측). `run`도
+  커맨드 치환이라 stdin을 그대로 상속한다. 그래서 @test 안의 스텁이 피연산자 없이 `cat`을 부르면
+  그 `cat`은 **bats를 부른 셸의 stdin**에서 EOF를 기다린다.
+- **실측(2026-08-20)**: `tests/test_sealed-secrets-restore.bats`의 `sops` 스텁이
+  `printf '#!/bin/sh\ncat\n'`이었다. 피시험 코드(`scripts/sealing-key-dr-gate.sh:121`)는
+  `sops -d … "$latest" | sanitize_backup_yaml`로 **파일 인자를 주고 파이프로 먹이지 않는다** —
+  그 `sops`는 파이프의 **첫** 명령이라 먹일 stdin이 없다. never-EOF stdin을 물리면 TAP이 `1..1`에서
+  정지하고 rc=124(`timeout`)다. `</dev/null`이면 같은 파일 22건이 1초에 통과한다.
+  이전 세션은 이 모양으로 **1시간 39분**을 태웠다(자식 프로세스 없이 블록).
+- **왜 red가 아니라 hang인가**: 실패도 출력도 없이 멈춘다. 스위트가 `not ok`를 내면 사람이 읽지만,
+  멈추면 **관측되는 것이 아무것도 없다.** "느린 테스트"와 구별되지 않으므로 CI 타임아웃까지 간다.
+- ⚠️ **venue가 갈리는 자리다.** CI가 이걸 안 밟는 것은 러너의 성질이 아니라 `ci.yaml:245`가 러너를
+  `&`로 띄우기 때문이다(비대화형 bash의 async 명령은 fd 0이 `/dev/null`). `make ci`는 포그라운드라
+  호출자의 fd 0을 그대로 물려받는다. 즉 **로컬만 밟고 CI는 영원히 초록**이다 — 「tracked 열거 게이트는
+  untracked 파일을 아예 안 본다」와 같은 클래스(로컬 초록이 CI를 예고하지 못하는 것의 거울상)다.
+- ⇒ **처방은 3층이고 층마다 막는 것이 다르다.**
+  1. **러너가 스스로 fd 0을 끊는다**(`scripts/run-bats.sh`의 `exec 0</dev/null`) — 클래스 전체를
+     구조적으로 없앤다. 호출면 전량(`Makefile`·`iac.yaml`·`AGENTS.md`)도 `</dev/null`을 붙인다.
+     ⚠️ `>/dev/null`은 stdout이라 격리가 **아니다**.
+  2. **스텁의 입력원을 argv로 못박는다** — 파일 인자는 항상 마지막 위치라는 규약
+     (`for f in "$@"; do :; done; exec cat "$f"`). 이게 결함 자체의 수정이다. 1층만 하면 스텁은
+     여전히 계약을 어기고 있고, `</dev/null`을 빠뜨린 새 호출면에서 되살아난다.
+  3. ⚠️ **per-@test 타임아웃 백스톱은 쓸 수 없다.** 1·2층이 못 덮는 잔여 블로킹(스텁이 스스로 여는
+     fifo·`/dev/tty` 직접 열기)은 열거할 수 없고, 열거 없이 fail-loud하는 유일한 기전이
+     `BATS_TEST_TIMEOUT`이다. 그런데 그 값이 설정돼 있으면 **실패하는 중첩 bats를 부르는 @test가
+     거짓 타임아웃**을 낸다. 최소 재현(2026-08-20): `run bats <통과하는 파일>`은 1초에 끝나고,
+     **같은 구조에서 안쪽 파일만 실패하게 바꾸면** 타임아웃을 꽉 채우고 죽는다. 라이브에서는
+     `tests/gates/test_guard-skip-signalling.bats`의 "reports failure (not skip)…"가 그랬다 —
+     백스톱 없이 0초 통과, `BATS_TEST_TIMEOUT=40`이면 40초 후 red이고 진단은 `echo '}'`라는
+     **도달 불가능한 자리**를 가리킨다(그래서 원인을 코드에서 찾으면 영원히 못 찾는다).
+     이 레포는 **fail-closed를 단언하는 게이트가 다수**라 그런 @test가 우연이 아니라 구조적으로
+     존재한다 ⇒ 보험이 통과하던 게이트를 깨뜨리는 **순손실**이다. 넣지 마라.
+- ⚠️ **정적 스캐너("스텁 본문에 bare `cat` 금지")는 만들지 않았다.** 이 레포의 스텁은 `printf`·
+  heredoc·`cat >`로 제각각 쓰이고 정당한 `cat`(파이프 계약이 확실한 자리)이 다수라, 술어가 넓으면
+  거짓 양성이 쏟아지고 좁히면 곧 vacuous해진다. 대신 **행동 증인**을 쓴다: 스텁 emitter를 헬퍼로
+  묶고, stdin에 **다른 내용을 파이프로 흘린 채** 호출해 출력이 파일 내용인지 단언한다. 헬퍼가 bare
+  `cat`으로 되돌아가면 hang이 아니라 **red**가 된다(파이프에는 EOF가 있다). 실측으로 감도를 확인했다.
+> 가드: `scripts/run-bats.sh`, `tests/test_sealed-secrets-restore.bats`
+
+### 호스트 포트 밴드는 ephemeral뿐 아니라 NodePort도 피해야 한다 — NodePort는 리스너가 아니라 nat 규칙이라 어떤 bind 프로브로도 안 보인다
+- 임시 컨테이너에 호스트 포트를 붙이는 하네스는 "빈 포트"를 골라야 하는데, **무엇이 비었는지 묻는
+  방법이 세 가지고 셋 다 다른 답을 준다.** 예전 구현은 20000-39999에서 뽑고 `/dev/tcp` connect로
+  확인했다 — 범위와 프로브가 각각 틀렸다.
+- **① 커널 ephemeral과 겹치면 자기 자신과 경합한다.** 이 NUC은 32768-60999라 예전 밴드와 7232포트가
+  겹쳤다. 하네스 자신의 `curl`(health 폴 60회 + 매 질의)이 그 대역에 아웃바운드 소스 포트를 계속
+  만들므로 **혼자 돌아도** 자기 포트를 빼앗긴다. 2026-08-19 실측 실패 포트 35704가 정확히 이 구간이다.
+  ⇒ "병렬 실행의 TOCTOU"로 진단하면 처방이 빗나간다. 병렬도를 낮춰도 안 없어진다.
+- **② NodePort는 어떤 bind 프로브로도 안 보인다.** k8s 기본 30000-32767이 예전 밴드에 통째로 들어
+  있었다. NodePort는 리스너가 아니라 **nat 규칙**(KUBE-NODEPORTS DNAT)이라 프로세스가 그 포트를
+  잡고 있지 않다. **실측(2026-08-20)**: 30953 = `gateway/traefik:443`인데 `ss -ltnp` 0건 ·
+  connect 프로브 FREE · **plain bind도 FREE** · 그런데 `curl http://127.0.0.1:30953/health`는
+  Traefik의 `404 page not found`를 받는다. ⇒ 컨테이너는 정상 기동하고 `docker port` 대조까지
+  통과하는데 질의만 남의 서비스로 간다. 예전 코드는 그 상태를 60×0.5s 태운 뒤 **"not ready"로
+  오진**했다 — 원인이 로그 어디에도 없다. **프로브를 아무리 고쳐도 못 잡는다. 밴드에서 빼는 것이
+  유일한 처방이다.**
+- **③ connect 프로브는 리스너만 본다.** `/dev/tcp`(그리고 `nc -z`)는 "지금 접속되는가"를 묻는데,
+  bind가 실패하는 포트는 그보다 넓다. **실측**: 리스너를 닫고 남은 accepted 소켓이 붙든 포트와
+  아웃바운드 연결의 로컬 소스 포트 — 둘 다 connect는 FREE라 답하고 plain bind는 EADDRINUSE(98)다.
+  ⇒ **런타임이 실제로 던지는 질문(bind)을 그대로 던져야 한다.**
+- **④ `127.0.0.1` bind 프로브는 특정 인터페이스에만 있는 리스너를 못 본다.** ③에서 프로브를 bind로
+  고쳐도 **바인드 주소**라는 축이 하나 더 남는다. **실측(2026-08-21, 같은 포트)**: 점유가
+  `127.0.0.1`이면 두 프로브 모두 BUSY(98), 점유가 `0.0.0.0`이어도 두 프로브 모두 BUSY, 그런데 점유가
+  **글로벌 IP(192.168.x.x) 하나뿐**이면 `127.0.0.1` 프로브는 **FREE라고 오답**하고 `0.0.0.0` 프로브만
+  BUSY다. `0.0.0.0` bind는 그 포트를 **어느 주소로든** 잡고 있으면 실패하므로 세 경우를 다 맞히는
+  엄격한 상위집합이다. ⇒ 소비자가 루프백 전용으로만 바인드한다면 차이가 안 나지만, 컨테이너가
+  host-gateway로 붙는 헬퍼(telegram mock·블랙홀 sink)는 **`0.0.0.0`에 바인드할 수밖에 없어** 그
+  오답이 곧 EADDRINUSE 사고다. 엄격한 쪽으로 틀리는 대가는 "쓸 수 있는 포트를 가끔 건너뛰는 것"뿐이고
+  재추첨이 흡수한다.
+- ⚠️ **그 bind 프로브에 `SO_REUSEADDR`를 켜지 마라.** 실측: accepted 소켓이 잡은 포트에 대해
+  `bind+SO_REUSEADDR`는 **성공**하고 plain bind는 EADDRINUSE다. REUSEADDR를 켜면 프로브가 런타임보다
+  **관대**해져 못 쓰는 포트를 배정한다. plain bind는 어떤 런타임보다 같거나 엄격해 안전한 방향으로만
+  틀린다(TIME_WAIT 포트를 가끔 건너뛸 뿐이다).
+- ⇒ **처방은 세 겹이고 각각 다른 것을 막는다.** ①② 밴드를 두 예약 **밖**으로 옮기고 그 배타성을
+  **라이브로** 검사한다(상수만 두면 호스트가 범위를 바꿀 때 조용히 회귀한다). ③ 프로브를 plain
+  bind로 바꾼다. 그리고 프로브~`docker run` 사이의 **잔여 TOCTOU**만 재시도가 흡수한다 —
+  재시도는 결함 제거가 아니라 잔여 흡수이므로, 밴드를 안 고치고 재시도만 넣으면 실패율만 낮아지고
+  ②는 그대로 남는다.
+- ⚠️ **재시도의 판별자를 메시지나 종료코드로 삼지 마라.** 같은 podman도 pasta/rootlessport로 문자열이
+  갈리고 CI의 dockerd는 또 다르다 — venue 의존 판별자는 한 venue에서 조용히 무력해진다. 판별자는
+  "**서로 다른 포트로 다시 하면 되는가**" 하나이고, 서로 다른 포트 N개에서 모두 실패하면 그때는
+  포트 경합이 아니므로 원본 stderr 전량과 함께 fail-closed한다.
+- ⚠️ **실패한 `docker run -d`는 컨테이너를 Created로 남긴다** → 같은 이름으로 재시도하면
+  "name already in use"로 죽는다. 재시도 직전에 `docker rm -f`를 넣지 않으면 재시도가 있는데도
+  회복하지 못한다(podman 전용 `--replace`는 docker 양립성이 없다).
+- ⚠️ **health 확인은 2xx가 아니라 본문을 봐야 한다.** ②의 서명이 정확히 "HTTP는 200인데 남의 답"이다.
+  본문이 기대값이 아니면 그것은 "아직 안 뜸"이 아니라 **라우팅이 우리 것이 아니라는 확정**이므로
+  대기가 아니라 즉시 FAULT다.
+- ⚠️ **처방을 한 소비자의 lib 안에 두면 형제 표면은 원리적으로 그 처방을 못 받는다.** 위 세 겹을
+  `lib/vmalert-e2e.sh`에 넣고 완전성 가드를 `vmalert-*-firing-e2e.sh` 글롭으로 걸었는데, 그 글롭
+  **밖**에 호스트 포트를 잡는 표면이 남아 있었다 — 하네스 둘(`alertmanager-render-e2e.sh` ·
+  `skopeo-timeout-smoke.sh`)에 리터럴 포트 셋(AM publish `9093` · telegram mock `8089` ·
+  블랙홀 sink `18443`). 열거가 붕괴한 것이 아니라 **열거 범위가 처음부터 좁았다** — 그래서 바닥값도
+  want/got 대조도 이 갭에 대해 원리적으로 침묵한다. ⇒ 프리미티브는 소비자 중립 lib
+  (`tests/gates/lib/host-port.sh`)이 소유하고, 완전성은 소비자 글롭이 아니라 **"호스트 포트를 잡는
+  행위"** 를 도메인으로 삼는 가드(`scripts/check-host-ports.sh`)가 hard-zero로 강제한다.
+> 가드: `tests/gates/test_vmalert-e2e-port-allocation.bats`, `tests/gates/lib/vmalert-e2e.sh`, `tests/gates/lib/host-port.sh`, `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats`
+
+### `&`로 띄운 헬퍼의 바인드 실패는 `set -e`에 안 걸린다 — readiness 줄이 없으면 30초 뒤 엉뚱한 곳을 가리키는 오진이 된다
+- 하네스가 보조 서버를 `cmd … &`로 띄우면 **`set -euo pipefail`은 그 종료코드를 보지 않는다.**
+  `wait`도 liveness 확인도 없으면, 그 프로세스가 즉사해도 하네스는 그대로 다음 단계로 간다.
+- **실측(2026-08-21)**: `tests/gates/alertmanager-render-e2e.sh`가 telegram mock을 고정 포트 `8089`에
+  `&`로 띄웠다. 그 포트를 미리 점유한 채 같은 argv로 돌리면 mock은 `OSError: [Errno 98] Address
+  already in use` 트레이스백과 함께 rc=1로 죽는다. 그런데 하네스는 진행해서 → AM readiness 통과 →
+  alert inject 8회 재시도 끝에 성공(AM은 실제로 받는다) → `wait_capture`가 60×0.5s를 소진 →
+  `no telegram capture within timeout` + **AM 로그 tail**로 종료한다. 즉 **최종 진단이 포트가 아니라
+  메시지 템플릿을 가리키고**, 진짜 원인인 트레이스백은 그 로그 60줄 위에 있다.
+- ⇒ 처방은 **readiness 줄을 계약으로 만드는 것**이다: 헬퍼가 바인드 성공 직후 stderr에 한 줄을 쓰고,
+  호출자가 그 줄(또는 프로세스 사망)을 기다린다. 형제 `tests/gates/tcp-blackhole-sink.py`가 이미
+  `sink: listening on <port>`로 그렇게 하고 있었다 — **같은 레포 안에서 한쪽만 처방을 받은 상태**였다.
+- ⚠️ 대기 루프는 `kill -0`로 **프로세스 사망도** 탈출 조건에 넣어야 한다. readiness 줄만 기다리면
+  이미 죽은 헬퍼를 상대로 타임아웃을 꽉 채우고, 그러면 오진 시간이 줄어들 뿐 없어지지 않는다.
+- ⚠️ 헬퍼에 **argc 가드**를 넣어라. 인자가 모자라면 `IndexError` 트레이스백이 background job의
+  stderr로만 나가 호출자가 못 본다 — 같은 오진이 다른 입구로 돌아온다.
+> 가드: `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats`
+
+### `Restart=always` 유닛은 failed 상태에 진입하지 않는다 — 시작 rate limit에 못 닿으면 영원히 activating이다
+- `systemctl list-units`를 읽어 "failed인 유닛"을 감시하는 축을 만들면, **상시 재시작 서비스가 그
+  축에 원리적으로 잡히지 않는다.** systemd는 `Restart=`가 붙은 유닛을 실패 시 `auto-restart`로
+  돌리고, **시작 rate limit(`StartLimitBurst` 회를 `StartLimitIntervalUSec` 안에)에 도달했을 때만**
+  `failed`로 확정한다. 그 한계에 못 닿으면 유닛은 영원히 `activating (auto-restart)`를 오간다.
+- **실측(2026-08-20, 이 NUC)**: `k3s.service`는 `Restart=always` · `RestartUSec=5s` ·
+  `StartLimitIntervalUSec=10s` · `StartLimitBurst=5`다. 10초 창에 5초 간격이면 시도가 **최대 3회**라
+  burst 5에 **구조적으로 도달할 수 없다** ⇒ k3s가 크래시루프에 빠져도 `failed`가 되지 않는다.
+  즉 전역 스윕이 그 장애를 **못 본다**.
+- **무엇이 위험한가**: 위험은 못 보는 것 자체가 아니라 **"이제 전역을 덮었다"는 오해**다.
+  스윕을 넣고 나면 호스트 실패가 전부 커버된 것처럼 읽히는데, 정작 가장 중요한 서비스가
+  그 커버리지 밖이다. 「열거 붕괴 → vacuous green」의 사촌인데, 여기서는 열거가 아니라
+  **상태 정의**가 구멍이다 — 유닛이 목록에 **있고** 상태도 정확한데, 그 상태가 `failed`가 아니다.
+- ⇒ **처방: 축을 나눠 적고, 각 축이 못 보는 것을 그 축의 문서에 적는다.** 상시 재시작 서비스의
+  생존은 systemd가 아니라 **그 서비스가 제공하는 것**으로 본다(k3s면 TargetDown·Watchdog·
+  off-node deadman). 스윕이 커버하는 것은 `Restart=no` 유닛이다 — 이 호스트에서는 `apt-daily`·
+  `apt-daily-upgrade`·`fstrim`·`logrotate`·`man-db`·`unattended-upgrades`·`e2scrub_all` 등이다.
+- ⚠️ **`StartLimitBurst`를 낮춰 "failed에 도달하게 만드는" 것은 처방이 아니다.** 그러면 일시적
+  장애에서 k3s가 재시작을 **포기**하고 죽은 채로 남는다 — 관측을 얻으려고 복원력을 파는 거래다.
+  관측이 필요하면 관측 축을 따로 놓는다.
+> 가드: `tests/gates/test_systemd-failed-sweep.bats`, `scripts/sweep-systemd-failures.sh`
+
+### ERE의 leftmost-longest가 `^A|B.*$` 한 방을 토큰 전체 삭제로 바꾼다 — 검출기가 자기 도메인의 표기법에 눈이 먼다
+- **병(2026-08-24 실측, `scripts/check-host-ports.sh` 도입판)**: publish 인자에서 따옴표를 벗기려고
+  `gsub(/^["']|["'].*$/, "", cand)` 한 방을 썼다. 그런데 POSIX ERE는 **오프셋이 앞선 매치를 먼저**
+  고르고, 같은 오프셋이면 **가장 긴 대안**을 고른다(leftmost-longest). `"9093:9093"`은 오프셋 0에서
+  두 대안이 **동시에** 시작하므로 더 긴 `["'].*$`가 이겨 **토큰 전체**를 먹는다 ⇒ `cand=""`.
+  `printf '%s' '-p "9093:9093"' | awk '{c=$2; gsub(/^["'"'"']|["'"'"'].*$/,"",c); print "["c"]"}'` → `[]`
+  (gawk 5.3.2 · mawk 1.3.4 동일).
+- **왜 침묵했는가**: 빈 `cand`는 `split(cand, part, ":")`가 0을 줘 `np < 2`에서 조용히 `continue`된다.
+  그 `continue`가 `binds[FILENAME]=1`보다 **위**라, 레인 A(리터럴 호스트 포트)뿐 아니라
+  레인 C(배정 lib 미사용)까지 **함께 꺼졌다**. 가드 헤더가 「A가 못 보면 C까지 함께 꺼진다」고
+  스스로 적어 둔 그 자리를 정작 정규식이 밟았다.
+- ⚠️ **하필 사각지대가 이 레포의 실제 표기였다.** 하네스는 `-p "127.0.0.1:${PORT}:9093"`처럼 따옴표로
+  쓴다. 즉 가드가 초록인 채로, 그 가드가 없앴다고 선언한 사고를 그대로 되돌릴 수 있었다 —
+  실측: 이 PR이 고친 두 자리를 따옴표를 **유지한 채** 리터럴로 되돌려도 `0곳 OK` rc=0.
+- ⚠️ **bats 대조군이 함께 눈이 멀어 있었다.** dirty 픽스처는 전부 따옴표 **없이**, clean 픽스처만
+  따옴표형이었다. 그래서 clean 레인은 변수를 리터럴로 바꿔도 통과하는 **vacuous 대조**였다.
+  픽스처의 표기가 도메인의 표기와 다르면, 통과한 대조는 아무것도 증명하지 않는다.
+- ⇒ **처방: 벗기기와 자르기를 두 `sub`로 나눠 순서를 강제한다.** `sub(/^["']/,"",c)`로 선두를 먼저
+  벗기면, 남은 따옴표는 정의상 **닫는** 쪽이므로 `sub(/["'].*$/,"",c)`가 안전하다. 대안에 `.*`가
+  들어가는 순간 그 대안은 나머지 전부를 먹을 수 있다고 읽어라. (`$` 앵커만 있고 `.*`가 없는
+  `["'&;)]+$` 형태는 이 함정에 걸리지 않는다 — 같은 파일의 레인 D가 그 형태다.)
+- ⇒ **그리고 픽스처는 도메인이 실제로 쓰는 표기로 적는다.** 양성 픽스처를 표기별로 전부 걸어라
+  (`"…"` · `'…'` · `-p "host:c:h"` · `--publish="…"`). 하나만 걸면 다음 표기로 조용히 빠져나간다.
+> 가드: `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats`
+
+### heredoc 상태 기계가 주석 규칙보다 먼저 돌면, `<<PY`를 인용한 주석 한 줄이 파일의 나머지를 통째로 지운다
+- **병(2026-08-24 실측)**: awk 검출기가 heredoc 본문을 건너뛰려고 상태 기계를 `{ ... }` 무조건
+  블록에 두었는데, 주석 스킵 규칙 `/^[ \t]*#/ { next }`가 그 **아래**에 있었다. awk는 규칙을 적힌
+  순서로 평가하므로 **주석줄도 heredoc 시작 판정을 받는다**. `# 예전엔 \`python3 - <<PY\`로 …`
+  한 줄이 `inhere=1`·`delim="PY"`를 세우고, 그 뒤 모든 줄이 `next`로 빠져 레인이 하나도 안 돈다.
+- ⚠️ **[E](미종료 heredoc) 레인도 침묵한다.** 그 파일에 **진짜** `PY`/`EOF` 종료줄이 이미 있으면
+  가짜 heredoc이 거기서 조용히 닫히기 때문이다. 실측: 추적 도메인 15파일 중 5파일이 그 조건을
+  만족했다 — 즉 절반 가까이가 fail-open, 나머지만 fail-closed라는 **비대칭 침묵**이었다.
+- ⚠️ **파일 수 축 회계로는 원리적으로 못 본다.** `SCAN:` 신호도 `READFILES` 대조도 **파일 개수**를
+  세므로, 파일이 열리기는 했으나 그 안이 통째로 스킵된 붕괴에는 둘 다 정상값을 낸다. 열거 붕괴를
+  파일 수로 막는 규율은 **줄 단위 붕괴에 대해서는 대조군이 아니다.**
+- ⚠️ **AGENTS.md 컨벤션이 이 지뢰를 밟도록 유도한다.** 이 레포의 규율은 "고친 함정을 인용하며
+  설명"하는 것이고, 하네스는 `<<PY`·`<<EOF` 투성이다. 도입 시점에는 히트가 0이었으니 초록이
+  거짓은 아니었다 — **다음 편집 한 줄이 잠복을 깨우는** 형태다.
+- ⇒ **처방: 주석 스킵을 상태 기계 안으로, `inhere` 닫힘 판정 바로 뒤에 올린다.** 닫힘 판정보다
+  앞에 두면 heredoc 본문의 `#` 줄이 종료 판정을 못 받아 반대 방향으로 깨진다.
+- ⇒ **같은 클래스의 세 번째다.** 앞의 둘은 `<<<` herestring(2번째 `<`부터 `<< "foo"`로 읽힌다)과
+  산술 좌시프트 `$(( a << b ))`였다. **`<<`를 문자로 보는 상태 기계는 그것이 heredoc이 아닌 경우를
+  전부 열거해야 하고, 그 열거는 계속 는다** — 새 오인원을 만나면 회귀 픽스처를 함께 남겨라.
+> 가드: `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats`
+
+### 면제 판정이 주석보다 먼저 돌면, 규약을 *설명한* 파일이 그 규약에서 면제된다 — 가드 자신부터
+- **병(2026-08-24 실측, `scripts/check-bats-fd0.sh` 도입판)**: "이 파일이 스스로 `exec 0</dev/null`을
+  하는가"로 면제를 판정하는 규칙(`/exec[ \t]+0<[ \t]*\/dev\/null/ { self = 1 }`)이 주석 스킵
+  `/^[ \t]*#/ { next }`와 `name:` 스킵보다 **위**에 있었다. awk는 규칙을 적힌 순서로 평가하므로
+  **그 문자열을 인용하기만 한 줄도 면제를 세운다.**
+- **세 표면이 모두 걸렸다**(실측, 셋 다 `rc=0` + "전건 fd 0 격리 OK"): 셸 헤더 주석 한 줄 ·
+  Makefile `##` 도움말 · 워크플로 스텝 `name:`. 각 경우 같은 파일에서 그 한 줄만 빼면 즉시 `[FD0]`가 난다.
+- ⚠️ **가드 자신이 영구 면제 상태였다.** 헤더가 규약을 설명하며 `exec 0</dev/null`을 인용하기 때문이다.
+  즉 그 파일에 위반을 넣어도 잡히지 않았다 — hard-zero를 선언한 가드가 자기 자신에게만은 waiver였다.
+- **왜 이 클래스가 반복되는가**: 「면제는 파일 목록이 아니라 **사실**로 판정한다」는 규율은 옳다.
+  그런데 그 "사실"을 **텍스트 매칭**으로 읽는 순간, 규약을 문서화한 산문이 규약 준수의 증거로 오인된다.
+  이 레포는 "고친 함정을 인용하며 설명"하는 컨벤션을 갖고 있어 그 오인원이 도처에 있다.
+- ⇒ **처방: 면제 판정을 주석·이름 스킵 **뒤**로, 그리고 `code()`로 행간 주석을 벗긴 텍스트에 대해 한다.**
+  판정 대상은 "파일에 그 문자열이 있는가"가 아니라 "**코드에** 그 문장이 있는가"다.
+- ⇒ **회귀 픽스처는 세 표면을 전부 건다**(셸 주석 · `##` 도움말 · YAML `name:`). 하나만 걸면 나머지
+  표면으로 조용히 빠져나간다. 음성 대조(**진짜** exec 줄은 여전히 면제)를 함께 두어, 수정이 면제
+  자체를 없앤 것이 아님을 증인으로 남긴다.
+> 가드: `scripts/check-bats-fd0.sh`, `tests/gates/test_bats-fd0.bats`
+
+### SKIP(exit 4)을 모르는 대조는 gitignored 자산이 있는 로컬에서만 초록이다 — venue가 갈리면 로컬은 CI를 예고하지 못한다
+- **병(2026-08-24 실측)**: `tests/gates/test_scan-floor.bats`의 로스터 대조는 커널 가드를 **실제로 실행**해
+  `SCAN:` 라벨을 모으고 정적 열거와 집합 비교한다. 그런데 `scripts/verify-credential-inventory.sh`는
+  대상 런북이 **gitignored 로컬 전용**이라 CI에서 원리적으로 `exit 4`(SKIP)를 내고 SCAN 라벨을 0개 낸다.
+  대조는 그 rc를 "가드가 비-0으로 죽었다"로 읽었다 ⇒ **로컬 `make ci` rc=0 · PR `gate` FAILURE.**
+- **왜 사전에 안 보였는가**: 로컬에는 런북이 있어 같은 가드가 rc=0을 내고 라벨 2개를 낸다.
+  즉 **로컬 초록이 CI를 예고하지 못하는 형태**다(「tracked 열거 게이트는 untracked 파일을 안 본다」의
+  거울상 — 그쪽은 로컬에만 있는 파일을 CI가 못 보는 것이고, 이쪽은 로컬에만 있는 파일이 rc를 바꾼다).
+  재현은 `git archive HEAD | tar -x -C <스크래치>`면 된다 — gitignored가 빠진 트리가 곧 CI 트리다.
+- ⇒ **처방 ①: SKIP은 실패가 아니고, 대조에서 양쪽이 대칭으로 빠져야 한다.** SKIP한 가드의 라벨을
+  런타임에서만 빼면 정적 쪽이 남아 반대 방향으로 red다. 그 가드의 라벨을 정적 집합에서도 뺀다.
+- ⇒ **처방 ②: SKIP에는 상한을 둔다.** 없으면 "전부 SKIP → 양쪽 공집합 → 등식 성립"이라는 vacuous
+  green이 열린다. SKIP 수는 venue에 따라 달라지므로(로컬 0 · CI 1) 바닥값이 아니라 **상한**이다.
+  그리고 SKIP한 가드 이름을 항상 출력해 커버리지 축소가 diff와 로그에 보이게 한다.
+- ⚠️ **`out="$(...)"; rc=$?`는 bats에서 못 쓴다.** bats는 `set -e` 아래라 **할당이 비-0이면 그 줄에서
+  죽어** 다음 줄의 rc 판정에 도달하지 못한다(이 수정의 첫 판이 정확히 그래서 CI조건 재현에서
+  `failed with status 4`로 깨졌다). `rc=0; out="$(...)" || rc=$?`로 써야 한다 — 형제 가드들이
+  `|| arc=$?`를 쓰는 이유가 그것이다.
+> 가드: `tests/gates/test_scan-floor.bats`, `scripts/verify-credential-inventory.sh`
+
+### `findings="$(awk … || true)"` — 검출기가 죽어도 "0곳 OK"를 내는 가드 본체의 fail-open
+- **병(라이브 실측 2026-08-24)**: awk 검출기를 쓰는 정적 가드들이 결과를 `findings="$(awk "$DETECT"
+  "${FILES[@]}" || true)"`로 받았다. 그 `|| true`는 **awk가 fatal로 죽은 rc까지** 삼킨다. 그러면
+  `findings`가 비고, 카운트가 0이 되어 가드는 `"0곳 OK" rc=0`을 낸다 — **검출기가 아무것도 안 봤는데
+  통과**다. 뮤테이션 증인: `check-locale-collation.sh`·`check-bats-style.sh`의 awk 프로그램에
+  syntax error를 한 글자 심으면(`gsub`→`gsub_TYPO`) red 없이 그대로 초록이었다.
+- **왜 `|| true`가 거기 있었는가**: 정당한 이유가 있다 — `set -euo pipefail` 아래에서 awk가 매치 0건에
+  비-0을 내는 구현이 있고(일부), 그걸 실패로 오인하지 않으려 붙였다. 그러나 그 관용구는 **매치 0건**과
+  **검출기 사망**을 구별하지 못한다. 둘 다 rc≠0인데 뜻이 정반대다.
+- ⇒ **처방은 세 겹이다**(형제 `check-host-ports.sh`가 먼저 채택, #525):
+  ① awk rc를 `2>"$errlog"` + `|| arc=$?`로 **포착**하고, 0이 아니면 "판정 불가는 통과가 아니다"로 red.
+  ② 인자를 awk에 넘기기 **전에** `[ -r "$f" ]`로 검증한다 — 읽을 수 없는 파일이 gawk를 fatal로 죽인다.
+  ③ awk가 `END { printf "READFILES=%d\n", nfiles > "/dev/stderr" }`로 **실제로 읽은 파일 수**를 보고하고,
+     셸이 그것을 열거 수와 대조한다. SCAN 신호(scan-floor)는 "열거한" 수라, 검출이 중간에 무너져도
+     그 수는 그대로 나가므로 개수 축만으로는 이 붕괴를 원리적으로 못 본다.
+- ⚠️ **이 처방을 한 가드에만 넣으면 형제가 남는다.** #525가 host-ports에 넣었을 때 핸드오프가
+  "check-locale-collation·check-bats-style에 같은 `|| true`가 그대로다"라고 후속 후보로 남겼고,
+  실측하니 그 두 줄이 문자 그대로 동일했다. 같은 lib(`scan-floor.sh`)를 쓰는 awk 가드는 전부 이
+  패턴을 공유하므로, 새 awk 가드를 추가할 때 이 세 겹을 함께 넣어야 한다.
+> 가드: `scripts/check-host-ports.sh`, `scripts/check-locale-collation.sh`, `scripts/check-bats-style.sh`, `tests/gates/test_host-ports.bats`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_bats-style.bats`
+### vmalert에 configCheckInterval이 없으면 룰 파일 변경을 감시하지 않는다 — ArgoCD가 갱신해도 옛 룰을 계속 평가한다
+- **병**: vmalert(그리고 vmagent)는 마운트된 룰/스크래이프 설정 파일의 변경을 **기본으로 감시하지 않는다.**
+  `-configCheckInterval`(vmagent는 `-promscrape.configCheckInterval`)이 설정돼야 그 주기로 파일을 다시
+  읽는다. 이 플래그가 없으면 ArgoCD가 ConfigMap을 갱신하고 kubelet이 마운트를 새 내용으로 바꿔도,
+  vmalert는 **메모리상 옛 룰을 계속 평가**한다 — 수동 `rollout restart`나 `-/reload`를 칠 때까지.
+- **왜 위험한가**: 이것은 red가 아니라 **silent staleness**다. 룰을 고치는 커밋이 머지되고 ArgoCD가
+  Synced/Healthy를 보고해도, 정작 발화 판정은 옛 룰로 돈다. "배포됐다"와 "평가에 반영됐다" 사이의
+  간극이 관측되지 않는다 — 알림 룰이라면 그 간극 동안 진짜 사고를 놓칠 수 있다.
+- ⇒ **처방: 두 컴포넌트 모두 configCheckInterval을 명시하고, 그 존재를 게이트로 강제한다.**
+  값 자체보다 **존재**가 계약이다(없으면 감시가 통째로 꺼지므로). ConfigMap 변경이 파드 재시작을
+  자동으로 일으키지 않는다는 인접 함정과 짝이다 — 그쪽은 envFrom 시크릿, 이쪽은 룰 파일이다.
+> 가드: `tests/gates/test_vmalert-config.bats`
+
+### 워크플로 YAML의 따옴표 없는 스텝 이름에 콜론이 들어가면 매핑으로 파싱돼 파일이 조용히 깨진다
+- **병(실측)**: `bump-poll.yaml`의 스텝 `name: 신뢰 경계: ...`가 따옴표가 없어, YAML 파서가 `신뢰 경계`를
+  키로 `...`를 값으로 하는 **중첩 매핑**으로 읽었다. 그 결과 `update-image` 권위 경로(bump-poll) 전체가
+  불능이 됐는데 **CI 게이트가 못 잡았다** — 워크플로가 스스로를 트리거하는 경로라 문법이 깨져도
+  다른 잡의 초록에 묻혔다.
+- **왜 이 클래스가 반복되는가**: YAML에서 따옴표 없는 스칼라 안의 `:`(뒤에 공백이 오면)는 **항상**
+  키-값 구분자다. 한국어 스텝 이름은 "신뢰 경계:", "포트 확인:"처럼 콜론+공백을 자연스럽게 쓰므로
+  이 지뢰를 밟기 쉽다. 그리고 워크플로 파일은 자기 자신을 실행하는 주체라, 깨진 파일이 낸 증상이
+  "그 워크플로가 안 도는 것"이라 사후에 인지하기 어렵다.
+- ⇒ **처방: 전 워크플로 YAML을 파서에 통과시키는 게이트를 둔다.** 개별 문법 규칙을 열거하는 대신
+  실제 YAML 파서(bun yaml)로 파싱해 예외가 나면 red — colon-in-unquoted-name뿐 아니라 모든 문법
+  회귀를 한 그물로 잡는다.
+> 가드: `tests/gates/test_workflow-yaml.bats`
+
+### bats @test 이름에 한글/CJK가 있으면 디렉토리 단위 실행에서 침묵 스킵된다
+- **병**: bats를 **디렉토리 단위**로 실행하면(`bats tests/`) @test 이름의 한글/CJK가 인코딩 처리에서
+  깨져 그 테스트가 **조용히 스킵**된다(단일 파일 실행에서는 재현되지 않아 로컬에서 안 보인다).
+  스킵은 실패가 아니라 "그 검증이 아예 안 돈 것"이라, 회귀 테스트가 CJK 이름을 갖는 순간 그 가드는
+  침묵으로 무력화된다 — dead-green의 한 형태다.
+- **경계**: 깨지는 것은 `@test "이름"`의 **이름**뿐이다. em-dash·트레일링 한국어 주석·본문의 한국어는
+  bats가 정상 처리한다. 그래서 이 레포의 규약은 "@test 이름은 영어만"으로 좁게 고정되고, 본문·주석의
+  한국어는 허용된다.
+- ⇒ **처방: @test 이름에 CJK가 있으면 red를 내는 정적 가드.** CJK 판정은 하드코딩 유니코드 범위가
+  아니라 **스크립트 속성**(`\p{Han}\p{Hangul}\p{Hiragana}\p{Katakana}`)으로 한다 — Ext-A(㐀 U+3400)·
+  compat 이데오그래프·Hangul 확장까지 범위 누락 없이 덮기 위해서다. 검출기가 스스로 vacuous하지
+  않음을 black-box 음성 픽스처(추적 CJK 이름을 넣으면 check-skeleton이 실제로 exit≠0)로 증명한다.
+> 가드: `tests/gates/test_check-skeleton-cjk.bats`, `tests/gates/test_check-skeleton-gate.bats`
+
+### homepage: config 마운트를 readOnly로 두면 EROFS · apiserver egress는 노드 CIDR:6443이지 ClusterIP가 아니다
+- **병 ①(인시던트 #65, EROFS)**: homepage는 시작 시 config를 **써야** 하는데(seed→emptyDir), 그 마운트를
+  `readOnly: true`로 두면 런타임이 `EROFS`(read-only file system)로 죽는다. grep-on-source로는 안 보인다 —
+  kustomize가 조립한 **최종 출력**에서만 readOnly 값이 확정되기 때문이다.
+- **병 ②(인시던트 #66, apiserver egress)**: homepage가 apiserver에 닿는 egress NetworkPolicy를 쓸 때,
+  대상을 **ClusterIP(kubernetes 서비스의 가상 IP)로 적으면 막힌다** — NetworkPolicy egress는 ClusterIP를
+  볼 수 없고(그건 iptables/IPVS DNAT 규칙이지 실제 엔드포인트가 아니다), **노드 서브넷의 실제 IP:6443**을
+  허용해야 apiserver에 도달한다. 이것은 인접 함정 「NetworkPolicy egress는 apiserver ClusterIP 불가」의
+  homepage 구체화다.
+- ⇒ **처방: kustomize 렌더 출력을 yq로 객체-스코프 단언한다.** ① config 마운트가 writable(readOnly!=true)
+  인지, ② `allow-egress-to-apiserver` 규칙 **하나**가 노드 CIDR과 (protocol=TCP, port=6443) 엔트리를
+  **동시에** 묶는지(체인 select로 같은 규칙·같은 엔트리 결속 — 두 조건이 서로 다른 규칙에 흩어져
+  vacuous하게 통과하는 것을 막는다). ⚠️ CI(required gate)에서는 kustomize/yq 부재 시 skip 금지 —
+  fail-closed다(가드가 dead-green이 되면 이 두 인시던트가 그대로 재현된다).
+> 가드: `platform/homepage/prod/test_homepage_render.bats`, `platform/homepage/prod/test_homepage_netpol.bats`
+
+### 상류 레지스트리의 릴리스 태그가 불변이 아니다 — 재푸시가 옛 매니페스트를 GC해 모든 PR gate를 red로 만든다
+- **병(라이브 실측)**: `quay.io/skopeo/stable:v1.22.2`를 digest로 핀했는데, 상류가 **같은 태그를 주기적으로
+  재푸시**하고 옛 매니페스트를 GC했다 — 2026-08-18(#518) · 08-21(#528) · 08-24(#531)로 **6일에 세 번**,
+  세 번째는 재핀 PR을 머지한 **같은 세션 안에서** 죽었다. `image-pin-liveness.sh`가 라이브 레지스트리를
+  조회하므로, digest가 사라질 때마다 **브랜치와 무관하게 모든 PR의 `gate`가 red**가 된다.
+- **왜 재핀이 증상 대응이었는가**: 새 digest로 핀을 갱신하면 그 순간은 초록이지만, 3일 뒤 또 재푸시되면
+  다시 red다. Renovate가 서드파티 digest를 주 1회 갱신하는데 상류 재푸시가 그보다 잦아, 갱신 주기로도
+  못 따라잡는다. 무성 실패는 아니지만(가드가 매번 잡는다) **모든 PR을 막는 형태**라 비용이 크다.
+- ⚠️ **quay를 base로 미러해도 안 된다.** `image-pin-liveness`는 `git grep`으로 추적 파일 전체의 digest
+  핀을 열거하므로 `ops/*/Dockerfile`의 `FROM` 핀도 검사 대상이다 — `FROM quay.io/skopeo/...`로 미러하면
+  그 핀이 그대로 같은 GC에 노출된다.
+- ⇒ **처방: GC하지 않는 레지스트리 기반의 자기 소유 이미지로 옮긴다.** Docker Hub는 옛 매니페스트를
+  GC하지 않는다(같은 레포의 `ops/pg-tools`가 쓰는 `debian:bookworm-slim` 핀이 오래 살아 있는 것이 증거).
+  `ops/skopeo/Dockerfile`을 `FROM alpine:3.22@digest` + `apk add skopeo`로 만들어 `ghcr.io/<owner>/skopeo:alpine`으로
+  게시하고, 소비자(digest-exporter·gha-liveness-exporter)가 그것을 참조한다. build→bump write-back이
+  `repin-ops-image`로 digest를 재핀한다(pg-tools와 같은 경로).
+- ⚠️ **소비자가 이미지의 ENTRYPOINT에 기대지 않는지 확인하라.** quay skopeo 이미지는 `ENTRYPOINT ["skopeo"]`가
+  있지만, 이 소비자들은 `command: ["/bin/sh", "/script/run.sh"]`로 셸을 직접 지정하고 그 안에서 `skopeo`를
+  PATH로 부른다 — 그래서 ENTRYPOINT 없는 alpine 이미지로도 그대로 동작한다(실측). ENTRYPOINT에 기댔다면
+  미러 이미지에 그것을 재현해야 했다. ⚠️ **소비자 매니페스트뿐 아니라 게이트도 확인하라** — 실측:
+  `skopeo-timeout-smoke.sh`가 `docker run "$IMAGE" --command-timeout=…`로 ENTRYPOINT를 전제해,
+  alpine 미러에서 그 플래그를 실행 파일로 오인해 죽었다(소비자는 멀쩡한데 게이트만 red). 게이트도
+  소비자와 같은 호출 형태(`skopeo`를 명시)로 맞춰야 한다. cf. 게이트가 실 도메인과 다른 방식으로
+  대상을 부르면, 그 게이트가 증명하는 것은 실 도메인의 동작이 아니다.
+> 가드: `tests/gates/image-pin-liveness.sh`, `ops/skopeo/Dockerfile`, `tests/gates/skopeo-timeout-smoke.sh`, `tests/gates/test_pgtools-digest.bats`, `tests/gates/test_ci-build.bats`

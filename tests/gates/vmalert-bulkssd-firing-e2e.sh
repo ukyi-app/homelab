@@ -2,7 +2,7 @@
 # vmalert **발화** e2e (bulk SSD 용량) — `FilesBulkSSDLow`가 "파싱된다"가 아니라 "실제로 발화한다"를 증명한다.
 #
 # 버그: r4의 FilesBulkSSDLow가 `(files_data_bulk_avail_bytes / files_data_bulk_size_bytes) < 0.10`으로
-# **하루 1회(04:30, 호스트 launchd)** push되는 메트릭을 **rollup 없이 맨 참조**한다. vmalert instant 질의
+# **하루 1회(호스트 systemd 타이머)** push되는 메트릭을 **rollup 없이 맨 참조**한다. vmalert instant 질의
 # 룩백은 5m이라 하루 1440분 중 **5분만** 시야에 들어온다 → 30초 간격 평가로 최대 11회 연속 참 →
 # `for: 30m`(≈61회 연속 필요)에 **구조적으로 도달 불가**. 외장 bulk SSD가 꽉 차도 영원히 울리지 않는다.
 # (라이브 실측: 마지막 push 후 10.8h 시점에 알림 expr → 빈 결과 / `last_over_time(...[3d])` 비율 → 0.9991.)
@@ -15,8 +15,10 @@
 # 설계(형제 드리프트 하네스와 동일 골격 — 공용 프리미티브는 tests/gates/lib/vmalert-e2e.sh):
 #  - 룰은 **배포 ConfigMap에서 매 실행 바이트 그대로 추출**(픽스처 복제 금지 → 드리프트 0). for:는 불변.
 #  - 버전/평가주기/룩백/du push 주기는 **매니페스트에서 파생**(하드코딩 0). 유일한 명시 상수는 호스트
-#    launchd push 주기(86400s) — launchd plist는 owner-local이라 레포에 없다(scripts/backup-files-data.sh
-#    헤더: "launchd 배선(일1회, RPO=24h)은 owner-local"). 아래 HOST_PUSH_S 주석 참조.
+#    push 주기(86400s) — 배선 자체는 레포 안에 있지만(infra/k3s-bootstrap/host-config/etc/systemd/
+#    system/files-data-backup.timer) `OnCalendar=daily`는 캘린더 스펙이라 cron 문자열처럼 초 단위 주기를
+#    기계적으로 파생할 수 없다(scripts/backup-files-data.sh 헤더: "배선: host-config/etc/systemd/system/
+#    files-data-backup.{service,timer} (일1회, RPO=24h)"). 아래 HOST_PUSH_S 주석 참조.
 #  - datasource URL에 `?max_lookback=<queryStep>`(라이브 instant 룩백)을 주입한다 — vmalert replay는
 #    /api/v1/query_range를 쓰고 VM의 range 룩백은 **휴리스틱**이라, 보간이 일어나면 버그 룰조차 발화해
 #    거짓 GREEN이 된다(형제 드리프트 하네스의 10분 push에서 실증). 그 상한을 고정하는 방어 핀이다.
@@ -64,10 +66,20 @@ EVAL_S="$(vme_to_s "$EVAL")"
 LOOKBACK_S="$(vme_to_s "$LOOKBACK")"
 
 # ★ 호스트 push 주기 — 이 하네스에서 **매니페스트 파생이 불가능한 유일한 상수**다.
-#   files_data_bulk_*의 pusher는 in-cluster CronJob이 아니라 **호스트 launchd**(app.homelab.files-backup,
-#   StartCalendarInterval Hour=4 Minute=30 → 하루 1회)이고, plist는 owner-local이라 레포에 없다
-#   (scripts/backup-files-data.sh 헤더가 "일1회, RPO=24h"를 계약으로 명시). 라이브 TSDB에서도 연속 샘플
-#   간격 8개가 전부 86400±5초로 실측됐다. → 명시 상수 + 아래 산술 단언으로 못박는다.
+#   files_data_bulk_*의 pusher는 in-cluster CronJob이 아니라 **호스트 systemd 타이머**
+#   (infra/k3s-bootstrap/host-config/etc/systemd/system/files-data-backup.timer — `OnCalendar=daily`
+#   + `RandomizedDelaySec=30min` → 하루 1회)이고, 캘린더 스펙이라 du CronJob처럼 주기를 파생할 수 없다
+#   (scripts/backup-files-data.sh 헤더가 "일1회, RPO=24h"를 계약으로 명시). → 명시 상수 + 아래 산술
+#   단언으로 못박는다.
+#   ⚠️ **이 상수의 근거는 계약이지 라이브 실측이 아니다.** 옛 판은 "연속 샘플 간격 8개가 전부
+#      86400±5초"라는 실측을 인용했는데, 그것은 결정적 04:30 스케줄(Mac launchd, 2026-07-12 #341)에서
+#      나온 수치다. 지금 타이머는 `RandomizedDelaySec=30min`이라 **연속 샘플 간격이 두 난수 지연의
+#      차만큼 흔들려 최대 ±1800s까지 벌어진다** — ±5초는 원리적으로 불가능하다. 그 실측을 systemd
+#      타이머의 것으로 재귀속하면 "켜면 라이브 격자가 이 상수와 정확히 맞는다"는 거짓 기대가 생긴다.
+#      명목 주기(슬롯 간격)는 86400s 그대로이고, 이 하네스가 쓰는 것은 그 **명목 주기**다.
+#   ⚠️ 국면 A 동안 이 타이머는 **의도적으로 enable되지 않는다**(짝 유닛 files-data-backup.service 머리말이
+#      이유를 담는다). 즉 이 타이머로 측정된 라이브 격자는 **존재한 적이 없다**. 이 하네스는 합성
+#      백필로 도는 hermetic replay라 그 상태에서도 그대로 유효하다.
 #   ⚠️ 백업 주기를 바꾸면(예: 6시간마다) 이 상수와 아래 단언을 함께 갱신하라.
 HOST_PUSH_S=86400
 
@@ -78,7 +90,9 @@ case "$DU_CRON" in
   [0-9]*' '[0-9]*' * * *') DU_PUSH_S=86400 ;;
   *) fault "pvc-du-exporter 크론이 일 1회('M H * * *') 형식이 아님: '$DU_CRON' — L4 대조군의 push 격자 산술을 재설계하라." ;;
 esac
-DU_OFFSET_S=1800 # 05:00(du) − 04:30(launchd) = +30m. 두 pusher가 독립임을 재현(레그 판정엔 무영향).
+# 두 pusher는 스케줄러가 다르다(호스트 systemd 타이머 vs in-cluster CronJob '0 5 * * *') → 격자가 정렬되지
+# 않는다. 그 독립성만 재현하는 임의의 30m 오프셋이다(실제 시각차와 무관 — 레그 판정엔 무영향).
+DU_OFFSET_S=1800
 
 # ── 2) 배포 ConfigMap에서 룰 바이트 그대로 추출 ─────────────────────────────────────────────────────
 TMP="$(mktemp -d)"
@@ -190,7 +204,7 @@ REPLAY_MIN=$(( (RP_TO - RP_FROM) / 60 ))
 [ $(( T_LAST - RP_FROM )) -gt "$FOR_S" ] || fault "push 이전 구간이 for: 보다 짧다 — rollup 룰의 발화가 push 가시 구간과 뒤섞여 대조가 흐려진다"
 [ $(( RP_FROM - (T_LAST - HOST_PUSH_S) )) -gt "$LOOKBACK_S" ] || fault "직전 push가 replay 시작의 룩백 안 — 맨 참조가 시작부터 보인다(전제 붕괴)"
 
-echo "[params] vmalert=$VA_VER vmsingle=$VM_VER eval=$EVAL lookback=$LOOKBACK(queryStep) host_push=${HOST_PUSH_S}s(launchd, 명시 상수) du_push=${DU_PUSH_S}s(cron '$DU_CRON') for=$FOR"
+echo "[params] vmalert=$VA_VER vmsingle=$VM_VER eval=$EVAL lookback=$LOOKBACK(queryStep) host_push=${HOST_PUSH_S}s(systemd timer, 명시 상수) du_push=${DU_PUSH_S}s(cron '$DU_CRON') for=$FOR"
 echo "[arith]  [라이브] 맨 참조 가시 평가=${VISIBLE_EVALS}회(룩백 ${LOOKBACK_S}s / eval ${EVAL_S}s) vs for: 요구=${NEEDED_EVALS}회 → 도달 불가 (replay 재현 창은 이보다 좁다 — 안전 방향)"
 echo "[window] backfill $(vme_iso "$DATA_START") .. $(vme_iso "$T_LAST") (${DAYS}일, 일 1회) | replay $(vme_iso "$RP_FROM") .. $(vme_iso "$RP_TO") (${REPLAY_MIN}m, push 1회 포함)"
 

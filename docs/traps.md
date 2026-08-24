@@ -4,10 +4,16 @@
 이 원장은 그중 **실행 가능한 가드로 강제된 함정만** 추적해, 가드 파일이 삭제·리네임됐는데 함정이
 다시 물리는 드리프트를 `make verify-traps`로 차단한다. 여기 없는 함정 = doc-only(traps-detail.md가 유일 SSOT).
 
-- **검사 방향**: `scripts/verify-traps.sh`는 아래 `guard` 열의 백틱 경로가 **실재하는지** + `docs/traps-detail.md`의
-  `> 가드:` 주석 경로가 **이 원장에도 추적되는지**(역방향 guard-path-tie — SSOT↔원장 내용 드리프트 차단)를 본다(enforced인데
-  파일 없음 = 거짓 안심 → 실패). 가드의 *내용 정확성*은 각 가드 테스트 자신이 책임진다.
+- **검사 방향 3가지**: `scripts/verify-traps.sh`가 전부 강제한다. 가드의 *내용 정확성*은 각 가드 테스트 자신이 책임진다.
+  1. 아래 `guard` 열의 백틱 경로가 **실재하는지**(enforced인데 파일 없음 = 거짓 안심 → 실패).
+  2. `docs/traps-detail.md`의 `> 가드:` 주석 경로가 **이 원장에도 추적되는지**(SSOT → 원장).
+  3. 이 원장의 각 행이 가리키는 가드가 **SSOT의 어느 `> 가드:` 줄에든 있는지**(원장 → SSOT).
+     ⚠️ 1·2는 이 갭을 **원리적으로 못 본다** — 1은 파일 실재만, 2는 반대 방향만 본다. 실측 2026-08-21
+     도입 시점에 **9행**이 SSOT에도 AGENTS 인덱스에도 없이 enforced를 주장하고 있었다.
 - **where**: `gate`=ci.yaml job `gate`가 수집 · `iac`=iac/tf-reconcile · `local`=make/pre-commit 로컬.
+  방향 3의 면제는 여기에 **사유와 함께 명시**한다(하드코딩 목록이 아니라 마커라 새 행에도 같은 규칙이 적용된다):
+  - `SSOT없음(불변식)` — 함정 서사가 아니라 불변식·규약을 지키는 가드다. traps-detail에 들어갈 대상이 아니다.
+  - `SSOT없음(승격대상)` — 함정인데 traps-detail 서사가 아직 없다. **부채를 침묵시키지 않고 계상한다.**
 - 새 가드 테스트를 추가하면 이 표에도 한 줄 추가한다(리네임 시 verify-traps가 강제로 알려준다).
 
 | 함정 (traps-detail.md) | where | guard |
@@ -32,16 +38,16 @@
 | 상주 워크로드 자원 limit 블라인드스팟(cpu·memory request + memory limit) | gate | `tools/check-resource-limits.ts`, `tests/test_resource_limits.bats` |
 | AdGuard setcap 바이너리 ↔ allowPrivilegeEscalation 양립불가 | gate | `platform/adguard/prod/test_adguard_auth.bats` |
 | enc.yaml 평문 직접 수정 금지(SOPS MAC) | gate+verify | `scripts/sops-guard.sh`, `.claude/hooks/manifest-guard.sh`, `tests/gates/test_manifest-guard.bats`, `tests/gates/test_verify-secrets.bats` |
-| SOPS 왕복(암호화 후 복호 동일) | local | `tests/test_sops-roundtrip.bats` |
-| `.claude/` 선택적 un-ignore(하네스 추적/런타임 무시) | gate | `tests/gates/test_claude-harness-tracked.bats` |
+| SOPS 왕복(암호화 후 복호 동일) | local · SSOT없음(불변식) | `tests/test_sops-roundtrip.bats` |
+| `.claude/` 선택적 un-ignore(하네스 추적/런타임 무시) | gate · SSOT없음(불변식) | `tests/gates/test_claude-harness-tracked.bats` |
 | make ci ↔ ci.yaml gate 8스텝 패리티 | gate | `tests/gates/test_make-ci-parity.bats` |
 | DR drill 안전 불변식(R5, 라이브 파괴 없이) | gate | `tests/test_dr-drill.bats` |
-| 파괴 프리미티브는 전용 파일 + 확인 env로 분리한다(드릴 본문의 한 줄이면 '그 줄만 떼어 돌려보는' 경로가 생긴다) · bulk 안전은 경로가 아니라 **bind 소스**로 판정한다 | gate | `tests/test_destroy-node.bats` |
+| 파괴 프리미티브는 전용 파일 + 확인 env로 분리한다(드릴 본문의 한 줄이면 '그 줄만 떼어 돌려보는' 경로가 생긴다) · bulk 안전은 경로가 아니라 **bind 소스**로 판정한다 | gate · SSOT없음(불변식) | `tests/test_destroy-node.bats` |
 | 한시 억제의 자기 만료(시각 상수 ↔ 창 SSOT 양방향 정합) + 억제한 알림을 vacuity 대조군으로 쓰던 e2e 동반 사망 | gate | `tests/gates/test_files-backup-phase-a.bats` |
-| R2 pg 아카이브 reset --purge 가드(④) | gate | `tests/test_reset-pg-r2-archive.bats` |
+| R2 pg 아카이브 reset --purge 가드(④) | gate · SSOT없음(불변식) | `tests/test_reset-pg-r2-archive.bats` |
 | sealing key 백업 체인 DR fail-closed 게이트 | gate | `tests/test_sealed-secrets-restore.bats` |
 | tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | iac | `infra/_tests/test_tf_reconcile.bats` |
-| ArgoCD AppProject 권한경계 + appset finalizer/exclude/default-lockdown 거버넌스 | gate | `platform/argocd/root/test_projects.bats` |
+| ArgoCD AppProject 권한경계 + appset finalizer/exclude/default-lockdown 거버넌스 | gate · SSOT없음(불변식) | `platform/argocd/root/test_projects.bats` |
 | bats @test 이름 한글/CJK 디렉토리실행 침묵스킵 | gate | `tests/gates/test_check-skeleton-cjk.bats`, `tests/gates/test_check-skeleton-gate.bats` |
 | homepage EROFS(RO config)·apiserver egress(노드서브넷:6443 not ClusterIP) | gate | `platform/homepage/prod/test_homepage_render.bats`, `platform/homepage/prod/test_homepage_netpol.bats` |
 | GHA run 기본 셸 pipefail 부재(bash -e {0}) — tee 파이프 fail-open | gate | `tests/gates/test_workflow-pipefail.bats` |
@@ -76,3 +82,13 @@
 | GitHub API가 낡은 스냅샷을 200으로 반환 → push된 단조 타임스탬프가 역행 → `last_over_time`이 그 한 샘플로 오발화(rollup 함수 선택 축) | gate | `tests/gates/vmalert-gha-liveness-firing-e2e.sh`, `tests/gates/test_gha-liveness-exporter.bats`, `tests/gates/fixtures/r6-gha-lastovertime.yaml`, `tools/check-alert-rules.ts`, `policy/alert-supply-monotonicity.json`, `tests/test_alert_rules.bats` |
 | 로케일 콜레이션이 게이트를 뒤집는다 — en_US `sort -u`가 `-1`과 `1`(그리고 `_`-접두 워크플로와 동명 공개 디스패처)을 같다고 보고 하나를 버려 fail-open | gate | `scripts/check-locale-collation.sh`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_make-help.bats`, `platform/argocd/root/test_sync_wave_ledger.bats` |
 | systemd 유닛 등 생산자 확장자 밖 파일의 인라인 push — 완전성 가드가 원리적으로 못 봐 죽은 알림이 초록으로 태어난다 | gate | `tests/gates/test_unit-failure-notify.bats` |
+| bats가 fd 0을 상속시켜 스텁의 피연산자 없는 `cat`이 호출자 stdin에서 영구 블록 — red가 아니라 hang이고 `&`로 띄우는 CI는 우연히 면역이라 로컬만 밟는다 | local | `scripts/run-bats.sh`, `tests/test_sealed-secrets-restore.bats` |
+| e2e 하네스의 호스트 포트 밴드가 커널 ephemeral·k8s NodePort와 겹침 — 전자는 하네스 자신의 curl과 경합하고 후자는 nat 규칙이라 어떤 bind 프로브로도 안 보여 `docker run`이 통과한 채 남의 서비스로 질의가 간다(+ `127.0.0.1` 프로브는 글로벌 인터페이스 전용 리스너를 FREE로 오답 · 처방이 한 소비자 lib에 갇히면 형제 표면은 원리적으로 못 받는다) | gate | `tests/gates/test_vmalert-e2e-port-allocation.bats`, `tests/gates/lib/vmalert-e2e.sh`, `tests/gates/lib/host-port.sh`, `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats` |
+| `&`로 띄운 헬퍼의 바인드 실패는 `set -e`에 안 걸린다 — readiness 줄이 없으면 30초를 태운 뒤 진단이 포트가 아니라 메시지 템플릿을 가리킨다 | gate | `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats` |
+| `Restart=always` 유닛은 시작 rate limit에 못 닿으면 `failed`로 확정되지 않아 systemd 상태 축이 원리적으로 못 본다 — 전역 스윕을 넣고 '이제 다 덮었다'로 읽는 것이 위험이다 | gate | `tests/gates/test_systemd-failed-sweep.bats`, `scripts/sweep-systemd-failures.sh` |
+| ERE의 leftmost-longest가 `^A|B.*$` 한 방을 토큰 전체 삭제로 바꾼다 — 검출기가 자기 도메인의 실제 표기(따옴표형 publish)에 눈이 멀고, 픽스처가 그 표기를 안 쓰면 대조군까지 vacuous가 된다 | gate | `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats` |
+| heredoc 상태 기계가 주석 규칙보다 먼저 돌면 `<<PY`를 인용한 주석 한 줄이 파일의 나머지를 통째로 지운다 — 진짜 종료줄이 있으면 [E]도 침묵하고, 파일 수 축 회계(SCAN·READFILES)로는 원리적으로 안 보인다 | gate | `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats` |
+| 면제 판정이 주석 스킵보다 먼저 돌면 규약을 *설명한* 파일이 그 규약에서 면제된다 — 가드 자신이 자기 헤더 때문에 영구 면제였다(셸 주석·Makefile `##`·YAML `name:` 세 표면) | gate | `scripts/check-bats-fd0.sh`, `tests/gates/test_bats-fd0.bats` |
+| SKIP(exit 4)을 모르는 대조는 gitignored 자산이 있는 로컬에서만 초록이다 — 로스터 대조가 그 rc를 실패로 읽어 로컬 `make ci` rc=0인데 PR gate만 FAILURE였다(SKIP은 양쪽 대칭 제외 + 상한 필요) | gate | `tests/gates/test_scan-floor.bats`, `scripts/verify-credential-inventory.sh` |
+| `findings="$(awk … || true)"` — `|| true`가 awk fatal rc까지 삼켜 검출기가 죽어도 "0곳 OK" rc=0을 낸다(가드 본체 fail-open). 처방 세 겹: awk rc 포착 + 인자 사전 검증 + READFILES 대조 | gate | `scripts/check-host-ports.sh`, `scripts/check-locale-collation.sh`, `scripts/check-bats-style.sh`, `tests/gates/test_host-ports.bats`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_bats-style.bats` |
+| 상류 레지스트리의 릴리스 태그가 불변이 아니다 — 재푸시가 옛 매니페스트를 GC해(quay skopeo 6일 3회) image-pin-liveness가 브랜치와 무관하게 모든 PR gate를 red로 만든다. GC 안 하는 레지스트리(Docker Hub alpine)의 자기 소유 이미지로 옮긴다 | gate | `tests/gates/image-pin-liveness.sh`, `ops/skopeo/Dockerfile`, `tests/gates/skopeo-timeout-smoke.sh`, `tests/gates/test_pgtools-digest.bats`, `tests/gates/test_ci-build.bats` |

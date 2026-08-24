@@ -26,15 +26,21 @@ echo '/var/lib/rancher/k3s-storage/bulk /mnt/bulk none bind 0 0' | sudo tee -a /
 #      (bulk가 파괴 대상과 같은 디스크 — 정확히는 bind 소스가 /var/lib/rancher 밑에 있다).
 
 # 국면 B (PONR 3 이후). 위 bind 줄을 fstab에서 빼고 실제 M.2로 갈아끼운다. **순서가 곧 안전이다.**
-#   → ① files 백업 **실행자를 먼저 배선**한다(국면 A 내내 부재였다 — scripts/backup-files-data.sh 는
-#        macOS 전용 launchd 배선이었고 그 plist 는 어느 레포에도 없었다). 매체 판별을 diskutil 이
-#        아니라 **디바이스 정체성**으로 재작성하고 systemd timer 로 건다. 커밋된 배선이어야 한다.
-#   → ② r4-storage-backup.yaml 의 FilesBackupStale 에서 국면 A 억제 절
-#        `and on() (vector(time()) >= ...)` 를 제거한다.
-#   → ③ versions.env의 BULK_MIGRATION_WINDOW_UNTIL 을 비우면 dr-drill 과 destroy-node.sh 가 다시
-#        열리고, 플래그 없이 make up 이 통과한다(디바이스가 / 와 다르므로).
-#   ⚠️ **강제 장치는 이 주석이 아니라 게이트다** — ③을 ②보다 먼저 하면
-#      tests/gates/test_files-backup-phase-a.bats 가 "창은 비었는데 억제 절이 남아 있음"으로 RED 를 낸다.
+#   → ① files 백업 **실행자를 먼저 enable** 한다 — 배선은 2026-08-19 에 이미 끝났다(scripts/backup-files-data.sh
+#        를 diskutil 이 아니라 **디바이스 정체성**으로 재작성 + host-config/etc/systemd/system/
+#        files-data-backup.{service,timer} 커밋). 국면 A 동안은 같은 매체 사본이 되므로 의도적으로
+#        enable 하지 않았다: `sudo systemctl enable --now files-data-backup.timer`.
+#   → ② **같은 커밋에서** 둘을 함께 한다 — 나누면 어느 순서로 나눠도 RED 다:
+#        (a) r4-storage-backup.yaml 의 FilesBackupStale 에서 국면 A 억제 절
+#            `and on() (vector(time()) >= ...)` 를 제거한다.
+#        (b) versions.env의 BULK_MIGRATION_WINDOW_UNTIL 을 비운다. 그러면 dr-drill 과
+#            destroy-node.sh 가 다시 열리고, 플래그 없이 make up 이 통과한다(디바이스가 / 와 다르므로).
+#   ⚠️ **강제 장치는 이 주석이 아니라 게이트다** — tests/gates/test_files-backup-phase-a.bats 는
+#      **양방향**이라 (a)·(b)를 나눈 두 순서가 **둘 다** RED 다:
+#        · (b)만 한 커밋 → "창은 비었는데 억제 절이 남아 있음"
+#        · (a)만 한 커밋 → "창은 열려 있는데 억제 절이 없음"
+#      ⇒ 한 방향만 경고하면 나머지 순서가 안전하다고 읽힌다. `docs/runbooks/external-ssd.md` §2-1 이
+#      같은 이유로 이미 "같은 커밋에서 … 나누면 안 된다"로 고쳐져 있다.
 #      억제 절의 자동 만료(창 만료 다음날 00:00 KST)는 백스톱일 뿐이다 — 그때까지 손 놓고 있으면
 #      알림이 배선 없이 되살아나 다시 24/7 critical 로 운다.
 #   ⚠️ **창을 비우는 것만으로는 국면 B가 아니다.** destroy-node.sh 는 선언과 별개로 findmnt 으로

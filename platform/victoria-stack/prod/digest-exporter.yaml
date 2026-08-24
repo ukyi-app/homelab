@@ -81,8 +81,9 @@ data:
     #   브랜치가 같은 (빈) 라벨셋을 내야 시리즈 만료 시 알림 identity가 유지돼 for: pending이 리셋되지 않는다.
     TS=$(date +%s)
     OUT="${OUT}digest_exporter_last_success_timestamp ${TS}\n"
-    # ⚠️ push는 curl — quay.io/skopeo/stable 이미지에 wget 부재(라이브 검증에서 발각: || true가 127을 삼켜
-    # 시리즈 0으로 무소음 사망). 실패는 비치명 유지하되 stderr로 가시화(Job 로그에서 추적 가능).
+    # ⚠️ push는 curl — ops/skopeo/Dockerfile이 curl을 명시 설치한다(alpine base엔 busybox wget만 있어
+    # curl 문법과 다르다). 예전 quay.io/skopeo/stable 이미지엔 wget이 아예 없어 `|| true`가 127을 삼켜
+    # 시리즈 0으로 무소음 사망한 적이 있다(라이브 검증). 실패는 비치명 유지하되 stderr로 가시화(Job 로그).
     # curl 플래그의 **순서는 계약이 아니다** — 게이트는 같은 호출 안에 -fsS·--data-binary @-·--max-time이
     # **존재**하는지만 단언한다(argv 순서가 계약인 것은 skopeo 쪽뿐: 글로벌 옵션이 서브커맨드 앞).
     printf "%b" "$OUT" | curl -fsS --data-binary @- --max-time "$CURL_MAX_TIME" 'http://vmsingle:8428/api/v1/import/prometheus' || echo "vmsingle push failed (exit $?)" >&2
@@ -118,7 +119,7 @@ spec:
           securityContext: { runAsNonRoot: true, runAsUser: 65532 }
           containers:
             - name: digest-exporter
-              image: quay.io/skopeo/stable:v1.22.2@sha256:02053f3c795ecf32af60e58c2099935ae620a1a9b6186c1dbcf557b6a09fb1eb
+              image: ghcr.io/ukyi-app/skopeo:alpine@sha256:a28a72e4a8950f5c70586ddb3d2c45058b68737d5d7a3122380991fde820ca3d
               command: ["/bin/sh", "/script/run.sh"]
               env:
                 # 배포된 외부 앱의 "name=ghcr.io/owner/name:tag" 공백 구분 목록 — apps/ 디렉토리와 parity

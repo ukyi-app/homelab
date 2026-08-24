@@ -35,7 +35,7 @@ fi
 DETECT=""
 IFS='' read -r -d '' DETECT <<'AWK' || true
 function flush(){ if(pend!=""){ print pend; pend="" } }
-FNR==1 { intest=0; pend=""; inhere=0; delim="" }
+FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++ }
 {
   line=$0
   if (inhere){ if(line ~ ("^[ \t]*"delim"[ \t]*$")) inhere=0; next }
@@ -51,8 +51,34 @@ FNR==1 { intest=0; pend=""; inhere=0; delim="" }
   if (t ~ /^![ \t]/)    pend=FILENAME":"FNR": [NEG] "t
   else if (t ~ /^\[\[/) pend=FILENAME":"FNR": [BB] "t
 }
+# 검출기가 **실제로 읽은** 파일 수를 호출자에게 알린다 — 형제 check-host-ports.sh와 같은 계약.
+END { printf "READFILES=%d\n", nfiles > "/dev/stderr" }
 AWK
-findings="$(awk "$DETECT" "${FILES[@]}" || true)"
+# ⚠️ **인자를 먼저 검증한다.** 읽을 수 없는 파일이 awk로 가면 gawk는 fatal로 즉시 죽는데, 예전 코드는
+#    그 rc를 `|| true`로 버려 "0곳 OK" rc=0을 냈다 — 가드 본체가 fail-open이었다(형제
+#    check-host-ports.sh가 닫은 것과 같은 클래스, 2026-08-24 뮤테이션으로 실증).
+missing=""
+for f in "${FILES[@]}"; do [ -r "$f" ] || missing="${missing} ${f}"; done
+[ -z "$missing" ] || { echo "FAIL: check-bats-style: 읽을 수 없는 대상 —${missing}" >&2; exit 1; }
+
+errlog="$(mktemp)"
+trap 'rm -f "$errlog"' EXIT
+arc=0
+findings="$(awk "$DETECT" "${FILES[@]}" 2>"$errlog")" || arc=$?
+if [ "$arc" -ne 0 ]; then
+  echo "FAIL: check-bats-style: 검출기가 실패했다(awk rc=${arc}) — 판정 불가는 '통과'가 아니다." >&2
+  cat "$errlog" >&2
+  exit 1
+fi
+# 검출기가 실제로 읽은 파일 수를 열거 수와 대조한다(SCAN 신호가 열거 수라 이 축이 없으면 붕괴가 안 보인다).
+read_files="$(sed -n 's/^READFILES=//p' "$errlog" | head -1)"
+case "$read_files" in
+  '' | *[!0-9]*) echo "FAIL: check-bats-style: 검출기가 읽은 파일 수를 보고하지 않았다(READFILES 부재) — 끝까지 돌지 않았다." >&2; exit 1 ;;
+esac
+[ "$read_files" -eq "${#FILES[@]}" ] || {
+  echo "FAIL: check-bats-style: 열거 ${#FILES[@]}파일 != 검출기가 읽은 ${read_files}파일 — 스캔이 중간에 무너졌다." >&2
+  exit 1
+}
 neg="$(printf '%s\n' "$findings" | grep -c '\[NEG\]' || true)"; neg="${neg//[^0-9]/}"; neg="${neg:-0}"
 bb="$(printf '%s\n' "$findings" | grep -c '\[BB\]' || true)"; bb="${bb//[^0-9]/}"; bb="${bb:-0}"
 printf '%s\n' "$findings" | grep -E '\[(NEG|BB)\]' || true   # gate bats가 [NEG]/[BB] 검증

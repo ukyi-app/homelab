@@ -192,10 +192,14 @@ function loadPolicy(root: string): Policy {
 }
 
 // ── 소유자 판정 ───────────────────────────────────────────────────────────────
-export type Owner = "repin-pgtools" | "bump-poll" | "renovate" | "none";
+export type Owner = "repin-ops-image" | "bump-poll" | "renovate" | "none";
+
+// ops 미러 이미지의 canonical 태그 — 소유자는 build→bump write-back(repin-ops-image)이다.
+// tools/repin-ops-image.ts의 CATALOG와 같은 집합이어야 한다(둘 다 "이 이미지는 우리가 재핀한다"의 선언).
+const REPINNED_OPS = [/pg-tools:18-rclone@sha256:/, /\/skopeo:alpine@sha256:/];
 
 export function resolveOwner(r: Ref, renovate: Renovate, bespoke: Set<string>): Owner {
-  if (/pg-tools:18-rclone@sha256:/.test(r.ref)) return "repin-pgtools";
+  if (REPINNED_OPS.some((re) => re.test(r.ref))) return "repin-ops-image";
   if (/^apps\/[^/]+\/deploy\/prod\/values\.yaml$/.test(r.file)) return "bump-poll";
   if (bespoke.has(r.file)) return "bump-poll";
   // 숨은 참조는 Renovate가 원리적으로 추출할 수 없다 — base64 안이라 어떤 manager도 파싱하지 못한다.

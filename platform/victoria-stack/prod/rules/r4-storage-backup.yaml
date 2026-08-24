@@ -118,8 +118,17 @@ data:
             #    적었으나 틀렸다. 주기가 7일이므로 700000s(=8.1019일)는 **1회 실패 + 약 26.4시간**에
             #    발화한다(for: 30m 포함 약 26.9시간). 같은 레포의 restore-drill-script.sh(약 5.9일간
             #    이미 발화) · restore-drill-cronjob.yaml · traps-detail.md는 모두 1회 기준으로 계산한다 —
-            #    이 줄만 outlier였다. **즉시성은 이전 서술의 약 2배다.** warning 유지 여부는 owner 몫이되,
-            #    그 판단은 이 정정된 값 위에서 다시 내려야 한다(이전 결론은 오염된 입력 위에 있었다).
+            #    이 줄만 outlier였다. **즉시성은 이전 서술의 약 2배다.**
+            # ✅ **재판정 종결(2026-08-20): warning 유지.** 위 정정된 산술(1회 실패 + 약 26.9시간) 위에서
+            #    다시 내린 결론이다 — 이전 결론은 오염된 입력 위에 있었으므로 그대로 승계하지 않았다.
+            #    근거: (a) 이 알림이 실질적 유일 채널인 것은 맞지만, 그 사실이 요구하는 것은 **누락 방지**이지
+            #    반복 빈도가 아니다. 26.9시간이면 4h repeat로 하루 안에 여러 번 눈에 띈다. (b) 조건은
+            #    "데이터를 잃었다"가 아니라 "복원이 미검증이다" — critical의 1h repeat(하루 24건)는
+            #    알림 피로만 늘리고 대응 속도를 못 바꾼다(대응이 주간 drill 주기에 묶여 있다).
+            # ⚠️ **레버를 혼동하지 마라.** 반복 빈도를 올리고 싶으면 `severity`가 아니라 이 알림 전용
+            #    라우트의 `repeat_interval`이 정확한 레버다. severity를 critical로 올리면 alertmanager.yaml의
+            #    `severity = critical` 라우트(repeat_interval 1h)를 **통째로** 상속받으므로, 빈도만이 아니라
+            #    이 알림의 분류까지 바뀐다 — 원하는 것이 빈도뿐이라면 과잉이고 되돌리기도 어렵다.
             labels: { severity: warning }
             annotations:
               summary: "CNPG 복원 drill이 최근에 성공하지 못함"
@@ -168,18 +177,23 @@ data:
           # files 오프-노드 백업 생존성(H2/M14): 백업 스크립트(scripts/backup-files-data.sh, 일1회)가
           # rsync 성공 시 files_backup_last_success_timestamp를 vmsingle에 단발 import한다. instant query는
           # staleness 윈도(~분) 밖의 단발 샘플을 못 봐 bare absent()가 영구 오발화하므로(CNPGRestoreDrillStale과
-          # 동형), [10d] last_over_time으로 마지막 성공을 찾아 임계(180000s≈2.08일 — 일1회 RPO의 2배 여유)로 판정.
-          # 값 없음(첫 push 전)은 absent가로 fail-loud — 실행자 미설치/미실행을 페이징(백업 필수화 강제).
+          # 동형), [10d] last_over_time으로 마지막 성공을 찾아 임계(100000s≈27.8시간 — 형제 일일 백업 4종과
+          # 같은 주기의 1.157배. 산술 근거는 아래 「임계 정정(2026-08-20)」)로 판정.
+          # 값 없음(첫 push 전)은 absent가로 fail-loud — 실행자 미enable/미실행을 페이징(백업 필수화 강제).
           #
           # ★ **국면 A 한시 억제 — expr 끝의 시각 절이 `absent` 가지에만 걸려 있다.**
-          #   왜: NUC 이식으로 이 백업의 **실행자가 사라졌다.** 생산자는 macOS 전용이고(dest 매체 판별
-          #   권위가 `diskutil`), 배선이던 launchd plist는 Mac mini 로컬이라 어느 레포에도 없었다 —
-          #   NUC엔 launchd도 diskutil도 없다. 즉 국면 A 동안 absent 가지는 **영구 참**이고 이 룰은
-          #   24/7 critical로 운다(alertmanager `severity=critical` 라우트의 repeat_interval: 1h를 타고
-          #   하루 24건). 그건 무음보다 나쁘다: 상시 소음이 채널 전체를 둔감화해 **진짜 페이지를 묻는다.**
+          #   왜: 국면 A 동안 이 백업은 **돌지 않는다.** 실행자 자체는 2026-08-19(#506)에 리눅스로 재작성돼
+          #   systemd로 배선을 이미 마쳤다(`infra/k3s-bootstrap/host-config/etc/systemd/system/`의
+          #   `files-data-backup.{service,timer}` — OnCalendar=daily + RandomizedDelaySec=30min, 일 1회).
+          #   그러나 **국면 A 동안 그 타이머는 의도적으로 enable되지 않는다**(레포 전체에 `systemctl enable`
+          #   실행 호출 0건 — 이유는 짝 유닛 `files-data-backup.service`의 머리말). 즉 국면 A 동안 absent
+          #   가지는 **영구 참**이고 이 룰은 24/7 critical로 운다(alertmanager `severity=critical` 라우트의
+          #   repeat_interval: 1h를 타고 하루 24건). 그건 무음보다 나쁘다: 상시 소음이 채널 전체를 둔감화해
+          #   **진짜 페이지를 묻는다.**
           #   ⚠️ 그리고 국면 A에는 **2차 매체가 원리적으로 존재할 수 없다** — NUC은 디스크가 하나이고
-          #   `/mnt/bulk`는 루트 LV의 bind 마운트다. 지금 스크립트를 이식하고 타이머만 걸면 알림은
-          #   초록이 되지만 사본은 같은 매체에 놓인다 — **정직한 red보다 나쁜 false-green이다.**
+          #   `/mnt/bulk`는 루트 LV의 bind 마운트다. 지금 타이머를 enable하면 스크립트가 source/dest 동일
+          #   디스크를 거부해 매일 실패하고, 그 거부를 우회하면 알림만 초록이 되고 사본은 같은 매체에
+          #   놓인다 — **정직한 red보다 나쁜 false-green이다.**
           #   진짜 2차 매체는 국면 B(2TB M.2 장착) 이후에나 생긴다.
           #
           #   ⚠️ **억제 대상은 absent 가지 뿐이다(최소 표면).** PromQL은 `and`가 `or`보다 강하게
@@ -187,9 +201,10 @@ data:
           #   expr **끝에 괄호 없이** 붙이면 정확히 absent 가지만 걸린다. 전체를 괄호로 묶으면
           #   (`(A or B) and on() C`) staleness 가지까지 함께 죽는다. **그 두 형태는 문법상 둘 다
           #   유효해 `-dryRun`이 구별하지 못한다** — 그래서 아래 가드가 형태를 잠근다.
-          #   덕분에 국면 A 중 누군가 실행자를 배선하면 그 순간부터 신선도 감시가 **자동 복귀**한다.
-          #   실측(VictoriaMetrics v1.145.0): 실행자 없음 → 무발화 / 배선 + 백업 stale → **발화** /
-          #   배선 + 백업 fresh → 무발화 / 억제 없는 원본 + 실행자 없음 → 발화(원래의 병).
+          #   덕분에 국면 A 중 누군가 타이머를 enable해 백업이 실제로 돌면 그 순간부터 신선도 감시가
+          #   **자동 복귀**한다.
+          #   실측(VictoriaMetrics v1.145.0): 실행 없음 → 무발화 / 실행 + 백업 stale → **발화** /
+          #   실행 + 백업 fresh → 무발화 / 억제 없는 원본 + 실행 없음 → 발화(원래의 병).
           #
           #   ⚠️ **만료는 자동이다 — 사람의 기억에 의존하지 않는다.** 1790780400 =
           #   2026-10-01T00:00:00+09:00 = 국면 A 창(`infra/k3s-bootstrap/versions.env`의
@@ -214,7 +229,7 @@ data:
             labels: { severity: critical }
             annotations:
               summary: "files 오프-노드 백업이 stale(≈27.8시간 초과)이거나 없음"
-              description: "files-data(비재생성 사용자 데이터)의 2차 매체 사본이 갱신되지 않았습니다 — 백업 실행자 미실행 또는 bulk 매체 미마운트. 매체 유실 시 전손 위험(R2 미사용). scripts/backup-files-data.sh와 그 실행자 배선을 확인하세요. ⚠️ 국면 A(versions.env의 BULK_MIGRATION_WINDOW_UNTIL이 비어 있지 않으면 진행 중)에는 '값 없음' 가지가 의도적으로 억제돼 있다 — 이 알림이 떴다면 실행자는 있는데 백업이 stale하다는 뜻이다."
+              description: "files-data(비재생성 사용자 데이터)의 2차 매체 사본이 갱신되지 않았습니다 — 백업 실행자 미실행 또는 bulk 매체 미마운트. 매체 유실 시 전손 위험(R2 미사용). scripts/backup-files-data.sh와 그 실행자(systemd `files-data-backup.timer`)를 확인하세요. ⚠️ 국면 A(versions.env의 BULK_MIGRATION_WINDOW_UNTIL이 비어 있지 않으면 진행 중)에는 '값 없음' 가지가 의도적으로 억제돼 있다 — 이 알림이 떴다면 실행자는 있는데 백업이 stale하다는 뜻이다."
           # ── 호스트 systemd 유닛 실패의 **즉시 채널** ────────────────────────────────────────
           # ★ 위 신선도 룰과 **직교 축**이다. 신선도는 "마지막 성공이 언제였나"만 알고, 원리적으로
           #   주기(1일)보다 빨리 울 수 없다 — 배수를 조여도 하한이 1주기라 **1회 실패의 즉시 관측이
@@ -233,7 +248,12 @@ data:
           #   "최근 실패가 아니다"라는 뜻이다). 유닛이 계속 실패하면 매 실행마다 값이 갱신돼 재발화한다.
           #   파일을 지우는 주체를 두지 않는 것도 의도다 — 그 주체의 실패가 새로운 무성 경로가 된다.
           # ⚠️ 이 룰은 레포 트리에 선언된 유닛만이 아니라 **`OnFailure=`가 달린 모든 호스트 유닛**을
-          #   덮는다. 반대로 그 줄이 없는 유닛(k3s.service·apt-daily·fstrim 등)에는 여전히 채널이 0이다.
+          #   덮는다. 그 줄이 **없는** 유닛(apt-daily·fstrim·logrotate·unattended-upgrades 등)의
+          #   전역 표면은 아래 `SystemdHostUnitFailed`(주기 스윕)가 덮는다 — 둘은 직교다.
+          # 🔴 **어느 축도 `Restart=always` 유닛은 못 본다**(라이브 실측 2026-08-20): `k3s.service`는
+          #   RestartUSec=5s · StartLimitIntervalUSec=10s · StartLimitBurst=5라 10초 창에 시도가 최대
+          #   3회 — 시작 rate limit에 도달하지 못해 `failed`에 **진입하지 않는다**(계속 activating).
+          #   그 축은 TargetDown/Watchdog/off-node deadman의 소관이고, systemd 축의 원리적 사각지대다.
           - alert: SystemdUnitFailed
             expr: |
               (time() - systemd_unit_last_failure_timestamp) < 7200
@@ -242,19 +262,82 @@ data:
             annotations:
               summary: "호스트 systemd 유닛 실패: {{ $labels.unit }}"
               description: "호스트 systemd oneshot 유닛이 failed로 끝났습니다 — `journalctl -u {{ $labels.unit }} -n 200`으로 원인을 보세요. 이 알림은 **실패 이벤트 기준**이라 2시간 뒤 자동 해소됩니다(고쳤다는 뜻이 아닙니다). 유닛이 계속 실패하면 매 실행마다 재발화하고, 실행 자체가 멈추면 해당 신선도 알림이 backstop입니다."
+          # ── 호스트 systemd **전역** 스윕(주기 축) ────────────────────────────────────────
+          # ★ 위 SystemdUnitFailed와 **직교하는 축**이다. 저쪽은 `OnFailure=` 한 줄이 달린 유닛만
+          #   덮는 **이벤트** 채널(지연 0 · critical), 이쪽은 `systemctl list-units`를 5분마다 읽는
+          #   **상태** 채널(전역 · 지연 ≤1주기)이다. 라이브 실측(2026-08-20): 로드 `.service` 64건 중
+          #   `OnFailure=` 보유가 vendor 2건 + 레포 1건뿐 — 나머지가 이 스윕의 존재 이유다.
+          # ★ **severity가 warning인 것이 설계다.** 어떤 유닛의 실패가 정말 critical이면 그 유닛
+          #   파일에 `OnFailure=unit-failure-notify@%n.service` 한 줄을 넣어 위 축으로 승격한다.
+          #   스윕은 폭(coverage), 저쪽은 깊이(즉시성·critical)를 맡는다.
+          #   ⚠️ 승격은 **페이지를 늘리지 않는다** — alertmanager.yaml의 unit-scoped inhibit 규칙이
+          #      같은 `unit`의 critical로 이 warning을 억제한다(같은 고장에 두 번 페이징하지 않는다).
+          # ★ `type=~` 필터의 근거: 라이브 629건의 내역은 mount 225 · device 116 · scope 94 ·
+          #   slice 52로 **487건이 kubelet/k3s 트랜지언트**다. `device`(udev 상태)·`scope`(컨테이너
+          #   런타임 소유)·`slice`(cgroup)·`target`(항상 결과이지 원인이 아니다)은 호스트의 일이
+          #   아니고 그 실패는 k8s 알림들의 소관이다. `mount`는 **남긴다** — `/mnt/bulk`가 그 타입이고
+          #   국면 B의 핵심 스토리지다(kubelet subpath mount 실패는 13일 journal에 0건. 노이즈가
+          #   관측되면 그때 `unit!~"var-lib-kubelet.+"`가 레버다 — 선제 allowlist는 썩는다).
+          # ★ **`and on()` 신선도 게이트가 잔상의 역방향을 닫는다.** 스윕이 죽은 시점에 파일에 failed
+          #   시리즈가 남아 있으면 textfile collector가 그것을 영원히 재발행해, 유닛을 고친 뒤에도
+          #   이 알림이 **영구 발화**한다. 게이트가 하트비트 3600s를 넘기면 게이지를 버린다.
+          #   ⚠️ 3600s는 SystemdSweepStale의 발화 시점(1800 + for 5m = 2100s)보다 **뒤**여야 한다 —
+          #      그래야 상태 게이지가 꺼지기 전에 하트비트 알림이 먼저 켜져 **틈이 생기지 않는다.**
+          #      tests/gates/test_systemd-failed-sweep.bats가 이 부등식을 강제한다.
+          # ★ rollup 없음 — 스크레이프 시계열이라 모드 C 구멍이 원리적으로 없다. `max by`는 rollup이
+          #   아니라 **집계**다: node-exporter 파드 재생성으로 instance/pod가 갈리면 같은 unit이 두
+          #   시리즈가 되므로(「재부팅 IP churn」) 라벨을 벗겨 알림 identity를 안정시킨다.
+          # ★ `absent()` 없음 — "지금 failed인 유닛이 없다"가 곧 이 시리즈의 부재(정상)다.
+          #   **미실행**은 아래 SystemdSweepStale이 전담한다(하트비트 ⊥ 상태 게이지 관용구).
+          - alert: SystemdHostUnitFailed
+            expr: |
+              max by (unit, type) (systemd_sweep_unit_failed{type=~"service|timer|socket|path|mount|automount"}) == 1
+              and on() ((time() - max(last_over_time(systemd_sweep_last_success_timestamp[2h]))) < 3600)
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "호스트 systemd 유닛이 failed 상태: {{ $labels.unit }}"
+              description: "주기 스윕(5분)이 failed 상태인 호스트 유닛을 발견했습니다 — `systemctl status {{ $labels.unit }}` · `journalctl -u {{ $labels.unit }} -n 200`. 고친 뒤에도 유닛은 failed로 남으므로 `systemctl reset-failed {{ $labels.unit }}`까지 해야 다음 스윕(≤5분)에 해소됩니다. 이 유닛의 실패가 즉시 페이징돼야 한다면 유닛 파일에 `OnFailure=unit-failure-notify@%n.service`를 넣어 critical 축으로 승격하세요. ⚠️ `Restart=always` 유닛은 이 축에 원리적으로 잡히지 않습니다(failed 상태에 진입하지 않음)."
+          # ── 스윕 하트비트: **0건과 미실행의 구별** ───────────────────────────────────────
+          # 🔴 이 알림의 존재 이유가 그 구별이다. textfile collector는 파일이 남아 있는 한 같은 값을
+          #   **영원히 재발행**하므로 스윕이 죽어도 `systemd_sweep_units_failed 0`이 계속 나온다 —
+          #   **시리즈의 존재는 생존을 증명하지 않는다.** 신선도를 값 안에 실은 타임스탬프만이 그것을
+          #   증명한다. 생산자 쪽 짝은 스크립트의 3중 fail-closed다(열거가 붕괴하면 아무것도 쓰지 않고
+          #   죽어 이 하트비트가 그 자리에 늙는다).
+          # ★ `absent()` 가드는 여기 **필수**다 — 위 SystemdUnitFailed와 정반대 결정이다. 저쪽은
+          #   이벤트 메트릭이라 부재가 곧 정상, 여기는 주기 게이지라 부재가 곧 드리프트다.
+          #   이벤트 메트릭의 '부재=정상' 논거를 연속 게이지에 복사하지 마라.
+          # ★ 모드 D: `in-cluster` + `impossible` → 화이트리스트가 `last_over_time`을 **요구**한다.
+          #   `max_over_time`은 값의 전진 점프를 [2h] 래치해 스윕이 살아나도 알림이 안 꺼진다.
+          # ★ 임계 1800s 산술: 최악 성공↔성공 간격 = OnCalendar(300) + AccuracySec(30) +
+          #   RandomizedDelaySec(30) + TimeoutStartSec(60) = **420s**. 1800s는 4.3배로 노드
+          #   재부팅(다운 + k3s/node-exporter 기동 ≈10분)을 페이지 없이 흡수한다.
+          # ⚠️ 배선의 마지막 한 줄(`systemctl enable --now systemd-failed-sweep.timer`)을 잊으면
+          #   이 알림이 그것을 잡는다 — host-config.sh는 유닛을 설치만 하고 enable하지 않는다(의도).
+          - alert: SystemdSweepStale
+            expr: |
+              (time() - max(last_over_time(systemd_sweep_last_success_timestamp[2h]))) > 1800
+              or absent(last_over_time(systemd_sweep_last_success_timestamp[2h]))
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "systemd 전역 실패 스윕 하트비트가 30분+ 침묵 — 호스트 실패 감시 실명 위험"
+              description: "systemd-failed-sweep.timer(5분)가 textfile collector에 하트비트를 못 씁니다 — 타이머 미enable/미설치 · 스크립트 fail-closed(열거 붕괴) · textfile 디렉토리 소실. 이 값이 늙으면 SystemdHostUnitFailed의 '0건'은 관측이 아니라 잔상입니다. `systemctl status systemd-failed-sweep.timer systemd-failed-sweep.service`와 `/var/lib/node_exporter/textfile/systemd-failed-sweep.prom`의 mtime을 확인하세요. 배선: sudo infra/k3s-bootstrap/host-config.sh --apply 후 sudo systemctl enable --now systemd-failed-sweep.timer"
           # bulk 티어 용량: 호스트 df를 백업 잡이 함께 push(files_data_bulk_avail/size_bytes).
           #
-          # ⚠️ **국면 A 정정(2026-08-17)**: 아래 서술의 "호스트 launchd pusher"는 Mac 시대의 실행자다.
-          #   NUC 이식으로 그 실행자가 사라져 **국면 A 동안 이 알림은 양변이 빈 벡터라 구조적으로 무성**이다.
+          # ⚠️ **국면 A 정정(2026-08-17 · 실행자 갱신 2026-08-19)**: 이 알림의 pusher는 2026-08-19(#506)에
+          #   리눅스로 재작성돼 systemd 타이머(`files-data-backup.timer`)로 배선됐다. 다만 **국면 A 동안 그
+          #   타이머는 enable되지 않아** 이 알림은 양변이 빈 벡터라 구조적으로 무성이다.
           #   그 축의 유일한 생존 신호는 in-cluster 짝인 `BulkStorageLow`(du exporter · absent 가드 착용 ·
-          #   15%)다 — 그쪽을 지우거나 약화시키면 안 된다. 국면 B에서 실행자가 배선되면 자동 복귀한다.
+          #   15%)다 — 그쪽을 지우거나 약화시키면 안 된다. 국면 B에서 타이머를 enable하면 자동 복귀한다.
           #   여기 expr은 손대지 않는다(absent 가드를 안 다는 결정은 국면 B에서 여전히 옳다 — 중복 페이지).
-          #   아래 rollup 논거는 실행자가 있는 국면(과거·미래) 모두에 유효하므로 그대로 둔다.
+          #   아래 rollup 논거는 실행자가 도는 국면(과거·미래) 모두에 유효하므로 그대로 둔다.
           #
           # ★ 양변 rollup은 필수다(맨 참조 금지 — 이게 이 알림이 죽어 있던 이유다). files_data_bulk_*의 pusher는
-          #   호스트 launchd(app.homelab.files-backup, scripts/backup-files-data.sh)라 **하루 1회(04:30)** 단발
-          #   push다. vmalert instant 질의 룩백은 5m(-datasource.queryStep 기본)뿐이라, 맨 참조하면 시리즈가 하루
-          #   1440분 중 **5분만** 보인다 → 30초 평가로 최대 11회 연속 참 → for: 30m이 요구하는 61회 연속에
+          #   호스트 systemd 타이머(files-data-backup.timer, scripts/backup-files-data.sh)라 **하루 1회**
+          #   (OnCalendar=daily + RandomizedDelaySec=30min) 단발 push다. vmalert instant 질의 룩백은
+          #   5m(-datasource.queryStep 기본)뿐이라, 맨 참조하면 시리즈가 하루 1440분 중 **5분만** 보인다
+          #   → 30초 평가로 최대 11회 연속 참 → for: 30m이 요구하는 61회 연속에
           #   **구조적으로 도달 불가** → 외장 SSD가 꽉 차도 영원히 무발화(라이브 실측: 마지막 push 후 10.8h에
           #   맨 참조 = 빈 결과, last_over_time [3d] 비율 = 0.9991 — 데이터는 TSDB에 멀쩡히 있고 차이는 rollup뿐).
           #   전문·근거는 `docs/traps-detail.md`(SSOT)의 「push 주기 > instant 룩백 → 룰 시리즈 구멍 → 무발화」.
@@ -308,8 +391,8 @@ data:
               summary: "per-PVC 용량 수집이 48시간 이상 정체"
               description: "pvc-du-exporter CronJob이 pvc_dir_size_bytes/storage_tier_* 갱신에 실패했습니다 — bulk(virtiofs) 용량의 유일 in-cluster 신호가 소실됩니다(W3 선행). CronJob/마운트/경로를 확인하세요."
           # 외장 bulk-ssd의 in-cluster 용량 신호(W3 관측 데이터 이전의 선행 조건, F18) — du exporter가 파드
-          # 내부 df로 티어 용량을 push한다. FilesBulkSSDLow(host launchd df push, <10%)와 물리 매체는 같으나
-          # ⚠️ 의도적 이원화(중복 아님): (a) 독립 liveness — host launchd 백업이 멈춰도(FilesBulkSSDLow capacity
+          # 내부 df로 티어 용량을 push한다. FilesBulkSSDLow(호스트 백업 타이머의 df push, <10%)와 물리 매체는
+          # 같으나 ⚠️ 의도적 이원화(중복 아님): (a) 독립 liveness — 호스트 백업이 멈춰도(FilesBulkSSDLow capacity
           # 판독이 freeze) 이 in-cluster 신호는 생존, (b) 티어 스캔 무결성 증거(F20 — pvc_dir_size_bytes{tier="bulk"}
           # 동반)로 df 경로가 진짜 bulk 트리를 본다는 것을 증명. 15%로 FilesBulkSSDLow(10%)보다 먼저 발화(early).
           # 일 1회 push라 last_over_time [3d] 윈도 필수(instant staleness 함정).

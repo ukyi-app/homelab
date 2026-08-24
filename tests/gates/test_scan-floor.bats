@@ -114,18 +114,43 @@ c" ]
   # ⚠️ 이 바닥값은 **여유가 없다**(오늘 로스터와 같은 값). 도메인 바닥값은 도메인이 정당하게 줄 수
   #    있어 여유를 두지만, 라벨이 사라지는 것은 드리프트가 아니라 언제나 **의도적 커버리지 변경**이고
   #    그때는 CONTRIBUTING·PROGRESS의 커버리지 수치도 같이 고쳐야 하므로 diff에 보여야 한다.
+  # 라벨 수 바닥값은 **전체** 정적 집합에서 센다 — SKIP과 무관하게 "라벨이 사라졌는가"를 보는 축이다.
   labels=$(printf '%s\n' "$static" | grep -c . || true)
   [ "$labels" -ge 10 ]
   guards="$(grep -lE '^[^#]*\b(scan_floor|scan_signal) ' "$ROOT"/scripts/*.sh)"
   [ -n "$guards" ]
-  runtime=""
-  for f in $guards; do
-    out="$(bash "$f" 2>/dev/null)" || { echo "가드가 비-0으로 죽었다: $f"; false; }
+  # ⚠️ **SKIP(exit 4)은 실패가 아니다 — 그리고 대조에서 양쪽 대칭으로 빠져야 한다.**
+  #    `verify-credential-inventory.sh`는 런북이 gitignored라 CI에서 원리적으로 SKIP한다(rc=4,
+  #    SCAN 라벨 0개). 예전 판은 그 rc를 "비-0으로 죽었다"로 읽어 **로컬은 초록·CI만 red**였다
+  #    (실측 2026-08-24: 로컬 make ci rc=0인데 PR gate FAILURE — venue가 갈리는 형태라
+  #    로컬 초록이 CI를 예고하지 못했다). SKIP을 인정하되 그 가드의 라벨을 **정적 쪽에서도** 빼야
+  #    등식이 성립한다 — 한쪽만 빼면 반대 방향으로 red다.
+  cmp_static=""; runtime=""; skipped=""; nskip=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    lbl="$(grep -hE '^[^#]*\b(scan_floor|scan_signal) ' "$f" \
+           | grep -oE '(scan_floor|scan_signal) [a-z0-9:-]+' | awk '{print $2}')"
+    # ⚠️ `out="$(...)"; rc=$?`로 쓰면 안 된다 — bats는 set -e 아래라 **할당이 비-0이면 그 줄에서
+    #    죽어** 다음 줄의 rc 판정에 도달하지 못한다(이 레포에 반복되는 클래스: 형제 가드들이
+    #    `|| arc=$?`를 쓰는 이유가 그것이다). `||`가 붙어야 set -e가 발동하지 않는다.
+    rc=0
+    out="$(bash "$f" 2>/dev/null)" || rc=$?
+    if [ "$rc" -eq 4 ]; then skipped="${skipped} ${f##*/}"; nskip=$(( nskip + 1 )); continue; fi
+    [ "$rc" -eq 0 ] || { echo "가드가 비-0으로 죽었다: $f (rc=$rc)"; false; }
+    cmp_static="${cmp_static}${lbl}
+"
     runtime="${runtime}$(printf '%s\n' "$out" | sed -n 's/^SCAN: \(.*\): [0-9][0-9]*$/\1/p')
 "
-  done
+  done <<EOF
+$guards
+EOF
+  # ⚠️ SKIP 상한이 없으면 "전부 SKIP → 양쪽 공집합 → 등식 성립"이라는 vacuous green이 열린다.
+  #    SKIP은 venue에 따라 달라지므로(로컬 0 · CI 1) 바닥값이 아니라 **상한**으로 문다.
+  echo "skipped(${nskip}):${skipped}"
+  [ "$nskip" -le 2 ]
+  cmp_static="$(printf '%s' "$cmp_static" | grep -v '^$' | LC_ALL=C sort -u)"
   runtime="$(printf '%s' "$runtime" | grep -v '^$' | LC_ALL=C sort -u)"
-  [ "$static" = "$runtime" ] || { echo "정적:"; echo "$static"; echo "런타임:"; echo "$runtime"; false; }
+  [ "$cmp_static" = "$runtime" ] || { echo "정적:"; echo "$cmp_static"; echo "런타임:"; echo "$runtime"; false; }
 }
 
 # 콜사이트 증인 — 바닥값 면제(픽스처·인자) 모드와 바닥값 없는 레인도 **자기** 신호를 낸다.

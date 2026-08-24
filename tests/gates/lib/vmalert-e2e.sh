@@ -57,36 +57,89 @@ vme_cleanup() { # trap EXIT에서 호출
   [ -n "$VME_NET" ] && docker network rm "$VME_NET" >/dev/null 2>&1 || true
 }
 
+# ── 호스트 포트 밴드 ──────────────────────────────────────────────────────────────
+# 밴드·프로브·추첨의 **정의처는 `tests/gates/lib/host-port.sh`다**(#521의 처방이 이 lib 안에 갇혀 있어
+# 형제 하네스 둘이 같은 함정 위에 리터럴 포트를 그대로 박은 채 남았던 것을 되돌린 결과다).
+# 여기 남은 것은 그 프리미티브를 이 lib의 **종료 규약(HARNESS FAULT = exit 2)** 으로 감싸는 얇은
+# 어댑터뿐이다 — host-port.sh는 exit하지 않고 비-0 rc만 내므로, 그 rc를 삼키면 vacuous green이 된다.
+# ⚠️ `VME_PORT_*`는 계속 이 lib의 손잡이다(소비자·테스트가 이 이름으로 밴드를 흔든다). 어댑터가
+#    호출 직전에 `HP_*`로 옮긴다 — 두 벌의 기본값을 따로 두면 조용히 갈리므로 기본값은 host-port.sh
+#    한 곳에서만 온다.
+# ⚠️ **이 lib을 다른 위치로 복사해 source하려면 `host-port.sh`도 같이 복사해야 한다** — 형제를
+#    `BASH_SOURCE` 기준으로 찾기 때문이다(레포 루트를 추정하면 워크트리·복사본에서 조용히 엉뚱한
+#    파일을 집는다). 부재는 **fail-closed**다: 조용히 넘어가면 밴드 검사도 프로브도 없는 채로
+#    `_vme_pick_port`가 "command not found"를 내며 재시도 루프를 이상하게 태운다.
+_VME_HP_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/host-port.sh"
+[ -r "$_VME_HP_LIB" ] || {
+  echo "vmalert-e2e: 형제 lib을 읽을 수 없다: ${_VME_HP_LIB} — 이 파일을 복사했다면 host-port.sh도 같은 디렉토리로 복사하라." >&2
+  exit 2
+}
+# shellcheck source=tests/gates/lib/host-port.sh
+. "$_VME_HP_LIB"
+
+VME_PORT_LO="${VME_PORT_LO:-$HP_PORT_LO}"
+VME_PORT_HI="${VME_PORT_HI:-$HP_PORT_HI}"
+VME_NODEPORT_LO="${VME_NODEPORT_LO:-$HP_NODEPORT_LO}"
+VME_NODEPORT_HI="${VME_NODEPORT_HI:-$HP_NODEPORT_HI}"
+VME_PORT_RANGE_FILE="${VME_PORT_RANGE_FILE:-$HP_PORT_RANGE_FILE}"
+
+_vme_hp_sync() {   # VME_* 손잡이 → HP_* 프리미티브 입력
+  HP_PORT_LO="$VME_PORT_LO"; HP_PORT_HI="$VME_PORT_HI"
+  HP_NODEPORT_LO="$VME_NODEPORT_LO"; HP_NODEPORT_HI="$VME_NODEPORT_HI"
+  HP_PORT_RANGE_FILE="$VME_PORT_RANGE_FILE"
+}
+
+_vme_band_assert() { # 밴드가 두 예약 중 하나라도 건드리면 즉시 죽는다(판정 불가는 '통과'가 아니다)
+  _vme_hp_sync
+  hp_band_assert || vme_fault "포트 밴드 검사가 실패했다(직전 host-port stderr가 원인이다) — 판정 불가는 '통과'가 아니다."
+}
+
+_vme_port_free() { hp_port_free "$1"; }
+
+# vmsingle은 컨테이너당 포트를 **하나만** 쓰므로 배제 인자를 넘기지 않는다(넘길 것이 없다).
+# 한 하네스가 포트를 둘 이상 뽑아야 하면 `hp_pick_port <이미-뽑은-포트>`를 직접 부른다.
+_vme_pick_port() {
+  _vme_hp_sync
+  hp_pick_port
+}
+
 # $3.. = vmsingle에 그대로 넘길 **추가 플래그**(선택). 하네스 고유 스토리지 의미(예: 드리프트 하네스의
 # `--dedup.minScrapeInterval` — 합성 KSM 시계열을 scrape 그리드에 정렬)를 인라인 사본 없이 표현하기 위한
 # 통로다. 넘기지 않으면 `"$@"`가 0개로 전개돼 기존 소비자의 명령줄은 **바이트 불변**이다.
-# 빈 포트를 **직접** 고른다.
-# ⚠️ `-p 127.0.0.1:0:8428`(호스트 포트 0 = 커널이 임의 배정)은 **docker 전용 관용구다.**
-#    podman 5는 거부한다: `parsing host port: port numbers must be between 1 and 65535 (inclusive), got 0`.
-#    2026-08-19 NUC 이관에서 밟았다 — 맥은 OrbStack이 docker를 제공해 안 밟혔고, 리눅스 노드에는
-#    docker 데몬을 올리지 않는다(docker0 브리지와 FORWARD 체인 조작이 k3s 파드 네트워킹을 깨는
-#    전형적 경로다). 그래서 rootless podman을 쓰고, 포트 배정을 런타임에 맡기지 않는다.
-# ⚠️ `/dev/tcp`는 **bash 전용**이다(이 파일 shebang이 bash라 성립). 새 도구 의존을 만들지 않으려고
-#    파이썬·ss·nc 대신 이걸 쓴다 — m6-tools가 관리하지 않는 도구를 게이트가 조용히 요구하면 안 된다.
-_vme_port_free() { ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
-_vme_pick_port() {
-  local p _
-  for _ in $(seq 40); do
-    p=$(( 20000 + RANDOM % 20000 ))
-    if _vme_port_free "$p"; then printf '%s' "$p"; return 0; fi
-  done
-  echo "빈 포트를 찾지 못했다(20000-39999에서 40회) — 판정 불가는 '통과'가 아니다" >&2
-  return 1
-}
+VME_BIND_TRIES="${VME_BIND_TRIES:-3}"   # 첫 시도 + 재추첨 2회(판별에 필요한 최소치는 2다)
 
 vme_start_vmsingle() { # $1=container name $2=vmsingle version [$3.. = 추가 플래그] → VME_BASE 설정
-  local name="$1" ver="$2" port ready got
+  local name="$1" ver="$2" port ready got try err log body
   shift 2
   VME_CONTAINERS="$VME_CONTAINERS $name"
-  port="$(_vme_pick_port)" || exit 2
-  docker run -d --name "$name" --network "$VME_NET" -p "127.0.0.1:${port}:8428" \
-    "victoriametrics/victoria-metrics:${ver}" \
-    --storageDataPath=/storage --retentionPeriod=100y --httpListenAddr=:8428 "$@" >/dev/null
+  # 밴드를 좁혀도 프로브~`docker run` 사이의 창은 남는다(TOCTOU). 그 잔여만 재시도가 흡수한다.
+  try=1; log=""
+  while :; do
+    port="$(_vme_pick_port)" || exit 2
+    # ⚠️ 실패한 `docker run -d`는 컨테이너를 **Created로 남긴다** → 같은 이름 재시도가 "name already
+    #    in use"로 죽는다. podman 전용 `--replace`는 docker 양립성이 없으므로 명시적으로 지운다.
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    if err="$(docker run -d --name "$name" --network "$VME_NET" -p "127.0.0.1:${port}:8428" \
+        "victoriametrics/victoria-metrics:${ver}" \
+        --storageDataPath=/storage --retentionPeriod=100y --httpListenAddr=:8428 "$@" 2>&1 >/dev/null)"; then
+      break
+    fi
+    log="${log}
+--- 시도 ${try} (port=${port}) ---
+${err}"
+    # ⚠️ 실패를 **메시지·종료코드로 판별하지 않는다** — 같은 podman도 pasta/rootlessport로 문자열이
+    #    갈리고 CI dockerd는 또 다르다. venue 의존 판별자는 한 venue에서 조용히 무력해진다.
+    #    판별자는 "서로 다른 포트로 다시 하면 되는가" 하나다.
+    if [ "$try" -ge "$VME_BIND_TRIES" ]; then
+      printf '%s\n' "$log" >&2
+      vme_fault "vmsingle(${name}) 기동이 **서로 다른 포트** ${try}개에서 모두 실패했다 — 포트 경합만으로는 설명되지 않는다(위 런타임 stderr가 원인이다)."
+    fi
+    # ⚠️ 조용한 재시도 금지 — 발생 사실이 로그에 없으면 경합 빈도가 관측되지 않는다.
+    echo "RETRY (bind ${try}/${VME_BIND_TRIES}): vmsingle(${name}) port=${port} 기동 실패 — 포트를 새로 뽑아 재시도한다. 런타임 stderr: ${err}" >&2
+    try=$(( try + 1 ))
+  done
+  [ -z "$err" ] || printf '%s\n' "$err" >&2   # 성공 경로의 런타임 경고는 예전처럼 그대로 흘린다
+  [ "$try" -eq 1 ] || echo "RETRY (bind): vmsingle(${name}) ${try}번째 시도에서 성공했다." >&2
   # 읽어온 포트를 **쓰지 않고 대조한다.** 예전엔 `docker port` 출력을 그대로 믿었는데, 이제는
   # 우리가 고른 값과 다르면 즉시 죽는다 — 경합으로 매핑이 어긋나면 아래 health 대기가 60×0.5s를
   # 통째로 태운 뒤에야 "not ready"로 죽어 원인이 안 보인다.
@@ -99,7 +152,17 @@ vme_start_vmsingle() { # $1=container name $2=vmsingle version [$3.. = 추가 �
   VME_BASE="http://127.0.0.1:${port}"
   ready=0
   for _ in $(seq 60); do
-    if curl -sf "$VME_BASE/health" >/dev/null 2>&1; then ready=1; break; fi
+    # ⚠️ 2xx 여부가 아니라 **본문**을 본다. vmsingle의 /health는 `OK`를 준다. 본문이 비면 아직 안 뜬
+    #    것이고, 본문이 있는데 `OK`가 아니면 이 호스트 포트가 **우리 컨테이너로 가지 않는다**는 뜻이다
+    #    — 밴드가 잘못 옮겨져 NodePort와 겹치면 정확히 이 모양이 된다(실측 2026-08-20: `docker run`도
+    #    `docker port` 대조도 통과하는데 curl만 Traefik의 `404 page not found`를 받았다).
+    #    예전 코드는 그 상태를 60×0.5s 태운 뒤 "not ready"로 **오진**했다.
+    body="$(curl -s --max-time 3 "$VME_BASE/health" 2>/dev/null || true)"
+    case "$body" in
+      OK*) ready=1; break ;;
+      '') ;;
+      *) vme_fault "${VME_BASE}/health가 vmsingle이 아닌 응답을 냈다 — 이 호스트 포트가 다른 서비스로 라우팅된다(NodePort DNAT 등). 본문: ${body}" ;;
+    esac
     sleep 0.5
   done
   [ "$ready" = 1 ] || { echo "vmsingle($name) not ready" >&2; docker logs "$name" 2>&1 | tail -20 >&2; exit 2; }
