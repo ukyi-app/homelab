@@ -89,3 +89,12 @@ WAIVED by user: 라운드 한도 2 도달, 잔여는 r2-a1 1건뿐이고 수리�
 - r2-b1 Accept(still-open) — required만 타입 검증, optional dryRun:'true'(문자열)가 bool()에서 false로 접혀 실제 자격 쓰기 실행. 수리: 전체 inputSchema 검증(schema-check.ts 재사용)으로 type·enum·additionalProperties·minLength까지. 판별성 검증.
 - r2-a5 Accept(still-open) — cache-url 계획의 host가 urlResult에 없어 cache_url 성공 envelope이 스키마 위반. 수리: 계획에서 urlResult 알려진 키만 화이트리스트 복사 + cache_url 테스트. 판별성 검증.
 - r2 New Accept — verification.md가 a19f466 이전(97e8f6f)에 핀됨(수정이 코드 변경). 수리: 최종 HEAD 재측정·재핀(r2 수정 커밋에서).
+
+WAIVED by user: release 게이트 라운드 한도(2) 도달. r1(5쟁점)·r2(4건) 발견 전 9건을 실코드 확증 후
+수용·수정했고, 각 수정을 mutation 판별성(되돌리면 red)으로 검증했으며 전체 스위트(gate 2092 @test)·
+make verify·typecheck가 exit 0이다. 게이트 정식 verdict는 pane 판독 손상(r1·r2 readback-incomplete)과
+1차 review-timeout이라는 이 레포 게이트의 구조적 이슈로 clean approve에 도달하지 못했고, 리뷰어 답은
+codex 세션 로그에서 무손실 회수(HRG 토큰·count 일치)해 트리아지했다. 라운드 3(무단 금지)은 같은 판독
+손상 재발 가능성이 높아, 독립 검증된 수정을 근거로 release 게이트를 사람 웨이버로 종결한다. 스코프:
+full-branch(558KB)가 herdr 96KB 상한 초과라 ticket 12 슬라이스(최대 fitting suffix)만 게이트했고,
+ticket 01~11은 per-ticket 2축 리뷰 + ticket 10·11·12의 4렌즈 적대 red-team이 슬라이스 적대 커버리지다.
