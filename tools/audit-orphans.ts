@@ -8,14 +8,19 @@
 //   missing-activation    : active:true+public 앱인데 .activation 마커(registry projection) 부재 — 재노출 게이트 사각(차단)
 //   dangling-role         : cluster.yaml managed.role인데 passwordSecret sealed 부재 — 고아 role (정보성)
 //   unreferenced-conn     : data-conn 등록 conn인데 어느 apps/*/values.yaml envFrom도 미참조 (정보성; *-ro-conn 제외)
+//   orphan-conn           : conn 등록인데 소스(Database CR/인스턴스 디렉토리) 부재 — teardown 잔재/부분 purge (정보성)
+//   malformed-conn        : conn 형상인데 레이아웃 분류 불가(이름 정책 밖) — 손으로 쓴 불량 엔트리 (정보성)
 //   stale-ledger-row      : prod 원장 행인데 apps/도 platform/도 없음
 //   incomplete-purge      : tombstone state=purging 잔존 — 상태머신 중단 흔적
+// conn/원장 명명 판정은 레이아웃 커널(lib/resource-layout.ts)을 소비한다 — 자체 정규식 유도는
+// 명명 변경 시 조용히 어긋나는 관측 사각이었다(cli-deepening 심화 4).
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { surfaceHash } from "./lib/surface-hash.ts";
 import { registryProjection } from "./lib/activation-marker.ts";
 import { parseLedgerRows } from "./lib/ledger-totals.ts";
 import { listUnits } from "./lib/repo-walk.ts";
+import { LAYOUT_DIRS, TOMBSTONES_PATH, classifyArtifact, classifyLedgerRow, layoutFor } from "./lib/resource-layout.ts";
 
 const USAGE = `audit-orphans — registry↔매니페스트↔원장 교차 드리프트 리포트(읽기 전용)
 사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict] [--min-registry <n>]
@@ -97,8 +102,8 @@ const appsRoot = `${ROOT}/apps`;
 const appDirs = listUnits("apps", ROOT)
   .map((u) => u.name)
   .filter((a) => existsSync(`${appsRoot}/${a}/deploy/prod/values.yaml`));
-const cacheDirs = existsSync(`${ROOT}/platform/cache/prod`)
-  ? readdirSync(`${ROOT}/platform/cache/prod`, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
+const cacheDirs = existsSync(`${ROOT}/${LAYOUT_DIRS.cacheProd}`)
+  ? readdirSync(`${ROOT}/${LAYOUT_DIRS.cacheProd}`, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
   : [];
 
 // 1) registry ↔ 매니페스트
@@ -157,23 +162,26 @@ for (const r of parseLedgerRows(ledger)) { // F7: 명명 필드(raw 인덱스 �
   const comp = r.name, ns = r.env;
   if (ns === "prod" && !appDirs.includes(comp) && !existsSync(`${ROOT}/platform/${comp}`))
     add("stale-ledger-row", comp, "원장 prod 행인데 apps/·platform/ 어디에도 실체 없음");
-  if (ns === "cache" && !cacheDirs.includes(comp.replace(/^cache-/, "")))
-    add("stale-ledger-row", comp, "원장 cache 행인데 인스턴스 디렉토리 없음");
+  if (ns === "cache") {
+    const row = classifyLedgerRow(comp); // 커널 역방향 — cache-<name> 형상 밖이면 그 자체로 stale
+    if (row === null || !cacheDirs.includes(row.name))
+      add("stale-ledger-row", comp, "원장 cache 행인데 인스턴스 디렉토리 없음");
+  }
 }
 
 // 3) 중단된 purge
-const tombs: Record<string, any> = readJson(`${ROOT}/platform/data-conn/prod/.tombstones.json`, {});
+const tombs: Record<string, any> = readJson(`${ROOT}/${TOMBSTONES_PATH}`, {});
 for (const [k, v] of Object.entries(tombs))
   if (v.state === "purging") add("incomplete-purge", k, "purge 상태머신이 중단됨 — drop/verify/cleanup 재개 필요");
 
 // 4) dangling-role — cluster.yaml managed.roles 항목인데 passwordSecret sealed가 부재(정보성).
 //    purge cleanup이 sealed/CR을 제거했지만 cluster.yaml role 제거 커밋이 빠진 상태를 잡는다
 //    (incomplete-purge는 state=purging만 봐서 purge 완료 후 고아 role을 못 본다).
-const clusterPath = `${ROOT}/platform/cnpg/prod/cluster.yaml`;
+const clusterPath = `${ROOT}/${LAYOUT_DIRS.cnpgProd}/cluster.yaml`;
 if (existsSync(clusterPath)) {
   const cluster = parseYaml(readFileSync(clusterPath, "utf8")) ?? {};
   const roles = cluster?.spec?.managed?.roles ?? [];
-  const cnpgDir = `${ROOT}/platform/cnpg/prod`;
+  const cnpgDir = `${ROOT}/${LAYOUT_DIRS.cnpgProd}`;
   for (const role of roles) {
     const secret = role?.passwordSecret?.name;
     if (!secret) continue;
@@ -188,12 +196,9 @@ if (existsSync(clusterPath)) {
 //    envFrom도 참조하지 않음(정보성, 비차단). *-ro-conn은 모드2 디버깅 전용(의도적 미참조)이라 제외.
 //    trip-mate 실재발(#211): conn이 봉인·커밋돼도 앱이 envFrom을 배선 안 하면 어떤 게이트도 안 잡았다.
 //    (이름 재사용/공유 등 이름≠앱 케이스가 있어 차단하지 않는다 — 정보로만 표면화.)
-const connKustPath = `${ROOT}/platform/data-conn/prod/kustomization.yaml`;
+const connKustPath = `${ROOT}/${LAYOUT_DIRS.dataConn}/kustomization.yaml`;
 if (existsSync(connKustPath)) {
   const connKust = parseYaml(readFileSync(connKustPath, "utf8")) ?? {};
-  const connEntries: string[] = (connKust.resources ?? [])
-    .map((r: any) => String(r))
-    .filter((r: string) => /^(db|cache)-.+-conn\.sealed\.yaml$/.test(r) && !r.endsWith("-ro-conn.sealed.yaml"));
   const referenced = new Set<string>();
   for (const a of appDirs) {
     const values = parseYaml(readFileSync(`${appsRoot}/${a}/deploy/prod/values.yaml`, "utf8")) ?? {};
@@ -202,11 +207,28 @@ if (existsSync(connKustPath)) {
       if (n) referenced.add(String(n));
     }
   }
-  for (const entry of connEntries) {
-    const handle = entry.replace(/\.sealed\.yaml$/, "");
-    if (!referenced.has(handle))
+  for (const raw of (connKust.resources ?? []).map((r: any) => String(r))) {
+    if (!/-conn\.sealed\.yaml$/.test(raw)) continue; // conn 형상만 이 절의 소관
+    const c = classifyArtifact(raw);
+    if (c === null) {
+      // 커널이 못 읽는 conn 형상 — 조용히 건너뛰면 손으로 쓴 불량 엔트리가 감사에서 사라진다
+      // (형식 밖 = 산출물 아님으로 접는 관측 축소 금지 — 티켓 06 리뷰 이월).
+      add("malformed-conn", raw, "conn 형상인데 레이아웃 분류 불가(이름 정책 밖) — 손으로 쓴 불량 엔트리 의심(정보성)");
+      continue;
+    }
+    const layout = layoutFor(c.kind, c.name);
+    const handle = c.role === "conn" ? layout.handles.rw.name : layout.handles.ro.name;
+    // 미참조 검사는 rw conn만 — *-ro-conn은 모드2 디버깅 전용(의도적 미참조)이라 제외.
+    if (c.role === "conn" && !referenced.has(handle))
       add("unreferenced-conn", handle,
         "data-conn 등록 conn인데 어느 apps/*/values.yaml envFrom도 참조하지 않음 — 앱이 DB/캐시 없이 배포 중일 수 있음(#211 클래스, 정보성)");
+    // 소스 부재 — 정방향 열거로는 원리적으로 못 보던 고아(소스가 사라진 conn)를 역방향 분류가
+    // 잡는다. **ro-conn도 검사한다** — purge 삼중이 conn→ro-conn 순으로 제거하므로 중단이 남기는
+    // 것이 정확히 ro-conn 엔트리다(리뷰 지적: conn 한정이면 그 케이스가 무관측).
+    const src = layout.kind === "db" ? `${ROOT}/${layout.paths.cr}` : `${ROOT}/${layout.paths.instanceDir}`;
+    if (!existsSync(src))
+      add("orphan-conn", handle,
+        `conn 등록인데 소스(${layout.kind === "db" ? "Database CR" : "인스턴스 디렉토리"}) 부재 — teardown 잔재/부분 purge 의심(정보성)`);
   }
 }
 

@@ -343,3 +343,44 @@ KEOF
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.findings | any(.type == "unreferenced-conn" and .subject == "db-lonely-conn")'
 }
+
+@test "audit reports a conn whose source resource is gone (orphan-conn via the layout kernel)" {
+  # 소스(Database CR / 인스턴스 디렉토리)가 사라진 conn 등록 — 지금까지 어떤 유형도 못 보던
+  # 관측(설계 게이트 r1 D2가 요구한 역방향의 감사 소비). shared는 CR이 실재하므로 대조군.
+  cat > "$FR/platform/data-conn/prod/kustomization.yaml" <<'YAML'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - db-shared-conn.sealed.yaml
+  - db-waif-conn.sealed.yaml
+  - db-waif-ro-conn.sealed.yaml
+  - cache-stray-conn.sealed.yaml
+YAML
+  touch "$FR/platform/data-conn/prod/db-waif-conn.sealed.yaml"
+  touch "$FR/platform/data-conn/prod/db-waif-ro-conn.sealed.yaml"
+  touch "$FR/platform/data-conn/prod/cache-stray-conn.sealed.yaml"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.findings | any(.type == "orphan-conn" and .subject == "db-waif-conn")'
+  # ro-conn도 검사된다 — purge 삼중이 conn→ro-conn 순 제거라 중단이 남기는 것이 정확히 ro-conn(리뷰 지적).
+  echo "$output" | jq -e '.findings | any(.type == "orphan-conn" and .subject == "db-waif-ro-conn")'
+  echo "$output" | jq -e '.findings | any(.type == "orphan-conn" and .subject == "cache-stray-conn")'
+  # 음성 대조는 같은 성공 출력의 카운트=0으로 — 별도 파이프의 rc 기반(-ne 0)은 bun이 죽어도 통과한다.
+  [ "$(echo "$output" | jq '[.findings[] | select(.type == "orphan-conn" and .subject == "db-shared-conn")] | length')" = "0" ]
+}
+
+@test "audit surfaces malformed conn entries instead of silently dropping them (observation preserved)" {
+  # 커널 분류가 null인 conn 형상 엔트리를 조용히 건너뛰면 손으로 쓴 불량 엔트리가 감사에서
+  # 사라진다(티켓 06 리뷰 이월 — 관측 축소 금지). 별도 유형으로 표면화한다.
+  cat > "$FR/platform/data-conn/prod/kustomization.yaml" <<'YAML'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - db-BAD-conn.sealed.yaml
+YAML
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.findings | any(.type == "malformed-conn" and .subject == "db-BAD-conn.sealed.yaml")'
+}

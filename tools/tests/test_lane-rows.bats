@@ -131,3 +131,26 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "ok"
 }
+
+@test "db/cache lane surface paths equal the layout kernel derivation (import-0 parity guard)" {
+  # 기술자는 import 0 계약이라 커널을 참조할 수 없다 — 두 순수 모듈의 표면 경로 일치를 가드가
+  # 대조한다(Q7과 같은 양끝+가드 패턴). 어긋나면 red — D3 호환 형태의 "커널 소비"다.
+  run bun -e '
+    import { laneMutationFields } from "./tools/lib/catalog-rows.ts";
+    import { layoutFor } from "./tools/lib/resource-layout.ts";
+    const db = laneMutationFields("create-database", "orders");
+    const dbL = layoutFor("db", "orders");
+    const cc = laneMutationFields("create-cache", "demo");
+    const ccL = layoutFor("cache", "demo");
+    const cases = [
+      [db.applications[0].surfacePath, dbL.paths.cr],
+      [db.applications[1].surfacePath, dbL.paths.connSealed],
+      [cc.applications[0].surfacePath, ccL.paths.instanceDir + "/deployment.yaml"],
+      [cc.applications[1].surfacePath, ccL.paths.conn],
+    ];
+    for (const [a, b] of cases) if (a !== b) { console.error(a + " != " + b); process.exit(1); }
+    console.log("ok:" + cases.length);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:4$"
+}

@@ -12,6 +12,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
+import { layoutFor } from "./lib/resource-layout.ts";
 import { parseFlags } from "./lib/cli.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed. 종료 코드 2 보존.
@@ -30,13 +31,15 @@ if (!name || !RESOURCE_NAME_RE.test(name)) {
 }
 if (RW && ADMIN) { console.error("db-url: --rw와 --admin은 상호배타 — 하나만 지정"); process.exit(2); }
 
-const NAME = name.replaceAll("-", "_").toUpperCase();
+const NAME = name.replaceAll("-", "_").toUpperCase(); // admin 키 전용(admin 채널은 커널 밖 — F2 별도 채널)
+// conn 핸들·env 키는 레이아웃 커널 소유(cli-deepening 심화 4) — 여기서 재유도하지 않는다.
+const L = layoutFor("db", name);
 // 모드별: secret(NS) · 내부 srcKey(있으면 URL, 없으면 basic-auth=admin) · 출력 env 키 · 대상 파일
 const mode = ADMIN
   ? { label: "admin-superuser", ns: "database", secret: "pg-admin-credentials", srcKey: "", envKey: `${NAME}_DATABASE_ADMIN_URL`, envFile: ".env.admin.local" }
   : RW
-    ? { label: "owner-readwrite", ns: "prod", secret: `db-${name}-conn`, srcKey: `${NAME}_DATABASE_URL`, envKey: `${NAME}_DATABASE_URL`, envFile: ".env.local" }
-    : { label: "readonly", ns: "prod", secret: `db-${name}-ro-conn`, srcKey: `${NAME}_RO_DATABASE_URL`, envKey: `${NAME}_RO_DATABASE_URL`, envFile: ".env.local" };
+    ? { label: "owner-readwrite", ns: "prod", secret: L.handles.rw.name, srcKey: L.envKeys.rw, envKey: L.envKeys.rw, envFile: ".env.local" }
+    : { label: "readonly", ns: "prod", secret: L.handles.ro.name, srcKey: L.envKeys.ro, envKey: L.envKeys.ro, envFile: ".env.local" };
 const envLocal = arg("--env-local", mode.envFile)!;
 // F2 채널 분리 완결: --admin은 .env.admin.local에만 기록 — --env-local로 앱 런타임 파일(.env.local 등)을
 // 가리켜 superuser URL을 런타임 채널에 흘리는 것을 차단한다(envKey는 namespaced <NAME>_DATABASE_ADMIN_URL이라

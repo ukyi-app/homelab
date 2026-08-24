@@ -18,6 +18,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { RESOURCE_NAME_RE, EXT_RE, resourceNameError } from "./lib/identity.ts";
+import { entryName, layoutFor } from "./lib/resource-layout.ts";
 import { sealManifest } from "./lib/seal.ts";
 import { parseFlags } from "./lib/cli.ts";
 import { Document, parseDocument } from "yaml";
@@ -57,27 +58,30 @@ if (!RESOURCE_NAME_RE.test(args.cluster)) fail(`cluster 형식 불량: '${args.c
 if (new Set(args.extensions).size !== args.extensions.length) fail("extensions에 중복 항목");
 for (const e of args.extensions) if (!EXT_RE.test(e)) fail(`extension 이름 불량: '${e}'`);
 
-const owner = name; // owner == name 불변식 — role↔DB 1:1
-const roRole = `${name}_ro`; // 읽기전용 롤 (모드2 디버깅용)
-const ENV = name.replaceAll("-", "_").toUpperCase(); // kebab → UPPER_SNAKE (env 키 규약)
+// 산출물 명명·배치는 레이아웃 커널 소유(cli-deepening 심화 4) — 여기서 재유도하지 않는다.
+const layout = layoutFor("db", name);
+const owner = layout.roles.owner; // owner == name 불변식 — role↔DB 1:1
+const roRole = layout.roles.ro;   // 읽기전용 롤 (모드2 디버깅용)
 
-// ---------- 3) 경로 ----------
+// ---------- 3) 경로 — 커널의 레포 상대 정준형에 ROOT를 결합한다 ----------
 const ROOT = args.root;
-const cnpgDir = join(ROOT, "platform/cnpg/prod");
-const dbDir = join(cnpgDir, "databases");
-const connDir = join(ROOT, "platform/data-conn/prod");
 const certPath = join(ROOT, "tools/sealed-secrets-cert.pem");
+const j = (p: string) => join(ROOT, p);
+const bn = entryName;
+const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/"));
 const paths = {
-  cr: join(dbDir, `${name}.yaml`),
-  ownerSealed: join(dbDir, `db-${name}-owner.sealed.yaml`),
-  roSealed: join(dbDir, `db-${name}-ro.sealed.yaml`),
-  dbKust: join(dbDir, "kustomization.yaml"),
-  parentKust: join(cnpgDir, "kustomization.yaml"),
-  cluster: join(cnpgDir, "cluster.yaml"),
-  connSealed: join(connDir, `db-${name}-conn.sealed.yaml`),
-  roConnSealed: join(connDir, `db-${name}-ro-conn.sealed.yaml`),
-  connKust: join(connDir, "kustomization.yaml"),
+  cr: j(layout.paths.cr),
+  ownerSealed: j(layout.paths.ownerSealed),
+  roSealed: j(layout.paths.roSealed),
+  dbKust: j(layout.paths.dbKust),
+  parentKust: j(layout.paths.parentKust),
+  cluster: j(layout.paths.cluster),
+  connSealed: j(layout.paths.connSealed),
+  roConnSealed: j(layout.paths.roConnSealed),
+  connKust: j(layout.paths.connKust),
 };
+const dbDir = dirOf(paths.cr);
+const connDir = dirOf(paths.connSealed);
 
 // ---------- 4) 중복/전제 검사 (읽기 전용 — dry-run도 동일하게 거른다) ----------
 if (!existsSync(paths.cluster)) fail(`${paths.cluster} 없음 — repo-root가 homelab 레포 루트인지 확인`);
@@ -101,13 +105,13 @@ const plan = {
   owner,
   roles: [owner, roRole],
   extensions: args.extensions,
-  envKeys: [`${ENV}_DATABASE_URL`, `${ENV}_MIGRATE_DATABASE_URL`, `${ENV}_RO_DATABASE_URL`],
-  handles: { conn: `db-${name}-conn`, roConn: `db-${name}-ro-conn` },
+  envKeys: [layout.envKeys.rw, layout.envKeys.migrate, layout.envKeys.ro],
+  handles: { conn: layout.handles.rw.name, roConn: layout.handles.ro.name },
   files: [paths.cr, paths.ownerSealed, paths.roSealed, paths.connSealed, paths.roConnSealed,
     paths.dbKust, paths.parentKust, paths.cluster, paths.connKust],
   dryRun: args.dryRun,
   checklist: [
-    `apps/<app>/deploy/prod/values.yaml envFrom에 secretRef 'db-${name}-conn' 배선 필요 — 미배선 시 앱이 DB 없이 그대로 배포된다(#211 재발 클래스). 'db-${name}-ro-conn'은 모드2 디버깅 전용이라 배선하지 않는다`,
+    `apps/<app>/deploy/prod/values.yaml envFrom에 secretRef '${layout.handles.rw.name}' 배선 필요 — 미배선 시 앱이 DB 없이 그대로 배포된다(#211 재발 클래스). '${layout.handles.ro.name}'은 모드2 디버깅 전용이라 배선하지 않는다`,
     `읽기전용 롤 GRANT SQL 후처리: CNPG managed role은 롤 생성만 하고 GRANT는 관리하지 않는다 — Database CR Ready 후 ${name} DB에서 적용 필요: GRANT CONNECT ON DATABASE "${name}" TO "${roRole}"; GRANT USAGE ON SCHEMA public TO "${roRole}"; GRANT SELECT ON ALL TABLES IN SCHEMA public TO "${roRole}"; ALTER DEFAULT PRIVILEGES FOR ROLE "${owner}" IN SCHEMA public GRANT SELECT ON TABLES TO "${roRole}";`,
     "envFrom 시크릿 변경(회전 포함)은 파드 재시작이 있어야 반영된다",
     "메모리 원장: 논리 DB는 행 추가 금지 — 공유 CNPG limit를 키울 때만 기존 CNPG 행을 갱신",
@@ -156,30 +160,30 @@ const url = (user: string, pw: string, host: string) => `postgres://${encodeURIC
 const sealed = [
   withSyncWave(seal({ // CNPG managed role passwordSecret 계약: kubernetes.io/basic-auth (username/password)
     apiVersion: "v1", kind: "Secret",
-    metadata: { name: `db-${name}-owner`, namespace: "database" },
+    metadata: { name: layout.passwordSecrets.owner, namespace: "database" },
     type: "kubernetes.io/basic-auth",
     stringData: { username: owner, password: pwOwner },
   }, paths.ownerSealed)),
   withSyncWave(seal({
     apiVersion: "v1", kind: "Secret",
-    metadata: { name: `db-${name}-ro`, namespace: "database" },
+    metadata: { name: layout.passwordSecrets.ro, namespace: "database" },
     type: "kubernetes.io/basic-auth",
     stringData: { username: roRole, password: pwRo },
   }, paths.roSealed)),
   seal({ // 앱 소비용 conn 핸들 (prod NS — envFrom은 네임스페이스-로컬)
     apiVersion: "v1", kind: "Secret",
-    metadata: { name: `db-${name}-conn`, namespace: "prod" },
+    metadata: { name: layout.handles.rw.name, namespace: "prod" },
     type: "Opaque",
     stringData: {
-      [`${ENV}_DATABASE_URL`]: url(owner, pwOwner, POOLER_HOST),
-      [`${ENV}_MIGRATE_DATABASE_URL`]: url(owner, pwOwner, DIRECT_HOST),
+      [layout.envKeys.rw]: url(owner, pwOwner, POOLER_HOST),
+      [layout.envKeys.migrate]: url(owner, pwOwner, DIRECT_HOST),
     },
   }, paths.connSealed),
   seal({
     apiVersion: "v1", kind: "Secret",
-    metadata: { name: `db-${name}-ro-conn`, namespace: "prod" },
+    metadata: { name: layout.handles.ro.name, namespace: "prod" },
     type: "Opaque",
-    stringData: { [`${ENV}_RO_DATABASE_URL`]: url(roRole, pwRo, DIRECT_HOST) },
+    stringData: { [layout.envKeys.ro]: url(roRole, pwRo, DIRECT_HOST) },
   }, paths.roConnSealed),
 ];
 
@@ -229,9 +233,9 @@ const mkRole = (roleName: string, secretName: string, comment: string) => {
   node.commentBefore = comment;
   return node;
 };
-rolesSeq.add(mkRole(owner, `db-${name}-owner`,
+rolesSeq.add(mkRole(owner, layout.passwordSecrets.owner,
   ` ${name} owner — create-database 산출물. ensure/inherit/connectionLimit는 서버 주입 기본값 명시(SSA atomic 리스트)`));
-rolesSeq.add(mkRole(roRole, `db-${name}-ro`,
+rolesSeq.add(mkRole(roRole, layout.passwordSecrets.ro,
   ` ${name} 읽기전용(모드2 디버깅) — GRANT는 managed role 범위 밖, PR checklist의 SQL 후처리 필요`));
 
 // ---------- 9) kustomization 멱등 등록 ----------
@@ -262,9 +266,9 @@ kind: Kustomization
 namespace: database
 resources: []
 `);
-addResource(dbKustDoc, `${name}.yaml`);
-addResource(dbKustDoc, `db-${name}-owner.sealed.yaml`);
-addResource(dbKustDoc, `db-${name}-ro.sealed.yaml`);
+addResource(dbKustDoc, bn(paths.cr));
+addResource(dbKustDoc, bn(paths.ownerSealed));
+addResource(dbKustDoc, bn(paths.roSealed));
 
 // 상위 cnpg kustomization에 databases/ 추가 (이미 있으면 멱등)
 const parentDoc = parseDocument(readFileSync(paths.parentKust, "utf8"));
@@ -280,8 +284,8 @@ kind: Kustomization
 namespace: prod
 resources: []
 `);
-addResource(connKustDoc, `db-${name}-conn.sealed.yaml`);
-addResource(connKustDoc, `db-${name}-ro-conn.sealed.yaml`);
+addResource(connKustDoc, bn(paths.connSealed));
+addResource(connKustDoc, bn(paths.roConnSealed));
 
 // ---------- 10) 쓰기 (모든 조립이 성공한 뒤에만) ----------
 mkdirSync(dbDir, { recursive: true });

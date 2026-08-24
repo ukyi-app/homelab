@@ -204,3 +204,52 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^ok:19$"
 }
+
+@test "named paths, password secrets, and the purge triples mirror teardown exactly" {
+  # 소비자(provision·teardown)가 필요로 하는 명명 접근면 — purge 삼중(file·kust·entry)은
+  # teardown-resource purgeArtifacts의 정확한 형상이어야 생성·철거가 같은 커널 값을 쓴다(AC3).
+  run bun -e '
+    import { layoutFor, purgeArtifactsFor, classifyLedgerRow, TOMBSTONES_PATH } from "./tools/lib/resource-layout.ts";
+    const db = layoutFor("db", "orders");
+    if (db.paths.cr !== "platform/cnpg/prod/databases/orders.yaml") { console.error("paths.cr: " + db.paths.cr); process.exit(1); }
+    if (db.paths.cluster !== "platform/cnpg/prod/cluster.yaml") { console.error("paths.cluster"); process.exit(1); }
+    if (db.passwordSecrets.owner !== "db-orders-owner" || db.passwordSecrets.ro !== "db-orders-ro") { console.error("passwordSecrets"); process.exit(1); }
+    const dbPurge = purgeArtifactsFor("db", "orders");
+    const wantDb = [
+      ["platform/cnpg/prod/databases/orders.yaml", "platform/cnpg/prod/databases/kustomization.yaml", "orders.yaml"],
+      ["platform/cnpg/prod/databases/db-orders-owner.sealed.yaml", "platform/cnpg/prod/databases/kustomization.yaml", "db-orders-owner.sealed.yaml"],
+      ["platform/cnpg/prod/databases/db-orders-ro.sealed.yaml", "platform/cnpg/prod/databases/kustomization.yaml", "db-orders-ro.sealed.yaml"],
+      ["platform/data-conn/prod/db-orders-conn.sealed.yaml", "platform/data-conn/prod/kustomization.yaml", "db-orders-conn.sealed.yaml"],
+      ["platform/data-conn/prod/db-orders-ro-conn.sealed.yaml", "platform/data-conn/prod/kustomization.yaml", "db-orders-ro-conn.sealed.yaml"],
+    ];
+    if (JSON.stringify(dbPurge.map((a) => [a.file, a.kust, a.entry])) !== JSON.stringify(wantDb)) { console.error("db purge 삼중 불일치"); process.exit(1); }
+    if (dbPurge.some((a) => a.dir)) { console.error("db에 dir 플래그"); process.exit(1); }
+    const cachePurge = purgeArtifactsFor("cache", "demo");
+    if (cachePurge.length !== 3 || cachePurge[0].dir !== true || cachePurge[0].file !== "platform/cache/prod/demo" || cachePurge[0].entry !== "demo") { console.error("cache purge 삼중 불일치: " + JSON.stringify(cachePurge)); process.exit(1); }
+    const row = classifyLedgerRow("cache-demo");
+    if (row === null || row.name !== "demo") { console.error("classifyLedgerRow(cache-demo)"); process.exit(1); }
+    if (classifyLedgerRow("cache-") !== null || classifyLedgerRow("orders") !== null || classifyLedgerRow("cache-BAD") !== null) { console.error("classifyLedgerRow 불량 통과"); process.exit(1); }
+    if (TOMBSTONES_PATH !== "platform/data-conn/prod/.tombstones.json") { console.error("TOMBSTONES_PATH"); process.exit(1); }
+    console.log("ok");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok$"
+}
+
+@test "provision-cache writes exactly the kernel instance file set (7th-file drift guard)" {
+  # provision이 인스턴스 파일을 자체 열거하므로, write 대상과 커널 CACHE_INSTANCE_FILES의
+  # 집합 동치를 기계 대조한다 — 7번째 파일이 커널 갱신 없이 생기면 red(티켓 06 리뷰 이월).
+  run bun -e '
+    const root = process.argv[1];
+    const { readFileSync } = require("node:fs");
+    const { CACHE_INSTANCE_FILES } = await import(root + "/tools/lib/resource-layout.ts");
+    const src = readFileSync(root + "/tools/provision-cache.ts", "utf8");
+    const written = [...src.matchAll(/writeFileSync\(`\$\{instDir\}\/([a-z.]+)`/g)].map((m) => m[1]);
+    const a = [...written].sort().join(",");
+    const b = [...CACHE_INSTANCE_FILES].sort().join(",");
+    if (written.length !== 6 || a !== b) { console.error("written=" + a + " kernel=" + b); process.exit(1); }
+    console.log("ok:" + written.length);
+  ' "$ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:6$"
+}

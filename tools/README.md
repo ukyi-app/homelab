@@ -237,7 +237,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   teardown purge의 의도된 부분집합을 데이터로 성문화). 역방향 `classifyArtifact`(경로/엔트리 →
   {kind, name, role})가 같은 커널에 산다 — 소스 없는 고아 conn도 분류된다(설계 게이트 r1 D2).
   순수 문자열 유도만(yaml 편집 비흡수). 왕복·리터럴 앵커는 test_resource-layout.bats.
-  소비자 이행(provision/teardown/audit/url)은 후속 티켓.
+  소비 4모드: provision-db/cache(정방향, paths·handles·envKeys) · teardown-resource(역제거 —
+  `purgeArtifactsFor` 삼중·`TOMBSTONES_PATH`) · audit-orphans(감사 — classify 소비, orphan-conn/
+  malformed-conn 축) · db-url/cache-url(읽기). 레인 행(catalog-rows)과의 표면 경로 일치는
+  import-0 계약상 parity 가드(test_lane-rows.bats)가 대조한다.
 - **`lib/mutation.ts`** — 공유 변이 엔진(`runMutation()`) — 변이 동사들의 공통 골격: correlation
   nonce → 디스패치 → run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정 →
   [--wait] 머지 관측 + Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,

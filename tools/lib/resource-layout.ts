@@ -39,19 +39,29 @@ type LayoutBase = {
   tombstoneKey: string; // "<kind>:<name>" — .tombstones.json 키
 };
 // kind별 발산은 판별 union으로 못 박는다 — optional 필드는 테스트가 지키지만 union은
-// 컴파일러가 지킨다(리뷰 S3).
+// 컴파일러가 지킨다(리뷰 S3). paths는 소비자(provision·teardown·url)의 명명 접근면이다 —
+// files[]는 스윕/감사용 스코프 목록이고, 두 뷰는 같은 유도에서 나온다.
 export type DbLayout = LayoutBase & {
   kind: "db";
+  paths: {
+    cr: string; ownerSealed: string; roSealed: string; connSealed: string; roConnSealed: string;
+    dbKust: string; parentKust: string; cluster: string; connKust: string;
+  };
+  passwordSecrets: { owner: string; ro: string };       // database NS 비밀번호 Secret 이름
   envKeys: { rw: string; migrate: string; ro: string }; // role → 키 조회(설계 §심화 4)
   roles: { owner: string; ro: string };                 // cluster.yaml managed.roles 이름
 };
 export type CacheLayout = LayoutBase & {
   kind: "cache";
+  paths: { instanceDir: string; conn: string; roConn: string; cacheKust: string; connKust: string; ledger: string };
   envKeys: { rw: string; ro: string };
-  instanceDir: string; // purge가 디렉토리째 제거하는 권위 경로
+  instanceDir: string; // purge가 디렉토리째 제거하는 권위 경로(paths.instanceDir와 동일 값)
   ledgerRow: string;   // 메모리 원장 행 이름 cache-<name>
 };
 export type ResourceLayout = DbLayout | CacheLayout;
+
+// .tombstones.json 위치 — teardown(기록)·audit(감시)이 같은 상수를 읽는다.
+export const TOMBSTONES_PATH = "platform/data-conn/prod/.tombstones.json";
 
 // kebab → UPPER_SNAKE (env 키 규약 — provision-db/cache의 ENV 유도와 동일)
 function envName(name: string): string {
@@ -64,8 +74,17 @@ const CONN_DIR = "platform/data-conn/prod";
 const CACHE_DIR = "platform/cache/prod";
 const LEDGER = "docs/memory-ledger.md";
 
-// cache 인스턴스 디렉토리 내용물 — provision-cache 산출 6파일(이름 고정).
-const CACHE_INSTANCE_FILES = ["configmap.yaml", "pvc.yaml", "deployment.yaml", "service.yaml", "acl.sealed.yaml", "kustomization.yaml"] as const;
+// cache 인스턴스 디렉토리 내용물 — provision-cache 산출 6파일(이름 고정). export는 7번째 파일
+// 드리프트의 기계 검출용(가드가 provision-cache의 write 대상과 대조 — 티켓 06 리뷰 이월).
+export const CACHE_INSTANCE_FILES = ["configmap.yaml", "pvc.yaml", "deployment.yaml", "service.yaml", "acl.sealed.yaml", "kustomization.yaml"] as const;
+
+// 이름 무관 디렉토리 좌표 — 소비자(audit·provision)가 리터럴로 재유도하지 않게 export한다.
+export const LAYOUT_DIRS = { databases: DB_DIR, cnpgProd: CNPG_DIR, dataConn: CONN_DIR, cacheProd: CACHE_DIR } as const;
+
+// kustomization 엔트리 문자열(경로 말단) — 소비자 공용(로컬 bn 재정의 금지).
+export function entryName(p: string): string {
+  return p.slice(p.lastIndexOf("/") + 1);
+}
 
 export function layoutFor(kind: "db", name: string): DbLayout;
 export function layoutFor(kind: "cache", name: string): CacheLayout;
@@ -73,62 +92,117 @@ export function layoutFor(kind: ResourceKind, name: string): ResourceLayout;
 export function layoutFor(kind: ResourceKind, name: string): ResourceLayout {
   const ENV = envName(name);
   if (kind === "db") {
+    const paths = {
+      cr: `${DB_DIR}/${name}.yaml`,                                  // CNPG Database CR
+      ownerSealed: `${DB_DIR}/db-${name}-owner.sealed.yaml`,         // 비밀번호(owner)
+      roSealed: `${DB_DIR}/db-${name}-ro.sealed.yaml`,               // 비밀번호(ro)
+      connSealed: `${CONN_DIR}/db-${name}-conn.sealed.yaml`,         // 앱 소비 conn(rw)
+      roConnSealed: `${CONN_DIR}/db-${name}-ro-conn.sealed.yaml`,    // 디버깅 conn(ro)
+      dbKust: `${DB_DIR}/kustomization.yaml`,
+      parentKust: `${CNPG_DIR}/kustomization.yaml`,
+      cluster: `${CNPG_DIR}/cluster.yaml`,
+      connKust: `${CONN_DIR}/kustomization.yaml`,
+    };
     return {
       kind: "db",
+      paths,
       files: [
-        { path: `${DB_DIR}/${name}.yaml`, scope: "purge-제거" },                        // CNPG Database CR
-        { path: `${DB_DIR}/db-${name}-owner.sealed.yaml`, scope: "purge-제거" },        // 비밀번호(owner)
-        { path: `${DB_DIR}/db-${name}-ro.sealed.yaml`, scope: "purge-제거" },           // 비밀번호(ro)
-        { path: `${CONN_DIR}/db-${name}-conn.sealed.yaml`, scope: "purge-제거" },       // 앱 소비 conn(rw)
-        { path: `${CONN_DIR}/db-${name}-ro-conn.sealed.yaml`, scope: "purge-제거" },    // 디버깅 conn(ro)
-        { path: `${DB_DIR}/kustomization.yaml`, scope: "공유-잔존" },
-        { path: `${CNPG_DIR}/kustomization.yaml`, scope: "공유-잔존" },
-        { path: `${CNPG_DIR}/cluster.yaml`, scope: "수동-이연" },                        // managed.roles — 별도 수동 커밋
-        { path: `${CONN_DIR}/kustomization.yaml`, scope: "공유-잔존" },
+        { path: paths.cr, scope: "purge-제거" },
+        { path: paths.ownerSealed, scope: "purge-제거" },
+        { path: paths.roSealed, scope: "purge-제거" },
+        { path: paths.connSealed, scope: "purge-제거" },
+        { path: paths.roConnSealed, scope: "purge-제거" },
+        { path: paths.dbKust, scope: "공유-잔존" },
+        { path: paths.parentKust, scope: "공유-잔존" },
+        { path: paths.cluster, scope: "수동-이연" },                  // managed.roles — 별도 수동 커밋
+        { path: paths.connKust, scope: "공유-잔존" },
       ],
       kustomizationEntries: [
-        { kust: `${DB_DIR}/kustomization.yaml`, entry: `${name}.yaml`, scope: "purge-제거" },
-        { kust: `${DB_DIR}/kustomization.yaml`, entry: `db-${name}-owner.sealed.yaml`, scope: "purge-제거" },
-        { kust: `${DB_DIR}/kustomization.yaml`, entry: `db-${name}-ro.sealed.yaml`, scope: "purge-제거" },
-        { kust: `${CNPG_DIR}/kustomization.yaml`, entry: "databases/", scope: "공유-잔존" },
-        { kust: `${CONN_DIR}/kustomization.yaml`, entry: `db-${name}-conn.sealed.yaml`, scope: "purge-제거" },
-        { kust: `${CONN_DIR}/kustomization.yaml`, entry: `db-${name}-ro-conn.sealed.yaml`, scope: "purge-제거" },
+        { kust: paths.dbKust, entry: bn(paths.cr), scope: "purge-제거" },
+        { kust: paths.dbKust, entry: bn(paths.ownerSealed), scope: "purge-제거" },
+        { kust: paths.dbKust, entry: bn(paths.roSealed), scope: "purge-제거" },
+        { kust: paths.parentKust, entry: "databases/", scope: "공유-잔존" },
+        { kust: paths.connKust, entry: bn(paths.connSealed), scope: "purge-제거" },
+        { kust: paths.connKust, entry: bn(paths.roConnSealed), scope: "purge-제거" },
       ],
       handles: {
         rw: { name: `db-${name}-conn`, envKeys: [`${ENV}_DATABASE_URL`, `${ENV}_MIGRATE_DATABASE_URL`] },
         ro: { name: `db-${name}-ro-conn`, envKeys: [`${ENV}_RO_DATABASE_URL`] },
       },
+      passwordSecrets: { owner: `db-${name}-owner`, ro: `db-${name}-ro` },
       envKeys: { rw: `${ENV}_DATABASE_URL`, migrate: `${ENV}_MIGRATE_DATABASE_URL`, ro: `${ENV}_RO_DATABASE_URL` },
       roles: { owner: name, ro: `${name}_ro` },
       tombstoneKey: `db:${name}`,
     };
   }
+  const paths = {
+    instanceDir: `${CACHE_DIR}/${name}`,
+    conn: `${CONN_DIR}/cache-${name}-conn.sealed.yaml`,
+    roConn: `${CONN_DIR}/cache-${name}-ro-conn.sealed.yaml`,
+    cacheKust: `${CACHE_DIR}/kustomization.yaml`,
+    connKust: `${CONN_DIR}/kustomization.yaml`,
+    ledger: LEDGER,
+  };
   return {
     kind: "cache",
+    paths,
     files: [
-      ...CACHE_INSTANCE_FILES.map((f): LayoutFile => ({ path: `${CACHE_DIR}/${name}/${f}`, scope: "purge-제거" })),
-      { path: `${CONN_DIR}/cache-${name}-conn.sealed.yaml`, scope: "purge-제거" },
-      { path: `${CONN_DIR}/cache-${name}-ro-conn.sealed.yaml`, scope: "purge-제거" },
-      { path: `${CACHE_DIR}/kustomization.yaml`, scope: "공유-잔존" },
+      ...CACHE_INSTANCE_FILES.map((f): LayoutFile => ({ path: `${paths.instanceDir}/${f}`, scope: "purge-제거" })),
+      { path: paths.conn, scope: "purge-제거" },
+      { path: paths.roConn, scope: "purge-제거" },
+      { path: paths.cacheKust, scope: "공유-잔존" },
       // data-conn kustomization은 provision-cache plan.files 밖이다(생성은 다른 소유자) —
       // 그러나 teardown이 엔트리를 제거하는 레이아웃의 일부이므로 커널은 포함한다.
-      { path: `${CONN_DIR}/kustomization.yaml`, scope: "공유-잔존" },
-      { path: LEDGER, scope: "공유-잔존" },                                             // 파일 잔존, 행(ledgerRow)만 제거
+      { path: paths.connKust, scope: "공유-잔존" },
+      { path: paths.ledger, scope: "공유-잔존" },                     // 파일 잔존, 행(ledgerRow)만 제거
     ],
     kustomizationEntries: [
-      { kust: `${CACHE_DIR}/kustomization.yaml`, entry: name, scope: "purge-제거" },
-      { kust: `${CONN_DIR}/kustomization.yaml`, entry: `cache-${name}-conn.sealed.yaml`, scope: "purge-제거" },
-      { kust: `${CONN_DIR}/kustomization.yaml`, entry: `cache-${name}-ro-conn.sealed.yaml`, scope: "purge-제거" },
+      { kust: paths.cacheKust, entry: name, scope: "purge-제거" },
+      { kust: paths.connKust, entry: bn(paths.conn), scope: "purge-제거" },
+      { kust: paths.connKust, entry: bn(paths.roConn), scope: "purge-제거" },
     ],
     handles: {
       rw: { name: `cache-${name}-conn`, envKeys: [`${ENV}_REDIS_URL`] },
       ro: { name: `cache-${name}-ro-conn`, envKeys: [`${ENV}_REDIS_RO_URL`] },
     },
     envKeys: { rw: `${ENV}_REDIS_URL`, ro: `${ENV}_REDIS_RO_URL` },
-    instanceDir: `${CACHE_DIR}/${name}`,
+    instanceDir: paths.instanceDir,
     ledgerRow: `cache-${name}`,
     tombstoneKey: `cache:${name}`,
   };
+}
+
+// 내부 별칭 — export 본체는 entryName.
+const bn = entryName;
+
+// teardown purge가 제거하는 (파일/디렉토리, kustomization, 엔트리) 삼중 — provision 등록의
+// 정확한 역이다. cache의 권위는 인스턴스 디렉토리째 제거(dir: true). 생성과 철거가 이 한
+// 함수를 공유하면 원장 행·엔트리 이름 추정 어긋남(F1 클래스)이 구조적으로 재현 불가다.
+export type PurgeArtifact = { file: string; dir?: true; kust: string; entry: string };
+export function purgeArtifactsFor(kind: ResourceKind, name: string): PurgeArtifact[] {
+  if (kind === "db") {
+    const L = layoutFor("db", name);
+    return [
+      { file: L.paths.cr, kust: L.paths.dbKust, entry: bn(L.paths.cr) },
+      { file: L.paths.ownerSealed, kust: L.paths.dbKust, entry: bn(L.paths.ownerSealed) },
+      { file: L.paths.roSealed, kust: L.paths.dbKust, entry: bn(L.paths.roSealed) },
+      { file: L.paths.connSealed, kust: L.paths.connKust, entry: bn(L.paths.connSealed) },
+      { file: L.paths.roConnSealed, kust: L.paths.connKust, entry: bn(L.paths.roConnSealed) },
+    ];
+  }
+  const L = layoutFor("cache", name);
+  return [
+    { file: L.paths.instanceDir, dir: true, kust: L.paths.cacheKust, entry: name },
+    { file: L.paths.conn, kust: L.paths.connKust, entry: bn(L.paths.conn) },
+    { file: L.paths.roConn, kust: L.paths.connKust, entry: bn(L.paths.roConn) },
+  ];
+}
+
+// 원장 행 이름의 역방향 — "cache-<name>" 형상만 산출물 계열이다(db는 원장 비접촉 불변식).
+export function classifyLedgerRow(component: string): { kind: "cache"; name: string } | null {
+  const m = component.match(/^cache-(.+)$/);
+  if (!m || !validName("cache", m[1]!)) return null;
+  return { kind: "cache", name: m[1]! };
 }
 
 // ── 역방향(설계 게이트 r1 D2) ──────────────────────────────────────────────────

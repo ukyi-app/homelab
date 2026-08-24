@@ -9,6 +9,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
+import { layoutFor } from "./lib/resource-layout.ts";
 import { parseFlags } from "./lib/cli.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed. 종료 코드 2 보존.
@@ -26,10 +27,11 @@ if (!name || !RESOURCE_NAME_RE.test(name)) {
   process.exit(2);
 }
 
-const NAME = name.replaceAll("-", "_").toUpperCase();
+// conn 핸들·env 키는 레이아웃 커널 소유(cli-deepening 심화 4) — 여기서 재유도하지 않는다.
+const L = layoutFor("cache", name);
 const mode = RW
-  ? { label: "default-readwrite", secret: `cache-${name}-conn`, srcKey: `${NAME}_REDIS_URL`, envKey: `${NAME}_REDIS_URL` }
-  : { label: "readonly", secret: `cache-${name}-ro-conn`, srcKey: `${NAME}_REDIS_RO_URL`, envKey: `${NAME}_REDIS_RO_URL` };
+  ? { label: "default-readwrite", secret: L.handles.rw.name, srcKey: L.envKeys.rw, envKey: L.envKeys.rw }
+  : { label: "readonly", secret: L.handles.ro.name, srcKey: L.envKeys.ro, envKey: L.envKeys.ro };
 const envKey = mode.envKey; // prod conn 핸들과 동일한 namespaced 키(RW=<NAME>_REDIS_URL, RO=<NAME>_REDIS_RO_URL)
 
 if (DRY) {
