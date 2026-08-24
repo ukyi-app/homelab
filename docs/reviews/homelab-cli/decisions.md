@@ -81,3 +81,11 @@ WAIVED by user: 라운드 한도 2 도달, 잔여는 r2-a1 1건뿐이고 수리�
 - a2=b3 Accept — 비-wait 변이가 run conclusion(최대 20분)까지 폴링해 단일 스레드 서버 블로킹(계약). 수리: mutation.ts identifyOnly — MCP는 run 식별 직후 pending+run 핸들 즉시 반환(진행은 status(run) 재조회). 판별성 mutation 검증.
 - a1 Accept — verification.md가 스펙 요구 amd64 스캐폴드-빌드-스모크 증거 누락. 수리: 릴리스 선행 조건 절 추가(PR#31 머지·doctor 실증·ticket-03-amd64-smoke.md·a37834c).
 - a5 Accept — db_url/cache_url이 envelope 대신 raw text 반환(일관성). 수리: urlResult 정의 + db url/cache url verb 분기, url tool도 envelope(계획은 dry-run 캡처·평문 비출력). 계약 floor 32→36/24→34.
+
+### release r2 (codex — 적대 렌즈 재검증. 정식 아티팩트 2회 ok:false(1차 review-timeout·2차 readback-incomplete). 2차는 세션 로그 무손실 회수: 토큰 df4c9de6, count 4 일치. 회수본 release-r1-salvaged.json의 round2)
+
+스코프: r1 수정만(97e8f6f..HEAD, 43KB)·effort high. 적대 렌즈가 r1 수정의 미완·부작용 4건을 정확히 포착 — 전건 실코드 확증 후 사용자 일괄 수용.
+- r2-a2/b3 Accept(still-open) — identifyOnly가 conclusion은 건너뛰나 run '출현' 대기(step2)는 공유 deadline(20분)까지 폴링. 수리: MCP 짧은 deadline(HOMELAB_MCP_DEADLINE_MS env 주입, 기본 30s) — run 미출현이면 즉시 pending. 판별성 검증(되돌리면 20분 블로킹).
+- r2-b1 Accept(still-open) — required만 타입 검증, optional dryRun:'true'(문자열)가 bool()에서 false로 접혀 실제 자격 쓰기 실행. 수리: 전체 inputSchema 검증(schema-check.ts 재사용)으로 type·enum·additionalProperties·minLength까지. 판별성 검증.
+- r2-a5 Accept(still-open) — cache-url 계획의 host가 urlResult에 없어 cache_url 성공 envelope이 스키마 위반. 수리: 계획에서 urlResult 알려진 키만 화이트리스트 복사 + cache_url 테스트. 판별성 검증.
+- r2 New Accept — verification.md가 a19f466 이전(97e8f6f)에 핀됨(수정이 코드 변경). 수리: 최종 HEAD 재측정·재핀(r2 수정 커밋에서).

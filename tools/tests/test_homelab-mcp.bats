@@ -209,6 +209,60 @@ mcp_rpc() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
 }
 
+@test "type-invalid OPTIONAL args are refused too (a string dryRun must not fold to a real write)" {
+  # release r2-b1: required만 검사하면 optional dryRun:'true'(문자열)가 bool()에서 false로 접혀
+  # 실제 자격 파일 쓰기(subprocess)를 실행한다. 전체 inputSchema 검증이 이를 -32602로 막는다.
+  ED="$BATS_TEST_TMPDIR/ed2"; mkdir -p "$ED"
+  mcp_rpc \
+    "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"dryRun\":\"true\"}}}" \
+    '{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"db_create","arguments":{"name":"mydb","bogus":1}}}' \
+    '{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"cache_create","arguments":{"name":123}}}'
+  [ "$status" -eq 0 ]
+  # dryRun 문자열·미지 키·숫자 name 전부 -32602.
+  for i in 30 31 32; do [ "$(echo "$output" | jq -rc "select(.id==$i) | .error.code")" = "-32602" ]; done
+  # dryRun='true' 거부로 실제 쓰기 subprocess가 돌지 않았다(.env.local 미생성).
+  [ ! -e "$ED/.env.local" ]
+}
+
+@test "the cache_url success envelope is schema-valid (plan host does not leak into urlResult)" {
+  # release r2-a5: cache-url 계획은 host를 담는데 urlResult(additionalProperties:false)엔 없다 —
+  # 계획을 통째로 복사하면 성공 envelope이 스키마 위반. 화이트리스트 복사로 유효해야 한다.
+  ED="$BATS_TEST_TMPDIR/ed3"; mkdir -p "$ED"
+  mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":33,\"method\":\"tools/call\",\"params\":{\"name\":\"cache_url\",\"arguments\":{\"name\":\"mycache\",\"envDir\":\"$ED\",\"dryRun\":true}}}"
+  [ "$status" -eq 0 ]
+  env="$(echo "$output" | jq -rc 'select(.id==33) | .result.content[0].text')"
+  [ "$(echo "$env" | jq -r '.verb')" = "cache url" ]
+  [ "$(echo "$env" | jq -r '.variant')" = "success" ]
+  # host는 결과에 새지 않는다(urlResult에 없음).
+  [ "$(echo "$env" | jq -r '.result.host')" = "null" ]
+  [ "$(echo "$env" | jq -r '.result.envKey')" = "MYCACHE_REDIS_RO_URL" ]
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const errs = schemaErrors(JSON.parse(process.argv[1]), sch, sch);
+    console.log(errs.length ? "INVALID:" + errs.join("|") : "valid");
+  ' "$env"
+  echo "$output" | grep -q "^valid$"
+}
+
+@test "an MCP mutation bounds run-appearance to a short deadline (no 20-minute block on a missing run)" {
+  # release r2-a2/b3: identifyOnly라도 run '출현' 대기(step2)는 공유 deadline까지 폴링한다 — MCP는
+  # 짧은 deadline(env 주입)으로 바운드하고, run 미출현이면 pending을 즉시 반환한다(status 재조회로 재개).
+  # 매칭 run이 없는 스텁: 디스패처는 접수하나 nonce 에코 run이 목록에 없음 → 짧은 deadline에 pending.
+  printf '[]\n' > "$FIX/db-runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    HOMELAB_MCP_DEADLINE_MS=150 HOMELAB_MCP_POLL_MS=20 \
+    bash -c 'printf "%s\n" "$@" | "$0" tools/homelab.ts mcp' "$BUN" \
+    '{"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"db_create","arguments":{"name":"mydb"}}}'
+  [ "$status" -eq 0 ]
+  env="$(echo "$output" | jq -rc 'select(.id==34) | .result.content[0].text')"
+  [ "$(echo "$env" | jq -r '.variant')" = "pending" ]
+  # run 미출현 pending(디스패치는 접수됨) — 20분이 아니라 짧은 deadline에 반환됐다.
+  echo "$env" | jq -r '.result.pendingReason' | grep -q "run 미출현"
+  [ "$(echo "$output" | jq -rc 'select(.id==34) | .result.isError')" = "false" ]
+}
+
 @test "a malformed (non-object) JSON-RPC line yields -32600 and does NOT kill the server" {
   # 유효 JSON이지만 오브젝트가 아닌 원시값 한 줄(42). in 연산자 TypeError로 서버가 죽으면 뒤 요청이 유실된다.
   mcp_rpc \

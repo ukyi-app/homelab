@@ -7,14 +7,14 @@ Stage 5(Ship) 검증 스윕. 이 문서는 릴리스 게이트(release 렌즈)�
 
 | 항목 | 값 |
 |---|---|
-| HEAD 커밋 | `97e8f6f9f1c24db2944a678667ebfbe2e8004e10` |
-| HEAD 트리 | `48ef806f416235c5b32d01d985297152a066a39e` |
 | 브랜치 | `homelab-cli` |
 | base(main merge-base) | `969cb05384d2f3b187756e9c2dbbb92cd47b2c0d` |
-| 구현 커밋 수(main..HEAD) | 22 (feat 12장 + 하우스키핑·게이트 아티팩트) |
+| 도구 코드 최종 | 이 verification.md를 담은 커밋(release r2 수정 반영 — MCP 전체 입력검증·짧은 식별 deadline·url envelope 화이트리스트). 이후 커밋은 문서/게이트 아티팩트만 |
 
-> 이 verification.md 자체를 커밋하면 HEAD가 한 커밋 전진한다. 트리 내용(도구 코드·테스트)은 불변이며,
-> 위 핀은 도구/테스트가 최종 확정된 시점(`97e8f6f`)을 가리킨다. 게이트 대상 코드는 이 커밋 이후 변경 없음.
+> **재핀 이력(release r2-4)**: 초판 verification.md는 `97e8f6f`에 핀됐으나 이후 `a19f466`(release r1 수정)이
+> MCP·mutation·tests 코드를 바꿔 증거가 stale이 됐다(r2 적대 렌즈 포착). 이 판은 r1·r2 수정을 모두 담은
+> 트리에서 전 명령을 **재측정**한 값이다. verification.md 자체를 커밋하면 HEAD가 한 칸 전진하지만 그 커밋은
+> 문서만 바꾸며, 도구 코드(tools/)·테스트는 이 커밋의 트리가 최종이다.
 
 ## 실행한 명령과 결과 (전부 이 HEAD에서 실측, exit code)
 
@@ -22,7 +22,7 @@ Stage 5(Ship) 검증 스윕. 이 문서는 릴리스 게이트(release 렌즈)�
 |---|---|
 | `bun run typecheck` (`tsc --noEmit`) | **exit 0** |
 | `make verify` (check-skeleton + 원장 conftest + sops 라운드트립) | **exit 0** |
-| `./scripts/run-bats.sh` (gate 도메인 전체 bats) | **exit 0 — 237 파일 / 2089 `@test` 전건 통과** (`set -e` 하 비-0이면 즉시 실패하므로 exit 0 = 전건 green) |
+| `./scripts/run-bats.sh` (gate 도메인 전체 bats) | **exit 0 — 237 파일 / 2092 `@test` 전건 통과** (`set -e` 하 비-0이면 즉시 실패하므로 exit 0 = 전건 green) |
 | `bun run verify:ledger` (메모리 원장 OPA) | **exit 0** |
 | `bun tools/audit-orphans.ts --ci` | **exit 0** |
 | `./scripts/check-skeleton.sh` | **exit 0** |
@@ -31,14 +31,14 @@ Stage 5(Ship) 검증 스윕. 이 문서는 릴리스 게이트(release 렌즈)�
 | `bun tools/check-workflow-readiness.ts` | **exit 0** |
 | `bun tools/check-ci-parity.ts` | **exit 0** |
 | `bash scripts/check-doc-index.sh` | **exit 0** |
-| `bash scripts/check-bats-accounting.sh` | **exit 0** (2089건 스캔, 제외 16/16) |
+| `bash scripts/check-bats-accounting.sh` | **exit 0** (2092건 스캔, 제외 16/16) |
 | `bash scripts/check-app-deploy.sh` | **exit 0** |
 
 CI 전용 스텝(`make ci` 상의 typecheck·verify:ledger·audit-orphans·check-skeleton·check-guard-authority·
 check-image-ownership·check-workflow-readiness·check-ci-parity·check-doc-index·check-bats-accounting·
 check-app-deploy) 전부 개별 실측 green.
 
-## 이 피처가 추가/변경한 테스트 (146 `@test`, 10 파일)
+## 이 피처가 추가/변경한 테스트 (149 `@test`, 10 파일)
 
 CLI 프로세스 경계(PATH stub + NUL argv 원장) + 시간 주입 심 + 실물 git 픽스처로 라이브 무의존 검증.
 
@@ -53,7 +53,7 @@ CLI 프로세스 경계(PATH stub + NUL argv 원장) + 시간 주입 심 + 실�
 | `test_homelab-secrets.bats` | 15 | app secrets(이중 모드·seal 연쇄) |
 | `test_homelab-appteardown.bats` | 13 | **app teardown**(confirm 가드·converge:absence·pty TTY) |
 | `test_homelab-appinit.bats` | 15 | **app init**(멱등 재개·마커 소유·시크릿 원자·private key 비노출) |
-| `test_homelab-mcp.bats` | 14 | **mcp**(JSON-RPC·teardown 부재·명시 경로·-32602/-32600) |
+| `test_homelab-mcp.bats` | 17 | **mcp**(JSON-RPC·teardown 부재·명시 경로·-32602/-32600) |
 
 ## 릴리스 선행 조건 — 템플릿 amd64 (스펙 "크로스레포 티켓" 요구 증거)
 
@@ -71,6 +71,10 @@ amd64 NUC에서 실기동해야 init 산출 앱이 exec format error로 죽지 �
 
 - **plan 게이트**: r2까지, WAIVED by user(decisions.md `### plan r2`).
 - **structure 게이트**: r2 완주(ok:true), 회수본 트리아지 종결, WAIVED by user(`### structure r2`).
+- **release 게이트**: ticket 12 슬라이스(full-branch 558KB가 herdr 96KB 상한 초과 — 최대 fitting suffix,
+  사용자 결정). r1(2인 패널)·r2(적대 렌즈) 모두 pane 판독 손상/타임아웃으로 정식 ok:false → codex 세션
+  로그 무손실 회수(HRG 토큰·count 일치, 회수본 `release-r1-salvaged.json`). r1 5쟁점·r2 4건 전건 실코드
+  확증 후 수용·수정(전 수정 mutation 판별성 검증). decisions.md `### release r1`·`### release r2`.
 - **per-ticket /code-review(2축)**: 12장 전부. 티켓 10·11·12는 추가로 **4렌즈 적대 red-team**
   (Standards·Spec + 엔진/계약(또는 신뢰경계/JSON-RPC) red-team) — 확정 결함 반영 후 재검증 green.
   - 티켓 10: 확정 결함 0(엔진 red-team 관찰 1건 진단 정확화 반영).

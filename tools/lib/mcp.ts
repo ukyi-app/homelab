@@ -12,6 +12,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { ENVELOPE, compact, exitFor, mcpIsError, type Envelope } from "./contract.ts";
 import { sh } from "./exec.ts";
+import { schemaErrors } from "./schema-check.ts";
 import { appInitInputError, type AppInitInput } from "./init.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./secrets.ts";
 import { statusInputError, type StatusInput } from "./status.ts";
@@ -22,6 +23,14 @@ import {
 
 const PROTOCOL_VERSION = "2024-11-05";
 type Json = Record<string, unknown>;
+
+// MCP 변이의 run 식별 시간 상한 — identifyOnly라도 run '출현' 대기(step2)는 공유 deadline까지 폴링하므로,
+// run 미출현 시 최대 20분 서버 블로킹이 남는다(release r2-a2/b3). MCP는 짧은 deadline으로 그 대기를
+// 바운드한다(미출현이면 pending 반환, status(run) 재조회로 재개). env로 주입 가능(테스트 시간 심).
+const MCP_DEADLINE_MS = Number(process.env.HOMELAB_MCP_DEADLINE_MS ?? "30000");
+const MCP_POLL_MS = Number(process.env.HOMELAB_MCP_POLL_MS ?? "2000");
+// 변이 tool 공통 대기 입력 — 짧은 식별 deadline + identifyOnly.
+const MCP_MUT = { wait: false, identifyOnly: true, deadlineMs: MCP_DEADLINE_MS, pollMs: MCP_POLL_MS } as const;
 
 // tool 호출 결과 — 계약 envelope(전 동사, url 포함) 또는 usage 오류(invalid params -32602).
 type ToolResult =
@@ -49,12 +58,20 @@ const usage = (m: string): ToolResult => ({ kind: "usage", message: m });
 // (envelope)을 낸다(release r1 a5). 평문 자격은 결과에 담지 않는다: 계획(mode/envKey/envFile)은
 // --dry-run(클러스터 무의존, 평문 비출력)으로 캡처하고, 실제 기록은 wrote 불리언으로만 표기한다.
 // stdio 오염 방지를 위해 inherit이 아니라 캡처(sh)로 실행하고, 명시 envDir을 cwd로 준다(서버 cwd 추론 없음).
+// 계획(dry-run JSON)에서 urlResult가 모델링한 키만 복사한다 — cache-url 계획은 host를 담는데
+// urlResult(additionalProperties:false)엔 없어, 통째로 복사하면 성공 envelope이 스키마 위반이 된다
+// (release r2-a5). 화이트리스트로 계획 드리프트에도 envelope이 유효하게 유지된다.
+const URL_PLAN_KEYS = ["mode", "secretRef", "envKey", "envFile", "note"] as const;
 function urlEnvelope(verb: string, tool: string, name: string, baseArgv: string[], dryRun: boolean, envDir: string): ToolResult {
   const toolPath = fileURLToPath(new URL(`../${tool}`, import.meta.url));
   const result: Record<string, unknown> = { name, dryRun };
   const plan = sh(process.execPath, [toolPath, ...baseArgv, "--dry-run"], { cwd: envDir });
-  if (plan.ok) { try { Object.assign(result, JSON.parse(plan.out)); } catch { /* 계획 파싱 실패는 변이 아님 */ } }
-  result.name = name; result.dryRun = dryRun; // 계획의 name으로 덮이지 않게 재고정
+  if (plan.ok) {
+    try {
+      const parsed = JSON.parse(plan.out) as Record<string, unknown>;
+      for (const k of URL_PLAN_KEYS) if (parsed[k] !== undefined) result[k] = parsed[k];
+    } catch { /* 계획 파싱 실패는 변이 아님 */ }
+  }
   let variant = "success";
   if (dryRun) {
     result.wrote = false;
@@ -95,10 +112,10 @@ const TOOLS: McpTool[] = [
     description: DB_CREATE.desc,
     inputSchema: {
       type: "object", additionalProperties: false, required: ["name"],
-      properties: { name: { type: "string" }, ext: { type: "array", items: { type: "string" } } },
+      properties: { name: { type: "string", minLength: 1 }, ext: { type: "array", items: { type: "string" } } },
     },
     call: (a) => {
-      const input = { name: str(a, "name") ?? "", ext: strArr(a, "ext"), wait: false, identifyOnly: true };
+      const input = { name: str(a, "name") ?? "", ext: strArr(a, "ext"), ...MCP_MUT };
       const bad = dbCreateInputError(input);
       return bad ? usage(bad) : envelope(DB_CREATE.op(input));
     },
@@ -108,10 +125,10 @@ const TOOLS: McpTool[] = [
     description: CACHE_CREATE.desc,
     inputSchema: {
       type: "object", additionalProperties: false, required: ["name"],
-      properties: { name: { type: "string" }, maxmemoryMi: { type: "integer" } },
+      properties: { name: { type: "string", minLength: 1 }, maxmemoryMi: { type: "integer" } },
     },
     call: (a) => {
-      const input = { name: str(a, "name") ?? "", maxmemoryMi: num(a, "maxmemoryMi"), wait: false, identifyOnly: true };
+      const input = { name: str(a, "name") ?? "", maxmemoryMi: num(a, "maxmemoryMi"), ...MCP_MUT };
       const bad = cacheCreateInputError(input);
       return bad ? usage(bad) : envelope(CACHE_CREATE.op(input));
     },
@@ -121,10 +138,10 @@ const TOOLS: McpTool[] = [
     description: APP_CREATE.desc,
     inputSchema: {
       type: "object", additionalProperties: false, required: ["app"],
-      properties: { app: { type: "string" } },
+      properties: { app: { type: "string", minLength: 1 } },
     },
     call: (a) => {
-      const input = { app: str(a, "app") ?? "", wait: false, identifyOnly: true };
+      const input = { app: str(a, "app") ?? "", ...MCP_MUT };
       const bad = appCreateInputError(input);
       return bad ? usage(bad) : envelope(APP_CREATE.op(input));
     },
@@ -134,11 +151,11 @@ const TOOLS: McpTool[] = [
     description: APP_SECRETS.desc,
     inputSchema: {
       type: "object", additionalProperties: false, required: ["app", "repoPath"],
-      properties: { app: { type: "string" }, repoPath: { type: "string" }, noSeal: { type: "boolean" } },
+      properties: { app: { type: "string", minLength: 1 }, repoPath: { type: "string", minLength: 1 }, noSeal: { type: "boolean" } },
     },
     call: (a) => {
       // repoPath = 앱 레포 경로 명시 입력(서버 cwd 추론 없음 — input.cwd로 흐른다).
-      const input: AppSecretsInput = { app: str(a, "app") ?? "", noSeal: bool(a, "noSeal"), wait: false, identifyOnly: true, cwd: str(a, "repoPath") };
+      const input: AppSecretsInput = { app: str(a, "app") ?? "", noSeal: bool(a, "noSeal"), ...MCP_MUT, cwd: str(a, "repoPath") };
       const bad = appSecretsInputError(input);
       return bad ? usage(bad) : envelope(APP_SECRETS.op(input));
     },
@@ -149,8 +166,8 @@ const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object", additionalProperties: false, required: ["app", "archetype", "parentDir"],
       properties: {
-        app: { type: "string" }, archetype: { enum: ["api", "fullstack", "site", "worker"] },
-        parentDir: { type: "string" }, public: { type: "boolean" },
+        app: { type: "string", minLength: 1 }, archetype: { enum: ["api", "fullstack", "site", "worker"] },
+        parentDir: { type: "string", minLength: 1 }, public: { type: "boolean" },
         dispatchSecrets: { type: "string" }, adopt: { type: "boolean" },
       },
     },
@@ -170,8 +187,8 @@ const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object", additionalProperties: false, required: ["name", "envDir"],
       properties: {
-        name: { type: "string" }, mode: { enum: ["ro", "rw", "admin"] },
-        host: { type: "string" }, envDir: { type: "string" }, dryRun: { type: "boolean" },
+        name: { type: "string", minLength: 1 }, mode: { enum: ["ro", "rw", "admin"] },
+        host: { type: "string" }, envDir: { type: "string", minLength: 1 }, dryRun: { type: "boolean" },
       },
     },
     call: (a) => {
@@ -190,8 +207,8 @@ const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object", additionalProperties: false, required: ["name", "envDir"],
       properties: {
-        name: { type: "string" }, rw: { type: "boolean" },
-        host: { type: "string" }, envDir: { type: "string" }, dryRun: { type: "boolean" },
+        name: { type: "string", minLength: 1 }, rw: { type: "boolean" },
+        host: { type: "string" }, envDir: { type: "string", minLength: 1 }, dryRun: { type: "boolean" },
       },
     },
     call: (a) => {
@@ -245,19 +262,13 @@ export function handleRequest(req: Json): Json | null {
     const args = (params.arguments ?? {}) as Json;
     const tool = TOOL_BY_NAME.get(name);
     if (!tool) return err(id, -32602, `알 수 없는 tool: ${name}`); // 파괴 동사·오타 전부 여기(노출 표면 밖)
-    // inputSchema.required를 서버측 **타입 인식으로** 강제한다 — 스키마의 required는 클라이언트 광고일
-    // 뿐 신뢰 경계가 아니다. 존재만 검사하면 null/숫자/빈 문자열 경로가 통과해 str()에서 undefined로
-    // 접히고, 명시 경로(repoPath/parentDir/envDir)가 cwd 폴백으로 새어 서버 디렉토리에 변이·자격 기록이
-    // 일어난다(release r1 a3=b1·a4=b2). 값의 존재 + 타입(문자열은 비어 있지 않은 문자열)까지 검증한다.
-    const props = (tool.inputSchema.properties as Record<string, { type?: string }> | undefined) ?? {};
-    const required = (tool.inputSchema.required as string[] | undefined) ?? [];
-    for (const k of required) {
-      const v = args[k];
-      if (v === undefined || v === null) return err(id, -32602, `필수 입력 누락: ${k}`);
-      if (props[k]?.type === "string" && (typeof v !== "string" || v === "")) {
-        return err(id, -32602, `${k}는 비어 있지 않은 문자열이어야 한다`);
-      }
-    }
+    // 인자 전체를 inputSchema로 서버측 검증한다 — 스키마의 required/type/enum/additionalProperties는
+    // 클라이언트 광고일 뿐 신뢰 경계가 아니다. required만 검사하면 (release r1 a3=b1·a4=b2) null/숫자/빈
+    // 문자열 경로가 str()에서 undefined로 접혀 cwd 폴백으로 서버 디렉토리에 변이·자격 기록이 나가고,
+    // optional만 검사 밖이면 (release r2-b1) dryRun:'true'(문자열)가 bool()에서 false로 접혀 실제 자격
+    // 쓰기가 실행된다. 전체 검증(type·enum·minLength·additionalProperties)으로 이 접힘 표면을 통째로 닫는다.
+    const errs = schemaErrors(args, tool.inputSchema, tool.inputSchema);
+    if (errs.length > 0) return err(id, -32602, `입력 검증 실패: ${errs.slice(0, 3).join("; ")}`);
     const r = tool.call(args);
     if (r.kind === "usage") return err(id, -32602, r.message); // usage 오류 = invalid params
     // envelope — CLI --json과 같은 계약 오브젝트를 content로, isError는 variant 매핑.
