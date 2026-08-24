@@ -8,6 +8,15 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   [ "$status" -eq 0 ]   # B3.2가 NEG를 0으로 만든 뒤 통과
 }
 
+@test "the detector failing (awk fatal or an unreadable arg) is red, not a silent pass" {
+  # ★ 예전엔 `findings="$(awk … || true)"`라 검출기가 죽어도 "0곳 OK" rc=0이었다 — 가드 본체의
+  #   fail-open이다(2026-08-24 뮤테이션으로 실증). 형제 check-host-ports.sh가 닫은 것과 같은 클래스.
+  #   awk를 직접 못 죽이므로 검출기가 fatal을 내는 유일한 결정적 경로 — 읽을 수 없는 인자 — 를 쓴다.
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/does-not-exist.bats"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF 'FAIL'
+}
+
 @test "detector catches a MIDDLE negation and a MIDDLE [[ ]] (not vacuous)" {
   # ⚠️ fixture는 printf로 생성 — bats 전처리기가 .bats 소스의 heredoc 속 '@test' 줄까지
   #    bats_test_function으로 재작성해 heredoc fixture는 탐지 앵커(^@test)를 잃는다(실측).
