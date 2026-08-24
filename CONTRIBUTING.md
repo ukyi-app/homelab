@@ -154,7 +154,7 @@ fail-closed) 바닥값으로 대체했다. 예약 platform host는 구조적으�
 성공을 보고했다. 그 4파일을 다시 하드코딩한 bats가 "단일 digest"를 확인해 초록이었다.
 
 **규약.**
-- 이미지 참조를 추가하면 **소유자가 계산되어야** 한다: `pg-tools`→`repin-pgtools` ·
+- 이미지 참조를 추가하면 **소유자가 계산되어야** 한다: ops 미러 이미지→`repin-ops-image` ·
   `apps/*/deploy/prod/values.yaml`·`.image-pin.json` descriptor→`bump-poll` · 그 외 추적 매니페스트→
   **Renovate 도달성 실측**(`managerFilePatterns` 매치 ∧ `ignorePaths` 비매치 — 분류표를 믿지 않는다).
 - **소유자 없음은 결함이 아니라 선언 대상**이다. `policy/image-ownership.json`에 why·freshness·since·

@@ -698,7 +698,7 @@ terraform `drift=false` 같은 **결과 플래그**가 전부 준비상태로 �
 2. **핀이 일치하는가** — 아무도 안 봤다. 같은 `repo:tag`가 서로 다른 digest로 갈려 있어도 ①은 통과한다.
 3. **그 digest를 누가 갱신하는가** — 아무도 안 봤다.
 
-라이브 실측(2026-07-28): `pg-tools:18-rclone`이 두 digest로 갈려 있었다. `tools/repin-pgtools.ts`의
+라이브 실측(2026-07-28): `pg-tools:18-rclone`이 두 digest로 갈려 있었다. `tools/repin-ops-image.ts`(당시 `repin-pgtools.ts`)의
 `CONSUMERS`에 등록된 4파일은 GHCR 현재값이었고, 등록 안 된 2파일
 (`platform/adguard/prod/rewrite-reconciler.yaml` · `platform/victoria-stack/prod/pvc-du-exporter.yaml`)은
 **낡은 digest에 영구히 묶여** 있었다 — 재핀 대상이 아니므로 새 빌드가 나와도 영원히 그 상태다.
@@ -1613,3 +1613,29 @@ selfHeal과 플립플롭한다.
   vacuous하게 통과하는 것을 막는다). ⚠️ CI(required gate)에서는 kustomize/yq 부재 시 skip 금지 —
   fail-closed다(가드가 dead-green이 되면 이 두 인시던트가 그대로 재현된다).
 > 가드: `platform/homepage/prod/test_homepage_render.bats`, `platform/homepage/prod/test_homepage_netpol.bats`
+
+### 상류 레지스트리의 릴리스 태그가 불변이 아니다 — 재푸시가 옛 매니페스트를 GC해 모든 PR gate를 red로 만든다
+- **병(라이브 실측)**: `quay.io/skopeo/stable:v1.22.2`를 digest로 핀했는데, 상류가 **같은 태그를 주기적으로
+  재푸시**하고 옛 매니페스트를 GC했다 — 2026-08-18(#518) · 08-21(#528) · 08-24(#531)로 **6일에 세 번**,
+  세 번째는 재핀 PR을 머지한 **같은 세션 안에서** 죽었다. `image-pin-liveness.sh`가 라이브 레지스트리를
+  조회하므로, digest가 사라질 때마다 **브랜치와 무관하게 모든 PR의 `gate`가 red**가 된다.
+- **왜 재핀이 증상 대응이었는가**: 새 digest로 핀을 갱신하면 그 순간은 초록이지만, 3일 뒤 또 재푸시되면
+  다시 red다. Renovate가 서드파티 digest를 주 1회 갱신하는데 상류 재푸시가 그보다 잦아, 갱신 주기로도
+  못 따라잡는다. 무성 실패는 아니지만(가드가 매번 잡는다) **모든 PR을 막는 형태**라 비용이 크다.
+- ⚠️ **quay를 base로 미러해도 안 된다.** `image-pin-liveness`는 `git grep`으로 추적 파일 전체의 digest
+  핀을 열거하므로 `ops/*/Dockerfile`의 `FROM` 핀도 검사 대상이다 — `FROM quay.io/skopeo/...`로 미러하면
+  그 핀이 그대로 같은 GC에 노출된다.
+- ⇒ **처방: GC하지 않는 레지스트리 기반의 자기 소유 이미지로 옮긴다.** Docker Hub는 옛 매니페스트를
+  GC하지 않는다(같은 레포의 `ops/pg-tools`가 쓰는 `debian:bookworm-slim` 핀이 오래 살아 있는 것이 증거).
+  `ops/skopeo/Dockerfile`을 `FROM alpine:3.22@digest` + `apk add skopeo`로 만들어 `ghcr.io/<owner>/skopeo:alpine`으로
+  게시하고, 소비자(digest-exporter·gha-liveness-exporter)가 그것을 참조한다. build→bump write-back이
+  `repin-ops-image`로 digest를 재핀한다(pg-tools와 같은 경로).
+- ⚠️ **소비자가 이미지의 ENTRYPOINT에 기대지 않는지 확인하라.** quay skopeo 이미지는 `ENTRYPOINT ["skopeo"]`가
+  있지만, 이 소비자들은 `command: ["/bin/sh", "/script/run.sh"]`로 셸을 직접 지정하고 그 안에서 `skopeo`를
+  PATH로 부른다 — 그래서 ENTRYPOINT 없는 alpine 이미지로도 그대로 동작한다(실측). ENTRYPOINT에 기댔다면
+  미러 이미지에 그것을 재현해야 했다. ⚠️ **소비자 매니페스트뿐 아니라 게이트도 확인하라** — 실측:
+  `skopeo-timeout-smoke.sh`가 `docker run "$IMAGE" --command-timeout=…`로 ENTRYPOINT를 전제해,
+  alpine 미러에서 그 플래그를 실행 파일로 오인해 죽었다(소비자는 멀쩡한데 게이트만 red). 게이트도
+  소비자와 같은 호출 형태(`skopeo`를 명시)로 맞춰야 한다. cf. 게이트가 실 도메인과 다른 방식으로
+  대상을 부르면, 그 게이트가 증명하는 것은 실 도메인의 동작이 아니다.
+> 가드: `tests/gates/image-pin-liveness.sh`, `ops/skopeo/Dockerfile`, `tests/gates/skopeo-timeout-smoke.sh`, `tests/gates/test_pgtools-digest.bats`, `tests/gates/test_ci-build.bats`

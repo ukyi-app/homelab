@@ -98,14 +98,17 @@ docker pull -q "$IMAGE" >/dev/null 2>&1 || fault "skopeo 이미지 pull 실패: 
 run_skopeo() {
   local t="$1" placement="$2" start end
   start="$(date +%s)"
+  # ⚠️ `skopeo`를 명시한다 — 이미지 ENTRYPOINT에 기대지 않는다. 소비자 매니페스트도 `command: [/bin/sh…]`로
+  #   셸을 지정하고 그 안에서 skopeo를 PATH로 부른다(digest-exporter run.sh). GHCR 미러(alpine base)엔
+  #   ENTRYPOINT가 없어 `docker run "$IMAGE" --command-timeout=…`는 그 플래그를 실행 파일로 오인해 죽는다.
   if [ "$placement" = "global" ]; then
     docker run --rm --add-host=host.docker.internal:host-gateway "$IMAGE" \
-      --command-timeout="${t}s" inspect --no-tags --tls-verify=false \
+      skopeo --command-timeout="${t}s" inspect --no-tags --tls-verify=false \
       "docker://host.docker.internal:${PORT}/blackhole/img:latest" >/dev/null 2>"$TMP/err.$t.$placement" || true
   else
     # 음성 대조: 글로벌 옵션을 서브커맨드 **뒤**에 둔다(run.sh가 절대 하면 안 되는 배치)
     docker run --rm --add-host=host.docker.internal:host-gateway "$IMAGE" \
-      inspect --command-timeout="${t}s" --no-tags --tls-verify=false \
+      skopeo inspect --command-timeout="${t}s" --no-tags --tls-verify=false \
       "docker://host.docker.internal:${PORT}/blackhole/img:latest" >/dev/null 2>"$TMP/err.$t.$placement" || true
   fi
   end="$(date +%s)"
