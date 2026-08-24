@@ -55,6 +55,18 @@ CLI 프로세스 경계(PATH stub + NUL argv 원장) + 시간 주입 심 + 실�
 | `test_homelab-appinit.bats` | 15 | **app init**(멱등 재개·마커 소유·시크릿 원자·private key 비노출) |
 | `test_homelab-mcp.bats` | 14 | **mcp**(JSON-RPC·teardown 부재·명시 경로·-32602/-32600) |
 
+## 릴리스 선행 조건 — 템플릿 amd64 (스펙 "크로스레포 티켓" 요구 증거)
+
+스펙은 릴리스 수용 증거에 **amd64 스캐폴드→빌드→스모크 결과**를 요구한다(템플릿 arm64 하드코딩 수리가
+amd64 NUC에서 실기동해야 init 산출 앱이 exec format error로 죽지 않는다). 증거:
+
+| 항목 | 값 |
+|---|---|
+| 템플릿 수리 PR | `ukyi-app/homelab-app-template#31` — **머지됨**(merge commit `924feb9`, 2026-08-24) |
+| 반영 실측 | 라이브 `homelab doctor`의 `template-targetarch` 검사가 머지 전 **fail** → 후 **pass**(컴파일 아키타입 3종 api·fullstack·worker Dockerfile TARGETARCH 파라미터화 확인) |
+| amd64 스모크 증거 | `docs/reviews/homelab-cli/ticket-03-amd64-smoke.md`(커밋 `a37834c`) — red(exec format error) 실측→green 스모크 4/4 + 바이너리 검증 6종, template-ci 9/9 |
+| doctor 템플릿 호환성 검사 | init preflight와 **같은 술어**(`lib/template-contract.ts`) 공유 — 장래 템플릿 드리프트를 지속 방어 |
+
 ## 게이트 이력 (adversarial)
 
 - **plan 게이트**: r2까지, WAIVED by user(decisions.md `### plan r2`).

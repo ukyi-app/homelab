@@ -72,3 +72,12 @@ r2는 정식 완주(ok:true, 판독 성공 — code 필드 이스케이프 예�
 - r2-a1 Accept — The extracted catalog cannot represent the planned operations; VerbShape 제네릭 + 동사별 union·named export로 수리(동사 추가 = union 멤버 추가, catalog 우회 불가)
 
 WAIVED by user: 라운드 한도 2 도달, 잔여는 r2-a1 1건뿐이고 수리·검증 완료(typecheck·bats 28/28) — 나머지 9건은 r2가 resolved로 재검증. 수리 커밋은 이 절과 같은 커밋
+
+### release r1 (codex — 정식 아티팩트 ok:false, pane 판독 손상. codex 세션 로그에서 무손실 회수: HRG 토큰 a=903de1a3·b=12c7a050, declaredCount 5/3 일치. 회수본 docs/reviews/homelab-cli/release-r1-salvaged.json)
+
+스코프: ticket 12(mcp) 슬라이스(bbd6c70..HEAD, 43KB) — full-branch(558KB)가 herdr 인라인 상한(96KB) 5.7배 초과라 최대 fitting suffix만 게이트(사용자 결정). 2인 패널 모두 needs-attention, 8발견 → 5쟁점. 전건 검증(실코드/실증) 후 사용자 일괄 수용.
+- a3=b1 Accept — null/wrong-type 명시 경로가 required-check(존재만) 통과 → str() undefined → cwd 폴백으로 변이가 서버 cwd 실행(보안). 수리: MCP required-check를 타입 인식으로(null/wrong-type/빈 문자열 -32602). 판별성 mutation 검증.
+- a4=b2 Accept — db_url/cache_url envDir이 required 아님 → 생략 시 서버 checkout에 자격 기록(보안). 수리: envDir required.
+- a2=b3 Accept — 비-wait 변이가 run conclusion(최대 20분)까지 폴링해 단일 스레드 서버 블로킹(계약). 수리: mutation.ts identifyOnly — MCP는 run 식별 직후 pending+run 핸들 즉시 반환(진행은 status(run) 재조회). 판별성 mutation 검증.
+- a1 Accept — verification.md가 스펙 요구 amd64 스캐폴드-빌드-스모크 증거 누락. 수리: 릴리스 선행 조건 절 추가(PR#31 머지·doctor 실증·ticket-03-amd64-smoke.md·a37834c).
+- a5 Accept — db_url/cache_url이 envelope 대신 raw text 반환(일관성). 수리: urlResult 정의 + db url/cache url verb 분기, url tool도 envelope(계획은 dry-run 캡처·평문 비출력). 계약 floor 32→36/24→34.

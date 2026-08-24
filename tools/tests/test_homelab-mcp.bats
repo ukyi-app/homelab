@@ -76,20 +76,25 @@ mcp_rpc() {
   echo "$output" | grep -q "^valid$"
 }
 
-@test "a mutation tool call returns a run/PR handle without waiting for merge" {
+@test "a mutation tool call returns the run handle promptly (pending) without blocking on conclusion" {
+  # identifyOnly(release r1 a2=b3): MCP 변이는 run을 식별하면 conclusion(최대 20분) 폴링 없이 pending +
+  # run 핸들을 즉시 반환한다 — 진행은 status(run URL) 재조회로. 단일 스레드 서버가 블로킹되지 않게.
   mcp_rpc '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"db_create","arguments":{"name":"mydb","ext":["pg_trgm"]}}}'
   [ "$status" -eq 0 ]
   env="$(echo "$output" | jq -rc 'select(.id==5) | .result.content[0].text')"
   [ "$(echo "$env" | jq -r '.verb')" = "db create" ]
-  [ "$(echo "$env" | jq -r '.variant')" = "success" ]
-  # 머지를 기다리지 않았다(waited=false) — run/PR 핸들만.
-  [ "$(echo "$env" | jq -r '.result.waited')" = "false" ]
+  [ "$(echo "$env" | jq -r '.variant')" = "pending" ]
   [ "$(echo "$env" | jq -r '.result.run.id')" = "501" ]
-  [ "$(echo "$env" | jq -r '.result.pr.number')" = "21" ]
+  echo "$env" | jq -r '.result.pendingReason' | grep -q "status 핸들"
+  # conclusion을 기다리지 않았다: run conclusion 추적(actions/runs/<id>) 호출이 없다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/runs/501" --jq "{status, conclusion, html_url}")" = "0" ]
+  # pending은 MCP에서 에러가 아니다(x-contract.mcp normalVariants).
+  [ "$(echo "$output" | jq -rc 'select(.id==5) | .result.isError')" = "false" ]
   # 디스패치 argv에 correlation 수령증(자기 run 특정), auto-merge 관련 gh pr 호출 0.
   run python3 "$LEDGER_PY" exact "$CALLS" gh workflow run create-database.yaml -R ukyi-app/homelab \
     -f "name=mydb" -f "ext_pg_trgm=true" -f "ext_pgcrypto=false" -f "ext_citext=false" -f "ext_vector=false" -f "ext_postgis=false" -f "ext_extra=" -f "correlation=$NONCE"
   [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh pr)" = "0" ]
 }
 
 @test "a usage error maps to JSON-RPC invalid params (-32602), not an envelope" {
@@ -150,29 +155,54 @@ mcp_rpc() {
   [ "$(echo "$output" | jq -rc 'select(.id==14) | .result.content[0].text | fromjson | .verb')" = "doctor" ]
 }
 
-@test "the url passthrough tool takes an explicit envDir and reports without leaking the value (dry-run)" {
-  mcp_rpc '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"db_url","arguments":{"name":"mydb","dryRun":true}}}'
+@test "the url tool requires an explicit envDir and returns a schema-valid envelope without leaking the value (dry-run)" {
+  ED="$BATS_TEST_TMPDIR/envdir"; mkdir -p "$ED"
+  mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"dryRun\":true}}}"
   [ "$status" -eq 0 ]
-  txt="$(echo "$output" | jq -rc 'select(.id==15) | .result.content[0].text')"
-  # dry-run 계획: 모드·secretRef·envKey만(평문 URL 없음).
-  echo "$txt" | grep -q "readonly"
-  echo "$txt" | grep -q "MYDB_RO_DATABASE_URL"
+  # release r1 a5: url tool도 다른 tool과 같은 envelope 계약을 낸다(raw text 아님).
+  env="$(echo "$output" | jq -rc 'select(.id==15) | .result.content[0].text')"
+  [ "$(echo "$env" | jq -r '.schema')" = "homelab-cli/1" ]
+  [ "$(echo "$env" | jq -r '.verb')" = "db url" ]
+  [ "$(echo "$env" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$env" | jq -r '.result.mode')" = "readonly" ]
+  [ "$(echo "$env" | jq -r '.result.envKey')" = "MYDB_RO_DATABASE_URL" ]
+  [ "$(echo "$env" | jq -r '.result.dryRun')" = "true" ]
+  [ "$(echo "$env" | jq -r '.result.wrote')" = "false" ]
   [ "$(echo "$output" | jq -rc 'select(.id==15) | .result.isError')" = "false" ]
-  # url tool 스키마에 명시 envDir이 있고 wait류는 없다.
-  mcp_rpc '{"jsonrpc":"2.0","id":16,"method":"tools/list"}'
-  [ "$(echo "$output" | jq -rc 'select(.id==16) | .result.tools[] | select(.name=="db_url") | .inputSchema.properties | has("envDir")')" = "true" ]
+  # envelope이 스키마 계약을 만족한다.
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const errs = schemaErrors(JSON.parse(process.argv[1]), sch, sch);
+    console.log(errs.length ? "INVALID:" + errs.join("|") : "valid");
+  ' "$env"
+  echo "$output" | grep -q "^valid$"
+  # release r1 a4=b2: envDir은 required — 생략하면 -32602(서버 cwd에 자격 기록 금지).
+  mcp_rpc '{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"db_url","arguments":{"name":"mydb","dryRun":true}}}'
+  [ "$(echo "$output" | jq -rc 'select(.id==16) | .error.code')" = "-32602" ]
+  echo "$output" | jq -rc 'select(.id==16) | .error.message' | grep -q "envDir"
+  # url tool 스키마에 wait류 없음(동기 바운디드) + envDir required.
+  mcp_rpc '{"jsonrpc":"2.0","id":17,"method":"tools/list"}'
+  [ "$(echo "$output" | jq -rc 'select(.id==17) | .result.tools[] | select(.name=="db_url") | .inputSchema.required | index("envDir") != null')" = "true" ]
 }
 
-@test "omitting a required explicit path is refused server-side (no cwd fallback mutation)" {
-  # 명시 경로(repoPath/parentDir)를 생략한 호출은 서버가 -32602로 거부해야 한다 — 스키마 required는
-  # 광고일 뿐이라 서버가 강제하지 않으면 cwd 폴백으로 서버 디렉토리에 변이가 나간다(신뢰 경계 우회).
+@test "omitting OR type-invalidating a required explicit path is refused server-side (no cwd fallback mutation)" {
+  # 명시 경로(repoPath/parentDir)를 생략하거나(undefined) null/wrong-type/빈 문자열로 주면 서버가
+  # -32602로 거부한다 — release r1 a3=b1: 존재만 검사하면 null/숫자가 통과해 str()에서 undefined로 접히고
+  # cwd 폴백으로 서버 디렉토리에 변이가 나간다(신뢰 경계 우회). 타입 인식 검증이 이를 fail-closed로 막는다.
   mcp_rpc \
     '{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"app_secrets","arguments":{"app":"myapp"}}}' \
-    '{"jsonrpc":"2.0","id":18,"method":"tools/call","params":{"name":"app_init","arguments":{"app":"myapp","archetype":"api"}}}'
+    '{"jsonrpc":"2.0","id":18,"method":"tools/call","params":{"name":"app_init","arguments":{"app":"myapp","archetype":"api"}}}' \
+    '{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"app_secrets","arguments":{"app":"myapp","repoPath":null}}}' \
+    '{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"app_secrets","arguments":{"app":"myapp","repoPath":123}}}' \
+    '{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"app_init","arguments":{"app":"myapp","archetype":"api","parentDir":""}}}'
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -rc 'select(.id==17) | .error.code')" = "-32602" ]
+  # undefined·null·number·empty-string 전부 -32602.
+  for i in 17 18 19 20 21; do
+    [ "$(echo "$output" | jq -rc "select(.id==$i) | .error.code")" = "-32602" ]
+  done
   echo "$output" | jq -rc 'select(.id==17) | .error.message' | grep -q "repoPath"
-  [ "$(echo "$output" | jq -rc 'select(.id==18) | .error.code')" = "-32602" ]
   echo "$output" | jq -rc 'select(.id==18) | .error.message' | grep -q "parentDir"
   # 어떤 변이도 서버 cwd(homelab 레포)를 대상으로 나가지 않았다 — 디스패치 argv 0건.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run update-secrets.yaml)" = "0" ]

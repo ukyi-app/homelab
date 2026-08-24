@@ -10,7 +10,7 @@
 //   - 서버는 무상태 — 동시 호출은 각자 run/PR URL 핸들로 독립 조회되고(status 핸들 모드), 재시작 후 재호출 정상.
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { mcpIsError, type Envelope } from "./contract.ts";
+import { ENVELOPE, compact, exitFor, mcpIsError, type Envelope } from "./contract.ts";
 import { sh } from "./exec.ts";
 import { appInitInputError, type AppInitInput } from "./init.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./secrets.ts";
@@ -23,10 +23,9 @@ import {
 const PROTOCOL_VERSION = "2024-11-05";
 type Json = Record<string, unknown>;
 
-// tool 호출 결과 — 계약 envelope(op 동사) 또는 usage 오류(invalid params -32602) 또는 url 패스스루 텍스트.
+// tool 호출 결과 — 계약 envelope(전 동사, url 포함) 또는 usage 오류(invalid params -32602).
 type ToolResult =
   | { kind: "envelope"; envelope: Envelope }
-  | { kind: "text"; text: string; isError: boolean }
   | { kind: "usage"; message: string };
 
 type McpTool = {
@@ -46,14 +45,27 @@ const strArr = (a: Json, k: string): string[] | undefined =>
 const envelope = (e: Envelope): ToolResult => ({ kind: "envelope", envelope: e });
 const usage = (m: string): ToolResult => ({ kind: "usage", message: m });
 
-// url 패스스루(db url/cache url) — 값(평문 자격)이 나오지 않는 로컬 파일 기록 도구. envelope 동사가
-// 아니므로(CLI에서도 패스스루) 캡처된 출력 텍스트를 그대로 결과로 낸다. stdio 오염 방지를 위해
-// inherit이 아니라 캡처(sh)로 실행하고, 명시 envDir을 cwd로 준다(서버 cwd 추론 없음).
-function urlPassthrough(tool: string, argv: string[], envDir: string | undefined): ToolResult {
+// url tool(db url/cache url) — 로컬 .env 파일에 접속 URL을 기록하는 도구. 다른 tool과 같은 결과 계약
+// (envelope)을 낸다(release r1 a5). 평문 자격은 결과에 담지 않는다: 계획(mode/envKey/envFile)은
+// --dry-run(클러스터 무의존, 평문 비출력)으로 캡처하고, 실제 기록은 wrote 불리언으로만 표기한다.
+// stdio 오염 방지를 위해 inherit이 아니라 캡처(sh)로 실행하고, 명시 envDir을 cwd로 준다(서버 cwd 추론 없음).
+function urlEnvelope(verb: string, tool: string, name: string, baseArgv: string[], dryRun: boolean, envDir: string): ToolResult {
   const toolPath = fileURLToPath(new URL(`../${tool}`, import.meta.url));
-  const r = sh(process.execPath, [toolPath, ...argv], { cwd: envDir });
-  const text = r.ok ? (r.out.trim() || `${tool}: 기록 완료(값 비출력)`) : (r.err.split("\n")[0] || `${tool} 실패`);
-  return { kind: "text", text, isError: !r.ok };
+  const result: Record<string, unknown> = { name, dryRun };
+  const plan = sh(process.execPath, [toolPath, ...baseArgv, "--dry-run"], { cwd: envDir });
+  if (plan.ok) { try { Object.assign(result, JSON.parse(plan.out)); } catch { /* 계획 파싱 실패는 변이 아님 */ } }
+  result.name = name; result.dryRun = dryRun; // 계획의 name으로 덮이지 않게 재고정
+  let variant = "success";
+  if (dryRun) {
+    result.wrote = false;
+    if (!plan.ok) { variant = "failure"; result.error = plan.err.split("\n")[0] || `${tool} 계획 실패`; }
+  } else {
+    const real = sh(process.execPath, [toolPath, ...baseArgv], { cwd: envDir });
+    result.wrote = real.ok;
+    if (!real.ok) { variant = "failure"; result.error = real.err.split("\n")[0] || `${tool} 실패`; }
+  }
+  const env: Envelope = { schema: ENVELOPE, verb, variant, exitCode: exitFor(variant), omitted: [], result: compact(result) };
+  return { kind: "envelope", envelope: env };
 }
 
 // MCP tool 테이블 — VERBS 순서를 따르되 destructive(teardown)·서버 모드(mcp)는 제외한다.
@@ -86,7 +98,7 @@ const TOOLS: McpTool[] = [
       properties: { name: { type: "string" }, ext: { type: "array", items: { type: "string" } } },
     },
     call: (a) => {
-      const input = { name: str(a, "name") ?? "", ext: strArr(a, "ext"), wait: false };
+      const input = { name: str(a, "name") ?? "", ext: strArr(a, "ext"), wait: false, identifyOnly: true };
       const bad = dbCreateInputError(input);
       return bad ? usage(bad) : envelope(DB_CREATE.op(input));
     },
@@ -99,7 +111,7 @@ const TOOLS: McpTool[] = [
       properties: { name: { type: "string" }, maxmemoryMi: { type: "integer" } },
     },
     call: (a) => {
-      const input = { name: str(a, "name") ?? "", maxmemoryMi: num(a, "maxmemoryMi"), wait: false };
+      const input = { name: str(a, "name") ?? "", maxmemoryMi: num(a, "maxmemoryMi"), wait: false, identifyOnly: true };
       const bad = cacheCreateInputError(input);
       return bad ? usage(bad) : envelope(CACHE_CREATE.op(input));
     },
@@ -112,7 +124,7 @@ const TOOLS: McpTool[] = [
       properties: { app: { type: "string" } },
     },
     call: (a) => {
-      const input = { app: str(a, "app") ?? "", wait: false };
+      const input = { app: str(a, "app") ?? "", wait: false, identifyOnly: true };
       const bad = appCreateInputError(input);
       return bad ? usage(bad) : envelope(APP_CREATE.op(input));
     },
@@ -126,7 +138,7 @@ const TOOLS: McpTool[] = [
     },
     call: (a) => {
       // repoPath = 앱 레포 경로 명시 입력(서버 cwd 추론 없음 — input.cwd로 흐른다).
-      const input: AppSecretsInput = { app: str(a, "app") ?? "", noSeal: bool(a, "noSeal"), wait: false, cwd: str(a, "repoPath") };
+      const input: AppSecretsInput = { app: str(a, "app") ?? "", noSeal: bool(a, "noSeal"), wait: false, identifyOnly: true, cwd: str(a, "repoPath") };
       const bad = appSecretsInputError(input);
       return bad ? usage(bad) : envelope(APP_SECRETS.op(input));
     },
@@ -156,38 +168,38 @@ const TOOLS: McpTool[] = [
     name: "db_url",
     description: "클러스터 DB 접속 URL을 envDir의 .env.local(admin은 .env.admin.local)에 기록(값 비출력). dryRun=계획만.",
     inputSchema: {
-      type: "object", additionalProperties: false, required: ["name"],
+      type: "object", additionalProperties: false, required: ["name", "envDir"],
       properties: {
         name: { type: "string" }, mode: { enum: ["ro", "rw", "admin"] },
         host: { type: "string" }, envDir: { type: "string" }, dryRun: { type: "boolean" },
       },
     },
     call: (a) => {
-      const argv = ["--name", str(a, "name") ?? ""];
+      const name = str(a, "name") ?? "";
+      const argv = ["--name", name];
       const mode = str(a, "mode");
       if (mode === "rw") argv.push("--rw");
       else if (mode === "admin") argv.push("--admin");
       const host = str(a, "host"); if (host !== undefined) argv.push("--host", host);
-      if (bool(a, "dryRun")) argv.push("--dry-run");
-      return urlPassthrough("db-url.ts", argv, str(a, "envDir"));
+      return urlEnvelope("db url", "db-url.ts", name, argv, bool(a, "dryRun"), str(a, "envDir") ?? "");
     },
   },
   {
     name: "cache_url",
     description: "캐시 접속 URL을 envDir의 .env.local에 기록(port-forward 선행, 값 비출력). dryRun=계획만.",
     inputSchema: {
-      type: "object", additionalProperties: false, required: ["name"],
+      type: "object", additionalProperties: false, required: ["name", "envDir"],
       properties: {
         name: { type: "string" }, rw: { type: "boolean" },
         host: { type: "string" }, envDir: { type: "string" }, dryRun: { type: "boolean" },
       },
     },
     call: (a) => {
-      const argv = ["--name", str(a, "name") ?? ""];
+      const name = str(a, "name") ?? "";
+      const argv = ["--name", name];
       if (bool(a, "rw")) argv.push("--rw");
       const host = str(a, "host"); if (host !== undefined) argv.push("--host", host);
-      if (bool(a, "dryRun")) argv.push("--dry-run");
-      return urlPassthrough("cache-url.ts", argv, str(a, "envDir"));
+      return urlEnvelope("cache url", "cache-url.ts", name, argv, bool(a, "dryRun"), str(a, "envDir") ?? "");
     },
   },
 ];
@@ -233,15 +245,21 @@ export function handleRequest(req: Json): Json | null {
     const args = (params.arguments ?? {}) as Json;
     const tool = TOOL_BY_NAME.get(name);
     if (!tool) return err(id, -32602, `알 수 없는 tool: ${name}`); // 파괴 동사·오타 전부 여기(노출 표면 밖)
-    // inputSchema.required를 서버측 강제한다 — 스키마의 required는 클라이언트 광고일 뿐 신뢰 경계가
-    // 아니다. 명시 경로(repoPath/parentDir)를 생략한 비대응 클라이언트가 cwd 폴백으로 서버 디렉토리에
-    // 변이를 일으키는 것을 fail-closed로 막는다(디렉토리 추론 없음 불변식).
+    // inputSchema.required를 서버측 **타입 인식으로** 강제한다 — 스키마의 required는 클라이언트 광고일
+    // 뿐 신뢰 경계가 아니다. 존재만 검사하면 null/숫자/빈 문자열 경로가 통과해 str()에서 undefined로
+    // 접히고, 명시 경로(repoPath/parentDir/envDir)가 cwd 폴백으로 새어 서버 디렉토리에 변이·자격 기록이
+    // 일어난다(release r1 a3=b1·a4=b2). 값의 존재 + 타입(문자열은 비어 있지 않은 문자열)까지 검증한다.
+    const props = (tool.inputSchema.properties as Record<string, { type?: string }> | undefined) ?? {};
     const required = (tool.inputSchema.required as string[] | undefined) ?? [];
-    const missing = required.filter((k) => args[k] === undefined);
-    if (missing.length > 0) return err(id, -32602, `필수 입력 누락: ${missing.join(", ")}`);
+    for (const k of required) {
+      const v = args[k];
+      if (v === undefined || v === null) return err(id, -32602, `필수 입력 누락: ${k}`);
+      if (props[k]?.type === "string" && (typeof v !== "string" || v === "")) {
+        return err(id, -32602, `${k}는 비어 있지 않은 문자열이어야 한다`);
+      }
+    }
     const r = tool.call(args);
     if (r.kind === "usage") return err(id, -32602, r.message); // usage 오류 = invalid params
-    if (r.kind === "text") return ok(id, { content: [{ type: "text", text: r.text }], isError: r.isError });
     // envelope — CLI --json과 같은 계약 오브젝트를 content로, isError는 variant 매핑.
     return ok(id, { content: [{ type: "text", text: JSON.stringify(r.envelope) }], isError: mcpIsError(r.envelope.variant) });
   }

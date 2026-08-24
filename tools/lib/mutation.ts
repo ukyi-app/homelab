@@ -41,18 +41,21 @@ export type MutationSpec = {
   noopOnMissingPr?: boolean;
 };
 
-export type MutationOpts = { wait: boolean; pollMs: number; deadlineMs: number };
+export type MutationOpts = { wait: boolean; pollMs: number; deadlineMs: number; identifyOnly: boolean };
 
 // 대기 옵션 SSOT — 기본값과 검증 술어를 변이 동사 전부가 공유한다(콜사이트 인라인 사본 금지).
 export const WAIT_DEFAULTS = { pollMs: 5_000, deadlineMs: 1_200_000 } as const;
-export type WaitInput = { wait?: boolean; pollMs?: number; deadlineMs?: number };
+// identifyOnly: run 식별 직후 run 핸들을 pending으로 반환하고 conclusion 추적(최대 deadline)을 건너뛴다.
+// MCP 전용(release r1 a2=b3) — stdio 서버는 단일 스레드라 conclusion 폴링이 서버를 최대 20분 블로킹한다.
+// 스펙의 "결과의 run URL이 상관 핸들, 진행 확인은 status 핸들 조회로"를 실행형으로 만든다. CLI는 미설정.
+export type WaitInput = { wait?: boolean; pollMs?: number; deadlineMs?: number; identifyOnly?: boolean };
 export function waitInputError(input: WaitInput): string | null {
   if (input.pollMs !== undefined && !(Number.isInteger(input.pollMs) && input.pollMs > 0)) return `--poll-ms는 양의 정수여야 한다: ${input.pollMs}`;
   if (input.deadlineMs !== undefined && !(Number.isInteger(input.deadlineMs) && input.deadlineMs > 0)) return `--deadline-ms는 양의 정수여야 한다: ${input.deadlineMs}`;
   return null;
 }
 export function waitOpts(input: WaitInput): MutationOpts {
-  return { wait: input.wait === true, pollMs: input.pollMs ?? WAIT_DEFAULTS.pollMs, deadlineMs: input.deadlineMs ?? WAIT_DEFAULTS.deadlineMs };
+  return { wait: input.wait === true, pollMs: input.pollMs ?? WAIT_DEFAULTS.pollMs, deadlineMs: input.deadlineMs ?? WAIT_DEFAULTS.deadlineMs, identifyOnly: input.identifyOnly === true };
 }
 export type MutationOutcome = { variant: string; omitted: string[]; result: Record<string, unknown> };
 
@@ -100,6 +103,13 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     Bun.sleepSync(opts.pollMs);
   }
   const runRef = () => compact({ id: run!.id, url: run!.html_url, conclusion: run!.conclusion ?? undefined });
+
+  // 2b) identifyOnly(MCP) — run을 식별했으면 conclusion 추적 없이 run 핸들을 pending으로 즉시 반환한다.
+  // stdio 서버가 GitHub Actions run 완료(최대 deadline)까지 블로킹하지 않게 한다 — 진행은 status(run URL)
+  // 재조회가 재개 경로다(스펙 "결과의 run URL이 상관 핸들, 진행 확인은 status 핸들 조회로", release r1 a2=b3).
+  if (opts.identifyOnly) {
+    return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pendingReason: "run 디스패치·식별 완료 — 진행은 status 핸들(run URL) 조회로 확인(동기 바운디드)" }) };
+  }
 
   // 3) conclusion 추적 — queued/in_progress면 폴링, 실패면 실패 잡 열거.
   while (run.status !== "completed") {

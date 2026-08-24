@@ -28,7 +28,7 @@
   "required": ["schema", "verb", "variant", "exitCode", "omitted", "result"],
   "properties": {
     "schema": { "enum": ["homelab-cli/1"] },
-    "verb": { "enum": ["doctor", "status", "db create", "cache create", "app create", "app secrets", "app teardown", "app init"] },
+    "verb": { "enum": ["doctor", "status", "db create", "cache create", "app create", "app secrets", "app teardown", "app init", "db url", "cache url"] },
     "variant": { "enum": ["success", "failure", "race", "skip", "pending", "no-op", "superseded"] },
     "exitCode": { "enum": [0, 1, 3, 4] },
     "omitted": { "type": "array", "uniqueItems": true, "items": { "enum": ["live"] } },
@@ -356,6 +356,22 @@
             "variant": { "enum": ["failure"] },
             "result": { "$ref": "#/definitions/initFailure" }
           }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["db url"] },
+            "variant": { "enum": ["success", "failure"] },
+            "result": { "$ref": "#/definitions/urlResult" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["cache url"] },
+            "variant": { "enum": ["success", "failure"] },
+            "result": { "$ref": "#/definitions/urlResult" }
+          }
         }
       ]
     },
@@ -666,6 +682,23 @@
         "checkpoint": { "enum": ["preflight", "created", "cloned", "scaffolded", "pushed", "secrets"] },
         "error": { "type": "string", "minLength": 1 },
         "secrets": { "$ref": "#/definitions/initSecrets" }
+      }
+    },
+    "urlResult": {
+      "description": "db url/cache url 결과(MCP) — 로컬 .env 파일에 접속 URL을 기록하는 도구의 계획/수행 보고. 평문 자격은 담지 않는다(비출력 계약): 계획(mode/secretRef/envKey/envFile)은 --dry-run으로 캡처하고 실제 기록은 wrote 불리언으로만 표기한다. dryRun=계획만(wrote=false). failure는 error를 담는다.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dryRun"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "mode": { "type": "string" },
+        "secretRef": { "type": "string" },
+        "envKey": { "type": "string" },
+        "envFile": { "type": "string" },
+        "note": { "type": "string" },
+        "dryRun": { "type": "boolean" },
+        "wrote": { "type": "boolean" },
+        "error": { "type": "string" }
       }
     },
     "statusResult": {
