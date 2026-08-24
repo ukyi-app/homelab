@@ -13,8 +13,9 @@ import { USAGE_EXIT, type Envelope } from "./lib/contract.ts";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { WAIT_DEFAULTS } from "./lib/mutation.ts";
 import type { TypedFlags } from "./lib/cli.ts";
-import { APP_CREATE, APP_SECRETS, APP_TEARDOWN, CACHE_CREATE, DB_CREATE, DOCTOR, STATUS, VERBS, appCreateInputError, appTeardownInputError, cacheCreateInputError, dbCreateInputError, type AppCreateInput, type AppTeardownInput, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
+import { APP_CREATE, APP_INIT, APP_SECRETS, APP_TEARDOWN, CACHE_CREATE, DB_CREATE, DOCTOR, STATUS, VERBS, appCreateInputError, appTeardownInputError, cacheCreateInputError, dbCreateInputError, type AppCreateInput, type AppTeardownInput, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./lib/secrets.ts";
+import { appInitInputError, type AppInitInput } from "./lib/init.ts";
 import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
 import { statusInputError, type StatusInput } from "./lib/status.ts";
 
@@ -39,6 +40,7 @@ const CLI_BY_VERB: Record<string, (rest: string[]) => VerbOutput> = {
   "app create": appCreateCli,
   "app secrets": appSecretsCli,
   "app teardown": appTeardownCli,
+  "app init": appInitCli,
 };
 for (const v of VERBS) {
   if (!CLI_BY_VERB[v.path.join(" ")]) throw new Error(`계약 파손: 동사 '${v.path.join(" ")}'의 CLI 어댑터가 없다`);
@@ -314,6 +316,60 @@ function appTeardownCli(rest: string[]): VerbOutput {
   if (bad) return { kind: "usage-error", message: `homelab app teardown: ${bad}`, usage: appTeardownUsage() };
   const envelope = APP_TEARDOWN.op(input);
   return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
+}
+
+function appInitUsage(): string {
+  return [
+    "사용법: homelab app init <app> --archetype fullstack|api|site|worker [--public] [--dispatch-secrets <경로>] [--adopt] [--json]",
+    "",
+    "앱 레포의 시작을 끝까지 만든다(멱등·재개 가능): preflight(부수효과 0) → 템플릿에서 레포 생성",
+    "(기본 private) → 클론 → 스캐폴더 비대화형 실행 → invocation marker 기록 → 커밋·첫 push(빌드",
+    "트리거) → [--dispatch-secrets면 디스패치 시크릿 쌍 설정]. 실패 후 같은 명령을 다시 실행하면",
+    "도달한 체크포인트부터 수렴한다. 소유 증명은 마커(.homelab-init)이고, 마커 없는 기존 레포는",
+    "거부한다 — 확인 후 --adopt로만 이어갈 수 있다. private key 값은 어떤 출력에도 나타나지 않는다.",
+    "  --archetype <a>    fullstack|api|site|worker (kind는 아키타입 유도값 — CONTEXT.md 용어)",
+    "  --public           공개 레포로 생성(기본 private)",
+    "  --dispatch-secrets <경로>  App 키 디렉토리(app-id·private-key.pem) — 새 레포에 디스패치 시크릿 쌍 설정",
+    "  --adopt            마커 없는 기존 레포를 명시 입양(사용자 확인 — 소유 미증명 레포 이어가기)",
+    "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
+    "",
+  ].join("\n");
+}
+
+function renderInit(envelope: Envelope): string[] {
+  const r = envelope.result as Record<string, any>;
+  const lines = [`app init ${r.app} — 아키타입 ${r.archetype} · ${r.public ? "public" : "private"} · repo ${r.repo}`];
+  if (r.error) {
+    lines.push(`체크포인트: ${r.checkpoint ?? "?"}`);
+    lines.push(`오류: ${r.error}`);
+  } else {
+    const st: string[] = [];
+    if (r.created) st.push("레포 생성");
+    if (r.adopted) st.push("입양");
+    if (r.scaffolded) st.push("스캐폴드");
+    if (r.pushed) st.push("첫 push");
+    lines.push(`단계: ${st.length ? st.join(" · ") : "변경 없음(이미 완료)"}`);
+  }
+  if (r.secrets) lines.push(`디스패치 시크릿: App ID ${OX[String(r.secrets.appId)]} · private key ${OX[String(r.secrets.privateKey)]}`);
+  lines.push(`결과: ${envelope.variant}`);
+  return lines;
+}
+
+function appInitCli(rest: string[]): VerbOutput {
+  const p = positionalThenFlags(rest, { value: ["--archetype", "--dispatch-secrets"], bool: ["--public", "--adopt", "--json", "--help"] }, "homelab app init", appInitUsage);
+  if (isOutput(p)) return p;
+  if (p.flags.bool("--help")) return { kind: "help", text: appInitUsage() };
+  const input: AppInitInput = {
+    app: p.positional ?? "",
+    archetype: p.flags.str("--archetype") ?? "",
+    public: p.flags.bool("--public"),
+    dispatchSecrets: p.flags.str("--dispatch-secrets"),
+    adopt: p.flags.bool("--adopt"),
+  };
+  const bad = appInitInputError(input);
+  if (bad) return { kind: "usage-error", message: `homelab app init: ${bad}`, usage: appInitUsage() };
+  const envelope = APP_INIT.op(input);
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderInit(envelope) };
 }
 
 function cacheCreateUsage(): string {

@@ -73,7 +73,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$output" = "2" ]
 }
 
-@test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (29 allowed, 20 rejected)" {
+@test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (32 allowed, 24 rejected)" {
   # structure r1 시도2 A2·B2: verb만 result를 고르면 불가능한 variant(doctor+pending 등)가 valid로
   # 남는다 — verb 분기가 허용 variant 집합까지 선언하고, verb별 허용∪비허용 = variant 전체(7종).
   # 한 동사가 variant별 result 형상으로 분기를 여럿 가질 수 있으므로(db create) 허용 집합은 동사
@@ -108,6 +108,13 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
       ["race"]: { ...tdBase, error: "x", observedRuns: 2 },
       ["pending"]: { ...tdBase, pendingReason: "x" },
     };
+    // app init은 로컬 체인(변이 아님) — correlation 없음, 전용 정의(initSuccess/initFailure).
+    const initBase = { app: "myapp", archetype: "api", public: false, repo: "ukyi-app/myapp" };
+    const init = {
+      ["success"]: { ...initBase, created: true, scaffolded: true, pushed: true, checkpoint: "pushed" },
+      ["no-op"]: { ...initBase, existed: true, scaffolded: true, pushed: true, checkpoint: "pushed" },
+      ["failure"]: { ...initBase, checkpoint: "preflight", error: "x" },
+    };
     const SAMPLES = {
       doctor: { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } },
       status: { mode: "list", apps: [], count: 0 },
@@ -117,6 +124,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
       ...Object.fromEntries(Object.entries(mut(secBase)).map(([v, r]) => ["app secrets|" + v, r])),
       "app secrets|no-op": { ...secBase, waited: false, run: { id: 1, url: "u" } },
       ...Object.fromEntries(Object.entries(td).map(([v, r]) => ["app teardown|" + v, r])),
+      ...Object.fromEntries(Object.entries(init).map(([v, r]) => ["app init|" + v, r])),
     };
     const byVerb = {};
     for (const br of verbBranches) (byVerb[br.properties.verb.enum[0]] ??= []).push(br);
@@ -141,12 +149,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     console.log("ok:" + okN + " rej:" + rejN);
   '
   [ "$status" -eq 0 ]
-  # 바닥값: 허용 doctor 2 + status 2 + db 5 + cache 5 + app create 5 + secrets 6 + teardown 4 = 29
-  #        / 비허용 5+5+2+2+2+1+3 = 20
-  echo "$output" | grep -q "^ok:29 rej:20$"
+  # 바닥값: 허용 doctor 2 + status 2 + db 5 + cache 5 + app create 5 + secrets 6 + teardown 4 + init 3 = 32
+  #        / 비허용 5+5+2+2+2+1+3+4 = 24
+  echo "$output" | grep -q "^ok:32 rej:24$"
 }
 
-@test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, floor 29)" {
+@test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, floor 32)" {
   # structure r1 b2: variant와 exitCode가 독립이면 success+exit 1도 green — 허용 쌍을 스키마가 강제한다.
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
@@ -176,6 +184,13 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
       ["race"]: { ...tdBase, error: "x", observedRuns: 2 },
       ["pending"]: { ...tdBase, pendingReason: "x" },
     };
+    // app init은 로컬 체인(변이 아님) — correlation 없음, 전용 정의(initSuccess/initFailure).
+    const initBase = { app: "myapp", archetype: "api", public: false, repo: "ukyi-app/myapp" };
+    const init = {
+      ["success"]: { ...initBase, created: true, scaffolded: true, pushed: true, checkpoint: "pushed" },
+      ["no-op"]: { ...initBase, existed: true, scaffolded: true, pushed: true, checkpoint: "pushed" },
+      ["failure"]: { ...initBase, checkpoint: "preflight", error: "x" },
+    };
     const SAMPLES = {
       doctor: { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } },
       status: { mode: "list", apps: [], count: 0 },
@@ -185,6 +200,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
       ...Object.fromEntries(Object.entries(mut(secBase)).map(([v, r]) => ["app secrets|" + v, r])),
       "app secrets|no-op": { ...secBase, waited: false, run: { id: 1, url: "u" } },
       ...Object.fromEntries(Object.entries(td).map(([v, r]) => ["app teardown|" + v, r])),
+      ...Object.fromEntries(Object.entries(init).map(([v, r]) => ["app init|" + v, r])),
     };
     let n = 0;
     for (const br of verbBranches) {
@@ -201,7 +217,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     console.log("rejected:" + n);
   '
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^rejected:29$"
+  echo "$output" | grep -q "^rejected:32$"
 }
 
 @test "schema rejects a doctor envelope whose result does not match doctorResult (verb-result coupling)" {

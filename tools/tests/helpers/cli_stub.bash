@@ -378,3 +378,101 @@ TS
   git -C "$APP_WORK" config "url.$APP_REMOTE.insteadOf" "https://github.com/ukyi-app/$app.git"
   git -C "$APP_WORK" push -q origin main
 }
+
+# app init 하네스(보조 심 2 확장) — init은 gh repo create(동적 bare 생성)·canonical URL 클론
+# (insteadOf 매핑)·bun run scaffold·gh secret set/list를 쓴다. 실물 git 레포 + init 전용 gh stub으로
+# 재현한다. 사용: cli_stub_init 후 make_init_stub → INIT_GCFG(GIT_CONFIG_GLOBAL)·INIT_PARENT(클론 부모)
+# 설정. 테스트는 run env에 GIT_CONFIG_GLOBAL="$INIT_GCFG" GIT_CONFIG_SYSTEM=/dev/null을 넘긴다.
+#   실패 주입 env: STUB_GH_CREATE_FAIL / STUB_SCAFFOLD_FAIL / STUB_GH_SECRET_FAIL=<name>.
+make_init_stub() {
+  INIT_REMOTES="$BATS_TEST_TMPDIR/init-remotes"; mkdir -p "$INIT_REMOTES"
+  INIT_SECRETS="$BATS_TEST_TMPDIR/init-secrets"; mkdir -p "$INIT_SECRETS"
+  INIT_PARENT="$BATS_TEST_TMPDIR/init-parent"; mkdir -p "$INIT_PARENT"
+  export INIT_REMOTES INIT_SECRETS INIT_PARENT
+
+  # 격리 git 설정 — insteadOf 접두 매핑(canonical→로컬 bare) + 커밋 신원. 실제 ~/.gitconfig 미간섭.
+  INIT_GCFG="$BATS_TEST_TMPDIR/init-gitconfig"
+  export INIT_GCFG
+  {
+    printf '[user]\n\tname = init-fixture\n\temail = init@example.com\n'
+    printf '[init]\n\tdefaultBranch = main\n'
+    printf '[url "%s/"]\n\tinsteadOf = https://github.com/ukyi-app/\n' "$INIT_REMOTES"
+  } > "$INIT_GCFG"
+
+  # 템플릿 bare — gh repo create --template의 시드(스캐폴더 stub + scaffold 스크립트).
+  tw="$BATS_TEST_TMPDIR/init-tpl-work"
+  git -c init.defaultBranch=main init -q "$tw"
+  git -C "$tw" config user.name init-fixture; git -C "$tw" config user.email init@example.com
+  mkdir -p "$tw/scaffold"
+  # 스캐폴더 stub — 비대화형 계약(--archetype·--name·--yes)을 해석, kind를 아키타입에서 유도,
+  # .app-config.yml 생성 + scaffold/ 자가삭제, argv를 공용 원장에 기록. STUB_SCAFFOLD_FAIL시 실패.
+  cat > "$tw/scaffold/scaffold.ts" <<'TS'
+import { appendFileSync, writeFileSync, rmSync } from "node:fs";
+const argv = process.argv.slice(2);
+appendFileSync(process.env.CALLS!, ["scaffold", ...argv].join("\0") + "\0\x1e");
+if (process.env.STUB_SCAFFOLD_FAIL) { console.error("scaffold: STUB_SCAFFOLD_FAIL"); process.exit(1); }
+const get = (k: string) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
+const arch = get("--archetype"); const name = get("--name");
+if (!arch || !name || !argv.includes("--yes")) { console.error("scaffold: --archetype --name --yes 필수"); process.exit(1); }
+const KIND: Record<string, string> = { fullstack: "web", api: "web", site: "site", worker: "worker" };
+writeFileSync(".app-config.yml", `kind: ${KIND[arch] ?? "web"}\nresources:\n  requests:\n    cpu: 50m\n    memory: 64Mi\n`);
+rmSync("scaffold", { recursive: true, force: true });
+TS
+  printf '{"name":"tpl","scripts":{"scaffold":"bun scaffold/scaffold.ts"}}\n' > "$tw/package.json"
+  git -C "$tw" add -A; git -C "$tw" commit -q -m "template init"
+  INIT_TPL_BARE="$INIT_REMOTES/homelab-app-template.git"
+  git clone -q --bare "$tw" "$INIT_TPL_BARE"
+
+  # 스캐폴더 계약 원료(preflight) — 기본 호환 소스는 cli_stub_init의 $FIX/scaffold.ts(3 마커 포함).
+  # init gh stub이 이 파일을 base64로 낸다(doctor와 같은 소스).
+
+  cat > "$STUB/gh" <<'SH'
+#!/usr/bin/env bash
+# ⚠️ PATH는 $STUB **대체**라 sed/sort 같은 외부 도구가 없다 — 인자 추출은 bash 파라미터 확장으로만.
+{ printf '%s\0' gh "$@"; printf '\x1e'; } >> "$CALLS"
+b64() { base64 < "$1"; }
+case "$*" in
+  # 레포 생성 — 템플릿 bare에서 <app> bare를 복사(private/public 플래그는 argv 원장으로 단언).
+  # 인자: $1=repo $2=create $3=ukyi-app/<app> $4=--template $5=<tmpl> $6=--private|--public.
+  "repo create ukyi-app/"*" --template ukyi-app/homelab-app-template "*)
+    if [ -n "${STUB_GH_CREATE_FAIL:-}" ]; then echo "gh: repo create 실패" >&2; exit 1; fi
+    app="${3#ukyi-app/}"
+    git clone -q --bare "$INIT_REMOTES/homelab-app-template.git" "$INIT_REMOTES/$app.git"
+    ;;
+  # 레포 존재 — bare 유무. 인자: $1=api $2=repos/ukyi-app/<app> $3=--jq $4=.name.
+  "api repos/ukyi-app/"*" --jq .name")
+    app="${2#repos/ukyi-app/}"
+    if [ -d "$INIT_REMOTES/$app.git" ]; then printf '%s\n' "$app"; else echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    ;;
+  # invocation marker — bare main의 .homelab-init(있으면 base64, 없으면 404). $2=repos/ukyi-app/<app>/contents/.homelab-init.
+  "api repos/ukyi-app/"*"/contents/.homelab-init --jq .content")
+    rest="${2#repos/ukyi-app/}"; app="${rest%%/*}"
+    if git -C "$INIT_REMOTES/$app.git" show main:.homelab-init >/dev/null 2>&1; then
+      git -C "$INIT_REMOTES/$app.git" show main:.homelab-init | base64
+    else echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    ;;
+  # 템플릿 스캐폴더 계약 원료(preflight) — 호환 소스($FIX/scaffold.ts, 3 마커).
+  "api repos/ukyi-app/homelab-app-template/contents/scaffold/scaffold.ts --jq .content")
+    b64 "$FIX/scaffold.ts"
+    ;;
+  # 시크릿 목록 — 설정된 이름(줄당 하나, 중복 무해: init이 Set으로 dedup). $4=ukyi-app/<app>.
+  "secret list --repo ukyi-app/"*" --json name --jq "*)
+    app="${4#ukyi-app/}"
+    [ -f "$INIT_SECRETS/$app" ] && cat "$INIT_SECRETS/$app" || true
+    ;;
+  # 시크릿 설정 — 이름을 기록(값은 --body-file 경유라 argv/원장에 안 남는다). STUB_GH_SECRET_FAIL로 주입.
+  # 인자: $1=secret $2=set $3=<name> $4=--repo $5=ukyi-app/<app> $6=--body-file $7=<path>.
+  "secret set "*" --repo ukyi-app/"*" --body-file "*)
+    name="$3"
+    if [ "${STUB_GH_SECRET_FAIL:-}" = "$name" ]; then echo "gh: secret set $name 실패" >&2; exit 1; fi
+    app="${5#ukyi-app/}"
+    printf '%s\n' "$name" >> "$INIT_SECRETS/$app"
+    ;;
+  *)
+    echo "stub gh(init): 계약 밖 호출: $*" >&2
+    exit 3
+    ;;
+esac
+SH
+  chmod +x "$STUB/gh"
+}

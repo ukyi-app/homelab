@@ -6,8 +6,8 @@ import { spawnSync } from "node:child_process";
 
 export type Cmd = { ok: boolean; out: string; err: string };
 
-export function sh(cmd: string, args: string[]): Cmd {
-  const r = spawnSync(cmd, args, { encoding: "utf8", timeout: 30_000 });
+export function sh(cmd: string, args: string[], opts: { cwd?: string } = {}): Cmd {
+  const r = spawnSync(cmd, args, { encoding: "utf8", timeout: 30_000, cwd: opts.cwd });
   if (r.error) return { ok: false, out: "", err: String((r.error as Error).message) };
   return { ok: r.status === 0, out: r.stdout ?? "", err: (r.stderr ?? "").trim() };
 }

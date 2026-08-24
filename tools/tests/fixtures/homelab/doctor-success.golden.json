@@ -44,7 +44,7 @@
       {
         "id": "template-scaffold-contract",
         "status": "pass",
-        "detail": "스캐폴더 비대화형 계약 확인(--archetype·--yes)"
+        "detail": "스캐폴더 비대화형 계약 확인(--archetype·--name·--yes)"
       },
       {
         "id": "template-targetarch",

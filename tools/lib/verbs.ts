@@ -7,6 +7,7 @@
 import { ENVELOPE, exitFor, type Envelope } from "./contract.ts";
 import { runDoctor } from "./doctor.ts";
 import { APP_NAME_RE, CACHE_MAXMEMORY_MI, EXT_RE, resourceNameError } from "./identity.ts";
+import { appInitInputError, runAppInit, type AppInitInput } from "./init.ts";
 import { runMutation, waitInputError, waitOpts, type WaitInput } from "./mutation.ts";
 import { appSecretsInputError, runAppSecrets, type AppSecretsInput } from "./secrets.ts";
 import { runStatus, statusInputError, type StatusInput } from "./status.ts";
@@ -48,8 +49,11 @@ export type AppSecretsVerb = VerbShape<AppSecretsInput>;
 export type AppTeardownInput = WaitInput & { app: string; confirm: string };
 export type AppTeardownVerb = VerbShape<AppTeardownInput>;
 
+// app init — 앱 레포 시작 로컬 체인(멱등·재개 가능, 변이 디스패처 아님 — correlation 없음).
+export type AppInitVerb = VerbShape<AppInitInput>;
+
 // 전 동사의 union — 후속 동사가 멤버로 추가된다.
-export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | CacheCreateVerb | AppCreateVerb | AppSecretsVerb | AppTeardownVerb | CliOnlyVerb;
+export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | CacheCreateVerb | AppCreateVerb | AppSecretsVerb | AppTeardownVerb | AppInitVerb | CliOnlyVerb;
 
 function doctorOp(_input: DoctorInput): Envelope {
   const { checks, summary } = runDoctor();
@@ -181,6 +185,13 @@ function appSecretsOp(input: AppSecretsInput): Envelope {
   return { schema: ENVELOPE, verb: "app secrets", variant, exitCode: exitFor(variant), omitted, result };
 }
 
+function appInitOp(input: AppInitInput): Envelope {
+  const bad = appInitInputError(input);
+  if (bad) throw new Error(`계약 파손: appInitOp에 검증 안 된 입력 — ${bad}`);
+  const { variant, omitted, result } = runAppInit(input);
+  return { schema: ENVELOPE, verb: "app init", variant, exitCode: exitFor(variant), omitted, result };
+}
+
 function statusOp(input: StatusInput): Envelope {
   // 입력 검증은 어댑터(CLI usage 오류)·MCP(invalid params)가 같은 술어로 선행한다 — 도달하면 결함.
   const bad = statusInputError(input);
@@ -251,4 +262,10 @@ export const APP_TEARDOWN: AppTeardownVerb = {
   destructive: true,
 };
 
-export const VERBS: readonly Verb[] = [DOCTOR, STATUS, DB_CREATE, DB_URL, CACHE_CREATE, CACHE_URL, APP_CREATE, APP_SECRETS, APP_TEARDOWN];
+export const APP_INIT: AppInitVerb = {
+  path: ["app", "init"],
+  desc: "앱 레포 시작(템플릿→레포 생성·스캐폴드·첫 push, 멱등·재개 가능 — 마커 소유 술어·시크릿 쌍 원자)",
+  op: appInitOp,
+};
+
+export const VERBS: readonly Verb[] = [DOCTOR, STATUS, DB_CREATE, DB_URL, CACHE_CREATE, CACHE_URL, APP_CREATE, APP_SECRETS, APP_TEARDOWN, APP_INIT];

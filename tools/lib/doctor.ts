@@ -6,6 +6,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { HOMELAB_REPO, TEMPLATE_REPO, COMPILED_ARCHETYPES } from "./platform.ts";
+import { SCAFFOLD_CONTRACT_LABEL, scaffoldContractError } from "./template-contract.ts";
 
 export type CheckStatus = "pass" | "fail" | "warn";
 export type DoctorCheck = { id: string; status: CheckStatus; detail: string };
@@ -97,10 +98,10 @@ export function runDoctor(): DoctorResult {
     const sc = fetchTemplateFile("scaffold/scaffold.ts");
     if (sc === null) add("template-scaffold-contract", "fail", "scaffold/scaffold.ts 조회 실패 — 템플릿 구조 변경 의심(스캐폴더 부재면 init 불가)");
     else {
-      const markers = ["--archetype", "--yes"];
-      const absent = markers.filter((mk) => !sc.includes(mk));
-      if (absent.length > 0) add("template-scaffold-contract", "fail", `스캐폴더 비대화형 계약 마커 부재(${absent.join("·")}) — init이 이 템플릿과 비호환`);
-      else add("template-scaffold-contract", "pass", "스캐폴더 비대화형 계약 확인(--archetype·--yes)");
+      // 계약 술어는 lib/template-contract.ts SSOT — init preflight가 같은 술어를 쓴다(structure r1 a3).
+      const absent = scaffoldContractError(sc);
+      if (absent !== null) add("template-scaffold-contract", "fail", `스캐폴더 비대화형 계약 마커 부재(${absent}) — init이 이 템플릿과 비호환`);
+      else add("template-scaffold-contract", "pass", `스캐폴더 비대화형 계약 확인(${SCAFFOLD_CONTRACT_LABEL})`);
     }
 
     // site는 검사 대상이 아니다(arch 중립 — COMPILED_ARCHETYPES 주석·ticket 03 실측).

@@ -1,0 +1,15 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "app init",
+  "variant": "failure",
+  "exitCode": 1,
+  "omitted": [],
+  "result": {
+    "app": "other",
+    "archetype": "api",
+    "public": false,
+    "repo": "ukyi-app/other",
+    "checkpoint": "preflight",
+    "error": "--dispatch-secrets 경로에 키 파일 부재(app-id·private-key.pem 필요): /nonexistent-keys"
+  }
+}
