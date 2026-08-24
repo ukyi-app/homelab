@@ -56,3 +56,23 @@ teardown() { rm -rf "$FX"; }
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "열거 붕괴"
 }
+@test "bump.yaml's opstag case set matches the tool CATALOG keys (no silent drift on a new ops image)" {
+  # ★ 적대 검증이 잡은 자리. bump.yaml:92 주석이 "test_ops-repin이 강제한다"고 했으나 그런 게이트가
+  #   없었다. CATALOG에 새 ops 이미지를 추가하고 bump.yaml의 opstag case를 잊으면 opstag=""가 돼
+  #   그 이미지가 재핀되지 않고 조용히 드리프트한다(D-1 클래스). 두 집합을 실제로 대조해 그 갭을 닫는다.
+  bump="$ROOT/.github/workflows/bump.yaml"
+  tool="$ROOT/tools/repin-ops-image.ts"
+  # bump.yaml opstag case 우변(canonical 태그) 집합
+  opstags="$(grep -oE 'opstag="[^"]+"' "$bump" | sed 's/opstag="//;s/"//' | LC_ALL=C sort -u)"
+  # 도구 CATALOG 키 집합
+  catalog="$(grep -oE '"[a-z0-9-]+:[a-z0-9._-]+": \{ minSites' "$tool" | sed 's/": .*//;s/"//' | LC_ALL=C sort -u)"
+  # 열거 붕괴 바닥값 — 둘 다 최소 2(pg-tools·skopeo)
+  [ "$(printf '%s\n' "$opstags" | grep -c .)" -ge 2 ]
+  [ "$(printf '%s\n' "$catalog" | grep -c .)" -ge 2 ]
+  [ "$opstags" = "$catalog" ] || {
+    echo "bump.yaml opstag case 집합 != 도구 CATALOG 키 집합 — 새 ops 이미지를 한쪽에만 추가했다"
+    echo "opstag:"; printf '%s\n' "$opstags"
+    echo "catalog:"; printf '%s\n' "$catalog"
+    false
+  }
+}

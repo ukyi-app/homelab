@@ -134,7 +134,7 @@ spec:
             #    "같은 태그는 같은 digest" 불변식이 두 파일을 **함께** 묶어 주는 이득까지 있다
             #    (한쪽만 bump하면 그 가드가 red를 낸다).
             - name: gha-liveness-exporter
-              image: ghcr.io/ukyi-app/skopeo:alpine@sha256:dc78e3f1419c22afbfc3d2f26dc70b246c41a41316b07feb99c47a8aa8b5e986
+              image: ghcr.io/ukyi-app/skopeo:alpine@sha256:a28a72e4a8950f5c70586ddb3d2c45058b68737d5d7a3122380991fde820ca3d
               command: ["/bin/sh", "/script/run.sh"]
               env:
                 - name: REPO

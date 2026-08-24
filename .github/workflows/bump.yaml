@@ -89,7 +89,9 @@ jobs:
               ''|*[!a-z0-9-]*) echo "skip suspicious app name: '$app'"; continue ;;
             esac
             # ops 이미지의 canonical 태그(소비자가 참조하는 안정 태그). 새 ops 이미지를 추가하면 여기와
-            # tools/repin-ops-image.ts의 CATALOG에 함께 등록한다 — 둘은 같은 집합이어야 한다(test_ops-repin이 강제).
+            # tools/repin-ops-image.ts의 CATALOG에 함께 등록한다 — 이 case 우변 집합 == CATALOG 키 집합을
+            # test_ops-repin.bats「bump.yaml's opstag case set matches the tool CATALOG keys」가 대조한다
+            # (한쪽에만 추가하면 red — 잊으면 opstag=""로 그 이미지가 조용히 재핀 안 되는 D-1 갭을 닫는다).
             case "$app" in
               pg-tools) opstag="pg-tools:18-rclone" ;;
               skopeo)   opstag="skopeo:alpine" ;;

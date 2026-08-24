@@ -119,7 +119,7 @@ spec:
           securityContext: { runAsNonRoot: true, runAsUser: 65532 }
           containers:
             - name: digest-exporter
-              image: ghcr.io/ukyi-app/skopeo:alpine@sha256:dc78e3f1419c22afbfc3d2f26dc70b246c41a41316b07feb99c47a8aa8b5e986
+              image: ghcr.io/ukyi-app/skopeo:alpine@sha256:a28a72e4a8950f5c70586ddb3d2c45058b68737d5d7a3122380991fde820ca3d
               command: ["/bin/sh", "/script/run.sh"]
               env:
                 # 배포된 외부 앱의 "name=ghcr.io/owner/name:tag" 공백 구분 목록 — apps/ 디렉토리와 parity
