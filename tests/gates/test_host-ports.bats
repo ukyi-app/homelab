@@ -75,6 +75,36 @@ setup() {
   run bash "$S" "$FX/cmt.sh"; [ "$status" -eq 0 ]
 }
 
+@test "lane A reads publish arguments that are wrapped in quotes (the notation this repo actually uses)" {
+  # ★ 적대적 리뷰가 잡은 자리. 한 번의 `gsub(/^["']|["'].*$/, ...)`는 ERE의 leftmost-longest로
+  #   따옴표 토큰 **전체**를 먹어 cand를 비우고, 그러면 A가 침묵하며 binds가 안 서서 C까지 꺼졌다.
+  #   하필 이 레포의 실제 표기가 따옴표형이라, 그 상태의 hard-zero 보증은 **거짓**이었다.
+  #   네 표기를 전부 건다 — 하나만 걸면 다음 표기로 조용히 빠져나간다.
+  printf '#!/usr/bin/env bash\ndocker run -d -p "9093:9093" img\n'             > "$FX/q1.sh"
+  printf "#!/usr/bin/env bash\ndocker run -d -p '18443:18443' img\n"           > "$FX/q2.sh"
+  printf '#!/usr/bin/env bash\ndocker run -d -p "127.0.0.1:9093:9093" img\n'   > "$FX/q3.sh"
+  printf '#!/usr/bin/env bash\ndocker run -d --publish="9093:9093" img\n'      > "$FX/q4.sh"
+  run bash "$S" "$FX/q1.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[A]'
+  run bash "$S" "$FX/q2.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[A]'
+  run bash "$S" "$FX/q3.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[A]'
+  run bash "$S" "$FX/q4.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[A]'
+  # 음성 대조 — 같은 따옴표 표기에 **변수**가 들어가면 조용해야 한다.
+  printf '#!/usr/bin/env bash\n. tests/gates/lib/host-port.sh\ndocker run -d -p "127.0.0.1:${P}:9093" img\n' > "$FX/qok.sh"
+  run bash "$S" "$FX/qok.sh"; [ "$status" -eq 0 ]
+}
+
+@test "a heredoc token quoted inside a comment does not blind the detector to the rest of the file" {
+  # ★ heredoc 상태 기계가 주석 규칙보다 먼저 돌아, `# … <<PY …` 한 줄이 inhere=1을 세우면
+  #   그 뒤 파일 전체가 검출기에게 투명해졌다. 진짜 종료줄이 있는 파일은 [E]도 침묵해서
+  #   어떤 신호도 안 났다(SCAN·READFILES는 **파일 수** 축이라 줄 단위 붕괴를 원리적으로 못 본다).
+  #   `<<<`·`$(( << ))`에 이은 같은 클래스의 세 번째 오인원이다.
+  printf '#!/usr/bin/env bash\n# 예전엔 `python3 - <<PY` 로 인라인했다\ndocker run -d -p 9093:9093 img\nPY\n' > "$FX/hd.sh"
+  run bash "$S" "$FX/hd.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[A]'
+  # 음성 대조 — **진짜** heredoc 본문은 명령이 아니므로 여전히 면제다.
+  printf '#!/usr/bin/env bash\ncat <<PY\n-p 9093:9093\nPY\necho done\n' > "$FX/hdreal.sh"
+  run bash "$S" "$FX/hdreal.sh"; [ "$status" -eq 0 ]
+}
+
 @test "the real harnesses that bind host ports are all wired to the lib (tracked enumeration, no hardcoded roster)" {
   # ★ 완전성 레인. 예전 가드는 `vmalert-*-firing-e2e.sh` 글롭만 열거해 형제 표면 셋이 **원리적으로**
   #   안 보였다(열거 붕괴가 아니라 열거 범위가 좁았다). 여기서는 추적 글롭 전체를 돌린다.
