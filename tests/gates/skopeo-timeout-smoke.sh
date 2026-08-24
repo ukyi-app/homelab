@@ -17,7 +17,10 @@
 #   (sink가 **독립 파일**인 이유: 셸 heredoc에 python을 내장하면 typecheck·lint 사각이 된다 —
 #    CONTRIBUTING.md 「새 코드 배치 규칙」의 명시적 금지. 형제 관용구 = tests/gates/mock-telegram.py.)
 #
-# 증명 3단(단순 "종료했다"로는 부족 — 다른 이유로 즉시 죽어도 통과한다):
+# 증명 단계(단순 "종료했다"로는 부족 — 다른 이유로 즉시 죽어도 통과한다):
+#   S0 이미지 계약: 소비자가 의존하는 GNU date(-d ISO8601)를 이미지가 제공하는가. gha-liveness-exporter가
+#      `date -u -d "$ISO" +%s`로 워크플로 나이를 계산하는데 busybox date는 이를 무성 실패시킨다(실측
+#      2026-08-24: quay Fedora→alpine 미러 전환 회귀). 두 exporter가 같은 이미지라 여기서 한 번 검증한다.
 #   S1 짧은 타임아웃(T_SHORT)  → T_SHORT 근처에서 종료(하한 단언 = 진짜로 기다렸다, 즉시 실패가 아니다)
 #   S2 긴 타임아웃(T_LONG)     → T_LONG 근처에서 종료 **그리고 S1보다 확실히 오래 걸린다**
 #      ↳ 경과가 플래그 **값을 따라간다**는 것이 "타임아웃이 실제로 지배한다"의 유일한 증거다.
@@ -93,6 +96,22 @@ grep -q 'listening' "$TMP/sink.log" || fault "TCP sink가 기동하지 못했다
 
 # 이미지 pull을 타이밍에서 제외(pull 시간이 경과에 섞이면 하한/상한 단언이 무의미해진다).
 docker pull -q "$IMAGE" >/dev/null 2>&1 || fault "skopeo 이미지 pull 실패: $IMAGE"
+
+# ── S0: 소비자가 의존하는 GNU date를 이미지가 제공하는가 ──────────────────────────────────────────
+# ⚠️ gha-liveness-exporter의 run.sh는 GitHub 타임스탬프를 `date -u -d "$ISO" +%s`로 파싱한다 — GNU date
+#    문법이다. alpine 기본 date는 busybox라 ISO8601을 거부하고, 그러면 EPOCH가 빈 값이 돼 워크플로
+#    나이 계산이 **조용히 깨진다**(실측 2026-08-24: quay Fedora base→alpine 미러 전환에서 드러난 회귀).
+#    두 exporter가 같은 이미지를 공유하므로 이미지 계약을 여기서 한 번 검증한다. digest-exporter는
+#    `date +%s`만 쓰지만, 이미지가 GNU date를 잃으면 gha-liveness가 무성 사망한다.
+# ⚠️ 소비자와 **같은 호출 형태**로 재현한다. 소비자 매니페스트는 `command: ["/bin/sh", "/script/run.sh"]`인데
+#    k8s의 command:는 이미지 ENTRYPOINT를 **override**하므로 실제 실행은 `/bin/sh`를 직접 돌리고 그 안에서
+#    date를 PATH로 부른다. docker로는 `--entrypoint /bin/sh`가 그 재현이다 — 이게 없으면 quay 이미지의
+#    `ENTRYPOINT ["skopeo"]`가 `/bin/sh`를 skopeo 인자로 삼켜 GNU date가 있는 이미지도 거짓 red가 난다
+#    (실측: 게이트가 실 도메인과 다른 방식으로 부르면 증명하는 것이 실 도메인 동작이 아니다, docs/traps-detail.md).
+GNU_DATE_ISO="2026-08-24T05:45:27Z"
+if ! docker run --rm --entrypoint /bin/sh "$IMAGE" -c "date -u -d '$GNU_DATE_ISO' +%s" >/dev/null 2>&1; then
+  fault "이미지의 date가 ISO8601(-d)을 파싱하지 못한다: $IMAGE — gha-liveness-exporter의 run.sh가 GNU date에 의존한다(busybox date는 무성 실패). Dockerfile에 coreutils를 추가하라."
+fi
 
 # $1=타임아웃(초) $2=placement(global|after-subcommand) → 경과 초를 stdout으로
 run_skopeo() {
