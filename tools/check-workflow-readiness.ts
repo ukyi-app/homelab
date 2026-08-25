@@ -28,10 +28,13 @@
 //
 // 종료코드: tools/lib/cli.ts 규약(0=통과 · 1=검증 실패 · 2=사용법). skip(4)은 내지 않는다 — 이 가드의
 // 도메인(워크플로 + 원장)은 레포에 항상 있고, 없으면 그건 skip이 아니라 붕괴다.
+// 열거 바닥값·스캔 신호는 커널(tools/lib/scan-floor.ts)이 한 몸으로 낸다 — 정적 모드는 두 도메인
+// (workflows · declarations)을 순차로, 런타임 모드는 바닥값 없는 accounted 신호 하나를 낸다.
 import { appendFileSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { typedFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
+import { ScanError, parseFloor, reportScanError, scanFloor, scanSignal } from "./lib/scan-floor.ts";
 
 const POLICY_PATH = "policy/workflow-readiness.json";
 const WORKFLOW_DIR = ".github/workflows";
@@ -250,15 +253,19 @@ function declaredJobs(wf: WfDecl | undefined): Record<string, JobDecl> {
 }
 
 // ── 정적 검사 ─────────────────────────────────────────────────────────────────
+// 반환값은 **회계 위반**만이다. 두 도메인(워크플로 열거 · 원장 선언)의 바닥값 실패는 여기 섞이지 않고
+// `ScanError`로 나간다 — 바닥값 실패는 "아무것도 측정하지 않았다"는 뜻이라, 그 뒤에 모일 위반은 0건에
+// 가까운 검사에서 나온 것이고 함께 보고하면 잘못된 그림을 준다. 종료는 콜사이트(CLI 블록)가 소유한다.
 function checkStatic(root: string, minWorkflows: number, minDeclarations: number): string[] {
-  const bad: string[] = [];
   const policy = loadPolicy(root);
   const entries = walkManifests("workflows", root);
-  if (entries.length < minWorkflows) {
-    bad.push(`워크플로 열거 ${entries.length}건 < ${minWorkflows} — 열거 붕괴(이 회계가 vacuous해진다)`);
-    return bad; // 열거가 무너지면 아래 대조는 전부 무의미하다.
-  }
+  // 도메인 1 — 워크플로 열거. 바닥값 + SCAN 신호를 커널이 한 몸으로 처리한다. 붕괴하면 아래 대조는
+  // 전부 돌지 않는다 — 이행 전에는 `bad.push` 후 **조기 반환**으로 같은 성질을 손으로 구현했었다.
+  scanFloor("check-workflow-readiness:workflows", entries.length, minWorkflows, {
+    hint: "이 회계가 vacuous해진다.",
+  });
 
+  const bad: string[] = [];
   const docs = new Map<string, Workflow>();
   for (const e of entries) {
     const name = e.path.slice(`${WORKFLOW_DIR}/`.length);
@@ -269,7 +276,27 @@ function checkStatic(root: string, minWorkflows: number, minDeclarations: number
     }
   }
 
-  let declarations = 0;
+  // 도메인 2 — 원장 선언. **실제로 대조되는 선언**만 센다 = 파싱된 워크플로(`docs`)를 가리키는 항목의
+  // 선언(이행 전과 같은 셈이다 — 파일이 없거나 YAML이 깨진 항목은 아래 정방향 루프가 `continue`하므로
+  // 그 선언은 대조되지 않고, 마커가 그것을 "스캔했다"로 보고하면 hint의 "대조 대상"과 어긋난다).
+  // 이행 전에는 이 수를 정방향 루프 안에서 누적하고 끝에서 `bad.push`만 해, 붕괴한 실행에서도 마커가
+  // **무조건** 나갔다(규약 위반 — 붕괴한 건수를 "검사했다"로 읽게 한다). 커널이 그 비대칭을 흡수한다.
+  const declarations = Object.entries(policy.workflows ?? {})
+    .filter(([name]) => docs.has(name))
+    .reduce((n, [, wf]) => n + Object.keys(declaredJobs(wf)).length, 0);
+  try {
+    scanFloor("check-workflow-readiness:declarations", declarations, minDeclarations, {
+      hint: "원장 붕괴(대조 대상이 사라졌다).",
+    });
+  } catch (e) {
+    // ⚠️ **이미 모인 진단을 먼저 흘린다.** 이 시점의 `bad`는 YAML 파싱 실패뿐이고, 파싱에 실패한
+    //    워크플로의 선언은 위 셈에서 빠지므로 그 진단이 곧 붕괴의 근본원인 후보다. 그대로 죽이면 hint가
+    //    가리키는 바로 그 증거가 사라진다(check-ci-parity의 yq 선례 — 티켓 04 Standards (a)1).
+    //    버려도 되는 것은 바닥값 **뒤에** 모일 위반이지, 앞에서 모인 원인이 아니다.
+    for (const b of bad) console.error(`FAIL: ${b}`);
+    throw e;
+  }
+
   // 역방향 — 탐지된 준비상태 게이트는 **반드시** 원장에 있어야 한다(미선언 = 통과 불가).
   for (const [name, doc] of docs) {
     // 자격 플래그를 내는 job의 출력이 게이트로 쓰이는데 출처를 못 읽으면, 그 게이트는 탐지에서 빠져
@@ -297,7 +324,6 @@ function checkStatic(root: string, minWorkflows: number, minDeclarations: number
     const flags = readinessFlags(doc);
     const decl = declaredJobs(wf);
     const jobs = doc.jobs ?? {};
-    declarations += Object.keys(decl).length;
     if (!Object.keys(decl).length) {
       // 빈 항목은 "선언했다"는 인상만 남기고 아무것도 대조하지 않는다 — 원장이 아니라 장식이다.
       bad.push(`${POLICY_PATH}: '${name}' 항목의 jobs가 비었다(선언 0건 = 대조 0건)`);
@@ -415,13 +441,6 @@ function checkStatic(root: string, minWorkflows: number, minDeclarations: number
     }
   }
 
-  if (declarations < minDeclarations) {
-    bad.push(`원장 선언 ${declarations}건 < ${minDeclarations} — 원장 붕괴(대조 대상이 사라졌다)`);
-  }
-  // ⚠️ 위반 유무와 **무관하게** 낸다. `if (!bad.length)` 안에 두면 위반 실행에서 마커가 사라져
-  //    "마커 부재 = 미실행" 해석이 깨진다 — 열거는 정상이었고 위반이 있었을 뿐인데도 '안 돌았다'로 읽힌다.
-  console.log(`SCAN: check-workflow-readiness:workflows: ${entries.length}`);
-  console.log(`SCAN: check-workflow-readiness:declarations: ${declarations}`);
   return bad;
 }
 
@@ -577,7 +596,9 @@ function runRuntime(root: string, name: string): string[] {
   for (const m of failures) console.log(`::error::준비상태 회계(${name}): ${m}`);
   for (const m of warnings) console.log(`::warning::준비상태 회계(${name}): ${m}`);
   for (const m of gaps) console.log(`::warning::준비상태 갭(${name}, 원장 선언됨): ${m}`);
-  console.log(`SCAN: check-workflow-readiness:accounted: ${Object.keys(decl).length}`);
+  // 바닥값 **없는** 신호다 — 회계 대상 수는 원장이 정하고, 그 원장의 바닥값은 정적 모드가 본다.
+  // 위 조기 반환(원장 미선언·페이로드 부재)에서는 나가지 않는다: 도메인을 평가한 실행이 아니다.
+  scanSignal("check-workflow-readiness:accounted", Object.keys(decl).length);
 
   // 전문(job summary·run 로그) — 원장의 근거를 그대로 읽을 수 있어야 판단이 된다.
   const full = [
@@ -610,15 +631,6 @@ function runRuntime(root: string, name: string): string[] {
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
-function positiveInt(raw: string | undefined, flag: string): number {
-  // `Number("")===0`이라 빈 값이 바닥값을 조용히 끄는 자리다(같은 클래스의 실측 버그가 있었다).
-  if (raw === undefined || raw.trim() === "" || !/^\d+$/.test(raw.trim())) {
-    console.error(`${flag}는 음이 아닌 정수여야 한다(받은 값: '${raw ?? ""}')`);
-    process.exit(2);
-  }
-  return Number(raw.trim());
-}
-
 if (import.meta.main) {
   let flags;
   try {
@@ -634,16 +646,24 @@ if (import.meta.main) {
   const root = flags.str("--repo-root", ".")!;
   const workflow = flags.str("--workflow");
 
+  // 바닥값 raw 입력 판정은 커널(`parseFloor`)이 소유한다 — 이 자리에 있던 `positiveInt`는 복제 2벌
+  // (다른 하나는 `check-image-ownership`, 티켓 02가 걷음) 중 마지막 사본이었다(본문 동일, 주석 한 줄 차이).
+  // 정적 모드에서만 파싱한다(이행 전과 같다 — 삼항의 지연 평가가 그 조건이다).
+  // ⚠️ 선례 5곳과 달리 `parseFloor`를 별도 `try`로 빼지 않는다: 파싱이 모드 조건부라 별도 블록은
+  //    런타임 모드용 기본값을 요구하고, 아래 catch는 어차피 `checkStatic`의 두 계층을 갈라야 한다.
   let bad: string[];
   try {
     bad = workflow
       ? runRuntime(root, workflow)
       : checkStatic(
           root,
-          positiveInt(flags.str("--min-workflows", "20"), "--min-workflows"),
-          positiveInt(flags.str("--min-declarations", "8"), "--min-declarations"),
+          parseFloor(flags.str("--min-workflows", "20"), "--min-workflows"),
+          parseFloor(flags.str("--min-declarations", "8"), "--min-declarations"),
         );
   } catch (e) {
+    // 커널의 판정은 권고 코드를 싣고 온다(바닥값 붕괴 1 · 임계값이 수가 아님 2). 그 밖의 예외(원장 부재·
+    // 형식 오류)는 검증 실패(1)다 — 한 catch에 두 계층이 오므로 먼저 가른다.
+    if (e instanceof ScanError) process.exit(reportScanError(e, "FAIL:"));
     console.error(`FAIL: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
   }
