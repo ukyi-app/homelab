@@ -270,8 +270,14 @@ RPO_NOTE="" # 대기가 타임아웃했으면 최종 보고 본문에 실린다
 # ⚠️ **타임아웃을 건다.** 이 헬퍼는 이제 프로덕션 primary에 **쓰기**도 한다 — 무타임아웃이면
 #    테이블 락이나 반쯤 죽은 API에서 fail-closed가 아니라 **무한 대기**로 끝나고, 그건
 #    activeDeadlineSeconds 초과 → SIGKILL → 고아라는 M17의 생성 경로 그 자체다(이 파일 상단 참조).
+# ⚠️ **`kubectl --request-timeout`을 쓰면 안 된다** — kubectl v1.36.x가 그 플래그와 in-cluster REST
+#    config 로딩을 상호작용시켜 **config를 통째로 버리고 localhost:8080으로 폴백**한다(2026-08-24 실측:
+#    `--request-timeout=30s`·`=1m` 둘 다 재현, 플래그 없으면 정상). pg-tools 재빌드로 kubectl이
+#    v1.36.3으로 올라가며 매 drill이 RPO 마커 단계에서 결정적으로 죽었다(8/22·8/25 재현). 값 무관이라
+#    시간만 조정해선 못 고친다. ⇒ 타임아웃은 kubectl 플래그가 아니라 `timeout` 코어유틸로 exec 전체를
+#    감싸 건다(무한 대기 방지 요구는 그대로 충족). psql 내부 statement/lock_timeout은 DB 레벨 보호로 유지.
 _live_psql() {
-  kubectl --request-timeout=30s -n "$NS" exec "${LIVE_CLUSTER}-1" -c postgres -- \
+  timeout 35 kubectl -n "$NS" exec "${LIVE_CLUSTER}-1" -c postgres -- \
     env PGOPTIONS='-c statement_timeout=15s -c lock_timeout=5s' psql -X -v ON_ERROR_STOP=1 -U postgres "$@"
 }
 

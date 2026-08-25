@@ -85,3 +85,17 @@ sh=platform/cnpg/prod/restore-drill-script.sh
     printf '%s' "$mem" | grep -qv '^null$'
   done
 }
+
+@test "live psql helper does not use kubectl --request-timeout (v1.36.x breaks in-cluster config)" {
+  # ★ 회귀 가드(2026-08-24 진단). kubectl v1.36.x는 `--request-timeout`과 in-cluster REST config
+  #   로딩을 상호작용시켜 config를 버리고 localhost:8080으로 폴백한다(값 무관 — 30s·1m 둘 다 재현).
+  #   pg-tools 재빌드로 kubectl이 v1.36.3이 되며 매 drill이 RPO 마커 단계에서 결정적으로 죽었다
+  #   (8/22·8/25 실측, backoffLimit:0이라 1회 실패가 DR 드릴을 주 단위로 방치). 타임아웃은 kubectl
+  #   플래그가 아니라 `timeout` 코어유틸 래퍼로 건다. 이 파일 어디에도 --request-timeout이 없어야 한다.
+  # ⚠️ 주석 제외(`^[^#]*`) — 이 파일과 drill.sh **양쪽 주석이 이 함정 문자열을 인용**하므로(고친 함정을
+  #    설명하는 컨벤션), 전체 줄 grep은 자기 설명에 걸려 거짓 red를 낸다. 실행되는 코드 줄만 본다.
+  run grep -nE '^[^#]*request-timeout' "$sh"
+  [ "$status" -ne 0 ] || { echo "drill.sh 코드가 kubectl --request-timeout을 쓴다 (v1.36.x in-cluster 폴백 버그):"; echo "$output"; false; }
+  # 양성 대조: _live_psql이 timeout 래퍼로 여전히 무한 대기를 막는지(플래그 제거가 보호를 없앤 게 아님)
+  grep -qE 'timeout [0-9]+ kubectl .*exec' "$sh"
+}
