@@ -1639,3 +1639,58 @@ selfHeal과 플립플롭한다.
   소비자와 같은 호출 형태(`skopeo`를 명시)로 맞춰야 한다. cf. 게이트가 실 도메인과 다른 방식으로
   대상을 부르면, 그 게이트가 증명하는 것은 실 도메인의 동작이 아니다.
 > 가드: `tests/gates/image-pin-liveness.sh`, `ops/skopeo/Dockerfile`, `tests/gates/skopeo-timeout-smoke.sh`, `tests/gates/test_pgtools-digest.bats`, `tests/gates/test_ci-build.bats`
+
+### QEMU amd64 leg의 bun 1.4는 RSS 24MB에서 "메모리 고갈"로 죽는다 — Dockerfile을 안 돌리는 CI는 그 6시간을 초록으로 지나친다
+- **병(라이브 실측)**: `ukyi-app/trip-mate-api`의 배포가 2026-08-24부터 멈춰 있었다. 부동 태그
+  `oven/bun:1-alpine`이 상류에서 1.3.x → 1.4.0으로 넘어가자, amd64 leg(`reusable-app-build`가
+  arm64 러너에서 도는 구조라 **amd64만 QEMU를 탄다**)의 `bun install`이 `@prisma/client` postinstall을
+  실행하는 순간 abort했다:
+  ```
+  #14 [linux/amd64 4/6] RUN bun install --frozen-lockfile --production
+  Args: "node" "scripts/postinstall.js"
+  ASSERTION FAILED: MemoryExhaustion: Crash intentionally because memory is exhausted.
+  JSC::LocalAllocator::allocateSlowCase(...)
+  RSS: 24.52 MB | Peak: 71.47 MB          ← 실제로는 메모리가 남아돈다
+  qemu: uncaught target signal 6 (Aborted) - core dumped
+  ```
+  **RSS 24MB에서 "고갈"은 실제 고갈이 아니다** — QEMU 아래서 JSC가 GC 힙 블록의 주소 공간 예약에
+  실패하는 것이고, 80~90ms 만에 죽는다. bun은 그 뒤 재시도에 들어가 release가 **6시간
+  타임아웃**까지 갔다(run 32722287190, `1h34m`~`6h0m` 다수).
+- **digest 대조가 그대로 증거다**: 8/11 성공 빌드(**1m24s**)는 `oven/bun:1-alpine@sha256:5acc90a9…`(1.3.x),
+  8/24 타임아웃 빌드는 같은 태그의 `@sha256:07235578…`(1.4.0)이다. 태그는 그대로인데 내용이 바뀌었다.
+  cf. 상류 릴리스 태그 불변성 항목 — 거기선 옛 매니페스트가 **사라져** red가 됐고, 여기선 태그가
+  **조용히 다른 것을 가리켜** 무한 재시도가 됐다. 둘 다 부동 태그의 같은 뿌리다.
+- ⚠️ **`ci.yml`이 초록인 것은 아무것도 증명하지 않는다.** trip-mate의 CI는 ubuntu-latest에서 bun을
+  직접 설치해 lint·fmt·typecheck·test·openapi-drift를 돌린다 — **Dockerfile을 한 줄도 실행하지 않는다.**
+  그래서 베이스 이미지·멀티아치·설치 스크립트에서 나는 고장은 원리적으로 못 본다. 게이트는 머지 후,
+  그것도 '이미 배포되는 중'인 release에서 처음 울렸고, 그 사이 의존성 PR 10건이 초록으로 머지됐다.
+  page 레포엔 같은 성격의 `pr.yaml`(reusable을 `push:false`로 호출)이 있어 이 갭이 없었다 — 실제로
+  같은 bun 1.4.0 범프가 page에선 **PR 단계에서 red**로 잡혔다. 같은 조직·같은 reusable인데 한쪽만
+  6시간을 태운 차이가 그 게이트 하나다.
+- ⚠️ **JSC 옵션으로는 못 막는다(실측).** 주소 공간 예약 자체가 실패하는 것이라 튜닝 대상이 아니다:
+
+  | 시도 | 결과 |
+  |---|---|
+  | `BUN_JSC_useJIT=0` | 같은 자리에서 crash(JIT이 아니라 GC 힙이다) |
+  | `BUN_JSC_forceRAMSize=2GiB` | 같은 자리에서 crash |
+
+  참고로 `BUN_JSC_useGigacage`는 **존재하지 않는 옵션**이다(bun이 `invalid JSC environment variable`로 거부).
+- ⇒ **처방: 에뮬레이션을 타는 자리를 없앤다. 어느 쪽인지는 그 스테이지 산출물이 아키텍처에 묶이는지로 갈린다.**
+  - **산출물이 아키텍처 독립이면 `FROM --platform=$BUILDPLATFORM`** — 정적 자산 빌드가 여기다.
+    `ukyi-app/page`의 web 스테이지(`tsc --noEmit && vite build` → `dist/index.html`)를 이렇게 고정하니
+    호스트(arm64 네이티브)에서 한 번만 돌고 양쪽 leg가 그 결과를 복사한다. 통과했을 뿐 아니라
+    **1m45s → 36초**로 빨라졌다(에뮬레이션 제거의 부수 효과). 선례: `ukyi-app/files`가 rust-lld
+    크로스컴파일로 같은 회피를 한다.
+  - **node_modules처럼 런타임 아키텍처에 묶이면 못 옮긴다 → 죽는 스크립트를 끈다.**
+    trip-mate는 `bun install --frozen-lockfile --production --ignore-scripts`로 복구했다. 그 prod
+    트리에서 설치 스크립트를 가진 패키지는 `@prisma/client`·`better-sqlite3`·`esbuild` 셋뿐이고
+    **전부 better-auth의 optional peer로 딸려온 것이라 소스 참조가 0**이다 — 건너뛰어도 설치되는
+    패키지 수는 그대로다(**134/134 실측**). ⚠️ 이 조건을 확인하지 않고 `--ignore-scripts`를 붙이면
+    필요한 postinstall이 조용히 누락된다. 붙이기 전에 `--ignore-scripts` 유무로 트리를 실제로 비교하라.
+  - 복구 결과: trip-mate release **6시간 타임아웃 → 56초**, page release **1m45s → 1m7s**.
+- ⇒ **처방(블라스트 반경): `reusable-app-build`에 `timeout-minutes`를 건다.** 정상 빌드는 1~2분인데
+  기본값은 platform max(6시간)라, 이번처럼 크래시-재시도 루프에 빠지면 러너를 6시간씩 잡고 그동안
+  아무 신호도 주지 않는다. 상한을 걸면 같은 일이 재발해도 **분 단위로 red가 된다**(같은 이유로
+  `contract-drift.yaml`이 이미 `timeout-minutes: 5`를 쓴다). 상한은 원인을 고치지 않는다 — 6시간을
+  N분으로 바꿔 **드러나게** 할 뿐이다.
+> 가드: `.github/workflows/reusable-app-build.yaml`

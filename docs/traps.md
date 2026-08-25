@@ -10,7 +10,8 @@
   3. 이 원장의 각 행이 가리키는 가드가 **SSOT의 어느 `> 가드:` 줄에든 있는지**(원장 → SSOT).
      ⚠️ 1·2는 이 갭을 **원리적으로 못 본다** — 1은 파일 실재만, 2는 반대 방향만 본다. 실측 2026-08-21
      도입 시점에 **9행**이 SSOT에도 AGENTS 인덱스에도 없이 enforced를 주장하고 있었다.
-- **where**: `gate`=ci.yaml job `gate`가 수집 · `iac`=iac/tf-reconcile · `local`=make/pre-commit 로컬.
+- **where**: `gate`=ci.yaml job `gate`가 수집 · `iac`=iac/tf-reconcile · `local`=make/pre-commit 로컬 ·
+  `app-build`=앱 레포의 pr/release가 호출하는 reusable(이 레포엔 caller가 없어 `gate`가 수집하지 않는다).
   방향 3의 면제는 여기에 **사유와 함께 명시**한다(하드코딩 목록이 아니라 마커라 새 행에도 같은 규칙이 적용된다):
   - `SSOT없음(불변식)` — 함정 서사가 아니라 불변식·규약을 지키는 가드다. traps-detail에 들어갈 대상이 아니다.
   - `SSOT없음(승격대상)` — 함정인데 traps-detail 서사가 아직 없다. **부채를 침묵시키지 않고 계상한다.**
@@ -92,3 +93,4 @@
 | SKIP(exit 4)을 모르는 대조는 gitignored 자산이 있는 로컬에서만 초록이다 — 로스터 대조가 그 rc를 실패로 읽어 로컬 `make ci` rc=0인데 PR gate만 FAILURE였다(SKIP은 양쪽 대칭 제외 + 상한 필요) | gate | `tests/gates/test_scan-floor.bats`, `scripts/verify-credential-inventory.sh` |
 | `findings="$(awk … || true)"` — `|| true`가 awk fatal rc까지 삼켜 검출기가 죽어도 "0곳 OK" rc=0을 낸다(가드 본체 fail-open). 처방 세 겹: awk rc 포착 + 인자 사전 검증 + READFILES 대조 | gate | `scripts/check-host-ports.sh`, `scripts/check-locale-collation.sh`, `scripts/check-bats-style.sh`, `tests/gates/test_host-ports.bats`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_bats-style.bats` |
 | 상류 레지스트리의 릴리스 태그가 불변이 아니다 — 재푸시가 옛 매니페스트를 GC해(quay skopeo 6일 3회) image-pin-liveness가 브랜치와 무관하게 모든 PR gate를 red로 만든다. GC 안 하는 레지스트리(Docker Hub alpine)의 자기 소유 이미지로 옮긴다 | gate | `tests/gates/image-pin-liveness.sh`, `ops/skopeo/Dockerfile`, `tests/gates/skopeo-timeout-smoke.sh`, `tests/gates/test_pgtools-digest.bats`, `tests/gates/test_ci-build.bats` |
+| QEMU amd64 leg의 bun 1.4는 RSS 24MB에서 "메모리 고갈"로 죽는다(JSC 주소공간 예약 실패 — BUN_JSC_useJIT=0·forceRAMSize 무효) — 크래시-재시도 루프가 release를 6시간 태우고, Dockerfile을 안 돌리는 앱 CI는 그동안 초록이다. timeout-minutes로 분 단위에 드러나게 한다 | app-build | `.github/workflows/reusable-app-build.yaml` |
