@@ -87,6 +87,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { parse, parseAllDocuments } from "yaml";
 import { parseFlags } from "./lib/cli.ts";
 import { RULES_ROOT, walkManifests } from "./lib/repo-walk.ts";
+import { reportScanError, scanFloor } from "./lib/scan-floor.ts";
 
 let f: Record<string, string | boolean>;
 try { f = parseFlags(process.argv.slice(2), { value: ["--repo-root", "--registry", "--supply-policy"], bool: [] }); }
@@ -253,6 +254,7 @@ const DEFAULT_REGISTRY: PushEntry[] = [
 ];
 
 function fatal(msg: string): never { console.error(`FAIL: ${msg}`); process.exit(1); }
+
 
 // ⚠️ 정책 파일은 **필수 읽기**다. 옛 `existsSync(p) ? … : []` 폴백은 파일 부재/이동/오타 경로를
 // "항목 0개"로 위장했다. denyMetrics가 비면 모드 A의 `denyMetrics.find(...)`가 상시 미스라
@@ -657,8 +659,16 @@ function requiredRollup(e: SupplyEntry, flipped: boolean): string {
   if (e.supply === "external" && e.decreasing === "impossible") return flipped ? "min_over_time" : "max_over_time";
   return flipped ? "min_over_time" : "last_over_time";
 }
-if (denyMetrics.length < MIN_DENY) {
-  fatal(`denylist 항목 ${denyMetrics.length}건 < ${MIN_DENY}(${DENYLIST}) — 열거 붕괴 의심(모드 A가 통째로 무발화한다)`);
+// ⚠️ 바닥값과 신호를 **한 몸으로** 여기서 처리한다. 위치는 모드 A보다 앞이어야 한다 —
+// denyMetrics가 0건이면 모드 A의 find가 상시 미스라 통째로 무발화하므로 검사 전에 죽어야 한다.
+// 신호를 아래 라벨들과 함께 두면 이 지점과 그 사이에 종료 경로가 27개 끼어(실측), 그중 어느 것에
+// 걸린 실행은 denylist 도메인을 **평가하고도** 마커를 못 낸다 — 커널이 없애려는 그 형태다.
+try {
+  scanFloor("check-alert-rules:denylist", denyMetrics.length, MIN_DENY, {
+    hint: `${DENYLIST} — 모드 A가 통째로 무발화한다.`,
+  });
+} catch (e) {
+  process.exit(reportScanError(e, "FAIL:"));
 }
 
 // ── 레지스트리 로드 + 완전성 가드(모드 C 전처리) ──
@@ -980,35 +990,42 @@ for (const { path: rel, text, docs } of ruleEntries) {
   }
 }
 
-// SCAN 신호(scripts/lib/scan-floor.sh 규약) — 실행 관측용 균일 마커. **위반 검사보다 앞**이다:
-// 규약상 도메인을 평가한 실행은 위반 여부와 무관하게 신호를 낸다(면제는 바닥값 실패 경로뿐).
-// 라벨 = 바닥값이 걸린 열거 도메인 하나 — 여긴 룰(MIN_SCAN)과 denylist(MIN_DENY) 둘이다.
-console.log(`SCAN: check-alert-rules:rules: ${ruleCount}`);
-console.log(`SCAN: check-alert-rules:denylist: ${denyMetrics.length}`);
-// 모드 D는 **두 축**의 신호를 낸다. 원장 크기(supply)는 큐레이션이 사라지는 것을 잡고,
-// 판정 참조 수(supply-refs)는 **강제 루프가 조용히 죽는 것**을 잡는다 — 전자만 있으면
-// 열거가 0건이 돼도 원장은 그대로라 초록이 된다(이 레포가 반복해 밟은 그 비대칭).
-console.log(`SCAN: check-alert-rules:supply: ${SUPPLY.length}`);
-console.log(`SCAN: check-alert-rules:supply-refs: ${supplyRefs}`);
+// SCAN 신호 — 커널(tools/lib/scan-floor.ts)이 바닥값과 **한 몸으로** 처리한다.
+// 이행 전에는 마커 4개를 여기서 몰아 내고 바닥값을 아래에서 봤다. 그래서 룰 추출이 붕괴해도
+// 마커가 먼저 나가, 소비자가 "붕괴했다"를 "n건 검사했다"로 **정반대로** 읽었다 — 바로 위 주석이
+// 규약("면제는 바닥값 실패 경로뿐")을 정확히 적어 두고도 코드가 그 반대였다.
+//
+// ⚠️ 도메인별로 순차 호출한다. 첫 도메인이 붕괴하면 뒤 도메인의 신호는 나가지 않는다 —
+//    셸 adapter가 같은 동작이고(check-gh-secret-coverage가 두 도메인을 순차로 부른다),
+//    그 실행은 뒤 도메인을 실제로 평가하지 않았으므로 신호를 낼 근거가 없다.
+try {
+  scanFloor("check-alert-rules:rules", ruleCount, MIN_SCAN, {
+    hint: `룰 추출 회귀 의심(${RULES_DIR} 재배치 또는 ConfigMap .data 키 변경?).`,
+  });
+  // denylist 라벨은 위에서 바닥값과 함께 이미 냈다(모드 A 앞이어야 하는 도메인이다).
+  // 모드 D는 **두 축**의 신호를 낸다. 원장 크기(supply)는 큐레이션이 사라지는 것을 잡고,
+  // 판정 참조 수(supply-refs)는 **강제 루프가 조용히 죽는 것**을 잡는다 — 전자만 있으면
+  // 열거가 0건이 돼도 원장은 그대로라 초록이 된다(이 레포가 반복해 밟은 그 비대칭).
+  // ⚠️ 픽스처 주입 모드는 바닥값을 **0으로** 표현한다 — 0은 정당한 바닥값이라(커널 parseFloor 규약)
+  //    분기 없이 면제가 되고, 바닥값·신호 일체와 라벨 집합 불변이 함께 유지된다.
+  // ⚠️ 이 두 바닥값의 붕괴 경로는 `--supply-policy` **없이** 픽스처 루트의 실 경로에 원장을 두면
+  //    재현된다(주입이 없으니 면제도 없다). 한때 이 자리에 "주입이 곧 면제라 재현 불가"라고
+  //    적었으나 거짓이었고, 적대 검토가 우회로를 실증했다 — 증인은
+  //    `tests/test_alert_rules.bats`의 `a supply-ledger collapse …` / `a dead enforcement loop …`다.
+  //    **커버리지 공백이라고 단정하기 전에 우회로부터 찾아야 한다.**
+  scanFloor("check-alert-rules:supply", SUPPLY.length, SUPPLY_INJECTED ? 0 : MIN_SUPPLY, {
+    hint: `${SUPPLY_POLICY} 큐레이션이 사라졌다.`,
+  });
+  scanFloor("check-alert-rules:supply-refs", supplyRefs, SUPPLY_INJECTED ? 0 : MIN_SUPPLY_REFS, {
+    hint: "**모드 D**가 판정한 참조가 사라졌다 — 원장은 그대로인데 강제 루프가 죽었다(열거 범위 회귀 의심).",
+  });
+} catch (e) {
+  process.exit(reportScanError(e, "FAIL:"));
+}
 if (allowErrors.length) {
   console.log(`FAIL: ${ALLOWLIST} 항목에 사유 주석이 없다 — 무근거 면제는 금지:`);
   for (const e of allowErrors) console.log("  " + e);
   process.exit(1);
-}
-// scan-floor: 룰 추출이 붕괴하면 아무것도 검사 안 하고 GREEN — fail-loud.
-if (ruleCount < MIN_SCAN) {
-  console.error(`FAIL: 스캔 룰 ${ruleCount}건 < ${MIN_SCAN} — 룰 추출 회귀 의심(${RULES_DIR} 재배치 또는 ConfigMap .data 키 변경?)`);
-  process.exit(1);
-}
-if (!SUPPLY_INJECTED) {
-  if (SUPPLY.length < MIN_SUPPLY) {
-    console.error(`FAIL: ${SUPPLY_POLICY} 항목 ${SUPPLY.length}건 < ${MIN_SUPPLY} — 큐레이션이 사라졌다(0건 검사 후 초록이 되는 자리)`);
-    process.exit(1);
-  }
-  if (supplyRefs < MIN_SUPPLY_REFS) {
-    console.error(`FAIL: 모드 D가 판정한 참조 ${supplyRefs}건 < ${MIN_SUPPLY_REFS} — 원장은 그대로인데 **강제 루프가 죽었다**(열거 범위 회귀 의심)`);
-    process.exit(1);
-  }
 }
 // 완전성 가드: 미등록 생산자/메트릭은 모드 C를 **조용히 통과**한다(fail-open) → 여기서 막는다.
 if (producerViol.length) {

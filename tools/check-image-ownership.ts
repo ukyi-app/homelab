@@ -26,17 +26,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { typedFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
-import { ScanError, parseFloor, scanFloor } from "./lib/scan-floor.ts";
+import { parseFloor, reportScanError, scanFloor } from "./lib/scan-floor.ts";
 
-// 커널의 판정 실패를 이 도구의 종료로 번역한다 — `tools/lib/`는 종료를 소유하지 않는다
-// (`tools/README.md` 커널 규율). 파일당 한 번.
-function dieOnScanError(e: unknown): never {
-  if (e instanceof ScanError) {
-    console.error(`FAIL: ${e.message}`);
-    process.exit(e.exitCode);
-  }
-  throw e;
-}
 
 const POLICY_PATH = "policy/image-ownership.json";
 const RENOVATE_PATH = "renovate.json";
@@ -377,7 +368,7 @@ if (import.meta.main) {
   try {
     minRefs = parseFloor(flags.str("--min-refs", "20"), "--min-refs");
   } catch (e) {
-    dieOnScanError(e);
+    process.exit(reportScanError(e, "FAIL:"));
   }
 
   let res;
@@ -396,7 +387,7 @@ if (import.meta.main) {
       hint: "이 회계가 vacuous해진다.",
     });
   } catch (e) {
-    dieOnScanError(e);
+    process.exit(reportScanError(e, "FAIL:"));
   }
 
   if (flags.bool("--report")) {

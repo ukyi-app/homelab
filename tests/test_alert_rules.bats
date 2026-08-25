@@ -101,6 +101,14 @@ _lint() {   # $1=root — 픽스처를 추적 상태로 만든 뒤 픽스처 레
   echo "$output"
 }
 
+# stdout에 주어진 마커 정규식이 **없어야** 한다. 붕괴 경로의 공통 단언이라 헬퍼로 둔다.
+# ⚠️ `grep -q … && false`로 쓰면 매치 안 될 때 rc=1이라 set -e가 통과 경로를 죽인다.
+_refute_marker() {   # $1=정규식 $2=출력
+  if printf '%s\n' "$2" | grep -qE "$1"; then
+    echo "예상 밖 마커($1):"; printf '%s\n' "$2"; false
+  fi
+}
+
 _run_probe() {   # $1=alert명 $2=expr → run 결과를 호출자가 판정
   tmp="$(mktemp -d)"
   _seed "$tmp" "$1" "$2"
@@ -572,16 +580,6 @@ YAML
 
 # ── 게이트 자체의 fail-closed 성질 ──
 
-@test "alert-rule guard enforces a minimum scan count (extraction collapse = fail-loud)" {
-  tmp="$(mktemp -d)"
-  _seed "$tmp"
-  rm -f "$tmp/platform/victoria-stack/prod/rules/probe.yaml"   # 룰 추출 붕괴 시뮬레이션
-  _lint "$tmp"
-  rm -rf "$tmp"
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -q '스캔 룰'
-}
-
 @test "alert-rule guard honors an allowlist entry that carries a reason" {
   tmp="$(mktemp -d)"
   _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
@@ -637,17 +635,6 @@ YAML
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '정책 파일 읽기 실패'
-}
-
-@test "a denylist that still exists but holds no entries trips the entry floor" {
-  # 필수 읽기는 파일 부재만 잡는다 — 주석만 남는 부분 드리프트는 항목 바닥값이 잡는다.
-  tmp="$(mktemp -d)"
-  _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
-  printf '# 주석만 남은 상태\n' > "$tmp/policy/alert-instance-stability-denylist.txt"
-  _lint "$tmp"
-  rm -rf "$tmp"
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -q 'denylist 항목 0건'
 }
 
 @test "a missing allowlist file is a hard failure too (absence is drift on both lists)" {
@@ -740,4 +727,116 @@ YAML
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '무근거 선언은 금지'
   rm -rf "$tmp"
+}
+
+# ── 스캔 신호 순서 (티켓 03) ───────────────────────────────────────────────────
+# 규약: 바닥값을 **통과한** 실행만 마커를 낸다. 붕괴한 실행의 건수는 "검사했다"가 아니라
+# "붕괴했다"는 뜻이라 같은 마커로 내면 소비자가 정반대로 읽는다.
+# 이행 전 이 파일은 마커 4개를 앞에서 몰아 내고 바닥값을 뒤에서 봤다 — 즉 붕괴해도 마커가 나갔다.
+# 그 자리의 주석은 규약을 **정확히** 적고 있었다("면제는 바닥값 실패 경로뿐").
+
+# 이 테스트가 옛 `enforces a minimum scan count`를 흡수한다 — 같은 붕괴 경로를 돌면서
+# fail-loud뿐 아니라 **마커 부재**까지 단언한다(옛 앵커 `스캔 룰`은 커널 균일 문구로 대체됐다).
+@test "a rule-extraction collapse withholds the rules marker" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  rm -f "$tmp/platform/victoria-stack/prod/rules/probe.yaml"   # 룰 추출 붕괴
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '열거 붕괴'
+  # 도메인 힌트가 살아남아야 한다 — 균일 문구만 남으면 진단 품질이 회귀한다.
+  echo "$output" | grep -q '룰 추출 회귀'
+  _refute_marker '^SCAN: check-alert-rules:rules:' "$output"
+}
+
+# rules가 붕괴하면 **그 뒤 도메인**(supply·supply-refs)의 마커는 나가지 않는다(설계 §4 — 순차 호출).
+# ⚠️ denylist는 **앞** 도메인이다 — 모드 A보다 먼저 평가돼야 해서 바닥값·신호가 위에 있다.
+#    그 실행은 denylist를 실제로 평가했으므로 마커를 내는 것이 옳다. "뒤"의 정의가 요점이다.
+@test "a rule-extraction collapse withholds the later domain markers but keeps the earlier one" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  rm -f "$tmp/platform/victoria-stack/prod/rules/probe.yaml"
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  # 앞 도메인은 평가됐다 — 마커가 나간다.
+  printf '%s\n' "$output" | grep -qE '^SCAN: check-alert-rules:denylist: [0-9]+$'
+  # 뒤 도메인은 평가되지 않았다 — 마커가 없다.
+  _refute_marker '^SCAN: check-alert-rules:(supply|supply-refs):' "$output"
+}
+
+# 이 테스트가 옛 `a denylist that still exists but holds no entries trips the entry floor`를 흡수한다.
+# 필수 읽기는 파일 **부재**만 잡는다 — 주석만 남는 부분 드리프트는 항목 바닥값이 잡고, 그 바닥값은
+# 모드 A보다 **앞**이라야 한다(0건이면 모드 A의 find가 상시 미스라 통째로 무발화한다).
+@test "a denylist collapse trips the entry floor and withholds every marker" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
+  printf '# 주석만 남은 상태\n' > "$tmp/policy/alert-instance-stability-denylist.txt"
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '열거 붕괴'
+  # 도메인 힌트가 살아남아야 한다 — 옛 앵커 `denylist 항목 0건`이 나르던 정보다.
+  echo "$output" | grep -q '모드 A가 통째로 무발화한다'
+  echo "$output" | grep -q 'check-alert-rules:denylist'
+  # denylist는 첫 도메인이다 — 여기서 붕괴하면 어떤 마커도 나가지 않는다.
+  _refute_marker '^SCAN: check-alert-rules:' "$output"
+}
+
+# supply·supply-refs 바닥값의 붕괴 경로. `--supply-policy`를 **주지 않고** 픽스처 루트의
+# 실 경로(policy/alert-supply-monotonicity.json)에 원장을 두면 주입 면제 없이 바닥값이 살아 있다.
+# (한때 이 자리를 "주입이 곧 면제라 재현 불가"라고 적었으나 거짓이었다 — 적대 검토가 우회로를 실증했다.)
+_seed_real_supply() {   # $1=root $2=원장 항목 수
+  local root="$1" n="$2" i body=""
+  mkdir -p "$root/policy"
+  for i in $(seq 1 "$n"); do
+    [ -z "$body" ] || body="${body},"
+    body="${body}{\"metric\":\"fixture_m${i}\",\"supply\":\"external\",\"decreasing\":\"impossible\",\"why\":\"픽스처\"}"
+  done
+  printf '{ "metrics": [%s] }\n' "$body" > "$root/policy/alert-supply-monotonicity.json"
+}
+
+_lint_real_supply() {   # $1=root — supply 원장만 실 경로에서 읽게 한다(주입 면제 없음)
+  _track_fixture "$1"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json"
+  echo "$output"
+}
+
+@test "a supply-ledger collapse trips its floor and withholds that marker" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _seed_real_supply "$tmp" 3            # 3 < MIN_SUPPLY(12)
+  _lint_real_supply "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '열거 붕괴'
+  echo "$output" | grep -q '큐레이션이 사라졌다'
+  _refute_marker '^SCAN: check-alert-rules:supply:' "$output"
+}
+
+@test "a dead enforcement loop trips the supply-refs floor and withholds that marker" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _seed_real_supply "$tmp" 14           # 원장은 통과(14 >= 12), 참조는 0건이라 강제 루프가 죽었다
+  _lint_real_supply "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '열거 붕괴'
+  echo "$output" | grep -q '강제 루프가 죽었다'
+  # 원장 바닥값은 통과했으므로 supply 마커는 나가고, supply-refs만 빠진다.
+  printf '%s\n' "$output" | grep -qE '^SCAN: check-alert-rules:supply: [0-9]+$'
+  _refute_marker '^SCAN: check-alert-rules:supply-refs:' "$output"
+}
+
+# 통과 실행은 라벨 4개를 **전부** 낸다 — 이행이 라벨 집합을 바꾸지 않았다는 증인이다.
+@test "a passing run emits all four domain markers" {
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  for label in rules denylist supply supply-refs; do
+    printf '%s\n' "$output" | grep -qE "^SCAN: check-alert-rules:${label}: [0-9]+$"
+  done
 }

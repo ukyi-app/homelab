@@ -22,19 +22,10 @@
 // 열거는 공유 워커의 `platform-manifests` 스코프가 소유한다(tracked · charts/·벤더 제외).
 
 import { walkManifests } from "./lib/repo-walk.ts";
-import { ScanError, parseFloor, scanFloor } from "./lib/scan-floor.ts";
+import { parseFloor, reportScanError, scanFloor } from "./lib/scan-floor.ts";
 
 const ROOT = process.cwd();
 
-// 커널의 판정 실패를 이 도구의 종료로 번역한다 — `tools/lib/`는 종료를 소유하지 않는다
-// (`tools/README.md` 커널 규율). 아래 walkManifests 열거 실패 처리와 같은 형태다.
-function dieOnScanError(e: unknown): never {
-  if (e instanceof ScanError) {
-    console.error(`::error::disk-caps: ${e.message}`);
-    process.exit(e.exitCode);
-  }
-  throw e;
-}
 
 // 상한 플래그는 **패턴으로 발견**한다. 새 플래그가 생겨도 이름에 `maxDisk`가 들어가면 자동 편입된다.
 // (하드코딩 목록을 두면 그 목록이 곧 다음 드리프트다 — 이 레포가 반복해서 맞은 클래스.)
@@ -50,7 +41,7 @@ let MIN_FLAGS: number;
 try {
   MIN_FLAGS = parseFloor(process.env.DISK_CAP_MIN_FLAGS ?? "2", "DISK_CAP_MIN_FLAGS");
 } catch (e) {
-  dieOnScanError(e);
+  process.exit(reportScanError(e, "::error::disk-caps:"));
 }
 
 // SI(10ⁿ) vs IEC(2ⁿ). 접미사가 `i`를 포함하면 IEC다. 접미사 없으면 바이트.
@@ -137,7 +128,7 @@ try {
     hint: `정규식 드리프트·스코프 변경 의심. 이 상태의 "위반 0건"은 통과가 아니라 무측정이다.`,
   });
 } catch (e) {
-  dieOnScanError(e);
+  process.exit(reportScanError(e, "::error::disk-caps:"));
 }
 
 if (bad.length) {

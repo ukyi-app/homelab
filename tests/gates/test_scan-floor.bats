@@ -305,8 +305,20 @@ KERNEL_TS='const k = await import(process.argv[1] + "/tools/lib/scan-floor.ts");
 # ("process.exit는 전부 콜사이트 소유") · `repo-walk.ts` · `sealed-contract.ts`가 같은 경계를 적었다.
 # 이 커널이 종료를 도로 가져가면 콜사이트가 두 실패를 구별할 수 없고, 단위 표면 테스트도 불가능해진다.
 @test "the TypeScript scan kernel never terminates the process itself" {
-  run grep -nE '^[^/]*process\.exit' "$ROOT/tools/lib/scan-floor.ts"
-  [ "$status" -ne 0 ]
+  # ⚠️ **주석 줄을 먼저 걷어낸다.** `^[^/]*` 는 `//`만 제외하므로 JSDoc의 ` * ` 연속줄이 코드로
+  #    오인된다 — 실측: 커널 독스트링이 콜사이트 관용구 예시로 `process.exit(…)`를 적자 이 증인이
+  #    red가 됐다. 규약은 "커널이 종료를 **부르지** 않는다"이지 "그 단어를 적지 않는다"가 아니다.
+  # ⚠️ `run bash -c "… \$ROOT …"`로 쓰면 안 된다 — ROOT는 export되지 않은 bats 지역 변수라
+  #    새 셸에서 빈 문자열이 되고, grep이 빈 경로를 읽어 0건 → rc=1 → **이 단언이 항상 통과**한다
+  #    (실측: 그 판에서 커널 끝에 process.exit을 넣어도 red가 나지 않았다).
+  code="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$ROOT/tools/lib/scan-floor.ts")"
+  # 커널을 실제로 읽었다는 증거 — 없으면 아래 판정이 자기 자신 vacuous가 된다.
+  [ -n "$code" ]
+  if printf '%s\n' "$code" | grep -q 'process\.exit'; then
+    echo "커널이 종료를 부른다(lib은 종료를 소유하지 않는다):"
+    printf '%s\n' "$code" | grep -n 'process\.exit'
+    false
+  fi
 }
 
 # 실패는 ScanError로 나가고 **권고 종료코드**를 싣는다 — 콜사이트가 두 사고를 구별할 수 있어야 한다

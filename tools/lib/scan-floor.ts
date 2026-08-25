@@ -115,6 +115,26 @@ export function parseFloor(raw: string | undefined, source: string): number {
 }
 
 /**
+ * `ScanError`를 콜사이트의 진단 한 줄로 만든다. **문구는 커널이, 종료는 콜사이트가** 소유한다 —
+ * `tools/README.md` 커널 표제가 "콜사이트가 정책 소유, **단 정책이 콜사이트마다 갈릴 때**"이고,
+ * 여기서 실제로 갈리는 정책은 **진단 접두 하나**뿐이다(대부분 `FAIL:`, check-disk-caps는
+ * GitHub Actions 어노테이션 `::error::disk-caps:`). 나머지는 전부 같으므로 커널이 갖는다 —
+ * `lib/sealed-contract.ts`가 "정책이 갈리지 않으면 에러 문구까지 커널이 갖는다"로 세운 선례다.
+ *
+ * 이것이 없으면 콜사이트마다 `if (e instanceof ScanError) { console.error(…); process.exit(…) }`가
+ * 복제된다(실측: 5벌 중 4벌이 주석까지 바이트 동일했다 — 원장 행 파서 3벌 사례와 같은 형태).
+ *
+ * 콜사이트 관용구는 **한 줄**이다: `catch (e) { process.exit(reportScanError(e, "FAIL:")); }`
+ * — 진단을 내고 권고 코드를 돌려줄 뿐, **종료는 콜사이트가 한다**(lib은 종료를 소유하지 않는다).
+ * `ScanError`가 아니면 되던진다: 커널이 삼키면 다른 결함이 이 자리에서 조용히 사라진다.
+ */
+export function reportScanError(e: unknown, prefix: string): number {
+  if (!(e instanceof ScanError)) throw e;
+  console.error(`${prefix} ${e.message}`);
+  return e.exitCode;
+}
+
+/**
  * 상수로 주입되는 자리(`const MIN_SCAN = 30`)는 parseFloor를 거치지 않으므로, 그 경로를 덮는
  * 안전망이 필요하다. NaN·Infinity·소수·음수가 비교에 들어가면 `<`가 조용히 false가 된다.
  */

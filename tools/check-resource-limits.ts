@@ -10,18 +10,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
-import { ScanError, scanFloor } from "./lib/scan-floor.ts";
+import { reportScanError, scanFloor } from "./lib/scan-floor.ts";
 
-// 커널의 판정 실패를 이 도구의 종료로 번역한다 — `tools/lib/`는 종료를 소유하지 않는다
-// (`tools/README.md` 커널 규율). 파일당 한 번만 둔다: catch 본문을 콜사이트마다 복제하면
-// 그것이 이 pass가 없애려는 형태다.
-function dieOnScanError(e: unknown): never {
-  if (e instanceof ScanError) {
-    console.error(`FAIL: ${e.message}`);
-    process.exit(e.exitCode);
-  }
-  throw e;
-}
 
 let f: Record<string, string | boolean>;
 try { f = parseFlags(process.argv.slice(2), { value: ["--repo-root"], bool: [] }); }
@@ -128,7 +118,7 @@ try {
     hint: "grep 셀렉터 회귀 의심(platform 재배치·kind 들여쓰기?).",
   });
 } catch (e) {
-  dieOnScanError(e);
+  process.exit(reportScanError(e, "FAIL:"));
 }
 if (viol.length) {
   console.log("FAIL: cpu·memory request 또는 memory limit 없는 상주 워크로드 main 컨테이너 — 선언 후 (memory는) 원장 행 동반, 또는 " + ALLOW + "에 이유와 함께 등재:");

@@ -39,7 +39,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { typedFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
-import { ScanError, parseFloor, scanFloor, scanSignal } from "./lib/scan-floor.ts";
+import { parseFloor, reportScanError, scanFloor, scanSignal } from "./lib/scan-floor.ts";
 
 const WORKFLOW_DIR = ".github/workflows";
 const CI_WORKFLOW = `${WORKFLOW_DIR}/ci.yaml`;
@@ -304,15 +304,6 @@ export function collectVenues(root: string, guards: { path: string; text: string
 // ── CLI ───────────────────────────────────────────────────────────────────────
 function fail(msg: string): never { console.error(`FAIL: ${msg}`); process.exit(1); }
 
-// 커널의 판정 실패를 이 도구의 종료로 번역한다 — `tools/lib/`는 종료를 소유하지 않는다.
-// fail()과 달리 **에러가 실어 온 권고 코드**를 쓴다(바닥값 붕괴 1 · 임계값 입력 오류 2).
-function dieOnScanError(e: unknown): never {
-  if (e instanceof ScanError) {
-    console.error(`FAIL: ${e.message}`);
-    process.exit(e.exitCode);
-  }
-  throw e;
-}
 
 if (import.meta.main) {
   let flags;
@@ -334,7 +325,7 @@ if (import.meta.main) {
   try {
     minScan = parseFloor(flags.str("--min-scan", "15"), "--min-scan");
   } catch (e) {
-    dieOnScanError(e);
+    process.exit(reportScanError(e, "FAIL:"));
   }
 
   const guardEntries = walkManifests("guards", root).map((e) => ({ path: e.path, text: e.text }));
@@ -345,7 +336,7 @@ if (import.meta.main) {
       hint: "이 회계가 vacuous해진다.",
     });
   } catch (e) {
-    dieOnScanError(e);
+    process.exit(reportScanError(e, "FAIL:"));
   }
 
   const venues = collectVenues(root, guardEntries);
