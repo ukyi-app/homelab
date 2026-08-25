@@ -38,7 +38,7 @@ exec(sys.argv[2])
 json.dump(d,open(p,'w',encoding='utf-8'),ensure_ascii=False,indent=2)
 " "$1/policy/image-ownership.json" "$2"; }
 
-FIXTURE_ARGS="--min-refs 1"
+FIXTURE_ARGS="--floor refs=1"
 
 # ── 실 레포 (최소 단언) ───────────────────────────────────────────────────────
 
@@ -204,15 +204,15 @@ FIXTURE_ARGS="--min-refs 1"
 # ── 바닥값 ────────────────────────────────────────────────────────────────────
 
 @test "the reference enumeration floor fires when the domain collapses" {
-  run GUARD --repo-root "$ROOT" --min-refs 99999
+  run GUARD --repo-root "$ROOT" --floor refs=99999
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "열거 붕괴"
 }
 
 @test "the floor value must be a non-negative integer (never a silently disabled floor)" {
-  run GUARD --repo-root "$ROOT" --min-refs ""
+  run GUARD --repo-root "$ROOT" --floor refs=
   [ "$status" -eq 2 ]
-  run GUARD --repo-root "$ROOT" --min-refs abc
+  run GUARD --repo-root "$ROOT" --floor refs=abc
   [ "$status" -eq 2 ]
 }
 

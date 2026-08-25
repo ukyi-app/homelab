@@ -22,7 +22,7 @@
 // 열거는 공유 워커의 `platform-manifests` 스코프가 소유한다(tracked · charts/·벤더 제외).
 
 import { walkManifests } from "./lib/repo-walk.ts";
-import { guardMain } from "./lib/scan-floor.ts";
+import { guardMain, takeFloors } from "./lib/scan-floor.ts";
 
 const ROOT = process.cwd();
 
@@ -34,7 +34,17 @@ const CAP_FLAG = /--[A-Za-z.]*maxDisk[A-Za-z]*=\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGT
 const VOL_DECL = /(?:storage|sizeLimit)\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]?i?)\b/g;
 
 // 현재 대상 2건(victorialogs · vmagent). 0이면 정규식/스코프가 붕괴한 것이지 "위반 없음"이 아니다.
-const MIN_FLAGS = Number(process.env.DISK_CAP_MIN_FLAGS ?? "2");
+// 오버라이드는 공용 어휘 `--floor caps=<n>`뿐이다(구 DISK_CAP_MIN_FLAGS env 폐지 — 어휘 통일 d1).
+const MIN_FLAGS = 2;
+let floors: Map<string, number>;
+try {
+  const taken = takeFloors(process.argv.slice(2));
+  if (taken.rest.length) throw new Error(`알 수 없는 인자: ${taken.rest.join(" ")}`);
+  floors = taken.floors;
+} catch (e) {
+  console.error(`${e instanceof Error ? e.message : String(e)}\n사용법: check-disk-caps.ts [--floor caps=<n>]`);
+  process.exit(2);
+}
 
 // SI(10ⁿ) vs IEC(2ⁿ). 접미사가 `i`를 포함하면 IEC다. 접미사 없으면 바이트.
 function toBytes(num: string, unit: string): number | null {
@@ -59,6 +69,7 @@ let fileCount = 0;
 // 클래스). 위반·성공 문구와 **위반의** ::error:: 채널은 이 콜사이트 소유이고, 바닥값·열거 실패
 // 진단은 커널이 stderr `FAIL:`로 낸다(셸 커널과 어휘 통일 — 붕괴 경로의 GH annotation은 의도적 미사용).
 guardMain({
+  floors,
   domains: [{
     scan: "check-disk-caps:caps",
     min: MIN_FLAGS,

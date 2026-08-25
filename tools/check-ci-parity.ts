@@ -33,10 +33,20 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { guardMain } from "./lib/scan-floor.ts";
+import { guardMain, takeFloors } from "./lib/scan-floor.ts";
 import { readLedger } from "./lib/policy-ledger.ts";
 
 const ROOT = process.cwd();
+// 바닥값 오버라이드는 공용 어휘 `--floor check-ci-parity=<n>`뿐이다(어휘 통일 d1).
+let floors: Map<string, number>;
+try {
+  const taken = takeFloors(process.argv.slice(2));
+  if (taken.rest.length) throw new Error(`알 수 없는 인자: ${taken.rest.join(" ")}`);
+  floors = taken.floors;
+} catch (e) {
+  console.error(`${e instanceof Error ? e.message : String(e)}\n사용법: check-ci-parity.ts [--floor check-ci-parity=<n>]`);
+  process.exit(2);
+}
 const CI = ".github/workflows/ci.yaml";
 const LEDGER = "policy/ci-parity.json";
 const GATE_JOB = "gate";
@@ -271,6 +281,7 @@ function reconcile(): string[] {
 // 실행 순서(열거 → floor → SCAN → 검사 → 종료코드)는 guardMain이 구조로 소유한다.
 // 이 가드는 종전에 바닥값만 있고 SCAN이 없던 자리다 — 커널 편입으로 실행 관측 축이 열린다.
 guardMain({
+  floors,
   domains: [{
     scan: "check-ci-parity",
     min: MIN_STEPS,

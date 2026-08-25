@@ -32,7 +32,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { typedFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
-import { guardMain } from "./lib/scan-floor.ts";
+import { guardMain, takeFloors } from "./lib/scan-floor.ts";
 import { readLedger } from "./lib/policy-ledger.ts";
 
 const POLICY_PATH = "policy/workflow-readiness.json";
@@ -587,25 +587,16 @@ function runRuntime(root: string, name: string): string[] {
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
-function positiveInt(raw: string | undefined, flag: string): number {
-  // `Number("")===0`이라 빈 값이 바닥값을 조용히 끄는 자리다(같은 클래스의 실측 버그가 있었다).
-  if (raw === undefined || raw.trim() === "" || !/^\d+$/.test(raw.trim())) {
-    console.error(`${flag}는 음이 아닌 정수여야 한다(받은 값: '${raw ?? ""}')`);
-    process.exit(2);
-  }
-  return Number(raw.trim());
-}
-
 if (import.meta.main) {
   let flags;
+  let floors: Map<string, number>;
   try {
-    flags = typedFlags(process.argv.slice(2), {
-      value: ["--repo-root", "--workflow", "--min-workflows", "--min-declarations"],
-      bool: [],
-    });
+    const taken = takeFloors(process.argv.slice(2));
+    floors = taken.floors;
+    flags = typedFlags(taken.rest, { value: ["--repo-root", "--workflow"], bool: [] });
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
-    console.error("사용법: check-workflow-readiness.ts [--repo-root <path>] [--workflow <file.yaml>] [--min-workflows <n>] [--min-declarations <n>]");
+    console.error("사용법: check-workflow-readiness.ts [--repo-root <path>] [--workflow <file.yaml>] [--floor <도메인>=<n>]");
     process.exit(2);
   }
   const root = flags.str("--repo-root", ".")!;
@@ -633,10 +624,11 @@ if (import.meta.main) {
     const docs = new Map<string, Workflow>();
     guardMain({
       label: "check-workflow-readiness",
+      floors,
       domains: [
         {
           scan: "check-workflow-readiness:workflows",
-          min: positiveInt(flags.str("--min-workflows", "20"), "--min-workflows"),
+          min: 20,
           floorHint: "이 회계가 vacuous해진다",
           enumerate: () => {
             policy = loadWorkflowDecls(root);
@@ -657,7 +649,7 @@ if (import.meta.main) {
         },
         {
           scan: "check-workflow-readiness:declarations",
-          min: positiveInt(flags.str("--min-declarations", "8"), "--min-declarations"),
+          min: 8,
           floorHint: "원장 붕괴 — 대조 대상이 사라졌다",
           // 종전 카운트와 동일 의미론: 워크플로가 실재하는 원장 항목의 선언 job 수 합.
           enumerate: () =>

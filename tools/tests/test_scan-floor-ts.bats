@@ -11,9 +11,11 @@ setup() {
   # 픽스처 가드: 도메인 2개(fx:alpha·fx:beta), 열거/바닥값/위반/방출 정책을 env로 조종한다.
   # ⚠️ heredoc은 비인용(EOF) — $ROOT 확장이 필요하다. TS 본문은 ${} 템플릿 리터럴을 쓰지 않는다.
   cat > "$FX" <<EOF
-import { guardMain } from "$ROOT/tools/lib/scan-floor.ts";
+import { guardMain, takeFloors } from "$ROOT/tools/lib/scan-floor.ts";
+const taken = takeFloors(process.argv.slice(2));
 guardMain({
   label: process.env.FX_LABEL || undefined,
+  floors: taken.floors,
   domains: [
     { scan: "fx:alpha", min: Number(process.env.FX_MIN_A ?? "1"), floorHint: "fixture alpha hint",
       enumerate: () => {
@@ -105,6 +107,79 @@ EOF
   FX_CHECK_THROW=1 FX_LABEL=fx-guard run bun "$FX"
   [ "$status" -eq 1 ]
   echo "$output" | grep -q '^FAIL: fx-guard: 검사 실패'
+}
+
+@test "the floor override vocabulary parses repeated --floor and strips it from argv" {
+  # 어휘 통일(d1): 구 5어휘(env·--min-* 플래그·상수)를 `--floor <도메인>=<n>` 하나로 접는다.
+  # 키는 scan 라벨 전체 또는 마지막 콜론 뒤 접미사 — floorOf가 그 순서로 해소한다.
+  run bun -e '
+    import { takeFloors, floorOf } from "'"$ROOT"'/tools/lib/scan-floor.ts";
+    const { floors, rest } = takeFloors(["--floor", "caps=3", "--repo-root", "x", "--floor", "check-g:refs=7"]);
+    console.log(rest.join(","));
+    console.log(floorOf(floors, "check-disk-caps:caps", 99));
+    console.log(floorOf(floors, "check-g:refs", 99));
+    console.log(floorOf(floors, "check-g:other", 42));
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^--repo-root,x$'
+  echo "$output" | grep -q '^3$'
+  echo "$output" | grep -q '^7$'
+  echo "$output" | grep -q '^42$'
+}
+
+@test "a --floor override raises the effective floor through the kernel (no callsite lookup)" {
+  # floors는 guardMain 인자다 — 콜사이트가 floorOf를 기억해 부르는 구조는 잊힌 도메인만
+  # 조용히 오버라이드 불가가 되는 자리였다(실측: 배선 누락 2가드).
+  run bun "$FX" --floor alpha=7
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'fx:alpha: 스캔 3건 < 7'
+}
+
+@test "an unmatched --floor domain key is a usage error, not a silently disabled floor" {
+  # 오타 키가 조용히 무시되면 바닥값이 소리 없이 꺼진다 — 구 typedFlags 화이트리스트가 잡던
+  # fail-closed의 복원(커널이 선언 도메인과 전건 매칭을 검증한다).
+  run bun "$FX" --floor bogus=9999
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "bogus"
+  echo "$output" | grep -q "조용히 꺼진 바닥값"
+}
+
+@test "a --floor key matching two domains is rejected as ambiguous" {
+  FX2="$BATS_TEST_TMPDIR/g2.ts"
+  cat > "$FX2" <<EOF
+import { guardMain, takeFloors } from "$ROOT/tools/lib/scan-floor.ts";
+const taken = takeFloors(process.argv.slice(2));
+guardMain({
+  floors: taken.floors,
+  domains: [
+    { scan: "fx:dup", min: 1, enumerate: () => 3 },
+    { scan: "gx:dup", min: 1, enumerate: () => 3 },
+  ],
+  output: "stdout",
+  check: () => [],
+  report: () => {},
+  ok: () => { console.log("ok"); },
+});
+EOF
+  run bun "$FX2" --floor dup=5
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q '전체 라벨로 지정하라'
+  run bun "$FX2" --floor fx:dup=5
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'fx:dup: 스캔 3건 < 5'
+}
+
+@test "a malformed --floor value fails loud (empty and non-numeric are both rejected)" {
+  run bun -e '
+    import { takeFloors } from "'"$ROOT"'/tools/lib/scan-floor.ts";
+    try { takeFloors(["--floor", "caps="]); } catch (e) { console.error("E1 " + (e as Error).message); }
+    try { takeFloors(["--floor", "abc"]); } catch (e) { console.error("E2 " + (e as Error).message); }
+    try { takeFloors(["--floor"]); } catch (e) { console.error("E3 " + (e as Error).message); }
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^E1 .*음이 아닌 정수'
+  echo "$output" | grep -q '^E2 '
+  echo "$output" | grep -q '^E3 '
 }
 
 @test "output:none keeps stdout free of markers while verdict semantics stay intact" {

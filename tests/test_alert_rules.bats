@@ -126,7 +126,9 @@ _seed_frozen_fixture() {   # $1=root $2=픽스처 경로
   echo "$output"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q '모드 A/B/C/D 위반 0'   # 네 모드 전부 실행됐다는 증거(모드 침묵 스킵 차단)
-  # 모드 D의 두 축이 **실제로** 관측됐는가 — 원장 크기와 판정 참조 수는 다른 축이다.
+  # 도메인 4개 = 마커 4개(일괄 방출) — 어느 하나가 빠지면 그 축의 실행 관측이 죽은 것이다.
+  echo "$output" | grep -qE '^SCAN: check-alert-rules:rules: [0-9]+$'
+  echo "$output" | grep -qE '^SCAN: check-alert-rules:denylist: [0-9]+$'
   echo "$output" | grep -qE '^SCAN: check-alert-rules:supply: [0-9]+$'
   echo "$output" | grep -qE '^SCAN: check-alert-rules:supply-refs: [0-9]+$'
 }
@@ -581,7 +583,9 @@ YAML
   _lint "$tmp"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q '스캔 룰'
+  # 커널(guardMain) floor 진단 — 도메인 라벨이 곧 어느 축이 무너졌는지 말한다.
+  echo "$output" | grep -q 'check-alert-rules:rules'
+  echo "$output" | grep -q '열거 붕괴'
   # scan-floor 규약: 바닥값 실패 실행은 SCAN 면제 — 열거 붕괴 실행이 마커를 내고 죽으면
   # 실행 관측이 그 실행을 "정상 실행됨"으로 오독한다(마커가 바닥값 판정보다 앞이던 버그의 회귀 앵커).
   out="$output"
@@ -654,7 +658,7 @@ YAML
   _lint "$tmp"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q 'denylist 항목 0건'
+  echo "$output" | grep -q 'check-alert-rules:denylist: 스캔 0건'
 }
 
 @test "a missing allowlist file is a hard failure too (absence is drift on both lists)" {

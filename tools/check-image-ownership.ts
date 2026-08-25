@@ -26,7 +26,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { typedFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
-import { guardMain } from "./lib/scan-floor.ts";
+import { guardMain, takeFloors } from "./lib/scan-floor.ts";
 import { readLedger } from "./lib/policy-ledger.ts";
 
 const POLICY_PATH = "policy/image-ownership.json";
@@ -242,13 +242,6 @@ export function bespokeFiles(root: string): Set<string> {
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
-function positiveInt(raw: string | undefined, flag: string): number {
-  if (raw === undefined || raw.trim() === "" || !/^\d+$/.test(raw.trim())) {
-    console.error(`${flag}는 음이 아닌 정수여야 한다(받은 값: '${raw ?? ""}')`);
-    process.exit(2);
-  }
-  return Number(raw.trim());
-}
 
 export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<string, Owner> } {
   const bad: string[] = [];
@@ -368,23 +361,26 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
 
 if (import.meta.main) {
   let flags;
+  let floors: Map<string, number>;
   try {
-    flags = typedFlags(process.argv.slice(2), { value: ["--repo-root", "--min-refs"], bool: ["--report"] });
+    const taken = takeFloors(process.argv.slice(2));
+    floors = taken.floors;
+    flags = typedFlags(taken.rest, { value: ["--repo-root"], bool: ["--report"] });
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
-    console.error("사용법: check-image-ownership.ts [--repo-root <path>] [--min-refs <n>] [--report]");
+    console.error("사용법: check-image-ownership.ts [--repo-root <path>] [--floor refs=<n>] [--report]");
     process.exit(2);
   }
   const root = flags.str("--repo-root", ".")!;
-  const minRefs = positiveInt(flags.str("--min-refs", "20"), "--min-refs");
 
   // 실행 순서(열거 → floor → SCAN → 검사 → 종료코드)는 guardMain이 구조로 소유한다 —
   // 원장 로딩 실패(readLedger throw)와 renovate.json 읽기 실패는 열거 실패로 접혀 마커 없이 죽는다.
   let res!: ReturnType<typeof audit>;
   guardMain({
+    floors,
     domains: [{
       scan: "check-image-ownership:refs",
-      min: minRefs,
+      min: 20,
       floorHint: "이 회계가 vacuous해진다",
       enumerate: () => { res = audit(root); return res.refs.length; },
     }],

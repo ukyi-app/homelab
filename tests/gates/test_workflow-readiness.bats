@@ -257,7 +257,7 @@ exec(sys.argv[2])
 json.dump(d,open(p,'w',encoding='utf-8'),ensure_ascii=False,indent=2)
 " "$1/policy/workflow-readiness.json" "$2"; }
 
-FIXTURE_ARGS="--min-workflows 1 --min-declarations 1"
+FIXTURE_ARGS="--floor workflows=1 --floor declarations=1"
 
 # ── 실 레포 (딱 두 가지만) ────────────────────────────────────────────────────
 
@@ -475,15 +475,15 @@ JSON
 # ── 정적: 바닥값 자신 ─────────────────────────────────────────────────────────
 
 @test "the workflow enumeration floor fires when the domain collapses" {
-  run GUARD --repo-root "$ROOT" --min-workflows 99999
+  run GUARD --repo-root "$ROOT" --floor workflows=99999
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "열거 붕괴"
 }
 
 @test "the floor values must be non-negative integers (never a silently disabled floor)" {
-  run GUARD --repo-root "$ROOT" --min-workflows ""
+  run GUARD --repo-root "$ROOT" --floor workflows=
   [ "$status" -eq 2 ]
-  run GUARD --repo-root "$ROOT" --min-declarations abc
+  run GUARD --repo-root "$ROOT" --floor declarations=abc
   [ "$status" -eq 2 ]
 }
 

@@ -8,11 +8,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
-import { guardMain } from "./lib/scan-floor.ts";
+import { guardMain, takeFloors } from "./lib/scan-floor.ts";
 
 let f: Record<string, string | boolean>;
-try { f = parseFlags(process.argv.slice(2), { value: ["--repo-root"], bool: [] }); }
-catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root`); process.exit(2); }
+let floors: Map<string, number>;
+try {
+  const taken = takeFloors(process.argv.slice(2));
+  floors = taken.floors;
+  f = parseFlags(taken.rest, { value: ["--repo-root"], bool: [] });
+} catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root · --floor check-resource-limits=<n>`); process.exit(2); }
 const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string) : ".";
 
 const KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler", "Cluster"]);
@@ -76,6 +80,7 @@ function checkBlock(
 // 실행 순서(전 도메인 열거 → 전 floor 판정 → SCAN 일괄 방출 → 검사 → 종료코드)는 guardMain이
 // 구조로 소유한다 — 콜사이트가 순서를 손으로 맞추던 시절의 드리프트 클래스가 표현 불가능해진다.
 guardMain({
+  floors,
   domains: [{
     scan: "check-resource-limits",
     min: MIN_SCAN,

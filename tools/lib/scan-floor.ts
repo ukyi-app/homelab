@@ -18,11 +18,38 @@ export type ScanDomain = {
   floorHint?: string;       // 붕괴의 그럴듯한 원인 진단 꼬리 — 콜사이트 소유
 };
 
+// 바닥값 오버라이드 어휘: `--floor <도메인>=<n>`(반복 가능). 구 개별 어휘(env·--min-* 플래그)를
+// 이 하나로 접는다 — 소비자 목록은 여기 적지 않는다(손 관리 로스터 금지: guardMain 콜사이트가
+// SSOT다, `grep -l takeFloors tools/*.ts`로 세라). 키는 도메인 scan 라벨 전체 또는 마지막 콜론
+// 뒤 접미사. 형식 위반은 throw — 콜사이트가 사용법 exit(2)로 접는다(cli.ts 규약). 기본값(min)은
+// 콜사이트 상수가 소유하고, 키↔도메인 매칭 검증은 guardMain이 한다(오타 키 = 조용히 꺼진
+// 바닥값이 되므로 fail-closed).
+export function takeFloors(argv: string[]): { floors: Map<string, number>; rest: string[] } {
+  const floors = new Map<string, number>();
+  const rest: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== "--floor") { rest.push(argv[i]!); continue; }
+    const spec = argv[++i];
+    const m = /^([a-z0-9:-]+)=(\d+)$/.exec(spec ?? "");
+    if (!m) throw new Error(`--floor 형식은 <도메인>=<n>이다 — n은 음이 아닌 정수(받은 값: '${spec ?? ""}')`);
+    floors.set(m[1]!, Number(m[2]!));
+  }
+  return { floors, rest };
+}
+
+export function floorOf(floors: Map<string, number>, scan: string, dflt: number): number {
+  return floors.get(scan) ?? floors.get(scan.split(":").pop()!) ?? dflt;
+}
+
 export function guardMain(opts: {
   // 가드 식별자 — 도메인 라벨과 별개다("라벨 = 열거 도메인 하나" 규약상 도메인 라벨을 검사
   // 실패 같은 비-도메인 진단에 참칭하면 안 된다). 다중 도메인 가드는 지정하라.
   label?: string;
   domains: ScanDomain[];
+  // takeFloors 산출 — 있으면 커널이 유효 min을 해소한다(floorOf). 키는 선언 도메인에 **전건
+  // 매칭**돼야 한다: 오타·타 가드 키가 조용히 무시되면 바닥값이 소리 없이 꺼진다(구 typedFlags
+  // 화이트리스트가 잡던 fail-closed의 복원). 미매칭·모호(2개 이상 매칭)는 사용법 exit(2)다.
+  floors?: Map<string, number>;
   // 방출 정책 — **명시 필수**(design r1-3: 기본값에 숨기지 않는다). "none"은 기계 판독 stdout
   // 모드 전용이며 마커만 끄고 floor 판정·fail-closed는 그대로다.
   output: "stdout" | "none";
@@ -30,6 +57,21 @@ export function guardMain(opts: {
   report: (viol: string[]) => void; // 위반 문구·채널 — 콜사이트 소유
   ok: (counts: number[]) => void;   // 성공 문구 — 콜사이트 소유
 }): never {
+  // ⓪ --floor 키 검증(도메인 전건 매칭) — 열거보다 먼저다: 잘못된 호출은 일을 시작하기 전에 죽는다.
+  const floors = opts.floors ?? new Map<string, number>();
+  for (const k of floors.keys()) {
+    const hits = opts.domains.filter((d) => d.scan === k || d.scan.split(":").pop() === k);
+    if (hits.length === 0) {
+      console.error(
+        `--floor 도메인 '${k}'가 이 가드의 선언 도메인에 없다(허용: ${opts.domains.map((d) => d.scan).join(" · ")}) — 오타 키는 조용히 꺼진 바닥값이 된다(fail-closed)`,
+      );
+      process.exit(2);
+    }
+    if (hits.length > 1) {
+      console.error(`--floor 도메인 '${k}'가 ${hits.length}개 도메인에 걸린다(${hits.map((d) => d.scan).join(" · ")}) — 전체 라벨로 지정하라`);
+      process.exit(2);
+    }
+  }
   // ① 전 도메인 열거. throw는 fail-loud로 접는다 — raw 스택이 나가면 게이트 출력 규약이 깨진다.
   const counts: number[] = [];
   for (const d of opts.domains) {
@@ -43,11 +85,12 @@ export function guardMain(opts: {
   // ② 전 floor 판정 — 하나라도 무너지면 전부 보고하고 마커 없이 죽는다.
   const collapsed: string[] = [];
   opts.domains.forEach((d, i) => {
-    if (counts[i]! < d.min) {
+    const min = floorOf(floors, d.scan, d.min);
+    if (counts[i]! < min) {
       // 어휘는 셸 커널 scan_floor와 같다("스캔 N건 < M — 열거 붕괴 의심") — 두 커널이 두 문구를
       // 만들면 소비자가 grep을 두 벌 들게 된다.
       collapsed.push(
-        `FAIL: ${d.scan}: 스캔 ${counts[i]}건 < ${d.min} — 열거 붕괴 의심` +
+        `FAIL: ${d.scan}: 스캔 ${counts[i]}건 < ${min} — 열거 붕괴 의심` +
           (d.floorHint ? `(${d.floorHint})` : ""),
       );
     }
