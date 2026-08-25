@@ -13,6 +13,7 @@ import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInpu
 import { mcpIsError, type Envelope } from "./contract.ts";
 import { schemaErrors } from "./schema-check.ts";
 import { appInitInputError, type AppInitInput } from "./init.ts";
+import { ARCHETYPES } from "./platform.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./secrets.ts";
 import { statusInputError, type StatusInput } from "./status.ts";
 import {
@@ -140,7 +141,9 @@ const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object", additionalProperties: false, required: ["app", "archetype", "parentDir"],
       properties: {
-        app: { type: "string", minLength: 1 }, archetype: { enum: ["api", "fullstack", "site", "worker"] },
+        // archetype enum은 아키타입 SSOT(platform.ts ARCHETYPES)의 파생이다 — 리터럴 사본이면 아키타입
+        // 확장 시 init 엔진은 수용하는데 MCP만 -32602로 거부하는 입력 표면 드리프트가 난다(cli-deepening 심화 6).
+        app: { type: "string", minLength: 1 }, archetype: { enum: [...ARCHETYPES] },
         parentDir: { type: "string", minLength: 1 }, public: { type: "boolean" },
         dispatchSecrets: { type: "string" }, adopt: { type: "boolean" },
       },

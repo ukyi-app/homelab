@@ -298,7 +298,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   doctor가 통과시킨 템플릿을 init이 실행 중 거부하는 계약 갭이 생긴다.
 - **`lib/platform.ts`** — 플랫폼 좌표 SSOT(HOMELAB_REPO·TEMPLATE_REPO·ARCHETYPES·
   COMPILED_ARCHETYPES). doctor가 검증한 대상과 이후 init이 쓰는 대상이 콜사이트마다 갈리지
-  않게 한 곳에서만 정의(identity.ts와 같은 원칙 — 저긴 이름 형식, 여긴 좌표).
+  않게 한 곳에서만 정의(identity.ts와 같은 원칙 — 저긴 이름 형식, 여긴 좌표). MCP `app_init`
+  inputSchema의 archetype enum도 ARCHETYPES 파생이다(cli-deepening 심화 6 — 리터럴 사본이면
+  아키타입 확장 시 init 엔진은 수용하는데 MCP만 -32602로 거부하는 입력 표면 드리프트가 난다;
+  test_homelab-mcp.bats가 동치·확장 수용을 단언).
 - **`lib/schema-check.ts`** — cli-result-schema.json 전용 미니 검증기(`schemaErrors()`, ajv 무의존).
   지원 키워드 화이트리스트 밖은 **throw로 fail-closed**(모르는 제약의 조용한 통과 차단).
   골든 픽스처·계약 테스트 전용 — create-app.ts의 check()는 .app-config.yml 정책 소유가

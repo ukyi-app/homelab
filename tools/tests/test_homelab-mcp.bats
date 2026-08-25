@@ -21,10 +21,13 @@ setup() {
 }
 
 # JSON-RPC 라인들을 stdin으로 파이프하고 stdout(응답)을 $output에 담는다. 서버는 EOF에 exit 0.
-mcp_rpc() {
+# mcp_rpc_at <entry> <lines...> — 진입 스크립트를 인자로 받는 형태(사본 트리 실행용). mcp_rpc는 현 트리 기본.
+mcp_rpc_at() {
+  local entry="$1"; shift
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
-    bash -c 'printf "%s\n" "$@" | "$0" tools/homelab.ts mcp' "$BUN" "$@"
+    bash -c 'entry="$1"; shift; printf "%s\n" "$@" | "$0" "$entry" mcp' "$BUN" "$entry" "$@"
 }
+mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
 
 @test "initialize returns serverInfo and tools capability" {
   mcp_rpc '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
@@ -287,4 +290,56 @@ mcp_rpc() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "destructive:app_teardown"
   echo "$output" | grep -q "exposed:app_create,app_init,app_secrets,cache_create,cache_url,db_create,db_url,doctor,status"
+}
+
+@test "the app_init archetype enum is exactly platform ARCHETYPES (derivation parity, hand-pinned floor)" {
+  # 두 입력 표면(init 엔진의 ARCHETYPES ↔ MCP inputSchema enum)이 순서까지 일치한다(cli-deepening 심화 6).
+  run bun -e '
+    const { ARCHETYPES } = await import(process.argv[1] + "/tools/lib/platform.ts");
+    console.log(ARCHETYPES.join(","));
+  ' "$ROOT"
+  [ "$status" -eq 0 ]
+  want="$output"
+  # 손 앵커(floor) — SSOT가 비거나 축소돼도 동치 비교가 vacuous green이 되지 않게 4종을 리터럴로 핀한다.
+  [ "$want" = "api,fullstack,site,worker" ]
+  mcp_rpc '{"jsonrpc":"2.0","id":40,"method":"tools/list"}'
+  [ "$status" -eq 0 ]
+  got="$(echo "$output" | jq -rc 'select(.id==40) | .result.tools[] | select(.name=="app_init") | .inputSchema.properties.archetype.enum | join(",")')"
+  [ "$got" = "$want" ]
+  # 리터럴 사본 소멸 — mcp.ts 소스에 아키타입 이름이 남아 있지 않다(파생의 정적 증거). 부정 카운트라
+  # 같은 술어가 SSOT(platform.ts)에서는 매치함을 양성 대조로 함께 단언한다(검출기 생존 증명).
+  [ "$(grep -c '"fullstack"' tools/lib/platform.ts)" -ge 1 ]
+  [ "$(grep -c '"fullstack"' tools/lib/mcp.ts)" = "0" ]
+}
+
+@test "an archetype added to the SSOT alone is accepted by MCP (mutation discriminability, mcp.ts untouched)" {
+  # 대조군(현 트리): 미지 아키타입은 입력 검증에서 -32602(엔진에 닿지 않는다).
+  ARGS='{"app":"myapp","archetype":"hexagon","parentDir":"'"$BATS_TEST_TMPDIR"'","dispatchSecrets":"'"$BATS_TEST_TMPDIR"'/nonexistent"}'
+  mcp_rpc '{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"app_init","arguments":'"$ARGS"'}}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==41) | .error.code')" = "-32602" ]
+  # 사본 트리(lib + 진입점 + 계약 JSON): platform.ts의 ARCHETYPES 줄 끝에만 "hexagon"을 덧붙인다(mcp.ts 무변경).
+  # node_modules는 심링크로 공유한다 — 없으면 bun이 lockfile 밖 auto-install로 통과해 venue 의존 초록이 된다.
+  # sed 치환 불발은 vacuous라 grep으로 증명한다.
+  T="$BATS_TEST_TMPDIR/ext"; mkdir -p "$T/tools"
+  cp -R tools/lib "$T/tools/lib"; cp tools/homelab.ts tools/*.json "$T/tools/"
+  ln -s "$ROOT/node_modules" "$T/node_modules"
+  sed 's|^\(export const ARCHETYPES = \[.*\)\] as const;|\1, "hexagon"] as const;|' tools/lib/platform.ts > "$T/tools/lib/platform.ts"
+  grep -q '^export const ARCHETYPES = .*"hexagon"\] as const;' "$T/tools/lib/platform.ts"
+  cmp -s tools/lib/mcp.ts "$T/tools/lib/mcp.ts"
+  # dispatchSecrets 부재 경로 → 엔진이 preflight에서 부수효과 0으로 실패한다(결정적·스텁 무관) — 여기서
+  # 단언하는 것은 체인 결과가 아니라 "입력 표면이 hexagon을 통과시켜 엔진까지 닿았다"는 사실이다.
+  mcp_rpc_at "$T/tools/homelab.ts" \
+    '{"jsonrpc":"2.0","id":42,"method":"tools/list"}' \
+    '{"jsonrpc":"2.0","id":43,"method":"tools/call","params":{"name":"app_init","arguments":'"$ARGS"'}}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==42) | .result.tools[] | select(.name=="app_init") | .inputSchema.properties.archetype.enum | index("hexagon") != null')" = "true" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==43) | has("error")')" = "false" ]
+  env43="$(echo "$output" | jq -rc 'select(.id==43) | .result.content[0].text')"
+  [ "$(echo "$env43" | jq -r '.verb')" = "app init" ]
+  [ "$(echo "$env43" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$env43" | jq -r '.result.checkpoint')" = "preflight" ]
+  [ "$(echo "$env43" | jq -r '.result.archetype')" = "hexagon" ]
+  # 부수효과 0 — 레포 생성 호출이 원장에 없다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
 }
