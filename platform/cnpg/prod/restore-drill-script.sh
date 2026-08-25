@@ -284,7 +284,12 @@ _live_psql() {
 echo "[drill] RPO 마커 기록 — 지금 쓴 행이 복구본에 나타나야 아카이브가 최신이다"
 # 마커는 `id`와 `ts`를 **함께** 받는다. id 단독은 시퀀스가 되감기면(pg_dump 복원의 setval 등)
 # 옛 행과 충돌해 거짓 PASS가 날 수 있고, ts가 있어야 **실제 RPO 수치**를 보고할 수 있다.
-MARKER_ROW="$(_live_psql -d "$DB" -tAF'|' -c "INSERT INTO ${TABLE} DEFAULT VALUES RETURNING id, extract(epoch from ts)::bigint;")" \
+# ⚠️ **`head -1`로 RETURNING 행만 취한다.** PostgreSQL 18의 psql은 `INSERT … RETURNING`에서 `-tA`
+#    (tuples-only)에도 상태 태그 `INSERT 0 1`을 stdout **둘째 줄**로 낸다(실측 PG 18.4 — SELECT는 안 낸다).
+#    그걸 두면 `MARKER_TS="${MARKER_ROW##*|}"`가 `1787…\nINSERT 0 1`이 되어 아래 숫자 case가 fail한다
+#    (2026-08-25 라이브: --request-timeout 결함을 고치자 이 파싱 결함이 드러났다). RETURNING 행이 항상
+#    첫 줄이므로 head -1이 안전하다. 다른 `_live_psql -tAc` SELECT 호출은 상태 태그가 없어 무관하다.
+MARKER_ROW="$(_live_psql -d "$DB" -tAF'|' -c "INSERT INTO ${TABLE} DEFAULT VALUES RETURNING id, extract(epoch from ts)::bigint;" | head -1)" \
   || fail "RPO 마커를 라이브에 쓰지 못했다 — 아카이브 신선도를 증명할 수 없다(테이블 부재/권한/DB 다운/락 확인)"
 MARKER_ID="${MARKER_ROW%%|*}"
 MARKER_TS="${MARKER_ROW##*|}"

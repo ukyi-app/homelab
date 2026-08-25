@@ -66,7 +66,10 @@ case "$*" in
     printf '%s' "${DRILL_RPO_LAG:-12}" ;;                           # RPO 실측 초
   *"exec pg-1"*"INSERT INTO"*)
     [ "${DRILL_INSERT_FAILS:-0}" = "1" ] && exit 1                  # 프로덕션 write 실패 경로
-    printf '%s|%s' "${DRILL_MARKER_ID:-42}" "${DRILL_MARKER_TS:-1700000000}" ;;
+    # ⚠️ PG 18의 psql은 `INSERT … RETURNING`에서 `-tA`에도 상태 태그 `INSERT 0 1`을 **둘째 줄**로 낸다
+    #    (실측 PG 18.4). 스텁이 이를 재현해야 drill.sh의 `head -1` 파싱 가드가 실제로 검증된다 —
+    #    없이 `%s|%s`만 내던 예전 스텁은 2026-08-25 라이브 파싱 결함을 원리적으로 못 봤다.
+    printf '%s|%s\nINSERT 0 1' "${DRILL_MARKER_ID:-42}" "${DRILL_MARKER_TS:-1700000000}" ;;
   *"exec pg-1"*"pg_walfile_name(pg_switch_wal())"*)
     [ "${DRILL_SWITCH_FAILS:-0}" = "1" ] && exit 1                  # 전환+이름을 한 문장으로
     printf '%s' "${DRILL_MARKER_WAL:-000000010000000000000009}" ;;
