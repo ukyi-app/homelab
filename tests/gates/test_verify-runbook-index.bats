@@ -58,6 +58,37 @@ write_index() {   # $@: 인덱스에 나열할 런북 파일명
   echo "$output" | grep -q "ghost.md"
 }
 
+@test "index extraction stops at the next section heading (does not swallow later sections)" {
+  # 실측 사고: 「## 런북」 절 추출이 파일 끝까지 읽어, 뒤에 추가된 「## Agent skills」 절의
+  # 백틱 .md 참조(CONTEXT.md 등)를 인덱스 항목으로 오인해 owner 머신에서 가드가 red였다.
+  # 추출이 통째로 비어도 초록이 되는 vacuous를 막으려고 절 안의 ghost.md를 증인으로 세운다:
+  # 절 안 ghost.md는 여전히 잡히고(추출이 살아 있음), 경계 밖 other-doc.md는 안 잡힌다(멈춤).
+  write_index alpha.md ghost.md
+  {
+    echo
+    echo "## Agent skills"
+    echo
+    echo "See \`docs/agents/other-doc.md\`."
+  } >> "$FIX/AGENTS.md"
+  : > "$FIX/docs/runbooks/alpha.md"
+  run bash "$FIX/scripts/verify-runbook-index.sh"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "ghost.md"
+  out="$output"
+  run grep -q "other-doc.md" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+@test "an empty index extraction fails loud when runbooks exist (reverse lane must not fail open)" {
+  # `^## 런북` 헤딩이 개명·강등되면 추출이 0건이 된다 — 역방향 레인이 errexit로 무언 종료하는
+  # 대신 명시 FAIL을 내야 한다(무언 종료는 진단이 아니다).
+  write_index
+  : > "$FIX/docs/runbooks/alpha.md"
+  run bash "$FIX/scripts/verify-runbook-index.sh"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "추출하지 못했다"
+}
+
 @test "runbook-index guard exists and is local-only" {
   S="$ROOT/scripts/verify-runbook-index.sh"
   [ -f "$S" ]
