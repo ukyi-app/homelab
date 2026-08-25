@@ -32,6 +32,8 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { typedFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
+import { guardMain } from "./lib/scan-floor.ts";
+import { readLedger } from "./lib/policy-ledger.ts";
 
 const POLICY_PATH = "policy/workflow-readiness.json";
 const WORKFLOW_DIR = ".github/workflows";
@@ -64,7 +66,8 @@ type JobDecl = {
   owner_action?: unknown;
 };
 type WfDecl = { accounting_job?: unknown; expect_executed?: unknown; jobs?: Record<string, JobDecl> };
-type Policy = { workflows?: Record<string, WfDecl> };
+// 원장 컨테이너(workflows) 값 — 파일 전체가 아니라 선언 맵이다.
+type WorkflowDecls = Record<string, WfDecl>;
 
 function steps(job: Job | undefined): Step[] {
   return Array.isArray(job?.steps) ? (job.steps as Step[]) : [];
@@ -236,13 +239,10 @@ export function readinessFlags(doc: Workflow): Set<string> {
 // ── 원장 ──────────────────────────────────────────────────────────────────────
 // **필수 읽기**다. `existsSync ? … : {}` 폴백을 두면 원장이 사라졌을 때 "선언 0건 = 위반 0건"으로
 // 조용히 통과한다 — 이 목록은 *차단 대상*이 아니라 *검사 계약*이라 부재가 곧 fail-open이다.
-function loadPolicy(root: string): Policy {
-  const raw = readFileSync(`${root}/${POLICY_PATH}`, "utf8");
-  const p = JSON.parse(raw) as Policy;
-  if (!p || typeof p !== "object" || !p.workflows || typeof p.workflows !== "object") {
-    throw new Error(`${POLICY_PATH}: workflows 객체가 없다`);
-  }
-  return p;
+// 로딩·통일 shape·비어있음 판정은 readLedger 소유, 상태별 조건부 요건(state/severity/since/
+// owner_action)은 checkStatic 소유다 — 조건부 의미론이라 항목 스키마로 접지 않는다(「정책 원장」).
+function loadWorkflowDecls(root: string): WorkflowDecls {
+  return readLedger<WorkflowDecls>({ path: POLICY_PATH, container: "workflows", root });
 }
 
 function declaredJobs(wf: WfDecl | undefined): Record<string, JobDecl> {
@@ -250,32 +250,17 @@ function declaredJobs(wf: WfDecl | undefined): Record<string, JobDecl> {
 }
 
 // ── 정적 검사 ─────────────────────────────────────────────────────────────────
-function checkStatic(root: string, minWorkflows: number, minDeclarations: number): string[] {
+// 열거(워크플로 walk·원장 로딩·선언 카운트)와 floor는 guardMain의 domains가 소유한다 —
+// 이 함수는 양방향 대조 의미론만 소유한다(원장·docs는 enumerate가 채워 넘긴다).
+function checkStatic(policy: WorkflowDecls, docs: Map<string, Workflow>): string[] {
   const bad: string[] = [];
-  const policy = loadPolicy(root);
-  const entries = walkManifests("workflows", root);
-  if (entries.length < minWorkflows) {
-    bad.push(`워크플로 열거 ${entries.length}건 < ${minWorkflows} — 열거 붕괴(이 회계가 vacuous해진다)`);
-    return bad; // 열거가 무너지면 아래 대조는 전부 무의미하다.
-  }
 
-  const docs = new Map<string, Workflow>();
-  for (const e of entries) {
-    const name = e.path.slice(`${WORKFLOW_DIR}/`.length);
-    try {
-      docs.set(name, (parse(e.text) ?? {}) as Workflow);
-    } catch (err) {
-      bad.push(`${e.path}: YAML 파싱 실패 — ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  let declarations = 0;
   // 역방향 — 탐지된 준비상태 게이트는 **반드시** 원장에 있어야 한다(미선언 = 통과 불가).
   for (const [name, doc] of docs) {
     // 자격 플래그를 내는 job의 출력이 게이트로 쓰이는데 출처를 못 읽으면, 그 게이트는 탐지에서 빠져
     // 원장 강제를 통째로 우회한다(출력 이름만 바꾸면 되는 탈출구였다 — 적대 검토가 실측).
     for (const u of unresolvedGateOutputs(doc)) bad.push(`${WORKFLOW_DIR}/${name}: ${u}`);
-    const decl = declaredJobs(policy.workflows?.[name]);
+    const decl = declaredJobs(policy[name]);
     for (const [job, kind] of readinessGates(doc)) {
       if (!decl[job]) {
         bad.push(
@@ -287,7 +272,7 @@ function checkStatic(root: string, minWorkflows: number, minDeclarations: number
   }
 
   // 정방향 — 원장의 항목은 실재하는 준비상태 게이트여야 한다(죽은 선언 = 아무도 대조하지 않는 주장).
-  for (const [name, wf] of Object.entries(policy.workflows ?? {})) {
+  for (const [name, wf] of Object.entries(policy)) {
     const doc = docs.get(name);
     if (!doc) {
       bad.push(`${POLICY_PATH}: '${name}' 워크플로가 존재하지 않는다(리네임/삭제 후 원장 미갱신)`);
@@ -297,7 +282,6 @@ function checkStatic(root: string, minWorkflows: number, minDeclarations: number
     const flags = readinessFlags(doc);
     const decl = declaredJobs(wf);
     const jobs = doc.jobs ?? {};
-    declarations += Object.keys(decl).length;
     if (!Object.keys(decl).length) {
       // 빈 항목은 "선언했다"는 인상만 남기고 아무것도 대조하지 않는다 — 원장이 아니라 장식이다.
       bad.push(`${POLICY_PATH}: '${name}' 항목의 jobs가 비었다(선언 0건 = 대조 0건)`);
@@ -402,7 +386,7 @@ function checkStatic(root: string, minWorkflows: number, minDeclarations: number
       );
       continue;
     }
-    const d = declaredJobs(policy.workflows?.[workflow])[job];
+    const d = declaredJobs(policy[workflow])[job];
     if (!d) {
       bad.push(`${POLICY_PATH}: 보안 항목 ${workflow}.${job} 선언이 사라졌다(면제 불가 대상)`);
       continue;
@@ -415,13 +399,6 @@ function checkStatic(root: string, minWorkflows: number, minDeclarations: number
     }
   }
 
-  if (declarations < minDeclarations) {
-    bad.push(`원장 선언 ${declarations}건 < ${minDeclarations} — 원장 붕괴(대조 대상이 사라졌다)`);
-  }
-  // ⚠️ 위반 유무와 **무관하게** 낸다. `if (!bad.length)` 안에 두면 위반 실행에서 마커가 사라져
-  //    "마커 부재 = 미실행" 해석이 깨진다 — 열거는 정상이었고 위반이 있었을 뿐인데도 '안 돌았다'로 읽힌다.
-  console.log(`SCAN: check-workflow-readiness:workflows: ${entries.length}`);
-  console.log(`SCAN: check-workflow-readiness:declarations: ${declarations}`);
   return bad;
 }
 
@@ -534,8 +511,8 @@ function emit(name: string, value: string): void {
 }
 
 function runRuntime(root: string, name: string): string[] {
-  const policy = loadPolicy(root);
-  const wf = policy.workflows?.[name];
+  const policy = loadWorkflowDecls(root);
+  const wf = policy[name];
   if (!wf) return [`${POLICY_PATH}: '${name}' 선언이 없다 — 회계 대상이 아닌 워크플로가 회계를 부르고 있다`];
   const decl = declaredJobs(wf);
   if (!Object.keys(decl).length) return [`${POLICY_PATH}: '${name}'의 jobs가 비었다(원장 붕괴)`];
@@ -634,23 +611,69 @@ if (import.meta.main) {
   const root = flags.str("--repo-root", ".")!;
   const workflow = flags.str("--workflow");
 
-  let bad: string[];
-  try {
-    bad = workflow
-      ? runRuntime(root, workflow)
-      : checkStatic(
-          root,
-          positiveInt(flags.str("--min-workflows", "20"), "--min-workflows"),
-          positiveInt(flags.str("--min-declarations", "8"), "--min-declarations"),
-        );
-  } catch (e) {
-    console.error(`FAIL: ${e instanceof Error ? e.message : String(e)}`);
-    process.exit(1);
+  if (workflow) {
+    // 런타임 회계 모드 — 마커(`SCAN: check-workflow-readiness:accounted`)는 runRuntime이 낸다.
+    let bad: string[];
+    try {
+      bad = runRuntime(root, workflow);
+    } catch (e) {
+      console.error(`FAIL: ${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+    if (bad.length) {
+      console.error("FAIL: 워크플로 준비상태 회계 위반:");
+      for (const b of bad) console.error(`  ${b}`);
+      process.exit(1);
+    }
+  } else {
+    // 정적 모드 — 실행 순서(열거 → floor → SCAN 일괄 방출 → 검사 → 종료코드)는 guardMain이
+    // 구조로 소유한다. 종전엔 declarations floor가 위반으로 취급돼 붕괴 실행이 마커를 냈다 —
+    // 커널 편입으로 그 순서 결함이 표현 불가능해졌다.
+    let policy!: WorkflowDecls;
+    const docs = new Map<string, Workflow>();
+    guardMain({
+      label: "check-workflow-readiness",
+      domains: [
+        {
+          scan: "check-workflow-readiness:workflows",
+          min: positiveInt(flags.str("--min-workflows", "20"), "--min-workflows"),
+          floorHint: "이 회계가 vacuous해진다",
+          enumerate: () => {
+            policy = loadWorkflowDecls(root);
+            const entries = walkManifests("workflows", root);
+            for (const e of entries) {
+              const name = e.path.slice(`${WORKFLOW_DIR}/`.length);
+              try {
+                docs.set(name, (parse(e.text) ?? {}) as Workflow);
+              } catch (err) {
+                // 파싱 실패는 위반이 아니라 **열거 실패**다 — 그 워크플로의 선언·게이트를 평가할 수
+                // 없고, declarations 카운트에서도 빠져 floor 오진("열거 붕괴")으로 위장된다. throw로
+                // 커널에 접어 진짜 원인이 진단에 남게 한다.
+                throw new Error(`${e.path}: YAML 파싱 실패 — ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
+            return entries.length;
+          },
+        },
+        {
+          scan: "check-workflow-readiness:declarations",
+          min: positiveInt(flags.str("--min-declarations", "8"), "--min-declarations"),
+          floorHint: "원장 붕괴 — 대조 대상이 사라졌다",
+          // 종전 카운트와 동일 의미론: 워크플로가 실재하는 원장 항목의 선언 job 수 합.
+          enumerate: () =>
+            Object.entries(policy).reduce(
+              (n, [name, wf]) => n + (docs.has(name) ? Object.keys(declaredJobs(wf)).length : 0),
+              0,
+            ),
+        },
+      ],
+      output: "stdout",
+      check: () => checkStatic(policy, docs),
+      report: (v) => {
+        console.error("FAIL: 워크플로 준비상태 회계 위반:");
+        for (const b of v) console.error(`  ${b}`);
+      },
+      ok: () => console.log("check-workflow-readiness OK (원장 ↔ 워크플로 양방향 정합)"),
+    });
   }
-  if (bad.length) {
-    console.error("FAIL: 워크플로 준비상태 회계 위반:");
-    for (const b of bad) console.error(`  ${b}`);
-    process.exit(1);
-  }
-  if (!workflow) console.log("check-workflow-readiness OK (원장 ↔ 워크플로 양방향 정합)");
 }

@@ -86,6 +86,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parse, parseAllDocuments } from "yaml";
 import { parseFlags } from "./lib/cli.ts";
+import { readLedger } from "./lib/policy-ledger.ts";
 import { RULES_ROOT, walkManifests } from "./lib/repo-walk.ts";
 
 let f: Record<string, string | boolean>;
@@ -633,14 +634,15 @@ const MIN_SUPPLY = 12;      // 열거 붕괴 바닥값(도입 시 15건). 도메
 const MIN_SUPPLY_REFS = 12; // **강제**가 실제로 몇 건을 판정했는가 — 원장 크기와 별개 축이다(아래 참조).
 type SupplyEntry = { metric: string; supply: "in-cluster" | "external"; decreasing: "impossible" | "is-truth"; why: string };
 // ⚠️ 정책 파일은 **필수 읽기**다(모드 A의 규율 미러) — 부재/오타 경로를 "항목 0개"로 위장시키지 않는다.
+// 로딩·통일 shape({_readme, metrics})는 readLedger(policy-ledger) 소유 — $comment 개명의 강제자다.
+// 필드 의미론(supply/decreasing enum·무근거 why 금지)은 문구가 계약이라 이 콜사이트에 남긴다.
 function loadSupply(): SupplyEntry[] {
-  let raw: string;
-  try { raw = readFileSync(SUPPLY_INJECTED ? SUPPLY_POLICY : `${ROOT}/${SUPPLY_POLICY}`, "utf8"); }
-  catch (e) { fatal(`${SUPPLY_POLICY}를 읽을 수 없다(${(e as Error).message}) — 부재를 '항목 0개'로 위장시키지 않는다`); }
-  let parsed: { metrics?: SupplyEntry[] };
-  try { parsed = JSON.parse(raw); } catch (e) { fatal(`${SUPPLY_POLICY} JSON 파싱 실패: ${(e as Error).message}`); }
-  const list = parsed.metrics;
-  if (!Array.isArray(list)) fatal(`${SUPPLY_POLICY}에 metrics 배열이 없다`);
+  let list!: SupplyEntry[];
+  try {
+    list = readLedger<SupplyEntry[]>({ path: SUPPLY_POLICY, container: "metrics", root: ROOT });
+  } catch (e) {
+    fatal(e instanceof Error ? e.message : String(e));
+  }
   for (const e of list) {
     if (!e?.metric) fatal(`${SUPPLY_POLICY}: metric 필드가 없는 항목이 있다`);
     if (e.supply !== "in-cluster" && e.supply !== "external") fatal(`${SUPPLY_POLICY}: ${e.metric}의 supply가 'in-cluster'|'external'이 아니다`);

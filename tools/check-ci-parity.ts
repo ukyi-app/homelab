@@ -33,6 +33,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { guardMain } from "./lib/scan-floor.ts";
+import { readLedger } from "./lib/policy-ledger.ts";
 
 const ROOT = process.cwd();
 const CI = ".github/workflows/ci.yaml";
@@ -67,40 +69,34 @@ function sh(cmd: string, args: string[]): string {
 // ── ① gate의 run 스텝을 ci.yaml에서 파생 ──────────────────────────────────────────────────────────
 // yq로 뽑는다(YAML 파서 재구현 금지). 이름 없는 스텝은 원장 키가 없으므로 **즉시 red**다 — 익명 스텝을
 // 허용하면 "무명 스텝은 계상 안 해도 된다"는 구멍이 생긴다.
+// 파생 실패(yq 죽음·이름/본문 어긋남)는 throw — guardMain이 열거 실패로 접어 마커 없이 죽는다.
 let stepNames: string[] = [];
-try {
-  const out = sh("yq", [
+let stepRuns: string[] = [];
+const runByName = new Map<string, string>();
+function deriveSteps(): number {
+  const names = sh("yq", [
     "-r",
     `.jobs.${GATE_JOB}.steps[] | select(has("run")) | (.name // "((unnamed))")`,
     CI,
   ]);
-  stepNames = out.split("\n").map((s) => s.trim()).filter(Boolean);
-} catch (e) {
-  fail(`ci.yaml에서 ${GATE_JOB} 스텝을 읽지 못했다(yq 실패): ${(e as Error).message}`);
-}
-
-// 스텝 본문(run 텍스트)도 함께 파생한다 — ⑦의 대조 원본이다. 이름과 같은 순서로 나온다.
-let stepRuns: string[] = [];
-try {
+  stepNames = names.split("\n").map((s) => s.trim()).filter(Boolean);
+  // 스텝 본문(run 텍스트)도 함께 파생한다 — ⑦의 대조 원본이다. 이름과 같은 순서로 나온다.
   // 스텝 사이 구분자로 NUL을 쓸 수 없으므로 유일한 센티널을 쓴다(본문에 나올 수 없는 형태).
-  const out = sh("yq", [
+  const runs = sh("yq", [
     "-r",
     `.jobs.${GATE_JOB}.steps[] | select(has("run")) | .run + "\n@@STEP@@"`,
     CI,
   ]);
-  stepRuns = out.split("@@STEP@@").slice(0, -1);
-} catch (e) {
-  fail(`ci.yaml에서 ${GATE_JOB} 스텝 본문을 읽지 못했다(yq 실패): ${(e as Error).message}`);
+  stepRuns = runs.split("@@STEP@@").slice(0, -1);
+  if (stepRuns.length !== stepNames.length) {
+    throw new Error(
+      `스텝 이름 ${stepNames.length}건 ≠ 스텝 본문 ${stepRuns.length}건 — 파생이 어긋났다. ` +
+        `이 상태로 ⑦을 돌리면 엉뚱한 본문을 엉뚱한 이름에 붙여 대조한다.`,
+    );
+  }
+  stepNames.forEach((n, i) => { if (stepRuns[i] !== undefined) runByName.set(n, stepRuns[i]); });
+  return stepNames.length;
 }
-if (stepRuns.length !== stepNames.length) {
-  fail(
-    `스텝 이름 ${stepNames.length}건 ≠ 스텝 본문 ${stepRuns.length}건 — 파생이 어긋났다. ` +
-      `이 상태로 ⑦을 돌리면 엉뚱한 본문을 엉뚱한 이름에 붙여 대조한다.`,
-  );
-  stepRuns = [];
-}
-const runByName = new Map<string, string>();
-stepNames.forEach((n, i) => { if (stepRuns[i] !== undefined) runByName.set(n, stepRuns[i]); });
 
 // run 본문에서 **실행되는 레포 커맨드**만 뽑는다. 주석 줄은 명령이 아니고, 글롭 인자
 // (`git ls-files 'tests/gates/vmalert-*-firing-e2e.sh'`)는 경로가 아니라 패턴이라 제외한다.
@@ -143,137 +139,155 @@ function commandsIn(run: string): string[] {
   return [...out];
 }
 
-if (stepNames.length < MIN_STEPS) {
-  fail(
-    `gate의 run 스텝 ${stepNames.length}건 < 바닥값 ${MIN_STEPS} — 열거 붕괴다(job 리네임·yq 실패·스키마 변경). ` +
-      `이 상태의 "미계상 0건"은 통과가 아니라 무측정이다.`,
-  );
-}
-for (const n of stepNames.filter((n) => n === "((unnamed))")) {
-  void n;
-  fail(`gate에 이름 없는 run 스텝이 있다 — 원장은 이름으로 계상하므로 무명 스텝은 회계에서 빠진다. name을 붙여라.`);
-}
-const dupes = stepNames.filter((n, i) => stepNames.indexOf(n) !== i);
-if (dupes.length) fail(`gate 스텝 이름 중복: ${[...new Set(dupes)].join(", ")} — 원장 키가 모호해진다.`);
-
-// ── 원장 ────────────────────────────────────────────────────────────────────────────────────────
-let entries: Entry[] = [];
-if (!existsSync(LEDGER)) {
-  fail(`${LEDGER} 부재 — 패리티 원장이 없으면 이 검사는 아무것도 강제하지 않는다.`);
-} else {
-  try {
-    const parsed = JSON.parse(readFileSync(LEDGER, "utf8"));
-    entries = parsed.steps ?? [];
-  } catch (e) {
-    fail(`${LEDGER} 파싱 실패: ${(e as Error).message}`);
-  }
-}
+// ── 원장 + 대조(guardMain check 단계) ──────────────────────────────────────────────────────────
+// 로딩·통일 shape({_readme, steps})·항목 구조는 readLedger(policy-ledger) 소유. 미계상·죽은 선언·
+// ④~⑦ 대조 의미론과 상태별 조건부 요건은 이 콜사이트 소유다(CONTEXT.md 「정책 원장」).
+const ENTRY_SCHEMA = {
+  type: "object",
+  required: ["name", "status"],
+  properties: {
+    name: { type: "string", minLength: 1 },
+    status: { enum: ["mirrored", "covered", "excluded"] },
+    local: {}, covered_by: {}, why: {}, since: {}, owner_action: {},
+  },
+  additionalProperties: false,
+};
 
 const byName = new Map<string, Entry>();
-for (const e of entries) {
-  if (!e?.name) { fail(`${LEDGER}: name 없는 항목이 있다.`); continue; }
-  if (byName.has(e.name)) fail(`${LEDGER}: 중복 항목 '${e.name}'`);
-  byName.set(e.name, e);
-}
-
-// ── ② 미계상 ────────────────────────────────────────────────────────────────────────────────────
-for (const n of stepNames) {
-  if (n === "((unnamed))") continue;
-  if (!byName.has(n)) {
-    fail(
-      `게이트 스텝이 원장에 없다: "${n}"\n` +
-        `    → ${LEDGER}에 계상하라. mirrored(make ci가 같은 걸 돈다) / covered(다른 로컬 수단이 덮는다) /\n` +
-        `      excluded(로컬에선 안 돈다 — why·since·owner_action 필수) 중 하나를 골라야 한다.`,
-    );
+function reconcile(): string[] {
+  for (const n of stepNames.filter((n) => n === "((unnamed))")) {
+    void n;
+    fail(`gate에 이름 없는 run 스텝이 있다 — 원장은 이름으로 계상하므로 무명 스텝은 회계에서 빠진다. name을 붙여라.`);
   }
-}
+  const dupes = stepNames.filter((n, i) => stepNames.indexOf(n) !== i);
+  if (dupes.length) fail(`gate 스텝 이름 중복: ${[...new Set(dupes)].join(", ")} — 원장 키가 모호해진다.`);
 
-// ── ③ 죽은 선언 ─────────────────────────────────────────────────────────────────────────────────
-for (const e of byName.values()) {
-  if (!stepNames.includes(e.name)) {
-    fail(`원장에만 있고 gate에는 없는 스텝: "${e.name}" — 스텝이 삭제·리네임됐다. 원장에서 지우거나 이름을 맞춰라.`);
-  }
-}
-
-// ── ④ mirrored: make -n ci 실측 대조 ────────────────────────────────────────────────────────────
-let makeOut = "";
-const needMake = [...byName.values()].some((e) => e.status === "mirrored");
-if (needMake) {
+  // 원장 로딩 실패(부재·파싱·shape·항목 구조)는 **여기서** 잡아 ::error:: 채널로 낸다 — 문구·채널은
+  // 콜사이트 소유이고, steps 도메인 자체는 이미 평가됐으므로 마커는 정당하다(readLedger 소유 경계).
+  let entries: Entry[] = [];
   try {
-    makeOut = sh("make", ["-n", "ci"]);
+    entries = readLedger<Entry[]>({ path: LEDGER, container: "steps", entrySchema: ENTRY_SCHEMA });
   } catch (e) {
-    // ⚠️ 여기서 조용히 넘어가면 mirrored 전건이 무검사로 통과한다(fail-open). 명시적으로 죽인다.
-    fail(`\`make -n ci\` 실행 실패 — mirrored 항목을 하나도 검증할 수 없다: ${(e as Error).message}`);
+    fail(e instanceof Error ? e.message : String(e));
+    return errors; // 원장이 없으면 ②~⑦ 대조가 전부 무의미하다 — 홍수 대신 근인 하나로 보고한다.
   }
-  if (makeOut.trim().length === 0) fail("`make -n ci` 출력이 비었다 — mirrored 검증이 무측정이 된다.");
-}
+  for (const e of entries) {
+    if (byName.has(e.name)) fail(`${LEDGER}: 중복 항목 '${e.name}'`);
+    byName.set(e.name, e);
+  }
 
-for (const e of byName.values()) {
-  switch (e.status) {
-    case "mirrored": {
-      // local은 문자열 하나 또는 **배열**이다. 배열이 필요한 이유: 게이트 스텝 하나가 여러 스위트를
-      // 덮을 수 있다(예: bats ∥ 발화 e2e 동시 실행). 그때 문자열 하나만 대조하면 나머지가 make ci에서
-      // 빠져도 통과한다 — 부분 대조는 대조가 아니다. **전건**이 있어야 한다.
-      const wants = Array.isArray(e.local) ? e.local : e.local ? [e.local] : [];
-      if (wants.length === 0) { fail(`"${e.name}": mirrored인데 local(대조할 커맨드 문자열)이 없다.`); break; }
-      for (const w of wants) {
-        if (typeof w !== "string" || w.length === 0) { fail(`"${e.name}": local 항목이 빈 문자열이다.`); continue; }
-        if (makeOut && !makeOut.includes(w)) {
-          fail(
-            `"${e.name}": mirrored로 선언됐지만 \`make -n ci\` 출력에 '${w}'이(가) 없다.\n` +
-              `    → make ci에서 빠졌거나 커맨드가 바뀌었다. Makefile을 고치거나 원장 상태를 바꿔라.`,
-          );
-        }
-      }
-      // ⑦ 역방향: ci.yaml 스텝 본문의 커맨드가 전부 local에 있는가.
-      // ⚠️ ④(원장 → make)만으로는 **원장에 안 적은 커맨드**가 원리적으로 안 보인다. 그 목록이
-      //    손 관리 로스터가 되는 자리이고, 실제로 10건 중 2건이 빠진 채 오래 초록이었다.
-      // ⚠️ 원장의 `local`은 **basename**이나 **글롭**이다(그 문자열은 `make -n ci` 출력 대조용이라
-      //    Makefile이 쓰는 형태를 따른다 — 예: `vmalert-*-firing-e2e.sh`는 Makefile이 글롭을 쓰기
-      //    때문이다). 전체 경로로만 대조하면 이 방향이 **정상 원장을 물어** 아무도 안 켠다.
-      const inStep = commandsIn(runByName.get(e.name) ?? "");
-      for (const c of inStep) {
-        if (!wants.some((w) => typeof w === "string" && ledgerCovers(w, c))) {
-          fail(
-            `"${e.name}": ci.yaml 스텝이 '${c}'를 부르는데 원장 local에 없다.\n` +
-              `    → local은 스텝 본문의 커맨드를 **전건** 담아야 한다. 부분 대조는 대조가 아니다.`,
-          );
-        }
-      }
-      break;
+  // ── ② 미계상 ──────────────────────────────────────────────────────────────────────────────────
+  for (const n of stepNames) {
+    if (n === "((unnamed))") continue;
+    if (!byName.has(n)) {
+      fail(
+        `게이트 스텝이 원장에 없다: "${n}"\n` +
+          `    → ${LEDGER}에 계상하라. mirrored(make ci가 같은 걸 돈다) / covered(다른 로컬 수단이 덮는다) /\n` +
+          `      excluded(로컬에선 안 돈다 — why·since·owner_action 필수) 중 하나를 골라야 한다.`,
+      );
     }
-    case "covered": {
-      if (!e.why) fail(`"${e.name}": covered인데 why가 없다 — 무엇이 덮는지 적어야 한다.`);
-      const c = e.covered_by;
-      if (!c?.file || !c?.contains) {
-        fail(`"${e.name}": covered인데 covered_by.file/contains가 없다 — 덮는 메커니즘이 실재하는지 검사할 수 없다.`);
+  }
+
+  // ── ③ 죽은 선언 ───────────────────────────────────────────────────────────────────────────────
+  for (const e of byName.values()) {
+    if (!stepNames.includes(e.name)) {
+      fail(`원장에만 있고 gate에는 없는 스텝: "${e.name}" — 스텝이 삭제·리네임됐다. 원장에서 지우거나 이름을 맞춰라.`);
+    }
+  }
+
+  // ── ④ mirrored: make -n ci 실측 대조 ──────────────────────────────────────────────────────────
+  let makeOut = "";
+  const needMake = [...byName.values()].some((e) => e.status === "mirrored");
+  if (needMake) {
+    try {
+      makeOut = sh("make", ["-n", "ci"]);
+    } catch (e) {
+      // ⚠️ 여기서 조용히 넘어가면 mirrored 전건이 무검사로 통과한다(fail-open). 명시적으로 죽인다.
+      fail(`\`make -n ci\` 실행 실패 — mirrored 항목을 하나도 검증할 수 없다: ${(e as Error).message}`);
+    }
+    if (makeOut.trim().length === 0) fail("`make -n ci` 출력이 비었다 — mirrored 검증이 무측정이 된다.");
+  }
+
+  for (const e of byName.values()) {
+    switch (e.status) {
+      case "mirrored": {
+        // local은 문자열 하나 또는 **배열**이다. 배열이 필요한 이유: 게이트 스텝 하나가 여러 스위트를
+        // 덮을 수 있다(예: bats ∥ 발화 e2e 동시 실행). 그때 문자열 하나만 대조하면 나머지가 make ci에서
+        // 빠져도 통과한다 — 부분 대조는 대조가 아니다. **전건**이 있어야 한다.
+        const wants = Array.isArray(e.local) ? e.local : e.local ? [e.local] : [];
+        if (wants.length === 0) { fail(`"${e.name}": mirrored인데 local(대조할 커맨드 문자열)이 없다.`); break; }
+        for (const w of wants) {
+          if (typeof w !== "string" || w.length === 0) { fail(`"${e.name}": local 항목이 빈 문자열이다.`); continue; }
+          if (makeOut && !makeOut.includes(w)) {
+            fail(
+              `"${e.name}": mirrored로 선언됐지만 \`make -n ci\` 출력에 '${w}'이(가) 없다.\n` +
+                `    → make ci에서 빠졌거나 커맨드가 바뀌었다. Makefile을 고치거나 원장 상태를 바꿔라.`,
+            );
+          }
+        }
+        // ⑦ 역방향: ci.yaml 스텝 본문의 커맨드가 전부 local에 있는가.
+        // ⚠️ ④(원장 → make)만으로는 **원장에 안 적은 커맨드**가 원리적으로 안 보인다. 그 목록이
+        //    손 관리 로스터가 되는 자리이고, 실제로 10건 중 2건이 빠진 채 오래 초록이었다.
+        // ⚠️ 원장의 `local`은 **basename**이나 **글롭**이다(그 문자열은 `make -n ci` 출력 대조용이라
+        //    Makefile이 쓰는 형태를 따른다 — 예: `vmalert-*-firing-e2e.sh`는 Makefile이 글롭을 쓰기
+        //    때문이다). 전체 경로로만 대조하면 이 방향이 **정상 원장을 물어** 아무도 안 켠다.
+        const inStep = commandsIn(runByName.get(e.name) ?? "");
+        for (const c of inStep) {
+          if (!wants.some((w) => typeof w === "string" && ledgerCovers(w, c))) {
+            fail(
+              `"${e.name}": ci.yaml 스텝이 '${c}'를 부르는데 원장 local에 없다.\n` +
+                `    → local은 스텝 본문의 커맨드를 **전건** 담아야 한다. 부분 대조는 대조가 아니다.`,
+            );
+          }
+        }
         break;
       }
-      if (!existsSync(c.file)) { fail(`"${e.name}": covered_by.file '${c.file}' 부재.`); break; }
-      if (!readFileSync(c.file, "utf8").includes(c.contains)) {
-        fail(`"${e.name}": covered_by.file '${c.file}'에 '${c.contains}'가 없다 — 덮는다는 주장이 더 이상 참이 아니다.`);
+      case "covered": {
+        if (!e.why) fail(`"${e.name}": covered인데 why가 없다 — 무엇이 덮는지 적어야 한다.`);
+        const c = e.covered_by;
+        if (!c?.file || !c?.contains) {
+          fail(`"${e.name}": covered인데 covered_by.file/contains가 없다 — 덮는 메커니즘이 실재하는지 검사할 수 없다.`);
+          break;
+        }
+        if (!existsSync(c.file)) { fail(`"${e.name}": covered_by.file '${c.file}' 부재.`); break; }
+        if (!readFileSync(c.file, "utf8").includes(c.contains)) {
+          fail(`"${e.name}": covered_by.file '${c.file}'에 '${c.contains}'가 없다 — 덮는다는 주장이 더 이상 참이 아니다.`);
+        }
+        break;
       }
-      break;
-    }
-    case "excluded": {
-      for (const k of ["why", "since", "owner_action"] as const) {
-        if (!e[k]) fail(`"${e.name}": excluded인데 ${k}가 없다 — 선언되지 않은 부재는 통과할 수 없다.`);
+      case "excluded": {
+        for (const k of ["why", "since", "owner_action"] as const) {
+          if (!e[k]) fail(`"${e.name}": excluded인데 ${k}가 없다 — 선언되지 않은 부재는 통과할 수 없다.`);
+        }
+        break;
       }
-      break;
+      default:
+        fail(`"${e.name}": 알 수 없는 status '${e.status}' (mirrored|covered|excluded)`);
     }
-    default:
-      fail(`"${e.name}": 알 수 없는 status '${e.status}' (mirrored|covered|excluded)`);
   }
+  return errors;
 }
 
-// ── 보고 ────────────────────────────────────────────────────────────────────────────────────────
-if (errors.length) {
-  for (const e of errors) console.error(`::error::ci-parity: ${e}`);
-  console.error(`\nci-parity: ${errors.length}건 실패 (gate run 스텝 ${stepNames.length}건)`);
-  process.exit(1);
-}
-const n = (s: Status) => [...byName.values()].filter((e) => e.status === s).length;
-console.log(
-  `ci-parity OK — gate run 스텝 ${stepNames.length}건 전건 계상: ` +
-    `mirrored ${n("mirrored")} · covered ${n("covered")} · excluded ${n("excluded")}`,
-);
+// 실행 순서(열거 → floor → SCAN → 검사 → 종료코드)는 guardMain이 구조로 소유한다.
+// 이 가드는 종전에 바닥값만 있고 SCAN이 없던 자리다 — 커널 편입으로 실행 관측 축이 열린다.
+guardMain({
+  domains: [{
+    scan: "check-ci-parity",
+    min: MIN_STEPS,
+    floorHint: 'job 리네임·yq 실패·스키마 변경 — 이 상태의 "미계상 0건"은 통과가 아니라 무측정이다',
+    enumerate: deriveSteps,
+  }],
+  output: "stdout",
+  check: reconcile,
+  report: (v) => {
+    for (const e of v) console.error(`::error::ci-parity: ${e}`);
+    console.error(`\nci-parity: ${v.length}건 실패 (gate run 스텝 ${stepNames.length}건)`);
+  },
+  ok: () => {
+    const n = (s: Status) => [...byName.values()].filter((e) => e.status === s).length;
+    console.log(
+      `ci-parity OK — gate run 스텝 ${stepNames.length}건 전건 계상: ` +
+        `mirrored ${n("mirrored")} · covered ${n("covered")} · excluded ${n("excluded")}`,
+    );
+  },
+});

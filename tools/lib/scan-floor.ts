@@ -19,6 +19,9 @@ export type ScanDomain = {
 };
 
 export function guardMain(opts: {
+  // 가드 식별자 — 도메인 라벨과 별개다("라벨 = 열거 도메인 하나" 규약상 도메인 라벨을 검사
+  // 실패 같은 비-도메인 진단에 참칭하면 안 된다). 다중 도메인 가드는 지정하라.
+  label?: string;
   domains: ScanDomain[];
   // 방출 정책 — **명시 필수**(design r1-3: 기본값에 숨기지 않는다). "none"은 기계 판독 stdout
   // 모드 전용이며 마커만 끄고 floor 판정·fail-closed는 그대로다.
@@ -57,8 +60,15 @@ export function guardMain(opts: {
   if (opts.output === "stdout") {
     opts.domains.forEach((d, i) => console.log(`SCAN: ${d.scan}: ${counts[i]}`));
   }
-  // ④ 검사 → ⑤ 종료코드.
-  const viol = opts.check();
+  // ④ 검사 → ⑤ 종료코드. 검사 단계의 예외도 커널이 접는다(raw 스택 금지 — 마커는 이미
+  // 방출된 뒤라 붕괴 경로와 구별된다).
+  let viol: string[];
+  try {
+    viol = opts.check();
+  } catch (e) {
+    console.error(`FAIL: ${opts.label ?? opts.domains[0]?.scan ?? "guard"}: 검사 실패 — ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  }
   if (viol.length) {
     opts.report(viol);
     process.exit(1);

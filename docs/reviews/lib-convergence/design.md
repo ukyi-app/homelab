@@ -35,6 +35,10 @@ vmalert-e2e.sh)는 재발이 멈췄고, **탐지기·복붙으로 대응한 자�
   `scripts/lib/scan-floor.sh`(소비자 15, 콜사이트↔방출 대조 테스트 보유)의 TS 이식이다.
 - `tools/lib/policy-ledger.ts`: `readLedger({path, container, entrySchema})` —
   **축소 범위**(design r1-4): fail-closed 로딩(빈 원장 = red) + 컨테이너 shape 통일
+  > 구현 정정(티켓 10): "빈 원장 = red"는 부재·파싱 실패에만 무조건 적용하고, **항목 수
+  > 바닥값은 `minEntries`(기본 0)로 소비자가 소유**한다 — image-ownership의 빈 unowned는
+  > 정당한 상태(무소유 0)로 실측됐고, "정당한 0건 vs 붕괴 0건"의 구별은 도메인 지식이라는
+  > 셸 커널의 기존 규율과 정합해야 했다.
   (현행 4가지 → 1가지, 주석 키 `_readme`/`$comment` 통일) + `schema-check.ts` 재사용
   항목 검증**까지만** 소유. **미선언·죽은-선언 양방향 대조는 콜사이트에 남긴다** —
   소비자 3곳의 대조 의미론이 실질적으로 다르다(중첩 워크플로/job 신원 · CI-step

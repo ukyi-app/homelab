@@ -13,6 +13,7 @@ setup() {
   cat > "$FX" <<EOF
 import { guardMain } from "$ROOT/tools/lib/scan-floor.ts";
 guardMain({
+  label: process.env.FX_LABEL || undefined,
   domains: [
     { scan: "fx:alpha", min: Number(process.env.FX_MIN_A ?? "1"), floorHint: "fixture alpha hint",
       enumerate: () => {
@@ -23,7 +24,10 @@ guardMain({
       enumerate: () => Number(process.env.FX_N_B ?? "2") },
   ],
   output: (process.env.FX_OUTPUT ?? "stdout") as "stdout" | "none",
-  check: () => (process.env.FX_VIOL ? ["v1"] : []),
+  check: () => {
+    if (process.env.FX_CHECK_THROW) throw new Error("fixture check boom");
+    return process.env.FX_VIOL ? ["v1"] : [];
+  },
   report: (v) => { console.log("FAIL: fixture violations: " + v.join(",")); },
   ok: (c) => { console.log("fixture OK " + c.join("/")); },
 });
@@ -86,6 +90,21 @@ EOF
   out="$output"
   run grep -q '^SCAN: ' <<<"$out"
   [ "$status" -ne 0 ]
+}
+
+@test "a check that throws fails loud after markers (never a raw stack)" {
+  # 검사 단계의 예외도 커널이 접는다 — raw 스택은 게이트 출력 규약 위반이다. 마커는 이미
+  # 방출된 뒤다(도메인 평가는 정상이었고 검사가 죽었을 뿐 — 붕괴 경로와 구별된다).
+  FX_CHECK_THROW=1 run bun "$FX"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q '^SCAN: fx:alpha: 3$'
+  echo "$output" | grep -q '검사 실패'
+  echo "$output" | grep -q 'fixture check boom'
+  # 가드 식별자(label)가 있으면 검사 실패 진단은 그것을 쓴다 — 도메인 라벨은 열거 도메인
+  # 전용이라("라벨 = 열거 도메인 하나") 비-도메인 진단에 참칭하면 안 된다.
+  FX_CHECK_THROW=1 FX_LABEL=fx-guard run bun "$FX"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q '^FAIL: fx-guard: 검사 실패'
 }
 
 @test "output:none keeps stdout free of markers while verdict semantics stay intact" {
