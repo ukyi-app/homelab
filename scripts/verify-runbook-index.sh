@@ -5,10 +5,13 @@
 # cf. verify-runbooks=DR bats 러너(별도, 불변).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 RB="$ROOT/docs/runbooks"
 shopt -s nullglob
 files=("$RB"/*.md)
-if [ ${#files[@]} -eq 0 ]; then echo "SKIP: verify-runbook-index: docs/runbooks/*.md 0건(gitignored 로컬 전용) — 인덱스 정합 미평가"; exit 4; fi
+# skip 방출(마커+exit 4 원자)은 guard_skip(scripts/lib/guard.sh)이 소유한다.
+if [ ${#files[@]} -eq 0 ]; then guard_skip verify-runbook-index "docs/runbooks/*.md 0건(gitignored 로컬 전용) — 인덱스 정합 미평가"; fi
 fail=0
 for f in "${files[@]}"; do
   b="$(basename "$f")"

@@ -7,6 +7,8 @@
 # ⚠️ 예전엔 이 skip이 exit 2였는데 아래 unknown-option도 2다 — 한 코드에 두 의미였다. 규약(4=skip,
 # CONTRIBUTING '가드 skip 신호')으로 갈랐다.
 set -euo pipefail
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 
 CERT="tools/sealed-secrets-cert.pem"
 NS="sealed-secrets"
@@ -21,16 +23,17 @@ done
 
 [ -f "$CERT" ] || { echo "secret-cert-check: committed cert 없음: $CERT"; exit 1; }
 
-command -v kubeseal >/dev/null 2>&1 || { echo "SKIP: secret-cert-check: kubeseal 부재 — 라이브 cert 대조 미평가"; exit 4; }
+# skip 방출(마커+exit 4 원자)은 guard_skip(scripts/lib/guard.sh)이 소유한다.
+command -v kubeseal >/dev/null 2>&1 || guard_skip secret-cert-check "kubeseal 부재 — 라이브 cert 대조 미평가"
 
 live="$(kubeseal --controller-namespace "$NS" --fetch-cert 2>/dev/null || true)"
-[ -n "$live" ] || { echo "SKIP: secret-cert-check: 라이브 cert fetch 실패(KUBECONFIG/클러스터 접근 확인) — 대조 미평가(봉인 전 수동 확인 권장)"; exit 4; }
+[ -n "$live" ] || guard_skip secret-cert-check "라이브 cert fetch 실패(KUBECONFIG/클러스터 접근 확인) — 대조 미평가(봉인 전 수동 확인 권장)"
 
 fp_live="$(printf '%s' "$live" | openssl x509 -noout -fingerprint -sha256 2>/dev/null || true)"
 fp_have="$(openssl x509 -in "$CERT" -noout -fingerprint -sha256 2>/dev/null || true)"
 
 [ -n "$fp_have" ] || { echo "secret-cert-check: committed cert 읽기 실패: $CERT"; exit 1; }
-[ -n "$fp_live" ] || { echo "SKIP: secret-cert-check: 라이브 cert 파싱 실패 — 대조 미평가"; exit 4; }
+[ -n "$fp_live" ] || guard_skip secret-cert-check "라이브 cert 파싱 실패 — 대조 미평가"
 
 if [ "$fp_live" != "$fp_have" ]; then
   echo "secret-cert-check: STALE — committed cert($CERT)가 라이브 컨트롤러 cert와 불일치."

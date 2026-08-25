@@ -61,7 +61,13 @@ const GATE_JOB = "gate";
 //   · 앞에 공백을 요구했다가 skipGuards가 0건 — 실제 마커는 `echo "SKIP: …"`처럼 따옴표 뒤에 온다.
 //   · 출력 동사를 안 보다가 이 파일 자신의 **정규식 상수**가 마커로 잡혀 `make verify`가 권위로
 //     승격됐다(규약을 다루는 코드 ≠ 규약을 쓰는 가드).
-const SKIP_EMISSION = /(echo|printf|console\.log)[^\n]*SKIP: [a-z0-9-]+:/;
+//   · **커널 경유 방출도 센다** — guard_skip(scripts/lib/guard.sh)으로 이관된 가드는 소스에
+//     리터럴 마커가 없다. 호출 형태를 안 보면 그 가드들이 skip 규약 대상에서 조용히 빠져
+//     owner-local make 타깃의 권위가 사라진다(고아 오탐). 규율은 check-skip-signalling과 동형:
+//     주석 줄(`[^\n#]*` — # 이전까지만)은 emission이 아니다 — 커널을 *설명하는* 주석이
+//     그 가드를 skip 가드로 둔갑시키면 위 두 사고의 재발이다. TS skip() 호출 형태는 소비자가
+//     생기는 티켓 11에서 함께 넓힌다(`skip\(`만 넣으면 임의 skip( 문자열·주석이 오탐된다 — 실측 2건).
+const SKIP_EMISSION = /(echo|printf|console\.log)[^\n]*SKIP: [a-z0-9-]+:|(^|\n)[^\n#]*\bguard_skip [a-z0-9-]+/;
 
 // 명령 세그먼트의 '실행 대상'을 찾을 때 건너뛰는 실행 동사·래퍼.
 const EXEC_VERBS = new Set([

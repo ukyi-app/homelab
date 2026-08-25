@@ -48,6 +48,14 @@ export function parseCommand(argv: string[], tree: CommandTree): ParsedCommand {
 //   경로를 잃어도 CI가 초록이다(verify-runbook-index 실측 — CI에선 런북이 gitignored라 무조건 skip이었다).
 //   4를 낼 때는 같은 줄에서 `SKIP: <가드>: <이유>` 마커를 함께 낸다(정적 짝 검증 —
 //   tests/gates/test_guard-skip-signalling.bats).
+// skip(4) 방출 — 위 종료코드 어휘의 함수형(산문 SSOT를 코드로). 마커와 종료코드를 **한 문장
+// 줄에서 원자** 방출한다: check-skip-signalling의 짝 검사(같은 줄 규약)가 이 구현 줄로 성립하고,
+// 콜사이트는 짝 규약을 알 필요가 없어진다(셸 레인의 대응물은 scripts/lib/guard.sh의 guard_skip).
+// 문자열 연결(쌍따옴표)인 이유: 짝 검사는 마커가 따옴표 리터럴 안에 있을 때만 emission으로 본다.
+export function skip(guard: string, reason: string): never {
+  console.log("SKIP: " + guard + ": " + reason); process.exit(4);
+}
+
 export type TypedFlags = {
   str: (k: string, d?: string) => string | undefined;
   bool: (k: string) => boolean;
