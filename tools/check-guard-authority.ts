@@ -39,6 +39,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { typedFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
+import { ScanError, parseFloor, scanFloor, scanSignal } from "./lib/scan-floor.ts";
 
 const WORKFLOW_DIR = ".github/workflows";
 const CI_WORKFLOW = `${WORKFLOW_DIR}/ci.yaml`;
@@ -303,6 +304,16 @@ export function collectVenues(root: string, guards: { path: string; text: string
 // ── CLI ───────────────────────────────────────────────────────────────────────
 function fail(msg: string): never { console.error(`FAIL: ${msg}`); process.exit(1); }
 
+// 커널의 판정 실패를 이 도구의 종료로 번역한다 — `tools/lib/`는 종료를 소유하지 않는다.
+// fail()과 달리 **에러가 실어 온 권고 코드**를 쓴다(바닥값 붕괴 1 · 임계값 입력 오류 2).
+function dieOnScanError(e: unknown): never {
+  if (e instanceof ScanError) {
+    console.error(`FAIL: ${e.message}`);
+    process.exit(e.exitCode);
+  }
+  throw e;
+}
+
 if (import.meta.main) {
   let flags;
   try {
@@ -313,18 +324,37 @@ if (import.meta.main) {
     process.exit(2);
   }
   const root = flags.str("--repo-root", ".")!;
-  // 열거 붕괴 바닥값 — 소비자 소유(repo-walk는 scan-floor를 갖지 않는다). 현재 가드 23개.
-  const minScan = Number(flags.str("--min-scan", "15"));
+  // ⚠️ `--json`이면 stdout이 기계 판독 JSON이라 마커를 억제한다. **바닥값 검사는 그 모드에서도 한다** —
+  //    억제는 출력 채널의 성질이지 판정의 성질이 아니다. 그래서 asJson을 바닥값보다 위에서 읽는다.
+  const asJson = flags.bool("--json");
+  // 열거 붕괴 바닥값 — 수치는 소비자 소유(repo-walk는 바닥값을 갖지 않는다). 현재 가드 23개.
+  // ⚠️ raw 입력은 `Number()` **앞에서** 판정한다 — `Number("")===0`이고 `n < NaN`은 항상 false라,
+  //    coercion 뒤에 검증하면 오타 하나가 바닥값을 통째로 끈다(이행 전 실측: `--min-scan abc` → rc=0).
+  let minScan: number;
+  try {
+    minScan = parseFloor(flags.str("--min-scan", "15"), "--min-scan");
+  } catch (e) {
+    dieOnScanError(e);
+  }
 
   const guardEntries = walkManifests("guards", root).map((e) => ({ path: e.path, text: e.text }));
   const guards = guardEntries.map((e) => e.path);
-  if (guards.length < minScan) {
-    fail(`가드 열거 ${guards.length}건 < ${minScan} — 열거 붕괴(이 회계가 vacuous해진다)`);
+  try {
+    scanFloor("check-guard-authority:guards", guards.length, minScan, {
+      quiet: asJson,
+      hint: "이 회계가 vacuous해진다.",
+    });
+  } catch (e) {
+    dieOnScanError(e);
   }
 
   const venues = collectVenues(root, guardEntries);
   const authoritativeVenues = venues.filter((v) => v.kind !== "mirror");
   if (authoritativeVenues.length === 0) fail("권위 venue 0건 — venue 수집 붕괴(ci.yaml/run-bats/make 확인)");
+  // ⚠️ 바닥값이 걸린 수(권위 venue)와 보고하는 수(전체 venue)가 **다른** 유일한 자리다. 그래서
+  //    바닥값 없는 신호를 쓴다 — 라벨 규약("라벨 = 바닥값이 걸린 도메인")의 정당한 예외이고,
+  //    셸에도 같은 자리가 있다(check-argocd-revision이 scan_signal을 직접 부른다).
+  scanSignal("check-guard-authority:venues", venues.length, { quiet: asJson });
 
   const report = guards.map((g) => {
     const hits = venues.filter((v) => invokesGuard(v.text, g, guards));
@@ -336,17 +366,9 @@ if (import.meta.main) {
   });
 
   // --json이면 stdout은 **JSON만** — 사람용 요약을 섞으면 파이프 소비자가 파싱에 실패한다.
-  const asJson = flags.bool("--json");
+  // 마커는 위에서 이미 억제됐다(quiet: asJson).
   if (asJson) console.log(JSON.stringify({ guards: guards.length, venues: venues.length, report }, null, 2));
 
-  // SCAN 신호(scripts/lib/scan-floor.sh 규약) — **위반 검사보다 앞**이다: 규약상 도메인을 평가한
-  // 실행은 위반 여부와 무관하게 신호를 낸다(면제는 바닥값 실패 경로뿐 — 위 fail()이 이미 처리).
-  // 라벨 = 바닥값이 걸린 열거 도메인 하나 — 여긴 가드(minScan)와 venue(붕괴 0건 검사) 둘이다.
-  // --json 모드에선 stdout이 기계 판독 JSON이라 내지 않는다(마커가 JSON을 오염시킨다).
-  if (!asJson) {
-    console.log(`SCAN: check-guard-authority:guards: ${guards.length}`);
-    console.log(`SCAN: check-guard-authority:venues: ${venues.length}`);
-  }
   const orphans = report.filter((r) => r.authoritative.length === 0);
   if (orphans.length) {
     console.error("FAIL: 권위 있는 실행 경로가 0인 가드 — 삭제되거나 조용히 죽어도 아무도 모른다:");

@@ -125,7 +125,10 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q '스캔 대상'
+  # 커널 이행 후 문구는 균일하다 — 라벨이 도메인을, hint가 원인 후보를 나른다.
+  # 앵커를 둘 다 건다: 균일부가 바뀌면 규약 회귀이고, hint가 사라지면 진단 품질 회귀다.
+  echo "$output" | grep -q '열거 붕괴'
+  echo "$output" | grep -q 'grep 셀렉터 회귀'
 }
 
 

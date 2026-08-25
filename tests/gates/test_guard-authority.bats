@@ -211,3 +211,70 @@ YAML
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "전건 권위 경로 ≥1"
 }
+
+# ── 스캔 커널 이행 (티켓 02) ───────────────────────────────────────────────────
+# 바닥값 주입이 raw 문자열을 Number() **앞에서** 판정해야 한다. `Number("")===0`이고
+# `n < NaN`은 항상 false라, coercion 뒤에 검증하면 오타 하나가 바닥값을 조용히 끈다.
+
+@test "a malformed --min-scan is rejected instead of silently disabling the floor" {
+  for bad in abc "" 1.5 -1; do
+    run bun "$TOOL" --min-scan "$bad"
+    [ "$status" -eq 2 ]
+    out="$output"
+    # 바닥값이 꺼진 채 초록이 되면 마커가 나간다 — 나가면 안 된다.
+    run grep -q "^SCAN:" <<<"$out"
+    [ "$status" -ne 0 ]
+  done
+}
+
+# 억제는 출력 채널의 성질이지 판정의 성질이 아니다 — JSON 모드에서도 바닥값은 본다.
+@test "the json mode still enforces the enumeration floor" {
+  run bun "$TOOL" --json --min-scan 9999
+  [ "$status" -ne 0 ]
+  out="$output"
+  run grep -q "열거 붕괴" <<<"$out"
+  [ "$status" -eq 0 ]
+  # 붕괴한 실행은 마커도 JSON도 내지 않는다.
+  run grep -q "^SCAN:" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+# 라벨 = 바닥값이 걸린 열거 도메인 하나. venues는 **바닥값이 걸리지 않은** 카운트 자리라
+# 검사한 수(권위 venue)와 보고한 수(전체 venue)가 다르다 — 그 성질이 보존돼야 한다.
+#
+# ⚠️ 마커의 **존재와 숫자꼴**만 보면 이 단언은 vacuous다 — 실측: 신호 대상을 authoritativeVenues로
+#    바꿔(297→265, 성질 파괴) 돌려도 45건 전부 green이었다. 그래서 **값**을 대조한다.
+@test "the venues marker counts every venue, not just the authoritative ones" {
+  run bun "$TOOL"
+  [ "$status" -eq 0 ]
+  marker="$(printf '%s\n' "$output" | sed -n 's/^SCAN: check-guard-authority:venues: //p')"
+  guards_marker="$(printf '%s\n' "$output" | sed -n 's/^SCAN: check-guard-authority:guards: //p')"
+  [ -n "$marker" ]
+  [ -n "$guards_marker" ]
+  # 두 라벨은 서로 다른 도메인을 센다 — 같은 수면 라벨을 나눌 이유가 없다.
+  [ "$marker" -ne "$guards_marker" ]
+  # 핵심: 마커가 세는 것은 **전체** venue다. JSON 모드의 venues 필드가 그 정의이므로 값이 같아야 한다.
+  run bun "$TOOL" --json
+  [ "$status" -eq 0 ]
+  total="$(printf '%s\n' "$output" | jq -r '.venues')"
+  [ "$marker" = "$total" ]
+  # 그 구별이 **관측 가능**해야 이 단언이 의미를 갖는다 — 비권위(mirror) venue가 0이면
+  # 전체와 권위가 같아져 위 대조가 자기 자신 vacuous가 된다.
+  nonauth="$(printf '%s\n' "$output" | jq -r '[.report[].nonAuthoritative[]] | unique | length')"
+  [ "$nonauth" -gt 0 ]
+}
+
+# "첫 도메인이 붕괴하면 뒤 도메인의 신호는 나가지 않는다"(설계 §4)의 증인. guards는 바닥값 0을
+# 통과해 이미 마커를 냈고, venue 수집이 붕괴한 지점 뒤의 venues 마커는 나오지 않는다.
+@test "a venue collapse keeps the guards marker but withholds the venues marker" {
+  tmp="$BATS_TEST_TMPDIR/empty"
+  mkdir -p "$tmp"
+  git -C "$tmp" init -q
+  run bun "$TOOL" --repo-root "$tmp" --min-scan 0
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qE '^SCAN: check-guard-authority:guards: 0$'
+  printf '%s\n' "$output" | grep -q '권위 venue 0건'
+  if printf '%s\n' "$output" | grep -q '^SCAN: check-guard-authority:venues:'; then
+    echo "붕괴 뒤 도메인의 마커가 나갔다: $output"; false
+  fi
+}
