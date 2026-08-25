@@ -92,12 +92,13 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   기술자 행에서 생성한다(수정은 기술자/생성기 조각 → `--write` 재생성, byte 드리프트 게이트가 강제).
   골든 픽스처: `tools/tests/fixtures/homelab/*.golden.json`.
 - **`generate-result-schema.ts`** — cli-result-schema.json **생성기**(cli-deepening 심화 3): 행렬
-  분기(allOf member 0)·verb enum은 기술자 행(lib/catalog-rows `CONTRACT_ROWS`)에서 생성하고,
-  x-contract·variant→exitCode 재진술·definitions 본문은 수제 조각으로 보존한다(컴팩트 스타일 —
+  분기(allOf member 0)·verb enum은 기술자 행(lib/catalog-rows `CONTRACT_ROWS`)에서, initSuccess·
+  initFailure의 archetype enum은 플랫폼 좌표(lib/platform `ARCHETYPES` — 심화 6 후속)에서 생성하고,
+  x-contract·variant→exitCode 재진술·나머지 definitions 본문은 수제 조각으로 보존한다(컴팩트 스타일 —
   과거 리뷰의 의도적 결정). 기본 `--check`(byte 대조 — make verify 로컬 보조), `--write`(재생성).
-  **게이트 강제는 bats**(test_result-schema-gen.bats — run-bats 수집)가 담당한다. 기술자 외 무참조라
-  생성물 부재·파손에서도 재생성 성립(설계 게이트 r1 D3). 이름이 가드 열거 규약(check-*)의 밖인 것은
-  의도다 — 생성기 겸 게이트라 check- 접두가 거짓이 된다.
+  **게이트 강제는 bats**(test_result-schema-gen.bats — run-bats 수집)가 담당한다. 기술자(행·좌표) 외
+  무참조라 생성물 부재·파손에서도 재생성 성립(설계 게이트 r1 D3). 이름이 가드 열거 규약(check-*)의
+  밖인 것은 의도다 — 생성기 겸 게이트라 check- 접두가 거짓이 된다.
 
 ## App Platform 변이 도구 (변이 디스패처 경유 — 직접 실행 금지)
 
@@ -299,9 +300,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`lib/platform.ts`** — 플랫폼 좌표 SSOT(HOMELAB_REPO·TEMPLATE_REPO·ARCHETYPES·
   COMPILED_ARCHETYPES). doctor가 검증한 대상과 이후 init이 쓰는 대상이 콜사이트마다 갈리지
   않게 한 곳에서만 정의(identity.ts와 같은 원칙 — 저긴 이름 형식, 여긴 좌표). MCP `app_init`
-  inputSchema의 archetype enum도 ARCHETYPES 파생이다(cli-deepening 심화 6 — 리터럴 사본이면
-  아키타입 확장 시 init 엔진은 수용하는데 MCP만 -32602로 거부하는 입력 표면 드리프트가 난다;
-  test_homelab-mcp.bats가 동치·확장 수용을 단언).
+  inputSchema의 archetype enum과 결과 계약(cli-result-schema.json initSuccess·initFailure)의
+  archetype enum도 ARCHETYPES 파생이다(cli-deepening 심화 6 — 리터럴 사본이면 아키타입 확장 시 init
+  엔진은 수용하는데 MCP만 -32602로 거부하거나 결과 계약만 낡는 드리프트가 난다; test_homelab-mcp.bats가
+  입력·결과 두 표면의 확장 수용을, test_result-schema-gen.bats가 생성물 파생을 단언).
 - **`lib/schema-check.ts`** — cli-result-schema.json 전용 미니 검증기(`schemaErrors()`, ajv 무의존).
   지원 키워드 화이트리스트 밖은 **throw로 fail-closed**(모르는 제약의 조용한 통과 차단).
   골든 픽스처·계약 테스트 전용 — create-app.ts의 check()는 .app-config.yml 정책 소유가

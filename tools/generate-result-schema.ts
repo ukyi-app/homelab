@@ -2,8 +2,11 @@
 // (lib/catalog-rows.ts CONTRACT_ROWS)의 산출물이다(cli-deepening 심화 3). 행렬 분기(allOf
 // member 0)와 verb enum은 행에서 생성되고, x-contract·variant→exitCode 재진술(의도된 이중부기)·
 // definitions 본문은 아래 수제 조각이다 — 컴팩트 스타일은 과거 리뷰의 의도적 결정이라 보존한다.
-// import는 기술자와 node 표준뿐이다: 계약 독자(contract.ts)도 생성물 JSON도 참조하지 않으므로
-// 생성물이 없거나 파손돼도 재생성이 성립한다(설계 게이트 r1 D3 — test_result-schema-gen.bats 증명).
+// import는 기술자(catalog-rows·platform 좌표 SSOT)와 node 표준뿐이다: 계약 독자(contract.ts)도 생성물
+// JSON도 참조하지 않으므로 생성물이 없거나 파손돼도 재생성이 성립한다(설계 게이트 r1 D3 —
+// test_result-schema-gen.bats 증명). initSuccess·initFailure의 archetype enum은 platform.ts ARCHETYPES
+// 파생이다(cli-deepening 심화 6 후속 — 리터럴 사본이면 아키타입 확장 시 입력 표면(MCP)은 수용하는데
+// 결과 계약만 낡는다).
 // 사용: 기본 --check(대상과 byte 대조, 드리프트면 exit 1) | --write(대상에 기록).
 //       --out <path>로 대상 지정(기본: 이 파일 옆 cli-result-schema.json).
 // 강제 지점 둘: 게이트는 test_result-schema-gen.bats(run-bats 수집 — required check), make verify의
@@ -12,6 +15,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CONTRACT_ROWS, LANES, type MutationVariantName } from "./lib/catalog-rows.ts";
+import { ARCHETYPES } from "./lib/platform.ts";
 
 const HEADER_A = `{
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -68,6 +72,8 @@ const TAIL_MID = `      ]
   ],
   "definitions": {`;
 
+// archetype enum 인라인 — verb enum과 같은 표기(`"a", "b"`)로 생성물 byte를 보존한다.
+const ARCHETYPE_ENUM = ARCHETYPES.map((a) => '"' + a + '"').join(", ");
 const DEFINITIONS = `    "doctorResult": {
       "type": "object",
       "additionalProperties": false,
@@ -334,7 +340,7 @@ const DEFINITIONS = `    "doctorResult": {
       "required": ["app", "archetype", "public", "repo", "scaffolded", "pushed"],
       "properties": {
         "app": { "type": "string", "minLength": 1 },
-        "archetype": { "enum": ["api", "fullstack", "site", "worker"] },
+        "archetype": { "enum": [${ARCHETYPE_ENUM}] },
         "public": { "type": "boolean" },
         "repo": { "type": "string", "minLength": 1 },
         "existed": { "type": "boolean" },
@@ -353,7 +359,7 @@ const DEFINITIONS = `    "doctorResult": {
       "required": ["app", "archetype", "public", "repo", "checkpoint", "error"],
       "properties": {
         "app": { "type": "string", "minLength": 1 },
-        "archetype": { "enum": ["api", "fullstack", "site", "worker"] },
+        "archetype": { "enum": [${ARCHETYPE_ENUM}] },
         "public": { "type": "boolean" },
         "repo": { "type": "string", "minLength": 1 },
         "existed": { "type": "boolean" },

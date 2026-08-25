@@ -318,15 +318,18 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
   mcp_rpc '{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"app_init","arguments":'"$ARGS"'}}'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -rc 'select(.id==41) | .error.code')" = "-32602" ]
-  # 사본 트리(lib + 진입점 + 계약 JSON): platform.ts의 ARCHETYPES 줄 끝에만 "hexagon"을 덧붙인다(mcp.ts 무변경).
-  # node_modules는 심링크로 공유한다 — 없으면 bun이 lockfile 밖 auto-install로 통과해 venue 의존 초록이 된다.
-  # sed 치환 불발은 vacuous라 grep으로 증명한다.
+  # 사본 트리(lib + 진입점 + 생성기 + 계약 JSON): cp 그대로이고 platform.ts의 ARCHETYPES 줄 끝에만 "hexagon"을
+  # 덧붙인다(mcp.ts·생성기는 축자 사본 — 변이 파일은 sed로 생성한 그 하나뿐). node_modules는 심링크로 공유한다 — 없으면 bun이 lockfile 밖 auto-install로
+  # 통과해 venue 의존 초록이 된다. sed 치환 불발은 vacuous라 grep으로 증명한다.
   T="$BATS_TEST_TMPDIR/ext"; mkdir -p "$T/tools"
-  cp -R tools/lib "$T/tools/lib"; cp tools/homelab.ts tools/*.json "$T/tools/"
+  cp -R tools/lib "$T/tools/lib"; cp tools/homelab.ts tools/generate-result-schema.ts tools/*.json "$T/tools/"
   ln -s "$ROOT/node_modules" "$T/node_modules"
   sed 's|^\(export const ARCHETYPES = \[.*\)\] as const;|\1, "hexagon"] as const;|' tools/lib/platform.ts > "$T/tools/lib/platform.ts"
   grep -q '^export const ARCHETYPES = .*"hexagon"\] as const;' "$T/tools/lib/platform.ts"
-  cmp -s tools/lib/mcp.ts "$T/tools/lib/mcp.ts"
+  # 결과 계약도 같은 SSOT에서 재생성한다 — 입력 표면(MCP enum)과 결과 표면(initFailure enum)이 함께 확장돼야
+  # "아키타입 추가 시 자동 수용"이 envelope까지 성립한다.
+  run bun "$T/tools/generate-result-schema.ts" --write
+  [ "$status" -eq 0 ]
   # dispatchSecrets 부재 경로 → 엔진이 preflight에서 부수효과 0으로 실패한다(결정적·스텁 무관) — 여기서
   # 단언하는 것은 체인 결과가 아니라 "입력 표면이 hexagon을 통과시켜 엔진까지 닿았다"는 사실이다.
   mcp_rpc_at "$T/tools/homelab.ts" \
@@ -340,6 +343,17 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
   [ "$(echo "$env43" | jq -r '.variant')" = "failure" ]
   [ "$(echo "$env43" | jq -r '.result.checkpoint')" = "preflight" ]
   [ "$(echo "$env43" | jq -r '.result.archetype')" = "hexagon" ]
+  # hexagon envelope이 재생성된 결과 계약(사본 트리)에 적합하다 — 두 표면이 한 SSOT에서 함께 확장됐다는 증명.
+  run bun -e '
+    const root = process.argv[2];
+    const { schemaErrors } = await import(root + "/tools/lib/schema-check.ts");
+    const { readFileSync } = await import("node:fs");
+    const sch = JSON.parse(readFileSync(root + "/tools/cli-result-schema.json", "utf8"));
+    const errs = schemaErrors(JSON.parse(process.argv[1]), sch, sch);
+    console.log(errs.length ? "INVALID:" + errs.join("|") : "valid");
+  ' "$env43" "$T"
+  [ "$status" -eq 0 ]
+  [ "$output" = "valid" ]
   # 부수효과 0 — 레포 생성 호출이 원장에 없다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
 }

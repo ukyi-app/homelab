@@ -165,6 +165,8 @@ lane: {
 
 mcp.ts:169의 archetype enum 리터럴(platform.ts ARCHETYPES의 사본 — 실측된 유일한 입력 표면 드리프트: 확장 시 MCP만 -32602 거부)을 ARCHETYPES에서 파생시킨다. 전면 입력 표면 카탈로그화(선언 3벌 → 1벌, totality 장치 2벌 제거)는 **다음 심화 패스 후보로 이연** — 재개 조건: 심화 2·3이 확정한 행 모양 + structure r1 B1(표현 관심사는 셸 소유, docs/reviews/homelab-cli/decisions.md) 재협상. shallow config-language 위험(transport 발산을 전부 표현하는 행이 대체 대상만큼 복잡해짐)이 검증에서 지적됐음을 함께 기록한다.
 
+**구현 중 확장(2026-08-25)**: 결과 계약 생성기(generate-result-schema.ts)의 initSuccess·initFailure archetype enum 리터럴 2곳도 같은 SSOT 파생으로 전환했다 — 심화 3의 "definitions 본문은 수제 조각"에 대한 의식적 예외이며, 생성물 byte는 동일하고 생성기 import는 여전히 기술자(catalog-rows·platform 좌표)뿐이라 r1 D3(격리 재생성)는 유지된다. 이로써 아키타입 추가는 입력 표면(MCP)과 결과 표면(계약 enum)에 함께 전파되고, 남는 손 앵커(bats의 4종 핀)만 의식적 갱신 대상이다.
+
 ---
 
 ## 공통 보존 불변식 (전 심화 공통 AC)

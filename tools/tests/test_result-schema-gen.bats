@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # 결과 계약 표화(cli-deepening 심화 3) — cli-result-schema.json은 기술자 행(catalog-rows
-# CONTRACT_ROWS)에서 생성기의 산출물이다. 드리프트 게이트(byte 동일)·생성물 부재 재생성
-# (의존 순환 부재 — 설계 게이트 r1 D3)·행 순서 손 앵커·판별성을 여기서 강제한다.
+# CONTRACT_ROWS)과 플랫폼 좌표(platform ARCHETYPES)에서 생성기의 산출물이다. 드리프트 게이트(byte 동일)·
+# 생성물 부재 재생성(의존 순환 부재 — 설계 게이트 r1 D3)·행 순서 손 앵커·판별성을 여기서 강제한다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과 함정. @test 이름은 영어(인코딩 함정).
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
@@ -35,7 +35,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   T="$BATS_TEST_TMPDIR/isolated"
   mkdir -p "$T/tools/lib"
   cp tools/generate-result-schema.ts "$T/tools/"
-  cp tools/lib/catalog-rows.ts "$T/tools/lib/"
+  cp tools/lib/catalog-rows.ts tools/lib/platform.ts "$T/tools/lib/"
   [ ! -f "$T/tools/cli-result-schema.json" ]
   # cwd도 격리 트리 안으로 — 실 레포가 cwd 상대 경로로 보이면 무참조 증명이 vacuous해진다.
   run bash -c "cd '$T' && exec bun tools/generate-result-schema.ts --write --out gen.json"
@@ -61,9 +61,34 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   T="$BATS_TEST_TMPDIR/mut"
   mkdir -p "$T/tools/lib"
   cp tools/generate-result-schema.ts "$T/tools/"
+  cp tools/lib/platform.ts "$T/tools/lib/"
   sed 's|chain: false|chain: true|' tools/lib/catalog-rows.ts > "$T/tools/lib/catalog-rows.ts"
   run bash -c "cd '$T' && exec bun tools/generate-result-schema.ts --write --out gen.json"
   [ "$status" -eq 0 ]
+  run cmp -s tools/cli-result-schema.json "$T/gen.json"
+  [ "$status" -eq 1 ]
+}
+
+@test "the archetype enum derives from platform ARCHETYPES (hand-pinned anchor, mutation discriminability)" {
+  # 손 앵커 — 커밋된 생성물의 initSuccess·initFailure archetype enum을 리터럴로 핀한다(SSOT 축소 시 vacuous 차단).
+  for d in initSuccess initFailure; do
+    [ "$(jq -rc ".definitions.$d.properties.archetype.enum | join(\",\")" tools/cli-result-schema.json)" = "api,fullstack,site,worker" ]
+  done
+  # 리터럴 사본 소멸 — 생성기 소스에 아키타입 이름이 없다(양성 대조: 같은 술어가 SSOT에서는 매치).
+  [ "$(grep -c '"fullstack"' tools/lib/platform.ts)" -ge 1 ]
+  [ "$(grep -c '"fullstack"' tools/generate-result-schema.ts)" = "0" ]
+  # 변이: platform.ts의 ARCHETYPES 줄 끝에만 "hexagon"을 덧붙인 격리 트리에서 생성하면 두 정의 모두에 반영된다.
+  T="$BATS_TEST_TMPDIR/arch"
+  mkdir -p "$T/tools/lib"
+  cp tools/generate-result-schema.ts "$T/tools/"
+  cp tools/lib/catalog-rows.ts "$T/tools/lib/"
+  sed 's|^\(export const ARCHETYPES = \[.*\)\] as const;|\1, "hexagon"] as const;|' tools/lib/platform.ts > "$T/tools/lib/platform.ts"
+  grep -q '^export const ARCHETYPES = .*"hexagon"\] as const;' "$T/tools/lib/platform.ts"
+  run bash -c "cd '$T' && exec bun tools/generate-result-schema.ts --write --out gen.json"
+  [ "$status" -eq 0 ]
+  for d in initSuccess initFailure; do
+    [ "$(jq -rc ".definitions.$d.properties.archetype.enum | join(\",\")" "$T/gen.json")" = "api,fullstack,site,worker,hexagon" ]
+  done
   run cmp -s tools/cli-result-schema.json "$T/gen.json"
   [ "$status" -eq 1 ]
 }
