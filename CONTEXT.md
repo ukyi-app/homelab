@@ -37,6 +37,32 @@ _Avoid_: 핀 설정, 핀 메타데이터
 베스포크 레인(descriptor)이 같은 해석을 공유한다.
 _Avoid_: 자동 머지 플래그
 
+**bump 계획 (bump plan)**:
+apps 레인 배포 핀 갱신 한 사이클의 계약 산출물 — plan 항목·레인(`bump`/`propose-pr`)·
+브랜치/커밋 문구/writer 신원 명명 규약. 계약은 `tools/lib/bump-plan.ts`가 소유하고
+생산자(poll-ghcr)와 소비자(run-bump-plan·ensure-bump-pr)가 공유한다.
+_Avoid_: 폴링 결과, 갱신 목록
+
+### 가드 (guards)
+
+**가드 커널 (guard kernel)**:
+가드 한 번의 실행이 반드시 지나는 순서 — 열거 → 바닥값 판정 → SCAN 방출 → 검사 →
+종료코드 — 를 소유하는 골격. 셸 adapter는 `scripts/lib/scan-floor.sh`(+`guard.sh`),
+TS adapter는 `tools/lib/scan-floor.ts`의 `guardMain`.
+_Avoid_: 가드 프레임워크, 공용 가드 유틸
+
+**정책 원장 (policy ledger)**:
+`policy/` 아래 기계가 읽는 가드 정책 파일. 리더 `tools/lib/policy-ledger.ts`는
+fail-closed 로딩·컨테이너 shape·항목 검증**만** 소유하고, 미선언/죽은-선언 양방향
+대조는 **각 가드 콜사이트가 소유**한다(대조 의미론이 소비자마다 다르다 — 공통
+interface는 공통형이 실증될 때).
+_Avoid_: 설정 파일, allowlist(단독 — 원장의 한 형태일 뿐이다)
+
+**판정 어휘 (verdict vocabulary)**:
+발화 e2e 하네스의 `fault`/`contract`/`fail`/`pass` 4함수. `(preflight)` 라벨과 로컬 집계는
+하네스-로컬 정책이라 공용 lib으로 올리지 않는다 — 그 라벨이 진단의 절반이다.
+_Avoid_: 에러 헬퍼
+
 ### 봉인 계약 (sealed contract)
 
 **봉인 계약**:
@@ -75,6 +101,12 @@ _Avoid_: 연결, 등록
 owner 전용 workflow_dispatch 진입점 워크플로. actor 가드·계약표 검증을 통과한 변이를
 reusable 워크플로에 위임해 결과를 PR로 낸다. 전역 직렬화 그룹(homelab-mutation)에 속한다.
 _Avoid_: 변이 워크플로(reusable과 구분 안 됨), 수동 트리거
+
+**앱 표면 (app surface)**:
+앱 하나가 이 레포에 남기는 배포 파일 집합(values·bindings·봉인본·kustomization·
+source-repo·activation 마커 등). create가 쓰는 집합과 teardown이 지우는 집합은 같아야
+하며, `tools/lib/app-surface.ts`가 그 집합과 경로 구성을 선언한다.
+_Avoid_: 앱 디렉토리, 배포 파일들
 
 **아키타입 (archetype)**:
 앱 템플릿 스캐폴더가 생성하는 앱의 형태 — fullstack / api / site / worker.
