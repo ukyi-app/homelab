@@ -62,13 +62,15 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   그 도구의 kubeseal stdin 전용, CLI는 .env를 읽지 않는다.
   `homelab cache create <name> [--maxmemory-mi 16..1024] [--wait]` = 변이 엔진의 두 번째 인스턴스
   (create-cache 디스패치, 빈 maxmemory=디스패처 기본 64 소유, 수렴 집합 cache-prod·data-conn-prod,
-  표면 = 인스턴스 deployment.yaml + conn 봉인본). `homelab cache url` = cache-url.ts 패스스루 재노출.
+  표면 = 인스턴스 deployment.yaml + conn 봉인본). `homelab cache url` = conn URL 엔진
+  (`lib/conn-url.ts`)의 catalog op — 다른 동사와 같은 envelope 계약(--json), 사람용은 렌더러 소유.
   `homelab db create <name> [--ext a,b] [--wait]` = 첫 변이 동사(공유 변이 엔진 `lib/mutation.ts`의
   첫 인스턴스): create-database 디스패처를 correlation 수령증과 함께 트리거 → nonce 에코 run-name으로
   자기 run 특정(정확히 1개, ≥2=race exit 3) → conclusion 추적(실패 잡 열거) → `--wait`면 auto-merge
   머지 관측 + Application 집합(cnpg-data·data-conn-prod) 수렴(머지 SHA 후손+Synced+Healthy+표면 실존,
   후손 리비전 표면 부재=superseded). KUBECONFIG 부재=머지까지 확인+omitted=["live"].
-  `homelab db url` = 기존 `db-url.ts` 패스스루 재노출(같은 동작 — argv·stdio·종료코드 그대로).
+  `homelab db url` = conn URL 엔진(`lib/conn-url.ts`)의 catalog op — envelope 계약(--json)·F2
+  채널 분리·상호배타는 엔진 술어 소유(구 패스스루 계약은 티켓 08에서 op 계약으로 대체됨).
   `homelab status [<app>] [--run <url>|--pr <url>] [--json]` = 상태 관찰(관측 전용): 인자 없음=
   전체 앱 목록·요약(레포 데이터), `<app>`=핀·바인딩·최근 run·열린 PR(+KUBECONFIG 있으면 ArgoCD
   `<app>-prod` sync/health, 없으면 라이브 구간 생략 — envelope.omitted=["live"]·exit 0), 핸들
@@ -241,6 +243,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `purgeArtifactsFor` 삼중·`TOMBSTONES_PATH`) · audit-orphans(감사 — classify 소비, orphan-conn/
   malformed-conn 축) · db-url/cache-url(읽기). 레인 행(catalog-rows)과의 표면 경로 일치는
   import-0 계약상 parity 가드(test_lane-rows.bats)가 대조한다.
+- **`lib/conn-url.ts`** — conn URL 엔진(`runDbUrl()`·`runCacheUrl()`·입력 술어 — cli-deepening
+  심화 5): db url/cache url의 실체. 계획이 타입 값(UrlResult ↔ urlResult 스키마 1:1)이라 계획 키
+  드리프트(release r2-a5 클래스)가 컴파일 타임 오류로 강등. 평문 비출력·F2 채널 분리(--admin ↔
+  .env.admin.local)·RW/ADMIN 상호배타는 엔진 소유. 핸들·env 키는 레이아웃 커널 소비. 소비자 3:
+  CLI 셸·MCP(같은 op)·bin 껍데기(db-url/cache-url — 기존 출력 계약 보존). envLocal·envDir 축은
+  입력에 존재하되 MCP는 envDir만 노출(설계 Q9).
 - **`lib/mutation.ts`** — 공유 변이 엔진(`runMutation()`) — 변이 동사들의 공통 골격: correlation
   nonce → 디스패치 → run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정 →
   [--wait] 머지 관측 + Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,

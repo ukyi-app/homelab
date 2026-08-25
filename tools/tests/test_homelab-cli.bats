@@ -235,3 +235,31 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^rejected:3$"
 }
+
+@test "url verbs are consumed directly at the op interface (no child process, schema-valid)" {
+  # AC2(티켓 08)의 직접 형태 — MCP 왕복 없이 op 결과 자체가 계약 적합함을 단언한다.
+  run bun -e '
+    import { CACHE_URL, DB_URL } from "./tools/lib/verbs.ts";
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const cases = [
+      ["db url", DB_URL.op({ name: "mydb", dryRun: true })],
+      ["cache url", CACHE_URL.op({ name: "mycache", dryRun: true })],
+    ];
+    for (const [verb, env] of cases) {
+      if (env.verb !== verb || env.variant !== "success" || env.result.dryRun !== true) { console.error(verb + ": " + JSON.stringify(env).slice(0, 120)); process.exit(1); }
+      const errs = schemaErrors(env, sch, sch);
+      if (errs.length) { console.error(verb + ": " + errs.join(" | ")); process.exit(1); }
+    }
+    console.log("ok:2");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:2$"
+}
+
+@test "url verbs accept a positional name like every other verb (documented surface)" {
+  run --separate-stderr bun tools/homelab.ts db url t --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.name')" = "t" ]
+}

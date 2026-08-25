@@ -226,7 +226,8 @@ mcp_rpc() {
 
 @test "the cache_url success envelope is schema-valid (plan host does not leak into urlResult)" {
   # release r2-a5: cache-url 계획은 host를 담는데 urlResult(additionalProperties:false)엔 없다 —
-  # 계획을 통째로 복사하면 성공 envelope이 스키마 위반. 화이트리스트 복사로 유효해야 한다.
+  # 구판은 자식 계획 JSON의 화이트리스트 복사로 지켰던 성질 — 지금은 엔진의 타입 결과
+  # (UrlResult ↔ urlResult 1:1)가 host류 계획 전용 필드의 유입을 컴파일 타임에 차단한다(티켓 08).
   ED="$BATS_TEST_TMPDIR/ed3"; mkdir -p "$ED"
   mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":33,\"method\":\"tools/call\",\"params\":{\"name\":\"cache_url\",\"arguments\":{\"name\":\"mycache\",\"envDir\":\"$ED\",\"dryRun\":true}}}"
   [ "$status" -eq 0 ]

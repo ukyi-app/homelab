@@ -65,8 +65,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   run grep -nE '\^\[a-z\]\[a-z0-9-\]\*\$' \
     tools/db-url.ts tools/cache-url.ts tools/teardown-resource.ts tools/validate-mutation.ts
   [ "$status" -ne 0 ]
-  for f in db-url cache-url teardown-resource validate-mutation provision-db provision-cache; do
+  for f in teardown-resource validate-mutation provision-db provision-cache; do
     run grep -q "lib/identity.ts" "tools/$f.ts"
+    [ "$status" -eq 0 ]
+  done
+  # db-url/cache-url은 엔진 껍데기(티켓 08) — 이름 검증은 conn-url 엔진 술어가 identity SSOT를
+  # 소유하고, bin은 엔진을 경유한다(직수입 대신 위임 — 분기 없는 단일 판정은 유지된다).
+  for f in db-url cache-url; do
+    run grep -q "lib/conn-url.ts" "tools/$f.ts"
     [ "$status" -eq 0 ]
   done
 }

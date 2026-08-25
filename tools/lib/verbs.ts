@@ -5,6 +5,7 @@
 // (homelab.ts) 소유이고, MCP 서버(후속 티켓)는 op를 직접 호출해 같은 envelope을 tool 결과로 쓴다.
 // MCP 노출 정책 필드는 MCP 티켓에서 이 descriptor에 추가한다.
 import { CONTRACT_ROWS, DB_CHECKBOX_EXTS, laneMutationFields } from "./catalog-rows.ts";
+import { cacheUrlInputError, dbUrlInputError, runCacheUrl, runDbUrl, type CacheUrlInput, type DbUrlInput } from "./conn-url.ts";
 import { ENVELOPE, exitFor, type Envelope } from "./contract.ts";
 import { runDoctor } from "./doctor.ts";
 import { APP_NAME_RE, CACHE_MAXMEMORY_MI, EXT_RE, resourceNameError } from "./identity.ts";
@@ -34,9 +35,10 @@ export type DbCreateVerb = VerbShape<DbCreateInput>;
 export type CacheCreateInput = WaitInput & { name: string; maxmemoryMi?: number };
 export type CacheCreateVerb = VerbShape<CacheCreateInput>;
 
-// CLI 전용 패스스루 동사 — 산출이 로컬 파일 기록이라 envelope 계약 밖(같은 동작 재노출이 계약).
-// MCP에서의 형상은 MCP 티켓이 결정한다.
-export type CliOnlyVerb = { path: readonly string[]; desc: string; cliOnly: true; destructive?: boolean };
+// db url/cache url — conn URL 엔진(lib/conn-url.ts)의 catalog 동사(cli-deepening 심화 5:
+// 패스스루 특례 소멸 — 나머지 동사와 같은 op envelope 계약, CLI·MCP가 같은 op를 소비).
+export type DbUrlVerb = VerbShape<DbUrlInput>;
+export type CacheUrlVerb = VerbShape<CacheUrlInput>;
 
 // app create — 수동 머지 변이(머지 = 공개 승인, auto-merge:false — _create-app.yaml).
 export type AppCreateInput = WaitInput & { app: string };
@@ -54,7 +56,7 @@ export type AppTeardownVerb = VerbShape<AppTeardownInput>;
 export type AppInitVerb = VerbShape<AppInitInput>;
 
 // 전 동사의 union — 후속 동사가 멤버로 추가된다.
-export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | CacheCreateVerb | AppCreateVerb | AppSecretsVerb | AppTeardownVerb | AppInitVerb | CliOnlyVerb;
+export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | DbUrlVerb | CacheCreateVerb | CacheUrlVerb | AppCreateVerb | AppSecretsVerb | AppTeardownVerb | AppInitVerb;
 
 function doctorOp(_input: DoctorInput): Envelope {
   const { checks, summary } = runDoctor();
@@ -159,6 +161,20 @@ function appTeardownOp(input: AppTeardownInput): Envelope {
   return { schema: ENVELOPE, verb: "app teardown", variant, exitCode: exitFor(variant), omitted, result };
 }
 
+function dbUrlOp(input: DbUrlInput): Envelope {
+  const bad = dbUrlInputError(input);
+  if (bad) throw new Error(`계약 파손: dbUrlOp에 검증 안 된 입력 — ${bad}`);
+  const { variant, omitted, result } = runDbUrl(input);
+  return { schema: ENVELOPE, verb: "db url", variant, exitCode: exitFor(variant), omitted, result };
+}
+
+function cacheUrlOp(input: CacheUrlInput): Envelope {
+  const bad = cacheUrlInputError(input);
+  if (bad) throw new Error(`계약 파손: cacheUrlOp에 검증 안 된 입력 — ${bad}`);
+  const { variant, omitted, result } = runCacheUrl(input);
+  return { schema: ENVELOPE, verb: "cache url", variant, exitCode: exitFor(variant), omitted, result };
+}
+
 function appSecretsOp(input: AppSecretsInput): Envelope {
   const bad = appSecretsInputError(input);
   if (bad) throw new Error(`계약 파손: appSecretsOp에 검증 안 된 입력 — ${bad}`);
@@ -204,11 +220,10 @@ export const DB_CREATE: DbCreateVerb = {
   op: dbCreateOp,
 };
 
-// 기존 도구 재노출(같은 동작) — tools/db-url.ts 패스스루(CLI 셸이 spawn).
-export const DB_URL: CliOnlyVerb = {
+export const DB_URL: DbUrlVerb = {
   path: ["db", "url"],
-  desc: "클러스터 DB 접속 URL을 .env.local에 기록(기존 db:url 재노출 — 평문 stdout 비노출)",
-  cliOnly: true,
+  desc: "클러스터 DB 접속 URL을 .env.local(admin은 .env.admin.local)에 기록(평문 비출력 — 엔진 소유)",
+  op: dbUrlOp,
 };
 
 export const CACHE_CREATE: CacheCreateVerb = {
@@ -217,11 +232,10 @@ export const CACHE_CREATE: CacheCreateVerb = {
   op: cacheCreateOp,
 };
 
-// 기존 도구 재노출(같은 동작) — tools/cache-url.ts 패스스루(CLI 셸이 spawn).
-export const CACHE_URL: CliOnlyVerb = {
+export const CACHE_URL: CacheUrlVerb = {
   path: ["cache", "url"],
-  desc: "캐시 접속 URL을 .env.local에 기록(기존 cache:url 재노출 — port-forward 선행, 평문 stdout 비노출)",
-  cliOnly: true,
+  desc: "캐시 접속 URL을 .env.local에 기록(port-forward 선행, 평문 비출력 — 엔진 소유)",
+  op: cacheUrlOp,
 };
 
 // 열거 SSOT — 라우팅 어휘(TREE)·usage·MCP tool 목록이 여기서 파생된다.
