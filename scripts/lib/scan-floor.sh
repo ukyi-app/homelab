@@ -31,10 +31,10 @@
 #    실측한 적이 있다: 주석은 "11종/27종", 실제는 13종/31종, CONTRIBUTING·PROGRESS엔 또 다른 수치.
 #    현재값이 필요하면 세어라:
 #      grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh
-#      grep -lE '^[^/]*(SCAN: |scan(Floor|Signal)\()' tools/*.ts
-#    ⚠️ TS 쪽이 **두 형태**인 것은 커널 이행이 진행 중이기 때문이다(옛 형태 = 콜사이트가
-#       직접 SCAN 마커를 출력). 한쪽만 세면 옮긴 가드가 통째로 빠진다 — 실측 5 vs 6.
-#    정합은 tests/gates/test_scan-floor.bats가 **정적 콜사이트 == 런타임 방출** 집합 대조로 강제한다.
+#      grep -lE '^[^/]*scan(Floor|Signal)\(' tools/*.ts
+#    정합은 tests/gates/test_scan-floor.bats가 **정적 콜사이트 == 런타임 방출** 집합 대조로 강제하고,
+#    TS 콜사이트가 커널을 우회해 마커를 직접 출력하는 것은 scripts/check-scan-producers.sh가 거부한다
+#    (등식은 양쪽에서 함께 사라지는 우회를 못 잡는다 — 인식이 아니라 거부가 문을 닫는다).
 # ⚠️ **라벨 = 바닥값이 걸린 열거 도메인 하나.** 한 실행이 두 도메인을 보면 접미사로 나눈다
 #    (`check-skeleton:bats`/`:platform`). 도메인이 하나면 접미사를 붙이지 않는다.
 #

@@ -81,6 +81,15 @@
   이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + Makefile
   전수(자기 자신 제외 — 패턴 리터럴이 위반과 같은 모양). 열거 붕괴 차단용 `MIN_SCAN`(기본 70) 보유.
   `tests/gates/test_guard-skip-signalling.bats`가 호출(양방향 픽스처 음성 테스트 + 열거 바닥값).
+- **`check-scan-producers.sh`** — 가드 스캔 신호 규약(CONTRIBUTING '가드 스캔 신호')의 **거부 가드**:
+  추적 `tools/**/*.ts`·`*.mts`의 코드 줄이 커널(`tools/lib/scan-floor.ts`)을 우회해 `SCAN:` 마커를 직접
+  출력하면 red. 로스터 등식(`test_scan-floor.bats`)은 되돌린 가드가 정적·런타임 양쪽에서 함께 사라져
+  못 잡으므로(게이트 r1 F1) 인식이 아니라 거부가 문을 닫는다. 판정 선은 "출력 동사의 인자가 마커
+  리터럴로 시작"(여러 줄 호출 포함) — 마커를 다루는 소비자·진단문은 선 밖이라 제외 목록이 없다.
+  주석(`//`·블록 주석 상태 기계·꼬리 주석)을 걷어낸 뒤 판정하고, 면제는 커널 경로 하나 — 그 파일도
+  건너뛰지 않고 생산자 히트 ≥1을 검출기 생존 증거로 요구한다. awk 3겹 처방(rc 포착·`[ -r ]`·READFILES)
+  + 바닥값·마커는 검출 뒤. 바닥값은 상수(`MIN_FILES`, env 주입 없음) · `--root <dir>`는 픽스처 전용.
+  `tests/gates/test_scan-floor.bats`가 호출(되돌림·신규 생산자·주석 표면·소비자·검출기 붕괴·열거 붕괴 증인).
 - **`check-credential-expiry.sh`** — 자격증명 만료 원장(`policy/credential-expiry.json`) 검사. `--days N`
   (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). `credential-expiry.yaml`(주간)이 D-14 telegram 경고로
   중계, `tests/gates/test_credential_expiry.bats`가 가드. jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)

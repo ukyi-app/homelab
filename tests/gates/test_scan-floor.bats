@@ -153,7 +153,7 @@ EOF
   [ "$cmp_static" = "$runtime" ] || { echo "정적:"; echo "$cmp_static"; echo "런타임:"; echo "$runtime"; false; }
 }
 
-# 콜사이트 증인 — 바닥값 면제(픽스처·인자) 모드와 바닥값 없는 레인도 **자기** 신호를 낸다.
+# 콜사이트 증인 — 바닥값 면제(픽스처·인자) 모드와 바닥값 없는 카운트 자리도 **자기** 신호를 낸다.
 # 위 집합 대조는 기본 모드만 돌리므로 이 네 자리를 못 본다. 신호가 없으면 06은 "픽스처 호출"과
 # "가드 미실행"을 구별할 수 없다 — 08-a의 명시 산출물이 그 구별이다.
 @test "floor-exempt call sites emit their own scan marker" {
@@ -181,57 +181,42 @@ EOF
   [ -z "$bad" ]   # 비어야 통과. 디버깅: echo "$bad"
 }
 
-# TS 가드도 같은 규약을 쓴다(커널이 셸 전용이라 마커는 콜사이트에 있다).
+# TS 가드도 같은 규약을 쓴다 — 두 번째 adapter(`tools/lib/scan-floor.ts`)가 마커를 낸다.
 # ⚠️ **앞선 판은 하드코딩 로스터였고 이미 드리프트했다** — 3행(resource-limits·alert-rules·
 #    guard-authority)만 적혀 있었는데 실제 방출 TS는 5종이었다(image-ownership·workflow-readiness가
 #    누락). "하드코딩 소비처 목록은 자기 자신에게만 정확하다"(AGENTS.md 함정)의 살아있는 사례다.
 #    ⇒ 셸 adapter와 **동형**으로 바꾼다: 정적 콜사이트 라벨 집합 == 런타임 방출 라벨 집합.
 #
-# ⚠️ **이행 중에는 두 형태가 공존한다.** 옛 형태(콜사이트가 직접 `console.log`)와 새 형태(커널 호출).
-#    둘 다 인식해야 각 이행 티켓이 독립적으로 green이다. 한쪽만 보면 옮긴 가드가 정적·런타임 집합에서
-#    **동시에** 사라져 등식이 그대로 성립하고(실측: check-disk-caps를 옮긴 직후 이 테스트가 통과했다),
-#    바닥값의 여유가 그 손실을 덮는다.
-# ⚠️ **이 등식만으로는 커널 우회를 막지 못한다.** 되돌린 가드도 같은 이유로 양쪽에서 함께 사라진다.
-#    문을 닫는 것은 인식 제거가 아니라 **거부**다 — 마지막 이행 티켓이 "직접 생산자가 있으면 red"인
-#    가드를 세운다. 그때까지 이 확장은 임시 상태다.
-SCAN_OLD_RE='^[^/]*SCAN: '
+# ⚠️ 정적 축은 **커널 호출 형태만** 본다. 이행 중에는 옛 형태(콜사이트가 직접 `console.log`)도 함께
+#    인식했었다 — 한쪽만 보면 옮긴 가드가 정적·런타임 집합에서 **동시에** 사라져 등식이 그대로 성립하기
+#    때문이다(실측: check-disk-caps를 옮긴 직후 이 테스트가 통과했다). 이행이 끝나 옛 형태가 0이 된 지금,
+#    그 인식은 거뒀다. 그런데 같은 이유로 **이 등식만으로는 커널 우회를 막지 못한다** — 되돌린 가드도
+#    양쪽에서 함께 사라진다. 문을 닫는 것은 인식 제거가 아니라 **거부**다: 아래 "거부 가드" 절의
+#    `scripts/check-scan-producers.sh`가 "직접 생산자가 있으면 red"를 강제한다(설계 §5 · 게이트 r1 F1).
 SCAN_NEW_RE='^[^/]*scan(Floor|Signal)\('
 
 @test "the TypeScript guards emit the same marker shape (derived roster, not hardcoded)" {
-  # 정적: 주석(//) 줄을 제외한 콜사이트. 옛 형태는 `SCAN: <라벨>:`, 새 형태는 `scanFloor("<라벨>"`.
+  # 정적: 주석(//) 줄을 제외한 커널 콜사이트 `scanFloor("<라벨>"` · `scanSignal("<라벨>"`.
   # 라벨은 도메인 단위라 접미사가 붙을 수 있다.
-  static="$( { grep -hE "$SCAN_OLD_RE" "$ROOT"/tools/*.ts | grep -oE 'SCAN: [a-z0-9:-]+:' | sed 's/^SCAN: //; s/:$//'
-               grep -hE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts | grep -oE 'scan(Floor|Signal)\("[a-z0-9:-]+"' | sed 's/^[^"]*"//; s/"$//'
-             } | LC_ALL=C sort -u)"
+  static="$(grep -hE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts \
+            | grep -oE 'scan(Floor|Signal)\("[a-z0-9:-]+"' | sed 's/^[^"]*"//; s/"$//' | LC_ALL=C sort -u)"
   # 바닥값: 콜사이트가 통째로 사라지면 정적·런타임이 함께 줄어 등식이 유지된다(적대 검토가 실측한 구멍).
   n=$(printf '%s\n' "$static" | grep -c . || true)
-  # ⚠️ 라벨 수에 맞춰 올린다(실측 13). 여유는 두되 **절반이 사라져도 통과하는 상태**는 아니어야 한다 —
-  #    이 바닥값의 목적은 "콜사이트가 통째로 사라지면 정적·런타임이 함께 줄어 등식이 유지된다"는
-  #    구멍을 막는 것이고, 여유가 크면 그 구멍이 그대로 열려 있다. 래칫은 아니다: 라벨을 정당하게
-  #    줄이는 변경에서는 같이 내리면 되고, 그 조정이 diff에 보이는 것이 요점이다.
+  # ⚠️ 여유는 두되 **절반이 사라져도 통과하는 상태**는 아니어야 한다 — 이 바닥값의 목적은 위 구멍을
+  #    막는 것이고, 여유가 크면 그 구멍이 그대로 열려 있다. 정확한 기대값은 두지 않는다(손 관리 수치는
+  #    드리프트한다 — 커널 주석의 실측). 래칫은 아니다: 라벨을 정당하게 줄이는 변경에서는 같이 내리면
+  #    되고, 그 조정이 diff에 보이는 것이 요점이다.
+  # ⚠️ 여유 안의 **조용한 손실 두 형태는 다른 자리가 막는다.** 되돌림(콜사이트가 직접 출력으로)은 거부
+  #    가드가 잡는다. 삭제(콜사이트 자체를 지움 — 바닥값도 함께 사라진다)는 거부 가드도 이 등식도 못 본다
+  #    (적대 검토 실측: `scanFloor(…)`를 `void 0`으로 바꿔도 둘 다 green) — 그것은 각 가드의 도메인
+  #    테스트가 자기 바닥값·마커를 단언하는 자리다. 여기서 여유를 0으로 조이면 그 자리가 필요 없어지는
+  #    것이 아니라 라벨 수가 곧 손 관리 기대값이 된다(설계 §5가 기각한 형태).
   [ "$n" -ge 11 ]
   # 방출 TS 파일 전량을 **파생**한다 — 목록을 손으로 적지 않는다.
-  files="$(grep -lE "$SCAN_OLD_RE|$SCAN_NEW_RE" "$ROOT"/tools/*.ts)"
+  # ⚠️ 정적 집합과 이 목록이 같은 패턴에서 나오므로, 패턴이 깨지면 둘이 함께 비어 등식이 성립한다.
+  #    `[ -n "$files" ]`와 위 라벨 바닥값이 그 붕괴를 막고, 우회는 거부 가드가 막는다.
+  files="$(grep -lE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts)"
   [ -n "$files" ]
-  # ⚠️ **아래 등식은 두 형태를 다 본다는 것을 증명하지 못한다.** 커널로 옮긴 가드는 정적 로스터와
-  #    이 파일 목록에서 **동시에** 빠지므로 등식이 그대로 성립하고, 바닥값의 여유가 그 손실을 덮는다
-  #    (실측 재현: check-disk-caps를 옮긴 직후 이 테스트가 통과했다). 그래서 인식 자체를 여기서
-  #    단언한다 — 대상이 **이 변수들**이라 검증이 자기 계산을 보는 것으로 미끄러지지 않는다.
-  new_files="$(grep -lE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts)"
-  new_labels="$(grep -hE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts \
-                | grep -oE 'scan(Floor|Signal)\("[a-z0-9:-]+"' | sed 's/^[^"]*"//; s/"$//')"
-  # ⚠️ **신형 열거 자체에 바닥값을 건다.** 없으면 SCAN_NEW_RE가 깨졌을 때 아래 두 루프가 0회 반복해
-  #    조용히 통과하고(실측: 매치 0으로 변조하니 27건 전부 green), 등식은 양쪽이 함께 줄어 유지된다.
-  #    검증이 기준을 대상과 **같은 깨진 패턴**에서 뽑는 자리라, 이 커널이 다루는 그 병을 검증 쪽에
-  #    새로 만든다. 이행이 끝나 옛 형태가 0이 되면 이 단언은 거부 가드로 대체된다.
-  [ -n "$new_files" ]
-  [ -n "$new_labels" ]
-  for f in $new_files; do
-    printf '%s\n' "$files" | grep -qxF "$f"
-  done
-  for lbl in $new_labels; do
-    printf '%s\n' "$static" | grep -qxF "$lbl"
-  done
   runtime=""
   for f in $files; do
     out="$(bun "$f" 2>/dev/null)" || { echo "TS 가드가 비-0으로 죽었다: $f"; false; }
@@ -274,8 +259,8 @@ SCAN_NEW_RE='^[^/]*scan(Floor|Signal)\('
 
 # ── TypeScript adapter (08-b) ─────────────────────────────────────────────────
 # 같은 규약의 두 번째 adapter. 셸 쪽 단위 테스트 4종을 그대로 이식한다 — 규약이 언어가 아니라
-# 의미에서 하나라는 것이 이 커널의 주장이고, 두 레인이 한 파일에서 나란히 보여야 다음 사람이
-# 한쪽만 고치지 않는다.
+# 의미에서 하나라는 것이 이 커널의 주장이고, 두 adapter가 한 파일에서 나란히 보여야 다음 사람이
+# 한쪽만 고치지 않는다(CONTEXT.md 「가드 규약」 — "레인"은 배포 핀 도메인 전용 어휘라 여기서 쓰지 않는다).
 #
 # 병(TS 고유): 셸 콜사이트는 `[ "$got" -lt "$min" ]`이 수가 아닌 값에 **에러를 낸다**. TypeScript는
 # `Number("abc")`가 NaN이고 `n < NaN`이 항상 false라 **바닥값이 통째로 꺼진 채 초록**이 된다.
@@ -471,4 +456,220 @@ YAML
   out="$output"
   run grep -q "^SCAN:" <<<"$out"
   [ "$status" -ne 0 ]
+}
+
+# ── 거부 가드 — 커널 우회 직접 생산자 (T6) ────────────────────────────────────
+# 위 집합 대조는 **우회를 막지 못한다**: 정적 로스터와 실행 파일 목록이 같은 패턴에서 파생되므로,
+# 한 가드가 직접 출력으로 되돌아가면 양쪽에서 동시에 사라져 등식이 그대로 성립하고 바닥값의 여유가
+# 그 손실을 덮는다(설계 §5 · 게이트 r1 F1). 문을 닫는 것은 인식 제거가 아니라 **거부**다 —
+# `scripts/check-scan-producers.sh`가 "주석이 아닌 줄이 SCAN 마커를 직접 출력하면 red"를 강제한다.
+# 이 파일에서 호출하는 것이 그 가드의 권위 venue다(check-skip-signalling과 같은 형태).
+
+@test "no TypeScript guard emits the scan marker directly (kernel bypass is rejected)" {
+  run bash "$ROOT/scripts/check-scan-producers.sh"
+  [ "$status" -eq 0 ]
+  out="$output"
+  # 자기 열거 바닥값을 통과한 실행만 신호를 낸다 — 붕괴한 채 "직접 생산자 0건"을 내는 것이 이 캠페인이 다루는 병이다.
+  run grep -qE '^SCAN: check-scan-producers: [0-9]{2,}$' <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "직접 생산자 0건" <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
+# 실 `tools/` 추적 트리를 픽스처 루트로 복사한다 — 되돌림 시나리오는 **진짜 가드 파일**에 대해 증명해야
+# 하고, 그러면 바닥값·커널 자기 대조가 주입 없이 자연히 성립한다(티켓 04: 테스트 편의로 env를 열면
+# 프로덕션 방어가 꺼진다 — 주입은 애초에 필요 없었다).
+make_tools_fixture() {   # $1: 하위 디렉토리명 → 경로를 stdout으로
+  local fx="$BATS_TEST_TMPDIR/$1"
+  mkdir -p "$fx"
+  while IFS= read -r f; do
+    mkdir -p "$fx/$(dirname "$f")"
+    cp "$ROOT/$f" "$fx/$f"
+  done <<LIST
+$(git -C "$ROOT" ls-files -- 'tools/*.ts' 'tools/*.mts')
+LIST
+  git -C "$fx" init -q
+  git -C "$fx" add -A
+  echo "$fx"
+}
+
+# 핵심 증인 — 되돌림 시나리오가 red다. 이 단언이 없으면 "거부 축이 있다"는 주장이 무증인이다(티켓 06).
+# 두 형태를 다 건다: 커널 호출을 옛 형태로 **되돌린** 가드 · 커널을 안 거치는 **새** 직접 생산자.
+@test "reverting a guard to direct marker output is rejected (the bypass hole is closed)" {
+  fx="$(make_tools_fixture revert)"
+  # 대조군 — 손대지 않은 사본은 통과한다(아래 red가 픽스처 조립 자체의 실패가 아님을 증명).
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"
+  [ "$status" -eq 0 ]
+  # 되돌림: scanFloor 호출을 이행 전 형태(console.log)로.
+  python3 - "$fx/tools/check-resource-limits.ts" <<'PY'
+import sys
+p=sys.argv[1]; s=open(p,encoding='utf-8').read()
+i=s.index('scanFloor("check-resource-limits"'); j=s.index(');', i)+2
+n=s[:i]+'console.log(`SCAN: check-resource-limits: ${count}`);'+s[j:]
+assert n!=s; open(p,'w',encoding='utf-8').write(n)
+PY
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "커널 우회 직접 생산자" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "tools/check-resource-limits.ts:" <<<"$out"
+  [ "$status" -eq 0 ]
+  # 신호는 **나갔다** — 열거는 정상이었고 위반이 있었을 뿐이다("마커 부재 = 미실행" 해석 유지).
+  run grep -qE '^SCAN: check-scan-producers: [0-9]{2,}$' <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
+# 네 파일이 각각 한 조건을 행사한다 — `.mts` 열거 + `console.info` · `process.stdout.write` · **여러 줄 호출**
+# (이 레포의 실제 관용구: `console.log(` 로 끝나고 인자가 다음 줄 — 리뷰가 실 tools/에서 4곳을 실측했다) ·
+# `Bun.write(Bun.stdout, …)`. 픽스처가 `console.log` + 쌍따옴표 + `.ts`만 쓰면 나머지 분기는 "넣었지만
+# 아무도 보지 않는" 조건이 된다(적대 검토 실측: 동사 목록을 log 하나로 좁혀도 전건 green이었다).
+@test "a brand-new direct producer that never touched the kernel is rejected too" {
+  fx="$(make_tools_fixture fresh)"
+  printf '%s\n' 'const n = 3;' 'console.info("SCAN: check-fresh: " + n);' > "$fx/tools/check-fresh.mts"
+  printf '%s\n' 'const n = 3;' 'process.stdout.write(`SCAN: check-write: ${n}\n`);' > "$fx/tools/check-write.ts"
+  printf '%s\n' 'const n = 3;' 'console.log(' '  `SCAN: check-multi: ${n}`,' ');' > "$fx/tools/check-multi.ts"
+  printf '%s\n' 'const n = 3;' 'await Bun.write(Bun.stdout, "SCAN: check-bun: " + n + "\n");' > "$fx/tools/check-bun.ts"
+  git -C "$fx" add -A
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"
+  [ "$status" -eq 1 ]
+  out="$output"
+  for hit in "tools/check-fresh.mts:2:" "tools/check-write.ts:2:" "tools/check-multi.ts:3:" "tools/check-bun.ts:2:"; do
+    run grep -q "$hit" <<<"$out"
+    [ "$status" -eq 0 ]
+  done
+}
+
+# 검출기 사망은 "매치 0건"이 아니다 — 읽을 수 없는 파일은 넘기기 전에 잡고, 그 실행은 마커를 내지 않는다
+# (함정 원장 `findings="$(awk … || true)"`: 검출이 죽은 실행이 "N파일 스캔"을 내면 소비자가 정반대로 읽는다).
+@test "an unreadable target is a loud failure before any marker, not a silently skipped file" {
+  fx="$(make_tools_fixture unreadable)"
+  chmod 000 "$fx/tools/check-resource-limits.ts"
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"
+  chmod 644 "$fx/tools/check-resource-limits.ts"
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "읽을 수 없는 대상" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "^SCAN:" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+# 주석 표면 — `//` 줄 · 블록 주석 본문(JSDoc ` * ` 연속줄 **과 별 없는 줄** 둘 다) · 코드 줄 꼬리 `// …`.
+# 줄 단위 규칙은 여러 줄 구조를 못 본다(함정 원장 "heredoc 상태 기계…"): 별 없는 블록 본문이 코드로
+# 판정돼 오탐이었다(적대 검토 실측) — 그래서 상태 기계다. `^[^/]*`가 `//`만 제외한다는 것은 티켓 03이
+# 다른 자리(H1 회귀 증인이 JSDoc의 `process.exit` 예시를 코드로 오인)에서 실측한 같은 클래스다.
+# 양성 대조를 같은 파일에 함께 둔다 — 그것이 없으면 "오탐 없음"은 검출기가 죽어도 참이다. 그 대조는
+# **홑따옴표 + 꼬리 주석**이다: 따옴표 세 종과 "주석 판정은 행 앞에서만"을 한 줄이 함께 행사한다
+# (적대 검토 실측: 홑따옴표 조건을 지우거나 주석 앵커를 줄 중간까지 풀어도 전건 green이었다).
+@test "marker text inside the comment surfaces is not a producer (and a real one beside them is)" {
+  fx="$(make_tools_fixture comments)"
+  cat > "$fx/tools/lib/prose.ts" <<'TS'
+// console.log(`SCAN: prose-a: 1`) — 규약을 설명하는 줄
+/** 독스트링 첫 줄
+ * 콜사이트 관용구 예시: console.log("SCAN: prose-b: 2")
+   console.log("SCAN: prose-b2: 2") — 별 없이 들여쓴 연속줄
+ */
+/* 블록 주석 한 줄: process.stdout.write("SCAN: prose-c: 3") */
+/*
+  블록 주석 본문 — 별 없는 중간 줄:
+  console.log("SCAN: prose-c2: 3")
+*/
+export const prose = true; // 꼬리 주석: console.log("SCAN: prose-e: 5")
+TS
+  git -C "$fx" add -A
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"
+  [ "$status" -eq 0 ]
+  # 양성 대조 — 같은 파일의 코드 줄 하나가 red를 낸다(홑따옴표 · 꼬리 주석 달림).
+  printf '%s\n' "console.log('SCAN: prose-d: 4'); // 설명" >> "$fx/tools/lib/prose.ts"
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "tools/lib/prose.ts:12:" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -qE "prose-(a|b|b2|c|c2|e)" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+# 마커를 **다루는** 코드는 생산자가 아니다 — 선은 "출력 동사의 인자가 마커 리터럴로 **시작**"이다.
+# 정규식 리터럴·상수·`startsWith("SCAN: ")` 소비자·마커 형태를 인용하는 진단문은 전부 그 선 밖이다.
+# 이 선이 없으면 규약을 구현·설명하는 파일마다 자기를 제외 목록에 넣어야 한다.
+# ⚠️ 이행 첫 판은 "출력 동사 + 앞에 따옴표"였고, `if (l.startsWith("SCAN: ")) console.log(l)`와
+#    `console.error("힌트: 'SCAN: <라벨>…'")`가 오탐이었다(적대 검토 실측) — 증인은 정규식 철자에서만
+#    green이었다. 아래 픽스처가 그 형태들을 전부 행사한다.
+@test "code that handles the marker without emitting it is not a producer" {
+  fx="$(make_tools_fixture handler)"
+  cat > "$fx/tools/lib/marker-parse.ts" <<'TS'
+export const RE = /^SCAN: ([a-z:-]+): (\d+)$/;
+export const PREFIX = "SCAN: ";
+export const echoRe = (ls: string[]) => { for (const l of ls) if (/^SCAN: /.test(l)) console.log(l); };
+export const echoSw = (ls: string[]) => { for (const l of ls) if (l.startsWith("SCAN: ")) console.log(l); };
+export const relay = (l: string) => { if (l.startsWith("SCAN: ")) console.error(`relay ${l}`); };
+export const isMark = (l: string) => { console.log(/^SCAN: /.test(l) ? "y" : "n"); };
+export const hint = () => { console.error("힌트: 가드는 'SCAN: <라벨>: <n>' 마커를 stdout에 낸다"); };
+export const warn = (label: string) => { console.warn(`WARN: 'SCAN: ${label}: <n>' 마커가 출력에 없다`); };
+TS
+  git -C "$fx" add -A
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"
+  [ "$status" -eq 0 ]
+  out="$output"
+  # vacuity 방지 — 이 실행이 그 파일을 실제로 읽었다(열거 수가 사본 62 + 1).
+  run grep -qE '^SCAN: check-scan-producers: [0-9]{2,}$' <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
+# 검출기 자기 대조 — 커널의 생산자 줄이 코드에서 안 보이면 "위반 0건"이 아니라 **검출기 붕괴**다.
+# 파일 수 바닥값은 줄 단위 붕괴를 원리적으로 못 본다(함정 원장 "heredoc 상태 기계…").
+@test "the detector reports its own collapse when the kernel producer line is invisible to it" {
+  fx="$(make_tools_fixture kernel-dead)"
+  python3 - "$fx/tools/lib/scan-floor.ts" <<'PY'
+import sys
+p=sys.argv[1]; s=open(p,encoding='utf-8').read()
+n=s.replace('  console.log(`SCAN: ${label}: ${n}`);','  const line = "SCAN" + ": " + label + ": " + n; console.log(line);')
+assert n!=s; open(p,'w',encoding='utf-8').write(n)
+PY
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "검출기 붕괴" <<<"$out"
+  [ "$status" -eq 0 ]
+  # 커널 파일 자체가 열거에서 빠져도 같은 판정이다(면제 대상 부재 = 붕괴, 조용한 통과가 아니다).
+  fx2="$(make_tools_fixture kernel-gone)"
+  git -C "$fx2" rm -qf tools/lib/scan-floor.ts
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx2"
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "검출기 붕괴" <<<"$out"
+  [ "$status" -eq 0 ]
+  # 면제는 **정확한 경로 하나**다 — 같은 이름의 그림자 파일은 면제되지 않는다(basename 비교로 바꿔도
+  # 전건 green이었다 — 적대 검토 실측).
+  fx3="$(make_tools_fixture kernel-shadow)"
+  printf '%s\n' 'console.log("SCAN: shadow: 1");' > "$fx3/tools/scan-floor.ts"
+  git -C "$fx3" add -A
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx3"
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "tools/scan-floor.ts:1:" <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
+# 자기 열거 바닥값 — 작은 트리에서 자연히 붕괴한다(주입 없음). 붕괴한 실행은 마커를 내지 않는다.
+@test "the rejection guard has its own enumeration floor (a collapsed scan is not a pass)" {
+  fx="$BATS_TEST_TMPDIR/tiny"
+  mkdir -p "$fx/tools/lib"
+  cp "$ROOT/tools/lib/scan-floor.ts" "$fx/tools/lib/scan-floor.ts"
+  git -C "$fx" init -q
+  git -C "$fx" add -A
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "열거 붕괴" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "^SCAN:" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+@test "the rejection guard rejects an unknown option with the usage exit code" {
+  run bash "$ROOT/scripts/check-scan-producers.sh" --bogus
+  [ "$status" -eq 2 ]
 }
