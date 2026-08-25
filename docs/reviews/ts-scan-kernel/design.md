@@ -193,7 +193,7 @@ TS adapter 전량(:191~208)을 **실제로 실행해서** 같은 정규식으로
 |---|---|---|
 | `check-disk-caps` | `caps` | 바닥값을 `bad` 배열에서 분리해 커널로 |
 | `check-alert-rules` | `rules` · `denylist` · `supply` · `supply-refs` | 신호 4개 몰아내기를 해체, 도메인별 순차로 재배치 |
-| `check-ci-parity` | `steps` **(신규)** | 바닥값을 `errors` 수집에서 분리. 나머지 오류 수집 관용구는 그대로 |
+| `check-ci-parity` | `check-ci-parity` **(신규)** | 바닥값을 `errors` 수집에서 분리. 나머지 오류 수집 관용구는 그대로. 도메인이 하나라 접미사를 붙이지 않는다(커널 규약) |
 | `check-workflow-readiness` | `workflows` · `declarations` · `accounted` | `checkStatic` 반환 계약 변경 (아래) |
 | `check-resource-limits` | (1개) | 치환 |
 | `check-guard-authority` | `guards` · `venues` | 치환 + `quiet` |

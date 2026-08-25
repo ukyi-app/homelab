@@ -33,6 +33,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { reportScanError, scanFloor } from "./lib/scan-floor.ts";
 
 const ROOT = process.cwd();
 const CI = ".github/workflows/ci.yaml";
@@ -41,9 +42,17 @@ const GATE_JOB = "gate";
 
 // gate가 이 아래로 줄면 열거가 붕괴한 것이다(yq 실패·job 리네임·스키마 변경). 그 상태에서 "미계상 0건"은
 // 검사한 게 없다는 뜻이지 통과가 아니다.
-// ⚠️ 스텝이 늘면 이 값도 함께 올린다 — 안 올리면 바닥이 조용히 느슨해진다(현재 20스텝 / 바닥 18).
+// ⚠️ 스텝이 늘면 이 값도 함께 올린다 — 안 올리면 바닥이 조용히 느슨해진다.
+//    여기에 **현재 건수를 적지 않는다**: 아무도 대조하지 않는 손 관리 수치는 반드시 드리프트한다
+//    (이 줄에 '20스텝 / 바닥 18'이라 적혀 있었고 실측은 25/19였다). 현재값은 SCAN 마커를 읽어라.
 //    **래칫이 아니다**: 스텝을 정당하게 줄이는 변경에서는 같이 내리면 된다. 목적은 "0에 가까운 붕괴"를
 //    잡는 것이지 스텝 수를 고정하는 게 아니다.
+// 열거 붕괴 바닥값 — **상수다. 주입 경로를 열지 않는다.**
+// ⚠️ 한때 테스트가 붕괴 경로를 관측하려고 `CI_PARITY_MIN_STEPS` env를 열었으나 되돌렸다:
+//    이 가드는 required gate이고, `CI_PARITY_MIN_STEPS=0` 한 줄로 바닥값이 통째로 꺼졌다(실측).
+//    붕괴 관측에는 주입이 필요 없다 — 이 도구는 `process.cwd()`를 읽으므로 픽스처 디렉토리에서
+//    실행하면 열거가 자연히 0건이 된다. 설계도 상수 경로를 파서 경로와 명시적으로 갈라 두었다
+//    (상수는 커널의 requireCount 안전망이 덮는다).
 const MIN_STEPS = 19;
 
 type Status = "mirrored" | "covered" | "excluded";
@@ -143,11 +152,23 @@ function commandsIn(run: string): string[] {
   return [...out];
 }
 
-if (stepNames.length < MIN_STEPS) {
-  fail(
-    `gate의 run 스텝 ${stepNames.length}건 < 바닥값 ${MIN_STEPS} — 열거 붕괴다(job 리네임·yq 실패·스키마 변경). ` +
-      `이 상태의 "미계상 0건"은 통과가 아니라 무측정이다.`,
-  );
+// 열거 붕괴 바닥값 + SCAN 신호 — 커널이 한 몸으로 처리한다.
+// ⚠️ **오류 수집(`errors`)과 분리한다.** 이행 전에는 `fail()`이 배열에 push할 뿐이라 바닥값 진단이
+//    다른 회계 위반과 뒤섞였다. 바닥값 실패는 "아무것도 측정하지 않았다"는 뜻이라, 그 뒤에 모인
+//    위반은 0건에 가까운 검사에서 나온 것이고 함께 보고하면 잘못된 그림을 준다.
+//    나머지 오류를 모아 일괄 보고하는 이 파일의 관용구는 그대로 정당하다 — 커널에 "수집 모드"를
+//    만들지 않는다(그것은 이 이행이 없애는 형태를 커널이 승인한 경로로 만드는 일이다).
+try {
+  scanFloor("check-ci-parity", stepNames.length, MIN_STEPS, {
+    hint: `job 리네임·yq 실패·스키마 변경 의심. 이 상태의 "미계상 0건"은 통과가 아니라 무측정이다.`,
+  });
+} catch (e) {
+  // ⚠️ **이미 모인 진단을 먼저 흘린다.** 이 콜사이트는 yq 블록 **뒤**라, yq가 실패하면 그 근본원인이
+  //    `errors`에 담긴 채로 여기 온다. 그대로 죽이면 hint가 "yq 실패 의심"이라고 가리키는 바로 그
+  //    증거가 사라진다(실측: 스텁 yq로 재현하니 원인 2줄이 통째로 없어졌다).
+  //    버려도 되는 것은 바닥값 **뒤에** 모일 위반이지, 앞에서 모인 원인이 아니다.
+  for (const m of errors) console.error(`::error::ci-parity: ${m}`);
+  process.exit(reportScanError(e, "::error::ci-parity:"));
 }
 for (const n of stepNames.filter((n) => n === "((unnamed))")) {
   void n;

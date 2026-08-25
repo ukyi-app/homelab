@@ -124,3 +124,75 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   echo "$output" | grep -q 'SKIP: ci: 추적되지 않은'
 }
 
+
+# ── 스캔 신호 (티켓 04) ────────────────────────────────────────────────────────
+# 이 가드는 바닥값(MIN_STEPS)은 갖고도 스캔 신호가 **아예 없는** 네 번째 변종이었다.
+# 신호가 없으면 관측하는 쪽에서 "돌지 않았다"와 "돌았고 통과했다"가 구별되지 않는다 —
+# `check-guard-authority`의 실행 경로 회계가 그 구별을 못 하면 과다 계상으로 기운다.
+
+# 마커의 값은 **실제로 계상한 스텝 수**여야 한다 — 상수나 원장 크기가 아니다.
+# `[0-9]+` 형태만 보면 "평가함"과 "0건 붕괴"가 구별되지 않으므로 값을 대조한다.
+# ⚠️ 대조 상대는 가드의 **사람용 출력 문구가 아니라** ci.yaml이다. 산문에 계약을 걸면 문구를
+#    다듬는 것만으로 증인이 깨지고(리뷰 중 실제로 발생), 이 파일 헤더가 기록한 "하드코딩 5토큰"
+#    클래스를 그대로 되풀이한다. 가드와 **같은 원본**에서 파생해야 대조가 의미를 갖는다.
+@test "the scan marker counts the gate steps it actually accounted for" {
+  run bun "$ROOT/tools/check-ci-parity.ts"
+  [ "$status" -eq 0 ]
+  marker="$(printf '%s\n' "$output" | sed -n 's/^SCAN: check-ci-parity: //p')"
+  expected="$(yq -r '.jobs.gate.steps[] | select(has("run"))' "$ROOT/.github/workflows/ci.yaml" | grep -c '^run:' || true)"
+  [ -n "$marker" ]
+  # 도메인이 실재한다는 증거 — 0이면 아래 등식이 자기 자신 vacuous가 된다.
+  [ "$marker" -gt 0 ]
+  [ "$expected" -gt 0 ]
+  [ "$marker" = "$expected" ]
+}
+
+# 바닥값 실패는 **오류 수집과 분리**되어 즉시 죽고 마커를 내지 않는다.
+# 이행 전에는 `fail()`이 배열에 push할 뿐이라 바닥값 진단이 다른 회계 위반과 뒤섞였다 —
+# 0건에 가까운 검사에서 나온 위반을 함께 보고하면 잘못된 그림을 준다.
+# ⚠️ 붕괴는 **픽스처 cwd**로 만든다 — 이 도구는 process.cwd()를 읽는다. 바닥값에 env 주입을
+#    열면 required gate의 붕괴 방어가 `CI_PARITY_MIN_STEPS=0` 한 줄로 꺼진다(한때 그렇게 열었다가
+#    되돌렸다). 테스트 편의가 프로덕션 방어를 무르게 하면 안 된다.
+@test "an enumeration collapse dies on the floor and withholds the marker" {
+  fx="$BATS_TEST_TMPDIR/empty"
+  mkdir -p "$fx/.github/workflows"
+  printf 'name: ci\non: push\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n' \
+    > "$fx/.github/workflows/ci.yaml"
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts'"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -q '열거 붕괴'
+  printf '%s\n' "$output" | grep -q '무측정'
+  if printf '%s\n' "$output" | grep -q '^SCAN:'; then
+    echo "붕괴 실행이 마커를 냈다: $output"; false
+  fi
+  # ⚠️ 성공 요약 부재는 **어떤 실패 경로에서도** 참이라 수집 형태와 즉사 형태를 구별하지 못한다
+  #    (실측: 그 단언만 두었을 때 catch를 fail()로 되돌려도 전건 green이었다 — 다섯 번째 vacuous 증인).
+  #    **구별되는 사실은 진단이 몇 줄이냐다.** 즉사면 바닥값 한 줄이고, 수집이면 그 뒤 원장 대조까지
+  #    진행돼 위반이 더 붙는다(실측: 무명 스텝 + 원장 부재 2줄 + 집계 줄).
+  [ "$(printf '%s\n' "$output" | grep -c '^::error::ci-parity:')" -eq 1 ]
+  if printf '%s\n' "$output" | grep -q '건 실패 (gate run 스텝'; then
+    echo "바닥값이 먼저 죽지 않아 수집 집계까지 진행됐다: $output"; false
+  fi
+}
+
+# 바닥값이 즉시 죽더라도 **앞에서 모인 근본원인은 흘려야 한다.** 이 콜사이트는 yq 블록 뒤라,
+# yq가 실패하면 그 원인이 errors에 담긴 채 바닥값 경로로 온다 — 그대로 죽이면 hint가
+# "yq 실패 의심"이라 가리키는 바로 그 증거가 사라진다(리뷰가 실측으로 지목).
+# 버려도 되는 것은 바닥값 **뒤에** 모일 위반이지 앞에서 모인 원인이 아니다.
+@test "a collapse still reports the root cause it had already collected" {
+  stub="$BATS_TEST_TMPDIR/stub"
+  mkdir -p "$stub"
+  printf '#!/bin/sh\nexit 3\n' > "$stub/yq"
+  chmod +x "$stub/yq"
+  run env PATH="$stub:$PATH" bun "$ROOT/tools/check-ci-parity.ts"
+  [ "$status" -ne 0 ]
+  # 근본원인(yq 실패)이 **바닥값 진단과 함께** 나온다. hint 안의 문구가 아니라 원인 줄이어야 하므로
+  # `읽지 못했다`를 앵커로 삼는다.
+  printf '%s\n' "$output" | grep -q '읽지 못했다'
+  printf '%s\n' "$output" | grep -q '열거 붕괴'
+  # 붕괴 실행은 마커를 내지 않는다.
+  if printf '%s\n' "$output" | grep -q '^SCAN:'; then
+    echo "붕괴 실행이 마커를 냈다: $output"; false
+  fi
+}
+
