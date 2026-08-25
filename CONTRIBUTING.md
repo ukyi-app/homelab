@@ -87,8 +87,27 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
 
 **규약.**
 - 도메인을 평가한 실행은 `SCAN: <가드>: <건수>`를 **stdout**에 낸다(`SKIP:`과 같은 채널·같은 모양).
-- 셸 가드는 커널이 대신 낸다 — `scan_floor`가 바닥값을 통과하면 자동, 바닥값 없는 카운트 자리는
-  `scan_signal <라벨> <n>`을 직접 부른다(`scripts/lib/scan-floor.sh`).
+- 가드는 커널이 대신 낸다 — 바닥값을 통과하면 자동으로 나가고, 바닥값 없는 카운트 자리는 신호
+  함수를 직접 부른다. 커널은 실행 환경별 **두 adapter**다: 셸 `scripts/lib/scan-floor.sh`
+  (`scan_floor`·`scan_signal`) · TypeScript `tools/lib/scan-floor.ts`(`scanFloor`·`scanSignal`).
+  규약(마커 형태·방출 순서·억제·SKIP 배타)은 하나이고 구현만 갈린다.
+  ⚠️ 이는 위 "같은 검사의 셸·TS **이중 구현** 금지"의 대상이 **아니다** — 그 조항의 주어는 같은
+  *검사*이고 괄호가 "파서·계산은 TS 한 곳에만"으로 못박는다. 스캔 커널은 도메인 판정이 없는 신호
+  기계이고 임계값은 양쪽 다 콜사이트에 남으므로, 그 조항이 막는 해악(판정 드리프트) 밖이다.
+  ⚠️ 셸이 TS 커널을 **부를 수 없어서**가 아니다 — `repo-walk.ts`는 `import.meta.main` CLI를 두고
+  셸 가드 셋이 실제로 그렇게 부른다(`check-image-pins.sh` · `check-app-deploy.sh` · `check-app-netpol.sh`).
+  스캔 커널이 그 길을 안 쓰는 이유는 **의미론**이다: 신호는 가드 실행마다 여러 번 나가 호출당 프로세스
+  기동이 붙고, 무엇보다 바닥값 실패의 종료가 **호출자를 죽여야** 하는데 서브프로세스의 exit은 그러지
+  못한다(셸 콜사이트의 `|| exit N` 관용구가 성립하지 않는다). 열거는 값을 돌려주면 끝이라 프로세스
+  경계를 건널 수 있지만, 종료 제어는 건너지 못한다.
+  두 adapter가 갈라지지 않는 근거는 대조가 실행 기반이라는 것이다:
+  `tests/gates/test_scan-floor.bats`가 양쪽을 **실제로 실행해** 같은 정규식으로 방출을 파싱한다.
+  ⚠️ 그 대조가 고정하는 것은 **마커 형태**뿐이다 — 바닥값 의미론과 종료 기전은 각 adapter의 자기
+  테스트가 맡는다.
+  ⚠️ TypeScript adapter는 셸에 없는 `parseFloor(raw, source)`를 하나 더 갖는다. `Number("")`가 0이고
+  `n < NaN`이 항상 false라, 임계값 검증이 **coercion 앞에** 서지 않으면 오타 하나가 바닥값을 조용히
+  끈다(실측: `DISK_CAP_MIN_FLAGS=abc` → 마커 방출 + rc=0). 셸엔 그 병이 없다 —
+  `[ "$got" -lt "$min" ]`이 수가 아닌 값에 에러를 낸다.
 - 한 실행이 **두 도메인**을 검사하면 라벨을 나눈다(`check-skeleton:bats` · `check-skeleton:platform`).
   같은 라벨로 두 줄을 내면 소비자가 어느 쪽인지 모른다.
 - 기계 판독 stdout을 내는 모드(`--json`)에선 마커를 내지 않는다 — 출력을 오염시킨다.
@@ -105,8 +124,14 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
 대상"과 같은 모양). 현재값이 필요하면 세어라:
 
 ```
-grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh; grep -lE '^[^/]*SCAN: ' tools/*.ts
+grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh
+grep -lE '^[^/]*(SCAN: |scan(Floor|Signal)\()' tools/*.ts
 ```
+
+⚠️ TS 쪽 패턴이 **두 형태**를 보는 것은 커널 이행이 진행 중이기 때문이다(옛 형태 = 콜사이트가
+직접 `console.log`). 이행이 끝나면 옛 형태는 0이 되고, 그때 게이트가 "직접 생산자가 있으면 red"인
+거부 가드로 바뀐다. 그 전까지 한쪽만 세면 **옮긴 가드가 통째로 누락된다** — 정적 로스터와 실행
+파일 목록이 같은 패턴에서 파생되므로 양쪽에서 동시에 빠지고, 대조 등식은 그대로 성립한다.
 
 정합은 `tests/gates/test_scan-floor.bats`가 **정적 콜사이트 집합 == 런타임 방출 집합**으로 강제한다
 (셸·TS 양쪽 레인. 런타임 전용 라벨 `:accounted`도 그 모드를 실제로 호출해 덮는다 — 제외 목록 금지).

@@ -68,10 +68,11 @@ TS는 콜사이트가 그 순서를 손으로 맞춰야 하고, 맞춰야 하는
 ### 표면 (함수 3개)
 
 ```
-scanFloor(label, got, min, opts?)   바닥값 검사 → 실패: 진단(stderr) + process.exit / 통과: 신호 방출
+scanFloor(label, got, min, opts?)   바닥값 검사 → 실패: ScanError throw / 통과: 신호 방출
 scanSignal(label, n, opts?)         신호만 (바닥값이 걸리지 않은 카운트 자리)
-parseFloor(raw, source)             raw 문자열 → 바닥값 수, 아니면 진단 + exit 2   ← 게이트 r2
-opts = { exitCode?: number, quiet?: boolean }   기본 exitCode = 1
+parseFloor(raw, source)             raw 문자열 → 바닥값 수, 아니면 ScanError throw   ← 게이트 r2
+opts = { quiet?: boolean, hint?: string }
+ScanError.exitCode                  권고 종료코드 — 열거 붕괴 1 · 임계값 입력 오류 2
 ```
 
 셋째는 셸에서 온 것이 아니라 **게이트 r2가 연 축**이다(아래 "임계값" 절). 셸에는 이 병이 없다 —
@@ -80,11 +81,18 @@ opts = { exitCode?: number, quiet?: boolean }   기본 exitCode = 1
 
 - **마커 형태 `SCAN: <라벨>: <n>`는 셸과 한 글자도 다르지 않다.** 함수 이름만 camelCase로 옮긴다.
   사람이 두 adapter의 출력을 나란히 읽을 수 있어야 하고, 게이트의 파싱 정규식도 하나다.
-- **실패는 커널이 종료시킨다.** 반환값(boolean)은 무시할 수 있고, 무시하는 것이 정확히 지금 고치는 결함이다
-  (`check-disk-caps`가 바닥값 실패를 위반과 같은 `bad` 배열에 합쳤다). 셸에서 `|| exit N`이 강제하던 것을
-  TS에서는 커널이 직접 해야 동형이다.
-- **종료코드는 콜사이트가 소유한다.** 셸 콜사이트 15곳이 전부 `|| exit N` 형태이고 N이 갈린다
-  (대부분 1, `check-credential-expiry.sh:49`·`check-gh-secret-coverage.sh:77,136`은 2). 임계값과 같은 규율이다.
+- **실패는 예외로 나간다 — 커널은 종료하지 않는다** (코드리뷰 H1으로 초안을 뒤집었다).
+  초안은 "커널이 `process.exit`을 친다"였고 셸의 `|| exit N`과의 동형을 논거로 삼았다. 그런데 셸 커널은
+  `scripts/lib/`에 있고 TypeScript `tools/lib/`는 **정반대 규율**을 네 곳에 명시한다 —
+  `tools/README.md`("콜사이트가 정책 소유") · `image-pin.ts`("process.exit는 전부 콜사이트 소유") ·
+  `repo-walk.ts` · `sealed-contract.ts`. 그대로 갔다면 `scan-floor.ts`가 그 규율을 깨는 **유일한 lib**이
+  됐을 것이고, 자기 주석에 "종료코드는 콜사이트가 소유한다"고 적으며 정반대를 구현하는 상태였다.
+  → `ScanError`를 던지고 **콜사이트가 잡아 종료한다**. 에러가 권고 코드를 실어 보내므로 콜사이트가
+  두 실패를 구별할 수 있고(붕괴 1 · 입력 오류 2), 셸이 `exit 1`/`exit 2`로 갈리듯 덮어쓸 수도 있다.
+  `check-disk-caps.ts`가 `walkManifests` 실패를 처리하던 형태와 같아서 콜사이트 관용구도 새것이 아니다.
+- **그래도 콜사이트가 두 사고를 합칠 수 없어야 한다.** boolean 반환은 무시할 수 있지만 예외는 명시적으로
+  잡아야 하고, `catch` 블록은 `bad.push` 한 줄과 달리 눈에 띈다. 회귀 증인은 **"커널이 종료하지 않는다"를
+  정적으로 단언하는 테스트**다(뮤테이션 실측: 커널이 종료를 도로 가져가면 4건이 red).
 - **`quiet`는 stdout 마커만 삼킨다.** 바닥값 검사와 stderr 진단은 그대로 수행한다.
   `check-guard-authority`가 `--json` 모드에서 stdout을 JSON으로 쓰기 때문에 필요하다. 억제는 출력 채널의
   성질이지 판정의 성질이 아니므로, 커널이 출력을 소유한 이상 억제도 커널이 안다.
@@ -152,7 +160,7 @@ coercion **앞**에 세운다.
 - **명시적 0은 통과시킨다.** `/^\d+$/`가 `"0"`을 받고 `""`를 거부하므로 두 경우가 갈린다.
 - `scanFloor` 안의 숫자 검증(유한·안전 정수·음수 아님)은 **안전망으로 남긴다.** 상수로 주입되는 자리
   (`MIN_SCAN = 30`)는 파서를 거치지 않으므로 그 경로를 덮는 것이 필요하다.
-- 거부의 종료코드는 **2**다(바닥값 실패의 1과 구별). "바닥값이 수가 아니다"는 사용법 오류이고
+- 거부가 싣는 권고 종료코드는 **2**다(바닥값 실패의 1과 구별). "바닥값이 수가 아니다"는 사용법 오류이고
   "열거가 붕괴했다"와 다른 사고다. `positiveInt`가 이미 exit 2를 쓰고 `cli.ts:57`이 같은 규약을 적었다.
 - **순서 제약**: 기존 `positiveInt` 2벌을 제거하기 **전에** 빈 문자열이 exit 2를 내는 테스트가 green이어야
   한다. 뒤집으면 회귀가 무증인 상태로 들어간다.

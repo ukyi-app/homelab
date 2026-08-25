@@ -22,8 +22,19 @@
 // 열거는 공유 워커의 `platform-manifests` 스코프가 소유한다(tracked · charts/·벤더 제외).
 
 import { walkManifests } from "./lib/repo-walk.ts";
+import { ScanError, parseFloor, scanFloor } from "./lib/scan-floor.ts";
 
 const ROOT = process.cwd();
+
+// 커널의 판정 실패를 이 도구의 종료로 번역한다 — `tools/lib/`는 종료를 소유하지 않는다
+// (`tools/README.md` 커널 규율). 아래 walkManifests 열거 실패 처리와 같은 형태다.
+function dieOnScanError(e: unknown): never {
+  if (e instanceof ScanError) {
+    console.error(`::error::disk-caps: ${e.message}`);
+    process.exit(e.exitCode);
+  }
+  throw e;
+}
 
 // 상한 플래그는 **패턴으로 발견**한다. 새 플래그가 생겨도 이름에 `maxDisk`가 들어가면 자동 편입된다.
 // (하드코딩 목록을 두면 그 목록이 곧 다음 드리프트다 — 이 레포가 반복해서 맞은 클래스.)
@@ -33,7 +44,14 @@ const CAP_FLAG = /--[A-Za-z.]*maxDisk[A-Za-z]*=\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGT
 const VOL_DECL = /(?:storage|sizeLimit)\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]?i?)\b/g;
 
 // 현재 대상 2건(victorialogs · vmagent). 0이면 정규식/스코프가 붕괴한 것이지 "위반 없음"이 아니다.
-const MIN_FLAGS = Number(process.env.DISK_CAP_MIN_FLAGS ?? "2");
+// ⚠️ raw 문자열을 **Number() 앞에서** 판정한다 — `Number("abc")`는 NaN이고 `n < NaN`은 항상 false라
+//    오타 하나가 바닥값을 통째로 껐다(실측: DISK_CAP_MIN_FLAGS=abc → SCAN 방출 + rc=0).
+let MIN_FLAGS: number;
+try {
+  MIN_FLAGS = parseFloor(process.env.DISK_CAP_MIN_FLAGS ?? "2", "DISK_CAP_MIN_FLAGS");
+} catch (e) {
+  dieOnScanError(e);
+}
 
 // SI(10ⁿ) vs IEC(2ⁿ). 접미사가 `i`를 포함하면 IEC다. 접미사 없으면 바이트.
 function toBytes(num: string, unit: string): number | null {
@@ -110,11 +128,16 @@ for (const entry of entries) {
   }
 }
 
-if (flagCount < MIN_FLAGS) {
-  bad.push(
-    `디스크 상한 플래그 ${flagCount}건 < 바닥값 ${MIN_FLAGS} — 열거 붕괴다(정규식 드리프트·스코프 변경). ` +
-      `이 상태의 "위반 0건"은 통과가 아니라 무측정이다.`,
-  );
+// ⚠️ 바닥값은 위반 목록(`bad`)과 **분리한다.** 둘을 합치면 위반이 있는 실행에서 SCAN 마커가
+//    아예 안 나가 "마커 부재 = 미실행" 해석이 깨진다(실측 결함 — 위반 1건짜리 픽스처에서 마커 0건).
+//    바닥값 실패는 "아무것도 측정하지 않았다"라 그 뒤에 모인 위반은 0건 검사에서 나온 것이다.
+//    커널이 통과 시점에 신호를 내므로 순서를 손으로 맞출 자리가 사라진다.
+try {
+  scanFloor("check-disk-caps:caps", flagCount, MIN_FLAGS, {
+    hint: `정규식 드리프트·스코프 변경 의심. 이 상태의 "위반 0건"은 통과가 아니라 무측정이다.`,
+  });
+} catch (e) {
+  dieOnScanError(e);
 }
 
 if (bad.length) {
@@ -122,5 +145,4 @@ if (bad.length) {
   console.error(`\ncheck-disk-caps: ${bad.length}건 실패`);
   process.exit(1);
 }
-console.log(`SCAN: check-disk-caps:caps: ${flagCount}`);
 console.log(`check-disk-caps OK (파일 ${fileCount}개 · 상한 ${flagCount}건 전건이 볼륨 선언 미만)`);

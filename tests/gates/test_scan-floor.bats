@@ -185,17 +185,49 @@ EOF
 # ⚠️ **앞선 판은 하드코딩 로스터였고 이미 드리프트했다** — 3행(resource-limits·alert-rules·
 #    guard-authority)만 적혀 있었는데 실제 방출 TS는 5종이었다(image-ownership·workflow-readiness가
 #    누락). "하드코딩 소비처 목록은 자기 자신에게만 정확하다"(AGENTS.md 함정)의 살아있는 사례다.
-#    ⇒ 셸 레인과 **동형**으로 바꾼다: 정적 콜사이트 라벨 집합 == 런타임 방출 라벨 집합.
+#    ⇒ 셸 adapter와 **동형**으로 바꾼다: 정적 콜사이트 라벨 집합 == 런타임 방출 라벨 집합.
+#
+# ⚠️ **이행 중에는 두 형태가 공존한다.** 옛 형태(콜사이트가 직접 `console.log`)와 새 형태(커널 호출).
+#    둘 다 인식해야 각 이행 티켓이 독립적으로 green이다. 한쪽만 보면 옮긴 가드가 정적·런타임 집합에서
+#    **동시에** 사라져 등식이 그대로 성립하고(실측: check-disk-caps를 옮긴 직후 이 테스트가 통과했다),
+#    바닥값의 여유가 그 손실을 덮는다.
+# ⚠️ **이 등식만으로는 커널 우회를 막지 못한다.** 되돌린 가드도 같은 이유로 양쪽에서 함께 사라진다.
+#    문을 닫는 것은 인식 제거가 아니라 **거부**다 — 마지막 이행 티켓이 "직접 생산자가 있으면 red"인
+#    가드를 세운다. 그때까지 이 확장은 임시 상태다.
+SCAN_OLD_RE='^[^/]*SCAN: '
+SCAN_NEW_RE='^[^/]*scan(Floor|Signal)\('
+
 @test "the TypeScript guards emit the same marker shape (derived roster, not hardcoded)" {
-  # 정적: 주석(//) 줄을 제외한 `SCAN: <라벨>:` 콜사이트. 라벨은 도메인 단위라 접미사가 붙을 수 있다.
-  static="$(grep -hE '^[^/]*SCAN: ' "$ROOT"/tools/*.ts \
-            | grep -oE 'SCAN: [a-z0-9:-]+:' | sed 's/^SCAN: //; s/:$//' | LC_ALL=C sort -u)"
+  # 정적: 주석(//) 줄을 제외한 콜사이트. 옛 형태는 `SCAN: <라벨>:`, 새 형태는 `scanFloor("<라벨>"`.
+  # 라벨은 도메인 단위라 접미사가 붙을 수 있다.
+  static="$( { grep -hE "$SCAN_OLD_RE" "$ROOT"/tools/*.ts | grep -oE 'SCAN: [a-z0-9:-]+:' | sed 's/^SCAN: //; s/:$//'
+               grep -hE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts | grep -oE 'scan(Floor|Signal)\("[a-z0-9:-]+"' | sed 's/^[^"]*"//; s/"$//'
+             } | LC_ALL=C sort -u)"
   # 바닥값: 콜사이트가 통째로 사라지면 정적·런타임이 함께 줄어 등식이 유지된다(적대 검토가 실측한 구멍).
   n=$(printf '%s\n' "$static" | grep -c . || true)
   [ "$n" -ge 6 ]
   # 방출 TS 파일 전량을 **파생**한다 — 목록을 손으로 적지 않는다.
-  files="$(grep -lE '^[^/]*SCAN: ' "$ROOT"/tools/*.ts)"
+  files="$(grep -lE "$SCAN_OLD_RE|$SCAN_NEW_RE" "$ROOT"/tools/*.ts)"
   [ -n "$files" ]
+  # ⚠️ **아래 등식은 두 형태를 다 본다는 것을 증명하지 못한다.** 커널로 옮긴 가드는 정적 로스터와
+  #    이 파일 목록에서 **동시에** 빠지므로 등식이 그대로 성립하고, 바닥값의 여유가 그 손실을 덮는다
+  #    (실측 재현: check-disk-caps를 옮긴 직후 이 테스트가 통과했다). 그래서 인식 자체를 여기서
+  #    단언한다 — 대상이 **이 변수들**이라 검증이 자기 계산을 보는 것으로 미끄러지지 않는다.
+  new_files="$(grep -lE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts)"
+  new_labels="$(grep -hE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts \
+                | grep -oE 'scan(Floor|Signal)\("[a-z0-9:-]+"' | sed 's/^[^"]*"//; s/"$//')"
+  # ⚠️ **신형 열거 자체에 바닥값을 건다.** 없으면 SCAN_NEW_RE가 깨졌을 때 아래 두 루프가 0회 반복해
+  #    조용히 통과하고(실측: 매치 0으로 변조하니 27건 전부 green), 등식은 양쪽이 함께 줄어 유지된다.
+  #    검증이 기준을 대상과 **같은 깨진 패턴**에서 뽑는 자리라, 이 커널이 다루는 그 병을 검증 쪽에
+  #    새로 만든다. 이행이 끝나 옛 형태가 0이 되면 이 단언은 거부 가드로 대체된다.
+  [ -n "$new_files" ]
+  [ -n "$new_labels" ]
+  for f in $new_files; do
+    printf '%s\n' "$files" | grep -qxF "$f"
+  done
+  for lbl in $new_labels; do
+    printf '%s\n' "$static" | grep -qxF "$lbl"
+  done
   runtime=""
   for f in $files; do
     out="$(bun "$f" 2>/dev/null)" || { echo "TS 가드가 비-0으로 죽었다: $f"; false; }
@@ -234,4 +266,193 @@ EOF
   [ -n "$fix" ]
   [ -n "$real" ]
   [ "$fix" -ne "$real" ]
+}
+
+# ── TypeScript adapter (08-b) ─────────────────────────────────────────────────
+# 같은 규약의 두 번째 adapter. 셸 쪽 단위 테스트 4종을 그대로 이식한다 — 규약이 언어가 아니라
+# 의미에서 하나라는 것이 이 커널의 주장이고, 두 레인이 한 파일에서 나란히 보여야 다음 사람이
+# 한쪽만 고치지 않는다.
+#
+# 병(TS 고유): 셸 콜사이트는 `[ "$got" -lt "$min" ]`이 수가 아닌 값에 **에러를 낸다**. TypeScript는
+# `Number("abc")`가 NaN이고 `n < NaN`이 항상 false라 **바닥값이 통째로 꺼진 채 초록**이 된다.
+# 실측(2026-08-25): DISK_CAP_MIN_FLAGS=abc → SCAN 방출 + rc=0.
+
+KERNEL_TS='const k = await import(process.argv[1] + "/tools/lib/scan-floor.ts");'
+
+@test "scanSignal emits the marker in the agreed shape (TypeScript adapter)" {
+  run bun -e "$KERNEL_TS"' k.scanSignal("demo", 42)' "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "SCAN: demo: 42" ]
+}
+
+@test "scanFloor emits the scan marker when it passes (TypeScript adapter)" {
+  run bun -e "$KERNEL_TS"' k.scanFloor("demo", 10, 5)' "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "SCAN: demo: 10" ]
+}
+
+# 붕괴한 실행의 건수는 "검사했다"가 아니라 "붕괴했다"는 뜻이다 — 같은 마커로 내면 정반대로 읽힌다.
+# ⚠️ 커널은 **종료하지 않는다**(lib 커널 규율). 콜사이트가 잡은 뒤에도 마커가 없어야 한다.
+@test "scanFloor does NOT emit the scan marker when it fails (TypeScript adapter)" {
+  run bun -e "$KERNEL_TS"' try { k.scanFloor("demo", 0, 5) } catch { /* 콜사이트가 종료를 소유 */ }' "$ROOT"
+  [ "$status" -eq 0 ]
+  out="$output"
+  run grep -q "^SCAN:" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+# lib 커널 규율의 회귀 증인 — `tools/README.md`("콜사이트가 정책 소유") · `image-pin.ts`
+# ("process.exit는 전부 콜사이트 소유") · `repo-walk.ts` · `sealed-contract.ts`가 같은 경계를 적었다.
+# 이 커널이 종료를 도로 가져가면 콜사이트가 두 실패를 구별할 수 없고, 단위 표면 테스트도 불가능해진다.
+@test "the TypeScript scan kernel never terminates the process itself" {
+  run grep -nE '^[^/]*process\.exit' "$ROOT/tools/lib/scan-floor.ts"
+  [ "$status" -ne 0 ]
+}
+
+# 실패는 ScanError로 나가고 **권고 종료코드**를 싣는다 — 콜사이트가 두 사고를 구별할 수 있어야 한다
+# (바닥값 붕괴 1 · 임계값이 수가 아님 2). 셸에서 `|| exit 1`과 `|| exit 2`가 갈리던 그 구별이다.
+@test "scanFloor throws ScanError carrying the advisory exit code" {
+  run bun -e "$KERNEL_TS"'
+    try { k.scanFloor("demo", 0, 5) } catch (e) {
+      console.log("name=" + e.name + " code=" + e.exitCode);
+      console.log("collapse=" + /열거 붕괴/.test(e.message));
+      process.exit(0);
+    }
+    process.exit(9);
+  ' "$ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "name=ScanError code=1"
+  echo "$output" | grep -q "collapse=true"
+}
+
+# 두 마커는 배타적이다. ⚠️ 마커 존재를 **먼저** 단언한다 — 이게 없으면 "SKIP이 없다"는 마커가
+# 아예 없어도 참이라 이 테스트가 자기 자신 vacuous가 된다(셸 쪽 적대 검토 지목, 그대로 이식).
+@test "the TypeScript scan marker never carries the skip marker (exclusive channels)" {
+  run bun -e "$KERNEL_TS"' k.scanFloor("demo", 10, 5)' "$ROOT"
+  [ "$status" -eq 0 ]
+  out="$output"
+  run grep -q "^SCAN: demo: 10$" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "SKIP:" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+# 억제는 출력 채널의 성질이지 판정의 성질이 아니다 — 마커만 삼키고 바닥값은 그대로 본다.
+@test "the quiet option suppresses the marker but still enforces the floor" {
+  run bun -e "$KERNEL_TS"' k.scanFloor("demo", 10, 5, { quiet: true })' "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "" ]
+  run bun -e "$KERNEL_TS"'
+    try { k.scanFloor("demo", 0, 5, { quiet: true }) } catch (e) { console.log("threw:" + e.message); process.exit(0) }
+    process.exit(9);
+  ' "$ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "열거 붕괴"
+}
+
+# ── 임계값 입력 (r2 G1) ───────────────────────────────────────────────────────
+# 검증이 Number() **앞**에 서야 한다. 뒤에 서면 ""가 이미 0이 되어 의도적 0과 구별할 수 없다.
+
+# 사용법 오류라 권고 코드는 2다(열거 붕괴의 1과 구별 — 원인 계층이 다르다).
+@test "parseFloor rejects malformed floor input with advisory exit code 2" {
+  for bad in abc "" -1 1.5 " " 2x; do
+    run bun -e "$KERNEL_TS"'
+      try { k.parseFloor(process.argv[2], "--demo") } catch (e) { console.log("code=" + e.exitCode); process.exit(0) }
+      process.exit(9);
+    ' "$ROOT" "$bad"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "code=2"
+  done
+}
+
+@test "parseFloor rejects an absent value" {
+  run bun -e "$KERNEL_TS"'
+    try { k.parseFloor(undefined, "--demo") } catch (e) { console.log("code=" + e.exitCode); process.exit(0) }
+    process.exit(9);
+  ' "$ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "code=2"
+}
+
+# 0은 정당한 바닥값이다(셸 선례: check-app-deploy의 APP_DEPLOY_MIN_SCAN:-0). 금지하면 안 된다.
+@test "parseFloor accepts an explicit zero" {
+  run bun -e "$KERNEL_TS"' console.log(k.parseFloor("0", "--demo"))' "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+# 상수로 주입되는 자리는 파서를 거치지 않으므로 그 경로를 덮는 안전망이 필요하다.
+@test "scanFloor itself rejects a non-integer floor that bypassed the parser" {
+  for expr in 'k.scanFloor("demo", 10, Number("abc"))' 'k.scanFloor("demo", Number("abc"), 5)'; do
+    run bun -e "$KERNEL_TS"' try { '"$expr"' } catch (e) { console.log("code=" + e.exitCode); process.exit(0) }
+      process.exit(9);' "$ROOT"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "code=2"
+  done
+}
+
+# ── check-disk-caps 회귀 (첫 소비자) ──────────────────────────────────────────
+
+# 위반 1건(15GB 상한 > 10Gi 볼륨)짜리 최소 픽스처 — 아래 두 테스트가 공유한다.
+# 15GB=1.50e10 > 10Gi=1.07e10 (SI vs IEC — 접미사만 보면 반대로 읽힌다).
+make_caps_fixture() {
+  FX="$BATS_TEST_TMPDIR/caps"
+  mkdir -p "$FX/platform/demo/prod"
+  cat > "$FX/platform/demo/prod/app.yaml" <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: c
+          args: ["--retention.maxDiskSpaceUsageBytes=15GB"]
+      volumes:
+        - name: data
+          emptyDir: { sizeLimit: 10Gi }
+YAML
+  git -C "$FX" init -q
+  git -C "$FX" add -A
+}
+
+# 위반이 있는 실행에서도 마커가 나와야 한다 — "마커 부재 = 미실행" 해석이 깨지지 않도록.
+@test "check-disk-caps emits the scan marker even when it reports violations" {
+  make_caps_fixture
+  run bash -c "cd '$FX' && DISK_CAP_MIN_FLAGS=1 bun '$ROOT/tools/check-disk-caps.ts'"
+  [ "$status" -ne 0 ]
+  out="$output"
+  run grep -q "^SCAN: check-disk-caps:caps: 1$" <<<"$out"
+  [ "$status" -eq 0 ]
+  # 위반은 보고된다 — 바닥값을 통과한 실행이므로 그 위반은 실측 결과다.
+  # ⚠️ 위반 **고유 문구**로 본다. `::error::disk-caps` 접두는 바닥값 진단도 함께 쓰므로 둘을 못 가른다.
+  run grep -q "볼륨 선언" <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
+# 바닥값과 위반이 **둘 다** 참인 실행. 이 티켓이 "가장 위험한 가정"으로 지목한 경로다 —
+# 커널이 종료를 소유하므로 콜사이트가 두 사고를 한 배열에 합칠 수 없다. 합쳐 두면(이행 전 형태)
+# 바닥값 진단이 위반 사이에 섞여 나가고 마커는 어느 쪽이든 사라진다.
+@test "check-disk-caps dies on the floor before it reports violations" {
+  make_caps_fixture
+  run bash -c "cd '$FX' && DISK_CAP_MIN_FLAGS=5 bun '$ROOT/tools/check-disk-caps.ts'"
+  [ "$status" -ne 0 ]
+  out="$output"
+  # 바닥값 진단은 나간다(도메인 힌트를 달고).
+  run grep -q "열거 붕괴" <<<"$out"
+  [ "$status" -eq 0 ]
+  # 마커는 나가지 않는다 — 붕괴한 실행의 건수는 "검사했다"가 아니다.
+  run grep -q "^SCAN:" <<<"$out"
+  [ "$status" -ne 0 ]
+  # 위반 목록은 나가지 않는다 — 0건에 가까운 검사에서 나온 것이라 보고하면 잘못된 그림을 준다.
+  # ⚠️ 위반 **고유 문구**로 본다(위와 같은 이유 — 접두는 두 진단이 공유한다).
+  run grep -q "볼륨 선언" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+@test "check-disk-caps rejects a malformed floor from the environment" {
+  run bash -c "DISK_CAP_MIN_FLAGS=abc bun '$ROOT/tools/check-disk-caps.ts'"
+  [ "$status" -eq 2 ]
+  out="$output"
+  run grep -q "^SCAN:" <<<"$out"
+  [ "$status" -ne 0 ]
 }
