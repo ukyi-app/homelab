@@ -52,6 +52,16 @@ mkfx() {
   echo "$output" | grep -q '139.7%'
 }
 
+@test "a violation run still emits the SCAN marker (order: floor, then SCAN, then violations)" {
+  # scan-floor 규약: 도메인을 평가한 실행은 위반 여부와 무관하게 신호를 낸다 — 면제는 바닥값
+  # 실패 경로뿐. 위반 exit가 마커보다 앞서면 위반 실행이 "마커 부재 = 미실행"으로 오독된다.
+  fx="$(mkfx 15GB 10Gi)"
+  cd "$fx" || false
+  DISK_CAP_MIN_FLAGS=1 run bun "$TOOL"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^SCAN: check-disk-caps:caps: 1$'
+}
+
 @test "a cap below its volume declaration passes (the fix direction)" {
   fx="$(mkfx 8GB 10Gi)"
   cd "$fx" || false
@@ -80,6 +90,10 @@ mkfx() {
   DISK_CAP_MIN_FLAGS=99 run bun "$TOOL"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '열거 붕괴'
+  # scan-floor 규약의 나머지 반쪽: 바닥값 실패 실행은 SCAN 면제 — 마커를 내면 "실행됨"으로 오독된다.
+  out="$output"
+  run grep -q '^SCAN: check-disk-caps:caps: ' <<<"$out"
+  [ "$status" -ne 0 ]
 }
 
 @test "the guard runs in BOTH the required gate and make ci" {

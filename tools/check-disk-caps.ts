@@ -110,17 +110,21 @@ for (const entry of entries) {
   }
 }
 
+// scan-floor 규약: SCAN 면제는 바닥값 실패 경로뿐 — 위반 실행도 도메인을 평가했으므로 신호를
+// 낸다. 바닥값 실패를 bad에 섞어 위반과 같은 exit를 태우면 위반 실행이 마커 없이 죽어
+// "마커 부재 = 미실행"으로 오독된다(순서가 곧 계약이다: floor → SCAN → 위반).
 if (flagCount < MIN_FLAGS) {
-  bad.push(
-    `디스크 상한 플래그 ${flagCount}건 < 바닥값 ${MIN_FLAGS} — 열거 붕괴다(정규식 드리프트·스코프 변경). ` +
+  console.error(
+    `::error::disk-caps: 디스크 상한 플래그 ${flagCount}건 < 바닥값 ${MIN_FLAGS} — 열거 붕괴다(정규식 드리프트·스코프 변경). ` +
       `이 상태의 "위반 0건"은 통과가 아니라 무측정이다.`,
   );
+  process.exit(1);
 }
+console.log(`SCAN: check-disk-caps:caps: ${flagCount}`);
 
 if (bad.length) {
   for (const b of bad) console.error(`::error::disk-caps: ${b}`);
   console.error(`\ncheck-disk-caps: ${bad.length}건 실패`);
   process.exit(1);
 }
-console.log(`SCAN: check-disk-caps:caps: ${flagCount}`);
 console.log(`check-disk-caps OK (파일 ${fileCount}개 · 상한 ${flagCount}건 전건이 볼륨 선언 미만)`);

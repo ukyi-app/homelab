@@ -980,22 +980,9 @@ for (const { path: rel, text, docs } of ruleEntries) {
   }
 }
 
-// SCAN 신호(scripts/lib/scan-floor.sh 규약) — 실행 관측용 균일 마커. **위반 검사보다 앞**이다:
-// 규약상 도메인을 평가한 실행은 위반 여부와 무관하게 신호를 낸다(면제는 바닥값 실패 경로뿐).
-// 라벨 = 바닥값이 걸린 열거 도메인 하나 — 여긴 룰(MIN_SCAN)과 denylist(MIN_DENY) 둘이다.
-console.log(`SCAN: check-alert-rules:rules: ${ruleCount}`);
-console.log(`SCAN: check-alert-rules:denylist: ${denyMetrics.length}`);
-// 모드 D는 **두 축**의 신호를 낸다. 원장 크기(supply)는 큐레이션이 사라지는 것을 잡고,
-// 판정 참조 수(supply-refs)는 **강제 루프가 조용히 죽는 것**을 잡는다 — 전자만 있으면
-// 열거가 0건이 돼도 원장은 그대로라 초록이 된다(이 레포가 반복해 밟은 그 비대칭).
-console.log(`SCAN: check-alert-rules:supply: ${SUPPLY.length}`);
-console.log(`SCAN: check-alert-rules:supply-refs: ${supplyRefs}`);
-if (allowErrors.length) {
-  console.log(`FAIL: ${ALLOWLIST} 항목에 사유 주석이 없다 — 무근거 면제는 금지:`);
-  for (const e of allowErrors) console.log("  " + e);
-  process.exit(1);
-}
-// scan-floor: 룰 추출이 붕괴하면 아무것도 검사 안 하고 GREEN — fail-loud.
+// scan-floor: 룰 추출이 붕괴하면 아무것도 검사 안 하고 GREEN — fail-loud. 바닥값 판정은
+// SCAN 방출보다 **앞**이어야 한다: 열거 붕괴 실행이 마커를 내고 죽으면 실행 관측이 그 실행을
+// "정상 실행됨"으로 오독한다(scripts/lib/scan-floor.sh 규약 — SCAN 면제는 바닥값 실패 경로뿐).
 if (ruleCount < MIN_SCAN) {
   console.error(`FAIL: 스캔 룰 ${ruleCount}건 < ${MIN_SCAN} — 룰 추출 회귀 의심(${RULES_DIR} 재배치 또는 ConfigMap .data 키 변경?)`);
   process.exit(1);
@@ -1009,6 +996,21 @@ if (!SUPPLY_INJECTED) {
     console.error(`FAIL: 모드 D가 판정한 참조 ${supplyRefs}건 < ${MIN_SUPPLY_REFS} — 원장은 그대로인데 **강제 루프가 죽었다**(열거 범위 회귀 의심)`);
     process.exit(1);
   }
+}
+// SCAN 신호(scripts/lib/scan-floor.sh 규약) — 실행 관측용 균일 마커. 바닥값 판정 **뒤**,
+// 위반 검사 **앞**이다: 도메인을 평가한 실행은 위반 여부와 무관하게 신호를 낸다.
+// 라벨 = 바닥값이 걸린 열거 도메인 하나 — 여긴 룰(MIN_SCAN)과 denylist(MIN_DENY) 둘이다.
+console.log(`SCAN: check-alert-rules:rules: ${ruleCount}`);
+console.log(`SCAN: check-alert-rules:denylist: ${denyMetrics.length}`);
+// 모드 D는 **두 축**의 신호를 낸다. 원장 크기(supply)는 큐레이션이 사라지는 것을 잡고,
+// 판정 참조 수(supply-refs)는 **강제 루프가 조용히 죽는 것**을 잡는다 — 전자만 있으면
+// 열거가 0건이 돼도 원장은 그대로라 초록이 된다(이 레포가 반복해 밟은 그 비대칭).
+console.log(`SCAN: check-alert-rules:supply: ${SUPPLY.length}`);
+console.log(`SCAN: check-alert-rules:supply-refs: ${supplyRefs}`);
+if (allowErrors.length) {
+  console.log(`FAIL: ${ALLOWLIST} 항목에 사유 주석이 없다 — 무근거 면제는 금지:`);
+  for (const e of allowErrors) console.log("  " + e);
+  process.exit(1);
 }
 // 완전성 가드: 미등록 생산자/메트릭은 모드 C를 **조용히 통과**한다(fail-open) → 여기서 막는다.
 if (producerViol.length) {

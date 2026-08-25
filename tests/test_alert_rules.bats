@@ -138,6 +138,8 @@ _seed_frozen_fixture() {   # $1=root $2=픽스처 경로
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '\[모드 A:'
+  # scan-floor 규약의 나머지 반쪽: 위반 실행도 도메인을 평가했으므로 SCAN을 낸다(면제는 바닥값 실패뿐).
+  echo "$output" | grep -q '^SCAN: check-alert-rules:rules: '
 }
 
 @test "mode A accepts a subquery that strips instance before the rollup" {
@@ -580,6 +582,11 @@ YAML
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '스캔 룰'
+  # scan-floor 규약: 바닥값 실패 실행은 SCAN 면제 — 열거 붕괴 실행이 마커를 내고 죽으면
+  # 실행 관측이 그 실행을 "정상 실행됨"으로 오독한다(마커가 바닥값 판정보다 앞이던 버그의 회귀 앵커).
+  out="$output"
+  run grep -q '^SCAN: check-alert-rules:' <<<"$out"
+  [ "$status" -ne 0 ]
 }
 
 @test "alert-rule guard honors an allowlist entry that carries a reason" {
