@@ -27,8 +27,8 @@
 #    소비자는 "SCAN 없음"을 "픽스처"나 "0건"으로 읽으면 안 된다 — **미지(unknown)** 다.
 # ⚠️ 여기에 **건수를 적지 않는다.** 아무도 대조하지 않는 손 관리 수치는 반드시 드리프트한다 —
 #    실측한 적이 있다: 주석은 "11종/27종", 실제는 13종/31종, CONTRIBUTING·PROGRESS엔 또 다른 수치.
-#    현재값이 필요하면 세어라:
-#      grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh; grep -lE '^[^/]*SCAN: ' tools/*.ts
+#    현재값이 필요하면 세어라(TS는 리터럴 콜사이트 + 커널 guardMain 도메인 선언 두 형태):
+#      grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh; grep -lE '^[^/]*(SCAN: |scan: ")' tools/*.ts
 #    정합은 tests/gates/test_scan-floor.bats가 **정적 콜사이트 == 런타임 방출** 집합 대조로 강제한다.
 # ⚠️ **라벨 = 바닥값이 걸린 열거 도메인 하나.** 한 실행이 두 도메인을 보면 접미사로 나눈다
 #    (`check-skeleton:bats`/`:platform`). 도메인이 하나면 접미사를 붙이지 않는다.

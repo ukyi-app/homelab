@@ -89,6 +89,8 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
 - 도메인을 평가한 실행은 `SCAN: <가드>: <건수>`를 **stdout**에 낸다(`SKIP:`과 같은 채널·같은 모양).
 - 셸 가드는 커널이 대신 낸다 — `scan_floor`가 바닥값을 통과하면 자동, 바닥값 없는 카운트 자리는
   `scan_signal <라벨> <n>`을 직접 부른다(`scripts/lib/scan-floor.sh`).
+- TS 가드도 커널이 낸다 — `tools/lib/scan-floor.ts`의 `guardMain`이 전 도메인 floor 통과 시에만
+  일괄 방출한다(도메인 라벨은 콜사이트의 `scan: "<라벨>"` 리터럴 — 정적 파생 대상).
 - 한 실행이 **두 도메인**을 검사하면 라벨을 나눈다(`check-skeleton:bats` · `check-skeleton:platform`).
   같은 라벨로 두 줄을 내면 소비자가 어느 쪽인지 모른다.
 - 기계 판독 stdout을 내는 모드(`--json`)에선 마커를 내지 않는다 — 출력을 오염시킨다.
@@ -105,7 +107,7 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
 대상"과 같은 모양). 현재값이 필요하면 세어라:
 
 ```
-grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh; grep -lE '^[^/]*SCAN: ' tools/*.ts
+grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh; grep -lE '^[^/]*(SCAN: |scan: ")' tools/*.ts
 ```
 
 정합은 `tests/gates/test_scan-floor.bats`가 **정적 콜사이트 집합 == 런타임 방출 집합**으로 강제한다

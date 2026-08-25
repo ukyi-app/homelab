@@ -125,7 +125,8 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q '스캔 대상'
+  # 커널(tools/lib/scan-floor.ts) floor 진단의 안정 어휘 — 셸 scan_floor와 동일 문구다.
+  echo "$output" | grep -q '열거 붕괴'
 }
 
 

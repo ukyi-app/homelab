@@ -187,14 +187,22 @@ EOF
 #    누락). "하드코딩 소비처 목록은 자기 자신에게만 정확하다"(AGENTS.md 함정)의 살아있는 사례다.
 #    ⇒ 셸 레인과 **동형**으로 바꾼다: 정적 콜사이트 라벨 집합 == 런타임 방출 라벨 집합.
 @test "the TypeScript guards emit the same marker shape (derived roster, not hardcoded)" {
-  # 정적: 주석(//) 줄을 제외한 `SCAN: <라벨>:` 콜사이트. 라벨은 도메인 단위라 접미사가 붙을 수 있다.
-  static="$(grep -hE '^[^/]*SCAN: ' "$ROOT"/tools/*.ts \
-            | grep -oE 'SCAN: [a-z0-9:-]+:' | sed 's/^SCAN: //; s/:$//' | LC_ALL=C sort -u)"
+  # 정적: 두 형태의 합집합 — ① 레거시: 주석(//) 줄을 제외한 `SCAN: <라벨>:` 리터럴 콜사이트,
+  # ② 커널(tools/lib/scan-floor.ts guardMain) 도메인 선언의 `scan: "<라벨>"` 리터럴.
+  # 커널이 마커를 방출하는 가드는 소스에 `SCAN: `이 없으므로 ②가 없으면 이 대조가 그 가드를
+  # 정적 쪽에서 잃는다(라벨은 도메인 단위라 접미사가 붙을 수 있다 — 두 형태 모두).
+  static="$({ grep -hE '^[^/]*SCAN: ' "$ROOT"/tools/*.ts \
+              | grep -oE 'SCAN: [a-z0-9:-]+:' | sed 's/^SCAN: //; s/:$//'; \
+              grep -hE '^[^/]*scan: "' "$ROOT"/tools/*.ts \
+              | grep -oE 'scan: "[a-z0-9:-]+"' | sed 's/^scan: "//; s/"$//'; } | LC_ALL=C sort -u)"
   # 바닥값: 콜사이트가 통째로 사라지면 정적·런타임이 함께 줄어 등식이 유지된다(적대 검토가 실측한 구멍).
   n=$(printf '%s\n' "$static" | grep -c . || true)
   [ "$n" -ge 6 ]
-  # 방출 TS 파일 전량을 **파생**한다 — 목록을 손으로 적지 않는다.
-  files="$(grep -lE '^[^/]*SCAN: ' "$ROOT"/tools/*.ts)"
+  # 방출 TS 파일 전량을 **파생**한다 — 목록을 손으로 적지 않는다(두 형태의 합집합).
+  # ⚠️ 각 grep에 `|| true` — 이관이 진행되며 한 형태가 0건이 되는 것은 정당하고, 그때 grep rc=1이
+  #    set -e로 여기서 죽으면 진짜 단언(아래 비어있음·집합 대조)에 도달하지 못한다.
+  files="$({ grep -lE '^[^/]*SCAN: ' "$ROOT"/tools/*.ts || true; \
+             grep -lE '^[^/]*scan: "' "$ROOT"/tools/*.ts || true; } | LC_ALL=C sort -u)"
   [ -n "$files" ]
   runtime=""
   for f in $files; do
