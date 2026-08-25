@@ -1,0 +1,81 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "design",
+  "ack": "human-triage",
+  "triageMode": "human",
+  "verdict": "needs-attention",
+  "summary": "F1 resolved: lines 192–217 now require T6 to reject direct `SCAN:` producers independently of the static/runtime roster, narrowly exempt the kernel, and floor its own enumeration. F2 is still open: the proposed numeric kernel check occurs after string-to-number coercion, so an empty floor becomes valid `0`; deleting the existing parsers also regresses two previously protected callers. No additional critical/high issue was found in the F1 fix.",
+  "planFile": "docs/reviews/ts-scan-kernel/design.md",
+  "planInDiff": true,
+  "reviewedFileCount": 4,
+  "target": "working tree diff",
+  "reviewer": "codex",
+  "fallbackFrom": null,
+  "fallbackReason": null,
+  "effort": "xhigh",
+  "inputMode": "inline-diff",
+  "reviewedSha": "05df2bcbc4a5af93a9020acb56571e5e6fceee06",
+  "reviewedTree": "818b6a2d347c237434780635fe8b7570f6146e1e",
+  "reviewedPlanSha256": "6a0b907bc96bd2b6ff6c2f43744a66bab4ad3627e46d6964ab23e35a44886e48",
+  "headMovedDuringReview": false,
+  "planDriftDuringReview": false,
+  "backendExitCode": 0,
+  "parseError": null,
+  "promptDelivery": {
+    "mechanism": "token-echo",
+    "enforcing": false,
+    "verified": true,
+    "echoed": "57045117e17473c2"
+  },
+  "judgment": {
+    "rule": null,
+    "considered": [],
+    "facts": {
+      "phase": "post-run",
+      "scope": "working-tree",
+      "plan": "docs/reviews/ts-scan-kernel/design.md",
+      "needsPlan": true,
+      "resolvedMode": "working-tree",
+      "filesCount": 4,
+      "planInDiff": true,
+      "workingTreeDirty": true,
+      "planHasUncommittedEdits": true,
+      "commitsAheadOfBase": null,
+      "reviewerId": "codex",
+      "reviewerCommand": "codex",
+      "preRunTargetMode": "working-tree",
+      "preRunSha": "05df2bcbc4a5af93a9020acb56571e5e6fceee06",
+      "preRunTree": "818b6a2d347c237434780635fe8b7570f6146e1e",
+      "preRunPlanHash": "6a0b907bc96bd2b6ff6c2f43744a66bab4ad3627e46d6964ab23e35a44886e48",
+      "headShaAfterRun": "05df2bcbc4a5af93a9020acb56571e5e6fceee06",
+      "headTreeAfterRun": "818b6a2d347c237434780635fe8b7570f6146e1e",
+      "postRunPlanHash": "6a0b907bc96bd2b6ff6c2f43744a66bab4ad3627e46d6964ab23e35a44886e48",
+      "exitCode": 0,
+      "stdinError": null,
+      "hasResult": true,
+      "validVerdict": true,
+      "relaunchTail": "This is a property of the run, not of the repository, so the round's next launch may use another backend (--reviewer claude) — the caller performs that switch as its second launch; this launcher never spawns a second backend itself."
+    }
+  },
+  "findingCount": 1,
+  "planFindingCount": 1,
+  "triage": "review-gate SKILL.md §§ Triage and Rounds govern. Render EVERY finding as a full table row — `ID | Finding (title + full body) | Severity | file:line | Code | Recommendation | Proposed decision` — never truncated and never inside a dialog; then ask the ROUND before the rows — take every Proposed decision as it stands, or decide row by row — and `as proposed` ends the round in that ONE action; only if row-by-row was chosen, ask per finding with that row's Proposed decision as the first option, a reject or defer taking a free-text reason; echo back ONLY the rows that carried free text, and none if the round was decided by selection alone. Max 2 rounds. Append the decided rows to `docs/reviews/<slug>/decisions.md` under a `### <gate> r<n> (<reviewer>)` heading — one line per row, `<ID> <decision> — <finding title>[; <reason for reject/defer>]`, and an accepted waiver as `WAIVED by user: <reason>` — then COMMIT it with this artifact. That grammar is not decoration: the conductors anchor on `^### <gate> r<n>` and read the waiver line as the pass condition, so a ledger written in any other shape reads back as a gate still owed.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Kernel-side validation cannot reject an empty floor after coercion",
+      "body": "The fix recognizes that `Number(\"\") === 0`, but still defines the kernel contract over numeric `got`/`min` values and removes both raw-string `positiveInt` parsers. Once a caller converts an empty flag or environment value with `Number`, the kernel receives the safe, finite, non-negative integer `0` and cannot distinguish it from an intentional zero. The promised empty-input test therefore cannot pass without changing the interface, and migrating as designed would newly disable the floor for `check-image-ownership` and `check-workflow-readiness`, whose current parsers reject empty input.",
+      "file": "docs/reviews/ts-scan-kernel/design.md",
+      "line_start": 115,
+      "line_end": 127,
+      "code": "**이 레포는 같은 클래스를 이미 한 번 밟았다.** `positiveInt(raw, flag)`가 그 처방인데,\n`check-image-ownership.ts:234`와 `check-workflow-readiness.ts:613`에 **바이트 동일하게 복제**되어 있고\n후자의 주석이 근거를 적어 뒀다 — *\"`Number(\"\")===0`이라 빈 값이 바닥값을 조용히 끄는 자리다\n(같은 클래스의 실측 버그가 있었다).\"* 처방이 둘에만 손으로 적용되고 나머지 둘(`check-disk-caps:36` env ·\n`check-guard-authority:317` flag)은 raw `Number(...)`로 남았다. **검출기 하네스 복제와 같은 형태다.**\n\n따라서 유효성 판정을 커널 계약에 넣고, 복제 2벌을 흡수한다.\n\n- `got`·`min` 둘 다 **유한한 안전 정수**이고 음수가 아니어야 한다. 아니면 비교 **전에** 거부한다.\n- 거부의 종료코드는 **2**다(바닥값 실패의 1과 구별). \"바닥값이 수가 아니다\"는 사용법 오류이고\n  \"열거가 붕괴했다\"와 다른 사고다. `positiveInt`가 이미 exit 2를 쓰고 `cli.ts:57`이 같은 규약을 적었다.\n- 복제된 `positiveInt` 2벌이 커널 소비로 바뀌고, 미적용 2곳이 **자동으로 덮인다**.\n- 테스트는 **잘못된 입력**으로 연다(`DISK_CAP_MIN_FLAGS=abc` · `--min-scan abc` · 빈 문자열 · 음수 · 소수).",
+      "confidence": 0.99,
+      "recommendation": "Validate the raw floor input before `Number` coercion—either with a shared parser or by letting the kernel accept and parse raw strings. Migrate all four injection sites through that path, retain explicit zero support, and prove empty strings exit 2 before removing the existing parsers.",
+      "isPlanFinding": true
+    }
+  ],
+  "next_steps": [
+    "Revise F2’s interface so raw malformed values cannot lose information before validation; then re-check the empty-string cases for all affected consumers."
+  ]
+}
