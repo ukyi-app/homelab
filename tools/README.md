@@ -298,12 +298,16 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (structure r1 a3 — 두 번째 소비자 init이 생겨 추출). 마커 = --archetype·--name·--yes. 둘이 갈리면
   doctor가 통과시킨 템플릿을 init이 실행 중 거부하는 계약 갭이 생긴다.
 - **`lib/platform.ts`** — 플랫폼 좌표 SSOT(HOMELAB_REPO·TEMPLATE_REPO·ARCHETYPES·
-  COMPILED_ARCHETYPES). doctor가 검증한 대상과 이후 init이 쓰는 대상이 콜사이트마다 갈리지
-  않게 한 곳에서만 정의(identity.ts와 같은 원칙 — 저긴 이름 형식, 여긴 좌표). MCP `app_init`
-  inputSchema의 archetype enum과 결과 계약(cli-result-schema.json initSuccess·initFailure)의
-  archetype enum도 ARCHETYPES 파생이다(cli-deepening 심화 6 — 리터럴 사본이면 아키타입 확장 시 init
-  엔진은 수용하는데 MCP만 -32602로 거부하거나 결과 계약만 낡는 드리프트가 난다; test_homelab-mcp.bats가
-  입력·결과 두 표면의 확장 수용을, test_result-schema-gen.bats가 생성물 파생을 단언).
+  ARCH_NEUTRAL_ARCHETYPES·COMPILED_ARCHETYPES). doctor가 검증한 대상과 이후 init이 쓰는 대상이
+  콜사이트마다 갈리지 않게 한 곳에서만 정의(identity.ts와 같은 원칙 — 저긴 이름 형식, 여긴 좌표).
+  **아키타입 어휘 리터럴은 ARCHETYPES 한 곳뿐**이고 나머지 표면은 전부 파생이다(cli-deepening 심화 6):
+  MCP `app_init` inputSchema enum(mcp.ts)·결과 계약 enum(생성기 → cli-result-schema.json initSuccess·
+  initFailure)·CLI 사용법(homelab.ts)·doctor TARGETARCH 검사 대상(COMPILED = ARCHETYPES − 중립 opt-out,
+  신규 아키타입은 기본 검사 대상 — fail-closed). 리터럴 사본이면 아키타입 확장 시 init 엔진은
+  수용하는데 MCP만 -32602로 거부하거나 결과 계약만 낡는 드리프트가 난다. 강제: test_platform.bats(파생
+  계약 + `fullstack` 감시 토큰 전역 가드)·test_homelab-mcp.bats(입력·결과 두 표면의 확장 수용)·
+  test_result-schema-gen.bats(생성물 파생)·test_homelab-appinit.bats(사용법 파생). **확장 절차**는
+  platform.ts ARCHETYPES 주석이 SSOT다(추가 → 중립 여부 → `--write` 재생성 → bats 손 앵커 갱신).
 - **`lib/schema-check.ts`** — cli-result-schema.json 전용 미니 검증기(`schemaErrors()`, ajv 무의존).
   지원 키워드 화이트리스트 밖은 **throw로 fail-closed**(모르는 제약의 조용한 통과 차단).
   골든 픽스처·계약 테스트 전용 — create-app.ts의 check()는 .app-config.yml 정책 소유가

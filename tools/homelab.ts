@@ -15,6 +15,7 @@ import type { TypedFlags } from "./lib/cli.ts";
 import { APP_CREATE, APP_INIT, APP_SECRETS, APP_TEARDOWN, CACHE_CREATE, CACHE_URL, DB_CREATE, DB_URL, DOCTOR, STATUS, VERBS, appCreateInputError, appTeardownInputError, cacheCreateInputError, dbCreateInputError, type AppCreateInput, type AppTeardownInput, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./lib/secrets.ts";
 import { appInitInputError, type AppInitInput } from "./lib/init.ts";
+import { ARCHETYPES } from "./lib/platform.ts";
 import { runMcpServer } from "./lib/mcp.ts";
 import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
 import { statusInputError, type StatusInput } from "./lib/status.ts";
@@ -319,15 +320,16 @@ function appTeardownCli(rest: string[]): VerbOutput {
 }
 
 function appInitUsage(): string {
+  const choices = ARCHETYPES.join("|"); // 어휘는 platform.ts SSOT 파생(리터럴 사본 금지 — test_platform.bats 가드)
   return [
-    "사용법: homelab app init <app> --archetype fullstack|api|site|worker [--public] [--dispatch-secrets <경로>] [--adopt] [--json]",
+    `사용법: homelab app init <app> --archetype ${choices} [--public] [--dispatch-secrets <경로>] [--adopt] [--json]`,
     "",
     "앱 레포의 시작을 끝까지 만든다(멱등·재개 가능): preflight(부수효과 0) → 템플릿에서 레포 생성",
     "(기본 private) → 클론 → 스캐폴더 비대화형 실행 → invocation marker 기록 → 커밋·첫 push(빌드",
     "트리거) → [--dispatch-secrets면 디스패치 시크릿 쌍 설정]. 실패 후 같은 명령을 다시 실행하면",
     "도달한 체크포인트부터 수렴한다. 소유 증명은 마커(.homelab-init)이고, 마커 없는 기존 레포는",
     "거부한다 — 확인 후 --adopt로만 이어갈 수 있다. private key 값은 어떤 출력에도 나타나지 않는다.",
-    "  --archetype <a>    fullstack|api|site|worker (kind는 아키타입 유도값 — CONTEXT.md 용어)",
+    `  --archetype <a>    ${choices} (kind는 아키타입 유도값 — CONTEXT.md 용어)`,
     "  --public           공개 레포로 생성(기본 private)",
     "  --dispatch-secrets <경로>  App 키 디렉토리(app-id·private-key.pem) — 새 레포에 디스패치 시크릿 쌍 설정",
     "  --adopt            마커 없는 기존 레포를 명시 입양(사용자 확인 — 소유 미증명 레포 이어가기)",

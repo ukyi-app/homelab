@@ -290,3 +290,21 @@ run_init() {
   echo "$output" | grep -q -- "--adopt"
   echo "$output" | grep -q -- "--dispatch-secrets"
 }
+
+@test "the usage archetype choices derive from platform ARCHETYPES (parity, hand-pinned floor)" {
+  run bun -e '
+    const { ARCHETYPES } = await import(process.argv[1] + "/tools/lib/platform.ts");
+    console.log(ARCHETYPES.join("|"));
+  ' "$ROOT"
+  [ "$status" -eq 0 ]
+  want="$output"
+  [ "$want" = "api|fullstack|site|worker" ]
+  run bun tools/homelab.ts app init --help
+  [ "$status" -eq 0 ]
+  # 사용법 줄과 옵션 설명 줄 둘 다 SSOT 순서 그대로다.
+  echo "$output" | grep -q -- "--archetype $want "
+  echo "$output" | grep -q -- "--archetype <a>    $want "
+  # 리터럴 사본 소멸 — homelab.ts에 어휘 리터럴이 없다(양성 대조: SSOT에서는 매치).
+  [ "$(grep -c "fullstack" tools/lib/platform.ts)" -ge 1 ]
+  [ "$(grep -c "fullstack" tools/homelab.ts)" = "0" ]
+}
