@@ -4,6 +4,7 @@
 // 계약 Envelope 반환, 프로세스/표현 관심사 없음). argv 파싱·렌더링·stdout·종료코드는 CLI 셸
 // (homelab.ts) 소유이고, MCP 서버(후속 티켓)는 op를 직접 호출해 같은 envelope을 tool 결과로 쓴다.
 // MCP 노출 정책 필드는 MCP 티켓에서 이 descriptor에 추가한다.
+import { appRel } from "./app-surface.ts";
 import { ENVELOPE, exitFor, type Envelope } from "./contract.ts";
 import { runDoctor } from "./doctor.ts";
 import { APP_NAME_RE, CACHE_MAXMEMORY_MI, EXT_RE, resourceNameError } from "./identity.ts";
@@ -143,7 +144,7 @@ function appCreateOp(input: AppCreateInput): Envelope {
     dispatchInputs: [["app", input.app]],
     branchFor: (runId) => `create-app/${input.app}-${runId}`, // 명명 SSOT: _create-app.yaml
     applications: [ // 해당 앱 Application + 배포 핀 표면(create-app 산출)
-      { name: `${input.app}-prod`, surfacePath: `apps/${input.app}/deploy/prod/values.yaml` },
+      { name: `${input.app}-prod`, surfacePath: appRel(input.app).values },
     ],
     resultBase: { action: "create-app", name: input.app },
     manualMerge: { approval: "공개 승인" }, // 머지 = 공개 승인 — auto-merge를 켜는 어떤 경로도 없다
@@ -169,7 +170,7 @@ function appTeardownOp(input: AppTeardownInput): Envelope {
     dispatchInputs: [["app", input.app], ["confirm", input.confirm]],
     branchFor: (runId) => `teardown/teardown-app-${input.app}-${runId}`, // 명명 SSOT: _teardown-app.yaml
     applications: [ // 철거 대상 앱 Application + 제거될 표면(create-app 산출과 동일 경로)
-      { name: `${input.app}-prod`, surfacePath: `apps/${input.app}/deploy/prod/values.yaml` },
+      { name: `${input.app}-prod`, surfacePath: appRel(input.app).values },
     ],
     resultBase: { action: "teardown-app", name: input.app, dnsReclaim: "iac/tf-reconcile" },
     manualMerge: { approval: "파괴 승인" }, // 머지 = 파괴 승인 — auto-merge를 켜는 어떤 경로도 없다

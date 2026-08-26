@@ -7,7 +7,7 @@
 // 라이브 계층 오류만 live.error로 보고한다(스펙이 선택 계층으로 선언한 유일한 구간).
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
+import { appPaths, appRel, readAppSurface } from "./app-surface.ts";
 import { parseBranch } from "./bump-plan.ts";
 import { compact } from "./contract.ts";
 import { ghJson, sh } from "./exec.ts";
@@ -56,25 +56,17 @@ function defaultRoot(): string {
 
 type AppRow = Record<string, unknown>;
 
-// create-app.ts 산출 형상(values.yaml image.{repo,tag,digest} · .bindings.json autoDeploy ·
-// source-repo 한 줄)을 읽는다. 파일/키 부재는 키 부재로 보고한다(fail-closed 의미 부여는 소비자 —
-// autoDeploy 누락을 승인 레인으로 접는 것은 bump-poll의 계약).
+// 앱 표면(values.yaml image.{repo,tag,digest} · .bindings.json autoDeploy · source-repo 한 줄)의
+// 읽기·부재 접기는 app-surface module 소유(d4) — 부재/파손 = null을 키 부재로 보고한다.
+// autoDeploy 값 해석도 그 module(descriptorAutoDeploy 재사용 — 정확히 true만 승인)이 한다:
+// bindings가 실재하는데 키가 불량이면 false로 보고된다(인가 의미론과 표시가 일치 — "미기록"은 파일 부재뿐).
 function readAppRow(root: string, name: string): AppRow {
-  const dir = `${root}/apps/${name}/deploy/prod`;
-  let tag: unknown, digest: unknown, autoDeploy: unknown, sourceRepo: unknown;
-  try {
-    const image = (parseYaml(readFileSync(`${dir}/values.yaml`, "utf8")) ?? {})?.image ?? {};
-    tag = typeof image.tag === "string" ? image.tag : undefined;
-    digest = typeof image.digest === "string" ? image.digest : undefined;
-  } catch { /* values.yaml 부재/파손 — 핀 키 부재로 보고 */ }
-  try {
-    const b = JSON.parse(readFileSync(`${dir}/.bindings.json`, "utf8"));
-    autoDeploy = typeof b.autoDeploy === "boolean" ? b.autoDeploy : undefined;
-  } catch { /* 바인딩 부재/파손 — autoDeploy 키 부재로 보고 */ }
-  try {
-    const s = readFileSync(`${dir}/source-repo`, "utf8").trim();
-    sourceRepo = s.length > 0 ? s : undefined;
-  } catch { /* source-repo 부재(인레포 앱) */ }
+  const s = readAppSurface(root, name);
+  const image = (s.values?.image ?? {}) as Record<string, unknown>;
+  const tag = typeof image.tag === "string" ? image.tag : undefined;
+  const digest = typeof image.digest === "string" ? image.digest : undefined;
+  const autoDeploy = s.autoDeploy ?? undefined;
+  const sourceRepo = s.sourceRepo ?? undefined;
   let ledgerMi: unknown;
   try {
     const rows = parseLedgerRows(readFileSync(`${root}/docs/memory-ledger.md`, "utf8"));
@@ -88,7 +80,7 @@ function readAppRow(root: string, name: string): AppRow {
 function listAppNames(root: string): string[] {
   return listUnits("apps", root)
     .filter((u) => {
-      try { return statSync(`${root}/${u.dir}/deploy/prod`).isDirectory(); } catch { return false; }
+      try { return statSync(appPaths(root, u.name).prod).isDirectory(); } catch { return false; }
     })
     .map((u) => u.name);
 }
@@ -99,8 +91,8 @@ function statusList(root: string): StatusOutcome {
 }
 
 function statusApp(root: string, app: string): StatusOutcome {
-  if (!existsSync(`${root}/apps/${app}/deploy/prod`)) {
-    return { variant: "failure", omitted: [], result: { mode: "app", error: `앱 '${app}'의 배포 산출물(apps/${app}/deploy/prod)이 없다` } };
+  if (!existsSync(appPaths(root, app).prod)) {
+    return { variant: "failure", omitted: [], result: { mode: "app", error: `앱 '${app}'의 배포 산출물(${appRel(app).prod})이 없다` } };
   }
   const row = readAppRow(root, app);
 

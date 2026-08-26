@@ -3,6 +3,8 @@ import { resolve, sep, dirname } from "node:path";
 import { parseDocument, isScalar } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { TAG_RE, DIGEST_RE, parseInlinePin, parseDescriptor, formatInlinePin, type PinDescriptor } from "./lib/image-pin.ts";
+// apps 레인의 표면 경로는 app-surface module 소유(d4) — 손조립 리터럴 금지.
+import { appPaths } from "./lib/app-surface.ts";
 
 // digest-exporter APPS 신선도 동기(codex pass2 P2-2): bump한 앱이 APPS 목록에 있으면 그 항목의
 // 이미지 태그를 새 tag로 갱신한다. sha-* 태그가 불변이라 배포 핀만 바꾸면 digest-exporter가 stale
@@ -109,7 +111,7 @@ if (pinArg !== undefined) {
   process.exit(0);
 }
 
-const path = `${repoRoot}/apps/${app}/deploy/prod/values.yaml`;
+const path = appPaths(repoRoot, app).values;
 // 심층 방어: regex가 나중에 느슨해지더라도 apps/ 밖 쓰기는 거부한다.
 const root = resolve(repoRoot, "apps");
 if (!resolve(path).startsWith(root + sep)) {

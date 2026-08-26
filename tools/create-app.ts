@@ -3,8 +3,8 @@
 // 연결(DB/Redis)은 앱 SealedSecret(DATABASE_URL/REDIS_URL)으로 주입 — create-app은
 // SealedSecret 시크릿·digest 핀 이미지·권위 바인딩 레지스트리(.bindings.json=autoDeploy)를 다룬다.
 // _create-app.yaml(homelab-initiated workflow_dispatch)이 호출 — 결과물은 PR(사람 머지 = 승인).
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
-import { parse as parseYaml, stringify as toYaml } from "yaml";
+import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { TAG_RE, DIGEST_RE } from "./lib/image-pin.ts";
 import { readSealed, type SealedFacts } from "./lib/sealed-contract.ts";
@@ -13,6 +13,9 @@ import { parseFlags } from "./lib/cli.ts";
 import { addApp } from "./lib/digest-exporter.ts";
 import { surfaceHashWorktree } from "./lib/surface-hash.ts";
 import { buildActivationMarker, registryProjection } from "./lib/activation-marker.ts";
+// 앱 표면(경로·기록 집합)은 app-surface module이 소유한다(d4) — create가 쓰는 집합 = teardown이
+// 지우는 집합의 대칭이 module 테스트로 강제된다. apps.json·원장·digest-exporter는 앱-외부 표면이라 여기 잔류.
+import { appPaths, appRel, writeAppSurface } from "./lib/app-surface.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
 let __f: Record<string, string | boolean>;
@@ -94,7 +97,7 @@ if (served) {
     // 내부 host 유일성 — 내부 앱은 apps.json 미등록이라 기존 apps/*/values.yaml route.host를 스캔(명시 override 충돌=오라우팅)
     const appsDir = `${ROOT}/apps`;
     if (existsSync(appsDir)) for (const d of readdirSync(appsDir)) {
-      const vp = `${appsDir}/${d}/deploy/prod/values.yaml`;
+      const vp = appPaths(ROOT, d).values;
       if (d === app || !existsSync(vp)) continue;
       const rh = (parseYaml(readFileSync(vp, "utf8")) ?? {})?.route?.host;
       if (rh === host) fail(`내부 host '${host}'가 apps/${d}에 이미 배선됨(오라우팅 차단)`);
@@ -111,8 +114,8 @@ const replicas = config.replicas ?? 1;
 const reqMi = toMi(rq.memory) * replicas, limitMi = toMi(lm.memory) * replicas;
 
 // 중복: 디렉토리 + 원장 행
-const appDir = `${ROOT}/apps/${app}`;
-if (existsSync(appDir)) fail(`apps/${app} 이미 존재`);
+const appDir = appPaths(ROOT, app).dir;
+if (existsSync(appDir)) fail(`${appRel(app).dir} 이미 존재`);
 const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
 const ledger = readFileSync(ledgerPath, "utf8");
 let agg: LedgerAgg;
@@ -179,32 +182,30 @@ const plan = {
 };
 
 if (!DRY) {
-  mkdirSync(`${appDir}/deploy/prod`, { recursive: true });
-  writeFileSync(`${appDir}/deploy/prod/values.yaml`, toYaml(values));
-  writeFileSync(`${appDir}/deploy/prod/source-repo`, `${repo}\n`); // bump-poll의 발신 레포 바인딩
-  writeFileSync(`${appDir}/deploy/prod/.bindings.json`, JSON.stringify(bindings, null, 2) + "\n");
-  // kustomization은 secrets 유무와 무관하게 항상 필요(appset source #3가 kustomize 렌더 —
-  // 없으면 values.yaml을 매니페스트로 파싱해 "groupVersion shouldn't be empty"로 죽는다)
-  writeFileSync(`${appDir}/deploy/prod/kustomization.yaml`, toYaml({
-    apiVersion: "kustomize.config.k8s.io/v1beta1", kind: "Kustomization",
-    namespace: "prod",
-    ...(sealedFacts ? { resources: [sealedFacts.sealedFile] } : {}),
-  }));
-  if (sealedFacts) writeFileSync(`${appDir}/deploy/prod/${sealedFacts.sealedFile}`, sealedFacts.bytes); // 원본 바이트 그대로(checksum과 정합)
+  // 인-디렉토리 표면(values·source-repo·bindings·kustomization·봉인본·.activation)은 app-surface
+  // module이 한 번에 쓴다 — 표면 집합의 선언과 대칭(teardown) 이빨이 거기 있다.
+  // .activation 마커는 공개 앱만: create-app PR 머지가 첫 공개 승인이고, 재노출 감사
+  // (audit-orphans activation-exposure-drift)가 이 마커를 검사한다 — 없으면 재노출 게이트에서 영구
+  // 제외된다(activate-app --flip만 마커를 남기던 갭). 함수형으로 넘겨 **다른 표면 기록 뒤** 평가된다:
+  // surfaceHash는 working-tree canonical(.activation 제외 — 커밋 후 audit의 surfaceHash(HEAD)와 일치),
+  // sha/syncedRev는 생성 시점 미확정이라 null.
+  writeAppSurface(ROOT, app, {
+    values,
+    sourceRepo: repo,
+    bindings,
+    sealed: sealedFacts ? { file: sealedFacts.sealedFile, bytes: sealedFacts.bytes } : null,
+    activation: served && pub
+      ? () => buildActivationMarker({
+        app,
+        surfaceHash: surfaceHashWorktree(ROOT, app),
+        registry: registryProjection({ name: app, host, public: true }),
+      })
+      : null,
+  });
   if (served && pub) {
     // create-app PR 머지가 첫 공개 승인이다. 머지 후 iac.yaml이 이 active:true 행을 DNS/tunnel에 적용한다.
     registry.push({ name: app, host, public: true, active: true });
     writeFileSync(appsJsonPath, JSON.stringify(registry, null, 2) + "\n");
-    // 재노출 감사(audit-orphans activation-exposure-drift)가 검사할 .activation 마커를 함께 기록한다.
-    // 이게 없으면 create-app으로 공개된 앱이 재노출 게이트에서 영구 제외된다(activate-app --flip만 마커를
-    // 남기던 갭). activate-app과 동일 포맷 — surfaceHash는 working-tree canonical(커밋 후 audit의
-    // surfaceHash(HEAD)와 일치), sha/syncedRev는 생성 시점 미확정이라 null.
-    const marker = buildActivationMarker({
-      app,
-      surfaceHash: surfaceHashWorktree(ROOT, app),
-      registry: registryProjection({ name: app, host, public: true }),
-    });
-    writeFileSync(`${appDir}/deploy/prod/.activation`, JSON.stringify(marker, null, 2) + "\n");
   }
   // 원장: 행 추가 + Totals 프로즈 동반 갱신(ledger-budget SSOT)
   writeFileSync(ledgerPath, appendRowWithTotals(agg, { name: app, env: "prod", reqMi, limitMi }));

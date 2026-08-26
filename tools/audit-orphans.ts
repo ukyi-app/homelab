@@ -11,6 +11,7 @@
 //   stale-ledger-row      : prod 원장 행인데 apps/도 platform/도 없음
 //   incomplete-purge      : tombstone state=purging 잔존 — 상태머신 중단 흔적
 import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { appPaths, appRel } from "./lib/app-surface.ts";
 import { parse as parseYaml } from "yaml";
 import { surfaceHash } from "./lib/surface-hash.ts";
 import { registryProjection } from "./lib/activation-marker.ts";
@@ -90,13 +91,12 @@ if (registry.length < MIN_REGISTRY) {
   console.error(`audit-orphans: registry ${registry.length}행 < ${MIN_REGISTRY} — 열거 붕괴 의심(scan-floor). 이 자리가 0건 검사 후 초록이 되던 곳이다`);
   process.exit(1);
 }
-const appsRoot = `${ROOT}/apps`;
 // 열거는 공유 워커의 `apps` 유닛 스코프가 소유한다. **의미론적 필터(values.yaml 실재)는 여기 남는다** —
 // 스코프가 그걸 걸러버리면 check-app-deploy가 잡아야 할 "필수 산출물 부재"가 열거에서 사라진다
 // (design-r1 R-1). 이 가드는 배포 가능한 앱만 보면 되므로 필터가 정당하다.
 const appDirs = listUnits("apps", ROOT)
   .map((u) => u.name)
-  .filter((a) => existsSync(`${appsRoot}/${a}/deploy/prod/values.yaml`));
+  .filter((a) => existsSync(appPaths(ROOT, a).values));
 const cacheDirs = existsSync(`${ROOT}/platform/cache/prod`)
   ? readdirSync(`${ROOT}/platform/cache/prod`, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
   : [];
@@ -107,13 +107,13 @@ const cacheDirs = existsSync(`${ROOT}/platform/cache/prod`)
 for (const r of registry) {
   if (!appDirs.includes(r.name)) {
     if (r.active)
-      add("orphan-dns", r.name, `apps.json active:true 행인데 apps/${r.name}/deploy/prod 부재 — DNS가 빈 백엔드로 노출 중`);
+      add("orphan-dns", r.name, `apps.json active:true 행인데 ${appRel(r.name).prod} 부재 — DNS가 빈 백엔드로 노출 중`);
     else
-      add("orphan-dns-inactive", r.name, `apps.json active:false 행인데 apps/${r.name}/deploy/prod 부재 — DNS 미노출(수동 보류/철거 중 상태일 수 있음)`);
+      add("orphan-dns-inactive", r.name, `apps.json active:false 행인데 ${appRel(r.name).prod} 부재 — DNS 미노출(수동 보류/철거 중 상태일 수 있음)`);
   }
 }
 for (const a of appDirs) {
-  const values = parseYaml(readFileSync(`${appsRoot}/${a}/deploy/prod/values.yaml`, "utf8")) ?? {};
+  const values = parseYaml(readFileSync(appPaths(ROOT, a).values, "utf8")) ?? {};
   if (values.route?.public === true && !registry.some((r) => r.name === a))
     add("missing-registration", a, "public 앱인데 apps.json 행 부재 — activate 불가 상태");
 }
@@ -127,7 +127,7 @@ for (const a of appDirs) {
 // 무효화로 인한 false-positive 노이즈를 막기 위해 여전히 필요하다.
 for (const r of registry) {
   if (r.active !== true || !appDirs.includes(r.name)) continue;
-  const markerPath = `${appsRoot}/${r.name}/deploy/prod/.activation`;
+  const markerPath = appPaths(ROOT, r.name).activation;
   const marker = readJson(markerPath, null);
   // ⚠️ 마커 없는 active&&public 앱은 유일 차단 재노출 게이트(activation-exposure-drift)가 registry
   // projection 부재로 **영구 제외**된다(감사 사각). create-app(공개 생성)·activate-app(--flip) 둘 다
@@ -140,7 +140,7 @@ for (const r of registry) {
   if (!marker || !marker.surfaceHash) continue;
   const current = surfaceHash(ROOT, "HEAD", r.name); // .activation 제외 canonical — 마커와 동일 함수
   if (current && current !== marker.surfaceHash)
-    add("activation-surface-drift", r.name, `activation 이후 apps/${r.name} 표면 변경(정보성 — 런북 재검증 권장; 마커 ${String(marker.surfaceHash).slice(0, 12)} ≠ 현재 ${current.slice(0, 12)})`);
+    add("activation-surface-drift", r.name, `activation 이후 ${appRel(r.name).dir} 표면 변경(정보성 — 런북 재검증 권장; 마커 ${String(marker.surfaceHash).slice(0, 12)} ≠ 현재 ${current.slice(0, 12)})`);
   // ⚠️ codex pass4 F1: apps.json 노출 행(host/public)이 바뀌면 앱 트리 무변경이어도 DNS 노출이 변한다 — 정보성으로 잡는다.
   // ⚠️ codex restale2 F1: apps.json 노출 행(host/public) 변경은 app-tree(surfaceHash) drift와 달리 **데드락
   // 위험이 없다**(호스트 변경은 앱 재배포·Healthy 선행 불필요) → 미재검증 public DNS 노출을 막기 위해 **차단**.
@@ -196,7 +196,7 @@ if (existsSync(connKustPath)) {
     .filter((r: string) => /^(db|cache)-.+-conn\.sealed\.yaml$/.test(r) && !r.endsWith("-ro-conn.sealed.yaml"));
   const referenced = new Set<string>();
   for (const a of appDirs) {
-    const values = parseYaml(readFileSync(`${appsRoot}/${a}/deploy/prod/values.yaml`, "utf8")) ?? {};
+    const values = parseYaml(readFileSync(appPaths(ROOT, a).values, "utf8")) ?? {};
     for (const e of values.envFrom ?? []) {
       const n = e?.secretRef?.name;
       if (n) referenced.add(String(n));

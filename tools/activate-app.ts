@@ -11,6 +11,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { APP_NAME_RE } from "./lib/identity.ts";
+import { appRel } from "./lib/app-surface.ts";
 import { typedFlags, type TypedFlags } from "./lib/cli.ts";
 import { surfaceHash } from "./lib/surface-hash.ts";
 import { buildActivationMarker, registryProjection } from "./lib/activation-marker.ts";
@@ -109,7 +110,7 @@ if (flip) {
   // 이 마커는 **정보성**(pass3 F1) — audit이 차단 게이트로 쓰면 정상 이미지 bump가 데드락. 노출 재검증은 런북.
   const registryRow = registryProjection(row); // create-app/audit과 공유(키 순서 계약)
   const sh = surfaceHash(repoDir, syncedRev, app);
-  const markerPath = path.join(repoDir, `apps/${app}/deploy/prod/.activation`);
+  const markerPath = path.join(repoDir, appRel(app).activation); // 앱 표면 경로 SSOT(d4)
   // ⚠️ codex restale F2: 멱등 — 이미 active이고 마커(surfaceHash+registry+sha)가 동일하면 **아무것도 쓰지 않고**
   // 끝낸다(재실행/리트라이 시 worktree clean — activatedAt churn·불필요 PR 노이즈 방지). 변경이 있으면 갱신.
   const cur = (row.active === true && existsSync(markerPath)) ? JSON.parse(readFileSync(markerPath, "utf8")) : null;

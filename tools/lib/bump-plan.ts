@@ -18,6 +18,7 @@
 // 성립하지 않는다(legacyAmbiguity — fail-closed는 소비자 몫).
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { appPaths } from "./app-surface.ts";
 import { TAG_RE, descriptorAutoDeploy } from "./image-pin.ts";
 
 // 레인의 런타임 값 목록도 여기가 SSOT다 — 소비자(ensure-bump-pr의 isLane)가 로컬 사본을 들면
@@ -116,8 +117,10 @@ export type LaneProbe = {
 };
 
 function surfaceFile(root: string, kind: TargetKind, name: string): string {
+  // apps 레인의 표면 경로는 app-surface module(d4)이 소유한다. 베스포크 핀 디스크립터는 앱 표면이
+  // 아니라서(플랫폼 컴포넌트의 배포 핀 위치) 여기 남는다 — 베스포크 표면 module은 실증되면 별도 판단.
   return kind === "app"
-    ? path.join(root, "apps", name, "deploy", "prod", ".bindings.json")
+    ? appPaths(root, name).bindings
     : path.join(root, "platform", name, "prod", ".image-pin.json");
 }
 

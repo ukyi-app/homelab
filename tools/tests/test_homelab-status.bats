@@ -42,6 +42,21 @@ setup() {
   [ "$(echo "$output" | jq -r '.result.apps[] | select(.name=="page") | .sourceRepo')" = "ukyi-app/page" ]
 }
 
+@test "status folds a non-boolean autoDeploy to false and reports a missing bindings file as key absence" {
+  # 해석 SSOT는 descriptorAutoDeploy(app-surface 경유 — d4) 하나다: bindings가 실재하면 정확히
+  # boolean true만 true고, non-boolean("yes")은 인가 의미론과 같은 false로 **표시**된다.
+  # "미기록"(키 부재)은 bindings 파일 자체의 부재/파손뿐이다.
+  make_app_fixture blog true
+  make_app_fixture page '"yes"'
+  make_app_fixture bare true
+  rm "$APPS_ROOT/apps/bare/deploy/prod/.bindings.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.apps[] | select(.name=="page") | .autoDeploy')" = "false" ]
+  [ "$(echo "$output" | jq -r '.result.apps[] | select(.name=="bare") | has("autoDeploy")')" = "false" ]
+  [ "$(echo "$output" | jq -r '.result.apps[] | select(.name=="blog") | .autoDeploy')" = "true" ]
+}
+
 @test "status app mode reports pin, runs, lane-filtered open PRs, and live ArgoCD state" {
   make_app_fixture page true
   printf '[{"name":"release","status":"completed","conclusion":"success","head_sha":"c0ffee1","html_url":"https://github.com/ukyi-app/page/actions/runs/9"}]\n' > "$FIX/runs.json"

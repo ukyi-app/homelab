@@ -11,6 +11,7 @@
 // 멱등: 같은 봉인본이면 커밋·push가 no-op으로 건너뛰어지고 디스패치만 재시도된다(push 성공·
 //   디스패치 실패 경계가 재실행으로 수렴). 평문(.env)은 seal 도구의 kubeseal stdin 전용 — 이 엔진은
 //   .env를 읽지도, 봉인본 내용을 출력하지도 않는다.
+import { appRel } from "./app-surface.ts";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { compact } from "./contract.ts";
@@ -128,7 +129,7 @@ export function runAppSecrets(input: AppSecretsInput, cwd = process.cwd()): Muta
     dispatchInputs: [["app", app]],
     branchFor: (runId) => `update-secrets/${app}-${runId}`, // 명명 SSOT: _update-secrets.yaml
     applications: [ // 해당 앱 Application + 봉인본 표면(update-secrets 산출: apps/<app>/deploy/prod/)
-      { name: `${app}-prod`, surfacePath: `apps/${app}/deploy/prod/${app}-secrets.sealed.yaml` },
+      { name: `${app}-prod`, surfacePath: appRel(app).sealed(`${app}-secrets.sealed.yaml`) },
     ],
     resultBase: { action: "update-secrets", name: app, chain },
     noopOnMissingPr: true, // 동일 봉인본 = PR 없는 멱등 no-op run(pr-first-commit)

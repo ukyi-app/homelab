@@ -18,6 +18,8 @@ import path from "node:path";
 import { parse } from "yaml";
 import { TAG_RE, parseInlinePin, parseDescriptor } from "./lib/image-pin.ts";
 import { listUnits } from "./lib/repo-walk.ts";
+// apps 레인의 표면 경로는 app-surface module 소유(d4) — writePath 와이어 문자열은 레포-상대(appRel).
+import { appPaths, appRel } from "./lib/app-surface.ts";
 import { decodePlan, encodePlan, resolveLane, type Candidate, type PinRef, type PlanItem, type Target } from "./lib/bump-plan.ts";
 
 const USAGE = `poll-ghcr — GHCR 폴링 bump 플래너(읽기 전용, update-image 권위 경로)
@@ -135,21 +137,21 @@ function computeBump(result: Draft, s: { key: string; src: string; repo: string;
   return { ...result, action: s.autoDeploy ? "bump" : "propose-pr", candidate, reason: s.autoDeploy ? "" : "autoDeploy 아님(fail-closed) — 승인 PR만" };
 }
 
-function planApp(dir: string, app: string): Draft {
-  const read = (f: string) => readFileSync(path.join(dir, f), "utf8");
+function planApp(app: string): Draft {
+  const p = appPaths(args.root, app);
   const result: Draft = { target: { kind: "app", name: app }, action: "noop", reason: "", current: null, candidate: null };
 
-  const src = read("source-repo").trim();
+  const src = readFileSync(p.sourceRepo, "utf8").trim();
   result.src = src;
   if (!new RegExp(`^${args.owner}/[A-Za-z0-9._-]+$`).test(src))
     return { ...result, action: "refuse", reason: `source-repo가 ${args.owner} org 밖: ${src}` };
 
-  const values = parse(read("values.yaml"));
+  const values = parse(readFileSync(p.values, "utf8"));
   const repo = values?.image?.repo ?? "";
   const tag = String(values?.image?.tag ?? "");
   const digest = values?.image?.digest ?? null;
   result.current = { tag, digest };
-  result.writePath = path.join("apps", app, "deploy", "prod", "values.yaml");
+  result.writePath = appRel(app).values;
   // values image.repo가 source-repo 바인딩과 일치하는지 강제(베스포크 레인 planComponent와 동일 계약).
   // 불일치면 다른 레포의 이미지를 폴링·bump하게 되므로 refuse(fail-closed, cross-repo 오배포 차단).
   if (repo !== `ghcr.io/${src}`)
@@ -197,13 +199,11 @@ function planComponent(dir: string, name: string): Draft {
 // apps/*/deploy/prod 중 source-repo 바인딩이 있는 앱만 순회.
 // 열거는 공유 워커의 `apps` 유닛 스코프가 소유하고, `source-repo` 실재라는 **의미론적 필터는 여기**
 // 남는다 — 스코프가 거르면 다른 소비자(check-app-deploy)가 잡아야 할 상태가 사라진다(design-r1 R-1).
-const appsRoot = path.join(args.root, "apps");
 const plans: Draft[] = [];
 for (const { name } of listUnits("apps", args.root)) {
-  const dir = path.join(appsRoot, name, "deploy", "prod");
-  if (!existsSync(path.join(dir, "source-repo"))) continue;
+  if (!existsSync(appPaths(args.root, name).sourceRepo)) continue;
   try {
-    plans.push(planApp(dir, name));
+    plans.push(planApp(name));
   } catch (e: any) {
     plans.push({ target: { kind: "app", name }, action: "refuse", reason: `플랜 실패: ${e.message}`, current: null, candidate: null });
   }
