@@ -10,7 +10,8 @@
   3. 이 원장의 각 행이 가리키는 가드가 **SSOT의 어느 `> 가드:` 줄에든 있는지**(원장 → SSOT).
      ⚠️ 1·2는 이 갭을 **원리적으로 못 본다** — 1은 파일 실재만, 2는 반대 방향만 본다. 실측 2026-08-21
      도입 시점에 **9행**이 SSOT에도 AGENTS 인덱스에도 없이 enforced를 주장하고 있었다.
-- **where**: `gate`=ci.yaml job `gate`가 수집 · `iac`=iac/tf-reconcile · `local`=make/pre-commit 로컬.
+- **where**: `gate`=ci.yaml job `gate`가 수집 · `iac`=iac/tf-reconcile · `local`=make/pre-commit 로컬 ·
+  `app-build`=앱 레포의 pr/release가 호출하는 reusable(이 레포엔 caller가 없어 `gate`가 수집하지 않는다).
   방향 3의 면제는 여기에 **사유와 함께 명시**한다(하드코딩 목록이 아니라 마커라 새 행에도 같은 규칙이 적용된다):
   - `SSOT없음(불변식)` — 함정 서사가 아니라 불변식·규약을 지키는 가드다. traps-detail에 들어갈 대상이 아니다.
   - `SSOT없음(승격대상)` — 함정인데 traps-detail 서사가 아직 없다. **부채를 침묵시키지 않고 계상한다.**
@@ -95,3 +96,4 @@
 | TS 바닥값은 coercion 뒤에서 조용히 꺼진다(Number("abc")=NaN → n<NaN 항상 false · Number("")=0 → 빈 입력≠의도적 0 구별 불가) — parseFloor를 coercion 앞에 | gate | `tools/lib/scan-floor.ts`, `tests/gates/test_scan-floor.bats` |
 | 스캔 신호를 콜사이트가 손으로 내면 순서가 드리프트한다(위반 exit이 신호보다 앞 → 마커 0건=미실행 오독 · 로스터 등식은 우회 못 잡음) — 커널 한 몸 + 직접 생산자 거부 | gate | `tools/lib/scan-floor.ts`, `scripts/check-scan-producers.sh`, `tests/gates/test_scan-floor.bats` |
 | 정적 증인의 두 함정(`^[^/]*`는 `//`만 제외 — JSDoc 줄이 코드 · `run bash -c` 안의 bats 지역 변수는 빈 문자열 — grep 0건 항상 통과) | gate | `tests/gates/test_scan-floor.bats`, `scripts/check-scan-producers.sh` |
+| QEMU amd64 leg의 bun 1.4는 RSS 24MB에서 "메모리 고갈"로 죽는다(JSC 주소공간 예약 실패 — BUN_JSC_useJIT=0·forceRAMSize 무효) — 크래시-재시도 루프가 release를 6시간 태우고, Dockerfile을 안 돌리는 앱 CI는 그동안 초록이다. timeout-minutes로 분 단위에 드러나게 한다 | app-build | `.github/workflows/reusable-app-build.yaml` |

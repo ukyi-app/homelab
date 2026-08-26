@@ -270,15 +270,26 @@ RPO_NOTE="" # 대기가 타임아웃했으면 최종 보고 본문에 실린다
 # ⚠️ **타임아웃을 건다.** 이 헬퍼는 이제 프로덕션 primary에 **쓰기**도 한다 — 무타임아웃이면
 #    테이블 락이나 반쯤 죽은 API에서 fail-closed가 아니라 **무한 대기**로 끝나고, 그건
 #    activeDeadlineSeconds 초과 → SIGKILL → 고아라는 M17의 생성 경로 그 자체다(이 파일 상단 참조).
+# ⚠️ **`kubectl --request-timeout`을 쓰면 안 된다** — kubectl v1.36.x가 그 플래그와 in-cluster REST
+#    config 로딩을 상호작용시켜 **config를 통째로 버리고 localhost:8080으로 폴백**한다(2026-08-24 실측:
+#    `--request-timeout=30s`·`=1m` 둘 다 재현, 플래그 없으면 정상). pg-tools 재빌드로 kubectl이
+#    v1.36.3으로 올라가며 매 drill이 RPO 마커 단계에서 결정적으로 죽었다(8/22·8/25 재현). 값 무관이라
+#    시간만 조정해선 못 고친다. ⇒ 타임아웃은 kubectl 플래그가 아니라 `timeout` 코어유틸로 exec 전체를
+#    감싸 건다(무한 대기 방지 요구는 그대로 충족). psql 내부 statement/lock_timeout은 DB 레벨 보호로 유지.
 _live_psql() {
-  kubectl --request-timeout=30s -n "$NS" exec "${LIVE_CLUSTER}-1" -c postgres -- \
+  timeout 35 kubectl -n "$NS" exec "${LIVE_CLUSTER}-1" -c postgres -- \
     env PGOPTIONS='-c statement_timeout=15s -c lock_timeout=5s' psql -X -v ON_ERROR_STOP=1 -U postgres "$@"
 }
 
 echo "[drill] RPO 마커 기록 — 지금 쓴 행이 복구본에 나타나야 아카이브가 최신이다"
 # 마커는 `id`와 `ts`를 **함께** 받는다. id 단독은 시퀀스가 되감기면(pg_dump 복원의 setval 등)
 # 옛 행과 충돌해 거짓 PASS가 날 수 있고, ts가 있어야 **실제 RPO 수치**를 보고할 수 있다.
-MARKER_ROW="$(_live_psql -d "$DB" -tAF'|' -c "INSERT INTO ${TABLE} DEFAULT VALUES RETURNING id, extract(epoch from ts)::bigint;")" \
+# ⚠️ **`head -1`로 RETURNING 행만 취한다.** PostgreSQL 18의 psql은 `INSERT … RETURNING`에서 `-tA`
+#    (tuples-only)에도 상태 태그 `INSERT 0 1`을 stdout **둘째 줄**로 낸다(실측 PG 18.4 — SELECT는 안 낸다).
+#    그걸 두면 `MARKER_TS="${MARKER_ROW##*|}"`가 `1787…\nINSERT 0 1`이 되어 아래 숫자 case가 fail한다
+#    (2026-08-25 라이브: --request-timeout 결함을 고치자 이 파싱 결함이 드러났다). RETURNING 행이 항상
+#    첫 줄이므로 head -1이 안전하다. 다른 `_live_psql -tAc` SELECT 호출은 상태 태그가 없어 무관하다.
+MARKER_ROW="$(_live_psql -d "$DB" -tAF'|' -c "INSERT INTO ${TABLE} DEFAULT VALUES RETURNING id, extract(epoch from ts)::bigint;" | head -1)" \
   || fail "RPO 마커를 라이브에 쓰지 못했다 — 아카이브 신선도를 증명할 수 없다(테이블 부재/권한/DB 다운/락 확인)"
 MARKER_ID="${MARKER_ROW%%|*}"
 MARKER_TS="${MARKER_ROW##*|}"
