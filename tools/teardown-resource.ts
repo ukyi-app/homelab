@@ -23,6 +23,7 @@
 // 확인: 사용 앱 grep + 실행 워크로드 kubectl + 백업 검증 후 증거 id 전달; F1 강화).
 import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
+import { TOMBSTONES_PATH, layoutFor, purgeArtifactsFor } from "./lib/resource-layout.ts";
 import { replaceTotals, removeRow, parseLedgerRows } from "./lib/ledger-totals.ts";
 import { removeResource } from "./lib/kustomization.ts";
 import { parseFlags } from "./lib/cli.ts";
@@ -46,8 +47,11 @@ const fail = (msg: string): never => { console.error(`teardown-resource: ${msg}`
 if ((db ? 1 : 0) + (cache ? 1 : 0) !== 1) fail("--db <name> 또는 --cache <name> 중 정확히 하나");
 const name = (db ?? cache)!;
 if (!RESOURCE_NAME_RE.test(name)) fail(`이름 형식 불량: ${name}`);
-const kind = db ? "db" : "cache";
-const key = `${kind}:${name}`;
+// 산출물 명명·배치는 레이아웃 커널 소유(cli-deepening 심화 4) — provision과 같은 값을 쓴다
+// (원장 행·엔트리 이름 추정 어긋남 F1 클래스의 구조적 소멸).
+const kind: "db" | "cache" = db ? "db" : "cache";
+const layout = kind === "db" ? layoutFor("db", name) : layoutFor("cache", name);
+const key = layout.tombstoneKey;
 
 // ── refs-verified attestation 게이트 (F1 강화) ────────────────────────────────
 // db: 필드 제거로 자동 refcount는 불가하다 — 대신 owner가 "사용 앱 수동 확인 완료"를 명시 attest해야
@@ -57,38 +61,18 @@ if (!refsVerified || !refsVerified.trim())
   fail("--refs-verified <evidence-id> 필수 — 런북 수동 확인(사용 앱 0 + 백업) 후 증거 id를 전달하라");
 
 // ── tombstone 인벤토리 ────────────────────────────────────────────────────────
-const tombPath = `${ROOT}/platform/data-conn/prod/.tombstones.json`;
+const tombPath = `${ROOT}/${TOMBSTONES_PATH}`;
 const tombs = existsSync(tombPath) ? JSON.parse(readFileSync(tombPath, "utf8")) : {};
 const writeTombs = () => writeFileSync(tombPath, JSON.stringify(tombs, null, 2) + "\n");
 
-// 대상 산출물 경로
-const dbDir = `${ROOT}/platform/cnpg/prod/databases`;
-const crPath = `${dbDir}/${name}.yaml`;
-const cacheDir = `${ROOT}/platform/cache/prod/${name}`;
-const connFiles = [
-  `${ROOT}/platform/data-conn/prod/${kind}-${name}-conn.sealed.yaml`,
-  `${ROOT}/platform/data-conn/prod/${kind}-${name}-ro-conn.sealed.yaml`,
-];
-const dataConnKust = `${ROOT}/platform/data-conn/prod/kustomization.yaml`;
-const dbKust = `${dbDir}/kustomization.yaml`;
-const cacheKust = `${ROOT}/platform/cache/prod/kustomization.yaml`;
+// drop 단계가 편집하는 Database CR — db 전용(커널 정준형 + ROOT 결합).
+const crPath = layout.kind === "db" ? `${ROOT}/${layout.paths.cr}` : "";
 
-// purge cleanup이 제거할 (파일/디렉토리, 등록된 kustomization, resources 엔트리) — provision이
-// 등록한 그대로를 역으로 제거한다. **파일만 rm하고 kustomization 엔트리를 남기면 kustomize
-// build가 "missing file"로 죽어 cnpg-data/data-conn-prod/cache-prod 렌더가 파손된다**(적대적 리뷰).
-const purgeArtifacts = kind === "db"
-  ? [
-      { file: crPath, kust: dbKust, entry: `${name}.yaml` },
-      { file: `${dbDir}/db-${name}-owner.sealed.yaml`, kust: dbKust, entry: `db-${name}-owner.sealed.yaml` },
-      { file: `${dbDir}/db-${name}-ro.sealed.yaml`, kust: dbKust, entry: `db-${name}-ro.sealed.yaml` },
-      { file: connFiles[0], kust: dataConnKust, entry: `db-${name}-conn.sealed.yaml` },
-      { file: connFiles[1], kust: dataConnKust, entry: `db-${name}-ro-conn.sealed.yaml` },
-    ]
-  : [
-      { file: cacheDir, dir: true, kust: cacheKust, entry: name },
-      { file: connFiles[0], kust: dataConnKust, entry: `cache-${name}-conn.sealed.yaml` },
-      { file: connFiles[1], kust: dataConnKust, entry: `cache-${name}-ro-conn.sealed.yaml` },
-    ];
+// purge cleanup이 제거할 (파일/디렉토리, 등록된 kustomization, resources 엔트리) — 커널의
+// purge 삼중이 provision 등록의 정확한 역이다. **파일만 rm하고 kustomization 엔트리를 남기면
+// kustomize build가 "missing file"로 죽어 cnpg-data/data-conn-prod/cache-prod 렌더가 파손된다**(적대적 리뷰).
+const purgeArtifacts = purgeArtifactsFor(kind, name)
+  .map((a) => ({ ...a, file: `${ROOT}/${a.file}`, kust: `${ROOT}/${a.kust}` }));
 
 
 const plan = { resource: key, mode: deleteData ? "purge" : "retain", step, refsVerified, backupId: backupId ?? null };
@@ -144,9 +128,9 @@ switch (step) {
   case "cleanup": {
     if (!DRY) {
       // 원장 행 제거를 파괴적 작업(파일 rm·tombstone) **전에** — totals 프로즈 드리프트/write 실패 시 cleanup abort(F1·F2 버그수정).
-      if (kind === "cache") {
-        const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
-        const component = `cache-${name}`; // F1: 원장 행은 cache-<name>로 기록됨(provision-cache와 동일)
+      if (layout.kind === "cache") {
+        const ledgerPath = `${ROOT}/${layout.paths.ledger}`;
+        const component = layout.ledgerRow; // 원장 행 이름 — provision-cache와 같은 커널 값(F1 클래스 소멸)
         if (existsSync(ledgerPath)) {
           let lg = readFileSync(ledgerPath, "utf8");
           // 멱등은 사전 존재 검사로(부재면 이미 정리됨). 존재하면 removeRow→합계 재계산→replaceTotals→write를

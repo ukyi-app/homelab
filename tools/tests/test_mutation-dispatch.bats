@@ -203,6 +203,136 @@ setup() {
   run grep -q 'HOMELAB_OWNER' "$WF/bump-poll.yaml"; [ "$status" -ne 0 ]
 }
 
+@test "reusable branch: lines match the lane rows' neutral patterns (TS-YAML parity)" {
+  # 레인 신원 parity 축 1(cli-deepening 심화 2): YAML 쪽 branch: 개명은 어떤 테스트도 red가
+  # 아니었다 — 이 가드가 그 방향을 CI로 당긴다. 값은 YAML 파서로 읽는다(따옴표·주석 재포맷에
+  # 흔들리지 않고, 축 2와 같은 venue). key 표현식은 레인별 **열거 매핑**(가드 소유 — 설계 심화 2
+  # "정규화 매핑은 가드 쪽")으로 기대 문자열을 조립해 정확 대조한다 — 포괄 ${{…}}→{key} 붕괴는
+  # 오타 표현식(inputs.applicaton)도 green으로 접는 fail-open이다(리뷰 실측). 경로는 $ROOT 절대
+  # (cwd 의존은 venue가 갈리면 로컬이 CI를 예고하지 못한다). 5는 레인 수 손 앵커다.
+  run bun -e '
+    const root = process.argv[1];
+    const { parse } = require("yaml");
+    const { readFileSync } = require("node:fs");
+    const { LANES, fillLanePattern } = await import(root + "/tools/lib/catalog-rows.ts");
+    const KEY_EXPR = {
+      "create-database": "steps.spec.outputs.name",
+      "create-cache": "steps.spec.outputs.name",
+      "create-app": "steps.img.outputs.app",
+      "update-secrets": "inputs.app",
+      "teardown-app": "inputs.app",
+    };
+    const collect = (node, out) => {
+      if (Array.isArray(node)) { for (const v of node) collect(v, out); return; }
+      if (node && typeof node === "object") {
+        for (const k of Object.keys(node)) {
+          if (k === "branch" && typeof node[k] === "string") out.push(node[k]);
+          else collect(node[k], out);
+        }
+      }
+    };
+    const bad = [];
+    let n = 0;
+    for (const row of Object.values(LANES)) {
+      const doc = parse(readFileSync(root + "/.github/workflows/" + row.reusable, "utf8"));
+      const got = [];
+      collect(doc, got);
+      if (got.length !== 1) { bad.push(row.reusable + ": branch 값 " + got.length + "개(정확히 1 기대)"); continue; }
+      const want = fillLanePattern(row.branchPattern, { key: "${{ " + KEY_EXPR[row.action] + " }}", runId: "${{ github.run_id }}" });
+      const normed = got[0].replace(/\s+/g, " ").trim();
+      if (normed !== want) { bad.push(row.reusable + ": " + normed + " != " + want); continue; }
+      n++;
+    }
+    if (n !== 5 || bad.length) { console.error(bad.join("\n") || ("레인 수 " + n + " != 5")); process.exit(1); }
+    console.log("ok:" + n);
+  ' "$ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:5$"
+}
+
+@test "dispatcher workflow_dispatch inputs equal the lane row inputs plus correlation" {
+  # 레인 신원 parity 축 2: 디스패치 입력 이름의 양끝(행 ↔ 디스패처 YAML) 집합 동치.
+  # 경로는 $ROOT 절대(venue 비의존). 5는 레인 수 손 앵커.
+  run bun -e '
+    const root = process.argv[1];
+    const { parse } = require("yaml");
+    const { readFileSync } = require("node:fs");
+    const { LANES } = await import(root + "/tools/lib/catalog-rows.ts");
+    const bad = [];
+    let n = 0;
+    for (const row of Object.values(LANES)) {
+      const doc = parse(readFileSync(root + "/.github/workflows/" + row.workflow, "utf8"));
+      const on = doc?.on ?? doc?.[true]; // YAML 1.1 on→true 키 함정 방어
+      const got = Object.keys(on?.workflow_dispatch?.inputs ?? {}).sort();
+      const want = [...row.inputs, "correlation"].sort();
+      if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(row.workflow + ": " + JSON.stringify(got) + " != " + JSON.stringify(want));
+      n++;
+    }
+    if (n !== 5 || bad.length) { console.error(bad.join("\n") || ("레인 수 " + n + " != 5")); process.exit(1); }
+    console.log("ok:" + n);
+  ' "$ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:5$"
+}
+
+@test "lane row inputs match validate-mutation CONTRACT: pass-through equality and the spec layer pin" {
+  # 레인 신원 parity 축 3(Q7 참조·대조 — validate-mutation은 무변경 서버 끝 선언으로 남는다).
+  # 패스스루 레인은 행 inputs == required. 조립 레인(create-database/create-cache)은 디스패처가
+  # 입력을 spec으로 조립하므로 검증기는 조립 후 계층을 본다(설계 게이트 r1 아티팩트의 검증 노트가
+  # 수용한 계층 구분 — design.md 본문이 아니라 design-r1.json notes가 출처인 구현 결정이다).
+  # 그 경계의 양쪽을 각각 핀한다: ① required == ["spec"], ② validateSpec 허용 필드 리터럴 핀
+  # (db) / 행 inputs 동치(cache), ③ 행 inputs 전부를 디스패처 조립이 실제로 소비.
+  # CONTRACT/OPTIONAL 키는 전량 리터럴 핀 — 개수 핀만으로는 회귀 앵커 행 개명이 통과한다.
+  run bun -e '
+    const root = process.argv[1];
+    const { readFileSync } = require("node:fs");
+    const { LANES } = await import(root + "/tools/lib/catalog-rows.ts");
+    const src = readFileSync(root + "/tools/validate-mutation.ts", "utf8");
+    const block = (name) => {
+      const i = src.indexOf("const " + name);
+      const j = src.indexOf("};", i);
+      if (i < 0 || j < 0) { console.error(name + " 블록 없음"); process.exit(1); }
+      return src.slice(i, j);
+    };
+    const rows = (text) => {
+      const out = {};
+      for (const m of text.matchAll(/^\s*"?([a-z-]+)"?:\s*\[([^\]]*)\]/gm)) {
+        out[m[1]] = m[2].split(",").map((s) => s.trim().replace(/^"|"$/g, "")).filter((s) => s !== "");
+      }
+      return out;
+    };
+    const contract = rows(block("CONTRACT"));
+    const optional = rows(block("OPTIONAL"));
+    const wantContractKeys = ["activate-app", "audit", "create-app", "create-cache", "create-database", "teardown-app", "teardown-resource", "update-secrets"];
+    const wantOptionalKeys = ["create-app", "create-cache", "create-database", "teardown-app", "update-secrets"];
+    if (JSON.stringify(Object.keys(contract).sort()) !== JSON.stringify(wantContractKeys)) { console.error("CONTRACT 키 전량 핀 어긋남: " + Object.keys(contract).sort().join(",")); process.exit(1); }
+    if (JSON.stringify(Object.keys(optional).sort()) !== JSON.stringify(wantOptionalKeys)) { console.error("OPTIONAL 키 전량 핀 어긋남: " + Object.keys(optional).sort().join(",")); process.exit(1); }
+    const am = src.match(/const allowed = action === "create-database" \? \[([^\]]*)\] : \[([^\]]*)\]/);
+    if (!am) { console.error("validateSpec allowed 추출 실패"); process.exit(1); }
+    const list = (s) => s.split(",").map((x) => x.trim().replace(/^"|"$/g, "")).filter((x) => x !== "");
+    if (JSON.stringify(list(am[1])) !== JSON.stringify(["name", "owner", "extensions"])) { console.error("db spec 허용 필드 핀 어긋남: " + am[1]); process.exit(1); }
+    if (JSON.stringify(list(am[2]).sort()) !== JSON.stringify([...LANES["create-cache"].inputs].sort())) { console.error("cache spec 허용 필드가 행 inputs와 다르다: " + am[2]); process.exit(1); }
+    const bad = [];
+    let n = 0;
+    for (const row of Object.values(LANES)) {
+      if ((optional[row.action] ?? []).join(",") !== "correlation") bad.push(row.action + ": OPTIONAL != [correlation]");
+      const required = contract[row.action] ?? [];
+      if (row.action === "create-database" || row.action === "create-cache") {
+        if (JSON.stringify(required) !== JSON.stringify(["spec"])) bad.push(row.action + ": spec 계층 핀 어긋남 — " + JSON.stringify(required));
+        const wf = readFileSync(root + "/.github/workflows/" + row.workflow, "utf8");
+        for (const i of row.inputs) if (wf.indexOf("inputs." + i) < 0) bad.push(row.workflow + ": 조립이 inputs." + i + "를 소비하지 않는다");
+      } else if (JSON.stringify([...required].sort()) !== JSON.stringify([...row.inputs].sort())) {
+        bad.push(row.action + ": " + JSON.stringify(required) + " != " + JSON.stringify(row.inputs));
+      }
+      n++;
+    }
+    if (n !== 5 || bad.length) { console.error(bad.join("\n") || ("레인 수 " + n + " != 5")); process.exit(1); }
+    console.log("ok:" + n);
+  ' "$ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:5$"
+}
+
 @test "each dispatcher declares an optional correlation input echoed into run-name (web-UI compat by definition)" {
   # 하위호환의 정의상 증명: required 아님 + 기본값 빈 문자열 + run-name은 빈값에서 바이트 동일(조건부 에코).
   run bun -e '

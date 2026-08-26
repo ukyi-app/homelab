@@ -3,11 +3,15 @@
 // (cpu limit은 비요구: CFS quota 유휴 throttling 회피 — 의도적 생략이 SRE 권장. initContainer 비대상.)
 // CNPG CR도 스캔한다: kind:Cluster는 컨테이너 개념이 없어 spec.resources를 pseudo-container 'postgres'로
 // (allowlist 키 Cluster/<name>/postgres), kind:Pooler는 spec.template.spec.containers[](pgbouncer)로 검사한다.
-// 구 scripts/check-resource-limits.sh(bash+yq+python3 3언어)를 bun/TS 단일로 이관 — 메시지·scan-floor 동일.
+// 구 scripts/check-resource-limits.sh(bash+yq+python3 3언어)를 bun/TS 단일로 이관.
+// ⚠️ 바닥값 진단은 이제 **커널 균일 문구**다(tools/lib/scan-floor.ts) — 셸 시절의 '메시지 동일'
+//    계약은 그 이행으로 대체됐다. 도메인은 라벨이, 원인 후보는 hint가 나른다.
 // 원격-helm 벤더(platform/*/prod/charts/)·barman-plugin은 스캔 밖. make verify가 호출, bats가 행동 검증.
 import { existsSync, readFileSync } from "node:fs";
 import { parseFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
+import { reportScanError, scanFloor } from "./lib/scan-floor.ts";
+
 
 let f: Record<string, string | boolean>;
 try { f = parseFlags(process.argv.slice(2), { value: ["--repo-root"], bool: [] }); }
@@ -106,16 +110,16 @@ for (const { path: rel, text, docs } of entries) {
   }
 }
 
-// scan-floor: grep 셀렉터 붕괴로 매치가 0~소수면 아무것도 검사 안 하고 GREEN 되는 false-green 차단(fail-loud).
-if (count < MIN_SCAN) {
-  console.error(`FAIL: 스캔 대상 ${count}건 < ${MIN_SCAN} — grep 셀렉터 회귀 의심(platform 재배치/kind 들여쓰기?)`);
-  process.exit(1);
+// 열거 붕괴 바닥값 + SCAN 신호 — 커널(tools/lib/scan-floor.ts)이 한 몸으로 처리한다.
+// 바닥값을 통과한 실행만 마커를 내므로 **순서를 손으로 맞출 자리가 없다**(이 자리에 있던
+// "TS는 콜사이트라 순서를 손으로 맞춰야 한다"는 주석이 설명할 것을 잃었다).
+try {
+  scanFloor("check-resource-limits", count, MIN_SCAN, {
+    hint: "grep 셀렉터 회귀 의심(platform 재배치·kind 들여쓰기?).",
+  });
+} catch (e) {
+  process.exit(reportScanError(e, "FAIL:"));
 }
-// SCAN 신호(scripts/lib/scan-floor.sh와 같은 규약) — 실행 관측용 균일 마커.
-// ⚠️ **위반 검사보다 앞**이다. 규약상 "도메인을 평가한 실행"은 위반 여부와 무관하게 신호를 낸다
-// (유일한 면제는 바닥값 실패 경로 — 그건 위에서 이미 exit 1). 셸 가드는 커널이 바닥값 시점에
-// 내므로 자동으로 이 위치인데, TS는 콜사이트라 순서를 손으로 맞춰야 한다.
-console.log(`SCAN: check-resource-limits: ${count}`);
 if (viol.length) {
   console.log("FAIL: cpu·memory request 또는 memory limit 없는 상주 워크로드 main 컨테이너 — 선언 후 (memory는) 원장 행 동반, 또는 " + ALLOW + "에 이유와 함께 등재:");
   for (const v of viol) console.log("  " + v);

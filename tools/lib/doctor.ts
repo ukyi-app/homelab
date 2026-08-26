@@ -5,7 +5,7 @@
 //   - 결정적 출력: detail에 절대경로·시각 등 실행마다 변하는 값을 넣지 않는다(골든 픽스처 계약).
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { HOMELAB_REPO, TEMPLATE_REPO, COMPILED_ARCHETYPES } from "./platform.ts";
+import { HOMELAB_REPO, TEMPLATE_REPO, ARCH_NEUTRAL_ARCHETYPES, COMPILED_ARCHETYPES } from "./platform.ts";
 import { SCAFFOLD_CONTRACT_LABEL, scaffoldContractError } from "./template-contract.ts";
 
 export type CheckStatus = "pass" | "fail" | "warn";
@@ -104,7 +104,7 @@ export function runDoctor(): DoctorResult {
       else add("template-scaffold-contract", "pass", `스캐폴더 비대화형 계약 확인(${SCAFFOLD_CONTRACT_LABEL})`);
     }
 
-    // site는 검사 대상이 아니다(arch 중립 — COMPILED_ARCHETYPES 주석·ticket 03 실측).
+    // 검사 대상 = COMPILED_ARCHETYPES(ARCHETYPES − ARCH_NEUTRAL: arch 중립은 명시 opt-out — platform.ts 주석·ticket 03 실측).
     const bad: string[] = [];
     for (const a of COMPILED_ARCHETYPES) {
       const df = fetchTemplateFile(`scaffold/archetypes/${a}/Dockerfile`);
@@ -112,7 +112,7 @@ export function runDoctor(): DoctorResult {
       else if (!df.includes("TARGETARCH")) bad.push(a);
     }
     if (bad.length > 0) add("template-targetarch", "fail", `TARGETARCH 파라미터화 부재: ${bad.join(", ")} — amd64 노드 exec format error(이 템플릿으로는 init 거부 근거)`);
-    else add("template-targetarch", "pass", "컴파일 아키타입 3종(api·fullstack·worker) Dockerfile TARGETARCH 파라미터화 확인 — site는 arch 중립이라 대상 아님");
+    else add("template-targetarch", "pass", `컴파일 아키타입 ${COMPILED_ARCHETYPES.length}종(${COMPILED_ARCHETYPES.join("·")}) Dockerfile TARGETARCH 파라미터화 확인 — ${ARCH_NEUTRAL_ARCHETYPES.join("·")}는 arch 중립이라 대상 아님`);
   }
 
   const summary: DoctorSummary = {

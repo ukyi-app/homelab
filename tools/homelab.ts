@@ -5,27 +5,26 @@
 // 이 bin 모듈은 import 시 main이 실행되므로 MCP 등 다른 소비자는 lib 쪽을 import한다
 // (structure r1 A1·B1). 셰뱅+exec 비트는 이 파일만 예외: package.json bin("homelab")의
 // 대상이라 `bun link`가 전역 PATH에 심링크한다(test_shebang-exec.bats가 bin 선언에서 파생).
-import { spawnSync } from "node:child_process";
 import { readSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { parseCommand, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
+import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInput } from "./lib/conn-url.ts";
 import { USAGE_EXIT, type Envelope } from "./lib/contract.ts";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { WAIT_DEFAULTS } from "./lib/mutation.ts";
 import type { TypedFlags } from "./lib/cli.ts";
-import { APP_CREATE, APP_INIT, APP_SECRETS, APP_TEARDOWN, CACHE_CREATE, DB_CREATE, DOCTOR, STATUS, VERBS, appCreateInputError, appTeardownInputError, cacheCreateInputError, dbCreateInputError, type AppCreateInput, type AppTeardownInput, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
+import { APP_CREATE, APP_INIT, APP_SECRETS, APP_TEARDOWN, CACHE_CREATE, CACHE_URL, DB_CREATE, DB_URL, DOCTOR, STATUS, VERBS, appCreateInputError, appTeardownInputError, cacheCreateInputError, dbCreateInputError, type AppCreateInput, type AppTeardownInput, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./lib/secrets.ts";
 import { appInitInputError, type AppInitInput } from "./lib/init.ts";
+import { ARCHETYPES } from "./lib/platform.ts";
 import { runMcpServer } from "./lib/mcp.ts";
 import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
 import { statusInputError, type StatusInput } from "./lib/status.ts";
 
-// 동사 실행의 네 결말 — 프로세스 관심사(stdout 채널·종료코드)는 전부 main이 소유한다.
-// exit = 패스스루 동사(자식 프로세스가 자기 출력·종료코드를 이미 냈다 — 같은 동작 재노출 계약).
+// 동사 실행의 세 결말 — 프로세스 관심사(stdout 채널·종료코드)는 전부 main이 소유한다.
+// (패스스루 "exit" 결말은 url 동사의 catalog 승격으로 소멸 — 전 동사가 op envelope 계약이다.)
 type VerbOutput =
   | { kind: "help"; text: string }
   | { kind: "usage-error"; message: string; usage: string }
-  | { kind: "exit"; code: number }
   | { kind: "result"; json: boolean; envelope: Envelope; human: string[] };
 
 // CLI 어댑터 — catalog 행마다 argv→타입 입력 매핑과 렌더링을 배선한다(어댑터는 named export를
@@ -321,15 +320,16 @@ function appTeardownCli(rest: string[]): VerbOutput {
 }
 
 function appInitUsage(): string {
+  const choices = ARCHETYPES.join("|"); // 어휘는 platform.ts SSOT 파생(리터럴 사본 금지 — test_platform.bats 가드)
   return [
-    "사용법: homelab app init <app> --archetype fullstack|api|site|worker [--public] [--dispatch-secrets <경로>] [--adopt] [--json]",
+    `사용법: homelab app init <app> --archetype ${choices} [--public] [--dispatch-secrets <경로>] [--adopt] [--json]`,
     "",
     "앱 레포의 시작을 끝까지 만든다(멱등·재개 가능): preflight(부수효과 0) → 템플릿에서 레포 생성",
     "(기본 private) → 클론 → 스캐폴더 비대화형 실행 → invocation marker 기록 → 커밋·첫 push(빌드",
     "트리거) → [--dispatch-secrets면 디스패치 시크릿 쌍 설정]. 실패 후 같은 명령을 다시 실행하면",
     "도달한 체크포인트부터 수렴한다. 소유 증명은 마커(.homelab-init)이고, 마커 없는 기존 레포는",
     "거부한다 — 확인 후 --adopt로만 이어갈 수 있다. private key 값은 어떤 출력에도 나타나지 않는다.",
-    "  --archetype <a>    fullstack|api|site|worker (kind는 아키타입 유도값 — CONTEXT.md 용어)",
+    `  --archetype <a>    ${choices} (kind는 아키타입 유도값 — CONTEXT.md 용어)`,
     "  --public           공개 레포로 생성(기본 private)",
     "  --dispatch-secrets <경로>  App 키 디렉토리(app-id·private-key.pem) — 새 레포에 디스패치 시크릿 쌍 설정",
     "  --adopt            마커 없는 기존 레포를 명시 입양(사용자 확인 — 소유 미증명 레포 이어가기)",
@@ -397,11 +397,32 @@ function cacheCreateCli(rest: string[]): VerbOutput {
   return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
 }
 
-// cache url 패스스루 — 기존 도구(tools/cache-url.ts)를 같은 동작으로 재노출한다.
+function cacheUrlUsage(): string {
+  return [
+    "사용법: homelab cache url <name> [--rw] [--host <h>] [--env-local <file>] [--dry-run] [--json]",
+    "        (--name <name> 형태도 동등 — 기존 cache:url argv 호환)",
+    "",
+    "캐시 접속 URL을 .env.local에 기록한다(평문 비출력 — 엔진 소유). 기본 RO, --rw=default 유저.",
+    "host 기본은 127.0.0.1(선행: kubectl -n cache port-forward svc/<name> 6379:6379 — 런북).",
+    "  --rw               default 유저(관리=RW)로 기록(기본: 읽기 ACL 유저)",
+    "  --host <h>         port-forward 타깃 호스트(기본 127.0.0.1 또는 CACHE_LOCAL_HOST)",
+    "  --env-local <file> 대상 파일 오버라이드(기본 .env.local)",
+    "  --dry-run          계획만(클러스터 무의존)",
+    "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
+    "",
+  ].join("\n");
+}
+
+// cache url — conn URL 엔진의 catalog op 소비(패스스루 소멸 — 티켓 08).
 function cacheUrlCli(rest: string[]): VerbOutput {
-  const tool = fileURLToPath(new URL("./cache-url.ts", import.meta.url));
-  const r = spawnSync(process.execPath, [tool, ...rest], { stdio: "inherit" });
-  return { kind: "exit", code: r.status ?? 1 };
+  const p = positionalThenFlags(rest, { value: ["--name", "--host", "--env-local"], bool: ["--rw", "--dry-run", "--json", "--help"] }, "homelab cache url", cacheUrlUsage);
+  if (isOutput(p)) return p;
+  if (p.flags.bool("--help")) return { kind: "help", text: cacheUrlUsage() };
+  const input: CacheUrlInput = { name: p.flags.str("--name") ?? p.positional ?? "", rw: p.flags.bool("--rw"), host: p.flags.str("--host"), envLocal: p.flags.str("--env-local"), dryRun: p.flags.bool("--dry-run") };
+  const bad = cacheUrlInputError(input);
+  if (bad) return { kind: "usage-error", message: `homelab cache url: ${bad}`, usage: cacheUrlUsage() };
+  const envelope = CACHE_URL.op(input);
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderUrl(envelope) };
 }
 
 function dbCreateCli(rest: string[]): VerbOutput {
@@ -421,12 +442,43 @@ function dbCreateCli(rest: string[]): VerbOutput {
   return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
 }
 
-// db url 패스스루 — 기존 도구(tools/db-url.ts)를 같은 동작으로 재노출한다: argv 그대로,
-// stdio 상속(평문 비노출 규율 포함 그 도구의 출력 계약 그대로), 종료코드 전파.
+function dbUrlUsage(): string {
+  return [
+    "사용법: homelab db url <name> [--rw|--admin] [--host <h>] [--env-local <file>] [--dry-run] [--json]",
+    "        (--name <name> 형태도 동등 — 기존 db:url argv 호환)",
+    "",
+    "클러스터 DB 접속 URL을 .env.local(admin은 .env.admin.local)에 기록한다(평문 비출력 — 엔진 소유).",
+    "기본 RO(읽기전용 롤), --rw=owner, --admin=superuser(F2 채널 분리 — .env.admin.local 전용).",
+    "  --rw               owner(읽기쓰기)로 기록 (--admin과 상호배타)",
+    "  --admin            superuser(GUI 전용 — 대상 파일 오버라이드 불가)",
+    "  --host <h>         tailscale LB host(기본 TS_DB_HOST — 런북)",
+    "  --env-local <file> 대상 파일 오버라이드(기본 .env.local, admin 제외)",
+    "  --dry-run          계획만(클러스터 무의존)",
+    "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
+    "",
+  ].join("\n");
+}
+
+// url 동사 공용 렌더러 — 값은 결과에 존재하지 않으므로(비출력 계약) 계획/기록 보고만 그린다.
+function renderUrl(envelope: Envelope): string[] {
+  const r = envelope.result as { mode?: string; secretRef?: string; envKey?: string; envFile?: string; note?: string; dryRun?: boolean; error?: string };
+  if (typeof r.error === "string") return [`오류: ${r.error}`];
+  if (r.dryRun === true) {
+    return [`계획: mode=${r.mode} · secretRef=${r.secretRef} · envKey=${r.envKey} · envFile=${r.envFile}`, ...(r.note ? [r.note] : [])];
+  }
+  return [`${r.envFile}에 ${r.envKey} 기록(mode=${r.mode}) — 값은 출력하지 않음`];
+}
+
+// db url — conn URL 엔진의 catalog op 소비(패스스루 소멸 — 티켓 08).
 function dbUrlCli(rest: string[]): VerbOutput {
-  const tool = fileURLToPath(new URL("./db-url.ts", import.meta.url));
-  const r = spawnSync(process.execPath, [tool, ...rest], { stdio: "inherit" });
-  return { kind: "exit", code: r.status ?? 1 };
+  const p = positionalThenFlags(rest, { value: ["--name", "--host", "--env-local"], bool: ["--rw", "--admin", "--dry-run", "--json", "--help"] }, "homelab db url", dbUrlUsage);
+  if (isOutput(p)) return p;
+  if (p.flags.bool("--help")) return { kind: "help", text: dbUrlUsage() };
+  const input: DbUrlInput = { name: p.flags.str("--name") ?? p.positional ?? "", rw: p.flags.bool("--rw"), admin: p.flags.bool("--admin"), host: p.flags.str("--host"), envLocal: p.flags.str("--env-local"), dryRun: p.flags.bool("--dry-run") };
+  const bad = dbUrlInputError(input);
+  if (bad) return { kind: "usage-error", message: `homelab db url: ${bad}`, usage: dbUrlUsage() };
+  const envelope = DB_URL.op(input);
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderUrl(envelope) };
 }
 
 function doctorCli(rest: string[]): VerbOutput {
@@ -471,7 +523,6 @@ function main(argv: string[]): number {
   // stderr, 결과는 stdout 순수성(--json이면 stdout은 envelope 하나, 사람용은 stderr)을 지킨다.
   if (out.kind === "help") { process.stdout.write(out.text); return 0; }
   if (out.kind === "usage-error") { process.stderr.write(`${out.message}\n\n${out.usage}`); return USAGE_EXIT; }
-  if (out.kind === "exit") return out.code;
   const sink = out.json ? process.stderr : process.stdout;
   for (const line of out.human) sink.write(line + "\n");
   if (out.json) process.stdout.write(JSON.stringify(out.envelope, null, 2) + "\n");

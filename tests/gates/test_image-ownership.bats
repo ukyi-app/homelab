@@ -209,11 +209,23 @@ FIXTURE_ARGS="--min-refs 1"
   echo "$output" | grep -q "열거 붕괴"
 }
 
+# 이 가드는 커널 이행 **전에도** 빈 입력을 거부했다(자체 positiveInt). 파서를 커널로 옮기면서
+# 그 거부가 사라지면 회귀다 — 설계 게이트 r2가 지목한 자리라 소수·음수까지 넓혀 잠근다.
 @test "the floor value must be a non-negative integer (never a silently disabled floor)" {
-  run GUARD --repo-root "$ROOT" --min-refs ""
-  [ "$status" -eq 2 ]
-  run GUARD --repo-root "$ROOT" --min-refs abc
-  [ "$status" -eq 2 ]
+  for bad in "" abc 1.5 -1; do
+    run GUARD --repo-root "$ROOT" --min-refs "$bad"
+    [ "$status" -eq 2 ]
+    # 바닥값이 꺼진 채 초록이 되면 마커가 나간다 — 나가면 안 된다.
+    # ⚠️ `grep -q … && false`로 쓰면 매치 **안 될 때** rc=1이라 set -e가 통과 경로를 죽인다.
+    if printf '%s\n' "$output" | grep -q '^SCAN:'; then echo "예상 밖 SCAN 마커: $output"; false; fi
+  done
+}
+
+# 0은 정당한 바닥값이다(빈 문자열과 갈려야 한다) — 금지하면 "앱이 0개인 동안" 같은 자리를 막는다.
+@test "an explicit zero floor is accepted (it is a legitimate value, unlike empty)" {
+  run GUARD --repo-root "$ROOT" --min-refs 0
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qE '^SCAN: check-image-ownership:refs: [0-9]+$'
 }
 
 @test "an unknown flag is rejected with the usage exit code" {

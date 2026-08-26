@@ -47,3 +47,10 @@ STUB
   [ "$(printf '%s' "$output" | grep -c 'redis://')" -eq 0 ]    # 평문 URL stdout 비노출
   rm -rf "$T"
 }
+
+@test "the dry-run plan pins the default port-forward host field (display parity with the engine)" {
+  # host 필드는 껍데기의 표시 전용 재계산 — 엔진 기본값(127.0.0.1)과 갈리면 여기서 red(리뷰 지적).
+  run bun tools/cache-url.ts --name t --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.host')" = "127.0.0.1:6379" ]
+}

@@ -26,6 +26,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { typedFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
+import { parseFloor, reportScanError, scanFloor } from "./lib/scan-floor.ts";
+
 
 const POLICY_PATH = "policy/image-ownership.json";
 const RENOVATE_PATH = "renovate.json";
@@ -231,13 +233,6 @@ export function bespokeFiles(root: string): Set<string> {
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
-function positiveInt(raw: string | undefined, flag: string): number {
-  if (raw === undefined || raw.trim() === "" || !/^\d+$/.test(raw.trim())) {
-    console.error(`${flag}는 음이 아닌 정수여야 한다(받은 값: '${raw ?? ""}')`);
-    process.exit(2);
-  }
-  return Number(raw.trim());
-}
 
 export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<string, Owner> } {
   const bad: string[] = [];
@@ -366,7 +361,15 @@ if (import.meta.main) {
     process.exit(2);
   }
   const root = flags.str("--repo-root", ".")!;
-  const minRefs = positiveInt(flags.str("--min-refs", "20"), "--min-refs");
+  // 바닥값 raw 입력 판정은 커널이 소유한다 — 이 파일에 있던 `positiveInt` 사본은
+  // `check-workflow-readiness`의 것과 바이트 동일했고, 나머지 두 가드는 그 처방을 못 받아
+  // `Number()` 직행이었다(처방을 복제하면 일부가 빠진다). 남은 한 벌은 그 가드의 이행 티켓이 걷는다.
+  let minRefs: number;
+  try {
+    minRefs = parseFloor(flags.str("--min-refs", "20"), "--min-refs");
+  } catch (e) {
+    process.exit(reportScanError(e, "FAIL:"));
+  }
 
   let res;
   try {
@@ -376,9 +379,15 @@ if (import.meta.main) {
     process.exit(1);
   }
 
-  if (res.refs.length < minRefs) {
-    console.error(`FAIL: 이미지 참조 열거 ${res.refs.length}건 < ${minRefs} — 열거 붕괴(이 회계가 vacuous해진다)`);
-    process.exit(1);
+  // 열거 붕괴 바닥값 + SCAN 신호 — 커널이 한 몸으로 처리한다. 바닥값을 통과한 실행만 마커를 내고,
+  // 위반이 있어도 마커는 이미 나갔다("마커 부재 = 미실행" 해석이 유지된다).
+  // ⚠️ `--report` 출력보다 **앞**이다. 열거가 붕괴했으면 소유자 목록을 낼 이유가 없다.
+  try {
+    scanFloor("check-image-ownership:refs", res.refs.length, minRefs, {
+      hint: "이 회계가 vacuous해진다.",
+    });
+  } catch (e) {
+    process.exit(reportScanError(e, "FAIL:"));
   }
 
   if (flags.bool("--report")) {
@@ -388,10 +397,6 @@ if (import.meta.main) {
     }
   }
 
-  // ⚠️ SCAN 마커는 **위반 검사보다 먼저** 낸다. 뒤에 두면 위반 실행에서 마커가 아예 안 나오고,
-  //    그러면 "마커 부재 = 미실행"이라는 해석이 깨진다(열거는 됐는데 위반이 있었을 뿐인데도
-  //    '안 돌았다'로 읽힌다). 규약은 scripts/lib/scan-floor.sh + CONTRIBUTING '열거 바닥값' 절.
-  console.log(`SCAN: check-image-ownership:refs: ${res.refs.length}`);
   if (res.bad.length) {
     console.error("FAIL: 이미지 소유권 회계 위반:");
     for (const b of res.bad) console.error(`  ${b}`);

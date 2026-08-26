@@ -73,63 +73,29 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$output" = "2" ]
 }
 
-@test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (36 allowed, 34 rejected)" {
+@test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (counts derived from contract rows)" {
   # structure r1 시도2 A2·B2: verb만 result를 고르면 불가능한 variant(doctor+pending 등)가 valid로
   # 남는다 — verb 분기가 허용 variant 집합까지 선언하고, verb별 허용∪비허용 = variant 전체(7종).
-  # 한 동사가 variant별 result 형상으로 분기를 여럿 가질 수 있으므로(db create) 허용 집합은 동사
-  # 단위로 합산한다. 표본 result는 SAMPLES가 SSOT — "verb|variant" 키 우선, "verb" 키 폴백.
-  # 새 동사/variant 분기를 추가하면 표본도 추가해야 한다(누락 = fail-loud).
+  # 표본 result는 공유 코퍼스(helpers/contract-samples.ts)가 SSOT — 축자 이중 사본 제거(티켓 05).
+  # 바닥값은 계약 행(CONTRACT_ROWS)에서 파생한다 — 손 재계산(구 36/34) 대체. 열거 붕괴 방지의
+  # 손 앵커는 파생 밖에 남는다: oneOf 분기 수 31 · 계약 행 수 10 (exitCodes 리터럴 7쌍 핀은
+  # 위의 "result schema pins …" @test가 소유).
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { CONTRACT_ROWS } from "./tools/lib/catalog-rows.ts";
+    import { buildSamples, matrixCellCounts } from "./tools/tests/helpers/contract-samples.ts";
     import { readFileSync } from "node:fs";
     const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
     const map = sch["x-contract"].exitCodes;
     const all = sch.properties.variant.enum;
     const verbBranches = sch.allOf.find((b) => b.oneOf?.[0]?.properties?.verb)?.oneOf ?? [];
-    if (verbBranches.length === 0) { console.error("verb 분기 없음"); process.exit(1); }
-    const ids = sch.definitions.doctorCheck.properties.id.enum;
-    const dbBase = { action: "create-database", name: "mydb", correlation: "corr-fixed-nonce-01" };
-    const cacheBase = { action: "create-cache", name: "mycache", correlation: "corr-fixed-nonce-01" };
-    const mut = (base) => ({
-      ["success"]: { ...base, waited: false, run: { id: 1, url: "u" }, pr: { number: 1, url: "u", merged: false } },
-      ["failure"]: { ...base, error: "x" },
-      ["race"]: { ...base, error: "x", observedRuns: 2 },
-      ["pending"]: { ...base, pendingReason: "x" },
-      ["superseded"]: { ...base, error: "x", pr: { number: 1, url: "u", merged: true, mergeSha: "a" }, applications: [{ name: "cnpg-data" }] },
-    });
-    const secBase = { action: "update-secrets", name: "myapp", correlation: "corr-fixed-nonce-01", chain: { mode: "dispatch-only" } };
-    const appBase = { action: "create-app", name: "myapp", correlation: "corr-fixed-nonce-01" };
-    // teardown은 shared mutation* 정의를 쓰지 않는다(dnsReclaim 필수·chain 없음·applications는
-    // mutationAbsentApp) — 표본을 직접 짓는다.
-    const tdBase = { action: "teardown-app", name: "myapp", correlation: "corr-fixed-nonce-01", dnsReclaim: "iac/tf-reconcile" };
-    const td = {
-      ["success"]: { ...tdBase, waited: false, run: { id: 1, url: "u" }, pr: { number: 1, url: "u", merged: false } },
-      ["failure"]: { ...tdBase, error: "x" },
-      ["race"]: { ...tdBase, error: "x", observedRuns: 2 },
-      ["pending"]: { ...tdBase, pendingReason: "x" },
-    };
-    // app init은 로컬 체인(변이 아님) — correlation 없음, 전용 정의(initSuccess/initFailure).
-    const initBase = { app: "myapp", archetype: "api", public: false, repo: "ukyi-app/myapp" };
-    const init = {
-      ["success"]: { ...initBase, created: true, scaffolded: true, pushed: true, checkpoint: "pushed" },
-      ["no-op"]: { ...initBase, existed: true, scaffolded: true, pushed: true, checkpoint: "pushed" },
-      ["failure"]: { ...initBase, checkpoint: "preflight", error: "x" },
-    };
-    // db url/cache url은 MCP 전용 envelope(urlResult) — 평문 비출력, 계획/수행 보고.
-    const url = { ["success"]: { name: "mydb", dryRun: true, wrote: false, mode: "readonly" }, ["failure"]: { name: "mydb", dryRun: false, wrote: false, error: "x" } };
-    const SAMPLES = {
-      doctor: { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } },
-      status: { mode: "list", apps: [], count: 0 },
-      ...Object.fromEntries(Object.entries(mut(dbBase)).map(([v, r]) => ["db create|" + v, r])),
-      ...Object.fromEntries(Object.entries(mut(cacheBase)).map(([v, r]) => ["cache create|" + v, r])),
-      ...Object.fromEntries(Object.entries(mut(appBase)).map(([v, r]) => ["app create|" + v, r])),
-      ...Object.fromEntries(Object.entries(mut(secBase)).map(([v, r]) => ["app secrets|" + v, r])),
-      "app secrets|no-op": { ...secBase, waited: false, run: { id: 1, url: "u" } },
-      ...Object.fromEntries(Object.entries(td).map(([v, r]) => ["app teardown|" + v, r])),
-      ...Object.fromEntries(Object.entries(init).map(([v, r]) => ["app init|" + v, r])),
-      ...Object.fromEntries(Object.entries(url).map(([v, r]) => ["db url|" + v, r])),
-      ...Object.fromEntries(Object.entries(url).map(([v, r]) => ["cache url|" + v, r])),
-    };
+    if (verbBranches.length !== 31) { console.error("oneOf 분기 수 " + verbBranches.length + " != 31(손 앵커)"); process.exit(1); }
+    if (CONTRACT_ROWS.length !== 10) { console.error("계약 행 수 " + CONTRACT_ROWS.length + " != 10(손 앵커)"); process.exit(1); }
+    // variant 셀 총합 핀 — 다중 variant 엔트리에서 variant가 지워지면 분기·행 수는 그대로인 채
+    // 파생과 워커가 함께 내려가 초록이 된다(리뷰 실측) — 구판 ok:36 리터럴의 정확한 복원이다.
+    const cellTotal = verbBranches.reduce((n, b) => n + b.properties.variant.enum.length, 0);
+    if (cellTotal !== 36) { console.error("variant 셀 총합 " + cellTotal + " != 36(손 앵커)"); process.exit(1); }
+    const SAMPLES = buildSamples(sch.definitions.doctorCheck.properties.id.enum);
     const byVerb = {};
     for (const br of verbBranches) (byVerb[br.properties.verb.enum[0]] ??= []).push(br);
     let okN = 0, rejN = 0;
@@ -150,65 +116,30 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
         rejN++;
       }
     }
-    console.log("ok:" + okN + " rej:" + rejN);
+    const want = matrixCellCounts(CONTRACT_ROWS, all.length);
+    if (okN !== want.allowed || rejN !== want.rejected) {
+      console.error("행 파생 바닥값 불일치: ok=" + okN + "/" + want.allowed + " rej=" + rejN + "/" + want.rejected);
+      process.exit(1);
+    }
+    console.log("ok");
   '
   [ "$status" -eq 0 ]
-  # 바닥값: 허용 ... + init 3 + db url 2 + cache url 2 = 36 / 비허용 ... + 3+4+5+5 = 34
-  echo "$output" | grep -q "^ok:36 rej:34$"
+  echo "$output" | grep -q "^ok$"
 }
 
-@test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, floor 36)" {
+@test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, count derived)" {
   # structure r1 b2: variant와 exitCode가 독립이면 success+exit 1도 green — 허용 쌍을 스키마가 강제한다.
+  # 표본은 공유 코퍼스, 기대 건수는 계약 행 파생(allowed 전수) — 손 앵커는 위 행렬 @test 소유.
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { CONTRACT_ROWS } from "./tools/lib/catalog-rows.ts";
+    import { buildSamples, matrixCellCounts } from "./tools/tests/helpers/contract-samples.ts";
     import { readFileSync } from "node:fs";
     const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
     const map = sch["x-contract"].exitCodes;
     const codes = sch.properties.exitCode.enum;
     const verbBranches = sch.allOf.find((b) => b.oneOf?.[0]?.properties?.verb)?.oneOf ?? [];
-    const ids = sch.definitions.doctorCheck.properties.id.enum;
-    const dbBase = { action: "create-database", name: "mydb", correlation: "corr-fixed-nonce-01" };
-    const cacheBase = { action: "create-cache", name: "mycache", correlation: "corr-fixed-nonce-01" };
-    const mut = (base) => ({
-      ["success"]: { ...base, waited: false, run: { id: 1, url: "u" }, pr: { number: 1, url: "u", merged: false } },
-      ["failure"]: { ...base, error: "x" },
-      ["race"]: { ...base, error: "x", observedRuns: 2 },
-      ["pending"]: { ...base, pendingReason: "x" },
-      ["superseded"]: { ...base, error: "x", pr: { number: 1, url: "u", merged: true, mergeSha: "a" }, applications: [{ name: "cnpg-data" }] },
-    });
-    const secBase = { action: "update-secrets", name: "myapp", correlation: "corr-fixed-nonce-01", chain: { mode: "dispatch-only" } };
-    const appBase = { action: "create-app", name: "myapp", correlation: "corr-fixed-nonce-01" };
-    // teardown은 shared mutation* 정의를 쓰지 않는다(dnsReclaim 필수·chain 없음·applications는
-    // mutationAbsentApp) — 표본을 직접 짓는다.
-    const tdBase = { action: "teardown-app", name: "myapp", correlation: "corr-fixed-nonce-01", dnsReclaim: "iac/tf-reconcile" };
-    const td = {
-      ["success"]: { ...tdBase, waited: false, run: { id: 1, url: "u" }, pr: { number: 1, url: "u", merged: false } },
-      ["failure"]: { ...tdBase, error: "x" },
-      ["race"]: { ...tdBase, error: "x", observedRuns: 2 },
-      ["pending"]: { ...tdBase, pendingReason: "x" },
-    };
-    // app init은 로컬 체인(변이 아님) — correlation 없음, 전용 정의(initSuccess/initFailure).
-    const initBase = { app: "myapp", archetype: "api", public: false, repo: "ukyi-app/myapp" };
-    const init = {
-      ["success"]: { ...initBase, created: true, scaffolded: true, pushed: true, checkpoint: "pushed" },
-      ["no-op"]: { ...initBase, existed: true, scaffolded: true, pushed: true, checkpoint: "pushed" },
-      ["failure"]: { ...initBase, checkpoint: "preflight", error: "x" },
-    };
-    // db url/cache url은 MCP 전용 envelope(urlResult) — 평문 비출력, 계획/수행 보고.
-    const url = { ["success"]: { name: "mydb", dryRun: true, wrote: false, mode: "readonly" }, ["failure"]: { name: "mydb", dryRun: false, wrote: false, error: "x" } };
-    const SAMPLES = {
-      doctor: { checks: ids.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: ids.length, fail: 0, warn: 0 } },
-      status: { mode: "list", apps: [], count: 0 },
-      ...Object.fromEntries(Object.entries(mut(dbBase)).map(([v, r]) => ["db create|" + v, r])),
-      ...Object.fromEntries(Object.entries(mut(cacheBase)).map(([v, r]) => ["cache create|" + v, r])),
-      ...Object.fromEntries(Object.entries(mut(appBase)).map(([v, r]) => ["app create|" + v, r])),
-      ...Object.fromEntries(Object.entries(mut(secBase)).map(([v, r]) => ["app secrets|" + v, r])),
-      "app secrets|no-op": { ...secBase, waited: false, run: { id: 1, url: "u" } },
-      ...Object.fromEntries(Object.entries(td).map(([v, r]) => ["app teardown|" + v, r])),
-      ...Object.fromEntries(Object.entries(init).map(([v, r]) => ["app init|" + v, r])),
-      ...Object.fromEntries(Object.entries(url).map(([v, r]) => ["db url|" + v, r])),
-      ...Object.fromEntries(Object.entries(url).map(([v, r]) => ["cache url|" + v, r])),
-    };
+    const SAMPLES = buildSamples(sch.definitions.doctorCheck.properties.id.enum);
     let n = 0;
     for (const br of verbBranches) {
       const verb = br.properties.verb.enum[0];
@@ -221,10 +152,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
         n++;
       }
     }
-    console.log("rejected:" + n);
+    const want = matrixCellCounts(CONTRACT_ROWS, sch.properties.variant.enum.length);
+    if (n !== want.allowed) { console.error("행 파생 바닥값 불일치: " + n + "/" + want.allowed); process.exit(1); }
+    console.log("ok");
   '
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^rejected:36$"
+  echo "$output" | grep -q "^ok$"
 }
 
 @test "schema rejects a doctor envelope whose result does not match doctorResult (verb-result coupling)" {
@@ -243,6 +176,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 
 @test "exit-code coupling branches restate x-contract.exitCodes exactly (SSOT pinning, floor 7)" {
   # 결합 분기(allOf/oneOf)는 x-contract.exitCodes의 재진술이다 — 둘이 어긋나면 드리프트.
+  # 생성기(티켓 04) 이후에도 둘은 서로 다른 수제 조각(HEADER_A vs TAIL_MID)이라 이 대조가 살아
+  # 있고, 리터럴 7쌍 핀은 위 "result schema pins …" @test의 jq 단언이 소유한다(손 앵커 ①).
   run bun -e '
     import { readFileSync } from "node:fs";
     const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
@@ -299,4 +234,32 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   '
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^rejected:3$"
+}
+
+@test "url verbs are consumed directly at the op interface (no child process, schema-valid)" {
+  # AC2(티켓 08)의 직접 형태 — MCP 왕복 없이 op 결과 자체가 계약 적합함을 단언한다.
+  run bun -e '
+    import { CACHE_URL, DB_URL } from "./tools/lib/verbs.ts";
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const cases = [
+      ["db url", DB_URL.op({ name: "mydb", dryRun: true })],
+      ["cache url", CACHE_URL.op({ name: "mycache", dryRun: true })],
+    ];
+    for (const [verb, env] of cases) {
+      if (env.verb !== verb || env.variant !== "success" || env.result.dryRun !== true) { console.error(verb + ": " + JSON.stringify(env).slice(0, 120)); process.exit(1); }
+      const errs = schemaErrors(env, sch, sch);
+      if (errs.length) { console.error(verb + ": " + errs.join(" | ")); process.exit(1); }
+    }
+    console.log("ok:2");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:2$"
+}
+
+@test "url verbs accept a positional name like every other verb (documented surface)" {
+  run --separate-stderr bun tools/homelab.ts db url t --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.name')" = "t" ]
 }

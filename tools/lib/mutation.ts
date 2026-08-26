@@ -22,7 +22,7 @@ export type MutationSpec = {
   action: string;                                  // 예: "create-database"
   workflow: string;                                // 디스패처 파일명(예: create-database.yaml)
   dispatchInputs: Array<[string, string]>;         // -f k=v 순서 보존(argv 원장 계약 — correlation은 엔진이 뒤에 붙임)
-  branchFor: (runId: number) => string;            // PR 브랜치 명명(reusable이 SSOT)
+  branchFor: (runId: number) => string;            // PR 브랜치 명명(레인 신원 행 파생 — catalog-rows)
   applications: Array<{ name: string; surfacePath: string }>; // --wait 수렴 대상 집합 + 표면
   resultBase: Record<string, unknown>;             // 모든 variant에 실리는 공통 필드({action, name, …})
   // 수동 머지 동사(create-app: 머지 = 공개 승인 · teardown-app: 머지 = 파괴 승인 — 둘 다
