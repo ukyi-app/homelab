@@ -257,7 +257,7 @@ exec(sys.argv[2])
 json.dump(d,open(p,'w',encoding='utf-8'),ensure_ascii=False,indent=2)
 " "$1/policy/workflow-readiness.json" "$2"; }
 
-FIXTURE_ARGS="--min-workflows 1 --min-declarations 1"
+FIXTURE_ARGS="--floor workflows=1 --floor declarations=1"
 
 # ── 실 레포 (딱 두 가지만) ────────────────────────────────────────────────────
 
@@ -475,7 +475,7 @@ JSON
 # ── 정적: 바닥값 자신 ─────────────────────────────────────────────────────────
 
 @test "the workflow enumeration floor fires when the domain collapses" {
-  run GUARD --repo-root "$ROOT" --min-workflows 99999
+  run GUARD --repo-root "$ROOT" --floor workflows=99999
   [ "$status" -eq 1 ]
   out="$output"
   run grep -q "열거 붕괴" <<<"$out"
@@ -502,7 +502,7 @@ JSON
   run grep -qE '^SCAN: check-workflow-readiness:declarations: [0-9]+$' <<<"$out"
   [ "$status" -eq 0 ]
   # 실험군 — 같은 위반이 있어도 바닥값이 먼저 죽으면 위반은 나가지 않는다.
-  run GUARD --repo-root "$t" --min-workflows 1 --min-declarations 99
+  run GUARD --repo-root "$t" --floor workflows=1 --floor declarations=99
   [ "$status" -eq 1 ]
   out="$output"
   run grep -q "열거 붕괴" <<<"$out"
@@ -511,48 +511,40 @@ JSON
   [ "$status" -ne 0 ]
 }
 
-# 선언 건수는 **실제로 대조되는** 선언 = 파싱된 워크플로를 가리키는 항목의 선언이다(이행 전과 같은 셈).
-# 픽스처는 demo 3 · bump-poll 1 · altgate 2 = 6인데 demo.yaml을 깨뜨리면 3이어야 한다 — 파일 열거로
-# 세면 6이 되어 대조하지 않은 3건을 "스캔했다"로 보고한다(리뷰 실측). 그리고 그 붕괴의 근본원인인
-# 파싱 실패 진단은 바닥값이 죽기 **전에** 흘러야 한다(check-ci-parity의 yq 선례 — 삼키면 증거가 사라진다).
-@test "a workflow that fails to parse is not counted as a declaration, and its diagnosis survives the floor" {
+# 체인판(17 재접목) 의미론: 파싱 실패는 위반이 아니라 **열거 실패**다 — 그 워크플로의 선언·게이트를
+# 평가할 수 없으므로 계속 진행하면 그 몫의 회계가 조용히 빠진다(순차판은 위반으로 두고 진행해
+# declarations 셈에서 빠진 것이 floor 오진으로 위장되는 자리였다). 진단은 파일명과 원인을 담고,
+# 열거 실패 실행은 어떤 마커도 내지 않는다(floor보다 앞에서 죽는다 — 바닥값과 무관).
+@test "a workflow that fails to parse is an enumeration failure, loud and marker-free" {
   t="$(_fixture parsefail)"
   printf 'jobs: [\n' > "$t/.github/workflows/demo.yaml"
   git -C "$t" add -A
-  # 대조군 — 바닥값 3은 통과하고 마커가 파싱된 3건만 센다(파싱 실패는 위반으로 따로 나간다).
-  run GUARD --repo-root "$t" --min-workflows 1 --min-declarations 3
+  run GUARD --repo-root "$t" --floor workflows=1 --floor declarations=1
   [ "$status" -eq 1 ]
   out="$output"
-  run grep -q "^SCAN: check-workflow-readiness:declarations: 3$" <<<"$out"
+  run grep -q "열거 실패" <<<"$out"
   [ "$status" -eq 0 ]
   run grep -q "YAML 파싱 실패" <<<"$out"
   [ "$status" -eq 0 ]
-  # 실험군 — 바닥값 4에 걸린다. 마커는 없고, 파싱 실패 진단은 살아남는다.
-  run GUARD --repo-root "$t" --min-workflows 1 --min-declarations 4
-  [ "$status" -eq 1 ]
-  out="$output"
-  run grep -q "열거 붕괴" <<<"$out"
+  run grep -q "demo.yaml" <<<"$out"
   [ "$status" -eq 0 ]
-  run grep -q "^SCAN: check-workflow-readiness:declarations:" <<<"$out"
+  run grep -q "^SCAN:" <<<"$out"
   [ "$status" -ne 0 ]
-  run grep -q "YAML 파싱 실패" <<<"$out"
-  [ "$status" -eq 0 ]
 }
 
 # 두 번째 도메인(원장 선언)이 붕괴한 실행. 이행 전에는 바닥값 실패를 `bad`에 push만 하고 마커는
 # **무조건** 냈다 — 붕괴한 건수를 "검사했다"로 읽게 하는 규약 위반이었다(설계 §4 세부 판단 셋째).
-# 첫 도메인(워크플로 열거)은 통과했으므로 그 마커는 나가야 한다 — 그 단언이 없으면 "마커가 없다"는
-# 가드가 아예 안 돌아도 참이라 이 테스트가 자기 자신 vacuous가 된다.
-@test "the declaration floor fires without emitting its marker (a collapsed count is not a scan)" {
+# guardMain 일괄 방출에서는 첫 도메인(워크플로 열거)이 통과했어도 그 마커 **도** 나가지 않는다 —
+# 붕괴한 실행의 어떤 건수도 "검사했다"로 읽히면 안 된다(커널 계약 bats가 픽스처로 고정한 원칙).
+# vacuous 방지 양성 대조는 붕괴 진단의 도메인 라벨이다("마커 없음"만 두면 미실행도 참이다).
+@test "the declaration floor fires and every marker is withheld (batch emission)" {
   t="$(_fixture declfloor)"
-  run GUARD --repo-root "$t" --min-workflows 1 --min-declarations 99
+  run GUARD --repo-root "$t" --floor workflows=1 --floor declarations=99
   [ "$status" -eq 1 ]
   out="$output"
-  run grep -q "열거 붕괴" <<<"$out"
+  run grep -q "check-workflow-readiness:declarations:.*열거 붕괴" <<<"$out"
   [ "$status" -eq 0 ]
-  run grep -qE '^SCAN: check-workflow-readiness:workflows: [0-9]+$' <<<"$out"
-  [ "$status" -eq 0 ]
-  run grep -q "^SCAN: check-workflow-readiness:declarations:" <<<"$out"
+  run grep -q "^SCAN:" <<<"$out"
   [ "$status" -ne 0 ]
 }
 
@@ -562,9 +554,9 @@ JSON
 @test "the floor values must be non-negative integers (never a silently disabled floor)" {
   # ⚠️ `bash -c` 없이 GUARD를 직접 부른다 — 빈 문자열 인자를 문자열로 조립하면 티켓 03이 밟은
   #    `bash -c` + 지역변수 함정 표면이 생긴다(여기선 동작해도 다음 편집자가 그 형태를 복제한다).
-  for flag in --min-workflows --min-declarations; do
+  for dom in workflows declarations; do
     for val in "" abc -1 1.5; do
-      run GUARD --repo-root "$ROOT" "$flag" "$val"
+      run GUARD --repo-root "$ROOT" --floor "$dom=$val"
       [ "$status" -eq 2 ]
       out="$output"
       run grep -q "^SCAN:" <<<"$out"

@@ -168,28 +168,33 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # ⚠️ 성공 요약 부재는 **어떤 실패 경로에서도** 참이라 수집 형태와 즉사 형태를 구별하지 못한다
   #    (실측: 그 단언만 두었을 때 catch를 fail()로 되돌려도 전건 green이었다 — 다섯 번째 vacuous 증인).
   #    **구별되는 사실은 진단이 몇 줄이냐다.** 즉사면 바닥값 한 줄이고, 수집이면 그 뒤 원장 대조까지
-  #    진행돼 위반이 더 붙는다(실측: 무명 스텝 + 원장 부재 2줄 + 집계 줄).
-  [ "$(printf '%s\n' "$output" | grep -c '^::error::ci-parity:')" -eq 1 ]
-  if printf '%s\n' "$output" | grep -q '건 실패 (gate run 스텝'; then
-    echo "바닥값이 먼저 죽지 않아 수집 집계까지 진행됐다: $output"; false
+  #    진행돼 위반이 더 붙는다. 붕괴 진단의 접두는 커널 소유 `FAIL:`이다(guardMain 재접목 — 위반
+  #    경로의 ::error:: 채널은 콜사이트 소유로 남고, 바닥값 경로의 GH annotation은 의도적 미사용).
+  [ "$(printf '%s\n' "$output" | grep -c '^FAIL: check-ci-parity:')" -eq 1 ]
+  if printf '%s\n' "$output" | grep -qE '^::error::ci-parity:|건 실패 \(gate run 스텝'; then
+    echo "바닥값이 먼저 죽지 않아 수집 보고까지 진행됐다: $output"; false
   fi
 }
 
-# 바닥값이 즉시 죽더라도 **앞에서 모인 근본원인은 흘려야 한다.** 이 콜사이트는 yq 블록 뒤라,
-# yq가 실패하면 그 원인이 errors에 담긴 채 바닥값 경로로 온다 — 그대로 죽이면 hint가
-# "yq 실패 의심"이라 가리키는 바로 그 증거가 사라진다(리뷰가 실측으로 지목).
-# 버려도 되는 것은 바닥값 **뒤에** 모일 위반이지 앞에서 모인 원인이 아니다.
-@test "a collapse still reports the root cause it had already collected" {
+# yq 실패의 근본원인 보존 — guardMain 재접목으로 형태가 바뀌었다: 파생 실패는 errors 수집이
+# 아니라 enumerate의 throw이고, 커널이 "열거 실패" 진단에 그 원인(argv 접두 + exit 사유)을 담아
+# 즉사한다. 순차판의 "앞에서 모인 진단을 먼저 흘린다" 손 처방은 열거가 floor보다 앞에서 끝나는
+# 구조가 대체한다 — 원인이 floor 오진("열거 붕괴")으로 위장되지 않고 직접 보고된다.
+@test "a derivation failure reports its root cause as an enumeration failure, not a floor misdiagnosis" {
   stub="$BATS_TEST_TMPDIR/stub"
   mkdir -p "$stub"
   printf '#!/bin/sh\nexit 3\n' > "$stub/yq"
   chmod +x "$stub/yq"
   run env PATH="$stub:$PATH" bun "$ROOT/tools/check-ci-parity.ts"
   [ "$status" -ne 0 ]
-  # 근본원인(yq 실패)이 **바닥값 진단과 함께** 나온다. hint 안의 문구가 아니라 원인 줄이어야 하므로
-  # `읽지 못했다`를 앵커로 삼는다.
-  printf '%s\n' "$output" | grep -q '읽지 못했다'
-  printf '%s\n' "$output" | grep -q '열거 붕괴'
+  # 근본원인이 열거 실패 진단에 담긴다 — 어느 파생이 죽었는지(yq argv 접두)와 사유(exit 3)까지.
+  printf '%s\n' "$output" | grep -q '열거 실패'
+  printf '%s\n' "$output" | grep -q 'yq'
+  printf '%s\n' "$output" | grep -q 'exit 3'
+  # floor 오진이 아니다 — 붕괴 문구가 아니라 원인 문구로 죽는다.
+  if printf '%s\n' "$output" | grep -q '열거 붕괴'; then
+    echo "근본원인이 floor 오진으로 위장됐다: $output"; false
+  fi
   # 붕괴 실행은 마커를 내지 않는다.
   if printf '%s\n' "$output" | grep -q '^SCAN:'; then
     echo "붕괴 실행이 마커를 냈다: $output"; false
