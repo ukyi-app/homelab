@@ -11,14 +11,14 @@
 // 멱등: 같은 봉인본이면 커밋·push가 no-op으로 건너뛰어지고 디스패치만 재시도된다(push 성공·
 //   디스패치 실패 경계가 재실행으로 수렴). 평문(.env)은 seal 도구의 kubeseal stdin 전용 — 이 엔진은
 //   .env를 읽지도, 봉인본 내용을 출력하지도 않는다.
-import { appRel } from "./app-surface.ts";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { compact } from "./contract.ts";
-import { sh } from "./exec.ts";
-import { APP_NAME_RE } from "./identity.ts";
+import { laneMutationFields } from "./catalog-rows.ts";
+import { ALLOW_PUSH_REWRITE_ENV, git, pushRoutes } from "./exec.ts";
+import { APP_NAME_RE, isCanonicalClone, pushRouteError } from "./identity.ts";
 import { runMutation, waitInputError, waitOpts, type MutationOutcome, type WaitInput } from "./mutation.ts";
-import { HOMELAB_REPO } from "./platform.ts";
+import { OWNER } from "./platform.ts";
 
 // noSeal: 이미 커밋·push된 봉인본을 재봉인 없이 재디스패치한다 — push 성공·디스패치 실패 경계의
 // 재실행 수렴 경로. kubeseal은 같은 평문도 매번 다른 암호문을 내므로(랜덤 세션 키) "재봉인 후
@@ -36,13 +36,6 @@ export function appSecretsInputError(input: AppSecretsInput): string | null {
 const APP_MARKER = ".app-config.yml"; // 스캐폴더가 생성하는 앱 레포 마커(연구 노트 §2)
 const SEAL_TOOL = "tools/seal-secret.mts"; // 앱 레포에 벤더된 봉인 도구(scaffold/common/tools/)
 
-function git(cwd: string, args: string[]) { return sh("git", ["-C", cwd, ...args]); }
-
-// canonical remote 판정 — https/ssh 두 형태, .git 접미 선택. 원본 설정값(insteadOf 미적용)을 본다.
-function isCanonicalRemote(url: string, app: string): boolean {
-  const owner = HOMELAB_REPO.split("/")[0];
-  return new RegExp(`^(https://github\\.com/|git@github\\.com:|ssh://git@github\\.com/)${owner}/${app}(\\.git)?$`).test(url.trim());
-}
 
 type Chain = Record<string, unknown>;
 type ChainResult = { ok: true; chain: Chain } | { ok: false; error: string; chain: Chain };
@@ -111,10 +104,21 @@ export function runAppSecrets(input: AppSecretsInput, cwd = process.cwd()): Muta
   const top = git(cwd, ["rev-parse", "--show-toplevel"]);
   const toplevel = top.ok ? top.out.trim() : null;
   if (toplevel !== null && existsSync(`${toplevel}/${APP_MARKER}`)) {
-    // 앱 레포 후보 — remote가 canonical이 아니면 fail-closed(엉뚱한 레포에서 이 앱 이름으로 디스패치 금지)
+    // 앱 레포 후보 — remote가 canonical이 아니면 fail-closed(엉뚱한 레포에서 이 앱 이름으로 디스패치 금지).
+    // 구성 신원 판정은 identity.ts SSOT 술어 — 원본 설정값(insteadOf 미적용)을 본다.
     const url = git(toplevel, ["config", "--get", "remote.origin.url"]);
-    if (!url.ok || !isCanonicalRemote(url.out, app)) {
-      return { variant: "failure", omitted: [], result: compact({ action: "update-secrets", name: app, chain: { mode: "chain" }, error: `앱 레포 마커(${APP_MARKER})는 있으나 remote(${url.out.trim() || "없음"})가 canonical ${HOMELAB_REPO.split("/")[0]}/${app}와 다르다 — 거부` }) };
+    if (!url.ok || !isCanonicalClone(OWNER, app, url.out)) {
+      return { variant: "failure", omitted: [], result: compact({ action: "update-secrets", name: app, chain: { mode: "chain" }, error: `앱 레포 마커(${APP_MARKER})는 있으나 remote(${url.out.trim() || "없음"})가 canonical ${OWNER}/${app}와 다르다 — 거부` }) };
+    }
+    // push 라우팅 안전 — chain 모드는 진입 시점에 fail-closed로 본다. push뿐 아니라 도달성 증명
+    // (runChain의 ls-remote가 origin을 읽는다)도 원격 정직성에 의존하므로, 재배선된 origin 위에서는
+    // --no-seal 무-push 재디스패치의 "도달성"조차 위조가 된다 — 의도적으로 push 직전이 아니라
+    // 진입 게이트다. 테스트 하네스(insteadOf→로컬 bare)는 명시 플래그로만 완화한다.
+    if (process.env[ALLOW_PUSH_REWRITE_ENV] !== "1") {
+      const routeErr = pushRouteError(OWNER, app, pushRoutes(toplevel));
+      if (routeErr !== null) {
+        return { variant: "failure", omitted: [], result: compact({ action: "update-secrets", name: app, chain: { mode: "chain" }, error: `${routeErr} — 디스패치 없이 거부` }) };
+      }
     }
     const r = runChain(toplevel, app, input.noSeal === true);
     if (!r.ok) return { variant: "failure", omitted: [], result: compact({ action: "update-secrets", name: app, chain: r.chain, error: r.error }) };
@@ -123,15 +127,11 @@ export function runAppSecrets(input: AppSecretsInput, cwd = process.cwd()): Muta
     chain = { mode: "dispatch-only" };
   }
 
+  const lane = laneMutationFields("update-secrets", app); // 레인 신원(workflow·branch·수렴 표면) — 행 파생
   return runMutation({
-    action: "update-secrets",
-    workflow: "update-secrets.yaml",
+    ...lane,
     dispatchInputs: [["app", app]],
-    branchFor: (runId) => `update-secrets/${app}-${runId}`, // 명명 SSOT: _update-secrets.yaml
-    applications: [ // 해당 앱 Application + 봉인본 표면(update-secrets 산출: apps/<app>/deploy/prod/)
-      { name: `${app}-prod`, surfacePath: appRel(app).sealed(`${app}-secrets.sealed.yaml`) },
-    ],
-    resultBase: { action: "update-secrets", name: app, chain },
+    resultBase: { action: lane.action, name: app, chain },
     noopOnMissingPr: true, // 동일 봉인본 = PR 없는 멱등 no-op run(pr-first-commit)
   }, waitOpts(input));
 }

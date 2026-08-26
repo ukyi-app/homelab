@@ -257,7 +257,7 @@ exec(sys.argv[2])
 json.dump(d,open(p,'w',encoding='utf-8'),ensure_ascii=False,indent=2)
 " "$1/policy/workflow-readiness.json" "$2"; }
 
-FIXTURE_ARGS="--floor workflows=1 --floor declarations=1"
+FIXTURE_ARGS="--min-workflows 1 --min-declarations 1"
 
 # ── 실 레포 (딱 두 가지만) ────────────────────────────────────────────────────
 
@@ -475,16 +475,104 @@ JSON
 # ── 정적: 바닥값 자신 ─────────────────────────────────────────────────────────
 
 @test "the workflow enumeration floor fires when the domain collapses" {
-  run GUARD --repo-root "$ROOT" --floor workflows=99999
+  run GUARD --repo-root "$ROOT" --min-workflows 99999
   [ "$status" -eq 1 ]
-  echo "$output" | grep -q "열거 붕괴"
+  out="$output"
+  run grep -q "열거 붕괴" <<<"$out"
+  [ "$status" -eq 0 ]
+  # 첫 도메인이 붕괴하면 **어떤** 마커도 나가지 않는다 — 이행 전에는 조기 반환이 손으로 지키던 성질이고,
+  # 이제는 커널이 지킨다. 뒤 도메인(declarations)의 신호가 새어 나오면 "원장은 검사했다"로 오독된다.
+  run grep -q "^SCAN:" <<<"$out"
+  [ "$status" -ne 0 ]
 }
 
+# 바닥값과 위반이 **둘 다** 참인 실행 — 이행 전에는 둘이 같은 `bad` 배열에 합쳐져 바닥값 진단이 위반
+# 사이에 섞여 나갔다. 바닥값 실패는 "아무것도 측정하지 않았다"는 뜻이라 그 뒤의 위반은 보고하지 않는다.
+@test "a floor failure dies before any violation is reported (the two are not merged)" {
+  t="$(_fixture floor-vs-viol)"
+  _mutate "$t" "del d['workflows']['demo.yaml']['jobs']['probe']['severity']"
+  # 대조군 — 바닥값을 통과한 실행은 위반을 보고하고 마커도 **둘 다** 낸다("마커 부재 = 미실행" 해석 유지).
+  run GUARD --repo-root "$t" $FIXTURE_ARGS
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "severity가 필요하다" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -qE '^SCAN: check-workflow-readiness:workflows: [0-9]+$' <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -qE '^SCAN: check-workflow-readiness:declarations: [0-9]+$' <<<"$out"
+  [ "$status" -eq 0 ]
+  # 실험군 — 같은 위반이 있어도 바닥값이 먼저 죽으면 위반은 나가지 않는다.
+  run GUARD --repo-root "$t" --min-workflows 1 --min-declarations 99
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "열거 붕괴" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "severity가 필요하다" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+# 선언 건수는 **실제로 대조되는** 선언 = 파싱된 워크플로를 가리키는 항목의 선언이다(이행 전과 같은 셈).
+# 픽스처는 demo 3 · bump-poll 1 · altgate 2 = 6인데 demo.yaml을 깨뜨리면 3이어야 한다 — 파일 열거로
+# 세면 6이 되어 대조하지 않은 3건을 "스캔했다"로 보고한다(리뷰 실측). 그리고 그 붕괴의 근본원인인
+# 파싱 실패 진단은 바닥값이 죽기 **전에** 흘러야 한다(check-ci-parity의 yq 선례 — 삼키면 증거가 사라진다).
+@test "a workflow that fails to parse is not counted as a declaration, and its diagnosis survives the floor" {
+  t="$(_fixture parsefail)"
+  printf 'jobs: [\n' > "$t/.github/workflows/demo.yaml"
+  git -C "$t" add -A
+  # 대조군 — 바닥값 3은 통과하고 마커가 파싱된 3건만 센다(파싱 실패는 위반으로 따로 나간다).
+  run GUARD --repo-root "$t" --min-workflows 1 --min-declarations 3
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "^SCAN: check-workflow-readiness:declarations: 3$" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "YAML 파싱 실패" <<<"$out"
+  [ "$status" -eq 0 ]
+  # 실험군 — 바닥값 4에 걸린다. 마커는 없고, 파싱 실패 진단은 살아남는다.
+  run GUARD --repo-root "$t" --min-workflows 1 --min-declarations 4
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "열거 붕괴" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "^SCAN: check-workflow-readiness:declarations:" <<<"$out"
+  [ "$status" -ne 0 ]
+  run grep -q "YAML 파싱 실패" <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
+# 두 번째 도메인(원장 선언)이 붕괴한 실행. 이행 전에는 바닥값 실패를 `bad`에 push만 하고 마커는
+# **무조건** 냈다 — 붕괴한 건수를 "검사했다"로 읽게 하는 규약 위반이었다(설계 §4 세부 판단 셋째).
+# 첫 도메인(워크플로 열거)은 통과했으므로 그 마커는 나가야 한다 — 그 단언이 없으면 "마커가 없다"는
+# 가드가 아예 안 돌아도 참이라 이 테스트가 자기 자신 vacuous가 된다.
+@test "the declaration floor fires without emitting its marker (a collapsed count is not a scan)" {
+  t="$(_fixture declfloor)"
+  run GUARD --repo-root "$t" --min-workflows 1 --min-declarations 99
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "열거 붕괴" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -qE '^SCAN: check-workflow-readiness:workflows: [0-9]+$' <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "^SCAN: check-workflow-readiness:declarations:" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+# 이 가드는 커널 이행 **전에도** 빈 입력을 거부했다(자체 `positiveInt` — 마지막 사본). 파서를 커널로
+# 옮기면서 회귀가 나면 안 되는 자리라(설계 r2 순서 제약), 빈 문자열을 두 플래그 모두에 대해 못박는다.
+# 사용법 오류(2)는 바닥값 붕괴(1)와 다른 사고이고, 거부된 실행은 도메인을 평가한 적이 없으므로 마커가 없다.
 @test "the floor values must be non-negative integers (never a silently disabled floor)" {
-  run GUARD --repo-root "$ROOT" --floor workflows=
-  [ "$status" -eq 2 ]
-  run GUARD --repo-root "$ROOT" --floor declarations=abc
-  [ "$status" -eq 2 ]
+  # ⚠️ `bash -c` 없이 GUARD를 직접 부른다 — 빈 문자열 인자를 문자열로 조립하면 티켓 03이 밟은
+  #    `bash -c` + 지역변수 함정 표면이 생긴다(여기선 동작해도 다음 편집자가 그 형태를 복제한다).
+  for flag in --min-workflows --min-declarations; do
+    for val in "" abc -1 1.5; do
+      run GUARD --repo-root "$ROOT" "$flag" "$val"
+      [ "$status" -eq 2 ]
+      out="$output"
+      run grep -q "^SCAN:" <<<"$out"
+      [ "$status" -ne 0 ]
+      run grep -q "음이 아닌 정수" <<<"$out"
+      [ "$status" -eq 0 ]
+    done
+  done
 }
 
 @test "an unknown flag is rejected with the usage exit code" {
@@ -555,18 +643,42 @@ _needs() { WORKFLOW_NEEDS="$1" GUARD --repo-root "$2" --workflow demo.yaml; }
   echo "$output" | grep -q "원장은 unconfigured다"
 }
 
+# 런타임 모드의 `accounted`는 **바닥값 없는** 신호다 — 회계 대상 수는 원장이 정하고 원장의 바닥값은 정적
+# 모드가 본다. 게이트(test_scan-floor.bats)는 이 모드를 **두 번째 실행**(`WORKFLOW_NEEDS='{}'`)으로
+# 덮는데, 그 등식은 콜사이트가 통째로 사라지면 양쪽이 함께 줄어 유지된다(티켓 06 전까지의 알려진 구멍).
+# 그래서 여기서 값까지 직접 본다: 전건 absent 실패인 실행에서도 선언 수(3)가 그대로 나가야 한다.
+@test "runtime: the accounted marker carries the declared count even when every job is absent" {
+  t="$(_fixture rt-accounted)"
+  run _needs '{}' "$t"
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "^SCAN: check-workflow-readiness:accounted: 3$" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "needs 페이로드에서 누락" <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
 @test "runtime: a missing needs payload is a failure, not a silent pass" {
   t="$(_fixture rt-nopayload)"
   run env -u WORKFLOW_NEEDS bun "$ROOT/tools/check-workflow-readiness.ts" --repo-root "$t" --workflow demo.yaml
   [ "$status" -eq 1 ]
-  echo "$output" | grep -q "WORKFLOW_NEEDS"
+  out="$output"
+  run grep -q "WORKFLOW_NEEDS" <<<"$out"
+  [ "$status" -eq 0 ]
+  # 도메인을 평가한 실행이 아니다 — `accounted`가 여기서 새면 "0건 회계했다"로 읽힌다.
+  run grep -q "^SCAN:" <<<"$out"
+  [ "$status" -ne 0 ]
 }
 
 @test "runtime: a workflow with no ledger entry cannot silently account itself" {
   t="$(_fixture rt-undeclared)"
   run env WORKFLOW_NEEDS='{}' bun "$ROOT/tools/check-workflow-readiness.ts" --repo-root "$t" --workflow ghost.yaml
   [ "$status" -eq 1 ]
-  echo "$output" | grep -q "선언이 없다"
+  out="$output"
+  run grep -q "선언이 없다" <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "^SCAN:" <<<"$out"
+  [ "$status" -ne 0 ]
 }
 
 @test "runtime: GITHUB_OUTPUT carries the counts the notify step gates on" {

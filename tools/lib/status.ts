@@ -9,6 +9,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { appPaths, appRel, readAppSurface } from "./app-surface.ts";
 import { parseBranch } from "./bump-plan.ts";
+import { LANES, isDispatchLaneBranch } from "./catalog-rows.ts";
 import { compact } from "./contract.ts";
 import { ghJson, sh } from "./exec.ts";
 import { parseLedgerRows } from "./ledger-totals.ts";
@@ -21,24 +22,21 @@ export type StatusOutcome = { variant: "success" | "failure"; omitted: string[];
 const RUN_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/actions\/runs\/(\d+)(?:\/.*)?$/;
 const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?:\/.*)?$/;
 
-// 이 앱을 대상으로 하는 homelab 변이 PR 브랜치 판정 — 명명 SSOT:
-//   bump-poll은 tools/lib/bump-plan.ts(branchFor/parseBranch — kind 인코딩 `bump-poll/<kind>/<name>-<tag>`,
-//   구형 `bump-poll/<name>-<tag>`는 app 해석) · create-app/<app>-<run_id> ·
-//   update-secrets/<app>-<run_id> · teardown/teardown-app-<app>-<run_id>(_teardown-app.yaml).
-// 접두만 보면 하이픈 앱명에서 형제 앱을 오귀속한다(page의 `bump-poll/page-`가 page-extra의
-// `bump-poll/page-extra-sha-…`에 참) — parseBranch/잔여 형식(run_id) 검증이 그 오귀속을 막는다.
-// db/cache 브랜치는 리소스명 키라 앱 필터 대상이 아니다.
+// 이 앱을 대상으로 하는 homelab 변이 PR 브랜치 판정 — 두 SSOT의 분업:
+//   · bump 레인 = tools/lib/bump-plan.ts(parseBranch — kind 인코딩 `bump-poll/<kind>/<name>-<tag>`,
+//     구형 `bump-poll/<name>-<tag>`는 app 해석). catalog의 파싱 전용 행으로 겹판정하지 않는다(두 번째 진실 금지).
+//   · 앱 키 디스패처 레인(create-app/update-secrets/teardown) = 레인 신원 행(catalog-rows)에서 파생 —
+//     구조+run_id 형식을 행이 소유한다(isDispatchLaneBranch).
+// 접두만 보면 하이픈 앱명에서 형제 앱을 오귀속하므로(page ↔ page-extra) tail 형식까지가 판정이다.
+// db/cache 레인은 리소스명 키(keyKind: "resource")라 앱 필터 대상이 아니다 — 행 데이터가 말한다.
 function isAppLaneBranch(head: string, app: string): boolean {
-  const tail = (prefix: string): string | null => (head.startsWith(prefix) ? head.slice(prefix.length) : null);
   // status는 apps 레인 조회다 — bespoke target의 bump 브랜치는 이 앱의 것이 아니다.
   const bump = parseBranch(head);
   if (bump !== null && bump.target.kind === "app" && bump.target.name === app) return true;
-  for (const action of ["create-app", "update-secrets"]) {
-    const t = tail(`${action}/${app}-`);
-    if (t !== null && /^\d+$/.test(t)) return true;
+  for (const row of Object.values(LANES)) {
+    if (row.keyKind === "app" && isDispatchLaneBranch(row.branchPattern, app, head)) return true;
   }
-  const td = tail(`teardown/teardown-app-${app}-`);
-  return td !== null && /^\d+$/.test(td);
+  return false;
 }
 
 // 모드 상호배타·핸들 URL 형식 검증 — CLI(usage 오류 exit 2)와 MCP(invalid params)가 같은 술어를 쓴다.

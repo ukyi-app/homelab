@@ -71,6 +71,7 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@bash scripts/check-doc-index.sh
 	@bash scripts/check-bats-accounting.sh
 	@bash scripts/check-app-deploy.sh
+	@bun tools/generate-result-schema.ts --check
 	@bun tools/check-resource-limits.ts
 	@bun tools/check-alert-rules.ts
 	@bun tools/check-guard-authority.ts

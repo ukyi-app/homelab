@@ -69,3 +69,10 @@ STUB
   [ "$(printf '%s' "$output" | grep -c 'postgres://')" -eq 0 ]    # 평문 URL stdout 비노출(카운트 패턴)
   rm -rf "$T"
 }
+
+@test "a malformed name is a usage error (exit 2, usage line — shell preserves the legacy contract)" {
+  run --separate-stderr bun tools/db-url.ts --name BAD --dry-run
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "^usage: db-url"
+}

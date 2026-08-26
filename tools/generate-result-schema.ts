@@ -1,4 +1,23 @@
-{
+// 결과 계약 스키마 생성기 — tools/cli-result-schema.json 전체가 이 파일과 기술자 행
+// (lib/catalog-rows.ts CONTRACT_ROWS)의 산출물이다(cli-deepening 심화 3). 행렬 분기(allOf
+// member 0)와 verb enum은 행에서 생성되고, x-contract·variant→exitCode 재진술(의도된 이중부기)·
+// definitions 본문은 아래 수제 조각이다 — 컴팩트 스타일은 과거 리뷰의 의도적 결정이라 보존한다.
+// import는 기술자(catalog-rows·platform 좌표 SSOT)와 node 표준뿐이다: 계약 독자(contract.ts)도 생성물
+// JSON도 참조하지 않으므로 생성물이 없거나 파손돼도 재생성이 성립한다(설계 게이트 r1 D3 —
+// test_result-schema-gen.bats 증명). initSuccess·initFailure의 archetype enum은 platform.ts ARCHETYPES
+// 파생이다(cli-deepening 심화 6 후속 — 리터럴 사본이면 아키타입 확장 시 입력 표면(MCP)은 수용하는데
+// 결과 계약만 낡는다).
+// 사용: 기본 --check(대상과 byte 대조, 드리프트면 exit 1) | --write(대상에 기록).
+//       --out <path>로 대상 지정(기본: 이 파일 옆 cli-result-schema.json).
+// 강제 지점 둘: 게이트는 test_result-schema-gen.bats(run-bats 수집 — required check), make verify의
+// --check 라인은 로컬 보조다(verify는 CI에서 안 돈다 — check-guard-authority.ts 헤더). 파일명이
+// 가드 열거 규약(check-*) 밖인 것은 의도다 — 생성기 겸 게이트라 check- 접두가 거짓이 된다.
+import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { CONTRACT_ROWS, LANES, type MutationVariantName } from "./lib/catalog-rows.ts";
+import { ARCHETYPES } from "./lib/platform.ts";
+
+const HEADER_A = `{
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "cli-result-schema",
   "title": "homelab CLI --json 결과 계약 v1 (SSOT — 전 동사·MCP tool 공용)",
@@ -27,9 +46,9 @@
   "additionalProperties": false,
   "required": ["schema", "verb", "variant", "exitCode", "omitted", "result"],
   "properties": {
-    "schema": { "enum": ["homelab-cli/1"] },
-    "verb": { "enum": ["doctor", "status", "db create", "cache create", "app create", "app secrets", "app teardown", "app init", "db url", "cache url"] },
-    "variant": { "enum": ["success", "failure", "race", "skip", "pending", "no-op", "superseded"] },
+    "schema": { "enum": ["homelab-cli/1"] },`;
+
+const HEADER_B = `    "variant": { "enum": ["success", "failure", "race", "skip", "pending", "no-op", "superseded"] },
     "exitCode": { "enum": [0, 1, 3, 4] },
     "omitted": { "type": "array", "uniqueItems": true, "items": { "enum": ["live"] } },
     "result": { "type": "object" }
@@ -37,343 +56,9 @@
   "allOf": [
     {
       "description": "verb→(허용 variant 집합, result) 결합(structure r1 a1·b1 + 시도2 A2·B2): verb별로 낼 수 있는 variant와 result 정의를 루트에 강제 — 어긋난 shape·불가능한 verb/variant 쌍은 스키마 차원에서 red. 변이 동사(db/cache create)는 variant 단위 분기이고 공유 mutation* 정의에 allOf로 verb별 action을 고정한다(verb↔action 교차 배선 차단). 동사 추가 = 분기 추가.",
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["doctor"] },
-            "variant": { "enum": ["success", "failure"] },
-            "result": { "$ref": "#/definitions/doctorResult" }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["status"] },
-            "variant": { "enum": ["success", "failure"] },
-            "result": { "$ref": "#/definitions/statusResult" }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["db create"] },
-            "variant": { "enum": ["success"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationSuccess" },
-              { "type": "object", "properties": { "action": { "enum": ["create-database"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["db create"] },
-            "variant": { "enum": ["failure"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationFailure" },
-              { "type": "object", "properties": { "action": { "enum": ["create-database"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["db create"] },
-            "variant": { "enum": ["race"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationRace" },
-              { "type": "object", "properties": { "action": { "enum": ["create-database"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["db create"] },
-            "variant": { "enum": ["pending"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationPending" },
-              { "type": "object", "properties": { "action": { "enum": ["create-database"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["db create"] },
-            "variant": { "enum": ["superseded"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationSuperseded" },
-              { "type": "object", "properties": { "action": { "enum": ["create-database"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["cache create"] },
-            "variant": { "enum": ["success"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationSuccess" },
-              { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["cache create"] },
-            "variant": { "enum": ["failure"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationFailure" },
-              { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["cache create"] },
-            "variant": { "enum": ["race"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationRace" },
-              { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["cache create"] },
-            "variant": { "enum": ["pending"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationPending" },
-              { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["cache create"] },
-            "variant": { "enum": ["superseded"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationSuperseded" },
-              { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app create"] },
-            "variant": { "enum": ["success"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationSuccess" },
-              { "type": "object", "properties": { "action": { "enum": ["create-app"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app create"] },
-            "variant": { "enum": ["failure"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationFailure" },
-              { "type": "object", "properties": { "action": { "enum": ["create-app"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app create"] },
-            "variant": { "enum": ["race"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationRace" },
-              { "type": "object", "properties": { "action": { "enum": ["create-app"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app create"] },
-            "variant": { "enum": ["pending"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationPending" },
-              { "type": "object", "properties": { "action": { "enum": ["create-app"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app create"] },
-            "variant": { "enum": ["superseded"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationSuperseded" },
-              { "type": "object", "properties": { "action": { "enum": ["create-app"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app secrets"] },
-            "variant": { "enum": ["success"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationSuccess" },
-              { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-              { "type": "object", "required": ["chain"] }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app secrets"] },
-            "variant": { "enum": ["failure"] },
-            "result": { "oneOf": [
-              { "allOf": [
-                { "$ref": "#/definitions/mutationFailure" },
-                { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-                { "type": "object", "required": ["chain"] }
-              ] },
-              { "$ref": "#/definitions/mutationRefused" }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app secrets"] },
-            "variant": { "enum": ["race"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationRace" },
-              { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-              { "type": "object", "required": ["chain"] }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app secrets"] },
-            "variant": { "enum": ["pending"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationPending" },
-              { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-              { "type": "object", "required": ["chain"] }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app secrets"] },
-            "variant": { "enum": ["superseded"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationSuperseded" },
-              { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-              { "type": "object", "required": ["chain"] }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app secrets"] },
-            "variant": { "enum": ["no-op"] },
-            "result": { "allOf": [
-              { "$ref": "#/definitions/mutationNoop" },
-              { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-              { "type": "object", "required": ["chain"] }
-            ] }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app teardown"] },
-            "variant": { "enum": ["success"] },
-            "result": { "$ref": "#/definitions/teardownSuccess" }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app teardown"] },
-            "variant": { "enum": ["failure"] },
-            "result": { "$ref": "#/definitions/teardownFailure" }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app teardown"] },
-            "variant": { "enum": ["race"] },
-            "result": { "$ref": "#/definitions/teardownRace" }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app teardown"] },
-            "variant": { "enum": ["pending"] },
-            "result": { "$ref": "#/definitions/teardownPending" }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app init"] },
-            "variant": { "enum": ["success", "no-op"] },
-            "result": { "$ref": "#/definitions/initSuccess" }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["app init"] },
-            "variant": { "enum": ["failure"] },
-            "result": { "$ref": "#/definitions/initFailure" }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["db url"] },
-            "variant": { "enum": ["success", "failure"] },
-            "result": { "$ref": "#/definitions/urlResult" }
-          }
-        },
-        {
-          "type": "object",
-          "properties": {
-            "verb": { "enum": ["cache url"] },
-            "variant": { "enum": ["success", "failure"] },
-            "result": { "$ref": "#/definitions/urlResult" }
-          }
-        }
-      ]
+      "oneOf": [`;
+
+const TAIL_MID = `      ]
     },
     {
       "description": "variant→exitCode 결합(structure r1 b2): 허용 쌍 밖(success+1 등)은 red. 이 분기들은 x-contract.exitCodes의 재진술이며, 둘의 일치는 test_homelab-cli.bats의 SSOT pinning 테스트가 강제한다.",
@@ -385,8 +70,11 @@
       ]
     }
   ],
-  "definitions": {
-    "doctorResult": {
+  "definitions": {`;
+
+// archetype enum 인라인 — verb enum과 같은 표기(`"a", "b"`)로 생성물 byte를 보존한다.
+const ARCHETYPE_ENUM = ARCHETYPES.map((a) => '"' + a + '"').join(", ");
+const DEFINITIONS = `    "doctorResult": {
       "type": "object",
       "additionalProperties": false,
       "required": ["checks", "summary"],
@@ -652,7 +340,7 @@
       "required": ["app", "archetype", "public", "repo", "scaffolded", "pushed"],
       "properties": {
         "app": { "type": "string", "minLength": 1 },
-        "archetype": { "enum": ["api", "fullstack", "site", "worker"] },
+        "archetype": { "enum": [${ARCHETYPE_ENUM}] },
         "public": { "type": "boolean" },
         "repo": { "type": "string", "minLength": 1 },
         "existed": { "type": "boolean" },
@@ -671,7 +359,7 @@
       "required": ["app", "archetype", "public", "repo", "checkpoint", "error"],
       "properties": {
         "app": { "type": "string", "minLength": 1 },
-        "archetype": { "enum": ["api", "fullstack", "site", "worker"] },
+        "archetype": { "enum": [${ARCHETYPE_ENUM}] },
         "public": { "type": "boolean" },
         "repo": { "type": "string", "minLength": 1 },
         "existed": { "type": "boolean" },
@@ -745,7 +433,7 @@
         "runs": { "type": "array", "items": { "$ref": "#/definitions/statusRunRow" } },
         "openPrs": { "type": "array", "items": { "$ref": "#/definitions/statusOpenPrRow" } },
         "live": {
-          "description": "라이브 계층 — 부재는 envelope.omitted=[\"live\"](생략), error는 조회 실패의 관측 보고(선택 계층이라 variant는 success 유지).",
+          "description": "라이브 계층 — 부재는 envelope.omitted=[\\"live\\"](생략), error는 조회 실패의 관측 보고(선택 계층이라 variant는 success 유지).",
           "oneOf": [
             {
               "type": "object",
@@ -863,4 +551,142 @@
       }
     }
   }
+}`;
+
+const DEF_BY_VARIANT: Record<MutationVariantName, string> = {
+  success: "mutationSuccess",
+  failure: "mutationFailure",
+  race: "mutationRace",
+  pending: "mutationPending",
+  superseded: "mutationSuperseded",
+  "no-op": "mutationNoop",
+};
+
+// 행렬 분기 3형 — 형식(들여쓰기·인라인 스타일)이 곧 byte 계약이라 문자열 조립로만 만든다.
+function mutationBranch(verb: string, variant: MutationVariantName, action: string, chain: boolean): string {
+  const chainLine = chain
+    ? '              { "type": "object", "required": ["chain"] }'
+    : '              { "not": { "type": "object", "required": ["chain"] } }';
+  return [
+    "        {",
+    '          "type": "object",',
+    '          "properties": {',
+    '            "verb": { "enum": ["' + verb + '"] },',
+    '            "variant": { "enum": ["' + variant + '"] },',
+    '            "result": { "allOf": [',
+    '              { "$ref": "#/definitions/' + DEF_BY_VARIANT[variant] + '" },',
+    '              { "type": "object", "properties": { "action": { "enum": ["' + action + '"] } } },',
+    chainLine,
+    "            ] }",
+    "          }",
+    "        }",
+  ].join("\n");
 }
+
+function refusedFailureBranch(verb: string, action: string): string {
+  return [
+    "        {",
+    '          "type": "object",',
+    '          "properties": {',
+    '            "verb": { "enum": ["' + verb + '"] },',
+    '            "variant": { "enum": ["failure"] },',
+    '            "result": { "oneOf": [',
+    '              { "allOf": [',
+    '                { "$ref": "#/definitions/mutationFailure" },',
+    '                { "type": "object", "properties": { "action": { "enum": ["' + action + '"] } } },',
+    '                { "type": "object", "required": ["chain"] }',
+    "              ] },",
+    '              { "$ref": "#/definitions/mutationRefused" }',
+    "            ] }",
+    "          }",
+    "        }",
+  ].join("\n");
+}
+
+function simpleBranch(verb: string, variants: readonly string[], ref: string): string {
+  return [
+    "        {",
+    '          "type": "object",',
+    '          "properties": {',
+    '            "verb": { "enum": ["' + verb + '"] },',
+    '            "variant": { "enum": [' + variants.map((v) => '"' + v + '"').join(", ") + "] },",
+    '            "result": { "$ref": "#/definitions/' + ref + '" }',
+    "          }",
+    "        }",
+  ].join("\n");
+}
+
+function memberZeroBranches(): string {
+  const out: string[] = [];
+  for (const row of CONTRACT_ROWS) {
+    if (row.mutation) {
+      // 기술자 내부 정합 — 계약 행의 action은 레인 행에 실재해야 한다(fail-closed).
+      if (!(row.mutation.action in LANES)) throw new Error("계약 파손: 미지의 action — " + row.mutation.action);
+      for (const v of row.mutation.variants) {
+        out.push(v === "failure" && row.mutation.refusedOnFailure === true
+          ? refusedFailureBranch(row.verb, row.mutation.action)
+          : mutationBranch(row.verb, v, row.mutation.action, row.mutation.chain));
+      }
+    }
+    for (const s of row.simple ?? []) out.push(simpleBranch(row.verb, s.variants, s.ref));
+  }
+  return out.join(",\n");
+}
+
+function verbEnumLine(): string {
+  return '    "verb": { "enum": [' + CONTRACT_ROWS.map((r) => '"' + r.verb + '"').join(", ") + "] },";
+}
+
+export function generateSchema(): string {
+  // 기술자 ↔ 수제 definitions 정합 단언 — mutation* 정의의 action enum(6곳)은 계약 행의
+  // mutation action 목록(행 순서)과 같아야 한다. 행렬 분기만 생성되므로 이 단언이 없으면
+  // 동사 추가 시 생성부는 맞고 definitions만 조용히 낡는다(열거끼리는 일치하고 레포와
+  // 어긋나는 클래스 — 6은 손 앵커, defs가 늘면 의식적으로 갱신).
+  const mutationActions = CONTRACT_ROWS.flatMap((r) => (r.mutation ? [r.mutation.action] : []));
+  const actionEnumInline = '"action": { "enum": [' + mutationActions.map((a) => '"' + a + '"').join(", ") + "] }";
+  const hits = DEFINITIONS.split(actionEnumInline).length - 1;
+  if (hits !== 6) throw new Error("계약 파손: definitions의 action enum(" + hits + "곳)이 계약 행 mutation action 목록과 어긋난다(기대 6곳)");
+  return HEADER_A + "\n" + verbEnumLine() + "\n" + HEADER_B + "\n" + memberZeroBranches() + "\n" + TAIL_MID + "\n" + DEFINITIONS + "\n";
+}
+
+function main(): void {
+  // fail-loud argv — 파싱 SSOT(lib/cli.ts parseFlags)의 규약(unknown 거부·값 누락 거부)을 손으로
+  // 따른다: cli.ts를 import하면 격리 재생성 증명(기술자 외 무참조)이 약해지기 때문이다.
+  const args = process.argv.slice(2);
+  let mode: "check" | "write" = "check";
+  let target = fileURLToPath(new URL("./cli-result-schema.json", import.meta.url));
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--check") mode = "check";
+    else if (a === "--write") mode = "write";
+    else if (a === "--out") {
+      const v = args[i + 1];
+      if (v === undefined || v.startsWith("--")) { console.error("--out 값이 없다"); process.exit(2); }
+      target = v;
+      i++;
+    } else {
+      console.error("알 수 없는 인자: " + a + " (허용: --check | --write | --out <path>)");
+      process.exit(2);
+    }
+  }
+  const text = generateSchema();
+  if (mode === "write") {
+    writeFileSync(target, text);
+    console.error("기록: " + target);
+    return;
+  }
+  // --check — 드리프트 게이트. 대상 부재도 red(재생성 경로 안내), 성공은 한 줄로 보인다.
+  let current: string;
+  try { current = readFileSync(target, "utf8"); }
+  catch {
+    console.error("대상을 읽을 수 없다(재생성: --write): " + target);
+    process.exit(1);
+  }
+  if (current !== text) {
+    console.error("드리프트: " + target + " ≠ 생성 결과 — 기술자(lib/catalog-rows.ts)를 고치고 --write로 재생성하라");
+    process.exit(1);
+  }
+  console.error("result-schema: 생성 결과와 byte 동일 OK");
+}
+
+main();

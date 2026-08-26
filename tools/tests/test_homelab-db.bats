@@ -236,13 +236,41 @@ merged_pr_at_descendant() {
   echo "$output" | grep -q "^ok:5$"
 }
 
-@test "db url is re-exposed as a passthrough with byte-identical behavior (dry-run parity)" {
-  run bash -c "bun tools/homelab.ts db url --name t --host h --dry-run 2>&1"
-  s1="$status"
-  o1="$output"
-  run bash -c "bun tools/db-url.ts --name t --host h --dry-run 2>&1"
-  [ "$status" -eq "$s1" ]
-  [ "$output" = "$o1" ]
+@test "db url is a catalog op: --json yields a schema-valid envelope with no plaintext value" {
+  # 구 byte-parity(패스스루가 패스스루임을 검증)는 catalog 승격으로 계약이 대체됐다(티켓 08):
+  # url 동사도 op envelope 계약이고, 사람용 출력은 렌더러 소유다. usage의 --json 공통 광고가
+  # 이제 10/10 동사에서 참이 된다.
+  export OUTDIR="$BATS_TEST_TMPDIR"
+  run --separate-stderr bun tools/homelab.ts db url --name t --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.verb')" = "db url" ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.dryRun')" = "true" ]
+  [ "$(echo "$output" | jq -r '.result.wrote')" = "false" ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "readonly" ]
+  [ "$(printf '%s' "$output" | grep -c "postgres://")" = "0" ]
+  echo "$output" > "$OUTDIR/url.json"
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const env = JSON.parse(readFileSync(process.env.OUTDIR + "/url.json", "utf8"));
+    const errs = schemaErrors(env, sch, sch);
+    if (errs.length) { console.error(errs.join(" | ")); process.exit(1); }
+    console.log("ok");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok$"
+}
+
+@test "db url enforces rw/admin exclusivity and the F2 admin channel as usage errors (engine predicate)" {
+  run --separate-stderr bun tools/homelab.ts db url --name t --rw --admin
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "상호배타"
+  run --separate-stderr bun tools/homelab.ts db url --name t --admin --env-local .env.local
+  [ "$status" -eq 2 ]
+  echo "$stderr" | grep -q "F2 채널 분리"
 }
 
 @test "db create --help prints the verb usage and exits 0" {

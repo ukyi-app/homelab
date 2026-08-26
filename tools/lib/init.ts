@@ -12,9 +12,9 @@
 // --body-file로 값을 넘겨 argv 원장에 값이 남지 않는다 — 이 엔진은 키 파일을 읽지도 않는다).
 import { existsSync, writeFileSync } from "node:fs";
 import { compact } from "./contract.ts";
-import { sh } from "./exec.ts";
-import { APP_NAME_RE } from "./identity.ts";
-import { ARCHETYPES, HOMELAB_REPO, TEMPLATE_REPO } from "./platform.ts";
+import { ALLOW_PUSH_REWRITE_ENV, git, pushRoutes, sh } from "./exec.ts";
+import { APP_NAME_RE, isCanonicalClone, pushRouteError } from "./identity.ts";
+import { ARCHETYPES, OWNER, TEMPLATE_REPO } from "./platform.ts";
 import { scaffoldContractError } from "./template-contract.ts";
 
 export type AppInitInput = {
@@ -28,7 +28,6 @@ export type AppInitInput = {
 
 export type InitOutcome = { variant: string; omitted: string[]; result: Record<string, unknown> };
 
-const OWNER = HOMELAB_REPO.split("/")[0];
 const MARKER_FILE = ".homelab-init";        // invocation marker(레포 루트 — scaffold self-delete 대상 아님)
 const MARKER_TOOL = "homelab-app-init";     // 도구 식별자(소유 술어)
 const SCAFFOLD_MARKER = ".app-config.yml";  // 스캐폴드 완료 사후조건(연구 노트 §2)
@@ -50,7 +49,6 @@ function api(args: string[]): Api {
   if (r.ok) return { ok: true, out: r.out, missing: false, err: "" };
   return { ok: false, out: "", missing: /\(HTTP 404\)/.test(r.err), err: r.err.split("\n")[0] || "gh 실패" };
 }
-function git(cwd: string, args: string[]) { return sh("git", ["-C", cwd, ...args]); }
 
 // 원격 마커 판독 — contents API base64 디코드 후 tool+app 대조. present/absent/mismatch/error.
 type Marker = { kind: "present" } | { kind: "absent" } | { kind: "mismatch"; app: string } | { kind: "error"; err: string };
@@ -147,6 +145,14 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     const cloneReady = ensureClone(parentDir, app, dest, cloneUrl);
     if (cloneReady !== null) return fail(cloneReady, created ? "created" : "preflight", { created });
 
+    // ── push 라우팅 안전 — origin.url(원본 설정값)이 canonical이어도 pushurl/insteadOf/pushInsteadOf가
+    // push를 다른 곳으로 보낼 수 있다. push 지향 관측을 공유 진단(identity.pushRouteError)에 넘겨
+    // fail-closed로 본다. 테스트 하네스(insteadOf→로컬 bare)는 명시 플래그로만 완화된다. ──
+    if (process.env[ALLOW_PUSH_REWRITE_ENV] !== "1") {
+      const routeErr = pushRouteError(OWNER, app, pushRoutes(dest));
+      if (routeErr !== null) return fail(`${routeErr} — 수동 확인 필요`, "cloned", { created });
+    }
+
     // ── 스캐폴드(멱등) — 이미 되어 있으면(.app-config.yml 존재 + scaffold/ 부재) 건너뛴다. ──
     // 두 조건 모두 봐야 한다: 스캐폴더가 .app-config.yml을 먼저 쓴 뒤 self-delete 전에 실패하면
     // config만으로 스킵하면 반쪽 스캐폴드가 성공으로 통과한다(scaffold/ 잔존 = 미완).
@@ -228,12 +234,19 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
 function ensureClone(parentDir: string, app: string, dest: string, cloneUrl: string): string | null {
   if (existsSync(`${dest}/.git`)) {
     const url = git(dest, ["config", "--get", "remote.origin.url"]);
-    // 소유자까지 대조한다 — `/${app}` 접미만 보면 남의 동명 클론(github.com/someone/${app})을
+    // canonical 판정은 identity.ts SSOT 술어 — 접미 매치는 임의 host의 …/${OWNER}/${app}(mirror 클론)을
     // '우리 것'으로 오귀속해 마커·push를 엉뚱한 레포에 흘린다(insteadOf 하에서도 origin은 canonical).
-    if (url.ok && new RegExp(`[:/]${OWNER}/${app}(\\.git)?$`).test(url.out.trim())) return null; // 우리 클론 — 재사용
-    return `${dest}가 이미 있으나 origin이 ${OWNER}/${app}가 아니다(${url.out.trim() || "없음"}) — 수동 확인 필요`;
+    if (url.ok && isCanonicalClone(OWNER, app, url.out)) return null; // 우리 클론 — 재사용
+    return `${dest}가 이미 있으나 origin이 canonical ${OWNER}/${app}가 아니다(${url.out.trim() || "없음"}) — 수동 확인 필요`;
   }
   if (existsSync(dest)) return `${dest}가 이미 있으나 git 레포가 아니다 — 수동 확인 필요`;
   const clone = sh("git", ["clone", "-q", cloneUrl, dest]);
-  return clone.ok ? null : `클론 실패 — ${clone.err.split("\n")[0] || "git clone 비-0"}`;
+  if (!clone.ok) return `클론 실패 — ${clone.err.split("\n")[0] || "git clone 비-0"}`;
+  // 신규 클론도 구성 신원을 같은 술어로 증명한다(재사용 분기와 대칭) — cloneUrl 조립이
+  // 바뀌어도 "push 전 ① 통과" 계약이 붙잡는다.
+  const fresh = git(dest, ["config", "--get", "remote.origin.url"]);
+  if (!fresh.ok || !isCanonicalClone(OWNER, app, fresh.out)) {
+    return `클론 origin(${fresh.out.trim() || "없음"})이 canonical ${OWNER}/${app}가 아니다 — 수동 확인 필요`;
+  }
+  return null;
 }

@@ -51,8 +51,24 @@ export function sh(cmd: string, args: string[], opts: ExecOpts = {}): Cmd {
 }
 
 export function gh(args: string[], opts: ExecOpts = {}): Cmd { return sh("gh", args, opts); }
-export function git(args: string[], opts: ExecOpts = {}): Cmd { return sh("git", args, opts); }
 export function kubeseal(args: string[], opts: ExecOpts = {}): Cmd { return sh("kubeseal", args, opts); }
+
+// push 라우팅 검사를 생략시키는 테스트 전용 플래그 이름 — bats 하네스가 insteadOf로
+// canonical→로컬 bare 재배선을 쓰기 때문에만 존재한다. production 기본은 검사한다.
+export const ALLOW_PUSH_REWRITE_ENV = "HOMELAB_TEST_ALLOW_PUSH_REWRITE";
+
+// git 실행 헬퍼 — init·secrets 엔진 등 cwd 고정 소비자의 계약(#541 시그니처 유지).
+// 명명 adapter 확장(errKind·timeoutMs·maxBuffer)은 sh를 경유해 그대로 받는다.
+export function git(cwd: string, args: string[], opts: ExecOpts = {}): Cmd { return sh("git", ["-C", cwd, ...args], opts); }
+
+// push 라우팅 관측 — `git remote get-url --push --all`만이 pushurl 복수 나열과 insteadOf/
+// pushInsteadOf 전개를 전부 반영한다(실측 — `git ls-remote --get-url`은 fetch 지향이라
+// pushInsteadOf를 못 본다). 판정은 identity.ts isSafePushRoute 소유 — 여기는 관측만. 실패는 null.
+export function pushRoutes(cwd: string): string[] | null {
+  const r = git(cwd, ["remote", "get-url", "--push", "--all", "origin"]);
+  if (!r.ok) return null;
+  return r.out.split("\n").map((s) => s.trim()).filter((s) => s !== "");
+}
 
 // gh api + --jq 결과를 파싱한다. 실패는 null — 콜사이트가 fail-loud 여부를 정한다.
 // ⚠️ 오브젝트/배열 jq 전용 — 스칼라 jq(.status 등)는 raw 문자열이 나와 JSON.parse가 깨진다.

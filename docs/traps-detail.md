@@ -630,7 +630,7 @@ grep rc=1(매치 없음)뿐 아니라 rc=2(디렉토리 부재)도 통과시킨�
 무조건 적용하면 음성 테스트가 전부 red가 된다(실측). ⚠️ 바닥값은 래칫이 아니다 — 도메인이 줄지
 않는 한 손댈 일이 없다.
 
-> 가드: `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `policy/ledger.rego`, `tests/test_ledger.bats`
+> 가드: `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `tools/lib/scan-floor.ts`, `scripts/check-scan-producers.sh`, `policy/ledger.rego`, `tests/test_ledger.bats`
 
 ### PreToolUse 훅 종료코드 — fail-closed는 exit 2뿐
 
@@ -1556,7 +1556,9 @@ selfHeal과 플립플롭한다.
   "check-locale-collation·check-bats-style에 같은 `|| true`가 그대로다"라고 후속 후보로 남겼고,
   실측하니 그 두 줄이 문자 그대로 동일했다. 같은 lib(`scan-floor.sh`)를 쓰는 awk 가드는 전부 이
   패턴을 공유하므로, 새 awk 가드를 추가할 때 이 세 겹을 함께 넣어야 한다.
-> 가드: `scripts/check-host-ports.sh`, `scripts/check-locale-collation.sh`, `scripts/check-bats-style.sh`, `tests/gates/test_host-ports.bats`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_bats-style.bats`
+  실측(2026-08-25): 이 문단을 읽고 만든 새 awk 가드(`check-scan-producers.sh`)가 첫 판에서 세 겹을 빠뜨리고
+  SCAN 마커를 검출 **전에** 냈다 — 리뷰가 잡았다. 처방은 읽는 것이 아니라 자매 가드의 **순서를 베끼는** 것이다.
+> 가드: `scripts/check-host-ports.sh`, `scripts/check-locale-collation.sh`, `scripts/check-bats-style.sh`, `scripts/check-scan-producers.sh`, `tests/gates/test_host-ports.bats`, `tests/gates/test_locale-collation.bats`, `tests/gates/test_bats-style.bats`
 ### vmalert에 configCheckInterval이 없으면 룰 파일 변경을 감시하지 않는다 — ArgoCD가 갱신해도 옛 룰을 계속 평가한다
 - **병**: vmalert(그리고 vmagent)는 마운트된 룰/스크래이프 설정 파일의 변경을 **기본으로 감시하지 않는다.**
   `-configCheckInterval`(vmagent는 `-promscrape.configCheckInterval`)이 설정돼야 그 주기로 파일을 다시
@@ -1640,6 +1642,80 @@ selfHeal과 플립플롭한다.
   대상을 부르면, 그 게이트가 증명하는 것은 실 도메인의 동작이 아니다.
 > 가드: `tests/gates/image-pin-liveness.sh`, `ops/skopeo/Dockerfile`, `tests/gates/skopeo-timeout-smoke.sh`, `tests/gates/test_pgtools-digest.bats`, `tests/gates/test_ci-build.bats`
 
+### TS 바닥값은 coercion 뒤에서 조용히 꺼진다 — Number("abc")는 NaN이라 n < NaN이 항상 false이고, Number("")는 0이라 빈 입력과 의도적 0을 구별할 수 없다
+- **병(2026-08-25 실측)**: 셸 콜사이트는 `[ "$got" -lt "$min" ]`이 수가 아닌 값에 **에러를 낸다**. TypeScript는
+  `Number("abc")`가 NaN이고 `n < NaN`이 항상 false라 **바닥값이 통째로 꺼진 채 초록**이 된다.
+  `DISK_CAP_MIN_FLAGS=abc bun tools/check-disk-caps.ts` → SCAN 마커 방출 + rc=0. 오타 하나가 열거 붕괴
+  방어를 되살리지 않고 **끈다** — 「열거 붕괴 → vacuous green」의 TS 얼굴이다.
+- ⚠️ **숫자 검증을 coercion 뒤에 두면 빈 입력을 못 거른다.** `Number("")`는 0이고, 0은 정당한 바닥값이라
+  (셸 선례 `APP_DEPLOY_MIN_SCAN:-0` — 앱이 0개인 동안 열거 0건은 정당) 금지로 피할 수도 없다. 설계 게이트
+  r2가 실측: `--min-refs ""`는 자체 파서(`positiveInt`)가 거부하고 `--min-scan ""`는 `Number()` 직행이라
+  통과했다 — **같은 처방을 복제하면 일부가 빠진다**(2벌 복제, 미적용 2곳).
+- ⚠️ **테스트 편의로 바닥값에 env 주입을 열면 required gate의 방어가 꺼진다.** 붕괴 경로를 관측하려고
+  `CI_PARITY_MIN_STEPS`를 열었더니 `=0` 한 줄로 방어가 통째로 꺼졌다(리뷰 실측 → 되돌림). 주입은 애초에
+  필요 없다 — 도구가 cwd/`--root`를 읽으면 픽스처 디렉토리에서 열거가 자연히 붕괴한다.
+- ⇒ **처방: 판정을 `Number()` 앞에 세운다(`tools/lib/scan-floor.ts`의 `parseFloor(raw, source)`) — 빈 문자열·
+  `abc`·음수·소수는 exit 2(사용법 오류, 바닥값 붕괴 1과 다른 사고), 명시적 `"0"`은 통과.** 상수로 주입되는
+  자리는 파서를 안 거치므로 `scanFloor` 안의 정수 검증이 안전망으로 남는다. 바닥값 자리는 상수 또는 CLI
+  플래그이지 env가 아니다.
+> 가드: `tools/lib/scan-floor.ts`, `tests/gates/test_scan-floor.bats`
+
+### 스캔 신호를 콜사이트가 손으로 내면 순서가 드리프트한다 — 위반 exit이 신호보다 앞이면 마커 0건이 '미실행'으로 읽히고, 로스터 등식은 우회를 못 잡는다
+- **병(2026-08-25 실측)**: 규약은 "바닥값을 통과한 실행만 `SCAN:` 마커를 내고, 위반 유무와 무관하게 낸다"인데,
+  셸은 커널(`scan_floor`)이 바닥값 시점에 내므로 자동으로 그 순서이고 TS는 콜사이트가 `console.log`로
+  직접 냈다. 주석으로만 둔 규약은 **7곳 중 4곳이 어긋났다** — 위반 exit이 신호보다 앞(위반 실행에서 마커
+  0건 → "안 돌았다"로 오독), 바닥값 실패인데 신호 방출(붕괴한 건수가 "검사했다"로 읽힘), 신호 부재.
+  소비자(check-guard-authority)는 마커 부재를 **미지**로 읽으므로 실행 경로 회계가 과다 계상으로 기운다.
+- ⚠️ **바닥값 실패를 위반 배열에 합치면 두 사고가 섞인다.** `bad.push(바닥값 진단)` 뒤에 위반을 계속 모으면
+  0건에 가까운 검사에서 나온 위반이 진짜 위반처럼 보고된다. 반대로 즉사시킬 때는 **앞에서** 모인 근본원인
+  (yq 실패·YAML 파싱 실패)을 먼저 흘려야 한다 — 삼키면 hint가 가리키는 바로 그 증거가 사라진다.
+- ⚠️ **로스터 등식(정적 콜사이트 집합 == 런타임 방출 집합)은 우회를 못 잡는다.** 정적 집합과 실행 파일
+  목록이 같은 grep 패턴에서 파생되므로 한 가드가 직접 출력으로 되돌아가면 **양쪽에서 동시에 사라져** 등식이
+  그대로 성립하고, 바닥값의 여유가 정확히 한 건의 손실을 덮는다(게이트 r1 F1 실측). 인식 제거는 "안 본다"이고
+  필요한 것은 "있으면 red"다. 콜사이트 **삭제**(바닥값도 함께 사라짐)는 거부 가드도 못 보며 그 가드의
+  도메인 테스트가 자기 바닥값·마커를 단언하는 자리다.
+- ⇒ **처방: 바닥값과 신호를 한 함수 뒤에 둔다(`tools/lib/scan-floor.ts` — 셸 adapter와 마커 형태가 한 글자도
+  다르지 않은 두 번째 adapter). 커널은 `ScanError`를 던지고 종료는 콜사이트가 소유한다(`tools/lib/` 규율).
+  그리고 직접 생산자를 거부한다(`scripts/check-scan-producers.sh` — 출력 동사의 인자가 마커 리터럴로 시작하면
+  red, 커널 파일은 경로 하나로 면제하되 건너뛰지 않고 히트 ≥1을 검출기 생존 증거로 요구).**
+> 가드: `tools/lib/scan-floor.ts`, `scripts/check-scan-producers.sh`, `tests/gates/test_scan-floor.bats`
+
+### 테스트 이름은 인터페이스가 아니다 — 뮤테이션이 전건 red여도 픽스처가 밟지 않는 판정 조건은 무증인이다
+- **병(2026-08-25, 한 캠페인의 여섯 티켓에서 여섯 번 실측)**: 테스트 **이름**은 의도를 정확히 적는데 **단언**은
+  다른 것을 본다. 다섯 번은 "존재·형태만 본다"였다 — 마커의 존재와 숫자꼴만 봐서 신호 대상을 바꿔도 45건
+  green, "성공 요약 부재"는 어떤 실패 경로에서도 참이라 즉사와 수집을 구별 못 함, `run bash -c` 안의 지역
+  변수가 비어 아무것도 읽지 않는 단언. 여섯째는 형태가 달랐다: 저자의 뮤테이션 6종이 **전부 red였는데도**
+  판정 조건 다수(홑따옴표·출력 동사 4종·`.mts` 열거·주석 앵커·정확한 면제 경로)가 **어떤 픽스처에서도
+  행사되지 않았다** — 픽스처가 `console.log` + 쌍따옴표 + `.ts`만 써서, 그 조건들은 지워도 전건 green이었다.
+- **왜 뮤테이션이 못 잡는가**: 뮤테이션은 구현을 바꾸고 테스트가 red가 되는지 본다. 결함이 "테스트가 무엇을
+  보는가"에 있으면 구현을 바꿔도 테스트가 보는 것은 그대로다. 그리고 뮤테이션은 **픽스처가 밟는 분기만**
+  증명한다 — 밟지 않는 분기의 뮤테이션은 저자가 떠올리지 않는다.
+- ⇒ **처방 ①: 모든 새 증인은 뮤테이션으로 red를 확인하고, vacuity 방지 단언(대상을 실제로 읽었다·집합이
+  비지 않았다·마커가 먼저 존재한다)을 함께 건다.** 부정 단언("X가 없다")은 양성 대조 없이는 대상이 아예
+  없어도 참이다.
+- ⇒ **처방 ②: 판정 조건마다 그 조건을 행사하는 픽스처 줄이 하나씩 있는지 센다.** 정규식의 분기(`(a|b|c)`),
+  문자 클래스(`["'\`]`), 글롭 목록, 경로 비교의 정확성 — 각각 한 줄. 문서의 "표면은 셋이다" 같은 완결 주장은
+  그 수를 세는 순간 틀린다(별 없는 블록 주석 본문이 넷째였다) — 열거를 문서에 적지 말고 상태 기계에 적어라.
+- ⇒ **처방 ③: 리뷰와 수정을 같은 트리에서 동시에 돌리지 않는다.** 리뷰어의 뮤테이션 하네스가 작업 트리를
+  되돌려 저자의 조치 두 건이 사라진 채 다음 리뷰가 돌았다(티켓 04). 리뷰는 읽기 전용으로, 수정은 전부 도착한 뒤.
+
+### 정적 증인의 두 함정 — `^[^/]*`는 `//`만 제외하고(JSDoc ` * ` 줄이 코드가 된다), `run bash -c` 안의 bats 지역 변수는 빈 문자열이라 grep이 0건으로 항상 통과한다
+- **병 ①(2026-08-25 실측)**: "커널이 `process.exit`을 부르지 않는다"를 `grep -vE '^[^/]*process\.exit'`로
+  단언했다. `^[^/]*`는 `//` 줄만 제외하므로 JSDoc의 ` * ` 연속줄은 코드로 읽힌다 — 커널 독스트링에 콜사이트
+  관용구 예시 `process.exit(reportScanError(…))`를 적자 그 증인이 red가 됐다. 규약은 "그 단어를 적지 않는다"가
+  아니라 "**부르지** 않는다"인데, 패턴이 산문을 코드로 오인했다. 같은 클래스: 거부 가드의 첫 판은 `//`·` * `·
+  `/*` 세 줄 접두를 걷어냈는데 별 없는 블록 주석 본문이 넷째 표면이었다 — 줄 접두 열거가 아니라 **블록
+  주석 상태 기계**여야 하고, 진입은 행 앞 `/*`로만 한다(줄 중간 `/*`는 `"tools/*.ts"` 글롭에 흔해 파일
+  나머지를 삼킨다).
+- **병 ②(같은 날 실측 — 위 ①을 고치다가 새로 만들었다)**: `run bash -c "grep … $ROOT/…"`에서 `ROOT`는
+  export되지 않은 bats 지역 변수라 새 셸에서 **빈 문자열**이 되고, grep이 빈 경로를 읽어 0건 → rc=1 →
+  부정 단언이 **항상 통과**했다. 그 판에서 커널 끝에 `process.exit`을 넣어도 red가 나지 않았다. 빈 인자를
+  문자열로 조립하는 `bash -c "… '$ROOT' $args"`도 같은 함정 표면이다(큰따옴표라 동작해도 다음 편집자가
+  그 형태를 복제한다).
+- ⇒ **처방: 주석은 `grep -vE '^[[:space:]]*(//|\*|/\*)'`로 먼저 걷어내되 그것도 줄 접두 열거임을 알고,
+  구조가 여러 줄이면 상태 기계로. 정적 증인에는 "대상을 실제로 읽었다"는 단언(`[ -n "$code" ]`)을 함께
+  건다. `bash -c` 대신 `run <함수> "$flag" "$val"`로 직접 부르고, 부득이하면 변수를 인자(`_ "$ROOT"`)로 넘긴다.**
+> 가드: `tests/gates/test_scan-floor.bats`, `scripts/check-scan-producers.sh`
 ### QEMU amd64 leg의 bun 1.4는 RSS 24MB에서 "메모리 고갈"로 죽는다 — Dockerfile을 안 돌리는 CI는 그 6시간을 초록으로 지나친다
 - **병(라이브 실측)**: `ukyi-app/trip-mate-api`의 배포가 2026-08-24부터 멈춰 있었다. 부동 태그
   `oven/bun:1-alpine`이 상류에서 1.3.x → 1.4.0으로 넘어가자, amd64 leg(`reusable-app-build`가

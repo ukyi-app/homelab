@@ -62,13 +62,15 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   그 도구의 kubeseal stdin 전용, CLI는 .env를 읽지 않는다.
   `homelab cache create <name> [--maxmemory-mi 16..1024] [--wait]` = 변이 엔진의 두 번째 인스턴스
   (create-cache 디스패치, 빈 maxmemory=디스패처 기본 64 소유, 수렴 집합 cache-prod·data-conn-prod,
-  표면 = 인스턴스 deployment.yaml + conn 봉인본). `homelab cache url` = cache-url.ts 패스스루 재노출.
+  표면 = 인스턴스 deployment.yaml + conn 봉인본). `homelab cache url` = conn URL 엔진
+  (`lib/conn-url.ts`)의 catalog op — 다른 동사와 같은 envelope 계약(--json), 사람용은 렌더러 소유.
   `homelab db create <name> [--ext a,b] [--wait]` = 첫 변이 동사(공유 변이 엔진 `lib/mutation.ts`의
   첫 인스턴스): create-database 디스패처를 correlation 수령증과 함께 트리거 → nonce 에코 run-name으로
   자기 run 특정(정확히 1개, ≥2=race exit 3) → conclusion 추적(실패 잡 열거) → `--wait`면 auto-merge
   머지 관측 + Application 집합(cnpg-data·data-conn-prod) 수렴(머지 SHA 후손+Synced+Healthy+표면 실존,
   후손 리비전 표면 부재=superseded). KUBECONFIG 부재=머지까지 확인+omitted=["live"].
-  `homelab db url` = 기존 `db-url.ts` 패스스루 재노출(같은 동작 — argv·stdio·종료코드 그대로).
+  `homelab db url` = conn URL 엔진(`lib/conn-url.ts`)의 catalog op — envelope 계약(--json)·F2
+  채널 분리·상호배타는 엔진 술어 소유(구 패스스루 계약은 티켓 08에서 op 계약으로 대체됨).
   `homelab status [<app>] [--run <url>|--pr <url>] [--json]` = 상태 관찰(관측 전용): 인자 없음=
   전체 앱 목록·요약(레포 데이터), `<app>`=핀·바인딩·최근 run·열린 PR(+KUBECONFIG 있으면 ArgoCD
   `<app>-prod` sync/health, 없으면 라이브 구간 생략 — envelope.omitted=["live"]·exit 0), 핸들
@@ -86,7 +88,17 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   (envelope `homelab-cli/1`). variant 어휘(success/failure/race/skip/pending/no-op/superseded)·
   종료코드 매핑(x-contract.exitCodes — pending=1 근거 포함)·stdout 순수성(--json이면 stdout은
   오브젝트 하나, 사람용은 stderr)·MCP 에러 매핑을 정의한다. CLI가 런타임에 읽는다(코드 상수로
-  복제 금지). 골든 픽스처: `tools/tests/fixtures/homelab/*.golden.json`.
+  복제 금지). ⚠️ **생성물이다 — 직접 편집 금지**: 행렬 분기·verb enum은 `generate-result-schema.ts`가
+  기술자 행에서 생성한다(수정은 기술자/생성기 조각 → `--write` 재생성, byte 드리프트 게이트가 강제).
+  골든 픽스처: `tools/tests/fixtures/homelab/*.golden.json`.
+- **`generate-result-schema.ts`** — cli-result-schema.json **생성기**(cli-deepening 심화 3): 행렬
+  분기(allOf member 0)·verb enum은 기술자 행(lib/catalog-rows `CONTRACT_ROWS`)에서, initSuccess·
+  initFailure의 archetype enum은 플랫폼 좌표(lib/platform `ARCHETYPES` — 심화 6 후속)에서 생성하고,
+  x-contract·variant→exitCode 재진술·나머지 definitions 본문은 수제 조각으로 보존한다(컴팩트 스타일 —
+  과거 리뷰의 의도적 결정). 기본 `--check`(byte 대조 — make verify 로컬 보조), `--write`(재생성).
+  **게이트 강제는 bats**(test_result-schema-gen.bats — run-bats 수집)가 담당한다. 기술자(행·좌표) 외
+  무참조라 생성물 부재·파손에서도 재생성 성립(설계 게이트 r1 D3). 이름이 가드 열거 규약(check-*)의
+  밖인 것은 의도다 — 생성기 겸 게이트라 check- 접두가 거짓이 된다.
 
 ## App Platform 변이 도구 (변이 디스패처 경유 — 직접 실행 금지)
 
@@ -218,16 +230,43 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`lib/verbs.ts`** — 동사 operation catalog(transport 중립·부수효과 없는 import-safe SSOT).
   행 = path(라우팅 어휘)+desc(--help)+op(타입 입력→계약 Envelope). argv 파싱·렌더링은 CLI 셸
   소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1). 후속 동사는 여기 행을 추가.
+- **`lib/catalog-rows.ts`** — 변이 레인 신원 행 + 결과 계약 행(**순수 기술자, import 0** — 설계 게이트 r1 D3).
+  액션별 한 행 = 디스패처/reusable 파일명 · 디스패치 입력 이름 · 브랜치 중립 패턴({key}·{runId}·{tag}) ·
+  수렴 Application 집합+표면 패턴. 생성 방향(verbs·secrets의 `laneMutationFields`)과 파싱 방향(status의
+  `isDispatchLaneBranch`/`laneBranchTail`)이 같은 행에서 파생된다. bump-poll은 CLI 동사 없는
+  파싱 전용 레인(tail=tag — TAG_RE 조합은 소비자 몫). 워크플로 YAML과의 정적 parity 가드는
+  후속 티켓이 이 행을 대조 축으로 쓴다. 왕복·리터럴 앵커는 test_lane-rows.bats.
+- **`lib/resource-layout.ts`** — 리소스 산출물 레이아웃 커널(cli-deepening 심화 4, CONTEXT.md
+  "산출물 레이아웃"): kind+name → 산출물 집합(파일 경로 · kustomization 엔트리 · role 라벨
+  handles/envKeys · 원장 행 · tombstone 키)과 **scope 태그**(purge-제거/공유-잔존/수동-이연 —
+  teardown purge의 의도된 부분집합을 데이터로 성문화). 역방향 `classifyArtifact`(경로/엔트리 →
+  {kind, name, role})가 같은 커널에 산다 — 소스 없는 고아 conn도 분류된다(설계 게이트 r1 D2).
+  순수 문자열 유도만(yaml 편집 비흡수). 왕복·리터럴 앵커는 test_resource-layout.bats.
+  소비 4모드: provision-db/cache(정방향, paths·handles·envKeys) · teardown-resource(역제거 —
+  `purgeArtifactsFor` 삼중·`TOMBSTONES_PATH`) · audit-orphans(감사 — classify 소비, orphan-conn/
+  malformed-conn 축) · db-url/cache-url(읽기). 레인 행(catalog-rows)과의 표면 경로 일치는
+  import-0 계약상 parity 가드(test_lane-rows.bats)가 대조한다.
+- **`lib/conn-url.ts`** — conn URL 엔진(`runDbUrl()`·`runCacheUrl()`·입력 술어 — cli-deepening
+  심화 5): db url/cache url의 실체. 계획이 타입 값(UrlResult ↔ urlResult 스키마 1:1)이라 계획 키
+  드리프트(release r2-a5 클래스)가 컴파일 타임 오류로 강등. 평문 비출력·F2 채널 분리(--admin ↔
+  .env.admin.local)·RW/ADMIN 상호배타는 엔진 소유. 핸들·env 키는 레이아웃 커널 소비. 소비자 3:
+  CLI 셸·MCP(같은 op)·bin 껍데기(db-url/cache-url — 기존 출력 계약 보존). envLocal·envDir 축은
+  입력에 존재하되 MCP는 envDir만 노출(설계 Q9).
 - **`lib/mutation.ts`** — 공유 변이 엔진(`runMutation()`) — 변이 동사들의 공통 골격: correlation
   nonce → 디스패치 → run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정 →
   [--wait] 머지 관측 + Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,
   health 단독 판정 금지, 후손 리비전 표면 부재=superseded). 시간 심 pollMs/deadlineMs +
   HOMELAB_CORRELATION 주입(테스트). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
 - **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghJson` — ghJson은 오브젝트/배열 jq 전용, 스칼라
-  jq는 raw라 sh 직접) — status·mutation 공유. 판정 정책은 콜사이트 소유(doctor의 gh()는
-  ENOENT 판별 자기 정책이 있어 별도 유지).
+  jq는 raw라 sh 직접, `git`·`pushRoutes` — push 지향 관측 `git remote get-url --push --all`:
+  pushurl 복수·insteadOf/pushInsteadOf 전개 반영) — status·mutation·init·secrets 공유. 판정 정책은
+  콜사이트 소유(doctor의 gh()는 ENOENT 판별 자기 정책이 있어 별도 유지). push 라우팅 검사의
+  테스트 전용 완화 플래그 이름(`ALLOW_PUSH_REWRITE_ENV` = HOMELAB_TEST_ALLOW_PUSH_REWRITE)도
+  여기 산다 — HOMELAB_CORRELATION 주입과 같은 부류(테스트 심).
 - **`lib/secrets.ts`** — app secrets 엔진(`runAppSecrets()`·`appSecretsInputError()`): 이중 모드 판별(git
-  toplevel의 .app-config.yml 마커 → canonical remote 필수, 아니면 fail-closed 거부 / 마커 없음 → 디스패치만),
+  toplevel의 .app-config.yml 마커 → canonical remote(identity.isCanonicalClone) + push 라우팅 안전
+  (identity.pushRouteError — pushurl/insteadOf/pushInsteadOf 재배선 fail-closed) 필수, 아니면 거부 /
+  마커 없음 → 디스패치만),
   연쇄 각 단계를 사후조건으로 증명(봉인본 외 변경 거부·ls-remote 도달성). 디스패치는 공유 변이 엔진
   (noopOnMissingPr — pr-first-commit 멱등 no-op를 정당한 no-op variant로).
 - **`lib/status.ts`** — homelab CLI status 엔진(`runStatus()`·`statusInputError()`). 계층 계약:
@@ -239,7 +278,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든
   픽스처 계약). 소비자: `homelab.ts`(이후 MCP 서버도 같은 엔진 재사용 예정).
 - **`lib/init.ts`** — app init 엔진(`runAppInit()`·`appInitInputError()`): 앱 레포 시작 로컬 체인
-  (변이 디스패처 아님 — correlation 없음). preflight(부수효과 0) → 레포 생성(기본 private) → 클론 →
+  (변이 디스패처 아님 — correlation 없음). preflight(부수효과 0) → 레포 생성(기본 private) → 클론
+  (canonical 판정 identity.isCanonicalClone) → push 라우팅 게이트(identity.pushRouteError) →
   스캐폴드 → invocation marker(.homelab-init) → 커밋·첫 push → [--dispatch-secrets면 시크릿 쌍].
   각 단계는 사후조건으로 증명하고 재실행이 그 지점부터 수렴한다(멱등). 소유 증명은 계보가 아니라
   마커(plan r2 r2-a2) — 마커 없는 기존 레포는 fail-closed(--adopt로만). 시크릿 쌍은 원자적(절반
@@ -260,8 +300,16 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (structure r1 a3 — 두 번째 소비자 init이 생겨 추출). 마커 = --archetype·--name·--yes. 둘이 갈리면
   doctor가 통과시킨 템플릿을 init이 실행 중 거부하는 계약 갭이 생긴다.
 - **`lib/platform.ts`** — 플랫폼 좌표 SSOT(HOMELAB_REPO·TEMPLATE_REPO·ARCHETYPES·
-  COMPILED_ARCHETYPES). doctor가 검증한 대상과 이후 init이 쓰는 대상이 콜사이트마다 갈리지
-  않게 한 곳에서만 정의(identity.ts와 같은 원칙 — 저긴 이름 형식, 여긴 좌표).
+  ARCH_NEUTRAL_ARCHETYPES·COMPILED_ARCHETYPES). doctor가 검증한 대상과 이후 init이 쓰는 대상이
+  콜사이트마다 갈리지 않게 한 곳에서만 정의(identity.ts와 같은 원칙 — 저긴 이름 형식, 여긴 좌표).
+  **아키타입 어휘 리터럴은 ARCHETYPES 한 곳뿐**이고 나머지 표면은 전부 파생이다(cli-deepening 심화 6):
+  MCP `app_init` inputSchema enum(mcp.ts)·결과 계약 enum(생성기 → cli-result-schema.json initSuccess·
+  initFailure)·CLI 사용법(homelab.ts)·doctor TARGETARCH 검사 대상(COMPILED = ARCHETYPES − 중립 opt-out,
+  신규 아키타입은 기본 검사 대상 — fail-closed). 리터럴 사본이면 아키타입 확장 시 init 엔진은
+  수용하는데 MCP만 -32602로 거부하거나 결과 계약만 낡는 드리프트가 난다. 강제: test_platform.bats(파생
+  계약 + `fullstack` 감시 토큰 전역 가드)·test_homelab-mcp.bats(입력·결과 두 표면의 확장 수용)·
+  test_result-schema-gen.bats(생성물 파생)·test_homelab-appinit.bats(사용법 파생). **확장 절차**는
+  platform.ts ARCHETYPES 주석이 SSOT다(추가 → 중립 여부 → `--write` 재생성 → bats 손 앵커 갱신).
 - **`lib/schema-check.ts`** — cli-result-schema.json 전용 미니 검증기(`schemaErrors()`, ajv 무의존).
   지원 키워드 화이트리스트 밖은 **throw로 fail-closed**(모르는 제약의 조용한 통과 차단).
   골든 픽스처·계약 테스트 전용 — create-app.ts의 check()는 .app-config.yml 정책 소유가

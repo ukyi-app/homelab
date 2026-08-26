@@ -16,6 +16,7 @@ import { randomBytes, createHash } from "node:crypto";
 import { parseDocument } from "yaml";
 import { analyzeLedger, appendRowWithTotals, budgetViolation, type LedgerAgg } from "./lib/ledger-budget.ts";
 import { CACHE_MAXMEMORY_MI, resourceNameError } from "./lib/identity.ts";
+import { LAYOUT_DIRS, entryName, layoutFor } from "./lib/resource-layout.ts";
 import { sealManifest } from "./lib/seal.ts";
 import { addResource } from "./lib/kustomization.ts";
 import { parseFlags } from "./lib/cli.ts";
@@ -52,16 +53,19 @@ const reqMi = maxmemoryMi + 32;
 const limitMi = Math.ceil(maxmemoryMi * 1.5) + 64;
 
 // ---------- 중복/예산 검증 (쓰기 전 전부) ----------
-const instDir = `${ROOT}/platform/cache/prod/${name}`;
-if (existsSync(instDir)) fail(`platform/cache/prod/${name} 이미 존재`);
-const connPath = `${ROOT}/platform/data-conn/prod/cache-${name}-conn.sealed.yaml`;
-const roConnPath = `${ROOT}/platform/data-conn/prod/cache-${name}-ro-conn.sealed.yaml`;
+// 산출물 명명·배치는 레이아웃 커널 소유(cli-deepening 심화 4) — 여기서 재유도하지 않는다.
+const layout = layoutFor("cache", name);
+const bn = entryName;
+const instDir = `${ROOT}/${layout.paths.instanceDir}`;
+if (existsSync(instDir)) fail(`${layout.paths.instanceDir} 이미 존재`);
+const connPath = `${ROOT}/${layout.paths.conn}`;
+const roConnPath = `${ROOT}/${layout.paths.roConn}`;
 if (existsSync(connPath) || existsSync(roConnPath)) fail(`data-conn에 cache-${name} conn sealed가 이미 존재`);
 
-const ledgerPath = `${ROOT}/docs/memory-ledger.md`;
+const ledgerPath = `${ROOT}/${layout.paths.ledger}`;
 if (!existsSync(ledgerPath)) fail(`메모리 원장 없음: ${ledgerPath}`);
 const ledger = readFileSync(ledgerPath, "utf8");
-const component = `cache-${name}`;
+const component = layout.ledgerRow;
 let agg: LedgerAgg;
 try { agg = analyzeLedger(ledger); } catch (e) { fail(e instanceof Error ? e.message : String(e)); }
 const viol = budgetViolation(agg, component, limitMi, "maxmemory를 줄여라");
@@ -69,7 +73,6 @@ if (viol) fail(viol);
 const { sumReq, sumLimit, budget } = agg;
 
 // ---------- 자격 생성 (비출력 — kubeseal stdin 전용) ----------
-const NAME = name.replaceAll("-", "_").toUpperCase();
 const pw = randomBytes(24).toString("base64url");
 const pwRo = randomBytes(24).toString("base64url");
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -232,27 +235,27 @@ function registerResource(file: string, entry: string) {
 
 const checklist = [
   `valkey 이미지 태그(${VALKEY_IMAGE}) 실존/arm64 확인 후 필요 시 digest 핀`,
-  `apps/<app>/deploy/prod/values.yaml envFrom에 secretRef 'cache-${name}-conn' 배선 필요 — 미배선 시 앱이 캐시 없이 그대로 배포된다(#211 재발 클래스). envFrom 변경(회전 포함) 반영은 파드 재시작 필요`,
+  `apps/<app>/deploy/prod/values.yaml envFrom에 secretRef '${layout.handles.rw.name}' 배선 필요 — 미배선 시 앱이 캐시 없이 그대로 배포된다(#211 재발 클래스). envFrom 변경(회전 포함) 반영은 파드 재시작 필요`,
   "cache NS의 R2 백업 자격 cache-r2-creds가 아직 없으면 kubeseal로 봉인 필요 (platform/cache/prod/backup-cronjob.yaml 참고)",
 ];
-const dataConnKustomization = `${ROOT}/platform/data-conn/prod/kustomization.yaml`;
+const dataConnKustomization = `${ROOT}/${layout.paths.connKust}`;
 const dataConnExists = existsSync(dataConnKustomization);
 if (!dataConnExists)
   checklist.unshift(
-    `platform/data-conn/prod/kustomization.yaml(namespace: prod)에 cache-${name}-conn.sealed.yaml·cache-${name}-ro-conn.sealed.yaml 등록 필요 — kustomization 생성은 Task 5.1 작업자 소유, 등록 전까지 prod에 conn Secret이 만들어지지 않는다`,
+    `${layout.paths.connKust}(namespace: prod)에 ${bn(layout.paths.conn)}·${bn(layout.paths.roConn)} 등록 필요 — kustomization 생성은 Task 5.1 작업자 소유, 등록 전까지 prod에 conn Secret이 만들어지지 않는다`,
   );
 
 const files = [
-  `platform/cache/prod/${name}/kustomization.yaml`,
-  `platform/cache/prod/${name}/configmap.yaml`,
-  `platform/cache/prod/${name}/pvc.yaml`,
-  `platform/cache/prod/${name}/deployment.yaml`,
-  `platform/cache/prod/${name}/service.yaml`,
-  `platform/cache/prod/${name}/acl.sealed.yaml`,
-  `platform/data-conn/prod/cache-${name}-conn.sealed.yaml`,
-  `platform/data-conn/prod/cache-${name}-ro-conn.sealed.yaml`,
-  "platform/cache/prod/kustomization.yaml",
-  "docs/memory-ledger.md",
+  `${layout.paths.instanceDir}/kustomization.yaml`,
+  `${layout.paths.instanceDir}/configmap.yaml`,
+  `${layout.paths.instanceDir}/pvc.yaml`,
+  `${layout.paths.instanceDir}/deployment.yaml`,
+  `${layout.paths.instanceDir}/service.yaml`,
+  `${layout.paths.instanceDir}/acl.sealed.yaml`,
+  layout.paths.conn,
+  layout.paths.roConn,
+  layout.paths.cacheKust,
+  layout.paths.ledger,
 ];
 
 const plan = {
@@ -263,8 +266,8 @@ const plan = {
   limitMi,
   image: VALKEY_IMAGE,
   service: `${name}.cache.svc.cluster.local:6379`,
-  secrets: { conn: `cache-${name}-conn`, roConn: `cache-${name}-ro-conn`, acl: `${name}-acl` },
-  envKeys: [`${NAME}_REDIS_URL`, `${NAME}_REDIS_RO_URL`],
+  secrets: { conn: layout.handles.rw.name, roConn: layout.handles.ro.name, acl: `${name}-acl` },
+  envKeys: [layout.envKeys.rw, layout.envKeys.ro],
   ledger: { before: sumLimit, after: sumLimit + limitMi, budget },
   files,
   checklist,
@@ -277,15 +280,15 @@ if (!DRY) {
     "users.acl": usersAcl, // 해시만 포함
     VALKEY_PASSWORD: pw, // cache-backup CronJob의 BGSAVE/--rdb 인증용 (cache NS 밖으로 안 나간다)
   }));
-  const sealedConn = seal(secret("prod", `cache-${name}-conn`, {
-    [`${NAME}_REDIS_URL`]: `redis://:${pw}@${host}:6379`,
+  const sealedConn = seal(secret("prod", layout.handles.rw.name, {
+    [layout.envKeys.rw]: `redis://:${pw}@${host}:6379`,
   }));
-  const sealedRoConn = seal(secret("prod", `cache-${name}-ro-conn`, {
-    [`${NAME}_REDIS_RO_URL`]: `redis://ro:${pwRo}@${host}:6379`,
+  const sealedRoConn = seal(secret("prod", layout.handles.ro.name, {
+    [layout.envKeys.ro]: `redis://ro:${pwRo}@${host}:6379`,
   }));
 
   mkdirSync(instDir, { recursive: true });
-  mkdirSync(`${ROOT}/platform/data-conn/prod`, { recursive: true });
+  mkdirSync(`${ROOT}/${LAYOUT_DIRS.dataConn}`, { recursive: true });
   writeFileSync(`${instDir}/kustomization.yaml`, instKustomization);
   writeFileSync(`${instDir}/configmap.yaml`, configmapYaml);
   writeFileSync(`${instDir}/pvc.yaml`, pvcYaml);
@@ -296,7 +299,7 @@ if (!DRY) {
   writeFileSync(roConnPath, sealedRoConn);
 
   // cache 컴포넌트 kustomization: 있으면 멱등 등록, 없으면 최초 생성(namespace: cache)
-  const cacheKustomization = `${ROOT}/platform/cache/prod/kustomization.yaml`;
+  const cacheKustomization = `${ROOT}/${layout.paths.cacheKust}`;
   if (existsSync(cacheKustomization)) {
     const updated = registerResource(cacheKustomization, name);
     if (updated !== null) writeFileSync(cacheKustomization, updated);
@@ -313,7 +316,7 @@ resources:
 
   // data-conn kustomization은 생성하지 않는다(Task 5.1 소유) — 있으면 등록만
   if (dataConnExists) {
-    for (const entry of [`cache-${name}-conn.sealed.yaml`, `cache-${name}-ro-conn.sealed.yaml`]) {
+    for (const entry of [bn(layout.paths.conn), bn(layout.paths.roConn)]) {
       const updated = registerResource(dataConnKustomization, entry);
       if (updated !== null) writeFileSync(dataConnKustomization, updated);
     }

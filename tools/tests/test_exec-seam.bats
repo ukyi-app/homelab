@@ -21,13 +21,14 @@ if (mode === "notfound") {
   const r = sh("cat", [], { input: "SECRET-PLAINTEXT-7f3a" });
   console.log("out=" + r.out);
 } else if (mode === "named") {
-  console.log("git=" + git(["--version"]).ok);
+  // git adapter는 cwd-우선 시그니처다(#541 엔진 계약 유지 — -C <cwd> 전치). 나머지 adapter는 args-우선.
+  console.log("git=" + git(".", ["--version"]).ok);
 } else if (mode === "spawnkind") {
   const r = sh("/etc/hostname", []);
   console.log("ok=" + r.ok + " errKind=" + (r.errKind ?? "none"));
 } else if (mode === "ledger") {
   sh("cat", [], { input: "SECRET-PLAINTEXT-7f3a" });
-  git(["--version"]);
+  git(".", ["--version"]);
   gh(["--version"]);
   kubeseal(["--version"]);
   console.log("done");

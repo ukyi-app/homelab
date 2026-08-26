@@ -12,7 +12,7 @@ k3s 단일 노드(**Intel NUC 베어메탈** · Ubuntu 26.04 LTS · amd64) 홈�
 | `platform/` | ArgoCD가 싱크하는 GitOps 컴포넌트 — **전체 목록은 README 디렉토리 지도**(check-skeleton 강제) |
 | `platform/charts/app` | 모든 앱이 쓰는 공유 Helm 차트 (SSOT) |
 | `apps/<name>/deploy/prod/` | 앱별 values + SealedSecret + `.bindings.json`(db/redis·autoDeploy SSOT) + `source-repo`(외부 레포 바인딩) |
-| `tools/` | 앱 플랫폼 DX **Bun/TS CLI** (`create-app`/`activate-app`·`audit-orphans` 등 — 변이 디스패처·`bump-poll`이 호출, `homelab` 통합 CLI 진입점 `homelab.ts` 포함) + 단위 테스트(`tools/tests/`). top-level 30개 + `lib/` 28개 `.ts`(bun 전용) + app-shared 2개 `.mts`(bun + node≥22.18 strip-types 양립) |
+| `tools/` | 앱 플랫폼 DX **Bun/TS CLI** (`create-app`/`activate-app`·`audit-orphans` 등 — 변이 디스패처·`bump-poll`이 호출, `homelab` 통합 CLI 진입점 `homelab.ts` 포함) + 단위 테스트(`tools/tests/`). top-level 31개 + `lib/` 30개 `.ts`(bun 전용) + app-shared 2개 `.mts`(bun + node≥22.18 strip-types 양립) |
 | `scripts/` | 클러스터/DR 운영·시크릿 **셸 스크립트** (bootstrap·seed/seal·dr-drill·`check-*` 게이트·run-bats — `make`/CI 게이트가 호출). cf. `infra/k3s-bootstrap/*.sh` = VM·k3s·스토리지 substrate 부트스트랩 |
 | `policy/` | 메모리 원장 OPA 정책 (`bun run verify:ledger` 게이트) |
 | `docs/memory-ledger.md` | 메모리 예산 SSOT — limit 합계 ≤ 10240Mi, CI 강제 |
@@ -150,6 +150,10 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - bats @test 이름에 한글/CJK가 있으면 디렉토리 단위 실행에서 침묵 스킵된다
 - homepage: config 마운트를 readOnly로 두면 EROFS · apiserver egress는 노드 CIDR:6443이지 ClusterIP가 아니다
 - 상류 레지스트리의 릴리스 태그가 불변이 아니다 — 재푸시가 옛 매니페스트를 GC해 모든 PR gate를 red로 만든다
+- TS 바닥값은 coercion 뒤에서 조용히 꺼진다 — Number("abc")는 NaN이라 n < NaN이 항상 false이고, Number("")는 0이라 빈 입력과 의도적 0을 구별할 수 없다
+- 스캔 신호를 콜사이트가 손으로 내면 순서가 드리프트한다 — 위반 exit이 신호보다 앞이면 마커 0건이 '미실행'으로 읽히고, 로스터 등식은 우회를 못 잡는다
+- 테스트 이름은 인터페이스가 아니다 — 뮤테이션이 전건 red여도 픽스처가 밟지 않는 판정 조건은 무증인이다
+- 정적 증인의 두 함정 — `^[^/]*`는 `//`만 제외하고(JSDoc ` * ` 줄이 코드가 된다), `run bash -c` 안의 bats 지역 변수는 빈 문자열이라 grep이 0건으로 항상 통과한다
 - QEMU amd64 leg의 bun 1.4는 RSS 24MB에서 "메모리 고갈"로 죽는다 — Dockerfile을 안 돌리는 CI는 그 6시간을 초록으로 지나친다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)

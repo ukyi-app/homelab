@@ -39,7 +39,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { typedFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
-import { guardMain, takeFloors } from "./lib/scan-floor.ts";
+import { parseFloor, reportScanError, scanFloor, scanSignal } from "./lib/scan-floor.ts";
 
 const WORKFLOW_DIR = ".github/workflows";
 const CI_WORKFLOW = `${WORKFLOW_DIR}/ci.yaml`;
@@ -61,13 +61,7 @@ const GATE_JOB = "gate";
 //   · 앞에 공백을 요구했다가 skipGuards가 0건 — 실제 마커는 `echo "SKIP: …"`처럼 따옴표 뒤에 온다.
 //   · 출력 동사를 안 보다가 이 파일 자신의 **정규식 상수**가 마커로 잡혀 `make verify`가 권위로
 //     승격됐다(규약을 다루는 코드 ≠ 규약을 쓰는 가드).
-//   · **커널 경유 방출도 센다** — guard_skip(scripts/lib/guard.sh)으로 이관된 가드는 소스에
-//     리터럴 마커가 없다. 호출 형태를 안 보면 그 가드들이 skip 규약 대상에서 조용히 빠져
-//     owner-local make 타깃의 권위가 사라진다(고아 오탐). 규율은 check-skip-signalling과 동형:
-//     주석 줄(`[^\n#]*` — # 이전까지만)은 emission이 아니다 — 커널을 *설명하는* 주석이
-//     그 가드를 skip 가드로 둔갑시키면 위 두 사고의 재발이다. TS skip() 호출 형태는 소비자가
-//     생기는 티켓 11에서 함께 넓힌다(`skip\(`만 넣으면 임의 skip( 문자열·주석이 오탐된다 — 실측 2건).
-const SKIP_EMISSION = /(echo|printf|console\.log)[^\n]*SKIP: [a-z0-9-]+:|(^|\n)[^\n#]*\bguard_skip [a-z0-9-]+/;
+const SKIP_EMISSION = /(echo|printf|console\.log)[^\n]*SKIP: [a-z0-9-]+:/;
 
 // 명령 세그먼트의 '실행 대상'을 찾을 때 건너뛰는 실행 동사·래퍼.
 const EXEC_VERBS = new Set([
@@ -308,85 +302,73 @@ export function collectVenues(root: string, guards: { path: string; text: string
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
+function fail(msg: string): never { console.error(`FAIL: ${msg}`); process.exit(1); }
+
+
 if (import.meta.main) {
   let flags;
-  let floors: Map<string, number>;
   try {
-    const taken = takeFloors(process.argv.slice(2));
-    floors = taken.floors;
-    flags = typedFlags(taken.rest, { value: ["--repo-root"], bool: ["--json"] });
+    flags = typedFlags(process.argv.slice(2), { value: ["--repo-root", "--min-scan"], bool: ["--json"] });
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
-    console.error("사용법: check-guard-authority.ts [--repo-root <path>] [--floor <도메인>=<n>] [--json]");
+    console.error("사용법: check-guard-authority.ts [--repo-root <path>] [--min-scan <n>] [--json]");
     process.exit(2);
   }
   const root = flags.str("--repo-root", ".")!;
+  // ⚠️ `--json`이면 stdout이 기계 판독 JSON이라 마커를 억제한다. **바닥값 검사는 그 모드에서도 한다** —
+  //    억제는 출력 채널의 성질이지 판정의 성질이 아니다. 그래서 asJson을 바닥값보다 위에서 읽는다.
   const asJson = flags.bool("--json");
+  // 열거 붕괴 바닥값 — 수치는 소비자 소유(repo-walk는 바닥값을 갖지 않는다). 현재 가드 23개.
+  // ⚠️ raw 입력은 `Number()` **앞에서** 판정한다 — `Number("")===0`이고 `n < NaN`은 항상 false라,
+  //    coercion 뒤에 검증하면 오타 하나가 바닥값을 통째로 끈다(이행 전 실측: `--min-scan abc` → rc=0).
+  let minScan: number;
+  try {
+    minScan = parseFloor(flags.str("--min-scan", "15"), "--min-scan");
+  } catch (e) {
+    process.exit(reportScanError(e, "FAIL:"));
+  }
 
-  let guardEntries!: { path: string; text: string }[];
-  let venues!: Venue[];
-  // 실행 순서(전 도메인 열거 → 전 floor 판정 → SCAN 일괄 방출 → 검사 → 종료코드)는 guardMain이
-  // 구조로 소유한다. --json 모드는 stdout이 기계 판독 JSON이라 마커를 선언적으로 억제한다
-  // (output:"none" — 판정·fail-closed는 그대로다).
-  guardMain({
-    label: "check-guard-authority",
-    floors,
-    domains: [
-      {
-        scan: "check-guard-authority:guards",
-        // 열거 붕괴 바닥값 — 기본값은 소비자 소유(repo-walk는 scan-floor를 갖지 않는다). 현재 가드 23개.
-        min: 15,
-        floorHint: "이 회계가 vacuous해진다",
-        enumerate: () => {
-          guardEntries = walkManifests("guards", root).map((e) => ({ path: e.path, text: e.text }));
-          return guardEntries.length;
-        },
-      },
-      {
-        scan: "check-guard-authority:venues",
-        min: 1,
-        floorHint: "venue 수집 붕괴 — ci.yaml/run-bats/make 확인",
-        enumerate: () => {
-          venues = collectVenues(root, guardEntries);
-          return venues.length;
-        },
-      },
-      {
-        // 권위(비-mirror) venue는 총 건수와 **별개의 붕괴 축**이다 — 전부 mirror로 강등되면 총
-        // 건수 floor는 초록인 채 판정만 무력해진다. 도메인으로 승격해 floor·마커가 관측한다
-        // ("라벨 = 바닥값이 걸린 열거 도메인 하나" — 비-도메인 진단으로 접으면 라벨 참칭이다).
-        scan: "check-guard-authority:authoritative-venues",
-        min: 1,
-        floorHint: "권위 venue 수집 붕괴 — ci.yaml/run-bats/make 확인",
-        enumerate: () => venues.filter((v) => v.kind !== "mirror").length,
-      },
-    ],
-    output: asJson ? "none" : "stdout",
-    check: () => {
-      const guards = guardEntries.map((e) => e.path);
-      const report = guards.map((g) => {
-        const hits = venues.filter((v) => invokesGuard(v.text, g, guards));
-        return {
-          guard: g,
-          authoritative: hits.filter((v) => v.kind !== "mirror").map((v) => v.id),
-          nonAuthoritative: hits.filter((v) => v.kind === "mirror").map((v) => v.id),
-        };
-      });
-      // --json이면 stdout은 **JSON만** — 사람용 요약을 섞으면 파이프 소비자가 파싱에 실패한다.
-      if (asJson) console.log(JSON.stringify({ guards: guards.length, venues: venues.length, report }, null, 2));
-      const orphans = report.filter((r) => r.authoritative.length === 0);
-      if (!orphans.length) return [];
-      const lines = ["FAIL: 권위 있는 실행 경로가 0인 가드 — 삭제되거나 조용히 죽어도 아무도 모른다:"];
-      for (const o of orphans) {
-        const mirror = o.nonAuthoritative.length ? ` (비권위 경로만: ${o.nonAuthoritative.join(", ")})` : " (어떤 경로에도 없음)";
-        lines.push(`  ${o.guard}${mirror}`);
-      }
-      lines.push("  권위 = ci.yaml gate 스텝 · gate 수집 bats · 스케줄 워크플로 · owner-local make 타깃");
-      return lines;
-    },
-    report: (lines) => { for (const l of lines) console.error(l); },
-    ok: (counts) => {
-      if (!asJson) console.log(`check-guard-authority OK (가드 ${counts[0]}건, venue ${counts[1]}건, 전건 권위 경로 ≥1)`);
-    },
+  const guardEntries = walkManifests("guards", root).map((e) => ({ path: e.path, text: e.text }));
+  const guards = guardEntries.map((e) => e.path);
+  try {
+    scanFloor("check-guard-authority:guards", guards.length, minScan, {
+      quiet: asJson,
+      hint: "이 회계가 vacuous해진다.",
+    });
+  } catch (e) {
+    process.exit(reportScanError(e, "FAIL:"));
+  }
+
+  const venues = collectVenues(root, guardEntries);
+  const authoritativeVenues = venues.filter((v) => v.kind !== "mirror");
+  if (authoritativeVenues.length === 0) fail("권위 venue 0건 — venue 수집 붕괴(ci.yaml/run-bats/make 확인)");
+  // ⚠️ 바닥값이 걸린 수(권위 venue)와 보고하는 수(전체 venue)가 **다른** 유일한 자리다. 그래서
+  //    바닥값 없는 신호를 쓴다 — 라벨 규약("라벨 = 바닥값이 걸린 도메인")의 정당한 예외이고,
+  //    셸에도 같은 자리가 있다(check-argocd-revision이 scan_signal을 직접 부른다).
+  scanSignal("check-guard-authority:venues", venues.length, { quiet: asJson });
+
+  const report = guards.map((g) => {
+    const hits = venues.filter((v) => invokesGuard(v.text, g, guards));
+    return {
+      guard: g,
+      authoritative: hits.filter((v) => v.kind !== "mirror").map((v) => v.id),
+      nonAuthoritative: hits.filter((v) => v.kind === "mirror").map((v) => v.id),
+    };
   });
+
+  // --json이면 stdout은 **JSON만** — 사람용 요약을 섞으면 파이프 소비자가 파싱에 실패한다.
+  // 마커는 위에서 이미 억제됐다(quiet: asJson).
+  if (asJson) console.log(JSON.stringify({ guards: guards.length, venues: venues.length, report }, null, 2));
+
+  const orphans = report.filter((r) => r.authoritative.length === 0);
+  if (orphans.length) {
+    console.error("FAIL: 권위 있는 실행 경로가 0인 가드 — 삭제되거나 조용히 죽어도 아무도 모른다:");
+    for (const o of orphans) {
+      const mirror = o.nonAuthoritative.length ? ` (비권위 경로만: ${o.nonAuthoritative.join(", ")})` : " (어떤 경로에도 없음)";
+      console.error(`  ${o.guard}${mirror}`);
+    }
+    console.error("  권위 = ci.yaml gate 스텝 · gate 수집 bats · 스케줄 워크플로 · owner-local make 타깃");
+    process.exit(1);
+  }
+  if (!asJson) console.log(`check-guard-authority OK (가드 ${guards.length}건, venue ${venues.length}건, 전건 권위 경로 ≥1)`);
 }

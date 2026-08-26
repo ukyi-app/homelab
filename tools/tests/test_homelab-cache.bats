@@ -130,13 +130,28 @@ run_cache_create() {
   echo "$output" | grep -q "^rejected$"
 }
 
-@test "cache url is re-exposed as a passthrough with byte-identical behavior (dry-run parity)" {
-  run bash -c "bun tools/homelab.ts cache url --name t --dry-run 2>&1"
-  s1="$status"
-  o1="$output"
-  run bash -c "bun tools/cache-url.ts --name t --dry-run 2>&1"
-  [ "$status" -eq "$s1" ]
-  [ "$output" = "$o1" ]
+@test "cache url is a catalog op: --json yields a schema-valid envelope with no plaintext value" {
+  # 구 byte-parity는 catalog 승격으로 계약이 대체됐다(티켓 08) — op envelope 계약 + 렌더러 소유.
+  export OUTDIR="$BATS_TEST_TMPDIR"
+  run --separate-stderr bun tools/homelab.ts cache url --name t --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.verb')" = "cache url" ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.dryRun')" = "true" ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "readonly" ]
+  [ "$(printf '%s' "$output" | grep -c "redis://")" = "0" ]
+  echo "$output" > "$OUTDIR/url.json"
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const env = JSON.parse(readFileSync(process.env.OUTDIR + "/url.json", "utf8"));
+    const errs = schemaErrors(env, sch, sch);
+    if (errs.length) { console.error(errs.join(" | ")); process.exit(1); }
+    console.log("ok");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok$"
 }
 
 @test "cache create --help prints the verb usage and exits 0" {

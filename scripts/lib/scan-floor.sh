@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# 열거 붕괴 → vacuous green 차단 커널. 가드들이 공유하는 **기계**만 여기 둔다.
+# 열거 붕괴 → vacuous green 차단 커널 — **셸 adapter**. 가드들이 공유하는 **기계**만 여기 둔다.
+# TypeScript adapter는 `tools/lib/scan-floor.ts`다. 규약(마커 형태·방출 순서·억제·SKIP 배타)은
+# 하나이고 구현만 갈린다 — 근거와 경계는 CONTRIBUTING '가드 스캔 신호' 절.
 #
 # 병(라이브 재현): `done < <(enumerator)` **프로세스 치환은 열거자 실패를 `set -euo pipefail`로
 # 전파하지 않는다.** 워커가 죽으면 소비자가 0건을 검사하고 성공 메시지를 낸다 —
@@ -27,9 +29,12 @@
 #    소비자는 "SCAN 없음"을 "픽스처"나 "0건"으로 읽으면 안 된다 — **미지(unknown)** 다.
 # ⚠️ 여기에 **건수를 적지 않는다.** 아무도 대조하지 않는 손 관리 수치는 반드시 드리프트한다 —
 #    실측한 적이 있다: 주석은 "11종/27종", 실제는 13종/31종, CONTRIBUTING·PROGRESS엔 또 다른 수치.
-#    현재값이 필요하면 세어라(TS는 리터럴 콜사이트 + 커널 guardMain 도메인 선언 두 형태):
-#      grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh; grep -lE '^[^/]*(SCAN: |scan: ")' tools/*.ts
-#    정합은 tests/gates/test_scan-floor.bats가 **정적 콜사이트 == 런타임 방출** 집합 대조로 강제한다.
+#    현재값이 필요하면 세어라:
+#      grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh
+#      grep -lE '^[^/]*scan(Floor|Signal)\(' tools/*.ts
+#    정합은 tests/gates/test_scan-floor.bats가 **정적 콜사이트 == 런타임 방출** 집합 대조로 강제하고,
+#    TS 콜사이트가 커널을 우회해 마커를 직접 출력하는 것은 scripts/check-scan-producers.sh가 거부한다
+#    (등식은 양쪽에서 함께 사라지는 우회를 못 잡는다 — 인식이 아니라 거부가 문을 닫는다).
 # ⚠️ **라벨 = 바닥값이 걸린 열거 도메인 하나.** 한 실행이 두 도메인을 보면 접미사로 나눈다
 #    (`check-skeleton:bats`/`:platform`). 도메인이 하나면 접미사를 붙이지 않는다.
 #

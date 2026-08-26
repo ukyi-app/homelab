@@ -24,10 +24,13 @@ setup() {
   printf '[{"number":41,"html_url":"https://github.com/ukyi-app/homelab/pull/41","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
 }
 
-# cwd를 인자로 받는 호출 — SEAL_VERSION 기본 2(갱신 경로)
+# cwd를 인자로 받는 호출 — SEAL_VERSION 기본 2(갱신 경로).
+# 하네스는 insteadOf로 canonical→로컬 bare 재배선을 쓰므로 push 라우팅 검사(fail-closed)를 명시
+# 플래그로만 완화한다 — 적대 테스트는 플래그 없이 돌아 production 기본 경로를 검증한다.
 run_secrets_in() {
   dir="$1"; shift
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
     bash -c "cd '$dir' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 $*"
 }
 
@@ -52,9 +55,9 @@ run_secrets_in() {
 
 @test "chain-mode success and precondition refusal envelopes validate against the schema (floor 2)" {
   export OUTDIR="$BATS_TEST_TMPDIR"
-  env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json" > "$OUTDIR/chain.json" 2>/dev/null || true
+  env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json" > "$OUTDIR/chain.json" 2>/dev/null || true
   printf 'junk\n' > "$APP_WORK/scratch.txt"
-  env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json" > "$OUTDIR/refused.json" 2>/dev/null || true
+  env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json" > "$OUTDIR/refused.json" 2>/dev/null || true
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
     import { readFileSync } from "node:fs";
@@ -99,6 +102,56 @@ run_secrets_in() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "0" ]
 }
 
+@test "push-route check is fail-closed by default: the harness rewrite itself is refused without the bypass flag" {
+  # run_secrets_in은 우회 플래그를 켠다 — 여기서는 플래그 없이 돌려 production 기본 경로를 검증한다.
+  # 하네스의 insteadOf(canonical→로컬 bare)가 push 지향 질의에 그대로 관측되므로 거부여야 한다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json"
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "push 경로"
+  # 거부는 seal 이전·디스패치 이전이다 — 부수효과 0, 원격도 그대로.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "0" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "1" ]
+}
+
+@test "multiple push destinations are enumerated and a foreign pushurl is refused before seal and dispatch" {
+  # 하네스 insteadOf를 걷어내 foreign pushurl 축을 단독 분리한다 — 첫 pushurl(canonical 텍스트)은
+  # 재배선 없이 canonical로 관측되므로, 거부의 원인은 오직 두 번째(evil) 목적지다. 관측은 로컬
+  # config뿐이라 네트워크 접촉 없이 거부가 성립한다(every 판정도 함께 증명: 하나 통과+하나 실패=거부).
+  git -C "$APP_WORK" config --unset-all "url.$APP_REMOTE.insteadOf"
+  EVIL_BARE="$BATS_TEST_TMPDIR/evil-remote.git"
+  git init -q --bare "$EVIL_BARE"
+  git -C "$APP_WORK" config remote.origin.pushurl "https://github.com/ukyi-app/myapp.git"
+  git -C "$APP_WORK" config --add remote.origin.pushurl "$EVIL_BARE"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json"
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  # 열거가 실재한다 — 오류에 foreign 목적지가 그대로 나타난다.
+  echo "$output" | jq -r '.result.error' | grep -qF "$EVIL_BARE"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "0" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  # 오귀속 push 0 — evil 원격은 빈 채로 남는다(미구현이면 봉인본 커밋이 여기 실려 red).
+  run git -C "$EVIL_BARE" rev-parse main
+  [ "$status" -ne 0 ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "1" ]
+}
+
+@test "canonical push routes pass the gate without the bypass flag (refusal advances to the next precondition)" {
+  # false-positive 회귀 차단 — 재배선을 걷어내면 canonical 경로가 그대로 관측되고, 플래그 없이도
+  # 게이트를 '통과'해 다음 선행 조건(클린 트리)에서 거부돼야 한다. 관측은 로컬 config뿐이라
+  # push·ls-remote 이전에 거부가 나므로 네트워크 접촉이 없다.
+  git -C "$APP_WORK" config --unset-all "url.$APP_REMOTE.insteadOf"
+  printf 'junk\n' > "$APP_WORK/scratch.txt"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json"
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -r '.result.error' | grep -q "깨끗"
+  [ "$(echo "$output" | jq -r '.result.error' | grep -c "push 경로")" = "0" ]
+}
+
 @test "outside an app repo (no marker) only the dispatch runs — no seal, no git mutation" {
   run_secrets_in "$APPS_ROOT" --json
   [ "$status" -eq 0 ]
@@ -114,6 +167,7 @@ run_secrets_in() {
 
 @test "push succeeded but dispatch failed: rerun with --no-seal converges by dispatching only (no second commit)" {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_DISPATCH_FAIL=1 \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
     bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json"
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]

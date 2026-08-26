@@ -4,7 +4,8 @@
 // 계약 Envelope 반환, 프로세스/표현 관심사 없음). argv 파싱·렌더링·stdout·종료코드는 CLI 셸
 // (homelab.ts) 소유이고, MCP 서버(후속 티켓)는 op를 직접 호출해 같은 envelope을 tool 결과로 쓴다.
 // MCP 노출 정책 필드는 MCP 티켓에서 이 descriptor에 추가한다.
-import { appRel } from "./app-surface.ts";
+import { CONTRACT_ROWS, DB_CHECKBOX_EXTS, laneMutationFields } from "./catalog-rows.ts";
+import { cacheUrlInputError, dbUrlInputError, runCacheUrl, runDbUrl, type CacheUrlInput, type DbUrlInput } from "./conn-url.ts";
 import { ENVELOPE, exitFor, type Envelope } from "./contract.ts";
 import { runDoctor } from "./doctor.ts";
 import { APP_NAME_RE, CACHE_MAXMEMORY_MI, EXT_RE, resourceNameError } from "./identity.ts";
@@ -34,9 +35,10 @@ export type DbCreateVerb = VerbShape<DbCreateInput>;
 export type CacheCreateInput = WaitInput & { name: string; maxmemoryMi?: number };
 export type CacheCreateVerb = VerbShape<CacheCreateInput>;
 
-// CLI 전용 패스스루 동사 — 산출이 로컬 파일 기록이라 envelope 계약 밖(같은 동작 재노출이 계약).
-// MCP에서의 형상은 MCP 티켓이 결정한다.
-export type CliOnlyVerb = { path: readonly string[]; desc: string; cliOnly: true; destructive?: boolean };
+// db url/cache url — conn URL 엔진(lib/conn-url.ts)의 catalog 동사(cli-deepening 심화 5:
+// 패스스루 특례 소멸 — 나머지 동사와 같은 op envelope 계약, CLI·MCP가 같은 op를 소비).
+export type DbUrlVerb = VerbShape<DbUrlInput>;
+export type CacheUrlVerb = VerbShape<CacheUrlInput>;
 
 // app create — 수동 머지 변이(머지 = 공개 승인, auto-merge:false — _create-app.yaml).
 export type AppCreateInput = WaitInput & { app: string };
@@ -54,7 +56,7 @@ export type AppTeardownVerb = VerbShape<AppTeardownInput>;
 export type AppInitVerb = VerbShape<AppInitInput>;
 
 // 전 동사의 union — 후속 동사가 멤버로 추가된다.
-export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | CacheCreateVerb | AppCreateVerb | AppSecretsVerb | AppTeardownVerb | AppInitVerb | CliOnlyVerb;
+export type Verb = DoctorVerb | StatusVerb | DbCreateVerb | DbUrlVerb | CacheCreateVerb | CacheUrlVerb | AppCreateVerb | AppSecretsVerb | AppTeardownVerb | AppInitVerb;
 
 function doctorOp(_input: DoctorInput): Envelope {
   const { checks, summary } = runDoctor();
@@ -62,8 +64,6 @@ function doctorOp(_input: DoctorInput): Envelope {
   return { schema: ENVELOPE, verb: "doctor", variant, exitCode: exitFor(variant), omitted: [], result: { checks, summary } };
 }
 
-// 디스패처 체크박스 5종과 1:1 — 목록 밖 확장은 ext_extra로 간다(디스패처 계약).
-const KNOWN_EXTS = ["pg_trgm", "pgcrypto", "citext", "vector", "postgis"] as const;
 
 // 입력 검증 술어 — CLI(usage exit 2)·MCP(invalid params)가 공유. 이름·확장 형식은 identity SSOT.
 export function dbCreateInputError(input: DbCreateInput): string | null {
@@ -79,21 +79,16 @@ function dbCreateOp(input: DbCreateInput): Envelope {
   const bad = dbCreateInputError(input);
   if (bad) throw new Error(`계약 파손: dbCreateOp에 검증 안 된 입력 — ${bad}`);
   const exts = input.ext ?? [];
-  const extra = exts.filter((e) => !(KNOWN_EXTS as readonly string[]).includes(e));
+  const extra = exts.filter((e) => !DB_CHECKBOX_EXTS.includes(e));
+  const lane = laneMutationFields("create-database", input.name); // 레인 신원(workflow·branch·수렴 집합·표면) — 행 파생
   const { variant, omitted, result } = runMutation({
-    action: "create-database",
-    workflow: "create-database.yaml",
+    ...lane,
     dispatchInputs: [
       ["name", input.name],
-      ...KNOWN_EXTS.map((k): [string, string] => [`ext_${k}`, String(exts.includes(k))]),
+      ...DB_CHECKBOX_EXTS.map((k): [string, string] => [`ext_${k}`, String(exts.includes(k))]),
       ["ext_extra", extra.join(",")],
     ],
-    branchFor: (runId) => `create-database/${input.name}-${runId}`, // 명명 SSOT: _create-database.yaml
-    applications: [ // 명명된 수렴 집합(스펙 대기 매트릭스) + 관측 표면(provision-db 산출 경로)
-      { name: "cnpg-data", surfacePath: `platform/cnpg/prod/databases/${input.name}.yaml` },
-      { name: "data-conn-prod", surfacePath: `platform/data-conn/prod/db-${input.name}-conn.sealed.yaml` },
-    ],
-    resultBase: { action: "create-database", name: input.name },
+    resultBase: { action: lane.action, name: input.name },
   }, waitOpts(input));
   return { schema: ENVELOPE, verb: "db create", variant, exitCode: exitFor(variant), omitted, result };
 }
@@ -111,20 +106,15 @@ export function cacheCreateInputError(input: CacheCreateInput): string | null {
 function cacheCreateOp(input: CacheCreateInput): Envelope {
   const bad = cacheCreateInputError(input);
   if (bad) throw new Error(`계약 파손: cacheCreateOp에 검증 안 된 입력 — ${bad}`);
+  const lane = laneMutationFields("create-cache", input.name); // 레인 신원(workflow·branch·수렴 집합·표면) — 행 파생
   const { variant, omitted, result } = runMutation({
-    action: "create-cache",
-    workflow: "create-cache.yaml",
+    ...lane,
     dispatchInputs: [
       ["name", input.name],
       // 빈 값 = 디스패처 기본(64) 소유 — CLI가 기본값을 복제하지 않는다.
       ["maxmemory_mi", input.maxmemoryMi === undefined ? "" : String(input.maxmemoryMi)],
     ],
-    branchFor: (runId) => `create-cache/${input.name}-${runId}`, // 명명 SSOT: _create-cache.yaml
-    applications: [ // 명명된 수렴 집합(스펙 대기 매트릭스) + 관측 표면(provision-cache 산출 경로)
-      { name: "cache-prod", surfacePath: `platform/cache/prod/${input.name}/deployment.yaml` },
-      { name: "data-conn-prod", surfacePath: `platform/data-conn/prod/cache-${input.name}-conn.sealed.yaml` },
-    ],
-    resultBase: { action: "create-cache", name: input.name },
+    resultBase: { action: lane.action, name: input.name },
   }, waitOpts(input));
   return { schema: ENVELOPE, verb: "cache create", variant, exitCode: exitFor(variant), omitted, result };
 }
@@ -138,15 +128,11 @@ export function appCreateInputError(input: AppCreateInput): string | null {
 function appCreateOp(input: AppCreateInput): Envelope {
   const bad = appCreateInputError(input);
   if (bad) throw new Error(`계약 파손: appCreateOp에 검증 안 된 입력 — ${bad}`);
+  const lane = laneMutationFields("create-app", input.app); // 레인 신원(workflow·branch·수렴 집합·표면) — 행 파생
   const { variant, omitted, result } = runMutation({
-    action: "create-app",
-    workflow: "create-app.yaml",
+    ...lane,
     dispatchInputs: [["app", input.app]],
-    branchFor: (runId) => `create-app/${input.app}-${runId}`, // 명명 SSOT: _create-app.yaml
-    applications: [ // 해당 앱 Application + 배포 핀 표면(create-app 산출)
-      { name: `${input.app}-prod`, surfacePath: appRel(input.app).values },
-    ],
-    resultBase: { action: "create-app", name: input.app },
+    resultBase: { action: lane.action, name: input.app },
     manualMerge: { approval: "공개 승인" }, // 머지 = 공개 승인 — auto-merge를 켜는 어떤 경로도 없다
   }, waitOpts(input));
   return { schema: ENVELOPE, verb: "app create", variant, exitCode: exitFor(variant), omitted, result };
@@ -163,20 +149,30 @@ export function appTeardownInputError(input: AppTeardownInput): string | null {
 function appTeardownOp(input: AppTeardownInput): Envelope {
   const bad = appTeardownInputError(input);
   if (bad) throw new Error(`계약 파손: appTeardownOp에 검증 안 된 입력 — ${bad}`);
+  const lane = laneMutationFields("teardown-app", input.app); // 레인 신원(workflow·branch·수렴 집합·표면) — 행 파생
   const { variant, omitted, result } = runMutation({
-    action: "teardown-app",
-    workflow: "teardown-app.yaml",
+    ...lane,
     // confirm은 디스패처의 confirm 입력으로 전달(서버 측 재검증은 _teardown-app.yaml이 기존대로).
     dispatchInputs: [["app", input.app], ["confirm", input.confirm]],
-    branchFor: (runId) => `teardown/teardown-app-${input.app}-${runId}`, // 명명 SSOT: _teardown-app.yaml
-    applications: [ // 철거 대상 앱 Application + 제거될 표면(create-app 산출과 동일 경로)
-      { name: `${input.app}-prod`, surfacePath: appRel(input.app).values },
-    ],
-    resultBase: { action: "teardown-app", name: input.app, dnsReclaim: "iac/tf-reconcile" },
+    resultBase: { action: lane.action, name: input.app, dnsReclaim: "iac/tf-reconcile" },
     manualMerge: { approval: "파괴 승인" }, // 머지 = 파괴 승인 — auto-merge를 켜는 어떤 경로도 없다
     converge: "absence", // 종결 = Application 부재(Healthy 대기 아님)
   }, waitOpts(input));
   return { schema: ENVELOPE, verb: "app teardown", variant, exitCode: exitFor(variant), omitted, result };
+}
+
+function dbUrlOp(input: DbUrlInput): Envelope {
+  const bad = dbUrlInputError(input);
+  if (bad) throw new Error(`계약 파손: dbUrlOp에 검증 안 된 입력 — ${bad}`);
+  const { variant, omitted, result } = runDbUrl(input);
+  return { schema: ENVELOPE, verb: "db url", variant, exitCode: exitFor(variant), omitted, result };
+}
+
+function cacheUrlOp(input: CacheUrlInput): Envelope {
+  const bad = cacheUrlInputError(input);
+  if (bad) throw new Error(`계약 파손: cacheUrlOp에 검증 안 된 입력 — ${bad}`);
+  const { variant, omitted, result } = runCacheUrl(input);
+  return { schema: ENVELOPE, verb: "cache url", variant, exitCode: exitFor(variant), omitted, result };
 }
 
 function appSecretsOp(input: AppSecretsInput): Envelope {
@@ -224,11 +220,10 @@ export const DB_CREATE: DbCreateVerb = {
   op: dbCreateOp,
 };
 
-// 기존 도구 재노출(같은 동작) — tools/db-url.ts 패스스루(CLI 셸이 spawn).
-export const DB_URL: CliOnlyVerb = {
+export const DB_URL: DbUrlVerb = {
   path: ["db", "url"],
-  desc: "클러스터 DB 접속 URL을 .env.local에 기록(기존 db:url 재노출 — 평문 stdout 비노출)",
-  cliOnly: true,
+  desc: "클러스터 DB 접속 URL을 .env.local(admin은 .env.admin.local)에 기록(평문 비출력 — 엔진 소유)",
+  op: dbUrlOp,
 };
 
 export const CACHE_CREATE: CacheCreateVerb = {
@@ -237,11 +232,10 @@ export const CACHE_CREATE: CacheCreateVerb = {
   op: cacheCreateOp,
 };
 
-// 기존 도구 재노출(같은 동작) — tools/cache-url.ts 패스스루(CLI 셸이 spawn).
-export const CACHE_URL: CliOnlyVerb = {
+export const CACHE_URL: CacheUrlVerb = {
   path: ["cache", "url"],
-  desc: "캐시 접속 URL을 .env.local에 기록(기존 cache:url 재노출 — port-forward 선행, 평문 stdout 비노출)",
-  cliOnly: true,
+  desc: "캐시 접속 URL을 .env.local에 기록(port-forward 선행, 평문 비출력 — 엔진 소유)",
+  op: cacheUrlOp,
 };
 
 // 열거 SSOT — 라우팅 어휘(TREE)·usage·MCP tool 목록이 여기서 파생된다.
@@ -272,3 +266,13 @@ export const APP_INIT: AppInitVerb = {
 };
 
 export const VERBS: readonly Verb[] = [DOCTOR, STATUS, DB_CREATE, DB_URL, CACHE_CREATE, CACHE_URL, APP_CREATE, APP_SECRETS, APP_TEARDOWN, APP_INIT];
+
+// 결과 계약 행 totality — catalog의 모든 동사는 계약 행을 갖고, 행의 동사는 catalog에 실재해야
+// 한다(설계 심화 3 "VERBS 행이 이를 참조" 배선). 병렬 배열이 조용히 어긋나면 동사 추가 시
+// 스키마 분기가 빠진 채 초록이 되므로, import 시점에 죽인다(모든 소비자·테스트가 즉시 red).
+{
+  const catalogVerbs = new Set(VERBS.map((v) => v.path.join(" ")));
+  const rowVerbs = new Set(CONTRACT_ROWS.map((r) => r.verb));
+  for (const v of catalogVerbs) if (!rowVerbs.has(v)) throw new Error(`계약 파손: 결과 계약 행 없는 동사 — ${v}`);
+  for (const v of rowVerbs) if (!catalogVerbs.has(v)) throw new Error(`계약 파손: catalog에 없는 결과 계약 행 — ${v}`);
+}

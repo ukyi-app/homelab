@@ -8,16 +8,25 @@
 //   - 결과 = CLI --json과 같은 계약 오브젝트(op가 낸 envelope). isError는 variant로 매핑(x-contract.mcp).
 //   - 디렉토리 추론 없음 — secrets는 앱 레포 경로(repoPath), init은 부모 디렉토리(parentDir)를 명시 입력으로.
 //   - 서버는 무상태 — 동시 호출은 각자 run/PR URL 핸들로 독립 조회되고(status 핸들 모드), 재시작 후 재호출 정상.
+//
+// ⚠️ **입력 표면 선언 3벌(verbs.ts의 op 입력 타입 · 이 파일의 tool inputSchema · 결과 계약의 verb 축)은
+//    의도된 중복이다 — 카탈로그 한 벌로 합치지 않는다.** structure 게이트 r1 B1이 "표현 관심사는 각
+//    셸(CLI·MCP)이 소유한다"로 정했고, 전면 카탈로그화는 transport 발산(스키마 표현력·검증 시점·에러
+//    매핑의 차이)을 전부 표현하는 행이 대체 대상만큼 복잡해지는 **shallow config-language 위험**이
+//    지적되어 이연됐다. 그래서 cli-deepening 심화 6은 실측된 드리프트 지점(archetype enum — 확장 시
+//    MCP만 -32602로 거부하던 리터럴 사본) **하나만** ARCHETYPES 파생으로 좁혔다. 전면 카탈로그화를
+//    재시도하려면 B1 재협상이 선행이다(원 결정 기록은 git 히스토리의 docs/reviews — CONTRIBUTING
+//    '문서 관례'의 복구 레시피로 꺼낸다).
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
-import { ENVELOPE, compact, exitFor, mcpIsError, type Envelope } from "./contract.ts";
-import { sh } from "./exec.ts";
+import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInput } from "./conn-url.ts";
+import { mcpIsError, type Envelope } from "./contract.ts";
 import { schemaErrors } from "./schema-check.ts";
 import { appInitInputError, type AppInitInput } from "./init.ts";
+import { ARCHETYPES } from "./platform.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./secrets.ts";
 import { statusInputError, type StatusInput } from "./status.ts";
 import {
-  APP_CREATE, APP_INIT, APP_SECRETS, CACHE_CREATE, DB_CREATE, DOCTOR, STATUS, VERBS,
+  APP_CREATE, APP_INIT, APP_SECRETS, CACHE_CREATE, CACHE_URL, DB_CREATE, DB_URL, DOCTOR, STATUS, VERBS,
   appCreateInputError, cacheCreateInputError, dbCreateInputError,
 } from "./verbs.ts";
 
@@ -54,36 +63,11 @@ const strArr = (a: Json, k: string): string[] | undefined =>
 const envelope = (e: Envelope): ToolResult => ({ kind: "envelope", envelope: e });
 const usage = (m: string): ToolResult => ({ kind: "usage", message: m });
 
-// url tool(db url/cache url) — 로컬 .env 파일에 접속 URL을 기록하는 도구. 다른 tool과 같은 결과 계약
-// (envelope)을 낸다(release r1 a5). 평문 자격은 결과에 담지 않는다: 계획(mode/envKey/envFile)은
-// --dry-run(클러스터 무의존, 평문 비출력)으로 캡처하고, 실제 기록은 wrote 불리언으로만 표기한다.
-// stdio 오염 방지를 위해 inherit이 아니라 캡처(sh)로 실행하고, 명시 envDir을 cwd로 준다(서버 cwd 추론 없음).
-// 계획(dry-run JSON)에서 urlResult가 모델링한 키만 복사한다 — cache-url 계획은 host를 담는데
-// urlResult(additionalProperties:false)엔 없어, 통째로 복사하면 성공 envelope이 스키마 위반이 된다
-// (release r2-a5). 화이트리스트로 계획 드리프트에도 envelope이 유효하게 유지된다.
-const URL_PLAN_KEYS = ["mode", "secretRef", "envKey", "envFile", "note"] as const;
-function urlEnvelope(verb: string, tool: string, name: string, baseArgv: string[], dryRun: boolean, envDir: string): ToolResult {
-  const toolPath = fileURLToPath(new URL(`../${tool}`, import.meta.url));
-  const result: Record<string, unknown> = { name, dryRun };
-  const plan = sh(process.execPath, [toolPath, ...baseArgv, "--dry-run"], { cwd: envDir });
-  if (plan.ok) {
-    try {
-      const parsed = JSON.parse(plan.out) as Record<string, unknown>;
-      for (const k of URL_PLAN_KEYS) if (parsed[k] !== undefined) result[k] = parsed[k];
-    } catch { /* 계획 파싱 실패는 변이 아님 */ }
-  }
-  let variant = "success";
-  if (dryRun) {
-    result.wrote = false;
-    if (!plan.ok) { variant = "failure"; result.error = plan.err.split("\n")[0] || `${tool} 계획 실패`; }
-  } else {
-    const real = sh(process.execPath, [toolPath, ...baseArgv], { cwd: envDir });
-    result.wrote = real.ok;
-    if (!real.ok) { variant = "failure"; result.error = real.err.split("\n")[0] || `${tool} 실패`; }
-  }
-  const env: Envelope = { schema: ENVELOPE, verb, variant, exitCode: exitFor(variant), omitted: [], result: compact(result) };
-  return { kind: "envelope", envelope: env };
-}
+// url tool(db url/cache url) — 다른 tool과 같은 경로: conn URL 엔진의 op를 직접 소비한다
+// (cli-deepening 심화 5 — 자식 프로세스 이중 실행·계획 키 화이트리스트(release r2-a5 땜질)는
+// 엔진의 타입 결과(UrlResult ↔ urlResult 1:1)로 소멸했다). 평문 비출력·F2 채널 분리는 엔진 소유.
+// envDir = 대상 env 파일의 기준 디렉토리 명시 입력(서버 cwd 추론 없음). envLocal 축은 엔진에
+// 존재하지만 MCP에는 노출하지 않는다(설계 Q9 — 파일 기록 축 확대는 별도 신뢰 경계 결정).
 
 // MCP tool 테이블 — VERBS 순서를 따르되 destructive(teardown)·서버 모드(mcp)는 제외한다.
 // 각 tool은 op를 --wait 없이 호출한다(wait 미노출 = 동기 바운디드).
@@ -166,7 +150,9 @@ const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object", additionalProperties: false, required: ["app", "archetype", "parentDir"],
       properties: {
-        app: { type: "string", minLength: 1 }, archetype: { enum: ["api", "fullstack", "site", "worker"] },
+        // archetype enum은 아키타입 SSOT(platform.ts ARCHETYPES)의 파생이다 — 리터럴 사본이면 아키타입
+        // 확장 시 init 엔진은 수용하는데 MCP만 -32602로 거부하는 입력 표면 드리프트가 난다(cli-deepening 심화 6).
+        app: { type: "string", minLength: 1 }, archetype: { enum: [...ARCHETYPES] },
         parentDir: { type: "string", minLength: 1 }, public: { type: "boolean" },
         dispatchSecrets: { type: "string" }, adopt: { type: "boolean" },
       },
@@ -192,13 +178,13 @@ const TOOLS: McpTool[] = [
       },
     },
     call: (a) => {
-      const name = str(a, "name") ?? "";
-      const argv = ["--name", name];
       const mode = str(a, "mode");
-      if (mode === "rw") argv.push("--rw");
-      else if (mode === "admin") argv.push("--admin");
-      const host = str(a, "host"); if (host !== undefined) argv.push("--host", host);
-      return urlEnvelope("db url", "db-url.ts", name, argv, bool(a, "dryRun"), str(a, "envDir") ?? "");
+      const input: DbUrlInput = {
+        name: str(a, "name") ?? "", rw: mode === "rw", admin: mode === "admin",
+        host: str(a, "host"), envDir: str(a, "envDir"), dryRun: bool(a, "dryRun"),
+      };
+      const bad = dbUrlInputError(input);
+      return bad ? usage(bad) : envelope(DB_URL.op(input));
     },
   },
   {
@@ -212,11 +198,12 @@ const TOOLS: McpTool[] = [
       },
     },
     call: (a) => {
-      const name = str(a, "name") ?? "";
-      const argv = ["--name", name];
-      if (bool(a, "rw")) argv.push("--rw");
-      const host = str(a, "host"); if (host !== undefined) argv.push("--host", host);
-      return urlEnvelope("cache url", "cache-url.ts", name, argv, bool(a, "dryRun"), str(a, "envDir") ?? "");
+      const input: CacheUrlInput = {
+        name: str(a, "name") ?? "", rw: bool(a, "rw"),
+        host: str(a, "host"), envDir: str(a, "envDir"), dryRun: bool(a, "dryRun"),
+      };
+      const bad = cacheUrlInputError(input);
+      return bad ? usage(bad) : envelope(CACHE_URL.op(input));
     },
   },
 ];

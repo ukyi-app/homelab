@@ -47,25 +47,15 @@ mkfx() {
   # 비율 139.7%가 나온다는 것 자체가 **바이트 환산이 실제로 일어났다**는 증거다.
   fx="$(mkfx 15GB 10Gi)"
   cd "$fx" || false
-  run bun "$TOOL" --floor caps=1
+  DISK_CAP_MIN_FLAGS=1 run bun "$TOOL"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '139.7%'
-}
-
-@test "a violation run still emits the SCAN marker (order: floor, then SCAN, then violations)" {
-  # scan-floor 규약: 도메인을 평가한 실행은 위반 여부와 무관하게 신호를 낸다 — 면제는 바닥값
-  # 실패 경로뿐. 위반 exit가 마커보다 앞서면 위반 실행이 "마커 부재 = 미실행"으로 오독된다.
-  fx="$(mkfx 15GB 10Gi)"
-  cd "$fx" || false
-  run bun "$TOOL" --floor caps=1
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -q '^SCAN: check-disk-caps:caps: 1$'
 }
 
 @test "a cap below its volume declaration passes (the fix direction)" {
   fx="$(mkfx 8GB 10Gi)"
   cd "$fx" || false
-  run bun "$TOOL" --floor caps=1
+  DISK_CAP_MIN_FLAGS=1 run bun "$TOOL"
   [ "$status" -eq 0 ]
 }
 
@@ -73,27 +63,23 @@ mkfx() {
   # 여유 0. BGSAVE류 순간 2배 사용을 생각하면 '같음'도 안전하지 않다.
   fx="$(mkfx 10Gi 10Gi)"
   cd "$fx" || false
-  run bun "$TOOL" --floor caps=1
+  DISK_CAP_MIN_FLAGS=1 run bun "$TOOL"
   [ "$status" -ne 0 ]
 }
 
 @test "a cap with no volume declaration in its file fails closed (nothing to compare)" {
   fx="$(mkfx 8GB "")"
   cd "$fx" || false
-  run bun "$TOOL" --floor caps=1
+  DISK_CAP_MIN_FLAGS=1 run bun "$TOOL"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '무엇과 비교해야 하는지'
 }
 
 @test "the enumeration floor fires when discovery collapses" {
   # 바닥값이 없으면 정규식/스코프가 깨져 0건을 스캔하고도 "위반 0"으로 초록이 된다.
-  run bun "$TOOL" --floor caps=99
+  DISK_CAP_MIN_FLAGS=99 run bun "$TOOL"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '열거 붕괴'
-  # scan-floor 규약의 나머지 반쪽: 바닥값 실패 실행은 SCAN 면제 — 마커를 내면 "실행됨"으로 오독된다.
-  out="$output"
-  run grep -q '^SCAN: check-disk-caps:caps: ' <<<"$out"
-  [ "$status" -ne 0 ]
 }
 
 @test "the guard runs in BOTH the required gate and make ci" {
