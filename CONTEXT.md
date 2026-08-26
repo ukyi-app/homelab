@@ -38,7 +38,8 @@ _Avoid_: 핀 설정, 핀 메타데이터
 _Avoid_: 자동 머지 플래그
 
 **bump 계획 (bump plan)**:
-apps 레인 배포 핀 갱신 한 사이클의 계약 산출물 — plan 항목·레인(`bump`/`propose-pr`)·
+배포 핀 갱신 한 사이클의 계약 산출물(apps 레인·베스포크 레인 공통) — 판별 union
+plan 항목(Change/Noop/Refusal)·target 신원(kind: app|bespoke)·레인(`bump`/`propose-pr`)·
 브랜치/커밋 문구/writer 신원 명명 규약. 계약은 `tools/lib/bump-plan.ts`가 소유하고
 생산자(poll-ghcr)와 소비자(run-bump-plan·ensure-bump-pr)가 공유한다.
 _Avoid_: 폴링 결과, 갱신 목록

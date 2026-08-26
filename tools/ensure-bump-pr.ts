@@ -1221,16 +1221,10 @@ type SiblingState = {
 // "모른다"며 손을 뗐다 → `.bindings.json`이 사라진 앱에 **이미 무장된 PR이 있으면 그 낡은 인가가 그대로
 // 살아남는다**. 인가 문맥에서 fail-closed는 "아무것도 하지 않는다"가 아니라 **"권한을 거둔다"**이다.
 //
-// 플래너의 실제 코드(tools/poll-ghcr.ts planApp — 이 도구가 **맞춰야 할** 계약, 읽기 전용):
-//     // 승인 정책: autoDeploy === true만 자동, 그 외(false/누락/파싱 불가)는 전부 fail-closed
-//     let autoDeploy = false;
-//     const bindingsPath = path.join(dir, ".bindings.json");
-//     if (existsSync(bindingsPath)) {
-//       try { autoDeploy = descriptorAutoDeploy(JSON.parse(readFileSync(bindingsPath, "utf8"))); }
-//       catch { autoDeploy = false; }
-//     }
-//     …  action: s.autoDeploy ? "bump" : "propose-pr"
-// 즉 **파일 없음 = 파싱 불가 = autoDeploy:false = propose-pr**. 세 상태가 하나의 레인으로 접힌다.
+// 그 계약의 유일 구현은 이제 tools/lib/bump-plan.ts의 resolveLane이다(d3) — 플래너(poll-ghcr)가
+// 그것을 소비하며, **파일 없음 = 파싱 불가 = autoDeploy:false = propose-pr**로 접는다. 아래
+// probeLane은 같은 접기의 인라인 사본으로 남아 있다 — 티켓 08이 resolveLane 소비로 수렴한다
+// (그때 이 주석과 probeLane이 함께 사라진다).
 // → probeLane도 **언제나 레인을 준다**. 다만 어떻게 정해졌는지는 구분해 보고한다(resolution):
 //     present    : SSOT를 읽었다(autoDeploy 값 그대로)
 //     absent     : SSOT가 없다 → propose-pr. 플래너 계약상 **정상 상태**다(앱이 철거됐거나 바인딩이 없다) → 조용히 회수만.
