@@ -159,6 +159,59 @@ YAML
   [ "$status" -eq 0 ]
 }
 
+@test "a make target invoking a guard_skip-routed guard is authoritative (helper era)" {
+  # 07 이관 후 콜사이트에는 emission이 없다 — 헬퍼 호출 자체가 skip 규약 사용의 증거다(티켓 11,
+  # 02에서 오탐 때문에 연기했던 확장). 이 인식이 없으면 헬퍼 경유 가드의 owner-local 권위가 죽는다.
+  # ⚠️ 호출 행은 실 트리 형태(verify-runbook-index.sh:15)를 그대로 밟는다 — `${#files[@]}`의 `#`이
+  # guard_skip **앞**에 있어, 주석-제외를 행 전역 문자클래스로 쓰면 이 행이 통째로 미탐이 된다(실측).
+  printf '#!/usr/bin/env bash\n. scripts/lib/guard.sh\nguard_init check-mirrored\nfiles=()\nif [ ${#files[@]} -eq 0 ]; then guard_skip check-mirrored "도메인 없음"; fi\n' > "$FIX/scripts/check-mirrored.sh"
+  printf 'whatever: ## owner-local\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-orphan.sh"
+  git -C "$FIX" add -A
+  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  [ "$status" -eq 0 ]
+}
+
+@test "a make target invoking a ts guard that calls skip(...) is authoritative" {
+  mkdir -p "$FIX/tools"
+  printf 'import { skip } from "./lib/cli.ts";\nif (!process.env.DOMAIN) skip("check-tsguard", "도메인 없음");\n' > "$FIX/tools/check-tsguard.ts"
+  printf 'whatever: ## owner-local\n\t@bun tools/check-tsguard.ts\n' > "$FIX/Makefile"
+  rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-mirrored.sh" "$FIX/scripts/check-orphan.sh"
+  git -C "$FIX" add -A
+  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  [ "$status" -eq 0 ]
+}
+
+@test "the real repo keeps make verify as a mirror (no self-promotion)" {
+  # 리뷰 실측(11): 이 도구 자신의 주석 산문(백틱 인라인 코드 안의 TS 헬퍼 호출 모양)이 분기 ③에
+  # 매치하면 스스로 skipGuards에 들어가고, 자신을 부르는 make verify가 owner-local로 승격된다 —
+  # "make verify에만 있는 가드는 고아"라는 이 회계의 전제가 실 트리에서 무효가 된다.
+  # ⚠️ make:ci는 여기 안 넣는다 — ci recipe 자신이 SKIP 규약을 직접 쓴다(untracked 가드·미평가
+  #    원장, `make -n ci`에 'SKIP: ci:' 방출 2건 실측)라 ② 레인의 **정당한** owner-local이다.
+  bun "$TOOL" --json --repo-root "$ROOT" > "$BATS_TEST_TMPDIR/report.json"
+  cat > "$BATS_TEST_TMPDIR/assert.ts" <<'TS'
+const r = await Bun.file(process.argv[2]).json();
+const bad = r.report.flatMap((g: { authoritative: string[] }) => g.authoritative)
+  .filter((v: string) => v === "make:verify");
+if (bad.length) { console.error("owner-local로 승격된 mirror: " + bad.join(", ")); process.exit(1); }
+console.log("mirrors stay mirrors");
+TS
+  run bun "$BATS_TEST_TMPDIR/assert.ts" "$BATS_TEST_TMPDIR/report.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "prose mentioning the helpers does not promote a guard to the skip convention" {
+  # 02 리뷰의 오탐 2형("skip(cert" 문자열·"// skip(4)" 주석) + 산문·대입 — 규약을 다루는 코드는
+  # 규약을 쓰는 가드가 아니다. 이들이 승격되면 mirror 타깃이 조용히 권위로 둔갑한다.
+  printf '#!/usr/bin/env bash\nh="guard_skip"\necho "헬퍼(guard_skip / skip()) 경유만"\necho "skip(cert"\n# skip(4)은 내지 않는다\necho ok\n' > "$FIX/scripts/check-mirrored.sh"
+  printf 'whatever: ## still a mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-orphan.sh"
+  git -C "$FIX" add -A
+  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "비권위 경로만"
+}
+
 # 리뷰 실측: 따옴표 안의 `|`·`;`·`()`를 연산자로 쪼개는 바람에 grep/yq **패턴**이 명령 head로
 # 승격돼, 호출이 0건인 가드가 권위를 얻었다(vacuous pass).
 @test "a guard path inside a quoted pattern is not an invocation" {

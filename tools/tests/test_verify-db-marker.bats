@@ -56,6 +56,10 @@ vdm() { PATH="$TMP/bin:$PATH" run bun "$TOOL" "$@"; }
   export VDM_MARKER_PRESENT="0"
   vdm --name example-api
   [ "$status" -ne 0 ]
+  # 오진단 방지(d6③ 이관에서 실측된 회귀 클래스): die 문구에 kubectl의 실제 실패 사유(stderr)가
+  # 동봉된다 — 연결/인증 실패가 "마커 부재"로만 읽히면 운영자가 엉뚱한 곳(ensure-role-password)을 판다.
+  echo "$output" | grep -q "kubectl:"
+  echo "$output" | grep -q "NotFound"
 }
 
 @test "rejects a malformed db name before touching the cluster" {

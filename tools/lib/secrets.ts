@@ -12,10 +12,9 @@
 //   디스패치 실패 경계가 재실행으로 수렴). 평문(.env)은 seal 도구의 kubeseal stdin 전용 — 이 엔진은
 //   .env를 읽지도, 봉인본 내용을 출력하지도 않는다.
 import { existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { compact } from "./contract.ts";
 import { laneMutationFields } from "./catalog-rows.ts";
-import { ALLOW_PUSH_REWRITE_ENV, git, pushRoutes } from "./exec.ts";
+import { ALLOW_PUSH_REWRITE_ENV, git, pushRoutes, sh } from "./exec.ts";
 import { APP_NAME_RE, isCanonicalClone, pushRouteError } from "./identity.ts";
 import { runMutation, waitInputError, waitOpts, type MutationOutcome, type WaitInput } from "./mutation.ts";
 import { OWNER } from "./platform.ts";
@@ -62,8 +61,11 @@ function runChain(cwd: string, app: string, noSeal: boolean): ChainResult {
     // seal 위임 — 벤더 도구 계약(tools/README.md seal-secret.mts 절): --config --env 필수, --app 명시.
     // .env는 도구 안에서만 kubeseal stdin으로 흐른다(이 엔진은 .env를 읽지 않는다).
     if (!existsSync(`${cwd}/${SEAL_TOOL}`)) return refuse(`${SEAL_TOOL} 부재 — 앱 레포에 벤더된 봉인 도구가 없다(템플릿 계약 드리프트)`);
-    const sealed = spawnSync(process.execPath, [SEAL_TOOL, "--config", APP_MARKER, "--env", ".env", "--app", app], { cwd, stdio: ["ignore", "ignore", "inherit"] });
-    if (sealed.status !== 0) return refuse(`seal 실패(exit ${sealed.status ?? "?"})`);
+    // seam 경유(d6④) — 종전 stdio(stdout ignore·stderr inherit)는 캡처 후 stderr만 흘리는 것으로
+    // 등가다(.env 평문은 벤더 도구 안에서만 흐르고 이 엔진의 캡처·원장 어디에도 실리지 않는다).
+    const sealed = sh(process.execPath, [SEAL_TOOL, "--config", APP_MARKER, "--env", ".env", "--app", app], { cwd, timeoutMs: 0 });
+    if (sealed.err) process.stderr.write(sealed.err + "\n");
+    if (!sealed.ok) return refuse(`seal 실패(exit ${sealed.status ?? "?"})`);
     if (!existsSync(`${cwd}/${sealedPath}`)) return refuse(`seal 후 봉인본(${sealedPath})이 없다`);
     chain.sealSkipped = false;
   }

@@ -34,7 +34,7 @@
 // owner-local `make verify-runbook-index`로 이미 권위를 갖는다.
 //
 // 종료코드: tools/lib/cli.ts 규약(0=통과 · 1=권위 0인 가드 존재 · 2=사용법).
-import { execFileSync } from "node:child_process";
+import { sh as shExec } from "./lib/exec.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { typedFlags } from "./lib/cli.ts";
@@ -55,13 +55,28 @@ const GATE_JOB = "gate";
 //   ② 그 타깃이 **skip 신호 규약을 쓰는 가드**를 부른다 — 티켓 01의 `SKIP:` 마커는 "이 가드의
 //      도메인은 없을 수 있다"는 뜻이고, 도메인이 CI에 없는 가드에겐 owner-local 엔트리포인트가
 //      유일한 권위다. 01이 06의 선행 티켓인 이유가 정확히 이것이다.
-// 그 외는 mirror다(폴백이 default-deny로 뒤집힌다). `make verify`·`make ci`는 규약을 쓰는 가드를
-// 부르지 않으므로 자동으로 mirror가 된다 — 이름을 적어둘 필요가 없다.
+// 그 외는 mirror다(폴백이 default-deny로 뒤집힌다). `make verify`는 규약을 쓰는 가드를 부르지
+// 않으므로 자동으로 mirror가 된다(게이트 bats가 실 레포에서 이 불변을 단언한다). `make ci`는
+// recipe 자신이 SKIP 규약을 직접 쓴다(untracked 가드·미평가 원장)라 ②로 정당하게 owner-local.
 // ⚠️ 마커를 **내는** 줄만 센다(출력 동사 필요). 두 번 틀렸던 자리다:
 //   · 앞에 공백을 요구했다가 skipGuards가 0건 — 실제 마커는 `echo "SKIP: …"`처럼 따옴표 뒤에 온다.
 //   · 출력 동사를 안 보다가 이 파일 자신의 **정규식 상수**가 마커로 잡혀 `make verify`가 권위로
 //     승격됐다(규약을 다루는 코드 ≠ 규약을 쓰는 가드).
-const SKIP_EMISSION = /(echo|printf|console\.log)[^\n]*SKIP: [a-z0-9-]+:/;
+// 세 대안(티켓 11 — 02에서 오탐 때문에 연기했던 확장을 소비자와 함께 착지):
+//   ① 직접 emission — Makefile recipe 잔존 레인(같은-줄 짝)이 여전히 이 모양이다.
+//   ② 셸 `guard_skip <이름>` 호출 — 07 이관 후 셸 콜사이트의 유일한 모양. **행두 주석만** 배제하고
+//      (행 전역 `[^\n#]*`는 `${#files[@]}`의 `#`에서 실 호출 행을 통째로 미탐시킨다 —
+//      verify-runbook-index.sh:15 실측, check-skip-signalling의 행두 스트립과 같은 도메인 규율)
+//      뒤에 이름 리터럴을 요구한다 — 대입(h="guard_skip")·산문("헬퍼(guard_skip / …")을 배제.
+//   ③ TS 헬퍼 호출 — skip 뒤에 여는 괄호·여는 따옴표가 붙는 콜사이트 모양만 본다(여는 따옴표
+//      요구 + 앞 문자 lookbehind). 02의 오탐 2형(cert 문자열은 따옴표가 괄호 앞에, 숫자 4 주석은
+//      따옴표 부재)과 메서드 호출(.skip), 백틱 인라인 코드 산문을 배제한다.
+// ⚠️ 이 주석 자신이 위반 모양의 연속 리터럴을 담지 않게 쓴다(check-skip-signalling의 조립식과
+//    같은 규율) — 직전 판은 백틱 산문 한 줄이 분기 ③에 매치해 이 파일이 skipGuards에 들어갔고,
+//    이 파일을 부르는 make verify·make ci가 통째로 owner-local로 승격됐다(실측 — 세 번째 재발이라
+//    lookbehind에 백틱도 넣고 게이트 bats가 실 레포의 mirror 불변을 단언한다).
+const SKIP_EMISSION =
+  /(echo|printf|console\.log)[^\n]*SKIP: [a-z0-9-]+:|(^|\n)(?![ \t]*#)[^\n]*\bguard_skip [a-z0-9][a-z0-9-]*|(?<![.\w`])skip\(\s*["'`]/;
 
 // 명령 세그먼트의 '실행 대상'을 찾을 때 건너뛰는 실행 동사·래퍼.
 const EXEC_VERBS = new Set([
@@ -183,11 +198,11 @@ export function invokesGuard(text: string, guard: string, allGuards: string[]): 
 
 // ── venue 수집 ────────────────────────────────────────────────────────────────
 function sh(cmd: string, args: string[], root: string): string {
-  try {
-    return execFileSync(cmd, args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  } catch {
-    return "";
-  }
+  // seam 경유(d6③) — venue 수집은 실패를 빈 문자열로 접는 기존 관용 유지(부재 venue = 빈 텍스트,
+  // 열거 붕괴는 SKIP_EMISSION 바닥값이 잡는다). stderr는 버린다(종전 stdio ignore와 동일 효과).
+  // timeoutMs 0 = 종전 무-timeout 보존(git log 전 이력 스캔이 느린 디스크에서 30s를 넘을 수 있다).
+  const r = shExec(cmd, args, { cwd: root, timeoutMs: 0 });
+  return r.ok ? r.out : "";
 }
 
 type Step = { run?: string; uses?: string };

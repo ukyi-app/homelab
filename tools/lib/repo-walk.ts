@@ -23,7 +23,8 @@
 // (check-resource-limits MIN_SCAN=10 · check-image-pins --min-scan 20 · check-alert-rules 30) —
 // 그것들은 **의미론적 필터 이후**를 세므로 훨씬 정확하다. 워커 바닥값은 없던 보호를 더하지 않으면서
 // 정당한 상태를 고장으로 신고한다(구현 중 픽스처 3곳이 연달아 이 신호를 줬다).
-import { execFileSync } from "node:child_process";
+// 실행은 exec seam 경유(d6④) — git 실패는 빈 목록으로 흡수하는 기존 계약 유지(바닥값이 진단을 대신한다).
+import { git } from "./exec.ts";
 import { readFileSync, readdirSync } from "node:fs";
 import { type Document, parseAllDocuments } from "yaml";
 
@@ -246,19 +247,12 @@ function scopeDef(scope: string, kind: ScopeDef["kind"]): ScopeDef {
 // git의 stderr는 버린다: 실패를 여기서 의도적으로 흡수하므로 `fatal: not a git repository`가 모든
 // 소비자 출력에 섞이면 노이즈다. 진단은 바닥값 에러가 더 정확한 문구로 대신한다.
 function trackedPaths(root: string, sub: string): string[] {
-  try {
-    // sub가 비면(레포 전역 스코프) pathspec을 아예 주지 않는다 — `git ls-files -- ""`는 빈
-    // pathspec이라 아무것도 매치하지 않는다.
-    const args = sub ? ["ls-files", "--", sub] : ["ls-files"];
-    const out = execFileSync("git", args, {
-      cwd: root,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return out.split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
+  // sub가 비면(레포 전역 스코프) pathspec을 아예 주지 않는다 — `git ls-files -- ""`는 빈
+  // pathspec이라 아무것도 매치하지 않는다. seam은 throw하지 않는다 — 실패는 !ok로 접혀 빈 목록이다.
+  const args = sub ? ["ls-files", "--", sub] : ["ls-files"];
+  const r = git(root, args, { timeoutMs: 0 });
+  if (!r.ok) return [];
+  return r.out.split("\n").filter(Boolean);
 }
 
 // filesystem 열거 — 유닛 스코프 전용. 유닛은 "디렉토리가 존재하는가"라는 파일시스템 질문이고,

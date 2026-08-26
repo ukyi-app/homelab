@@ -46,30 +46,25 @@ STALE_AGE_S=259200      # L1: 실패 Job이 replay 창 **시작보다 이만큼 
 STALE_LEAD_S=3600       # 실패 Job 시작 **이전**이 마지막 성공(미해소 시나리오)
 
 # ── 1) 배포 매니페스트에서 파라미터 파생(하드코딩 0) ───────────────────────────────────────────────
-vme_derive_stack_params "$STACK"
+# 파라미터 파생·작업공간·룰 추출의 조립 순서는 lib(vme_scenario)이 소유한다 — 아래 한 호출이 기동이다.
 
-vme_workspace "corejob-e2e-net-$$"
-
-# ── 2) 배포 ConfigMap에서 룰 바이트 그대로 추출 ────────────────────────────────────────────────────
-# ⚠️ 룰을 여기에 재작성하면 "배포된 것"이 아니라 "내가 적은 것"을 검증하게 된다.
-yq '.data["core.yaml"]' "$RULES_CM" > "$VME_TMP/core-deployed.yaml"
-[ -s "$VME_TMP/core-deployed.yaml" ] || vme_fault "룰 추출 실패: $RULES_CM"
+vme_scenario "corejob-e2e-net-$$" "$STACK" "$RULES_CM" "core.yaml"
 
 # fail-closed: 하네스가 겨냥하는 룰이 실제로 존재하는지(리네임 시 무성 무측정 방지)
 for a in "$ALERT" "$FLAP_ALERT"; do
-  grep -q "alert: $a" "$VME_TMP/core-deployed.yaml" \
+  grep -q "alert: $a" "$VME_RULES" \
     || vme_fault "배포 룰에 'alert: $a' 부재 — 하네스가 아무것도 측정하지 않는다"
 done
 
-EXPR="$(vme_alert_expr "$VME_TMP/core-deployed.yaml" "$ALERT")"
+EXPR="$(vme_alert_expr "$VME_RULES" "$ALERT")"
 [ -n "$EXPR" ] || vme_fault "$ALERT: 배포 룰에서 expr 추출 실패"
-FOR_S="$(vme_to_s "$(vme_alert_for "$VME_TMP/core-deployed.yaml" "$ALERT")")"
+FOR_S="$(vme_to_s "$(vme_alert_for "$VME_RULES" "$ALERT")")"
 [ "$FOR_S" -gt 0 ] || vme_fault "$ALERT: for: 부재 또는 0 — 지속성 계약이 없다"
 
 # ── flapping 룰의 창·임계는 **룰에서 파생**한다(하드코딩 금지 — 룰을 바꾸면 픽스처가 따라온다) ──
-FLAP_EXPR="$(vme_alert_expr "$VME_TMP/core-deployed.yaml" "$FLAP_ALERT")"
+FLAP_EXPR="$(vme_alert_expr "$VME_RULES" "$FLAP_ALERT")"
 [ -n "$FLAP_EXPR" ] || vme_fault "$FLAP_ALERT: 배포 룰에서 expr 추출 실패"
-FLAP_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_TMP/core-deployed.yaml" "$FLAP_ALERT")")"
+FLAP_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_RULES" "$FLAP_ALERT")")"
 [ "$FLAP_FOR_S" -gt 0 ] || vme_fault "$FLAP_ALERT: for: 부재 또는 0"
 # 최근성 창 — `(time() - …) < <초>` 형태에서 뽑는다.
 FLAP_WINDOW_S="$(grep -oE '\)\s*<\s*[0-9]+' <<<"$FLAP_EXPR" | grep -oE '[0-9]+$' | head -1)"
@@ -387,12 +382,11 @@ PY
 run_scenario() { # $1=시나리오 → vmsingle 기동 + import + replay
   local scen="$1"
   local vm="vm-corejob-$scen-$$"
-  vme_start_vmsingle "$vm" "$VME_VM_VER"
   gen "$VME_TMP/$scen.jsonl" "$scen"
   assert_no_future_timestamps "$VME_TMP/$scen.jsonl" \
     || vme_contract "시나리오 '$scen'이 KSM이 낼 수 없는 타임라인을 만든다(위 목록) — 미래 타임스탬프는 첫 평가부터 소급 적용돼 전이를 건너뛴 vacuous green을 만든다(R-2)"
-  vme_import "$VME_TMP/$scen.jsonl"
-  vme_replay "$vm" "$VME_VA_VER" "$VME_TMP/core-deployed.yaml" "$VME_EVAL" "$VME_LOOKBACK" "$FROM_EPOCH" "$TO_EPOCH"
+  vme_leg "$vm" "$VME_TMP/$scen.jsonl"
+  vme_replay "$vm" "$VME_VA_VER" "$VME_RULES" "$VME_EVAL" "$VME_LOOKBACK" "$FROM_EPOCH" "$TO_EPOCH"
 }
 
 # L1~L6은 전부 "flapping이 아닌" 상태다 — 그 레그들에서 CronJobFlapping이 울면 오탐이다.

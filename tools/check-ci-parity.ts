@@ -32,7 +32,7 @@
 //    그 구분이 핵심이다 — 완전 일치를 강제하면 docker 없는 환경에서 make ci가 못 돌고, 결국 아무도 안 쓴다.
 
 import { existsSync, readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { sh as shExec } from "./lib/exec.ts";
 import { reportScanError, scanFloor } from "./lib/scan-floor.ts";
 
 const ROOT = process.cwd();
@@ -70,7 +70,12 @@ const errors: string[] = [];
 const fail = (m: string) => errors.push(m);
 
 function sh(cmd: string, args: string[]): string {
-  return execFileSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  // seam 경유(d6③) — 실패는 throw(파생 실패를 콜사이트가 스캔 오류로 접는 기존 계약). 64MiB 캡처 유지.
+  // timeoutMs 0 = 종전 execFileSync 무-timeout 보존(make -n ci가 느린 머신에서 30s를 넘을 수 있다).
+  const r = shExec(cmd, args, { cwd: ROOT, timeoutMs: 0, maxBuffer: 64 * 1024 * 1024 });
+  // 문구에 argv 앞부분을 실어 **어느 파생**이 죽었는지 가린다(스텝 이름/본문 파생이 같은 yq -r 접두다).
+  if (!r.ok) throw new Error(`${cmd} ${args.join(" ").slice(0, 160)} 실패: ${r.err || `exit ${r.status}`}`);
+  return r.out;
 }
 
 // ── ① gate의 run 스텝을 ci.yaml에서 파생 ──────────────────────────────────────────────────────────

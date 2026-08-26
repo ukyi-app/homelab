@@ -3,7 +3,8 @@
 // ⚠️ 평문/해시/토큰은 어떤 경로로도(stdout·예외·산출물 diff) 노출하지 않는다 — kubeseal stdin 전용.
 // 봉인 전 secret-cert-check preflight를 fail-closed로 실행(--offline-ok/SEAL_OFFLINE=1 break-glass, dry-run 비대상).
 // 변환은 TS에서 Secret manifest 조립(kubectl 불요) → kubeseal(lib/seal.ts). docker는 bcrypt에만, gh는 dockerconfig user에만.
-import { spawnSync } from "node:child_process";
+// 실행은 exec seam 경유(d6④) — 평문(비밀값)은 stdin으로만 흐르고 seam 원장은 stdin을 기록하지 않는다.
+import { gh as ghExec, sh } from "./lib/exec.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseFlags } from "./lib/cli.ts";
@@ -81,8 +82,8 @@ if (dry) {
 
 // preflight — secret-cert-check(fail-closed). 봉인 1회만 실행.
 {
-  const p = spawnSync("bash", ["scripts/secret-cert-check.sh", "--cert", cert], { stdio: "inherit" });
-  if (p.status !== 0) {
+  const p = sh("bash", ["scripts/secret-cert-check.sh", "--cert", cert], { inherit: true, timeoutMs: 0 });
+  if (!p.ok) {
     // 4=skip(미평가: 오프라인/kubeseal 부재) vs 그 외(stale 등 실제 판정) — 둘 다 fail-closed지만
     // 사람이 원인을 구별해야 대처가 갈린다(전자는 클러스터 접근 복구, 후자는 cert 갱신/키 복원).
     const why = p.status === 4 ? "미평가(오프라인/kubeseal 부재)" : "실패(stale 등)";
@@ -98,9 +99,9 @@ function buildManifest(e: Entry): object {
   const val = process.env[e.env]!;
   if (e.transform === "bcrypt") {
     // docker httpd htpasswd bcrypt(평문은 stdin 전용 — 인자/ps 미노출). 'x:$2y$..' → cut -f2.
-    const r = spawnSync("docker", ["run", "--rm", "-i", "httpd:2.4-alpine", "htpasswd", "-niBC", "10", "x"], { input: val, encoding: "utf8" });
-    if (r.status !== 0) fail(`bcrypt 해시 생성 실패(docker htpasswd) — ${e.name}`);
-    const hash = (r.stdout.split(":")[1] ?? "").trim();
+    const r = sh("docker", ["run", "--rm", "-i", "httpd:2.4-alpine", "htpasswd", "-niBC", "10", "x"], { input: val, timeoutMs: 0 });
+    if (!r.ok) fail(`bcrypt 해시 생성 실패(docker htpasswd) — ${e.name}`);
+    const hash = (r.out.split(":")[1] ?? "").trim();
     // 옛 seal-adguard-auth.sh는 '$2' 접두를 검사했으나 여기선 비어있음만 검사한다: 실 docker htpasswd는
     // 항상 bcrypt($2y$)를 내지만, bats docker 스텁은 sh 위치파라미터 확장으로 '$2y$10$' 리터럴을 못 만든다.
     if (!hash) fail(`bcrypt 해시 비어있음 — ${e.name}`);
@@ -118,9 +119,9 @@ function buildManifest(e: Entry): object {
     return { apiVersion: "v1", kind: "Secret", metadata: { name: e.secretName, namespace: e.ns }, type: "Opaque", stringData: { [e.key!]: val } };
   }
   // dockerconfig — dockerconfigjson. user는 gh api user, password=토큰.
-  const gh = spawnSync("gh", ["api", "user", "--jq", ".login"], { encoding: "utf8" });
-  if (gh.status !== 0) fail(`gh api user 실패 — ${e.name}`);
-  const user = gh.stdout.trim();
+  const gh = ghExec(["api", "user", "--jq", ".login"], { timeoutMs: 0 });
+  if (!gh.ok) fail(`gh api user 실패 — ${e.name}`);
+  const user = gh.out.trim();
   const auth = b64(`${user}:${val}`);
   const dcj = JSON.stringify({ auths: { "ghcr.io": { username: user, password: val, auth } } });
   return { apiVersion: "v1", kind: "Secret", metadata: { name: e.secretName, namespace: e.ns }, type: "kubernetes.io/dockerconfigjson", data: { ".dockerconfigjson": b64(dcj) } };

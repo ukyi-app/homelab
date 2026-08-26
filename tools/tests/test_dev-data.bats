@@ -61,3 +61,25 @@ EOF
   run grep -qE "LOG_LEVEL=|_DATABASE_URL|_REDIS_URL" "$TMP/.env.example"
   [ "$status" -ne 0 ]
 }
+
+@test "db:up drives docker compose through the seam with argv intact and propagates the child exit code" {
+  # d6④ 이관면의 실측 증인 — dry-run이 가리던 compose 경로를 PATH 스텁으로 태운다:
+  # ① 셸 문자열이 argv 배열로 바뀌어도 compose 인자가 그대로다 ② 자식 rc가 뭉개지지 않고 전파된다.
+  S="$TMP/bin"; mkdir -p "$S"
+  cat > "$S/docker" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "${DOCKER_LOG:?}"
+exit "${DOCKER_RC:-0}"
+EOF
+  chmod +x "$S/docker"
+  run env PATH="$S:$PATH" DOCKER_LOG="$TMP/docker.log" bun "$ROOT/tools/dev.ts" db:up
+  [ "$status" -eq 0 ]
+  grep -q '^compose -f tools/dev-postgres/compose.yaml up -d --wait$' "$TMP/docker.log"
+  run env PATH="$S:$PATH" DOCKER_LOG="$TMP/docker.log" DOCKER_RC=5 bun "$ROOT/tools/dev.ts" db:up
+  [ "$status" -eq 5 ]
+  # db:reset은 down -v를 먼저 낸다(파괴는 이 모드 전용 — 인자 원장으로 실측).
+  : > "$TMP/docker.log"
+  run env PATH="$S:$PATH" DOCKER_LOG="$TMP/docker.log" bun "$ROOT/tools/dev.ts" db:reset
+  [ "$status" -eq 0 ]
+  grep -q '^compose -f tools/dev-postgres/compose.yaml down -v$' "$TMP/docker.log"
+}

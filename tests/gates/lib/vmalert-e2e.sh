@@ -18,6 +18,7 @@ VME_BASE=""         # 최근 기동한 vmsingle의 http base URL
 VME_QUERY_ARGS=()   # vme_query_args가 조립하는 curl 인자
 VME_W=""            # vme_assert_rollup_ok의 출력: rollup 윈도(예 2h — 부재+skip 정책이면 빈 값)
 VME_W_S=0           # vme_assert_rollup_ok의 출력: 같은 윈도(초 — 부재 시 0)
+VME_RULES=""        # vme_scenario의 출력: 배포 ConfigMap에서 추출한 룰 파일 경로
 
 # 30s|5m|2h|3d(단위 없으면 초) → 초.
 # ⚠️ **fail-closed**: 빈 값·비수치는 즉시 FAULT다. 예전엔 인식 못 한 입력을 **그대로 되돌려줬는데**, 그게
@@ -274,8 +275,12 @@ vme_alert_series() { vme_promql "count(count_over_time(ALERTS{alertname=\"$1\"}[
 # ── 하네스-무관 공통 골격 ───────────────────────────────────────────────────────────────────────────
 # 아래는 알림별 산술과 무관한 하네스 골격이다(종료 규약·룰 추출·매니페스트 파생·판정 집계·작업공간).
 # ⚠️ 형제 bulkssd·drift 하네스는 접두사 없는 `fault`/`contract`/`fail`/`pass`를 source **뒤에** 자체
-#    정의한다 — 진단 라벨("(preflight)")과 판정 집계는 **하네스-로컬 정책**이라 남긴 것이고, 동명이므로
-#    그쪽 정의가 이긴다. 프리미티브(질의·docker·매니페스트 파생·작업공간)는 전부 여기로 흡수됐다.
+#    정의한다 — 진단 라벨("(preflight)")과 판정 집계는 **하네스-로컬 정책**이라 남긴 것이다(lib은
+#    vme_ 접두 판정 함수만 정의하므로 이름 충돌은 없다). 프리미티브(질의·docker·매니페스트 파생·
+#    작업공간·expr/for/record/rollup 헬퍼)는 발화 e2e 6종 전부에서 여기로 흡수됐다(d5·09 — 기동은
+#    vme_scenario/vme_leg 경유가 유일 표준). 하네스-로컬로 남는 것은 판정 어휘 4함수와 bulkssd의
+#    2-피연산자 rollup preflight **산술**뿐이다(vme_assert_rollup_ok가 표현 불가 — 산술은 lib 헬퍼
+#    산출값 위에서 돈다).
 
 # 종료 규약: 2 = HARNESS FAULT/CONTRACT(전제 붕괴·vacuity) · 1 = leg FAIL · 0 = OK
 vme_fault()    { echo "HARNESS FAULT: $*" >&2; exit 2; }
@@ -287,6 +292,14 @@ vme_pass() { echo "PASS $*"; }
 
 vme_alert_expr() { # $1=룰 yaml $2=alert 이름 → expr만(주석 제거 — 주석이 단언을 만족시키는 것 차단)
   yq '.groups[].rules[] | select(.alert=="'"$2"'") | .expr' "$1" | sed 's/#.*//'
+}
+
+vme_record_expr() { # $1=룰 yaml $2=record 이름 → expr만(주석 제거) — vme_alert_expr의 record 형제
+  yq '.groups[].rules[] | select(.record=="'"$2"'") | .expr' "$1" | sed 's/#.*//'
+}
+
+vme_rollup_count() { # $1=expr → expr 안의 rollup 함수 호출 수 (⚠️ pipefail: grep 무매치 1 → `|| true` 필수)
+  { grep -oE '[a-z_]+_over_time[[:space:]]*\(' <<<"$1" || true; } | wc -l | tr -d ' '
 }
 
 vme_alert_for() { # $1=룰 yaml $2=alert 이름 → for:(예 15m). **무매치·키 부재 = 빈 문자열**
@@ -359,4 +372,38 @@ vme_workspace() { # $1=docker 네트워크명 → VME_TMP 생성 + EXIT trap(컨
   VME_TMP="$(mktemp -d)"
   trap 'vme_cleanup; rm -rf "${VME_TMP:-}"' EXIT
   vme_net_up "$1"
+}
+
+# ── 시나리오 interface(d5) — 조립의 암묵 순서를 lib 내부로 접는다 ────────────────────────────────
+# 마찰의 근원은 전역 VME_*가 아니라 **암묵 순서**였다(체이닝 레이스 2건 전부 순서 사고). 하네스가
+# derive → workspace → 룰 추출을 직접 나열하면 그 순서가 호출자 문서가 되고, 한 곳이 어긋나면
+# "VME_TMP: unbound" 같은 잡음 크래시나 빈 룰 vacuous green으로 돌아온다 — 그래서 여기가 소유한다.
+# 전역 VME_* 출력 변수 계약은 그대로다(+ VME_RULES: 추출된 배포 룰 파일 경로).
+#
+# 설계 문구의 4단계(workspace → derive → start → import) 중 start·import는 **레그마다 반복**이라
+# (실측 5/5 하네스 — 시나리오 라벨별 새 vmsingle) 톱레벨 1회 조립은 vme_scenario가, 레그 미니-조립
+# (start → import)은 vme_leg가 나눠 소유한다 — 순서 소유라는 목적은 같고 함수 경계만 실측 구조를 따른다.
+vme_scenario() { # $1=net $2=stack 디렉토리 $3=룰 ConfigMap(yaml) $4=.data 키(예 r4.yaml) → VME_RULES 설정
+  local net="$1" stack="$2" cm="$3" key="$4"
+  vme_derive_stack_params "$stack"
+  vme_workspace "$net"
+  VME_RULES="$VME_TMP/deployed-rules.yaml"
+  # 룰은 배포 ConfigMap에서 **바이트 그대로** 추출한다(재작성하면 "배포된 것"이 아니라 "내가 적은 것"을
+  # 검증하게 된다). 추출은 **yq**로 한다 — PyYAML은 설치 보장이 없어 하네스가 환경에 따라 조용히 못
+  # 도는 자리가 된다(실측으로 겪었다). yq는 부재 키에 리터럴 `null`을 주므로 [ -s ]만으로는
+  # fail-closed가 안 된다 — 전체 비교로 함께 거르고, stderr는 fault에 동봉한다(yq 미설치/파싱 오류/
+  # 키 부재 세 갈래가 한 줄로 붕괴하지 않게 — 이 lib의 "런타임 stderr verbatim" 문화).
+  local yq_err=""
+  yq_err="$( { yq ".data[\"$key\"]" "$cm" > "$VME_RULES"; } 2>&1 )" || : > "$VME_RULES"
+  if [ ! -s "$VME_RULES" ] || [ "$(tr -d '[:space:]' < "$VME_RULES")" = "null" ]; then
+    vme_fault "룰 추출 실패: $cm (.data[\"$key\"]) — 빈 룰로 진행하면 하네스가 아무것도 측정하지 않는다${yq_err:+. yq stderr: ${yq_err}}"
+  fi
+}
+
+vme_leg() { # $1=vmsingle 컨테이너명 $2=fixture(jsonl) [$3..=vmsingle 추가 플래그] — 레그 기동의 순서 소유
+  # start가 import보다 앞이어야 한다(VME_BASE는 start의 출력이다) — 그 의존을 호출자가 알 필요가 없다.
+  local vm="$1" fixture="$2"
+  shift 2
+  vme_start_vmsingle "$vm" "$VME_VM_VER" "$@"
+  vme_import "$fixture"
 }

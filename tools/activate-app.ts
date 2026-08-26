@@ -8,7 +8,8 @@
 // 통과 시 active:true만 변경(워크트리) — 커밋/PR은 호출자(owner 또는 워크플로)가 PR-first로.
 // 라이브 상태는 kubectl로 읽고(--status-file 미지정 시), 테스트는 픽스처 주입.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+// 실행은 exec seam 경유(d6④) — 실패 의미(throw/불리언/파싱)는 콜사이트 소유 그대로.
+import { git as gitExec, sh } from "./lib/exec.ts";
 import path from "node:path";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { appRel } from "./lib/app-surface.ts";
@@ -42,14 +43,14 @@ if (!app || !sha || !syncedRev) die("--app --sha --synced-rev 필수");
 if (!APP_NAME_RE.test(app)) die(`app 이름 형식 불량: ${app}`);
 if (!/^[0-9a-f]{7,40}$/.test(sha)) die(`sha 형식 불량`);
 
-const git = (...a: string[]) => execFileSync("git", a, { cwd: repoDir, encoding: "utf8" });
+const git = (...a: string[]): string => {
+  const r = gitExec(repoDir, a, { timeoutMs: 0 });
+  // 문구에 argv 앞부분을 실어 어느 호출이 죽었는지 남긴다(15 처방과 동형 — stderr만으로는 정체가 사라진다).
+  if (!r.ok) throw new Error(`git ${a.join(" ").slice(0, 120)} 실패: ${r.err || `exit ${r.status}`}`);
+  return r.out;
+};
 const gitOk = (...a: string[]) => {
-  try {
-    execFileSync("git", a, { cwd: repoDir, stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
+  return gitExec(repoDir, a, { timeoutMs: 0 }).ok;
 };
 
 // (1) descendant 검증 — moving-main에서 옛 synced revision의 게이트 통과를 차단
@@ -86,7 +87,11 @@ let status;
 if (statusFile) {
   status = JSON.parse(readFileSync(statusFile, "utf8"));
 } else {
-  const kubectl = (...a: string[]) => JSON.parse(execFileSync("kubectl", a, { encoding: "utf8" }));
+  const kubectl = (...a: string[]) => {
+    const r = sh("kubectl", a, { timeoutMs: 0 });
+    if (!r.ok) throw new Error(`kubectl ${a.join(" ").slice(0, 120)} 실패: ${r.err || `exit ${r.status}`}`);
+    return JSON.parse(r.out);
+  };
   status = {
     application: kubectl("-n", "argocd", "get", "application", `${app}-prod`, "-o", "json"),
     httproute: kubectl("-n", "prod", "get", "httproute", app, "-o", "json"),

@@ -29,3 +29,22 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   run grep -q "lib/seal" tools/seal-secret.mts
   [ "$status" -ne 0 ]
 }
+
+@test "a kubeseal failure surfaces the exit code but never the child stderr (plaintext echo defence)" {
+  # d6④ 이관면의 성질 고정 — 실패 메시지에 stderr(res.err)를 싣지 않는다. kubeseal이 평문을 stderr로
+  # 에코하는 최악 상황을 스텁으로 재현해, 그 평문이 throw 메시지에 실리지 않음을 실측한다
+  # (15행 분기에 ${res.err}를 붙이는 mutation이 이 단언에서 red가 된다).
+  S="$BATS_TEST_TMPDIR/bin"; mkdir -p "$S"
+  printf '#!/bin/sh\necho "PLAINTEXT-ECHO-9d2c $(cat)" >&2\nexit 1\n' > "$S/kubeseal"
+  chmod +x "$S/kubeseal"
+  run env PATH="$S:$PATH" bun -e '
+    import { sealManifest } from "./tools/lib/seal.ts";
+    try { sealManifest({ kind: "Secret", stringData: { K: "PLAINTEXT-ECHO-9d2c" } }, "/tmp/cert.pem"); console.log("DID-NOT-THROW"); }
+    catch (e) { console.log("threw: " + (e as Error).message); }
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^threw: '
+  echo "$output" | grep -q '종료 코드 1'
+  run grep -q 'PLAINTEXT-ECHO-9d2c' <<<"$output"
+  [ "$status" -ne 0 ]
+}

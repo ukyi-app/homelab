@@ -46,12 +46,12 @@ export function parseCommand(argv: string[], tree: CommandTree): ParsedCommand {
 //   워크플로는 비-0만 보지만 래퍼/사람이 원인 계층을 구분하도록 유지한다.
 // 4가 0과 갈라져야 하는 이유: 대상이 없어 건너뛴 것과 검사해서 통과한 것이 같은 코드면 가드가 실제 실행
 //   경로를 잃어도 CI가 초록이다(verify-runbook-index 실측 — CI에선 런북이 gitignored라 무조건 skip이었다).
-//   4를 낼 때는 같은 줄에서 `SKIP: <가드>: <이유>` 마커를 함께 낸다(정적 짝 검증 —
-//   tests/gates/test_guard-skip-signalling.bats).
-// skip(4) 방출 — 위 종료코드 어휘의 함수형(산문 SSOT를 코드로). 마커와 종료코드를 **한 문장
-// 줄에서 원자** 방출한다: check-skip-signalling의 짝 검사(같은 줄 규약)가 이 구현 줄로 성립하고,
+//   4는 콜사이트에서 직접 내지 않는다 — TS는 이 skip(), 셸은 guard_skip을 경유한다(축 교체, 티켓 11:
+//   scripts/check-skip-signalling.sh가 직접 방출을 red로 강제한다).
+// skip(4) 방출 — 위 종료코드 어휘의 함수형(산문 SSOT를 코드로). 마커와 종료코드의 같은-줄 원자성은
+// **이 구현 줄 하나가 소유**하고(정확 1은 tests/gates/test_guard-skip-signalling.bats가 잰다),
 // 콜사이트는 짝 규약을 알 필요가 없어진다(셸 레인의 대응물은 scripts/lib/guard.sh의 guard_skip).
-// 문자열 연결(쌍따옴표)인 이유: 짝 검사는 마커가 따옴표 리터럴 안에 있을 때만 emission으로 본다.
+// 문자열 연결(쌍따옴표)인 이유: 마커 검출은 마커가 따옴표 리터럴 안에 있을 때만 emission으로 본다.
 export function skip(guard: string, reason: string): never {
   console.log("SKIP: " + guard + ": " + reason); process.exit(4);
 }

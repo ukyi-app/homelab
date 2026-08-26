@@ -29,40 +29,91 @@ fixture_suite() {   # $1: 하위 디렉토리명
 # --- 정적: 마커와 종료코드가 짝을 이루는가 (규약 드리프트 차단) ---
 
 @test "check-skip-signalling passes on the current tree and reaches its domain" {
-  # 스캔 건수를 함께 단언한다 — 열거가 무너져 0건을 봐도 '위반 0'과 똑같이 빈 출력이기 때문.
+  # 스캔 신호를 함께 단언한다 — 열거가 무너져 0건을 봐도 '위반 0'과 똑같이 빈 출력이기 때문.
   run bash "$ROOT/scripts/check-skip-signalling.sh"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -qE '\([0-9]{2,}건 스캔\)'
+  echo "$output" | grep -qE '^SCAN: check-skip-signalling: [0-9]{2,}$'
 }
 
-@test "the detector catches a marker without the skip exit code (not vacuous)" {
+@test "the detector rejects a hand-rolled SKIP emission (helper bypass, shell)" {
+  # 축 교체(11): 검사는 "같은 줄 짝"이 아니라 **헬퍼 경유**다 — 마커·종료코드의 원자성은
+  # guard_skip/skip() 구현이 소유하므로, 콜사이트의 직접 방출은 짝이 맞아도 위반이다.
   printf '%s\n' 'echo "SKIP: fake: 도메인 없음"' 'exit 0' > "$BATS_TEST_TMPDIR/fake.sh"
   run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/fake.sh"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q "SKIP 마커인데 skip 종료코드 아님"
+  echo "$output" | grep -q "guard_skip"
 }
 
-@test "the detector catches the reverse violation (skip exit code without a marker)" {
+@test "the detector rejects a hand-rolled skip exit code (helper bypass, shell)" {
   printf '%s\n' 'echo "도메인 없음"' 'exit 4' > "$BATS_TEST_TMPDIR/fake2.sh"
   run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/fake2.sh"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q "skip 종료코드인데 SKIP 마커 없음"
+  echo "$output" | grep -q "guard_skip"
 }
 
-@test "the detector understands the TypeScript spelling of the skip exit code" {
-  printf '%s\n' 'console.log("SKIP: fake-ts: 도메인 없음");' 'process.exit(0);' > "$BATS_TEST_TMPDIR/fake.ts"
+@test "the detector rejects hand-rolled TypeScript skip signalling even when the old pair rule holds" {
+  # 옛 축(같은 줄 짝)을 만족하는 형태도 새 축에선 위반이다 — 원자성은 skip() 한 곳의 구현이다.
+  printf '%s\n' 'console.log("SKIP: fake-ts: 도메인 없음"); process.exit(4);' > "$BATS_TEST_TMPDIR/fake.ts"
   run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/fake.ts"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q "SKIP 마커인데 skip 종료코드 아님"
+  echo "$output" | grep -q "skip()"
 }
 
-# 리뷰 실측: `##` 절단이 셸에도 적용돼 `${f##*/}` 가 있는 줄의 skip 종료코드가 통째로 잘려
-# **위반이 조용히 통과**했다(이 가드가 막으려는 바로 그 병). 이제 Makefile에만 적용된다.
-@test "a shell parameter expansion (##) does not hide a marker-less skip exit" {
+@test "a bare TypeScript skip exit without a marker is still caught (TS exit lane witness)" {
+  # 리뷰 실측(11): 옛 패턴의 \xHH는 GNU grep ERE에서 리터럴 'x'라 이 픽스처를 영구 미탐했고,
+  # 마커 동반 픽스처(위)는 P_EMIT 레인이 잡아 게이트가 초록이었다 — 레인 독립 증인이 이것이다.
+  printf '%s\n' 'process.exit(4);' > "$BATS_TEST_TMPDIR/bare.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/bare.ts"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "skip()"
+}
+
+@test "a printf %s emission of the marker is caught (the repo's dominant idiom)" {
+  # 리뷰 실측(11): POSIX 브래킷에 \n 이스케이프는 없다 — [^\n]은 '역슬래시·n 제외'라서
+  # printf "%s\n"(포맷 문자열의 n이 그 클래스에 걸린다)가 우회 통로였다.
+  printf '%s\n' 'printf "%s\n" "SKIP: fake: 도메인 없음"' > "$BATS_TEST_TMPDIR/pf.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/pf.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "guard_skip"
+}
+
+@test "the guard body holds no fail-open idiom (detector death must not read as zero findings)" {
+  # `|| true`는 무매치(rc 1)와 검출기 사망(rc>=2)을 구별하지 못한다 — 사망 시 '위반 0'으로 읽히는
+  # fail-open의 관용구 자체가 가드 **코드**에 없음을 못박는다(rc 판정은 lane_grep이 소유).
+  # 주석은 스트립한다 — 처방을 설명하는 산문의 언급은 관용구가 아니다(유일성 테스트와 같은 규율).
+  n="$(sed 's|^[[:space:]]*#.*||' "$ROOT/scripts/check-skip-signalling.sh" | grep -cF '|| true' || true)"
+  [ "$n" -eq 0 ]
+}
+
+@test "a missing fixture path is a failure, not a silent green" {
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/no-such-file.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "읽을 수 없는 대상"
+}
+
+@test "argument mode emits the scan signal (venue parity with the default mode)" {
+  # 신호 비대칭이면 게이트 픽스처가 경로를 잘못 만들어도 0건 스캔이 초록으로 통과한다.
+  printf '%s\n' 'true' > "$BATS_TEST_TMPDIR/one.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/one.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^SCAN: check-skip-signalling: 1$"
+}
+
+@test "helper-routed skip signalling is accepted in both languages" {
+  printf '%s\n' 'guard_skip fake "도메인 없음"' > "$BATS_TEST_TMPDIR/ok.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/ok.sh"
+  [ "$status" -eq 0 ]
+  printf '%s\n' 'skip("fake-ts", "도메인 없음");' > "$BATS_TEST_TMPDIR/ok.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/ok.ts"
+  [ "$status" -eq 0 ]
+}
+
+# `${f##*/}` 파라미터 확장이 있는 줄의 직접 skip 종료코드도 잡힌다(옛 ## 절단 오적용 회귀 방지).
+@test "a shell parameter expansion (##) does not hide a hand-rolled skip exit" {
   printf '%s\n' 'b="${f##*/}"; exit 4' > "$BATS_TEST_TMPDIR/pe.sh"
   run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/pe.sh"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q "skip 종료코드인데 SKIP 마커 없음"
+  echo "$output" | grep -q "guard_skip"
 }
 
 # 주석줄 제외 규칙의 커버 — 규약을 설명하는 산문이 곳곳에 있어서 이 규칙이 없으면 전부 오탐이다.
@@ -78,12 +129,41 @@ fixture_suite() {   # $1: 하위 디렉토리명
   [ "$status" -eq 0 ]
 }
 
-# TS 짝의 **정방향** — 마커와 process.exit(4)가 같은 줄이면 위반이 아니다. 이 갈래가 없으면
-# TS 종료코드 인식 로직이 무커버로 남는다(리뷰가 mutation 생존으로 지적).
-@test "a TypeScript skip site with both marker and exit code is accepted" {
-  printf '%s\n' 'console.log("SKIP: fake-ts: 도메인 없음"); process.exit(4);' > "$BATS_TEST_TMPDIR/ok.ts"
-  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/ok.ts"
+# Makefile 레인만 옛 같은-줄 짝 검사로 잔존한다(함수를 쓸 수 없는 자리) — 정방향·역방향 각각.
+@test "a Makefile recipe with marker and exit code on one line is accepted (surviving pair lane)" {
+  printf '%s\n' 'verify-x:' '	@echo "SKIP: x: 도메인 없음" && exit 4' > "$BATS_TEST_TMPDIR/Makefile.ok"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/Makefile.ok"
   [ "$status" -eq 0 ]
+}
+
+@test "a Makefile recipe with a bare skip exit code is still a violation (pair lane teeth)" {
+  printf '%s\n' 'verify-x:' '	@exit 4' > "$BATS_TEST_TMPDIR/Makefile.bad"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/Makefile.bad"
+  [ "$status" -ne 0 ]
+}
+
+@test "a Makefile recipe emitting the marker without the exit code is a violation (reverse pair)" {
+  # 이 방향이 이 규약의 원래 병이다 — 마커만 내고 0으로 끝나면 호출자에겐 여전히 성공이다.
+  printf '%s\n' 'verify-x:' '	@echo "SKIP: verify-x: 도메인 없음"' > "$BATS_TEST_TMPDIR/Makefile.rev"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/Makefile.rev"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "skip 종료코드 아님"
+}
+
+@test "the guard scans itself clean (assembled patterns need no self-exclusion)" {
+  # AC②의 실증 — 검사 패턴이 전부 조립식이라 이 파일 소스에 위반 모양의 연속 리터럴이 없고,
+  # 따라서 자기 자신을 스캔 대상에 두고도 green이다(옛 판의 self-exclusion이 소멸한 근거).
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$ROOT/scripts/check-skip-signalling.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^SCAN: check-skip-signalling: 1$"
+}
+
+@test "the helper implementations stay singular (one emission in guard.sh, one in cli.ts)" {
+  # 구현체가 갈라지면(방출이 한 곳 더 생기면) 원자성 주장이 두 번째 진실을 얻는다 — 정확 1을 못박는다.
+  n="$(sed 's|^[[:space:]]*#.*||' scripts/lib/guard.sh | grep -cE 'exit 4([^0-9]|$)')"
+  [ "$n" -eq 1 ]
+  n="$(sed 's|^[[:space:]]*//.*||' tools/lib/cli.ts | grep -cF 'process.exit(4)')"
+  [ "$n" -eq 1 ]
 }
 
 @test "the enumeration floor fires when the scan domain collapses" {

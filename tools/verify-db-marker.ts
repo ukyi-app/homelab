@@ -7,7 +7,8 @@
 // 권위: ensure-role-password Job의 passwordStatus.<role>.resourceVersion == 적용된 비번 Secret의
 // metadata.resourceVersion(라이브 확인). 마커는 그 값을 기록하고, 이 도구는 현재 Secret rv와 대조한다.
 // owner-local(admin kubeconfig) — DB가 'usable'한지의 단일 권위. WS2 온보딩 수용/activation이 호출.
-import { execFileSync } from "node:child_process";
+// 실행은 exec seam 경유(d6③) — timeoutMs 0으로 종전 무-timeout 동작 보존. 실패 판정(die 문구)은 콜사이트 소유.
+import { sh } from "./lib/exec.ts";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
 import { typedFlags, type TypedFlags } from "./lib/cli.ts";
 
@@ -22,14 +23,21 @@ const ns = f.str("--namespace", "database")!;
 if (!name) die("--name <db> 필수");
 if (!RESOURCE_NAME_RE.test(name)) die(`db 이름 형식 불량: ${name}`);
 
-const kubectl = (...a: string[]) => execFileSync("kubectl", a, { encoding: "utf8" });
+const kubectl = (...a: string[]): string => {
+  const r = sh("kubectl", a, { timeoutMs: 0 });
+  // throw 의미 보존 — 마커 조회는 콜사이트 catch가 die로 접고, rv 조회 2곳은 종전대로 uncaught(exit 1).
+  if (!r.ok) throw new Error(r.err || `kubectl 실패(exit ${r.status})`);
+  return r.out;
+};
 
 // 마커 ConfigMap — 부재면 DB가 아직 verified되지 않음(ensure-role-password 미완료/실패) = fail-closed
 let markerJson: string;
 try {
   markerJson = kubectl("-n", ns, "get", "configmap", `db-${name}-ready`, "-o", "json");
-} catch {
-  die(`마커 ConfigMap db-${name}-ready 부재 — DB가 아직 verified되지 않음(ensure-role-password 미완료/실패). 온보딩 진행 금지`);
+} catch (e) {
+  // kubectl의 실제 실패 사유를 동봉한다 — 연결/인증/권한 실패가 "마커 부재"로 오진단되면 운영자가
+  // 엉뚱한 곳(ensure-role-password)을 판다(종전 execFileSync는 stderr를 화면에 흘려 이 정보가 살아 있었다).
+  die(`마커 ConfigMap db-${name}-ready 조회 실패 — DB가 아직 verified되지 않았거나 클러스터 접근이 깨졌다(온보딩 진행 금지). kubectl: ${e instanceof Error ? e.message : String(e)}`);
 }
 const data: Record<string, string> = (JSON.parse(markerJson).data ?? {});
 const markerOwner = data.ownerSecretResourceVersion;

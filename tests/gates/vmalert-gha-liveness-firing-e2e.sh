@@ -56,39 +56,32 @@ N_BACK=2                # 연속 역행 폴 수. 1이면 지속이 `for:`와 같
 BACK_S=1855080          # 역행 폭 515.3h — 2026-08-19 라이브 실측 최대치(bump-poll)
 
 # ── 1) 배포 매니페스트에서 파라미터 파생(하드코딩 0) ───────────────────────────────────────────────
-vme_derive_stack_params "$STACK"
+# 파라미터 파생·작업공간·룰 추출의 조립 순서는 lib(vme_scenario)이 소유한다 — 아래 한 호출이 기동이다.
 
 # exporter 크론 주기 = push 주기. 룰의 rollup 윈도 하한이 여기서 나온다.
 CRON_MIN="$(grep -oE '^  schedule: "\*/([0-9]+) ' "$EXPORTER" | grep -oE '[0-9]+' || true)"
 [ -n "$CRON_MIN" ] || vme_fault "exporter 크론 주기 추출 실패($EXPORTER)"
 PUSH_S=$(( CRON_MIN * 60 ))
 
-vme_workspace "r6gha-e2e-net-$$"
-
-# ── 2) 배포 ConfigMap에서 룰 바이트 그대로 추출 ────────────────────────────────────────────────────
-# ⚠️ 룰을 여기에 재작성하면 "배포된 것"이 아니라 "내가 적은 것"을 검증하게 된다.
-# ⚠️ 추출은 **yq**로 한다 — 형제 하네스와 같은 도구다. python PyYAML을 쓰면 러너·로컬 어디서든
-#    설치 보장이 없어 하네스가 환경에 따라 조용히 못 도는 자리가 된다(실측으로 겪었다).
-yq '.data["r6.yaml"]' "$RULES_CM" > "$VME_TMP/r6-deployed.yaml"
-[ -s "$VME_TMP/r6-deployed.yaml" ] || vme_fault "룰 추출 실패: $RULES_CM"
+vme_scenario "r6gha-e2e-net-$$" "$STACK" "$RULES_CM" "r6.yaml"
 
 # fail-closed: 하네스가 겨냥하는 룰이 실제로 존재하는지(리네임 시 무성 무측정 방지)
 for a in "$STALE_ALERT" "$HB_ALERT" "$SCRAPE_ALERT"; do
-  grep -q "alert: $a" "$VME_TMP/r6-deployed.yaml" \
+  grep -q "alert: $a" "$VME_RULES" \
     || vme_fault "배포 룰에 'alert: $a' 부재 — 하네스가 아무것도 측정하지 않는다"
 done
 
 for a in "$STALE_ALERT" "$HB_ALERT" "$SCRAPE_ALERT"; do
-  e="$(vme_alert_expr "$VME_TMP/r6-deployed.yaml" "$a")"
+  e="$(vme_alert_expr "$VME_RULES" "$a")"
   [ -n "$e" ] || vme_fault "$a: 배포 룰에서 expr 추출 실패"
-  f="$(vme_alert_for "$VME_TMP/r6-deployed.yaml" "$a")"
+  f="$(vme_alert_for "$VME_RULES" "$a")"
   [ -n "$f" ] || vme_fault "$a: for: 부재(무매치 또는 키 없음)"
 done
-STALE_EXPR="$(vme_alert_expr "$VME_TMP/r6-deployed.yaml" "$STALE_ALERT")"
-STALE_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_TMP/r6-deployed.yaml" "$STALE_ALERT")")"
-HB_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_TMP/r6-deployed.yaml" "$HB_ALERT")")"
-SCRAPE_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_TMP/r6-deployed.yaml" "$SCRAPE_ALERT")")"
-HB_EXPR="$(vme_alert_expr "$VME_TMP/r6-deployed.yaml" "$HB_ALERT")"
+STALE_EXPR="$(vme_alert_expr "$VME_RULES" "$STALE_ALERT")"
+STALE_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_RULES" "$STALE_ALERT")")"
+HB_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_RULES" "$HB_ALERT")")"
+SCRAPE_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_RULES" "$SCRAPE_ALERT")")"
+HB_EXPR="$(vme_alert_expr "$VME_RULES" "$HB_ALERT")"
 HB_THRESHOLD_S="$(grep -oE '>[[:space:]]*[0-9]+' <<<"$HB_EXPR" | head -1 | grep -oE '[0-9]+' || true)"
 [ -n "$HB_THRESHOLD_S" ] || vme_fault "$HB_ALERT: 임계 상수 추출 실패"
 
@@ -214,11 +207,10 @@ PY
 
 run_scenario() { # $1=시나리오 [$2=룰 파일(기본: 배포 룰) $3=vm 이름 접미사]
   local scen="$1"
-  local rules="${2:-$VME_TMP/r6-deployed.yaml}"
+  local rules="${2:-$VME_RULES}"
   local vm="vm-gha-$scen${3:-}-$$"
-  vme_start_vmsingle "$vm" "$VME_VM_VER"
   gen "$VME_TMP/$scen.jsonl" "$scen"
-  vme_import "$VME_TMP/$scen.jsonl"
+  vme_leg "$vm" "$VME_TMP/$scen.jsonl"
   vme_replay "$vm" "$VME_VA_VER" "$rules" "$VME_EVAL" "$VME_LOOKBACK" "$FROM_EPOCH" "$TO_EPOCH"
 }
 

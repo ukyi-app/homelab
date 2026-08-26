@@ -83,3 +83,36 @@ setup() {
   run yq -e '.env.LC_ALL == "C.UTF-8"' "$ROOT/.github/workflows/ci.yaml"
   [ "$status" -eq 0 ]
 }
+
+@test "lane D: a scripts guard missing guard_init is a violation (prologue omission goes red)" {
+  # d2(11) — 새 가드가 프롤로그 커널(guard_init)을 건너뛰면 LC_ALL 전역 export가 빠져 이 가드가
+  # 잡는 바로 그 병(로케일 의존 콜레이션)의 신설 표면이 된다. 가드 모양(check-/verify- 접두)의
+  # 파일은 guard_init 호출이 정적으로 강제된다.
+  mkdir -p "$BATS_TEST_TMPDIR/scripts"
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'echo ok' > "$BATS_TEST_TMPDIR/scripts/check-fake.sh"
+  run bash "$ROOT/scripts/check-locale-collation.sh" "$BATS_TEST_TMPDIR/scripts/check-fake.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "guard_init"
+}
+
+@test "lane D: guard_init in a comment alone is still red (the lane demands a call, not a mention)" {
+  # 리뷰 실측(11): 모든 가드 머리에 "프롤로그는 guard_init(…)이 소유한다" 주석을 심었으므로,
+  # 언급만으로 통과하면 호출 줄을 지워도 레인 D가 초록이다 — 주석 스트립 후 행두 호출만 센다.
+  mkdir -p "$BATS_TEST_TMPDIR/scripts"
+  printf '%s\n' '#!/usr/bin/env bash' '# 프롤로그는 guard_init(scripts/lib/guard.sh)이 소유한다.' 'echo ok' \
+    > "$BATS_TEST_TMPDIR/scripts/check-commentonly.sh"
+  run bash "$ROOT/scripts/check-locale-collation.sh" "$BATS_TEST_TMPDIR/scripts/check-commentonly.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "guard_init"
+}
+
+@test "lane D: a guard that calls guard_init passes, and non-guard scripts are out of scope" {
+  mkdir -p "$BATS_TEST_TMPDIR/scripts"
+  printf '%s\n' '#!/usr/bin/env bash' '. lib/guard.sh' 'guard_init check-fake' > "$BATS_TEST_TMPDIR/scripts/check-fake2.sh"
+  run bash "$ROOT/scripts/check-locale-collation.sh" "$BATS_TEST_TMPDIR/scripts/check-fake2.sh"
+  [ "$status" -eq 0 ]
+  # 가드 모양이 아닌 스크립트(부트스트랩류)는 레인 D 대상 밖이다.
+  printf '%s\n' '#!/usr/bin/env bash' 'echo tool' > "$BATS_TEST_TMPDIR/scripts/run-something.sh"
+  run bash "$ROOT/scripts/check-locale-collation.sh" "$BATS_TEST_TMPDIR/scripts/run-something.sh"
+  [ "$status" -eq 0 ]
+}
