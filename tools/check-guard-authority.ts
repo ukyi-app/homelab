@@ -34,7 +34,7 @@
 // owner-local `make verify-runbook-index`로 이미 권위를 갖는다.
 //
 // 종료코드: tools/lib/cli.ts 규약(0=통과 · 1=권위 0인 가드 존재 · 2=사용법).
-import { execFileSync } from "node:child_process";
+import { sh as shExec } from "./lib/exec.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { typedFlags } from "./lib/cli.ts";
@@ -183,11 +183,11 @@ export function invokesGuard(text: string, guard: string, allGuards: string[]): 
 
 // ── venue 수집 ────────────────────────────────────────────────────────────────
 function sh(cmd: string, args: string[], root: string): string {
-  try {
-    return execFileSync(cmd, args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  } catch {
-    return "";
-  }
+  // seam 경유(d6③) — venue 수집은 실패를 빈 문자열로 접는 기존 관용 유지(부재 venue = 빈 텍스트,
+  // 열거 붕괴는 SKIP_EMISSION 바닥값이 잡는다). stderr는 버린다(종전 stdio ignore와 동일 효과).
+  // timeoutMs 0 = 종전 무-timeout 보존(git log 전 이력 스캔이 느린 디스크에서 30s를 넘을 수 있다).
+  const r = shExec(cmd, args, { cwd: root, timeoutMs: 0 });
+  return r.ok ? r.out : "";
 }
 
 type Step = { run?: string; uses?: string };

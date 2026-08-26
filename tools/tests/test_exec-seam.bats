@@ -89,21 +89,23 @@ EOF
   echo "$output" | grep -q '^git=true$'
 }
 
-@test "the bump cluster imports no child_process directly (execution routes through the seam)" {
-  # d6② — bump 계열의 subprocess 실행은 전부 seam(명명 adapter)을 경유한다. 직접 import가 되살아나면
-  # maxBuffer/timeout/원장 계약이 그 사이트만 조용히 빠진다(ENOBUFS 죽음이 spawn 오류로만 보이는 클래스).
-  # 주석을 걷어낸 소스에서 `child_process` 단어 자체를 센다 — `from "child_process"`(node: 접두 생략)·
-  # 동적 import까지 한 그물로 잡고, ENOBUFS 실측 근거를 서술한 주석의 언급만 정당하게 남긴다.
-  # ⚠️ 5파일 열거는 이행기 표식이다(CONTRIBUTING의 소비처 하드코딩 금지 대상): 16(exec-remainder)이
+@test "the bump and check clusters import no child_process directly (execution routes through the seam)" {
+  # d6②③ — bump 계열(14)·check 계열(15)의 subprocess 실행은 전부 seam(명명 adapter)을 경유한다.
+  # 직접 import가 되살아나면 maxBuffer/timeout/원장 계약이 그 사이트만 조용히 빠진다(ENOBUFS 죽음이
+  # spawn 오류로만 보이는 클래스). 주석을 걷어낸 소스에서 `child_process` 단어 자체를 센다 —
+  # `from "child_process"`(node: 접두 생략)·동적 import까지 한 그물로 잡되, ENOBUFS 실측 근거를
+  # 서술한 주석의 언급(ensure-bump-pr)만 주석-스트립으로 정당하게 남긴다.
+  # ⚠️ 파일 열거는 이행기 표식이다(CONTRIBUTING의 소비처 하드코딩 금지 대상): 16(exec-remainder)이
   #    착지하면 "tools/ 전체에서 child_process는 exec.ts 하나"의 **레포 파생** 증인으로 교체한다.
   n=0
-  for f in tools/poll-ghcr.ts tools/run-bump-plan.ts tools/ensure-bump-pr.ts tools/bump-tag.ts tools/repin-ops-image.ts; do
+  for f in tools/poll-ghcr.ts tools/run-bump-plan.ts tools/ensure-bump-pr.ts tools/bump-tag.ts tools/repin-ops-image.ts \
+           tools/check-guard-authority.ts tools/check-ci-parity.ts tools/check-image-ownership.ts tools/verify-db-marker.ts; do
     [ -f "$ROOT/$f" ] || { echo "roster drift: $f가 없다(개명/이동 — 증인 목록을 갱신하라)"; false; }
     run bash -c "sed 's|//.*||' '$ROOT/$f' | grep -c 'child_process'"
     [ "$output" = "0" ] || { echo "seam bypass: $f가 child_process를 직접 쓴다(${output}곳)"; false; }
     n=$((n + 1))
   done
-  [ "$n" -eq 5 ]   # 열거 붕괴 바닥값 — 루프가 굴러가지 않으면 여기서 죽는다
+  [ "$n" -eq 9 ]   # 열거 붕괴 바닥값 — 루프가 굴러가지 않으면 여기서 죽는다
 }
 
 @test "the exit status rides the Cmd result (callsites keep rc semantics without touching child_process)" {

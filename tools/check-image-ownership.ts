@@ -22,7 +22,8 @@
 // 어디에도 안 걸린 채 데이터 내구성 경로에 있었다(D-3). 그래서 숨은 참조도 따로 스캔한다.
 //
 // 종료코드: tools/lib/cli.ts 규약(0=통과 · 1=검증 실패 · 2=사용법).
-import { execFileSync } from "node:child_process";
+// 실행은 exec seam 경유(d6③) — git 실패는 빈 집합으로 접는 기존 관용 유지(바닥값이 붕괴를 잡는다).
+import { git } from "./lib/exec.ts";
 import { readFileSync } from "node:fs";
 import { typedFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
@@ -219,10 +220,10 @@ export function resolveOwner(r: Ref, renovate: Renovate, bespoke: Set<string>): 
 export function bespokeFiles(root: string): Set<string> {
   const out = new Set<string>();
   // descriptor 자체는 `.json`이라 매니페스트 스코프에 없다 — git 열거로 찾는다.
-  let listed = "";
-  try {
-    listed = execFileSync("git", ["ls-files", "--", "*/.image-pin.json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  } catch { /* git 없음 = 빈 집합. 아래 바닥값이 잡는다. */ }
+  // seam은 throw하지 않는다 — git 부재/실패는 !r.ok로 접혀 빈 집합이 되고, 아래 바닥값이 붕괴를 잡는다.
+  // timeoutMs 0 = 종전 execFileSync 무-timeout 보존.
+  const ls = git(root, ["ls-files", "--", "*/.image-pin.json"], { timeoutMs: 0 });
+  const listed = ls.ok ? ls.out : "";
   for (const d of listed.split("\n").filter(Boolean)) {
     try {
       const desc = JSON.parse(readFileSync(`${root}/${d}`, "utf8")) as { file?: string };
@@ -303,8 +304,8 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
   // `chart:<이름>` 항목으로 선언됐는지 본다 — 새 차트를 들이면 선언을 강제한다.
   let charts: string[] = [];
   try {
-    const files = execFileSync("git", ["ls-files", "--", "platform"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
-      .split("\n").filter(Boolean);
+    const ls = git(root, ["ls-files", "--", "platform"], { timeoutMs: 0 });
+    const files = (ls.ok ? ls.out : "").split("\n").filter(Boolean);
     for (const f of files) {
       // ⚠️ 모양을 **파일명이 아니라 kind/스키마로** 판정한다. 경로 패턴으로 좁히면 실존하는 모양이
       // 조용히 빠진다 — 적대 검토 실측: `platform/argocd/root/newchart-app.yaml`(root-app이 recurse로
@@ -331,7 +332,7 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
         }
       }
     }
-  } catch { /* git 부재 — 아래 바닥값이 잡는다 */ }
+  } catch { /* 루프 중간 readFileSync/파싱 실패 = charts 열거의 조용한 절단 — 아래 선언 대조·바닥값이 잡는다(git 부재는 위 ls.ok 분기가 담당) */ }
   charts = [...new Set(charts)].sort();
   for (const c of charts) {
     if (!declared.has(`chart:${c}`)) {
