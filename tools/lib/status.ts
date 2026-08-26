@@ -24,7 +24,8 @@ const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?:\
 
 // 이 앱을 대상으로 하는 homelab 변이 PR 브랜치 판정 — 두 SSOT의 분업:
 //   · bump 레인 = tools/lib/bump-plan.ts(parseBranch — kind 인코딩 `bump-poll/<kind>/<name>-<tag>`,
-//     구형 `bump-poll/<name>-<tag>`는 app 해석). catalog의 파싱 전용 행으로 겹판정하지 않는다(두 번째 진실 금지).
+//     구형 `bump-poll/<name>-<tag>`는 app 해석). catalog에 있던 파싱 전용 행은 18에서 폐기됐다
+//     (두 번째 진실 금지 — 브랜치 문법 SSOT는 parseBranch뿐이다).
 //   · 앱 키 디스패처 레인(create-app/update-secrets/teardown) = 레인 신원 행(catalog-rows)에서 파생 —
 //     구조+run_id 형식을 행이 소유한다(isDispatchLaneBranch).
 // 접두만 보면 하이픈 앱명에서 형제 앱을 오귀속하므로(page ↔ page-extra) tail 형식까지가 판정이다.

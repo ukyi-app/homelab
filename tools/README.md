@@ -231,11 +231,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   행 = path(라우팅 어휘)+desc(--help)+op(타입 입력→계약 Envelope). argv 파싱·렌더링은 CLI 셸
   소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1). 후속 동사는 여기 행을 추가.
 - **`lib/catalog-rows.ts`** — 변이 레인 신원 행 + 결과 계약 행(**순수 기술자, import 0** — 설계 게이트 r1 D3).
-  액션별 한 행 = 디스패처/reusable 파일명 · 디스패치 입력 이름 · 브랜치 중립 패턴({key}·{runId}·{tag}) ·
+  액션별 한 행 = 디스패처/reusable 파일명 · 디스패치 입력 이름 · 브랜치 중립 패턴({key}·{runId}) ·
   수렴 Application 집합+표면 패턴. 생성 방향(verbs·secrets의 `laneMutationFields`)과 파싱 방향(status의
-  `isDispatchLaneBranch`/`laneBranchTail`)이 같은 행에서 파생된다. bump-poll은 CLI 동사 없는
-  파싱 전용 레인(tail=tag — TAG_RE 조합은 소비자 몫). 워크플로 YAML과의 정적 parity 가드는
-  후속 티켓이 이 행을 대조 축으로 쓴다. 왕복·리터럴 앵커는 test_lane-rows.bats.
+  `isDispatchLaneBranch`/`laneBranchTail`)이 같은 행에서 파생된다. bump-poll 브랜치 문법은 이 표의
+  소관이 아니다 — SSOT는 `lib/bump-plan.ts`(parseBranch)이고, 파싱 전용 행은 18에서 폐기됐다.
+  워크플로 YAML과의 정적 parity 가드는 후속 티켓이 이 행을 대조 축으로 쓴다.
+  왕복·리터럴 앵커는 test_lane-rows.bats.
 - **`lib/resource-layout.ts`** — 리소스 산출물 레이아웃 커널(cli-deepening 심화 4, CONTEXT.md
   "산출물 레이아웃"): kind+name → 산출물 집합(파일 경로 · kustomization 엔트리 · role 라벨
   handles/envKeys · 원장 행 · tombstone 키)과 **scope 태그**(purge-제거/공유-잔존/수동-이연 —
