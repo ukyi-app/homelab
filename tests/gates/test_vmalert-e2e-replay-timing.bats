@@ -52,6 +52,26 @@ sites() { git ls-files 'tests/gates/*.sh' 'tests/gates/lib/*.sh' | xargs grep -l
   done
 }
 
+@test "no firing-e2e harness redefines the lib expr/rollup helpers (verdict vocabulary stays local by policy)" {
+  # lib 헬퍼(vme_alert_expr·vme_rollup_windows)의 로컬 재정의는 byte-identical 사본 표면이다 — 한쪽만
+  # 바뀌면 하네스가 배포 룰이 아니라 자기 사본의 해석을 검증하게 된다(d5 사본-0 축의 확장).
+  # ⚠️ 판정 어휘(fault/contract/fail/pass)는 **명시 제외**다 — 문서화된 하네스-로컬 정책
+  #    (CONTEXT.md 「판정 어휘」: (preflight) 라벨과 로컬 집계가 진단의 절반)이라 측정 도메인 밖이다.
+  #    2-피연산자 rollup preflight(bulkssd)도 로컬 유지다(vme_assert_rollup_ok가 표현 불가).
+  hs="$(git ls-files 'tests/gates/vmalert-*-firing-e2e.sh')"
+  n="$(printf '%s\n' "$hs" | grep -c .)"
+  [ "$n" -ge 6 ] || { echo "발화 e2e 하네스 ${n}건 < 6 — 열거 붕괴(무측정 초록)"; return 1; }
+  for f in $hs; do
+    # 이름 축 — lib 헬퍼(및 그 접두 없는 원형)의 로컬 재정의 금지.
+    run grep -cE '^[[:space:]]*(vme_)?(alert_expr|alert_for|record_expr|rollup_windows|rollup_count)[[:space:]]*\(\)' "$f"
+    [ "$output" = "0" ] || { echo "$f: lib 헬퍼의 로컬 재정의(${output}곳) — vme_* 헬퍼를 쓰라(사본은 red를 내지 않고 갈린다)"; return 1; }
+    # 형태 축 — 개명해도 잡는다: yq 룰-워크 리터럴은 룰 해석 사본의 지문이다(lib 밖 출현 0 —
+    # drift의 record_expr 사본이 이름 축만으로는 초록이던 실측 구멍의 봉쇄).
+    run grep -cF 'groups[].rules[]' "$f"
+    [ "$output" = "0" ] || { echo "$f: yq 룰-워크 리터럴(${output}곳) — 룰 해석은 lib 헬퍼가 소유한다(개명 사본도 이 지문으로 잡힌다)"; return 1; }
+  done
+}
+
 @test "no replay site hardcodes a rulesDelay below the measured-safe floor" {
   # 리터럴로 박은 사이트는 체인이 있다고 가정해야 안전하다 → 4s 하한. 파생($delay)을 쓰는 사이트는
   # 아래 별도 테스트가 파생 자체를 검증한다.

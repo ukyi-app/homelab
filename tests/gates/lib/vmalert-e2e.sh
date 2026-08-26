@@ -275,8 +275,12 @@ vme_alert_series() { vme_promql "count(count_over_time(ALERTS{alertname=\"$1\"}[
 # ── 하네스-무관 공통 골격 ───────────────────────────────────────────────────────────────────────────
 # 아래는 알림별 산술과 무관한 하네스 골격이다(종료 규약·룰 추출·매니페스트 파생·판정 집계·작업공간).
 # ⚠️ 형제 bulkssd·drift 하네스는 접두사 없는 `fault`/`contract`/`fail`/`pass`를 source **뒤에** 자체
-#    정의한다 — 진단 라벨("(preflight)")과 판정 집계는 **하네스-로컬 정책**이라 남긴 것이고, 동명이므로
-#    그쪽 정의가 이긴다. 프리미티브(질의·docker·매니페스트 파생·작업공간)는 전부 여기로 흡수됐다.
+#    정의한다 — 진단 라벨("(preflight)")과 판정 집계는 **하네스-로컬 정책**이라 남긴 것이다(lib은
+#    vme_ 접두 판정 함수만 정의하므로 이름 충돌은 없다). 프리미티브(질의·docker·매니페스트 파생·
+#    작업공간·expr/for/record/rollup 헬퍼)는 발화 e2e 6종 전부에서 여기로 흡수됐다(d5·09 — 기동은
+#    vme_scenario/vme_leg 경유가 유일 표준). 하네스-로컬로 남는 것은 판정 어휘 4함수와 bulkssd의
+#    2-피연산자 rollup preflight **산술**뿐이다(vme_assert_rollup_ok가 표현 불가 — 산술은 lib 헬퍼
+#    산출값 위에서 돈다).
 
 # 종료 규약: 2 = HARNESS FAULT/CONTRACT(전제 붕괴·vacuity) · 1 = leg FAIL · 0 = OK
 vme_fault()    { echo "HARNESS FAULT: $*" >&2; exit 2; }
@@ -288,6 +292,14 @@ vme_pass() { echo "PASS $*"; }
 
 vme_alert_expr() { # $1=룰 yaml $2=alert 이름 → expr만(주석 제거 — 주석이 단언을 만족시키는 것 차단)
   yq '.groups[].rules[] | select(.alert=="'"$2"'") | .expr' "$1" | sed 's/#.*//'
+}
+
+vme_record_expr() { # $1=룰 yaml $2=record 이름 → expr만(주석 제거) — vme_alert_expr의 record 형제
+  yq '.groups[].rules[] | select(.record=="'"$2"'") | .expr' "$1" | sed 's/#.*//'
+}
+
+vme_rollup_count() { # $1=expr → expr 안의 rollup 함수 호출 수 (⚠️ pipefail: grep 무매치 1 → `|| true` 필수)
+  { grep -oE '[a-z_]+_over_time[[:space:]]*\(' <<<"$1" || true; } | wc -l | tr -d ' '
 }
 
 vme_alert_for() { # $1=룰 yaml $2=alert 이름 → for:(예 15m). **무매치·키 부재 = 빈 문자열**

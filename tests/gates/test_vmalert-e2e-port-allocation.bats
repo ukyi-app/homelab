@@ -99,17 +99,19 @@ band_assert() {
   "
 }
 
-@test "firing-e2e harnesses are enumerated and all allocate ports through the shared lib" {
+@test "firing-e2e harnesses boot through vme_leg and never docker-run vmsingle inline (ports stay lib-allocated)" {
   hs="$(git ls-files 'tests/gates/vmalert-*-firing-e2e.sh')"
   n="$(printf '%s\n' "$hs" | grep -c .)"
   # 열거 붕괴 방어 — 0건이면 아래 루프가 vacuous하게 통과한다(형제 test_vmalert-e2e-replay-timing과 동형).
-  [ "$n" -ge 3 ]
+  [ "$n" -ge 6 ]
   for f in $hs; do
-    # d5 이후 기동은 vme_leg(레그 조립 — start를 lib 내부에서 부른다) 경유가 표준이다. bulkssd는
-    # 아직 vme_start_vmsingle 직접 호출(09 이관 대기)이라 둘 다 lib 경유로 인정한다 — 09 착지 후
-    # vme_leg 하나로 좁힌다. 어느 쪽이든 포트 추첨은 lib(_vme_pick_port)만 지난다.
-    run grep -qE 'vme_leg |vme_start_vmsingle' "$f"
+    # d5·09 이후 기동은 vme_leg(레그 조립 — start·포트 추첨을 lib 내부에서 한다) 경유가 유일 표준이다.
+    run grep -qE '^[[:space:]]*vme_leg ' "$f"
     [ "$status" -eq 0 ]
+    # 이 레인의 고유 축: vmsingle을 인라인 docker run으로 띄우면 포트가 lib 추첨(_vme_pick_port)을
+    # 우회한다 — 밴드·프로브·재시도 처방 전부가 그 사이트만 빠진다.
+    run grep -c 'docker run.*victoria-metrics' "$f"
+    [ "$output" = "0" ]
   done
 }
 

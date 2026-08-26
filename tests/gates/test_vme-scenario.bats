@@ -17,10 +17,10 @@ setup() {
   chmod +x "$STUB/docker"
 }
 
-# 발화 하네스 열거는 레포에서 파생한다(CONTRIBUTING — 소비처 하드코딩 금지). bulkssd는 09 이관 대기의
-# **선언된 예외**다(아직 조립을 직접 나열한다) — 09 착지 후 이 예외를 지운다.
+# 발화 하네스 열거는 레포에서 파생한다(CONTRIBUTING — 소비처 하드코딩 금지). 예외 없음(09에서
+# bulkssd까지 흡수 완료 — 발화 e2e 전 종이 시나리오 경유다).
 harnesses() {
-  git ls-files 'tests/gates/vmalert-*-firing-e2e.sh' | grep -v 'vmalert-bulkssd-'
+  git ls-files 'tests/gates/vmalert-*-firing-e2e.sh'
 }
 
 # ── vme_scenario 계약(단위 — docker는 PATH 스텁: 네트워크 기동의 실증은 발화 e2e 5종이 갖는다) ─────
@@ -81,7 +81,7 @@ fixture_stack() {
     [ "$output" = "1" ] || { echo "assembly drift: $h의 vme_leg 호출이 ${output}회(기대 1 — 레그 함수 안 한 곳)"; false; }
     n=$((n + 1))
   done
-  [ "$n" -ge 5 ]   # 열거 붕괴 바닥값 — glob이 깨지면 루프가 vacuous해진다
+  [ "$n" -ge 6 ]   # 열거 붕괴 바닥값 — glob이 깨지면 루프가 vacuous해진다
 }
 
 @test "vme_leg owns the start-then-import order (start before import, both inside the lib)" {

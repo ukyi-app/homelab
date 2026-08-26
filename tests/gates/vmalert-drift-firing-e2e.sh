@@ -96,25 +96,17 @@ FOR_S="$(vme_to_s "$FOR")"
 # 위반해도 L3를 통과한다**. 그 갭은 관측이 아니라 **산술 단언**으로만 닫힌다. `for:`도 마찬가지로 가변
 # 룰에서 파생하기만 하면(예: 15m으로 낮춤) 아무도 못 잡는다 → 여기서 못박는다.
 # 위반은 **룰 판정이 아니라 전제 붕괴**다 → FAIL(exit 1)이 아니라 **HARNESS FAULT/CONTRACT(exit 2)**.
-record_expr() { # $1=룰 yaml → app:image_digest_drift의 expr만(주석 제거 — 주석이 단언을 만족시키는 것 차단)
-  yq '.groups[].rules[] | select(.record=="app:image_digest_drift") | .expr' "$1" | sed 's/#.*//'
-}
-rollup_count() { # $1=expr → expr 안의 rollup 함수 호출 수 (⚠️ pipefail: grep 무매치 1 → `|| true` 필수)
-  { grep -oE '[a-z_]+_over_time[[:space:]]*\(' <<<"$1" || true; } | wc -l | tr -d ' '
-}
-push_rollup_window() { # $1=expr → push 메트릭에 걸린 rollup 윈도(없으면 빈 문자열, 복수면 공백 구분)
-  { grep -oE '[a-z_]+_over_time[[:space:]]*\([[:space:]]*ghcr_latest_digest[[:space:]]*\[[0-9]+[smh]\]' <<<"$1" || true; } \
-    | { grep -oE '\[[0-9]+[smh]\]' || true; } | tr -d '[]' | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ *$//'
-}
+# expr/record/rollup 헬퍼는 lib 소유다(vme_record_expr·vme_rollup_count·vme_rollup_windows — byte
+# 사본 금지, 사본-0 단언이 잰다). phantom 산술·단언 자체는 이 하네스의 것이다.
 
 # ① `for: 20m` 고정 — 이 하네스에서 **유일하게 의도적으로 하드코딩한 상수**다(나머지는 전부 매니페스트 파생).
 #    페이징 임계 자체가 보존 계약이고(낮추면 페이징이 빨라지는 행위 변경), 아래 phantom 산술의 입력이다.
 [ "$FOR" = "20m" ] || contract "ImageDigestDrift for:가 20m이 아니다(현재: $FOR). 페이징 임계는 보존 계약이며 하네스 phantom 산술의 입력이다 — 바꾸려면 이 게이트와 계약을 함께 재설계하라."
 
-REC_EXPR="$(record_expr "$VME_RULES")"
+REC_EXPR="$(vme_record_expr "$VME_RULES" app:image_digest_drift)"
 [ -n "$REC_EXPR" ] || fault "배포 룰에서 record app:image_digest_drift의 expr 추출 실패"
-NROLL="$(rollup_count "$REC_EXPR")"
-W="$(push_rollup_window "$REC_EXPR")"
+NROLL="$(vme_rollup_count "$REC_EXPR")"
+W="$(vme_rollup_windows "$REC_EXPR" ghcr_latest_digest)"
 case "$NROLL" in
   0)
     # ⚠️ rollup 부재 = **이 버그 자체**다. 여기서 FAULT로 죽으면 RED 경로를 스스로 지우게 된다 →
@@ -136,7 +128,7 @@ esac
 
 # ② L8 픽스처 산술 자가검증: 과대 윈도 픽스처가 실제로 phantom을 **넘기는지**(W − 룩백 > for) 확인.
 #    파라미터가 드리프트해 L8이 이빨을 잃으면 조용히 통과시키지 말고 여기서 크게 실패시킨다.
-W_OW="$(push_rollup_window "$(record_expr "$TMP/r6-overwide.yaml")")"
+W_OW="$(vme_rollup_windows "$(vme_record_expr "$TMP/r6-overwide.yaml" app:image_digest_drift)" ghcr_latest_digest)"
 [ -n "$W_OW" ] || fault "fixtures/r6-overwide-window.yaml에서 rollup 윈도 추출 실패 — L8이 아무것도 증명하지 못한다"
 W_OW_S="$(vme_to_s "$W_OW")"
 

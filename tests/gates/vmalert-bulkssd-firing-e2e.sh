@@ -50,20 +50,14 @@ START_EPOCH="$(date +%s)"
 fault()    { echo "HARNESS FAULT (preflight): $*" >&2; exit 2; }
 contract() { echo "CONTRACT VIOLATION (preflight): $*" >&2; exit 2; }
 
-# ── 1) 배포 매니페스트에서 파라미터 파생 ────────────────────────────────────────────────────────────
-VA_VER="$(grep -oE 'victoriametrics/vmalert:v[0-9.]+' "$STACK/vmalert.yaml" | head -1 | cut -d: -f2)"
-VM_VER="$(grep -oE 'victoriametrics/victoria-metrics:v[0-9.]+' "$STACK/vmsingle.yaml" | head -1 | cut -d: -f2)"
-[ -n "$VA_VER" ] && [ -n "$VM_VER" ] || fault "이미지 버전 추출 실패(vmalert/vmsingle)"
-
-# ⚠️ `set -e`: 미지정 플래그는 grep이 1로 끝난다 → 대입이 스크립트를 죽인다. `|| true`로 기본값 분기 보존.
-EVAL="$(grep -oE -- '--evaluationInterval=[0-9a-z]+' "$STACK/vmalert.yaml" | head -1 | cut -d= -f2 || true)"
-[ -n "$EVAL" ] || EVAL=1m # vmalert 기본
-# vmalert instant 질의의 룩백 = -datasource.queryStep (미지정 시 vmalert 기본 5m). 이게 버그의 핵심 상수다.
-LOOKBACK="$(grep -oE -- '--datasource\.queryStep=[0-9a-z]+' "$STACK/vmalert.yaml" | head -1 | cut -d= -f2 || true)"
-[ -n "$LOOKBACK" ] || LOOKBACK=5m # vmalert 기본
-
-EVAL_S="$(vme_to_s "$EVAL")"
-LOOKBACK_S="$(vme_to_s "$LOOKBACK")"
+# ── 1) 시나리오 기동 + push 격자 파생 — 스택 파라미터·작업공간·룰 추출은 lib(vme_scenario) 소유,
+#      push 주기(HOST_PUSH_S·DU_*)는 이 하네스 고유의 파생이다 ──────────────────────────────────────
+vme_scenario "r4bulk-e2e-net-$$" "$STACK" "$RULES_CM" "r4.yaml"
+# 아래 별칭은 이 하네스의 산문(preflight 산술 주석·레그 메시지)이 부르는 이름이다. 값은 lib 파생분
+# 그대로이며 **재파생하지 않는다**(형제 drift와 동일 관용구).
+VA_VER="$VME_VA_VER"; VM_VER="$VME_VM_VER"
+EVAL="$VME_EVAL"; LOOKBACK="$VME_LOOKBACK"
+EVAL_S="$VME_EVAL_S"; LOOKBACK_S="$VME_LOOKBACK_S"
 
 # ★ 호스트 push 주기 — 이 하네스에서 **매니페스트 파생이 불가능한 유일한 상수**다.
 #   files_data_bulk_*의 pusher는 in-cluster CronJob이 아니라 **호스트 systemd 타이머**
@@ -94,14 +88,8 @@ esac
 # 않는다. 그 독립성만 재현하는 임의의 30m 오프셋이다(실제 시각차와 무관 — 레그 판정엔 무영향).
 DU_OFFSET_S=1800
 
-# ── 2) 배포 ConfigMap에서 룰 바이트 그대로 추출 ─────────────────────────────────────────────────────
-TMP="$(mktemp -d)"
-cleanup() { vme_cleanup; rm -rf "$TMP"; }
-trap cleanup EXIT
-vme_net_up "r4bulk-e2e-net-$$"
-
-yq '.data["r4.yaml"]' "$RULES_CM" > "$TMP/r4-deployed.yaml"
-[ -s "$TMP/r4-deployed.yaml" ] || fault "룰 추출 실패: $RULES_CM"
+# ── 2) 작업공간 별칭·결함 픽스처 준비(추출·정리 trap은 vme_scenario가 이미 소유 — $VME_RULES) ────────
+TMP="$VME_TMP"
 cp "$FIXTURES/r4-bulkssd-buggy-expr.yaml" "$TMP/r4-buggy.yaml"
 
 # fail-closed: 하네스가 겨냥하는 룰이 실제로 존재하는지(리네임 시 무성 무측정 방지)
@@ -112,20 +100,15 @@ cp "$FIXTURES/r4-bulkssd-buggy-expr.yaml" "$TMP/r4-buggy.yaml"
 #    CNPGRestoreDrillStale은 같은 r4 그룹 · 같은 형태(`time() - last_over_time[10d] > T or absent`) ·
 #    같은 for:(30m)이고, 생성기가 restore_drill_last_success_timestamp를 심지 않으므로 매 replay에서 발화한다.
 for want in 'alert: FilesBulkSSDLow' 'alert: BulkStorageLow' 'alert: CNPGRestoreDrillStale'; do
-  grep -q "$want" "$TMP/r4-deployed.yaml" || fault "배포 룰에 '$want' 부재 — 하네스가 아무것도 측정하지 않는다"
+  grep -q "$want" "$VME_RULES" || fault "배포 룰에 '$want' 부재 — 하네스가 아무것도 측정하지 않는다"
 done
 
-alert_expr() { # $1=룰 yaml $2=alert 이름 → expr만(주석 제거 — 주석이 단언을 만족시키는 것 차단)
-  yq '.groups[].rules[] | select(.alert=="'"$2"'") | .expr' "$1" | sed 's/#.*//'
-}
-rollup_windows() { # $1=expr $2=메트릭명 → 그 메트릭에 걸린 rollup 윈도(공백 구분, 없으면 빈 문자열)
-  { grep -oE "[a-z_]+_over_time[[:space:]]*\([[:space:]]*${2}[^]]*\]" <<<"$1" || true; } \
-    | { grep -oE '\[[0-9]+[smhd]\]' || true; } | tr -d '[]' | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ *$//'
-}
-
-FOR="$(yq '.groups[].rules[] | select(.alert=="FilesBulkSSDLow") | .for' "$TMP/r4-deployed.yaml" | head -1)"
+# expr/for/rollup 헬퍼는 lib 소유다(vme_alert_expr·vme_alert_for·vme_rollup_windows — byte 사본 금지,
+# 사본-0 단언이 잰다). 2-피연산자 rollup preflight 산술만 아래 하네스-로컬로 남는다.
+FOR="$(vme_alert_for "$VME_RULES" FilesBulkSSDLow)"
+[ -n "$FOR" ] || fault "배포 룰에서 FilesBulkSSDLow for: 추출 실패"
 FOR_S="$(vme_to_s "$FOR")"
-EXPR="$(alert_expr "$TMP/r4-deployed.yaml" FilesBulkSSDLow)"
+EXPR="$(vme_alert_expr "$VME_RULES" FilesBulkSSDLow)"
 [ -n "$EXPR" ] || fault "배포 룰에서 FilesBulkSSDLow expr 추출 실패"
 
 # ── 2b) preflight: 버그의 전제와 픽스의 불변식을 **기계가** 강제한다 ────────────────────────────────
@@ -156,8 +139,8 @@ NEEDED_EVALS=$(( FOR_S / EVAL_S + 1 ))
 #    대신 (a) 하한: W ≥ 2×push — push 1회 누락에도 판독이 살아 있어야 한다.
 #         (b) 상한: W ≤ 7×push — 매체 교체/언마운트 후 stale한 낮은 값이 무한 페이징하지 않도록 유계.
 #    이 두 경계는 **관측으로 닫히지 않는다**(둘 다 L1을 통과시킨다) → 산술 단언이 전담한다.
-W_AVAIL="$(rollup_windows "$EXPR" files_data_bulk_avail_bytes)"
-W_SIZE="$(rollup_windows "$EXPR" files_data_bulk_size_bytes)"
+W_AVAIL="$(vme_rollup_windows "$EXPR" files_data_bulk_avail_bytes)"
+W_SIZE="$(vme_rollup_windows "$EXPR" files_data_bulk_size_bytes)"
 if [ -z "$W_AVAIL" ] && [ -z "$W_SIZE" ]; then
   echo "[preflight] rollup: ABSENT on files_data_bulk_* → W 불변식 검사 skip (이게 버그다 — L1이 RED로 잡는다)"
 elif [ -z "$W_AVAIL" ] || [ -z "$W_SIZE" ]; then
@@ -174,7 +157,7 @@ fi
 
 # ⑤ L4 대조군이 실제로 발화할 수 있는지 — BulkStorageLow의 rollup이 du push 주기를 덮지 못하면 대조가
 #    무의미해진다(양쪽 다 침묵 → "하네스가 아무것도 못 울린다"와 구분 불가).
-W_CTL="$(rollup_windows "$(alert_expr "$TMP/r4-deployed.yaml" BulkStorageLow)" 'storage_tier_avail_bytes\{tier="bulk"\}')"
+W_CTL="$(vme_rollup_windows "$(vme_alert_expr "$VME_RULES" BulkStorageLow)" 'storage_tier_avail_bytes\{tier="bulk"\}')"
 [ -n "$W_CTL" ] || fault "BulkStorageLow가 storage_tier_avail_bytes{tier=\"bulk\"}에 rollup을 걸고 있지 않다 — L4 대조군이 발화하지 못해 '이 알림만 못 운다'는 대조가 성립하지 않는다."
 case "$W_CTL" in *' '*) fault "BulkStorageLow의 rollup 윈도가 복수($W_CTL) — 유효 윈도 판정 불가" ;; esac
 W_CTL_S="$(vme_to_s "$W_CTL")"
@@ -211,9 +194,8 @@ echo "[window] backfill $(vme_iso "$DATA_START") .. $(vme_iso "$T_LAST") (${DAYS
 # ── 4) 레그 실행기 ──────────────────────────────────────────────────────────────────────────────────
 run_leg() { # $1=label $2=rules-file $3=scenario
   local label="$1" rules="$2" scenario="$3" vm="r4bulk-e2e-$1-$$"
-  vme_start_vmsingle "$vm" "$VM_VER"
   python3 "$GEN" "$scenario" "$T_LAST" "$HOST_PUSH_S" "$DAYS" "$DU_PUSH_S" "$DU_OFFSET_S" > "$TMP/$label.jsonl"
-  vme_import "$TMP/$label.jsonl"
+  vme_leg "$vm" "$TMP/$label.jsonl"
 
   # 백필 sanity: 임포트가 조용히 비면 모든 레그가 거짓 통과한다(fail-closed).
   [ "$(vme_promql "sum(count_over_time(files_data_bulk_avail_bytes[7d]))")" -eq "$DAYS" ] \
@@ -238,7 +220,7 @@ fail() { echo "FAIL $*" >&2; FAILED=$(( FAILED + 1 )); }
 pass() { echo "PASS $*"; }
 
 # ── L1(RED 락) + L4(하네스 생존): 배포 룰 + 여유율 5% ───────────────────────────────────────────────
-run_leg l1-low "$TMP/r4-deployed.yaml" low
+run_leg l1-low "$VME_RULES" low
 F1="$(vme_firing FilesBulkSSDLow)"; P1="$(vme_pending FilesBulkSSDLow)"
 F4="$(vme_firing BulkStorageLow)"
 echo "  [L1] deployed rules + 5% free (threshold 10%) → FilesBulkSSDLow firing=$F1 pending=$P1"
@@ -256,7 +238,7 @@ fi
 docker rm -f "r4bulk-e2e-l1-low-$$" >/dev/null 2>&1 || true
 
 # ── L2(음성 대조): 배포 룰 + 여유율 99% → 오발화 금지 ──────────────────────────────────────────────
-run_leg l2-healthy "$TMP/r4-deployed.yaml" healthy
+run_leg l2-healthy "$VME_RULES" healthy
 S2="$(vme_alert_series FilesBulkSSDLow)"
 B2="$(vme_firing BulkStorageLow)"
 C2="$(vme_firing CNPGRestoreDrillStale)"
