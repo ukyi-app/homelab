@@ -24,7 +24,9 @@ function syncDigestExporter(root: string, appName: string, newTag: string): void
   // ⚠️ 이 skip은 **"APPS에 없는 미감시 앱(정상 no-op)"** 과 **"APPS에 있는데 위 정규식이 못 맞춘 포맷
   //    드리프트(진짜 고장)"** 를 같은 무성 경로로 뭉갠다(arch-deepen F-1 — 행위 변경이라 미착수).
   //    후자면 APPS가 stale 태그에 묶인 채 남아 digest-exporter가 옛 태그의 digest를 push하고 → 거짓
-  //    ImageDigestDrift가 난다. tests/gates/test_digest-exporter.bats의 APPS parity 게이트는 **이름 집합**만
+  //    ImageDigestDrift가 난다. 08 이후엔 동명 app/bespoke target도 이 **이름 키** 한 줄을 공유한다 —
+//    브랜치·인가 소스는 kind로 갈렸지만 이 표면은 아니다(두 PR이 머지되면 나중 것이 이긴다 — 같은 F-1 부채).
+//    tests/gates/test_digest-exporter.bats의 APPS parity 게이트는 **이름 집합**만
   //    대조하므로 태그 포맷 드리프트를 못 잡는다. fail-loud화하려면 앱이 APPS 목록에 있는지를 먼저 판정한
   //    뒤(있는데 미매치 = 비-0 종료), 없을 때만 조용히 return하라.
   if (next === raw) { console.log(`digest-exporter: APPS에 ${appName} 없음(또는 이미 최신) — 동기 skip`); return; }
@@ -35,7 +37,7 @@ function syncDigestExporter(root: string, appName: string, newTag: string): void
 const argv = process.argv.slice(2);
 // arity 검증 파서: 인식된 값-플래그는 비어있지 않은 값(다음 토큰이 `--flag`가 아님)을 필수로 갖는다.
 // 미인식 `--flag`는 거부(오타 침묵-무시 차단). 나머지는 positional(app, tag).
-const VALUE_FLAGS = new Set(["--repo-root", "--digest", "--expect-current", "--pin"]);
+const VALUE_FLAGS = new Set(["--repo-root", "--digest", "--expect-current", "--pin", "--kind"]);
 const opts: Record<string, string> = {};
 const positionals: string[] = [];
 for (let i = 0; i < argv.length; i++) {
@@ -58,11 +60,22 @@ if (!app || !APP_NAME_RE.test(app)) {
   console.error(`bad app name: ${app ?? "<none>"}`); process.exit(2);
 }
 if (!TAG_RE.test(tag ?? "")) {
-  console.error("usage: bump-tag <app> sha-<gitsha> [--digest sha256:<64hex>] [--expect-current sha-<gitsha>] [--repo-root <dir>]"); process.exit(2);
+  console.error("usage: bump-tag <app> sha-<gitsha> [--digest sha256:<64hex>] [--expect-current sha-<gitsha>] [--repo-root <dir>] [--pin <descriptor>] [--kind app|bespoke]"); process.exit(2);
 }
 // digest는 비신뢰 입력(workflow client_payload 경유 가능) — 형식 검증 필수
 if (digest !== undefined && !DIGEST_RE.test(digest)) {
   console.error(`bad digest: ${digest}`); process.exit(2);
+}
+// --kind는 target 신원의 교차 검증이다(bump-plan 계약, design r2-1 — 러너는 항상 넘긴다): 편집 모드는
+// --pin 유무가 가르지만, 호출부가 주장한 kind와 그 모드가 갈리면 엉뚱한 레인의 파일을 편집하게 되므로
+// fail-closed다. 선택 플래그인 이유: 구 호출부(bump.yaml 수동 디스패처)는 apps 레인 positional 계약로
+// kind 무주장 호출을 유지한다(무주장 = 검증 생략이지 관용 해석이 아니다).
+const kindArg = opts["--kind"];
+if (kindArg !== undefined) {
+  if (kindArg !== "app" && kindArg !== "bespoke") { console.error(`bad kind: ${kindArg} (app | bespoke)`); process.exit(2); }
+  if ((kindArg === "bespoke") !== (opts["--pin"] !== undefined)) {
+    console.error(`kind(${kindArg})와 편집 모드가 갈린다 — bespoke ⇔ --pin(인라인 핀 디스크립터). 신원 분열은 fail-closed다`); process.exit(2);
+  }
 }
 
 // ── 인라인 핀 편집 모드(베스포크 platform 컴포넌트) ──

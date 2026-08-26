@@ -173,6 +173,18 @@ JSON
   echo "$output" | jq -e '.[0].action == "noop"'
 }
 
+@test "an app without bindings but with a same-name platform pin is refused (cross-kind identity, no lane borrowing)" {
+  # 03 Comments ④의 무테스트 분기 — planApp의 resolveLane이 이름을 bespoke로 해소하면(바인딩 부재 +
+  # 동명 .image-pin.json 실재) 그 이름의 apps 레인은 어느 인가도 빌려 쓰지 못하고 refuse여야 한다.
+  rm -f "$D/.bindings.json"
+  PD="$TMP/platform/orders/prod"; mkdir -p "$PD"
+  printf '{ "file": "deployment.yaml", "path": ["a"], "autoDeploy": true }\n' > "$PD/.image-pin.json"
+  run_poll
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[] | select(.target.name=="orders" and .target.kind=="app") | .action == "refuse"'
+  echo "$output" | jq -e '.[] | select(.target.name=="orders" and .target.kind=="app") | .reason | test("신원|bespoke")'
+}
+
 @test "a bespoke platform component (image-pin descriptor) joins the bump lane with pin+writePath" {
   PD="$TMP/platform/files/prod"; mkdir -p "$PD"
   printf 'ukyi-app/files' > "$PD/source-repo"
@@ -195,10 +207,10 @@ EOF
   printf '{ "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" }\n' > "$FX/files.manifest-sha-bbb2222.json"
   run bun "$P" --root "$TMP" --fixtures "$FX" --dry-run
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.[] | select(.app=="files") | .action == "bump"'
-  echo "$output" | jq -e '.[] | select(.app=="files") | .pin == "platform/files/prod/.image-pin.json"'
-  echo "$output" | jq -e '.[] | select(.app=="files") | .writePath == "platform/files/prod/deployment.yaml"'
-  echo "$output" | jq -e '.[] | select(.app=="files") | .candidate.tag == "sha-bbb2222000000000000000000000000000000000"'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | .action == "bump"'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | .pin == "platform/files/prod/.image-pin.json"'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | .writePath == "platform/files/prod/deployment.yaml"'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | .candidate.tag == "sha-bbb2222000000000000000000000000000000000"'
 }
 
 @test "bespoke descriptor without autoDeploy is fail-closed (propose-pr, never auto bump)" {
@@ -221,5 +233,5 @@ EOF
   printf '{ "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" }\n' > "$FX/files.manifest-sha-bbb2222.json"
   run bun "$P" --root "$TMP" --fixtures "$FX" --dry-run
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.[] | select(.app=="files") | .action == "propose-pr"'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | .action == "propose-pr"'
 }

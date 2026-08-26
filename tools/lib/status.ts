@@ -8,9 +8,9 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { parseBranch } from "./bump-plan.ts";
 import { compact } from "./contract.ts";
 import { ghJson, sh } from "./exec.ts";
-import { TAG_RE } from "./image-pin.ts";
 import { parseLedgerRows } from "./ledger-totals.ts";
 import { HOMELAB_REPO } from "./platform.ts";
 import { listUnits } from "./repo-walk.ts";
@@ -21,16 +21,18 @@ export type StatusOutcome = { variant: "success" | "failure"; omitted: string[];
 const RUN_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/actions\/runs\/(\d+)(?:\/.*)?$/;
 const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?:\/.*)?$/;
 
-// 이 앱을 대상으로 하는 homelab 변이 PR 브랜치 판정 — 명명 SSOT는 각 워크플로:
-//   bump-poll/<app>-<tag>(bump-poll.yaml, tag=TAG_RE) · create-app/<app>-<run_id> ·
+// 이 앱을 대상으로 하는 homelab 변이 PR 브랜치 판정 — 명명 SSOT:
+//   bump-poll은 tools/lib/bump-plan.ts(branchFor/parseBranch — kind 인코딩 `bump-poll/<kind>/<name>-<tag>`,
+//   구형 `bump-poll/<name>-<tag>`는 app 해석) · create-app/<app>-<run_id> ·
 //   update-secrets/<app>-<run_id> · teardown/teardown-app-<app>-<run_id>(_teardown-app.yaml).
 // 접두만 보면 하이픈 앱명에서 형제 앱을 오귀속한다(page의 `bump-poll/page-`가 page-extra의
-// `bump-poll/page-extra-sha-…`에 참) — 접두 뒤 잔여의 형식(tag/run_id)까지 검증한다.
+// `bump-poll/page-extra-sha-…`에 참) — parseBranch/잔여 형식(run_id) 검증이 그 오귀속을 막는다.
 // db/cache 브랜치는 리소스명 키라 앱 필터 대상이 아니다.
 function isAppLaneBranch(head: string, app: string): boolean {
   const tail = (prefix: string): string | null => (head.startsWith(prefix) ? head.slice(prefix.length) : null);
-  const bump = tail(`bump-poll/${app}-`);
-  if (bump !== null && TAG_RE.test(bump)) return true;
+  // status는 apps 레인 조회다 — bespoke target의 bump 브랜치는 이 앱의 것이 아니다.
+  const bump = parseBranch(head);
+  if (bump !== null && bump.target.kind === "app" && bump.target.name === app) return true;
   for (const action of ["create-app", "update-secrets"]) {
     const t = tail(`${action}/${app}-`);
     if (t !== null && /^\d+$/.test(t)) return true;

@@ -107,7 +107,7 @@ setup() {
   APP="page"
   # 배포 핀 tag: sha- + 40 hex (라이브에서 중복 PR 3개를 낸 그 커밋 형태)
   TAG="sha-815abb1$(printf '%033d' 0)"
-  BRANCH="bump-poll/${APP}-${TAG}"
+  BRANCH="bump-poll/app/${APP}-${TAG}"  # kind 인코딩(d3·08) — branchFor와 같은 문법
   # 열린 PR의 head OID(= DIRTY rebuild lease 기대값) vs 고아 원격 브랜치 OID(= adopt lease 기대값)
   PR_OID="1111111111111111111111111111111111111111"
   ORPHAN_OID="2222222222222222222222222222222222222222"
@@ -490,8 +490,8 @@ write_image_pin() {
   printf '%s' "$1" > "$SSOT_ROOT/platform/$APP/prod/.image-pin.json"
 }
 # 인가 회수 전용 패스 — **후보(tag)도, 레인 인자도, 대상 앱도 넘기지 않는다**(그게 이 모드의 요점이다).
-# ★ `--app`이 없다(R-27): 대상은 `bump-poll/*` **네임스페이스**(git ls-remote)가 권위이고 app은
-#   브랜치명에서 유도된다. 호출부가 대상 목록을 정하면 그 목록의 출처(플래너)가 죽는 순간 회수가 굶는다.
+# ★ `--kind/--name`이 없다(R-27): 대상은 `bump-poll/*` **네임스페이스**(git ls-remote)가 권위이고
+#   target은 브랜치명에서 복원된다(parseBranch). 호출부가 대상 목록을 정하면 그 목록의 출처(플래너)가 죽는 순간 회수가 굶는다.
 run_reconcile() {
   run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --root "$SSOT_ROOT"
   # ⚠️ bats의 `run`은 호출할 때마다 $output/$status를 **덮어쓴다** — 원장 질의(`run disarm_calls …`)를
@@ -611,7 +611,7 @@ merge_calls()  { count_calls gh pr merge; }
 # ── superseded 형제 픽스처 ────────────────────────────────────────────────────────────────────
 # 형제 브랜치명(같은 앱, **다른** tag) — 이 앱의 옛 후보가 남긴 브랜치다.
 SIB_TAG="sha-9999999$(printf '%033d' 0)"
-SIB_BRANCH_OF()  { echo "bump-poll/${APP}-${1:-$SIB_TAG}"; }
+SIB_BRANCH_OF()  { echo "bump-poll/app/${APP}-${1:-$SIB_TAG}"; }
 SIB_OID="3333333333333333333333333333333333333333"
 
 # 형제 PR 노드(GraphQL 원시 스키마) — 기본은 **회수 대상 형태**(동일-레포 · writer Bot · base=main ·
@@ -655,7 +655,7 @@ update_branch_calls() { count_calls gh pr update-branch; }
 # 레인(--action)은 **필수**다 — 기본값이 없다(승인 게이트 우회 방지, plan r5 R-11).
 # 테스트 기본 레인은 bump(autoDeploy) — 라이브에서 중복 PR 3개가 터진 바로 그 레인이다.
 run_ensure_lane() {
-  run --separate-stderr bun tools/ensure-bump-pr.ts --app "$APP" --tag "$TAG" --action "$1" \
+  run --separate-stderr bun tools/ensure-bump-pr.ts --kind app --name "$APP" --tag "$TAG" --action "$1" \
     --title "chore: ${APP} 이미지 갱신 (자동)" --body "GHCR 폴링 bump"
   # ⚠️ bats의 `run`은 **호출할 때마다 $output을 덮어쓴다**. 아래 증인들은 판정 단언 전에
   # `run has_call_exact …`(원장 질의)를 쓰므로, 그 시점엔 $output이 이미 원장 질의의 출력(빈 문자열)이다
@@ -2401,7 +2401,7 @@ setup_closable_sibling() {
 #      플래너 출력에서 빠지기만 해도 그 앱은 **방문조차 되지 않았다**(낡은 무장 생존). 의존을 한 칸
 #      옮겼을 뿐(`.action` 필터 → plan.json 존재)이지 끊은 게 아니었다.
 #      → 대상은 **`bump-poll/*` 원격 ref**가 권위이고(git ls-remote), `<app>`은 **브랜치명에서 유도**한다.
-#      이 모드는 `--app`을 **받지 않는다**(호출부가 대상을 좁히면 그게 곧 회수의 기아다).
+#      이 모드는 대상 신원 인자(`--kind/--name`)를 **받지 않는다**(호출부가 대상을 좁히면 그게 곧 회수의 기아다).
 #
 # 계약(좁다 — "이번 후보가 무엇인지" 알 필요조차 없다):
 #   lane=propose-pr → 그 브랜치의 열린 신뢰 PR 무장을 회수한다.
@@ -2451,8 +2451,8 @@ setup_closable_sibling() {
   echo "$JSON" | jq -e '[.subjects[] | select(.lane == "propose-pr")] | length == 2' > /dev/null \
     || { echo "레인이 autoDeploy SSOT에서 파생되지 않았다"; echo "$JSON"; false; }
   echo "$JSON" | jq -e '[.subjects[] | select(.disarmed)] | length == 2' > /dev/null
-  # app은 **브랜치명에서 유도**됐다(호출부가 준 게 아니다 — --app을 넘기지도 않았다).
-  echo "$JSON" | jq -e --arg a "$APP" '[.subjects[] | select(.app == $a)] | length == 2' > /dev/null \
+  # target은 **브랜치명에서 복원**됐다(호출부가 준 게 아니다 — --kind/--name을 넘기지도 않았다).
+  echo "$JSON" | jq -e --arg a "$APP" '[.subjects[] | select(.name == $a)] | length == 2' > /dev/null \
     || { echo "브랜치명에서 app을 유도하지 못했다"; echo "$JSON"; false; }
 }
 
@@ -2511,7 +2511,7 @@ setup_closable_sibling() {
   #    그 주기에 옛 armed PR은 **열린 채 살아남고 run은 초록이다**(telegram 무발화). 나중에 누가 그
   #    브랜치를 전진시키면("Update branch" · 체크 재실행 · main 이동) **옛 이미지가 승인 없이 머지된다**.
   # ★ 이 증인은 **실행기 계약**이다(호출부 계약이 아니다): 실행기는 플래너가 무엇을 냈는지 **알 필요도,
-  #   알 방법도 없어야** 한다. 그래서 여기선 --app·--tag·--action을 **하나도 넘기지 않는다**.
+  #   알 방법도 없어야** 한다. 그래서 여기선 --kind·--name·--tag·--action을 **하나도 넘기지 않는다**.
   write_bindings '{"autoDeploy": true}'
   local t2="sha-8888888$(printf '%033d' 0)"
   add_sibling "$(SIB_BRANCH_OF)" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
@@ -2722,15 +2722,15 @@ setup_closable_sibling() {
     echo "arming churn: autoDeploy:true 앱(other)의 무장까지 회수했다 — 레인을 앱별로 풀지 않았다"
     dump_calls; false
   }
-  echo "$JSON" | jq -e '[.subjects[] | select(.app == "page")   | .lane] == ["propose-pr"]' > /dev/null
-  echo "$JSON" | jq -e '[.subjects[] | select(.app == "other")  | .lane] == ["bump"]' > /dev/null
+  echo "$JSON" | jq -e '[.subjects[] | select(.name == "page")   | .lane] == ["propose-pr"]' > /dev/null
+  echo "$JSON" | jq -e '[.subjects[] | select(.name == "other")  | .lane] == ["bump"]' > /dev/null
 }
 
-@test "W61: --reconcile-only refuses an injected lane OR an injected subject list (--action and --app cannot reach this mode)" {
+@test "W61: --reconcile-only refuses an injected lane OR an injected subject identity (--action, --kind and --name cannot reach this mode)" {
   # ★ 승인 게이트 우회 봉인(R-11)의 연장 + 회수 기아 봉인(R-27).
   #   · 레인을 인자로 받으면 호출부가 레인을 지어낼 수 있다(autoDeploy:false인데 bump로 넘겨 회수를 끈다).
-  #   · **대상(--app)을 인자로 받으면 호출부가 목록을 좁힐 수 있다** — 그 목록의 출처가 플래너면,
-  #     플래너가 죽는 순간 회수도 죽는다. 대상은 네임스페이스가 정한다.
+  #   · **대상 신원(--kind/--name)을 인자로 받으면 호출부가 목록을 좁힐 수 있다** — 그 목록의 출처가
+  #     플래너면, 플래너가 죽는 순간 회수도 죽는다. 대상은 네임스페이스가 정한다.
   write_bindings '{"autoDeploy": false}'
   setup_closable_sibling
   run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --root "$SSOT_ROOT" --action bump
@@ -2738,10 +2738,15 @@ setup_closable_sibling() {
     echo "lane injection: --reconcile-only가 --action을 받아들였다(exit $status, 기대 2)"
     echo "$output$stderr"; false
   }
-  run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --root "$SSOT_ROOT" --app "$APP"
+  run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --root "$SSOT_ROOT" --name "$APP"
   [ "$status" -eq 2 ] || {
-    echo "subject injection: --reconcile-only가 --app을 받아들였다(exit $status, 기대 2) —"
+    echo "subject injection: --reconcile-only가 --name을 받아들였다(exit $status, 기대 2) —"
     echo "  호출부가 대상 목록을 정할 수 있으면 그 목록(= 플래너 출력)이 비는 순간 회수가 굶는다."
+    echo "$output$stderr"; false
+  }
+  run --separate-stderr bun tools/ensure-bump-pr.ts --reconcile-only --root "$SSOT_ROOT" --kind app
+  [ "$status" -eq 2 ] || {
+    echo "subject injection: --reconcile-only가 --kind를 받아들였다(exit $status, 기대 2)"
     echo "$output$stderr"; false
   }
   # 후보(tag)도 받지 않는다 — 이 모드엔 '이번 후보'라는 개념이 없다.
@@ -2813,14 +2818,16 @@ setup_closable_sibling() {
 # bats test_tags=regression
 @test "W51: the bespoke pin lane's autoDeploy lives in .image-pin.json and is honoured too" {
   # 바인딩된 앱은 apps/ 레인만이 아니다 — 베스포크 핀 레인(platform/<comp>/prod/.image-pin.json)도
-  # 같은 `bump-poll/<app>-*` 네임스페이스를 쓴다(라이브: files). 여기서 SSOT를 못 찾으면 그 앱의
-  # 회수가 통째로 fail-closed로 죽어 낡은 무장이 남는다.
+  # 같은 `bump-poll/*` 네임스페이스를 쓴다(라이브: files). 브랜치의 kind 세그먼트(bespoke)가 그 레인의
+  # SSOT를 지목한다(08 — kind별 인가 해소). 여기서 SSOT를 못 읽으면 낡은 무장이 남는다.
   write_image_pin '{"file":"deployment.yaml","path":["spec"],"autoDeploy": false}'
-  setup_closable_sibling
+  add_sibling "bump-poll/bespoke/${APP}-${SIB_TAG}" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
+  sibling_commit "$SIB_OID" "$(sib_commit_msg "$SIB_TAG")"
   run_reconcile
   [ "$status" -eq 0 ] || { echo "$output"; echo "$stderr"; dump_calls; false; }
   echo "$JSON" | jq -e '.subjects[0].lane == "propose-pr"' > /dev/null
   echo "$JSON" | jq -e '.subjects[0].laneResolution == "present"' > /dev/null
+  echo "$JSON" | jq -e '.subjects[0].kind == "bespoke"' > /dev/null
   run disarm_calls 348
   [ "$output" -eq 1 ] || {
     echo "stale authorization survives: 베스포크 핀 레인(.image-pin.json)의 autoDeploy:false를 읽지 못했다"
@@ -3869,7 +3876,7 @@ setup_closable_sibling() {
   # 무조건 그 플래그를 넘기는 것만으로 승인 앱이 자동 배포된다(그러면서 모든 증인은 GREEN이다).
   # 그래서 그런 플래그는 **존재하지 않는다** — 알 수 없는 옵션으로 exit 2.
   write_prs '[]'
-  run bun tools/ensure-bump-pr.ts --app "$APP" --tag "$TAG" --action propose-pr \
+  run bun tools/ensure-bump-pr.ts --kind app --name "$APP" --tag "$TAG" --action propose-pr \
     --title t --body b --auto-merge
   [ "$status" -eq 2 ]
   echo "$output" | grep -q "알 수 없는 옵션"
@@ -3883,7 +3890,7 @@ setup_closable_sibling() {
   #   propose-pr로 기본 → autoDeploy 배포가 조용히 정지
   # 둘 다 조용한 오동작이라 fail-closed(exit 2)로 막는다.
   write_prs '[]'
-  run bun tools/ensure-bump-pr.ts --app "$APP" --tag "$TAG" --title t --body b
+  run bun tools/ensure-bump-pr.ts --kind app --name "$APP" --tag "$TAG" --title t --body b
   [ "$status" -eq 2 ]
   echo "$output" | grep -q -- "--action"
   creates="$(count_calls gh pr create)"
@@ -3893,14 +3900,14 @@ setup_closable_sibling() {
 @test "an unknown lane value exits 2 (only the planner's two actions are lanes)" {
   # 플래너의 다른 action들(noop/refuse)이나 오타가 레인으로 흘러들면 안 된다 — 호출부는 bump/propose-pr만 넘긴다.
   write_prs '[]'
-  run bun tools/ensure-bump-pr.ts --app "$APP" --tag "$TAG" --action refuse --title t --body b
+  run bun tools/ensure-bump-pr.ts --kind app --name "$APP" --tag "$TAG" --action refuse --title t --body b
   [ "$status" -eq 2 ]
   creates="$(count_calls gh pr create)"
   [ "$creates" -eq 0 ]
 }
 
 @test "an unknown flag exits 2 (no silent default)" {
-  run bun tools/ensure-bump-pr.ts --app "$APP" --tag "$TAG" --action bump --title t --body b --bogus x
+  run bun tools/ensure-bump-pr.ts --kind app --name "$APP" --tag "$TAG" --action bump --title t --body b --bogus x
   [ "$status" -eq 2 ]
   echo "$output" | grep -q "알 수 없는 옵션"
 }
@@ -3911,4 +3918,92 @@ setup_closable_sibling() {
   echo "$output" | grep -qi "ensure-bump-pr"
   echo "$output" | grep -q -- "--action"
   echo "$output" | grep -q "propose-pr"
+}
+
+# ══ 08 — target 신원의 프로세스 경계 관통(--kind/--name · kind 인코딩 브랜치 · 레거시 이행) ═══════════
+
+@test "identity is fail-closed at the CLI: --kind without --name (and vice versa) exits 2" {
+  # 이름만 받던 구 --app 계약의 폐지 지점 — 신원의 반쪽만 오면 파일시스템에서 나머지를 추측하게 되고,
+  # 그 추측이 동명 충돌에서 다른 target의 인가를 적용한다(design r2-1). 어느 반쪽의 부재도 exit 2다.
+  run bun tools/ensure-bump-pr.ts --kind app --tag "$TAG" --action bump --title t --body b
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- "--name"
+  run bun tools/ensure-bump-pr.ts --name "$APP" --tag "$TAG" --action bump --title t --body b
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- "--kind"
+  run bun tools/ensure-bump-pr.ts --kind platformish --name "$APP" --tag "$TAG" --action bump --title t --body b
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- "--kind"
+}
+
+@test "W80: reconcile keeps a legacy branch working when its app reading is unambiguous (no bespoke shadow)" {
+  # 레거시 이행의 무소음 절반 — 구형 브랜치는 app으로 해석되고, 동명 bespoke가 없으면 그 해석은
+  # 유효하다: 자기 SSOT(bindings)로 판정되고 run은 초록이다(이행 자체는 다음 후보의 신형 브랜치가 한다).
+  write_bindings '{"autoDeploy": true}'
+  add_sibling "bump-poll/${APP}-${SIB_TAG}" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
+  sibling_commit "$SIB_OID" "$(sib_commit_msg "$SIB_TAG")"
+  run_reconcile
+  [ "$RCODE" -eq 0 ] || { echo "$JSON"; echo "$stderr"; dump_calls; false; }
+  run disarm_calls 348
+  [ "$output" -eq 0 ] || { echo "legacy churn: 유효한 레거시 브랜치의 인가된 무장을 회수했다"; dump_calls; false; }
+  echo "$JSON" | jq -e '.subjects[0].legacy == true' > /dev/null
+  echo "$JSON" | jq -e '.subjects[0].kind == "app"' > /dev/null
+  echo "$JSON" | jq -e '.subjects[0].lane == "bump"' > /dev/null
+}
+
+@test "W81: reconcile fail-closes a legacy branch shadowed by a same-name bespoke surface (revoke + red)" {
+  # 레거시 이행의 fail-closed 절반(design r2-1) — 구형 이름엔 kind가 없어서, 동명 bespoke 표면이 실재하면
+  # 그 브랜치가 어느 레인의 bump였는지 증명할 수 없다. 무장은 회수하고(안전 방향) run은 빨개진다
+  # (사람이 구형 PR을 정리해야 이행이 끝난다 — 조용히 초록이면 영원히 안 끝난다).
+  write_image_pin '{"file":"deployment.yaml","path":["spec"],"autoDeploy": true}'
+  write_bindings '{"autoDeploy": true}'
+  add_sibling "bump-poll/${APP}-${SIB_TAG}" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
+  run_reconcile
+  [ "$RCODE" -eq 1 ] || { echo "legacy shadow silent: 동명 bespoke가 실재하는데 run이 초록이다"; echo "$JSON"; false; }
+  run disarm_calls 348
+  [ "$output" -eq 1 ] || { echo "legacy shadow survives: 증명 불가 신원의 무장을 회수하지 않았다"; dump_calls; false; }
+  echo "$JSON" | jq -e '.subjects[0].laneResolution == "legacy-ambiguous"' > /dev/null
+  echo "$JSON" | jq -e '[.failures[] | select(test("bespoke"))] | length >= 1' > /dev/null \
+    || { echo "이행 결함이 failures에 보고되지 않았다"; echo "$JSON"; false; }
+}
+
+@test "W82: same-name app and bespoke targets are judged by their own SSOT — no cross-arming, no cross-revocation" {
+  # 08 e2e의 reconcile 축 — kind 인코딩 브랜치 덕에 동명 target이 각자의 인가 소스로만 판정된다.
+  # app page: autoDeploy true → 무장 유지(소유 증명 필요). bespoke page: autoDeploy false → 회수.
+  # 교차 오염(bespoke의 승인 레인이 app의 무장을 회수하거나, app의 자동 레인이 bespoke를 무장 유지)이 없다.
+  write_bindings '{"autoDeploy": true}'
+  write_image_pin '{"file":"deployment.yaml","path":["spec"],"autoDeploy": false}'
+  add_sibling "bump-poll/app/${APP}-${SIB_TAG}" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
+  sibling_commit "$SIB_OID" "$(sib_commit_msg "$SIB_TAG")"
+  local t2="sha-8888888$(printf '%033d' 0)"
+  add_sibling "bump-poll/bespoke/${APP}-${t2}" "$ORPHAN_OID" "$(sib_node 350 "$ORPHAN_OID" "2026-07-13T06:35:00Z" "$(amr_armed)")"
+  run_reconcile
+  [ "$RCODE" -eq 0 ] || { echo "$JSON"; echo "$stderr"; dump_calls; false; }
+  run disarm_calls 350
+  [ "$output" -eq 1 ] || { echo "cross-arming: bespoke target의 승인 레인 무장이 회수되지 않았다(app의 autoDeploy를 빌려 썼다?)"; dump_calls; false; }
+  run disarm_calls 348
+  [ "$output" -eq 0 ] || { echo "cross-revocation: app target의 인가된 무장을 bespoke의 승인 레인이 회수했다"; dump_calls; false; }
+  echo "$JSON" | jq -e '[.subjects[] | select(.kind == "app")     | .lane] == ["bump"]' > /dev/null
+  echo "$JSON" | jq -e '[.subjects[] | select(.kind == "bespoke") | .lane] == ["propose-pr"]' > /dev/null
+}
+
+@test "W83: the main-path sibling sweep disarms a legacy sibling of the same app target but never a same-name bespoke branch" {
+  # 이행기의 중복 인가 소거 — 같은 app target의 레거시 ref는 형제다(다른 ref에 같은 target의 무장이
+  # 남으면 중복 인가다). **같은 tag의 레거시 ref도 형제다**: 컷오버 직후엔 레거시 `<name>-<tag>`와
+  # 신형 `app/<name>-<tag>`가 같은 tag로 공존하는데, 옛 tag-동일 방어(`r.tag === TAG` skip)를 그대로
+  # 두면 정확히 그 중복 인가가 스윕 밖에 남는다. 동명 bespoke의 신형 ref는 **다른 target**이라 형제가
+  # 아니다(스윕 밖).
+  add_sibling "bump-poll/${APP}-${SIB_TAG}" "$SIB_OID" "$(sib_node 348 "$SIB_OID" "2026-07-13T06:34:00Z" "$(amr_armed)")"
+  local oid3="5555555555555555555555555555555555555555"
+  add_sibling "bump-poll/${APP}-${TAG}" "$oid3" "$(sib_node 349 "$oid3" "2026-07-13T06:36:00Z" "$(amr_armed)")"
+  local t2="sha-8888888$(printf '%033d' 0)"
+  add_sibling "bump-poll/bespoke/${APP}-${t2}" "$ORPHAN_OID" "$(sib_node 350 "$ORPHAN_OID" "2026-07-13T06:35:00Z" "$(amr_armed)")"
+  run_ensure
+  [ "$status" -eq 0 ] || { echo "$output"; echo "$stderr"; dump_calls; false; }
+  run disarm_calls 348
+  [ "$output" -eq 1 ] || { echo "legacy sibling survives: 같은 app target의 레거시 무장이 스윕되지 않았다"; dump_calls; false; }
+  run disarm_calls 349
+  [ "$output" -eq 1 ] || { echo "same-tag legacy survives: 같은 tag의 레거시 ref가 형제에서 빠졌다(컷오버 중복 인가)"; dump_calls; false; }
+  run disarm_calls 350
+  [ "$output" -eq 0 ] || { echo "cross-target sweep: 동명 bespoke target의 무장을 app 경로가 회수했다"; dump_calls; false; }
 }

@@ -48,7 +48,8 @@ setup() {
 @test "expect-current is sourced from the planner snapshot, never re-read from the live tree (F2)" {
   # ⚠️ codex pass1 F2: 브랜치를 뗀 뒤 대상 파일에서 현재 tag를 **다시 읽으면**, main이 움직여도 expect가
   # 같이 움직여 자기비교(no-op)가 된다 → 가드가 죽는다. 반드시 플래너 스냅샷(item.current.tag)에서 온다.
-  run grep -nE 'expect[[:space:]]*=[[:space:]]*item\.current\?\.tag' "$RCODE"
+  # (decodePlan이 Change의 current.tag를 보증하므로 옵셔널 체이닝은 없어도 된다 — 출처가 스냅샷이라는 계약만 잰다.)
+  run grep -nE 'expect[[:space:]]*=[[:space:]]*item\.current(\?)?\.tag' "$RCODE"
   [ "$status" -eq 0 ]
   # ★ 봉인: 러너가 읽는 파일은 **plan.json 하나뿐**이다. 대상 트리를 읽을 수단이 없으면 재읽기도 불가능하다.
   n="$(grep -oE 'readFileSync\(' "$RCODE" | wc -l | tr -d ' ')"

@@ -41,7 +41,10 @@ _Avoid_: 자동 머지 플래그
 배포 핀 갱신 한 사이클의 계약 산출물(apps 레인·베스포크 레인 공통) — 판별 union
 plan 항목(Change/Noop/Refusal)·target 신원(kind: app|bespoke)·레인(`bump`/`propose-pr`)·
 브랜치/커밋 문구/writer 신원 명명 규약. 계약은 `tools/lib/bump-plan.ts`가 소유하고
-생산자(poll-ghcr)와 소비자(run-bump-plan·ensure-bump-pr)가 공유한다.
+생산자(poll-ghcr)와 소비자(run-bump-plan·ensure-bump-pr)가 공유한다. target 신원은
+프로세스 경계를 관통한다: 브랜치가 kind를 인코딩하고(`bump-poll/<kind>/<name>-<tag>`,
+구형 무한정 이름은 app 해석 — 동명 bespoke 실재 시 fail-closed), CLI는 `--kind/--name`
+쌍으로만 신원을 받는다.
 _Avoid_: 폴링 결과, 갱신 목록
 
 ### 가드 (guards)

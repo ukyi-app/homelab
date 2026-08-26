@@ -75,7 +75,7 @@ setup() {
   # ⚠️ 실행기-파생 **소유권 기대값** 하네스(EXPECT_PY)는 여기서 사라졌다 — 그 계약(러너가 심는 커밋의
   #    정체성·메시지가 실행기의 proveOurCommit 기대와 글자 그대로 같은가)은 이제 **커밋을 실제로 만드는
   #    곳**에서 검증된다: `tools/tests/test_run-bump-plan.bats`의 "the commit the runner EFFECTIVELY
-  #    makes…" 증인이 같은 파생(DEFAULT_WRITER/WRITER_BOT_NAME/WRITER_BOT_EMAIL_RE/bumpCommitMessageOf,
+  #    makes…" 증인이 같은 파생(DEFAULT_WRITER/WRITER_BOT_NAME/WRITER_BOT_EMAIL_RE/bump-plan.commitMessage,
   #    못 찾으면 exit 2)을 그대로 들고 가고, 기대값은 **진짜 git 커밋 오브젝트**와 대조된다.
 
   # ── GitHub Actions **조건식 평가기**(structure r9 R-31) ────────────────────────────────────────
@@ -208,15 +208,17 @@ setup_hermetic() {
   PLAN="$TMPD/plan.json"
   cat > "$PLAN" <<'JSON'
 [
-  {"app":"page","action":"bump","writePath":"apps/page/deploy/prod/values.yaml",
+  {"target":{"kind":"app","name":"page"},"action":"bump","reason":"","src":"ukyi-app/page",
+   "writePath":"apps/page/deploy/prod/values.yaml",
    "current":{"tag":"sha-1111111111111111111111111111111111111111"},
-   "candidate":{"tag":"sha-2222222222222222222222222222222222222222","digest":"sha256:aaaa"}},
-  {"app":"trip-mate","action":"propose-pr","writePath":"apps/trip-mate/deploy/prod/values.yaml",
+   "candidate":{"gitsha":"2222222222222222222222222222222222222222","tag":"sha-2222222222222222222222222222222222222222","digest":"sha256:aaaa"}},
+  {"target":{"kind":"app","name":"trip-mate"},"action":"propose-pr","reason":"autoDeploy 아님","src":"ukyi-app/trip-mate",
+   "writePath":"apps/trip-mate/deploy/prod/values.yaml",
    "current":{"tag":"sha-3333333333333333333333333333333333333333"},
-   "candidate":{"tag":"sha-4444444444444444444444444444444444444444","digest":"sha256:bbbb"}},
-  {"app":"files","action":"noop","reason":"배포 이후 빌드된 main 커밋 없음",
+   "candidate":{"gitsha":"4444444444444444444444444444444444444444","tag":"sha-4444444444444444444444444444444444444444","digest":"sha256:bbbb"}},
+  {"target":{"kind":"bespoke","name":"files"},"action":"noop","reason":"배포 이후 빌드된 main 커밋 없음",
    "current":{"tag":"sha-5555555555555555555555555555555555555555"},"candidate":null},
-  {"app":"broken-api","action":"refuse","reason":"manifest 조회 일시 오류(transient)",
+  {"target":{"kind":"app","name":"broken-api"},"action":"refuse","reason":"manifest 조회 일시 오류(transient)",
    "current":null,"candidate":null}
 ]
 JSON
@@ -248,7 +250,7 @@ GHEOF
   cat > "$STUB/bun" <<'BUNEOF'
 #!/bin/sh
 { printf '%s\0' bun "$@"; printf '\036'; } >> "$CALLS"
-# 인가 회수 패스의 실패 주입(R-27) — 이 모드엔 `--app`이 없다(대상은 네임스페이스가 준다).
+# 인가 회수 패스의 실패 주입(R-27) — 이 모드엔 대상 신원 인자(--kind/--name)가 없다(대상은 네임스페이스가 준다).
 if [ -n "${STUB_FAIL_RECONCILE:-}" ] && [ "$1" = "tools/ensure-bump-pr.ts" ]; then
   for a in "$@"; do
     if [ "$a" = "--reconcile-only" ]; then
@@ -575,7 +577,8 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
   [ -n "$re" ] || { echo "정규식을 추출하지 못했다: $sel"; false; }
 
   # ① bump-poll 브랜치는 **선택되지 않는다**(실측: 그 정규식에 실제로 통과시켜 본다).
-  hit="$(printf '%s' '[{"headRefName":"bump-poll/page-sha-abc1234"}]' \
+  #    프로브는 라이브에서 실제 생산되는 형태 전부 — 신형(kind 인코딩, 08) 둘 + 이행기의 레거시 하나.
+  hit="$(printf '%s' '[{"headRefName":"bump-poll/app/page-sha-abc1234"},{"headRefName":"bump-poll/bespoke/page-sha-abc1234"},{"headRefName":"bump-poll/page-sha-abc1234"}]' \
     | jq -r --arg re "$re" '.[] | select(.headRefName | test($re)) | .headRefName')"
   [ -z "$hit" ] || {
     echo "approval gate bypass: pr-sweeper의 정규식이 여전히 bump-poll 브랜치를 고른다('$hit', 정규식 '$re') —"
@@ -642,7 +645,7 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
 #    방문되지 않고 낡은 무장이 산다.** 회수는 보안 속성이라 **후보 계획의 가용성에도 완전성에도** 의존해선 안 된다.
 # 계약(셋 다 필요하다):
 #   ⓐ 회수는 **자기 job**이다 — reader 토큰·docker·플래너 스텝을 하나도 갖지 않는다(그것들이 죽어도 돈다).
-#   ⓑ 대상 목록을 **넘기지 않는다**(`--app` 0회) — 실행기가 `bump-poll/*` 네임스페이스에서 직접 열거한다.
+#   ⓑ 대상 신원을 **넘기지 않는다**(`--kind`/`--name` 0회) — 실행기가 `bump-poll/*` 네임스페이스에서 직접 열거한다.
 #   ⓒ 레인도 넘기지 않는다(`--action` 0회) — autoDeploy SSOT가 유일한 출처다(승인 게이트 우회 방지).
 
 # bats test_tags=regression
@@ -672,11 +675,18 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
     step_out; dump_calls; false
   }
 
-  # ⓑ **대상 목록을 넘기지 않는다** — 넘기는 순간 회수의 완전성이 호출부의 목록(=플래너 출력)에 의존한다.
-  a="$(arg_calls --app)"
+  # ⓑ **대상 신원을 넘기지 않는다** — 넘기는 순간 회수의 완전성이 호출부의 목록(=플래너 출력)에 의존한다.
+  #    (08에서 --app이 --kind/--name 쌍으로 바뀌었다 — 폐지된 플래그를 세면 도메인이 비어 영구 참이 된다.)
+  a="$(arg_calls --kind)"
   [ "$a" -eq 0 ] || {
-    echo "subject injection: reconcile 패스가 실행기에 --app을 넘긴다(${a}회, 기대 0회) —"
+    echo "subject injection: reconcile 패스가 실행기에 --kind를 넘긴다(${a}회, 기대 0회) —"
     echo "  그 목록의 출처가 플래너면 R-27이 그대로 재발한다(플래너가 죽으면 회수도 죽는다)."
+    dump_calls; false
+  }
+  a="$(arg_calls --name)"
+  [ "$a" -eq 0 ] || {
+    echo "subject injection: reconcile 패스가 실행기에 --name을 넘긴다(${a}회, 기대 0회) —"
+    echo "  대상은 bump-poll/* 네임스페이스가 준다(호출부가 목록을 좁히면 회수가 굶는다)."
     dump_calls; false
   }
   # ⓒ 레인도 넘기지 않는다(승인 게이트 우회 방지 — 레인은 autoDeploy SSOT에서만 나온다).
@@ -946,7 +956,7 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
 #    executor proves ownership with" + 그 이빨 증인("a later git config override and a --amend both flip
 #    it RED"). 커밋을 만드는 코드가 러너로 옮겨갔으므로 계약도 함께 갔다:
 #    `tools/tests/test_run-bump-plan.bats`의 "the commit the runner EFFECTIVELY makes…"가 같은 파생
-#    (실행기 소스의 DEFAULT_WRITER/WRITER_BOT_NAME/WRITER_BOT_EMAIL_RE/bumpCommitMessageOf — 못 찾으면
+#    (실행기 소스의 DEFAULT_WRITER/WRITER_BOT_NAME/WRITER_BOT_EMAIL_RE + bump-plan.commitMessage — 못 찾으면
 #    exit 2)을 들고 **진짜 git 커밋 오브젝트**와 대조한다(정체성·메시지·항목당 1커밋).
 #    이빨 증인이 함께 사라진 이유: 그건 stub git이 last-write-wins/--amend **의미를 흉내내는지**를
 #    증명하는 하네스 자기증명이었다. 관측 대상이 모형에서 실물로 바뀌면 흉내낼 의미가 없다 —

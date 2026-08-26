@@ -220,8 +220,8 @@ for (const { name } of listUnits("platform", args.root)) {
     plans.push({ target: { kind: "bespoke", name }, action: "refuse", reason: `플랜 실패: ${e.message}`, current: null, candidate: null });
   }
 }
-// 와이어 형식(구 소비자용 app 필드 동반)은 encodePlan이 소유하고, 출력 전에 decodePlan을
-// 통과시킨다 — 생산자 자기검증: 계약 위반 plan은 소비자에게 가기 전에 여기서 죽는다.
+// 와이어 형식은 encodePlan이 소유하고(08부터 target 신원만 싣는다 — 구 app 필드는 폐지),
+// 출력 전에 decodePlan을 통과시킨다 — 생산자 자기검증: 계약 위반 plan은 소비자에게 가기 전에 여기서 죽는다.
 const wire = encodePlan(plans as PlanItem[]);
 decodePlan(wire);
 console.log(wire);
