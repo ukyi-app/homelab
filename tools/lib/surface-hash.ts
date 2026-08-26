@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+// 실행은 exec seam 경유(d6④) — git 실패는 ""로 흡수하는 기존 계약 유지.
+import { git } from "./exec.ts";
 import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
@@ -17,15 +18,11 @@ function hashLines(lines: string[]): string {
 // (정상 활성 앱이 전부 surface-drift로 오탐). marker 기록(activate-app)과 감사(audit-orphans)가
 // 이 함수를 동일하게 호출해야 일치한다. rev: 커밋 ref(syncedRev 또는 "HEAD"). 실패 시 "" 반환.
 export function surfaceHash(repoDir: string, rev: string, app: string): string {
-  let out: string;
-  try {
-    // stderr ignore: 실패는 ""로 흡수하는 계약이므로 git의 "fatal: not a git repository" 등을
-    // 부모 stderr로 새지 않게 한다(비-git 픽스처에서 감사 출력 오염 방지).
-    out = execFileSync("git", ["-C", repoDir, "ls-tree", "-r", `${rev}:apps/${app}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  } catch {
-    return "";
-  }
-  return hashLines(out.split("\n"));
+  // 실패는 ""로 흡수하는 계약 — seam이 stderr를 캡처만 하고 버리므로 git의 "fatal: not a git
+  // repository" 등이 부모 stderr로 새지 않는다(비-git 픽스처에서 감사 출력 오염 방지).
+  const r = git(repoDir, ["ls-tree", "-r", `${rev}:apps/${app}`], { timeoutMs: 0 });
+  if (!r.ok) return "";
+  return hashLines(r.out.split("\n"));
 }
 
 // working-tree 변형 — 아직 커밋되지 않은 apps/<app> 파일에서 canonical surface 해시를 낸다.
@@ -49,12 +46,9 @@ export function surfaceHashWorktree(repoDir: string, app: string): string {
       if (e.isDirectory()) {
         if (!walk(full, r)) return false;
       } else if (e.isFile()) {
-        let sha: string;
-        try {
-          sha = execFileSync("git", ["-C", repoDir, "hash-object", full], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-        } catch {
-          return false;
-        }
+        const h = git(repoDir, ["hash-object", full], { timeoutMs: 0 });
+        if (!h.ok) return false;
+        const sha = h.out.trim();
         // git ls-tree는 실행권 있으면 100755, 아니면 100644 — create-app 산출물은 전부 비실행(644).
         const mode = statSync(full).mode & 0o111 ? "100755" : "100644";
         lines.push(`${mode} blob ${sha}\t${r}`);

@@ -6,6 +6,7 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  cd "$ROOT" || exit 1   # git ls-files는 cwd 상대다(sops-guard와 같은 관례)
   FX="$BATS_TEST_TMPDIR/x.ts"
   # ⚠️ heredoc 비인용(EOF) — $ROOT 확장 필요. TS 본문은 ${} 템플릿 리터럴을 쓰지 않는다.
   cat > "$FX" <<EOF
@@ -89,23 +90,25 @@ EOF
   echo "$output" | grep -q '^git=true$'
 }
 
-@test "the bump and check clusters import no child_process directly (execution routes through the seam)" {
-  # d6②③ — bump 계열(14)·check 계열(15)의 subprocess 실행은 전부 seam(명명 adapter)을 경유한다.
-  # 직접 import가 되살아나면 maxBuffer/timeout/원장 계약이 그 사이트만 조용히 빠진다(ENOBUFS 죽음이
-  # spawn 오류로만 보이는 클래스). 주석을 걷어낸 소스에서 `child_process` 단어 자체를 센다 —
-  # `from "child_process"`(node: 접두 생략)·동적 import까지 한 그물로 잡되, ENOBUFS 실측 근거를
-  # 서술한 주석의 언급(ensure-bump-pr)만 주석-스트립으로 정당하게 남긴다.
-  # ⚠️ 파일 열거는 이행기 표식이다(CONTRIBUTING의 소비처 하드코딩 금지 대상): 16(exec-remainder)이
-  #    착지하면 "tools/ 전체에서 child_process는 exec.ts 하나"의 **레포 파생** 증인으로 교체한다.
+@test "child_process lives in exec.ts alone across tools (repo-derived, one declared exemption)" {
+  # d6 완결(16) — tools/의 subprocess 실행은 전부 seam(명명 adapter)을 경유한다. 직접 사용이
+  # 되살아나면 maxBuffer/timeout/원장 계약이 그 사이트만 조용히 빠진다(ENOBUFS 죽음이 spawn 오류로만
+  # 보이는 클래스). 열거는 레포에서 파생한다(CONTRIBUTING — 소비처 하드코딩 금지; 14·15의 이행기
+  # 목록을 이 완결형이 대체한다). 주석을 걷어낸 소스에서 `child_process` 단어 자체를 센다.
+  # 예외 1: tools/seal-secret.mts — app-shared 양립 파일(bun + node strip-types, 외부 앱 레포에서
+  # node로 돈다)이라 bun 전용 lib(exec.ts)을 import하지 않고 자체 블록을 유지한다(Pass1 F3 결정).
   n=0
-  for f in tools/poll-ghcr.ts tools/run-bump-plan.ts tools/ensure-bump-pr.ts tools/bump-tag.ts tools/repin-ops-image.ts \
-           tools/check-guard-authority.ts tools/check-ci-parity.ts tools/check-image-ownership.ts tools/verify-db-marker.ts; do
-    [ -f "$ROOT/$f" ] || { echo "roster drift: $f가 없다(개명/이동 — 증인 목록을 갱신하라)"; false; }
-    run bash -c "sed 's|//.*||' '$ROOT/$f' | grep -c 'child_process'"
-    [ "$output" = "0" ] || { echo "seam bypass: $f가 child_process를 직접 쓴다(${output}곳)"; false; }
+  for f in $(git ls-files 'tools/*.ts' 'tools/*.mts' 'tools/lib/*.ts' 'tools/lib/*.mts'); do
+    case "$f" in
+      tools/lib/exec.ts) n=$((n + 1)); continue ;;       # seam 자신 — 유일한 정당 보유처
+      tools/seal-secret.mts) n=$((n + 1)); continue ;;   # 선언된 예외(위 근거)
+    esac
+    # bun 런타임의 자연 우회 경로(Bun.spawn/Bun.spawnSync/Bun.$)도 같은 그물로 잡는다.
+    run bash -c "sed 's|//.*||' '$ROOT/$f' | grep -cE 'child_process|Bun\.(spawn|\\\$)'"
+    [ "$output" = "0" ] || { echo "seam bypass: $f가 subprocess를 직접 쓴다(${output}곳 — child_process/Bun.spawn)"; false; }
     n=$((n + 1))
   done
-  [ "$n" -eq 9 ]   # 열거 붕괴 바닥값 — 루프가 굴러가지 않으면 여기서 죽는다
+  [ "$n" -ge 40 ]   # 열거 붕괴 바닥값 — glob이 깨지면 루프가 vacuous해진다(실측 64: tools 33 + lib 30 + tests/helpers 1)
 }
 
 @test "the exit status rides the Cmd result (callsites keep rc semantics without touching child_process)" {
