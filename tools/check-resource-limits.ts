@@ -4,18 +4,19 @@
 // CNPG CR도 스캔한다: kind:Cluster는 컨테이너 개념이 없어 spec.resources를 pseudo-container 'postgres'로
 // (allowlist 키 Cluster/<name>/postgres), kind:Pooler는 spec.template.spec.containers[](pgbouncer)로 검사한다.
 // 구 scripts/check-resource-limits.sh(bash+yq+python3 3언어)를 bun/TS 단일로 이관.
-// ⚠️ 바닥값 진단은 이제 **커널 균일 문구**다(tools/lib/scan-floor.ts) — 셸 시절의 '메시지 동일'
-//    계약은 그 이행으로 대체됐다. 도메인은 라벨이, 원인 후보는 hint가 나른다.
 // 원격-helm 벤더(platform/*/prod/charts/)·barman-plugin은 스캔 밖. make verify가 호출, bats가 행동 검증.
 import { existsSync, readFileSync } from "node:fs";
 import { parseFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
-import { reportScanError, scanFloor } from "./lib/scan-floor.ts";
-
+import { guardMain, takeFloors } from "./lib/scan-floor.ts";
 
 let f: Record<string, string | boolean>;
-try { f = parseFlags(process.argv.slice(2), { value: ["--repo-root"], bool: [] }); }
-catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root`); process.exit(2); }
+let floors: Map<string, number>;
+try {
+  const taken = takeFloors(process.argv.slice(2));
+  floors = taken.floors;
+  f = parseFlags(taken.rest, { value: ["--repo-root"], bool: [] });
+} catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root · --floor check-resource-limits=<n>`); process.exit(2); }
 const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string) : ".";
 
 const KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler", "Cluster"]);
@@ -44,21 +45,10 @@ const allowed = new Set(
     : [],
 );
 
-// 열거는 공유 워커의 `platform-manifests` 스코프가 소유한다 — 제외 어휘와 tracked 열거,
-// 열거 붕괴 바닥값이 전부 그 안에 있다(제외 목록은 스코프 정의가 SSOT — 여기 복창하지 않는다).
-// 아래 MIN_SCAN은 **워크로드 kind 매치 이후**의 바닥값이라 성격이 다르다(소비자 소유).
-// 커널은 열거 붕괴·미등록 스코프를 throw로만 알린다 — 종료코드와 문구는 콜사이트 소유다
-// (lib/image-pin.ts와 같은 규율). 잡지 않으면 이 파일의 다른 실패가 쓰는 `FAIL:` + exit(1) 대신
-// raw 스택 트레이스가 나가 게이트 출력 규약이 깨진다.
-let entries: ReturnType<typeof walkManifests>;
-try {
-  entries = walkManifests("platform-manifests", ROOT);
-} catch (e) {
-  console.error(`FAIL: ${e instanceof Error ? e.message : String(e)}`);
-  process.exit(1);
-}
-
-let count = 0;
+// 열거는 공유 워커의 `platform-manifests` 스코프가 소유한다 — 제외 어휘와 tracked 열거가 전부
+// 그 안에 있다(제외 목록은 스코프 정의가 SSOT — 여기 복창하지 않는다). 아래 MIN_SCAN은
+// **워크로드 kind 매치 이후**의 바닥값이라 성격이 다르다(소비자 소유). 워커의 throw는
+// guardMain이 fail-loud로 접는다 — raw 스택이 나가면 게이트 출력 규약이 깨진다.
 const viol: string[] = [];
 
 // 자원 블록 1개(컨테이너 또는 Cluster spec.resources) 검사 — cpu·memory request + memory limit 필수,
@@ -87,42 +77,48 @@ function checkBlock(
   if (!allowed.has(key)) viol.push(`${key} [missing: ${missing.join(",")}]  (${rel})`);
 }
 
-for (const { path: rel, text, docs } of entries) {
-  if (!KIND_RE.test(text)) continue;
-  count++;
-  for (const doc of docs) {
-    if (doc.errors.length) { console.error(`FAIL: YAML 파싱 실패: ${rel}: ${doc.errors[0].message}`); process.exit(1); }
-    const o = doc.toJS() as any;
-    if (!o || typeof o !== "object" || !KINDS.has(o.kind)) continue;
-    const name = o.metadata?.name ?? "?";
-    if (o.kind === "Cluster") {
-      // CNPG Cluster: 컨테이너 없음 — spec.resources를 pseudo-container 'postgres'로 검사(GOMEMLIMIT 무관).
-      checkBlock(o.kind, name, "postgres", o.spec?.resources, undefined, rel);
-    } else if (CONTAINER_KINDS.has(o.kind)) {
-      // Deployment/DaemonSet/StatefulSet/Pooler: spec.template.spec.containers[]
-      const containers = o.spec?.template?.spec?.containers ?? [];
-      if (o.kind === "Pooler" && containers.length === 0) {
-        // template 미지정 Pooler = pgbouncer 자원 unlimited → fail-loud(자원 블록 통째 삭제 우회 차단).
-        checkBlock(o.kind, name, "pgbouncer", undefined, undefined, rel);
+// 실행 순서(전 도메인 열거 → 전 floor 판정 → SCAN 일괄 방출 → 검사 → 종료코드)는 guardMain이
+// 구조로 소유한다 — 콜사이트가 순서를 손으로 맞추던 시절의 드리프트 클래스가 표현 불가능해진다.
+guardMain({
+  floors,
+  domains: [{
+    scan: "check-resource-limits",
+    min: MIN_SCAN,
+    floorHint: "grep 셀렉터 회귀 — platform 재배치/kind 들여쓰기?",
+    enumerate: () => {
+      let count = 0;
+      for (const { path: rel, text, docs } of walkManifests("platform-manifests", ROOT)) {
+        if (!KIND_RE.test(text)) continue;
+        count++;
+        for (const doc of docs) {
+          // throw로 알린다 — 커널이 `FAIL: <scan>: 열거 실패`로 접어 마커 없이 죽는다(enumerate 안의
+          // 직접 exit는 커널의 순서 보장 밖에서 죽는 경로를 되살린다).
+          if (doc.errors.length) throw new Error(`YAML 파싱 실패: ${rel}: ${doc.errors[0].message}`);
+          const o = doc.toJS() as any;
+          if (!o || typeof o !== "object" || !KINDS.has(o.kind)) continue;
+          const name = o.metadata?.name ?? "?";
+          if (o.kind === "Cluster") {
+            // CNPG Cluster: 컨테이너 없음 — spec.resources를 pseudo-container 'postgres'로 검사(GOMEMLIMIT 무관).
+            checkBlock(o.kind, name, "postgres", o.spec?.resources, undefined, rel);
+          } else if (CONTAINER_KINDS.has(o.kind)) {
+            // Deployment/DaemonSet/StatefulSet/Pooler: spec.template.spec.containers[]
+            const containers = o.spec?.template?.spec?.containers ?? [];
+            if (o.kind === "Pooler" && containers.length === 0) {
+              // template 미지정 Pooler = pgbouncer 자원 unlimited → fail-loud(자원 블록 통째 삭제 우회 차단).
+              checkBlock(o.kind, name, "pgbouncer", undefined, undefined, rel);
+            }
+            for (const c of containers) checkBlock(o.kind, name, c.name, c.resources, c.env, rel);
+          }
+        }
       }
-      for (const c of containers) checkBlock(o.kind, name, c.name, c.resources, c.env, rel);
-    }
-  }
-}
-
-// 열거 붕괴 바닥값 + SCAN 신호 — 커널(tools/lib/scan-floor.ts)이 한 몸으로 처리한다.
-// 바닥값을 통과한 실행만 마커를 내므로 **순서를 손으로 맞출 자리가 없다**(이 자리에 있던
-// "TS는 콜사이트라 순서를 손으로 맞춰야 한다"는 주석이 설명할 것을 잃었다).
-try {
-  scanFloor("check-resource-limits", count, MIN_SCAN, {
-    hint: "grep 셀렉터 회귀 의심(platform 재배치·kind 들여쓰기?).",
-  });
-} catch (e) {
-  process.exit(reportScanError(e, "FAIL:"));
-}
-if (viol.length) {
-  console.log("FAIL: cpu·memory request 또는 memory limit 없는 상주 워크로드 main 컨테이너 — 선언 후 (memory는) 원장 행 동반, 또는 " + ALLOW + "에 이유와 함께 등재:");
-  for (const v of viol) console.log("  " + v);
-  process.exit(1);
-}
-console.log(`check-resource-limits OK (${count} 워크로드 매니페스트 스캔, cpu·memory request + memory limit 위반 0)`);
+      return count;
+    },
+  }],
+  output: "stdout",
+  check: () => viol,
+  report: (v) => {
+    console.log("FAIL: cpu·memory request 또는 memory limit 없는 상주 워크로드 main 컨테이너 — 선언 후 (memory는) 원장 행 동반, 또는 " + ALLOW + "에 이유와 함께 등재:");
+    for (const x of v) console.log("  " + x);
+  },
+  ok: (counts) => console.log(`check-resource-limits OK (${counts[0]} 워크로드 매니페스트 스캔, cpu·memory request + memory limit 위반 0)`),
+});

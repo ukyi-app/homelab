@@ -94,6 +94,9 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
   함수를 직접 부른다. 커널은 실행 환경별 **두 adapter**다: 셸 `scripts/lib/scan-floor.sh`
   (`scan_floor`·`scan_signal`) · TypeScript `tools/lib/scan-floor.ts`(`scanFloor`·`scanSignal`).
   규약(마커 형태·방출 순서·억제·SKIP 배타)은 하나이고 구현만 갈린다.
+- TS 실행 커널 `guardMain`(같은 파일)을 쓰는 가드는 커널이 **전 도메인 floor 통과 시에만 일괄**
+  방출한다 — 도메인 라벨은 콜사이트의 `scan: "<라벨>"` 리터럴이라 정적 파생 대상이고, 바닥값
+  오버라이드는 `--floor <도메인>=<n>` 하나다(lib-convergence 17).
   ⚠️ 이는 위 "같은 검사의 셸·TS **이중 구현** 금지"의 대상이 **아니다** — 그 조항의 주어는 같은
   *검사*이고 괄호가 "파서·계산은 TS 한 곳에만"으로 못박는다. 스캔 커널은 도메인 판정이 없는 신호
   기계이고 임계값은 양쪽 다 콜사이트에 남으므로, 그 조항이 막는 해악(판정 드리프트) 밖이다.
@@ -128,7 +131,7 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
 
 ```
 grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh
-grep -lE '^[^/]*scan(Floor|Signal)\(' tools/*.ts
+grep -lE '^[^/]*(scan(Floor|Signal)\(|scan: ")' tools/*.ts
 ```
 
 정합은 `tests/gates/test_scan-floor.bats`가 **정적 콜사이트 집합 == 런타임 방출 집합**으로 강제한다
