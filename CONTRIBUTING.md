@@ -103,7 +103,7 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
   오버라이드는 `--floor <도메인>=<n>` 하나다(lib-convergence 17). 셸도 같은 어휘다 —
   `take_floors`(scripts/lib/scan-floor.sh, kernel-followups 01)가 선언 선행으로 같은 fail-closed를
   강제하고, 선언 라벨 ⊆ 방출 라벨은 게이트가 정적 대조한다(구 env·--min-* 어휘는 01~03에서
-  전 가드 이관 완료 — 재유입의 정적 거부는 kernel-followups 04). 예외 하나: 픽스처 주입 플래그가
+  전 가드 이관 완료 — 재유입은 거부 가드 `scripts/check-floor-vocab.sh`가 정적 red로 막는다). 예외 하나: 픽스처 주입 플래그가
   자기 도메인의 floor를 0으로 표현하는 관용구(check-alert-rules `--supply-policy` — 0은 정당한
   바닥값이라 분기 없이 면제가 되고 라벨 집합 불변이 유지된다)는 별개다. 프로덕션 호출은
   floor-free다 — check-ci-parity가 gate 스텝·make -n ci 양쪽에서 `--floor` 잔존을 red로 강제한다.

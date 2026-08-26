@@ -90,6 +90,11 @@
   건너뛰지 않고 생산자 히트 ≥1을 검출기 생존 증거로 요구한다. awk 3겹 처방(rc 포착·`[ -r ]`·READFILES)
   + 바닥값·마커는 검출 뒤. 바닥값은 상수(`MIN_FILES`, env 주입 없음) · `--root <dir>`는 픽스처 전용.
   `tests/gates/test_scan-floor.bats`가 호출(되돌림·신규 생산자·주석 표면·소비자·검출기 붕괴·열거 붕괴 증인).
+- **`check-floor-vocab.sh`** — 바닥값 어휘 거부 가드(kernel-followups 04): 구 어휘의 재유입 —
+  `--min-*` 플래그 표면 · `${…MIN…:-…}` env 폴백 읽기(셸) · `process.env.…MIN…`(TS) — 을 정적
+  red로 만든다. 상수 정의·지역 읽기·주석 산문·`*.bats`(거부 증인 픽스처)는 정당 보유처로 선 밖.
+  패턴은 조립식(self-exclusion 없음), 검출은 detect_run(rc·READFILES 대조), 오버라이드는
+  `--floor check-floor-vocab=<n>` 하나(dogfood). `tests/gates/test_floor-vocab.bats`가 게이트.
 - **`check-credential-expiry.sh`** — 자격증명 만료 원장(`policy/credential-expiry.json`) 검사. `--days N`
   (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). `credential-expiry.yaml`(주간)이 D-14 telegram 경고로
   중계, `tests/gates/test_credential_expiry.bats`가 가드. jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)

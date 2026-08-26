@@ -254,7 +254,7 @@ c" ]
   #    그때는 CONTRIBUTING·PROGRESS의 커버리지 수치도 같이 고쳐야 하므로 diff에 보여야 한다.
   # 라벨 수 바닥값은 **전체** 정적 집합에서 센다 — SKIP과 무관하게 "라벨이 사라졌는가"를 보는 축이다.
   labels=$(printf '%s\n' "$static" | grep -c . || true)
-  [ "$labels" -ge 10 ]
+  [ "$labels" -ge 29 ]
   guards="$(grep -lE '^[^#]*\b(scan_floor|scan_signal) ' "$ROOT"/scripts/*.sh)"
   [ -n "$guards" ]
   # ⚠️ **SKIP(exit 4)은 실패가 아니다 — 그리고 대조에서 양쪽 대칭으로 빠져야 한다.**
