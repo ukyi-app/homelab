@@ -22,10 +22,9 @@
 // 열거는 공유 워커의 `platform-manifests` 스코프가 소유한다(tracked · charts/·벤더 제외).
 
 import { walkManifests } from "./lib/repo-walk.ts";
-import { parseFloor, reportScanError, scanFloor } from "./lib/scan-floor.ts";
+import { guardMain, takeFloors } from "./lib/scan-floor.ts";
 
 const ROOT = process.cwd();
-
 
 // 상한 플래그는 **패턴으로 발견**한다. 새 플래그가 생겨도 이름에 `maxDisk`가 들어가면 자동 편입된다.
 // (하드코딩 목록을 두면 그 목록이 곧 다음 드리프트다 — 이 레포가 반복해서 맞은 클래스.)
@@ -35,13 +34,16 @@ const CAP_FLAG = /--[A-Za-z.]*maxDisk[A-Za-z]*=\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGT
 const VOL_DECL = /(?:storage|sizeLimit)\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]?i?)\b/g;
 
 // 현재 대상 2건(victorialogs · vmagent). 0이면 정규식/스코프가 붕괴한 것이지 "위반 없음"이 아니다.
-// ⚠️ raw 문자열을 **Number() 앞에서** 판정한다 — `Number("abc")`는 NaN이고 `n < NaN`은 항상 false라
-//    오타 하나가 바닥값을 통째로 껐다(실측: DISK_CAP_MIN_FLAGS=abc → SCAN 방출 + rc=0).
-let MIN_FLAGS: number;
+// 오버라이드는 공용 어휘 `--floor caps=<n>`뿐이다(구 DISK_CAP_MIN_FLAGS env 폐지 — 어휘 통일 d1).
+const MIN_FLAGS = 2;
+let floors: Map<string, number>;
 try {
-  MIN_FLAGS = parseFloor(process.env.DISK_CAP_MIN_FLAGS ?? "2", "DISK_CAP_MIN_FLAGS");
+  const taken = takeFloors(process.argv.slice(2));
+  if (taken.rest.length) throw new Error(`알 수 없는 인자: ${taken.rest.join(" ")}`);
+  floors = taken.floors;
 } catch (e) {
-  process.exit(reportScanError(e, "::error::disk-caps:"));
+  console.error(`${e instanceof Error ? e.message : String(e)}\n사용법: check-disk-caps.ts [--floor caps=<n>]`);
+  process.exit(2);
 }
 
 // SI(10ⁿ) vs IEC(2ⁿ). 접미사가 `i`를 포함하면 IEC다. 접미사 없으면 바이트.
@@ -60,80 +62,74 @@ function toBytes(num: string, unit: string): number | null {
 const human = (b: number) => (b >= 2 ** 30 ? `${(b / 2 ** 30).toFixed(2)}Gi` : `${(b / 2 ** 20).toFixed(1)}Mi`);
 
 const bad: string[] = [];
-let flagCount = 0;
 let fileCount = 0;
 
-// ⚠️ 워커 실패를 삼키면 0건 열거 후 초록이 된다(이 레포의 vacuous-green 클래스). 명시적으로 죽인다.
-let entries: ReturnType<typeof walkManifests>;
-try {
-  entries = walkManifests("platform-manifests", ROOT);
-} catch (e) {
-  console.error(`::error::disk-caps: 열거 실패 — ${e instanceof Error ? e.message : String(e)}`);
-  process.exit(1);
-}
+// 실행 순서(전 도메인 열거 → 전 floor 판정 → SCAN 일괄 방출 → 검사 → 종료코드)는 guardMain이
+// 구조로 소유한다 — 워커 throw의 fail-loud 포함(삼키면 0건 열거 후 초록이 되는 vacuous-green
+// 클래스). 위반·성공 문구와 **위반의** ::error:: 채널은 이 콜사이트 소유이고, 바닥값·열거 실패
+// 진단은 커널이 stderr `FAIL:`로 낸다(셸 커널과 어휘 통일 — 붕괴 경로의 GH annotation은 의도적 미사용).
+guardMain({
+  floors,
+  domains: [{
+    scan: "check-disk-caps:caps",
+    min: MIN_FLAGS,
+    floorHint: '정규식 드리프트·스코프 변경 — 이 상태의 "위반 0건"은 통과가 아니라 무측정이다',
+    enumerate: () => {
+      let flagCount = 0;
+      for (const entry of walkManifests("platform-manifests", ROOT)) {
+        const file = entry.path;
+        const text = entry.text;
+        CAP_FLAG.lastIndex = 0;
+        const caps: { raw: string; bytes: number }[] = [];
+        for (const m of text.matchAll(CAP_FLAG)) {
+          const b = toBytes(m[1]!, m[2]!);
+          if (b === null) {
+            bad.push(`${file}: 상한 '${m[0]}'의 단위를 해석할 수 없다 — 판정 불가(fail-closed).`);
+            continue;
+          }
+          caps.push({ raw: `${m[1]}${m[2]}`, bytes: b });
+        }
+        if (caps.length === 0) continue;
+        fileCount++;
+        flagCount += caps.length;
 
-for (const entry of entries) {
-  const file = entry.path;
-  const text = entry.text;
-  CAP_FLAG.lastIndex = 0;
-  const caps: { raw: string; bytes: number }[] = [];
-  for (const m of text.matchAll(CAP_FLAG)) {
-    const b = toBytes(m[1]!, m[2]!);
-    if (b === null) {
-      bad.push(`${file}: 상한 '${m[0]}'의 단위를 해석할 수 없다 — 판정 불가(fail-closed).`);
-      continue;
-    }
-    caps.push({ raw: `${m[1]}${m[2]}`, bytes: b });
-  }
-  if (caps.length === 0) continue;
-  fileCount++;
-  flagCount += caps.length;
-
-  VOL_DECL.lastIndex = 0;
-  const vols: { raw: string; bytes: number }[] = [];
-  for (const m of text.matchAll(VOL_DECL)) {
-    const b = toBytes(m[1]!, m[2]!);
-    if (b !== null) vols.push({ raw: `${m[1]}${m[2]}`, bytes: b });
-  }
-  // ⚠️ 볼륨 선언을 못 찾으면 **통과시키지 않는다.** "비교 대상이 없다"는 곧 판정 불가이고,
-  //    조용히 넘기면 상한이 아무 볼륨에도 묶이지 않은 채 초록이 된다(무측정).
-  if (vols.length === 0) {
-    bad.push(
-      `${file}: 디스크 상한(${caps.map((c) => c.raw).join(", ")})이 있는데 같은 파일에 볼륨 크기 선언` +
-        `(PVC requests.storage 또는 emptyDir sizeLimit)이 없다 — 무엇과 비교해야 하는지 알 수 없다.`,
-    );
-    continue;
-  }
-  // 파일 안에 볼륨이 여럿이면 **가장 작은 것**과 비교한다(보수적). 두 사례 모두 볼륨이 하나다.
-  const min = vols.reduce((a, b2) => (b2.bytes < a.bytes ? b2 : a));
-  for (const c of caps) {
-    if (c.bytes >= min.bytes) {
-      bad.push(
-        `${file}: 디스크 상한 ${c.raw}(${human(c.bytes)})가 볼륨 선언 ${min.raw}(${human(min.bytes)}) 이상이다 ` +
-          `— 비율 ${((c.bytes / min.bytes) * 100).toFixed(1)}%. 같은 파일이 모순된 두 숫자를 말한다.\n` +
-          `    → 상한을 볼륨 선언보다 **작게** 내려라(선례: vmagent 450MiB < 512Mi emptyDir).\n` +
-          `    ⚠️ PVC requests.storage는 **축소 불가**(확장 전용)라 볼륨 쪽을 올려 맞추면 되돌릴 수 없다.\n` +
-          `    ⚠️ 단위: GB=10⁹ · Gi=2³⁰ — 접미사만 보면 15GB < 10Gi로 잘못 읽힌다.`,
-      );
-    }
-  }
-}
-
-// ⚠️ 바닥값은 위반 목록(`bad`)과 **분리한다.** 둘을 합치면 위반이 있는 실행에서 SCAN 마커가
-//    아예 안 나가 "마커 부재 = 미실행" 해석이 깨진다(실측 결함 — 위반 1건짜리 픽스처에서 마커 0건).
-//    바닥값 실패는 "아무것도 측정하지 않았다"라 그 뒤에 모인 위반은 0건 검사에서 나온 것이다.
-//    커널이 통과 시점에 신호를 내므로 순서를 손으로 맞출 자리가 사라진다.
-try {
-  scanFloor("check-disk-caps:caps", flagCount, MIN_FLAGS, {
-    hint: `정규식 드리프트·스코프 변경 의심. 이 상태의 "위반 0건"은 통과가 아니라 무측정이다.`,
-  });
-} catch (e) {
-  process.exit(reportScanError(e, "::error::disk-caps:"));
-}
-
-if (bad.length) {
-  for (const b of bad) console.error(`::error::disk-caps: ${b}`);
-  console.error(`\ncheck-disk-caps: ${bad.length}건 실패`);
-  process.exit(1);
-}
-console.log(`check-disk-caps OK (파일 ${fileCount}개 · 상한 ${flagCount}건 전건이 볼륨 선언 미만)`);
+        VOL_DECL.lastIndex = 0;
+        const vols: { raw: string; bytes: number }[] = [];
+        for (const m of text.matchAll(VOL_DECL)) {
+          const b = toBytes(m[1]!, m[2]!);
+          if (b !== null) vols.push({ raw: `${m[1]}${m[2]}`, bytes: b });
+        }
+        // ⚠️ 볼륨 선언을 못 찾으면 **통과시키지 않는다.** "비교 대상이 없다"는 곧 판정 불가이고,
+        //    조용히 넘기면 상한이 아무 볼륨에도 묶이지 않은 채 초록이 된다(무측정).
+        if (vols.length === 0) {
+          bad.push(
+            `${file}: 디스크 상한(${caps.map((c) => c.raw).join(", ")})이 있는데 같은 파일에 볼륨 크기 선언` +
+              `(PVC requests.storage 또는 emptyDir sizeLimit)이 없다 — 무엇과 비교해야 하는지 알 수 없다.`,
+          );
+          continue;
+        }
+        // 파일 안에 볼륨이 여럿이면 **가장 작은 것**과 비교한다(보수적). 두 사례 모두 볼륨이 하나다.
+        const min = vols.reduce((a, b2) => (b2.bytes < a.bytes ? b2 : a));
+        for (const c of caps) {
+          if (c.bytes >= min.bytes) {
+            bad.push(
+              `${file}: 디스크 상한 ${c.raw}(${human(c.bytes)})가 볼륨 선언 ${min.raw}(${human(min.bytes)}) 이상이다 ` +
+                `— 비율 ${((c.bytes / min.bytes) * 100).toFixed(1)}%. 같은 파일이 모순된 두 숫자를 말한다.\n` +
+                `    → 상한을 볼륨 선언보다 **작게** 내려라(선례: vmagent 450MiB < 512Mi emptyDir).\n` +
+                `    ⚠️ PVC requests.storage는 **축소 불가**(확장 전용)라 볼륨 쪽을 올려 맞추면 되돌릴 수 없다.\n` +
+                `    ⚠️ 단위: GB=10⁹ · Gi=2³⁰ — 접미사만 보면 15GB < 10Gi로 잘못 읽힌다.`,
+            );
+          }
+        }
+      }
+      return flagCount;
+    },
+  }],
+  output: "stdout",
+  check: () => bad,
+  report: (viol) => {
+    for (const b of viol) console.error(`::error::disk-caps: ${b}`);
+    console.error(`\ncheck-disk-caps: ${viol.length}건 실패`);
+  },
+  ok: (counts) => console.log(`check-disk-caps OK (파일 ${fileCount}개 · 상한 ${counts[0]}건 전건이 볼륨 선언 미만)`),
+});

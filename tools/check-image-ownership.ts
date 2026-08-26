@@ -27,8 +27,8 @@ import { git } from "./lib/exec.ts";
 import { readFileSync } from "node:fs";
 import { typedFlags } from "./lib/cli.ts";
 import { walkManifests } from "./lib/repo-walk.ts";
-import { parseFloor, reportScanError, scanFloor } from "./lib/scan-floor.ts";
-
+import { guardMain, takeFloors } from "./lib/scan-floor.ts";
+import { readLedger } from "./lib/policy-ledger.ts";
 
 const POLICY_PATH = "policy/image-ownership.json";
 const RENOVATE_PATH = "renovate.json";
@@ -183,15 +183,24 @@ export function renovateReaches(path: string, r: Renovate): boolean {
 
 // ── 원장 ──────────────────────────────────────────────────────────────────────
 type Decl = { artifact?: unknown; why?: unknown; freshness?: unknown; since?: unknown; owner_action?: unknown };
-type Policy = { unowned?: Decl[] };
-const SINCE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function loadPolicy(root: string): Policy {
-  const p = JSON.parse(readFileSync(`${root}/${POLICY_PATH}`, "utf8")) as Policy;
-  if (!p || typeof p !== "object" || !Array.isArray(p.unowned)) {
-    throw new Error(`${POLICY_PATH}: unowned 배열이 없다`);
-  }
-  return p;
+// 원장 로딩·통일 shape·항목 구조는 readLedger 소유, 죽은-선언·무소유 매칭 대조는 audit 소유
+// (CONTEXT.md 「정책 원장」). 필드가 왜 필수인지의 산문은 원장 _readme가 진다.
+const LEDGER_SCHEMA = {
+  type: "object",
+  required: ["artifact", "why", "freshness", "since", "owner_action"],
+  properties: {
+    artifact: { type: "string", minLength: 1 },
+    why: { type: "string", minLength: 1 },
+    freshness: { type: "string", minLength: 1 },
+    since: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+    owner_action: { type: "string", minLength: 1 },
+  },
+  additionalProperties: false,
+};
+
+function loadUnowned(root: string): Decl[] {
+  return readLedger<Decl[]>({ path: POLICY_PATH, container: "unowned", entrySchema: LEDGER_SCHEMA, root });
 }
 
 // ── 소유자 판정 ───────────────────────────────────────────────────────────────
@@ -239,7 +248,14 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
   const bad: string[] = [];
   const renovate = loadRenovate(root);
   const bespoke = bespokeFiles(root);
-  const policy = loadPolicy(root);
+  // 원장 결함은 열거 붕괴가 아니라 **위반**이다 — refs 도메인은 정상 평가되므로 마커를 유지한 채
+  // FAIL 목록으로 보고한다(부재·파싱·항목 구조 판정은 readLedger, 근인 메시지가 목록 맨 앞).
+  let unowned: Decl[] = [];
+  try {
+    unowned = loadUnowned(root);
+  } catch (e) {
+    bad.push(e instanceof Error ? e.message : String(e));
+  }
 
   const refs: Ref[] = [];
   for (const e of walkManifests("image-ownership", root)) {
@@ -260,16 +276,8 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
     }
   }
 
-  // 소유자 판정 + 무소유는 원장 선언 강제.
-  const declared = new Set(policy.unowned!.map((d) => String(d.artifact ?? "")));
-  for (const d of policy.unowned!) {
-    const a = String(d.artifact ?? "");
-    if (!a) bad.push(`${POLICY_PATH}: artifact가 빈 항목이 있다`);
-    if (!String(d.why ?? "").trim()) bad.push(`${POLICY_PATH}: '${a}' why가 비었다 — 근거 없는 선언은 원장이 아니다`);
-    if (!String(d.freshness ?? "").trim()) bad.push(`${POLICY_PATH}: '${a}' freshness가 비었다(버전 채널이 없으면 '없음'이라고 적어라)`);
-    if (!SINCE_RE.test(String(d.since ?? ""))) bad.push(`${POLICY_PATH}: '${a}' since=YYYY-MM-DD가 필요하다`);
-    if (!String(d.owner_action ?? "").trim()) bad.push(`${POLICY_PATH}: '${a}' owner_action이 필요하다`);
-  }
+  // 소유자 판정 + 무소유는 원장 선언 강제. (항목 필드 구조 검증은 readLedger가 이미 했다.)
+  const declared = new Set(unowned.map((d) => String(d.artifact ?? "")));
 
   const owners = new Map<string, Owner>();
   const usedDecls = new Set<string>();
@@ -354,54 +362,44 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
 
 if (import.meta.main) {
   let flags;
+  let floors: Map<string, number>;
   try {
-    flags = typedFlags(process.argv.slice(2), { value: ["--repo-root", "--min-refs"], bool: ["--report"] });
+    const taken = takeFloors(process.argv.slice(2));
+    floors = taken.floors;
+    flags = typedFlags(taken.rest, { value: ["--repo-root"], bool: ["--report"] });
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
-    console.error("사용법: check-image-ownership.ts [--repo-root <path>] [--min-refs <n>] [--report]");
+    console.error("사용법: check-image-ownership.ts [--repo-root <path>] [--floor refs=<n>] [--report]");
     process.exit(2);
   }
   const root = flags.str("--repo-root", ".")!;
-  // 바닥값 raw 입력 판정은 커널이 소유한다 — 이 파일에 있던 `positiveInt` 사본은
-  // `check-workflow-readiness`의 것과 바이트 동일했고, 나머지 두 가드는 그 처방을 못 받아
-  // `Number()` 직행이었다(처방을 복제하면 일부가 빠진다). 남은 한 벌은 그 가드의 이행 티켓이 걷는다.
-  let minRefs: number;
-  try {
-    minRefs = parseFloor(flags.str("--min-refs", "20"), "--min-refs");
-  } catch (e) {
-    process.exit(reportScanError(e, "FAIL:"));
-  }
 
-  let res;
-  try {
-    res = audit(root);
-  } catch (e) {
-    console.error(`FAIL: ${e instanceof Error ? e.message : String(e)}`);
-    process.exit(1);
-  }
-
-  // 열거 붕괴 바닥값 + SCAN 신호 — 커널이 한 몸으로 처리한다. 바닥값을 통과한 실행만 마커를 내고,
-  // 위반이 있어도 마커는 이미 나갔다("마커 부재 = 미실행" 해석이 유지된다).
-  // ⚠️ `--report` 출력보다 **앞**이다. 열거가 붕괴했으면 소유자 목록을 낼 이유가 없다.
-  try {
-    scanFloor("check-image-ownership:refs", res.refs.length, minRefs, {
-      hint: "이 회계가 vacuous해진다.",
-    });
-  } catch (e) {
-    process.exit(reportScanError(e, "FAIL:"));
-  }
-
-  if (flags.bool("--report")) {
-    for (const [k, owner] of [...res.owners].sort()) {
-      const [file, ref] = k.split("\u0000");
-      console.log(`${owner.padEnd(14)} ${file} — ${ref}`);
-    }
-  }
-
-  if (res.bad.length) {
-    console.error("FAIL: 이미지 소유권 회계 위반:");
-    for (const b of res.bad) console.error(`  ${b}`);
-    process.exit(1);
-  }
-  console.log(`check-image-ownership OK (참조 ${res.refs.length}건 전건 소유자 확정 또는 원장 선언)`);
+  // 실행 순서(열거 → floor → SCAN → 검사 → 종료코드)는 guardMain이 구조로 소유한다 —
+  // renovate.json 읽기 실패는 열거 실패로 접혀 마커 없이 죽는다. 원장(readLedger) 실패는 **위반**이다 —
+  // refs 도메인은 정상 평가되므로 마커를 유지한 채 FAIL 목록으로 보고한다(audit 안 try/catch가 소유).
+  let res!: ReturnType<typeof audit>;
+  guardMain({
+    floors,
+    domains: [{
+      scan: "check-image-ownership:refs",
+      min: 20,
+      floorHint: "이 회계가 vacuous해진다",
+      enumerate: () => { res = audit(root); return res.refs.length; },
+    }],
+    output: "stdout",
+    check: () => {
+      if (flags.bool("--report")) {
+        for (const [k, owner] of [...res.owners].sort()) {
+          const [file, ref] = k.split("\u0000");
+          console.log(`${owner.padEnd(14)} ${file} — ${ref}`);
+        }
+      }
+      return res.bad;
+    },
+    report: (v) => {
+      console.error("FAIL: 이미지 소유권 회계 위반:");
+      for (const b of v) console.error(`  ${b}`);
+    },
+    ok: (counts) => console.log(`check-image-ownership OK (참조 ${counts[0]}건 전건 소유자 확정 또는 원장 선언)`),
+  });
 }

@@ -750,20 +750,21 @@ YAML
   _refute_marker '^SCAN: check-alert-rules:rules:' "$output"
 }
 
-# rules가 붕괴하면 **그 뒤 도메인**(supply·supply-refs)의 마커는 나가지 않는다(설계 §4 — 순차 호출).
-# ⚠️ denylist는 **앞** 도메인이다 — 모드 A보다 먼저 평가돼야 해서 바닥값·신호가 위에 있다.
-#    그 실행은 denylist를 실제로 평가했으므로 마커를 내는 것이 옳다. "뒤"의 정의가 요점이다.
-@test "a rule-extraction collapse withholds the later domain markers but keeps the earlier one" {
+# rules가 붕괴하면 **어느 도메인의 마커도** 나가지 않는다 — guardMain 일괄 방출(17 재접목).
+# 순차판은 denylist 마커가 모드 A 앞에서 이미 나가 "앞 도메인 유지"였지만, 일괄 원칙에서는
+# 붕괴한 실행의 어떤 건수도 "검사했다"로 읽히면 안 된다(커널 계약 bats가 픽스처로 고정).
+# 이 테스트(rules 붕괴)와 아래(denylist 붕괴)는 서로 다른 도메인의 붕괴가 같은 전-억제를
+# 낳음을 각각 증인한다.
+@test "a rule-extraction collapse withholds every domain marker (batch emission)" {
   tmp="$(mktemp -d)"
   _seed "$tmp"
   rm -f "$tmp/platform/victoria-stack/prod/rules/probe.yaml"
   _lint "$tmp"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
-  # 앞 도메인은 평가됐다 — 마커가 나간다.
-  printf '%s\n' "$output" | grep -qE '^SCAN: check-alert-rules:denylist: [0-9]+$'
-  # 뒤 도메인은 평가되지 않았다 — 마커가 없다.
-  _refute_marker '^SCAN: check-alert-rules:(supply|supply-refs):' "$output"
+  # 양성 대조 — 붕괴 진단이 rules 도메인 라벨을 단다("마커 없음"만 두면 미실행도 참이다).
+  printf '%s\n' "$output" | grep -q 'check-alert-rules:rules:.*열거 붕괴'
+  _refute_marker '^SCAN: check-alert-rules:' "$output"
 }
 
 # 이 테스트가 옛 `a denylist that still exists but holds no entries trips the entry floor`를 흡수한다.
@@ -815,7 +816,7 @@ _lint_real_supply() {   # $1=root — supply 원장만 실 경로에서 읽게 �
   _refute_marker '^SCAN: check-alert-rules:supply:' "$output"
 }
 
-@test "a dead enforcement loop trips the supply-refs floor and withholds that marker" {
+@test "a dead enforcement loop trips the supply-refs floor and withholds every marker" {
   tmp="$(mktemp -d)"
   _seed "$tmp"
   _seed_real_supply "$tmp" 14           # 원장은 통과(14 >= 12), 참조는 0건이라 강제 루프가 죽었다
@@ -824,9 +825,10 @@ _lint_real_supply() {   # $1=root — supply 원장만 실 경로에서 읽게 �
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '열거 붕괴'
   echo "$output" | grep -q '강제 루프가 죽었다'
-  # 원장 바닥값은 통과했으므로 supply 마커는 나가고, supply-refs만 빠진다.
-  printf '%s\n' "$output" | grep -qE '^SCAN: check-alert-rules:supply: [0-9]+$'
-  _refute_marker '^SCAN: check-alert-rules:supply-refs:' "$output"
+  # guardMain 일괄 방출 — 통과한 도메인(supply 포함)의 마커도 억제된다. 붕괴 진단의 도메인
+  # 라벨(supply-refs)이 양성 대조다.
+  printf '%s\n' "$output" | grep -q 'check-alert-rules:supply-refs:.*열거 붕괴'
+  _refute_marker '^SCAN: check-alert-rules:' "$output"
 }
 
 # 통과 실행은 라벨 4개를 **전부** 낸다 — 이행이 라벨 집합을 바꾸지 않았다는 증인이다.

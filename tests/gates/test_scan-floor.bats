@@ -196,10 +196,14 @@ EOF
 SCAN_NEW_RE='^[^/]*scan(Floor|Signal)\('
 
 @test "the TypeScript guards emit the same marker shape (derived roster, not hardcoded)" {
-  # 정적: 주석(//) 줄을 제외한 커널 콜사이트 `scanFloor("<라벨>"` · `scanSignal("<라벨>"`.
-  # 라벨은 도메인 단위라 접미사가 붙을 수 있다.
-  static="$(grep -hE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts \
-            | grep -oE 'scan(Floor|Signal)\("[a-z0-9:-]+"' | sed 's/^[^"]*"//; s/"$//' | LC_ALL=C sort -u)"
+  # 정적: 두 형태의 합집합 — ① 커널 콜사이트 `scanFloor("<라벨>"` · `scanSignal("<라벨>"`,
+  # ② 실행 커널(guardMain) 도메인 선언의 `scan: "<라벨>"` 리터럴(17 재접목 — 커널이 마커를
+  # 방출하는 가드는 소스에 콜사이트 형태가 없으므로 ②가 없으면 그 가드를 정적 쪽에서 잃는다).
+  # 라벨은 도메인 단위라 접미사가 붙을 수 있다 — 두 형태 모두.
+  static="$({ grep -hE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts \
+              | grep -oE 'scan(Floor|Signal)\("[a-z0-9:-]+"' | sed 's/^[^"]*"//; s/"$//'; \
+              grep -hE '^[^/]*scan: "' "$ROOT"/tools/*.ts \
+              | grep -oE 'scan: "[a-z0-9:-]+"' | sed 's/^scan: "//; s/"$//'; } | LC_ALL=C sort -u)"
   # 바닥값: 콜사이트가 통째로 사라지면 정적·런타임이 함께 줄어 등식이 유지된다(적대 검토가 실측한 구멍).
   n=$(printf '%s\n' "$static" | grep -c . || true)
   # ⚠️ 여유는 두되 **절반이 사라져도 통과하는 상태**는 아니어야 한다 — 이 바닥값의 목적은 위 구멍을
@@ -215,7 +219,10 @@ SCAN_NEW_RE='^[^/]*scan(Floor|Signal)\('
   # 방출 TS 파일 전량을 **파생**한다 — 목록을 손으로 적지 않는다.
   # ⚠️ 정적 집합과 이 목록이 같은 패턴에서 나오므로, 패턴이 깨지면 둘이 함께 비어 등식이 성립한다.
   #    `[ -n "$files" ]`와 위 라벨 바닥값이 그 붕괴를 막고, 우회는 거부 가드가 막는다.
-  files="$(grep -lE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts)"
+  # ⚠️ 각 grep에 `|| true` — 이관이 진행되며 한 형태가 0건이 되는 것은 정당하고, 그때 grep rc=1이
+  #    set -e로 여기서 죽으면 진짜 단언(아래 비어있음·집합 대조)에 도달하지 못한다.
+  files="$({ grep -lE "$SCAN_NEW_RE" "$ROOT"/tools/*.ts || true; \
+             grep -lE '^[^/]*scan: "' "$ROOT"/tools/*.ts || true; } | LC_ALL=C sort -u)"
   [ -n "$files" ]
   runtime=""
   for f in $files; do
@@ -293,21 +300,28 @@ KERNEL_TS='const k = await import(process.argv[1] + "/tools/lib/scan-floor.ts");
 # lib 커널 규율의 회귀 증인 — `tools/README.md`("콜사이트가 정책 소유") · `image-pin.ts`
 # ("process.exit는 전부 콜사이트 소유") · `repo-walk.ts` · `sealed-contract.ts`가 같은 경계를 적었다.
 # 이 커널이 종료를 도로 가져가면 콜사이트가 두 실패를 구별할 수 없고, 단위 표면 테스트도 불가능해진다.
-@test "the TypeScript scan kernel never terminates the process itself" {
+@test "the judging kernel section never terminates the process (only guardMain owns exit)" {
   # ⚠️ **주석 줄을 먼저 걷어낸다.** `^[^/]*` 는 `//`만 제외하므로 JSDoc의 ` * ` 연속줄이 코드로
   #    오인된다 — 실측: 커널 독스트링이 콜사이트 관용구 예시로 `process.exit(…)`를 적자 이 증인이
   #    red가 됐다. 규약은 "커널이 종료를 **부르지** 않는다"이지 "그 단어를 적지 않는다"가 아니다.
   # ⚠️ `run bash -c "… \$ROOT …"`로 쓰면 안 된다 — ROOT는 export되지 않은 bats 지역 변수라
   #    새 셸에서 빈 문자열이 되고, grep이 빈 경로를 읽어 0건 → rc=1 → **이 단언이 항상 통과**한다
   #    (실측: 그 판에서 커널 끝에 process.exit을 넣어도 red가 나지 않았다).
-  code="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$ROOT/tools/lib/scan-floor.ts")"
+  # 파일은 두 절이다(17 재접목): 판정 커널(scanFloor류 — 종료 금지, ScanError로 콜사이트에 위임)과
+  # 실행 커널(guardMain — 진입 함수라 exit를 소유, 반환형 never가 계약). 구분 주석이 경계다 —
+  # 마커가 사라지면 절단이 파일 전체가 되어 guardMain의 exit로 이 증인이 red가 난다(fail-closed).
+  code="$(awk '/── 실행 커널 guardMain/{exit} {print}' "$ROOT/tools/lib/scan-floor.ts" | grep -vE '^[[:space:]]*(//|\*|/\*)')"
   # 커널을 실제로 읽었다는 증거 — 없으면 아래 판정이 자기 자신 vacuous가 된다.
   [ -n "$code" ]
   if printf '%s\n' "$code" | grep -q 'process\.exit'; then
-    echo "커널이 종료를 부른다(lib은 종료를 소유하지 않는다):"
+    echo "판정 커널 절이 종료를 부른다(판정 lib은 종료를 소유하지 않는다):"
     printf '%s\n' "$code" | grep -n 'process\.exit'
     false
   fi
+  # 실행 커널 절의 exit 소유는 양성 대조다 — 이게 없으면 위 절단이 빗나가도 조용히 참이다.
+  tail_code="$(awk 'f{print} /── 실행 커널 guardMain/{f=1}' "$ROOT/tools/lib/scan-floor.ts" | grep -vE '^[[:space:]]*(//|\*|/\*)')"
+  [ -n "$tail_code" ]
+  printf '%s\n' "$tail_code" | grep -q 'process\.exit'
 }
 
 # 실패는 ScanError로 나가고 **권고 종료코드**를 싣는다 — 콜사이트가 두 사고를 구별할 수 있어야 한다
@@ -419,7 +433,7 @@ YAML
 # 위반이 있는 실행에서도 마커가 나와야 한다 — "마커 부재 = 미실행" 해석이 깨지지 않도록.
 @test "check-disk-caps emits the scan marker even when it reports violations" {
   make_caps_fixture
-  run bash -c "cd '$FX' && DISK_CAP_MIN_FLAGS=1 bun '$ROOT/tools/check-disk-caps.ts'"
+  run bash -c "cd '$FX' && bun '$ROOT/tools/check-disk-caps.ts' --floor caps=1"
   [ "$status" -ne 0 ]
   out="$output"
   run grep -q "^SCAN: check-disk-caps:caps: 1$" <<<"$out"
@@ -435,7 +449,7 @@ YAML
 # 바닥값 진단이 위반 사이에 섞여 나가고 마커는 어느 쪽이든 사라진다.
 @test "check-disk-caps dies on the floor before it reports violations" {
   make_caps_fixture
-  run bash -c "cd '$FX' && DISK_CAP_MIN_FLAGS=5 bun '$ROOT/tools/check-disk-caps.ts'"
+  run bash -c "cd '$FX' && bun '$ROOT/tools/check-disk-caps.ts' --floor caps=5"
   [ "$status" -ne 0 ]
   out="$output"
   # 바닥값 진단은 나간다(도메인 힌트를 달고).
@@ -450,8 +464,8 @@ YAML
   [ "$status" -ne 0 ]
 }
 
-@test "check-disk-caps rejects a malformed floor from the environment" {
-  run bash -c "DISK_CAP_MIN_FLAGS=abc bun '$ROOT/tools/check-disk-caps.ts'"
+@test "check-disk-caps rejects a malformed floor from the override vocabulary" {
+  run bash -c "bun '$ROOT/tools/check-disk-caps.ts' --floor caps=abc"
   [ "$status" -eq 2 ]
   out="$output"
   run grep -q "^SCAN:" <<<"$out"
@@ -500,12 +514,13 @@ LIST
   # 대조군 — 손대지 않은 사본은 통과한다(아래 red가 픽스처 조립 자체의 실패가 아님을 증명).
   run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"
   [ "$status" -eq 0 ]
-  # 되돌림: scanFloor 호출을 이행 전 형태(console.log)로.
+  # 되돌림: 커널 방출을 콜사이트 직접 emission으로(guardMain 이관 후의 등가 되돌림 — 도메인
+  # 선언은 그대로 두고 마커를 손으로 하나 더 내는 형태가 정확히 "두 번째 진실"의 모양이다).
   python3 - "$fx/tools/check-resource-limits.ts" <<'PY'
 import sys
 p=sys.argv[1]; s=open(p,encoding='utf-8').read()
-i=s.index('scanFloor("check-resource-limits"'); j=s.index(');', i)+2
-n=s[:i]+'console.log(`SCAN: check-resource-limits: ${count}`);'+s[j:]
+i=s.index('guardMain({')
+n=s[:i]+'console.log("SCAN: check-resource-limits: " + 0);\n'+s[i:]
 assert n!=s; open(p,'w',encoding='utf-8').write(n)
 PY
   run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"

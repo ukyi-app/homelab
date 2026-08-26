@@ -5,12 +5,13 @@
 //
 // 병(TS 고유): 셸 콜사이트는 `[ "$got" -lt "$min" ]`이 수가 아닌 값에 **에러를 낸다**. TypeScript는
 // `Number("abc")`가 NaN이고 `n < NaN`이 항상 false라 **바닥값이 통째로 꺼진 채 초록**이 된다.
-// 실측(2026-08-25): `DISK_CAP_MIN_FLAGS=abc` → SCAN 방출 + rc=0. 오타 하나가 이 커널이 없애려는
-// 실패 클래스를 그대로 되살렸다. 그래서 이 adapter에는 셸에 없는 세 번째 함수가 있다.
+// 실측(2026-08-25): 구 `DISK_CAP_MIN_FLAGS=abc` → SCAN 방출 + rc=0. 오타 하나가 이 커널이 없애려는
+// 실패 클래스를 그대로 되살렸다. 그래서 이 adapter에는 셸에 없는 판정 함수(parseFloor)가 있다.
 //
 //   scanFloor(label, got, min, opts?)   건수 바닥값. 미만이면 진단 + 종료. 통과하면 SCAN 신호를 낸다.
 //   scanSignal(label, n, opts?)         `SCAN: <라벨>: <n>` 마커만 낸다(바닥값 없는 카운트 자리용).
 //   parseFloor(raw, source)             raw 문자열 → 바닥값 수. 아니면 진단 + exit 2.
+//   guardMain / takeFloors / floorOf    아래 "실행 커널" 절 — 실행 순서와 --floor 어휘를 소유한다.
 //
 // ⚠️ **바닥값을 통과한 실행만 신호를 낸다.** 실패 경로는 이미 stderr로 시끄럽고, 그때의 건수는
 //    "검사했다"가 아니라 "붕괴했다"는 뜻이라 같은 마커로 내면 소비자가 정반대로 읽는다.
@@ -90,8 +91,9 @@ export type SignalOpts = Pick<ScanOpts, "quiet">;
 
 /**
  * `SCAN: <라벨>: <n>` — 실행 관측용 균일 신호. **stdout**(SKIP 마커와 같은 채널).
- * 바닥값이 걸리지 않은 카운트 자리도 이걸 직접 부른다(예: check-guard-authority의 venues —
- * 바닥값은 권위 venue 수에 걸리고 신호는 전체 venue 수를 낸다).
+ * 바닥값이 걸리지 않은 카운트 자리도 이걸 직접 부른다(예: check-workflow-readiness의 런타임
+ * 모드 `:accounted` — 회계 대상 수는 원장이 정하고 그 바닥값은 정적 모드가 본다). guardMain의
+ * 일괄 방출도 이 함수를 경유한다 — 마커를 내는 구현은 이 한 곳이다.
  */
 export function scanSignal(label: string, n: number, opts: SignalOpts = {}): void {
   if (opts.quiet) return;
@@ -115,18 +117,15 @@ export function parseFloor(raw: string | undefined, source: string): number {
 }
 
 /**
- * `ScanError`를 콜사이트의 진단 한 줄로 만든다. **문구는 커널이, 종료는 콜사이트가** 소유한다 —
- * `tools/README.md` 커널 표제가 "콜사이트가 정책 소유, **단 정책이 콜사이트마다 갈릴 때**"이고,
- * 여기서 실제로 갈리는 정책은 **진단 접두 하나**뿐이다(대부분 `FAIL:`, check-disk-caps는
- * GitHub Actions 어노테이션 `::error::disk-caps:`). 나머지는 전부 같으므로 커널이 갖는다 —
- * `lib/sealed-contract.ts`가 "정책이 갈리지 않으면 에러 문구까지 커널이 갖는다"로 세운 선례다.
- *
- * 이것이 없으면 콜사이트마다 `if (e instanceof ScanError) { console.error(…); process.exit(…) }`가
- * 복제된다(실측: 5벌 중 4벌이 주석까지 바이트 동일했다 — 원장 행 파서 3벌 사례와 같은 형태).
- *
- * 콜사이트 관용구는 **한 줄**이다: `catch (e) { process.exit(reportScanError(e, "FAIL:")); }`
- * — 진단을 내고 권고 코드를 돌려줄 뿐, **종료는 콜사이트가 한다**(lib은 종료를 소유하지 않는다).
+ * `ScanError`를 콜사이트의 진단 한 줄로 만든다. **문구는 커널이, 종료는 콜사이트가** 소유한다.
+ * 콜사이트 관용구: `catch (e) { process.exit(reportScanError(e, "FAIL:")); }` — 진단을 내고 권고
+ * 코드를 돌려줄 뿐, **종료는 콜사이트가 한다**(판정 lib은 종료를 소유하지 않는다).
  * `ScanError`가 아니면 되던진다: 커널이 삼키면 다른 결함이 이 자리에서 조용히 사라진다.
+ *
+ * ⚠️ 현 소비자 0(17 재접목 실측) — guardMain 이행이 scanFloor 직접 콜사이트를 전부 접었다.
+ *    커널 밖에서 scanFloor/parseFloor를 직접 쓰는 가드가 다시 생기면 이 관용구가 그 자리다.
+ *    제거하지 않는 근거: ScanError의 권고 종료코드 계약(1/2)을 소비하는 유일한 규약 함수라
+ *    이것을 지우면 그 계약이 산문으로만 남는다. 소비자가 계속 0이면 제거 재평가(얕은 모듈 규율).
  */
 export function reportScanError(e: unknown, prefix: string): number {
   if (!(e instanceof ScanError)) throw e;
@@ -140,7 +139,7 @@ export function reportScanError(e: unknown, prefix: string): number {
  */
 function requireCount(n: number, what: string): void {
   if (!Number.isSafeInteger(n) || n < 0) {
-    throw new ScanError(`${what}가 음이 아닌 정수가 아니다(받은 값: ${String(n)}) — 판정 불가(fail-closed).`, 2);
+    throw new ScanError(`${what}이(가) 음이 아닌 정수가 아니다(받은 값: ${String(n)}) — 판정 불가(fail-closed).`, 2);
   }
 }
 
@@ -157,4 +156,139 @@ export function scanFloor(label: string, got: number, min: number, opts: ScanOpt
     throw new ScanError(`${label}: 스캔 ${got}건 < ${min} — 열거 붕괴 의심(0건 검사 후 초록이 되는 자리).${hint}`, 1);
   }
   scanSignal(label, got, opts);
+}
+
+// ── 실행 커널 guardMain (lib-convergence 17 — 06/13의 재접목) ─────────────────────────────────
+// 순서가 곧 계약이다: **전 도메인 열거 → 전 floor 판정 → (전부 통과 시에만) SCAN 일괄 방출 →
+// 검사 → 종료코드.** 콜사이트가 순서를 손으로 맞추던 시절의 실측 버그 2건 — 위반 exit가 마커보다
+// 앞(check-disk-caps) · 마커가 바닥값 판정보다 앞(check-alert-rules) — 이 이 구조에서는 표현
+// 불가능하다. 붕괴한 실행의 건수는 "검사했다"가 아니라 "붕괴했다"는 뜻이므로, floor가 하나라도
+// 무너지면 어느 도메인의 마커도 내지 않는다(일괄 방출).
+//
+// 위 판정 커널(scanFloor·scanSignal·parseFloor)과의 관계: guardMain은 판정을 **재사용**한다 —
+// floor 판정·문구는 scanFloor(quiet)가, 마커 방출은 scanSignal이, --floor 값 검증은 parseFloor가
+// 소유한다. 커널 둘이 문구 두 벌을 만들면 소비자가 grep을 두 벌 들게 된다. 위 커널은 "종료하지
+// 않는다"가 규약이지만 guardMain은 **실행 진입 함수**라 exit를 소유한다(반환형 never가 계약이다).
+//
+// 소유 경계(셸 커널과 동일): 바닥값 수치와 위반·성공의 문구·채널은 콜사이트 소유, 실행 순서·
+// 마커 모양·floor/열거 실패 진단(stderr `FAIL:`)은 커널 소유.
+// `scan` 필드는 마커 라벨 **전체**를 콜사이트 리터럴로 받는다(도메인이 하나면 접미사 없음 —
+// 셸 커널 규약) — tests/gates/test_scan-floor.bats의 정적 콜사이트 ↔ 런타임 방출 집합 대조가
+// 이 리터럴(`scan: "…"`)을 파생하므로, 라벨을 변수로 조립하면 그 대조가 원리적으로 못 본다.
+export type ScanDomain = {
+  scan: string;             // 마커 라벨 전체 — 반드시 콜사이트 리터럴(정적 파생 대상)
+  min: number;              // 열거 붕괴 바닥값 — 수치는 소비자 소유(커널은 판정 기계만 공유)
+  enumerate: () => number;  // 열거 실행 — 검사 대상 건수 반환(위반 수집은 콜사이트 클로저)
+  floorHint?: string;       // 붕괴의 그럴듯한 원인 진단 꼬리 — 콜사이트 소유(scanFloor hint로 전달)
+};
+
+// 바닥값 오버라이드 어휘: `--floor <도메인>=<n>`(반복 가능). 구 개별 어휘(env·--min-* 플래그)를
+// 이 하나로 접는다 — 소비자 목록은 여기 적지 않는다(손 관리 로스터 금지: guardMain 콜사이트가
+// SSOT다, `grep -l takeFloors tools/*.ts`로 세라). 키는 도메인 scan 라벨 전체 또는 마지막 콜론
+// 뒤 접미사. 형식 위반은 ScanError(2) throw — 콜사이트가 reportScanError로 접는다. 기본값(min)은
+// 콜사이트 상수가 소유하고, 키↔도메인 매칭 검증은 guardMain이 한다(오타 키 = 조용히 꺼진
+// 바닥값이 되므로 fail-closed).
+export function takeFloors(argv: string[]): { floors: Map<string, number>; rest: string[] } {
+  const floors = new Map<string, number>();
+  const rest: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== "--floor") { rest.push(argv[i]!); continue; }
+    const spec = argv[++i];
+    const m = /^([a-z0-9:-]+)=(.*)$/.exec(spec ?? "");
+    if (!m) throw new ScanError(`--floor 형식은 <도메인>=<n>이다(받은 값: '${spec ?? ""}')`, 2);
+    floors.set(m[1]!, parseFloor(m[2], `--floor ${m[1]}`));
+  }
+  return { floors, rest };
+}
+
+export function floorOf(floors: Map<string, number>, scan: string, dflt: number): number {
+  return floors.get(scan) ?? floors.get(scan.split(":").pop()!) ?? dflt;
+}
+
+export function guardMain(opts: {
+  // 가드 식별자 — 도메인 라벨과 별개다("라벨 = 열거 도메인 하나" 규약상 도메인 라벨을 검사
+  // 실패 같은 비-도메인 진단에 참칭하면 안 된다). 다중 도메인 가드는 지정하라.
+  label?: string;
+  domains: ScanDomain[];
+  // takeFloors 산출 — 있으면 커널이 유효 min을 해소한다(floorOf). 키는 선언 도메인에 **전건
+  // 매칭**돼야 한다: 오타·타 가드 키가 조용히 무시되면 바닥값이 소리 없이 꺼진다(구 typedFlags
+  // 화이트리스트가 잡던 fail-closed의 복원). 미매칭·모호(2개 이상 매칭)는 사용법 exit(2)다.
+  floors?: Map<string, number>;
+  // 방출 정책 — **명시 필수**(design r1-3: 기본값에 숨기지 않는다). "none"은 기계 판독 stdout
+  // 모드 전용이며 마커만 끄고 floor 판정·fail-closed는 그대로다.
+  output: "stdout" | "none";
+  check: () => string[];       // 위반 목록 — 비었으면 통과
+  report: (viol: string[]) => void; // 위반 문구·채널 — 콜사이트 소유
+  ok: (counts: number[]) => void;   // 성공 문구 — 콜사이트 소유
+}): never {
+  // ⓪ 도메인 0건 거부 — 빈 domains는 floor도 마커도 없이 초록이 되는 가드를 만든다(정적 로스터·
+  //    거부 가드 양쪽에서 동시에 사라지는 삭제 구멍 — CONTRIBUTING '그 등식만으로는…' 절이 인정한
+  //    자리를 커널이 닫는다). --floor 오타 키와 같은 사용법 오류(2)다.
+  if (opts.domains.length === 0) {
+    console.error("guardMain: domains가 비었다 — 열거 도메인 0개인 가드는 바닥값도 마커도 없이 초록이 된다(fail-closed)");
+    process.exit(2);
+  }
+  // ⓪ --floor 키 검증(도메인 전건 매칭) — 열거보다 먼저다: 잘못된 호출은 일을 시작하기 전에 죽는다.
+  const floors = opts.floors ?? new Map<string, number>();
+  for (const k of floors.keys()) {
+    const hits = opts.domains.filter((d) => d.scan === k || d.scan.split(":").pop() === k);
+    if (hits.length === 0) {
+      console.error(
+        `--floor 도메인 '${k}'가 이 가드의 선언 도메인에 없다(허용: ${opts.domains.map((d) => d.scan).join(" · ")}) — 오타 키는 조용히 꺼진 바닥값이 된다(fail-closed)`,
+      );
+      process.exit(2);
+    }
+    if (hits.length > 1) {
+      console.error(`--floor 도메인 '${k}'가 ${hits.length}개 도메인에 걸린다(${hits.map((d) => d.scan).join(" · ")}) — 전체 라벨로 지정하라`);
+      process.exit(2);
+    }
+  }
+  // ① 전 도메인 열거. throw는 fail-loud로 접는다 — raw 스택이 나가면 게이트 출력 규약이 깨진다.
+  const counts: number[] = [];
+  for (const d of opts.domains) {
+    try {
+      counts.push(d.enumerate());
+    } catch (e) {
+      console.error(`FAIL: ${d.scan}: 열거 실패 — ${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  }
+  // ② 전 floor 판정 — 하나라도 무너지면 전부 보고하고 마커 없이 죽는다. 판정·문구는 scanFloor
+  //    재사용이다(quiet: 통과 도메인의 마커는 ③에서 일괄 방출하므로 여기선 내지 않는다).
+  const collapsed: string[] = [];
+  let collapseCode = 1;
+  opts.domains.forEach((d, i) => {
+    try {
+      scanFloor(d.scan, counts[i]!, floorOf(floors, d.scan, d.min), { quiet: true, hint: d.floorHint });
+    } catch (e) {
+      // 비-ScanError는 되던진다 — scanFloor는 ScanError만 던지므로 사실상 도달 불가이고, 도달했다면
+      // 커널 자신의 결함이라 접으면 안 된다(①·④의 콜사이트 클로저 예외 접기와 소유가 다르다).
+      if (!(e instanceof ScanError)) throw e;
+      collapsed.push(`FAIL: ${e.message}`);
+      if (e.exitCode > collapseCode) collapseCode = e.exitCode;   // 계약 파손(2)은 붕괴(1)보다 우선
+    }
+  });
+  if (collapsed.length) {
+    for (const c of collapsed) console.error(c);
+    process.exit(collapseCode);
+  }
+  // ③ SCAN 일괄 방출(정책이 stdout일 때만) — 도메인 선언 순서 그대로, 방출 구현은 scanSignal 하나다.
+  if (opts.output === "stdout") {
+    opts.domains.forEach((d, i) => scanSignal(d.scan, counts[i]!));
+  }
+  // ④ 검사 → ⑤ 종료코드. 검사 단계의 예외도 커널이 접는다(raw 스택 금지 — 마커는 이미
+  // 방출된 뒤라 붕괴 경로와 구별된다).
+  let viol: string[];
+  try {
+    viol = opts.check();
+  } catch (e) {
+    console.error(`FAIL: ${opts.label ?? opts.domains[0]?.scan ?? "guard"}: 검사 실패 — ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  }
+  if (viol.length) {
+    opts.report(viol);
+    process.exit(1);
+  }
+  opts.ok(counts);
+  process.exit(0);
 }

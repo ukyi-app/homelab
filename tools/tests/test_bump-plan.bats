@@ -153,6 +153,24 @@ EOF
   [ "$n" = "5" ]
 }
 
+@test "sibling app names do not cross-match in bump branch parsing (page vs page-extra)" {
+  # SSOT 단위 증인(18) — 하이픈 앱명(page-extra)의 브랜치에서 TAG_RE가 tail 경계를 소유하므로
+  # name이 정확히 갈린다. 형제 배제의 결합 판정(status.ts의 name === app)은
+  # test_homelab-status.bats가 end-to-end로 소유한다 — 이 테스트는 파싱 경계만 못박는다.
+  run bun -e '
+    import { parseBranch } from "'"$ROOT"'/tools/lib/bump-plan.ts";
+    for (const h of ["bump-poll/page-extra-sha-abc1234", "bump-poll/app/page-extra-sha-abc1234", "bump-poll/bespoke/page-extra-sha-abc1234"]) {
+      const p = parseBranch(h);
+      if (p === null || p.target.name !== "page-extra" || p.tag !== "sha-abc1234") {
+        console.error("형제 경계 파손: " + h + " -> " + JSON.stringify(p)); process.exit(1);
+      }
+    }
+    console.log("ok");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "ok"
+}
+
 @test "legacyAmbiguity flags a legacy name shadowed by a bespoke surface (app reading would be a lie)" {
   R="$BATS_TEST_TMPDIR/l1"; mkdir -p "$R/platform/files/prod" "$R/apps"
   printf '{ "file": "deployment.yaml", "path": ["a"], "autoDeploy": false }' > "$R/platform/files/prod/.image-pin.json"

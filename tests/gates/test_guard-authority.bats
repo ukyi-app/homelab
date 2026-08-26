@@ -38,7 +38,7 @@ YAML
   git -C "$FIX" add -A
 }
 
-run_tool() { run bun "$TOOL" --repo-root "$FIX" --min-scan 3 "$@"; }
+run_tool() { run bun "$TOOL" --repo-root "$FIX" --floor guards=3 "$@"; }
 
 @test "a guard reachable only through the local mirror (make verify) counts as orphaned" {
   # 이 구분이 회계의 핵심이다 — make verify는 CI에서 돌지 않으므로 거기 있다는 건 보호가 아니다.
@@ -68,7 +68,7 @@ run_tool() { run bun "$TOOL" --repo-root "$FIX" --min-scan 3 "$@"; }
   printf 'verify: ## mirror\n\t@bash scripts/check-real.sh\n\nci: ## mirror2\n\t@bash scripts/check-real.sh\n' > "$FIX/Makefile"
   rm "$FIX/scripts/check-mirrored.sh" "$FIX/scripts/check-orphan.sh"
   git -C "$FIX" add -A
-  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "전건 권위 경로 ≥1"
 }
@@ -109,7 +109,7 @@ jobs:
 YAML
   rm "$FIX/scripts/check-real.sh" "$FIX/scripts/check-mirrored.sh"
   git -C "$FIX" add -A
-  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 0 ]
 }
 
@@ -130,7 +130,7 @@ jobs:
 YAML
   rm "$FIX/scripts/check-real.sh" "$FIX/scripts/check-mirrored.sh"
   git -C "$FIX" add -A
-  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "scripts/check-orphan.sh"
 }
@@ -142,7 +142,7 @@ YAML
   for name in verify verify-all local-checks; do
     printf '%s: ## local mirror\n\t@bash scripts/check-mirrored.sh\n' "$name" > "$FIX/Makefile"
     git -C "$FIX" add -A
-    run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+    run bun "$TOOL" --repo-root "$FIX" --floor guards=1
     [ "$status" -eq 1 ]
     echo "$output" | grep -q "scripts/check-mirrored.sh"
   done
@@ -155,7 +155,7 @@ YAML
   printf 'whatever: ## owner-local\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
   rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-orphan.sh"
   git -C "$FIX" add -A
-  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 0 ]
 }
 
@@ -168,7 +168,7 @@ YAML
   printf 'whatever: ## owner-local\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
   rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-orphan.sh"
   git -C "$FIX" add -A
-  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 0 ]
 }
 
@@ -178,7 +178,7 @@ YAML
   printf 'whatever: ## owner-local\n\t@bun tools/check-tsguard.ts\n' > "$FIX/Makefile"
   rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-mirrored.sh" "$FIX/scripts/check-orphan.sh"
   git -C "$FIX" add -A
-  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 0 ]
 }
 
@@ -207,7 +207,7 @@ TS
   printf 'whatever: ## still a mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
   rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-orphan.sh"
   git -C "$FIX" add -A
-  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "비권위 경로만"
 }
@@ -229,7 +229,7 @@ jobs:
           yq -e '.jobs.gate.steps[] | select((.run // "") | test("scripts/check-orphan.sh"))' f.yaml
 YAML
   git -C "$FIX" add -A
-  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "scripts/check-orphan.sh"
 }
@@ -249,12 +249,12 @@ jobs:
           if [ -f x ]; then bash scripts/check-orphan.sh; fi
 YAML
   git -C "$FIX" add -A
-  run bun "$TOOL" --repo-root "$FIX" --min-scan 1
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 0 ]
 }
 
 @test "the enumeration floor fires when the guard scope collapses" {
-  run bun "$TOOL" --repo-root "$FIX" --min-scan 9999
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=9999
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "열거 붕괴"
 }
@@ -269,9 +269,9 @@ YAML
 # 바닥값 주입이 raw 문자열을 Number() **앞에서** 판정해야 한다. `Number("")===0`이고
 # `n < NaN`은 항상 false라, coercion 뒤에 검증하면 오타 하나가 바닥값을 조용히 끈다.
 
-@test "a malformed --min-scan is rejected instead of silently disabling the floor" {
+@test "a malformed --floor value is rejected instead of silently disabling the floor" {
   for bad in abc "" 1.5 -1; do
-    run bun "$TOOL" --min-scan "$bad"
+    run bun "$TOOL" --floor "guards=$bad"
     [ "$status" -eq 2 ]
     out="$output"
     # 바닥값이 꺼진 채 초록이 되면 마커가 나간다 — 나가면 안 된다.
@@ -282,7 +282,7 @@ YAML
 
 # 억제는 출력 채널의 성질이지 판정의 성질이 아니다 — JSON 모드에서도 바닥값은 본다.
 @test "the json mode still enforces the enumeration floor" {
-  run bun "$TOOL" --json --min-scan 9999
+  run bun "$TOOL" --json --floor guards=9999
   [ "$status" -ne 0 ]
   out="$output"
   run grep -q "열거 붕괴" <<<"$out"
@@ -292,11 +292,12 @@ YAML
   [ "$status" -ne 0 ]
 }
 
-# 라벨 = 바닥값이 걸린 열거 도메인 하나. venues는 **바닥값이 걸리지 않은** 카운트 자리라
-# 검사한 수(권위 venue)와 보고한 수(전체 venue)가 다르다 — 그 성질이 보존돼야 한다.
+# 라벨 = 바닥값이 걸린 열거 도메인 하나. 17 재접목으로 venues도 floor 도메인(min 1)이 됐고
+# 권위 venue는 셋째 도메인으로 승격됐다 — 그래도 venues 마커의 값은 **전체** venue 수여야 한다
+# (권위 수는 authoritative-venues 라벨이 따로 센다 — 두 축이 같은 수를 내면 라벨을 나눈 이유가 없다).
 #
-# ⚠️ 마커의 **존재와 숫자꼴**만 보면 이 단언은 vacuous다 — 실측: 신호 대상을 authoritativeVenues로
-#    바꿔(297→265, 성질 파괴) 돌려도 45건 전부 green이었다. 그래서 **값**을 대조한다.
+# ⚠️ 마커의 **존재와 숫자꼴**만 보면 이 단언은 vacuous다 — 실측: 신호 대상을 권위 수로 바꿔
+#    (성질 파괴 — 손 관리 수치는 안 적는다, 드리프트한다) 돌려도 전건 green이었다. 그래서 **값**을 대조한다.
 @test "the venues marker counts every venue, not just the authoritative ones" {
   run bun "$TOOL"
   [ "$status" -eq 0 ]
@@ -317,17 +318,18 @@ YAML
   [ "$nonauth" -gt 0 ]
 }
 
-# "첫 도메인이 붕괴하면 뒤 도메인의 신호는 나가지 않는다"(설계 §4)의 증인. guards는 바닥값 0을
-# 통과해 이미 마커를 냈고, venue 수집이 붕괴한 지점 뒤의 venues 마커는 나오지 않는다.
-@test "a venue collapse keeps the guards marker but withholds the venues marker" {
+# venue 수집이 붕괴하면 **어느 도메인의 마커도** 나가지 않는다 — guardMain 일괄 방출(17 재접목).
+# 순차판은 guards 마커가 먼저 나가 "앞 도메인 유지"였지만, 붕괴한 실행의 어떤 건수도 "검사했다"로
+# 읽히면 안 된다. 권위 venue 축도 셋째 도메인으로 승격돼 같은 실행에서 함께 보고된다(13 리뷰 ②).
+@test "a venue collapse withholds every marker and reports both venue floors (batch emission)" {
   tmp="$BATS_TEST_TMPDIR/empty"
   mkdir -p "$tmp"
   git -C "$tmp" init -q
-  run bun "$TOOL" --repo-root "$tmp" --min-scan 0
+  run bun "$TOOL" --repo-root "$tmp" --floor guards=0
   [ "$status" -ne 0 ]
-  printf '%s\n' "$output" | grep -qE '^SCAN: check-guard-authority:guards: 0$'
-  printf '%s\n' "$output" | grep -q '권위 venue 0건'
-  if printf '%s\n' "$output" | grep -q '^SCAN: check-guard-authority:venues:'; then
-    echo "붕괴 뒤 도메인의 마커가 나갔다: $output"; false
+  printf '%s\n' "$output" | grep -q 'check-guard-authority:venues:.*열거 붕괴'
+  printf '%s\n' "$output" | grep -q 'check-guard-authority:authoritative-venues:.*열거 붕괴'
+  if printf '%s\n' "$output" | grep -q '^SCAN:'; then
+    echo "붕괴 실행이 마커를 냈다: $output"; false
   fi
 }

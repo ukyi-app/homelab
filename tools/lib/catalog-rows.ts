@@ -8,9 +8,10 @@
 // 엔진(mutation.ts)도, 이미지 핀(image-pin.ts)도 참조하지 않는다. 스키마 생성기(심화 3)와
 // 런타임이 순환 없이 같은 행을 소비하기 위한 전제이며, test_lane-rows.bats가 import 0을 강제한다.
 //
-// 패턴 토큰 3종: {key}(앱/리소스 이름) · {runId}(디스패처 run id — 형식 \d+는 이 레인 문법의
-// 소유라 여기서 검증) · {tag}(배포 핀 tag — 형식 SSOT는 image-pin.ts TAG_RE이고 import 0
-// 계약상 검증은 소비자(status.ts)가 조합한다).
+// 패턴 토큰 2종: {key}(앱/리소스 이름) · {runId}(디스패처 run id — 형식 \d+는 이 레인 문법의
+// 소유라 여기서 검증). bump-poll 브랜치 문법은 이 표의 소관이 아니다 — SSOT는
+// tools/lib/bump-plan.ts(parseBranch, kind 인코딩)이고, 파싱 전용 행을 여기 두면 두 번째 진실이
+// 된다(18에서 폐기 — 낡은 `bump-poll/{key}-{tag}` 문법을 자기 테스트만 소비하며 고정하고 있었다).
 
 export type LaneApp = { name: string; surfacePath: string }; // 이름·경로 모두 {key} 패턴 허용(산출 필드명과 동일)
 export type LaneAction = "create-database" | "create-cache" | "create-app" | "update-secrets" | "teardown-app";
@@ -125,39 +126,33 @@ export const DB_CHECKBOX_EXTS: readonly string[] = LANES["create-database"].inpu
   .filter((i) => i.startsWith("ext_") && i !== "ext_extra")
   .map((i) => i.slice("ext_".length));
 
-// CLI 동사 없는 파싱 전용 레인 — bump-poll(브랜치는 GHA 플래너가 생성, tail=tag). 행 스키마가
-// 이 변주를 수용해야 status의 6번째 파싱 축이 표 밖으로 새지 않는다.
-export const PARSE_ONLY_LANES = [
-  { lane: "bump-poll", branchPattern: "bump-poll/{key}-{tag}", tailKind: "tag" },
-] as const;
-
-// 중립 패턴 채움 — {key}는 항상, {runId}·{tag}는 주어진 것만 치환한다(순수 문자열 유도).
-export function fillLanePattern(pattern: string, vars: { key: string; runId?: number | string; tag?: string }): string {
+// 중립 패턴 채움 — {key}는 항상, {runId}는 주어진 것만 치환한다(순수 문자열 유도).
+export function fillLanePattern(pattern: string, vars: { key: string; runId?: number | string }): string {
   let out = pattern.split("{key}").join(vars.key);
   if (vars.runId !== undefined) out = out.split("{runId}").join(String(vars.runId));
-  if (vars.tag !== undefined) out = out.split("{tag}").join(vars.tag);
   return out;
 }
 
-// 패턴의 tail 토큰 판정 — 정확히 한 종류가 정확히 1회, 그리고 말미여야 한다. 아니면 행 데이터
+// 패턴의 tail 토큰 판정 — {runId}가 정확히 1회, 그리고 말미여야 한다. 아니면 행 데이터
 // 결함이므로 fail-closed로 던진다(토큰 없는 패턴을 스니핑하면 slice가 엉뚱한 접두를 만들어
-// 임의 head에 non-null tail을 내는 fail-open이 된다 — 리뷰 실측).
-function tailToken(pattern: string): "{runId}" | "{tag}" {
+// 임의 head에 non-null tail을 내는 fail-open이 된다 — 리뷰 실측). {tag} 토큰은 18에서 폐기 —
+// tag tail은 bump 문법이고 그 SSOT는 bump-plan.ts다.
+function tailToken(pattern: string): "{runId}" {
   const count = (t: string): number => pattern.split(t).length - 1;
-  const runId = count("{runId}");
-  const tag = count("{tag}");
-  const ok = (runId === 1 && tag === 0 && pattern.endsWith("{runId}")) || (tag === 1 && runId === 0 && pattern.endsWith("{tag}"));
-  if (!ok) throw new Error(`계약 파손: branchPattern은 tail 토큰({runId}|{tag}) 정확히 1개로 끝나야 한다 — ${pattern}`);
-  return pattern.endsWith("{runId}") ? "{runId}" : "{tag}";
+  if (!(count("{runId}") === 1 && pattern.endsWith("{runId}"))) {
+    throw new Error(`계약 파손: branchPattern은 tail 토큰({runId}) 정확히 1개로 끝나야 한다 — ${pattern}`);
+  }
+  return "{runId}";
 }
 
 // 파싱 방향 — head가 (pattern, key)의 구조에 부합하면 tail(말미 토큰 자리의 문자열)을 낸다.
 // 접두만 보면 하이픈 앱명에서 형제를 오귀속하므로(page ↔ page-extra), tail "형식" 검증까지
-// 합쳐야 판정이 완성된다: runId는 isDispatchLaneBranch가 여기서 소유하고, tag는 TAG_RE
-// 소유자(소비자)가 조합한다.
+// 합쳐야 판정이 완성된다: runId 형식은 isDispatchLaneBranch가 여기서 소유한다.
 export function laneBranchTail(pattern: string, key: string, head: string): string | null {
   const token = tailToken(pattern);
-  const prefix = fillLanePattern(pattern.slice(0, pattern.length - token.length), { key });
+  // assertFilled — 미지 토큰이 남은 행 데이터 결함은 조용한 영구 미매치가 아니라 loud다(생성
+  // 방향의 laneMutationFields와 대칭 — 파싱 방향만 조용하면 결함이 null로 위장한다).
+  const prefix = assertFilled(fillLanePattern(pattern.slice(0, pattern.length - token.length), { key }));
   return head.startsWith(prefix) ? head.slice(prefix.length) : null;
 }
 

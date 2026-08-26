@@ -31,34 +31,33 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   echo "$output" | grep -q "^ok:5$"
 }
 
-@test "the parse-only bump-poll lane round-trips a tag tail and composes with TAG_RE" {
+@test "the parse-only bump-poll lane is retired (parseBranch is the only branch-grammar SSOT)" {
+  # 티켓 18 — status.ts가 parseBranch(SSOT)로 이행한 뒤 이 행의 실 소비자는 자기 테스트뿐이었다.
+  # 낡은 문법(bump-poll/{key}-{tag} — 08의 kind 인코딩과 어긋남)을 선언한 행이 남으면 두 번째
+  # 진실이다: export 부재를 못박는다. 형제 오귀속 가치는 test_bump-plan.bats로 이관됐다.
   run bun -e '
-    import { PARSE_ONLY_LANES, fillLanePattern, laneBranchTail } from "./tools/lib/catalog-rows.ts";
-    import { TAG_RE } from "./tools/lib/image-pin.ts";
-    const bp = PARSE_ONLY_LANES[0];
-    if (bp.lane !== "bump-poll" || bp.tailKind !== "tag") { console.error("bump-poll 행 형상 불량"); process.exit(1); }
-    const head = fillLanePattern(bp.branchPattern, { key: "myapp", tag: "sha-abc1234" });
-    if (head !== "bump-poll/myapp-sha-abc1234") { console.error("생성 불일치: " + head); process.exit(1); }
-    const tail = laneBranchTail(bp.branchPattern, "myapp", head);
-    if (tail !== "sha-abc1234" || !TAG_RE.test(tail)) { console.error("왕복/형식 불일치: " + tail); process.exit(1); }
-    console.log("ok");
+    import * as m from "./tools/lib/catalog-rows.ts";
+    // 양성 대조 — 부정 단언은 프로브 자체가 죽어도 참이다(traps: vacuity 방지 단언 동반 규약).
+    if (!("LANES" in m) || !("laneBranchTail" in m)) { console.error("네임스페이스 프로브 자체가 죽었다"); process.exit(1); }
+    if ("PARSE_ONLY_LANES" in m) { console.error("PARSE_ONLY_LANES가 아직 export된다"); process.exit(1); }
+    // 이름 무관·주석 무관 스캔 — 다른 이름으로 부활한 bump 문법 행도 잡는다(문법 부재가 불변식이다).
+    for (const [k, v] of Object.entries(m)) {
+      const s = JSON.stringify(v);   // 함수는 undefined — 데이터 행만 본다
+      if (s !== undefined && s.indexOf("bump-poll/") >= 0) { console.error("bump 브랜치 문법이 행 데이터로 부활했다: " + k); process.exit(1); }
+    }
+    console.log("retired");
   '
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "ok"
+  echo "$output" | grep -q "retired"
 }
 
-@test "sibling app names do not cross-match for runId and tag tails (page vs page-extra)" {
+@test "sibling app names do not cross-match for runId tails (page vs page-extra)" {
+  # bump(tag tail) 쪽 형제 오귀속 증인은 브랜치 문법 SSOT를 따라 test_bump-plan.bats에 있다(18).
   run bun -e '
-    import { LANES, PARSE_ONLY_LANES, fillLanePattern, laneBranchTail, isDispatchLaneBranch } from "./tools/lib/catalog-rows.ts";
-    import { TAG_RE } from "./tools/lib/image-pin.ts";
+    import { LANES, fillLanePattern, isDispatchLaneBranch } from "./tools/lib/catalog-rows.ts";
     const row = LANES["create-app"];
     const sibling = fillLanePattern(row.branchPattern, { key: "page-extra", runId: 99 });
     if (isDispatchLaneBranch(row.branchPattern, "page", sibling)) { console.error("runId 형제 오귀속"); process.exit(1); }
-    const bp = PARSE_ONLY_LANES[0];
-    const tagHead = fillLanePattern(bp.branchPattern, { key: "page-extra", tag: "sha-abc1234" });
-    const t = laneBranchTail(bp.branchPattern, "page", tagHead);
-    if (t === null) { console.error("구조 매치 자체가 실패"); process.exit(1); }
-    if (TAG_RE.test(t)) { console.error("형제 tail이 tag 형식을 통과 — 오귀속"); process.exit(1); }
     console.log("ok");
   '
   [ "$status" -eq 0 ]
@@ -117,12 +116,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "malformed branch patterns fail closed instead of matching a mangled prefix" {
-  # 토큰이 없거나 말미가 아니거나 두 종류가 섞이면 던져야 한다 — 스니핑 fail-open이면
+  # 토큰이 없거나 말미가 아니거나 미지 토큰이 접두에 잔존하면 던져야 한다 — 스니핑 fail-open이면
   # slice가 마지막 글자만 잘린 접두를 만들어 임의 head에 non-null tail을 낸다(리뷰 실측).
+  # 셋째 픽스처는 tailToken은 통과하지만 접두에 {tag}가 남는 형태 — assertFilled가 loud로 잡는다
+  # (이게 없으면 행 데이터 결함이 조용한 영구 미매치 null로 위장한다 — 18 리뷰 실측).
   run bun -e '
     import { laneBranchTail } from "./tools/lib/catalog-rows.ts";
     let threw = 0;
-    for (const p of ["foo/{key}-x", "foo/{key}-{runId}-suffix", "a/{key}-{runId}-{tag}"]) {
+    for (const p of ["foo/{key}-x", "foo/{key}-{runId}-suffix", "a/{tag}-{runId}"]) {
       try { laneBranchTail(p, "a", "whatever"); } catch { threw++; }
     }
     if (threw !== 3) { console.error("fail-open: threw=" + threw); process.exit(1); }
