@@ -5,6 +5,10 @@
 #  2) data/stringData 리프가 전부 ENC[...] 형태(평문 리프 0건)인지 확인.
 # 실 age 키 복호는 필요 없다(yq만 있으면 게이트 러너에서 동작).
 set -euo pipefail
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init sops-guard
 
 if ! command -v yq >/dev/null 2>&1; then
   echo "sops-guard: yq가 필요하다(설치 후 재시도)." >&2
@@ -20,13 +24,11 @@ CANON="$(sops_canonical_recipients)"
 # 인자 0개 = 아무것도 평가하지 않고 exit 0이었다. 호출자 3곳(.pre-commit-config · Makefile ·
 # ci.yaml의 `xargs -r`)이 전부 "0 파일=성공"으로 읽었고, 글롭이 깨지면 required 스텝이 조용히 초록이었다.
 # 이제 무인자면 **자기 도메인을 스스로 열거**하고 바닥값을 건다(현재 추적 9건 — 래칫 아님).
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
 if [ "$#" -gt 0 ]; then
   scan_signal sops-guard "$#"   # 인자(pre-commit·픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
 fi
 if [ "$#" -eq 0 ]; then
-  cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1   # git ls-files는 cwd 상대다
+  cd "$ROOT"   # git ls-files는 cwd 상대다
   tracked="$(scan_enumerate sops-guard git ls-files '*.enc.yaml')" || exit 1
   scan_floor sops-guard "$(scan_count "$tracked")" "${SOPS_GUARD_MIN_SCAN:-6}" || exit 1
   # shellcheck disable=SC2086  # 경로에 공백 없음(레포 규약) — 위치 인자로 재주입

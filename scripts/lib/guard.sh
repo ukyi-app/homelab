@@ -31,7 +31,9 @@ guard_init() {
   # shellcheck disable=SC2034  # 소비자(가드 본문)가 읽는 출력 변수다
   GUARD_NAME="$1"
   set -euo pipefail
-  # 로케일 콜레이션이 게이트를 뒤집는다(#514) — 개별 sort 호출에 붙이는 방식은 8/15 비대칭을 낳았다.
+  # 로케일 콜레이션이 게이트를 뒤집는다(#514) — 파일별 export 부착의 비대칭을 전역 export가 소멸시킨다.
+  # ⚠️ 콜사이트의 개별 `LC_ALL=C sort` 접두는 **떼지 않는다** — check-locale-collation의 정적
+  #    레인은 런타임 export를 원리적으로 못 보므로 그 표기를 계속 강제한다(이중이 계약이다).
   export LC_ALL=C
   # shellcheck disable=SC2034  # 소비자(가드 본문)가 읽는 출력 변수다
   ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

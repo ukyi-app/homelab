@@ -23,7 +23,9 @@ run_g() { PG_CLUSTER_YAML="$FX" run bash "$sh"; }
 
 @test "guard exists, is executable, and passes shellcheck" {
   [ -x "$sh" ]
-  run shellcheck "$sh"
+  # 소스하는 lib을 입력에 함께 넘긴다 — 단일 파일 호출은 source 해석이 안 돼 SC1091(info)로
+  # rc 1이 난다(게이트의 전 파일 일괄 호출과 동등한 형태로 맞춘다).
+  run shellcheck "$sh" "$ROOT/scripts/lib/guard.sh" "$ROOT/scripts/lib/scan-floor.sh"
   [ "$status" -eq 0 ]
 }
 

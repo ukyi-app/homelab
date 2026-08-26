@@ -20,9 +20,12 @@
 #
 # yq(mikefarah) 필요. bash 3.2 호환. shellcheck clean.
 set -euo pipefail
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-pg-servername
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CLUSTER_YAML="${PG_CLUSTER_YAML:-$REPO_ROOT/platform/cnpg/prod/cluster.yaml}"
+CLUSTER_YAML="${PG_CLUSTER_YAML:-$ROOT/platform/cnpg/prod/cluster.yaml}"
 PLUGIN="barman-cloud.cloudnative-pg.io"
 
 fail() { echo "FAIL: check-pg-servername: $*" >&2; exit 1; }

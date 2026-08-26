@@ -23,11 +23,12 @@
 #
 # bash 3.2 호환: [[ ]]·mapfile 금지(중간 단언은 [ ]/if-블록). jq 필수(CI ubuntu·로컬 brew 존재 — python fallback 금지).
 set -euo pipefail
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
-# 기본 원장은 **스크립트 기준**으로 잡는다 — 상대경로면 호출자의 cwd에 의존한다(무인자 실행을
-# 레포 밖에서 하면 조용히 "원장 파일 없음"이 된다). `--file`은 호출자 상대 그대로 둔다.
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-credential-expiry
+# 기본 원장은 **스크립트 기준**(ROOT)으로 잡는다 — 상대경로면 호출자의 cwd에 의존한다(무인자
+# 실행을 레포 밖에서 하면 조용히 "원장 파일 없음"이 된다). `--file`은 호출자 상대 그대로 둔다.
 FILE="$ROOT/policy/credential-expiry.json"; DAYS=14; LINT=0; MIN_ENTRIES=5
 while [ $# -gt 0 ]; do
   case "$1" in

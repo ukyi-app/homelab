@@ -4,9 +4,10 @@
 # exit 0이면 "인덱스를 실제로 대조했고 정합"이라는 뜻이다 — 부재로 건너뛴 것과 절대 같은 코드를 쓰지 않는다.
 # cf. verify-runbooks=DR bats 러너(별도, 불변).
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init verify-runbook-index
 RB="$ROOT/docs/runbooks"
 shopt -s nullglob
 files=("$RB"/*.md)

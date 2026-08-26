@@ -12,6 +12,7 @@ setup() {
   mkdir -p "$FIX/scripts/lib" "$FIX/docs/runbooks"
   cp "$ROOT/scripts/verify-runbook-index.sh" "$FIX/scripts/"
   cp "$ROOT/scripts/lib/guard.sh" "$FIX/scripts/lib/"
+  cp "$ROOT/scripts/lib/scan-floor.sh" "$FIX/scripts/lib/"
 }
 
 # 픽스처 AGENTS.md — `## 런북` 절 아래 백틱 파일명이 인덱스(실 AGENTS.md와 같은 모양).

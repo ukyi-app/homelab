@@ -23,10 +23,10 @@
 # 인자로 파일을 주면 그 파일만 스캔한다(픽스처 모드 — 바닥값 면제, 신호는 낸다).
 # bash 3.2 호환(mapfile 금지). shellcheck 클린. ⚠️ 탐지 자신은 `LC_ALL=C`(#514).
 set -euo pipefail
-export LC_ALL=C
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-bats-fd0
 cd "$ROOT"
 
 FILES=()

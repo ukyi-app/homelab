@@ -41,10 +41,10 @@
 # 종료코드: 0=전단사 성립 · 1=위반(미등재/stale/이중분류) · 2=사용법·정책파일 부재/형식·열거 붕괴(fail-loud).
 # bash 3.2 호환(mapfile·[[ ]] 금지). shellcheck clean.
 set -euo pipefail
-export LC_ALL=C
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT 기본값·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-gh-secret-coverage
 FIXTURE=0
 while [ $# -gt 0 ]; do
   case "$1" in

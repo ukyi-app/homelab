@@ -28,10 +28,15 @@
 #   완료 후 실 레포는 allowlist 0으로 통과한다. 신규 미핀 이미지는 이 게이트가 fail-closed로 차단.
 # bash 3.2 호환: [[ ]]·mapfile 금지(중간 단언 [ ]/grep). --root로 픽스처 tmp git 레포 지정 가능.
 set -euo pipefail
+# 프롤로그(LC_ALL=C·ROOT 기본값·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다 —
+# 이 파일의 `$(dirname "$0")` 기반 소스/ROOT가 형제들과 갈리던 비대칭의 소멸 지점이다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-image-pins
 
 # ⚠️ MIN_SCAN_APPS 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거).
 #    앱이 0개인 동안은 레인2 열거 0건이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
-ROOT=""; ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; ROOT_OVERRIDDEN=0; MIN_SCAN_APPS_SET=0
+ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; ROOT_OVERRIDDEN=0; MIN_SCAN_APPS_SET=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT="$2"; ROOT_OVERRIDDEN=1; shift 2 ;;
@@ -41,9 +46,6 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$(dirname "$0")/lib/scan-floor.sh"
-if [ -z "$ROOT" ]; then ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; fi
 [ -z "$ALLOWLIST" ] && ALLOWLIST="$ROOT/policy/image-pin-allowlist.txt"
 
 # 앵커된 이미지 키 정규식 — `logo_image:`·경로 내 `my-image:` 부분매치 방지(리스트 아이템 `- ` 허용).
@@ -54,7 +56,7 @@ IMG_KEY='^[[:space:]]*(-[[:space:]]+)?(image|imageName):[[:space:]]*'
 # 레인1은 `platform-image-refs`(추적된 **차트 소스 포함** — 공유 차트 values.yaml에 리터럴 이미지가
 # 생기면 잡아야 한다. cf. `platform-manifests`는 렌더 전 템플릿이 YAML 파싱 불가라 차트를 뺀다).
 # 값 추출(grep/sed/awk)은 셸이 그대로 소유한다 — CONTRIBUTING이 라인 지향 필터를 셸 영역으로 규정.
-walk_scope() { bun "$(dirname "$0")/../tools/lib/repo-walk.ts" --manifests "$1" --root "$ROOT"; }
+walk_scope() { bun "$(dirname "${BASH_SOURCE[0]}")/../tools/lib/repo-walk.ts" --manifests "$1" --root "$ROOT"; }
 
 # --- allowlist: 사유 주석 강제(config lint) + 멤버십 ---
 # 각 비주석·비공백 엔트리는 인라인 `# 사유` 또는 직전 줄 `#` 주석을 가져야 한다.

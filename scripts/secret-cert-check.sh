@@ -7,8 +7,10 @@
 # ⚠️ 예전엔 이 skip이 exit 2였는데 아래 unknown-option도 2다 — 한 코드에 두 의미였다. 규약(4=skip,
 # CONTRIBUTING '가드 skip 신호')으로 갈랐다.
 set -euo pipefail
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init secret-cert-check
 
 CERT="tools/sealed-secrets-cert.pem"
 NS="sealed-secrets"

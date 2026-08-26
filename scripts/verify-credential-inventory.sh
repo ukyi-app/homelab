@@ -19,12 +19,10 @@
 #         낫다 — 그러면 **기계가 대조**하게 만드는 것이 답이다(수치를 지우는 것이 아니라).
 # bash 3.2 호환(mapfile 금지). shellcheck 클린. ⚠️ 정렬은 전부 `LC_ALL=C`(#514).
 set -euo pipefail
-export LC_ALL=C
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+guard_init verify-credential-inventory
 cd "$ROOT"
 
 RB="${1:-$ROOT/docs/runbooks/token-inventory.md}"

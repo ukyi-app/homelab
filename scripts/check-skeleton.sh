@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-skeleton
+cd "$ROOT"
 README="${CK_README:-README.md}"   # 테스트 오버라이드(역방향 검사용)
 BT='`'                              # 백틱 리터럴
 # platform 컴포넌트는 아래 양방향 검사(정방향 dir→표 + 역방향 표→dir)가 동적 커버한다 —
@@ -48,7 +51,7 @@ fi
 # 열거는 공유 워커의 `platform` 유닛 스코프가 소유한다(공유 차트 제외도 그 안에 있다).
 # ⚠️ 프로세스 치환은 워커 실패를 전파하지 않아, bun이 죽으면 정방향(dir→표) 검사가 0회 돌고
 # 역방향만 남은 채 통과했다(부분 degrade — 실측). 현재 컴포넌트 16개 — 래칫 아님.
-comp_units="$(scan_enumerate check-skeleton bun "$(dirname "$0")/../tools/lib/repo-walk.ts" --units platform)" || exit 1
+comp_units="$(scan_enumerate check-skeleton bun "$(dirname "${BASH_SOURCE[0]}")/../tools/lib/repo-walk.ts" --units platform)" || exit 1
 scan_floor check-skeleton:platform "$(scan_count "$comp_units")" "${SKELETON_PLATFORM_MIN_SCAN:-10}" || exit 1
 while IFS= read -r d; do
   [ -n "$d" ] || continue

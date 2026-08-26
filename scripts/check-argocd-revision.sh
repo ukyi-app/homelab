@@ -27,8 +27,10 @@
 #    생겼을 때 조용히 빠진다(matrix/merge generator 중첩이 실재하는 경로다).
 # yq만(버전 무관). bash 3.2 호환. shellcheck clean.
 set -euo pipefail
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT 기본값·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-argocd-revision
 ROOT_OVERRIDDEN=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -38,8 +40,6 @@ while [ $# -gt 0 ]; do
   esac
 done
 cd "$ROOT"
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$HERE/lib/scan-floor.sh"
 EXPECT_REVISION="${EXPECT_REVISION:-}"
 # ⚠️ 값은 **붕괴 경계**이지 현재 도메인 크기(15)가 아니다. 스냅샷을 굳히면 Application 하나를 정당하게
 #    철거할 때마다 red가 난다. 경계의 근거: GitOps 척추 — root-app(1) + argocd-app(1) + appset(소스 4 +
