@@ -3,8 +3,8 @@
 //   - 관측 전용: 모든 외부 호출은 `gh api` 읽기뿐(테스트가 argv 원장으로 강제).
 //   - fail-closed: 선행 실패(gh 인증 부재)로 판정 불가한 항목은 pass가 아니라 fail로 보고한다.
 //   - 결정적 출력: detail에 절대경로·시각 등 실행마다 변하는 값을 넣지 않는다(골든 픽스처 계약).
-import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { gh as ghExec } from "./exec.ts";
 import { HOMELAB_REPO, TEMPLATE_REPO, COMPILED_ARCHETYPES } from "./platform.ts";
 import { SCAFFOLD_CONTRACT_LABEL, scaffoldContractError } from "./template-contract.ts";
 
@@ -13,13 +13,9 @@ export type DoctorCheck = { id: string; status: CheckStatus; detail: string };
 export type DoctorSummary = { pass: number; fail: number; warn: number };
 export type DoctorResult = { checks: DoctorCheck[]; summary: DoctorSummary };
 
-type GhOutcome = { ok: boolean; out: string; missing: boolean };
-
-function gh(args: string[]): GhOutcome {
-  const r = spawnSync("gh", args, { encoding: "utf8", timeout: 30_000 });
-  if (r.error) return { ok: false, out: "", missing: (r.error as NodeJS.ErrnoException).code === "ENOENT" };
-  return { ok: r.status === 0, out: r.stdout ?? "", missing: false };
-}
+// 실행은 seam(lib/exec.ts) 경유 — 미설치(ENOENT) **판별**만 이 콜사이트가 소유한다
+// (errKind는 seam이 나르고, 그것을 "설치 필요"로 읽는 정책은 doctor의 것이다).
+const gh = ghExec;
 
 // contents API의 base64 본문을 디코드해 돌려준다(실패 = null — 콜사이트가 fail 처리).
 function fetchTemplateFile(path: string): string | null {
@@ -46,7 +42,7 @@ export function runDoctor(): DoctorResult {
   }
   const authed = user.ok && login !== "";
   if (authed) add("gh-auth", "pass", `gh 인증 확인(login: ${login})`);
-  else if (user.missing) add("gh-auth", "fail", "gh CLI가 PATH에 없다 — 설치 필요(모든 동사가 gh 경유)");
+  else if (user.errKind === "not-found") add("gh-auth", "fail", "gh CLI가 PATH에 없다 — 설치 필요(모든 동사가 gh 경유)");
   else add("gh-auth", "fail", "gh 인증 부재 — 'gh auth login' 필요");
 
   const blocked = (id: string) => add(id, "fail", "선행 gh-auth 실패로 판정 불가");
