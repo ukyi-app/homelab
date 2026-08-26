@@ -24,6 +24,14 @@ CANON="$(sops_canonical_recipients)"
 # 인자 0개 = 아무것도 평가하지 않고 exit 0이었다. 호출자 3곳(.pre-commit-config · Makefile ·
 # ci.yaml의 `xargs -r`)이 전부 "0 파일=성공"으로 읽었고, 글롭이 깨지면 required 스텝이 조용히 초록이었다.
 # 이제 무인자면 **자기 도메인을 스스로 열거**하고 바닥값을 건다(현재 추적 9건 — 래칫 아님).
+# ⚠️ 이 가드는 아직 --floor 미이관(kernel-followups 03 예정)이다. 인자 모드가 --floor를 **파일로
+#    오인**하면 0건 검사 + 초록 + 거짓 SCAN(리뷰 실측: rc 0 · "SCAN: sops-guard: 2")이 되므로,
+#    이관 전까지 명시 거부한다 — 거짓 신호는 fixture↔real 회계까지 오염한다.
+for _sg_a in "$@"; do
+  case "$_sg_a" in
+    --floor|--floor=*) echo "sops-guard: --floor 미지원(kernel-followups 03에서 이관 예정) — 파일 인자로 오인되면 0건 검사 가짜 초록이 된다" >&2; exit 2 ;;
+  esac
+done
 if [ "$#" -gt 0 ]; then
   scan_signal sops-guard "$#"   # 인자(pre-commit·픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
 fi

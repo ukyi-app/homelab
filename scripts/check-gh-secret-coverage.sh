@@ -38,7 +38,7 @@
 #    실측: `.github/actions/**`에 표현식 컨텍스트 `secrets.` 참조 0건.
 # ⚠️ `vars.X`는 자격이 아니다(공개 설정값 — HOMELAB_OWNER 등). 도메인 밖.
 #
-# 종료코드: 0=전단사 성립 · 1=위반(미등재/stale/이중분류) · 2=사용법·정책파일 부재/형식·열거 붕괴(fail-loud).
+# 종료코드: 0=전단사 성립 · 1=위반(미등재/stale/이중분류)·열거 붕괴(fail-loud) · 2=사용법·정책파일 부재/형식.
 # bash 3.2 호환(mapfile·[[ ]] 금지). shellcheck clean.
 set -euo pipefail
 # 프롤로그(LC_ALL=C·ROOT 기본값·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
@@ -46,6 +46,10 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-gh-secret-coverage
 FIXTURE=0
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 02 — 구 GH_SECRET_*
+# env 폐지). 붕괴 종료코드도 1로 수렴한다(2는 사용법 전용 — check-image-pins 선례와 같은 근거).
+take_floors "check-gh-secret-coverage:workflows check-gh-secret-coverage:secrets" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT="$(cd "$2" && pwd)"; FIXTURE=1; shift 2 ;;
@@ -73,8 +77,10 @@ PROVIDED="$(jq -r '.secrets[] | select(.class=="provided") | .name' "$CLASS" | L
 # ── 열거 ────────────────────────────────────────────────────────────────────
 files="$(git ls-files '.github/workflows/*.yaml' || true)"
 nfiles="$(scan_count "$files")"
-if [ "$FIXTURE" -eq 0 ]; then
-  scan_floor check-gh-secret-coverage:workflows "$nfiles" "${GH_SECRET_MIN_WORKFLOWS:-18}" || exit 2
+# 픽스처(--root)엔 기본 바닥값을 적용하지 않는다 — 단 --floor를 **명시하면** 적용한다(floor_set,
+# check-image-pins 선례). 아니면 명시 플래그가 조용한 no-op이 된다(조용히 꺼진 바닥값과 같은 관측).
+if [ "$FIXTURE" -eq 0 ] || floor_set check-gh-secret-coverage:workflows; then
+  scan_floor check-gh-secret-coverage:workflows "$nfiles" "$(floor_of check-gh-secret-coverage:workflows 18)" || exit 1
 else
   scan_signal check-gh-secret-coverage:workflows "$nfiles"
 fi
@@ -132,8 +138,8 @@ EOT
 
 enum="$(printf '%s' "$owned" | grep -v '^$' | LC_ALL=C sort -u || true)"
 n="$(scan_count "$enum")"
-if [ "$FIXTURE" -eq 0 ]; then
-  scan_floor check-gh-secret-coverage:secrets "$n" "${GH_SECRET_MIN_SECRETS:-12}" || exit 2
+if [ "$FIXTURE" -eq 0 ] || floor_set check-gh-secret-coverage:secrets; then
+  scan_floor check-gh-secret-coverage:secrets "$n" "$(floor_of check-gh-secret-coverage:secrets 12)" || exit 1
 else
   scan_signal check-gh-secret-coverage:secrets "$n"
 fi

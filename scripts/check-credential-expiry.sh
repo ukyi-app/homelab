@@ -2,8 +2,10 @@
 # 자격증명 만료 원장(policy/credential-expiry.json) 검사 — 값(토큰) 없음, {name, expires(YYYY-MM-DD), note}만.
 #   --days N          : N일 이내 만료 항목이 있으면 목록 출력 + exit 1 (주간 워크플로가 telegram 경고로 중계)
 #   --lint            : 스키마 + 열거 바닥값만 검증 후 exit 0/2
-#   --min-entries N   : 항목 수 바닥값(기본 5 = 커밋된 원장의 현재 크기). 픽스처는 자기 크기에 맞춰 낮춰 쓴다.
-# exit: 0=윈도 내 만료 없음/lint OK, 1=만료 임박, 2=인자/원장 형식 오류·열거 붕괴(fail-loud)
+#   --floor credential-expiry=N : 항목 수 바닥값 오버라이드(기본 5 = 커밋된 원장의 현재 크기 —
+#                     공용 어휘, kernel-followups 02. 픽스처는 자기 크기에 맞춰 낮춰 쓴다).
+# exit: 0=윈도 내 만료 없음/lint OK, 1=만료 임박, 2=인자/원장 형식 오류·열거 붕괴(fail-loud —
+#       붕괴가 1이 아닌 근거는 아래 ⚠️ 소비자 계약)
 #
 # ⚠️ **바닥값이 왜 필요한가**: 예전엔 "빈 배열은 vacuous true 허용"을 자기 주석에 선언했다. 그래서 원장이
 #    비거나 항목이 조용히 사라져도 "만료 임박 없음"을 출력하고 exit 0이었다 — 이 레포의 다른 모든 가드가
@@ -29,16 +31,27 @@ set -euo pipefail
 guard_init check-credential-expiry
 # 기본 원장은 **스크립트 기준**(ROOT)으로 잡는다 — 상대경로면 호출자의 cwd에 의존한다(무인자
 # 실행을 레포 밖에서 하면 조용히 "원장 파일 없음"이 된다). `--file`은 호출자 상대 그대로 둔다.
-FILE="$ROOT/policy/credential-expiry.json"; DAYS=14; LINT=0; MIN_ENTRIES=5
+FILE="$ROOT/policy/credential-expiry.json"; DAYS=14; LINT=0
+# 바닥값 오버라이드는 공용 어휘 `--floor credential-expiry=<n>`뿐이다(kernel-followups 02 —
+# 구 --min-entries 폐지).
+# ⚠️ 붕괴 종료코드는 **2를 유지한다** — 형제들의 1 수렴 대상이 아니다: 소비자
+#    credential-expiry.yaml이 rc=1을 "만료 임박"(telegram 경고 + job 성공)으로 읽고 rc>=2만
+#    hard-fail한다. 붕괴를 1로 내면 거짓 제목의 알림이 나가고 job이 초록으로 남는다(게이트
+#    bats가 값을 못박는다). 사용법 2와의 겹침은 소비자 관점에서 동일 hard-fail이라 무해하다 —
+#    skip을 2에서 4로 가른 선례("한 코드에 두 의미")가 여기 부적용인 이유: 그 선례의 소비자는
+#    두 의미를 갈라 읽어야 했지만, 이 소비자의 분기점은 1/비-1 하나뿐이다(규약 거처는
+#    CONTRIBUTING §종료코드의 예외 각주).
+take_floors "credential-expiry" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --file) FILE="$2"; shift 2 ;;
     --days) DAYS="$2"; shift 2 ;;
-    --min-entries) MIN_ENTRIES="$2"; shift 2 ;;
     --lint) LINT=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+MIN_ENTRIES="$(floor_of credential-expiry 5)"
 command -v jq >/dev/null 2>&1 || { echo "ERROR: jq 필요(이 게이트는 jq 전용 — python fallback 금지)" >&2; exit 2; }
 [ -f "$FILE" ] || { echo "ERROR: 원장 파일 없음: $FILE" >&2; exit 2; }
 # 스키마: 배열 + 각 항목 name(문자열)·expires(YYYY-MM-DD). 위반 시 fail-loud.

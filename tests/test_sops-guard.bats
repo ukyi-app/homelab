@@ -53,3 +53,14 @@ YAML
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'BLOCKED'
 }
+
+@test "a --floor argument is refused until the migration lands (no fake-green file mode)" {
+  # 리뷰 실측(kernel-followups 02): 인자 모드가 --floor를 파일로 오인해 0건 검사 + 초록 + 거짓
+  # SCAN을 냈다 — 03 이관 전까지 명시 거부가 방어선이다.
+  run ./scripts/sops-guard.sh --floor sops-guard=99999
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- "--floor 미지원"
+  out="$output"
+  run grep -q "^SCAN:" <<<"$out"
+  [ "$status" -ne 0 ]
+}

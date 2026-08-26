@@ -120,8 +120,9 @@ PY2
 }
 
 @test "the enumeration floor engages when the domain collapses" {
-  run env GH_SECRET_MIN_SECRETS=99999 bash "$S"
-  [ "$status" -eq 2 ]
+  # 붕괴는 검증 실패(1)다 — 2는 사용법 전용(CONTRIBUTING 종료코드 규약, exit 2 잔존을 1로 수렴).
+  run bash "$S" --floor secrets=99999
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '열거 붕괴'
 }
 
@@ -133,4 +134,10 @@ PY2
   # 소문자 토큰이 분류 정책에 새어 들어오지 않았는지 — 들어왔다면 규칙 ①이 깨진 것이다.
   run grep -E '"name": "[a-z]' "$CLASS"
   [ "$status" -ne 0 ]
+}
+
+@test "the retired GH_SECRET env floors are inert (kernel-followups 02)" {
+  # env 재유입 회귀 증인 — 폐지 env가 되살아나면 99999가 바닥값이 되어 rc가 갈린다.
+  run env GH_SECRET_MIN_SECRETS=99999 GH_SECRET_MIN_WORKFLOWS=99999 bash "$S"
+  [ "$status" -eq 0 ]
 }

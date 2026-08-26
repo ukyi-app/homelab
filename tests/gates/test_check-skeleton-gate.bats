@@ -26,3 +26,4 @@ setup() {
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "ghostcomp"
 }
+
