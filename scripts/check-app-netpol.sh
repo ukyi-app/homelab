@@ -12,6 +12,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-app-netpol
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "check-app-netpol:manifests" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 ROOT_OVERRIDDEN=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -31,8 +34,8 @@ cd "$ROOT"
 # 정당한 트리를 "열거 붕괴"로 오탐한다(적대 검토 실측). 래칫 아님.
 # ⚠️ 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거). 앱이 0개인
 #    동안은 매니페스트 열거 0건이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
-#    형제 가드도 같은 경계다 — APP_DEPLOY_MIN_SCAN=0 · check-image-pins MIN_SCAN_APPS=0.
-MIN_SCAN="${APP_NETPOL_MIN_SCAN:-0}"
+#    형제 가드도 같은 경계다 — check-app-deploy 기본 0 · check-image-pins :apps 기본 0.
+MIN_SCAN="$(floor_of check-app-netpol:manifests 0)"
 
 manifests="$(scan_enumerate check-app-netpol bun "$(dirname "${BASH_SOURCE[0]}")/../tools/lib/repo-walk.ts" --manifests apps-manifests --root "$ROOT")" || exit 1
 scanned="$(scan_count "$manifests")"
@@ -40,7 +43,7 @@ scanned="$(scan_count "$manifests")"
 # 적용하면 red가 되는 건 **양성** 테스트(clean 셀렉터=통과 기대) 1건뿐이다 — 음성 3건은 단언이
 # `-ne 0`이라 바닥값 exit 1도 만족해 green을 유지한다(실측 4 ok / 1 not ok).
 # 즉 열거 붕괴를 실제로 증언하는 건 양성 2건(실-레포·clean 픽스처)뿐이다.
-if [ "$ROOT_OVERRIDDEN" -eq 1 ]; then
+if [ "$ROOT_OVERRIDDEN" -eq 1 ] && ! floor_set check-app-netpol:manifests; then
   # 바닥값은 면제하되 **신호는 낸다** — 신호가 아예 없으면 06이 "픽스처 호출"과 "가드 미실행"을
   # 구별할 수 없다. 건수(픽스처는 소수 · 실 트리는 기준선 근처)가 곧 그 판별자다.
   scan_signal check-app-netpol:manifests "$scanned"

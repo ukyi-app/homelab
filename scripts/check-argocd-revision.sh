@@ -31,6 +31,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-argocd-revision
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "check-argocd-revision:refs" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 ROOT_OVERRIDDEN=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -45,7 +48,7 @@ EXPECT_REVISION="${EXPECT_REVISION:-}"
 #    철거할 때마다 red가 난다. 경계의 근거: GitOps 척추 — root-app(1) + argocd-app(1) + appset(소스 4 +
 #    generator 2 = 6) = 8은 이 레포가 GitOps 레포인 한 구조적으로 사라지지 않는다. 10은 거기에
 #    `root/apps/*` 변동 여유를 두면서도 1/3 이상 붕괴는 잡는다. 래칫 아님.
-MIN_REFS="${ARGOCD_REVISION_MIN_REFS:-10}"
+MIN_REFS="$(floor_of check-argocd-revision:refs 10)"
 
 # URL 정규화 — 스킴·ssh 형태·후행 슬래시·`.git` 접미사·대소문자를 흡수해 host/path만 남긴다.
 norm_url() {

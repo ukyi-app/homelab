@@ -31,6 +31,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-host-ports
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "check-host-ports" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
 
 FILES=()
@@ -41,8 +44,8 @@ $enumerated
 EOF
 fi
 # ⚠️ 기본 모드의 도메인은 **정당하게 0이 될 수 없다** — 0건은 열거 붕괴다(형제 가드와 같은 규율).
-if [ "$#" -eq 0 ]; then
-  scan_floor check-host-ports "${#FILES[@]}" "${HOSTPORT_MIN_SCAN:-10}" || exit 1
+if [ "$#" -eq 0 ] || floor_set check-host-ports; then
+  scan_floor check-host-ports "${#FILES[@]}" "$(floor_of check-host-ports 10)" || exit 1
 else
   scan_signal check-host-ports "${#FILES[@]}"
 fi

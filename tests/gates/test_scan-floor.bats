@@ -274,7 +274,9 @@ c" ]
     rc=0
     out="$(bash "$f" 2>/dev/null)" || rc=$?
     if [ "$rc" -eq 4 ]; then skipped="${skipped} ${f##*/}"; nskip=$(( nskip + 1 )); continue; fi
-    [ "$rc" -eq 0 ] || { echo "가드가 비-0으로 죽었다: $f (rc=$rc)"; false; }
+    # rc 1은 "위반을 찾았다"다 — 도메인은 평가됐고 마커는 이미 방출됐다(라이브 감사 가드가 실
+    # 고아를 보고하는 venue에서 이 등식이 red가 되면 게이트가 감사 결과에 오염된다). 사망은 그 외.
+    [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ] || { echo "가드가 비-0으로 죽었다: $f (rc=$rc)"; false; }
     cmp_static="${cmp_static}${lbl}
 "
     runtime="${runtime}$(printf '%s\n' "$out" | sed -n 's/^SCAN: \(.*\): [0-9][0-9]*$/\1/p')
@@ -283,7 +285,8 @@ c" ]
 $guards
 EOF
   # ⚠️ SKIP 상한이 없으면 "전부 SKIP → 양쪽 공집합 → 등식 성립"이라는 vacuous green이 열린다.
-  #    SKIP은 venue에 따라 달라지므로(로컬 0 · CI 1) 바닥값이 아니라 **상한**으로 문다.
+  #    SKIP은 venue에 따라 달라지므로(로컬 1: audit-orphan-pv · CI 2: +verify-credential-inventory)
+#    바닥값이 아니라 **상한**으로 문다.
   echo "skipped(${nskip}):${skipped}"
   [ "$nskip" -le 2 ]
   cmp_static="$(printf '%s' "$cmp_static" | grep -v '^$' | LC_ALL=C sort -u)"
@@ -527,7 +530,7 @@ KERNEL_TS='const k = await import(process.argv[1] + "/tools/lib/scan-floor.ts");
   echo "$output" | grep -q "code=2"
 }
 
-# 0은 정당한 바닥값이다(셸 선례: check-app-deploy의 APP_DEPLOY_MIN_SCAN:-0). 금지하면 안 된다.
+# 0은 정당한 바닥값이다(셸 선례: check-app-deploy 기본 바닥값 0 — 인-레포 앱 0개 동안). 금지하면 안 된다.
 @test "parseFloor accepts an explicit zero" {
   run bun -e "$KERNEL_TS"' console.log(k.parseFloor("0", "--demo"))' "$ROOT"
   [ "$status" -eq 0 ]

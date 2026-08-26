@@ -63,8 +63,9 @@ setup() {
   echo "$output" | grep -qE '^SCAN: check-bats-fd0: [0-9]+$'
   sites="$(printf '%s\n' "$output" | sed -n 's/^SCAN: check-bats-fd0: //p')"
   [ "$sites" -ge 5 ]
-  run env BATSFD0_MIN_SITES=99999 bash "$S"
+  run bash "$S" --floor check-bats-fd0=99999
   [ "$status" -ne 0 ]
+  echo "$output" | grep -q "열거 붕괴"
   echo "$output" | grep -qF '열거 붕괴'
 }
 

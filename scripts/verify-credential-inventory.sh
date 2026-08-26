@@ -23,6 +23,10 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init verify-credential-inventory
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+# (이관 전 --floor는 위치 인자라 런북 경로로 오인돼 SKIP이 났다 — 리뷰 실측. 커널이 먼저 걷는다.)
+take_floors "verify-credential-inventory:ledger verify-credential-inventory:runbook" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
 
 RB="${1:-$ROOT/docs/runbooks/token-inventory.md}"
@@ -61,8 +65,8 @@ rb_sorted="$(printf '%s\n' "$rb_names" | LC_ALL=C sort -u)"
 rb_n="$(scan_count "$rb_names")"
 
 # 열거 붕괴 방어 — 어느 쪽이든 0건이면 아래 대조가 vacuous하게 통과한다.
-scan_floor verify-credential-inventory:ledger "$led_n" "${CREDINV_MIN:-3}" || exit 1
-scan_floor verify-credential-inventory:runbook "$rb_n" "${CREDINV_MIN:-3}" || exit 1
+scan_floor verify-credential-inventory:ledger "$led_n" "$(floor_of verify-credential-inventory:ledger 3)" || exit 1
+scan_floor verify-credential-inventory:runbook "$rb_n" "$(floor_of verify-credential-inventory:runbook 3)" || exit 1
 
 fail=0
 # ① 표 → 원장

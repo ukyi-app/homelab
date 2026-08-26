@@ -112,8 +112,10 @@ setup() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE '^SCAN: check-host-ports: [0-9]+$'
   # 바닥값이 실제로 물리는지 — 도메인이 붕괴하면 초록이 아니라 red여야 한다.
-  run env HOSTPORT_MIN_SCAN=99999 bash "$S"
+  run bash "$S" --floor check-host-ports=99999
   [ "$status" -ne 0 ]
+  # 파일 오인("읽을 수 없는 대상")이 아니라 진짜 floor에 닿아야 한다 — 문구가 그 구별이다.
+  echo "$output" | grep -q "열거 붕괴"
 }
 
 @test "the explicit-file mode emits its own SCAN signal (floor is exempt, the signal is not)" {

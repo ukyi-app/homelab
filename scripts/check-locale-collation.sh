@@ -29,6 +29,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-locale-collation
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "check-locale-collation" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
 
 FILES=()
@@ -38,8 +41,8 @@ if [ "$#" -gt 0 ]; then FILES=("$@"); else
   )
 fi
 # ⚠️ 기본 모드의 도메인은 **정당하게 0이 될 수 없다** — 0건은 열거 붕괴다(형제 가드와 같은 규율).
-if [ "$#" -eq 0 ]; then
-  scan_floor check-locale-collation "${#FILES[@]}" "${LOCALE_MIN_SCAN:-200}" || exit 1
+if [ "$#" -eq 0 ] || floor_set check-locale-collation; then
+  scan_floor check-locale-collation "${#FILES[@]}" "$(floor_of check-locale-collation 200)" || exit 1
 else
   scan_signal check-locale-collation "${#FILES[@]}"
 fi

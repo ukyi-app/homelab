@@ -167,7 +167,7 @@ fixture_suite() {   # $1: 하위 디렉토리명
 }
 
 @test "the enumeration floor fires when the scan domain collapses" {
-  run env SKIP_SIGNAL_MIN_SCAN=99999 bash "$ROOT/scripts/check-skip-signalling.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" --floor check-skip-signalling=99999
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "열거 붕괴"
 }

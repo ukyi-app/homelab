@@ -27,11 +27,14 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-skip-signalling
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "check-skip-signalling" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
 
 # ⚠️ 현재 건수를 여기 적지 않는다 — 손 관리 수치는 드리프트한다(check-scan-producers 규율).
-#    현재값은 SCAN 마커를 읽어라. env 손잡이는 게이트 bats의 붕괴 증인 전용이다.
-MIN_SCAN="${SKIP_SIGNAL_MIN_SCAN:-100}"
+#    현재값은 SCAN 마커를 읽어라. 오버라이드는 --floor(위 take_floors)뿐이다.
+MIN_SCAN="$(floor_of check-skip-signalling 100)"
 
 # 유일 구현체(방출 정당 보유처) — 헬퍼 자신은 원자 방출 줄 하나를 가진다(정확 1은 게이트 bats가 잰다).
 HELPER_SH="scripts/lib/guard.sh"
@@ -139,7 +142,7 @@ done
 
 # 신호는 검출 뒤에 낸다(check-scan-producers와 같은 순서) — 검출이 죽은 실행이 "N건"을 내면
 # 소비자가 정반대로 읽는다. 바닥값·마커는 손조립하지 않고 커널(scan-floor.sh)을 태운다.
-if [ "$FIXTURE" -eq 0 ]; then
+if [ "$FIXTURE" -eq 0 ] || floor_set check-skip-signalling; then
   scan_floor check-skip-signalling "$scanned" "$MIN_SCAN" || exit 1
 else
   scan_signal check-skip-signalling "$scanned"

@@ -1648,7 +1648,7 @@ selfHeal과 플립플롭한다.
   구 `DISK_CAP_MIN_FLAGS=abc bun tools/check-disk-caps.ts` → SCAN 마커 방출 + rc=0(현 재현: `bun tools/check-disk-caps.ts --floor caps=abc` → exit 2·마커 없음). 오타 하나가 열거 붕괴
   방어를 되살리지 않고 **끈다** — 「열거 붕괴 → vacuous green」의 TS 얼굴이다.
 - ⚠️ **숫자 검증을 coercion 뒤에 두면 빈 입력을 못 거른다.** `Number("")`는 0이고, 0은 정당한 바닥값이라
-  (셸 선례 `APP_DEPLOY_MIN_SCAN:-0` — 앱이 0개인 동안 열거 0건은 정당) 금지로 피할 수도 없다. 설계 게이트
+  (셸 선례 check-app-deploy 기본 바닥값 0 — 앱이 0개인 동안 열거 0건은 정당) 금지로 피할 수도 없다. 설계 게이트
   r2가 실측: `--min-refs ""`는 자체 파서(`positiveInt`)가 거부하고 `--min-scan ""`는 `Number()` 직행이라
   통과했다 — **같은 처방을 복제하면 일부가 빠진다**(2벌 복제, 미적용 2곳).
 - ⚠️ **테스트 편의로 바닥값에 env 주입을 열면 required gate의 방어가 꺼진다.** 붕괴 경로를 관측하려고

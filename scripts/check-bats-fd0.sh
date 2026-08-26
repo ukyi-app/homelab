@@ -27,6 +27,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-bats-fd0
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "check-bats-fd0" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
 
 FILES=()
@@ -88,8 +91,8 @@ case "$sites" in '' | *[!0-9]*) echo "FAIL: check-bats-fd0: 검출기가 호출�
 
 # ⚠️ 바닥값의 대상은 **파일 수가 아니라 호출면 수**다. 파일은 수백 개인데 bats 호출면은 한 자리라,
 #    파일 수로 바닥을 걸면 정규식이 깨져 호출면을 0개 찾아도 그 바닥을 통과한다(무측정 초록).
-if [ "$#" -eq 0 ]; then
-  scan_floor check-bats-fd0 "$sites" "${BATSFD0_MIN_SITES:-5}" || exit 1
+if [ "$#" -eq 0 ] || floor_set check-bats-fd0; then
+  scan_floor check-bats-fd0 "$sites" "$(floor_of check-bats-fd0 5)" || exit 1
 else
   scan_signal check-bats-fd0 "$sites"
 fi

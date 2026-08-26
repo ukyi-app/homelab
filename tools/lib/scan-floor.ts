@@ -103,7 +103,7 @@ export function scanSignal(label: string, n: number, opts: SignalOpts = {}): voi
 /**
  * raw 문자열을 바닥값 수로 판정한다. **`Number()` 앞에 서는 것이 이 함수의 존재 이유다** —
  * `Number("")`는 0이라, coercion 뒤에 검증하면 빈 입력과 **의도적 0**을 구별할 수 없다.
- * 그리고 0은 정당한 바닥값이라 금지해서 피할 수도 없다(셸 선례: `APP_DEPLOY_MIN_SCAN:-0`,
+ * 그리고 0은 정당한 바닥값이라 금지해서 피할 수도 없다(셸 선례: `check-app-deploy 기본 0`,
  * "앱이 0개인 동안은 레인2 열거 0건이 정당하다").
  *
  * 종료코드 2 = 사용법 오류(`cli.ts`의 종료코드 규약). 바닥값 실패(1)와 다른 사고다 —

@@ -29,6 +29,9 @@ cd "$ROOT"
 #    ⇒ 픽스처 모드는 **명시 플래그**로만 열고, 모르는 인자는 fail-loud(exit 2)다.
 EXCLUDE_FILE="tests/.ci-exclude"
 LINT_ONLY=0
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "check-bats-accounting:gate check-bats-accounting:tracked" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --lint-excludes)
@@ -105,7 +108,7 @@ gate_list="$(scan_enumerate check-bats-accounting:gate ./scripts/run-bats.sh --l
 # ── (3) gate 도메인 바닥값 — 러너 붕괴·대량 삭제 차단 ─────────────────────────────────────────────
 # (0b)가 제외 증가를 막으므로 여기는 **다른 축**을 본다: 러너 로직이 깨지거나 테스트가 대량 삭제돼
 # gate가 통째로 비는 경우. 바닥값이지 래칫이 아니라 여유를 둔다(정당한 삭제는 있을 수 있다).
-scan_floor check-bats-accounting:gate "$(scan_count "$gate_list")" "${BATS_ACCOUNTING_MIN_GATE:-195}" || exit 1
+scan_floor check-bats-accounting:gate "$(scan_count "$gate_list")" "$(floor_of check-bats-accounting:gate 195)" || exit 1
 GATE=" $(printf '%s\n' "$gate_list" | tr '\n' ' ') "
 in_gate() { case "$GATE" in *" $1 "*) return 0;; *) return 1;; esac; }
 
@@ -121,7 +124,7 @@ in_excl() { case "$EXCL" in *" $1 "*) return 0;; *) return 1;; esac; }
 # 안 묶여 조용히 죽음)에 **자기가 걸린다**(라이브 재현: 글롭만 비우는 셰임으로 같은 OK + rc=0).
 all_bats="$(scan_enumerate check-bats-accounting:tracked git ls-files '*test_*.bats')" || exit 1
 scanned="$(scan_count "$all_bats")"
-scan_floor check-bats-accounting:tracked "$scanned" "${BATS_ACCOUNTING_MIN_SCAN:-150}" || exit 1
+scan_floor check-bats-accounting:tracked "$scanned" "$(floor_of check-bats-accounting:tracked 150)" || exit 1
 
 # (1) 모든 추적 test_*.bats가 정확히 한 도메인
 while IFS= read -r f; do
