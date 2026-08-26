@@ -231,3 +231,22 @@ EOF
   run grep -q '^SCAN: ' <<<"$out"
   [ "$status" -ne 0 ]
 }
+
+@test "assertFloorKeys is a first-class contract for kernel-vocabulary-only consumers" {
+  # guardMain 밖 소비자(어휘만 소비·마커 미방출 — kernel-followups 05)의 fail-closed가 이 함수
+  # 하나에 걸린다 — ScanError(2) throw(takeFloors와 같은 오류 규율, 종료·접두는 콜사이트 소유).
+  run bun -e '
+    import { ScanError, assertFloorKeys, takeFloors } from "'"$ROOT"'/tools/lib/scan-floor.ts";
+    const ok = takeFloors(["--floor", "reserved=3"]).floors;
+    assertFloorKeys(ok, ["demo:reserved"]);
+    console.log("valid-ok");
+    try { assertFloorKeys(takeFloors(["--floor", "bogus=1"]).floors, ["demo:reserved"]); }
+    catch (e) { if (e instanceof ScanError) console.error("E1 code=" + e.exitCode + " " + e.message); }
+    try { assertFloorKeys(takeFloors(["--floor", "dup=1"]).floors, ["a:dup", "b:dup"]); }
+    catch (e) { if (e instanceof ScanError) console.error("E2 code=" + e.exitCode); }
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^valid-ok$"
+  echo "$output" | grep -q "^E1 code=2 .*조용히 꺼진 바닥값"
+  echo "$output" | grep -q "^E2 code=2$"
+}

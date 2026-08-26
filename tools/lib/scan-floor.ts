@@ -201,6 +201,24 @@ export function takeFloors(argv: string[]): { floors: Map<string, number>; rest:
   return { floors, rest };
 }
 
+// --floor 키의 선언 도메인 전건 매칭 검증 — guardMain ⓪가 소비하고, guardMain에 맞지 않는 도구
+// (kernel-followups 05: dns-drift-check는 판정이 비동기라 동기 check 계약 밖, audit-orphans는
+// 종료코드가 3분기라 report/ok 이분법 밖)도 같은 fail-closed를 이것으로 얻는다.
+// ScanError(2) throw — takeFloors와 같은 오류 규율(판정은 던지고 종료·접두는 콜사이트 소유).
+export function assertFloorKeys(floors: Map<string, number>, scans: string[]): void {
+  for (const k of floors.keys()) {
+    const hits = scans.filter((s) => s === k || s.split(":").pop() === k);
+    if (hits.length === 0) {
+      throw new ScanError(
+        `--floor 도메인 '${k}'가 이 가드의 선언 도메인에 없다(허용: ${scans.join(" · ")}) — 오타 키는 조용히 꺼진 바닥값이 된다(fail-closed)`, 2,
+      );
+    }
+    if (hits.length > 1) {
+      throw new ScanError(`--floor 도메인 '${k}'가 ${hits.length}개 도메인에 걸린다(${hits.join(" · ")}) — 전체 라벨로 지정하라`, 2);
+    }
+  }
+}
+
 export function floorOf(floors: Map<string, number>, scan: string, dflt: number): number {
   return floors.get(scan) ?? floors.get(scan.split(":").pop()!) ?? dflt;
 }
@@ -230,18 +248,12 @@ export function guardMain(opts: {
   }
   // ⓪ --floor 키 검증(도메인 전건 매칭) — 열거보다 먼저다: 잘못된 호출은 일을 시작하기 전에 죽는다.
   const floors = opts.floors ?? new Map<string, number>();
-  for (const k of floors.keys()) {
-    const hits = opts.domains.filter((d) => d.scan === k || d.scan.split(":").pop() === k);
-    if (hits.length === 0) {
-      console.error(
-        `--floor 도메인 '${k}'가 이 가드의 선언 도메인에 없다(허용: ${opts.domains.map((d) => d.scan).join(" · ")}) — 오타 키는 조용히 꺼진 바닥값이 된다(fail-closed)`,
-      );
-      process.exit(2);
-    }
-    if (hits.length > 1) {
-      console.error(`--floor 도메인 '${k}'가 ${hits.length}개 도메인에 걸린다(${hits.map((d) => d.scan).join(" · ")}) — 전체 라벨로 지정하라`);
-      process.exit(2);
-    }
+  try {
+    assertFloorKeys(floors, opts.domains.map((d) => d.scan));
+  } catch (e) {
+    if (!(e instanceof ScanError)) throw e;
+    console.error(e.message);
+    process.exit(e.exitCode);
   }
   // ① 전 도메인 열거. throw는 fail-loud로 접는다 — raw 스택이 나가면 게이트 출력 규약이 깨진다.
   const counts: number[] = [];

@@ -22,23 +22,44 @@ import { registryProjection } from "./lib/activation-marker.ts";
 import { parseLedgerRows } from "./lib/ledger-totals.ts";
 import { listUnits } from "./lib/repo-walk.ts";
 import { LAYOUT_DIRS, TOMBSTONES_PATH, classifyArtifact, classifyLedgerRow, layoutFor } from "./lib/resource-layout.ts";
+import { assertFloorKeys, floorOf, takeFloors } from "./lib/scan-floor.ts";
+import { typedFlags } from "./lib/cli.ts";
 
 const USAGE = `audit-orphans — registry↔매니페스트↔원장 교차 드리프트 리포트(읽기 전용)
-사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict] [--min-registry <n>]
+사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict] [--floor registry=<n>]
   --repo-root <dir>  레포 루트(기본 .)
   --ci               배포를 깨는 유형만 비-0 종료(orphan-dns/activation-exposure-drift/missing-activation) — PR 게이트용
   --strict           모든 드리프트 유형을 비-0 종료(수동 점검)
-  --min-registry <n> apps.json 행 수 바닥값(기본 0 — 인-레포 앱 0개) — 열거 붕괴 감지. 앱 온보딩 시 1로 되돌린다
+  --floor registry=<n>  apps.json 행 수 바닥값(기본 0 — 인-레포 앱 0개, 공용 어휘) — 열거 붕괴 감지. 앱 온보딩 시 1로 되돌린다
   --help, -h         이 도움말`;
 if (process.argv.includes("--help") || process.argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 
-const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
-const ROOT = arg("--repo-root", ".");
-const STRICT = process.argv.includes("--strict");
+// 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 05 — 구 --min-registry
+// 폐지, 자체 정수 검증·argv 파서 복제는 커널 parseFloor·takeFloors·typedFlags로 접혔다).
+// guardMain은 쓰지 않는다 — 종료코드가 기본/--ci/--strict 3분기라 report(1)/ok(0) 이분법 밖이다
+// (stdout JSON은 이유가 아니다: output:"none"이 그 용도다 — check-guard-authority 선례).
+// 도메인 라벨 상수 — 선언(assertFloorKeys)과 조회(floorOf)가 같은 리터럴을 봐야 오타가 조용히
+// 꺼진 바닥값이 되지 않는다(guardMain의 scan 필드가 겸하던 역할의 수동 등가물).
+const FLOOR_REGISTRY = "audit-orphans:registry";
+let flags;
+let FLOORS: Map<string, number>;
+try {
+  const taken = takeFloors(process.argv.slice(2));
+  FLOORS = taken.floors;
+  assertFloorKeys(FLOORS, [FLOOR_REGISTRY]);
+  // 미지 인자·플래그 값 삼킴(--repo-root --ci 류)은 typedFlags가 거부한다 — 종전 위치 검색
+  // 파서는 오타·폐지 어휘를 조용히 무시했다(조용히 꺼진 바닥값 클래스).
+  flags = typedFlags(taken.rest, { value: ["--repo-root"], bool: ["--ci", "--strict"] });
+} catch (e) {
+  console.error(`audit-orphans: ${e instanceof Error ? e.message : String(e)}`);
+  process.exit(2);
+}
+const ROOT = flags.str("--repo-root", ".")!;
+const STRICT = flags.bool("--strict");
 // --ci: PR 게이트용 — 배포 정합/노출을 깨는 유형만 비-0 종료(빈 백엔드 DNS/미재검증 노출 드리프트).
 // missing-registration·incomplete-purge·원장 드리프트는 정보/경고라 차단하지 않는다.
 // (--strict는 전부 차단 — 수동 점검용.)
-const CI = process.argv.includes("--ci");
+const CI = flags.bool("--ci");
 // CI 차단은 **정확히** 배포 정합/노출을 깨는 세 유형만:
 //   orphan-dns(apps.json active 행에 앱 매니페스트 부재 → 빈 백엔드로 DNS 노출),
 //   activation-exposure-drift(activation 이후 apps.json host/public 변경 → 미재검증 DNS 노출),
@@ -65,16 +86,9 @@ const readJson = (p: string, d: any): any => (existsSync(p) ? JSON.parse(readFil
 // 진짜 missing-activation 위반이 있는 상태에서 apps.json만 치우면 blocking 1→0 · rc 1→0(stderr 0줄).
 // 레포 밖 cwd에서 기본 `--repo-root .`로 부르면(Makefile:102 · ci.yaml:72의 형태) 전 도메인이 0건이었다.
 // ⚠️ 나머지 readJson 폴백 2곳(.tombstones.json · .activation 마커)은 **부재가 정상 상태**라 건드리지 않는다.
-// ⚠️ `Number()` + `Number.isFinite()` 조합만으로는 부족하다 — JS는 `Number("") === 0`,
-// `Number(" ") === 0`, `Number("\n") === 0`이라 **빈 값/공백이 유효한 0으로 통과해 바닥값이 조용히 꺼진다**
-// (`--min-registry ""` 또는 값 없이 마지막 인자로 두는 경우). 적대 검토가 실측으로 잡은 자리다.
-// 정수 리터럴만 받는다 — "숫자로 해석 가능"이 아니라 "숫자로 쓰였다"를 요구한다.
-const rawMinRegistry = String(arg("--min-registry", "0") ?? "");
-if (!/^\d+$/.test(rawMinRegistry)) {
-  console.error(`audit-orphans: --min-registry 값이 음이 아닌 정수가 아니다(받은 값: ${JSON.stringify(rawMinRegistry)}) — 바닥값이 조용히 무력화되는 자리다`);
-  process.exit(2); // 사용법 오류(CONTRIBUTING 종료코드 규약)
-}
-const MIN_REGISTRY = Number(rawMinRegistry);
+// 값 검증(빈 값·공백이 유효한 0으로 통과하던 자리 — 적대 검토 실측)은 커널 parseFloor가
+// takeFloors 안에서 소유한다 — 이 파일의 검증 사본은 05에서 소멸했다.
+const MIN_REGISTRY = floorOf(FLOORS, FLOOR_REGISTRY, 0);
 const registryPath = `${ROOT}/infra/cloudflare/apps.json`;
 let registry: RegRow[];
 try {
@@ -91,7 +105,7 @@ if (!Array.isArray(registry)) {
 // check-resource-limits=10 · check-guard-authority=15). 래칫 아님.
 // ⚠️ 기본 0 — 인-레포 배포 앱이 **0개**라 실 registry가 빈 배열이다(page #455 · trip-mate-api 철거).
 //    앱이 0개인 동안은 0행이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
-//    바닥값이 실제로 작동함은 `--min-registry 1`을 명시해 부르는 test_audit-orphans.bats가 계속 증명한다.
+//    바닥값이 실제로 작동함은 `--floor registry=1`을 명시해 부르는 test_audit-orphans.bats가 계속 증명한다.
 if (registry.length < MIN_REGISTRY) {
   console.error(`audit-orphans: registry ${registry.length}행 < ${MIN_REGISTRY} — 열거 붕괴 의심(scan-floor). 이 자리가 0건 검사 후 초록이 되던 곳이다`);
   process.exit(1);

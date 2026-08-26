@@ -132,7 +132,12 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
 `SCAN:`은 “n건 평가했다”(정상 경로)다. 바닥값 **실패** 경로도 마커를 내지 않는다 — 그때의 건수는
 “검사했다”가 아니라 “붕괴했다”는 뜻이라 같은 마커로 내면 정반대로 읽힌다.
 
-**⚠️ 커버리지는 완전하지 않다** — 가드 전부가 신호를 내지는 않는다.
+**⚠️ 커버리지는 완전하지 않다** — 가드 전부가 신호를 내지는 않는다. 커널 소비 패턴은 셋이다:
+① guardMain(실행 커널 — 일괄 방출) ② scanFloor/scanSignal 직접(판정 커널) ③ **어휘만 소비 ·
+마커 미방출**(takeFloors+assertFloorKeys+floorOf — guardMain 계약에 맞지 않는 도구용:
+dns-drift-check는 판정이 비동기라 동기 check 밖, audit-orphans는 종료코드 3분기라 report/ok
+이분법 밖. stdout JSON은 사유가 아니다 — output:"none"이 그 용도다). ③은 마커가 없어 로스터
+등식 대상 밖이고, 라벨 오타는 콜사이트의 라벨 상수 + --floor 증인 bats가 진다.
 
 ⚠️ **여기에 건수를 적지 않는다.** 예전엔 "28종 중 12종 · 라벨 17개"라고 적혀 있었는데 실측은
 13종/31종 · 라벨 21개였고, `scripts/lib/scan-floor.sh`와 `PROGRESS.md`에는 **또 다른 숫자**가 박혀
@@ -190,7 +195,7 @@ grep -lE '^[^/]*(scan(Floor|Signal)\(|scan: ")' tools/*.ts
 
 **도메인-크기 게이트는 이 규약의 대상이 아니다.** "검사 대상이 0건이라 skip"은 자격 부재가 아니라
 열거 붕괴 클래스이고 처방이 다르다(**바닥값** — 위 '가드 스캔 신호' 절). `dns-drift`가 그 예다:
-`active&&public + platform_hosts == 0 → clean skip`이던 게이트를 없애고 `--min-reserved`(기본 1,
+`active&&public + platform_hosts == 0 → clean skip`이던 게이트를 없애고 `--floor reserved=<n>`(기본 1,
 fail-closed) 바닥값으로 대체했다. 예약 platform host는 구조적으로 항상 ≥1이라 0은 "대상 없음"이
 아니라 SSOT 부재/키 변경이기 때문이다.
 

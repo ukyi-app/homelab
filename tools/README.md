@@ -462,8 +462,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   표면 무변경 + 행 고정을 검증해 재노출을 재승인한다(런북 `app-platform.md`). 라이브 무변경(게이트만).
 - **`dns-drift-check.ts`** — active&&public 앱 host + 예약 platform host(`reserved-hosts.json`)가 실제
   resolve되는지(apply 누락=NXDOMAIN, transient는 별도 버킷) 검사. `dns-drift.yaml`(주기)이 호출. resolver 주입(`--fixture`)으로 테스트. 읽기 전용.
-  **레인별 바닥값** `--min-reserved`(기본 1, fail-closed) — 예약 platform host는 구조적으로 항상 ≥1이라
-  0은 "대상 없음"이 아니라 SSOT 부재/키 변경이다. 픽스처만 `--min-reserved 0`으로 **명시** 해제한다
+  **레인별 바닥값** `--floor reserved=<n>`(기본 1, fail-closed — 공용 어휘, kernel-followups 05) —
+  예약 platform host는 구조적으로 항상 ≥1이라
+  0은 "대상 없음"이 아니라 SSOT 부재/키 변경이다. 픽스처만 `--floor reserved=0`으로 **명시** 해제한다
   (기본을 0으로 두면 조용히 꺼진 바닥값이 된다). 출력의 `scanned`가 스캔 신호다 — stdout이 기계 판독
   JSON이라 `SCAN:` 마커를 못 낸다.
 - **`contract-drift-check.ts`** — 동봉 계약(vendored `seal-secret.mts`·`sealed-secrets-cert.pem`)이 다운스트림

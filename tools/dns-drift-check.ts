@@ -5,16 +5,31 @@ import { existsSync, readFileSync } from "node:fs";
 import { promises as dnsp } from "node:dns";
 import { dirname, join } from "node:path";
 import { typedFlags } from "./lib/cli.ts";
+import { assertFloorKeys, floorOf, takeFloors } from "./lib/scan-floor.ts";
 
 let flags;
+let floors: Map<string, number>;
 try {
-  flags = typedFlags(process.argv.slice(2), {
-    value: ["--apps", "--fixture", "--reserved", "--min-reserved"],
+  // 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 05 — 구 --min-reserved 폐지).
+  const taken = takeFloors(process.argv.slice(2));
+  floors = taken.floors;
+  flags = typedFlags(taken.rest, {
+    value: ["--apps", "--fixture", "--reserved"],
     bool: [],
   });
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
-  console.error("사용법: dns-drift-check.ts [--apps <path>] [--reserved <path>] [--min-reserved <n>] [--fixture <json>]");
+  console.error("사용법: dns-drift-check.ts [--apps <path>] [--reserved <path>] [--floor reserved=<n>] [--fixture <json>]");
+  process.exit(2);
+}
+// guardMain은 쓰지 않는다 — 판정이 비동기(resolve await)라 동기 check() 계약 밖이다
+// (stdout JSON은 이유가 아니다: output:"none"이 그 용도다 — check-guard-authority 선례).
+// 도메인 라벨 상수 — 선언과 조회가 같은 리터럴을 본다(오타 = 조용히 꺼진 바닥값 방지).
+const FLOOR_RESERVED = "dns-drift-check:reserved";
+try {
+  assertFloorKeys(floors, [FLOOR_RESERVED]);
+} catch (e) {
+  console.error(e instanceof Error ? e.message : String(e));
   process.exit(2);
 }
 const appsPath = flags.str("--apps", "infra/cloudflare/apps.json")!;
@@ -25,13 +40,9 @@ const reservedPath = flags.str("--reserved", join(dirname(appsPath), "reserved-h
 // (첫 공개 앱 이전) 예약 platform host는 구조적으로 항상 ≥1이다 — 0이면 그건 "검사할 게 없다"가
 // 아니라 **파일이 사라졌거나 키가 바뀌었다**는 뜻이고, 그 상태에서 조용히 0건 검사하면 이 체커가
 // vacuous해진다. 기본값을 1(fail-closed)로 두고, 픽스처는 `--min-reserved 0`으로 **명시** 해제한다
-// (기본이 off면 '조용히 꺼진 바닥값'이 된다 — 같은 클래스의 실측 버그가 있었다).
-const minRaw = flags.str("--min-reserved", "1")!;
-if (!/^\d+$/.test(minRaw.trim())) {
-  console.error(`--min-reserved는 음이 아닌 정수여야 한다(받은 값: '${minRaw}')`);
-  process.exit(2);
-}
-const minReserved = Number(minRaw.trim());
+// (기본이 off면 '조용히 꺼진 바닥값'이 된다 — 같은 클래스의 실측 버그가 있었다. 해제 어휘는
+// `--floor reserved=0` — kernel-followups 05).
+const minReserved = floorOf(floors, FLOOR_RESERVED, 1);
 
 // resolver: host → 배열(존재) | null(NXDOMAIN) | undefined(transient: SERVFAIL/timeout)
 let resolve;

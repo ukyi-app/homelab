@@ -29,7 +29,7 @@ jobs:
         with: { install: 'false' }     # dns 체크는 deps 불요
       # ⚠️ "대상 0건이면 skip" 게이트를 두지 않는다 — 예약 platform host는 구조적으로 항상 ≥1이라
       #    0은 "대상 없음"이 아니라 **열거 붕괴**다(그 형태는 파싱 실패를 0으로 흡수해 fail-open이었다).
-      #    검사기가 `--min-reserved`(기본 1) 바닥값으로 exit 1을 낸다. 준비상태 클래스가 아니라
+      #    검사기가 `--floor reserved=<n>`(기본 1) 바닥값으로 exit 1을 낸다. 준비상태 클래스가 아니라
       #    열거 붕괴 클래스라 처방이 accounting job이 아니다. cf. docs/traps.md 「열거 붕괴」
       - id: check
         run: |
