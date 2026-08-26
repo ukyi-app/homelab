@@ -19,6 +19,10 @@ export function readLedger<T = unknown>(opts: {
   // 임계값은 소비자가 소유한다(scripts/lib/scan-floor.sh와 같은 규율 — image-ownership의 빈
   // unowned는 이상적 상태이고, ci-parity의 빈 steps는 미계상 대조가 어차피 red를 낸다).
   // **부재·파싱 실패는 여전히 무조건 red**다 — 이 바닥값은 "존재하되 비었다"에만 적용된다.
+  // 재평가(kernel-followups 07, 2026-08-27): 프로덕션 소비자 여전히 0 — 그래도 유지한다. 이것은
+  // 죽은 함수가 아니라 "빈 원장=red 일률"의 실측 반증을 수용한 **의미론의 자리**(옵션 필드 +
+  // 4줄)이고, 계약 bats가 red 증인을 보유한다. 지우면 이 경계 서술이 산문으로만 남는다.
+  // 다음 재평가 조건: readLedger 소비자 목록이 바뀔 때.
   minEntries?: number;
   root?: string;       // 기본 "."
 }): T {

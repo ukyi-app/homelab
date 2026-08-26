@@ -62,6 +62,8 @@ export class ScanError extends Error {
   /**
    * 권고 종료코드. `1` = 열거 붕괴(검증 실패) · `2` = 임계값이 수가 아님(사용법 오류).
    * 콜사이트가 자기 값으로 덮어쓸 수 있다 — 셸 콜사이트가 `|| exit 1`과 `|| exit 2`로 갈리듯이.
+   * 직접 콜사이트 관용구:
+   * `catch (e) { if (!(e instanceof ScanError)) throw e; console.error(…); process.exit(e.exitCode); }`
    */
   readonly exitCode: number;
   constructor(message: string, exitCode: number) {
@@ -116,22 +118,11 @@ export function parseFloor(raw: string | undefined, source: string): number {
   return Number(raw.trim());
 }
 
-/**
- * `ScanError`를 콜사이트의 진단 한 줄로 만든다. **문구는 커널이, 종료는 콜사이트가** 소유한다.
- * 콜사이트 관용구: `catch (e) { process.exit(reportScanError(e, "FAIL:")); }` — 진단을 내고 권고
- * 코드를 돌려줄 뿐, **종료는 콜사이트가 한다**(판정 lib은 종료를 소유하지 않는다).
- * `ScanError`가 아니면 되던진다: 커널이 삼키면 다른 결함이 이 자리에서 조용히 사라진다.
- *
- * ⚠️ 현 소비자 0(17 재접목 실측) — guardMain 이행이 scanFloor 직접 콜사이트를 전부 접었다.
- *    커널 밖에서 scanFloor/parseFloor를 직접 쓰는 가드가 다시 생기면 이 관용구가 그 자리다.
- *    제거하지 않는 근거: ScanError의 권고 종료코드 계약(1/2)을 소비하는 유일한 규약 함수라
- *    이것을 지우면 그 계약이 산문으로만 남는다. 소비자가 계속 0이면 제거 재평가(얕은 모듈 규율).
- */
-export function reportScanError(e: unknown, prefix: string): number {
-  if (!(e instanceof ScanError)) throw e;
-  console.error(`${prefix} ${e.message}`);
-  return e.exitCode;
-}
+// (제거된 표면 — kernel-followups 07) reportScanError: "진단을 내고 권고 코드를 돌려주는" 규약
+// 함수였으나 17 재접목 이후 소비자 0이 지속됐고(05·06도 미소비 실측), 유지 근거였던 "ScanError
+// 계약을 소비하는 유일한 규약 함수"는 05에서 거짓이 됐다 — 실소비자는 guardMain ⓪의
+// assertFloorKeys catch(+②의 scanFloor catch — 권고 코드 번역·비-ScanError 되던짐)다.
+// 직접 콜사이트가 다시 생기면 그 관용구는 ScanError 독스트링이 소유한다.
 
 /**
  * 상수로 주입되는 자리(`const MIN_SCAN = 30`)는 parseFloor를 거치지 않으므로, 그 경로를 덮는
@@ -185,7 +176,8 @@ export type ScanDomain = {
 // 바닥값 오버라이드 어휘: `--floor <도메인>=<n>`(반복 가능). 구 개별 어휘(env·--min-* 플래그)를
 // 이 하나로 접는다 — 소비자 목록은 여기 적지 않는다(손 관리 로스터 금지: guardMain 콜사이트가
 // SSOT다, `grep -l takeFloors tools/*.ts`로 세라). 키는 도메인 scan 라벨 전체 또는 마지막 콜론
-// 뒤 접미사. 형식 위반은 ScanError(2) throw — 콜사이트가 reportScanError로 접는다. 기본값(min)은
+// 뒤 접미사. 형식 위반은 ScanError(2) throw — 콜사이트의 argv 파싱 try/catch가 exit 2로 접는다
+// (guardMain은 takeFloors를 부르지 않는다 — 이미 파싱된 floors를 받는다). 기본값(min)은
 // 콜사이트 상수가 소유하고, 키↔도메인 매칭 검증은 guardMain이 한다(오타 키 = 조용히 꺼진
 // 바닥값이 되므로 fail-closed).
 export function takeFloors(argv: string[]): { floors: Map<string, number>; rest: string[] } {
