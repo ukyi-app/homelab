@@ -19,8 +19,8 @@ export const ARCHETYPES = ["api", "fullstack", "site", "worker"] as const;
 export type Archetype = (typeof ARCHETYPES)[number];
 
 // 산출물이 arch 중립인 아키타입 — Dockerfile에 TARGETARCH가 없는 것이 정상이라 doctor의
-// TARGETARCH 파라미터화 검사에서 제외한다(site: ticket 03 실측, docs/reviews/homelab-cli/
-// ticket-03-amd64-smoke.md). 명시 opt-out 목록이다: 여기 없는 아키타입은 전부 검사 대상.
+// TARGETARCH 파라미터화 검사에서 제외한다(site: ticket 03 amd64 스모크 실측, 커밋 a37834c —
+// exec format error red → 수리 후 스모크 green). 명시 opt-out 목록이다: 여기 없는 아키타입은 전부 검사 대상.
 export const ARCH_NEUTRAL_ARCHETYPES = ["site"] as const satisfies readonly Archetype[];
 
 // TARGETARCH 파라미터화 검사 대상 = ARCHETYPES − 중립. 리터럴 사본이 아니라 여집합이라 신규

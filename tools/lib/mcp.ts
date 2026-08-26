@@ -8,6 +8,15 @@
 //   - 결과 = CLI --json과 같은 계약 오브젝트(op가 낸 envelope). isError는 variant로 매핑(x-contract.mcp).
 //   - 디렉토리 추론 없음 — secrets는 앱 레포 경로(repoPath), init은 부모 디렉토리(parentDir)를 명시 입력으로.
 //   - 서버는 무상태 — 동시 호출은 각자 run/PR URL 핸들로 독립 조회되고(status 핸들 모드), 재시작 후 재호출 정상.
+//
+// ⚠️ **입력 표면 선언 3벌(verbs.ts의 op 입력 타입 · 이 파일의 tool inputSchema · 결과 계약의 verb 축)은
+//    의도된 중복이다 — 카탈로그 한 벌로 합치지 않는다.** structure 게이트 r1 B1이 "표현 관심사는 각
+//    셸(CLI·MCP)이 소유한다"로 정했고, 전면 카탈로그화는 transport 발산(스키마 표현력·검증 시점·에러
+//    매핑의 차이)을 전부 표현하는 행이 대체 대상만큼 복잡해지는 **shallow config-language 위험**이
+//    지적되어 이연됐다. 그래서 cli-deepening 심화 6은 실측된 드리프트 지점(archetype enum — 확장 시
+//    MCP만 -32602로 거부하던 리터럴 사본) **하나만** ARCHETYPES 파생으로 좁혔다. 전면 카탈로그화를
+//    재시도하려면 B1 재협상이 선행이다(원 결정 기록은 git 히스토리의 docs/reviews — CONTRIBUTING
+//    '문서 관례'의 복구 레시피로 꺼낸다).
 import { createInterface } from "node:readline";
 import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInput } from "./conn-url.ts";
 import { mcpIsError, type Envelope } from "./contract.ts";
