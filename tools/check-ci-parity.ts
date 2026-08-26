@@ -231,6 +231,19 @@ function reconcile(): string[] {
     if (makeOut.trim().length === 0) fail("`make -n ci` 출력이 비었다 — mirrored 검증이 무측정이 된다.");
   }
 
+  // ── 프로덕션 호출은 floor-free다 ──────────────────────────────────────────────────────────────
+  // --floor는 테스트·픽스처 전용 오버라이드다. env 주입 폐지 결정("한 줄로 required gate의 바닥값이
+  // 꺼졌다")의 승계가 "argv라 호출자에게 보인다"는 주장인데, 그 주장을 사람 눈에만 맡기면 되돌림
+  // 한 줄이 조용히 통과한다 — 이 회계가 기계로 진다(gate 스텝 본문 + make -n ci 실측 양쪽).
+  for (const [n, run] of runByName) {
+    if (run.includes("--floor")) {
+      fail(`"${n}": gate 스텝이 --floor를 넘긴다 — 프로덕션 호출은 floor-free여야 한다(바닥값은 콜사이트 상수).`);
+    }
+  }
+  if (makeOut.includes("--floor")) {
+    fail("`make -n ci` 출력에 --floor가 있다 — 프로덕션 호출은 floor-free여야 한다(바닥값은 콜사이트 상수).");
+  }
+
   for (const e of byName.values()) {
     switch (e.status) {
       case "mirrored": {
@@ -292,7 +305,8 @@ function reconcile(): string[] {
 }
 
 // 실행 순서(열거 → floor → SCAN → 검사 → 종료코드)는 guardMain이 구조로 소유한다.
-// 이 가드는 종전에 바닥값만 있고 SCAN이 없던 자리다 — 커널 편입으로 실행 관측 축이 열린다.
+// 종전에도 scanFloor가 바닥값·마커를 한 몸으로 냈다 — 커널 편입이 옮긴 것은 마커의 존재가
+// 아니라 **순서의 소유**다(콜사이트가 floor·방출·검사의 순서를 손으로 맞추던 자리 소멸).
 guardMain({
   floors,
   domains: [{

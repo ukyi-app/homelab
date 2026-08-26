@@ -292,11 +292,12 @@ YAML
   [ "$status" -ne 0 ]
 }
 
-# 라벨 = 바닥값이 걸린 열거 도메인 하나. venues는 **바닥값이 걸리지 않은** 카운트 자리라
-# 검사한 수(권위 venue)와 보고한 수(전체 venue)가 다르다 — 그 성질이 보존돼야 한다.
+# 라벨 = 바닥값이 걸린 열거 도메인 하나. 17 재접목으로 venues도 floor 도메인(min 1)이 됐고
+# 권위 venue는 셋째 도메인으로 승격됐다 — 그래도 venues 마커의 값은 **전체** venue 수여야 한다
+# (권위 수는 authoritative-venues 라벨이 따로 센다 — 두 축이 같은 수를 내면 라벨을 나눈 이유가 없다).
 #
-# ⚠️ 마커의 **존재와 숫자꼴**만 보면 이 단언은 vacuous다 — 실측: 신호 대상을 authoritativeVenues로
-#    바꿔(297→265, 성질 파괴) 돌려도 45건 전부 green이었다. 그래서 **값**을 대조한다.
+# ⚠️ 마커의 **존재와 숫자꼴**만 보면 이 단언은 vacuous다 — 실측: 신호 대상을 권위 수로 바꿔
+#    (성질 파괴 — 손 관리 수치는 안 적는다, 드리프트한다) 돌려도 전건 green이었다. 그래서 **값**을 대조한다.
 @test "the venues marker counts every venue, not just the authoritative ones" {
   run bun "$TOOL"
   [ "$status" -eq 0 ]

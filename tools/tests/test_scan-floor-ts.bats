@@ -83,7 +83,7 @@ EOF
   # 문구는 origin scanFloor 소유다("스캔 N건 < M — 열거 붕괴 의심(…)") — 커널 둘이 문구 두 벌을
   # 만들면 안 되므로 guardMain은 판정·문구를 scanFloor 재사용으로 얻는다.
   echo "$output" | grep -q '스캔 0건'
-  echo "$output" | grep -q '7'
+  echo "$output" | grep -q '< 7'
   echo "$output" | grep -q 'fixture alpha hint'
 }
 
@@ -185,6 +185,33 @@ EOF
   echo "$output" | grep -q '^E1 .*음이 아닌 정수'
   echo "$output" | grep -q '^E2 '
   echo "$output" | grep -q '^E3 '
+}
+
+@test "an empty domains array is a usage error, not a silently floor-free guard" {
+  # 리뷰 실측(17): 도메인 0개인 가드는 floor도 마커도 없이 초록이 되고, 정적 로스터와 런타임
+  # 파일 목록에서 **동시에** 빠져 집합 등식이 그대로 성립한다 — 삭제 구멍을 커널이 닫는다.
+  FX0="$BATS_TEST_TMPDIR/g0.ts"
+  cat > "$FX0" <<EOF
+import { guardMain } from "$ROOT/tools/lib/scan-floor.ts";
+guardMain({ domains: [], output: "stdout", check: () => [], report: () => {}, ok: () => { console.log("EMPTY-OK"); } });
+EOF
+  run bun "$FX0"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "domains가 비었다"
+  out="$output"
+  run grep -q "EMPTY-OK" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+@test "a non-numeric floor constant dies as contract breakage (exit 2), not as collapse (exit 1)" {
+  # collapseCode 승격의 증인 — min이 NaN이면 requireCount(ScanError 2)가 걸리고, 붕괴(1)로
+  # 오분류되면 "계약 파손"과 "열거 붕괴"라는 다른 원인 계층이 한 코드로 뭉개진다.
+  FX_MIN_A=abc run bun "$FX"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "음이 아닌 정수"
+  out="$output"
+  run grep -q '^SCAN: ' <<<"$out"
+  [ "$status" -ne 0 ]
 }
 
 @test "output:none keeps stdout free of markers while verdict semantics stay intact" {

@@ -224,6 +224,11 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 
 ## 공유 커널 (lib/ — 콜사이트가 정책 소유, 단 정책이 콜사이트마다 갈릴 때)
 
+- **`lib/scan-floor.ts`** — 열거 붕괴 커널(TS adapter — 셸 `scripts/lib/scan-floor.sh`의 형제):
+  scanFloor/scanSignal/parseFloor 판정부 + guardMain/takeFloors 실행부(실행 순서·`--floor` 어휘 소유,
+  lib-convergence 17). 마커를 내는 구현은 이 파일 하나다(check-scan-producers가 거부로 강제).
+- **`lib/policy-ledger.ts`** — 정책 원장 리더 readLedger: fail-closed 로딩 + 통일 shape
+  ({_readme, <container>}) + schema-check 항목 검증. 대조 의미론은 콜사이트 잔류(design r1-4).
 - **`lib/contract.ts`** — 결과 계약 SSOT 리더: cli-result-schema.json의 x-contract(envelope 버전·
   종료코드 매핑)를 런타임에 읽어 노출(`ENVELOPE`·`EXIT`·`exitFor`·`Envelope` 타입 — 코드 상수
   복제 금지). 소비자: `homelab.ts`·`lib/verbs.ts`·(예정) MCP 서버.

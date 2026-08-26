@@ -5,12 +5,13 @@
 //
 // 병(TS 고유): 셸 콜사이트는 `[ "$got" -lt "$min" ]`이 수가 아닌 값에 **에러를 낸다**. TypeScript는
 // `Number("abc")`가 NaN이고 `n < NaN`이 항상 false라 **바닥값이 통째로 꺼진 채 초록**이 된다.
-// 실측(2026-08-25): `DISK_CAP_MIN_FLAGS=abc` → SCAN 방출 + rc=0. 오타 하나가 이 커널이 없애려는
-// 실패 클래스를 그대로 되살렸다. 그래서 이 adapter에는 셸에 없는 세 번째 함수가 있다.
+// 실측(2026-08-25): 구 `DISK_CAP_MIN_FLAGS=abc` → SCAN 방출 + rc=0. 오타 하나가 이 커널이 없애려는
+// 실패 클래스를 그대로 되살렸다. 그래서 이 adapter에는 셸에 없는 판정 함수(parseFloor)가 있다.
 //
 //   scanFloor(label, got, min, opts?)   건수 바닥값. 미만이면 진단 + 종료. 통과하면 SCAN 신호를 낸다.
 //   scanSignal(label, n, opts?)         `SCAN: <라벨>: <n>` 마커만 낸다(바닥값 없는 카운트 자리용).
 //   parseFloor(raw, source)             raw 문자열 → 바닥값 수. 아니면 진단 + exit 2.
+//   guardMain / takeFloors / floorOf    아래 "실행 커널" 절 — 실행 순서와 --floor 어휘를 소유한다.
 //
 // ⚠️ **바닥값을 통과한 실행만 신호를 낸다.** 실패 경로는 이미 stderr로 시끄럽고, 그때의 건수는
 //    "검사했다"가 아니라 "붕괴했다"는 뜻이라 같은 마커로 내면 소비자가 정반대로 읽는다.
@@ -90,8 +91,9 @@ export type SignalOpts = Pick<ScanOpts, "quiet">;
 
 /**
  * `SCAN: <라벨>: <n>` — 실행 관측용 균일 신호. **stdout**(SKIP 마커와 같은 채널).
- * 바닥값이 걸리지 않은 카운트 자리도 이걸 직접 부른다(예: check-guard-authority의 venues —
- * 바닥값은 권위 venue 수에 걸리고 신호는 전체 venue 수를 낸다).
+ * 바닥값이 걸리지 않은 카운트 자리도 이걸 직접 부른다(예: check-workflow-readiness의 런타임
+ * 모드 `:accounted` — 회계 대상 수는 원장이 정하고 그 바닥값은 정적 모드가 본다). guardMain의
+ * 일괄 방출도 이 함수를 경유한다 — 마커를 내는 구현은 이 한 곳이다.
  */
 export function scanSignal(label: string, n: number, opts: SignalOpts = {}): void {
   if (opts.quiet) return;
@@ -115,18 +117,15 @@ export function parseFloor(raw: string | undefined, source: string): number {
 }
 
 /**
- * `ScanError`를 콜사이트의 진단 한 줄로 만든다. **문구는 커널이, 종료는 콜사이트가** 소유한다 —
- * `tools/README.md` 커널 표제가 "콜사이트가 정책 소유, **단 정책이 콜사이트마다 갈릴 때**"이고,
- * 여기서 실제로 갈리는 정책은 **진단 접두 하나**뿐이다(대부분 `FAIL:`, check-disk-caps는
- * GitHub Actions 어노테이션 `::error::disk-caps:`). 나머지는 전부 같으므로 커널이 갖는다 —
- * `lib/sealed-contract.ts`가 "정책이 갈리지 않으면 에러 문구까지 커널이 갖는다"로 세운 선례다.
- *
- * 이것이 없으면 콜사이트마다 `if (e instanceof ScanError) { console.error(…); process.exit(…) }`가
- * 복제된다(실측: 5벌 중 4벌이 주석까지 바이트 동일했다 — 원장 행 파서 3벌 사례와 같은 형태).
- *
- * 콜사이트 관용구는 **한 줄**이다: `catch (e) { process.exit(reportScanError(e, "FAIL:")); }`
- * — 진단을 내고 권고 코드를 돌려줄 뿐, **종료는 콜사이트가 한다**(lib은 종료를 소유하지 않는다).
+ * `ScanError`를 콜사이트의 진단 한 줄로 만든다. **문구는 커널이, 종료는 콜사이트가** 소유한다.
+ * 콜사이트 관용구: `catch (e) { process.exit(reportScanError(e, "FAIL:")); }` — 진단을 내고 권고
+ * 코드를 돌려줄 뿐, **종료는 콜사이트가 한다**(판정 lib은 종료를 소유하지 않는다).
  * `ScanError`가 아니면 되던진다: 커널이 삼키면 다른 결함이 이 자리에서 조용히 사라진다.
+ *
+ * ⚠️ 현 소비자 0(17 재접목 실측) — guardMain 이행이 scanFloor 직접 콜사이트를 전부 접었다.
+ *    커널 밖에서 scanFloor/parseFloor를 직접 쓰는 가드가 다시 생기면 이 관용구가 그 자리다.
+ *    제거하지 않는 근거: ScanError의 권고 종료코드 계약(1/2)을 소비하는 유일한 규약 함수라
+ *    이것을 지우면 그 계약이 산문으로만 남는다. 소비자가 계속 0이면 제거 재평가(얕은 모듈 규율).
  */
 export function reportScanError(e: unknown, prefix: string): number {
   if (!(e instanceof ScanError)) throw e;
@@ -140,7 +139,7 @@ export function reportScanError(e: unknown, prefix: string): number {
  */
 function requireCount(n: number, what: string): void {
   if (!Number.isSafeInteger(n) || n < 0) {
-    throw new ScanError(`${what}가 음이 아닌 정수가 아니다(받은 값: ${String(n)}) — 판정 불가(fail-closed).`, 2);
+    throw new ScanError(`${what}이(가) 음이 아닌 정수가 아니다(받은 값: ${String(n)}) — 판정 불가(fail-closed).`, 2);
   }
 }
 
@@ -222,6 +221,13 @@ export function guardMain(opts: {
   report: (viol: string[]) => void; // 위반 문구·채널 — 콜사이트 소유
   ok: (counts: number[]) => void;   // 성공 문구 — 콜사이트 소유
 }): never {
+  // ⓪ 도메인 0건 거부 — 빈 domains는 floor도 마커도 없이 초록이 되는 가드를 만든다(정적 로스터·
+  //    거부 가드 양쪽에서 동시에 사라지는 삭제 구멍 — CONTRIBUTING '그 등식만으로는…' 절이 인정한
+  //    자리를 커널이 닫는다). --floor 오타 키와 같은 사용법 오류(2)다.
+  if (opts.domains.length === 0) {
+    console.error("guardMain: domains가 비었다 — 열거 도메인 0개인 가드는 바닥값도 마커도 없이 초록이 된다(fail-closed)");
+    process.exit(2);
+  }
   // ⓪ --floor 키 검증(도메인 전건 매칭) — 열거보다 먼저다: 잘못된 호출은 일을 시작하기 전에 죽는다.
   const floors = opts.floors ?? new Map<string, number>();
   for (const k of floors.keys()) {
@@ -255,6 +261,8 @@ export function guardMain(opts: {
     try {
       scanFloor(d.scan, counts[i]!, floorOf(floors, d.scan, d.min), { quiet: true, hint: d.floorHint });
     } catch (e) {
+      // 비-ScanError는 되던진다 — scanFloor는 ScanError만 던지므로 사실상 도달 불가이고, 도달했다면
+      // 커널 자신의 결함이라 접으면 안 된다(①·④의 콜사이트 클로저 예외 접기와 소유가 다르다).
       if (!(e instanceof ScanError)) throw e;
       collapsed.push(`FAIL: ${e.message}`);
       if (e.exitCode > collapseCode) collapseCode = e.exitCode;   // 계약 파손(2)은 붕괴(1)보다 우선

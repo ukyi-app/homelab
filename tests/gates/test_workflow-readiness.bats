@@ -511,6 +511,27 @@ JSON
   [ "$status" -ne 0 ]
 }
 
+# docs.has 필터의 증인(리뷰 M5) — declarations는 파일 열거가 아니라 "실재 워크플로를 가리키는
+# 항목의 선언"만 센다. 필터가 죽으면 ghost 선언이 마커에 세어져, 대조하지 않은 건수를
+# "스캔했다"로 보고한다(마커 값 단언이 곧 뮤테이션 감도다 — 죽은 선언 위반은 별도로 유지).
+@test "a ledger entry for a missing workflow is excluded from the declarations count (dead claim stays loud)" {
+  t="$(_fixture ghost)"
+  python3 - "$t/policy/workflow-readiness.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["workflows"]["ghost.yaml"] = d["workflows"]["demo.yaml"]
+json.dump(d, open(p, "w"))
+PY
+  run GUARD --repo-root "$t" --floor workflows=1 --floor declarations=1
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -qE '^SCAN: check-workflow-readiness:declarations: 6$' <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -q "존재하지 않는다" <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
 # 체인판(17 재접목) 의미론: 파싱 실패는 위반이 아니라 **열거 실패**다 — 그 워크플로의 선언·게이트를
 # 평가할 수 없으므로 계속 진행하면 그 몫의 회계가 조용히 빠진다(순차판은 위반으로 두고 진행해
 # declarations 셈에서 빠진 것이 floor 오진으로 위장되는 자리였다). 진단은 파일명과 원인을 담고,

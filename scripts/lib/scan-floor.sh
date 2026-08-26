@@ -32,6 +32,8 @@
 #    현재값이 필요하면 세어라:
 #      grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh
 #      grep -lE '^[^/]*(scan(Floor|Signal)\(|scan: ")' tools/*.ts
+# ⚠️ 바닥값 오버라이드 어휘는 adapter별로 갈린다 — TS는 guardMain의 `--floor <도메인>=<n>` 하나,
+#    셸은 콜사이트별 env(…_MIN_SCAN)·플래그가 남는다(17이 TS만 통일 — 셸 수렴은 별도 티켓 감).
 #    정합은 tests/gates/test_scan-floor.bats가 **정적 콜사이트 == 런타임 방출** 집합 대조로 강제하고,
 #    TS 콜사이트가 커널을 우회해 마커를 직접 출력하는 것은 scripts/check-scan-producers.sh가 거부한다
 #    (등식은 양쪽에서 함께 사라지는 우회를 못 잡는다 — 인식이 아니라 거부가 문을 닫는다).

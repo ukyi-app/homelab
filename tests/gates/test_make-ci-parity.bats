@@ -201,3 +201,35 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   fi
 }
 
+
+# 프로덕션 호출은 floor-free다(리뷰 H-1) — --floor는 테스트 전용 오버라이드이고, gate 스텝이
+# 그것을 넘기면 required gate의 바닥값이 argv 한 줄로 꺼진다(env 폐지 결정의 기계 강제 승계).
+# 픽스처 자신은 --floor로 자기 바닥값을 낮춰 reconcile까지 도달한다(테스트 호출이라 정당).
+@test "a gate step passing --floor is rejected (production calls stay floor-free)" {
+  fx="$BATS_TEST_TMPDIR/floored"
+  mkdir -p "$fx/.github/workflows" "$fx/policy"
+  cat > "$fx/.github/workflows/ci.yaml" <<'YAML'
+name: ci
+on: push
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: floored
+        run: bun tools/check-guard-authority.ts --floor guards=1
+YAML
+  printf '%s\n' '{"_readme": "fixture", "steps": [{"name": "floored", "status": "excluded", "why": "w", "since": "s", "owner_action": "o"}]}' \
+    > "$fx/policy/ci-parity.json"
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -q -- "--floor를 넘긴다"
+  # 대조군 — 같은 픽스처에서 --floor만 걷어내면 통과한다(픽스처 조립 자체의 실패가 아니다).
+  python3 - "$fx/.github/workflows/ci.yaml" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p, encoding="utf-8").read()
+n = s.replace("bun tools/check-guard-authority.ts --floor guards=1", "bun tools/check-guard-authority.ts")
+assert n != s; open(p, "w", encoding="utf-8").write(n)
+PY
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  [ "$status" -eq 0 ]
+}

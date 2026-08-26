@@ -634,7 +634,6 @@ if (import.meta.main) {
           min: 20,
           floorHint: "이 회계가 vacuous해진다",
           enumerate: () => {
-            policy = loadWorkflowDecls(root);
             const entries = walkManifests("workflows", root);
             for (const e of entries) {
               const name = e.path.slice(`${WORKFLOW_DIR}/`.length);
@@ -655,11 +654,15 @@ if (import.meta.main) {
           min: 8,
           floorHint: "원장 붕괴 — 대조 대상이 사라졌다",
           // 종전 카운트와 동일 의미론: 워크플로가 실재하는 원장 항목의 선언 job 수 합.
-          enumerate: () =>
-            Object.entries(policy).reduce(
+          // 원장 로딩은 **이 도메인**의 열거다 — workflows enumerate에 두면 원장 실패가
+          // workflows 라벨로 보고돼 도메인 귀속이 어긋난다(라벨 참칭의 약형 — 리뷰 실측).
+          enumerate: () => {
+            policy = loadWorkflowDecls(root);
+            return Object.entries(policy).reduce(
               (n, [name, wf]) => n + (docs.has(name) ? Object.keys(declaredJobs(wf)).length : 0),
               0,
-            ),
+            );
+          },
         },
       ],
       output: "stdout",

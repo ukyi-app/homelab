@@ -375,7 +375,8 @@ if (import.meta.main) {
   const root = flags.str("--repo-root", ".")!;
 
   // 실행 순서(열거 → floor → SCAN → 검사 → 종료코드)는 guardMain이 구조로 소유한다 —
-  // 원장 로딩 실패(readLedger throw)와 renovate.json 읽기 실패는 열거 실패로 접혀 마커 없이 죽는다.
+  // renovate.json 읽기 실패는 열거 실패로 접혀 마커 없이 죽는다. 원장(readLedger) 실패는 **위반**이다 —
+  // refs 도메인은 정상 평가되므로 마커를 유지한 채 FAIL 목록으로 보고한다(audit 안 try/catch가 소유).
   let res!: ReturnType<typeof audit>;
   guardMain({
     floors,
