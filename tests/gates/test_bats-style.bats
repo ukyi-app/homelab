@@ -44,6 +44,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   mkdir -p "$FIX/scripts/lib"
   cp "$ROOT/scripts/check-bats-style.sh" "$FIX/scripts/"
   cp "$ROOT/scripts/lib/scan-floor.sh" "$FIX/scripts/lib/"
+  cp "$ROOT/scripts/lib/guard.sh" "$FIX/scripts/lib/"
   git -C "$FIX" init -q
   run bash "$FIX/scripts/check-bats-style.sh"
   [ "$status" -eq 1 ]

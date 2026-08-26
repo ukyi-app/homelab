@@ -4,7 +4,10 @@
 # 지도)·verify-runbook-index.sh(런북 인덱스)와 동일 불변식. 순수 파일/문자열 검사(CI-safe).
 # bash 3.2 안전(glob 루프, 배열 미사용).
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-doc-index
 cd "$ROOT"
 BT='`'   # 백틱 리터럴(명령치환 회피)
 rc=0

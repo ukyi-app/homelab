@@ -6,11 +6,12 @@
 # netpol 미선언(0건)은 통과지만 **매니페스트 열거 0건은 실패**(scan-floor — 아래 참조).
 # yq만(버전 무관). bash 3.2 호환. shellcheck clean.
 set -euo pipefail
-# 워커(tools/lib/repo-walk.ts)는 이 스크립트의 실제 위치 기준으로 찾고, 스캔 대상 트리는 --root로
-# 바꿀 수 있다(픽스처). 둘을 분리해야 픽스처 트리에 워커를 복사하지 않아도 된다 —
-# check-image-pins.sh·check-app-deploy.sh와 같은 --root 규약.
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT 기본값·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# 스캔 대상 트리는 --root로 바꾼다(픽스처) — 워커는 스크립트 위치 기준이라 분리된다
+# (check-image-pins.sh·check-app-deploy.sh와 같은 --root 규약).
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-app-netpol
 ROOT_OVERRIDDEN=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -31,11 +32,9 @@ cd "$ROOT"
 # ⚠️ 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거). 앱이 0개인
 #    동안은 매니페스트 열거 0건이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
 #    형제 가드도 같은 경계다 — APP_DEPLOY_MIN_SCAN=0 · check-image-pins MIN_SCAN_APPS=0.
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$HERE/lib/scan-floor.sh"
 MIN_SCAN="${APP_NETPOL_MIN_SCAN:-0}"
 
-manifests="$(scan_enumerate check-app-netpol bun "$HERE/../tools/lib/repo-walk.ts" --manifests apps-manifests --root "$ROOT")" || exit 1
+manifests="$(scan_enumerate check-app-netpol bun "$(dirname "${BASH_SOURCE[0]}")/../tools/lib/repo-walk.ts" --manifests apps-manifests --root "$ROOT")" || exit 1
 scanned="$(scan_count "$manifests")"
 # ⚠️ 픽스처 모드(--root)엔 바닥값을 적용하지 않는다 — 픽스처 트리는 정당하게 1~2건이다.
 # 적용하면 red가 되는 건 **양성** 테스트(clean 셀렉터=통과 기대) 1건뿐이다 — 음성 3건은 단언이

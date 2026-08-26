@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { APP_NAME_RE } from "./lib/identity.ts";
+import { appPaths } from "./lib/app-surface.ts";
 import { parseFlags } from "./lib/cli.ts";
 import { addResource } from "./lib/kustomization.ts";
 import { readSealed } from "./lib/sealed-contract.ts";
@@ -20,7 +21,7 @@ try {
 
 const arg = (key: string, fallback?: string) => (typeof flags[key] === "string" ? flags[key] as string : fallback);
 const app = arg("--app");
-const root = arg("--repo-root", ".");
+const root = arg("--repo-root") ?? ".";
 const appRepoRoot = arg("--app-repo-root", ".apprepo");
 const dryRun = flags["--dry-run"] === true;
 
@@ -32,13 +33,15 @@ function fail(message: string): never {
 if (!app) fail("--app 필수");
 if (!APP_NAME_RE.test(app)) fail(`app 이름 불량: '${app}'`);
 
-const appDir = `${root}/apps/${app}/deploy/prod`;
-if (!existsSync(appDir)) fail(`미온보딩 앱 '${app}' — create-app 먼저`);
+// 앱 표면 경로는 app-surface module 소유(d4) — 이 도구는 기존 표면의 **부분 갱신**(봉인본 교체 +
+// values checksum + kustomization resources)이라 쓰기 로직은 여기 남는다(writeAppSurface는 생성 전용).
+const p = appPaths(root, app);
+if (!existsSync(p.prod)) fail(`미온보딩 앱 '${app}' — create-app 먼저`);
 
 const sealedPath = `${appRepoRoot}/deploy/${app}-secrets.sealed.yaml`;
-const dstSealedPath = `${appDir}/${app}-secrets.sealed.yaml`;
-const valuesPath = `${appDir}/values.yaml`;
-const kustomizationPath = `${appDir}/kustomization.yaml`;
+const dstSealedPath = p.sealed(`${app}-secrets.sealed.yaml`);
+const valuesPath = p.values;
+const kustomizationPath = p.kustomization;
 
 if (!existsSync(sealedPath)) fail(`${sealedPath} 없음 — 앱 레포에서 bun run secret:seal 먼저`);
 if (!existsSync(valuesPath)) fail(`${valuesPath} 없음`);

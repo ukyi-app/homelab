@@ -4,6 +4,10 @@
 # age 키 없으면 복호 단계만 스킵 → CI(키 없음)에서도 구조 검사는 수행한다(평문 누출/recipient 신원 드리프트 차단).
 # 인자가 있으면 그 파일들만, 없으면 추적 *.enc.yaml 전수 검사.
 set -euo pipefail
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init verify-secrets
 
 age_key="${SOPS_AGE_KEY_FILE:-}"
 can_decrypt=0
@@ -42,8 +46,6 @@ check_one() {
 }
 
 if [ "$#" -gt 0 ]; then
-  # shellcheck source=scripts/lib/scan-floor.sh
-  . "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
   scan_signal verify-secrets "$#"   # 인자(픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
   for f in "$@"; do check_one "$f" || fail=1; done
 else
@@ -51,9 +53,7 @@ else
   # 0건이었다), (b) 열거 실패를 rc로 잡아야 한다(프로세스 치환이 삼켰다). 둘 다 라이브 재현됨 —
   # `cd docs && bash ../scripts/verify-secrets.sh` → "모든 *.enc.yaml 무결성 OK" rc=0.
   # 0건이면 recipient canonical 검사까지 함께 무발화된다(이중 vacuity). 현재 추적 9건 — 래칫 아님.
-  # shellcheck source=scripts/lib/scan-floor.sh
-  . "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
-  cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+  cd "$ROOT"
   tracked="$(scan_enumerate verify-secrets git ls-files '*.enc.yaml')" || exit 1
   scanned="$(scan_count "$tracked")"
   scan_floor verify-secrets "$scanned" "${VERIFY_SECRETS_MIN_SCAN:-6}" || exit 1

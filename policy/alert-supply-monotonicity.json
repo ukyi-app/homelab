@@ -1,5 +1,5 @@
 {
-  "$comment": [
+  "_readme": [
     "모드 D 정책 — 알림이 `time()`과 빼서 비교하는 시계열의 **공급원 의미론** SSOT.",
     "",
     "왜 push 레지스트리(tools/check-alert-rules.ts의 DEFAULT_REGISTRY)와 별개인가: 저기는 '이 값이",

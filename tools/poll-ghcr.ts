@@ -13,11 +13,16 @@
 //
 // 이 스크립트는 플래너(읽기 전용)다 — 실제 bump/PR은 bump-poll.yaml이 plan JSON을 소비해 수행.
 import { readFileSync, existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import path from "node:path";
+// subprocess 실행은 exec seam 경유(d6②) — timeoutMs 0으로 종전 무-timeout 동작을 보존한다.
+// 판정 정책(진짜 404만 absent·transient는 rethrow→refuse)은 아래 콜사이트가 그대로 소유한다.
+import { gh as ghExec, sh } from "./lib/exec.ts";
 import { parse } from "yaml";
-import { TAG_RE, parseInlinePin, parseDescriptor, descriptorAutoDeploy } from "./lib/image-pin.ts";
+import { TAG_RE, parseInlinePin, parseDescriptor } from "./lib/image-pin.ts";
 import { listUnits } from "./lib/repo-walk.ts";
+// apps 레인의 표면 경로는 app-surface module 소유(d4) — writePath 와이어 문자열은 레포-상대(appRel).
+import { appPaths, appRel } from "./lib/app-surface.ts";
+import { decodePlan, encodePlan, resolveLane, type Candidate, type PinRef, type PlanItem, type Target } from "./lib/bump-plan.ts";
 
 const USAGE = `poll-ghcr — GHCR 폴링 bump 플래너(읽기 전용, update-image 권위 경로)
 사용법: bun tools/poll-ghcr.ts [--dry-run] [--root <dir>] [--owner <org>] [--fixtures <dir>]
@@ -73,32 +78,41 @@ function makeQuery(app: string) {
       },
     };
   }
-  const gh = (p: string) => JSON.parse(execFileSync("gh", ["api", p], { encoding: "utf8" }));
+  const gh = (p: string) => {
+    const r = ghExec(["api", p], { timeoutMs: 0 });
+    // 실패는 throw — planApp/planComponent의 outer catch가 refuse로 접는다(fail-closed 보존).
+    if (!r.ok) throw new Error(`gh api ${p} 실패: ${r.err || `exit ${r.status}`}`);
+    return JSON.parse(r.out);
+  };
   return {
     commits: (src: string) => gh(`repos/${src}/commits?sha=main&per_page=30`),
     compare: (src: string, base: string, head: string) => gh(`repos/${src}/compare/${base}...${head}`),
     manifest: (repo: string, tag: string) => {
+      const r = sh(
+        "docker", ["buildx", "imagetools", "inspect", `${repo}:${tag}`, "--format", "{{json .Manifest}}"],
+        { timeoutMs: 0 },
+      );
+      if (!r.ok) {
+        if (isNotFound(r.err)) return null; // 진짜 404 — 미빌드 커밋
+        throw new Error(`manifest 조회 일시 오류(transient, rethrow→refuse): ${r.err || `exit ${r.status}`}`);
+      }
       try {
-        const out = execFileSync(
-          "docker", ["buildx", "imagetools", "inspect", `${repo}:${tag}`, "--format", "{{json .Manifest}}"],
-          { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-        );
-        return { digest: JSON.parse(out).digest };
+        return { digest: JSON.parse(r.out).digest };
       } catch (e: any) {
-        const stderr = (e.stderr ?? "").toString();
-        if (isNotFound(stderr) || isNotFound(e.message)) return null; // 진짜 404 — 미빌드 커밋
-        throw new Error(`manifest 조회 일시 오류(transient, rethrow→refuse): ${stderr || e.message}`);
+        throw new Error(`manifest 조회 일시 오류(transient, rethrow→refuse): ${e.message}`);
       }
     },
   };
 }
 
-type Plan = {
-  app: string;
+// plan 항목의 계약(판별 union·target 신원·와이어 형식)은 lib/bump-plan.ts가 소유한다(d3).
+// 이 빌더 타입은 순회 중의 누적형일 뿐이다 — 출력은 encodePlan을 지나며 계약 형식이 된다.
+type Draft = {
+  target: Target;
   action: string;
   reason: string;
-  current: { tag: string; digest: any } | null;
-  candidate: { gitsha: string; tag: string; digest: any } | null;
+  current: PinRef | null;
+  candidate: Candidate | null;
   src?: string;
   writePath?: string; // git add 대상(apps: values.yaml / 베스포크: deployment.yaml)
   pin?: string;       // 베스포크 핀 디스크립터 경로(apps 레인은 미설정 → bump-poll이 apps 분기)
@@ -109,7 +123,7 @@ const getIn = (obj: any, p: (string | number)[]) => p.reduce((o: any, k) => (o =
 
 // 배포된 tag/digest·autoDeploy·src를 받아 bump/propose-pr/refuse/noop을 계산(두 레인 공유).
 // key = 데이터소스 조회 키(app 또는 컴포넌트 이름 — fixtures 파일명 접두).
-function computeBump(result: Plan, s: { key: string; src: string; repo: string; deployed: string; digest: any; autoDeploy: boolean }): Plan {
+function computeBump(result: Draft, s: { key: string; src: string; repo: string; deployed: string; digest: any; autoDeploy: boolean }): Draft {
   const q = makeQuery(s.key);
   // (a) 배포 SHA가 main의 조상인가 — 아니면 수동 rollback/이력 조작 상황: 자동 폴링 거부
   const baseCmp = q.compare(s.src, s.deployed, "main");
@@ -132,21 +146,21 @@ function computeBump(result: Plan, s: { key: string; src: string; repo: string; 
   return { ...result, action: s.autoDeploy ? "bump" : "propose-pr", candidate, reason: s.autoDeploy ? "" : "autoDeploy 아님(fail-closed) — 승인 PR만" };
 }
 
-function planApp(dir: string, app: string): Plan {
-  const read = (f: string) => readFileSync(path.join(dir, f), "utf8");
-  const result: Plan = { app, action: "noop", reason: "", current: null, candidate: null };
+function planApp(app: string): Draft {
+  const p = appPaths(args.root, app);
+  const result: Draft = { target: { kind: "app", name: app }, action: "noop", reason: "", current: null, candidate: null };
 
-  const src = read("source-repo").trim();
+  const src = readFileSync(p.sourceRepo, "utf8").trim();
   result.src = src;
   if (!new RegExp(`^${args.owner}/[A-Za-z0-9._-]+$`).test(src))
     return { ...result, action: "refuse", reason: `source-repo가 ${args.owner} org 밖: ${src}` };
 
-  const values = parse(read("values.yaml"));
+  const values = parse(readFileSync(p.values, "utf8"));
   const repo = values?.image?.repo ?? "";
   const tag = String(values?.image?.tag ?? "");
   const digest = values?.image?.digest ?? null;
   result.current = { tag, digest };
-  result.writePath = path.join("apps", app, "deploy", "prod", "values.yaml");
+  result.writePath = appRel(app).values;
   // values image.repo가 source-repo 바인딩과 일치하는지 강제(베스포크 레인 planComponent와 동일 계약).
   // 불일치면 다른 레포의 이미지를 폴링·bump하게 되므로 refuse(fail-closed, cross-repo 오배포 차단).
   if (repo !== `ghcr.io/${src}`)
@@ -154,21 +168,21 @@ function planApp(dir: string, app: string): Plan {
   if (!TAG_RE.test(tag))
     return { ...result, action: "refuse", reason: `배포 tag가 sha-* 형식이 아니라 조상 증명 불가: ${tag}` };
 
-  // 승인 정책: autoDeploy === true만 자동, 그 외(false/누락/파싱 불가)는 전부 fail-closed
-  let autoDeploy = false;
-  const bindingsPath = path.join(dir, ".bindings.json");
-  if (existsSync(bindingsPath)) {
-    try { autoDeploy = descriptorAutoDeploy(JSON.parse(readFileSync(bindingsPath, "utf8"))); } catch { autoDeploy = false; }
+  // 승인 정책은 resolveLane(lib/bump-plan.ts)이 소유한다 — 파일 없음 = 파싱 불가 = autoDeploy:false.
+  // 동명 app/bespoke 충돌(conflict)·타 레인 신원은 어느 쪽 인가도 적용하지 않고 refuse(fail-closed, r1-2).
+  const probe = resolveLane(args.root, app);
+  if (probe.resolution === "conflict" || (probe.target !== null && probe.target.kind !== "app")) {
+    return { ...result, action: "refuse", reason: probe.why ?? `target 신원 불일치(app 아님: ${probe.target?.kind})` };
   }
-  return computeBump(result, { key: app, src, repo, deployed: tag.slice(4), digest, autoDeploy });
+  return computeBump(result, { key: app, src, repo, deployed: tag.slice(4), digest, autoDeploy: probe.lane === "bump" });
 }
 
 // 베스포크 핀 레인: platform/<comp>/prod/.image-pin.json이 인라인 이미지 핀(values.yaml image.tag/
 // digest 분리 키 대신 deployment.yaml의 <repo>:<tag>@<digest> 단일 스칼라)의 위치·autoDeploy를 담는다.
 // source-repo = org 바인딩(apps/와 동일). GHCR repo는 source-repo에서 파생(ghcr.io/<src>)해 인라인 파싱본과 대조.
-function planComponent(dir: string, name: string): Plan {
+function planComponent(dir: string, name: string): Draft {
   const read = (f: string) => readFileSync(path.join(dir, f), "utf8");
-  const result: Plan = { app: name, action: "noop", reason: "", current: null, candidate: null };
+  const result: Draft = { target: { kind: "bespoke", name }, action: "noop", reason: "", current: null, candidate: null };
 
   const src = read("source-repo").trim();
   result.src = src;
@@ -184,21 +198,23 @@ function planComponent(dir: string, name: string): Plan {
   result.current = { tag, digest };
   result.pin = path.join("platform", name, "prod", ".image-pin.json");
   result.writePath = path.join("platform", name, "prod", pin.file);
-  return computeBump(result, { key: name, src, repo, deployed: tag.slice(4), digest, autoDeploy: descriptorAutoDeploy(pin) });
+  const probe = resolveLane(args.root, name, { kind: "bespoke", parsed: pin });
+  if (probe.resolution === "conflict" || (probe.target !== null && probe.target.kind !== "bespoke")) {
+    return { ...result, action: "refuse", reason: probe.why ?? `target 신원 불일치(bespoke 아님: ${probe.target?.kind})` };
+  }
+  return computeBump(result, { key: name, src, repo, deployed: tag.slice(4), digest, autoDeploy: probe.lane === "bump" });
 }
 
 // apps/*/deploy/prod 중 source-repo 바인딩이 있는 앱만 순회.
 // 열거는 공유 워커의 `apps` 유닛 스코프가 소유하고, `source-repo` 실재라는 **의미론적 필터는 여기**
 // 남는다 — 스코프가 거르면 다른 소비자(check-app-deploy)가 잡아야 할 상태가 사라진다(design-r1 R-1).
-const appsRoot = path.join(args.root, "apps");
-const plans = [];
+const plans: Draft[] = [];
 for (const { name } of listUnits("apps", args.root)) {
-  const dir = path.join(appsRoot, name, "deploy", "prod");
-  if (!existsSync(path.join(dir, "source-repo"))) continue;
+  if (!existsSync(appPaths(args.root, name).sourceRepo)) continue;
   try {
-    plans.push(planApp(dir, name));
+    plans.push(planApp(name));
   } catch (e: any) {
-    plans.push({ app: name, action: "refuse", reason: `플랜 실패: ${e.message}` });
+    plans.push({ target: { kind: "app", name }, action: "refuse", reason: `플랜 실패: ${e.message}`, current: null, candidate: null });
   }
 }
 
@@ -210,7 +226,11 @@ for (const { name } of listUnits("platform", args.root)) {
   try {
     plans.push(planComponent(dir, name));
   } catch (e: any) {
-    plans.push({ app: name, action: "refuse", reason: `플랜 실패: ${e.message}` });
+    plans.push({ target: { kind: "bespoke", name }, action: "refuse", reason: `플랜 실패: ${e.message}`, current: null, candidate: null });
   }
 }
-console.log(JSON.stringify(plans, null, 2));
+// 와이어 형식은 encodePlan이 소유하고(08부터 target 신원만 싣는다 — 구 app 필드는 폐지),
+// 출력 전에 decodePlan을 통과시킨다 — 생산자 자기검증: 계약 위반 plan은 소비자에게 가기 전에 여기서 죽는다.
+const wire = encodePlan(plans as PlanItem[]);
+decodePlan(wire);
+console.log(wire);

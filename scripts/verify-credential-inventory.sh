@@ -19,18 +19,17 @@
 #         낫다 — 그러면 **기계가 대조**하게 만드는 것이 답이다(수치를 지우는 것이 아니라).
 # bash 3.2 호환(mapfile 금지). shellcheck 클린. ⚠️ 정렬은 전부 `LC_ALL=C`(#514).
 set -euo pipefail
-export LC_ALL=C
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init verify-credential-inventory
 cd "$ROOT"
 
 RB="${1:-$ROOT/docs/runbooks/token-inventory.md}"
 LEDGER="${2:-$ROOT/policy/credential-expiry.json}"
 
-# ⚠️ 마커와 종료코드를 **같은 줄**에 둔다 — `scripts/check-skip-signalling.sh`가 그 짝을 정적으로
-#    검사한다. 짝이 갈리면 "미평가"가 다시 성공으로 위장할 수 있는 형태가 된다.
-if [ ! -f "$RB" ]; then echo "SKIP: verify-credential-inventory: ${RB#"$ROOT/"} 부재(gitignored 로컬 전용) — 인벤토리 대조를 하지 못했다"; exit 4; fi
+# skip 방출(마커+exit 4 원자)은 guard_skip(scripts/lib/guard.sh)이 소유한다 — 짝 규약은 그 구현 줄이 진다.
+if [ ! -f "$RB" ]; then guard_skip verify-credential-inventory "${RB#"$ROOT/"} 부재(gitignored 로컬 전용) — 인벤토리 대조를 하지 못했다"; fi
 [ -f "$LEDGER" ] || {
   echo "FAIL: verify-credential-inventory: 원장 ${LEDGER#"$ROOT/"} 부재 — 대조 대상이 없다." >&2
   exit 1

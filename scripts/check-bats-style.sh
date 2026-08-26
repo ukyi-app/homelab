@@ -11,9 +11,10 @@
 # 인자로 파일을 주면 그 파일만 스캔하고 NEG·BB 아무거나 있으면 실패(픽스처/ad-hoc 탐지 모드).
 # bash 3.2 호환: mapfile 금지(while read). shellcheck 클린.
 set -euo pipefail
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-bats-style
 cd "$ROOT"
 BB_BASELINE="${BB_BASELINE_OVERRIDE:-0}"   # **0 수렴 완료** — 이제 hard-zero다(NEG와 같은 규율). 신규 중간 [[ ]]는 즉시 red.
 FILES=()
@@ -54,31 +55,8 @@ FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++ }
 # 검출기가 **실제로 읽은** 파일 수를 호출자에게 알린다 — 형제 check-host-ports.sh와 같은 계약.
 END { printf "READFILES=%d\n", nfiles > "/dev/stderr" }
 AWK
-# ⚠️ **인자를 먼저 검증한다.** 읽을 수 없는 파일이 awk로 가면 gawk는 fatal로 즉시 죽는데, 예전 코드는
-#    그 rc를 `|| true`로 버려 "0곳 OK" rc=0을 냈다 — 가드 본체가 fail-open이었다(형제
-#    check-host-ports.sh가 닫은 것과 같은 클래스, 2026-08-24 뮤테이션으로 실증).
-missing=""
-for f in "${FILES[@]}"; do [ -r "$f" ] || missing="${missing} ${f}"; done
-[ -z "$missing" ] || { echo "FAIL: check-bats-style: 읽을 수 없는 대상 —${missing}" >&2; exit 1; }
-
-errlog="$(mktemp)"
-trap 'rm -f "$errlog"' EXIT
-arc=0
-findings="$(awk "$DETECT" "${FILES[@]}" 2>"$errlog")" || arc=$?
-if [ "$arc" -ne 0 ]; then
-  echo "FAIL: check-bats-style: 검출기가 실패했다(awk rc=${arc}) — 판정 불가는 '통과'가 아니다." >&2
-  cat "$errlog" >&2
-  exit 1
-fi
-# 검출기가 실제로 읽은 파일 수를 열거 수와 대조한다(SCAN 신호가 열거 수라 이 축이 없으면 붕괴가 안 보인다).
-read_files="$(sed -n 's/^READFILES=//p' "$errlog" | head -1)"
-case "$read_files" in
-  '' | *[!0-9]*) echo "FAIL: check-bats-style: 검출기가 읽은 파일 수를 보고하지 않았다(READFILES 부재) — 끝까지 돌지 않았다." >&2; exit 1 ;;
-esac
-[ "$read_files" -eq "${#FILES[@]}" ] || {
-  echo "FAIL: check-bats-style: 열거 ${#FILES[@]}파일 != 검출기가 읽은 ${read_files}파일 — 스캔이 중간에 무너졌다." >&2
-  exit 1
-}
+# 검출 실행(인자 검증·rc 포착·READFILES 대조)은 detect_run(guard.sh) 소유 — 여긴 awk 본문만.
+findings="$(detect_run check-bats-style "$DETECT" "${FILES[@]}")"
 neg="$(printf '%s\n' "$findings" | grep -c '\[NEG\]' || true)"; neg="${neg//[^0-9]/}"; neg="${neg:-0}"
 bb="$(printf '%s\n' "$findings" | grep -c '\[BB\]' || true)"; bb="${bb//[^0-9]/}"; bb="${bb:-0}"
 printf '%s\n' "$findings" | grep -E '\[(NEG|BB)\]' || true   # gate bats가 [NEG]/[BB] 검증

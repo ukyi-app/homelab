@@ -4,6 +4,10 @@
 # package.json(verify:ledger)·Makefile(verify)·make ci·ci.yaml gate가 모두 이 스크립트를 호출한다.
 # (ledger 게이트는 required gate 한 곳 — ci.yaml의 `bun run verify:ledger`가 이 스크립트를 부른다.)
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다 —
+# 이 파일의 `$(dirname "$0")` 기반 ROOT가 형제들과 갈리던 비대칭의 소멸 지점이다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init verify-ledger
 bun "$ROOT/tools/ledger-to-json.ts" "$ROOT/docs/memory-ledger.md" > /tmp/ledger.json
 conftest test /tmp/ledger.json --policy "$ROOT/policy/ledger.rego"

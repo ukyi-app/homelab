@@ -16,9 +16,10 @@
 #    ⇒ 아래 (0)(0b)(3)이 그 구멍이다.
 # ⚠️ 이 가드는 ci.yaml의 **명시 스텝**이다(자기 bats에만 의존하면 .ci-exclude 한 줄로 자기가 꺼진다).
 set -euo pipefail
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-bats-accounting
 cd "$ROOT"
 
 # ⚠️ **맨 인자로 모드를 바꾸지 않는다.** 앞선 판은 `if [ "$#" -gt 0 ]`로 첫 인자를 레지스트리 경로로 삼았는데,

@@ -83,7 +83,9 @@ build_state() {
 }
 
 @test "poll-ghcr discovers apps by source-repo (contract: missing source-repo = never polled)" {
-  run grep -nE 'source-repo' "$ROOT/tools/poll-ghcr.ts"
+  # 경로는 app-surface module(appPaths(...).sourceRepo — d4) 경유다 — 그 필드를 검사한 행이 continue로
+  # 걸러야 한다(source-repo 부재 = 폴링 대상 아님).
+  run grep -nE '\.sourceRepo' "$ROOT/tools/poll-ghcr.ts"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'continue'
 }

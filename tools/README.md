@@ -143,7 +143,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   manifest 실존을 증명해 후보를 고른다. `.bindings.json`의 `autoDeploy`가 true면 `bump`(자동 PR+머지),
   false/누락이면 `propose-pr`(fail-closed 승인). 테스트는 `--fixtures <dir>`.
 - **`ensure-bump-pr.ts`** — bump PR **멱등 실행기**(조회 → 결정 → 변이를 한 seam에). `bump-poll.yaml`이
-  브랜치(`bump-poll/<app>-<tag>` — **RUN_ID 없음**: 같은 bump = 같은 브랜치)를 최신 main에서 재구축해
+  브랜치(`bump-poll/<kind>/<name>-<tag>` — **RUN_ID 없음**: 같은 bump = 같은 브랜치, kind가 동명 app/bespoke를 가른다)를 최신 main에서 재구축해
   로컬 커밋을 얹은 뒤 이 도구를 부르면, **원격 변이(push·PR·무장/해제)는 전부 이 도구만** 한다.
   **조회 = 상한 없는 완전 열거(ref-연결)**: `gh api graphql`의
   `repository.ref(qualifiedName:refs/heads/<branch>).associatedPullRequests(states:OPEN, first:100)` connection을
@@ -185,7 +185,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   assignee·사람 코멘트·`hold` 라벨·draft·reopen — **잘렸거나 관측 불가면 "흔적 있음"**)은 신뢰 PR의 force-push(rebuild)를 막는다.
   **`--reconcile-only`** = **해제 스윕 전용** 패스(push·create·무장 0). 회수는 보안 속성이라 플래너의
   가용성에 의존하면 안 된다 → `bump-poll.yaml`의 **별도 job**에서 **writer 토큰만으로 매 주기** 돈다. 대상은
-  `bump-poll/*` **원격 ref 전체**(`--app`·`--tag`·`--action` 거부 — app은 브랜치명에서 유도), 레인은 autoDeploy
+  `bump-poll/*` **원격 ref 전체**(`--kind`·`--name`·`--tag`·`--action` 거부 — target은 브랜치명에서 복원), 레인은 autoDeploy
   SSOT(`.bindings.json`/`.image-pin.json`)에서 직접 읽고 **부재·파손도 `propose-pr`**(인가 문맥의 fail-closed는
   "아무것도 안 함"이 아니라 **"권한을 거둠"**). bump 레인은 그 앱의 **가장 새로운** 신뢰 PR만 무장을 유지하고
   **더 오래된 형제는 전부 회수**한다(순서 불명 = 전부 회수 — 과잉 회수는 다음 주기가 재무장하지만 과소 회수는
@@ -202,7 +202,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `bun tools/run-bump-plan.ts --plan plan.json` 한 줄로 호출 — plan.json의 bump/propose-pr 항목을 **항목마다 격리
   git worktree**에서 오케스트레이션한다(worktree add → bump-tag → commit(writer 신원 명시) → ensure-bump-pr →
   worktree remove, 모든 경로 정리). 공유 worktree/index가 없어 R-38(종료상태만 격리)·H-2(staged digest-exporter
-  누출)가 **구조적으로 불가능**하다. 원격 변이(push·PR·무장)는 **ensure-bump-pr만** 하고, 러너는 플래너 레인
+  누출)가 **구조적으로 불가능**하다. plan 입구는 bump-plan module의 `decodePlan`(fail-closed — 미지 action·
+  신원 불량·kind↔pin 부정합은 red)이고, target 신원은 `--kind/--name` 쌍으로 ensure-bump-pr까지 관통한다.
+  원격 변이(push·PR·무장)는 **ensure-bump-pr만** 하고, 러너는 플래너 레인
   (`--action`)을 재해석 없이 **그대로** 넘긴다(auto-merge 켜는 별도 플래그 없음 — 승인 게이트 우회 불가). 실패는
   fail-closed 집계 후 비-0. 앱명은 공유 `APP_NAME_RE`(identity.ts)로 검증(분기 금지). 테스트는 **진짜 git worktree
   fixture + ensure-bump-pr stub**(`--ensure-bin`/`--ensure-script` argv seam)으로

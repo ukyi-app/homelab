@@ -18,7 +18,10 @@
 #   그래서 기본 모드엔 스캔 바닥값을 둔다(`check-image-pins.sh`·`check-alert-rules.ts` 선례).
 # bash 3.2 호환(mapfile 금지). shellcheck clean.
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-skip-signalling
 cd "$ROOT"
 
 SELF="scripts/check-skip-signalling.sh"

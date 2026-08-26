@@ -165,6 +165,24 @@ NEWDIG="sha256:1111111111111111111111111111111111111111111111111111111111111111"
   [ "$output" == "ghcr.io/ukyi-app/files:sha-feedbee@$NEWDIG" ]
 }
 
+@test "bump --kind cross-check refuses a kind that disagrees with the edit mode (identity split, exit 2)" {
+  # 08의 신원 교차 검증 — 러너가 주장한 kind와 편집 모드(--pin 유무)가 갈리면 엉뚱한 레인의 파일을
+  # 편집하게 되므로 fail-closed다. 양방향(bespoke 무pin / app 유pin) 모두 exit 2.
+  seed_pin
+  run bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --kind bespoke --repo-root "$FIX"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "갈린다"
+  run bun tools/bump-tag.ts blog sha-deadbee --kind app --pin platform/files/prod/.image-pin.json --digest "$NEWDIG" --repo-root "$FIX"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "갈린다"
+  run bun tools/bump-tag.ts blog sha-deadbee --kind platformish --repo-root "$FIX"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "bad kind"
+  # 정합 주장(kind=모드 일치)은 통과한다 — 검증이 과잉 거부가 아님을 같은 픽스처로 대조.
+  run bun tools/bump-tag.ts files sha-feedbee --digest "$NEWDIG" --kind bespoke --pin platform/files/prod/.image-pin.json --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+}
+
 @test "bump --pin without --digest is refused (bespoke pins are always digest-pinned)" {
   seed_pin
   run bun tools/bump-tag.ts files sha-feedbee --pin platform/files/prod/.image-pin.json --repo-root "$FIX"

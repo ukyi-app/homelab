@@ -23,9 +23,10 @@
 # 현재 인레포 배포 앱은 **0개**다(page #455 · trip-mate-api 철거). 앱이 있던 시절의 규약은
 # 앱당 <app>-secrets.sealed.yaml 봉인본 1개 — 새 앱 온보딩 시 그대로 적용된다.
 set -euo pipefail
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib/scan-floor.sh"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-app-deploy
 SCHEMA="$ROOT/tools/app-deploy-schema.json"
 required="$(jq -r '.required[]' "$SCHEMA")"   # 개행구분 → for 워드분할
 
@@ -116,7 +117,7 @@ else
   # ⚠️ 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거).
   #    앱이 0개인 동안은 열거 0건이 정당한 상태라 붕괴와 구별되지 않는다. 앱을 다시 온보딩하면
   #    이 값을 1로 되돌릴 것 — 그래야 워커가 죽었을 때의 0건이 다시 red가 된다.
-  units="$(scan_enumerate check-app-deploy bun "$(dirname "$0")/../tools/lib/repo-walk.ts" --units apps --root "$ROOT")" || exit 1
+  units="$(scan_enumerate check-app-deploy bun "$(dirname "${BASH_SOURCE[0]}")/../tools/lib/repo-walk.ts" --units apps --root "$ROOT")" || exit 1
   scanned="$(scan_count "$units")"
   scan_floor check-app-deploy "$scanned" "${APP_DEPLOY_MIN_SCAN:-0}" || exit 1
   while IFS= read -r u; do

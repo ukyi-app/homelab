@@ -60,7 +60,7 @@ jobs:
   # 빠지기만 해도** 그 앱의 회수는 **아예 시도조차 되지 않았다**(낡은 무장 생존). 의존을 한 칸 옮겼을 뿐
   # (`.action` 필터 → plan.json 존재)이지 끊은 게 아니었다.
   # → 이 job은 **writer 토큰만** 쓰고, reader·docker·플래너 스텝을 **하나도 갖지 않는다**. 대상은 실행기가
-  #   `bump-poll/*` **원격 ref**에서 직접 열거한다(app은 브랜치명에서 유도 — 플래너는 입력이 아니다).
+  #   `bump-poll/*` **원격 ref**에서 직접 열거한다(target은 브랜치명에서 복원 — 플래너는 입력이 아니다).
   # ⚠️ 양방향 비-기아: 이 job이 실패해도 poll은 돈다(poll의 `if: !cancelled()`), poll이 실패해도 이 job은
   #    이미 돌았다. 실패는 그대로 run을 빨갛게 만든다(telegram 발화).
   # ⚠️ poll이 이 job을 `needs`로 **뒤따르는** 이유는 순서(직렬화)뿐이다 — 두 job이 동시에 같은 PR을
@@ -89,7 +89,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.writer.outputs.token }} # writer: PR 조회 + auto-merge 해제
         run: |
-          # 대상 목록은 **넘기지 않는다**(--app 없음). 넘기는 순간 회수의 완전성이 호출부의 목록에 의존하고,
+          # 대상 신원은 **넘기지 않는다**(--kind/--name 없음). 넘기는 순간 회수의 완전성이 호출부의 목록에 의존하고,
           # 그 목록이 곧 플래너 출력이면 R-27이 그대로 재발한다. 실행기가 `git ls-remote`로 네임스페이스를
           # 직접 열거하고, 레인은 autoDeploy SSOT(.bindings.json / .image-pin.json)에서 직접 읽는다.
           # 항목별 격리·실패 수집·비-0 종료는 전부 실행기 안에 있다(한 앱의 실패가 나머지를 굶기지 않는다).
@@ -146,7 +146,7 @@ jobs:
           GH_TOKEN: ${{ steps.reader.outputs.token }}
         run: |
           bun tools/poll-ghcr.ts --root . > /tmp/plan.json
-          jq -r '.[] | "\(.app): \(.action) \(.reason // "")"' /tmp/plan.json
+          jq -r '.[] | "\(.target.kind)/\(.target.name): \(.action) \(.reason // "")"' /tmp/plan.json
       # 이 스텝은 **로컬 브랜치·커밋만 준비**한다. 원격 변이(브랜치 push·PR 생성·auto-merge 무장)는
       # 전부 tools/ensure-bump-pr.ts(멱등 실행기 — 조회 → 결정 → 변이)가 한다:
       # 워크플로가 스스로 push/create하면 "열린 PR 확인"이 무의미해져 매 주기 중복 PR이 열린다

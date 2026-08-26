@@ -42,12 +42,28 @@ setup() {
   [ "$(echo "$output" | jq -r '.result.apps[] | select(.name=="page") | .sourceRepo')" = "ukyi-app/page" ]
 }
 
+@test "status folds a non-boolean autoDeploy to false and reports a missing bindings file as key absence" {
+  # 해석 SSOT는 descriptorAutoDeploy(app-surface 경유 — d4) 하나다: bindings가 실재하면 정확히
+  # boolean true만 true고, non-boolean("yes")은 인가 의미론과 같은 false로 **표시**된다.
+  # "미기록"(키 부재)은 bindings 파일 자체의 부재/파손뿐이다.
+  make_app_fixture blog true
+  make_app_fixture page '"yes"'
+  make_app_fixture bare true
+  rm "$APPS_ROOT/apps/bare/deploy/prod/.bindings.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.apps[] | select(.name=="page") | .autoDeploy')" = "false" ]
+  [ "$(echo "$output" | jq -r '.result.apps[] | select(.name=="bare") | has("autoDeploy")')" = "false" ]
+  [ "$(echo "$output" | jq -r '.result.apps[] | select(.name=="blog") | .autoDeploy')" = "true" ]
+}
+
 @test "status app mode reports pin, runs, lane-filtered open PRs, and live ArgoCD state" {
   make_app_fixture page true
   printf '[{"name":"release","status":"completed","conclusion":"success","head_sha":"c0ffee1","html_url":"https://github.com/ukyi-app/page/actions/runs/9"}]\n' > "$FIX/runs.json"
-  # 레인 픽스처(브랜치 명명 SSOT 형식): 매치 3(bump tag형·secrets run_id형·teardown/teardown-app-)
-  # + 배제 2(비접두 형제 'pages', 하이픈 형제 'page-extra' — 접두는 같아도 잔여가 tag형이 아님)
-  printf '[{"number":7,"title":"bump page","head":"bump-poll/page-sha-abcdef1","html_url":"u1","auto_merge":true},{"number":8,"title":"secrets","head":"update-secrets/page-123","html_url":"u2","auto_merge":true},{"number":9,"title":"other app","head":"bump-poll/pages-sha-abcdef1","html_url":"u3","auto_merge":false},{"number":10,"title":"teardown","head":"teardown/teardown-app-page-456","html_url":"u4","auto_merge":false},{"number":11,"title":"sibling","head":"bump-poll/page-extra-sha-abcdef1","html_url":"u5","auto_merge":true}]\n' > "$FIX/homelab-prs.json"
+  # 레인 픽스처(브랜치 명명 SSOT 형식): 매치 4(bump 레거시 tag형·bump kind 인코딩 신형·secrets run_id형·
+  # teardown/teardown-app-) + 배제 3(비접두 형제 'pages', 하이픈 형제 'page-extra' — 접두는 같아도 잔여가
+  # tag형이 아님, 동명 bespoke target — kind가 다르면 이 앱의 브랜치가 아니다)
+  printf '[{"number":7,"title":"bump page","head":"bump-poll/page-sha-abcdef1","html_url":"u1","auto_merge":true},{"number":8,"title":"secrets","head":"update-secrets/page-123","html_url":"u2","auto_merge":true},{"number":9,"title":"other app","head":"bump-poll/pages-sha-abcdef1","html_url":"u3","auto_merge":false},{"number":10,"title":"teardown","head":"teardown/teardown-app-page-456","html_url":"u4","auto_merge":false},{"number":11,"title":"sibling","head":"bump-poll/page-extra-sha-abcdef1","html_url":"u5","auto_merge":true},{"number":12,"title":"bump page new","head":"bump-poll/app/page-sha-abcdef1","html_url":"u6","auto_merge":true},{"number":13,"title":"bespoke twin","head":"bump-poll/bespoke/page-sha-abcdef1","html_url":"u7","auto_merge":false}]\n' > "$FIX/homelab-prs.json"
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.mode')" = "app" ]
@@ -56,8 +72,8 @@ setup() {
   [ "$(echo "$output" | jq -r '.result.app.autoDeploy')" = "true" ]
   [ "$(echo "$output" | jq -r '.result.runs | length')" = "1" ]
   [ "$(echo "$output" | jq -r '.result.runs[0].conclusion')" = "success" ]
-  [ "$(echo "$output" | jq -r '.result.openPrs | length')" = "3" ]
-  [ "$(echo "$output" | jq -r '[.result.openPrs[].number] | sort | join(",")')" = "7,8,10" ]
+  [ "$(echo "$output" | jq -r '.result.openPrs | length')" = "4" ]
+  [ "$(echo "$output" | jq -r '[.result.openPrs[].number] | sort | join(",")')" = "7,8,10,12" ]
   [ "$(echo "$output" | jq -r '.result.live.argocd.sync')" = "Synced" ]
   [ "$(echo "$output" | jq -r '.result.live.argocd.health')" = "Healthy" ]
   [ "$(echo "$output" | jq -r '.result.live.argocd.revision')" = "abc1234" ]

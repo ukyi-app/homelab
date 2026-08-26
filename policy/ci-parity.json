@@ -1,5 +1,5 @@
 {
-  "$comment": [
+  "_readme": [
     "make ci ↔ ci.yaml job 'gate' 패리티 원장. 강제: tools/check-ci-parity.ts (필수 게이트).",
     "게이트의 모든 run 스텝은 여기 계상돼야 한다. 미계상도 red, 죽은 선언(gate에 없는 이름)도 red.",
     "status: mirrored = make ci가 같은 걸 돈다(local 문자열이 `make -n ci` 출력에 실재해야 한다) /",

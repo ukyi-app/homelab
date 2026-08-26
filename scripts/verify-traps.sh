@@ -4,6 +4,11 @@
 # 원장이 enforced로 남아있는 거짓 안심을 차단(KD-4). doc-only 함정(guard 경로 없음)은 대상 아님.
 # 인자로 원장 경로를 덮어쓸 수 있다(테스트용). 순수 파일 존재 검사 — 라이브 무관.
 set -euo pipefail
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init verify-traps
+cd "$ROOT"
 
 LEDGER="${1:-docs/traps.md}"
 [ -f "$LEDGER" ] || { echo "verify-traps: $LEDGER 없음" >&2; exit 1; }

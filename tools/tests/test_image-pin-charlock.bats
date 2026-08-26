@@ -77,16 +77,16 @@ EOF
   seed_bespoke_pin "ghcr.io/ukyi-app/files:sha-aaa1111000000000000000000000000000000000"
   run_poll
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.[] | select(.app=="files") | .action == "refuse"'
-  echo "$output" | jq -e '.[] | select(.app=="files") | .reason == "인라인 핀 형식 불량(repo:sha-*@sha256:*): ghcr.io/ukyi-app/files:sha-aaa1111000000000000000000000000000000000"'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | .action == "refuse"'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | .reason == "인라인 핀 형식 불량(repo:sha-*@sha256:*): ghcr.io/ukyi-app/files:sha-aaa1111000000000000000000000000000000000"'
 }
 
 @test "poll-ghcr B2: inline pin repo not matching source-repo refuses with exact mismatch reason" {
   seed_bespoke_pin "ghcr.io/ukyi-app/other:sha-aaa1111000000000000000000000000000000000@$DIG2"
   run_poll
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.[] | select(.app=="files") | .action == "refuse"'
-  echo "$output" | jq -e '.[] | select(.app=="files") | .reason == "핀 repo(ghcr.io/ukyi-app/other)가 source-repo(ukyi-app/files)와 불일치"'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | .action == "refuse"'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | .reason == "핀 repo(ghcr.io/ukyi-app/other)가 source-repo(ukyi-app/files)와 불일치"'
 }
 
 @test "poll-ghcr B2: apps lane non-sha tag refuses with exact ancestry-proof reason" {
@@ -99,8 +99,8 @@ image:
 EOF
   run_poll
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.[] | select(.app=="orders") | .action == "refuse"'
-  echo "$output" | jq -e '.[] | select(.app=="orders") | .reason == "배포 tag가 sha-* 형식이 아니라 조상 증명 불가: latest"'
+  echo "$output" | jq -e '.[] | select(.target.name=="orders") | .action == "refuse"'
+  echo "$output" | jq -e '.[] | select(.target.name=="orders") | .reason == "배포 tag가 sha-* 형식이 아니라 조상 증명 불가: latest"'
 }
 
 @test "poll-ghcr B2: malformed image-pin json refuses via outer catch with plan-failure prefix" {
@@ -110,8 +110,8 @@ EOF
   printf '{ not valid json' > "$PD/.image-pin.json"
   run_poll
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.[] | select(.app=="files") | .action == "refuse"'
-  echo "$output" | jq -e '.[] | select(.app=="files") | (.reason | startswith("플랜 실패: "))'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | .action == "refuse"'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | (.reason | startswith("플랜 실패: "))'
 }
 
 # ─────────────────────────── B4: bump-tag 정확 stderr + exit 2 ───────────────────────────
@@ -252,8 +252,8 @@ EOF
   seed_bespoke_pin "ghcr.io/ukyi-app/files:sha-1234567@$DIG2"
   run_poll
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.[] | select(.app=="files") | .current.tag == "sha-1234567"'
-  echo "$output" | jq -e --arg d "$DIG2" '.[] | select(.app=="files") | .current.digest == $d'
+  echo "$output" | jq -e '.[] | select(.target.name=="files") | .current.tag == "sha-1234567"'
+  echo "$output" | jq -e --arg d "$DIG2" '.[] | select(.target.name=="files") | .current.digest == $d'
 }
 
 @test "bump-tag B10: inline non-greedy (.+?) preserves a colon-containing repo across the rewrite" {
