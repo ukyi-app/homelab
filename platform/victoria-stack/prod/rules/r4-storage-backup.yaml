@@ -181,55 +181,25 @@ data:
           # 같은 주기의 1.157배. 산술 근거는 아래 「임계 정정(2026-08-20)」)로 판정.
           # 값 없음(첫 push 전)은 absent가로 fail-loud — 실행자 미enable/미실행을 페이징(백업 필수화 강제).
           #
-          # ★ **국면 A 한시 억제 — expr 끝의 시각 절이 `absent` 가지에만 걸려 있다.**
-          #   왜: 국면 A 동안 이 백업은 **돌지 않는다.** 실행자 자체는 2026-08-19(#506)에 리눅스로 재작성돼
-          #   systemd로 배선을 이미 마쳤다(`infra/k3s-bootstrap/host-config/etc/systemd/system/`의
-          #   `files-data-backup.{service,timer}` — OnCalendar=daily + RandomizedDelaySec=30min, 일 1회).
-          #   그러나 **국면 A 동안 그 타이머는 의도적으로 enable되지 않는다**(레포 전체에 `systemctl enable`
-          #   실행 호출 0건 — 이유는 짝 유닛 `files-data-backup.service`의 머리말). 즉 국면 A 동안 absent
-          #   가지는 **영구 참**이고 이 룰은 24/7 critical로 운다(alertmanager `severity=critical` 라우트의
-          #   repeat_interval: 1h를 타고 하루 24건). 그건 무음보다 나쁘다: 상시 소음이 채널 전체를 둔감화해
-          #   **진짜 페이지를 묻는다.**
-          #   ⚠️ 그리고 국면 A에는 **2차 매체가 원리적으로 존재할 수 없다** — NUC은 디스크가 하나이고
-          #   `/mnt/bulk`는 루트 LV의 bind 마운트다. 지금 타이머를 enable하면 스크립트가 source/dest 동일
-          #   디스크를 거부해 매일 실패하고, 그 거부를 우회하면 알림만 초록이 되고 사본은 같은 매체에
-          #   놓인다 — **정직한 red보다 나쁜 false-green이다.**
-          #   진짜 2차 매체는 국면 B(2TB M.2 장착) 이후에나 생긴다.
+          # ✅ 국면 A 한시 억제는 국면 B 전환(2026-08-26)과 함께 제거했다 — absent 가지가 다시 살아 있다.
+          #   `tests/gates/test_files-backup-phase-a.bats`가 "창이 비면 억제 절도 없다"를 강제한다.
           #
-          #   ⚠️ **억제 대상은 absent 가지 뿐이다(최소 표면).** PromQL은 `and`가 `or`보다 강하게
-          #   결합하므로 `A or B and on() C`는 `A or (B and on() C)`로 파싱된다 — 그래서 시각 절을
-          #   expr **끝에 괄호 없이** 붙이면 정확히 absent 가지만 걸린다. 전체를 괄호로 묶으면
-          #   (`(A or B) and on() C`) staleness 가지까지 함께 죽는다. **그 두 형태는 문법상 둘 다
-          #   유효해 `-dryRun`이 구별하지 못한다** — 그래서 아래 가드가 형태를 잠근다.
-          #   덕분에 국면 A 중 누군가 타이머를 enable해 백업이 실제로 돌면 그 순간부터 신선도 감시가
-          #   **자동 복귀**한다.
-          #   실측(VictoriaMetrics v1.145.0): 실행 없음 → 무발화 / 실행 + 백업 stale → **발화** /
-          #   실행 + 백업 fresh → 무발화 / 억제 없는 원본 + 실행 없음 → 발화(원래의 병).
-          #
-          #   ⚠️ **만료는 자동이다 — 사람의 기억에 의존하지 않는다.** 1790780400 =
-          #   2026-10-01T00:00:00+09:00 = 국면 A 창(`infra/k3s-bootstrap/versions.env`의
-          #   BULK_MIGRATION_WINDOW_UNTIL)의 **다음날 0시 KST**. 그 시각 이후엔 배선 여부와 무관하게
-          #   다시 critical로 페이징한다 — 억제의 상한을 룰 자신이 들고 있다(창을 연장하고 여기를
-          #   안 고치면 시끄러워질 뿐 조용해지지 않는다). 두 값의 정합과 "창을 비웠는데 억제가 남음"은
-          #   `tests/gates/test_files-backup-phase-a.bats`가 **양방향**으로 강제한다.
-          #
-          #   🔴 **임계 정정(2026-08-20)**: 이전 값 180000s는 주기(86400s)의 **2.083배**였는데,
-          #   형제 일일 백업 4종(LocalBasebackup·R2Backup·PgDumpHedge·CacheBackup)은 전부 100000s
-          #   = **1.157배**다 — 이것만 아웃라이어였다. 대가는 **1회 실패의 완전 무성 + 페이지 T+50.5h**
-          #   였다. 여유 계산: 성공↔성공 최악 간격 = OnCalendar(86400) + RandomizedDelaySec(1800)
-          #   + TimeoutStartSec(1800) = 90000s < 100000s(여유 2.8h) + `for: 30m`.
-          #   ⚠️ 그래도 **신선도는 원리적으로 주기보다 빨리 울 수 없다**(배수를 조여도 하한이 1주기다).
-          #   1회 실패의 즉시 관측은 아래 `SystemdUnitFailed`가 맡는 **직교 축**이다 — 둘은 대체가 아니다.
+          # 🔴 **임계 정정(2026-08-20)**: 이전 값 180000s는 주기(86400s)의 **2.083배**였는데,
+          # 형제 일일 백업 4종(LocalBasebackup·R2Backup·PgDumpHedge·CacheBackup)은 전부 100000s
+          # = **1.157배**다 — 이것만 아웃라이어였다. 대가는 **1회 실패의 완전 무성 + 페이지 T+50.5h**
+          # 였다. 여유 계산: 성공↔성공 최악 간격 = OnCalendar(86400) + RandomizedDelaySec(1800)
+          # + TimeoutStartSec(1800) = 90000s < 100000s(여유 2.8h) + `for: 30m`.
+          # ⚠️ 그래도 **신선도는 원리적으로 주기보다 빨리 울 수 없다**(배수를 조여도 하한이 1주기다).
+          # 1회 실패의 즉시 관측은 아래 `SystemdUnitFailed`가 맡는 **직교 축**이다 — 둘은 대체가 아니다.
           - alert: FilesBackupStale
             expr: |
               (time() - last_over_time(files_backup_last_success_timestamp[10d])) > 100000
               or absent(last_over_time(files_backup_last_success_timestamp[10d]))
-              and on() (vector(time()) >= 1790780400)
             for: 30m
             labels: { severity: critical }
             annotations:
               summary: "files 오프-노드 백업이 stale(≈27.8시간 초과)이거나 없음"
-              description: "files-data(비재생성 사용자 데이터)의 2차 매체 사본이 갱신되지 않았습니다 — 백업 실행자 미실행 또는 bulk 매체 미마운트. 매체 유실 시 전손 위험(R2 미사용). scripts/backup-files-data.sh와 그 실행자(systemd `files-data-backup.timer`)를 확인하세요. ⚠️ 국면 A(versions.env의 BULK_MIGRATION_WINDOW_UNTIL이 비어 있지 않으면 진행 중)에는 '값 없음' 가지가 의도적으로 억제돼 있다 — 이 알림이 떴다면 실행자는 있는데 백업이 stale하다는 뜻이다."
+              description: "files-data(비재생성 사용자 데이터)의 2차 매체 사본이 갱신되지 않았습니다 — 백업 실행자 미실행 또는 bulk 매체 미마운트. 매체 유실 시 전손 위험(R2 미사용). scripts/backup-files-data.sh와 그 실행자(systemd `files-data-backup.timer`)를 확인하세요."
           # ── 호스트 systemd 유닛 실패의 **즉시 채널** ────────────────────────────────────────
           # ★ 위 신선도 룰과 **직교 축**이다. 신선도는 "마지막 성공이 언제였나"만 알고, 원리적으로
           #   주기(1일)보다 빨리 울 수 없다 — 배수를 조여도 하한이 1주기라 **1회 실패의 즉시 관측이
