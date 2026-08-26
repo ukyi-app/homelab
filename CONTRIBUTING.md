@@ -54,8 +54,11 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
 
 **규약.**
 - 도메인 부재로 불변식을 평가하지 못하면 `SKIP: <가드>: <이유>`를 stdout에 내고 **exit 4**.
-- 마커와 `exit 4`는 **같은 줄**에 둔다. 짝을 정적으로 검증할 수 있게 하려는 제약이다
-  (`tests/gates/test_guard-skip-signalling.bats`가 강제 — mutation 테스트로 load-bearing 실측).
+- 방출은 **헬퍼 경유만** — 셸은 `guard_skip`(scripts/lib/guard.sh), TS는 `skip()`(tools/lib/cli.ts).
+  마커와 `exit 4`의 같은-줄 원자성은 이 구현 두 곳이 소유하므로, 콜사이트의 직접 방출은 짝이
+  맞아도 위반이다(손조립 하나가 살아 있으면 원자성 주장이 두 번째 진실을 얻는다 —
+  `scripts/check-skip-signalling.sh`가 강제, 게이트는 `tests/gates/test_guard-skip-signalling.bats`).
+  **Makefile 레인만** 함수를 쓸 수 없어 옛 같은-줄 짝 검사로 잔존한다.
 - 평가한 실행은 마커를 내지 않는다: 0=평가·통과, 1=평가·실패.
 - 각 가드의 bats 래퍼는 **두 갈래를 각각 단언**한다. `[ "$status" -eq 0 ]` 하나만 두면 skip이
   그 단언을 만족해 래퍼가 vacuous해진다. 도메인을 주입할 시임(픽스처 트리·`RUNBOOK_DIR` 같은

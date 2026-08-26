@@ -86,8 +86,38 @@ AWK
 findings="$(detect_run check-locale-collation "$DETECT" "${FILES[@]}")"
 n="$(scan_count "$findings")"
 printf '%s\n' "$findings" | grep -E '\[(A|B|C)\]' || true   # gate bats가 레인 태그를 검증
+abc_rc=0
 if [ "$n" -gt 0 ]; then
   echo "FAIL: 로케일 콜레이션에 물리는 정렬/비교 ${n}곳 — 셸은 'LC_ALL=C sort'(또는 -n), TS/JS는 코드유닛 비교로." >&2
+  abc_rc=1   # 레인 D까지 보고한 뒤에 종료한다 — 한 실행이 두 클래스를 함께 말해야 재실행이 안 는다.
+fi
+
+# ── 레인 D: 가드 프롤로그 — scripts/ 가드류(.sh)는 guard_init를 불러야 한다(d2·11) ────────────────
+# LC_ALL 전역 export는 프롤로그 커널(scripts/lib/guard.sh)이 소유한다 — 커널을 건너뛴 새 가드는
+# 이 가드가 잡는 병(로케일 의존 콜레이션)의 신설 표면이라, 프롤로그 누락을 여기서 정적 red로 만든다.
+# 대상 = 가드 모양 파일명 — repo-walk 'guards' 스코프의 **scripts/ 셸 부분집합**(tests/gates/*.sh와
+# tools/*.ts는 대상 밖 — TS는 프롤로그 커널이 없고, 게이트 셸은 bats 하네스가 프롤로그를 진다) +
+# `audit-*`(감사 가드 — 접두만 다르고 실질이 가드다: audit-orphan-pv 리뷰 실측).
+# `*-gate.sh`(sealing-key-dr-gate)는 대상 밖 — source-safe lib라 guard_init의 set -euo가 호출자
+# 셸을 오염시킨다(정당 제외, 파일 헤더가 근거를 진다).
+# 인자 모드에선 인자 파일이 가드 모양일 때만 적용한다(픽스처 검증 경로 — 비-가드 스크립트는 관할 밖).
+d_viol=""
+for f in "${FILES[@]}"; do
+  case "$f" in
+    scripts/lib/*|*/scripts/lib/*) continue ;;   # lib은 가드가 아니라 커널 자신이다
+    scripts/check-*.sh|scripts/verify-*.sh|scripts/audit-*.sh|scripts/*-guard.sh|scripts/*-check.sh) : ;;
+    */scripts/check-*.sh|*/scripts/verify-*.sh|*/scripts/audit-*.sh|*/scripts/*-guard.sh|*/scripts/*-check.sh) : ;;   # 픽스처(절대경로)
+    *) continue ;;
+  esac
+  # ⚠️ 언급이 아니라 **호출**을 센다 — 가드 머리 주석마다 "guard_init(…)이 소유한다" 산문이 있어,
+  #    토큰 존재만 보면 호출 줄을 지워도 초록이다(리뷰 실측). 주석 스트립 후 행두 호출만 인정한다.
+  sed 's|^[[:space:]]*#.*||' "$f" | grep -qE '^[[:space:]]*guard_init[[:space:]]' \
+    || d_viol="${d_viol}${f}: [D] 가드 프롤로그 누락 — guard_init(scripts/lib/guard.sh)를 불러라(LC_ALL 전역 export·ROOT·scan-floor가 커널 소유다)"$'\n'
+done
+if [ -n "$d_viol" ]; then
+  printf '%s' "$d_viol"
+  echo "FAIL: 레인 D — guard_init 미사용 가드(프롤로그 커널 우회)" >&2
   exit 1
 fi
-echo "check-locale-collation: 콜레이션 의존 정렬/비교 0곳 OK"
+[ "$abc_rc" -eq 0 ] || exit 1
+echo "check-locale-collation: 콜레이션 의존 정렬/비교 0곳 + 가드 프롤로그 OK"

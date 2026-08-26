@@ -16,6 +16,11 @@
 #   ② Bound인데 소비자 0 — PVC는 살아 있는데 어떤 파드도 마운트하지 않음(cascade=orphan 잔재)
 # 판정은 **소비 여부**로 한다. "phase"는 ②를 원리적으로 볼 수 없다.
 set -euo pipefail
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다 — 개별
+# `LC_ALL=C sort` 접두는 떼지 않는다(정적 레인이 런타임 export를 못 보므로 이중이 계약이다).
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init audit-orphan-pv
 command -v kubectl >/dev/null || { echo "ERROR: kubectl 부재" >&2; exit 2; }
 command -v yq >/dev/null || { echo "ERROR: yq 부재" >&2; exit 2; }
 kubectl cluster-info >/dev/null 2>&1 || { echo "ERROR: 클러스터 접근 불가(KUBECONFIG/RBAC)" >&2; exit 3; }

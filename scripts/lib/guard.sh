@@ -8,9 +8,10 @@
 #                                    을 구조로 소멸). 소비자는 세지 않고 파생하라:
 #                                    `grep -l guard_init scripts/*.sh`
 #   guard_skip <가드> <이유>         `SKIP: <가드>: <이유>` 마커와 exit 4를 **한 줄에서 원자**
-#                                    방출한다 — check-skip-signalling의 짝 검사(같은 줄 규약)가
-#                                    이 구현 줄 하나로 성립하고, 콜사이트는 짝 규약을 알 필요가
-#                                    없어진다. (TS 레인의 대응물은 tools/lib/cli.ts의 skip().)
+#                                    방출한다 — 같은-줄 원자성은 이 구현 줄 하나가 소유하고(정확 1은
+#                                    게이트 bats가 잰다), check-skip-signalling은 콜사이트의 직접
+#                                    방출을 red로 강제한다(축 교체, 티켓 11). 콜사이트는 짝 규약을
+#                                    알 필요가 없다. (TS 레인의 대응물은 tools/lib/cli.ts의 skip().)
 #   detect_run <라벨> <awk> <파일…>  awk 검출기의 fail-closed 실행 — 인자 0건/읽기 불가 프리체크 ·
 #                                    rc 포착(`|| true`가 fatal을 삼키던 fail-open 봉쇄) ·
 #                                    READFILES 열거수 대조(#525가 클래스를 명명하고도 #532에서
@@ -28,7 +29,8 @@
 # shellcheck shell=bash
 
 guard_init() {
-  # shellcheck disable=SC2034  # 소비자(가드 본문)가 읽는 출력 변수다
+  # shellcheck disable=SC2034  # 소비자 0(2026-08-26 실측) — guard_skip/scan_floor가 라벨을 매번
+  # 다시 받는 중복의 수렴 후보로 남긴다(시그니처 변경은 콜사이트 전면 개정이라 별도 티켓 감).
   GUARD_NAME="$1"
   set -euo pipefail
   # 로케일 콜레이션이 게이트를 뒤집는다(#514) — 파일별 export 부착의 비대칭을 전역 export가 소멸시킨다.

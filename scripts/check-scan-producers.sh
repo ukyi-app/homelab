@@ -42,9 +42,10 @@
 #    붕괴한다. `--root`는 되돌림 시나리오 증인(실 `tools/` 사본 + 한 파일 되돌림)을 위한 것이다.
 # bash 3.2 호환(mapfile 금지). shellcheck clean.
 set -euo pipefail
-SELF_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=scripts/lib/scan-floor.sh
-. "$SELF_ROOT/scripts/lib/scan-floor.sh"
+# 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
+# shellcheck source=scripts/lib/guard.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
+guard_init check-scan-producers
 
 KERNEL="tools/lib/scan-floor.ts"
 # 열거 붕괴 바닥값 — 추적 .ts/.mts 파일 수. ⚠️ 여기에 현재 건수를 적지 않는다(커널 주석의 규율 — 손 관리
@@ -52,7 +53,7 @@ KERNEL="tools/lib/scan-floor.ts"
 MIN_FILES=40
 
 usage() { echo "사용법: check-scan-producers.sh [--root <dir>]" >&2; exit 2; }
-ROOT="$SELF_ROOT"
+# ROOT 기본값은 guard_init가 산출한 레포 루트 — --root는 픽스처 트리 검증용으로만 그것을 덮는다.
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --root) [ "$#" -ge 2 ] || usage; ROOT="$2"; shift 2 ;;
