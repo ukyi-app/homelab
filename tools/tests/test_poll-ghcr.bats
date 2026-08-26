@@ -173,6 +173,17 @@ JSON
   echo "$output" | jq -e '.[0].action == "noop"'
 }
 
+@test "an app directory without source-repo is not polled at all (discovery is binding-gated — behavioural witness)" {
+  # 발견 계약의 행동 증인(정적 grep 증인의 짝) — source-repo 바인딩이 없는 앱은 plan에 아예 없어야
+  # 하고, 있는 앱은 있어야 한다(양성 대조 — 열거 자체가 붕괴한 vacuous green 차단).
+  mkdir -p "$TMP/apps/unbound/deploy/prod"
+  printf 'image:\n  repo: ghcr.io/ukyi-app/unbound\n  tag: sha-aaa1111000000000000000000000000000000000\n' > "$TMP/apps/unbound/deploy/prod/values.yaml"
+  run_poll
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '[.[] | select(.target.name=="unbound")] | length == 0'
+  echo "$output" | jq -e '[.[] | select(.target.name=="orders")] | length == 1'
+}
+
 @test "an app without bindings but with a same-name platform pin is refused (cross-kind identity, no lane borrowing)" {
   # 03 Comments ④의 무테스트 분기 — planApp의 resolveLane이 이름을 bespoke로 해소하면(바인딩 부재 +
   # 동명 .image-pin.json 실재) 그 이름의 apps 레인은 어느 인가도 빌려 쓰지 못하고 refuse여야 한다.
@@ -234,4 +245,63 @@ EOF
   run bun "$P" --root "$TMP" --fixtures "$FX" --dry-run
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.[] | select(.target.name=="files") | .action == "propose-pr"'
+}
+
+# ── 라이브 분기(--fixtures 부재) 증인 — seam 이관 코드(gh api·docker inspect)가 실제로 도는 유일한
+# 경로다. 위 픽스처 테스트들은 makeQuery의 fixtures 분기에서 early return하므로 이관 코드를 한 줄도
+# 밟지 않는다(d6② 동작 등가는 여기서만 실증된다). PATH stub이 원격을 대신한다.
+live_stubs() {
+  S="$BATS_TEST_TMPDIR/livebin"; mkdir -p "$S"
+  cat > "$S/gh" <<'GH'
+#!/bin/sh
+[ -n "${GH_FAIL:-}" ] && { echo "gh: api 실패(주입 — 인증/네트워크)" >&2; exit 1; }
+case "$2" in
+  repos/*/commits*) printf '[ { "sha": "bbb2222000000000000000000000000000000000" }, { "sha": "aaa1111000000000000000000000000000000000" } ]' ;;
+  repos/*/compare/*) printf '{ "status": "ahead", "ahead_by": 1 }' ;;
+  *) echo "stub gh: 예상치 못한 호출: $*" >&2; exit 3 ;;
+esac
+GH
+  cat > "$S/docker" <<'DK'
+#!/bin/sh
+case "${DOCKER_MODE:-ok}" in
+  notfound)  echo "ERROR: ghcr.io/ukyi-app/orders:sha-bbb2222...: not found" >&2; exit 1 ;;
+  transient) echo "received unexpected HTTP status: 500 Internal Server Error" >&2; exit 1 ;;
+  ok)        printf '{"digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222"}' ;;
+esac
+DK
+  chmod +x "$S/gh" "$S/docker"
+}
+
+@test "live branch: the seam-routed gh/docker path yields the same bump verdict as the fixtures path" {
+  live_stubs
+  run env PATH="$S:$PATH" DOCKER_MODE=ok bun "$P" --root "$TMP" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[0].action == "bump"'
+  echo "$output" | jq -e '.[0].candidate.digest == "sha256:2222222222222222222222222222222222222222222222222222222222222222"'
+}
+
+@test "live branch: a genuine not-found on stderr is image-absent (noop), reading the seam's captured err" {
+  # 종전 execFileSync는 e.stderr∪e.message 두 입력을 봤다 — seam 이관 후엔 r.err(trim된 stderr) 하나다.
+  # docker의 실제 실패 표면(stderr)이 isNotFound에 그대로 걸리는지를 라이브 분기로 실증한다.
+  live_stubs
+  run env PATH="$S:$PATH" DOCKER_MODE=notfound bun "$P" --root "$TMP" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[0].action == "noop"'
+  echo "$output" | jq -e '.[0].reason | test("빌드된 main 커밋 없음")'
+}
+
+@test "live branch: a transient docker failure refuses (never swallowed as absent) through the seam" {
+  live_stubs
+  run env PATH="$S:$PATH" DOCKER_MODE=transient bun "$P" --root "$TMP" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[0].action == "refuse"'
+  echo "$output" | jq -e '.[0].reason | test("transient|일시")'
+}
+
+@test "live branch: a gh api failure folds to refuse via the planner's outer catch (fail-closed preserved)" {
+  live_stubs
+  run env PATH="$S:$PATH" GH_FAIL=1 bun "$P" --root "$TMP" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[0].action == "refuse"'
+  echo "$output" | jq -e '.[0].reason | test("플랜 실패")'
 }

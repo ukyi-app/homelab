@@ -1,6 +1,6 @@
 // 외부 명령 실행 seam — 이 레포 TS 도구의 subprocess 실행이 전부 지나는 자리(lib-convergence d6).
 // 판정 정책(무엇이 실패인가·실패를 어떻게 보고하는가)은 콜사이트 소유 — 여기는 실행·캡처·관측만
-// 한다(encoding utf8·timeout 30s 고정). 명명 adapter(gh/git/kubeseal)는 sh의 커맨드 고정형이다.
+// 한다(encoding utf8 · timeout 기본 30s/0=무제한 — ExecOpts 참조). 명명 adapter(gh/git/kubeseal)는 sh의 커맨드 고정형이다.
 //
 // errKind — 실행 자체가 실패한 종류("not-found"=바이너리 부재 ENOENT · "spawn"=그 외 spawn 실패).
 // 비-0 종료는 errKind 없이 ok:false다 — rc 의미론은 콜사이트가 판정한다. doctor의 미설치 진단이
@@ -13,10 +13,13 @@ import { appendFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 export type ErrKind = "not-found" | "spawn";
-export type Cmd = { ok: boolean; out: string; err: string; errKind?: ErrKind };
-// timeoutMs — 기본 30s(느린 push/pr 경로는 콜사이트가 올린다). maxBuffer — 기본 8MiB:
-// Node 기본 1MiB는 ENOBUFS로 죽고 그 죽음이 errKind:"spawn"으로만 보인다(ensure-bump-pr가
-// 4MiB로 세 번 실측한 클래스 — 이관 클러스터가 조용히 퇴행하지 않게 seam 기본을 넉넉히 둔다).
+// status — 자식의 exit code(실행 실패·시그널 사망이면 null). rc **의미론**은 콜사이트 소유지만
+// rc **값** 자체는 seam이 나른다(bump 클러스터 이관의 실증 소비자: 러너의 `exit N` 실패 로그).
+export type Cmd = { ok: boolean; status: number | null; out: string; err: string; errKind?: ErrKind };
+// timeoutMs — 기본 30s(느린 push/pr 경로는 콜사이트가 올린다). **0 = 무제한**(종전 spawnSync
+// 무-timeout 동작을 보존해야 하는 이관 콜사이트용 — 기본값 강제는 조용한 동작 변화다).
+// maxBuffer — 기본 8MiB: Node 기본 1MiB는 ENOBUFS로 죽고 그 죽음이 errKind:"spawn"으로만 보인다
+// (ensure-bump-pr가 4MiB로 세 번 실측한 클래스 — 이관 클러스터가 조용히 퇴행하지 않게 넉넉히 둔다).
 // inherit — stdio를 부모에 물린다(대화형/스트리밍 콜사이트용 · out/err는 빈 문자열이 된다).
 export type ExecOpts = { cwd?: string; input?: string; timeoutMs?: number; maxBuffer?: number; inherit?: boolean };
 
@@ -28,9 +31,10 @@ function ledger(cmd: string, args: string[]): void {
 
 export function sh(cmd: string, args: string[], opts: ExecOpts = {}): Cmd {
   ledger(cmd, args);
+  const timeoutMs = opts.timeoutMs ?? 30_000;
   const r = spawnSync(cmd, args, {
     encoding: "utf8",
-    timeout: opts.timeoutMs ?? 30_000,
+    timeout: timeoutMs === 0 ? undefined : timeoutMs,
     maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024,
     cwd: opts.cwd,
     input: opts.input,
@@ -39,11 +43,11 @@ export function sh(cmd: string, args: string[], opts: ExecOpts = {}): Cmd {
   if (r.error) {
     const code = (r.error as NodeJS.ErrnoException).code;
     return {
-      ok: false, out: "", err: String((r.error as Error).message),
+      ok: false, status: null, out: "", err: String((r.error as Error).message),
       errKind: code === "ENOENT" ? "not-found" : "spawn",
     };
   }
-  return { ok: r.status === 0, out: r.stdout ?? "", err: (r.stderr ?? "").trim() };
+  return { ok: r.status === 0, status: r.status, out: r.stdout ?? "", err: (r.stderr ?? "").trim() };
 }
 
 export function gh(args: string[], opts: ExecOpts = {}): Cmd { return sh("gh", args, opts); }

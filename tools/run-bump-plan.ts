@@ -20,7 +20,6 @@
 //   --base      : worktree 기준 ref(기본 "main").
 //   --ensure-cmd: ensure-bump-pr 호출 커맨드(기본 "bun <이 파일 옆 ensure-bump-pr.ts>"). 테스트가 stub으로 override(내부 seam).
 
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -29,6 +28,8 @@ import { APP_NAME_RE } from "./lib/identity.ts";
 // plan 계약·명명·writer 신원은 bump-plan module이 소유한다(d3·08) — 디코드는 fail-closed고,
 // target 신원(kind+name)은 argv(--kind/--name)로 ensure-bump-pr까지 관통한다(design r2-1).
 import { WRITER_NAME, WRITER_EMAIL, decodePlan, branchFor, commitMessage, type Change, type PlanItem } from "./lib/bump-plan.ts";
+// subprocess 실행은 exec seam 경유(d6②) — timeoutMs 0으로 종전 무-timeout 동작을 보존한다.
+import { sh } from "./lib/exec.ts";
 
 const EXPORTER = "platform/victoria-stack/prod/digest-exporter.yaml";
 // 도구 경로는 러너 옆(tools/)에서 절대 해석 — cwd(worktree=대상 트리, tools/ 없을 수 있음)와 무관하게 실행.
@@ -60,10 +61,10 @@ const ensureBin = opts["--ensure-bin"] ?? "bun";
 const ensureScript = opts["--ensure-script"] ?? DEFAULT_ENSURE_SCRIPT;
 
 function run(cmd: string, args: string[], cwd: string): { ok: boolean; status: number; out: string } {
-  const r = spawnSync(cmd, args, { cwd, encoding: "utf8" });
-  // r.error(ENOENT 등 spawn 자체 실패)도 실패로 접고 로그에 남긴다(missing git/bun이 조용한 비-0 되지 않게).
-  const out = (r.stdout ?? "") + (r.stderr ?? "") + (r.error ? `\n[spawn error] ${r.error.message}` : "");
-  return { ok: r.status === 0 && !r.error, status: r.status ?? -1, out };
+  const r = sh(cmd, args, { cwd, timeoutMs: 0 });
+  // spawn 자체 실패(errKind — missing git/bun 등)도 실패로 접고 로그에 남긴다(조용한 비-0 방지).
+  const out = r.errKind !== undefined ? `[spawn error] ${r.err}` : r.out + (r.err ? `\n${r.err}` : "");
+  return { ok: r.ok, status: r.status ?? -1, out };
 }
 const git = (args: string[], cwd: string) => run("git", args, cwd);
 
@@ -133,9 +134,10 @@ for (const item of items) {
         : [`chore: ${name} 이미지 갱신 (승인 대기)`, "autoDeploy:false — **머지 = 배포 승인**. GHCR 폴링이 검증한 후보(digest 핀)."];
       // ensure-bump-pr(원격 변이 유일 소유): cwd=wt(HEAD=bump 커밋). 열린 PR·원격 브랜치 관측 후에만 변이.
       // argv seam(bin+script, split 없음)이라 경로 공백에도 안전. 신원은 (kind, name) 쌍으로 관통한다.
+      // inherit — ensure의 stdout(결과 JSON)·stderr(경고)를 워크플로 로그에 그대로 물린다(종전 stdio 동작).
       const eArgs = [ensureScript, "--kind", target.kind, "--name", name, "--tag", tag, "--action", action, "--title", title, "--body", body];
-      const e = spawnSync(ensureBin, eArgs, { cwd: wt, encoding: "utf8", stdio: ["inherit", "inherit", "inherit"] });
-      if (e.status !== 0 || e.error) { console.log(`::warning::${label}: ensure-bump-pr 실패(exit ${e.status}${e.error ? " " + e.error.message : ""})`); ok = false; }
+      const e = sh(ensureBin, eArgs, { cwd: wt, timeoutMs: 0, inherit: true });
+      if (!e.ok) { console.log(`::warning::${label}: ensure-bump-pr 실패(exit ${e.status}${e.errKind !== undefined ? " " + e.err : ""})`); ok = false; }
     }
   } finally {
     // 정리는 **모든 경로**에서 — worktree/브랜치 누적 방지. (원격은 ensure-bump-pr 소관 — 여기선 로컬만.)

@@ -186,8 +186,8 @@
 // 사실은 파싱·검증해 stdout의 `observed`에(무장 여부 포함), 실제 실행한 명령은 `executed`에 실어
 // 호출부/테스트가 "무엇을 관측하고 무엇을 변이했는가"를 검증할 수 있게 한다
 // (tools/tests/test_ensure-bump-pr.bats가 argv 원장으로 이 계약을 고정한다).
-import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { sh as shExec } from "./lib/exec.ts";
 import { TAG_RE } from "./lib/image-pin.ts";
 import {
   LANES, NS_PREFIX, branchFor, parseBranch, legacyAmbiguity, laneFor, commitMessage,
@@ -395,17 +395,19 @@ const MAX_CAPTURE = 4 * 1024 * 1024;
 // 소유권 판정은 이제 **인가 조정(auto-merge 무장/해제)의 입력**이라, 그 실패조차 "해제(안전 방향)"보다
 // 먼저 프로세스를 죽이면 안 된다(★★ 아래 순서 규칙 참고). 여기선 실패를 값으로 받아 두고,
 // 해제를 먼저 낸 다음에 fail-closed한다.
-// ⚠️ 캡처 실패(ENOBUFS)는 `r.error`로 선다 → 아래 첫 가드가 잡는다. 살해된 자식은 status=null이라
-//    둘째 가드(`status !== 0`)에도 걸린다. **잘린 stdout을 성공으로 읽는 경로는 없다.**
+// ⚠️ 캡처 실패(ENOBUFS)는 seam의 `errKind`로 선다 → 아래 첫 가드가 잡는다(seam은 그 분기에서 out을
+//    비운다). **잘린 stdout을 성공으로 읽는 경로는 없다.**
 // audit=false는 **read-only 페이지 조회 전용**(foldConnection) — 그 조회만 원장에서 뺀다. 변이 경로는
 // 전부 기본값(audit=true)으로 예전 그대로 원장에 남는다(create/push/arm/disarm·ls-remote 무변경).
 function runSoft(cmd: string, a: string[], audit = true): { failure: string | null; stdout: string } {
   if (audit) executed.push([cmd, ...a].join(" "));
-  const r = spawnSync(cmd, a, { encoding: "utf8", maxBuffer: MAX_CAPTURE });
-  if (r.error) return { failure: `실행 실패: ${r.error.message}`, stdout: "" };
-  if (r.stderr) process.stderr.write(r.stderr);
-  if (r.status !== 0) return { failure: `실패(exit ${r.status})`, stdout: r.stdout ?? "" };
-  return { failure: null, stdout: r.stdout ?? "" };
+  // 실행은 seam(d6②) 경유 — 종전 계약 보존: timeout 없음(timeoutMs 0)·캡처 경계 MAX_CAPTURE.
+  // 캡처 초과(ENOBUFS)·spawn 실패는 errKind로 선다 → 첫 가드가 잡는다(잘린 stdout을 성공으로 읽는 경로 없음).
+  const r = shExec(cmd, a, { timeoutMs: 0, maxBuffer: MAX_CAPTURE });
+  if (r.errKind !== undefined) return { failure: `실행 실패: ${r.err}`, stdout: "" };
+  if (r.err) process.stderr.write(r.err + "\n");
+  if (!r.ok) return { failure: `실패(exit ${r.status})`, stdout: r.out };
+  return { failure: null, stdout: r.out };
 }
 // 변이 명령의 stdout은 stderr로 흘린다 — 이 도구의 stdout은 결과 JSON 전용(호출부가 jq로 읽는다).
 function mutate(cmd: string, a: string[], what: string): void {

@@ -332,3 +332,34 @@ EOF
   [ "$output" = "0" ]
   no_leftover
 }
+
+@test "the seam exec ledger records the runner's per-item call sequence in-process (d6 observation adapter)" {
+  # AC(14): 한 경로의 호출 시퀀스가 인-프로세스 원장으로 검증된다 — PATH stub 없이, seam의
+  # HOMELAB_EXEC_LEDGER(JSONL)만으로 러너가 무엇을 어떤 argv로 실행했는지 본다.
+  seed_repo; plan_json bump propose-pr
+  L="$BATS_TEST_TMPDIR/exec-ledger.jsonl"
+  export HOMELAB_EXEC_LEDGER="$L"   # run_runner의 env가 상속한다(호출 형태 복제 금지)
+  run_runner 0
+  unset HOMELAB_EXEC_LEDGER
+  [ "$status" -eq 0 ]
+  [ -f "$L" ]
+  # ① 조각의 실재 — 격리 worktree 생성 → bump-tag(bun, argv로 결속) → 스테이징 → ensure(bash) → 정리.
+  grep -qF '"cmd":"git","args":["worktree","add"' "$L"
+  run grep -cE '"cmd":"bun","args":\["[^"]*bump-tag\.ts"' "$L"   # bun 호출이 곧 bump-tag임을 argv로 못박는다
+  [ "$output" = "2" ]
+  grep -qF '"cmd":"git","args":["add"' "$L"
+  grep -qF '"cmd":"bash"' "$L"
+  grep -qF '"cmd":"git","args":["worktree","remove"' "$L"
+  grep -qF '"cmd":"git","args":["branch","-D"' "$L"
+  # ② 순서 — 첫 worktree add가 어떤 정리(branch -D)보다도 앞이고, 마지막 정리가 마지막 add 뒤다.
+  first_add="$(grep -nF '"cmd":"git","args":["worktree","add"' "$L" | head -1 | cut -d: -f1)"
+  first_del="$(grep -nF '"cmd":"git","args":["branch","-D"' "$L" | head -1 | cut -d: -f1)"
+  last_add="$(grep -nF '"cmd":"git","args":["worktree","add"' "$L" | tail -1 | cut -d: -f1)"
+  last_del="$(grep -nF '"cmd":"git","args":["branch","-D"' "$L" | tail -1 | cut -d: -f1)"
+  [ -n "$first_add" ]; [ -n "$first_del" ]
+  [ "$first_add" -lt "$first_del" ]
+  [ "$last_add" -lt "$last_del" ]
+  # ③ 개수 — 항목당 git 5회(worktree add·add·commit·worktree remove·branch -D) × 2항목 = 정확히 10.
+  n="$(grep -cF '"cmd":"git"' "$L")"
+  [ "$n" -eq 10 ]
+}

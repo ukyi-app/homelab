@@ -13,8 +13,10 @@
 //
 // 이 스크립트는 플래너(읽기 전용)다 — 실제 bump/PR은 bump-poll.yaml이 plan JSON을 소비해 수행.
 import { readFileSync, existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import path from "node:path";
+// subprocess 실행은 exec seam 경유(d6②) — timeoutMs 0으로 종전 무-timeout 동작을 보존한다.
+// 판정 정책(진짜 404만 absent·transient는 rethrow→refuse)은 아래 콜사이트가 그대로 소유한다.
+import { gh as ghExec, sh } from "./lib/exec.ts";
 import { parse } from "yaml";
 import { TAG_RE, parseInlinePin, parseDescriptor } from "./lib/image-pin.ts";
 import { listUnits } from "./lib/repo-walk.ts";
@@ -76,21 +78,28 @@ function makeQuery(app: string) {
       },
     };
   }
-  const gh = (p: string) => JSON.parse(execFileSync("gh", ["api", p], { encoding: "utf8" }));
+  const gh = (p: string) => {
+    const r = ghExec(["api", p], { timeoutMs: 0 });
+    // 실패는 throw — planApp/planComponent의 outer catch가 refuse로 접는다(fail-closed 보존).
+    if (!r.ok) throw new Error(`gh api ${p} 실패: ${r.err || `exit ${r.status}`}`);
+    return JSON.parse(r.out);
+  };
   return {
     commits: (src: string) => gh(`repos/${src}/commits?sha=main&per_page=30`),
     compare: (src: string, base: string, head: string) => gh(`repos/${src}/compare/${base}...${head}`),
     manifest: (repo: string, tag: string) => {
+      const r = sh(
+        "docker", ["buildx", "imagetools", "inspect", `${repo}:${tag}`, "--format", "{{json .Manifest}}"],
+        { timeoutMs: 0 },
+      );
+      if (!r.ok) {
+        if (isNotFound(r.err)) return null; // 진짜 404 — 미빌드 커밋
+        throw new Error(`manifest 조회 일시 오류(transient, rethrow→refuse): ${r.err || `exit ${r.status}`}`);
+      }
       try {
-        const out = execFileSync(
-          "docker", ["buildx", "imagetools", "inspect", `${repo}:${tag}`, "--format", "{{json .Manifest}}"],
-          { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-        );
-        return { digest: JSON.parse(out).digest };
+        return { digest: JSON.parse(r.out).digest };
       } catch (e: any) {
-        const stderr = (e.stderr ?? "").toString();
-        if (isNotFound(stderr) || isNotFound(e.message)) return null; // 진짜 404 — 미빌드 커밋
-        throw new Error(`manifest 조회 일시 오류(transient, rethrow→refuse): ${stderr || e.message}`);
+        throw new Error(`manifest 조회 일시 오류(transient, rethrow→refuse): ${e.message}`);
       }
     },
   };
