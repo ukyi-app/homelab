@@ -33,34 +33,25 @@ FIX_ALERT=AdguardRewriteDriftFixed
 HB=adguard_rewrite_reconcile_timestamp
 FIX_METRIC=adguard_rewrite_last_fix_timestamp
 
-# ── 1) 배포 매니페스트에서 파라미터 파생(하드코딩 0) ───────────────────────────────────────────────
-vme_derive_stack_params "$STACK"
+# ── 1) 시나리오 기동 — 파라미터 파생·작업공간·배포 룰 추출의 조립 순서는 lib(vme_scenario)이 소유한다 ──
+vme_scenario "r4agrw-e2e-net-$$" "$STACK" "$RULES_CM" "r4.yaml"
 
 # 리컨실러 크론 주기 = push 주기. 룰의 rollup 윈도 하한이 여기서 나온다.
 CRON_MIN="$(grep -oE '^  schedule: "\*/([0-9]+) ' "$RECONCILER" | grep -oE '[0-9]+' || true)"
 [ -n "$CRON_MIN" ] || vme_fault "리컨실러 크론 주기 추출 실패($RECONCILER) — push 주기를 모르면 rollup 하한을 판정할 수 없다"
 PUSH_S=$(( CRON_MIN * 60 ))
 
-vme_workspace "r4agrw-e2e-net-$$"
-
-# ── 2) 배포 ConfigMap에서 룰 바이트 그대로 추출 ────────────────────────────────────────────────────
-# ⚠️ 룰을 여기에 재작성하면 "배포된 것"이 아니라 "내가 적은 것"을 검증하게 된다.
-# ⚠️ 추출은 **yq**로 한다(형제 하네스와 같은 도구). PyYAML은 설치 보장이 없어 하네스가 환경에 따라
-#    조용히 못 도는 자리가 된다 — 실측으로 겪었다.
-yq '.data["r4.yaml"]' "$RULES_CM" > "$VME_TMP/r4-deployed.yaml"
-[ -s "$VME_TMP/r4-deployed.yaml" ] || vme_fault "룰 추출 실패: $RULES_CM"
-
 for a in "$STALE_ALERT" "$FIX_ALERT"; do
-  grep -q "alert: $a" "$VME_TMP/r4-deployed.yaml" \
+  grep -q "alert: $a" "$VME_RULES" \
     || vme_fault "배포 룰에 'alert: $a' 부재 — 하네스가 아무것도 측정하지 않는다"
 done
 
-STALE_EXPR="$(vme_alert_expr "$VME_TMP/r4-deployed.yaml" "$STALE_ALERT")"
+STALE_EXPR="$(vme_alert_expr "$VME_RULES" "$STALE_ALERT")"
 [ -n "$STALE_EXPR" ] || vme_fault "$STALE_ALERT: expr 추출 실패"
-STALE_FOR="$(vme_alert_for "$VME_TMP/r4-deployed.yaml" "$STALE_ALERT")"
+STALE_FOR="$(vme_alert_for "$VME_RULES" "$STALE_ALERT")"
 [ -n "$STALE_FOR" ] || vme_fault "$STALE_ALERT: for: 부재(무매치 또는 키 없음) — 발화 경계를 판정할 수 없다"
 STALE_FOR_S="$(vme_to_s "$STALE_FOR")"
-FIX_EXPR="$(vme_alert_expr "$VME_TMP/r4-deployed.yaml" "$FIX_ALERT")"
+FIX_EXPR="$(vme_alert_expr "$VME_RULES" "$FIX_ALERT")"
 [ -n "$FIX_EXPR" ] || vme_fault "$FIX_ALERT: expr 추출 실패"
 
 # 임계 상수는 **룰에서 파생**한다(하드코딩하면 룰이 바뀔 때 하네스가 조용히 낡는다).
@@ -153,13 +144,12 @@ run_scenario() { # $1=시나리오
   scen="$1"
   vm="r4agrw-$scen-$$"
   docker rm -f "$vm" >/dev/null 2>&1 || true
-  vme_start_vmsingle "$vm" "$VME_VM_VER"
   gen "$VME_TMP/$scen.jsonl" "$scen"
-  vme_import "$VME_TMP/$scen.jsonl"
+  vme_leg "$vm" "$VME_TMP/$scen.jsonl"
   # 백필 sanity — 임포트가 조용히 비면 모든 레그가 거짓 통과한다(fail-closed).
   [ "$(vme_promql "count(count_over_time(harness_alive[${SPAN_S}s]))")" -ge 1 ] \
     || vme_fault "백필 sanity 실패($scen): harness_alive 시리즈 0 — 임포트가 비었다"
-  vme_replay "$vm" "$VME_VA_VER" "$VME_TMP/r4-deployed.yaml" "$VME_EVAL" "$VME_LOOKBACK" "$FROM_EPOCH" "$TO_EPOCH"
+  vme_replay "$vm" "$VME_VA_VER" "$VME_RULES" "$VME_EVAL" "$VME_LOOKBACK" "$FROM_EPOCH" "$TO_EPOCH"
 }
 
 echo "[window] replay $(vme_iso "$FROM_EPOCH") .. $(vme_iso "$TO_EPOCH") (${SPAN_S}s) | push=${PUSH_S}s"

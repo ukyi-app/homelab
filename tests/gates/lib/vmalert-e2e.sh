@@ -18,6 +18,7 @@ VME_BASE=""         # 최근 기동한 vmsingle의 http base URL
 VME_QUERY_ARGS=()   # vme_query_args가 조립하는 curl 인자
 VME_W=""            # vme_assert_rollup_ok의 출력: rollup 윈도(예 2h — 부재+skip 정책이면 빈 값)
 VME_W_S=0           # vme_assert_rollup_ok의 출력: 같은 윈도(초 — 부재 시 0)
+VME_RULES=""        # vme_scenario의 출력: 배포 ConfigMap에서 추출한 룰 파일 경로
 
 # 30s|5m|2h|3d(단위 없으면 초) → 초.
 # ⚠️ **fail-closed**: 빈 값·비수치는 즉시 FAULT다. 예전엔 인식 못 한 입력을 **그대로 되돌려줬는데**, 그게
@@ -359,4 +360,38 @@ vme_workspace() { # $1=docker 네트워크명 → VME_TMP 생성 + EXIT trap(컨
   VME_TMP="$(mktemp -d)"
   trap 'vme_cleanup; rm -rf "${VME_TMP:-}"' EXIT
   vme_net_up "$1"
+}
+
+# ── 시나리오 interface(d5) — 조립의 암묵 순서를 lib 내부로 접는다 ────────────────────────────────
+# 마찰의 근원은 전역 VME_*가 아니라 **암묵 순서**였다(체이닝 레이스 2건 전부 순서 사고). 하네스가
+# derive → workspace → 룰 추출을 직접 나열하면 그 순서가 호출자 문서가 되고, 한 곳이 어긋나면
+# "VME_TMP: unbound" 같은 잡음 크래시나 빈 룰 vacuous green으로 돌아온다 — 그래서 여기가 소유한다.
+# 전역 VME_* 출력 변수 계약은 그대로다(+ VME_RULES: 추출된 배포 룰 파일 경로).
+#
+# 설계 문구의 4단계(workspace → derive → start → import) 중 start·import는 **레그마다 반복**이라
+# (실측 5/5 하네스 — 시나리오 라벨별 새 vmsingle) 톱레벨 1회 조립은 vme_scenario가, 레그 미니-조립
+# (start → import)은 vme_leg가 나눠 소유한다 — 순서 소유라는 목적은 같고 함수 경계만 실측 구조를 따른다.
+vme_scenario() { # $1=net $2=stack 디렉토리 $3=룰 ConfigMap(yaml) $4=.data 키(예 r4.yaml) → VME_RULES 설정
+  local net="$1" stack="$2" cm="$3" key="$4"
+  vme_derive_stack_params "$stack"
+  vme_workspace "$net"
+  VME_RULES="$VME_TMP/deployed-rules.yaml"
+  # 룰은 배포 ConfigMap에서 **바이트 그대로** 추출한다(재작성하면 "배포된 것"이 아니라 "내가 적은 것"을
+  # 검증하게 된다). 추출은 **yq**로 한다 — PyYAML은 설치 보장이 없어 하네스가 환경에 따라 조용히 못
+  # 도는 자리가 된다(실측으로 겪었다). yq는 부재 키에 리터럴 `null`을 주므로 [ -s ]만으로는
+  # fail-closed가 안 된다 — 전체 비교로 함께 거르고, stderr는 fault에 동봉한다(yq 미설치/파싱 오류/
+  # 키 부재 세 갈래가 한 줄로 붕괴하지 않게 — 이 lib의 "런타임 stderr verbatim" 문화).
+  local yq_err=""
+  yq_err="$( { yq ".data[\"$key\"]" "$cm" > "$VME_RULES"; } 2>&1 )" || : > "$VME_RULES"
+  if [ ! -s "$VME_RULES" ] || [ "$(tr -d '[:space:]' < "$VME_RULES")" = "null" ]; then
+    vme_fault "룰 추출 실패: $cm (.data[\"$key\"]) — 빈 룰로 진행하면 하네스가 아무것도 측정하지 않는다${yq_err:+. yq stderr: ${yq_err}}"
+  fi
+}
+
+vme_leg() { # $1=vmsingle 컨테이너명 $2=fixture(jsonl) [$3..=vmsingle 추가 플래그] — 레그 기동의 순서 소유
+  # start가 import보다 앞이어야 한다(VME_BASE는 start의 출력이다) — 그 의존을 호출자가 알 필요가 없다.
+  local vm="$1" fixture="$2"
+  shift 2
+  vme_start_vmsingle "$vm" "$VME_VM_VER" "$@"
+  vme_import "$fixture"
 }

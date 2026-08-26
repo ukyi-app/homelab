@@ -105,7 +105,10 @@ band_assert() {
   # 열거 붕괴 방어 — 0건이면 아래 루프가 vacuous하게 통과한다(형제 test_vmalert-e2e-replay-timing과 동형).
   [ "$n" -ge 3 ]
   for f in $hs; do
-    run grep -q 'vme_start_vmsingle' "$f"
+    # d5 이후 기동은 vme_leg(레그 조립 — start를 lib 내부에서 부른다) 경유가 표준이다. bulkssd는
+    # 아직 vme_start_vmsingle 직접 호출(09 이관 대기)이라 둘 다 lib 경유로 인정한다 — 09 착지 후
+    # vme_leg 하나로 좁힌다. 어느 쪽이든 포트 추첨은 lib(_vme_pick_port)만 지난다.
+    run grep -qE 'vme_leg |vme_start_vmsingle' "$f"
     [ "$status" -eq 0 ]
   done
 }

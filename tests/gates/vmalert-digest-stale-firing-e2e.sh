@@ -92,34 +92,32 @@ N_SCRAPED_PARTIAL=1   # 부분 수집 실패 → SCRAPE_ALERT 발화(L4)
 N_ZERO=0              # zero-app(마지막 앱 teardown) → `0 < 0`이 거짓이라 침묵(L6 — owner 결정 ④)
 
 # ── 1) 배포 매니페스트에서 파라미터 파생(하드코딩 0) ───────────────────────────────────────────────
-vme_derive_stack_params "$STACK"
+# 파라미터 파생·작업공간·룰 추출의 조립 순서는 lib(vme_scenario)이 소유한다 — 아래 한 호출이 기동이다.
 
 # producer(digest-exporter) 계약 — 부트스트랩 상한의 입력. **파생 실패 = 즉시 CONTRACT**(fail-closed):
 # 빈 값을 그대로 산술에 넣으면 부등식이 참으로 평가돼 상한을 하나도 강제하지 못한 채 게이트가 통과한다.
 deb_load "$EXPORTER" || vme_contract "digest-exporter 예산 파생 실패(위 stderr 참조) — 지연 상한의 입력을 모른 채로는 부트스트랩 부등식이 무의미하다."
 
-# ── 2) 배포 ConfigMap에서 룰 바이트 그대로 추출 ────────────────────────────────────────────────────
-vme_workspace "r4dgst-e2e-net-$$"
+# ── 2) 시나리오 기동 — 파라미터 파생·작업공간·배포 룰 추출의 조립 순서는 lib(vme_scenario)이 소유한다 ──
+vme_scenario "r4dgst-e2e-net-$$" "$STACK" "$RULES_CM" "r4.yaml"
 
-yq '.data["r4.yaml"]' "$RULES_CM" > "$VME_TMP/r4-deployed.yaml"
-[ -s "$VME_TMP/r4-deployed.yaml" ] || vme_fault "룰 추출 실패: $RULES_CM"
 cp "$FIXTURES/r4-digest-stale-buggy-expr.yaml" "$VME_TMP/r4-buggy.yaml"
 
 # fail-closed: 하네스가 겨냥하는 룰이 실제로 존재하는지(리네임 시 무성 무측정 방지)
 for want in "alert: $ALERT" "alert: $SCRAPE_ALERT" "alert: $CONTROL"; do
-  grep -q "$want" "$VME_TMP/r4-deployed.yaml" || vme_fault "배포 룰에 '$want' 부재 — 하네스가 아무것도 측정하지 않는다"
+  grep -q "$want" "$VME_RULES" || vme_fault "배포 룰에 '$want' 부재 — 하네스가 아무것도 측정하지 않는다"
 done
 grep -q "alert: $ALERT" "$VME_TMP/r4-buggy.yaml" || vme_fault "결함 픽스처에 'alert: $ALERT' 부재 — L3가 무측정"
 
 # ⚠️ expr·for: 파생은 **전부 fail-closed**다(빈 값 = 즉시 FAULT). 룰에서 `for:`가 사라지면 yq가 `null`을
 #    주는데, 가드가 없으면 그 `null`이 산술까지 흘러가 "null: unbound variable" 잡음 크래시로 죽는다
 #    (깔끔한 CONTRACT가 아니라 하네스 버그처럼 보인다). 파생 실패는 룰 판정이 아니라 **전제 붕괴**다.
-EXPR="$(vme_alert_expr "$VME_TMP/r4-deployed.yaml" "$ALERT")"
+EXPR="$(vme_alert_expr "$VME_RULES" "$ALERT")"
 [ -n "$EXPR" ] || vme_fault "배포 룰에서 $ALERT expr 추출 실패"
-FOR="$(vme_alert_for "$VME_TMP/r4-deployed.yaml" "$ALERT")"
+FOR="$(vme_alert_for "$VME_RULES" "$ALERT")"
 [ -n "$FOR" ] || vme_fault "배포 룰에서 ${ALERT}의 for: 추출 실패(부재/null) — for:가 없으면 절이 즉시 발화하므로 부트스트랩 상한(①)도 발화 경계(⑤)도 판정할 수 없다."
 FOR_S="$(vme_to_s "$FOR")"
-CTRL_FOR="$(vme_alert_for "$VME_TMP/r4-deployed.yaml" "$CONTROL")"
+CTRL_FOR="$(vme_alert_for "$VME_RULES" "$CONTROL")"
 [ -n "$CTRL_FOR" ] || vme_fault "배포 룰에서 대조 알림 ${CONTROL}의 for: 추출 실패(부재/null) — replay 길이를 그 for:에서 파생하므로 음성 레그의 vacuity 차단이 무너진다."
 CTRL_FOR_S="$(vme_to_s "$CTRL_FOR")"
 # staleness 임계 T — expr의 `> N`에서 파생(하드코딩 금지).
@@ -127,9 +125,9 @@ T_S="$(grep -oE '>[[:space:]]*[0-9]+' <<<"$EXPR" | head -1 | grep -oE '[0-9]+' |
 [ -n "$T_S" ] || vme_fault "$ALERT expr에서 staleness 임계(> N)를 파생하지 못했다"
 
 # 수집 카운트 알림(US2) — 같은 파일에서 파생(하드코딩 0).
-SCRAPE_EXPR="$(vme_alert_expr "$VME_TMP/r4-deployed.yaml" "$SCRAPE_ALERT")"
+SCRAPE_EXPR="$(vme_alert_expr "$VME_RULES" "$SCRAPE_ALERT")"
 [ -n "$SCRAPE_EXPR" ] || vme_fault "배포 룰에서 $SCRAPE_ALERT expr 추출 실패"
-SCRAPE_FOR="$(vme_alert_for "$VME_TMP/r4-deployed.yaml" "$SCRAPE_ALERT")"
+SCRAPE_FOR="$(vme_alert_for "$VME_RULES" "$SCRAPE_ALERT")"
 [ -n "$SCRAPE_FOR" ] || vme_fault "배포 룰에서 ${SCRAPE_ALERT}의 for: 추출 실패(부재/null) — for:가 없으면 단발 GHCR 블립에도 즉시 페이징하고, L4/L6의 발화 경계 산술(⑨)이 성립하지 않는다."
 SCRAPE_FOR_S="$(vme_to_s "$SCRAPE_FOR")"
 
@@ -221,10 +219,9 @@ run_leg() { # $1=label $2=rules-file $3=scenario $4=기대 하트비트 샘플 �
   # ⚠️ $5/$6은 **카운트 값**이다 — 하네스가 SSOT이고 gen.py는 argv로 받는다(리터럴 3중 사본 금지).
   #    카운트를 심지 않는 시나리오(stale/absent/bootstrap)도 인자는 받는다(gen.py가 무시한다).
   local label="$1" rules="$2" scenario="$3" want_hb="$4" cfg="$5" scr="$6" vm="r4dgst-e2e-$1-$$"
-  vme_start_vmsingle "$vm" "$VME_VM_VER"
   python3 "$GEN" "$scenario" "$RP_FROM" "$RP_TO" "$DEB_CRON_PERIOD_S" "$BOUND_S" "$STALE_LAST" "$BACKFILL_N" \
     "$cfg" "$scr" > "$VME_TMP/$label.jsonl"
-  vme_import "$VME_TMP/$label.jsonl"
+  vme_leg "$vm" "$VME_TMP/$label.jsonl"
 
   # 백필 sanity: 임포트가 조용히 비면 모든 레그가 거짓 통과한다(fail-closed).
   local got
@@ -273,7 +270,7 @@ verdict_engages_never_fires() { # $1=firing $2=pending $3=PASS $4=FAIL(발화함
 }
 
 # ── L1(stale-샘플 가지): 하트비트가 끊긴 지 임계 초과 → 발화해야 함 ────────────────────────────────
-run_leg l1-stale "$VME_TMP/r4-deployed.yaml" stale $(( BACKFILL_N + 1 )) "$N_CFG" "$N_SCRAPED_OK"
+run_leg l1-stale "$VME_RULES" stale $(( BACKFILL_N + 1 )) "$N_CFG" "$N_SCRAPED_OK"
 F1="$(vme_firing "$ALERT")"; P1="$(vme_pending "$ALERT")"
 echo "  [L1] deployed rule + heartbeat stopped $(( RP_FROM - STALE_LAST ))s before replay → $ALERT firing=$F1 pending=$P1"
 verdict_fires "$F1" "$P1" \
@@ -282,7 +279,7 @@ verdict_fires "$F1" "$P1" \
 drop_leg l1-stale
 
 # ── L2(음성 대조): 정상 하트비트 + 같은(비-0) 카운트 → **두 알림 모두** 침묵. + 대조 알림으로 vacuity 차단 ──
-run_leg l2-healthy "$VME_TMP/r4-deployed.yaml" healthy $(( BACKFILL_N + RP_LEN / DEB_CRON_PERIOD_S + 1 )) "$N_CFG" "$N_SCRAPED_OK"
+run_leg l2-healthy "$VME_RULES" healthy $(( BACKFILL_N + RP_LEN / DEB_CRON_PERIOD_S + 1 )) "$N_CFG" "$N_SCRAPED_OK"
 F2="$(vme_firing "$ALERT")"; P2="$(vme_pending "$ALERT")"; C2="$(vme_firing "$CONTROL")"
 SF2="$(vme_firing "$SCRAPE_ALERT")"; SP2="$(vme_pending "$SCRAPE_ALERT")"
 echo "  [L2] deployed rules + healthy heartbeat every ${DEB_CRON_PERIOD_S}s + counts ${N_SCRAPED_OK}/${N_CFG} → $ALERT firing=$F2 pending=$P2 · $SCRAPE_ALERT firing=$SF2 pending=$SP2 (control $CONTROL firing=$C2)"
@@ -320,7 +317,7 @@ drop_leg l3-buggy
 #   수집만 부분 실패한 이 고장은 DigestExporterStale이 **원리적으로 못 잡는다**(직교 축). 지금 코드는
 #   `[ -z "$DIGEST" ] && continue`로 그 앱을 조용히 스킵할 뿐이라, 이 알림이 없으면 드리프트 감시에서
 #   앱이 소리 없이 빠진다.
-run_leg l4-incomplete "$VME_TMP/r4-deployed.yaml" incomplete $(( BACKFILL_N + RP_LEN / DEB_CRON_PERIOD_S + 1 )) "$N_CFG" "$N_SCRAPED_PARTIAL"
+run_leg l4-incomplete "$VME_RULES" incomplete $(( BACKFILL_N + RP_LEN / DEB_CRON_PERIOD_S + 1 )) "$N_CFG" "$N_SCRAPED_PARTIAL"
 CFG4="$(vme_promql "last_over_time(${CFG_METRIC}[30d])")"; SCR4="$(vme_promql "last_over_time(${SCRAPED_METRIC}[30d])")"
 F4="$(vme_firing "$SCRAPE_ALERT")"; P4="$(vme_pending "$SCRAPE_ALERT")"; HF4="$(vme_firing "$ALERT")"
 echo "  [L4] deployed rule + healthy heartbeat + counts scraped=$SCR4 < configured=$CFG4 → $SCRAPE_ALERT firing=$F4 pending=$P4 ($ALERT firing=$HF4)"
@@ -338,7 +335,7 @@ drop_leg l4-incomplete
 # ── L5(absent 가지): 하트비트 샘플 전무 → 발화해야 함 ──────────────────────────────────────────────
 # L1(stale 샘플)과 **다른 코드 경로**다 — `or absent(last_over_time(...))` 가지의 유일한 증명.
 # 이 가지가 없으면 "한 번도 push된 적 없음"(exporter가 애초에 못 뜸 / [W] 만료)이 **빈 벡터 = 침묵**이 된다.
-run_leg l5-absent "$VME_TMP/r4-deployed.yaml" absent 0 "$N_CFG" "$N_SCRAPED_OK"
+run_leg l5-absent "$VME_RULES" absent 0 "$N_CFG" "$N_SCRAPED_OK"
 F5="$(vme_firing "$ALERT")"; P5="$(vme_pending "$ALERT")"
 echo "  [L5] deployed rule + NO heartbeat samples at all → $ALERT firing=$F5 pending=$P5"
 verdict_fires "$F5" "$P5" \
@@ -353,7 +350,7 @@ drop_leg l5-absent
 #   추가하면 여기서 죽는다. 음성 레그이므로 vacuity 차단을 이중으로 건다 —
 #   ①카운트 시리즈가 **실제로 존재**한다(0 값으로 발행됨 — 미발행이면 빈 벡터라 우연히 조용할 뿐이다)
 #   ②대조 알림이 같은 replay에서 발화한다(vmalert가 실제로 룰을 평가하고 ALERTS를 썼다).
-run_leg l6-zeroapp "$VME_TMP/r4-deployed.yaml" zeroapp $(( BACKFILL_N + RP_LEN / DEB_CRON_PERIOD_S + 1 )) "$N_ZERO" "$N_ZERO"
+run_leg l6-zeroapp "$VME_RULES" zeroapp $(( BACKFILL_N + RP_LEN / DEB_CRON_PERIOD_S + 1 )) "$N_ZERO" "$N_ZERO"
 PRESENT6="$(vme_series_count "last_over_time(${CFG_METRIC}[30d])")"
 CFG6="$(vme_promql "last_over_time(${CFG_METRIC}[30d])")"; SCR6="$(vme_promql "last_over_time(${SCRAPED_METRIC}[30d])")"
 F6="$(vme_firing "$SCRAPE_ALERT")"; P6="$(vme_pending "$SCRAPE_ALERT")"; C6="$(vme_firing "$CONTROL")"
@@ -370,7 +367,7 @@ drop_leg l6-zeroapp
 # 최초 배포의 최악 시나리오다: 이력이 없어 absent(...)가 즉시 pending에 들어간다. for:가 강제 상한보다
 # 크므로 첫 하트비트가 반드시 pending을 리셋한다 → **롤아웃이 원인인 거짓 페이지가 구조적으로 불가능**.
 # 단언 3개: ①pending>0(레그가 vacuous하지 않다 — 룰이 실제로 engage했다) ②발화 경계를 넘겨 replay ③firing==0.
-run_leg l7-bootstrap "$VME_TMP/r4-deployed.yaml" bootstrap $(( (RP_LEN - BOUND_S) / DEB_CRON_PERIOD_S + 1 )) "$N_CFG" "$N_SCRAPED_OK"
+run_leg l7-bootstrap "$VME_RULES" bootstrap $(( (RP_LEN - BOUND_S) / DEB_CRON_PERIOD_S + 1 )) "$N_CFG" "$N_SCRAPED_OK"
 F7="$(vme_firing "$ALERT")"; P7="$(vme_pending "$ALERT")"
 echo "  [L7] deployed rule + first heartbeat arriving exactly at the enforced bound (${BOUND_S}s), replay runs ${RP_LEN}s (> bound+for:=${NEED_L7}s) → firing=$F7 pending=$P7"
 verdict_engages_never_fires "$F7" "$P7" \
