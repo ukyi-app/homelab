@@ -99,6 +99,144 @@ c" ]
   [ "$status" -ne 0 ]
 }
 
+# ── take_floors — --floor 어휘의 셸 adapter(kernel-followups 01, TS takeFloors 동형) ───────────
+# 허용 라벨을 **선언 선행**으로 받는다 — TS는 guardMain ⓪가 파싱 뒤 전건 매칭을 검증하지만
+# 셸엔 실행 커널이 없어, 파싱 시점 검증(잊을 수 없는 자리)이 등가물이다.
+
+@test "take_floors strips --floor pairs and leaves the rest of argv intact" {
+  run bash -c '. "$1"; take_floors "check-x:aa check-x:bb check-x:cc" --floor aa=3 --keep v --floor check-x:bb=7
+    printf "%s\n" "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
+    floor_of check-x:aa 99; floor_of check-x:bb 99; floor_of check-x:aa 42; floor_of check-x:cc 42' _ "$LIB"
+  [ "$status" -eq 0 ]
+  # 잔여 argv는 내용과 **순서**가 보존된다(개별 존재만 보면 순서 뒤집기 뮤테이션이 통과한다).
+  echo "$output" | grep -A1 '^--keep$' | grep -q '^v$'
+  out="$output"
+  run grep -q '^7$' <<<"$out"
+  [ "$status" -eq 0 ]
+  run grep -c '^3$' <<<"$out"
+  [ "$output" = "2" ]   # 접미사 키(aa)가 전체 라벨로 정규화돼 두 조회가 같은 값을 본다
+  # 미오버라이드 도메인은 콜사이트 기본값으로 떨어진다(TS floorOf의 dflt 축과 동형).
+  run grep -q '^42$' <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
+@test "take_floors keeps working when --floor is the only argv (empty rest under set -u)" {
+  # bash 3.2~4.3의 빈 배열 확장 함정 — 콜사이트 관용구 `"${REST_ARGV[@]+"${REST_ARGV[@]}"}"`가
+  # set -u에서 사는지 커널 계약으로 못박는다.
+  run bash -c 'set -u; . "$1"; take_floors "check-x" --floor check-x=5
+    set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
+    echo "argc=$#"; floor_of check-x 99' _ "$LIB"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^argc=0$'
+  echo "$output" | grep -q '^5$'
+}
+
+@test "floor_set distinguishes an explicit floor from the default (fixture-only semantics)" {
+  # check-image-pins의 MIN_SCAN_APPS_SET 의미론("명시하면 픽스처에서도 적용")이 커널로 접힌다.
+  run bash -c '. "$1"; take_floors "check-x:aa check-x:bb" --floor aa=0
+    floor_set check-x:aa && echo "aa=set"; floor_set check-x:bb || echo "bb=default"' _ "$LIB"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^aa=set$'
+  echo "$output" | grep -q '^bb=default$'
+}
+
+@test "an unmatched --floor domain key is a usage error, not a silently disabled floor" {
+  run bash -c '. "$1"; take_floors "check-x:aa" --floor bogus=9' _ "$LIB"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "bogus"
+  echo "$output" | grep -q "조용히 꺼진 바닥값"
+}
+
+@test "a --floor key matching two domains is rejected as ambiguous" {
+  run bash -c '. "$1"; take_floors "check-x:dup check-y:dup" --floor dup=5' _ "$LIB"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "전체 라벨로 지정하라"
+  run bash -c '. "$1"; take_floors "check-x:dup check-y:dup" --floor check-x:dup=5; floor_of check-x:dup 99' _ "$LIB"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^5$'
+}
+
+@test "a malformed --floor value fails loud (empty, non-numeric, missing operand)" {
+  # 값 오류와 형식 오류는 문구가 다른 사고다 — 하나로 뭉개는 뮤테이션이 rc 단언만으로는 통과한다.
+  for spec in "caps=" "caps=abc" "caps=-1"; do
+    run bash -c '. "$1"; take_floors "check-x:caps" --floor "$2"' _ "$LIB" "$spec"
+    [ "$status" -eq 2 ]
+    echo "spec=$spec: $output" | grep -q "음이 아닌 정수"
+  done
+  for spec in "abc" ""; do
+    run bash -c '. "$1"; take_floors "check-x:caps" --floor "$2"' _ "$LIB" "$spec"
+    [ "$status" -eq 2 ]
+    echo "spec=$spec: $output" | grep -q -- "--floor 형식은"
+  done
+  run bash -c '. "$1"; take_floors "check-x:caps" --floor' _ "$LIB"
+  [ "$status" -eq 2 ]
+}
+
+@test "a repeated --floor key resolves last-wins, across suffix and full-label spellings" {
+  # TS Map.set 동형 — 접미사 키도 전체 라벨로 정규화해 저장하므로 혼용 반복도 마지막 값이 이긴다.
+  run bash -c '. "$1"; take_floors "check-x:aa" --floor aa=3 --floor check-x:aa=9 --floor aa=5
+    floor_of check-x:aa 99' _ "$LIB"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^5$'
+}
+
+@test "an empty allowed-label declaration is a usage error (TS empty-domains parity)" {
+  run bash -c '. "$1"; take_floors "" --root x' _ "$LIB"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "허용 라벨이 비었다"
+}
+
+@test "a colon-free label coexisting with suffixed labels does not self-collide (mixed declaration)" {
+  # 콜론 없는 라벨은 자기 접미사가 자기 자신이다 — 전체·접미사 두 조건이 한 if의 ||로 묶여
+  # hits가 1회만 증가해야 모호 오발화가 없다(check-image-pins류 혼합 선언의 하중 부품).
+  run bash -c '. "$1"; take_floors "check-y check-y:apps" --floor check-y=4 --floor apps=6
+    floor_of check-y 99; floor_of check-y:apps 99' _ "$LIB"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^4$'
+  echo "$output" | grep -q '^6$'
+}
+
+@test "a leading-zero floor value is decimal, never octal (the low-floor direction is blocked)" {
+  run bash -c '. "$1"; take_floors "check-x" --floor check-x=010; floor_of check-x 99' _ "$LIB"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^10$'
+}
+
+@test "an IFS override at the callsite cannot silently disable the floor matching" {
+  # 리뷰 실측 — IFS에 콜론이 들어가면 선언 순회가 무너져 정상 키가 조용히 기본값으로 떨어졌다
+  # (fail-open). 커널이 순회 구간에서 IFS·글롭을 고정한다.
+  run bash -c '. "$1"; IFS=$'"'"' \t\n:'"'"'; take_floors "check-x:aa" --floor aa=3; floor_of check-x:aa 99' _ "$LIB"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^3$'
+}
+
+@test "floor_of without a prior take_floors resolves to the default (no raw unbound diagnostics)" {
+  # source 시점 초기화 — 커맨드 치환 안에서 서브셸만 죽어 빈 문자열 + rc 0이 되던 갈래가
+  # "항상 기본값"이라는 하나의 의미로 수렴한다(그때 argv의 --floor는 콜사이트 argv 루프 소관).
+  run bash -c 'set -u; . "$1"; echo "min=$(floor_of check-x 7)"; floor_set check-x || echo "not-set"' _ "$LIB"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^min=7$'
+  echo "$output" | grep -q '^not-set$'
+}
+
+@test "the take_floors declared labels are a subset of the emitted scan labels (typo goes red)" {
+  # 선언은 콜사이트 손 문자열이라 TS(선언 = 마커 리터럴)만큼 강하지 않다 — 선언 오타는 조용히
+  # 꺼진 바닥값이 된다(리뷰 실측). 이 정적 대조가 그 등가물이다: 선언 라벨은 반드시 어딘가의
+  # scan_floor/scan_signal 콜사이트 라벨이어야 한다.
+  static="$(grep -hE '^[^#]*\b(scan_floor|scan_signal) ' "$ROOT"/scripts/*.sh \
+            | grep -oE '(scan_floor|scan_signal) [a-z0-9:-]+' | awk '{print $2}' | LC_ALL=C sort -u)"
+  declared="$(grep -hE '^[^#]*\btake_floors "' "$ROOT"/scripts/*.sh \
+              | grep -oE 'take_floors "[a-z0-9: -]+"' | sed 's/^take_floors "//; s/"$//' \
+              | tr ' ' '\n' | grep . | LC_ALL=C sort -u)"
+  # 양성 대조 — 선언이 하나도 파생되지 않으면 아래 루프가 vacuous다(01 시점 실측: 소비자 1가드 2라벨).
+  [ -n "$declared" ]
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    printf '%s\n' "$static" | grep -qxF "$d" || {
+      echo "take_floors 선언 라벨 '$d'가 방출 라벨 집합에 없다 — 선언 오타는 조용히 꺼진 바닥값이 된다"; false; }
+  done <<<"$declared"
+}
+
 # 커버리지 증인 — **정적 콜사이트 라벨 집합 == 런타임 방출 라벨 집합**.
 # ⚠️ 앞선 판(가드당 마커 ≥1인지만 보는 하드코딩 목록)은 세 가지를 통과시켰다(적대 검토 실측):
 #    라벨 하나 삭제(가드는 다른 라벨로 여전히 ≥1) · 픽스처 콜사이트 삭제(기본 모드만 돌았다) ·

@@ -23,7 +23,7 @@
 # 예외: policy/image-pin-allowlist.txt(라인당 이미지 값 또는 app:<name>, # 사유 주석 **강제** — 인라인 또는 직전 줄).
 #   수용 기준 = allowlist 0(핀 후).
 #
-# make verify 배선됨(Task 9, 핀 적용 후) — 기본 --min-scan 20(scan-floor 유효, 배선부에 넘기지 않는다).
+# make verify 배선됨(Task 9, 핀 적용 후) — 기본 바닥값 20(scan-floor 유효, 배선부는 floor-free).
 #   24 tag-only 이미지를 수동 digest 핀(renovate pin-dependencies 배치가 Issues:write gap으로 엉켜 결정적 경로 선택)
 #   완료 후 실 레포는 allowlist 0으로 통과한다. 신규 미핀 이미지는 이 게이트가 fail-closed로 차단.
 # bash 3.2 호환: [[ ]]·mapfile 금지(중간 단언 [ ]/grep). --root로 픽스처 tmp git 레포 지정 가능.
@@ -36,16 +36,22 @@ guard_init check-image-pins
 
 # ⚠️ MIN_SCAN_APPS 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거).
 #    앱이 0개인 동안은 레인2 열거 0건이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
-ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; ROOT_OVERRIDDEN=0; MIN_SCAN_APPS_SET=0
+ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; ROOT_OVERRIDDEN=0
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 01 — 구 --min-scan/
+# --min-scan-apps 폐지). 선언 라벨은 **방출 라벨의 부분집합**이어야 한다(커버리지 증인이 정적 대조 —
+# 선언 오타가 조용히 꺼진 바닥값이 되는 자리). :platform은 바닥값 없는 신호 전용이라 선언 밖이다
+# (--floor platform=N은 미매칭 진단이 정확한 응답이다 — floor를 소비하지 않는 도메인).
+take_floors "check-image-pins:total check-image-pins:apps" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT="$2"; ROOT_OVERRIDDEN=1; shift 2 ;;
     --allowlist) ALLOWLIST="$2"; shift 2 ;;
-    --min-scan) MIN_SCAN="$2"; shift 2 ;;   # scan-floor(글롭/제외 파손 감지). 픽스처만 낮춰 호출.
-    --min-scan-apps) MIN_SCAN_APPS="$2"; MIN_SCAN_APPS_SET=1; shift 2 ;;   # 레인2 전용 바닥값(아래 참조)
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+MIN_SCAN="$(floor_of check-image-pins:total "$MIN_SCAN")"    # scan-floor(글롭/제외 파손 감지). 픽스처만 낮춰 호출.
+MIN_SCAN_APPS="$(floor_of check-image-pins:apps "$MIN_SCAN_APPS")"   # 레인2 전용 바닥값(아래 참조)
 [ -z "$ALLOWLIST" ] && ALLOWLIST="$ROOT/policy/image-pin-allowlist.txt"
 
 # 앵커된 이미지 키 정규식 — `logo_image:`·경로 내 `my-image:` 부분매치 방지(리스트 아이템 `- ` 허용).
@@ -170,22 +176,17 @@ done <<< "$apps_files"
 scanned_lane2=$((scanned - scanned_lane1))
 
 # --- scan-floor: 스캔이 의심스럽게 적으면(글롭/제외 파손) fail-loud ---
-# ⚠️ 종료코드는 1이다. 2는 CONTRIBUTING이 **사용법/파싱 오류**로 예약했고(위 `unknown arg`가 그 용법),
-# 같은 scan-floor 클래스의 다른 가드는 전부 1이다(check-resource-limits·check-alert-rules·
-# check-guard-authority·check-skip-signalling·scripts/lib/scan-floor.sh). 여기만 2였다 — 같은 클래스에
-# 두 코드를 남기는 것이 정확히 이 캠페인이 지우는 병이라 1로 수렴시켰다.
-if [ "$scanned" -lt "$MIN_SCAN" ]; then
-  echo "ERROR: 스캔 무결성 의심 — 이미지 ${scanned}건(<${MIN_SCAN}). 글롭/제외 경로 파손 가능(scan-floor)." >&2
-  exit 1
-fi
+# 합계 도메인도 커널 경유다(:total — kernel-followups 01 리뷰 수용: 손조립 판정은 라벨이 없어
+# --floor 선언과 방출 라벨이 어긋나는 어휘 이탈이었다). 판정·문구·마커는 scan_floor 소유.
+scan_floor check-image-pins:total "$scanned" "$MIN_SCAN" || exit 1
 # ⚠️ **합계 바닥값은 작은 레인의 붕괴를 원리적으로 못 잡는다.** 실측 분해(앱 철거 전): 레인1
 # (platform) 34건 · 레인2(apps) 2건. 레인2가 0이 돼도 레인1만으로 34 ≥ 20이라 위 검사는 절대 발화하지 않는다 —
 # 그동안 apps 레인의 digest 핀 강제가 통째로 사라져도 초록이었다는 뜻이다. 레인마다 자기 바닥값이 필요하다.
 # (레인1은 합계 바닥값이 사실상 전담한다 — 레인2 최대치가 한 자릿수라 34가 무너지면 합계가 먼저 걸린다.)
 # 픽스처 모드(--root)엔 **기본값을** 적용하지 않는다 — 픽스처는 정당하게 한 레인만 만든다
-# (선례: check-app-netpol). 단 `--min-scan-apps`를 **명시하면** 픽스처에서도 적용한다 —
+# (선례: check-app-netpol). 단 `--floor apps=<n>`을 **명시하면** 픽스처에서도 적용한다(floor_set 판정) —
 # 그렇지 않으면 이 바닥값 자체를 red-green으로 실증할 방법이 없다(가드가 자기 검증을 못 받는 자리).
-if [ "$ROOT_OVERRIDDEN" -eq 0 ] || [ "$MIN_SCAN_APPS_SET" -eq 1 ]; then
+if [ "$ROOT_OVERRIDDEN" -eq 0 ] || floor_set check-image-pins:apps; then
   scan_floor check-image-pins:apps "$scanned_lane2" "$MIN_SCAN_APPS" || exit 1
 else
   scan_signal check-image-pins:apps "$scanned_lane2"

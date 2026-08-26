@@ -32,8 +32,9 @@
 #    현재값이 필요하면 세어라:
 #      grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh
 #      grep -lE '^[^/]*(scan(Floor|Signal)\(|scan: ")' tools/*.ts
-# ⚠️ 바닥값 오버라이드 어휘는 adapter별로 갈린다 — TS는 guardMain의 `--floor <도메인>=<n>` 하나,
-#    셸은 콜사이트별 env(…_MIN_SCAN)·플래그가 남는다(17이 TS만 통일 — 셸 수렴은 별도 티켓 감).
+# ⚠️ 바닥값 오버라이드 어휘는 `--floor <도메인>=<n>` 하나다 — TS는 guardMain(takeFloors), 셸은
+#    아래 take_floors(kernel-followups 01). 셸 콜사이트별 env(…_MIN_SCAN)·구 플래그는 이관 진행
+#    중의 잔존이다(01: check-image-pins 완료 — 잔여는 kernel-followups 02·03이 소화한다).
 #    정합은 tests/gates/test_scan-floor.bats가 **정적 콜사이트 == 런타임 방출** 집합 대조로 강제하고,
 #    TS 콜사이트가 커널을 우회해 마커를 직접 출력하는 것은 scripts/check-scan-producers.sh가 거부한다
 #    (등식은 양쪽에서 함께 사라지는 우회를 못 잡는다 — 인식이 아니라 거부가 문을 닫는다).
@@ -83,4 +84,103 @@ scan_floor() {
 # 줄 수를 센다(빈 문자열=0). `grep -c .`는 0건일 때 rc=1이라 set -e 콜사이트에서 함정이 된다.
 scan_count() {
   if [ -z "$1" ]; then echo 0; else printf '%s\n' "$1" | grep -c . || true; fi
+}
+
+# ── take_floors — 바닥값 오버라이드 어휘 `--floor <도메인>=<n>`의 셸 adapter ─────────────────────
+# (kernel-followups 01 — TS guardMain의 takeFloors/floorOf 동형. 구 콜사이트별 env·--min-* 어휘를
+# 이 하나로 접는다: env는 호출부에 보이지 않는 채로 바닥값을 끄므로 거부 가드로도 못 막는다.)
+#
+# 사용 규약(콜사이트):
+#   take_floors "<허용 라벨들(공백 구분)>" "$@" || exit $?
+#   set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"     # ⚠️ 빈 배열 + set -u 함정의 관용구 그대로 쓸 것
+#   … min="$(floor_of <라벨> <기본값>)" …
+# 허용 라벨은 **선언 선행**이다 — TS는 실행 커널(guardMain ⓪)이 파싱 뒤 전건 매칭을 검증하지만,
+# 셸엔 실행 커널이 없어 파싱 시점 검증(잊을 수 없는 자리)이 그 등가물이다. 키는 라벨 전체 또는
+# 마지막 콜론 뒤 접미사 — 정규화해 저장하므로 floor_of는 전체 라벨로만 조회한다.
+# ⚠️ 선언은 콜사이트 손 문자열이라 TS(마커 리터럴과 동일 대상)만큼 강하지 않다 — 선언 오타는
+#    바닥값을 조용히 끈다. 그래서 커버리지 증인(test_scan-floor.bats)이 **선언 라벨 ⊆ 방출 라벨**을
+#    정적으로 대조한다(선언에 넣는 라벨은 반드시 scan_floor/scan_signal 콜사이트 라벨이어야 한다).
+# 같은 키 반복은 **마지막 승**이다(TS Map.set 동형 — 접미사·전체 라벨 혼용도 정규화 후 같은 키라
+# 마지막 값이 이긴다). 값의 선행 0은 십진으로 정규화한다(8진 해석이 요청보다 낮은 바닥값이 되는
+# 방향을 막는다 — TS Number()와 동형).
+# 오류(빈 선언·형식·값·미매칭·모호)는 진단 + return 2 — set -e 콜사이트에서 그대로 사용법 종료가
+# 된다(판정 lib은 exit을 소유하지 않는다 — detect_run과 같은 규율. guard_skip의 exit 4는 방출
+# 헬퍼의 원자성 계약이라 예외다).
+take_floors() {
+  _tf_allowed="$1"; shift
+  REST_ARGV=(); _FLOOR_KEYS=(); _FLOOR_VALS=()
+  if [ -z "$_tf_allowed" ]; then
+    echo "take_floors: 허용 라벨이 비었다 — 도메인 0개인 가드는 오버라이드가 전부 미매칭이 된다(fail-closed, TS guardMain의 빈 domains 거부와 동형)" >&2
+    return 2
+  fi
+  while [ $# -gt 0 ]; do
+    if [ "$1" != "--floor" ]; then REST_ARGV+=("$1"); shift; continue; fi
+    _tf_spec="${2-}"
+    _tf_key="${_tf_spec%%=*}"; _tf_val="${_tf_spec#*=}"
+    if [ -z "$_tf_spec" ] || [ "$_tf_key" = "$_tf_spec" ] || [ -z "$_tf_key" ]; then
+      echo "--floor 형식은 <도메인>=<n>이다(받은 값: '${_tf_spec}')" >&2; return 2
+    fi
+    case "$_tf_val" in
+      ''|*[!0-9]*) echo "--floor ${_tf_key}는 음이 아닌 정수여야 한다(받은 값: '${_tf_val}')" >&2; return 2 ;;
+    esac
+    _tf_val=$((10#$_tf_val))
+    # 선언 순회 — IFS·글롭을 고정한다: 콜사이트가 IFS를 바꿔 두면(형제 가드의 `IFS=,` 류) 매칭이
+    # 조용히 무너져 fail-open이고, 글롭 문자가 든 선언은 파일명으로 확장된다(리뷰 실측 재현).
+    _tf_oifs="$IFS"; IFS=' '
+    _tf_noglob=0; case $- in *f*) _tf_noglob=1 ;; esac
+    set -f
+    _tf_hit=""; _tf_hits=0; _tf_hitlist=""
+    for _tf_lbl in $_tf_allowed; do
+      if [ "$_tf_lbl" = "$_tf_key" ] || [ "${_tf_lbl##*:}" = "$_tf_key" ]; then
+        _tf_hit="$_tf_lbl"; _tf_hits=$((_tf_hits + 1))
+        _tf_hitlist="${_tf_hitlist}${_tf_hitlist:+ · }${_tf_lbl}"
+      fi
+    done
+    [ "$_tf_noglob" -eq 1 ] || set +f
+    IFS="$_tf_oifs"
+    if [ "$_tf_hits" -eq 0 ]; then
+      _tf_render="$(printf '%s' "$_tf_allowed" | sed 's/ / · /g')"
+      echo "--floor 도메인 '${_tf_key}'가 이 가드의 선언 도메인에 없다(허용: ${_tf_render}) — 오타 키는 조용히 꺼진 바닥값이 된다(fail-closed)" >&2
+      return 2
+    fi
+    if [ "$_tf_hits" -gt 1 ]; then
+      echo "--floor 도메인 '${_tf_key}'가 ${_tf_hits}개 도메인에 걸린다(${_tf_hitlist}) — 전체 라벨로 지정하라" >&2
+      return 2
+    fi
+    # 같은 키 재등장은 덮어쓴다(마지막 승 — TS Map.set 동형).
+    _tf_j=0; _tf_found=0
+    while [ "$_tf_j" -lt "${#_FLOOR_KEYS[@]}" ]; do
+      if [ "${_FLOOR_KEYS[$_tf_j]}" = "$_tf_hit" ]; then _FLOOR_VALS[_tf_j]="$_tf_val"; _tf_found=1; fi
+      _tf_j=$((_tf_j + 1))
+    done
+    if [ "$_tf_found" -eq 0 ]; then _FLOOR_KEYS+=("$_tf_hit"); _FLOOR_VALS+=("$_tf_val"); fi
+    shift 2
+  done
+  return 0
+}
+
+# ⚠️ source 시점 초기화 — take_floors를 부르지 않은 콜사이트의 floor_of/floor_set이 raw unbound
+#    진단(또는 커맨드 치환 안에서의 조용한 rc 소실)으로 갈리지 않고, 항상 "오버라이드 없음"이라는
+#    일관된 의미로 수렴한다(그때 argv의 --floor 자체는 콜사이트 argv 루프가 unknown arg로 거부한다).
+REST_ARGV=(); _FLOOR_KEYS=(); _FLOOR_VALS=()
+
+# 유효 min 해소 — 오버라이드가 있으면 그 값, 없으면 콜사이트 기본값(수치는 소비자 소유).
+floor_of() {
+  _fo_i=0
+  while [ "$_fo_i" -lt "${#_FLOOR_KEYS[@]}" ]; do
+    if [ "${_FLOOR_KEYS[$_fo_i]}" = "$1" ]; then echo "${_FLOOR_VALS[$_fo_i]}"; return 0; fi
+    _fo_i=$((_fo_i + 1))
+  done
+  echo "$2"
+}
+
+# 명시 여부 판정 — "픽스처가 명시하면 적용" 류 의미론(check-image-pins의 구 MIN_SCAN_APPS_SET)이
+# 콜사이트 손 플래그 없이 커널로 접힌다. rc 0=명시됨 / 1=기본값.
+floor_set() {
+  _fs_i=0
+  while [ "$_fs_i" -lt "${#_FLOOR_KEYS[@]}" ]; do
+    if [ "${_FLOOR_KEYS[$_fs_i]}" = "$1" ]; then return 0; fi
+    _fs_i=$((_fs_i + 1))
+  done
+  return 1
 }

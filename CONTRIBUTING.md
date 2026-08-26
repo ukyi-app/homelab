@@ -96,7 +96,10 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
   규약(마커 형태·방출 순서·억제·SKIP 배타)은 하나이고 구현만 갈린다.
 - TS 실행 커널 `guardMain`(같은 파일)을 쓰는 가드는 커널이 **전 도메인 floor 통과 시에만 일괄**
   방출한다 — 도메인 라벨은 콜사이트의 `scan: "<라벨>"` 리터럴이라 정적 파생 대상이고, 바닥값
-  오버라이드는 `--floor <도메인>=<n>` 하나다(lib-convergence 17). 예외 하나: 픽스처 주입 플래그가
+  오버라이드는 `--floor <도메인>=<n>` 하나다(lib-convergence 17). 셸도 같은 어휘다 —
+  `take_floors`(scripts/lib/scan-floor.sh, kernel-followups 01)가 선언 선행으로 같은 fail-closed를
+  강제하고, 선언 라벨 ⊆ 방출 라벨은 게이트가 정적 대조한다(구 env·--min-* 어휘는 이관 중 잔존 —
+  kernel-followups 02·03이 소화한다). 예외 하나: 픽스처 주입 플래그가
   자기 도메인의 floor를 0으로 표현하는 관용구(check-alert-rules `--supply-policy` — 0은 정당한
   바닥값이라 분기 없이 면제가 되고 라벨 집합 불변이 유지된다)는 별개다. 프로덕션 호출은
   floor-free다 — check-ci-parity가 gate 스텝·make -n ci 양쪽에서 `--floor` 잔존을 red로 강제한다.

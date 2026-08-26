@@ -10,7 +10,7 @@ setup() {
     "$FR/platform/cnpg/prod/databases" "$FR/platform/data-conn/prod" "$FR/platform/cache/prod"
   # ⚠️ 이 스위트의 도메인은 cluster.yaml managed.roles다 — registry는 정당하게 비어 있다.
   # audit-orphans의 registry scan-floor(기본 1)는 그래서 `--min-registry 0`으로 낮춰 부른다
-  # (선례: check-image-pins `--min-scan 1`). 바닥값은 **기본 모드에만** 적용한다.
+  # (선례: check-image-pins `--floor total=1`). 바닥값은 **기본 모드에만** 적용한다.
   echo '[]' > "$FR/infra/cloudflare/apps.json"
   printf '<!-- ledger:meta -->\n' > "$FR/docs/memory-ledger.md"
   # cluster.yaml: orders DB의 owner/ro managed role 2개. ro sealed는 제거됨(고아), owner sealed는 존재.
