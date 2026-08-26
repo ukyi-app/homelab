@@ -27,6 +27,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-app-deploy
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "check-app-deploy" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 SCHEMA="$ROOT/tools/app-deploy-schema.json"
 required="$(jq -r '.required[]' "$SCHEMA")"   # 개행구분 → for 워드분할
 
@@ -105,7 +108,12 @@ check_one() {
 }
 
 if [ "$#" -gt 0 ]; then
-  scan_signal check-app-deploy "$#"   # 인자(픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
+  # --floor를 **명시하면** 픽스처 모드에도 적용한다(floor_set — 명시 플래그의 조용한 no-op 금지).
+  if floor_set check-app-deploy; then
+    scan_floor check-app-deploy "$#" "$(floor_of check-app-deploy 0)" || exit 1
+  else
+    scan_signal check-app-deploy "$#"   # 인자(픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
+  fi
   for d in "$@"; do check_one "$d"; done
 else
   cd "$ROOT"
@@ -119,7 +127,7 @@ else
   #    이 값을 1로 되돌릴 것 — 그래야 워커가 죽었을 때의 0건이 다시 red가 된다.
   units="$(scan_enumerate check-app-deploy bun "$(dirname "${BASH_SOURCE[0]}")/../tools/lib/repo-walk.ts" --units apps --root "$ROOT")" || exit 1
   scanned="$(scan_count "$units")"
-  scan_floor check-app-deploy "$scanned" "${APP_DEPLOY_MIN_SCAN:-0}" || exit 1
+  scan_floor check-app-deploy "$scanned" "$(floor_of check-app-deploy 0)" || exit 1
   while IFS= read -r u; do
     [ -n "$u" ] || continue
     [ -d "$u/deploy/prod" ] || continue

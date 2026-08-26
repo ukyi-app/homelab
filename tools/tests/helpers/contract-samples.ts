@@ -38,6 +38,7 @@ export function buildSamples(doctorIds: readonly string[]): Record<string, Sampl
   const url: Record<string, Sample> = {
     ["success"]: { name: "mydb", dryRun: true, wrote: false, mode: "readonly" },
     ["failure"]: { name: "mydb", dryRun: false, wrote: false, error: "x" },
+    ["skip"]: { name: "mydb", dryRun: false, wrote: false, note: "x" },
   };
   return {
     doctor: { checks: doctorIds.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: doctorIds.length, fail: 0, warn: 0 } },
@@ -59,7 +60,7 @@ export function buildSamples(doctorIds: readonly string[]): Record<string, Sampl
 // 행 내 variant 중복은 fail-closed로 던진다 — 같은 verb+variant를 두 분기가 주장하면 oneOf가
 // "정확히 하나"를 잃어 스키마 자체가 모호해지고, 중복/dedup 계수 갈림으로 파생과 워커가
 // 어긋난다(리뷰 실측). 열거 붕괴 방지의 손 앵커(oneOf 분기 수 31 · 행 수 10 · variant 셀 총합
-// 36 · exitCodes 리터럴 7쌍)는 소비 테스트가 파생 밖에 유지한다.
+// 38 · exitCodes 리터럴 7쌍)는 소비 테스트가 파생 밖에 유지한다.
 export function matrixCellCounts(rows: readonly ContractRow[], allVariantCount: number): { allowed: number; rejected: number } {
   let allowed = 0;
   let rejected = 0;

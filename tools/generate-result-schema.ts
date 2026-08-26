@@ -373,7 +373,7 @@ const DEFINITIONS = `    "doctorResult": {
       }
     },
     "urlResult": {
-      "description": "db url/cache url 결과 — conn URL 엔진(lib/conn-url.ts)의 계획/수행 보고(CLI --json·MCP 공용). 평문 자격은 담지 않는다(비출력 계약): 계획은 엔진의 타입 결과(UrlResult ↔ 이 정의 1:1)이고 실제 기록은 wrote 불리언으로만 표기한다. dryRun=계획만(wrote=false). failure는 error를 담는다.",
+      "description": "db url/cache url 결과 — conn URL 엔진(lib/conn-url.ts)의 계획/수행 보고(CLI --json·MCP 공용). 평문 자격은 담지 않는다(비출력 계약): 계획은 엔진의 타입 결과(UrlResult ↔ 이 정의 1:1)이고 실제 기록은 wrote 불리언으로만 표기한다. dryRun=계획만(wrote=false). failure는 error를, skip(클러스터 도메인 부재 — KUBECONFIG 미설정)은 note에 사유를 담는다.",
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "dryRun"],

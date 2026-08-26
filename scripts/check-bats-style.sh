@@ -15,6 +15,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-bats-style
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "check-bats-style" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
 BB_BASELINE="${BB_BASELINE_OVERRIDE:-0}"   # **0 수렴 완료** — 이제 hard-zero다(NEG와 같은 규율). 신규 중간 [[ ]]는 즉시 red.
 FILES=()
@@ -28,8 +31,8 @@ fi
 # 커널 주석(lib/scan-floor.sh)이 "마커를 내면 사람이 정반대 뜻으로 읽는다"고 금지한 채널 혼동이다.
 # 명시-파일 모드($# > 0)는 원소가 항상 ≥1이라 이 분기에 도달하지 않지만, 픽스처가 1건짜리로
 # 부를 수 있으므로 바닥값은 기본 모드에만 건다(선례: check-app-netpol의 --root 면제). 래칫 아님.
-if [ "$#" -eq 0 ]; then
-  scan_floor check-bats-style "${#FILES[@]}" "${BATS_STYLE_MIN_SCAN:-150}" || exit 1
+if [ "$#" -eq 0 ] || floor_set check-bats-style; then
+  scan_floor check-bats-style "${#FILES[@]}" "$(floor_of check-bats-style 150)" || exit 1
 else
   scan_signal check-bats-style "${#FILES[@]}"   # 바닥값 면제 모드도 신호는 낸다(06 판별자)
 fi

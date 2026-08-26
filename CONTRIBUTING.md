@@ -44,6 +44,10 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
   (그 스텝의 명령이 러너 호출 하나뿐 — 남기지 않으면 계약이 조용히 증발한다).
 - **종료코드 규약(가드·도구 공통)** — `tools/lib/cli.ts` 주석이 SSOT: 0=성공 · 1=검증/게이트 실패 ·
   2=사용법/플래그 파싱 · 3=race · **4=skip**(도메인 부재 — 아래 절).
+  선언된 예외 2건: `check-credential-expiry`는 붕괴를 2로 낸다(소비자 워크플로가 rc 1을
+  "만료 임박" 알림 의미로 선점하고 rc≥2만 hard-fail — 콜사이트 주석·게이트 bats가 근거·값 보유).
+  `audit-orphan-pv`는 붕괴를 3으로 낸다(라이브 쿼리 실패 계열의 자기 어휘 보존 — 연결된 클러스터의
+  열거 붕괴는 접근 실패와 같은 사고 계층이다). 이 목록에 없는 exit≠1 붕괴는 1 수렴 대상이다.
 
 ### 가드 skip 신호 — `exit 4` + `SKIP:` 마커
 
@@ -60,6 +64,12 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
   `scripts/check-skip-signalling.sh`가 강제, 게이트는 `tests/gates/test_guard-skip-signalling.bats`).
   **Makefile 레인만** 함수를 쓸 수 없어 옛 같은-줄 짝 검사로 잔존한다.
 - 평가한 실행은 마커를 내지 않는다: 0=평가·통과, 1=평가·실패.
+- **homelab CLI의 skip variant**(kernel-followups 06)는 같은 어휘의 CLI 대응물이다: 종료코드 4는
+  envelope **데이터**(`exitFor(variant)` 계약 파생 — 스키마가 skip↔4 짝을 강제)로 흐르고, stderr
+  마커 `SKIP: homelab <동사>: <이유>`는 `skipMarker()`(tools/lib/cli.ts — 유일 방출)가 낸다.
+  `process.exitCode = 4` 직접 대입은 check-skip-signalling의 전용 레인이 거부한다.
+  bin 껍데기(db-url/cache-url)는 CLI 계약 밖이라 **가드형 `skip()` 경유**(stdout ·
+  `SKIP: db-url: <이유>`)로 신호한다 — stderr 계약 마커는 homelab CLI 전용이다.
 - 각 가드의 bats 래퍼는 **두 갈래를 각각 단언**한다. `[ "$status" -eq 0 ]` 하나만 두면 skip이
   그 단언을 만족해 래퍼가 vacuous해진다. 도메인을 주입할 시임(픽스처 트리·`RUNBOOK_DIR` 같은
   변수 오버라이드)이 없으면 만들어서 두 갈래를 실증한다.
@@ -96,7 +106,10 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
   규약(마커 형태·방출 순서·억제·SKIP 배타)은 하나이고 구현만 갈린다.
 - TS 실행 커널 `guardMain`(같은 파일)을 쓰는 가드는 커널이 **전 도메인 floor 통과 시에만 일괄**
   방출한다 — 도메인 라벨은 콜사이트의 `scan: "<라벨>"` 리터럴이라 정적 파생 대상이고, 바닥값
-  오버라이드는 `--floor <도메인>=<n>` 하나다(lib-convergence 17). 예외 하나: 픽스처 주입 플래그가
+  오버라이드는 `--floor <도메인>=<n>` 하나다(lib-convergence 17). 셸도 같은 어휘다 —
+  `take_floors`(scripts/lib/scan-floor.sh, kernel-followups 01)가 선언 선행으로 같은 fail-closed를
+  강제하고, 선언 라벨 ⊆ 방출 라벨은 게이트가 정적 대조한다(구 env·--min-* 어휘는 01~03에서
+  전 가드 이관 완료 — 재유입은 거부 가드 `scripts/check-floor-vocab.sh`가 정적 red로 막는다). 예외 하나: 픽스처 주입 플래그가
   자기 도메인의 floor를 0으로 표현하는 관용구(check-alert-rules `--supply-policy` — 0은 정당한
   바닥값이라 분기 없이 면제가 되고 라벨 집합 불변이 유지된다)는 별개다. 프로덕션 호출은
   floor-free다 — check-ci-parity가 gate 스텝·make -n ci 양쪽에서 `--floor` 잔존을 red로 강제한다.
@@ -125,7 +138,12 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
 `SCAN:`은 “n건 평가했다”(정상 경로)다. 바닥값 **실패** 경로도 마커를 내지 않는다 — 그때의 건수는
 “검사했다”가 아니라 “붕괴했다”는 뜻이라 같은 마커로 내면 정반대로 읽힌다.
 
-**⚠️ 커버리지는 완전하지 않다** — 가드 전부가 신호를 내지는 않는다.
+**⚠️ 커버리지는 완전하지 않다** — 가드 전부가 신호를 내지는 않는다. 커널 소비 패턴은 셋이다:
+① guardMain(실행 커널 — 일괄 방출) ② scanFloor/scanSignal 직접(판정 커널) ③ **어휘만 소비 ·
+마커 미방출**(takeFloors+assertFloorKeys+floorOf — guardMain 계약에 맞지 않는 도구용:
+dns-drift-check는 판정이 비동기라 동기 check 밖, audit-orphans는 종료코드 3분기라 report/ok
+이분법 밖. stdout JSON은 사유가 아니다 — output:"none"이 그 용도다). ③은 마커가 없어 로스터
+등식 대상 밖이고, 라벨 오타는 콜사이트의 라벨 상수 + --floor 증인 bats가 진다.
 
 ⚠️ **여기에 건수를 적지 않는다.** 예전엔 "28종 중 12종 · 라벨 17개"라고 적혀 있었는데 실측은
 13종/31종 · 라벨 21개였고, `scripts/lib/scan-floor.sh`와 `PROGRESS.md`에는 **또 다른 숫자**가 박혀
@@ -183,7 +201,7 @@ grep -lE '^[^/]*(scan(Floor|Signal)\(|scan: ")' tools/*.ts
 
 **도메인-크기 게이트는 이 규약의 대상이 아니다.** "검사 대상이 0건이라 skip"은 자격 부재가 아니라
 열거 붕괴 클래스이고 처방이 다르다(**바닥값** — 위 '가드 스캔 신호' 절). `dns-drift`가 그 예다:
-`active&&public + platform_hosts == 0 → clean skip`이던 게이트를 없애고 `--min-reserved`(기본 1,
+`active&&public + platform_hosts == 0 → clean skip`이던 게이트를 없애고 `--floor reserved=<n>`(기본 1,
 fail-closed) 바닥값으로 대체했다. 예약 platform host는 구조적으로 항상 ≥1이라 0은 "대상 없음"이
 아니라 SSOT 부재/키 변경이기 때문이다.
 

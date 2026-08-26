@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 고아 스토리지 감사 — hostPath 디스크가 조용히 누수되는 두 경로를 **둘 다** 본다. 나열만(파괴 없음).
-# ★fail-closed(F7): 도구/접근/쿼리 실패는 비-0 종료(깨진 감사를 '고아 없음'으로 위장 금지).
+# ★fail-closed(F7): 도구·접근 부재=skip(4 — 도메인에 닿을 수 없음), 평가 중 쿼리 실패=비-0 red
+#   (깨진 감사를 '고아 없음'으로 위장 금지 — skip 마커는 '평가하지 않았다'라 위장이 아니다).
 #
 # ⚠️ **이 가드는 자기 클래스의 병에 걸려 있었다(2026-07-29 실측).** 예전 판은 `.status.phase == "Released"`
 #    **하나만** 봤다. 그 전제는 "PVC를 지우면 PV가 Released로 남는다"인데, 실제로 발생한 고아는
@@ -21,9 +22,18 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init audit-orphan-pv
-command -v kubectl >/dev/null || { echo "ERROR: kubectl 부재" >&2; exit 2; }
-command -v yq >/dev/null || { echo "ERROR: yq 부재" >&2; exit 2; }
-kubectl cluster-info >/dev/null 2>&1 || { echo "ERROR: 클러스터 접근 불가(KUBECONFIG/RBAC)" >&2; exit 3; }
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "audit-orphan-pv" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
+[ $# -eq 0 ] || { echo "unknown arg: $1" >&2; exit 2; }
+# 도구·클러스터 부재 = 평가할 라이브 도메인에 닿을 수 없음 — skip 규약(verify-posture 선례).
+# CI 러너(ubuntu-arm, setup-toolchain)에는 kubectl이 없다 — 여기서 2로 죽으면 로스터 등식 게이트가
+# venue에 따라 갈린다(로컬 초록·CI red — 그 게이트 주석이 실측으로 적어 둔 클래스).
+command -v kubectl >/dev/null || guard_skip audit-orphan-pv "kubectl 부재 — 라이브 감사 미평가"
+command -v yq >/dev/null || guard_skip audit-orphan-pv "yq 부재 — 라이브 감사 미평가"
+# 접근 불가 = 평가할 도메인에 닿을 수 없음 — skip 규약(verify-posture 선례: 라이브 부재는 red가
+# 아니라 미평가 신호 + 비-0). 평가 **중** 쿼리 실패는 그대로 3(감사가 깨진 것 — 위장 금지).
+kubectl cluster-info >/dev/null 2>&1 || guard_skip audit-orphan-pv "클러스터 접근 불가(KUBECONFIG/RBAC) — 라이브 감사 미평가"
 
 rc=0
 
@@ -36,12 +46,11 @@ echo "== ② 소비자 없는 PVC (Bound인데 어떤 파드도 마운트하지 
 pvcs="$(kubectl get pvc -A -o json)" || { echo "ERROR: kubectl get pvc 실패" >&2; exit 3; }
 pods="$(kubectl get pod -A -o json)" || { echo "ERROR: kubectl get pod 실패" >&2; exit 3; }
 
-# 열거 바닥값 — PVC가 0건으로 읽히면 "고아 없음"과 구별할 수 없다(무측정).
+# 열거 바닥값 — PVC가 0건으로 읽히면 "고아 없음"과 구별할 수 없다(무측정). 판정·문구·마커는
+# 커널(scan_floor) 소유로 승격(03) — rc는 이 가드의 어휘(3=쿼리 실패 계열)를 콜사이트가 보존한다
+# (접근·도구 부재는 위에서 skip(4)으로 갈렸다 — 여긴 연결된 클러스터의 열거가 붕괴한 경우다).
 n_pvc="$(printf '%s' "$pvcs" | yq -r '.items | length')"
-[ "${n_pvc:-0}" -ge "${ORPHAN_PVC_MIN_SCAN:-3}" ] || {
-  echo "ERROR: PVC ${n_pvc:-0}건 < 바닥값 ${ORPHAN_PVC_MIN_SCAN:-3} — 열거 붕괴 의심(0건 검사 후 초록이 되는 자리)" >&2
-  exit 3
-}
+scan_floor audit-orphan-pv "${n_pvc:-0}" "$(floor_of audit-orphan-pv 3)" || exit 3
 
 # 소비 집합: 파드가 실제로 마운트한 (ns, claimName). ⚠️ **파드 기준**이다 — STS/Deployment 스펙만 보면
 # 스케일 0이나 삭제된 컨트롤러의 PVC를 "사용 중"으로 오판한다.

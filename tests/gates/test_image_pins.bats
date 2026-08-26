@@ -24,7 +24,7 @@ spec:
   containers:
     - image: nginx:1.25
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'platform/x/deployment.yaml'
   echo "$output" | grep -q 'nginx:1.25'
@@ -36,7 +36,7 @@ spec:
   containers:
     - image: nginx:1.25@sha256:abcdef
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 0 ]
 }
 
@@ -46,7 +46,7 @@ image:
   repo: ghcr.io/x/y
   tag: v1
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'lane2'
 }
@@ -58,7 +58,7 @@ image:
   tag: v1
   digest: sha256:abcdef
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 0 ]
 }
 
@@ -75,7 +75,7 @@ EOF
   wf platform/cnpg/barman-plugin/manifest.yaml <<'EOF'
 image: baz:1.0
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 0 ]
   # 제외가 동작하면 tag-only 3개는 UNPINNED로 안 잡힌다(부정 단언 — 마지막 줄).
   [ -z "$(echo "$output" | grep 'UNPINNED' || true)" ]
@@ -86,7 +86,7 @@ EOF
 image: nginx:1.25
 EOF
   printf '# reason: 상류가 이미 digest 고정\nnginx:1.25\n' > "$REPO/allow.txt"
-  run bash "$CHK" --root "$REPO" --min-scan 1 --allowlist "$REPO/allow.txt"
+  run bash "$CHK" --root "$REPO" --floor total=1 --allowlist "$REPO/allow.txt"
   [ "$status" -eq 0 ]
 }
 
@@ -96,7 +96,7 @@ EOF
   wf platform/x/deployment.yaml <<'EOF'
 image: nginx:1.0@sha256:abcdef
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 99
+  run bash "$CHK" --root "$REPO" --floor total=99
   [ "$status" -eq 1 ]
 }
 
@@ -106,7 +106,7 @@ EOF
   wf platform/x/deployment.yaml <<'EOF'
 image: nginx:1.0@sha256:abcdef
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1 --min-scan-apps 1
+  run bash "$CHK" --root "$REPO" --floor total=1 --floor apps=1
   [ "$status" -eq 1 ]
   out="$output"
   run grep -q "check-image-pins:apps" <<<"$out"
@@ -120,7 +120,7 @@ EOF
   wf apps/orders/deploy/prod/values.yaml <<'EOF'
 image: { repo: ghcr.io/x/orders, digest: sha256:abcdef }
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1 --min-scan-apps 1
+  run bash "$CHK" --root "$REPO" --floor total=1 --floor apps=1
   [ "$status" -eq 0 ]
 }
 
@@ -131,7 +131,7 @@ image: nginx:1.0@sha256:abcdef
 EOF
   SHIM="$REPO/../shim-$$"; mkdir -p "$SHIM"
   printf '#!/bin/sh\nexit 1\n' > "$SHIM/bun"; chmod +x "$SHIM/bun"
-  PATH="$SHIM:$PATH" run bash "$CHK" --root "$REPO" --min-scan 1
+  PATH="$SHIM:$PATH" run bash "$CHK" --root "$REPO" --floor total=1
   rm -rf "$SHIM"
   [ "$status" -eq 1 ]
   out="$output"
@@ -139,9 +139,10 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "an unknown flag is still a usage error (exit 2), distinct from a scan-floor failure" {
-  # 두 코드가 각자 의미를 갖는다는 대조 — scan-floor를 1로 옮긴 뒤에도 2는 사용법 전용이다.
-  run bash "$CHK" --root "$REPO" --bogus-flag
+@test "the retired --min-scan vocabulary is a usage error (exit 2), distinct from a scan-floor failure" {
+  # 두 코드가 각자 의미를 갖는다는 대조 — scan-floor는 1, 사용법은 2. 픽스처가 폐지 어휘를 쓰는
+  # 것은 AC3의 부정 증인이다: 구 --min-scan이 조용히 무시되지 않고 거부된다(kernel-followups 01).
+  run bash "$CHK" --root "$REPO" --min-scan 1
   [ "$status" -eq 2 ]
 }
 
@@ -152,7 +153,7 @@ EOF
   wf platform/ok/deployment.yaml <<'EOF'
 image: nginx:1.0@sha256:abcdef
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 0 ]
   [ -z "$(echo "$output" | grep 'background' || true)" ]
 }
@@ -163,7 +164,7 @@ EOF
 spec:
   imageName: ghcr.io/cloudnative-pg/postgresql:18.4
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'postgresql:18.4'
 }
@@ -174,7 +175,7 @@ EOF
 containers:
   - image: "nginx:1.25"
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'nginx:1.25'
 }
@@ -189,7 +190,7 @@ EOF
   wf platform/ok/deployment.yaml <<'EOF'
 image: nginx:1.0@sha256:abcdef
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 0 ]
   [ -z "$(echo "$output" | grep -E 'gravatar|default' || true)" ]
 }
@@ -200,7 +201,7 @@ EOF
 containers:
   - image: ghcr.io/foo/my-image:v1
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'ghcr.io/foo/my-image:v1'
   [ -z "$(echo "$output" | grep -E '— v1$' || true)" ]
@@ -212,7 +213,7 @@ EOF
 image: nginx:1.25
 EOF
   printf 'nginx:1.25\n' > "$REPO/allow.txt"   # 사유 주석 없음
-  run bash "$CHK" --root "$REPO" --min-scan 1 --allowlist "$REPO/allow.txt"
+  run bash "$CHK" --root "$REPO" --floor total=1 --allowlist "$REPO/allow.txt"
   [ "$status" -eq 2 ]
   echo "$output" | grep -q '사유 주석'
 }
@@ -226,13 +227,13 @@ image:
 someOtherField:
   digest: sha256:deadbeef
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'lane2'
 }
 
 @test "(f) real repo passes — all runtime images digest-pinned (default scan-floor, Task 9)" {
-  # Task 9: 24 tag-only 이미지 수동 핀 적용 후 실 레포가 allowlist 0으로 통과(기본 min-scan=20 scan-floor 유효).
+  # Task 9: 24 tag-only 이미지 수동 핀 적용 후 실 레포가 allowlist 0으로 통과(기본 바닥값 scan-floor 유효 — 오버라이드는 --floor total=<n>).
   run bash "$ROOT/scripts/check-image-pins.sh"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q '전부 digest 핀됨'
@@ -243,7 +244,7 @@ EOF
   wf apps/flowbad/deploy/prod/values.yaml <<'EOF'
 image: { repo: ghcr.io/x/y, tag: v1 }
 EOF
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'lane2-flow'
   wf apps/flowgood/deploy/prod/values.yaml <<'EOF'
@@ -251,6 +252,6 @@ image: { repo: ghcr.io/x/y, tag: v1, digest: sha256:abc }
 EOF
   # flowbad 제거 후 flowgood만 → 통과
   rm -rf "$REPO/apps/flowbad"; git -C "$REPO" add -A
-  run bash "$CHK" --root "$REPO" --min-scan 1
+  run bash "$CHK" --root "$REPO" --floor total=1
   [ "$status" -eq 0 ]
 }

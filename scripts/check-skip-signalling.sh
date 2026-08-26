@@ -18,20 +18,26 @@
 #   그래서 기본 모드엔 스캔 바닥값을 둔다(`check-image-pins.sh`·`check-alert-rules.ts` 선례).
 # ⚠️ **탐지기는 프록시다**(check-scan-producers 동형) — 드리프트를 잡는 것이지 적대 우회를 막는
 #    것이 아니다. 보지 않는 것: 변수 경유 종료코드(`rc=4; exit "$rc"` · `return 4` — 실 트리에
-#    sealing-key-dr-gate.sh 등 rc-변수 관용구가 정당하게 존재한다), TS `process.exitCode` 대입
-#    (homelab CLI의 skip variant 계약이 exitCode:4를 규정한다 — generate-result-schema.ts. 그 경로가
-#    구현되면 이 가드의 종료코드 패턴 밖이다: **알려진 구멍**으로 여기 기록한다), `exit 04` 표기.
+#    sealing-key-dr-gate.sh 등 rc-변수 관용구가 정당하게 존재한다 — homelab CLI의 skip variant도
+#    이 클래스: 종료코드가 envelope.exitCode **데이터**로 흘러 어떤 리터럴 패턴에도 안 잡히고,
+#    그래도 되는 이유는 값이 손조립이 아니라 exitFor(variant) 계약 파생이기 때문이다), `exit 04` 표기.
+# (해소) 옛 판이 '알려진 구멍'으로 등재하던 TS exitCode(process 필드)에 4를 직접 대입하는 경로는 skip variant
+#    구현(kernel-followups 06)과 함께 전용 레인으로 닫았다 — CLI 마커(SKIP: homelab <verb>:)의
+#    방출도 헬퍼(cli.ts skipMarker) 소유이고 P_EMIT이 콜사이트 직접 방출을 거부한다(stderr 동사 포함).
 # bash 3.2 호환(mapfile 금지). shellcheck clean.
 set -euo pipefail
 # 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-skip-signalling
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "check-skip-signalling" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
 
 # ⚠️ 현재 건수를 여기 적지 않는다 — 손 관리 수치는 드리프트한다(check-scan-producers 규율).
-#    현재값은 SCAN 마커를 읽어라. env 손잡이는 게이트 bats의 붕괴 증인 전용이다.
-MIN_SCAN="${SKIP_SIGNAL_MIN_SCAN:-100}"
+#    현재값은 SCAN 마커를 읽어라. 오버라이드는 --floor(위 take_floors)뿐이다.
+MIN_SCAN="$(floor_of check-skip-signalling 100)"
 
 # 유일 구현체(방출 정당 보유처) — 헬퍼 자신은 원자 방출 줄 하나를 가진다(정확 1은 게이트 bats가 잰다).
 HELPER_SH="scripts/lib/guard.sh"
@@ -45,10 +51,17 @@ HELPER_TS="tools/lib/cli.ts"
 T_EXIT="exit"
 P_SH_EXIT="${T_EXIT} 4([^0-9]|\$)"             # 셸 skip 종료코드 직접 방출
 P_TS_EXIT="process\\.${T_EXIT}\\(4\\)"         # TS skip 종료코드 직접 방출
+# TS 종료코드 손조립의 두 번째 얼굴 — exitCode에 4를 **직접 대입**하면 exit(4) 패턴 밖이다
+# (variant 파생값·변수 경유 대입은 리터럴 4가 아니라서 이 레인 밖 — 정당).
+P_TS_EXITCODE="process\.${T_EXIT}Code[[:space:]]*=[[:space:]]*4([^0-9]|\$)"
 T_MARK="SKIP"
 # 동사 목록에 console.error·process.std{out,err}.write 포함 — homelab CLI 계약이 stderr 마커를
 # 규정하므로 stdout 동사만 보면 그 레인이 통째로 밖이다(리뷰 실측 — 채널이 아니라 방출이 선이다).
-P_EMIT="(echo|printf|console\\.(log|error)|process\\.(stdout|stderr)\\.write).*[\"'][^\"']*${T_MARK}:"   # 따옴표 리터럴 안 마커의 emission
+# 따옴표 클래스는 3종 전부 — 백틱이 빠지면 템플릿 리터럴 방출이 통째로 밖이고, CLI 계약 마커
+# (SKIP: homelab <verb>:)는 보간이 필수인 모양이라 정확히 그 구멍을 부른다(06 리뷰 실측 —
+# console.warn도 같은 스윕에서 편입).
+T_Q_CLS='"'"'"'`'   # dquote·squote·backtick — 작은따옴표 연결 조립(백틱을 큰따옴표에 두면 커맨드 치환)
+P_EMIT="(echo|printf|console\\.(log|error|warn)|process\\.(stdout|stderr)\\.write).*[${T_Q_CLS}][^${T_Q_CLS}]*${T_MARK}:"   # 따옴표 리터럴 안 마커의 emission
 
 FIXTURE=0
 FILES=()
@@ -120,6 +133,12 @@ scan_one() {
   if [ -n "$hits" ]; then
     printf '%s\n' "$hits" | sed "s|^|$1:|; s|\$| — SKIP 마커 직접 방출: ${helper}를 경유하라(원자성은 헬퍼 구현이 소유한다)|"
   fi
+  if [ "$ists" -eq 1 ]; then
+    hits="$(lane_grep "$P_TS_EXITCODE" "$stripped")" || return 1
+    if [ -n "$hits" ]; then
+      printf '%s\n' "$hits" | sed "s|^|$1:|; s|\$| — skip 종료코드(4) 직접 대입: 종료코드는 variant 축(exitFor 파생)이 소유한다 — 가드는 skip(), CLI는 skip variant 경로|"
+    fi
+  fi
   return 0
 }
 
@@ -139,7 +158,7 @@ done
 
 # 신호는 검출 뒤에 낸다(check-scan-producers와 같은 순서) — 검출이 죽은 실행이 "N건"을 내면
 # 소비자가 정반대로 읽는다. 바닥값·마커는 손조립하지 않고 커널(scan-floor.sh)을 태운다.
-if [ "$FIXTURE" -eq 0 ]; then
+if [ "$FIXTURE" -eq 0 ] || floor_set check-skip-signalling; then
   scan_floor check-skip-signalling "$scanned" "$MIN_SCAN" || exit 1
 else
   scan_signal check-skip-signalling "$scanned"

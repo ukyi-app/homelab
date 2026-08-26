@@ -56,6 +56,16 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   [ "$status" -ne 0 ]
 }
 
+@test "db-url without KUBECONFIG signals skip via the helper (exit 4, marker, no write)" {
+  # skip variant의 bin 대응 — 성공 문구/exit 0으로 위장하면 "기록했다"는 거짓말이다(kernel-followups 06).
+  T="$(mktemp -d)"
+  run env -u KUBECONFIG TS_DB_HOST=h bun "$ROOT/tools/db-url.ts" --name orders --env-local "$T/.env.local"
+  [ "$status" -eq 4 ]
+  echo "$output" | grep -q "^SKIP: db-url: "
+  [ ! -f "$T/.env.local" ]
+  rm -rf "$T"
+}
+
 @test "db-url live path writes the namespaced env key, substitutes the tailscale host, and never prints plaintext" {
   T="$(mktemp -d)"; mkdir -p "$T/bin"
   cat > "$T/bin/kubectl" <<'STUB'
@@ -63,7 +73,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 printf '%s' "cG9zdGdyZXM6Ly91Om5AcGctcncucHJvZDo1NDMyL29yZGVycw=="
 STUB
   chmod +x "$T/bin/kubectl"
-  run env PATH="$T/bin:$PATH" bun "$ROOT/tools/db-url.ts" --name orders --host 100.99.0.1 --env-local "$T/.env.local"
+  : > "$T/kubeconfig"   # 라이브 경로 픽스처 — 클러스터 도메인 실재(없으면 skip variant가 선행한다)
+  run env PATH="$T/bin:$PATH" KUBECONFIG="$T/kubeconfig" bun "$ROOT/tools/db-url.ts" --name orders --host 100.99.0.1 --env-local "$T/.env.local"
   [ "$status" -eq 0 ]
   grep -q '^ORDERS_RO_DATABASE_URL=postgres://u:n@100.99.0.1:5432/orders$' "$T/.env.local"   # host 치환 + namespaced 키
   [ "$(printf '%s' "$output" | grep -c 'postgres://')" -eq 0 ]    # 평문 URL stdout 비노출(카운트 패턴)

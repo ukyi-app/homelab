@@ -61,8 +61,9 @@ setup() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE '^SCAN: check-locale-collation: [0-9]+$'
   # 바닥값이 실제로 물리는지 — 도메인이 붕괴하면 초록이 아니라 red여야 한다.
-  run env LOCALE_MIN_SCAN=99999 bash "$S"
+  run bash "$S" --floor check-locale-collation=99999
   [ "$status" -ne 0 ]
+  echo "$output" | grep -q "열거 붕괴"
 }
 
 @test "the detector failing (an unreadable arg) is red, not a silent pass" {

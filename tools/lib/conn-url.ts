@@ -49,7 +49,12 @@ export type UrlResult = {
   wrote?: boolean;
   error?: string;
 };
-export type UrlOutcome = { variant: "success" | "failure"; omitted: string[]; result: UrlResult };
+// skip: 클러스터 도메인 부재(KUBECONFIG 미설정) — '평가했고 실패(failure)'가 아니라 '평가하지
+// 않음'이다(가드 어휘의 4와 같은 선 — status.ts는 같은 조건을 omitted로 구별하지만 url 동사는
+// 클러스터 조회가 본체라 부분 생략이 성립하지 않는다). 사유는 note가 담고, CLI 셸이 그 note로
+// stderr 마커를 만든다(계약 x-contract.exitRationale). 설정됐는데 깨진 조회는 여전히 failure
+// (doctor 선례: 미설정=warn·깨진 설정=fail).
+export type UrlOutcome = { variant: "success" | "failure" | "skip"; omitted: string[]; result: UrlResult };
 
 // 입력 검증 술어 — CLI(usage exit 2)·MCP(invalid params)·bin 껍데기가 공유.
 export function dbUrlInputError(input: DbUrlInput): string | null {
@@ -106,6 +111,11 @@ function kubectlData(ns: string, secret: string, key: string): { ok: boolean; va
     : { ok: false, value: "", err: r.err.split("\n")[0] || "kubectl 실패" };
 }
 
+// skip 결과 한 벌 — 두 동사가 같은 사유 문구를 낸다(UrlOutcome 타입 주석이 의미론 소유).
+function skipNoCluster(base: UrlResult): UrlOutcome {
+  return { variant: "skip", omitted: [], result: { ...base, wrote: false, note: "KUBECONFIG 미설정 — 클러스터 조회 없이 종료(계획은 --dry-run, 라이브는 KUBECONFIG 설정 후 재실행)" } };
+}
+
 export function runDbUrl(input: DbUrlInput): UrlOutcome {
   const mode = dbMode(input);
   const envFile = input.envLocal ?? mode.envFile;
@@ -116,6 +126,10 @@ export function runDbUrl(input: DbUrlInput): UrlOutcome {
   }
   const tsHost = input.host ?? process.env.TS_DB_HOST ?? "";
   if (tsHost === "") return failure("--host <tailscale-host>(또는 TS_DB_HOST) 필요 — pg-rw-tailscale LB host(런북)");
+  // host 미지정(입력 결함)은 skip(도메인 부재)보다 앞선다 — 도메인이 생겨도 host 없이는 라이브
+  // 실행이 성립하지 않으니, 먼저 고칠 수 있는 것을 먼저 보고한다(cache url은 host 기본값이 있어
+  // 이 축 자체가 없다 — 두 동사의 순서 비대칭은 그 차이다).
+  if ((process.env.KUBECONFIG ?? "") === "") return skipNoCluster(base);
   let url: string;
   if (input.admin === true) {
     const user = kubectlData(mode.ns, mode.secret, "username");
@@ -141,6 +155,7 @@ export function runCacheUrl(input: CacheUrlInput): UrlOutcome {
   if (input.dryRun === true) {
     return { variant: "success", omitted: [], result: { ...base, wrote: false, note: `Valkey tailscale 상시 노출은 deferred — 선행 kubectl -n cache port-forward svc/${input.name} 6379:6379. 평문 URL은 stdout에 출력하지 않음` } };
   }
+  if ((process.env.KUBECONFIG ?? "") === "") return skipNoCluster(base);
   const src = kubectlData(mode.ns, mode.secret, mode.srcKey);
   if (!src.ok) return failure(src.err);
   const url = src.value.replace(/@[^/]+/, `@${host}:6379`);

@@ -94,7 +94,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     // variant 셀 총합 핀 — 다중 variant 엔트리에서 variant가 지워지면 분기·행 수는 그대로인 채
     // 파생과 워커가 함께 내려가 초록이 된다(리뷰 실측) — 구판 ok:36 리터럴의 정확한 복원이다.
     const cellTotal = verbBranches.reduce((n, b) => n + b.properties.variant.enum.length, 0);
-    if (cellTotal !== 36) { console.error("variant 셀 총합 " + cellTotal + " != 36(손 앵커)"); process.exit(1); }
+    if (cellTotal !== 38) { console.error("variant 셀 총합 " + cellTotal + " != 38(손 앵커)"); process.exit(1); }
     const SAMPLES = buildSamples(sch.definitions.doctorCheck.properties.id.enum);
     const byVerb = {};
     for (const br of verbBranches) (byVerb[br.properties.verb.enum[0]] ??= []).push(br);

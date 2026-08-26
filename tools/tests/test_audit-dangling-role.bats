@@ -9,8 +9,8 @@ setup() {
   mkdir -p "$FR/apps" "$FR/infra/cloudflare" "$FR/docs" \
     "$FR/platform/cnpg/prod/databases" "$FR/platform/data-conn/prod" "$FR/platform/cache/prod"
   # ⚠️ 이 스위트의 도메인은 cluster.yaml managed.roles다 — registry는 정당하게 비어 있다.
-  # audit-orphans의 registry scan-floor(기본 1)는 그래서 `--min-registry 0`으로 낮춰 부른다
-  # (선례: check-image-pins `--min-scan 1`). 바닥값은 **기본 모드에만** 적용한다.
+  # audit-orphans의 registry scan-floor(기본 1)는 그래서 `--floor registry=0`으로 낮춰 부른다
+  # (선례: check-image-pins `--floor total=1`). 바닥값은 **기본 모드에만** 적용한다.
   echo '[]' > "$FR/infra/cloudflare/apps.json"
   printf '<!-- ledger:meta -->\n' > "$FR/docs/memory-ledger.md"
   # cluster.yaml: orders DB의 owner/ro managed role 2개. ro sealed는 제거됨(고아), owner sealed는 존재.
@@ -32,16 +32,16 @@ YAML
 teardown() { rm -rf "$TMP"; }
 
 @test "a managed role whose passwordSecret sealed file is gone is reported as dangling-role" {
-  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --min-registry 0
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --floor registry=0
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.findings | any(.type == "dangling-role" and .subject == "orders_ro")'
   # owner role은 sealed가 살아있어 고아 아님
-  run bash -c "bun '$ROOT/tools/audit-orphans.ts' --repo-root '$FR' --min-registry 0 | jq -e '.findings | any(.type==\"dangling-role\" and .subject==\"orders_owner\")'"
+  run bash -c "bun '$ROOT/tools/audit-orphans.ts' --repo-root '$FR' --floor registry=0 | jq -e '.findings | any(.type==\"dangling-role\" and .subject==\"orders_owner\")'"
   [ "$status" -ne 0 ]
 }
 
 @test "dangling-role is informational (non-blocking under --ci)" {
-  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry 0
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --floor registry=0
   [ "$status" -eq 0 ]
 }
 
@@ -53,6 +53,6 @@ teardown() { rm -rf "$TMP"; }
 YAML
   # KSOPS 시드 파일 존재(secret-generator가 렌더) — 평문 아님(테스트는 파일 존재만 본다)
   touch "$FR/platform/cnpg/prod/pg-admin-credentials.enc.yaml"
-  run bash -c "bun '$ROOT/tools/audit-orphans.ts' --repo-root '$FR' --min-registry 0 | jq -e '.findings | any(.type==\"dangling-role\" and .subject==\"ukkiee\")'"
+  run bash -c "bun '$ROOT/tools/audit-orphans.ts' --repo-root '$FR' --floor registry=0 | jq -e '.findings | any(.type==\"dangling-role\" and .subject==\"ukkiee\")'"
   [ "$status" -ne 0 ]   # ukkiee은 .enc.yaml로 해소 → 고아 아님
 }

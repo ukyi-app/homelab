@@ -4,6 +4,11 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-skeleton
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 02 — 구 SKELETON_*
+# env 폐지: env는 호출부에 보이지 않는 채로 바닥값을 끄거나 올린다).
+take_floors "check-skeleton:bats check-skeleton:platform check-skeleton:nul-scan" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
+[ $# -eq 0 ] || { echo "unknown arg: $1" >&2; exit 2; }
 cd "$ROOT"
 README="${CK_README:-README.md}"   # 테스트 오버라이드(역방향 검사용)
 BT='`'                              # 백틱 리터럴
@@ -22,9 +27,9 @@ done
 # bats 네이밍 컨벤션: 모든 추적 *.bats는 test_ 접두여야 한다(run-bats.sh 수집 글롭 전제).
 # 미접두 bats는 단일 러너 수집에서 조용히 빠지므로 시끄럽게 실패시킨다. (grep no-match는 || true로 흡수)
 # ⚠️ 열거를 변수로 받아 rc를 잡는다. 이 도메인이 비면 네이밍 가드와 CJK 가드가 **둘 다** 0회 돈다
-# (CJK는 3회 재발한 검증된 함정이라 조용히 꺼지면 특히 위험하다). 현재 추적 228건 — 래칫 아님.
+# (CJK는 3회 재발한 검증된 함정이라 조용히 꺼지면 특히 위험하다). 현재값은 SCAN 마커를 읽어라 — 래칫 아님.
 all_bats="$(scan_enumerate check-skeleton git ls-files '*.bats')" || exit 1
-scan_floor check-skeleton:bats "$(scan_count "$all_bats")" "${SKELETON_BATS_MIN_SCAN:-150}" || exit 1
+scan_floor check-skeleton:bats "$(scan_count "$all_bats")" "$(floor_of check-skeleton:bats 150)" || exit 1
 unprefixed="$(printf '%s\n' "$all_bats" | grep -vE '(^|/)test_[^/]*\.bats$' || true)"
 if [ -n "$unprefixed" ]; then
   echo "FAIL: test_ 접두 없는 bats (네이밍 컨벤션 위반):"
@@ -52,7 +57,7 @@ fi
 # ⚠️ 프로세스 치환은 워커 실패를 전파하지 않아, bun이 죽으면 정방향(dir→표) 검사가 0회 돌고
 # 역방향만 남은 채 통과했다(부분 degrade — 실측). 현재 컴포넌트 16개 — 래칫 아님.
 comp_units="$(scan_enumerate check-skeleton bun "$(dirname "${BASH_SOURCE[0]}")/../tools/lib/repo-walk.ts" --units platform)" || exit 1
-scan_floor check-skeleton:platform "$(scan_count "$comp_units")" "${SKELETON_PLATFORM_MIN_SCAN:-10}" || exit 1
+scan_floor check-skeleton:platform "$(scan_count "$comp_units")" "$(floor_of check-skeleton:platform 10)" || exit 1
 while IFS= read -r d; do
   [ -n "$d" ] || continue
   c="$(basename "$d")"
@@ -87,7 +92,7 @@ while IFS= read -r f; do
   # (`tr … | cmp - "$f"`는 같은 파일을 한 파이프라인에서 두 번 읽어 shellcheck SC2094가 붙는다.)
   if [ "$(LC_ALL=C tr -d '\000' < "$f" | wc -c)" -ne "$(wc -c < "$f")" ]; then nul_bad="${nul_bad}  $f"$'\n'; fi
 done <<< "$(git ls-files '*.ts' '*.mts' '*.sh' '*.bats' '*.yaml' '*.yml' '*.json' '*.md' '*.py' '*.tf' '*.rego' 'Makefile')"
-scan_floor check-skeleton:nul-scan "$nul_scanned" "${SKELETON_NUL_MIN_SCAN:-200}" || exit 1
+scan_floor check-skeleton:nul-scan "$nul_scanned" "$(floor_of check-skeleton:nul-scan 200)" || exit 1
 if [ -n "$nul_bad" ]; then
   echo "FAIL: 소스에 리터럴 NUL 바이트 — grep이 이 파일들을 바이너리로 보고 내용을 건너뛴다(가드에 투명해짐):"
   printf '%s' "$nul_bad"

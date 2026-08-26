@@ -8,6 +8,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init verify-secrets
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "verify-secrets" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 
 age_key="${SOPS_AGE_KEY_FILE:-}"
 can_decrypt=0
@@ -46,7 +49,12 @@ check_one() {
 }
 
 if [ "$#" -gt 0 ]; then
-  scan_signal verify-secrets "$#"   # 인자(픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
+  # --floor를 **명시하면** 픽스처 모드에도 적용한다(floor_set — 명시 플래그의 조용한 no-op 금지).
+  if floor_set verify-secrets; then
+    scan_floor verify-secrets "$#" "$(floor_of verify-secrets 6)" || exit 1
+  else
+    scan_signal verify-secrets "$#"   # 인자(픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
+  fi
   for f in "$@"; do check_one "$f" || fail=1; done
 else
   # ⚠️ 전수 모드는 (a) `git ls-files`가 **cwd 상대**라 ROOT로 내려가야 하고(서브디렉토리에서 실행하면
@@ -56,7 +64,7 @@ else
   cd "$ROOT"
   tracked="$(scan_enumerate verify-secrets git ls-files '*.enc.yaml')" || exit 1
   scanned="$(scan_count "$tracked")"
-  scan_floor verify-secrets "$scanned" "${VERIFY_SECRETS_MIN_SCAN:-6}" || exit 1
+  scan_floor verify-secrets "$scanned" "$(floor_of verify-secrets 6)" || exit 1
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     check_one "$f" || fail=1

@@ -263,6 +263,43 @@ merged_pr_at_descendant() {
   echo "$output" | grep -q "^ok$"
 }
 
+@test "db url without KUBECONFIG is a skip: exit 4, stderr marker, schema-valid skip envelope" {
+  # skip 의미론(계약 exitRationale): 클러스터 도메인 부재는 '평가했고 실패(1)'가 아니라
+  # '평가하지 않음(4)'이다 — 가드 어휘의 skip이 CLI variant로 같은 규약으로 흐른다(kernel-followups 06).
+  export OUTDIR="$BATS_TEST_TMPDIR"
+  run --separate-stderr env -u KUBECONFIG PATH="$STUB" TS_DB_HOST=h "$BUN" tools/homelab.ts db url --name t --env-local "$BATS_TEST_TMPDIR/skip.env.local" --json
+  [ "$status" -eq 4 ]
+  echo "$stderr" | grep -q "^SKIP: homelab db url: "
+  [ ! -f "$BATS_TEST_TMPDIR/skip.env.local" ]   # skip = 정말로 안 썼다(이 variant의 존재 이유)
+  [ "$(echo "$output" | jq -r '.variant')" = "skip" ]
+  [ "$(echo "$output" | jq -r '.exitCode')" = "4" ]
+  [ "$(echo "$output" | jq -r '.result.wrote')" = "false" ]
+  echo "$output" > "$OUTDIR/url-skip.json"
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const env = JSON.parse(readFileSync(process.env.OUTDIR + "/url-skip.json", "utf8"));
+    const errs = schemaErrors(env, sch, sch);
+    if (errs.length) { console.error(errs.join(" | ")); process.exit(1); }
+    console.log("ok");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok$"
+}
+
+@test "db url with KUBECONFIG set but a failing query is a failure, not a skip (boundary)" {
+  # 경계: KUBECONFIG가 설정돼 있으면 도메인은 있다 — 조회 실패는 평가 실패(1)지 skip(4)이 아니다
+  # (doctor 선례: 미설정=warn·깨진 설정=fail 의 같은 선).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" TS_DB_HOST=h STUB_KUBECTL_FAIL=1 "$BUN" tools/homelab.ts db url --name t --env-local "$BATS_TEST_TMPDIR/fail.env.local" --json
+  [ "$status" -eq 1 ]
+  [ ! -f "$BATS_TEST_TMPDIR/fail.env.local" ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  out="$stderr"
+  run grep -q "^SKIP:" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
 @test "db url enforces rw/admin exclusivity and the F2 admin channel as usage errors (engine predicate)" {
   run --separate-stderr bun tools/homelab.ts db url --name t --rw --admin
   [ "$status" -eq 2 ]

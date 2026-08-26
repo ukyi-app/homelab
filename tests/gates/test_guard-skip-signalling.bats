@@ -166,8 +166,33 @@ fixture_suite() {   # $1: 하위 디렉토리명
   [ "$n" -eq 1 ]
 }
 
+@test "a template-literal marker emission is caught (backtick quote class)" {
+  # 06 리뷰 실측 — 따옴표 클래스에 백틱이 없으면 템플릿 리터럴 방출이 통째로 밖이고,
+  # CLI 계약 마커는 보간이 필수인 모양이라 정확히 그 구멍을 부른다.
+  printf '%s\n' 'process.stderr.write(`SKIP: fake: ${reason}`);' > "$BATS_TEST_TMPDIR/tpl.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/tpl.ts"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "skip()"
+}
+
+@test "a direct process.exitCode skip assignment is caught (the schema-era known gap, closed)" {
+  # 옛 헤더가 '알려진 구멍'으로 등재하던 경로 — homelab CLI skip variant 구현(kernel-followups 06)이
+  # 이 레인을 함께 닫는다: 종료코드는 variant 축(exitFor)이 소유하고, 4의 직접 대입은 손조립이다.
+  printf '%s\n' 'process.exitCode = 4;' > "$BATS_TEST_TMPDIR/ec.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/ec.ts"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "직접 대입"
+}
+
+@test "the CLI skip marker emission stays singular in cli.ts (skipMarker owns it)" {
+  # CLI 계약 마커(SKIP: homelab <verb>:)의 방출도 가드 마커와 같은 규율 — 구현 한 곳이 원자성을
+  # 소유한다. 방출이 한 곳 더 생기면 두 번째 진실이다.
+  n="$(sed 's|^[[:space:]]*//.*||' tools/lib/cli.ts | grep -cF 'SKIP: homelab ')"
+  [ "$n" -eq 1 ]
+}
+
 @test "the enumeration floor fires when the scan domain collapses" {
-  run env SKIP_SIGNAL_MIN_SCAN=99999 bash "$ROOT/scripts/check-skip-signalling.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" --floor check-skip-signalling=99999
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "열거 붕괴"
 }

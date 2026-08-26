@@ -34,6 +34,16 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   [ "$status" -ne 0 ]
 }
 
+@test "cache-url without KUBECONFIG signals skip via the helper (exit 4, marker, no write)" {
+  # db-url과 대칭(kernel-followups 06).
+  T="$(mktemp -d)"
+  run env -u KUBECONFIG bun "$ROOT/tools/cache-url.ts" --name sessions --env-local "$T/.env.local"
+  [ "$status" -eq 4 ]
+  echo "$output" | grep -q "^SKIP: cache-url: "
+  [ ! -f "$T/.env.local" ]
+  rm -rf "$T"
+}
+
 @test "cache-url live path writes the namespaced env key, substitutes the port-forward host, and never prints plaintext" {
   T="$(mktemp -d)"; mkdir -p "$T/bin"
   cat > "$T/bin/kubectl" <<'STUB'
@@ -41,7 +51,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 printf '%s' "cmVkaXM6Ly91Om5AY2FjaGUtc2Vzc2lvbnM6NjM3OQ=="
 STUB
   chmod +x "$T/bin/kubectl"
-  run env PATH="$T/bin:$PATH" bun "$ROOT/tools/cache-url.ts" --name sessions --env-local "$T/.env.local"
+  : > "$T/kubeconfig"   # 라이브 경로 픽스처 — 클러스터 도메인 실재(없으면 skip variant가 선행한다)
+  run env PATH="$T/bin:$PATH" KUBECONFIG="$T/kubeconfig" bun "$ROOT/tools/cache-url.ts" --name sessions --env-local "$T/.env.local"
   [ "$status" -eq 0 ]
   grep -q '^SESSIONS_REDIS_RO_URL=redis://u:n@127.0.0.1:6379$' "$T/.env.local"   # 기본 host(127.0.0.1) 치환 + namespaced 키
   [ "$(printf '%s' "$output" | grep -c 'redis://')" -eq 0 ]    # 평문 URL stdout 비노출

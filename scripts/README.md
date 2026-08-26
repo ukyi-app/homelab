@@ -18,7 +18,7 @@
   `run-bats.sh --list`를 읽는다. 도메인 회계만으로는 **gate → `.ci-exclude` 이동**이 원리적으로 안 보이므로
   (옮겨도 여전히 "정확히 한 도메인") 레지스트리 계약 두 가지가 더 붙는다: 항목은 빈 줄로 끊긴 직전 주석
   블록의 지배를 받고 그 블록이 `실행처`를 명시 + 항목 수 **상한**(`BATS_EXCLUDE_MAX`). 여기에 gate 도메인
-  바닥값(`BATS_ACCOUNTING_MIN_GATE` — 러너 붕괴·대량 삭제)까지 셋이 각각 다른 축이다.
+  바닥값(``--floor gate=<n>`` — 러너 붕괴·대량 삭제)까지 셋이 각각 다른 축이다.
   `--lint-excludes <파일>`은 레지스트리 계약만 보는 픽스처 모드다(그 외 인자는 exit 2 — 맨 인자로 회계를
   끄는 off-switch를 두지 않는다).
 - **`check-app-deploy.sh`** — `apps/<name>/deploy/prod/` 배포 계약 가드. 필수 산출물 목록을
@@ -79,7 +79,7 @@
 - **`check-skip-signalling.sh`** — 가드 skip 신호 규약(CONTRIBUTING '가드 skip 신호')의 정적 가드:
   `SKIP: <가드>: <이유>` 마커와 skip 종료코드(셸 `exit 4` / TS `process.exit(4)`)가 **같은 줄에서 짝**을
   이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + Makefile
-  전수(자기 자신 제외 — 패턴 리터럴이 위반과 같은 모양). 열거 붕괴 차단용 `MIN_SCAN`(기본 70) 보유.
+  전수(자기 자신 제외 — 패턴 리터럴이 위반과 같은 모양). 열거 붕괴 차단용 바닥값 보유(오버라이드는 `--floor check-skip-signalling=<n>`).
   `tests/gates/test_guard-skip-signalling.bats`가 호출(양방향 픽스처 음성 테스트 + 열거 바닥값).
 - **`check-scan-producers.sh`** — 가드 스캔 신호 규약(CONTRIBUTING '가드 스캔 신호')의 **거부 가드**:
   추적 `tools/**/*.ts`·`*.mts`의 코드 줄이 커널(`tools/lib/scan-floor.ts`)을 우회해 `SCAN:` 마커를 직접
@@ -90,6 +90,11 @@
   건너뛰지 않고 생산자 히트 ≥1을 검출기 생존 증거로 요구한다. awk 3겹 처방(rc 포착·`[ -r ]`·READFILES)
   + 바닥값·마커는 검출 뒤. 바닥값은 상수(`MIN_FILES`, env 주입 없음) · `--root <dir>`는 픽스처 전용.
   `tests/gates/test_scan-floor.bats`가 호출(되돌림·신규 생산자·주석 표면·소비자·검출기 붕괴·열거 붕괴 증인).
+- **`check-floor-vocab.sh`** — 바닥값 어휘 거부 가드(kernel-followups 04): 구 어휘의 재유입 —
+  `--min-*` 플래그 표면 · `${…MIN…:-…}` env 폴백 읽기(셸) · `process.env.…MIN…`(TS) — 을 정적
+  red로 만든다. 상수 정의·지역 읽기·주석 산문·`*.bats`(거부 증인 픽스처)는 정당 보유처로 선 밖.
+  패턴은 조립식(self-exclusion 없음), 검출은 detect_run(rc·READFILES 대조), 오버라이드는
+  `--floor check-floor-vocab=<n>` 하나(dogfood). `tests/gates/test_floor-vocab.bats`가 게이트.
 - **`check-credential-expiry.sh`** — 자격증명 만료 원장(`policy/credential-expiry.json`) 검사. `--days N`
   (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). `credential-expiry.yaml`(주간)이 D-14 telegram 경고로
   중계, `tests/gates/test_credential_expiry.bats`가 가드. jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)

@@ -53,3 +53,14 @@ YAML
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'BLOCKED'
 }
+
+@test "a --floor override reaches the self-enumeration floor (no fake-green file mode)" {
+  # 02 리뷰 실측: 이관 전에는 인자 모드가 --floor를 파일로 오인해 0건 검사 + 초록 + 거짓 SCAN을
+  # 냈다(임시 명시 거부로 방어). 03 정식 이관 후에는 커널이 걷어 자기열거 floor에 닿는다.
+  run ./scripts/sops-guard.sh --floor sops-guard=99999
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "열거 붕괴"
+  out="$output"
+  run grep -q "^SCAN:" <<<"$out"
+  [ "$status" -ne 0 ]
+}

@@ -299,32 +299,32 @@ KEOF
   #    trip-mate-api 철거) 무인자 호출로는 트립을 볼 수 없다. 수치를 박아야 "바닥값이 실제로
   #    작동한다"는 계약이 앱 개수와 무관하게 증명된다.
   echo '[]' > "$FR/infra/cloudflare/apps.json"
-  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry 1
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --floor registry=1
   [ "$status" -eq 1 ]
   out="$output"
   run grep -q "scan-floor" <<<"$out"
   [ "$status" -eq 0 ]
   # 바닥값 **수치**는 소비자가 소유한다 — 빈 registry가 정당한 픽스처는 낮춰 부른다(래칫 아님).
-  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry 0
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --floor registry=0
   [ "$status" -eq 0 ]
 }
 
-@test "a non-numeric --min-registry is a usage error, never a silently disabled floor" {
+@test "a non-numeric --floor registry value is a usage error, never a silently disabled floor" {
   # NaN 비교는 항상 false다 — 오타 하나로 바닥값이 조용히 사라지는 자리(이 캠페인이 지우는 바로 그 병).
-  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry abc
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --floor registry=abc
   [ "$status" -eq 2 ]
 }
 
-@test "an empty or blank --min-registry is a usage error too (Number('') is 0, not NaN)" {
+@test "an empty or blank --floor registry value is a usage error too (Number('') is 0, not NaN)" {
   # ⚠️ `Number("")===0`·`Number(" ")===0`이라 isFinite 검사만으로는 **빈 값이 유효한 0으로 통과**해
   # 바닥값이 조용히 꺼진다. 위 @test가 불가능하다고 선언한 상태가 실제로 가능했다(적대 검토 실측).
   echo '[]' > "$FR/infra/cloudflare/apps.json"
-  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry ""
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --floor "registry="
   [ "$status" -eq 2 ]
-  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry " "
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --floor "registry= "
   [ "$status" -eq 2 ]
   # 값 없이 마지막 인자로 두면 undefined — 같은 경로로 막혀야 한다
-  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --floor
   [ "$status" -eq 2 ]
 }
 
@@ -383,4 +383,11 @@ YAML
   run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.findings | any(.type == "malformed-conn" and .subject == "db-BAD-conn.sealed.yaml")'
+}
+
+@test "the retired --min-registry vocabulary is a usage error (kernel-followups 05)" {
+  # 인자 거부는 레지스트리 읽기보다 앞이다 — setup 픽스처(FR) 그대로 쓴다.
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry 1
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "알 수 없는 옵션"
 }

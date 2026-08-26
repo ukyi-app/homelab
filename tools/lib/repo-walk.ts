@@ -20,7 +20,7 @@
 // ⚠️ **열거 바닥값(scan-floor)은 여기 두지 않는다.** 열거자는 "글롭이 깨져 0건"과 "정당하게 0건"을
 // 구별할 도메인 지식이 없다 — apps 0개는 첫 온보딩 전의 정상 상태고, 픽스처 트리는 platform/을
 // 아예 안 만들기도 한다. 반면 소비자는 이미 자기 도메인에 맞는 바닥값을 갖고 있다
-// (check-resource-limits MIN_SCAN=10 · check-image-pins --min-scan 20 · check-alert-rules 30) —
+// (check-resource-limits MIN_SCAN=10 · check-image-pins --floor total=20 · check-alert-rules 30) —
 // 그것들은 **의미론적 필터 이후**를 세므로 훨씬 정확하다. 워커 바닥값은 없던 보호를 더하지 않으면서
 // 정당한 상태를 고장으로 신고한다(구현 중 픽스처 3곳이 연달아 이 신호를 줬다).
 // 실행은 exec seam 경유(d6④) — git 실패는 빈 목록으로 흡수하는 기존 계약 유지(바닥값이 진단을 대신한다).

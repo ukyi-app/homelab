@@ -296,6 +296,15 @@ case "$*" in
     if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
     cat "$FIX/argocd-app.json"
     ;;
+  # conn-url 엔진의 자격 secret 조회(jsonpath) — cache 핸들은 redis URL, 나머지는 postgres URL.
+  "-n prod get secret cache-"*)
+    if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
+    printf '%s' "cmVkaXM6Ly91OnBAaG9zdDo2Mzc5"
+    ;;
+  "-n prod get secret "*|"-n database get secret "*)
+    if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
+    printf '%s' "cG9zdGdyZXM6Ly91OnBAaG9zdC9kYg=="
+    ;;
   *)
     echo "stub kubectl: 계약 밖 호출: $*" >&2
     exit 3

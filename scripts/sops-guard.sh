@@ -9,6 +9,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init sops-guard
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+take_floors "sops-guard" "$@" || exit $?
+set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 
 if ! command -v yq >/dev/null 2>&1; then
   echo "sops-guard: yq가 필요하다(설치 후 재시도)." >&2
@@ -25,12 +28,17 @@ CANON="$(sops_canonical_recipients)"
 # ci.yaml의 `xargs -r`)이 전부 "0 파일=성공"으로 읽었고, 글롭이 깨지면 required 스텝이 조용히 초록이었다.
 # 이제 무인자면 **자기 도메인을 스스로 열거**하고 바닥값을 건다(현재 추적 9건 — 래칫 아님).
 if [ "$#" -gt 0 ]; then
-  scan_signal sops-guard "$#"   # 인자(pre-commit·픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
+  # --floor를 **명시하면** 인자/픽스처 모드에도 적용한다(floor_set — 명시 플래그의 조용한 no-op 금지).
+  if floor_set sops-guard; then
+    scan_floor sops-guard "$#" "$(floor_of sops-guard 6)" || exit 1
+  else
+    scan_signal sops-guard "$#"   # 인자(pre-commit·픽스처) 모드도 신호는 낸다 — 06의 fixture↔real 판별자
+  fi
 fi
 if [ "$#" -eq 0 ]; then
   cd "$ROOT"   # git ls-files는 cwd 상대다
   tracked="$(scan_enumerate sops-guard git ls-files '*.enc.yaml')" || exit 1
-  scan_floor sops-guard "$(scan_count "$tracked")" "${SOPS_GUARD_MIN_SCAN:-6}" || exit 1
+  scan_floor sops-guard "$(scan_count "$tracked")" "$(floor_of sops-guard 6)" || exit 1
   # shellcheck disable=SC2086  # 경로에 공백 없음(레포 규약) — 위치 인자로 재주입
   set -- $tracked
 fi

@@ -108,7 +108,7 @@ push_success_metric() { # M5의 CNPGRestoreDrillStale이 읽는 정식 시계열
 #    Role은 clusters/pvc 둘 다 `list`를 이미 갖고 있다(restore-drill-rbac.yaml:11,18).
 # ⚠️ kubectl 실패를 빈 출력으로 **위장하지 않는다** — rc 2로 전파한다. 예전 잔여 검사
 #    (`RESID=$(kubectl … 2>/dev/null | wc -l)`)는 API 접근이 죽어도 0을 내어 '잔여 없음'으로 읽혔다.
-#    "열거할 수 없다"와 "잔여가 없다"는 다른 사실이다(같은 클래스를 scripts/audit-orphan-pv.sh:34-39가
+#    "열거할 수 없다"와 "잔여가 없다"는 다른 사실이다(같은 클래스를 scripts/audit-orphan-pv.sh의 열거 바닥값가
 #    '열거 바닥값'으로 막는다). 그 아이디어의 양성 대조판이 아래 verify_enumeration_positive다.
 list_clusters() {
   local out
@@ -180,7 +180,7 @@ purge_drill() {
 
 # 열거자 양성 대조 — 이 실행이 **방금 만든** 오브젝트가 열거에 잡히는지 본다.
 # 잡히지 않으면 스윕이 눈이 먼 것이고(셀렉터/접두 드리프트), 그 상태에서는 '잔여 0 확인'이
-# 무측정 초록이다 — audit-orphan-pv.sh:34-39의 '열거 바닥값'과 같은 방어를 in-band로 세운다.
+# 무측정 초록이다 — audit-orphan-pv.sh의 '열거 바닥값'과 같은 방어를 in-band로 세운다.
 verify_enumeration_positive() {
   local c p
   c="$(list_clusters)" || fail "cleanup 양성 대조: Cluster를 열거하지 못했다(kubectl/API 실패)"
