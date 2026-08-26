@@ -6,7 +6,7 @@
 // (structure r1 A1·B1). 셰뱅+exec 비트는 이 파일만 예외: package.json bin("homelab")의
 // 대상이라 `bun link`가 전역 PATH에 심링크한다(test_shebang-exec.bats가 bin 선언에서 파생).
 import { readSync } from "node:fs";
-import { parseCommand, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
+import { parseCommand, skipMarker, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
 import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInput } from "./lib/conn-url.ts";
 import { USAGE_EXIT, type Envelope } from "./lib/contract.ts";
 import { APP_NAME_RE } from "./lib/identity.ts";
@@ -408,6 +408,7 @@ function cacheUrlUsage(): string {
     "  --host <h>         port-forward 타깃 호스트(기본 127.0.0.1 또는 CACHE_LOCAL_HOST)",
     "  --env-local <file> 대상 파일 오버라이드(기본 .env.local)",
     "  --dry-run          계획만(클러스터 무의존)",
+    "  (KUBECONFIG 미설정이면 skip: exit 4 + stderr SKIP 마커 — 기록 없이 종료)",
     "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
     "",
   ].join("\n");
@@ -455,6 +456,7 @@ function dbUrlUsage(): string {
     "  --env-local <file> 대상 파일 오버라이드(기본 .env.local, admin 제외)",
     "  --dry-run          계획만(클러스터 무의존)",
     "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
+    "  (KUBECONFIG 미설정이면 skip: exit 4 + stderr SKIP 마커 — 기록 없이 종료)",
     "",
   ].join("\n");
 }
@@ -466,6 +468,7 @@ function renderUrl(envelope: Envelope): string[] {
   if (r.dryRun === true) {
     return [`계획: mode=${r.mode} · secretRef=${r.secretRef} · envKey=${r.envKey} · envFile=${r.envFile}`, ...(r.note ? [r.note] : [])];
   }
+  if (envelope.variant === "skip") return [`생략: ${r.note ?? "사유 미기록"}`, `결과: ${envelope.variant}`];
   return [`${r.envFile}에 ${r.envKey} 기록(mode=${r.mode}) — 값은 출력하지 않음`];
 }
 
@@ -526,6 +529,11 @@ function main(argv: string[]): number {
   const sink = out.json ? process.stderr : process.stdout;
   for (const line of out.human) sink.write(line + "\n");
   if (out.json) process.stdout.write(JSON.stringify(out.envelope, null, 2) + "\n");
+  // skip variant는 stderr 마커와 짝이다(계약 exitRationale — 같은 실행). 마커는 헬퍼가,
+  // 종료코드는 envelope(variant 축의 exitFor 파생 — 스키마가 skip↔4를 강제)가 소유한다.
+  if (out.envelope.variant === "skip") {
+    skipMarker(out.envelope.verb, String((out.envelope.result as { note?: string }).note ?? "사유 미기록"));
+  }
   return out.envelope.exitCode;
 }
 

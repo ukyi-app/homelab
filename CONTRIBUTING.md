@@ -64,6 +64,12 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
   `scripts/check-skip-signalling.sh`가 강제, 게이트는 `tests/gates/test_guard-skip-signalling.bats`).
   **Makefile 레인만** 함수를 쓸 수 없어 옛 같은-줄 짝 검사로 잔존한다.
 - 평가한 실행은 마커를 내지 않는다: 0=평가·통과, 1=평가·실패.
+- **homelab CLI의 skip variant**(kernel-followups 06)는 같은 어휘의 CLI 대응물이다: 종료코드 4는
+  envelope **데이터**(`exitFor(variant)` 계약 파생 — 스키마가 skip↔4 짝을 강제)로 흐르고, stderr
+  마커 `SKIP: homelab <동사>: <이유>`는 `skipMarker()`(tools/lib/cli.ts — 유일 방출)가 낸다.
+  `process.exitCode = 4` 직접 대입은 check-skip-signalling의 전용 레인이 거부한다.
+  bin 껍데기(db-url/cache-url)는 CLI 계약 밖이라 **가드형 `skip()` 경유**(stdout ·
+  `SKIP: db-url: <이유>`)로 신호한다 — stderr 계약 마커는 homelab CLI 전용이다.
 - 각 가드의 bats 래퍼는 **두 갈래를 각각 단언**한다. `[ "$status" -eq 0 ]` 하나만 두면 skip이
   그 단언을 만족해 래퍼가 vacuous해진다. 도메인을 주입할 시임(픽스처 트리·`RUNBOOK_DIR` 같은
   변수 오버라이드)이 없으면 만들어서 두 갈래를 실증한다.

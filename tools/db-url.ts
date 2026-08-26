@@ -1,11 +1,11 @@
 // db:url — conn URL 엔진(lib/conn-url.ts)의 CLI 껍데기(cli-deepening 심화 5). 접속 로직·평문
 // 비출력·F2 채널 분리(--admin ↔ .env.admin.local)·RW/ADMIN 상호배타는 엔진 술어 소유 — 여기는
-// argv 파싱과 기존 출력 계약(dry-run 계획 JSON·기록 한 줄·종료코드 0/1/2)만 보존한다.
+// argv 파싱과 기존 출력 계약(dry-run 계획 JSON·기록 한 줄·종료코드 0/1/2, skip=4는 헬퍼 경유)만 보존한다.
 // homelab CLI(`homelab db url`)와 MCP(db_url)는 catalog op로 같은 엔진을 소비한다.
 // 이 도구는 reset/drop 등 파괴 수단을 제공하지 않는다(파괴는 docker 모드 전용).
 import { dbUrlInputError, runDbUrl } from "./lib/conn-url.ts";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
-import { parseFlags } from "./lib/cli.ts";
+import { parseFlags, skip } from "./lib/cli.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed. 종료 코드 2 보존.
 let __f: Record<string, string | boolean>;
@@ -40,4 +40,7 @@ if (variant === "failure") {
   console.error(`db-url: ${result.error}`);
   process.exit(1);
 }
+// 클러스터 도메인 부재 — 성공 문구를 내면 "기록했다"는 거짓말이 된다. 신호는 헬퍼 경유(4=skip
+// 규약 — 가드형: 마커는 stdout이고, stderr 계약 마커는 homelab CLI 전용이다).
+if (variant === "skip") skip("db-url", result.note ?? "사유 미기록");
 console.log(`db-url: ${result.envFile}에 ${result.envKey} 기록(mode=${result.mode}, host=tailscale) — 값은 출력하지 않음`);

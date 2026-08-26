@@ -181,6 +181,20 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
     console.log(errs.length ? "INVALID:" + errs.join("|") : "valid");
   ' "$env"
   echo "$output" | grep -q "^valid$"
+  # skip variant(kernel-followups 06): KUBECONFIG 없는 서버의 라이브 조회는 isError가 아니라
+  # 구조화된 skip이다(x-contract.mcp.normalVariants) — 에이전트는 variant·wrote로 읽는다(마커는
+  # 종료코드 채널의 보조물이라 MCP엔 없다). 기록이 없어야 한다.
+  run --separate-stderr env PATH="$STUB" TS_DB_HOST=h HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'printf "%s\n" "$@" | "$0" tools/homelab.ts mcp' "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==18) | .result.isError')" = "false" ]
+  senv="$(echo "$output" | jq -rc 'select(.id==18) | .result.content[0].text')"
+  [ "$(echo "$senv" | jq -r '.variant')" = "skip" ]
+  [ "$(echo "$senv" | jq -r '.exitCode')" = "4" ]
+  [ "$(echo "$senv" | jq -r '.result.wrote')" = "false" ]
+  [ ! -f "$ED/.env.local" ]
+
   # release r1 a4=b2: envDir은 required — 생략하면 -32602(서버 cwd에 자격 기록 금지).
   mcp_rpc '{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"db_url","arguments":{"name":"mydb","dryRun":true}}}'
   [ "$(echo "$output" | jq -rc 'select(.id==16) | .error.code')" = "-32602" ]

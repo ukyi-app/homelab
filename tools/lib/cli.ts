@@ -56,6 +56,15 @@ export function skip(guard: string, reason: string): never {
   console.log("SKIP: " + guard + ": " + reason); process.exit(4);
 }
 
+// CLI skip variant의 stderr 마커 — 위 skip()(가드 레인: stdout·즉시 exit)의 CLI 셸 대응물.
+// 계약(cli-result-schema x-contract.exitRationale)은 skip envelope와 같은 실행에서 stderr에
+// 'SKIP: homelab <verb>: <이유>' 마커를 요구한다. 종료코드는 이 헬퍼 소관이 아니다 — variant
+// 축에서 exitFor로 파생되고 스키마가 skip↔4 짝을 강제하므로, 마커만 이 구현이 소유한다
+// (정확 1은 게이트 bats가 잰다). 문자열 연결(쌍따옴표)인 이유는 skip()과 같다.
+export function skipMarker(verb: string, reason: string): void {
+  process.stderr.write("SKIP: homelab " + verb + ": " + reason + "\n");
+}
+
 export type TypedFlags = {
   str: (k: string, d?: string) => string | undefined;
   bool: (k: string) => boolean;

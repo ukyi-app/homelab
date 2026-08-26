@@ -130,6 +130,15 @@ run_cache_create() {
   echo "$output" | grep -q "^rejected$"
 }
 
+@test "cache url without KUBECONFIG is a skip with the stderr marker (exit 4)" {
+  # db url과 같은 skip 규약(kernel-followups 06) — cache 레인 독립 증인.
+  run --separate-stderr env -u KUBECONFIG PATH="$STUB" "$BUN" tools/homelab.ts cache url --name t --env-local "$BATS_TEST_TMPDIR/skip.env.local" --json
+  [ "$status" -eq 4 ]
+  echo "$stderr" | grep -q "^SKIP: homelab cache url: "
+  [ ! -f "$BATS_TEST_TMPDIR/skip.env.local" ]   # skip = 정말로 안 썼다
+  [ "$(echo "$output" | jq -r '.variant')" = "skip" ]
+}
+
 @test "cache url is a catalog op: --json yields a schema-valid envelope with no plaintext value" {
   # 구 byte-parity는 catalog 승격으로 계약이 대체됐다(티켓 08) — op envelope 계약 + 렌더러 소유.
   export OUTDIR="$BATS_TEST_TMPDIR"

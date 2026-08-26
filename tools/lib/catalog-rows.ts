@@ -115,8 +115,10 @@ export const CONTRACT_ROWS: readonly ContractRow[] = [
     { variants: ["success", "no-op"], ref: "initSuccess" },
     { variants: ["failure"], ref: "initFailure" },
   ] },
-  { verb: "db url", simple: [{ variants: ["success", "failure"], ref: "urlResult" }] },
-  { verb: "cache url", simple: [{ variants: ["success", "failure"], ref: "urlResult" }] },
+  // skip: 클러스터 도메인 부재(KUBECONFIG 미설정 — conn-url 엔진의 skipNoCluster) — exitCode 4 +
+  // CLI 셸의 stderr 마커(x-contract.exitRationale)와 짝이다(kernel-followups 06).
+  { verb: "db url", simple: [{ variants: ["success", "failure", "skip"], ref: "urlResult" }] },
+  { verb: "cache url", simple: [{ variants: ["success", "failure", "skip"], ref: "urlResult" }] },
 ];
 
 // create-database 디스패처 체크박스 확장 목록 — 행 inputs에서 파생한다(ext_ 접두 규약,
