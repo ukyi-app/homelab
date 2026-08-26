@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 스캔 신호 규약의 **거부 가드** — TS 가드가 커널(`tools/lib/scan-floor.ts`)을 우회해 `SCAN:` 마커를
-# **직접 출력**하면 red. `CONTRIBUTING.md` '가드 스캔 신호' 절 + 설계 `docs/reviews/ts-scan-kernel/design.md` §5.
+# **직접 출력**하면 red. 규약 SSOT는 `CONTRIBUTING.md` '가드 스캔 신호' 절이다(설계 원문 ts-scan-kernel
+# §5는 git 히스토리의 docs/reviews — 병·근거는 아래 헤더가 자체 보유한다).
 #
 # 병: `tests/gates/test_scan-floor.bats`의 로스터 대조(정적 콜사이트 집합 == 런타임 방출 집합)는 우회를
 # 막지 못한다. 정적 집합과 실행 파일 목록이 **같은 패턴**에서 파생되므로, 한 가드가 직접 `console.log`로
