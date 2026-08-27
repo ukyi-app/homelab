@@ -132,10 +132,43 @@ _refute_marker() {   # $1=정규식 $2=출력
   fi
 }
 
+# 픽스처(_seed)가 쓰는 정책과 **등가**인 리터럴 판정 컨텍스트.
+# ⚠️ 이 등가는 손으로 유지된다 — `_seed`의 정책을 바꾸고 여기를 안 바꾸면 아래 38건이 조용히
+#    딴 것을 잰다. 그 드리프트는 「두 경로가 일치한다」 테스트가 잡는다(이 파일 맨 아래).
+_probe_ctx_js() {
+  cat <<'JS'
+const ctx = {
+  denyMetrics: ["kube_pod_container_status_restarts_total"],
+  allowed: new Set(),
+  pushPeriodSec: new Map([
+    ["ghcr_latest_digest", 600],
+    ["files_backup_last_success_timestamp", 86400],
+    ["files_data_bulk_avail_bytes", 86400],
+    ["files_data_bulk_size_bytes", 86400],
+  ]),
+  lookbackSec: 300,
+  supply: new Map([
+    ["fixture_external_ts", { metric: "fixture_external_ts", supply: "external",   decreasing: "impossible", why: "픽스처" }],
+    ["fixture_local_ts",    { metric: "fixture_local_ts",    supply: "in-cluster", decreasing: "impossible", why: "픽스처" }],
+    ["fixture_budget",      { metric: "fixture_budget",      supply: "in-cluster", decreasing: "is-truth",   why: "픽스처" }],
+  ]),
+  cite: "policy/alert-supply-monotonicity.json",
+};
+JS
+}
+
+# 판정을 **인-프로세스**로 부른다. 계약($status·$output)은 종전과 같아 호출자 38곳이 무변경이다.
+# 종전에는 건마다 mktemp + 픽스처 시드 + git init + 가드 전량 실행을 지불하고 문구 하나를 grep했다.
+# ⚠️ expr는 env로 넘긴다 — 스크립트에 보간하면 따옴표·백틱이 든 식에서 조용히 깨진다.
 _run_probe() {   # $1=alert명 $2=expr → run 결과를 호출자가 판정
-  tmp="$(mktemp -d)"
-  _seed "$tmp" "$1" "$2"
-  _lint "$tmp"
+  run env PROBE_NAME="$1" PROBE_EXPR="$2" bun -e "
+    import { lintExpr } from '${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts';
+    $(_probe_ctx_js)
+    const v = lintExpr({ file: 'rules/probe.yaml', name: process.env.PROBE_NAME },
+                       process.env.PROBE_EXPR, ctx);
+    for (const x of v.violations) console.log(x);
+    process.exit(v.violations.length ? 1 : 0);
+  "
 }
 
 # 동결 결함 픽스처(tests/gates/fixtures/*.yaml — 실제 역사적 버그의 expr 스냅샷)를 **무수정**으로
@@ -1057,4 +1090,91 @@ JSON
   '
   [ "$status" -eq 0 ]
   echo "$output" | grep -qx 'ok'
+}
+
+@test "lintExpr emits modes in the documented order A then B then D then C" {
+  # 불변식: **방출 순서는 소스 순서(A→B→D→C)다.** 정렬하면 회귀 앵커가 깨진다.
+  # CLI로는 관측 불가다 — renderViolations가 세 그룹으로 평탄화해 모드 간 순서를 지운다.
+  # 기대값의 출처는 코드가 아니라 이 불변식이다(코드에서 다시 계산하면 항진명제가 된다).
+  run bun -e '
+    import { lintExpr } from "'"$ROOT"'/tools/check-alert-rules.ts";
+    const ctx = { allowed: new Set(), lookbackSec: 300, cite: "policy/x.json",
+      denyMetrics: ["restarts_total"],
+      pushPeriodSec: new Map([["pushed_metric", 600]]),
+      supply: new Map() };
+    const expr = "increase(restarts_total[5m]) / on(x) raw_thing > 0"
+      + " and (time() - some_ts_metric) > 100 and pushed_metric > 1";
+    const v = lintExpr({ file: "r.yaml", name: "P" }, expr, ctx);
+    console.log(v.violations.map((x) => (x.match(/\[모드 ([ABCD])/) || [])[1]).join(""));
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx 'ABDC'
+}
+
+@test "lintExpr counts an exempted reference in supplyRefs (the floor measures the loop, not the violations)" {
+  # `supplyRefs`는 **면제된 참조도 센다**(allowlist 판정보다 앞에서 증가한다). 콜사이트의
+  # supply-refs 바닥값은 "강제 루프가 살아 있는가"를 재는 것이지 "위반이 몇 건인가"가 아니다 —
+  # 둘을 같은 수로 재면 면제가 늘 때 바닥값이 조용히 무너진다.
+  run bun -e '
+    import { lintExpr } from "'"$ROOT"'/tools/check-alert-rules.ts";
+    const base = { lookbackSec: 300, cite: "policy/x.json", denyMetrics: [],
+                   pushPeriodSec: new Map(), supply: new Map() };
+    const expr = "(time() - some_ts_metric) > 100";
+    const armed = lintExpr({ file: "r.yaml", name: "P" }, expr, { ...base, allowed: new Set() });
+    const exempt = lintExpr({ file: "r.yaml", name: "P" }, expr, { ...base, allowed: new Set(["P"]) });
+    console.log(armed.violations.length > 0 && exempt.violations.length === 0
+      && armed.supplyRefs > 0 && exempt.supplyRefs === armed.supplyRefs ? "ok"
+      : `armed=${armed.violations.length}/${armed.supplyRefs} exempt=${exempt.violations.length}/${exempt.supplyRefs}`);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx 'ok'
+}
+
+@test "the mode C selector is exclusive at the lookback boundary (period == lookback is not a target)" {
+  # 프로덕션 셀렉터는 `period > lookback`이다. 경계에서 배타인지는 **파생이 lintExpr 안에 있어야만**
+  # 잴 수 있다 — 대상 목록을 인자로 받으면 테스트가 소속을 스스로 골라 셀렉터를 한 번도 안 밟는다
+  # (설계 게이트 r1 F2). 룩백을 300 아닌 값으로 두어 상수 우연도 배제한다.
+  run bun -e '
+    import { modeCTargets } from "'"$ROOT"'/tools/check-alert-rules.ts";
+    const at = (p) => ({ allowed: new Set(), lookbackSec: 420, cite: "x", denyMetrics: [],
+                         supply: new Map(), pushPeriodSec: new Map([["m", p]]) });
+    console.log([419, 420, 421].map((p) => modeCTargets(at(p)).length).join(","));
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx '0,0,1'
+}
+
+@test "the real repository keeps a non-shrinking mode C target set (literal contexts cannot drift from the loader)" {
+  # **이 대조가 없으면 이 설계는 vacuous green을 만든다.** 리터럴 ctx로 도는 단위 테스트가 실
+  # 로더와 어긋나면 "단위는 초록, 실 레포는 red"가 된다. loadPolicy는 export하지 않으므로 대조는
+  # CLI로 선다 — OK 문구가 싣는 `[모드 C 대상 N]`이 그 유일한 기계 입력이다.
+  # ⚠️ "비어 있지 않음"으로는 부족하다 — 대상 하나만 살아남아도 통과한다(설계 게이트 r1 F2).
+  #    바닥값은 오늘의 실측 대상 수에 건다. 도메인이 정당하게 줄지 않는 한 손대지 않는다(래칫 규율).
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "${BATS_TEST_DIRNAME}/.."
+  [ "$status" -eq 0 ]
+  n="$(printf '%s\n' "$output" | sed -n 's/.*\[모드 C 대상 \([0-9]*\)\].*/\1/p')"
+  [ -n "$n" ]
+  [ "$n" -ge 21 ]
+}
+
+@test "the in-process probe context agrees with what the fixture actually loads (drift guard)" {
+  # 이관이 만든 **유일한 새 위험**: `_seed`의 정책을 바꾸고 `_probe_ctx_js`를 안 바꾸면 38건이
+  # 조용히 딴 것을 잰다(리터럴 ctx는 픽스처를 따라가지 않는다). 한 식을 **두 경로**로 돌려
+  # 위반이 같음을 단언해 그 드리프트를 잡는다.
+  # 식은 ctx의 세 축을 함께 밟는다 — denylist(모드 A) · push 주기/룩백(모드 C) · 공급원(모드 D).
+  local e='increase(kube_pod_container_status_restarts_total[5m]) > 0 and ghcr_latest_digest > 1 and (time() - fixture_external_ts) > 100'
+  # 정책 주소는 경로가 갈리므로(주입 픽스처 vs 실 경로) 정규화한 뒤 비교한다.
+  _norm() { sed -E 's#[^ ]*supply\.json#<POLICY>#g; s#policy/alert-supply-monotonicity\.json#<POLICY>#g' | LC_ALL=C sort; }
+
+  tmp="$(mktemp -d)"
+  _seed "$tmp" EqProbe "$e"
+  _lint "$tmp"
+  cli="$(printf '%s\n' "$output" | grep -oE '\[모드 [ABCD]:.*' | _norm)"
+  rm -rf "$tmp"
+
+  _run_probe EqProbe "$e"
+  inp="$(printf '%s\n' "$output" | grep -oE '\[모드 [ABCD]:.*' | _norm)"
+
+  [ -n "$cli" ]                      # 양성 대조 — 둘 다 비면 등식이 항진명제가 된다
+  [ "$cli" = "$inp" ]
 }
