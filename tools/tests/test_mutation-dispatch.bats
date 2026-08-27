@@ -371,17 +371,36 @@ setup() {
   [ "$pred" -ge 15 ]
   # 빈 owner fail-closed(vacuous 방지)는 술어와 **같은 수**로 존재해야 한다 — 한쪽만 남으면
   # 변수 미설정이 곧 통과가 된다.
+  # 빈 owner fail-closed는 **모든** 가드 스텝에 있어야 한다(dispatch 가드 + replay 전용 가드).
   empty="$(grep -rhoF '[ -n "$OWNER" ] ||' "$WF"/*.yaml | wc -l | tr -d ' ')"
   [ "$empty" -ge 15 ]
-  [ "$pred" -eq "$empty" ]
-  # 재실행 개시자 술어도 **같은 수**여야 한다 — 한쪽만 남으면 재실행 축이 조용히 다시 열린다.
-  # (github.actor는 재실행에서 최초 트리거 신원으로 보존되므로 actor 단독 비교는 통과한다.)
-  trig="$(grep -rhoF '[ "$TRIGGERING" = "$OWNER" ] ||' "$WF"/*.yaml | wc -l | tr -d ' ')"
-  [ "$trig" -ge 15 ]
-  [ "$pred" -eq "$trig" ]
-  # env 바인딩도 술어와 같은 수 — 술어만 있고 바인딩이 없으면 빈 문자열 비교로 **전 디스패치가 잠긴다**.
-  bind="$(grep -rhoF 'TRIGGERING: ${{ github.triggering_actor }}' "$WF"/*.yaml | wc -l | tr -d ' ')"
-  [ "$bind" -eq "$trig" ]
+  # 정본 본문은 축이 셋이고 **셋 다 같은 수**여야 한다. 하나만 빠져도 그 축이 조용히 다시 열린다.
+  #   ① 재실행 축   — 이벤트를 보지 않는다(github.run_attempt).
+  #   ② 트리거 축   — 종전 `if:` 한정을 본문으로 옮긴 것. `if:`로 두면 재실행에서 스텝이 skip된다.
+  #   ③ dispatch 축 — actor와 개시자 둘 다 owner여야 한다(actor는 재실행에서 보존된다).
+  replay="$(grep -rhoF '[ "$ATTEMPT" = "1" ] ||' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  gate="$(grep -rhoF '[ "$EVENT" = "workflow_dispatch" ] || exit 0' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  init="$(grep -rhoF '재실행 개시자=$TRIGGERING 거부' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  [ "$replay" -ge 15 ]
+  # 재실행 절은 dispatch 가드 15 + 이벤트 구동 잡의 replay 전용 가드에 붙는다. 등식으로 못을 박아야
+  # 한쪽에서 사라진 것이 다른 쪽 증가로 가려지지 않는다.
+  evt="$(grep -rhoF 'replay 가드 (이벤트 구동 잡' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  [ "$evt" -ge 2 ]
+  [ "$replay" -eq "$((pred + evt))" ]
+  [ "$empty" -eq "$replay" ]
+  [ "$pred" -eq "$gate" ]
+  [ "$pred" -eq "$init" ]
+  # 가드 스텝에 `if:`가 남아 있으면 안 된다 — 그것이 재실행 축을 무력화하는 정확한 형태다.
+  [ "$(grep -rhcF "if: github.event_name == 'workflow_dispatch'" "$WF"/*.yaml | paste -sd+ - | bc)" -eq 0 ]
+  # env 바인딩도 같은 수 — 술어만 있고 바인딩이 없으면 빈 문자열 비교로 **전 디스패치가 잠긴다**.
+  # ATTEMPT/TRIGGERING은 **모든** 가드 스텝이 바인딩한다 — replay 총계와 등식이어야 한다.
+  # (`-ge pred`로 두면 replay 전용 가드 2건이 여유가 되어 dispatch 가드 하나의 누락을 가린다.)
+  for k in 'ATTEMPT: ${{ github.run_attempt }}' 'TRIGGERING: ${{ github.triggering_actor }}'; do
+    b="$(grep -rhoF "$k" "$WF"/*.yaml | wc -l | tr -d ' ')"
+    [ "$b" -eq "$replay" ]
+  done
+  # EVENT는 트리거 축을 가진 dispatch 가드만 바인딩한다.
+  [ "$(grep -rhoF 'EVENT: ${{ github.event_name }}' "$WF"/*.yaml | wc -l | tr -d ' ')" -ge "$pred" ]
 }
 
 @test "every actor guard predicate actually executes and decides correctly (the predicate gets a witness)" {
@@ -393,25 +412,40 @@ setup() {
     set -euo pipefail
     root="$1"; n=0; bad=""
     for f in "$root"/.github/workflows/*.yaml; do
-      cnt="$(yq -r "[.jobs[]?.steps[]? | select((.run // \"\") | contains(\"ACTOR\"))] | length" "$f" 2>/dev/null || echo 0)"
+      cnt="$(yq -r "[.jobs[]?.steps[]? | select((.run // \"\") | contains(\"ATTEMPT\"))] | length" "$f" 2>/dev/null || echo 0)"
       [ "${cnt:-0}" -gt 0 ] || continue
       i=0
       while [ "$i" -lt "$cnt" ]; do
-        body="$(yq -r "[.jobs[]?.steps[]? | select((.run // \"\") | contains(\"ACTOR\"))][$i].run" "$f")"
+        body="$(yq -r "[.jobs[]?.steps[]? | select((.run // \"\") | contains(\"ATTEMPT\"))][$i].run" "$f")"
         n=$((n+1)); w="$(basename "$f")#$i"
-        OWNER="" ACTOR="x" TRIGGERING="x"                bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:empty-owner-passed"
-        OWNER="alice" ACTOR="mallory" TRIGGERING="mallory" bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:mismatch-passed"
-        # 재실행 축 — GitHub은 재실행에서 github.actor를 **최초 트리거 신원으로 보존**하고
-        # github.triggering_actor만 개시자로 바꾼다. actor만 보는 가드는 owner의 과거 디스패치를
-        # 재실행하는 것으로 통과한다(actions:write가 재실행 동사를 포함한다 —
-        # reusable-app-build.yaml:159-167이 앱 레포에 그 자격을 발급한다).
-        OWNER="alice" ACTOR="alice" TRIGGERING="mallory"   bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:rerun-passed"
-        OWNER="alice" ACTOR="alice" TRIGGERING="alice"     bash -e -c "$body" >/dev/null 2>&1 || bad="$bad $w:match-rejected"
+        # ── 재실행 축 (17사본 **공통**) — 이벤트를 보지 않는다 ──
+        # `if:`로 dispatch에 한정한 가드는 push/schedule run의 재실행에서 **스텝 자체가 skip**되므로
+        # (skip은 실패가 아니다) 아래 dispatch 축 케이스가 닿지 못한다. github.run_attempt은 재실행이
+        # 보존할 수 없는 유일한 값이고, attempt>=2의 개시자는 언제나 actions:write를 든 주체다 —
+        # 그래서 이 축에는 열거할 트리거가 없다.
+        EVENT="workflow_dispatch" ATTEMPT="1" OWNER="" ACTOR="x" TRIGGERING="x" \
+          bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:empty-owner-passed"
+        EVENT="schedule" ATTEMPT="2" OWNER="alice" ACTOR="alice" TRIGGERING="mallory" \
+          bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:replay-passed"
+        # 대조군 — 최초 실행(attempt=1)의 비-dispatch 트리거는 무영향이어야 한다(종전 의미론 보존).
+        EVENT="schedule" ATTEMPT="1" OWNER="alice" ACTOR="anyone" TRIGGERING="anyone" \
+          bash -e -c "$body" >/dev/null 2>&1 || bad="$bad $w:first-schedule-rejected"
+        # ── dispatch 축 — actor 가드를 가진 사본에만 적용한다(이벤트 구동 잡의 replay 전용 가드는 비대상) ──
+        # GitHub은 재실행에서 github.actor를 **최초 트리거 신원으로 보존**하고 triggering_actor만
+        # 개시자로 바꾼다 — actor만 보는 가드는 owner의 과거 디스패치 재실행으로 통과한다.
+        case "$body" in *ACTOR*)
+          EVENT="workflow_dispatch" ATTEMPT="1" OWNER="alice" ACTOR="mallory" TRIGGERING="mallory" \
+            bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:mismatch-passed"
+          EVENT="workflow_dispatch" ATTEMPT="1" OWNER="alice" ACTOR="alice" TRIGGERING="mallory" \
+            bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:rerun-passed"
+          EVENT="workflow_dispatch" ATTEMPT="1" OWNER="alice" ACTOR="alice" TRIGGERING="alice" \
+            bash -e -c "$body" >/dev/null 2>&1 || bad="$bad $w:match-rejected"
+        esac
         i=$((i+1))
       done
     done
     # 열거 바닥값 — 추출이 붕괴하면 0사본을 돌리고도 초록이 된다. 수치는 콜사이트 소유.
-    [ "$n" -ge 15 ] || { echo "ROSTER-COLLAPSE n=$n"; exit 1; }
+    [ "$n" -ge 17 ] || { echo "ROSTER-COLLAPSE n=$n"; exit 1; }
     [ -z "$bad" ] || { echo "PREDICATE-WRONG:$bad"; exit 1; }
     echo "EXECUTED=$n"
   ' _ "$ROOT"
