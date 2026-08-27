@@ -90,18 +90,6 @@ import { readLedger } from "./lib/policy-ledger.ts";
 import { RULES_ROOT, walkManifests } from "./lib/repo-walk.ts";
 import { guardMain, takeFloors } from "./lib/scan-floor.ts";
 
-let f: Record<string, string | boolean>;
-let floors: Map<string, number>;
-try {
-  const taken = takeFloors(process.argv.slice(2));
-  floors = taken.floors;
-  f = parseFlags(taken.rest, { value: ["--repo-root", "--registry", "--supply-policy"], bool: [] });
-} catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root · --registry · --supply-policy · --floor <도메인>=<n>`); process.exit(2); }
-const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string) : ".";
-// --registry: push 메트릭 레지스트리 주입(**테스트 픽스처 격리 전용**). 실 레포 검증은 항상 기본
-// 레지스트리(DEFAULT_REGISTRY)로 돈다 — 부분 레포 루트를 쓰느라 프로덕션 검증을 약화시키지 않기 위함(F-4).
-const REGISTRY_FILE = typeof f["--registry"] === "string" ? (f["--registry"] as string) : "";
-
 // 룰 디렉토리 경로의 SSOT는 워커의 `rules` 스코프 root다(콜사이트 인라인 사본 금지).
 const RULES_DIR = RULES_ROOT;
 const DENYLIST = "policy/alert-instance-stability-denylist.txt";
@@ -290,8 +278,8 @@ function fatal(msg: string): never { console.error(`FAIL: ${msg}`); process.exit
 // 적대 검토가 A/B 대조로 실측: 같은 위반 룰을 둔 채 denylist 파일만 치우면 rc 1 → 0, stderr 0줄.
 // 모드 A가 지키는 것은 라이브에서 4회 재발한 instance 라벨 churn phantom-increase다(denylist 헤더 참조).
 // allowlist는 부재 시 면제 0 = 더 엄격(fail-closed)이라 성격이 다르지만, **부재 자체는 양쪽 다 드리프트**다.
-function readList(rel: string): string[] {
-  const p = `${ROOT}/${rel}`;
+function readList(rel: string, root: string): string[] {
+  const p = `${root}/${rel}`;
   try {
     return readFileSync(p, "utf8").split("\n");
   } catch (e) {
@@ -378,8 +366,8 @@ function fmtSec(s: number): string {
 
 // vmalert instant 질의 룩백. `-datasource.queryStep` 미지정 시 기본 5m(문서화되지 않은 상수) —
 // 매니페스트가 그 플래그를 명시하면 **거기서 파생**한다(상수가 조용히 낡는 fail-open 차단).
-function lookbackSec(): number {
-  const p = `${ROOT}/${VMALERT_MANIFEST}`;
+function lookbackSec(root: string): number {
+  const p = `${root}/${VMALERT_MANIFEST}`;
   if (!existsSync(p)) return 300;   // 테스트 루트 등 매니페스트 밖 — vmalert 기본값
   const mt = /-datasource\.queryStep=([0-9a-z]+)/.exec(readFileSync(p, "utf8"));
   if (!mt) return 300;              // 플래그 미지정 = vmalert 기본 5m
@@ -387,7 +375,6 @@ function lookbackSec(): number {
   if (s === null) fatal(`${VMALERT_MANIFEST}: -datasource.queryStep=${mt[1]} 파싱 실패 — 룩백을 파생할 수 없다`);
   return s;
 }
-const LOOKBACK = lookbackSec();
 
 // cron → 연속 실행 간격(초). 이 레포가 실제로 쓰는 형태만 지원하고 나머지는 **fail-loud**(추측 금지).
 function cronPeriodSec(sched: string, where: string): number {
@@ -416,8 +403,8 @@ function cronPeriodSec(sched: string, where: string): number {
 }
 
 // 매니페스트에서 CronJob 스케줄 1건을 뽑는다. 파일 부재·다중 CronJob = **FAIL**(조용한 상수 폴백 금지, F-4).
-function cronOf(rel: string): string {
-  const p = `${ROOT}/${rel}`;
+function cronOf(rel: string, root: string): string {
+  const p = `${root}/${rel}`;
   if (!existsSync(p)) {
     fatal(`레지스트리가 schedule=cron으로 선언한 파일이 없다: ${rel} — CronJob을 옮겼거나 리네임했다면 ` +
       `레지스트리를 함께 고쳐라(상수로 조용히 강등하지 않는다).`);
@@ -471,9 +458,9 @@ type Candidate = { path: string; why: string; viaUrl: boolean; metrics: string[]
 // 여기 남는 것은 전부 **의미론적 판정**이다 — "이 파일이 생산자인가"는 도메인 질문이지 "레포에
 // 무엇이 있는가"가 아니다(design-r1 R-1). 특히 룰 디렉토리는 이 린터의 **검사 대상**(소비자 표면)
 // 이라 생산자로 오인하면 안 되는 것이지, 존재하지 않는 파일이 아니다.
-function collectProducers(): Candidate[] {
+function collectProducers(root: string): Candidate[] {
   const out: Candidate[] = [];
-  for (const { path: r, text } of walkManifests("producers", ROOT)) {
+  for (const { path: r, text } of walkManifests("producers", root)) {
     if (r === SELF || PRODUCER_EXEMPT[r]) continue;          // 면제는 사유와 함께 코드에 명시
     if (r.startsWith(`${RULES_DIR}/`)) continue;             // 소비자 표면 — 생산자 아님
     const sig = producerSignal(text);
@@ -647,184 +634,63 @@ function rollupWindow(s: string, metricPos: number, metricLen: number, owner: { 
   return null;
 }
 
-const denyMetrics = readList(DENYLIST).map((l) => l.split("#", 1)[0].trim()).filter(Boolean);
+export type SupplyEntry = { metric: string; supply: "in-cluster" | "external"; decreasing: "impossible" | "is-truth"; why: string };
 
-// ── 모드 D: 공급원 의미론 정책 (알림이 `time()`과 빼서 비교하는 시계열) ──
-//   질문이 모드 C와 **다르다**: 저긴 "이 값이 얼마나 자주 push되는가"(생산자), 여긴 "이 값이 내려갈
-//   수 있는가 · 신선도가 클러스터 밖 읽기에 의존하는가"(의미론)다. 후자가 필요한 메트릭 일부는
-//   스크레이프라 push 레지스트리에 **원리적으로 존재할 수 없다**(barman_cloud_… · certmanager_… ·
-//   kube_job_status_*) — 그래서 SSOT를 나눈다. 정책 파일 헤더가 판별 기준의 SSOT다.
-// --supply-policy: 정책 주입(**테스트 픽스처 격리 전용**). 실 레포 검증은 항상 기본 경로를 쓴다.
-// ⚠️ 주입 모드는 **바닥값만 면제**한다(형제 가드의 확립된 관용구 — check-bats-style의 명시-파일 모드와
-//    같다). 신호는 그대로 내고 강제 로직도 그대로 돈다 — 면제되는 것은 "도메인이 충분히 큰가"뿐이다.
-const SUPPLY_INJECTED = typeof f["--supply-policy"] === "string" ? (f["--supply-policy"] as string) : "";
-const SUPPLY_POLICY = SUPPLY_INJECTED || "policy/alert-supply-monotonicity.json";
-const MIN_SUPPLY = 12;      // 열거 붕괴 바닥값(도입 시 15건). 도메인이 줄지 않는 한 손댈 일이 없다.
-const MIN_SUPPLY_REFS = 12; // 모드 D가 **시야에 넣은** 참조 수(판정 + TS 면제 + 미등재) — 원장 크기와 별개 축.
-type SupplyEntry = { metric: string; supply: "in-cluster" | "external"; decreasing: "impossible" | "is-truth"; why: string };
-// ⚠️ 정책 파일은 **필수 읽기**다(모드 A의 규율 미러) — 부재/오타 경로를 "항목 0개"로 위장시키지 않는다.
-// 로딩·통일 shape({_readme, metrics})는 readLedger(policy-ledger) 소유 — $comment 개명의 강제자다.
-// 필드 의미론(supply/decreasing enum·무근거 why 금지)은 문구가 계약이라 이 콜사이트에 남긴다.
-function loadSupply(): SupplyEntry[] {
-  let list!: SupplyEntry[];
-  try {
-    list = readLedger<SupplyEntry[]>({ path: SUPPLY_POLICY, container: "metrics", root: ROOT });
-  } catch (e) {
-    fatal(e instanceof Error ? e.message : String(e));
-  }
-  for (const e of list) {
-    if (!e?.metric) fatal(`${SUPPLY_POLICY}: metric 필드가 없는 항목이 있다`);
-    if (e.supply !== "in-cluster" && e.supply !== "external") fatal(`${SUPPLY_POLICY}: ${e.metric}의 supply가 'in-cluster'|'external'이 아니다`);
-    if (e.decreasing !== "impossible" && e.decreasing !== "is-truth") fatal(`${SUPPLY_POLICY}: ${e.metric}의 decreasing이 'impossible'|'is-truth'가 아니다`);
-    if (!e.why || !e.why.trim()) fatal(`${SUPPLY_POLICY}: ${e.metric}에 why(근거)가 없다 — 무근거 선언은 금지`);
-  }
-  return list;
-}
-const SUPPLY = loadSupply();
-const supplyOf = new Map(SUPPLY.map((e) => [e.metric, e]));
-// **화이트리스트**다. "max만 금지"로 두면 avg/sum이 통과하는데 `sum_over_time(타임스탬프[W])`는
-// `time() - 거대값`이 영구 음수라 **조용한 무발화**다(격리 사본 실증).
 function requiredRollup(e: SupplyEntry, flipped: boolean): string {
   if (e.supply === "external" && e.decreasing === "impossible") return flipped ? "min_over_time" : "max_over_time";
   return flipped ? "min_over_time" : "last_over_time";
 }
-// (denylist 바닥값은 guardMain의 denylist 도메인 floor가 판정한다 — 아래 커널 호출부.)
 
-// ── 레지스트리 로드 + 완전성 가드(모드 C 전처리) ──
-function loadRegistry(): PushEntry[] {
-  // ⚠️ **조기 return이 아니라 입력 선택이다.** 예전엔 `if (!REGISTRY_FILE) return DEFAULT_REGISTRY;`라
-  //    프로덕션 데이터가 아래 검증 루프를 **한 번도 지나지 않았다** — `--registry`는 스스로 "테스트
-  //    픽스처 격리 전용"이라 적고 있어(위 :101), 레지스트리 자체의 회귀를 실증할 경로가 없었다.
-  //    이제 두 adapter가 같은 루프를 지난다.
-  // ⚠️ DEFAULT_REGISTRY는 **TS 리터럴로 남긴다.** tsconfig의 strict가 판별 유니온 `Schedule`을
-  //    컴파일 타임에 전량 검증하므로, JSON 원장으로 옮기면 그 커버리지가 순손실이다(설계 판정).
-  const SRC = REGISTRY_FILE || "DEFAULT_REGISTRY(tools/check-alert-rules.ts)";
-  let j: unknown = DEFAULT_REGISTRY;
-  if (REGISTRY_FILE) {
-    try { j = JSON.parse(readFileSync(REGISTRY_FILE, "utf8")); }
-    catch (e) { fatal(`--registry 읽기 실패: ${REGISTRY_FILE}: ${e instanceof Error ? e.message : e}`); }
-  }
-  if (!Array.isArray(j)) fatal(`레지스트리는 PushEntry 배열이어야 한다: ${SRC}`);
-  for (const e of j as any[]) {
-    if (typeof e?.metric !== "string" || typeof e?.producer !== "string") fatal(`${SRC} 항목에 metric·producer 필수`);
-    const s = e.schedule;
-    if (s?.kind === "cron") { if (typeof s.file !== "string") fatal(`${SRC} ${e.metric}: schedule.cron에 file 필수`); }
-    else if (s?.kind === "external") {
-      if (typeof s.periodSec !== "number" || typeof s.why !== "string" || !s.why.trim()) {
-        fatal(`${SRC} ${e.metric}: schedule.external은 periodSec + why(근거) 필수 — 무근거 상수 금지`);
-      }
-    } else fatal(`${SRC} ${e.metric}: schedule.kind는 cron|external`);
-  }
-  // ⚠️ **중복 metric은 조용히 이긴다.** `registryMetrics`는 Set이고 `pushPeriod`는 Map이라, 같은
-  //    이름이 두 번 등재되면 뒤에 온 항목이 앞을 덮고 아무 신호도 없다 — 생산자나 주기가 다르면
-  //    모드 C 판정이 말없이 바뀐다(윈도 하한이 바뀌면 죽은 알림이 된다). 등재 자체를 거부한다.
-  const seen = new Set<string>();
-  for (const e of j as any[]) {
-    if (seen.has(e.metric)) fatal(`${SRC} ${e.metric}: 중복 등재 — 뒤 항목이 앞을 조용히 덮는다(한 메트릭에 한 항목)`);
-    seen.add(e.metric);
-  }
-  return j as PushEntry[];
+// ── 판정 seam ────────────────────────────────────────────────────────────────────────
+// `lintExpr`는 **순수 함수**다: 파일을 읽지 않고, 프로세스를 종료하지 않고, ctx를 변형하지 않고,
+// 같은 입력에 같은 출력을 낸다. 그래서 리터럴 컨텍스트로 직접 부를 수 있다 — 그것이 이 seam의 값이다.
+// 착지 선례: tools/check-image-ownership.ts:363 · tools/check-workflow-readiness.ts:593.
+
+/** 판정에 필요한 **정책 사실** 전부. 읽기 전용. 경로·바닥값 수치·대조 의미론은 들어오지 않는다 —
+ *  바닥값 수치는 CONTEXT.md 「열거 바닥값」이, 원장 대조 의미론은 「정책 원장」이 콜사이트 소유로
+ *  확정했다. 그래서 이 타입엔 숫자가 `lookbackSec` 하나뿐이고, 그것은 바닥값이 아니라 판정 입력이다. */
+export type LintContext = {
+  denyMetrics: readonly string[];                 // 모드 A 대상(상태-파생 카운터)
+  allowed: ReadonlySet<string>;                   // `<alert>` 또는 `<file>:<alert>`
+  pushPeriodSec: ReadonlyMap<string, number>;     // 메트릭 → push 주기(초). 없으면 스크레이프다
+  lookbackSec: number;                            // vmalert instant 룩백(초)
+  supply: ReadonlyMap<string, SupplyEntry>;       // 모드 D 공급원 원장
+  cite: string;                                   // 공급원 정책 주소(판정 입력 아님, 진단 문구 전용)
+};
+
+export type ExprVerdict = {
+  violations: string[];   // `<file> <name> [모드 X: …]` — 문구 전문을 이 module이 소유한다
+  supplyRefs: number;     // 모드 D가 **시야에 넣은** 참조 수(면제된 참조도 센다)
+  modeCTargets: number;   // 이 판정이 파생한 모드 C 대상 수 — CLI의 `[모드 C 대상 N]`이 읽는다
+};
+
+/** 모드 C 대상 파생 — `push 주기 > 룩백`인 메트릭만. **파생은 여기 한 곳뿐이다.**
+ *  미리 걸러진 목록을 인자로 받으면 `period == lookback` / `+1` 스윕이 프로덕션 셀렉터를 한 번도
+ *  밟지 못한다(테스트가 대상 소속을 스스로 고르게 된다 — 설계 게이트 r1 F2). */
+export function modeCTargets(ctx: LintContext): string[] {
+  return [...ctx.pushPeriodSec.entries()].filter(([, p]) => p > ctx.lookbackSec).map(([m]) => m);
 }
-const REGISTRY = loadRegistry();
-if (!REGISTRY.length) fatal("push 메트릭 레지스트리가 비었다 — 모드 C가 무력화된다(fail-closed)");
-
-const registryMetrics = new Set(REGISTRY.map((e) => e.metric));
-const producerViol: string[] = [];
-const pushPeriod = new Map<string, number>();   // 메트릭 → push 주기(초)
-
-// 면제 목록은 사유가 있어야 한다(무근거 면제 = 우회 경로).
-for (const [p, why] of Object.entries(PRODUCER_EXEMPT)) {
-  if (!why.trim()) fatal(`PRODUCER_EXEMPT['${p}']에 사유가 없다 — 무근거 면제 금지`);
-}
-
-// (a) 레지스트리 항목 검증: 생산자 실재 + 여전히 VM에 씀 + 그 메트릭을 실제로 발행 + 주기 판별.
-for (const e of REGISTRY) {
-  const pp = `${ROOT}/${e.producer}`;
-  if (!existsSync(pp)) fatal(`레지스트리 생산자 파일 부재: ${e.producer}(${e.metric}) — 경로를 고치거나 항목을 지워라`);
-  const text = readFileSync(pp, "utf8");
-  if (!producerSignal(text)) fatal(`${e.producer}: 메트릭 push 호출이 사라졌다(${e.metric}) — 레지스트리 항목이 낡았다`);
-  if (!extractMetrics(text).includes(e.metric)) {
-    producerViol.push(`${e.producer} — 레지스트리 메트릭 '${e.metric}'을 더는 push하지 않는다(이름 변경/삭제? 추출 실패?)`);
-  }
-  const period = e.schedule.kind === "cron"
-    ? cronPeriodSec(cronOf(e.schedule.file), e.schedule.file)   // 파일 부재/파싱불가 = FAIL(F-4)
-    : e.schedule.periodSec;
-  // ⚠️ **파생된 주기의 수치 도메인을 여기서 잠근다.** 프로덕션 필터는 `period > LOOKBACK`이라
-  //    0·음수는 red가 아니라 **조용한 탈락**이 된다 — 그 메트릭이 모드 C 도메인에서 사라지고,
-  //    그것이 바로 이 레지스트리가 막으려는 죽은-알림 결함이다(실측: 주기 0으로 대상 4 → 1).
-  //    cron·external 양쪽에 건다 — 파생 경로가 갈려도 도메인은 하나다.
-  //    반대 방향도 샌다: `Infinity > LOOKBACK`은 참이라 그 메트릭이 대상에 **영원히 남고**
-  //    rollup 윈도 하한이 무한대가 되어 어떤 윈도도 통과한다. JSON은 NaN을 못 담지만 `1e999`가
-  //    Infinity로 파싱되므로 주입 경로로도 실재한다.
-  if (!Number.isFinite(period) || period <= 0) {
-    fatal(`레지스트리 ${e.metric}: periodSec은 **유한한 양수**여야 한다(실제 ${period}) — ` +
-      `0·음수는 모드 C 필터에서 조용히 탈락하고, 비유한은 윈도 하한을 무한대로 만들어 무력화한다`);
-  }
-  pushPeriod.set(e.metric, period);
-}
-
-// (b) 완전성 가드: push하는 표면을 전부 스캔해 **파일 단위 + 메트릭 단위** 등록을 강제(F-3·G-1·G-2).
-const found: Candidate[] = collectProducers();
-const foundProducers = found.map((x) => x.path);
-const registeredProducers = new Set(REGISTRY.map((e) => e.producer));
-for (const { path: p, why, viaUrl, metrics } of found) {
-  if (!registeredProducers.has(p)) {
-    producerViol.push(`${p} — 메트릭을 push하는데(${why}) 레지스트리에 없는 생산자` +
-      (metrics.length ? ` (발행 메트릭: ${metrics.join("·")})` : " (페이로드 정적 해석 불가 — 아래 fail-closed 참조)"));
-    continue;
-  }
-  // fail-closed: **VM에 쓰는 게 확실한데**(URL 신호) 무엇을 쓰는지 정적으로 못 읽으면 모드 C가 그 메트릭을
-  // 영영 못 본다. (URL 신호 없이 페이로드로만 잡힌 후보는 정의상 추출에 성공한 것이라 이 갈래가 아니다.)
-  if (viaUrl && !metrics.length) {
-    producerViol.push(`${p} — VM에 쓰지만(${why}) push 페이로드를 **정적으로 해석할 수 없다**(메트릭 이름 추출 0) — ` +
-      `fail-closed. 알려진 exposition 형태로 쓰거나(printf 'name val\\n' · VAR="\${VAR}name{…} val\\n") EXPO_INLINE·EXPO_LINE을 넓혀라`);
-  }
-  for (const m of metrics) {
-    if (!registryMetrics.has(m)) {
-      producerViol.push(`${p} — push하는 메트릭 '${m}'이 레지스트리에 없음(기존 exporter에 메트릭 추가 = 모드 C 우회 경로)`);
-    }
-  }
-}
-for (const p of registeredProducers) {
-  if (!foundProducers.includes(p)) {
-    producerViol.push(`${p} — 레지스트리 생산자인데 스캔에서 안 잡혔다(추적 안 됨·하네스/charts 제외·push 시그널 미검출 중 하나) — 완전성 가드가 못 본다`);
-  }
-}
-
-// 모드 C 대상 = 주기가 룩백보다 긴 메트릭만(≤ 룩백이면 항상 시야 안이라 구멍이 안 난다).
-const modeCMetrics = REGISTRY.filter((e) => (pushPeriod.get(e.metric) as number) > LOOKBACK).map((e) => e.metric);
-
-// allowlist: `<alert>` 또는 `<file>:<alert>` + 사유 주석(`#`) 필수 — 무근거 면제 차단.
-const allowed = new Set<string>();
-const allowErrors: string[] = [];
-readList(ALLOWLIST).forEach((line, i) => {
-  const raw = line.trim();
-  if (!raw || raw.startsWith("#")) return;
-  const key = raw.split("#", 1)[0].trim();
-  if (!raw.includes("#")) { allowErrors.push(`${ALLOWLIST}:${i + 1} '${key}' — 사유 주석(#) 없음`); return; }
-  allowed.add(key);
-});
-
-// 열거는 공유 워커의 `rules` 스코프가 소유한다(tracked + YAML). MIN_SCAN은 이 린터에 남는다 —
-// 워커 바닥값은 없다(열거자는 "글롭이 깨져 0건"과 "정당하게 0건"을 구별할 도메인 지식이 없다).
-const ruleEntries = walkManifests("rules", ROOT);
-
-let ruleCount = 0;
-const viol: string[] = [];
 
 // expr 1건 검사. name = alert명(또는 record명), rel = 룰 ConfigMap 파일 경로.
-function checkExpr(rel: string, name: string, expr: string): void {
+export function lintExpr(at: { file: string; name: string }, expr: string, ctx: LintContext): ExprVerdict {
+  const rel = at.file, name = at.name;
+  const viol: string[] = [];
+  let refs = 0;
+  const modeCMetrics = modeCTargets(ctx);
+  // 파싱 붕괴는 **위반 1건을 보고하고 나머지 모드를 건너뛴다**(현행 조기 return 의미론 보존).
+  // 부분 판정 결과를 "그 식은 깨끗하다"로 읽으면 안 되므로 붕괴 경로도 같은 판정을 돌려준다.
+  const done = (): ExprVerdict => ({ violations: viol, supplyRefs: refs, modeCTargets: modeCMetrics.length });
   const m = maskStrings(expr);
-  const isAllowed = allowed.has(name) || allowed.has(`${rel}:${name}`);
+  const isAllowed = ctx.allowed.has(name) || ctx.allowed.has(`${rel}:${name}`);
 
   // ── 모드 A: rollup 인자에 denylist(상태-파생) 메트릭이 있으면 instance 제거 증거를 요구 ──
   const rollupRe = new RegExp(`\\b(${ROLLUP})\\s*\\(`, "g");
   for (let mt = rollupRe.exec(m); mt; mt = rollupRe.exec(m)) {
     const open = mt.index + mt[0].length - 1;
     const close = matchParen(m, open);
-    if (close < 0) { viol.push(`${rel} ${name} [모드 A: rollup 괄호 불균형 — 파싱 실패]`); return; }
+    if (close < 0) { viol.push(`${rel} ${name} [모드 A: rollup 괄호 불균형 — 파싱 실패]`); return done(); }
     const arg = m.slice(open + 1, close);
-    const hit = denyMetrics.find((d) => new RegExp(`\\b${d}\\b`).test(arg));
+    const hit = ctx.denyMetrics.find((d) => new RegExp(`\\b${d}\\b`).test(arg));
     if (!hit) continue;   // 프로세스-로컬 카운터 = 안전(재시작 시 0 리셋)
     const agg = new RegExp(`\\b(?:${AGG})\\s+(by|without)\\s*\\(([^)]*)\\)`).exec(arg);
     const sub = /\[[^\]]*:[^\]]*\]/.test(arg);   // 집계 위 rollup은 서브쿼리여야 한다
@@ -845,13 +711,13 @@ function checkExpr(rel: string, name: string, expr: string): void {
     const before = m.slice(0, mt.index);
     if (SET_OP_RE.test(before)) continue;                 // and/or/unless = 422 불가
     const opMatch = BIN_OP_RE.exec(before);
-    if (!opMatch) { viol.push(`${rel} ${name} [모드 B: ${mt[1]}() 앞의 연산자를 못 찾음 — 파싱 실패]`); return; }
+    if (!opMatch) { viol.push(`${rel} ${name} [모드 B: ${mt[1]}() 앞의 연산자를 못 찾음 — 파싱 실패]`); return done(); }
     if (isAllowed) continue;
     const opPos = before.length - opMatch[0].length;      // 연산자 시작 위치
     const lhs = m.slice(operandStart(m, opPos), opPos);
     const onOpen = mt.index + mt[0].length - 1;
     const onClose = matchParen(m, onOpen);
-    if (onClose < 0) { viol.push(`${rel} ${name} [모드 B: ${mt[1]}() 괄호 불균형 — 파싱 실패]`); return; }
+    if (onClose < 0) { viol.push(`${rel} ${name} [모드 B: ${mt[1]}() 괄호 불균형 — 파싱 실패]`); return done(); }
     const rhs = m.slice(onClose + 1, operandEnd(m, onClose + 1)).replace(GROUP_MOD_RE, "");
     const bare: string[] = [];
     if (!OPERAND_AGG_RE.test(lhs)) bare.push("좌변");
@@ -916,7 +782,7 @@ function checkExpr(rel: string, name: string, expr: string): void {
       }
     }
     for (const metric of [...seen].sort()) {
-      const e = supplyOf.get(metric);
+      const e = ctx.supply.get(metric);
       // `X - time()`(만료 모양)이면 부등호 방향이 뒤집혀 요구도 뒤집힌다(max는 fail-open, min이 fail-closed).
       const want = e ? requiredRollup(e, new RegExp(`\\b${metric}\\b[\\s\\S]{0,120}?-\\s*time\\s*\\(\\s*\\)`).test(md)) : "";
       // 미등재 red는 **비-TS 참조가 실재할 때만**(참조 스캔 뒤) — 전 참조가 tlast/tmax(샘플-시각
@@ -925,7 +791,7 @@ function checkExpr(rel: string, name: string, expr: string): void {
       const re = new RegExp(`\\b${metric}\\b`, "g");
       for (let mt = re.exec(md); mt; mt = re.exec(md)) {
         const owner = ownerFn(md, mt.index);
-        supplyRefs++;
+        refs++;
         if (owner && TS_FRESHNESS_BAD.has(owner.name)) {
           if (isAllowed) continue;
           viol.push(`${rel} ${name} [모드 D: ${metric}가 ${owner.name}()에 감싸였다 — 최신 샘플의 ` +
@@ -953,10 +819,10 @@ function checkExpr(rel: string, name: string, expr: string): void {
             ? `이 값은 **내려가는 것이 사실**이다 — max 계열은 옛 값을 윈도만큼 부활시켜 새 값이 늦게 먹는다`
             : `값이 클러스터 안에서 생겨 흡수할 잡음이 없다 — max 계열은 이득 0이고 값의 전진 점프만 윈도만큼 래치한다`;
         viol.push(`${rel} ${name} [모드 D: ${metric}가 ${owner!.name}()에 감싸였으나 ${want}()여야 한다 — ${why}. ` +
-          `판별 기준과 근거는 ${SUPPLY_POLICY}]`);
+          `판별 기준과 근거는 ${ctx.cite}]`);
       }
       if (!e && nonTsRef && !isAllowed) {
-        viol.push(`${rel} ${name} [모드 D: ${metric}가 time() 비교에 쓰이는데 ${SUPPLY_POLICY}에 없다 — ` +
+        viol.push(`${rel} ${name} [모드 D: ${metric}가 time() 비교에 쓰이는데 ${ctx.cite}에 없다 — ` +
           `**기본값은 없다**(기본을 하나로 정하면 반대쪽 클래스가 조용히 열린다). supply(값의 신선도가 ` +
           `클러스터 밖 읽기에 의존하는가)와 decreasing(내려가는 것이 사실일 수 있는가)을 근거와 함께 등재하라]`);
       }
@@ -988,13 +854,13 @@ function checkExpr(rel: string, name: string, expr: string): void {
   }
 
   for (const metric of modeCMetrics) {
-    const period = pushPeriod.get(metric) as number;
-    const why = `push 주기 ${period}s > vmalert instant 룩백 ${LOOKBACK}s → 매 주기 시리즈에 구멍 → ` +
+    const period = ctx.pushPeriodSec.get(metric) as number;
+    const why = `push 주기 ${period}s > vmalert instant 룩백 ${ctx.lookbackSec}s → 매 주기 시리즈에 구멍 → ` +
       `for: pending이 매 주기 리셋 → **어떤 조건에도 발화 불가**`;
     // ⚠️ 처방이 **공급원을 알아야 한다** — 모드 C가 무조건 `last_over_time`을 지시하면, external·단조
     //    메트릭(공급원이 역행 샘플을 준다)에 대해 그대로 따랐을 때 **모드 D가 red를 낸다**. 두 모드가
     //    서로 모순되는 지시를 내리면 사람은 게이트를 믿지 않게 된다. 정책 파일이 답을 갖고 있으니 읽는다.
-    const sp = supplyOf.get(metric);
+    const sp = ctx.supply.get(metric);
     const wantFn = sp ? requiredRollup(sp, false) : "last_over_time";
     const fix = `${wantFn}(${metric}[≥${fmtSec(period)}])로 감싸라 (전문: docs/traps-detail.md)`;
     const re = new RegExp(`\\b${metric}\\b`, "g");
@@ -1024,100 +890,294 @@ function checkExpr(rel: string, name: string, expr: string): void {
       }
     }
   }
+  return done();
 }
 
-// 룰 열거 + expr 검사 — 위반(viol)·모드 D 판정 수(supplyRefs)는 이 순회가 클로저로 채운다.
-// supply-refs가 **도메인 floor**라서 검사를 열거 단계에서 함께 돈다(판정 수가 floor 입력이다).
-// 파싱 실패는 throw — 커널이 열거 실패로 접어 마커 없이 죽는다(raw 스택·순서 우회 금지).
-// ⚠️ checkExpr 계열에 fatal()/process.exit를 넣지 마라 — floor·마커 순서를 우회해 커널의
-//    순서 보장 밖에서 죽는다. 실패는 viol.push(위반) 또는 throw(붕괴)로만 알린다.
-function enumerateRules(): number {
-  for (const { path: rel, docs } of ruleEntries) {
-    for (const doc of docs) {
-      if (doc.errors.length) throw new Error(`YAML 파싱 실패: ${rel}: ${doc.errors[0].message}`);
-      const o = doc.toJS() as any;
-      if (!o || o.kind !== "ConfigMap" || !o.data) continue;
-      for (const [key, body] of Object.entries(o.data as Record<string, string>)) {
-        if (!key.endsWith(".yaml") || typeof body !== "string") continue;
-        let inner: any;
-        try { inner = parse(body); }
-        catch (e) { throw new Error(`룰 본문 파싱 실패: ${rel} .data["${key}"]: ${e instanceof Error ? e.message : e}`); }
-        for (const g of inner?.groups ?? []) {
-          for (const r of g?.rules ?? []) {
-            const name = r?.alert ?? r?.record;
-            if (!name || typeof r?.expr !== "string") continue;
-            ruleCount++;
-            // 검사 내부 예외는 룰 이름을 실어 재던진다 — 커널의 "열거 실패" 라벨만으로는
-            // 룰 walk 실패와 expr 검사기 자신의 결함이 구별되지 않는다.
-            try { checkExpr(rel, name, r.expr); }
-            catch (e) { throw new Error(`expr 검사 중 예외(룰 ${name}, ${rel}): ${e instanceof Error ? e.message : e}`); }
+// ── 가드 진입 경계 ───────────────────────────────────────────────────────────────────
+// 부작용(플래그 파싱 · 원장 읽기 · 열거 · guardMain · 종료)은 **여기 아래에만** 산다. 그 밖의
+// 최상위는 선언과 export뿐이라, 이 파일을 import해도 가드가 실행되지 않고 순수 판정(lintExpr)만
+// 꺼내 쓸 수 있다. 착지 선례: check-workflow-readiness.ts:593 · check-image-ownership.ts:363.
+if (import.meta.main) {
+  let f: Record<string, string | boolean>;
+  let floors: Map<string, number>;
+  try {
+    const taken = takeFloors(process.argv.slice(2));
+    floors = taken.floors;
+    f = parseFlags(taken.rest, { value: ["--repo-root", "--registry", "--supply-policy"], bool: [] });
+  } catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root · --registry · --supply-policy · --floor <도메인>=<n>`); process.exit(2); }
+  const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string) : ".";
+  // --registry: push 메트릭 레지스트리 주입(**테스트 픽스처 격리 전용**). 실 레포 검증은 항상 기본
+  // 레지스트리(DEFAULT_REGISTRY)로 돈다 — 부분 레포 루트를 쓰느라 프로덕션 검증을 약화시키지 않기 위함(F-4).
+  const REGISTRY_FILE = typeof f["--registry"] === "string" ? (f["--registry"] as string) : "";
+  const LOOKBACK = lookbackSec(ROOT);
+
+  const denyMetrics = readList(DENYLIST, ROOT).map((l) => l.split("#", 1)[0].trim()).filter(Boolean);
+
+  // ── 모드 D: 공급원 의미론 정책 (알림이 `time()`과 빼서 비교하는 시계열) ──
+  //   질문이 모드 C와 **다르다**: 저긴 "이 값이 얼마나 자주 push되는가"(생산자), 여긴 "이 값이 내려갈
+  //   수 있는가 · 신선도가 클러스터 밖 읽기에 의존하는가"(의미론)다. 후자가 필요한 메트릭 일부는
+  //   스크레이프라 push 레지스트리에 **원리적으로 존재할 수 없다**(barman_cloud_… · certmanager_… ·
+  //   kube_job_status_*) — 그래서 SSOT를 나눈다. 정책 파일 헤더가 판별 기준의 SSOT다.
+  // --supply-policy: 정책 주입(**테스트 픽스처 격리 전용**). 실 레포 검증은 항상 기본 경로를 쓴다.
+  // ⚠️ 주입 모드는 **바닥값만 면제**한다(형제 가드의 확립된 관용구 — check-bats-style의 명시-파일 모드와
+  //    같다). 신호는 그대로 내고 강제 로직도 그대로 돈다 — 면제되는 것은 "도메인이 충분히 큰가"뿐이다.
+  const SUPPLY_INJECTED = typeof f["--supply-policy"] === "string" ? (f["--supply-policy"] as string) : "";
+  const SUPPLY_POLICY = SUPPLY_INJECTED || "policy/alert-supply-monotonicity.json";
+  const MIN_SUPPLY = 12;      // 열거 붕괴 바닥값(도입 시 15건). 도메인이 줄지 않는 한 손댈 일이 없다.
+  const MIN_SUPPLY_REFS = 12; // 모드 D가 **시야에 넣은** 참조 수(판정 + TS 면제 + 미등재) — 원장 크기와 별개 축.
+  // ⚠️ 정책 파일은 **필수 읽기**다(모드 A의 규율 미러) — 부재/오타 경로를 "항목 0개"로 위장시키지 않는다.
+  // 로딩·통일 shape({_readme, metrics})는 readLedger(policy-ledger) 소유 — $comment 개명의 강제자다.
+  // 필드 의미론(supply/decreasing enum·무근거 why 금지)은 문구가 계약이라 이 콜사이트에 남긴다.
+  function loadSupply(root: string, policyPath: string, injected: string): SupplyEntry[] {
+    let list!: SupplyEntry[];
+    try {
+      list = readLedger<SupplyEntry[]>({ path: policyPath, container: "metrics", root });
+    } catch (e) {
+      fatal(e instanceof Error ? e.message : String(e));
+    }
+    for (const e of list) {
+      if (!e?.metric) fatal(`${SUPPLY_POLICY}: metric 필드가 없는 항목이 있다`);
+      if (e.supply !== "in-cluster" && e.supply !== "external") fatal(`${SUPPLY_POLICY}: ${e.metric}의 supply가 'in-cluster'|'external'이 아니다`);
+      if (e.decreasing !== "impossible" && e.decreasing !== "is-truth") fatal(`${SUPPLY_POLICY}: ${e.metric}의 decreasing이 'impossible'|'is-truth'가 아니다`);
+      if (!e.why || !e.why.trim()) fatal(`${SUPPLY_POLICY}: ${e.metric}에 why(근거)가 없다 — 무근거 선언은 금지`);
+    }
+    return list;
+  }
+  const SUPPLY = loadSupply(ROOT, SUPPLY_POLICY, SUPPLY_INJECTED);
+  const supplyOf = new Map(SUPPLY.map((e) => [e.metric, e]));
+  // **화이트리스트**다. "max만 금지"로 두면 avg/sum이 통과하는데 `sum_over_time(타임스탬프[W])`는
+  // `time() - 거대값`이 영구 음수라 **조용한 무발화**다(격리 사본 실증).
+  // (denylist 바닥값은 guardMain의 denylist 도메인 floor가 판정한다 — 아래 커널 호출부.)
+
+  // ── 레지스트리 로드 + 완전성 가드(모드 C 전처리) ──
+  function loadRegistry(root: string, registryFile: string): PushEntry[] {
+    // ⚠️ **조기 return이 아니라 입력 선택이다.** 예전엔 `if (!registryFile) return DEFAULT_REGISTRY;`라
+    //    프로덕션 데이터가 아래 검증 루프를 **한 번도 지나지 않았다** — `--registry`는 스스로 "테스트
+    //    픽스처 격리 전용"이라 적고 있어(위 :101), 레지스트리 자체의 회귀를 실증할 경로가 없었다.
+    //    이제 두 adapter가 같은 루프를 지난다.
+    // ⚠️ DEFAULT_REGISTRY는 **TS 리터럴로 남긴다.** tsconfig의 strict가 판별 유니온 `Schedule`을
+    //    컴파일 타임에 전량 검증하므로, JSON 원장으로 옮기면 그 커버리지가 순손실이다(설계 판정).
+    const SRC = registryFile || "DEFAULT_REGISTRY(tools/check-alert-rules.ts)";
+    let j: unknown = DEFAULT_REGISTRY;
+    if (registryFile) {
+      try { j = JSON.parse(readFileSync(registryFile, "utf8")); }
+      catch (e) { fatal(`--registry 읽기 실패: ${registryFile}: ${e instanceof Error ? e.message : e}`); }
+    }
+    if (!Array.isArray(j)) fatal(`레지스트리는 PushEntry 배열이어야 한다: ${SRC}`);
+    for (const e of j as any[]) {
+      if (typeof e?.metric !== "string" || typeof e?.producer !== "string") fatal(`${SRC} 항목에 metric·producer 필수`);
+      const s = e.schedule;
+      if (s?.kind === "cron") { if (typeof s.file !== "string") fatal(`${SRC} ${e.metric}: schedule.cron에 file 필수`); }
+      else if (s?.kind === "external") {
+        if (typeof s.periodSec !== "number" || typeof s.why !== "string" || !s.why.trim()) {
+          fatal(`${SRC} ${e.metric}: schedule.external은 periodSec + why(근거) 필수 — 무근거 상수 금지`);
+        }
+      } else fatal(`${SRC} ${e.metric}: schedule.kind는 cron|external`);
+    }
+    // ⚠️ **중복 metric은 조용히 이긴다.** `registryMetrics`는 Set이고 `pushPeriod`는 Map이라, 같은
+    //    이름이 두 번 등재되면 뒤에 온 항목이 앞을 덮고 아무 신호도 없다 — 생산자나 주기가 다르면
+    //    모드 C 판정이 말없이 바뀐다(윈도 하한이 바뀌면 죽은 알림이 된다). 등재 자체를 거부한다.
+    const seen = new Set<string>();
+    for (const e of j as any[]) {
+      if (seen.has(e.metric)) fatal(`${SRC} ${e.metric}: 중복 등재 — 뒤 항목이 앞을 조용히 덮는다(한 메트릭에 한 항목)`);
+      seen.add(e.metric);
+    }
+    return j as PushEntry[];
+  }
+  const REGISTRY = loadRegistry(ROOT, REGISTRY_FILE);
+  if (!REGISTRY.length) fatal("push 메트릭 레지스트리가 비었다 — 모드 C가 무력화된다(fail-closed)");
+
+  const registryMetrics = new Set(REGISTRY.map((e) => e.metric));
+  const producerViol: string[] = [];
+  const pushPeriod = new Map<string, number>();   // 메트릭 → push 주기(초)
+
+  // 면제 목록은 사유가 있어야 한다(무근거 면제 = 우회 경로).
+  for (const [p, why] of Object.entries(PRODUCER_EXEMPT)) {
+    if (!why.trim()) fatal(`PRODUCER_EXEMPT['${p}']에 사유가 없다 — 무근거 면제 금지`);
+  }
+
+  // (a) 레지스트리 항목 검증: 생산자 실재 + 여전히 VM에 씀 + 그 메트릭을 실제로 발행 + 주기 판별.
+  for (const e of REGISTRY) {
+    const pp = `${ROOT}/${e.producer}`;
+    if (!existsSync(pp)) fatal(`레지스트리 생산자 파일 부재: ${e.producer}(${e.metric}) — 경로를 고치거나 항목을 지워라`);
+    const text = readFileSync(pp, "utf8");
+    if (!producerSignal(text)) fatal(`${e.producer}: 메트릭 push 호출이 사라졌다(${e.metric}) — 레지스트리 항목이 낡았다`);
+    if (!extractMetrics(text).includes(e.metric)) {
+      producerViol.push(`${e.producer} — 레지스트리 메트릭 '${e.metric}'을 더는 push하지 않는다(이름 변경/삭제? 추출 실패?)`);
+    }
+    const period = e.schedule.kind === "cron"
+      ? cronPeriodSec(cronOf(e.schedule.file, ROOT), e.schedule.file)   // 파일 부재/파싱불가 = FAIL(F-4)
+      : e.schedule.periodSec;
+    // ⚠️ **파생된 주기의 수치 도메인을 여기서 잠근다.** 프로덕션 필터는 `period > LOOKBACK`이라
+    //    0·음수는 red가 아니라 **조용한 탈락**이 된다 — 그 메트릭이 모드 C 도메인에서 사라지고,
+    //    그것이 바로 이 레지스트리가 막으려는 죽은-알림 결함이다(실측: 주기 0으로 대상 4 → 1).
+    //    cron·external 양쪽에 건다 — 파생 경로가 갈려도 도메인은 하나다.
+    //    반대 방향도 샌다: `Infinity > LOOKBACK`은 참이라 그 메트릭이 대상에 **영원히 남고**
+    //    rollup 윈도 하한이 무한대가 되어 어떤 윈도도 통과한다. JSON은 NaN을 못 담지만 `1e999`가
+    //    Infinity로 파싱되므로 주입 경로로도 실재한다.
+    if (!Number.isFinite(period) || period <= 0) {
+      fatal(`레지스트리 ${e.metric}: periodSec은 **유한한 양수**여야 한다(실제 ${period}) — ` +
+        `0·음수는 모드 C 필터에서 조용히 탈락하고, 비유한은 윈도 하한을 무한대로 만들어 무력화한다`);
+    }
+    pushPeriod.set(e.metric, period);
+  }
+
+  // (b) 완전성 가드: push하는 표면을 전부 스캔해 **파일 단위 + 메트릭 단위** 등록을 강제(F-3·G-1·G-2).
+  const found: Candidate[] = collectProducers(ROOT);
+  const foundProducers = found.map((x) => x.path);
+  const registeredProducers = new Set(REGISTRY.map((e) => e.producer));
+  for (const { path: p, why, viaUrl, metrics } of found) {
+    if (!registeredProducers.has(p)) {
+      producerViol.push(`${p} — 메트릭을 push하는데(${why}) 레지스트리에 없는 생산자` +
+        (metrics.length ? ` (발행 메트릭: ${metrics.join("·")})` : " (페이로드 정적 해석 불가 — 아래 fail-closed 참조)"));
+      continue;
+    }
+    // fail-closed: **VM에 쓰는 게 확실한데**(URL 신호) 무엇을 쓰는지 정적으로 못 읽으면 모드 C가 그 메트릭을
+    // 영영 못 본다. (URL 신호 없이 페이로드로만 잡힌 후보는 정의상 추출에 성공한 것이라 이 갈래가 아니다.)
+    if (viaUrl && !metrics.length) {
+      producerViol.push(`${p} — VM에 쓰지만(${why}) push 페이로드를 **정적으로 해석할 수 없다**(메트릭 이름 추출 0) — ` +
+        `fail-closed. 알려진 exposition 형태로 쓰거나(printf 'name val\\n' · VAR="\${VAR}name{…} val\\n") EXPO_INLINE·EXPO_LINE을 넓혀라`);
+    }
+    for (const m of metrics) {
+      if (!registryMetrics.has(m)) {
+        producerViol.push(`${p} — push하는 메트릭 '${m}'이 레지스트리에 없음(기존 exporter에 메트릭 추가 = 모드 C 우회 경로)`);
+      }
+    }
+  }
+  for (const p of registeredProducers) {
+    if (!foundProducers.includes(p)) {
+      producerViol.push(`${p} — 레지스트리 생산자인데 스캔에서 안 잡혔다(추적 안 됨·하네스/charts 제외·push 시그널 미검출 중 하나) — 완전성 가드가 못 본다`);
+    }
+  }
+
+  // 모드 C 대상 = 주기가 룩백보다 긴 메트릭만(≤ 룩백이면 항상 시야 안이라 구멍이 안 난다).
+  // (모드 C 대상 파생은 `modeCTargets(ctx)` 한 곳이 소유한다 — 아래 LINT_CTX 조립 뒤에 쓴다.)
+
+  // allowlist: `<alert>` 또는 `<file>:<alert>` + 사유 주석(`#`) 필수 — 무근거 면제 차단.
+  const allowed = new Set<string>();
+  const allowErrors: string[] = [];
+  readList(ALLOWLIST, ROOT).forEach((line, i) => {
+    const raw = line.trim();
+    if (!raw || raw.startsWith("#")) return;
+    const key = raw.split("#", 1)[0].trim();
+    if (!raw.includes("#")) { allowErrors.push(`${ALLOWLIST}:${i + 1} '${key}' — 사유 주석(#) 없음`); return; }
+    allowed.add(key);
+  });
+
+  // 열거는 공유 워커의 `rules` 스코프가 소유한다(tracked + YAML). MIN_SCAN은 이 린터에 남는다 —
+  // 워커 바닥값은 없다(열거자는 "글롭이 깨져 0건"과 "정당하게 0건"을 구별할 도메인 지식이 없다).
+  const ruleEntries = walkManifests("rules", ROOT);
+
+  let ruleCount = 0;
+
+  const viol: string[] = [];
+
+  // 판정 컨텍스트 — 최상위 상태에서 조립한다. 여기 담기는 것은 **정책 사실**뿐이고,
+  // 바닥값 수치와 원장 대조 의미론은 콜사이트(아래 guardMain 배선)에 남는다.
+  const LINT_CTX: LintContext = {
+    denyMetrics, allowed, pushPeriodSec: pushPeriod,
+    lookbackSec: LOOKBACK, supply: supplyOf, cite: SUPPLY_POLICY,
+  };
+
+
+
+  // 룰 열거 + expr 검사 — 위반(viol)·모드 D 판정 수(supplyRefs)는 이 순회가 클로저로 채운다.
+  // supply-refs가 **도메인 floor**라서 검사를 열거 단계에서 함께 돈다(판정 수가 floor 입력이다).
+  // 파싱 실패는 throw — 커널이 열거 실패로 접어 마커 없이 죽는다(raw 스택·순서 우회 금지).
+  // ⚠️ checkExpr 계열에 fatal()/process.exit를 넣지 마라 — floor·마커 순서를 우회해 커널의
+  //    순서 보장 밖에서 죽는다. 실패는 viol.push(위반) 또는 throw(붕괴)로만 알린다.
+  function enumerateRules(): number {
+    for (const { path: rel, docs } of ruleEntries) {
+      for (const doc of docs) {
+        if (doc.errors.length) throw new Error(`YAML 파싱 실패: ${rel}: ${doc.errors[0].message}`);
+        const o = doc.toJS() as any;
+        if (!o || o.kind !== "ConfigMap" || !o.data) continue;
+        for (const [key, body] of Object.entries(o.data as Record<string, string>)) {
+          if (!key.endsWith(".yaml") || typeof body !== "string") continue;
+          let inner: any;
+          try { inner = parse(body); }
+          catch (e) { throw new Error(`룰 본문 파싱 실패: ${rel} .data["${key}"]: ${e instanceof Error ? e.message : e}`); }
+          for (const g of inner?.groups ?? []) {
+            for (const r of g?.rules ?? []) {
+              const name = r?.alert ?? r?.record;
+              if (!name || typeof r?.expr !== "string") continue;
+              ruleCount++;
+              // 검사 내부 예외는 룰 이름을 실어 재던진다 — 커널의 "열거 실패" 라벨만으로는
+              // 룰 walk 실패와 expr 검사기 자신의 결함이 구별되지 않는다.
+              try {
+                const v = lintExpr({ file: rel, name }, r.expr, LINT_CTX);
+                viol.push(...v.violations);
+                supplyRefs += v.supplyRefs;
+              }
+              catch (e) { throw new Error(`expr 검사 중 예외(룰 ${name}, ${rel}): ${e instanceof Error ? e.message : e}`); }
+            }
           }
         }
       }
     }
+    return ruleCount;
   }
-  return ruleCount;
-}
 
-// 위반 3그룹의 헤더·문구는 이 콜사이트가 소유한다 — 종전과 달리 세 그룹을 한 번에 전부 보고한다
-// (그룹별 조기 exit는 뒤 그룹을 가렸다).
-function renderViolations(): string[] {
-  const out: string[] = [];
-  if (allowErrors.length) {
-    out.push(`FAIL: ${ALLOWLIST} 항목에 사유 주석이 없다 — 무근거 면제는 금지:`);
-    for (const e of allowErrors) out.push("  " + e);
+  // 위반 3그룹의 헤더·문구는 이 콜사이트가 소유한다 — 종전과 달리 세 그룹을 한 번에 전부 보고한다
+  // (그룹별 조기 exit는 뒤 그룹을 가렸다).
+  function renderViolations(): string[] {
+    const out: string[] = [];
+    if (allowErrors.length) {
+      out.push(`FAIL: ${ALLOWLIST} 항목에 사유 주석이 없다 — 무근거 면제는 금지:`);
+      for (const e of allowErrors) out.push("  " + e);
+    }
+    // 완전성 가드: 미등록 생산자/메트릭은 모드 C를 **조용히 통과**한다(fail-open) → 여기서 막는다.
+    if (producerViol.length) {
+      out.push("FAIL: push 메트릭 레지스트리 완전성 위반 — 미등록 메트릭은 모드 C 검사를 빠져나가 죽은 알림으로 " +
+        "배포된다. tools/check-alert-rules.ts의 DEFAULT_REGISTRY에 메트릭·생산자·스케줄을 등재하라:");
+      for (const p of producerViol) out.push("  " + p);
+    }
+    if (viol.length) {
+      out.push("FAIL: vmalert 룰 expr 안티패턴(모드 A/B=instance 라벨 불안정 · 모드 C=push 주기 > 룩백 · 모드 D=공급원 의미론↔rollup 함수 불일치) — " +
+        "수정하거나 " + ALLOWLIST + "에 사유와 함께 등재:");
+      for (const v of viol) out.push("  " + v);
+    }
+    return out;
   }
-  // 완전성 가드: 미등록 생산자/메트릭은 모드 C를 **조용히 통과**한다(fail-open) → 여기서 막는다.
-  if (producerViol.length) {
-    out.push("FAIL: push 메트릭 레지스트리 완전성 위반 — 미등록 메트릭은 모드 C 검사를 빠져나가 죽은 알림으로 " +
-      "배포된다. tools/check-alert-rules.ts의 DEFAULT_REGISTRY에 메트릭·생산자·스케줄을 등재하라:");
-    for (const p of producerViol) out.push("  " + p);
-  }
-  if (viol.length) {
-    out.push("FAIL: vmalert 룰 expr 안티패턴(모드 A/B=instance 라벨 불안정 · 모드 C=push 주기 > 룩백 · 모드 D=공급원 의미론↔rollup 함수 불일치) — " +
-      "수정하거나 " + ALLOWLIST + "에 사유와 함께 등재:");
-    for (const v of viol) out.push("  " + v);
-  }
-  return out;
-}
 
-// 실행 순서(전 도메인 열거 → 전 floor 판정 → SCAN 일괄 방출 → 검사 → 종료코드)는 guardMain이
-// 구조로 소유한다. 도메인 4개: 룰 · denylist(모드 A) · 공급원 원장 크기 · 모드 D 판정 참조 수 —
-// supply 두 축이 갈라진 이유는 원장은 그대로인데 강제 루프만 죽는 비대칭을 잡기 위해서다.
-// --supply-policy 주입 모드는 supply 두 floor만 면제한다(형제 가드의 확립된 관용구 — 신호·강제는 그대로).
-guardMain({
-  label: "check-alert-rules",
-  floors,
-  domains: [
-    {
-      scan: "check-alert-rules:rules",
-      min: MIN_SCAN,
-      floorHint: `룰 추출 회귀 의심 — ${RULES_DIR} 재배치 또는 ConfigMap .data 키 변경?`,
-      enumerate: enumerateRules,
-    },
-    {
-      scan: "check-alert-rules:denylist",
-      min: MIN_DENY,
-      floorHint: `${DENYLIST} — 모드 A가 통째로 무발화한다`,
-      enumerate: () => denyMetrics.length,
-    },
-    {
-      scan: "check-alert-rules:supply",
-      min: SUPPLY_INJECTED ? 0 : MIN_SUPPLY,
-      floorHint: `${SUPPLY_POLICY} 큐레이션이 사라졌다 — 0건 검사 후 초록이 되는 자리`,
-      enumerate: () => SUPPLY.length,
-    },
-    {
-      scan: "check-alert-rules:supply-refs",
-      min: SUPPLY_INJECTED ? 0 : MIN_SUPPLY_REFS,
-      floorHint: "원장은 그대로인데 강제 루프가 죽었다 — 열거 범위 회귀 의심",
-      enumerate: () => supplyRefs,
-    },
-  ],
-  output: "stdout",
-  check: renderViolations,
-  report: (lines) => { for (const l of lines) console.log(l); },
-  ok: (counts) => console.log(`check-alert-rules OK (${counts[0]} 룰 스캔, push 생산자 ${foundProducers.length}건 / 등록 메트릭 ` +
-    `${REGISTRY.length}건[모드 C 대상 ${modeCMetrics.length}], 룩백 ${LOOKBACK}s, ` +
-    `공급원 원장 ${counts[2]}건/판정 ${counts[3]}참조, 모드 A/B/C/D 위반 0)`),
-});
+  // 실행 순서(전 도메인 열거 → 전 floor 판정 → SCAN 일괄 방출 → 검사 → 종료코드)는 guardMain이
+  // 구조로 소유한다. 도메인 4개: 룰 · denylist(모드 A) · 공급원 원장 크기 · 모드 D 판정 참조 수 —
+  // supply 두 축이 갈라진 이유는 원장은 그대로인데 강제 루프만 죽는 비대칭을 잡기 위해서다.
+  // --supply-policy 주입 모드는 supply 두 floor만 면제한다(형제 가드의 확립된 관용구 — 신호·강제는 그대로).
+  guardMain({
+    label: "check-alert-rules",
+    floors,
+    domains: [
+      {
+        scan: "check-alert-rules:rules",
+        min: MIN_SCAN,
+        floorHint: `룰 추출 회귀 의심 — ${RULES_DIR} 재배치 또는 ConfigMap .data 키 변경?`,
+        enumerate: enumerateRules,
+      },
+      {
+        scan: "check-alert-rules:denylist",
+        min: MIN_DENY,
+        floorHint: `${DENYLIST} — 모드 A가 통째로 무발화한다`,
+        enumerate: () => denyMetrics.length,
+      },
+      {
+        scan: "check-alert-rules:supply",
+        min: SUPPLY_INJECTED ? 0 : MIN_SUPPLY,
+        floorHint: `${SUPPLY_POLICY} 큐레이션이 사라졌다 — 0건 검사 후 초록이 되는 자리`,
+        enumerate: () => SUPPLY.length,
+      },
+      {
+        scan: "check-alert-rules:supply-refs",
+        min: SUPPLY_INJECTED ? 0 : MIN_SUPPLY_REFS,
+        floorHint: "원장은 그대로인데 강제 루프가 죽었다 — 열거 범위 회귀 의심",
+        enumerate: () => supplyRefs,
+      },
+    ],
+    output: "stdout",
+    check: renderViolations,
+    report: (lines) => { for (const l of lines) console.log(l); },
+    ok: (counts) => console.log(`check-alert-rules OK (${counts[0]} 룰 스캔, push 생산자 ${foundProducers.length}건 / 등록 메트릭 ` +
+      `${REGISTRY.length}건[모드 C 대상 ${modeCTargets(LINT_CTX).length}], 룩백 ${LOOKBACK}s, ` +
+      `공급원 원장 ${counts[2]}건/판정 ${counts[3]}참조, 모드 A/B/C/D 위반 0)`),
+  });
+}

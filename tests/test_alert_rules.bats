@@ -12,6 +12,10 @@
 # **생산자·레지스트리도 함께 시드**한다 — 린터는 레지스트리의 생산자 파일이 실재하고, 그 파일이 선언된
 # 메트릭을 실제로 push하며, cron 스케줄 파일이 존재할 것을 강제한다(fail-open 4구멍 중 F-3·F-4).
 # 프로덕션 레지스트리를 약화시키지 않으려고 테스트는 **--registry로 픽스처를 주입**해 격리한다.
+# ⚠️ `$ROOT`은 여기서 정의한다 — `run bun -e` 안에 bats 지역 변수를 보간할 때 그것이 비어 있으면
+# 경로가 조용히 깨진다(이 레포의 「정적 증인의 두 함정」과 같은 형태). 형제 게이트 bats의 관례다.
+setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"; }
+
 _seed() {
   local root="$1" name="${2:-}" expr="${3:-}" i
   mkdir -p "$root/platform/victoria-stack/prod/rules" "$root/platform/fake/prod" "$root/scripts" "$root/policy"
@@ -1031,4 +1035,26 @@ JSON
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '^FAIL: .*중복'
+}
+
+# ── 판정 seam: lintExpr 를 파일시스템 없이 직접 부른다 ────────────────────────────────
+# 착지 선례와 같은 형태다(tools/check-image-ownership.ts:363 · check-workflow-readiness.ts:593).
+
+@test "lintExpr goes silent when the mode A policy is empty (observable only through the seam)" {
+  # 오늘 CLI로는 관측 불가다 — denylist 파일을 치우면 **바닥값이 먼저 죽어**(entry floor) 모드 A의
+  # 침묵 자체를 볼 수 없다. 정책이 비면 그 모드가 아무것도 안 잡는다는 사실이 가드의 사각이었다.
+  # ⚠️ 쌍으로 단언한다 — 같은 식이 **정책만으로** 뒤집혀야 이 테스트가 자기 축을 잰다.
+  run bun -e '
+    import { lintExpr } from "'"$ROOT"'/tools/check-alert-rules.ts";
+    const at = { file: "r.yaml", name: "A1" };
+    const expr = "increase(some_metric[5m]) > 0";
+    const base = { allowed: new Set(), pushPeriodSec: new Map(), lookbackSec: 300,
+                   supply: new Map(), cite: "policy/x.json" };
+    const armed = lintExpr(at, expr, { ...base, denyMetrics: ["some_metric"] });
+    const empty = lintExpr(at, expr, { ...base, denyMetrics: [] });
+    console.log(armed.violations.length === 1 && empty.violations.length === 0
+      ? "ok" : `armed=${armed.violations.length} empty=${empty.violations.length}`);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx 'ok'
 }
