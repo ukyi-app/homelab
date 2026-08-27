@@ -269,3 +269,19 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE '^SCAN: check-image-pins:total: [0-9]+$'
 }
+
+@test "a later-domain collapse withholds EVERY domain marker (batch emission)" {
+  # 종전엔 :total 마커가 먼저 나가서, :apps가 붕괴한 실행이 "합계 N건 검사했다"를 그대로 냈다.
+  # 붕괴한 실행의 어떤 건수도 "검사했다"로 읽히면 안 된다(TS guardMain과 동형).
+  wf platform/x/deployment.yaml <<'EOF'
+spec:
+  containers:
+    - image: nginx:1.25@sha256:abcdef
+EOF
+  run bash "$CHK" --root "$REPO" --floor apps=9999
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'check-image-pins:apps.*열거 붕괴'
+  out="$output"
+  run grep -q '^SCAN: check-image-pins:' <<<"$out"
+  [ "$status" -ne 0 ]
+}

@@ -79,10 +79,10 @@ files="$(git ls-files '.github/workflows/*.yaml' || true)"
 nfiles="$(scan_count "$files")"
 # 픽스처(--root)엔 기본 바닥값을 적용하지 않는다 — 단 --floor를 **명시하면** 적용한다(floor_set,
 # check-image-pins 선례). 아니면 명시 플래그가 조용한 no-op이 된다(조용히 꺼진 바닥값과 같은 관측).
+# 판정만 한다(quiet) — 마커는 **전 도메인 판정 뒤** 아래에서 일괄 방출한다. 뒤 도메인이 붕괴한
+# 실행이 앞 도메인의 "N건 검사했다"를 내면 소비자가 정반대로 읽는다(TS guardMain과 동형).
 if [ "$SCOPE_NARROWED" -eq 0 ] || floor_set check-gh-secret-coverage:workflows; then
-  scan_floor check-gh-secret-coverage:workflows "$nfiles" "$(floor_of check-gh-secret-coverage:workflows 18)" || exit 1
-else
-  scan_signal check-gh-secret-coverage:workflows "$nfiles"
+  scan_floor check-gh-secret-coverage:workflows "$nfiles" "$(floor_of check-gh-secret-coverage:workflows 18)" quiet || exit 1
 fi
 
 # 로컬 호출되는 reusable 집합 — 네이밍이 아니라 **실제 호출**에서 파생한다.
@@ -139,10 +139,14 @@ EOT
 enum="$(printf '%s' "$owned" | grep -v '^$' | LC_ALL=C sort -u || true)"
 n="$(scan_count "$enum")"
 if [ "$SCOPE_NARROWED" -eq 0 ] || floor_set check-gh-secret-coverage:secrets; then
-  scan_floor check-gh-secret-coverage:secrets "$n" "$(floor_of check-gh-secret-coverage:secrets 12)" || exit 1
-else
-  scan_signal check-gh-secret-coverage:secrets "$n"
+  scan_floor check-gh-secret-coverage:secrets "$n" "$(floor_of check-gh-secret-coverage:secrets 12)" quiet || exit 1
 fi
+
+# ── 마커 일괄 방출 — 전 도메인이 바닥값을 통과한 뒤에만 나간다 ──
+# 순서는 종전과 같다(workflows → secrets). 면제 모드에서도 신호는 낸다 — 신호가 아예 없으면
+# "좁혀진 호출"과 "가드 미실행"을 구별할 수 없다.
+scan_signal check-gh-secret-coverage:workflows "$nfiles"
+scan_signal check-gh-secret-coverage:secrets "$n"
 
 # ── 분류 읽기(스키마 강제 — 사유 없는 선언 금지) ────────────────────────────
 [ -f "$CLASS" ] || { echo "ERROR: 분류 정책 부재: ${CLASS} — 부재를 '분류 0건'으로 위장시키지 않는다" >&2; exit 2; }
