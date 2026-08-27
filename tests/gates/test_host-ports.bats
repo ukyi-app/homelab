@@ -348,3 +348,12 @@ PYWITNESS
   run bash -c "grep -vE '^[[:space:]]*#' '$LIB' | grep -c 'exit '"
   [ "$output" -eq 0 ]
 }
+
+@test "a dead detector emits no marker (a run that could not scan must not claim it did)" {
+  # 형제 check-locale-collation·check-bats-style와 같은 규율.
+  run bash "$ROOT/scripts/check-host-ports.sh" "$BATS_TEST_TMPDIR/does-not-exist.sh"
+  [ "$status" -ne 0 ]
+  out="$output"
+  run grep -q '^SCAN: check-host-ports:' <<<"$out"
+  [ "$status" -ne 0 ]
+}

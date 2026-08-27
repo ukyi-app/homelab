@@ -41,10 +41,10 @@ if [ "$#" -gt 0 ]; then FILES=("$@"); else
   )
 fi
 # ⚠️ 기본 모드의 도메인은 **정당하게 0이 될 수 없다** — 0건은 열거 붕괴다(형제 가드와 같은 규율).
+# 판정만 한다(quiet) — 마커는 **검출기가 살아서 끝난 뒤** 아래에서 낸다. 검출기가 죽은 실행은
+# 아무것도 검사하지 못했으므로 "N건 검사했다"를 내면 소비자가 정반대로 읽는다(형제 후행 가드와 같은 규율).
 if [ "$#" -eq 0 ] || floor_set check-locale-collation; then
-  scan_floor check-locale-collation "${#FILES[@]}" "$(floor_of check-locale-collation 200)" || exit 1
-else
-  scan_signal check-locale-collation "${#FILES[@]}"
+  scan_floor check-locale-collation "${#FILES[@]}" "$(floor_of check-locale-collation 200)" quiet || exit 1
 fi
 
 DETECT=""
@@ -99,6 +99,8 @@ AWK
 
 # 검출 실행(인자 검증·rc 포착·READFILES 대조)은 detect_run(guard.sh) 소유 — 여긴 awk 본문만.
 findings="$(detect_run check-locale-collation "$DETECT" "${FILES[@]}")"
+# 검출기가 끝까지 돌았다 — 이제 마커를 낸다.
+scan_signal check-locale-collation "${#FILES[@]}"
 n="$(scan_count "$findings")"
 printf '%s\n' "$findings" | grep -E '\[(A|B|C)\]' || true   # gate bats가 레인 태그를 검증
 abc_rc=0

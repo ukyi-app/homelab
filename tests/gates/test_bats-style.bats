@@ -142,3 +142,13 @@ setup() {
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '\[NEG\]'
 }
+
+@test "a dead detector emits no marker (a run that could not scan must not claim it did)" {
+  # 형제 check-locale-collation·check-host-ports와 같은 규율 — 검출기가 죽은 실행은
+  # 아무것도 검사하지 못했으므로 "N건 검사했다"를 내면 안 된다.
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/does-not-exist.bats"
+  [ "$status" -ne 0 ]
+  out="$output"
+  run grep -q '^SCAN: check-bats-style:' <<<"$out"
+  [ "$status" -ne 0 ]
+}

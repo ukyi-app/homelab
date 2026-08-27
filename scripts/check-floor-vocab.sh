@@ -58,7 +58,7 @@ P_TS_ENV='process[.]env[.]([A-Z0-9]+_)*MIN(_[A-Z0-9]+)*([^A-Z0-9_]|$)'   # [E] T
 # 검출기 — 주석 스트립 후 두 레인. READFILES로 detect_run(guard.sh)이 열거수 대조를 진다.
 DETECT=""
 IFS='' read -r -d '' DETECT <<AWK || true
-FNR==1 { nfiles++; inblock=0 }
+FNR==1 { pflush(); pfile=FILENAME; plast=0; pn=0; delete qlab; delete slab; nfiles++; inblock=0 }
 {
   # 주석 표면(scan-producers 규율 승계): 행두 # · // — 그리고 TS 블록 주석은 행두 /*만 상태 진입
   # (줄 중간 /*는 글롭 문자열에 흔해 파일 잔부를 통째로 삼킨다 — 형제 헤더의 실측),
@@ -68,6 +68,18 @@ FNR==1 { nfiles++; inblock=0 }
 }
 /^[ \\t]*#/ { next }
 /^[ \\t]*\\/\\// { next }
+{
+# 레인 P: 방출 콜사이트는 **마지막 detect_run보다 뒤**여야 한다. 마커는 "열거·바닥값을 통과했다"는
+# 뜻인데 검출기가 죽은 실행은 아무것도 검사하지 못했으므로, 그 실행이 마커를 내면 정반대로 읽힌다.
+# ⚠️ **모든** 방출 콜사이트를 본다 — 마지막 마커만 마지막 검출기와 비교하면 이른 방출 하나 뒤에
+#    늦은 신호 하나가 있기만 해도 통과한다. 판정만 하는 scan_floor(quiet)는 방출이 아니라 제외한다.
+if (\$0 ~ /detect_run[ \\t]/) plast = FNR
+else if (\$0 ~ /scan_signal[ \\t]/ || (\$0 ~ /scan_floor[ \\t]/ && \$0 !~ /quiet/)) { pn++; pl[pn]=FNR; pt[pn]=\$0 }
+# 레인 Q: quiet 판정은 마커를 내지 않는다 — 그 라벨의 마커는 **뒤에서 반드시** 나가야 한다.
+#         짝이 없으면 결합되지 않은 2단계 프로토콜이 되어 그 도메인이 조용히 무증인이 된다.
+if (\$0 ~ /scan_floor[ \\t]/ && \$0 ~ /quiet/) { split(\$0, qf, /[ \\t]+/); for (qi in qf) if (qf[qi] ~ /^check-/) { qlab[qf[qi]] = FNR; break } }
+if (\$0 ~ /scan_signal[ \\t]/) { split(\$0, sf, /[ \\t]+/); for (si in sf) if (sf[si] ~ /^check-/) { slab[sf[si]] = 1; break } }
+}
 {
   ists = (FILENAME ~ /\\.(ts|mts)\$/)
   if (match(\$0, /${P_FLAG}/)) {
@@ -80,7 +92,13 @@ FNR==1 { nfiles++; inblock=0 }
     if (cm == 0 || cm > RSTART) printf "%s:%d: [E] env 바닥값 읽기 재유입 — env는 호출부에 보이지 않는 채로 바닥값을 끈다: %s\\n", FILENAME, FNR, \$0
   }
 }
-END { printf "READFILES=%d\\n", nfiles > "/dev/stderr" }
+END { pflush(); printf "READFILES=%d\\n", nfiles > "/dev/stderr" }
+function pflush(  i, q) {
+if (plast > 0) for (i = 1; i <= pn; i++) if (pl[i] < plast)
+  printf "%s:%d: [P] 방출이 검출기보다 앞이다 — 검출기가 죽은 실행이 마커를 낸다(판정만 할 거면 quiet 인자를 주라): %s\\n", pfile, pl[i], pt[i]
+if (plast > 0) for (q in qlab) if (!(q in slab))
+  printf "%s:%d: [Q] quiet 판정의 짝 신호가 없다 — 이 도메인은 마커를 한 줄도 내지 않는다(라벨 %s): 검출 뒤에서 그 라벨의 신호를 내라 (%s)\\n", pfile, qlab[q], q, q
+}
 AWK
 
 findings="$(detect_run check-floor-vocab "$DETECT" "${FILES[@]}")"

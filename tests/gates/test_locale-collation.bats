@@ -195,3 +195,14 @@ setup() {
   [ "$status" -ne 0 ]
   echo "$output" | grep -qF '[A]'
 }
+
+@test "a dead detector emits no marker (a run that could not scan must not claim it did)" {
+  # 마커는 "열거·바닥값을 통과했다"는 뜻인데, 검출기가 죽은 실행은 **아무것도 검사하지 못했다**.
+  # 그런 실행이 "N건 검사했다"를 내면 소비자가 정반대로 읽는다 — 형제 후행 가드(check-floor-vocab ·
+  # check-scan-producers)는 이미 안 낸다. 검출기가 fatal을 내는 결정적 경로(읽을 수 없는 인자)를 쓴다.
+  run bash "$S" "$FX/does-not-exist.sh"
+  [ "$status" -ne 0 ]
+  out="$output"
+  run grep -q '^SCAN: check-locale-collation:' <<<"$out"
+  [ "$status" -ne 0 ]
+}

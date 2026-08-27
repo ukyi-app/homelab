@@ -45,9 +45,7 @@ EOF
 fi
 # ⚠️ 기본 모드의 도메인은 **정당하게 0이 될 수 없다** — 0건은 열거 붕괴다(형제 가드와 같은 규율).
 if [ "$#" -eq 0 ] || floor_set check-host-ports; then
-  scan_floor check-host-ports "${#FILES[@]}" "$(floor_of check-host-ports 10)" || exit 1
-else
-  scan_signal check-host-ports "${#FILES[@]}"
+  scan_floor check-host-ports "${#FILES[@]}" "$(floor_of check-host-ports 10)" quiet || exit 1
 fi
 
 DETECT=""
@@ -195,6 +193,8 @@ findings="$(detect_run check-host-ports "$DETECT" "${FILES[@]}")" || {
   echo "(힌트: 이 스크립트는 레포 루트로 cd한다 — 상대경로 인자는 루트 기준이다)" >&2
   exit 1
 }
+# 검출기가 끝까지 돌았다 — 이제 마커를 낸다(실패 경로는 위에서 exit 1이라 여기 닿지 않는다).
+scan_signal check-host-ports "${#FILES[@]}"
 
 n="$(scan_count "$findings")"
 printf '%s\n' "$findings" | grep -E '\[(A|B|C|D|E)\]' || true   # gate bats가 레인 태그를 검증

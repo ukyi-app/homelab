@@ -32,9 +32,7 @@ fi
 # 명시-파일 모드($# > 0)는 원소가 항상 ≥1이라 이 분기에 도달하지 않지만, 픽스처가 1건짜리로
 # 부를 수 있으므로 바닥값은 기본 모드에만 건다(선례: check-app-netpol의 --root 면제). 래칫 아님.
 if [ "$#" -eq 0 ] || floor_set check-bats-style; then
-  scan_floor check-bats-style "${#FILES[@]}" "$(floor_of check-bats-style 150)" || exit 1
-else
-  scan_signal check-bats-style "${#FILES[@]}"   # 바닥값 면제 모드도 신호는 낸다(06 판별자)
+  scan_floor check-bats-style "${#FILES[@]}" "$(floor_of check-bats-style 150)" quiet || exit 1
 fi
 DETECT=""
 IFS='' read -r -d '' DETECT <<'AWK' || true
@@ -71,6 +69,8 @@ END { printf "READFILES=%d\n", nfiles > "/dev/stderr" }
 AWK
 # 검출 실행(인자 검증·rc 포착·READFILES 대조)은 detect_run(guard.sh) 소유 — 여긴 awk 본문만.
 findings="$(detect_run check-bats-style "$DETECT" "${FILES[@]}")"
+# 검출기가 끝까지 돌았다 — 이제 마커를 낸다(검출기가 죽으면 이 줄에 닿지 않는다).
+scan_signal check-bats-style "${#FILES[@]}"
 neg="$(printf '%s\n' "$findings" | grep -c '\[NEG\]' || true)"; neg="${neg//[^0-9]/}"; neg="${neg:-0}"
 bb="$(printf '%s\n' "$findings" | grep -c '\[BB\]' || true)"; bb="${bb//[^0-9]/}"; bb="${bb:-0}"
 printf '%s\n' "$findings" | grep -E '\[(NEG|BB)\]' || true   # gate bats가 [NEG]/[BB] 검증
