@@ -8,6 +8,9 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   S="$ROOT/scripts/check-locale-collation.sh"
   FX="$BATS_TEST_TMPDIR"
+  # heredoc 여는 표기는 lib이 런타임에 조립한다 — 리터럴로 적으면 이 파일이 검출기에게 투명해진다.
+  # shellcheck source=tests/gates/lib/heredoc-marker.sh
+  . "$ROOT/tests/gates/lib/heredoc-marker.sh"
 }
 
 @test "the detector fires on a bare sort -u and stays quiet on a pinned one" {
@@ -119,11 +122,10 @@ setup() {
 }
 
 @test "a comment quoting a heredoc marker does not blind the detector to the rest of the file" {
-  # docs/traps-detail.md 1490 — heredoc 상태 기계가 주석 규칙보다 **먼저** 돌면, 인용된 heredoc
+  # docs/traps-detail.md 「heredoc 상태 기계가 주석 규칙보다 먼저 돌면 …」 — 상태 기계가 주석 규칙보다 **먼저** 돌면, 인용된 heredoc
   # 표기 한 줄이 파일의 나머지를 통째로 지운다. 착지 전 실측: 이 도메인에서 10파일 2,956줄이
   # 그렇게 투명했고 그중엔 그 함정을 문서화한 회귀 픽스처 자신도 있었다.
-  # ⚠️ 표기를 런타임에 조립한다 — 이 파일에 리터럴로 적으면 이 파일 자신이 검출기에게 투명해진다.
-  hd='<'; hd="$hd$hd"
+  hd="$(heredoc_marker)"
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     "# 예전엔 python3 - ${hd}PY 로 했다" \
@@ -136,12 +138,31 @@ setup() {
 @test "a TS shift-like token in a string does not blind the detector (TS has no heredoc syntax)" {
   # 실측 유발원: tools/ensure-bump-pr.ts의 봇 이메일 문구가 `id`를 delimiter로 오인시켜 그 파일
   # 756줄을 검출기에게서 가렸다. TS/MTS엔 heredoc 문법이 없으므로 표면 종류로 상태 기계를 끈다.
-  # ⚠️ 표기를 런타임에 조립한다(위 테스트와 같은 이유).
-  hd='<'; hd="$hd$hd"
+  hd="$(heredoc_marker)"
   printf '%s\n' \
     "const msg = 'author=bot ${hd}id>+bot@users.noreply.github.com>';" \
     'const x = a.localeCompare(b);' > "$FX/tpl.ts"
   run bash "$S" "$FX/tpl.ts"
   [ "$status" -ne 0 ]
   echo "$output" | grep -qF '[C]'
+}
+
+@test "a real heredoc body is still suppressed and its terminator is still reached" {
+  # 음성 대조 — 주석 규칙을 상태 기계 **위로** 올린 수정이 상태 기계 자체를 없앤 것이 아님을 고정한다.
+  # 형제 함정 「면제 판정이 주석보다 먼저 돌면 …」이 이 짝을 처방한다: 대조군이 없으면 수정이
+  # 억제 자체를 지웠는지 알 수 없다.
+  # 본문에 `#` 줄을 넣어 **종료 판정이 여전히 도달함**도 함께 실증한다 — 이 가드는 주석 규칙이
+  # 닫힘 판정보다 앞이라, delimiter가 `#`로 시작할 수 없다는 사실에 기대고 있다.
+  # 위반이 정확히 1건(종료줄 **뒤**의 것)이어야 둘 다 증명된다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "cat ${hd}EOF" \
+    '# 본문의 주석 줄 — 이 줄 때문에 종료 판정이 막히면 안 된다' \
+    '  suppressed="$(printf a | sort -u)"' \
+    'EOF' \
+    'after="$(printf b | sort -u)"' > "$FX/realhd.sh"
+  run bash "$S" "$FX/realhd.sh"
+  [ "$status" -ne 0 ]
+  [ "$(echo "$output" | grep -cF '[A]')" -eq 1 ]
 }
