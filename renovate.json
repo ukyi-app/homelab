@@ -100,6 +100,11 @@
       "matchDatasources": ["git-refs", "git-tags"],
       "matchPackageNames": ["https://github.com/ukyi-app/homelab.git", "https://github.com/ukyi-app/homelab"],
       "enabled": false
+    },
+    {
+      "description": "grafana bump는 플러그인 페이로드 재측정을 동반한다 — 측정 앵커(MEASURED_AT_TAG) 대조가 red를 내고, 해소 절차는 test_grafana_plugin_budget.bats 헤더에 있다(followup-sweep 02).",
+      "matchPackageNames": ["grafana/grafana"],
+      "prBodyNotes": ["⚠️ 이 bump는 `platform/victoria-stack/prod/test_grafana_plugin_budget.bats`의 측정 앵커를 red로 만든다 — 파일 헤더의 재측정 절차(1Gi 프로브 `du -sk`)를 돌고 MEASURED_PAYLOAD_KIB·MEASURED_AT_TAG·내역 주석을 같은 PR에서 갱신할 것(상수만 올리면 앵커가 거짓말이 된다)."]
     }
   ]
 }

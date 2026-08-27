@@ -73,7 +73,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0          # 재시도 없이 다음 주기 — staleness 알림이 침묵을 잡는다
-      activeDeadlineSeconds: 120 # 주기(600s)보다 훨씬 짧게 — 행 걸림 방지
+      activeDeadlineSeconds: 150 # 주기(600s)의 1/4 — 행 걸림 방지(DNS 대기 30 + 지연 2×50 = 130 편입)
       template:
         metadata:
           labels: { app: rewrite-reconciler }
@@ -104,30 +104,54 @@ spec:
               args:
                 - |
                   set -euo pipefail
-                  # F6: 모든 네트워크 호출 바운드 + 전이적 연결거부 재시도(adguard/apiserver 롤링 중 ~2s 갭 흡수 —
-                  # backoffLimit:0라 단발 connrefused가 Job Failed→ArgoCD Degraded로 얼어붙던 라이브 확인된 함정.
-                  # connrefused는 즉시 실패라 재시도 비용 작고 120s 데드라인 내. 4xx(인증 등)는 재시도 안 함).
-                  CURL="curl -fsS --connect-timeout 5 --max-time 20 --retry 3 --retry-delay 2 --retry-connrefused"
+                  # F6: 모든 네트워크 호출 바운드 + 재시도 2등급(followup-sweep 01 — curl 7.71+ 필요:
+                  # --retry-all-errors 7.71·--retry-max-time 7.32, pg-tools는 bookworm 기반 7.88 — 베이스
+                  # 단언은 test_rewrite_reconciler.bats).
+                  # ⚠️ DNS(exit 6)는 man의 transient 목록 밖이지만 curl이 **이미 재시도한다**(pg-tools
+                  #   파드 실측 2026-08-27: plain --retry와 --retry-all-errors의 시도 수 동일). 2026-07-26
+                  #   사고(vmalert-adguard-rewrite-firing-e2e.sh 헤더의 exit 6 — 파드 Error 후 다음 주기
+                  #   자가복구, staleness 임계 1800s=3주기가 단발 흡수)의 병은 재시도 부재가 아니라
+                  #   **재시도 창 6초**(retry 3×delay 2 고정 지연 — 즉시 실패 클래스는 6초가 전부)였다.
+                  # 처방 두 축: ① 창 확대 — READ retry 6·delay 3(즉시 실패 창 18s — 사고 갭 ~3s 여유)
+                  #   + retry-max-time 30 상한. ② --retry-all-errors(READ만) — 실델타는 TLS(35)·전송
+                  #   리셋(55/56)·부분 전송(18)·목록 밖 5xx다. 부작용: READ는 4xx도 재시도한다(즉시
+                  #   실패라 지연 ~수 초·로그 7배 — 자격 회전 사고 시 AdGuard 측 rate-limit 가능성은
+                  #   미확인 추정). 메트릭 push도 READ 등급 — 게이지 재전송은 멱등(vmsingle ingest).
+                  # WRITE(변이 — rewrite add/update): --retry-all-errors를 주지 않는다. ⚠️ 단 curl 기본
+                  #   transient(타임아웃 28·408/429/5xx)는 --retry가 **항상** 재시도한다 — "적용됐는데
+                  #   응답만 20s+ 지연" 창에서 add 중복 위험이 잔존하고, 그 감지는 list_answer의 중복
+                  #   카운트가 진다(아래). connrefused는 커넥션 수립 전 실패라 언제나 안전.
+                  # 재시도 예산: 양 등급 모두 retry-max-time 30이 상한 — 호출당 최악 ≈ 30+20=50s.
+                  #   DNS pre-flight 최대 대기(DNS_WAIT_MAX=30, 아래) + 지연 2개(READ/WRITE 조합 무관)
+                  #   = 30+2×50=130 < 150s 데드라인. CoreDNS 롤링은 상관 장애라 READ 4곳을 동시에
+                  #   때릴 수 있다 — 3개+ 동시 지연은 DeadlineExceeded→다음 주기 수용(staleness 알림
+                  #   소관). 산술 증인은 test_rewrite_reconciler.bats.
+                  CURL_READ="curl -fsS --connect-timeout 5 --max-time 20 --retry 6 --retry-delay 3 --retry-connrefused --retry-all-errors --retry-max-time 30"
+                  CURL_WRITE="curl -fsS --connect-timeout 5 --max-time 20 --retry 3 --retry-delay 2 --retry-connrefused --retry-max-time 30"
                   SA=/var/run/secrets/kubernetes.io/serviceaccount
                   APISERVER="https://kubernetes.default.svc"
                   TOKEN=$(cat $SA/token)
                   AG="http://adguard-ui.edge.svc"
                   DOMAIN='*.home.ukyi.app'
                   AUTH="${ADGUARD_USER}:${ADGUARD_PASSWORD}"
-                  # F6 보강: 부팅 직후 CoreDNS 기동 전에 스케줄되면 curl이 6(Could not resolve host)으로
-                  # 즉사한다(라이브 확인 — 호스트 부팅 21초 뒤 실행분이 이 코드로 Failed). curl --retry는
-                  # 이름 해석 실패를 전이적 오류로 취급하지 않아 --retry-connrefused로도 못 잡고,
-                  # --retry-all-errors는 4xx(인증)까지 재시도해 위 "4xx는 재시도 안 함" 규약을 깬다.
-                  # 그래서 DNS만 별도로 기다린다. 종료코드 6 이외(연결거부 7 포함)면 해석은 된 것이라 즉시 통과.
-                  # 정상 경로 비용은 curl 1회(~ms), 최악 30s로 activeDeadline 120s 안에 든다.
+                  # F6 보강(#547): 부팅 직후 CoreDNS 기동 전에 스케줄되면 curl이 6(Could not resolve host)으로
+                  # 죽는다(라이브 확인 — 호스트 부팅 21초 뒤 실행분이 이 코드로 Failed). ⚠️ #547 당시 주석은
+                  # "--retry가 이름 해석 실패를 전이적으로 취급하지 않는다"를 근거로 삼았으나 파드 실측
+                  # (2026-08-27, 위 F6 주석)이 반증 — 재시도는 되지만, 부팅 급 장기 부재(수십 초)는 어떤
+                  # 재시도 창으로도 덮기 애매하고 명시 대기가 판정도 명확하다(rc 6만 대기 — 그 외(연결거부
+                  # 7 포함)는 해석이 된 것이라 즉시 통과). 정상 경로 비용은 프로브 1회(~ms).
+                  # 프로브는 재시도 없는 rc 판별용이라 세 번째 등급(PROBE)이다 — 판별이 목적이라 -f도
+                  # --retry도 주지 않는다. 최악 DNS_WAIT_MAX초는 아래 데드라인 산술에 편입된다.
+                  DNS_WAIT_MAX=30
+                  CURL_PROBE="curl -s --connect-timeout 2 --max-time 3"
                   dns_wait=0
-                  while [ "$dns_wait" -lt 30 ]; do
-                    rc=0; curl -s --connect-timeout 2 -o /dev/null "$AG/" || rc=$?
+                  while [ "$dns_wait" -lt "$DNS_WAIT_MAX" ]; do
+                    rc=0; $CURL_PROBE -o /dev/null "$AG/" || rc=$?
                     if [ "$rc" -ne 6 ]; then break; fi
                     dns_wait=$((dns_wait + 1)); sleep 1
                   done
                   # 1) want = traefik-ts LB tailscale IP (apiserver로 svc 조회 — status.loadBalancer.ingress[].ip)
-                  want=$($CURL --cacert $SA/ca.crt -H "Authorization: Bearer $TOKEN" \
+                  want=$($CURL_READ --cacert $SA/ca.crt -H "Authorization: Bearer $TOKEN" \
                     "$APISERVER/api/v1/namespaces/gateway/services/traefik-ts" \
                     | sed -n 's/.*"ip"[[:space:]]*:[[:space:]]*"\([0-9.]*\)".*/\1/p')
                   want=${want%%$'\n'*}   # 첫 매치만(다중 라인 방어) — `| head`의 SIGPIPE+pipefail 141 회피
@@ -137,7 +161,13 @@ spec:
                     # local 미사용(local var=$(...)는 종료코드를 삼켜 set -e를 무력화 — bash 함정). pipefail로 curl 실패 전파.
                     # answer 캡처는 [^"]*(IP뿐 아니라 hostname/CNAME 등 비-IPv4도) — [0-9.]*면 비-IPv4 answer를
                     # 못 봐 have=빈값→ADD가 중복 rewrite를 만든다(적대 리뷰 LOW). 비-IPv4면 have≠want로 update(PUT) 수렴.
-                    out=$($CURL -u "$AUTH" "$AG/control/rewrite/list" \
+                    raw=$($CURL_READ -u "$AUTH" "$AG/control/rewrite/list")
+                    # 중복 감지 — WRITE의 잔존 재시도 창(타임아웃·5xx)이 add를 중복시키면 아래 첫-매치
+                    # 반환이 그 사실을 가리므로, 여기서 도메인 매치 수를 세어 1 초과를 red로 만든다
+                    # (awk는 0건에도 rc 0 — grep -c류의 열거 붕괴 함정 회피).
+                    n=$(printf '%s' "$raw" | awk -F'"domain":"\\*\\.home\\.ukyi\\.app"' '{ c += NF - 1 } END { print c + 0 }')
+                    [ "$n" -le 1 ] || { echo "rewrite 중복 ${n}건(*.home) — 변이 재시도 잔재 의심, 수동 정리 필요" >&2; exit 1; }
+                    out=$(printf '%s' "$raw" \
                       | sed -n 's/.*"domain":"\*.home.ukyi.app","answer":"\([^"]*\)".*/\1/p')
                     printf '%s' "${out%%$'\n'*}"   # 첫 매치만 — head 파이프 SIGPIPE 회피
                   }
@@ -146,13 +176,13 @@ spec:
                   if [ "$have" != "$want" ]; then
                     if [ -z "$have" ]; then
                       # rewrite 부재 → 추가
-                      $CURL -u "$AUTH" -H 'Content-Type: application/json' \
+                      $CURL_WRITE -u "$AUTH" -H 'Content-Type: application/json' \
                         -d "{\"domain\":\"${DOMAIN}\",\"answer\":\"${want}\"}" "$AG/control/rewrite/add"
                     else
                       # F7: 원자적 교체(delete→add 갭 없음) — v0.107.45+ /control/rewrite/update.
                       # ★AdGuard는 update를 PUT으로만 등록(rewritehttp.go:150) — -X PUT 없으면 curl -d가 POST를
                       #   보내 405로 매번 실패해 stale 교정이 불능(적대 리뷰 HIGH). add는 POST가 맞으므로 무변경.
-                      $CURL -X PUT -u "$AUTH" -H 'Content-Type: application/json' \
+                      $CURL_WRITE -X PUT -u "$AUTH" -H 'Content-Type: application/json' \
                         -d "{\"target\":{\"domain\":\"${DOMAIN}\",\"answer\":\"${have}\"},\"update\":{\"domain\":\"${DOMAIN}\",\"answer\":\"${want}\"}}" \
                         "$AG/control/rewrite/update"
                     fi
@@ -165,7 +195,7 @@ spec:
                   # 4) 성공 하트비트 + fix 표시 — read-back 통과 시에만. F19: fix 타임스탬프는 FIXED=1일 때만(희소 샘플, 0 금지).
                   { printf 'adguard_rewrite_reconcile_timestamp %s\n' "$(date +%s)"
                     if [ "$FIXED" = 1 ]; then printf 'adguard_rewrite_last_fix_timestamp %s\n' "$(date +%s)"; fi
-                  } | $CURL --data-binary @- "http://vmsingle.observability.svc:8428/api/v1/import/prometheus"
+                  } | $CURL_READ --data-binary @- "http://vmsingle.observability.svc:8428/api/v1/import/prometheus"
                   echo "done: have=${have:-<none>} want=${want} fixed=${FIXED}"
               volumeMounts:
                 - { name: tmp, mountPath: /tmp }
