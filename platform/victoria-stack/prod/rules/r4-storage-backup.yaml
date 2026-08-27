@@ -376,6 +376,50 @@ data:
             annotations:
               summary: "bulk-ssd 티어 여유 15% 미만 또는 in-cluster 신호 소실"
               description: "du exporter가 본 bulk 티어 여유가 15% 미만이거나 storage_tier_avail_bytes{tier=bulk} 신호가 소실됐습니다 — W3에서 관측 TSDB가 bulk에 얹히므로 이전 착수 전 반드시 여유를 확인하세요(FilesBulkSSDLow의 in-cluster 짝). ⚠️ 국면 A(D4 한시 — versions.env의 BULK_MIGRATION_WINDOW_UNTIL이 비어 있지 않으면 진행 중) 동안 bulk는 루트 LV의 bind 마운트라 **이 수치는 루트 파일시스템 여유와 같습니다**. 그 기간에는 StandardSSDWarning/Filling과 같은 사건에 함께 발화하는 것이 정상이며, 원인은 '외장 디스크'가 아니라 루트 포화입니다."
+          # grafana data emptyDir 사용률(meta-observability 02) — 정적 예산 게이트(측정 앵커,
+          # test_grafana_plugin_budget.bats)가 못 보는 축: 태그 고정 상태에서 preinstall 자동갱신이
+          # 페이로드를 키우는 성장(13.1.0→13.1.3 사이 +10.5%·zipkin 신규가 커밋 0건 — 실측). du
+          # exporter의 지문 스캔(일 1회)이 push하는 실사용량을 선언 sizeLimit과 대조한다. 임계 0.67 =
+          # 정적 마진 정책(MARGIN 3/2 = 1.5배)의 역수 반올림 — 이 선을 넘으면 마진이 무너지기 시작한
+          # 것(원 사고는 0.997에서 kubelet eviction 루프). 임계↔마진 정책의 결박은
+          # test_grafana_plugin_budget.bats가 정적으로 강제한다(리뷰 M7 — 한쪽만 바꾸면 red).
+          # [3d] last_over_time은 일 1회 push의 모드 C 관례(위 룰들과 동일).
+          # ⚠️ absent 절을 달지 않는다(의도) — 메트릭 부재는 grafana 미가동(exporter의 0건 미방출
+          #   설계)일 수 있어, absent를 달면 grafana 다운을 "예산 부족"으로 **오귀속**한다(위
+          #   DigestExporterStale의 오귀속 금지 규약과 동일). exporter 사망은 PvcDuExporterStale이,
+          #   grafana 다운은 TargetDown이 잡는다 — 역할 분리.
+          # ⚠️ 분모 536870912 = grafana.yaml data emptyDir sizeLimit(512Mi)의 바이트 리터럴 — 두 값의
+          #   일치는 test_grafana_plugin_budget.bats가 정적으로 결박한다(선언만 바꾸면 그 게이트가 red).
+          # (disk 라벨을 달지 않는다 — alertmanager inhibit 2번(disk 축)의 사정권 밖 유지, spec 결정.)
+          - alert: GrafanaPluginBudgetLow
+            expr: |
+              (last_over_time(grafana_data_dir_size_bytes[3d]) / 536870912) > 0.67
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "grafana 플러그인 페이로드가 emptyDir 예산의 67%를 초과"
+              description: "grafana data emptyDir 실사용량(du exporter 지문 스캔)이 선언 sizeLimit(512Mi)의 66%를 넘었습니다 — 정적 마진 1.5배가 무너지기 시작한 것입니다(원 사고는 99.7%에서 eviction 루프). preinstall 자동갱신 성장이 원인일 수 있으니 test_grafana_plugin_budget.bats 헤더의 재측정 절차를 돌고 sizeLimit 상향(768Mi 후보)을 검토하세요."
+          # 지문 스캔 자기관측 — grafana_data_dir_size_bytes는 지문 0건에서 **의도적 미방출**이고
+          # (grafana 미가동 오귀속 방지), 위 GrafanaPluginBudgetLow는 absent 절이 없다. 그 둘에
+          # 초록 하트비트까지 겹치면 지문 붕괴(grafana.db 파일명 변경·emptyDir→PVC 전환·kubelet
+          # 레이아웃 변화)가 **영구 무성**이 된다 — 죽은 알림 클래스의 생산자 쪽 변종(01 리뷰 H2,
+          # 린터는 룰 expr만 봐 원리적으로 못 잡는다). 그래서 매치 수 게이지는 무조건 방출되고,
+          # 여기서 0의 지속을 페이징한다. grafana 자체 다운이면 TargetDown류와 동반 발화가 정상.
+          # ⚠️ absent 가지는 "exporter가 돌았다"(하트비트 실재)에 조건화한다(리뷰 M8) — 무조건
+          #   absent면 첫 배포 후 du 크론이 돌기 전(최대 24h)에 오발화한다. AlertPipelineWriteStale의
+          #   absent 거부 규약과 같은 뿌리의 반대 해법: 여기는 게이지 소실 자체가 표적이라 absent가
+          #   필요하고, 조건화가 무이력 구간만 걷어낸다. for 30m은 de-flap(e2e 발화 레그가 잰다).
+          - alert: GrafanaDuFingerprintLost
+            expr: |
+              last_over_time(grafana_du_fingerprint_matches[3d]) == 0
+              or (absent(last_over_time(grafana_du_fingerprint_matches[3d]))
+                  and on() (last_over_time(pvc_du_last_success_timestamp[3d]) > 0))
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "grafana emptyDir 지문 스캔이 대상을 찾지 못함"
+              description: "du exporter의 grafana.db 지문 매치가 0건(또는 게이지 자체 소실)입니다 — GrafanaPluginBudgetLow가 무측정 상태입니다. grafana 미가동이면 동반 알림을, 가동 중이면 DB 파일명/볼륨 변경·kubelet 경로를 확인하세요."
+
           # ★ digest-exporter 자기관측(감시견의 감시견) — ImageDigestDrift(r6)의 **먹이 공급선**이 죽으면
           #   그 알림이 조용히 실명한다(ghcr_latest_digest 시리즈가 끊긴 뒤 [15m] 윈도가 만료되면 좌변이 빈
           #   벡터 → 드리프트가 있어도 무발화). exporter의 조용한 실패 3모드(크론 미실행·push 실패·파드 기동
