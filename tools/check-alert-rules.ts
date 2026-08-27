@@ -106,11 +106,13 @@ const REGISTRY_FILE = typeof f["--registry"] === "string" ? (f["--registry"] as 
 const RULES_DIR = RULES_ROOT;
 const DENYLIST = "policy/alert-instance-stability-denylist.txt";
 const ALLOWLIST = "policy/alert-instance-stability-allowlist.txt";
-// ⚠️ 알려진 관측 공백(meta-observability 04 리뷰 M1 — 실측): 모드 D의 토큰 필터가 소문자 시작
-// 메트릭만 매치해 **대문자 메트릭(ALERTS·ALERTS_FOR_STATE)** 은 time() 비교 검사 시야 밖이고,
-// timestamp-생산 rollup 클래스(tlast_over_time — 값이 아니라 샘플 시각)는 모드 D의 값-타임스탬프
-// 모델에 아예 없다(등재하면 오히려 last_over_time 요구 오탐). r7 AlertPipelineWriteStale의 통과는
-// 정당 판정이 아니라 이 공백이다 — 확장(대문자 + t*_over_time 클래스)은 followups 등재.
+// (해소 — linter-mode-d 01) 옛 관측 공백 2건을 닫았다: ① 모드 D 토큰 필터가 대문자 메트릭
+// (ALERTS·ALERTS_FOR_STATE)을 못 보던 것 — [A-Za-z_] 확장(PROMQL_BUILTIN은 전부 소문자·Inf/NaN은
+// 5자 문턱 아래라 충돌 없음). ② 샘플-시각 rollup 클래스 — tlast_over_time(창의 마지막 샘플
+// 시각)만 올바른 신선도 표현이라 supply 등재 **면제**, tfirst/tmin은 의미가 어긋나 무조건 red,
+// tmax는 argmax 시각(값 기반)이라 클래스 밖 = 기존 화이트리스트 red 유지. r7
+// AlertPipelineWriteStale의 통과는 이제 공백이 아니라 정당 판정이다. 분류 SSOT는 정책 파일
+// _readme(TS 클래스 항목)와 TS_FRESHNESS_* 주석이 함께 진다.
 const MIN_SCAN = 30;   // 실 룰 56건(55 alert + 1 record, meta-observability 시점) — 셀렉터 붕괴 false-green 차단
 // denylist 항목 바닥값 — 파일이 남아 있는데 **내용만** 비거나 주석만 남는 부분 드리프트를 잡는다
 // (필수 읽기는 파일 부재만 잡는다). 실 원장 1항목 — 이 목록은 줄어들 이유가 없다. 래칫 아님.
@@ -177,6 +179,20 @@ const ROLLUP_OK = new Set([
   "present_over_time", "absent_over_time", "distinct_over_time", "geomean_over_time",
   "tlast_over_time", "tfirst_over_time", "tmin_over_time", "tmax_over_time", "default_rollup",
 ]);
+
+// timestamp-생산 rollup(모드 D 전용 분류 — linter-mode-d 01): 값이 아니라 **샘플 시각**을 낸다.
+// OK = tlast_over_time 하나뿐(창의 **마지막 샘플** 시각 — 신선도 판정의 정답이라 supply 등재 면제).
+// BAD = tfirst(창의 첫 샘플 시각 — 창이 찰수록 낡아 보임)·tmin(**최소값** 샘플의 시각 — 값 기반이라
+//   신선도와 무관한 임의 시점). 둘 다 신선도 판정으로 쓰면 의미가 어긋나 무조건 red(fail-closed —
+//   supply-policy allowlist로만 탈출 가능).
+// ⚠️ tmax_over_time은 어느 클래스에도 없다(리뷰 H1 정정 — MetricsQL 실정의: **최댓값** 샘플의
+//   시각이지 최신 샘플이 아니다). 단조 메트릭에선 우연히 일치하지만 is-truth(값이 내려가는 게
+//   사실 — barman purge 등)에선 피크 옛 샘플을 윈도만큼 래치해 거짓 신선이 된다 — 기존 want
+//   화이트리스트가 그대로 red를 낸다(sum_over_time 판정과 동형).
+// ⚠️ timestamp()는 여기 없다 — 샘플 시각을 내는 두 번째 관용구지만 instant 참조라 정체가 룩백을
+//   넘는 순간 시야에서 사라지는 vacuity가 있다(r7 AlertPipelineWriteStale이 그 이유로 기각한 기록).
+const TS_FRESHNESS_OK = new Set(["tlast_over_time"]);
+const TS_FRESHNESS_BAD = new Set(["tfirst_over_time", "tmin_over_time"]);
 
 // 모드 D의 메트릭 토큰 필터 — PromQL 내장/키워드는 메트릭이 아니다. 뒤에 `(`가 오는 토큰은 이미
 // 함수 호출로 걸러지지만, 인자 없이 쓰이는 키워드(`bool`·`offset` 등)는 여기서 뺀다.
@@ -644,7 +660,7 @@ const denyMetrics = readList(DENYLIST).map((l) => l.split("#", 1)[0].trim()).fil
 const SUPPLY_INJECTED = typeof f["--supply-policy"] === "string" ? (f["--supply-policy"] as string) : "";
 const SUPPLY_POLICY = SUPPLY_INJECTED || "policy/alert-supply-monotonicity.json";
 const MIN_SUPPLY = 12;      // 열거 붕괴 바닥값(도입 시 15건). 도메인이 줄지 않는 한 손댈 일이 없다.
-const MIN_SUPPLY_REFS = 12; // **강제**가 실제로 몇 건을 판정했는가 — 원장 크기와 별개 축이다(아래 참조).
+const MIN_SUPPLY_REFS = 12; // 모드 D가 **시야에 넣은** 참조 수(판정 + TS 면제 + 미등재) — 원장 크기와 별개 축.
 type SupplyEntry = { metric: string; supply: "in-cluster" | "external"; decreasing: "impossible" | "is-truth"; why: string };
 // ⚠️ 정책 파일은 **필수 읽기**다(모드 A의 규율 미러) — 부재/오타 경로를 "항목 0개"로 위장시키지 않는다.
 // 로딩·통일 shape({_readme, metrics})는 readLedger(policy-ledger) 소유 — $comment 개명의 강제자다.
@@ -863,7 +879,8 @@ function checkExpr(rel: string, name: string, expr: string): void {
       const scrub = md.slice(a, b)
         .replace(/\{[^}]*\}/g, "")
         .replace(/\b(?:by|without|on|ignoring|group_left|group_right)\s*\([^)]*\)/g, "");
-      for (const mt of scrub.matchAll(/\b([a-z_][a-z0-9_]{4,})\b(\s*\()?/g)) {
+      // [A-Za-z_] — 대문자 메트릭(ALERTS류)도 메트릭이다(구판 소문자 한정 = 관측 공백, 헤더 해소 기록).
+      for (const mt of scrub.matchAll(/\b([A-Za-z_][A-Za-z0-9_]{4,})\b(\s*\()?/g)) {
         if (mt[2]) continue;                        // 뒤에 '('가 오면 함수 호출이지 메트릭이 아니다
         if (/^_+$/.test(mt[1])) continue;           // maskStrings 채움문자(밑줄 런) — 라벨 값의 잔해다
         if (PROMQL_BUILTIN.has(mt[1])) continue;
@@ -872,22 +889,27 @@ function checkExpr(rel: string, name: string, expr: string): void {
     }
     for (const metric of [...seen].sort()) {
       const e = supplyOf.get(metric);
-      if (!e) {
-        if (isAllowed) continue;
-        viol.push(`${rel} ${name} [모드 D: ${metric}가 time() 비교에 쓰이는데 ${SUPPLY_POLICY}에 없다 — ` +
-          `**기본값은 없다**(기본을 하나로 정하면 반대쪽 클래스가 조용히 열린다). supply(값의 신선도가 ` +
-          `클러스터 밖 읽기에 의존하는가)와 decreasing(내려가는 것이 사실일 수 있는가)을 근거와 함께 등재하라]`);
-        continue;
-      }
       // `X - time()`(만료 모양)이면 부등호 방향이 뒤집혀 요구도 뒤집힌다(max는 fail-open, min이 fail-closed).
-      const flipped = new RegExp(`\\b${metric}\\b[\\s\\S]{0,120}?-\\s*time\\s*\\(\\s*\\)`).test(md);
-      const want = requiredRollup(e, flipped);
+      const want = e ? requiredRollup(e, new RegExp(`\\b${metric}\\b[\\s\\S]{0,120}?-\\s*time\\s*\\(\\s*\\)`).test(md)) : "";
+      // 미등재 red는 **비-TS 참조가 실재할 때만**(참조 스캔 뒤) — 전 참조가 tlast/tmax(샘플-시각
+      // 클래스)면 등재할 "값의 공급원 의미론"이 없다(등재하면 오히려 want 대조 오탐 — 해소 기록).
+      let nonTsRef = false;
       const re = new RegExp(`\\b${metric}\\b`, "g");
       for (let mt = re.exec(md); mt; mt = re.exec(md)) {
         const owner = ownerFn(md, mt.index);
-        const isRollup = !!owner && ROLLUP_OK.has(owner.name);
         supplyRefs++;
+        if (owner && TS_FRESHNESS_BAD.has(owner.name)) {
+          if (isAllowed) continue;
+          viol.push(`${rel} ${name} [모드 D: ${metric}가 ${owner.name}()에 감싸였다 — 최신 샘플의 ` +
+            `시각이 아니다(tfirst=창의 첫 샘플 시각 · tmin=최소값 샘플의 시각). 신선도 판정으로 쓸 수 ` +
+            `없다 — tlast_over_time(창의 마지막 샘플 시각)을 쓰라]`);
+          continue;
+        }
+        if (owner && TS_FRESHNESS_OK.has(owner.name)) continue;   // 샘플-시각 클래스 — 등재·want 대조 면제
+        nonTsRef = true;
         if (isAllowed) continue;
+        if (!e) continue;   // 미등재 red는 아래 메트릭-레벨에서 한 번만
+        const isRollup = !!owner && ROLLUP_OK.has(owner.name);
         if (!isRollup) {
           // external+단조는 **흡수가 0인 것 자체가 위반**이다 — 역행 샘플이 그대로 판정에 들어간다.
           if (e.supply === "external" && e.decreasing === "impossible") {
@@ -904,6 +926,11 @@ function checkExpr(rel: string, name: string, expr: string): void {
             : `값이 클러스터 안에서 생겨 흡수할 잡음이 없다 — max 계열은 이득 0이고 값의 전진 점프만 윈도만큼 래치한다`;
         viol.push(`${rel} ${name} [모드 D: ${metric}가 ${owner!.name}()에 감싸였으나 ${want}()여야 한다 — ${why}. ` +
           `판별 기준과 근거는 ${SUPPLY_POLICY}]`);
+      }
+      if (!e && nonTsRef && !isAllowed) {
+        viol.push(`${rel} ${name} [모드 D: ${metric}가 time() 비교에 쓰이는데 ${SUPPLY_POLICY}에 없다 — ` +
+          `**기본값은 없다**(기본을 하나로 정하면 반대쪽 클래스가 조용히 열린다). supply(값의 신선도가 ` +
+          `클러스터 밖 읽기에 의존하는가)와 decreasing(내려가는 것이 사실일 수 있는가)을 근거와 함께 등재하라]`);
       }
     }
   }

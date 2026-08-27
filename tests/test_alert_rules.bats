@@ -715,6 +715,60 @@ YAML
   rm -rf "$tmp"
 }
 
+# ── 모드 D 확장(linter-mode-d 01): 대문자 메트릭 + timestamp-생산 rollup 클래스 ──
+# 공백 실증(meta-observability 04 리뷰 M1): 토큰 필터가 소문자 시작만 매치해 ALERTS류가 시야 밖
+# 이었고, t*_over_time(값이 아니라 샘플 시각)은 값-타임스탬프 모델에 클래스가 없었다.
+
+@test "mode D sees uppercase metrics in time() comparisons (ALERTS-class gap, closed)" {
+  _run_probe UpperProbe '(time() - last_over_time(FIXTURE_UPPER_TS[3h])) > 100'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '기본값은 없다'
+  rm -rf "$tmp"
+}
+
+@test "mode D rejects wrong-sample timestamp rollups as freshness (tfirst/tmin)" {
+  # tfirst=창의 **첫** 샘플 시각(창이 찰수록 낡아 보임)·tmin=**최소값** 샘플의 시각(값 기반 —
+  # 신선도와 무관한 임의 시점). 어느 쪽도 신선도 판정이 아니다(fail-closed — supply 등재 무관).
+  _run_probe TfirstProbe '(time() - tfirst_over_time(fixture_local_ts[3h])) > 100'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'tlast_over_time'
+  rm -rf "$tmp"
+  _run_probe TminProbe '(time() - tmin_over_time(FIXTURE_UPPER_TS[3h])) > 100'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '최소값 샘플의 시각'
+  rm -rf "$tmp"
+}
+
+@test "mode D exempts the last-sample timestamp rollup from policy registration (tlast only)" {
+  # tlast는 값이 아니라 창의 마지막 샘플 **시각**을 내므로 supply(값의 공급원 의미론) 등재
+  # 대상이 아니다 — 자체로 올바른 신선도 표현(r7 AlertPipelineWriteStale의 형태). max() 랩은
+  # ownerFn 최근접 판정의 증인을 겸한다.
+  _run_probe TlastProbe '(time() - tlast_over_time(FIXTURE_UPPER_TS[2h])) > 100'
+  [ "$status" -eq 0 ]
+  rm -rf "$tmp"
+  _run_probe TlastWrapProbe '(time() - max(tlast_over_time(FIXTURE_UPPER_TS[2h]))) > 100'
+  [ "$status" -eq 0 ]
+  rm -rf "$tmp"
+}
+
+@test "mode D keeps tmax_over_time red — argmax timestamp latches stale peaks on is-truth metrics" {
+  # 리뷰 H1: tmax는 최신 샘플이 아니라 **최댓값** 샘플의 시각 — is-truth(barman purge 류)에서
+  # 피크 옛 샘플을 윈도만큼 래치해 거짓 신선이 된다. 클래스 밖 = 기존 화이트리스트가 red.
+  _run_probe TmaxProbe '(time() - tmax_over_time(fixture_budget[3h])) > 100'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '모드 D'
+  rm -rf "$tmp"
+}
+
+@test "mode D stays closed when TS-exempt and bare references mix (one metric, two contexts)" {
+  # 핵심 불변식(리뷰 M3): 면제는 "전 참조가 샘플-시각 클래스"일 때만이다 — 한 참조라도 값
+  # 문맥(bare)이면 등재 요구가 살아야 한다(nonTsRef fail-closed).
+  _run_probe MixedProbe '(time() - tlast_over_time(FIXTURE_UPPER_TS[2h])) > 100 and on() (FIXTURE_UPPER_TS > 0)'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '기본값은 없다'
+  rm -rf "$tmp"
+}
+
 @test "mode D requires a reason on every policy entry" {
   tmp="$(mktemp -d)"
   _seed "$tmp"

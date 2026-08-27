@@ -1225,7 +1225,9 @@ selfHeal과 플립플롭한다.
   ⚠️ **화이트리스트로 강제한다** — "max만 금지"로 두면 `avg_over_time`·`sum_over_time`이 통과하는데,
   `sum_over_time(타임스탬프[W])`는 `time() - 거대값`이 영구 음수라 **조용한 무발화**다.
   ⇒ 이 판별은 `policy/alert-supply-monotonicity.json`(메트릭별 `supply`/`decreasing` 선언 + 근거 필수)과
-  `tools/check-alert-rules.ts`의 **모드 D**가 레포 전역에서 강제한다. 미등재 = FAIL(기본값 없음).
+  `tools/check-alert-rules.ts`의 **모드 D**가 레포 전역에서 강제한다. 미등재 = FAIL(기본값 없음). 예외 하나(linter-mode-d 01):
+  샘플-시각 rollup `tlast_over_time`은 값이 아니라 시각을 내므로 등재·요구 대조 면제다(tfirst/tmin은
+  무조건 red·tmax는 argmax 시각이라 예외 밖 — 정책 _readme가 SSOT).
 - ⚠️ **`max_over_time`은 면역이 아니라 유계 흡수다.** 창 안에 역행하지 **않은** 샘플이 최소 1개 남아야 흡수하므로
   내성은 `floor(W / push)`폴이고, 침묵 조건은 `n×push ≤ W` **그리고** `(n+1)×push ≤ 예산`이다. W=3h·push=30m에서는
   **앞 항이 먼저 물어 연속 6폴(3.0h)**이 상한이다(hermetic replay 실측: n=6 무발화 / n=7 pending / n=8 발화 —
