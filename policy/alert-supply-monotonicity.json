@@ -31,7 +31,8 @@
     "⚠️ **기본값이 없다.** 미등재 메트릭이 `time()` 비교에 나오면 FAIL이다. 기본을 하나로 정하면 그",
     "   반대쪽 클래스가 조용히 열린다 — 새 외부 단조량이면 PR #513이 그대로 재현된다.",
     "⚠️ rollup **없는** 참조는 대상이 아니다(단, external+impossible은 rollup 부재 자체가 위반이다 —",
-    "   흡수가 0이라 역행 샘플이 그대로 판정에 들어간다)."
+    "   흡수가 0이라 역행 샘플이 그대로 판정에 들어간다).",
+    "샘플-시각 rollup 예외(linter-mode-d 01): tlast_over_time(창의 마지막 샘플 시각)은 값이 아니라 시각을 내므로 이 원장의 대상이 아니다 — 등재·요구 대조 면제(등재하면 오히려 last_over_time 요구 오탐). tfirst/tmin은 의미가 어긋나 무조건 red, tmax는 argmax 시각(값 기반)이라 예외 밖 = 화이트리스트 red 유지. 분기 상세는 check-alert-rules.ts의 TS_FRESHNESS_* 주석."
   ],
   "metrics": [
     {
