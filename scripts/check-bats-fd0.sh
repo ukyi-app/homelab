@@ -77,6 +77,13 @@ FNR==1 { nfiles++; self = 0 }
 END { printf "SITES=%d\n", sites > "/dev/stderr" }
 AWK
 
+# detect_run-exempt: 바닥값 피연산자가 **파일 수가 아니라 호출면 수(SITES)**다. detect_run은
+#   READFILES(=읽은 파일 수)만 보고하고 `READFILES == $#`를 강제하므로, 이 가드가 바닥값에 넣어야
+#   하는 수를 커널에서 꺼낼 길이 없다. 파일 수로 바닥을 걸면 정규식이 깨져 호출면을 0개 찾아도
+#   그 바닥을 통과한다(무측정 초록) — 그래서 검출기 셸을 손으로 연다.
+#   ⚠️ 이 선언은 부채의 **면제**가 아니라 **계상**이다. 커널이 카운터 이름을 인자로 받게 되면
+#   (또는 SITES 계약을 흡수하면) 이 사본은 사라져야 한다. 형제 check-scan-producers는 커널과 같은
+#   일을 하고 있었을 뿐이라 2026-08-27에 detect_run으로 되돌렸다.
 errlog="$(mktemp)"
 trap 'rm -f "$errlog"' EXIT
 arc=0
