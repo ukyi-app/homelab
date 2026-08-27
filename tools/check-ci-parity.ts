@@ -15,6 +15,10 @@
 //      사람이 "이건 로컬에서 어떻게 도는가"를 반드시 답하게 된다.
 //   ③ 죽은 선언(원장엔 있는데 ci.yaml엔 없는 스텝) = red. 아무도 대조하지 않는 주장은 원장이 아니다.
 //   ④ `mirrored`는 선언한 로컬 커맨드가 **`make -n ci` 실제 출력에** 있어야 한다. 여기가 load-bearing이다 —
+//      단, 대조 전에 출력을 정제한다. `make -n ci` 출력에는 **호출이 아닌 것**이 섞여 있다: 전제 프로브
+//      `command -v <도구>`와, 도구 부재 시 이름만 남기는 미평가 라벨 append. 둘 다 그 도구를 부르지
+//      않는데 문자열은 남는다 — 원문에 대조를 걸면 **실제 호출만 지워도 통과한다**(실측: `then actionlint;`를
+//      `then :;`로 바꿔도 초록. 선언이 자기 자신을 증명한다).
 //      Makefile에서 스텝이 빠지면 이 검사가 red를 낸다(Makefile 텍스트를 파싱하지 않는다. make 자신에게
 //      해소를 맡긴다 — 조건부·변수·전제 타깃을 사람이 다시 구현하면 그 재구현이 곧 다음 드리프트다).
 //   ⑤ `covered`는 로컬의 **다른 메커니즘**이 덮는 경우다. 그 메커니즘이 실재하는지(파일·문자열)를 검사한다.
@@ -162,6 +166,19 @@ function commandsIn(run: string): string[] {
   return [...out];
 }
 
+// `make -n ci` 출력에서 **실제 호출이 아닌 텍스트**를 지운다(④ 대조 전용).
+//   · `command -v <도구>` — 전제 프로브다. 도구의 존재를 묻지, 도구를 부르지 않는다.
+//   · `echo "…" >> <파일>` — 미평가 원장에 이름만 남기는 append다. 부르지 못했다는 기록이지 호출이 아니다.
+// 변수명(`CI_UNEVAL`)에 기대지 않는다 — 그 이름이 바뀌면 정제가 조용히 멎고 fail-open이 돌아온다.
+// recipe의 append-echo는 구조상 게이트 호출일 수 없으므로 형태로 지운다.
+// 실측 2026-08-28: 실 레포 mirrored 22항목·local 34문자열에 대해 정제로 사라지는 것 **0건**(오탐 없음).
+function execOnly(s: string): string {
+  return s
+    .replace(/command -v \S+/g, "")
+    .replace(/\becho\s+"[^"]*"\s*>>[^\n;]*/g, "")
+    .replace(/\becho\s+'[^']*'\s*>>[^\n;]*/g, "");
+}
+
 // ── 원장 + 대조(guardMain check 단계) ──────────────────────────────────────────────────────────
 // 로딩·통일 shape({_readme, steps})·항목 구조는 readLedger(policy-ledger) 소유. 미계상·죽은 선언·
 // ④~⑦ 대조 의미론과 상태별 조건부 요건은 이 콜사이트 소유다(CONTEXT.md 「정책 원장」).
@@ -220,6 +237,7 @@ function reconcile(): string[] {
 
   // ── ④ mirrored: make -n ci 실측 대조 ──────────────────────────────────────────────────────────
   let makeOut = "";
+  let makeExec = "";
   const needMake = [...byName.values()].some((e) => e.status === "mirrored");
   if (needMake) {
     try {
@@ -229,6 +247,7 @@ function reconcile(): string[] {
       fail(`\`make -n ci\` 실행 실패 — mirrored 항목을 하나도 검증할 수 없다: ${(e as Error).message}`);
     }
     if (makeOut.trim().length === 0) fail("`make -n ci` 출력이 비었다 — mirrored 검증이 무측정이 된다.");
+    makeExec = execOnly(makeOut);
   }
 
   // ── 프로덕션 호출은 floor-free다 ──────────────────────────────────────────────────────────────
@@ -254,10 +273,11 @@ function reconcile(): string[] {
         if (wants.length === 0) { fail(`"${e.name}": mirrored인데 local(대조할 커맨드 문자열)이 없다.`); break; }
         for (const w of wants) {
           if (typeof w !== "string" || w.length === 0) { fail(`"${e.name}": local 항목이 빈 문자열이다.`); continue; }
-          if (makeOut && !makeOut.includes(w)) {
+          if (makeOut && !makeExec.includes(w)) {
             fail(
               `"${e.name}": mirrored로 선언됐지만 \`make -n ci\` 출력에 '${w}'이(가) 없다.\n` +
-                `    → make ci에서 빠졌거나 커맨드가 바뀌었다. Makefile을 고치거나 원장 상태를 바꿔라.`,
+                `    → make ci에서 빠졌거나 커맨드가 바뀌었다. Makefile을 고치거나 원장 상태를 바꿔라.\n` +
+                `      (전제 프로브 \`command -v\`와 미평가 라벨은 호출이 아니라 대조에서 제외된다.)`,
             );
           }
         }
