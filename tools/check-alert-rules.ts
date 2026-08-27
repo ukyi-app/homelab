@@ -106,7 +106,12 @@ const REGISTRY_FILE = typeof f["--registry"] === "string" ? (f["--registry"] as 
 const RULES_DIR = RULES_ROOT;
 const DENYLIST = "policy/alert-instance-stability-denylist.txt";
 const ALLOWLIST = "policy/alert-instance-stability-allowlist.txt";
-const MIN_SCAN = 30;   // 실 룰 49건(48 alert + 1 record) — 셀렉터 붕괴 false-green 차단
+// ⚠️ 알려진 관측 공백(meta-observability 04 리뷰 M1 — 실측): 모드 D의 토큰 필터가 소문자 시작
+// 메트릭만 매치해 **대문자 메트릭(ALERTS·ALERTS_FOR_STATE)** 은 time() 비교 검사 시야 밖이고,
+// timestamp-생산 rollup 클래스(tlast_over_time — 값이 아니라 샘플 시각)는 모드 D의 값-타임스탬프
+// 모델에 아예 없다(등재하면 오히려 last_over_time 요구 오탐). r7 AlertPipelineWriteStale의 통과는
+// 정당 판정이 아니라 이 공백이다 — 확장(대문자 + t*_over_time 클래스)은 followups 등재.
+const MIN_SCAN = 30;   // 실 룰 56건(55 alert + 1 record, meta-observability 시점) — 셀렉터 붕괴 false-green 차단
 // denylist 항목 바닥값 — 파일이 남아 있는데 **내용만** 비거나 주석만 남는 부분 드리프트를 잡는다
 // (필수 읽기는 파일 부재만 잡는다). 실 원장 1항목 — 이 목록은 줄어들 이유가 없다. 래칫 아님.
 const MIN_DENY = 1;
@@ -240,7 +245,10 @@ const DEFAULT_REGISTRY: PushEntry[] = [
   ...["ghcr_latest_digest", "digest_exporter_last_success_timestamp",
     "digest_exporter_apps_configured", "digest_exporter_apps_scraped"]
     .map((metric): PushEntry => ({ metric, producer: DIGEST_EXPORTER, schedule: { kind: "cron", file: DIGEST_EXPORTER } })),
-  ...["pvc_dir_size_bytes", "storage_tier_size_bytes", "storage_tier_avail_bytes", "pvc_du_last_success_timestamp"]
+  // grafana emptyDir 지문 du(meta-observability 01)도 같은 실행·같은 push라 스케줄·하트비트를 공유한다 —
+  // 0건(grafana 미가동)은 의도적 미방출이므로 소비 룰은 absent 절 없이 사용률만 본다(GrafanaPluginBudgetLow).
+  ...["pvc_dir_size_bytes", "storage_tier_size_bytes", "storage_tier_avail_bytes", "pvc_du_last_success_timestamp",
+    "grafana_data_dir_size_bytes", "grafana_du_fingerprint_matches"]
     .map((metric): PushEntry => ({ metric, producer: DU_EXPORTER, schedule: { kind: "cron", file: DU_EXPORTER } })),
   // gha-liveness-exporter(*/30) — GHA 스케줄 워크플로의 **마지막 성공 시각**을 GitHub API에서 읽어 push.
   // 09가 닫지 못한 표면(run이 아예 발생하지 않는 것)의 유일한 관측자라, 이 push가 끊기면 그 감시가

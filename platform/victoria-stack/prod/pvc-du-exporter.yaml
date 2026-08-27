@@ -12,6 +12,21 @@
 #    (2) 전용 default-deny egress netpol — 허용은 vmsingle:8428·DNS:53만(인터넷·telegram 불허 → exfil 봉쇄)
 #    (3) resources limits + readOnly 마운트 + readOnlyRootFilesystem
 #    (4) 이미지는 레포 기존 digest 핀(pg-tools) 재사용 — 신규 서드파티 금지
+#    세 번째 루트(/var/lib/kubelet/pods — meta-observability 01): grafana emptyDir du의 유일 경로다
+#    (cadvisor에 파드별 fs 시리즈가 없음 — 라이브 실측).
+#    ⚠️ 이 루트의 실제 표면 = 노드 상 **모든 파드**의 projected SA 토큰 · secret/configmap tmpfs
+#       (hostPath rbind라 기동 시점 하위 마운트가 보인다) · 타 파드 emptyDir 전량 · etc-hosts.
+#       DAC_READ_SEARCH는 PVC 순회용이지만 이 루트에서는 0600 토큰의 DAC 검사까지 우회하는
+#       **읽기 개방의 활성화 요인**이다. 최대 반경은 노드 상 최고권한 SA 토큰(argocd 등)으로 본다.
+#    ⚠️ "egress가 vmsingle뿐"은 완화가 **아니다**(2026-08-27 라이브 실측): 이 라벨의 프로브가
+#       kubernetes.default.svc:443에 **도달했다**(HTTP 401 — 연결 성립). kube-router는 노드 자신
+#       IP:6443 경로(ClusterIP DNAT 후)를 FORWARD 기반 netpol로 못 막는다(트랩 원장 「NetworkPolicy
+#       egress apiserver ClusterIP 불가」와 같은 뿌리) — 즉 탈취 토큰은 **실사용 가능**하다.
+#       vmsingle import도 임의 라벨을 받아 저대역 exfil 채널로 남는다.
+#    → 남는 실완화는 readOnly 마운트 + readOnlyRootFilesystem(변이 불가) · 고정 digest 이미지의
+#       고정 명령(일 1회 단명 CronJob — 상주 침해 표면 아님) · "숫자만 push"는 현 스크립트의
+#       사실(침해 후 가드 아님)이다. 이 잔여를 **명시 수용**한다 — 대안(grafana 사이드카·별도
+#       CronJob 분리)도 root 필수 + 같은 netpol 한계라 반경이 실질 동등하다(01 Comments).
 #    root+DAC_READ_SEARCH: 0700 PVC 디렉토리(pg PGDATA 등)를 순회하려면 읽기 우회 capability가 필요하다.
 #    drop:[ALL] 후 DAC_READ_SEARCH만 add(읽기-전용 우회 — 쓰기 불가), readOnly 마운트로 변이 경로 자체를 제거.
 #    (라이브 dry-run 확인: internal 7 dirs·bulk 3 dirs, du_failures=0.)
@@ -121,13 +136,41 @@ spec:
                   # 최소 2개(files-data·pg-basebackup-local, 라이브 3). 0이면 경로/마운트가 틀린 것 — 녹색 하트비트 금지.
                   [ "$N_internal" -ge 1 ] || { echo "internal PVC 0개 — 마운트/경로 확인"; exit 1; }
                   [ "$N_bulk" -ge 1 ] || { echo "bulk PVC 0개 — bulk 경로/외장 마운트 확인(F20)"; exit 1; }
+                  # grafana emptyDir 지문 스캔(meta-observability 01) — pod UID는 재생성마다 바뀌므로
+                  # 경로 추적 대신 내용 지문(data 볼륨 안 grafana.db)으로 특정한다(RBAC 0 — 라이브 실측
+                  # 매치 정확 1건·290,372 KiB가 파드 내부 du와 정합). 0건 = grafana 미가동일 수 있어
+                  # 미방출(그건 TargetDown류 소관 — 이 exporter의 사망은 아래 하트비트가 감지). 2+건 =
+                  # 지문 충돌(특정 전제 붕괴) — fail-loud. 글롭 무매치는 -f 검사가 걸러 nullglob 불요.
+                  # ⚠️ 이 값만 kubelet의 sizeLimit 하드 limit과 비교되므로 kubelet과 **같은 회계**(블록,
+                  #   -sB1)로 잰다 — 형제 PVC 루프의 -sb(apparent)는 소파일 다수에서 ~20%+ 과소라
+                  #   (리뷰 실측) 예산 알림이 막으려던 것을 덜 막는다. 앵커 실측(290,372·290,380 KiB —
+                  #   du -sk)도 블록 회계라 정합. du 실패(파드 소멸 레이스 — kubelet 트리는 휘발)는
+                  #   그 후보만 건너뛴다(전체 사망 금지 — 1차 티어 신호와 분리).
+                  N_gf=0; GF_BYTES=0
+                  for d in /kubelet-pods/*/volumes/kubernetes.io~empty-dir/data; do
+                    [ -f "$d/grafana.db" ] || continue
+                    b=$(du -sB1 "$d" 2>/dev/null | cut -f1) || continue
+                    [ -n "$b" ] || continue
+                    N_gf=$((N_gf+1)); GF_BYTES=$b
+                  done
+                  if [ "$N_gf" -eq 1 ]; then BODY="${BODY}grafana_data_dir_size_bytes ${GF_BYTES}\n"; fi
+                  # 매치 수는 **무조건** 방출한다 — 0건 미방출 + absent 없는 소비 룰 + 초록 하트비트가
+                  # 겹치면 지문 붕괴(DB 파일명 변경·emptyDir→PVC 전환)가 영구 무성이 된다(리뷰 H2 —
+                  # 죽은 알림 클래스의 생산자 쪽 변종·린터가 원리적으로 못 봄). GrafanaDuFingerprintLost
+                  # (r4)가 이 게이지의 0을 페이징한다.
+                  BODY="${BODY}grafana_du_fingerprint_matches ${N_gf}\n"
                   BODY="${BODY}pvc_du_last_success_timestamp ${TS}\n"
                   printf "%b" "$BODY" | curl -fsS --connect-timeout 5 --max-time 30 --data-binary @- \
                     "http://vmsingle.observability.svc:8428/api/v1/import/prometheus"
-                  echo "pushed: internal=${N_internal} bulk=${N_bulk} pvc dirs"
+                  # 지문 충돌은 push **뒤**에 판정한다(리뷰 M1) — 부수 메트릭의 전제 붕괴가 1차 티어
+                  # 신호·하트비트를 통째로 날리면 안 된다(티어 fail-loud와 범주가 다르다). 충돌 관측은
+                  # 위 matches 게이지(≥2)가, Job Failed는 KubeJobFailed가 각각 진다.
+                  [ "$N_gf" -le 1 ] || { echo "grafana.db 지문 ${N_gf}건 — 지문 충돌(특정 전제 붕괴)"; exit 1; }
+                  echo "pushed: internal=${N_internal} bulk=${N_bulk} pvc dirs, grafana_fp=${N_gf}"
               volumeMounts:
                 - { name: storage-internal, mountPath: /storage-internal, readOnly: true }
                 - { name: storage-bulk, mountPath: /storage-bulk, readOnly: true }
+                - { name: kubelet-pods, mountPath: /kubelet-pods, readOnly: true }
           volumes:
             - name: storage-internal
               hostPath: { path: /var/lib/rancher/k3s-storage/internal, type: Directory }
@@ -136,3 +179,7 @@ spec:
               # ⚠️ `type: Directory`가 여기서 **두 번째 가드**로 일한다: bulk 마운트가 없으면 kubelet이
               #    이 파드를 아예 기동시키지 않는다 — 용량 신호가 조용히 0이 되는 대신 요란하게 멈춘다.
               hostPath: { path: /mnt/bulk, type: Directory }
+            - name: kubelet-pods
+              # kubelet 코어 경로 — 부재 = 노드 이상이라 type: Directory의 fail-loud가 정당하다
+              # (storage-bulk와 같은 두 번째 가드 역할). 표면·완화는 상단 F8 계약 주석.
+              hostPath: { path: /var/lib/kubelet/pods, type: Directory }

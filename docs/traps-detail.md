@@ -262,6 +262,11 @@
   refused(default-deny REJECT)로 막힌다 — **노드 서브넷:6443**을 허용해야 한다(homepage 자동발견이
   "Error getting namespaces"로 전체 실패하며 검증). selfHeal 있는 Application엔 임시 patch가 reconcile에 곧
   원복돼 라이브 디버그가 어렵다 — PR로 수정.
+- ⇒ (2026-08-27 실측 보강) 반대 방향도 같은 뿌리로 막힌다 — **default-deny egress가 노드 자신
+  IP:6443(= ClusterIP DNAT 후 apiserver)을 차단하지 못한다**: pvc-du-exporter 라벨의 프로브가
+  kubernetes.default.svc:443에 도달했다(HTTP 401 = 연결 성립). kube-router의 FORWARD 기반 netpol은
+  노드 로컬 트래픽(INPUT 경로)에 미적용이라, "netpol로 apiserver를 봉쇄했다"는 완화 주장은 이
+  CNI에서 성립하지 않는다 — F8류 격리 계약은 이 잔여를 명시 수용으로 적어야 한다.
 
 ### OrbStack LISTEN 포트만 포워딩
 - OrbStack은 VM에서 **LISTEN 중인 포트만** Mac으로 포워딩한다(바인드는 Mac 전 인터페이스).
