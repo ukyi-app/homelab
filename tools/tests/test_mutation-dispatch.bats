@@ -374,6 +374,14 @@ setup() {
   empty="$(grep -rhoF '[ -n "$OWNER" ] ||' "$WF"/*.yaml | wc -l | tr -d ' ')"
   [ "$empty" -ge 15 ]
   [ "$pred" -eq "$empty" ]
+  # 재실행 개시자 술어도 **같은 수**여야 한다 — 한쪽만 남으면 재실행 축이 조용히 다시 열린다.
+  # (github.actor는 재실행에서 최초 트리거 신원으로 보존되므로 actor 단독 비교는 통과한다.)
+  trig="$(grep -rhoF '[ "$TRIGGERING" = "$OWNER" ] ||' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  [ "$trig" -ge 15 ]
+  [ "$pred" -eq "$trig" ]
+  # env 바인딩도 술어와 같은 수 — 술어만 있고 바인딩이 없으면 빈 문자열 비교로 **전 디스패치가 잠긴다**.
+  bind="$(grep -rhoF 'TRIGGERING: ${{ github.triggering_actor }}' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  [ "$bind" -eq "$trig" ]
 }
 
 @test "every actor guard predicate actually executes and decides correctly (the predicate gets a witness)" {
@@ -391,9 +399,14 @@ setup() {
       while [ "$i" -lt "$cnt" ]; do
         body="$(yq -r "[.jobs[]?.steps[]? | select((.run // \"\") | contains(\"ACTOR\"))][$i].run" "$f")"
         n=$((n+1)); w="$(basename "$f")#$i"
-        OWNER="" ACTOR="x"             bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:empty-owner-passed"
-        OWNER="alice" ACTOR="mallory"  bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:mismatch-passed"
-        OWNER="alice" ACTOR="alice"    bash -e -c "$body" >/dev/null 2>&1 || bad="$bad $w:match-rejected"
+        OWNER="" ACTOR="x" TRIGGERING="x"                bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:empty-owner-passed"
+        OWNER="alice" ACTOR="mallory" TRIGGERING="mallory" bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:mismatch-passed"
+        # 재실행 축 — GitHub은 재실행에서 github.actor를 **최초 트리거 신원으로 보존**하고
+        # github.triggering_actor만 개시자로 바꾼다. actor만 보는 가드는 owner의 과거 디스패치를
+        # 재실행하는 것으로 통과한다(actions:write가 재실행 동사를 포함한다 —
+        # reusable-app-build.yaml:159-167이 앱 레포에 그 자격을 발급한다).
+        OWNER="alice" ACTOR="alice" TRIGGERING="mallory"   bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:rerun-passed"
+        OWNER="alice" ACTOR="alice" TRIGGERING="alice"     bash -e -c "$body" >/dev/null 2>&1 || bad="$bad $w:match-rejected"
         i=$((i+1))
       done
     done

@@ -19,11 +19,15 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
           OWNER: ${{ vars.HOMELAB_OWNER }}
         run: |
           # 디스패치 자격(actions:write)은 워크플로 단위 스코프가 불가 — 허용목록(bump-poll) 외 전 진입점 가드(P2-1).
           [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — actor 가드 fail-closed"; exit 1; }
           [ "$ACTOR" = "$OWNER" ] || { echo "::error::workflow_dispatch는 owner($OWNER)만 실행 가능 — actor=$ACTOR 거부"; exit 1; }
+          # 재실행은 github.actor를 **최초 트리거 신원으로 보존**한다(개시자는 triggering_actor다).
+          # actor만 보면 owner의 과거 디스패치를 재실행하는 것으로 통과한다 — actions:write는 재실행 동사를 포함한다.
+          [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::workflow_dispatch는 owner($OWNER)만 실행 가능 — 재실행 개시자=$TRIGGERING 거부"; exit 1; }
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0 — 로컬 telegram-notify 액션 resolve + 체커 실행(F8 가드 충족)
       - uses: ./.github/actions/setup-bun
         with: { install: 'false' }     # dns 체크는 deps 불요
