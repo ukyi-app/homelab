@@ -52,18 +52,30 @@ IFS='' read -r -d '' DETECT <<'AWK' || true
 # 단일따옴표 span을 지운다 — yq/jq 표현식 안의 `sort`가 셸 명령으로 오인되지 않게(실측 오탐원 1위).
 function code(l){ gsub(/'[^']*'/,"Q",l); return l }
 FNR==1 { inhere=0; delim=""; nfiles++ }
+# ⚠️ **주석 규칙이 heredoc 상태 기계보다 먼저 온다 — 순서가 곧 판정이다.**
+#    뒤집으면 인용된 heredoc 표기 한 줄이 파일의 나머지를 통째로 지우고, 그 침묵은 red가 아니다.
+#    착지 전 실측: 이 도메인 10파일 2,956줄이 그렇게 투명했다(그중 하나가 그 함정을 문서화한
+#    회귀 픽스처 자신이다). cf. docs/traps-detail.md 「heredoc 상태 기계가 주석 규칙보다 먼저 …」
+/^[ \t]*#/ { next }
+/^[ \t]*\/\// { next }
 # heredoc 본문은 명령이 아니다(형제 check-bats-style.sh와 같은 관용구). 이 가드 자신의 awk 프로그램이
 # `<<'AWK'` 본문에 패턴 **리터럴**로 들어 있어, 이게 없으면 검출기가 자기 자신을 위반으로 잡는다.
 # ⚠️ 대가: heredoc으로 **스크립트를 생성**하는 자리는 여기서 안 보인다. 그 생성물이 추적 파일이면
 #    자기 차례에 검사되고, 아니면 게이트 도메인 밖이라 애초에 이 가드의 관할이 아니다.
-{
+# ⚠️ TS/MTS는 heredoc 문법이 **없다** — 표면 종류로 상태 기계를 끈다. 켜 두면 문자열 속
+#    `<<id>` 같은 토큰을 delimiter로 오인해 그 지점 이후를 통째로 가린다(실측: ensure-bump-pr.ts 756줄).
+FILENAME !~ /\.m?ts$/ {
   if (inhere) { if ($0 ~ ("^[ \t]*"delim"[ \t]*$")) inhere=0; next }
-  if (match($0, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/)) {
-    d=substr($0,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; next
+  hl = $0
+  # `<<<` herestring은 heredoc 시작이 아니다 — match()가 **2번째** `<`부터 `<< "foo"`로 읽어
+  # delim="foo"를 세우고 그 뒤 파일 전체가 투명해진다(실측). 이 레포는 `done <<< "$x"`를 쓴다.
+  gsub(/<<</, "@HERESTRING@", hl)
+  # 산술 좌시프트 `$(( a << b ))`도 heredoc이 아니다(오인원 열거 2번).
+  if (hl ~ /\$\(\(/) gsub(/<</, "@SHIFT@", hl)
+  if (match(hl, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/)) {
+    d=substr(hl,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; next
   }
 }
-/^[ \t]*#/ { next }
-/^[ \t]*\/\// { next }
 # bats `@test "이름" {` 헤더는 **이름**이지 명령이 아니다 — 이 가드의 테스트가 픽스처 형태를
 # 제목에 적는 것이 정상이고, 그걸 위반으로 세면 가드가 자기 회귀 테스트를 금지하게 된다.
 /^@test[ \t]/ { next }

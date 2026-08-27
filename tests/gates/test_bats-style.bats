@@ -1,7 +1,12 @@
 #!/usr/bin/env bats
 # bats 단언-스타일 가드의 gate 테스트 — 탐지기가 스스로 vacuous하지 않음을 fixture로 증명(선례: test_bats-naming.bats).
 # ⚠️ 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵 통과 — 이 파일이 막으려는 바로 그 함정).
-setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
+setup() {
+  ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  # heredoc 여는 표기는 lib이 런타임에 조립한다 — 리터럴로 적으면 이 파일이 검출기에게 투명해진다.
+  # shellcheck source=tests/gates/lib/heredoc-marker.sh
+  . "$ROOT/tests/gates/lib/heredoc-marker.sh"
+}
 
 @test "check-bats-style passes on the current tree (no middle negations, [[ ]] within baseline)" {
   run bash "$ROOT/scripts/check-bats-style.sh"
@@ -71,4 +76,69 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
     '}' > "$BATS_TEST_TMPDIR/test_good.bats"
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_good.bats"
   [ "$status" -eq 0 ]
+}
+
+@test "a comment quoting a heredoc marker does not blind the detector to a middle negation" {
+  # 형제 check-locale-collation.sh와 같은 순서 결함 — heredoc 상태 기계가 주석 스킵보다 먼저 돌면
+  # 인용된 heredoc 표기 한 줄이 @test의 나머지를 통째로 지운다
+  # (docs/traps-detail.md 「heredoc 상태 기계가 주석 규칙보다 먼저 돌면 …」).
+  # 이 파일 도메인(*.bats)에서 착지 전 실측 5파일 602줄이 그렇게 투명했다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '@test "quoted heredoc marker in a comment" {' \
+    "  # 예전엔 python3 - ${hd}PY 로 했다" \
+    '  run echo hi' \
+    '  ! echo "$output" | grep -q zzz' \
+    '  [ "$status" -eq 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_cmt_hd.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_cmt_hd.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[NEG\]'
+}
+
+@test "a real heredoc body is still suppressed and its terminator is still reached" {
+  # 음성 대조 — 주석 스킵을 heredoc 매치 앞에 넣은 수정이 상태 기계 자체를 없앤 것이 아님을 고정한다.
+  # 이 가드는 주석 스킵이 `inhere` **닫힘 판정 뒤**라 종료 판정이 본문 주석에 가리지 않는다.
+  # 위반이 정확히 1건(종료줄 **뒤**의 것)이어야 억제와 종료가 둘 다 증명된다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '@test "real heredoc body" {' \
+    "  cat ${hd}EOF" \
+    '# 본문의 주석 줄' \
+    '  ! echo suppressed | grep -q zzz' \
+    'EOF' \
+    '  run echo hi' \
+    '  ! echo "$output" | grep -q zzz' \
+    '  [ "$status" -eq 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_realhd.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_realhd.bats"
+  [ "$status" -ne 0 ]
+  [ "$(echo "$output" | grep -cF '[NEG]')" -eq 1 ]
+}
+
+@test "a herestring is not read as a heredoc opener (misreading #1)" {
+  # 형제 check-locale-collation·check-host-ports와 같은 오인원. 이 레포는 `done <<< "$x"`를 쓴다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '@test "herestring in a test body" {' \
+    "  grep -q x ${hd}<payload" \
+    '  ! echo hi | grep -q zzz' \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_hs.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_hs.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[NEG\]'
+}
+
+@test "an arithmetic left shift is not read as a heredoc opener (misreading #2)" {
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '@test "shift in a test body" {' \
+    "  n=\$(( a ${hd} b ))" \
+    '  ! echo hi | grep -q zzz' \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_shift.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_shift.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[NEG\]'
 }

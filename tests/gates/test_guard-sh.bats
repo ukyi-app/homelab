@@ -86,10 +86,61 @@ setup() {
   echo "$output" | grep -q '검사 대상 0건'
 }
 
-@test "the detector prescription lives only in the kernel (hand copies stay dead)" {
-  # #532의 재발 형태는 이 처방 22줄의 손 복사였다 — 처방 고유 문구가 lib 밖 scripts/*.sh에
-  # 다시 나타나면 red다(lib은 glob 밖이라 자동 제외).
-  run grep -l "읽은 파일 수를 보고하지" "$ROOT"/scripts/*.sh
-  [ "$status" -ne 0 ]
-  grep -q "읽은 파일 수를 보고하지" "$ROOT/scripts/lib/guard.sh"
+
+@test "every heredoc state machine carries the misreading idioms and sees comments before the opener" {
+  # **형태 대조**다 — 정확성이 아니라 동일성. 문구는 바꿔 쓸 수 있지만 awk 토큰은 못 바꾼다.
+  # (a) 알려진 오인원 마스킹 관용구를 함께 갖는다: `<<<` herestring · `$(( a << b ))` 좌시프트.
+  # (b) 주석 인식이 heredoc **시작** 판정보다 앞선다.
+  #     ⚠️ 그 자리가 상태 기계 안인지 밖인지는 **가드의 구조가 정한다** — 오늘 세 소비자가 두
+  #        형태로 갈리고 둘 다 옳다(docs/traps-detail.md 「heredoc 상태 기계가 …」의 개정된 일반형).
+  # ⚠️ 산문 주석을 배제한다 — 이 레포의 가드 헤더는 자기가 고친 함정을 **인용하며 설명**하므로,
+  #    배제하지 않으면 헤더의 인용이 규칙으로 오인돼 대조가 항진명제가 된다(실측: host-ports 헤더).
+  run bash -c '
+    set -euo pipefail
+    n=0
+    for f in "$1"/scripts/check-*.sh "$1"/scripts/verify-*.sh; do
+      grep -q "inhere" "$f" || continue
+      n=$((n+1))
+      grep -qF "@HERESTRING@" "$f" || { echo "MISSING-HERESTRING $f"; exit 1; }
+      grep -qF "@SHIFT@"      "$f" || { echo "MISSING-SHIFT $f"; exit 1; }
+      c=$(awk "\$0 ~ /^[[:space:]]*#/ {next} index(\$0,\"^[ \\\\t]*#\") && index(\$0,\"next\") && !c {c=FNR} END{printf \"%d\", c}" "$f")
+      m=$(awk "\$0 ~ /^[[:space:]]*#/ {next} index(\$0,\"match(\") && index(\$0,\"/<<-\") && !m {m=FNR} END{printf \"%d\", m}" "$f")
+      [ "$c" -gt 0 ] || { echo "NO-COMMENT-RULE $f"; exit 1; }
+      [ "$m" -gt 0 ] || { echo "NO-OPENER-RULE $f"; exit 1; }
+      [ "$c" -lt "$m" ] || { echo "COMMENT-AFTER-OPENER $f (주석 ${c}행 >= opener ${m}행)"; exit 1; }
+    done
+    # 열거 바닥값 — 로스터가 붕괴해 0건을 검사하고 초록이 되는 것을 막는다. 수치는 콜사이트 소유.
+    [ "$n" -ge 3 ] || { echo "ROSTER-COLLAPSE n=$n"; exit 1; }
+    echo "SHAPE-OK n=$n"
+  ' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'SHAPE-OK n='
+}
+
+@test "every hand-rolled detector shell declares why the kernel could not serve it" {
+  # #532의 재발 형태는 detect_run 처방의 **손 복사**였다. 그 재발을 막으라던 단언이 문구 리터럴
+  # 매칭이었던 탓에, 문구를 바꿔 쓴 재구현 2곳이 통째로 빠져나갔다(실측). **문구는 계약이 아니다** —
+  # 형태로 대조한다: 검출기 셸을 손으로 여는 자리(프로그램 변수를 awk에 넘기고 stderr를 임시파일로)는
+  # 파일이 `detect_run-exempt:` 마커로 **사유를 선언**해야 한다. 선언이 없으면 그것은 부채가 아니라
+  # 보이지 않는 부채다.
+  run bash -c '
+    set -euo pipefail
+    roster=0; undeclared=""
+    for f in "$1"/scripts/check-*.sh "$1"/scripts/verify-*.sh; do
+      hand=0; kern=0
+      grep -qE "awk[[:space:]]+\"?\\\$[A-Za-z_]+\"?.*2>\"?\\\$[A-Za-z_]+\"?" "$f" && hand=1
+      sed "s|^[[:space:]]*#.*||" "$f" | grep -qE "(^|[|(;&\` ])detect_run[[:space:]]" && kern=1
+      [ "$hand" -eq 1 ] || [ "$kern" -eq 1 ] || continue
+      roster=$((roster+1))
+      if [ "$hand" -eq 1 ]; then
+        grep -qF "detect_run-exempt:" "$f" || undeclared="$undeclared $(basename "$f")"
+      fi
+    done
+    [ -z "$undeclared" ] || { echo "UNDECLARED-HANDROLL:$undeclared"; exit 1; }
+    # 열거 바닥값 — 로스터가 붕괴하면 위반 0건이 되어 조용히 통과한다. 수치는 콜사이트 소유.
+    [ "$roster" -ge 6 ] || { echo "ROSTER-COLLAPSE roster=$roster"; exit 1; }
+    echo "DETECTOR-ROSTER=$roster"
+  ' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'DETECTOR-ROSTER='
 }

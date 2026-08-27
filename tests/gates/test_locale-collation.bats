@@ -8,6 +8,9 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   S="$ROOT/scripts/check-locale-collation.sh"
   FX="$BATS_TEST_TMPDIR"
+  # heredoc 여는 표기는 lib이 런타임에 조립한다 — 리터럴로 적으면 이 파일이 검출기에게 투명해진다.
+  # shellcheck source=tests/gates/lib/heredoc-marker.sh
+  . "$ROOT/tests/gates/lib/heredoc-marker.sh"
 }
 
 @test "the detector fires on a bare sort -u and stays quiet on a pinned one" {
@@ -116,4 +119,79 @@ setup() {
   printf '%s\n' '#!/usr/bin/env bash' 'echo tool' > "$BATS_TEST_TMPDIR/scripts/run-something.sh"
   run bash "$ROOT/scripts/check-locale-collation.sh" "$BATS_TEST_TMPDIR/scripts/run-something.sh"
   [ "$status" -eq 0 ]
+}
+
+@test "a comment quoting a heredoc marker does not blind the detector to the rest of the file" {
+  # docs/traps-detail.md 「heredoc 상태 기계가 주석 규칙보다 먼저 돌면 …」 — 상태 기계가 주석 규칙보다 **먼저** 돌면, 인용된 heredoc
+  # 표기 한 줄이 파일의 나머지를 통째로 지운다. 착지 전 실측: 이 도메인에서 10파일 2,956줄이
+  # 그렇게 투명했고 그중엔 그 함정을 문서화한 회귀 픽스처 자신도 있었다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "# 예전엔 python3 - ${hd}PY 로 했다" \
+    'x="$(printf a | sort -u)"' > "$FX/cmt-heredoc.sh"
+  run bash "$S" "$FX/cmt-heredoc.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[A]'
+}
+
+@test "a TS shift-like token in a string does not blind the detector (TS has no heredoc syntax)" {
+  # 실측 유발원: tools/ensure-bump-pr.ts의 봇 이메일 문구가 `id`를 delimiter로 오인시켜 그 파일
+  # 756줄을 검출기에게서 가렸다. TS/MTS엔 heredoc 문법이 없으므로 표면 종류로 상태 기계를 끈다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    "const msg = 'author=bot ${hd}id>+bot@users.noreply.github.com>';" \
+    'const x = a.localeCompare(b);' > "$FX/tpl.ts"
+  run bash "$S" "$FX/tpl.ts"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[C]'
+}
+
+@test "a real heredoc body is still suppressed and its terminator is still reached" {
+  # 음성 대조 — 주석 규칙을 상태 기계 **위로** 올린 수정이 상태 기계 자체를 없앤 것이 아님을 고정한다.
+  # 형제 함정 「면제 판정이 주석보다 먼저 돌면 …」이 이 짝을 처방한다: 대조군이 없으면 수정이
+  # 억제 자체를 지웠는지 알 수 없다.
+  # 본문에 `#` 줄을 넣어 **종료 판정이 여전히 도달함**도 함께 실증한다 — 이 가드는 주석 규칙이
+  # 닫힘 판정보다 앞이라, delimiter가 `#`로 시작할 수 없다는 사실에 기대고 있다.
+  # 위반이 정확히 1건(종료줄 **뒤**의 것)이어야 둘 다 증명된다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "cat ${hd}EOF" \
+    '# 본문의 주석 줄 — 이 줄 때문에 종료 판정이 막히면 안 된다' \
+    '  suppressed="$(printf a | sort -u)"' \
+    'EOF' \
+    'after="$(printf b | sort -u)"' > "$FX/realhd.sh"
+  run bash "$S" "$FX/realhd.sh"
+  [ "$status" -ne 0 ]
+  [ "$(echo "$output" | grep -cF '[A]')" -eq 1 ]
+}
+
+@test "a herestring is not read as a heredoc opener (misreading #1 of the trap's enumeration)" {
+  # docs/traps-detail.md 「heredoc 상태 기계가 주석 규칙보다 먼저 돌면 …」의 오인원 열거 1번.
+  # `match()`가 **2번째** `<`부터 `<< "foo"`로 읽어 delim을 세우면 파일의 나머지가 투명해진다.
+  # 이 레포는 `done <<< "$x"` 스타일을 쓰므로 잠복이 아니라 다음 편집 한 줄이 깨우는 형태다.
+  # 형제 check-host-ports.sh는 이미 이 관용구를 갖는다 — 처방이 한 소비자에 갇혀 있었다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "grep -q x ${hd}<payload" \
+    'x="$(printf a | sort -u)"' > "$FX/hs.sh"
+  run bash "$S" "$FX/hs.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[A]'
+}
+
+@test "an arithmetic left shift is not read as a heredoc opener (misreading #2)" {
+  # 오인원 열거 2번 — `$(( a << b ))`의 `<<`도 heredoc이 아니다.
+  # ⚠️ 표기를 런타임에 조립하는 이유가 여기서 한 번 더 산다: 리터럴로 적으면 이 처방이 착지하기
+  #    **전까지** 이 테스트 파일 자신이 검출기에게 부분적으로 투명해진다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "n=\$(( a ${hd} b ))" \
+    'x="$(printf a | sort -u)"' > "$FX/shift.sh"
+  run bash "$S" "$FX/shift.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[A]'
 }
