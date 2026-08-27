@@ -115,3 +115,30 @@ setup() {
   [ "$status" -ne 0 ]
   [ "$(echo "$output" | grep -cF '[NEG]')" -eq 1 ]
 }
+
+@test "a herestring is not read as a heredoc opener (misreading #1)" {
+  # 형제 check-locale-collation·check-host-ports와 같은 오인원. 이 레포는 `done <<< "$x"`를 쓴다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '@test "herestring in a test body" {' \
+    "  grep -q x ${hd}<payload" \
+    '  ! echo hi | grep -q zzz' \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_hs.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_hs.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[NEG\]'
+}
+
+@test "an arithmetic left shift is not read as a heredoc opener (misreading #2)" {
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '@test "shift in a test body" {' \
+    "  n=\$(( a ${hd} b ))" \
+    '  ! echo hi | grep -q zzz' \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_shift.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_shift.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[NEG\]'
+}

@@ -166,3 +166,32 @@ setup() {
   [ "$status" -ne 0 ]
   [ "$(echo "$output" | grep -cF '[A]')" -eq 1 ]
 }
+
+@test "a herestring is not read as a heredoc opener (misreading #1 of the trap's enumeration)" {
+  # docs/traps-detail.md 「heredoc 상태 기계가 주석 규칙보다 먼저 돌면 …」의 오인원 열거 1번.
+  # `match()`가 **2번째** `<`부터 `<< "foo"`로 읽어 delim을 세우면 파일의 나머지가 투명해진다.
+  # 이 레포는 `done <<< "$x"` 스타일을 쓰므로 잠복이 아니라 다음 편집 한 줄이 깨우는 형태다.
+  # 형제 check-host-ports.sh는 이미 이 관용구를 갖는다 — 처방이 한 소비자에 갇혀 있었다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "grep -q x ${hd}<payload" \
+    'x="$(printf a | sort -u)"' > "$FX/hs.sh"
+  run bash "$S" "$FX/hs.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[A]'
+}
+
+@test "an arithmetic left shift is not read as a heredoc opener (misreading #2)" {
+  # 오인원 열거 2번 — `$(( a << b ))`의 `<<`도 heredoc이 아니다.
+  # ⚠️ 표기를 런타임에 조립하는 이유가 여기서 한 번 더 산다: 리터럴로 적으면 이 처방이 착지하기
+  #    **전까지** 이 테스트 파일 자신이 검출기에게 부분적으로 투명해진다.
+  hd="$(heredoc_marker)"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "n=\$(( a ${hd} b ))" \
+    'x="$(printf a | sort -u)"' > "$FX/shift.sh"
+  run bash "$S" "$FX/shift.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[A]'
+}

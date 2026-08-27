@@ -66,8 +66,14 @@ FNR==1 { inhere=0; delim=""; nfiles++ }
 #    `<<id>` 같은 토큰을 delimiter로 오인해 그 지점 이후를 통째로 가린다(실측: ensure-bump-pr.ts 756줄).
 FILENAME !~ /\.m?ts$/ {
   if (inhere) { if ($0 ~ ("^[ \t]*"delim"[ \t]*$")) inhere=0; next }
-  if (match($0, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/)) {
-    d=substr($0,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; next
+  hl = $0
+  # `<<<` herestring은 heredoc 시작이 아니다 — match()가 **2번째** `<`부터 `<< "foo"`로 읽어
+  # delim="foo"를 세우고 그 뒤 파일 전체가 투명해진다(실측). 이 레포는 `done <<< "$x"`를 쓴다.
+  gsub(/<<</, "@HERESTRING@", hl)
+  # 산술 좌시프트 `$(( a << b ))`도 heredoc이 아니다(오인원 열거 2번).
+  if (hl ~ /\$\(\(/) gsub(/<</, "@SHIFT@", hl)
+  if (match(hl, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/)) {
+    d=substr(hl,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; next
   }
 }
 # bats `@test "이름" {` 헤더는 **이름**이지 명령이 아니다 — 이 가드의 테스트가 픽스처 형태를

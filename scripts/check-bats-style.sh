@@ -48,8 +48,14 @@ FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++ }
   #    check-locale-collation.sh와 같은 결함 — 착지 전 실측 이 도메인 5파일 602줄).
   #    아래 intest 본문의 `t ~ /^#/`는 intest 판정 **뒤**라 heredoc 매치에 원리적으로 닿지 못한다.
   if (line ~ /^[ \t]*#/) next
-  if (match(line, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/)) {
-    d=substr(line,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; next
+  hl = line
+  # `<<<` herestring은 heredoc 시작이 아니다 — match()가 **2번째** `<`부터 `<< "foo"`로 읽는다.
+  # (형제 check-host-ports.sh·check-locale-collation.sh와 같은 관용구 — 오인원 열거 1번.)
+  gsub(/<<</, "@HERESTRING@", hl)
+  # 산술 좌시프트 `$(( a << b ))`도 heredoc이 아니다(오인원 열거 2번).
+  if (hl ~ /\$\(\(/) gsub(/<</, "@SHIFT@", hl)
+  if (match(hl, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/)) {
+    d=substr(hl,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; next
   }
   if (line ~ /^@test .*\{[ \t]*$/){ intest=1; pend=""; next }
   if (!intest) next
