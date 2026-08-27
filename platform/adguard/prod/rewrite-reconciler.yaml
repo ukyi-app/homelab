@@ -73,7 +73,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0          # 재시도 없이 다음 주기 — staleness 알림이 침묵을 잡는다
-      activeDeadlineSeconds: 120 # 주기(600s)보다 훨씬 짧게 — 행 걸림 방지
+      activeDeadlineSeconds: 150 # 주기(600s)의 1/4 — 행 걸림 방지(DNS 대기 30 + 지연 2×50 = 130 편입)
       template:
         metadata:
           labels: { app: rewrite-reconciler }
@@ -121,10 +121,11 @@ spec:
                   #   transient(타임아웃 28·408/429/5xx)는 --retry가 **항상** 재시도한다 — "적용됐는데
                   #   응답만 20s+ 지연" 창에서 add 중복 위험이 잔존하고, 그 감지는 list_answer의 중복
                   #   카운트가 진다(아래). connrefused는 커넥션 수립 전 실패라 언제나 안전.
-                  # 재시도 예산: 양 등급 모두 retry-max-time 30이 상한 — 호출당 최악 ≈ 30+20=50s,
-                  #   지연 2개(READ/WRITE 조합 무관)까지 120s 데드라인 안(2×50<120). CoreDNS 롤링은
-                  #   상관 장애라 READ 4곳을 동시에 때릴 수 있다 — 3개+ 동시 지연은 DeadlineExceeded
-                  #   →다음 주기 수용(staleness 알림 소관). 산술 증인은 test_rewrite_reconciler.bats.
+                  # 재시도 예산: 양 등급 모두 retry-max-time 30이 상한 — 호출당 최악 ≈ 30+20=50s.
+                  #   DNS pre-flight 최대 대기(DNS_WAIT_MAX=30, 아래) + 지연 2개(READ/WRITE 조합 무관)
+                  #   = 30+2×50=130 < 150s 데드라인. CoreDNS 롤링은 상관 장애라 READ 4곳을 동시에
+                  #   때릴 수 있다 — 3개+ 동시 지연은 DeadlineExceeded→다음 주기 수용(staleness 알림
+                  #   소관). 산술 증인은 test_rewrite_reconciler.bats.
                   CURL_READ="curl -fsS --connect-timeout 5 --max-time 20 --retry 6 --retry-delay 3 --retry-connrefused --retry-all-errors --retry-max-time 30"
                   CURL_WRITE="curl -fsS --connect-timeout 5 --max-time 20 --retry 3 --retry-delay 2 --retry-connrefused --retry-max-time 30"
                   SA=/var/run/secrets/kubernetes.io/serviceaccount
@@ -133,15 +134,19 @@ spec:
                   AG="http://adguard-ui.edge.svc"
                   DOMAIN='*.home.ukyi.app'
                   AUTH="${ADGUARD_USER}:${ADGUARD_PASSWORD}"
-                  # F6 보강: 부팅 직후 CoreDNS 기동 전에 스케줄되면 curl이 6(Could not resolve host)으로
-                  # 즉사한다(라이브 확인 — 호스트 부팅 21초 뒤 실행분이 이 코드로 Failed). curl --retry는
-                  # 이름 해석 실패를 전이적 오류로 취급하지 않아 --retry-connrefused로도 못 잡고,
-                  # --retry-all-errors는 4xx(인증)까지 재시도해 위 "4xx는 재시도 안 함" 규약을 깬다.
-                  # 그래서 DNS만 별도로 기다린다. 종료코드 6 이외(연결거부 7 포함)면 해석은 된 것이라 즉시 통과.
-                  # 정상 경로 비용은 curl 1회(~ms), 최악 30s로 activeDeadline 120s 안에 든다.
+                  # F6 보강(#547): 부팅 직후 CoreDNS 기동 전에 스케줄되면 curl이 6(Could not resolve host)으로
+                  # 죽는다(라이브 확인 — 호스트 부팅 21초 뒤 실행분이 이 코드로 Failed). ⚠️ #547 당시 주석은
+                  # "--retry가 이름 해석 실패를 전이적으로 취급하지 않는다"를 근거로 삼았으나 파드 실측
+                  # (2026-08-27, 위 F6 주석)이 반증 — 재시도는 되지만, 부팅 급 장기 부재(수십 초)는 어떤
+                  # 재시도 창으로도 덮기 애매하고 명시 대기가 판정도 명확하다(rc 6만 대기 — 그 외(연결거부
+                  # 7 포함)는 해석이 된 것이라 즉시 통과). 정상 경로 비용은 프로브 1회(~ms).
+                  # 프로브는 재시도 없는 rc 판별용이라 세 번째 등급(PROBE)이다 — 판별이 목적이라 -f도
+                  # --retry도 주지 않는다. 최악 DNS_WAIT_MAX초는 아래 데드라인 산술에 편입된다.
+                  DNS_WAIT_MAX=30
+                  CURL_PROBE="curl -s --connect-timeout 2 --max-time 3"
                   dns_wait=0
-                  while [ "$dns_wait" -lt 30 ]; do
-                    rc=0; curl -s --connect-timeout 2 -o /dev/null "$AG/" || rc=$?
+                  while [ "$dns_wait" -lt "$DNS_WAIT_MAX" ]; do
+                    rc=0; $CURL_PROBE -o /dev/null "$AG/" || rc=$?
                     if [ "$rc" -ne 6 ]; then break; fi
                     dns_wait=$((dns_wait + 1)); sleep 1
                   done

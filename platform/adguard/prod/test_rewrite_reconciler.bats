@@ -65,7 +65,7 @@ setup() {
 @test "reconciler job has concurrency and deadline guards (no overlapping linchpin mutation)" {
   # F6: 의존성 정체 시 중첩 실행이 stale 값으로 rewrite를 변이(플래핑)하는 것 차단.
   grep -q 'concurrencyPolicy: Forbid' "$F"
-  grep -q 'activeDeadlineSeconds: 120' "$F"
+  grep -q 'activeDeadlineSeconds: 150' "$F"
   grep -q 'startingDeadlineSeconds: 300' "$F"
   grep -q 'backoffLimit: 0' "$F"
 }
@@ -74,6 +74,7 @@ setup() {
   # F6/F12: 전 네트워크 호출이 타임아웃 바운드 — 재시도 등급이 갈려 var가 둘이다(followup-sweep 01).
   grep -q 'CURL_READ=' "$F"
   grep -q 'CURL_WRITE=' "$F"
+  grep -q 'CURL_PROBE=' "$F"   # DNS pre-flight 판별용(#547 통합) — 재시도 없음은 아래 단언
   [ "$(grep -cE 'CURL_(READ|WRITE)=.*connect-timeout 5' "$F")" = "2" ]
   [ "$(grep -cE 'CURL_(READ|WRITE)=.*max-time 20' "$F")" = "2" ]
   [ "$(grep -cE 'CURL_(READ|WRITE)=.*retry-connrefused' "$F")" = "2" ]
@@ -125,8 +126,11 @@ setup() {
   [ "$rmt" -ge 10 ]
   [ "$wrmt" -ge 10 ]
   [ "$mt" -ge 10 ]
+  # DNS pre-flight(#547 통합) 최대 대기도 예산의 일부다 — assignment 앵커로 뽑는다.
+  dw=$(grep -v '^[[:space:]]*#' "$F" | grep -oE 'DNS_WAIT_MAX=[0-9]+' | grep -oE '[0-9]+$')
+  [ -n "$dw" ]
   big=$(( rmt > wrmt ? rmt : wrmt ))
-  [ $(( 2 * (big + mt) )) -lt "$adl" ]
+  [ $(( dw + 2 * (big + mt) )) -lt "$adl" ]
 }
 
 @test "every curl-holding variable is timeout-bounded (third-var regression guard)" {
@@ -134,15 +138,22 @@ setup() {
   # curl을 담는 var 전수와 그중 max-time 보유 수가 같아야 한다(바닥값 2는 열거 붕괴 방어).
   vars=$(grep -cE '[A-Z_]+="curl' "$F")
   bounded=$(grep -cE '[A-Z_]+="curl[^"]*--max-time [0-9]+' "$F")
-  [ "$vars" -ge 2 ]
+  [ "$vars" -ge 3 ]
   [ "$vars" = "$bounded" ]
+}
+
+@test "the dns pre-flight probe never retries (rc discrimination needs the raw exit)" {
+  # PROBE는 rc 6(해석 실패)만 골라 기다리는 판별기다 — 재시도가 붙으면 rc가 마지막 시도의 것이
+  # 되어 대기 판정이 흐려지고, -f가 붙으면 4xx가 22로 뭉개져 "해석은 됐다" 신호를 잃는다.
+  run bash -c 'grep -E "CURL_PROBE=" "$1" | grep -E -- "--retry|-f"' _ "$F"
+  [ "$status" -ne 0 ]
 }
 
 @test "no bare curl reaches the network even through pipes or substitutions" {
   # 라인 선두만 보면 `} | curl …`·`v=$(curl …)`가 샌다(01 리뷰 실측 — metrics push가 정확히
   # 파이프 형태). var 정의 2줄만 정당 보유처다. 주석(행두·꼬리)은 산문이라 먼저 걷는다 —
   # "curl 임시 경로" 류 언급이 오탐이 된다(스크립트 본문 문자열에 ` #`가 없어 꼬리 절단이 안전).
-  run bash -c 'sed -e "s/^[[:space:]]*#.*//" -e "s/[[:space:]]#.*$//" "$1" | grep -nE "(^|[|;&(=[[:space:]])curl[[:space:]]" | grep -vE "CURL_(READ|WRITE)=\"curl"' _ "$F"
+  run bash -c 'sed -e "s/^[[:space:]]*#.*//" -e "s/[[:space:]]#.*$//" "$1" | grep -nE "(^|[|;&(=[[:space:]])curl[[:space:]]" | grep -vE "CURL_(READ|WRITE|PROBE)=\"curl"' _ "$F"
   [ "$status" -ne 0 ]
 }
 
