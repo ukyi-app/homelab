@@ -191,7 +191,12 @@ setup() {
       const on = doc?.on ?? doc?.[true];   // 일부 YAML 파서의 on→true 키 함정 방어
       const hasDispatch = !!on && typeof on === "object" && Object.prototype.hasOwnProperty.call(on, "workflow_dispatch");
       if (!hasDispatch || ALLOW.has(f)) continue;
-      const guarded = src.includes("vars.HOMELAB_OWNER") && src.includes("github.actor") && src.includes("HOMELAB_OWNER 미설정");
+      // 재료 3개의 **존재**만 보면 술어가 틀려도 초록이다(실측: `=`→`!=`가 통과했다) — 위 개수
+      // 등식과 아래 실행 증인이 그 축을 닫는다. 여기서는 거부 문구를 **닫힌 열거**로 못박는다:
+      // 오늘 두 변종이 있고(수동 진입 / 변이), 세 번째는 규약 결정이지 조용히 늘 것이 아니다.
+      const REJECT = ["workflow_dispatch는 owner(", "변이 디스패처는 owner("];
+      const guarded = src.includes("vars.HOMELAB_OWNER") && src.includes("github.actor")
+        && src.includes("HOMELAB_OWNER 미설정") && REJECT.some((m) => src.includes(m));
       if (!guarded) bad.push(f + ": workflow_dispatch 진입점에 actor 가드 부재(허용목록 아님)");
     }
     if (bad.length) { console.error(bad.join("\n")); process.exit(1); }
@@ -355,4 +360,48 @@ setup() {
     if (bad.length) { console.error(bad.join("\n")); process.exit(1); }
   ' "$WF" $DISPATCHERS
   [ "$status" -eq 0 ]
+}
+
+@test "the actor predicate copies are counted (a deleted or flipped copy is red)" {
+  # 아래 로스터 판정은 술어의 **텍스트 존재**만 본다 — 그래서 `=`를 `!=`로 뒤집어도 초록이었다
+  # (2026-08 실측). 이 등식이 그 우회의 절반을 닫는다: 사본이 사라지거나 비교가 뒤집히면 수가 어긋난다.
+  # 나머지 절반은 아래 **실행 증인**이 닫는다 — 개수만으로는 "뒤집고 하나 더 추가"를 못 잡는다.
+  # 수치는 콜사이트가 소유한다(CONTEXT.md 「열거 바닥값」) — 도메인이 줄지 않는 한 손대지 않는다.
+  pred="$(grep -rhoF '[ "$ACTOR" = "$OWNER" ] ||' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  [ "$pred" -ge 15 ]
+  # 빈 owner fail-closed(vacuous 방지)는 술어와 **같은 수**로 존재해야 한다 — 한쪽만 남으면
+  # 변수 미설정이 곧 통과가 된다.
+  empty="$(grep -rhoF '[ -n "$OWNER" ] ||' "$WF"/*.yaml | wc -l | tr -d ' ')"
+  [ "$empty" -ge 15 ]
+  [ "$pred" -eq "$empty" ]
+}
+
+@test "every actor guard predicate actually executes and decides correctly (the predicate gets a witness)" {
+  # 이 술어는 지금까지 **한 번도 실행된 적이 없었다** — 로스터는 텍스트만 봤고, 그래서 `=`를
+  # `!=`로 뒤집어도 게이트가 초록이었다(2026-08 실측). owner 전용 변이 경계의 술어가 무증인이었다.
+  # ⚠️ **생산 텍스트를 생산과 같은 셸 모드로 돌린다** — 렌더한 사본이 아니다. GHA의 기본 셸은
+  #    `bash -e {0}`라 pipefail이 없다(함정 원장) → `bash -e`가 충실한 모드다.
+  run bash -c '
+    set -euo pipefail
+    root="$1"; n=0; bad=""
+    for f in "$root"/.github/workflows/*.yaml; do
+      cnt="$(yq -r "[.jobs[]?.steps[]? | select((.run // \"\") | contains(\"ACTOR\"))] | length" "$f" 2>/dev/null || echo 0)"
+      [ "${cnt:-0}" -gt 0 ] || continue
+      i=0
+      while [ "$i" -lt "$cnt" ]; do
+        body="$(yq -r "[.jobs[]?.steps[]? | select((.run // \"\") | contains(\"ACTOR\"))][$i].run" "$f")"
+        n=$((n+1)); w="$(basename "$f")#$i"
+        OWNER="" ACTOR="x"             bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:empty-owner-passed"
+        OWNER="alice" ACTOR="mallory"  bash -e -c "$body" >/dev/null 2>&1 && bad="$bad $w:mismatch-passed"
+        OWNER="alice" ACTOR="alice"    bash -e -c "$body" >/dev/null 2>&1 || bad="$bad $w:match-rejected"
+        i=$((i+1))
+      done
+    done
+    # 열거 바닥값 — 추출이 붕괴하면 0사본을 돌리고도 초록이 된다. 수치는 콜사이트 소유.
+    [ "$n" -ge 15 ] || { echo "ROSTER-COLLAPSE n=$n"; exit 1; }
+    [ -z "$bad" ] || { echo "PREDICATE-WRONG:$bad"; exit 1; }
+    echo "EXECUTED=$n"
+  ' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'EXECUTED='
 }
