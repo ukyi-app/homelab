@@ -43,6 +43,11 @@ FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++ }
 {
   line=$0
   if (inhere){ if(line ~ ("^[ \t]*"delim"[ \t]*$")) inhere=0; next }
+  # ⚠️ **주석 스킵이 heredoc 매치보다 먼저 온다 — 순서가 곧 판정이다.** 뒤집으면 인용된 heredoc
+  #    표기 한 줄이 @test의 나머지를 통째로 지우고, 그 침묵은 red가 아니다(형제
+  #    check-locale-collation.sh와 같은 결함 — 착지 전 실측 이 도메인 5파일 602줄).
+  #    아래 :53의 `t ~ /^#/`는 intest 판정 뒤라 heredoc 매치에 닿지 못한다.
+  if (line ~ /^[ \t]*#/) next
   if (match(line, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/)) {
     d=substr(line,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; next
   }

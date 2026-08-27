@@ -72,3 +72,21 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_good.bats"
   [ "$status" -eq 0 ]
 }
+
+@test "a comment quoting a heredoc marker does not blind the detector to a middle negation" {
+  # 형제 check-locale-collation.sh와 같은 순서 결함 — heredoc 상태 기계가 주석 스킵보다 먼저 돌면
+  # 인용된 heredoc 표기 한 줄이 @test의 나머지를 통째로 지운다(docs/traps-detail.md 1490).
+  # 이 파일 도메인(*.bats)에서 착지 전 실측 5파일 602줄이 그렇게 투명했다.
+  # ⚠️ 표기를 런타임에 조립한다 — 리터럴로 적으면 이 파일 자신이 검출기에게 투명해진다.
+  hd='<'; hd="$hd$hd"
+  printf '%s\n' \
+    '@test "quoted heredoc marker in a comment" {' \
+    "  # 예전엔 python3 - ${hd}PY 로 했다" \
+    '  run echo hi' \
+    '  ! echo "$output" | grep -q zzz' \
+    '  [ "$status" -eq 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_cmt_hd.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_cmt_hd.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[NEG\]'
+}

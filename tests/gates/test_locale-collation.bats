@@ -117,3 +117,31 @@ setup() {
   run bash "$ROOT/scripts/check-locale-collation.sh" "$BATS_TEST_TMPDIR/scripts/run-something.sh"
   [ "$status" -eq 0 ]
 }
+
+@test "a comment quoting a heredoc marker does not blind the detector to the rest of the file" {
+  # docs/traps-detail.md 1490 — heredoc 상태 기계가 주석 규칙보다 **먼저** 돌면, 인용된 heredoc
+  # 표기 한 줄이 파일의 나머지를 통째로 지운다. 착지 전 실측: 이 도메인에서 10파일 2,956줄이
+  # 그렇게 투명했고 그중엔 그 함정을 문서화한 회귀 픽스처 자신도 있었다.
+  # ⚠️ 표기를 런타임에 조립한다 — 이 파일에 리터럴로 적으면 이 파일 자신이 검출기에게 투명해진다.
+  hd='<'; hd="$hd$hd"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "# 예전엔 python3 - ${hd}PY 로 했다" \
+    'x="$(printf a | sort -u)"' > "$FX/cmt-heredoc.sh"
+  run bash "$S" "$FX/cmt-heredoc.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[A]'
+}
+
+@test "a TS shift-like token in a string does not blind the detector (TS has no heredoc syntax)" {
+  # 실측 유발원: tools/ensure-bump-pr.ts의 봇 이메일 문구가 `id`를 delimiter로 오인시켜 그 파일
+  # 756줄을 검출기에게서 가렸다. TS/MTS엔 heredoc 문법이 없으므로 표면 종류로 상태 기계를 끈다.
+  # ⚠️ 표기를 런타임에 조립한다(위 테스트와 같은 이유).
+  hd='<'; hd="$hd$hd"
+  printf '%s\n' \
+    "const msg = 'author=bot ${hd}id>+bot@users.noreply.github.com>';" \
+    'const x = a.localeCompare(b);' > "$FX/tpl.ts"
+  run bash "$S" "$FX/tpl.ts"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[C]'
+}
