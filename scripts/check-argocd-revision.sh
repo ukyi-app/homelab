@@ -34,10 +34,10 @@ guard_init check-argocd-revision
 # 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
 take_floors "check-argocd-revision:refs" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
-ROOT_OVERRIDDEN=0
+SCOPE_NARROWED=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --root) ROOT="$(cd "$2" && pwd)"; ROOT_OVERRIDDEN=1; shift 2 ;;
+    --root) ROOT="$(cd "$2" && pwd)"; SCOPE_NARROWED=1; shift 2 ;;
     --expect) EXPECT_REVISION="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -134,7 +134,7 @@ if [ -n "$EXPECT_REVISION" ]; then
     exit 1; }
 fi
 
-if [ "$ROOT_OVERRIDDEN" -eq 1 ]; then
+if [ "$SCOPE_NARROWED" -eq 1 ]; then
   echo "check-argocd-revision OK [fixture] (자기레포 참조 ${n_refs}건 전부 '${values}')"
 else
   echo "check-argocd-revision OK (repoURL 노드 ${total}건 중 자기레포 ${n_refs}건, 전부 '${values}'${EXPECT_REVISION:+ · main 고정 확인})"

@@ -37,10 +37,10 @@ cd "$ROOT"
 
 FILES=()
 if [ "$#" -gt 0 ]; then
-  FIXTURE=1
+  SCOPE_NARROWED=1
   for f in "$@"; do FILES+=("$f"); done
 else
-  FIXTURE=0
+  SCOPE_NARROWED=0
   while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.sh' '*.ts' '*.mts' 'Makefile')
 fi
 
@@ -87,7 +87,7 @@ findings="$(detect_run check-floor-vocab "$DETECT" "${FILES[@]}")"
 n="$(scan_count "$findings")"
 
 # 신호는 검출 뒤에 낸다(검출이 죽은 실행이 건수를 내면 정반대로 읽힌다 — 형제 규율).
-if [ "$FIXTURE" -eq 0 ] || floor_set check-floor-vocab; then
+if [ "$SCOPE_NARROWED" -eq 0 ] || floor_set check-floor-vocab; then
   scan_floor check-floor-vocab "${#FILES[@]}" "$(floor_of check-floor-vocab 100)" || exit 1
 else
   scan_signal check-floor-vocab "${#FILES[@]}"
