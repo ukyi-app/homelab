@@ -155,6 +155,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 테스트 이름은 인터페이스가 아니다 — 뮤테이션이 전건 red여도 픽스처가 밟지 않는 판정 조건은 무증인이다
 - 정적 증인의 두 함정 — `^[^/]*`는 `//`만 제외하고(JSDoc ` * ` 줄이 코드가 된다), `run bash -c` 안의 bats 지역 변수는 빈 문자열이라 grep이 0건으로 항상 통과한다
 - QEMU amd64 leg의 bun 1.4는 RSS 24MB에서 "메모리 고갈"로 죽는다 — Dockerfile을 안 돌리는 CI는 그 6시간을 초록으로 지나친다
+- `github.actor`는 재실행에서 보존된다 — 개시자는 `triggering_actor`이고, `actions:write`는 재실행 동사를 포함한다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

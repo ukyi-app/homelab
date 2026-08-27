@@ -1782,3 +1782,33 @@ selfHeal과 플립플롭한다.
   `contract-drift.yaml`이 이미 `timeout-minutes: 5`를 쓴다). 상한은 원인을 고치지 않는다 — 6시간을
   N분으로 바꿔 **드러나게** 할 뿐이다.
 > 가드: `.github/workflows/reusable-app-build.yaml`
+
+### `github.actor`는 재실행에서 보존된다 — 개시자는 `triggering_actor`이고, `actions:write`는 재실행 동사를 포함한다
+- **정의(GitHub 문서)**: `github.actor`는 워크플로 run을 **최초로 트리거한** 사용자다.
+  `github.triggering_actor`는 **이 run을 개시한** 사용자다. 재실행에서 둘은 갈리고,
+  재실행은 `github.actor`의 권한으로 돈다. 즉 **`actor`는 재실행에서 보존된다.**
+- **병(실측 2026-08-28)**: owner 경계 가드 15사본이 `[ "$ACTOR" = "$OWNER" ]` 하나만 봤고
+  `github.triggering_actor`는 `.github/` 전체에서 **0건**이었다. 15사본 전건이
+  `ACTOR=owner · TRIGGERING=타인` 케이스를 통과했다(실측 — 가드 본문을 그대로 실행해 확인).
+- **왜 이것이 이 레포의 함정인가**: 트리거 경계가 "앱 레포는 dispatch만 할 수 있다"로 서술돼
+  있는데, fine-grained **Actions: write**는 `gh workflow run`뿐 아니라 run 재실행
+  (`POST /actions/runs/{id}/rerun`, `rerun-failed-jobs`, `jobs/{id}/rerun`)을 포함한다.
+  그 자격은 실재한다 — `.github/workflows/reusable-app-build.yaml:159-167`이 앱 레포 키로
+  `repositories: homelab` · `permission-actions: write` 토큰을 발급하고 `:173`에서 쓴다.
+  히스토리에 그 신원(`ukyi-homelab-dispatch[bot]`)이 디스패치한 run이 15건 있다.
+- **재실행은 이벤트도 재생한다.** 새 이벤트를 만들지 않고 원래 페이로드를 그대로 돌린다. 그래서
+  두 가지가 함께 따라온다:
+  1. `if: github.event_name == 'workflow_dispatch'`로 한정한 가드는 **스케줄 run의 재실행에서 skip**된다.
+     skip은 실패가 아니므로 뒤 스텝은 그대로 돈다.
+  2. `workflow_dispatch`가 없는 워크플로도 **재실행으로 도달 가능**하다 — 트리거 목록만 보고
+     "이건 디스패치가 없으니 대상 밖"이라고 읽는 정적 분류는 그 자리에서 무너진다
+     (실측: `iac.yaml`의 `terraform apply` 잡 4개와 `bump.yaml`의 `git push`+`gh pr create` 잡이
+     그 방식으로 분류 우주 밖에 있었다).
+- ⇒ **처방: 두 신원을 모두 요구한다.** `TRIGGERING: ${ github.triggering_actor }`를 바인딩하고
+  `[ "$TRIGGERING" = "$OWNER" ]`를 `[ "$ACTOR" = "$OWNER" ]`와 **함께** 건다. 하나로 대체하지 않는다 —
+  둘 다 요구하는 것이 어떤 경우에도 더 약해지지 않는다.
+  ⚠️ **env 바인딩과 술어는 같은 수여야 한다.** 술어만 넣고 바인딩을 빠뜨리면 빈 문자열 비교가 되어
+  **전 디스패치가 잠긴다**(가용성 사고). 증인이 두 수의 등식을 진다.
+- ⚠️ **트리거 열거는 안전 판정이 될 수 없다.** 재실행이 트리거를 우회하므로, 워크플로를
+  `on:` 키로 선별해 "밖은 안전"으로 읽으면 그것 자체가 「열거 붕괴 → vacuous green」의 한 사례다.
+> 가드: `tools/tests/test_mutation-dispatch.bats`, `.github/workflows/create-app.yaml`
