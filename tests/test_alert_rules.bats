@@ -75,10 +75,11 @@ JSON
     echo "    groups:"
     echo "      - name: probe"
     echo "        rules:"
-    for i in $(seq 1 30); do
-      echo "          - alert: ok$i"
-      echo "            expr: up == 0"
-    done
+    # 더미는 **1건**이면 족하다 — 픽스처의 바닥값을 `--floor rules=1`로 낮춰 두었기 때문이다.
+    # (0으로 줄이면 이름 없이 _seed를 부르는 테스트가 룰 0건이 되어 붕괴 판정에 걸린다.)
+    # 실 트리의 바닥값 MIN_SCAN=30은 그대로다 — 프로덕션을 지키는 것은 그쪽이다.
+    echo "          - alert: ok1"
+    echo "            expr: up == 0"
     if [ -n "$name" ]; then
       echo "          - alert: $name"
       echo "            expr: '$expr'"
@@ -95,9 +96,27 @@ _track_fixture() {
   git -C "$1" add -A || { echo "git add 실패: $1"; return 1; }
 }
 
+# 픽스처 레지스트리를 external 주기만 갈아끼워 다시 쓴다. **나머지 항목은 _seed와 동일해야 한다** —
+# 다르면 완전성 가드가 "미등재 생산자"로 red를 내고, 그러면 이 테스트는 자기 축(주기 수치 도메인)을
+# 재는 것이 아니라 남의 축을 재게 된다(거짓 red).
+_registry_with_period() {   # $1=root  $2=periodSec(JSON 리터럴)
+  cat > "$1/registry.json" <<JSON
+[
+  { "metric": "ghcr_latest_digest", "producer": "platform/fake/prod/digest-exporter.yaml",
+    "schedule": { "kind": "cron", "file": "platform/fake/prod/digest-exporter.yaml" } },
+  { "metric": "files_backup_last_success_timestamp", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": $2, "why": "테스트 픽스처" } },
+  { "metric": "files_data_bulk_avail_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": $2, "why": "테스트 픽스처" } },
+  { "metric": "files_data_bulk_size_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": $2, "why": "테스트 픽스처" } }
+]
+JSON
+}
+
 _lint() {   # $1=root — 픽스처를 추적 상태로 만든 뒤 픽스처 레지스트리를 주입해 린터 실행
   _track_fixture "$1"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json" --supply-policy "$1/supply.json"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json" --supply-policy "$1/supply.json" --floor rules=1
   echo "$output"
 }
 
@@ -854,7 +873,7 @@ _seed_real_supply() {   # $1=root $2=원장 항목 수
 
 _lint_real_supply() {   # $1=root — supply 원장만 실 경로에서 읽게 한다(주입 면제 없음)
   _track_fixture "$1"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json" --floor rules=1
   echo "$output"
 }
 
@@ -895,4 +914,121 @@ _lint_real_supply() {   # $1=root — supply 원장만 실 경로에서 읽게 �
   for label in rules denylist supply supply-refs; do
     printf '%s\n' "$output" | grep -qE "^SCAN: check-alert-rules:${label}: [0-9]+$"
   done
+}
+
+@test "a registry period of zero is rejected (it would silently drop the metric from mode C)" {
+  # 프로덕션 필터는 `period > LOOKBACK`이다 — 0은 조용히 탈락하고 그 메트릭이 모드 C 도메인에서
+  # 사라진다. 이 레지스트리가 막으려는 죽은-알림 결함 그 자체다. TS `number`는 0·음수·비유한을
+  # 전부 허용한다(이 레포의 함정 「TS 바닥값은 coercion 뒤에서 조용히 꺼진다」와 같은 클래스).
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _registry_with_period "$tmp" 0
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*periodSec'
+}
+
+@test "a negative registry period is rejected (same rule, second witness)" {
+  # 위 테스트와 같은 규칙(양수)의 두 번째 증인이다 — 0과 음수는 서로 다른 오타 경로로 들어온다.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _registry_with_period "$tmp" -60
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*periodSec'
+}
+
+@test "a non-finite registry period is rejected (JSON 1e999 parses to Infinity)" {
+  # JSON은 NaN을 표현하지 못하지만 `1e999`는 **Infinity로 파싱된다**. Infinity > LOOKBACK은 참이라
+  # 0·음수와 반대 방향으로 샌다 — 그 메트릭이 모드 C 대상에 **영원히 남고** rollup 윈도 하한이
+  # 무한대가 되어 어떤 윈도도 통과한다(조용한 무력화).
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _registry_with_period "$tmp" 1e999
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*periodSec'
+}
+
+# ── loadRegistry 검증 분기의 증인 (착지 전 실측: 5분기 전부 무증인) ────────────────────
+# 이 다섯은 **기존 거동**이라 red→green이 아니다. 검증이 있는데 아무도 그것을 밟지 않았고,
+# 밟지 않는 판정 조건은 무증인이다(AGENTS.md 「테스트 이름은 인터페이스가 아니다」).
+# 레지스트리가 망가지면 loadRegistry가 완전성 가드보다 **먼저** fatal하므로 최소 픽스처로 충분하다 —
+# 완전성 가드가 다른 이유로 red를 내면 이 테스트들은 자기 축을 못 잰다.
+_bad_registry() {   # $1=root  $2=JSON 본문
+  printf '%s\n' "$2" > "$1/registry.json"
+  _lint "$1"
+}
+
+@test "registry validation rejects a non-array document" {
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  _bad_registry "$tmp" '{ "metric": "m" }'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  # ⚠️ **방출 형태로 고정한다.** bun은 에러 시 소스 문맥 줄을 함께 찍는데, 그 줄에 진단 문구가
+  # 리터럴로 들어 있어 맨 substring grep은 검증을 지워도 초록이다(실측: 뮤테이션이 green이었다).
+  # fatal()은 `FAIL: `를 접두로 붙인다 — 그 형태만 인정한다.
+  echo "$output" | grep -q '^FAIL: .*PushEntry 배열'
+}
+
+@test "registry validation rejects an entry missing metric or producer" {
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  _bad_registry "$tmp" '[{ "producer": "scripts/fake-files-backup.sh", "schedule": { "kind": "cron", "file": "x" } }]'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*metric·producer 필수'
+}
+
+@test "registry validation rejects a cron schedule without a file" {
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  _bad_registry "$tmp" '[{ "metric": "m", "producer": "scripts/fake-files-backup.sh", "schedule": { "kind": "cron" } }]'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*schedule.cron에 file 필수'
+}
+
+@test "registry validation rejects an external schedule whose reason is blank" {
+  # 무근거 상수 금지 — periodSec은 관측이 아니라 계약이라 근거가 값의 절반이다.
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  _bad_registry "$tmp" '[{ "metric": "m", "producer": "scripts/fake-files-backup.sh", "schedule": { "kind": "external", "periodSec": 60, "why": "   " } }]'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*무근거 상수 금지'
+}
+
+@test "registry validation rejects an unknown schedule kind" {
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  _bad_registry "$tmp" '[{ "metric": "m", "producer": "scripts/fake-files-backup.sh", "schedule": { "kind": "timer", "periodSec": 60 } }]'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*schedule.kind는 cron|external'
+}
+
+@test "registry validation rejects a duplicate metric (the later entry would silently win)" {
+  # `registryMetrics`는 Set이고 `pushPeriod`는 Map이라 같은 metric이 두 번 등재되면 **뒤에 온 항목이
+  # 조용히 이긴다** — 생산자나 주기가 다르면 모드 C 판정이 말없이 바뀐다. 같은 계열의 fail-open이다.
+  # ⚠️ 픽스처는 _seed의 4항목을 그대로 두고 **중복 한 줄만** 더한다. 항목을 줄이면 완전성 가드가
+  #    "미등재 메트릭"으로 red를 내고, 그러면 이 테스트는 자기 축이 아니라 남의 축을 잰다.
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  cat > "$tmp/registry.json" <<'JSON'
+[
+  { "metric": "ghcr_latest_digest", "producer": "platform/fake/prod/digest-exporter.yaml",
+    "schedule": { "kind": "cron", "file": "platform/fake/prod/digest-exporter.yaml" } },
+  { "metric": "files_backup_last_success_timestamp", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처" } },
+  { "metric": "files_data_bulk_avail_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처" } },
+  { "metric": "files_data_bulk_size_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처" } },
+  { "metric": "files_data_bulk_size_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": 60, "why": "중복 — 주기가 다르고 조용히 이긴다" } }
+]
+JSON
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*중복'
 }

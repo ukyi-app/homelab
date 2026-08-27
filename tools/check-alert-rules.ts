@@ -692,20 +692,36 @@ function requiredRollup(e: SupplyEntry, flipped: boolean): string {
 
 // ── 레지스트리 로드 + 완전성 가드(모드 C 전처리) ──
 function loadRegistry(): PushEntry[] {
-  if (!REGISTRY_FILE) return DEFAULT_REGISTRY;
-  let j: unknown;
-  try { j = JSON.parse(readFileSync(REGISTRY_FILE, "utf8")); }
-  catch (e) { fatal(`--registry 읽기 실패: ${REGISTRY_FILE}: ${e instanceof Error ? e.message : e}`); }
-  if (!Array.isArray(j)) fatal(`--registry는 PushEntry 배열이어야 한다: ${REGISTRY_FILE}`);
+  // ⚠️ **조기 return이 아니라 입력 선택이다.** 예전엔 `if (!REGISTRY_FILE) return DEFAULT_REGISTRY;`라
+  //    프로덕션 데이터가 아래 검증 루프를 **한 번도 지나지 않았다** — `--registry`는 스스로 "테스트
+  //    픽스처 격리 전용"이라 적고 있어(위 :101), 레지스트리 자체의 회귀를 실증할 경로가 없었다.
+  //    이제 두 adapter가 같은 루프를 지난다.
+  // ⚠️ DEFAULT_REGISTRY는 **TS 리터럴로 남긴다.** tsconfig의 strict가 판별 유니온 `Schedule`을
+  //    컴파일 타임에 전량 검증하므로, JSON 원장으로 옮기면 그 커버리지가 순손실이다(설계 판정).
+  const SRC = REGISTRY_FILE || "DEFAULT_REGISTRY(tools/check-alert-rules.ts)";
+  let j: unknown = DEFAULT_REGISTRY;
+  if (REGISTRY_FILE) {
+    try { j = JSON.parse(readFileSync(REGISTRY_FILE, "utf8")); }
+    catch (e) { fatal(`--registry 읽기 실패: ${REGISTRY_FILE}: ${e instanceof Error ? e.message : e}`); }
+  }
+  if (!Array.isArray(j)) fatal(`레지스트리는 PushEntry 배열이어야 한다: ${SRC}`);
   for (const e of j as any[]) {
-    if (typeof e?.metric !== "string" || typeof e?.producer !== "string") fatal("--registry 항목에 metric·producer 필수");
+    if (typeof e?.metric !== "string" || typeof e?.producer !== "string") fatal(`${SRC} 항목에 metric·producer 필수`);
     const s = e.schedule;
-    if (s?.kind === "cron") { if (typeof s.file !== "string") fatal(`--registry ${e.metric}: schedule.cron에 file 필수`); }
+    if (s?.kind === "cron") { if (typeof s.file !== "string") fatal(`${SRC} ${e.metric}: schedule.cron에 file 필수`); }
     else if (s?.kind === "external") {
       if (typeof s.periodSec !== "number" || typeof s.why !== "string" || !s.why.trim()) {
-        fatal(`--registry ${e.metric}: schedule.external은 periodSec + why(근거) 필수 — 무근거 상수 금지`);
+        fatal(`${SRC} ${e.metric}: schedule.external은 periodSec + why(근거) 필수 — 무근거 상수 금지`);
       }
-    } else fatal(`--registry ${e.metric}: schedule.kind는 cron|external`);
+    } else fatal(`${SRC} ${e.metric}: schedule.kind는 cron|external`);
+  }
+  // ⚠️ **중복 metric은 조용히 이긴다.** `registryMetrics`는 Set이고 `pushPeriod`는 Map이라, 같은
+  //    이름이 두 번 등재되면 뒤에 온 항목이 앞을 덮고 아무 신호도 없다 — 생산자나 주기가 다르면
+  //    모드 C 판정이 말없이 바뀐다(윈도 하한이 바뀌면 죽은 알림이 된다). 등재 자체를 거부한다.
+  const seen = new Set<string>();
+  for (const e of j as any[]) {
+    if (seen.has(e.metric)) fatal(`${SRC} ${e.metric}: 중복 등재 — 뒤 항목이 앞을 조용히 덮는다(한 메트릭에 한 항목)`);
+    seen.add(e.metric);
   }
   return j as PushEntry[];
 }
@@ -730,9 +746,21 @@ for (const e of REGISTRY) {
   if (!extractMetrics(text).includes(e.metric)) {
     producerViol.push(`${e.producer} — 레지스트리 메트릭 '${e.metric}'을 더는 push하지 않는다(이름 변경/삭제? 추출 실패?)`);
   }
-  pushPeriod.set(e.metric, e.schedule.kind === "cron"
+  const period = e.schedule.kind === "cron"
     ? cronPeriodSec(cronOf(e.schedule.file), e.schedule.file)   // 파일 부재/파싱불가 = FAIL(F-4)
-    : e.schedule.periodSec);
+    : e.schedule.periodSec;
+  // ⚠️ **파생된 주기의 수치 도메인을 여기서 잠근다.** 프로덕션 필터는 `period > LOOKBACK`이라
+  //    0·음수는 red가 아니라 **조용한 탈락**이 된다 — 그 메트릭이 모드 C 도메인에서 사라지고,
+  //    그것이 바로 이 레지스트리가 막으려는 죽은-알림 결함이다(실측: 주기 0으로 대상 4 → 1).
+  //    cron·external 양쪽에 건다 — 파생 경로가 갈려도 도메인은 하나다.
+  //    반대 방향도 샌다: `Infinity > LOOKBACK`은 참이라 그 메트릭이 대상에 **영원히 남고**
+  //    rollup 윈도 하한이 무한대가 되어 어떤 윈도도 통과한다. JSON은 NaN을 못 담지만 `1e999`가
+  //    Infinity로 파싱되므로 주입 경로로도 실재한다.
+  if (!Number.isFinite(period) || period <= 0) {
+    fatal(`레지스트리 ${e.metric}: periodSec은 **유한한 양수**여야 한다(실제 ${period}) — ` +
+      `0·음수는 모드 C 필터에서 조용히 탈락하고, 비유한은 윈도 하한을 무한대로 만들어 무력화한다`);
+  }
+  pushPeriod.set(e.metric, period);
 }
 
 // (b) 완전성 가드: push하는 표면을 전부 스캔해 **파일 단위 + 메트릭 단위** 등록을 강제(F-3·G-1·G-2).
