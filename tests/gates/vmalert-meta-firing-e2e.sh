@@ -231,7 +231,7 @@ if [ "$F7" -gt 0 ] && [ "$F7b" -eq 0 ]; then vme_pass "L7 GrafanaPluginBudgetLow
 run_leg l8-grafq graf-quiet "$TMP/r4.yaml"
 G8="$(vme_promql "max(last_over_time(grafana_data_dir_size_bytes[3d]))" "$RP_TO" "$VME_LOOKBACK")"
 [ "$G8" -ge 1 ] || fault "(L8) grafana 픽스처가 없다 — 침묵이 vacuous"
-[ "$G8" -lt $(( GRAF_DENOM * 66 / 100 )) ] || fault "(L8) 픽스처 사용량 $G8이 임계 근처/이상 — 침묵 기대가 성립하지 않는다"
+[ "$G8" -lt $(( GRAF_DENOM * 66 / 100 )) ] || fault "(L8) 픽스처 사용량 ${G8}이 임계 근처/이상 — 침묵 기대가 성립하지 않는다"
 F8="$(vme_firing GrafanaPluginBudgetLow)"
 if [ "$F8" -eq 0 ]; then vme_pass "L8 GrafanaPluginBudgetLow silent at 50% usage (fixture=${G8}B)"; else vme_fail "L8 GrafanaPluginBudgetLow fired at 50% usage — threshold semantics broken"; fi
 
