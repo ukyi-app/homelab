@@ -1804,11 +1804,20 @@ selfHeal과 플립플롭한다.
      "이건 디스패치가 없으니 대상 밖"이라고 읽는 정적 분류는 그 자리에서 무너진다
      (실측: `iac.yaml`의 `terraform apply` 잡 4개와 `bump.yaml`의 `git push`+`gh pr create` 잡이
      그 방식으로 분류 우주 밖에 있었다).
-- ⇒ **처방: 두 신원을 모두 요구한다.** `TRIGGERING: ${ github.triggering_actor }`를 바인딩하고
+- ⇒ **처방 ①: 가드 스텝에 `if:`를 두지 않는다.** 트리거로 한정하면 그 트리거가 아닌 run의
+  재실행에서 **스텝 자체가 skip**되어 아래 처방 ②가 애초에 닿지 못한다. 트리거 판정은 본문이
+  한다(`[ "$EVENT" = "workflow_dispatch" ] || exit 0`) — 의미론은 같고 스텝은 모든 이벤트에서 돈다.
+  실측 2026-08-28: 이 형태 때문에 특권 잡 셋(`build.yaml#build` push · `pr-sweeper.yaml#sweep`
+  schedule · `tf-reconcile.yaml#reconcile` schedule)이 재실행에 노출돼 있었다.
+- ⇒ **처방 ②: 두 신원을 모두 요구한다.** `TRIGGERING: ${ github.triggering_actor }`를 바인딩하고
   `[ "$TRIGGERING" = "$OWNER" ]`를 `[ "$ACTOR" = "$OWNER" ]`와 **함께** 건다. 하나로 대체하지 않는다 —
   둘 다 요구하는 것이 어떤 경우에도 더 약해지지 않는다.
   ⚠️ **env 바인딩과 술어는 같은 수여야 한다.** 술어만 넣고 바인딩을 빠뜨리면 빈 문자열 비교가 되어
   **전 디스패치가 잠긴다**(가용성 사고). 증인이 두 수의 등식을 진다.
+- ⇒ **처방 ③: 이벤트 구동 특권 잡에는 재실행 전용 가드를 첫 스텝으로 둔다.** actor 축은 그
+  잡들에 모양이 맞지 않는다(출처는 잡 `if:`와 branch protection이 진다). 남는 축은 재실행뿐이고,
+  그 축은 `[ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ]` 한 줄이다 — **이벤트를 보지 않으므로
+  열거할 것이 없다.**
 - ⚠️ **트리거 열거는 안전 판정이 될 수 없다.** 재실행이 트리거를 우회하므로, 워크플로를
   `on:` 키로 선별해 "밖은 안전"으로 읽으면 그것 자체가 「열거 붕괴 → vacuous green」의 한 사례다.
 > 가드: `tools/tests/test_mutation-dispatch.bats`, `.github/workflows/create-app.yaml`
