@@ -114,6 +114,18 @@ spec:
                   AG="http://adguard-ui.edge.svc"
                   DOMAIN='*.home.ukyi.app'
                   AUTH="${ADGUARD_USER}:${ADGUARD_PASSWORD}"
+                  # F6 보강: 부팅 직후 CoreDNS 기동 전에 스케줄되면 curl이 6(Could not resolve host)으로
+                  # 즉사한다(라이브 확인 — 호스트 부팅 21초 뒤 실행분이 이 코드로 Failed). curl --retry는
+                  # 이름 해석 실패를 전이적 오류로 취급하지 않아 --retry-connrefused로도 못 잡고,
+                  # --retry-all-errors는 4xx(인증)까지 재시도해 위 "4xx는 재시도 안 함" 규약을 깬다.
+                  # 그래서 DNS만 별도로 기다린다. 종료코드 6 이외(연결거부 7 포함)면 해석은 된 것이라 즉시 통과.
+                  # 정상 경로 비용은 curl 1회(~ms), 최악 30s로 activeDeadline 120s 안에 든다.
+                  dns_wait=0
+                  while [ "$dns_wait" -lt 30 ]; do
+                    rc=0; curl -s --connect-timeout 2 -o /dev/null "$AG/" || rc=$?
+                    if [ "$rc" -ne 6 ]; then break; fi
+                    dns_wait=$((dns_wait + 1)); sleep 1
+                  done
                   # 1) want = traefik-ts LB tailscale IP (apiserver로 svc 조회 — status.loadBalancer.ingress[].ip)
                   want=$($CURL --cacert $SA/ca.crt -H "Authorization: Bearer $TOKEN" \
                     "$APISERVER/api/v1/namespaces/gateway/services/traefik-ts" \
