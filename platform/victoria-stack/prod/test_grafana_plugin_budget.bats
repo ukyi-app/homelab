@@ -163,3 +163,20 @@ _grafana_image_tag() {
   [ "$output" = "13.1.3" ]
   rm -rf "$tmp"
 }
+
+@test "the live-usage rule denominator equals the declared sizeLimit (static binding)" {
+  # GrafanaPluginBudgetLow(r4)의 분모는 선언 sizeLimit의 바이트 리터럴이다 — 결박이 없으면 선언만
+  # 바꿨을 때 사용률 판정이 낡은 예산으로 돌아 임계 의미가 조용히 뒤틀린다(meta-observability 02).
+  run _grafana_data_sizelimit_kib "$D/grafana.yaml"
+  [ "$status" -eq 0 ]
+  declared_bytes=$(( output * 1024 ))
+  denom="$(grep -oE 'grafana_data_dir_size_bytes\[3d\]\) / [0-9]+' "$D/rules/r4-storage-backup.yaml" | grep -oE '[0-9]+$')"
+  [ -n "$denom" ]
+  [ "$denom" -eq "$declared_bytes" ]
+  # 임계도 마진 정책의 역수(반올림)와 결박한다(리뷰 M7) — MARGIN만 바꾸면 임계 의미가 조용히
+  # 뒤틀린다(이 게이트의 존재 이유와 같은 결함 클래스).
+  ratio="$(grep -oE '/ [0-9]+\) > 0\.[0-9]+' "$D/rules/r4-storage-backup.yaml" | grep -oE '0\.[0-9]+$')"
+  [ -n "$ratio" ]
+  want_ratio="$(python3 -c "print(round($MARGIN_DEN/$MARGIN_NUM, 2))")"
+  [ "$ratio" = "$want_ratio" ]
+}

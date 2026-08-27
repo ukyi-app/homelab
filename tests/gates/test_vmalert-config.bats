@@ -298,3 +298,35 @@ $pairs
 EOF
   if [ -n "$missing" ]; then echo "critical 알림의 텔레그램 제목 매핑 누락:$missing"; return 1; fi
 }
+
+@test "vmalert wires the r7 meta rules file (rule glob, mount, volume — three places)" {
+  # r5 선례와 같은 3점 배선 — 하나라도 빠지면 룰이 조용히 미적재(silent staleness의 사촌).
+  V="$ROOT/platform/victoria-stack/prod/vmalert.yaml"
+  grep -q -- '--rule=/rules/r7/\*.yaml' "$V"
+  grep -q 'name: rules-r7, mountPath: /rules/r7' "$V"
+  grep -q 'name: rules-r7, configMap: { name: vmalert-rules-r7 }' "$V"
+  grep -qE '^  - rules/r7-meta\.yaml$' "$ROOT/platform/victoria-stack/prod/kustomization.yaml"
+}
+
+@test "meta alerts exclude Watchdog and themselves from the flapping selector (self-reference loop)" {
+  # ALERTS_FOR_STATE를 읽는 메타 룰이 자기 자신·상시 firing Watchdog를 세면 양성 피드백/상시
+  # 노이즈다(homepage 위젯의 Watchdog 제외 선례). 셀렉터에 네 이름 전부가 있어야 한다.
+  R="$ROOT/platform/victoria-stack/prod/rules/r7-meta.yaml"
+  ex="$(grep -A8 'alert: AlertRuleFlapping' "$R" | grep -oE 'alertname!~"[^"]*"')"
+  [ -n "$ex" ]
+  for n in Watchdog AlertRuleFlapping AlertPipelineWriteStale AlertSuppressionProlonged; do
+    printf '%s' "$ex" | grep -q "$n"
+  done
+}
+
+@test "every meta alert carries a Telegram title mapping (quality bar of this pass)" {
+  # 이름 하드코딩 금지(리뷰 M6) — r7 전량을 룰 파일에서 파생하고, 같은 패스의 r4 신규 2종은
+  # 명시로 얹는다(r4 전량 파생은 기존 미매핑 warning 16종을 소급 강제해 별개 결정이 된다 — 유보).
+  AM="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
+  R7="$ROOT/platform/victoria-stack/prod/rules/r7-meta.yaml"
+  alerts="$(yq -e '.data["r7.yaml"]' "$R7" | yq '.groups[].rules[].alert')"
+  [ "$(printf '%s\n' "$alerts" | grep -c .)" -ge 3 ]
+  for n in $alerts GrafanaPluginBudgetLow GrafanaDuFingerprintLost; do
+    grep -qF "eq \$name \"$n\"" "$AM"
+  done
+}

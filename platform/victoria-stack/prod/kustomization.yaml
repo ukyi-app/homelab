@@ -19,6 +19,7 @@ resources:
   - rules/r4-storage-backup.yaml
   - rules/r5-cert-tls.yaml
   - rules/r6-ci-staleness.yaml
+  - rules/r7-meta.yaml
   - ghcr-read.sealed.yaml # digest-exporter private GHCR inspect 자격(owner: make seal-ghcr-read)
   - digest-exporter.yaml
   - gha-liveness-exporter.yaml # GHA 스케줄 워크플로 liveness 하트비트(티켓 10 — run 밖 관측자)

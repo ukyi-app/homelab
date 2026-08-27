@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmalert-rules-r7
+  labels: { vmalert-rule: "true" }
+data:
+  r7.yaml: |
+    groups:
+      - name: meta
+        rules:
+          # ── 알림의 알림(meta-observability 03) — 기존 4표면이 못 보는 세 축만 담당한다 ─────────
+          # VmalertUnhealthy(평가·전송 에러)·AlertmanagerTelegramFailing(전송 실패)·TargetDown
+          # (스크레이프 단절)·Watchdog deadman(파이프라인 전멸)은 전부 "기계가 고장났다"를 본다.
+          # 여기 세 룰은 "기계는 도는데 **알림이 일을 못 한다**"를 본다: for:를 못 채우고 되도는
+          # 만성 flapping(라이브 실증: ContainerMemoryNearLimit{container="vmagent"} 195리셋/24h,
+          # 알림 0) · remoteWrite만 죽는 부분 장애(ALERTS 기반 관측 전체의 fail-open) · 억제가
+          # 알림을 장기간 삼키는 무성.
+          # 라벨 규약: disk·unit 라벨 금지(alertmanager inhibit 2·3번의 equal 축 — 빈 매칭은
+          # `=~ ".+"` 한정이 막지만 실수로 달면 억제 사정권에 들어간다). severity: warning 통일.
+          # e2e: 이 파일은 record가 없고 ALERTS류를 **픽스처로 주입**해 replay하므로(04 하네스)
+          # rulesDelay 파생기의 record-체인 판정과 무관하게 PLAIN 1s가 정확하다(설계 spec).
+
+          # 룰별 만성 flapping — ALERTS_FOR_STATE의 값은 그 알림이 활성화된 시각(activeAt)이다
+          # (라이브 실측: 값=타임스탬프). 활성화가 되풀이되면 activeAt이 갱신되므로 **값 변경 횟수 =
+          # 활성화 리셋 횟수** — "for: 룰 51종 중 누구도 자기 리셋을 관측하지 않는다"는 갭의 직접
+          # 신호다. ⚠️ 이 신호는 "for:를 못 채운 리셋"과 "정상 발화·해소의 반복"을 **구분하지
+          # 않는다**(후자도 activeAt 갱신 — 리뷰 M4). 어느 쪽이든 6h에 6회는 임계 근처 진동이라
+          # 관측 가치가 있고, 판별은 description이 안내한다.
+          # ⚠️ 집계·라벨(리뷰 H3): rollup 결과는 원본 알림의 전체 라벨셋을 보존해 알림 라벨의
+          #   베이스가 된다 — disk 라벨 보유 룰(StandardSSD류)이 flap하면 이 메타 알림이 disk를
+          #   상속해 inhibit 2번(equal: disk)에 **삼켜지고**, instance/pod 상속은 파드 재생성마다
+          #   신원이 갈려 시리즈별 changes가 과소 계수된다(L7). max by (alertname)로 라벨을 벗기고
+          #   원본 이름은 label_replace로 전용 라벨(flapping_alert)에 옮긴다 — 그룹 축도 안정된다.
+          # 임계 6/6h: 라이브 top(vmagent 195/24h ≈ 49/6h)은 즉발, 정상 단발 해소·재발(glances
+          # 3/24h)은 침묵. ⚠️ VM의 changes()는 창 직전 샘플과의 전이도 세므로(Prometheus와 다름 —
+          # 리뷰 L6) 실효 임계는 창 내 전이 5회다. for: 30m은 **순수 지연 + 창 경계의 5↔6 진동
+          # de-flap**이다(창 축적형이라 그 이상의 역할은 없다 — 리뷰 L4).
+          # 셀렉터 제외: Watchdog + 메타 3종 자신(양성 피드백). Watchdog 제외는 죽은 방어가 아니다 —
+          # for: 없는 룰도 VM은 ALERTS_FOR_STATE를 기록한다(라이브 실측: AFS{Watchdog} 실재, 값
+          # 1787751660 — live-facts.md). 게이트가 네 이름을 강제한다.
+          # ⚠️ 정확성 의존(리뷰 L10): vmalert 재시작 시 activeAt 복원은 vmalert.yaml의
+          #   --remoteRead.url이 담당한다 — 그 플래그가 빠지면 재시작마다 전 알림의 activeAt이
+          #   갱신돼 이 룰이 조용히 오탐 폭발한다.
+          - alert: AlertRuleFlapping
+            expr: |
+              label_replace(
+                max by (alertname) (
+                  changes(ALERTS_FOR_STATE{alertname!~"Watchdog|AlertRuleFlapping|AlertPipelineWriteStale|AlertSuppressionProlonged"}[6h])
+                ),
+                "flapping_alert", "$1", "alertname", "(.*)"
+              ) >= 6
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "알림 룰이 만성 flapping — 6시간에 6회 이상 활성화 리셋"
+              description: "{{ $labels.flapping_alert }}이(가) 6시간 동안 {{ $value }}회 활성화를 되풀이했습니다 — 조건이 임계 근처에서 진동 중입니다(발화까지 갔는지는 이 신호가 구분하지 않습니다 — ALERTS{alertstate=\"firing\"}로 확인하세요). 대상 지표의 임계·for:를 재설계하거나 원인(리소스 진동 등)을 제거하세요."
+
+          # remoteWrite 부분 장애 — vmalert가 평가는 계속하는데 ALERTS 되쓰기만 죽으면, 위
+          # AlertRuleFlapping을 포함한 ALERTS 기반 관측 전체가 **조용히 무측정**이 된다(fail-open).
+          # Watchdog은 상시 firing이라 ALERTS{Watchdog}의 마지막 샘플 시각이 파이프 생존의 정확한
+          # 프록시다(라이브 실측: 최신성 41s — 평가 30s 주기). 임계 900s = 주기의 30배(재시작·일시
+          # 정체 흡수).
+          # ⚠️ timestamp()+instant가 아니라 **tlast_over_time**(MetricsQL — 창 내 마지막 샘플의
+          #   시각)인 이유: instant 참조는 룩백(300s) 안의 샘플만 본다 — 정체가 900s를 넘는 순간
+          #   시리즈가 시야에서 사라져 빈 벡터 = **영구 무발화**(감시 대상이 병들수록 조용해지는
+          #   vacuous — 04 하네스 설계 중 자체 발견).
+          # ⚠️ 지평 [24h](리뷰 H4): 짧은 지평(구안 2h)은 장애 지속 중 창이 만료되는 순간
+          #   firing→resolved 전이를 만들어 send_resolved가 **거짓 "해소" 텔레그램**을 보낸다 —
+          #   무발화와 오해소는 다른 범주다(후자는 적극적 오정보). 24h면 발화가 하루 유지되고,
+          #   그 넘는 전무(파이프 전멸·vmalert 다운)는 빈 벡터 = 무발화가 맞다 — 그 축은
+          #   TargetDown + 오프노드 deadman(healthchecks.io)의 소관이다(경계).
+          # ⚠️ max(...) 집계(리뷰 M5): ALERTS{Watchdog}는 셀렉터라 external label 추가 등으로
+          #   시리즈가 갈리면 낡은 형제 시리즈가 창 만료까지 오발화를 끈다 — 최신 샘플 하나로 접는다.
+          # ⚠️ absent 가지 없음(의도): 첫 배포 전 ALERTS 무이력 오발화 방지 — 시리즈가 있는데
+          #   낡는 것이 이 룰의 표적이다.
+          - alert: AlertPipelineWriteStale
+            expr: |
+              (time() - max(tlast_over_time(ALERTS{alertname="Watchdog"}[24h]))) > 900
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "vmalert의 ALERTS 되쓰기가 900초 이상 정체"
+              description: "상시 발화하는 Watchdog의 ALERTS 샘플이 900초 이상 갱신되지 않았습니다 — vmalert remoteWrite 부분 장애로 ALERTS 기반 메타 관측(AlertRuleFlapping 등)이 무측정 상태입니다. vmalert 로그와 vmalert_remotewrite_errors_total을 확인하세요."
+
+          # 억제 장기화 — inhibit 3건은 warning을 무기한 삼킬 수 있는데 그 억제를 관측하는 신호가
+          # 없었다(suppressed 계열 소비 레포 전역 0 — 조사). ⚠️ suppressed 상태는 inhibit **또는
+          # silence**를 합산한다(Alertmanager marker 의미론 — 리뷰 H5: 원인별 분해 게이지가 없어
+          # expr로는 못 가른다) — 문구가 inhibit로 단정하면 유지보수 silence를 오귀속한다.
+          # 억제 자체는 정상 동작이라 이 룰은 오류가 아니라 장기화의 관측이다(warning).
+          # ⚠️ 창 밀도 가드(리뷰 M3): min_over_time은 창을 **덮었는지** 요구하지 않는다 — 파드
+          #   재시작으로 시리즈가 갈리면 새 시리즈 30분 만에 "24시간 지속"을 참칭한다. 샘플 수
+          #   하한(2400 ≈ 20h치 @30s 스크레이프)이 그 참칭과 장기 스크레이프 갭을 함께 막는다.
+          - alert: AlertSuppressionProlonged
+            expr: |
+              min_over_time(alertmanager_alerts{state="suppressed"}[24h]) > 0
+                and count_over_time(alertmanager_alerts{state="suppressed"}[24h]) >= 2400
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "억제된 알림이 24시간 이상 지속"
+              description: "inhibit 또는 silence로 억제된 알림이 24시간 내내 1건 이상입니다({{ $value }}건) — critical 장기 미해소로 warning들이 무성이거나, 잊힌 유지보수 silence일 수 있습니다. amtool silence query와 UI의 suppressed 목록으로 어느 쪽인지 가르세요."

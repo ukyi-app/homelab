@@ -90,3 +90,69 @@ setup() {
 @test "du exporter is wired into kustomization" {
   grep -q 'pvc-du-exporter.yaml' "$ROOT/platform/victoria-stack/prod/kustomization.yaml"
 }
+
+@test "du exporter mounts kubelet pods read-only and documents the widened F8 surface" {
+  # 세 번째 루트(meta-observability 01) — emptyDir du는 cadvisor에 파드별 fs 시리즈가 없어(라이브
+  # 실측) du만 남는다. 이 루트는 타 파드 projected SA 토큰 도달 표면이라 F8 계약 주석에 수용·완화가
+  # 명시돼야 한다(readOnly·egress vmsingle뿐·자기 SA 비마운트·숫자만 push).
+  vk="$(yq -e 'select(.kind=="CronJob") | .spec.jobTemplate.spec.template.spec.volumes[] | select(.name=="kubelet-pods") | .hostPath.path' "$F")"
+  printf '%s' "$vk" | grep -qxF -- "/var/lib/kubelet/pods"
+  ro="$(yq -e 'select(.kind=="CronJob") | .spec.jobTemplate.spec.template.spec.containers[0].volumeMounts[] | select(.name=="kubelet-pods") | .readOnly' "$F")"
+  printf '%s' "$ro" | grep -qxF -- "true"
+  # F8 주석이 표면·활성화 요인·잔여를 **이름으로** 수용한다 — 문구가 지워지면 red(01 리뷰 H3).
+  grep -q 'projected' "$F"
+  grep -q 'secret/configmap' "$F"
+  grep -q '읽기 개방의 활성화 요인' "$F"
+  grep -q 'exfil' "$F"
+  grep -q '실사용 가능' "$F"   # apiserver 도달 실측(netpol 미차단)의 명시 수용
+}
+
+@test "grafana fingerprint scan: one match pushes, zero is silent, collision dies (executed)" {
+  # 정적 grep이 아니라 **실행** 증인 — 스크립트를 추출해 경로만 픽스처로 치환하고 curl을 캡처
+  # 스텁으로 바꿔 세 시나리오를 실제로 돌린다(jobfailed 하네스의 파생·실행 관례).
+  # GNU coreutils 전제(df --output·du -B1 — 컨테이너와 동일 환경) — 없으면 정직하게 skip.
+  df -B1 --output=size,avail / >/dev/null 2>&1 || skip "GNU coreutils 전용 실행 증인"
+  FX="$BATS_TEST_TMPDIR"
+  yq -e 'select(.kind=="CronJob") | .spec.jobTemplate.spec.template.spec.containers[0].args[0]' "$F" > "$FX/script.sh"
+  # 접두 보존형 치환(sed 구분자 # — 경로에 |가 와도 안전) + 치환 착지 앵커: 마운트 경로가
+  # 리네임되면 sed가 no-op이 되어 **실 경로**를 읽는다 — 조용한 no-op을 여기서 죽인다(01 리뷰 M5).
+  sed -i "s#/storage-#$FX/storage-#g; s#/kubelet-pods#$FX/kp#g" "$FX/script.sh"
+  grep -qF "$FX/kp/" "$FX/script.sh"
+  grep -qF "$FX/storage-internal" "$FX/script.sh"
+  mkdir -p "$FX/bin" "$FX/storage-internal/pvc-a_ns1_data" "$FX/storage-bulk/pvc-b_ns2_files"
+  printf 'x' > "$FX/storage-internal/pvc-a_ns1_data/f"; printf 'x' > "$FX/storage-bulk/pvc-b_ns2_files/f"
+  printf '%s\n' '#!/usr/bin/env bash' 'cat > "$CAPTURE"' > "$FX/bin/curl"; chmod +x "$FX/bin/curl"
+  # 시나리오 1: 지문 1건 + **노이즈 혼재**(01 리뷰 M6 — 프로덕션 실모양: alertmanager도 data
+  # emptyDir을 갖는다): 비지문 data 볼륨·서브디렉토리 지문(미매치여야)을 섞고, 값까지 결박한다
+  # (kubelet과 같은 블록 회계 -sB1 — [0-9][0-9]*는 빈 값 방어, digest-exporter gauge 관례).
+  mkdir -p "$FX/kp/uid1/volumes/kubernetes.io~empty-dir/data"
+  printf 'db' > "$FX/kp/uid1/volumes/kubernetes.io~empty-dir/data/grafana.db"
+  mkdir -p "$FX/kp/uid9/volumes/kubernetes.io~empty-dir/data"
+  head -c 40960 /dev/zero > "$FX/kp/uid9/volumes/kubernetes.io~empty-dir/data/nflog"
+  mkdir -p "$FX/kp/uid8/volumes/kubernetes.io~empty-dir/data/sub"
+  printf 'db' > "$FX/kp/uid8/volumes/kubernetes.io~empty-dir/data/sub/grafana.db"
+  CAPTURE="$FX/cap1" PATH="$FX/bin:$PATH" run bash "$FX/script.sh"
+  [ "$status" -eq 0 ]
+  v="$(sed -n 's/^grafana_data_dir_size_bytes \([0-9][0-9]*\)$/\1/p' "$FX/cap1")"
+  [ -n "$v" ]
+  want="$(du -sB1 "$FX/kp/uid1/volumes/kubernetes.io~empty-dir/data" | cut -f1)"
+  [ "$v" = "$want" ]
+  grep -q '^grafana_du_fingerprint_matches 1$' "$FX/cap1"
+  # 시나리오 2: 지문 0건 → 크기 미방출·matches=0은 방출(지문 붕괴 무성 방지 — 01 리뷰 H2)
+  rm -rf "${FX:?}/kp"; mkdir -p "$FX/kp"
+  CAPTURE="$FX/cap2" PATH="$FX/bin:$PATH" run bash "$FX/script.sh"
+  [ "$status" -eq 0 ]
+  run grep -q 'grafana_data_dir_size_bytes' "$FX/cap2"
+  [ "$status" -ne 0 ]
+  grep -q '^grafana_du_fingerprint_matches 0$' "$FX/cap2"
+  # 시나리오 3: 지문 2건 → **push는 나가고**(1차 신호·하트비트 보존 — 01 리뷰 M1) 그 뒤 fail-loud.
+  # 이 단언 쌍이 그 설계 결정을 락한다 — 순서를 되돌리면 여기가 red로 반대한다(L4).
+  mkdir -p "$FX/kp/uid1/volumes/kubernetes.io~empty-dir/data" "$FX/kp/uid2/volumes/kubernetes.io~empty-dir/data"
+  printf 'db' > "$FX/kp/uid1/volumes/kubernetes.io~empty-dir/data/grafana.db"
+  printf 'db' > "$FX/kp/uid2/volumes/kubernetes.io~empty-dir/data/grafana.db"
+  CAPTURE="$FX/cap3" PATH="$FX/bin:$PATH" run bash "$FX/script.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '지문'
+  grep -q 'pvc_du_last_success_timestamp' "$FX/cap3"
+  grep -q '^grafana_du_fingerprint_matches 2$' "$FX/cap3"
+}
