@@ -29,7 +29,10 @@ done
 # ⚠️ 열거를 변수로 받아 rc를 잡는다. 이 도메인이 비면 네이밍 가드와 CJK 가드가 **둘 다** 0회 돈다
 # (CJK는 3회 재발한 검증된 함정이라 조용히 꺼지면 특히 위험하다). 현재값은 SCAN 마커를 읽어라 — 래칫 아님.
 all_bats="$(scan_enumerate check-skeleton git ls-files '*.bats')" || exit 1
-scan_floor check-skeleton:bats "$(scan_count "$all_bats")" "$(floor_of check-skeleton:bats 150)" || exit 1
+# 판정만 한다(quiet) — 마커는 **전 도메인 판정 뒤** 아래에서 일괄 방출한다. 뒤 도메인이
+# 붕괴한 실행이 앞 도메인의 "N건 검사했다"를 내면 소비자가 정반대로 읽는다(TS guardMain과 동형).
+n_bats="$(scan_count "$all_bats")"
+scan_floor check-skeleton:bats "$n_bats" "$(floor_of check-skeleton:bats 150)" quiet || exit 1
 unprefixed="$(printf '%s\n' "$all_bats" | grep -vE '(^|/)test_[^/]*\.bats$' || true)"
 if [ -n "$unprefixed" ]; then
   echo "FAIL: test_ 접두 없는 bats (네이밍 컨벤션 위반):"
@@ -57,7 +60,8 @@ fi
 # ⚠️ 프로세스 치환은 워커 실패를 전파하지 않아, bun이 죽으면 정방향(dir→표) 검사가 0회 돌고
 # 역방향만 남은 채 통과했다(부분 degrade — 실측). 현재 컴포넌트 16개 — 래칫 아님.
 comp_units="$(scan_enumerate check-skeleton bun "$(dirname "${BASH_SOURCE[0]}")/../tools/lib/repo-walk.ts" --units platform)" || exit 1
-scan_floor check-skeleton:platform "$(scan_count "$comp_units")" "$(floor_of check-skeleton:platform 10)" || exit 1
+n_platform="$(scan_count "$comp_units")"
+scan_floor check-skeleton:platform "$n_platform" "$(floor_of check-skeleton:platform 10)" quiet || exit 1
 while IFS= read -r d; do
   [ -n "$d" ] || continue
   c="$(basename "$d")"
@@ -92,7 +96,13 @@ while IFS= read -r f; do
   # (`tr … | cmp - "$f"`는 같은 파일을 한 파이프라인에서 두 번 읽어 shellcheck SC2094가 붙는다.)
   if [ "$(LC_ALL=C tr -d '\000' < "$f" | wc -c)" -ne "$(wc -c < "$f")" ]; then nul_bad="${nul_bad}  $f"$'\n'; fi
 done <<< "$(git ls-files '*.ts' '*.mts' '*.sh' '*.bats' '*.yaml' '*.yml' '*.json' '*.md' '*.py' '*.tf' '*.rego' 'Makefile')"
-scan_floor check-skeleton:nul-scan "$nul_scanned" "$(floor_of check-skeleton:nul-scan 200)" || exit 1
+scan_floor check-skeleton:nul-scan "$nul_scanned" "$(floor_of check-skeleton:nul-scan 200)" quiet || exit 1
+
+# ── 마커 일괄 방출 — 전 도메인이 바닥값을 통과한 뒤에만 나간다 ──
+# 순서는 종전과 같다(bats → platform → nul-scan) — 소비자가 보는 시퀀스를 바꾸지 않는다.
+scan_signal check-skeleton:bats "$n_bats"
+scan_signal check-skeleton:platform "$n_platform"
+scan_signal check-skeleton:nul-scan "$nul_scanned"
 if [ -n "$nul_bad" ]; then
   echo "FAIL: 소스에 리터럴 NUL 바이트 — grep이 이 파일들을 바이너리로 보고 내용을 건너뛴다(가드에 투명해짐):"
   printf '%s' "$nul_bad"

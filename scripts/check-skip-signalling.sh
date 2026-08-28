@@ -63,10 +63,10 @@ T_MARK="SKIP"
 T_Q_CLS='"'"'"'`'   # dquote·squote·backtick — 작은따옴표 연결 조립(백틱을 큰따옴표에 두면 커맨드 치환)
 P_EMIT="(echo|printf|console\\.(log|error|warn)|process\\.(stdout|stderr)\\.write).*[${T_Q_CLS}][^${T_Q_CLS}]*${T_MARK}:"   # 따옴표 리터럴 안 마커의 emission
 
-FIXTURE=0
+SCOPE_NARROWED=0
 FILES=()
 if [ "$#" -gt 0 ]; then
-  FIXTURE=1
+  SCOPE_NARROWED=1
   for f in "$@"; do FILES+=("$f"); done
 else
   while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.sh' '*.ts' '*.mts')
@@ -158,7 +158,7 @@ done
 
 # 신호는 검출 뒤에 낸다(check-scan-producers와 같은 순서) — 검출이 죽은 실행이 "N건"을 내면
 # 소비자가 정반대로 읽는다. 바닥값·마커는 손조립하지 않고 커널(scan-floor.sh)을 태운다.
-if [ "$FIXTURE" -eq 0 ] || floor_set check-skip-signalling; then
+if [ "$SCOPE_NARROWED" -eq 0 ] || floor_set check-skip-signalling; then
   scan_floor check-skip-signalling "$scanned" "$MIN_SCAN" || exit 1
 else
   scan_signal check-skip-signalling "$scanned"

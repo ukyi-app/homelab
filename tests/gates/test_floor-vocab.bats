@@ -95,3 +95,50 @@ setup() {
   printf '%s\n' '/**' ' * 구 --min-registry 폐지 경위와 ${FOO_MIN_SCAN:-10} 인용.' ' */' 'const x = 1;' > "$FX/block.ts"
   run bash "$S" "$FX/block.ts"; [ "$status" -eq 0 ]
 }
+
+@test "an emission call before the last detect_run is rejected (precedence lane)" {
+  # 마커는 "열거·바닥값을 통과했다"는 뜻인데, 검출기가 죽은 실행은 **아무것도 검사하지 못했다**.
+  # 그런 실행이 마커를 내면 소비자가 정반대로 읽는다 — 착지 전 3가드가 정확히 그 형태였다(실측).
+  # ⚠️ 원안은 `마지막 마커 줄 > 마지막 detect_run 줄`이었는데, 그 비교는 **이른 방출 하나 뒤에
+  #    늦은 신호 하나**가 있기만 하면 만족한다. 그래서 **모든** 방출 콜사이트를 본다.
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'scan_signal check-fake 3' \
+    'findings="$(detect_run check-fake "$DETECT" "$@")"' \
+    'scan_signal check-fake 3' > "$FX/early.sh"
+  run bash "$S" "$FX/early.sh"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -qF "[P]"
+}
+
+@test "emission after the last detect_run is not a violation, and quiet judgment before it is fine" {
+  # 음성 대조 — 판정(quiet)은 검출 **앞**에 있어도 된다. 억제는 출력 채널의 성질이지 판정의 성질이
+  # 아니기 때문이다(scan-floor 커널 규약). 이 구별이 없으면 규칙이 정당한 형태를 위반으로 잡는다.
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'scan_floor check-fake 3 1 quiet || exit 1' \
+    'findings="$(detect_run check-fake "$DETECT" "$@")"' \
+    'scan_signal check-fake 3' > "$FX/late.sh"
+  run bash "$S" "$FX/late.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "a quiet floor judgment without its later signal is rejected (pairing lane)" {
+  # `scan_floor … quiet`는 **판정만** 한다 — 그 도메인의 마커는 뒤에서 반드시 나가야 한다.
+  # 짝이 없으면 그 가드는 "검사했다고 주장하지 않는" 상태가 되고, 로스터 등식은 라벨이 준 것을
+  # 붕괴로도 미실행으로도 읽지 못한다. 결합되지 않은 2단계 프로토콜의 fail-open이다.
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'scan_floor check-fake:alpha 3 1 quiet || exit 1' \
+    'findings="$(detect_run check-fake "$DETECT" "$@")"' \
+    'scan_signal check-fake:beta 3' > "$FX/unpaired.sh"
+  run bash "$S" "$FX/unpaired.sh"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -qF "[Q]"
+}
+
+@test "a quiet floor judgment with its matching signal is not a violation" {
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'scan_floor check-fake:alpha 3 1 quiet || exit 1' \
+    'findings="$(detect_run check-fake "$DETECT" "$@")"' \
+    'scan_signal check-fake:alpha 3' > "$FX/paired.sh"
+  run bash "$S" "$FX/paired.sh"
+  [ "$status" -eq 0 ]
+}

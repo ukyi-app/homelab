@@ -141,3 +141,14 @@ PY2
   run env GH_SECRET_MIN_SECRETS=99999 GH_SECRET_MIN_WORKFLOWS=99999 bash "$S"
   [ "$status" -eq 0 ]
 }
+
+@test "a later-domain collapse withholds EVERY domain marker (batch emission)" {
+  # 종전엔 :workflows 마커가 먼저 나가서, :secrets가 붕괴한 실행이 "워크플로 N건 검사했다"를
+  # 그대로 냈다. 붕괴한 실행의 어떤 건수도 "검사했다"로 읽히면 안 된다(TS guardMain과 동형).
+  run bash "$ROOT/scripts/check-gh-secret-coverage.sh" --floor check-gh-secret-coverage:secrets=9999
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "check-gh-secret-coverage:secrets.*열거 붕괴"
+  out="$output"
+  run grep -q "^SCAN: check-gh-secret-coverage:" <<<"$out"
+  [ "$status" -ne 0 ]
+}

@@ -15,10 +15,10 @@ guard_init check-app-netpol
 # 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
 take_floors "check-app-netpol:manifests" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
-ROOT_OVERRIDDEN=0
+SCOPE_NARROWED=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --root) ROOT="$(cd "$2" && pwd)"; ROOT_OVERRIDDEN=1; shift 2 ;;
+    --root) ROOT="$(cd "$2" && pwd)"; SCOPE_NARROWED=1; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -43,12 +43,14 @@ scanned="$(scan_count "$manifests")"
 # 적용하면 red가 되는 건 **양성** 테스트(clean 셀렉터=통과 기대) 1건뿐이다 — 음성 3건은 단언이
 # `-ne 0`이라 바닥값 exit 1도 만족해 green을 유지한다(실측 4 ok / 1 not ok).
 # 즉 열거 붕괴를 실제로 증언하는 건 양성 2건(실-레포·clean 픽스처)뿐이다.
-if [ "$ROOT_OVERRIDDEN" -eq 1 ] && ! floor_set check-app-netpol:manifests; then
-  # 바닥값은 면제하되 **신호는 낸다** — 신호가 아예 없으면 06이 "픽스처 호출"과 "가드 미실행"을
+# 표기는 형제 가드(check-image-pins·check-floor-vocab·check-gh-secret-coverage 등)와 같은 방향이다 —
+# 종전의 드모르간 역전형(`-eq 1 && ! floor_set`)은 등가이지만 읽는 사람이 매번 등가를 다시 풀어야 했다.
+if [ "$SCOPE_NARROWED" -eq 0 ] || floor_set check-app-netpol:manifests; then
+  scan_floor check-app-netpol:manifests "$scanned" "$MIN_SCAN" || exit 1
+else
+  # 바닥값은 면제하되 **신호는 낸다** — 신호가 아예 없으면 06이 "좁혀진 호출"과 "가드 미실행"을
   # 구별할 수 없다. 건수(픽스처는 소수 · 실 트리는 기준선 근처)가 곧 그 판별자다.
   scan_signal check-app-netpol:manifests "$scanned"
-else
-  scan_floor check-app-netpol:manifests "$scanned" "$MIN_SCAN" || exit 1
 fi
 
 netpol_files=""
