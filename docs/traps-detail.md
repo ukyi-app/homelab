@@ -1817,6 +1817,54 @@ selfHeal과 플립플롭한다.
 - ⇒ 같은 파일의 기존 관용구가 이미 답을 갖고 있었다: 이 가드는 금지 패턴을 리터럴로 적지 않으려고
   `P_FLAG="${D2}min-[a-z]"`처럼 **조립**한다. 주석도 같은 규율을 따른다.
 
+### `github.actor`는 재실행에서 보존된다 — 개시자는 `triggering_actor`이고, `actions:write`는 재실행 동사를 포함한다
+- **정의(GitHub 문서)**: `github.actor`는 워크플로 run을 **최초로 트리거한** 사용자다.
+  `github.triggering_actor`는 **이 run을 개시한** 사용자다. 재실행에서 둘은 갈리고,
+  재실행은 `github.actor`의 권한으로 돈다. 즉 **`actor`는 재실행에서 보존된다.**
+- **병(실측 2026-08-28)**: owner 경계 가드 15사본이 `[ "$ACTOR" = "$OWNER" ]` 하나만 봤고
+  `github.triggering_actor`는 `.github/` 전체에서 **0건**이었다. 15사본 전건이
+  `ACTOR=owner · TRIGGERING=타인` 케이스를 통과했다(실측 — 가드 본문을 그대로 실행해 확인).
+- **라이브 실측 2026-08-28 (run 32814398310).** bot이 디스패치했던 run을 owner가 재실행하고 즉시
+  취소한 뒤 run 객체를 읽었다:
+  ```
+  attempt=2  event=workflow_dispatch  actor=ukyi-homelab-dispatch[bot]  trig=ukkiee
+  ```
+  셋이 함께 확인된다 — `run_attempt`이 1→2로 **증가**하고, `event`가 **재생**되고,
+  `actor`가 **최초 트리거 신원으로 보존**된 채 `triggering_actor`만 개시자로 바뀐다.
+  관측 방향은 공격 방향의 역상이지만 성립하는 **규칙은 같다**: `actor` = 최초 트리거,
+  `triggering_actor` = 재실행 개시자. 따라서 owner의 과거 디스패치를 다른 주체가 재실행하면
+  `actor` 단독 비교는 통과한다.
+- **왜 이것이 이 레포의 함정인가**: 트리거 경계가 "앱 레포는 dispatch만 할 수 있다"로 서술돼
+  있는데, fine-grained **Actions: write**는 `gh workflow run`뿐 아니라 run 재실행
+  (`POST /actions/runs/{id}/rerun`, `rerun-failed-jobs`, `jobs/{id}/rerun`)을 포함한다.
+  그 자격은 실재한다 — `.github/workflows/reusable-app-build.yaml:159-167`이 앱 레포 키로
+  `repositories: homelab` · `permission-actions: write` 토큰을 발급하고 `:173`에서 쓴다.
+  히스토리에 그 신원(`ukyi-homelab-dispatch[bot]`)이 디스패치한 run이 15건 있다.
+- **재실행은 이벤트도 재생한다.** 새 이벤트를 만들지 않고 원래 페이로드를 그대로 돌린다. 그래서
+  두 가지가 함께 따라온다:
+  1. `if: github.event_name == 'workflow_dispatch'`로 한정한 가드는 **스케줄 run의 재실행에서 skip**된다.
+     skip은 실패가 아니므로 뒤 스텝은 그대로 돈다.
+  2. `workflow_dispatch`가 없는 워크플로도 **재실행으로 도달 가능**하다 — 트리거 목록만 보고
+     "이건 디스패치가 없으니 대상 밖"이라고 읽는 정적 분류는 그 자리에서 무너진다
+     (실측: `iac.yaml`의 `terraform apply` 잡 4개와 `bump.yaml`의 `git push`+`gh pr create` 잡이
+     그 방식으로 분류 우주 밖에 있었다).
+- ⇒ **처방 ①: 가드 스텝에 `if:`를 두지 않는다.** 트리거로 한정하면 그 트리거가 아닌 run의
+  재실행에서 **스텝 자체가 skip**되어 아래 처방 ②가 애초에 닿지 못한다. 트리거 판정은 본문이
+  한다(`[ "$EVENT" = "workflow_dispatch" ] || exit 0`) — 의미론은 같고 스텝은 모든 이벤트에서 돈다.
+  실측 2026-08-28: 이 형태 때문에 특권 잡 셋(`build.yaml#build` push · `pr-sweeper.yaml#sweep`
+  schedule · `tf-reconcile.yaml#reconcile` schedule)이 재실행에 노출돼 있었다.
+- ⇒ **처방 ②: 두 신원을 모두 요구한다.** `TRIGGERING: ${ github.triggering_actor }`를 바인딩하고
+  `[ "$TRIGGERING" = "$OWNER" ]`를 `[ "$ACTOR" = "$OWNER" ]`와 **함께** 건다. 하나로 대체하지 않는다 —
+  둘 다 요구하는 것이 어떤 경우에도 더 약해지지 않는다.
+  ⚠️ **env 바인딩과 술어는 같은 수여야 한다.** 술어만 넣고 바인딩을 빠뜨리면 빈 문자열 비교가 되어
+  **전 디스패치가 잠긴다**(가용성 사고). 증인이 두 수의 등식을 진다.
+- ⇒ **처방 ③: 이벤트 구동 특권 잡에는 재실행 전용 가드를 첫 스텝으로 둔다.** actor 축은 그
+  잡들에 모양이 맞지 않는다(출처는 잡 `if:`와 branch protection이 진다). 남는 축은 재실행뿐이고,
+  그 축은 `[ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ]` 한 줄이다 — **이벤트를 보지 않으므로
+  열거할 것이 없다.**
+- ⚠️ **트리거 열거는 안전 판정이 될 수 없다.** 재실행이 트리거를 우회하므로, 워크플로를
+  `on:` 키로 선별해 "밖은 안전"으로 읽으면 그것 자체가 「열거 붕괴 → vacuous green」의 한 사례다.
+> 가드: `tools/tests/test_mutation-dispatch.bats`, `.github/workflows/create-app.yaml`
 ### 프로브는 호출이 아니다 — `command -v X`와 미평가 라벨이 X의 증인 노릇을 해서 mirrored 선언이 자기 자신을 증명한다
 - **병(라이브 실측)**: `check-ci-parity`의 방향 ④는 "mirrored로 선언한 로컬 커맨드가 `make -n ci`
   출력에 있어야 한다"였고, 구현은 `makeOut.includes(local)` 한 줄이었다. 그런데 `make -n` 출력에는

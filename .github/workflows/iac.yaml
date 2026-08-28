@@ -162,6 +162,18 @@ jobs:
       TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
       TF_VAR_zone_name: ${{ secrets.TF_DOMAIN }}
     steps:
+      - name: replay 가드 (이벤트 구동 잡 — 재실행 개시자만 검사한다)
+        env:
+          ATTEMPT: ${{ github.run_attempt }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        run: |
+          # 이 잡은 owner 디스패치 대상이 아니라 **이벤트 구동**이다 — 출처는 잡 `if:`와 branch
+          # protection이 진다. 그래서 actor 축은 모양이 맞지 않고, 남는 축은 재실행뿐이다:
+          # 재실행은 원래 이벤트를 **그대로 재생**하므로 출처 술어가 그대로 통과한다.
+          # (actions:write는 재실행 동사를 포함하고, 그 자격은 앱 레포에 실재한다.)
+          [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — replay 가드 fail-closed"; exit 1; }
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행(attempt=$ATTEMPT)은 owner($OWNER)만 개시 가능 — 개시자=$TRIGGERING 거부"; exit 1; }
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0 — push 이벤트의 머지 SHA가 기본 체크아웃 — SHA 고정
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         with:

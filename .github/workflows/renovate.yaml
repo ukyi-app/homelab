@@ -27,14 +27,26 @@ jobs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
       - name: actor 가드 (workflow_dispatch 한정 — 스케줄/기타 트리거 무영향)
-        if: github.event_name == 'workflow_dispatch'
         env:
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
           ACTOR: ${{ github.actor }}
+          TRIGGERING: ${{ github.triggering_actor }}
           OWNER: ${{ vars.HOMELAB_OWNER }}
         run: |
           # 디스패치 자격(actions:write)은 워크플로 단위 스코프가 불가 — 허용목록(bump-poll) 외 전 진입점 가드(P2-1).
           [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — actor 가드 fail-closed"; exit 1; }
+          # 재실행 축 — **이벤트를 보지 않는다.** github.run_attempt은 재실행이 보존할 수 없는 유일한
+          # 값이고, attempt>=2의 개시자는 언제나 actions:write를 든 주체다(스케줄러도 push도 재실행을
+          # 하지 않는다). 그래서 이 축에는 열거할 트리거가 없다 — 열거 밖이라는 개념이 성립하지 않는다.
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행(attempt=$ATTEMPT)은 owner($OWNER)만 개시 가능 — 개시자=$TRIGGERING 거부"; exit 1; }
+          # 트리거 축 — 종전 `if:` 한정을 본문으로 옮긴 것이다. 스텝 자체는 **모든 이벤트에서 돈다**:
+          # `if:`로 한정하면 push/schedule run의 재실행에서 스텝이 skip되고(skip은 실패가 아니다) 위 축이 사라진다.
+          [ "$EVENT" = "workflow_dispatch" ] || exit 0
           [ "$ACTOR" = "$OWNER" ] || { echo "::error::workflow_dispatch는 owner($OWNER)만 실행 가능 — actor=$ACTOR 거부"; exit 1; }
+          # 재실행은 github.actor를 **최초 트리거 신원으로 보존**한다(개시자는 triggering_actor다).
+          # actor만 보면 owner의 과거 디스패치를 재실행하는 것으로 통과한다 — actions:write는 재실행 동사를 포함한다.
+          [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::workflow_dispatch는 owner($OWNER)만 실행 가능 — 재실행 개시자=$TRIGGERING 거부"; exit 1; }
       - id: check
         env:
           WRITER: ${{ secrets.HOMELAB_WRITER_APP_ID }}

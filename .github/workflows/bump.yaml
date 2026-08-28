@@ -39,6 +39,18 @@ jobs:
       # main 직접 push가 아니라 PR + auto-merge로 쓴다(required check `gate`가 리뷰 게이트).
       # checkout 자체에 토큰이 필요해 이 첫 step에서 create-github-app-token을 인라인 발급한다
       # (핀 SSOT: tests/gates/test_app-token-sha-ssot.bats가 전 콜사이트 동일 SHA 강제).
+      - name: replay 가드 (이벤트 구동 잡 — 재실행 개시자만 검사한다)
+        env:
+          ATTEMPT: ${{ github.run_attempt }}
+          TRIGGERING: ${{ github.triggering_actor }}
+          OWNER: ${{ vars.HOMELAB_OWNER }}
+        run: |
+          # 이 잡은 owner 디스패치 대상이 아니라 **이벤트 구동**이다 — 출처는 잡 `if:`와 branch
+          # protection이 진다. 그래서 actor 축은 모양이 맞지 않고, 남는 축은 재실행뿐이다:
+          # 재실행은 원래 이벤트를 **그대로 재생**하므로 출처 술어가 그대로 통과한다.
+          # (actions:write는 재실행 동사를 포함하고, 그 자격은 앱 레포에 실재한다.)
+          [ -n "$OWNER" ] || { echo "::error::repo variable HOMELAB_OWNER 미설정 — replay 가드 fail-closed"; exit 1; }
+          [ "$ATTEMPT" = "1" ] || [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::재실행(attempt=$ATTEMPT)은 owner($OWNER)만 개시 가능 — 개시자=$TRIGGERING 거부"; exit 1; }
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: token
         with:
