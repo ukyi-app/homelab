@@ -33,4 +33,35 @@
 (예: OIDC 토큰 클레임·러너 감사 로그·GitHub이 잡별 유효 권한을 API로 노출할 때).
 그때는 r4를 죽인 반례가 성립하지 않는다. 그 전까지 아키텍처 리뷰는 이 후보를 재제안하지 않는다.
 
+## 재개할 때 쓸 비회귀 기준선
+
+기각했지만 **측정은 유효하다.** 설계 패스가 프로토타입으로 오늘의 트리를 실제로 분류했고, 그
+결과가 재개 시점의 출발선이다. 이 수치가 없으면 다음 시도는 "첫 커밋이 red"라는 같은 자리에서
+다시 죽는다(원 후보 6이 정확히 그 방식으로 죽었다).
+
+`workflow_dispatch` 보유 우주(14 워크플로 / 33잡) 기준:
+
+| 분류 | 잡 수 |
+|---|---|
+| GUARDED (자기 잡에 가드) | 15 |
+| DOMINATED (성공 전파로 지배) | 7 |
+| NONPRIVILEGED (원장 선언 + 능력 반증 통과) | 7 |
+| ALLOW (`bump-poll.yaml`) | 4 |
+| **UNCLASSIFIED** | **0** |
+
+뮤테이션 6종이 전건 red였다: 가드 스텝 `if: false` · `continue-on-error: true` · 가드를 특권 스텝
+뒤로 이동 · 특권 잡 `if`에 `!cancelled()` 추가 · build-push 잡의 가드 제거 · terraform-apply 잡의
+성공 전파 절단. ⚠️ **전체 우주는 23 워크플로 / 46잡이다** — 위 수치는 트리거 선별(r3)이 기각되기
+전의 우주라, 재개 시에는 전 워크플로로 다시 재야 한다.
+
+## 처방이 닫지 못한 것 (기각이 남긴 부채)
+
+- **`bump-poll.yaml`은 앱 레포 dispatch의 정당한 대상이다.** 안전이 actor 가드가 아니라 폴링
+  로직의 fail-closed 검증(main reachable · 배포 SHA descendant · digest 핀 · autoDeploy 누락=거부)에
+  걸려 있고, 그 검증 자체의 증인은 이 패스 밖이다.
+- **자격 잔존은 처방으로 닫았지 가드로 닫지 않았다.** `build.yaml`의 checkout이 잡 토큰을
+  `.git/config`에 남기던 1곳은 `persist-credentials: false`로 막았지만(실측 잔존 0), 새 write 스코프
+  잡이 같은 형태로 들어와도 잡아 줄 기전이 없다. 그 기전이 곧 이 ADR이 기각한 분류 가드다.
+- **크로스레포 `workflow_call` 호출자는 보이지 않는다.** 정적 분석의 원리적 경계다.
+
 관련: `docs/traps-detail.md` 「`github.actor`는 재실행에서 보존된다」 · 「열거 붕괴 → vacuous green」.
