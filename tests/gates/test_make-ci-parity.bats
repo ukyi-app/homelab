@@ -233,3 +233,34 @@ PY
   run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
   [ "$status" -eq 0 ]
 }
+
+# ── mirrored는 자기 자신을 증명할 수 없다 ─────────────────────────────────────────────────────────
+# ④는 `makeOut.includes(local)` 하나였다. 그런데 `make -n ci` 출력에는 **호출이 아닌 것**이 두 종류
+# 섞여 있다: 전제 프로브 `command -v actionlint`와, 도구 부재 시 이름만 남기는 미평가 라벨
+# `echo "actionlint(…)" >> .make-ci-uneval`. 둘 다 그 도구를 **부르지 않는다**.
+# ⇒ 실제 호출을 지워도 두 문자열이 남아 대조가 통과했다 — 선언이 자기 자신을 증명한다(실측: 초록).
+# 정제 대상은 그 둘뿐이고, 실 레포 mirrored 22항목·local 34문자열에 대한 오탐은 0건이다(실측).
+mkparity_fixture() {   # $1=디렉토리  $2=then 절 본문
+  mkdir -p "$1/.github/workflows" "$1/policy"
+  printf 'name: ci\non: push\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - name: actionlint\n        run: actionlint\n' \
+    > "$1/.github/workflows/ci.yaml"
+  printf '%s\n' '{"_readme": "fixture", "steps": [{"name": "actionlint", "status": "mirrored", "local": "actionlint"}]}' \
+    > "$1/policy/ci-parity.json"
+  printf 'CI_UNEVAL := .make-ci-uneval\nci:\n\t@rm -f $(CI_UNEVAL)\n\t@if command -v actionlint >/dev/null 2>&1; then %s \\\n\t  else echo "actionlint(워크플로 정적 검사)" >> $(CI_UNEVAL); fi\n' \
+    "$2" > "$1/Makefile"
+}
+
+@test "a probe or an unevaluated label cannot stand in for the call itself (mirrored proves nothing about itself)" {
+  # 뮤테이션: 실제 호출만 지운다. 프로브 분기와 else 라벨은 그대로 둔다 — 이것이 오늘의 fail-open이다.
+  gone="$BATS_TEST_TMPDIR/gone"
+  mkparity_fixture "$gone" ':;'
+  run bash -c "cd '$gone' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -q "make -n ci"
+
+  # 대조군 — 같은 픽스처에서 호출만 되살리면 통과한다(픽스처 조립 자체의 실패가 아니다).
+  kept="$BATS_TEST_TMPDIR/kept"
+  mkparity_fixture "$kept" 'actionlint;'
+  run bash -c "cd '$kept' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  [ "$status" -eq 0 ]
+}

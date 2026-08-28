@@ -156,6 +156,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 정적 증인의 두 함정 — `^[^/]*`는 `//`만 제외하고(JSDoc ` * ` 줄이 코드가 된다), `run bash -c` 안의 bats 지역 변수는 빈 문자열이라 grep이 0건으로 항상 통과한다
 - QEMU amd64 leg의 bun 1.4는 RSS 24MB에서 "메모리 고갈"로 죽는다 — Dockerfile을 안 돌리는 CI는 그 6시간을 초록으로 지나친다
 - 인용하지 않은 heredoc 안의 주석에 백틱을 쓰면 그 명령이 **실행되고** 주석이 잘려 나간다 — shellcheck는 그걸 "style"로 부른다
+- 프로브는 호출이 아니다 — `command -v X`와 미평가 라벨이 X의 증인 노릇을 해서 mirrored 선언이 자기 자신을 증명한다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 
