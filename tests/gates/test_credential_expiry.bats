@@ -96,8 +96,13 @@ setup() {
   grep -q 'chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}' "$W"
   grep -q 'source: 자격만료' "$W"
   # workflow_dispatch 진입점은 actor 가드 필수(B6 전수 가드 불변식 — dns-drift/contract-drift와 동일).
-  grep -q "if: github.event_name == 'workflow_dispatch'" "$W"
+  # ⚠️ 트리거 판정은 스텝 `if:`가 아니라 **가드 본문**이 진다. `if:`로 한정하면 push/schedule run의
+  #    재실행에서 스텝 자체가 skip되어 경계가 사라진다(함정 원장 「github.actor는 재실행에서 보존된다」).
+  #    이 단언이 종전에 그 `if:` 문자열을 계약으로 굳혀 두어, 고치는 변경이 여기서 red를 냈다.
+  grep -qF '[ "$EVENT" = "workflow_dispatch" ] || exit 0' "$W"
   grep -q 'vars.HOMELAB_OWNER' "$W"
+  # 재실행 축도 함께 요구한다 — 이 진입점의 경계는 두 축이 함께여야 성립한다.
+  grep -qF '[ "$ATTEMPT" = "1" ] ||' "$W"
 }
 
 @test "credential-expiry source label is registered in the notify.sh enum (forward cross-check)" {
