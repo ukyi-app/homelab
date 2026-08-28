@@ -108,22 +108,13 @@ DETECT='
   }
   END { printf "READFILES=%d\n", nfiles > "/dev/stderr" }
 '
-errlog="$(mktemp)"
-trap 'rm -f "$errlog"' EXIT
-arc=0
-findings="$(awk "$DETECT" "${FILES[@]}" 2>"$errlog")" || arc=$?
-if [ "$arc" -ne 0 ]; then
-  # ① 검출기 사망은 "매치 0건"이 아니다 — `|| true`로 삼키면 "0건 OK"가 된다.
-  echo "FAIL: check-scan-producers: 검출기가 실패했다(awk rc=${arc}) — 판정 불가는 '통과'가 아니다." >&2
-  grep -v '^READFILES=' "$errlog" >&2 || true
-  exit 1
-fi
-read_files="$(sed -n 's/^READFILES=//p' "$errlog")"
-# ③ 실제로 읽은 파일 수 == 열거 수. SCAN 신호는 "열거한" 수라 검출이 중간에 무너져도 그대로 나간다.
-if [ "${read_files:-0}" -ne "$n" ]; then
-  echo "FAIL: check-scan-producers: 검출기가 읽은 파일 ${read_files:-0}건 != 열거 ${n}건 — 판정 불가(fail-closed)." >&2
-  exit 1
-fi
+# 검출 실행(인자 검증 · rc 포착 · READFILES 대조 · 임시파일 정리)은 detect_run(scripts/lib/guard.sh)
+# 소유다 — 여긴 awk 본문만 갖는다.
+# ⚠️ 여기 있던 **손 복사 16줄**을 커널로 되돌린다. #532가 명명한 재발 형태가 바로 그 복사였고,
+#    그것을 막던 지속성 단언이 **문구 리터럴** 매칭이라 문구를 바꿔 쓴 이 사본이 통째로 빠져나갔다
+#    (2026-08-27 실측 — 형태 대조로 교체하며 발견). `trap 'rm -f' EXIT`도 함께 사라진다:
+#    커널은 trap 없이 정리한다(zsh source 시 호출자 셸을 오염시키지 않는 규율).
+findings="$(detect_run check-scan-producers "$DETECT" "${FILES[@]}")"
 # 바닥값 + SCAN 마커 — 검출이 살아 있음을 확인한 **뒤**에 낸다.
 scan_floor check-scan-producers "$n" "$MIN_FILES" || exit 1
 

@@ -29,12 +29,32 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "a hyphenated suffix key resolves to its own domain (nul-scan does not misbind)" {
-  # 다중 도메인 접미사 해소의 실 가드 증인 — platform은 통과 마커를 내고 nul-scan만 붕괴한다.
+  # 다중 도메인 접미사 해소의 실 가드 증인 — `--floor nul-scan=`이 **nul-scan에만** 물린다.
+  # ⚠️ 종전엔 "platform이 통과 마커를 낸다"로 그것을 보였는데, 그 단언은 접미사 해소가 아니라
+  #    **즉시 방출**이라는 옛 계약에 걸려 있었다(일괄 방출로 바꾸면 붕괴한 실행은 어떤 마커도 안 낸다).
+  #    목적은 그대로 두고 수단만 바꾼다: 붕괴가 nul-scan에만 일어났음을 진단으로 확인한다.
   run bash "$ROOT/scripts/check-skeleton.sh" --floor nul-scan=99999
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "check-skeleton:nul-scan.*열거 붕괴"
-  echo "$output" | grep -q "^SCAN: check-skeleton:platform:"
+  out="$output"
+  run grep -q "check-skeleton:platform.*열거 붕괴" <<<"$out"
+  [ "$status" -ne 0 ]
+  run grep -q "check-skeleton:bats.*열거 붕괴" <<<"$out"
+  [ "$status" -ne 0 ]
   out="$output"
   run grep -q "^SCAN: check-skeleton:nul-scan:" <<<"$out"
+  [ "$status" -ne 0 ]
+}
+
+@test "a later-domain collapse withholds EVERY domain marker (batch emission, not just its own)" {
+  # 위 증인은 **붕괴한 도메인 자신의** 마커만 본다(:bats는 첫 도메인이라 앞이 없다). 이건 다른 축이다.
+  # 종전엔 도메인마다 즉시 방출해서, 뒤 도메인이 붕괴한 실행이 앞 도메인의 "N건 검사했다"를 그대로
+  # 냈다(실측: :bats·:platform 마커가 나갔다). 붕괴한 실행의 **어떤** 건수도 "검사했다"로 읽히면 안 된다.
+  # TS adapter(guardMain)는 이미 일괄 방출이라 셸만 이 규약에서 이탈해 있었다.
+  run bash "$ROOT/scripts/check-skeleton.sh" --floor nul-scan=99999
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "check-skeleton:nul-scan.*열거 붕괴"
+  out="$output"
+  run grep -q "^SCAN: check-skeleton:" <<<"$out"
   [ "$status" -ne 0 ]
 }

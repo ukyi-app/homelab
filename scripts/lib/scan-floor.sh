@@ -70,15 +70,20 @@ scan_signal() {
   echo "SCAN: $1: $2"
 }
 
+# 4번째 인자 `quiet`는 **마커만 삼킨다 — 판정은 그대로다.** 억제는 출력 채널의 성질이지 판정의
+# 성질이 아니다(TS adapter가 이미 확정한 의미론 — tools/lib/scan-floor.ts).
+# 왜 필요한가: 도메인이 여럿인 가드가 도메인마다 즉시 방출하면, 뒤 도메인이 붕괴한 실행이 앞
+# 도메인의 "N건 검사했다"를 그대로 낸다 — 붕괴한 실행의 어떤 건수도 "검사했다"로 읽히면 안 된다.
+# 소비자는 통과 도메인의 마커를 **판정을 다 한 뒤** scan_signal로 일괄 방출한다(TS guardMain과 동형).
 scan_floor() {
-  label="$1"; got="$2"; min="$3"
+  label="$1"; got="$2"; min="$3"; quiet="${4:-}"
   if [ "$got" -lt "$min" ]; then
     echo "FAIL: ${label}: 스캔 ${got}건 < ${min} — 열거 붕괴 의심(0건 검사 후 초록이 되는 자리)." >&2
     return 1
   fi
   # 바닥값을 통과한 실행만 신호를 낸다 — 실패 경로는 이미 stderr로 시끄럽고, 그때의 건수는
   # "검사했다"가 아니라 "붕괴했다"는 뜻이라 같은 마커로 내면 소비자가 정반대로 읽는다.
-  scan_signal "$label" "$got"
+  [ "$quiet" = quiet ] || scan_signal "$label" "$got"
   return 0
 }
 

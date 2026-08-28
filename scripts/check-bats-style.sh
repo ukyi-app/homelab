@@ -32,9 +32,7 @@ fi
 # 명시-파일 모드($# > 0)는 원소가 항상 ≥1이라 이 분기에 도달하지 않지만, 픽스처가 1건짜리로
 # 부를 수 있으므로 바닥값은 기본 모드에만 건다(선례: check-app-netpol의 --root 면제). 래칫 아님.
 if [ "$#" -eq 0 ] || floor_set check-bats-style; then
-  scan_floor check-bats-style "${#FILES[@]}" "$(floor_of check-bats-style 150)" || exit 1
-else
-  scan_signal check-bats-style "${#FILES[@]}"   # 바닥값 면제 모드도 신호는 낸다(06 판별자)
+  scan_floor check-bats-style "${#FILES[@]}" "$(floor_of check-bats-style 150)" quiet || exit 1
 fi
 DETECT=""
 IFS='' read -r -d '' DETECT <<'AWK' || true
@@ -43,8 +41,19 @@ FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++ }
 {
   line=$0
   if (inhere){ if(line ~ ("^[ \t]*"delim"[ \t]*$")) inhere=0; next }
-  if (match(line, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/)) {
-    d=substr(line,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; next
+  # ⚠️ **주석 스킵이 heredoc 매치보다 먼저 온다 — 순서가 곧 판정이다.** 뒤집으면 인용된 heredoc
+  #    표기 한 줄이 @test의 나머지를 통째로 지우고, 그 침묵은 red가 아니다(형제
+  #    check-locale-collation.sh와 같은 결함 — 착지 전 실측 이 도메인 5파일 602줄).
+  #    아래 intest 본문의 `t ~ /^#/`는 intest 판정 **뒤**라 heredoc 매치에 원리적으로 닿지 못한다.
+  if (line ~ /^[ \t]*#/) next
+  hl = line
+  # `<<<` herestring은 heredoc 시작이 아니다 — match()가 **2번째** `<`부터 `<< "foo"`로 읽는다.
+  # (형제 check-host-ports.sh·check-locale-collation.sh와 같은 관용구 — 오인원 열거 1번.)
+  gsub(/<<</, "@HERESTRING@", hl)
+  # 산술 좌시프트 `$(( a << b ))`도 heredoc이 아니다(오인원 열거 2번).
+  if (hl ~ /\$\(\(/) gsub(/<</, "@SHIFT@", hl)
+  if (match(hl, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/)) {
+    d=substr(hl,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; next
   }
   if (line ~ /^@test .*\{[ \t]*$/){ intest=1; pend=""; next }
   if (!intest) next
@@ -60,6 +69,8 @@ END { printf "READFILES=%d\n", nfiles > "/dev/stderr" }
 AWK
 # 검출 실행(인자 검증·rc 포착·READFILES 대조)은 detect_run(guard.sh) 소유 — 여긴 awk 본문만.
 findings="$(detect_run check-bats-style "$DETECT" "${FILES[@]}")"
+# 검출기가 끝까지 돌았다 — 이제 마커를 낸다(검출기가 죽으면 이 줄에 닿지 않는다).
+scan_signal check-bats-style "${#FILES[@]}"
 neg="$(printf '%s\n' "$findings" | grep -c '\[NEG\]' || true)"; neg="${neg//[^0-9]/}"; neg="${neg:-0}"
 bb="$(printf '%s\n' "$findings" | grep -c '\[BB\]' || true)"; bb="${bb//[^0-9]/}"; bb="${bb:-0}"
 printf '%s\n' "$findings" | grep -E '\[(NEG|BB)\]' || true   # gate bats가 [NEG]/[BB] 검증

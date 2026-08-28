@@ -36,7 +36,7 @@ guard_init check-image-pins
 
 # ⚠️ MIN_SCAN_APPS 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거).
 #    앱이 0개인 동안은 레인2 열거 0건이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
-ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; ROOT_OVERRIDDEN=0
+ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; SCOPE_NARROWED=0
 # 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 01 — 구 --min-scan/
 # --min-scan-apps 폐지). 선언 라벨은 **방출 라벨의 부분집합**이어야 한다(커버리지 증인이 정적 대조 —
 # 선언 오타가 조용히 꺼진 바닥값이 되는 자리). :platform은 바닥값 없는 신호 전용이라 선언 밖이다
@@ -45,7 +45,7 @@ take_floors "check-image-pins:total check-image-pins:apps" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --root) ROOT="$2"; ROOT_OVERRIDDEN=1; shift 2 ;;
+    --root) ROOT="$2"; SCOPE_NARROWED=1; shift 2 ;;
     --allowlist) ALLOWLIST="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -178,7 +178,15 @@ scanned_lane2=$((scanned - scanned_lane1))
 # --- scan-floor: 스캔이 의심스럽게 적으면(글롭/제외 파손) fail-loud ---
 # 합계 도메인도 커널 경유다(:total — kernel-followups 01 리뷰 수용: 손조립 판정은 라벨이 없어
 # --floor 선언과 방출 라벨이 어긋나는 어휘 이탈이었다). 판정·문구·마커는 scan_floor 소유.
-scan_floor check-image-pins:total "$scanned" "$MIN_SCAN" || exit 1
+# 픽스처 모드(--root)엔 **기본값을** 적용하지 않는다 — 형제 도메인 `:apps`와 같은 형태다.
+# 픽스처는 정당하게 소수의 파일만 만들고, 그대로 걸면 픽스처 호출마다 `--floor total=<n>`을
+# 달아야 한다(그 의례가 게이트 bats에 18줄로 있었다 — 비대칭의 직접 비용).
+# 단 `--floor total=<n>`을 **명시하면** 픽스처에서도 적용한다(floor_set 판정) — 그렇지 않으면
+# 이 바닥값 자체를 red-green으로 실증할 방법이 없다(가드가 자기 검증을 못 받는 자리).
+# 판정만 한다(quiet) — 마커는 **전 도메인 판정 뒤** 아래에서 일괄 방출한다.
+if [ "$SCOPE_NARROWED" -eq 0 ] || floor_set check-image-pins:total; then
+  scan_floor check-image-pins:total "$scanned" "$MIN_SCAN" quiet || exit 1
+fi
 # ⚠️ **합계 바닥값은 작은 레인의 붕괴를 원리적으로 못 잡는다.** 실측 분해(앱 철거 전): 레인1
 # (platform) 34건 · 레인2(apps) 2건. 레인2가 0이 돼도 레인1만으로 34 ≥ 20이라 위 검사는 절대 발화하지 않는다 —
 # 그동안 apps 레인의 digest 핀 강제가 통째로 사라져도 초록이었다는 뜻이다. 레인마다 자기 바닥값이 필요하다.
@@ -186,13 +194,15 @@ scan_floor check-image-pins:total "$scanned" "$MIN_SCAN" || exit 1
 # 픽스처 모드(--root)엔 **기본값을** 적용하지 않는다 — 픽스처는 정당하게 한 레인만 만든다
 # (선례: check-app-netpol). 단 `--floor apps=<n>`을 **명시하면** 픽스처에서도 적용한다(floor_set 판정) —
 # 그렇지 않으면 이 바닥값 자체를 red-green으로 실증할 방법이 없다(가드가 자기 검증을 못 받는 자리).
-if [ "$ROOT_OVERRIDDEN" -eq 0 ] || floor_set check-image-pins:apps; then
-  scan_floor check-image-pins:apps "$scanned_lane2" "$MIN_SCAN_APPS" || exit 1
-else
-  scan_signal check-image-pins:apps "$scanned_lane2"
+if [ "$SCOPE_NARROWED" -eq 0 ] || floor_set check-image-pins:apps; then
+  scan_floor check-image-pins:apps "$scanned_lane2" "$MIN_SCAN_APPS" quiet || exit 1
 fi
 # 레인1은 자기 바닥값이 없다(합계 MIN_SCAN이 사실상 전담 — 레인2 최대치가 한 자릿수다).
 # 그래도 실행 관측 신호는 내야 한다 — 06이 "이 호출이 실 도메인에 닿았는가"를 판정하는 입력이다.
+# ── 마커 일괄 방출 — 전 도메인이 바닥값을 통과한 뒤에만 나간다 ──
+# 순서는 종전과 같다(total → apps → platform). 면제 모드에서도 신호는 낸다.
+scan_signal check-image-pins:total "$scanned"
+scan_signal check-image-pins:apps "$scanned_lane2"
 scan_signal check-image-pins:platform "$scanned_lane1"
 
 if [ "$fail" -gt 0 ]; then

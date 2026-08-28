@@ -829,3 +829,21 @@ PY
   run bash "$ROOT/scripts/check-scan-producers.sh" --bogus
   [ "$status" -eq 2 ]
 }
+
+@test "scan_floor with quiet checks the floor but withholds the marker" {
+  # TS 커널이 이미 확정한 의미론이다 — **억제(quiet)는 출력 채널의 성질이지 판정의 성질이 아니다**
+  # (tools/lib/scan-floor.ts). 셸 adapter에만 그 프리미티브가 없어서 다중 도메인 가드가 도메인마다
+  # 즉시 방출했고, **붕괴한 실행이 앞 도메인의 "N건 검사했다"를 그대로 냈다**(실측 3가드).
+  # 통과 + quiet → 마커 없음, 종료코드 0.
+  run bash -c '. "$1"; scan_floor demo 10 10 quiet' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # 붕괴 + quiet → **판정은 그대로 red**이고 진단은 나간다(진단은 억제 대상이 아니다).
+  run bash -c '. "$1"; scan_floor demo 0 10 quiet' _ "$LIB"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '열거 붕괴'
+  # quiet를 안 주면 종전과 같다 — 선택 인자라 하위호환이다.
+  run bash -c '. "$1"; scan_floor demo 10 10' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [ "$output" = "SCAN: demo: 10" ]
+}
