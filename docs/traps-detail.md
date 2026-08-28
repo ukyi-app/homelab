@@ -1831,3 +1831,29 @@ selfHeal과 플립플롭한다.
 - ⚠️ **트리거 열거는 안전 판정이 될 수 없다.** 재실행이 트리거를 우회하므로, 워크플로를
   `on:` 키로 선별해 "밖은 안전"으로 읽으면 그것 자체가 「열거 붕괴 → vacuous green」의 한 사례다.
 > 가드: `tools/tests/test_mutation-dispatch.bats`, `.github/workflows/create-app.yaml`
+### 프로브는 호출이 아니다 — `command -v X`와 미평가 라벨이 X의 증인 노릇을 해서 mirrored 선언이 자기 자신을 증명한다
+- **병(라이브 실측)**: `check-ci-parity`의 방향 ④는 "mirrored로 선언한 로컬 커맨드가 `make -n ci`
+  출력에 있어야 한다"였고, 구현은 `makeOut.includes(local)` 한 줄이었다. 그런데 `make -n` 출력에는
+  **호출이 아닌 텍스트**가 섞여 있다:
+  ```make
+  @if command -v actionlint >/dev/null 2>&1; then actionlint; \
+    else echo "actionlint(워크플로 정적 검사)" >> $(CI_UNEVAL); fi
+  ```
+  한 줄에 `actionlint`가 **세 번** 나오는데 그중 실제 호출은 하나다. 나머지 둘은 **전제 프로브**
+  (도구의 존재를 묻는다)와 **미평가 라벨**(부르지 *못했다*는 기록이다)이다.
+  ⇒ `then actionlint;`를 `then :;`로 바꿔 실제 호출만 지워도 게이트는 **초록**이었다.
+- **왜 이 클래스가 재발하는가**: 이 레포는 `make -n` 출력을 **데이터로 읽는다**(패리티 대조 ·
+  check-guard-authority의 venue 수집). Makefile 텍스트를 파싱하지 않고 make 자신에게 해소를 맡기는
+  것은 옳은 결정이지만(조건부·변수·전제 타깃의 재구현이 곧 다음 드리프트다), 그 대가로 출력에
+  **실행되지 않을 분기까지 전부** 들어온다. `-n`은 "무엇이 실행될 것인가"가 아니라 "셸에 무엇이
+  넘어갈 것인가"를 보여 준다 — 그 둘의 차이가 이 함정이다.
+- ⇒ **처방: 대조 전에 호출이 아닌 형태를 지운다.** `command -v \S+`와 append-echo
+  (`echo "…" >> <파일>`) 둘뿐이다. recipe의 append-echo는 구조상 게이트 호출일 수 없다.
+  ⚠️ **변수명에 기대지 마라** — `$(CI_UNEVAL)`이 리네임되면 정제가 조용히 멎고 fail-open이 돌아온다.
+  형태로 지운다.
+  ⚠️ **정제본을 모든 검사에 쓰지 마라.** `--floor` 금지 검사는 원문을 봐야 한다: 프로브 안이든
+  라벨 안이든 `--floor`가 보이면 위반이다. 정제는 ④ 하나의 국소 처방이다.
+- **오탐 검증이 처방의 절반이다**: 정제가 정상 원장을 물면 아무도 안 켠다. 실측 2026-08-28로
+  mirrored 22항목 · local 34문자열 전건이 정제 후에도 매치했다(사라진 것 0건). 이 수치를 재지
+  않고 정제를 넣는 것은 다른 fail-open을 만드는 일이다.
+> 가드: `tools/check-ci-parity.ts`, `tests/gates/test_make-ci-parity.bats`
