@@ -58,8 +58,10 @@ ALLOW 4 · **미분류 0**이었고, 뮤테이션 6종이 전건 red였다. 재�
 
 ## 잔여 위험 — 명시한다
 
-- **`run_attempt` 증가는 이 레포에서 실측된 적이 없다.** 문서화된 거동이고 처방은 그 확인과
-  무관하게 옳지만(둘 다 요구하는 것이 더 약해질 수 없다), 확인 전까지는 문서 신뢰다.
+- ~~`run_attempt` 증가는 실측된 적이 없다~~ → **닫혔다.** 라이브 실측 2026-08-28(run 32814398310):
+  `attempt=2 · event=workflow_dispatch · actor=ukyi-homelab-dispatch[bot] · trig=ukkiee`.
+  재실행이 `run_attempt`을 올리고 이벤트를 재생하며 `actor`를 최초 트리거 신원으로 보존한다는
+  것이 셋 다 확인됐다. ⇒ 이 패스의 처방은 **방어적 강화가 아니라 라이브 구멍을 닫은 것**이다.
 - **`bump-poll.yaml`은 여전히 앱 레포 dispatch의 정당한 대상이다.** 안전이 폴링 로직의
   fail-closed 검증(main reachable · descendant · digest 핀 · autoDeploy 누락=거부)에 걸려 있고,
   그 검증 자체의 증인은 이 패스 밖이다.

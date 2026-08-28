@@ -1790,6 +1790,16 @@ selfHeal과 플립플롭한다.
 - **병(실측 2026-08-28)**: owner 경계 가드 15사본이 `[ "$ACTOR" = "$OWNER" ]` 하나만 봤고
   `github.triggering_actor`는 `.github/` 전체에서 **0건**이었다. 15사본 전건이
   `ACTOR=owner · TRIGGERING=타인` 케이스를 통과했다(실측 — 가드 본문을 그대로 실행해 확인).
+- **라이브 실측 2026-08-28 (run 32814398310).** bot이 디스패치했던 run을 owner가 재실행하고 즉시
+  취소한 뒤 run 객체를 읽었다:
+  ```
+  attempt=2  event=workflow_dispatch  actor=ukyi-homelab-dispatch[bot]  trig=ukkiee
+  ```
+  셋이 함께 확인된다 — `run_attempt`이 1→2로 **증가**하고, `event`가 **재생**되고,
+  `actor`가 **최초 트리거 신원으로 보존**된 채 `triggering_actor`만 개시자로 바뀐다.
+  관측 방향은 공격 방향의 역상이지만 성립하는 **규칙은 같다**: `actor` = 최초 트리거,
+  `triggering_actor` = 재실행 개시자. 따라서 owner의 과거 디스패치를 다른 주체가 재실행하면
+  `actor` 단독 비교는 통과한다.
 - **왜 이것이 이 레포의 함정인가**: 트리거 경계가 "앱 레포는 dispatch만 할 수 있다"로 서술돼
   있는데, fine-grained **Actions: write**는 `gh workflow run`뿐 아니라 run 재실행
   (`POST /actions/runs/{id}/rerun`, `rerun-failed-jobs`, `jobs/{id}/rerun`)을 포함한다.
