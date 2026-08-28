@@ -12,6 +12,10 @@
 # **생산자·레지스트리도 함께 시드**한다 — 린터는 레지스트리의 생산자 파일이 실재하고, 그 파일이 선언된
 # 메트릭을 실제로 push하며, cron 스케줄 파일이 존재할 것을 강제한다(fail-open 4구멍 중 F-3·F-4).
 # 프로덕션 레지스트리를 약화시키지 않으려고 테스트는 **--registry로 픽스처를 주입**해 격리한다.
+# ⚠️ `$ROOT`은 여기서 정의한다 — `run bun -e` 안에 bats 지역 변수를 보간할 때 그것이 비어 있으면
+# 경로가 조용히 깨진다(이 레포의 「정적 증인의 두 함정」과 같은 형태). 형제 게이트 bats의 관례다.
+setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"; }
+
 _seed() {
   local root="$1" name="${2:-}" expr="${3:-}" i
   mkdir -p "$root/platform/victoria-stack/prod/rules" "$root/platform/fake/prod" "$root/scripts" "$root/policy"
@@ -75,10 +79,11 @@ JSON
     echo "    groups:"
     echo "      - name: probe"
     echo "        rules:"
-    for i in $(seq 1 30); do
-      echo "          - alert: ok$i"
-      echo "            expr: up == 0"
-    done
+    # 더미는 **1건**이면 족하다 — 픽스처의 바닥값을 `--floor rules=1`로 낮춰 두었기 때문이다.
+    # (0으로 줄이면 이름 없이 _seed를 부르는 테스트가 룰 0건이 되어 붕괴 판정에 걸린다.)
+    # 실 트리의 바닥값 MIN_SCAN=30은 그대로다 — 프로덕션을 지키는 것은 그쪽이다.
+    echo "          - alert: ok1"
+    echo "            expr: up == 0"
     if [ -n "$name" ]; then
       echo "          - alert: $name"
       echo "            expr: '$expr'"
@@ -95,9 +100,27 @@ _track_fixture() {
   git -C "$1" add -A || { echo "git add 실패: $1"; return 1; }
 }
 
+# 픽스처 레지스트리를 external 주기만 갈아끼워 다시 쓴다. **나머지 항목은 _seed와 동일해야 한다** —
+# 다르면 완전성 가드가 "미등재 생산자"로 red를 내고, 그러면 이 테스트는 자기 축(주기 수치 도메인)을
+# 재는 것이 아니라 남의 축을 재게 된다(거짓 red).
+_registry_with_period() {   # $1=root  $2=periodSec(JSON 리터럴)
+  cat > "$1/registry.json" <<JSON
+[
+  { "metric": "ghcr_latest_digest", "producer": "platform/fake/prod/digest-exporter.yaml",
+    "schedule": { "kind": "cron", "file": "platform/fake/prod/digest-exporter.yaml" } },
+  { "metric": "files_backup_last_success_timestamp", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": $2, "why": "테스트 픽스처" } },
+  { "metric": "files_data_bulk_avail_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": $2, "why": "테스트 픽스처" } },
+  { "metric": "files_data_bulk_size_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": $2, "why": "테스트 픽스처" } }
+]
+JSON
+}
+
 _lint() {   # $1=root — 픽스처를 추적 상태로 만든 뒤 픽스처 레지스트리를 주입해 린터 실행
   _track_fixture "$1"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json" --supply-policy "$1/supply.json"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json" --supply-policy "$1/supply.json" --floor rules=1
   echo "$output"
 }
 
@@ -109,10 +132,43 @@ _refute_marker() {   # $1=정규식 $2=출력
   fi
 }
 
+# 픽스처(_seed)가 쓰는 정책과 **등가**인 리터럴 판정 컨텍스트.
+# ⚠️ 이 등가는 손으로 유지된다 — `_seed`의 정책을 바꾸고 여기를 안 바꾸면 아래 38건이 조용히
+#    딴 것을 잰다. 그 드리프트는 「두 경로가 일치한다」 테스트가 잡는다(이 파일 맨 아래).
+_probe_ctx_js() {
+  cat <<'JS'
+const ctx = {
+  denyMetrics: ["kube_pod_container_status_restarts_total"],
+  allowed: new Set(),
+  pushPeriodSec: new Map([
+    ["ghcr_latest_digest", 600],
+    ["files_backup_last_success_timestamp", 86400],
+    ["files_data_bulk_avail_bytes", 86400],
+    ["files_data_bulk_size_bytes", 86400],
+  ]),
+  lookbackSec: 300,
+  supply: new Map([
+    ["fixture_external_ts", { metric: "fixture_external_ts", supply: "external",   decreasing: "impossible", why: "픽스처" }],
+    ["fixture_local_ts",    { metric: "fixture_local_ts",    supply: "in-cluster", decreasing: "impossible", why: "픽스처" }],
+    ["fixture_budget",      { metric: "fixture_budget",      supply: "in-cluster", decreasing: "is-truth",   why: "픽스처" }],
+  ]),
+  cite: "policy/alert-supply-monotonicity.json",
+};
+JS
+}
+
+# 판정을 **인-프로세스**로 부른다. 계약($status·$output)은 종전과 같아 호출자 38곳이 무변경이다.
+# 종전에는 건마다 mktemp + 픽스처 시드 + git init + 가드 전량 실행을 지불하고 문구 하나를 grep했다.
+# ⚠️ expr는 env로 넘긴다 — 스크립트에 보간하면 따옴표·백틱이 든 식에서 조용히 깨진다.
 _run_probe() {   # $1=alert명 $2=expr → run 결과를 호출자가 판정
-  tmp="$(mktemp -d)"
-  _seed "$tmp" "$1" "$2"
-  _lint "$tmp"
+  run env PROBE_NAME="$1" PROBE_EXPR="$2" bun -e "
+    import { lintExpr } from '${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts';
+    $(_probe_ctx_js)
+    const v = lintExpr({ file: 'rules/probe.yaml', name: process.env.PROBE_NAME },
+                       process.env.PROBE_EXPR, ctx);
+    for (const x of v.violations) console.log(x);
+    process.exit(v.violations.length ? 1 : 0);
+  "
 }
 
 # 동결 결함 픽스처(tests/gates/fixtures/*.yaml — 실제 역사적 버그의 expr 스냅샷)를 **무수정**으로
@@ -854,7 +910,7 @@ _seed_real_supply() {   # $1=root $2=원장 항목 수
 
 _lint_real_supply() {   # $1=root — supply 원장만 실 경로에서 읽게 한다(주입 면제 없음)
   _track_fixture "$1"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json" --floor rules=1
   echo "$output"
 }
 
@@ -895,4 +951,230 @@ _lint_real_supply() {   # $1=root — supply 원장만 실 경로에서 읽게 �
   for label in rules denylist supply supply-refs; do
     printf '%s\n' "$output" | grep -qE "^SCAN: check-alert-rules:${label}: [0-9]+$"
   done
+}
+
+@test "a registry period of zero is rejected (it would silently drop the metric from mode C)" {
+  # 프로덕션 필터는 `period > LOOKBACK`이다 — 0은 조용히 탈락하고 그 메트릭이 모드 C 도메인에서
+  # 사라진다. 이 레지스트리가 막으려는 죽은-알림 결함 그 자체다. TS `number`는 0·음수·비유한을
+  # 전부 허용한다(이 레포의 함정 「TS 바닥값은 coercion 뒤에서 조용히 꺼진다」와 같은 클래스).
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _registry_with_period "$tmp" 0
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*periodSec'
+}
+
+@test "a negative registry period is rejected (same rule, second witness)" {
+  # 위 테스트와 같은 규칙(양수)의 두 번째 증인이다 — 0과 음수는 서로 다른 오타 경로로 들어온다.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _registry_with_period "$tmp" -60
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*periodSec'
+}
+
+@test "a non-finite registry period is rejected (JSON 1e999 parses to Infinity)" {
+  # JSON은 NaN을 표현하지 못하지만 `1e999`는 **Infinity로 파싱된다**. Infinity > LOOKBACK은 참이라
+  # 0·음수와 반대 방향으로 샌다 — 그 메트릭이 모드 C 대상에 **영원히 남고** rollup 윈도 하한이
+  # 무한대가 되어 어떤 윈도도 통과한다(조용한 무력화).
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _registry_with_period "$tmp" 1e999
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*periodSec'
+}
+
+# ── loadRegistry 검증 분기의 증인 (착지 전 실측: 5분기 전부 무증인) ────────────────────
+# 이 다섯은 **기존 거동**이라 red→green이 아니다. 검증이 있는데 아무도 그것을 밟지 않았고,
+# 밟지 않는 판정 조건은 무증인이다(AGENTS.md 「테스트 이름은 인터페이스가 아니다」).
+# 레지스트리가 망가지면 loadRegistry가 완전성 가드보다 **먼저** fatal하므로 최소 픽스처로 충분하다 —
+# 완전성 가드가 다른 이유로 red를 내면 이 테스트들은 자기 축을 못 잰다.
+_bad_registry() {   # $1=root  $2=JSON 본문
+  printf '%s\n' "$2" > "$1/registry.json"
+  _lint "$1"
+}
+
+@test "registry validation rejects a non-array document" {
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  _bad_registry "$tmp" '{ "metric": "m" }'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  # ⚠️ **방출 형태로 고정한다.** bun은 에러 시 소스 문맥 줄을 함께 찍는데, 그 줄에 진단 문구가
+  # 리터럴로 들어 있어 맨 substring grep은 검증을 지워도 초록이다(실측: 뮤테이션이 green이었다).
+  # fatal()은 `FAIL: `를 접두로 붙인다 — 그 형태만 인정한다.
+  echo "$output" | grep -q '^FAIL: .*PushEntry 배열'
+}
+
+@test "registry validation rejects an entry missing metric or producer" {
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  _bad_registry "$tmp" '[{ "producer": "scripts/fake-files-backup.sh", "schedule": { "kind": "cron", "file": "x" } }]'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*metric·producer 필수'
+}
+
+@test "registry validation rejects a cron schedule without a file" {
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  _bad_registry "$tmp" '[{ "metric": "m", "producer": "scripts/fake-files-backup.sh", "schedule": { "kind": "cron" } }]'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*schedule.cron에 file 필수'
+}
+
+@test "registry validation rejects an external schedule whose reason is blank" {
+  # 무근거 상수 금지 — periodSec은 관측이 아니라 계약이라 근거가 값의 절반이다.
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  _bad_registry "$tmp" '[{ "metric": "m", "producer": "scripts/fake-files-backup.sh", "schedule": { "kind": "external", "periodSec": 60, "why": "   " } }]'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*무근거 상수 금지'
+}
+
+@test "registry validation rejects an unknown schedule kind" {
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  _bad_registry "$tmp" '[{ "metric": "m", "producer": "scripts/fake-files-backup.sh", "schedule": { "kind": "timer", "periodSec": 60 } }]'
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*schedule.kind는 cron|external'
+}
+
+@test "registry validation rejects a duplicate metric (the later entry would silently win)" {
+  # `registryMetrics`는 Set이고 `pushPeriod`는 Map이라 같은 metric이 두 번 등재되면 **뒤에 온 항목이
+  # 조용히 이긴다** — 생산자나 주기가 다르면 모드 C 판정이 말없이 바뀐다. 같은 계열의 fail-open이다.
+  # ⚠️ 픽스처는 _seed의 4항목을 그대로 두고 **중복 한 줄만** 더한다. 항목을 줄이면 완전성 가드가
+  #    "미등재 메트릭"으로 red를 내고, 그러면 이 테스트는 자기 축이 아니라 남의 축을 잰다.
+  tmp="$(mktemp -d)"; _seed "$tmp"
+  cat > "$tmp/registry.json" <<'JSON'
+[
+  { "metric": "ghcr_latest_digest", "producer": "platform/fake/prod/digest-exporter.yaml",
+    "schedule": { "kind": "cron", "file": "platform/fake/prod/digest-exporter.yaml" } },
+  { "metric": "files_backup_last_success_timestamp", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처" } },
+  { "metric": "files_data_bulk_avail_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처" } },
+  { "metric": "files_data_bulk_size_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": 86400, "why": "테스트 픽스처" } },
+  { "metric": "files_data_bulk_size_bytes", "producer": "scripts/fake-files-backup.sh",
+    "schedule": { "kind": "external", "periodSec": 60, "why": "중복 — 주기가 다르고 조용히 이긴다" } }
+]
+JSON
+  _lint "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '^FAIL: .*중복'
+}
+
+# ── 판정 seam: lintExpr 를 파일시스템 없이 직접 부른다 ────────────────────────────────
+# 착지 선례와 같은 형태다(tools/check-image-ownership.ts:363 · check-workflow-readiness.ts:593).
+
+@test "lintExpr goes silent when the mode A policy is empty (observable only through the seam)" {
+  # 오늘 CLI로는 관측 불가다 — denylist 파일을 치우면 **바닥값이 먼저 죽어**(entry floor) 모드 A의
+  # 침묵 자체를 볼 수 없다. 정책이 비면 그 모드가 아무것도 안 잡는다는 사실이 가드의 사각이었다.
+  # ⚠️ 쌍으로 단언한다 — 같은 식이 **정책만으로** 뒤집혀야 이 테스트가 자기 축을 잰다.
+  run bun -e '
+    import { lintExpr } from "'"$ROOT"'/tools/check-alert-rules.ts";
+    const at = { file: "r.yaml", name: "A1" };
+    const expr = "increase(some_metric[5m]) > 0";
+    const base = { allowed: new Set(), pushPeriodSec: new Map(), lookbackSec: 300,
+                   supply: new Map(), cite: "policy/x.json" };
+    const armed = lintExpr(at, expr, { ...base, denyMetrics: ["some_metric"] });
+    const empty = lintExpr(at, expr, { ...base, denyMetrics: [] });
+    console.log(armed.violations.length === 1 && empty.violations.length === 0
+      ? "ok" : `armed=${armed.violations.length} empty=${empty.violations.length}`);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx 'ok'
+}
+
+@test "lintExpr emits modes in the documented order A then B then D then C" {
+  # 불변식: **방출 순서는 소스 순서(A→B→D→C)다.** 정렬하면 회귀 앵커가 깨진다.
+  # CLI로는 관측 불가다 — renderViolations가 세 그룹으로 평탄화해 모드 간 순서를 지운다.
+  # 기대값의 출처는 코드가 아니라 이 불변식이다(코드에서 다시 계산하면 항진명제가 된다).
+  run bun -e '
+    import { lintExpr } from "'"$ROOT"'/tools/check-alert-rules.ts";
+    const ctx = { allowed: new Set(), lookbackSec: 300, cite: "policy/x.json",
+      denyMetrics: ["restarts_total"],
+      pushPeriodSec: new Map([["pushed_metric", 600]]),
+      supply: new Map() };
+    const expr = "increase(restarts_total[5m]) / on(x) raw_thing > 0"
+      + " and (time() - some_ts_metric) > 100 and pushed_metric > 1";
+    const v = lintExpr({ file: "r.yaml", name: "P" }, expr, ctx);
+    console.log(v.violations.map((x) => (x.match(/\[모드 ([ABCD])/) || [])[1]).join(""));
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx 'ABDC'
+}
+
+@test "lintExpr counts an exempted reference in supplyRefs (the floor measures the loop, not the violations)" {
+  # `supplyRefs`는 **면제된 참조도 센다**(allowlist 판정보다 앞에서 증가한다). 콜사이트의
+  # supply-refs 바닥값은 "강제 루프가 살아 있는가"를 재는 것이지 "위반이 몇 건인가"가 아니다 —
+  # 둘을 같은 수로 재면 면제가 늘 때 바닥값이 조용히 무너진다.
+  run bun -e '
+    import { lintExpr } from "'"$ROOT"'/tools/check-alert-rules.ts";
+    const base = { lookbackSec: 300, cite: "policy/x.json", denyMetrics: [],
+                   pushPeriodSec: new Map(), supply: new Map() };
+    const expr = "(time() - some_ts_metric) > 100";
+    const armed = lintExpr({ file: "r.yaml", name: "P" }, expr, { ...base, allowed: new Set() });
+    const exempt = lintExpr({ file: "r.yaml", name: "P" }, expr, { ...base, allowed: new Set(["P"]) });
+    console.log(armed.violations.length > 0 && exempt.violations.length === 0
+      && armed.supplyRefs > 0 && exempt.supplyRefs === armed.supplyRefs ? "ok"
+      : `armed=${armed.violations.length}/${armed.supplyRefs} exempt=${exempt.violations.length}/${exempt.supplyRefs}`);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx 'ok'
+}
+
+@test "the mode C selector is exclusive at the lookback boundary (period == lookback is not a target)" {
+  # 프로덕션 셀렉터는 `period > lookback`이다. 경계에서 배타인지는 **파생이 lintExpr 안에 있어야만**
+  # 잴 수 있다 — 대상 목록을 인자로 받으면 테스트가 소속을 스스로 골라 셀렉터를 한 번도 안 밟는다
+  # (설계 게이트 r1 F2). 룩백을 300 아닌 값으로 두어 상수 우연도 배제한다.
+  run bun -e '
+    import { modeCTargets } from "'"$ROOT"'/tools/check-alert-rules.ts";
+    const at = (p) => ({ allowed: new Set(), lookbackSec: 420, cite: "x", denyMetrics: [],
+                         supply: new Map(), pushPeriodSec: new Map([["m", p]]) });
+    console.log([419, 420, 421].map((p) => modeCTargets(at(p)).length).join(","));
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx '0,0,1'
+}
+
+@test "the real repository keeps a non-shrinking mode C target set (literal contexts cannot drift from the loader)" {
+  # **이 대조가 없으면 이 설계는 vacuous green을 만든다.** 리터럴 ctx로 도는 단위 테스트가 실
+  # 로더와 어긋나면 "단위는 초록, 실 레포는 red"가 된다. loadPolicy는 export하지 않으므로 대조는
+  # CLI로 선다 — OK 문구가 싣는 `[모드 C 대상 N]`이 그 유일한 기계 입력이다.
+  # ⚠️ "비어 있지 않음"으로는 부족하다 — 대상 하나만 살아남아도 통과한다(설계 게이트 r1 F2).
+  #    바닥값은 오늘의 실측 대상 수에 건다. 도메인이 정당하게 줄지 않는 한 손대지 않는다(래칫 규율).
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "${BATS_TEST_DIRNAME}/.."
+  [ "$status" -eq 0 ]
+  n="$(printf '%s\n' "$output" | sed -n 's/.*\[모드 C 대상 \([0-9]*\)\].*/\1/p')"
+  [ -n "$n" ]
+  [ "$n" -ge 21 ]
+}
+
+@test "the in-process probe context agrees with what the fixture actually loads (drift guard)" {
+  # 이관이 만든 **유일한 새 위험**: `_seed`의 정책을 바꾸고 `_probe_ctx_js`를 안 바꾸면 38건이
+  # 조용히 딴 것을 잰다(리터럴 ctx는 픽스처를 따라가지 않는다). 한 식을 **두 경로**로 돌려
+  # 위반이 같음을 단언해 그 드리프트를 잡는다.
+  # 식은 ctx의 세 축을 함께 밟는다 — denylist(모드 A) · push 주기/룩백(모드 C) · 공급원(모드 D).
+  local e='increase(kube_pod_container_status_restarts_total[5m]) > 0 and ghcr_latest_digest > 1 and (time() - fixture_external_ts) > 100'
+  # 정책 주소는 경로가 갈리므로(주입 픽스처 vs 실 경로) 정규화한 뒤 비교한다.
+  _norm() { sed -E 's#[^ ]*supply\.json#<POLICY>#g; s#policy/alert-supply-monotonicity\.json#<POLICY>#g' | LC_ALL=C sort; }
+
+  tmp="$(mktemp -d)"
+  _seed "$tmp" EqProbe "$e"
+  _lint "$tmp"
+  cli="$(printf '%s\n' "$output" | grep -oE '\[모드 [ABCD]:.*' | _norm)"
+  rm -rf "$tmp"
+
+  _run_probe EqProbe "$e"
+  inp="$(printf '%s\n' "$output" | grep -oE '\[모드 [ABCD]:.*' | _norm)"
+
+  [ -n "$cli" ]                      # 양성 대조 — 둘 다 비면 등식이 항진명제가 된다
+  [ "$cli" = "$inp" ]
 }
