@@ -1,8 +1,14 @@
 #!/usr/bin/env bats
-# verify-traps.sh — docs/traps.md enforcement 원장의 **3방향** 드리프트 가드.
+# verify-traps.sh — 함정 원장 3종의 **4방향** 드리프트 가드.
 #   ① 원장의 guard 경로가 실재하는가(삭제/리네임 드리프트 — KD-4)
 #   ② traps-detail.md의 '> 가드:' 주석이 원장에 추적되는가(SSOT → 원장)
 #   ③ 원장의 각 행이 SSOT의 '> 가드:' 줄에 대응하는가(원장 → SSOT). ①②는 이 갭을 원리적으로 못 본다.
+#   ④ SSOT 섹션 헤드라인 ↔ AGENTS.md 한줄 인덱스의 **완전 일치**(개수 등식 포함).
+# ⚠️ **argc 규약: 0(실 트리) 또는 3(원장·SSOT·인덱스 트리플).** 부분 지정은 exit 2다 — 일부만
+#    픽스처로 바꾸면 남은 하나가 실 트리라 그 방향이 의도하지 않은 이유로 판정되고, 유일한 회피가
+#    "그 방향을 argc로 끄기"인데 그것이 이 가드가 닫은 fail-open 그 자체다(가드 헤더가 논증한다).
+#    ⇒ 아래 픽스처 레인은 전부 트리플을 넘긴다. 인덱스 픽스처는 그 레인의 SSOT 헤드라인과 짝이 맞아야
+#    한다 — 안 맞으면 방향 ④가 먼저 물어 레인이 의도한 방향이 아닌 이유로 red가 된다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 
 setup() {
@@ -10,6 +16,13 @@ setup() {
   TMP="$(mktemp -d)"
 }
 teardown() { rm -rf "$TMP"; }
+
+# 픽스처 인덱스 — 인자로 받은 헤드라인들을 AGENTS.md의 절 형식으로 적는다. 방향 ④가 SSOT 픽스처와
+# 짝을 이뤄야 하므로, 각 레인은 자기 detail의 '### ' 줄과 **같은 텍스트**를 여기 넘긴다.
+_mkindex() {
+  out="$1"; shift
+  { echo '## 라이브에서 검증된 함정'; for h in "$@"; do echo "- $h"; done; echo '## 다음 절'; } > "$out"
+}
 
 @test "verify-traps passes — ledger guards exist + SSOT guard annotations tracked (reverse tie)" {
   run bash scripts/verify-traps.sh
@@ -24,7 +37,8 @@ teardown() { rm -rf "$TMP"; }
   # ⚠️ 픽스처 detail에는 '> 가드:'를 두지 않는다 — 두면 방향 ②(SSOT→원장)가 먼저 물어 이 레인이
   #   **의도한 방향이 아닌 이유로** 판정된다(레인이 초록/빨강이어도 무엇을 쟀는지 알 수 없다).
   printf '### 다른 함정\n- 본문\n' > "$TMP/detail.md"
-  run bash scripts/verify-traps.sh "$TMP/orphan.md" "$TMP/detail.md"
+  _mkindex "$TMP/index.md" '다른 함정'
+  run bash scripts/verify-traps.sh "$TMP/orphan.md" "$TMP/detail.md" "$TMP/index.md"
   [ "$status" -ne 0 ]
   echo "$output" | grep -Fq "SSOT(traps-detail.md)에 대응"
 }
@@ -35,11 +49,12 @@ teardown() { rm -rf "$TMP"; }
   # ⚠️ 픽스처 detail에는 '> 가드:'를 두지 않는다 — 두면 방향 ②(SSOT→원장)가 먼저 물어 이 레인이
   #   **의도한 방향이 아닌 이유로** 판정된다(레인이 초록/빨강이어도 무엇을 쟀는지 알 수 없다).
   printf '### 다른 함정\n- 본문\n' > "$TMP/detail.md"
-  run bash scripts/verify-traps.sh "$TMP/ok.md" "$TMP/detail.md"
+  _mkindex "$TMP/index.md" '다른 함정'
+  run bash scripts/verify-traps.sh "$TMP/ok.md" "$TMP/detail.md" "$TMP/index.md"
   [ "$status" -eq 0 ]
   # 음성 대조 — 마커를 guard 열에 적으면 면제되지 않는다(엉뚱한 열에 적어 통과하는 것을 막는다).
   printf '| 함정 | where | guard |\n|---|---|---|\n| 잘못된 위치 | gate | `scripts/verify-traps.sh` SSOT없음(불변식) |\n' > "$TMP/wrong.md"
-  run bash scripts/verify-traps.sh "$TMP/wrong.md" "$TMP/detail.md"
+  run bash scripts/verify-traps.sh "$TMP/wrong.md" "$TMP/detail.md" "$TMP/index.md"
   [ "$status" -ne 0 ]
 }
 
@@ -48,7 +63,8 @@ teardown() { rm -rf "$TMP"; }
   #   판정 불가가 아니라 **무엇이 틀렸는지 말하지 않는 실패**라 진단이 통째로 사라진다.
   printf '| 함정 | where | guard |\n|---|---|---|\n| 면제된 행 | gate · SSOT없음(불변식) | `scripts/verify-traps.sh` |\n' > "$TMP/led.md"
   printf '### 서사만 있는 함정\n- 가드 주석이 없다\n' > "$TMP/noguard.md"
-  run bash scripts/verify-traps.sh "$TMP/led.md" "$TMP/noguard.md"
+  _mkindex "$TMP/index.md" '서사만 있는 함정'
+  run bash scripts/verify-traps.sh "$TMP/led.md" "$TMP/noguard.md" "$TMP/index.md"
   [ "$status" -eq 0 ]
   echo "$output" | grep -Fq "실재 + SSOT"
 }
@@ -64,7 +80,9 @@ teardown() { rm -rf "$TMP"; }
 
 @test "verify-traps flags a ledger guard path that does not exist" {
   printf '| 함정 | status | guard |\n|---|---|---|\n| x | gate-enforced | `tools/tests/nonexistent-guard.bats` |\n' > "$TMP/bad.md"
-  run bash scripts/verify-traps.sh "$TMP/bad.md"
+  printf '### 아무 함정\n- 본문\n' > "$TMP/detail.md"
+  _mkindex "$TMP/index.md" '아무 함정'
+  run bash scripts/verify-traps.sh "$TMP/bad.md" "$TMP/detail.md" "$TMP/index.md"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "nonexistent-guard"
 }

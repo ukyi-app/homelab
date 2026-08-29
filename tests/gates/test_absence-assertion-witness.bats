@@ -100,11 +100,19 @@ _tree() {
 
 # ── 레인 C: 연산자 자체의 감도(자기 뮤테이션) ────────────────────────────────────────────────────
 # `test_traps-sync.bats`의 역방향 tie는 부재 대상($D = docs/traps-detail.md)에 대한 양성 대조가
-# **없다** — 그 자리에서는 `-eq 1`이 유일한 가드다. 그래서 이 레인만이 "연산자를 `-ne 0`으로
-# 되돌리면 구멍이 다시 열린다"를 직접 증언할 수 있다.
-# (되돌린 실행이 초록으로 돌아가는 것은 `scripts/verify-traps.sh`가 `[ -f "$DETAIL" ]`로 감싸
-#  traps-detail.md 부재를 **묵인**하기 때문이다 — 같은 @test의 나머지 단언은 red를 만들지 않는다.)
-@test "the converted operator is load-bearing (reverting -eq 1 to -ne 0 re-opens the hole)" {
+# **없다** — 그 자리에서는 `-eq 1`이 유일한 grep-rc 가드다.
+#
+# ⚠️ **이 레인의 원래 결론은 09번 착지로 무효가 됐다.** 도입 시(01번) 이 레인은 "연산자를 `-ne 0`으로
+#    되돌리면 구멍이 다시 열린다(초록으로 돌아간다)"를 증언했고, 그것이 가능했던 이유는
+#    `scripts/verify-traps.sh`가 `[ -f "$DETAIL" ]`로 감싸 traps-detail.md 부재를 **묵인**했기 때문이다.
+#    09번이 정확히 그 fail-open을 닫았다(세 대상 전부 LEDGER와 같은 규율로 문다). 그래서 이제는
+#    연산자를 되돌려도 같은 @test의 `:29`(`run bash verify-traps.sh; [ -eq 0 ]`)가 red를 만든다.
+#
+# ⇒ 이 레인은 그 **이중화 자체**를 증언하도록 바뀐다. 대상 부재가 두 겹으로 닫혔다는 것이 09번의
+#    산출물이고, 한 겹(연산자)을 되돌려도 다른 겹(가드의 fail-closed)이 여전히 잡는다.
+#    연산자 **단독** 감도는 레인 D·E가 실 파일에서 계속 잰다(그 자리들엔 형제 단언이 0건이라
+#    verify-traps 같은 이중 겹이 없다).
+@test "the missing SSOT is closed twice over (operator plus the guard's own fail-closed)" {
   t="$(_tree c)"
   g="$t/tests/gates/test_traps-sync.bats"
   [ -s "$g" ]
@@ -130,8 +138,11 @@ _tree() {
   mv "$g.rev" "$g"
 
   run bats -f 'reverse guard-path-tie' "$g" </dev/null
-  [ "$status" -eq 0 ]
-  printf '%s\n' "$output" | grep -q '^ok 1 '
+  # 09번 이후: 연산자를 되돌려도 여전히 red다 — verify-traps 자신이 대상 부재를 fail-closed로 문다.
+  # 그 red가 **다른 줄**에서 난다는 것이 이중화의 증거다(연산자 줄이 아니라 :29의 가드 호출).
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -q '^not ok 1 '
+  printf '%s\n' "$output" | grep -Fq 'verify-traps.sh'
 }
 
 # ── 레인 D: tests/ 레인 — 파괴 동사(destroy-node) ─────────────────────────────────────────────────

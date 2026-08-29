@@ -121,7 +121,7 @@
   가드 **파일의 존재**만 보지 @test 이름까지 보지 않는다 — 그래서 이 문단이 그 구멍을 메운다).
 > 가드: `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats`
 
-### 상주 워크로드 OOM 진단 — 코어 수는 그럴듯한 오답이다 (D-e)
+### 상주 워크로드 OOM 진단 — 코어 수는 그럴듯한 오답이다 (D-e) · 처방 후 같은 지표를 다시 재라
 - 2026-08-14 NUC 콜드스타트에서 `vector`·`victorialogs`가 OOM 루프를 돌았다(2시간에 22회·16회).
   **1차 진단은 "노드 코어 수(6→14)가 늘어 런타임이 워커/P를 더 띄운 탓"이었고, 틀렸다.**
   핀(`--threads 6`·`GOMAXPROCS=6`)을 넣어 vector 워커를 15→8로 줄였는데 커널 OOM 기록의
@@ -188,7 +188,7 @@
   (`TREE_N -eq TREE_ALL_N`). 이제 새 확장자는 조용히 빠지는 대신 글롭을 넓히라고 요란하게 운다.
 > 가드: `infra/k3s-bootstrap/tests/test_03-host-config.bats`
 
-### hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다
+### hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다 — root가 만든 파일을 non-root가 못 연다(빈 PVC 전용)
 - Pod `securityContext.fsGroup`은 kubelet이 소유권을 관리하는 볼륨에만 걸린다. **local-path류의
   hostPath 백엔드 PV는 대상이 아니다** — 2026-08-14 NUC 실측: `fsGroup: 65532`인데 PVC 디렉토리가
   `root:root 0777`이었다. 디렉토리가 0777이라 non-root도 **생성**은 되므로 문제가 없어 보이지만,
@@ -200,7 +200,7 @@
   ⇒ 처방: **PVC에 파일을 만드는 컨테이너를 최종 소비자와 같은 uid로 돌린다**(fsGroup에 기대지 말 것).
 > 가드: `platform/adguard/prod/test_adguard_auth.bats`
 
-### yq -e는 값이 false면 exit 1이다
+### yq -e는 값이 false면 exit 1이다 — 키 부재(null)와 구별하지 않아 올바른 매니페스트에서 red가 난다
 - `yq -e`의 종료코드는 "출력이 truthy인가"다 — **키가 없을 때(`null`)와 값이 `false`일 때를 구별하지
   않는다.** 그래서 올바른 매니페스트(`isWALArchiver: false`)에서 bats가 red가 된다.
   `-e` 없이 읽고 `printf '%s' "$v" | grep -qxF -- 'false'`로 정확 일치를 단언하면 미기재(`null`)와
@@ -818,7 +818,7 @@ terraform `drift=false` 같은 **결과 플래그**가 전부 준비상태로 �
 
 > 가드: `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats`
 
-### 이미지 핀의 *존재* ≠ *일치* ≠ *소유자*
+### 이미지 핀의 *존재* ≠ *일치* ≠ *소유자* — 하드코딩 소비처 목록은 자기 자신에게만 정확하다
 
 세 가지 서로 다른 질문이 하나로 뭉뚱그려져 있었다.
 
