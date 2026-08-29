@@ -13,13 +13,20 @@
 #    되돌리면 위 (a)~(c) 안전망을 지키는 @test들이 destroy-node.sh 부재에도 초록이 된다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 sh=scripts/destroy-node.sh
+reader=infra/k3s-bootstrap/versions-read.sh
 
 _fixture() {                 # $1 = BULK_MIGRATION_WINDOW_UNTIL 값 · $2 = findmnt이 답할 bulk SOURCE(선택)
   FX="$BATS_TEST_TMPDIR/fx$RANDOM"
   mkdir -p "$FX/scripts" "$FX/infra/k3s-bootstrap" "$FX/bin"
   cp "$sh" "$FX/scripts/destroy-node.sh"
+  VENV="$FX/infra/k3s-bootstrap/versions.env"
   { printf 'export BULK_MIGRATION_WINDOW_UNTIL="%s"\n' "$1"
-    printf 'export BULK_STORAGE_PATH="/mnt/bulk"\n'; } > "$FX/infra/k3s-bootstrap/versions.env"
+    printf 'export BULK_STORAGE_PATH="/mnt/bulk"\n'; } > "$VENV"
+  # ⚠️ 픽스처는 versions.env **와 리더**를 함께 재합성한다. 리더는 자기 옆의 versions.env를
+  #    기본 피연산자로 삼으므로(SCRIPT_DIR 관용구), 이 한 줄이 없으면 destroy-node.sh가 (2)에서
+  #    '리더 비실행'으로 죽고 아래 국면 A 단언들이 조용히 vacuous해진다.
+  cp "$reader" "$FX/infra/k3s-bootstrap/versions-read.sh"
+  [ -x "$FX/infra/k3s-bootstrap/versions-read.sh" ]
   # 기본 SOURCE = 국면 B(별도 디바이스). 국면 A를 흉내 내려면 $2로 bind 소스를 준다.
   FM_SRC="${2:-/dev/nvme1n1p1}"
   # argv 기록기 — 권한 명령을 **기록만** 한다. 두 가지만 실물처럼 답한다:
@@ -41,7 +48,19 @@ REC
   chmod +x "$FX/bin/k3s-uninstall.sh"
   REC_LOG="$FX/argv.log"; : > "$REC_LOG"
   PATH="$FX/bin:$PATH"
-  export FX REC_LOG PATH FM_SRC
+  export FX VENV REC_LOG PATH FM_SRC
+}
+# 창 값을 **판정 불가**로 만드는 뮤테이션. 옛 sed 파생(`… 2>/dev/null || true`)에서는 넷 다
+# 빈 문자열로 접혀 "국면 B — 파괴해도 좋다"로 읽혔다. 이 4종이 그 fail-open의 직접 증인이다.
+_break_window() {            # $1 = 뮤테이션 이름 (_fixture 뒤에 부른다)
+  case "$1" in
+    file-missing) rm -f "$VENV" ;;
+    key-missing)  printf 'export BULK_STORAGE_PATH="/mnt/bulk"\n' > "$VENV" ;;
+    unquoted)     { printf 'export BULK_MIGRATION_WINDOW_UNTIL=\n'
+                    printf 'export BULK_STORAGE_PATH="/mnt/bulk"\n'; } > "$VENV" ;;
+    duplicate)    printf 'export BULK_MIGRATION_WINDOW_UNTIL=""\n' >> "$VENV" ;;
+    *)            return 1 ;;
+  esac
 }
 _run_destroy() {             # 나머지 인자는 env 오버라이드
   run env "$@" FM_SRC="$FM_SRC" K3S_RUN="$FX/bin/rec" bash "$FX/scripts/destroy-node.sh"
@@ -70,6 +89,60 @@ _run_destroy() {             # 나머지 인자는 env 오버라이드
   printf '%s' "$output" | grep -qF -- '2026-12-31'
   run bash -c "grep -c . '$REC_LOG' || true"
   printf '%s' "$output" | grep -qx '0'
+}
+
+@test "destroy-node REFUSES when the window value is UNDECIDABLE (the old sed folded all of these to empty)" {
+  # ⚠️ 이 @test가 티켓 07의 본안이다. 옛 파생은 파일 부재 · 키 부재 · 줄 포맷 변경 · 중복을 **전부**
+  #    빈 문자열로 접었고, 바로 아래 `[ -n ]`이 그 넷을 모두 "국면 B, 파괴 허용"으로 읽었다.
+  #    같은 파일의 BULK_STORAGE_PATH는 반대로 fail-closed였다 — 한 파일 안의 그 비대칭이 병소였다.
+  # ⚠️ 완화 사실(무효화되는 것이 무엇인지 정확히 적는다): (2b)의 findmnt 정체성 게이트가 뒤에 있으므로
+  #    옛 형태에서도 **데이터 유실까지 가지는 않았다.** 깨지는 것은 dr-drill.sh 헤더가 명시한
+  #    "거부가 부작용 0으로 끝난다"는 성질이다 — 거부가 권한 상승 조회 뒤로 밀린다.
+  for m in file-missing key-missing unquoted duplicate; do
+    _fixture ''
+    _break_window "$m"
+    _run_destroy DR_DRILL_DESTROY_CONFIRM=1 K3S_UNINSTALL="$FX/bin/k3s-uninstall.sh"
+    [ "$status" -ne 0 ]
+    # 진단은 **판정 불가**를 말해야 한다 — "창이 비었다"가 아니다.
+    printf '%s' "$output" | grep -qF -- 'BULK_MIGRATION_WINDOW_UNTIL을 판정하지 못했다'
+    # 리더가 낸 사유 토큰이 실제로 흘러나온다(리더가 조용히 죽으면 이 줄이 red다).
+    printf '%s' "$output" | grep -qE 'versions-read: (FILE_MISSING|KEY_MISSING|MALFORMED|DUPLICATE):'
+    # 권한 명령이 하나도 나가지 않았다 — 거부가 부작용 0으로 끝난다.
+    run bash -c "grep -c . '$REC_LOG' || true"
+    printf '%s' "$output" | grep -qx '0'
+  done
+}
+
+@test "a DECLARED empty window still destroys — undecidable and legitimately-empty are different things" {
+  # ⚠️ 위 @test의 짝이다. 리더가 '전부 거부'로 퇴화하면 이 자리가 red다 — 그것이 곧
+  #    "빈 값도 못 읽는다"는 회귀이고, 국면 B에서 드릴이 영영 못 도는 상태다.
+  _fixture ''
+  grep -qxF 'export BULK_MIGRATION_WINDOW_UNTIL=""' "$VENV"   # 양성 대조: 창이 **선언된** 빈 값이다
+  _run_destroy DR_DRILL_DESTROY_CONFIRM=1 K3S_UNINSTALL="$FX/bin/k3s-uninstall.sh"
+  [ "$status" -eq 0 ]
+  grep -qF -- 'rm -rf /var/lib/rancher' "$REC_LOG"
+}
+
+@test "destroy-node REFUSES when the versions.env reader is absent or not executable" {
+  # ⚠️ 리더가 실행 비트를 잃으면(형제 bulk-gate-probe.sh가 644다) 판정 경로가 통째로 사라진다.
+  #    그 상태는 '국면 B'가 아니라 판정 불가다.
+  _fixture ''
+  chmod -x "$FX/infra/k3s-bootstrap/versions-read.sh"
+  _run_destroy DR_DRILL_DESTROY_CONFIRM=1 K3S_UNINSTALL="$FX/bin/k3s-uninstall.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '리더가 실행 가능하지 않다'
+  run bash -c "grep -c . '$REC_LOG' || true"
+  printf '%s' "$output" | grep -qx '0'
+}
+
+@test "both versions.env derivations go through the reader (no sed one-liner survives)" {
+  # 소비자 2곳이 **각각** 리더를 지난다 — 개수가 아니라 키 이름으로 잠근다(손 관리 수치 금지).
+  grep -qE '^[^#]*"\$VERSIONS_READ" BULK_MIGRATION_WINDOW_UNTIL' "$sh"
+  grep -qE '^[^#]*"\$VERSIONS_READ" BULK_STORAGE_PATH' "$sh"
+  # 옛 관용구가 되살아나면 red. `^[^#]*` — 이 파일과 destroy-node.sh 양쪽 **주석이 같은 리터럴을
+  # 담고 있어서**(fail-open의 근거를 적은 자리) 전체 줄 grep은 주석에 걸려 거짓 red를 낸다.
+  run grep -nE "^[^#]*sed -n 's/\^export " "$sh"
+  [ "$status" -eq 1 ]
 }
 
 @test "destroy-node fails loudly when the k3s uninstaller is absent (absence is not 'nothing to do')" {

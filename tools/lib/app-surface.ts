@@ -11,6 +11,7 @@
 // 앱-외부 표면(apps.json 행·메모리 원장 행·digest-exporter APPS 항목)은 이 module의 소관이 아니다 —
 // 각자의 SSOT 헬퍼(digest-exporter.ts·ledger-budget.ts)와 parity 게이트가 지킨다.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { descriptorAutoDeploy } from "./image-pin.ts";
 
@@ -18,10 +19,14 @@ import { descriptorAutoDeploy } from "./image-pin.ts";
 // appRel = 레포-상대(와이어·계약 문자열용 — plan.writePath·verbs surfacePath가 이 형태를 실어 나른다).
 // appPaths = 파일시스템 접근용(root 결합 — root는 정규화하지 않으므로 trailing slash 없는 형태가
 // 호출부 계약이다). 둘은 appRel 하나에서 파생된다 — 두 벌이 드리프트할 자리가 없다.
+// sealed는 **값**이다(파일명 인자를 받지 않는다) — 앱 배포 디렉토리의 봉인본은
+// `<app>-secrets.sealed.yaml` 하나뿐이라는 것이 이미 강제되는 불변식이기 때문이다
+// (scripts/check-app-deploy.sh 파일명 규약 절: 규약 외 *.sealed.yaml은 FAIL). 임의 파일명을
+// 받는 signature는 그 불변식보다 넓어서, 규약 밖 경로를 만들 자유를 타입이 남겨 두었다.
 export type AppRelPaths = {
   dir: string; prod: string;
   values: string; sourceRepo: string; bindings: string; kustomization: string; activation: string;
-  sealed: (file: string) => string;
+  sealed: string;
 };
 
 export function appRel(app: string): AppRelPaths {
@@ -34,7 +39,7 @@ export function appRel(app: string): AppRelPaths {
     bindings: `${prod}/.bindings.json`,
     kustomization: `${prod}/kustomization.yaml`,
     activation: `${prod}/.activation`,
-    sealed: (file: string) => `${prod}/${file}`,
+    sealed: `${prod}/${app}-secrets.sealed.yaml`,
   };
 }
 
@@ -44,7 +49,7 @@ export function appPaths(root: string, app: string): AppRelPaths {
     dir: `${root}/${r.dir}`, prod: `${root}/${r.prod}`,
     values: `${root}/${r.values}`, sourceRepo: `${root}/${r.sourceRepo}`, bindings: `${root}/${r.bindings}`,
     kustomization: `${root}/${r.kustomization}`, activation: `${root}/${r.activation}`,
-    sealed: (file: string) => `${root}/${r.sealed(file)}`,
+    sealed: `${root}/${r.sealed}`,
   };
 }
 
@@ -81,7 +86,9 @@ export type AppSurfaceFacts = {
   values: unknown;                                          // values.yaml(YAML 직렬화)
   sourceRepo: string;                                       // bump-poll의 발신 레포 바인딩(<owner>/<repo>)
   bindings: { autoDeploy: boolean };                        // 승인 정책 레지스트리(poll-ghcr의 유일 소스)
-  sealed?: { file: string; bytes: string | Uint8Array } | null; // 봉인본 — 원본 바이트 그대로(checksum 정합)
+  // 봉인본 — 원본 바이트 그대로(checksum 정합). 파일명은 facts가 아니라 경로 SSOT(appRel.sealed)가
+  // 소유한다: 콜사이트가 이름을 고를 자유가 없어야 check-app-deploy 파일명 규약과 폭이 같다.
+  sealed?: { bytes: string | Uint8Array } | null;
   // 공개 앱의 재노출 게이트 마커. 함수형이면 **다른 표면을 전부 기록한 뒤** 평가한다 — 마커의
   // surfaceHash는 디스크에 실재하는 표면(단, .activation 제외 canonical)을 해시해야 하기 때문이다.
   // (객체 | 콜백 유니온을 명시해야 컴파일 층위에도 계약이 남는다 — unknown과의 유니온은 붕괴한다.)
@@ -101,15 +108,17 @@ export function writeAppSurface(root: string, app: string, facts: AppSurfaceFact
   written.push(rel.bindings);
   // kustomization은 봉인본 유무와 무관하게 항상 필요하다(appset source #3가 kustomize 렌더 —
   // 없으면 values.yaml을 매니페스트로 파싱해 "groupVersion shouldn't be empty"로 죽는다).
+  // resources 항목은 경로 SSOT의 basename — 기록 경로와 kustomization 참조가 한 값에서 나와
+  // 갈라질 수 없다(종전에는 콜사이트가 넘긴 file이 둘 다를 정해, 규약 밖 이름도 정합했다).
   writeFileSync(p.kustomization, toYaml({
     apiVersion: "kustomize.config.k8s.io/v1beta1", kind: "Kustomization",
     namespace: "prod",
-    ...(facts.sealed ? { resources: [facts.sealed.file] } : {}),
+    ...(facts.sealed ? { resources: [basename(rel.sealed)] } : {}),
   }));
   written.push(rel.kustomization);
   if (facts.sealed) {
-    writeFileSync(p.sealed(facts.sealed.file), facts.sealed.bytes); // 원본 바이트 그대로(checksum과 정합)
-    written.push(rel.sealed(facts.sealed.file));
+    writeFileSync(p.sealed, facts.sealed.bytes); // 원본 바이트 그대로(checksum과 정합)
+    written.push(rel.sealed);
   }
   if (facts.activation != null) {
     const marker = typeof facts.activation === "function" ? facts.activation() : facts.activation;

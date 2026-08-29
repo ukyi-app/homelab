@@ -174,3 +174,165 @@ setup() {
   run grep -q '^SCAN: check-bats-style:' <<<"$out"
   [ "$status" -ne 0 ]
 }
+
+# ── [ABS] 레인 — bats 부재 단언(철자 + 형태) ──────────────────────────────────────────────────
+# 근거·분모 규약은 scripts/check-bats-style.sh 헤더가 소유한다. 여기 증인이 재는 것은 셋이다:
+#   ⓐ 옛 철자(`-ne 0`)가 red다 · ⓑ 정당한 비대상(히어스트링)이 red가 **아니다** ·
+#   ⓒ 형태 요구가 **접속사**다 — 증인 둘 중 하나만 있으면 red(01~04가 손으로 건 setup 단언이
+#     영구 가드에게 보이지 않던 자리를 닫는 것이 이 클래스의 존재 이유다).
+# 픽스처는 printf로 만든다(bats 전처리기가 .bats 소스의 heredoc 속 '@test'를 재작성한다 — 위 주석 참조).
+
+@test "detector rejects the stale absence spelling (-ne 0 on a grep with a path operand)" {
+  printf '%s\n' \
+    '@test "stale absence spelling" {' \
+    '  run grep -q TOKEN some/file' \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_stale.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_stale.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS\]'
+}
+
+@test "a herestring absence assertion is NOT a finding (the denominator excludes it)" {
+  # ⚠️ 이 구별이 이 가드 설계의 첫 제약이다 — 착지 시점 잔여 `-ne 0`은 95곳이고 **전부**
+  #    히어스트링이었다(그 중 tests/gates/test_scan-floor.bats 18곳). 히어스트링은 경로
+  #    피연산자가 없어 rc 2 채널 자체가 없으므로 그 자리의 `-ne 0`은 옳다. 분모에 넣으면
+  #    그 파일이 영구 red 또는 영구 예외 목록 항목이 된다.
+  printf '%s\n' \
+    '@test "herestring absence" {' \
+    '  run grep -qF -- TOKEN <<<"$out"' \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_hs.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_hs.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "a recursive absence assertion with neither witness is a finding" {
+  printf '%s\n' \
+    '@test "recursive absence, no witnesses" {' \
+    '  run grep -rn TOKEN "$TREE"' \
+    '  [ "$status" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_rec0.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_rec0.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-REC\]'
+}
+
+@test "the same recursive assertion passes once floor AND positive control are present" {
+  # 음성 대조 — 이 레인이 '재귀면 무조건 red'가 아니라 **증인 두 종류의 부재**를 재는지 고정한다.
+  # 바닥값은 setup()에 둔다: 파일 수준 스코프가 실제로 증인을 공급하는지도 여기서 함께 잰다
+  # (`bats -f`로 @test를 개별 실행해도 setup은 먼저 돈다 — 01번이 별도 @test에서 setup으로
+  #  양성 대조를 옮긴 이유와 같다).
+  printf '%s\n' \
+    'setup() {' \
+    '  [ -d "$TREE" ]' \
+    '}' \
+    '@test "recursive absence, both witnesses" {' \
+    '  run grep -rl ANCHOR "$TREE"' \
+    '  [ "$status" -eq 0 ]' \
+    '  run grep -rn TOKEN "$TREE"' \
+    '  [ "$status" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_recok.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_recok.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "deleting the floor from that pair is red (the requirement is a conjunction)" {
+  printf '%s\n' \
+    '@test "recursive absence, positive control only" {' \
+    '  run grep -rl ANCHOR "$TREE"' \
+    '  [ "$status" -eq 0 ]' \
+    '  run grep -rn TOKEN "$TREE"' \
+    '  [ "$status" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_recpos.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_recpos.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-REC\]'
+}
+
+@test "deleting the positive control from that pair is red (the requirement is a conjunction)" {
+  printf '%s\n' \
+    'setup() {' \
+    '  [ -d "$TREE" ]' \
+    '}' \
+    '@test "recursive absence, floor only" {' \
+    '  run grep -rn TOKEN "$TREE"' \
+    '  [ "$status" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_recfl.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_recfl.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-REC\]'
+}
+
+@test "a loop-driven absence assertion carries the same requirement" {
+  # 루프는 목록이 비면 반복 0회라 **어떤 rc로도** 안 보인다(`for d in $DISPATCHERS` 실측 사례).
+  printf '%s\n' \
+    '@test "loop-driven absence, no witnesses" {' \
+    '  for f in "$WF"/*.yaml; do' \
+    '    run grep -q TOKEN "$f"' \
+    '    [ "$status" -eq 1 ]' \
+    '  done' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_loop.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_loop.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-LOOP\]'
+}
+
+@test "git grep needs the positive control and no filesystem floor (asymmetry is deliberate)" {
+  # pathspec은 파일시스템 경로가 아니라 바닥값을 걸 대상이 없고, pathspec이 추적 파일과 하나도
+  # 안 맞을 때 git grep은 128이 아니라 **rc 1**이다(실측 git 2.53.0) — 그 붕괴는 같은 pathspec의
+  # 양성 대조로만 보인다. 파일시스템 바닥값을 강요하면 실제 구멍을 안 닫는 줄을 세우게 된다.
+  printf '%s\n' \
+    '@test "git grep absence, no positive control" {' \
+    '  run git grep -n TOKEN -- "*.yaml"' \
+    '  [ "$status" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_git0.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_git0.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-GIT\]'
+  printf '%s\n' \
+    '@test "git grep absence, positive control only" {' \
+    '  git grep -q ANCHOR -- "*.yaml"' \
+    '  run git grep -n TOKEN -- "*.yaml"' \
+    '  [ "$status" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_gitok.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_gitok.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "detector rejects a pipeline-terminal grep -qv (line-wise inversion is not absence)" {
+  # ⚠️ 옵션 두 글자를 런타임에 조립한다 — 리터럴로 적으면 이 파일 자신이 [QV] 레인에 걸린다
+  #    (같은 처방: tests/gates/lib/heredoc-marker.sh — 고치려는 함정이 테스트를 쓰는 동안 물린다).
+  qv="-q""v"
+  printf '%s\n' \
+    '@test "qv absence" {' \
+    "  echo \"\$out\" | grep ${qv}F TOKEN" \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_qv.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_qv.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[QV\]'
+}
+
+@test "the state machine reaches 0-column function bodies, not just @test bodies" {
+  # 착지 전 검출기는 `^@test … {`로만 상태에 들어가서, 도메인에 있는 파일이어도 setup()·헬퍼
+  # 본문은 전부 판정 밖이었다(그 갭을 가드 헤더가 「부재-단언 클래스를 얹을 때의 몫」으로 계상해
+  # 뒀다). 이 증인이 그 확장을 고정한다 — `^@test`로 되돌리면 여기서만 red가 난다.
+  printf '%s\n' \
+    'make_stubs() {' \
+    '  run echo hi' \
+    '  ! echo "$output" | grep -q zzz' \
+    '  [ "$status" -eq 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_fn.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_fn.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[NEG\]'
+}
+
+@test "the default-mode summary announces the absence-assertion ratchet" {
+  # 래칫 판정이 통째로 빠져도 나머지 레인이 초록을 유지하면 아무도 red를 못 낸다 — 잔액 방출을
+  # 형태로 고정한다(형제 scan-floor 커널의 `SCAN:` 마커와 같은 규율: 판정했다는 사실이 관측 가능해야 한다).
+  run bash "$ROOT/scripts/check-bats-style.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '부재 단언 [0-9]+ \(baseline [0-9]+\)'
+}

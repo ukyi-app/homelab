@@ -131,6 +131,7 @@ jobs:
         run: |
           bash scripts/check-doc-index.sh
           bash scripts/check-bats-accounting.sh
+          bash scripts/check-bats-style.sh
           bash scripts/check-app-deploy.sh
           bash scripts/check-app-netpol.sh
           bash scripts/check-image-pins.sh

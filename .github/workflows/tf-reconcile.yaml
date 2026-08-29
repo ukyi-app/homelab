@@ -80,7 +80,6 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         with:
           root: cloudflare
-          state-key: cloudflare/prod/terraform.tfstate
       - name: drift 감지 (plan -out=tf.plan)
         id: drift
         run: |
@@ -198,7 +197,6 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         with:
           root: github
-          state-key: github/prod/terraform.tfstate
       - name: plan (드리프트 감지 — apply 안 함)
         id: drift
         if: steps.pf.outputs.configured == 'true'
@@ -319,7 +317,6 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         with:
           root: tailscale
-          state-key: tailscale/prod/terraform.tfstate
       - name: plan (드리프트 감지 — apply 안 함)
         id: drift
         if: steps.pf.outputs.configured == 'true'

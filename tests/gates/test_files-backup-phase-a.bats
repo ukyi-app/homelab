@@ -18,9 +18,13 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
-  V="$ROOT/infra/k3s-bootstrap/versions.env"
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  WIN="$(sed -n 's/^export BULK_MIGRATION_WINDOW_UNTIL="\(.*\)"$/\1/p' "$V")"
+  # ⚠️ SSOT 파생은 **리더를 지난다**(infra/k3s-bootstrap/versions-read.sh). 옛 sed 한 줄은 파일 부재 ·
+  #    키 부재 · 줄 포맷 변경을 전부 빈 문자열로 접었고, 이 가드에서 그 빈 문자열은 "창이 닫혔다"로
+  #    읽힌다 — 그러면 억제 절이 남아 있어도 아래 첫 @test가 초록이고, 나머지 둘은 skip이다.
+  #    즉 국면 B 전환의 강제 장치가 **파생 한 줄의 침묵으로** 통째로 꺼진다.
+  WIN="$("$ROOT/infra/k3s-bootstrap/versions-read.sh" BULK_MIGRATION_WINDOW_UNTIL)" \
+    || { echo "versions.env에서 BULK_MIGRATION_WINDOW_UNTIL을 판정하지 못했다 — 창 상태를 모르면 이 가드는 아무것도 강제하지 못한다"; return 1; }
 }
 
 # 배포되는 expr **본문만** 꺼낸다(ConfigMap → 내장 룰 YAML → 해당 alert).
