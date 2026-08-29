@@ -91,3 +91,27 @@ teardown() { rm -rf "$FX"; }
     false
   }
 }
+@test "check-image-ownership's REPINNED_OPS set matches the tool CATALOG keys (no silent drift on a new ops image)" {
+  # 세 사본 중 이 쌍만 무증인이었다. (CATALOG ↔ bump.yaml)은 바로 위 @test가 대조하지만
+  # (CATALOG ↔ `check-image-ownership.ts`의 REPINNED_OPS)는 **주석뿐이었다**(소비자 2줄, 테스트 참조 0건).
+  # 한쪽에만 새 ops 이미지를 넣으면 `resolveOwner`의 REPINNED_OPS 매치가 실패해 `renovateReaches`로
+  # 떨어지고, renovate.json의 kubernetes manager가 `^platform/.+\.ya?ml$`를 덮으므로 그 참조가
+  # "owner: renovate"로 **초록**이 된다 — 배포 사고가 아니라 **오귀속**이고, 그 가드 헤더가 존재
+  # 이유로 적은 실패가 정확히 그것이다. 위 @test와 같은 파서 관용구·같은 바닥값 형태로 그 갭을 닫는다.
+  own="$ROOT/tools/check-image-ownership.ts"
+  tool="$ROOT/tools/repin-ops-image.ts"
+  # REPINNED_OPS 정규식에서 이미지 키(<repo>:<tag>)를 뽑는다 — 표기가 refRe와 동형(`…\/<key>@sha256:…`)
+  # 이라 이 파싱이 성립한다. 표기가 다시 갈리면 여기서 먼저 드러난다(바닥값이 그 붕괴를 잡는다).
+  repinned="$(grep -oE '\\/[a-z0-9-]+:[a-z0-9._-]+@sha256:' "$own" | sed 's|^\\/||;s|@sha256:$||' | LC_ALL=C sort -u)"
+  # 도구 CATALOG 키 집합(위 @test와 동일 관용구)
+  catalog="$(grep -oE '"[a-z0-9-]+:[a-z0-9._-]+": \{ minSites' "$tool" | sed 's/": .*//;s/"//' | LC_ALL=C sort -u)"
+  # 열거 붕괴 바닥값 — 둘 다 최소 2(pg-tools·skopeo). 양쪽이 함께 0이면 등식은 공허하게 참이다.
+  [ "$(printf '%s\n' "$repinned" | grep -c .)" -ge 2 ]
+  [ "$(printf '%s\n' "$catalog" | grep -c .)" -ge 2 ]
+  [ "$repinned" = "$catalog" ] || {
+    echo "check-image-ownership REPINNED_OPS 집합 != 도구 CATALOG 키 집합 — 새 ops 이미지를 한쪽에만 추가했다"
+    echo "repinned:"; printf '%s\n' "$repinned"
+    echo "catalog:"; printf '%s\n' "$catalog"
+    false
+  }
+}

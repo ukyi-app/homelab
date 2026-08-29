@@ -21,6 +21,9 @@ _fixture() {
   cp "$ROOT/renovate.json" "$t/renovate.json"
   echo 'image: registry.example.com/thing:v1@sha256:1111111111111111111111111111111111111111111111111111111111111111' > "$t/platform/comp/prod/deploy.yaml"
   echo 'image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:2222222222222222222222222222222222222222222222222222222222222222' > "$t/platform/comp/prod/job.yaml"
+  # CATALOG 두 키를 **둘 다** 픽스처에 둔다 — 하나만 있으면 REPINNED_OPS 표기가 한쪽에서만 검증되고,
+  # 실제로 착지 전 두 정규식은 경로 구분자 요구 여부가 근거 없이 갈려 있었다(pg-tools 미요구·skopeo 요구).
+  echo 'image: ghcr.io/ukyi-app/skopeo:alpine@sha256:5555555555555555555555555555555555555555555555555555555555555555' > "$t/platform/comp/prod/skopeo.yaml"
   printf 'image:\n  repo: ghcr.io/ukyi-app/demo\n  tag: sha-abc\n  digest: sha256:3333333333333333333333333333333333333333333333333333333333333333\n' > "$t/apps/demo/deploy/prod/values.yaml"
   echo 'image: ghcr.io/ukyi-app/files:sha-x@sha256:4444444444444444444444444444444444444444444444444444444444444444' > "$t/platform/files/prod/deployment.yaml"
   printf '{"file":"deployment.yaml","path":["a"],"autoDeploy":true}\n' > "$t/platform/files/prod/.image-pin.json"
@@ -79,7 +82,10 @@ FIXTURE_ARGS="--floor refs=1"
   t="$(_fixture classes)"
   run bun "$ROOT/tools/check-image-ownership.ts" --repo-root "$t" $FIXTURE_ARGS --report
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q '^repin-ops-image'
+  # 두 ops 이미지 각각이 이 소유자로 분류되는지 — 집합이 아니라 원소별로 본다.
+  # 하나만 보면 REPINNED_OPS의 한 정규식이 깨져도 다른 하나가 클래스를 채워 초록이 된다.
+  echo "$output" | grep -q '^repin-ops-image .*pg-tools'
+  echo "$output" | grep -q '^repin-ops-image .*skopeo'
   echo "$output" | grep -q '^bump-poll .*apps/demo'
   echo "$output" | grep -q '^bump-poll .*platform/files'
   echo "$output" | grep -q '^renovate'

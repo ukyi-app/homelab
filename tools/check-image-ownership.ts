@@ -208,7 +208,17 @@ export type Owner = "repin-ops-image" | "bump-poll" | "renovate" | "none";
 
 // ops 미러 이미지의 canonical 태그 — 소유자는 build→bump write-back(repin-ops-image)이다.
 // tools/repin-ops-image.ts의 CATALOG와 같은 집합이어야 한다(둘 다 "이 이미지는 우리가 재핀한다"의 선언).
-const REPINNED_OPS = [/pg-tools:18-rclone@sha256:/, /\/skopeo:alpine@sha256:/];
+// 그 등식은 이제 `tests/gates/test_ops-repin.bats`의 집합 대조가 강제한다 — 착지 전까지는 이 주석뿐이라
+// 한쪽에만 새 ops 이미지를 넣으면 아래 매치가 실패해 `renovateReaches`로 떨어지고(:222), renovate.json의
+// kubernetes manager가 `^platform/.+\.ya?ml$`를 덮으므로 그 참조가 "owner: renovate"로 **초록**이 됐다.
+// ⚠️ **표기는 `tools/repin-ops-image.ts`의 refRe와 동형이어야 한다** — `ghcr.io/<owner>/<key>@sha256:<64hex>`.
+//    재핀 도구가 실제로 고쳐 주는 것이 정확히 그 형태이므로, 이보다 느슨한 표기는 도구가 **닿지 않는**
+//    참조까지 이 소유자로 읽어 거짓 소유를 만든다(예: 다른 레지스트리, 또는 renovate도 못 가는 `infra/**`).
+//    착지 전 두 정규식은 경로 구분자 요구 여부가 근거 없이 갈려 있었다(pg-tools는 미요구, skopeo는 요구).
+const REPINNED_OPS = [
+  /ghcr\.io\/[a-z0-9-]+\/pg-tools:18-rclone@sha256:[0-9a-f]{64}/,
+  /ghcr\.io\/[a-z0-9-]+\/skopeo:alpine@sha256:[0-9a-f]{64}/,
+];
 
 export function resolveOwner(r: Ref, renovate: Renovate, bespoke: Set<string>): Owner {
   if (REPINNED_OPS.some((re) => re.test(r.ref))) return "repin-ops-image";
