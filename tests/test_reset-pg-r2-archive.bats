@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 # R2 아카이브 리셋 도구(④)의 안전 불변식을 오프라인에서 강제한다 — 실제 R2 삭제 없이.
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일(`$sh`)이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」 ③·③-a
 sh=scripts/reset-pg-r2-archive.sh
 
 @test "reset-pg-r2-archive exists, is executable, and passes shellcheck" {
@@ -25,8 +27,9 @@ sh=scripts/reset-pg-r2-archive.sh
   # 파생 실패 시 fail-closed — 어느 prefix를 지울지 모른 채 진행하면 안 된다.
   grep -q '어느 prefix를 지울지 알 수 없으므로 중단' "$sh"
   # 리터럴 대입이 남아 있으면 안 된다(`SERVER=pg`·`SERVER="pg"` 등, 파생 대입은 `SERVER="$(`).
+  # 양성 대조: 위 파생 단언들이 같은 피연산자(`$sh`)의 실재를 증언한다.
   run grep -nE '^[[:space:]]*SERVER=(["'"'"']?)[A-Za-z0-9_-]+\1[[:space:]]*$' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "purging ANOTHER cluster's archive needs a second, distinct flag (PONR 1 must be deliberate)" {
@@ -38,8 +41,9 @@ sh=scripts/reset-pg-r2-archive.sh
 
 @test "reset never purges sibling prefixes (pgdump hedge = restore path B stays offsite)" {
   grep -q 'rclone purge' "$sh"                # 양성 대조: 삭제 명령이 실재한다
+  # 바로 위 양성 대조가 같은 피연산자(`$sh`)를 들어 부재 단언과 한 쌍을 이룬다.
   run grep -qE '(purge|delete).*pgdump' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "the k8s Cluster name and the archive serverName are separate variables" {
@@ -49,8 +53,9 @@ sh=scripts/reset-pg-r2-archive.sh
   #    전체 줄 grep은 자기 주석에 걸려 거짓 red를 낸다(이 세션에서 세 번째로 밟은 클래스).
   grep -qE '^CLUSTER=' "$sh"
   grep -q '"${CLUSTER}-1"' "$sh"
+  # 양성 대조: 위 CLUSTER 단언들이 같은 피연산자(`$sh`)의 실재를 증언한다.
   run grep -nE '^[^#]*\$\{SERVER\}-1' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "reset derives bucket and endpoint from the live ObjectStore (not hardcoded)" {

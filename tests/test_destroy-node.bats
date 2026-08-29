@@ -8,6 +8,10 @@
 #      (c) 그래도 K3S_RUN이 새어 기본값 `sudo`가 될 경우에 대비해, PATH 앞에 **가짜 sudo**(같은 기록기)를 둔다.
 #    2026-08-16에 에이전트 3개가 파괴 명령을 '실증하려고' 실제로 실행해 라이브 클러스터를 날렸다.
 #    이 파일이 그 실증의 **유일하게 안전한 형태**다.
+#
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
+#    되돌리면 위 (a)~(c) 안전망을 지키는 @test들이 destroy-node.sh 부재에도 초록이 된다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 sh=scripts/destroy-node.sh
 
 _fixture() {                 # $1 = BULK_MIGRATION_WINDOW_UNTIL 값 · $2 = findmnt이 답할 bulk SOURCE(선택)
@@ -94,19 +98,21 @@ _run_destroy() {             # 나머지 인자는 env 오버라이드
 @test "destroy-node never swallows a failed destruction (no '|| true' on privileged calls)" {
   grep -qE '^[^#]*\$K3S_RUN' "$sh"                 # 양성 대조: 권한 호출이 실재한다
   run grep -nE '^[^#]*\$K3S_RUN.*\|\|[[:space:]]*true' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # ⚠️ 한 줄 안에서만 보면 **줄바꿈 연결로 우회된다**(`$K3S_RUN rm -rf … \` + 다음 줄 `|| true`).
   #    **파괴** 명령 줄이 백슬래시로 이어지지 않는다는 것까지 잠근다.
   # ⚠️ 검사 범위를 파괴 호출로 좁힌다 — 게이트의 읽기 전용 조회(`$K3S_RUN command -v findmnt \`)는
   #    정당하게 이어진다. 넓게 잡으면 그 줄에 걸려 이 @test가 거짓 red를 낸다(실측: 그렇게 됐다).
   grep -qE '^[^#]*\$K3S_RUN[^#]*(rm -rf|K3S_UNINSTALL)' "$sh"   # 양성 대조: 파괴 호출이 실재한다
   run grep -nE '^[^#]*\$K3S_RUN[^#]*(rm -rf|K3S_UNINSTALL)[^#]*\\$' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "every privileged command goes through the K3S_RUN seam (a leak would destroy for real in tests)" {
+  # ⚠️ 이 @test에는 형제 단언이 없다 — 예전 `-ne 0` 형태에서는 destroy-node.sh를 리네임하면
+  #    grep이 rc 2로 죽고도 통과해, 이 파일에서 **혼자 초록으로 남았다**(2026-08-29 격리 트리 실측).
   run grep -nE '^[[:space:]]*sudo ' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "destroy-node REFUSES when bulk's bind source lives inside the tree it deletes" {

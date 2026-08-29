@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# 부재 단언 **뮤테이션 증인** — tests/gates의 부재 단언이 대상이 사라지면 실제로 red가 되는지를
-# 격리 트리에서 **실행으로** 증언한다.
+# 부재 단언 **뮤테이션 증인** — `tests/gates/`·`tests/` 두 레인의 부재 단언이 대상이 사라지면
+# 실제로 red가 되는지를 격리 트리에서 **실행으로** 증언한다.
 #
 # 병(SSOT: docs/traps-detail.md 「열거 붕괴 → vacuous green」): grep은 대상 부재/읽기불가에 rc **2**를
 # 내는데 `[ "$status" -ne 0 ]`은 그것을 무매치(rc 1)와 구별하지 않는다 — 파일이 리네임/삭제되면 부재
@@ -15,6 +15,14 @@
 #
 # 레인 구성 — 레인 A·B는 처방의 **양성 대조/실재 단언** 겹을, 레인 C는 **`-eq 1` 연산자 자체**를 잰다.
 # (A·B의 자리는 양성 대조가 먼저 잡으므로 연산자 단독 감도를 못 잰다 — C가 그 구멍을 메운다.)
+# 레인 D·E는 도메인을 **`tests/`(gates 밖)**로 넓힌다 — 파괴 동사(destroy-node)와 시크릿 불변식
+# (sealing key 백업 체인). 둘 다 해당 @test에 형제 단언이 **하나도 없어** `-eq 1`이 유일한 가드라,
+# 리네임→red 자체가 C와 같은 '연산자 단독 감도'를 실 파일에서 재는 셈이다. 두 도메인을 각각
+# 대표하므로 하나로 줄이지 않는다(레인당 비용은 트리 추출 ~0.4s가 전부다).
+# ⚠️ `tests/test_sops-roundtrip.bats`는 레인으로 넣지 않는다 — 그 파일은 실 age 키 의존이라
+#    `tests/.ci-exclude`에 있는데 이 증인은 required gate 안에 **있다**(`scripts/run-bats.sh --list`
+#    실측: 증인 포함 · sops-roundtrip 제외). 중첩하면 키 없는 러너에서 이 게이트가 깨진다.
+#    gate의 sops 커버리지는 ci.yaml의 'SOPS 왕복 (ephemeral CI 키)' 스텝이 따로 진다.
 #
 # ⚠️ @test 이름은 영어만 — 디렉토리 단위 실행에서 CJK 이름이 침묵 스킵된다(AGENTS.md).
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2에서 [[ ]] 실패가 침묵 통과한다(AGENTS.md).
@@ -124,4 +132,59 @@ _tree() {
   run bats -f 'reverse guard-path-tie' "$g" </dev/null
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -q '^ok 1 '
+}
+
+# ── 레인 D: tests/ 레인 — 파괴 동사(destroy-node) ─────────────────────────────────────────────────
+# 02 티켓의 A 분류 ①. 이 @test에는 형제 단언이 **하나도 없다** — 전환 전 `-ne 0`에서는
+# `scripts/destroy-node.sh`를 리네임하면 grep이 rc 2로 죽고도 통과해 그 파일에서 **혼자 초록으로
+# 남았다**(실측). 그래서 여기서는 리네임→red가 곧 `-eq 1`의 서명이다.
+@test "renaming destroy-node.sh turns the tests/ lane's K3S_RUN seam gate red" {
+  t="$(_tree d)"
+  g="$t/tests/test_destroy-node.bats"
+  # 비공허 증인 — 게이트와 그 대상이 픽스처에 실재해야 아래 판정에 증인이 선다.
+  [ -s "$g" ]
+  [ -s "$t/scripts/destroy-node.sh" ]
+
+  # ⚠️ 이 대상은 피연산자가 **상대 경로**다(`sh=scripts/destroy-node.sh`). 픽스처 밖에서 절대 경로로
+  #    부르면 grep이 **실 레포**를 읽어 뮤테이션이 무력해지고 이 레인이 조용히 vacuous가 된다
+  #    (실측: 그 형태는 리네임 후에도 ok였다). 아래 pre(green)/post(red) 쌍이 이 cd의 증인도 겸한다 —
+  #    cd가 빠지면 post가 green이라 레인이 red로 알린다.
+  cd "$t"
+
+  # 뮤테이션 **전에 green이었다** — "원래부터 red"가 아님을 세운다. 필터가 0건이면 `1..0` + rc 1이라
+  # 이 두 줄이 필터 오타(@test 이름 드리프트)의 증인도 겸한다.
+  run bats -f 'every privileged command goes through the K3S_RUN seam' tests/test_destroy-node.bats </dev/null
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -q '^1\.\.1$'
+
+  mv scripts/destroy-node.sh scripts/destroy-node.renamed.sh
+  [ ! -e scripts/destroy-node.sh ]
+
+  run bats -f 'every privileged command goes through the K3S_RUN seam' tests/test_destroy-node.bats </dev/null
+  # rc 1 = 테스트 실패만 red로 읽는다(127 실행 불가 · `1..0` 필터 0건은 판정이 아니다).
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -q '^not ok 1 '
+}
+
+# ── 레인 E: tests/ 레인 — 시크릿 불변식(sealing key 백업 체인) ────────────────────────────────────
+# 02 티켓의 A 분류 ②. 여기도 그 @test에 형제 단언이 없어 `-eq 1`이 유일한 가드다.
+# 레인 D와 **다른 도메인**이라 함께 둔다(파괴 동사 vs 시크릿).
+@test "renaming sealing-key-dr-gate.sh turns the tests/ lane's source-safety gate red" {
+  t="$(_tree e)"
+  g="$t/tests/test_sealed-secrets-restore.bats"
+  [ -s "$g" ]
+  [ -s "$t/scripts/sealing-key-dr-gate.sh" ]
+
+  # ⚠️ 레인 D와 달리 cd가 필요 없다 — 이 파일은 setup에서 피연산자를 `$BATS_TEST_DIRNAME/..`로
+  #    파생하므로(`ROOT`) 절대 경로 호출에서도 대상이 **자기 트리**다(실측: 픽스처 밖에서 불러도 red).
+  run bats -f 'sealing-key-dr-gate is source-safe' "$g" </dev/null
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -q '^1\.\.1$'
+
+  mv "$t/scripts/sealing-key-dr-gate.sh" "$t/scripts/sealing-key-dr-gate.renamed.sh"
+  [ ! -e "$t/scripts/sealing-key-dr-gate.sh" ]
+
+  run bats -f 'sealing-key-dr-gate is source-safe' "$g" </dev/null
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -q '^not ok 1 '
 }

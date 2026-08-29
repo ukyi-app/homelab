@@ -1,5 +1,10 @@
 #!/usr/bin/env bats
 # DR drill 스크립트(R5)의 안전 불변식을 오프라인에서 강제한다 — 라이브 파괴 없이.
+#
+# ⚠️ grep 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 파일이라 그것으로 닫힌다.
+#    ⚠️ `run bash "$fx/scripts/dr-drill.sh"`의 `-ne 0`은 **비대상**이다 — 그 rc는 스크립트 자신의
+#       종료코드 규약이지 grep의 것이 아니다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 sh=scripts/dr-drill.sh
 
 @test "dr-drill exists, is executable, and passes shellcheck" {
@@ -88,10 +93,10 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   grep -qE '^[^#]*DR_DRILL_DESTROY_CONFIRM=1[[:space:]]+bash[[:space:]].*scripts/destroy-node\.sh' "$sh"
   [ -x scripts/destroy-node.sh ]
   run grep -nE '^[^#]*destroy-node\.sh.*\|\|[[:space:]]*true' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # ⚠️ 한 줄 안에서만 보면 **줄바꿈 연결로 우회된다**(`… destroy-node.sh \` + 다음 줄 `|| true`).
   run grep -nE '^[^#]*bash[^#]*destroy-node\.sh[^#]*\\$' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   grep -q 'infra/k3s-bootstrap/host-up.sh' "$sh"
   grep -q 'make bootstrap' "$sh"
   # ⚠️ 이름이 주장하는 "커밋된 것에서 재구축"을 실제로 앵커한다. 예전 이름은 `cloud-init`을
@@ -126,7 +131,7 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
 @test "dr-drill [6] verifies a workload that still exists (no removed in-repo app)" {
   # prod/deploy/api는 제거됨(인-레포 앱 0) — 워크로드 서빙 검증은 현존 코어 서비스(adguard)를 가리킨다.
   run grep -n 'deploy/api' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   grep -q 'rollout status deploy/adguard' "$sh"
 }
 
@@ -159,10 +164,12 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   #    그 단어들을 그대로 담는다. 단언 대상은 산문이 아니라 **코드**다.
   # ⚠️ 양성 대조를 **두 파일 모두**에 건다. 하나만 걸면, 두 번째 파일이 삭제/리네임됐을 때
   #    grep이 exit 2(비-0)로 죽고 `[ "$status" -ne 0 ]`가 통과해 **vacuous green**이 된다.
+  #    그래서 부재 단언도 `-eq 1`이다 — 이 자리는 `-q`가 아니라 `-nE`라 한쪽 파일이 사라지면
+  #    남은 파일에 매치가 있어도 rc 2가 보존된다(`-q`였다면 매치가 그 에러를 덮어 0이 됐을 자리다).
   grep -qE '^[^#]*scripts/destroy-node\.sh' "$sh"
   grep -qE '^[^#]*\$K3S_RUN' scripts/destroy-node.sh
   run grep -nE '^[^#]*(orb |orbctl|virtiofs|/mnt/mac)' "$sh" scripts/destroy-node.sh
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "dr-drill proves recovery of THIS cluster's archive (serverName derived, not the k8s name)" {
@@ -172,7 +179,7 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   grep -q 'parameters.serverName' "$sh"
   grep -q 'serverName: ${ARCHIVE_SERVER}' "$sh"
   run grep -nE '^[^#]*serverName: \$\{LIVE_CLUSTER\}' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "dr-drill purges a leftover drill cluster BEFORE apply (the false-proof that authorizes node destruction)" {

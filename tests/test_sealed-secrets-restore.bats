@@ -3,6 +3,13 @@
 # 불변식: 컨트롤러 sealing key 없이는 git의 SealedSecret을 아무도 복호화 못 한다.
 # 백업은 (1) 평문을 디스크에 남기지 않고 (2) 실패 시 직전 백업을 파괴하지 않으며(원자적)
 # (3) git 밖에만 보관된다.
+# ⚠️ 부재 단언 규약(`-eq 1` · 디렉토리·재귀 자리는 **비공허 바닥값 + 양성 대조**를 한 쌍으로)은
+#    docs/traps-detail.md 「열거 붕괴 → vacuous green」 ③·③-a와 그 「처방(bats 부재 단언)」이 SSOT다.
+#    이 파일 고유의 사정: 술어 `PLAINTEXT-MARKER`의 출처가 실 트리가 아니라 **로컬 스텁**이다 —
+#    마커 문자열이 드리프트하면 바닥값은 그대로 초록인 채 "평문 0건"만 vacuous해지고, 그 손해
+#    방향이 황금률 2(평문 시크릿)다. 그래서 양성 대조를 술어를 주조하는 자리(make_stubs)에 두어
+#    스텁을 쓰는 모든 @test가 개별 실행(`bats -f`)에서도 술어 생존을 함께 증언하게 한다.
+#    바닥값 증인은 각 콜사이트 주석이 지목한다.
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -37,6 +44,13 @@ exit 1
 EOF
   fi
   chmod +x "$STUB/kubectl" "$STUB/sops"
+  # 양성 대조 — 부재 단언이 쓰는 **같은 술어**가 스텁 산출물에는 실제로 매치한다.
+  # 스텁이 마커를 다른 문자열로 바꾸면 여기서 red다(그게 없으면 아래 `grep -r … -eq 1`은
+  # 술어가 죽었는지 평문이 없는지를 구별하지 못한다 — 바닥값만으론 못 보는 절반).
+  # 파이프 종단이 아니라 **경로 피연산자**로 잰다(SSOT ③-b: 파이프 끝 grep은 부재의 rc 2가
+  # 빈 stdin의 rc 1로 눌린다). 프로브는 $TMP/out 밖이라 아래 열거·건수 증인을 오염시키지 않는다.
+  "$STUB/kubectl" > "$TMP/plaintext-probe"
+  grep -q "PLAINTEXT-MARKER" "$TMP/plaintext-probe"
 }
 
 # 항등 패스스루 sops 스텁(리허설 경로 전용) — **입력원은 argv가 정한다.**
@@ -72,10 +86,21 @@ EOF
   # 직전 백업 무손상 (truncate/덮어쓰기 금지)
   [ "$(cat "$TMP/out/ss-keys.111.enc.yaml")" = "OLD-BACKUP" ]
   # 평문/임시파일 잔존 0
+  # 디렉토리 피연산자 — `-eq 1`이 경로 소실(rc 2)을 닫고, 비공허 바닥값은 바로 위의 OLD-BACKUP
+  # 무손상 대조다(같은 디렉토리에 파일이 실재함을 이미 증언한다). 나머지 절반인 **양성 대조**는
+  # make_stubs가 세운다(술어가 스텁 산출물에 실재함) — 둘이 한 쌍이라야 이 자리가 닫힌다.
   run grep -r "PLAINTEXT-MARKER" "$TMP/out"
-  [ "$status" -ne 0 ]
-  run ls "$TMP/out"/ss-keys.tmp.*
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
+  # ⚠️ 이 자리는 `ls`로 `-eq 1`이 **원리적으로** 불가능하다 — 무매치 글롭과 대상 부재가 같은
+  #    rc 2로 합쳐진다(기전·실측표는 SSOT의 `ls` 행). 그래서 rc를 고쳐 쓰는 대신 단언의 의도
+  #    ('임시파일이 남지 않았다')를 그대로 재는 find로 옮긴다 — 부재 rc 1 / 무매치 rc 0 + 빈 출력.
+  #    depth는 SSOT 예시(`-maxdepth 1`)와 달리 재귀로 둔다: 형제 `grep -r`과 도메인을 맞춰
+  #    중첩된 평문 유출을 원리적으로 놓치지 않기 위해서다(mktemp는 outdir 직하에만 쓴다).
+  #    rc와 출력을 **함께** 건다 — find의 rc 관례가 구현마다 갈려도 부재면 stderr가 $output에
+  #    섞여 `-z`가 red를 낸다.
+  run find "$TMP/out" -name 'ss-keys.tmp.*'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "successful backup writes a versioned file, decrypt-verified, previous kept" {
@@ -87,8 +112,11 @@ EOF
   [ "$(ls -1 "$TMP/out"/ss-keys.*.enc.yaml | wc -l | tr -d ' ')" = "2" ]
   [ "$(cat "$TMP/out/ss-keys.111.enc.yaml")" = "OLD-BACKUP" ]
   # 신규 백업은 평문이 아니어야 한다 (스텁 암호화 통과 확인)
+  # 디렉토리 피연산자 — `-eq 1`이 경로 소실(rc 2)을 닫고, 비공허 바닥값은 바로 위의
+  # `ls -1 … = "2"` + OLD-BACKUP 대조다(같은 디렉토리가 비어 있지 않음을 이미 증언한다).
+  # 나머지 절반인 **양성 대조**는 make_stubs가 세운다 — 둘이 한 쌍이라야 이 자리가 닫힌다.
   run grep -r "PLAINTEXT-MARKER" "$TMP/out"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "restore runbook documents the sealing key recovery path (local only)" {
@@ -247,8 +275,10 @@ EOF
   # 실측 대조: zsh source → 잔류 / bash source → 정리. 이 호스트 기본 셸이 zsh이므로 사람이
   # 프롬프트에서 함수를 직접 부르는 경로가 정확히 그 조건이다. 정리는 명시 호출로만 한다.
   # 주석에서 이 함정을 설명하는 문장은 걸리면 안 되므로, 줄 머리의 실제 trap 문만 본다.
+  # 파일 피연산자라 `-eq 1`이 리네임·삭제를 그대로 닫는다 — 실측: 이 스크립트를 리네임하면
+  # `-ne 0` 형태는 ok(vacuous green)였고 `-eq 1`은 red다.
   run grep -nE '^[[:space:]]*trap[[:space:]].*RETURN' "$ROOT/scripts/sealing-key-dr-gate.sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "rehearse_restore_on_live cleans up on every exit path after ns creation" {
