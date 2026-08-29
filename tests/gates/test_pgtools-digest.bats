@@ -74,8 +74,10 @@ refs() { git ls-files -- 'platform/**.yaml' 'platform/**.yml' 'apps/**.yaml' 'op
   git -C "$d" init -q; git -C "$d" add -A
   run bun "$ROOT/tools/repin-ops-image.ts" pg-tools:18-rclone --root "$d" "$new"
   [ "$status" -eq 0 ]
+  # ⚠️ `-ne 0`은 grep rc **2**(대상 파일 부재/읽기불가)도 통과로 읽는다 — 무매치는 정확히 rc 1이다.
+  #    (재핀이 파일을 지워버려도 옛 digest 부재가 '통과'로 보이던 자리다. 아래 양성 대조가 짝이다.)
   run grep -qF "$old" "$d/platform/victoria-stack/prod/pvc-du-exporter.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run grep -qF "$new" "$d/platform/victoria-stack/prod/pvc-du-exporter.yaml"
   [ "$status" -eq 0 ]
 }
@@ -86,7 +88,8 @@ refs() { git ls-files -- 'platform/**.yaml' 'platform/**.yml' 'apps/**.yaml' 'op
   # **도구는 6파일을 고치는데 4개만 커밋**됐고, 그러면 재빌드마다 드리프트가 그대로 되돌아온다
   # (적대 검토가 실측). 파일 열거가 어디에도 없어야 그 클래스가 닫힌다.
   run grep -nE 'platform/(cache|cnpg)/prod/[a-z-]+\.yaml' "$ROOT/.github/workflows/bump.yaml"
-  [ "$status" -ne 0 ] || { echo "bump.yaml에 소비처 파일 열거가 남아 있다:"; echo "$output"; false; }
+  # rc 2(bump.yaml 부재)를 통과로 읽지 않는다 — 워크플로가 사라지면 이 가드가 vacuous해진다.
+  [ "$status" -eq 1 ] || { echo "bump.yaml에 소비처 파일 열거가 남아 있다(또는 파일을 읽을 수 없다):"; echo "$output"; false; }
   # 그리고 재핀 산출물이 실제로 스테이지되는 경로가 있어야 한다(위 검사가 '전부 지우기'로 만족되면 안 된다).
   run grep -qE '^ +git add .*platform' "$ROOT/.github/workflows/bump.yaml"
   [ "$status" -eq 0 ] || { echo "bump.yaml이 platform 변경을 스테이지하지 않는다 — 재핀이 커밋되지 않는다"; false; }
@@ -98,5 +101,6 @@ refs() { git ls-files -- 'platform/**.yaml' 'platform/**.yml' 'apps/**.yaml' 'op
   #    왜 틀렸는지 설명한다 — 그건 살아 있는 주장이 아니라 기록이고, 지우면 재발 방지 근거가 사라진다.
   #    (처음엔 두 파일을 함께 검사했다가 그 인용을 오탐으로 잡아 이 경계를 명시하게 됐다.)
   run grep -nE '[0-9]+-site|[0-9]+개 소비처' "$ROOT/.github/workflows/bump.yaml"
-  [ "$status" -ne 0 ] || { echo "낡은 건수 주장이 남아 있다:"; echo "$output"; false; }
+  # rc 2(bump.yaml 부재)를 통과로 읽지 않는다 — 이 @test는 부정 단언 하나뿐이라 더 그렇다.
+  [ "$status" -eq 1 ] || { echo "낡은 건수 주장이 남아 있다(또는 파일을 읽을 수 없다):"; echo "$output"; false; }
 }

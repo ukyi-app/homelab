@@ -323,10 +323,13 @@ PY
   # ⚠️ **인용된 기록은 살아 있는 주장이 아니다.** 헤더는 무엇이 왜 틀렸는지 설명하려고 옛 문구를
   #    따옴표로 인용하는데(지우면 재발 방지 근거가 사라진다), 단순 grep은 그것도 매치한다 —
   #    `repin-ops-image` 헤더에서 이미 같은 경계를 그었다. 따옴표 없는 줄만 본다.
+  # ⚠️ `-ne 0`은 grep rc **2**(대상 파일 부재/읽기불가)도 통과로 읽는다 — 무매치는 정확히 rc 1이다.
+  #    (파이프 자리는 2단 grep이 stdin을 읽어 rc 2가 1로 눌리지만, 이 @test 끝의 양성 대조가
+  #     같은 파일에 `-eq 0`을 걸고 있어 파일 부재는 그쪽에서 red가 된다.)
   run bash -c "grep -n 'Renovate pinDigests 관할' '$ROOT/scripts/check-image-pins.sh' | grep -v '\"'"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run grep -n 'helm 차트 내부=Renovate' "$ROOT/scripts/check-image-pins.sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]   # rc 2(대상 부재)를 통과로 읽지 않는다
   # 그리고 실제 소유 모델(원장 선언)을 가리켜야 한다.
   run grep -q 'image-ownership.json' "$ROOT/scripts/check-image-pins.sh"
   [ "$status" -eq 0 ]

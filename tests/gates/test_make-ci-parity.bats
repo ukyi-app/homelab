@@ -87,8 +87,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   #    (check-ci-parity의 미러 대조 · check-guard-authority의 venue 수집).
   #    실측: 게이트 스텝을 서브-make로 묶었더니 `make -n ci` 한 번에 docker e2e가 통째로 돌았다.
   # 레시피 줄(탭으로 시작)만 본다 — 주석의 설명 문구는 대상이 아니다.
+  # ⚠️ 이 자리는 `-eq 1`만으로 안 닫힌다: Makefile이 사라지면 1단 grep이 rc 2에 빈 출력을 내고
+  #    2단 grep(stdin)이 rc **1**을 내 부재가 무매치로 위장한다. 그래서 비공허 대조를 먼저 세운다 —
+  #    레시피 줄이 실재해야 아래 부정 단언이 무언가를 검사한 것이 된다.
+  run bash -c "grep -c '^	' '$ROOT/Makefile'"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
   run bash -c "grep '^	' '$ROOT/Makefile' | grep -F '\$(MAKE)'"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]   # rc 2(대상 부재)를 통과로 읽지 않는다
 }
 
 @test "make ci depends on the m6-tools toolchain check" {

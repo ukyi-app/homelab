@@ -38,8 +38,10 @@ _expr() { # $1=alert 이름 → r4 ConfigMap 안의 expr(주석 제거)
   [ -f "$T" ]
   grep -qF 'ExecStart=/home/ukyi/workspace/homelab/scripts/notify-unit-failure.sh %i' "$T"
   # 자기 자신에 달면 실패 루프가 된다.
+  # rc 2(대상 부재)를 통과로 읽지 않는다 — 무매치는 정확히 rc 1이다. `-ne 0`이면 $T가 사라져도
+  # 초록이 된다. 위 [ -f "$T" ]와 ExecStart 단언이 같은 파일에 대한 양성 대조다.
   run grep -qE '^OnFailure=' "$T"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "no non-producer file writes metrics (the completeness guard cannot see outside its extensions)" {

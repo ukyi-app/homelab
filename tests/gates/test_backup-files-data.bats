@@ -159,7 +159,10 @@ teardown() { rm -rf "$STUB" "$DEST" "$SRC"; }
   [ -f "$DEST/pushed.txt" ]
   n="$(grep -c . "$DEST/pushed.txt")"; [ "$n" -eq 1 ]
   run grep -qE '^files_backup_last_success_timestamp [0-9]+$' "$DEST/pushed.txt"; [ "$status" -eq 0 ]
-  run grep -q 'files_data_bulk_' "$DEST/pushed.txt"; [ "$status" -ne 0 ]
+  # ⚠️ rc 2(pushed.txt 부재/읽기불가)를 통과로 읽지 않는다 — `-ne 0`이면 push가 통째로 사라져도
+  #   "용량 메트릭 없음"으로 읽혀 초록이다. 매치 없음은 정확히 rc=1. 위 두 줄(줄 수 + 하트비트
+  #   매치)이 이 부정 단언의 양성 대조다.
+  run grep -q 'files_data_bulk_' "$DEST/pushed.txt"; [ "$status" -eq 1 ]
 }
 
 @test "df reporting size=0 also drops the capacity metrics (0/0=NaN would silence the alert)" {
@@ -167,7 +170,10 @@ teardown() { rm -rf "$STUB" "$DEST" "$SRC"; }
   run bash "$S" "$DEST"; [ "$status" -eq 0 ]
   echo "$output" | grep -q "size=0"
   n="$(grep -c . "$DEST/pushed.txt")"; [ "$n" -eq 1 ]
-  run grep -q 'files_data_bulk_' "$DEST/pushed.txt"; [ "$status" -ne 0 ]
+  # 양성 대조 — 그 한 줄이 실제로 하트비트임을 본다. 없으면 아래 부정 단언이 "무엇이 남았는지"를
+  # 묻지 않은 채 통과할 수 있다.
+  run grep -qE '^files_backup_last_success_timestamp [0-9]+$' "$DEST/pushed.txt"; [ "$status" -eq 0 ]
+  run grep -q 'files_data_bulk_' "$DEST/pushed.txt"; [ "$status" -eq 1 ]   # rc 2(대상 부재)를 통과로 읽지 않는다
 }
 
 @test "the source PV selector takes only Bound — a Retain orphan keeps both its claimRef and its directory" {

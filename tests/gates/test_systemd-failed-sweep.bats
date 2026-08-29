@@ -123,8 +123,11 @@ _prom() { cat "$OUT/systemd-failed-sweep.prom"; }
   # ⚠️ env로 낮출 수 있으면 fail-closed가 런타임에 해제된다.
   run grep -cE '^(SCAN_MIN|SERVICE_MIN)=[0-9]+$' "$SWEEP"
   [ "$output" -eq 2 ]
+  # ⚠️ `-ne 0`은 grep rc=**2**($SWEEP 부재/읽기불가)도 통과로 읽는다 — "env 오버라이드 0건"과
+  #   "검사 대상 0건"이 같은 초록이 되는 부정-카운트 함정. 매치 없음은 정확히 rc=1이다.
+  #   (바로 위 `grep -cE ... -eq 2`가 같은 파일에 대한 양성 대조 역할을 한다.)
   run grep -qE '^(SCAN_MIN|SERVICE_MIN)="\$\{' "$SWEEP"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "the unit runs the script from scripts/ and never inlines a metric write" {
@@ -135,8 +138,9 @@ _prom() { cat "$OUT/systemd-failed-sweep.prom"; }
   # ⚠️ 줄 머리(`^`)로 한정한다 — 이 유닛의 주석이 **바로 그 함정을 설명하면서** 금지 문자열을
   #   인용한다. 한정하지 않으면 근거를 적은 것이 red가 되어, 다음 사람이 근거를 지우게 만든다
   #   (test_sealed-secrets-restore.bats의 RETURN 트랩 가드가 같은 이유로 같은 한정을 건다).
+  # rc 2($SVC 부재)를 통과로 읽지 않는다 — 유닛 파일이 사라져도 초록이 되면 안 된다.
   run grep -qE '^ExecStart=.*(curl|/bin/sh -c)' "$SVC"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "the sweep unit has its own OnFailure channel (it cannot record its own failure)" {

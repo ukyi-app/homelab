@@ -132,8 +132,14 @@ PY2
   run bash "$S"
   [ "$status" -eq 0 ]
   # 소문자 토큰이 분류 정책에 새어 들어오지 않았는지 — 들어왔다면 규칙 ①이 깨진 것이다.
+  # 양성 대조 — 정책에 대문자 name이 실재한다. 이게 없으면 $CLASS가 비거나 스키마가 바뀌어
+  # "name" 키가 통째로 사라져도 아래 부정 단언이 공허하게 초록이다.
+  run grep -cE '"name": "[A-Z]' "$CLASS"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 10 ]
+  # rc 2(대상 부재)를 통과로 읽지 않는다 — 무매치는 정확히 rc 1이다.
   run grep -E '"name": "[a-z]' "$CLASS"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "the retired GH_SECRET env floors are inert (kernel-followups 02)" {

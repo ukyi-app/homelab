@@ -81,7 +81,13 @@ _rearm() { _expr | grep -oE 'vector\(time\(\)\) >= [0-9]+' | grep -oE '[0-9]+' |
   #    (레포 선례: tools/check-alert-rules.ts의 SELF 자기참조 제외).
   run git grep -nE 'CONTROL=FilesBackupStale|vme_firing[[:space:]]+"?FilesBackupStale' \
     -- 'tests/gates' ':(exclude)tests/gates/test_files-backup-phase-a.bats'
-  [ "$status" -ne 0 ]
+  # ⚠️ `-ne 0`이 아니라 `-eq 1`이다 — git grep rc는 0=매치 / 1=무매치 / **128**=치명적
+  #    (비-레포 · `:(exclude)` 같은 pathspec magic 오타). 128은 grep의 rc 2와 **다른 값**이니
+  #    grep 규약을 그대로 옮겨 적지 말 것. `-ne 0`이면 128이 '대조군 없음'으로 읽힌다.
+  #    (부정 카운트가 '매치 0'과 '대상 0'을 못 가르는 함정: docs/traps-detail.md ③)
+  [ "$status" -eq 1 ]
   # 양성 대조 — 대조군 관용구 자체는 살아 있다(패턴이 깨져 0건이 된 것을 '깨끗하다'로 오독하지 않는다).
+  # ⚠️ `-eq 1`이 못 닫는 구멍을 닫는 자리이기도 하다: pathspec이 추적 파일과 하나도 안 맞아도
+  #    git grep은 128이 아니라 **rc 1**이다(실측) — 'tests/gates' 리네임은 아래 한 줄만이 잡는다.
   git grep -qE 'CONTROL=|vme_firing' -- 'tests/gates'
 }

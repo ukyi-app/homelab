@@ -51,7 +51,8 @@ PY
 @test "renovate token does NOT request workflows:write (consistent with github-actions manager disabled)" {
   # 실제 indented 요청 키만 검사(주석의 Phase-0 안내 언급은 허용). 미요청이라야 App 미보유 시 토큰 민팅이 안 깨진다.
   run grep -qE '^[[:space:]]+permission-workflows:' "$WF"
-  [ "$status" -ne 0 ]
+  # rc 2(파일 부재)를 통과로 읽지 않는다 — grep 무매치는 정확히 rc 1이다.
+  [ "$status" -eq 1 ]
 }
 
 @test "renovate tracks ArgoCD inline helm charts (cnpg-operator, cert-manager)" {

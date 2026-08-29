@@ -24,8 +24,10 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/iac.yaml"
   run grep -qE 'mode:[[:space:]]*warn' "$WF"
   [ "$status" -eq 0 ]
   # 인라인 destroy jq 셀렉터는 composite로 옮겨졌어야 한다(워크플로에서 제거).
+  # rc 2(대상 부재)를 통과로 읽지 않는다 — 무매치는 정확히 rc 1이다. `-ne 0`이면 iac.yaml을
+  # 리네임·삭제해도 이 단언이 초록이다. 바로 위 mode=warn 단언(rc 0)이 $WF의 양성 대조다.
   run grep -F 'select(. == "delete")' "$WF"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "iac.yaml primary apply guard stays block (drift-2 alert-and-skip is reconcile-only)" {
@@ -34,7 +36,8 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/iac.yaml"
   run grep -qE 'mode:[[:space:]]*block' "$WF"
   [ "$status" -eq 0 ]
   run grep -qE 'continue-on-error:[[:space:]]*true' "$WF"
-  [ "$status" -ne 0 ]   # iac.yaml apply 경로엔 continue-on-error 없음
+  # rc 2(대상 부재)를 통과로 읽지 않는다. 위 mode=block 단언(rc 0)이 $WF의 양성 대조다.
+  [ "$status" -eq 1 ]   # iac.yaml apply 경로엔 continue-on-error 없음
 }
 
 @test "iac guards pass allow=app-DNS + allow_max cap (both apply+preview)" {
