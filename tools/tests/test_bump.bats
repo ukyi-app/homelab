@@ -1,4 +1,7 @@
 #!/usr/bin/env bats
+# ⚠️ 부재 단언 규약(`-eq 1`)은 docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a가 SSOT다.
+#    이 파일 고유 사정: 비-0 단언 대부분은 bump-tag.ts의 종료코드 계약(2=사용법·3=TOCTOU)이라
+#    비대상이고, 경로 피연산자는 아래 v1 경로 폐기 가드 한 곳뿐이다.
 WF=".github/workflows/bump.yaml"
 
 # 인-레포 앱이 없으므로(앱은 외부 레포 체제) fixture root에 임시 앱 values를 만들어 테스트한다.
@@ -132,8 +135,10 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 # ── v1 dispatch 경로 폐기 가드 (이전엔 존재를 단언 — 이제 부재를 단언) ──
 @test "bump: v1 repository_dispatch path fully removed (writeback-dispatch gone)" {
   f="$WF"
+  # ⚠️ `$WF`는 **상대 경로**라 cwd가 레포 루트가 아니면 grep이 rc 2를 낸다 — 이 줄이 @test의 첫
+  #    단언이라 `-ne 0` 형태에서는 아래 양성 형제가 red를 내기 전에 자기 자리에서 먼저 통과했다.
   run grep -E 'repository_dispatch:|app-image|writeback-dispatch|client_payload|source-repo' "$f"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # workflow_run write-back 경로 + digest 검증은 유지된다
   grep -qE "event_name == 'workflow_run'" "$f"
   grep -q 'docker manifest inspect' "$f"

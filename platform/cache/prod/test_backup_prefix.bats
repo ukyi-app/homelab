@@ -1,6 +1,9 @@
 #!/usr/bin/env bats
 # Valkey 캐시 백업의 R2 경로 계약. 이 파일이 생긴 이유는 계획서 §3.4가 **캐시를 아예 열거하지
 # 않았고**, 그래서 병행 운용 중 라이브 데이터를 지우는 경로가 무방비였기 때문이다.
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
+#    ⚠️ 피연산자가 **상대 경로**다 — 이 파일은 레포 루트에서 실행해야 rc가 의미를 갖는다.
 f=platform/cache/prod/backup-cronjob.yaml
 
 @test "cache backup writes a CLUSTER-SPECIFIC R2 prefix (last_success.json is a FIXED key)" {
@@ -16,7 +19,7 @@ f=platform/cache/prod/backup-cronjob.yaml
   grep -qE 'rclone delete "\$\{CACHE_PREFIX\}/\$\{name\}/rdb/" --min-age 14d' "$f"
   # 공유 prefix 직접 참조가 남아 있으면 red (비-주석 줄만 — 주석이 옛 경로를 설명한다)
   run grep -nE '^[^#]*"r2:homelab-cache-backups-prod/\$\{name\}' "$f"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "the roundtrip integrity check re-READS the uploaded copy (not just any sha256 variable)" {

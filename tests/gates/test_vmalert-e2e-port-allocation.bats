@@ -15,10 +15,16 @@
 #   ③ connect 프로브는 **리스너만** 본다. 아웃바운드 소스 포트도, 리스너가 닫힌 뒤 남은 accepted
 #      소켓도 FREE라고 답하는데 그 포트의 bind는 EADDRINUSE(98)로 실패한다(실측).
 #
-# ⇒ 처방은 세 겹이고 이 파일은 셋을 각각 문다: 밴드 이전(①②) · plain bind 프로브(③) ·
-#    잔여 TOCTOU 재시도 + health **본문** 확인(오진 방지).
+# ⇒ 처방은 세 겹이고 이 파일이 무는 것은 그중 **이 lib이 아직 소유한 축**이다: 밴드 손잡이(①②)가
+#    프리미티브에 실제로 닿는가 · 잔여 TOCTOU 재시도 · health **본문** 확인(오진 방지) ·
+#    그리고 프리미티브의 비-0 rc가 이 lib의 종료 규약(HARNESS FAULT = exit 2)으로 번역되는가.
 #
-# hermetic — 스텁 docker/curl을 쓰고 실 컨테이너는 0개다. 실 소켓은 프로브 증인에서만 쓴다.
+# ⚠️ **기동 6불변식과 plain bind 프로브(③)의 증인은 여기가 아니다** — 그 처방의 정의처가
+#    `tests/gates/lib/host-port.sh`로 옮겨갔고(`hp_run_published`·`hp_port_free`), 증인도 함께
+#    `tests/gates/test_host-ports.bats`로 갔다. 여기에 사본을 남기면 처방이 두 벌이 되던 그 병을
+#    테스트 층에서 되풀이한다. 여기 남는 것은 **어댑터**(VME_* 손잡이 · rc 번역 · readiness)뿐이다.
+#
+# hermetic — 스텁 docker/curl을 쓰고 실 컨테이너는 0개다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2에서 [[ ]] 실패는 침묵 통과한다.
 
 setup() {
@@ -48,11 +54,14 @@ case "$1" in
       shift
     done
     printf '%s\n' "$hostport" >> "$S/ports"
+    # 시도 **횟수**로도 실패시킨다 — 포트별(failports) 픽스처는 어느 포트가 먼저 뽑힐지에 의존해
+    # 밴드를 좁혀도 결정적이지 않다(첫 추첨이 성공 포트를 집으면 재시도 레인이 통째로 vacuous하다).
+    n=$(cat "$S/attempts" 2>/dev/null || echo 0); n=$(( n + 1 )); printf '%s\n' "$n" > "$S/attempts"
     if [ -e "$S/c-$name" ]; then
       echo "Error response from daemon: container name \"/$name\" is already in use" >&2
       exit 125
     fi
-    if grep -qx "$hostport" "$S/failports" 2>/dev/null; then
+    if [ "$n" -le "$(cat "$S/failfirst" 2>/dev/null || echo 0)" ] || grep -qx "$hostport" "$S/failports" 2>/dev/null; then
       : > "$S/c-$name"   # ⚠️ 실패한 run도 컨테이너를 Created로 남긴다(docker/podman 공통 의미론)
       echo "STUBFAIL-COOKIE rootlessport listen tcp 127.0.0.1:$hostport: bind: address already in use" >&2
       exit 126
@@ -88,13 +97,14 @@ start_vmsingle() {
   "
 }
 
-# 밴드 검사만 따로 부른다. $1 = 검사 전에 끼울 셸 코드.
+# 밴드 손잡이만 따로 부른다(VME_* → HP_* 배선의 **양성 대조**). $1 = 검사 전에 끼울 셸 코드.
 band_assert() {
   run env PATH="$STUB:$PATH" STUB_STATE="$STATE" bash -c "
     set -euo pipefail
     . '$LIB'
     $1
-    _vme_band_assert
+    _vme_hp_sync
+    hp_band_assert
     echo BAND-OK
   "
 }
@@ -108,128 +118,85 @@ band_assert() {
     # d5·09 이후 기동은 vme_leg(레그 조립 — start·포트 추첨을 lib 내부에서 한다) 경유가 유일 표준이다.
     run grep -qE '^[[:space:]]*vme_leg ' "$f"
     [ "$status" -eq 0 ]
-    # 이 레인의 고유 축: vmsingle을 인라인 docker run으로 띄우면 포트가 lib 추첨(_vme_pick_port)을
-    # 우회한다 — 밴드·프로브·재시도 처방 전부가 그 사이트만 빠진다.
+    # 이 레인의 고유 축: vmsingle을 인라인 docker run으로 띄우면 포트 추첨도 기동 6불변식도
+    # (hp_pick_port·hp_run_published) 그 사이트만 빠진다 — 밴드·프로브·재시도·매핑 대조 전부다.
     run grep -c 'docker run.*victoria-metrics' "$f"
     [ "$output" = "0" ]
   done
 }
 
-@test "the port band is disjoint from this host's live kernel ephemeral range" {
+@test "the VME_ band handles reach the primitive and stay disjoint from this host's live kernel ephemeral range" {
   # ★ 상수가 아니라 **라이브 커널 값**에 대해 판정한다. 밴드를 되돌리면(29999→39999) 이 lane만 red다.
+  #   동시에 `_vme_hp_sync`(VME_* → HP_*) 배선의 양성 대조다 — 그 줄을 지우면 아래 음성 레인들이
+  #   전부 "밴드를 흔들었는데 아무 일도 안 난다"로 조용히 뒤집힌다.
   band_assert ""
   [ "$status" -eq 0 ]
   printf '%s' "$output" | grep -qF 'BAND-OK'
 }
 
-@test "a band overlapping the ephemeral range fails closed instead of picking a port" {
+@test "a band overlapping the ephemeral range fails closed before any container is started" {
+  # ★ 밴드 판정은 **기동 경로에서** 물어야 한다 — 검사 함수를 직접 부르는 레인만 있으면 그 검사가
+  #   `vme_start_vmsingle`에서 떨어져 나가도 초록이다. 그래서 실제 start를 태우고,
+  #   docker run이 **한 번도** 불리지 않았음을 함께 단언한다(판정 불가는 '통과'가 아니라 기동 금지다).
   printf '20000\t60999\n' > "$TMP/eph"
-  band_assert "VME_PORT_RANGE_FILE='$TMP/eph'"
+  start_vmsingle "VME_PORT_RANGE_FILE='$TMP/eph'"
   [ "$status" -eq 2 ]
   printf '%s' "$output" | grep -qF 'ephemeral'
+  [ ! -s "$STATE/ports" ]
 }
 
 @test "a band overlapping the k8s NodePort range fails closed (nat rules are invisible to any bind probe)" {
   # ★ 프로브 개선으로는 원리적으로 못 잡는 축 — 밴드에서 빼는 것이 유일한 처방이라 여기서 문다.
-  band_assert "VME_PORT_LO=30000; VME_PORT_HI=30500"
+  start_vmsingle "VME_PORT_LO=30000; VME_PORT_HI=30500"
   [ "$status" -eq 2 ]
   printf '%s' "$output" | grep -qF 'NodePort'
+  [ ! -s "$STATE/ports" ]
 }
 
 @test "an unreadable ephemeral range file fails closed (undecidable is not a pass)" {
-  band_assert "VME_PORT_RANGE_FILE='$TMP/nonexistent-range'"
+  start_vmsingle "VME_PORT_RANGE_FILE='$TMP/nonexistent-range'"
   [ "$status" -eq 2 ]
   printf '%s' "$output" | grep -qF '읽을 수 없다'
-}
-
-@test "the free-port probe reports a port held by a live socket as busy, and an unused port as free" {
-  # ★ 프로브 증인 — 양성·음성 대조를 함께 건다. connect 프로브(/dev/tcp)로 되돌리면 양성 쪽이 red고,
-  #   항상-BUSY로 망가뜨리면 음성 쪽이 red다. 실 소켓을 쓰는 유일한 lane이다.
-  run env PATH="$STUB:$PATH" python3 - "$LIB" <<'PYWITNESS'
-import socket, subprocess, sys
-lib = sys.argv[1]
-# 리스너를 닫고 accepted 소켓만 남긴다 — connect는 refused(FREE)라고 답하지만 bind는 EADDRINUSE다.
-srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-srv.bind(("127.0.0.1", 0)); held = srv.getsockname()[1]; srv.listen(1)
-cli = socket.socket(); cli.connect(("127.0.0.1", held))
-acc, _ = srv.accept(); srv.close()
-
-def probe(port):
-    return subprocess.run(
-        ["bash", "-c", f'. "{lib}"; _vme_port_free {port}'],
-        capture_output=True).returncode
-
-busy = probe(held)
-free_sock = socket.socket(); free_sock.bind(("127.0.0.1", 0))
-unused = free_sock.getsockname()[1]; free_sock.close()
-free = probe(unused)
-acc.close(); cli.close()
-print(f"held={held} rc={busy} unused={unused} rc={free}")
-if busy == 0:
-    print("PROBE-FAILED: 살아있는 소켓이 붙든 포트를 FREE라고 답했다"); sys.exit(1)
-if free != 0:
-    print("PROBE-FAILED: 안 쓰는 포트를 BUSY라고 답했다(항상-BUSY 프로브는 무측정과 같다)"); sys.exit(1)
-print("PROBE-OK")
-PYWITNESS
-  [ "$status" -eq 0 ]
-  printf '%s' "$output" | grep -qF 'PROBE-OK'
+  [ ! -s "$STATE/ports" ]
 }
 
 @test "a transient bind failure is retried on a different port and the retry is announced" {
-  printf '21001\n' > "$STATE/failports"
-  # 포트 선택을 결정적으로 만든다 — 확률적 단언은 flake의 씨앗이다.
-  start_vmsingle "
-    _vme_pick_port() { c=\$(cat '$STATE/cursor' 2>/dev/null || echo 1); echo \$((c+1)) > '$STATE/cursor'; printf '2100%s' \"\$c\"; }
-  "
+  # ★ 실패는 **시도 횟수**로 주입한다. 포트별 픽스처(failports)는 어느 포트가 먼저 뽑히느냐에
+  #   의존해 결정적이지 않다 — 첫 추첨이 성공 포트를 집으면 재시도가 아예 안 일어나 이 레인이
+  #   통째로 vacuous하다. 확률적 단언은 flake의 씨앗이다.
+  # ⚠️ 픽스처 밴드는 프로덕션 밴드(20000-29999) **밖**에 둔다. CI에서 이 스위트는 발화 e2e 6종과
+  #   **동시에** 도는데, 프로덕션 밴드 안의 고정 포트를 잡으면 그 하네스들과 경합해 이 레인이
+  #   간헐적으로 red가 된다(형제 test_host-ports.bats의 배제 레인과 같은 규율).
+  printf '1\n' > "$STATE/failfirst"
+  start_vmsingle "VME_PORT_LO=19401; VME_PORT_HI=19402"
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | grep -qF 'BASE=http://127.0.0.1:21002'
+  out="$output"
   # 조용한 재시도 금지 — 발생 사실이 로그에 없으면 경합 빈도가 관측되지 않는다.
-  printf '%s' "$output" | grep -qF 'RETRY (bind'
-  # 같은 포트를 다시 쓰지 않았다.
+  printf '%s' "$out" | grep -qF 'RETRY (bind'
+  # ★ 같은 포트를 다시 쓴 것이 아니라 **서로 다른** 포트로 재시도했다.
   # ⚠️ `LC_ALL=C` 필수 — en_US 콜레이션은 서로 다른 값을 같다고 보고 하나를 버린다(#514의 fail-open).
   #    여기서 그 일이 나면 "서로 다른 포트 N개" 단언이 조용히 약해진다.
   run bash -c "LC_ALL=C sort -u '$STATE/ports' | grep -c ."
   [ "$output" -eq 2 ]
-}
-
-@test "the retry removes the Created leftover, otherwise the name collision makes every retry fail" {
-  # ★ 실패한 `docker run -d`는 컨테이너를 Created로 남긴다. `docker rm -f`를 빼면 재시도가 전부
-  #   "name already in use"로 죽는다 — 재시도가 있는데도 회복하지 못한다. 그 삭제를 여기서 문다.
-  # ⚠️ 정규식이 아니라 고정 문자열로 지운다 — 패턴에 `|`·`$`가 들어가면 delimiter/메타문자로 삼켜져
-  #    치환이 조용히 실패하고, 그러면 이 lane이 원본 lib을 검사해 vacuous하게 통과한다.
-  grep -vF 'docker rm -f "$name"' "$LIB" > "$TMP/lib-norm.sh"
-  # lib은 형제 host-port.sh를 BASH_SOURCE 기준으로 찾는다 — 변이 사본 옆에 같이 둬야 한다.
-  # (없으면 lib이 fail-closed로 죽어 이 레인이 **아래 단언과 무관한 이유로** red가 된다.)
-  cp "$ROOT/tests/gates/lib/host-port.sh" "$TMP/host-port.sh"
-  run grep -cF 'docker rm -f "$name"' "$TMP/lib-norm.sh"
-  [ "$output" -eq 0 ]
-  # cleanup 쪽 `docker rm -f "$c"`는 남아 있어야 한다(지우려던 것만 정확히 지웠다는 대조).
-  run grep -cF 'docker rm -f "$c"' "$TMP/lib-norm.sh"
-  [ "$output" -eq 1 ]
-  printf '21001\n' > "$STATE/failports"
-  run env PATH="$STUB:$PATH" STUB_STATE="$STATE" bash -c "
-    set -euo pipefail
-    . '$TMP/lib-norm.sh'
-    VME_NET=testnet
-    _vme_pick_port() { c=\$(cat '$STATE/cursor' 2>/dev/null || echo 1); echo \$((c+1)) > '$STATE/cursor'; printf '2100%s' \"\$c\"; }
-    vme_start_vmsingle vm-test v1.0.0
-  "
-  [ "$status" -eq 2 ]
-  printf '%s' "$output" | grep -qF 'already in use'
+  # ★ 그리고 lib이 쓰는 BASE는 **두 번째** 시도의 포트다 — 프리미티브가 첫 요청값을 그대로 되돌려주면
+  #   하네스는 아무도 안 듣는 포트에 질의하고 60×0.5s 뒤 "not ready"로 오진한다.
+  second="$(sed -n '2p' "$STATE/ports")"
+  [ -n "$second" ]
+  printf '%s' "$out" | grep -qF "BASE=http://127.0.0.1:${second}"
 }
 
 @test "a permanent bind failure exits 2 after distinct ports and surfaces the runtime stderr verbatim" {
-  printf '21001\n21002\n21003\n21004\n' > "$STATE/failports"
-  start_vmsingle "
-    _vme_pick_port() { c=\$(cat '$STATE/cursor' 2>/dev/null || echo 1); echo \$((c+1)) > '$STATE/cursor'; printf '2100%s' \"\$c\"; }
-  "
+  printf '9\n' > "$STATE/failfirst"   # 모든 시도를 실패시킨다(HP_BIND_TRIES=3보다 크게)
+  start_vmsingle "VME_PORT_LO=19411; VME_PORT_HI=19413"
   [ "$status" -eq 2 ]
   # 원본 stderr를 삼키면 진단이 사라진다.
   printf '%s' "$output" | grep -qF 'STUBFAIL-COOKIE'
+  # ★ **종료 규약 번역**이 이 어댑터의 유일한 일이다. hp_run_published는 exit하지 않고 rc 1만 내므로,
+  #   그 rc를 HARNESS FAULT(exit 2)로 옮기지 않으면 `set -e` 아래에서 rc 1이 그대로 새어 나가
+  #   이 lib의 규약(하네스 고장 = 2)이 조용히 뒤집힌다. 형제 AM 하네스는 같은 rc를 exit 1로 옮긴다.
   printf '%s' "$output" | grep -qF 'HARNESS FAULT'
   # 같은 포트를 반복한 것이 아니라 **서로 다른** 포트에서 실패했음을 단언한다.
   # ⚠️ `LC_ALL=C` 필수 — en_US 콜레이션은 서로 다른 값을 같다고 보고 하나를 버린다(#514의 fail-open).
-  #    여기서 그 일이 나면 "서로 다른 포트 N개" 단언이 조용히 약해진다.
   run bash -c "LC_ALL=C sort -u '$STATE/ports' | grep -c ."
   [ "$output" -eq 3 ]
 }
@@ -237,6 +204,8 @@ PYWITNESS
 @test "a health body from someone else is a fault, not a not-ready timeout" {
   # ★ NodePort DNAT의 서명이 정확히 이것이다 — run도 port 대조도 통과하는데 남의 답이 온다.
   #   예전 코드는 이 상태를 60×0.5s 태운 뒤 "not ready"로 오진했다.
+  #   readiness 판정은 **하네스-로컬 정책**이라 프리미티브로 올리지 않았다(ADR-0005) — 그 결정이
+  #   실제로 이 lib 안에서 살아 있는지 여기서 문다.
   printf '404 page not found\n' > "$STATE/health-body"
   start_vmsingle ""
   [ "$status" -eq 2 ]

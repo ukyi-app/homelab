@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 # homepage Deployment(restricted·ALLOWED_HOSTS·디렉토리 마운트) 가드. @test 이름은 영어.
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 deployment.yaml 단일 파일이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 setup() { D="${BATS_TEST_DIRNAME}/deployment.yaml"; }
 
 @test "uses the gethomepage image and container port 3000" {
@@ -34,7 +36,9 @@ setup() { D="${BATS_TEST_DIRNAME}/deployment.yaml"; }
   run grep -q 'name: seed-config' "$D"; [ "$status" -eq 0 ]
   run grep -q 'emptyDir: {}' "$D"; [ "$status" -eq 0 ]
   run grep -q 'name: config-src' "$D"; [ "$status" -eq 0 ]
-  run grep -qE '^[[:space:]]*subPath:' "$D"; [ "$status" -ne 0 ]
+  # subPath 금지가 이 @test의 유일한 부재 단언이다 — 형제 양성 단언(seed-config·emptyDir·config-src)이
+  # 같은 파일을 들므로 대상 부재는 이미 red지만, 형제가 리팩터로 빠지면 그때부터 홀로 공허해진다.
+  run grep -qE '^[[:space:]]*subPath:' "$D"; [ "$status" -eq 1 ]
   run grep -qE 'mountPath: /app/config\b' "$D"; [ "$status" -eq 0 ]
 }
 

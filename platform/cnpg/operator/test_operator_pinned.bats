@@ -1,4 +1,6 @@
 #!/usr/bin/env bats
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 단일 파일이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 
 f=platform/argocd/root/apps/cnpg-operator.yaml
 
@@ -8,7 +10,7 @@ f=platform/argocd/root/apps/cnpg-operator.yaml
   run grep -E 'targetRevision:\s+0\.28\.3' "$f"
   [ "$status" -eq 0 ]
   run grep -E 'targetRevision:\s+[~^*]' "$f"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "operator targets cnpg-system namespace" {

@@ -2,6 +2,8 @@
 # tailscale ACL F2 회귀 가드 — CNPG pg(5432)가 전 tailnet 멤버(autogroup:member)에 열리지 않게 강제.
 # crown-jewel DB 직결은 owner(autogroup:admin)만. grep 기반(terraform 불요 → CI-safe, required gate).
 # @test 이름은 영어(디렉토리 단위 실행 시 한글 인코딩 깨짐). 중간 단언은 [ ]만(bash 3.2).
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 단일 파일($ACL)이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 setup() { ACL="${BATS_TEST_DIRNAME}/acl.tf"; }
 
 @test "pg 5432 is exposed to the owner (autogroup:admin), not all members" {
@@ -12,8 +14,11 @@ setup() { ACL="${BATS_TEST_DIRNAME}/acl.tf"; }
 
 @test "pg 5432 is never opened to autogroup:member (F2 over-exposure guard)" {
   # member rule(현재 80,443)에 5432가 섞이면 전 tailnet 노출 → 같은 줄에 member와 5432 공존 시 실패.
+  # ⚠️ 형제 양성 단언이 없는 @test다 — 예전 `-ne 0`에서는 acl.tf를 리네임하면 이 파일 4개 중
+  #    **이것만 초록으로 남았다**(2026-08-29 격리 트리 실측). crown-jewel DB 과다노출 가드가
+  #    ACL 파일 부재에 공허했다는 뜻이다.
   run grep -E 'autogroup:member.*5432|5432.*autogroup:member' "$ACL"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 # D-i(2026-08-12) 의존 가드 — 아래 두 줄이 사라지면 D-i의 두 경로가 조용히 죽는다.

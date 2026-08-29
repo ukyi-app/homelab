@@ -2,6 +2,10 @@
 # dry-6: 앱-이름 regex SSOT(tools/lib/identity.ts). 4종 분기 regex를 validator 정책으로 수렴.
 # trailing hyphen 금지(`^[a-z][a-z0-9-]{0,38}[a-z0-9]$`). 모든 mutator 콜사이트가 동일 검증.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과 함정.
+# ⚠️ 부재 단언("인라인 잔존 0")은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 tools/*.ts
+#    단일·다중 **파일**이라 그것으로 닫힌다. 이 파일의 술어는 전부 "콜사이트에서 사라졌는가"라
+#    콜사이트가 리네임되면 `-ne 0`이 SSOT 수렴을 증명하지 않고도 초록이 된다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
 
@@ -22,7 +26,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # 5 콜사이트가 분기 regex 대신 SSOT를 쓴다 — 인라인 `[a-z][a-z0-9-]{1,29}`/`{0,40}` 잔존 0
   run grep -nE 'a-z0-9-\]\{1,29\}|a-z0-9-\]\{0,40\}' \
     tools/create-app.ts tools/teardown-app.ts tools/bump-tag.ts
-  [ "$status" -ne 0 ]   # grep이 아무것도 못 찾아야(=잔존 0) status!=0
+  [ "$status" -eq 1 ]   # grep이 아무것도 못 찾아야(=잔존 0) status==1
   for f in create-app teardown-app validate-mutation activate-app bump-tag; do
     run grep -q "lib/identity.ts" "tools/$f.ts"
     [ "$status" -eq 0 ]
@@ -64,7 +68,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # 느슨한 ^[a-z][a-z0-9-]*$ 가 리소스 검증 파일에서 사라졌는지(seal-secret.mts는 secret 키名이라 제외)
   run grep -nE '\^\[a-z\]\[a-z0-9-\]\*\$' \
     tools/db-url.ts tools/cache-url.ts tools/teardown-resource.ts tools/validate-mutation.ts
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   for f in teardown-resource validate-mutation provision-db provision-cache; do
     run grep -q "lib/identity.ts" "tools/$f.ts"
     [ "$status" -eq 0 ]
@@ -78,8 +82,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "EXT_RE has no inline duplicate left (validate-mutation, provision-db)" {
+  # 이 @test에는 형제 단언이 없다 — `-ne 0`이면 두 파일이 함께 리네임돼도 혼자 초록으로 남는다
   run grep -nE 'a-z0-9_-\]\*\$/' tools/validate-mutation.ts tools/provision-db.ts
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "provision-cache now rejects a >30-char name (29->30 tightening consistent)" {
@@ -177,8 +182,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 
 @test "executors use shared reserved policy (no local RESERVED/-ro check left)" {
   run grep -Fq 'resourceNameError' tools/provision-db.ts;        [ "$status" -eq 0 ]
-  run grep -Fq '"streaming_replica"' tools/provision-db.ts;      [ "$status" -ne 0 ]   # 로컬 RESERVED 리터럴 제거
-  run grep -Fq '/-ro$/' tools/provision-db.ts;                   [ "$status" -ne 0 ]   # provision-db 로컬 -ro 제거(F8)
-  run grep -Fq '/-ro$/' tools/provision-cache.ts;                [ "$status" -ne 0 ]   # provision-cache 로컬 -ro 제거
+  run grep -Fq '"streaming_replica"' tools/provision-db.ts;      [ "$status" -eq 1 ]   # 로컬 RESERVED 리터럴 제거
+  run grep -Fq '/-ro$/' tools/provision-db.ts;                   [ "$status" -eq 1 ]   # provision-db 로컬 -ro 제거(F8)
+  # ⚠️ provision-cache.ts는 이 @test에서 여기서만 읽힌다 — 형제 양성 단언(resourceNameError)이 없어
+  #    `-ne 0`에서는 그 파일이 사라져도 "로컬 -ro 제거됨"으로 읽혔다
+  run grep -Fq '/-ro$/' tools/provision-cache.ts;                [ "$status" -eq 1 ]   # provision-cache 로컬 -ro 제거
   run grep -Fq 'resourceNameError' tools/validate-mutation.ts;   [ "$status" -eq 0 ]
 }

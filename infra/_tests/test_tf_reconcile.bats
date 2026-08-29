@@ -4,6 +4,12 @@
 #  - cloudflare 루트만 apply하며 destroy 가드를 유지한다.
 #  - 시크릿 부재로 인한 skip은 **관측 가능해야 한다**(G-09 준비상태 회계) — 예전엔 그 skip을
 #    "바람직한 상태"로 못박고 있었는데, 실제로는 신뢰 앵커 감시가 통째로 죽는 상태였다.
+#
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일($WF)이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
+#    2026-08-29 격리 트리 실측: tf-reconcile.yaml을 리네임하면 이 파일의 12개 중 **아래 두 개만**
+#    초록으로 남았다(형제 양성 단언이 없는 @test들이다). 즉 plan-only 계약과 alert-and-skip 계약이
+#    대상 부재에 공허했다.
 
 WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
 
@@ -16,8 +22,9 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
 
 @test "github/tailscale roots are NEVER applied/destroyed unattended (plan-only)" {
   # 신뢰 앵커 보호: 이 두 루트에 대한 apply/destroy 호출이 워크플로에 있으면 안 된다.
+  # ⚠️ 형제 양성 단언이 없는 @test다 — 예전 `-ne 0`에서는 워크플로 리네임에 홀로 초록이었다(실측).
   run grep -nE 'chdir=infra/(github|tailscale)[^|]*(apply|destroy)' "$WF"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "github/tailscale drift jobs use plan with detailed-exitcode" {
@@ -76,17 +83,19 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
 @test "cloudflare reconcile uses the tf-destroy-guard composite (block) not inline jq" {
   run grep -q 'uses: ./.github/actions/tf-destroy-guard' "$WF"
   [ "$status" -eq 0 ]
-  # 인라인 destroy jq가 reconcile에서 제거됐는지(composite로 수렴)
+  # 인라인 destroy jq가 reconcile에서 제거됐는지(composite로 수렴) — 위 composite 단언이 같은 파일의
+  # 실재를 함께 증언하므로 이 자리는 rc 구별만 채우면 닫힌다.
   run grep -F 'select(. == "delete")' "$WF"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "reconcile delete guard is alert-and-skip (does not hard-fail the job on delete)" {
   # drift-2: delete가 있어도 reconcile job 자체는 실패시키지 않는다(::warning:: + telegram). ⚠️ F3: saved-plan
   # apply는 원자적이라 delete 포함 시 apply 전체가 skip되며(부분 수렴 불가), owner 로컬 apply 후 다음 주기에 수렴.
   # 즉 reconcile 경로엔 'exit 1'로 잡을 죽이는 인라인 destroy 분기가 없어야 한다(가드는 continue-on-error로 강등).
+  # ⚠️ 형제 양성 단언이 없는 @test다 — 예전 `-ne 0`에서는 워크플로 리네임에 홀로 초록이었다(실측).
   run grep -nE '무인 apply 차단.*exit 1|exit 1[[:space:]]*#.*destroy' "$WF"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "reconcile guard step is continue-on-error and emits a warning (not job failure)" {

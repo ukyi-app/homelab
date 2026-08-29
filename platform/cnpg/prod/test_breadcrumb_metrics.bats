@@ -1,4 +1,6 @@
 #!/usr/bin/env bats
+# ⚠️ 피연산자가 **상대 경로**다 — 이 파일은 레포 루트에서 실행해야 rc가 의미를 갖는다
+#    (실행처: scripts/run-bats.sh:21-22가 `cd "$ROOT"` 한다).
 
 @test "Cluster enables the barman WAL archiver (feeds barman_cloud_* + pg_stat_archiver metrics)" {
   grep -q 'isWALArchiver: true' platform/cnpg/prod/cluster.yaml
@@ -10,10 +12,27 @@
   grep -q 'restore_drill_last_success_timestamp' platform/cnpg/prod/restore-drill-script.sh
 }
 @test "M4 authors NO vmalert / PrometheusRule (those are M5-owned)" {
-  run bash -c "ls platform/cnpg/prod/alert-rules.yaml 2>/dev/null"
-  [ "$status" -ne 0 ]
+  # ⚠️ 이 @test의 두 자리는 **`-eq 1` 전환으로 안 닫힌다** — 형태가 서로 다른 이유로 각각 다르다.
+  #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③-a
+  #
+  # ① `ls`는 "무매치"와 "경로째 부재"를 **둘 다 rc 2**로 뭉개므로 전환이 원리적으로 불가능하다.
+  #    처방대로 극성이 반대인 `find`로 바꾼다(경로 부재=rc 1 / 무매치=rc 0 + 빈 stdout).
+  #    예전 `ls … ; [ -ne 0 ]`은 platform/cnpg/prod가 통째로 사라져도 초록이었다.
+  run find platform/cnpg/prod -maxdepth 1 -name 'alert-rules.yaml'
+  [ "$status" -eq 0 ] # 디렉토리 실재 = 비공허 바닥값
+  [ -z "$output" ]
+  #
+  # ② 아래는 **재귀 디렉토리** 부재 단언이다 — 존재하되 빈 디렉토리와 무매치가 같은 rc 1이라
+  #    rc 하나로는 도메인이 빈 것을 못 본다. 비공허 바닥값과 양성 대조를 한 쌍으로 건다.
+  #    양성 대조의 술어가 `kind: PrometheusRule`이 아닌 것은 그 kind가 레포 어디에도 없기 때문이다
+  #    (2026-08-29 실측: `grep -rl --include='*.yaml' 'kind: PrometheusRule' .` = 0건). 대신 이 파일
+  #    @test 1이 이미 읽는 CNPG Cluster manifest를 같은 재귀 술어로 잡아 도메인·술어 생존을 증언한다.
+  run grep -rl --include='*.yaml' 'kind: Cluster' platform/cnpg
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
   # YAML manifest로 한정 — 이 문자열을 언급하는 이 .bats 파일 자신이 매칭되지 않도록
-  run bash -c "grep -rl --include='*.yaml' 'kind: PrometheusRule' platform/cnpg 2>/dev/null"
+  run grep -rl --include='*.yaml' 'kind: PrometheusRule' platform/cnpg
+  [ "$status" -eq 1 ]
   [ -z "$output" ]
 }
 

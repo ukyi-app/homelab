@@ -38,11 +38,13 @@ setup() {
   echo "$output" | grep -q '\[BB\]'
 }
 
-# 도메인(추적 *.bats)이 비면 통과가 아니라 SKIP이다 — 수집이 깨져 0건이 된 것과 "검사했고 깨끗함"을
-# 가르지 못하면 이 가드가 죽어도 게이트가 초록이다.
-# ⚠️ 채널은 **skip이 아니라 열거 붕괴**다 — 기본 모드 도메인(추적 *.bats 229건)은 정당하게 0이 될 수
-# 없다. 같은 도메인의 형제(check-skeleton·check-bats-accounting)가 exit 1 바닥값이라, 여기서 exit 4 +
-# `SKIP:`를 내면 "정당하게 대상 없음(미평가·정상)"으로 정반대로 읽힌다(적대 검토 확정).
+# 도메인(추적 `*.bats` + `load` seam `*.bash`)이 비면 통과가 아니라 SKIP이다 — 수집이 깨져 0건이 된
+# 것과 "검사했고 깨끗함"을 가르지 못하면 이 가드가 죽어도 게이트가 초록이다.
+# ⚠️ 채널은 **skip이 아니라 열거 붕괴**다 — 기본 모드 도메인은 정당하게 0이 될 수
+# 없다. (건수는 여기 적지 않는다 — 손 관리 수치는 드리프트한다, scripts/lib/scan-floor.sh 규약.
+# 착지 전 주석에 남아 있던 "229건"은 실제 열거와 어긋난 낡은 수치였다.)
+# 거의 같은 도메인의 형제(check-skeleton·check-bats-accounting — `*.bats`만)가 exit 1 바닥값이라,
+# 여기서 exit 4 + `SKIP:`를 내면 "정당하게 대상 없음(미평가·정상)"으로 정반대로 읽힌다(적대 검토 확정).
 # 픽스처 = 스크립트 + 커널을 복사한 빈 git 레포(스크립트가 ROOT를 BASH_SOURCE/..로 잡는다).
 @test "fails as enumeration collapse (not skip) when no bats files are tracked" {
   FIX="$BATS_TEST_TMPDIR/emptyrepo"
@@ -65,6 +67,26 @@ setup() {
   out="$output"
   run grep -q "^SKIP:" <<<"$out"
   [ "$status" -ne 0 ]
+}
+
+# 경로 규약 증인 — **bats 도메인 = 추적 `*.bats` + bats가 `load`하는 `*.bash` seam**
+# (근거·경계는 check-bats-style.sh의 열거 주석이 소유한다). `.bash`는 `git ls-files '*.bats'`
+# 단독 열거에 **안 보이므로**, 글롭이 그리로 되돌아가면 그 seam은 이 가드에게 영원히 투명해진다 —
+# 주석만으로는 그 회귀에 아무도 red를 내지 않는다. 픽스처는 형제 '열거 붕괴' 테스트와 같은 관용구다.
+@test "the default domain covers the *.bash seams bats loads, not just *.bats" {
+  FIX="$BATS_TEST_TMPDIR/seamrepo"
+  mkdir -p "$FIX/scripts/lib" "$FIX/tests"
+  cp "$ROOT/scripts/check-bats-style.sh" "$FIX/scripts/"
+  cp "$ROOT/scripts/lib/scan-floor.sh" "$ROOT/scripts/lib/guard.sh" "$FIX/scripts/lib/"
+  printf '%s\n' '@test "noop" {' '  [ 1 -eq 1 ]' '}' > "$FIX/tests/test_x.bats"
+  printf '%s\n' 'helper_fn() { :; }' > "$FIX/tests/test_helper.bash"
+  git -C "$FIX" init -q
+  git -C "$FIX" add -A
+  # 바닥값은 실 레포 크기라 픽스처에선 공용 어휘 `--floor`로 낮춘다(구 env 오버라이드는 폐지).
+  run bash "$FIX/scripts/check-bats-style.sh" --floor check-bats-style=1
+  [ "$status" -eq 0 ]
+  # 2 = .bats 1건 + .bash 1건. 글롭이 `*.bats` 단독으로 좁아지면 1이 되어 여기서 red가 난다.
+  echo "$output" | grep -qxF 'SCAN: check-bats-style: 2'
 }
 
 @test "detector allows a LAST-command negation (valid bats idiom)" {

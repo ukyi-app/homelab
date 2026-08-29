@@ -29,8 +29,9 @@ DIR="${BATS_TEST_DIRNAME}"
   run grep -c 'ENC\[AES256_GCM' "$DIR/pg-admin-credentials.enc.yaml"
   [ "$status" -eq 0 ]
   [ "$output" -ge 2 ]                                    # username + password 암호화
+  # 부재 단언은 `-eq 1` — 단일 파일 피연산자라 닫힌다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
   run grep -q 'ukkiee' "$DIR/pg-admin-credentials.enc.yaml"
-  [ "$status" -ne 0 ]                                    # 평문 username/password 노출 0
+  [ "$status" -eq 1 ]                                    # 평문 username/password 노출 0
 }
 
 # ── C2: tailscale → pg(5432) ingress (default-deny 유지) ──────────────────────

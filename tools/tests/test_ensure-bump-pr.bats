@@ -104,6 +104,15 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   cd "$ROOT" || exit 1
 
+  # ⚠️ fail-closed 증인(`run_ensure*` 뒤의 `[ "$status" -ne 0 ]` 34곳)은 실행기가 **사라져도** 통과한다:
+  #    bun이 rc 1로 죽고 원장이 비어 뒤따르는 `count_calls … -eq 0`(변이 0)까지 전부 참이 되기 때문이다
+  #    = @test 통째로 공허한 초록. rc로는 못 가른다 — 실측(2026-08-29): bun의 "파일 없음"도 **rc 1**이라
+  #    도구 자신의 거부 rc와 값이 같다. 그래서 실행기 실재를 여기 바닥값으로 못박는다.
+  #    ★ 양성 대조는 setup에 못 둔다 — setup에서 실행기를 한 번 돌리면 그 호출이 argv 원장(`$CALLS`)에
+  #      섞여 이 파일의 호출 **횟수** 단언을 전부 오염시킨다. 그 역할은 성공 경로 @test들이 진다.
+  #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·「처방(bats 부재 단언)」
+  [ -s "$ROOT/tools/ensure-bump-pr.ts" ]
+
   APP="page"
   # 배포 핀 tag: sha- + 40 hex (라이브에서 중복 PR 3개를 낸 그 커밋 형태)
   TAG="sha-815abb1$(printf '%033d' 0)"

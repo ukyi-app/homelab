@@ -1,4 +1,7 @@
 #!/usr/bin/env bats
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
+#    (아래 yq 자리는 비대상 — yq의 rc는 값 false와 키 부재를 구별하지 않는다.)
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 cj=platform/cnpg/prod/restore-drill-cronjob.yaml
 sh=platform/cnpg/prod/restore-drill-script.sh
 
@@ -61,7 +64,7 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   grep -q 'parameters.serverName' "$sh"          # 라이브 Cluster에서 파생
   grep -q 'serverName: ${ARCHIVE_SERVER}' "$sh"  # 그 값을 실제로 쓴다
   run grep -nE '^[^#]*serverName: \$\{LIVE_CLUSTER\}' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "drill fails closed when the archive serverName cannot be derived" {
@@ -79,10 +82,15 @@ sh=platform/cnpg/prod/restore-drill-script.sh
     y="platform/cnpg/prod/${f}.yaml"
     cpu="$(yq -e '.spec.jobTemplate.spec.template.spec.containers[0].resources.requests.cpu' "$y")"
     mem="$(yq -e '.spec.jobTemplate.spec.template.spec.containers[0].resources.requests.memory' "$y")"
+    # ⚠️ 부재를 `grep -qv`로 재지 않는다 — `-v`는 줄 단위 반전이라 ∀줄 ¬매치가 아니라 ∃줄 ¬매치다.
+    #    여기 피연산자는 yq 스칼라 1줄이라 **오늘은 우발적으로 옳았지만**, 값이 두 줄이 되는 날
+    #    조용히 공허해지는 잠복형이었다(형제 실측: tests/gates/test_ops-repin.bats — 5줄 중 1줄이
+    #    stale이어도 green이었다). 스칼라 비교엔 줄 개념이 없는 `[ … != … ]`가 정확하고, 오늘의
+    #    동작을 그대로 보존한다(100m/null/빈 문자열/0 네 값에서 rc 동일 — 2026-08-29 대조).
     [ -n "$cpu" ]
     [ -n "$mem" ]
-    printf '%s' "$cpu" | grep -qv '^null$'
-    printf '%s' "$mem" | grep -qv '^null$'
+    [ "$cpu" != "null" ]
+    [ "$mem" != "null" ]
   done
 }
 
@@ -95,7 +103,7 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   # ⚠️ 주석 제외(`^[^#]*`) — 이 파일과 drill.sh **양쪽 주석이 이 함정 문자열을 인용**하므로(고친 함정을
   #    설명하는 컨벤션), 전체 줄 grep은 자기 설명에 걸려 거짓 red를 낸다. 실행되는 코드 줄만 본다.
   run grep -nE '^[^#]*request-timeout' "$sh"
-  [ "$status" -ne 0 ] || { echo "drill.sh 코드가 kubectl --request-timeout을 쓴다 (v1.36.x in-cluster 폴백 버그):"; echo "$output"; false; }
+  [ "$status" -eq 1 ] || { echo "drill.sh 코드가 kubectl --request-timeout을 쓴다 (v1.36.x in-cluster 폴백 버그), 또는 스크립트가 사라졌다:"; echo "$output"; false; }
   # 양성 대조: _live_psql이 timeout 래퍼로 여전히 무한 대기를 막는지(플래그 제거가 보호를 없앤 게 아님)
   grep -qE 'timeout [0-9]+ kubectl .*exec' "$sh"
 }

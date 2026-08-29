@@ -52,9 +52,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 두 포트를 뽑는다 — 두 번째는 첫 번째를 **배제**한다(프로브는 소켓을 즉시 닫아 아무것도 붙들지 않는다).
-AM_PORT="$(hp_pick_port)" || { echo "AM publish 포트 배정 실패(위 stderr)"; exit 1; }
-MOCK_PORT="$(hp_pick_port "$AM_PORT")" || { echo "telegram mock 포트 배정 실패(위 stderr)"; exit 1; }
+# mock 포트를 먼저 뽑는다 — 이 값은 AM config(api_url)에 굳어야 하므로 컨테이너 기동보다 앞이다.
+# AM publish 포트는 `hp_run_published`가 뽑는다(재추첨이 그 안에서 일어나므로 배정 주체가 하나다).
+# 배제는 그 호출에 넘긴다 — 프로브는 소켓을 즉시 닫아 아무것도 붙들지 않으므로, 배제가 없으면 AM이
+# mock과 같은 포트를 받아 둘 중 하나가 EADDRINUSE로 죽는다.
+MOCK_PORT="$(hp_pick_port)" || { echo "telegram mock 포트 배정 실패(위 stderr)"; exit 1; }
 
 # 1) CI-safe config 추출(KSOPS 미경유) + 더미 chat_id + api_url→mock + group_wait 축소
 yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' \
@@ -86,57 +88,22 @@ done
 }
 
 # 3) AM 컨테이너(token 파일 마운트, host.docker.internal 매핑, publish는 루프백 한정).
-# ⚠️ `-p 127.0.0.1:` 접두를 붙인다 — 접두 없는 `-p N:M`은 **전 인터페이스**에 연다. 이 하네스는 k3s가
-#    도는 NUC에서도 돌므로 게이트가 LAN에 포트를 여는 것은 그 자체로 표면이고, 프로브(0.0.0.0 bind)와
-#    실제 바인드의 의미도 그때만 일치한다.
-# ⚠️ 프로브~`docker run` 사이의 창(TOCTOU)은 밴드를 좁혀도 남는다. 그 잔여만 재추첨이 흡수한다
-#    (형제 `vme_start_vmsingle`과 같은 처방·같은 판별자: "서로 다른 포트로 다시 하면 되는가").
-AM_BIND_TRIES="${AM_BIND_TRIES:-3}"
-try=1; runlog=""
-while :; do
-  # ⚠️ 실패한 `docker run -d`는 컨테이너를 **Created로 남긴다** → 같은 이름 재시도가 "name already in
-  #    use"로 죽는다. 명시적으로 지운다(podman 전용 `--replace`는 docker 양립성이 없다).
-  # ⚠️ **`--rm`을 쓰지 않는다.** AM이 기동 직후 죽으면(= 이 게이트가 존재하는 이유인 config 회귀)
-  #    `--rm`이 컨테이너를 즉시 지워 `docker port`도 `docker logs`도 실패한다 — 진단이 통째로
-  #    사라진다. 정리는 EXIT trap과 이 줄이 이미 소유한다. 형제 `vme_start_vmsingle`도 같은 이유로
-  #    `--rm`을 안 쓴다.
-  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-  if runerr="$(docker run -d --name "$CONTAINER" \
-      --add-host=host.docker.internal:host-gateway \
-      -p "127.0.0.1:${AM_PORT}:9093" \
-      -v "$TMP/am.yml:/etc/alertmanager/alertmanager.yml:ro" \
-      -v "$TMP/TELEGRAM_BOT_TOKEN:/etc/alertmanager/secrets/TELEGRAM_BOT_TOKEN:ro" \
-      "$AM_IMAGE" \
-        --config.file=/etc/alertmanager/alertmanager.yml \
-        --cluster.listen-address= 2>&1 >/dev/null)"; then
-    break
-  fi
-  runlog="${runlog}
---- 시도 ${try} (port=${AM_PORT}) ---
-${runerr}"
-  if [ "$try" -ge "$AM_BIND_TRIES" ]; then
-    printf '%s\n' "$runlog" >&2
-    echo "AM 기동이 **서로 다른 포트** ${try}개에서 모두 실패했다 — 포트 경합만으로는 설명되지 않는다(위 런타임 stderr가 원인이다)." >&2
-    exit 1
-  fi
-  # 조용한 재시도 금지 — 발생 사실이 로그에 없으면 경합 빈도가 관측되지 않는다.
-  echo "RETRY (bind ${try}/${AM_BIND_TRIES}): AM port=${AM_PORT} 기동 실패 — 포트를 새로 뽑아 재시도한다. 런타임 stderr: ${runerr}" >&2
-  AM_PORT="$(hp_pick_port "$MOCK_PORT")" || { echo "재추첨 실패(위 stderr)" >&2; exit 1; }
-  try=$(( try + 1 ))
-done
-[ "$try" -eq 1 ] || echo "RETRY (bind): AM이 ${try}번째 시도에서 성공했다." >&2
-
-# 요청한 포트를 **쓰지 않고 대조한다** — 경합으로 매핑이 어긋나면 아래 readiness가 30초를 통째로 태운
-# 뒤에야 "not ready"로 죽어 원인이 안 보인다.
-# ⚠️ `|| got=""`가 **필요하다.** `set -o pipefail` 아래에서 `docker port`가 실패하면(컨테이너가 이미
-#    죽었을 때 rc=125) 명령 치환 rc가 비-0이 되고 `set -e`가 **할당 단계에서** 스크립트를 죽인다 —
-#    아래 진단도 `docker logs`도 실행되지 않아 하네스가 **stdout·stderr 0줄에 rc=125**로 끝난다.
-#    실측 2026-08-21: alertmanager.yml에 구조적 회귀를 심으면 정확히 그 모양이 됐고, 이 하네스는
-#    바로 그 회귀를 잡으려고 존재한다.
-got="$(docker port "$CONTAINER" 9093/tcp 2>/dev/null | head -1 | sed 's/.*://')" || got=""
-[ "$got" = "$AM_PORT" ] || {
-  echo "포트 매핑을 확인할 수 없다: 요청 ${AM_PORT} / 실제 '${got}' — AM이 기동 직후 죽었거나(설정 회귀) 포트 경합이거나 런타임이 매핑을 바꿨다. 아래가 컨테이너 로그다:" >&2
-  docker logs "$CONTAINER" 2>&1 | tail -20 >&2 || echo "  (컨테이너가 남아 있지 않아 로그를 읽지 못했다)" >&2
+# ⚠️ 기동 6불변식(`docker rm -f` 선행 · `--rm` 금지 · 실패를 메시지·종료코드로 비판별 · 서로 다른
+#    포트로 재추첨 재시도 · 요청↔실제 매핑 대조 · 실패 시 `docker logs … tail -20`)은 이 하네스가
+#    아니라 `hp_run_published`(tests/gates/lib/host-port.sh)가 소유한다. 예전엔 그 여섯이 여기와
+#    `lib/vmalert-e2e.sh`의 `vme_start_vmsingle`에 **두 벌로** 살았고, 이 사본은 주석으로 3회
+#    "형제 vme_start_vmsingle과 같은 처방·같은 판별자"라고 자백했다 — 그 자백이 곧 처방이 소비자
+#    사유물로 갇혔다는 증거였다. `-p 127.0.0.1:` 접두(게이트가 LAN에 포트를 열지 않는다)도 그 안이다.
+# ⇒ 여기 남는 것은 AM 고유의 명령줄과 **rc → 이 하네스의 종료 규약(exit 1)** 번역뿐이다.
+#    readiness(`/-/ready` 본문 판정)는 하네스-로컬 정책이라 아래에 그대로 남는다.
+AM_PORT="$(hp_run_published "$CONTAINER" 9093 "$MOCK_PORT" \
+    --add-host=host.docker.internal:host-gateway \
+    -v "$TMP/am.yml:/etc/alertmanager/alertmanager.yml:ro" \
+    -v "$TMP/TELEGRAM_BOT_TOKEN:/etc/alertmanager/secrets/TELEGRAM_BOT_TOKEN:ro" \
+    "$AM_IMAGE" \
+      --config.file=/etc/alertmanager/alertmanager.yml \
+      --cluster.listen-address=)" || {
+  echo "AM 기동 실패 — 위 host-port stderr가 원인이다(포트 경합이면 재추첨 로그가, 설정 회귀면 컨테이너 로그가 그 위에 있다)." >&2
   exit 1
 }
 BASE="http://127.0.0.1:${AM_PORT}"

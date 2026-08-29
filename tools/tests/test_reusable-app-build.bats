@@ -45,10 +45,13 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; F="$ROOT/.github/workf
 }
 
 @test "reusable-app-build: v1 dispatch path stays retired (no repository_dispatch / dispatch-pat / environment)" {
+  # ⚠️ 이 @test엔 형제 양성 단언이 없다 — `-ne 0`이던 시절엔 reusable-app-build.yaml이 리네임돼도
+  #    (=cross-repo 계약 자체가 사라져도) v1 은퇴 가드가 혼자 초록이었다. 단일 파일 피연산자라
+  #    `-eq 1`이 그 rc 2를 red로 가른다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
   run grep -E "repos/.*/dispatches|app-onboard|app-image|environment: production" "$F"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run grep -q 'dispatch-pat' "$F"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "reusable-app-build: inputs contract is exactly [app, push] (app required; push boolean default true)" {

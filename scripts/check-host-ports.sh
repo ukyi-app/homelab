@@ -19,6 +19,17 @@
 #   C 위 둘 중 하나를 하는 파일이 `lib/host-port.sh`를 **안 쓴다** : 배정을 안 받았다는 뜻이다.
 #   D 포트 변수를 **자기가 리터럴로** 채운다 : `PORT=18443` 뒤에 `"$PORT"`로 쓰면 A·B가 침묵한다.
 #     밴드 상수의 정의처인 `HP_` 이름공간만 면제다(파일 목록이 아니라 이름공간 규칙이다).
+#   E publish 컨테이너를 띄우면서 **기동 프리미티브를 안 쓴다** : 기동 6불변식(`docker rm -f` 선행 ·
+#     `--rm` 금지 · 실패를 메시지·종료코드로 비판별 · 서로 다른 포트로 재추첨 · 요청↔실제 매핑 대조 ·
+#     실패 시 `docker logs … tail -20`)의 SSOT는 `hp_run_published`(lib/host-port.sh)다. A~D를 전부
+#     지키면서 — 배정은 받고 — 그 여섯을 손으로 다시 인라인하면 처방이 또 두 벌이 된다. 그것이 이
+#     가드를 태어나게 한 병(#521 처방이 한 소비자 lib에 갇힘)이 **한 층 위**에서 재발한 모양이었다.
+#     ⚠️ 태그는 `[P]`다 — `[E]`는 이미 **미종료 heredoc 구조 오류**가 쓰고 있고 그 태그는 traps
+#        원장이 인용한다. 한 가드 안에서 같은 태그가 두 뜻이면 실패 출력이 사람에게 애매해진다.
+#     ⚠️ 판정은 **파일 단위**다. "같은 줄에 `docker run`과 `hp_run_published`가 함께 있는가" 같은
+#        접속사 조건을 넣으면 레인이 **vacuous**해진다 — 프리미티브를 쓰는 소비자에는 `docker run`
+#        줄이 아예 없고, 남는 `docker run -p` 줄은 프리미티브 **정의처**의 한 줄뿐이라 어떤 소비자도
+#        그 조건에 걸리지 않는다(즉 아무것도 안 무는 레인이 된다).
 #
 # 도메인은 `tests/gates/**`의 추적 `.sh`다. 프로덕션 실행자(`scripts/backup-files-data.sh`의
 # `kubectl port-forward`)는 **의도적으로 밖**이다 — 거긴 CI 게이트가 아니라 systemd 실행자이고 실패
@@ -115,6 +126,7 @@ FNR==1 { flush_prev(); inhere=0; delim=""; herestart=0; prevfile=FILENAME; nfile
     #    publish로 읽어 그 파일을 [C]로 오탐한다(실측 — 도입 때 app-shared-node-smoke.sh가 걸렸다).
     if (np < 2) continue
     binds[FILENAME] = 1
+    publishes[FILENAME] = 1   # [C]의 binds와 달리 **publish에만** 서는 표식이다(레인 E의 입력)
     host = (np >= 3) ? part[2] : part[1]
     if (host ~ /^[0-9]+$/) {
       printf "%s:%d: [A] publish 호스트 포트가 리터럴(%s): %s\n", FILENAME, FNR, host, $0
@@ -172,6 +184,14 @@ FNR==1 { flush_prev(); inhere=0; delim=""; herestart=0; prevfile=FILENAME; nfile
 # ⚠️ **행간 주석은 배정으로 치지 않는다.** 텍스트 등장만 보면 "host-port.sh 라고 적기만 해도" 통과해
 #    마지막 방어선이 주석 한 줄로 무너진다.
 { if (nocomment($0) ~ /host-port\.sh|hp_pick_port/) used[FILENAME] = 1 }
+# ── [P] publish 컨테이너를 띄우는 파일이 기동 프리미티브를 쓰는가(레인 E · 파일 단위) ────────────
+# ⚠️ [C]와 같은 규율로 **행간 주석은 사용으로 치지 않는다** — 이름을 적기만 해도 통과하면 마지막
+#    방어선이 주석 한 줄로 무너진다. 이 레포의 하네스는 자기가 고친 함정을 인용하며 설명하므로
+#    `hp_run_published`라는 이름은 주석에 실제로 등장한다.
+{ if (nocomment($0) ~ /hp_run_published/) usesrun[FILENAME] = 1 }
+# **정의처는 소비자가 아니다.** 파일 목록이 아니라 "이 파일이 그 함수를 정의하는가"라는 규칙이라
+# (레인 D의 `HP_` 이름공간 면제와 같은 형태) lib을 옮겨도 판정이 갈리지 않는다.
+{ if (nocomment($0) ~ /^[ \t]*hp_run_published[ \t]*\(\)/) { if (defsrun[FILENAME] != 1) ndefs++; defsrun[FILENAME] = 1 } }
 
 END {
   flush_prev()
@@ -180,6 +200,20 @@ END {
       printf "%s:0: [C] 호스트 포트를 잡는데 lib/host-port.sh를 쓰지 않는다(배정을 안 받았다)\n", f
       bad = 1
     }
+  }
+  for (f in publishes) {
+    if (defsrun[f] == 1) continue
+    if (usesrun[f] != 1) {
+      printf "%s:0: [P] publish 컨테이너를 직접 띄운다 — 기동 프리미티브 hp_run_published를 쓰지 않는다(rm -f 선행·--rm 금지·비판별 재시도·매핑 대조·logs tail 6불변식이 또 두 벌이 된다)\n", f
+      bad = 1
+    }
+  }
+  # 정의처 면제가 **우회 통로**가 되지 않게 — 프리미티브를 자기 파일로 복사하면 그만이기 때문이다.
+  # 기동 처방의 SSOT는 하나여야 하므로 사본의 존재 자체를 위반으로 낸다(전수 열거 모드에서 문다).
+  if (ndefs > 1) {
+    for (f in defsrun)
+      printf "%s:0: [P] hp_run_published 정의가 %d곳이다 — 기동 처방의 SSOT는 하나여야 한다(사본은 정의처 면제를 우회 통로로 만든다)\n", f, ndefs
+    bad = 1
   }
   # 검출기가 실제로 읽은 파일 수를 **호출자에게 알린다** — SCAN 신호가 "열거한 파일 수"이면
   # awk가 중간에 죽어도 그 수가 그대로 나가 "몇 건을 검사했는가"라는 신호의 계약이 깨진다.
@@ -197,7 +231,7 @@ findings="$(detect_run check-host-ports "$DETECT" "${FILES[@]}")" || {
 scan_signal check-host-ports "${#FILES[@]}"
 
 n="$(scan_count "$findings")"
-printf '%s\n' "$findings" | grep -E '\[(A|B|C|D|E)\]' || true   # gate bats가 레인 태그를 검증
+printf '%s\n' "$findings" | grep -E '\[(A|B|C|D|E|P)\]' || true   # gate bats가 레인 태그를 검증
 if [ "$n" -gt 0 ]; then
   echo "FAIL: 리터럴 호스트 포트 ${n}곳 — 포트는 tests/gates/lib/host-port.sh의 hp_pick_port로 배정받아라." >&2
   exit 1

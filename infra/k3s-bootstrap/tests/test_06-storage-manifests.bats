@@ -38,7 +38,9 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
   # bulk 경로는 템플릿(${BULK_STORAGE_PATH})이라 apply-storage.sh가 외장 SSD 마운트
   # (또는 VM 디스크 dev 폴백)를 가리키게 할 수 있다; 렌더 결과 검사는 07에 있다.
   run grep -F '${BULK_STORAGE_PATH}' "$PROV"; [ "$status" -eq 0 ]
-  run grep -F "$BULK_STORAGE_PATH" "$PROV"; [ "$status" -ne 0 ]  # 외장 경로 리터럴이 박혀 있으면 안 된다
+  # rc 2(PROV 리네임)를 통과로 읽지 않는다 — 바로 위 두 양성 대조가 같은 파일의 실재를 증언한다.
+  # cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
+  run grep -F "$BULK_STORAGE_PATH" "$PROV"; [ "$status" -eq 1 ]  # 외장 경로 리터럴이 박혀 있으면 안 된다
 }
 
 @test "helper pod image is wired to the LOCAL_PATH_HELPER_IMAGE placeholder" {

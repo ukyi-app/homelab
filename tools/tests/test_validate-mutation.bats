@@ -2,7 +2,16 @@
 # mutation dispatcher payload 검증기 — 액션 계약표 강제.
 # 픽스처는 실제 `toJSON(github.event.inputs)` 모양(빈 문자열 선택 입력 포함)과 일치해야 한다.
 
-setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; V="$ROOT/tools/validate-mutation.ts"; }
+# ⚠️ 이 파일의 거부 단언은 전부 `run bun "$V"`라 부재를 rc로 못 가른다 — 실측(2026-08-29):
+#    bun은 없는 파일에도 **rc 1**을 내고 validate-mutation의 거부도 rc 1이다(`-eq 1` 전환이
+#    원리적으로 불가능한 자리). 그래서 도구 실재를 setup 바닥값으로 못박는다: 계약표가
+#    리네임/삭제되면 거부 단언 20곳이 통째로 공허하게 초록이 되는 대신 전 @test가 red다.
+#    양성 대조는 같은 파일의 수락(`-eq 0`) @test들이 진다 — 도구가 전부 거부해도 그쪽이 red다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·「처방(bats 부재 단언)」
+setup() {
+  ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; V="$ROOT/tools/validate-mutation.ts"
+  [ -s "$V" ]
+}
 
 @test "rejects unknown action" {
   run bun "$V" --action evil --payload '{"app":"orders"}'

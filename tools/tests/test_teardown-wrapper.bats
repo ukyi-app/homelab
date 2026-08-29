@@ -1,6 +1,9 @@
 #!/usr/bin/env bats
 # owner-local teardown 래퍼(scripts/teardown.sh) 안전 envelope 가드. 파괴/네트워크는 DRY_RUN=1로 차단.
 # (@test 이름 영어, 단언은 run+[ ] — bash 3.2 함정 회피)
+# ⚠️ 부재 단언 규약(`-eq 1`)은 docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a가 SSOT다.
+#    이 파일 고유 사정: 비-0 단언 대부분은 teardown.sh 자신의 **거부 종료코드**(dirty·bad arg·
+#    미검증 attestation)라 비대상이고, 전환 대상은 소스 형태를 보는 마지막 @test 하나뿐이다.
 
 setup() { ROOT="$(git rev-parse --show-toplevel)"; SH="$ROOT/scripts/teardown.sh"; }
 
@@ -39,6 +42,8 @@ setup() { ROOT="$(git rev-parse --show-toplevel)"; SH="$ROOT/scripts/teardown.sh
   grep -qE 'switch -c .* FETCH_HEAD' "$SH"
 }
 @test "teardown wrapper carries no node/.mjs entrypoints (bun-only)" {
+  # ⚠️ 이 @test에는 형제 단언이 없다 — `-ne 0` 형태에서는 teardown.sh를 리네임해도 홀로 초록이었다
+  #    (FETCH_HEAD 양성 대조는 다른 @test라 `bats -f` 단일 실행에서는 함께 돌지 않는다).
   run grep -nE 'node tools/|\.mjs' "$SH"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }

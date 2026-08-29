@@ -166,8 +166,11 @@ EOF
 @test "the warn banner never uses the SKIP marker shape (it would promote the caller to authoritative)" {
   # tools/check-guard-authority.ts의 SKIP_EMISSION 정규식이 'SKIP: <이름>:' 을 보면 그 타겟을
   # mirror에서 권위 venue로 승격시킨다. 이 스크립트는 그 문자열을 내면 안 된다.
+  # ⚠️ 이 @test에는 형제 단언이 없다 — 대상이 리네임되면 rc 2이고, `-ne 0`은 그것을 "SKIP 마커
+  #    없음"으로 읽어 권위 승격 가드가 스크립트째 사라진 상태에서도 초록이었다.
+  #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
   run grep -nE '(echo|printf)[^\n]*SKIP: [a-z0-9-]+:' "$BOOTSTRAP_DIR/assert-cluster-identity.sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "the node command shim keeps sudo as its default (D-i decision, not an accident)" {

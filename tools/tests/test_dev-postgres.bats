@@ -11,6 +11,9 @@ teardown() { docker compose -f tools/dev-postgres/compose.yaml down -v >/dev/nul
 }
 
 @test "seed contains NO email/phone columns (sanitized)" {
+  # 시드가 리네임/삭제되면 rc 2 — `-ne 0`은 그걸 "PII 없음"으로 읽어, 위생 단언이 검사할 대상 없이
+  # 초록이 됐다. 단일 파일 피연산자라 `-eq 1`이 닫는다.
+  # cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
   run grep -iE 'email|phone|ssn' tools/dev-postgres/seed.sql
-  [ "$status" -ne 0 ] # grep이 아무것도 못 찾음 -> exit 1
+  [ "$status" -eq 1 ] # grep이 아무것도 못 찾음 -> exit 1
 }

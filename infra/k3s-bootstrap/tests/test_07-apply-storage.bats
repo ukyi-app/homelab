@@ -5,6 +5,11 @@
 #    OrbStack 시절 그 증명은 macOS `diskutil` stub이었고(`@test "aborts when the host volume is on
 #    an INTERNAL disk"`), 베어메탈에서는 **디바이스 정체성**으로 옮겼다. 국면 A(D4 한시)가 바로 그
 #    금지 상태를 한시 허용하므로, 여기서 증명까지 같이 잃기 쉽다 — 그래서 음성 @test가 더 많다.
+#
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다. 여기서 특히 중요한 것은 `$RENDERED`가 **kubectl 스텁이
+#    만드는** 파일이라는 점이다 — apply가 아예 일어나지 않으면 그 파일이 없어 grep이 rc 2로 죽는데,
+#    예전 `-ne 0`은 그것을 "플레이스홀더가 안 남았다"는 렌더 성공으로 읽었다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 load test_helper
 
 setup() {
@@ -76,7 +81,7 @@ _apply() { BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" run "$B
   [ "$status" -eq 0 ]
   source "$BS/versions.env"
   run grep -F '${LOCAL_PATH_HELPER_IMAGE}' "$RENDERED"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run grep -F "$LOCAL_PATH_HELPER_IMAGE" "$RENDERED"
   [ "$status" -eq 0 ]
 }
@@ -92,7 +97,7 @@ _apply() { BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" run "$B
   _sandbox; _apply
   [ "$status" -eq 0 ]
   run grep -F '${BULK_STORAGE_PATH}' "$RENDERED"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run grep -F "$BULKDIR" "$RENDERED"
   [ "$status" -eq 0 ]
 }
@@ -100,8 +105,12 @@ _apply() { BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" run "$B
 @test "a separate device needs no phase-A flag (phase B is the normal path)" {
   _sandbox; _apply
   [ "$status" -eq 0 ]
+  # ⚠️ 이 @test에는 형제 양성 단언이 없다 — 위 두 렌더 @test는 치환된 실제 값을 되잡아 렌더가
+  #    비지 않았음을 함께 증언하지만, 여기는 부정 grep 하나뿐이다. 렌더가 통째로 비면 rc 1이라
+  #    `-eq 1`도 통과하므로 비공허 바닥값을 함께 건다.
+  [ -s "$RENDERED" ]
   run grep -F -- '국면 A' "$RENDERED"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 # ── 기본 거부 — 이 스위트의 존재 이유 ──────────────────────────────────────────────────────
@@ -178,7 +187,12 @@ _apply() { BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" run "$B
   #    단언 대상은 **코드**이므로 비-주석 줄만 본다.
   run grep -n 'BULK_STORAGE_PATH' "$BOOTSTRAP_DIR/apply-storage.sh"
   [ "$status" -eq 0 ]                        # 양성 대조: 대상 파일이 실재하고 grep이 동작한다
+  # ⚠️ 아래 부정 grep은 **두 파일**에 걸리는데 양성 대조는 오래도록 apply-storage.sh 하나뿐이었다.
+  #    probe 쪽은 아무도 대조하지 않아, 그 파일이 사라져도(또는 `^[^#]*` 앵커가 표류해도) 이 @test가
+  #    절반만 증언했다. 같은 앵커로 probe에도 대조를 세운다.
+  run grep -nE '^[^#]*BULK_STORAGE_PATH' "$BOOTSTRAP_DIR/bulk-gate-probe.sh"
+  [ "$status" -eq 0 ]
   run grep -nE '^[^#]*(diskutil|orb -m|virtiofs|/mnt/mac|BULK_ALLOW_VM_DISK)' \
     "$BOOTSTRAP_DIR/apply-storage.sh" "$BOOTSTRAP_DIR/bulk-gate-probe.sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }

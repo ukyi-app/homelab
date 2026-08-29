@@ -20,13 +20,25 @@ take_floors "check-bats-style" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
 BB_BASELINE="${BB_BASELINE_OVERRIDE:-0}"   # **0 수렴 완료** — 이제 hard-zero다(NEG와 같은 규율). 신규 중간 [[ ]]는 즉시 red.
+# ── 기본 모드의 도메인 = **추적 `*.bats` + bats가 `load`하는 `*.bash` seam** ─────────────
+# `.bash` seam을 빼면 그 파일은 이 가드에게 **영원히 안 보인다** — bats 본문과 같은 문법을
+# 쓰는 코드인데 확장자 하나로 판정 밖이 된다(「처방 도달」 축의 도달 실패).
+# 확장자가 도메인을 정확히 가른다: 추적 `*.bash`는 전부 `load` 대상이고(파생:
+# `git ls-files '*.bats' | xargs grep -h '^\s*load '` ↔ `git ls-files '*.bash'`), 반대로
+# `tests/gates/lib/*.sh`는 @test 표면이 아니라 가드 본체가 source하는 라이브러리라
+# `.bash`가 아니고, 그래서 이 합집합에 안 들어온다(들어오면 bats 표면 판정이 셸 표면으로 번진다).
+# ⚠️ **열거는 필요조건일 뿐 충분조건이 아니다.** 아래 검출기는 `^@test … {`로만 intest에
+#    들어가므로, `.bash` seam의 함수 본문과 `setup()` 본문은 파일이 도메인에 있어도 여전히
+#    판정 밖이다. 거기까지 닿으려면 상태 기계를 넓혀야 한다(부재-단언 클래스를 얹을 때의 몫).
+# 증인: tests/gates/test_bats-style.bats의 픽스처 테스트가 합집합 열거를 고정한다(글롭을 좁히면 red).
 FILES=()
 if [ "$#" -gt 0 ]; then FILES=("$@"); else
-  while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.bats')
+  while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.bats' '*.bash')
 fi
-# ⚠️ 기본 모드의 도메인(추적 *.bats)은 **정당하게 0이 될 수 없다**: 0건은 열거 붕괴다.
+# ⚠️ 기본 모드의 도메인은 **정당하게 0이 될 수 없다**: 0건은 열거 붕괴다.
 # (건수는 여기 적지 않는다 — 손 관리 수치는 반드시 드리프트한다, scan-floor.sh 규약.)
-# 여기에 skip 규약(exit 4 + `SKIP:`)을 쓰면 같은 `git ls-files '*.bats'` 도메인을 쓰는
+# 바닥값은 라벨 하나 = 도메인 하나 규약대로 합집합 전체에 한 번 건다(접미사 분할 없음).
+# 여기에 skip 규약(exit 4 + `SKIP:`)을 쓰면 거의 같은 도메인(추적 `*.bats`)을 쓰는
 # check-skeleton·check-bats-accounting(둘 다 바닥값 + exit 1)과 **정반대 신호**가 된다 —
 # 커널 주석(lib/scan-floor.sh)이 "마커를 내면 사람이 정반대 뜻으로 읽는다"고 금지한 채널 혼동이다.
 # 명시-파일 모드($# > 0)는 원소가 항상 ≥1이라 이 분기에 도달하지 않지만, 픽스처가 1건짜리로

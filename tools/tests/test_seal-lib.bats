@@ -1,6 +1,9 @@
 #!/usr/bin/env bats
 # kubeseal 봉인 SSOT(tools/lib/seal.ts) — 평문은 stdin으로만, 디스크/stdout 비기록.
 # ⚠️ 중간 단언은 [ ]만.
+# ⚠️ 부재 단언 규약(`-eq 1`)은 docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a가 SSOT다.
+#    이 파일 고유 사정: 이관 경계(어느 파일이 lib를 쓰고 어느 파일이 안 쓰는가)를 **소스 형태**로
+#    재는 파일이라, 그 소스 파일이 리네임되면 경계 단언이 통째로 vacuous해진다.
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
 
 @test "seal.ts exports sealManifest and fails loud on missing cert" {
@@ -14,8 +17,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "provision callsites use sealManifest (no inline kubeseal spawnSync left)" {
+  # 다중 파일 피연산자 — 하나만 사라져도 무매치면 rc 2다(SSOT ③-a 표). 아래 루프가 같은 두
+  # 파일에 lib/seal.ts import를 요구하는 양성 형제다.
   run grep -nE 'spawnSync\("kubeseal"' tools/provision-db.ts tools/provision-cache.ts
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   for f in provision-db.ts provision-cache.ts; do
     run grep -q "lib/seal.ts" "tools/$f"
     [ "$status" -eq 0 ]
@@ -26,8 +31,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # 외부 앱 레포 배포 self-contained — homelab lib import 금지
   run grep -nE 'spawnSync\("kubeseal"' tools/seal-secret.mts
   [ "$status" -eq 0 ]
+  # 바로 위가 같은 파일의 양성 형제라 리네임은 거기서 먼저 red다 — 이 줄의 `-eq 1`이 더 잡는 것은
+  # 두 줄의 경로가 갈리는 드리프트와, 위 형제가 지워졌을 때의 단독 vacuous green이다.
   run grep -q "lib/seal" tools/seal-secret.mts
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "a kubeseal failure surfaces the exit code but never the child stderr (plaintext echo defence)" {

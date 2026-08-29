@@ -2,6 +2,8 @@
 # AdGuard UI 인증 배선 가드. AdGuard는 users:(bcrypt 해시)만 인증 수단이라(secret/env 네이티브 미지원)
 # inject-auth init이 SealedSecret의 해시를 PVC config의 .users에 매 시작 주입한다(GitOps 강제).
 # (@test 이름은 영어 — 디렉토리 단위 실행 시 한글이 인코딩 깨짐. 중간 단언은 [ ]/grep 단순 명령.)
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
 
 D="$BATS_TEST_DIRNAME/deployment.yaml"
 K="$BATS_TEST_DIRNAME/kustomization.yaml"
@@ -57,7 +59,7 @@ S="$BATS_TEST_DIRNAME/adguard-auth.sealed.yaml"
   run grep -q 'namespace: edge' "$S"; [ "$status" -eq 0 ]
   run grep -q 'PASSWORD_HASH' "$S"; [ "$status" -eq 0 ]
   # 봉인본에는 평문 Secret 필드(stringData/data)가 없어야 한다 — encryptedData만.
-  run grep -qE '^\s*stringData:|^\s*data:' "$S"; [ "$status" -ne 0 ]
+  run grep -qE '^\s*stringData:|^\s*data:' "$S"; [ "$status" -eq 1 ]
   run grep -q 'encryptedData:' "$S"; [ "$status" -eq 0 ]
   # kustomization이 SealedSecret을 포함
   run grep -q 'adguard-auth.sealed.yaml' "$K"; [ "$status" -eq 0 ]
@@ -71,7 +73,7 @@ S="$BATS_TEST_DIRNAME/adguard-auth.sealed.yaml"
   run grep -q 'namespace: edge' "$A"; [ "$status" -eq 0 ]
   run grep -q 'ADGUARD_PASSWORD' "$A"; [ "$status" -eq 0 ]
   # 봉인본에는 평문 필드 없음 — encryptedData만.
-  run grep -qE '^\s*stringData:|^\s*data:' "$A"; [ "$status" -ne 0 ]
+  run grep -qE '^\s*stringData:|^\s*data:' "$A"; [ "$status" -eq 1 ]
   run grep -q 'encryptedData:' "$A"; [ "$status" -eq 0 ]
   run grep -q 'adguard-api-creds.sealed.yaml' "$K"; [ "$status" -eq 0 ]
 }

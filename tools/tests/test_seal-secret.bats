@@ -1,5 +1,8 @@
 #!/usr/bin/env bats
 # secret:seal CLI — .env→SealedSecret 봉인. .env 키가 SSOT이며 값은 비노출.
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 이 파일의 경로 피연산자는 전부 픽스처가 방금 만든
+#    단일 파일이라 그것으로 닫힌다. 히어스트링(`<<<"$seal_output"`) 자리는 부재할 경로가 없어
+#    대상이 아니다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -69,8 +72,9 @@ EOF
 
   [ "$status" -eq 0 ]
   seal_output="$output"
+  # 봉인 도구가 설정 파일을 **지워도** "secrets를 안 썼다"로 초록이던 자리다.
   run grep -q "secrets" "$TMP/.app-config.yml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$seal_output" | grep -q "ENV_TEST"
   echo "$seal_output" | grep -q "API_KEY"
   # 중간 negate는 침묵 통과 → run+status로 강제(check-bats-style.sh). $seal_output 보존됨.
@@ -99,8 +103,9 @@ EOF
 
   [ "$status" -eq 0 ]
   [ -f deploy/example-api-secrets.sealed.yaml ]
+  # 같은 불변식의 cwd-상대 형태 — 기본값 유도가 이 @test의 주제라 피연산자도 상대다.
   run grep -q "secrets" .app-config.yml
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "seal-secret allows DATABASE_ADMIN_URL like any other env key" {
@@ -169,8 +174,10 @@ EOF
   seal_output="$output"   # run 재호출이 $output을 덮으므로 보존
   grep -q "kind: SealedSecret" "$TMP/demo-secrets.sealed.yaml"
   # 평문 값이 산출/출력 어디에도 없다 (중간 negate는 침묵 통과 → run+status로 강제)
+  # 산출물이 아예 안 써져도 "평문 없음"이 초록이던 자리다 — 위 `kind: SealedSecret` 단언과
+  # 함께 산출물 실재를 요구한다.
   run grep -rq "sealme" "$TMP/demo-secrets.sealed.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run grep -q "sealme" <<<"$seal_output"
   [ "$status" -ne 0 ]
 }

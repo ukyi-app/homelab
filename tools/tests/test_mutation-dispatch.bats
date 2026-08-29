@@ -2,19 +2,30 @@
 # 변이 디스패처(create-app/update-secrets/create-database/create-cache) 구조·notify 불변식.
 # 구 단일 디스패처 전용 테스트(삭제됨)의 단언을 4 디스패처로 일반화.
 # (@test 이름 영어, 단언은 run+[ ] — bash 3.2 [[ ]] 침묵통과 함정 회피)
-
+#
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 워크플로 **파일**이라 그것으로 닫힌다.
+#    반면 루프 구동 자리(DISPATCHERS·글롭)는 반복 0회가 어떤 rc로도 안 보이므로, setup의 열거
+#    바닥값과 각 @test의 양성 대조가 한 쌍으로 닫는다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 setup() {
   ROOT="$(git rev-parse --show-toplevel)"; WF="$ROOT/.github/workflows"
   # 디스패처 목록 동적 파생 — 하드코딩 열거는 신규 디스패처를 조용히 빠뜨린다(fail-open, arch-meta finding).
   # 규칙: workflow_dispatch 보유 + 동명 reusable(uses: ./.github/workflows/_<self>.yaml) 참조.
-  DISPATCHERS=""
+  DISPATCHERS=""; DISPATCHER_N=0
   for f in "$WF"/*.yaml; do
     base="$(basename "$f" .yaml)"
     case "$base" in _*) continue;; esac
     grep -q 'workflow_dispatch:' "$f" || continue
     grep -q "uses: ./.github/workflows/_${base}.yaml" "$f" || continue
-    DISPATCHERS="$DISPATCHERS $base"
+    DISPATCHERS="$DISPATCHERS $base"; DISPATCHER_N=$((DISPATCHER_N + 1))
   done
+  # 열거 바닥값 — WF가 리네임되면 글롭이 리터럴로 남아 파생이 0건이 되고, 아래 루프 구동 @test들이
+  # 반복 0회로 조용히 초록이 된다. setup에 두어 **개별 @test 실행에서도** 닫는다.
+  # 5는 이 파일이 이미 소유한 레인 수다(아래 known five 열거 · bun 디스패처 붕괴 하한 · LANES 행 수)
+  # — 손으로 관리하는 새 수치가 아니다.
+  [ -d "$WF" ]
+  [ -n "$DISPATCHERS" ]
+  [ "$DISPATCHER_N" -ge 5 ]
 }
 
 @test "every dispatcher serializes via homelab-mutation group with queue max" {
@@ -27,11 +38,16 @@ setup() {
 }
 
 @test "no workflow combines queue:max with cancel-in-progress:true" {
+  hits=0
   for f in "$WF"/*.yaml; do
     if grep -q "queue: max" "$f"; then
-      run grep -q "cancel-in-progress: true" "$f"; [ "$status" -ne 0 ]
+      hits=$((hits + 1))
+      run grep -q "cancel-in-progress: true" "$f"; [ "$status" -eq 1 ]
     fi
   done
+  # 양성 대조 — 루프 조건(`queue: max`)이 어디선가 참이었다. 조건이 전수 거짓이면 반복 0회라
+  # 위 단언이 한 번도 평가되지 않는데 그것은 rc에 안 보인다(setup의 열거 바닥값과 한 쌍).
+  [ "$hits" -ge 1 ]
 }
 
 @test "create-app dispatcher grants packages:read on the reusable call job" {
@@ -48,9 +64,13 @@ setup() {
 }
 
 @test "each dispatcher triggers only on workflow_dispatch (homelab-initiated boundary)" {
+  # 양성 대조 — 같은 술어가 같은 트리 어딘가에서는 매치한다(push/schedule 구동 워크플로가 실재).
+  # 술어 쪽이 부패하면 디스패처 전수 무매치가 정당한 결과처럼 보이는데, 이 줄이 먼저 red다.
+  run grep -rlE "repository_dispatch|pull_request:|push:|schedule:" "$WF"
+  [ "$status" -eq 0 ]
   for d in $DISPATCHERS; do
     run grep -E "repository_dispatch|pull_request:|push:|schedule:" "$WF/$d.yaml"
-    [ "$status" -ne 0 ]
+    [ "$status" -eq 1 ]
   done
 }
 
@@ -64,16 +84,17 @@ setup() {
 
 @test "each dispatcher declares only its contract inputs" {
   # create-app/update-secrets는 app만(repo=ukyi-app/<app>·sha는 reusable이 main HEAD에서 해석 — 입력 없음).
-  grep -q "app:" "$WF/create-app.yaml";     run grep -q "app_repo:" "$WF/create-app.yaml";     [ "$status" -ne 0 ]
-  grep -q "app:" "$WF/update-secrets.yaml"; run grep -q "app_repo:" "$WF/update-secrets.yaml"; [ "$status" -ne 0 ]
+  grep -q "app:" "$WF/create-app.yaml";     run grep -q "app_repo:" "$WF/create-app.yaml";     [ "$status" -eq 1 ]
+  grep -q "app:" "$WF/update-secrets.yaml"; run grep -q "app_repo:" "$WF/update-secrets.yaml"; [ "$status" -eq 1 ]
   grep -q "spec:" "$WF/create-database.yaml"
   grep -q "spec:" "$WF/create-cache.yaml"
 }
 
 @test "create-app and update-secrets no longer reference app_repo anywhere (org is structurally ukyi-app)" {
   # 단일 결정 단언(bats는 마지막 명령만 평가) — 4 파일 어디에도 app_repo가 없어야 한다.
+  # 형제 양성 단언이 없어 `-eq 1`이 파일 실재의 유일한 증인이다(넷 중 하나만 사라져도 rc 2).
   run grep -l "app_repo" "$WF/create-app.yaml" "$WF/_create-app.yaml" "$WF/update-secrets.yaml" "$WF/_update-secrets.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "each dispatcher notify fires on cancelled as well as failure" {
@@ -91,12 +112,16 @@ setup() {
 }
 
 @test "each dispatcher notify delegates to the mutation-notify composite" {
+  # 양성 대조 — job.status 직접 참조 술어가 같은 트리 어딘가(reusable·이벤트 구동 워크플로)에서는
+  # 매치한다. 표기가 바뀌어 술어가 죽으면 디스패처 전수 무매치가 정당해 보이는데, 이 줄이 먼저 red다.
+  run grep -rlE 'status:[[:space:]]*\$\{\{[[:space:]]*job\.status[[:space:]]*\}\}' "$WF"
+  [ "$status" -eq 0 ]
   for d in $DISPATCHERS; do
     f="$WF/$d.yaml"
     grep -q 'uses: ./.github/actions/mutation-notify' "$f"
     run grep -nE 'results:[[:space:]]*\$\{\{[[:space:]]*toJSON\(needs\)' "$f"; [ "$status" -eq 0 ]
     # norm 로직은 composite로 이동 — 디스패처엔 job.status 직접 참조가 없어야 한다
-    run grep -nE 'status:[[:space:]]*\$\{\{[[:space:]]*job\.status[[:space:]]*\}\}' "$f"; [ "$status" -ne 0 ]
+    run grep -nE 'status:[[:space:]]*\$\{\{[[:space:]]*job\.status[[:space:]]*\}\}' "$f"; [ "$status" -eq 1 ]
   done
 }
 
@@ -123,12 +148,12 @@ setup() {
 @test "teardown-app dispatcher declares only app and confirm inputs (no app_repo)" {
   grep -q "app:" "$WF/teardown-app.yaml"
   grep -q "confirm:" "$WF/teardown-app.yaml"
-  run grep -q "app_repo:" "$WF/teardown-app.yaml"; [ "$status" -ne 0 ]
+  run grep -q "app_repo:" "$WF/teardown-app.yaml"; [ "$status" -eq 1 ]
 }
 
 @test "teardown-app reusable uses writer token only (no reader, no GHCR)" {
   grep -q "HOMELAB_WRITER_APP_ID" "$WF/_teardown-app.yaml"
-  run grep -q "HOMELAB_READER_APP_ID" "$WF/_teardown-app.yaml"; [ "$status" -ne 0 ]
+  run grep -q "HOMELAB_READER_APP_ID" "$WF/_teardown-app.yaml"; [ "$status" -eq 1 ]
 }
 
 @test "teardown-app reusable enforces confirm at its boundary (workflow_call input + re-validate)" {
@@ -138,6 +163,10 @@ setup() {
 
 @test "teardown-app reusable does NOT auto-merge (destruction = manual merge)" {
   # 주석 제외 후 실행 라인만 검사 — 워크플로 주석에 'auto-merge-or-fail' 설명 문구가 있어 그대로 grep하면 오탐
+  # ⚠️ 파이프 종단 grep이라 rc로는 못 닫는다 — 대상이 사라지면 앞 grep만 rc 2로 죽고 뒤 grep은 빈
+  #    stdin에 무매치 rc 1을 내므로 `-eq 1` 전환조차 통과한다(SSOT ③-b · 2026-08-29 이 파일로 실측).
+  #    파괴 경계의 불변식이 대상 리네임에 침묵 초록이면 안 되므로 실재를 먼저 못 박는다.
+  [ -f "$WF/_teardown-app.yaml" ]
   run bash -c "grep -v '^[[:space:]]*#' '$WF/_teardown-app.yaml' | grep -q 'auto-merge-or-fail'"; [ "$status" -ne 0 ]
   run bash -c "grep -v '^[[:space:]]*#' '$WF/_teardown-app.yaml' | grep -qE 'gh pr merge.*--auto'"; [ "$status" -ne 0 ]
 }
@@ -160,13 +189,15 @@ setup() {
 @test "the bot commit identity lives only in the pr-first-commit composite (no 5x literal copies)" {
   a="$ROOT/.github/actions/pr-first-commit/action.yml"
   grep -q 'ukyi-homelab-writer\[bot\]' "$a"
+  # 다중 피연산자 — 다섯 중 하나라도 리네임되면 rc 2다. 위 양성 단언은 composite 파일이라
+  # 이 다섯의 실재를 증언하지 않는다.
   run grep -l '293311924+ukyi-homelab-writer' "$WF"/_create-app.yaml "$WF"/_create-database.yaml "$WF"/_create-cache.yaml "$WF"/_update-secrets.yaml "$WF"/_teardown-app.yaml
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "reusables carry no inline RESOURCE_NAME_RE copy (identity.ts SSOT via validate-mutation)" {
   for wf in _create-cache _create-database; do
-    run grep -Fq '{0,28}' "$WF/$wf.yaml"; [ "$status" -ne 0 ]
+    run grep -Fq '{0,28}' "$WF/$wf.yaml"; [ "$status" -eq 1 ]
     grep -q 'validate-mutation.ts --action' "$WF/$wf.yaml"
   done
 }
@@ -205,7 +236,8 @@ setup() {
 }
 
 @test "bump-poll stays allowlisted WITHOUT the actor guard (intended dispatch target)" {
-  run grep -q 'HOMELAB_OWNER' "$WF/bump-poll.yaml"; [ "$status" -ne 0 ]
+  # 이 @test에는 형제 단언이 없다 — `-ne 0`이면 bump-poll.yaml 리네임에도 홀로 초록으로 남는다.
+  run grep -q 'HOMELAB_OWNER' "$WF/bump-poll.yaml"; [ "$status" -eq 1 ]
 }
 
 @test "reusable branch: lines match the lane rows' neutral patterns (TS-YAML parity)" {

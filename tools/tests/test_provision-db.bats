@@ -137,8 +137,15 @@ provision() { PATH="$TMP/bin:$PATH" run bun "$ROOT/tools/provision-db.ts" "$@"; 
   run grep -qiE "postgres://|password=" <<<"$output"
   [ "$status" -ne 0 ]
   # 산출 파일 어디에도 평문 Secret 없음 (스텁이 stringData를 그대로 출력하지 않음을 포함 검증)
+  # ⚠️ 재귀 피연산자라 `-eq 1`만으로는 "산출 트리가 통째로 비었다"를 못 가른다 — provision이 아무것도
+  #    안 써도 rc 1이다. 비공허 바닥값(CR이 실제로 쓰였다)과 같은 피연산자·같은 재귀 술어의 양성
+  #    대조(봉인본이 그 트리에 있다)를 한 쌍으로 건다.
+  #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③-a·「처방(bats 부재 단언)」
+  [ -f "$FIX/platform/cnpg/prod/databases/orders.yaml" ]              # 바닥값: 산출 트리가 비지 않았다
+  run grep -rqE "encryptedData|kind: SealedSecret" "$FIX/platform"    # 양성 대조: 같은 술어가 여기선 매치한다
+  [ "$status" -eq 0 ]
   run grep -rqE "postgres://|stringData" "$FIX/platform"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "provision-db rejects --owner because owner is always pinned to name" {

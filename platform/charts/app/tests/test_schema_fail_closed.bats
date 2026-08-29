@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 # 스키마 fail-closed 회귀 (additionalProperties:false + 전수등재 + extraManifests 제거)
+# ⚠️ 이 파일에서 `-eq 1`로 전환한 부재 단언은 **경로 피연산자를 든 grep 하나뿐**이다(맨 아래).
+#    나머지 `-ne 0`은 전부 `run helm template`이라 rc가 helm의 규약이고, 부재할 경로 피연산자가 없다.
 CHART="${BATS_TEST_DIRNAME}/.."
 C="--set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
    --set resources.requests.cpu=10m --set resources.requests.memory=32Mi \
@@ -69,6 +71,13 @@ C="--set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
 }
 
 @test "deployment template no longer emits an extraManifests range block" {
+  # 양성 대조 — 그 템플릿이 아직 Deployment를 렌더하는 파일인지. 통째로 비면 grep은 rc 1이라
+  # 아래 부재 단언 혼자서는 못 잡는다(격리 트리 실측: 0바이트로 비워도 ok였다).
+  run grep -q "kind: Deployment" "$CHART/templates/deployment.yaml"
+  [ "$status" -eq 0 ]
+  # 부재는 `-eq 1` — 리네임/삭제의 rc 2를 "extraManifests 없음"으로 읽지 않는다
+  # (실측: deployment.yaml을 리네임해도 이 @test는 홀로 초록이었다).
+  # cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
   run grep -q "extraManifests" "$CHART/templates/deployment.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }

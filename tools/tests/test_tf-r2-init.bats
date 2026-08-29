@@ -24,10 +24,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   run grep -F 'uses: ./.github/actions/tf-r2-init' "$ROOT/.github/workflows/tf-reconcile.yaml"
   [ "$status" -eq 0 ]
   # 인라인 heredoc(cat > infra/.../backend.hcl)이 두 워크플로에서 제거됐는지
+  # rc 2(그 워크플로가 리네임/삭제)를 "heredoc 제거됨"으로 읽지 않는다 — 위 두 uses 단언이 같은 두
+  # 파일의 실재를 증언한다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
   run grep -E 'cat > infra/.*backend\.hcl' "$ROOT/.github/workflows/iac.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run grep -E 'cat > infra/.*backend\.hcl' "$ROOT/.github/workflows/tf-reconcile.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "all five init call-sites use the composite" {

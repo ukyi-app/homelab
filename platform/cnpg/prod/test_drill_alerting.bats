@@ -4,8 +4,10 @@ f=platform/cnpg/prod/restore-drill-alerting.enc.yaml
   grep -q '^sops:' "$f"
 }
 @test "no plaintext bot token leaks" {
+  # ⚠️ 형제 단언이 없는 누출 가드다 — 예전 `-ne 0`은 봉인본 부재(rc 2)를 "평문 없음"으로 읽었다.
+  #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
   run grep -E 'TELEGRAM_BOT_TOKEN:\s+[0-9]{6,}:' "$f"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 @test "decrypts to canonical key names and Secret name" {
   run bash -c "sops --decrypt '$f' | grep -qE 'name:\s+restore-drill-alerting'"

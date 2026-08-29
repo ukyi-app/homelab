@@ -1,6 +1,9 @@
 #!/usr/bin/env bats
 # argocd-extras 가드. PR1: SealedSecret(patch-mode). PR2(Task 9)에서 HTTPRoute 단언 추가.
 # (@test 이름 영어. 중간 단언 [ ]/단순 명령, 최종 명령 status만 신뢰.)
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
+#    yq 자리는 비대상이다 — rc가 아니라 `$output`으로 판정하고, yq의 rc는 키 부재를 값 false와 구별하지 않는다.
 
 D="$BATS_TEST_DIRNAME"
 S="$D/argocd-accounts.sealed.yaml"
@@ -42,7 +45,9 @@ S="$D/argocd-accounts.sealed.yaml"
 }
 
 @test "kustomization has no KSOPS generator (plain SealedSecret CR)" {
-  run grep -q 'generators:' "$D/kustomization.yaml"; [ "$status" -ne 0 ]
+  # ⚠️ 이 @test에는 형제 단언이 없다 — 구 `-ne 0`에서는 kustomization.yaml을 리네임하면 grep이 rc 2로
+  #    죽고도 통과해, 이 파일에서 혼자 초록으로 남았다.
+  run grep -q 'generators:' "$D/kustomization.yaml"; [ "$status" -eq 1 ]
 }
 
 @test "notify-smoke source builds, container is app, and is NOT synced by argocd-extras" {
@@ -78,5 +83,5 @@ S="$D/argocd-accounts.sealed.yaml"
   run grep -q 'value: /api/webhook' "$H"; [ "$status" -eq 0 ]
   run grep -q 'name: argocd-server' "$H"; [ "$status" -eq 0 ]
   # 루트 PathPrefix(/)는 web-public에 절대 노출하지 않는다 — /api/webhook만.
-  run grep -qE 'value: /$' "$H"; [ "$status" -ne 0 ]
+  run grep -qE 'value: /$' "$H"; [ "$status" -eq 1 ]
 }

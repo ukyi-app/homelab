@@ -2,6 +2,9 @@
 # tf-destroy-guard composite 테스트 — destroy-count 단일 구현(warn|block).
 # ⚠️ bash 3.2: 중간 단언은 [ ]만(​[[ ]] 실패는 침묵 통과). action 로직은 destroy-guard.sh에 있고
 # PLAN_JSON 오버라이드로 terraform 없이 단위 검증한다.
+# ⚠️ 부재 단언 규약(`-eq 1`)은 docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a가 SSOT다.
+#    이 파일에서 전환 대상은 "POSIX sh" @test의 소스 형태 검사 한 곳뿐이다 — 나머지 비-0 단언은
+#    destroy-guard.sh의 종료코드 계약(1=차단·2=툴링 오류)이거나 `$output` 히어스트링이라 비대상이다.
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -41,7 +44,8 @@ teardown() { rm -rf "$TMP"; }
 
 @test "destroy-guard.sh is POSIX sh (no bashisms)" {
   run grep -E "^#!/usr/bin/env sh|^#!/bin/sh" "$SH"; [ "$status" -eq 0 ]
-  run grep -nE '\[\[|\$\{[A-Za-z_]+\^\^|\$\{[A-Za-z_]+//' "$SH"; [ "$status" -ne 0 ]
+  # 바로 위 shebang 단언이 같은 파일의 양성 형제다 — 리네임되면 거기서도 red다.
+  run grep -nE '\[\[|\$\{[A-Za-z_]+\^\^|\$\{[A-Za-z_]+//' "$SH"; [ "$status" -eq 1 ]
 }
 
 @test "block mode exits 1 with ::error:: when deletes present" {
