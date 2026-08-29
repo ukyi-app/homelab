@@ -699,8 +699,14 @@ pathspec**도 똑같이 rc=**1**이다(실측: 매치되는 파일이 레포에 
 술어가 죽은 것을, 양성 대조만 있으면 도메인이 빈 것을 못 본다. 히어스트링(`<<<`)처럼 **경로
 피연산자가 없는** 자리는 부재할 대상이 없어 이 함정의 대상이 아니다 — 다만 그 자리에서 `grep -qv`로
 쓰면 **다른** 함정이다(아래 「`grep -qv`는 부재를 재지 않는다」).
+⇒ **이 처방은 이제 정적으로 강제된다** — `scripts/check-bats-style.sh`의 `[ABS]` 레인이 철자(`-ne 0`)를
+거부하고, `[ABS-REC]`/`[ABS-LOOP]`가 재귀·디렉토리·루프 자리에 비공허 바닥값과 양성 대조를 **접속사로**
+요구한다(둘 중 하나만 지워도 red). 잔액은 `ABS_BASELINE` 래칫이 잰다. ⚠️ 분모는 **grep 계열 + 경로
+피연산자**뿐이다 — 히어스트링과 `run bash|bun|make`는 rc 알파벳이 달라 하나의 형태 규칙으로 말할 수 없다.
+⚠️ `git grep`은 양성 대조만 요구한다 — ③-c대로 pathspec 부재 채널이 아예 없어서 파일시스템 바닥값이
+닫을 수 있는 것이 없다.
 
-> 가드: `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `tools/lib/scan-floor.ts`, `scripts/check-scan-producers.sh`, `policy/ledger.rego`, `tests/test_ledger.bats`
+> 가드: `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `tools/lib/scan-floor.ts`, `scripts/check-scan-producers.sh`, `policy/ledger.rego`, `tests/test_ledger.bats`, `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats`
 
 ### `grep -qv`는 부재를 재지 않는다 — 줄 단위 반전이 전칭을 존재로 바꾼다
 
@@ -744,8 +750,15 @@ pathspec**도 똑같이 rc=**1**이다(실측: 매치되는 파일이 레포에 
   - ③ **1줄 보장**: 피연산자가 정확히 1줄임을 같은 자리에서 못 박은 뒤에만 `-qv`가 옳다. ①·②가 더
     짧으니 새로 쓸 이유는 없다 — 남아 있는 `-qv`를 살릴지 판정할 때만 쓰는 기준이다.
   - ⚠️ 부정을 중간 `!`로 쓰지 마라(「bats bash 3.2 중간 [[ ]] 침묵 통과」) — `run` + `[ ]`뿐이다.
-- ⚠️ **오늘 이 클래스에 정적 가드가 없다.** `scripts/check-bats-style.sh`는 중간 `!`/`[[ ]]`만 보고,
-  그 파일 주석이 부재-단언 클래스를 **미착수 몫으로 계상**하고 있다. 즉 강제는 아직 문서와 리뷰뿐이다.
+- ⇒ **정적으로 강제된다(hard-zero).** `scripts/check-bats-style.sh`의 `[QV]` 레인이 `-q`와 `-v`가 같은
+  옵션 클러스터에 있는 자리를 거부한다(파이프 종단 또는 문장 선두). 라이브 0건이라 래칫할 부채가 없다 —
+  잔존 표기 4곳은 전부 이 함정을 **설명하는** 주석이고 검출기가 주석 줄을 먼저 건너뛴다.
+  ⚠️ 필터로 쓰는 `| grep -v '^---'` 류는 `-q`가 없어 대상이 아니다 — rc를 판정으로 쓰지 않기 때문이다
+  (이 레포에 20곳 넘게 있는 정당한 관용구다). `[ABS]`와 **같은 숫자로 접지 않는다**: 저건 run/status
+  짝의 rc 철자 문제고 이건 술어의 양화사가 뒤집히는 문제라, 한 잔액으로 합치면 그 수가 무엇의 부채인지
+  말할 수 없게 된다.
+
+> 가드: `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats`
 
 ### PreToolUse 훅 종료코드 — fail-closed는 exit 2뿐
 

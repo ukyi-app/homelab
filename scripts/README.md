@@ -60,8 +60,11 @@
   일치까지 본다(B) — 그 변수는 **main 진입 시에만** 채워진다. (B)를 기본으로 켜면 마이그레이션 브랜치의
   gate가 영구 red가 되고, 무인자 rc=0을 요구하는 형제 게이트까지 같이 죽는다. 자기레포 판정은 앵커
   (`platform/argocd/root/root-app.yaml`의 repoURL) **정규화 후 비교** — 리터럴 대조는 `.git` 접미사 하나로 눈이 먼다.
-- **`check-bats-style.sh`** — bats 단언-스타일 가드: `@test` 본문의 중간(마지막 아님) 부정(`! `)·조건(`[[ `)
-  단언을 잡는다(bats가 침묵 통과시키는 false-green 가드 차단; NEG=hard-zero·BB=ratchet).
+- **`check-bats-style.sh`** — bats **코드 표면**(`@test` 본문 + 0열 함수 본문) 단언-스타일 가드.
+  네 클래스: 중간(마지막 아님) 부정(`! `)·조건(`[[ `) — bats가 침묵 통과시키는 false-green 단언 ·
+  부재 단언 `[ABS]`(`run grep <경로>` + `-ne 0`은 무매치 rc 1과 대상 부재 rc 2를 구별하지 못한다;
+  재귀·디렉토리·루프 자리는 비공허 바닥값 + 양성 대조를 **형태로** 요구) · `[QV]`(`grep -qv`의 줄 단위
+  반전은 부재가 아니라 항진이다). NEG·QV=hard-zero · BB·ABS=ratchet.
   기본 모드에서 스캔 대상이 0건이면 통과가 아니라 **열거 붕괴**(scan-floor, exit 1) — 같은 도메인을 쓰는
   check-skeleton·check-bats-accounting과 같은 채널이다(skip 규약 아님).
 - **`check-locale-collation.sh`** — 로케일 콜레이션 가드: 게이트의 `sort`가 `LC_ALL=C` 접두(또는 숫자
