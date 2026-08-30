@@ -2,7 +2,7 @@
 # kubectl/psql/rclone 기반 운영(ops) 이미지 (Postgres 백업/복구 + 캐시 백업).
 # Milestone 4의 restore-drill CronJob·pg_dump→rclone→R2 헤지와 캐시(Valkey) 백업 CronJob이 사용한다.
 # ghcr.io/<owner>/pg-tools:18-rclone으로 게시된다 (Task 6.15 matrix 참조).
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 
 # ⚠️ 기본값을 주지 않는다. stage-level ARG 기본값은 BuildKit predefined platform arg를 **이긴다**
 #   (실측: `ARG TARGETARCH=arm64` + `--platform linux/amd64` → TARGETARCH=[arm64]).
