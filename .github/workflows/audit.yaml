@@ -50,6 +50,12 @@ jobs:
       - id: audit
         run: |
           bun tools/audit-orphans.ts --repo-root . | tee /tmp/audit.json
+          # 도메인별 열거 건수(페이로드 .scan) — 이 도구는 stdout이 기계 판독 JSON이라 `SCAN:` 마커를
+          # 낼 수 없다(tools/audit-orphans.ts 「방출 규약」). 같은 정보가 페이로드에 실리므로 런 로그에서
+          # 열거 붕괴를 읽을 수 있게 여기서 편다. 바닥값 위반은 도구가 비-0으로 죽어 이 줄에 닿지 않는다.
+          # ⚠️ 아래 규율은 이 줄에도 적용된다 — 대입으로 분리해야 jq 실패가 echo exit 0에 안 삼켜진다.
+          scan=$(jq -c .scan /tmp/audit.json)
+          echo "::notice::열거 건수 $scan"
           # 명령치환을 echo 인자에 인라인하면 jq 실패가 echo exit 0에 삼켜진다 → 대입 분리(-e가 잡음)
           count=$(jq -r .count /tmp/audit.json)
           # alerting = 페이지 대상(report-only 제외 — activation-surface-drift는 이미지 bump마다 재발하는

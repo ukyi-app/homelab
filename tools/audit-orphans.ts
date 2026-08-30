@@ -22,15 +22,35 @@ import { registryProjection } from "./lib/activation-marker.ts";
 import { parseLedgerRows } from "./lib/ledger-totals.ts";
 import { listUnits } from "./lib/repo-walk.ts";
 import { LAYOUT_DIRS, TOMBSTONES_PATH, classifyArtifact, classifyLedgerRow, layoutFor } from "./lib/resource-layout.ts";
-import { assertFloorKeys, floorOf, takeFloors } from "./lib/scan-floor.ts";
+import { ScanError, assertFloorKeys, floorOf, scanFloor, takeFloors } from "./lib/scan-floor.ts";
 import { typedFlags } from "./lib/cli.ts";
 
+// 도메인 라벨 상수 — 선언(assertFloorKeys)과 조회(floorOf)가 같은 리터럴을 봐야 오타가 조용히
+// 꺼진 바닥값이 되지 않는다(guardMain의 scan 필드가 겸하던 역할의 수동 등가물).
+// ⚠️ 라벨은 **상수로만** 적는다. `scanFloor("<리터럴>"` · `scan: "<리터럴>"` 두 형태는
+//    tests/gates/test_scan-floor.bats의 「정적 콜사이트 집합 == 런타임 방출 집합」 등식이 정적 쪽을
+//    파생하는 모양인데, 이 도구는 stdout이 기계 판독 JSON이라 SCAN 마커를 한 줄도 낼 수 없다
+//    (아래 「방출 규약」). 라벨을 그 형태로 적으면 정적 집합에만 들어가 그 등식이 red가 된다.
+const FLOOR_REGISTRY = "audit-orphans:registry";
+const FLOOR_APPS = "audit-orphans:apps";
+const FLOOR_CACHES = "audit-orphans:caches";
+const FLOOR_LEDGER = "audit-orphans:ledger";
+const FLOOR_ROLES = "audit-orphans:roles";
+const FLOOR_CONNS = "audit-orphans:conns";
+const FLOOR_TOMBSTONES = "audit-orphans:tombstones";
+// 선언 로스터 — assertFloorKeys(fail-closed)·USAGE·바닥값 루프가 **같은 배열**을 본다.
+// 세 자리가 각자 목록을 들면 그중 하나가 조용히 뒤처진다("하드코딩 소비처 목록은 자기 자신에게만
+// 정확하다" — AGENTS.md 함정).
+const FLOOR_LABELS = [
+  FLOOR_REGISTRY, FLOOR_APPS, FLOOR_CACHES, FLOOR_LEDGER, FLOOR_ROLES, FLOOR_CONNS, FLOOR_TOMBSTONES,
+];
+
 const USAGE = `audit-orphans — registry↔매니페스트↔원장 교차 드리프트 리포트(읽기 전용)
-사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict] [--floor registry=<n>]
+사용법: bun tools/audit-orphans.ts [--repo-root <dir>] [--ci] [--strict] [--floor <도메인>=<n>]
   --repo-root <dir>  레포 루트(기본 .)
   --ci               배포를 깨는 유형만 비-0 종료(orphan-dns/activation-exposure-drift/missing-activation) — PR 게이트용
   --strict           모든 드리프트 유형을 비-0 종료(수동 점검)
-  --floor registry=<n>  apps.json 행 수 바닥값(기본 0 — 인-레포 앱 0개, 공용 어휘) — 열거 붕괴 감지. 앱 온보딩 시 1로 되돌린다
+  --floor <도메인>=<n>  열거 붕괴 바닥값 오버라이드(반복 가능). 도메인: ${FLOOR_LABELS.map((l) => l.split(":").pop()).join(" · ")}
   --help, -h         이 도움말`;
 if (process.argv.includes("--help") || process.argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 
@@ -38,15 +58,12 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) { console.lo
 // 폐지, 자체 정수 검증·argv 파서 복제는 커널 parseFloor·takeFloors·typedFlags로 접혔다).
 // guardMain은 쓰지 않는다 — 종료코드가 기본/--ci/--strict 3분기라 report(1)/ok(0) 이분법 밖이다
 // (stdout JSON은 이유가 아니다: output:"none"이 그 용도다 — check-guard-authority 선례).
-// 도메인 라벨 상수 — 선언(assertFloorKeys)과 조회(floorOf)가 같은 리터럴을 봐야 오타가 조용히
-// 꺼진 바닥값이 되지 않는다(guardMain의 scan 필드가 겸하던 역할의 수동 등가물).
-const FLOOR_REGISTRY = "audit-orphans:registry";
 let flags;
 let FLOORS: Map<string, number>;
 try {
   const taken = takeFloors(process.argv.slice(2));
   FLOORS = taken.floors;
-  assertFloorKeys(FLOORS, [FLOOR_REGISTRY]);
+  assertFloorKeys(FLOORS, FLOOR_LABELS);
   // 미지 인자·플래그 값 삼킴(--repo-root --ci 류)은 typedFlags가 거부한다 — 종전 위치 검색
   // 파서는 오타·폐지 어휘를 조용히 무시했다(조용히 꺼진 바닥값 클래스).
   flags = typedFlags(taken.rest, { value: ["--repo-root"], bool: ["--ci", "--strict"] });
@@ -88,7 +105,6 @@ const readJson = (p: string, d: any): any => (existsSync(p) ? JSON.parse(readFil
 // ⚠️ 나머지 readJson 폴백 2곳(.tombstones.json · .activation 마커)은 **부재가 정상 상태**라 건드리지 않는다.
 // 값 검증(빈 값·공백이 유효한 0으로 통과하던 자리 — 적대 검토 실측)은 커널 parseFloor가
 // takeFloors 안에서 소유한다 — 이 파일의 검증 사본은 05에서 소멸했다.
-const MIN_REGISTRY = floorOf(FLOORS, FLOOR_REGISTRY, 0);
 const registryPath = `${ROOT}/infra/cloudflare/apps.json`;
 let registry: RegRow[];
 try {
@@ -101,15 +117,12 @@ if (!Array.isArray(registry)) {
   console.error(`audit-orphans: registry(${registryPath})가 배열이 아니다 — 감사 불가`);
   process.exit(1);
 }
-// scan-floor — 소비자가 바닥값 수치를 소유한다(선례: check-image-pins=20 · check-alert-rules=30 ·
-// check-resource-limits=10 · check-guard-authority=15). 래칫 아님.
-// ⚠️ 기본 0 — 인-레포 배포 앱이 **0개**라 실 registry가 빈 배열이다(page #455 · trip-mate-api 철거).
-//    앱이 0개인 동안은 0행이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
-//    바닥값이 실제로 작동함은 `--floor registry=1`을 명시해 부르는 test_audit-orphans.bats가 계속 증명한다.
-if (registry.length < MIN_REGISTRY) {
-  console.error(`audit-orphans: registry ${registry.length}행 < ${MIN_REGISTRY} — 열거 붕괴 의심(scan-floor). 이 자리가 0건 검사 후 초록이 되던 곳이다`);
-  process.exit(1);
-}
+
+// ── 일곱 도메인 열거 ─────────────────────────────────────────────────────────────
+// **findings 수집보다 먼저** 전부 센다. 커널 독스트링(lib/scan-floor.ts)의 "바닥값과 신호가 한 몸인
+// 것이 요점이다 — 둘을 떼어 놓으면 그 사이에 무엇이든 낄 수 있다"를 이 콜사이트에서 지키는 배치다.
+// 종전에는 registry 비교와 stdout 출력 사이에 findings 수집 140줄이 끼어 있었고, 나머지 여섯
+// 도메인은 바닥값도 신호도 없이 붕괴할 수 있었다(글롭·키 경로 변경 → 0건 검사 후 초록).
 // 열거는 공유 워커의 `apps` 유닛 스코프가 소유한다. **의미론적 필터(values.yaml 실재)는 여기 남는다** —
 // 스코프가 그걸 걸러버리면 check-app-deploy가 잡아야 할 "필수 산출물 부재"가 열거에서 사라진다
 // (design-r1 R-1). 이 가드는 배포 가능한 앱만 보면 되므로 필터가 정당하다.
@@ -119,6 +132,69 @@ const appDirs = listUnits("apps", ROOT)
 const cacheDirs = existsSync(`${ROOT}/${LAYOUT_DIRS.cacheProd}`)
   ? readdirSync(`${ROOT}/${LAYOUT_DIRS.cacheProd}`, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
   : [];
+const ledgerRows = parseLedgerRows(
+  existsSync(`${ROOT}/docs/memory-ledger.md`) ? readFileSync(`${ROOT}/docs/memory-ledger.md`, "utf8") : "",
+);
+const clusterPath = `${ROOT}/${LAYOUT_DIRS.cnpgProd}/cluster.yaml`;
+const managedRoles: any[] = existsSync(clusterPath)
+  ? ((parseYaml(readFileSync(clusterPath, "utf8")) ?? {})?.spec?.managed?.roles ?? [])
+  : [];
+const connKustPath = `${ROOT}/${LAYOUT_DIRS.dataConn}/kustomization.yaml`;
+// conn 형상만 이 절의 소관 — 필터 **뒤**를 센다. 도메인은 "검사 대상"이지 "파일에 적힌 줄"이 아니다.
+const connEntries: string[] = existsSync(connKustPath)
+  ? ((parseYaml(readFileSync(connKustPath, "utf8")) ?? {}).resources ?? [])
+      .map((r: any) => String(r))
+      .filter((r: string) => /-conn\.sealed\.yaml$/.test(r))
+  : [];
+const tombs: Record<string, any> = readJson(`${ROOT}/${TOMBSTONES_PATH}`, {});
+const tombEntries = Object.entries(tombs);
+
+// ── 바닥값 판정 ──────────────────────────────────────────────────────────────────
+// 수치는 소비자가 소유한다(선례: check-image-pins=20 · check-alert-rules=30 · check-guard-authority=15).
+// 래칫 아님 — 정당하게 줄어드는 변경에서는 같이 내리고, 그 조정이 diff에 보이는 것이 요점이다.
+// **근거 있는 자리에만 양수를 둔다**(근거 없는 매직 넘버 금지). 0인 도메인도 목록에 남는 이유는
+// 페이로드 신호(`scan`)를 내기 위해서다 — 바닥값이 0이어도 건수 자체는 관측된다.
+const DOMAINS: { label: string; got: number; min: number; hint: string }[] = [
+  // 기본 0 — 인-레포 배포 앱이 **0개**라 실 registry가 빈 배열이다(page #455 · trip-mate-api 철거).
+  // 앱이 0개인 동안은 0행이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
+  // 바닥값이 실제로 작동함은 `--floor registry=1`을 명시해 부르는 test_audit-orphans.bats가 계속 증명한다.
+  { label: FLOOR_REGISTRY, got: registry.length, min: 0, hint: "apps.json 행 붕괴 — 이 자리가 0건 검사 후 초록이 되던 곳이다(BLOCKING 3종이 전부 이 순회 안에 있다)." },
+  // 기본 0 — registry와 같은 근거(인-레포 앱 0개). values.yaml 필터 뒤의 배포 가능 앱 수다.
+  { label: FLOOR_APPS, got: appDirs.length, min: 0, hint: "apps/ 유닛 열거 붕괴(repo-walk 스코프·values.yaml 필터)." },
+  // 기본 0 — 캐시 인스턴스는 첫 create-cache 전까지 정당하게 0이다.
+  { label: FLOOR_CACHES, got: cacheDirs.length, min: 0, hint: "cache 인스턴스 디렉토리 열거 붕괴(LAYOUT_DIRS.cacheProd 경로 변경)." },
+  // 기본 1 — docs/memory-ledger.md는 CI가 강제하는 예산 SSOT(AGENTS.md: limit 합계 ≤ 10240Mi)라
+  // 구조적으로 항상 ≥1행이다. 0행은 "검사할 게 없다"가 아니라 파일 부재 또는 `<!-- ledger:row -->`
+  // 포맷 드리프트이고, 그 상태에서 stale-ledger-row 검사가 통째로 vacuous해진다.
+  { label: FLOOR_LEDGER, got: ledgerRows.length, min: 1, hint: "원장 행 파서(ledger-totals LEDGER_ROW_RE) 미매치 또는 docs/memory-ledger.md 부재." },
+  // 기본 1 — cluster.yaml managed.roles에는 superuser 시드(ukkiee)가 구조적으로 상주한다. 0은
+  // 파일 부재/키 경로(spec.managed.roles) 변경이고, 그때 dangling-role 검사가 vacuous해진다.
+  { label: FLOOR_ROLES, got: managedRoles.length, min: 1, hint: "cluster.yaml 부재 또는 spec.managed.roles 키 경로 변경." },
+  // 기본 0 — data-conn kustomization의 resources는 정당하게 빌 수 있다(그 파일 주석: "빈 resources여도
+  // kustomize build는 성공해야 한다 — appset 발견 시점에 DB 0개 가능").
+  { label: FLOOR_CONNS, got: connEntries.length, min: 0, hint: "data-conn kustomization resources 열거 붕괴 또는 conn 파일명 규약 변경." },
+  // 기본 0 — tombstone 부재가 정상 상태다(purge를 한 번도 안 돌린 레포).
+  { label: FLOOR_TOMBSTONES, got: tombEntries.length, min: 0, hint: ".tombstones.json 경로/포맷 변경." },
+];
+// 붕괴는 **모아서** 던진다 — 첫 도메인에서 죽으면 나머지 여섯의 상태를 한 번에 못 본다(guardMain ②와 동형).
+// 커널은 종료하지 않는다(ScanError throw) — 종료코드는 콜사이트가 소유한다(3분기 유지).
+const collapsed: string[] = [];
+let collapseCode = 1;
+for (const d of DOMAINS) {
+  try {
+    // quiet — 마커 억제는 출력 채널의 성질이지 판정의 성질이 아니다(커널 독스트링). 신호는 아래 페이로드가 낸다.
+    scanFloor(d.label, d.got, floorOf(FLOORS, d.label, d.min), { quiet: true, hint: d.hint });
+  } catch (e) {
+    if (!(e instanceof ScanError)) throw e;   // 비-ScanError는 커널 자신의 결함 — 접으면 안 된다
+    collapsed.push(e.message);
+    if (e.exitCode > collapseCode) collapseCode = e.exitCode;   // 계약 파손(2)이 붕괴(1)보다 우선
+  }
+}
+if (collapsed.length > 0) {
+  console.error(`audit-orphans: 열거 붕괴 ${collapsed.length}건(scan-floor 바닥값) — 이 자리가 0건 검사 후 초록이 되던 곳이다`);
+  for (const m of collapsed) console.error(`FAIL: ${m}`);
+  process.exit(collapseCode);
+}
 
 // 1) registry ↔ 매니페스트
 //   active:true orphan → orphan-dns(차단): dns.tf가 public&&active만 노출하므로 빈 백엔드 DNS가 실재.
@@ -171,8 +247,7 @@ for (const r of registry) {
 
 // 2) 원장 ↔ 실체 (prod 행만 — 플랫폼 컴포넌트 행은 namespace가 다르거나 platform/에 실체)
 // (연결=SealedSecret 이후 바인딩↔리소스/미참조 리소스 교차는 제거 — .bindings.json엔 db/redis 참조 없음)
-const ledger = existsSync(`${ROOT}/docs/memory-ledger.md`) ? readFileSync(`${ROOT}/docs/memory-ledger.md`, "utf8") : "";
-for (const r of parseLedgerRows(ledger)) { // F7: 명명 필드(raw 인덱스 금지)
+for (const r of ledgerRows) { // F7: 명명 필드(raw 인덱스 금지)
   const comp = r.name, ns = r.env;
   if (ns === "prod" && !appDirs.includes(comp) && !existsSync(`${ROOT}/platform/${comp}`))
     add("stale-ledger-row", comp, "원장 prod 행인데 apps/·platform/ 어디에도 실체 없음");
@@ -184,19 +259,15 @@ for (const r of parseLedgerRows(ledger)) { // F7: 명명 필드(raw 인덱스 �
 }
 
 // 3) 중단된 purge
-const tombs: Record<string, any> = readJson(`${ROOT}/${TOMBSTONES_PATH}`, {});
-for (const [k, v] of Object.entries(tombs))
-  if (v.state === "purging") add("incomplete-purge", k, "purge 상태머신이 중단됨 — drop/verify/cleanup 재개 필요");
+for (const [k, v] of tombEntries)
+  if ((v as any).state === "purging") add("incomplete-purge", k, "purge 상태머신이 중단됨 — drop/verify/cleanup 재개 필요");
 
 // 4) dangling-role — cluster.yaml managed.roles 항목인데 passwordSecret sealed가 부재(정보성).
 //    purge cleanup이 sealed/CR을 제거했지만 cluster.yaml role 제거 커밋이 빠진 상태를 잡는다
 //    (incomplete-purge는 state=purging만 봐서 purge 완료 후 고아 role을 못 본다).
-const clusterPath = `${ROOT}/${LAYOUT_DIRS.cnpgProd}/cluster.yaml`;
-if (existsSync(clusterPath)) {
-  const cluster = parseYaml(readFileSync(clusterPath, "utf8")) ?? {};
-  const roles = cluster?.spec?.managed?.roles ?? [];
+{
   const cnpgDir = `${ROOT}/${LAYOUT_DIRS.cnpgProd}`;
-  for (const role of roles) {
+  for (const role of managedRoles) {
     const secret = role?.passwordSecret?.name;
     if (!secret) continue;
     // 비밀번호 시크릿 경로 2종: provision-db owner/ro는 databases/<secret>.sealed.yaml(SealedSecret),
@@ -210,9 +281,7 @@ if (existsSync(clusterPath)) {
 //    envFrom도 참조하지 않음(정보성, 비차단). *-ro-conn은 모드2 디버깅 전용(의도적 미참조)이라 제외.
 //    trip-mate 실재발(#211): conn이 봉인·커밋돼도 앱이 envFrom을 배선 안 하면 어떤 게이트도 안 잡았다.
 //    (이름 재사용/공유 등 이름≠앱 케이스가 있어 차단하지 않는다 — 정보로만 표면화.)
-const connKustPath = `${ROOT}/${LAYOUT_DIRS.dataConn}/kustomization.yaml`;
-if (existsSync(connKustPath)) {
-  const connKust = parseYaml(readFileSync(connKustPath, "utf8")) ?? {};
+if (connEntries.length > 0) {
   const referenced = new Set<string>();
   for (const a of appDirs) {
     const values = parseYaml(readFileSync(appPaths(ROOT, a).values, "utf8")) ?? {};
@@ -221,8 +290,7 @@ if (existsSync(connKustPath)) {
       if (n) referenced.add(String(n));
     }
   }
-  for (const raw of (connKust.resources ?? []).map((r: any) => String(r))) {
-    if (!/-conn\.sealed\.yaml$/.test(raw)) continue; // conn 형상만 이 절의 소관
+  for (const raw of connEntries) {
     const c = classifyArtifact(raw);
     if (c === null) {
       // 커널이 못 읽는 conn 형상 — 조용히 건너뛰면 손으로 쓴 불량 엔트리가 감사에서 사라진다
@@ -249,7 +317,19 @@ if (existsSync(connKustPath)) {
 const blocking = findings.filter((f) => BLOCKING.has(f.type));
 // alerting: 텔레그램 페이지 대상 = report-only 제외 전 finding. blocking ⊆ alerting ⊆ count(불변식).
 const alerting = findings.filter((f) => !REPORT_ONLY.has(f.type));
-console.log(JSON.stringify({ findings, count: findings.length, blocking: blocking.length, alerting: alerting.length }, null, 2));
+// ── 방출 규약 ────────────────────────────────────────────────────────────────────
+// 이 도구는 `SCAN:` 마커를 **어느 모드에서도 내지 않는다**. stdout이 기계 판독 JSON이고
+// (audit.yaml:52 `| tee` → jq · tools/tests/test_audit-orphans.bats·test_audit-dangling-role.bats의
+// jq 단언 — `--ci` 출력도 jq가 읽는다) 마커 한 줄이 그 소비를 통째로 깬다. 그래서 위 바닥값 판정은
+// quiet로 돌리고, 같은 정보를 페이로드 `scan`에 싣는다 — 형제 dns-drift-check.ts가 세운 관용구다
+// ("stdout이 기계 판독 JSON이라 SCAN: 마커를 낼 수 없으므로 같은 정보를 페이로드 안에 싣는다").
+// ⚠️ 그 형제의 **합계 결함은 복제하지 않는다**(`scanned: appHosts.length + reservedHosts.length`) —
+//    합계는 작은 레인의 붕괴를 큰 레인이 덮는다. 여기서는 도메인별 건수를 각각 싣는다.
+// ⚠️ 모드별 방출(`--ci`에서만 마커)도 기각했다: 로스터 등식(tests/gates/test_scan-floor.bats)은 무인자
+//    실행만 관측하므로 그 마커는 어느 대조도 보지 못하고, 두 모드가 서로 다른 신호 채널을 갖게 된다.
+const scan: Record<string, number> = {};
+for (const d of DOMAINS) scan[d.label] = d.got;
+console.log(JSON.stringify({ findings, count: findings.length, blocking: blocking.length, alerting: alerting.length, scan }, null, 2));
 if (STRICT && findings.length > 0) process.exit(1);
 if (CI && blocking.length > 0) {
   console.error(`audit-orphans: 배포 정합 위반 ${blocking.length}건 — ${blocking.map((f) => `${f.type}:${f.subject}`).join(", ")}`);

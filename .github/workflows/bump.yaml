@@ -72,14 +72,17 @@ jobs:
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
           pattern: built-*
-          path: built
+          # ⚠️ 워크스페이스(=레포 체크아웃) **밖**에 푼다. 레포 트리 안이면 이 다운로드가 untracked
+          #    잔여물이 되어 아래 스테이징 완전성 판정의 노이즈가 되고, 더 나쁘게는 `git add -A --
+          #    apps platform` 천장이 넓어지는 날 산출물이 커밋에 실릴 수 있다.
+          path: ${{ runner.temp }}/built
           merge-multiple: true
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: derive the set of apps that were actually built
         id: set
         run: |
-          built_apps="$(find built -mindepth 1 -maxdepth 1 -type f -printf '%f ' 2>/dev/null | sed 's/ *$//')"
+          built_apps="$(find "$RUNNER_TEMP/built" -mindepth 1 -maxdepth 1 -type f -printf '%f ' 2>/dev/null | sed 's/ *$//')"
           if [ -z "$built_apps" ]; then
             echo "apps=" >> "$GITHUB_OUTPUT"; echo "nothing built — no write-back"; exit 0
           fi
@@ -125,6 +128,20 @@ jobs:
               echo "skip $app (no deploy values.yaml, no re-pin registry)"; continue
             fi
           done
+          # ── 스테이징 완전성 판정 [staged-completeness] ────────────────────────────────
+          # 천장(`git add -A -- apps platform`)은 상한으로 남긴다 — 재는 것은 열거가 아니라
+          # **잔여물**이다: 위 도구들이 이 두 루트 밖에 쓰면 그 변경은 커밋에서 조용히 유실되고
+          # PR이 부분 표면으로 열린다(형제 자리의 2026-08-18 실사고 — pr-first-commit/action.yml).
+          # 포함 판정은 `:(exclude)` pathspec으로 git에게 시킨다 — 아래 `git add`와 같은 매처다.
+          # ⚠️ 판정은 `git diff --quiet` 조기 종료 **앞**이다. 뒤에 두면 도구가 천장 밖에만 쓴
+          #    경우(추적 변경 0) 이 스텝이 "no values changed"로 초록 종료해 판정을 아예 지나간다.
+          residue="$(git status --porcelain --untracked-files=all -- . ':(exclude)apps' ':(exclude)platform')"
+          if [ -n "$residue" ]; then
+            echo "::error::apps/platform 천장 밖 변경이 남는다 — 이대로면 커밋에서 유실된다"
+            echo "$residue"
+            exit 1
+          fi
+          # ── [/staged-completeness] ───────────────────────────────────────────────────
           if git diff --quiet; then echo "no values changed"; exit 0; fi
           git config user.name "ukyi-homelab-writer[bot]"
           git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"

@@ -41,7 +41,11 @@ setup() {
   [ "$status" -eq 0 ]
   run grep -nE '"-b",[[:space:]]*branch,[[:space:]]*base' "$RCODE"
   [ "$status" -eq 0 ]
-  run grep -nE 'base[[:space:]]*=[[:space:]]*opts\["--base"\][[:space:]]*\?\?[[:space:]]*"main"' "$RCODE"
+  # 기본 base는 "main"이다 — 파싱이 lib/cli.ts(typedFlags)로 수렴한 뒤에도 **계약은 불변**이라
+  # 철자만 따라 옮겼다(`opts["--base"] ?? "main"` → `f.str("--base") ?? "main"`).
+  # 이 계약의 실행 증인은 tools/tests/test_run-bump-plan.bats 전건이다 — 그쪽 run_runner는 --base를
+  # 아예 넘기지 않으므로, 기본값이 main이 아니게 되면 worktree add가 없는 ref로 죽어 전부 red다.
+  run grep -nE 'base[[:space:]]*=[[:space:]]*f\.str\("--base"\)[[:space:]]*\?\?[[:space:]]*"main"' "$RCODE"
   [ "$status" -eq 0 ]
 }
 

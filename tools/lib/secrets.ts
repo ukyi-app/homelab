@@ -70,12 +70,22 @@ function runChain(cwd: string, app: string, noSeal: boolean): ChainResult {
     chain.sealSkipped = false;
   }
 
+  // ── 스테이징 완전성 판정 [staged-completeness] ──────────────────────────────────────────
   // seal이 봉인본 외의 것을 건드렸으면 거부 — 커밋은 봉인본 파일만 스테이징한다(스펙).
+  // 이 자리가 그 판정의 **원형**이고 형제 넷이 여기서 파생됐다(.github/actions/pr-first-commit/
+  // action.yml · scripts/teardown.sh · .github/workflows/bump.yaml · tools/run-bump-plan.ts).
+  // ⚠️ 형제들은 포함 판정을 `:(exclude)` pathspec으로 git에게 시킨다 — 그쪽 천장은 다중 pathspec이라
+  //    같은 매처를 두 번 구현하지 않는 것이 유일하게 안전하다. 여기는 천장이 **정확히 한 파일**이라
+  //    문자열 동일성으로 족하고, 아래 `changed.length === 1`(멱등 no-op 판정)이 같은 열거를 재사용한다.
+  // ⚠️ `l.slice(3)` 고정 오프셋은 **복사하지 마라**. 포세린은 rename을 `R  <orig> -> <new>`로,
+  //    특수문자 경로를 C-따옴표로 낸다(실측) — 둘 다 이 오프셋으로는 경로가 안 뽑힌다. 다만 그때
+  //    뽑힌 문자열은 sealedPath와 다르므로 foreign에 걸려 **거부**로 떨어진다(손해 방향이 fail-closed).
   const after = git(cwd, ["status", "--porcelain"]);
   if (!after.ok) return refuse("git status 실패(seal 후)");
   const changed = after.out.split("\n").map((l) => l.slice(3).trim()).filter((l) => l !== "");
   const foreign = changed.filter((f) => f !== sealedPath);
   if (foreign.length > 0) return refuse(`seal이 봉인본 외 파일을 변경했다: ${foreign.join(", ")}`);
+  // ── [/staged-completeness] ────────────────────────────────────────────────────────────────
 
   if (changed.length === 1) {
     const add = git(cwd, ["add", "--", sealedPath]);

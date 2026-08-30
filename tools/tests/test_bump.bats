@@ -257,3 +257,54 @@ EOF
   after=$(shasum "$ex" | awk '{print $1}')
   [ "$before" == "$after" ]
 }
+
+# ── APPS 편집이 커널(tools/lib/digest-exporter.ts)을 지난다 ────────────────────────────────
+# 착지 전에는 이 자리가 손 정규식으로 APPS 문법을 재유도했다. 아래 세 @test는 그 재유도가
+# **무성 skip**으로 뭉개던 부류들이다(전부 stale APPS → R6 ImageDigestDrift 거짓 발화로 나타난다).
+@test "bump retags an APPS entry whose owner is not ukyi-app (hand regex pinned the owner literal)" {
+  seed_exporter "blog=ghcr.io/other-owner/blog:sha-0000000"
+  ex="$FIX/platform/victoria-stack/prod/digest-exporter.yaml"
+  bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  run grep -c "blog=ghcr.io/other-owner/blog:sha-deadbee" "$ex"
+  [ "$output" -eq 1 ]
+}
+
+@test "bump retags an APPS entry whose tag has drifted off the sha- form (present but unmatched)" {
+  # 착지 전: 항목이 목록에 **있는데** 손 정규식이 못 맞춰 조용히 skip → APPS가 v1.2.3에 묶인 채 남았다.
+  seed_exporter "blog=ghcr.io/ukyi-app/blog:v1.2.3"
+  ex="$FIX/platform/victoria-stack/prod/digest-exporter.yaml"
+  run bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -Fq "digest-exporter: APPS blog 태그 동기 → sha-deadbee"
+  run grep -c "blog=ghcr.io/ukyi-app/blog:sha-deadbee" "$ex"
+  [ "$output" -eq 1 ]
+}
+
+@test "bump keeps a port-bearing registry ref intact while moving its tag" {
+  seed_exporter "blog=reg.io:443/ukyi-app/blog:sha-0000000"
+  ex="$FIX/platform/victoria-stack/prod/digest-exporter.yaml"
+  bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  run grep -c "blog=reg.io:443/ukyi-app/blog:sha-deadbee" "$ex"
+  [ "$output" -eq 1 ]
+}
+
+@test "bump leaves the digest-exporter byte-identical when the entry is already current and APPS is canonical" {
+  # 정정된 불변식: "이미 최신이면 바이트 동일"이 아니라 "이미 최신 **이고 APPS가 이미 정준**이면"이다.
+  seed_exporter "blog=ghcr.io/ukyi-app/blog:sha-deadbee page=ghcr.io/ukyi-app/page:sha-cd4815ca409992f56bf72d324d0806acb97010e2"
+  ex="$FIX/platform/victoria-stack/prod/digest-exporter.yaml"
+  before=$(shasum "$ex" | awk '{print $1}')
+  run bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+  after=$(shasum "$ex" | awk '{print $1}')
+  [ "$before" == "$after" ]
+}
+
+@test "bump fails loud when the digest-exporter file exists but its APPS line has drifted" {
+  # 커널 계약(매치 0 = throw)을 그대로 물려받는다. 착지 전에는 이것도 무성 skip이었다 —
+  # 파일 부재(정상 no-op)와 APPS 라인 소실(고장)이 구별되지 않았다.
+  mkdir -p "$FIX/platform/victoria-stack/prod"
+  echo 'no apps here' > "$FIX/platform/victoria-stack/prod/digest-exporter.yaml"
+  run bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -Fq "digest-exporter APPS(value) 라인을 찾지 못함"
+}

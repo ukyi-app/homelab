@@ -225,13 +225,29 @@ case "$*" in
     fi
     cat "$FIX/db-compare.txt"
     ;;
-  # 표면 blob sha(3상) — ref=feedbee(머지 SHA)는 요청값, 그 외 ref는 관측 리비전.
+  # 머지 커밋의 first parent(= 철거 전 ref) — absence 수렴이 "부재가 철거의 관측인가"를 재는 축.
+  # 기본은 dadfeed(확정). STUB_PARENT_FAIL이면 전송 오류(미확정), STUB_PARENT_ROOT면 parents 비어
+  # 있음(jq가 "null") — 둘 다 미확정 경로다.
+  "api repos/ukyi-app/homelab/commits/"*" --jq .parents[0].sha")
+    if [ -n "${STUB_PARENT_FAIL:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
+    if [ -n "${STUB_PARENT_ROOT:-}" ]; then printf 'null\n'; exit 0; fi
+    printf 'dadfeed\n'
+    ;;
+  # 표면 blob sha(3상) — ref=feedbee(머지 SHA)는 요청값, ref=dadfeed는 철거 전, 그 외는 관측 리비전.
   "api repos/ukyi-app/homelab/contents/"*" --jq .sha")
     case "$*" in
       *"?ref=feedbee --jq .sha"|*"?ref=main --jq .sha")
         # feedbee=머지 SHA(변이 요청값) · main=no-op 기준(디스패처가 비교한 HEAD)
-        if [ -n "${STUB_SURFACE_MERGE_ABSENT:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+        if [ -n "${STUB_SURFACE_MERGE_ABSENT:-}" ] || [ -n "${STUB_SURFACE_NEVER:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
         printf 'blobsha-request\n'
+        ;;
+      *"?ref=dadfeed --jq .sha")
+        # dadfeed=철거 전 ref(머지 커밋의 first parent). 기본은 **실재** — 그래야 머지 SHA의 부재가
+        # 철거의 관측이 된다. STUB_SURFACE_NEVER=1이면 어느 ref에서도 404(경로 오타·표면 드리프트
+        # 형태 — 부재가 아무것도 증언하지 못하는 상태), STUB_SURFACE_BEFORE_ERROR=1이면 미확정.
+        if [ -n "${STUB_SURFACE_NEVER:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+        if [ -n "${STUB_SURFACE_BEFORE_ERROR:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
+        printf 'blobsha-before\n'
         ;;
       *)
         if [ -n "${STUB_SURFACE_ABSENT:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi

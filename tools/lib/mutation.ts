@@ -10,6 +10,8 @@
 //   blob sha — 제거형·변경형 추월을 모두 superseded로 포착한다(전제 상태 변동 — exit 3 계열).
 //   3상 판정: found/absent(HTTP 404 확정)/error(전송 오류) — 전송 오류는 추월의 증거가 아니라
 //   그 사이클 미확정이다(일시 실패 한 번이 exit 3 종결이 되면 안 된다).
+//   absence 수렴(teardown)의 표면 축은 두 ref를 본다 — 머지 SHA에서 부재 AND 철거 전 ref(first
+//   parent)에서 실재. 부재 한 축만 보면 404의 모든 사유가 "철거 완료"와 같은 값이 된다.
 // KUBECONFIG 부재: 머지까지 확인하고 라이브 구간은 omitted=["live"]로 명시(생략 ≠ 성공 은폐).
 // 시간 심: pollMs·deadlineMs 주입(테스트가 밀리초로 돌린다), nonce는 HOMELAB_CORRELATION 주입.
 import { randomBytes } from "node:crypto";
@@ -34,6 +36,8 @@ export type MutationSpec = {
   // 표면이 요청값)해야 성공. absence(teardown-app): 삭제 대상은 Healthy가 될 수 없다 — 성공 =
   // Application 부재(appset finalizer cascade prune 완료)이고, 표면 술어의 극성도 함께 뒤집힌다
   // (철거 머지는 표면을 제거하므로 머지 SHA에서 표면이 사라져 있어야 요청이 반영된 것).
+  // absence의 표면 축은 **두 ref 관측**이다 — 머지 SHA에서 부재 AND 철거 전 ref(머지 커밋의 first
+  // parent)에서 실재. 후자가 없으면 404의 모든 사유가 "철거 완료"로 접힌다(무판정 통과).
   converge?: "presence" | "absence";
   // run 성공 + 브랜치 PR 0 = 정당한 no-op(update-secrets: 동일 봉인본 — pr-first-commit 멱등).
   // --wait 검증은 머지 SHA 없이 "관측 리비전의 표면 blob == homelab main의 표면 blob"으로 대체한다
@@ -177,14 +181,33 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     if (r.ok) return { kind: "found", sha: r.out.trim() };
     return /\(HTTP 404\)/.test(r.err) ? { kind: "absent" } : { kind: "error" };
   };
-  // 요청값 blob(머지 SHA 시점) — 확정 관측만 캐시(전송 오류는 미확정이라 재평가 여지).
-  const requestedBlobCache = new Map<string, Blob>();
-  const requestedBlob = (path: string): Blob => {
-    const hit = requestedBlobCache.get(path);
+  // ref 고정 blob 리더 — 확정 관측만 캐시(전송 오류는 미확정이라 재평가 여지를 남긴다).
+  // 리더가 둘이다: 요청값(머지 SHA 시점)과 철거 전(머지 커밋의 first parent — absence 수렴 전용).
+  const blobReader = (ref: string) => {
+    const cache = new Map<string, Blob>();
+    return (path: string): Blob => {
+      const hit = cache.get(path);
+      if (hit !== undefined) return hit;
+      const b = blobAt(ref, path);
+      if (b.kind !== "error") cache.set(path, b);
+      return b;
+    };
+  };
+  const requestedBlob = blobReader(wantRef);
+  // 머지 커밋의 first parent = 머지 직전 main(merge/squash/rebase 어느 방식이든 첫 부모가 base다).
+  // 확정 관측만 캐시 — 전송 오류는 null(미확정)이고 계보는 불변이라 성공 관측은 재조회하지 않는다.
+  const parentCache = new Map<string, string>();
+  const firstParentOf = (sha: string): string | null => {
+    const hit = parentCache.get(sha);
     if (hit !== undefined) return hit;
-    const b = blobAt(wantRef, path);
-    if (b.kind !== "error") requestedBlobCache.set(path, b);
-    return b;
+    const r = sh("gh", ["api", `repos/${HOMELAB_REPO}/commits/${sha}`, "--jq", ".parents[0].sha"]);
+    if (!r.ok) return null; // 전송 오류 — 미확정
+    const p = r.out.trim();
+    // parents가 비어 있으면(root 커밋) jq가 "null"을 낸다 — "철거 전"이 없는 상태라 판정 불가로
+    // 접는다(미확정 → 이 사이클 미수렴 → 최종 pending). 성공을 내주지 않는 방향이다.
+    if (!/^[0-9a-f]{7,40}$/.test(p)) return null;
+    parentCache.set(sha, p);
+    return p;
   };
 
   // 6a) absence 수렴(teardown) — 삭제 대상 Application은 Healthy가 될 수 없다(스펙 대기 매트릭스,
@@ -193,12 +216,31 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   //   sync/health가 아니라 존재/부재로 판정한다(--ignore-not-found: 부재=빈 stdout·exit 0).
   //   DNS 회수는 관측 대상이 아니다 — iac/tf-reconcile 소관을 resultBase가 명시한다.
   if (spec.converge === "absence") {
+    // absence 수렴은 머지 SHA를 전제한다 — "철거 전 ref"가 없으면 부재가 관측이 될 수 없다.
+    // no-op 동사(noopOnMissingPr: wantRef="main")와 absence는 양립하지 않는다(오늘 그런 조합의 동사는
+    // 없다). 조합이 생기면 조용한 무판정 통과가 아니라 여기서 loud로 죽는다.
+    if (mergeSha === undefined) return fail("계약 파손: absence 수렴에 머지 SHA가 없다 — 철거 전 ref를 특정할 수 없다(no-op 동사와 absence는 양립 불가)", { run: runRef(), pr: prRef() });
+    let before: { ref: string; read: (path: string) => Blob } | undefined;
     for (;;) {
       let surfaceUndecided = false;
       for (const app of spec.applications) {
         const want = requestedBlob(app.surfacePath);
         if (want.kind === "found") return fail(`기준 ref(${wantRef})에 표면(${app.surfacePath})이 남아 있다 — 철거가 반영되지 않았다`, { run: runRef(), pr: prRef() });
-        if (want.kind === "error") surfaceUndecided = true; // 미확정 — 이 사이클은 수렴 아님
+        if (want.kind === "error") { surfaceUndecided = true; continue; } // 미확정 — 이 사이클은 수렴 아님
+        // want.kind === "absent" — 여기가 종전의 **무판정 통과**였다. blobAt이 404를 absent로 접으므로
+        // 경로가 해석되지 않는 모든 사유(경로 오타·표면 드리프트·애초에 없었음)가 "철거 완료"와 같은
+        // 값이 되고, 손해 방향이 파괴 승인이다(같은 blobAt을 쓰는 presence 레인은 같은 absent를
+        // fail로 읽는다). 부재가 **관측**이 되려면 철거 전 ref에 표면이 실재했어야 한다.
+        if (before === undefined) {
+          const parent = firstParentOf(mergeSha);
+          if (parent === null) { surfaceUndecided = true; continue; } // 부모 조회 미확정
+          before = { ref: parent, read: blobReader(parent) };
+        }
+        const had = before.read(app.surfacePath);
+        if (had.kind === "error") { surfaceUndecided = true; continue; } // 미확정
+        if (had.kind === "absent") {
+          return fail(`철거 전 ref(${before.ref})에도 표면(${app.surfacePath})이 없다 — 부재가 철거의 증거가 아니다(경로 오타·표면 드리프트·이미 부재가 구별되지 않는다)`, { run: runRef(), pr: prRef() });
+        }
       }
       const states: Array<Record<string, unknown>> = [];
       let allAbsent = !surfaceUndecided;
@@ -217,7 +259,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
         // "finalizer cascade 진행 중"으로 뭉개면 운영자를 잘못 유도한다(원인별 재조회 판단이 다르다).
         const kubectlError = states.some((s) => s.error !== undefined);
         const pendingReason = surfaceUndecided
-          ? "철거 반영 확인 미완 — 표면(git) 조회가 일시 실패했다(핸들로 재조회 가능)"
+          ? "철거 반영 확인 미완 — 표면/철거 전 ref(git) 조회가 일시 실패했다(핸들로 재조회 가능)"
           : kubectlError
             ? "Application 부재 미확정 — 클러스터 조회 일시 실패(핸들로 재조회 가능)"
             : "Application prune 미완 — appset finalizer cascade 진행 중일 수 있다(핸들로 재조회 가능)";

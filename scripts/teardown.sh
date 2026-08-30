@@ -62,10 +62,31 @@ git fetch origin main
 git switch -c "$branch" FETCH_HEAD
 "${plan_cmd[@]}" | tee /tmp/td-plan.json
 [ -n "$(git status --porcelain)" ] || { echo "변경 없음 — 멱등 no-op"; exit 0; }
+# ── 스테이징 완전성 판정 [staged-completeness] ─────────────────────────────────────────────────
+# 도구가 ALLOWLIST 천장 밖에 쓰면 아래 `git add`가 그 변경을 스테이징하지 않아 커밋에서 **조용히
+# 유실**되고 PR이 부분 표면으로 열린다(형제 자리의 실사고: .github/actions/pr-first-commit/action.yml).
+# ALLOWLIST는 **상한으로 남긴다** — 재는 것은 열거가 아니라 **잔여물**이다. 포함 판정은 `:(exclude)`
+# pathspec으로 git에게 시킨다(아래 `git add $ALLOWLIST`와 같은 매처 — 두 번째 구현이 생기지 않는다).
+# 판정은 `git add` **앞**이자 사람의 승인(read) 앞이다 — 뒤에 두면 pathspec 미매치와 구별할 수 없고,
+# 승인 뒤에 두면 이미 승인한 플랜이 실패한다.
+excl=""
+# shellcheck disable=SC2086  # ALLOWLIST는 의도적 단어 분할
+for p in $ALLOWLIST; do excl="$excl :(exclude)$p"; done
+# shellcheck disable=SC2086  # excl은 pathspec 다중 인자 — 의도적 분할
+residue="$(git status --porcelain --untracked-files=all -- . $excl)"
+[ -z "$residue" ] || {
+  echo "거부: ALLOWLIST 천장 밖 변경이 남는다 — 이대로 커밋하면 유실된다" >&2
+  echo "$residue" >&2
+  echo "선언된 ALLOWLIST: $ALLOWLIST" >&2
+  exit 1
+}
+# ── [/staged-completeness] ────────────────────────────────────────────────────────────────────
 echo "── 플랜(/tmp/td-plan.json) 검토 후 Enter로 PR 생성, Ctrl-C로 중단 ──"
 read -r _
-# shellcheck disable=SC2086  # ALLOWLIST는 의도적 단어 분할(없는 경로는 git이 무시)
-git add $ALLOWLIST 2>/dev/null || true
+# 잔여물 판정이 앞에서 통과했으므로 여기서 남는 비-0은 **진짜 실패**다 — 옛 `2>/dev/null || true`는
+# 그 실패(권한·인덱스 잠금·pathspec 미매치)까지 삼켜 빈 커밋으로 PR을 열 수 있었다.
+# shellcheck disable=SC2086  # ALLOWLIST는 의도적 단어 분할
+git add $ALLOWLIST
 git commit -m "$title"
 git push -u origin "$branch"
 gh pr create --base main --head "$branch" --title "$title" --body-file /tmp/td-plan.json

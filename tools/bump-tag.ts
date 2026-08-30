@@ -5,36 +5,52 @@ import { APP_NAME_RE } from "./lib/identity.ts";
 import { TAG_RE, DIGEST_RE, parseInlinePin, parseDescriptor, formatInlinePin, type PinDescriptor } from "./lib/image-pin.ts";
 // apps 레인의 표면 경로는 app-surface module 소유(d4) — 손조립 리터럴 금지.
 import { appPaths } from "./lib/app-surface.ts";
+// APPS 리스트 문법(항목 경계·이름 키·ref 표기·존재 판정)의 SSOT — create-app·teardown-app과 공유한다.
+import { hasApp, retagApp } from "./lib/digest-exporter.ts";
 
 // digest-exporter APPS 신선도 동기(codex pass2 P2-2): bump한 앱이 APPS 목록에 있으면 그 항목의
 // 이미지 태그를 새 tag로 갱신한다. sha-* 태그가 불변이라 배포 핀만 바꾸면 digest-exporter가 stale
-// 참조로 거짓 ImageDigestDrift(B2)를 낸다. 파일/항목 부재는 무변경 no-op(정보 로그만) — apps·베스포크 공통.
+// 참조로 거짓 ImageDigestDrift(B2)를 낸다.
+//
+// APPS 리스트 문법(항목 경계 · 이름 키 · ref 표기 · 존재 판정)은 전부 lib/digest-exporter.ts 커널
+// 소유다. 형제 두 쓰기 주체(create-app.ts · teardown-app.ts)가 이미 그 커널을 지나는데 여기만
+// 손 정규식(`ghcr.io/ukyi-app/<app>:` + 배포 핀 tag 몸통의 재유도)으로 문법을 다시 짜고 있었다(처방 도달).
+// ⚠️ 그 몸통을 이 주석에 **철자로 옮겨 적지 마라** — tools/tests/test_image-pin-lib.bats의 로스터가
+//    바로 그 리터럴의 재출현을 0으로 잰다(주석도 파일 바이트다).
+// 그 재유도가 **세 부류를 무성 skip으로** 뭉갰다 — 셋 다 APPS가 stale 태그에 묶인 채 남아
+// R6 ImageDigestDrift 거짓 발화로 나타난다:
+//   ① 커널의 tag 형식(TAG_BODY)이 넓어지면 손 정규식이 부분만 맞춰 태그가 잘린다(어느 게이트도
+//      이 skew를 못 잡았다 — 그 면제가 tools/tests/test_image-pin-lib.bats의 로스터 주석에 있었다).
+//   ② owner가 `ukyi-app`이 아닌 ref(create-app은 `ghcr.io/${owner}/${app}`을 쓴다)는 아예 안 맞는다.
+//   ③ 항목의 태그가 sha-* 밖으로 드리프트하면(`:v1.2.3`) 목록에 **있는데도** 못 맞춘다.
+// 커널 경유는 옛 태그의 모양을 보지 않고 이름 키로만 항목을 찾으므로 셋이 구조적으로 사라진다.
+//
+// 경계 셋: 파일 부재 = no-op(이 레포가 유일한 배선처가 아니다 — apps·베스포크 공통) ·
+//   파일은 있는데 APPS 라인이 없음 = 포맷 드리프트 = 커널 throw(fail-loud) · 항목 부재 = no-op.
+// 불변식: 항목이 **이미 최신이고 APPS가 이미 정준**(코드유닛 정렬 + 단일 공백)이면 파일은 바이트
+//   동일이다. 비정준 입력의 재정렬은 계약 위반이 아니다 — 정렬·구분자는 커널이 소유하는 산출물 형식이고,
+//   그 정준화는 create-app/teardown-app이 쓸 때도 똑같이 일어난다.
 function syncDigestExporter(root: string, appName: string, newTag: string): void {
   const p = resolve(root, "platform/victoria-stack/prod/digest-exporter.yaml");
   let raw: string;
   try { raw = readFileSync(p, "utf8"); } catch { return; } // 파일 부재 = no-op
-  // ⚠️ 아래 정규식만 형식 커널(tools/lib/image-pin.ts)을 **의도적으로 안 쓴다**(arch-deepen F-3).
-  //    여기는 파일 본문 **부분치환**(g 플래그)이라 언앵커드 본문이 필요한데, 커널이 export하는 TAG_RE는
-  //    `^…$` 앵커드다 — 그대로 갈아끼우면 매치 0건이 되어 **조용한 동기 실패**가 된다(APPS가 stale 태그로
-  //    남고 거짓 ImageDigestDrift가 난다). 커널은 부분매치용 TAG_BODY를 일부러 노출하지 않는다(인터페이스
-  //    확장 = 별도 판단). 안티드리프트 grep-guard도 이 형태는 검사 대상 밖이다
-  //    (tools/tests/test_image-pin-lib.bats:94-101). ⇒ 배포 핀 tag 형식(`sha-` + 7..40 hex)을 바꾸면
-  //    image-pin.ts의 TAG_BODY와 **이 줄을 같이** 고쳐라 — 어느 게이트도 이 skew를 잡지 못한다.
-  const esc = appName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`(ghcr\\.io/ukyi-app/${esc}:)sha-[0-9a-f]{7,40}`, "g");
-  const next = raw.replace(re, `$1${newTag}`);
-  // ⚠️ 이 skip은 **"APPS에 없는 미감시 앱(정상 no-op)"** 과 **"APPS에 있는데 위 정규식이 못 맞춘 포맷
-  //    드리프트(진짜 고장)"** 를 같은 무성 경로로 뭉갠다(arch-deepen F-1 — 행위 변경이라 미착수).
-  //    후자면 APPS가 stale 태그에 묶인 채 남아 digest-exporter가 옛 태그의 digest를 push하고 → 거짓
-  //    ImageDigestDrift가 난다. 08 이후엔 동명 app/bespoke target도 이 **이름 키** 한 줄을 공유한다 —
-//    브랜치·인가 소스는 kind로 갈렸지만 이 표면은 아니다(두 PR이 머지되면 나중 것이 이긴다 — 같은 F-1 부채).
-//    tests/gates/test_digest-exporter.bats의 APPS parity 게이트는 **이름 집합**만
-  //    대조하므로 태그 포맷 드리프트를 못 잡는다. fail-loud화하려면 앱이 APPS 목록에 있는지를 먼저 판정한
-  //    뒤(있는데 미매치 = 비-0 종료), 없을 때만 조용히 return하라.
-  if (next === raw) { console.log(`digest-exporter: APPS에 ${appName} 없음(또는 이미 최신) — 동기 skip`); return; }
+  // ⚠️ 아래 두 로그 문구는 charlock(tools/tests/test_image-pin-charlock.bats B8)이 **바이트로** 고정한다.
+  //    두 skip 경로가 한 문구를 공유하는 것은 의도다: 착지 전과 달리 이제 skip은 "목록에 없음"과
+  //    "이미 최신 + 정준" 둘뿐이라 문구가 참이 됐다(옛 세 번째 사정 = 포맷 드리프트는 위 ①②③으로 소멸).
+  const skipLog = `digest-exporter: APPS에 ${appName} 없음(또는 이미 최신) — 동기 skip`;
+  // 존재 판정을 **먼저** 한다 — 커널 문법으로 "미감시 앱(정상 no-op)"을 가려낸 뒤에만 편집한다.
+  //   (F-1이 처방한 순서 그대로다. "있는데 미매치 = 비-0 종료" 항은 소멸했다 — 커널은 목록에 있는
+  //    항목을 옛 태그 모양과 무관하게 항상 옮기므로 그 상태 자체가 도달 불가다.)
+  if (!hasApp(raw, appName)) { console.log(skipLog); return; }
+  const next = retagApp(raw, appName, newTag);
+  if (next === raw) { console.log(skipLog); return; } // 이미 최신 + APPS 정준
   writeFileSync(p, next);
   console.log(`digest-exporter: APPS ${appName} 태그 동기 → ${newTag}`);
 }
+// ⚠️ 08 이후엔 동명 app/bespoke target도 이 **이름 키** 한 줄을 공유한다 — 브랜치·인가 소스는 kind로
+//    갈렸지만 이 표면은 아니다(두 PR이 머지되면 나중 것이 이긴다 — arch-deepen F-1 부채 잔여).
+//    tests/gates/test_digest-exporter.bats의 APPS parity 게이트는 **이름 집합**만 대조하므로 이
+//    다툼도, 태그 값도 보지 않는다. cf. tools/tests/test_bump-identity-e2e.bats의 비-보장 절.
 
 const argv = process.argv.slice(2);
 // arity 검증 파서: 인식된 값-플래그는 비어있지 않은 값(다음 토큰이 `--flag`가 아님)을 필수로 갖는다.
