@@ -171,11 +171,22 @@ awk -v a="$SB_NR" -v t="$T" 'BEGIN{exit !(a > t)}' \
   || contract "shmem-바운드 픽스처의 회수 불가 비율($SB_NR) ≤ 임계($T) — 올바른 분자에서도 안 울리는 형상이라 L2b가 vacuous하다"
 awk -v a="$SB_NRC" -v t="$T" 'BEGIN{exit !(a <= t)}' \
   || contract "shmem-바운드 픽스처가 usage−cache 분자에서도 임계를 넘는다($SB_NRC > $T) — 그러면 L2b가 F1 회귀(cache 통째 차감)를 못 잡는다. shmem 몫을 키워라."
+# ⚠️ SB_WS(shmem 형상의 working_set 판)는 **단언하지 않는다.** active_file ≥ 0이라 SB_NR ≤ SB_WS가 항상
+#    성립하므로, 바로 위 `SB_NR > T`가 `SB_WS > T`를 이미 함의한다. 별도 단언을 두면 어떤 픽스처로도
+#    밟히지 않는 무증인 조건이 된다(이 레포의 「픽스처가 밟지 않는 판정 조건은 무증인」 클래스 —
+#    mutation으로 실증했다: SB_WS를 임계 아래로 내리려 하면 SB_NR 단언이 항상 먼저 잡는다).
+#    값은 진단용으로 출력에만 싣는다 — 세 분자를 나란히 봐야 어느 축에서 갈렸는지 즉시 읽힌다.
+# cachebound·anonbound는 shmem이 0이라 두 분자가 **같은 값**을 내야 한다. 갈리면 픽스처에 shmem이
+# 섞여 들어간 것이고, 그러면 L1/L2가 재려던 축(순수 파일 캐시 오염 · 순수 anon)이 흐려진다.
+awk -v a="$CB_NRC" -v b="$CB_NR" 'BEGIN{exit !(a == b)}' \
+  || contract "캐시-바운드 픽스처에서 usage−cache($CB_NRC) != usage−inactive−active($CB_NR) — shmem이 섞였다. L1은 순수 파일 캐시 오염만 재야 한다."
+awk -v a="$AB_NRC" -v b="$AB_NR" 'BEGIN{exit !(a == b)}' \
+  || contract "anon-바운드 픽스처에서 usage−cache($AB_NRC) != usage−inactive−active($AB_NR) — shmem이 섞였다. L2는 순수 anon 참양성만 재야 한다."
 
 echo "[preflight] 임계=$T | for:=${FOR}(${FOR_S}s) | eval=${VME_EVAL} | 룩백=${VME_LOOKBACK}"
 echo "[preflight] cachebound  working_set=${CB_WS} > $T  ∧  회수불가=${CB_NR} ≤ $T  ✓ (두 판정이 갈린다)"
 echo "[preflight] anonbound   working_set=${AB_WS} > $T  ∧  회수불가=${AB_NR} > $T  ✓ (양쪽 다 참양성)"
-echo "[preflight] shmembound  회수불가(LRU축)=${SB_NR} > $T  ∧  usage−cache=${SB_NRC} ≤ $T  ✓ (F1 회귀 앵커)"
+echo "[preflight] shmembound  회수불가(LRU축)=${SB_NR} > $T  ∧  usage−cache=${SB_NRC} ≤ $T  ✓ (F1 회귀 앵커) | working_set=${SB_WS}"
 echo "[window] replay $(vme_iso "$FROM_EPOCH") .. $(vme_iso "$TO_EPOCH") (${SPAN_S}s) | 격자=${STEP_S}s"
 
 # ── 3) 판정 헬퍼 — container 라벨로 좁힌다(집계가 by (namespace,pod,container)라 라벨이 보존된다) ──
