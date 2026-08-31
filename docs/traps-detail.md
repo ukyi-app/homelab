@@ -2026,3 +2026,34 @@ selfHeal과 플립플롭한다.
   자리다. 변수를 새로 설정하거나 회전할 때 그 체크를 먼저 돌린다.
 - ⇒ 반대 선택(대소문자 무시)을 언젠가 고르면, 그 커밋은 **15사본 전부**를 함께 바꿔야 한다. 한 사본만
   넓히면 같은 org 변수에 대해 워크플로마다 판정이 갈린다.
+
+### `grep -q`의 조기 종료가 pipefail 아래에서 writer를 SIGPIPE로 죽인다 — 매치가 있었는데 141이 거짓 FAIL이 된다
+- 2026-08-31 PR #564의 CI에서 `tests/gates/test_traps-sync.bats`의 `reverse guard-path-tie`가 red였다가
+  **같은 커밋 재실행으로 green**이 됐다. 결정적 단서는 같은 실패 로그 안에 있었다 — 동일한
+  같은 가드를 인자 없이 부르는 `tests/gates/test_verify-traps.bats`의 레인은 **통과**했다.
+- 기전: `printf '%s\n' "$list" | grep -Fqx -- "$x"`에서 `grep -q`는 **첫 매치에서 즉시 종료**한다. 그때
+  writer(bash `printf` 빌트인)가 아직 쓸 것이 남아 있으면 SIGPIPE로 죽고, `set -o pipefail`이 그
+  **141(=128+13)**을 파이프라인 rc로 채택한다. ⇒ **매치가 있었는데 FAIL**이다. 판정이 뒤집히는 것이
+  아니라 판정 자체가 종료코드에 삼켜진다.
+- ⚠️ **부하 의존이라 로컬이 CI를 예고하지 못한다.** writer가 몇 번 write()를 끝냈는지는 스케줄링에
+  달려 있다. 실측(2026-08-31, 14코어): CPU 부하 아래 `verify-traps.sh` **30회 중 22회 red** ·
+  무부하 **20회 전건 green**. CI가 이 창을 만든다 — `.github/workflows/ci.yaml`의 "무거운 스위트 동시
+  실행" 스텝이 `run-bats.sh`와 발화 e2e 8건을 **한 스텝에서 병렬로** 띄운다(PR #564가 그 목록을 7→8로
+  늘렸다). 깨끗한 worktree·전체 스위트·CI 로케일 어디서도 재현되지 않은 이유가 이것이다.
+- ⭐ **최소 재현**(부하 불요): 줄 수를 키우고 매치를 맨 앞에 두면 결정적으로 관측된다 —
+  `BIG=$(seq 1 10000); bash -c 'set -euo pipefail; printf "%s\n" "$1" | grep -Fqx -- "1"' _ "$BIG"`가
+  **rc=141**을 낸다(3회 중 1회). 같은 입력에 `grep -Fqx -- "1" <<<"$BIG"`는 전건 rc=0.
+- ⇒ 처방: **herestring**(`grep -Fqx -- "$x" <<<"$list"`). bash가 임시 파일을 seek 가능한 fd로 붙이므로
+  파이프 자체가 없고 이 레이스가 **원리적으로** 사라진다. `|| true`나 재시도는 처방이 아니다 —
+  SIGPIPE가 만든 거짓 FAIL과 진짜 SSOT 드리프트 FAIL이 **같은 문장을 내므로** 재시도는 판별 장치가
+  아니라 은폐다(형제 항목 「체이닝 레이스의 두 번째 얼굴」이 재시도의 정당성 조건으로 "레이스 서명이
+  결함과 구별될 것"을 세워 뒀는데, 여기선 그 조건이 성립하지 않는다).
+- ⚠️ **도메인 경계**: bats는 `pipefail`을 켜지 않는다. 그래서 `.bats` 안의 같은 관용구는 141이 나도
+  파이프라인 rc가 grep 쪽(0)이라 안전하다 — 이 함정은 **`set -o pipefail`을 켠 `.sh`에만** 적용된다.
+- ⚠️ 단일 값(`printf '%s' "$one"` — 줄바꿈 없음)은 write가 1회라 사실상 안전하다. 위험한 것은
+  **여러 줄 리스트를 멤버십 검사에 파이프하는 형태**다.
+- ⇒ **부채(별도 티켓)**: pipefail을 켠 채 같은 형태를 쓰는 형제가 남아 있다 —
+  `infra/k3s-bootstrap/host-preflight.sh`(:121·:131) · `infra/k3s-bootstrap/verify-cluster.sh`(:93) ·
+  `scripts/audit-orphan-pv.sh`(:63) · `scripts/check-gh-secret-coverage.sh`(:107·:114·:115·:128·:129·:180) ·
+  `scripts/verify-credential-inventory.sh`(:75·:85). 지금 red가 아니라 이번 변경에 묶지 않았고,
+  전수 정적 가드는 bats 레인 면제 설계가 선행이라 함께 미뤘다. 침묵시키지 않으려고 여기 계상한다.
