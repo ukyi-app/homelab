@@ -117,41 +117,29 @@ python3 "$GEN" "$FIXTURE" "$FROM_EPOCH" "$TO_EPOCH" "$STEP_S" \
   || fault "시계열 생성 실패 — 창/격자 산술이 픽스처를 무의미하게 만들었다"
 
 # 판정 비율은 **생성된 픽스처에서 되읽는다** — gen.py의 상수를 여기 재선언하면 두 벌이 조용히 갈린다.
-# 물리 정합성(cache·working_set ≤ usage, 커널 항등식)도 여기서 함께 강제한다.
+# 오라클은 tools/fixture-memory-ratios.ts가 소유한다(CONTRIBUTING 「새 코드 배치 규칙」: 구조 데이터
+# 파싱·계산은 typed TS. 인라인 python일 때는 bun typecheck도 단위 테스트도 이 코드를 보지 못했다).
 # 세 축을 낸다: working_set(옛 판) · usage−cache(r1 판, F1 결함) · usage−inactive−active(현행 판).
 # 가운데 축은 배포 룰이 더는 쓰지 않지만 **L2b의 전제**를 재는 데 필요하다 — shmem 형상이 그 판에서
 # 침묵한다는 것이 F1 회귀 앵커의 핵심이고, 그 사실을 기계가 확인해야 L2b가 무언가를 재는 것이 된다.
+# 물리 정합성·커널 항등식 검증도 그 도구가 지고, 위반은 rc 1 + FAIL 줄로 온다.
 ratios() { # $1=container 라벨 → "ws_ratio nonrecl_cache_ratio nonrecl_lru_ratio"
-  python3 - "$FIXTURE" "$1" <<'PY'
-import json, sys
-path, want = sys.argv[1], sys.argv[2]
-v = {}
-for line in open(path):
-    o = json.loads(line)
-    m = o["metric"]
-    if m.get("container") == want:
-        v[m["__name__"]] = float(o["values"][0])
-need = ["container_memory_working_set_bytes", "container_memory_usage_bytes",
-        "container_memory_cache", "container_memory_total_inactive_file_bytes",
-        "container_memory_total_active_file_bytes", "kube_pod_container_resource_limits"]
-missing = [n for n in need if n not in v]
-if missing:
-    sys.exit("픽스처에 %s의 메트릭 누락: %s" % (want, ",".join(missing)))
-ws, us, ca, inact, act, li = (v[n] for n in need)
-if not (ws <= us and ca <= us and li > 0):
-    sys.exit("픽스처 %s 물리 정합성 위반: ws=%d us=%d ca=%d li=%d" % (want, ws, us, ca, li))
-# 커널 항등식 — 픽스처가 이것을 어기면 shmem 축의 산술이 통째로 무의미해진다.
-if ws != us - inact:
-    sys.exit("픽스처 %s: working_set(%d) != usage−inactive_file(%d)" % (want, ws, us - inact))
-if ca < inact + act:
-    sys.exit("픽스처 %s: cache(%d) < inactive+active(%d) — 항등식 위반" % (want, ca, inact + act))
-print("%.6f %.6f %.6f" % (ws / li, (us - ca) / li, (us - inact - act) / li))
-PY
+  bun "$ROOT/tools/fixture-memory-ratios.ts" --fixture "$FIXTURE" --container "$1"
 }
 
-read -r CB_WS CB_NRC CB_NR <<<"$(ratios "$CB")" || fault "캐시-바운드 픽스처 비율 산출 실패"
-read -r AB_WS AB_NRC AB_NR <<<"$(ratios "$AB")" || fault "anon-바운드 픽스처 비율 산출 실패"
-read -r SB_WS SB_NRC SB_NR <<<"$(ratios "$SB")" || fault "shmem-바운드 픽스처 비율 산출 실패"
+# ⚠️ **명령 치환을 read와 같은 줄에 두지 않는다.** `read -r A B C <<<"$(ratios …)" || fault`는 fail-open이다 —
+#    ratios가 죽어도 치환이 빈 문자열을 내고 read가 rc 0을 돌려주므로 `|| fault`가 **절대 뜨지 않는다**
+#    (이 레포의 「명령치환 인라인도 동류 fail-open — 대입으로 분리해야 -e가 잡는다」 클래스).
+#    대입으로 분리하면 rc가 대입의 rc가 되어 실제로 잡힌다. 빈 산출도 함께 막는다.
+CB_RAW="$(ratios "$CB")" || fault "캐시-바운드 픽스처 비율 산출 실패 — 위 FAIL 줄이 원인이다"
+AB_RAW="$(ratios "$AB")" || fault "anon-바운드 픽스처 비율 산출 실패 — 위 FAIL 줄이 원인이다"
+SB_RAW="$(ratios "$SB")" || fault "shmem-바운드 픽스처 비율 산출 실패 — 위 FAIL 줄이 원인이다"
+for _raw in "$CB_RAW" "$AB_RAW" "$SB_RAW"; do
+  [ -n "$_raw" ] || fault "비율 산출이 빈 문자열을 냈다 — 오라클이 rc 0으로 아무것도 안 냈다는 뜻이다"
+done
+read -r CB_WS CB_NRC CB_NR <<<"$CB_RAW"
+read -r AB_WS AB_NRC AB_NR <<<"$AB_RAW"
+read -r SB_WS SB_NRC SB_NR <<<"$SB_RAW"
 
 # ★ 이 네 단언이 없으면 하네스는 아무것도 재지 않는다 — 픽스처가 두 판정을 **실제로 가르는** 형상일
 #   때만 L1/L2가 의미를 갖는다. 특히 CB_WS > T 는 "이 픽스처가 결함 expr에서 발화한다"의 전제이고,
