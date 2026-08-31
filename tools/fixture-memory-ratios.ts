@@ -1,4 +1,5 @@
-// 발화 e2e 픽스처(VictoriaMetrics /api/v1/import JSON lines)에서 한 컨테이너의 **메모리 비율 세 축**을
+// 발화 e2e 픽스처(VictoriaMetrics import 포맷 — 줄당 하나의 JSON 시계열)에서 한 컨테이너의
+// **메모리 비율 세 축**을
 // 읽어 내고, 그 픽스처가 커널 물리로 성립하는지 검증한다. vmalert-memory-nearlimit-firing-e2e.sh의
 // preflight 오라클 — 그 하네스가 "픽스처가 두 판정을 실제로 가른다"를 단언하는 근거를 여기서 만든다.
 //
@@ -14,6 +15,12 @@
 // 출력: `<working_set> <usage−cache> <usage−inactive−active>` (limit 대비 비율, 소수 6자리, 공백 구분)
 //   축이 셋인 이유는 하네스 헤더가 논증한다 — 가운데(usage−cache)는 배포 룰이 더는 쓰지 않지만
 //   shmem 형상이 **그 판에서 침묵한다**는 것이 F1 회귀 앵커의 전제라 기계가 확인해야 한다.
+//
+// ⚠️ 이 파일은 VM 쓰기 엔드포인트 경로를 **리터럴로 적지 않는다**. check-alert-rules.ts의 push 메트릭
+//    완전성 가드가 `tools/` 표면에서 그 리터럴을 보면 이 파일을 '메트릭 생산자'로 판정하고, 페이로드
+//    정적 해석에 실패해 fail-closed FAIL을 낸다(실측). 이 도구는 픽스처를 **읽기만** 하므로 생산자
+//    레지스트리 등재는 거짓 등재가 된다 — 그래서 가드를 끄는 대신 리터럴을 피한다.
+//    (형제 생성기 vmalert-memory-nearlimit-gen.py는 tests/ 아래라 그 표면 밖이다.)
 //
 // 종료코드(tools/lib/cli.ts 규약): 0=성공 · 1=픽스처 검증 실패 · 2=사용법/플래그 오류
 

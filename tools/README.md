@@ -478,6 +478,13 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `contract-drift.yaml`(주 1회)이 호출·telegram 알림. `--self-test` 오프라인 유닛, 라이브 raw fetch는 워크플로 전용. 읽기 전용.
 - **`verify-db-marker.ts`** — `_create-database.yaml` PostSync에서 provision-db 마커(role 비번 적용 등)를
   검증(fail-closed — 마커 부재=비-0). 읽기 전용.
+- **`fixture-memory-ratios.ts`** — 발화 e2e 픽스처(VM import 포맷 — 줄당 하나의 JSON 시계열)에서 한 컨테이너의 메모리
+  비율 **세 축**(working_set · usage−cache · usage−inactive−active)을 내고 커널 물리 항등식을 검증한다.
+  ⚠️ 레포 상태를 보는 가드가 아니라 **테스트 하네스가 부르는 오라클**이다 —
+  `tests/gates/vmalert-memory-nearlimit-firing-e2e.sh`의 preflight가 "픽스처가 두 판정을 실제로 가른다"를
+  단언하는 근거를 만든다. 판정(임계 비교)은 그 하네스가 자기 awk로 하고 여기 없다(ADR-0005 경계).
+  종전에는 셸 heredoc 내장 python이라 typecheck·단위 테스트 어느 쪽도 이 코드를 보지 못했다.
+  단위 테스트 `tools/tests/test_fixture-memory-ratios.bats`(run-bats 수집). 읽기 전용.
 
 ## 앱 시크릿 봉인 (앱 레포 측 — bun 경유)
 
