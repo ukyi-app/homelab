@@ -174,9 +174,14 @@ EOF
   seal_output="$output"   # run 재호출이 $output을 덮으므로 보존
   grep -q "kind: SealedSecret" "$TMP/demo-secrets.sealed.yaml"
   # 평문 값이 산출/출력 어디에도 없다 (중간 negate는 침묵 통과 → run+status로 강제)
-  # 산출물이 아예 안 써져도 "평문 없음"이 초록이던 자리다 — 위 `kind: SealedSecret` 단언과
-  # 함께 산출물 실재를 요구한다.
-  run grep -rq "sealme" "$TMP/demo-secrets.sealed.yaml"
+  # 산출물이 아예 안 써져도 "평문 없음"이 초록이던 자리다 — 위 `kind: SealedSecret` 단언이
+  # **같은 피연산자**로 산출물 실재를 요구하는 양성 대조다.
+  # ⚠️ `-r`을 붙이지 않는다 — 피연산자가 단일 파일이라 재귀는 무의미한데, 그 플래그 하나가
+  #    이 자리를 디렉토리 형태로 읽히게 만든다(빈 디렉토리 rc 1 = 무매치라 `-eq 1`로 못 닫는
+  #    형태). 실측(2026-08-31): 없는 **파일**에는 `grep -q`도 `grep -rq`도 rc **2** · 빈
+  #    **디렉토리**에는 `grep -rq`가 rc **1**. 그래서 단일 파일 피연산자는 `-eq 1` 하나로
+  #    리네임·미작성이 닫힌다. 뮤테이션 확증: 산출물을 다른 이름으로 쓰게 하면 이 @test는 red.
+  run grep -q "sealme" "$TMP/demo-secrets.sealed.yaml"
   [ "$status" -eq 1 ]
   run grep -q "sealme" <<<"$seal_output"
   [ "$status" -ne 0 ]

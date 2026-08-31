@@ -3,7 +3,9 @@
 #
 # ⚠️ grep 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 파일이라 그것으로 닫힌다.
 #    ⚠️ `run bash "$fx/scripts/dr-drill.sh"`의 `-ne 0`은 **비대상**이다 — 그 rc는 스크립트 자신의
-#       종료코드 규약이지 grep의 것이 아니다.
+#       종료코드 규약이지 grep의 것이 아니다. 대신 그 자리를 **피연산자 실재**로 닫는다:
+#       `_drill_fixture`가 조립 결과를 단언하고(치환 밖이라 `cp` 실패가 errexit에 닿는다),
+#       양성 대조는 국면 A **다음 단계**의 이름에 걸린다 — 아래 두 주석 블록이 실측을 진다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 sh=scripts/dr-drill.sh
 
@@ -21,7 +23,17 @@ sh=scripts/dr-drill.sh
 #    scripts/sealing-key-dr-gate.sh가 없으므로 가드가 깨져 있으면 바로 다음 줄에서 죽는다.
 #    즉 파괴 지점에 닿을 길이 원리적으로 없다. grep만으로는 "가드가 **맨 앞**에 있는가"를
 #    증명할 수 없어서 이 형태를 골랐다.
-_drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
+# ⚠️ 픽스처 조립은 **커맨드 치환 밖**에서 한다 — 결과는 전역 `$fx`로 돌려주고 stdout으로 내지
+#    않는다. 옛 형태 `fx="$(_drill_fixture '')"`는 치환의 rc가 마지막 `echo`의 0이라 내부 `cp`
+#    실패를 통째로 삼켰다(docs/traps-detail.md 「열거 붕괴 → vacuous green」②의 **픽스처 조립판** —
+#    열거가 아니라 조립이 실패했는데 같은 방식으로 조용하다).
+#    실측(2026-08-31, `scripts/dr-drill.sh`를 지운 격리 트리): 이 파일 22 레인 중 21이 red인데
+#    「positive control」 한 레인만 `ok`였다. 세 겹이 함께 통과했다 — ① 치환이 `cp` 실패를 삼키고,
+#    ② 이어지는 `run bash <없는 파일>`가 rc **127**로 `-ne 0`을 만족하고, ③ 그 `$output`이
+#    **비어 있지도 않다**: bash 자신의 `No such file or directory` 진단이 들어와 아래 `grep -q .`
+#    양성 대조까지 통과시켰다. 치환을 걷어내면 `cp`의 rc가 bats errexit에 직접 닿아 그 자리에서
+#    죽는다(실측: 프로브가 `cp` 줄에서 멈춰 그 다음 줄에 도달하지 못했다).
+_drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값 · 결과 = 전역 `$fx`
   fx="$BATS_TEST_TMPDIR/fx$RANDOM"
   mkdir -p "$fx/scripts" "$fx/infra/k3s-bootstrap"
   cp "$sh" "$fx/scripts/dr-drill.sh"
@@ -30,12 +42,15 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   #    삼는다 — SCRIPT_DIR 관용구). 빠뜨리면 드릴이 '리더 비실행'으로 죽고, 아래 양성 대조가
   #    "국면 A 거부가 안 났다"를 **엉뚱한 이유로** 만족해 조용히 vacuous해진다.
   cp infra/k3s-bootstrap/versions-read.sh "$fx/infra/k3s-bootstrap/versions-read.sh"
-  echo "$fx"
+  # 픽스처 무결성 — 조립 결과를 **실재로** 확인한다. 호출부에 흩어져 있던 리더 단언을 여기로
+  # 모은다: 세 호출부 중 UNDECIDABLE 레인에는 그 단언이 아예 없었다. 피연산자가 없으면 아래
+  # `run bash`가 다른 이유로 죽고 그 rc가 `-ne 0`을 그대로 만족한다(위 ②).
+  [ -s "$fx/scripts/dr-drill.sh" ]
+  [ -x "$fx/infra/k3s-bootstrap/versions-read.sh" ]
 }
 
 @test "dr-drill REFUSES to run while the phase-A bulk window is open" {
-  fx="$(_drill_fixture 2026-12-31)"
-  [ -x "$fx/infra/k3s-bootstrap/versions-read.sh" ]     # 픽스처 무결성 — 리더가 없으면 아래가 다른 이유로 죽는다
+  _drill_fixture 2026-12-31
   run bash "$fx/scripts/dr-drill.sh"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -qF -- 'DR ABORT: 국면 A'
@@ -44,8 +59,7 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
 
 @test "the phase-A refusal does NOT fire once the window is cleared (positive control)" {
   # 이게 없으면 '항상 거부하는' 가드도 위 @test를 통과한다.
-  fx="$(_drill_fixture '')"
-  [ -x "$fx/infra/k3s-bootstrap/versions-read.sh" ]     # 픽스처 무결성 — 리더가 없으면 아래가 다른 이유로 죽는다
+  _drill_fixture ''
   run bash "$fx/scripts/dr-drill.sh"
   [ "$status" -ne 0 ]                       # 픽스처엔 sealing-key 게이트가 없어 어차피 죽는다
   out="$output"                             # `run`이 $output을 덮으므로 먼저 붙잡는다
@@ -59,14 +73,26 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   run bash -c 'printf "%s" "$1" | grep -qF -- "BULK_MIGRATION_WINDOW_UNTIL을 판정하지 못했다"' _ "$out"
   [ "$status" -eq 1 ]
   # 양성 대조 — 진단이 실제로 흘렀다. 하네스가 빈 출력을 넘기면 위 두 부재는 공허하게 참이 된다.
-  run bash -c 'printf "%s" "$1" | grep -q .' _ "$out"
+  # ⚠️ 옛 대조는 `grep -q .`(아무 바이트나 한 개)였고 그건 **너무 약하다**: 2026-08-31 실측에서
+  #    피연산자가 사라진 `run bash`의 `$output`이 bash 자신의 `No such file or directory` 한 줄이라
+  #    비어 있지 않았고, 그 한 줄이 이 대조를 그대로 통과시켰다. 그래서 대조를 국면 A **다음
+  #    단계의 이름**에 건다 — 픽스처엔 sealing-key 게이트 파일이 없으므로 국면 A를 지난 드릴은
+  #    반드시 그 source 줄에서 죽고, 그 경로가 출력에 실린다(실측 확인). 즉 이 한 줄이 "국면 A를
+  #    지났다"를 **적극적으로** 증언하고, 비공허는 그 따름결과다. 리더 비실행 분기에서 죽는
+  #    경우도 여기서 잡힌다(그 출력엔 이 이름이 없다).
+  # 🔴 그리고 이것이 파일 헤더의 안전 주장("픽스처엔 그 파일이 없으므로 파괴 지점에 닿을 길이
+  #    원리적으로 없다")의 **유일한 증인**이다. 실측(2026-08-31): dr-drill.sh에서 그 source 줄
+  #    하나만 지운 트리에서 옛 `grep -q .` 대조는 그대로 `ok`였다 — 그때 픽스처 드릴은 국면 A를
+  #    지나 [0.5] 쪽 라이브 호출로 계속 흘러갔는데도 이 레인이 초록이었다. 이름 앵커는 그
+  #    조기 사망을 매 실행 재확인한다.
+  run bash -c 'printf "%s" "$1" | grep -qF -- "sealing-key-dr-gate.sh"' _ "$out"
   [ "$status" -eq 0 ]
 }
 
 @test "dr-drill REFUSES when the phase-A window is UNDECIDABLE (not just when it is open)" {
   # ⚠️ 옛 sed 한 줄은 파일 부재 · 키 부재 · 줄 포맷 변경을 전부 빈 문자열로 접었고, 그 셋이 모두
   #    "국면 B — 드릴 진행"으로 읽혔다. 드릴은 [1]에서 노드를 파괴하므로 그 오독의 대가가 크다.
-  fx="$(_drill_fixture '')"
+  _drill_fixture ''
   printf 'export BULK_STORAGE_PATH="/mnt/bulk"\n' > "$fx/infra/k3s-bootstrap/versions.env"   # 키 부재
   run bash "$fx/scripts/dr-drill.sh"
   [ "$status" -ne 0 ]

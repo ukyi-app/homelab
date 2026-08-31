@@ -903,7 +903,19 @@ PY
   t="$(_fixture rt-earlyfail)"
   _mutate "$t" "d['workflows']['demo.yaml']['jobs']['probe']={'state':'unconfigured','since':'2026-07-27','owner_action':'시크릿 등록','why':'알려진 갭'}; d['workflows']['demo.yaml']['expect_executed']=2"
   run _needs '{"preflight":{"result":"success","outputs":{}},"worker":{"result":"success","outputs":{}},"probe":{"result":"failure","outputs":{}},"dual":{"result":"success","outputs":{"executed":"true"}}}' "$t"
+  # 정상 경로의 rc는 0이다(probe는 미실행으로 남아 선언된 갭 1건 · 경고 0건 → run은 초록).
+  # 이 판정이 이 레인의 **피연산자 실재 증인**이다: 아래 부재 단언은 히어스트링이라 rc 2 채널이 없어
+  # 대상이 사라져도 참이 되고(그 자리의 `-ne 0`은 그래서 옳다), 이 레인엔 그 단언 하나뿐이었다.
+  # 실측(2026-08-31): `tools/check-workflow-readiness.ts`를 지운 트리에서 이 레인만 `ok`로 남았다
+  # (51개 중 생존 5 · 나머지 46은 red — 남은 넷은 이 티켓 밖이고 51번은 ci.yaml 정적 grep이라
+  # 애초에 이 도구가 피연산자가 아니다). rc를 승격하면 bun이 도구 부재에 내는
+  # rc 1이 0과 갈려 이 줄이 먼저 red가 된다.
+  [ "$status" -eq 0 ]
   out="$output"
+  # 양성 대조 — 같은 `out`에서 갭 보고는 실제로 매치한다. 아래 부재 단언이 빈 출력이나 죽은 grep
+  # 때문에 참이 된 것이 아님을 증인한다(rc 판정만으로는 출력 채널이 살아 있음을 못 말한다).
+  run grep -q "준비상태 갭(demo.yaml, 원장 선언됨): 'probe' 미실행" <<<"$out"
+  [ "$status" -eq 0 ]
   run grep -q "원장은 unconfigured다" <<<"$out"
   [ "$status" -ne 0 ]
 }
