@@ -22,6 +22,20 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   S="$ROOT/scripts/check-host-ports.sh"
   LIB="$ROOT/tests/gates/lib/host-port.sh"
+  # ⚠️ **피연산자 실재 증인.** 이 두 파일이 이 스위트 전체의 검사 대상인데, 대상이 사라져도 이 파일은
+  #   초록을 낼 수 있다 — `run bash "$S" <픽스처>`에서 `$S`가 없으면 bash가 rc **127**로 죽어
+  #   `[ "$status" -ne 0 ]`을 만족하고, 뒤따르는 마커 부재 단언도 당연히 참이 된다(세 겹이 통과한다).
+  #   실측(2026-08-31, 둘을 지운 격리 트리): 39건 중 **6건이 초록**이었다 — ①대상을 아예 안 쓰는
+  #   레인 셋(telegram mock readiness · AM readiness 정적 대조 · 이미지 파생 완전성. 마지막 것은 로스터를
+  #   추적 열거에서 뽑는데 LIB은 정의처 면제로 원래 세지 않아 n=5가 그대로였다), ②`. "$LIB"` 실패의
+  #   rc 127을 "BUSY"로 읽어 통과한 0.0.0.0 프로브 레인, ③`command not found` **stderr가 `$output`에
+  #   섞여** awk 필드가 비지 않은 배제목록 레인, ④rc 127 + 마커 부재로 통과한 dead-detector 레인.
+  #   프로그램 rc는 그 도구의 규약이라 철자 규칙으로 못 닫는다(`bun <없는 파일>`=1인데 그 도구의
+  #   **거부**도 1이다 — ADR-0007 「기각이 남긴 부채」·scripts/check-bats-style.sh의 [ABS] 분모 근거).
+  #   그래서 이 축의 처방은 형태 규칙이 아니라 **대상이 거기 있다**는 한 줄이다(선례:
+  #   tests/gates/test_app-token-sha-ssot.bats의 `[ -d .github ]`).
+  [ -f "$S" ]
+  [ -f "$LIB" ]
   FX="$BATS_TEST_TMPDIR"
   STUB="$FX/bin"; STATE="$FX/state"
   mkdir -p "$STUB" "$STATE"
@@ -496,6 +510,12 @@ PYWITNESS
   run bash "$ROOT/scripts/check-host-ports.sh" "$BATS_TEST_TMPDIR/does-not-exist.sh"
   [ "$status" -ne 0 ]
   out="$output"
+  # ★ **양성 대조 — 가드가 실제로 돌아서 거부했다.** `-ne 0` + 마커 부재만 물면 이 레인은 가드가
+  #   사라진 트리에서도 초록이다: bash가 없는 스크립트에 rc **127**을 내 첫 단언을 만족시키고,
+  #   돌지 않은 프로그램은 당연히 마커도 안 낸다(실측 — 이 레인이 그 6건 중 하나였다).
+  #   자기 진단 문구를 함께 물어 "죽은 검출기"와 "없는 검출기"를 갈라낸다(guard.sh detect_run의
+  #   읽기 검증 경로 — 문구가 바뀌면 여기가 red로 알린다).
+  printf '%s' "$out" | grep -qF '읽을 수 없는 대상'
   run grep -q '^SCAN: check-host-ports:' <<<"$out"
   [ "$status" -ne 0 ]
 }
