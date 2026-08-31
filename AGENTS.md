@@ -160,6 +160,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 인용하지 않은 heredoc 안의 주석에 백틱을 쓰면 그 명령이 **실행되고** 주석이 잘려 나간다 — shellcheck는 그걸 "style"로 부른다
 - 프로브는 호출이 아니다 — `command -v X`와 미평가 라벨이 X의 증인 노릇을 해서 mirrored 선언이 자기 자신을 증명한다
 - actor 가드는 대소문자를 구별한다 — GitHub login은 구별하지 않는데, 그 어긋남을 밟는 테스트가 0건이다
+- `grep -q`의 조기 종료가 pipefail 아래에서 writer를 SIGPIPE로 죽인다 — 매치가 있었는데 141이 거짓 FAIL이 된다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 
