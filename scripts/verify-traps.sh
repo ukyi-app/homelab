@@ -13,6 +13,14 @@ set -euo pipefail
 guard_init verify-traps
 cd "$ROOT"
 
+# ⚠️ 이 파일의 멤버십 검사는 전부 `grep -Fqx -- "$x" <<<"$list"`다. **`printf … | grep -q`로 쓰지 마라.**
+#    `grep -q`는 첫 매치에서 즉시 종료하는데, 그때 writer(bash printf 빌트인)가 아직 쓸 것이 남아 있으면
+#    SIGPIPE로 죽고 `set -o pipefail`이 그 141을 파이프라인 rc로 채택한다 — **매치가 있었는데 FAIL**이 된다.
+#    writer가 얼마나 썼는지는 스케줄링에 달려 있어 부하가 높을수록 실패율이 오른다(CI 실측: 러너가
+#    bats 스위트와 발화 e2e 8건을 한 스텝에서 병렬로 돌리는 창에서 발현. 로컬 재현: CPU 부하 아래
+#    30회 중 22회 red · 무부하 20회 전건 green · 최소 재현은 10000줄에 첫 줄 매치로 rc=141 직접 관측).
+#    herestring은 임시 파일을 seek 가능한 fd로 붙여 파이프 자체가 없으므로 이 레이스가 원리적으로 없다.
+
 take_floors "verify-traps:index verify-traps:ledger" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 
@@ -80,7 +88,7 @@ while IFS= read -r row; do
   hit=0
   while IFS= read -r g; do
     [ -n "$g" ] || continue
-    printf '%s\n' "$detail_guards" | grep -Fqx -- "$g" && { hit=1; break; }
+    grep -Fqx -- "$g" <<<"$detail_guards" && { hit=1; break; }
   done <<EOF
 $guards
 EOF
@@ -121,14 +129,14 @@ fi
 
 while IFS= read -r h; do
   [ -n "$h" ] || continue
-  printf '%s\n' "$index_lines" | grep -Fqx -- "$h" || {
+  grep -Fqx -- "$h" <<<"$index_lines" || {
     echo "FAIL: SSOT 헤드라인이 AGENTS 인덱스에 없다(완전 일치 아님): $h"
     echo "      → AGENTS.md 「라이브에서 검증된 함정」절에 **같은 텍스트로** 한 줄 추가하라(꼬리를 덧붙이지 말 것)."
     fail=1; }
 done <<< "$detail_heads"
 while IFS= read -r l; do
   [ -n "$l" ] || continue
-  printf '%s\n' "$detail_heads" | grep -Fqx -- "$l" || {
+  grep -Fqx -- "$l" <<<"$detail_heads" || {
     echo "FAIL: AGENTS 인덱스 줄이 SSOT 섹션 헤드라인과 다르다(완전 일치 아님): $l"
     echo "      → traps-detail.md의 '### ' 헤드라인을 이 텍스트와 같게 하라(꼬리가 정보를 담으면 SSOT를 늘린다)."
     fail=1; }
