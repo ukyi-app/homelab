@@ -164,12 +164,29 @@ setup() {
   grep -q 'kube_pod_status_reason{reason="Evicted"}' "$C"     # PodEvicted 메트릭(honor_labels로 실제 ns)
 }
 
-@test "leading OOM alert uses working_set not max_usage (reclaimable page-cache trap)" {
+@test "leading OOM alert measures unreclaimable memory, not working_set (page-cache contamination)" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
   grep -q 'alert: ContainerMemoryNearLimit' "$C"
-  grep -q 'container_memory_working_set_bytes' "$C"
-  # max_usage는 reclaimable page cache를 포함해 hostPath 로그파드에서 limit까지 차는 오발화 함정 — 회귀 금지.
-  run grep -q 'container_memory_max_usage_bytes' "$C"; [ "$status" -eq 1 ]
+  # ⚠️ **expr만** 뽑아 본다 — 파일 전체를 grep하면 주석에 적힌 메트릭 이름이 단언을 만족시킨다
+  #    (이 레포의 「규약을 설명한 파일이 그 규약에서 면제된다」 클래스). 아래 부재 단언 둘이 특히 그렇다.
+  E="$BATS_TEST_TMPDIR/nearlimit-expr.txt"
+  yq -e '.data["core.yaml"]' "$C" | yq '.groups[].rules[] | select(.alert=="ContainerMemoryNearLimit") | .expr' > "$E"
+  [ -s "$E" ]
+  grep -q 'container_memory_usage_bytes' "$E"
+  grep -q 'container_memory_total_inactive_file_bytes' "$E"
+  grep -q 'container_memory_total_active_file_bytes' "$E"
+  # ⚠️ 이 알림은 **회수 불가 메모리**(anon+shmem+slab)를 재야 한다. 금지된 분자가 셋이다:
+  #  - working_set = memory.current − inactive_file 이라 active_file(활성 clean page cache)을 싣는다.
+  #    라이브 위양성(2026-08-31 glances: anon은 20일 불변인데 clean 캐시 charge만으로 88.3% 발화,
+  #    같은 시점 cgroup memory.events는 max=0·oom_kill=0으로 limit에 닿은 적조차 없었다).
+  #  - max_usage는 캐시를 통째로 싣는 더 나쁜 판이다.
+  #  - **cache 차감**은 반대편 오답이다 — cgroup v2의 memory.stat:file은 tmpfs·shared memory를 포함하고
+  #    이 호스트는 swap이 0이라 그 몫이 회수 불가인데도 빠진다(라이브 database/pg-1: shmem 38Mi가
+  #    사라져 7.6% → 3.9%). 파일 LRU 두 축만 빼야 shmem이 남는다.
+  #    발화 축의 증인은 tests/gates/vmalert-memory-nearlimit-firing-e2e.sh(L1·L2·L2b)다 — 여기는 정적 앵커.
+  run grep -q 'container_memory_working_set_bytes' "$E"; [ "$status" -eq 1 ]
+  run grep -q 'container_memory_max_usage_bytes' "$E"; [ "$status" -eq 1 ]
+  run grep -q 'container_memory_cache' "$E"; [ "$status" -eq 1 ]
 }
 
 @test "R6 ArgoCDOutOfSync has an absent() fail-closed guard like the other R-rules" {
