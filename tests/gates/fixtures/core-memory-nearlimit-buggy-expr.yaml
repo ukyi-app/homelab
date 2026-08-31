@@ -1,0 +1,31 @@
+# 픽스처(동결 — 절대 "고치지" 마라): core `ContainerMemoryNearLimit`의 **결함 expr** 스냅샷.
+# 분자가 container_memory_working_set_bytes다. 커널 정의상 working_set = memory.current − inactive_file
+# 이므로 **active_file(활성 clean page cache)이 분자에 그대로 실린다**. 즉 회수 가능한 캐시가 활성으로
+# 남아 있기만 하면 회수 불가 메모리가 전혀 늘지 않아도 지표가 임계를 넘는다.
+#
+# 라이브 발현(2026-08-31, glances): anon은 20일간 76.61 → 76.68Mi로 불변인데 file cache가 0.01 → 40.94Mi
+# (전량 clean — file_dirty=0)로 charge되자 working_set만 81.27 → 113.08Mi로 계단 상승해 128Mi limit의
+# 88.3%가 되어 발화했다. cgroup memory.events는 max=0·oom_kill=0으로 **limit에 한 번도 닿은 적이 없음**을
+# 증명하는데도 "OOM 임박"이 페이징됐다. 같은 지표로 traefik은 62.4%로 보이지만 회수 불가 메모리는
+# 11.9%에 불과하다(50%p 괴리).
+#
+# 용도: vmalert-memory-nearlimit-firing-e2e.sh의 L3(하네스 이빨 증명) — 캐시-바운드 픽스처를 먹이면
+# 이 expr은 **발화한다**. 그게 나와야 하네스가 이 버그를 실제로 감지할 능력이 있는 것이다(픽스처가
+# 룰에 실제로 닿았다는 양성 증거 → L1의 vacuous 통과 차단).
+#
+# ★ 이 픽스처가 **발화하지 않으면** 픽스처가 룰에 닿지 않았다는 뜻이고(캐시-바운드 형상이 재현되지
+#   않음), 그러면 배포 룰이 안 고쳐졌는데도 L1이 통과할 수 있다. 즉 이 파일은 하네스의 **거짓 GREEN
+#   방지 최종 보증**이다.
+# (배포 룰이 고쳐진 뒤에도 이 픽스처는 그대로 결함 상태로 남는다 — 하네스의 음성 기준선.)
+groups:
+  - name: core-fixture-buggy
+    rules:
+      - alert: ContainerMemoryNearLimit
+        expr: |
+          max by (namespace, pod, container) (container_memory_working_set_bytes{container!="", namespace!~"kube-system|kube-public|kube-node-lease"})
+            / max by (namespace, pod, container) (kube_pod_container_resource_limits{resource="memory"})
+            > 0.85
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "fixture(buggy) — 컨테이너 메모리 limit 근접"

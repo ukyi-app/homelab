@@ -55,21 +55,40 @@ data:
             annotations:
               summary: "OOMKill 발생: {{ $labels.namespace }}/{{ $labels.pod }}"
               description: "컨테이너가 메모리 limit에 도달했습니다 — 메모리 원장 예산을 확인하세요."
-          # 선제(leading) 메모리 경보 — PodOOMKilled(사후)의 짝. working_set이 limit의 85%를 10분 넘으면
-          # OOM 전에 발화(vector·homepage류 만성 과소 limit 조기 포착). working_set 기준 — page cache를
-          # 포함하는 max_usage는 hostPath 로그수집 파드에서 limit까지 차므로 금지(라이브 검증된 함정).
+          # 선제(leading) 메모리 경보 — PodOOMKilled(사후)의 짝. **회수 불가 메모리**가 limit의 85%를
+          # 10분 넘으면 OOM 전에 발화(vector·homepage류 만성 과소 limit 조기 포착).
+          # ⚠️ 분자는 usage에서 **파일 LRU 두 축만** 뺀 값이다. 두 오답이 있고 둘 다 라이브에서 겪었다:
+          #  ① **working_set을 쓰면 안 된다** — 커널 정의가 working_set = memory.current − inactive_file
+          #     이라 active_file(활성 clean page cache)이 분자에 그대로 실린다. 회수 가능한 캐시가 활성으로
+          #     남아 있기만 하면 실요구량이 전혀 늘지 않아도 임계를 넘는다. 라이브 확정(2026-08-31 glances):
+          #     anon이 20일간 76.6Mi로 불변인데 clean 캐시 40.9Mi가 charge되자 working_set만 81→113Mi로
+          #     계단 상승해 88.3%로 발화했고, 같은 시점 cgroup memory.events는 max=0·oom_kill=0으로 limit에
+          #     닿은 적조차 없었다. 옛 주석은 "max_usage만 피하면 page cache가 빠진다"고 적었는데 그 전제가
+          #     틀렸다 — working_set도 정도가 덜할 뿐 같은 오염이다.
+          #  ② **container_memory_cache를 빼도 안 된다** — 그것은 cgroup v2의 memory.stat:file이고
+          #     tmpfs·shared memory를 **포함**한다. 이 호스트는 swap이 0이라(infra/k3s-bootstrap/host-config.sh)
+          #     shmem은 회수될 수 없는데 통째로 빠진다. 라이브 database/pg-1(postgres shared_buffers)이
+          #     file 120Mi 중 shmem 38Mi를 그렇게 잃어 7.6%가 3.9%로 보고됐다 — shared memory로 limit을
+          #     채우는 컨테이너는 0%에 가깝게 평가돼 OOM 전까지 무성이 된다.
+          #  ⇒ total_inactive_file + total_active_file만 빼면 파일 LRU의 회수 가능분만 빠지고
+          #     anon + shmem + slab + kernel_stack이 남는다 — 그것이 커널이 회수할 수 없는 몫이고
+          #     OOM을 실제로 결정하는 것도 그쪽이다. (라이브 대조: glances 67.0% 침묵 유지 / postgres 7.6%.)
+          #    게이트: tests/gates/vmalert-memory-nearlimit-firing-e2e.sh
+          #           (L1=캐시 오염 락 · L2=anon 참양성 · L2b=shmem 참양성 · L3=하네스 이빨).
           # limit 미설정 컨테이너는 kube_pod_container_resource_limits가 없어 매칭 0 → 자동 제외.
           # system ns는 PodCrashLooping과 동일하게 제외. 발화 시 원장에서 해당 행 limit 상향을 검토.
           - alert: ContainerMemoryNearLimit
             expr: |
-              max by (namespace, pod, container) (container_memory_working_set_bytes{container!="", namespace!~"kube-system|kube-public|kube-node-lease"})
+              (max by (namespace, pod, container) (container_memory_usage_bytes{container!="", namespace!~"kube-system|kube-public|kube-node-lease"})
+                - max by (namespace, pod, container) (container_memory_total_inactive_file_bytes{container!="", namespace!~"kube-system|kube-public|kube-node-lease"})
+                - max by (namespace, pod, container) (container_memory_total_active_file_bytes{container!="", namespace!~"kube-system|kube-public|kube-node-lease"}))
                 / max by (namespace, pod, container) (kube_pod_container_resource_limits{resource="memory"})
                 > 0.85
             for: 10m
             labels: { severity: warning }
             annotations:
               summary: "컨테이너 메모리 limit 근접: {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }}"
-              description: "working_set이 메모리 limit의 85%를 10분 초과 — OOM 임박. 메모리 원장에서 해당 행 limit 상향을 검토하세요."
+              description: "회수 불가 메모리(anon+shmem+slab — 회수 가능한 파일 캐시 제외)가 메모리 limit의 85%를 10분 초과 — OOM 임박. 메모리 원장에서 해당 행 limit 상향을 검토하세요."
           # Notifier 자기관측 (R8 보강): Telegram 전송이 실패하면 발화.
           # ⚠️ Watchdog 커버리지 경계 — Watchdog는 "vmalert→Alertmanager 평가 파이프라인이
           #    살아있음"만 증명하고(healthchecks.io의 off-node dead-man's-switch가 그 부재를 페이징),
