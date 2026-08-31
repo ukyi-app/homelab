@@ -36,13 +36,39 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
   전부 회수해도 온보딩 1앱분(256)에 미달. 게다가 각 후보는 F25의 24h 관찰 윈도(다중일) 필요.
 - 오히려 **cnpg-operator(153/160=1.05x)·homepage(162/192=1.19x)·glances(112/128)·traefik(168/192)**은
   타이트(≥1.3x 미달) — 축소 금지, cnpg-operator는 near-OOM이라 관찰 필요(ContainerMemoryNearLimit이 backstop).
+  ⚠️ **이 네 판정은 무효다(2026-08-31).** 측정 지표인 working_set이 커널 정의상
+  `memory.current − inactive_file`이라 **active_file(활성 clean page cache)을 분자에 싣는다** — 회수 가능한
+  캐시가 실사용으로 계상된다(PR #564: 같은 결함이 ContainerMemoryNearLimit을 위양성 발화시켰고, 알림 분자는
+  `usage − total_inactive_file − total_active_file`로 교체됐다). 같은 분자로 14일 peak를 소급 재측정한 결과
+  (vmsingle retention 30d + cadvisor keep-list 부재로 과거 구간이 그대로 남아 있다):
+
+  | 워크로드 | 원장 판정 | limit | WS peak 14d | **A′ peak 14d** | **A′ 마진** |
+  |---|---|---|---|---|---|
+  | cnpg-operator | 1.05x "near-OOM" | 160 | 36.2 | **36.2** | **4.42x** |
+  | homepage | 1.19x | 192 | 159.4 | **95.4** | **2.01x** |
+  | glances | 1.14x | 128 | 113.6 | **86.3** | **1.48x** |
+  | traefik | 1.14x | 192 | 126.0 | **31.5** | **6.10x** |
+
+  ⇒ traefik·cnpg-operator는 판정이 **완전히 뒤집힌다**. homepage만 2.0x에서 간신히 살아남고, glances는
+  방향이 반대로 뒤집혀 오히려 **마진 부족**이다(1.48x — 축소 금지는 유지되나 근거가 "캐시 오염"이 아니라
+  "실제 여유 부족"으로 바뀐다).
+  ⚠️ **cnpg-operator는 지표 결함으로 설명되지 않는다** — WS와 A′가 36.2로 동일해 캐시 charge가 0이다.
+  2026-07-06의 153Mi는 오늘 working_set으로도 재현되지 않는다. 그 사이 기판이 OrbStack VM(6코어)에서
+  베어메탈 NUC(14코어)으로 통째로 바뀌었고, `infra/k3s-bootstrap/versions.env`가 "GOMAXPROCS 미핀 →
+  Go 프로세스 RSS 기준선이 조용히 달라진다. 핀할지 원장을 재기준선할지는 **미결정(D-e)**"을 기록해 뒀다.
+  ⇒ **이 표는 정정 근거일 뿐 새 limit이 아니다.** 행 값 회수는 (i) 마진 규약 확정과 (ii) 기판 재기준선(D-e)이
+  선행해야 한다 — 아래 「마진 규약 미정」 참조.
+- ⚠️ **마진 규약 미정(2026-08-31 확인).** 위 판정이 인용하는 `F23`·`F24`(peak×2.0x 마진)·`F25`(24h 관찰
+  윈도)의 **정의가 레포 어디에도 없다** — 전수 검색의 실 히트가 이 파일의 인용 3곳뿐이다. 게다가 같은
+  블록 안에서 임계가 **2.0x·1.5x·1.3x로 갈린다**. 이 규약이 확정되기 전에는 어떤 행도 "타이트/여유"로
+  재판정할 수 없다. 회수 작업의 1순위 선행 조건이다.
 - **owner 결정(2026-07-07, F23 게이트): (b) VM RAM 증설 확정** — right-size로 ≥256 불가 확정에 따라 VM
   증설이 온보딩 차단의 유일 실효 해소책으로 채택. 착수 = W2 병행 owner-local 태스크(VM 재시작 필요):
   ~~`infra/k3s-bootstrap/versions.env` ORB_MEMORY_MIB~~(베어메탈 이전으로 삭제) 11264→12288 + 이 원장 meta VM_ALLOCATABLE_MIB
   11264→12288·LIMIT_BUDGET_MIB 9216→10240(reserve 2048 유지). 반영 후 명목 잔여 ≈ 1028Mi(온보딩 차단 해소).
   ⚠️ config 변경은 VM resize와 **커플링** — VM 재시작 전 cap 선행 상향 시 page-cache/burst 리저브 침식이라,
   cap 상향은 VM 재시작 후에만 적용했다(resize와 동일 커밋). 동시 peak ≪ allocatable라 노드-OOM 안전.
-- **적용(2026-07-08): VM 12 GiB 증설 완료·라이브 검증.** `orb config set memory_mib 12288` + OrbStack 재기동 →
+- **적용(2026-07-08): VM 12 GiB 증설 완료·라이브 검증.** ⚠️ **아래 문단은 OrbStack VM 시절의 역사 기록이다 — 2026-08 베어메탈 NUC 이전으로 `orb config set`·"호스트 Mac RAM 16 GiB" 제약은 더 이상 적용되지 않는다(현행 기판은 `infra/k3s-bootstrap/`).** `orb config set memory_mib 12288` + OrbStack 재기동 →
   노드 capacity 11→12 GiB(12306288Ki)·allocatable 9738→10744 Mi 확인, 23/23 앱 Synced/Healthy 회복(root health
   롤업 지연 ~100s 후 자가 해소), 파드 낙오 0. cap 9216→10240 동반 상향(reserve 2048 유지) → 명목 잔여
   10240−9212 = 1028Mi(온보딩 차단 해소). ⚠️ **호스트 Mac RAM 16 GiB** — 12 GiB 할당은 macOS에 4 GiB만 남겨
@@ -59,7 +85,7 @@ runbooks/observability-bootstrap.md §5.)
 pod만 ~170Mi). (`edge`·`cnpg` limit 보수 버퍼는 2026-06-22 right-size에서 라이브 정합 회수 — 단 `edge`
 req는 176으로 stale하게 남아 있어 2026-07-06 실측(adguard 48 + cloudflared 48 = 96)으로 정정(−80 req);
 `cert-manager`· tailscale proxy는 무제한이었으나 같은 날 거버넌스 캡 신설해 예산에 편입.) 따라서 명목
-잔여(10240−8700 = 1540, VM 12 GiB 증설 + 앱 2개 철거 후)는 실 헤드룸을 과소표현한다
+잔여(10240−9020 = 1220)는 실 헤드룸을 과소표현한다
 (2026-06-22 실측 동시 peak ≈ 6586 ≪ allocatable ~10744 — 그 뒤 앱 철거로 더 내려갔다).
 더 많은 명목 헤드룸이 필요하면 (a) 상주 워크로드를 라이브 peak 실측에 맞게 right-size해 limit을 회수한다
 (2026-06-22 observability/argocd/edge/cnpg 808Mi 회수; postgres·최근 OOM 수정분은 보호. 2026-07 B10에서
@@ -120,7 +146,10 @@ steady만 보면 7배 과다로 보이지만 **peak가 판단 기준이다.** �
 | <!-- ledger:row --> cache-trip-mate | cache          |     96 |      160 |
 | <!-- ledger:row --> files          | files          |     32 |      128 |
 
-**합계:** req ≈ 4675 Mi · limit ≈ 8700 Mi (반드시 ≤ 10240 Mi 유지).
+**합계:** req 4707 Mi · limit 9020 Mi (반드시 ≤ 10240 Mi 유지).
+(⚠️ 이 줄은 쓰기 경로(`tools/lib/ledger-totals.ts`의 `replaceTotals` — create-app/provision-cache/teardown-app)
+만 갱신하고 **읽기 게이트는 검사하지 않는다**. 그래서 2026-08-14 observability 상향분이 반영되지 않은 채
+`4675/8700`으로 남아 CI가 계속 초록이었다(2026-08-31 정정). 손으로 행을 고치면 이 줄도 함께 고칠 것.)
 (`pg-tools`는 CronJob용 ops 이미지 — 일시적이므로 상주 워크로드 행이 없다. worker/web/console
 values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 앱은 온보딩 PR이 행을 추가한다.)
 
