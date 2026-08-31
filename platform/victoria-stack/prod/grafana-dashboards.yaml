@@ -1,3 +1,11 @@
+# Homelab 자원 대시보드. ⚠️ **limit 대비 비율 패널의 분자는 working_set이 아니다.**
+# 커널 정의상 working_set = memory.current − inactive_file 이라 active_file(활성 clean page cache)이
+# 분자에 실린다 — 회수 가능한 캐시가 실사용으로 계상돼 "누구를 줄일까"를 잘못 정렬한다(PR #564에서
+# 같은 결함이 ContainerMemoryNearLimit을 위양성 발화시켰고, 라이브 실측으로 traefik이 62.4% vs 11.9%로
+# 50%p 벌어졌다). 비율 패널은 `usage − total_inactive_file − total_active_file`(= anon+shmem+slab)을 쓴다.
+# 반면 **"Per-pod working set" 패널은 working_set 그대로가 맞다** — 그 패널은 비율이 아니라 총 사용량
+# 추이를 보여주고 제목이 지표를 정직하게 말한다. 두 패널을 나란히 두면 캐시 몫이 눈에 보인다.
+# 가드: tests/gates/test_grafana-dashboards.bats
 apiVersion: v1
 kind: ConfigMap
 metadata: { name: grafana-dashboard-resources }
@@ -23,10 +31,10 @@ data:
           "targets": [ { "expr": "sum by (namespace,pod) (container_memory_working_set_bytes{container!=\"\"}) / 1024 / 1024", "legendFormat": "{{namespace}}/{{pod}}" } ]
         },
         {
-          "type": "table", "title": "Pod memory vs limit (budget ledger view)",
+          "type": "table", "title": "Pod unreclaimable memory vs limit (budget ledger view)",
           "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
           "datasource": { "type": "prometheus", "uid": "VictoriaMetrics" },
-          "targets": [ { "expr": "sum by (namespace,pod) (container_memory_working_set_bytes{container!=\"\"}) / sum by (namespace,pod) (kube_pod_container_resource_limits{resource=\"memory\"})", "format": "table", "instant": true } ]
+          "targets": [ { "expr": "(sum by (namespace,pod) (container_memory_usage_bytes{container!=\"\"}) - sum by (namespace,pod) (container_memory_total_inactive_file_bytes{container!=\"\"}) - sum by (namespace,pod) (container_memory_total_active_file_bytes{container!=\"\"})) / sum by (namespace,pod) (kube_pod_container_resource_limits{resource=\"memory\"})", "format": "table", "instant": true } ]
         }
       ]
     }
