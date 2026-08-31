@@ -1,6 +1,10 @@
 #!/usr/bin/env bats
 # adguard *.home rewrite 셀프힐 리컨실러(메타갭 ① W2-A) 계약.
 # ⚠️ @test 이름은 영어만(bats dir-run 인코딩), 중간 단언은 [ ]/grep만(bash 3.2 [[ ]] 침묵통과).
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
+#    `run bash -c` 부재 단언 3곳은 비대상이다 — rc가 bash의 것이고, 파이프 종단 grep은 대상
+#    부재에도 빈 stdin을 읽어 rc 1을 낸다(SSOT ③-b) — 여기서 `-eq 1`은 아무것도 못 가른다.
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
@@ -18,7 +22,7 @@ setup() {
   # F7: 원자적 /control/rewrite/update로 stale→want 교체(delete→add 비원자성으로 rewrite 소실 회피).
   grep -q '/control/rewrite/update' "$F"
   # 무방비 delete 금지(링치핀을 빈 상태로 남기지 않는다).
-  run grep -q '/control/rewrite/delete' "$F"; [ "$status" -ne 0 ]
+  run grep -q '/control/rewrite/delete' "$F"; [ "$status" -eq 1 ]
 }
 
 @test "reconciler calls the update endpoint with PUT (AdGuard registers update as PUT, not POST)" {
@@ -52,8 +56,8 @@ setup() {
 
 @test "reconciler carries no telegram credential or direct send path (notify via fix metric only)" {
   # F13: DNS 변이 권한 파드에 발송 자격·인터넷 egress 금지 — 통지는 메트릭→vmalert→alertmanager.
-  run grep -qi 'sendMessage' "$F"; [ "$status" -ne 0 ]
-  run grep -q 'TELEGRAM' "$F"; [ "$status" -ne 0 ]
+  run grep -qi 'sendMessage' "$F"; [ "$status" -eq 1 ]
+  run grep -q 'TELEGRAM' "$F"; [ "$status" -eq 1 ]
   grep -q 'adguard_rewrite_last_fix_timestamp' "$F"
 }
 
@@ -78,8 +82,11 @@ setup() {
   [ "$(grep -cE 'CURL_(READ|WRITE)=.*connect-timeout 5' "$F")" = "2" ]
   [ "$(grep -cE 'CURL_(READ|WRITE)=.*max-time 20' "$F")" = "2" ]
   [ "$(grep -cE 'CURL_(READ|WRITE)=.*retry-connrefused' "$F")" = "2" ]
+  # ⚠️ `grep -c`의 무매치는 rc 1 + stdout "0"이다 — 구 `|| -ne 0`은 rc 2(파일 부재, stdout 없음)를
+  #    OR의 오른쪽으로 통과시켰다. rc와 카운트를 **둘 다** 못 박아야 그 갈래가 닫힌다.
   run grep -cE '^[[:space:]]*curl[[:space:]]' "$F"
-  [ "$output" = "0" ] || [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
+  [ "$output" = "0" ]
 }
 
 @test "read calls retry all transient errors within a widened bounded window" {
@@ -166,7 +173,7 @@ setup() {
 
 @test "reconciler does not mount telegram; uses SA token for apiserver (API-user, token required)" {
   # 리컨실러는 apiserver를 읽으므로 SA 토큰이 필요(automount:false 금지 — du-exporter와 반대).
-  run grep -q 'automountServiceAccountToken: false' "$F"; [ "$status" -ne 0 ]
+  run grep -q 'automountServiceAccountToken: false' "$F"; [ "$status" -eq 1 ]
   grep -q 'serviceAccountName: rewrite-reconciler' "$F"
 }
 
@@ -189,7 +196,7 @@ setup() {
   grep -q '8428' "$F"               # vmsingle import
   grep -q 'k8s-app: kube-dns' "$F"  # DNS
   # F13: 인터넷 egress 없음 — 실제 ipBlock 규칙(cidr: 0.0.0.0/0) 부재 단언(설명 주석의 언급은 허용).
-  run grep -qE 'cidr:[[:space:]]*[{]?[[:space:]]*0\.0\.0\.0/0' "$F"; [ "$status" -ne 0 ]
+  run grep -qE 'cidr:[[:space:]]*[{]?[[:space:]]*0\.0\.0\.0/0' "$F"; [ "$status" -eq 1 ]
 }
 
 @test "reconciler is wired into kustomization" {

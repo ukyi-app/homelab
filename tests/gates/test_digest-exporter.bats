@@ -65,7 +65,10 @@ load_budget() {
   # 올바른 픽스를 RED로 만든다. 맨 `! grep` 중간 부정은 bats false-green 함정 → run + status.
   run grep -qE 'max by \(app\) \([^)]*ghcr_latest_digest' <<<"$EXPR"
   [ "$status" -ne 0 ]
-  run grep -q 'image=~' "$R"; [ "$status" -ne 0 ]                         # bare-ID 라벨 selector 회귀 금지
+  # ⚠️ 여기만 **경로 피연산자**($R)다 — grep은 파일 부재에 rc=**2**를 내는데 `-ne 0`은 그것을 "매치 없음"과
+  #    구별하지 않는다(룰 파일이 사라져도 초록 = 부정-카운트 fail-open). 매치 없음은 정확히 rc=1이다.
+  #    (위 두 자리는 히어스트링이라 경로가 없어 이 함정의 대상이 아니다.)
+  run grep -q 'image=~' "$R"; [ "$status" -eq 1 ]                         # bare-ID 라벨 selector 회귀 금지
 }
 
 @test "drift rule's twin pod selectors stay byte-identical (unless RHS vs. existence guard)" {

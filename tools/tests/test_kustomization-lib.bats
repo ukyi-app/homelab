@@ -32,7 +32,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "callsites use kustomization lib (teardown removeResource, provision-cache addResource)" {
-  run grep -nE 'function deregister' "$ROOT/tools/teardown-resource.ts"; [ "$status" -ne 0 ]  # 인라인 deregister 제거
+  # rc 2(teardown-resource.ts 리네임)를 "인라인 deregister 제거됨"으로 읽지 않는다 — 아래 루프가 같은
+  # 파일을 양성으로 증언한다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
+  run grep -nE 'function deregister' "$ROOT/tools/teardown-resource.ts"; [ "$status" -eq 1 ]  # 인라인 deregister 제거
   for f in teardown-resource provision-cache; do
     run grep -q "lib/kustomization.ts" "$ROOT/tools/$f.ts"; [ "$status" -eq 0 ]
   done

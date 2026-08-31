@@ -5,6 +5,10 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   CHECK="$ROOT/scripts/check-app-deploy.sh"
+  # 비공허 바닥값 — 이 파일의 음성 fixture는 전부 `run bash "$CHECK"` + 비-0이라, 체커가 리네임되면
+  # bash가 127로 죽고 **전부 초록**이 된다(rc가 체커 규약이라 `-eq 1` 전환은 대상이 아니다 —
+  # 실재 단언만이 닫는 수단이다). cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
+  [ -f "$CHECK" ]
 }
 
 # 봉인본 원본 바이트 sha256 앞 16자 — 게이트 재산출 규약(create-app/update-secrets와 동일)

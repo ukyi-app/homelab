@@ -42,6 +42,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 K3S_RUN="${K3S_RUN:-sudo}"
 K3S_UNINSTALL="${K3S_UNINSTALL:-/usr/local/bin/k3s-uninstall.sh}"
 RANCHER_DIR=/var/lib/rancher
+# versions.env 단일 값 리더. **직접 실행**한다(`bash <경로>`가 아니다) — 실행 비트가 계약이라
+# 644로 떨어지면 아래 `[ -x ]`가 먼저 fail-loud한다.
+VERSIONS_READ="$REPO_ROOT/infra/k3s-bootstrap/versions-read.sh"
 
 fail() { echo "DESTROY ABORT: $*" >&2; exit 1; }
 
@@ -50,11 +53,21 @@ fail() { echo "DESTROY ABORT: $*" >&2; exit 1; }
   || fail "DR_DRILL_DESTROY_CONFIRM=1 없이는 파괴하지 않는다. 이 스크립트는 노드를 전손시킨다(k3s-uninstall.sh + ${RANCHER_DIR} 삭제 = standard 클래스 PV 전량 소멸, 복구 불가). 의도했다면: DR_DRILL_DESTROY_CONFIRM=1 $0"
 
 # ── (2) bulk 국면 A(D4 한시) 거부 게이트 ───────────────────────────────────────────────────
-# ⚠️ 파생 방식은 dr-drill.sh와 같다: versions.env를 **source하지 않고** sed로 그 한 값만 읽는다.
-#    source하면 그 파일의 다른 export가 이 셸에 새어 들어오고, 파괴 직전 스크립트가 자기 환경을
-#    남의 파일에 맡기게 된다.
-_bulk_window="$(sed -n 's/^export BULK_MIGRATION_WINDOW_UNTIL="\(.*\)"$/\1/p' \
-  "$REPO_ROOT/infra/k3s-bootstrap/versions.env" 2>/dev/null || true)"
+# ⚠️ 파생 방식은 dr-drill.sh와 같다: versions.env를 **source하지 않는다.** source하면 그 파일의
+#    다른 export가 이 셸에 새어 들어오고, 파괴 직전 스크립트가 자기 환경을 남의 파일에 맡기게 된다.
+# ⚠️ **옛 sed 한 줄은 여기서 fail-open이었다.** `sed -n 's/^export KEY="\(.*\)"$/\1/p' … || true`는
+#    파일 부재 · 키 부재 · 줄 포맷 변경을 **전부 빈 문자열로 접었고**, 아래 `[ -n ]`이 그 셋을 모두
+#    "국면 B — 파괴해도 좋다"로 읽었다. 실측(2026-08-29, argv 기록기 픽스처 · findmnt이 국면 B 응답):
+#    키 부재 · `export …UNTIL=2026-12-31`(따옴표 없음) · `export …UNTIL = "…"`(등호 공백) 셋 다
+#    **rc 0으로 `rm -rf ${RANCHER_DIR}`까지 완주했다** — 창이 열려 있다고 선언돼 있어도 그랬다.
+#    파일 부재만 거부됐는데, 그것은 국면 A 게이트가 아니라 아래 (2b)의 형제 키 `BULK_STORAGE_PATH`가
+#    같은 sed로 실패해 잡은 것이다(우연이다 — 한 파일 안의 그 비대칭이 티켓 07의 병소였다).
+#    리더는 그 셋을 rc 1(판정 불가)로 내고 **선언된 빈 값만** rc 0으로 통과시킨다.
+[ -x "$VERSIONS_READ" ] \
+  || fail "versions.env 리더가 실행 가능하지 않다: ${VERSIONS_READ}. 부재/비실행은 '국면 B'가 아니라 판정 불가다."
+if ! _bulk_window="$("$VERSIONS_READ" BULK_MIGRATION_WINDOW_UNTIL)"; then
+  fail "versions.env에서 BULK_MIGRATION_WINDOW_UNTIL을 판정하지 못했다(사유는 바로 위 versions-read 줄) — 국면 A인지 모른 채로는 파괴하지 않는다. 판정 불가는 '창이 비었다'가 아니다."
+fi
 if [ -n "$_bulk_window" ]; then
   echo "DESTROY ABORT: 국면 A(D4 한시) 진행 중 — bulk가 파괴 대상과 같은 디스크에 있다(만료 ${_bulk_window})." >&2
   echo "               이 파괴는 bulk의 사용자 데이터(files-data)를 함께 지운다 — git+R2+age로 재구축 불가다." >&2
@@ -70,9 +83,12 @@ fi
 #    소스는 파괴 대상 트리 안이므로 아래 `rm -rf`가 files-data(git+R2+age로 재구축 불가)를 지운다.
 #    (2)만 있으면 그 사고를 잡는 가드가 레포 전체에 0건이다.
 # ⚠️ `findmnt` 부재는 '안전'이 아니라 '판정 불가'다 — (3)과 같은 이유로 fail-loud.
-_bulk_path="$(sed -n 's/^export BULK_STORAGE_PATH="\(.*\)"$/\1/p' \
-  "$REPO_ROOT/infra/k3s-bootstrap/versions.env" 2>/dev/null || true)"
-[ -n "$_bulk_path" ] || fail "versions.env에서 BULK_STORAGE_PATH를 파생하지 못했다 — bulk가 파괴 대상 안에 있는지 판정할 수 없다."
+if ! _bulk_path="$("$VERSIONS_READ" BULK_STORAGE_PATH)"; then
+  fail "versions.env에서 BULK_STORAGE_PATH를 판정하지 못했다(사유는 바로 위 versions-read 줄) — bulk가 파괴 대상 안에 있는지 판정할 수 없다."
+fi
+# ⚠️ 리더의 rc와 **이 `[ -n ]`은 다른 것을 본다.** rc는 "선언을 읽었는가", 여기는 "그 값이 경로로
+#    쓸 수 있는가"다. `BULK_STORAGE_PATH=""`는 정본 선언이라 rc 0이지만 findmnt에 줄 경로가 아니다.
+[ -n "$_bulk_path" ] || fail "versions.env의 BULK_STORAGE_PATH가 빈 값으로 선언돼 있다 — bulk가 파괴 대상 안에 있는지 판정할 수 없다."
 $K3S_RUN command -v findmnt >/dev/null 2>&1 \
   || fail "findmnt가 없다 — bulk의 bind 소스를 확인할 수 없다. 부재는 '안전'이 아니라 '판정 불가'다(util-linux 설치 후 재시도)."
 # bind 마운트의 SOURCE는 `<device>[<subpath>]` 꼴이다. subpath가 파괴 대상 트리 안이면 거부한다.

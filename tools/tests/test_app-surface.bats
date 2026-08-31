@@ -35,7 +35,7 @@ if (mode === "rel") {
   console.log("bindings=" + r.bindings);
   console.log("kustomization=" + r.kustomization);
   console.log("activation=" + r.activation);
-  console.log("sealed=" + r.sealed("demo-secrets.sealed.yaml"));
+  console.log("sealed=" + r.sealed);
   const a = appPaths("/r", app);
   console.log("abs=" + a.values);
 } else if (mode === "write-full") {
@@ -43,7 +43,7 @@ if (mode === "rel") {
     values: { image: { repo: "ghcr.io/ukyi-app/demo", tag: "sha-0000000" }, kind: "web" },
     sourceRepo: "ukyi-app/demo",
     bindings: { autoDeploy: true },
-    sealed: { file: "demo-secrets.sealed.yaml", bytes: "sealed-bytes\n" },
+    sealed: { bytes: "sealed-bytes\n" },
     // 콜백형 — 다른 표면 **기록 후** 평가된다(마커 해시가 디스크 실측이어야 하는 create-app 계약).
     // 평가 시점의 values 실재 여부를 마커에 실어 그 순서를 직접 잰다.
     activation: () => ({ app: "demo", valuesOnDisk: existsSync(appPaths(root, app).values) }),
@@ -53,6 +53,8 @@ if (mode === "rel") {
   // 실측: 디스크에 생긴 파일 집합 == 선언된 표면 집합(한쪽에만 추가하면 여기서 갈린다)
   const actual = walk(appPaths(root, app).dir).map((p) => path.relative(root, p)).sort();
   console.log("actual=" + actual.join(","));
+  // kustomization resources 항목 — 경로 SSOT의 basename에서 나온다(콜사이트가 이름을 못 고른다).
+  console.log("kust-resource=" + String((readFileSync(appPaths(root, app).kustomization, "utf8").match(/^ *- (.+)$/m) || [])[1]));
 } else if (mode === "write-min") {
   // 선택 표면(sealed·activation) 없는 최소형 — kustomization은 sealed 유무와 무관하게 항상 실재
   // (appset kustomize 렌더 전제)하고, resources는 sealed 있을 때만 실린다.
@@ -66,7 +68,7 @@ if (mode === "rel") {
 } else if (mode === "remove") {
   writeAppSurface(root, app, {
     values: { kind: "web" }, sourceRepo: "ukyi-app/demo", bindings: { autoDeploy: true },
-    sealed: { file: "demo-secrets.sealed.yaml", bytes: "b\n" }, activation: { app: "demo" },
+    sealed: { bytes: "b\n" }, activation: { app: "demo" },
   });
   const removed = removeAppSurface(root, app);
   const again = removeAppSurface(root, app); // 멱등 — 이미 없어도 조용
@@ -110,6 +112,8 @@ EOF
   echo "$w" | grep -q 'apps/demo/deploy/prod/.bindings.json'
   echo "$w" | grep -q 'apps/demo/deploy/prod/kustomization.yaml'
   echo "$w" | grep -q 'apps/demo/deploy/prod/demo-secrets.sealed.yaml'
+  # kustomization resources 항목은 기록 경로와 같은 값에서 나온다 — 콜사이트가 파일명을 못 넘긴다.
+  echo "$output" | grep -q '^kust-resource=demo-secrets.sealed.yaml$'
   echo "$w" | grep -q 'apps/demo/deploy/prod/.activation'
   # 콜백은 다른 표면 기록 **뒤**에 평가됐다 — 평가 시점에 values가 이미 디스크에 있었다.
   echo "$output" | grep -q '^marker-values-on-disk=true$'

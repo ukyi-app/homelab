@@ -29,7 +29,10 @@ setup() {
   grep -q 'alert: PostgresClusterDown' "$C"          # 단일 인스턴스 pg 생존 페이징
   grep -q 'cnpg_collector_up' "$C"                    # pg-1에서 직접 scrape돼 라벨 정확(KSM clobbering 회피)
   grep -q 'absent(cnpg_collector_up' "$C"             # 스크레이프 단절 fail-closed 가드
-  run grep -q 'max(kube_pod_status_ready' "$C"; [ "$status" -ne 0 ]  # expr 회귀 금지(주석 언급은 허용)
+  # ⚠️ 부재 단언은 `-ne 0`이 아니라 `-eq 1`이다 — grep은 대상 파일 부재/읽기불가에 rc **2**를 내는데
+  #    `-ne 0`은 그것을 무매치와 구별하지 않는다(경로가 사라지면 통과 = vacuous green). 무매치는 정확히 rc 1.
+  #    이 파일의 아래 부재 단언 전부가 같은 사유다.
+  run grep -q 'max(kube_pod_status_ready' "$C"; [ "$status" -eq 1 ]  # expr 회귀 금지(주석 언급은 허용)
   grep -q 'alert: PodCrashLooping' "$C"
   # PodCrashLooping은 블랙리스트(namespace!~)여야 신규 PSA ns(cache·sealed-secrets)를 자동 포함 —
   # 화이트리스트 회귀 금지(restarts_total에 namespace!~ 사용 확인).
@@ -46,7 +49,7 @@ setup() {
 @test "disk-fill alerts carry a disk label so a critical inhibits the matching warning" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   # bulk-ssd 알림은 제거됨(virtiofs 집계라 측정 불가 — 죽은 알림). 잔존 금지.
-  run grep -q 'disk: bulk-ssd' "$R"; [ "$status" -ne 0 ]
+  run grep -q 'disk: bulk-ssd' "$R"; [ "$status" -eq 1 ]
   # standard 디스크는 warning(StandardSSDWarning/Trend)+critical(StandardSSDFilling)이 같은 disk 라벨을
   # 공유해 disk-scoped inhibit(critical→warning)가 동작해야 한다.
   [ "$(grep -c 'disk: standard' "$R")" -ge 2 ]
@@ -58,7 +61,7 @@ setup() {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   # hostPath PV라 kubelet_volume_stats_*가 원천 부재 — 그 메트릭 의존 룰 금지(불가능한 접근 재도입 차단).
   # expr 형태(메트릭 접미사 '_')만 매치 — 주석의 설명 언급은 허용(core.yaml 선례와 동일).
-  run grep -q 'kubelet_volume_stats_' "$R"; [ "$status" -ne 0 ]
+  run grep -q 'kubelet_volume_stats_' "$R"; [ "$status" -eq 1 ]
   # 루트 fs 3티어: 조기 warning + critical + predict_linear 추세.
   grep -q 'alert: StandardSSDWarning' "$R"
   grep -q 'alert: StandardSSDFilling' "$R"
@@ -74,7 +77,7 @@ setup() {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
   run grep -cE 'alert: (NodeRootFs|RootDisk|RootFsFull|NodeDiskFull|DiskFull)' "$R"
-  [ "$output" = "0" ] || [ "$status" -ne 0 ]
+  [ "$output" = "0" ] || [ "$status" -eq 1 ]
   # 기존 3룰 존치(계약 검토 결론 = contract-complete: 2단 절대임계 + predict_linear 추세, 단일 series).
   grep -q 'alert: StandardSSDWarning' "$R"
   grep -q 'alert: StandardSSDFilling' "$R"
@@ -94,7 +97,7 @@ setup() {
   grep -q 'cnpg_collector_pg_wal{value="volume_size"}' "$R"
   grep -q 'disk: pgwal' "$R"
   # deprecated 백업/아카이브 in-tree 메트릭(plugin 환경 0/부재) 재도입 금지(인시던트 #13/#14).
-  run grep -qE 'cnpg_collector_last_(available_backup|archived|failed_archive)' "$R"; [ "$status" -ne 0 ]
+  run grep -qE 'cnpg_collector_last_(available_backup|archived|failed_archive)' "$R"; [ "$status" -eq 1 ]
 }
 
 @test "observability self-monitoring alerts defined and 4 components self-scraped" {
@@ -166,7 +169,7 @@ setup() {
   grep -q 'alert: ContainerMemoryNearLimit' "$C"
   grep -q 'container_memory_working_set_bytes' "$C"
   # max_usage는 reclaimable page cache를 포함해 hostPath 로그파드에서 limit까지 차는 오발화 함정 — 회귀 금지.
-  run grep -q 'container_memory_max_usage_bytes' "$C"; [ "$status" -ne 0 ]
+  run grep -q 'container_memory_max_usage_bytes' "$C"; [ "$status" -eq 1 ]
 }
 
 @test "R6 ArgoCDOutOfSync has an absent() fail-closed guard like the other R-rules" {

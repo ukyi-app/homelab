@@ -351,6 +351,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   콜사이트가 소유한다 — **정책이 콜사이트마다 갈리기** 때문이다(poll-ghcr는 null을 refuse로,
   bump-tag는 exit 2로). 콜사이트마다 정규식이 갈리는 오배포 표면을 SSOT로 없앤다.
   소비자: `poll-ghcr`·`bump-tag`·`create-app`.
+- **`lib/digest-exporter.ts`** — digest-exporter `APPS`(공백 구분 `name=ref` 목록) 편집 커널.
+  **APPS 리스트 문법 전부**를 소유한다: 항목 경계(공백) · 이름 키(`=` 앞) · ref 표기(`<repo>:<tag>`,
+  태그 경계는 마지막 `/` 뒤의 `:`) · 존재 판정 · 코드유닛 정렬(로케일 무관 — `LC_ALL=C sort`와 동형).
+  `addApp`/`removeApp`/`retagApp`은 value 라인 매치 0에서 **throw**(fail-loud)하고, `hasApp`은 항목
+  부재(`false`)를 포맷 드리프트(throw)와 가른다 — 손 정규식은 그 둘을 같은 무성 skip으로 뭉갠다.
+  소비자: `create-app`(추가)·`teardown-app`(제거)·`bump-tag`(태그 이동).
 - **`lib/sealed-contract.ts`** — 봉인 계약 커널(`readSealed(raw, app)` 단일 함수). 6검증(kind·
   namespace=prod·name=`<app>-secrets`·encryptedData 비었음·키 UPPER_SNAKE·**strict scope**)의 **판정과
   에러 문구** + checksum + **디스크에 쓸 바이트**를 소유한다. strict scope = scope 확대 어노테이션

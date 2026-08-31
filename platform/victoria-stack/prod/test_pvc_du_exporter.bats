@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 # per-PVC 용량 가시화 du exporter(메타갭 ③ W1-A)의 계약을 강제한다.
 # (중간 단언은 [ ]/grep 단순 명령으로 — bash 3.2에서 [[ ]] 실패 침묵 통과 회피)
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일(매니페스트 또는 캡처 픽스처)이라
+#    그것으로 닫힌다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 
 f=platform/victoria-stack/prod/pvc-du-exporter.yaml
 
@@ -35,13 +37,16 @@ setup() {
 @test "du exporter carries no OrbStack/virtiofs binding (bare metal has no /mnt/mac)" {
   grep -q 'hostPath' "$F"                    # 양성 대조 — 대상이 실재하고 grep이 동작한다
   run grep -nE '^[^#]*(/mnt/mac|virtiofs)' "$F"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "du exporter never references the stale pre-dual-provisioner path" {
   # 구경로(/var/lib/rancher/k3s/storage) 회귀 시 W3 bulk 신호가 침묵 — 부정 단언
+  # ⚠️ 이 @test는 부재 단언 하나뿐이라 형제 증인이 없다 — 예전 `-ne 0`에서는 pvc-du-exporter.yaml을
+  #    리네임해도 초록이었다(2026-08-29 격리 트리 실측: 12개 중 생존 2건 — 이 @test와, 피연산자가
+  #    kustomization.yaml인 @test 10. 매니페스트를 읽는 나머지 열 중에서는 이 @test가 유일했다).
   run grep -q '/var/lib/rancher/k3s/storage' "$F"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "du exporter fails loud per-tier on empty scan and emits tier capacity metrics" {
@@ -80,7 +85,7 @@ setup() {
   grep -q 'app.kubernetes.io/name: vmsingle' "$F"   # vmsingle:8428 허용
   grep -q 'k8s-app: kube-dns' "$F"                  # DNS 허용
   run grep -q '0.0.0.0/0' "$F"                      # 인터넷 egress 부정 단언
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "du exporter image is a repo digest-pinned image (no fresh third-party)" {
@@ -142,8 +147,12 @@ setup() {
   rm -rf "${FX:?}/kp"; mkdir -p "$FX/kp"
   CAPTURE="$FX/cap2" PATH="$FX/bin:$PATH" run bash "$FX/script.sh"
   [ "$status" -eq 0 ]
+  # ⚠️ 피연산자가 매니페스트가 아니라 **스텁이 쓴 캡처 파일**이다 — `-ne 0`이면 push가 통째로
+  #    죽어 cap2가 없는 경우도 "크기 미방출"로 읽혀 이 줄이 통과했다. 다음 줄(matches 0) 덕에
+  #    @test 자체는 red였지만 진단이 한 줄 밀려 엉뚱한 곳을 가리켰다 — 2026-08-29 실측: 지문 0건일
+  #    때 push를 건너뛰는 회귀를 심으면 전환 전엔 다음 줄이 rc 2로 죽고, 전환 후엔 여기가 red다.
   run grep -q 'grafana_data_dir_size_bytes' "$FX/cap2"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   grep -q '^grafana_du_fingerprint_matches 0$' "$FX/cap2"
   # 시나리오 3: 지문 2건 → **push는 나가고**(1차 신호·하트비트 보존 — 01 리뷰 M1) 그 뒤 fail-loud.
   # 이 단언 쌍이 그 설계 결정을 락한다 — 순서를 되돌리면 여기가 red로 반대한다(L4).
@@ -151,7 +160,7 @@ setup() {
   printf 'db' > "$FX/kp/uid1/volumes/kubernetes.io~empty-dir/data/grafana.db"
   printf 'db' > "$FX/kp/uid2/volumes/kubernetes.io~empty-dir/data/grafana.db"
   CAPTURE="$FX/cap3" PATH="$FX/bin:$PATH" run bash "$FX/script.sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -ne 0 ]   # 부재 단언이 아니라 스크립트의 fail-loud rc — `-eq 1`로 좁히지 않는다(bash rc는 그 스크립트의 규약)
   echo "$output" | grep -q '지문'
   grep -q 'pvc_du_last_success_timestamp' "$FX/cap3"
   grep -q '^grafana_du_fingerprint_matches 2$' "$FX/cap3"

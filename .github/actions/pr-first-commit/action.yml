@@ -36,6 +36,30 @@ runs:
         set -euo pipefail
         git config user.name "ukyi-homelab-writer[bot]"
         git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
+        # ── 스테이징 완전성 판정 [staged-completeness] ───────────────────────────────────────
+        # 🔴 2026-08-18 실사고: create-app.ts는 digest-exporter.yaml에도 쓰는데 그 경로가 add-paths
+        #    천장 밖이라 아래 `git add`가 스테이징하지 않았고, 그 수정이 커밋에서 **조용히 유실**된 채
+        #    PR이 부분 표면으로 열렸다(근거: _create-app.yaml의 add-paths 주석). add·commit·PR이 전부
+        #    성공하므로 어떤 종료코드도 그 유실을 말하지 않는다.
+        # add-paths는 **상한으로 남긴다**(오염된 도구가 커밋할 수 있는 범위를 묶는 설계) — 여기서 재는
+        # 것은 천장의 열거가 아니라 **잔여물**이다: 워킹트리 변경 중 천장 밖에 남는 것이 있으면 거부한다.
+        # 포함 판정은 손으로 쓰지 않고 `:(exclude)` pathspec으로 **git에게 시킨다** — 바로 아래
+        # `git add $ADD_PATHS`와 **같은 매처**라 두 번째 구현이 생기지 않는다(rename·따옴표 경로·
+        # 디렉토리 의미론이 자동으로 일치한다. 포세린 줄을 고정 오프셋으로 자르는 형태는
+        # `R  a -> b`와 따옴표 경로에서 깨진다 — cf. tools/lib/secrets.ts:74-79).
+        # 판정은 반드시 `git add` **앞**이다 — 뒤에 두면 pathspec 미매치 실패와 구별할 수 없다.
+        excl=""
+        # shellcheck disable=SC2086  # ADD_PATHS는 공백 구분 다중 pathspec — 의도적 분할(값은 검증된 경로)
+        for p in $ADD_PATHS; do excl="$excl :(exclude)$p"; done
+        # shellcheck disable=SC2086  # excl은 pathspec 다중 인자 — 의도적 분할
+        residue="$(git status --porcelain --untracked-files=all -- . $excl)"
+        if [ -n "$residue" ]; then
+          echo "::error::add-paths 천장 밖 변경이 남는다 — 이대로 커밋하면 유실된다. 그 경로를 add-paths에 넣거나 도구가 /tmp에 쓰게 하라"
+          echo "$residue"
+          echo "선언된 add-paths: $ADD_PATHS"
+          exit 1
+        fi
+        # ── [/staged-completeness] ───────────────────────────────────────────────────────────
         # shellcheck disable=SC2086  # ADD_PATHS는 공백 구분 다중 pathspec — 의도적 분할(값은 검증된 경로)
         git add $ADD_PATHS
         # 신규(미추적) 파일은 `git diff --quiet`가 항상 0이므로 staged diff로 검사(첫 시크릿 추가도 감지)

@@ -33,8 +33,20 @@ CACHE="$BATS_TEST_DIRNAME/../../infra/cloudflare/cache.tf"
   # ⚠️ codex restale2 F2: Cloudflare `matches`는 **infix 연산자**다 — `http.host matches "..."`(괄호 없음).
   # `matches(`만 막으면 infix 형태가 게이트를 통과해 apply 400. 주석(인라인 포함)을 sed로 제거한 뒤 `\bmatches\b`
   # 토큰을 잡는다(라인 43의 'matches 미사용' 인라인 주석 false-positive 회피). starts_with()만 허용.
+  # 비공허 floor — 이 단언은 rc만으로 안 닫힌다: 파이프 끝 grep이 **stdin**을 읽으므로 두 피연산자가
+  # 사라져도 sed만 죽고 grep은 빈 입력에 rc 1을 낸다(= "matches 0건"과 "검사 대상 0건"이 같은 초록).
+  # 대상 실재를 먼저 못 박는다.
+  [ -s "$WAF" ]
+  [ -s "$CACHE" ]
   run sh -c "sed -E 's/#.*//' \"$WAF\" \"$CACHE\" | grep -nE '\\bmatches\\b'"
-  [ "$status" -ne 0 ]
+  # rc 2(정규식 오류 등)를 통과로 읽지 않는다 — grep 무매치는 정확히 rc 1이다.
+  [ "$status" -eq 1 ]
+  # 양성 대조 — 같은 sed|grep 체인이 이 도메인에서 사라질 리 없는 것(ruleset의 `expression =`)을
+  # 실제로 잡는가. 체인이 조용히 죽으면 위 단언이 공허해진다. 래칫이 아니다(현재 5건 — 규칙 1개
+  # 제거는 견디고, 피연산자 한쪽이 사라지면 red다).
+  run sh -c "sed -E 's/#.*//' \"$WAF\" \"$CACHE\" | grep -cE 'expression[[:space:]]*='"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 4 ]
 }
 
 @test "entitlement gate catches the infix 'http.host matches' form (negative fixture)" {

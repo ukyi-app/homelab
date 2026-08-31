@@ -80,8 +80,10 @@ EOF
   grep -q '"cmd":"kubeseal"' "$L"
   grep -q -- '--version' "$L"
   # ⚠️ 평문(stdin)은 원장에 절대 남지 않는다 — kubeseal 봉인 경로의 비밀 미기록 계약.
+  #    rc 2(원장 파일 미생성)를 "평문 미기록"으로 읽지 않는다 — 위 [ -f "$L" ]와 cmd 단언들이 원장의
+  #    실재·비공허를 증언한다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
   run grep -q 'SECRET-PLAINTEXT-7f3a' "$L"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "a broken ledger path never blocks execution (observation must not gate the run)" {

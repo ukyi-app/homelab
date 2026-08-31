@@ -30,8 +30,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 @test "cache-url provides no destructive surface (read-only tool)" {
   run bun "$ROOT/tools/cache-url.ts" --name sessions --flushall
   [ "$status" -ne 0 ]   # 알 수 없는 플래그 fail-closed
+  # ⚠️ 중첩 사각 — 위 `run bun`은 cache-url.ts가 사라져도 비-0이라, 이 줄까지 `-ne 0`이면 도구 파일
+  #    부재에 두 단언이 함께 통과했다(db-url과 같은 짝). 단일 파일 피연산자라 `-eq 1`이 닫는다.
+  #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
   run grep -iE "FLUSHALL|flushdb|del " "$ROOT/tools/cache-url.ts"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "cache-url without KUBECONFIG signals skip via the helper (exit 4, marker, no write)" {

@@ -87,6 +87,7 @@
       "local": [
         "scripts/check-doc-index.sh",
         "scripts/check-bats-accounting.sh",
+        "scripts/check-bats-style.sh",
         "scripts/check-app-deploy.sh",
         "scripts/check-app-netpol.sh",
         "scripts/check-image-pins.sh",

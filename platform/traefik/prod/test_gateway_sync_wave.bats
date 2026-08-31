@@ -14,6 +14,9 @@
 #    wave를 붙이며, 이 @test가 그 patch를 고정한다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 # ⚠️ 진단 메시지에 백틱을 쓰지 말 것 — 음성 @test가 $output을 재해석하는 관용구가 레포에 있다.
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
+#    `run sh -c` 파이프라인 자리는 비대상이다 — rc가 sh의 것이고 판정도 $output으로 한다.
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; D="$ROOT/platform/traefik/prod"; }
 
 wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annotation 부재 = ArgoCD 기본값 0)
@@ -49,7 +52,7 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
 @test "the vendored CRD bundle itself stays unedited (no hand-added wave annotation)" {
   # 번들에 손으로 wave를 박으면 재벤더링(curl) 때 조용히 사라진다 — patch 경로를 강제한다.
   run grep -qE 'argocd\.argoproj\.io/sync-wave' "$D/gateway-api-crds.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # 양성 대조 — 대상 0(파일이 비었거나 경로 오타)을 매치 0으로 오독하지 않는다.
   run grep -qE '^kind: CustomResourceDefinition' "$D/gateway-api-crds.yaml"
   [ "$status" -eq 0 ]
@@ -59,9 +62,9 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
   # wave 0 = Helm 차트가 내는 traefik Deployment/Service + Issuer/Certificate + KSOPS Secret.
   # 아래 단언들은 전부 이 '컨트롤러 = 0' 전제 위에 서 있다.
   run grep -qE 'argocd\.argoproj\.io/sync-wave' "$D/helmrelease.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run grep -qE 'argocd\.argoproj\.io/sync-wave' "$D/values-traefik.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # 양성 대조 — 두 파일이 실재하고 비어 있지 않다.
   run grep -qE '^kind: HelmChartInflationGenerator' "$D/helmrelease.yaml"
   [ "$status" -eq 0 ]
@@ -107,7 +110,7 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
   run grep -qE 'secretName: home-wildcard-tls' "$D/cert-issuer.yaml"
   [ "$status" -eq 0 ]
   run grep -qE 'argocd\.argoproj\.io/sync-wave' "$D/cert-issuer.yaml"
-  [ "$status" -ne 0 ] || { echo "cert-issuer.yaml에 sync-wave가 생겼다 — Gateway wave와의 관계를 다시 볼 것"; false; }
+  [ "$status" -eq 1 ] || { echo "cert-issuer.yaml에 sync-wave가 생겼거나 파일이 사라졌다 (rc=$status) — Gateway wave와의 관계를 다시 볼 것"; false; }
 }
 
 @test "the whoami smoke HTTPRoute attaches only after its Gateway is programmed" {

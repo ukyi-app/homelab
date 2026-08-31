@@ -1,5 +1,10 @@
 #!/usr/bin/env bats
 # DR drill 스크립트(R5)의 안전 불변식을 오프라인에서 강제한다 — 라이브 파괴 없이.
+#
+# ⚠️ grep 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 파일이라 그것으로 닫힌다.
+#    ⚠️ `run bash "$fx/scripts/dr-drill.sh"`의 `-ne 0`은 **비대상**이다 — 그 rc는 스크립트 자신의
+#       종료코드 규약이지 grep의 것이 아니다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 sh=scripts/dr-drill.sh
 
 @test "dr-drill exists, is executable, and passes shellcheck" {
@@ -21,11 +26,16 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   mkdir -p "$fx/scripts" "$fx/infra/k3s-bootstrap"
   cp "$sh" "$fx/scripts/dr-drill.sh"
   printf 'export BULK_MIGRATION_WINDOW_UNTIL="%s"\n' "$1" > "$fx/infra/k3s-bootstrap/versions.env"
+  # ⚠️ versions.env **와 리더**를 함께 재합성한다(리더는 자기 옆 versions.env를 기본 피연산자로
+  #    삼는다 — SCRIPT_DIR 관용구). 빠뜨리면 드릴이 '리더 비실행'으로 죽고, 아래 양성 대조가
+  #    "국면 A 거부가 안 났다"를 **엉뚱한 이유로** 만족해 조용히 vacuous해진다.
+  cp infra/k3s-bootstrap/versions-read.sh "$fx/infra/k3s-bootstrap/versions-read.sh"
   echo "$fx"
 }
 
 @test "dr-drill REFUSES to run while the phase-A bulk window is open" {
   fx="$(_drill_fixture 2026-12-31)"
+  [ -x "$fx/infra/k3s-bootstrap/versions-read.sh" ]     # 픽스처 무결성 — 리더가 없으면 아래가 다른 이유로 죽는다
   run bash "$fx/scripts/dr-drill.sh"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -qF -- 'DR ABORT: 국면 A'
@@ -35,9 +45,41 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
 @test "the phase-A refusal does NOT fire once the window is cleared (positive control)" {
   # 이게 없으면 '항상 거부하는' 가드도 위 @test를 통과한다.
   fx="$(_drill_fixture '')"
+  [ -x "$fx/infra/k3s-bootstrap/versions-read.sh" ]     # 픽스처 무결성 — 리더가 없으면 아래가 다른 이유로 죽는다
   run bash "$fx/scripts/dr-drill.sh"
   [ "$status" -ne 0 ]                       # 픽스처엔 sealing-key 게이트가 없어 어차피 죽는다
-  ! printf '%s' "$output" | grep -qF -- 'DR ABORT: 국면 A'
+  out="$output"                             # `run`이 $output을 덮으므로 먼저 붙잡는다
+  # ⚠️ 중간 부정(`! …`)은 bats가 침묵 통과시킨다(check-bats-style.sh) — `run` + rc로 쓴다.
+  #    ⚠️ 피연산자를 **위치 인자로 넘긴다**: `bash -c` 안에서 bats 지역 변수는 빈 문자열이라
+  #       grep이 0건으로 **항상** 통과한다(docs/traps-detail.md 「정적 증인의 두 함정」).
+  run bash -c 'printf "%s" "$1" | grep -qF -- "DR ABORT: 국면 A"' _ "$out"
+  [ "$status" -eq 1 ]
+  # ⚠️ 위 부정만으로는 "국면 A 게이트를 **지났다**"가 증명되지 않는다 — 리더 판정에서 먼저 죽어도
+  #    같은 초록이 난다. 그래서 판정 불가 진단이 **없음**을 함께 건다(선언된 빈 값은 rc 0이어야 한다).
+  run bash -c 'printf "%s" "$1" | grep -qF -- "BULK_MIGRATION_WINDOW_UNTIL을 판정하지 못했다"' _ "$out"
+  [ "$status" -eq 1 ]
+  # 양성 대조 — 진단이 실제로 흘렀다. 하네스가 빈 출력을 넘기면 위 두 부재는 공허하게 참이 된다.
+  run bash -c 'printf "%s" "$1" | grep -q .' _ "$out"
+  [ "$status" -eq 0 ]
+}
+
+@test "dr-drill REFUSES when the phase-A window is UNDECIDABLE (not just when it is open)" {
+  # ⚠️ 옛 sed 한 줄은 파일 부재 · 키 부재 · 줄 포맷 변경을 전부 빈 문자열로 접었고, 그 셋이 모두
+  #    "국면 B — 드릴 진행"으로 읽혔다. 드릴은 [1]에서 노드를 파괴하므로 그 오독의 대가가 크다.
+  fx="$(_drill_fixture '')"
+  printf 'export BULK_STORAGE_PATH="/mnt/bulk"\n' > "$fx/infra/k3s-bootstrap/versions.env"   # 키 부재
+  run bash "$fx/scripts/dr-drill.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'BULK_MIGRATION_WINDOW_UNTIL을 판정하지 못했다'
+  printf '%s' "$output" | grep -qF -- 'versions-read: KEY_MISSING:'
+}
+
+@test "the dr-drill phase-A derivation goes through the reader (no sed one-liner survives)" {
+  grep -qE '^[^#]*"\$VERSIONS_READ" BULK_MIGRATION_WINDOW_UNTIL' "$sh"
+  # ⚠️ `^[^#]*` — 이 파일과 dr-drill.sh 양쪽 **주석이 옛 관용구를 리터럴로 담고 있어서**
+  #    (fail-open의 근거를 적은 자리) 전체 줄 grep은 주석에 걸려 거짓 red를 낸다.
+  run grep -nE "^[^#]*sed -n 's/\^export " "$sh"
+  [ "$status" -eq 1 ]
 }
 
 @test "the phase-A gate precedes every side effect (source, yq derivation, destruction)" {
@@ -88,10 +130,10 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   grep -qE '^[^#]*DR_DRILL_DESTROY_CONFIRM=1[[:space:]]+bash[[:space:]].*scripts/destroy-node\.sh' "$sh"
   [ -x scripts/destroy-node.sh ]
   run grep -nE '^[^#]*destroy-node\.sh.*\|\|[[:space:]]*true' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # ⚠️ 한 줄 안에서만 보면 **줄바꿈 연결로 우회된다**(`… destroy-node.sh \` + 다음 줄 `|| true`).
   run grep -nE '^[^#]*bash[^#]*destroy-node\.sh[^#]*\\$' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   grep -q 'infra/k3s-bootstrap/host-up.sh' "$sh"
   grep -q 'make bootstrap' "$sh"
   # ⚠️ 이름이 주장하는 "커밋된 것에서 재구축"을 실제로 앵커한다. 예전 이름은 `cloud-init`을
@@ -126,7 +168,7 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
 @test "dr-drill [6] verifies a workload that still exists (no removed in-repo app)" {
   # prod/deploy/api는 제거됨(인-레포 앱 0) — 워크로드 서빙 검증은 현존 코어 서비스(adguard)를 가리킨다.
   run grep -n 'deploy/api' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   grep -q 'rollout status deploy/adguard' "$sh"
 }
 
@@ -159,10 +201,12 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   #    그 단어들을 그대로 담는다. 단언 대상은 산문이 아니라 **코드**다.
   # ⚠️ 양성 대조를 **두 파일 모두**에 건다. 하나만 걸면, 두 번째 파일이 삭제/리네임됐을 때
   #    grep이 exit 2(비-0)로 죽고 `[ "$status" -ne 0 ]`가 통과해 **vacuous green**이 된다.
+  #    그래서 부재 단언도 `-eq 1`이다 — 이 자리는 `-q`가 아니라 `-nE`라 한쪽 파일이 사라지면
+  #    남은 파일에 매치가 있어도 rc 2가 보존된다(`-q`였다면 매치가 그 에러를 덮어 0이 됐을 자리다).
   grep -qE '^[^#]*scripts/destroy-node\.sh' "$sh"
   grep -qE '^[^#]*\$K3S_RUN' scripts/destroy-node.sh
   run grep -nE '^[^#]*(orb |orbctl|virtiofs|/mnt/mac)' "$sh" scripts/destroy-node.sh
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "dr-drill proves recovery of THIS cluster's archive (serverName derived, not the k8s name)" {
@@ -172,7 +216,7 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값
   grep -q 'parameters.serverName' "$sh"
   grep -q 'serverName: ${ARCHIVE_SERVER}' "$sh"
   run grep -nE '^[^#]*serverName: \$\{LIVE_CLUSTER\}' "$sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "dr-drill purges a leftover drill cluster BEFORE apply (the false-proof that authorizes node destruction)" {

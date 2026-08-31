@@ -23,7 +23,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   T="$ROOT/docs/traps.md"; D="$ROOT/docs/traps-detail.md"
   # traps.md prose(표 밖)에 scripts/verify-traps.sh 존재하나 SSOT '> 가드:' 주석이 아니라 tie 비대상
   run grep -Fq 'scripts/verify-traps.sh' "$T"; [ "$status" -eq 0 ]
-  run grep -Fq 'scripts/verify-traps.sh' "$D"; [ "$status" -ne 0 ]
+  # rc 2(대상 부재)를 통과로 읽지 않는다 — grep 무매치는 정확히 rc 1이다.
+  run grep -Fq 'scripts/verify-traps.sh' "$D"; [ "$status" -eq 1 ]
   # verify-traps(역방향 tie 포함)가 PASS — SSOT '> 가드:' 주석이 전부 원장에 추적됨
   run bash "$ROOT/scripts/verify-traps.sh"; [ "$status" -eq 0 ]
 }

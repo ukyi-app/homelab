@@ -8,6 +8,10 @@
 # ⚠️ @test 이름은 영어만(check-skeleton.sh의 CJK 가드 — 디렉토리 실행 시 인코딩이 깨진다).
 # ⚠️ 중간 단언은 `[ … ]`/단순 명령/`run …; [ … ]`만 — 줄머리 `!`/`[[`는 check-bats-style.sh가 hard-zero.
 # ⚠️ CI 러너엔 kubectl이 없다 — 스텁이 PATH 선두가 아니면 죽는 것이 맞다(라이브 접근 사고 방지).
+# ⚠️ grep 부재 단언은 `[ "$status" -eq 1 ]`이다. 여기 피연산자($KLOG)는 레포 파일이 아니라 **스텁이
+#    만드는 산출물**이라 `-eq 1`만으로는 "빈 로그"를 못 가른다 — 비공허 바닥값 `[ -s "$KLOG" ]`를
+#    한 쌍으로 건다. run_drill 뒤의 `-ne 0`은 스크립트 종료코드라 **비대상**이다(0/1이 아닌 값이 규약).
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
@@ -141,8 +145,11 @@ kcount() { grep -cF -- "$1" "$KLOG" || true; }
   seed_survivor
   run_drill
   [ "$status" -eq 0 ]
+  # 비공허 바닥값: argv 로그가 실재하고 비어 있지 않다(스텁이 실제로 불렸다). 아래 양성 대조는
+  # **다른 피연산자**($OUT/fixture)를 쓰므로 이 바닥값 없이는 로그 경로 드리프트를 못 본다.
+  [ -s "$KLOG" ]
   run grep -nE '(^| )delete (cluster pg( |$)|persistentvolumeclaim/pg-1( |$))' "$KLOG"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # 양성 대조: 같은 정규식이 실제로 무언가를 잡을 수 있다(검출기가 썩지 않았다)
   printf 'delete cluster pg --ignore-not-found\n' >"$OUT/fixture"
   run grep -nE '(^| )delete (cluster pg( |$)|persistentvolumeclaim/pg-1( |$))' "$OUT/fixture"
@@ -244,8 +251,9 @@ kcount() { grep -cF -- "$1" "$KLOG" || true; }
 @test "the script uses only verbs the restore-drill Role grants (no patch/replace/update/edit)" {
   run_drill
   [ "$status" -eq 0 ]
+  [ -s "$KLOG" ]   # 비공허 바닥값 — 아래 양성 대조는 피연산자가 달라 이 축을 못 덮는다(파일 헤더)
   run grep -nE '(^|[[:space:]])(patch|replace|update|edit|scale|annotate|label)([[:space:]]|$)' "$KLOG"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # 양성 대조: 같은 정규식이 실제로 금지 동사를 잡는다(검출기 부패 방지)
   printf -- '-n database patch cluster pg-restore-drill\n' >"$OUT/fixture"
   run grep -nE '(^|[[:space:]])(patch|replace|update|edit|scale|annotate|label)([[:space:]]|$)' "$OUT/fixture"

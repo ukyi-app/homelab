@@ -44,6 +44,10 @@
 #      건너뛰면 앵커가 거짓말이 된다 — 값의 출처는 언제나 du다).
 #
 # ⚠️ @test 이름은 영어만(bats dir-run 인코딩), 중간 단언은 [ ]/run만(bash 3.2 [[ ]]·중간 `!` 침묵통과).
+# ⚠️ 이 파일의 `[ "$status" -ne 0 ]` 넷은 부재 단언이 아니라 `run test`/추출기 함수의 rc다 —
+#    `-eq 1` 전환 대상이 아니다(전환하면 추출기의 미래 rc 어휘를 여기서 고정해 버린다).
+#    부재는 각 @test의 `[ "$status" -eq 0 ]` 선행 단언이 이미 red로 만든다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"

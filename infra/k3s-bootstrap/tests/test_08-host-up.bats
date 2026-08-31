@@ -48,6 +48,9 @@ EOF
 
 @test "no OrbStack step survives in the pipeline (bare metal has no VM layer)" {
   # orb-create/orb-guard 삭제의 회귀 가드. 문자열이 남아 있으면 없는 파일을 부르게 된다.
+  # ⚠️ 이 @test에는 형제 단언이 없다 — `-ne 0`이던 동안에는 host-up.sh를 리네임해도(rc 2) 혼자
+  #    초록으로 남아, 파이프라인 자체가 사라진 상태를 "OrbStack 잔재 없음"으로 읽었다.
+  #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
   run grep -cE 'orb-(create|guard)' "$BOOTSTRAP_DIR/host-up.sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }

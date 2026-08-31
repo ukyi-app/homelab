@@ -72,6 +72,21 @@ jobs:
           #    실행기는 BEHIND를 최신 main에서 재구축한 leased force-push로 수렴시킨다(머지 커밋 0).
           #    나머지 접두(bump·create-*·update-secrets)는 그대로 — 그 PR들엔 레인 개념이 없다.
           #
+          # ★ 이 union의 불변식은 **단방향**이다: **무장하는 생산자의 브랜치 접두는 전부 여기 있어야 한다**.
+          #   스위퍼는 무장된 PR만 고치므로(아래 `autoMergeRequest != null`) 빠진 접두는 곧 "그 레인의 PR이
+          #   BEHIND로 굳어도 아무도 깨우지 않는다"이다. 반대 방향은 **요구하지 않는다** — 무장하지 않는
+          #   접두가 여기 있어도 그 필터가 걸러 무동작이다. 오늘 `create-app/`이 그 자리다
+          #   (`_create-app.yaml`은 `auto-merge: 'false'` — 앱 생성 PR은 사람이 읽고 머지한다).
+          #   증인은 무장 초크포인트 **전수 스캔**이 파생한다(손 목록이 아니다):
+          #   ① pr-first-commit 소비자 중 `auto-merge: 'true'` ② `scripts/auto-merge-or-fail.sh` 직접 호출
+          #   ③ `gh pr merge --auto` 직접 호출 — tests/gates/test_pr-sweeper.bats의 "…(armed-chokepoint scan)".
+          #
+          # ★ `teardown/`이 이 목록에 **없는 것은 의도다**(누락이 아니다). 그 접두를 내는 생산자 둘이 모두
+          #   무장하지 않는다: `_teardown-app.yaml`은 pr-first-commit에 `auto-merge: 'false'`를 주고(파괴는
+          #   수동 머지 규약 — AGENTS.md), owner-local `scripts/teardown.sh`도 auto-merge를 걸지 않는다.
+          #   무장되지 않은 PR은 아래 필터에서 이미 배제되므로 접두를 넣어도 **순수 무동작**이다. 넣으려면
+          #   먼저 무장 정책을 뒤집어야 하고, 그건 파괴 PR의 자동 머지라 리뷰 대상이다(위 증인이 그 전환을 red로 낸다).
+          #
           # ⚠️ **DIRTY는 이 스위퍼의 사각지대다**(알려진 갭 — 별도 flip이라 미착수). 무장된 봇 PR이 BEHIND가
           #    아니라 **DIRTY(충돌)** 로 굳으면 위 select에서 걸러져 아무도 손대지 않는다 → auto-merge가 무장된
           #    채 영구 잔류하는 좀비가 된다. 라이브 실측(2026-07-13): 같은 앱 커밋에 중복 생성된 bump-poll PR

@@ -110,6 +110,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - bump-poll/** 예약 룰셋 — 인터록≠인증·정적 가드는 변경 감지기
 - emptyDir sizeLimit vs 런타임 다운로드 페이로드
 - 열거 붕괴 → vacuous green (프로세스 치환·커맨드 치환·부정 카운트)
+- `grep -qv`는 부재를 재지 않는다 — 줄 단위 반전이 전칭을 존재로 바꾼다
 - PreToolUse 훅 종료코드 — fail-closed는 exit 2뿐
 - vmalert replay rulesDelay — 비율 아닌 절대 지연·체인 없으면 순수 낭비
 - make -n은 드라이런이 아니다 — 레시피의 $(MAKE)는 -n에서도 실행된다

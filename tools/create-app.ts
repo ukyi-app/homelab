@@ -193,7 +193,7 @@ if (!DRY) {
     values,
     sourceRepo: repo,
     bindings,
-    sealed: sealedFacts ? { file: sealedFacts.sealedFile, bytes: sealedFacts.bytes } : null,
+    sealed: sealedFacts ? { bytes: sealedFacts.bytes } : null, // 파일명은 경로 SSOT(appRel.sealed) 소유
     activation: served && pub
       ? () => buildActivationMarker({
         app,

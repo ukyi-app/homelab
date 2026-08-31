@@ -34,12 +34,15 @@ PRECOMMIT="$BATS_TEST_DIRNAME/../../.pre-commit-config.yaml"
   # 공식 checksums.txt를 받아 검증하는지(=실 해시; placeholder 없음).
   run grep -qE 'gitleaks_.*_checksums\.txt' "$CI"
   [ "$status" -eq 0 ]
+  # ⚠️ 아래 두 부정 단언은 `-eq 1`이다 — grep rc는 0=매치 · 1=무매치 · 2=대상 부재/읽기불가다.
+  # `-ne 0`이면 "$CI"가 사라져도(rc 2) "placeholder 없음"으로 읽혀 초록이 된다.
+  # 위 두 `-eq 0` 단언이 같은 @test 안의 양성 대조라, $CI 부재·공허는 여기 닿기 전에 red다.
   # placeholder SHA256(`<... SHA256 ...>`)가 남아있으면 안 된다.
   run grep -qE 'GL_SHA256="<' "$CI"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # 체크섬 없이 gitleaks tarball을 curl→tar로 바로 파이프하면 안 된다.
   run grep -qE 'gitleaks.*\.tar\.gz" *\| *sudo tar' "$CI"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "gate job runs sops-guard over all tracked enc.yaml" {

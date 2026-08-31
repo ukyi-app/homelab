@@ -8,6 +8,10 @@
 #     루프가 healthchecks를 폭주 ping해 webhook 미수신인데도 체크가 영구 green이 된다.
 # 이 릴레이는 k8s 워크로드라 테스트는 임베드 relay.sh에 대한 '정적' grep이다(busybox 부재·CI 클러스터 비접촉).
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과. @test 이름은 영어 — 한글 인코딩 깨짐.
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 deadmanswitch-relay.yaml 단일 파일이라
+#    그것으로 닫힌다. setup이 이미 ROOT 오산으로 F를 doubled 경로로 만들어 전건 공허 통과한 전력이
+#    있는 파일이라(위 #53 기록) 이 rc 구별이 그 재발의 두 번째 방어선이다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 
 setup() {
   # ⚠️ #53 false-green 수정 (스코프 추가): 테스트가 prod/로 이동(platform/victoria-stack/prod/test_relay.bats)했는데
@@ -18,14 +22,21 @@ setup() {
 }
 
 @test "relay nc listener does not use the busybox-incompatible -q flag" {
+  # ⚠️ 부재 단언 단독이라 `$F`를 읽는 형제 증인이 없다 — 예전 `-ne 0`에서는 대상 리네임에도
+  #    초록이었다. 2026-08-29 격리 트리 실측(base=`git archive HEAD`, 매니페스트만 리네임):
+  #    6건 중 **3건**이 살아남았다 — 이 부재 단언 둘(rc 2를 무매치로 오독)과, `$F`를 아예 읽지
+  #    않아 리네임에 영향받지 않는 맨 아래 kustomization 배선 @test. 즉 헤더가 적은 두 라이브
+  #    인시던트의 회귀 가드가 대상 부재에 공허했다.
+  #    `-eq 1`로 고친 지금 같은 뮤테이션의 생존은 1건 = 그 배선 @test뿐이다(같은 날 실측).
   run grep -nE 'nc[[:space:]].*-q' "$F"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "relay does not swallow nc failure with a trailing || true before pinging" {
   # '... | nc -l ... || true' 패턴(nc 실패 무시)이 더는 없어야 한다.
+  # ⚠️ 위 @test와 같다 — 위 실측에서 리네임을 견디고 살아남은 부재 단언 둘 중 하나였다.
   run grep -nE 'nc[[:space:]]+-l[^|]*\|\|[[:space:]]*true' "$F"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "relay pings healthchecks only when nc served a request (wget nested under nc success)" {

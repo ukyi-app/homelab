@@ -1,7 +1,7 @@
 // bump 플랜 항목 러너 — bump-poll.yaml의 인-워크플로 셸 루프를 대체하는 테스트된 오케스트레이터(F-1).
 //
 // 플래너(poll-ghcr)가 만든 plan.json을 소비해 bump/propose-pr 항목을 **항목마다 격리 git worktree**에서 처리한다:
-//   worktree add(<base> 기준 결정적 새 브랜치) → bump-tag → git add(writePath+digest-exporter) → commit(writer 신원) →
+//   worktree add(<base> 기준 결정적 새 브랜치) → bump-tag → **잔여물 판정**(천장 밖 변경 0) → git add(writePath+digest-exporter) → commit(writer 신원) →
 //   ensure-bump-pr → worktree remove(성공·실패 모든 경로). 공유 worktree/index가 없어 R-38(종료상태만 격리)·
 //   H-2(commit 전 실패 시 staged digest-exporter 누출) 클래스가 **구조적으로 불가능**하다.
 //
@@ -15,10 +15,11 @@
 //    직접 부르지 않는다. auto-merge를 켜는 별도 플래그도 없다 — 레인(플래너 `.action`)이 유일 입력이고, 러너는
 //    그것을 **재해석 없이 그대로** ensure-bump-pr에 넘긴다(승인 게이트 우회 불가).
 //
-// 사용: bun tools/run-bump-plan.ts --plan <plan.json> [--repo-root <dir>] [--base <ref>] [--ensure-cmd "<cmd>"]
-//   --repo-root : git repo 루트(기본 "."). 테스트는 fixture repo를 넘긴다.
-//   --base      : worktree 기준 ref(기본 "main").
-//   --ensure-cmd: ensure-bump-pr 호출 커맨드(기본 "bun <이 파일 옆 ensure-bump-pr.ts>"). 테스트가 stub으로 override(내부 seam).
+// 사용: bun tools/run-bump-plan.ts --plan <plan.json> [--repo-root <dir>] [--base <ref>] [--ensure-bin <bin>] [--ensure-script <path>]
+//   --repo-root    : git repo 루트(기본 "."). 테스트는 fixture repo를 넘긴다.
+//   --base         : worktree 기준 ref(기본 "main").
+//   --ensure-bin   : ensure-bump-pr 실행 바이너리(기본 "bun"). 테스트가 stub으로 override(내부 seam).
+//   --ensure-script: ensure-bump-pr 스크립트 경로(기본 "<이 파일 옆 ensure-bump-pr.ts>"). 같은 seam의 나머지 절반.
 
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,6 +31,8 @@ import { APP_NAME_RE } from "./lib/identity.ts";
 import { WRITER_NAME, WRITER_EMAIL, decodePlan, branchFor, commitMessage, type Change, type PlanItem } from "./lib/bump-plan.ts";
 // subprocess 실행은 exec seam 경유(d6②) — timeoutMs 0으로 종전 무-timeout 동작을 보존한다.
 import { sh } from "./lib/exec.ts";
+// argv 파싱 SSOT — unknown/값 누락 fail-closed. 광고(USAGE)도 같은 목록에서 파생한다.
+import { typedFlags, type TypedFlags } from "./lib/cli.ts";
 
 const EXPORTER = "platform/victoria-stack/prod/digest-exporter.yaml";
 // 도구 경로는 러너 옆(tools/)에서 절대 해석 — cwd(worktree=대상 트리, tools/ 없을 수 있음)와 무관하게 실행.
@@ -38,27 +41,40 @@ const BUMP_TAG = resolve(HERE, "bump-tag.ts");
 const DEFAULT_ENSURE_SCRIPT = resolve(HERE, "ensure-bump-pr.ts");
 
 // ensure 호출은 argv seam(bin + script) — shell-string split 금지(경로 공백이 argv를 깨뜨린다).
-const VALUE_FLAGS = new Set(["--plan", "--repo-root", "--base", "--ensure-bin", "--ensure-script"]);
+// ⚠️ **광고와 파서는 한 목록에서 나온다.** 예전엔 usage(--help·헤더 주석)가 ensure 커맨드를 통째로
+//    받는 **네 번째 플래그**를 광고하는데 파서는 아래 bin/script 둘만 받아, --help를 그대로 따라 하면
+//    `알 수 없는 옵션`으로 exit 2가 났다(실측). 콜사이트가 0건이라 라이브 손해는 없었지만 광고가
+//    거짓이었다 — shell-string split은 태생(0193930)부터 명시 기각이므로 처방은 파서 확장이 아니라
+//    광고 정정이고, 재발을 막는 자리는 usage 문자열을 이 표에서 **파생**시키는 것이다(갈릴 표면 소멸).
+// ⚠️ 그 유령 플래그의 리터럴을 **이 파일에 다시 쓰지 마라**(주석 포함) — 재유입 거부 증인이
+//    주석 스트립 없는 원본을 보므로 설명하려다 red를 만든다. 규율은 scripts/check-floor-vocab.sh와 같다.
+// 이름과 메타변수를 한 표에 둔다 — 파서 입력(이름)과 광고(이름+메타변수)가 이 표에서만 나온다.
+const VALUE_FLAGS: ReadonlyArray<readonly [string, string, boolean]> = [
+  ["--plan", "<plan.json>", true],   // true = 필수(광고에서 대괄호를 벗는다)
+  ["--repo-root", "<dir>", false],
+  ["--base", "<ref>", false],
+  ["--ensure-bin", "<bin>", false],
+  ["--ensure-script", "<path>", false],
+];
+const USAGE = "usage: run-bump-plan.ts " + VALUE_FLAGS.map(([k, meta, req]) => (req ? `${k} ${meta}` : `[${k} ${meta}]`)).join(" ");
 const argv = process.argv.slice(2);
 if (argv.includes("--help") || argv.includes("-h")) {
-  console.log("usage: run-bump-plan.ts --plan <plan.json> [--repo-root <dir>] [--base <ref>] [--ensure-cmd <cmd>]");
+  console.log(USAGE);
   process.exit(0);
 }
-const opts: Record<string, string> = {};
-for (let i = 0; i < argv.length; i++) {
-  const a = argv[i];
-  if (!a.startsWith("--")) { console.error(`positional 인자 미지원: ${a}`); process.exit(2); }
-  if (!VALUE_FLAGS.has(a)) { console.error(`알 수 없는 옵션: ${a}\n허용: ${[...VALUE_FLAGS].join(" ")}`); process.exit(2); }
-  const v = argv[i + 1];
-  if (v === undefined || v.startsWith("--")) { console.error(`옵션 ${a}에 값이 없다(arity 위반) — 값을 명시하라`); process.exit(2); }
-  opts[a] = v; i++;
-}
-const planPath = opts["--plan"];
+// 파싱은 SSOT 경유(tools/lib/cli.ts) — unknown 거부·값 누락(다음 플래그 삼킴) 거부를 콜사이트가 다시
+// 구현하지 않는다. 종전 자체 루프는 그 규약을 손으로 복제하고 있었고 우회 근거 주석도 없었다
+// (비교: tools/generate-result-schema.ts의 손 파싱은 "격리 재생성 증명" 근거를 명시한다).
+// 종료코드 2(사용법)는 cli.ts 규약 그대로다.
+let f: TypedFlags;
+try { f = typedFlags(argv, { value: VALUE_FLAGS.map(([k]) => k), bool: [] }); }
+catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n${USAGE}`); process.exit(2); }
+const planPath = f.str("--plan");
 if (!planPath) { console.error("--plan <plan.json> 필수"); process.exit(2); }
-const repoRoot = resolve(opts["--repo-root"] ?? ".");
-const base = opts["--base"] ?? "main";
-const ensureBin = opts["--ensure-bin"] ?? "bun";
-const ensureScript = opts["--ensure-script"] ?? DEFAULT_ENSURE_SCRIPT;
+const repoRoot = resolve(f.str("--repo-root") ?? ".");
+const base = f.str("--base") ?? "main";
+const ensureBin = f.str("--ensure-bin") ?? "bun";
+const ensureScript = f.str("--ensure-script") ?? DEFAULT_ENSURE_SCRIPT;
 
 function run(cmd: string, args: string[], cwd: string): { ok: boolean; status: number; out: string } {
   const r = sh(cmd, args, { cwd, timeoutMs: 0 });
@@ -113,6 +129,25 @@ for (const item of items) {
       if (pin) btArgs.push("--pin", pin);
       const bt = run("bun", btArgs, wt);
       if (!bt.ok) { console.log(`::warning::${label}: bump-tag 실패(exit ${bt.status})\n${bt.out}`); ok = false; }
+    }
+
+    if (ok) {
+      // ── 스테이징 완전성 판정 [staged-completeness] ────────────────────────────────────────
+      // 천장(바로 아래 add의 pathspec = writePath + digest-exporter)은 **상한으로 남긴다** — 여기서
+      // 재는 것은 열거가 아니라 **잔여물**이다. bump-tag가 이 둘 밖에 쓰면(플래너 writePath가 실제
+      // 편집 대상과 어긋나는 순간이 그 자리다) 그 변경은 커밋에서 **조용히 유실**되고 PR이 부분
+      // 표면으로 열린다 — add·commit·push가 전부 성공하므로 어떤 종료코드도 그것을 말하지 않는다
+      // (형제 자리의 2026-08-18 실사고: .github/actions/pr-first-commit/action.yml).
+      // 포함 판정은 `:(exclude)` pathspec으로 **git에게 시킨다** — 아래 add와 같은 매처라 두 번째
+      // 구현이 생기지 않는다(포세린 줄을 고정 오프셋으로 자르는 형태는 rename에서 깨진다).
+      // 판정은 add **앞**이다 — 뒤에 두면 pathspec 미매치 실패와 구별할 수 없다.
+      const residue = git(["status", "--porcelain", "--untracked-files=all", "--", ".", `:(exclude)${writePath}`, `:(exclude)${EXPORTER}`], wt);
+      if (!residue.ok) { console.log(`::warning::${label}: git status 실패(스테이징 완전성)\n${residue.out}`); ok = false; }
+      else if (residue.out.trim() !== "") {
+        console.log(`::warning::${label}: 천장(writePath+digest-exporter) 밖 변경이 남는다 — 이대로 커밋하면 유실된다\n${residue.out}`);
+        ok = false;
+      }
+      // ── [/staged-completeness] ───────────────────────────────────────────────────────────
     }
 
     if (ok) {

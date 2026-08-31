@@ -1,15 +1,69 @@
 #!/usr/bin/env bash
-# bats 단언-스타일 가드 — @test 본문에서 '마지막 명령이 아닌'(중간) 부정(`! `)·조건(`[[ `)을 잡는다.
+# bats 단언-스타일 가드 — bats 「코드 표면」에서 **조용히 통과하는 단언 형태** 네 클래스를 잡는다.
 # bats는 negated/[[ 명령의 실패를 errexit/ERR-trap 면제로 침묵 통과시킨다(라이브 확증: bats 1.13에서
 # 중간 `! echo x|grep -q x`가 'ok'). 그런 중간 단언은 죽은(false-green) 가드다.
 #   NEG(중간 `! `)  = 모든 bash에서 발생(negated pipeline은 set -e 면제) → hard-zero.
 #   BB (중간 `[[ `) = bash 3.2 함정 변종 — **0 수렴 완료**, 이제 hard-zero다.
 #     실증: bats 1.13에서 `[[ "$x" == *ABSENT* ]]`가 거짓인데 ok. 같은 자리를
 #     `printf '%s' "$x" | grep -qF …`로 바꾸면 정확히 red가 난다(변환 전 53건은 전부 죽은 단언이었다).
+#   ABS(부재 단언)  = `run grep …` + `[ "$status" … ]` 짝의 **철자와 형태** → ABS_BASELINE 래칫(아래).
+#   QV (`grep -qv`) = 줄 단위 반전이 전칭(∀¬)을 존재(∃¬)로 바꾼다 → hard-zero(아래).
 # 휴리스틱: 다줄 @test 규약 가정("@test … {" 한 줄 시작, 0열 "}" 종료). heredoc 본문은 명령으로 안 센다.
 # (레포 단일 한줄 @test는 단일 명령이라 무해 — 신규 한줄 본문은 다줄로 작성할 것.)
-# 인자로 파일을 주면 그 파일만 스캔하고 NEG·BB 아무거나 있으면 실패(픽스처/ad-hoc 탐지 모드).
+# 인자로 파일을 주면 그 파일만 스캔하고 네 클래스 아무거나 있으면 실패(픽스처/ad-hoc 탐지 모드).
 # bash 3.2 호환: mapfile 금지(while read). shellcheck 클린.
+#
+# ── 코드 표면 = `@test` 본문 **+ 0열 함수 본문**(`setup()`·`teardown()`·헬퍼) ──────────────────
+# 착지 전 이 검출기는 `^@test … {`로만 상태에 들어가서, 도메인에 있는 파일이어도 `@test` **밖** 줄은
+# 전부 판정 밖이었다(그 갭은 이 헤더가 「부재-단언 클래스를 얹을 때의 몫」으로 계상해 뒀다).
+# 이제 0열 `name() {` 본문도 같은 상태 기계에 들어간다. 근거 셋:
+#   ① 함정이 같다 — 헬퍼는 @test에서 호출되므로 중간 `!`/`[[ ]]`의 errexit 면제가 그대로 전파된다.
+#   ② `[ABS]`의 증인(비공허 바닥값·양성 대조)이 관례적으로 `setup()`과 스텁 팩토리에 산다.
+#      본문을 못 보면 그 증인들이 **원리적으로** 안 보여 전건 위반이 된다.
+#   ③ 대가가 0이다 — 착지 전 실측: 0열 함수 본문의 NEG·BB 신규 검출 **0건**(추적 288파일).
+# ⇒ 그래서 `test_helper.bash`처럼 `@test`가 없는 seam 파일도 이제 실제로 판정된다: 자기 함수 본문이
+#    위반 자리이자 같은 파일 `@test`들의 증인 공급처가 된다(04번이 넓힌 열거가 여기서 load-bearing).
+#
+# ── [ABS] — bats 부재 단언 ────────────────────────────────────────────────────────────────────
+# 병: `run grep <경로> ; [ "$status" -ne 0 ]`은 **무매치(rc 1)와 대상 부재(rc 2)를 구별하지 않는다.**
+# 피연산자가 리네임/삭제되면 "그 문자열이 없다"가 무증인 초록이 된다(SSOT: docs/traps-detail.md
+# 「열거 붕괴 → vacuous green」③ 부정 카운트 · 그 「처방(bats 부재 단언)」).
+# 두 레인이다 — **철자만 거부하면 안 된다**(설계 게이트 r1 · F3):
+#   [ABS]      철자 — 대상 run의 판정이 `-ne 0`/`-gt 0`. 정확한 무매치는 `-eq 1` 하나다.
+#   [ABS-REC]  형태 — 피연산자가 **재귀/디렉토리**인 부재 판정(`grep -r…` · 경로가 `/`로 끝남 ·
+#              `git grep`)인데 같은 `@test`(또는 그 파일의 함수 본문)에 **비공허 바닥값과 양성
+#              대조가 함께** 있지 않다. `-eq 1`로는 안 닫히는 자리다 — 빈 디렉토리 `grep -r`은
+#              rc **1**이라 무매치와 값이 같다(실측).
+#   [ABS-LOOP] 형태 — 같은 요구를 **루프 구동** 판정에 건다. 목록이 비면 반복 0회라 어떤 rc로도
+#              안 보인다(`for d in $DISPATCHERS`가 실측 사례).
+# ⚠️ **분모는 grep 계열 + 경로 피연산자뿐이다.** 히어스트링(`<<<`)은 경로가 없어 rc 2 채널 자체가
+#    없고(그 자리의 `-ne 0`은 옳다 — 착지 시점 잔여 `-ne 0` 95곳이 **전부** 히어스트링이었다),
+#    `run bash|bun|make|conftest`·`yq`·`jq`·`ls`는 rc 알파벳이 grep과 달라 하나의 형태 규칙으로
+#    말할 수 없다(실측: `bun <없는 파일>`=1인데 그 도구의 **거부**도 1 · `ls`는 무매치와 부재를
+#    둘 다 2로 접는다). 이 구별이 없으면 `tests/gates/test_scan-floor.bats`처럼 18곳 전부 정당한
+#    비대상인 파일이 영구 red 또는 영구 예외 목록 항목이 된다.
+# ⚠️ **증인은 존재만 본다 — 피연산자로 연결하지 않는다.** 셸에서 피연산자 동일성은 정적으로 결정
+#    불가능하고(변수·조립 경로·루프 변수), 결정하는 척하면 그 연결이 조용히 어긋나 이 가드 자신이
+#    vacuous green이 된다. 형태 규칙은 "증인 두 종류가 스코프 안에 실재하는가"까지만 묻는다.
+# ⚠️ ABS_BASELINE은 **래칫**이다(BB_BASELINE 선례). 오늘 남은 건수는 "증인이 실재하지 않는다"가
+#    아니라 "증인이 **기계가 읽는 형태로** 있지 않다"는 뜻이다 — 각 자리의 산문 주석이 근거를 진다.
+#    scan-floor.sh:30-31이 금지하는 '손 관리 수치'와 다른 종류다: 저건 아무도 대조하지 않는 도메인
+#    건수고, 이건 **매 실행이 대조하는** 부채 잔액이라 드리프트가 곧 red다. 목표 상태는 0.
+#
+# ── [QV] — `grep -qv`는 부재를 재지 않는다 ─────────────────────────────────────────────────────
+# `-v`는 **줄 단위** 반전이라 `grep -qv TOKEN`은 "TOKEN이 없다"(∀¬)가 아니라 "TOKEN이 없는 줄이
+# 하나라도 있다"(∃¬)다 — 피연산자가 두 줄 이상이면 TOKEN이 **있어도** rc 0이고, 반대로 입력이
+# 통째로 비면 rc 1이라 진짜 부재에서 red다(SSOT 실측표: docs/traps-detail.md 「`grep -qv`는 부재를
+# 재지 않는다」). 라이브 항진이 이 레포에서만 3곳 적발됐다(tailscale scopes · host-ports 6곳 ·
+# ops-repin). **[ABS]와 같은 레인에 넣지 않는다**: 저건 run/status 짝의 rc 철자 문제고 이건 술어의
+# 양화사가 뒤집히는 문제라 한 숫자로 접으면 그 수가 무엇의 잔액인지 말할 수 없게 된다. 라이브 0건이라
+# 래칫할 부채도 없다 → hard-zero. (필터로 쓰는 `| grep -v '^---'` 류는 `-q`가 없어 대상이 아니다 —
+# rc를 판정으로 쓰지 않기 때문이다.)
+#
+# ⚠️ 이 가드는 ci.yaml·Makefile(`verify`·`ci`)의 **명시 스텝**이다 — 자기 bats에만 의존하면
+#    `tests/.ci-exclude` 한 줄로 자기가 꺼진다(형제 check-bats-accounting.sh가 같은 근거로 거부한
+#    자리). NEG·QV 두 hard-zero 클래스의 유일한 집행자가 한 줄로 꺼지면 안 되므로, 그 배선은
+#    이 클래스의 별건 확대가 아니라 **전제**다. 패리티는 policy/ci-parity.json이 대조한다.
 set -euo pipefail
 # 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
 # shellcheck source=scripts/lib/guard.sh
@@ -19,14 +73,32 @@ guard_init check-bats-style
 take_floors "check-bats-style" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
-BB_BASELINE="${BB_BASELINE_OVERRIDE:-0}"   # **0 수렴 완료** — 이제 hard-zero다(NEG와 같은 규율). 신규 중간 [[ ]]는 즉시 red.
+# ⚠️ 래칫 수치에 env 오버라이드를 두지 않는다 — `BB_BASELINE_OVERRIDE`는 소비자 0인 채로 남아 있던
+#    off-switch였다(env는 호출부에 보이지 않는 채로 판정을 끈다 — scan-floor.sh의 어휘 통일 근거 그대로).
+BB_BASELINE=0    # **0 수렴 완료** — 이제 hard-zero다(NEG와 같은 규율). 신규 중간 [[ ]]는 즉시 red.
+# 부재-단언 부채 잔액. 오늘의 5곳은 전부 **증인이 산문으로만 있는** 자리다(기계가 읽는 형태가 아니다):
+#   test_app-token-sha-ssot 2(setup의 `[ -d .github ]` 바닥값은 있고 그 두 @test에 양성 대조가 없다) ·
+#   test_sealed-secrets-restore 2(바닥값이 `[ "$(cat …)" = OLD-BACKUP ]`이고 양성 대조는 스텁 팩토리
+#   heredoc 안이라 둘 다 형태 밖) · test_seal-secret 1(양성 대조는 맨 grep으로 있고 바닥값이 없다).
+# 내리는 방향(증인을 형태로 세우는 방향)으로만 손댄다. 올리려면 같은 diff에서 이 줄을 고쳐야 하고,
+# 그건 리뷰에 보인다(check-bats-accounting의 EXCL_MAX와 같은 성격).
+ABS_BASELINE=5
+# ── 기본 모드의 도메인 = **추적 `*.bats` + bats가 `load`하는 `*.bash` seam** ─────────────
+# `.bash` seam을 빼면 그 파일은 이 가드에게 **영원히 안 보인다** — bats 본문과 같은 문법을
+# 쓰는 코드인데 확장자 하나로 판정 밖이 된다(「처방 도달」 축의 도달 실패).
+# 확장자가 도메인을 정확히 가른다: 추적 `*.bash`는 전부 `load` 대상이고(파생:
+# `git ls-files '*.bats' | xargs grep -h '^\s*load '` ↔ `git ls-files '*.bash'`), 반대로
+# `tests/gates/lib/*.sh`는 @test 표면이 아니라 가드 본체가 source하는 라이브러리라
+# `.bash`가 아니고, 그래서 이 합집합에 안 들어온다(들어오면 bats 표면 판정이 셸 표면으로 번진다).
+# 증인: tests/gates/test_bats-style.bats의 픽스처 테스트가 합집합 열거를 고정한다(글롭을 좁히면 red).
 FILES=()
 if [ "$#" -gt 0 ]; then FILES=("$@"); else
-  while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.bats')
+  while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.bats' '*.bash')
 fi
-# ⚠️ 기본 모드의 도메인(추적 *.bats)은 **정당하게 0이 될 수 없다**: 0건은 열거 붕괴다.
+# ⚠️ 기본 모드의 도메인은 **정당하게 0이 될 수 없다**: 0건은 열거 붕괴다.
 # (건수는 여기 적지 않는다 — 손 관리 수치는 반드시 드리프트한다, scan-floor.sh 규약.)
-# 여기에 skip 규약(exit 4 + `SKIP:`)을 쓰면 같은 `git ls-files '*.bats'` 도메인을 쓰는
+# 바닥값은 라벨 하나 = 도메인 하나 규약대로 합집합 전체에 한 번 건다(접미사 분할 없음).
+# 여기에 skip 규약(exit 4 + `SKIP:`)을 쓰면 거의 같은 도메인(추적 `*.bats`)을 쓰는
 # check-skeleton·check-bats-accounting(둘 다 바닥값 + exit 1)과 **정반대 신호**가 된다 —
 # 커널 주석(lib/scan-floor.sh)이 "마커를 내면 사람이 정반대 뜻으로 읽는다"고 금지한 채널 혼동이다.
 # 명시-파일 모드($# > 0)는 원소가 항상 ≥1이라 이 분기에 도달하지 않지만, 픽스처가 1건짜리로
@@ -37,7 +109,101 @@ fi
 DETECT=""
 IFS='' read -r -d '' DETECT <<'AWK' || true
 function flush(){ if(pend!=""){ print pend; pend="" } }
-FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++ }
+# ── [ABS]/[QV] 레인 헬퍼 ──────────────────────────────────────────────────────────────────
+# 후행 주석 제거 — **따옴표 균형이 맞는 자리에서만** 뗀다. 균형을 안 보면 `'^[[:space:]]*#.*repoURL:'`
+# 같은 패턴 리터럴의 `#`에서 잘려 판정 대상 자체가 사라진다(형제 check-locale-collation이 밟은
+# "상태 기계 순서가 곧 판정" 결함과 같은 얼굴). NEG/BB 레인은 줄 선두 토큰만 보므로 이 정제와 무관하다.
+function abs_strip(s,   i,c,q1,q2){
+  q1=0; q2=0
+  for(i=1;i<=length(s);i++){
+    c=substr(s,i,1)
+    if(c=="'" && q2==0) q1=1-q1
+    else if(c=="\"" && q1==0) q2=1-q2
+    else if(c=="#" && q1==0 && q2==0 && (i==1 || substr(s,i-1,1) ~ /[ \t]/)) return substr(s,1,i-1)
+  }
+  return s
+}
+# 대상 판정 — grep 계열 + 경로 피연산자. 히어스트링은 경로가 없으므로 대상 밖(헤더의 분모 규약).
+# rc 1 = grep 계열(무매치 1 · 부재/읽기불가 2) · rc 2 = git grep(무매치 1 · 치명적 **128**).
+function abs_target(s,   p){
+  if (s ~ /<<</) return 0
+  p=s; sub(/^run[ \t]+/,"",p)
+  while (p ~ /^[A-Za-z_][A-Za-z0-9_]*=[^ \t]*[ \t]+/) sub(/^[A-Za-z_][A-Za-z0-9_]*=[^ \t]*[ \t]+/,"",p)
+  sub(/^--separate-stderr[ \t]+/,"",p)
+  if (p ~ /^(grep|egrep|fgrep)[ \t]/) return 1
+  if (p ~ /^git[ \t]+(-C[ \t]+[^ \t]+[ \t]+)?grep[ \t]/) return 2
+  return 0
+}
+# 재귀/디렉토리 형태 — 옵션 클러스터의 r/R · `--recursive` · 패턴 뒤 피연산자가 `/`로 끝남 · git grep.
+# (git grep은 pathspec 전체를 훑으므로 언제나 이 형태다. pathspec이 추적 파일과 하나도 안 맞아도
+#  128이 아니라 rc 1이라는 것이 이 레인이 필요한 바로 그 이유다 — 실측.)
+function abs_rec(s,kind,   q,n,i,a,pat){
+  if (kind==2) return 1
+  q=s; gsub(/['"]/,"",q); sub(/^run[ \t]+/,"",q)
+  n=split(q,a,/[ \t]+/); pat=0
+  for(i=1;i<=n;i++){
+    if (a[i] ~ /^-[A-Za-z]*[rR][A-Za-z]*$/ || a[i]=="--recursive") return 1
+    if (a[i] ~ /^-/) continue
+    if (a[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) continue
+    if (a[i]=="grep"||a[i]=="egrep"||a[i]=="fgrep"||a[i]=="git") continue
+    if (!pat) { pat=1; continue }
+    if (a[i] ~ /\/$/) return 1
+  }
+  return 0
+}
+# 한 문장 처리 — 루프 깊이 · [QV] · run/status 짝 · 증인 수집.
+function abs_stmt(s,   rec){
+  if (s ~ /^(for|while|until)[ \t]/) absloop++
+  else if (s ~ /^done([ \t;].*)?$/) { if(absloop>0) absloop-- }
+  # [QV] — rc를 판정으로 쓰는 `-q`와 줄 반전 `-v`가 같은 클러스터에 있으면 항진/거짓실패다.
+  if (s ~ /\|[ \t]*grep[ \t]+-([A-Za-z]*q[A-Za-z]*v|[A-Za-z]*v[A-Za-z]*q)[A-Za-z]*[ \t]/ ||
+      s ~ /^(run[ \t]+)?grep[ \t]+-([A-Za-z]*q[A-Za-z]*v|[A-Za-z]*v[A-Za-z]*q)[A-Za-z]*[ \t]/)
+    print FILENAME":"FNR": [QV] "s
+  if (s ~ /^run[ \t]/) {
+    absk=abs_target(s)
+    if (absk) { absrun=s; absline=FNR; absrloop=absloop } else absrun=""
+    return
+  }
+  if (s ~ /^\[[ \t]+"\$status"[ \t]/) {
+    if (absrun=="") return
+    # 양성 대조 ①: 대상 run이 `-eq 0`으로 판정됐다 = 같은 술어 가족이 어딘가에서 매치한다.
+    if (s ~ /-eq[ \t]+0[ \t]*\]/) abspos[absscope]++
+    else if (s ~ /-eq[ \t]+1[ \t]*\]/ || s ~ /-(ne|gt)[ \t]+0[ \t]*\]/) {
+      # GIT = git grep(pathspec) · REC = 파일시스템 재귀/디렉토리 · LOOP = 루프 구동 · FILE = 단일 파일.
+      rec = (absk==2) ? "GIT" : (abs_rec(absrun,absk) ? "REC" : (absrloop>0 ? "LOOP" : "FILE"))
+      absc[absn] = FILENAME"\t"FILENAME":"absline"\t"absscope"\t" \
+                   ((s ~ /-eq[ \t]+1[ \t]*\]/) ? "ok" : "stale")"\t"rec"\t"absrun
+      absn++
+    }
+    absrun=""
+    return
+  }
+  # 조건절·`|| …` 보호절·부정은 단언이 아니다 — 증인으로 세면 필터 한 줄이 증인 노릇을 한다.
+  if (s ~ /^(if|elif|while|until)[ \t]/ || s ~ /\|\|/ || s ~ /^!/) return
+  # 양성 대조 ②: 맨 grep 호출(bats는 @test 본문의 실패 명령에서 죽으므로 그 자체가 단언이다).
+  # ⚠️ **경로 도메인을 질의하는 호출만** 센다 — `printf … | grep -q …`처럼 `$output`을 보는 관용구는
+  #    술어가 살아 있음을 증언하지만 그 **경로 열거**에 대해서는 아무 말도 하지 않는다. 그걸 세면
+  #    거의 모든 @test가 자동으로 증인을 갖게 되어 이 레인이 자기 자신에게 vacuous해진다.
+  #    (실측: 그 형태까지 증인으로 세는 규칙을 넣고 빼며 돌려 봤고 레포 전역 검출은 양쪽 다 5곳이었다 —
+  #     느슨하게 할 이유가 없었다. 반대로 그 규칙이 있으면 뮤테이션 M4가 red를 못 낸다.)
+  if (abs_target(s)) abspos[absscope]++
+  # 양성 대조 ③: 루프가 실제로 돌았다는 카운터(`[ "$hits" -ge 1 ]`). `$status`는 rc라 대상 밖.
+  if (s ~ /^\[[ \t]+"?\$/ && s ~ /-(ge|gt)[ \t]+[0-9]+[ \t]*\]/ && s !~ /"\$status"/) abspos[absscope]++
+  # 비공허 바닥값: 열거 대상이 실재한다(`[ -d "$WF" ]` · `[ -n "$DISPATCHERS" ]`).
+  if (s ~ /^\[[ \t]+-[defsr][ \t]/ || s ~ /^\[[ \t]+-n[ \t]/) absfloor[absscope]++
+}
+# 한 줄 처리 — 후행 주석 제거 → 줄바꿈 연속(`\`) 접합 → `; [ … ]` 관용구 분해.
+function abs_line(raw,   t,i,n,parts,s){
+  t=abs_strip(raw); sub(/^[ \t]+/,"",t); sub(/[ \t]+$/,"",t)
+  if (t=="") return
+  if (abscont!=""){ t=abscont" "t; abscont="" }
+  if (t ~ /\\$/){ sub(/\\$/,"",t); abscont=t; return }
+  n=split(t, parts, /;[ \t]*/)
+  for(i=1;i<=n;i++){ s=parts[i]; sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); if(s!="") abs_stmt(s) }
+}
+BEGIN { absn=0 }
+FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++
+         absscope=FILENAME"#file"; absrun=""; abscont=""; absloop=0 }
 {
   line=$0
   if (inhere){ if(line ~ ("^[ \t]*"delim"[ \t]*$")) inhere=0; next }
@@ -55,34 +221,70 @@ FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++ }
   if (match(hl, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/)) {
     d=substr(hl,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; next
   }
-  if (line ~ /^@test .*\{[ \t]*$/){ intest=1; pend=""; next }
+  if (line ~ /^@test .*\{[ \t]*$/){
+    intest=1; pend=""; absscope=FILENAME":"FNR; absrun=""; abscont=""; absloop=0; next
+  }
+  # 0열 함수 정의 — 본문을 같은 상태 기계에 들인다(헤더 「코드 표면」). 증인 스코프는 **파일 수준**이다:
+  # setup()/스텁 팩토리는 그 파일의 모든 @test보다 먼저 도므로 개별 실행(`bats -f`)에서도 증인이 산다.
+  if (line ~ /^[A-Za-z_][A-Za-z0-9_]*\(\)[ \t]*\{/){
+    absscope=FILENAME"#file"; absrun=""; abscont=""; absloop=0
+    t=line; sub(/^[^{]*\{/,"",t)
+    if (t ~ /\}[ \t]*$/){ sub(/[ \t]*\}[ \t]*$/,"",t); abs_line(t); next }   # 한 줄 정의는 바로 닫힌다
+    intest=1; pend=""; abs_line(t); next
+  }
   if (!intest) next
-  if (line ~ /^\}[ \t]*$/){ intest=0; pend=""; next }
+  if (line ~ /^\}[ \t]*$/){ intest=0; pend=""; absrun=""; abscont=""; absloop=0; next }
   t=line; sub(/^[ \t]+/,"",t)
   if (t=="" || t ~ /^#/) next
   flush()
   if (t ~ /^![ \t]/)    pend=FILENAME":"FNR": [NEG] "t
   else if (t ~ /^\[\[/) pend=FILENAME":"FNR": [BB] "t
+  # [ABS]/[QV]는 pend(마지막-명령 면제)를 쓰지 않는다 — 부재 판정은 @test의 **마지막 줄**이 정상 자리다.
+  abs_line(line)
 }
-# 검출기가 **실제로 읽은** 파일 수를 호출자에게 알린다 — 형제 check-host-ports.sh와 같은 계약.
-END { printf "READFILES=%d\n", nfiles > "/dev/stderr" }
+END {
+  for(i=0;i<absn;i++){
+    split(absc[i], f, "\t")
+    if (f[4]=="stale") print f[2]": [ABS] "f[6]
+    if (f[5]=="FILE") continue
+    fl = (absfloor[f[3]]>0 || absfloor[f[1]"#file"]>0)
+    pc = (abspos[f[3]]>0  || abspos[f[1]"#file"]>0)
+    # ⚠️ **git grep은 양성 대조만 요구한다.** 피연산자가 파일시스템 경로가 아니라 pathspec이라
+    #    `[ -d … ]` 류 바닥값을 걸 대상이 없고, pathspec이 추적 파일과 하나도 안 맞을 때 git grep은
+    #    128이 아니라 **rc 1**을 낸다(실측 git 2.53.0) — 즉 그 붕괴는 같은 pathspec의 양성 대조로만
+    #    보인다. 여기에 파일시스템 바닥값을 강요하면 실제 구멍을 안 닫는 줄을 세우게 된다.
+    if (f[5]=="GIT") { if (!pc) print f[2]": [ABS-GIT] "f[6]; continue }
+    if (!(fl && pc)) print f[2]": [ABS-"f[5]"] "f[6]
+  }
+  # 검출기가 **실제로 읽은** 파일 수를 호출자에게 알린다 — 형제 check-host-ports.sh와 같은 계약.
+  printf "READFILES=%d\n", nfiles > "/dev/stderr"
+}
 AWK
 # 검출 실행(인자 검증·rc 포착·READFILES 대조)은 detect_run(guard.sh) 소유 — 여긴 awk 본문만.
 findings="$(detect_run check-bats-style "$DETECT" "${FILES[@]}")"
 # 검출기가 끝까지 돌았다 — 이제 마커를 낸다(검출기가 죽으면 이 줄에 닿지 않는다).
 scan_signal check-bats-style "${#FILES[@]}"
-neg="$(printf '%s\n' "$findings" | grep -c '\[NEG\]' || true)"; neg="${neg//[^0-9]/}"; neg="${neg:-0}"
-bb="$(printf '%s\n' "$findings" | grep -c '\[BB\]' || true)"; bb="${bb//[^0-9]/}"; bb="${bb:-0}"
-printf '%s\n' "$findings" | grep -E '\[(NEG|BB)\]' || true   # gate bats가 [NEG]/[BB] 검증
+count_class() { printf '%s\n' "$findings" | grep -c "$1" || true; }
+neg="$(count_class '\[NEG\]')"; neg="${neg//[^0-9]/}"; neg="${neg:-0}"
+bb="$(count_class '\[BB\]')";   bb="${bb//[^0-9]/}";   bb="${bb:-0}"
+abs="$(count_class '\[ABS')";   abs="${abs//[^0-9]/}"; abs="${abs:-0}"
+qv="$(count_class '\[QV\]')";   qv="${qv//[^0-9]/}";   qv="${qv:-0}"
+printf '%s\n' "$findings" | grep -E '\[(NEG|BB|ABS(-REC|-LOOP|-GIT)?|QV)\]' || true   # gate bats가 라벨을 검증
 rc=0
 if [ "$neg" -gt 0 ]; then
   echo "FAIL: 마지막 명령이 아닌 부정 단언 ${neg}곳 — bats가 침묵 통과. 'run …; [ \"\$status\" -ne 0 ]'로 재작성." >&2; rc=1
 fi
-if [ "$#" -gt 0 ]; then
-  [ "$bb" -eq 0 ] || { echo "FAIL: (명시 파일) 중간 [[ ]] ${bb}곳 탐지." >&2; rc=1; }
-else
-  echo "check-bats-style: 중간 [[ ]] ${bb} (baseline ${BB_BASELINE})"
-  [ "$bb" -le "$BB_BASELINE" ] || { echo "FAIL: 중간 [[ ]]가 baseline(${BB_BASELINE}) 초과(${bb}) — 신규는 'run …; [ … ]'로." >&2; rc=1; }
+if [ "$qv" -gt 0 ]; then
+  echo "FAIL: 부재를 재지 않는 \`grep -qv\` ${qv}곳 — -v는 줄 단위 반전이라 항진이다. 'run grep -qF -- TOKEN <<<\"\$out\"; [ \"\$status\" -eq 1 ]'로. cf. docs/traps-detail.md" >&2; rc=1
 fi
-[ "$rc" -eq 0 ] && echo "check-bats-style: 중간 부정 0곳 + [[ ]] ratchet OK"
+if [ "$#" -gt 0 ]; then
+  # 명시-파일(픽스처) 모드 — 래칫은 레포 전역 잔액이라 여기선 뜻이 없다. 네 클래스 전부 hard-zero.
+  [ "$bb" -eq 0 ] || { echo "FAIL: (명시 파일) 중간 [[ ]] ${bb}곳 탐지." >&2; rc=1; }
+  [ "$abs" -eq 0 ] || { echo "FAIL: (명시 파일) 부재 단언 위반 ${abs}곳 탐지." >&2; rc=1; }
+else
+  echo "check-bats-style: 중간 [[ ]] ${bb} (baseline ${BB_BASELINE}) · 부재 단언 ${abs} (baseline ${ABS_BASELINE})"
+  [ "$bb" -le "$BB_BASELINE" ] || { echo "FAIL: 중간 [[ ]]가 baseline(${BB_BASELINE}) 초과(${bb}) — 신규는 'run …; [ … ]'로." >&2; rc=1; }
+  [ "$abs" -le "$ABS_BASELINE" ] || { echo "FAIL: 부재 단언 위반이 baseline(${ABS_BASELINE}) 초과(${abs}) — [ABS]는 '-eq 1'로 고치고, [ABS-REC]/[ABS-LOOP]는 같은 @test나 그 파일 함수 본문에 **비공허 바닥값 + 양성 대조**를 함께 세워라. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」" >&2; rc=1; }
+fi
+[ "$rc" -eq 0 ] && echo "check-bats-style: 중간 부정 0곳 + grep -qv 0곳 + [[ ]]·부재 단언 ratchet OK"
 exit "$rc"

@@ -84,7 +84,6 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         with:
           root: cloudflare
-          state-key: cloudflare/prod/terraform.tfstate
       - name: terraform plan → job summary
         id: plan
         if: steps.pf.outputs.configured == 'true'
@@ -187,7 +186,6 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         with:
           root: cloudflare
-          state-key: cloudflare/prod/terraform.tfstate
       - name: terraform plan (-out=tf.plan)
         run: terraform -chdir=infra/cloudflare plan -input=false -lock-timeout=120s -out=tf.plan
       # primary merge→apply 경로 destroy 가드 — apex/www(public[*])·tunnel/ruleset/zone 등 구조적

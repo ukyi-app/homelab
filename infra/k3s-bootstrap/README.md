@@ -4,6 +4,10 @@
 
 **적용 방식** — **bootstrap 스크립트(owner 로컬)**: `host-up.sh`로 k3s·스토리지를 올리고 `verify-cluster.sh`로 검증. 버전 핀은 `versions.env`. CI 아님.
 
+**`versions.env` 어휘와 단일 값 리더** — 이 파일은 **두 방식으로** 읽힌다: 같은 트리 6파일이 `source`하고, 파괴 경계(`scripts/destroy-node.sh` · `scripts/dr-drill.sh`)와 `tests/gates/test_files-backup-phase-a.bats`는 `versions-read.sh <KEY>`로 **한 값만 텍스트로** 읽는다(파괴 직전 셸이 남의 export를 자기 환경에 들이지 않기 위해). 두 관측이 같으려면 어휘가 좁아야 한다 — 정본 형태는 `export <KEY>="<값>"` 한 줄이고 **값에 `"` · `$` · 백틱 · 백슬래시를 쓸 수 없다**. 백슬래시를 허용하면 `source`는 이스케이프를 해석하고(`"a\\b"` → `a\b`) 텍스트 리더는 원시 바이트를 돌려줘 두 소비자가 다른 값을 본다(후행 `\"`는 더 나쁘다 — 선언이 미종료로 남는다).
+
+리더의 종료코드는 **2분기**다: `rc 0` = 정본 선언 1회(stdout = 그 값, **선언된 빈 값 포함**) · `rc 1` = 판정 불가(파일 부재 · 키 부재 · 형태 위반 · 중복) + stderr 사유 한 줄. 옛 `sed -n 's/^export KEY="\(.*\)"$/\1/p' … || true` 한 줄은 그 셋을 **전부 빈 문자열로 접었고**, `BULK_MIGRATION_WINDOW_UNTIL`에서 그 빈 문자열은 "국면 B — 파괴해도 좋다"로 읽혔다. 어휘 강제는 `versions-read.sh --lint`이고, required 게이트에서 그것을 돌리는 것은 `infra/k3s-bootstrap/tests/test_11-versions-read.bats`다.
+
 **호스트 설정 계층** — `cloud-init.yaml`의 후계다. NUC은 이미 설치·부팅된 기계이고 `cloud-init status`가 `disabled`라(실측) first-boot 데이터는 실행될 기회가 없다. 그래서 **실파일 트리 + 멱등 설치기**다:
 - `host-config/` — 그대로 `/`에 놓이는 드롭인 트리(resolved · journald · sshd). `diff`가 곧 리뷰이고 **트리 열거가 곧 검사 도메인**이다.
 - `host-config.sh --check` (기본) — 선언 ↔ 디스크 **드리프트 검사**. sudo 불요.

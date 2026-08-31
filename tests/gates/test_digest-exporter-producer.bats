@@ -152,8 +152,11 @@ payload_lineno() { grep -n "$1" "$OUTDIR/payload.txt" | head -1 | cut -d: -f1; }
   run grep -qE '^digest_exporter_last_success_timestamp [0-9]{10}$' "$OUTDIR/payload.txt"
   [ "$status" -eq 0 ]
   # digest 라인은 하나도 없어야 한다(빈 DIGEST → continue)
+  # ⚠️ **경로 피연산자**다 — grep은 payload.txt 부재에 rc=**2**를 내는데 `-ne 0`은 그것을 "매치 없음"과
+  #    구별하지 않는다(= push가 통째로 사라져도 이 단언이 초록이 되는 부정-카운트 fail-open).
+  #    매치 없음은 정확히 rc=1이다. 이 파일의 부재 단언은 전부 같은 이유로 `-eq 1`이다.
   run grep -q '^ghcr_latest_digest{' "$OUTDIR/payload.txt"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "producer emits the heartbeat alongside partial scrape results" {
@@ -215,7 +218,7 @@ payload_lineno() { grep -n "$1" "$OUTDIR/payload.txt" | head -1 | cut -d: -f1; }
   [ "$status" -eq 0 ]
   # 하트비트가 유실됐다 → 시리즈가 낡아 DigestExporterStale이 운다(무성 실패가 아니다).
   run grep -q '^digest_exporter_last_success_timestamp ' "$OUTDIR/payload.txt"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]   # rc 2(payload.txt 부재)를 통과로 읽지 않는다
   # 반대로 카운트는 접두부라 살아남는다 — 하트비트가 앞에 있었다면 이 관계가 뒤집혀 두 알림 모두 침묵했다.
   [ "$(gauge digest_exporter_apps_configured)" = "2" ]
   [ "$(gauge digest_exporter_apps_scraped)" = "2" ]
@@ -234,8 +237,8 @@ payload_lineno() { grep -n "$1" "$OUTDIR/payload.txt" | head -1 | cut -d: -f1; }
   [ "$status" -eq 0 ]
   # 성공한 앱은 실패로 보고되지 않는다(로그가 거짓말하지 않는다).
   run grep -q 'app=page' "$OUTDIR/stderr.txt"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]   # rc 2(stderr.txt 부재)를 통과로 읽지 않는다
   # ⚠️ 자격증명·authfile은 절대 새지 않는다(skopeo stderr는 2>/dev/null로 버린다 — 정제된 한 줄만 낸다).
   run grep -qE 'authfile|config\.json|dockerconfigjson' "$OUTDIR/stderr.txt"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]   # rc 2(stderr.txt 부재)를 통과로 읽지 않는다
 }

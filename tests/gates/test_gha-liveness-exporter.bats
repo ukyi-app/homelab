@@ -268,8 +268,10 @@ EOF
   run grep -qE 'OUT="\$\{OUT\}gha_liveness_scraped \$\{SCRAPED\}' "$MF"
   [ "$status" -eq 0 ]
   # 라벨이 붙으면 red — `{`가 메트릭 이름 뒤에 오면 안 된다.
+  # rc 2(대상 부재)를 통과로 읽지 않는다 — 무매치는 정확히 rc 1이다. `-ne 0`이면 $MF가 사라져도
+  # "라벨 0건"으로 읽힌다. 바로 위 두 단언(rc 0)이 같은 파일의 양성 대조다.
   run grep -qE 'gha_liveness_(configured|scraped)\{' "$MF"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "the CronJob bounds itself (Replace + activeDeadlineSeconds + no service account token)" {

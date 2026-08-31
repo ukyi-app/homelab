@@ -30,14 +30,29 @@ teardown() { rm -rf "$FX"; }
   run bun tools/repin-ops-image.ts pg-tools:18-rclone "$NEW" --root "$FX"
   [ "$status" -eq 0 ]
   run grep -rhoE 'pg-tools:18-rclone@sha256:[0-9a-f]{64}' "$FX"
-  echo "$output" | grep -q "$NEW"
-  echo "$output" | grep -qv "$OLD" || { echo "OLD pg-tools digest가 남았다"; false; }
+  pins="$output"
+  printf '%s' "$pins" | grep -q "$NEW"
+  # 🔴 여기 있던 `echo "$output" | grep -qv "$OLD"`는 **라이브 항진명제였다**(2026-08-29 실측).
+  #    `-v`는 줄 단위 반전이라 다중 줄 피연산자에서 부재(∀줄 ¬매치)가 아니라 ∃줄 ¬매치를 잰다 —
+  #    5사이트 중 **1곳만 OLD로 남은** 출력을 넣어도 `ok`였다(전 사이트가 OLD일 때만 red가 났다).
+  #    즉 이 @test가 막겠다고 선언한 회귀(**일부** 사이트 미갱신)를 정확히 그 형태에서 놓쳤다.
+  #    피연산자가 사이트 수만큼의 줄이므로 부재는 **건수**로만 닫힌다: OLD를 가진 줄 0건.
+  #    (형제 관용구 `run grep -qF … <<<` + `[ "$status" -eq 1 ]`도 같은 주입에서 red다. 여기는
+  #     "몇 곳이 남았나"가 진단의 알맹이라 -c를 쓴다. cf. tests/gates/test_host-ports.bats:11)
+  run grep -cF "$OLD" <<<"$pins"
+  [ "$output" -eq 0 ] || { echo "OLD pg-tools digest가 ${output}곳 남았다:"; printf '%s\n' "$pins"; false; }
 }
 @test "repins every skopeo site to the new digest (2-site image)" {
   run bun tools/repin-ops-image.ts skopeo:alpine "$NEW" --root "$FX"
   [ "$status" -eq 0 ]
   run grep -rhoE 'skopeo:alpine@sha256:[0-9a-f]{64}' "$FX"
-  echo "$output" | grep -q "$NEW"
+  pins="$output"
+  printf '%s' "$pins" | grep -q "$NEW"
+  # 이름이 "every"인데 NEW 존재만 보면 2사이트 중 **1곳 미갱신**에 눈이 먼다 — 위 pg-tools 자리와
+  # 같은 클래스이고 처방도 같다(OLD를 가진 줄 0건). 2사이트라 부분 미갱신이 1가지뿐이지만,
+  # 그 하나가 정확히 이 @test가 막겠다고 선언한 회귀다.
+  run grep -cF "$OLD" <<<"$pins"
+  [ "$output" -eq 0 ] || { echo "OLD skopeo digest가 ${output}곳 남았다:"; printf '%s\n' "$pins"; false; }
 }
 @test "repinning one image does not touch the other (per-image isolation)" {
   # pg-tools만 재핀 — skopeo 사이트는 OLD 그대로여야 한다.
@@ -72,6 +87,30 @@ teardown() { rm -rf "$FX"; }
   [ "$opstags" = "$catalog" ] || {
     echo "bump.yaml opstag case 집합 != 도구 CATALOG 키 집합 — 새 ops 이미지를 한쪽에만 추가했다"
     echo "opstag:"; printf '%s\n' "$opstags"
+    echo "catalog:"; printf '%s\n' "$catalog"
+    false
+  }
+}
+@test "check-image-ownership's REPINNED_OPS set matches the tool CATALOG keys (no silent drift on a new ops image)" {
+  # 세 사본 중 이 쌍만 무증인이었다. (CATALOG ↔ bump.yaml)은 바로 위 @test가 대조하지만
+  # (CATALOG ↔ `check-image-ownership.ts`의 REPINNED_OPS)는 **주석뿐이었다**(소비자 2줄, 테스트 참조 0건).
+  # 한쪽에만 새 ops 이미지를 넣으면 `resolveOwner`의 REPINNED_OPS 매치가 실패해 `renovateReaches`로
+  # 떨어지고, renovate.json의 kubernetes manager가 `^platform/.+\.ya?ml$`를 덮으므로 그 참조가
+  # "owner: renovate"로 **초록**이 된다 — 배포 사고가 아니라 **오귀속**이고, 그 가드 헤더가 존재
+  # 이유로 적은 실패가 정확히 그것이다. 위 @test와 같은 파서 관용구·같은 바닥값 형태로 그 갭을 닫는다.
+  own="$ROOT/tools/check-image-ownership.ts"
+  tool="$ROOT/tools/repin-ops-image.ts"
+  # REPINNED_OPS 정규식에서 이미지 키(<repo>:<tag>)를 뽑는다 — 표기가 refRe와 동형(`…\/<key>@sha256:…`)
+  # 이라 이 파싱이 성립한다. 표기가 다시 갈리면 여기서 먼저 드러난다(바닥값이 그 붕괴를 잡는다).
+  repinned="$(grep -oE '\\/[a-z0-9-]+:[a-z0-9._-]+@sha256:' "$own" | sed 's|^\\/||;s|@sha256:$||' | LC_ALL=C sort -u)"
+  # 도구 CATALOG 키 집합(위 @test와 동일 관용구)
+  catalog="$(grep -oE '"[a-z0-9-]+:[a-z0-9._-]+": \{ minSites' "$tool" | sed 's/": .*//;s/"//' | LC_ALL=C sort -u)"
+  # 열거 붕괴 바닥값 — 둘 다 최소 2(pg-tools·skopeo). 양쪽이 함께 0이면 등식은 공허하게 참이다.
+  [ "$(printf '%s\n' "$repinned" | grep -c .)" -ge 2 ]
+  [ "$(printf '%s\n' "$catalog" | grep -c .)" -ge 2 ]
+  [ "$repinned" = "$catalog" ] || {
+    echo "check-image-ownership REPINNED_OPS 집합 != 도구 CATALOG 키 집합 — 새 ops 이미지를 한쪽에만 추가했다"
+    echo "repinned:"; printf '%s\n' "$repinned"
     echo "catalog:"; printf '%s\n' "$catalog"
     false
   }

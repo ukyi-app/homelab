@@ -2,6 +2,8 @@
 # AdGuard UI 노출 가드: 인터널 도메인(adguard.home.ukyi.app) HTTPRoute로 web-internal-tls 리스너에 붙는다.
 # 구 tailscale Ingress(.ts.net)는 제거됨 — break-glass는 kubectl port-forward(파드 up·DNS broken 시).
 # (@test 이름은 영어 — 디렉토리 단위 실행 시 한글 인코딩 깨짐. 중간 단언은 [ ]/grep 단순 명령.)
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
 
 H="$BATS_TEST_DIRNAME/httproute.yaml"
 K="$BATS_TEST_DIRNAME/kustomization.yaml"
@@ -18,7 +20,7 @@ K="$BATS_TEST_DIRNAME/kustomization.yaml"
 }
 
 @test "legacy tailscale Ingress is removed (kustomization no longer references it)" {
-  run grep -q 'ts-ingress' "$K"; [ "$status" -ne 0 ]
+  run grep -q 'ts-ingress' "$K"; [ "$status" -eq 1 ]
   run grep -q 'httproute.yaml' "$K"; [ "$status" -eq 0 ]
   [ ! -f "$BATS_TEST_DIRNAME/ts-ingress.yaml" ]
 }

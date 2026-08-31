@@ -91,11 +91,25 @@ lib() { bun -e "
   [ "$output" == "true,false,false,false,false,false,false" ]
 }
 
-@test "no inline pin regex literals reappear in kernel consumers" {
-  # 커널 채택 콜사이트(poll-ghcr·bump-tag·create-app)에 인라인/앵커드 핀 정규식 리터럴이 재출현하면
-  # FAIL — SSOT 우회 오배포 표면 회귀 가드(test_ledger-budget.bats:64-68 선례). 검사 리터럴 3종:
-  # 인라인 파서 몸통 `(.+?):(sha-` · 앵커드 tag `/^sha-[0-9a-f]` · 앵커드 digest `/^sha256:[0-9a-f]`.
-  # bump-tag.ts:15의 언앵커드 `sha-[0-9a-f]{7,40}` 템플릿(F-3 백로그)은 세 리터럴 어디에도 안 걸린다.
-  run bash -c "grep -hoF -e '(.+?):(sha-' -e '/^sha-[0-9a-f]' -e '/^sha256:[0-9a-f]' '$ROOT/tools/poll-ghcr.ts' '$ROOT/tools/bump-tag.ts' '$ROOT/tools/create-app.ts' | wc -l | tr -d ' '"
+@test "pin format literals live only in the kernel, never in its consumers" {
+  # 커널 채택 콜사이트(poll-ghcr · bump-tag · create-app · lib/digest-exporter)에 핀 형식 리터럴이
+  # 재출현하면 FAIL — SSOT 우회 오배포 표면 회귀 가드(test_ledger-budget.bats:64-68 선례).
+  # 검사 리터럴 3종: 인라인 파서 몸통 `(.+?):(sha-` · tag 몸통 · digest 몸통.
+  # ⚠️ tag/digest 몸통은 **언앵커드**로 센다. 착지 전 이 로스터는 앵커드 철자(`/^sha-…`)만 봤고,
+  #    그래서 bump-tag.ts가 손으로 재유도하던 언앵커드 tag 몸통이 판정 밖이었다 — 그 면제 주석이
+  #    바로 이 자리에 있었다. 12번이 그 재유도를 커널로 라우팅해 리터럴이 사라졌으므로, 이제 넓은
+  #    철자로 세어 **재유입까지** 막는다(재유도가 주석이든 코드든 파일 바이트로는 같다).
+  # ⚠️ `tools/lib/digest-exporter.ts`가 로스터에 새로 들어온다(오늘 0건이라 무비용) — bump-tag의
+  #    APPS 편집이 그 커널을 지나므로 이제 그 module도 "형식을 재유도할 수 있는 자리"다.
+  # ⚠️ `tools/lib/image-pin.ts`는 로스터에 **넣지 않는다** — 커널이 이 형식의 유일한 소재지라
+  #    거기 리터럴이 있는 것이 정상이다. 대신 아래 **양성 대조**로 쓴다: 커널에서 매치가 사라지면
+  #    술어가 죽은 것이고 위의 0건은 공허하다(바닥값 2 = TAG_BODY·DIGEST_BODY 두 상수).
+  #    세 번째 리터럴 `(.+?):(sha-`는 커널이 템플릿 보간으로 조립하므로 커널에도 0건이다.
+  LITERALS="-e '(.+?):(sha-' -e 'sha-[0-9a-f]' -e 'sha256:[0-9a-f]'"
+  run bash -c "grep -hoF $LITERALS '$ROOT/tools/poll-ghcr.ts' '$ROOT/tools/bump-tag.ts' '$ROOT/tools/create-app.ts' '$ROOT/tools/lib/digest-exporter.ts' | wc -l | tr -d ' '"
+  [ "$status" -eq 0 ]
   [ "$output" = "0" ]
+  run bash -c "grep -hoF $LITERALS '$ROOT/tools/lib/image-pin.ts' | wc -l | tr -d ' '"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 2 ]
 }

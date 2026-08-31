@@ -6,6 +6,10 @@
 #    호스트에는 zram·journald 상한·storage dir·sshd 하드닝이 **하나도 없었다**(실측 2026-08-11).
 #    문자열이 초록인 것과 호스트가 그렇다는 것은 다르다 — 그래서 이 파일은 트리 대조뿐 아니라
 #    `--apply` 실행 경로를 시임으로 **실제로 돌린다**.
+#
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다. 다만 이 파일의 두 재귀 단언은 피연산자가 `$TREE`
+#    (디렉토리)라 `-eq 1`만으로는 안 닫힌다 — setup의 **비공허 바닥값**과 각 @test의 **양성 대조**가
+#    한 쌍으로 닫는다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 load test_helper
 
 TREE="$BOOTSTRAP_DIR/host-config"
@@ -23,6 +27,9 @@ setup() {
 $( (cd "$TREE" && find . -type f \( -name '*.conf' -o -name '*.service' -o -name '*.timer' \)) | sed 's|^\./||' )
 EOF
   export FX
+  # 비공허 바닥값 — 선언 트리가 비면 픽스처도 비고, `$TREE`를 재귀로 훑는 아래 두 부재 단언이
+  # 도메인 0에서 rc 1을 받아 그대로 통과한다(`-eq 1`이 잡는 것은 경로 소실뿐이다).
+  [ -n "$(find "$TREE" -type f | head -n 1)" ]
 }
 run_hc() { HOSTCFG_ROOT="$FX" run "$BOOTSTRAP_DIR/host-config.sh" "$@"; }
 
@@ -129,8 +136,9 @@ run_hc() { HOSTCFG_ROOT="$FX" run "$BOOTSTRAP_DIR/host-config.sh" "$@"; }
   # ⚠️ 양성 대조 먼저: 부정 grep은 '매치 0'과 '대상 0'을 구별하지 못한다(traps-detail ③).
   run grep -rn 'DNSStubListener' "$TREE"
   [ "$status" -eq 0 ]
+  # 위 양성 대조 + setup의 비공허 바닥값이 재귀 피연산자를 한 쌍으로 닫는다(rc 1 = 무매치뿐).
   run grep -rniE 'zram|swap' "$TREE"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "the tree declares no dns-forward-trigger (OrbStack LISTEN-forward hack has no bare-metal role)" {
@@ -138,8 +146,10 @@ run_hc() { HOSTCFG_ROOT="$FX" run "$BOOTSTRAP_DIR/host-config.sh" "$@"; }
   # svclb hostPort가 노드 실주소에 직접 걸리므로 트리거할 대상이 없다.
   run grep -rn 'k3s-node' "$TREE" "$BOOTSTRAP_DIR/host-config.sh"
   [ "$status" -eq 0 ]
+  # 다중 피연산자라 둘 중 하나만 사라져도 rc 2다. `$TREE`가 비는 쪽은 setup 바닥값이 막고,
+  # 술어가 죽는 쪽은 위 양성 대조가 막는다.
   run grep -rn 'dns-forward-trigger' "$TREE" "$BOOTSTRAP_DIR/host-config.sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "rejects an unknown argument instead of silently defaulting" {
@@ -308,8 +318,15 @@ _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RU
   run grep -F -- "$INTERNAL_STORAGE_PATH" "$REC_LOG"
   [ "$status" -eq 0 ]
   [ -n "$BULK_STORAGE_PATH" ]
+  # ⚠️ 여기서 rc 2는 나오지 않는다 — `_sandbox`가 `: > "$REC_LOG"`로 로그를 **항상** 만들고
+  #    지우는 곳이 없다(모든 `_apply`는 `_sandbox`와 짝이다). 빈 파일 grep은 rc 1이고 rc 2는
+  #    파일이 아예 없어야 나온다 — 즉 "시임이 침묵한" 갈래는 `-eq 1`이 못 잡는다.
+  #    그 갈래를 닫는 것은 **위 양성 대조**다(2026-08-29 실측: host-config.sh의 RUN을 `:`로
+  #    바꿔 로그를 비우면 이 줄이 아니라 위 양성 대조가 먼저 운다).
+  #    이 `-eq 1`은 파일 전역의 부재 단언 규약이고, 막으려는 실제 회귀는 rc 0으로 여기서 잡힌다
+  #    (같은 날 실측: bulk를 만드는 `install -d` 한 줄을 --apply에 심으면 이 줄이 red).
   run grep -F -- "$BULK_STORAGE_PATH" "$REC_LOG"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "apply fails loudly when tailscale is absent instead of leaving cluster-dependent DNS" {
@@ -407,8 +424,9 @@ _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RU
   [ "$status" -eq 0 ]
   [ -f "$FX/etc/systemd/system/files-data-backup.service" ]
   [ -f "$FX/etc/systemd/system/files-data-backup.timer" ]
+  # host-config.sh가 리네임되면 rc 2다 — 위 `_apply`가 같은 파일을 실제로 실행해 실재를 증언한다.
   run grep -qE 'systemctl[[:space:]]+(enable|--now)' "$BOOTSTRAP_DIR/host-config.sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "a tree file outside the extension whitelist fails LOUDLY (not silently dropped)" {

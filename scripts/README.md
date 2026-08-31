@@ -1,21 +1,31 @@
 # scripts/ — 운영 셸 스크립트 인덱스
 
-부트스트랩·CI 게이트·시크릿 봉인·DR 운영 스크립트 모음. 각 스크립트의 **호출 경로**와
-**파괴성**을 명시한다. 크게 세 부류:
+부트스트랩·CI 게이트·시크릿 봉인·DR 운영 스크립트 모음. 이 인덱스가 소유하는 것은 **계산할 수 없는
+것**이다 — 각 스크립트의 **목적**·**파괴성**·**불변식**·**위험**.
 
-- **CI 게이트** — `make verify`/`make ci` 또는 `ci.yaml`이 호출하는 순수 검사(읽기 전용).
-- **시크릿/부트스트랩** — `make` 타겟이 호출, 라이브 클러스터에 쓰거나 봉인본을 산출.
-- **DR/owner 전용(파괴적)** — Makefile/워크플로에 배선 없이 **사람이 직접 실행**. 잘못 쓰면 데이터 유실.
+**가드는 어디서 실행되는지를 여기 적지 않는다.** 가드의 실행 경로는
+`bun tools/check-guard-authority.ts --json`이 venue에서 **계산한다**(venue 집합의 정의는 그 도구의
+헤더가 소유한다 — 여기 사본을 두지 않는다). 손으로 적은 사본은 반드시 드리프트한다. 2026-08-29
+실측: 「CI 게이트」 절 26개 항목 중 **12곳이 틀렸다** — 11곳은 비권위 mirror를 권위처럼 적었고,
+`sops-guard.sh`는 정반대 방향으로 적혀 있었다(어디에도 없다고 했는데 실제로는 required 스텝이
+가진다). 같은 절의 **4곳**은 아예 한 글자도 적지 않았고, 나머지 두 절에도 mirror 주장이 6곳 더
+있었다 — 한 파일 안에서 같은 종류의 사실이 맞고·틀리고·비어 있었다.
+
+**가드가 아닌 스크립트는 그 계산의 도메인 밖이다** — `bootstrap.sh`·`dr-drill.sh`·`teardown.sh`처럼
+가드 이름 모양(`check-*`/`verify-*`/`*-guard`/`*-check`)이 아닌 것들은 계산원이 없으므로 이 인덱스가
+실행 경로의 SSOT다. 그 문장을 지우면 정보 손실이 0이 아니다. 경계는 `scripts/check-doc-index.sh`가
+강제하고, 두 집합이 실제로 일치하는지는 게이트가 권위 도구와 대조한다.
+
+절 제목 셋이 부류 라벨이다 — CI 게이트(읽기 전용 순수 검사) · 시크릿/부트스트랩(라이브 클러스터에
+쓰거나 봉인본을 산출) · DR/owner 전용(파괴적 — 잘못 쓰면 데이터 유실).
 
 > CNPG 복구·DR 절차 상세는 (gitignored) `docs/runbooks/restore.md`·`docs/runbooks/host-substrate.md` 참고.
 
 ## CI 게이트 (읽기 전용 검사)
 
-- **`check-skeleton.sh`** — 필수 디렉토리 스켈레톤 존재 검사. `make verify`·**`bun run verify:skeleton`**·
-  `ci.yaml`(gate)이 호출. 라이브 무관.
+- **`check-skeleton.sh`** — 필수 디렉토리 스켈레톤 존재 검사. 라이브 무관(순수 파일 존재).
 - **`check-bats-accounting.sh`** — 모든 추적 `test_*.bats`가 정확히 한 도메인(gate / chart-test /
-  `.ci-exclude`)에 배정됐는지 검사(고아·이중소유 차단). `make verify`·`ci.yaml`(gate 명시 스텝)이 호출.
-  `run-bats.sh --list`를 읽는다. 도메인 회계만으로는 **gate → `.ci-exclude` 이동**이 원리적으로 안 보이므로
+  `.ci-exclude`)에 배정됐는지 검사(고아·이중소유 차단). `run-bats.sh --list`를 읽는다. 도메인 회계만으로는 **gate → `.ci-exclude` 이동**이 원리적으로 안 보이므로
   (옮겨도 여전히 "정확히 한 도메인") 레지스트리 계약 두 가지가 더 붙는다: 항목은 빈 줄로 끊긴 직전 주석
   블록의 지배를 받고 그 블록이 `실행처`를 명시 + 항목 수 **상한**(`BATS_EXCLUDE_MAX`). 여기에 gate 도메인
   바닥값(``--floor gate=<n>`` — 러너 붕괴·대량 삭제)까지 셋이 각각 다른 축이다.
@@ -25,31 +35,36 @@
   `tools/app-deploy-schema.json`(SSOT)에서 읽어 강제(`source-repo` 누락/공백 = fail-closed) + **봉인 배선
   all-or-none 불변식**(봉인본⇔envFrom `<app>-secrets`⇔kustomization 등재⇔checksum/secrets, 부분 상태 거부)
   + `S → checksum 정합`(#277 재발 방지) + **strict scope**(namespace-wide/cluster-wide 어노테이션 거부, patch는
-  통과) + **파일명 규약**(`<app>-secrets.sealed.yaml` 하나만 허용). `make verify`가 호출. 인자 없는 기본 모드에서 앱 열거 0건은 **scan-floor로 실패**(vacuous pass 아님).
+  통과) + **파일명 규약**(`<app>-secrets.sealed.yaml` 하나만 허용). 인자 없는 기본 모드에서 앱 열거 0건은 **scan-floor로 실패**(vacuous pass 아님).
 - **`run-bats.sh`** — **단일 테스트 수집·실행기(required GATE)**. `make ci`·`ci.yaml`(gate)이 공통 호출(이중 SSOT 제거).
   스코프 = git-tracked `test_*.bats` − `platform/charts/*`(chart-test 별도) − `tests/.ci-exclude`. `--list`는 수집 목록만.
 - **`verify-secrets.sh`** — 추적 `*.enc.yaml` 무결성(암호화됨 + age recipient 신원이 canonical(.sops.yaml
-  cluster+recovery)과 일치 + 복호 가능) 검사. **`make verify-secrets`**가 호출. 값 비출력; age 키 없으면(=CI) 복호 단계만 스킵하고 구조 검사는 수행.
+  cluster+recovery)과 일치 + 복호 가능) 검사. 값 비출력; age 키 없으면(=CI) 복호 단계만 스킵하고 구조 검사는 수행.
 - **`verify-traps.sh`** — `docs/traps.md` enforcement 원장이 가리키는 guard 파일이 실재하는지 검사
-  (가드 소실 드리프트 = 거짓 안심 차단). **`make verify-traps`**가 호출. 순수 파일 존재 검사.
+  (가드 소실 드리프트 = 거짓 안심 차단). 순수 파일 존재 검사.
 - **`ledger-to-json.ts`** — `docs/memory-ledger.md` 표를 JSON으로 변환(conftest 입력 생성). **`bun run verify:ledger`**·
   `make verify`·`ci.yaml`(gate)이 호출(출력을 `conftest test … policy/ledger.rego`로 파이프). 라이브 무관.
 - **`sops-guard.sh`** — 인자로 받은 `*.enc.yaml`이 실제 sops 암호화됐는지(평문 누출 차단) 검사.
-  pre-commit 가드 훅이 호출(staged 파일). `make`/워크플로 배선 아님.
-- **`check-doc-index.sh`** — `scripts/`·`tools/`·`.github/workflows/` 산출물이 해당 README에 등재됐는지
-  검사(가드 없는 인덱스 드리프트 소멸). **`make verify`**·gate(`tests/gates/test_check-doc-index.bats`)가 호출. 순수 문자열 검사.
+  **인자 필수** — 대상 목록(staged 파일 등)은 호출자가 소유한다.
+- **`check-doc-index.sh`** — 두 레인. ① **등재**: `scripts/`·`tools/`·`.github/workflows/` 산출물이 해당
+  README에 있는지(가드 없는 인덱스 드리프트 소멸). ② **스코프**: 이 파일의 **가드 bullet**이 계산 가능한
+  실행 경로를 주장하지 않는지 — 판정 단위는 `- **` bullet 전건 + bullet 밖 산문이고(절 스코프는 절
+  이름을 바꾸면 통째로 우회된다), 가드가 아닌 bullet은 계산원이 없어 스코프 밖이자 **검출기의 상시
+  양성 대조**다. 순수 문자열 검사.
 - **`check-app-netpol.sh`** — `apps/<app>/deploy/**`의 app-owned NetworkPolicy가 app-scoped 셀렉터
-  (`app.kubernetes.io/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). **`make verify`**가 호출. netpol 0건은 통과지만 **매니페스트 열거 0건은 scan-floor로 실패**(vacuous pass 아님).
+  (`app.kubernetes.io/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). netpol 0건은 통과지만 **매니페스트 열거 0건은 scan-floor로 실패**(vacuous pass 아님).
 - **`check-pg-servername.sh`** — CNPG **아카이브 serverName** 분리 가드. `serverName` 한 줄이 `s3://<bucket>/<serverName>/`를 통째로 정하고, 두 primary가 같은 값을 쓰면 타임라인이 섞여 오프사이트 PITR 경로가 망가진다(R2 버저닝 없음 = 되돌릴 수 없음). (A) 쓰기 ≠ 읽기 정합은 항상, (B) `EXPECT_PG_SERVERNAME` 고정은 **main 진입 시에만**(`check-argocd-revision.sh`와 같은 이유로 분리).
 - **`check-argocd-revision.sh`** — ArgoCD **자기레포** 리비전 핀 정합. `repoURL`을 가진 맵 노드를 **재귀로**
   뽑아(Application 단일/다중 소스 · ApplicationSet template 소스 · git generator `revision` — 모양을 세지 않는다)
   자기레포 참조 전건이 **같은 값**인지 강제한다(A). `EXPECT_REVISION`(또는 `--expect`)이 주어지면 그 값과의
-  일치까지 본다(B) — ci.yaml이 **main으로 들어갈 때만** 채운다. (B)를 기본으로 켜면 마이그레이션 브랜치의
-  gate가 영구 red가 되고 `test_scan-floor.bats`(무인자 rc=0 요구)까지 같이 죽는다. 자기레포 판정은 앵커
+  일치까지 본다(B) — 그 변수는 **main 진입 시에만** 채워진다. (B)를 기본으로 켜면 마이그레이션 브랜치의
+  gate가 영구 red가 되고, 무인자 rc=0을 요구하는 형제 게이트까지 같이 죽는다. 자기레포 판정은 앵커
   (`platform/argocd/root/root-app.yaml`의 repoURL) **정규화 후 비교** — 리터럴 대조는 `.git` 접미사 하나로 눈이 먼다.
-  **`make ci`**·gate(`tests/gates/test_argocd-revision.bats`)가 호출.
-- **`check-bats-style.sh`** — bats 단언-스타일 가드: `@test` 본문의 중간(마지막 아님) 부정(`! `)·조건(`[[ `)
-  단언을 잡는다(bats가 침묵 통과시키는 false-green 가드 차단; NEG=hard-zero·BB=ratchet). `tests/gates/test_bats-style.bats`가 호출.
+- **`check-bats-style.sh`** — bats **코드 표면**(`@test` 본문 + 0열 함수 본문) 단언-스타일 가드.
+  네 클래스: 중간(마지막 아님) 부정(`! `)·조건(`[[ `) — bats가 침묵 통과시키는 false-green 단언 ·
+  부재 단언 `[ABS]`(`run grep <경로>` + `-ne 0`은 무매치 rc 1과 대상 부재 rc 2를 구별하지 못한다;
+  재귀·디렉토리·루프 자리는 비공허 바닥값 + 양성 대조를 **형태로** 요구) · `[QV]`(`grep -qv`의 줄 단위
+  반전은 부재가 아니라 항진이다). NEG·QV=hard-zero · BB·ABS=ratchet.
   기본 모드에서 스캔 대상이 0건이면 통과가 아니라 **열거 붕괴**(scan-floor, exit 1) — 같은 도메인을 쓰는
   check-skeleton·check-bats-accounting과 같은 채널이다(skip 규약 아님).
 - **`check-locale-collation.sh`** — 로케일 콜레이션 가드: 게이트의 `sort`가 `LC_ALL=C` 접두(또는 숫자
@@ -60,53 +75,51 @@
   사유와 함께 분류돼 있어야 한다(ledger/inventory-only/identifier/provided). `ledger` 갈래는
   `policy/credential-expiry.json` 행과 기계 대조된다. 미분류·stale·이중선언 전부 fail-closed.
 - **`check-host-ports.sh`** — 호스트 포트 위생 가드: `tests/gates/**`의 하네스가 호스트 포트를
-  **리터럴로 박는** 자리를 hard-zero로 막는다(레인 A publish 인자 · B 리스너 헬퍼 인자 · C 배정 lib
-  미사용 · D 포트 변수를 자기가 리터럴로 채움 — `HP_` 이름공간만 면제, 밴드 상수의 정의처라서다).
+  **리터럴로 박거나** 기동 프리미티브를 우회하는 자리를 hard-zero로 막는다(publish 인자 · 리스너 헬퍼
+  인자 · 배정 lib 미사용 · 포트 변수를 자기가 리터럴로 채움 · publish 컨테이너를 기동 프리미티브 없이
+  띄움 — `HP_` 이름공간만 면제, 밴드 상수의 정의처라서다).
   이 클래스의 결함은 red가 아니라 **오진**으로 나타난다: 예전 AM 렌더 e2e는 mock을 `8089`에 `&`로
   띄워 바인드 실패가 `set -e`에 안 걸렸고, 30초 뒤 "no telegram capture within timeout"으로 죽어
-  진단이 포트가 아니라 메시지 템플릿을 가리켰다. 배정 프리미티브는 `tests/gates/lib/host-port.sh`.
+  진단이 포트가 아니라 메시지 템플릿을 가리켰다. 배정·기동 프리미티브는 `tests/gates/lib/host-port.sh`.
 - **`verify-credential-inventory.sh`** — 런북 `token-inventory.md` §A 표 ↔ `policy/credential-expiry.json`
   **양방향** 정합 + "N건 등재" 수치 대조. 런북이 gitignored라 **로컬 전용**이고 부재는 SKIP(exit 4).
   병(2026-08-21 실측): 원장에는 `github-tf-ci-pat`·`r2-terraform-state`가 들어갔는데 §A 표는 3건인
   채였다 — `check-credential-expiry.sh`는 원장 **안**만 보므로 이 방향에 원리적으로 침묵한다.
-  진입점은 `make verify-credential-inventory`.
 - **`check-bats-fd0.sh`** — bats 호출면의 `</dev/null` 규약 hard-zero 가드. bats는 stdin을 만지지 않고
   @test에 그대로 물려주므로, 스텁이 피연산자 없이 fd 0을 읽으면 호출자 stdin에서 **영구 블록**한다
-  (red가 아니라 hang — 이전 세션이 1시간 39분을 태운 형태, PR #520). ⚠️ venue가 갈린다: ci.yaml은
-  러너를 `&`로 띄워 fd 0이 `/dev/null`이라 **CI는 우연히 면역**이고 `make ci`만 밟는다.
+  (red가 아니라 hang — 이전 세션이 1시간 39분을 태운 형태, PR #520). ⚠️ 같은 러너라도 호출면에 따라
+  갈린다: `&`로 띄운 호출면은 fd 0이 `/dev/null`이라 **우연히 면역**이다 — 그 우연 때문에 어떤 venue는
+  영영 이 병을 못 재현하고, 규약을 정적으로 강제해야 하는 이유가 정확히 그것이다.
   면제는 파일 목록이 아니라 그 파일이 `exec 0</dev/null`을 하는지로 판정한다.
   바닥값의 대상은 파일 수가 아니라 **호출면 수**다(파일 수로 걸면 정규식이 깨져도 통과한다).
 - **`check-skip-signalling.sh`** — 가드 skip 신호 규약(CONTRIBUTING '가드 skip 신호')의 정적 가드:
   `SKIP: <가드>: <이유>` 마커와 skip 종료코드(셸 `exit 4` / TS `process.exit(4)`)가 **같은 줄에서 짝**을
   이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + Makefile
   전수(자기 자신 제외 — 패턴 리터럴이 위반과 같은 모양). 열거 붕괴 차단용 바닥값 보유(오버라이드는 `--floor check-skip-signalling=<n>`).
-  `tests/gates/test_guard-skip-signalling.bats`가 호출(양방향 픽스처 음성 테스트 + 열거 바닥값).
 - **`check-scan-producers.sh`** — 가드 스캔 신호 규약(CONTRIBUTING '가드 스캔 신호')의 **거부 가드**:
   추적 `tools/**/*.ts`·`*.mts`의 코드 줄이 커널(`tools/lib/scan-floor.ts`)을 우회해 `SCAN:` 마커를 직접
-  출력하면 red. 로스터 등식(`test_scan-floor.bats`)은 되돌린 가드가 정적·런타임 양쪽에서 함께 사라져
+  출력하면 red. 로스터 등식은 되돌린 가드가 정적·런타임 양쪽에서 함께 사라져
   못 잡으므로(게이트 r1 F1) 인식이 아니라 거부가 문을 닫는다. 판정 선은 "출력 동사의 인자가 마커
   리터럴로 시작"(여러 줄 호출 포함) — 마커를 다루는 소비자·진단문은 선 밖이라 제외 목록이 없다.
   주석(`//`·블록 주석 상태 기계·꼬리 주석)을 걷어낸 뒤 판정하고, 면제는 커널 경로 하나 — 그 파일도
   건너뛰지 않고 생산자 히트 ≥1을 검출기 생존 증거로 요구한다. awk 3겹 처방(rc 포착·`[ -r ]`·READFILES)
   + 바닥값·마커는 검출 뒤. 바닥값은 상수(`MIN_FILES`, env 주입 없음) · `--root <dir>`는 픽스처 전용.
-  `tests/gates/test_scan-floor.bats`가 호출(되돌림·신규 생산자·주석 표면·소비자·검출기 붕괴·열거 붕괴 증인).
 - **`check-floor-vocab.sh`** — 바닥값 어휘 거부 가드(kernel-followups 04): 구 어휘의 재유입 —
   `--min-*` 플래그 표면 · `${…MIN…:-…}` env 폴백 읽기(셸) · `process.env.…MIN…`(TS) — 을 정적
   red로 만든다. 상수 정의·지역 읽기·주석 산문·`*.bats`(거부 증인 픽스처)는 정당 보유처로 선 밖.
   패턴은 조립식(self-exclusion 없음), 검출은 detect_run(rc·READFILES 대조), 오버라이드는
-  `--floor check-floor-vocab=<n>` 하나(dogfood). `tests/gates/test_floor-vocab.bats`가 게이트.
+  `--floor check-floor-vocab=<n>` 하나(dogfood).
 - **`check-credential-expiry.sh`** — 자격증명 만료 원장(`policy/credential-expiry.json`) 검사. `--days N`
-  (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). `credential-expiry.yaml`(주간)이 D-14 telegram 경고로
-  중계, `tests/gates/test_credential_expiry.bats`가 가드. jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)
+  (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). 주간 telegram 경고의 임계는 **D-14**.
+  jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)
 - **`check-image-pins.sh`** — 이미지 digest 핀 2-레인 게이트: 레인1(platform 문자열 `image:`)·레인2(apps values
   `image:` 구조체 `digest:`). 벤더(barman-plugin)·테스트/픽스처(`**/tests/**`·`**/fixtures*/**`) 제외, substrate 스코프 밖,
-  scan-floor. 예외=`policy/image-pin-allowlist.txt`(사유 주석). `tests/gates/test_image_pins.bats`가 픽스처+실-레포로 가드.
-  **`make verify` 배선됨**(Task 9, 24 이미지 수동 핀 후 실 레포 통과). 신규 미핀 이미지는 fail-closed 차단. (메타갭 ②)
+  scan-floor. 예외=`policy/image-pin-allowlist.txt`(사유 주석). 신규 미핀 이미지는 fail-closed 차단. (메타갭 ②)
 - **`verify-ledger.sh`** — 메모리 원장 예산 게이트 SSOT. `bun tools/ledger-to-json.ts` 출력을
-  `conftest … policy/ledger.rego`로 검사. **`bun run verify:ledger`**·`make verify`·`make ci`·`ci.yaml`(gate)이 호출.
+  `conftest … policy/ledger.rego`로 검사.
 - **`verify-runbook-index.sh`** — `docs/runbooks/`(gitignored) ↔ AGENTS.md 런북 인덱스 정합(로컬 전용).
   런북 부재 시 **SKIP 신호**(exit 4 + `SKIP:` 마커 — CONTRIBUTING '가드 skip 신호'; exit 0은 "실제로
-  대조했고 정합"만 뜻한다). **`make verify-runbook-index`**가 호출.
+  대조했고 정합"만 뜻한다).
 - **`audit-orphan-pv.sh`** — 고아 Released PV 감사(storageclass Retain이라 PVC 삭제 시 PV 누수). 나열만
   (비파괴), reclaim은 owner 수동. **`make audit-orphan-pv`**(라이브 ops)가 호출. `tests/gates/test_audit-orphan-pv.bats`가
   가드. ★fail-closed(도구/쿼리 실패=비-0).
@@ -121,11 +134,10 @@
   선언 테이블로 통합. `make seal-<name>`(별칭)·`make seal-all`(회전 드릴)이 호출. 봉인 전 `secret-cert-check`
   preflight fail-closed(break-glass `--offline-ok`). 평문·해시·토큰은 kubeseal stdin 전용(값 미출력).
 - **`secret-cert-check.sh`** — 봉인 전 preflight: 커밋된 `tools/sealed-secrets-cert.pem`이 라이브
-  컨트롤러 cert와 fingerprint 일치하는지(stale 차단) 검사. **`make secret-cert-check`**가 호출.
-  read-only(fetch만); 오프라인/kubeseal 부재면 **SKIP 신호**(exit 4 + 마커 — 예전 2는 unknown-option과
+  컨트롤러 cert와 fingerprint 일치하는지(stale 차단) 검사. read-only(fetch만); 오프라인/kubeseal 부재면 **SKIP 신호**(exit 4 + 마커 — 예전 2는 unknown-option과
   같은 코드였다). 호출자(`seal-batch.ts`)는 4=미평가와 1=stale을 구별해 보고한다. `sealing-key-dr-gate.sh` 로직 재사용.
 
-## DR / owner 전용 — 파괴적 (직접 실행, Makefile/워크플로 배선 주의)
+## DR / owner 전용 — 파괴적
 
 - **`reset-pg-r2-archive.sh`** — **파괴적**. fresh initdb `pg`가 R2의 옛 barman 아카이브와 충돌할 때
   serverName `pg` 아카이브(base/+wals/)만 정리해 아카이빙 재개. **`make reset-pg-archive`**가 호출하되

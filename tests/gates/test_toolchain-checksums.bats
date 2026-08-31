@@ -3,12 +3,14 @@
 # TLS만 믿으면 미러/계정 침해 시 변조 바이너리가 gate 러너에서 실행된다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 
-setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actions/setup-toolchain/action.yml"; }
+# ⚠️ 검사 도메인(action.yml)이 실재하는지 setup에서 닫는다 — 아래 부재 단언은 전부 이 한 파일을 읽는다.
+setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actions/setup-toolchain/action.yml"; [ -f "$A" ]; }
 
 @test "age is pinned to a fixed version (not latest)" {
   # dl.filippo.io/age/latest 무핀 경로가 사라졌는가
   run grep -E 'dl\.filippo\.io/age/latest' "$A"
-  [ "$status" -ne 0 ]
+  # ⚠️ `-ne 0`은 grep rc 2(대상 파일 부재/읽기불가)도 통과로 읽는다 — 무매치는 정확히 rc 1이다.
+  [ "$status" -eq 1 ]
   # 고정 버전 자산(age-v...-linux-arm64.tar.gz)으로 받는가
   run grep -E 'age/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/age-v[0-9]' "$A"
   [ "$status" -eq 0 ]
@@ -20,10 +22,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   # gate를 깰 위험이 있다 → 불변 커밋 SHA로 clone+검증한다(git 객체 content-addressed, fetch 시 git이 SHA 검증).
   # apt 설치 경로 부재(원 SPOF 재발 차단)
   run grep -E 'apt-get (update|install).*bats|install.*-y bats' "$A"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]   # rc 2(대상 부재)를 통과로 읽지 않는다
   # 불안정 자동생성 아카이브 경로 부재(R-1 재발 차단)
   run grep -E 'bats-core/bats-core/archive/' "$A"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]   # rc 2(대상 부재)를 통과로 읽지 않는다
   # bats-core를 clone하고 HEAD를 고정 40-hex 커밋 SHA와 대조 검증하는가(content-addressed 불변 핀)
   run grep -E 'git clone .*github\.com/bats-core/bats-core' "$A"
   [ "$status" -eq 0 ]
@@ -61,5 +63,6 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
 @test "no checksum line is an obvious placeholder" {
   # 0000.../deadbeef/TODO/REPLACE 류 더미가 커밋되지 않았는지
   run grep -Ei 'REPLACE|TODO|deadbeef|^0{16}|[[:space:]]0{64}[[:space:]]' "$A"
-  [ "$status" -ne 0 ]
+  # 이 @test는 부정 단언 하나뿐이다 — rc 2(대상 부재)가 통과가 되면 검사가 통째로 vacuous해진다.
+  [ "$status" -eq 1 ]
 }

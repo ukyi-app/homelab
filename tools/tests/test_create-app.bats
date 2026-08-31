@@ -1,5 +1,8 @@
 #!/usr/bin/env bats
 # create-app 생성기 — .app-config.yml → values.yaml + .bindings.json + apps.json + sealed 시크릿
+# ⚠️ 부재 단언 규약(`-eq 1`)은 docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a가 SSOT다.
+#    이 파일 고유 사정: 비-0 단언 대부분은 create-app.ts의 **거부 계약**(중복 host·예약 host·
+#    봉인 계약 위반)이라 비대상이고, 경로 피연산자는 생성 산출물을 보는 한 곳뿐이다.
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -46,8 +49,10 @@ gen() {
 @test "create-app values.yaml has no migrate/db.enabled (migrate removed)" {
   gen
   [ "$status" -eq 0 ]
+  # ⚠️ 피연산자가 gen 산출물인데 이 @test에는 양성 형제가 없다 — create-app이 values.yaml을 다른
+  #    경로에 쓰게 되면 `-ne 0` 형태는 "migrate 없음"을 조용히 계속 보고했다.
   run grep -E "migrateCmd|^db:" "$FR/apps/orders/deploy/prod/values.yaml"
-  [ "$status" -ne 0 ]   # migrate Job 제거 → values.db.enabled/migrateCmd 미생성
+  [ "$status" -eq 1 ]   # migrate Job 제거 → values.db.enabled/migrateCmd 미생성
 }
 
 @test "bindings.json records only autoDeploy (no db/redis — connection is a sealed secret)" {

@@ -107,6 +107,52 @@ run_teardown_tty() {
   [ "$status" -ne 0 ]
   # 브랜치 명명 계약 원장 단언(_teardown-app.yaml SSOT).
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:teardown/teardown-app-myapp-901" --jq)" -ge 1 ]
+  # 양성 대조 — 이 초록이 **두 ref 관측**으로 서 있다: 머지 SHA 부재 + 철거 전 ref(first parent) 실재.
+  # 아래 두 argv가 없으면 성공은 표면 축 없이 난 것이다(다음 테스트가 그 공백의 손해를 잰다).
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api "repos/ukyi-app/homelab/commits/feedbee" --jq ".parents[0].sha"
+  [ "$status" -eq 0 ]
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api "repos/ukyi-app/homelab/contents/apps/myapp/deploy/prod/values.yaml?ref=dadfeed" --jq .sha
+  [ "$status" -eq 0 ]
+}
+
+@test "a surface absent at the pre-teardown ref too is a failure, never a silent teardown approval" {
+  printf '%s\n' "$MERGED" > "$FIX/db-prs.json"
+  # STUB_SURFACE_NEVER=1 = 어느 ref에서도 404. 라이브에서 이 모양을 내는 사유는 여럿이다 —
+  # surfacePath 오타·표면 드리프트·이미 부재. 종전에는 셋 다 "철거 완료"와 같은 값(success)이었고,
+  # 손해 방향이 파괴 승인이었다. 부재가 관측이 되려면 철거 전 ref에 실재했어야 한다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    STUB_SURFACE_NEVER=1 \
+    "$BUN" tools/homelab.ts app teardown myapp --confirm myapp --poll-ms 10 --deadline-ms 300 --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "철거 전 ref(dadfeed)"
+  echo "$output" | jq -r '.result.error' | grep -q "부재가 철거의 증거가 아니다"
+  # 판정이 표면 축에서 끝났다 — 클러스터 부재 조회를 근거로 삼지 않았다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" kubectl)" = "0" ]
+}
+
+@test "an undecided pre-teardown ref is pending, not a converged absence" {
+  printf '%s\n' "$MERGED" > "$FIX/db-prs.json"
+  # (1) first parent 조회 자체가 전송 오류 — 철거 전 ref를 특정하지 못한 미확정.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    STUB_SURFACE_MERGE_ABSENT=1 STUB_PARENT_FAIL=1 \
+    "$BUN" tools/homelab.ts app teardown myapp --confirm myapp --poll-ms 10 --deadline-ms 300 --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "철거 전 ref"
+  # (2) 철거 전 ref는 특정됐으나 그 ref의 blob 조회가 전송 오류 — 같은 미확정 극성.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    STUB_SURFACE_MERGE_ABSENT=1 STUB_SURFACE_BEFORE_ERROR=1 \
+    "$BUN" tools/homelab.ts app teardown myapp --confirm myapp --poll-ms 10 --deadline-ms 300 --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "철거 전 ref"
+  # (3) parents가 비어 있는 root 커밋도 성공이 아니라 미확정이다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    STUB_SURFACE_MERGE_ABSENT=1 STUB_PARENT_ROOT=1 \
+    "$BUN" tools/homelab.ts app teardown myapp --confirm myapp --poll-ms 10 --deadline-ms 300 --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
 }
 
 @test "an Application that is still present is prune-in-progress, not success" {

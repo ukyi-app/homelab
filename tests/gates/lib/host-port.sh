@@ -139,3 +139,102 @@ hp_pick_port() {
   hp_err "빈 포트를 찾지 못했다(${HP_PORT_LO}-${HP_PORT_HI}에서 ${HP_PICK_TRIES}회) — 판정 불가는 '통과'가 아니다"
   return 1
 }
+
+# ── 컨테이너 기동 프리미티브 ──────────────────────────────────────────────────────
+# publish 컨테이너를 띄우는 **처방 SSOT**. 예전엔 이 6불변식이 두 벌로 손 유지됐다
+# (`lib/vmalert-e2e.sh`의 vmsingle · `alertmanager-render-e2e.sh`의 AM) — 출처가 같은 커밋이고
+# 그 제목이 "처방이 한 소비자 lib에 갇히면 인접 표면은 원리적으로 그 처방을 못 받는다"였는데,
+# 같은 커밋에서 같은 클래스가 한 층 위(포트 배정 → 컨테이너 기동)로 재발했다. AM 사본은 그 사실을
+# 주석으로 **3회** 자백했다("형제 vme_start_vmsingle과 같은 처방·같은 판별자").
+# 6불변식: `docker rm -f` 선행 · `--rm` 금지 · 실패를 메시지·종료코드로 비판별 · 서로 다른 포트로
+#          재추첨 재시도 · 요청↔실제 매핑 대조 · 실패 시 `docker logs … tail -20`.
+#
+# ⚠️ **seam은 readiness 앞에서 끊는다.** vmsingle의 `/health` 본문 `OK*` 판정과 AM의 `/-/ready`는
+#    **하네스-로컬 정책이다**(CONTEXT.md 「판정 어휘」 · ADR-0005가 지킨 축). 이 프리미티브가
+#    readiness를 소유하면 그 ADR을 어긴다 — 여기서는 "매핑이 우리가 요청한 대로인가"까지만 본다.
+#    그 대조가 통과한 뒤의 응답 해석은 소비자가 각자의 판정 어휘로 한다.
+# ⚠️ 헤더 규율 승계: 이 함수도 `exit`하지 않는다. 실패는 stderr + rc 1이고, 종료 규약 번역은
+#    소비자가 소유한다(vme = `vme_fault`의 exit 2, AM = exit 1).
+HP_BIND_TRIES="${HP_BIND_TRIES:-3}"   # 첫 시도 + 재추첨 2회(판별에 필요한 최소치는 2다)
+
+# $1=컨테이너 이름 $2=컨테이너 포트 $3=배제 포트 목록(공백 구분, 없으면 "")
+# $4.. = `docker run`에 그대로 넘길 인자(이미지·이미지 인자 포함). **`-p`는 넣지 않는다** — 호스트
+#        포트를 뽑는 주체가 이 함수이므로 publish 인자도 이 함수가 조립한다.
+# → 성공 시 stdout에 **실제 배정된 호스트 포트**(재추첨이 일어나면 요청과 다른 값이다), rc 0.
+#
+# ⚠️ publish는 `127.0.0.1:` 접두로 고정한다. 접두 없는 `-p N:M`은 **전 인터페이스**에 연다 — 이
+#    게이트들은 k3s가 도는 NUC에서도 도니 LAN에 포트를 여는 것 자체가 표면이고, 프로브(0.0.0.0
+#    bind)가 실제 바인드보다 엄격하다는 관계도 그때만 성립한다. 손잡이를 두지 않는 것이 정책이다.
+hp_run_published() {
+  local name cport exclude port try=1 log="" err="" got a
+  # ⚠️ **인자 검사가 `shift`보다 먼저 온다.** `shift 3`을 먼저 하면 인자가 모자랄 때 bash가 rc 1을
+  #    내고, 소비자의 `set -e`가 그 rc로 셸을 통째로 죽인다 — `exit`을 한 줄도 안 썼는데 이 lib이
+  #    종료를 소유하게 되는 자리다(헤더 규율 위반). 부족은 stderr + rc 1로만 알린다.
+  if [ "$#" -lt 4 ]; then
+    hp_err "hp_run_published: 인자가 모자란다(받은 것 $#개) — 사용법: hp_run_published <이름> <컨테이너포트> <배제목록> <docker run 인자…>"
+    return 1
+  fi
+  name="$1"; cport="$2"; exclude="$3"
+  shift 3
+  case "$name" in '') hp_err "hp_run_published: 컨테이너 이름이 비었다"; return 1 ;; esac
+  case "$cport" in '' | *[!0-9]*) hp_err "hp_run_published(${name}): 컨테이너 포트 '${cport}' 비수치"; return 1 ;; esac
+  # ⚠️ **`--rm`을 받지 않는다.** 컨테이너가 기동 직후 죽으면(= 이 게이트들이 존재하는 이유인 설정
+  #    회귀) `--rm`이 컨테이너를 즉시 지워 `docker port`도 `docker logs`도 실패한다 — 진단이 통째로
+  #    사라지고, 남는 것은 "매핑을 확인할 수 없다"뿐인 **오진 서사**다. 정리는 소비자의 EXIT trap과
+  #    아래 `docker rm -f`가 이미 소유한다. 인자에 섞이면 조용히 무시하지 않고 거부한다 — 무시하면
+  #    호출부는 `--rm`이 걸렸다고 믿은 채 정리 책임을 놓는다.
+  for a in "$@"; do
+    case "$a" in
+      --rm | --rm=*)
+        hp_err "hp_run_published(${name}): --rm은 받지 않는다 — 컨테이너가 기동 직후 죽으면 docker port·docker logs가 함께 사라져 진단이 오진으로 둔갑한다. 정리는 호출자의 EXIT trap이 소유하라."
+        return 1 ;;
+    esac
+  done
+  # ⚠️ 밴드를 좁혀도 프로브~`docker run` 사이의 창(TOCTOU)은 남는다. 그 **잔여만** 재시도가 흡수한다 —
+  #    재시도는 밴드·프로브의 대체재가 아니라 그 둘이 원리적으로 못 닫는 창의 마감재다.
+  while :; do
+    # ⚠️ 실패한 포트를 **배제 목록에 누적한다.** 재추첨이 같은 값을 다시 낼 수 있으면 "서로 다른
+    #    포트에서 모두 실패했다"는 진단이 거짓이 되고, 판별자("서로 다른 포트로 다시 하면 되는가")
+    #    자체가 성립하지 않는다. 확률에 기대지 않고 구조로 보장한다.
+    # shellcheck disable=SC2086  # exclude는 공백 구분 목록이라 의도적으로 분할한다
+    port="$(hp_pick_port $exclude)" || return 1
+    # ⚠️ 실패한 `docker run -d`는 컨테이너를 **Created로 남긴다** → 같은 이름 재시도가 "name already
+    #    in use"로 죽는다(재시도가 있는데도 회복하지 못한다). podman 전용 `--replace`는 docker
+    #    양립성이 없으므로 명시적으로 지운다.
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    if err="$(docker run -d --name "$name" -p "127.0.0.1:${port}:${cport}" "$@" 2>&1 >/dev/null)"; then
+      break
+    fi
+    log="${log}
+--- 시도 ${try} (port=${port}) ---
+${err}"
+    # ⚠️ 실패를 **메시지·종료코드로 판별하지 않는다** — 같은 podman도 pasta/rootlessport로 문자열이
+    #    갈리고 CI dockerd는 또 다르다. venue 의존 판별자는 한 venue에서 조용히 무력해진다.
+    #    판별자는 "서로 다른 포트로 다시 하면 되는가" 하나다.
+    if [ "$try" -ge "$HP_BIND_TRIES" ]; then
+      printf '%s\n' "$log" >&2
+      hp_err "${name} 기동이 **서로 다른 포트** ${try}개에서 모두 실패했다 — 포트 경합만으로는 설명되지 않는다(위 런타임 stderr가 원인이다)."
+      return 1
+    fi
+    # ⚠️ 조용한 재시도 금지 — 발생 사실이 로그에 없으면 경합 빈도가 관측되지 않는다.
+    echo "RETRY (bind ${try}/${HP_BIND_TRIES}): ${name} port=${port} 기동 실패 — 포트를 새로 뽑아 재시도한다. 런타임 stderr: ${err}" >&2
+    exclude="${exclude} ${port}"
+    try=$(( try + 1 ))
+  done
+  [ -z "$err" ] || printf '%s\n' "$err" >&2   # 성공 경로의 런타임 경고도 그대로 흘린다
+  [ "$try" -eq 1 ] || echo "RETRY (bind): ${name}이(가) ${try}번째 시도에서 성공했다." >&2
+  # 읽어온 포트를 **쓰지 않고 대조한다.** 예전엔 `docker port` 출력을 그대로 믿었는데, 이제는 우리가
+  # 고른 값과 다르면 즉시 비-0이다 — 경합으로 매핑이 어긋나면 소비자의 readiness 루프가 30~60초를
+  # 통째로 태운 뒤에야 "not ready"로 죽어 원인이 안 보인다.
+  # ⚠️ `|| got=""`가 **필요하다.** 소비자가 `set -o pipefail`인 채 이 함수를 부르면 `docker port`
+  #    실패(컨테이너가 이미 죽었을 때 rc=125)가 명령 치환 rc로 올라와 **할당 단계에서** 죽는다 —
+  #    아래 진단도 `docker logs`도 실행되지 않아 하네스가 stdout·stderr 0줄로 끝난다.
+  got="$(docker port "$name" "${cport}/tcp" 2>/dev/null | head -1 | sed 's/.*://')" || got=""
+  [ "$got" = "$port" ] || {
+    hp_err "포트 매핑을 확인할 수 없다: ${name} 요청 ${port} / 실제 '${got}' — 컨테이너가 기동 직후 죽었거나(설정 회귀) 포트 경합이거나 런타임이 매핑을 바꿨다. 아래가 컨테이너 로그다:"
+    docker logs "$name" 2>&1 | tail -20 >&2 || echo "  (컨테이너가 남아 있지 않아 로그를 읽지 못했다)" >&2
+    return 1
+  }
+  printf '%s' "$port"
+  return 0
+}

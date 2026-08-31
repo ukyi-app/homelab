@@ -48,8 +48,17 @@ fx_rewrite() {
   #    두 레인은 진짜로 독립이다 — 하나는 `grep`(텍스트), 하나는 yq 재귀 하강(구조).
   #    ⚠️ 텍스트 레인은 `repoURL:` **키 위치**만 센다(리스트 마커 `- ` 허용). 주석에 걸리는 grep은
   #       #441이 이미 밟은 함정이라 반복하지 않는다 — 주석 줄에 이 키가 없음도 함께 단언한다.
-  run bash -c "cd '$ROOT' && git grep -cnE '^[[:space:]]*#.*repoURL:' -- '*.yaml' '*.yml'"
-  [ "$status" -ne 0 ]   # git grep은 매치 0건에 비-0 → 주석 오염 없음
+  #    ⚠️ 여기서 `bash -c "cd … && …"`을 쓰지 않는다 — cd 실패도 rc 1이라 무매치와 구별이 안 된다.
+  #       `git -C`(이 파일의 다른 자리와 같은 관용구)면 rc가 git grep의 것 그대로 온다.
+  run git -C "$ROOT" grep -cnE '^[[:space:]]*#.*repoURL:' -- '*.yaml' '*.yml'
+  # `-ne 0`이 아니라 `-eq 1`이다 — git grep rc는 0=매치 / 1=무매치 / **128**=치명적(비-레포 ·
+  # pathspec magic 오타). 128은 grep의 rc 2와 **다른 값**이니 grep 규약을 옮겨 적지 말 것.
+  # `-ne 0`이면 128이 '주석 오염 없음'으로 읽힌다(docs/traps-detail.md ③ 부정 카운트).
+  [ "$status" -eq 1 ]   # 정확히 무매치 = 주석 오염 없음
+  # 양성 대조 — 같은 pathspec에서 주석 줄 자체는 잡힌다(패턴/경로가 죽어 0건이 된 것을 '오염 없음'으로
+  # 오독하지 않는다). git grep은 pathspec이 추적 파일과 하나도 안 맞아도 128이 아니라 rc 1이다(실측).
+  # `repoURL:` 쪽 절반의 증인은 바로 아래 text 레인이다(0건이면 struct와 어긋나 red).
+  git -C "$ROOT" grep -qE '^[[:space:]]*#' -- '*.yaml' '*.yml'
   text="$(cd "$ROOT" && git grep -hE '^[[:space:]]*(- )?repoURL:' -- '*.yaml' '*.yml' | grep -c .)"
   struct="$("$GUARD" | sed -n 's/^SCAN: check-argocd-revision:repourls: \([0-9]*\)$/\1/p')"
   printf '%s' "$struct" | grep -qxF "$text"

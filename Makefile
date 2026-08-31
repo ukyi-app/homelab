@@ -70,6 +70,7 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@./scripts/check-skeleton.sh
 	@bash scripts/check-doc-index.sh
 	@bash scripts/check-bats-accounting.sh
+	@bash scripts/check-bats-style.sh
 	@bash scripts/check-app-deploy.sh
 	@bun tools/generate-result-schema.ts --check
 	@bun tools/check-resource-limits.ts
@@ -189,6 +190,7 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 # 한 줄"이 지워져도 G1이 초록을 유지했다. 여기서도 레포 자신에 대해 직접 돌린다.
 	bash scripts/check-doc-index.sh
 	bash scripts/check-bats-accounting.sh
+	bash scripts/check-bats-style.sh
 	bash scripts/check-app-deploy.sh
 	bash scripts/check-app-netpol.sh
 	bash scripts/check-image-pins.sh

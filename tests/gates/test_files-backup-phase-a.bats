@@ -18,9 +18,13 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
-  V="$ROOT/infra/k3s-bootstrap/versions.env"
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  WIN="$(sed -n 's/^export BULK_MIGRATION_WINDOW_UNTIL="\(.*\)"$/\1/p' "$V")"
+  # ⚠️ SSOT 파생은 **리더를 지난다**(infra/k3s-bootstrap/versions-read.sh). 옛 sed 한 줄은 파일 부재 ·
+  #    키 부재 · 줄 포맷 변경을 전부 빈 문자열로 접었고, 이 가드에서 그 빈 문자열은 "창이 닫혔다"로
+  #    읽힌다 — 그러면 억제 절이 남아 있어도 아래 첫 @test가 초록이고, 나머지 둘은 skip이다.
+  #    즉 국면 B 전환의 강제 장치가 **파생 한 줄의 침묵으로** 통째로 꺼진다.
+  WIN="$("$ROOT/infra/k3s-bootstrap/versions-read.sh" BULK_MIGRATION_WINDOW_UNTIL)" \
+    || { echo "versions.env에서 BULK_MIGRATION_WINDOW_UNTIL을 판정하지 못했다 — 창 상태를 모르면 이 가드는 아무것도 강제하지 못한다"; return 1; }
 }
 
 # 배포되는 expr **본문만** 꺼낸다(ConfigMap → 내장 룰 YAML → 해당 alert).
@@ -81,7 +85,13 @@ _rearm() { _expr | grep -oE 'vector\(time\(\)\) >= [0-9]+' | grep -oE '[0-9]+' |
   #    (레포 선례: tools/check-alert-rules.ts의 SELF 자기참조 제외).
   run git grep -nE 'CONTROL=FilesBackupStale|vme_firing[[:space:]]+"?FilesBackupStale' \
     -- 'tests/gates' ':(exclude)tests/gates/test_files-backup-phase-a.bats'
-  [ "$status" -ne 0 ]
+  # ⚠️ `-ne 0`이 아니라 `-eq 1`이다 — git grep rc는 0=매치 / 1=무매치 / **128**=치명적
+  #    (비-레포 · `:(exclude)` 같은 pathspec magic 오타). 128은 grep의 rc 2와 **다른 값**이니
+  #    grep 규약을 그대로 옮겨 적지 말 것. `-ne 0`이면 128이 '대조군 없음'으로 읽힌다.
+  #    (부정 카운트가 '매치 0'과 '대상 0'을 못 가르는 함정: docs/traps-detail.md ③)
+  [ "$status" -eq 1 ]
   # 양성 대조 — 대조군 관용구 자체는 살아 있다(패턴이 깨져 0건이 된 것을 '깨끗하다'로 오독하지 않는다).
+  # ⚠️ `-eq 1`이 못 닫는 구멍을 닫는 자리이기도 하다: pathspec이 추적 파일과 하나도 안 맞아도
+  #    git grep은 128이 아니라 **rc 1**이다(실측) — 'tests/gates' 리네임은 아래 한 줄만이 잡는다.
   git grep -qE 'CONTROL=|vme_firing' -- 'tests/gates'
 }

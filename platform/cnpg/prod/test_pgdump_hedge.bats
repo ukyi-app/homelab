@@ -1,10 +1,12 @@
 #!/usr/bin/env bats
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
 @test "hedge uses pg_dump piped to rclone, not barman" {
   grep -q 'pg_dump' "$f"
   grep -q 'rclone rcat' "$f"
   run grep -q 'barman' "$f"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 @test "hedge writes a CLUSTER-SPECIFIC R2 prefix and prunes only that prefix" {
   # ⚠️ 프루닝(`--min-age 14d`)이 prefix 전체를 훑는다. 라이브 Mac과 prefix를 공유하면 **상대편의
@@ -15,7 +17,7 @@ f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
   grep -qE 'rclone delete .*\$\{DUMP_PREFIX\}.*--min-age 14d' "$f"
   # 공유 prefix로 되돌아가면 red — 비-주석 줄만 본다(주석이 옛 경로를 설명한다).
   run grep -nE '^[^#]*r2:homelab-pg-backups-prod/pgdump/' "$f"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 @test "hedge pulls rclone+aws creds from cnpg-r2-creds secret" {
   grep -q 'name: cnpg-r2-creds' "$f"
@@ -26,7 +28,7 @@ f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
   # 완전한 논리 백업은 superuser로 떠야 한다 — pg-app-credentials가 아니라 pg-superuser를 쓴다.
   grep -q 'name: pg-superuser' "$f"
   run grep -q 'name: pg-app-credentials' "$f"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 @test "hedge uses the M6-built pg-tools image" {
   grep -q 'ghcr.io/ukyi-app/pg-tools:18-rclone' "$f"

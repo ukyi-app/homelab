@@ -121,7 +121,7 @@
   가드 **파일의 존재**만 보지 @test 이름까지 보지 않는다 — 그래서 이 문단이 그 구멍을 메운다).
 > 가드: `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats`
 
-### 상주 워크로드 OOM 진단 — 코어 수는 그럴듯한 오답이다 (D-e)
+### 상주 워크로드 OOM 진단 — 코어 수는 그럴듯한 오답이다 (D-e) · 처방 후 같은 지표를 다시 재라
 - 2026-08-14 NUC 콜드스타트에서 `vector`·`victorialogs`가 OOM 루프를 돌았다(2시간에 22회·16회).
   **1차 진단은 "노드 코어 수(6→14)가 늘어 런타임이 워커/P를 더 띄운 탓"이었고, 틀렸다.**
   핀(`--threads 6`·`GOMAXPROCS=6`)을 넣어 vector 워커를 15→8로 줄였는데 커널 OOM 기록의
@@ -188,7 +188,7 @@
   (`TREE_N -eq TREE_ALL_N`). 이제 새 확장자는 조용히 빠지는 대신 글롭을 넓히라고 요란하게 운다.
 > 가드: `infra/k3s-bootstrap/tests/test_03-host-config.bats`
 
-### hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다
+### hostPath 백엔드 PV에는 fsGroup이 적용되지 않는다 — root가 만든 파일을 non-root가 못 연다(빈 PVC 전용)
 - Pod `securityContext.fsGroup`은 kubelet이 소유권을 관리하는 볼륨에만 걸린다. **local-path류의
   hostPath 백엔드 PV는 대상이 아니다** — 2026-08-14 NUC 실측: `fsGroup: 65532`인데 PVC 디렉토리가
   `root:root 0777`이었다. 디렉토리가 0777이라 non-root도 **생성**은 되므로 문제가 없어 보이지만,
@@ -200,7 +200,7 @@
   ⇒ 처방: **PVC에 파일을 만드는 컨테이너를 최종 소비자와 같은 uid로 돌린다**(fsGroup에 기대지 말 것).
 > 가드: `platform/adguard/prod/test_adguard_auth.bats`
 
-### yq -e는 값이 false면 exit 1이다
+### yq -e는 값이 false면 exit 1이다 — 키 부재(null)와 구별하지 않아 올바른 매니페스트에서 red가 난다
 - `yq -e`의 종료코드는 "출력이 truthy인가"다 — **키가 없을 때(`null`)와 값이 `false`일 때를 구별하지
   않는다.** 그래서 올바른 매니페스트(`isWALArchiver: false`)에서 bats가 red가 된다.
   `-e` 없이 읽고 `printf '%s' "$v" | grep -qxF -- 'false'`로 정확 일치를 단언하면 미기재(`null`)와
@@ -626,7 +626,59 @@ rc=2 + stderr로 죽는데, `|| true`가 rc를, 치환이 stderr를 삼켜 `bad=
 **③ 부정 카운트는 "매치 0"과 "대상 0"을 구별하지 못한다.** `run grep -r … dir/; [ "$status" -ne 0 ]`은
 grep rc=1(매치 없음)뿐 아니라 rc=2(디렉토리 부재)도 통과시킨다. 매치 없음은 정확히 rc=1이다.
 
-**처방** — 열거를 **변수로** 받아 rc를 캡처하고(`scripts/lib/scan-floor.sh`의 `scan_enumerate`),
+**③-a `-eq 1`은 파일 피연산자만 닫는다 — 디렉토리는 못 닫는다.** ③의 처방(`-ne 0` → `-eq 1`)이
+리네임·삭제를 탐지하는 것은 grep이 **에러 채널을 가진 경로 피연산자**를 들 때뿐이다.
+2026-08-29 실측(GNU grep 3.12 / `ls`는 uutils coreutils 0.8.0 · GNU coreutils 9.10 / bash 5.3):
+
+| 형태 | rc |
+|---|---|
+| `grep PAT <없는 파일>` · `grep -q PAT <없는 파일>` | **2** |
+| `grep PAT <없는 파일> <있는 파일>`(다중 피연산자·무매치) | **2** |
+| `grep -q PAT <없는 파일> <매치되는 파일>` | **0** — `-q`는 매치를 만나면 에러를 덮는다 |
+| `grep -q PAT <디렉토리>`(`-r` 없이) | **2** |
+| `grep -r PAT <없는/리네임된 디렉토리>` | **2** |
+| `grep -r PAT <존재하되 비어 있는 디렉토리>` | **1** ← 무매치와 **구별 불가** |
+| `ls <없는 경로>` · `ls <없는 경로> <있는 파일>`(다중 피연산자) | **2** |
+| `ls <있는 디렉토리>/<무매치 글롭>`(셸이 리터럴을 그대로 넘김) | **2** ← 부재와 **구별 불가** |
+| `ls <있는 디렉토리>` · `ls <있는 파일>` · `ls -A <빈 디렉토리>` | **0** |
+| `ls <무매치 글롭>` + `shopt -s nullglob`(피연산자 0개) | **0** — **cwd를 나열한다** |
+| `ls -R <읽을 수 없는 하위 디렉토리 포함>` | **1** ← ls가 1을 내는 **유일한** 경우(부분 실패) |
+
+즉 디렉토리 피연산자에서 `-eq 1`이 잡는 것은 **경로가 사라지는 것**뿐이고, **도메인이 비는 것**은
+원리적으로 못 잡는다. 재귀 열거·루프 구동 자리는 rc 하나로 닫히지 않는다.
+⚠️ **측정 자체가 셸에 의존한다** — 대화형 셸이 `grep`을 ugrep 셰임으로 감싸는 환경이 있고, 거기선
+`grep -q PAT <없는 파일> <매치되는 파일>`이 0이 아니라 **2**다(ugrep 7.8.4 실측). bats는 PATH의
+GNU grep을 쓰므로 rc를 잴 땐 `/usr/bin/grep`으로 재라. 두 구현이 갈리는 곳은 이 한 행뿐이었다.
+
+**같은 표의 `ls` 행은 한 칸 더 나쁘다 — 무매치와 부재가 같은 rc 2로 합쳐져 `-eq 1` 전환이 원리적으로
+불가능하다.** grep과 달리 `ls`의 rc 1에는 "무매치"라는 뜻이 **아예 없다**(1은 재귀 중 하위 디렉토리
+접근 실패 = 부분 실패 전용). 글롭이 안 맞으면 bash 기본값에서 셸이 **리터럴을 그대로 넘기므로** ls가
+"그런 경로 없음"으로 2를 낸다 — 즉 `ls` 자리의 비-0 단언은 상수로 좁혀도 "매치 0"과 "디렉토리째
+사라짐"을 가르지 못한다. 더 나쁜 쪽은 `nullglob`이다: 글롭이 지워져 피연산자가 0개가 되면 ls는
+**cwd를 나열하고 rc 0**을 내므로 부재 단언이 조용히 뒤집힌다(`failglob`은 셸이 먼저 rc 1로 죽는
+것이라 ls가 낸 1이 아니다).
+⇒ 처방은 **rc를 버리는 것**이다 — 출력을 재거나(`run bash -c 'ls -A <dir>'` + `[ -z "$output" ]`, 아래
+「처방(bats 부재 단언)」의 비공허 바닥값·양성 대조와 한 쌍으로), `find <dir> -maxdepth 1 -name '<pat>'`
+로 바꾼다. `find`는 극성이 반대라 **경로 부재=rc 1 / 무매치=rc 0 + 빈 stdout**으로 둘을 가른다
+(GNU findutils 4.10.0 실측).
+⚠️ **여기서도 측정이 구현에 의존한다** — 호스트 grep이 ugrep인 것과 같은 이유로, Ubuntu 26.04의
+`/usr/bin/ls`는 GNU가 아니라 **uutils coreutils 0.8.0**(패키지 `coreutils-from-uutils`)이다. 위 `ls`
+다섯 행은 uutils 0.8.0과 GNU coreutils 9.10에서 **전부 일치**했다(부재·리터럴 글롭·nullglob·부분 실패).
+
+**③-b 파이프 끝의 grep은 stdin을 읽는다 — 대상 부재의 rc 2가 rc 1로 눌린다.**
+`sed … "$F" | grep -q PAT`에서 `$F`가 사라지면 sed만 rc 2로 죽고, grep은 **빈 stdin**에 무매치
+rc=**1**을 낸다 → `-eq 1`이 그대로 통과한다. ⚠️ **`pipefail`도 이걸 고치지 못한다**: pipefail은
+*가장 오른쪽*의 비-0을 취하는데 grep의 1이 sed의 2보다 오른쪽이다(실측: `set -o pipefail` 유무
+양쪽 모두 rc=1). 반대로 grep이 **자기 경로 피연산자**를 들면 stdin과 무관하게 rc=2다
+(`echo x | grep PAT <없는 파일>` = 2) — 위험한 것은 **피연산자 없는 파이프 종단 grep**이다.
+
+**③-c `git grep`에는 "대상 부재" 채널이 아예 없다.** 레포 안에서는 무매치도, **존재하지 않는
+pathspec**도 똑같이 rc=**1**이다(실측: 매치되는 파일이 레포에 있어도
+`git grep -q hello -- <없는 경로>` = 1). 비-레포 디렉토리에서만 rc=**128**이다. 따라서 `git grep`
+부재 단언에서 `-eq 1`은 리네임을 **전혀** 탐지하지 못한다 — pathspec 실재를 세는 양성 대조가
+유일한 닫는 수단이다.
+
+**처방(가드 스크립트의 열거)** — 열거를 **변수로** 받아 rc를 캡처하고(`scripts/lib/scan-floor.sh`의 `scan_enumerate`),
 건수 바닥값을 건다(`scan_floor`). 바닥값 **수치는 소비자가 소유한다** — 열거자는 "글롭이 깨져 0건"과
 "정당하게 0건"을 구별할 도메인 지식이 없다. 부정 카운트=0 형태에는 바닥값만으론 부족하고
 **양성 대조**(같은 술어가 어딘가에서는 매치한다)가 함께 필요하다. 셀 때 `grep -c .`는 0건에서 rc=1이라
@@ -638,7 +690,75 @@ grep rc=1(매치 없음)뿐 아니라 rc=2(디렉토리 부재)도 통과시킨�
 무조건 적용하면 음성 테스트가 전부 red가 된다(실측). ⚠️ 바닥값은 래칫이 아니다 — 도메인이 줄지
 않는 한 손댈 일이 없다.
 
-> 가드: `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `tools/lib/scan-floor.ts`, `scripts/check-scan-producers.sh`, `policy/ledger.rego`, `tests/test_ledger.bats`
+**처방(bats 부재 단언)** — 부재는 `[ "$status" -ne 0 ]`이 아니라 **`[ "$status" -eq 1 ]`**로 쓴다
+(선례: `tests/gates/test_app-token-sha-ssot.bats:28,35` — 주석이 이 함정을 명명한다). 그것으로
+닫히는 것은 **파일 피연산자**뿐이다. 디렉토리·재귀·파이프 종단·루프 구동 자리는 `-eq 1`에 더해
+둘을 **한 쌍으로** 건다 — **비공허 바닥값**(열거 도메인이 실재하고 비어 있지 않음을 setup에서
+못 박는다: `tests/gates/test_app-token-sha-ssot.bats:8`)과 **양성 대조**(같은 술어·같은 피연산자가
+어딘가에서는 매치한다: `tests/test_dr-drill.bats:161-163`). 하나만으론 부족하다 — 바닥값만 있으면
+술어가 죽은 것을, 양성 대조만 있으면 도메인이 빈 것을 못 본다. 히어스트링(`<<<`)처럼 **경로
+피연산자가 없는** 자리는 부재할 대상이 없어 이 함정의 대상이 아니다 — 다만 그 자리에서 `grep -qv`로
+쓰면 **다른** 함정이다(아래 「`grep -qv`는 부재를 재지 않는다」).
+⇒ **이 처방은 이제 정적으로 강제된다** — `scripts/check-bats-style.sh`의 `[ABS]` 레인이 철자(`-ne 0`)를
+거부하고, `[ABS-REC]`/`[ABS-LOOP]`가 재귀·디렉토리·루프 자리에 비공허 바닥값과 양성 대조를 **접속사로**
+요구한다(둘 중 하나만 지워도 red). 잔액은 `ABS_BASELINE` 래칫이 잰다. ⚠️ 분모는 **grep 계열 + 경로
+피연산자**뿐이다 — 히어스트링과 `run bash|bun|make`는 rc 알파벳이 달라 하나의 형태 규칙으로 말할 수 없다.
+⚠️ `git grep`은 양성 대조만 요구한다 — ③-c대로 pathspec 부재 채널이 아예 없어서 파일시스템 바닥값이
+닫을 수 있는 것이 없다.
+
+> 가드: `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `tools/lib/scan-floor.ts`, `scripts/check-scan-producers.sh`, `policy/ledger.rego`, `tests/test_ledger.bats`, `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats`
+
+### `grep -qv`는 부재를 재지 않는다 — 줄 단위 반전이 전칭을 존재로 바꾼다
+
+- **병**: `-v`는 **줄 단위** 반전이다. 따라서 `grep -qv TOKEN`이 답하는 질문은 "TOKEN이 없다"(∀¬)가
+  아니라 **"TOKEN이 없는 줄이 하나라도 있다"(∃¬)**다. 피연산자가 두 줄 이상이면 TOKEN이 출력에
+  **있어도** rc 0이라, 부재 단언 자리에서 이 관용구는 사실상 항진명제다.
+  2026-08-29 실측(GNU grep 3.12 · bash 5.3 — 이 호스트는 `/usr/bin/ls`가 uutils인 사례가 있어 판본을
+  적는다. 측정은 `/usr/bin/grep`으로):
+
+  | stdin | `grep -qv 'a'` rc | 부재 단언으로서 |
+  |---|---|---|
+  | `a\nb`(토큰이 **있고** 다른 줄도 있다) | **0** | **거짓 통과** — 항진의 자리 |
+  | `a\na`(모든 줄이 매치) | 1 | 옳다 |
+  | `a`(1줄, 매치) | 1 | 우발적으로 옳다 |
+  | `x`(1줄, 무매치) | 0 | 옳다 |
+  | 빈 입력 | 1 | **거짓 실패** — 대상이 통째로 사라지면 부재인데 red다 |
+
+  마지막 행이 두 번째 얼굴이다: 같은 한 줄이 **진짜 존재에서 green, 진짜 부재에서 red**를 낼 수 있다.
+- **「열거 붕괴 → vacuous green」과 다른 축이다.** 저긴 **도메인이 비는 것**(열거가 0건)이고 여긴
+  **술어의 양화사가 뒤집히는 것**이다. 도메인이 완전히 정상이어도 — 줄이 여럿이기만 하면 — 발생한다.
+  겹치는 지점은 하나뿐이다: 둘 다 rc 하나를 곧이곧대로 읽어서 생긴다.
+- **인-레포 실측 — 「처방 도달」 축 그 자체**(한 자리에서 실증된 처방이 형제에 안 닿았다):
+  - `infra/tailscale/test_provider_scopes.bats:75` — 2026-08-19 적대 검증이 `grep -qvF`를 항진으로
+    적발했다. 고쳤고 근거 주석까지 남겼는데 **SSOT에는 안 올렸다.** 이 등재가 그 부채다.
+  - `tests/gates/test_host-ports.bats:11-20` — 같은 관용구 **6곳**. 5곳이 실측 항진이었고 남은 1곳은
+    진단 문구가 마침 1줄이라 우발적으로만 옳았다. 전건 전환 + 파일 머리에 규약 고정.
+  - `tests/gates/test_ops-repin.bats`(적발 시점 :34) — `echo "$output" | grep -qv "$OLD"`.
+    바로 윗줄이 NEW digest의 실재를 단언하므로 OLD가 남아도 "OLD 없는 줄"이 항상 존재한다 → rc 0
+    (재현: OLD·NEW 두 줄을 만들어 넣으면 OLD가 **있는데** rc 0).
+  - 우발적으로 옳은 표본: `platform/cnpg/prod/test_restore_drill.bats:87-88`의
+    `printf '%s' "$cpu" | grep -qv '^null$'` — 피연산자가 yq 스칼라 **1줄**이라 오늘은 맞다.
+    그 값이 여러 줄이 되는 날 아무 신호 없이 항진이 된다.
+- ⇒ **처방은 셋이고 각각 무엇을 재는지가 다르다.**
+  - ① **히어스트링 + `-eq 1`**(기본형): `run grep -qF -- TOKEN <<<"$out"` + `[ "$status" -eq 1 ]`.
+    `<<<`는 경로 피연산자가 없어 rc 2 채널이 아예 없으므로 1이 **정확한 상수**다(빈 문자열·미설정
+    변수도 1 — 실측). 그 대가로 "출력이 통째로 비었다"가 이 rc에는 안 보이니, 위
+    「처방(bats 부재 단언)」의 **비공허 바닥값 + 양성 대조**와 한 쌍으로 건다.
+  - ② **건수 재기**: `run grep -cF -- TOKEN <<<"$out"` + `[ "$output" -eq 0 ]`. 값을 보므로 "몇 개
+    남았나"를 진단에 실을 수 있다. ⚠️ `grep -c`는 0건에서 **rc 1**이다(실측) — `$status`로 닫으면
+    ①과 같아지고, `set -e` 콜사이트에서는 그 1이 스크립트를 죽인다(`scan_count`가 흡수하는 함정).
+  - ③ **1줄 보장**: 피연산자가 정확히 1줄임을 같은 자리에서 못 박은 뒤에만 `-qv`가 옳다. ①·②가 더
+    짧으니 새로 쓸 이유는 없다 — 남아 있는 `-qv`를 살릴지 판정할 때만 쓰는 기준이다.
+  - ⚠️ 부정을 중간 `!`로 쓰지 마라(「bats bash 3.2 중간 [[ ]] 침묵 통과」) — `run` + `[ ]`뿐이다.
+- ⇒ **정적으로 강제된다(hard-zero).** `scripts/check-bats-style.sh`의 `[QV]` 레인이 `-q`와 `-v`가 같은
+  옵션 클러스터에 있는 자리를 거부한다(파이프 종단 또는 문장 선두). 라이브 0건이라 래칫할 부채가 없다 —
+  잔존 표기 4곳은 전부 이 함정을 **설명하는** 주석이고 검출기가 주석 줄을 먼저 건너뛴다.
+  ⚠️ 필터로 쓰는 `| grep -v '^---'` 류는 `-q`가 없어 대상이 아니다 — rc를 판정으로 쓰지 않기 때문이다
+  (이 레포에 20곳 넘게 있는 정당한 관용구다). `[ABS]`와 **같은 숫자로 접지 않는다**: 저건 run/status
+  짝의 rc 철자 문제고 이건 술어의 양화사가 뒤집히는 문제라, 한 잔액으로 합치면 그 수가 무엇의 부채인지
+  말할 수 없게 된다.
+
+> 가드: `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats`
 
 ### PreToolUse 훅 종료코드 — fail-closed는 exit 2뿐
 
@@ -698,7 +818,7 @@ terraform `drift=false` 같은 **결과 플래그**가 전부 준비상태로 �
 
 > 가드: `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats`
 
-### 이미지 핀의 *존재* ≠ *일치* ≠ *소유자*
+### 이미지 핀의 *존재* ≠ *일치* ≠ *소유자* — 하드코딩 소비처 목록은 자기 자신에게만 정확하다
 
 세 가지 서로 다른 질문이 하나로 뭉뚱그려져 있었다.
 

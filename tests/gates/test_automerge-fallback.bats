@@ -80,7 +80,8 @@ teardown() { rm -rf "$TMP"; }
   grep -q 'auto-merge-or-fail.sh' "$ROOT/tools/ensure-bump-pr.ts" || { echo "missing shared fallback in tools/ensure-bump-pr.ts"; false; }
   # 변이 reusable은 composite 위임이라 직접 호출 0(auto-merge: 'true'/'false' 입력만).
   run grep -l 'auto-merge-or-fail.sh' "$WF"/_create-database.yaml "$WF"/_create-cache.yaml "$WF"/_update-secrets.yaml "$WF"/_create-app.yaml "$WF"/_teardown-app.yaml
-  [ "$status" -ne 0 ]
+  # rc 2(파일 하나라도 부재)를 통과로 읽지 않는다 — 다중 피연산자 grep의 무매치는 정확히 rc 1이다.
+  [ "$status" -eq 1 ]
   # bump.yaml은 단일 job(writeback) — 1회 호출 (v1 외부 dispatch 경로 폐기)
   run grep -c 'auto-merge-or-fail.sh' "$WF/bump.yaml"
   [ "$output" -eq 1 ]

@@ -2,6 +2,11 @@
 # teardown — 앱 ↔ 리소스 분리. 앱 teardown은 DB/캐시를 절대 건드리지 않고,
 # 리소스 teardown은 참조 0 + tombstone 2단계 + 백업 게이트를 강제한다.
 # ⚠️ 중간 단언은 [ ]만 사용 — bats가 bash 3.2로 돌 때 [[ ]] 실패는 침묵 통과된다.
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 픽스처 **단일 파일**이라 그것으로 닫힌다.
+#    여기서 피시험 도구는 **파괴 도구**라 노출 축이 특별하다: `-ne 0`은 "항목이 등록 해제됨"과
+#    "파일이 통째로 지워짐"을 같은 초록으로 읽는다 — 후자는 kustomize build를 깨는 정반대 결과다.
+#    (실측: 지금 픽스처에서는 아래 대상 파일이 전부 살아남는다. 그 성질이 깨지면 red가 되는 것이 목적이다.)
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -87,8 +92,9 @@ tdr() { bun "$ROOT/tools/teardown-resource.ts" --refs-verified manual-test "$@";
   [ ! -d "$FR/apps/orders" ]
   run jq -e 'map(select(.name == "orders")) | length == 0' "$FR/infra/cloudflare/apps.json"
   [ "$status" -eq 0 ]
+  # 원장을 증언하는 형제 단언이 없다 — 아래 [ -f ]들은 리소스 산출물이라 원장 삭제를 못 본다
   run grep "ledger:row --> orders" "$FR/docs/memory-ledger.md"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # 리소스 산출물 무손상
   [ -f "$FR/platform/cnpg/prod/databases/shared.yaml" ]
   [ -f "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml" ]
@@ -167,10 +173,11 @@ tdr() { bun "$ROOT/tools/teardown-resource.ts" --refs-verified manual-test "$@";
   [ ! -f "$FR/platform/cnpg/prod/databases/db-shared-ro.sealed.yaml" ]
   [ ! -f "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml" ]
   # kustomization 등록 해제 — 남아 있으면 kustomize build가 missing file로 죽는다
+  # cnpg 쪽 kustomization에는 양성 대조가 없다(resources 3개가 전부 제거 대상) — rc만이 실재 증인이다
   run grep -E "shared\.yaml|db-shared" "$FR/platform/cnpg/prod/databases/kustomization.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run grep "db-shared" "$FR/platform/data-conn/prod/kustomization.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # cache conn 항목은 무관하므로 보존
   run grep "cache-sessions-conn" "$FR/platform/data-conn/prod/kustomization.yaml"
   [ "$status" -eq 0 ]
@@ -185,10 +192,11 @@ tdr() { bun "$ROOT/tools/teardown-resource.ts" --refs-verified manual-test "$@";
   run tdr --cache sessions --repo-root "$FR" --delete-data \
     --backup-verified rdb-1 --step cleanup
   [ "$status" -eq 0 ]
+  # cache kustomization의 resources는 `sessions` 하나뿐이라 양성 대조를 세울 항목이 없다 — rc가 유일한 증인
   run grep "sessions" "$FR/platform/cache/prod/kustomization.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run grep "cache-sessions" "$FR/platform/data-conn/prod/kustomization.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   # db 항목은 무관하므로 보존
   run grep "db-shared-conn" "$FR/platform/data-conn/prod/kustomization.yaml"
   [ "$status" -eq 0 ]
@@ -227,13 +235,16 @@ tdr() { bun "$ROOT/tools/teardown-resource.ts" --refs-verified manual-test "$@";
   echo '{}' > "$D/platform/data-conn/prod/.tombstones.json"
   run tdr --cache widget --repo-root "$D" --delete-data --backup-verified test-id --step cleanup
   [ "$status" -ne 0 ]
+  # ⚠️ fail-loud의 증인이 이 한 줄뿐이다 — `-ne 0`이면 도구가 tombstone 파일을 **지워버린** 경우도
+  #    "purged로 안 넘어갔다"로 읽혀, 가장 나쁜 실패가 초록이 된다
   run grep -q '"state": "purged"' "$D/platform/data-conn/prod/.tombstones.json"   # fail-loud: purged로 안 넘어가야
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "teardown-app removes the app from digest-exporter APPS" {
   run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
   [ "$status" -eq 0 ]
+  # digest-exporter CronJob 자체가 지워지면 APPS 목록에서 앱을 뺀 것이 아니다 — rc 2를 통과로 읽지 않는다
   run grep -q 'orders=' "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }

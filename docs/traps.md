@@ -60,7 +60,7 @@
 | rollup 윈도 상한(라벨-값 상태 게이지는 W < `for:`) — bump phantom 오발화 + 우변 존재 가드 | gate | `tests/gates/vmalert-drift-firing-e2e.sh` |
 | bump-poll/** writer App 예약(인터록≠인증·R-46 수용 잔여·정적 가드=best-effort 변경감지기·Seam C 권위) | gate | `tests/gates/test_bump_poll_ruleset.bats` |
 | emptyDir sizeLimit vs 런타임 다운로드 페이로드(부팅↔evict 루프·DiskPressure=False·로그 파이프라인 연쇄) | gate | `platform/victoria-stack/prod/test_grafana_plugin_budget.bats` |
-| 열거 붕괴 → vacuous green(프로세스 치환 rc 미전파·커맨드 치환 stderr 삼킴·부정 카운트 rc=2) | gate+verify | `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `tools/lib/scan-floor.ts`, `scripts/check-scan-producers.sh`, `policy/ledger.rego`, `tests/test_ledger.bats` |
+| 열거 붕괴 → vacuous green(프로세스 치환 rc 미전파·커맨드 치환 stderr 삼킴·부정 카운트 rc=2·bats 부재 단언은 `-eq 1` + 재귀/루프 자리의 바닥값·양성 대조 한 쌍) | gate+verify | `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `tools/lib/scan-floor.ts`, `scripts/check-scan-producers.sh`, `policy/ledger.rego`, `tests/test_ledger.bats`, `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats` |
 | PreToolUse 훅 종료코드(0=허용·2=차단·그 외=비차단) — 1/4 복사 시 fail-open | local | `tests/gates/test_manifest-guard.bats` |
 | GHA job-level skip은 run conclusion에 안 보인다(스텝 전부 skip이어도 job은 success) | gate+iac | `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats` |
 | 이미지 핀의 존재≠일치≠소유자(하드코딩 소비처 목록·base64 은닉·차트 내부 mutable tag) | gate | `tools/check-image-ownership.ts`, `policy/image-ownership.json`, `tests/gates/test_image-ownership.bats`, `tests/gates/test_pgtools-digest.bats` |
@@ -72,6 +72,7 @@
 | 디스크 자기-상한 > 자기 볼륨 선언(GB=10⁹ vs Gi=2³⁰ 혼동·PVC는 축소 불가·존재 grep은 못 잡음) | gate | `tools/check-disk-caps.ts`, `tests/gates/test_disk-caps.bats` |
 | 고아 PVC는 Bound다 — `phase == Released` 감사는 cascade=orphan 잔재를 원리적으로 못 잡는다 | local | `scripts/audit-orphan-pv.sh` |
 | bats 중간 `[[ ]]`는 침묵 통과 — 거짓인데 ok (grep -qF 변환 시 `--` 종결자 필수) | gate | `scripts/check-bats-style.sh` |
+| `grep -qv`는 부재를 재지 않는다 — 줄 단위 반전이 ∀¬를 ∃¬로 바꾼다(2줄 이상이면 토큰이 있어도 rc 0, 빈 입력이면 rc 1) | gate | `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats` |
 | 셸 문자열의 `$VAR한글` — bash 3.2만 죽고 CI(5.2)는 초록이라 게이트가 원리적으로 못 잡는다 | gate | `tests/gates/test_shell-bash32-traps.bats` |
 | sshd_config.d는 먼저 읽힌 값이 이긴다(systemd와 반대) — 600 드롭인 때문에 실효값은 sudo 없이 못 읽는다 | gate | `infra/k3s-bootstrap/tests/test_03-host-config.bats` |
 | Ubuntu 26.04에 /etc/timezone 부재 — 그 파일을 읽는 검사는 정상 호스트에서도 죽고 처방이 고치지 못한다 | gate | `infra/k3s-bootstrap/tests/test_02-host-preflight.bats` |

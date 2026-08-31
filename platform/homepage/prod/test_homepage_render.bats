@@ -59,6 +59,8 @@ setup() {
   run yq -e "$N | .spec.egress[] | select(.to[].ipBlock.cidr == \"192.168.117.0/24\") | select(.ports[] | (.port == 6443 and .protocol == \"TCP\")) | .ports" "$RENDERED"
   [ "$status" -eq 0 ]
   # apiserver egress에 ClusterIP 10.43.0.1/32 미사용(있으면 select 매치=exit0 → 회귀)
+  # ⚠️ 여긴 grep이 아니라 `yq -e`라 `-eq 1` 전환 대상이 아니다 — yq는 값이 false여도 1이라 rc로
+  #    키 부재를 못 가른다(레포 함정). 대상 부재는 setup의 `[ -s "$RENDERED" ]`가 앞서 red로 만든다.
   run yq -e "$N | .spec.egress[].to[].ipBlock.cidr | select(. == \"10.43.0.1/32\")" "$RENDERED"
   [ "$status" -ne 0 ]
 }

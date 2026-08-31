@@ -39,7 +39,7 @@ const p = appPaths(root, app);
 if (!existsSync(p.prod)) fail(`미온보딩 앱 '${app}' — create-app 먼저`);
 
 const sealedPath = `${appRepoRoot}/deploy/${app}-secrets.sealed.yaml`;
-const dstSealedPath = p.sealed(`${app}-secrets.sealed.yaml`);
+const dstSealedPath = p.sealed; // 경로 SSOT의 값 — 파일명은 규약(<app>-secrets.sealed.yaml) 소유
 const valuesPath = p.values;
 const kustomizationPath = p.kustomization;
 

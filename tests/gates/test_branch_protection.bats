@@ -23,7 +23,8 @@ TF="$BATS_TEST_DIRNAME/../../infra/github/repo.tf"
 @test "branch protection block does NOT set strict=false anywhere" {
   # 무인 relaxation 회귀 가드: strict=false 가 절대 등장하지 않아야 한다.
   run grep -E 'strict[[:space:]]*=[[:space:]]*false' "$TF"
-  [ "$status" -ne 0 ]
+  # rc 2(파일 부재)를 통과로 읽지 않는다 — grep 무매치는 정확히 rc 1이다.
+  [ "$status" -eq 1 ]
 }
 
 @test "enforce_admins=false is documented as a deliberate solo-owner residual bypass" {

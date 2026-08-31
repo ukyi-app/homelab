@@ -33,6 +33,20 @@ EOF
   touch "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml"
   printf 'kind: Database\n' > "$FR/platform/cnpg/prod/databases/lonely.yaml"
   touch "$FR/platform/data-conn/prod/db-lonely-conn.sealed.yaml"
+  # cluster.yaml managed.roles — roles 도메인의 바닥값(기본 1)이 보는 자리다. 이 스위트의 도메인은
+  # roles가 아니므로 **고아가 아닌** role 하나만 둔다(passwordSecret sealed 실재 → dangling-role 미발화).
+  # 형제 스위트(test_audit-dangling-role.bats)가 고아 role 쪽을 진다.
+  cat > "$FR/platform/cnpg/prod/cluster.yaml" <<'YAML'
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata: { name: pg }
+spec:
+  managed:
+    roles:
+      - name: shared_owner
+        passwordSecret: { name: db-shared-owner }
+YAML
+  touch "$FR/platform/cnpg/prod/databases/db-shared-owner.sealed.yaml"
   git -C "$FR" init -q; git -C "$FR" add -A
 }
 teardown() { rm -rf "$TMP"; }
@@ -390,4 +404,164 @@ YAML
   run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --min-registry 1
   [ "$status" -eq 2 ]
   echo "$output" | grep -q "알 수 없는 옵션"
+}
+
+# ── 스캔 신호 규약(티켓 14) ────────────────────────────────────────────────────────
+# 이 도구는 stdout이 기계 판독 JSON이라 `SCAN:` 마커를 낼 수 없다 — 같은 정보를 페이로드
+# `scan: {라벨: 건수}`에 싣는다(형제 tools/dns-drift-check.ts의 관용구, 단 그 파일의 **합계**
+# 결함은 복제하지 않는다). 아래 증인들이 그 두 축(도메인별 관측 · 근거 있는 바닥값)을 진다.
+
+# 일곱 도메인 접미사 — 아래 @test들이 공유하는 로스터. 비면 루프가 0회 도는 것이 곧 vacuous이므로
+# 각 @test가 반복 횟수를 세어 7과 대조한다(열거 붕괴 → vacuous green의 자기 적용).
+AUDIT_DOMAINS="registry apps caches ledger roles conns tombstones"
+
+# 페이로드의 한 도메인 건수를 읽는다. $1=repo-root · $2=도메인 접미사 · 나머지=그대로 전달.
+scan_count_of() {
+  local root="$1" dom="$2"
+  shift 2
+  bun "$ROOT/tools/audit-orphans.ts" --repo-root "$root" "$@" | jq -r ".scan[\"audit-orphans:$dom\"]"
+}
+
+# 일곱 도메인이 모두 비지 않은 픽스처로 올린다(양성 대조 — 붕괴 관측의 기준선).
+seed_all_domains() {
+  mkdir -p "$FR/platform/cache/prod/sessions"
+  cat > "$FR/platform/data-conn/prod/kustomization.yaml" <<'YAML'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - db-shared-conn.sealed.yaml
+YAML
+  # state=purged — incomplete-purge를 만들지 않으면서 tombstone 도메인만 채운다.
+  printf '{"db:gone":{"state":"purged"}}\n' > "$FR/platform/data-conn/prod/.tombstones.json"
+}
+
+@test "all seven enumerations are non-empty in the seeded fixture (positive control for the collapse witness)" {
+  seed_all_domains
+  out="$(bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR")"
+  # 도메인 수 자체를 먼저 고정한다 — 라벨이 빠지면 아래 루프가 조용히 짧아진다.
+  echo "$out" | jq -e '.scan | length == 7'
+  seen=0
+  for dom in $AUDIT_DOMAINS; do
+    n="$(echo "$out" | jq -r ".scan[\"audit-orphans:$dom\"]")"
+    [ "$n" -ge 1 ]
+    seen=$((seen + 1))
+  done
+  [ "$seen" -eq 7 ]
+}
+
+@test "each of the seven enumerations collapses to zero visibly in the payload (per-domain, never a sum)" {
+  # 형제 dns-drift-check는 `scanned: a.length + b.length` 합계라 작은 레인의 붕괴를 큰 레인이 덮는다.
+  # 여기서는 한 레인을 무너뜨려도 **그 레인만** 0이 되고 다른 레인은 그대로 보여야 한다.
+  seed_all_domains
+  # 원장·role은 바닥값이 1이라 붕괴시키면 종료코드가 1이 된다(그 축은 아래 두 @test가 진다).
+  # 이 @test의 질문은 "붕괴가 페이로드에 보이는가"이므로 두 바닥값만 명시 해제한다.
+  LOW="--floor ledger=0 --floor roles=0"
+  collapsed=0
+  rm -f "$FR/platform/data-conn/prod/.tombstones.json"
+  [ "$(scan_count_of "$FR" tombstones $LOW)" = "0" ]
+  [ "$(scan_count_of "$FR" conns $LOW)" -ge 1 ]      # 공붕괴 아님 — 다른 레인은 그대로
+  collapsed=$((collapsed + 1))
+  rm -f "$FR/platform/data-conn/prod/kustomization.yaml"
+  [ "$(scan_count_of "$FR" conns $LOW)" = "0" ]
+  [ "$(scan_count_of "$FR" caches $LOW)" -ge 1 ]
+  collapsed=$((collapsed + 1))
+  rm -rf "$FR/platform/cache/prod/sessions"
+  [ "$(scan_count_of "$FR" caches $LOW)" = "0" ]
+  [ "$(scan_count_of "$FR" roles $LOW)" -ge 1 ]
+  collapsed=$((collapsed + 1))
+  rm -f "$FR/platform/cnpg/prod/cluster.yaml"
+  [ "$(scan_count_of "$FR" roles $LOW)" = "0" ]
+  [ "$(scan_count_of "$FR" ledger $LOW)" -ge 1 ]
+  collapsed=$((collapsed + 1))
+  printf '<!-- ledger:meta -->\n' > "$FR/docs/memory-ledger.md"
+  [ "$(scan_count_of "$FR" ledger $LOW)" = "0" ]
+  [ "$(scan_count_of "$FR" registry $LOW)" -ge 1 ]
+  collapsed=$((collapsed + 1))
+  echo '[]' > "$FR/infra/cloudflare/apps.json"
+  [ "$(scan_count_of "$FR" registry $LOW)" = "0" ]
+  [ "$(scan_count_of "$FR" apps $LOW)" -ge 1 ]
+  collapsed=$((collapsed + 1))
+  rm -rf "$FR/apps/orders"
+  [ "$(scan_count_of "$FR" apps $LOW)" = "0" ]
+  collapsed=$((collapsed + 1))
+  [ "$collapsed" -eq 7 ]   # 일곱 도메인을 모두 밟았다(루프가 짧아지면 여기서 red)
+}
+
+@test "the ledger-row floor is red at zero rows, and the explicit override lets a fixture through" {
+  # 실 트리 docs/memory-ledger.md는 CI가 강제하는 예산 SSOT라 구조적으로 항상 ≥1행이다 —
+  # 0행은 "검사할 게 없다"가 아니라 파일 부재/행 마커 포맷 드리프트이고, 그 상태에서
+  # stale-ledger-row 검사가 통째로 vacuous해진다.
+  printf '<!-- ledger:meta VM_ALLOCATABLE_MIB=11264 LIMIT_BUDGET_MIB=8704 -->\n' > "$FR/docs/memory-ledger.md"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "audit-orphans:ledger"
+  echo "$output" | grep -q "열거 붕괴"
+  # 바닥값 **수치**는 소비자가 소유한다 — 정당하게 빈 픽스처는 명시로 내린다(래칫 아님).
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --floor ledger=0
+  [ "$status" -eq 0 ]
+}
+
+@test "the managed-role floor is red when cluster.yaml is gone (dangling-role would be vacuous)" {
+  # cluster.yaml managed.roles에는 superuser 시드(ukkiee)가 구조적으로 상주해 실 트리는 항상 ≥1이다.
+  # 0 = 파일 부재/키 경로(spec.managed.roles) 변경 → dangling-role 검사가 0건 검사 후 초록이 된다.
+  rm -f "$FR/platform/cnpg/prod/cluster.yaml"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "audit-orphans:roles"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --floor roles=0
+  [ "$status" -eq 0 ]
+}
+
+@test "simultaneous collapses are collected and reported together, not one per run" {
+  # 첫 도메인에서 죽으면 나머지 여섯의 상태를 한 번에 못 본다(guardMain ②와 같은 규율).
+  rm -f "$FR/platform/cnpg/prod/cluster.yaml"
+  printf '<!-- ledger:meta -->\n' > "$FR/docs/memory-ledger.md"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "열거 붕괴 2건"
+  echo "$output" | grep -q "audit-orphans:roles"
+  echo "$output" | grep -q "audit-orphans:ledger"
+}
+
+@test "every one of the seven domains is a declared --floor key, and a typo is a usage error" {
+  # assertFloorKeys는 오타 키를 **조용히 꺼진 바닥값**이 아니라 사용법 오류(2)로 접는다.
+  # 일곱 개가 전부 로스터에 있는지는 하나씩 실제로 넘겨서 확인한다(선언 목록 대조가 아니라 실행).
+  seed_all_domains
+  accepted=0
+  for dom in $AUDIT_DOMAINS; do
+    run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --floor "$dom=0"
+    [ "$status" -eq 0 ]
+    accepted=$((accepted + 1))
+  done
+  [ "$accepted" -eq 7 ]
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --floor connz=0
+  [ "$status" -eq 2 ]
+}
+
+@test "stdout stays machine-readable JSON in all three exit modes (the emission contract)" {
+  # 방출 규약: 마커를 어느 모드에서도 내지 않는다. 마커 한 줄이 audit.yaml:52의 tee→jq와
+  # 이 스위트의 jq 단언을 통째로 깬다. jq가 stdout **전체**를 파싱하는 것이 그 증인이다.
+  seed_all_domains
+  modes=0
+  for mode in default ci strict; do
+    case "$mode" in
+      default) out="$(bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" || true)" ;;
+      ci) out="$(bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci || true)" ;;
+      strict) out="$(bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --strict || true)" ;;
+    esac
+    printf '%s\n' "$out" | jq -e '.scan | length == 7'
+    modes=$((modes + 1))
+  done
+  [ "$modes" -eq 3 ]
+}
+
+@test "the audit.yaml consumption (tee then jq .count/.alerting) survives the scan payload" {
+  seed_all_domains
+  bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" | tee "$TMP/audit.json" > /dev/null
+  count="$(jq -r .count "$TMP/audit.json")"
+  alerting="$(jq -r .alerting "$TMP/audit.json")"
+  [ "$count" -ge 1 ]        # 픽스처엔 orphan-dns(ghost)가 있다 — null/빈 값이면 여기서 red
+  [ "$alerting" -ge 1 ]
+  jq -e '.scan["audit-orphans:registry"] == 2' "$TMP/audit.json"
 }

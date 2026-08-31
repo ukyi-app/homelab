@@ -133,25 +133,55 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   echo "$output" | grep -q "ok"
 }
 
-@test "db/cache lane surface paths equal the layout kernel derivation (import-0 parity guard)" {
-  # 기술자는 import 0 계약이라 커널을 참조할 수 없다 — 두 순수 모듈의 표면 경로 일치를 가드가
+@test "every lane row surface path equals the kernel derivation (import-0 parity guard)" {
+  # 기술자는 import 0 계약이라 커널을 참조할 수 없다 — 두 순수 module의 표면 경로 일치를 가드가
   # 대조한다(Q7과 같은 양끝+가드 패턴). 어긋나면 red — D3 호환 형태의 "커널 소비"다.
+  # 손 열거가 아니라 **행 순회**다: db/cache만 대조하고 앱 레인 3행은 :90-94의 리터럴 앵커에만
+  # 맡기던 비대칭이 「하드코딩 소비처 목록은 자기 자신에게만 정확하다」(AGENTS.md 함정) 형태였다.
+  # 커널 대조가 없는 행은 default에서 loud fail — 새 레인 행이 조용히 무대조로 들어오지 못한다.
   run bun -e '
-    import { laneMutationFields } from "./tools/lib/catalog-rows.ts";
+    import { LANES, laneMutationFields } from "./tools/lib/catalog-rows.ts";
     import { layoutFor } from "./tools/lib/resource-layout.ts";
-    const db = laneMutationFields("create-database", "orders");
-    const dbL = layoutFor("db", "orders");
-    const cc = laneMutationFields("create-cache", "demo");
-    const ccL = layoutFor("cache", "demo");
-    const cases = [
-      [db.applications[0].surfacePath, dbL.paths.cr],
-      [db.applications[1].surfacePath, dbL.paths.connSealed],
-      [cc.applications[0].surfacePath, ccL.paths.instanceDir + "/deployment.yaml"],
-      [cc.applications[1].surfacePath, ccL.paths.conn],
-    ];
-    for (const [a, b] of cases) if (a !== b) { console.error(a + " != " + b); process.exit(1); }
-    console.log("ok:" + cases.length);
+    import { appRel } from "./tools/lib/app-surface.ts";
+    // 행 → 커널 파생 표면 경로(순서 포함). 앱 레인은 app-surface(d4), 리소스 레인은 resource-layout.
+    const wantFor = (action, key) => {
+      const a = appRel(key);
+      switch (action) {
+        case "create-database": { const L = layoutFor("db", key); return [L.paths.cr, L.paths.connSealed]; }
+        case "create-cache":    { const L = layoutFor("cache", key); return [L.paths.instanceDir + "/deployment.yaml", L.paths.conn]; }
+        case "create-app":      return [a.values];
+        case "update-secrets":  return [a.sealed];
+        case "teardown-app":    return [a.values];
+        default: return null;   // 커널 대조가 없는 행 = 이 가드의 사각 — 통과가 아니라 red다
+      }
+    };
+    // 대조기 본체 — 불일치 사유를 내고, 일치면 null. 양성 대조가 이 함수를 그대로 문다.
+    const mismatch = (action, key, got) => {
+      const want = wantFor(action, key);
+      if (want === null) return action + ": 커널 대조가 없는 레인 행";
+      if (got.length !== want.length) return action + ": 표면 개수 " + got.length + " != " + want.length;
+      for (let i = 0; i < got.length; i++) if (got[i] !== want[i]) return action + "[" + i + "]: " + got[i] + " != " + want[i];
+      return null;
+    };
+    let lanes = 0, paths = 0;
+    for (const row of Object.values(LANES)) {
+      const key = row.keyKind === "app" ? "myapp" : "orders";
+      const got = laneMutationFields(row.action, key).applications.map((x) => x.surfacePath);
+      const why = mismatch(row.action, key, got);
+      if (why !== null) { console.error(why); process.exit(1); }
+      lanes++; paths += got.length;
+    }
+    // 양성 대조 — 전건 통과가 vacuous가 아님을 잰다(대조기가 같은 피연산자에서 불일치를 실제로 문다).
+    if (mismatch("create-app", "myapp", ["apps/myapp/deploy/prod/WRONG.yaml"]) === null) {
+      console.error("대조기가 불일치를 못 문다(vacuous green)"); process.exit(1);
+    }
+    if (mismatch("no-such-lane", "myapp", []) === null) {
+      console.error("커널 대조 없는 행이 통과한다"); process.exit(1);
+    }
+    console.log("lanes:" + lanes + " paths:" + paths);
   '
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^ok:4$"
+  # 손 핀 앵커 — 레인 5행(db 2 + cache 2 + create-app 1 + update-secrets 1 + teardown-app 1 = 표면 7).
+  # 행이 빠지거나 applications가 비면 순회가 조용히 짧아지는 대신 여기서 red다(열거 붕괴 방지).
+  echo "$output" | grep -q "^lanes:5 paths:7$"
 }

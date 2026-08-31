@@ -28,7 +28,10 @@ teardown() { rm -rf "$TMP"; }
 @test "notify.sh is POSIX sh (no bash-isms)" {
   run head -1 "$SH"; [ "$status" -eq 0 ]
   run grep -E "^#!/usr/bin/env sh|^#!/bin/sh" "$SH"; [ "$status" -eq 0 ]
-  run grep -nE '\[\[|\$\{[A-Za-z_]+\^\^|\$\{[A-Za-z_]+//' "$SH"; [ "$status" -ne 0 ]
+  # ⚠️ 부재 단언은 `-eq 1`이다 — grep은 대상 파일 부재/읽기불가에 rc **2**를 내는데 `-ne 0`은 그것을
+  #    무매치와 구별하지 않는다(notify.sh가 사라지면 "bash-ism 0건"으로 통과 = vacuous green).
+  #    아래 두 @test의 `-ne 0`은 notify.sh 자신의 종료코드 규약(사용법 오류 exit 2)이라 대상이 아니다.
+  run grep -nE '\[\[|\$\{[A-Za-z_]+\^\^|\$\{[A-Za-z_]+//' "$SH"; [ "$status" -eq 1 ]
 }
 
 @test "assembled message has parse_mode=HTML, the glyph, bold korean title, korean status" {

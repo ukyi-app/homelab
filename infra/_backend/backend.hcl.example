@@ -10,4 +10,9 @@ access_key = "<R2_STATE_ACCESS_KEY>"
 secret_key = "<R2_STATE_SECRET_KEY>"
 # key는 root별로 다르게: cloudflare/prod/terraform.tfstate,
 # tailscale/prod/terraform.tfstate, github/prod/terraform.tfstate
+#
+# ⚠️ 이 줄은 **로컬 수동 init 전용 사본**이다. CI는 이 값을 입력으로 받지 않는다 —
+#    .github/actions/tf-r2-init가 root 하나에서 파생한다(별도 `state-key` 입력은 제거됐다:
+#    등식은 정보가 0인데 짝이 어긋나면 한 루트가 다른 루트의 state를 관리할 수 있었다).
+#    형태를 바꾸려면 그쪽이 SSOT이고, 증인은 tools/tests/test_tf-r2-init.bats다.
 key = "<root>/prod/terraform.tfstate"

@@ -52,8 +52,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 @test "db-url provides no reset/drop/teardown surface (read-only tool)" {
   run bun "$ROOT/tools/db-url.ts" --name orders --reset
   [ "$status" -ne 0 ]   # 알 수 없는 플래그 fail-closed
+  # ⚠️ 중첩 사각 — 위 `run bun`은 db-url.ts가 사라져도 비-0이다. 이 줄까지 `-ne 0`이면 두 단언이
+  #    **함께** rc 비-0으로 통과해, 도구 파일 부재에 "파괴 표면 없음"이 초록으로 증명됐다.
+  #    단일 파일 피연산자라 `-eq 1`이 그 rc 2를 red로 가른다.
+  #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
   run grep -iE "DROP TABLE|db:reset|compose down" "$ROOT/tools/db-url.ts"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "db-url without KUBECONFIG signals skip via the helper (exit 4, marker, no write)" {

@@ -1,4 +1,8 @@
 #!/usr/bin/env bats
+# ⚠️ grep 부재 단언은 `[ "$status" -eq 1 ]`이다(피연산자가 단일 파일이라 그것으로 닫힌다).
+#    아래 `yq -e` 자리는 **비대상**이다 — yq는 값이 false여도 exit 1이라 rc가 부재를 뜻하지 않는다
+#    (이 파일 :82 @test의 주석이 그 함정의 원장 행이다).
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 f=platform/cnpg/prod/cluster.yaml
 
 @test "single instance, HA off" { grep -qE 'instances:\s*1' "$f"; }
@@ -22,7 +26,7 @@ f=platform/cnpg/prod/cluster.yaml
   grep -q 'storageClass: standard' "$f"
   grep -qE 'walStorage:' "$f"
   run grep -q 'bulk-ssd' "$f"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "Cluster CR carries sync-wave -1 (Ready before app migrations)" {

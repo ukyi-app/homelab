@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 # observability 외부 egress 격리 회귀 가드(alertmanager·relay, NETPOL-4 minimal). @test 이름은 영어
 # (디렉토리 단위 실행 시 한글 인코딩 깨짐 — 검증된 버그).
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 networkpolicy.yaml 단일 파일이라
+#    그것으로 닫힌다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
 
 @test "alertmanager and relay default-deny-egress baselines exist" {
@@ -26,9 +28,13 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
 
 @test "metrics east-west plane is intentionally untouched (no ns-wide default-deny)" {
   # vmagent가 전 ns를 scrape(role:pod SD)라 ns-wide deny는 near-allow-all → 외부 egress만 워크로드별 격리.
-  run grep -q 'podSelector: {}' "$P"; [ "$status" -ne 0 ]
+  # ⚠️ 이 @test는 부재 단언 하나뿐이라 형제 증인이 없다 — 예전 `-ne 0`에서는 networkpolicy.yaml을
+  #    리네임해도 초록이었다 — 2026-08-29 격리 트리 실측에서 이 파일의 부재 단언 두 @test만
+  #    살아남았다.
+  run grep -q 'podSelector: {}' "$P"; [ "$status" -eq 1 ]
 }
 
 @test "pod CIDR is never an allowed ipBlock cidr (default-deny bypass trap)" {
-  run grep -Eq 'cidr:[[:space:]]*10\.42' "$P"; [ "$status" -ne 0 ]
+  # ⚠️ 위 @test와 같다 — 부재 단언 단독이라 대상 부재에 홀로 초록이었다.
+  run grep -Eq 'cidr:[[:space:]]*10\.42' "$P"; [ "$status" -eq 1 ]
 }

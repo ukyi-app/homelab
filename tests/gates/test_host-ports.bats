@@ -8,12 +8,102 @@
 #
 # 픽스처는 전부 hermetic이다. 실 소켓은 프로브 증인 두 레인에서만 쓴다.
 # ⚠️ @test 이름은 영어만 · 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵 통과).
+# ⚠️ 토큰 **부재** 단언은 `run grep -qF … <<<"$out"` + `[ "$status" -eq 1 ]`로만 쓴다.
+#    `echo "$out" | grep -qvF TOKEN`은 부재를 재지 않는다 — `-v`는 줄 단위 반전이라 "매치하지
+#    않는 줄"이 하나라도 있으면 rc 0이고, 토큰이 출력에 **있어도** 통과하는 항진명제다
+#    (여기 6곳이 그 관용구였고 5곳이 실측으로 항진이었다 — 남은 한 곳(`--rm` 거부)은 진단이 마침
+#    **1줄**이라 우발적으로만 옳았다: 그 문구가 두 줄이 되는 날 조용히 공허해진다. 형제 실측은
+#    infra/tailscale/test_provider_scopes.bats:75).
+#    히어스트링은 경로 피연산자가 없어 rc 2 채널이 없으므로 `-eq 1`이 정확한 상수다
+#    (docs/traps-detail.md 「처방(bats 부재 단언)」 말미). 부재 단언마다 같은 피연산자 위의
+#    양성 단언이 비공허 바닥값을 겸하고, 토큰 자체의 양성 대조는 아래 두 레인이 세운다.
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   S="$ROOT/scripts/check-host-ports.sh"
   LIB="$ROOT/tests/gates/lib/host-port.sh"
   FX="$BATS_TEST_TMPDIR"
+  STUB="$FX/bin"; STATE="$FX/state"
+  mkdir -p "$STUB" "$STATE"
+
+  # hermetic docker 스텁 — 기동 프리미티브가 무는 네 가지를 모델링한다:
+  #   ⓐ **이름 유일성**(실패한 run이 Created를 남긴다 → `docker rm -f`를 빼면 재시도가 전부 죽는다)
+  #   ⓑ 시도 **횟수** 기반 bind 실패(포트별 픽스처는 어느 포트가 먼저 뽑히느냐에 의존해 비결정적이다)
+  #   ⓒ `docker port`가 **다른** 포트를 답하는 경합(매핑 대조 레인)
+  #   ⓓ `docker logs`의 식별 가능한 본문(실패 진단이 실제로 로그를 보여 주는가)
+  cat > "$STUB/docker" <<'DOCKEREOF'
+#!/usr/bin/env bash
+S="$STUB_STATE"
+case "$1" in
+  rm)   shift; while [ "$1" = "-f" ]; do shift; done; rm -f "$S/c-$1"; exit 0 ;;
+  port) cat "$S/mapped" 2>/dev/null; exit 0 ;;
+  logs) echo "STUBLOG-COOKIE last lines of the container log"; exit 0 ;;
+  network) exit 0 ;;
+  run)
+    name=""; hostport=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --name) name="$2"; shift ;;
+        -p) hostport="${2#127.0.0.1:}"; hostport="${hostport%%:*}"; shift ;;
+      esac
+      shift
+    done
+    printf '%s\n' "$hostport" >> "$S/ports"
+    n=$(cat "$S/attempts" 2>/dev/null || echo 0); n=$(( n + 1 )); printf '%s\n' "$n" > "$S/attempts"
+    if [ -e "$S/c-$name" ]; then
+      echo "Error response from daemon: container name \"/$name\" is already in use" >&2
+      exit 125
+    fi
+    if [ "$n" -le "$(cat "$S/failfirst" 2>/dev/null || echo 0)" ]; then
+      : > "$S/c-$name"   # ⚠️ 실패한 run도 컨테이너를 Created로 남긴다(docker/podman 공통 의미론)
+      echo "STUBFAIL-COOKIE rootlessport listen tcp 127.0.0.1:$hostport: bind: address already in use" >&2
+      exit 126
+    fi
+    : > "$S/c-$name"
+    if [ -s "$S/mismatch" ]; then printf '127.0.0.1:%s\n' "$(cat "$S/mismatch")" > "$S/mapped"
+    else printf '127.0.0.1:%s\n' "$hostport" > "$S/mapped"; fi
+    exit 0 ;;
+esac
+exit 0
+DOCKEREOF
+  chmod +x "$STUB/docker"
+}
+
+# 프리미티브를 스텁 런타임 위에서 부른다. $1 = 호출 전에 끼울 셸 코드, $2 = hp_run_published 인자열.
+# ⚠️ 호출 뒤에 `AFTER-CALL`을 찍는다 — 실패 레인에서 이 토큰이 **없어야** 한다. rc를 흘리면
+#    `set -e` 아래에서도 통과해 버리는 자리라 "죽었는가"를 출력으로도 함께 문다.
+run_published() {
+  run env PATH="$STUB:$PATH" STUB_STATE="$STATE" bash -c "
+    set -euo pipefail
+    . '$LIB'
+    $1
+    p=\"\$(hp_run_published $2)\"
+    printf 'PORT=%s\n' \"\$p\"
+    echo AFTER-CALL
+  "
+}
+
+# AM 하네스를 **격리 루트**에서 돌린다 — 뮤테이션 사본을 실 트리에 쓰지 않기 위해서다.
+# 하네스가 ROOT를 `dirname $0/../..`로 잡으므로 그 모양만 만들어 주고 나머지 자산은 심링크로 빌린다.
+# $1=루트 경로 $2=하네스에 걸 sed 스크립트("" = 무변경) $3=host-port.sh에서 지울 고정 문자열("" = 무변경)
+# ⚠️ 뮤테이션은 정규식이 아니라 **고정 문자열**로 지운다 — 패턴에 `|`·`$`가 들어가면 메타문자로
+#    삼켜져 치환이 조용히 실패하고, 그러면 그 레인이 원본을 검사해 vacuous하게 통과한다.
+am_root() {
+  local r="$1" hsed="${2:-}" hpdrop="${3:-}"
+  mkdir -p "$r/tests/gates/lib" "$r/platform/victoria-stack/prod"
+  ln -s "$ROOT/tests/gates/mock-telegram.py" "$r/tests/gates/mock-telegram.py"
+  ln -s "$ROOT/tests/gates/fixtures"         "$r/tests/gates/fixtures"
+  ln -s "$ROOT/platform/victoria-stack/prod/alertmanager.yaml" \
+        "$r/platform/victoria-stack/prod/alertmanager.yaml"
+  if [ -n "$hpdrop" ]; then grep -vF "$hpdrop" "$LIB" > "$r/tests/gates/lib/host-port.sh"
+  else cp "$LIB" "$r/tests/gates/lib/host-port.sh"; fi
+  if [ -n "$hsed" ]; then
+    sed "$hsed" "$ROOT/tests/gates/alertmanager-render-e2e.sh" > "$r/tests/gates/alertmanager-render-e2e.sh"
+  else cp "$ROOT/tests/gates/alertmanager-render-e2e.sh" "$r/tests/gates/alertmanager-render-e2e.sh"; fi
+}
+
+run_am() { # $1=격리 루트
+  run env PATH="$STUB:$PATH" STUB_STATE="$STATE" bash "$1/tests/gates/alertmanager-render-e2e.sh"
 }
 
 # ── 가드의 변별력 ────────────────────────────────────────────────────────────────
@@ -22,7 +112,10 @@ setup() {
   # 실제로 있던 형태 그대로 — 예전 alertmanager-render-e2e.sh:40이 이것이었다.
   printf '#!/usr/bin/env bash\ndocker run -d -p 9093:9093 img\n'                  > "$FX/dirty.sh"
   printf '#!/usr/bin/env bash\ndocker run -d -p 127.0.0.1:9093:9093 img\n'        > "$FX/dirty2.sh"
-  printf '#!/usr/bin/env bash\n. lib/host-port.sh\ndocker run -d -p "127.0.0.1:${P}:9093" img\n' > "$FX/clean.sh"
+  # ⚠️ 음성 대조는 **모든 레인에 대해** 깨끗해야 한다 — publish 인자가 있는 파일은 레인 E도 보므로
+  #   기동 프리미티브 사용이 함께 요구된다. 그 줄을 빼면 이 대조가 [A]가 아닌 [P]로 red가 돼
+  #   "레인 A가 변수 포트에 침묵한다"는 축을 더 이상 재지 못한다.
+  printf '#!/usr/bin/env bash\n. lib/host-port.sh\nQ="$(hp_run_published c 9093 "" img)"\ndocker run -d -p "127.0.0.1:${P}:9093" img\n' > "$FX/clean.sh"
   run bash "$S" "$FX/dirty.sh";  [ "$status" -ne 0 ]; echo "$output" | grep -qF '[A]'
   run bash "$S" "$FX/dirty2.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[A]'
   run bash "$S" "$FX/clean.sh";  [ "$status" -eq 0 ]
@@ -68,6 +161,36 @@ setup() {
   run bash "$S" "$FX/ns-bad.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[D]'
 }
 
+@test "lane E fires when a file publishes a container without going through the run primitive" {
+  # ★ A·B·C·D가 **전부 침묵하는** 자리다 — 배정은 lib에서 받고(hp_pick_port) 기동만 손으로 인라인하면
+  #   `docker rm -f` 선행·`--rm` 금지·비판별 재시도·매핑 대조·logs tail 6불변식이 그 사이트만 빠진다.
+  #   그게 이 가드를 태어나게 한 병(처방이 한 소비자에 갇힘)이 **한 층 위**에서 재발한 모양이었다.
+  printf '#!/usr/bin/env bash\n. tests/gates/lib/host-port.sh\nP="$(hp_pick_port)"\ndocker run -d --name x -p "127.0.0.1:${P}:9093" img\n' > "$FX/inline.sh"
+  run bash "$S" "$FX/inline.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[P]'
+  # 음성 대조 — publish 인자가 있어도 프리미티브를 쓰면 조용하다(항상-발화 레인은 무측정과 같다).
+  printf '#!/usr/bin/env bash\n. tests/gates/lib/host-port.sh\nP="$(hp_run_published c 9093 "" img)"\ndocker run -d -p "127.0.0.1:${P}:9093" other\n' > "$FX/viaprim.sh"
+  run bash "$S" "$FX/viaprim.sh"; [ "$status" -eq 0 ]
+  # ★ 그리고 **행간 주석은 사용으로 치지 않는다** — 이름을 적기만 해도 통과하면 마지막 방어선이
+  #   주석 한 줄로 무너진다([C]와 같은 규율).
+  printf '#!/usr/bin/env bash\n. tests/gates/lib/host-port.sh\nP="$(hp_pick_port)"\ndocker run -d -p "127.0.0.1:${P}:9093" img   # hp_run_published 로 바꿀 것\n' > "$FX/cmtonly.sh"
+  run bash "$S" "$FX/cmtonly.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[P]'
+}
+
+@test "lane E exempts the definition site by name and refuses a second definition (the exemption is not a bypass)" {
+  # 정의처는 소비자가 아니다 — 파일 목록이 아니라 "이 파일이 그 함수를 정의하는가"라는 규칙이라
+  # (레인 D의 HP_ 이름공간 면제와 같은 형태) lib을 옮겨도 판정이 갈리지 않는다.
+  def='#!/usr/bin/env bash\nhp_pick_port() { echo 1; }\nhp_run_published() {\n  docker run -d --name "$1" -p "127.0.0.1:${port}:${2}" "$@"\n}\n'
+  printf "$def" > "$FX/def1.sh"
+  run bash "$S" "$FX/def1.sh"; [ "$status" -eq 0 ]
+  # ★ 그 면제가 **우회 통로**가 되면 안 된다 — 프리미티브를 자기 파일로 복사하면 그만이기 때문이다.
+  #   기동 처방의 SSOT는 하나이므로 사본의 존재 자체가 위반이다.
+  printf "$def" > "$FX/def2.sh"
+  run bash "$S" "$FX/def1.sh" "$FX/def2.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[P]'
+  echo "$output" | grep -qF 'SSOT'
+}
+
 @test "comment lines quoting the forbidden forms are not flagged (self-hit control)" {
   # ★ 이 레포의 하네스는 자기가 고친 함정을 **인용하며 설명**한다. 줄 머리 앵커가 없으면 검출기가
   #   자기 문서를 위반으로 잡고, 그러면 사람이 주석을 지워 근거가 사라진다(형제 게이트가 밟은 자리).
@@ -89,7 +212,7 @@ setup() {
   run bash "$S" "$FX/q3.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[A]'
   run bash "$S" "$FX/q4.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[A]'
   # 음성 대조 — 같은 따옴표 표기에 **변수**가 들어가면 조용해야 한다.
-  printf '#!/usr/bin/env bash\n. tests/gates/lib/host-port.sh\ndocker run -d -p "127.0.0.1:${P}:9093" img\n' > "$FX/qok.sh"
+  printf '#!/usr/bin/env bash\n. tests/gates/lib/host-port.sh\nQ="$(hp_run_published c 9093 "" img)"\ndocker run -d -p "127.0.0.1:${P}:9093" img\n' > "$FX/qok.sh"
   run bash "$S" "$FX/qok.sh"; [ "$status" -eq 0 ]
 }
 
@@ -185,12 +308,17 @@ PYWITNESS
   #   형제 bats를 **함께** 올리고 이 하네스를 놔두면 전 게이트가 초록인 채로, "템플릿이 실제로
   #   렌더된다"는 유일한 증거가 **배포되지 않는 버전에 대해** 성립한다.
   #   추적 열거 — 하드코딩 로스터를 두면 새 하네스가 이 레인 밖에서 태어난다.
-  hs="$(git ls-files 'tests/gates/*.sh' 'tests/gates/lib/*.sh' | xargs grep -l 'docker run' || true)"
-  n="$(printf '%s\n' "$hs" | grep -c . || true)"
-  # ⚠️ xargs는 빈 입력에서 grep을 아예 안 부르고 0을 낸다 → hs가 비면 아래 for가 vacuous하다. 바닥값이 막는다.
-  [ "$n" -ge 3 ]
+  # ⚠️ 열거 키가 `docker run`**만**이면 안 된다. 기동이 `hp_run_published`로 접힌 뒤 publish 하네스
+  #   둘(AM 렌더 e2e · vmalert lib)에는 `docker run` 줄이 아예 없어 — 정작 이미지를 **파생하는**
+  #   그 둘이 이 레인 밖으로 조용히 빠져나간다. 키는 "컨테이너를 띄우는가"이지 표기가 아니다.
+  hs="$(git ls-files 'tests/gates/*.sh' 'tests/gates/lib/*.sh' | xargs grep -lE 'docker run|hp_run_published' || true)"
+  n=0
   for f in $hs; do
     CODE="$BATS_TEST_TMPDIR/harness-code.sh"
+    # 프리미티브의 **정의처**는 이미지를 인자로 받을 뿐 이름을 대지 않는다 — 파생을 요구할 대상이
+    # 아니다(파일 목록이 아니라 "그 함수를 정의하는가" 규칙 — 가드 레인 E와 같은 형태).
+    if grep -qE '^[[:space:]]*hp_run_published[[:space:]]*\(\)' "$f"; then continue; fi
+    n=$(( n + 1 ))
     # 줄 머리 주석은 걷어낸다 — 하네스가 자기 함정을 인용하며 설명한다.
     grep -vE '^[[:space:]]*#' "$f" > "$CODE"
     # ① 파생이 **존재하는가**.
@@ -203,6 +331,9 @@ PYWITNESS
     run bash -c "grep -coE '[a-z0-9][a-z0-9._/-]*/[a-z0-9._-]+:v?[0-9]+[.][0-9]+' '$CODE' || true"
     [ "$output" -eq 0 ]
   done
+  # ⚠️ 바닥값은 루프 **뒤**에 온다 — xargs는 빈 입력에서 grep을 아예 안 부르고 0을 내므로 hs가 비면
+  #   위 for가 통째로 vacuous하다. 실제로 검사한 건수를 세어 막는다(면제 스킵도 여기서 반영된다).
+  [ "$n" -ge 5 ]
 }
 
 # ── 배정 프리미티브의 계약 ────────────────────────────────────────────────────────
@@ -347,6 +478,17 @@ PYWITNESS
   # 정적 대조 — 함수 본문에 `exit`가 없다(주석은 줄 머리 앵커로 제외).
   run bash -c "grep -vE '^[[:space:]]*#' '$LIB' | grep -c 'exit '"
   [ "$output" -eq 0 ]
+  # ★ `exit`만 없으면 되는 게 아니다. **인자 부족**에서 `shift 3`이 먼저 돌면 bash가 rc 1을 내고
+  #   소비자의 `set -e`가 셸을 죽인다 — 한 줄의 exit도 없이 lib이 종료를 소유하는 자리다.
+  run env PATH="$STUB:$PATH" STUB_STATE="$STATE" bash -c "
+    set -euo pipefail
+    . '$LIB'
+    hp_run_published c 8080 || echo \"RC=\$?\"
+    echo STILL-ALIVE
+  "
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF 'RC=1'
+  echo "$output" | grep -qF 'STILL-ALIVE'
 }
 
 @test "a dead detector emits no marker (a run that could not scan must not claim it did)" {
@@ -356,4 +498,240 @@ PYWITNESS
   out="$output"
   run grep -q '^SCAN: check-host-ports:' <<<"$out"
   [ "$status" -ne 0 ]
+}
+
+# ── 기동 프리미티브(hp_run_published)의 계약 ──────────────────────────────────────
+# 이 여섯 축은 예전에 `lib/vmalert-e2e.sh`와 `alertmanager-render-e2e.sh`에 **두 벌로** 살았고,
+# AM 사본에 대한 증인은 0건이었다. 정의처가 하나가 됐으므로 증인도 여기 하나로 모은다.
+
+@test "the run primitive refuses --rm before it starts anything (the flag that erases the diagnosis)" {
+  # ★ 오진 서사를 되살리는 **유일한 편집**이다. 컨테이너가 기동 직후 죽으면(= 이 게이트들이 존재하는
+  #   이유인 설정 회귀) `--rm`이 컨테이너를 즉시 지워 `docker port`도 `docker logs`도 실패한다 —
+  #   남는 것은 "매핑을 확인할 수 없다" 한 줄뿐이고 원인은 어디에도 없다.
+  run_published "" 'c 8080 "" --rm img'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF -- '--rm은 받지 않는다'
+  # ★ **띄우기 전에** 거부한다 — 조용히 무시하면 호출부는 정리가 걸렸다고 믿은 채 책임을 놓는다.
+  [ ! -s "$STATE/ports" ]
+  run grep -qF 'AFTER-CALL' <<<"$output"
+  [ "$status" -eq 1 ]
+  # 음성 대조 — 같은 인자에서 `--rm`만 빼면 통과한다(항상-거부는 무측정과 같다).
+  run_published "" 'c 8080 "" img'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^PORT=[0-9]+$'
+  # ★ 그리고 이것이 `AFTER-CALL` 부재 단언 네 곳(이 파일의 실패 레인)의 **양성 대조**다 — 성공
+  #   경로에서 토큰이 실제로 나온다. run_published에서 `echo AFTER-CALL` 한 줄이 사라지면 네 레인이
+  #   전부 조용히 공허해지는데, 그것을 무는 자리가 여기 하나뿐이다.
+  echo "$output" | grep -qF 'AFTER-CALL'
+}
+
+@test "a transient bind failure is retried on a different port, announced, and the returned port is the new one" {
+  # ⚠️ 픽스처 밴드는 프로덕션 밴드(20000-29999) **밖**에 둔다 — CI에서 이 스위트는 발화 e2e와
+  #   동시에 도는데, 프로덕션 밴드 안의 고정 포트를 잡으면 그 하네스들과 경합해 간헐 red가 된다.
+  # 실패는 **시도 횟수**로 주입한다. 포트별 픽스처는 어느 포트가 먼저 뽑히느냐에 의존해 비결정적이라,
+  # 첫 추첨이 성공 포트를 집으면 재시도가 아예 안 일어나 이 레인이 통째로 vacuous하다.
+  printf '1\n' > "$STATE/failfirst"
+  run_published "HP_PORT_LO=19501; HP_PORT_HI=19502" 'c 8080 "" img'
+  [ "$status" -eq 0 ]
+  out="$output"
+  # 조용한 재시도 금지 — 발생 사실이 로그에 없으면 경합 빈도가 관측되지 않는다.
+  # ⚠️ 고정 문자열 `RETRY (bind`로 세면 안 된다 — 성공 요약줄(`RETRY (bind): …번째 시도에서 성공`)도
+  #   같은 접두라, **시도별** 줄을 통째로 지워도 이 단언이 통과한다(실측 뮤테이션). 카운터 형태를 문다.
+  printf '%s' "$out" | grep -qE 'RETRY \(bind [0-9]+/[0-9]+\)'
+  # ★ **서로 다른** 포트다. 프리미티브가 실패 포트를 배제 목록에 누적하므로 확률이 아니라 구조다 —
+  #   누적을 지우면 2포트 밴드에서 같은 값이 다시 나와 "서로 다른 포트" 진단이 거짓이 된다.
+  # ⚠️ `LC_ALL=C` 필수 — en_US 콜레이션은 서로 다른 값을 같다고 보고 하나를 버린다(#514의 fail-open).
+  run bash -c "LC_ALL=C sort -u '$STATE/ports' | grep -c ."
+  [ "$output" -eq 2 ]
+  # ★ 그리고 stdout으로 돌려주는 값은 **두 번째** 포트다. 첫 요청값을 그대로 되돌려주면 호출자는
+  #   아무도 안 듣는 포트에 readiness를 걸고 타임아웃을 통째로 태운 뒤 엉뚱한 곳을 가리킨다.
+  second="$(sed -n '2p' "$STATE/ports")"
+  [ -n "$second" ]
+  printf '%s' "$out" | grep -qF "PORT=${second}"
+}
+
+@test "the retry draws from a shrinking pool — a two-port band cannot serve a third attempt" {
+  # ★ "서로 다른 포트로 재시도한다"를 **결정적으로** 문다. 앞 레인의 `sort -u` 카운트는 배제 누적을
+  #   지워도 재추첨이 우연히 다른 값을 낼 확률이 남아 있어(2포트 밴드에서 50%) 뮤테이션을 절반만
+  #   잡는다 — 확률적 증인은 회귀를 통과시키는 쪽으로 틀린다.
+  #   2포트 밴드에서 앞 두 시도가 실패하면 세 번째 추첨은 **원리적으로 불가능**해야 한다:
+  #   누적이 있으면 밴드 고갈(빈 포트를 찾지 못했다), 없으면 이미 쓴 포트를 다시 뽑아 **성공**한다.
+  printf '2\n' > "$STATE/failfirst"
+  run_published "HP_PORT_LO=19531; HP_PORT_HI=19532" 'c 8080 "" img'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '빈 포트를 찾지 못했다'
+  run grep -qF 'AFTER-CALL' <<<"$output"
+  [ "$status" -eq 1 ]
+}
+
+@test "the retry removes the Created leftover, otherwise every retry dies of the name collision" {
+  # ★ 실패한 `docker run -d`는 컨테이너를 Created로 남긴다. `docker rm -f`를 빼면 재시도가 전부
+  #   "name already in use"로 죽는다 — 재시도가 있는데도 회복하지 못한다. 그 삭제를 여기서 문다.
+  # ⚠️ 정규식이 아니라 고정 문자열로 지운다 — 패턴에 `|`·`$`가 들어가면 메타문자로 삼켜져 치환이
+  #   조용히 실패하고, 그러면 이 레인이 원본 lib을 검사해 vacuous하게 통과한다.
+  run grep -cF 'docker rm -f "$name"' "$LIB"
+  [ "$output" -eq 1 ]
+  grep -vF 'docker rm -f "$name"' "$LIB" > "$FX/lib-norm.sh"
+  run grep -cF 'docker rm -f "$name"' "$FX/lib-norm.sh"
+  [ "$output" -eq 0 ]
+  printf '1\n' > "$STATE/failfirst"
+  run env PATH="$STUB:$PATH" STUB_STATE="$STATE" bash -c "
+    set -euo pipefail
+    . '$FX/lib-norm.sh'
+    HP_PORT_LO=19511; HP_PORT_HI=19512
+    hp_run_published c 8080 '' img
+  "
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF 'already in use'
+}
+
+@test "a permanent bind failure returns non-zero after distinct ports and surfaces the runtime stderr verbatim" {
+  printf '9\n' > "$STATE/failfirst"   # 모든 시도를 실패시킨다(HP_BIND_TRIES=3보다 크게)
+  run_published "HP_PORT_LO=19521; HP_PORT_HI=19523" 'c 8080 "" img'
+  [ "$status" -ne 0 ]
+  out="$output"
+  # ⚠️ 실패를 **메시지·종료코드로 판별하지 않는다** — 같은 podman도 pasta/rootlessport로 문자열이
+  #   갈리고 CI dockerd는 또 다르다. 판별자는 "서로 다른 포트로 다시 하면 되는가" 하나이므로,
+  #   원본 stderr는 삼키지 않고 그대로 흘려야 진단이 남는다.
+  printf '%s' "$out" | grep -qF 'STUBFAIL-COOKIE'
+  printf '%s' "$out" | grep -qF '서로 다른 포트'
+  run grep -qF 'AFTER-CALL' <<<"$out"
+  [ "$status" -eq 1 ]
+  run bash -c "LC_ALL=C sort -u '$STATE/ports' | grep -c ."
+  [ "$output" -eq 3 ]
+}
+
+@test "a mapping mismatch kills the call before readiness and shows the container log" {
+  # ★ 예전엔 `docker port` 출력을 그대로 믿었다. 경합으로 매핑이 어긋나면 호출자의 readiness 루프가
+  #   30~60초를 통째로 태운 뒤에야 "not ready"로 죽어 원인이 안 보였다.
+  printf '19999\n' > "$STATE/mismatch"
+  run_published "" 'c 8080 "" img'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '포트 매핑을 확인할 수 없다'
+  # 실패 진단이 실제로 컨테이너 로그를 보여 준다(삼키면 설정 회귀의 원인이 사라진다).
+  echo "$output" | grep -qF 'STUBLOG-COOKIE'
+  # ★ 호출자에게 **돌아가지 않는다** — 이 대조가 없으면 rc를 흘리는 구현도 통과한다.
+  run grep -qF 'AFTER-CALL' <<<"$output"
+  [ "$status" -eq 1 ]
+}
+
+@test "the run primitive stops before readiness — judging a response body stays each harness's own policy" {
+  # ★ ADR-0005가 지킨 축(CONTEXT.md 「판정 어휘」). 프리미티브가 readiness를 삼키면 vmsingle의
+  #   `/health` 본문 `OK*` 판정과 AM의 `/-/ready`가 하나로 접히는데, 그 둘은 서로 다른 하네스-로컬
+  #   정책이고 진단 문구("NodePort DNAT 등")의 절반이 거기 있다. 정적 대조 — 주석은 걷어낸다.
+  # ⚠️ 판정 토큰은 **엔드포인트와 대기 상태 변수**로 잡는다. `curl`을 토큰에 넣으면 이 lib의 밴드
+  #   진단 문구("하네스 자신의 curl이 그 대역에서 소스 포트를 만든다")가 걸려, 근거를 적은 주석을
+  #   지우게 만드는 오탐이 된다 — 이 레포가 이미 형제 게이트에서 밟은 자리다.
+  CODE="$FX/hp-code.sh"
+  grep -vE '^[[:space:]]*#' "$LIB" > "$CODE"
+  run bash -c "grep -coE '/health|/-/ready|ready=[0-9]' '$CODE' || true"
+  [ "$output" -eq 0 ]
+  # 음성 대조 — 두 소비자는 각자 자기 readiness를 **가지고 있다**. 양쪽이 0이면 위 단언은 무측정이다.
+  run bash -c "grep -coE '/health|ready=[0-9]' '$ROOT/tests/gates/lib/vmalert-e2e.sh'"
+  [ "$output" -ge 2 ]
+  run bash -c "grep -coE '/-/ready|ready=[0-9]' '$ROOT/tests/gates/alertmanager-render-e2e.sh'"
+  [ "$output" -ge 2 ]
+}
+
+@test "both publishing harnesses consume the primitive and none of them docker-runs a published container inline" {
+  # ★ 완전성 레인. 로스터를 박으면 새 하네스가 이 레인 밖에서 태어나므로 추적 열거에서 파생한다.
+  #   `consumers(publish) ⊂ consumers(port)`가 이 처방의 배치 근거였다 — 그 포함 관계가 유지되는지
+  #   여기서 잰다(프리미티브를 쓰는 파일은 반드시 lib을 source한다).
+  hs="$(git ls-files 'tests/gates/*.sh' 'tests/gates/lib/*.sh' \
+        | xargs grep -l 'hp_run_published' || true)"
+  n=0
+  for f in $hs; do
+    if grep -qE '^[[:space:]]*hp_run_published[[:space:]]*\(\)' "$f"; then continue; fi   # 정의처
+    n=$(( n + 1 ))
+    run grep -c 'host-port\.sh' "$f"
+    [ "$output" -ge 1 ]
+    # 인라인 publish가 남아 있으면 6불변식이 그 사이트만 빠진다. 판정은 **가드가 소유한다** —
+    # 여기에 두 번째 판정자를 두면 둘이 갈리고, 갈린 쪽이 조용히 약한 쪽이 된다(레인 E의 동적 형제).
+    # ⚠️ `docker run` 존재 자체를 세면 안 된다 — vmalert lib은 publish 없는 vmalert replay 컨테이너를
+    #   정당하게 띄운다(`docker run --rm --network …`). 금지 대상은 **publish 컨테이너**뿐이다.
+    run bash "$S" "$f"
+    [ "$status" -eq 0 ]
+  done
+  # 소비자가 0이면 위 for가 vacuous하다 — 오늘 둘(AM 렌더 e2e · vmalert lib의 vmsingle)이다.
+  [ "$n" -ge 2 ]
+}
+
+# ── AM 하네스가 그 처방을 실제로 **받는가** ────────────────────────────────────────
+# 오늘까지 AM 사본에 대한 동적 증인은 0건이었다(그 사본이 6불변식을 손으로 들고 있었는데도).
+# 격리 루트에서 실제로 하네스를 태워, 프리미티브의 rc가 **이 하네스의 종료 규약(exit 1)** 으로
+# 번역되는지와 세 불변식이 그대로 도착하는지를 함께 문다.
+
+@test "the AM harness retries on distinct ports and translates the primitive rc into its own exit 1" {
+  printf '9\n' > "$STATE/failfirst"
+  am_root "$FX/r1"
+  run_am "$FX/r1"
+  # ★ 형제 vmalert lib은 **같은 rc**를 HARNESS FAULT(exit 2)로 옮긴다. 소비자마다 규약이 다르므로
+  #   프리미티브가 exit를 소유하면 둘 중 하나가 조용히 뒤집힌다 — 그래서 rc 번역이 소비자 몫이다.
+  [ "$status" -eq 1 ]
+  out="$output"
+  printf '%s' "$out" | grep -qF 'STUBFAIL-COOKIE'
+  printf '%s' "$out" | grep -qF 'RETRY (bind'
+  # readiness를 태우지 않았다 — 예전 오진의 서명이 "30초 뒤 AM not ready"였다.
+  run grep -qF 'AM not ready' <<<"$out"
+  [ "$status" -eq 1 ]
+  run bash -c "LC_ALL=C sort -u '$STATE/ports' | grep -c ."
+  [ "$output" -eq 3 ]
+}
+
+@test "the AM harness dies on a mapping mismatch before entering its readiness loop" {
+  printf '19999\n' > "$STATE/mismatch"
+  am_root "$FX/r2"
+  run_am "$FX/r2"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -qF '포트 매핑을 확인할 수 없다'
+  echo "$output" | grep -qF 'STUBLOG-COOKIE'
+  # ★ 30초를 태운 뒤 "AM not ready"로 죽는 것이 예전의 오진이었다 — 그 문구가 나오면 seam이 뒤로 밀렸다.
+  run grep -qF 'AM not ready' <<<"$output"
+  [ "$status" -eq 1 ]
+}
+
+@test "the AM harness still says AM not ready when it does reach readiness (positive control for that token)" {
+  # ★ 위 두 레인(재시도 소진 · 매핑 불일치)의 **양성 대조**다. 둘은 "readiness에 들어가기 전에
+  #   죽는다"를 `AM not ready` 부재로 재는데, 그 문구가 하네스에서 사라지거나 이름이 바뀌면 두 레인이
+  #   조용히 공허해진다 — 부재 단언은 자기 술어가 살아 있음을 스스로 증명하지 못한다.
+  #   여기서는 프리미티브를 **성공시켜** 실제로 readiness 루프에 들어가게 하고, 그 문구가 나오는지를
+  #   본다. 즉 seam이 정확히 어디에서 끊기는지를 두 극성으로 함께 못 박는다.
+  # ⚠️ 루프를 1회로 줄인다 — 원본은 0.5초 × 60회라 이 대조 하나가 스위트를 30초 늘린다.
+  #   스텁 docker 위에는 아무것도 listen하지 않으므로 curl은 매번 빈 본문을 받는다.
+  # ⚠️ 줄 끝 `do$`로 앵커한다 — 같은 `$(seq 60)` 루프가 아래 telegram 캡처 대기에도 있어서,
+  #   앵커가 없으면 둘 다 바뀌어 이 스위트가 무는 대상이 흐려진다(실측: 치환 2건).
+  am_root "$FX/r5" 's|in $(seq 60); do$|in $(seq 1); do|'
+  # 뮤테이션이 실제로 걸렸는지 먼저 확인한다(치환이 조용히 실패하면 이 레인이 원본을 30초 태운다).
+  run grep -cF 'in $(seq 1); do' "$FX/r5/tests/gates/alertmanager-render-e2e.sh"
+  [ "$output" -eq 1 ]
+  run_am "$FX/r5"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -qF 'AM not ready'
+  # 여기까지 온 것 자체가 프리미티브가 성공했다는 뜻이다 — 매핑 대조를 통과했고 포트도 하나뿐이다.
+  run bash -c "LC_ALL=C sort -u '$STATE/ports' | grep -c ."
+  [ "$output" -eq 1 ]
+}
+
+@test "the AM harness receives the --rm refusal (a mutation that would erase its own diagnosis)" {
+  am_root "$FX/r3" 's|--add-host=host.docker.internal:host-gateway|--rm --add-host=host.docker.internal:host-gateway|'
+  # 뮤테이션이 실제로 걸렸는지 먼저 확인한다 — 치환이 조용히 실패하면 이 레인이 원본을 태워
+  # vacuous하게 통과한다(고정 문자열로 대조한다).
+  run grep -cF -- '--rm --add-host' "$FX/r3/tests/gates/alertmanager-render-e2e.sh"
+  [ "$output" -eq 1 ]
+  run_am "$FX/r3"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -qF -- '--rm은 받지 않는다'
+  [ ! -s "$STATE/ports" ]
+}
+
+@test "the AM harness recovers from the Created leftover only because the primitive removes it" {
+  # ★ AM 하네스에는 이 축의 증인이 0건이었다. 프리미티브에서 `docker rm -f`를 지운 사본으로 태우면
+  #   재시도가 전부 "name already in use"로 죽는다 — 하네스가 그 처방을 **받고 있다**는 증거다.
+  printf '1\n' > "$STATE/failfirst"
+  am_root "$FX/r4" "" 'docker rm -f "$name"'
+  run grep -cF 'docker rm -f "$name"' "$FX/r4/tests/gates/lib/host-port.sh"
+  [ "$output" -eq 0 ]
+  run_am "$FX/r4"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -qF 'already in use'
 }

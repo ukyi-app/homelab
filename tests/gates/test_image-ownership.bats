@@ -21,6 +21,9 @@ _fixture() {
   cp "$ROOT/renovate.json" "$t/renovate.json"
   echo 'image: registry.example.com/thing:v1@sha256:1111111111111111111111111111111111111111111111111111111111111111' > "$t/platform/comp/prod/deploy.yaml"
   echo 'image: ghcr.io/ukyi-app/pg-tools:18-rclone@sha256:2222222222222222222222222222222222222222222222222222222222222222' > "$t/platform/comp/prod/job.yaml"
+  # CATALOG 두 키를 **둘 다** 픽스처에 둔다 — 하나만 있으면 REPINNED_OPS 표기가 한쪽에서만 검증되고,
+  # 실제로 착지 전 두 정규식은 경로 구분자 요구 여부가 근거 없이 갈려 있었다(pg-tools 미요구·skopeo 요구).
+  echo 'image: ghcr.io/ukyi-app/skopeo:alpine@sha256:5555555555555555555555555555555555555555555555555555555555555555' > "$t/platform/comp/prod/skopeo.yaml"
   printf 'image:\n  repo: ghcr.io/ukyi-app/demo\n  tag: sha-abc\n  digest: sha256:3333333333333333333333333333333333333333333333333333333333333333\n' > "$t/apps/demo/deploy/prod/values.yaml"
   echo 'image: ghcr.io/ukyi-app/files:sha-x@sha256:4444444444444444444444444444444444444444444444444444444444444444' > "$t/platform/files/prod/deployment.yaml"
   printf '{"file":"deployment.yaml","path":["a"],"autoDeploy":true}\n' > "$t/platform/files/prod/.image-pin.json"
@@ -79,7 +82,10 @@ FIXTURE_ARGS="--floor refs=1"
   t="$(_fixture classes)"
   run bun "$ROOT/tools/check-image-ownership.ts" --repo-root "$t" $FIXTURE_ARGS --report
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q '^repin-ops-image'
+  # 두 ops 이미지 각각이 이 소유자로 분류되는지 — 집합이 아니라 원소별로 본다.
+  # 하나만 보면 REPINNED_OPS의 한 정규식이 깨져도 다른 하나가 클래스를 채워 초록이 된다.
+  echo "$output" | grep -q '^repin-ops-image .*pg-tools'
+  echo "$output" | grep -q '^repin-ops-image .*skopeo'
   echo "$output" | grep -q '^bump-poll .*apps/demo'
   echo "$output" | grep -q '^bump-poll .*platform/files'
   echo "$output" | grep -q '^renovate'
@@ -323,10 +329,13 @@ PY
   # ⚠️ **인용된 기록은 살아 있는 주장이 아니다.** 헤더는 무엇이 왜 틀렸는지 설명하려고 옛 문구를
   #    따옴표로 인용하는데(지우면 재발 방지 근거가 사라진다), 단순 grep은 그것도 매치한다 —
   #    `repin-ops-image` 헤더에서 이미 같은 경계를 그었다. 따옴표 없는 줄만 본다.
+  # ⚠️ `-ne 0`은 grep rc **2**(대상 파일 부재/읽기불가)도 통과로 읽는다 — 무매치는 정확히 rc 1이다.
+  #    (파이프 자리는 2단 grep이 stdin을 읽어 rc 2가 1로 눌리지만, 이 @test 끝의 양성 대조가
+  #     같은 파일에 `-eq 0`을 걸고 있어 파일 부재는 그쪽에서 red가 된다.)
   run bash -c "grep -n 'Renovate pinDigests 관할' '$ROOT/scripts/check-image-pins.sh' | grep -v '\"'"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   run grep -n 'helm 차트 내부=Renovate' "$ROOT/scripts/check-image-pins.sh"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]   # rc 2(대상 부재)를 통과로 읽지 않는다
   # 그리고 실제 소유 모델(원장 선언)을 가리켜야 한다.
   run grep -q 'image-ownership.json' "$ROOT/scripts/check-image-pins.sh"
   [ "$status" -eq 0 ]

@@ -49,7 +49,9 @@ seed_pin_component() {
   git -C "$REPO" commit -q -m pin
 }
 
-teardown() { [ -n "${REPO:-}" ] && rm -rf "$REPO"; }
+# ⚠️ `[ -n … ] && rm` 형태는 REPO를 안 만든 @test에서 teardown이 rc 1로 끝나 그 @test를
+#    통째로 red로 만든다(실측) — 부정으로 뒤집어 rc를 0으로 고정한다.
+teardown() { [ -z "${REPO:-}" ] || rm -rf "$REPO"; }
 
 plan_json() {  # $1=page action, $2=trip-mate action, [$3=page current.tag override]
   # 와이어는 bump-plan 계약 형식이다(decodePlan이 러너의 입구다) — target 신원·reason·src 필수.
@@ -237,6 +239,29 @@ no_leftover() {  # 정리 teeth: main worktree만 남고 bump-poll 로컬 브랜
   no_leftover
 }
 
+@test "an item whose bump-tag writes outside the add ceiling is fail-closed before staging (staged completeness)" {
+  # 🔴 형제 자리의 2026-08-18 실사고와 같은 클래스다 — 도구가 천장(add의 pathspec) 밖에 쓰면 `git add`가
+  #    그 변경을 스테이징하지 않는데 add·commit·push는 **전부 성공**해 PR이 부분 표면으로 열린다.
+  #    여기서는 플래너 writePath를 실제 편집 대상과 어긋나게 준다(page를 bump하는데 writePath는
+  #    trip-mate): bump-tag는 apps/page/…/values.yaml(천장 **밖**)과 digest-exporter(천장 안)를 쓴다.
+  #    잔여물 판정이 없으면 digest-exporter만 실린 커밋이 만들어지고 run은 초록이다
+  #    (실측: 러너의 [staged-completeness] 블록을 지운 격리 트리에서 status 0 · ensure 1회 도달 ·
+  #     원장의 `files:`가 digest-exporter 한 줄 — page의 values.yaml 갱신이 통째로 유실된 커밋이다).
+  seed_repo
+  cat > "$REPO/plan.json" <<EOF
+[
+ {"target":{"kind":"app","name":"page"},"action":"bump","reason":"","src":"ukyi-app/page","candidate":{"gitsha":"deadbee","tag":"sha-deadbee","digest":"$DIG"},"current":{"tag":"sha-0000000"},"writePath":"apps/trip-mate/deploy/prod/values.yaml"}
+]
+EOF
+  run_runner 0
+  [ "$status" -ne 0 ]
+  # 진단이 **유실될 뻔한 경로**를 지목한다(그냥 비-0이면 다른 이유로 죽어도 통과한다).
+  echo "$output" | grep -qF "apps/page/deploy/prod/values.yaml"
+  run grep -c "=== call ===" "$LEDGER"   # ensure 미도달 — 판정은 add 앞이고 add는 commit·ensure 앞이다
+  [ "$output" = "0" ]
+  no_leftover
+}
+
 @test "a stubbed ensure-bump-pr failure is aggregated fail-closed (run red) without starving the other item" {
   seed_repo; plan_json bump bump; run_runner 1   # 모든 ensure 실패
   [ "$status" -ne 0 ]
@@ -343,10 +368,13 @@ EOF
   unset HOMELAB_EXEC_LEDGER
   [ "$status" -eq 0 ]
   [ -f "$L" ]
-  # ① 조각의 실재 — 격리 worktree 생성 → bump-tag(bun, argv로 결속) → 스테이징 → ensure(bash) → 정리.
+  # ① 조각의 실재 — 격리 worktree 생성 → bump-tag(bun, argv로 결속) → 잔여물 판정 → 스테이징 → ensure(bash) → 정리.
   grep -qF '"cmd":"git","args":["worktree","add"' "$L"
   run grep -cE '"cmd":"bun","args":\["[^"]*bump-tag\.ts"' "$L"   # bun 호출이 곧 bump-tag임을 argv로 못박는다
   [ "$output" = "2" ]
+  # 스테이징 완전성 판정 — `git add` **앞**의 status 호출. 개수뿐 아니라 argv로 못박는다(③이 세는
+  # 6회 중 어느 하나가 이것으로 바뀌어도 총계는 같으므로, 실재는 여기서 따로 증언해야 한다).
+  grep -qF '"cmd":"git","args":["status","--porcelain","--untracked-files=all","--","."' "$L"
   grep -qF '"cmd":"git","args":["add"' "$L"
   grep -qF '"cmd":"bash"' "$L"
   grep -qF '"cmd":"git","args":["worktree","remove"' "$L"
@@ -359,7 +387,62 @@ EOF
   [ -n "$first_add" ]; [ -n "$first_del" ]
   [ "$first_add" -lt "$first_del" ]
   [ "$last_add" -lt "$last_del" ]
-  # ③ 개수 — 항목당 git 5회(worktree add·add·commit·worktree remove·branch -D) × 2항목 = 정확히 10.
+  # ③ 개수 — 항목당 git 6회(worktree add·status(잔여물 판정)·add·commit·worktree remove·branch -D)
+  #    × 2항목 = 정확히 12.
   n="$(grep -cF '"cmd":"git"' "$L")"
-  [ "$n" -eq 10 ]
+  [ "$n" -eq 12 ]
+}
+
+# ── CLI 표면 증인 ─────────────────────────────────────────────────────────────────────────────
+# 🔴 광고와 파서가 갈려 있었다: usage(`--help`)와 헤더 주석이 `--ensure-cmd`를 광고하는데 파서는
+#    `--ensure-bin`/`--ensure-script`만 받아, --help를 그대로 따라 하면 `알 수 없는 옵션`으로 exit 2였다.
+#    콜사이트 0건이라 라이브 손해는 없었지만 **광고가 거짓**이었고 그것을 재는 증인이 0건이었다.
+#    (러너 소스 쪽 유령 리터럴 재유입 금지는 아래 두 번째 @test가 원본 뷰에서 문다.)
+
+@test "every flag the runner advertises in --help is a flag its parser accepts (and a phantom one is not)" {
+  root="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  run bun "$root/tools/run-bump-plan.ts" --help
+  [ "$status" -eq 0 ]
+  # 광고 목록은 --help 출력에서 **뽑는다** — 여기 손으로 적으면 그 목록이 세 번째 진실이 된다.
+  flags="$(printf '%s\n' "$output" | grep -oE -- '--[a-z-]+' | LC_ALL=C sort -u)"
+  n=0
+  for fl in $flags; do
+    n=$((n + 1))
+    # 값 없이 넘겨도 되는 이유: 여기서 재는 것은 **인식** 여부다(arity 위반으로 죽는 것은 무방).
+    run bash -c "bun '$root/tools/run-bump-plan.ts' '$fl' 2>&1 | grep -c '알 수 없는 옵션'"
+    [ "$output" = "0" ] || { echo "광고와 파서 불일치: $fl 은 --help에 있는데 파서가 모른다"; false; }
+  done
+  # 비공허 바닥값 — 광고가 비면 위 전칭이 항진이다(실제 표면은 --plan 포함 5개).
+  [ "$n" -ge 5 ] || { echo "enumeration collapse: --help에서 뽑은 플래그 ${n}개 — 추출이 붕괴했다"; false; }
+  # 양성 대조 — 같은 술어가 **없는** 플래그에는 매치한다. 이것이 없으면 위 0건이 "안 본다"와 구별되지 않는다.
+  run bash -c "bun '$root/tools/run-bump-plan.ts' --ensure-cmd x 2>&1 | grep -c '알 수 없는 옵션'"
+  [ "$output" = "1" ]
+}
+
+@test "the phantom --ensure-cmd literal is absent from the runner source, comments included" {
+  root="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  # ⚠️ **주석 스트립 없는 원본**에 건다 — 거짓 광고는 헤더 주석(`// 사용: …`)에도 살았고, 주석을 지운
+  #    뷰에서 보면 그 절반이 무증인이 된다. 규율은 scripts/check-floor-vocab.sh와 같다:
+  #    "인식 제거는 '안 본다'이고, 필요한 것은 '있으면 red'다".
+  run grep -c -- '--ensure-cmd' "$root/tools/run-bump-plan.ts"
+  [ "$output" = "0" ]
+  # 양성 대조 — 같은 술어가 실재하는 seam 이름에는 매치한다(0건이 "파일을 안 읽었다"가 아님을 증언).
+  run grep -c -- '--ensure-script' "$root/tools/run-bump-plan.ts"
+  [ "$output" -ge 1 ]
+}
+
+@test "the runner parses argv through the shared cli.ts SSOT (no hand-rolled loop)" {
+  root="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  code="$BATS_TEST_TMPDIR/runner.code.ts"
+  sed 's#^[[:space:]]*//.*$##' "$root/tools/run-bump-plan.ts" > "$code"
+  run grep -c 'from "./lib/cli.ts"' "$code"
+  [ "$output" = "1" ]
+  run grep -c 'typedFlags(argv' "$code"
+  [ "$output" = "1" ]
+  # 자체 파싱 루프의 잔재가 없다 — 있으면 SSOT 규약(unknown 거부·값 누락 거부)이 두 곳에서 갈린다.
+  run grep -c 'argv\[i + 1\]' "$code"
+  [ "$output" = "0" ]
+  # 양성 대조 — 같은 술어가 이 파일 안 다른 인덱스 접근에는 매치한다(0건이 "안 본다"가 아님).
+  run grep -c 'process.argv.slice(2)' "$code"
+  [ "$output" = "1" ]
 }

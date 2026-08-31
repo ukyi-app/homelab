@@ -6,6 +6,8 @@
 # 못 돌았다 — policy/workflow-readiness.json의 owner_action이 "plan만 돌므로 write 스코프는
 # 불필요하다"고 적고 있었는데 **현행 코드로 실행 불가능한 지시**였다.
 # @test 이름은 영어(디렉토리 단위 실행 시 한글 인코딩 깨짐). 중간 단언은 [ ]만(bash 3.2).
+# ⚠️ 경로 피연산자를 든 부재 단언은 `[ "$status" -eq 1 ]`이다 — 단일 파일이라 그것으로 닫힌다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 setup() {
   P="${BATS_TEST_DIRNAME}/provider.tf"
   V="${BATS_TEST_DIRNAME}/variables.tf"
@@ -15,8 +17,9 @@ setup() {
   run grep -Eq '^\s*scopes\s*=\s*var\.ts_oauth_scopes\s*$' "$P"
   [ "$status" -eq 0 ]
   # 리터럴 회귀 금지 — 비-주석 줄에 대괄호 리스트가 다시 나타나면 CI 경로가 조용히 닫힌다.
+  # 바로 위 var 참조 단언이 같은 provider.tf의 실재를 증언하므로 이 자리는 rc 구별만 채우면 닫힌다.
   run grep -Eq '^[^#]*scopes\s*=\s*\[' "$P"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "the default scope set stays the owner's write set (narrowing it breaks local apply)" {
@@ -73,6 +76,9 @@ ts_job() { awk '/^  drift-tailscale:/{f=1;next} f&&/^  [a-z]/{exit} f' "$(WF)"; 
   #    여러 줄 입력에서는 "1.9.8을 안 가진 줄"이 항상 존재해 exit 0이 되고, 잡 블록이 통째로
   #    1.9.8로 바뀌어도 통과했다. 즉 이 파일이 막겠다고 선언한 "통일" 회귀를 못 막고 있었다.
   #    부정 단언은 이 레포 관용구대로 run + [ ] 로만 쓴다(중간 `!`는 bash 3.2에서 조용히 통과).
+  # ⚠️ 여기는 `-eq 1` 전환 대상이 **아니다** — grep이 경로가 아니라 stdin을 읽어 rc 2 채널이 없다.
+  #    대신 위 두 줄이 그 쌍을 이룬다: `run ts_job` rc=0이 비공허 바닥값(WF 부재/잡 블록 소실 시 red),
+  #    1.15.5 양성 대조가 같은 술어의 생존을 증언한다. cf. docs/traps-detail.md 「열거 붕괴」③-b
   run bash -c 'printf "%s" "$1" | grep -qF -- '"'"'terraform_version: "1.9.8"'"'"'' _ "$block"
   [ "$status" -ne 0 ]
 }

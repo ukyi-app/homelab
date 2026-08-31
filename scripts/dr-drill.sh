@@ -21,8 +21,20 @@ cd "$REPO_ROOT"
 #    복구 증명([0.5])은 CNPG/R2만 덮으므로 이 손실을 잡지 못한다.
 # ⚠️ 다른 어떤 검사보다 먼저 둔다(yq 파생·클러스터 변이·백업 생성 전부보다 앞). 그래야 거부가
 #    부작용 0으로 끝난다. `. sealing-key-dr-gate.sh` 소스보다도 앞이다.
-_bulk_window="$(sed -n 's/^export BULK_MIGRATION_WINDOW_UNTIL="\(.*\)"$/\1/p' \
-  "$REPO_ROOT/infra/k3s-bootstrap/versions.env" 2>/dev/null || true)"
+# ⚠️ **옛 sed 한 줄은 여기서 fail-open이었다** — `… 2>/dev/null || true`가 파일 부재 · 키 부재 ·
+#    줄 포맷 변경을 전부 빈 문자열로 접었고, 아래 `[ -n ]`이 그 셋을 모두 "국면 B, 드릴 진행"으로
+#    읽었다. 리더는 그 셋을 rc 1(판정 불가)로 내고 **선언된 빈 값만** rc 0으로 통과시킨다.
+#    (리더는 versions.env를 **source하지 않는다** — destroy-node.sh와 같은 근거를 승계한다.)
+VERSIONS_READ="$REPO_ROOT/infra/k3s-bootstrap/versions-read.sh"
+if [ ! -x "$VERSIONS_READ" ]; then
+  echo "DR ABORT: versions.env 리더가 실행 가능하지 않다: ${VERSIONS_READ}. 부재/비실행은 '국면 B'가 아니라 판정 불가다." >&2
+  exit 1
+fi
+if ! _bulk_window="$("$VERSIONS_READ" BULK_MIGRATION_WINDOW_UNTIL)"; then
+  echo "DR ABORT: versions.env에서 BULK_MIGRATION_WINDOW_UNTIL을 판정하지 못했다(사유는 바로 위 versions-read 줄)." >&2
+  echo "          국면 A인지 모른 채로는 노드를 파괴하는 드릴을 시작하지 않는다 — 판정 불가는 '창이 비었다'가 아니다." >&2
+  exit 1
+fi
 if [ -n "$_bulk_window" ]; then
   echo "DR ABORT: 국면 A(D4 한시) 진행 중 — bulk가 파괴 대상과 같은 디스크에 있다(만료 ${_bulk_window})." >&2
   echo "          이 드릴은 노드를 파괴하고, 그 파괴가 bulk의 사용자 데이터(files-data)를 함께 지운다." >&2
