@@ -41,15 +41,11 @@ if [ ! -f "$RB" ]; then guard_skip verify-credential-inventory "${RB#"$ROOT/"} �
 
 # ── 원장 name 슬러그(첫 공백 앞) ────────────────────────────────────────────────────────
 # 원장의 name은 `<슬러그> (<괄호 설명>)` 형태다. 표가 참조하는 것은 그 슬러그다.
-led_names="$(python3 - "$LEDGER" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1], encoding="utf-8"))
-if not isinstance(d, list):
-    sys.exit("원장이 배열이 아니다")
-for e in d:
-    print(str(e.get("name", "")).split(" ")[0])
-PY
-)" || { echo "FAIL: verify-credential-inventory: 원장 파싱 실패 — 판정 불가는 '통과'가 아니다." >&2; exit 1; }
+# ⚠️ jq를 쓴다 — 종전에는 python heredoc이었는데 CONTRIBUTING.md 「새 코드 배치 규칙」이
+#    셸 heredoc의 제3 언어 내장을 명시적으로 금지한다(typecheck·lint 사각). 이 블록은 순수 JSON
+#    순회라 규칙이 셸에 배정한 jq 필터가 정확한 자리다. 2026-09-01 이관 — 산출물 동일 검증.
+led_names="$(jq -r 'if type != "array" then ("원장이 배열이 아니다" | halt_error(1)) else .[] | ((.name // "") | tostring | split(" ")[0]) end' "$LEDGER")" \
+  || { echo "FAIL: verify-credential-inventory: 원장 파싱 실패 — 판정 불가는 '통과'가 아니다." >&2; exit 1; }
 led_sorted="$(printf '%s\n' "$led_names" | grep -c . >/dev/null && printf '%s\n' "$led_names" | LC_ALL=C sort -u)"
 led_n="$(scan_count "$led_names")"
 
