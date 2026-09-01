@@ -2088,3 +2088,45 @@ selfHeal과 플립플롭한다.
   캐시·힙을 늘리므로, limit을 올리면 peak도 따라 올라 `peak × 2.0`이 **자기참조**가 된다.
   vmagent·vmsingle·grafana·glances·victorialogs 5개가 이 클래스다 — 원장이 보류 행으로 계상한다.
 > 가드: `tests/gates/test_verify-ledger-ssot.bats`, `docs/memory-ledger.md`
+### 네이티브 사이드카의 limit은 KSM이 `init_container` 계열로 내보낸다 — 캡을 씌워도 near-limit 알림은 무성이다
+- 2026-09-01. CNPG의 `Cluster.spec.plugins[]`가 주입하는 `plugin-barman-cloud`는 일반 컨테이너가 아니라
+  **네이티브 사이드카**(`restartPolicy: Always`인 initContainer)다. 그래서 kube-state-metrics는 그
+  컨테이너의 자원 선언을 `kube_pod_container_resource_limits`가 아니라
+  **`kube_pod_init_container_resource_limits`** 로 내보낸다.
+- `ContainerMemoryNearLimit`의 분모는 앞쪽 계열뿐이었다(`rules/core.yaml:85`). 라이브 확인(pg-1):
+  container 계열에는 `postgres`만, init 계열에는 `bootstrap-controller`만 있다.
+- ⇒ **캡을 씌우는 것이 상태를 악화시킬 수 있다.** limit이 없던 동안 그 컨테이너는 "무캡·무알림"이었다.
+  캡만 주고 분모를 안 고치면 **"캡·무알림·조용한 OOMKill"** 이 된다 — cgroup이 프로세스를 죽이는데
+  아무도 페이징되지 않는 상태가 새로 생긴다. 무캡보다 나쁠 수 있다.
+- ⭐ 처방: 분모를 두 계열의 `or`로 넓힌다. `or`는 좌변에 없는 시리즈만 우변에서 채우므로 양쪽에 다 있는
+  컨테이너는 container 계열이 이기고, 일반 컨테이너의 판정은 바뀌지 않는다.
+- ⚠️ 같은 클래스가 더 있다: `restartPolicy: Always`인 initContainer를 쓰는 워크로드는 전부 이 경계에
+  걸린다. 자원 캡을 새로 씌울 때는 **그 limit이 어느 메트릭 계열로 나가는지 먼저 확인**할 것.
+> 가드: `platform/victoria-stack/prod/rules/core.yaml`, `tools/check-resource-limits.ts`
+### `Container.args`는 patchMergeKey 없는 atomic 리스트다 — strategic-merge patch가 통째로 교체한다
+- 2026-09-01, 벤더 매니페스트에 kustomize patch로 자원 캡만 얹으면서 "이왕이면 로컬 편집한
+  `--log-level=info`도 patch로 옮기자"는 부록이 제안됐다. 실행했으면 컨트롤러가 죽는다.
+- core/v1의 `Container.args`는 `[]string`이고 `patchMergeKey`가 없다. strategic-merge는 병합 키가 없는
+  리스트를 **atomic으로 취급해 통째로 교체**한다. 실측(kustomize v5.8.1): args만 담은 patch를 적용하니
+  렌더된 Deployment의 args가 `--log-level=info` **한 줄만** 남고 `operator` 서브커맨드와
+  `--server-cert`/`--server-key`/`--client-cert`/`--server-address`/`--leader-elect`가 전부 사라졌다.
+  서브커맨드와 TLS 경로가 없으면 그 Deployment는 기동조차 못 한다.
+- ⚠️ **resources 단언은 이 사고를 원리적으로 못 잡는다.** 같은 patch에서 `resources`는 map이라 정상
+  병합되고, args만 조용히 잘린다. "캡이 들어갔는지"만 보는 증인은 전건 초록을 낸다 — 실제로 뮤테이션에서
+  5개 @test 중 args 레그 하나만 red였다. 벤더 오버레이의 증인에는 **건드리지 않은 필드가 살아남았다**는
+  단언이 함께 있어야 한다.
+- ⇒ args를 정말 고쳐야 한다면 JSON6902 `replace`로 인덱스를 지정한다 — 다만 re-vendor 때 인덱스가
+  어긋나므로 그 자체가 별개 부채다. 형제 항목: 「SSA atomic 리스트 영구 OutOfSync」(같은 원인, 다른 층).
+> 가드: `platform/cnpg/barman-plugin/test_kustomize_cap.bats`
+### 파일 프리필터를 함께 넓히지 않으면 kind 추가가 vacuous green으로 착지한다
+- 2026-09-01. `tools/check-resource-limits.ts`에 `ObjectStore`를 가르치려고 `KINDS` 집합에만 더했다.
+  그런데 그 파일은 `KINDS` 조회 **전에** `if (!KIND_RE.test(text)) continue`로 파일을 거른다(:91).
+  `KIND_RE`는 별도 정규식이라 ObjectStore가 없었고, `object-store.yaml`은 열리지도 않았다.
+- 증상이 없다는 것이 이 함정의 전부다: 게이트는 초록이고, 위반은 0이고, 스캔 카운트만 조용히
+  그대로다(21 → 20). **스캔 수를 보지 않으면 "검사했다"와 구별되지 않는다.**
+- ⇒ 처방은 둘을 같은 자리에 두고 주석으로 묶는 것이다. 그리고 새 kind를 가르칠 때는 뮤테이션 둘을
+  함께 돌린다 — (a) 대상 필드를 지우면 red인가, (b) 프리필터만 되돌리면 스캔 카운트가 줄어드는가.
+  (b)가 없으면 (a)의 red는 다음 리팩터에서 무증인이 된다.
+- 형제: 「열거 붕괴 → vacuous green」(같은 클래스의 원형) · 「스캔 신호를 콜사이트가 손으로 내면
+  순서가 드리프트한다」(scan_floor가 이 카운트를 지키는 이유).
+> 가드: `tools/check-resource-limits.ts`
