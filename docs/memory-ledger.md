@@ -58,10 +58,49 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
   Go 프로세스 RSS 기준선이 조용히 달라진다. 핀할지 원장을 재기준선할지는 **미결정(D-e)**"을 기록해 뒀다.
   ⇒ **이 표는 정정 근거일 뿐 새 limit이 아니다.** 행 값 회수는 (i) 마진 규약 확정과 (ii) 기판 재기준선(D-e)이
   선행해야 한다 — 아래 「마진 규약 미정」 참조.
-- ⚠️ **마진 규약 미정(2026-08-31 확인).** 위 판정이 인용하는 `F23`·`F24`(peak×2.0x 마진)·`F25`(24h 관찰
-  윈도)의 **정의가 레포 어디에도 없다** — 전수 검색의 실 히트가 이 파일의 인용 3곳뿐이다. 게다가 같은
-  블록 안에서 임계가 **2.0x·1.5x·1.3x로 갈린다**. 이 규약이 확정되기 전에는 어떤 행도 "타이트/여유"로
-  재판정할 수 없다. 회수 작업의 1순위 선행 조건이다.
+- ⚠️ **마진 규약(2026-08-31 확인 → 2026-09-01 owner 확정).** 위 판정이 인용하던 `F23`·`F24`·`F25`는
+  **정의가 레포 어디에도 없었다** — 전수 검색의 실 히트가 이 파일의 인용 3곳뿐이었고, 같은 블록 안에서
+  임계가 2.0x·1.5x·1.3x로 갈려 있었다. owner가 **2.0x**로 확정했다. 이제 이 파일이 그 정의의 SSOT다.
+
+  ### 마진 규약 (SSOT — 2026-09-01 owner 확정)
+
+  **`limit ≥ A′ peak(14일, 파드-세대 붕괴) × 2.0`**, 16Mi 단위 올림.
+
+  - **A′ 분자** = `container_memory_usage_bytes − container_memory_total_inactive_file_bytes
+    − container_memory_total_active_file_bytes`. working_set을 쓰지 않는 이유는 위 무효 표시 항목과
+    `platform/victoria-stack/prod/rules/core.yaml`의 `ContainerMemoryNearLimit` 주석이 논증한다.
+  - **파드-세대 붕괴**(`max by (namespace, container)`)가 필수다. 없이 `sum by (namespace)`를 하면 14일간
+    생성된 모든 파드 세대가 합산된다 — CronJob은 10분마다 새 파드라 수천 개가 더해져 합계가 limit을
+    넘는 무의미한 수가 나온다(2026-09-01 실측: observability 1348 → 3427).
+  - **`max_over_time`은 전체 식에 한 번** 건다. 세 메트릭에 따로 걸면 서로 다른 시점의 peak를 빼게 된다.
+  - ⚠️ **`limit == req`로 착지하지 않는다.** peak×2.0이 `req`보다 작으면 목표를 고른 것은 마진이 아니라
+    `policy/ledger.rego`의 `limit ≥ req` 하한이다. 그대로 두면 버스트 헤드룸이 0이 되고 QoS가
+    Burstable → Guaranteed로 바뀐다 — 회수의 의도가 아닌 부수효과다. 그런 행은 `req` 위에 헤드룸을
+    남기거나(권장), `req`를 함께 재산정하는 별도 결정으로 넘긴다.
+  - ⚠️ **행이 여러 컨테이너를 묶으면 행 마진이 컨테이너 안전을 함의하지 않는다.** OOMKill은 cgroup 단위,
+    즉 컨테이너별로 난다. 행 전체가 2.0x여도 그 안의 하나가 1.0x일 수 있고, `ledger.rego`는 행 합계만
+    보므로 잘못된 배분을 잡아주지 못한다. 다중 컨테이너 행은 **컨테이너별 A′ peak 없이 회수하지 않는다.**
+  - **peak는 "지금 살아남고 있는 값"이지 "충분한 값"이 아니다.** 아래 vector/vlogs 항목이 논증하듯
+    버스트 크기는 장애 지속시간에 비례하고, 14일 창에 그 장애가 없었다면 그 창은 버스트에 무증인이다.
+    간헐적으로만 밟히는 경로(업로드·복구·재색인)를 가진 워크로드는 창이 그 경로를 대표하는지 먼저 물을 것.
+
+  ### 회수 보류 행 (2026-09-01 조사 — 침묵시키지 않고 계상한다)
+
+  2.0x 확정 직후 10개 행을 조사한 결과 **6행이 보류**다. 각 사유는 "나중에 하자"가 아니라 **무엇이
+  갖춰져야 할 수 있는지**를 적는다. 근거 없이 숫자를 넣으면 그 숫자가 곧 CI가 묶인 SSOT가 된다.
+
+  | 행 | 보류 사유 | 풀리는 조건 |
+  |---|---|---|
+  | `cnpg` | 목표가 **산술적으로 불가능**하다. Cluster limit을 772Mi로 만들어야 하는데 requests가 768Mi이고, `platform/cnpg/prod/test_cluster_params.bats`가 계약으로 고정한 `shared_buffers(244.1Mi) ≤ limit/4`가 깨진다. 불변식을 지키는 하한은 977Mi라 **실제 회수 상한은 32Mi**다. 원장이 두 번 보호를 명시한 행이기도 하다 | PostgreSQL 튜닝 변경(= 회수가 아닌 별개 작업)이거나, 32Mi만 회수 |
+  | `tailscale` | 행이 operator + proxy×2 **세 컨테이너**다. 목표대로면 각 64Mi인데 `proxyclass.yaml:5`가 기록한 proxy peak 116Mi 하나로 1.8배 초과다. `ts-traefik-ts`는 **내부 인입의 유일 경로**라(AGENTS.md 규약) 죽으면 `*.home` 전체가 tailscale·LAN 양쪽에서 끊긴다 | 컨테이너별 A′ peak + proxy 대수 변동(현재 `loadBalancerClass: tailscale` 서비스 2개에 연동) 반영 |
+  | `edge` | adguard의 192Mi는 **OOM 대응 상향**이다(`peak 123/128(96%)·블록리스트 성장 → 선제 상향`, 커밋 f1f23e8). 목표 208을 맞추려 −80을 adguard에서 빼면 112가 되어 **그 OOM을 유발했던 128보다 낮다**. cloudflared는 자기 주석이 이미 2.0x 미달(`peak 51Mi × 2.0 = 102 > 96`)이라고 말한다 | 블록리스트 성장을 반영한 adguard 단독 A′ 재측정 |
+  | `argocd` | 컨테이너 **6개** 집계. OOMKill은 cgroup 단위인데 −112Mi를 어디서 뗄지 근거가 없다. 옛 비율로 나누는 우회는 그 비율의 출처가 바로 무효화된 working_set이라 성립하지 않는다 | controller/repoServer/server/applicationSet/notifications/redis **각각**의 A′ peak. GOMEMLIMIT 4곳이 limit의 90%로 걸려 있어 함께 움직여야 한다 |
+  | `cert-manager` | 컨테이너 **3개** 집계, 같은 배분 근거 부재. 옛 비율(cainjector 101 : controller 96 : webhook 69)은 컨테이너마다 캐시 charge가 달라(controller는 WS의 약 2/3가 캐시) 왜곡돼 있다 | controller/cainjector/webhook 각각의 A′ peak |
+  | `cache-trip-mate` | A′ 22.4Mi는 작업집합이 아니라 **트래픽 부재**를 잰 값이다 — 소비처 `trip-mate-api`가 2026-08-12(#456)에 철거돼 키스페이스가 비어 있다. 게다가 이 행의 limit은 애초에 working_set이 아니라 `maxmemory 64mb + BGSAVE fork COW + 단편화 + 클라이언트 버퍼` **유도값**이라 이번 지표 정정의 대상이 아니다 | 소비처가 다시 붙어 LRU가 채워진 뒤의 재측정. 또는 리소스 자체의 존치 판단 |
+
+  ⇒ 공통 갭이 하나 보인다: **다중 컨테이너 행에 컨테이너별 A′가 없다.** 4행(`argocd`·`cert-manager`·
+  `edge`·`tailscale`)이 같은 이유로 막혔다. 이 원장이 행 단위인 것은 예산 회계로는 옳지만, OOM은
+  컨테이너에서 나므로 회수 판단에는 한 단계 더 낮은 해상도가 필요하다.
 - **owner 결정(2026-07-07, F23 게이트): (b) VM RAM 증설 확정** — right-size로 ≥256 불가 확정에 따라 VM
   증설이 온보딩 차단의 유일 실효 해소책으로 채택. 착수 = W2 병행 owner-local 태스크(VM 재시작 필요):
   ~~`infra/k3s-bootstrap/versions.env` ORB_MEMORY_MIB~~(베어메탈 이전으로 삭제) 11264→12288 + 이 원장 meta VM_ALLOCATABLE_MIB
