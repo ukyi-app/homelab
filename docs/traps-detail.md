@@ -2057,3 +2057,34 @@ selfHeal과 플립플롭한다.
   `scripts/audit-orphan-pv.sh`(:63) · `scripts/check-gh-secret-coverage.sh`(:107·:114·:115·:128·:129·:180) ·
   `scripts/verify-credential-inventory.sh`(:75·:85). 지금 red가 아니라 이번 변경에 묶지 않았고,
   전수 정적 가드는 bats 레인 면제 설계가 선행이라 함께 미뤘다. 침묵시키지 않으려고 여기 계상한다.
+### 서브쿼리 step이 스크레이프 간격보다 크면 peak가 조용히 과소평가된다 — 그 위에서 깎은 limit이 회귀가 된다
+- 2026-09-01, 메모리 원장의 마진 규약(`limit ≥ A′ peak × 2.0`)이 A′를 `[14d:5m]` 서브쿼리로 쟀다.
+  cadvisor 스크레이프는 **30초**다(`platform/victoria-stack/prod/vmagent-scrape-config.yaml`, job
+  override 없음). 서브쿼리는 5분 격자의 각 점에서 lookbehind의 **마지막 값 하나**만 취하므로
+  **샘플 10개 중 9개를 버린다**.
+- ⚠️ 이 손실은 균등하지 않다. **peak는 정의상 격자에 걸릴 확률이 낮은 점**이라, 버려지는 90%에
+  peak가 들어갈 공산이 크다. 짧은 버스트를 가진 워크로드일수록 과소평가가 커진다 —
+  같은 14일 창을 5m와 30s로 재 비교한 실측:
+
+  | 컨테이너 | `[14d:5m]` | `[14d:30s]` | 과소평가 |
+  |---|---|---|---|
+  | `argocd/repo-server` | 70.2Mi | **112.5Mi** | **+60.3%** |
+  | `edge/adguard` | 79.0Mi | **124.4Mi** | **+57.5%** |
+  | `database/plugin-barman-cloud` | 107.5Mi | **152.5Mi** | +41.9% |
+  | `argocd/application-controller` | 461.5Mi | **488.2Mi** | +5.8% |
+
+  repo-server의 렌더 버스트와 adguard의 블록리스트 갱신은 **5분 격자에 한 점도 걸리지 않았다** —
+  adguard의 124.4Mi는 8/31 06:51Z의 한 시간짜리 스파이크인데, 5분 해상도로 그 시간대를 보면
+  78.6 → 73.5Mi로 평온하다. **없는 것처럼 보인다.**
+- ⇒ 결과: 그 과소평가 위에서 같은 날 회수한 limit 둘이 **곧바로 회귀**였다 — adguard 192→160(실제 1.29x) ·
+  repo-server 384→144(실제 1.28x). 둘 다 "2.0x 규약을 만족한다"는 근거 주석을 달고 머지됐다.
+  전수로 재면 **12개 컨테이너가 2.0x 미달**이었고 6개가 1.5x 미만이었다.
+- ⭐ **처방: 서브쿼리 step ≤ 스크레이프 간격.** 현행은 `[14d:30s]`다. `15s`로 더 낮춰도 결과가
+  동일함을 확인했다 — 즉 30s가 전 샘플을 포착하며, 그 아래는 계산량만 늘린다.
+- ⚠️ **탐지의 비대칭**: 이 결함은 red를 내지 않는다. 쿼리는 성공하고, 값은 그럴듯하고, 게이트는
+  초록이다. 「열거 붕괴 → vacuous green」의 시계열판이다 — 표본이 조용히 잘려도 통계는 답을 낸다.
+- ⚠️ **자기조절 워크로드에는 배수 규약 자체가 정의되지 않는다**(같은 조사에서 드러난 형제 결함).
+  `--memory.allowedPercent`(VictoriaMetrics 계열)나 `GOMEMLIMIT`을 쓰는 워크로드는 limit에 비례해
+  캐시·힙을 늘리므로, limit을 올리면 peak도 따라 올라 `peak × 2.0`이 **자기참조**가 된다.
+  vmagent·vmsingle·grafana·glances·victorialogs 5개가 이 클래스다 — 원장이 보류 행으로 계상한다.
+> 가드: `tests/gates/test_verify-ledger-ssot.bats`, `docs/memory-ledger.md`

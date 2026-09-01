@@ -56,6 +56,10 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
   2026-07-06의 153Mi는 오늘 working_set으로도 재현되지 않는다. 그 사이 기판이 OrbStack VM(6코어)에서
   베어메탈 NUC(14코어)으로 통째로 바뀌었고, `infra/k3s-bootstrap/versions.env`가 "GOMAXPROCS 미핀 →
   Go 프로세스 RSS 기준선이 조용히 달라진다. 핀할지 원장을 재기준선할지는 **미결정(D-e)**"을 기록해 뒀다.
+  ⚠️ **이 표의 A′도 `[14d:5m]`으로 잰 값이라 과소평가다**(2026-09-01 3차 정정 — 규약 절 「서브쿼리 step」).
+  `[14d:30s]`로 다시 재면 cnpg-operator 36.2 → 41.1 · homepage 95.4 → **96.6** · glances 86.3(동일) ·
+  traefik 31.5 → 32.5다. homepage는 이로써 **2.01x → 1.99x로 다시 뒤집혀** 규약 미달이 되었고,
+  이번에 192 → 208Mi로 올렸다. 나머지 셋은 판정 방향이 바뀌지 않는다.
   ⇒ **이 표는 정정 근거일 뿐 새 limit이 아니다.** 행 값 회수는 (i) 마진 규약 확정과 (ii) 기판 재기준선(D-e)이
   선행해야 한다 — 아래 「마진 규약 미정」 참조.
 - ⚠️ **마진 규약(2026-08-31 확인 → 2026-09-01 owner 확정).** 위 판정이 인용하던 `F23`·`F24`·`F25`는
@@ -64,7 +68,14 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
 
   ### 마진 규약 (SSOT — 2026-09-01 owner 확정)
 
-  **`limit ≥ A′ peak(14일, 파드-세대 붕괴) × 2.0`**, 16Mi 단위 올림.
+  **`limit ≥ A′ peak(14일, 파드-세대 붕괴, 서브쿼리 step ≤ 스크레이프 간격) × 2.0`**, 16Mi 단위 올림.
+
+  ⚠️ **2026-09-01 정정**: 이 규약의 최초 측정은 `[14d:5m]`을 썼는데 cadvisor 스크레이프가 **30초**라
+  샘플 10개 중 9개를 버렸다. 아래 「서브쿼리 step」 항목이 그 결과를 계상한다 — 현행 측정은
+  **`[14d:30s]`**다. 아래 마커가 그 step의 기계 판독 SSOT이고,
+  `tests/gates/test_verify-ledger-ssot.bats`가 스크레이프 간격과의 정합을 강제한다.
+
+  <!-- ledger:subquery-step=30s -->
 
   - **A′ 분자** = `container_memory_usage_bytes − container_memory_total_inactive_file_bytes
     − container_memory_total_active_file_bytes`. working_set을 쓰지 않는 이유는 위 무효 표시 항목과
@@ -73,6 +84,16 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
     생성된 모든 파드 세대가 합산된다 — CronJob은 10분마다 새 파드라 수천 개가 더해져 합계가 limit을
     넘는 무의미한 수가 나온다(2026-09-01 실측: observability 1348 → 3427).
   - **`max_over_time`은 전체 식에 한 번** 건다. 세 메트릭에 따로 걸면 서로 다른 시점의 peak를 빼게 된다.
+  - ⚠️ **서브쿼리 step은 스크레이프 간격 이하여야 한다.** `[14d:5m]`은 5분 격자의 각 점에서 lookbehind
+    마지막 값 하나만 취하므로, 30초 스크레이프에서는 **샘플의 90%를 버린다**. peak는 정의상 격자에
+    걸릴 확률이 낮은 점이라 이 손실이 곧바로 과소평가가 된다(2026-09-01 실측, 5m → 30s):
+    repo-server 70.2 → **112.5Mi(+60.3%)** · adguard 79.0 → **124.4Mi(+57.5%)** ·
+    plugin-barman-cloud 107.5 → **152.5Mi(+41.9%)** · application-controller 461.5 → **488.2Mi(+5.8%)**.
+    짧은 버스트를 가진 워크로드일수록 손실이 크다 — repo-server의 렌더 버스트와 adguard의 블록리스트
+    갱신은 5분 격자에 **한 점도 걸리지 않았다**. 현행 스크레이프 간격은 30초이므로
+    (`platform/victoria-stack/prod/vmagent-scrape-config.yaml`, job override 없음) **`[14d:30s]`**를 쓴다.
+    `15s`로 낮춰도 결과가 같음을 확인했다 — 즉 30s가 전 샘플을 포착한다. 스크레이프 간격을 바꾸면
+    이 step도 함께 바꿔야 한다.
   - ⚠️ **`limit == req`로 착지하지 않는다.** peak×2.0이 `req`보다 작으면 목표를 고른 것은 마진이 아니라
     `policy/ledger.rego`의 `limit ≥ req` 하한이다. 그대로 두면 버스트 헤드룸이 0이 되고 QoS가
     Burstable → Guaranteed로 바뀐다 — 회수의 의도가 아닌 부수효과다. 그런 행은 `req` 위에 헤드룸을
@@ -96,6 +117,7 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
   | `edge` | adguard의 192Mi는 **OOM 대응 상향**이다(`peak 123/128(96%)·블록리스트 성장 → 선제 상향`, 커밋 f1f23e8). 목표 208을 맞추려 −80을 adguard에서 빼면 112가 되어 **그 OOM을 유발했던 128보다 낮다**. cloudflared는 자기 주석이 이미 2.0x 미달(`peak 51Mi × 2.0 = 102 > 96`)이라고 말한다 | 블록리스트 성장을 반영한 adguard 단독 A′ 재측정 |
   | `argocd` | 컨테이너 **6개** 집계. OOMKill은 cgroup 단위인데 −112Mi를 어디서 뗄지 근거가 없다. 옛 비율로 나누는 우회는 그 비율의 출처가 바로 무효화된 working_set이라 성립하지 않는다 | controller/repoServer/server/applicationSet/notifications/redis **각각**의 A′ peak. GOMEMLIMIT 4곳이 limit의 90%로 걸려 있어 함께 움직여야 한다 |
   | `cert-manager` | 컨테이너 **3개** 집계, 같은 배분 근거 부재. 옛 비율(cainjector 101 : controller 96 : webhook 69)은 컨테이너마다 캐시 charge가 달라(controller는 WS의 약 2/3가 캐시) 왜곡돼 있다 | controller/cainjector/webhook 각각의 A′ peak |
+  | **자기조절 5개**(`vmagent`·`vmsingle`·`grafana`·`glances`·`victorialogs`) | (2026-09-01 3차 추가) 30초 재측정에서 전부 2.0x 미달이다 — vmagent 1.34x · vmsingle 1.37x · grafana 1.32x · glances 1.48x · vlogs 1.52x. 그러나 이들은 `--memory.allowedPercent`(VictoriaMetrics 계열)나 `GOMEMLIMIT`으로 **limit에 비례해 캐시/힙을 스스로 늘린다** — limit을 올리면 peak도 따라 올라 배수 규약이 **자기참조**가 된다. "peak × 2.0"은 이 클래스에 정의되지 않는다. 회수 캠페인이 만든 상태도 아니다(원래부터 미달) | 이 클래스 전용 규약(예: `allowedPercent` 반영한 상한 모델) 또는 기판 재기준선(D-e). vmagent는 8/28에 213 → 159Mi로 스스로 내려온 이력이 있어 **부하 종속**이기도 하다 |
   | `cache-trip-mate` | A′ 22.4Mi는 작업집합이 아니라 **트래픽 부재**를 잰 값이다 — 소비처 `trip-mate-api`가 2026-08-12(#456)에 철거돼 키스페이스가 비어 있다. 게다가 이 행의 limit은 애초에 working_set이 아니라 `maxmemory 64mb + BGSAVE fork COW + 단편화 + 클라이언트 버퍼` **유도값**이라 이번 지표 정정의 대상이 아니다 | 소비처가 다시 붙어 LRU가 채워진 뒤의 재측정. 또는 리소스 자체의 존치 판단 |
 
   ⇒ 공통 갭이 하나 보인다: **다중 컨테이너 행에 컨테이너별 A′가 없다.** 4행(`argocd`·`cert-manager`·
@@ -160,7 +182,7 @@ steady만 보면 7배 과다로 보이지만 **peak가 판단 기준이다.** �
 ⚠️ `go_memstats_heap_sys`(166 MB)를 RSS로 읽지 말 것 — Go가 예약만 하고 반납 안 한 주소공간이다
 (실제 RSS 66.8 MB).
 
-명목 잔여 = 10240 − 8108 = **2132 Mi(21%)** — 신규 온보딩을 막는 수준이 아니다.
+명목 잔여 = 10240 − 8604 = **1636 Mi(16%)** — 신규 온보딩을 막는 수준이 아니다.
 (2026-09-01: 2.0x 규약 확정 후 4행 회수 −256Mi로 1220 → 1476. traefik 192→96 · sealed-secrets 96→48 ·
 files 128→64 · cnpg-operator 160→112.
 2026-09-01 2차: **컨테이너별 A′ 측정**으로 보류가 풀린 2행 −384Mi로 1476 → 1860. cert-manager 384→224
@@ -169,8 +191,34 @@ application-controller는 A′ 450.4Mi 대비 640Mi가 **1.42x로 규약 미달*
 repo-server 384→144 등 나머지 회수가 그것을 상쇄한다. 행 마진 2.19x 안에 1.42x가 숨어 있던 것이
 「행 마진은 컨테이너 안전을 함의하지 않는다」의 실증이다. edge·tailscale도 컨테이너별 측정으로
 보류가 풀렸고 각각 별도 PR로 착지했다 — edge 288→224(#572) · tailscale 512→304(operator 80 + proxy 112×2).
-최종: 9020 → 8108, 명목 잔여 1220 → **2132**. 남은 보류는 cnpg(계약상 회수 상한 32Mi)와
-cache-trip-mate(A′가 트래픽 부재를 잰 값) 둘뿐이다.)
+2026-09-01 3차 — **측정 해상도 결함 정정(+496Mi)**: 위 회수 전부가 `[14d:5m]` 서브쿼리로 잰 peak
+위에 서 있었는데, 그 step이 30초 스크레이프의 90%를 버린다(규약 절 「서브쿼리 step」 참조).
+`[14d:30s]`로 재측정하니 **12개 컨테이너가 2.0x 미달**이었고, 그중 둘은 같은 날 회수가 만든
+**회귀**였다 — adguard 160(1.29x·#572) · repo-server 144(1.28x·#571). 자기조절 워크로드 5개
+(vmagent·vmsingle·grafana·glances·victorialogs — `--memory.allowedPercent`/`GOMEMLIMIT`이 limit에
+비례해 peak도 따라 오르므로 배수 규약이 자기참조가 된다)를 제외한 **7개를 2.0x로 맞췄다**:
+adguard 160→256 · repo-server 144→240 · application-controller 768→992 · tailscale proxy 112→128(×2대) ·
+cert-manager-webhook 48→64 · homepage 192→208 · kube-state-metrics 64→80.
+application-controller는 이로써 **단계적 상향이 완성**됐다(1.57x → 2.03x) — 30초로 재면 14일 일별
+peak가 376~488Mi로 **전 구간 규약 미달**이었고, 재시작 종료 스파이크가 아니라 정상 진동 상단이다.
+최종: 9020 → 8108 → **8604**, 명목 잔여 1220 → 2132 → **1636**. 남은 보류는 cnpg(계약상 회수 상한 32Mi)와
+cache-trip-mate(A′가 트래픽 부재를 잰 값), 그리고 자기조절 5개(D-e 재기준선 대상)다.)
+⚠️ **미계상 상주 컨테이너 2개(2026-09-01 3차 조사에서 드러남 — 침묵시키지 않고 계상한다).**
+30초 해상도 전수 측정 중, 이 원장의 어느 행에도 잡히지 않으면서 **limit·request가 아예 없는**
+상주 컨테이너가 둘 나왔다:
+
+| 컨테이너 | A′ peak(30s) | 선언 | 원장 계상 |
+|---|---|---|---|
+| `database/pg-1/plugin-barman-cloud` (postgres 파드의 사이드카) | **152.5Mi** | limit·req 없음 | 없음 — cnpg 행 1152 = postgres 1024 + pgbouncer 128 |
+| `cnpg-system/barman-cloud-*/barman-cloud` (별도 Deployment) | 19.3Mi | limit·req 없음 | 없음 — cnpg-operator 행 112는 `manager`만 |
+
+합계 ~172Mi가 예산 밖에서 상주한다. 「상주 워크로드 자원 limit 블라인드스팟」(traps)의 새 사례이고,
+limit이 없으므로 폭주가 노드-eviction으로 번진다(파드-OOM으로 격리되지 않는다). 사이드카 쪽은
+postgres 파드의 QoS 계산에도 들어간다.
+⇒ **이번 변경에 묶지 않았다**: barman-plugin manifest는 벤더 파일(수정 금지, AGENTS.md)이라 캡을
+붙이려면 kustomize patch 경로를 먼저 정해야 하고, 그 자체가 별개 결정이다. 조치 전까지 이 표가
+부채를 계상한다.
+
 **회수를 다시 검토할 조건**: 잔여가 수십 Mi까지 떨어질 때. 그때도 limit을 깎기 전에 **버스트 자체를
 줄이는 쪽**(vector sink `request.concurrency` 고정)을 먼저 볼 것 — 미검증이므로 넣으면 반드시
 같은 지표를 다시 재라(`docs/traps-detail.md`의 "상주 워크로드 OOM 진단").
@@ -180,17 +228,17 @@ cache-trip-mate(A′가 트래픽 부재를 잰 값) 둘뿐이다.)
 | component                          | namespace      | req_mi | limit_mi |
 |------------------------------------|----------------|-------:|---------:|
 | <!-- ledger:row --> k3s+os+coredns | kube-system    |   1075 |     1740 |
-| <!-- ledger:row --> argocd         | argocd         |    640 |     1248 |
+| <!-- ledger:row --> argocd         | argocd         |    640 |     1568 |
 | <!-- ledger:row --> cnpg           | database       |    900 |     1152 |
 | <!-- ledger:row --> cnpg-operator  | cnpg-system    |    100 |      112 |
-| <!-- ledger:row --> cert-manager   | cert-manager   |     88 |      224 |
-| <!-- ledger:row --> observability  | observability  |   1184 |     2400 |
-| <!-- ledger:row --> edge           | edge           |     96 |      224 |
-| <!-- ledger:row --> tailscale      | tailscale      |    192 |      304 |
+| <!-- ledger:row --> cert-manager   | cert-manager   |     88 |      240 |
+| <!-- ledger:row --> observability  | observability  |   1184 |     2416 |
+| <!-- ledger:row --> edge           | edge           |     96 |      320 |
+| <!-- ledger:row --> tailscale      | tailscale      |    192 |      336 |
 | <!-- ledger:row --> whoami         | gateway        |     16 |       16 |
 | <!-- ledger:row --> traefik        | gateway        |     64 |      96 |
 | <!-- ledger:row --> sealed-secrets | sealed-secrets |     32 |       48 |
-| <!-- ledger:row --> homepage       | homepage       |    128 |      192 |
+| <!-- ledger:row --> homepage       | homepage       |    128 |      208 |
 | <!-- ledger:row --> glances        | observability  |     64 |      128 |
 | <!-- ledger:row --> cache-trip-mate | cache          |     96 |      160 |
 | <!-- ledger:row --> files          | files          |     32 |      64 |

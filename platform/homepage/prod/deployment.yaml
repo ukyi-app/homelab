@@ -64,8 +64,10 @@ spec:
             requests:
               cpu: 50m
               memory: 128Mi
+            # right-size 2026-09-01: A′ peak 96.6Mi(14일, 파드-세대 붕괴, 30초 해상도) × 2.0x = 208Mi(2.15x).
+            #    192Mi는 1.99x로 규약을 16Mi 차이로 못 채운다.
             limits:
-              memory: 192Mi
+              memory: 208Mi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
