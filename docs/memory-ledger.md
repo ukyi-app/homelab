@@ -160,7 +160,7 @@ steady만 보면 7배 과다로 보이지만 **peak가 판단 기준이다.** �
 ⚠️ `go_memstats_heap_sys`(166 MB)를 RSS로 읽지 말 것 — Go가 예약만 하고 반납 안 한 주소공간이다
 (실제 RSS 66.8 MB).
 
-명목 잔여 = 10240 − 8380 = **1860 Mi(18%)** — 신규 온보딩을 막는 수준이 아니다.
+명목 잔여 = 10240 − 8316 = **1924 Mi(19%)** — 신규 온보딩을 막는 수준이 아니다.
 (2026-09-01: 2.0x 규약 확정 후 4행 회수 −256Mi로 1220 → 1476. traefik 192→96 · sealed-secrets 96→48 ·
 files 128→64 · cnpg-operator 160→112.
 2026-09-01 2차: **컨테이너별 A′ 측정**으로 보류가 풀린 2행 −384Mi로 1476 → 1860. cert-manager 384→224
@@ -183,7 +183,7 @@ repo-server 384→144 등 나머지 회수가 그것을 상쇄한다. 행 마진
 | <!-- ledger:row --> cnpg-operator  | cnpg-system    |    100 |      112 |
 | <!-- ledger:row --> cert-manager   | cert-manager   |     88 |      224 |
 | <!-- ledger:row --> observability  | observability  |   1184 |     2400 |
-| <!-- ledger:row --> edge           | edge           |     96 |      288 |
+| <!-- ledger:row --> edge           | edge           |     96 |      224 |
 | <!-- ledger:row --> tailscale      | tailscale      |    192 |      512 |
 | <!-- ledger:row --> whoami         | gateway        |     16 |       16 |
 | <!-- ledger:row --> traefik        | gateway        |     64 |      96 |
@@ -193,7 +193,7 @@ repo-server 384→144 등 나머지 회수가 그것을 상쇄한다. 행 마진
 | <!-- ledger:row --> cache-trip-mate | cache          |     96 |      160 |
 | <!-- ledger:row --> files          | files          |     32 |      64 |
 
-**합계:** req 4707 Mi · limit 8380 Mi (반드시 ≤ 10240 Mi 유지).
+**합계:** req 4707 Mi · limit 8316 Mi (반드시 ≤ 10240 Mi 유지).
 (⚠️ 이 줄은 쓰기 경로(`tools/lib/ledger-totals.ts`의 `replaceTotals` — create-app/provision-cache/teardown-app)
 만 갱신하고 **읽기 게이트는 검사하지 않는다**. 그래서 2026-08-14 observability 상향분이 반영되지 않은 채
 `4675/8700`으로 남아 CI가 계속 초록이었다(2026-08-31 정정). 손으로 행을 고치면 이 줄도 함께 고칠 것.)
