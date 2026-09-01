@@ -36,7 +36,12 @@ ingressRoute:
     enabled: false # dashboard는 내부 전용; 여기서 노출하지 않음
 resources:
   requests: { cpu: 50m, memory: 64Mi }
-  limits: { cpu: 500m, memory: 192Mi } # OOM-watch: peak가 limit과 동일(헤드룸 0)·전 ingress 데이터플레인 → 선제 상향(128→192)
+  # right-size 2026-09-01: A′ peak 25.0Mi(14일, 파드-세대 붕괴) × 2.0x 마진 = 96Mi(3.84x).
+  # ⚠️ 128→192 선제 상향의 근거였던 "peak가 limit과 동일(헤드룸 0)"은 **working_set으로 잰 값**이라
+  #    PR #564로 무효화됐다 — 그 지표는 회수 가능한 page cache를 실사용으로 계상한다(같은 시점 A′는
+  #    192Mi의 13%). 전 ingress 데이터플레인인 것은 그대로이므로 2.0x 규약의 하한을 그대로 쓴다.
+  #    GOMEMLIMIT은 차트가 limits.memory에서 자동 파생한다(=96Mi).
+  limits: { cpu: 500m, memory: 96Mi }
 rbac:
   enabled: true # 기본 RBAC; Gateway-API 확장은 rbac-gateway.yaml에서 (Task 3.3)
 serviceAccount:
