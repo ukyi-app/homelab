@@ -117,7 +117,7 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
   | `edge` | adguard의 192Mi는 **OOM 대응 상향**이다(`peak 123/128(96%)·블록리스트 성장 → 선제 상향`, 커밋 f1f23e8). 목표 208을 맞추려 −80을 adguard에서 빼면 112가 되어 **그 OOM을 유발했던 128보다 낮다**. cloudflared는 자기 주석이 이미 2.0x 미달(`peak 51Mi × 2.0 = 102 > 96`)이라고 말한다 | 블록리스트 성장을 반영한 adguard 단독 A′ 재측정 |
   | `argocd` | 컨테이너 **6개** 집계. OOMKill은 cgroup 단위인데 −112Mi를 어디서 뗄지 근거가 없다. 옛 비율로 나누는 우회는 그 비율의 출처가 바로 무효화된 working_set이라 성립하지 않는다 | controller/repoServer/server/applicationSet/notifications/redis **각각**의 A′ peak. GOMEMLIMIT 4곳이 limit의 90%로 걸려 있어 함께 움직여야 한다 |
   | `cert-manager` | 컨테이너 **3개** 집계, 같은 배분 근거 부재. 옛 비율(cainjector 101 : controller 96 : webhook 69)은 컨테이너마다 캐시 charge가 달라(controller는 WS의 약 2/3가 캐시) 왜곡돼 있다 | controller/cainjector/webhook 각각의 A′ peak |
-  | **자기조절 5개**(`vmagent`·`vmsingle`·`grafana`·`glances`·`victorialogs`) | (2026-09-01 3차 추가) 30초 재측정에서 전부 2.0x 미달이다 — vmagent 1.34x · vmsingle 1.37x · grafana 1.32x · glances 1.48x · vlogs 1.52x. 그러나 이들은 `--memory.allowedPercent`(VictoriaMetrics 계열)나 `GOMEMLIMIT`으로 **limit에 비례해 캐시/힙을 스스로 늘린다** — limit을 올리면 peak도 따라 올라 배수 규약이 **자기참조**가 된다. "peak × 2.0"은 이 클래스에 정의되지 않는다. 회수 캠페인이 만든 상태도 아니다(원래부터 미달) | 이 클래스 전용 규약(예: `allowedPercent` 반영한 상한 모델) 또는 기판 재기준선(D-e). vmagent는 8/28에 213 → 159Mi로 스스로 내려온 이력이 있어 **부하 종속**이기도 하다 |
+  | **관측 스택 5개**(`vmagent`·`vmsingle`·`grafana`·`glances`·`victorialogs`) | (2026-09-01 3차 추가 → **4차 정정**) 30초 재측정에서 전부 2.0x 미달이다 — **vmagent 1.05x**(A′ 213.1Mi/224Mi) · vmsingle 1.37x · grafana 1.32x · glances 1.48x · vlogs 1.52x. ⚠️ **3차가 이 행에 적은 근거는 절반이 틀렸다**(4차 조사가 정정). (a) 배수: vmagent를 1.34x로 적었는데 그것은 최근 5일 값이고 14일 A′ peak 기준은 **1.05x**다 — 가장 나쁜 행의 숫자를 27% 낙관 쪽으로 적었다. (b) 메커니즘: `--memory.allowedPercent`/`GOMEMLIMIT`을 실제로 가진 것은 **셋뿐**이다(vmagent·vmsingle·victorialogs). grafana는 둘 다 없고(Go 기본 GOGC), **glances는 파이썬**이다. (c) "vmagent가 8/28에 스스로 내려왔으니 부하 종속"도 틀렸다 — `node_boot_time_seconds` = **2026-08-26T13:41:06Z**이고 하락은 그 재부팅 이후의 계단이다(부하가 아니라 가동시간 의존). ⇒ 남는 것은 **행동 관찰**이다: 라이브 cgroup에서 grafana는 `memory.current`가 limit의 **99.8%**이고 `memory.peak == memory.max`, `memory.events max=8`(회수 압력이 실제로 걸렸다). vmagent는 84.7%에 `max=0`이다. 즉 **배수 순서와 압력 순서가 어긋난다** — 배수가 가장 나쁜 vmagent가 압력은 가장 낮다. OOMKill은 5개 모두 0이다 | 이 클래스 전용 규약. ⚠️ **분자를 `container_memory_rss`(anon)로 내리는 처방은 금지**다 — cgroup v2의 anon은 **shmem을 제외**하므로 `shared_buffers`로 limit을 채우는 cnpg 행이 정확히 무성 지대에 들어간다(PR #564가 설계로 배제한 함정이고 `rules/core.yaml:70-75`가 같은 사례를 실측으로 적어 뒀다). 대안은 `allowedPercent` 반영 상한 모델이나 압력 기반 지표(`memory.events`)이며, 어느 쪽도 아직 논증되지 않았다 |
   | `cache-trip-mate` | A′ 22.4Mi는 작업집합이 아니라 **트래픽 부재**를 잰 값이다 — 소비처 `trip-mate-api`가 2026-08-12(#456)에 철거돼 키스페이스가 비어 있다. 게다가 이 행의 limit은 애초에 working_set이 아니라 `maxmemory 64mb + BGSAVE fork COW + 단편화 + 클라이언트 버퍼` **유도값**이라 이번 지표 정정의 대상이 아니다 | 소비처가 다시 붙어 LRU가 채워진 뒤의 재측정. 또는 리소스 자체의 존치 판단 |
 
   ⇒ 공통 갭이 하나 보인다: **다중 컨테이너 행에 컨테이너별 A′가 없다.** 4행(`argocd`·`cert-manager`·
@@ -185,7 +185,7 @@ steady만 보면 7배 과다로 보이지만 **peak가 판단 기준이다.** �
 ⚠️ `go_memstats_heap_sys`(166 MB)를 RSS로 읽지 말 것 — Go가 예약만 하고 반납 안 한 주소공간이다
 (실제 RSS 66.8 MB).
 
-명목 잔여 = 10240 − 8604 = **1636 Mi(16%)** — 신규 온보딩을 막는 수준이 아니다.
+명목 잔여 = 10240 − 8972 = **1268 Mi(12%)** — 신규 온보딩을 막는 수준이 아니다.
 (2026-09-01: 2.0x 규약 확정 후 4행 회수 −256Mi로 1220 → 1476. traefik 192→96 · sealed-secrets 96→48 ·
 files 128→64 · cnpg-operator 160→112.
 2026-09-01 2차: **컨테이너별 A′ 측정**으로 보류가 풀린 2행 −384Mi로 1476 → 1860. cert-manager 384→224
@@ -206,21 +206,32 @@ application-controller는 이로써 **단계적 상향이 완성**됐다(1.57x �
 peak가 376~488Mi로 **전 구간 규약 미달**이었고, 재시작 종료 스파이크가 아니라 정상 진동 상단이다.
 최종: 9020 → 8108 → **8604**, 명목 잔여 1220 → 2132 → **1636**. 남은 보류는 cnpg(계약상 회수 상한 32Mi)와
 cache-trip-mate(A′가 트래픽 부재를 잰 값), 그리고 자기조절 5개(D-e 재기준선 대상)다.)
-⚠️ **미계상 상주 컨테이너 2개(2026-09-01 3차 조사에서 드러남 — 침묵시키지 않고 계상한다).**
-30초 해상도 전수 측정 중, 이 원장의 어느 행에도 잡히지 않으면서 **limit·request가 아예 없는**
-상주 컨테이너가 둘 나왔다:
+✅ **미계상 상주 컨테이너 2개 — 해소(2026-09-01 4차, +368Mi).** 3차 조사에서 이 원장 어느 행에도
+잡히지 않으면서 limit·request가 아예 없던 상주 컨테이너 둘을 캡하고 행에 편입했다.
 
-| 컨테이너 | A′ peak(30s) | 선언 | 원장 계상 |
-|---|---|---|---|
-| `database/pg-1/plugin-barman-cloud` (postgres 파드의 사이드카) | **152.5Mi** | limit·req 없음 | 없음 — cnpg 행 1152 = postgres 1024 + pgbouncer 128 |
-| `cnpg-system/barman-cloud-*/barman-cloud` (별도 Deployment) | 19.3Mi | limit·req 없음 | 없음 — cnpg-operator 행 112는 `manager`만 |
+| 컨테이너 | A′ peak(30s) | 캡 | 선언 위치 | 행 |
+|---|---|---|---|---|
+| `database/pg-1/plugin-barman-cloud` (네이티브 사이드카) | 152.5Mi | **320Mi**(2.10x) / req 32Mi | `platform/cnpg/prod/object-store.yaml` — `spec.instanceSidecarConfiguration.resources` | cnpg 1152→**1472** |
+| `cnpg-system/barman-cloud` (Deployment) | 19.3Mi | **48Mi**(2.49x) / req 24Mi | `platform/cnpg/barman-plugin/kustomization.yaml` (patch — 벤더 manifest 무수정) | cnpg-operator 112→**160** |
 
-합계 ~172Mi가 예산 밖에서 상주한다. 「상주 워크로드 자원 limit 블라인드스팟」(traps)의 새 사례이고,
-limit이 없으므로 폭주가 노드-eviction으로 번진다(파드-OOM으로 격리되지 않는다). 사이드카 쪽은
-postgres 파드의 QoS 계산에도 들어간다.
-⇒ **이번 변경에 묶지 않았다**: barman-plugin manifest는 벤더 파일(수정 금지, AGENTS.md)이라 캡을
-붙이려면 kustomize patch 경로를 먼저 정해야 하고, 그 자체가 별개 결정이다. 조치 전까지 이 표가
-부채를 계상한다.
+**세 가지가 함께 필요했다**(어느 하나만 하면 무의미하거나 해롭다):
+1. **1급 필드 경로.** 사이드카는 `Cluster.spec.plugins[]`가 주입하지만 그 리스트에는 resources 필드가
+   없다(`kubectl explain cluster.spec.plugins` → enabled/isWALArchiver/name/parameters뿐). 캡의 경로는
+   plugin v0.13.0의 `ObjectStore.spec.instanceSidecarConfiguration.resources`뿐이고, 그 소비 파일은
+   **레포 소유**다 — 3차가 "벤더 파일이라 patch 경로 선행"이라 적은 것은 이 절반에서 틀렸다.
+2. **알림 분모.** 네이티브 사이드카(`restartPolicy: Always`인 initContainer)의 limit을 KSM은
+   `kube_pod_init_container_resource_limits`로 내보낸다. `ContainerMemoryNearLimit`의 분모를 두 계열의
+   `or`로 넓히지 않으면 캡은 **"무캡·무알림"을 "캡·무알림·조용한 OOMKill"로 바꾼다.**
+3. **게이트의 프리필터.** `tools/check-resource-limits.ts`는 `KINDS` 조회 **전에** `KIND_RE`로 파일을
+   거른다. `KINDS`에만 ObjectStore를 더하면 그 파일은 열리지도 않고 스캔 카운트도 안 늘어 게이트가
+   0건을 검사하고 초록을 낸다 — 뮤테이션으로 재현했다(스캔 21 → 20, 초록). 둘을 함께 넓혔다.
+
+⚠️ **캡 값의 창 의존성.** 사이드카 peak는 매일 03:00Z 베이스백업이 만들고, 같은 연산이 62~152Mi로
+2.5배 흔들린다. 그리고 그 창이 대표하는 것은 **PGDATA 49MB짜리 현재 데이터량**이다 — DB가 자라면
+재측정이 필요하다. 2.0x가 이 행에서는 넉넉한 값이 아니다.
+⚠️ **`args`는 kustomize patch로 건드리지 않는다.** core/v1 `Container.args`는 patchMergeKey 없는
+atomic []string이라 strategic-merge가 리스트를 통째로 교체한다(실측: `operator` 서브커맨드와 TLS 경로가
+전부 사라져 기동 불가). 그 이유가 `platform/cnpg/barman-plugin/kustomization.yaml` 헤더에 있다.
 
 **회수를 다시 검토할 조건**: 잔여가 수십 Mi까지 떨어질 때. 그때도 limit을 깎기 전에 **버스트 자체를
 줄이는 쪽**(vector sink `request.concurrency` 고정)을 먼저 볼 것 — 미검증이므로 넣으면 반드시
@@ -232,8 +243,8 @@ postgres 파드의 QoS 계산에도 들어간다.
 |------------------------------------|----------------|-------:|---------:|
 | <!-- ledger:row --> k3s+os+coredns | kube-system    |   1075 |     1740 |
 | <!-- ledger:row --> argocd         | argocd         |    640 |     1568 |
-| <!-- ledger:row --> cnpg           | database       |    900 |     1152 |
-| <!-- ledger:row --> cnpg-operator  | cnpg-system    |    100 |      112 |
+| <!-- ledger:row --> cnpg           | database       |    932 |     1472 |
+| <!-- ledger:row --> cnpg-operator  | cnpg-system    |    124 |      160 |
 | <!-- ledger:row --> cert-manager   | cert-manager   |     88 |      240 |
 | <!-- ledger:row --> observability  | observability  |   1184 |     2416 |
 | <!-- ledger:row --> edge           | edge           |     96 |      320 |

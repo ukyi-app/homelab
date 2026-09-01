@@ -19,10 +19,13 @@ try {
 } catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root · --floor check-resource-limits=<n>`); process.exit(2); }
 const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string) : ".";
 
-const KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler", "Cluster"]);
+const KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler", "Cluster", "ObjectStore"]);
 // spec.template.spec.containers[] 경로를 쓰는 kind(Pooler = CNPG pgbouncer). Cluster는 별도(spec.resources).
 const CONTAINER_KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler"]);
-const KIND_RE = /^kind:[ \t]*(Deployment|DaemonSet|StatefulSet|Pooler|Cluster)\b/m;
+// ⚠️ KINDS와 **반드시 함께** 넓힌다. 이 정규식이 파일 단위 프리필터라(:enumerate의 첫 줄),
+// KINDS에만 kind를 더하면 그 파일은 아예 열리지 않고 count도 늘지 않는다 — 게이트가 0건을
+// 검사하고 초록을 낸다(「열거 붕괴 → vacuous green」). 2026-09-01 ObjectStore 추가 시 실측 확인.
+const KIND_RE = /^kind:[ \t]*(Deployment|DaemonSet|StatefulSet|Pooler|Cluster|ObjectStore)\b/m;
 const MIN_SCAN = 10;
 const ALLOW = "policy/memory-limit-allowlist.txt";
 
@@ -100,6 +103,10 @@ guardMain({
           if (o.kind === "Cluster") {
             // CNPG Cluster: 컨테이너 없음 — spec.resources를 pseudo-container 'postgres'로 검사(GOMEMLIMIT 무관).
             checkBlock(o.kind, name, "postgres", o.spec?.resources, undefined, rel);
+          } else if (o.kind === "ObjectStore") {
+            // barman-plugin ObjectStore: Cluster.spec.plugins[]가 주입하는 **네이티브 사이드카**의 자원을
+            // 여기서 선언한다(Cluster CR에는 그 필드가 없다). pseudo-container 'plugin-barman-cloud'.
+            checkBlock(o.kind, name, "plugin-barman-cloud", o.spec?.instanceSidecarConfiguration?.resources, undefined, rel);
           } else if (CONTAINER_KINDS.has(o.kind)) {
             // Deployment/DaemonSet/StatefulSet/Pooler: spec.template.spec.containers[]
             const containers = o.spec?.template?.spec?.containers ?? [];

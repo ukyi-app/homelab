@@ -16,8 +16,6 @@
 #     - cert-manager controller/cainjector/webhook : 원격 helm 차트(platform/argocd/root/apps/cert-manager.yaml).
 #         임계 컴포넌트라 too-tight limit이면 cert 발급/갱신 장애(self-induced OOM) 위험 → 노드 여유로 흡수.
 #         (limit이 있는 워크로드는 ContainerMemoryNearLimit 알림이 OOM 전에 커버하나, unlimited는 미커버.)
-#     - barman-cloud : 벤더 barman-plugin manifest(platform/cnpg/barman-plugin — 수정 금지).
-#     - database/pg-1 plugin-barman-cloud : CNPG가 pg StatefulSet에 주입하는 사이드카(소스 매니페스트 부재, unlimited).
 #     - tailscale/ts-* tailscale : tailscale operator가 만드는 proxy StatefulSet(런타임 생성 → 소스 매니페스트 부재).
 #         proxyclass.yaml(resource-capped)을 defaultProxyClass로 지정해 각 proxy에 memory limit 192Mi를 cap함
 #         (더는 unlimited 아님). ProxyClass가 생성하는 StatefulSet이라 이 게이트 스캔 밖 → 원장 tailscale 행에

@@ -1,0 +1,52 @@
+# barman-plugin 벤더 릴리스에 **자원 캡만** 얹는 오버레이(2026-09-01).
+#
+# 왜 kustomization이 필요한가: `manifest.yaml`은 plugin-barman-cloud v0.13.0의 릴리스 매니페스트를
+# 그대로 벤더링한 것이고 AGENTS.md가 「벤더 파일 수정 금지」로 못박은 파일이다. 그런데 그 안의
+# Deployment `barman-cloud`는 `resources: {}`(:1037)로 **limit·request가 아예 없어**, 이 노드에서
+# 메모리 원장 어느 행에도 계상되지 않은 채 상주해 왔다(A′ peak 19.3Mi, 14일·30초 해상도).
+# limit이 없으면 폭주가 파드-OOM으로 격리되지 않고 노드-eviction으로 번진다.
+# ⇒ 벤더 파일을 한 바이트도 고치지 않고 patch로만 캡을 주입한다.
+#
+# ArgoCD Application(platform/argocd/root/apps/cnpg-barman-plugin.yaml)은 수정하지 않아도 된다 —
+# `path: platform/cnpg/barman-plugin`인 디렉토리 소스는 kustomization.yaml이 있으면 자동으로
+# kustomize 렌더로 전환한다.
+#
+# ⚠️ **`args`는 이 patch로 건드리지 말 것.** core/v1의 `Container.args`는 patchMergeKey가 없는
+#    atomic []string이라 strategic-merge patch가 리스트를 **통째로 교체**한다 — 실측(kustomize
+#    v5.8.1)에서 args만 담은 patch가 `operator` 서브커맨드와 TLS 경로(`--server-cert`/`--server-key`/
+#    `--client-cert`/`--server-address`/`--leader-elect`)를 전부 지워 Deployment가 기동 불가가 됐다.
+#    manifest.yaml:1020의 `--log-level=info` 로컬 편집을 여기로 옮기고 싶더라도, 그 경로는
+#    JSON6902 `replace`로 인덱스를 지정하는 별개 작업이다(벤더 재-vendor 때 인덱스가 어긋난다).
+#
+# ⚠️ `resources.limits`/`requests`는 `additionalProperties` 맵이라 SSA가 세분 병합한다 —
+#    「SSA atomic 리스트 영구 OutOfSync」 클래스에 걸리지 않는다(벤더 스키마에서 이 하위의
+#    x-kubernetes-list-type은 `resources.claims` 하나뿐이고 그것은 건드리지 않는다).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - manifest.yaml
+
+patches:
+  # 근거: A′ peak 19.3Mi(14일·30초 해상도) × 2.0 = 38.6 → 16Mi 올림 48Mi(2.49x).
+  # 이 컨트롤러는 백업을 직접 스트리밍하지 않는다(그것은 instance 파드의 사이드카 몫이라
+  # object-store.yaml이 따로 캡한다) — 여기 peak는 reconcile 루프의 작업집합이다.
+  - target:
+      kind: Deployment
+      name: barman-cloud
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: barman-cloud
+      spec:
+        template:
+          spec:
+            containers:
+              - name: barman-cloud
+                resources:
+                  requests:
+                    cpu: 10m
+                    memory: 24Mi
+                  limits:
+                    memory: 48Mi

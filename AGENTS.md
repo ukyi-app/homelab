@@ -162,6 +162,9 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - actor 가드는 대소문자를 구별한다 — GitHub login은 구별하지 않는데, 그 어긋남을 밟는 테스트가 0건이다
 - `grep -q`의 조기 종료가 pipefail 아래에서 writer를 SIGPIPE로 죽인다 — 매치가 있었는데 141이 거짓 FAIL이 된다
 - 서브쿼리 step이 스크레이프 간격보다 크면 peak가 조용히 과소평가된다 — 그 위에서 깎은 limit이 회귀가 된다
+- 네이티브 사이드카의 limit은 KSM이 `init_container` 계열로 내보낸다 — 캡을 씌워도 near-limit 알림은 무성이다
+- `Container.args`는 patchMergeKey 없는 atomic 리스트다 — strategic-merge patch가 통째로 교체한다
+- 파일 프리필터를 함께 넓히지 않으면 kind 추가가 vacuous green으로 착지한다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

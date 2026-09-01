@@ -40,3 +40,16 @@ spec:
     env:
       - name: AWS_REGION
         value: "auto"
+    # 사이드카 자원 캡(2026-09-01). 이 컨테이너는 `Cluster.spec.plugins[]`가 주입하는 **네이티브
+    # 사이드카**(restartPolicy: Always인 initContainer)라 Cluster CR에는 resources 필드가 없다 —
+    # 캡의 1급 경로는 여기(plugin v0.13.0 ObjectStore CRD)뿐이고, 벤더 manifest는 건드리지 않는다.
+    # 근거: A′ peak 152.5Mi(14일·30초 해상도) × 2.0 = 305 → 16Mi 올림 320Mi(2.10x).
+    # ⚠️ peak는 매일 03:00Z 베이스백업이 만든다(scheduled-backup.yaml). 같은 연산이 62~152Mi로
+    #    2.5배 흔들리고, 그 창이 대표하는 것은 **PGDATA 49MB짜리 현재 데이터량**이다 — DB가 커지면
+    #    재측정해야 한다(A′는 데이터량에 단조 비례하지 않지만 무관하지도 않다).
+    # ⚠️ 캡을 주면 이 컨테이너의 limit이 KSM의 `kube_pod_init_container_resource_limits`로 나간다.
+    #    ContainerMemoryNearLimit의 분모가 그 계열을 함께 보도록 같은 PR에서 고쳤다(rules/core.yaml).
+    #    분모 없이 캡만 주면 "무캡·무알림"이 "캡·무알림·조용한 OOMKill"이 된다.
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { memory: 320Mi }

@@ -75,14 +75,23 @@ data:
           #     OOM을 실제로 결정하는 것도 그쪽이다. (라이브 대조: glances 67.0% 침묵 유지 / postgres 7.6%.)
           #    게이트: tests/gates/vmalert-memory-nearlimit-firing-e2e.sh
           #           (L1=캐시 오염 락 · L2=anon 참양성 · L2b=shmem 참양성 · L3=하네스 이빨).
-          # limit 미설정 컨테이너는 kube_pod_container_resource_limits가 없어 매칭 0 → 자동 제외.
+          # limit 미설정 컨테이너는 분모 시리즈가 없어 매칭 0 → 자동 제외.
           # system ns는 PodCrashLooping과 동일하게 제외. 발화 시 원장에서 해당 행 limit 상향을 검토.
+          # ⚠️ 분모는 **두 KSM 계열의 or**다(2026-09-01). 네이티브 사이드카(`restartPolicy: Always`인
+          #    initContainer — CNPG의 plugin-barman-cloud가 그렇다)의 limit을 KSM은
+          #    `kube_pod_init_container_resource_limits`로 내보내므로, container 계열만 보면 그 컨테이너는
+          #    **limit이 있어도 영원히 분모가 없어 무성**이다. 라이브 확인(pg-1): container 계열에는
+          #    `postgres`만, init 계열에는 `bootstrap-controller`만 있다. 한쪽만 보면 캡을 씌우는 순간
+          #    "무캡·무알림"이 "캡·무알림·조용한 OOMKill"로 바뀐다.
+          #    `or`는 좌변에 없는 시리즈만 우변에서 채우므로, 양쪽에 다 있는 컨테이너는 container 계열이
+          #    이긴다(일반 컨테이너의 판정은 종전과 동일하다).
           - alert: ContainerMemoryNearLimit
             expr: |
               (max by (namespace, pod, container) (container_memory_usage_bytes{container!="", namespace!~"kube-system|kube-public|kube-node-lease"})
                 - max by (namespace, pod, container) (container_memory_total_inactive_file_bytes{container!="", namespace!~"kube-system|kube-public|kube-node-lease"})
                 - max by (namespace, pod, container) (container_memory_total_active_file_bytes{container!="", namespace!~"kube-system|kube-public|kube-node-lease"}))
-                / max by (namespace, pod, container) (kube_pod_container_resource_limits{resource="memory"})
+                / (max by (namespace, pod, container) (kube_pod_container_resource_limits{resource="memory"})
+                   or max by (namespace, pod, container) (kube_pod_init_container_resource_limits{resource="memory"}))
                 > 0.85
             for: 10m
             labels: { severity: warning }
