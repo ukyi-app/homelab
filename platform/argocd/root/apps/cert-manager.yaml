@@ -28,17 +28,20 @@ spec:
         - name: "dns01RecursiveNameserversOnly"
           value: "true"
         # 거버넌스 캡(2026-06-22): 무제한이던 3개 control-plane 컨테이너에 메모리 limit 신설.
-        # peak_ws controller 82·cainjector 77·webhook 69 → 각 128Mi(webhook은 admission 게이트라
-        # 가장 보수적). cpu는 request만(throttling 회피). 원장 cert-manager 행 180→384 동반.
+        # cpu는 request만(throttling 회피).
+        # right-size 2026-09-01: 옛 근거 "peak_ws controller 82·cainjector 77·webhook 69 → 각 128Mi"는
+        # working_set 기준이라 PR #564로 무효화됐다. 컨테이너별 A′ peak(14일) × 2.0x로 재산정한다 —
+        # controller 35.3→80Mi(2.27x) · cainjector 43.9→96Mi(2.19x) · webhook 23.4→48Mi(2.05x).
+        # 행 384→224. 옛 판정이 셋을 같은 128Mi로 묶은 것은 캐시 charge가 컨테이너마다 달라 생긴 왜곡이다.
         - { name: resources.requests.cpu, value: "10m" }
         - { name: resources.requests.memory, value: "32Mi" }
-        - { name: resources.limits.memory, value: "128Mi" }
+        - { name: resources.limits.memory, value: "80Mi" }
         - { name: cainjector.resources.requests.cpu, value: "10m" }
         - { name: cainjector.resources.requests.memory, value: "32Mi" }
-        - { name: cainjector.resources.limits.memory, value: "128Mi" }
+        - { name: cainjector.resources.limits.memory, value: "96Mi" }
         - { name: webhook.resources.requests.cpu, value: "10m" }
         - { name: webhook.resources.requests.memory, value: "24Mi" }
-        - { name: webhook.resources.limits.memory, value: "128Mi" }
+        - { name: webhook.resources.limits.memory, value: "48Mi" }
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager
