@@ -156,7 +156,10 @@ sealed-secrets 128→96·vmsingle 1Gi→896으로 −160Mi 추가 회수, 명목
 (b) cap 상향은 10240까지 적용됨(VM 12 GiB, 2026-07-08) — page-cache/burst reserve 2048 보호 위해 10240 초과는 금지.
 그 이상의 물리 헤드룸은 VM RAM 증설(VM_ALLOCATABLE_MIB 동반 상향)뿐이나 호스트 Mac RAM 16 GiB가 상한이라 VM
 12 GiB가 실질 최대다(그 이상은 하드웨어 교체). 모두 노드-OOM 안전(동시 peak ≪ allocatable).
-주의: 행은 라이브 manifest와 자동 교차검증되지 않는다(verify:ledger는 마크다운만; local-helm traefik 등은
+주의: 행은 라이브 manifest와 자동 교차검증되지 **않는다 — 단 하나, `homepage`만 예외다**
+(`platform/homepage/prod/test_homepage_deployment.bats`가 이 표에서 limit을 읽어 매니페스트와 대조한다.
+2026-09-01 3차에서 그 @test가 상수 192Mi를 박고 있어 원장 정정에 red를 냈고, 이름값(`matching the
+ledger`)을 하도록 원장 파서 대조로 고쳤다. 다른 행에 같은 대조는 없다). verify:ledger는 마크다운만; local-helm traefik 등은
 check-resource-limits 스캔 밖이라 여기 수기 계상). 신규/변경 상주 워크로드는 반드시 행+산문 동반 갱신.
 
 2026-08-14: observability 행 상향(limit 2080→2400 **+320**, req 1152→1184 **+32**) — NUC 콜드스타트에서

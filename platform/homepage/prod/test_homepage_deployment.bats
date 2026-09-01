@@ -2,7 +2,10 @@
 # homepage Deployment(restricted·ALLOWED_HOSTS·디렉토리 마운트) 가드. @test 이름은 영어.
 # ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 deployment.yaml 단일 파일이라 그것으로 닫힌다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
-setup() { D="${BATS_TEST_DIRNAME}/deployment.yaml"; }
+setup() {
+  D="${BATS_TEST_DIRNAME}/deployment.yaml"
+  LEDGER="${BATS_TEST_DIRNAME}/../../../docs/memory-ledger.md"
+}
 
 @test "uses the gethomepage image and container port 3000" {
   run grep -q 'ghcr.io/gethomepage/homepage' "$D"; [ "$status" -eq 0 ]
@@ -28,7 +31,12 @@ setup() { D="${BATS_TEST_DIRNAME}/deployment.yaml"; }
 
 @test "declares resource limits matching the ledger" {
   run grep -qE 'limits:' "$D"; [ "$status" -eq 0 ]
-  run grep -qE 'memory:\s*192Mi' "$D"; [ "$status" -eq 0 ]
+  # ⚠️ 원장 값을 **읽어서** 대조한다. 상수를 박으면 이 @test는 이름과 달리 원장을 안 보고,
+  #    원장이 정정될 때마다 무관한 red를 낸다(2026-09-01: 192→208 정정에서 실제로 그랬다).
+  local want
+  want="$(awk -F'|' '/ledger:row --> homepage /{gsub(/[^0-9]/, "", $5); print $5}' "$LEDGER")"
+  [ -n "$want" ]
+  run grep -qE "memory:[[:space:]]*${want}Mi" "$D"; [ "$status" -eq 0 ]
 }
 
 @test "config is a writable emptyDir seeded by initContainer (EROFS regression guard)" {
