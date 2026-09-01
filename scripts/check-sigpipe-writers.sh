@@ -54,7 +54,10 @@ done <<<"$files"
 # ⚠️ SCAN 신호를 손으로 내지 않는다 — scan_floor가 **통과 경로에서만** 낸다. 콜사이트가 따로 echo하면
 #    실패 시에도 마커가 찍혀 소비자가 "검사했다"로 오독한다(이 레포의 「스캔 신호를 콜사이트가 손으로
 #    내면 순서가 드리프트한다」 클래스). 바닥값도 floor_of를 거쳐 --floor 오버라이드를 받는다.
-scan_floor "check-sigpipe-writers:files" "$scanned" "$(floor_of check-sigpipe-writers:files 10)" || exit 1
+# ⚠️ 라벨은 **따옴표 없이** 쓴다 — tests/gates/test_scan-floor.bats의 정적 대조가
+#    `scan_floor [a-z0-9:-]+`로 라벨을 뽑으므로, 따옴표를 씌우면 추출되지 않아 "선언은 있는데
+#    방출이 없다"로 red가 난다(형제 가드 전부 따옴표 없는 관례).
+scan_floor check-sigpipe-writers:files "$scanned" "$(floor_of check-sigpipe-writers:files 10)" || exit 1
 
 if [ -n "$bad" ]; then
   echo "FAIL: pipefail 아래에서 다중행 writer를 grep -q에 파이프한다 — 매치가 있어도 SIGPIPE(141)로" >&2
