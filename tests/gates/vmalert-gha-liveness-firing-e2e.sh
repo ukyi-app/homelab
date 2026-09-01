@@ -16,6 +16,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+GEN="$ROOT/tests/gates/vmalert-gha-liveness-gen.py"
+[ -x "$GEN" ] || { echo "FAULT: 생성기 부재 $GEN" >&2; exit 2; }
 STACK="$ROOT/platform/victoria-stack/prod"
 RULES_CM="$STACK/rules/r6-ci-staleness.yaml"
 EXPORTER="$STACK/gha-liveness-exporter.yaml"
@@ -148,61 +150,9 @@ TO_EPOCH="$(date +%s)"
 FROM_EPOCH=$(( TO_EPOCH - SPAN_S ))
 
 gen() { # $1=출력파일 $2=시나리오(stale|healthy|hbstale|hbabsent|partial|zero|regress)
-  python3 - "$1" "$2" "$FROM_EPOCH" "$TO_EPOCH" "$PUSH_S" "$AGE_S" \
+  python3 "$GEN" "$1" "$2" "$FROM_EPOCH" "$TO_EPOCH" "$PUSH_S" "$AGE_S" \
     "$WF_OVER" "$WF_UNDER" "$BUDGET_SMALL" "$BUDGET_LARGE" "$N_CFG" "$N_SCRAPED_PARTIAL" "$N_ZERO" \
-    "$N_BACK" "$BACK_S" <<'PY'
-import json, sys
-out, scen, frm, to, push, age, wf_o, wf_u, b_small, b_large, n_cfg, n_part, n_zero, n_back, back_s = (
-    sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]),
-    int(sys.argv[6]), sys.argv[7], sys.argv[8], int(sys.argv[9]), int(sys.argv[10]),
-    int(sys.argv[11]), int(sys.argv[12]), int(sys.argv[13]), int(sys.argv[14]), int(sys.argv[15]))
-
-ts = list(range(frm, to + 1, push))          # push 주기마다 한 샘플(라이브와 같은 간격)
-lines = []
-def series(metric, labels, values):
-    m = {"__name__": metric}; m.update(labels)
-    lines.append(json.dumps({"metric": m,
-                             "values": values,
-                             "timestamps": [t * 1000 for t in ts]}))
-
-# 워크플로 타임스탬프: 각 샘플 시점 기준 age 초 전에 마지막 성공.
-# healthy·regress면 방금 성공(age=0)으로 둔다 — regress의 결함은 나이가 아니라 **역행**이다.
-eff_age = 0 if scen in ("healthy", "regress") else age
-over_vals = [t - eff_age for t in ts]
-under_vals = [t - eff_age for t in ts]
-# regress: 공급원(GitHub API)이 낡은 스냅샷을 준 상태 — 시계열 **끝**의 n_back 샘플만 back_s 뒤로 튄다.
-# ⚠️ 끝에 두는 것이 최악 배치다. 창 안 뒤쪽에 두면 그 뒤의 신선한 샘플이 last_over_time마저 구제해
-#    결함 픽스처가 발화하지 않는다(= L9 무측정).
-# ⚠️ wf_o(예산이 작은 쪽)에는 심지 않는다 — 흡수 후 남는 나이가 그 예산과 정확히 같아져 경계에 앉는다.
-if scen == "regress":
-    for i in range(len(ts) - n_back, len(ts)):
-        under_vals[i] = ts[i] - back_s
-series("gha_workflow_last_success_timestamp", {"workflow": wf_o}, over_vals)
-series("gha_workflow_last_success_timestamp", {"workflow": wf_u}, under_vals)
-series("gha_workflow_max_age_seconds", {"workflow": wf_o}, [b_small] * len(ts))
-series("gha_workflow_max_age_seconds", {"workflow": wf_u}, [b_large] * len(ts))
-
-# 하트비트: hbstale이면 창 초반에서 멈춘 값(= 오래된 타임스탬프가 계속 보인다),
-# hbabsent면 시리즈 자체를 내보내지 않는다(absent 가지 검증).
-if scen != "hbabsent":
-    if scen == "hbstale":
-        frozen = frm  # 창 시작 시각에 마지막 성공 → 창 끝에서 SPAN_S만큼 낡음
-        series("gha_liveness_last_success_timestamp", {}, [frozen] * len(ts))
-    else:
-        series("gha_liveness_last_success_timestamp", {}, list(ts))
-
-# 수집 카운트
-if scen == "zero":
-    cfg, scraped = n_zero, n_zero
-elif scen == "partial":
-    cfg, scraped = n_cfg, n_part
-else:
-    cfg, scraped = n_cfg, n_cfg
-series("gha_liveness_configured", {}, [cfg] * len(ts))
-series("gha_liveness_scraped", {}, [scraped] * len(ts))
-
-open(out, "w", encoding="utf-8").write("\n".join(lines) + "\n")
-PY
+    "$N_BACK" "$BACK_S"
 }
 
 run_scenario() { # $1=시나리오 [$2=룰 파일(기본: 배포 룰) $3=vm 이름 접미사]

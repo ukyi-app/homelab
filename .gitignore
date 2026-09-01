@@ -88,3 +88,7 @@ platform/*/prod/charts/
 # 운영 런북은 로컬 전용 — public 레포에 올리지 않는다(사용자 결정 2026-06-11)
 docs/runbooks/
 .make-ci-uneval
+
+# python 바이트코드 — tests/gates/*.py(하네스 생성기)를 py_compile로 검사할 때 생긴다.
+__pycache__/
+*.pyc

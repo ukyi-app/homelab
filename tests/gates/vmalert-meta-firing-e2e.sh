@@ -96,66 +96,10 @@ echo "[params] eval=${EVAL_S}s flap=${FLAP_N}회/${FLAP_W}·for=${FLAP_FOR} stal
 echo "[window] replay $(vme_iso "$RP_FROM") .. $(vme_iso "$RP_TO") (60m) · backfill ${BF_STEP}s(sup ${SUP_STEP}s)"
 
 # ── 5) 픽스처 생성기 — 시나리오별 합성 시계열(JSONL /api/v1/import) ────────────────────────────────
-GEN="$TMP/gen-meta.py"
-cat > "$GEN" <<'PY'
-import json, sys
-scenario, rp_from, rp_to, step, sup_step = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
-flap_w, flap_n = int(sys.argv[6]), int(sys.argv[7])
-stale_t = int(sys.argv[8]); sup_w = int(sys.argv[9]); graf_denom = int(sys.argv[10])
-out = []
-def series(metric, labels, pairs):
-    m = {"__name__": metric}; m.update(labels)
-    out.append({"metric": m, "values": [v for _, v in pairs], "timestamps": [t * 1000 for t, _ in pairs]})
-def grid(a, b, st): return list(range(a, b + 1, st))
-# 공통: Watchdog ALERTS — 정상이면 replay 끝까지 신선(stale 시나리오만 절단).
-wd_end = rp_to if scenario != "stale" else rp_from - stale_t - 300
-series("ALERTS", {"alertname": "Watchdog", "alertstate": "firing", "severity": "none"},
-       [(t, 1) for t in grid(rp_from - 2 * 3600, wd_end, step)])
-if scenario == "flap":       # activeAt이 창 안에서 flap_n+3회 갱신 — 임계 초과(마진 ≥2 — 리뷰 L2)
-    start = rp_to - flap_w + 600
-    n = flap_n + 3
-    pairs = []
-    for i in range(n):
-        seg_a = start + i * (flap_w - 1200) // n
-        seg_b = start + (i + 1) * (flap_w - 1200) // n - step
-        pairs += [(t, seg_a) for t in grid(seg_a, min(seg_b, rp_to), step)]
-    series("ALERTS_FOR_STATE", {"alertname": "SyntheticFlappy", "severity": "warning"}, pairs)
-elif scenario == "flap-quiet":   # 2회 갱신 — 임계 미만(정상 해소·재발)
-    mid = rp_to - flap_w // 2
-    pairs = [(t, rp_to - flap_w) for t in grid(rp_to - flap_w + 600, mid, step)]
-    pairs += [(t, mid) for t in grid(mid + step, rp_to, step)]
-    series("ALERTS_FOR_STATE", {"alertname": "SyntheticFlappy", "severity": "warning"}, pairs)
-elif scenario == "sup":          # suppressed ≥1이 창 전체(30s 밀도 — 밀도 가드 충족) + replay 내내
-    series("alertmanager_alerts", {"state": "suppressed", "namespace": "observability"},
-           [(t, 1) for t in grid(rp_from - sup_w - 600, rp_to, sup_step)])
-elif scenario == "sup-quiet":    # 창 중간 4h 동안 0 — min이 0이라 침묵
-    a = rp_from - sup_w - 600; hole_a = rp_to - sup_w // 2; hole_b = hole_a + 4 * 3600
-    pairs = [(t, 0 if hole_a <= t <= hole_b else 1) for t in grid(a, rp_to, sup_step)]
-    series("alertmanager_alerts", {"state": "suppressed", "namespace": "observability"}, pairs)
-elif scenario == "sup-short":    # 시리즈가 40분치뿐 + 내내 1 — 밀도 가드가 "24h 지속" 참칭을 막는다(리뷰 M3)
-    series("alertmanager_alerts", {"state": "suppressed", "namespace": "observability"},
-           [(t, 1) for t in grid(rp_to - 2400, rp_to, sup_step)])
-elif scenario == "graf":         # 사용률 0.70(임계 초과) + 지문 1·하트비트(FingerprintLost 침묵 대조)
-    v = int(graf_denom * 0.70)
-    series("grafana_data_dir_size_bytes", {}, [(rp_from - 86400, v), (rp_from - 600, v)])
-    series("grafana_du_fingerprint_matches", {}, [(rp_from - 86400, 1), (rp_from - 600, 1)])
-    series("pvc_du_last_success_timestamp", {}, [(rp_from - 86400, rp_from - 86400), (rp_from - 600, rp_from - 600)])
-elif scenario == "graf-quiet":   # 사용률 0.50 — 침묵
-    v = int(graf_denom * 0.50)
-    series("grafana_data_dir_size_bytes", {}, [(rp_from - 86400, v), (rp_from - 600, v)])
-    series("grafana_du_fingerprint_matches", {}, [(rp_from - 86400, 1), (rp_from - 600, 1)])
-    series("pvc_du_last_success_timestamp", {}, [(rp_from - 86400, rp_from - 86400), (rp_from - 600, rp_from - 600)])
-elif scenario == "fp-lost":      # 지문 0 + 하트비트 실재 — FingerprintLost 발화(리뷰 M8 레그)
-    series("grafana_du_fingerprint_matches", {}, [(rp_from - 86400, 0), (rp_from - 600, 0)])
-    series("pvc_du_last_success_timestamp", {}, [(rp_from - 86400, rp_from - 86400), (rp_from - 600, rp_from - 600)])
-elif scenario == "stale":
-    pass
-elif scenario == "quiet":
-    pass
-else:
-    raise SystemExit(f"unknown scenario {scenario}")
-for s_ in out: print(json.dumps(s_))
-PY
+# 형제 하네스(bulkssd·drift)와 같은 관용구 — gen.py를 쓰는 하네스는 ROOT를 명시한다.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+GEN="$ROOT/tests/gates/vmalert-meta-gen.py"
+[ -x "$GEN" ] || { echo "FAULT: 생성기 부재 $GEN" >&2; exit 2; }
 
 run_leg() { # $1=label $2=scenario $3=rules-file
   local label="$1" scenario="$2" rules="$3" vm="meta-e2e-$1-$$"
