@@ -2,7 +2,13 @@
 # 메모리 누수/스파이크가 노드 RAM을 무한정 잠식하는 블라인드스팟이다(감사 ★top: 상주 워크로드
 # limit 블라인드스팟 + 노드압박 보호 부재). 이 ProxyClass를 values-tailscale.yaml의
 # proxyConfig.defaultProxyClass로 전 proxy에 적용해, 폭주를 노드-eviction이 아닌 파드-OOM으로 격리한다.
-# tailscaleContainer peak_ws 116Mi → limit 192Mi(1.65×). ProxyClass는 cluster-scoped(CRD는 operator 차트가 관리).
+# right-size 2026-09-01: tailscaleContainer A′ peak 55.4Mi(14일, 파드-세대 붕괴) × 2.0x = 112Mi(2.02×).
+# ⚠️ 옛 근거 "peak_ws 116Mi → 192Mi(1.65×)"는 **working_set으로 잰 값**이라 PR #564로 무효화됐다 —
+#    그 지표는 회수 가능한 page cache를 실사용으로 계상한다(116 대비 A′는 절반 아래다).
+#    이 limit은 proxy **전체**에 적용된다(현재 ts-traefik-ts·ts-pg-rw-tailscale 2대). ts-traefik-ts는
+#    내부 인입의 유일 경로라 OOM 루프에 들면 *.home 전체가 tailscale·LAN 양쪽에서 죽는다 —
+#    그래서 2.0x를 하한 그대로 쓰고 더 깎지 않는다.
+# ProxyClass는 cluster-scoped(CRD는 operator 차트가 관리).
 apiVersion: tailscale.com/v1alpha1
 kind: ProxyClass
 metadata:
@@ -13,4 +19,4 @@ spec:
       tailscaleContainer:
         resources:
           requests: { cpu: 25m, memory: 64Mi }
-          limits: { memory: 192Mi }
+          limits: { memory: 112Mi }
