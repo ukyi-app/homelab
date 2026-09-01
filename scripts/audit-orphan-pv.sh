@@ -60,7 +60,7 @@ used="$(printf '%s' "$pods" | yq -r '.items[] | .metadata.namespace as $ns | .sp
 unconsumed=""
 while IFS= read -r key; do
   [ -n "$key" ] || continue
-  printf '%s\n' "$used" | grep -qxF "$key" || unconsumed="${unconsumed}  ${key}"$'\n'
+  grep -qxF "$key" <<<"$used" || unconsumed="${unconsumed}  ${key}"$'\n'
 done <<< "$(printf '%s' "$pvcs" | yq -r '.items[] | .metadata.namespace + "/" + .metadata.name')"
 
 if [ -z "$unconsumed" ]; then

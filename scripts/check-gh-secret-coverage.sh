@@ -104,15 +104,15 @@ while IFS= read -r f; do
   decl="$(yq -r '.on.workflow_call.secrets // {} | keys | .[]' "$f" 2>/dev/null | LC_ALL=C sort -u || true)"
   iscall="$(yq -r '.on | has("workflow_call")' "$f" 2>/dev/null || echo false)"
   islocal=0
-  printf '%s\n' "$local_called" | grep -qx "$b" && islocal=1 || true
+  grep -qx "$b" <<<"$local_called" && islocal=1 || true
   if [ "$iscall" = "true" ] && [ "$islocal" -eq 0 ]; then
     # 외부 caller 컨텍스트 → 이 레포의 자격이 아니다. 두 신호가 어긋나면 fail-loud.
     case "$b" in reusable-*) ;; *) bad="${bad}FAIL: ${f}: 로컬 호출 0건인 workflow_call인데 이름이 reusable-*가 아니다(네이밍 규약 ↔ 실제 호출 불일치).
 " ;; esac
     while IFS= read -r r; do
       [ -n "$r" ] || continue
-      printf '%s\n' "$PROVIDED" | grep -qx "$r" && continue
-      printf '%s\n' "$decl" | grep -qx "$r" || bad="${bad}FAIL: ${f}: cross-repo reusable이 미선언 secret '${r}'을 참조한다(caller가 넘길 수 없는 죽은 참조).
+      grep -qx "$r" <<<"$PROVIDED" && continue
+      grep -qx "$r" <<<"$decl" || bad="${bad}FAIL: ${f}: cross-repo reusable이 미선언 secret '${r}'을 참조한다(caller가 넘길 수 없는 죽은 참조).
 "
     done <<EOT
 $refs
@@ -125,8 +125,8 @@ EOT
   fi
   while IFS= read -r r; do
     [ -n "$r" ] || continue
-    printf '%s\n' "$PROVIDED" | grep -qx "$r" && continue
-    printf '%s\n' "$decl" | grep -qx "$r" && continue   # 자기 파일의 workflow_call 입력명 = 파라미터
+    grep -qx "$r" <<<"$PROVIDED" && continue
+    grep -qx "$r" <<<"$decl" && continue   # 자기 파일의 workflow_call 입력명 = 파라미터
     owned="${owned}${r}
 "
   done <<EOT
@@ -177,7 +177,7 @@ unbacked=""
 while IFS= read -r pair; do
   [ -n "$pair" ] || continue
   ln="${pair#*=}"
-  printf '%s\n' "$ledger_names" | grep -q "^${ln}" \
+  grep -q "^${ln}" <<<"$ledger_names" \
     || unbacked="${unbacked}${pair%%=*} → ledger_name='${ln}'가 ${LEDGER}에 없다
 "
 done <<EOT

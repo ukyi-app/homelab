@@ -26,19 +26,19 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 echo "==> [1] Node Ready?"
 nodes="$(kubectl get nodes --no-headers 2>/dev/null || true)"
-echo "$nodes" | grep -qw "Ready" || fail "node is not Ready"
+grep -qw "Ready" <<<"$nodes" || fail "node is not Ready"
 
 echo "==> [2] StorageClasses present?"
 sc="$(kubectl get sc --no-headers 2>/dev/null | awk '{print $1}')"
-echo "$sc" | grep -qx "standard" || fail "StorageClass 'standard' missing"
-echo "$sc" | grep -qx "bulk-ssd" || fail "StorageClass 'bulk-ssd' missing"
+grep -qx "standard" <<<"$sc" || fail "StorageClass 'standard' missing"
+grep -qx "bulk-ssd" <<<"$sc" || fail "StorageClass 'bulk-ssd' missing"
 
 echo "==> [3] Disabled components absent? (traefik controller, metrics-server)"
 pods="$(kubectl get pods -n kube-system --no-headers 2>/dev/null | awk '{print $1}')"
 # 컨트롤러 Deployment pod를 정확히 매칭해 servicelb LB pod(svclb-traefik-*)가
 # traefik 컨트롤러로 오인되지 않게 한다.
-echo "$pods" | grep -qE '^traefik-' && fail "traefik controller pod present — must be disabled"
-echo "$pods" | grep -qE '^metrics-server' && fail "metrics-server pod present — must be disabled"
+grep -qE '^traefik-' <<<"$pods" && fail "traefik controller pod present — must be disabled"
+grep -qE '^metrics-server' <<<"$pods" && fail "metrics-server pod present — must be disabled"
 
 echo "==> [4] servicelb KEPT (not in the k3s --disable flag contract)?"
 # ⚠️ 예전엔 레포의 k3s-install.sh를 K3S_PRINT_EXEC=1로 **실행해 그 출력을** grep했다. 그것은
@@ -60,7 +60,7 @@ esac
 
 echo "==> [5] secrets-encryption enabled?"
 enc="$($K3S_RUN k3s secrets-encrypt status 2>/dev/null || true)"
-echo "$enc" | grep -qi "Enabled" || fail "secrets encryption is not Enabled"
+grep -qi "Enabled" <<<"$enc" || fail "secrets encryption is not Enabled"
 
 echo "==> [6] k3s version pinned to versions.env (K3S_VERSION)?"
 kver="$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true)"
@@ -90,7 +90,7 @@ san_missing=""
 san_checked=0
 for _san in ${K3S_TLS_SANS:-}; do
   san_checked=$((san_checked + 1))
-  printf '%s\n' "$san_tokens" | grep -qxF -- "$_san" || san_missing="${san_missing} ${_san}"
+  grep -qxF -- "$_san" <<<"$san_tokens" || san_missing="${san_missing} ${_san}"
 done
 # ⚠️ 목록이 비면 루프가 0회 돌고 통과한다 — 바닥값이 그 vacuous green을 막는다(k3s-install.sh와 같은 규약).
 [ "$san_checked" -ge 3 ] || fail "K3S_TLS_SANS가 ${san_checked}건뿐이다(최소 3) — versions.env 확인"

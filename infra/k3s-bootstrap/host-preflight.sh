@@ -118,7 +118,7 @@ self_addrs="$($PREFLIGHT_IP -o -4 addr show 2>/dev/null | awk '{print $4}' | cut
 ns_self_list=""
 while IFS= read -r addr; do
   [ -n "$addr" ] || continue
-  if printf '%s\n' "$self_addrs" | grep -qxF "$addr"; then ns_self_list="${ns_self_list}${addr} "; fi
+  if grep -qxF "$addr" <<<"$self_addrs"; then ns_self_list="${ns_self_list}${addr} "; fi
 done <<EOF
 $(grep -E '^[[:space:]]*nameserver[[:space:]]+' "$rc" | awk '{print $2}')
 EOF
@@ -128,7 +128,7 @@ EOF
 case "${K3S_NODE_IP:-}" in "") fail "K3S_NODE_IP 미설정 — versions.env 확인" ;; esac
 addrs="$($PREFLIGHT_IP -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1)" \
   || fail "인터페이스 주소를 열거하지 못했다(${PREFLIGHT_IP})"
-printf '%s\n' "$addrs" | grep -qxF "$K3S_NODE_IP" \
+grep -qxF "$K3S_NODE_IP" <<<"$addrs" \
   || fail "핀한 K3S_NODE_IP=${K3S_NODE_IP}가 어느 인터페이스에도 없다 — DHCP 예약(MAC d4:94:a9:26:95:3a)을 확인할 것. 이 주소로 k3s가 기동하지 못한다"
 
 # ── [5] 스왑이 꺼져 있고 **재부팅해도 안 돌아오는가** ──────────────────────────────────────

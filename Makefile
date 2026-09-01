@@ -84,6 +84,7 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@bash scripts/check-gh-secret-coverage.sh
 	@bash scripts/check-host-ports.sh
 	@bash scripts/check-bats-fd0.sh
+	@bash scripts/check-sigpipe-writers.sh
 	@scripts/verify-ledger.sh
 # ⚠️ bats 호출은 fd 0을 끊는다(`</dev/null`). @test 안의 스텁이 피연산자 없이 fd 0을 읽으면 호출자의
 #    stdin에서 영구 블록한다 — 실패도 출력도 없는 hang이다(근거·실측은 scripts/run-bats.sh 헤더).
@@ -197,6 +198,7 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	bash scripts/check-locale-collation.sh
 	bash scripts/check-gh-secret-coverage.sh
 	bash scripts/check-host-ports.sh
+	bash scripts/check-sigpipe-writers.sh
 	bash scripts/check-bats-fd0.sh
 	bun tools/check-resource-limits.ts
 	bun tools/check-alert-rules.ts
