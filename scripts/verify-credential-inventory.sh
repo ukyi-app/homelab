@@ -72,7 +72,7 @@ fail=0
 # ① 표 → 원장
 while IFS= read -r n; do
   [ -n "$n" ] || continue
-  printf '%s\n' "$led_sorted" | grep -Fqx -- "$n" || {
+  grep -Fqx -- "$n" <<<"$led_sorted" || {
     echo "FAIL: 런북 §A 표에 있으나 원장에 없다: ${n} — 원장이 자격을 잃어버렸거나 이름이 갈렸다."
     fail=1
   }
@@ -82,7 +82,7 @@ EOF
 # ② 원장 → 표  (2026-08-21에 실제로 난 사고의 방향이다)
 while IFS= read -r n; do
   [ -n "$n" ] || continue
-  printf '%s\n' "$rb_sorted" | grep -Fqx -- "$n" || {
+  grep -Fqx -- "$n" <<<"$rb_sorted" || {
     echo "FAIL: 원장에 있으나 런북 §A 표에 없다: ${n} — 원장에 행을 더한 PR이 표를 같이 갱신하지 않았다."
     fail=1
   }
