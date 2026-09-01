@@ -12,8 +12,12 @@ resources:
     memory: 100Mi
   limits:
     cpu: 200m
-    # 14일 peak working_set 88Mi(라이브 실측 2026-07-06) × ~1.8 헤드룸. 원장(cnpg-operator 행)과 동기.
-    memory: 160Mi
+    # right-size 2026-09-01: A′ peak 54.3Mi(14일, 파드-세대 붕괴) × 2.0x 마진 = 112Mi(2.06x).
+    # ⚠️ 옛 근거 "14일 peak working_set 88Mi × ~1.8"은 무효 지표다(PR #564). 참고로 오늘 working_set으로
+    #    재봐도 36.2Mi라 88Mi가 재현되지 않는다 — 그 사이 기판이 OrbStack 6코어 → NUC 14코어로 바뀌었고
+    #    versions.env가 GOMAXPROCS 미핀에 따른 Go RSS 기준선 변동을 미결정(D-e)으로 기록해 뒀다.
+    # 원장(cnpg-operator 행)과 동기.
+    memory: 112Mi
 config:
   data:
     # barman-cloud plugin(CNPG-I) sidecar는 여기가 아니라 Cluster별로 활성화한다
