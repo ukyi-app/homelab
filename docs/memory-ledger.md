@@ -160,7 +160,7 @@ steady만 보면 7배 과다로 보이지만 **peak가 판단 기준이다.** �
 ⚠️ `go_memstats_heap_sys`(166 MB)를 RSS로 읽지 말 것 — Go가 예약만 하고 반납 안 한 주소공간이다
 (실제 RSS 66.8 MB).
 
-명목 잔여 = 10240 − 8316 = **1924 Mi(19%)** — 신규 온보딩을 막는 수준이 아니다.
+명목 잔여 = 10240 − 8108 = **2132 Mi(21%)** — 신규 온보딩을 막는 수준이 아니다.
 (2026-09-01: 2.0x 규약 확정 후 4행 회수 −256Mi로 1220 → 1476. traefik 192→96 · sealed-secrets 96→48 ·
 files 128→64 · cnpg-operator 160→112.
 2026-09-01 2차: **컨테이너별 A′ 측정**으로 보류가 풀린 2행 −384Mi로 1476 → 1860. cert-manager 384→224
@@ -168,7 +168,9 @@ files 128→64 · cnpg-operator 160→112.
 application-controller는 A′ 450.4Mi 대비 640Mi가 **1.42x로 규약 미달**이라 768Mi(1.70x)로 상향했고,
 repo-server 384→144 등 나머지 회수가 그것을 상쇄한다. 행 마진 2.19x 안에 1.42x가 숨어 있던 것이
 「행 마진은 컨테이너 안전을 함의하지 않는다」의 실증이다. edge·tailscale도 컨테이너별 측정으로
-보류가 풀렸으나(adguard 목표 160Mi는 OOM 유발값 128보다 높다) 라이브 데이터플레인이라 별도 PR로 분리한다.)
+보류가 풀렸고 각각 별도 PR로 착지했다 — edge 288→224(#572) · tailscale 512→304(operator 80 + proxy 112×2).
+최종: 9020 → 8108, 명목 잔여 1220 → **2132**. 남은 보류는 cnpg(계약상 회수 상한 32Mi)와
+cache-trip-mate(A′가 트래픽 부재를 잰 값) 둘뿐이다.)
 **회수를 다시 검토할 조건**: 잔여가 수십 Mi까지 떨어질 때. 그때도 limit을 깎기 전에 **버스트 자체를
 줄이는 쪽**(vector sink `request.concurrency` 고정)을 먼저 볼 것 — 미검증이므로 넣으면 반드시
 같은 지표를 다시 재라(`docs/traps-detail.md`의 "상주 워크로드 OOM 진단").
@@ -184,7 +186,7 @@ repo-server 384→144 등 나머지 회수가 그것을 상쇄한다. 행 마진
 | <!-- ledger:row --> cert-manager   | cert-manager   |     88 |      224 |
 | <!-- ledger:row --> observability  | observability  |   1184 |     2400 |
 | <!-- ledger:row --> edge           | edge           |     96 |      224 |
-| <!-- ledger:row --> tailscale      | tailscale      |    192 |      512 |
+| <!-- ledger:row --> tailscale      | tailscale      |    192 |      304 |
 | <!-- ledger:row --> whoami         | gateway        |     16 |       16 |
 | <!-- ledger:row --> traefik        | gateway        |     64 |      96 |
 | <!-- ledger:row --> sealed-secrets | sealed-secrets |     32 |       48 |
@@ -193,7 +195,7 @@ repo-server 384→144 등 나머지 회수가 그것을 상쇄한다. 행 마진
 | <!-- ledger:row --> cache-trip-mate | cache          |     96 |      160 |
 | <!-- ledger:row --> files          | files          |     32 |      64 |
 
-**합계:** req 4707 Mi · limit 8316 Mi (반드시 ≤ 10240 Mi 유지).
+**합계:** req 4707 Mi · limit 8108 Mi (반드시 ≤ 10240 Mi 유지).
 (⚠️ 이 줄은 쓰기 경로(`tools/lib/ledger-totals.ts`의 `replaceTotals` — create-app/provision-cache/teardown-app)
 만 갱신하고 **읽기 게이트는 검사하지 않는다**. 그래서 2026-08-14 observability 상향분이 반영되지 않은 채
 `4675/8700`으로 남아 CI가 계속 초록이었다(2026-08-31 정정). 손으로 행을 고치면 이 줄도 함께 고칠 것.)
