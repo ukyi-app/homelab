@@ -66,11 +66,11 @@ while IFS=$'\t' read -r file ref; do
   for attempt in 1 2 3; do
     tok=""
     if [ -n "$auth" ]; then
-      tok="$(curl -s --max-time 20 "$auth" | python3 -c "import json,sys
-try:
-  d = json.load(sys.stdin); print(d.get('token') or d.get('access_token') or '')
-except Exception:
-  print('')" 2>/dev/null)"
+      # jq로 뽑는다 — CONTRIBUTING.md 「새 코드 배치 규칙」이 셸 안의 제3 언어 내장을 금지한다
+      # (typecheck·lint 사각). 토큰 한 필드를 꺼내는 일은 규칙이 셸에 배정한 jq 필터의 자리다.
+      # 파싱 실패·키 부재·빈 입력 전부 빈 문자열로 떨어진다(2026-09-01 이관 — python 판정과
+      # 정상 응답 + 예외 4종에서 산출 동일 확인).
+      tok="$(curl -s --max-time 20 "$auth" | jq -r '(.token // .access_token // "")' 2>/dev/null || true)"
     fi
     code="$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 25 \
               ${tok:+-H "Authorization: Bearer $tok"} -H "Accept: ${ACCEPT}" \
