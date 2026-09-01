@@ -23,19 +23,20 @@ controller:
   args:
     statusProcessors: "4"
     operationProcessors: "2"
-  # 대형 Go 컨트롤러 — GOMEMLIMIT을 limit(640Mi)의 90%로 연동해 cgroup OOM 전에 GC가 소프트리밋에서
+  # 대형 Go 컨트롤러 — GOMEMLIMIT을 limit(992Mi)의 90%로 연동해 cgroup OOM 전에 GC가 소프트리밋에서
   # 힙을 수거하게 한다(자체 정책: notifications 주석 참조·check-resource-limits는 ≤limit×0.95 강제).
   env:
     - name: GOMEMLIMIT
-      value: "691MiB"
+      value: "892MiB"
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    # ⚠️ **상향**(2026-09-01): A′ peak 450.4Mi(14일) 대비 640Mi는 1.42x로 2.0x 규약 **미달**이다.
-    #    원장이 argocd 행을 2.19x로 본 것은 컨테이너 6개 집계였고 그 안에 이 컨테이너가 숨어 있었다
-    #    (「행 마진은 컨테이너 안전을 함의하지 않는다」의 실증). 768Mi = 1.70x로 **단계적** 상향한다 —
-    #    912Mi(2.0x)는 한 번에 +272라 폭이 크고, peak가 앱 수에 비례해 자라는 값이라 추이를 보며 간다.
-    #    OOM 이력은 없다. GOMEMLIMIT은 limit의 90%로 연동(691MiB).
-    limits: { cpu: 500m, memory: 768Mi }
+    # ⚠️ **상향 완성**(2026-09-01, 해상도 정정 재측정): A′ peak 488.2Mi(14일, 30초 해상도) × 2.0x
+    #    = 976.4 → 16Mi 올림 992Mi(2.03x). 직전 단계 768Mi는 1.57x로 여전히 규약 미달이었다.
+    #    단계적 상향을 택했던 근거(450.4Mi)는 `[14d:5m]` 서브쿼리가 30초 스크레이프의 90%를 버린
+    #    값이고, 30초로 재면 14일 일별 peak가 376~488Mi로 **전 구간 1.57~2.04x**다 — 미달이
+    #    한 시점의 사고가 아니라 상시 상태였다. 재시작 종료 스파이크가 아님도 확인했다(peak는 08-20).
+    #    OOM 이력은 없다. GOMEMLIMIT은 limit의 90%로 연동(892MiB).
+    limits: { cpu: 500m, memory: 992Mi }
 
 repoServer:
   replicas: 1
@@ -45,9 +46,9 @@ repoServer:
     # KSOPS가 렌더 시점에 마운트된 Secret에서 age 키를 읽는다.
     - name: SOPS_AGE_KEY_FILE
       value: /home/argocd/.config/sops/age/keys.txt
-    # 대형 Go 컨트롤러 — GOMEMLIMIT을 limit(384Mi)의 90%로 연동(cgroup OOM 전 GC 소프트리밋 수거·≤limit×0.95).
+    # 대형 Go 컨트롤러 — GOMEMLIMIT을 limit(240Mi)의 90%로 연동(cgroup OOM 전 GC 소프트리밋 수거·≤limit×0.95).
     - name: GOMEMLIMIT
-      value: "129MiB"
+      value: "216MiB"
   # ksops 바이너리 + exec 지원 kustomize를 repo-server에 설치한다.
   # ⚠️ 이 initContainer는 ksops뿐 아니라 repo-server가 쓰는 kustomize 바이너리 자체를 공급한다
   #    (/custom-tools → /usr/local/bin/kustomize subPath 마운트). KSOPS를 제거하더라도 이 컨테이너를
@@ -84,10 +85,13 @@ repoServer:
       readOnly: true
   resources:
     requests: { cpu: 50m, memory: 128Mi }
-    # right-size 2026-09-01: A′ peak 70.2Mi(14일) × 2.0x = 144Mi(2.05x). 옛 384Mi의 근거였던
-    # working_set peak 271.75Mi는 무효 지표다(PR #564) — 그 값의 74%가 회수 가능한 캐시였다.
-    # GOMEMLIMIT은 limit의 90%로 연동(129MiB).
-    limits: { cpu: 500m, memory: 144Mi }
+    # right-size 2026-09-01(**해상도 정정 재측정**): A′ peak 112.5Mi(14일, 30초 해상도) × 2.0x
+    # = 240Mi(2.13x). 직전 값 144Mi의 근거였던 70.2Mi는 `[14d:5m]` 서브쿼리가 30초 스크레이프의
+    # 90%를 버린 값으로, 이 컨테이너에서 과소평가가 **+60.3%**로 전 컨테이너 중 가장 컸다 —
+    # 렌더 버스트가 짧아 5분 격자에 잘 걸리지 않기 때문이다(일별 30초 peak 63~112Mi로 진동).
+    # 옛 384Mi의 근거였던 working_set peak 271.75Mi는 무효 지표다(PR #564).
+    # GOMEMLIMIT은 limit의 90%로 연동(216MiB).
+    limits: { cpu: 500m, memory: 240Mi }
   # parallelismLimit는 diff 동시성을 조절한다(§5).
   extraArgs:
     - --parallelismlimit=2

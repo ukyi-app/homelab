@@ -41,7 +41,8 @@ spec:
         - { name: cainjector.resources.limits.memory, value: "96Mi" }
         - { name: webhook.resources.requests.cpu, value: "10m" }
         - { name: webhook.resources.requests.memory, value: "24Mi" }
-        - { name: webhook.resources.limits.memory, value: "48Mi" }
+        # webhook은 30초 해상도 재측정에서 A′ peak 24.1Mi → 2.0x = 64Mi(2.66x). 48Mi는 1.99x였다.
+        - { name: webhook.resources.limits.memory, value: "64Mi" }
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager

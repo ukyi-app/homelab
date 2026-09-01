@@ -63,7 +63,8 @@ spec:
             - { name: telemetry, containerPort: 8081 }
           resources:
             requests: { cpu: 10m, memory: 32Mi }
-            limits: { memory: 64Mi }
+            # right-size 2026-09-01: A′ peak 34.1Mi(14일, 파드-세대 붕괴, 30초 해상도) × 2.0x = 80Mi(2.35x).
+            limits: { memory: 80Mi }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

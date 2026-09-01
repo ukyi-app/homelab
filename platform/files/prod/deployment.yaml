@@ -37,10 +37,15 @@ spec:
             - { name: FILES_PUBLIC_BASE_URL, value: "https://files.ukyi.app" }
           resources:
             requests: { cpu: 25m, memory: 32Mi }
-            # right-size 2026-09-01: A′ peak 2.9Mi(14일) × 2.0x → req 하한 위 헤드룸을 남겨 64Mi(22x).
+            # right-size 2026-09-01: A′ peak 3.4Mi(14일, 30초 해상도) × 2.0x → req 하한 위 헤드룸을
+            #    남겨 64Mi(19x). 5분 해상도로 잰 종전 값은 2.9Mi였다.
             # ⚠️ 32Mi로 더 내리지 않는다 — files-data는 재구축 불가한 유일 자산이고(pvc.yaml) 국면 A에는
             #    오프-매체 백업이 미-enable이다. 14일 창은 사람이 간헐적으로 쓰는 **업로드 경로**를
             #    대표한다는 증거가 없다(앱은 외부 레포라 스트리밍 여부를 여기서 확인할 수 없다).
+            #    ⭐ 이 차단 근거는 2026-09-01 3차 정정으로 **강해졌다**: 간헐 버스트가 측정 격자에서
+            #    통째로 사라지는 일이 실제로 일어났다(adguard의 한 시간짜리 124.4Mi 스파이크가 5분
+            #    해상도에 한 점도 안 걸렸다 — traps-detail 「서브쿼리 step이 …」). 해상도를 30초로
+            #    올려도 **창에 없는 이벤트는 여전히 무증인**이다.
             #    32Mi는 그 경로를 한 번 실측한 뒤에만. cpu limit 미설정(CFS throttling 회피 — 홈랩 규약).
             limits: { memory: 64Mi }
           securityContext:
