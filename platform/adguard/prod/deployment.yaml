@@ -73,7 +73,12 @@ spec:
             - { name: data, mountPath: /opt/adguardhome/work, subPath: work }
           resources:
             requests: { cpu: 25m, memory: 48Mi }
-            limits: { cpu: 200m, memory: 192Mi } # OOM-watch: peak 123/128(96%)·블록리스트 성장·LAN DNS → 선제 상향(128→192, edge 행 버퍼 흡수)
+            # right-size 2026-09-01: A′ peak 79.0Mi(14일, 파드-세대 붕괴) × 2.0x = 160Mi(2.03x).
+            # ⚠️ 128→192 선제 상향의 근거였던 "peak 123/128(96%)"은 **working_set으로 잰 값**이라
+            #    PR #564로 무효화됐다 — 그 지표는 회수 가능한 page cache를 실사용으로 계상한다.
+            #    ⭐ 그럼에도 **128 아래로는 내리지 않는다**: 160Mi는 그 OOM을 유발했던 128보다 높다.
+            #    블록리스트 성장은 실재하는 축이고 LAN 전체 DNS가 여기 걸려 있어 2.0x를 하한으로 쓴다.
+            limits: { cpu: 200m, memory: 160Mi }
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532
