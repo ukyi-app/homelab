@@ -47,16 +47,29 @@ spec:
             - --promscrape.configCheckInterval=30s
             - --remoteWrite.url=http://vmsingle:8428/api/v1/write
             - --promscrape.noStaleMarkers
-            - --memory.allowedPercent=60
+            # ⚠️ **allowedPercent가 아니라 absolute다**(2026-09-01, 관측 스택 마진 규약).
+            #    `allowedPercent=60`은 limit에 비례하므로 limit을 올리면 캐시 예산이 따라 커진다 —
+            #    GOMEMLIMIT을 고정해도 **캐시는 mmap이라 힙 밖**이라(원장 vlogs 항목이 실측으로 논증)
+            #    자기참조가 이 경로로 살아남는다. 종전 예산 그대로(224Mi × 0.6 = 134.4Mi)를 절대값으로
+            #    못박아 limit 상향이 캐시를 키우지 않게 한다. 141_033_472B = 134.5Mi.
+            - --memory.allowedBytes=141033472
             - --httpListenAddr=:8429
             - --remoteWrite.tmpDataPath=/tmpdata
             - --remoteWrite.maxDiskUsagePerURL=450MiB   # 512Mi emptyDir 미만 — 큐가 차면 oldest drop(eviction+전량유실 회피)
           env:
-            - { name: GOMEMLIMIT, value: "200MiB" } # 224Mi의 약 90% (right-size 2026-06-22)
+            # ⚠️ **limit에 연동하지 않는다**(2026-09-01, 관측 스택 마진 규약). 이 값을 limit의 90%로
+            #    따라 올리면 Go 힙이 새 예산까지 자라 peak가 따라 오르고, 배수 규약이 자기참조가 된다 —
+            #    limit을 올리는 목적은 **비-힙 여유**(캐시 mmap·커널)를 주는 것이지 힙을 키우는 게 아니다.
+            #    200MiB는 유지한다(현재 사용률 75.0%). check-resource-limits는 ≤limit×0.95만 강제한다.
+            - { name: GOMEMLIMIT, value: "200MiB" }
           ports: [{ name: http, containerPort: 8429 }]
           resources:
             requests: { cpu: 50m, memory: 128Mi }
-            limits: { memory: 224Mi }
+            # 관측 스택 마진 규약(docs/memory-ledger.md): RSS peak(현 기판, 30초) × 1.5, 16Mi 올림.
+            # 168.5Mi × 1.5 = 252.8 → 256Mi(1.52x). 종전 224Mi는 1.33x로 미달이었다.
+            # ⚠️ A′ 기준 1.05x는 **재부팅 전 세대**(2026-08-26T13:41Z 이전)의 값이라 폐기했다 —
+            #    창이 기판 변경을 가로지르면 두 체제가 한 숫자에 섞인다.
+            limits: { memory: 256Mi }
           readinessProbe: { httpGet: { path: /health, port: 8429 } }
           securityContext:
             allowPrivilegeEscalation: false

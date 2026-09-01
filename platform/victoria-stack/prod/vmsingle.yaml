@@ -48,16 +48,31 @@ spec:
             # "flag not defined"로 거부해 CrashLoop(라이브 확인). 디스크 폭주 가드는 시간 보존(30d)
             # + R4 disk-fill 알림(vmalert)으로 담당한다. (VictoriaLogs 쪽 동일 플래그는 커뮤니티 지원)
             - --retentionPeriod=30d
-            - --memory.allowedPercent=60
+            # ⚠️ **allowedPercent가 아니라 absolute다**(2026-09-01, 관측 스택 마진 규약).
+            #    비례 설정은 limit 상향을 캐시 예산 상향으로 옮겨 자기참조를 되살린다(캐시는 mmap이라
+            #    GOMEMLIMIT이 못 막는다). 종전 예산 그대로(896Mi × 0.6 = 537.6Mi)를 절대값으로 고정한다.
+            #    현재 캐시 사용량은 이 예산의 33.8%(181.8Mi)이고 그중 128Mi는 fastcache 32Mi 바닥값 4개다.
+            #    563_714_457B = 537.6Mi (라이브 vm_allowed_memory_bytes와 동일한 값).
+            - --memory.allowedBytes=563714457
             - --httpListenAddr=:8428
             - --dedup.minScrapeInterval=30s
           env:
-            - { name: GOMEMLIMIT, value: "800MiB" } # 896Mi limit의 약 89%(B2 게이트 ≤limit×0.95=851 준수, right-size 2026-07 B10)
+            # ⚠️ **limit에 연동하지 않는다**(2026-09-01, 관측 스택 마진 규약 — 자기참조 차단).
+            #    현재 사용률 73.4%로 힙은 이 상한에 닿지 않았고, rss 상승분은 힙 밖(캐시 mmap·커널)이다.
+            #    limit 1056Mi 대비 800MiB는 75.8%로 ≤limit×0.95 게이트를 넉넉히 통과한다.
+            - { name: GOMEMLIMIT, value: "800MiB" }
           ports:
             - { name: http, containerPort: 8428 }
           resources:
             requests: { cpu: 100m, memory: 512Mi }
-            limits: { memory: 896Mi } # right-size 2026-07(B10): 라이브 peak ~445Mi(7d) 대비 ~2x, allowedPercent=60이 캐시를 새 예산에 자동 튜닝
+            # 관측 스택 마진 규약: RSS peak(현 기판, 30초) × 1.5 = 694.9 × 1.5 = 1042.3 → 1056Mi(1.52x).
+            # 종전 896Mi는 1.29x로 미달이고, 다섯 중 유일하게 **재부팅 후에 최고점을 찍었다**(단조 상승).
+            # ⚠️ 상승의 정체: UTC 자정 TSDB 일일 파티션 롤오버(+140Mi 계단) + 활성 시계열 증가
+            #    (tsid 엔트리 68454 → 74782, 파드 재시작이 새 cgroup id 시계열을 만든다). 둘 다 정상
+            #    운영에서 재현되므로 산정에 포함한다. 재부팅 전 평형 552Mi를 이미 142Mi 넘겼다.
+            # ⚠️ 캐시 상한 합(920.74Mi)은 allowedPercent 예산(537.6Mi)의 **1.71배**로 오버서브스크립션이고
+            #    축출은 개별 캐시 상한에서 일어난다 — 총합이 예산의 33.8%라고 안전한 것이 아니다.
+            limits: { memory: 1056Mi }
           readinessProbe: { httpGet: { path: /health, port: 8428 }, initialDelaySeconds: 5 }
           livenessProbe: { httpGet: { path: /health, port: 8428 }, initialDelaySeconds: 30 }
           securityContext:

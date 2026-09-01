@@ -165,6 +165,9 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 네이티브 사이드카의 limit은 KSM이 `init_container` 계열로 내보낸다 — 캡을 씌워도 near-limit 알림은 무성이다
 - `Container.args`는 patchMergeKey 없는 atomic 리스트다 — strategic-merge patch가 통째로 교체한다
 - 파일 프리필터를 함께 넓히지 않으면 kind 추가가 vacuous green으로 착지한다
+- A′는 회수 가능한 커널 slab을 분자에 싣는다 — 그 비중이 워크로드마다 100배 갈리고 peak 시점 값은 소급 측정이 불가능하다
+- 자기조절 워크로드의 자기참조는 두 경로로 산다 — GOMEMLIMIT(힙)과 allowedPercent(캐시), 하나만 끊으면 되살아난다
+- 측정 창이 기판 변경을 가로지르면 두 체제가 한 숫자에 섞인다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

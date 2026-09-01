@@ -105,6 +105,118 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
     버스트 크기는 장애 지속시간에 비례하고, 14일 창에 그 장애가 없었다면 그 창은 버스트에 무증인이다.
     간헐적으로만 밟히는 경로(업로드·복구·재색인)를 가진 워크로드는 창이 그 경로를 대표하는지 먼저 물을 것.
 
+  ### 관측 스택 마진 규약 (자기조절 클래스 — 2026-09-01 확정)
+
+  **`limit ≥ RSS peak(현 기판 창, 30초 해상도, 파드-세대 붕괴) × 1.5`**, 16Mi 단위 올림.
+
+  **적용 대상**: `observability`의 `vmagent`·`vmsingle`·`grafana`·`glances`·`victorialogs` 5개.
+  **적용 조건**: ⭐ **`shmem == 0`을 cgroup `memory.stat` 직독으로 확인한 경우에만.**
+
+  #### 왜 A′ × 2.0을 쓰지 않는가
+
+  A′는 `usage − inactive_file − active_file`이라 **회수 가능한 커널 slab을 분자에 싣는다.**
+  그 비중이 이 다섯에서 100배 넘게 갈린다(2026-09-01 cgroup 직독):
+
+  | | vmagent | vmsingle | grafana | glances | victorialogs |
+  |---|---|---|---|---|---|
+  | `slab_reclaimable` / A′ | **0.2%** | 3.8% | 20.2% | 9.1% | **27.1%** |
+  | 회수 불가 / limit | 75.2% | 70.8% | 61.2% | 64.2% | **27.8%** |
+
+  ⇒ **같은 배수가 서로 다른 안전을 뜻한다.** vmagent의 A′는 사실상 순수 anon이고(slab 0.3Mi),
+  victorialogs의 A′는 27%가 커널이 언제든 내놓을 수 있는 캐시다. 그리고 결정적으로
+  ⚠️ **peak 시점의 slab 비중은 소급 측정이 원리적으로 불가능하다** — cadvisor는 cgroup v2 +
+  containerd에서 커널/slab 계열을 채우지 않는다(`container_memory_kernel_usage`가 5개 전부
+  `max_over_time([14d:30s]) = 0`). 즉 "A′에서 slab을 빼자"는 처방은 라이브 스냅샷으로만 가능하고
+  시계열이 없어 규약이 될 수 없다.
+
+  #### 왜 RSS가 여기서는 안전한가 (그리고 언제 안전하지 않은가)
+
+  ⚠️ 원장은 「분자를 `container_memory_rss`(anon)로 내리는 처방은 금지」를 명시한다 — cgroup v2의
+  anon은 **shmem을 제외**하므로 `shared_buffers`로 limit을 채우는 cnpg 행이 무성 지대에 들어가기
+  때문이다(PR #564가 설계로 배제, `rules/core.yaml:70-75`가 실측으로 논증).
+  **그 금지는 유효하며 이 규약이 뒤집지 않는다.** 다만 그 위험은 `shmem > 0`일 때만 성립하고,
+  이 다섯은 **전부 `shmem = 0`**이다(`memory.stat` 직독: `shmem 0`·`shmem_thp 0`·`zswapped 0`).
+  게다가 이 노드는 `node_memory_SwapTotal_bytes = 0`이라 **anon은 전량 회수 불가**다.
+  검산: A′ ≈ anon + kernel (vmagent 169.6 ≈ 166.3+2.5 · grafana 197.3 ≈ 152.7+43.8 · vlogs 99.3 ≈ 69.0+29.1).
+
+  ⇒ 그래서 **`shmem == 0` 확인이 적용 조건**이다. 이 규약을 다른 워크로드로 넓히려면 그 컨테이너의
+  `shmem`을 먼저 재야 한다. 조건 없이 복사하면 그것이 곧 #564가 막은 함정의 재발이다.
+
+  #### 왜 배수가 1.5인가
+
+  RSS는 회수 불가분만 재므로, 회수 가능분까지 포함한 A′와 같은 안전을 얻는 데 더 작은 배수로 충분하다
+  (실측 A′/rss = 1.02~1.41). 1.5의 근거는 **이 레포에서 실제로 일어난 OOM에서 역산**한다:
+  2026-08-14 victorialogs가 `limit 128Mi`에서 **anon-rss ~129MiB**로 OOMKill 루프를 돌았다(원장 상단
+  기록). 그 시점 peak에 1.5를 적용하면 129 × 1.5 = 193.5 → 208Mi로, 실제 처방(256Mi)보다 작지만
+  **그 사고를 막았을 값**이다. 관측된 steady→peak 버스트 폭이 최대 1.74x(vlogs)인 것과도 정합한다.
+
+  #### ⚠️ limit에 비례하는 설정을 **둘 다** 끊는다 — 자기참조의 두 경로
+
+  자기참조는 **두 경로**로 산다. 하나만 끊으면 나머지로 되살아난다.
+
+  **① 힙 — `GOMEMLIMIT`을 연동하지 않는다.** 원장의 다른 규약(「대형 Go 컨트롤러는 GOMEMLIMIT을
+  limit의 90%로 연동」)을 이 클래스에 적용하면 limit 상향이 곧 힙 예산 상향이 된다.
+  ⇒ **고정한다**(vmagent 200MiB · vmsingle 800MiB 유지). 사용률이 75.0%·73.4%로 상한에 닿지 않았고,
+  `tools/check-resource-limits.ts`의 `≤ limit × 0.95`는 넉넉히 통과한다.
+
+  **② 캐시 — `--memory.allowedPercent`를 `--memory.allowedBytes`로 바꾼다.** ⭐ 이것이 처음에
+  놓쳤던 절반이다. `allowedPercent=60`은 **limit에 비례**하므로 vmsingle을 896 → 1056Mi로 올리면
+  캐시 예산이 537.6 → 633.6Mi로 96Mi 따라 커진다. 그리고 ⚠️ **`GOMEMLIMIT`은 이것을 막지 못한다** —
+  VictoriaMetrics의 fastcache는 mmap 할당이라 **Go 힙 밖**에 살기 때문이다(원장 상단 victorialogs
+  항목이 실측으로 논증: "GOMEMLIMIT은 힙 소프트 리밋이라 이것을 못 막는다 — 115MiB가 걸린 채 죽었다").
+  ⇒ 종전 예산을 **절대값으로 못박는다**: vmagent `141033472`(=134.4Mi) · vmsingle `563714457`(=537.6Mi).
+  플래그 존재는 라이브에서 확인했다(`flag{name="memory.allowedBytes"}` — 종전 `is_set=false`, 값 0).
+
+  ⚠️ **두 경로를 다 끊어도 산술적으로는 여전히 초과 가능하다**: vmsingle의 힙 상한(800MiB) + 캐시
+  예산(537.6Mi) = 1337.6Mi > limit 1056Mi. 둘 다 최대에 닿으면 OOM이다. 실측은 힙 73.4% · 캐시
+  33.8%로 동시 최대가 관측된 적이 없고, 캐시 "사용량" 181.8Mi 중 128Mi는 fastcache의 32Mi 바닥값
+  4개(tsid·metricIDs·metricName·tagFiltersLoops가 **정확히** 32.00Mi)라 실 내용물은 ~54Mi다.
+  이 초과는 **오버서브스크립션을 의도적으로 허용한 것**이며, 그 사실을 여기 계상한다 —
+  두 상한의 합을 limit 아래로 눌러 담으려면 캐시 예산을 크게 깎아야 하고 그것은 질의 지연으로
+  전가된다(`promql/rollupResult`가 대시보드·vmalert 질의 결과 캐시다).
+
+  #### ⚠️ 창은 기판 변경을 가로지르지 않는다
+
+  `node_boot_time_seconds = 2026-08-26T13:41:06Z`. 그 재부팅에서 다섯 전부 계단이 있었고
+  (vmagent A′ 일별 peak 200~213 → 159~171, vmsingle rss 552 → 350), 14일 창은 **두 체제를 한 숫자에
+  섞는다.** 원장이 적었던 `vmagent 1.05x`가 정확히 그 산물이다 — 그 값은 재부팅 전 세대의 것이고
+  현 기판에서는 1.33x다. 기판이 바뀌면(노드 재부팅·커널·런타임 메이저) 창을 그 이후로 자른다.
+
+  #### 적용 결과 (2026-09-01)
+
+  | 워크로드 | RSS peak(현 기판) | ×1.5 | 종전 | 현행 | 판정 |
+  |---|---|---|---|---|---|
+  | `vmagent` | 168.5Mi | 252.8 | 224Mi | **256Mi** | 상향(1.33x → 1.52x) |
+  | `vmsingle` | 694.9Mi | 1042.3 | 896Mi | **1056Mi** | 상향(1.29x → 1.52x) |
+  | `grafana` | 149.5Mi | 224.2 | 256Mi | 256Mi | 유지(1.71x) |
+  | `glances` | 76.7Mi | 115.1 | 128Mi | 128Mi | 유지(1.67x) |
+  | `victorialogs` | 107.6Mi | 161.4 | 256Mi | 256Mi | 유지(2.38x) |
+
+  ⚠️ **이 규약은 하한이다 — 만족하는 행을 깎는 근거가 아니다.** 특히 `grafana`는 knob이 하나도 없어
+  (allowedPercent도 GOMEMLIMIT도 없는 Go 기본 GOGC) limit을 낮추면 자기조절로 흡수되지 않고 그대로
+  OOM 위험으로 전가된다. `victorialogs`는 2.38x로 여유가 커 보이지만 **14일 rss peak 119.8Mi가
+  2026-08-14 OOM 지점(129MiB)의 93%**다 — 지금 사는 이유는 워크로드가 줄어서가 아니라 limit이
+  128 → 256Mi로 두 배가 됐기 때문이다. 둘 다 회수 대상이 아니다.
+
+  #### 남은 관측 (침묵시키지 않는다)
+
+  - **`grafana`가 limit에 붙어 있는 것은 고장이 아니라 평형이다.** `memory.current/max = 99.3%`이고
+    `memory.peak == memory.max`, `memory.events max=8`이지만 `oom_kill = 0`이고 회수 가능분이
+    96.8Mi(file 57.0 + slab_reclaimable 39.8)다. 커널이 그것으로 limit을 채워 두고 필요할 때 뺏는다
+    (138시간 동안 `pgsteal_direct` 240215 페이지 ≈ 938Mi 회수). PSI `full total = 129,815µs`는 가동
+    시간의 **0.000026%**이고 카운터는 현재 동결 상태다 — 압력은 에피소드성이지 진행형이 아니다.
+  - ⚠️ **그 압력은 현재 수집되는 어느 메트릭에도 보이지 않는다.** cadvisor `container_memory_failcnt`는
+    cgroup v1 전용 필드라 5개 전부 0이고, v2의 `memory.events.max`를 반영하지 않는다. 압력을 알림으로
+    쓰려면 별도 공급원이 필요하다(미착수).
+  - **압력 순서는 배수 순서와 어긋난다**: PSI 누적으로 grafana 129,815µs ≫ glances 1,956 > vlogs 288 >
+    vmsingle 72 > **vmagent 0**. 배수가 가장 나빴던 vmagent는 메모리 압력을 한 번도 겪지 않았다.
+    이 어긋남이 "배수는 대리 지표일 뿐"이라는 이 절 전체의 논거다.
+  - **`vm_cache_size_bytes`를 노출하는 것은 vmsingle 하나뿐이다**(vmagent·victorialogs는 0건).
+    즉 `allowedPercent` 예산 대비 실제 캐시 사용량을 잴 수 있는 워크로드가 셋 중 하나다 —
+    예산 기반 모델을 세우려면 이 계측 공백부터 메워야 한다.
+  - **측정 창의 구멍**: 2026-08-31 08:30Z~13:00Z 약 4.5시간 cadvisor 샘플이 없다
+    (`count_over_time(...[1h])`가 120 → 28 → 결측 → 103). 그 구간의 peak는 관측되지 않았다.
+
   ### 회수 보류 행 (2026-09-01 조사 — 침묵시키지 않고 계상한다)
 
   2.0x 확정 직후 10개 행을 조사한 결과 **6행이 보류**다. 각 사유는 "나중에 하자"가 아니라 **무엇이
@@ -117,7 +229,7 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
   | `edge` | adguard의 192Mi는 **OOM 대응 상향**이다(`peak 123/128(96%)·블록리스트 성장 → 선제 상향`, 커밋 f1f23e8). 목표 208을 맞추려 −80을 adguard에서 빼면 112가 되어 **그 OOM을 유발했던 128보다 낮다**. cloudflared는 자기 주석이 이미 2.0x 미달(`peak 51Mi × 2.0 = 102 > 96`)이라고 말한다 | 블록리스트 성장을 반영한 adguard 단독 A′ 재측정 |
   | `argocd` | 컨테이너 **6개** 집계. OOMKill은 cgroup 단위인데 −112Mi를 어디서 뗄지 근거가 없다. 옛 비율로 나누는 우회는 그 비율의 출처가 바로 무효화된 working_set이라 성립하지 않는다 | controller/repoServer/server/applicationSet/notifications/redis **각각**의 A′ peak. GOMEMLIMIT 4곳이 limit의 90%로 걸려 있어 함께 움직여야 한다 |
   | `cert-manager` | 컨테이너 **3개** 집계, 같은 배분 근거 부재. 옛 비율(cainjector 101 : controller 96 : webhook 69)은 컨테이너마다 캐시 charge가 달라(controller는 WS의 약 2/3가 캐시) 왜곡돼 있다 | controller/cainjector/webhook 각각의 A′ peak |
-  | **관측 스택 5개**(`vmagent`·`vmsingle`·`grafana`·`glances`·`victorialogs`) | (2026-09-01 3차 추가 → **4차 정정**) 30초 재측정에서 전부 2.0x 미달이다 — **vmagent 1.05x**(A′ 213.1Mi/224Mi) · vmsingle 1.37x · grafana 1.32x · glances 1.48x · vlogs 1.52x. ⚠️ **3차가 이 행에 적은 근거는 절반이 틀렸다**(4차 조사가 정정). (a) 배수: vmagent를 1.34x로 적었는데 그것은 최근 5일 값이고 14일 A′ peak 기준은 **1.05x**다 — 가장 나쁜 행의 숫자를 27% 낙관 쪽으로 적었다. (b) 메커니즘: `--memory.allowedPercent`/`GOMEMLIMIT`을 실제로 가진 것은 **셋뿐**이다(vmagent·vmsingle·victorialogs). grafana는 둘 다 없고(Go 기본 GOGC), **glances는 파이썬**이다. (c) "vmagent가 8/28에 스스로 내려왔으니 부하 종속"도 틀렸다 — `node_boot_time_seconds` = **2026-08-26T13:41:06Z**이고 하락은 그 재부팅 이후의 계단이다(부하가 아니라 가동시간 의존). ⇒ 남는 것은 **행동 관찰**이다: 라이브 cgroup에서 grafana는 `memory.current`가 limit의 **99.8%**이고 `memory.peak == memory.max`, `memory.events max=8`(회수 압력이 실제로 걸렸다). vmagent는 84.7%에 `max=0`이다. 즉 **배수 순서와 압력 순서가 어긋난다** — 배수가 가장 나쁜 vmagent가 압력은 가장 낮다. OOMKill은 5개 모두 0이다 | 이 클래스 전용 규약. ⚠️ **분자를 `container_memory_rss`(anon)로 내리는 처방은 금지**다 — cgroup v2의 anon은 **shmem을 제외**하므로 `shared_buffers`로 limit을 채우는 cnpg 행이 정확히 무성 지대에 들어간다(PR #564가 설계로 배제한 함정이고 `rules/core.yaml:70-75`가 같은 사례를 실측으로 적어 뒀다). 대안은 `allowedPercent` 반영 상한 모델이나 압력 기반 지표(`memory.events`)이며, 어느 쪽도 아직 논증되지 않았다 |
+  | ~~**관측 스택 5개**~~ | ✅ **해소(2026-09-01 4차)** — 위 「관측 스택 마진 규약」이 이 클래스의 SSOT다. A′가 회수 가능 slab을 분자에 싣는데 그 비중이 0.2~27.1%로 100배 갈리고 peak 시점 값은 소급 측정이 불가능하다 ⇒ 분자를 RSS(=anon, 이 다섯은 `shmem = 0`·스왑 0이라 전량 회수 불가)로 바꾸고 배수를 1.5로 낮췄다. 자기참조는 **GOMEMLIMIT을 limit에 연동하지 않는 것**으로 끊었다. vmagent 224→256 · vmsingle 896→1056 상향, 나머지 셋은 규약 충족으로 유지 | — |
   | `cache-trip-mate` | A′ 22.4Mi는 작업집합이 아니라 **트래픽 부재**를 잰 값이다 — 소비처 `trip-mate-api`가 2026-08-12(#456)에 철거돼 키스페이스가 비어 있다. 게다가 이 행의 limit은 애초에 working_set이 아니라 `maxmemory 64mb + BGSAVE fork COW + 단편화 + 클라이언트 버퍼` **유도값**이라 이번 지표 정정의 대상이 아니다 | 소비처가 다시 붙어 LRU가 채워진 뒤의 재측정. 또는 리소스 자체의 존치 판단 |
 
   ⇒ 공통 갭이 하나 보인다: **다중 컨테이너 행에 컨테이너별 A′가 없다.** 4행(`argocd`·`cert-manager`·
@@ -185,7 +297,7 @@ steady만 보면 7배 과다로 보이지만 **peak가 판단 기준이다.** �
 ⚠️ `go_memstats_heap_sys`(166 MB)를 RSS로 읽지 말 것 — Go가 예약만 하고 반납 안 한 주소공간이다
 (실제 RSS 66.8 MB).
 
-명목 잔여 = 10240 − 8972 = **1268 Mi(12%)** — 신규 온보딩을 막는 수준이 아니다.
+명목 잔여 = 10240 − 9164 = **1076 Mi(11%)** — 신규 온보딩을 막는 수준이 아니다.
 (2026-09-01: 2.0x 규약 확정 후 4행 회수 −256Mi로 1220 → 1476. traefik 192→96 · sealed-secrets 96→48 ·
 files 128→64 · cnpg-operator 160→112.
 2026-09-01 2차: **컨테이너별 A′ 측정**으로 보류가 풀린 2행 −384Mi로 1476 → 1860. cert-manager 384→224
@@ -246,7 +358,7 @@ atomic []string이라 strategic-merge가 리스트를 통째로 교체한다(실
 | <!-- ledger:row --> cnpg           | database       |    932 |     1472 |
 | <!-- ledger:row --> cnpg-operator  | cnpg-system    |    124 |      160 |
 | <!-- ledger:row --> cert-manager   | cert-manager   |     88 |      240 |
-| <!-- ledger:row --> observability  | observability  |   1184 |     2416 |
+| <!-- ledger:row --> observability  | observability  |   1184 |     2608 |
 | <!-- ledger:row --> edge           | edge           |     96 |      320 |
 | <!-- ledger:row --> tailscale      | tailscale      |    192 |      336 |
 | <!-- ledger:row --> whoami         | gateway        |     16 |       16 |
