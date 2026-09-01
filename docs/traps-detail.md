@@ -2130,3 +2130,57 @@ selfHeal과 플립플롭한다.
 - 형제: 「열거 붕괴 → vacuous green」(같은 클래스의 원형) · 「스캔 신호를 콜사이트가 손으로 내면
   순서가 드리프트한다」(scan_floor가 이 카운트를 지키는 이유).
 > 가드: `tools/check-resource-limits.ts`
+### A′는 회수 가능한 커널 slab을 분자에 싣는다 — 그 비중이 워크로드마다 100배 갈리고 peak 시점 값은 소급 측정이 불가능하다
+- 2026-09-01. 메모리 원장의 A′(`usage − inactive_file − active_file`)는 회수 가능한 **파일 캐시**는
+  빼지만 회수 가능한 **커널 slab**(`slab_reclaimable`)은 그대로 남긴다. cgroup `memory.stat` 직독
+  결과 그 비중이 관측 스택 다섯에서 이렇게 갈렸다:
+  vmagent **0.2%** · vmsingle 3.8% · glances 9.1% · grafana 20.2% · victorialogs **27.1%**.
+- ⇒ **같은 배수가 서로 다른 안전을 뜻한다.** vmagent의 A′는 사실상 순수 anon이라 1.05x가 그대로
+  1.05x지만, victorialogs의 A′는 27%가 커널이 언제든 내놓는 캐시라 실질은 2.09x다. 배수만 보면
+  두 행이 같은 위험군으로 보인다.
+- ⚠️ **"그럼 slab을 빼자"는 처방은 규약이 될 수 없다.** cadvisor가 cgroup v2 + containerd에서
+  커널/slab 계열을 **채우지 않기** 때문이다 — `container_memory_kernel_usage`는 시리즈가 존재하는데
+  다섯 컨테이너 모두 `max_over_time([14d:30s]) = 0`이다. 즉 slab-차감 A′는 라이브 `kubectl exec`
+  스냅샷으로만 얻을 수 있고 **시계열이 없다.** peak 시점의 비중은 원리적으로 소급 불가다.
+- ⭐ 처방(관측 스택 한정): 분자를 `container_memory_rss`(= anon)로 바꾼다. 단 **`shmem == 0`을
+  `memory.stat` 직독으로 확인한 경우에만** — cgroup v2의 anon은 shmem을 제외하므로, shmem을 쓰는
+  워크로드(cnpg의 `shared_buffers`)에서는 이것이 #564가 배제한 무성 지대를 되살린다.
+  스왑이 0이면 anon은 전량 회수 불가라 OOM의 직접 원인과 정확히 일치한다.
+- ⚠️ **배수 순서 · 압력 순서 · slab 비중 순서가 서로 다른 세 순서다.** PSI 누적으로 재면
+  grafana 129,815µs ≫ glances 1,956 > vlogs 288 > vmsingle 72 > **vmagent 0**인데, 배수 최악은
+  vmagent다. 압력이 가장 심한 grafana가 회수 불가/limit로는 뒤에서 두 번째로 여유롭다(61.2%).
+  ⇒ 배수는 대리 지표이며, 그것 하나로 위험을 정렬하면 순서가 뒤집힌다.
+> 가드: `docs/memory-ledger.md`, `tools/check-resource-limits.ts`
+### 자기조절 워크로드의 자기참조는 두 경로로 산다 — GOMEMLIMIT(힙)과 allowedPercent(캐시), 하나만 끊으면 되살아난다
+- 2026-09-01. 이 레포는 「대형 Go 컨트롤러는 `GOMEMLIMIT`을 limit의 90%로 연동한다」를 규약으로
+  둔다(argocd 컨트롤러들이 그렇게 산다). 그런데 **관측 스택처럼 limit을 예산으로 소비하도록 설계된
+  워크로드**에 그대로 적용하면, limit 상향이 곧 힙 예산 상향이 되어 peak가 따라 오른다.
+  ⇒ `limit ≥ peak × K`가 영원히 자기 꼬리를 쫓는다 — 올릴 때마다 다시 미달이 된다.
+- ⭐ 처방: 이 클래스에서는 **`GOMEMLIMIT`을 고정한다.** limit을 올리는 목적은 힙을 키우는 것이 아니라
+  **비-힙 여유**(캐시 mmap·커널 slab·페이지 테이블)를 주는 것이기 때문이다. 실측이 그 구분을 지지한다:
+  vmsingle의 anon 629.9Mi 중 힙이 `heap_inuse` 491.7Mi이고, 캐시는 예산 537.6Mi의 33.8%만 쓴다 —
+  발열은 캐시가 아니라 힙인데, 그 힙은 `GOMEMLIMIT` 800MiB의 73.4%에서 멈춰 있다.
+- ⚠️ **그런데 GOMEMLIMIT 고정만으로는 절반이다.** VictoriaMetrics의 `--memory.allowedPercent`도
+  limit에 비례하므로, limit을 올리면 캐시 예산이 따라 커진다(vmsingle 896→1056Mi에서 537.6→633.6Mi).
+  그리고 **`GOMEMLIMIT`은 그것을 막지 못한다** — fastcache는 mmap 할당이라 Go 힙 밖에 살기 때문이다
+  (원장 victorialogs 항목의 실측: "GOMEMLIMIT은 힙 소프트 리밋이라 이것을 못 막는다 — 115MiB가
+  걸린 채 죽었다"). ⇒ `--memory.allowedBytes`로 **절대값을 못박아** 두 번째 경로도 끊는다.
+  플래그 존재는 `flag{name="memory.allowedBytes"}` 메트릭으로 확인할 수 있다.
+- ⚠️ 두 경로를 끊어도 **산술적으로는 여전히 초과 가능**하다(힙 상한 + 캐시 예산 > limit). 실측상
+  동시 최대가 관측된 적이 없어 의도적으로 허용한 오버서브스크립션이며, 그 사실을 원장에 계상한다.
+  두 상한의 합을 limit 아래로 누르려면 캐시를 크게 깎아야 하고 그것은 질의 지연으로 전가된다.
+- ⚠️ 연동을 끊어도 `tools/check-resource-limits.ts`의 `GOMEMLIMIT ≤ limit × 0.95`는 그대로 통과한다
+  (한쪽 방향 상한만 보기 때문). 즉 **게이트는 이 결정을 강제하지도 막지도 않는다** — 근거는 주석과
+  원장에만 산다. 다음 사람이 "90% 연동 규약을 안 지켰다"고 되돌리지 않도록 두 곳 모두에 적었다.
+> 가드: `platform/victoria-stack/prod/vmsingle.yaml`, `docs/memory-ledger.md`
+### 측정 창이 기판 변경을 가로지르면 두 체제가 한 숫자에 섞인다
+- 2026-09-01. `node_boot_time_seconds = 2026-08-26T13:41:06Z`. 그 재부팅에서 관측 스택 다섯 전부
+  계단이 있었다 — vmagent A′ 일별 peak 200~213 → 159~171 · vmsingle rss 552 → 350 ·
+  victorialogs A′ 168 → 111~134. 14일 창은 그 경계를 가로지른다.
+- ⇒ 원장이 「vmagent 1.05x」로 적었던 값이 정확히 그 산물이다. 그 peak(213.1Mi)는 **재부팅 전 세대**의
+  것이고 현 기판에서는 1.33x다. 즉 **이미 존재하지 않는 체제의 숫자로 현재를 판정**하고 있었다.
+- ⚠️ 방향도 일정하지 않다 — glances는 같은 재부팅에서 81 → 86Mi로 **올랐다**. "재부팅하면 내려간다"는
+  경험칙으로 뭉개면 안 되고, 창을 자르는 것 말고는 답이 없다.
+- ⭐ 처방: 기판이 바뀌면(노드 재부팅·커널·컨테이너 런타임 메이저) 측정 창을 **그 이후로 자른다.**
+  창이 짧아 표본이 부족하면 그 사실을 적을 것 — 섞인 숫자보다 짧은 창이 낫다.
+> 가드: `docs/memory-ledger.md`
