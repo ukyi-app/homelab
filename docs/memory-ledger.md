@@ -16,6 +16,10 @@ OS reserve를 떼어둠)로 "OOM 전에 예산 경계에서 시끄럽게 실패"
 헤드룸 확보를 위해 +512 상향 — 아래 옵션 (b) 적용분. 동시 peak 6586 ≪ allocatable 10724라 노드-OOM 안전.)
 2026-07-06: cnpg-operator를 예산에 편입(+160) — operator values가 umbrella용 네스팅으로 조용히
 무시돼 BestEffort로 구동되던 버그 수정과 함께 원장 행 추가(14일 peak 88Mi 실측 기반 160Mi).
+⚠️ **req 컬럼도 행 간 배타여야 한다** — limit 컬럼만 예산 게이트에 걸린다고 req를 방치하면 이중
+계상이 조용히 산다. 실제로 그랬다: 이 편입에서 cnpg 행의 req 100Mi(= operator 요청)를 차감하지
+않아 2026-09-02까지 cnpg가 932(매니페스트 합 832)로 남았다. 행을 쪼갤 때는 limit뿐 아니라 req도
+옮긴 쪽으로 넘긴다.
 2026-07-06: tailscale 행이 proxy 1대만 계상하던 미계상 정정(limit 320→512·+192, req 128→192·+64) —
 `loadBalancerClass: tailscale` 서비스가 2개(traefik-ts + pg-rw#114)라 operator가 proxy StatefulSet을
 2대 생성하고 defaultProxyClass(`resource-capped`)가 각 192Mi limit/64Mi req를 부여한다(라이브 확인:
@@ -355,7 +359,7 @@ atomic []string이라 strategic-merge가 리스트를 통째로 교체한다(실
 |------------------------------------|----------------|-------:|---------:|
 | <!-- ledger:row --> k3s+os+coredns | kube-system    |   1075 |     1740 |
 | <!-- ledger:row --> argocd         | argocd         |    640 |     1568 |
-| <!-- ledger:row --> cnpg           | database       |    932 |     1472 |
+| <!-- ledger:row --> cnpg           | database       |    832 |     1472 |
 | <!-- ledger:row --> cnpg-operator  | cnpg-system    |    124 |      160 |
 | <!-- ledger:row --> cert-manager   | cert-manager   |     88 |      240 |
 | <!-- ledger:row --> observability  | observability  |   1184 |     2608 |
@@ -369,10 +373,13 @@ atomic []string이라 strategic-merge가 리스트를 통째로 교체한다(실
 | <!-- ledger:row --> cache-trip-mate | cache          |     96 |      160 |
 | <!-- ledger:row --> files          | files          |     32 |      64 |
 
-**합계:** req 4707 Mi · limit 8108 Mi (반드시 ≤ 10240 Mi 유지).
-(⚠️ 이 줄은 쓰기 경로(`tools/lib/ledger-totals.ts`의 `replaceTotals` — create-app/provision-cache/teardown-app)
-만 갱신하고 **읽기 게이트는 검사하지 않는다**. 그래서 2026-08-14 observability 상향분이 반영되지 않은 채
-`4675/8700`으로 남아 CI가 계속 초록이었다(2026-08-31 정정). 손으로 행을 고치면 이 줄도 함께 고칠 것.)
+**합계:** req ≈ 4663 Mi · limit ≈ 9164 Mi (반드시 ≤ 10240 Mi 유지).
+(⚠️ 이 줄의 형식은 **계약**이다 — `≈` 두 개를 포함한 `tools/lib/ledger-totals.ts`의 `TOTALS_RE`가
+쓰기 경로(`replaceTotals` — create-app/provision-cache/teardown-app/teardown-resource)의 앵커다.
+2026-08-31 정정에서 `≈`가 떨어져 나가 실 원장에 대해 `replaceTotals`가 throw했고, 그동안 세 개의
+변이 디스패처가 원장 단계에서 죽는 상태였다(픽스처는 전부 `≈`를 품고 있어 아무도 못 봤다).
+이제 `tests/gates/test_verify-ledger-ssot.bats`가 **형식과 값을 함께** 대조한다: 매치 0건이면 red,
+두 숫자가 행 합과 다르면 red. 손으로 행을 고치면 이 줄도 함께 고칠 것.)
 (`pg-tools`는 CronJob용 ops 이미지 — 일시적이므로 상주 워크로드 행이 없다. worker/web/console
 values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 앱은 온보딩 PR이 행을 추가한다.)
 

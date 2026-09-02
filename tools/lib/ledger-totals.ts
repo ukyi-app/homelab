@@ -1,7 +1,11 @@
 // 메모리 원장 Totals 프로즈 치환 SSOT — create-app/provision-cache/teardown-app 공용.
 // 프로즈 문구가 드리프트하면 String.replace가 조용히 no-op이 되어 합계가 stale로 남는다 →
 // 매치가 0이면 throw해 fail-loud(silent no-op 차단).
-const TOTALS_RE = /req ≈ \d+ Mi · limit ≈ \d+ Mi/;
+// ⚠️ export인 이유: fail-loud는 **변이 디스패처가 돌 때만** 들린다. 2026-08-31~09-02에 실 원장의
+//    `≈`가 떨어져 나가 그 세 디스패처가 전부 원장 단계에서 죽었는데, 픽스처가 전부 `≈`를 품고 있어
+//    어떤 테스트도 red가 아니었다. `tests/gates/test_verify-ledger-ssot.bats`가 이 정규식을 그대로
+//    가져다 **실 원장**에 물려 그 침묵을 닫는다 — 사본 정규식을 쓰면 드리프트가 그대로 재발한다.
+export const TOTALS_RE = /req ≈ \d+ Mi · limit ≈ \d+ Mi/;
 
 export function replaceTotals(text: string, sumReqMi: number, sumLimitMi: number): string {
   if (!TOTALS_RE.test(text)) {
