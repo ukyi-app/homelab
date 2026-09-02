@@ -102,6 +102,66 @@ EOF
   [ "$checked" -ge 20 ]
 }
 
+@test "every job in every workflow carries a timeout-minutes ceiling below the platform max" {
+  # 위 @test의 분모는 homelab-mutation 그룹 9 워크플로뿐이었다 — 그룹 밖(ci·build·audit·dns-drift·
+  # pr-sweeper·credential-expiry·renovate·iac의 PR 잡·reusable-app-build deploy-trigger)은 상한 없이
+  # platform max(6h)에 노출된 채였다. 이 @test가 분모를 **전 워크플로**로 넓힌다. 두 @test는 축이
+  # 다르므로 공존한다: 위는 "그룹을 쥐는 잡이 빠짐없이 덮이는가"(route `uses:` 하강 포함), 여기는
+  # "워크플로 파일 안의 모든 잡이 덮이는가"다. 그룹 판정이 깨져도 여기가, 파일이 통째로 새로 생겨도
+  # 여기가 먼저 잡는다.
+  # ⚠️ 여기서는 route 잡의 `uses:`를 따라 내려가지 않는다 — 하강 대상인 `_*.yaml`이 이 글롭 안이라
+  #    **직접** 검사되기 때문이다. 그 전제가 깨지는 경우(대상이 이 디렉토리 밖)를 routes 레인이 red로
+  #    만든다. 따라가지 않으면서 전제도 안 보면 변이 본체 5종이 조용히 분모 밖으로 샌다.
+  # ⚠️ **존재만 보면 안 된다** — `timeout-minutes: 360`은 platform 기본값과 같아 이름만 상한이다.
+  #    값이 정수이고 1..359인지 함께 본다(360 이상 = 천장이 아니라 no-op).
+  command -v yq >/dev/null || skip "yq required"
+  wfn=0; checked=0; routes=0; bad=""
+  for f in "$WF"/*.yaml; do
+    [ -e "$f" ] || continue
+    wfn=$(( wfn + 1 ))
+    keys="$(yq -r '.jobs | keys | .[]' "$f")"
+    while read -r j; do
+      [ -n "$j" ] || continue
+      uses="$(yq -r ".jobs.\"$j\".uses // \"\"" "$f")"
+      if [ -n "$uses" ]; then
+        # route 잡(`uses:`)엔 timeout-minutes를 둘 수 없다(actionlint 거부) — 본체가 이 글롭 안에
+        # 있는지만 확인하고 상한 자체는 그 파일 차례에 본다.
+        routes=$(( routes + 1 ))
+        case "$uses" in
+          ./.github/workflows/*)
+            [ -f "$ROOT/${uses#./}" ] || bad="$bad
+  $(basename "$f"):$j — route 대상 $uses 파일 부재" ;;
+          *)
+            bad="$bad
+  $(basename "$f"):$j — route 대상이 .github/workflows 밖이다($uses) — 상한 분모에서 샌다" ;;
+        esac
+        continue
+      fi
+      checked=$(( checked + 1 ))
+      tm="$(yq -r ".jobs.\"$j\".\"timeout-minutes\" // \"\"" "$f")"
+      case "$tm" in
+        ''|*[!0-9]*)
+          bad="$bad
+  $(basename "$f"):$j — timeout-minutes 없음/비정수('$tm')"
+          continue ;;
+      esac
+      [ "$tm" -ge 1 ] && [ "$tm" -lt 360 ] || bad="$bad
+  $(basename "$f"):$j — timeout-minutes $tm 은 천장이 아니다(1..359 밖 · 360=platform 기본값)"
+    done <<EOF
+$keys
+EOF
+  done
+  [ -z "$bad" ] || { echo "$bad"; false; }
+  # 열거 바닥값 — 셋 다 있어야 "위반 0"이 "아무것도 안 봤다"와 갈린다(부정 카운트 판정이라 루프가
+  # 0회 돌아도 rc에 안 보인다). 수치는 도메인이 소유한다:
+  #   20 = 워크플로 파일 수의 하한(현재 23) — 글롭이 리터럴로 남으면 여기서 먼저 죽는다
+  #   35 = 상한을 실제로 확인한 비-route 잡 수의 하한(현재 41)
+  #   5  = route 잡 수(변이 디스패처 5종 — 위 @test의 followed와 같은 집합)
+  [ "$wfn" -ge 20 ]
+  [ "$checked" -ge 35 ]
+  [ "$routes" -ge 5 ]
+}
+
 @test "no workflow combines queue:max with cancel-in-progress:true" {
   hits=0
   for f in "$WF"/*.yaml; do

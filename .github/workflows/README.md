@@ -4,6 +4,8 @@
 
 > 네이밍: `<action>.yaml`=공개 디스패처(Run 버튼 O) · `_*.yaml`=내부 reusable(버튼 X, 디스패처가 `uses:`) · `reusable-*.yaml`=cross-repo 계약(외부 앱 레포가 `@main` 호출).
 
+> ⏱️ `timeout-minutes`는 **전 워크플로의 전 잡**에 있어야 한다(route 잡 `uses:`만 예외 — actionlint가 거부하므로 값은 그 reusable의 잡에). 없으면 platform max(6h)라 hang이 6시간 침묵이 되고, `360`을 적는 것은 천장이 아니라 no-op이다. 값은 라이브 실측(잡 실행구간 p50/max) 기반이며 근거 전문은 그룹 밖=`ci.yaml` gate 잡 · `homelab-mutation` 그룹=`bump-poll.yaml` preflight 잡 주석에 있다. 가드: `tools/tests/test_mutation-dispatch.bats`(존재 + 정수 + 360 미만, 분모=`.github/workflows/*.yaml` 전체).
+
 ## ✨ 변이 — owner 수동 (workflow_dispatch)
 
 | 워크플로 | 입력 | 언제 |

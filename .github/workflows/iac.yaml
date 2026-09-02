@@ -20,6 +20,12 @@ jobs:
   iac-validate:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04-arm
+    # timeout-minutes — 이 세 잡(iac-validate·iac-plan·accounting)은 그룹을 쥐지 **않는다**
+    # (homelab-mutation은 아래 apply 잡의 잡-레벨 concurrency뿐이다). 그래서 근거가 다르다 —
+    # 그룹 밖 천장의 전문은 ci.yaml gate 잡 주석, 그룹 쪽 전문은 bump-poll.yaml preflight 잡 주석.
+    # 값 근거 — 2026-09-03 라이브 실측(최근 40 run 중 완료 37건, 잡 실행구간): iac-validate p50 15s / max 20s
+    # (대부분이 terraform·툴체인 설치) · iac-plan p50 13s / max 24s · accounting p50 7s / max 11s.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
@@ -53,6 +59,8 @@ jobs:
   iac-plan:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04-arm
+    # provider 다운로드 + R2 state 조회가 상류 대기 표면이다(실측 max 24s) — 근거는 iac-validate 잡 주석
+    timeout-minutes: 15
     # 스텝-레벨 게이트라 시크릿이 없으면 스텝만 skip되고 job은 success다 — 그 상태의 **빈 job summary**를
     # 리뷰어가 "변경 없음"으로 오독한다(정보 부재가 정보로 읽힌다). 준비상태 회계(accounting job)가
     # 볼 수 있는 유일한 신호가 이 승격이다.
@@ -140,6 +148,7 @@ jobs:
     needs: [iac-plan]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5 # 보조 잡 — 원장 대조만(실측 max 11s). 근거는 iac-validate 잡 주석
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: ./.github/actions/setup-bun
