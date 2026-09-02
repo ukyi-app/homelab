@@ -138,6 +138,11 @@ jobs:
     needs: build
     if: ${{ inputs.push }}
     runs-on: ubuntu-latest
+    # timeout-minutes — 위 build 잡과 같은 이유(기본값이 platform max 6시간이다).
+    # ⚠️ 값 근거를 라이브 실측으로 낼 수 없다 — 이 파일은 cross-repo `workflow_call` 계약이라
+    #    homelab 레포에는 run이 **0건**이고(2026-09-03 확인), run은 호출한 앱 레포에 잡힌다.
+    #    하는 일은 App 토큰 발급 + workflow_dispatch 1회뿐이라 보수적으로 5분을 준다.
+    timeout-minutes: 5
     permissions: {}
     steps:
       - id: pre

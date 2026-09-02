@@ -20,6 +20,10 @@ permissions:
 jobs:
   sweep:
     runs-on: ubuntu-24.04-arm
+    # timeout-minutes — 그룹 밖 천장의 근거 전문은 ci.yaml gate 잡 주석.
+    # 값 근거 — 2026-09-03 라이브 실측(최근 100 run, run 구간): p50 13s / max 24s.
+    # gh API 조회 + update-branch뿐이고 */30 크론이라 거짓 타임아웃도 다음 주기가 수렴시킨다.
+    timeout-minutes: 10
     steps:
       - name: actor 가드 (workflow_dispatch 한정 — 스케줄/기타 트리거 무영향)
         env:

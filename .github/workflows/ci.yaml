@@ -30,6 +30,22 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-24.04-arm
+    # ── timeout-minutes: 그룹 **밖** 워크플로의 천장(근거 전문) ────────────────────────────
+    # homelab-mutation 그룹 쪽 근거는 bump-poll.yaml preflight 잡 주석이 갖는다. 그룹 밖에도 같은
+    # 노출이 있다 — 잡 timeout의 기본값은 platform max(6시간)라, hang한 잡은 러너를 6시간 잡고도
+    # 아무 말을 하지 않는다(실사고: reusable-app-build 2026-08-24 6h0m46s ·
+    # docs/traps-detail.md 「QEMU amd64 leg의 bun 1.4는 …」).
+    # 그룹 밖이라 FIFO 교착 비용은 없지만 각자의 비용이 있다 — gate는 이 레포의 **유일한 required
+    # check**(infra/github/repo.tf contexts=["gate"])라 여기서 멈추면 PR 머지가 통째로 선다.
+    # bump-poll/Renovate의 auto-merge도 `gate` 통과를 기다리므로 자동 배포·의존성 갱신이 함께 멈춘다.
+    # ⚠️ 상한은 원인을 고치지 않는다 — 6시간을 분 단위로 바꿔 **드러나게** 할 뿐이다.
+    # ⚠️ 값을 잴 때 두 축을 섞지 마라. `timeout-minutes`가 재는 것은 **잡 실행구간**
+    #    (started_at→completed_at)이고, `gh run list`의 createdAt→updatedAt은 큐 대기를 포함한다.
+    #    이 워크플로에서 그 차이가 3배였다(아래 실측) — run 구간만 보고 값을 잡으면 과다 산정된다.
+    # 값 근거 — 2026-09-03 라이브 실측(최근 100 run 중 완료 99건): 잡 실행구간 p50 483s / p90 514s / max 532s,
+    # run 구간(큐 포함) max 1687s. 45분은 큐 포함 최댓값(28분)마저 넘겨 잡아 어느 축으로 읽어도
+    # 오탐이 없고, 잡 실측 max의 5배라 발화 e2e 하네스가 더 붙어도 여유가 남는다.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: ./.github/actions/setup-bun

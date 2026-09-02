@@ -1960,6 +1960,27 @@ selfHeal과 플립플롭한다.
   값의 근거는 라이브 실측이다(최근 100 run 실행구간 max: bump-poll 352s · tf-reconcile 145s · iac 121s ·
   bump 337s) — 정상 소요가 분 단위라 15~30분 상한은 오탐 여지가 없고, 크론 멱등이라 거짓 타임아웃도
   다음 주기가 수렴시킨다.
+- ⇒ **세 번째 자리: 직렬화 그룹 밖의 나머지 전 워크플로**(2026-09-03). 앞의 두 처방은 각각 한 파일과 한
+  직렬화 그룹만 덮었다 — 남은 9 워크플로 13 잡(`ci` gate · `build` · `audit` · `dns-drift` ·
+  `pr-sweeper` · `credential-expiry` · `renovate` 3잡 · `iac`의 PR 잡 3종 · `reusable-app-build`
+  deploy-trigger)은 상한 없이 6시간에 노출돼 있었다. 그룹 밖이라 FIFO 교착 비용은 없지만 각자의
+  비용이 있다: `gate`는 이 레포의 **유일한 required check**라 hang하면 PR 머지가(bump-poll·Renovate의
+  auto-merge 포함) 통째로 서고, `build`는 그룹 안이 아닐 뿐 **같은 QEMU amd64 leg**를 탄다(원 사고와
+  동형). ⇒ 전 워크플로의 전 잡(route 잡 제외)에 상한을 걸고, 가드의 분모를 `.github/workflows/*.yaml`
+  전체로 넓힌다.
+  ⚠️ **두 축을 섞지 마라.** `timeout-minutes`가 재는 것은 **잡 실행구간**(started_at→completed_at)이고
+  `gh run list`의 createdAt→updatedAt은 **큐 대기를 포함**한다. `ci.yaml`에서 그 차이가 3배였다
+  (2026-09-03 실측 최근 99 run: 잡 max 532s vs run max 1687s) — run 구간만 보고 값을 잡으면 과다
+  산정되고, 잡 구간만 보고 아슬하게 잡으면 큐가 길 때 오탐으로 읽힌다. 두 값을 다 적고 큰 쪽을 넘겨 잡았다.
+  ⚠️ **존재는 천장이 아니다** — `timeout-minutes: 360`은 platform 기본값과 같아 이름만 상한이다.
+  가드는 값이 정수이고 360 미만인지까지 본다.
+  ⚠️ **상한의 값어치를 알림에 걸지 마라.** 티켓 07이 남긴 미확인 축이 그대로다 — 잡-레벨 상한 초과의
+  conclusion이 `cancelled`인지 `failure`인지, 그리고 그때 **같은 잡의** `if: always()` 알림 스텝이
+  도달하는지를 라이브로 확인하지 못했다(라이브 실측이 있는 것은 platform max 종료가 `cancelled`라는
+  것뿐이다 — trip-mate-api run 32722287190). 확실한 것은 run이 6시간이 아니라 분 단위에 끝난다는 것이고,
+  그 위에 `GHAWorkflowStale`(r6)·GitHub의 스케줄 실패 통지·**별도 잡**의 회계 알림이 얹힌다. 후자
+  (`iac`·`renovate`의 accounting)는 `if: !cancelled()`라 두 conclusion 어느 쪽이든 돈다 — 그래서
+  이번에도 알림 조건은 한 곳도 바꾸지 않았다.
 > 가드: `.github/workflows/reusable-app-build.yaml`, `tools/tests/test_mutation-dispatch.bats`
 ### 인용하지 않은 heredoc 안의 주석에 백틱을 쓰면 그 명령이 **실행되고** 주석이 잘려 나간다 — shellcheck는 그걸 "style"로 부른다
 - **병(2026-08-27 실측)**: 가드가 awk 프로그램을 `read -r -d '' DETECT <<AWK`(인용하지 않은

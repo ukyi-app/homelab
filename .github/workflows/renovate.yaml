@@ -23,6 +23,11 @@ jobs:
   # Phase 0(writer App secret 등록) 전 머지되면 매주 실패하지 않도록 — 미설정 시 skip(clean success).
   preflight:
     runs-on: ubuntu-24.04-arm
+    # timeout-minutes — 이 워크플로는 자기 그룹(`renovate`)이라 homelab-mutation FIFO 밖이다.
+    # 그룹 밖 천장의 근거 전문은 ci.yaml gate 잡 주석.
+    # 값 근거 — 2026-09-03 라이브 실측(최근 25 run 중 완료 22건, 잡 실행구간): preflight p50 3s / max 4s ·
+    # renovate p50 103s / max 289s · accounting max 9s. 보조 잡은 시크릿 유무만 보므로 5분.
+    timeout-minutes: 5
     outputs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
@@ -62,6 +67,11 @@ jobs:
     needs: preflight
     if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-24.04-arm
+    # 30 = 실측 max 289s의 6배 — org 전 레포를 autodiscover로 도는 스캔이라 대상 레포·의존성 수에
+    # 비례해 늘고, 상류 레지스트리(GHCR·registry.terraform.io·npm) 대기가 hang 표면이다.
+    # 주 1회 크론이라 백스톱이 '다음 주'지만 owner가 수동 디스패치로 즉시 회복할 수 있다.
+    # 근거는 preflight 잡 주석.
+    timeout-minutes: 30
     steps:
       # writer App 토큰: Contents+PR write + Issues write(workflows write 미요청 — github-actions manager 비활성).
       # issues:write는 Dependency Dashboard(#92, ":dependencyDashboard") 쓰기에 필수 — 미요청 시 renovate가
@@ -105,6 +115,7 @@ jobs:
     needs: [preflight, renovate]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5 # 보조 잡 — 원장 대조만(실측 max 9s). 근거는 preflight 잡 주석
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: ./.github/actions/setup-bun

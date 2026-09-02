@@ -22,6 +22,10 @@ defaults:
 jobs:
   audit:
     runs-on: ubuntu-24.04-arm
+    # timeout-minutes — 그룹 밖 천장의 근거 전문은 ci.yaml gate 잡 주석.
+    # 값 근거 — 2026-09-03 라이브 실측(최근 30 run 전건 완료, 잡 실행구간): p50 7s / max 12s.
+    # 레포 정적 드리프트만 보는 읽기 전용 감사라 상류 대기 표면이 telegram 1회뿐이다.
+    timeout-minutes: 10
     steps:
       - name: actor 가드 (workflow_dispatch 한정 — 스케줄/기타 트리거 무영향)
         env:
