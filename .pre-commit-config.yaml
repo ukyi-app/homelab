@@ -7,6 +7,6 @@ repos:
         language: script
         files: '\.enc\.yaml$'
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.4
+    rev: v8.30.1
     hooks:
       - id: gitleaks

@@ -1,0 +1,20 @@
+# gitleaks 설정 — required `gate`(ci.yaml secret-guard)와 pre-commit 훅이 자동으로 읽는다.
+# ⚠️ 기본 룰셋은 그대로 쓴다(useDefault). 여기는 **거짓 양성이 실측된 두 자리만** 좁게 면제한다 —
+#    v8.18.4 → v8.30.1 bump(2026-09-02)에서 gate가 red로 잡은 9건이 전부 아래 두 클래스였다.
+#    면제를 넓히는 변경은 tests/gates/test_gate-secret-guard.bats가 잠근다(경로 패턴 등식).
+[extend]
+useDefault = true
+
+# SealedSecret 봉인본 — `encryptedData`는 컨트롤러 공개키로 비대칭 암호화한 암호문이라 평문이 아니다
+# (create-app/update-secrets가 봉인 형식을 검증하고, 복호 키는 클러스터 밖으로 나오지 않는다).
+# 고엔트로피 base64라 generic-api-key가 8건 걸렸다. 파일명 접미 `.sealed.yaml`만 면제한다.
+[[allowlists]]
+description = "SealedSecret 봉인본(encryptedData 암호문) — 평문이 아니다"
+paths = ['''(^|/)[^/]+\.sealed\.yaml$''']
+
+# cnpg-barman-plugin 벤더 manifest(수정 금지 파일)의 kustomize 생성 Secret은 SIDECAR_IMAGE(이미지
+# 참조를 base64로 담은 것)뿐이다. 그 파일의 kubernetes-secret-yaml 룰만 면제한다 — 다른 룰은 계속 본다.
+[[allowlists]]
+description = "cnpg-barman-plugin 벤더 manifest — Secret 내용이 사이드카 이미지 참조뿐"
+targetRules = ["kubernetes-secret-yaml"]
+paths = ['''^platform/cnpg/barman-plugin/manifest\.yaml$''']
