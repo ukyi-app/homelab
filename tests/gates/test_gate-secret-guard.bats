@@ -120,3 +120,19 @@ YAML
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'BLOCKED'
 }
+
+@test "gitleaks allowlist stays minimal: default rules kept, exactly the two measured false-positive classes" {
+  # v8.30.1 bump(2026-09-02)에서 gate가 잡은 9건 = *.sealed.yaml 8건(generic-api-key) + 벤더
+  # barman manifest 1건(kubernetes-secret-yaml, 내용은 사이드카 이미지 참조). 그 둘만 면제한다 —
+  # 면제 경로가 늘거나 기본 룰셋이 꺼지면 스캐너가 조용히 눈을 감는 것이므로 여기서 red.
+  C="$ROOT/.gitleaks.toml"
+  [ -f "$C" ]
+  grep -qE '^useDefault = true$' "$C"
+  # 면제 블록은 정확히 2개, 경로 패턴은 아래 둘뿐(양성 대조 + 건수 등식 — `grep -qv`는 부재를 못 잰다).
+  [ "$(grep -c '^\[\[allowlists\]\]$' "$C")" -eq 2 ]
+  [ "$(grep -c '^paths = ' "$C")" -eq 2 ]
+  grep -qF -- "paths = ['''(^|/)[^/]+\.sealed\.yaml$''']" "$C"
+  grep -qF -- "paths = ['''^platform/cnpg/barman-plugin/manifest\.yaml$''']" "$C"
+  # 벤더 manifest 면제는 룰 한정이어야 한다(파일 전체 면제 금지).
+  grep -qF -- 'targetRules = ["kubernetes-secret-yaml"]' "$C"
+}
