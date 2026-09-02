@@ -4,7 +4,14 @@
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 
 # ⚠️ 검사 도메인(action.yml)이 실재하는지 setup에서 닫는다 — 아래 부재 단언은 전부 이 한 파일을 읽는다.
-setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actions/setup-toolchain/action.yml"; [ -f "$A" ]; }
+# ⚠️ 워크플로/액션 열거는 여기 한 줄이 SSOT다 — 글롭 리터럴을 레인마다 복제하면 한쪽만 오타 나도
+#    반대쪽 바닥값이 78건을 그대로 세서 붕괴를 못 잡는다(바닥값은 검출기가 **실제로 쓴** 열거를 재야 한다).
+setup() {
+  ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  A="$ROOT/.github/actions/setup-toolchain/action.yml"
+  [ -f "$A" ]
+  LS_WF="git ls-files '.github/workflows/*.yaml' '.github/actions/**'"
+}
 
 @test "age is pinned to a fixed version (not latest)" {
   # dl.filippo.io/age/latest 무핀 경로가 사라졌는가
@@ -42,7 +49,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   # `sudo apt-get install -y bats`가 그대로 있었고, 위 @test는 composite만 보므로 초록이었다.
   # arm64 러너의 ports.ubuntu.com은 미러 SPOF다(2026-07-16 실장애 — 그 워크플로 실패 2건의 유일 원인).
   # 도구는 setup-toolchain 한 곳에서만 온다: 그래야 핀·체크섬 규율이 실제로 전 경로를 덮는다.
-  run bash -c "git ls-files '.github/workflows/*.yaml' '.github/actions/**' | xargs grep -nE 'apt-get +(install|update)' || true"
+  # 양성 대조 — apt는 매치 0이 정상이라 pip 레인의 `[ -n "$output" ]`을 그대로 쓸 수 없다.
+  # floor의 피연산자를 grep 결과가 아니라 **열거 건수**로 둔다(열거 붕괴 → vacuous green 차단).
+  run bash -c "$LS_WF | grep -c ."
+  [ "$output" -ge 25 ]
+  run bash -c "$LS_WF | xargs grep -nE 'apt-get +(install|update)' || true"
   [ "$status" -eq 0 ]
   [ -z "$output" ] || {
     echo "워크플로/액션이 apt로 도구를 깐다 — setup-toolchain(핀+체크섬)을 쓸 것:"
@@ -56,12 +67,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   # 신규 릴리스/yank 하나가 전 PR을 red로 만들고(재현성 0), 판정을 바꿀 수 있는 배포본이
   # required check 안에서 실행된다. 핀의 freshness 소유자는 renovate.json customManager(pypi)다.
   # 양성 대조 — 열거가 붕괴하면 아래 부정 판정이 무증인 초록이 된다(vacuous green 차단).
-  run bash -c "git ls-files '.github/workflows/*.yaml' '.github/actions/**' | xargs grep -nE 'pip3? +install' || true"
+  run bash -c "$LS_WF | xargs grep -nE 'pip3? +install' || true"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
   # 무핀 검출은 **두 단계 grep**이다 — ERE에 부정 lookahead가 없고, `grep -qv`는 줄 단위 반전이라
   # 부재(∀¬)를 재지 못한다. 여기서 `-v`는 판정이 아니라 필터이고 판정은 출력 공허성이 진다.
-  run bash -c "git ls-files '.github/workflows/*.yaml' '.github/actions/**' | xargs grep -nE 'pip3? +install' | grep -vE '==' || true"
+  run bash -c "$LS_WF | xargs grep -nE 'pip3? +install' | grep -vE '==' || true"
   [ "$status" -eq 0 ]
   [ -z "$output" ] || {
     echo "pip 설치가 버전 무핀이다 — 'pkg==<버전>'으로 핀하고 renovate customManager(pypi)에 등록할 것:"
@@ -77,6 +88,18 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   # (bats는 업로드 에셋이 없어 sha256이 아니라 위의 커밋-SHA 핀으로 검증 — 이 10종에 포함되지 않는다.)
   n=$(grep -c '| sha256sum -c -' "$A")
   [ "$n" -ge 10 ]
+  # 바닥값은 검증 줄의 **삭제**만 잡는다 — 검증 없는 다운로드의 **추가**는 원리적으로 못 본다.
+  # 분모=코드 줄의 curl 전부(주석 제외)로 두고 등식으로 양방향을 닫는다.
+  # cf. tests/gates/test_ci-toolchain-pin.bats 「아무도 대조하지 않는 손 관리 건수 바닥값은 두지 않는다」
+  # ⚠️ 이 분모는 프록시다 — wget·변수로 조립한 URL은 안 본다(그 모양이 생기면 분모를 함께 넓힐 것).
+  # 체크섬이 원리적으로 불가능한 자산이 생기면 그 줄 옆에 사유 주석 + 분모 조정 근거를 남긴다
+  # (bats는 git clone + 커밋 SHA 핀 경로라 이미 분모 밖이다).
+  c=$(grep -cE '^[^#]*curl ' "$A")
+  [ "$n" -eq "$c" ] || {
+    echo "curl $c건 vs sha256sum -c $n건 — 무검증 다운로드 스텝이 있다"
+    grep -nE '^[^#]*curl ' "$A"
+    false
+  }
 }
 
 @test "no checksum line is an obvious placeholder" {
