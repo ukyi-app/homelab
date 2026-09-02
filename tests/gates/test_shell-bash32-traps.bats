@@ -18,9 +18,13 @@
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT"; }
 
+# 열거자는 한 곳이다 — 아래 바닥값이 **스캐너가 실제로 쓴** 열거를 재야 한다.
+# 글롭 리터럴을 바닥값 줄에 다시 적으면 이 줄의 오타를 그 바닥값이 못 잡는다(실측).
+list_sh() { git ls-files '*.sh'; }
+
 scan_unbraced() {
   # 전 추적 *.sh에서 `$VAR<비-ASCII>` 를 찾는다. 전체-줄 주석은 건너뛴다. 출력 = 발견 줄 목록.
-  git ls-files '*.sh' | while IFS= read -r f; do
+  list_sh | while IFS= read -r f; do
     LC_ALL=C command grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' "$f" 2>/dev/null | while IFS= read -r hit; do
       ln="${hit%%:*}"
       line="$(sed -n "${ln}p" "$f")"
@@ -33,6 +37,9 @@ scan_unbraced() {
 @test "no tracked shell script interpolates a bare \$VAR immediately followed by a non-ASCII byte" {
   run scan_unbraced
   [ "$status" -eq 0 ]
+  # 열거 붕괴 바닥값 — 글롭이 깨지면 이 전칭("no tracked shell script …")이 공허하게 참이 된다.
+  # 이 가드는 CI(bash 5.2)가 원리적으로 못 잡는 클래스의 유일한 집행자라 공허가 곧 실명이다.
+  [ "$(list_sh | grep -c .)" -ge 60 ]
   if [ -n "$output" ]; then
     echo "bash 3.2에서 죽는 보간 — \${VAR}로 감싸라 (CI는 bash 5.2라 초록이다):"
     printf '%s\n' "$output"
