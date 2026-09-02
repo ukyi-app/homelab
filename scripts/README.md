@@ -142,6 +142,8 @@
   **`make bootstrap`**이 호출(+ `bootstrap-deadmanswitch` 선행). 라이브 클러스터에 적용.
 - **`seed-secrets.sh`** — terraform output + `.env.secrets`에서 SOPS 암호화 시드 시크릿 생성.
   **`make seed-secrets`**가 호출(`.env.secrets`를 source한 뒤). R2/telegram 등 키를 env로 요구.
+  전제: `infra/cloudflare`·`infra/tailscale` apply 완료(state에 output 실재) — 부재/null은
+  `jq -re`가 FATAL로 끊는다(예전엔 문자열 `null`이 그대로 봉인·커밋됐다).
 - **`tools/seal-batch.ts`** (셸 아님 — 참고) — seal-* 4종(adguard-auth·argocd-notify·files·ghcr-pull)을
   선언 테이블로 통합. `make seal-<name>`(별칭)·`make seal-all`(회전 드릴)이 호출. 봉인 전 `secret-cert-check`
   preflight fail-closed(break-glass `--offline-ok`). 평문·해시·토큰은 kubeseal stdin 전용(값 미출력).
