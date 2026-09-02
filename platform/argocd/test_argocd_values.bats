@@ -55,9 +55,17 @@ V="platform/argocd/bootstrap-values.yaml"
   run yq '.configs.params."server.insecure"' "$V"; [ "$output" = "true" ]
 }
 
-@test "reconciliation timeout is tightened to 30s for faster deploy convergence (internal ArgoCD = no webhook)" {
-  # ArgoCD 내부 전용이라 GitHub 웹훅 대신 폴링 주기 단축으로 배포 지연을 줄인다(노출 없이).
+@test "reconciliation timeout is tightened to 30s as the polling backstop behind the /api/webhook route" {
+  # 웹훅(extras/httproute-webhook.yaml — /api/webhook만 web-public)이 즉시 refresh의 1차 경로이고,
+  # 30s 폴링은 웹훅 유실·서명 실패·터널 다운 시의 백스톱이다. "웹훅을 쓰지 않는다"는 #190 이후 거짓.
   run yq '.configs.cm."timeout.reconciliation"' "$V"; [ "$output" = "30s" ]
+}
+
+@test "chart NetworkPolicy stays enabled (the only ingress isolation of the argocd namespace)" {
+  # 자체 netpol(network-policies-prod)은 prod ns 전용이라 argocd ns를 덮지 않는다. 차트 netpol 4개가
+  # repo-server 8081(KSOPS age 키·인증 없는 GenerateManifest)을 argocd 컴포넌트로 좁히는 유일한 정책이다.
+  # 12cd8f8이 "자체 netpol이 관리한다"는 거짓 전제로 껐던 자리 — 다음 차트 hop이 같은 이유로 다시 끄지 못하게 잠근다.
+  run yq '.global.networkPolicy.create' "$V"; [ "$output" = "true" ]
 }
 
 @test "notifications controller is enabled, owns no secret, and has resource limits" {
