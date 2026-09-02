@@ -15,7 +15,15 @@ outdir="${1:?usage: backup-local-asset.sh [--verify] <outdir(git 밖)>}"
 mkdir -p "$outdir"; outdir="$(cd "$outdir" && pwd)"
 
 if (cd "$outdir" && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
-  echo "ERROR: outdir($outdir)가 git 작업트리 안이다 — 레포 밖에 보관하라" >&2; exit 1
+  # ⚠️ 판정보다 :15의 `mkdir -p`가 **먼저** 돈다 — 거부하면서 거부 대상을 만들어 두는 셈이다.
+  #    "레포 밖에 보관하라"고 말하면서 레포 안에 디렉토리를 남기면 그 잔여물은 비어 있어 git에도
+  #    안 보이고(추적 0), 발견 수단이 `ls`뿐인 무증인 쓰레기가 된다 — 실제로 레포 루트에
+  #    `scratch_backup_<pid>` 8개가 그렇게 쌓였다(tests/test_backup-local-asset.bats의 거부 레인).
+  # ⚠️ 순서: `echo` → `rmdir` → `exit`. rmdir을 앞에 두면 `set -e` 아래에서 그 실패가 ERROR
+  #    메시지를 삼킨다. `|| true`는 그 대칭 — 비어 있지 않은 기존 outdir은 rmdir이 스스로 거부한다.
+  echo "ERROR: outdir($outdir)가 git 작업트리 안이다 — 레포 밖에 보관하라" >&2
+  rmdir "$outdir" 2>/dev/null || true
+  exit 1
 fi
 { [ -d "$SRC" ] && ls "$SRC"/*.md >/dev/null 2>&1; } || { echo "ERROR: 런북 부재($SRC) — owner 머신에서만 실행" >&2; exit 1; }
 cd "$ROOT"
