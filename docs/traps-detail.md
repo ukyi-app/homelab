@@ -2137,7 +2137,14 @@ selfHeal과 플립플롭한다.
   컨테이너는 container 계열이 이기고, 일반 컨테이너의 판정은 바뀌지 않는다.
 - ⚠️ 같은 클래스가 더 있다: `restartPolicy: Always`인 initContainer를 쓰는 워크로드는 전부 이 경계에
   걸린다. 자원 캡을 새로 씌울 때는 **그 limit이 어느 메트릭 계열로 나가는지 먼저 확인**할 것.
-> 가드: `platform/victoria-stack/prod/rules/core.yaml`, `tools/check-resource-limits.ts`
+- ⚠️ **pod 합산 표면은 per-container `or`로 못 푼다 — 실행 중 시리즈 결박이 필요하다**(2026-09-02,
+  형제 표면인 Grafana "vs limit" 패널에서 드러남). 룰이 `or`만으로 무사한 이유는 usage 시리즈가 없는
+  **종료된** init 컨테이너가 per-container 나눗셈 매칭에서 자연 탈락하기 때문이다. `sum by (namespace,pod)`로
+  합산하는 표면에는 그 성질이 없어 종료 init의 limit(pg-1 `bootstrap-controller` 1Gi, argocd `copyutil`
+  240Mi)까지 분모에 실린다 — 라이브 pg-1이 1344Mi가 아니라 2368Mi가 되어 **고치기 전(8.9%)보다 더 틀린
+  4.0%** 가 된다. 처방은 `and on (namespace,pod,container) container_memory_usage_bytes{container!=""}`로
+  cAdvisor의 실행 중 시리즈에 결박한 뒤 합산하는 것이다(교정 후 7.1%).
+> 가드: `platform/victoria-stack/prod/rules/core.yaml`, `tools/check-resource-limits.ts`, `tests/gates/test_grafana-dashboards.bats`
 ### `Container.args`는 patchMergeKey 없는 atomic 리스트다 — strategic-merge patch가 통째로 교체한다
 - 2026-09-01, 벤더 매니페스트에 kustomize patch로 자원 캡만 얹으면서 "이왕이면 로컬 편집한
   `--log-level=info`도 patch로 옮기자"는 부록이 제안됐다. 실행했으면 컨트롤러가 죽는다.

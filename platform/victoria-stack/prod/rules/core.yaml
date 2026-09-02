@@ -35,13 +35,32 @@ data:
               description: "kubelet이 {{ $labels.condition }}를 보고합니다 — eviction 임박. 자원(메모리/디스크/PID) 소비자를 확인하세요. PVC 포화는 node_filesystem_avail_bytes(/)·StandardSSDFilling도 함께 보세요."
           # 파드 eviction 발생(사후) — 노드 압박으로 kubelet이 축출. NodePressure가 선행 경보.
           # kube_pod_status_reason는 honor_labels로 실제 ns/pod 라벨 보유(라이브 확인 — KSM clobber 아님).
+          # ★ 우변의 2h 억제 절이 **자기 해소**를 만든다(SystemdUnitFailed `< 7200`과 동형 —
+          #   r4-storage-backup.yaml). 축출된 파드는 Failed 상태의 **오브젝트로 남고** ReplicaSet은 대체
+          #   파드를 만들 뿐 그것을 지우지 않는다(PodGC는 terminated-pod-gc-threshold 12500 초과에서만
+          #   회수하고 k3s-install.sh에 그 오버라이드가 없다). 억제 절이 없으면 KSM이 그 오브젝트에 대해
+          #   계속 1을 내보내 **사람이 `kubectl delete pod`를 하기 전까지 발화가 꺼지지 않는다** —
+          #   KubeJobFailed(★★)가 3일 연속 firing으로 겪은 것과 같은 클래스이고, 2026-07-25 grafana
+          #   eviction 루프에서 누적 파드 오브젝트 375개를 손으로 지워야 했던 것이 그 라이브 기록이다.
+          #   ⇒ **2시간 뒤 자동 해소되지만 그것은 "고쳤다"는 뜻이 아니다**("최근 축출이 아니다"는 뜻이다).
+          #   축출이 이어지면 새 0→1 전이마다 재발화한다. Evicted 오브젝트를 **지우는 주체(CronJob 등)는
+          #   두지 않는다** — r4의 같은 자리 원칙대로 그 주체의 실패가 새로운 무성 경로가 되기 때문이다.
+          # ⚠️ `changes()`를 쓰면 안 된다 — VictoriaMetrics의 `changes`는 **시리즈 탄생을 변화 1회로 센다**
+          #   (라이브 대조 2026-09-02: 값이 0으로 불변인 2h 미만 시리즈 28개가 잡혔고 changes_prometheus는
+          #   0건). KSM 재시작/instance churn으로 시리즈 정체성이 갈리면 잔존 Evicted 오브젝트가 2h마다
+          #   되살아나 이 룰이 고치려는 클래스의 축소판이 된다. changes_prometheus는 창 안의 실제 0→1
+          #   전이만 센다(창 경계 한 샘플만큼 유효창이 짧아지는 것은 허용).
+          #   가드: tests/gates/test_vmalert-config.bats(expr에서 changes_prometheus 존재 + changes 부재).
           - alert: PodEvicted
-            expr: kube_pod_status_reason{reason="Evicted"} == 1
+            expr: |
+              max by (namespace,pod,uid) (kube_pod_status_reason{reason="Evicted"}) == 1
+                and on (namespace,pod,uid)
+              (max by (namespace,pod,uid) (changes_prometheus(kube_pod_status_reason{reason="Evicted"}[2h])) > 0)
             for: 0m
             labels: { severity: warning }
             annotations:
               summary: "파드 eviction: {{ $labels.namespace }}/{{ $labels.pod }}"
-              description: "노드 압박으로 파드가 축출됐습니다 — 원인 자원(디스크/메모리)을 확인하세요. hostPath PV 포화 가능."
+              description: "노드 압박으로 파드가 축출됐습니다 — 원인 자원(디스크/메모리)을 확인하세요. hostPath PV 포화 가능. 이 알림은 **축출 이벤트 기준**이라 2시간 뒤 자동 해소됩니다(고쳤다는 뜻이 아니라 '최근 축출이 아니다'라는 뜻입니다 — 축출된 파드 오브젝트는 지울 때까지 남습니다)."
           # ⚠️ 좌변의 max by(...) 서브쿼리는 필수다(instance 라벨 불안정 — PodCrashLooping :111과 동일 계열).
           # kube_pod_container_status_restarts_total은 KSM이 k8s API restartCount에서 재파생하는 상태-파생
           # 카운터라 KSM 프로세스 재시작에도 값이 0으로 리셋되지 않는다. KSM 파드 IP가 바뀌면(instance 라벨)
@@ -362,6 +381,28 @@ data:
             annotations:
               summary: "워크로드 불가용: {{ $labels.namespace }}/{{ $labels.deployment }}"
               description: "Deployment가 10분 이상 Available=False입니다(NotReady 파드가 minAvailable 미달) — 재시작이 없어 CrashLoop/OOM 알림에 안 잡히는 실패모드입니다. files는 /readyz 스토리지 저하, 그 외는 probe/스케줄/이미지를 확인하세요."
+          # StatefulSet 축의 형제 룰 — 위 WorkloadUnavailable이 Deployment에 대해 닫은 M13 갭이
+          # StatefulSet에는 그대로 열려 있었다(이 디렉토리 룰 5개 파일에 `kube_statefulset_` 참조 0건).
+          # KSM은 Available 조건을 Deployment에만 노출하므로 STS는 ready < desired 산술로 같은 클래스를 잰다.
+          # CrashLoop/OOM은 PodCrashLooping·PodOOMKilled가 이미 보므로, 이 룰이 더하는 것은
+          # **재시작 없는 0-ready**(Pending·ImagePullBackOff·CreateContainerError·롤링 실패)뿐이다.
+          # ⚠️ 정직하게 적는다 — tailscale operator가 만드는 `ts-*` proxy STS에는 probe가 **하나도 없어**
+          #   replicas_ready가 '프로세스가 떠 있는가'와 동치다. 즉 이 룰은 tailnet 단절(OAuth/authkey 만료·
+          #   coordination 손실로 프로세스는 살아 있는데 tailnet에서 사라짐)을 원리적으로 **못 본다**.
+          #   그 축은 별건이다(ProxyClass `spec.metrics` + `tailscaled_*` 스크레이프 — CRD가 unstable 표기).
+          # ⚠️ "operator가 STS를 아예 못 만든" 상태도 시리즈 자체가 없어 이 룰 밖이다. 그 서브케이스는
+          #   traefik-ts Service의 LB IP 부재 → rewrite-reconciler exit 1 → KubeJobFailed와
+          #   AdguardRewriteReconcilerStale(r4-storage-backup.yaml)이 간접 페이징한다.
+          # 시스템 ns 블랙리스트는 WorkloadUnavailable과 같은 규약(신규 ns 자동 포함).
+          - alert: StatefulSetUnavailable
+            expr: |
+              max by (namespace, statefulset) (kube_statefulset_status_replicas_ready{namespace!~"kube-system|kube-public|kube-node-lease"})
+                < max by (namespace, statefulset) (kube_statefulset_replicas{namespace!~"kube-system|kube-public|kube-node-lease"})
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "StatefulSet 불가용: {{ $labels.namespace }}/{{ $labels.statefulset }}"
+              description: "StatefulSet의 ready 레플리카가 10분 이상 desired 미만입니다 — 재시작이 없어 CrashLoop/OOM 알림에 안 잡히는 실패모드(Pending·ImagePullBackOff·CreateContainerError·롤링 실패)입니다. ⚠️ ts-* proxy STS는 probe가 없어 이 알림은 tailnet 단절을 보지 못합니다(프로세스 생존만 잽니다)."
       - name: deadmanswitch
         rules:
           - alert: Watchdog

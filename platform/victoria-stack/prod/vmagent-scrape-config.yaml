@@ -8,9 +8,18 @@ data:
       scrape_interval: 30s
       scrape_timeout: 10s
     scrape_configs:
+      # ⚠️ 아래 두 잡의 tls_config에 `insecure_skip_verify: true`를 다시 넣지 마라. 대상은 apiserver
+      #    (`kubernetes.default.svc:443`)이고 검증에 필요한 노드 CA는 **이미 같은 projected 볼륨에**
+      #    `ca.crt`로 들어와 있다(라이브 확인: 그 CA로 apiserver 서빙 인증서 검증 OK, SAN에
+      #    `kubernetes.default.svc` 포함). 검증이 꺼져 있으면 그 이름으로 응답하는 무엇에든 vmagent의
+      #    SA 베어러 토큰(nodes/proxy·nodes/metrics·pods/services/endpoints)이 그대로 전달된다.
+      #    아래 `kubernetes_sd_configs`(SD 경로)는 in-cluster 기본값으로 **이미 CA 검증을 한다** —
+      #    스크레이프 경로만 꺼져 있던 비대칭이었다(2026-09-02 정정). 같은 관용구의 선례:
+      #    platform/adguard/prod/rewrite-reconciler.yaml의 `--cacert $SA/ca.crt`.
+      #    가드: tests/gates/test_vmalert-config.bats
       - job_name: kubelet-cadvisor
         scheme: https
-        tls_config: { insecure_skip_verify: true }
+        tls_config: { ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt }
         authorization:
           credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
         kubernetes_sd_configs: [{ role: node }]
@@ -23,7 +32,7 @@ data:
             replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
       - job_name: kubelet
         scheme: https
-        tls_config: { insecure_skip_verify: true }
+        tls_config: { ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt }
         authorization:
           credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
         kubernetes_sd_configs: [{ role: node }]

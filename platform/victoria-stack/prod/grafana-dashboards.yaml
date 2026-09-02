@@ -5,6 +5,16 @@
 # 50%p 벌어졌다). 비율 패널은 `usage − total_inactive_file − total_active_file`(= anon+shmem+slab)을 쓴다.
 # 반면 **"Per-pod working set" 패널은 working_set 그대로가 맞다** — 그 패널은 비율이 아니라 총 사용량
 # 추이를 보여주고 제목이 지표를 정직하게 말한다. 두 패널을 나란히 두면 캐시 몫이 눈에 보인다.
+# ⚠️ **그 패널의 분모는 두 KSM 계열의 or를, 실행 중 컨테이너에 결박해서 쓴다**(2026-09-02).
+# 네이티브 사이드카(`restartPolicy: Always`인 initContainer — CNPG의 plugin-barman-cloud)의 limit을 KSM은
+# `kube_pod_init_container_resource_limits`로 내보낸다. 분자(`container!=""`)에는 그 사이드카의 cgroup이
+# 실리는데 분모에 그 캡이 없으면 과대 비율이 나온다(라이브 pg-1: 8.9% vs 올바른 7.1%).
+# ⚠️ 그렇다고 init 계열을 **무조건 합산하면 더 틀린다** — 종료된 일반 initContainer(pg-1
+# `bootstrap-controller` 1Gi, argocd `copyutil` 240Mi)까지 분모에 실려 pg-1이 2.37Gi·4.0%가 된다.
+# ContainerMemoryNearLimit(rules/core.yaml)이 per-container `or`만으로 무사한 이유는 usage 시리즈가 없는
+# 종료 init이 나눗셈 매칭에서 자연 탈락하기 때문이고, **pod 합산 표면에는 그 성질이 없다**. 그래서
+# `and on (namespace,pod,container) container_memory_usage_bytes{container!=""}`로 cAdvisor의 실행 중
+# 시리즈에 결박한 뒤 합산한다 — 그 결박이 빠지면 종료 init 합산 회귀다.
 # 가드: tests/gates/test_grafana-dashboards.bats
 apiVersion: v1
 kind: ConfigMap
@@ -34,7 +44,7 @@ data:
           "type": "table", "title": "Pod unreclaimable memory vs limit (budget ledger view)",
           "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
           "datasource": { "type": "prometheus", "uid": "VictoriaMetrics" },
-          "targets": [ { "expr": "(sum by (namespace,pod) (container_memory_usage_bytes{container!=\"\"}) - sum by (namespace,pod) (container_memory_total_inactive_file_bytes{container!=\"\"}) - sum by (namespace,pod) (container_memory_total_active_file_bytes{container!=\"\"})) / sum by (namespace,pod) (kube_pod_container_resource_limits{resource=\"memory\"})", "format": "table", "instant": true } ]
+          "targets": [ { "expr": "(sum by (namespace,pod) (container_memory_usage_bytes{container!=\"\"}) - sum by (namespace,pod) (container_memory_total_inactive_file_bytes{container!=\"\"}) - sum by (namespace,pod) (container_memory_total_active_file_bytes{container!=\"\"})) / sum by (namespace,pod) ((max by (namespace,pod,container) (kube_pod_container_resource_limits{resource=\"memory\"}) or max by (namespace,pod,container) (kube_pod_init_container_resource_limits{resource=\"memory\"})) and on (namespace,pod,container) container_memory_usage_bytes{container!=\"\"})", "format": "table", "instant": true } ]
         }
       ]
     }

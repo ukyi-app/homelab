@@ -18,6 +18,24 @@ setup() {
   grep -q 'promscrape.configCheckInterval' "$ROOT/platform/victoria-stack/prod/vmagent.yaml"
 }
 
+@test "vmagent verifies the apiserver cert on kubelet scrapes (SA token is not handed to an unverified peer)" {
+  # 두 kubelet 잡은 apiserver 프록시(kubernetes.default.svc:443)로 SA 베어러 토큰을 보낸다. 검증이
+  # 꺼져 있으면 그 이름으로 응답하는 무엇에든 nodes/proxy 권한 토큰이 전달된다. 노드 CA는 같은
+  # projected 볼륨의 ca.crt로 이미 파드 안에 있어 비용 0의 하드닝이다.
+  F="$ROOT/platform/victoria-stack/prod/vmagent-scrape-config.yaml"
+  # ⚠️ 판정은 **파싱한 tls_config**에만 한다 — 파일 전체 grep은 그 자리의 재도입 금지 주석이
+  #    부재 단언을 만족시킨다(「규약을 설명한 파일이 그 규약에서 면제된다」 클래스).
+  T="$BATS_TEST_TMPDIR/vmagent-tls.txt"
+  yq -e '.data["scrape.yml"]' "$F" | yq '.scrape_configs[] | select(.scheme == "https") | .tls_config' - > "$T"
+  [ -s "$T" ]
+  # 로스터 등식 — https 잡 전건이 CA를 지정해야 한다(하드코딩 2가 아니라 레포에서 센다).
+  jobs="$(yq -e '.data["scrape.yml"]' "$F" | yq '[.scrape_configs[] | select(.scheme == "https")] | length' -)"
+  [ "$jobs" -ge 2 ]
+  ca="$(grep -c 'ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt' "$T")"
+  [ "$ca" -eq "$jobs" ]
+  run grep -q 'insecure_skip_verify' "$T"; [ "$status" -eq 1 ]
+}
+
 @test "pod-annotations scrape honors target labels (KSM namespace/pod not clobbered to observability)" {
   # honor_labels 없으면 kube_* 메트릭 namespace가 전부 observability가 돼 namespace 필터/조인이 깨진다
   # (PostgresClusterDown 오발화·PodOOMKilled join 고장의 라이브 검증된 원인).
@@ -162,6 +180,15 @@ setup() {
   grep -q 'alert: PodEvicted' "$C"                            # 노드 압박 eviction(사후)
   grep -q 'kube_node_status_condition' "$C"                   # NodePressure 메트릭(라이브 확인)
   grep -q 'kube_pod_status_reason{reason="Evicted"}' "$C"     # PodEvicted 메트릭(honor_labels로 실제 ns)
+  # ⚠️ 억제 절 판정은 **expr만** 뽑아 본다 — 파일 전체를 grep하면 룰 위 주석에 적힌 함수 이름이
+  #    단언을 만족시킨다(이 파일 아래 ContainerMemoryNearLimit @test와 같은 규율).
+  E="$BATS_TEST_TMPDIR/podevicted-expr.txt"
+  yq -e '.data["core.yaml"]' "$C" | yq '.groups[].rules[] | select(.alert=="PodEvicted") | .expr' > "$E"
+  [ -s "$E" ]
+  # 억제 절이 없으면 Evicted 파드 **오브젝트**가 남아 있는 한 영구 발화한다(사람이 지울 때까지).
+  grep -q 'changes_prometheus(' "$E"
+  # `changes()`는 VM에서 **시리즈 탄생을 변화로 세어** KSM instance churn 때 잔존 Evicted가 2h 재발화한다.
+  run grep -q 'changes(' "$E"; [ "$status" -eq 1 ]
 }
 
 @test "leading OOM alert measures unreclaimable memory, not working_set (page-cache contamination)" {
@@ -230,6 +257,10 @@ setup() {
   grep -q 'kube_deployment_status_condition{condition="Available", status="false"' "$C"
   # 블랙리스트(namespace!~)여야 files(files ns)·adguard(edge)·homepage(homepage) 자동 포함
   grep -qE 'kube_deployment_status_condition\{condition="Available", status="false", namespace!~' "$C"
+  # 형제 축: StatefulSet은 KSM이 Available 조건을 안 내므로 ready < desired로 같은 클래스를 잰다.
+  # ⚠️ 이 룰은 재시작 없는 0-ready만 본다 — ts-* proxy STS에 probe가 없어 tailnet 단절은 별건이다.
+  grep -q 'alert: StatefulSetUnavailable' "$C"
+  grep -q 'kube_statefulset_status_replicas_ready' "$C"
 }
 
 @test "cache backup has a staleness alert like the four pg backups (fail-open asymmetry fixed)" {
