@@ -4,6 +4,11 @@
 # root별 state key는 init 시점에 `-backend-config`로 주입한다 — 파생(`<root>/prod/terraform.tfstate`)의
 # SSOT는 .github/actions/tf-r2-init이고 증인은 tools/tests/test_tf-r2-init.bats다.
 # 시크릿(endpoints, account id, keys)은 오직 backend.hcl(gitignored)에만 둔다.
+# ⚠️ **state 잠금이 없다.** 1.9.x S3 backend는 `dynamodb_table` 없이 잠그지 않고 `use_lockfile`은 1.10+다 —
+#    그래서 워크플로의 `-lock-timeout=120s`는 no-op이다(잠금 도입 시 살아나는 선행 핀이라 유지한다).
+#    직렬화는 CI `homelab-mutation` concurrency 그룹뿐이고, 그 그룹은 owner 로컬 apply를 덮지 못한다:
+#    cloudflare 루트를 로컬에서 apply하기 전(guard=blocked-delete 경로)에는
+#    `gh run list -w tf-reconcile.yaml --status in_progress`가 비어 있는지 확인할 것.
 terraform {
   backend "s3" {
     bucket = "homelab-tfstate"
