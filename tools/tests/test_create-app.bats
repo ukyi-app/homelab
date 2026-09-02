@@ -321,3 +321,27 @@ EOF
     return 1
   fi
 }
+
+@test "create-app rejects values that only the schema pattern/minItems catch (mini-validator witness)" {
+  # 미니 검증기(create-app.ts check())가 pattern/minItems를 **실제로 평가하는지**의 유일한 증인.
+  # test_app-config.bats:52는 스키마 JSON과 손으로 베낀 OK Set만 대조하므로 구현이 빠지는 방향을
+  # 원리적으로 못 본다(실측: :68 pattern 삭제 + :71 minItems 무력화에도 33/33 초록).
+  # ⚠️ 레인 위치는 파일 **말미** — tests/gates/test_staged-completeness.bats:15가 이 파일을
+  #    줄번호로 인용한다. 앞에 끼우면 그 주석이 어긋난다.
+  cat > "$TMP/.app-config.yml" <<'EOF'
+kind: web
+resources: { requests: {cpu: 50m, memory: 32Mi}, limits: {cpu: 200m, memory: "64 mega bytes"} }
+route: { public: false }
+EOF
+  gen
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qF -- '불일치'
+  cat > "$TMP/.app-config.yml" <<'EOF'
+kind: web
+resources: { requests: {cpu: 50m, memory: 32Mi}, limits: {cpu: 200m, memory: 64Mi} }
+route: { public: false, paths: [] }
+EOF
+  gen
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qF -- '최소 1개'
+}

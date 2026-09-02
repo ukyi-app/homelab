@@ -96,6 +96,9 @@ const limit = v.get(NEED[5])!;
 // ── 물리 정합성 — 이것이 깨진 픽스처는 커널이 만들 수 없는 상태이고, 그 위의 판정은 무의미하다 ──
 if (!(limit > 0)) fail(`픽스처 ${container}: limit이 0 이하다(${limit})`);
 if (ws > usage) fail(`픽스처 ${container}: working_set(${ws}) > usage(${usage})`);
+// ⚠️ 이 한 줄은 이중 방어다 — 유일한 픽스처 생산자 tests/gates/vmalert-memory-nearlimit-gen.py:90-91이
+//    같은 술어(`cache <= usage`)를 sys.exit로 이미 강제한다(하네스는 gen을 `|| fault`로 먼저 부른다).
+//    증인은 test_fixture-memory-ratios.bats 「a cache larger than usage is rejected」.
 if (cache > usage) fail(`픽스처 ${container}: cache(${cache}) > usage(${usage})`);
 // 커널 항등식 — working_set은 독립 상수가 아니라 usage에서 inactive_file을 뺀 값이다.
 if (ws !== usage - inactive) {

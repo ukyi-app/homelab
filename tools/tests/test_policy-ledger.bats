@@ -109,7 +109,7 @@ EOF
   echo "$output" | grep -q "항목 0건"
 }
 
-@test "schema-check fails closed on both axes: an unsupported keyword AND a typeless structural schema" {
+@test "schema-check fails closed on both axes (+ each KNOWN keyword actually reports)" {
   # 헤더가 선언한 fail-closed 성질 두 축 — ① 지원 밖 키워드(KNOWN 화이트리스트) ② `type` 없는 구조
   # 스키마. ②는 pattern/minLength/minimum/required/properties 평가가 전부 `t === "…"` 분기 안이라
   # type이 없으면 어느 것도 실행되지 않는 자리다(모르는 제약이 아니라 **아는 제약의 미평가**).
@@ -129,6 +129,14 @@ EOF
     // 대조군 ①: type이 있으면 throw가 아니라 위반 보고다(가드가 정상 스키마를 죽이지 않는다).
     if (throws({ app: "a" }, { type: "object", properties: { app: { type: "string" } } })) { console.error("FALSE THROW"); process.exit(1); }
     if (schemaErrors({}, { type: "object", required: ["app"] }, {}).length !== 1) { console.error("LOST VIOLATION"); process.exit(1); }
+    // KNOWN 화이트리스트는 키워드 **이름**만 통과시킨다 — 그 이름의 평가 구현이 살아 있는지는
+    // 아래 다섯 줄이 유일한 증인이다(실측: 다섯 구현을 지워도 소비처 11파일 181/181 초록이었다).
+    // ⚠️ KNOWN에 평가 키워드를 더하면 이 자리에 한 줄을 함께 더한다.
+    if (schemaErrors("ab", { type: "string", pattern: "^\\d{4}$" }, {}).length !== 1) { console.error("LOST VIOLATION (pattern)"); process.exit(1); }
+    if (schemaErrors(0, { type: "integer", minimum: 1 }, {}).length !== 1) { console.error("LOST VIOLATION (minimum)"); process.exit(1); }
+    if (schemaErrors(9, { type: "integer", maximum: 1 }, {}).length !== 1) { console.error("LOST VIOLATION (maximum)"); process.exit(1); }
+    if (schemaErrors([], { type: "array", minItems: 1 }, {}).length !== 1) { console.error("LOST VIOLATION (minItems)"); process.exit(1); }
+    if (schemaErrors([1, 1], { type: "array", uniqueItems: true }, {}).length !== 1) { console.error("LOST VIOLATION (uniqueItems)"); process.exit(1); }
     // 대조군 ②: enum 전용 노드와 빈 {} 노드는 구조 제약이 없어 면제다(ENTRY_SCHEMA의 자유 값 노드).
     if (throws("a", { enum: ["a", "b"] })) { console.error("FALSE THROW (enum)"); process.exit(1); }
     if (throws({ any: 1 }, {})) { console.error("FALSE THROW (empty)"); process.exit(1); }
