@@ -51,13 +51,13 @@ k3s 단일 노드(**Intel NUC15CRHU5 베어메탈** · Ubuntu 26.04 LTS · amd64
 
 | 영역 | 기술 |
 |---|---|
-| 호스트 · 오케스트레이션 | **Intel NUC15CRHU5 베어메탈**(Ubuntu 26.04 LTS · amd64 · 14 vCPU · 60 GiB · NVMe 931G) · **k3s** v1.36 · containerd 2.3 · local-path-provisioner 3티어(`standard`/`bulk-ssd`/`drill-ssd`) |
-| GitOps · CD | **ArgoCD** v3.4 — app-of-apps + ApplicationSet |
-| IaC | **Terraform** ≥1.9 — `cloudflare` · `github` · `tailscale` provider · **R2**(S3 호환) state backend |
-| 엣지 · 네트워크 | **Cloudflare**(DNS · Tunnel · WAF · zone hardening) · **cloudflared** · **tailscale-operator** v1.98 · **AdGuard Home** · kube-router NetworkPolicy |
-| 인그레스 · TLS | **Traefik** v3 (Gateway API) · **cert-manager** v1.20 (Let's Encrypt DNS-01 와일드카드) |
+| 호스트 · 오케스트레이션 | **Intel NUC15CRHU5 베어메탈**(Ubuntu 26.04 LTS · amd64 · 14 vCPU · 60 GiB · NVMe 931G) · **k3s** · containerd · local-path-provisioner 3티어(`standard`/`bulk-ssd`/`drill-ssd`) |
+| GitOps · CD | **ArgoCD** v3 — app-of-apps + ApplicationSet |
+| IaC | **Terraform** — `cloudflare` · `github` · `tailscale` provider · **R2**(S3 호환) state backend |
+| 엣지 · 네트워크 | **Cloudflare**(DNS · Tunnel · WAF · zone hardening) · **cloudflared** · **tailscale-operator** · **AdGuard Home** · kube-router NetworkPolicy |
+| 인그레스 · TLS | **Traefik** v3 (Gateway API) · **cert-manager** (Let's Encrypt DNS-01 와일드카드) |
 | 데이터 | **CloudNativePG**(PostgreSQL 18 · PgBouncer · barman-cloud → R2) · **Valkey** 9 (Redis 호환) |
-| 관측성 | **VictoriaMetrics** v1.145 · **VictoriaLogs** · vmagent/vmalert · **Alertmanager**(텔레그램) · **Grafana** · **Vector** · node-exporter · kube-state-metrics · Glances |
+| 관측성 | **VictoriaMetrics** · **VictoriaLogs** · vmagent/vmalert · **Alertmanager**(텔레그램) · **Grafana** · **Vector** · node-exporter · kube-state-metrics · Glances |
 | 시크릿 | **SOPS** + age(2-recipient) · **KSOPS** · **SealedSecrets** (하이브리드) |
 | 대시보드 · DX | **Homepage** 운영자 대시보드 · **Bun** + TypeScript CLI(`tools/`) · skopeo(이미지 digest 검증) |
 | CI · 품질 | **GitHub Actions**(gate) · **bats** · **conftest/OPA**(메모리 원장) · **Renovate** · pre-commit |

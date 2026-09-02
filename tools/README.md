@@ -4,6 +4,9 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
 명시한다 — 대부분은 워크플로(변이 디스패처)나 `bun`/`make` 타겟을 통해서만 돌고,
 일부만 직접 `bun tools/x.ts`로 부른다. 라이브 변이는 전부 PR-first(사람 머지 = 승인).
 
+**가드가 어느 venue에서 권위인지는 여기 적지 않는다** — `bun tools/check-guard-authority.ts --json`이
+계산한다(`scripts/README.md` 헤더와 같은 규약). 손으로 적은 사본은 반드시 드리프트한다.
+
 > 신뢰 경계·플로우 전반은 루트 `AGENTS.md`의 "멀티레포 앱 플로우"와 (gitignored) 런북
 > `docs/runbooks/app-platform.md` 참고.
 
@@ -104,7 +107,8 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
 
 owner가 homelab에서 액션별 변이 디스패처(`create-app.yaml` 등, workflow_dispatch)를 실행하면
 reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸다. 직접 `node`로 돌리지 않는다.
-(teardown은 예외 — owner-local `make teardown-*`.)
+(teardown-resource만 예외 — owner-local `make teardown-resource`뿐이고 디스패처가 없다. `teardown-app`은
+`_teardown-app.yaml`(🗑️ 디스패처 경유)과 owner-local `scripts/teardown.sh` **둘 다가** 호출한다.)
 
 - **`validate-mutation.ts`** — payload 검증기(계약표 강제). 각 변이 디스패처(`create-app.yaml` 등)와
   owner-local `scripts/teardown.sh`가 `--action <a> --payload-file <json>`으로 호출. action별 필수/허용
@@ -125,7 +129,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`provision-cache.ts`** — create-cache 프로비저너. `_create-cache.yaml`이 호출
   (`--name <cache> [--maxmemory-mi 16..1024]`). 앱별 경량 Valkey 인스턴스(cache NS) +
   conn/ro-conn SealedSecret + 원장 행을 산출. 자격은 `kubeseal` stdin 전용. cert 필요.
-- **`teardown-app.ts`** — 앱 한정 철거. owner-local `make teardown-app`(`scripts/teardown.sh`)이 호출
+- **`teardown-app.ts`** — 앱 한정 철거. `_teardown-app.yaml`(🗑️ 디스패처가 confirm 재검증 후 호출)과
+  owner-local `make teardown-app`(`scripts/teardown.sh`)이 호출
   (`--app <name>`). `apps/<app>/`·`apps.json` 행·원장 행만 제거 — DB/캐시 conn·CR·Valkey는
   **절대 비접촉**(리소스 철거는 teardown-resource 전담). 멱등.
 - **`teardown-resource.ts`** — DB/캐시 리소스 철거. owner-local `make teardown-resource`(`scripts/teardown.sh`)가
@@ -431,7 +436,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   ⚠️ 플래그는 `maxDisk` 패턴으로 **발견**한다(하드코딩 목록 금지). 열거 바닥값 + "볼륨 선언 없으면
   fail-closed"까지 둔다 — 비교 대상이 없는 것은 통과가 아니라 판정 불가다.
 - **`check-resource-limits.ts`** — 상주 워크로드 main 컨테이너 cpu·memory request + memory limit +
-  GOMEMLIMIT≤limit×0.95 강제(구 bash+yq+python3 이관). **`make verify`**(로컬 mirror)·gate 수집 bats(`tests/test_resource_limits.bats`)가 호출 — ci.yaml gate 스텝이 직접 부르지는 않는다(`check-guard-authority` 실측). `--repo-root`로 스캔 루트 지정.
+  GOMEMLIMIT≤limit×0.95 강제(구 bash+yq+python3 이관). `--repo-root`로 스캔 루트 지정.
 - **`check-alert-rules.ts`** — vmalert 룰 expr의 eval-time 안티패턴 정적 lint(`-dryRun`은 파싱만 해서 못 잡는
   클래스). 모드 A=상태-파생 카운터(`policy/alert-instance-stability-denylist.txt`) 위 rollup이 instance를
   안 벗김 / 모드 B=산술 `on()`·`ignoring()` 조인 피연산자가 집계 미포함 raw 셀렉터(422) — 둘 다 재부팅 IP
@@ -462,7 +467,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   - **스코프 인식 윈도 귀속**: 메트릭을 **실제로 감싸는** depth-0 종료 서브쿼리의 `[W]`만 본다(S-1 — 형제
     서브쿼리의 미끼 윈도로 죽은 알림이 통과하거나 정당한 룰이 오검출되던 위치 기반 폴백 제거).
   - 검사하는 것은 **하한 `W ≥ 주기`뿐** — 누락 내성(2×)·상한(`W < for:`)은 e2e preflight 소관(헤더 주석 참조).
-  면제는 `policy/alert-instance-stability-allowlist.txt`(사유 주석 필수). **`make verify`**·gate가 호출.
+  면제는 `policy/alert-instance-stability-allowlist.txt`(사유 주석 필수).
   `--repo-root` 지원. `--registry <json>`은 **테스트 픽스처 주입 전용**(실 레포는 항상 기본 레지스트리로 검증).
 - **`activate-app.ts`** — 재활성/노출 재승인 게이트(owner-local). host/public 표면 변경 시 descendant +
   표면 무변경 + 행 고정을 검증해 재노출을 재승인한다(런북 `app-platform.md`). 라이브 무변경(게이트만).
@@ -482,7 +487,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   비율 **세 축**(working_set · usage−cache · usage−inactive−active)을 내고 커널 물리 항등식을 검증한다.
   ⚠️ 레포 상태를 보는 가드가 아니라 **테스트 하네스가 부르는 오라클**이다 —
   `tests/gates/vmalert-memory-nearlimit-firing-e2e.sh`의 preflight가 "픽스처가 두 판정을 실제로 가른다"를
-  단언하는 근거를 만든다. 판정(임계 비교)은 그 하네스가 자기 awk로 하고 여기 없다(ADR-0005 경계).
+  단언하는 근거를 만든다. 판정(임계 비교)은 그 하네스가 자기 awk로 하고 여기 없다(docs/adr/0005 경계).
   종전에는 셸 heredoc 내장 python이라 typecheck·단위 테스트 어느 쪽도 이 코드를 보지 못했다.
   단위 테스트 `tools/tests/test_fixture-memory-ratios.bats`(run-bats 수집). 읽기 전용.
 
