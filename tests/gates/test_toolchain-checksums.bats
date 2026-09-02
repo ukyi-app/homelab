@@ -51,6 +51,25 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; A="$ROOT/.github/actio
   }
 }
 
+@test "no workflow installs a pip package without a version pin" {
+  # apt 레인과 같은 질문의 pip 판 — required `gate`(ci.yaml)가 도는 유일한 PyPI 경로가 무핀이면
+  # 신규 릴리스/yank 하나가 전 PR을 red로 만들고(재현성 0), 판정을 바꿀 수 있는 배포본이
+  # required check 안에서 실행된다. 핀의 freshness 소유자는 renovate.json customManager(pypi)다.
+  # 양성 대조 — 열거가 붕괴하면 아래 부정 판정이 무증인 초록이 된다(vacuous green 차단).
+  run bash -c "git ls-files '.github/workflows/*.yaml' '.github/actions/**' | xargs grep -nE 'pip3? +install' || true"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  # 무핀 검출은 **두 단계 grep**이다 — ERE에 부정 lookahead가 없고, `grep -qv`는 줄 단위 반전이라
+  # 부재(∀¬)를 재지 못한다. 여기서 `-v`는 판정이 아니라 필터이고 판정은 출력 공허성이 진다.
+  run bash -c "git ls-files '.github/workflows/*.yaml' '.github/actions/**' | xargs grep -nE 'pip3? +install' | grep -vE '==' || true"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || {
+    echo "pip 설치가 버전 무핀이다 — 'pkg==<버전>'으로 핀하고 renovate customManager(pypi)에 등록할 것:"
+    printf '%s\n' "$output"
+    false
+  }
+}
+
 @test "every download step verifies a sha256 checksum" {
   # sha256 핀 도구 10종(yq/kubeconform/helm/kustomize/conftest/shellcheck/sops/age/kubeseal/actionlint) 전부
   # sha256sum -c를 호출하는지 — 한 번이라도 누락이면 fail. **실제 호출**(`| sha256sum -c -`)만 센다 —
