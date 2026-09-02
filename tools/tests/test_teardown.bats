@@ -248,3 +248,19 @@ tdr() { bun "$ROOT/tools/teardown-resource.ts" --refs-verified manual-test "$@";
   run grep -q 'orders=' "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
   [ "$status" -eq 1 ]
 }
+
+@test "the dry-run plan judges digest-exporter membership with the kernel, not a partial-match regex" {
+  # 같은 실행의 계획과 행동이 다른 문법을 보면, 파괴 PR을 승인하는 사람이 읽는 plan이 실제 diff와
+  # 갈린다(_teardown-app.yaml이 그 plan을 PR 본문에 싣는다). 손 정규식 `(^|[" ])<app>=`는 APPS
+  # value 밖의 셸 로그 문자열에도 매치했다 — 라이브 재현: `--app app`·`--app ref`.
+  printf '              command: ["sh","-c","echo digest scrape failed: app=$APP ref=$REF"]\n' \
+    >> "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
+  # 대조군 — APPS에 실재하는 항목은 여전히 계획에 오른다(판정을 통째로 끈 것이 아니다).
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remove | any(. == "digest-exporter APPS 항목")'
+  # 본체 — APPS 밖 텍스트에만 있는 이름은 계획에 오르지 않는다(계획 = 행동의 예고).
+  run bun "$ROOT/tools/teardown-app.ts" --app app --repo-root "$FR" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remove | any(. == "digest-exporter APPS 항목") | not'
+}

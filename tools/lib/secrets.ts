@@ -92,7 +92,8 @@ function runChain(cwd: string, app: string, noSeal: boolean): ChainResult {
     if (!add.ok) return refuse("git add 실패");
     const commit = git(cwd, ["commit", "-q", "-m", "chore(secrets): 봉인본 갱신 (homelab app secrets)"]);
     if (!commit.ok) return refuse(`git commit 실패 — ${commit.err.split("\n")[0]}`);
-    const push = git(cwd, ["push", "-q", "origin", "HEAD:refs/heads/main"]);
+    // timeoutMs: 0 — push는 망 왕복이라 seam 기본 30s가 끊을 수 있다(init의 같은 자리와 동일 어휘).
+    const push = git(cwd, ["push", "-q", "origin", "HEAD:refs/heads/main"], { timeoutMs: 0 });
     if (!push.ok) return refuse(`git push 실패 — ${push.err.split("\n")[0]}`);
     chain.pushed = true;
   } else {

@@ -308,3 +308,16 @@ run_init() {
   [ "$(grep -c "fullstack" tools/lib/platform.ts)" -ge 1 ]
   [ "$(grep -c "fullstack" tools/homelab.ts)" = "0" ]
 }
+
+@test "the scaffold and network call sites of init/secrets pin timeoutMs: 0 (the seam default would SIGTERM them)" {
+  # exec seam 기본은 30s이고 "느린 경로는 콜사이트가 올린다"가 그 계약인데, 이 다섯 자리는 결정된
+  # 적이 없었다. 스캐폴드는 lock 재생성 `bun install`을 품어 30s를 넘으면 SIGTERM이 scaffold.ts의
+  # rollback **전에** 트리를 죽이고, package.json이 재작성된 채(scripts.scaffold 소실) 남아 init의
+  # 재실행 계약이 깨진다. clone/push/`gh repo create`도 같은 망 왕복이다.
+  # 증인이 정적 대조인 이유: bun 스텁 sleep 레인은 스위트 벽시계를 늘리고 timeoutMs 주입 심이 없어
+  # stub-env 흉내가 된다(원 처방이 그 레인을 기각했다).
+  # 첫 줄은 비공허 바닥값 — 네 콜사이트가 실재해야 아래 등식이 뜻을 갖는다(리네임되면 red).
+  [ "$(grep -cE '(sh\("gh", \["repo", "create"|sh\("bun", \["run", "scaffold"|sh\("git", \["clone"|git\(dest, \["push")' tools/lib/init.ts)" -eq 4 ]
+  [ "$(grep -cE '(sh\("gh", \["repo", "create"|sh\("bun", \["run", "scaffold"|sh\("git", \["clone"|git\(dest, \["push").*timeoutMs: 0' tools/lib/init.ts)" -eq 4 ]
+  [ "$(grep -cE 'git\(cwd, \["push".*timeoutMs: 0' tools/lib/secrets.ts)" -eq 1 ]
+}

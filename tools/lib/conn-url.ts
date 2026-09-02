@@ -53,7 +53,8 @@ export type UrlResult = {
 // 않음'이다(가드 어휘의 4와 같은 선 — status.ts는 같은 조건을 omitted로 구별하지만 url 동사는
 // 클러스터 조회가 본체라 부분 생략이 성립하지 않는다). 사유는 note가 담고, CLI 셸이 그 note로
 // stderr 마커를 만든다(계약 x-contract.exitRationale). 설정됐는데 깨진 조회는 여전히 failure
-// (doctor 선례: 미설정=warn·깨진 설정=fail).
+// (doctor 선례: 미설정=warn·깨진 설정=fail) — **키 부재(빈 출력·rc 0)도 그 failure에 든다**
+// (kubectl jsonpath가 키 부재를 rc 0으로 접으므로 rc만 보면 빈 자격 URL이 success로 기록된다).
 export type UrlOutcome = { variant: "success" | "failure" | "skip"; omitted: string[]; result: UrlResult };
 
 // 입력 검증 술어 — CLI(usage exit 2)·MCP(invalid params)·bin 껍데기가 공유.
@@ -106,6 +107,10 @@ function targetPath(envFile: string, envDir: string | undefined): string {
 
 function kubectlData(ns: string, secret: string, key: string): { ok: boolean; value: string; err: string } {
   const r = sh("kubectl", ["-n", ns, "get", "secret", secret, "-o", `jsonpath={.data.${key}}`]);
+  // 키 부재 = 빈 출력·rc 0(jsonpath가 접는다) — rc만 보면 `KEY=`(빈 값) 행이 success/wrote:true로
+  // 기록된다. `--allow-missing-template-keys=false`는 **쓰지 않는다**: 키 부재 시 kubectl stderr가
+  // Secret 오브젝트 전체를 base64 data째 덤프해(라이브 실측) 시크릿 로그 유출 표면이 된다.
+  if (r.ok && r.out === "") return { ok: false, value: "", err: `${ns}/${secret}의 키 ${key}가 비어 있거나 없다(jsonpath는 키 부재를 빈 출력·rc 0으로 접는다)` };
   return r.ok
     ? { ok: true, value: Buffer.from(r.out, "base64").toString("utf8"), err: "" }
     : { ok: false, value: "", err: r.err.split("\n")[0] || "kubectl 실패" };

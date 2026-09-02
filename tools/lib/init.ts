@@ -128,7 +128,8 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
   } else {
     // ── 레포 생성(부수효과) — 템플릿에서, 기본 private. ──
     const vis = isPublic ? "--public" : "--private";
-    const create = sh("gh", ["repo", "create", `${OWNER}/${app}`, "--template", TEMPLATE_REPO, vis]);
+    // timeoutMs: 0 — 템플릿 복제는 GitHub 쪽 왕복이라 seam 기본 30s가 망 사정으로 끊을 수 있다.
+    const create = sh("gh", ["repo", "create", `${OWNER}/${app}`, "--template", TEMPLATE_REPO, vis], { timeoutMs: 0 });
     if (!create.ok) return fail(`레포 생성 실패 — ${create.err.split("\n")[0] || "gh repo create 비-0"}`, "preflight");
     created = true;
   }
@@ -157,7 +158,10 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     // 두 조건 모두 봐야 한다: 스캐폴더가 .app-config.yml을 먼저 쓴 뒤 self-delete 전에 실패하면
     // config만으로 스킵하면 반쪽 스캐폴드가 성공으로 통과한다(scaffold/ 잔존 = 미완).
     if (!existsSync(`${dest}/${SCAFFOLD_MARKER}`) || existsSync(`${dest}/scaffold`)) {
-      const scaffold = sh("bun", ["run", "scaffold", "--archetype", input.archetype, "--name", app, "--yes"], { cwd: dest });
+      // timeoutMs: 0 — 스캐폴더가 lock 재생성 `bun install`을 품는다. 30s 초과 시 SIGTERM이
+      // 스캐폴더의 rollback **전에** 트리를 죽여 package.json이 재작성된 채(scripts.scaffold 소실)
+      // 남고, 바로 위 재실행 계약(반쪽 스캐폴드 → 재스캐폴드)이 그 지점에서 깨진다.
+      const scaffold = sh("bun", ["run", "scaffold", "--archetype", input.archetype, "--name", app, "--yes"], { cwd: dest, timeoutMs: 0 });
       if (!scaffold.ok) return fail(`스캐폴드 실패 — ${scaffold.err.split("\n")[0] || "bun run scaffold 비-0"}`, "cloned", { created });
       if (!existsSync(`${dest}/${SCAFFOLD_MARKER}`)) return fail(`스캐폴드 후 ${SCAFFOLD_MARKER}이 없다 — 스캐폴더 계약 위반`, "cloned", { created });
     }
@@ -181,7 +185,9 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     }
 
     // ── 첫 push(부수효과) — 스캐폴드 커밋(마커 포함)을 원격 main에 올린다(빌드 트리거). ──
-    const push = git(dest, ["push", "-q", "origin", "HEAD:refs/heads/main"]);
+    // timeoutMs: 0 — push는 망 왕복이고, 서버에 반영된 뒤 클라이언트만 SIGTERM으로 죽으면
+    // '첫 push 실패'로 보고돼 운영자가 성공한 부수효과를 실패로 읽는다.
+    const push = git(dest, ["push", "-q", "origin", "HEAD:refs/heads/main"], { timeoutMs: 0 });
     if (!push.ok) return fail(`첫 push 실패 — ${push.err.split("\n")[0]}`, "scaffolded", { created, adopted: adopted || undefined });
     pushed = true;
   }
@@ -240,7 +246,8 @@ function ensureClone(parentDir: string, app: string, dest: string, cloneUrl: str
     return `${dest}가 이미 있으나 origin이 canonical ${OWNER}/${app}가 아니다(${url.out.trim() || "없음"}) — 수동 확인 필요`;
   }
   if (existsSync(dest)) return `${dest}가 이미 있으나 git 레포가 아니다 — 수동 확인 필요`;
-  const clone = sh("git", ["clone", "-q", cloneUrl, dest]);
+  // timeoutMs: 0 — 클론은 망 왕복이라 seam 기본 30s가 콜드/느린 망에서 끊는다(같은 어휘로 통일).
+  const clone = sh("git", ["clone", "-q", cloneUrl, dest], { timeoutMs: 0 });
   if (!clone.ok) return `클론 실패 — ${clone.err.split("\n")[0] || "git clone 비-0"}`;
   // 신규 클론도 구성 신원을 같은 술어로 증명한다(재사용 분기와 대칭) — cloneUrl 조립이
   // 바뀌어도 "push 전 ① 통과" 계약이 붙잡는다.

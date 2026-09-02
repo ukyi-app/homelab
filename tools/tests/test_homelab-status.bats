@@ -258,3 +258,17 @@ setup() {
   echo "$output" | grep -q "배포 핀"
   echo "$output" | grep -q "라이브"
 }
+
+@test "a malformed app name is a usage error: exit 2, no envelope (traversal gate, shared predicate)" {
+  # status는 리더지만 app을 그대로 apps/<app>/deploy/prod 경로·kubectl 리소스명에 조립한다 —
+  # identity.ts의 traversal 1차 게이트를 형제 술어(verbs/secrets/init)와 같은 문구로 공유한다.
+  # `Bad_Name` 오타도 '앱 산출물이 없다' failure(1)가 아니라 usage(2)여야 원인 계층이 안 뭉개진다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status ../x --root "$APPS_ROOT" --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "사용법"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status Bad_Name --root "$APPS_ROOT" --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "사용법"
+}

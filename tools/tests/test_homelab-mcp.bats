@@ -371,3 +371,15 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
   # 부수효과 0 — 레포 생성 호출이 원장에 없다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
 }
+
+@test "a traversal-shaped status app is refused as invalid params (CLI and MCP share one predicate)" {
+  # MCP 표면은 LLM 에이전트 입력을 그대로 받는다 — inputSchema에 pattern을 덧붙이는 대신(두 번째
+  # 진실 금지) statusInputError 한 곳이 두 표면을 함께 닫는다는 것을 실제로 밟는다.
+  mcp_rpc '{"jsonrpc":"2.0","id":50,"method":"tools/call","params":{"name":"status","arguments":{"app":"../x"}}}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==50) | .error.code')" = "-32602" ]
+  # 대조군 — 유효한 이름은 같은 술어를 지나 envelope으로 응답한다(가드가 status를 통째로 막지 않는다).
+  mcp_rpc '{"jsonrpc":"2.0","id":51,"method":"tools/call","params":{"name":"status","arguments":{"app":"page"}}}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==51) | has("error")')" = "false" ]
+}

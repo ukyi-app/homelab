@@ -12,6 +12,7 @@ import { parseBranch } from "./bump-plan.ts";
 import { LANES, isDispatchLaneBranch } from "./catalog-rows.ts";
 import { compact } from "./contract.ts";
 import { ghJson, sh } from "./exec.ts";
+import { APP_NAME_RE } from "./identity.ts";
 import { parseLedgerRows } from "./ledger-totals.ts";
 import { HOMELAB_REPO } from "./platform.ts";
 import { listUnits } from "./repo-walk.ts";
@@ -42,6 +43,10 @@ function isAppLaneBranch(head: string, app: string): boolean {
 
 // 모드 상호배타·핸들 URL 형식 검증 — CLI(usage 오류 exit 2)와 MCP(invalid params)가 같은 술어를 쓴다.
 export function statusInputError(input: StatusInput): string | null {
+  // 앱 이름은 형제 술어(verbs·secrets·init)와 같은 문구·같은 SSOT다. status는 리더지만 app을 그대로
+  // apps/<app>/deploy/prod 경로·kubectl 리소스명에 조립하므로 identity.ts가 '분기 금지'로 못 박은
+  // traversal 1차 게이트가 여기에도 선다(오타는 '산출물 없음' failure가 아니라 usage로 층이 갈린다).
+  if (input.app !== undefined && !APP_NAME_RE.test(input.app)) return `앱 이름 형식 불량(소문자 kebab, 2..40): ${input.app}`;
   const modes = [input.app, input.runUrl, input.prUrl].filter((x) => x !== undefined).length;
   if (modes > 1) return "app 인자·--run·--pr는 상호배타다(하나만 지정)";
   if (input.runUrl !== undefined && !RUN_URL_RE.test(input.runUrl)) return `run URL 형식 불량(https://github.com/<o>/<r>/actions/runs/<id>): ${input.runUrl}`;

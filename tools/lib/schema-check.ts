@@ -10,6 +10,11 @@ const KNOWN = new Set([
   "pattern", "minimum", "maximum", "items", "minItems", "uniqueItems", "minLength",
   "allOf", "oneOf", "not",
 ]);
+// 구조 제약 키워드 — 아래 walk에서 전부 `t === "…"` 분기 **안**에 있어 `type` 없이는 미평가다.
+const STRUCT = [
+  "properties", "required", "additionalProperties",
+  "pattern", "minLength", "minimum", "maximum", "items", "minItems", "uniqueItems",
+];
 
 // val을 sch로 검증해 위반 목록을 돌려준다(빈 배열 = 유효). root는 $ref(#/definitions/*) 해석용
 // 루트 스키마 — 정의 자체를 sch로 넘겨 부분 검증할 때도 root는 항상 전체 스키마다.
@@ -25,6 +30,16 @@ export function schemaErrors(val: unknown, sch: unknown, root: unknown, path = "
     }
     for (const k of Object.keys(s)) {
       if (!KNOWN.has(k)) throw new Error(`지원 밖 스키마 키워드 '${k}' (${p}) — schema-check.ts 화이트리스트와 함께 확장해야 검증이 유효하다`);
+    }
+    // KNOWN 화이트리스트가 막는 것은 '모르는 키워드'뿐이다. 두 번째 접힘 표면 — **아는 키워드가
+    // `type` 부재로 평가되지 않는 것** — 은 같은 자리에서 fail-closed로 닫는다. `{required:[…]}`·
+    // `{minLength:1}`은 JSON Schema로 유효한 표기라 작성 실수가 조용히 통과하면 vacuous green이다.
+    // 면제는 enum뿐: enum은 값 자체를 판정하고 아래에서 return한다($ref는 :20-25에서 이미 target으로
+    // 치환된 뒤라 여기에 남지 않는다). 빈 `{}` 노드(check-ci-parity ENTRY_SCHEMA의 자유 값 필드)는
+    // STRUCT 키가 없어 대상이 아니고, allOf/oneOf/not은 형제 키로 따로 평가되므로 면제하지 않는다
+    // (`{allOf:[…], required:[…]}`를 면제하면 같은 구멍이 그대로 남는다).
+    if (s.type === undefined && !s.enum && STRUCT.some((k) => k in s)) {
+      throw new Error(`type 없는 구조 스키마 (${p}) — 구조 제약은 type이 있어야 평가된다(fail-closed)`);
     }
     // 결합 키워드 — verb→result·variant→exitCode 판별(allOf의 각 스키마는 전부, oneOf는 정확히 1개 분기).
     if (s.allOf) for (const branch of s.allOf) walk(v, branch, p);

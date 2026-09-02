@@ -39,7 +39,14 @@ if (import.meta.main) {
   const argv = process.argv.slice(2);
   const rootIdx = argv.indexOf("--root");
   const root = rootIdx >= 0 ? argv[rootIdx + 1] : ".";
-  // `--root <값>` 쌍을 걷어낸 나머지가 positional이다(플래그 파싱을 인덱스 산술에 기대지 않는다).
+  // 미지 `--플래그`는 거부한다(형제 mutator 전건과 같은 '누락/파싱 불가 = 거부' 규약). 이 도구엔
+  // `--dry-run`이 없는데 형제 어휘 관성으로 붙이면, 종전엔 그 플래그를 조용히 버린 채 레포의 인라인
+  // 핀을 즉시 재작성했다. cli.ts parseFlags로 접지 않는 이유: 위치 인자를 throw하므로 토큰 분리
+  // 코드가 더 붙어 오히려 비싸다.
+  for (const a of argv) {
+    if (a.startsWith("--") && a !== "--root") { console.error(`알 수 없는 옵션: ${a} — 허용: --root <dir> + 위치 인자 <image-key> <digest>`); process.exit(2); }
+  }
+  // `--root <값>` 쌍을 걷어낸 나머지가 positional이다(위 거부 루프가 지나간 뒤라 남은 `--*`는 없다).
   const skip = new Set(rootIdx >= 0 ? [rootIdx, rootIdx + 1] : []);
   const positional = argv.filter((_, i) => !skip.has(i)).filter((a) => !a.startsWith("--"));
   // positional: <image-key> <digest> (순서 무관 — digest는 sha256: 접두로 구분)

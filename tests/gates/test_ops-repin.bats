@@ -115,3 +115,13 @@ teardown() { rm -rf "$FX"; }
     false
   }
 }
+
+@test "rejects an unknown flag with exit 2 (no silent write)" {
+  # 형제 mutator가 전부 막은 '오타 침묵-무시' 클래스 — 이 도구엔 `--dry-run`이 아예 없는데
+  # 형제 어휘 관성으로 붙이면 그 플래그를 삼킨 채 레포의 인라인 핀을 즉시 재작성했다.
+  run bun tools/repin-ops-image.ts pg-tools:18-rclone "$NEW" --root "$FX" --dry-run
+  [ "$status" -eq 2 ]
+  # 픽스처 무변경 — pg-tools 사이트 5건이 전부 OLD로 남았다(건수로 닫는다: `grep -qv`는 부재를 못 잰다).
+  [ "$(grep -rhoE 'pg-tools:18-rclone@sha256:[0-9a-f]{64}' "$FX" | grep -c "$OLD")" -eq 5 ]
+  [ "$(grep -rhoE 'pg-tools:18-rclone@sha256:[0-9a-f]{64}' "$FX" | grep -c "$NEW")" -eq 0 ]
+}
