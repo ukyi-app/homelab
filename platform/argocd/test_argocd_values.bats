@@ -78,7 +78,7 @@ V="platform/argocd/bootstrap-values.yaml"
   [ "$output" != "null" ] || { echo "notifications.resources.limits.memory 미설정"; false; }
 }
 
-@test "notifications cm has native telegram service, Markdown line1 templates, deployed+degraded triggers, central selector subscription" {
+@test "notifications cm has native telegram service, Markdown line1 templates, deployed+degraded+sync-failed triggers, central selector subscription" {
   has() { printf '%s' "$1" | grep -qF -- "$2" || { echo "miss: $2"; false; }; }
   v=platform/argocd/bootstrap-values.yaml
   # native telegram service — 토큰만($telegram-token, tgbotapi에 직접 전달·URL 미로깅 → webhook의 토큰 로그 유출 회피).
@@ -93,6 +93,20 @@ V="platform/argocd/bootstrap-values.yaml"
   has "$output" 'Healthy'; has "$output" 'oncePer'
   run yq '.notifications.triggers."trigger.on-health-degraded"' "$v"
   has "$output" 'Degraded'
+  # sync 실패(hook 실패 포함)는 Healthy/Degraded 어느 축에도 안 잡힌다 — 전용 트리거가 유일한 채널이다.
+  # vmalert ArgoCDOutOfSync는 sync_status 기반이라 hook 실패에 침묵한다(감사 12-a).
+  run yq '.notifications.templates."template.app-sync-failed"' "$v"
+  has "$output" '⚠️ *동기화 실패*'
+  has "$output" 'operationState.message'   # 본문에 에러 첫 줄
+  # Markdown 중화 — native telegram의 parseMode가 Markdown 하드코딩이라 원문의 밑줄·별표·백틱·대괄호가 짝이 안 맞으면
+  # Telegram이 메시지 전체를 400으로 거부한다(실패 알림이 실패로 사라진다).
+  has "$output" 'replace "_"'
+  has "$output" 'replace "*"'
+  run yq '.notifications.triggers."trigger.on-sync-failed"' "$v"
+  has "$output" "phase in ['Error', 'Failed']"
+  has "$output" 'operationState.syncResult != nil'      # #224와 같은 nil 가드
+  has "$output" 'oncePer'                               # retry 5회 동안 전이마다 재발화 금지
+  has "$output" 'send: [app-sync-failed]'
   run yq '.notifications.subscriptions | tag' "$v"
   [ "$output" = "!!seq" ] || { echo "subscriptions must be a YAML list, got $output"; false; }
   run yq '.notifications.subscriptions[0].selector' "$v"
@@ -134,6 +148,30 @@ V="platform/argocd/bootstrap-values.yaml"
   V="platform/argocd/bootstrap-values.yaml"
   run yq '.controller.podAnnotations."prometheus.io/scrape"' "$V"; [ "$output" = "true" ]
   run yq '.controller.podAnnotations."prometheus.io/port"' "$V"; [ "$output" = "8082" ]
+}
+
+@test "every notifications trigger is subscribed and every send target has a template (closed roster)" {
+  # 감사 12-a의 일반형: 트리거를 **정의만** 하고 subscription의 triggers에 안 넣으면 조용히 아무
+  # 데도 안 간다(red 없음 — 그냥 무발화). 반대로 subscription에만 있고 정의가 없으면 컨트롤러가
+  # 그 이름을 무시한다. 양방향 등식으로 둘 다 잡는다. 하드코딩 목록이 아니라 파일에서 센다.
+  # ⚠️ `sort`는 LC_ALL=C로 — 로케일 콜레이션이 구두점을 1차 가중에서 무시해 원소를 삼킨다(레포 함정).
+  v=platform/argocd/bootstrap-values.yaml
+  defined="$(yq '.notifications.triggers | keys | .[]' "$v" | sed 's/^trigger\.//' | LC_ALL=C sort)"
+  subscribed="$(yq '.notifications.subscriptions[].triggers[]' "$v" | LC_ALL=C sort)"
+  # 열거 붕괴 바닥값 — 키 경로가 드리프트해 양변이 함께 비면 등식이 공허하게 성립한다.
+  [ "$(printf '%s\n' "$defined" | grep -c .)" -ge 3 ]
+  [ "$defined" = "$subscribed" ] \
+    || { echo "trigger 정의 != subscription 목록"; printf 'defined:\n%s\nsubscribed:\n%s\n' "$defined" "$subscribed"; false; }
+  # send: 대상 전건이 template으로 실재해야 한다 — 없으면 발송 시점에 template not supported로 죽는다.
+  tmpl="$(yq '.notifications.templates | keys | .[]' "$v" | sed 's/^template\.//' | LC_ALL=C sort)"
+  sends="$(yq '.notifications.triggers | to_entries | .[].value' "$v" \
+           | grep -oE 'send: \[[a-z0-9-]+\]' | sed -E 's/send: \[(.*)\]/\1/' | LC_ALL=C sort -u)"
+  [ "$(printf '%s\n' "$sends" | grep -c .)" -ge 3 ]
+  orphan=""
+  for s in $sends; do
+    printf '%s\n' "$tmpl" | grep -qxF -- "$s" || orphan="$orphan $s"
+  done
+  [ -z "$orphan" ] || { echo "send: 대상에 대응하는 template 없음:$orphan"; false; }
 }
 
 @test "on-deployed oncePer gates on the actual sync-job revision, not observed HEAD (#224 noise regression guard)" {

@@ -9,6 +9,19 @@ setup() {
   VMALERT="$ROOT/platform/victoria-stack/prod/vmalert.yaml"
 }
 
+# 알림 **존재** 단언 — 이름은 반드시 정확 일치여야 한다.
+# ⚠️ `grep -q 'alert: X'`는 접두 매치라 `alert: XY`에도 통과한다. 이 파일에서 라이브로 성립하던
+#    자리가 있었다: `alert: StandardSSDFilling` 단언은 **StandardSSDFillingTrend 룰만으로도 초록**이라
+#    critical 룰을 통째로 지워도 세 @test가 전부 통과했다(2026-09-02 뮤테이션 실측).
+#    룰 파일의 정의 줄은 전부 `- alert: <이름>` 꼴이므로 줄 끝 앵커가 접두 매치를 끊는다.
+# ⚠️ 앵커를 `- alert:`까지 포함해 잡는 두 번째 이유: 주석·expr에 인용된 알림 이름이 정의 노릇을
+#    하지 못하게 한다(이 레포의 「규약을 설명한 파일이 그 규약에서 면제된다」 클래스).
+# (**부재** 단언 — 아래 `alert: (NodeRootFs|…)` 카운트 — 는 반대다. 접두 매치가 더 넓게 잡아
+#  fail-closed라 좁히지 않는다.)
+alert_defined() {
+  grep -qE "^[[:space:]]*- alert: $2\$" "$1" || { echo "alert 정의 없음(정확 일치): $2 in $1"; false; }
+}
+
 @test "vmalert auto-reloads rule files on change (configCheckInterval set)" {
   grep -q 'configCheckInterval' "$VMALERT"
 }
@@ -44,14 +57,14 @@ setup() {
 
 @test "crown-jewel DB liveness + non-OOM crashloop alerts are defined" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
-  grep -q 'alert: PostgresClusterDown' "$C"          # 단일 인스턴스 pg 생존 페이징
+  alert_defined "$C" PostgresClusterDown          # 단일 인스턴스 pg 생존 페이징
   grep -q 'cnpg_collector_up' "$C"                    # pg-1에서 직접 scrape돼 라벨 정확(KSM clobbering 회피)
   grep -q 'absent(cnpg_collector_up' "$C"             # 스크레이프 단절 fail-closed 가드
   # ⚠️ 부재 단언은 `-ne 0`이 아니라 `-eq 1`이다 — grep은 대상 파일 부재/읽기불가에 rc **2**를 내는데
   #    `-ne 0`은 그것을 무매치와 구별하지 않는다(경로가 사라지면 통과 = vacuous green). 무매치는 정확히 rc 1.
   #    이 파일의 아래 부재 단언 전부가 같은 사유다.
   run grep -q 'max(kube_pod_status_ready' "$C"; [ "$status" -eq 1 ]  # expr 회귀 금지(주석 언급은 허용)
-  grep -q 'alert: PodCrashLooping' "$C"
+  alert_defined "$C" PodCrashLooping
   # PodCrashLooping은 블랙리스트(namespace!~)여야 신규 PSA ns(cache·sealed-secrets)를 자동 포함 —
   # 화이트리스트 회귀 금지(restarts_total에 namespace!~ 사용 확인).
   grep -qE 'kube_pod_container_status_restarts_total\{namespace!~' "$C"
@@ -59,7 +72,7 @@ setup() {
 
 @test "fourth backup (pgdump hedge) has a staleness alert like the other three" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  grep -q 'alert: PgDumpHedgeStale' "$R"
+  alert_defined "$R" PgDumpHedgeStale
   grep -q 'pg-dump-hedge-r2' "$R"
   grep -q 'kube_job_status_completion_time' "$R"
 }
@@ -81,9 +94,9 @@ setup() {
   # expr 형태(메트릭 접미사 '_')만 매치 — 주석의 설명 언급은 허용(core.yaml 선례와 동일).
   run grep -q 'kubelet_volume_stats_' "$R"; [ "$status" -eq 1 ]
   # 루트 fs 3티어: 조기 warning + critical + predict_linear 추세.
-  grep -q 'alert: StandardSSDWarning' "$R"
-  grep -q 'alert: StandardSSDFilling' "$R"
-  grep -q 'alert: StandardSSDFillingTrend' "$R"
+  alert_defined "$R" StandardSSDWarning
+  alert_defined "$R" StandardSSDFilling
+  alert_defined "$R" StandardSSDFillingTrend
   grep -q 'predict_linear(node_filesystem_avail_bytes' "$R"
   # mountpoint는 정확일치 '/'(shm/tmpfs/virtiofs 노이즈 배제) — 옛 정규식 회귀 금지.
   grep -q 'node_filesystem_avail_bytes{mountpoint="/"}' "$R"
@@ -97,19 +110,19 @@ setup() {
   run grep -cE 'alert: (NodeRootFs|RootDisk|RootFsFull|NodeDiskFull|DiskFull)' "$R"
   [ "$output" = "0" ] || [ "$status" -eq 1 ]
   # 기존 3룰 존치(계약 검토 결론 = contract-complete: 2단 절대임계 + predict_linear 추세, 단일 series).
-  grep -q 'alert: StandardSSDWarning' "$R"
-  grep -q 'alert: StandardSSDFilling' "$R"
-  grep -q 'alert: StandardSSDFillingTrend' "$R"
+  alert_defined "$R" StandardSSDWarning
+  alert_defined "$R" StandardSSDFilling
+  alert_defined "$R" StandardSSDFillingTrend
   # ⚠️ 설계 결정: StandardSSD*에는 per-rule absent() 가드를 두지 않는다. 스크레이프 전손(node-exporter
   # 다운)의 fail-closed는 core.yaml의 TargetDown(up==0, critical)이 담당한다 — per-rule absent()를 붙이면
   # 메트릭 부재를 "SSD 여유 부족" critical로 오귀속(잘못된 원인 페이지)하고 TargetDown과 중복된다.
-  grep -q 'alert: TargetDown' "$C"
+  alert_defined "$C" TargetDown
   grep -q 'up == 0' "$C"
 }
 
 @test "WAL volume saturation uses the live CNPG WAL-size collector, not deprecated backup metrics" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  grep -q 'alert: WALVolumeFilling' "$R"
+  alert_defined "$R" WALVolumeFilling
   # WAL 볼륨 충전율: CNPG가 직접 export하는 size/volume_size(라이브). disk:pgwal로 분리해 루트 critical이 inhibit 안 함.
   grep -q 'cnpg_collector_pg_wal{value="size"}' "$R"
   grep -q 'cnpg_collector_pg_wal{value="volume_size"}' "$R"
@@ -120,11 +133,11 @@ setup() {
 
 @test "observability self-monitoring alerts defined and 4 components self-scraped" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
-  grep -q 'alert: LogIngestionStalled' "$C"        # vector→VL 침묵 실패 감지
+  alert_defined "$C" LogIngestionStalled        # vector→VL 침묵 실패 감지
   grep -q 'vl_rows_ingested_total' "$C"
-  grep -q 'alert: VmagentRemoteWriteDropping' "$C"  # 메트릭 유실
-  grep -q 'alert: VmalertUnhealthy' "$C"            # 알림 엔진 자체 에러
-  grep -q 'alert: KubeJobFailed' "$C"               # 전용 staleness 없는 Job 실패(files ns 등)
+  alert_defined "$C" VmagentRemoteWriteDropping  # 메트릭 유실
+  alert_defined "$C" VmalertUnhealthy            # 알림 엔진 자체 에러
+  alert_defined "$C" KubeJobFailed               # 전용 staleness 없는 Job 실패(files ns 등)
   # 블랙리스트(namespace!~)여야 신규 ns(files 등)를 자동 포함 — 화이트리스트 회귀 금지(:108 교훈, PodCrashLooping과 동일).
   grep -qE 'kube_job_failed\{condition="true", namespace!~' "$C"
   # self-scrape 주석 — 위 self-metric이 TSDB에 들어가려면 4개 컴포넌트가 scrape돼야 한다.
@@ -137,10 +150,10 @@ setup() {
   R="$ROOT/platform/victoria-stack/prod/rules/r5-cert-tls.yaml"
   V="$ROOT/platform/victoria-stack/prod/vmalert.yaml"
   # 4 룰: wildcard critical + 전 cert catch-all + NotReady + absent fail-closed.
-  grep -q 'alert: CertWildcardExpiringSoon' "$R"
-  grep -q 'alert: CertExpiringSoon' "$R"
-  grep -q 'alert: CertManagerCertNotReady' "$R"
-  grep -q 'alert: CertMetricsAbsent' "$R"
+  alert_defined "$R" CertWildcardExpiringSoon
+  alert_defined "$R" CertExpiringSoon
+  alert_defined "$R" CertManagerCertNotReady
+  alert_defined "$R" CertMetricsAbsent
   # ready_status는 condition="True"==0만이 올바른 not-ready(False/Unknown==0은 비활성 시리즈라 상시 발화 함정).
   grep -q 'certmanager_certificate_ready_status{condition="True"} == 0' "$R"
   # fail-closed: 메트릭 전손 시 silent 무발화 방지.
@@ -157,27 +170,27 @@ setup() {
 @test "vmagent buffer saturation has a leading warning + graceful drop cap" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
   V="$ROOT/platform/victoria-stack/prod/vmagent.yaml"
-  grep -q 'alert: VmagentBufferFilling' "$C"                      # leading 경고(드롭 전)
+  alert_defined "$C" VmagentBufferFilling                      # leading 경고(드롭 전)
   grep -qE 'vmagent_remotewrite_pending_data_bytes|vm_persistentqueue_bytes_pending' "$C"  # 버퍼 메트릭
   grep -q 'maxDiskUsagePerURL' "$V"                               # eviction 대신 graceful drop
 }
 
 @test "relay single-down has an in-band signal via AM webhook failure (faster than off-node deadman)" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
-  grep -q 'alert: DeadmanswitchRelayUnreachable' "$C"
+  alert_defined "$C" DeadmanswitchRelayUnreachable
   grep -q 'alertmanager_notifications_failed_total{integration="webhook"}' "$C"
 }
 
 @test "vector sink backpressure has a partial-degradation alert (PR-B, uses PR-A exposed vector_utilization)" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
-  grep -q 'alert: VectorBackpressure' "$C"
+  alert_defined "$C" VectorBackpressure
   grep -q 'vector_utilization' "$C"   # vector internal_metrics로 노출된 메트릭
 }
 
 @test "node pressure and pod eviction alerts are defined (single-node starvation/disk coverage)" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
-  grep -q 'alert: NodePressure' "$C"                          # kubelet Memory/Disk/PIDPressure condition
-  grep -q 'alert: PodEvicted' "$C"                            # 노드 압박 eviction(사후)
+  alert_defined "$C" NodePressure                          # kubelet Memory/Disk/PIDPressure condition
+  alert_defined "$C" PodEvicted                            # 노드 압박 eviction(사후)
   grep -q 'kube_node_status_condition' "$C"                   # NodePressure 메트릭(라이브 확인)
   grep -q 'kube_pod_status_reason{reason="Evicted"}' "$C"     # PodEvicted 메트릭(honor_labels로 실제 ns)
   # ⚠️ 억제 절 판정은 **expr만** 뽑아 본다 — 파일 전체를 grep하면 룰 위 주석에 적힌 함수 이름이
@@ -193,7 +206,7 @@ setup() {
 
 @test "leading OOM alert measures unreclaimable memory, not working_set (page-cache contamination)" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
-  grep -q 'alert: ContainerMemoryNearLimit' "$C"
+  alert_defined "$C" ContainerMemoryNearLimit
   # ⚠️ **expr만** 뽑아 본다 — 파일 전체를 grep하면 주석에 적힌 메트릭 이름이 단언을 만족시킨다
   #    (이 레포의 「규약을 설명한 파일이 그 규약에서 면제된다」 클래스). 아래 부재 단언 둘이 특히 그렇다.
   E="$BATS_TEST_TMPDIR/nearlimit-expr.txt"
@@ -218,7 +231,7 @@ setup() {
 
 @test "R6 ArgoCDOutOfSync has an absent() fail-closed guard like the other R-rules" {
   R="$ROOT/platform/victoria-stack/prod/rules/r6-ci-staleness.yaml"
-  grep -q 'alert: ArgoCDOutOfSync' "$R"
+  alert_defined "$R" ArgoCDOutOfSync
   grep -q 'absent(argocd_app_info)' "$R"   # scrape 재단절 시 silent 무발화 방지
 }
 
@@ -253,27 +266,27 @@ setup() {
 
 @test "workload-unavailable alert covers subscription-less platform components (files/adguard/homepage gap)" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
-  grep -q 'alert: WorkloadUnavailable' "$C"
+  alert_defined "$C" WorkloadUnavailable
   grep -q 'kube_deployment_status_condition{condition="Available", status="false"' "$C"
   # 블랙리스트(namespace!~)여야 files(files ns)·adguard(edge)·homepage(homepage) 자동 포함
   grep -qE 'kube_deployment_status_condition\{condition="Available", status="false", namespace!~' "$C"
   # 형제 축: StatefulSet은 KSM이 Available 조건을 안 내므로 ready < desired로 같은 클래스를 잰다.
   # ⚠️ 이 룰은 재시작 없는 0-ready만 본다 — ts-* proxy STS에 probe가 없어 tailnet 단절은 별건이다.
-  grep -q 'alert: StatefulSetUnavailable' "$C"
+  alert_defined "$C" StatefulSetUnavailable
   grep -q 'kube_statefulset_status_replicas_ready' "$C"
 }
 
 @test "cache backup has a staleness alert like the four pg backups (fail-open asymmetry fixed)" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  grep -q 'alert: CacheBackupStale' "$R"
+  alert_defined "$R" CacheBackupStale
   grep -q 'job_name=~"cache-backup' "$R"
   grep -q 'absent(kube_job_status_completion_time{job_name=~"cache-backup' "$R"   # fail-closed 가드
 }
 
 @test "files off-SSD backup freshness + bulk-ssd capacity alerts are defined (host push)" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  grep -q 'alert: FilesBackupStale' "$R"     # 오프-SSD 백업 신선도(백업 필수화 강제)
-  grep -q 'alert: FilesBulkSSDLow' "$R"       # bulk-ssd 용량 임계
+  alert_defined "$R" FilesBackupStale     # 오프-SSD 백업 신선도(백업 필수화 강제)
+  alert_defined "$R" FilesBulkSSDLow       # bulk-ssd 용량 임계
   # 주간/일간 단발 push라 bare absent()는 영구 오발화 — last_over_time 윈도로 판정(restore-drill 패턴).
   grep -q 'last_over_time(files_backup_last_success_timestamp' "$R"
 }
@@ -281,8 +294,8 @@ setup() {
 @test "per-PVC du exporter has staleness + in-cluster bulk capacity alerts (push metric windows)" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   # 메타갭 ③ Task 2(W1-A): du exporter 생존 + bulk 용량(W3 선행 신호, F18/F20).
-  grep -q 'alert: PvcDuExporterStale' "$R"
-  grep -q 'alert: BulkStorageLow' "$R"
+  alert_defined "$R" PvcDuExporterStale
+  alert_defined "$R" BulkStorageLow
   # 일 1회 단발 push라 last_over_time 윈도 + absent fail-closed(instant staleness 함정, restore-drill 패턴).
   grep -q 'last_over_time(pvc_du_last_success_timestamp\[3d\])' "$R"
   grep -q 'absent(last_over_time(pvc_du_last_success_timestamp' "$R"
@@ -295,8 +308,8 @@ setup() {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   A="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
   # 메타갭 ① Task 7(W2-A): 리컨실러 생존(staleness) + 실제 수렴 시 통지(F13 — 발송은 alertmanager 경유).
-  grep -q 'alert: AdguardRewriteReconcilerStale' "$R"
-  grep -q 'alert: AdguardRewriteDriftFixed' "$R"
+  alert_defined "$R" AdguardRewriteReconcilerStale
+  alert_defined "$R" AdguardRewriteDriftFixed
   # 10분 push라 last_over_time 윈도 + absent fail-closed(push-metric staleness 함정).
   grep -q 'last_over_time(adguard_rewrite_reconcile_timestamp\[2h\])' "$R"
   grep -q 'absent(last_over_time(adguard_rewrite_reconcile_timestamp' "$R"
@@ -309,15 +322,15 @@ setup() {
 
 @test "LAN DNS liveness has a dedicated critical alert (R7 made AdGuard the whole house's resolver)" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
-  grep -q 'alert: LanDnsPathDown' "$C"
+  alert_defined "$C" LanDnsPathDown
   # ⚠️ 메트릭 선택이 본질이다. kube_endpoint_address 계열은 백엔드 0에서 **시리즈가 사라져**
   #    vmagent --promscrape.noStaleMarkers와 겹쳐 최대 5분 지연된다. replicas_ready는 값이 반전할 뿐
   #    시리즈가 남아 staleness를 타지 않는다 — 회귀하면 탐지가 조용히 5분 늦어진다.
   grep -qE 'kube_deployment_status_replicas_ready\{namespace="edge", ?deployment="adguard"\}' "$C"
   grep -q 'absent(kube_deployment_status_replicas_ready' "$C"    # 소멸/스크레이프 단절 fail-closed
   # 일상 롤아웃(실측 약 5초)에 발화하면 알림 피로가 된다 — for가 그보다 충분히 길어야 한다.
-  grep -A9 'alert: LanDnsPathDown' "$C" | grep -q 'for: 60s'
-  grep -A12 'alert: LanDnsPathDown' "$C" | grep -q 'severity: critical'
+  grep -A9 -E '^[[:space:]]*- alert: LanDnsPathDown$' "$C" | grep -q 'for: 60s'
+  grep -A12 -E '^[[:space:]]*- alert: LanDnsPathDown$' "$C" | grep -q 'severity: critical'
 }
 
 @test "every CRITICAL alert has a Telegram title mapping (silent-degradation class guard)" {
@@ -363,7 +376,7 @@ EOF
   # ALERTS_FOR_STATE를 읽는 메타 룰이 자기 자신·상시 firing Watchdog를 세면 양성 피드백/상시
   # 노이즈다(homepage 위젯의 Watchdog 제외 선례). 셀렉터에 네 이름 전부가 있어야 한다.
   R="$ROOT/platform/victoria-stack/prod/rules/r7-meta.yaml"
-  ex="$(grep -A8 'alert: AlertRuleFlapping' "$R" | grep -oE 'alertname!~"[^"]*"')"
+  ex="$(grep -A8 -E '^[[:space:]]*- alert: AlertRuleFlapping$' "$R" | grep -oE 'alertname!~"[^"]*"')"
   [ -n "$ex" ]
   for n in Watchdog AlertRuleFlapping AlertPipelineWriteStale AlertSuppressionProlonged; do
     printf '%s' "$ex" | grep -q "$n"
