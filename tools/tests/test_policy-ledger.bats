@@ -44,9 +44,13 @@ EOF
 }
 
 @test "a ledger without the container key fails closed" {
+  # ⚠️ `-eq 1`은 「리더가 거부했다」와 「policy-ledger.ts가 없어 bun이 죽었다」를 구별하지 못한다
+  #    (실측: 리더 삭제 시 12레인 중 이 레인이 그대로 초록). 거부 문구로 가른다.
+  [ -f "$ROOT/tools/lib/policy-ledger.ts" ]
   printf '{ "_readme": ["x"], "other": [] }' > "$LEDGER"
   PL_PATH="$LEDGER" PL_CONTAINER=entries run bun "$FX"
   [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qF -- "허용 밖 최상위 키 'other'"
 }
 
 @test "an empty container below the consumer floor fails closed" {

@@ -33,7 +33,10 @@ EOF
 }
 teardown() { rm -rf "$TMP"; }
 
+# ⚠️ 피연산자 실재 — 거부 레인이 `-ne 0`으로 판정하는데 도구 부재 시 bun의 rc도 비-0이라
+#    두 채널이 겹친다(실측: provision-cache.ts 삭제 시 14레인 중 #9·#13이 그대로 초록).
 provision() {
+  [ -f "$ROOT/tools/provision-cache.ts" ]
   PATH="$TMP/bin:$PATH" run bun "$ROOT/tools/provision-cache.ts" \
     --repo-root "$FIX" --cert "$TMP/cert.pem" "$@"
 }
@@ -119,10 +122,13 @@ provision() {
 @test "maxmemory outside 16..1024 and bad names are rejected" {
   provision --name demo --maxmemory-mi 8
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '::error::provision-cache: maxmemory-mi는 16..1024'
   provision --name demo --maxmemory-mi 2048
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '::error::provision-cache: maxmemory-mi는 16..1024'
   provision --name Demo
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '::error::provision-cache: 이름 형식 불량'
 }
 
 @test "instances register idempotently in the cache kustomization" {
@@ -166,7 +172,9 @@ provision() {
 @test "provision-cache rejects a -ro suffixed name (collides with readonly conn naming)" {
   provision --name sessions-ro
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q "ro"
+  # ⚠️ 옛 `grep -q "ro"`는 두 글자라 bun의 `Module not found ".../p-ro-vision-cache.ts"`에도
+  #    매치했다 — 도구 부재 뮤테이션에서 공허하게 초록이던 자리다(실측).
+  printf '%s' "$output" | grep -qF -- "::error::provision-cache: '-ro' 접미사 예약"
 }
 
 @test "provision-cache checklist surfaces the app values.yaml envFrom wiring step" {

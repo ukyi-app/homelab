@@ -38,8 +38,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "teardown-app now rejects a trailing-hyphen app name (policy tightened)" {
+  # ⚠️ `-ne 0`만으로는 「정책이 거부했다」와 「도구/SSOT가 사라져 bun이 죽었다」가 겹친다(실측:
+  #    tools/lib/identity.ts를 지워도 이 레인이 초록이었다). 피연산자 실재 + 거부 문구로 가른다.
+  [ -f tools/teardown-app.ts ]
   run bun tools/teardown-app.ts --app bad- --dry-run
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'usage: teardown-app --app'
 }
 
 @test "identity exports RESOURCE_NAME_RE (no trailing hyphen, 1..30, single-char ok)" {
@@ -92,18 +96,24 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "provision-cache now rejects a >30-char name (29->30 tightening consistent)" {
+  [ -f tools/provision-cache.ts ]
   run bun tools/provision-cache.ts --name "$(printf 'a%.0s' {1..31})" --dry-run
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '::error::provision-cache: 이름 형식 불량'
 }
 
 @test "teardown-resource now rejects a trailing-hyphen resource name" {
+  [ -f tools/teardown-resource.ts ]
   run bun tools/teardown-resource.ts --db bad- --dry-run
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'teardown-resource: 이름 형식 불량'
 }
 
 @test "provision-db still validates --cluster after NAME_RE removal (F10)" {
+  [ -f tools/provision-db.ts ]
   run bun tools/provision-db.ts --name blog --cluster 'Bad Cluster' --dry-run
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '::error::provision-db: cluster 형식 불량'
 }
 
 @test "resourceNameError flags db reserved names and cache -ro suffix" {

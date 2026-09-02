@@ -233,8 +233,12 @@ tdr() { bun "$ROOT/tools/teardown-resource.ts" --refs-verified manual-test "$@";
     '| <!-- ledger:row --> cache-widget   | cache          |     64 |      128 |' \
     'totals prose 누락(드리프트)' > "$D/docs/memory-ledger.md"
   echo '{}' > "$D/platform/data-conn/prod/.tombstones.json"
+  [ -f "$ROOT/tools/teardown-resource.ts" ]
   run tdr --cache widget --repo-root "$D" --delete-data --backup-verified test-id --step cleanup
   [ "$status" -ne 0 ]
+  # ⚠️ `-ne 0`은 「원장 드리프트로 abort했다」와 「teardown-resource.ts가 없다」를 구별하지 못한다
+  #    (실측: 도구 삭제 시 14레인 중 이 레인이 그대로 초록). 실제 abort 문구를 문다.
+  printf '%s' "$output" | grep -qF -- 'ledger Totals 프로즈를 찾지 못함' 
   # ⚠️ fail-loud의 증인이 이 한 줄뿐이다 — `-ne 0`이면 도구가 tombstone 파일을 **지워버린** 경우도
   #    "purged로 안 넘어갔다"로 읽혀, 가장 나쁜 실패가 초록이 된다
   run grep -q '"state": "purged"' "$D/platform/data-conn/prod/.tombstones.json"   # fail-loud: purged로 안 넘어가야

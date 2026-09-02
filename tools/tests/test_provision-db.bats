@@ -66,7 +66,10 @@ EOF
 
 teardown() { rm -rf "$TMP"; }
 
-provision() { PATH="$TMP/bin:$PATH" run bun "$ROOT/tools/provision-db.ts" "$@"; }
+# ⚠️ 피연산자 실재 — 이 파일의 거부 레인은 `-ne 0`으로 판정하는데 도구가 없을 때 bun의 rc도
+#    비-0이라 두 채널이 겹친다(실측: provision-db.ts 삭제 시 17레인 중 #14·#15가 그대로 초록).
+#    거부 문구 양성 대조는 각 레인이 지고, 여기서는 대상 실재를 닫는다.
+provision() { [ -f "$ROOT/tools/provision-db.ts" ]; PATH="$TMP/bin:$PATH" run bun "$ROOT/tools/provision-db.ts" "$@"; }
 
 @test "provision-db emits a CNPG Database CR with owner==name, retain policy and extensions" {
   provision --name orders --extensions pgcrypto,citext --repo-root "$FIX"
@@ -267,13 +270,19 @@ EOF
   for reserved in app postgres streaming_replica; do
     provision --name "$reserved" --repo-root "$FIX"
     [ "$status" -ne 0 ]
+    # 대상별 고정 에러 접두 — 셋이 같은 이유로 걸리지 않는다(app·postgres는 예약 이름,
+    # streaming_replica는 언더스코어라 형식 불량). 접두는 리워딩에 견디고, bun의
+    # `Module not found ".../provision-db.ts"`와도 겹치지 않는다.
+    printf '%s' "$output" | grep -qF -- '::error::provision-db: '
   done
 }
 
 @test "provision-db rejects a -ro suffixed name (collides with readonly conn naming)" {
   provision --name orders-ro --repo-root "$FIX"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q "ro"
+  # ⚠️ 옛 `grep -q "ro"`는 두 글자라 bun의 `Module not found ".../p-ro-vision-db.ts"`에도 매치했다
+  #    — 도구 부재 뮤테이션에서 공허하게 초록이던 자리다. 고정 에러 접두를 함께 문다.
+  printf '%s' "$output" | grep -qF -- "::error::provision-db: '-ro' 접미사 예약"
 }
 
 @test "provision-db fails clearly when the sealed-secrets cert is missing" {

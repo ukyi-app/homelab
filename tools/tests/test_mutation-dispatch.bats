@@ -259,17 +259,28 @@ EOF
   grep -q 'source: 변이' "$a"
 }
 
+# ⚠️ 아래 세 거부 레인은 `-ne 0`만으로 닫히지 않는다 — validate-mutation.ts를 지우면 bun도 비-0을
+#    내므로 「검증기가 거부했다」와 「검증기가 없다」가 같은 초록이 됐다(실측: 도구 삭제 시 33/34 ok).
+#    피연산자 실재 + 고정 에러 접두(`validate-mutation: `, tools/validate-mutation.ts:9)로 가른다.
+#    접두를 쓰는 이유: 레인별 손복사 문구는 메시지 리워딩에 부서지고, 짧은 부분문자열은 bun의
+#    `Module not found ".../validate-mutation.ts"`에 도로 매치한다.
 @test "dispatcher rejects a reserved db name before the executor" {
+  [ -f "$ROOT/tools/validate-mutation.ts" ]
   run bun "$ROOT/tools/validate-mutation.ts" --action create-database --payload '{"spec":"{\"name\":\"postgres\"}"}'
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'validate-mutation: spec.name 예약된 DB 이름'
 }
 @test "dispatcher rejects a cache -ro suffix name" {
+  [ -f "$ROOT/tools/validate-mutation.ts" ]
   run bun "$ROOT/tools/validate-mutation.ts" --action create-cache --payload '{"spec":"{\"name\":\"foo-ro\"}"}'
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- "validate-mutation: spec.name '-ro' 접미사 예약"
 }
 @test "dispatcher rejects a db -ro suffix name (F8)" {
+  [ -f "$ROOT/tools/validate-mutation.ts" ]
   run bun "$ROOT/tools/validate-mutation.ts" --action create-database --payload '{"spec":"{\"name\":\"foo-ro\"}"}'
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- "validate-mutation: spec.name '-ro' 접미사 예약"
 }
 
 @test "teardown-app dispatcher declares only app and confirm inputs (no app_repo)" {
