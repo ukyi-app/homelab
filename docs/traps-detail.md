@@ -447,7 +447,14 @@
   Markdown 하드코딩**(HTML 무시 → `*bold*` 리터럴), recipient에 `$secret` 확장 없음(chatId 리터럴). oncePer는
   관측 HEAD(`sync.revision`)가 아니라 **실제 sync 작업 revision(`operationState.syncResult.revision(s)`)**에 걸어야
   한다 — 모노레포는 main 머지마다 구독 앱 전부가 같은 HEAD를 관측해 거짓 "배포 완료" 버스트(#224). supergroup
-  승격 시 chatId가 바뀐다(전송 조용히 실패).
+  승격 시 chatId가 바뀐다(전송 조용히 실패). parseMode 하드코딩의 두 번째 얼굴: **템플릿에 임의 문자열
+  (`operationState.message` 등)을 그대로 실으면 안 된다** — 짝이 안 맞는 `_`·`*`·백틱·`[`에 Telegram이 400
+  (can't parse entities)으로 **메시지 전체를 거부**해 실패 알림이 실패로 사라진다. app 이름(DNS명)만 이스케이프
+  면제이고, 그 외에는 sprig `replace`로 중화한다(sprig는 notifications-engine이 등록 — `pkg/templates/service.go`,
+  `env`/`expandenv`만 제외). 트리거 축의 공백도 같은 자리다: `on-deployed`/`on-health-degraded`만으로는
+  **sync phase Error/Failed**(hook 실패 포함)가 어느 채널에도 안 잡힌다 — health는 Healthy, sync_status는
+  Synced로 남을 수 있어 vmalert `ArgoCDOutOfSync`까지 함께 침묵한다(`trigger.on-sync-failed`가 그 유일한 채널).
+> 가드: `platform/argocd/test_argocd_values.bats`
 
 ### PG 메이저 업그레이드 3-이미지 동시 갱신
 - PG 메이저 업그레이드는 **서버(CNPG Cluster) + basebackup(barman) + pg-tools(ops 이미지)를 한꺼번에** 올려야

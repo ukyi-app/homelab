@@ -149,6 +149,23 @@ notifications:
       message: "✅ *배포 완료* — {{.app.metadata.name}} (Healthy)"
     template.app-degraded: |
       message: "🔴 *앱 저하* — {{.app.metadata.name}} (Degraded)"
+    # ⚠️ 본문의 에러 원문은 **Markdown 특수문자를 중화한 뒤** 싣는다. native telegram은 parseMode를
+    #    "Markdown"으로 하드코딩하는데(위 notifiers 주석), 임의 에러 문자열의 `_`·`*`·backtick·`[`는
+    #    짝이 안 맞아 Telegram이 400(can't parse entities)으로 **메시지 전체를 거부**한다 — 실패 알림이
+    #    실패로 사라지는 자리다. 위 두 템플릿이 이스케이프 없이 되는 건 app 이름이 DNS명이기 때문이고,
+    #    여기 값은 임의 문자열이라 같은 면제가 성립하지 않는다.
+    # ⚠️ 첫 줄만 싣는다 — operationState.message는 리소스별 에러가 붙어 수십 줄이 될 수 있다.
+    #    함수는 sprig(notifications-engine이 TxtFuncMap을 등록한다 — pkg/templates/service.go,
+    #    env/expandenv만 제외). 값 부재는 default로 흡수(map 미존재 키는 Go template에서 nil).
+    # 글리프는 ⚠️ — 🔴(앱 저하)와 구분한다. 워크로드는 계속 돌고 있고 "원하는 상태가 반영되지
+    #    않았다"는 다른 클래스다(alertmanager의 critical=🔴 / warning=⚠️ 어휘와 같은 결).
+    template.app-sync-failed: |
+      message: |
+        {{- $m := .app.status.operationState.message | default "" | toString -}}
+        {{- $l := $m | splitList "\n" | first | default "" | toString -}}
+        {{- $s := $l | trunc 300 | replace "_" "-" | replace "*" "·" | replace "`" "'" | replace "[" "(" -}}
+        ⚠️ *동기화 실패* — {{.app.metadata.name}} ({{.app.status.operationState.phase}})
+        {{ $s }}
   triggers:
     trigger.on-deployed: |
       # oncePer는 "실제 sync 작업이 돈 revision"(operationState.syncResult)에 건다 — status.sync.revision(관측된 desired
@@ -162,13 +179,26 @@ notifications:
     trigger.on-health-degraded: |
       - when: app.status.health.status == 'Degraded'
         send: [app-degraded]
+    trigger.on-sync-failed: |
+      # sync 작업 자체가 Error/Failed로 끝난 경우 — Healthy/Degraded 어느 축에도 안 잡히는 세 번째 얼굴이다.
+      #   hook 실패(예: cnpg의 basebackup-pvc-warmup)는 리소스가 그대로라 health가 Healthy로 남고
+      #   sync_status도 Synced를 유지할 수 있어, vmalert ArgoCDOutOfSync(argocd_app_info의 sync_status
+      #   기반, r6-ci-staleness.yaml)까지 함께 침묵한다 — 이 트리거가 그 실패의 유일한 채널이다.
+      # oncePer는 on-deployed와 같은 관용구(#224): 실제 sync 작업이 돈 revision에 건다. 없으면
+      #   retry(limit 5)가 도는 동안 Running↔Failed 전이마다 같은 실패가 재발화한다.
+      # ⚠️ nil 가드의 대가: syncResult가 안 채워진 채 phase만 Error인 상태(revision resolve 실패 등)는
+      #   이 트리거가 못 잡는다. 가드를 빼면 oncePer가 nil을 평가해 트리거 전체가 에러가 되므로
+      #   대안이 아니다. 그 표면은 sync_status가 Unknown이 되므로 ArgoCDOutOfSync(매처 `!~"Synced"`)가 덮는다.
+      - when: app.status.operationState.phase in ['Error', 'Failed'] and app.status.operationState.syncResult != nil
+        oncePer: 'app.status.operationState.syncResult.revisions != nil ? join(app.status.operationState.syncResult.revisions, ",") : app.status.operationState.syncResult.revision'
+        send: [app-sync-failed]
   subscriptions:                       # ⚠️ YAML 리스트 — 블록 스칼라 `|` 금지(차트가 cm.data.subscriptions로 래핑; `|`면 중첩되어 무효)
     - recipients:
         # recipient = telegram 서비스 + 음수 그룹 chatId(리터럴·비-credential; native는 '-' 접두 음수 그룹만 지원).
         # -5468340205 = "homelab" telegram 그룹. ⚠️ basic group이 supergroup으로 승격되면 id가 -100…으로 바뀐다
         #   (그때 발송 실패 → getUpdates로 새 id 재조회 후 갱신).
         - telegram:-5468340205
-      triggers: [on-deployed, on-health-degraded]
+      triggers: [on-deployed, on-health-degraded, on-sync-failed]
       selector: notify.homelab/telegram=true
 
 dex:

@@ -20,6 +20,7 @@
 | 함정 (traps-detail.md) | where | guard |
 |---|---|---|
 | ArgoCD sync-wave 순서/교착 + 원장 드리프트 | gate | `platform/cnpg/prod/test_sync_wave_ordering.bats`, `platform/argocd/root/test_sync_wave_ledger.bats`, `platform/traefik/prod/test_gateway_sync_wave.bats` |
+| ArgoCD Notifications telegram native — parseMode Markdown 하드코딩(임의 문자열 이스케이프) · sync 실패 무채널 | gate | `platform/argocd/test_argocd_values.bats` |
 | SSA atomic 리스트(HTTPRoute group/kind/weight · CNPG plugins) 영구 OutOfSync | gate | `platform/adguard/prod/test_adguard_route.bats`, `platform/cnpg/prod/test_cluster_params.bats` |
 | 상주 워크로드 OOM 진단 — 코어 수는 그럴듯한 오답이다 (D-e) | gate | `platform/victoria-stack/prod/test_concurrency_pin.bats` |
 | PCIe correctable RxErr 폭주는 ASPM L1이다 — 유휴에서만 나고 열화가 아니다 | gate | `infra/k3s-bootstrap/tests/test_03-host-config.bats` |
