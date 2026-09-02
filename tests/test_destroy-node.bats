@@ -32,13 +32,13 @@ _fixture() {                 # $1 = BULK_MIGRATION_WINDOW_UNTIL 값 · $2 = find
   # argv 기록기 — 권한 명령을 **기록만** 한다. 두 가지만 실물처럼 답한다:
   #   · `test -e`  파괴 후 확인 경로(남아 있지 않다)
   #   · `findmnt`  (2b) bind 소스 게이트가 판정에 쓰는 값
-  #   · `command -v findmnt` 존재 확인
+  #   · `findmnt --version` 존재 확인 — 게이트는 빌트인 `command -v`가 아니라 **실행**으로 잰다
   cat > "$FX/bin/rec" <<'REC'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$REC_LOG"
 case "$*" in
   "test -e "*)            exit 1 ;;   # 파괴 후: 남아 있지 않다
-  "command -v findmnt")   exit 0 ;;
+  "findmnt --version")    exit 0 ;;
   "findmnt "*)            printf '%s\n' "$FM_SRC"; exit 0 ;;
 esac
 REC
@@ -151,7 +151,7 @@ _run_destroy() {             # 나머지 인자는 env 오버라이드
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -qF -- 'k3s 언인스톨러가 없다'
   # ⚠️ 여기서는 로그가 **비어 있지 않다** — (2b) bind 소스 게이트가 그 앞에서 읽기 전용 조회
-  #    (`command -v findmnt` · `findmnt <bulk>`)를 하기 때문이다. 그러니 '0줄'이 아니라
+  #    (`findmnt --version` · `findmnt <bulk>`)를 하기 때문이다. 그러니 '0줄'이 아니라
   #    **파괴 명령이 없음**을 단언한다. (앞의 두 @test는 (2b)에 닿기 전에 거부하므로 0줄이 맞다.)
   run grep -cE 'rm -rf|k3s-uninstall' "$REC_LOG"
   printf '%s' "$output" | grep -qx '0'
@@ -174,10 +174,21 @@ _run_destroy() {             # 나머지 인자는 env 오버라이드
   [ "$status" -eq 1 ]
   # ⚠️ 한 줄 안에서만 보면 **줄바꿈 연결로 우회된다**(`$K3S_RUN rm -rf … \` + 다음 줄 `|| true`).
   #    **파괴** 명령 줄이 백슬래시로 이어지지 않는다는 것까지 잠근다.
-  # ⚠️ 검사 범위를 파괴 호출로 좁힌다 — 게이트의 읽기 전용 조회(`$K3S_RUN command -v findmnt \`)는
+  # ⚠️ 검사 범위를 파괴 호출로 좁힌다 — 게이트의 읽기 전용 조회(`$K3S_RUN findmnt --version \`)는
   #    정당하게 이어진다. 넓게 잡으면 그 줄에 걸려 이 @test가 거짓 red를 낸다(실측: 그렇게 됐다).
   grep -qE '^[^#]*\$K3S_RUN[^#]*(rm -rf|K3S_UNINSTALL)' "$sh"   # 양성 대조: 파괴 호출이 실재한다
   run grep -nE '^[^#]*\$K3S_RUN[^#]*(rm -rf|K3S_UNINSTALL)[^#]*\\$' "$sh"
+  [ "$status" -eq 1 ]
+}
+
+@test "no privileged probe goes through a shell builtin (sudo cannot exec one)" {
+  # ⚠️ `sudo command -v X`는 **항상** 실패한다 — `command`는 bash 빌트인이라 sudo의 PATH 조회
+  #    (execve)가 찾을 실체가 없다(실측: `env command -v findmnt` rc 127). 그 자리에 쓰면 게이트가
+  #    프로브 실패로 **무조건** abort하고, 진단 문구는 엉뚱한 곳(패키지 설치)을 가리킨다.
+  # ⚠️ shellcheck SC2232("Can't use sudo with builtins")는 **리터럴** `sudo command`에만 발화한다 —
+  #    `$K3S_RUN` 간접 호출에는 눈이 멀어(실측) 이 grep이 그 자리를 대신한다.
+  grep -qE '^[^#]*\$K3S_RUN[[:space:]]+findmnt' "$sh"    # 양성 대조: 실행 파일 프로브가 실재한다
+  run grep -nE '^[^#]*\$K3S_RUN[[:space:]]+(command|type|builtin|hash|source|export|cd|alias)\b' "$sh"
   [ "$status" -eq 1 ]
 }
 
@@ -200,15 +211,15 @@ _run_destroy() {             # 나머지 인자는 env 오버라이드
   _run_destroy DR_DRILL_DESTROY_CONFIRM=1 K3S_UNINSTALL="$FX/bin/k3s-uninstall.sh"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -qF -- 'bind 소스가 파괴 대상 안에 있다'
-  # 파괴 명령이 하나도 나가지 않았다 — findmnt/command -v 조회만 기록돼 있어야 한다.
+  # 파괴 명령이 하나도 나가지 않았다 — findmnt 조회(--version · SOURCE)만 기록돼 있어야 한다.
   run grep -cF -- 'rm -rf' "$REC_LOG"
   printf '%s' "$output" | grep -qx '0'
 }
 
 @test "the bind-source gate refuses when findmnt is missing (absence is not proof of safety)" {
   _fixture ''
-  # 기록기에서 `command -v findmnt`만 실패시킨다 — 나머지는 그대로.
-  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$REC_LOG"\ncase "$*" in "command -v findmnt") exit 1 ;; "test -e "*) exit 1 ;; esac\n' > "$FX/bin/rec"
+  # 기록기에서 존재 프로브(`findmnt --version`)만 실패시킨다 — 나머지는 그대로.
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$REC_LOG"\ncase "$*" in "findmnt --version") exit 1 ;; "test -e "*) exit 1 ;; esac\n' > "$FX/bin/rec"
   chmod +x "$FX/bin/rec"
   _run_destroy DR_DRILL_DESTROY_CONFIRM=1 K3S_UNINSTALL="$FX/bin/k3s-uninstall.sh"
   [ "$status" -ne 0 ]

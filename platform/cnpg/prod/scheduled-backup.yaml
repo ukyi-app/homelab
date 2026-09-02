@@ -4,7 +4,11 @@ metadata:
   name: pg-daily-r2
   namespace: database
 spec:
-  schedule: "0 0 3 * * *" # CNPG 6-field cron: 매일 03:00
+  # ⚠️ **이 시각은 UTC다 — k8s CronJob 규약(k3s 노드 TZ=Asia/Seoul) 밖이다.** ScheduledBackup은
+  #    operator 파드가 발화하고 그 파드의 TZ는 UTC라, 03:00Z = **12:00 KST**(사용 시간대 한낮)다.
+  #    라이브 실측 2026-09-02: status.lastScheduleTime = 2026-09-02T03:00:00Z.
+  #    즉 로컬 basebackup(02:30 KST)보다 9.5시간 **뒤**다 — 형제 CronJob들의 시각과 직접 비교하지 말 것.
+  schedule: "0 0 3 * * *" # CNPG 6-field cron: 매일 03:00Z(=12:00 KST)
   immediate: true
   backupOwnerReference: self
   cluster:

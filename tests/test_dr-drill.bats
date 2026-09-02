@@ -180,6 +180,20 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값 · 결과 = �
   grep -q 'delete pvc' "$sh"
 }
 
+@test "dr-drill switches to the repo kubeconfig BEFORE its first live query (proof target == destroy target)" {
+  # 🔴 [0.5]가 복구할 아카이브 prefix(serverName)를 **호출 셸의 KUBECONFIG**로 읽으면, 증명 대상과
+  #    파괴 대상이 어긋난다 — 스크립트 자신의 :55-57 주석이 명명한 그 클래스다. 두 얼굴:
+  #      (a) ambient 미설정(런북의 정본 호출이 그렇다) → kubectl 실패 → `|| true` → 빈 값 →
+  #          「serverName을 파생하지 못했다」로 **거짓 abort**(진단이 클러스터 상태를 가리킨다).
+  #      (b) 반대편 kubeconfig 잔존 → 남의 아카이브로 PRE 판정이 통과한 뒤 이 노드를 파괴한다.
+  # ⚠️ `^[^#]*` 관용구 유지 — 이 파일과 dr-drill.sh 양쪽 주석이 같은 리터럴을 담고 있다.
+  u=$(grep -nE '^use_live_kubeconfig$' "$sh" | head -1 | cut -d: -f1)
+  a=$(grep -nE '^[^#]*ARCHIVE_SERVER=' "$sh" | head -1 | cut -d: -f1)
+  [ -n "$u" ]
+  [ -n "$a" ]
+  [ "$u" -lt "$a" ]
+}
+
 @test "dr-drill re-exports KUBECONFIG after the VM is rebuilt" {
   # host-up.sh가 kubeconfig를 재생성하므로 재구축 후 재export가 없으면 stale 컨텍스트로 죽는다.
   grep -q 'use_live_kubeconfig # host-up.sh가 kubeconfig를 재생성한다' "$sh"

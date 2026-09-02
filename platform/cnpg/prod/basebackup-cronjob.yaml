@@ -4,7 +4,9 @@ metadata:
   name: cnpg-local-basebackup # job_name=~"cnpg-local-basebackup.*"가 M5의 LocalBasebackupStale에 공급됨
   namespace: database
 spec:
-  schedule: "30 2 * * *" # 02:30, 03:00 R2 ScheduledBackup보다 먼저
+  # ⚠️ CronJob은 k3s 노드 TZ(Asia/Seoul)로 발화한다. R2 ScheduledBackup(03:00Z=12:00 KST)은
+  #    operator TZ(UTC)라 **다른 시계**다 — '먼저/나중'을 이 숫자끼리 비교해서 세우지 말 것.
+  schedule: "30 2 * * *" # 02:30 KST
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

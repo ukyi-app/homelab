@@ -28,3 +28,9 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+    # cert-manager(-3)의 CRD/webhook에 cross-Application 의존인데 root는 순서만 정하고 health를
+    # 기다리지 않는다 — dry-run이 Certificate CRD보다 빨라 SyncFailed가 나는 콜드스타트 레이스에서
+    # retry가 없으면 새 커밋/명시 sync 전까지 Missing에 고착한다(appset에서 2026-08-14 실측된 기전).
+    retry:
+      limit: 5
+      backoff: { duration: 15s, factor: 2, maxDuration: 5m }

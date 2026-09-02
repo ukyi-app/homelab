@@ -10,7 +10,9 @@ metadata:
   name: cache-backup
   namespace: cache
 spec:
-  schedule: "45 3 * * *" # 03:45 KST — cnpg 백업(02:30/03:00/04:00 KST)과 창이 겹치지 않게
+  # cnpg의 KST 창(로컬 basebackup 02:30 · pgdump 04:00)과 겹치지 않게. R2 ScheduledBackup은 여기
+  # 없다 — 그쪽만 operator TZ(UTC)의 03:00Z, 즉 **12:00 KST**라 이 창과 무관하다.
+  schedule: "45 3 * * *" # 03:45 KST
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

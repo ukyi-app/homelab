@@ -89,7 +89,10 @@ fi
 # ⚠️ 리더의 rc와 **이 `[ -n ]`은 다른 것을 본다.** rc는 "선언을 읽었는가", 여기는 "그 값이 경로로
 #    쓸 수 있는가"다. `BULK_STORAGE_PATH=""`는 정본 선언이라 rc 0이지만 findmnt에 줄 경로가 아니다.
 [ -n "$_bulk_path" ] || fail "versions.env의 BULK_STORAGE_PATH가 빈 값으로 선언돼 있다 — bulk가 파괴 대상 안에 있는지 판정할 수 없다."
-$K3S_RUN command -v findmnt >/dev/null 2>&1 \
+# ⚠️ 프로브는 `command -v`가 아니라 **실행**이다. `command`는 bash 빌트인이라 sudo가 execve로
+#    찾을 실체가 없고(`env command -v findmnt` rc 127), `$K3S_RUN command -v findmnt`는 findmnt이
+#    있든 없든 실패해 이 게이트가 **무조건** abort한다 — 파괴가 아니라 드릴 자체가 막힌다.
+$K3S_RUN findmnt --version >/dev/null 2>&1 \
   || fail "findmnt가 없다 — bulk의 bind 소스를 확인할 수 없다. 부재는 '안전'이 아니라 '판정 불가'다(util-linux 설치 후 재시도)."
 # bind 마운트의 SOURCE는 `<device>[<subpath>]` 꼴이다. subpath가 파괴 대상 트리 안이면 거부한다.
 # ⚠️ `|| true`로 삼키지 않는다. findmnt이 답하지 못하는 상태는 '안전'이 아니라 **더 위험**할 수 있다 —

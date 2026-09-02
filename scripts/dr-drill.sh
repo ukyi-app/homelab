@@ -50,6 +50,16 @@ SEALED_KEY_BACKUP_DIR="${SEALED_KEY_BACKUP_DIR:-}"  # 소비자 ≥1 또는 comm
 # 노드 권한 명령 시임 — 베어메탈에서는 **여기가 곧 노드**라 로컬 sudo다(k3s-install.sh·apply-storage.sh와
 # 같은 규약). [6.5]가 bulk 백킹 디렉토리를 읽을 때 쓴다. 테스트는 argv 기록기를 꽂는다.
 K3S_RUN="${K3S_RUN:-sudo}"
+# ⚠️ **kubeconfig 전환은 첫 kubectl보다 앞이어야 한다.** 아래 ARCHIVE_SERVER 파생이 이 드릴의 첫
+#    라이브 조회인데, 그때 KUBECONFIG가 아직 호출 셸의 것이면 증명 대상과 파괴 대상이 어긋난다:
+#    미설정이면(런북의 정본 호출이 그렇다) 조회가 실패해 「serverName을 파생하지 못했다」로 거짓
+#    abort하고, 반대편 클러스터의 kubeconfig가 남아 있으면 **남의 아카이브**로 복구 가능성을
+#    증명한 뒤 이 노드를 파괴한다. 형제 reset-pg-r2-archive.sh·netpol-rehearsal.sh가 D-i로 닫은
+#    바로 그 클래스다. (2026-08-17에 ARCHIVE_SERVER 파생이 이 두 줄 **앞**에 삽입돼 뒤집혔다.)
+KUBECONFIG_PATH="$REPO_ROOT/infra/k3s-bootstrap/kubeconfig"
+use_live_kubeconfig() { export KUBECONFIG="$KUBECONFIG_PATH"; }
+use_live_kubeconfig
+
 NS="database"
 LIVE_CLUSTER="pg"
 # ⚠️ k8s Cluster 이름과 아카이브 serverName은 다른 것이다(restore-drill-script.sh와 같은 이유).
@@ -59,7 +69,6 @@ ARCHIVE_SERVER="$(kubectl -n "$NS" get cluster "$LIVE_CLUSTER" \
   -o jsonpath='{.spec.plugins[?(@.name=="barman-cloud.cloudnative-pg.io")].parameters.serverName}' 2>/dev/null || true)"
 [ -n "$ARCHIVE_SERVER" ] || { echo "DR DRILL FAIL: Cluster ${LIVE_CLUSTER}에서 아카이브 serverName을 파생하지 못했다 — 무엇을 복구할지 모른 채 파괴할 수 없다" >&2; exit 1; }
 DB="app"
-KUBECONFIG_PATH="$REPO_ROOT/infra/k3s-bootstrap/kubeconfig"
 
 # PG 이미지는 cluster.yaml(SSOT)에서 파생 — 하드코딩 핀은 PG 메이저 갱신 시 cross-major
 # 물리복구 불가로 드릴을 조용히 죽인다(M6). 인클러스터 소비자(basebackup·restore-drill)는
@@ -73,9 +82,6 @@ esac
 
 : "${SOPS_AGE_KEY_FILE:?export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt (노드 유실에도 살아남는 out-of-band 입력)}"
 test -s "$SOPS_AGE_KEY_FILE" || { echo "DR DRILL FAIL: age key missing at $SOPS_AGE_KEY_FILE"; exit 1; }
-
-use_live_kubeconfig() { export KUBECONFIG="$KUBECONFIG_PATH"; }
-use_live_kubeconfig
 
 echo "==> [0] DR 입력이 노드 유실에도 살아남는지 확인: Terraform state + R2 백업은 R2에 있다"
 terraform -chdir=infra/cloudflare state list >/dev/null \

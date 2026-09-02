@@ -243,6 +243,9 @@
 
 ### CronJob k3s VM TZ(Asia/Seoul)
 - CronJob은 k3s VM의 TZ(Asia/Seoul)로 발화한다 — UTC로 읽지 말 것.
+- **CNPG ScheduledBackup은 이 규약 밖이다** — operator 파드가 발화하고 그 TZ는 UTC라 `0 0 3 * * *`은
+  03:00Z=**12:00 KST**다(실측 2026-09-02 `status.lastScheduleTime`). 두 시계를 같은 축에 놓고
+  '먼저/겹치지 않게' 같은 순서 근거를 세우면 그 근거가 거짓이 된다.
 
 ### NetworkPolicy ipBlock pod-CIDR → 전체 허용
 - **NetworkPolicy ipBlock에 pod CIDR(10.42.0.0/16)을 넣으면 "전체 파드 허용"** — default-deny가

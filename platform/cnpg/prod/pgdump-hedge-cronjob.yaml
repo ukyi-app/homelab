@@ -4,7 +4,9 @@ metadata:
   name: pg-dump-hedge-r2
   namespace: database
 spec:
-  schedule: "0 4 * * *" # 04:00, 두 백업이 끝난 뒤
+  # ⚠️ 로컬 basebackup(02:30 KST) 뒤다. R2 ScheduledBackup은 여기 끼지 않는다 — 그쪽은 operator
+  #    TZ(UTC)의 03:00Z, 즉 12:00 KST라 이 창보다 **뒤**에 돈다(다른 시계다).
+  schedule: "0 4 * * *" # 04:00 KST
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

@@ -22,3 +22,6 @@ spec:
     syncOptions:
       - CreateNamespace=true # moot(ns 없음)이나 appset namespaces-prod와 동일 옵션 유지
       - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: { duration: 15s, factor: 2, maxDuration: 5m }
