@@ -52,22 +52,30 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 #    쏘면 아무 경고 없이 반대편을 때린다. 아래 두 @test가 그 프리플라이트의 **존재와 강도**를
 #    고정한다 — 주입이 조용히 사라지면 red다.
 # ⚠️ prerequisite가 아니라 recipe 줄이어야 한다(test_guard-skip-signalling이 make verify-posture를
-#    실제로 실행하므로 prerequisite는 그 @test들을 죽인다). make -n 이 recipe 줄을 보여주므로
-#    아래 검사는 그 배치까지 함께 고정한다.
+#    실제로 실행하므로 prerequisite는 그 @test들을 죽인다). make -n 이 recipe 줄을 **순서대로**
+#    보여주므로 아래 검사는 존재뿐 아니라 그 배치(변이 명령보다 앞)까지 줄 번호로 함께 고정한다.
 
 @test "mutating ops targets assert cluster identity before touching the cluster" {
   bad=""
-  for t in argo-sync argo-terminate; do
+  # (타깃:변이 명령) 쌍 — 이름이 약속한 "before"의 피연산자다. 존재 grep만으로는 프리플라이트가
+  # 변이 명령 **뒤**로 밀려도 초록이다(실측: Makefile argo-sync의 `@$(ASSERT_IDENTITY)`와
+  # `kubectl … patch` 줄을 맞바꿔도 이 파일이 7/7 ok였다 — 잘못된 클러스터를 때린 **다음** 확인).
+  for spec in "argo-sync:kubectl -n argocd patch app" \
+              "argo-terminate:kubectl -n argocd patch app" \
+              "bootstrap:bash scripts/bootstrap.sh"; do
+    t="${spec%%:*}"; mut="${spec#*:}"
     run make -n "$t" APP=cnpg
     [ "$status" -eq 0 ]
     echo "$output" | grep -q 'assert-cluster-identity.sh' || bad="$bad $t"
     # 변이 경로는 warn이 아니라 fail-closed여야 한다.
     echo "$output" | grep -q 'assert-cluster-identity.sh --warn' && bad="$bad $t(warn)"
+    # 배치 — `make -n`이 recipe 줄을 순서대로 보여주므로 줄 번호로 고정한다(관용구: test_pr-sweeper.bats).
+    a="$(printf '%s\n' "$output" | grep -n 'assert-cluster-identity\.sh' | head -1 | cut -d: -f1)"
+    k="$(printf '%s\n' "$output" | grep -nF -- "$mut" | head -1 | cut -d: -f1)"
+    [ -n "$k" ] || bad="$bad $t[변이줄부재]"   # 변이 명령이 리네임되면 순서 판정이 공허해진다
+    { [ -n "$a" ] && [ -n "$k" ] && [ "$a" -lt "$k" ]; } || bad="$bad $t[순서]"
   done
-  run make -n bootstrap
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'assert-cluster-identity.sh' || bad="$bad bootstrap"
-  [ -z "$bad" ]   # 비어야 통과. 디버깅: echo "$bad"
+  [ -z "$bad" ] || { echo "클러스터 정체성 프리플라이트 결함: $bad"; false; }
 }
 
 @test "read-only ops targets warn instead of blocking (3am observability stays reachable)" {
