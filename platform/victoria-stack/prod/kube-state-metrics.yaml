@@ -5,9 +5,20 @@ metadata: { name: kube-state-metrics }
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata: { name: kube-state-metrics }
+# ⚠️ **`configmaps`·`secrets`를 다시 넣지 마라**(2026-09-02 제거 — 상류 기본 ClusterRole의 복사본이었다).
+#    k8s의 `list secrets`는 메타데이터가 아니라 **Secret data 전체**를 돌려주므로, 이 SA 토큰 하나로
+#    sops-age·sealed-secrets sealing key·cloudflared 토큰·pg-superuser·ghcr-pull이 한 번에 열린다
+#    (sealing key는 git에 있는 전 SealedSecret의 영구 복호화 능력으로 승격된다).
+#    그런데 이 레포는 `kube_secret_*`/`kube_configmap_*`를 **어디서도 쓰지 않는다**(레포 전역 grep 0건 —
+#    실사용 kube_* 접두는 pod/job/cronjob/deployment/statefulset/node/endpoint 계열뿐). 즉 순수 노출면이었다.
+# ⚠️ 이 목록과 아래 Deployment의 `--resources=`는 **같은 집합이어야 한다**. 한쪽만 지우면 KSM reflector가
+#    403 실패를 영구 로깅한다(반대로 ClusterRole에만 남은 grant는 요청조차 안 하는 죽은 권한이다 —
+#    serviceaccounts·replicationcontrollers·limitranges·horizontalpodautoscalers·poddisruptionbudgets·
+#    volumeattachments가 그랬고 같은 커밋에서 정리했다).
+#    가드: platform/victoria-stack/prod/test_automount.bats(부재 단언 + 양성 대조 + 두 목록의 등식)
 rules:
   - apiGroups: [""]
-    resources: ["configmaps", "secrets", "nodes", "pods", "services", "serviceaccounts", "resourcequotas", "replicationcontrollers", "limitranges", "persistentvolumeclaims", "persistentvolumes", "namespaces", "endpoints"]
+    resources: ["nodes", "pods", "services", "resourcequotas", "persistentvolumeclaims", "persistentvolumes", "namespaces", "endpoints"]
     verbs: ["list", "watch"]
   - apiGroups: ["apps"]
     resources: ["statefulsets", "daemonsets", "deployments", "replicasets"]
@@ -15,14 +26,8 @@ rules:
   - apiGroups: ["batch"]
     resources: ["cronjobs", "jobs"]
     verbs: ["list", "watch"]
-  - apiGroups: ["autoscaling"]
-    resources: ["horizontalpodautoscalers"]
-    verbs: ["list", "watch"]
-  - apiGroups: ["policy"]
-    resources: ["poddisruptionbudgets"]
-    verbs: ["list", "watch"]
   - apiGroups: ["storage.k8s.io"]
-    resources: ["storageclasses", "volumeattachments"]
+    resources: ["storageclasses"]
     verbs: ["list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -55,7 +60,7 @@ spec:
       containers:
         - name: kube-state-metrics
           image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.19.1@sha256:85108987d044b18a098126732f98602df408888c0f7d456241f5abefb9744bc1
-          args: ["--port=8080", "--telemetry-port=8081", "--resources=configmaps,cronjobs,daemonsets,deployments,endpoints,jobs,namespaces,nodes,persistentvolumeclaims,persistentvolumes,pods,replicasets,resourcequotas,secrets,services,statefulsets,storageclasses"]
+          args: ["--port=8080", "--telemetry-port=8081", "--resources=cronjobs,daemonsets,deployments,endpoints,jobs,namespaces,nodes,persistentvolumeclaims,persistentvolumes,pods,replicasets,resourcequotas,services,statefulsets,storageclasses"]
           env:
             - { name: GOMEMLIMIT, value: "57MiB" }
           ports:
