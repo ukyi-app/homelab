@@ -209,6 +209,29 @@ run_init() {
   [ "$status" -ne 0 ]
 }
 
+@test "a half-scaffolded clone that lost scripts.scaffold still re-scaffolds (entry point, not npm script)" {
+  # 04 인계의 별건: 스캐폴더는 자기 실행 중에 **package.json을 재작성한다**. 그 뒤 어떤 이유로든
+  # (타임아웃·중단·스캐폴더 오류) 죽으면 `scripts.scaffold`가 사라진 채 scaffold/가 남는데, 재개가
+  # `bun run scaffold`였다면 그 재호출이 "Script not found"로 **영구히** 실패해 바로 위 재실행 계약이
+  # 깨졌다(timeoutMs: 0은 트리거 하나를 없앴을 뿐이다). init은 preflight가 검증한 **진입점 파일**을
+  # 직접 부르므로 재개가 package.json 상태에 의존하지 않는다.
+  git clone -q --bare "$INIT_REMOTES/homelab-app-template.git" "$INIT_REMOTES/myapp.git"
+  git -c "url.$INIT_REMOTES/.insteadOf=https://github.com/ukyi-app/" \
+    clone -q https://github.com/ukyi-app/myapp.git "$INIT_PARENT/myapp"
+  [ -d "$INIT_PARENT/myapp/scaffold" ]           # 진입점은 살아 있다(계약이 검증한 그 파일)
+  printf 'kind: web\n' > "$INIT_PARENT/myapp/.app-config.yml"
+  # 스캐폴더가 재작성하고 죽은 상태를 그대로 만든다 — scaffold script만 소실.
+  printf '{"name":"myapp","scripts":{"dev":"bun src/index.ts"}}\n' > "$INIT_PARENT/myapp/package.json"
+  run grep -qF '"scaffold"' "$INIT_PARENT/myapp/package.json"
+  [ "$status" -eq 1 ]                            # 픽스처 실재 — script가 정말 없다(없어야 이 레인이 증언한다)
+  run_init myapp --archetype api --adopt --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold --archetype api --name myapp --yes)" -ge 1 ]
+  run git -C "$INIT_REMOTES/myapp.git" show main:scaffold/scaffold.ts
+  [ "$status" -ne 0 ]                            # 수렴 완료(scaffold/ 제거 후 push)
+}
+
 @test "a foreign pushInsteadOf is observed and refused before scaffold and push (no bypass flag)" {
   # 레포는 이미 존재(마커 없음) — --adopt 재개 시나리오로 canonical origin 클론을 준비한다.
   git clone -q --bare "$INIT_REMOTES/homelab-app-template.git" "$INIT_REMOTES/myapp.git"
@@ -312,12 +335,12 @@ run_init() {
 @test "the scaffold and network call sites of init/secrets pin timeoutMs: 0 (the seam default would SIGTERM them)" {
   # exec seam 기본은 30s이고 "느린 경로는 콜사이트가 올린다"가 그 계약인데, 이 다섯 자리는 결정된
   # 적이 없었다. 스캐폴드는 lock 재생성 `bun install`을 품어 30s를 넘으면 SIGTERM이 scaffold.ts의
-  # rollback **전에** 트리를 죽이고, package.json이 재작성된 채(scripts.scaffold 소실) 남아 init의
-  # 재실행 계약이 깨진다. clone/push/`gh repo create`도 같은 망 왕복이다.
+  # rollback **전에** 트리를 죽이고 package.json이 재작성된 채 남는다(그 상태에서의 재개는 이제 위
+  # "lost scripts.scaffold" 레인이 증언한다 — 진입점 직접 호출). clone/push/`gh repo create`도 같은 망 왕복이다.
   # 증인이 정적 대조인 이유: bun 스텁 sleep 레인은 스위트 벽시계를 늘리고 timeoutMs 주입 심이 없어
   # stub-env 흉내가 된다(원 처방이 그 레인을 기각했다).
   # 첫 줄은 비공허 바닥값 — 네 콜사이트가 실재해야 아래 등식이 뜻을 갖는다(리네임되면 red).
-  [ "$(grep -cE '(sh\("gh", \["repo", "create"|sh\("bun", \["run", "scaffold"|sh\("git", \["clone"|git\(dest, \["push")' tools/lib/init.ts)" -eq 4 ]
-  [ "$(grep -cE '(sh\("gh", \["repo", "create"|sh\("bun", \["run", "scaffold"|sh\("git", \["clone"|git\(dest, \["push").*timeoutMs: 0' tools/lib/init.ts)" -eq 4 ]
+  [ "$(grep -cE '(sh\("gh", \["repo", "create"|sh\("bun", \[SCAFFOLD_ENTRY|sh\("git", \["clone"|git\(dest, \["push")' tools/lib/init.ts)" -eq 4 ]
+  [ "$(grep -cE '(sh\("gh", \["repo", "create"|sh\("bun", \[SCAFFOLD_ENTRY|sh\("git", \["clone"|git\(dest, \["push").*timeoutMs: 0' tools/lib/init.ts)" -eq 4 ]
   [ "$(grep -cE 'git\(cwd, \["push".*timeoutMs: 0' tools/lib/secrets.ts)" -eq 1 ]
 }
