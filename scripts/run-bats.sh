@@ -60,4 +60,8 @@ while IFS= read -r f; do
 done < <(git ls-files '*test_*.bats' | LC_ALL=C sort)
 
 if [ "${1:-}" = "--list" ]; then printf '%s\n' "${SELECTED[@]}"; exit 0; fi
-[ "${#SELECTED[@]}" -gt 0 ] && bats "${SELECTED[@]}"
+# ⚠️ `--print-output-on-failure` — 실패한 @test의 `$output`을 TAP에 그대로 싣는다. gate의 「무거운 스위트
+#    동시 실행」 스텝에서만 재현되는 flake(test_02-host-preflight의 happy-path 레인 2회, 2026-09-01·09-02)가
+#    "line 47: [ "$status" -eq 0 ] failed" 한 줄만 남기고 죽어 원인을 잡을 수 없었다 — 이 플래그가 없으면
+#    재발해도 재실행 말고는 할 것이 없다. 통과한 @test에는 아무 영향이 없다(bats-core 1.5+).
+[ "${#SELECTED[@]}" -gt 0 ] && bats --print-output-on-failure "${SELECTED[@]}"

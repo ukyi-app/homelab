@@ -16,7 +16,9 @@ metadata:
   name: pg-rw-tailscale
   namespace: database
   annotations:
-    tailscale.com/hostname: pg-rw # → pg-rw.<tailnet>.ts.net + 안정적 100.x IP
+    # 요청 machine name — 실제 이름은 `-N` 접미가 붙을 수 있다(traefik-ts와 같은 이유 · 2026-09-02 실측 `pg-rw-1`).
+    # 접속 호스트의 SSOT는 `kubectl -n database get svc pg-rw-tailscale -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'`.
+    tailscale.com/hostname: pg-rw
 spec:
   type: LoadBalancer
   loadBalancerClass: tailscale

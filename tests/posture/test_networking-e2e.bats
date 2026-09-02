@@ -45,25 +45,35 @@ setup() {
   [ "$output" = "200" ]
 }
 
-@test "tailscale proxy device for Traefik is present in tailnet" {
+@test "the Traefik tailscale proxy device is ONLINE in the tailnet (name derived from the Service, not assumed)" {
   # operator 자체 디바이스(homelab-operator)는 least-privilege ACL 탓에 member 디바이스의
   # netmap에 안 보인다 — split-horizon이 실제로 의존하는 것은 Traefik 프록시 디바이스다.
-  run bash -c "tailscale status | awk '{print \$2}' | grep -cx homelab"
-  [ "$output" -ge 1 ]
+  # ⚠️ 이름을 가정하지 않는다. 옛 단언 `grep -cx homelab`은 (a) 요청 이름(`tailscale.com/hostname`)이
+  #    coordination server의 `-N` 접미로 바뀌면(실제 `homelab-1`) 0건이고, (b) 17일 offline인 Mac 시대
+  #    잔존 디바이스 `homelab`을 세어 **시체로 통과**했다(감사 2026-09-02). 실제 machine name의 SSOT는
+  #    Service의 status.loadBalancer.ingress[].hostname이고, 온라인 여부는 `tailscale status --json`의
+  #    Peer.Online이 준다 — 둘을 묶어야 "프록시가 살아 있다"가 된다.
+  run bash -c "kubectl -n gateway get svc traefik-ts -o jsonpath='{.status.loadBalancer.ingress[*].hostname}'"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  name="${output%%.*}"
+  run bash -c "tailscale status --json | jq -r --arg n \"$name\" '[.Peer[] | select(.DNSName | startswith(\$n + \".\")) | .Online] | @json'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[true]" ]   # 정확히 1대, 온라인 — 0대(미등록)·2대(잔존 디바이스)·offline 전부 red
 }
 
-@test "AdGuard resolves *.home to the stable Tailscale IP" {
-  # adguard-dns LB IP(=VM IP)는 Mac에서 직접 라우팅되지 않는다 — 실제 소비 경로는
-  # OrbStack 포워딩(dns-forward-trigger 유닛이 트리거, Mac의 localhost/LAN/tailnet IP에
-  # 바인드)이다. 이 스위트는 Mac mini(호스트)에서 돌므로 127.0.0.1이 그 경로다.
-  #
-  # ⚠️ **NUC 이전 후 이 전제는 거짓이 된다.** 베어메탈에는 OrbStack 포워딩도 그 더미 유닛도
-  #    없고(host-config 계층이 승계하지 않는다), svclb hostPort가 노드 실주소에 직접 걸린다.
-  #    이 파일은 tests/.ci-exclude(posture 그룹)라 게이트가 보지 않으므로 그 순간에도 red가
-  #    나지 않는다 — KUBECONFIG를 NUC로 돌린 뒤 `make verify-posture`를 처음 돌릴 때
-  #    이 한 건만 실패하고, 메시지는 원인을 전혀 시사하지 않는다. 그때 전송 경로를 노드 IP로
-  #    바꿀 것(G4 이후, nuc-port-g2.md B8).
-  tsip=$(tailscale ip -4 homelab)
-  run bash -c "dig +short +time=3 @127.0.0.1 whoami.home.${DOMAIN}"
+@test "AdGuard resolves *.home to the Traefik proxy's Tailscale IP via the node's hostPort (R7 LAN path)" {
+  # 베어메탈 NUC: svclb hostPort 53이 노드 실주소에 직접 걸린다 — R7(라우터 DHCP option 6 → AdGuard)이
+  # LAN 기기에 주는 경로가 정확히 `@<K3S_NODE_IP>`다. (예전 Mac mini 시대의 OrbStack 127.0.0.1 포워딩
+  # 전제는 2026-08-17 컷오버로 소멸했고, 이 @test는 그 뒤 첫 `make verify-posture`에서 예고대로 red였다.)
+  # 기대값은 이름이 아니라 **Service가 보고하는 프록시 IP**다 — `tailscale ip -4 homelab`은 요청 이름이
+  # `-N` 접미로 바뀐 순간(또는 잔존 디바이스가 그 이름을 점유한 동안) 엉뚱한 기기를 가리킨다.
+  run bash -c "kubectl -n gateway get svc traefik-ts -o jsonpath='{.status.loadBalancer.ingress[*].ip}'"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  tsip="$output"
+  node_ip="$("$BATS_TEST_DIRNAME/../../infra/k3s-bootstrap/versions-read.sh" K3S_NODE_IP)"
+  [ -n "$node_ip" ]
+  run bash -c "dig +short +time=3 @${node_ip} whoami.home.${DOMAIN}"
   [ "$output" = "$tsip" ]
 }

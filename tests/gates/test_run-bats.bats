@@ -56,9 +56,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   TMPD="$(mktemp -d)"
   # ⚠️ 사본이 $TMPD에 있으면 러너가 `dirname/..`로 계산하는 ROOT가 /tmp가 되어 tests/.ci-exclude를
   #    못 찾는다. ROOT만 실 레포로 고정한다 — fd 0 격리 줄은 바이트 그대로 남는다(그게 피시험 대상이다).
-  grep -vF 'bats "${SELECTED[@]}"' "$ROOT/scripts/run-bats.sh" \
+  grep -vF 'bats --print-output-on-failure "${SELECTED[@]}"' "$ROOT/scripts/run-bats.sh" \
     | sed "s|^ROOT=.*|ROOT='$ROOT'|" > "$TMPD/runner.sh"
-  run grep -cF 'bats "${SELECTED[@]}"' "$TMPD/runner.sh"
+  run grep -cF 'bats --print-output-on-failure "${SELECTED[@]}"' "$TMPD/runner.sh"
   [ "$output" -eq 0 ]
   printf 'readlink /proc/self/fd/0\n' >> "$TMPD/runner.sh"
 
