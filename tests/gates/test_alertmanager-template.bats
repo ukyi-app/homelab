@@ -69,7 +69,15 @@ setup() {
   # 포함하므로 bash -c 보간 대신 here-string(<<<)으로 원문 그대로 grep에 전달한다.
   # ⚠️ 템플릿 머리의 {{- /* … */ -}} 주석이 이 함정을 '산문'으로 문서화한다(reReplaceAll 언급) —
   #    가드는 사용처만 잡아야 하므로 Go-template 주석 블록을 벗겨낸 뒤 검사한다(구 죽은 가드가 숨겼던 오탐).
-  stripped="$(sed '/{{- *\/\*/,/\*\/ *-}}/d' <<<"$MSG")"
+  # ⚠️ **한 줄 주석을 먼저 지운다(2단 strip).** sed 주소 범위는 시작 줄에서 끝나지 않는다 — 한 줄짜리
+  #    `{{- /* … */ -}}`는 그 줄에서 범위를 열고 다음 종료 매치(없으면 EOF)까지 지운다. 실측 2026-09-03:
+  #    message에 한 줄 주석 + 그 뒤 `reReplaceAll`을 더하면 1단 sed의 stripped가 3115→2697B로 붕괴해
+  #    아래 두 부재 단언이 **빈 것에 대한 참**이 되고 12/12 green이었다(2단에서는 reReplaceAll 1건 → red).
+  #    1단이 한 줄 주석을 그 자리에서 지워 범위가 안 열리고, 2단이 머리의 다중행 블록만 벗긴다.
+  stripped="$(sed 's|{{- *//*\*.*\*/ *-}}||g' <<<"$MSG" | sed '/{{- *\/\*/,/\*\/ *-}}/d')"
+  # 앵커 양성 대조 — strip이 과도해지면(미종결 `{{- /*` 등) 부재 단언이 공허해지기 전에 여기서 red.
+  # 크기 하한(`[ ${#stripped} -ge 1000 ]`)은 판별력이 없다 — 붕괴 후에도 2697B가 남는다(실측).
+  printf '%s' "$stripped" | grep -q 'range .Alerts'
   run grep -q 'reReplaceAll' <<<"$stripped"
   [ "$status" -ne 0 ]
   run grep -qE '\|[[:space:]]*safeHtml|safeHtml[[:space:]]+\.' <<<"$stripped"
