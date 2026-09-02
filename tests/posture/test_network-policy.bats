@@ -42,10 +42,33 @@ probe() {
   # ⚠️ 옛 jsonpath 형태는 두 겹으로 vacuous했다. (a) 라벨 파드가 0건이면(DR 재구축 직후·전 앱 scale-0·
   # app.kubernetes.io/name 라벨 드리프트) 빈 출력이 `!= *False*`를 만족한다. (b) Ready condition을
   # **아직 못 쓴** 파드도 빈 문자열이라 같이 통과한다. -o json 3단 단언으로 둘 다 닫는다.
+  #
+  # ⚠️ 그런데 그 바닥값(`>= 1`)이 **앱 개수에 결합**돼 있었다. 인-레포 앱이 0개가 된 뒤로는
+  # (apps/README.md — page·trip-mate-api 철거) 완전히 건강한 클러스터에서도 이 @test가 red였고,
+  # 그 비-0은 AGENTS.md가 규정한 "KUBECONFIG 부재 = SKIP 신호"와 구별되지 않았다. 형제
+  # `test_internal-by-default.bats:14-18`이 같은 병을 이미 진단해 분모를 플랫폼 소유로 옮겼는데,
+  # apps/README.md의 "앱 개수에 걸린 바닥값 4개를 0으로" 캠페인이 **라이브 전용인 이 다섯 번째**를
+  # 열거에서 빠뜨렸다. 그래서 분모를 셋으로 나눈다:
+  #   (a) 네임스페이스 실재 — 앱 개수와 무관한 양성 대조. `kubectl -n <없는 ns> get pods -o json`은
+  #       rc 0에 빈 목록이라(실측) 조회 성공만으로는 도메인 실재를 증언하지 못한다.
+  #   (b) 라벨 드리프트 = 열거 붕괴 — prod에 파드가 있는데 셀렉터가 0건이면 red.
+  #   (c) 앱 파드 0건은 **정상 상태**다(공유 차트 `route.public` 기본값이 false — 앱은 teardown
+  #       없이도 0이 된다). 잴 것이 없으므로 skip으로 요란하게 표시하고, 앱을 온보딩하면 자동으로
+  #       실질 판정으로 돌아온다. 래칫도 손 관리 수치도 두지 않는다.
+  run bash -c "kubectl get ns prod -o name"
+  [ "$status" -eq 0 ]
+  run bash -c "kubectl -n prod get pods -o json"
+  [ "$status" -eq 0 ]
+  all_pods="$(jq '.items|length' <<<"$output")"
   run bash -c "kubectl -n prod get pods -l app.kubernetes.io/name -o json"
   [ "$status" -eq 0 ]
   pods="$(jq '.items|length' <<<"$output")"
-  [ "$pods" -ge 1 ]              # 열거 바닥값 — 현재 2건. 래칫 아님
+  if [ "$all_pods" -gt 0 ]; then
+    [ "$pods" -ge 1 ]            # 파드는 있는데 라벨 셀렉터가 0건 = 열거 붕괴
+  fi
+  if [ "$pods" -eq 0 ]; then
+    skip "prod에 앱 파드 0건(인-레포 앱 0개) — 잴 대상이 없다. 온보딩하면 실질 판정으로 복귀한다"
+  fi
   ready="$(jq '[.items[]|select(any(.status.conditions[]?; .type=="Ready" and .status=="True"))]|length' <<<"$output")"
   [ "$ready" -eq "$pods" ]       # Ready=True가 아닌 파드(False·condition 부재 포함) 0건
 }
