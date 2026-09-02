@@ -108,6 +108,38 @@ EOF
   done
 }
 
+@test "outcome-driven status expressions guard on success, not on failure (skipped upstream is not drift)" {
+  # 상류 스텝(checkout·setup-bun 등)이 죽으면 그 뒤 검사 스텝은 outcome=**skipped**이고 outputs는 ''이다.
+  # `outcome == 'failure' && 'failure' || …`처럼 **부정 가드**로 쓰면 첫 분기가 거짓이라 `'' != '0'`이
+  # 참이 되어 실행 실패가 'drift'(⚠️ 경고)로 오라벨된다 — 원인이 러너/의존성인데 드리프트로 귀속된다.
+  # 긍정 가드(`outcome == 'success' && … || 'failure'`)만이 success 아닌 모든 결과를 failure로 접는다.
+  # 선례: contract-drift.yaml(b11b 적대리뷰). audit·dns-drift·회계 3종이 뒤늦게 여기에 합류했다.
+  n=0; bad=""
+  for f in "$WF"/*.yml "$WF"/*.yaml; do
+    [ -e "$f" ] || continue
+    # ⚠️ 2>/dev/null·|| true 금지 — yq 하드 실패는 대입 자리에서 set -e로 죽어야 한다(위 @test와 같은 규율).
+    sts="$(yq -r '.jobs[].steps[]? | select(.uses=="./.github/actions/telegram-notify") | (.with.status // "")' "$f")"
+    while read -r st; do
+      [ -n "$st" ] || continue
+      grep -qF '.outcome' <<<"$st" || continue      # outcome을 참조하지 않는 콜사이트는 분모 밖
+      n=$(( n + 1 ))
+      grep -qF "outcome == 'success'" <<<"$st" || bad="$bad
+  $(basename "$f"): 긍정 가드 없음 — $st"
+      if grep -qE "outcome == 'failure'[[:space:]]*&&[[:space:]]*'failure'" <<<"$st"; then
+        bad="$bad
+  $(basename "$f"): 옛 부정 가드 — $st"
+      fi
+    done <<EOF
+$sts
+EOF
+  done
+  [ -z "$bad" ] || { echo "$bad"; false; }
+  # 양성 대조 — outcome을 참조하는 콜사이트가 실재해야 한다. 셀렉터가 부패하거나 `.with.status`가
+  # 리네임되면 위 루프는 0회 돌고 부정 카운트(bad 빈 문자열)만으로는 그것이 rc에 안 보인다.
+  # 6 = audit · dns-drift · contract-drift · bump-poll/renovate/tf-reconcile 회계(콜사이트가 소유한 바닥값).
+  [ "$n" -ge 6 ]
+}
+
 @test "every call site title is Korean (non-ASCII present, blocks english-title regression)" {
   # source 라벨뿐 아니라 with.title 자체가 한국어여야(영어 제목 회귀 차단).
   # 비-ASCII 판정은 LC_ALL=C + 인쇄가능 ASCII 클래스로(BSD/GNU 양쪽 동작 — [가-힣]는 로케일 의존).

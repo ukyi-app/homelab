@@ -21,6 +21,10 @@ jobs:
   # 시크릿 부재 시 reconcile을 skip해 run을 깨끗한 성공으로 만든다.
   preflight:
     runs-on: ubuntu-24.04-arm
+    # timeout-minutes — homelab-mutation 그룹의 천장(근거 전문은 bump-poll.yaml preflight 잡 주석).
+    # 값 근거 — 2026-09-02 라이브 실측(최근 100 run 실행구간): tf-reconcile p50 38s / max 145s.
+    # 보조 잡(preflight·accounting)은 초 단위 작업이지만 run이 사는 동안 그룹을 쥐므로 5분.
+    timeout-minutes: 5
     outputs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
@@ -61,6 +65,7 @@ jobs:
     needs: preflight
     if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20 # terraform plan/apply는 provider 다운로드 포함(실측 max 145s) — 근거는 preflight 잡 주석
     env:
       TF_VAR_cloudflare_api_token: ${{ secrets.TF_CLOUDFLARE_TOKEN }}
       TF_VAR_cloudflare_account_id: ${{ secrets.TF_CLOUDFLARE_ACCOUNT_ID }}
@@ -139,6 +144,7 @@ jobs:
   # 드리프트를 알리며 수렴은 owner 로컬 apply로 한다. read 토큰이 시크릿에 없으면 preflight가 skip(Phase-0 토글).
   drift-github:
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10 # plan 전용(apply 없음) — 근거는 preflight 잡 주석
     # 스텝-레벨 게이트라 시크릿이 없으면 **스텝만** 전부 skip되고 job은 그대로 success로 끝난다 —
     # run conclusion만 보는 관측자에겐 "돌았다"와 구별이 안 된다(2026-07-27 라이브 실측: 이 job은
     # TF_GITHUB_TOKEN 미등록으로 한 번도 실행된 적이 없는데 매 30분 초록이었다).
@@ -146,8 +152,14 @@ jobs:
     outputs:
       executed: ${{ steps.drift.outputs.executed }}
     steps:
-      # needs: preflight 금지 — preflight의 actor 가드 스텝은 if: workflow_dispatch 조건부라
-      # schedule 경로에서 preflight가 skip되면 의존 잡도 통째로 skip된다. 가드 스텝을 잡별로 복제한다.
+      # `needs: preflight` + `if: needs.preflight.outputs.configured`(위 reconcile 잡의 관용구)를 이 잡에
+      # 걸지 않는다 — preflight의 configured는 CF/R2 자격이고, 이 잡의 게이트는 자기 자격(TF_GITHUB_TOKEN /
+      # TF_TAILSCALE_OAUTH_ID)을 보는 스텝-레벨 `pf`라 서로 독립이다. `needs:`만으로는 묶이지 않지만
+      # (preflight의 check 스텝은 항상 exit 0이라 잡이 실패하지 않는다) 이 파일에서 그 관용구는 늘 `if:`와
+      # 쌍이라, 함께 복사하면 CF/R2 회전 구간(policy/credential-expiry.json — R2_ACCESS_KEY_ID가 마지막 교체)에
+      # 이 감시까지 skip돼 원장(policy/workflow-readiness.json)이 독립 required로 계상한 항목이 매 30분 오탐된다.
+      # 그래서 actor 가드 스텝은 잡별 복제다 — 사본 수는 tools/tests/test_mutation-dispatch.bats 로스터 등식이
+      # 계상하므로, 줄이려면 그 바닥값도 함께 조정해야 한다(그냥 지우면 red).
       - name: actor 가드 (workflow_dispatch 한정 — 스케줄/기타 트리거 무영향)
         env:
           EVENT: ${{ github.event_name }}
@@ -248,12 +260,19 @@ jobs:
 
   drift-tailscale:
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10 # plan 전용(apply 없음) — 근거는 preflight 잡 주석
     # drift-github와 같은 이유의 승격(위 주석) — 이 job도 스텝-레벨 게이트다.
     outputs:
       executed: ${{ steps.drift.outputs.executed }}
     steps:
-      # needs: preflight 금지 — preflight의 actor 가드 스텝은 if: workflow_dispatch 조건부라
-      # schedule 경로에서 preflight가 skip되면 의존 잡도 통째로 skip된다. 가드 스텝을 잡별로 복제한다.
+      # `needs: preflight` + `if: needs.preflight.outputs.configured`(위 reconcile 잡의 관용구)를 이 잡에
+      # 걸지 않는다 — preflight의 configured는 CF/R2 자격이고, 이 잡의 게이트는 자기 자격(TF_GITHUB_TOKEN /
+      # TF_TAILSCALE_OAUTH_ID)을 보는 스텝-레벨 `pf`라 서로 독립이다. `needs:`만으로는 묶이지 않지만
+      # (preflight의 check 스텝은 항상 exit 0이라 잡이 실패하지 않는다) 이 파일에서 그 관용구는 늘 `if:`와
+      # 쌍이라, 함께 복사하면 CF/R2 회전 구간(policy/credential-expiry.json — R2_ACCESS_KEY_ID가 마지막 교체)에
+      # 이 감시까지 skip돼 원장(policy/workflow-readiness.json)이 독립 required로 계상한 항목이 매 30분 오탐된다.
+      # 그래서 actor 가드 스텝은 잡별 복제다 — 사본 수는 tools/tests/test_mutation-dispatch.bats 로스터 등식이
+      # 계상하므로, 줄이려면 그 바닥값도 함께 조정해야 한다(그냥 지우면 red).
       - name: actor 가드 (workflow_dispatch 한정 — 스케줄/기타 트리거 무영향)
         env:
           EVENT: ${{ github.event_name }}
@@ -372,6 +391,7 @@ jobs:
     needs: [preflight, reconcile, drift-github, drift-tailscale]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5 # 보조 잡 — 원장 대조만. 근거는 preflight 잡 주석
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with: { ref: main } # 원장의 권위는 머지된 상태다(브랜치 로컬 수정이 회계를 무르게 하지 못한다)
@@ -386,7 +406,9 @@ jobs:
         if: always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')
         uses: ./.github/actions/telegram-notify
         with:
-          status: ${{ steps.acct.outcome == 'failure' && 'failure' || 'drift' }}
+          # 긍정 가드 — acct 앞 checkout/setup-bun이 죽으면 outcome=skipped라 `== 'failure'`가 거짓이고
+          # warnings가 ''이라 `'' != '0'`으로 이 스텝은 도는데 status만 'drift'로 오라벨됐다.
+          status: ${{ steps.acct.outcome == 'success' && 'drift' || 'failure' }}
           source: 준비상태
           title: 워크플로 준비상태
           ident: "tf-reconcile — 원장 대비 미실행/불일치"

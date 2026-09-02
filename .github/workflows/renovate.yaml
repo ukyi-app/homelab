@@ -116,7 +116,9 @@ jobs:
         if: always() && (steps.acct.outcome == 'failure' || steps.acct.outputs.warnings != '0')
         uses: ./.github/actions/telegram-notify
         with:
-          status: ${{ steps.acct.outcome == 'failure' && 'failure' || 'drift' }}
+          # 긍정 가드 — acct 앞 checkout/setup-bun이 죽으면 outcome=skipped라 `== 'failure'`가 거짓이고
+          # warnings가 ''이라 `'' != '0'`으로 이 스텝은 도는데 status만 'drift'로 오라벨됐다.
+          status: ${{ steps.acct.outcome == 'success' && 'drift' || 'failure' }}
           source: 준비상태
           title: 워크플로 준비상태
           ident: "renovate — 원장 대비 미실행/불일치"

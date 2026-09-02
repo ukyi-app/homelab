@@ -57,9 +57,10 @@ jobs:
         if: failure() || steps.check.outputs.count != '0'
         uses: ./.github/actions/telegram-notify
         with:
-          # check 스텝 크래시 시 count가 미설정('')이라 count!='0'이 참→'drift'로 오라벨된다.
-          # audit.yaml과 동일한 outcome 가드를 앞에 둬 실패는 'failure'로 정확히 표기.
-          status: ${{ steps.check.outcome == 'failure' && 'failure' || (steps.check.outputs.count != '0' && 'drift' || job.status) }}
+          # check 스텝 크래시·**상류 스텝 실패로 skip** 시 count가 미설정('')이라 count!='0'이 참→'drift'로
+          # 오라벨된다. contract-drift.yaml·audit.yaml과 같은 긍정 가드(== 'success')를 앞에 둬
+          # success가 아닌 모든 결과를 'failure'로 접는다(`== 'failure'`만 보면 skipped가 새어 나간다).
+          status: ${{ steps.check.outcome == 'success' && (steps.check.outputs.count != '0' && 'drift' || 'success') || 'failure' }}
           source: IaC드리프트
           title: DNS 드리프트
           ident: "active&&public host 미해결 ${{ steps.check.outputs.count }}건"

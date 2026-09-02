@@ -29,6 +29,10 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-24.04-arm
+    # timeout-minutes — workflow-레벨 concurrency라 이 보조 잡도 run이 사는 동안 homelab-mutation을
+    # 쥔다(그룹 천장의 근거 전문은 bump-poll.yaml preflight 잡 주석). 실제 변이의 상한은 동명
+    # `_*.yaml` reusable의 잡에 있다 — route 잡(`uses:`)에는 timeout-minutes를 둘 수 없다(actionlint 거부).
+    timeout-minutes: 5
     outputs:
       spec: ${{ steps.assemble.outputs.spec }}   # 조립한 spec JSON을 reusable 호출 잡으로 전달
     steps:
@@ -92,6 +96,7 @@ jobs:
     needs: [validate, create-cache]
     if: failure() || cancelled()
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5 # 보조 잡 — 위 validate와 같은 이유(실패 알림도 그룹을 쥔다)
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: ./.github/actions/mutation-notify

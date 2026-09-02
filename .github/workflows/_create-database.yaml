@@ -21,6 +21,10 @@ defaults:
 jobs:
   provision:
     runs-on: ubuntu-24.04-arm
+    # timeout-minutes — 디스패처의 route 잡(`uses:`)에는 걸 수 없어(actionlint 거부) 변이 본체의 상한이
+    # 여기 있다. homelab-mutation 그룹 천장의 근거 전문은 bump-poll.yaml preflight 잡 주석 —
+    # 이 잡의 gh/git 호출도 실행기 하위 상한이 없다(tools/lib/exec.ts `timeoutMs: 0`).
+    timeout-minutes: 20
     # main 쓰기는 writer App 토큰의 PR-first 경로 — workflow 자체 권한은 읽기만
     permissions:
       contents: read
