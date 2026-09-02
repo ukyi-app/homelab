@@ -6,9 +6,14 @@
 # 증인을 세운다.
 # ⚠️ 중간 단언은 `[ ]`만 — bash 3.2에서 `[[ ]]` 실패가 침묵 통과한다. @test 이름은 영어(CJK 함정).
 
+# ⚠️ **피연산자 실재 증인 + 거부 문구 양성 대조.** 이 파일의 검증 레인은 `[ "$status" -eq 1 ]`로
+#    판정하는데, 도구가 없을 때 bun의 rc도 정확히 1이라 두 채널이 겹친다. 실측(2026-09-02,
+#    `tools/fixture-memory-ratios.ts`를 지운 격리 트리): 10건 중 3건(#4 · #8 · #10)이 그대로 `ok`였다 —
+#    그 셋은 `FAIL:` 문구를 물지 않았던 자리다.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   T="$ROOT/tools/fixture-memory-ratios.ts"
+  [ -f "$T" ]
   F="$BATS_TEST_TMPDIR/fixture.jsonl"
 }
 
@@ -58,6 +63,7 @@ _fixture() { # $1=container $2=usage $3=inactive $4=active $5=shmem [$6=limit]
   _fixture cachebound 132878336 14307328 28622848 0
   run bun "$T" --fixture "$F" --container nosuchcontainer
   [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qF -- '메트릭 누락'
   # rc 0에 빈 출력이면 호출자가 빈 문자열을 비율로 읽는다 — 그것이 fail-open의 입구다.
   [ -n "$output" ]
 }
@@ -96,6 +102,7 @@ _fixture() { # $1=container $2=usage $3=inactive $4=active $5=shmem [$6=limit]
   mv "$F.m" "$F"
   run bun "$T" --fixture "$F" --container cachebound
   [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qF -- '> usage('
 }
 
 @test "a flag error exits 2, distinct from a validation failure" {
@@ -109,4 +116,5 @@ _fixture() { # $1=container $2=usage $3=inactive $4=active $5=shmem [$6=limit]
 @test "an unreadable fixture fails closed" {
   run bun "$T" --fixture "$BATS_TEST_TMPDIR/nope.jsonl" --container cachebound
   [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qF -- '픽스처를 읽을 수 없다'
 }

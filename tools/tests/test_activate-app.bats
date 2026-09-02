@@ -2,9 +2,17 @@
 # activate-app 게이트 — 노출할 revision을 고정 검증한 뒤에만 apps.json active를 플립한다.
 # moving-main 안전: synced가 sha의 descendant + 그 사이 이 앱 표면 무변경 + 행 동일성.
 
+# ⚠️ **피연산자 실재 증인 + 거부 문구 양성 대조.** `run bun "$A"`의 `-ne 0` 단독은 거부를 증언하지
+#    못한다 — 도구가 없으면 bun이 rc **1**로 죽는데 그 도구의 **거부**도 1이라 두 채널이 겹친다
+#    (ADR-0007 「프로그램 rc 부재 단언에는 철자 처방이 없다」 · docs/traps-detail.md 「테스트 이름은
+#    인터페이스가 아니다」). 실측(2026-09-02, `tools/activate-app.ts`를 지운 격리 트리):
+#    11건 중 rejects 5레인이 그대로 `ok`였다. 그래서 두 겹을 세운다 —
+#      ① setup의 `[ -f "$A" ]`(선택 실행 `bats -f rejects` 방어)
+#      ② 각 rejects 레인의 `die` 문구 대조(도구가 실재하면서 **다른 이유로 크래시**한 rc 1까지 닫는다)
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   A="$ROOT/tools/activate-app.ts"
+  [ -f "$A" ]
   TMP="$(mktemp -d)"
   R="$TMP/repo"
   mkdir -p "$R"
@@ -60,6 +68,7 @@ teardown() { rm -rf "$TMP"; }
   run bun "$A" --app orders --sha "$AHEAD" --synced-rev "$SIDE" \
     --repo-dir "$R" --status-file "$TMP/status.json"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'descendant가 아니다'
 }
 
 @test "rejects when the app surface changed between sha and synced (over-approval)" {
@@ -69,6 +78,7 @@ teardown() { rm -rf "$TMP"; }
   run bun "$A" --app orders --sha "$SHA" --synced-rev "$SYNCED" \
     --repo-dir "$R" --status-file "$TMP/status.json"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '재요청 필요'
 }
 
 @test "rejects when the apps.json row drifted from the approved sha (host change)" {
@@ -78,6 +88,7 @@ teardown() { rm -rf "$TMP"; }
   run bun "$A" --app orders --sha "$SHA" --synced-rev "$SHA" \
     --repo-dir "$R" --status-file "$TMP/status.json"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'apps.json 행이 승인 SHA와 다르다'
 }
 
 @test "rejects when application is not Healthy or route not Accepted" {
@@ -85,10 +96,12 @@ teardown() { rm -rf "$TMP"; }
   run bun "$A" --app orders --sha "$SHA" --synced-rev "$SHA" \
     --repo-dir "$R" --status-file "$TMP/bad.json"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'Application health=Degraded'
   jq '.httproute.status.parents[0].conditions[0].status = "False"' "$TMP/status.json" > "$TMP/bad2.json"
   run bun "$A" --app orders --sha "$SHA" --synced-rev "$SHA" \
     --repo-dir "$R" --status-file "$TMP/bad2.json"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'HTTPRoute Accepted=False'
 }
 
 @test "writes a committed .activation marker with the proved sha and canonical surfaceHash on flip" {
@@ -148,6 +161,7 @@ teardown() { rm -rf "$TMP"; }
   run bun "$A" --app orders --sha "$SYNCED" --synced-rev "$SYNCED" \
     --repo-dir "$R" --status-file "$TMP/status.json" --flip
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '공개 activate 불가'
   # active는 절대 플립되지 않아야 한다(내부 앱 공개 노출 차단)
   run jq -e '.[0].active == false' "$R/infra/cloudflare/apps.json"
   [ "$status" -eq 0 ]

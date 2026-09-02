@@ -7,6 +7,14 @@ SOPS_GUARD="${BATS_TEST_DIRNAME}/../scripts/sops-guard.sh"
 CLUSTER="age1n3j7p70f0unl5dgrjhtr9jxrdntz2a67dtntu446qus9c3jd3fnsp8z960"
 RECOVERY="age154tu9q7922xu46x0rkfm5l9x3ulf9u5at5qvxeaqfx9sgtm7cumq75jdwc"
 
+# ⚠️ **피연산자 실재 증인 + 거부 문구 양성 대조.** `run bash "$SOPS_GUARD"`는 가드가 없으면 rc **127**로
+#    죽어 `-ne 0`을 그대로 만족한다 — 즉 「recipient 신원을 거부한다」의 증인이 통째로 공허해진다.
+#    실측(2026-09-02, `scripts/sops-guard.sh`를 지운 격리 트리): 2건 중 rejects 레인이 `ok`였다
+#    (accepts 레인만 red). 그래서 setup에 실재 단언을, 거부 레인에 신원 불일치 문구 대조를 세운다.
+setup() {
+  [ -f "$SOPS_GUARD" ]
+}
+
 _fixture() { # $1=dir $2=recipient1 $3=recipient2
   cat > "$1/x.enc.yaml" <<YAML
 data:
@@ -38,4 +46,6 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
+  # 거부 **사유**까지 문다 — 개수(2)는 맞으므로 이 문구가 신원 규칙이 실제로 돌았다는 유일한 증거다.
+  printf '%s' "$output" | grep -qF -- 'recipient 신원이'
 }

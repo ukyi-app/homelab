@@ -10,7 +10,16 @@
 #    실 레포로 계약을 박으면 원장이 바뀔 때마다 테스트가 깨지고 mutation이 아무것도 증명하지 못한다.
 # ⚠️ @test 이름은 영어만 · 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵 통과).
 
-setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
+# ⚠️ **피연산자 실재 증인 + 거부 문구 양성 대조.** 두 뮤테이션이 같은 두 레인을 초록으로 남겼다
+#    (실측 2026-09-02, 격리 트리): ① `tools/check-image-ownership.ts` 삭제 — bun의 rc가 **1**인데
+#    이 가드의 **위반**도 1이라 `[ "$status" -eq 1 ]`이 둘을 구별하지 못한다. ② `renovate.json` 리네임 —
+#    `_fixture`의 `cp`가 커맨드 치환 안이라 실패가 삼켜지고(bats는 `inherit_errexit` off), 도달성 판정
+#    불가로 난 rc 1이 스키마/원장 거부로 읽힌다. 두 경우 모두 #8·#10이 `ok`였다.
+#    ⇒ 처방 두 겹: setup의 실재 단언 + 각 거부 레인의 문구 대조, 그리고 팩토리의 조립 결과 단언.
+setup() {
+  ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  [ -f "$ROOT/tools/check-image-ownership.ts" ]
+}
 
 GUARD() { bun "$ROOT/tools/check-image-ownership.ts" "$@"; }
 
@@ -30,6 +39,10 @@ _fixture() {
   printf '{\n  "unowned": []\n}\n' > "$t/policy/image-ownership.json" 2>/dev/null || { mkdir -p "$t/policy"; printf '{\n  "unowned": []\n}\n' > "$t/policy/image-ownership.json"; }
   git -C "$t" init -q
   git -C "$t" add -A
+  # 픽스처 무결성 — `cp`의 실패는 커맨드 치환이 삼키므로(치환의 rc는 마지막 `echo`의 0이다) 여기서
+  # 판정해 **`echo` 앞에서** 되돌린다. 그래야 호출부 `t="$(_fixture …)"`의 rc가 bats errexit에 닿는다
+  # (선례: tests/test_dr-drill.bats · tests/gates/test_absence-assertion-witness.bats).
+  [ -f "$t/renovate.json" ] || return 1
   echo "$t"
 }
 
@@ -153,6 +166,8 @@ FIXTURE_ARGS="--floor refs=1"
     _ledger "$t" "e={'artifact':'platform/vendor/manifest.yaml','why':'벤더','freshness':'수동','since':'2026-07-28','owner_action':'x'}; e['$field']='' ; d['unowned'].append(e)"
     run GUARD --repo-root "$t" $FIXTURE_ARGS
     [ "$status" -eq 1 ] || { echo "빈 $field 가 통과했다"; false; }
+    # 거부 **사유**를 문다 — rc 1만 보면 도달성 판정 불가·원장 부재 등 다른 실패와 구별되지 않는다.
+    printf '%s' "$output" | grep -qF -- '원장 항목 검증 실패'
   done
 }
 
@@ -169,6 +184,8 @@ FIXTURE_ARGS="--floor refs=1"
   rm "$t/policy/image-ownership.json"
   run GUARD --repo-root "$t" $FIXTURE_ARGS
   [ "$status" -eq 1 ]
+  # 형제 레인(missing renovate.json)과 같은 규율 — rc가 아니라 **문구**로 원인을 가른다.
+  printf '%s' "$output" | grep -qF -- '정책 원장 읽기 실패'
 }
 
 @test "a missing renovate.json is a loud failure (reachability cannot silently become false)" {

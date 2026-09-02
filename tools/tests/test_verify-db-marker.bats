@@ -4,9 +4,13 @@
 # 비번 Secret의 resourceVersion과 일치(=fresh)함을 검증한다 — stale한 이전 검증/무관 신호로 온보딩이
 # 통과되는 레이스를 차단. kubectl을 PATH 스텁으로 대체(라이브 무접근). ⚠️ @test 이름 영어.
 
+# ⚠️ **피연산자 실재 증인 + 거부 문구 양성 대조.** `bun <없는 파일>`은 rc **1**이고 이 도구의
+#    **거부**도 1이라 `-ne 0` 단독은 둘을 구별하지 못한다(ADR-0007 · 함정 「테스트 이름은 인터페이스가
+#    아니다」). 실측(2026-09-02, 도구를 지운 격리 트리): 5건 중 「rejects a malformed db name」만 `ok`였다.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   TOOL="$ROOT/tools/verify-db-marker.ts"
+  [ -f "$TOOL" ]
   TMP="$(mktemp -d)"
   export VDM_MARKER_OWNER="100" VDM_MARKER_RO="100"   # 마커에 기록된 rv
   export VDM_SECRET_OWNER="100" VDM_SECRET_RO="100"   # 현재 비번 Secret rv
@@ -65,4 +69,5 @@ vdm() { PATH="$TMP/bin:$PATH" run bun "$TOOL" "$@"; }
 @test "rejects a malformed db name before touching the cluster" {
   vdm --name "Bad_Name"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'db 이름 형식 불량'
 }

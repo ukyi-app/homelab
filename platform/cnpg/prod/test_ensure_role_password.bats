@@ -4,9 +4,13 @@
 # 유한 MAX_POLLS)으로 결정적으로 검증한다 — 라이브 클러스터 무접근.
 # ⚠️ @test 이름은 영어(디렉토리 단위 실행 시 한글 인코딩 깨짐, AGENTS.md). 중간 단언은 [ ]/명령만.
 
+# ⚠️ **피연산자 실재 증인 + 거부 문구 양성 대조.** `run bash "$SCRIPT"`는 스크립트가 없으면
+#    rc **127**로 죽어 `-ne 0`을 그대로 만족한다. 실측(2026-09-02, 스크립트를 지운 격리 트리):
+#    7건 중 「database-not-ready: fails closed」가 `ok`였다(마커 부재 단언도 빈 로그에 대해 참이다).
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   SCRIPT="$ROOT/platform/cnpg/prod/ensure-role-password.sh"
+  [ -f "$SCRIPT" ]
   TMP="$(mktemp -d)"
   export ERP_KLOG="$TMP/klog"           # 모든 kubectl 호출 기록
   export ERP_NUDGE_FILE="$TMP/nudges"   # nudge(annotate) 누적 횟수
@@ -87,6 +91,7 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   export ERP_TEST_DB_APPLIED="false"
   run_erp
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'applied=true 미도달(fail-closed)'
   ! grep -q "apply -f" "$ERP_KLOG"
 }
 

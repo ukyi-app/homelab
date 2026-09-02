@@ -4,10 +4,18 @@
 # 양성·음성 대조를 매 실행 건다.
 # ⚠️ @test 이름은 영어만 · 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵 통과).
 
+# ⚠️ **피연산자 실재 증인.** `run bash "$S"`는 가드가 없으면 rc **127**로 죽고, `_fixture`의 조립
+#    (git archive + 두 `cp`)은 커맨드 치환 안이라 실패가 삼켜진다(bats는 `inherit_errexit` off).
+#    실측(2026-09-02, 격리 트리 — 가드 삭제 · 원장 리네임 · `.git` 부재 세 뮤테이션): 이 파일은
+#    12건 중 11건이 red라 **현재는** 공허한 거부 레인이 없다(살아남은 #6은 가드를 아예 부르지 않는
+#    jq 핀이다). 그래도 형제 자리와 같은 두 줄을 세운다 — 조립이 조용히 반쯤 성공하는 날 이 레인들이
+#    "거부했다"를 다른 이유로 만족하는 것이 이 클래스의 도달 경로다.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   S="$ROOT/scripts/check-gh-secret-coverage.sh"
+  [ -f "$S" ]
   CLASS="$ROOT/policy/gh-secret-classification.json"
+  [ -f "$CLASS" ]
 }
 
 # 실 트리를 복사해 픽스처 루트를 만든다 — 열거 규칙이 실제 워크플로 모양에 붙어 있어서
@@ -19,6 +27,10 @@ _fixture() {
   cp "$ROOT/policy/gh-secret-classification.json" "$d/policy/" 2>/dev/null || true
   cp "$ROOT/policy/credential-expiry.json" "$d/policy/"
   ( cd "$d" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fx >/dev/null )
+  # 픽스처 무결성 — 아카이브 추출과 `cp`의 실패는 커맨드 치환이 삼킨다(치환의 rc는 마지막 `echo`의
+  # 0이다). `echo` **앞에서** 판정해야 호출부 `d="$(_fixture)"`의 rc가 bats errexit에 닿는다.
+  [ -f "$d/.github/workflows/ci.yaml" ] || return 1
+  [ -f "$d/policy/credential-expiry.json" ] || return 1
   echo "$d"
 }
 

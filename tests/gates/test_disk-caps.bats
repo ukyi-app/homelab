@@ -10,9 +10,13 @@
 #    되돌리는 방식은 테스트가 중간에 죽으면 워킹트리에 잔재를 남긴다 — 이 레포가 실제로 겪은 사고다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2에서 [[ ]] 실패는 침묵 통과.
 
+# ⚠️ **피연산자 실재 증인 + 거부 문구 양성 대조.** 실측(2026-09-02, `tools/check-disk-caps.ts`를
+#    지운 격리 트리): 7건 중 「equality is a violation too」가 그대로 `ok`였다 — bun이 rc 1로 죽은
+#    것을 `-ne 0`이 거부로 읽었다. 비율 문구를 물면 바이트 환산이 실제로 일어났음까지 함께 증언한다.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   TOOL="$ROOT/tools/check-disk-caps.ts"
+  [ -f "$TOOL" ]
 }
 
 # $1=cap 문자열 $2=볼륨 선언 문자열(빈 값이면 볼륨 선언 없음) → 픽스처 경로를 stdout으로
@@ -65,6 +69,7 @@ mkfx() {
   cd "$fx" || false
   run bun "$TOOL" --floor caps=1
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '비율 100.0%'
 }
 
 @test "a cap with no volume declaration in its file fails closed (nothing to compare)" {
