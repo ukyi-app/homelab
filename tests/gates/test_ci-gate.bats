@@ -1,12 +1,24 @@
 #!/usr/bin/env bats
 WF=".github/workflows/ci.yaml"
 
-@test "ci runs typecheck, chart-test, ledger gate, and bats" {
-  run cat "$WF"
-  printf '%s' "$output" | grep -qF -- "bun run typecheck"
-  printf '%s' "$output" | grep -qF -- "make chart-test"
-  printf '%s' "$output" | grep -qF -- "verify:ledger"
-  [[ "$output" == *"bats "* ]]
+# ⚠️ **구조 판정(F10)** — `cat | grep -F` 리터럴은 주석·비활성 스텝과 실제 `run` 필드를 구별하지
+#    못한다. 실측 2026-09-03: ci.yaml의 세 `run:` 줄(typecheck·chart-test·verify:ledger)을
+#    `# run: …`로 주석 처리해도 이 파일이 3/3 green이었고, 스텝 **이름을 보존한 채** 원장 스텝의
+#    본문만 no-op으로 바꾸면(`run: echo ledger-skipped`) check-ci-parity(25건 전건 계상)·
+#    check-guard-authority·test_make-ci-parity까지 전부 초록이라 required gate에서 메모리 원장이
+#    사라진 상태를 증언하는 레인이 레포에 0건이었다. ci-parity는 스텝 **이름**으로 계상하므로
+#    이 레인이 그 축의 두 번째 겹이다.
+# ⚠️ `| .run`을 반드시 붙인다 — 없으면 「yq -e는 값이 false면 exit 1」 축에 스스로 노출된다.
+#    형제 선례: tests/gates/test_check-skeleton-gate.bats:12(같은 이유로 이미 전환된 자리).
+@test "ci gate has ACTIVE run steps for typecheck, chart-test, ledger gate, and bats (structural, F10)" {
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("bun run typecheck")) | .run' "$WF"
+  [ "$status" -eq 0 ]
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("make chart-test")) | .run' "$WF"
+  [ "$status" -eq 0 ]
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("verify:ledger")) | .run' "$WF"
+  [ "$status" -eq 0 ]
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("run-bats.sh")) | .run' "$WF"
+  [ "$status" -eq 0 ]
 }
 
 @test "ci runs on pull_request and uses the setup-bun composite" {
