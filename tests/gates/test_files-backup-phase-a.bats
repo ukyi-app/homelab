@@ -36,7 +36,14 @@ _expr() {
 _rearm() { _expr | grep -oE 'vector\(time\(\)\) >= [0-9]+' | grep -oE '[0-9]+' | head -1; }
 
 @test "the phase-A suppression clause exists exactly while the migration window is open" {
-  got="$(_rearm)"
+  # ⚠️ **추출 양성 대조가 먼저다.** 국면 B에서 이 레인의 판정은 `[ -z "$got" ]` 음성 단언 하나뿐이라
+  #    «억제 절이 올바르게 제거됐다»와 «룰 파일이 사라졌다 / ConfigMap 키가 리네임됐다 / alert명이
+  #    바뀌었다»를 원리적으로 구별하지 못한다. 실측 2026-09-03(현재 국면 B): r4 룰 파일을 mv해도,
+  #    `alert: FilesBackupStale`을 리네임해도 이 파일 4레인이 전건 초록이었다. 추출 붕괴는 이웃
+  #    (test_vmalert-config.bats:275)이 아니라 **이 줄이 국소로** 잡는다.
+  e="$(_expr)"
+  [ -n "$e" ] || { echo "FAIL: FilesBackupStale expr 추출 0줄 — 파일/ConfigMap 키/alert명 드리프트이지 '억제 절 없음'이 아니다"; return 1; }
+  got="$(printf '%s' "$e" | grep -oE 'vector\(time\(\)\) >= [0-9]+' | grep -oE '[0-9]+' | head -1)"
   if [ -n "$WIN" ]; then
     [ -n "$got" ]
   else

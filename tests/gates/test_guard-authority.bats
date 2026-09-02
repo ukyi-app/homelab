@@ -9,9 +9,15 @@
 # 단언하면 전건 통과라 죽은 가드가 된다(PROGRESS.md 규율: 새 규칙마다 mutation으로 load-bearing 실측).
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 
+# ⚠️ **피연산자 실재 증인**(선례: operand-witness 01·05). `run bun "$TOOL"`은 도구가 없으면 rc 1로
+#    죽는데 그 rc는 도구의 **정상 거부**와 같은 값이고, 빈 출력은 "보고하지 않았다"는 부재 단언까지
+#    함께 만족시킨다. 실측 2026-09-03(`tools/check-guard-authority.ts`를 지운 격리 트리): 21건 중
+#    「a guard invoked by the ci gate is not reported」·「a scheduled workflow is an authoritative
+#    venue」 둘이 그대로 `ok`였다. 하중은 아래 두 레인의 **정상 보고 문구 양성 대조**가 진다.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   TOOL="$ROOT/tools/check-guard-authority.ts"
+  [ -f "$TOOL" ]
   FIX="$BATS_TEST_TMPDIR/fix"
   mkdir -p "$FIX/scripts" "$FIX/.github/workflows"
   git -C "$FIX" init -q
@@ -58,6 +64,9 @@ run_tool() { run bun "$TOOL" --repo-root "$FIX" --floor guards=3 "$@"; }
 @test "a guard invoked by the ci gate is not reported (authoritative >= 1)" {
   run_tool
   out="$output"
+  # 양성 대조 — 보고 자체가 실재했음을 먼저 세운다. 없으면 빈 출력(도구 부재·조기 크래시)이
+  # "check-real은 보고되지 않았다"를 만족시켜 이 레인이 자기 이름을 증언하지 못한다.
+  printf '%s' "$out" | grep -q "scripts/check-orphan.sh"
   run grep -q "scripts/check-real.sh" <<<"$out"
   [ "$status" -ne 0 ]
 }
@@ -88,6 +97,8 @@ YAML
   git -C "$FIX" add -A
   run_tool
   out="$output"
+  # 양성 대조 — 같은 실행이 mirrored 고아는 계속 보고한다(보고 경로가 살아 있다는 증인).
+  printf '%s' "$out" | grep -q "scripts/check-mirrored.sh"
   run grep -q "scripts/check-orphan.sh" <<<"$out"
   [ "$status" -ne 0 ]
 }

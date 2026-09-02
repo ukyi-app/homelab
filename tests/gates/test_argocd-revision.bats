@@ -130,6 +130,8 @@ fx_rewrite() {
   fx_rewrite "$base" OTHER-BRANCH
   EXPECT_REVISION="$base" run "$GUARD" --root "$FX"
   [ "$status" -ne 0 ]
+  # 형제 @test 9와 같은 문구 대조 — `-ne 0` 단독은 가드 부재(rc 127)도 "거부"로 읽는다.
+  printf '%s' "$output" | grep -q '라이브 ArgoCD가 그 브랜치를 따라간다'   # check-argocd-revision.sh:133
 }
 
 # ── 자기레포 판정 ───────────────────────────────────────────────────────────────────────────
@@ -161,6 +163,10 @@ fx_rewrite() {
   sed -i.bak "s|^\\( *\\)revision: $(fx_rev)\$|\\1revision: OTHER-BRANCH|" "$FX/platform/argocd/root/appset.yaml"
   run "$GUARD" --root "$FX"
   [ "$status" -ne 0 ]
+  # ⚠️ 거부 문구 대조 — `-ne 0` 단독이면 이 레인이 자기 이름을 오보한다. 실측 2026-09-03:
+  #    check-argocd-revision.sh:60의 `.git` 정규화를 no-op으로 바꾸면 이 레인은 (A)정합 판정이
+  #    아니라 **열거 붕괴**(`스캔 1건 < 10`)로 죽는데 `-ne 0`은 그것을 "사고를 잡았다"로 읽었다.
+  printf '%s' "$output" | grep -q '리비전이 갈렸다'   # check-argocd-revision.sh:124
 }
 
 @test "a missing anchor fails loudly instead of matching nothing" {

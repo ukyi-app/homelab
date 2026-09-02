@@ -81,6 +81,12 @@ fixture_suite() {   # $1: 하위 디렉토리명
   # `|| true`는 무매치(rc 1)와 검출기 사망(rc>=2)을 구별하지 못한다 — 사망 시 '위반 0'으로 읽히는
   # fail-open의 관용구 자체가 가드 **코드**에 없음을 못박는다(rc 판정은 lane_grep이 소유).
   # 주석은 스트립한다 — 처방을 설명하는 산문의 언급은 관용구가 아니다(유일성 테스트와 같은 규율).
+  # ⚠️ **피연산자 실재가 먼저다.** 대상이 없으면 sed가 rc 2로 죽고 grep -c가 0을 내는데 `|| true`가
+  #    그것을 삼켜 n=0 → 초록이다 — 이 레인이 이름으로 금지하는 바로 그 fail-open이 자기 판정에
+  #    있는 자리다. 실측 2026-09-03: `mv scripts/check-skip-signalling.sh` 후 31건 중 13건이 초록으로
+  #    남았고 대상 의존 레인 중 이 레인이 그 하나였다. `|| true` 자체는 **유지한다** — 정상 트리에서
+  #    grep은 0건 매치로 rc 1이라 걷으면 set -e가 게이트를 red로 만든다(이 레포의 표준 관용구).
+  [ -f "$ROOT/scripts/check-skip-signalling.sh" ]
   n="$(sed 's|^[[:space:]]*#.*||' "$ROOT/scripts/check-skip-signalling.sh" | grep -cF '|| true' || true)"
   [ "$n" -eq 0 ]
 }
