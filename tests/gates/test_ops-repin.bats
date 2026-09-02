@@ -20,7 +20,10 @@ teardown() { rm -rf "$FX"; }
 
 @test "rejects malformed digest" {
   run bun tools/repin-ops-image.ts pg-tools:18-rclone "notadigest" --root "$FX"
-  [ "$status" -ne 0 ]
+  # ⚠️ `-ne 0`은 도구 부재의 rc 1(bun)과 도구 자신의 거부를 구별하지 않는다 — 거부는 정확히 exit 2다.
+  [ "$status" -eq 2 ]
+  # 문구 대조로 **어느** exit 2인지 고정한다 — 아래 bad image key 레인도 2라 rc 단독은 CATALOG 회귀에서 오탐 초록이다.
+  printf '%s' "$output" | grep -qF 'bad digest'
 }
 @test "rejects an image key not in the catalog" {
   run bun tools/repin-ops-image.ts unknown:tag "$NEW" --root "$FX"

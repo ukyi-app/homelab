@@ -7,6 +7,8 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   ACT="$ROOT/.github/actions/telegram-notify/action.yml"
   SH="$ROOT/.github/actions/telegram-notify/notify.sh"
+  # 대상 실재를 setup에서 닫는다 — 부재 시 `sh "$SH"`가 rc 127로 죽어 거부 레인이 초록으로 읽힌다(05 (b)).
+  [ -f "$SH" ]
   TMP="$(mktemp -d)"
   export DRY_RUN=1
   export TG_TOKEN="x:y" TG_CHAT="123"
@@ -111,12 +113,16 @@ teardown() { rm -rf "$TMP"; }
 
 @test "rejects an unknown status enum" {
   run env STATUS=bogus SOURCE=배포 TITLE="x" sh "$SH"
-  [ "$status" -ne 0 ]
+  # ⚠️ rc만 보면 `sh <없는 파일>`의 127이 거부로 읽힌다 — 거부는 notify.sh의 규약대로 정확히 2이고,
+  #    문구 대조가 **어느** exit 2인지(status enum vs source enum) 고정한다(operand-witness 05 (a)).
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | grep -qF -- 'unknown status'
 }
 
 @test "rejects an unknown source label" {
   run env STATUS=success SOURCE=NotAKoreanLabel TITLE="x" sh "$SH"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | grep -qF -- 'unknown source'
 }
 
 @test "optional KST stamp is appended when STAMP=1 (mm/dd hh:mm shape)" {

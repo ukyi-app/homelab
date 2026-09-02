@@ -6,6 +6,8 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
+  # 대상 실재를 setup에서 닫는다 — 선택 실행(`bats -f`)에서도 부재가 초록으로 읽히지 않게(operand-witness 05 (b)).
+  [ -f "$ROOT/scripts/secret-cert-check.sh" ]
   TMP="$(mktemp -d)"; mkdir -p "$TMP/bin"
   # 두 개의 자체서명 cert(A=committed 픽스처, B=다른 라이브)
   openssl req -x509 -newkey rsa:2048 -keyout /dev/null -out "$TMP/certA.pem" -days 1 -nodes -subj "/CN=a" 2>/dev/null
@@ -53,5 +55,8 @@ stub_kubeseal() { # $1: cat할 cert 파일(없으면 exit 1로 fetch 실패 모�
 @test "never prints private key material" {
   stub_kubeseal "$TMP/certA.pem"
   PATH="$TMP/bin:$PATH" run bash scripts/secret-cert-check.sh --cert "$TMP/certA.pem"
+  # ⚠️ rc 단언이 없으면 스크립트가 **누출 경로에 닿기 전에** 죽어도(대상 부재 rc 127 등) 부재 판정이 참이 된다.
+  # 정상 경로의 계약은 성공이다(:22 레인이 같은 인자로 0을 단언한다).
+  [ "$status" -eq 0 ]
   ! echo "$output" | grep -q "PRIVATE KEY"
 }
