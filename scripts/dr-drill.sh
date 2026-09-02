@@ -8,7 +8,10 @@
 # bootstrap.initdb로 EMPTY로 뜨며, 실제 prod 데이터는 R2에서 복구된다(docs/runbooks/restore.md).
 #
 # 노드 유실에도 살아남아야 하는 외부 입력: M0 클러스터 age 키(~/.config/sops/age/keys.txt)와
-# Terraform state + R2 백업(둘 다 R2). 네임스페이스만 ArgoCD 재설치는 스모크 체크지 DR이 아니다.
+# Terraform state + R2 백업(둘 다 R2), 그리고 sealing key 백업(SEALED_KEY_BACKUP_DIR — git 밖 매체,
+# [0.6]이 라이브 키 셋과 대조한다; 2026-08-13 재구축 직후 컨트롤러가 만든 새 키가 21일간 어느 백업에도
+# 없었던 것을 2026-09-03 감사가 잡았다 — tests/posture/test_dr-assets.bats가 이제 그 신선도를 판정한다).
+# 네임스페이스만 ArgoCD 재설치는 스모크 체크지 DR이 아니다.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

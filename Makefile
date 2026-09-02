@@ -306,7 +306,7 @@ verify-credential-inventory: ## [local] 런북 token-inventory §A ↔ policy/cr
 	@bash scripts/verify-credential-inventory.sh
 
 .PHONY: verify-posture
-verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 부재=SKIP
+verify-posture: ## [live] posture 라이브 스위트(internal-by-default·netpol·e2e·DR 자산 신선도) — KUBECONFIG 부재=SKIP · 백업 경로는 SEALED_KEY_BACKUP_DIR/LOCAL_ASSET_BACKUP_DIR env(미설정=red)
 	@if [ -f "$(KUBECONFIG_LIVE)" ]; then \
 	  $(ASSERT_IDENTITY_WARN); \
 	  KUBECONFIG=$(KUBECONFIG_LIVE) bats $(POSTURE_BATS) </dev/null; \

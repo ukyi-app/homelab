@@ -5,7 +5,7 @@
 #    두 가지를 강제한다(예전엔 "가드가 강제한다"고 적혀만 있었고 실제로는 아무도 안 봤다):
 #      · 항목은 **빈 줄로 끊긴 직전 주석 블록**의 지배를 받고, 그 블록에 `실행처` 표기가 없으면 red.
 #        (헤더는 빈 줄 아래 항목을 지배하지 않는다. 항목 뒤의 주석은 새 그룹을 연다.)
-#      · 항목 수 **상한**(check-bats-accounting.sh의 `EXCL_MAX` 상수 = 현재 건수 15). 늘리려면 같은 PR에서
+#      · 항목 수 **상한**(check-bats-accounting.sh의 `EXCL_MAX` 상수 = 현재 건수 16). 늘리려면 같은 PR에서
 #        그 상수를 올려야 한다 — env 오버라이드는 없다(호출부에 안 보이는 off-switch를 두지 않는다).
 #    실행처 표기는 텍스트 계약이다 — 단어만 적고 실제 경로가 없어도 통과하니, 적을 때 정직할 것.
 # platform/charts/*는 여기 두지 않는다 — 러너가 도메인 prune(make chart-test 별도 harness).
@@ -15,6 +15,7 @@ tests/posture/test_internal-by-default.bats
 tests/posture/test_network-policy.bats
 tests/posture/test_networking-e2e.bats
 tests/posture/test_storage-reclaim.bats
+tests/posture/test_dr-assets.bats
 # docker compose 기동 + dev 전용 도구(tools/dev-postgres)라 gate 가치가 없다 —
 #   실행처: owner-local `bats tools/tests/test_dev-postgres.bats`
 #   ⚠️ 자동 실행 경로가 0이다(실측) — 아무 워크플로·make 타깃도 부르지 않는다.
