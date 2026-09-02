@@ -17,11 +17,16 @@ setup() {
   K="$BATS_TEST_DIRNAME/kustomization.yaml"
 }
 
-@test "the warmup Job is a Sync hook that is removed once it succeeds" {
+@test "the warmup Job is a Sync hook that is removed on success AND before it is recreated" {
   h="$(yq '.metadata.annotations."argocd.argoproj.io/hook"' "$W")"
   printf '%s' "$h" | grep -qxF -- 'Sync'
+  # ⚠️ 정책을 하나라도 **명시하면** gitops-engine의 기본 BeforeHookCreation이 사라진다
+  #    (DeletePolicies(): 파싱된 정책이 0건일 때만 기본을 넣는다). HookSucceeded 단독이면 실패한
+  #    Job이 고정 이름으로 남고, 다음 sync가 그 Failed를 다시 읽어 **영구 실패**한다.
+  #    그래서 토큰 단위로 잰다 — 부분문자열 `grep -q`는 한쪽이 사라져도 통과할 수 있다.
   d="$(yq '.metadata.annotations."argocd.argoproj.io/hook-delete-policy"' "$W")"
-  printf '%s' "$d" | grep -qxF -- 'HookSucceeded'
+  printf '%s' "$d" | tr ',' '\n' | grep -qxF -- 'HookSucceeded'
+  printf '%s' "$d" | tr ',' '\n' | grep -qxF -- 'BeforeHookCreation'
   # kustomization이 실제로 포함해야 렌더에 들어간다.
   run grep -q 'basebackup-pvc-warmup.yaml' "$K"
   [ "$status" -eq 0 ]

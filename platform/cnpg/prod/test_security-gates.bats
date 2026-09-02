@@ -62,7 +62,12 @@ DIR="${BATS_TEST_DIRNAME}"
   [ "$status" -eq 0 ]
 }
 
-@test "pg-rw-tailscale selects the CNPG cluster pods (primary on single-instance)" {
-  run yq -e '.spec.selector["cnpg.io/cluster"]=="pg"' "$DIR/pg-rw-tailscale-service.yaml"
+@test "pg-rw-tailscale selects ONLY the primary instance (the Pooler pods carry the same cluster label)" {
+  # 🔴 `cnpg.io/cluster=pg`만으로는 부족하다 — CNPG는 **PgBouncer Pooler 파드에도 같은 라벨을 붙인다**
+  #    (라이브 실측 2026-09-02: pg-pooler-rw-* 에 cnpg.io/cluster=pg · cnpg.io/podRole=pooler, 그리고
+  #    이 Service의 endpoints가 2개였다). 그러면 tailnet '직결'의 절반이 poolMode=transaction 풀러로
+  #    가서 세션 시맨틱(prepared statement·SET·LISTEN·temp table·advisory lock·pg_dump)이 깨진다.
+  #    instanceRole 키는 인스턴스 파드에만 있으므로 이것이 풀러를 배제하는 유일한 정적 수단이다.
+  run yq -e '[.spec.selector["cnpg.io/cluster"]=="pg", .spec.selector["cnpg.io/instanceRole"]=="primary"] | all' "$DIR/pg-rw-tailscale-service.yaml"
   [ "$status" -eq 0 ]
 }

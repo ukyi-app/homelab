@@ -3,9 +3,13 @@
 # ts-* proxy(tailscale ns) → cnpg-allow-tailscale ingress → pg-rw 5432. *누가* 붙는지는 ACL(infra/tailscale,
 # owner-only)이, *어떤 SQL*은 ro/owner/admin 롤 권한이 제어한다.
 #
-# ★selector: 단일 인스턴스라 cnpg.io/cluster=pg로 충분(=primary). 멀티 인스턴스로 가면 RW가 replica로
-#   라우팅되지 않도록 cnpg.io/instanceRole: primary를 추가해야 한다. apply 전 라이브 라벨 확인(owner-local):
-#   kubectl -n database get svc pg-rw -o jsonpath='{.spec.selector}'
+# ★selector: cnpg.io/cluster=pg **만으로는 부족하다** — CNPG는 PgBouncer Pooler 파드(pg-pooler-rw-*)에도
+#   같은 라벨을 붙이므로 단일 인스턴스여도 엔드포인트가 primary + 풀러 둘이 되고, 세션의 절반이
+#   poolMode=transaction 경로로 가서 세션 시맨틱(prepared statement·SET·LISTEN·temp table·advisory
+#   lock·pg_dump)이 깨진다(2026-09-02 라이브 실측: endpoints 2개). instanceRole은 인스턴스 파드에만
+#   붙으므로 그 키가 풀러를 배제하고 동시에 RW가 replica로 가는 것도 막는다 — CNPG pg-rw와 같은 셀렉터다.
+#   apply 전 라이브 확인(owner-local): kubectl -n database get svc pg-rw -o jsonpath='{.spec.selector}'
+#   그리고 kubectl -n database get endpoints pg-rw-tailscale (엔드포인트 1개 = primary만).
 apiVersion: v1
 kind: Service
 metadata:
@@ -18,5 +22,6 @@ spec:
   loadBalancerClass: tailscale
   selector:
     cnpg.io/cluster: pg
+    cnpg.io/instanceRole: primary
   ports:
     - { name: postgres, port: 5432, targetPort: 5432, protocol: TCP }
