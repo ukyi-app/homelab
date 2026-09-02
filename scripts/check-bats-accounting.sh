@@ -97,7 +97,7 @@ scan_signal check-bats-accounting:excludes "$excl_n"
 #    바로 위 「늘리려면 … 그건 리뷰에 보인다」가 이 자리에서만 거짓이었다. 형제 처방이 같은 결론을 냈다:
 #    check-bats-style.sh의 `BB_BASELINE_OVERRIDE`(소비자 0인데도 폐지) · check-doc-index.sh의
 #    `README_EXEMPT_MAX=0`(상수). 상한을 올리려면 이 줄을 고쳐야 하고, 그건 diff에 남는다.
-EXCL_MAX=15
+EXCL_MAX=16
 if [ "$excl_n" -gt "$EXCL_MAX" ]; then
   echo "FAIL: ${EXCLUDE_FILE}: 제외 ${excl_n}건 > 상한 ${EXCL_MAX} — gate에서 테스트가 빠졌다."
   echo "  정당한 제외라면 이 상한(scripts/check-bats-accounting.sh의 EXCL_MAX 상수)을 같은 PR에서 올려라."

@@ -471,7 +471,7 @@
   dns-drift·create-app 예약어가 apps.json만 인지해 platform_hosts를 모르던 갭은 예약 host SSOT 통합(B9)으로 해소.
 
 ### 로컬 자산 백업 체인
-- 런북 13종은 gitignored 로컬 전용 — 단일 Mac 디스크 단일 사본은 매체 유실에 무방비다(age-keys.md가 recovery
+- 런북(docs/runbooks/*.md — 건수는 `ls`가 SSOT)은 gitignored 로컬 전용 — 단일 디스크 단일 사본은 매체 유실에 무방비다(age-keys.md가 recovery
   키 보관처 포인터인데 그 문서 자체가 로컬 전용인 순환 의존). sealing key 백업(`backup-sealed-secrets-key.sh
   --verify`)과 대칭으로 런북 tarball을 age 암호화해 git 밖 매체에 버전드 보관하고(`backup-local-asset.sh`),
   `--verify`로 신선도를 게이트한다. verify-runbook-index는 owner 머신(런북 실재)에서 **양방향 fail-closed**
