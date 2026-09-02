@@ -12,6 +12,8 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
 
 @test "worker has NO default liveness probe (distroless-safe; avoids /bin/true CrashLoop)" {
   out=$(dep --set kind=worker)
+  # 빈 렌더 양성 대조 — 아래는 전부 부재 단언이라 `$out`이 비면 공허하게 통과한다(test_route.bats 선례).
+  echo "$out" | grep -qF 'kind: Deployment'
   # 기본 liveness 미렌더 — /bin/true 없음 + livenessProbe 키 자체 없음(override 시에만 등장).
   run grep -q '/bin/true' <<<"$out"; [ "$status" -ne 0 ]
   run grep -q 'livenessProbe' <<<"$out"; [ "$status" -ne 0 ]
@@ -19,11 +21,15 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
 
 @test "preStopSleepSeconds=0 omits the preStop block (distroless: no /bin/sleep)" {
   out=$(dep --set kind=web --set route.public=true --set route.host=a.example.com --set preStopSleepSeconds=0)
+  # 빈 렌더 양성 대조 — 아래는 전부 부재 단언이라 `$out`이 비면 공허하게 통과한다(test_route.bats 선례).
+  echo "$out" | grep -qF 'kind: Deployment'
   run grep -q 'preStop' <<<"$out"; [ "$status" -ne 0 ]
 }
 
 @test "default preStop omits /bin/sleep (distroless-safe)" {
   out=$(dep --set kind=web --set route.public=true --set route.host=a.example.com)
+  # 빈 렌더 양성 대조 — 아래는 전부 부재 단언이라 `$out`이 비면 공허하게 통과한다(test_route.bats 선례).
+  echo "$out" | grep -qF 'kind: Deployment'
   run grep -q 'preStop' <<<"$out"; [ "$status" -ne 0 ]
 }
 

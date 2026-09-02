@@ -48,9 +48,11 @@ host-up: ## [runtime] `up`의 별칭 — 호스트 기반층 기동 (M1)
 
 down: ## [비배선] 클러스터 내리기 — 파괴 프리미티브는 scripts/destroy-node.sh(직접 실행)
 # ⚠️ D-j는 **확정됐다**(프리미티브 = scripts/destroy-node.sh). 그런데도 여기 배선하지 않는다. 이유 셋:
-#      (1) `tests/test_makefile.bats`가 `make down`을 **실제로 실행한다.** 배선하면 그 @test가
-#          owner 머신(=라이브 NUC)에서 파괴 스크립트를 실행하게 되고, 안전이 확인 env 하나에만
-#          걸린다. 테스트가 파괴 경로에 발을 들이는 형태를 만들지 않는다.
+#      (1) `tests/test_makefile.bats`가 `make down`을 **실제로 실행하도록 설계돼 있다**(그 파일의 자동
+#          실행 venue는 0 — 첫 @test가 `make verify`를 부르므로 verify에 배선할 수 없고, owner가 손으로
+#          부른다. tests/.ci-exclude가 그렇게 적는다). 배선하면 그 @test가 owner 머신(=라이브 NUC)에서
+#          파괴 스크립트를 실행하게 되고, 안전이 확인 env 하나에만 걸린다 — 위험 모델이 owner-local
+#          수동 실행이라 자동 venue 유무와 무관하게 성립한다. 테스트가 파괴 경로에 발을 들이지 않는다.
 #      (2) 선례가 있다: `host-config --apply`도 make에 걸지 않는다(위 주석) — "make 뒤에 숨기면
 #          무엇이 바뀌는지 모른 채 도는 경로가 된다". `dr-drill.sh`·`backup-files-data.sh`도
 #          같은 이유로 배선 없음(scripts/README.md).
@@ -85,11 +87,17 @@ verify: ## 레포 기반 점검 실행 (스켈레톤 + bats accounting + 배포�
 	@bash scripts/check-host-ports.sh
 	@bash scripts/check-bats-fd0.sh
 	@bash scripts/check-sigpipe-writers.sh
+	@bash scripts/check-floor-vocab.sh
+	@bash scripts/check-scan-producers.sh
+	@bash scripts/check-skip-signalling.sh
 	@scripts/verify-ledger.sh
 # ⚠️ bats 호출은 fd 0을 끊는다(`</dev/null`). @test 안의 스텁이 피연산자 없이 fd 0을 읽으면 호출자의
 #    stdin에서 영구 블록한다 — 실패도 출력도 없는 hang이다(근거·실측은 scripts/run-bats.sh 헤더).
 #    `>/dev/null`은 stdout이라 격리가 아니다. ci.yaml은 `&`로 띄워 우연히 면역이고 여기는 포그라운드다.
 	@bats tests/test_sops-roundtrip.bats </dev/null
+# tests/.ci-exclude가 sops-guard의 실행처를 「owner-local make verify」로 적으면서 실제 호출은 없었다
+#    (쓰인 시점부터 거짓). 표기를 참으로 만든다 — verify는 이미 실 age 키를 요구하므로 새 전제가 없다.
+	@bats tests/test_sops-guard.bats </dev/null
 
 TF_ROOTS := cloudflare tailscale github
 
@@ -200,6 +208,11 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	bash scripts/check-host-ports.sh
 	bash scripts/check-sigpipe-writers.sh
 	bash scripts/check-bats-fd0.sh
+# ⚠️ 아래 셋은 이 처방(6c0194e)보다 뒤에 생겨 목록에 합류하지 못했다 — 실 트리 강제가 각자 bats 한 줄뿐이라
+#    그 @test가 지워지면 픽스처만 살아남는 상태였다(check-image-pins와 같은 자리의 형제).
+	bash scripts/check-floor-vocab.sh
+	bash scripts/check-scan-producers.sh
+	bash scripts/check-skip-signalling.sh
 	bun tools/check-resource-limits.ts
 	bun tools/check-alert-rules.ts
 	bun tools/check-disk-caps.ts

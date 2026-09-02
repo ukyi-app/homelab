@@ -34,7 +34,14 @@ TMP="$VME_TMP"
 META_RULES="$VME_RULES"
 
 # r4 룰 추출(grafana 레그) — vme_ 접두는 lib 전용(리뷰 L1)이라 하네스-로컬 이름을 쓴다.
-extract_rules() { yq -e '.data["'"$2"'"]' "$1" > "$3" 2>/dev/null || fault "룰 추출 실패: $1[$2]"; [ -s "$3" ] || fault "룰 추출 결과가 비었다: $1[$2]"; }
+# ⚠️ stderr를 `2>/dev/null`로 버리지 않는다 — yq 미설치·파싱 오류·키 부재 **세 갈래**가 「룰 추출 실패」
+#    한 문구로 붕괴한다. lib(vme_scenario)의 룰 추출은 이미 stderr를 변수로 받아 fault 문구에 동봉하는데
+#    이 로컬 재구현만 그러지 않았다(ADR-0005 「살릴 것 둘」). `-e`는 유지한다 — null 거절은 이미 fail-closed다.
+extract_rules() {
+  local yq_err=""
+  yq_err="$( { yq -e '.data["'"$2"'"]' "$1" > "$3"; } 2>&1 )" || fault "룰 추출 실패: $1[$2]${yq_err:+. yq stderr: ${yq_err}}"
+  [ -s "$3" ] || fault "룰 추출 결과가 비었다: $1[$2]"
+}
 extract_rules "$RULES_CM_R4" "r4.yaml" "$TMP/r4.yaml"
 
 # fail-closed: 겨냥 룰 실존(리네임 시 무성 무측정 방지 — jobfailed 관례)

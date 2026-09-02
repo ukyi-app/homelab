@@ -27,7 +27,8 @@
 - **`check-bats-accounting.sh`** — 모든 추적 `test_*.bats`가 정확히 한 도메인(gate / chart-test /
   `.ci-exclude`)에 배정됐는지 검사(고아·이중소유 차단). `run-bats.sh --list`를 읽는다. 도메인 회계만으로는 **gate → `.ci-exclude` 이동**이 원리적으로 안 보이므로
   (옮겨도 여전히 "정확히 한 도메인") 레지스트리 계약 두 가지가 더 붙는다: 항목은 빈 줄로 끊긴 직전 주석
-  블록의 지배를 받고 그 블록이 `실행처`를 명시 + 항목 수 **상한**(`BATS_EXCLUDE_MAX`). 여기에 gate 도메인
+  블록의 지배를 받고 그 블록이 `실행처`를 명시 + 항목 수 **상한**(스크립트 상수 `EXCL_MAX` — env
+  오버라이드는 폐지됐다: 호출부에 보이지 않는 off-switch를 두지 않는다). 여기에 gate 도메인
   바닥값(``--floor gate=<n>`` — 러너 붕괴·대량 삭제)까지 셋이 각각 다른 축이다.
   `--lint-excludes <파일>`은 레지스트리 계약만 보는 픽스처 모드다(그 외 인자는 exit 2 — 맨 인자로 회계를
   끄는 off-switch를 두지 않는다).
@@ -141,6 +142,8 @@
   **`make bootstrap`**이 호출(+ `bootstrap-deadmanswitch` 선행). 라이브 클러스터에 적용.
 - **`seed-secrets.sh`** — terraform output + `.env.secrets`에서 SOPS 암호화 시드 시크릿 생성.
   **`make seed-secrets`**가 호출(`.env.secrets`를 source한 뒤). R2/telegram 등 키를 env로 요구.
+  전제: `infra/cloudflare`·`infra/tailscale` apply 완료(state에 output 실재) — 부재/null은
+  `jq -re`가 FATAL로 끊는다(예전엔 문자열 `null`이 그대로 봉인·커밋됐다).
 - **`tools/seal-batch.ts`** (셸 아님 — 참고) — seal-* 4종(adguard-auth·argocd-notify·files·ghcr-pull)을
   선언 테이블로 통합. `make seal-<name>`(별칭)·`make seal-all`(회전 드릴)이 호출. 봉인 전 `secret-cert-check`
   preflight fail-closed(break-glass `--offline-ok`). 평문·해시·토큰은 kubeseal stdin 전용(값 미출력).

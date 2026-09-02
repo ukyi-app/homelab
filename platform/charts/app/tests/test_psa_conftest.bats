@@ -6,7 +6,14 @@ REGO="$CHART/tests/psa-restricted.rego"
 
 @test "chart fixtures (web/worker/site) pass PSA restricted conftest" {
   for k in web worker site; do
-    run bash -c "helm template t '$CHART' -f '$CHART/tests/fixtures/$k.yaml' | conftest test --policy '$REGO' -"
+    # ⚠️ helm과 conftest를 **나눈다**. 예전엔 `run bash -c "helm … | conftest …"` 한 줄이었는데
+    #    (a) `bash -c`는 pipefail을 물려받지 않아 helm 실패가 conftest의 rc에 가려지고
+    #    (b) conftest는 **빈 stdin에 rc 0**("10 tests, 10 passed")이다 — 둘이 겹쳐 빈 렌더가 초록으로
+    #    통과했다(2026-08-29 M1 실측: templates/ 3파일을 0바이트로 비워도 이 @test는 ok).
+    #    분리하면 helm 실패는 bats errexit이, 빈 렌더는 아래 양성 대조가 각각 red로 만든다.
+    out=$(helm template t "$CHART" -f "$CHART/tests/fixtures/$k.yaml")
+    echo "$out" | grep -qF 'kind: Deployment'
+    run conftest test --policy "$REGO" - <<<"$out"
     echo "$output"
     [ "$status" -eq 0 ]
   done

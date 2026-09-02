@@ -37,12 +37,14 @@ jobs:
             terraform -chdir=infra/$r init -backend=false -lockfile=readonly
           done
           make tf-validate
-      - name: terraform 의존 bats 가드 (fmt/validate·prevent_destroy·reconcile 불변식)
+      - name: terraform 의존 bats 가드 (fmt/validate·prevent_destroy·apps.json SSOT)
         # gate(terraform 미설치)에 못 넣는 terraform-결합 테스트만 여기서 advisory로 실행한다.
         # argocd_values·root_app은 platform/argocd로 이동 → required gate 러너가 수집·실행(이중실행 방지로 제외).
+        # test_tf_reconcile.bats도 같은 이유로 여기서 빠졌다 — terraform 비의존(전 @test가 워크플로 grep)이라
+        # required gate가 수집한다. 여기 남기면 이중 실행이고, 게다가 위 paths 필터가 `.github/**`를 안 봐서
+        # tf-reconcile.yaml만 바꾸는 PR에서는 이 advisory 자체가 뜨지 않았다(= 유일 실행처가 아니었다).
         run: |
           bats infra/_tests/test_tf_validate.bats </dev/null # tf fmt/validate + R2 prevent_destroy 가드(이전엔 미게이트)
-          bats infra/_tests/test_tf_reconcile.bats </dev/null # 드리프트 잡(github/tailscale)은 plan-only(무인 apply 금지) 불변식 가드
           bats infra/cloudflare/test_apps_data.bats </dev/null # apps.json DNS/tunnel SSOT(active/public·ingress 순서·host 유일성) — terraform validate 의존이라 gate 불가
 
   # ── PR: cloudflare 루트 plan 미리보기 — 머지 전 add/change/destroy를 job summary에 게시(드리프트/변경 가시성) ──

@@ -21,10 +21,18 @@ set -euo pipefail
 CF_OUT=$(terraform -chdir=infra/cloudflare output -json)
 TS_OUT=$(terraform -chdir=infra/tailscale output -json)
 
-TUNNEL_TOKEN=$(jq -r '.tunnel_token.value' <<<"$CF_OUT")
-R2_ENDPOINT=$(jq -r '.r2_account_endpoint.value' <<<"$CF_OUT")
-TS_ID=$(jq -r '.operator_oauth_client_id.value' <<<"$TS_OUT")
-TS_SECRET=$(jq -r '.operator_oauth_client_secret.value' <<<"$TS_OUT")
+# ⚠️ `jq -r`가 아니라 `jq -re`다. `terraform output -json`은 state가 비었거나 output 이름이 바뀌면
+#    `{}`를 **rc 0으로** 내고, 그때 `jq -r`는 `null`을 **문자열로** 출력한다 — 그 문자열이 아래
+#    heredoc에 그대로 실려 sops로 봉인·커밋되고, 후단 게이트(sops-guard·verify-secrets)는 암호화와
+#    recipient만 보므로 전부 초록이다. 장애는 ArgoCD 싱크 뒤 cloudflared/tailscale-operator/barman의
+#    인증 실패로 위장돼 seed 단계로 귀속되지 않는다(fail-open — 잘못된 산출물 생성).
+#    ⇒ 값 부재를 fail-closed로: `-e`가 null에 rc 1을 내고 첫 write_enc(아래)보다 앞이라 부분 시드도
+#      남지 않는다. 위 env 입력이 `: "${VAR:?}"`로 갖는 대칭을 terraform output에도 준다.
+#    전제: infra/cloudflare·infra/tailscale이 apply되어 state에 output이 실재해야 한다.
+TUNNEL_TOKEN=$(jq -re '.tunnel_token.value' <<<"$CF_OUT") || { echo "FATAL: terraform output tunnel_token 부재/null — 시드 중단" >&2; exit 1; }
+R2_ENDPOINT=$(jq -re '.r2_account_endpoint.value' <<<"$CF_OUT") || { echo "FATAL: terraform output r2_account_endpoint 부재/null — 시드 중단" >&2; exit 1; }
+TS_ID=$(jq -re '.operator_oauth_client_id.value' <<<"$TS_OUT") || { echo "FATAL: terraform output operator_oauth_client_id 부재/null — 시드 중단" >&2; exit 1; }
+TS_SECRET=$(jq -re '.operator_oauth_client_secret.value' <<<"$TS_OUT") || { echo "FATAL: terraform output operator_oauth_client_secret 부재/null — 시드 중단" >&2; exit 1; }
 
 write_enc() { # $1=path; 평문 yaml을 stdin으로 받음 -> 원자적: 평문이 ${path}에 닿는 일은 절대 없음
   local path="$1"

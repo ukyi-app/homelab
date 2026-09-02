@@ -72,20 +72,50 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 #    사람이 실제로 쓸 자연스러운 위치이고, 그 위치로 14건을 한 번에 조용히 제외해도 전 가드가 초록이었다
 #    (gate 바닥값의 여유분을 정확히 소진하는 합성 공격). 상한이 그 축을 닫는다.
 
+# ⚠️ 상한은 이제 **스크립트 상수**(EXCL_MAX)다 — env 오버라이드(`BATS_EXCLUDE_MAX`)는 폐지됐다(호출부에
+#    보이지 않는 off-switch). 그래서 아래 두 픽스처는 상수를 **정적 증인으로 읽어** 자기 크기를 만든다:
+#    상수를 올려도 픽스처가 자동 추종하므로 손 수치가 두 곳에서 이중 관리되지 않는다.
+#    `--lint-excludes` 모드는 (2) 실재 검사보다 **먼저** 종료하므로 항목 경로는 임의여도 된다.
+
+# 스크립트의 상한 상수를 읽는다(정적 증인 — 읽기 실패는 빈 문자열이라 호출부가 [ -n ]으로 잡는다).
+excl_max() { grep -oE '^EXCL_MAX=[0-9]+' "$s" | cut -d= -f2; }
+
 @test "growth under an existing valid group still trips the ceiling" {
+  max="$(excl_max)"
+  [ -n "$max" ]
   reg="$BATS_TEST_TMPDIR/grow"
-  mkreg "$reg" '# 사유 — 실행처: owner-local' \
-               'tests/gates/test_scan-floor.bats' 'tests/gates/test_bats-style.bats' 'tests/gates/test_make-help.bats'
-  BATS_EXCLUDE_MAX=2 run bash "$s" --lint-excludes "$reg"
+  # 상한 + 1건 — 기존 유효 그룹 **아래**에 이어 붙이는 자연스러운 위치 그대로.
+  : > "$reg"
+  echo '# 사유 — 실행처: owner-local' >> "$reg"
+  i=0
+  while [ "$i" -le "$max" ]; do echo "tests/gates/test_fixture-$i.bats" >> "$reg"; i=$((i + 1)); done
+  run bash "$s" --lint-excludes "$reg"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "상한"
 }
 
 @test "shrinking the registry below the ceiling passes (a ceiling, not a ratchet)" {
+  max="$(excl_max)"
+  [ -n "$max" ]
   reg="$BATS_TEST_TMPDIR/shrink"
   mkreg "$reg" '# 사유 — 실행처: owner-local' 'tests/gates/test_scan-floor.bats'
-  BATS_EXCLUDE_MAX=9 run bash "$s" --lint-excludes "$reg"
+  run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
+}
+
+# 상한이 **env로 꺼지지 않는다**는 것 자체가 단언 대상이다 — 폐지 전에는 `BATS_EXCLUDE_MAX=999` 한 줄로
+# 상한이 통째로 사라졌고(재현: 20건 레지스트리 rc 1 → env 붙이면 rc 0) 그걸 재는 증인이 0건이었다.
+@test "the ceiling cannot be lifted by an environment variable (no invisible off-switch)" {
+  max="$(excl_max)"
+  [ -n "$max" ]
+  reg="$BATS_TEST_TMPDIR/envoff"
+  : > "$reg"
+  echo '# 사유 — 실행처: owner-local' >> "$reg"
+  i=0
+  while [ "$i" -le "$max" ]; do echo "tests/gates/test_fixture-$i.bats" >> "$reg"; i=$((i + 1)); done
+  BATS_EXCLUDE_MAX=999 run bash "$s" --lint-excludes "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "상한"
 }
 
 @test "the committed registry is at or under its own ceiling with no override" {

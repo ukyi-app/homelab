@@ -149,6 +149,11 @@ jobs:
           bash scripts/check-host-ports.sh
           bash scripts/check-bats-fd0.sh
           bash scripts/check-sigpipe-writers.sh
+          # ⚠️ 아래 셋은 이 처방(6c0194e)보다 **뒤에** 생겨 목록에 합류하지 못했다 — 실 트리 강제가
+          #    각자 bats 한 줄뿐이라 그 @test가 지워지면 픽스처만 살아남는 상태였다(같은 결함의 형제).
+          bash scripts/check-floor-vocab.sh
+          bash scripts/check-scan-producers.sh
+          bash scripts/check-skip-signalling.sh
           bun tools/check-resource-limits.ts
           bun tools/check-alert-rules.ts
           bun tools/check-disk-caps.ts

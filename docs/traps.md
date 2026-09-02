@@ -47,7 +47,7 @@
 | 한시 억제의 자기 만료(시각 상수 ↔ 창 SSOT 양방향 정합) + 억제한 알림을 vacuity 대조군으로 쓰던 e2e 동반 사망 | gate | `tests/gates/test_files-backup-phase-a.bats` |
 | R2 pg 아카이브 reset --purge 가드(④) | gate · SSOT없음(불변식) | `tests/test_reset-pg-r2-archive.bats` |
 | sealing key 백업 체인 DR fail-closed 게이트 | gate | `tests/test_sealed-secrets-restore.bats` |
-| tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | iac | `infra/_tests/test_tf_reconcile.bats` |
+| tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | gate | `infra/_tests/test_tf_reconcile.bats` |
 | ArgoCD AppProject 권한경계 + appset finalizer/exclude/default-lockdown 거버넌스 | gate · SSOT없음(불변식) | `platform/argocd/root/test_projects.bats` |
 | bats @test 이름 한글/CJK 디렉토리실행 침묵스킵 | gate | `tests/gates/test_check-skeleton-cjk.bats`, `tests/gates/test_check-skeleton-gate.bats` |
 | homepage EROFS(RO config)·apiserver egress(노드서브넷:6443 not ClusterIP) | gate | `platform/homepage/prod/test_homepage_render.bats`, `platform/homepage/prod/test_homepage_netpol.bats` |
@@ -62,7 +62,7 @@
 | emptyDir sizeLimit vs 런타임 다운로드 페이로드(부팅↔evict 루프·DiskPressure=False·로그 파이프라인 연쇄) | gate | `platform/victoria-stack/prod/test_grafana_plugin_budget.bats` |
 | 열거 붕괴 → vacuous green(프로세스 치환 rc 미전파·커맨드 치환 stderr 삼킴·부정 카운트 rc=2·bats 부재 단언은 `-eq 1` + 재귀/루프 자리의 바닥값·양성 대조 한 쌍) | gate+verify | `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `tools/lib/scan-floor.ts`, `scripts/check-scan-producers.sh`, `policy/ledger.rego`, `tests/test_ledger.bats`, `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats` |
 | PreToolUse 훅 종료코드(0=허용·2=차단·그 외=비차단) — 1/4 복사 시 fail-open | local | `tests/gates/test_manifest-guard.bats` |
-| GHA job-level skip은 run conclusion에 안 보인다(스텝 전부 skip이어도 job은 success) | gate+iac | `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats` |
+| GHA job-level skip은 run conclusion에 안 보인다(스텝 전부 skip이어도 job은 success) | gate | `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats` |
 | 이미지 핀의 존재≠일치≠소유자(하드코딩 소비처 목록·base64 은닉·차트 내부 mutable tag) | gate | `tools/check-image-ownership.ts`, `policy/image-ownership.json`, `tests/gates/test_image-ownership.bats`, `tests/gates/test_pgtools-digest.bats` |
 | vmalert replay rulesDelay = 게이트 시간의 전부(비율 아닌 절대 지연·체인 없으면 순수 낭비) | gate | `tests/gates/test_vmalert-e2e-replay-timing.bats`, `tests/gates/lib/vmalert-e2e.sh` |
 | make -n은 드라이런이 아니다 — 레시피의 $(MAKE)는 -n에서도 실행(그 출력을 데이터로 읽는 가드 2종이 오염) | gate | `tests/gates/test_make-ci-parity.bats`, `tools/check-ci-parity.ts`, `policy/ci-parity.json` |
@@ -99,6 +99,7 @@
 | 정적 증인의 두 함정(`^[^/]*`는 `//`만 제외 — JSDoc 줄이 코드 · `run bash -c` 안의 bats 지역 변수는 빈 문자열 — grep 0건 항상 통과) | gate | `tests/gates/test_scan-floor.bats`, `scripts/check-scan-producers.sh` |
 | QEMU amd64 leg의 bun 1.4는 RSS 24MB에서 "메모리 고갈"로 죽는다(JSC 주소공간 예약 실패 — BUN_JSC_useJIT=0·forceRAMSize 무효) — 크래시-재시도 루프가 release를 6시간 태우고, Dockerfile을 안 돌리는 앱 CI는 그동안 초록이다. timeout-minutes로 분 단위에 드러나게 한다. 같은 노출이 `homelab-mutation` 직렬화 그룹(queue:max FIFO)에도 있어 그 9 워크플로의 잡에도 상한을 건다 — route 잡(`uses:`)엔 못 걸어 reusable 잡까지 따라 내려가 검사한다 | app-build, gate | `.github/workflows/reusable-app-build.yaml`, `tools/tests/test_mutation-dispatch.bats` |
 | `github.actor`는 재실행에서 **보존**된다(개시자는 `triggering_actor`) — 그리고 `actions:write`는 재실행 동사를 포함하므로 트리거 열거는 안전 판정이 못 된다. owner 가드 15사본이 actor만 봐서 전건이 `ACTOR=owner·TRIGGERING=타인`을 통과했다(실측). 두 신원을 **함께** 요구하고, env 바인딩 수와 술어 수의 등식을 증인이 진다(바인딩 누락=전 디스패치 잠금) | gate | `tools/tests/test_mutation-dispatch.bats`, `.github/workflows/create-app.yaml` |
+| `grep -q`의 조기 종료가 pipefail 아래에서 writer를 SIGPIPE로 죽인다 — 매치가 있었는데 141이 거짓 FAIL이 된다 | gate | `scripts/check-sigpipe-writers.sh`, `tests/gates/test_sigpipe-writers.bats` |
 | 프로브는 호출이 아니다 — `make -n` 출력의 `command -v X`와 미평가 라벨 `echo "X…" >> $(CI_UNEVAL)`이 X의 증인 노릇을 해, 실제 호출만 지워도 mirrored 대조가 초록이다(선언이 자기 자신을 증명한다). 대조 전에 그 두 **형태**를 지운다(변수명 의존 금지) — `--floor` 금지 검사는 원문 유지 | gate | `tools/check-ci-parity.ts`, `tests/gates/test_make-ci-parity.bats` |
 | 서브쿼리 step이 스크레이프 간격보다 크면 peak가 조용히 과소평가된다(`[14d:5m]` ↔ 30초 스크레이프 = 샘플 90% 폐기 — peak는 격자에 걸릴 확률이 낮은 점이라 손실이 편향된다). 그 위에서 깎은 limit 둘이 같은 날 회귀했다(repo-server +60.3% · adguard +57.5% 과소평가). red를 내지 않는 결함이라 원장 마커와 스크레이프 간격의 정합을 가드가 진다 | gate | `tests/gates/test_verify-ledger-ssot.bats`, `docs/memory-ledger.md` |
 | 네이티브 사이드카(`restartPolicy: Always` initContainer)의 limit은 KSM이 `kube_pod_init_container_resource_limits`로 내보낸다 — near-limit 알림 분모가 container 계열만 보면 캡을 씌우는 순간 "무캡·무알림"이 "캡·무알림·조용한 OOMKill"이 된다. 분모는 두 계열의 `or` | gate | `platform/victoria-stack/prod/rules/core.yaml`, `tools/check-resource-limits.ts` |
