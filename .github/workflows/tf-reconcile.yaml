@@ -294,15 +294,21 @@ jobs:
         with:
           # ⚠️ **형제 잡(1.9.8)과 일부러 다르다 — 맞추지 마라.** terraform은 state를 쓴 버전보다
           # 낮은 바이너리로는 그 state를 **읽지도 못한다**("state snapshot was created by Terraform
-          # vX, which is newer than current vY").
-          # 이 핀은 **선제**다 — 현재 state writer는 1.9.x이고(실측 2026-08-19: 1.9.8로 돈 run
-          # 32208622038이 이 state를 읽어 세 리소스를 refresh했다) 지금 당장 깨져 있지는 않다.
-          # 그런데 이 루트는 owner **로컬 apply 전용**이라 state writer가 owner 머신의 terraform이
-          # 되고, 그 머신은 이미 1.15.5다 — **다음 로컬 apply 한 번이 state writer를 1.15.5로 올리고,
-          # 그 순간 1.9.8인 CI는 plan을 시작조차 못 한다.** [4]에서 이 job이 required/error로 승격되면
-          # 그 고장은 매 30분 red다. 미리 맞춰 두는 비용이 0이라 선제로 올린다.
-          # cloudflare 루트는 CI가 apply해서 writer가 1.9.8로 고정이라 그대로 둔다 — 핀은 루트마다
-          # 독립이다(state writer가 다르므로 통일이 오히려 고장이다).
+          # vX, which is newer than current vY"). plan-only여도 refresh가 state를 읽으므로 같다.
+          # 이 핀은 **헤드룸**이다 — 세 루트의 state writer는 전부 ≤1.9.8이고(실측 2026-08-19:
+          # 1.9.8 바이너리로 github 8건·tailscale 3건·cloudflare 26건 `state list`가 정상 열렸다),
+          # 1.15.5는 어떤 writer보다도 높아 이 plan-only 감시가 writer 상승에 죽지 않는다.
+          # ⚠️ 초판 주석의 "owner 머신은 이미 1.15.5다"는 **낡은 사실이다** — 그 머신(맥미니)은
+          #    폐기됐고 owner 로컬 작업기는 NUC(terraform 1.9.8)로 옮겨갔다. 그 문장을 근거로
+          #    다른 핀들을 '선제' 통일하면 cloudflare/github 등식이 깨진다.
+          # 핀은 **루트마다 독립**이다(state writer가 다르므로 통일이 오히려 고장이다):
+          #   · cloudflare — CI(iac.yaml:76 plan·:179 apply · 이 파일 :73 apply)와 owner 로컬
+          #     apply(blocked-delete 복구 경로)가 번갈아 쓴다 ⇒ 그 핀들 = owner 바이너리 **등식**.
+          #   · github — owner 로컬 apply 전용이고 CI(이 파일 :189)는 plan-only ⇒ CI 핀 ≥ writer.
+          #   · iac.yaml:27(validate all roots)은 `init -backend=false`라 state를 안 만져 등식 밖이다.
+          #   ✅ 그 등식은 이제 기계가 진다 — infra/cloudflare/versions.tf·infra/github/versions.tf의
+          #     `required_version = "= 1.9.8"`이 한 변만 올라가도 init에서 fail-closed로 죽인다.
+          #     이 루트(tailscale)만 `>= 1.9.0`이라 1.15.5로 돌 수 있다.
           # 🔁 **재발 지점**: owner 머신 terraform이 1.15.5를 넘어서면 이 핀이 다시 낡는다. 로컬
           #    apply 후 이 값을 함께 올릴 것(Renovate 비대상 — customManager 없고 github-actions
           #    manager도 비활성이라 자동 갱신 경로가 아예 없다).

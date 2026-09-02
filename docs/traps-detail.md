@@ -1296,13 +1296,22 @@ selfHeal과 플립플롭한다.
 - **terraform은 state를 쓴 버전보다 낮은 바이너리로 그 state를 읽지도 못한다**
   (`state snapshot was created by Terraform vX, which is newer than current vY`). apply가 아니라
   **plan-only여도 마찬가지다** — refresh가 state를 읽어야 하기 때문이다.
-- **왜 이 레포에서 물리는가**: 루트마다 state writer가 다르다. cloudflare는 CI가 apply하므로 writer가
-  CI 핀에 고정되지만, **github·tailscale은 owner 로컬 apply 전용**이라 writer가 owner 머신의
-  terraform이 된다. owner가 brew/mise로 terraform을 올리고 한 번 apply하면, 그 순간부터 CI의
-  plan-only 감시가 죽는다 — 그 job이 `required/error`면 **매 30분 red**다.
+- **왜 이 레포에서 물리는가**: 루트마다 state writer가 다르다.
+  - **github·tailscale은 owner 로컬 apply 전용**이라 writer가 owner 머신의 terraform이 된다.
+    owner가 brew/mise로 terraform을 올리고 한 번 apply하면, 그 순간부터 CI의 plan-only 감시가
+    죽는다 — 그 job이 `required/error`면 **매 30분 red**다.
+  - ⚠️ **cloudflare는 "CI 전용"이 아니다.** CI가 apply하지만(iac.yaml plan/apply · tf-reconcile
+    apply) blocked-delete 복구 경로는 **owner 로컬 apply**다 — 즉 writer 집합이 CI ∪ owner이고,
+    "CI가 apply하므로 writer가 CI 핀에 고정"은 절반만 참이었다. 이 루트의 CI 핀과 owner 바이너리는
+    한 값이어야 하는 **등식**이다.
 - ⚠️ **핀 통일이 오히려 고장이다.** 워크플로의 `terraform_version` 핀들을 "일관성" 명목으로 맞추면
   로컬-apply 루트가 깨진다. 핀은 루트마다 독립이며, 그 의도를 주석에 박아 두지 않으면 다음 사람이
   통일한다(실제로 그 방향의 리팩터가 자연스러워 보인다).
+- ✅ **등식은 이제 terraform 자신이 진다**(가드 신설 0): `infra/cloudflare/versions.tf`와
+  `infra/github/versions.tf`의 `required_version = "= 1.9.8"`이 CI 핀·owner 바이너리 어느 한 변만
+  올라가도 `init`/`validate` 단계에서 fail-closed로 죽인다 — state를 쓰기 **전에**, 그리고
+  `init -backend=false`인 PR gate에서도 걸린다. `infra/tailscale/versions.tf`만 `>= 1.9.0`이다
+  (그 루트의 drift 잡은 일부러 1.15.5 헤드룸으로 돈다).
 - ⚠️ **Renovate가 이 값을 안 본다** — `renovate.json`에 `terraform_version` customManager가 없고
   github-actions manager도 비활성이다. 즉 자동 갱신 경로가 0이고, 로컬 apply 후 손으로 올려야 한다.
 > 가드: `infra/tailscale/test_provider_scopes.bats`
