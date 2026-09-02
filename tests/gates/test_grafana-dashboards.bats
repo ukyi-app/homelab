@@ -48,6 +48,13 @@ setup() {
   [ -s "$E" ]
   # limit으로 나누는 패널이 맞다는 확인(엉뚱한 패널을 재고 있지 않다).
   grep -q 'kube_pod_container_resource_limits' "$E"
+  # ⚠️ 분모는 **두 KSM 계열의 or**여야 한다 — 네이티브 사이드카(restartPolicy: Always인 initContainer)의
+  #    limit은 init 계열로 나가는데 분자에는 그 cgroup이 실려 과대 비율이 된다(라이브 pg-1 8.9% vs 7.1%).
+  grep -q 'kube_pod_init_container_resource_limits' "$E"
+  # ⚠️ 그 결박이 없으면 **더 틀린다** — 종료된 일반 init(bootstrap-controller 1Gi·copyutil 240Mi)까지
+  #    분모에 실린다(pg-1 2.37Gi·4.0%). 룰은 per-container or라 무사했지만 pod 합산 표면에는 그 성질이
+  #    없어 cAdvisor 실행 중 시리즈에 결박해야 한다. 이 줄이 종료 init 합산 회귀의 유일한 증인이다.
+  grep -q 'and on (namespace,pod,container)' "$E"
 
   grep -q 'container_memory_usage_bytes' "$E"
   grep -q 'container_memory_total_inactive_file_bytes' "$E"
