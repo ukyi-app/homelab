@@ -18,6 +18,24 @@ setup() {
   grep -q 'promscrape.configCheckInterval' "$ROOT/platform/victoria-stack/prod/vmagent.yaml"
 }
 
+@test "vmagent verifies the apiserver cert on kubelet scrapes (SA token is not handed to an unverified peer)" {
+  # 두 kubelet 잡은 apiserver 프록시(kubernetes.default.svc:443)로 SA 베어러 토큰을 보낸다. 검증이
+  # 꺼져 있으면 그 이름으로 응답하는 무엇에든 nodes/proxy 권한 토큰이 전달된다. 노드 CA는 같은
+  # projected 볼륨의 ca.crt로 이미 파드 안에 있어 비용 0의 하드닝이다.
+  F="$ROOT/platform/victoria-stack/prod/vmagent-scrape-config.yaml"
+  # ⚠️ 판정은 **파싱한 tls_config**에만 한다 — 파일 전체 grep은 그 자리의 재도입 금지 주석이
+  #    부재 단언을 만족시킨다(「규약을 설명한 파일이 그 규약에서 면제된다」 클래스).
+  T="$BATS_TEST_TMPDIR/vmagent-tls.txt"
+  yq -e '.data["scrape.yml"]' "$F" | yq '.scrape_configs[] | select(.scheme == "https") | .tls_config' - > "$T"
+  [ -s "$T" ]
+  # 로스터 등식 — https 잡 전건이 CA를 지정해야 한다(하드코딩 2가 아니라 레포에서 센다).
+  jobs="$(yq -e '.data["scrape.yml"]' "$F" | yq '[.scrape_configs[] | select(.scheme == "https")] | length' -)"
+  [ "$jobs" -ge 2 ]
+  ca="$(grep -c 'ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt' "$T")"
+  [ "$ca" -eq "$jobs" ]
+  run grep -q 'insecure_skip_verify' "$T"; [ "$status" -eq 1 ]
+}
+
 @test "pod-annotations scrape honors target labels (KSM namespace/pod not clobbered to observability)" {
   # honor_labels 없으면 kube_* 메트릭 namespace가 전부 observability가 돼 namespace 필터/조인이 깨진다
   # (PostgresClusterDown 오발화·PodOOMKilled join 고장의 라이브 검증된 원인).
