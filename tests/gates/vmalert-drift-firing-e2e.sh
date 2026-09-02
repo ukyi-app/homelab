@@ -49,10 +49,14 @@ START_EPOCH="$(date +%s)"
 # shellcheck source=tests/gates/lib/vmalert-e2e.sh
 . "$ROOT/tests/gates/lib/vmalert-e2e.sh"
 
-# 종료 규약은 lib과 같다(2 = 전제 붕괴). 라벨만 이 하네스 것으로 남긴다 — 이 둘은 전부 preflight에서만
-# 쓰이고, 그 사실이 진단의 절반이다(형제 bulkssd와 동일 관용구).
-fault()    { echo "HARNESS FAULT (preflight): $*" >&2; exit 2; }
-contract() { echo "CONTRACT VIOLATION (preflight): $*" >&2; exit 2; }
+# 종료 규약은 lib과 같다(2 = 전제 붕괴). 라벨만 이 하네스 것으로 남긴다 — **어느 국면의 전제가
+# 무너졌는가**가 진단의 절반이라 lib의 라벨-없는 vme_fault를 그대로 쓰지 않는다(형제 bulkssd 관용구).
+# ⚠️ 국면은 `$PHASE`다(기본 preflight). 예전엔 "preflight"가 문자열로 박혀 있었는데, 같은 규약이
+#    필요한 자리가 preflight 밖에도 있다(레그별 백필 sanity) — 고정 라벨로 그리 옮기면 라벨이
+#    거짓말을 한다. 호출자는 `local PHASE=…`로 국면을 바꾼다(bash 동적 스코프).
+PHASE=preflight
+fault()    { echo "HARNESS FAULT ($PHASE): $*" >&2; exit 2; }
+contract() { echo "CONTRACT VIOLATION ($PHASE): $*" >&2; exit 2; }
 
 # ── 1) 시나리오 기동 — 파라미터 파생·작업공간·배포 룰 추출의 조립 순서는 lib(vme_scenario)이 소유한다 ──
 vme_scenario "r6drift-e2e-net-$$" "$STACK" "$RULES_CM" "r6.yaml"
@@ -65,8 +69,10 @@ LOOKBACK="$VME_LOOKBACK"
 # push 주기 = digest-exporter CronJob 크론의 분 필드(*/N).
 CRON="$(yq 'select(.kind=="CronJob") | .spec.schedule' "$STACK/digest-exporter.yaml" | head -1)"
 PUSH_MIN="$(printf '%s' "$CRON" | cut -d' ' -f1 | grep -oE '[0-9]+$' || true)"
-case "$CRON" in '*/'*) : ;; *) echo "digest-exporter 크론이 */N 형식이 아님: $CRON"; exit 1 ;; esac
-[ -n "$PUSH_MIN" ] || { echo "push 주기 추출 실패: $CRON"; exit 1; }
+# ⚠️ 아래 셋은 **룰 판정이 아니라 전제 붕괴**다(매니페스트 파생 실패·겨냥 룰 부재) — bare `exit 1`이면
+#    CI 로그가 이걸 「leg FAIL」(제품 결함)로 보고해 진단이 오귀속된다. 종료 규약은 exit 2다(ADR-0005).
+case "$CRON" in '*/'*) : ;; *) fault "digest-exporter 크론이 */N 형식이 아님: $CRON" ;; esac
+[ -n "$PUSH_MIN" ] || fault "push 주기 추출 실패: $CRON"
 
 EVAL_S="$VME_EVAL_S"
 LOOKBACK_S="$VME_LOOKBACK_S"
@@ -82,7 +88,7 @@ cp "$FIXTURES/r6-overwide-window.yaml" "$TMP/r6-overwide.yaml"
 
 # fail-closed: 하네스가 겨냥하는 룰/레코드가 실제로 존재하는지(리네임 시 무성 무측정 방지)
 for want in 'record: app:image_digest_drift' 'alert: ImageDigestDrift' 'alert: ArgoCDOutOfSync'; do
-  grep -q "$want" "$VME_RULES" || { echo "배포 룰에 '$want' 부재 — 하네스가 아무것도 측정하지 않는다"; exit 1; }
+  grep -q "$want" "$VME_RULES" || fault "배포 룰에 '$want' 부재 — 하네스가 아무것도 측정하지 않는다"
 done
 FOR="$(vme_alert_for "$VME_RULES" ImageDigestDrift)"
 # ⚠️ vme_to_s는 fail-closed다 — `for:`가 없으면 아래 §2b ①의 `for: 20m` 계약 검사에 닿기 전에 죽는다.
@@ -152,10 +158,10 @@ POD_LEAD=$(( PUSH_S - SCRAPE_S ))
 #      전담한다. L3(음성)·L8(양성)·preflight(산술)는 상보적이며 셋 다 있어야 불변식이 강제된다.
 #
 # 픽스처 산술 preflight — 파생 파라미터가 바뀌어 레그가 무의미해지면 조용히 통과시키지 말고 즉시 실패.
-[ "$LOOKBACK_S" -lt "$PUSH_S" ] || { echo "룩백($LOOKBACK) ≥ push 주기(${PUSH_MIN}m) — 구멍이 생기지 않는다(버그 전제 소멸). 레그 산술 재설계 필요"; exit 1; }
-[ "$POD_LEAD" -gt "$LOOKBACK_S" ] || { echo "POD_LEAD(${POD_LEAD}s) ≤ 룩백($LOOKBACK) — L3 phantom 레그가 이빨을 잃는다. 픽스처 산술 재설계 필요"; exit 1; }
-[ "$PUSH_S" -lt "$FOR_S" ] || { echo "push 주기(${PUSH_MIN}m) ≥ for:($FOR) — 어떤 rollup 윈도도 안전대가 없다. 룰 재설계 필요"; exit 1; }
-[ $(( FOR_S % EVAL_S )) -eq 0 ] || { echo "for:($FOR)가 evaluationInterval($EVAL)의 정수배가 아님 — 발화 경계가 비결정적"; exit 1; }
+[ "$LOOKBACK_S" -lt "$PUSH_S" ] || fault "룩백($LOOKBACK) ≥ push 주기(${PUSH_MIN}m) — 구멍이 생기지 않는다(버그 전제 소멸). 레그 산술 재설계 필요"
+[ "$POD_LEAD" -gt "$LOOKBACK_S" ] || fault "POD_LEAD(${POD_LEAD}s) ≤ 룩백($LOOKBACK) — L3 phantom 레그가 이빨을 잃는다. 픽스처 산술 재설계 필요"
+[ "$PUSH_S" -lt "$FOR_S" ] || contract "push 주기(${PUSH_MIN}m) ≥ for:($FOR) — 어떤 rollup 윈도도 안전대가 없다. 룰 재설계 필요"
+[ $(( FOR_S % EVAL_S )) -eq 0 ] || contract "for:($FOR)가 evaluationInterval($EVAL)의 정수배가 아님 — 발화 경계가 비결정적"
 # L8 픽스처가 실제로 상한을 넘는지(phantom = W − 룩백 > for) — 아니면 L8은 양성을 못 뽑고 이빨을 잃는다.
 [ $(( W_OW_S - LOOKBACK_S )) -gt "$FOR_S" ] || fault "L8 픽스처(W=$W_OW)의 phantom 지속(W−룩백 = $(( W_OW_S - LOOKBACK_S ))s)이 for($FOR = ${FOR_S}s) 이하 — 과대 윈도 픽스처가 phantom을 넘기지 못한다 = L8이 아무것도 증명하지 못한다. 픽스처 윈도를 for+룩백 초과로 키워라."
 
@@ -212,6 +218,8 @@ echo "[legs] $SELECTED"
 # **시나리오 생성·백필 sanity·record 안착 확인**뿐이다.
 replay() { # $1=label $2=rules-file $3=scenario [$4=pods_expected(yes|no) — ksmdown 레그는 no]
   local label="$1" rules="$2" scenario="$3" pods="${4:-yes}" vm
+  # 이 함수 안의 전제 붕괴는 preflight가 아니다 — 국면 라벨을 바꿔 진단이 어느 자리를 가리키는지 남긴다.
+  local PHASE="백필 sanity($label)"
   # 재실행(require_engaged의 레이스 재시도)을 위해 인자를 보존한다. 레그마다 컨테이너 이름이
   # `$label-$$`이므로 재시도는 **같은 이름**을 다시 만든다 → 아래에서 기존 컨테이너를 먼저 지운다.
   LAST_REPLAY_ARGS=("$1" "$2" "$3" "${4:-yes}")
@@ -222,12 +230,12 @@ replay() { # $1=label $2=rules-file $3=scenario [$4=pods_expected(yes|no) — ks
   #    추가-플래그 통로로 넘긴다. 형제 하네스는 넘기지 않으므로 그쪽 명령줄은 불변이다.
   vme_leg "$vm" "$TMP/$label.jsonl" --dedup.minScrapeInterval="${SCRAPE_S}s"
   # 백필 sanity: 임포트가 조용히 비었으면 모든 레그가 거짓 통과한다(fail-closed).
-  [ "$(vme_promql "count(count_over_time(ghcr_latest_digest[4h]))")" -ge 1 ] || { echo "백필 sanity 실패($label): ghcr_latest_digest 시리즈 0"; exit 1; }
+  [ "$(vme_promql "count(count_over_time(ghcr_latest_digest[4h]))")" -ge 1 ] || fault "ghcr_latest_digest 시리즈 0 — 임포트가 조용히 비었다"
   if [ "$pods" = yes ]; then
-    [ "$(vme_promql "count(count_over_time(kube_pod_container_info[4h]))")" -ge 1 ] || { echo "백필 sanity 실패($label): kube_pod_container_info 시리즈 0"; exit 1; }
+    [ "$(vme_promql "count(count_over_time(kube_pod_container_info[4h]))")" -ge 1 ] || fault "kube_pod_container_info 시리즈 0 — 임포트가 조용히 비었다"
   else
     # ksmdown: **부재 자체가 레그의 전제**다 → 부재를 적극 단언한다(파드가 섞여 들어오면 L7이 무의미해진다).
-    [ "$(vme_promql "count(count_over_time(kube_pod_container_info[4h]))")" -eq 0 ] || { echo "백필 sanity 실패($label): 우변 소실 시나리오인데 kube_pod_container_info 시리즈가 존재한다"; exit 1; }
+    [ "$(vme_promql "count(count_over_time(kube_pod_container_info[4h]))")" -eq 0 ] || fault "우변 소실 시나리오인데 kube_pod_container_info 시리즈가 존재한다"
   fi
 
   # replay 골격 — ?max_lookback 룩백 핀(없으면 query_range 보간이 구멍을 메워 **거짓 GREEN**), rulesDelay
