@@ -1,5 +1,11 @@
 name: setup-bun
 description: bun 핀 + (옵션)frozen 설치 (버전 SSOT). bun-version을 한 곳에서 핀한다.
+# ⚠️ 위의 "버전 SSOT"는 **워크플로 축**의 주장이다 — 12개 워크플로가 각자 bun을 핀하지 않는다는 뜻이지,
+#    레포에 이 값의 선언이 하나뿐이라는 뜻이 아니다. 축은 셋이다: CI(이 파일의 bun-version) ·
+#    로컬(`Makefile`의 m6-tools 검사) · 선언(`package.json`의 packageManager). **셋의 등식은
+#    `tests/gates/test_setup-bun.bats`의 CANON @test가 진다** — 한 곳만 올리면 그 게이트가 red다.
+#    (그 등식이 없던 동안 각 테스트가 자기 파일 리터럴만 봐서, 여기와 두 테스트만 올리고 Makefile을
+#     잊으면 로컬도 CI도 초록인 채 런타임이 갈렸다 — "하드코딩 소비처 목록은 자기 자신에게만 정확하다".)
 inputs:
   install:
     description: "bun install --frozen-lockfile 실행 여부 (deps 불요 잡은 false)"

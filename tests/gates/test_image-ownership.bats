@@ -68,15 +68,27 @@ FIXTURE_ARGS="--floor refs=1"
 @test "the Renovate reachability approximation still classifies known match and non-match paths" {
   # 도달성은 **근사**다(실제 Renovate dry-run이 아니다). 근사가 조용히 무너지면 무소유가 소유로
   # 뒤집혀 stale-pin이 초록이 된다 — 알려진 양쪽 샘플을 센티넬로 박아 그 붕괴를 감지한다.
+  # ⚠️ **비-도달 센티넬은 ignore 분기를 실제로 밟아야 증인이다.** 착지 전 no 4개 중 둘
+  #    (`tools/templates/x.yaml`·`docs/plans/x.yaml`)은 include 자체에 미도달이라(:179-182의 첫 줄을
+  #    지워도 여전히 false) ignorePaths를 증언하지 않는 vacuous 샘플이었다 — 실측(bareReach=false).
+  #    그래서 각 no에 대해 "**ignore를 비우면 도달한다**"를 함께 단언한다(VACUOUS 레인). 그 대조가
+  #    샘플의 자격을 스스로 증명하므로, 이 목록은 손으로 관리해도 조용히 썩지 않는다.
+  # ⚠️ tools/templates·docs/plans에 닿는 include는 dockerfile manager(`(^|/)Dockerfile$`) **하나뿐**이라
+  #    (yaml 패턴은 전부 `^platform/`·`^apps/` 접두다 — 실측) 그 둘의 샘플이 Dockerfile인 것은 의도다.
+  #    누가 dockerfile manager를 끄면 VACUOUS 레인이 **loud red**를 낸다(조용한 vacuity로 되돌아가지 않는다).
+  # ⚠️ UNCOVERED 레인 — ignorePaths 항목이 늘었는데 센티넬이 없으면 그 항목은 무증인이다.
   run bun -e '
     import { loadRenovate, renovateReaches } from "'"$ROOT"'/tools/check-image-ownership.ts";
     const r = loadRenovate("'"$ROOT"'");
+    const bare = { include: r.include, ignore: [] };   // ignorePaths만 뺀 같은 설정(vacuity 대조군)
     const yes = ["platform/victoria-stack/prod/vmagent.yaml", "apps/page/deploy/prod/values.yaml",
                  "platform/argocd/root/apps/cnpg-operator.yaml", "platform/traefik/prod/helmrelease.yaml"];
-    const no  = ["platform/cnpg/barman-plugin/manifest.yaml", "platform/traefik/prod/charts/traefik/values.yaml",
-                 "tools/templates/x.yaml", "docs/plans/x.yaml"];
+    const no  = ["platform/traefik/prod/charts/traefik/values.yaml", "platform/cnpg/barman-plugin/manifest.yaml",
+                 "tools/templates/Dockerfile", "docs/plans/Dockerfile"];
     const bad = [...yes.filter((p) => !renovateReaches(p, r)).map((p) => "MISS " + p),
-                 ...no.filter((p) => renovateReaches(p, r)).map((p) => "FALSE " + p)];
+                 ...no.filter((p) => renovateReaches(p, r)).map((p) => "FALSE " + p),
+                 ...no.filter((p) => !renovateReaches(p, bare)).map((p) => "VACUOUS " + p),
+                 ...r.ignore.filter((re) => !no.some((p) => re.test(p))).map((re) => "UNCOVERED " + re.source)];
     console.log(bad.join(",") || "ok");
   '
   [ "$status" -eq 0 ]

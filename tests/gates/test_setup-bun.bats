@@ -40,6 +40,11 @@ CANON="1.3.14"
   run grep -oE "bun --version [|] grep -qF '[0-9.]+'" "$ROOT/Makefile"
   [ "$status" -eq 0 ]
   [ "$output" = "bun --version | grep -qF '$CANON'" ]
+  # (4) 그 등식이 **어디서 강제되는지**를 composite 자신이 가리켜야 한다 — 위 산문("버전 SSOT"의 축
+  #     범위 + 나머지 두 축)이 지워지면 다음 사람은 이 파일만 올리고 끝낸다. 정적 증인은 파일명 하나로
+  #     충분하다(문구 전체를 대조하면 리워딩마다 깨져 아무도 안 고치는 테스트가 된다).
+  run grep -qF 'test_setup-bun.bats' "$A"
+  [ "$status" -eq 0 ]
 }
 
 @test "setup-bun composite exists and pins bun + frozen install" {

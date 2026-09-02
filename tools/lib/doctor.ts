@@ -6,7 +6,7 @@
 import { existsSync } from "node:fs";
 import { gh as ghExec } from "./exec.ts";
 import { HOMELAB_REPO, TEMPLATE_REPO, ARCH_NEUTRAL_ARCHETYPES, COMPILED_ARCHETYPES } from "./platform.ts";
-import { SCAFFOLD_CONTRACT_LABEL, scaffoldContractError } from "./template-contract.ts";
+import { SCAFFOLD_CONTRACT_LABEL, SCAFFOLD_ENTRY, scaffoldContractError } from "./template-contract.ts";
 
 export type CheckStatus = "pass" | "fail" | "warn";
 export type DoctorCheck = { id: string; status: CheckStatus; detail: string };
@@ -93,8 +93,8 @@ export function runDoctor(): DoctorResult {
     else if (t.out.trim() !== "true") add("template-access", "fail", `템플릿 레포(${TEMPLATE_REPO})가 is_template이 아니다 — 'Use this template' 생성 불가`);
     else add("template-access", "pass", `템플릿 레포 접근 가능(${TEMPLATE_REPO}, is_template)`);
 
-    const sc = fetchTemplateFile("scaffold/scaffold.ts");
-    if (sc === null) add("template-scaffold-contract", "fail", "scaffold/scaffold.ts 조회 실패 — 템플릿 구조 변경 의심(스캐폴더 부재면 init 불가)");
+    const sc = fetchTemplateFile(SCAFFOLD_ENTRY);
+    if (sc === null) add("template-scaffold-contract", "fail", `${SCAFFOLD_ENTRY} 조회 실패 — 템플릿 구조 변경 의심(스캐폴더 부재면 init 불가)`);
     else {
       // 계약 술어는 lib/template-contract.ts SSOT — init preflight가 같은 술어를 쓴다(structure r1 a3).
       const absent = scaffoldContractError(sc);

@@ -15,7 +15,7 @@ import { compact } from "./contract.ts";
 import { ALLOW_PUSH_REWRITE_ENV, git, pushRoutes, sh } from "./exec.ts";
 import { APP_NAME_RE, isCanonicalClone, pushRouteError } from "./identity.ts";
 import { ARCHETYPES, OWNER, TEMPLATE_REPO } from "./platform.ts";
-import { scaffoldContractError } from "./template-contract.ts";
+import { SCAFFOLD_ENTRY, scaffoldContractError } from "./template-contract.ts";
 
 export type AppInitInput = {
   app: string;
@@ -95,7 +95,7 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     }
   }
   // (2) 템플릿 스캐폴더 계약 호환성 — doctor와 같은 술어(structure r1 a3). 비호환이면 init 거부.
-  const scaffoldSrc = api(["api", `repos/${TEMPLATE_REPO}/contents/scaffold/scaffold.ts`, "--jq", ".content"]);
+  const scaffoldSrc = api(["api", `repos/${TEMPLATE_REPO}/contents/${SCAFFOLD_ENTRY}`, "--jq", ".content"]);
   if (!scaffoldSrc.ok) return fail(`템플릿 스캐폴더 조회 실패(${TEMPLATE_REPO}) — 접근성/구조 확인`, "preflight");
   let scaffoldText: string;
   try { scaffoldText = Buffer.from(scaffoldSrc.out.replace(/\s+/g, ""), "base64").toString("utf8"); }
@@ -158,11 +158,15 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     // 두 조건 모두 봐야 한다: 스캐폴더가 .app-config.yml을 먼저 쓴 뒤 self-delete 전에 실패하면
     // config만으로 스킵하면 반쪽 스캐폴드가 성공으로 통과한다(scaffold/ 잔존 = 미완).
     if (!existsSync(`${dest}/${SCAFFOLD_MARKER}`) || existsSync(`${dest}/scaffold`)) {
+      // ⚠️ 스캐폴더는 **진입점 파일을 직접** 부른다(`bun run scaffold`가 아니다 — SCAFFOLD_ENTRY 주석).
+      // package.json script를 거치면 재개가 그 script의 생존에 의존하는데, 스캐폴더가 스스로 재작성하는
+      // 파일이 바로 package.json이다: 재작성 뒤 어떤 이유로든 죽으면 `scripts.scaffold`가 사라져
+      // 바로 위 재실행 계약(반쪽 스캐폴드 → 재스캐폴드)이 **재호출 불가**로 깨졌다(04 인계).
+      // 진입점은 preflight가 이미 존재·계약 마커를 검증한 그 경로다 — 검증 대상 = 실행 대상.
       // timeoutMs: 0 — 스캐폴더가 lock 재생성 `bun install`을 품는다. 30s 초과 시 SIGTERM이
-      // 스캐폴더의 rollback **전에** 트리를 죽여 package.json이 재작성된 채(scripts.scaffold 소실)
-      // 남고, 바로 위 재실행 계약(반쪽 스캐폴드 → 재스캐폴드)이 그 지점에서 깨진다.
-      const scaffold = sh("bun", ["run", "scaffold", "--archetype", input.archetype, "--name", app, "--yes"], { cwd: dest, timeoutMs: 0 });
-      if (!scaffold.ok) return fail(`스캐폴드 실패 — ${scaffold.err.split("\n")[0] || "bun run scaffold 비-0"}`, "cloned", { created });
+      // 스캐폴더의 rollback **전에** 트리를 죽인다(위 갭의 트리거였고, 지금은 재개가 수렴한다).
+      const scaffold = sh("bun", [SCAFFOLD_ENTRY, "--archetype", input.archetype, "--name", app, "--yes"], { cwd: dest, timeoutMs: 0 });
+      if (!scaffold.ok) return fail(`스캐폴드 실패 — ${scaffold.err.split("\n")[0] || `bun ${SCAFFOLD_ENTRY} 비-0`}`, "cloned", { created });
       if (!existsSync(`${dest}/${SCAFFOLD_MARKER}`)) return fail(`스캐폴드 후 ${SCAFFOLD_MARKER}이 없다 — 스캐폴더 계약 위반`, "cloned", { created });
     }
     scaffolded = true;
