@@ -82,6 +82,29 @@ spec:
             #    30초로 다시 재니 A′ peak(124.4)가 그 값과 사실상 같다. 블록리스트 성장은 실재하는
             #    축이고 LAN 전체 DNS가 여기 걸려 있어 2.0x를 하한 그대로 쓴다.
             limits: { cpu: 200m, memory: 256Mi }
+          # readinessProbe — 프로브가 없으면 kubelet은 프로세스가 뜨는 즉시 Ready로 두므로,
+          # LanDnsPathDown(core.yaml)이 보는 `kube_deployment_status_replicas_ready`는 'DNS가 응답한다'가
+          # 아니라 'adguardhome 프로세스가 살아 있다'를 잰다. AdGuard는 /metrics를 안 내 TargetDown도 없고
+          # rewrite 리컨실러 하트비트는 HTTP API(:3000)만 증명한다 — 즉 "프로세스는 살아 있는데 DNS만
+          # 멈춘" 클래스가 어느 알림에도 안 잡혔다. NotReady → replicas_ready 0 → 기존 LanDnsPathDown
+          # (`for: 60s`)이 그대로 페이징하므로 룰 변경은 필요 없다.
+          # ⚠️ 질의 도메인은 **rewrite로 로컬 응답되는 이름**이어야 한다(adguardhome.yaml의
+          #    `*.home.ukyi.app` rewrite — 리컨실러가 관리하는 그 한 줄). 그래서 업스트림 장애와 무관하고,
+          #    뒤집어 말하면 **업스트림 전건 실패(SERVFAIL)는 이 프로브로 안 잡힌다**. `adguard.home.ukyi.app`은
+          #    이 컴포넌트 자신의 HTTPRoute 호스트라(httproute.yaml) 레포에 실재하는 이름이다.
+          #    httpGet 대안은 없다 — `:3000/health-check`가 401(auth 강제)이다.
+          # ⚠️ **livenessProbe는 의도적으로 두지 않는다.** replicas 1 + LoadBalancer(adguard-dns) 구조라
+          #    kubelet이 재시작을 걸면 LAN 유일 리졸버가 그 동안 통째로 끊긴다. 특히 cpu limit 200m 아래
+          #    블록리스트 갱신 스파이크(위 주석의 124Mi 한 시간)와 겹치면 exec 연속 실패 → 재시작 →
+          #    같은 필터 로드 반복의 자기유발 루프가 된다. 교착의 재기동은 사람이 판단한다.
+          #    (readiness도 같은 대가를 작게 진다: NotReady = 엔드포인트 이탈. timeoutSeconds 3 ·
+          #     failureThreshold 3으로 30초 유예를 줘 일시 지연이 단절로 증폭되지 않게 한다.)
+          # 가드: platform/adguard/prod/test_adguard_auth.bats
+          readinessProbe:
+            exec: { command: [nslookup, -type=a, adguard.home.ukyi.app, 127.0.0.1] }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532

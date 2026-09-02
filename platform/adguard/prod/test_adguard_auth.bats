@@ -53,6 +53,22 @@ S="$BATS_TEST_DIRNAME/adguard-auth.sealed.yaml"
   printf '%s' "$root" | grep -qxF -- '0'
 }
 
+@test "the adguard container has a DNS readiness probe (replicas_ready must mean 'DNS answers')" {
+  # 프로브가 없으면 kubelet이 프로세스 기동만으로 Ready로 두고, LanDnsPathDown이 보는
+  # replicas_ready가 'DNS가 응답한다'가 아니라 '프로세스가 살아 있다'가 된다(무성 클래스).
+  probe="$(yq -e '.spec.template.spec.containers[] | select(.name == "adguard") | .readinessProbe.exec.command[0]' "$D")"
+  printf '%s' "$probe" | grep -qxF -- 'nslookup'
+  # 질의 대상은 rewrite로 로컬 응답되는 *.home 이름이어야 한다 — 업스트림에 의존하면 프로브가
+  # AdGuard가 아니라 인터넷을 잰다(그러면 상류 장애가 LAN DNS 자기단절이 된다).
+  host="$(yq -e '.spec.template.spec.containers[] | select(.name == "adguard") | .readinessProbe.exec.command[2]' "$D")"
+  printf '%s' "$host" | grep -qF -- '.home.'
+  # ⚠️ livenessProbe는 **의도적으로 없다** — replicas 1 + LoadBalancer라 kubelet 재시작이 곧 LAN DNS
+  #    단절이고, cpu limit 200m 아래 블록리스트 갱신 스파이크와 겹치면 자기유발 루프가 된다.
+  #    되돌리려면 deployment.yaml의 근거 주석부터 고쳐라(이 단언은 그 결정의 증인이다).
+  run yq -e '.spec.template.spec.containers[] | select(.name == "adguard") | .livenessProbe' "$D"
+  [ "$status" -eq 1 ]
+}
+
 @test "auth-sealed is a SealedSecret (no plaintext) named adguard-auth in edge" {
   run grep -q 'kind: SealedSecret' "$S"; [ "$status" -eq 0 ]
   run grep -q 'name: adguard-auth' "$S"; [ "$status" -eq 0 ]
