@@ -10,6 +10,9 @@ WF=".github/workflows/renovate.yaml"
   jq -e '.pinDigests == true' "$R" >/dev/null                    # 서드파티 이미지 digest 핀(supply-chain)
   jq -e '.["github-actions"].enabled == false' "$R" >/dev/null   # workflows:write 토큰 전까지 비활성
   jq -e 'any(.ignorePaths[]; . == "**/charts/**")' "$R" >/dev/null # 벤더 helm 캐시 제외
+  # pre-commit manager는 Renovate 기본 비활성 — 명시 opt-in이라야 gitleaks rev(.pre-commit-config.yaml)에
+  # freshness 소유자가 생긴다. ci.yaml secret-guard 주석이 그 소유를 사실로 적으므로 여기서 fail-closed.
+  jq -e '.["pre-commit"].enabled == true' "$R" >/dev/null
 }
 
 @test "renovate custom managers cover the homelab version pins" {

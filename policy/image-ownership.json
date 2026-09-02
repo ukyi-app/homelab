@@ -98,7 +98,7 @@
     {
       "artifact": "chart:argo-cd",
       "why": "GitOps 컨트롤러 자신 — 이 레포를 클러스터에 적용하는 주체다. 라이브 실측 quay.io/argoproj/argocd:v3.4.4(5개 파드) + 번들 redis. 차트 캐시 gitignored + ignorePaths. ⚠️ argocd는 self-manage라 잘못된 핀이 자기 수렴을 막을 수 있다(부트스트랩 복구 경로 필요).",
-      "freshness": "platform/argocd/CHART_VERSION(renovate customManagers, datasource=helm argo-helm).",
+      "freshness": "platform/argocd/CHART_VERSION(renovate customManagers, datasource=helm argo-helm). argocd-app.yaml targetRevision과 쌍이며 등식은 platform/argocd/test_argocd_values.bats가 강제한다(renovate argocd manager도 그 파일을 함께 추적).",
       "since": "2026-07-28",
       "owner_action": "platform/argocd/bootstrap-values.yaml에서 global.image 오버라이드로 끌어올 수 있다. self-manage 컴포넌트라 롤백 경로(make bootstrap)를 먼저 확인하고, redis 등 번들 의존 이미지도 함께 볼 것."
     }

@@ -21,6 +21,9 @@
 @test "argocd chart version is pinned (semver, not a range)" {
   run grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' platform/argocd/CHART_VERSION
   [ "$status" -eq 0 ]
+  # CHART_VERSION(bootstrap helm 설치)과 argocd-app.yaml targetRevision(self-manage Application)은
+  # 같은 차트를 두 번 핀한다 — 갈리면 DR 콜드스타트에서 selfHeal이 방금 설치한 차트를 되돌린다.
+  [ "$(tr -d '[:space:]' < platform/argocd/CHART_VERSION)" = "$(yq '.spec.sources[0].targetRevision' platform/argocd/argocd-app.yaml)" ]
 }
 
 V="platform/argocd/bootstrap-values.yaml"

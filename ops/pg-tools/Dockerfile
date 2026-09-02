@@ -10,6 +10,19 @@ FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639
 #   이미지를 만든다 — pull·기동은 성공하고 CronJob이 처음 실행될 때 exec format error로 죽는다.
 #   비워두면 TARGETARCH가 비어 URL이 404 → curl -f가 즉시 실패한다(요란한 실패가 옳다).
 ARG TARGETARCH
+
+# kubectl 버전 핀. **freshness 소유자는 infra/k3s-bootstrap/versions.env의 K3S_VERSION**이다 —
+# 이 값은 거기서 `+k3s1`을 뗀 것과 문자 그대로 같아야 하고, tools/tests/test_pg-tools.bats가 그
+# 등식을 강제한다(k3s bump PR이 이 줄을 안 따라오면 그 PR이 red). 독립 소유자를 주면 서버와의
+# ±1 minor skew가 다시 열린다.
+# ⚠️ 부동 채널(`release/stable`)을 따라가던 옛 형태는 같은 커밋의 두 빌드가 다른 kubectl을 담았고,
+#    그 재빌드가 restore-drill을 두 번(8/22·8/25) 결정적으로 죽였다. versions.env:5 "고정 —
+#    'stable'/'latest' 금지, cattle 재구축이 결정적이도록"이 이 자리에도 적용된다.
+ARG KUBECTL_VERSION=v1.36.3
+
+# rclone 버전 핀. freshness 소유자는 renovate.json customManagers(github-releases: rclone/rclone).
+ARG RCLONE_VERSION=v1.75.0
+
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -21,11 +34,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
       > /etc/apt/sources.list.d/pgdg.list && \
     apt-get update && apt-get install -y --no-install-recommends postgresql-client-18 && \
-    # kubectl (stable 채널, 아키텍처 인지)
-    curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/${TARGETARCH}/kubectl" \
+    # kubectl (버전 핀, 아키텍처 인지)
+    curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl" \
       -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl && \
-    # rclone (R2 호환 S3)
-    curl -fsSL "https://downloads.rclone.org/rclone-current-linux-${TARGETARCH}.zip" -o /tmp/rclone.zip && \
+    # rclone (R2 호환 S3, 버전 핀)
+    curl -fsSL "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${TARGETARCH}.zip" -o /tmp/rclone.zip && \
     unzip -j /tmp/rclone.zip '*/rclone' -d /usr/local/bin && chmod +x /usr/local/bin/rclone && \
     rm -rf /tmp/rclone.zip /var/lib/apt/lists/*
 

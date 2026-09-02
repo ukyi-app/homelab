@@ -24,6 +24,10 @@
     "description": "workflows:write 토큰 권한이 필요 — writer App에 권한 부여(Phase-0) 후 활성. 그 전엔 push가 거부돼 PR이 깨진다.",
     "enabled": false
   },
+  "pre-commit": {
+    "description": "gitleaks rev(.pre-commit-config.yaml)의 freshness 소유자 — required check `gate`(ci.yaml secret-guard)가 이 rev를 파생해 스캐너 버전을 정한다. Renovate의 pre-commit manager는 기본 비활성이라 명시 opt-in이 필요하다.",
+    "enabled": true
+  },
   "kubernetes": {
     "description": "platform/apps 매니페스트의 image: 추출(매니페스트는 native 자동감지가 안 돼 패턴 명시).",
     "managerFilePatterns": [
@@ -32,9 +36,10 @@
     ]
   },
   "argocd": {
-    "description": "ArgoCD Application 인라인 helm chart 핀 추적 — cnpg-operator(cloudnative-pg)·cert-manager. native argocd manager가 source/sources·필드순서·git source 제외를 처리(custom regex보다 견고).",
+    "description": "ArgoCD Application 인라인 helm chart 핀 추적 — cnpg-operator(cloudnative-pg)·cert-manager, 그리고 self-manage argocd-app.yaml(targetRevision은 CHART_VERSION과 등식 — platform/argocd/test_argocd_values.bats가 강제). native argocd manager가 source/sources·필드순서·git source 제외를 처리(custom regex보다 견고).",
     "managerFilePatterns": [
-      "/^platform/argocd/root/apps/.+\\.yaml$/"
+      "/^platform/argocd/root/apps/.+\\.yaml$/",
+      "/^platform/argocd/argocd-app\\.yaml$/"
     ]
   },
   "customManagers": [
@@ -64,12 +69,28 @@
     },
     {
       "customType": "regex",
-      "description": "argocd CHART_VERSION — argo-cd 차트(argo-helm)",
+      "description": "argocd CHART_VERSION — argo-cd 차트(argo-helm). argocd-app.yaml targetRevision과 쌍(등식 bats 강제 — platform/argocd/test_argocd_values.bats).",
       "managerFilePatterns": ["/^platform/argocd/CHART_VERSION$/"],
       "matchStrings": ["^(?<currentValue>\\S+)\\s*$"],
       "datasourceTemplate": "helm",
       "depNameTemplate": "argo-cd",
       "registryUrlTemplate": "https://argoproj.github.io/argo-helm"
+    },
+    {
+      "customType": "regex",
+      "description": "ci.yaml — required gate가 설치하는 pre-commit(PyPI). 이 스텝은 gate 안의 유일한 pip 경로라 무핀이면 PyPI 릴리스 하나가 전 PR을 red로 만든다(tests/gates/test_toolchain-checksums.bats가 무핀 재발을 막는다).",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yaml$/"],
+      "matchStrings": ["pre-commit==(?<currentValue>[0-9.]+)"],
+      "datasourceTemplate": "pypi",
+      "depNameTemplate": "pre-commit"
+    },
+    {
+      "customType": "regex",
+      "description": "ops/pg-tools Dockerfile — rclone 바이너리 버전 핀(빌드 시 downloads.rclone.org에서 받는다). kubectl은 여기 두지 않는다 — 그 값의 SSOT는 versions.env의 K3S_VERSION이고 tools/tests/test_pg-tools.bats가 등식을 강제한다(독립 소유자를 주면 서버 minor와의 skew가 다시 열린다).",
+      "managerFilePatterns": ["/^ops/pg-tools/Dockerfile$/"],
+      "matchStrings": ["ARG RCLONE_VERSION=(?<currentValue>v[0-9.]+)"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "rclone/rclone"
     },
     {
       "customType": "regex",
@@ -81,8 +102,8 @@
   ],
   "packageRules": [
     {
-      "description": "단일 노드 홈랩 — 인프라/플랫폼 의존은 리뷰 후 수동 머지(자동머지 금지, gate는 통과 필요).",
-      "matchManagers": ["kubernetes", "helmv3", "terraform", "dockerfile", "custom.regex"],
+      "description": "단일 노드 홈랩 — 인프라/플랫폼 의존은 리뷰 후 수동 머지(자동머지 금지, gate는 통과 필요). pre-commit(gitleaks rev)은 required gate의 스캐너 버전이라 같은 규칙에 둔다.",
+      "matchManagers": ["kubernetes", "helmv3", "terraform", "dockerfile", "custom.regex", "pre-commit"],
       "automerge": false
     },
     {

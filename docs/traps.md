@@ -41,7 +41,7 @@
 | enc.yaml 평문 직접 수정 금지(SOPS MAC) | gate+verify | `scripts/sops-guard.sh`, `.claude/hooks/manifest-guard.sh`, `tests/gates/test_manifest-guard.bats`, `tests/gates/test_verify-secrets.bats` |
 | SOPS 왕복(암호화 후 복호 동일) | local · SSOT없음(불변식) | `tests/test_sops-roundtrip.bats` |
 | `.claude/` 선택적 un-ignore(하네스 추적/런타임 무시) | gate · SSOT없음(불변식) | `tests/gates/test_claude-harness-tracked.bats` |
-| make ci ↔ ci.yaml gate 8스텝 패리티 | gate | `tests/gates/test_make-ci-parity.bats` |
+| make ci ↔ ci.yaml gate 스텝 패리티(건수는 policy/ci-parity.json이 계상 — 여기에 적지 않는다) | gate | `tests/gates/test_make-ci-parity.bats` |
 | DR drill 안전 불변식(R5, 라이브 파괴 없이) | gate | `tests/test_dr-drill.bats` |
 | 파괴 프리미티브는 전용 파일 + 확인 env로 분리한다(드릴 본문의 한 줄이면 '그 줄만 떼어 돌려보는' 경로가 생긴다) · bulk 안전은 경로가 아니라 **bind 소스**로 판정한다 | gate · SSOT없음(불변식) | `tests/test_destroy-node.bats` |
 | 한시 억제의 자기 만료(시각 상수 ↔ 창 SSOT 양방향 정합) + 억제한 알림을 vacuity 대조군으로 쓰던 e2e 동반 사망 | gate | `tests/gates/test_files-backup-phase-a.bats` |
