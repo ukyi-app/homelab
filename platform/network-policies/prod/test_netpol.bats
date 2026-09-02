@@ -21,9 +21,19 @@ build() { kustomize build "$DIR"; }
 }
 
 @test "manifests are kubeconform-valid (strict)" {
-  run bash -c "kustomize build \"$DIR\" | kubeconform -strict -summary"
+  # 🔴 이 레인은 '스키마에 맞다'가 아니라 '읽을 것이 없었다'를 초록으로 보고했다. 판정 셋
+  #    (rc·`Invalid: 0`·`Errors: 0`)이 **전부 0건 입력에서 참**이고, `bash -c "A | B"`는 pipefail을
+  #    물려받지 않아 A(kustomize build)의 실패도 삼킨다. 실측 2026-09-03: `resources: []`(0 리소스
+  #    렌더)와 경로 오타(build rc 1) 두 뮤테이션 모두 파이프 rc 0 · 같은 요약이라 이 파일이
+  #    1 ok / 7 not ok가 됐고, 살아남은 유일한 ok가 정확히 이 레인이었다.
+  # (1) pipefail로 렌더 실패를 rc에 전파하고 (2) 판정을 **비공허 양성 대조**로 접는다.
+  #     선례: cb212de(platform/charts/app 렌더 하네스) — 같은 결함·같은 처방.
+  # ⚠️ grep은 파이프 **밖**이라 SIGPIPE 거짓 FAIL 함정과 무관하다
+  #    (cf. docs/traps-detail.md 「`grep -q`의 조기 종료가 pipefail 아래에서 writer를 SIGPIPE로 죽인다」).
+  run bash -c "set -o pipefail; kustomize build \"$DIR\" | kubeconform -strict -summary"
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | grep -qF -- "Invalid: 0"
+  # 대문자 V라 "Invalid: N"과 충돌하지 않는다 — 검사 건수 >0과 유효성 판정을 한 줄에 접는다.
+  printf '%s' "$output" | grep -qE 'Valid: [1-9][0-9]*, Invalid: 0'
   [[ "$output" == *"Errors: 0"* ]]
 }
 
