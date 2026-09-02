@@ -71,8 +71,16 @@ kubectl -n sealed-secrets get secret -l "$LABEL" -o yaml \
   | sops --encrypt --filename-override ss-keys.enc.yaml \
       --input-type binary --output-type binary /dev/stdin > "$tmp"
 
-# 복구 검증(평문은 메모리만): 실제로 복호화되고 Secret을 담는지 — 키 0개(빈 List)도 여기서 거른다
-sops -d --input-type binary --output-type binary "$tmp" | grep -q "kind: Secret"
+# 복구 검증(평문은 메모리만): 실제로 복호화되고 Secret을 담는지 — 키 0개(빈 List)도 여기서 거른다.
+# ⚠️ `grep -q` 금지: 첫 매치에서 grep이 종료하면 아직 쓸 것이 남은 writer가 SIGPIPE로 죽고
+#    `set -o pipefail`이 141을 파이프라인 rc로 채택한다. `kind: Secret`은 List의 첫 항목에 있어 이
+#    자리가 정확히 그 형태다 — 합성 페이로드 실측으로 ≈90KB부터 확률적, ≈139KB(키 12개)부터
+#    결정적으로 백업 생성이 141로 죽고 EXIT trap이 tmp를 지운다(회전 핀 keyrenewperiod "0"이 풀리면
+#    30일마다 키가 하나씩 늘어 시한부로 도달한다). `grep -c`는 EOF까지 읽으므로 그 레이스가 원리적으로
+#    없고 종료코드 의미(매치 0건=rc 1)는 `-q`와 같아 빈 List도 그대로 set -e에 걸린다.
+#    cf. docs/traps-detail.md 「`grep -q`의 조기 종료가 pipefail 아래에서 writer를 SIGPIPE로 죽인다」
+#    — 외부 명령 writer는 check-sigpipe-writers.sh의 도메인 밖이라 이 형태를 손으로 지킨다.
+sops -d --input-type binary --output-type binary "$tmp" | grep -c "kind: Secret" >/dev/null
 
 dest="$outdir/ss-keys.$(date +%s).enc.yaml"
 mv -f "$tmp" "$dest"

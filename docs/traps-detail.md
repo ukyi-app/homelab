@@ -2076,11 +2076,22 @@ selfHeal과 플립플롭한다.
   파이프라인 rc가 grep 쪽(0)이라 안전하다 — 이 함정은 **`set -o pipefail`을 켠 `.sh`에만** 적용된다.
 - ⚠️ 단일 값(`printf '%s' "$one"` — 줄바꿈 없음)은 write가 1회라 사실상 안전하다. 위험한 것은
   **여러 줄 리스트를 멤버십 검사에 파이프하는 형태**다.
-- ⇒ **부채(별도 티켓)**: pipefail을 켠 채 같은 형태를 쓰는 형제가 남아 있다 —
-  `infra/k3s-bootstrap/host-preflight.sh`(:121·:131) · `infra/k3s-bootstrap/verify-cluster.sh`(:93) ·
-  `scripts/audit-orphan-pv.sh`(:63) · `scripts/check-gh-secret-coverage.sh`(:107·:114·:115·:128·:129·:180) ·
-  `scripts/verify-credential-inventory.sh`(:75·:85). 지금 red가 아니라 이번 변경에 묶지 않았고,
-  전수 정적 가드는 bats 레인 면제 설계가 선행이라 함께 미뤘다. 침묵시키지 않으려고 여기 계상한다.
+- ⇒ **부채는 닫혔다**(#574). 형제 **18곳**(host-preflight 2 · verify-cluster 7 · audit-orphan-pv 1 ·
+  check-gh-secret-coverage 6 · verify-credential-inventory 2 — #565의 열거는 `echo "$var"` writer를
+  빠뜨려 11곳으로 셌다)이 herestring으로 전환됐고, 전수 정적 가드 `scripts/check-sigpipe-writers.sh`
+  (pipefail 파일 × 다중행 printf/echo writer, 주석 줄은 사후 제외)가 `make verify`·ci gate에서 강제한다.
+  ⚠️ 이 문단은 #574가 갱신하지 않아 **닫힌 부채를 열린 것으로** 서술하고 있었다(SSOT가 코드와 다른
+  사실을 말하는 이 레포의 반복 클래스). verify-traps는 `> 가드:` 줄과 헤드라인만 대조하므로 본문
+  산문의 이 드리프트를 **원리적으로 못 본다** — 산문도 SSOT의 일부라는 것이 이 자리의 교훈이다.
+- ⚠️ **가드 도메인 밖**: 판정 범위는 `printf '%s\n' "$var"`·`echo "$var"` 같은 **셸 빌트인 writer**다.
+  외부 명령 writer(`sops -d …`·`kubectl get -o yaml …` → `grep -q`)는 같은 기전을 갖지만 가드가 보지
+  않는다(헤더 ②의 축소 근거 — 패턴을 넓히면 오탐이 도메인을 삼킨다). 그 자리는 **소비-완료 형태**
+  (`grep -c`/`grep -l`, 또는 herestring)를 손으로 지킨다. 실측 사례: `scripts/backup-sealed-secrets-key.sh`의
+  복호 검증은 sops(Go)가 stdout에 단일 write를 하는데, 출력이 커지면(합성 페이로드 실측: ≈90KB부터
+  10~20% 확률, ≈139KB=12키부터 결정적) `grep -q`의 조기 종료가 그 write를 EPIPE로 만들어 백업 생성이
+  **141로 죽고 EXIT trap이 tmp를 지운다**. sealing key 회전 핀(`keyrenewperiod "0"`)이 풀리면 30일마다
+  키가 하나씩 늘어 시한부로 도달하는 경로라 `grep -c`로 전환했다.
+> 가드: `scripts/check-sigpipe-writers.sh`, `tests/gates/test_sigpipe-writers.bats`
 ### 서브쿼리 step이 스크레이프 간격보다 크면 peak가 조용히 과소평가된다 — 그 위에서 깎은 limit이 회귀가 된다
 - 2026-09-01, 메모리 원장의 마진 규약(`limit ≥ A′ peak × 2.0`)이 A′를 `[14d:5m]` 서브쿼리로 쟀다.
   cadvisor 스크레이프는 **30초**다(`platform/victoria-stack/prod/vmagent-scrape-config.yaml`, job
