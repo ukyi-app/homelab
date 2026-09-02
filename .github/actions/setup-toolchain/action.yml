@@ -2,7 +2,14 @@ name: setup-toolchain
 description: 핀된 차트/정책/시크릿 툴체인 설치 (버전 SSOT). 필요한 도구만 입력으로 켠다. 러너=ubuntu-24.04-arm(arm64).
 # ⚠️ supplychain-5: 모든 다운로드는 받기→sha256sum -c→설치 패턴(TLS만 신뢰 금지 — 미러/계정 침해 시 변조 차단).
 # 체크섬은 각 핀 버전 자산을 직접 받아 산출한 실 SHA256(placeholder 금지 — test_toolchain-checksums.bats가 강제).
-# 버전 bump 시 Renovate가 URL을 갱신하면 SHA도 함께 갱신해야 한다(불일치 시 gate가 sha256sum 실패로 즉시 차단).
+# ⚠️ **이 파일의 버전 핀에는 자동 freshness 소유자가 없다 — 수동 회전이다.** renovate.json의 어떤
+#    manager도 `.github/actions/**`에 도달하지 않고(kubernetes·argocd는 platform/apps 경로 한정,
+#    customManagers는 versions.env·CHART_VERSION·helmrelease·ci.yaml·pg-tools Dockerfile), github-actions
+#    manager는 비활성인 데다 켜도 `uses:`만 보지 curl URL은 안 본다. Dependency Dashboard에 이 파일이
+#    아예 안 나온다는 것이 그 실측이다. bump 시에는 **URL·sha256(arm64 자산)·input description을 같은
+#    커밋에서 함께** 옮긴다 — 불일치는 gate가 sha256sum 실패로 즉시 차단한다.
+# ⚠️ helm은 **고의로 고정**한다(아래 helm 스텝 주석) — 낡음이 아니라 결정이다.
+# ⚠️ kubeseal은 컨트롤러 appVersion과 lockstep이다(아래 kubeseal 스텝 주석 + tests/gates/test_setup-toolchain-kubeseal.bats).
 
 inputs:
   yq:          { description: yq v4.53.3,            default: 'false' }
