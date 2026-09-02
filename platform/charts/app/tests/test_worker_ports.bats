@@ -6,6 +6,8 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
 
 @test "worker emits no http/metrics container ports and no scrape annotation (not served)" {
   out=$(dep --set kind=worker)
+  # 빈 렌더 양성 대조 — 아래는 전부 부재 단언이라 `$out`이 비면 공허하게 통과한다(test_route.bats 선례).
+  echo "$out" | grep -qF 'kind: Deployment'
   run grep -q 'name: http' <<<"$out"; [ "$status" -ne 0 ]
   run grep -q 'name: metrics' <<<"$out"; [ "$status" -ne 0 ]
   run grep -q 'prometheus.io/scrape' <<<"$out"; [ "$status" -ne 0 ]

@@ -17,6 +17,8 @@ CHART="${BATS_TEST_DIRNAME}/.."
     --set kind=web --set route.public=true --set route.host=a.example.com \
     --set resources.requests.cpu=10m --set resources.requests.memory=32Mi \
     --set resources.limits.cpu=100m --set resources.limits.memory=64Mi)
+  # 빈 렌더 양성 대조 — 아래 부재 단언은 커맨드 치환이라 `$out`이 비면 공허하게 통과한다.
+  echo "$out" | grep -qF 'kind: Deployment'
   run bash -c "echo \"\$1\" | yq 'select(.kind==\"Job\")'" _ "$out"
   [ -z "$output" ]
 }
