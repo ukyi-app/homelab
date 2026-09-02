@@ -2,7 +2,7 @@
 
 **역할** — appset이 발견하는 컴포넌트들의 대상 네임스페이스(gateway/edge/prod/sealed-secrets/cache 등) + PSA(Pod Security Admission) 라벨 소유. `database`는 cnpg가, `observability`는 victoria가 자체 담당.
 
-**싱크 Application · sync-wave** — `platform-components` ApplicationSet이 `platform/namespaces/prod`을 `namespaces-prod` Application으로 자동 발견. sync-wave 미지정 → 기본 **0**.
+**싱크 Application · sync-wave** — `platform/argocd/root/apps/namespaces.yaml`의 **수동 Application `namespaces`**(appset에서 `platform/namespaces/*` 제외 — wave 제어 필요, 이중 소유 금지). 값은 그 매니페스트가 소유한다: **sync-wave -9** — 규칙은 **bare ns + PSA 라벨이 그것을 소비하는 컴포넌트보다 먼저** 선다는 것이라 sealed-secrets/traefik(-8)보다 앞이다. resources-finalizer 없음 — Namespace cascade 삭제 금지(삭제/롤백 시 orphan-retain).
 
 **라이브 디버그** — `argo` 스킬(sync/health, PSA enforce 위반). PSA 검증은 `platform/namespaces/prod/test_psa.bats`.
 

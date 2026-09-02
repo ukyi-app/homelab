@@ -289,7 +289,7 @@
   DR로 traefik-ts 디바이스가 재등록되면(예: homelab→homelab-1) tailscale IP가 바뀌는데 rewrite는 옛 IP를
   가리킨 채라, tailscale·LAN 양쪽에서 모든 `*.home.ukyi.app`이 죽은 IP로 연결돼 실패한다(`.ts.net` MagicDNS
   경로엔 안 드러나 한참 뒤에 발견). 재구축 후 `kubectl -n gateway get svc traefik-ts`의 tailscale IP로 seed +
-  라이브 PVC 둘 다 갱신할 것. (tailnet 전역 nameserver=맥미니 tailscale IP:53→AdGuard는 디바이스명이 안정적이라 무관.)
+  라이브 PVC 둘 다 갱신할 것. (tailnet 전역 nameserver=NUC tailscale IP:53→AdGuard는 노드 IP가 안정적이라 무관.)
 
 ### tailscale operator Ingress reconcile metadata-only 무시
 - tailscale operator의 Ingress reconcile은 metadata-only 변경(annotation nudge)을 무시한다 —
@@ -378,6 +378,12 @@
   있다(data 필드 미설정 시 data 블록 미렌더 → 머지 키 prune 없음, DR-durable). `patch` 단독이면 ownerRef 없이
   additive 머지(기존 키 보존). **`managed: "true"`는 controller ownerRef를 만들어 SealedSecret 삭제 시 대상 Secret
   전체가 cascade delete되므로 쓰지 말 것**(patch 단독으로 충분).
+- **(다른 축, 같은 컴포넌트) 키 자동 회전은 상시 정지다** — `keyrenewperiod: "0"`
+  (`platform/sealed-secrets/prod/values-sealed-secrets.yaml`)는 한시 조치가 아니라 항구 결정이다. 회전은
+  **옛 키를 지우지도, 이미 커밋된 봉인본을 재봉인하지도 않아** 노출 창을 줄이지 못하는 반면,
+  `scripts/backup-sealed-secrets-key.sh --verify`·committed cert(`tools/sealed-secrets-cert.pem`)·복구 드릴을
+  30일마다 조용히 stale로 만든다(자동화 없음). 회전이 필요하면 런북 `restore.md` 「회전 절차」로 **수동**.
+  재검토 트리거는 그 셋 중 하나라도 자동화됐을 때(예: `--verify`가 `make verify-posture`에 편입).
 
 ### gh pr merge --auto clean PR 에러
 - `gh pr merge --auto`는 이미 clean(체크 완료)인 PR에 에러를 낸다 — `|| gh pr merge` 폴백 필요.
@@ -407,6 +413,10 @@
   대해 tf-reconcile에서 **plan-only 드리프트 알림**만 한다(신규 `TF_GITHUB_*`/`TF_TAILSCALE_*` 시크릿 있을
   때만, 없으면 preflight skip). Cloudflare 무료 플랜 rate-limit entitlement(period·mitigation_timeout 둘 다
   10초 고정 등)는 plan 통과해도 apply에서만 400으로 드러난다(cache.tf matches 함정과 동일 계열).
+- ⚠️ **그 모델에 state 잠금이 없다.** 1.9.x S3 backend는 `dynamodb_table` 없이 잠그지 않고
+  `use_lockfile`은 1.10+라, `-lock-timeout=120s`는 no-op이고 직렬화는 CI `homelab-mutation` 그룹뿐이다 —
+  그 그룹은 **설계된 owner 로컬 apply 경로**(cloudflare guard=blocked-delete)를 덮지 못한다. 로컬 apply
+  전에 `gh run list -w tf-reconcile.yaml --status in_progress`가 비어 있는지 확인할 것(근치는 followup).
 
 ### 상주 워크로드 자원 limit 블라인드스팟
 - **자원 limit 블라인드스팟:** 메모리 원장 게이트(`verify:ledger`/`ledger.rego`)는 docs/memory-ledger.md의
@@ -1098,10 +1108,11 @@ Debian 고유 파일인 `/etc/timezone`은 Ubuntu 26.04에 **존재하지 않는
 `DNSStubListener=no`로 스텁을 끄고 `/etc/resolv.conf`를 실업스트림 목록으로 돌려도, tailscale이
 `~.`(모든 도메인) 라우팅 도메인을 선언하면 **1순위 nameserver가 `100.100.100.100`(MagicDNS)** 이
 된다. 그 뒤의 실제 리졸버는 tailnet coordination server가 정하고, 이 tailnet에서 그 값은
-`infra/tailscale/acl.tf`의 `tailscale_dns_nameservers` = **맥미니**, 즉 라이브 클러스터의 AdGuard다.
+`infra/tailscale/acl.tf`의 `tailscale_dns_nameservers` = **NUC**, 즉 라이브 클러스터의 AdGuard다
+(2026-08-18 컷오버 전에는 맥미니였다).
 
-즉 노드의 이름해석이 **클러스터를 경유한다** — Mac을 끄는 순간 노드가 `github.com`조차 못 풀고,
-이미지 pull이 불가능해진다. 콜드스타트 교착의 두 번째 얼굴이며, `DNSStubListener=no` 하나로는
+즉 노드의 이름해석이 **클러스터를 경유한다** — AdGuard/클러스터가 내려간 순간 노드가 `github.com`조차
+못 풀고, 이미지 pull이 불가능해진다. 콜드스타트 교착의 두 번째 얼굴이며, `DNSStubListener=no` 하나로는
 닫히지 않는다.
 
 ⚠️ `100.100.100.100`은 **LOCAL 주소가 아니다**(실측: `ip route get` → `dev tailscale0 table 52`,
@@ -1113,9 +1124,9 @@ resolv.conf의 nameserver가 tailnet 대역(CGNAT `100.64.0.0/10` · tailscale U
 `fd7a:115c:a1e0::/48`)에 있으면 거부한다. tailscaled 자신의 동작에는 영향이 없다(자기 내부
 리졸버를 쓴다).
 
-⚠️ 남은 절반: tailnet 전역 nameserver가 컷오버 후에도 맥미니를 가리키면 **tailscale을 켠 모든
-기기**의 이름해석이 죽는다. 그 값은 gitignored `terraform.tfvars`에 있어 diff에 보이지 않고,
-`terraform apply`는 성공한다.
+⚠️ 남은 절반: tailnet 전역 nameserver는 컷오버에서 NUC으로 **함께 바꿨다**. 되돌리면(예:
+`terraform.tfvars.pre-cutover.bak` 복원) **tailscale을 켠 모든 기기**의 이름해석이 죽는다 — 그 값은
+gitignored `terraform.tfvars`에 있어 diff에 보이지 않고, `terraform apply`는 성공한다. `.bak` 복원 금지.
 
 > 가드: `infra/k3s-bootstrap/tests/test_02-host-preflight.bats`
 

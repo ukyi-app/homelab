@@ -94,7 +94,8 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
 
 **병.** 가드가 CI에서 **돈다는 사실**(권위 실행 경로 — `tools/check-guard-authority.ts`)과 그 호출이
 **가드의 실제 도메인에 닿았다는 사실**은 다른데, 텍스트로는 갈리지 않는다. 실측 반례 둘:
-`tests/test_alert_rules.bats:116`은 루트 인자가 **실 레포**를 가리키고(“인자가 있으면 픽스처”가 거짓),
+`tests/test_alert_rules.bats`의 @test “alert-rule guard passes on the real repository rules”는 루트
+인자가 **실 레포**를 가리키고(“인자가 있으면 픽스처”가 거짓),
 `tools/tests/test_app-deploy.bats`는 한 파일 안에 픽스처 호출과 실 트리 호출이 섞여 있다.
 그래서 회계가 과다 계상 쪽으로 기울어 있다 — 픽스처 전용 호출도 권위로 센다.
 

@@ -7,6 +7,11 @@
 `docs/traps-detail.md`, 또는 되돌림이 쓰여질 코드 지점의 주석으로 승격한다(CONTRIBUTING 「conductor
 파이프라인 산출물」).
 
+**인용 규약** — 맨 번호 `ADR-NNNN`은 **이 디렉토리(`docs/decisions/`) 전용**이다. 아키텍처 리뷰의
+기각·유보 기록은 `docs/adr/`에 **독립 번호**로 살아서 같은 번호가 양쪽에 있으므로, 그쪽은 언제나
+경로로 인용한다(`docs/adr/0005`). 두 시리즈는 목적이 다르다 — 여기는 채택한 결정, 저기는 기각·유보의
+근거(재제안 차단).
+
 | ADR | 결정 |
 |---|---|
 | [0001](0001-secret-management-hybrid.md) | 시크릿 관리 하이브리드(SOPS + SealedSecrets) 유지 |

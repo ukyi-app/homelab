@@ -5,12 +5,13 @@ resource "tailscale_acl" "homelab" {
       "tag:k8s"          = ["tag:k8s-operator"]
     }
     acls = [
-      # 각 멤버는 자기 소유 기기에 대한 전체 접근을 유지한다 (laptop→Mac mini SSH/moshi).
+      # 각 멤버는 자기 소유 기기에 대한 전체 접근을 유지한다 (laptop→NUC SSH/moshi).
       # 이 줄이 없으면 default-deny ACL이 운영자의 원격 Tailscale SSH 경로를 끊는다.
       { action = "accept", src = ["autogroup:member"], dst = ["autogroup:self:*"] },
       # 멤버는 내부 서비스에 Traefik ingress 프록시(HTTP/HTTPS)를 통해서만 도달한다.
-      # 전역 DNS(AdGuard)는 맥미니 tailscale IP:53으로 도달하며, 맥미니는 멤버 자기 소유
-      # 기기라 위 autogroup:self:* 규칙이 이미 허용한다 — tag:k8s에 53은 불필요.
+      # 전역 DNS(AdGuard)는 NUC(=AdGuard가 :53에 서빙하는 노드) tailscale IP:53으로 도달하며,
+      # NUC은 owner 소유 기기(autogroup:self)라 위 autogroup:self:* 규칙이 이미 허용한다 —
+      # tag:k8s에 53은 불필요.
       # kubelet/etcd/NodePort는 아래 tag:k8s 규칙으로 **열지 않는다**(80,443과 5432만 연다).
       # ⚠️ 그렇다고 apiserver가 닫혀 있다는 뜻은 아니다 — 예전 주석은 "kubectl은 OrbStack 경유
       #    로컬이라 kube-apiserver 포트가 노출되지 않는다"고 적었는데 **거짓이다**. 위
@@ -48,13 +49,14 @@ resource "tailscale_acl" "homelab" {
 # (광고 차단 + *.home.ukyi.app split-horizon 통합). split-nameserver(도메인별)가 아니라
 # 전역이라 광고 차단이 모든 쿼리에 적용된다. 폴백 없음(사용자 선택) — AdGuard가 SPOF이며,
 # 죽으면 tailscale 기기의 이름해석이 끊긴다(런북 lan-dns 참고).
-# nameserver = 맥미니 tailscale IP: 맥미니 :53(OrbStack가 모든 인터페이스에 바인딩) →
-# dns-forward-trigger/servicelb DNAT → AdGuard. 전용 tailscale LB 디바이스(Service 재생성
-# 시 IP 변동)보다 맥미니 IP가 안정적이라 사용자 선택.
-# ⚠️ **컷오버 의존**: 이 값은 gitignored `terraform.tfvars`에 있어 diff에 보이지 않는다. 지금은
-#    맥미니를 가리키고, 그 :53은 OrbStack 포워딩이 만들어 준 것이다 — Mac을 끄면 tailscale을 켠
-#    **모든 기기**의 이름해석이 죽는데 `terraform apply`는 성공한다(가드 0건). NUC으로 옮길 때
-#    이 값을 함께 바꿔야 한다.
+# nameserver = NUC tailscale IP: AdGuard가 :53에 서빙하는 노드 → servicelb DNAT → AdGuard.
+# 전용 tailscale LB 디바이스(Service 재생성 시 IP 변동)보다 노드 IP가 안정적이라 사용자 선택.
+# 옛 "맥미니 :53(OrbStack가 모든 인터페이스에 바인딩)" 경로는 2026-08-18 컷오버로 **소멸했다**
+# (근거 전문은 variables.tf `dns_nameserver_tailscale_ip`).
+# ⚠️ 이 값은 gitignored `terraform.tfvars`에 있어 diff에 보이지 않는다. `terraform.tfvars.pre-cutover.bak`
+#    의 맥미니 IP를 되돌려 넣으면 tailnet 전역 DNS가 죽은 기계를 가리키고, AdGuard/클러스터가
+#    내려간 순간 tailscale을 켠 **모든 기기**의 이름해석이 죽는데 `terraform apply`는 성공한다
+#    (가드 0건). `.bak` 복원 금지.
 # ⚠️ 그리고 **k3s 노드 자신은 이 전역 nameserver를 받으면 안 된다.** `~.` 라우팅 도메인이 노드의
 #    모든 질의를 MagicDNS로 끌어가 이름해석이 클러스터를 경유하게 되고, 그게 §2.4 콜드스타트
 #    교착이다. 노드에서는 `tailscale set --accept-dns=false`로 끊는다

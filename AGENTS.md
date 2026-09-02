@@ -12,7 +12,7 @@ k3s 단일 노드(**Intel NUC 베어메탈** · Ubuntu 26.04 LTS · amd64) 홈�
 | `platform/` | ArgoCD가 싱크하는 GitOps 컴포넌트 — **전체 목록은 README 디렉토리 지도**(check-skeleton 강제) |
 | `platform/charts/app` | 모든 앱이 쓰는 공유 Helm 차트 (SSOT) |
 | `apps/<name>/deploy/prod/` | 앱별 values + SealedSecret + `.bindings.json`(db/redis·autoDeploy SSOT) + `source-repo`(외부 레포 바인딩) |
-| `tools/` | 앱 플랫폼 DX **Bun/TS CLI** (`create-app`/`activate-app`·`audit-orphans` 등 — 변이 디스패처·`bump-poll`이 호출, `homelab` 통합 CLI 진입점 `homelab.ts` 포함) + 단위 테스트(`tools/tests/`). top-level 31개 + `lib/` 31개 `.ts`(bun 전용) + app-shared 2개 `.mts`(bun + node≥22.18 strip-types 양립) |
+| `tools/` | 앱 플랫폼 DX **Bun/TS CLI** (`create-app`/`activate-app`·`audit-orphans` 등 — 변이 디스패처·`bump-poll`이 호출, `homelab` 통합 CLI 진입점 `homelab.ts` 포함) + 단위 테스트(`tools/tests/`). top-level·`lib/`는 `.ts`(bun 전용), app-shared는 `.mts`(bun + node≥22.18 strip-types 양립) — 산출물 로스터는 `tools/README.md`(check-doc-index 강제) |
 | `scripts/` | 클러스터/DR 운영·시크릿 **셸 스크립트** (bootstrap·seed/seal·dr-drill·`check-*` 게이트·run-bats — `make`/CI 게이트가 호출). cf. `infra/k3s-bootstrap/*.sh` = VM·k3s·스토리지 substrate 부트스트랩 |
 | `policy/` | 메모리 원장 OPA 정책 (`bun run verify:ledger` 게이트) |
 | `docs/memory-ledger.md` | 메모리 예산 SSOT — limit 합계 ≤ 10240Mi, CI 강제 |
@@ -242,4 +242,6 @@ dispatch `actions:write`(4178609, **키는 homelab이 아니라 앱 레포에** 
 
 ### Domain docs
 
-단일 컨텍스트 — 루트 `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
+단일 컨텍스트 — 루트 `CONTEXT.md` + 결정 기록 `docs/decisions/`(맨 번호 `ADR-NNNN`은 이 시리즈 전용)
++ 아키텍처 리뷰의 기각·유보 기록 `docs/adr/`(번호 독립 — 항상 경로로 인용: `docs/adr/0005`).
+See `docs/agents/domain.md`.

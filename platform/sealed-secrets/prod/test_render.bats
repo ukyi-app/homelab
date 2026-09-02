@@ -22,10 +22,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; C="$ROOT/platform/s
   echo "$output" | grep -q "name: sealed-secrets-controller"
 }
 
-@test "key rotation is pinned off for the migration window (--key-renew-period 0)" {
-  # NUC 이전 기간 한정. values에서 keyrenewperiod가 사라지면 차트가 플래그 자체를 생략하고
-  # 컨트롤러 기본 30일 회전으로 '조용히' 복귀한다 — 반출한 sealing key 백업이 stale이 되는 경로다.
-  # 이전 완료 후 values의 keyrenewperiod와 함께 이 테스트도 제거한다.
+@test "automatic key rotation stays pinned off (--key-renew-period 0)" {
+  # 상시 결정이다(근거 전문은 values-sealed-secrets.yaml 헤더 · traps-detail 「sealed-secrets patch-mode」 절).
+  # values에서 keyrenewperiod가 사라지면 차트가 플래그 자체를 생략하고 컨트롤러 기본 30일 회전으로
+  # '조용히' 복귀한다 — 반출한 sealing key 백업과 committed cert가 stale이 되는 경로다.
+  # 이 단언은 그 무성 복귀를 막는 회귀 가드이지 시한 억제가 아니다.
   run kustomize build --enable-helm "$C"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q -- "--key-renew-period"

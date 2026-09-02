@@ -110,7 +110,7 @@ EOF
     [ "$output" = "0" ] || { echo "seam bypass: $f가 subprocess를 직접 쓴다(${output}곳 — child_process/Bun.spawn)"; false; }
     n=$((n + 1))
   done
-  [ "$n" -ge 40 ]   # 열거 붕괴 바닥값 — glob이 깨지면 루프가 vacuous해진다(실측 64: tools 33 + lib 30 + tests/helpers 1)
+  [ "$n" -ge 40 ]   # 열거 붕괴 바닥값 — glob이 깨지면 루프가 vacuous해진다(실측 건수는 여기 베끼지 않는다)
 }
 
 @test "the exit status rides the Cmd result (callsites keep rc semantics without touching child_process)" {

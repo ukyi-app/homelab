@@ -31,7 +31,7 @@ setup() {
   #   rc 127을 "BUSY"로 읽어 통과한 0.0.0.0 프로브 레인, ③`command not found` **stderr가 `$output`에
   #   섞여** awk 필드가 비지 않은 배제목록 레인, ④rc 127 + 마커 부재로 통과한 dead-detector 레인.
   #   프로그램 rc는 그 도구의 규약이라 철자 규칙으로 못 닫는다(`bun <없는 파일>`=1인데 그 도구의
-  #   **거부**도 1이다 — ADR-0007 「기각이 남긴 부채」·scripts/check-bats-style.sh의 [ABS] 분모 근거).
+  #   **거부**도 1이다 — docs/adr/0007 「기각이 남긴 부채」·scripts/check-bats-style.sh의 [ABS] 분모 근거).
   #   그래서 이 축의 처방은 형태 규칙이 아니라 **대상이 거기 있다**는 한 줄이다(선례:
   #   tests/gates/test_app-token-sha-ssot.bats의 `[ -d .github ]`).
   [ -f "$S" ]
@@ -636,7 +636,7 @@ PYWITNESS
 }
 
 @test "the run primitive stops before readiness — judging a response body stays each harness's own policy" {
-  # ★ ADR-0005가 지킨 축(CONTEXT.md 「판정 어휘」). 프리미티브가 readiness를 삼키면 vmsingle의
+  # ★ docs/adr/0005가 지킨 축(CONTEXT.md 「판정 어휘」). 프리미티브가 readiness를 삼키면 vmsingle의
   #   `/health` 본문 `OK*` 판정과 AM의 `/-/ready`가 하나로 접히는데, 그 둘은 서로 다른 하네스-로컬
   #   정책이고 진단 문구("NodePort DNAT 등")의 절반이 거기 있다. 정적 대조 — 주석은 걷어낸다.
   # ⚠️ 판정 토큰은 **엔드포인트와 대기 상태 변수**로 잡는다. `curl`을 토큰에 넣으면 이 lib의 밴드

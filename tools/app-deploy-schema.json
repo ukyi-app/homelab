@@ -12,7 +12,7 @@
       "description": "autoDeploy SSOT. bump-poll(poll-ghcr)이 autoDeploy 권위로 읽는다(누락=fail-closed 승인 PR). 연결(DB/Redis)은 앱 SealedSecret이라 여기 기록하지 않는다."
     },
     "source-repo": {
-      "description": "외부 앱 레포 바인딩(ukyi-app/<app>). poll-ghcr가 이 파일이 있는 deploy/prod만 update-image 폴링한다(tools/poll-ghcr.ts:145 — 없으면 continue로 영영 폴링 밖). 비어있으면 안 된다."
+      "description": "외부 앱 레포 바인딩(ukyi-app/<app>). poll-ghcr가 이 파일이 있는 deploy/prod만 update-image 폴링한다(tools/poll-ghcr.ts — `listUnits(\"apps\")` 순회에서 `appPaths(...).sourceRepo`가 없으면 continue로 영영 폴링 밖). 비어있으면 안 된다."
     },
     "kustomization.yaml": {
       "description": "appset source #3가 kustomize 렌더(namespace: prod + 봉인본 resources). create-app.ts가 항상 생성 — 없으면 ArgoCD kustomize build 실패."

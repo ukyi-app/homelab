@@ -32,10 +32,13 @@ rules:
       - tcproutes/status
       - tlsroutes/status
     verbs: ["update", "patch"]
-  # 클러스터 내부는 HTTP 전용 (TLS는 Cloudflare edge + Tailscale에서 종단, §6/§14),
-  # kubernetesCRD도 비활성 — 따라서 Gateway 컨트롤러에 클러스터 전역 Secret 읽기 권한이
-  # 필요 없다. TLS listener를 추가하게 되면 cert Secret은 namespaced Role(gateway ns +
-  # cert namespace) + ReferenceGrant로 부여할 것, 절대 클러스터 전역으로는 금지.
+  # ⚠️ secrets가 여기 없다고 해서 Traefik이 Secret을 못 읽는 것이 아니다. 차트가 만드는 ClusterRole
+  # `traefik-gateway`(values-traefik.yaml `rbac.enabled: true`, namespaced=false)가 secrets
+  # get/list/watch를 **클러스터 전역**으로 부여하고 SA `traefik`에 바인딩한다 — gateway.yaml의
+  # `web-internal-tls` 리스너가 참조하는 `home-wildcard-tls`가 그 권한을 실제로 소비한다.
+  # 좁히는 레버는 `rbac.namespaced`뿐인데 kubernetesGateway provider는 ClusterRole을 요구해
+  # (차트 values.yaml 주석) 비목표다. 즉 이 파일의 ClusterRole은 차트 ClusterRole의 부분집합이라
+  # 권한 효과가 없다 — 이 파일의 실효 역할은 SA를 선행 wave(-8)에 세우는 것이다.
   - apiGroups: [""]
     resources: ["services", "namespaces"]
     verbs: ["get", "list", "watch"]
