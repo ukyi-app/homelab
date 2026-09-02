@@ -103,7 +103,7 @@ vme_start_vmsingle() { # $1=container name $2=vmsingle version [$3.. = 추가 �
   #    **두 벌로** 살았고, AM 사본은 "형제 vme_start_vmsingle과 같은 처방"이라고 3회 자백했다.
   # ⇒ 여기 남는 것은 셋뿐이다: ⓐ vmsingle 고유의 명령줄 ⓑ 프리미티브 rc → 이 lib의 종료 규약
   #    (HARNESS FAULT = exit 2) 번역 ⓒ **readiness 판정**. ⓒ는 하네스-로컬 정책이라
-  #    (CONTEXT.md 「판정 어휘」 · ADR-0005가 지킨 축) 프리미티브로 올리지 않는다 — seam은
+  #    (CONTEXT.md 「판정 어휘」 · docs/adr/0005가 지킨 축) 프리미티브로 올리지 않는다 — seam은
   #    readiness **앞에서** 끊는다.
   local name="$1" ver="$2" port ready body
   shift 2

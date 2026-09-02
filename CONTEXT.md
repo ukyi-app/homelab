@@ -165,7 +165,7 @@ _Avoid_: 파서, 전처리기(실제보다 넓다 — 표면은 줄을 코드/�
 **표면 붕괴 (surface collapse)**:
 미종료 heredoc이나 미종료 블록 주석 때문에 파일의 그 지점 이후가 검출기에게 통째로 투명해진 상태.
 **열거 붕괴와 다른 축이다** — 파일은 정상적으로 열렸으므로 `READFILES`도 스캔 신호도 정상값을 낸다.
-파일 수 축 회계로는 원리적으로 관측할 수 없다(`docs/traps-detail.md:1500`).
+파일 수 축 회계로는 원리적으로 관측할 수 없다(`docs/traps-detail.md` 「heredoc 상태 기계가 주석 규칙보다 먼저 돌면」 절).
 _Avoid_: 열거 붕괴(파일 수 축), 오탐·미탐(붕괴는 판정이 아니라 판정 불가다)
 
 **가드 스코프 (guard scope)**:
@@ -184,8 +184,8 @@ _Avoid_: 픽스처 예외(면제는 파일 인자 모드에도 걸린다), 바�
 **가드 진입 경계 (guard entry boundary)**:
 가드 파일에서 부작용(플래그 파싱·원장 읽기·열거·`guardMain`·종료)이 사는 유일한 자리 —
 `if (import.meta.main) { … }`. 그 밖의 최상위는 선언과 export뿐이라, 가드를 import해도 실행되지 않고
-순수 판정만 꺼내 쓸 수 있다. 착지: `tools/check-workflow-readiness.ts:593` ·
-`tools/check-image-ownership.ts:363` · `tools/check-guard-authority.ts`.
+순수 판정만 꺼내 쓸 수 있다. 착지: `tools/check-workflow-readiness.ts` ·
+`tools/check-image-ownership.ts` · `tools/check-guard-authority.ts`의 `if (import.meta.main)` 블록.
 _Avoid_: main 함수, 엔트리포인트(「권위 있는 실행 경로」와 혼동된다)
 
 **린트 컨텍스트 (lint context)**:
@@ -203,7 +203,7 @@ _Avoid_: 설정 객체, 옵션 백, 원장(원장은 `policy/` 아래의 파일�
 자리가 초록이므로 회계가 정상값을 낸다. **셋이 다 서야 후보다**: ① 처방이 어딘가에서
 실증됐다(라이브 사고·재현·명시 결정 중 하나로) · ② 형제 표면이 **같은 실패에 노출**돼 있다 ·
 ③ 그 비대칭에 **근거가 적혀 있지 않다**. 세 조건이 없으면 다음 리뷰가 이 용어를 "비슷한 코드를
-합치자"로 오독한다 — ADR 0003·0004·0005가 기각한 축은 전부 중복은 실재하나 ①이 서지 않은
+합치자"로 오독한다 — `docs/adr/`의 0003·0004·0005가 기각한 축은 전부 중복은 실재하나 ①이 서지 않은
 자리였다. 이 용어 자체가 두 번 실증된 뒤에 승격됐다(`tests/gates/lib/host-port.sh` ·
 `tests/gates/lib/heredoc-marker.sh`의 헤더가 같은 명제를 각자 산문으로 다시 논증한다).
 _Avoid_: 중복 제거, DRY(중복이 문제가 아니라 처방이 닿지 않은 것이 문제다), 리팩터링,

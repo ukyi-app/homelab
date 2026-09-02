@@ -204,7 +204,7 @@ band_assert() {
 @test "a health body from someone else is a fault, not a not-ready timeout" {
   # ★ NodePort DNAT의 서명이 정확히 이것이다 — run도 port 대조도 통과하는데 남의 답이 온다.
   #   예전 코드는 이 상태를 60×0.5s 태운 뒤 "not ready"로 오진했다.
-  #   readiness 판정은 **하네스-로컬 정책**이라 프리미티브로 올리지 않았다(ADR-0005) — 그 결정이
+  #   readiness 판정은 **하네스-로컬 정책**이라 프리미티브로 올리지 않았다(docs/adr/0005) — 그 결정이
   #   실제로 이 lib 안에서 살아 있는지 여기서 문다.
   printf '404 page not found\n' > "$STATE/health-body"
   start_vmsingle ""
