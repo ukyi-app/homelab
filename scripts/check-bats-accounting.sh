@@ -55,7 +55,8 @@ rc=0
 #     그룹의 실행처 표기를 물려받아 통과한다 — 이 규칙을 쓰면서 실제로 낸 버그다(전용 @test로 고정).
 #   · 지배 블록에 `실행처` 문자열이 있어야 한다.
 # ⚠️ **이건 텍스트 계약이지 증명이 아니다.** 단어만 적고 실제 venue가 없어도 통과한다(실측: dev-postgres·
-#    bootstrap은 자동 실행 경로가 0이라 주석을 owner-local 수동 실행으로 정직하게 고쳐 적었다). 실행처의
+#    bootstrap·makefile은 자동 실행 경로가 0이라 주석을 owner-local 수동 실행으로 정직하게 고쳐 적었다.
+#    sops-guard는 반대로 `make verify`에 실제 호출을 붙여 표기를 참으로 만들었다). 실행처의
 #    실재를 강제하려면 check-guard-authority류의 venue 파생이 필요하다 — 별건이다.
 #    증가를 실제로 **묶는 것은 아래 (0b) 상한**이고, 이 계약은 "조용히"를 없앨 뿐이다.
 excl_n=0
@@ -91,10 +92,15 @@ scan_signal check-bats-accounting:excludes "$excl_n"
 # 이 숫자를 올려야 하고, 그건 리뷰에 보인다.
 # ⚠️ 래칫이 아니라 **상한**이다: 항목을 지우는 방향(제외를 줄이는 좋은 방향)은 그냥 통과한다.
 #    그래서 이 손 관리 수치의 드리프트는 단방향이고 무해하다 — 목표 상태는 0이다.
-EXCL_MAX="${BATS_EXCLUDE_MAX:-16}"
+# ⚠️ **env 오버라이드를 두지 않는다.** 예전엔 `${BATS_EXCLUDE_MAX:-16}`이라 `BATS_EXCLUDE_MAX=999 make verify`
+#    한 줄로 상한이 통째로 꺼졌다 — 호출부(ci.yaml·Makefile 2곳) 어디에도 보이지 않는 off-switch다.
+#    바로 위 「늘리려면 … 그건 리뷰에 보인다」가 이 자리에서만 거짓이었다. 형제 처방이 같은 결론을 냈다:
+#    check-bats-style.sh의 `BB_BASELINE_OVERRIDE`(소비자 0인데도 폐지) · check-doc-index.sh의
+#    `README_EXEMPT_MAX=0`(상수). 상한을 올리려면 이 줄을 고쳐야 하고, 그건 diff에 남는다.
+EXCL_MAX=15
 if [ "$excl_n" -gt "$EXCL_MAX" ]; then
   echo "FAIL: ${EXCLUDE_FILE}: 제외 ${excl_n}건 > 상한 ${EXCL_MAX} — gate에서 테스트가 빠졌다."
-  echo "  정당한 제외라면 이 상한(scripts/check-bats-accounting.sh의 BATS_EXCLUDE_MAX 기본값)을 같은 PR에서 올려라."
+  echo "  정당한 제외라면 이 상한(scripts/check-bats-accounting.sh의 EXCL_MAX 상수)을 같은 PR에서 올려라."
   echo "  제외는 부채다: CI가 안 보는 테스트는 죽어도 아무도 모른다."
   rc=1
 fi

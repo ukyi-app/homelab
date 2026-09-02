@@ -47,7 +47,7 @@
 | 한시 억제의 자기 만료(시각 상수 ↔ 창 SSOT 양방향 정합) + 억제한 알림을 vacuity 대조군으로 쓰던 e2e 동반 사망 | gate | `tests/gates/test_files-backup-phase-a.bats` |
 | R2 pg 아카이브 reset --purge 가드(④) | gate · SSOT없음(불변식) | `tests/test_reset-pg-r2-archive.bats` |
 | sealing key 백업 체인 DR fail-closed 게이트 | gate | `tests/test_sealed-secrets-restore.bats` |
-| tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | iac | `infra/_tests/test_tf_reconcile.bats` |
+| tf-reconcile 무인 apply 안전 불변식(destroy 가드 등) | gate | `infra/_tests/test_tf_reconcile.bats` |
 | ArgoCD AppProject 권한경계 + appset finalizer/exclude/default-lockdown 거버넌스 | gate · SSOT없음(불변식) | `platform/argocd/root/test_projects.bats` |
 | bats @test 이름 한글/CJK 디렉토리실행 침묵스킵 | gate | `tests/gates/test_check-skeleton-cjk.bats`, `tests/gates/test_check-skeleton-gate.bats` |
 | homepage EROFS(RO config)·apiserver egress(노드서브넷:6443 not ClusterIP) | gate | `platform/homepage/prod/test_homepage_render.bats`, `platform/homepage/prod/test_homepage_netpol.bats` |
@@ -62,7 +62,7 @@
 | emptyDir sizeLimit vs 런타임 다운로드 페이로드(부팅↔evict 루프·DiskPressure=False·로그 파이프라인 연쇄) | gate | `platform/victoria-stack/prod/test_grafana_plugin_budget.bats` |
 | 열거 붕괴 → vacuous green(프로세스 치환 rc 미전파·커맨드 치환 stderr 삼킴·부정 카운트 rc=2·bats 부재 단언은 `-eq 1` + 재귀/루프 자리의 바닥값·양성 대조 한 쌍) | gate+verify | `tests/gates/test_scan-floor.bats`, `scripts/lib/scan-floor.sh`, `tools/lib/scan-floor.ts`, `scripts/check-scan-producers.sh`, `policy/ledger.rego`, `tests/test_ledger.bats`, `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats` |
 | PreToolUse 훅 종료코드(0=허용·2=차단·그 외=비차단) — 1/4 복사 시 fail-open | local | `tests/gates/test_manifest-guard.bats` |
-| GHA job-level skip은 run conclusion에 안 보인다(스텝 전부 skip이어도 job은 success) | gate+iac | `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats` |
+| GHA job-level skip은 run conclusion에 안 보인다(스텝 전부 skip이어도 job은 success) | gate | `tools/check-workflow-readiness.ts`, `policy/workflow-readiness.json`, `tests/gates/test_workflow-readiness.bats`, `infra/_tests/test_tf_reconcile.bats` |
 | 이미지 핀의 존재≠일치≠소유자(하드코딩 소비처 목록·base64 은닉·차트 내부 mutable tag) | gate | `tools/check-image-ownership.ts`, `policy/image-ownership.json`, `tests/gates/test_image-ownership.bats`, `tests/gates/test_pgtools-digest.bats` |
 | vmalert replay rulesDelay = 게이트 시간의 전부(비율 아닌 절대 지연·체인 없으면 순수 낭비) | gate | `tests/gates/test_vmalert-e2e-replay-timing.bats`, `tests/gates/lib/vmalert-e2e.sh` |
 | make -n은 드라이런이 아니다 — 레시피의 $(MAKE)는 -n에서도 실행(그 출력을 데이터로 읽는 가드 2종이 오염) | gate | `tests/gates/test_make-ci-parity.bats`, `tools/check-ci-parity.ts`, `policy/ci-parity.json` |

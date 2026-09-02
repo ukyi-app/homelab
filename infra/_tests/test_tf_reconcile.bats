@@ -5,6 +5,14 @@
 #  - 시크릿 부재로 인한 skip은 **관측 가능해야 한다**(G-09 준비상태 회계) — 예전엔 그 skip을
 #    "바람직한 상태"로 못박고 있었는데, 실제로는 신뢰 앵커 감시가 통째로 죽는 상태였다.
 #
+#
+# terraform 비의존 — required gate가 수집(run-bats, tests/.ci-exclude 미등재). 12개 @test 전부가 워크플로
+# 파일에 대한 순수 grep이라 terraform 바이너리가 필요 없다. 예전엔 「terraform 의존」 사유로 .ci-exclude에
+# 있었고 유일 실행처가 iac.yaml advisory였는데, 그 워크플로의 `paths` 필터는 `.github/**`를 안 봐서
+# **tf-reconcile.yaml만 바꾸는 PR에서는 아예 돌지 않았다** — 이 파일이 지키는 불변식을 위반할 수 있는
+# 바로 그 PR이 무증인이었다. required check는 `gate` 하나뿐이다(docs/decisions/0003).
+# cf. 형제 선례 infra/cloudflare/test_apps_structure.bats:2-5(같은 클래스의 advisory 우회).
+#
 # ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일($WF)이라 그것으로 닫힌다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 #    2026-08-29 격리 트리 실측: tf-reconcile.yaml을 리네임하면 이 파일의 12개 중 **아래 두 개만**
@@ -62,8 +70,8 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
   [ "$status" -eq 0 ]
   run grep -q 'check-workflow-readiness.ts --workflow tf-reconcile.yaml' "$WF"
   [ "$status" -eq 0 ]
-  # 권위 계약(원장 ↔ 워크플로 양방향 + 런타임 판정)은 required gate가 지킨다 —
-  # 이 파일은 tests/.ci-exclude라 iac.yaml advisory에서만 돈다.
+  # 권위 계약(원장 ↔ 워크플로 양방향 + 런타임 판정)은 required gate가 지킨다 — 이 파일도 이제 그 gate가
+  # 수집하므로(헤더 참고) 같은 venue다. 여기서는 ci.yaml에 그 스텝이 살아 있는지만 확인한다.
   run grep -q 'check-workflow-readiness' "$BATS_TEST_DIRNAME/../../.github/workflows/ci.yaml"
   [ "$status" -eq 0 ]
 }

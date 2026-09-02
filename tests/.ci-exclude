@@ -5,7 +5,8 @@
 #    두 가지를 강제한다(예전엔 "가드가 강제한다"고 적혀만 있었고 실제로는 아무도 안 봤다):
 #      · 항목은 **빈 줄로 끊긴 직전 주석 블록**의 지배를 받고, 그 블록에 `실행처` 표기가 없으면 red.
 #        (헤더는 빈 줄 아래 항목을 지배하지 않는다. 항목 뒤의 주석은 새 그룹을 연다.)
-#      · 항목 수 **상한**(BATS_EXCLUDE_MAX, 기본 = 현재 건수). 늘리려면 같은 PR에서 상한을 올려야 한다.
+#      · 항목 수 **상한**(check-bats-accounting.sh의 `EXCL_MAX` 상수 = 현재 건수 15). 늘리려면 같은 PR에서
+#        그 상수를 올려야 한다 — env 오버라이드는 없다(호출부에 안 보이는 off-switch를 두지 않는다).
 #    실행처 표기는 텍스트 계약이다 — 단어만 적고 실제 경로가 없어도 통과하니, 적을 때 정직할 것.
 # platform/charts/*는 여기 두지 않는다 — 러너가 도메인 prune(make chart-test 별도 harness).
 
@@ -14,15 +15,22 @@ tests/posture/test_internal-by-default.bats
 tests/posture/test_network-policy.bats
 tests/posture/test_networking-e2e.bats
 tests/posture/test_storage-reclaim.bats
-# docker 의존(gate 러너에 docker 없음) — 실행처: owner-local `bats tools/tests/test_dev-postgres.bats`
+# docker compose 기동 + dev 전용 도구(tools/dev-postgres)라 gate 가치가 없다 —
+#   실행처: owner-local `bats tools/tests/test_dev-postgres.bats`
 #   ⚠️ 자동 실행 경로가 0이다(실측) — 아무 워크플로·make 타깃도 부르지 않는다.
+#   ⚠️ 예전 사유 「gate 러너에 docker 없음」은 **쓰인 시점부터 거짓**이었다: gate 잡은 docker를 쓴다
+#      (ci.yaml의 `docker pull` 스텝). 사유를 실제 것으로 고쳐 적는다.
 tools/tests/test_dev-postgres.bats
-# 실 age 키 의존 — 실행처는 owner-local `make verify`. gate의 커버리지는 항목마다 다르다:
+# 실 age 키 의존 — 실행처: owner-local `make verify`(recipe가 두 파일을 직접 부른다). gate 커버리지는 항목마다 다르다:
 #   sops-roundtrip: gate의 'SOPS 왕복 (ephemeral CI 키)' 스텝이 같은 불변식을 즉석 키로 커버.
-#   sops-guard:     gate의 sops-guard 스텝 + tests/gates/test_gate-secret-guard.bats가 커버(왕복 아님).
-#   makefile:       왕복과 무관 — 실 키가 있어야 도는 make 타깃 단언이라 gate 대응물이 없다.
+#   sops-guard:     gate의 sops-guard 스텝 + tests/gates/test_gate-secret-guard.bats는 ci.yaml 배선만 grep한다 —
+#                   BLOCK 의미론(decoy sops_mac·부분 암호화 누출)을 실제로 재는 venue는 verify뿐이다.
 tests/test_sops-roundtrip.bats
 tests/test_sops-guard.bats
+# 실 age 키 의존(왕복 무관 — 실 키가 있어야 도는 make 타깃 단언이라 gate 대응물이 없다) —
+#   실행처: owner-local `bats tests/test_makefile.bats </dev/null`
+#   ⚠️ 자동 실행 경로가 0이다(실측) — 첫 @test가 `make verify`를 부르므로 verify에 배선할 수 없고,
+#      어떤 워크플로·make 타깃도 이 파일을 부르지 않는다. owner가 손으로 부른다.
 tests/test_makefile.bats
 # KSOPS 실 age 시드 복호 의존 — 실행처: owner-local 'make verify-ksops'(age 키 있으면 실행/없으면 skip)
 platform/cnpg/prod/test_creds_reference.bats
@@ -30,8 +38,10 @@ platform/cnpg/prod/test_drill_alerting.bats
 platform/cnpg/prod/test_kustomize_build.bats
 platform/cache/prod/test_ksops_render.bats
 # terraform 의존(gate엔 terraform 미설치) — 실행처: .github/workflows/iac.yaml (advisory 잡)
+#   ⚠️ test_tf_reconcile.bats는 여기 있었지만 terraform 비의존(전 @test가 워크플로 grep)이라 gate로 옮겼다 —
+#      required check는 `gate` 하나뿐이고(decisions/0003), iac.yaml의 paths 필터는 `.github/**`를 안 봐서
+#      tf-reconcile.yaml만 바꾸는 PR에서는 그 advisory가 아예 뜨지 않았다.
 infra/_tests/test_tf_validate.bats
-infra/_tests/test_tf_reconcile.bats
 infra/cloudflare/test_apps_data.bats
 # 라이브 전용(VM/k3s 재구축 substrate) — 실행처: owner-local `bats infra/_tests/test_bootstrap.bats`(DR 드릴)
 #   ⚠️ 자동 실행 경로가 0이다(실측) — DR 드릴 때 사람이 직접 부른다.
