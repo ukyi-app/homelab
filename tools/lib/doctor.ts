@@ -43,7 +43,9 @@ export function runDoctor(): DoctorResult {
   const authed = user.ok && login !== "";
   if (authed) add("gh-auth", "pass", `gh 인증 확인(login: ${login})`);
   else if (user.errKind === "not-found") add("gh-auth", "fail", "gh CLI가 PATH에 없다 — 설치 필요(모든 동사가 gh 경유)");
-  else add("gh-auth", "fail", "gh 인증 부재 — 'gh auth login' 필요");
+  // seam의 err 첫 줄을 함께 싣는다 — 여기 접히는 것은 인증 부재만이 아니다: timeout(SIGTERM)·
+  // ENOBUFS 같은 errKind "spawn" 실패가 같은 문구로 나오면 원인이 통째로 지워진다(오진).
+  else add("gh-auth", "fail", `gh 인증 부재 — 'gh auth login' 필요${user.err ? ` (${user.err.split("\n")[0]})` : ""}`);
 
   const blocked = (id: string) => add(id, "fail", "선행 gh-auth 실패로 판정 불가");
 

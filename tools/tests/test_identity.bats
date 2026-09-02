@@ -23,12 +23,16 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "every mutator callsite imports APP_NAME_RE from lib/identity (no inline app-name regex left)" {
-  # 5 콜사이트가 분기 regex 대신 SSOT를 쓴다 — 인라인 `[a-z][a-z0-9-]{1,29}`/`{0,40}` 잔존 0
+  # 6 콜사이트가 분기 regex 대신 SSOT를 쓴다 — 인라인 `[a-z][a-z0-9-]{1,29}`/`{0,40}` 잔존 0.
+  # lib/status.ts는 mutator가 아니지만 app으로 경로·리소스명을 조립하는 리더라 같은 게이트를 지난다
+  # (identity.ts 헤더 소유 — 앱-이름 소비자 중 APP_NAME_RE 밖은 0곳이어야 한다).
   run grep -nE 'a-z0-9-\]\{1,29\}|a-z0-9-\]\{0,40\}' \
     tools/create-app.ts tools/teardown-app.ts tools/bump-tag.ts
   [ "$status" -eq 1 ]   # grep이 아무것도 못 찾아야(=잔존 0) status==1
-  for f in create-app teardown-app validate-mutation activate-app bump-tag; do
-    run grep -q "lib/identity.ts" "tools/$f.ts"
+  for f in tools/create-app.ts tools/teardown-app.ts tools/validate-mutation.ts tools/activate-app.ts tools/bump-tag.ts tools/lib/status.ts; do
+    # ⚠️ 피연산자를 **import 줄**로 좁힌다 — `grep -q identity.ts`는 그 파일의 *주석* 한 줄에도
+    #    매치해, 인라인 regex로 되돌린 뮤테이션에서 초록이 났다(실측). cf. 「정적 증인의 두 함정」
+    run grep -qE '^import .*from "[./a-z]*identity\.ts";' "$f"
     [ "$status" -eq 0 ]
   done
 }

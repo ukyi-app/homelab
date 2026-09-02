@@ -68,3 +68,19 @@ STUB
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.host')" = "127.0.0.1:6379" ]
 }
+
+@test "a missing secret key (empty jsonpath output, rc 0) is a failure, not a blank credential write" {
+  # db-url과 대칭 — 빈 출력·rc 0을 성공으로 접으면 `SESSIONS_REDIS_RO_URL=`(빈 값)이 파일에 남는다.
+  T="$(mktemp -d)"; mkdir -p "$T/bin"
+  cat > "$T/bin/kubectl" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x "$T/bin/kubectl"
+  : > "$T/kubeconfig"   # 라이브 경로 픽스처 — 클러스터 도메인 실재(없으면 skip variant가 선행한다)
+  run env PATH="$T/bin:$PATH" KUBECONFIG="$T/kubeconfig" bun "$ROOT/tools/cache-url.ts" --name sessions --env-local "$T/.env.local"
+  [ "$status" -eq 1 ]
+  [ ! -f "$T/.env.local" ]
+  echo "$output" | grep -q "비어 있거나 없다"
+  rm -rf "$T"
+}

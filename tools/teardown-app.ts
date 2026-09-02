@@ -10,7 +10,7 @@ import { appPaths, appRel, removeAppSurface } from "./lib/app-surface.ts";
 import { parseLedgerRows } from "./lib/ledger-totals.ts";
 import { removeRowWithTotals } from "./lib/ledger-budget.ts";
 import { parseFlags } from "./lib/cli.ts";
-import { removeApp } from "./lib/digest-exporter.ts";
+import { hasApp, removeApp } from "./lib/digest-exporter.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
 let __f: Record<string, string | boolean>;
@@ -40,7 +40,11 @@ const ledger = existsSync(ledgerPath) ? readFileSync(ledgerPath, "utf8") : "";
 plan.ledgerRow = parseLedgerRows(ledger).some((r) => r.name === app);
 
 const dePath = `${ROOT}/platform/victoria-stack/prod/digest-exporter.yaml`;
-if (existsSync(dePath) && new RegExp(`(^|[" ])${app}=`).test(readFileSync(dePath, "utf8"))) {
+// 소속 판정은 커널(hasApp) — 계획과 실제 제거(removeApp)가 **같은 문법**(같은 APPS_RE·splitApps)을
+// 본다. 손 부분매치 정규식은 APPS value 밖의 셸 로그(`app=$APP`)에도 매치해 계획을 거짓 양성으로
+// 만들었고, 반대로 APPS 라인 소실(포맷 드리프트)은 조용히 지나쳐 쓰기 단계에서만 죽었다.
+// 파일 부재 = no-op은 그대로, 포맷 드리프트는 plan 단계에서 커널 throw(아래 쓰기와 같은 조건).
+if (existsSync(dePath) && hasApp(readFileSync(dePath, "utf8"), app)) {
   plan.remove.push("digest-exporter APPS 항목");
 }
 
