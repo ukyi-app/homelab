@@ -150,6 +150,9 @@ jobs:
   apply:
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04-arm
+    # timeout-minutes — 이 워크플로에서 homelab-mutation을 쥐는 잡은 여기뿐이다(잡-레벨 concurrency).
+    # 근거 전문은 bump-poll.yaml preflight 잡 주석. 실측(최근 100 run): iac p50 29s / max 121s.
+    timeout-minutes: 20
     # 전역 변이 직렬화 그룹 공유 — tfstate race 차단. queue:max로 취소 누락 차단.
     # 그래도 취소/실패하면 tf-reconcile.yaml(주기)이 다음 주기에 수렴시킨다.
     concurrency:

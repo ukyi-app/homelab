@@ -1930,7 +1930,19 @@ selfHeal과 플립플롭한다.
   아무 신호도 주지 않는다. 상한을 걸면 같은 일이 재발해도 **분 단위로 red가 된다**(같은 이유로
   `contract-drift.yaml`이 이미 `timeout-minutes: 5`를 쓴다). 상한은 원인을 고치지 않는다 — 6시간을
   N분으로 바꿔 **드러나게** 할 뿐이다.
-> 가드: `.github/workflows/reusable-app-build.yaml`
+- ⇒ **같은 처방이 닿아야 할 두 번째 자리: `homelab-mutation` 직렬화 그룹**(2026-09-02). 이 그룹은
+  `queue: max` + `cancel-in-progress: false`라 in-progress run이 끝날 때까지 나머지를 pending FIFO로
+  붙든다 — 잡 하나가 네트워크에서 hang하면 owner 디스패치·DNS apply·이미지 bump·드리프트 수렴이
+  **전부** platform max(6h)까지 선다. 실행기 쪽 하위 상한도 없다(`tools/lib/exec.ts`의 `timeoutMs: 0`가
+  gh/docker/git 호출 전부에 걸린다). 유일한 런타임 신호인 GHAWorkflowStale은 예산이 21600s라 그 6h와
+  사실상 같은 시각에야 울리고, platform-max 종료는 `cancelled`라 잡-레벨 `if: failure()` 알림도 침묵한다
+  (라이브 실측: trip-mate-api run 32722287190이 6h0m46s 뒤 conclusion=cancelled).
+  ⚠️ 디스패처의 route 잡(`uses: ./.github/workflows/_<self>.yaml`)에는 `timeout-minutes`를 둘 수 없다 —
+  actionlint가 거부한다. 값은 그 reusable의 잡에 걸고, 가드도 `uses:`를 따라 내려가 검사해야 한다.
+  값의 근거는 라이브 실측이다(최근 100 run 실행구간 max: bump-poll 352s · tf-reconcile 145s · iac 121s ·
+  bump 337s) — 정상 소요가 분 단위라 15~30분 상한은 오탐 여지가 없고, 크론 멱등이라 거짓 타임아웃도
+  다음 주기가 수렴시킨다.
+> 가드: `.github/workflows/reusable-app-build.yaml`, `tools/tests/test_mutation-dispatch.bats`
 ### 인용하지 않은 heredoc 안의 주석에 백틱을 쓰면 그 명령이 **실행되고** 주석이 잘려 나간다 — shellcheck는 그걸 "style"로 부른다
 - **병(2026-08-27 실측)**: 가드가 awk 프로그램을 `read -r -d '' DETECT <<AWK`(인용하지 않은
   delimiter)로 조립한다 — 셸 변수를 본문에 끼워 넣어야 하기 때문이다. 그 안에 설명 주석을 달면서

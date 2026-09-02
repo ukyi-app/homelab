@@ -37,6 +37,71 @@ setup() {
   done
 }
 
+@test "every job holding the homelab-mutation group carries a timeout-minutes ceiling" {
+  # 이 그룹은 `queue: max` + `cancel-in-progress: false`라 in-progress run이 끝날 때까지 나머지를
+  # pending FIFO로 붙든다 — 잡 하나가 네트워크에서 hang하면 변이 플레인 전체가 platform max(6h)까지
+  # 선다. 실행기 쪽 하위 상한도 없다(tools/lib/exec.ts `timeoutMs: 0`). 유일한 런타임 신호인
+  # GHAWorkflowStale은 예산이 21600s라 그 6h와 사실상 같은 시각에 울린다. 형제 자리에서 이미 채택한
+  # 방어다(reusable-app-build 2026-08-24 6h 실사고 · contract-drift).
+  # ⚠️ 디스패처의 route 잡(`uses: ./.github/workflows/_<self>.yaml`)에는 timeout-minutes를 둘 수 없다
+  #    — actionlint가 거부한다. 그래서 `uses:`를 **따라 내려가** 그 reusable의 잡에서 상한을 찾는다.
+  #    따라가지 않으면 변이 본체 5종이 통째로 분모 밖이 되어 초록이 무의미해진다.
+  command -v yq >/dev/null || skip "yq required"
+  wfn=0; checked=0; followed=0; bad=""
+  for f in "$WF"/*.yaml; do
+    [ -e "$f" ] || continue
+    wg="$(yq -r '.concurrency.group // ""' "$f")"   # workflow-레벨 그룹
+    keys="$(yq -r '.jobs | keys | .[]' "$f")"
+    holder=0
+    while read -r j; do
+      [ -n "$j" ] || continue
+      jg="$(yq -r ".jobs.\"$j\".concurrency.group // \"\"" "$f")"   # 잡-레벨 그룹(iac.yaml apply)
+      hold=0
+      if [ "$wg" = "homelab-mutation" ]; then hold=1; fi
+      if [ "$jg" = "homelab-mutation" ]; then hold=1; fi
+      [ "$hold" -eq 1 ] || continue
+      holder=1
+      uses="$(yq -r ".jobs.\"$j\".uses // \"\"" "$f")"
+      case "$uses" in
+        ./.github/workflows/*)
+          tgt="$ROOT/${uses#./}"
+          [ -f "$tgt" ] || { bad="$bad
+  $(basename "$f"):$j → $uses 파일 부재"; continue; }
+          followed=$(( followed + 1 ))
+          tkeys="$(yq -r '.jobs | keys | .[]' "$tgt")"
+          while read -r tj; do
+            [ -n "$tj" ] || continue
+            checked=$(( checked + 1 ))
+            tm="$(yq -r ".jobs.\"$tj\".\"timeout-minutes\" // \"\"" "$tgt")"
+            [ -n "$tm" ] || bad="$bad
+  $(basename "$tgt"):$tj — timeout-minutes 없음(route 잡 $(basename "$f"):$j 경유)"
+          done <<EOF
+$tkeys
+EOF
+          ;;
+        *)
+          checked=$(( checked + 1 ))
+          tm="$(yq -r ".jobs.\"$j\".\"timeout-minutes\" // \"\"" "$f")"
+          [ -n "$tm" ] || bad="$bad
+  $(basename "$f"):$j — timeout-minutes 없음"
+          ;;
+      esac
+    done <<EOF
+$keys
+EOF
+    wfn=$(( wfn + holder ))
+  done
+  [ -z "$bad" ] || { echo "$bad"; false; }
+  # 열거 바닥값 — 셋 다 있어야 "위반 0"이 "아무것도 안 봤다"와 갈린다(부정 카운트 판정이라 루프가
+  # 0회 돌아도 rc에 안 보인다). 수치는 도메인이 소유한다:
+  #   9  = 그룹 보유 워크플로(bump-poll·bump·tf-reconcile·iac·변이 디스패처 5종)
+  #   5  = route 잡을 따라 들어간 reusable(_create-app/_create-cache/_create-database/_teardown-app/_update-secrets)
+  #   20 = 그 안에서 실제로 상한을 확인한 잡 수의 하한(현재 26)
+  [ "$wfn" -ge 9 ]
+  [ "$followed" -ge 5 ]
+  [ "$checked" -ge 20 ]
+}
+
 @test "no workflow combines queue:max with cancel-in-progress:true" {
   hits=0
   for f in "$WF"/*.yaml; do

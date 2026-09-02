@@ -31,6 +31,9 @@ jobs:
           && github.event.workflow_run.head_repository.full_name == github.repository
           && github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-24.04-arm
+    # timeout-minutes — homelab-mutation 그룹의 천장(근거 전문은 bump-poll.yaml preflight 잡 주석).
+    # 값 근거 — 2026-09-02 라이브 실측(최근 100 run 실행구간): bump p50 22s / max 337s.
+    timeout-minutes: 15
     # matrix 없음: 직렬화된 단일 job이 실제로 빌드된 앱만 bump하고
     # (build.yaml의 `built-*` 아티팩트에서 도출), 각 digest 실존을 검증한 뒤 한 번만 커밋한다.
     steps:

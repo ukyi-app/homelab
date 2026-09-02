@@ -22,7 +22,13 @@ setup() { ROOT="$(git rev-parse --show-toplevel)"; F="$ROOT/.github/workflows/au
   grep -q 'activation-surface-drift' "$ROOT/tools/audit-orphans.ts"
 }
 @test "audit status is outcome-driven (failure not mislabeled as drift)" {
-  grep -q "steps.audit.outcome == 'failure'" "$F"
+  # 긍정 가드여야 한다 — `== 'failure'`만 보면 checkout/setup-bun 같은 **상류 스텝** 실패에서
+  # audit이 outcome=skipped라 첫 분기가 거짓이고, outputs가 ''이라 `'' != '0'`이 참이 되어
+  # 실행 실패가 'drift'(⚠️ 경고)로 오라벨된다. status·ident·폴백 body 셋 다 같은 가드다.
+  # (형태 일반화는 tests/gates/test_telegram-callsites.bats가 전 콜사이트에 건다.)
+  grep -qF "status: \${{ steps.audit.outcome == 'success'" "$F"
+  grep -qF "ident: \${{ steps.audit.outcome == 'success'" "$F"
+  grep -qF '[ "$OUTCOME" != "success" ]' "$F"
 }
 @test "audit is read-only and not in the mutation serialization group" {
   # ⚠️ 이 @test엔 형제 양성 단언이 없다 — audit.yaml이 사라지면 "직렬화 그룹에 없다"가 대상 없이

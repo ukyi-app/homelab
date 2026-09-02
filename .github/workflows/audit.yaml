@@ -71,8 +71,11 @@ jobs:
           COUNT: ${{ steps.audit.outputs.count }}
         run: |
           # 실패 시 audit.json이 없거나 깨졌을 수 있다 → 폴백 body (drift 오표기·빈 body 방지 — C-F2/obs-6)
-          if [ "$OUTCOME" = "failure" ]; then
-            body="감사 실행 실패 — 런 로그 확인 필요"
+          # ⚠️ 긍정 가드(!= success)여야 한다 — checkout/setup-bun 등 **앞** 스텝이 죽으면 audit은
+          #    outcome=skipped라 `= failure` 비교는 거짓이고, else로 새어 들어간 jq가 /tmp/audit.json
+          #    부재로 죽어 body가 빈 채로 나갔다.
+          if [ "$OUTCOME" != "success" ]; then
+            body="감사 미실행/실패(outcome=${OUTCOME}) — 런 로그 확인 필요"
           else
             summary="$(jq -r '.findings[] | "- \(.type): \(.subject)"' /tmp/audit.json)"
             body="드리프트 건수: ${COUNT}"$'\n'"${summary}"
@@ -82,11 +85,13 @@ jobs:
         if: always() && (steps.audit.outcome == 'failure' || steps.audit.outputs.alerting != '0')
         uses: ./.github/actions/telegram-notify
         with:
-          # status는 outcome 우선 — 실패를 drift로 오표기하지 않는다(C-F2)
-          status: ${{ steps.audit.outcome == 'failure' && 'failure' || (steps.audit.outputs.alerting != '0' && 'drift' || 'success') }}
+          # status는 outcome 우선 — 실패를 drift로 오표기하지 않는다(C-F2). contract-drift.yaml과 같은
+          # **긍정 가드**다: `== 'failure'`만 보면 상류 스텝 실패(outcome=skipped)에서 outputs가 ''이라
+          # `'' != '0'`이 참이 되어 drift로 오라벨된다 — success가 아닌 모든 결과는 failure로 접는다.
+          status: ${{ steps.audit.outcome == 'success' && (steps.audit.outputs.alerting != '0' && 'drift' || 'success') || 'failure' }}
           source: 감사
           title: 드리프트 감사
-          ident: ${{ steps.audit.outcome == 'failure' && '실행 실패' || format('{0}건', steps.audit.outputs.count) }}
+          ident: ${{ steps.audit.outcome == 'success' && format('{0}건', steps.audit.outputs.count) || '실행 실패' }}
           body: ${{ steps.report.outputs.body }}
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
