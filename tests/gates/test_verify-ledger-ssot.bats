@@ -59,3 +59,51 @@ setup() {
     return 1
   fi
 }
+
+# 합계 프로즈는 **쓰기 경로의 앵커**다 — `tools/lib/ledger-totals.ts`의 `TOTALS_RE`가 매치하지 않으면
+# create-app/provision-cache/teardown-app/teardown-resource가 원장 단계에서 throw로 죽는다. 그런데 그
+# fail-loud는 디스패처가 돌 때만 들리고, 픽스처는 전부 올바른 형식을 품고 있어 어떤 테스트도 red가
+# 아니었다: 2026-08-31 정정이 `≈`를 떨어뜨린 뒤 세 디스패처가 이틀간 동작 불능이었는데 CI는 초록이었다.
+# 값 축도 같다 — 손편집이 행을 고치고 합계 줄을 안 고치면 원장 산문이 매니페스트와 다른 숫자를 말한다.
+# ⚠️ 정규식은 **lib에서 import**한다. 사본을 여기 다시 적으면 그 사본이 드리프트해 가드가 공허해진다.
+@test "the real ledger Totals prose matches the write-path anchor and the row sums" {
+  run bun -e '
+    const [ledgerPath, libPath] = process.argv.slice(1);
+    const fs = require("node:fs");
+    import("file://" + libPath).then(m => {
+      const text = fs.readFileSync(ledgerPath, "utf8");
+      const hit = text.match(m.TOTALS_RE);
+      if (!hit) { console.error("NO-MATCH"); process.exit(1); }
+      const [req, limit] = hit[0].match(/\d+/g).map(Number);
+      const rows = m.parseLedgerRows(text);
+      if (rows.length === 0) { console.error("NO-ROWS"); process.exit(1); }
+      const sumReq = rows.reduce((a, r) => a + r.reqMi, 0);
+      const sumLimit = rows.reduce((a, r) => a + r.limitMi, 0);
+      if (req !== sumReq || limit !== sumLimit) {
+        console.error(`MISMATCH prose=${req}/${limit} rows=${sumReq}/${sumLimit}`); process.exit(1);
+      }
+      console.log("ok");
+    }).catch(e => { console.error(e.message); process.exit(1); });
+  ' "$ROOT/docs/memory-ledger.md" "$ROOT/tools/lib/ledger-totals.ts"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok$"
+}
+
+# 위 @test의 대조군 — 판정이 실제로 형식을 재는지 사본으로 확인한다(`≈` 하나만 뺀다).
+# 이것이 없으면 위 @test는 "실 원장이 지금 맞다"만 말하고, 판정 조건 자체가 무증인으로 남는다.
+@test "a copy with one missing approx sign is red (the format axis is really measured)" {
+  local copy="$BATS_TEST_TMPDIR/ledger-mutant.md"
+  sed '0,/req ≈/s/req ≈/req/' "$ROOT/docs/memory-ledger.md" > "$copy"
+  run grep -c 'req ≈' "$copy"
+  [ "$output" = "0" ]
+  run bun -e '
+    const [ledgerPath, libPath] = process.argv.slice(1);
+    const fs = require("node:fs");
+    import("file://" + libPath).then(m => {
+      if (!m.TOTALS_RE.test(fs.readFileSync(ledgerPath, "utf8"))) { console.log("no-match"); return; }
+      console.log("MATCHED");
+    }).catch(e => { console.error(e.message); process.exit(1); });
+  ' "$copy" "$ROOT/tools/lib/ledger-totals.ts"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^no-match$"
+}

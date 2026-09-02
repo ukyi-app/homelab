@@ -17,17 +17,22 @@ EOF
   chmod +x "$STUBDIR/sops"
   OUT="$(mktemp -d)"   # git 밖
 }
-teardown() { rm -rf "$STUBDIR" "$OUT"; }
+# ⚠️ 거부 레인이 레포 루트를 밟는다 — 그 경로가 곧 이 스위트의 산출물이므로 정리도 여기 몫이다.
+#    (스크립트가 자기 부작용을 걷게 고쳤어도 teardown은 남긴다: 회귀하면 8개가 다시 쌓인다.)
+teardown() { rm -rf "$STUBDIR" "$OUT" "$ROOT/scratch_backup_$$"; }
 
 @test "usage error when outdir missing" {
   run scripts/backup-local-asset.sh
   [ "$status" -ne 0 ]
 }
 
-@test "refuses an outdir inside the git work tree" {
+@test "refuses an outdir inside the git work tree and leaves nothing behind" {
   run scripts/backup-local-asset.sh "$ROOT/scratch_backup_$$"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "git 작업트리"
+  # 부작용 부재 증인 — 거부가 자기 `mkdir -p`를 되돌린다. 이 한 줄이 없던 동안 이 @test가
+  # 실행 횟수만큼 레포 루트에 빈 700 디렉토리를 쌓았다(발견 시점 8개).
+  [ ! -d "$ROOT/scratch_backup_$$" ]
 }
 
 @test "errors when runbooks are absent (owner-only)" {

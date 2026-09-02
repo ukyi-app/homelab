@@ -33,6 +33,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; C="$ROOT/platform/s
   echo "$output" | grep -A1 -- "--key-renew-period" | grep -q '"0"'
 }
 
+@test "the netpol egress CIDR is the pinned node subnet" {
+  # 형제 5개 매니페스트는 각자 컴포넌트 bats가 이 CIDR를 잠그는데 여기만 대조가 0건이었다 —
+  # 그래서 versions.env ↔ 매니페스트 로스터(infra/k3s-bootstrap/tests/test_01-versions.bats)의
+  # 전이적 폐쇄에 구멍이 있었다. 구조로 본다(텍스트 needle은 주석에 걸린다 — argocd bats 선례).
+  run yq -e '.networkPolicy.egress.kubeapiCidr == "192.168.117.0/24"' "$C/values-sealed-secrets.yaml"
+  [ "$status" -eq 0 ]
+}
+
 @test "sealed-secrets is excluded from the platform appset (no double-ownership)" {
   run grep -E "path: platform/sealed-secrets/\*, exclude: true" "$ROOT/platform/argocd/root/appset.yaml"
   [ "$status" -eq 0 ]

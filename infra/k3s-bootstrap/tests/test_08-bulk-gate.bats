@@ -14,8 +14,13 @@ PROBE="$BOOTSTRAP_DIR/bulk-gate-probe.sh"
 #    「errors when required env is missing」가 `ok`였다. 다른 레인들은 종료코드(11/12/13)가 상수라 살아남았다.
 setup() {
   [ -f "$PROBE" ]
-  STUBDIR="$(mktemp -d)"; WORK="$(mktemp -d)"
-  PATH="$STUBDIR:$PATH"; export PATH STUBDIR WORK
+  STUBDIR="$(mktemp -d)"; WORK="$(mktemp -d)"; FROOT="$(mktemp -d)"
+  PATH="$STUBDIR:$PATH"; export PATH STUBDIR WORK FROOT
+  # 가짜 /etc/fstab — probe [2](영속 축)의 픽스처. `$WORK` **밖**에 둔다: 첫 @test가
+  # `ls -A "$WORK"`가 비었음을 단언하므로 여기에 두면 그 증인이 죽는다.
+  mkdir -p "$FROOT/etc"
+  printf 'UUID=fake-bulk %s ext4 defaults,noatime,nofail 0 2\n' "$WORK" > "$FROOT/etc/fstab"
+  export BULK_PROBE_ROOT="$FROOT"
   # 가짜 findmnt — `-no TARGET <path>` / `-no SOURCE <path>` 두 형태만 흉내낸다.
   #   FM_BULK_IS_MP=0  bulk 경로가 마운트포인트가 아닌 상태(= 루트 위 평범한 디렉토리)
   #   FM_BULK_SRC      bulk의 백킹 디바이스. 기본은 루트와 **다른** 디바이스(국면 B 형태)
@@ -43,7 +48,7 @@ if [ "$col" = "TARGET" ]; then echo "$path"; else echo "${FM_BULK_SRC:-/dev/nvme
 EOF
   chmod +x "$STUBDIR/findmnt"
 }
-teardown() { rm -rf "$STUBDIR" "$WORK"; }
+teardown() { rm -rf "$STUBDIR" "$WORK" "$FROOT"; }
 
 @test "passes when bulk is a mountpoint on a DIFFERENT device (phase B shape)" {
   BULK_STORAGE_PATH="$WORK" run sh "$PROBE"
@@ -63,6 +68,18 @@ teardown() { rm -rf "$STUBDIR" "$WORK"; }
   FM_BULK_IS_MP=0 BULK_STORAGE_PATH="$WORK" run sh "$PROBE"
   [ "$status" -eq 11 ]
   printf '%s' "$output" | grep -qF -- 'not a mountpoint'
+}
+
+@test "exit 14 when the mount is not persisted in fstab (it vanishes on the next boot)" {
+  # [1]은 **지금** 마운트돼 있는지만 본다 — 손으로 `mount`한 상태는 [1]을 통과하고 다음 부팅에
+  # 조용히 사라진다. host-preflight.sh [5](b)의 스왑 영속 축과 같은 자리다.
+  # 픽스처의 유일한 후보 줄을 **우물정 + 공백**으로 주석 처리해 `$1 !~ /^#/` 가드까지 함께
+  # 증언한다: 그 형태는 $1="#" · $2=마운트포인트라, 가드를 빼면 죽은 줄이 영속으로 읽혀
+  # 이 @test가 조용히 초록이 된다(뮤테이션 실측).
+  printf '# %s none bind 0 0\nUUID=deadbeef / ext4 defaults 0 1\n' "$WORK" > "$FROOT/etc/fstab"
+  BULK_STORAGE_PATH="$WORK" run sh "$PROBE"
+  [ "$status" -eq 14 ]
+  printf '%s' "$output" | grep -qF -- 'not persisted'
 }
 
 @test "exit 12 when bulk shares the device with / and phase A is NOT explicitly allowed" {

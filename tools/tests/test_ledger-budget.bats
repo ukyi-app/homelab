@@ -66,3 +66,20 @@ EOF
   [ "$output" = "0" ]
   grep -q 'lib/ledger-budget' "$ROOT/tools/teardown-app.ts"
 }
+
+# 양성 대조 — 이 스위트의 픽스처는 전부 올바른 합계 형식을 품고 있어서, 실 원장이 그 형식을 잃어도
+# 전건 초록이었다(2026-08-31~09-02 실제 사례: 세 변이 디스패처가 원장 단계에서 죽는 동안 CI 초록).
+# 픽스처가 아니라 **실 원장**에 쓰기 경로를 물린다.
+@test "replaceTotals accepts the real ledger (the write path is not throwing)" {
+  run bun -e '
+    const [ledgerPath, libPath] = process.argv.slice(1);
+    const fs = require("node:fs");
+    import("file://" + libPath).then(m => {
+      const out = m.replaceTotals(fs.readFileSync(ledgerPath, "utf8"), 1, 2);
+      if (!/req ≈ 1 Mi · limit ≈ 2 Mi/.test(out)) { console.error("NO-SUBSTITUTION"); process.exit(1); }
+      console.log("ok");
+    }).catch(e => { console.error(e.message); process.exit(1); });
+  ' "$ROOT/docs/memory-ledger.md" "$ROOT/tools/lib/ledger-totals.ts"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok$"
+}

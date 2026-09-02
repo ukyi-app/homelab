@@ -18,7 +18,9 @@
 # `BULK_TEMPORARY_ALLOWED=1`로 **명시적으로** 허용해야 하고, 허용해도 요란하게 짖는다.
 #
 # 입력 (env): BULK_STORAGE_PATH · BULK_TEMPORARY_ALLOWED(기본 0)
+#             · BULK_PROBE_ROOT(파일 조회 접두 — 테스트가 픽스처 트리를 준다. 기본 없음)
 # 종료: 0 정상 · 11 마운트포인트 아님 · 12 루트와 같은 디바이스(미허용) · 13 쓰기 불가
+#      · 14 fstab 미등재(= 다음 부팅에 사라진다)
 set -eu
 : "${BULK_STORAGE_PATH:?BULK_STORAGE_PATH unset}"
 ALLOW="${BULK_TEMPORARY_ALLOWED:-0}"
@@ -33,7 +35,30 @@ tgt="$(findmnt -no TARGET "$BULK_STORAGE_PATH" 2>/dev/null || true)"
   exit 11
 }
 
-# ── [2] 디바이스 정체성 — 루트와 같은 디스크인가 ───────────────────────────────────────────
+# ── [2] 재부팅해도 그 마운트가 돌아오는가 (영속 축) ────────────────────────────────────────
+# [1]은 **지금** 마운트돼 있는지만 본다. 손으로 `mount`한 상태는 [1]을 통과하고 다음 부팅에 조용히
+# 사라진다 — 그 순간 bulk는 루트 fs 위의 빈 디렉토리가 되는데, hostPath `type: Directory`도
+# du-exporter의 F20도 그 상태를 잡지 못한다(platform/victoria-stack/prod/pvc-du-exporter.yaml의
+# storage-bulk 볼륨 주석). 국면 A의 bind 줄도 fstab 등재가 규약이므로(README.md 「bulk 티어」)
+# 이 축은 국면 무관이다.
+# ⚠️ host-preflight.sh [5](b)와 같은 형태 — 2번째 필드(<mountpoint>)가 **정확일치**하는 비주석
+#    줄만 센다. `$1 !~ /^#/` 가드가 load-bearing이다: 주석 처리된 `# /mnt/bulk …`(우물정 뒤 공백
+#    **있음**)는 $1="#" · $2=마운트포인트라, 가드가 없으면 죽은 줄이 영속으로 읽힌다.
+fstab="${BULK_PROBE_ROOT:-}/etc/fstab"
+[ -r "$fstab" ] || {
+  echo "cannot read ${fstab}: 재부팅 시 마운트가 돌아오는지 단언할 수 없다" >&2
+  exit 14
+}
+export BULK_STORAGE_PATH   # awk ENVIRON — -v 의 이스케이프 해석을 피한다
+awk 'NF && $1 !~ /^#/ && $2 == ENVIRON["BULK_STORAGE_PATH"] { found = 1 } END { exit !found }' "$fstab" || {
+  echo "not persisted: no ${fstab} entry for ${BULK_STORAGE_PATH}" >&2
+  echo "  지금 마운트돼 있어도 다음 부팅에 사라진다 — bulk가 루트 fs 위 빈 디렉토리가 된다." >&2
+  echo "  국면 A: echo '<루트 위 디렉토리> ${BULK_STORAGE_PATH} none bind 0 0' | sudo tee -a /etc/fstab" >&2
+  echo "  국면 B: UUID=<M.2> ${BULK_STORAGE_PATH} ext4 defaults,noatime,nofail,x-systemd.device-timeout=30s 0 2" >&2
+  exit 14
+}
+
+# ── [3] 디바이스 정체성 — 루트와 같은 디스크인가 ───────────────────────────────────────────
 # bind 마운트의 SOURCE는 `/dev/…[/sub/path]` 형태다. 대괄호 앞이 디바이스다.
 root_src="$(findmnt -no SOURCE / 2>/dev/null || true)"
 bulk_src="$(findmnt -no SOURCE "$BULK_STORAGE_PATH" 2>/dev/null || true)"
@@ -56,7 +81,7 @@ if [ "$bulk_dev" = "$root_dev" ]; then
   echo "WARN: 이 창이 열려 있는 동안 dr-drill은 실행이 거부되고, bulk는 부트 디스크와 함께 사라진다." >&2
 fi
 
-# ── [3] 쓰기 가능한가 (local-path helper pod의 root 신원을 반영) ───────────────────────────
+# ── [4] 쓰기 가능한가 (local-path helper pod의 root 신원을 반영) ───────────────────────────
 s="${BULK_STORAGE_PATH}/.k3s-bulk-sentinel.$$"
 if echo homelab-bulk-ok > "$s" 2>/dev/null && grep -q homelab-bulk-ok "$s" 2>/dev/null; then
   rm -f "$s"

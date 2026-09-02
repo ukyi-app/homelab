@@ -16,6 +16,12 @@ setup() {
   STUBDIR="$(mktemp -d)"; RENDERED="$STUBDIR/rendered.yaml"
   BULKDIR="$STUBDIR/bulk"; mkdir -p "$BULKDIR"
   PATH="$STUBDIR:$PATH"; export PATH STUBDIR RENDERED BULKDIR
+  # 가짜 /etc/fstab — probe [2](영속 축)의 픽스처. probe는 `BULK_PROBE_ROOT`로 조회 접두를 받고,
+  # 여기 `asroot` 대역이 `exec "$@"`라 환경이 그대로 흐른다. 프로덕션의 `sudo`는 env_reset이라
+  # 이 시임이 새지 않는다 — 노드에서는 언제나 실제 `/etc/fstab`을 본다.
+  mkdir -p "$STUBDIR/froot/etc"
+  printf 'UUID=fake-bulk %s ext4 defaults,noatime,nofail 0 2\n' "$BULKDIR" > "$STUBDIR/froot/etc/fstab"
+  export BULK_PROBE_ROOT="$STUBDIR/froot"
   cat >"$STUBDIR/kubectl" <<'EOF'
 #!/usr/bin/env bash
 # '-f -'로 파이프되든 '-f <file>'로 읽히든, apply된 모든 매니페스트를 $RENDERED에

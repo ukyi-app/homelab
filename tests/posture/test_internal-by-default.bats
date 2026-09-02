@@ -9,8 +9,10 @@
 # ⚠️ 아래 두 공개면 단언은 **부정 카운트=0** 형태다. 셀렉터가 도메인을 잃으면(Gateway 리스너 개명,
 # HTTPRoute CRD 그룹 이동, parentRef 드리프트, 네임스페이스 RBAC 축소) "위반 0"과 "아무것도 안 봤다"가
 # 같은 초록이 된다. 그래서 판정 전에 (a) 열거 바닥값과 (b) 술어 유효성 양성 대조를 둔다.
-# 실측: web-public rule 4건 = **플랫폼 2건**(argocd/argocd-webhook · files/files-public) +
-# 앱 2건(prod/page · prod/trip-mate-api) · 그중 argocd 백엔드 1건 · grafana 백엔드 0건(영구).
+# 실측: **플랫폼 소유** web-public rule 2건(argocd/argocd-webhook · files/files-public) —
+# 그중 argocd 백엔드 1건 · grafana 백엔드 0건(영구). 앱 rule 수는 여기 적지 않는다: 인-레포 앱은
+# 0개일 수 있고(apps/README.md), 산문에 그 수를 적으면 철거와 함께 죽은 수치가 된다 —
+# 실제로 그랬다(`prod/page`·`prod/trip-mate-api` 철거 후에도 "4건 = 2 + 앱 2건"으로 남아 있었다).
 # ⚠️ 앱 rule은 분모에 넣지 않는다 — 공유 차트의 `route.public` 기본값이 false라 앱은 teardown 없이도
 # 0이 될 수 있다(이 파일이 단언하는 internal-by-default가 곧 앱의 기본 상태다). 바닥값이 앱 개수에
 # 결합되면 "앱을 전부 내부로 돌렸다"가 "열거 붕괴"와 같은 red가 된다(적대 검토 실측 — 라이브 셰임으로
