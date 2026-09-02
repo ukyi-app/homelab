@@ -1,6 +1,6 @@
 # ArgoCD sync-wave 원장 (전역 순서) — M3 소유
 
-낮은 wave가 먼저 sync된다. CD(-10/-9)와 gateway(traefik·sealed-secrets, -9/-8)가 가장 먼저
+낮은 wave가 먼저 sync된다. CD(-10/-9)·namespaces(-9)와 gateway(traefik·sealed-secrets, -9/-8)가 가장 먼저
 올라오고, 그 다음 stateful 계층(cert-manager -3 → cnpg -2/-1)이며, edge(cloudflared/
 tailscale/adguard, sync-wave 미지정 = 기본 0)와 observability(+2)는 그 뒤에 온다.
 
@@ -25,6 +25,7 @@ health를 세워 주는 주체가 더 앞 wave에 있는지 반드시 확인할 
 |------|--------------------------------------------------------------|-----------------|
 | -10  | argocd (자기 관리 Application)                                | M3              |
 |  -9  | root (ApplicationSet을 소유하는 app-of-apps)                  | M3              |
+|  -9  | namespaces (bare Namespace + PSA 라벨 — sealed-secrets/traefik(-8)보다 먼저: 라벨 없는 ns 윈도 제거) | M3 |
 |  -9  | traefik: Gateway-API CRD 8개 (`kustomization.yaml`의 patch가 붙인다 — 번들은 upstream 그대로) | M3 |
 |  -8  | traefik: gateway ns RBAC(ServiceAccount + ClusterRole/Binding — 컨트롤러 파드의 전제); sealed-secrets (controller) | M3 |
 |  -3  | cert-manager: barman-plugin webhook 인증서 발급(plugin -2보다 먼저) | M4         |

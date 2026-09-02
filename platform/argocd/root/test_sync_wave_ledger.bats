@@ -43,3 +43,34 @@ setup() {
   done
   [ "$missing" = " 999" ] || { echo "SYNC-WAVES.md root 표 대조 실패 — 미검출:${missing} (999는 대조군이라 항상 포함)"; false; }
 }
+
+@test "every root Application is bound to its own row in the SYNC-WAVES.md root table (component <-> wave)" {
+  # 위 @test는 **값**만 대조한다 — 어떤 컴포넌트가 그 wave에 있는지는 묻지 않는다. 그래서 root 표에서
+  # 행 하나가 통째로 빠져도 같은 wave를 쓰는 다른 행이 그 값을 대신 만족시킨다(실측 2026-09-02:
+  # namespaces(-9) 행이 없는데 root(-9)·traefik CRD(-9) 두 행 때문에 초록이었다 — 티켓 09가 README
+  # 포인터를 「값은 매니페스트가 소유한다」로 우회하게 만든 바로 그 갭). 여기서 이름↔wave를 묶는다.
+  # ⚠️ `sort -u` 금지 · 건초더미는 첫 표(root 전역 표)로 좁힘 — 근거는 파일 머리말과 같다.
+  local files f name wave table row p pairs="" missing="" n=0
+  files="$(ls "$ROOT"/platform/argocd/argocd-app.yaml "$ROOT"/platform/argocd/root/root-app.yaml "$ROOT"/platform/argocd/root/apps/*.yaml)"
+  table="$(awk '/^\| Wave \|/{t++} t==1' "$LEDGER")"
+  [ -n "$table" ]
+  for f in $files; do
+    name="$(yq '.metadata.name' "$f")"
+    wave="$(yq '.metadata.annotations."argocd.argoproj.io/sync-wave"' "$f" | sed 's/^+//')"
+    [ -n "$name" ]
+    [ -n "$wave" ]
+    pairs="$pairs $name:$wave"
+    n=$((n + 1))
+  done
+  # 열거 붕괴 바닥값 — 글롭이 비면 루프가 0회라 어떤 대조도 안 도는 vacuous green이 된다.
+  [ "$n" -ge 8 ] || { echo "root Application 열거가 ${n}건으로 붕괴했다(기대 >=8)"; false; }
+  # ★ 부정 대조군: 원장에 없는 합성 컴포넌트는 **반드시** 미검출로 잡혀야 한다.
+  #   표 추출이 비거나 매칭이 무조건 참이 되면 이 등식이 먼저 깨진다.
+  for p in $pairs zzz-absent:-10; do
+    name="${p%:*}"
+    wave="${p##*:}"
+    row="$(printf '%s\n' "$table" | grep -E "^\|[[:space:]]*[+]?${wave}[[:space:]]*\|" | grep -F -- "$name" || true)"
+    [ -n "$row" ] || missing="$missing $name"
+  done
+  [ "$missing" = " zzz-absent" ] || { echo "SYNC-WAVES.md root 표에 컴포넌트 행 없음 — 미검출:${missing} (zzz-absent는 대조군이라 항상 포함)"; false; }
+}
