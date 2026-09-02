@@ -9,7 +9,13 @@ metadata:
   name: traefik-ts
   namespace: gateway
   annotations:
-    tailscale.com/hostname: homelab # → homelab.<tailnet>.ts.net + 안정적 100.x IP
+    # 요청 machine name. ⚠️ 이 값이 곧 tailnet 이름은 아니다 — coordination server가 충돌 시 `-N` 접미를
+    # 붙이고(2026-08 Mac 시대 잔존 디바이스 `homelab`이 이름을 점유해 `homelab-1`로 등록), 노드 hostname이
+    # 안 바뀌면 재파생하지 않는다(2026-09-02 실측: 죽은 디바이스 제거 + 프록시 파드 재시작 후에도 `-1` 유지 —
+    # 되찾으려면 admin console 수동 rename). 실제 이름·IP의 SSOT는 이 Service의 `status.loadBalancer.ingress[]`
+    # 이고, AdGuard rewrite 리컨실러(platform/adguard)가 그 IP를 따라간다. 100.x IP는 state Secret이 살아 있는
+    # 한 안정적이다(파드 재시작 무관).
+    tailscale.com/hostname: homelab
 spec:
   type: LoadBalancer
   loadBalancerClass: tailscale
