@@ -176,10 +176,15 @@ spec:
               hostPath: { path: /var/lib/rancher/k3s-storage/internal, type: Directory }
             - name: storage-bulk
               # provisioner 실경로(local-path-config-bulk nodePathMap) = versions.env의 BULK_STORAGE_PATH.
-              # ⚠️ `type: Directory`가 여기서 **두 번째 가드**로 일한다: bulk 마운트가 없으면 kubelet이
-              #    이 파드를 아예 기동시키지 않는다 — 용량 신호가 조용히 0이 되는 대신 요란하게 멈춘다.
+              # ⚠️ `type: Directory`는 **존재만 검사한다** — bulk 미마운트는 잡지 못한다.
+              #    `/mnt/bulk`는 루트 fs 위의 마운트포인트 디렉토리라 미마운트에서도 항상 존재하고,
+              #    bulk PV 4건이 전부 hostPath `DirectoryOrCreate`라 kubelet이 그 아래 `pvc-*`까지
+              #    만든다 — 위 :138의 F20(`N_bulk -ge 1`)조차 통과한다.
+              #    미마운트의 실제 페이징 경로는 vmsingle.yaml의 `vmsingle-data-bulk`가 이 티어 위에
+              #    있다는 결합이다(TSDB CrashLoop -> Watchdog 단절 -> healthchecks deadman ≈4분).
               hostPath: { path: /mnt/bulk, type: Directory }
             - name: kubelet-pods
               # kubelet 코어 경로 — 부재 = 노드 이상이라 type: Directory의 fail-loud가 정당하다
-              # (storage-bulk와 같은 두 번째 가드 역할). 표면·완화는 상단 F8 계약 주석.
+              # (여기서는 경로 부재 자체가 노드 이상이라 존재 검사로 충분하다 — storage-bulk와 달리
+              #  '마운트되었는가'를 묻지 않는다). 표면·완화는 상단 F8 계약 주석.
               hostPath: { path: /var/lib/kubelet/pods, type: Directory }

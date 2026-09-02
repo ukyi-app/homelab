@@ -83,4 +83,10 @@ spec:
             - { name: storage, mountPath: /storage }
       volumes:
         - name: storage
+          # ⚠️ 이 PVC의 bulk 배치가 bulk 미마운트의 **유일한 즉시 페이징 경로**다: 미마운트면 kubelet이
+          #    만든 root 0755 빈 디렉토리에 uid 65534가 쓰지 못해 CrashLoop -> vmalert가 Watchdog을
+          #    평가하지 못함 -> alertmanager deadmanswitch ping 단절 -> healthchecks.io 약 4분 페이징.
+          #    이 TSDB를 bulk에서 내리려면 대체 신호(오프-노드 마운트 감시)를 **같은 커밋에서** 세울 것 —
+          #    hostPath `type: Directory`도 du-exporter의 F20도 미마운트를 잡지 못한다
+          #    (pvc-du-exporter.yaml의 storage-bulk 볼륨 주석).
           persistentVolumeClaim: { claimName: vmsingle-data-bulk }
