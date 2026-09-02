@@ -87,6 +87,33 @@ setup() {
   run bash "$S" "$FX/fb2.sh"; [ "$status" -eq 1 ]
 }
 
+@test "a MAX env off-switch inside a guard is rejected in both languages (lane C)" {
+  # 05(scripts-4)가 `BATS_EXCLUDE_MAX`를 상수로 죽였지만 정적 red는 없었다 — 상한 env가 되살아나도
+  # [E]는 MIN만 보므로 침묵한다. 병은 바닥값·상한의 방향이 아니라 "가드가 자기 임계값을 호출부에
+  # 안 보이는 env로 끈다"이므로 같은 표기의 MAX도 거부한다(가드 파일 안에서만 — 아래 음성 대조).
+  printf '%s\n' '#!/usr/bin/env bash' 'guard_init check-fake' 'EXCL="${BATS_EXCLUDE_MAX:-15}"' > "$FX/cap.sh"
+  run bash "$S" "$FX/cap.sh"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -qF "[C]"
+  printf '%s\n' 'import { guardMain } from "./lib/scan-floor.ts";' \
+    'const n = Number(process.env.SCAN_MAX_FILES ?? "2");' > "$FX/cap.ts"
+  run bash "$S" "$FX/cap.ts"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -qF "[C]"
+}
+
+@test "a MAX env knob outside the guard kernel is not a violation (poll caps, curl timeouts)" {
+  # 도메인 선의 음성 대조 — 착지 시점 실측으로 tracked 트리의 `${…MAX…}` 8곳이 전부 이 모양이었다
+  # (restore-drill 폴링 상한·curl 상한·composite 입력 ALLOW_MAX). 이들이 red가 되면 그 오탐을
+  # 면제 목록으로 덮게 되고, 목록은 다시 아무도 대조하지 않는 부패 표면이 된다.
+  printf '%s\n' '#!/usr/bin/env bash' 'polls="${DRILL_MAX_POLLS:-30}"' 't="${CURL_MAX_TIME:-20}"' > "$FX/cap-ok.sh"
+  run bash "$S" "$FX/cap-ok.sh"
+  [ "$status" -eq 0 ]
+  printf '%s\n' 'const n = Number(process.env.SCAN_MAX_FILES ?? "2");' > "$FX/cap-ok.ts"
+  run bash "$S" "$FX/cap-ok.ts"
+  [ "$status" -eq 0 ]
+}
+
 @test "tail comments and TS block comments are prose, not violations" {
   # 03 인계의 선("산문·주석 잔존은 04의 주석-제외 규율상 영구 밖") — 형제 check-scan-producers의
   # 주석 표면(행두·블록·꼬리)을 승계했다.
