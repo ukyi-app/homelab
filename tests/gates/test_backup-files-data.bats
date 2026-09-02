@@ -2,8 +2,12 @@
 # backup-files-data.sh 헤르메틱 가드(스텁으로 밀폐). @test 이름은 영어. ⚠️ 중간 부정 단언은 run+[ ]로만.
 S="scripts/backup-files-data.sh"
 
+# ⚠️ **피연산자 실재 증인 + 거부 문구 양성 대조.** 스크립트가 없으면 `run bash "$S"`가 rc **127**로
+#    죽어 `-ne 0` 단독 레인을 통과시킨다. 실측(2026-09-02, `scripts/backup-files-data.sh`를 지운 격리 트리):
+#    17건 중 「fails loud when the source path does not exist」가 `ok`였다.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
+  [ -f "$S" ]
   STUB="$(mktemp -d)"; DEST="$(mktemp -d)"; SRC="$(mktemp -d)"
   PATH="$STUB:$PATH"; export PATH STUB DEST SRC
   echo "hello-files" > "$SRC/a.txt"; mkdir -p "$SRC/sub"; echo "beta" > "$SRC/sub/b.txt"
@@ -112,6 +116,7 @@ teardown() { rm -rf "$STUB" "$DEST" "$SRC"; }
 }
 @test "fails loud when the source path does not exist" {
   FILES_DATA_HOST_PATH="/no/such/dir" run bash "$S" "$DEST"; [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'source 디렉토리 부재'
 }
 @test "manifest generation fails loud on an empty sha256 (no silent empty-hash rows), no promotion" {
   # shasum 스텁: 빈 출력·성공 종료 → 해시 계산이 '성공했으나 값이 빈' 병리 케이스 재현.

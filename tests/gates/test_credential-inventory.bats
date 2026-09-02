@@ -6,9 +6,13 @@
 # 있음을 증명한다. 픽스처는 전부 hermetic(인자로 파일을 주므로 실 런북이 없어도 돈다).
 # ⚠️ @test 이름은 영어만 · 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵 통과).
 
+# ⚠️ **피연산자 실재 증인 + 거부 문구 양성 대조.** `run bash "$S"`는 가드가 없으면 rc **127**로
+#    죽어 `-ne 0`을 만족한다. 실측(2026-09-02, 가드를 지운 격리 트리): 10건 중 「an unparseable ledger
+#    fails closed」가 `ok`였다 — 뒤따르는 성공문구 부재 카운트도 빈 출력에 대해 0이라 함께 통과했다.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   S="$ROOT/scripts/verify-credential-inventory.sh"
+  [ -f "$S" ]
   FX="$BATS_TEST_TMPDIR"
   # 원장 4건 — 바닥값(3)이 방향 단언을 **가리지 않도록** 한 건을 빼도 3이 남게 잡는다.
   cat > "$FX/led.json" <<'EOF'
@@ -90,6 +94,7 @@ ALL4='| ① | `aaa` | x |
   mk_rb "$ALL4" '**4건** 등재'
   run bash "$S" "$FX/rb.md" "$FX/bad.json"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '원장 파싱 실패'
   run bash -c "bash '$S' '$FX/rb.md' '$FX/bad.json' 2>&1 | grep -c '양방향 정합 + 수치 일치 OK' || true"
   [ "$output" -eq 0 ]
 }

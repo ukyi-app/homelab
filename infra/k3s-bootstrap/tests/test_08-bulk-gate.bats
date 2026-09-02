@@ -9,7 +9,11 @@ load test_helper
 
 PROBE="$BOOTSTRAP_DIR/bulk-gate-probe.sh"
 
+# ⚠️ **피연산자 실재 증인 + 거부 문구 양성 대조.** `run sh "$PROBE"`는 probe가 없으면 rc **127**로
+#    죽어 `-ne 0`을 만족한다. 실측(2026-09-02, `bulk-gate-probe.sh`를 지운 격리 트리): 8건 중
+#    「errors when required env is missing」가 `ok`였다. 다른 레인들은 종료코드(11/12/13)가 상수라 살아남았다.
 setup() {
+  [ -f "$PROBE" ]
   STUBDIR="$(mktemp -d)"; WORK="$(mktemp -d)"
   PATH="$STUBDIR:$PATH"; export PATH STUBDIR WORK
   # 가짜 findmnt — `-no TARGET <path>` / `-no SOURCE <path>` 두 형태만 흉내낸다.
@@ -106,4 +110,5 @@ EOF
 @test "errors when required env is missing" {
   run sh "$PROBE"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'BULK_STORAGE_PATH unset'
 }

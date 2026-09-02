@@ -3,9 +3,13 @@
 # PR에서만 직접 squash하고, 그 외(BLOCKED/BEHIND/UNKNOWN)는 시끄럽게 실패한다.
 # ⚠️ 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵통과). @test 이름은 영어.
 
+# ⚠️ **피연산자 실재 증인 + 거부 문구 양성 대조.** 스크립트가 없으면 `run bash "$S"`가 rc **127**로
+#    죽어 `-ne 0` 단독 레인을 통과시킨다. 실측(2026-09-02, `scripts/auto-merge-or-fail.sh`를 지운 격리 트리):
+#    6건 중 「requires a branch argument」가 `ok`였다.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   S="$ROOT/scripts/auto-merge-or-fail.sh"
+  [ -f "$S" ]
   TMP="$(mktemp -d)"
   BIN="$TMP/bin"; mkdir -p "$BIN"
   LOG="$TMP/gh.log"
@@ -60,6 +64,7 @@ teardown() { rm -rf "$TMP"; }
 @test "requires a branch argument" {
   run bash "$S"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'branch 인자 필수'
 }
 
 @test "all auto-merge callsites use the shared script, not the raw OR-fallback" {
