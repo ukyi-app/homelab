@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 # Gateway API 콜드스타트 sync-wave 순서 가드 (2026-08-14 NUC 콜드스타트 교착 2건에서 나온 것).
+# ⚠️ 이 파일은 **두 축**을 본다: (1) 콜드스타트 sync-wave 순서, (2) Gateway 리스너 형상(포트·protocol·tls.mode·hostname·allowedRoutes).
+#    마지막 @test가 (2)를 진다 — 그전까지 리스너 형상의 tracked 증인은 certificateRefs 이름 토큰 하나뿐이었다.
 #
 # ArgoCD는 **wave N의 전 리소스가 Healthy가 될 때까지 wave N+1로 넘어가지 않는다.** 그래서
 # "health가 늦은 wave의 무언가를 기다리는 리소스"를 앞 wave에 두면 **자기 자신을 기다리는 교착**이 된다.
@@ -123,4 +125,44 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
   # backend는 라우트와 같은 wave에 묶는다 — 라우트만 먼저 서면 ResolvedRefs가 실패한다.
   [ "$svc" -eq "$gw" ] || { echo "whoami Service wave=$svc · HTTPRoute wave=$gw — 같아야 한다"; false; }
   [ "$dep" -eq "$gw" ] || { echo "whoami Deployment wave=$dep · HTTPRoute wave=$gw — 같아야 한다"; false; }
+}
+
+@test "the Gateway listeners keep their shape (ports tied to the traefik entrypoints)" {
+  # AGENTS.md 「내부 인입은 tailscale passthrough→:8443뿐」·platform/traefik/README.md의
+  # 「web-internal-tls가 home.<도메인> 규약 담당」에 대한 유일한 tracked 증인이다.
+  # 2026-09-03 실측: port 8443→8444 + 세 리스너 from:All→Same + hostname "*" + tls.mode Passthrough를
+  # 동시에 걸어도 이 파일은 7/7 ok였다(check-skeleton·check-host-ports도 rc=0).
+  # ⚠️ 이 @test가 막는 것은 **내부 인입 가용성 회귀**다 — 공개면 확대는 infra/cloudflare/tunnel.tf의
+  #    hostname 열거와 tools/activate-app.ts의 .home. 차단이 이미 넣은 두 번째 잠금이다.
+  # ⚠️ yq -e 금지 — 값이 false면 exit 1이라 키 부재(null)와 구별되지 않는다(traps-detail).
+  if ! command -v yq >/dev/null; then
+    [ -z "${CI:-}" ] || { echo "FAIL: CI인데 yq 부재 — 리스너 형상 검증 불가(dead-green 방지)"; return 1; }
+    skip "yq 미설치(로컬만 — CI setup-toolchain 제공)"
+  fi
+  G="$D/gateway.yaml"; V="$D/values-traefik.yaml"
+  # 바닥값 — 리스너 개명이 아래 select()를 공허 초록으로 바꾸는 것을 막는다.
+  run bash -c "yq 'select(.kind==\"Gateway\") | .spec.listeners[].name' '$G' | LC_ALL=C sort | paste -sd, -"
+  [ "$output" = "web-internal,web-internal-tls,web-public" ]
+  # 내부 HTTPS 리스너 형상 — passthrough로 들어온 TLS를 여기서 종단한다.
+  run yq 'select(.kind=="Gateway") | .spec.listeners[] | select(.name=="web-internal-tls") | .protocol' "$G"
+  [ "$output" = "HTTPS" ]
+  run yq 'select(.kind=="Gateway") | .spec.listeners[] | select(.name=="web-internal-tls") | .tls.mode' "$G"
+  [ "$output" = "Terminate" ]
+  run yq 'select(.kind=="Gateway") | .spec.listeners[] | select(.name=="web-internal-tls") | .hostname' "$G"
+  [ "$output" = "*.home.ukyi.app" ]
+  run yq 'select(.kind=="Gateway") | .spec.listeners[] | select(.name=="web-public") | .hostname' "$G"
+  [ "$output" = "*.ukyi.app" ]
+  # 교차-네임스페이스 라우트 허용 — 모든 HTTPRoute가 남의 ns에 산다. from: Same으로
+  # 좀히면 내부 전 서비스의 라우트가 전건 detach된다.
+  run bash -c "yq 'select(.kind==\"Gateway\") | .spec.listeners[].allowedRoutes.namespaces.from' '$G' | LC_ALL=C sort -u | paste -sd, -"
+  [ "$output" = "All" ]
+  # 포트는 리터럴이 아니라 **등호**로 고정한다 — 실제 파손 모드가 entrypoint↔리스너 불일치다.
+  ws="$(yq '.ports.websecure.port' "$V")"; wp="$(yq '.ports.web.port' "$V")"
+  [ -n "$ws" ]; [ "$ws" != "null" ]
+  [ -n "$wp" ]; [ "$wp" != "null" ]
+  [ "$ws" != "$wp" ]
+  run yq 'select(.kind=="Gateway") | .spec.listeners[] | select(.name=="web-internal-tls") | .port' "$G"
+  [ "$output" = "$ws" ] || { echo "web-internal-tls port=$output · values-traefik websecure=$ws — 같아야 한다"; false; }
+  run bash -c "yq 'select(.kind==\"Gateway\") | .spec.listeners[] | select(.protocol==\"HTTP\") | .port' '$G' | LC_ALL=C sort -u | paste -sd, -"
+  [ "$output" = "$wp" ] || { echo "HTTP 리스너 port=$output · values-traefik web=$wp — 같아야 한다"; false; }
 }

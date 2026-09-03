@@ -38,6 +38,24 @@ setup() {
   [ "$vol_assets" = "$cm_assets" ]
 }
 
+@test "generated ConfigMaps enumerate every config/ and public/ source file" {
+  # configMapGenerator의 files 열거에 증인이 0이었다 — 소스 파일을 지우지 않고 목록에서만 빼면
+  # test_homepage_config.bats의 11 @test가 **클러스터에 없는 디스크 파일**을 계속 측정한다.
+  # 실측 2026-09-03: config/services.yaml + public/logo.png 두 줄을 지워도 homepage bats 41/41 초록.
+  # ⚠️ 기대값을 리터럴로 박지 않는다 — 디스크 디렉토리에서 파생해야 「파일 추가 후 열거 누락」(더 흔한
+  #    방향)까지 덮고, kustomization에서 파생하면 뮤테이션과 함께 붕괴해 공허해진다.
+  # ⚠️ 추출→bash 비교 관용구(위 :33-38) 유지 — yq 버전차(CI v4.44 vs 로컬 v4.52)의 멀티독 출력 때문.
+  local want got
+  want="$(LC_ALL=C ls "$BATS_TEST_DIRNAME/config" | LC_ALL=C sort | paste -sd, -)"
+  [ -n "$want" ]
+  got="$(yq 'select(.kind == "ConfigMap" and (.metadata.name | test("^homepage-[a-z0-9]+$"))) | .data | keys | sort | join(",")' "$RENDERED" | grep -v '^---$' | head -1)"
+  [ "$want" = "$got" ] || { echo "config/ 디스크=$want · 렌더 ConfigMap 키=$got — 열거가 어긋났다"; false; }
+  want="$(LC_ALL=C ls "$BATS_TEST_DIRNAME/public" | LC_ALL=C sort | paste -sd, -)"
+  [ -n "$want" ]
+  got="$(yq 'select(.kind == "ConfigMap" and (.metadata.name | test("^homepage-assets-[a-z0-9]+$"))) | .binaryData | keys | sort | join(",")' "$RENDERED" | grep -v '^---$' | head -1)"
+  [ "$want" = "$got" ] || { echo "public/ 디스크=$want · 렌더 assets 키=$got — 열거가 어긋났다"; false; }
+}
+
 @test "EROFS regression guard (#65): config emptyDir + seed binds + WRITABLE (readOnly!=true) mounts" {
   D='select(.kind == "Deployment" and .metadata.name == "homepage")'
   run yq -e "$D | .spec.template.spec.volumes[] | select(.name == \"config\") | has(\"emptyDir\")" "$RENDERED"

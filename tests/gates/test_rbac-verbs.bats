@@ -1,6 +1,9 @@
 #!/usr/bin/env bats
 # 레포 RBAC verb 화이트리스트 게이트 — 손으로 쓴 ClusterRole/Role **전부**(platform + substrate)의
 # verb가 read-only 집합 안에 있는지. 쓰기 verb는 파일 단위 면제 로스터로만 산다. @test 이름은 영어.
+# 두 번째 축(2026-09-03 추가): **바인딩의 roleRef**. rules를 아무리 좁혀도 roleRef 한 줄이 그 전부를
+#   우회한다 — 실측: platform/homepage/prod/rbac.yaml의 roleRef.name을 cluster-admin으로 바꿔도
+#   컴포넌트 bats 6/6 · 이 게이트 3/3 ok였고, 리포 전수 grep에서 roleRef를 읽는 가드는 0건이었다.
 #
 # 🔴 왜 게이트 레벨인가: 이 판정은 착지 전까지 **컴포넌트 하나(homepage)에만** 있었다.
 #    실측 2026-09-03 — `platform/victoria-stack/prod/vmagent.yaml`의 ClusterRole verbs에
@@ -77,6 +80,18 @@ setup() {
   # 바닥값 ② RBAC 문서를 가진 파일 수 — kind 판정이 드리프트하면(yq 경로·표기 변경) 여기서 먼저 죽는다.
   # 붕괴 경계 6(현재 10): 도메인 크기를 굳히면 컴포넌트를 철거할 때마다 red가 난다.
   [ "$NRBAC" -ge 6 ] || { echo "ClusterRole/Role 파일 열거가 ${NRBAC}건으로 붕괴했다(기대 >=6)"; false; }
+  # 바인딩 열거는 **RBACFILES에서 파생하지 않고 MANIFESTS에서 독립 열거**한다 — Role/ClusterRole을
+  # 선언하지 않고 **바인딩만 있는 신설 파일**(SA를 내장 cluster-admin에 묶는 최악의 형태)이
+  # RBACFILES에는 안 잡혀 열거 밖이 되기 때문이다(vacuous green).
+  BINDFILES=""
+  for f in $MANIFESTS; do
+    if [ -n "$(yq 'select(.kind=="ClusterRoleBinding" or .kind=="RoleBinding") | .kind' "$f" 2>/dev/null)" ]; then
+      BINDFILES="$BINDFILES $f"
+    fi
+  done
+  NBIND="$(printf '%s\n' $BINDFILES | grep -c . || true)"
+  # 바닥값 ③ 바인딩 파일 수 — 붕괴 경계 8(현재 10).
+  [ "$NBIND" -ge 8 ] || { echo "ClusterRoleBinding/RoleBinding 파일 열거가 ${NBIND}건으로 붕괴했다(기대 >=8)"; false; }
 }
 
 # 해당 파일의 면제 verb 목록을 stdout으로(없으면 빈 문자열).
@@ -165,4 +180,32 @@ EOF
   echo "SCAN: rbac-verbs:exemptions: $n"
   # 단방향 상한 — 늘리려면 같은 PR에서 EXEMPT_MAX를 고쳐야 한다(헤더 참조).
   [ "$n" -le "$EXEMPT_MAX" ] || { echo "면제 ${n}건 > 상한 ${EXEMPT_MAX} — 쓰기 verb가 늘었다"; false; }
+}
+
+# ★ 두 번째 축 — rules를 좁혀도 roleRef가 열려 있으면 전부 무의미하다.
+@test "every RoleBinding and ClusterRoleBinding points at a Role its own file declares" {
+  # 판정 = 각 바인딩의 `roleRef`(kind/name 쌍)가 **같은 파일이 선언한** Role/ClusterRole 안에 있을 것.
+  # 내장 롤(cluster-admin·edit·admin)이나 교차파일 바인딩이 정당해지면 위 EXEMPT와 같은 형태의
+  # 로스터로 명시해 받는다 — 조용히 통과시키지 않는다.
+  # ⚠️ kind까지 쌍으로 본다 — 이름만 보면 roleRef.kind를 Role↔ClusterRole로 뒤집는 드리프트가 샌다.
+  echo "SCAN: rbac-verbs:binding-files: $NBIND"
+  [ "$NBIND" -ge 8 ]
+  local f names refs nref r bad=""
+  for f in $BINDFILES; do
+    names="$(yq 'select(.kind=="ClusterRole" or .kind=="Role") | .kind + "/" + .metadata.name' "$f" 2>/dev/null | grep . || true)"
+    refs="$(yq 'select(.kind=="ClusterRoleBinding" or .kind=="RoleBinding") | .roleRef.kind + "/" + .roleRef.name' "$f" 2>/dev/null | grep . || true)"
+    nref="$(printf '%s\n' "$refs" | grep -c . || true)"
+    # 파일당 roleRef 바닥값 — yq 경로가 드리프트하면 파일은 열거되는데 refs만 공집합이 돼
+    # 아래 전칭이 파일 단위로 vacuous green이 된다.
+    [ "$nref" -ge 1 ] || { bad="$bad ${f}:(roleRef 공집합)"; continue; }
+    # ⚠️ `for r in $refs`(비인용 확장) 금지 — 위 ★ @test와 같은 이유다. heredoc 루프는 글로빙·단어분리가
+    #    없고 서브셸이 아니라 $bad가 전파된다.
+    while IFS= read -r r; do
+      [ -n "$r" ] || continue
+      printf '%s\n' "$names" | grep -qxF -- "$r" || bad="$bad ${f}:${r}"
+    done <<EOF
+$refs
+EOF
+  done
+  [ -z "$bad" ] || { echo "roleRef가 같은 파일이 선언한 Role/ClusterRole이 아니다(면제 로스터도 없음):$bad"; false; }
 }
