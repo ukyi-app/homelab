@@ -2,10 +2,13 @@
 #
 # 🔴 **이 유닛은 설치되지만 enable되지 않는다.** `host-config.sh --apply`는 트리를 놓고
 #    `daemon-reload`만 한다(`systemctl enable` 호출이 레포 전체에 0건 — 의도).
-#    국면 A에서는 스크립트가 **의도적으로 거부한다**(source=/mnt/bulk가 루트 LV의 bind라
-#    dest와 같은 물리 디스크다). 지금 켜면 매일 실패하거나, 더 나쁘게는 같은 매체에 사본을 만든다.
-#    국면 B(별도 SSD를 /mnt/bulk에 마운트) 이후 아래 한 줄이 배선의 마지막이다:
+#    국면 A에서는 스크립트가 **의도적으로 거부했다**(source=/mnt/bulk가 루트 LV의 bind라 dest와
+#    같은 물리 디스크였다 — 그때 켜면 매일 실패하거나, 더 나쁘게는 같은 매체에 사본을 만든다).
+#    **신규 호스트에서는** 국면 B(별도 SSD를 /mnt/bulk에 마운트) 진입 뒤 아래 한 줄이 배선의 마지막이다:
 #        sudo systemctl enable --now files-data-backup.timer
+#    ⚠️ 이 문장은 `host-config.sh --apply`의 동작에 대한 서술이지 **현재 노드의 enable 여부가 아니다** —
+#       국면은 `infra/k3s-bootstrap/versions.env`(BULK_MIGRATION_WINDOW_UNTIL)가 권위다. 수치·상태를
+#       여기 복제하지 않는다.
 #
 # ⚠️ 경로가 하드코딩이다. 이 레포는 owner 홈의 고정 체크아웃에서 돈다(`/home/ukyi/workspace/homelab`).
 #    체크아웃을 옮기면 이 유닛과 `host-config.sh --check`가 함께 틀어진다 — 옮길 일이 생기면

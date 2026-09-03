@@ -301,11 +301,13 @@ data:
               description: "systemd-failed-sweep.timer(5분)가 textfile collector에 하트비트를 못 씁니다 — 타이머 미enable/미설치 · 스크립트 fail-closed(열거 붕괴) · textfile 디렉토리 소실. 이 값이 늙으면 SystemdHostUnitFailed의 '0건'은 관측이 아니라 잔상입니다. `systemctl status systemd-failed-sweep.timer systemd-failed-sweep.service`와 `/var/lib/node_exporter/textfile/systemd-failed-sweep.prom`의 mtime을 확인하세요. 배선: sudo infra/k3s-bootstrap/host-config.sh --apply 후 sudo systemctl enable --now systemd-failed-sweep.timer"
           # bulk 티어 용량: 호스트 df를 백업 잡이 함께 push(files_data_bulk_avail/size_bytes).
           #
-          # ⚠️ **국면 A 정정(2026-08-17 · 실행자 갱신 2026-08-19)**: 이 알림의 pusher는 2026-08-19(#506)에
-          #   리눅스로 재작성돼 systemd 타이머(`files-data-backup.timer`)로 배선됐다. 다만 **국면 A 동안 그
-          #   타이머는 enable되지 않아** 이 알림은 양변이 빈 벡터라 구조적으로 무성이다.
-          #   그 축의 유일한 생존 신호는 in-cluster 짝인 `BulkStorageLow`(du exporter · absent 가드 착용 ·
-          #   15%)다 — 그쪽을 지우거나 약화시키면 안 된다. 국면 B에서 타이머를 enable하면 자동 복귀한다.
+          # ⚠️ **국면 A 이력(2026-08-17 · 실행자 갱신 2026-08-19 · 해소 국면 B 진입)**: 이 알림의 pusher는
+          #   2026-08-19(#506)에 리눅스로 재작성돼 systemd 타이머(`files-data-backup.timer`)로 배선됐다.
+          #   **국면 A 동안은** 그 타이머가 enable되지 않아 이 알림이 양변 빈 벡터로 무성이었고, 그 기간의
+          #   유일한 생존 신호가 in-cluster 짝 `BulkStorageLow`(du exporter · absent 가드 착용 · 15%)였다.
+          #   국면 B 진입으로 타이머가 배선돼 이 알림은 정상 판정 중이다 — 현행 국면의 권위는
+          #   `infra/k3s-bootstrap/versions.env`(BULK_MIGRATION_WINDOW_UNTIL)다(수치·상태 복제 금지).
+          #   ⚠️ `BulkStorageLow`를 지우거나 약화시키지 마라 — 두 신호는 여전히 서로의 대체가 아니다.
           #   여기 expr은 손대지 않는다(absent 가드를 안 다는 결정은 국면 B에서 여전히 옳다 — 중복 페이지).
           #   아래 rollup 논거는 실행자가 도는 국면(과거·미래) 모두에 유효하므로 그대로 둔다.
           #
@@ -329,8 +331,9 @@ data:
           # ★ absent() 가드를 **의도적으로 달지 않는다**: 실행자/push의 **전면** 실패(미실행·크래시·push 불가)는
           #   같은 스크립트가 함께 발행하는 files_backup_last_success_timestamp를 통해 위 FilesBackupStale
           #   (severity critical, absent 착용)이 fail-loud로 페이징한다. 여기 또 달면 동일 고장에 중복 페이지가 난다.
-          #   ⚠️ **국면 A 동안은 그 backstop 논거가 성립하지 않는다** — FilesBackupStale의 absent 가지가
-          #   억제돼 있기 때문이다(위 룰 주석). 그 기간의 bulk 결핍 신호는 `BulkStorageLow` 하나뿐이다.
+          #   ⚠️ **국면 A 동안은 그 backstop 논거가 성립하지 않았다** — FilesBackupStale의 absent 가지가
+          #   한시 억제돼 있었기 때문이다. 그 기간의 bulk 결핍 신호는 `BulkStorageLow` 하나뿐이었다.
+          #   (국면 B 진입으로 그 억제는 제거됐고 backstop 논거가 복귀했다 — 국면의 권위는 versions.env다.)
           #   ⚠️ **다만 그 백스톱은 부분 고장(값 오염)까지는 못 잡는다** — 정직한 한계이고, 여전히 그렇다.
           #   하트비트("실행자가 돌았다")와 용량("여유가 이만큼이다")은 서로 다른 명제라서, 전자가 참인 채로
           #   후자만 썩는 구간은 원리적으로 이 알림의 사각이다.

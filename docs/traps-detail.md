@@ -1162,8 +1162,9 @@ launchd 배선 + macOS 전용 `backup-files-data.sh` — NUC엔 launchd도 disku
 `severity=critical` 라우트의 `repeat_interval: 1h`를 타고 하루 24건이 나간다. 상시 소음은 채널 전체를
 둔감화해 **진짜 페이지를 묻는다** — "알림이 있다"가 "감시가 있다"를 뜻하지 않게 된다.
 (2026-08-19에 스크립트가 리눅스로 재작성되고 `files-data-backup.{service,timer}`로 **배선까지 끝났다**.
-그래도 억제는 유효하다 — 국면 A 동안 타이머를 의도적으로 enable하지 않으므로 시리즈는 여전히 absent다.
-남은 것은 국면 B의 `systemctl enable --now` 한 줄이고, 그때 억제 절 제거가 함께 가야 한다.)
+국면 A 동안은 타이머를 의도적으로 enable하지 않았으므로 시리즈가 absent였고 억제가 유효했다.
+국면 B 진입에서 `systemctl enable --now` 한 줄과 **억제 절 제거가 함께 갔다** — `tests/gates/test_files-backup-phase-a.bats`가
+그 동반을 양방향으로 강제한다. 현행 국면의 권위는 `infra/k3s-bootstrap/versions.env`다.)
 
 **억제의 만료는 룰 자신이 들고 있어야 한다.** 사람이 기억해야 하는 억제는 영구 침묵이 된다.
 expr에 `and on() (vector(time()) >= <재무장 unixtime>)`을 달면 만료가 자동이고 상한이 명시된다.

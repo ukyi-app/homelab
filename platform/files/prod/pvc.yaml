@@ -6,12 +6,11 @@
 # 내구성 등급 = 비재생성(non-regenerable): files-data는 git+R2+age로 재구축 불가한 유일 자산.
 #   · 오삭제/침묵유실 방어: Retain + Prune=false + /readyz free-space + FilesBackup/FilesBulkSSD 알림(r4).
 #   · 매체 유실 방어: 오프-매체 rsync 사본(scripts/backup-files-data.sh, RPO=일1회/24h).
-#     ⚠️ **국면 A에는 이 방어가 없다** — NUC은 디스크가 하나라 2차 매체가 원리적으로 존재할 수 없다.
-#     실행자는 2026-08-19에 리눅스로 재작성돼 이미 커밋된 배선을 갖는다
-#     (infra/k3s-bootstrap/host-config/etc/systemd/system/files-data-backup.{service,timer}) — 다만
-#     같은 매체 사본이라는 false-green을 막으려고 국면 A 동안 **의도적으로 enable하지 않는다**.
-#     국면 B(2TB M.2) 이후 `systemctl enable --now files-data-backup.timer` 한 줄로 복구된다.
-#     그때까지 r4의 FilesBackupStale은 absent 가지가 한시 억제 상태다(만료 시 자동 재무장).
+#     ⚠️ **국면 A에는 이 방어가 없었다** — 디스크가 하나라 2차 매체가 원리적으로 존재할 수 없었고,
+#     같은 매체 사본이라는 false-green을 막으려고 타이머를 의도적으로 enable하지 않았다(그동안 r4의
+#     FilesBackupStale은 absent 가지가 한시 억제 상태였다). 국면 B 진입 후 그 억제는 제거됐고 타이머가
+#     배선됐다 — 현행 국면·날짜의 권위는 `infra/k3s-bootstrap/versions.env`(BULK_MIGRATION_WINDOW_UNTIL)다.
+#     실행자는 `infra/k3s-bootstrap/host-config/etc/systemd/system/files-data-backup.{service,timer}`.
 #   · R2 미사용(무료티어)은 '백업 없음'이 아니라 '백업 = 호스트 내장 디스크 사본'.
 #   ⚠️ **DR 재결합 절차의 정본은 `docs/runbooks/external-ssd.md` §3이다**(2026-08-17 베어메탈 재작성에서
 #      신설 — 옛 판은 macOS APFS 외장 볼륨 **생성** 런북이라 재결합 절차를 담은 적이 없었다).
