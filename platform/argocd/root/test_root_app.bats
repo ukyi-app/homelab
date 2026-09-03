@@ -19,7 +19,17 @@
 }
 
 @test "every root/apps yaml is valid and is an Application" {
-  for f in platform/argocd/root/apps/*.yaml; do
+  # 🔴 1단계 글롭 `apps/*.yaml`은 root-app의 `recurse: true`(:6에서 이 파일이 직접 단언한다)보다
+  #    좁다 — 실측 2026-09-03: 기존 Application을 `apps/platform/` 아래로 옮겨도 이 레인은 ok로
+  #    남았다. 그 아래에 Application이 아닌 yaml(혹은 파싱 불가 파일)을 두면 그대로 싱크된다.
+  #    열거·바닥값의 근거는 형제 파일 root/test_projects.bats의 setup() 주석과 같다
+  #    (tracked만 싱크되므로 `git ls-files`, 값은 도메인 크기가 아니라 붕괴 경계).
+  local files f n
+  cd "$BATS_TEST_DIRNAME/../../.."
+  files="$(git ls-files -- platform/argocd/root/apps | grep '\.yaml$' | LC_ALL=C sort)"
+  n="$(printf '%s\n' "$files" | grep -c . || true)"
+  [ "$n" -ge 6 ] || { echo "root/apps 열거가 ${n}건으로 붕괴했다(기대 >=6)"; false; }
+  for f in $files; do
     run yq e 'true' "$f"; [ "$status" -eq 0 ]
     run yq '.kind' "$f"; [ "$output" = "Application" ]
   done

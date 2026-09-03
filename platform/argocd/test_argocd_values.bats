@@ -1,8 +1,19 @@
 #!/usr/bin/env bats
 
 @test "argocd bootstrap values disable HA and tune processors" {
-  run grep -q 'redis-ha:' platform/argocd/bootstrap-values.yaml
+  # 🔴 2026-09-03 실측: 여기 있던 `grep -q 'redis-ha:'`는 **키 문자열 존재**만 봤다 — @test 이름이
+  #    약속한 "disable HA"의 절반에 증인이 0이었고, bootstrap-values.yaml의 `enabled: false`를
+  #    `true`로 뒤집어도 이 파일은 16 ok/16으로 전건 초록이었다. 주석 줄에 `redis-ha`가 남기만 해도
+  #    rc 0이라 차트 hop이 키 경로를 옮겨 블록이 무효가 되는 경우도 같이 지나갔다.
+  #    단일 노드 k3s에서 redis-ha를 켜면 statefulset 3 replica + haproxy가 anti-affinity로 Pending에
+  #    고착하고 server/repo-server/controller가 Redis를 잃어 GitOps 제어면 자체가 degrade된다.
+  #    이 값을 재는 자리는 레포 전체에서 여기뿐이라(원격 helm 차트가 소비 — check-resource-limits·
+  #    verify:ledger 어느 쪽 도메인도 아님) 키 존재가 아니라 **값**을 핀한다.
+  # ⚠️ `yq -e`를 쓰지 마라 — 값이 false면 exit 1이라 올바른 매니페스트에서 red가 난다
+  #    (cf. docs/traps-detail.md 「yq -e는 값이 false면 exit 1이다」). 출력 등식으로 판정한다.
+  run yq '."redis-ha".enabled' platform/argocd/bootstrap-values.yaml
   [ "$status" -eq 0 ]
+  [ "$output" = "false" ]
   run grep -qE 'statusProcessors:\s*"?4"?' platform/argocd/bootstrap-values.yaml
   [ "$status" -eq 0 ]
   run grep -qE 'operationProcessors:\s*"?2"?' platform/argocd/bootstrap-values.yaml

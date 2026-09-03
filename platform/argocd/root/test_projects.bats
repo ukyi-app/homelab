@@ -6,6 +6,22 @@ setup() {
   P="$ROOT/platform/argocd/root/projects.yaml"
   APPSET="$ROOT/platform/argocd/root/appset.yaml"
   HOMELAB="https://github.com/ukyi-app/homelab.git"
+  # 🔴 root/apps 열거의 SSOT. root-app이 `directory.recurse: true`(root-app.yaml:17)라 **하위
+  #    디렉토리**의 Application도 그대로 싱크되는데, 아래 다섯 레인(sourceRepos 허용목록·finalizer
+  #    cascade·appset exclude 이중소유·destination 허용)은 1단계 글롭 `apps/*.yaml`이었다.
+  #    실측 2026-09-03: (a) `apps/platform/evil.yaml`(미등재 repoURL + finalizer + kube-system 소유)을
+  #    두면 22 ok / 0 not ok 전건 초록, (b) 기존 앱을 한 단계 아래로 옮기고 그 sourceRepos를 지우면
+  #    URL 3개를 하드코딩한 #7만 red고 정작 그 위반을 잡는 것이 존재 이유인 클래스 가드 #13은 ok였다.
+  #    파일 머리말(:92-94)은 재귀를 이미 명시 인지했고 #9만 그것을 따랐다 — 그 비대칭을 여기서 닫는다.
+  # `find`가 아니라 `git ls-files`인 이유: ArgoCD가 싱크하는 것은 tracked 파일뿐이라 분모가 배포
+  #    진실과 일치하고, 레포 커널(`scan_enumerate … git ls-files`)과 어휘가 같다.
+  APPFILES="$(cd "$ROOT" && git ls-files -- platform/argocd/root/apps | grep '\.yaml$' | LC_ALL=C sort)"
+  local n
+  n="$(printf '%s\n' "$APPFILES" | grep -c . || true)"
+  # 열거 붕괴 바닥값 — setup() 실패는 전 @test를 red로 만들어 fail-closed다. 값은 **붕괴 경계**이지
+  # 현재 도메인 크기(8)가 아니다: 스냅샷을 굳히면 Application을 정당하게 철거할 때마다 red가 난다
+  # (같은 판정이 scripts/check-argocd-revision.sh:47-50).
+  [ "$n" -ge 6 ] || { echo "root/apps 열거가 ${n}건으로 붕괴했다(기대 >=6)"; false; }
 }
 
 # --- AppProject 존재 + 종류 ---
@@ -24,7 +40,7 @@ setup() {
   # non-default consumer 최소 wave: appset 생성앱은 템플릿에 sync-wave 없어 wave 0,
   # 수동 root/apps 앱(project!=default)은 자기 sync-wave(없으면 0).
   minwave=0
-  for f in platform/argocd/root/apps/*.yaml; do
+  for f in $APPFILES; do   # 재귀 열거 SSOT — setup() 참조(1단계 글롭 금지)
     [ "$(yq '.spec.project' "$f")" != "default" ] || continue
     w="$(yq '.metadata.annotations."argocd.argoproj.io/sync-wave" // "0"' "$f")"
     [ "$w" -lt "$minwave" ] && minwave="$w"
@@ -142,7 +158,7 @@ setup() {
   }
   miss=""
   # 수동 platform/apps 앱 (재배정된 것만)
-  for f in platform/argocd/root/apps/*.yaml; do
+  for f in $APPFILES; do   # 재귀 열거 SSOT — setup() 참조(1단계 글롭 금지)
     proj="$(yq '.spec.project' "$f")"
     case "$proj" in platform|apps) ;; *) continue;; esac
     srv="$(yq '.spec.destination.server // ""' "$f")"
@@ -175,7 +191,7 @@ setup() {
   cd "$ROOT"
   repos="$(yq 'select(.metadata.name=="platform") | .spec.sourceRepos[]' platform/argocd/root/projects.yaml | LC_ALL=C sort -u)"
   miss=""
-  for f in platform/argocd/root/apps/*.yaml; do
+  for f in $APPFILES; do   # 재귀 열거 SSOT — setup() 참조(1단계 글롭 금지)
     [ "$(yq '.spec.project' "$f")" = "platform" ] || continue
     for u in $(yq '[.spec.source.repoURL // (.spec.sources[]?.repoURL)] | flatten | .[]' "$f"); do
       echo "$repos" | grep -qx "$u" || miss="$miss $u"
@@ -251,7 +267,7 @@ EOF
 @test "every root/apps platform path is excluded from the platform appset" {
   cd "$ROOT"
   miss=""
-  for f in platform/argocd/root/apps/*.yaml; do
+  for f in $APPFILES; do   # 재귀 열거 SSOT — setup() 참조(1단계 글롭 금지)
     # source path(들) 중 platform/<comp>/... 패턴의 comp 추출
     for p in $(yq '[.spec.source.path // (.spec.sources[]?.path)] | flatten | .[]' "$f" 2>/dev/null); do
       case "$p" in
@@ -279,7 +295,7 @@ NS_FINALIZER_ALLOW="cnpg-data victoria-stack"
 @test "Namespace-owning Applications carry no resources-finalizer (allowlist documented)" {
   cd "$ROOT"
   bad=""
-  for f in platform/argocd/root/apps/*.yaml; do
+  for f in $APPFILES; do   # 재귀 열거 SSOT — setup() 참조(1단계 글롭 금지)
     name="$(yq '.metadata.name' "$f")"
     case " $NS_FINALIZER_ALLOW " in *" $name "*) continue;; esac
     owns=0
