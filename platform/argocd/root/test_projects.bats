@@ -128,11 +128,13 @@ setup() {
 @test "only argocd and root use the default project — exhaustive scan of the recursed tree" {
   cd "$ROOT"
   offenders=""
+  ndef=0
   files="$(find platform/argocd/root -name '*.yaml') platform/argocd/argocd-app.yaml"
   for f in $files; do
     # Application 문서: "name project" (multi-doc 안전 — yq가 전 문서 순회)
     while read -r name proj; do
       [ -n "$name" ] || continue
+      [ "$proj" != "default" ] || ndef=$((ndef + 1))
       case "$name" in
         argocd|root) [ "$proj" = "default" ] || offenders="$offenders $name:$proj";;
         *) [ "$proj" != "default" ] || offenders="$offenders $name:default";;
@@ -145,6 +147,9 @@ setup() {
     done < <(yq 'select(.kind=="ApplicationSet") | .spec.template.spec.project' "$f")
   done
   [ -z "$offenders" ] || { echo "default escape hatch:$offenders"; false; }
+  # 면제가 metadata.name이라 예약 이름 재사용에 상한이 없다 — 존재(case) + 개수 2 = 정확 집합.
+  # 2는 스냅샷이 아니라 부트스트랩 구조다(argocd 자기관리 + root app-of-apps).
+  [ "$ndef" -eq 2 ] || { echo "default project Application 수=$ndef (기대 2: argocd, root)"; false; }
 }
 
 @test "both ApplicationSet templates use the new non-default projects" {
