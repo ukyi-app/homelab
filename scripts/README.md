@@ -83,10 +83,15 @@
 - **`check-locale-collation.sh`** — 로케일 콜레이션 가드: 게이트의 `sort`가 `LC_ALL=C` 접두(또는 숫자
   정렬)인지, TS/JS가 `localeCompare`·`toLocale*`·`Intl.Collator`를 쓰지 않는지 hard-zero로 강제한다.
   en_US 계열은 `-1`과 `1`을 같다고 봐 `sort -u`가 하나를 버린다 — 거짓 red가 아니라 **fail-open**이었다.
-- **`check-gh-secret-coverage.sh`** — GH Actions secret ↔ 분류 정책 **전단사** 가드.
-  워크플로가 참조하는 secret 전부가 `policy/gh-secret-var-classification.json`에 정확히 한 번,
-  사유와 함께 분류돼 있어야 한다(ledger/inventory-only/identifier/provided). `ledger` 갈래는
-  `policy/credential-expiry.json` 행과 기계 대조된다. 미분류·stale·이중선언 전부 fail-closed.
+- **`check-gh-secret-coverage.sh`** — GH Actions **secret·variable 두 평면 ↔ 분류 정책 전단사** 가드.
+  SSOT는 `policy/gh-secret-var-classification.json`이고, 두 평면은 그 안의 **별도 배열**(`secrets`·`vars`)로
+  산다 — 섞으면 `ledger` 갈래와 뒤엉켜 만료 원장 대조가 무의미해진다.
+  ① **secret**: 워크플로가 참조하는 secret 전부가 정확히 한 번, 사유와 함께 분류돼 있어야 한다
+  (ledger/inventory-only/identifier/provided). `ledger` 갈래는 `policy/credential-expiry.json` 행과 기계
+  대조된다. ② **variable**(`vars.X`): 공개 설정값이라 유출·회전 축이 없어 `ledger` 갈래 자체를 허용하지
+  않는다. 그래도 tracked 원장이 필요한 이유는 감시 공백이다 — `vars.HOMELAB_OWNER`는 owner 경계의 신뢰
+  앵커인데 `github_actions_variable` 리소스가 0건이라 terraform 드리프트 감시 범위 밖이다.
+  두 평면 모두 양방향(미분류·stale)이고, 이중선언·열거 붕괴까지 전부 fail-closed.
 - **`check-host-ports.sh`** — 호스트 포트 위생 가드: `tests/gates/**`의 하네스가 호스트 포트를
   **리터럴로 박거나** 기동 프리미티브를 우회하는 자리를 hard-zero로 막는다(publish 인자 · 리스너 헬퍼
   인자 · 배정 lib 미사용 · 포트 변수를 자기가 리터럴로 채움 · publish 컨테이너를 기동 프리미티브 없이
