@@ -23,7 +23,7 @@ metadata:
   namespace: prod
 spec:
   encryptedData:
-    DB_PASSWORD: AgBd1234567890abcdefABCDEF+/==
+    DB_PASSWORD: AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
   template:
     metadata:
       name: foo-secrets
@@ -53,7 +53,7 @@ metadata:
   namespace: prod
 spec:
   encryptedData:
-    DB_PASSWORD: AgBd1234567890abcdefABCDEF+/==
+    DB_PASSWORD: AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
   template:
     metadata:
       name: foo-secrets
