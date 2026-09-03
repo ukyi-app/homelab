@@ -266,7 +266,11 @@ const DEFAULT_REGISTRY: PushEntry[] = [
   ...["gha_workflow_last_success_timestamp", "gha_workflow_max_age_seconds",
     "gha_liveness_configured", "gha_liveness_scraped", "gha_liveness_last_success_timestamp"]
     .map((metric): PushEntry => ({ metric, producer: GHA_LIVENESS, schedule: { kind: "cron", file: GHA_LIVENESS } })),
-  ...["adguard_rewrite_reconcile_timestamp", "adguard_rewrite_last_fix_timestamp"]
+  // 같은 CronJob(*/10)의 두 축. rewrite 수렴(위 둘)과 **시드 대조**(아래 둘)는 실패 격리된 형제
+  // 스텝이라 하트비트도 각자 진다 — 대조가 죽어도 잡은 초록이므로 rewrite 하트비트는 그 침묵을
+  // 못 본다(ADR-0007 결정 2). `adguard_seed_drift`는 section 라벨을 단 값-게이지(0/1)다.
+  ...["adguard_rewrite_reconcile_timestamp", "adguard_rewrite_last_fix_timestamp",
+    "adguard_seed_drift", "adguard_seed_drift_checked_timestamp_seconds"]
     .map((metric): PushEntry => ({ metric, producer: ADGUARD_RECONCILER, schedule: { kind: "cron", file: ADGUARD_RECONCILER } })),
   // push는 스크립트가, 크론(`0 5 * * 0` 주 1회)은 별도 CronJob 매니페스트가 들고 있다.
   { metric: "restore_drill_last_success_timestamp", producer: RESTORE_DRILL,

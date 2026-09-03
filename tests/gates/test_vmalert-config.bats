@@ -320,6 +320,33 @@ alert_defined() {
   grep -q 'AdguardRewriteDriftFixed' "$A"
 }
 
+@test "adguard seed drift has a warning gauge alert and its own check heartbeat (ADR-0007)" {
+  R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
+  A="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
+  # ADR-0007 결정 2: adguard 본체 설정의 SSOT는 **라이브**이고 git ConfigMap은 `cp -n` 첫 부팅 시드다 —
+  # 시드 드리프트는 red가 아니라 "재구축 시 되돌아갈 거리"라 severity warning이 계약의 일부다.
+  alert_defined "$R" AdGuardSeedDrift
+  alert_defined "$R" AdGuardSeedDriftCheckStale
+  # 10분 주기 push라 [2h] 윈도(모드 C: W ≥ 주기).
+  grep -q 'last_over_time(adguard_seed_drift\[2h\])' "$R"
+  grep -q 'last_over_time(adguard_seed_drift_checked_timestamp_seconds\[2h\])' "$R"
+  # 하트비트 부재는 fail-closed(형제 AdguardRewriteReconcilerStale과 같은 형태).
+  grep -q 'absent(last_over_time(adguard_seed_drift_checked_timestamp_seconds' "$R"
+  # ⚠️ 값-게이지에 max_over_time을 쓰면 해소된 드리프트를 윈도만큼 래치해 for:를 넘긴다
+  #    (「rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭」의 상태-게이지 쪽). 최신 샘플만 보는
+  #    last_over_time이 유일하게 옳은 rollup이다.
+  run grep -q 'max_over_time(adguard_seed_drift' "$R"
+  [ "$status" -eq 1 ]
+  # severity — 두 룰 모두 warning(red 아님)이 ADR 결정의 본문이다. 정의 줄부터 5줄 안의 labels를 본다.
+  [ "$(grep -A5 -- '- alert: AdGuardSeedDrift$' "$R" | grep -c 'severity: warning')" = "1" ]
+  [ "$(grep -A5 -- '- alert: AdGuardSeedDriftCheckStale$' "$R" | grep -c 'severity: warning')" = "1" ]
+  # 처방이 annotation에 있어야 한다 — "라이브를 git으로 되돌려라"로 읽히면 ADR이 뒤집힌다.
+  grep -A9 -- '- alert: AdGuardSeedDrift$' "$R" | grep -q '시드를 라이브에 맞춰'
+  # alertmanager 타이틀 매핑(신규 알림 한국어).
+  grep -q 'AdGuardSeedDrift' "$A"
+  grep -q 'AdGuardSeedDriftCheckStale' "$A"
+}
+
 @test "LAN DNS liveness has a dedicated critical alert (R7 made AdGuard the whole house's resolver)" {
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
   alert_defined "$C" LanDnsPathDown
