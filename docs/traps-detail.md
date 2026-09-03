@@ -383,7 +383,10 @@
   **옛 키를 지우지도, 이미 커밋된 봉인본을 재봉인하지도 않아** 노출 창을 줄이지 못하는 반면,
   `scripts/backup-sealed-secrets-key.sh --verify`·committed cert(`tools/sealed-secrets-cert.pem`)·복구 드릴을
   30일마다 조용히 stale로 만든다(자동화 없음). 회전이 필요하면 런북 `restore.md` 「회전 절차」로 **수동**.
-  재검토 트리거는 그 셋 중 하나라도 자동화됐을 때(예: `--verify`가 `make verify-posture`에 편입).
+  재검토 트리거는 그 셋 중 하나라도 **자동 실행 venue(systemd timer·CronJob·워크플로 스케줄)에 배선**됐을 때다.
+  owner 손 호출 스위트로의 편입은 트리거가 아니다 — 옛 문언의 예시(`--verify`가 `make verify-posture`에 편입)가
+  #594로 문자 그대로 발화했고, 2026-09-03 재검토 결론은 **결정 유지**다(posture는 손 호출이라 회전이 부르는
+  수동 의무 4개를 자동으로 재는 것이 없다).
 
 ### gh pr merge --auto clean PR 에러
 - `gh pr merge --auto`는 이미 clean(체크 완료)인 PR에 에러를 낸다 — `|| gh pr merge` 폴백 필요.
