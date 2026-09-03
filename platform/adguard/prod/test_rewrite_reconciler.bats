@@ -235,6 +235,16 @@ setup() {
 }
 
 @test "reconciler is wired into kustomization" {
-  grep -q 'rewrite-reconciler.yaml' "$ROOT/platform/adguard/prod/kustomization.yaml"
-  grep -q 'rewrite-reconciler-rbac.yaml' "$ROOT/platform/adguard/prod/kustomization.yaml"
+  # ⚠️ 원문 grep은 주석 한 줄(`  # 임시 비활성 - rewrite-reconciler.yaml …`)에도 초록이다 —
+  #    resources 시퀀스에서 빠져 CronJob이 클러스터에서 사라져도 이 파일의 나머지 @test는 전부
+  #    매니페스트 **원문**만 읽으므로 전건 초록이 된다. 파싱한 resources로 판정한다.
+  #    (형제 자리 전수: victoria-stack/test_pvc_du_exporter.bats·test_relay.bats — 셋 다 yq로 통일.)
+  K="$ROOT/platform/adguard/prod/kustomization.yaml"
+  run yq '.resources | contains(["rewrite-reconciler.yaml"])' "$K"
+  printf '%s' "$output" | grep -qxF -- 'true'
+  run yq '.resources | contains(["rewrite-reconciler-rbac.yaml"])' "$K"
+  printf '%s' "$output" | grep -qxF -- 'true'
+  # dangling 참조 금지(양성 대조 — kustomize build를 깨는 배선을 초록으로 넘기지 않는다).
+  [ -f "$F" ]
+  [ -f "$R" ]
 }

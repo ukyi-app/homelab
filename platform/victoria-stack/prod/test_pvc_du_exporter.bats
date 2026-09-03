@@ -93,7 +93,24 @@ setup() {
 }
 
 @test "du exporter is wired into kustomization" {
-  grep -q 'pvc-du-exporter.yaml' "$ROOT/platform/victoria-stack/prod/kustomization.yaml"
+  # ⚠️ 원문 grep은 주석 한 줄(`  # 임시 비활성 - pvc-du-exporter.yaml …`)에도 초록이다 — resources
+  #    시퀀스에서 빠져 CronJob이 클러스터에서 사라져도 이 파일이 12/12 초록이었다(2026-09-03 격리
+  #    트리 실측). 나머지 11개 @test는 전부 pvc-du-exporter.yaml **원문**만 읽으므로, 이 한 줄이
+  #    "컴포넌트가 실재한다"의 유일한 증인이다.
+  #    선례: test_relay.bats:68-80이 같은 실패 모양을 실측하고 yq 파싱으로 옮겼다 — 그 주석이 바로
+  #    이 자리를 선례로 지목하는데 처방은 역수입되지 않았다. 여기서 닫는다.
+  # ⚠️ 이 갭이 여는 것은 "무성 소실"이 아니라 **CI 회귀 채널**이다 — 라이브는
+  #    r4-storage-backup.yaml의 PvcDuExporterStale(`absent(last_over_time(…[3d]))` 가지)이
+  #    prune 후 약 48.5h 안에 warning으로 페이징한다. 그래도 CI 채널을 여는 값이 2줄이라 고친다.
+  # ⚠️ `command -v yq >/dev/null || skip`를 여기 새로 들이지 않는다 — 이 파일은 :31·:33·:103에서
+  #    yq를 무조건 쓰므로, 이 자리만 skip을 두면 yq 부재가 이 @test만 조용히 빼는 두 번째
+  #    fail-open이 된다(그 자리는 skip이 아니라 red여야 한다).
+  run yq '.resources | contains(["pvc-du-exporter.yaml"])' "$ROOT/platform/victoria-stack/prod/kustomization.yaml"
+  printf '%s' "$output" | grep -qxF -- 'true'
+  # dangling 참조 금지(양성 대조 — kustomize build를 깨는 배선을 초록으로 넘기지 않는다).
+  # `contains` 단독의 로스터 붕괴는 tests/gates/의 컷오버 가드가 앵커 2개로 이미 덮으므로
+  # 여기서 앵커를 중복 고정하지 않는다(정당한 resources 증가마다 두 자리가 드리프트한다).
+  [ -f "$F" ]
 }
 
 @test "du exporter mounts kubelet pods read-only and documents the widened F8 surface" {
