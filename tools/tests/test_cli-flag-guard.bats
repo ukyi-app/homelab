@@ -53,8 +53,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "migrated mutators import the shared parseFlags (cli.ts adoption)" {
+  # ⚠️ 피연산자를 **import 줄**로 좁힌다 — 맨 `lib/cli.ts` 매치는 그 파일 어디든(주석 한 줄에도)
+  #    걸려 「리터럴 언급이면 참」이 된다. 실측 2026-09-04: create-app.ts의 import를 주석으로 바꾸고
+  #    lib 본문을 그대로 복사한 로컬 function parseFlags로 교체해도 이 파일 12/12 그대로 초록이었다.
+  #    형제 선례: test_identity.bats의 identity.ts 루프(같은 이유로 이미 앵커드).
   for f in db-url cache-url teardown-resource provision-db provision-cache create-app teardown-app activate-app verify-db-marker; do
-    run grep -q "lib/cli.ts" "tools/$f.ts"; [ "$status" -eq 0 ]
+    run grep -qE '^import .*"\./lib/cli\.ts"' "tools/$f.ts"; [ "$status" -eq 0 ]
   done
 }
 

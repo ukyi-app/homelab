@@ -35,7 +35,11 @@ setup() {
   # 인라인 'req ≈ ...' 치환이 teardown-app.ts에서 사라지고 공용 헬퍼를 import 하는지.
   run grep -c 'req ≈' "$ROOT/tools/teardown-app.ts"
   [ "$output" = "0" ]
-  grep -q "lib/ledger-totals" "$ROOT/tools/teardown-app.ts"
+  # ⚠️ 존재 단언은 **import 줄**로 좁힌다 — 맨 `lib/ledger-totals` 매치는 파일 어디든(주석 한 줄에도)
+  #    걸린다. 실측 2026-09-04: import를 주석으로 바꾸고 lib의 parseLedgerRows를 그대로 복사한
+  #    로컬 function으로 교체해도 이 @test는 초록이었다(위 부정 카운트도 여전히 0이다 — 인라인
+  #    치환이 아니라 **로컬 사본**이 이 클래스의 실제 모양이다).
+  grep -qE '^import .*"\./lib/ledger-totals\.ts"' "$ROOT/tools/teardown-app.ts"
 }
 
 @test "addRow inserts a ledger row after the last existing row" {

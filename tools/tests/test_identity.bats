@@ -144,8 +144,11 @@ ROSTER_FLOOR=15
   done
   # db-url/cache-url은 엔진 껍데기(티켓 08) — 이름 검증은 conn-url 엔진 술어가 identity SSOT를
   # 소유하고, bin은 엔진을 경유한다(직수입 대신 위임 — 분기 없는 단일 판정은 유지된다).
+  # ⚠️ 위 루프와 같은 이유로 **import 줄**로 좁힌다 — 두 파일 다 :1 헤더 주석이 `lib/conn-url.ts`를
+  #    문자열로 담고 있어, 맨 매치는 엔진을 안 써도 참이다(실측 2026-09-04: db-url.ts의 직수입을
+  #    지우고 동적 로드로 갈아타도 이 파일 + 형제 2파일 28/28 그대로 초록).
   for f in db-url cache-url; do
-    run grep -q "lib/conn-url.ts" "tools/$f.ts"
+    run grep -qE '^import .*"\./lib/conn-url\.ts"' "tools/$f.ts"
     [ "$status" -eq 0 ]
   done
 }
