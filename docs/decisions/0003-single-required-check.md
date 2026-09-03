@@ -18,7 +18,10 @@ branch protection의 required status check는 **`gate` 하나**로 둔다(`repo.
   (sops 왕복은 ephemeral 키, iac plan은 정보성).
 
 ## 결과
-- **`gate`가 유일 머지 게이트이므로 gate를 깨는 변경은 전면 차단된다.** 그래서 gate가 쓰는
+- **`gate`가 유일 머지 게이트이므로 gate를 깨는 변경은 전면 차단된다.**
+  (단, 「전면」은 비-admin 주체 한정이다 — `infra/github/repo.tf`의 `enforce_admins = false`로
+  owner(admin)의 수동 머지는 예외다. 2026-09-03 라이브 확인. 이 절이 유도하는 「도구 전량 핀」은
+  그 예외와 무관하게 성립한다 — 자동화 주체는 admin이 아니다.) 그래서 gate가 쓰는
   도구는 전부 핀해야 한다 — helm 무핀(`get-helm-3` latest)이 시한폭탄이었던 이유(→ 핀 완료).
 - 로컬에서 gate를 그대로 재현하는 단일 진입점이 필요하다 → `make ci`(+ `test_make-ci-parity.bats`가
   gate↔make ci 드리프트를 회귀 차단).
