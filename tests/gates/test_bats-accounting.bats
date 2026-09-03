@@ -27,7 +27,7 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 
 @test "a bare entry with no governing comment is rejected" {
   reg="$BATS_TEST_TMPDIR/bare"
-  mkreg "$reg" '# 사유 — 실행처: owner-local' 'tests/gates/test_scan-floor.bats' '' 'tests/gates/test_bats-style.bats'
+  mkreg "$reg" '# 사유 — 실행처: owner-local `bats tests/gates/test_scan-floor.bats`' 'tests/gates/test_scan-floor.bats' '' 'tests/gates/test_bats-style.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "사유 그룹 주석 없이"
@@ -45,7 +45,7 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 #    물려받아** 통과한다. 항목 뒤의 주석은 새 그룹을 열어야 한다.
 @test "a comment following an entry opens a new group instead of inheriting the previous one" {
   reg="$BATS_TEST_TMPDIR/inherit"
-  mkreg "$reg" '# 사유 — 실행처: owner-local' 'tests/gates/test_scan-floor.bats' \
+  mkreg "$reg" '# 사유 — 실행처: owner-local `bats tests/gates/test_scan-floor.bats`' 'tests/gates/test_scan-floor.bats' \
                '# 새 사유(표기 없음)' 'tests/gates/test_bats-style.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -ne 0 ]
@@ -62,9 +62,68 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 
 @test "a well-formed registry passes the contract" {
   reg="$BATS_TEST_TMPDIR/ok"
-  mkreg "$reg" '# docker 의존 — 실행처: owner-local bats' 'tests/gates/test_scan-floor.bats'
+  mkreg "$reg" '# docker 의존 — 실행처: owner-local `bats tests/gates/test_scan-floor.bats`' 'tests/gates/test_scan-floor.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
+}
+
+# ── 신설 계약 (0a): 실행처 표기가 가리키는 venue의 **실재** ──────────────────────────────────────
+# ⚠️ (0)의 `실행처` 문자열 매칭만 있던 시절, 이 자리는 스크립트 주석이 스스로 "텍스트 계약이지 증명이
+#    아니다"라고 적어 둔 구멍이었다. 실측 2026-09-03(착지 전): 없는 타깃(`make no-such-target`)도,
+#    아무 단어도(「실행처: 그냥 어딘가에서」) 전부 rc 0이었다. 아래 넷이 그 구멍의 증인이다.
+
+@test "a named venue that does not exist is rejected (the marking must derive, not merely be spelled)" {
+  reg="$BATS_TEST_TMPDIR/badvenue"
+  mkreg "$reg" '# 사유 — 실행처: `make no-such-target`' 'tests/gates/test_scan-floor.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "venue가 0건 실재"
+  # 진단은 그룹 첫 줄과 **인식한 토큰**을 함께 낸다 — 어느 표기가 왜 안 걸렸는지 없이는 고칠 수 없다.
+  echo "$output" | grep -q "그룹 첫 줄: # 사유"
+  echo "$output" | grep -q "인식한 토큰: \[make no-such-target\]"
+}
+
+@test "a venue marking with no recognizable token at all is rejected" {
+  reg="$BATS_TEST_TMPDIR/wordonly"
+  mkreg "$reg" '# 사유 — 실행처: 그냥 어딘가에서' 'tests/gates/test_scan-floor.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "venue가 0건 실재"
+  echo "$output" | grep -q "인식한 토큰: (없음)"
+}
+
+@test "each recognized venue form proves a group (make target, bats path, workflow file)" {
+  # 음성 대조 — 이 레인이 '표기가 있으면 무조건 red'가 아니라 **실재**를 재는지 고정한다.
+  # 셋 다 실 트리의 물건이다: `verify` 타깃 · 이 파일 자신 · iac.yaml(terraform 그룹의 실제 표기).
+  reg="$BATS_TEST_TMPDIR/vmake"
+  mkreg "$reg" '# 사유 — 실행처: owner-local `make verify`' 'tests/gates/test_scan-floor.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -eq 0 ]
+  reg="$BATS_TEST_TMPDIR/vbats"
+  mkreg "$reg" '# 사유 — 실행처: owner-local `bats tests/gates/test_bats-accounting.bats`' 'tests/gates/test_scan-floor.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -eq 0 ]
+  reg="$BATS_TEST_TMPDIR/vwf"
+  mkreg "$reg" '# 사유 — 실행처: .github/workflows/iac.yaml (advisory 잡)' 'tests/gates/test_scan-floor.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -eq 0 ]
+}
+
+@test "both backtick and single-quote markings are recognized (the registry mixes them)" {
+  # 레지스트리 실측: 대부분 백틱, KSOPS 그룹만 작은따옴표. 파서가 한쪽만 받으면 정직한 표기가 red가 된다.
+  reg="$BATS_TEST_TMPDIR/vquote"
+  mkreg "$reg" "# 사유 — 실행처: owner-local 'make verify-ksops'" 'tests/gates/test_scan-floor.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -eq 0 ]
+}
+
+@test "a venue named only in unquoted prose does not prove the group (the parser is not a word-matcher)" {
+  # 인용 없이 흘린 「make verify」는 산문이지 표기가 아니다 — 여길 열면 (0a)가 다시 텍스트 계약이 된다.
+  reg="$BATS_TEST_TMPDIR/vprose"
+  mkreg "$reg" '# 사유 — 실행처: 대충 make verify 쯤에서 돈다' 'tests/gates/test_scan-floor.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "venue가 0건 실재"
 }
 
 # ── 신설 계약 (0b): 레지스트리 상한 ─────────────────────────────────────────────────────────────
@@ -86,7 +145,7 @@ excl_max() { grep -oE '^EXCL_MAX=[0-9]+' "$s" | cut -d= -f2; }
   reg="$BATS_TEST_TMPDIR/grow"
   # 상한 + 1건 — 기존 유효 그룹 **아래**에 이어 붙이는 자연스러운 위치 그대로.
   : > "$reg"
-  echo '# 사유 — 실행처: owner-local' >> "$reg"
+  echo '# 사유 — 실행처: owner-local `bats tests/gates/test_scan-floor.bats`' >> "$reg"
   i=0
   while [ "$i" -le "$max" ]; do echo "tests/gates/test_fixture-$i.bats" >> "$reg"; i=$((i + 1)); done
   run bash "$s" --lint-excludes "$reg"
@@ -98,7 +157,7 @@ excl_max() { grep -oE '^EXCL_MAX=[0-9]+' "$s" | cut -d= -f2; }
   max="$(excl_max)"
   [ -n "$max" ]
   reg="$BATS_TEST_TMPDIR/shrink"
-  mkreg "$reg" '# 사유 — 실행처: owner-local' 'tests/gates/test_scan-floor.bats'
+  mkreg "$reg" '# 사유 — 실행처: owner-local `bats tests/gates/test_scan-floor.bats`' 'tests/gates/test_scan-floor.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
 }
@@ -110,7 +169,7 @@ excl_max() { grep -oE '^EXCL_MAX=[0-9]+' "$s" | cut -d= -f2; }
   [ -n "$max" ]
   reg="$BATS_TEST_TMPDIR/envoff"
   : > "$reg"
-  echo '# 사유 — 실행처: owner-local' >> "$reg"
+  echo '# 사유 — 실행처: owner-local `bats tests/gates/test_scan-floor.bats`' >> "$reg"
   i=0
   while [ "$i" -le "$max" ]; do echo "tests/gates/test_fixture-$i.bats" >> "$reg"; i=$((i + 1)); done
   BATS_EXCLUDE_MAX=999 run bash "$s" --lint-excludes "$reg"
@@ -158,7 +217,7 @@ excl_max() { grep -oE '^EXCL_MAX=[0-9]+' "$s" | cut -d= -f2; }
 @test "a fixture lint reports a different exclude count than the real registry" {
   # 08-a의 목적: 이 호출이 **실 도메인에 닿았는가**를 건수 대비로 가른다(같은 라벨·다른 값).
   reg="$BATS_TEST_TMPDIR/contrast"
-  mkreg "$reg" '# 사유 — 실행처: owner-local' 'tests/gates/test_scan-floor.bats'
+  mkreg "$reg" '# 사유 — 실행처: owner-local `bats tests/gates/test_scan-floor.bats`' 'tests/gates/test_scan-floor.bats'
   fix="$(bash "$s" --lint-excludes "$reg" | sed -n 's/^SCAN: check-bats-accounting:excludes: //p')"
   real="$(bash "$s" | sed -n 's/^SCAN: check-bats-accounting:excludes: //p')"
   [ -n "$fix" ]
