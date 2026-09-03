@@ -57,4 +57,9 @@ EOF
 $peers
 EOF
   [ "$status" -eq 1 ]
+  # glances-netpol.yaml 자신의 kustomization 멤버십 — 2026-09-04 실측: 이 파일을 resources에서
+  # 빼도(vmalert·vmagent·networkpolicy.yaml과 동시) 위 판정은 파일을 직접 열어 전건 초록이었다.
+  K="${BATS_TEST_DIRNAME}/kustomization.yaml"
+  run yq '.resources | contains(["glances-netpol.yaml"])' "$K"
+  printf '%s' "$output" | grep -qxF -- 'true'
 }
