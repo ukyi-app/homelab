@@ -165,4 +165,10 @@ YAML
   [ "$(grep -c '^targetRules = ' "$C")" -eq 2 ]
   grep -qF -- 'targetRules = ["kubernetes-secret-yaml"]' "$C"
   grep -qF -- 'targetRules = ["generic-api-key"]' "$C"
+  # 원소 '추가' 축(exact-tests-1) — 위 멤버십 5건(useDefault·paths×2·targetRules×2)은 존재만
+  # 잰다. disabledRules 한 줄로 기본 룰을 끄거나 regexes/stopwords/commits/regexTarget으로
+  # 면제 스코프를 넓혀도 위 단언은 그대로 초록이었다 — 새 테이블·새 키 자체를 상한으로 문다.
+  [ "$(grep -cE '^\[' "$C")" -eq 3 ]              # [extend] + [[allowlists]]×2 — 그 외 테이블 금지
+  [ "$(grep -c '^description = ' "$C")" -eq 2 ]
+  [ "$(grep -cE '^[A-Za-z_]+ *=' "$C")" -eq 7 ]   # 1+2+2+2 = 정확 집합(disabledRules 등 신규 키 = red)
 }
