@@ -10,8 +10,10 @@ setup() {
 }
 
 @test "required gate has an ACTIVE run step invoking check-skeleton.sh (structural, F10)" {
-  # 주석/비활성 텍스트가 아니라 jobs.gate.steps[]의 실제 run 필드
-  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("scripts/check-skeleton.sh")) | .run' .github/workflows/ci.yaml
+  # 주석/비활성 텍스트가 아니라 jobs.gate.steps[]의 실제 run 필드 — 행두 호출만 잡는다(untouched-b-2:
+  # .run 문자열 전문에 test()를 걸면 그 안의 `# 비활성화: bash scripts/check-skeleton.sh` 같은
+  # 주석 줄도 매치돼 스텝을 무력화해도 초록이었다). 주석 줄은 앵커에서 탈락.
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*bash scripts/check-skeleton\.sh")) | .run' .github/workflows/ci.yaml
   [ "$status" -eq 0 ]
 }
 

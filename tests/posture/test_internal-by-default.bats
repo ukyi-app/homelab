@@ -92,7 +92,12 @@ web_public_rules() { jq '[.items[]|select(any(.spec.parentRefs[]?;.sectionName==
   [ "$output" = "ClusterIP" ]
 }
 
-@test "cloudflared ingress targets only Traefik (no direct app/admin services)" {
+@test "admin services are never a cloudflared backend (ConfigMap fallback surface, not the routing authority)" {
+  # exact-tests-4: 라우팅 권위는 infra/cloudflare/tunnel.tf:10 config_src="cloudflare"의 원격
+  # (API) config다 — 이 ConfigMap의 ingress 블록은 config_src가 "local"로 반전될 때의 폴백일
+  # 뿐이라 관측만으로 상한을 못 재고(존재 ≥1 + 3이름 부재 denylist라 다른 backend 추가는
+  # 무증인), 새 backend 추가에 대한 정확 집합 상한은 권위 쪽 infra/_tests/test_tf_static.bats
+  # 「cloudflared tunnel ingress backends are exactly …」가 진다(gate-safe, terraform 비의존).
   run bash -c "kubectl -n edge get cm cloudflared -o jsonpath='{.data.config\.yaml}' | grep -c 'traefik.gateway.svc.cluster.local'"
   [ "$output" -ge 1 ]
   run bash -c "kubectl -n edge get cm cloudflared -o jsonpath='{.data.config\.yaml}' | grep -Ec 'argocd|grafana|adguard'"

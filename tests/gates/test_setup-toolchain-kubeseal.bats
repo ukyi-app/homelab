@@ -48,7 +48,9 @@ setup() {
   run grep -rlE '^on:' "$WF"
   [ "$status" -eq 0 ]
   # rc 2(디렉토리 부재)를 통과로 읽지 않는다 — 위 양성 대조가 같은 트리의 비공허성을 증언한다
-  run grep -rE 'kubeseal-0\.27\.3' "$WF"
+  # 버전 리터럴이 아니라 모양으로 잰다 — 옛 v0.27.3 하나만 보면 다른 버전으로 인라인해도 초록이다
+  # (untouched-c-2: 인라인 회귀는 버전이 자유 변수).
+  run grep -rE 'sealed-secrets/releases/download' "$WF"
   [ "$status" -eq 1 ]
 }
 
@@ -57,10 +59,13 @@ setup() {
   for wf in _create-app.yaml; do
     run grep -F 'uses: ./.github/actions/setup-toolchain' "$ROOT/.github/workflows/$wf"
     [ "$status" -eq 0 ]
-    # 아래 두 부재 단언의 양성 대조는 바로 위 줄이다 — 파일이 사라지면 그쪽이 먼저 red다.
-    run grep -E 'get\.helm\.sh/helm-v' "$ROOT/.github/workflows/$wf"
-    [ "$status" -eq 1 ]
-    run grep -E 'conftest_0\.56\.0' "$ROOT/.github/workflows/$wf"
-    [ "$status" -eq 1 ]
   done
+  # 인라인 helm/kubeconform/conftest 설치기가 워크플로 전역에 없는지 — 옛 버전 리터럴이 아니라
+  # 모양으로 잰다(untouched-c-2: 버전은 인라인 회귀의 자유 변수). 이름이 약속한 kubeconform
+  # 레인도 여기서 처음 실재한다.
+  # 양성 대조 — 열거 대상이 실제 워크플로 트리인지(:48-49와 동일 규약)
+  run grep -rlE '^on:' "$WF"
+  [ "$status" -eq 0 ]
+  run grep -rE 'conftest_[0-9]|kubeconform-linux|get\.helm\.sh/helm-v' "$WF"
+  [ "$status" -eq 1 ]
 }

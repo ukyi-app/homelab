@@ -30,3 +30,18 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     && grep -qE 'for_each = local\.site_hosts' "$d" \
     && grep -qE 'for_each = local\.app_hosts' "$d"
 }
+
+@test "cloudflared tunnel ingress backends are exactly traefik + the 404 catch-all (no admin/app backend)" {
+  # exact-tests-4: 라우팅 권위는 여기다 — tunnel.tf:10 config_src="cloudflare"라 cloudflared의
+  # ConfigMap ingress 블록은 원격(API) config에 밀려 비관여다(posture 쪽 @test는 죽은 표면을
+  # 읽고 있었다). for-loop라 host 수를 늘려도 `service =` **개수**는 늘지 않아(호스트마다 같은
+  # traefik URL을 재사용) 정당한 host 추가마다 손 갱신을 부르지 않는다.
+  # ⚠️ 행두 앵커(옵션 `[{ ` 접두)는 「행두 = 곧 service」를 가정하는데, 새 backend가
+  # `[{ hostname = "...", service = "..." }]`처럼 **다른 키 뒤**에 service를 두면 그 줄은
+  # 행두 매치에서 완전히 빠져 카운트가 그대로 2 — 침묵 통과(실측). 행 위치가 아니라 **개수**로
+  # 잰다: \bservice[[:space:]]*= 를 파일 전역에서 grep -o로 뽑아 라인이 아니라 매치 건수를 센다.
+  d=infra/cloudflare/tunnel.tf
+  [ "$(grep -oE '\bservice[[:space:]]*=' "$d" | wc -l)" -eq 2 ]
+  grep -qF 'http://traefik.gateway.svc.cluster.local:80' "$d"
+  grep -qF 'http_status:404' "$d"
+}
