@@ -6,6 +6,9 @@ setup() { R="${BATS_TEST_DIRNAME}/rbac.yaml"; }
 
 # 최소권한 표면의 **전칭 화이트리스트**. 확대는 이 두 줄을 고쳐야만 통과하므로 리뷰에 반드시 보인다.
 # ⚠️ 부정 열거(리터럴 동사 블랙리스트)로 되돌리지 마라 — 아래 @test 주석의 실측이 그 이유다.
+# 계층 관계: verb 축은 이제 게이트 `tests/gates/test_rbac-verbs.bats`가 **전 컴포넌트**에 같은
+#   화이트리스트를 건다(2026-09-03 신설 — 그 전엔 이 파일이 유일한 자리였다). 여기 두 줄은 남는다:
+#   resources 축(RO_RESOURCES)은 이 컴포넌트만의 표면이고, 게이트는 verb 축만 본다. 중복이 아니라 계층이다.
 RO_VERBS="get list watch"
 RO_RESOURCES="httproutes gateways namespaces pods nodes"
 
