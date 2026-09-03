@@ -1,0 +1,15 @@
+# 스키마는 통과하나 PSA restricted 위반 — securityContext 키를 null로 **지우는** 약화.
+# values.schema.json의 not.anyOf는 `const: true/false/0`만 거부하므로 키 삭제(null)는 helm rc=0으로
+# 통과한다. 그 자리가 정확히 conftest 백스톱이 마지막 방어선인 지점이다 —
+# APE·capabilities.drop·runAsNonRoot 세 deny 규칙이 이 픽스처 하나로 동시에 증인을 얻는다.
+image: { repo: ghcr.io/owner/api, tag: sha-abc1234 }
+kind: web
+route: { host: api.example.com, public: true, paths: ["/"] }
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits:   { cpu: 500m, memory: 64Mi }
+securityContext:
+  allowPrivilegeEscalation: null
+  capabilities: null
+podSecurityContext:
+  runAsNonRoot: null
