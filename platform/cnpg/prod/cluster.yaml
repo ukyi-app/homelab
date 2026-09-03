@@ -87,6 +87,9 @@ spec:
     # ⚠️ 여기가 이 클러스터의 **유일한 아카이브 serverName**이다(쓰기).
     #    ObjectStore CRD는 serverName을 CEL로 **금지**하므로(barman-plugin/manifest.yaml:409-413)
     #    이 값이 `s3://homelab-pg-backups-prod/<serverName>/{base,wals}/`를 통째로 정한다.
+    # 가드 위치(두 반쪽): **버킷 루트**의 증인은 test_object_store.bats("the offsite destination
+    #    bucket is the one terraform creates" — infra/cloudflare/r2.tf에서 파생 대조)이고,
+    #    **serverName**의 증인은 test_cluster_params.bats:71 리터럴 핀 + check-pg-servername.sh다.
     # ⚠️ **`pg`로 되돌리지 마라.** 그 prefix에는 Mac 시대 아카이브가 남아 있고(PONR 1 미실행),
     #    같아지면 타임라인이 섞인다. R2엔 버저닝이 없어(`infra/cloudflare/r2.tf`) 되돌릴 수 없다.
     #    `ci.yaml`의 `EXPECT_PG_SERVERNAME=pg-nuc`가 main 진입 시 이 값을 고정한다.
