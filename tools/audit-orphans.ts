@@ -88,6 +88,8 @@ const BLOCKING = new Set(["orphan-dns", "activation-exposure-drift", "missing-ac
 // activation-surface-drift는 이미지 bump마다 apps/<app> 표면 해시가 바뀌어(비차단, autoDeploy 데드락 회피 위해
 // 의도적 비차단) 매 주기 알림을 내던 유일한 노이즈원이다. 실제 노출 재검증은 blocking activation-exposure-drift
 // (apps.json host/public)가 페이지하므로 이건 report-only로 강등한다. audit.yaml이 `alerting`으로 게이트한다.
+// ⚠️ 「유일한」은 작성 시점(앱이 있던 체제)의 서술이다 — apps=0 체제에서 unreferenced-conn이 같은 클래스를
+//    재개통했다. 그쪽은 상태 한정 억제라 이 집합이 아니라 아래 `reportOnly` 계산에 있다.
 const REPORT_ONLY = new Set(["activation-surface-drift"]);
 
 type RegRow = { name: string; active?: boolean; host?: string | null; public?: boolean };
@@ -315,8 +317,16 @@ if (connEntries.length > 0) {
 }
 
 const blocking = findings.filter((f) => BLOCKING.has(f.type));
+// 배포 가능 앱이 0개면 참조자 집합(envFrom)이 구조적으로 공집합이라 unreferenced-conn이 **전건 참**이다
+// — 판별력 0인 판정을 매일 페이지하면 유일한 정보성 드리프트 채널이 학습된 무시로 죽는다. 그래서 이
+// 체제에서만 report-only와 동급으로 접는다(findings/count에는 그대로 남겨 가시성 유지 = REPORT_ONLY와 같은 규율).
+// ⚠️ 술어는 반드시 `appDirs.length === 0`이다. `referenced.size === 0`으로 쓰면 **앱이 있는데 envFrom을
+//    통째로 빠뜨린 상태**까지 같이 묻는데, 그게 정확히 #211 그 병이라 이 판정이 존재하는 이유다.
+// ⚠️ 한계: 앱이 1개라도 착지하면 남은 stale conn이 다시 매일 페이지한다. retain tombstone은 억제 경로가
+//    아니므로(위 unreferenced-conn 로직이 tombs를 보지 않는다) tombstone 기반 일반화는 넣지 않는다.
+const reportOnly = appDirs.length === 0 ? new Set([...REPORT_ONLY, "unreferenced-conn"]) : REPORT_ONLY;
 // alerting: 텔레그램 페이지 대상 = report-only 제외 전 finding. blocking ⊆ alerting ⊆ count(불변식).
-const alerting = findings.filter((f) => !REPORT_ONLY.has(f.type));
+const alerting = findings.filter((f) => !reportOnly.has(f.type));
 // ── 방출 규약 ────────────────────────────────────────────────────────────────────
 // 이 도구는 `SCAN:` 마커를 **어느 모드에서도 내지 않는다**. stdout이 기계 판독 JSON이고
 // (audit.yaml:52 `| tee` → jq · tools/tests/test_audit-orphans.bats·test_audit-dangling-role.bats의

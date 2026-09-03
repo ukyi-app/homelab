@@ -36,9 +36,10 @@
 #    루트 LV의 bind라 source와 dest가 같은 물리 매체다. 그 상태로 타이머를 켜면 알림은 초록이
 #    되지만 사본은 같은 매체에 놓인다(**정직한 red보다 나쁜 false-green**).
 #    그래서 유닛 파일은 **설치만 되고 enable되지 않는다**(`host-config.sh --apply`는 enable하지 않는다).
-#    국면 B(별도 SSD를 /mnt/bulk에 마운트) 이후 `systemctl enable --now files-data-backup.timer`가
-#    배선의 마지막 한 줄이다. 그때까지 `FilesBackupStale`의 absent 가지는 한시 억제돼 있고,
-#    `tests/gates/test_files-backup-phase-a.bats`가 창을 비우는 순간 억제 제거를 강제한다.
+#    국면 B(별도 SSD를 /mnt/bulk에 마운트) 진입 뒤 `systemctl enable --now files-data-backup.timer`가
+#    배선의 마지막 한 줄이다. 국면 A 동안은 `FilesBackupStale`의 absent 가지가 한시 억제돼 있었고,
+#    `tests/gates/test_files-backup-phase-a.bats`가 창을 비우는 순간 억제 제거를 **양방향으로** 강제한다
+#    (그 강제가 실제로 걸렸다 — 억제 절은 지금 없다). 국면은 versions.env가 권위다.
 set -euo pipefail
 umask 077
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

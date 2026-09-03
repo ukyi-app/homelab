@@ -53,5 +53,16 @@ if [ "$pods" -eq 0 ]; then
   echo "⚠️ $NS 앱 파드 0건(정상 — 인-레포 앱 0개): kubelet 프로브 레그는 skip된다." >&2
   echo "   ipBlock 자체는 platform/network-policies/prod/test_netpol.bats가 gate에서 핀으로 강제한다." >&2
 fi
-make verify-posture                                                          # pg-rw + pg-pooler-rw(F4b, fail-closed)
+# posture 스위트 중 DR 자산 신선도(test_dr-assets)는 netpol candidate 판정과 무관하고 owner 매체
+# env(SEALED_KEY_BACKUP_DIR/LOCAL_ASSET_BACKUP_DIR)를 요구한다 — 미설정=red 설계라, 이 스크립트가
+# 무가드로 전 스위트를 부르면 candidate의 옳고 그름과 무관하게 :PASS 줄에 영원히 못 닿는다.
+# 게다가 그 red는 **클러스터를 변이한 뒤에** 나타난다. 리허설 범위에서만 그 파일을 뺀다.
+# ⚠️ 손 열거가 아니라 `git ls-files` 파생이다 — 신규 posture 파일은 자동 편입된다(「하드코딩 소비처
+#    목록은 자기 자신에게만 정확하다」 함정 회피. 손으로 3개를 적으면 test_storage-reclaim이 조용히 빠진다).
+suite="$(git ls-files 'tests/posture/test_*.bats' | grep -v '/test_dr-assets\.bats$' || true)"
+# 열거 붕괴 바닥값 — 위 `|| true`는 이 줄이 즉시 소비한다. 0건이면 make가 빈 스위트로 vacuous green을 낸다.
+# 3은 **붕괴 경계**이지 현재 도메인 크기(4)가 아니다 — 정당한 철거에서 red가 나지 않게(선례: test_automount.bats).
+n="$(printf '%s\n' "$suite" | grep -c . || true)"
+[ "$n" -ge 3 ] || { echo "✗ posture netpol 레그 열거가 ${n}건으로 붕괴(기대 >=3) — 경로/파일명 규약 확인" >&2; exit 1; }
+make verify-posture POSTURE_BATS="$(printf '%s\n' "$suite" | tr '\n' ' ')"   # pg-rw + pg-pooler-rw(F4b, fail-closed)
 echo "==> rehearsal PASS — candidate 안전(trap이 곧 main 복원 · $NS 앱 파드 ${pods}건 · kubelet 레그는 파드 ≥1일 때만)"

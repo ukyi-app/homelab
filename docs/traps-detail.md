@@ -383,7 +383,10 @@
   **옛 키를 지우지도, 이미 커밋된 봉인본을 재봉인하지도 않아** 노출 창을 줄이지 못하는 반면,
   `scripts/backup-sealed-secrets-key.sh --verify`·committed cert(`tools/sealed-secrets-cert.pem`)·복구 드릴을
   30일마다 조용히 stale로 만든다(자동화 없음). 회전이 필요하면 런북 `restore.md` 「회전 절차」로 **수동**.
-  재검토 트리거는 그 셋 중 하나라도 자동화됐을 때(예: `--verify`가 `make verify-posture`에 편입).
+  재검토 트리거는 그 셋 중 하나라도 **자동 실행 venue(systemd timer·CronJob·워크플로 스케줄)에 배선**됐을 때다.
+  owner 손 호출 스위트로의 편입은 트리거가 아니다 — 옛 문언의 예시(`--verify`가 `make verify-posture`에 편입)가
+  #594로 문자 그대로 발화했고, 2026-09-03 재검토 결론은 **결정 유지**다(posture는 손 호출이라 회전이 부르는
+  수동 의무 4개를 자동으로 재는 것이 없다).
 
 ### gh pr merge --auto clean PR 에러
 - `gh pr merge --auto`는 이미 clean(체크 완료)인 PR에 에러를 낸다 — `|| gh pr merge` 폴백 필요.
@@ -1162,8 +1165,9 @@ launchd 배선 + macOS 전용 `backup-files-data.sh` — NUC엔 launchd도 disku
 `severity=critical` 라우트의 `repeat_interval: 1h`를 타고 하루 24건이 나간다. 상시 소음은 채널 전체를
 둔감화해 **진짜 페이지를 묻는다** — "알림이 있다"가 "감시가 있다"를 뜻하지 않게 된다.
 (2026-08-19에 스크립트가 리눅스로 재작성되고 `files-data-backup.{service,timer}`로 **배선까지 끝났다**.
-그래도 억제는 유효하다 — 국면 A 동안 타이머를 의도적으로 enable하지 않으므로 시리즈는 여전히 absent다.
-남은 것은 국면 B의 `systemctl enable --now` 한 줄이고, 그때 억제 절 제거가 함께 가야 한다.)
+국면 A 동안은 타이머를 의도적으로 enable하지 않았으므로 시리즈가 absent였고 억제가 유효했다.
+국면 B 진입에서 `systemctl enable --now` 한 줄과 **억제 절 제거가 함께 갔다** — `tests/gates/test_files-backup-phase-a.bats`가
+그 동반을 양방향으로 강제한다. 현행 국면의 권위는 `infra/k3s-bootstrap/versions.env`다.)
 
 **억제의 만료는 룰 자신이 들고 있어야 한다.** 사람이 기억해야 하는 억제는 영구 침묵이 된다.
 expr에 `and on() (vector(time()) >= <재무장 unixtime>)`을 달면 만료가 자동이고 상한이 명시된다.

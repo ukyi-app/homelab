@@ -26,7 +26,8 @@ make verify        # 기반 게이트: skeleton + 원장(conftest) + sops 라운
 make chart-test    # 공유 차트: 3 kind(web/worker/site) 렌더 + kubeconform + bats
 make tf-validate   # terraform fmt+validate (3 루트)
 bats tools/tests/ infra/k3s-bootstrap/tests/ </dev/null   # 툴링/부트스트랩 테스트(fd 0 격리 — 스텁 hang 방지)
-make verify-posture   # [live] posture 스위트(internal-by-default·netpol·e2e) — KUBECONFIG 필요(부재=SKIP 신호·비-0)
+make verify-posture   # [live] posture 스위트(internal-by-default·netpol·e2e·DR 자산 신선도) — KUBECONFIG 필요(부재=SKIP 신호·비-0)
+                      # + DR 자산 레그는 SEALED_KEY_BACKUP_DIR·LOCAL_ASSET_BACKUP_DIR env 필요(미설정=red)
 export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt
 kustomize build --enable-helm --enable-alpha-plugins --enable-exec platform/<comp>/prod  # KSOPS 풀 렌더
 export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터 접근

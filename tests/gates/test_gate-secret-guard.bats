@@ -158,6 +158,11 @@ YAML
   [ "$(grep -c '^paths = ' "$C")" -eq 2 ]
   grep -qF -- "paths = ['''(^|/)[^/]+\.sealed\.yaml$''']" "$C"
   grep -qF -- "paths = ['''^platform/cnpg/barman-plugin/manifest\.yaml$''']" "$C"
-  # 벤더 manifest 면제는 룰 한정이어야 한다(파일 전체 면제 금지).
+  # ⚠️ **두 면제 모두** 룰 한정이어야 한다(파일 전체 면제 금지). 봉인본 쪽에 targetRules가 없던 동안
+  # `*.sealed.yaml` 19개 파일에서 기본 룰셋이 통째로 꺼져, 봉인 안 한 평문 Secret을 그 이름으로 커밋해도
+  # 스캐너가 무성이었다(실측: 같은 내용을 .plain.yaml/.sealed.yaml에 두면 전자만 잡혔다).
+  # 건수 등식이 있어야 한 블록만 다시 넓어지는 재확장이 red가 된다.
+  [ "$(grep -c '^targetRules = ' "$C")" -eq 2 ]
   grep -qF -- 'targetRules = ["kubernetes-secret-yaml"]' "$C"
+  grep -qF -- 'targetRules = ["generic-api-key"]' "$C"
 }

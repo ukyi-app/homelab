@@ -5,6 +5,15 @@
 # ⚠️ 중간 단언은 [ ]만(bash 3.2 [[ ]] 실패 침묵통과 — AGENTS.md).
 # ⚠️ declare -A 금지(bash 3.2). enum 추출은 notify.sh:25 case 라인을 SSOT로 파싱.
 
+# 비-워크플로 발화처 술어(SSOT) — reverse @test와 로스터 증인 @test가 **같은** 함수를 부른다.
+# 두 곳에 복제하면 한쪽만 넓어져도 다른 쪽이 그 완화를 증언하지 못한다.
+# ⚠️ 반드시 '발화 모양'으로 앵커한다(무제한 substring 금지) — enum 토큰이 한국어 일반 명사라
+# 주석·bats·스키마 설명에 한 번만 나와도 '발화처 있음'으로 계상돼 아래 로스터가 통째로 도달 불능이 된다.
+# restore-drill-script.sh는 '복원드릴 · pg-restore-drill' 형태로 본문에 라벨을 직접 쓴다 — 그 모양이다.
+emitted_outside_workflows() {
+  grep -rqE "(^|· )$1( ·|$)" "$ROOT/platform" "$ROOT/tools" 2>/dev/null
+}
+
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   WF="$ROOT/.github/workflows"
@@ -25,9 +34,10 @@ setup() {
   # reverse 방향: 워크플로가 아닌 발화처(예: CNPG restore-drill CronJob)도 enum을 정당하게 쓴다.
   # 워크플로만 보면 false-positive가 나므로, 비-워크플로 발화처는 레포 전역 grep으로 보강하고
   # 발화처가 아예 0인 예약 라벨만 명시 exemption으로 둔다.
+  # 보강 술어는 파일 상단 emitted_outside_workflows()가 SSOT다(앵커 근거는 그 헤더).
   # 예약 라벨(의도적 0-emitter, 공백패딩 — case 멤버십 매치용):
-  #  알림=제네릭 예약. 해체=teardown owner-local 이전으로 CI 미발화(notify.sh 렌더 경로·테스트는 보존, 미래 재사용 가능).
-  EXEMPT_RESERVED=" 알림 해체 "
+  #  알림=제네릭 예약. 온보딩=앱 온보딩 예약 라벨(워크플로 .with.source·스크립트 emitter 모두 0).
+  EXEMPT_RESERVED=" 알림 온보딩 "
 }
 
 @test "enum tokens were extracted (non-empty SSOT parse of notify.sh case line)" {
@@ -61,9 +71,8 @@ EOF
     [ -n "$tok" ] || continue
     # 워크플로 발화처
     if printf '%s\n' "$WF_SOURCES" | grep -qx "$tok"; then continue; fi
-    # 비-워크플로 발화처(스크립트/CronJob 등) — 레포 전역에서 'source 라벨'로 등장하는지.
-    # restore-drill-script.sh는 '복원드릴 · ident' 형태로 본문에 라벨을 직접 쓴다.
-    if grep -rqF "$tok" "$ROOT/platform" "$ROOT/tools" 2>/dev/null; then continue; fi
+    # 비-워크플로 발화처(스크립트/CronJob 등) — 파일 상단 술어 SSOT를 그대로 쓴다.
+    if emitted_outside_workflows "$tok"; then continue; fi
     # 명시 예약 라벨 exemption (공백패딩 멤버십 매치 — 다중 예약 지원)
     case "$EXEMPT_RESERVED" in *" $tok "*) continue ;; esac
     dead="$dead $tok"
@@ -71,4 +80,21 @@ EOF
 $ENUM_TOKENS
 EOF
   [ -z "$dead" ] || { echo "발화처 없는 dead enum 멤버:$dead (제거하거나 EXEMPT_RESERVED에 등록)"; false; }
+}
+
+@test "exemption roster is load-bearing (each reserved label actually reaches the exemption branch)" {
+  # 죽은 면제는 '리뷰에 보이는 예외'를 장식으로 만든다 — 로스터 항목이 앞선 두 갈래(워크플로 발화처·
+  # 앵커 grep)에서 먼저 continue하면 그 줄을 지워도 위 @test의 색이 안 바뀐다.
+  # 형제 선례: platform/victoria-stack/prod/test_automount.bats(죽은 면제)·tests/gates/test_rbac-verbs.bats(로스터 바닥값).
+  n=0
+  bad=""
+  for tok in $EXEMPT_RESERVED; do
+    n=$((n + 1))
+    if ! printf '%s\n' "$ENUM_TOKENS" | grep -qx "$tok"; then bad="$bad $tok(enum밖)"; continue; fi
+    if printf '%s\n' "$WF_SOURCES" | grep -qx "$tok"; then bad="$bad $tok(워크플로가_실제_발화)"; continue; fi
+    if emitted_outside_workflows "$tok"; then bad="$bad $tok(발화처_있음)"; continue; fi
+  done
+  [ -z "$bad" ] || { echo "죽은 면제 항목:$bad — EXEMPT_RESERVED에서 제거하라(면제가 아무것도 면제하지 않는다)"; false; }
+  # 로스터가 비면 위 루프가 0회라 이 @test가 vacuous green이 된다.
+  [ "$n" -ge 1 ] || { echo "면제 로스터가 비었다 — 항목 0건이면 이 @test는 아무것도 증언하지 않는다"; false; }
 }
