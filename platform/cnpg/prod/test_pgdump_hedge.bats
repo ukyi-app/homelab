@@ -26,7 +26,8 @@ f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
   # ⚠️ cnpg-data App은 prune:true + selfHeal:true라 resources에서 한 줄이 사라지는 것이 곧
   #    클러스터에서의 삭제다. 위 @test들은 파일을 직접 grep할 뿐 배선을 안 봐서, 배선을 지워도
   #    PR 게이트가 전건 초록이었다(실측). 사후 검출은 PgDumpHedgeStale뿐이다.
-  # ⚠️ 원문 grep이 아니라 파싱된 resources를 본다(tests/gates/test_dual-run-excludes.bats:51-58 관례).
+  # ⚠️ 원문 grep이 아니라 파싱된 resources를 본다 — 주석 줄·들여쓰기 어긋난 줄이 통과한다
+  #    (tests/gates의 victoria-stack 배선 대조 @test가 세운 레포 관례).
   run yq '.resources | contains(["pgdump-hedge-cronjob.yaml"])' platform/cnpg/prod/kustomization.yaml
   printf '%s' "$output" | grep -qxF -- 'true'
 }

@@ -118,7 +118,8 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   #    파일을 직접 grep할 뿐 배선을 안 봐서 배선을 지워도 PR 게이트가 전건 초록이었다(실측).
   #    이 CronJob은 렌더 증인(test_kustomize_build.bats, 게다가 tests/.ci-exclude)조차 없어
   #    이 한 줄이 배선의 유일한 머지-전 증인이다. 사후 검출은 CNPGRestoreDrillStale(≈8.1일)뿐이다.
-  # ⚠️ 원문 grep이 아니라 파싱된 resources를 본다(tests/gates/test_dual-run-excludes.bats:51-58 관례).
+  # ⚠️ 원문 grep이 아니라 파싱된 resources를 본다 — 주석 줄·들여쓰기 어긋난 줄이 통과한다
+  #    (tests/gates의 victoria-stack 배선 대조 @test가 세운 레포 관례).
   run yq '.resources | contains(["restore-drill-cronjob.yaml"])' platform/cnpg/prod/kustomization.yaml
   printf '%s' "$output" | grep -qxF -- 'true'
 }
