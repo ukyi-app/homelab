@@ -363,13 +363,30 @@ EOF
   if [ -n "$missing" ]; then echo "critical 알림의 텔레그램 제목 매핑 누락:$missing"; return 1; fi
 }
 
-@test "vmalert wires the r7 meta rules file (rule glob, mount, volume — three places)" {
-  # r5 선례와 같은 3점 배선 — 하나라도 빠지면 룰이 조용히 미적재(silent staleness의 사촌).
+@test "every rules file is wired into vmalert (glob, mount, volume, ConfigMap name, kustomization)" {
+  # 하나라도 빠지면 룰이 조용히 미적재(silent staleness의 사촌)다 — vmalert는 없는 파일을 불평하지
+  # 않고, ArgoCD는 참조되지 않은 파일을 렌더하지 않으며, 제목-매핑 레인은 critical에만 걸린다.
+  # ⚠️ 패밀리별 손 하드코딩(r7 리터럴 4줄)이었다 — 실측: 배선 0인 `r8-new.yaml`을 추가해도
+  #    이 파일 30/30 · 한국어 게이트 · check-skeleton이 전건 초록이었다((N+1)번째 패밀리는 무방비).
+  #    ⇒ 로스터를 파일시스템 글롭에서 파생한다(:341과 같은 관용구 — untracked 신규 룰까지 본다).
+  # 키는 파일명에서 뽑고(core.yaml→core · r7-meta.yaml→r7), ConfigMap 이름을 5번째 점으로 넣어
+  # 그 파생이 실제 결합축(metadata.name)과 어긋나지 않는지까지 등식에 싣는다.
   V="$ROOT/platform/victoria-stack/prod/vmalert.yaml"
-  grep -q -- '--rule=/rules/r7/\*.yaml' "$V"
-  grep -q 'name: rules-r7, mountPath: /rules/r7' "$V"
-  grep -q 'name: rules-r7, configMap: { name: vmalert-rules-r7 }' "$V"
-  grep -qE '^  - rules/r7-meta\.yaml$' "$ROOT/platform/victoria-stack/prod/kustomization.yaml"
+  K="$ROOT/platform/victoria-stack/prod/kustomization.yaml"
+  [ -f "$V" ]
+  [ -f "$K" ]
+  n=0
+  for f in "$ROOT"/platform/victoria-stack/prod/rules/*.yaml; do
+    b="$(basename "$f")"; k="${b%%-*}"; k="${k%.yaml}"
+    grep -qE "^  - rules/${b}\$" "$K"
+    grep -qF -- "--rule=/rules/${k}/*.yaml" "$V"
+    grep -qF "name: rules-${k}, mountPath: /rules/${k}" "$V"
+    grep -qF "name: rules-${k}, configMap: { name: vmalert-rules-${k} }" "$V"
+    grep -qE "^  name: vmalert-rules-${k}\$" "$f"
+    n=$((n + 1))
+  done
+  # 비공허 바닥값 — 글롭이 붕괴하면 위 전칭이 0회 반복으로 공허하게 참이 된다.
+  [ "$n" -ge 5 ]
 }
 
 @test "meta alerts exclude Watchdog and themselves from the flapping selector (self-reference loop)" {

@@ -5,12 +5,21 @@
 
 WF="$BATS_TEST_DIRNAME/../../.github/workflows/iac.yaml"
 
+# ⚠️ mode 판정은 **잡 스코프**여야 한다 — preview(warn)와 apply(block)가 한 파일에 공존하므로
+#    파일 전체 grep은 두 값을 맞바꿔도 전건 통과한다(실측: `mode: warn`↔`mode: block` 맞바꿈
+#    뮤테이션에서 5/5 초록. warn은 `::warning::`만 내고 delete를 막지 않으므로 무인 apply의
+#    destroy 차단선이 사라진 상태였다). 같은 디렉토리 test_pr-sweeper.bats의 yq 관용구를 쓴다.
+guard_mode() { # $1: 잡 이름 — 그 잡의 tf-destroy-guard 콜사이트 mode 값
+  yq -r ".jobs.\"$1\".steps[] | select(.uses == \"./.github/actions/tf-destroy-guard\") | .with.mode" "$WF"
+}
+
 @test "apply job uses tf-destroy-guard with mode=block" {
   # apply job 블록(plan→apply 사이)에 composite + block 모드가 있어야 한다.
   run grep -q 'uses: ./.github/actions/tf-destroy-guard' "$WF"
   [ "$status" -eq 0 ]
-  run grep -qE 'mode:[[:space:]]*block' "$WF"
-  [ "$status" -eq 0 ]
+  m="$(guard_mode apply)"
+  [ -n "$m" ]        # 비공허 바닥값 — 잡/스텝 리네임으로 추출이 0줄이면 아래 비교가 공허해진다
+  [ "$m" = "block" ]
 }
 
 @test "apply job no longer applies without a guard (apply preceded by guard usage)" {
@@ -21,8 +30,9 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/iac.yaml"
 }
 
 @test "iac-plan preview uses tf-destroy-guard mode=warn (not an inline jq block)" {
-  run grep -qE 'mode:[[:space:]]*warn' "$WF"
-  [ "$status" -eq 0 ]
+  m="$(guard_mode iac-plan)"
+  [ -n "$m" ]
+  [ "$m" = "warn" ]
   # 인라인 destroy jq 셀렉터는 composite로 옮겨졌어야 한다(워크플로에서 제거).
   # rc 2(대상 부재)를 통과로 읽지 않는다 — 무매치는 정확히 rc 1이다. `-ne 0`이면 iac.yaml을
   # 리네임·삭제해도 이 단언이 초록이다. 바로 위 mode=warn 단언(rc 0)이 $WF의 양성 대조다.
@@ -33,8 +43,9 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/iac.yaml"
 @test "iac.yaml primary apply guard stays block (drift-2 alert-and-skip is reconcile-only)" {
   # primary apply(iac.yaml)는 alert-and-skip로 완화하지 않는다 — 구조적 무인 delete는 여기서 끝까지
   # 막힌다(app 공개 DNS만 allow로 자동 apply, tunnel/zone/waf/r2 등 delete/replace는 block 유지).
-  run grep -qE 'mode:[[:space:]]*block' "$WF"
-  [ "$status" -eq 0 ]
+  m="$(guard_mode apply)"
+  [ -n "$m" ]
+  [ "$m" = "block" ]
   run grep -qE 'continue-on-error:[[:space:]]*true' "$WF"
   # rc 2(대상 부재)를 통과로 읽지 않는다. 위 mode=block 단언(rc 0)이 $WF의 양성 대조다.
   [ "$status" -eq 1 ]   # iac.yaml apply 경로엔 continue-on-error 없음

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# setup-bun composite — bun-version 핀 + frozen 설치 SSOT. (7 워크플로 채택)
+# setup-bun composite — bun-version 핀 + frozen 설치 SSOT. (워크플로 축의 bun 핀은 여기 하나뿐이다)
 # 9개 워크플로에 복붙된 setup/frozen-install 블록을 흡수한다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 # ⚠️ 부재 단언은 `-eq 1`이다 — grep은 대상 부재/읽기불가에 rc 2를 내는데 `-ne 0`은 그것을 무매치와
@@ -17,8 +17,10 @@ setup() {
 # (`test_app-token-sha-ssot.bats:22`의 CANON 관용구를 그대로 따른다.)
 CANON="1.3.14"
 
-# `action.yml:2`의 "버전 SSOT"는 **워크플로 축**의 주장이다(12개 워크플로가 각자 핀하지 않는다는 뜻 —
-# 바로 아래 @test가 그 독해를 증언한다). 로컬 축의 핀은 `Makefile`의 m6-tools이고, `package.json`의
+# `action.yml:2`의 "버전 SSOT"는 **워크플로 축**의 주장이다(어떤 워크플로도 bun을 각자 핀하지 않는다는
+# 뜻 — 그 **배제**는 아래 마지막 @test의 인라인 0 단언이 트리 전역으로 증언하고, 아래 로스터 @test는
+# 채택 바닥값일 뿐이다. 실측 채택은 19개고 로스터는 12개다 — 로스터를 19로 늘리면 같은 드리프트를
+# 재생산하므로 늘리지 않는다). 로컬 축의 핀은 `Makefile`의 m6-tools이고, `package.json`의
 # `packageManager`가 세 번째 선언이다. 셋이 같은 값인지 묻는 게이트가 0건이었다 — 각 테스트가
 # 자기 파일 리터럴만 봐서, `action.yml` + 그 두 테스트만 올리고 `Makefile`을 잊으면 로컬도 CI도
 # 초록인 채 런타임이 갈린다. 이 레포가 "하드코딩 소비처 목록은 자기 자신에게만 정확하다"로 이름
@@ -54,7 +56,7 @@ CANON="1.3.14"
   run grep -E 'bun install --frozen-lockfile' "$A"; [ "$status" -eq 0 ]
 }
 
-@test "all 12 workflows adopt the setup-bun composite" {
+@test "the roster workflows adopt the setup-bun composite" {
   local wf
   for wf in ci.yaml bump.yaml bump-poll.yaml _create-app.yaml _create-database.yaml _create-cache.yaml audit.yaml \
             create-app.yaml create-cache.yaml create-database.yaml update-secrets.yaml dns-drift.yaml; do
@@ -86,6 +88,11 @@ CANON="1.3.14"
   [ "$status" -eq 0 ]
   # rc 2(디렉토리 부재)를 통과로 읽지 않는다 — 위 양성 대조가 같은 트리의 비공허성을 증언한다
   run grep -rE 'corepack prepare pnpm' "$WF"
+  [ "$status" -eq 1 ]
+  # 인라인 핀 0 — 워크플로 축의 bun 버전은 composite 하나가 소유한다. 위 로스터 @test는 **포함**만
+  # 보므로 로스터 밖 워크플로의 자체 `oven-sh/setup-bun` 핀은 무증인이었다(CANON 등식 밖의 4번째 핀 사이트).
+  # composite 자신은 `.github/actions/` 아래라 $WF 밖 — 자기매치 없다.
+  run grep -rlE 'oven-sh/setup-bun' "$WF"
   [ "$status" -eq 1 ]
   # setup-node는 ci.yaml(app-shared node 스모크) 1파일에서만 — 그 외 0
   run bash -c "grep -rlE 'actions/setup-node' '$WF' | grep -vE '/ci\.yaml$' || true"

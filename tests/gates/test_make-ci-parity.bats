@@ -11,7 +11,12 @@
 # dry-run(make -n) + 정적 grep으로 age/docker 없이도 돈다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2에서 [[ ]] 실패는 침묵 통과.
 
-setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
+setup() {
+  ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
+  # 대상 부재를 배선 레인이 초록으로 읽지 않는다 — 「…runs in BOTH…」는 두 파일에 이름이 적혀 있기만 하면
+  # 도구가 없어도 통과한다(operand-witness 05 (b) · 형제 tests/gates/test_disk-caps.bats와 같은 형태).
+  [ -f "$ROOT/tools/check-ci-parity.ts" ]
+}
 
 @test "ci.yaml gate invokes the same single bats runner (run-bats.sh)" {
   run grep -q 'run-bats.sh' "$ROOT/.github/workflows/ci.yaml"

@@ -82,3 +82,20 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 2 ]
   ! echo "$output" | grep -q "super-sensitive-zzz"
 }
+
+@test "the guard is actually registered as a PreToolUse hook (wiring, not just semantics)" {
+  # ⚠️ 위 레인들은 훅 **본체**의 fail-closed 의미론만 증언한다 — 그 훅이 실제로 PreToolUse에
+  #    매달려 있는지는 어디에도 증인이 없었다(실측: .claude/settings.json을 `{"hooks":{}}`로
+  #    비워도 이 파일 10/10 · test_claude-harness-tracked 2/2가 그대로 초록이었다).
+  #    이 훅은 AGENTS.md 최상위 금칙(*.enc.yaml 직접 편집 1회 → SOPS MAC 파괴 → DR 자산 복호
+  #    불능)의 **유일한 자동 차단선**이고, 에이전트가 settings.json을 편집하는 경로가 실재한다
+  #    (update-config 스킬). matcher 오타 하나·hooks 블록 삭제로 그 차단선이 통째로 사라진다.
+  S="$ROOT/.claude/settings.json"
+  [ -f "$S" ]
+  run jq -e '.hooks.PreToolUse[]
+               | select(.matcher == "Edit|Write|MultiEdit")
+               | .hooks[]
+               | select(.command | endswith("/.claude/hooks/manifest-guard.sh"))' "$S"
+  [ "$status" -eq 0 ]   # jq -e: 결과 없음=4 · null/false=1 — 등록이 있어야 정확히 0
+  [ -f "$HOOK" ]        # 등록이 가리키는 대상이 실재하는가(경로만 맞고 파일이 없으면 무음 통과)
+}
