@@ -55,7 +55,10 @@ no_block_comments() {
 }
 
 # (3) terraform override 파일 경로 판정(override.tf · override.tf.json · *_override.tf · *_override.tf.json).
-is_override_path() { printf '%s' "$1" | grep -Eq '(^|/)([^/]*_)?override\.tf(\.json)?$'; }
+# OVR_RE는 실 가드(:74)와 witness(:144-151)가 공유하는 단일 출처다 — 사본이 갈리면(untouched-a-5)
+# witness가 함수만 증언하고 실 가드의 인라인 사본은 무증인이 된다.
+OVR_RE='(^|/)([^/]*_)?override\.tf(\.json)?$'
+is_override_path() { printf '%s' "$1" | grep -Eq "$OVR_RE"; }
 
 # 핀된 canonical(신뢰 앵커의 리뷰된 형태). 위 재생성 절차로만 갱신한다.
 CANONICAL='resource "github_repository_ruleset" "bump_poll_writer_only" { name = "bump-poll-writer-only" repository = data.github_repository.homelab.name target = "branch" enforcement = "active" conditions { ref_name { include = ["refs/heads/bump-poll/**"] exclude = [] } } rules { creation = true update = true } bypass_actors { actor_id = 4043080 actor_type = "Integration" bypass_mode = "always" } }'
@@ -71,7 +74,7 @@ CANONICAL='resource "github_repository_ruleset" "bump_poll_writer_only" { name =
 }
 
 @test "no tracked terraform override file exists in infra/github" {
-  matches="$(git -C "$ROOT" ls-files infra/github | grep -E '(^|/)([^/]*_)?override\.tf(\.json)?$' || true)"
+  matches="$(git -C "$ROOT" ls-files infra/github | grep -E "$OVR_RE" || true)"
   [ -z "$matches" ]
 }
 
