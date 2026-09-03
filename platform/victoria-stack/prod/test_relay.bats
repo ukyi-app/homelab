@@ -41,17 +41,38 @@ setup() {
 
 @test "relay pings healthchecks only when nc served a request (wget nested under nc success)" {
   # wget(healthchecks ping)이 nc를 조건으로 한 if 성공 분기 안에 있어야 한다.
-  # 정적 증거: 'if ... nc -l ...; then' 라인이 존재하고, 그 then 블록 안에서 wget이 호출된다.
+  # ⚠️ **존재 grep은 분기 소속을 재지 않는다.** 예전 판정은 「`if … nc -l -p 9095` 줄이 있다」 +
+  #    「6칸 이상 들여쓴 `wget` 줄이 있다」뿐이라, 다음 세 뮤테이션이 전부 6/6 초록이었다
+  #    (2026-09-03 격리 트리 실측 — 셋 다 문서화된 절차대로 checksum/relay-script를 재계산했다):
+  #      ① then/else 교환(nc 실패 시에만 ping) ② wget을 `fi` 뒤로 hoist(무조건 ping — 헤더 fm-1
+  #      인시던트 그 자체) ③ `if ! printf … | nc …`로 극성 반전(한 글자).
+  #    그래서 들여쓰기가 아니라 **1-pass 상태 기계**로 wget의 분기 소속을 센다. if 줄 정규식이
+  #    `!`를 배제하는 것(`[^!]*`)도 판정의 일부다 — ③이 그 한 글자로 통과했다.
+  #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」 · 「테스트 이름은 인터페이스가 아니다」
   run grep -nE 'if[[:space:]].*nc[[:space:]]+-l[[:space:]]+-p[[:space:]]+9095' "$F"
   [ "$status" -eq 0 ]
-  # wget은 if 가드와 같은 then 블록의 들여쓰기 깊이(공백 6칸 이상)로 중첩돼야 한다.
-  run grep -nE '^[[:space:]]{6,}wget[[:space:]]' "$F"
+  # then 분기에 wget 정확히 1건 · else/분기 밖(if 이전·fi 이후)에는 0건.
+  run awk '
+    /^[[:space:]]*#/ {next}
+    /^[[:space:]]*if[[:space:]]+[^!]*nc[[:space:]]+-l[[:space:]]+-p[[:space:]]+9095/ {b = "then"; next}
+    /^[[:space:]]*else[[:space:]]*$/ {b = "else"; next}
+    /^[[:space:]]*fi[[:space:]]*$/ {b = "out"; next}
+    /wget[[:space:]]/ {w[b]++}
+    END {exit !(w["then"] == 1 && w["else"] == 0 && w[""] == 0 && w["out"] == 0)}' "$F"
   [ "$status" -eq 0 ]
 }
 
 @test "relay self-throttles on nc bind failure with a floor sleep" {
   # nc 실패 분기에 sleep(>=1초)이 있어 bind 경합 시 루프 spin/healthchecks 폭주를 막는다.
-  run grep -nE '^[[:space:]]+sleep[[:space:]]+[1-9][0-9]*' "$F"
+  # ⚠️ 위 @test와 같은 이유로 존재 grep이 아니라 **분기 소속**을 센다 — then/else 교환 뮤테이션에서
+  #    sleep이 성공 분기로 옮겨가도(= throttle 소멸) 예전 `^[[:space:]]+sleep` 존재 판정은 초록이었다.
+  run awk '
+    /^[[:space:]]*#/ {next}
+    /^[[:space:]]*if[[:space:]]+[^!]*nc[[:space:]]+-l[[:space:]]+-p[[:space:]]+9095/ {b = "then"; next}
+    /^[[:space:]]*else[[:space:]]*$/ {b = "else"; next}
+    /^[[:space:]]*fi[[:space:]]*$/ {b = "out"; next}
+    /^[[:space:]]*sleep[[:space:]]+[1-9][0-9]*/ {s[b]++}
+    END {exit !(s["else"] >= 1 && s["then"] == 0)}' "$F"
   [ "$status" -eq 0 ]
 }
 
