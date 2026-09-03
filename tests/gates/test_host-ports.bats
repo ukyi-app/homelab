@@ -303,18 +303,30 @@ PYWITNESS
   echo "$output" | grep -qF 'MOCK-OK'
 }
 
-@test "the AM harness waits for that token and escapes on helper death instead of burning the timeout" {
-  # ★ 정적 대조(변경 감지기임을 자인한다) — readiness 대기와 **프로세스 사망 탈출**이 둘 다 있어야
-  #   한다. 대기만 있고 `kill -0` 탈출이 없으면 이미 죽은 헬퍼를 상대로 타임아웃을 꽉 채워, 오진
-  #   시간이 줄어들 뿐 없어지지 않는다.
+@test "every ampersand-launched helper harness waits for its readiness token (the AM one also escapes on helper death)" {
+  # ★ 정적 대조(변경 감지기임을 자인한다) — readiness 대기가 있어야 한다. 옛 레인은 AM 하네스
+  #   한 파일에만 못박혀 있었다 — 형제 표면 skopeo-timeout-smoke.sh(sink readiness :89-95)의
+  #   삭제는 전건 초록이었다(2026-09-03 뮤테이션 실측: :91-95 삭제 → 39 ok/0 not ok, AM 쪽
+  #   동일 뮤테이션은 6건 red — 비대칭 그 자체가 갭이었다). 열거 키는 `=$!`(백그라운드 pid
+  #   포획) — "`&`로 띄운 헬퍼"라는 도메인 자체라 python→다른 헬퍼 표기 드리프트에 안 깨진다.
   # ⚠️ **주석을 세면 안 된다.** 이 레포의 하네스는 자기가 고친 함정을 인용하며 설명하므로, 코드를
   #   지우고 주석으로 옮기는 리팩터가 자연스럽다 — 그러면 오진이 돌아오는데 게이트는 초록이다.
-  #   (형제 레인은 주석을 걷는데 이 레인만 안 걷던 비대칭이 곧 갭이었다.)
+  hs="$(git ls-files 'tests/gates/*.sh' 'tests/gates/lib/*.sh' | xargs grep -lE '=\$!' || true)"
+  n=0
+  for f in $hs; do
+    n=$(( n + 1 ))
+    CODE="$BATS_TEST_TMPDIR/h-code.sh"
+    grep -vE '^[[:space:]]*#' "$f" > "$CODE"
+    run grep -c "grep -q 'listening'" "$CODE"
+    [ "$status" -eq 0 ]; [ "$output" -ge 1 ]
+  done
+  [ "$n" -ge 2 ]   # 열거 붕괴 바닥값 — 현재 AM·skopeo 둘
+
+  # AM 하네스 전용 — 대기만 있고 `kill -0` 탈출이 없으면 이미 죽은 헬퍼를 상대로 타임아웃을 꽉
+  # 채워, 오진 시간이 줄어들 뿐 없어지지 않는다. skopeo 쪽은 10초 상한 + 정확한 fault라 별도다.
   H="$ROOT/tests/gates/alertmanager-render-e2e.sh"
   CODE="$BATS_TEST_TMPDIR/am-code.sh"
   grep -vE '^[[:space:]]*#' "$H" > "$CODE"
-  run grep -c "grep -q 'listening'" "$CODE"
-  [ "$output" -ge 1 ]
   run grep -c 'kill -0 "$MOCK_PID"' "$CODE"
   [ "$output" -ge 1 ]
   # 실패 경로가 헬퍼의 stderr를 실제로 보여 주는가(삼키면 진단이 사라진다).

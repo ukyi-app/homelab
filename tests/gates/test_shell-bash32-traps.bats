@@ -20,10 +20,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT"; }
 
 # 열거자는 한 곳이다 — 아래 바닥값이 **스캐너가 실제로 쓴** 열거를 재야 한다.
 # 글롭 리터럴을 바닥값 줄에 다시 적으면 이 줄의 오타를 그 바닥값이 못 잡는다(실측).
-list_sh() { git ls-files '*.sh'; }
+# ⚠️ 도메인은 *.sh 단독이 아니라 *.sh+*.bats+*.bash 합집합이다 — bats 본문·`.bash` seam도 bash가
+#    해석하는 셸 문자열이라 함정 도달 대상이다(형제 근거: scripts/check-bats-style.sh:93-106의 합집합
+#    확대 주석과 동일 이유 — "`.bash` seam을 빼면 그 파일은 이 가드에게 영원히 안 보인다"). 확대 전
+#    실측(2026-09-03): *.sh만 스캔하면 32곳/15파일(추적 *.bats/*.bash)이 통째로 판정 밖이었다.
+list_sh() { git ls-files '*.sh' '*.bats' '*.bash'; }
 
 scan_unbraced() {
-  # 전 추적 *.sh에서 `$VAR<비-ASCII>` 를 찾는다. 전체-줄 주석은 건너뛴다. 출력 = 발견 줄 목록.
+  # 전 추적 *.sh+*.bats+*.bash에서 `$VAR<비-ASCII>` 를 찾는다. 전체-줄 주석은 건너뛴다. 출력 = 발견 줄 목록.
   list_sh | while IFS= read -r f; do
     LC_ALL=C command grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' "$f" 2>/dev/null | while IFS= read -r hit; do
       ln="${hit%%:*}"
@@ -39,7 +43,7 @@ scan_unbraced() {
   [ "$status" -eq 0 ]
   # 열거 붕괴 바닥값 — 글롭이 깨지면 이 전칭("no tracked shell script …")이 공허하게 참이 된다.
   # 이 가드는 CI(bash 5.2)가 원리적으로 못 잡는 클래스의 유일한 집행자라 공허가 곧 실명이다.
-  [ "$(list_sh | grep -c .)" -ge 60 ]
+  [ "$(list_sh | grep -c .)" -ge 300 ]
   if [ -n "$output" ]; then
     echo "bash 3.2에서 죽는 보간 — \${VAR}로 감싸라 (CI는 bash 5.2라 초록이다):"
     printf '%s\n' "$output"
@@ -51,7 +55,11 @@ scan_unbraced() {
   # 이 가드의 검출기가 실제로 무는지 픽스처로 증명한다. `grep -P`를 쓰던 첫 구현은 BSD grep에서
   # 아무것도 못 찾아 **버그를 되돌려 넣어도 초록**이었다 — 그 클래스를 여기서 막는다.
   fixture="$BATS_TEST_TMPDIR/bad.sh"
-  printf '%s\n' '#!/bin/sh' 'V=7' 'echo "평가($V회)"' > "$fixture"
+  # ⚠️ 이 파일 자신도 *.bats라 위 list_sh 도메인 안에 있다 — 리터럴 '$V회'를 소스에 그대로 쓰면
+  #    가드가 자기 픽스처에 red를 낸다. 간접 조립(d='$')으로 이 소스 줄의 '$V' 인접만 깨고, 런타임에
+  #    생성되는 픽스처 파일의 내용은 그대로 유지한다(검출기 증인 보존 — 생성물은 여전히 1건 매치).
+  d='$'
+  printf '%s\n' '#!/bin/sh' 'V=7' "echo \"평가(${d}V회)\"" > "$fixture"
   run bash -c "LC_ALL=C command grep -cE '\\\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' '$fixture'"
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]
@@ -63,7 +71,9 @@ scan_unbraced() {
 }
 
 @test "the trap is real on bash 3.2 and absent on bash 5.x (why CI cannot catch it)" {
-  run /bin/bash -c 'set -u; V=7; echo "평가($V회)"'
+  # 위 @test와 같은 이유로 간접 조립(d='$')한다 — 이 소스 줄도 이제 도메인 안이다.
+  d='$'
+  run /bin/bash -c "set -u; V=7; echo \"평가(${d}V회)\""
   if [ "$status" -eq 0 ]; then
     # bash 5.x — 이 인터프리터에선 함정이 재현되지 않는다(= CI가 못 잡는 이유).
     [ "$output" = "평가(7회)" ]

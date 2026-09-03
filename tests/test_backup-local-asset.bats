@@ -46,3 +46,22 @@ teardown() { rm -rf "$STUBDIR" "$OUT" "$ROOT/scratch_backup_$$"; }
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "런북 부재"
 }
+
+@test "--verify reddens when a runbook changed after the backup (freshness teeth)" {
+  # 위 3레인은 인자 파싱·git-worktree 거부·런북 부재만 재고 :39-48 --verify 신선도 비교(내용 sha256
+  # 대조)를 한 줄도 밟지 않는다 — 뮤테이션 실측(2026-09-03): :44 판정을 `if false; then`으로 죽여도
+  # 3 ok/0 not ok. 프로덕션 코드는 건드리지 않고(Makefile:284가 env 시임을 이미 기각), 스크립트를
+  # ROOT="$(BASH_SOURCE/..)" 그대로 fake ROOT로 옮겨 실제 --verify 경로를 밟는다(형제 관용구:
+  # tests/gates/test_verify-runbook-index.bats:9-16).
+  FIX="$BATS_TEST_TMPDIR/fix"; mkdir -p "$FIX/scripts" "$FIX/docs/runbooks"
+  cp "$ROOT/scripts/backup-local-asset.sh" "$FIX/scripts/"
+  printf 'a\n' > "$FIX/docs/runbooks/r.md"
+  run "$FIX/scripts/backup-local-asset.sh" "$OUT"
+  [ "$status" -eq 0 ]
+  run "$FIX/scripts/backup-local-asset.sh" --verify "$OUT"   # 양성 대조
+  [ "$status" -eq 0 ]
+  printf 'b\n' > "$FIX/docs/runbooks/r.md"
+  run "$FIX/scripts/backup-local-asset.sh" --verify "$OUT"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q '런북 드리프트'
+}

@@ -28,6 +28,19 @@ refs() { git ls-files -- 'platform/**.yaml' 'platform/**.yml' 'apps/**.yaml' 'op
   [ "$n" -eq 1 ] || { echo "digest가 ${n}종으로 갈렸다:"; printf '%s\n' "$all" | LC_ALL=C sort | uniq -c; false; }
 }
 
+@test "pg-tools client major is not behind the CNPG server major (3-image bump)" {
+  # digest 동일성(위 @test)만으로는 서버 major가 client보다 앞서는 skew를 못 잡는다 — 라이브 2회
+  # 발현(#178/#180)이 정확히 그 방향이다. `-ge`인 이유: pg_dump는 client<server만 거부한다(계약).
+  # `==`로 잠그면 client-first 단계 업그레이드(안전한 순서)까지 영구 red가 된다.
+  srv="$(grep -oE 'cloudnative-pg/postgresql:[0-9]+' "$ROOT/platform/cnpg/prod/cluster.yaml" | grep -oE '[0-9]+$' | LC_ALL=C sort -u)"
+  [ "$(printf '%s\n' "$srv" | grep -c .)" -eq 1 ]
+  tag="$(refs 'pg-tools:[0-9]+-rclone' | grep -oE 'pg-tools:[0-9]+' | grep -oE '[0-9]+$' | LC_ALL=C sort -u)"
+  [ "$(printf '%s\n' "$tag" | grep -c .)" -eq 1 ]
+  df="$(grep -oE 'postgresql-client-[0-9]+' "$ROOT/ops/pg-tools/Dockerfile" | grep -oE '[0-9]+$' | LC_ALL=C sort -u)"
+  [ "$df" = "$tag" ]     # 태그 N == 클라이언트 major(명명 계약)
+  [ "$tag" -ge "$srv" ] || { echo "서버 major=$srv > pg-tools major=$tag"; false; }
+}
+
 @test "every skopeo:alpine reference in the repo pins one identical digest (mirror-skew guard)" {
   # 소비자 둘(digest-exporter·gha-liveness-exporter)이 같은 digest를 가리켜야 한다 — 한쪽만 재핀되면
   # "같은 태그 다른 digest"가 되고, digest-exporter가 자기 소스와 어긋난 skopeo로 앱 digest를 조회한다.

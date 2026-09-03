@@ -29,12 +29,19 @@ alert_defined() {
 }
 
 @test "vmalert auto-reloads rule files on change (configCheckInterval set)" {
-  grep -q 'configCheckInterval' "$VMALERT"
+  # 판정은 파싱한 args에만 — 파일 전체 grep은 주석 줄을 통과시킨다(같은 파일 :아래 tls_config 관례와
+  # 동형). 2026-09-03 뮤테이션 실측: 플래그를 `# - --configCheckInterval=30s`로 주석 처리해도
+  # 원문 grep은 33 ok/0 not ok(silent staleness 재현). args 파싱은 그 자리에서 red가 된다.
+  yq '.spec.template.spec.containers[] | select(.name == "vmalert") | .args[]' "$VMALERT" \
+    | grep -qE '^--configCheckInterval='
 }
 
 @test "vmagent auto-reloads scrape config on change (promscrape.configCheckInterval set)" {
   # 없으면 scrape config(ConfigMap) 변경이 rollout restart 전까지 반영 안 됨(silent staleness).
-  grep -q 'promscrape.configCheckInterval' "$ROOT/platform/victoria-stack/prod/vmagent.yaml"
+  # 판정은 파싱한 args에만 — 위 vmalert 레인과 동형 근거.
+  yq '.spec.template.spec.containers[] | select(.name == "vmagent") | .args[]' \
+      "$ROOT/platform/victoria-stack/prod/vmagent.yaml" \
+    | grep -qE '^--promscrape\.configCheckInterval='
 }
 
 @test "vmagent verifies the apiserver cert on kubelet scrapes (SA token is not handed to an unverified peer)" {

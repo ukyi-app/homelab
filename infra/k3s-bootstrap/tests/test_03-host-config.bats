@@ -154,7 +154,7 @@ run_hc() {
   total="$( (cd "$TREE" && find . -type f \( -name '*.conf' -o -name '*.service' -o -name '*.timer' \)) | wc -l | tr -d ' ' )"
   floor="$(grep -oE '^TREE_MIN=[0-9]+' "$BOOTSTRAP_DIR/host-config.sh" | grep -oE '[0-9]+')"
   [ -n "$floor" ]
-  [ "$floor" -eq "$total" ] || { echo "TREE_MIN=$floor · 트리 $total건 — 바닥값이 트리를 따라오지 않았다"; false; }
+  [ "$floor" -eq "$total" ] || { echo "TREE_MIN=$floor · 트리 ${total}건 — 바닥값이 트리를 따라오지 않았다"; false; }
 }
 
 # ── 이식 계약: 버려야 할 것이 트리에 되살아나지 않는다 ─────────────────────────────────────

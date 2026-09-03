@@ -68,17 +68,17 @@ fixture_stack() {
   for h in $(harnesses); do
     # 호출 카운트는 행두 앵커드다 — 주석 속 언급이 실제 호출의 삭제를 가리면 안 된다(fail-open 봉쇄).
     run grep -cE '^[[:space:]]*vme_scenario ' "$h"
-    [ "$output" = "1" ] || { echo "assembly drift: $h의 vme_scenario 호출이 ${output}회(기대 1)"; false; }
+    [ "$output" = "1" ] || { echo "assembly drift: ${h}의 vme_scenario 호출이 ${output}회(기대 1)"; false; }
     # 조립 함수의 직접 나열이 사라졌다 — 순서 의존이 호출자에서 lib 내부로 이동했다는 그 사실(주석 포함 0).
     for fn in vme_derive_stack_params vme_workspace; do
       run grep -c "$fn" "$h"
-      [ "$output" = "0" ] || { echo "assembly drift: $h가 $fn을 직접 나열한다(${output}곳) — 순서 의존이 호출자로 되돌아왔다"; false; }
+      [ "$output" = "0" ] || { echo "assembly drift: ${h}가 ${fn}을 직접 나열한다(${output}곳) — 순서 의존이 호출자로 되돌아왔다"; false; }
     done
     # 레그 미니-조립(start → import)도 vme_leg가 소유한다.
     run grep -c 'vme_start_vmsingle\|vme_import' "$h"
-    [ "$output" = "0" ] || { echo "assembly drift: $h가 레그 조립(start/import)을 직접 나열한다(${output}곳)"; false; }
+    [ "$output" = "0" ] || { echo "assembly drift: ${h}가 레그 조립(start/import)을 직접 나열한다(${output}곳)"; false; }
     run grep -cE '^[[:space:]]*vme_leg ' "$h"
-    [ "$output" = "1" ] || { echo "assembly drift: $h의 vme_leg 호출이 ${output}회(기대 1 — 레그 함수 안 한 곳)"; false; }
+    [ "$output" = "1" ] || { echo "assembly drift: ${h}의 vme_leg 호출이 ${output}회(기대 1 — 레그 함수 안 한 곳)"; false; }
     n=$((n + 1))
   done
   [ "$n" -ge 6 ]   # 열거 붕괴 바닥값 — glob이 깨지면 루프가 vacuous해진다

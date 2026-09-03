@@ -107,7 +107,7 @@ EOF
     esac
     # bun 런타임의 자연 우회 경로(Bun.spawn/Bun.spawnSync/Bun.$)도 같은 그물로 잡는다.
     run bash -c "sed 's|//.*||' '$ROOT/$f' | grep -cE 'child_process|Bun\.(spawn|\\\$)'"
-    [ "$output" = "0" ] || { echo "seam bypass: $f가 subprocess를 직접 쓴다(${output}곳 — child_process/Bun.spawn)"; false; }
+    [ "$output" = "0" ] || { echo "seam bypass: ${f}가 subprocess를 직접 쓴다(${output}곳 — child_process/Bun.spawn)"; false; }
     n=$((n + 1))
   done
   [ "$n" -ge 40 ]   # 열거 붕괴 바닥값 — glob이 깨지면 루프가 vacuous해진다(실측 건수는 여기 베끼지 않는다)

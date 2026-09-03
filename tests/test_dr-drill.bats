@@ -62,7 +62,7 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값 · 결과 = �
   _drill_fixture ''
   run bash "$fx/scripts/dr-drill.sh"
   [ "$status" -ne 0 ]                       # 픽스처엔 sealing-key 게이트가 없어 어차피 죽는다
-  out="$output"                             # `run`이 $output을 덮으므로 먼저 붙잡는다
+  out="$output"                             # `run`이 ${output}을 덮으므로 먼저 붙잡는다
   # ⚠️ 중간 부정(`! …`)은 bats가 침묵 통과시킨다(check-bats-style.sh) — `run` + rc로 쓴다.
   #    ⚠️ 피연산자를 **위치 인자로 넘긴다**: `bash -c` 안에서 bats 지역 변수는 빈 문자열이라
   #       grep이 0건으로 **항상** 통과한다(docs/traps-detail.md 「정적 증인의 두 함정」).

@@ -16,8 +16,11 @@
 # 판별(오탐을 내면 아무도 이 가드를 안 켠다):
 #   · 줄 머리 주석 · Makefile `##` 도움말 · 행간 주석 · YAML `name:` 줄은 명령이 아니다.
 #   · `bats --version`은 테스트 실행이 아니다.
-#   · `bats` 다음 토큰이 **경로꼴**(`/` 포함 · `.bats` 포함 · `$`로 시작)일 때만 호출로 본다.
-#     "bats accounting"·"bats 픽스처가 아니라" 같은 산문은 호출이 아니다.
+#   · `bats` 다음 argv를 훑어 **첫 경로꼴 토큰**(`/` 포함 · `.bats` 포함 · `$`로 시작)을 찾되, 그 앞은
+#     플래그·플래그값만 허용한다 — `bats -t <path>`·`bats --print-output-on-failure <path>` 같은
+#     플래그-선행 호출도 잡는다(2026-09-03: 러너 자신의 표기 `run-bats.sh:67 bats
+#     --print-output-on-failure "${SELECTED[@]}"`가 옛 "바로 다음 토큰만" 판정에서 SITES 계상 밖이었다).
+#     "bats accounting"·"bats 픽스처가 아니라" 같은 산문은 첫 토큰부터 경로꼴이 아니라 호출이 아니다.
 #   · 면제는 파일 목록이 아니라 **그 파일이 `exec 0</dev/null`을 하는가**로 판정한다 — 러너를
 #     옮기거나 새 러너를 만들어도 같은 규칙이 성립한다.
 # 인자로 파일을 주면 그 파일만 스캔한다(픽스처 모드 — 바닥값 면제, 신호는 낸다).
@@ -62,11 +65,18 @@ FNR==1 { nfiles++; self = 0 }
   #    self=1이 서서 **그 파일 전체가 면제**됐다(실측). 가드 자신도 자기 헤더가 그 규약을 설명하므로
   #    영구 면제 상태였다 — hard-zero 보증이 그대로 거짓이 된다.
   if (c ~ /exec[ \t]+0<[ \t]*\/dev\/null/) self = 1
-  if (match(c, /(^|[ \t;&|(){}])bats[ \t]+[^ \t]+/)) {
-    tok = substr(c, RSTART, RLENGTH)
-    sub(/.*bats[ \t]+/, "", tok)
-    if (tok == "--version") next
-    if (tok !~ /\//  && tok !~ /\.bats/ && tok !~ /^["']?\$/) next
+  if (match(c, /(^|[ \t;&|(){}])bats[ \t]+/)) {
+    # 첫 경로꼴 토큰을 찾는다 — 그 앞은 플래그(`-x`/`--x`)와 그 값만 통과시킨다. 플래그도 경로꼴도
+    # 아닌 토큰(=산문 단어)을 만나면 그 자리에서 멈춘다(오탐 방지: "bats accounting은 …에 있다").
+    n2 = split(substr(c, RSTART + RLENGTH), a2, /[ \t]+/); tok = ""; pf = 0
+    for (j = 1; j <= n2; j++) {
+      if (a2[j] == "--version") { tok = ""; break }
+      if (a2[j] ~ /\// || a2[j] ~ /\.bats/ || a2[j] ~ /^["']?\$/) { tok = a2[j]; break }
+      if (a2[j] ~ /^-/) { pf = 1; continue }
+      if (pf) { pf = 0; continue }
+      break
+    }
+    if (tok == "") next
     sites++
     if (self) next
     if (c !~ /<[ \t]*\/dev\/null/) {

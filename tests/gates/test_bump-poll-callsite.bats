@@ -140,7 +140,7 @@ preflight_values() { # $1=READER $2=WRITER → "이름=값" 줄들
     raw="$(yq -r ".jobs.preflight.outputs.\"$name\"" "$F")"
     case "$raw" in
       *outputs.*) : ;;
-      *) echo "preflight.outputs.$name이 스텝 출력 참조가 아니다: '$raw'" >&2; return 9 ;;
+      *) echo "preflight.outputs.${name}이 스텝 출력 참조가 아니다: '$raw'" >&2; return 9 ;;
     esac
     key="$(printf '%s' "$raw" | sed -E 's/.*outputs\.([A-Za-z0-9_-]+).*/\1/')"
     val="$(awk -F= -v k="$key" '$1 == k { v = $2 } END { print v }' "$out")"
