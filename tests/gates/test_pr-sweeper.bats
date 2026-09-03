@@ -15,9 +15,9 @@ setup() {
   [ "$output" != "null" ]
   run yq '.on.workflow_dispatch' "$F"
   [ "$output" != "null" ]
-  # push/pull_request 트리거 금지(스위퍼는 스케줄 전용)
-  run yq '.on.push' "$F"
-  [ "$output" == "null" ]
+  # 트리거 집합 상한 — @test 이름의 'only'를 여기서 못박는다(push/pull_request_target/issue_comment
+  # 등 추가 시 red). 위 두 존재 단언은 원소 제거만 잡고 추가 방향은 이 등식이 잡는다.
+  [ "$(yq -r '.on | keys | sort | join(",")' "$F")" = "schedule,workflow_dispatch" ]
 }
 
 @test "pr-sweeper uses the writer App token (PR-first), not a standing PAT" {
