@@ -5,10 +5,28 @@ metadata: { name: vmagent }
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata: { name: vmagent }
+# ⚠️ **resources 집합은 무증인 축이다.** `tests/gates/test_rbac-verbs.bats`는 verb 화이트리스트만
+#    재고 resources에는 단언이 없다 — 실측(2026-09-03): 여기에 `configmaps`·`secrets`를 클러스터
+#    전역으로 더해도 86 ok / 0 not ok였다. 등식 가드(`role` → resources 번역표 + 서브리소스 예외
+#    목록)는 티켓 25가 **기각**했다: 그 표 자체가 캠페인이 없애려는 두 번째 손 로스터가 된다.
+#    ⇒ 유일한 방어는 **각 항목이 왜 필요한지 콜사이트를 여기 적어 두는 것**이다. 근거 없는 줄이
+#      보이면 그 줄이 죽은 권한이다(아래가 그 형태로 실제 둘을 잡았다).
 rules:
   - apiGroups: [""]
-    resources: ["nodes", "nodes/proxy", "nodes/metrics", "services", "endpoints", "pods"]
+    # nodes            ← `role: node` SD (vmagent-scrape-config.yaml:25 kubelet-cadvisor · :38 kubelet)
+    # nodes/proxy      ← 두 job이 `__address__`를 apiserver로 돌리고 `/api/v1/nodes/$1/proxy/...`를
+    #                    metrics path로 쓴다(같은 파일 :32·:45) — kubelet 직결이 아니라 proxy 경유다.
+    # nodes/metrics    ← 그 proxy 경로의 종단(`/metrics`, `/metrics/cadvisor`). 아래 nonResourceURLs와
+    #                    짝이다(하나만 있으면 403).
+    # pods             ← `role: pod` SD (같은 파일 :54 pod-annotations)
+    # ⚠️ `services`·`endpoints`는 2026-09-03에 **제거했다** — 스크레이프 config가 선언하는 SD role은
+    #    `node`·`pod` 둘뿐이라(`grep -n 'role:' vmagent-scrape-config.yaml` → :25 :38 :54, 전수)
+    #    vmagent가 그 둘을 **요청조차 하지 않는다**. KSM이 같은 캠페인(#604)에서 정리한 「요청조차 안
+    #    하는 죽은 권한」과 같은 모양이다. `role: endpoints`/`service` job을 새로 넣는다면 그 job과
+    #    **같은 PR에서** 여기에 되돌리고 이 주석에 job 이름을 적어라.
+    resources: ["nodes", "nodes/proxy", "nodes/metrics", "pods"]
     verbs: ["get", "list", "watch"]
+  # kubelet의 두 종단은 리소스가 아니라 non-resource URL이다(위 nodes/metrics·nodes/proxy와 짝).
   - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
     verbs: ["get"]
 ---
@@ -33,7 +51,8 @@ spec:
       annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8429" } # 자기관측 remoteWrite 메트릭
     spec:
       # ⚠️ automountServiceAccountToken을 false로 바꾸지 마라 — vmagent는 k8s **service discovery**로
-      #    스크레이프 대상(파드/엔드포인트/노드)을 찾으므로 API 접근이 필수다. 관측성 스택의 다른
+      #    스크레이프 대상(**노드·파드** — SD role은 그 둘뿐이다, 위 ClusterRole 주석)을 찾으므로
+      #    API 접근이 필수다. 관측성 스택의 다른
       #    워크로드(grafana·vmsingle·victorialogs·vmalert)가 false인 것은 그것들이 API를 안 쓰기 때문이다.
       serviceAccountName: vmagent
       securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
