@@ -58,6 +58,16 @@ CJ="$DIR/backup-cronjob.yaml"
     [ "$(yq '.metadata.labels."app.kubernetes.io/component"' "$s")" = "$sel" ] \
       || { echo "인스턴스 Service의 component 라벨이 CronJob 셀렉터($sel)와 다르다: $s"; false; }
   done
+  # 파일 실재 ≠ 렌더 포함 — ArgoCD가 싱크하는 진실은 kustomize 렌더 결과다. 위 grep들은 전부 파일을
+  # 직접 읽으므로 kustomization의 resources에서 두 줄을 지워도 초록이었다(실측 2026-09-03: 12/12).
+  # prune:true·selfHeal:true라 그 삭제는 라이브에서 실제로 CronJob+RBAC을 없앤다.
+  # ⚠️ 건수 바닥값(`.resources | length -ge N`)이 아니라 **멤버십**이다 — 인스턴스 디렉토리는
+  #    teardown-cache로 정당하게 사라져 래칫이 오탐이 된다. 여기 두 줄은 r4-storage-backup의
+  #    CacheBackupStale absent 설계가 전제하는 "상주 컴포넌트" 불변식과 같은 주장이다.
+  for r in backup-cronjob.yaml backup-rbac.yaml; do
+    yq '.resources[]' "$DIR/kustomization.yaml" | grep -qxF "$r" \
+      || { echo "kustomization resources에 $r 가 없다 — 렌더에서 빠지면 라이브가 프룬된다"; false; }
+  done
 }
 
 @test "backup r2-creds secret is optional so a no-cache cluster no-ops instead of failing" {
