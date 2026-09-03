@@ -32,6 +32,18 @@
 //      곧 AGENTS.md가 금지하는 **하드코딩 소비처 목록**이었다. ⇒ 목록을 ci.yaml에서 파생해 대조한다.
 //      (④는 그대로 둔다: ⑦은 "원장이 스텝을 다 담았는가", ④는 "담긴 것이 make ci에서 실제로 도는가".)
 //
+//   ⑧ `mirrored`의 `local` 토큰이 **그 gate 스텝의 run 본문에도** 실재하는지. ④·⑦은 스텝을
+//      **이름**으로만 계상한다 — 그래서 이름을 보존한 채 본문만 갈아치우면 ④는 Makefile 쪽
+//      문자열로 통과하고, ⑦은 본문에 커맨드가 없어 **침묵**한다(방향 ⑦은 "보이는 커맨드가 원장에
+//      있는가"만 본다). 실측 2026-09-03: 실 ci.yaml의 `run: bun run verify:ledger`를
+//      `run: echo swapped`로 바꿔도 ci-parity·guard-authority·workflow-readiness가 전건 초록이었다
+//      (겹은 bats 두 레인뿐 — 그것도 하드코딩된 네 토큰에 한정된다). ⑧이 그 자리를 문다.
+//      표기가 **정당하게 다른** 스텝(gate는 `make chart-test`를 부르고 make ci는 그 타깃의 레시피를
+//      편다)은 항목에 `gate_contains`로 본문 쪽 토큰을 명시한다. 그 필드는 `local`이 이미 본문에
+//      있으면 **거부**되므로 손 관리 문자열이 두 벌로 번지지 않는다.
+//      covered/excluded는 ⑧의 대상 밖이다 — covered는 "**다른** 로컬 수단이 덮는다"는 선언이라
+//      gate 본문과 대조할 토큰 자체가 없고(covered_by는 덮는 쪽 파일이다), excluded는 local이 없다.
+//
 // ⚠️ 이 도구는 "gate와 make ci가 같다"를 증명하지 않는다. **모든 차이가 의도된 것인지**를 증명한다.
 //    그 구분이 핵심이다 — 완전 일치를 강제하면 docker 없는 환경에서 make ci가 못 돌고, 결국 아무도 안 쓴다.
 
@@ -75,6 +87,8 @@ interface Entry {
   name: string;
   status: Status;
   local?: string | string[];
+  // ⑧ 전용 — gate 스텝 본문 쪽 토큰. local의 표기가 본문과 정당하게 다를 때만 쓴다(아래 ⑧ 참조).
+  gate_contains?: string;
   covered_by?: { file: string; contains: string };
   why?: string;
   since?: string;
@@ -188,7 +202,7 @@ const ENTRY_SCHEMA = {
   properties: {
     name: { type: "string", minLength: 1 },
     status: { enum: ["mirrored", "covered", "excluded"] },
-    local: {}, covered_by: {}, why: {}, since: {}, owner_action: {},
+    local: {}, gate_contains: {}, covered_by: {}, why: {}, since: {}, owner_action: {},
   },
   additionalProperties: false,
 };
@@ -264,6 +278,15 @@ function reconcile(): string[] {
   }
 
   for (const e of byName.values()) {
+    // `gate_contains`는 mirrored 전용이다 — 다른 status에 달면 아무도 대조하지 않는 문자열이
+    // 조용히 원장에 쌓인다(③ "죽은 선언"과 같은 클래스).
+    if (e.gate_contains !== undefined) {
+      if (e.status !== "mirrored") {
+        fail(`"${e.name}": gate_contains는 mirrored 전용이다(현재 '${e.status}') — covered/excluded는 gate 본문과 대조할 로컬 토큰이 없다.`);
+      } else if (typeof e.gate_contains !== "string" || e.gate_contains.length === 0) {
+        fail(`"${e.name}": gate_contains가 빈 문자열이다 — 빈 needle은 모든 본문에 있다(대조가 항진식이 된다).`);
+      }
+    }
     switch (e.status) {
       case "mirrored": {
         // local은 문자열 하나 또는 **배열**이다. 배열이 필요한 이유: 게이트 스텝 하나가 여러 스위트를
@@ -287,13 +310,45 @@ function reconcile(): string[] {
         // ⚠️ 원장의 `local`은 **basename**이나 **글롭**이다(그 문자열은 `make -n ci` 출력 대조용이라
         //    Makefile이 쓰는 형태를 따른다 — 예: `vmalert-*-firing-e2e.sh`는 Makefile이 글롭을 쓰기
         //    때문이다). 전체 경로로만 대조하면 이 방향이 **정상 원장을 물어** 아무도 안 켠다.
-        const inStep = commandsIn(runByName.get(e.name) ?? "");
+        const body = runByName.get(e.name) ?? "";
+        const inStep = commandsIn(body);
         for (const c of inStep) {
           if (!wants.some((w) => typeof w === "string" && ledgerCovers(w, c))) {
             fail(
               `"${e.name}": ci.yaml 스텝이 '${c}'를 부르는데 원장 local에 없다.\n` +
                 `    → local은 스텝 본문의 커맨드를 **전건** 담아야 한다. 부분 대조는 대조가 아니다.`,
             );
+          }
+        }
+        // ⑧ 이름 보존 + 본문 교체 — ④(원장→make)도 ⑦(본문→원장)도 못 보는 자리다.
+        // ⑦이 못 보는 이유가 요점이다: 본문에 레포 커맨드가 없으면 대조할 것이 0건이라 **침묵**한다.
+        // 여기서는 반대로 **원장이 선언한 토큰이 본문에 실재하는지**를 묻는다.
+        if (e.gate_contains !== undefined) {
+          // 표기가 정당하게 다른 자리(gate = make 타깃 · make ci = 그 타깃의 레시피)만 이 필드를
+          // 쓴다. local이 이미 본문에 있는데도 선언하면 **손 관리 문자열이 두 벌**이 되므로 거부한다 —
+          // 그 거부가 이 필드를 원장 전역으로 번지지 않게 하는 기계 장치다(선언 가능 ≠ 선언 허용).
+          if (typeof e.gate_contains === "string" && e.gate_contains.length > 0) {
+            if (wants.every((w) => typeof w === "string" && body.includes(w))) {
+              fail(
+                `"${e.name}": gate_contains가 불필요하다 — local 토큰이 이미 스텝 본문에 있다.\n` +
+                  `    → 같은 토큰 하나가 양쪽에 실재하면 그것으로 족하다. 손 관리 문자열을 두 벌 만들지 마라.`,
+              );
+            } else if (!body.includes(e.gate_contains)) {
+              fail(
+                `"${e.name}": gate 스텝 본문에 gate_contains '${e.gate_contains}'가 없다 — 이름만 남고 본문이 갈렸다.`,
+              );
+            }
+          }
+        } else {
+          for (const w of wants) {
+            if (typeof w !== "string" || w.length === 0) continue; // 위에서 이미 보고했다
+            if (!body.includes(w)) {
+              fail(
+                `"${e.name}": gate 스텝 본문에 local '${w}'이(가) 없다 — 이름을 보존한 채 run 본문이 갈렸다.\n` +
+                  `    → 본문을 되돌리거나, 표기가 정당하게 다르면(gate가 make 타깃을 부르는 경우 등)\n` +
+                  `      그 항목에 gate_contains로 본문 쪽 토큰을 명시하라.`,
+              );
+            }
           }
         }
         break;
