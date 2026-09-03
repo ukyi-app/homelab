@@ -53,9 +53,16 @@ D="$BATS_TEST_DIRNAME/deployment.yaml"
   run yq '.spec.template.spec.automountServiceAccountToken' "$D"; [ "$output" = "false" ]
 }
 
-@test "probes hit internal :8080 (public :8081 has no health handler)" {
+@test "probes: readiness /readyz, liveness /healthz, both on internal :8080" {
   run yq '.spec.template.spec.containers[0].readinessProbe.httpGet.port' "$D"; [ "$output" = "internal" ]
   run yq '.spec.template.spec.containers[0].livenessProbe.httpGet.path' "$D"; [ "$output" = "/healthz" ]
+  # /readyz는 스토리지 저하 검출기다 — pvc.yaml의 방어 4종 중 하나이고, core.yaml의
+  # WorkloadUnavailable·r4-storage-backup.yaml의 description이 사람을 이 경로로 보낸다.
+  # liveness(/healthz)와 **달라야** 한다: 같아지면 readiness가 프로세스 생존 판정으로 강등된다
+  # (실측 2026-09-03: /readyz→/healthz 치환 후에도 platform/files/prod 33/33 ok였다).
+  # ⚠️ 경로 문자열만 고정할 뿐이다 — /readyz의 실질(=/data 실제 write + free-space)은 앱 레포
+  #    소관이라 여기서 증인할 수 없다.
+  run yq '.spec.template.spec.containers[0].readinessProbe.httpGet.path' "$D"; [ "$output" = "/readyz" ]
 }
 
 @test "image is digest-pinned (@sha256:) — immutable, not a bare mutable tag" {
