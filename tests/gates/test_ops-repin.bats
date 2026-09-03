@@ -119,6 +119,23 @@ teardown() { rm -rf "$FX"; }
   }
 }
 
+@test "ops image bases stay on non-GC registries (quay release tags are mutable)" {
+  # ★ 상류 레지스트리 릴리스 태그가 불변이 아니다(quay skopeo, 6일 3회 GC 재발). image-pin-liveness는
+  #   그 GC가 **일어난 뒤**에야 red를 내는 사후 탐지기라 blast radius이지 예방 증인이 아니다. 이 자리가
+  #   유일한 예방선이다. 뮤테이션 실측(2026-09-03): ops/skopeo/Dockerfile:13을 quay.io/skopeo/stable로
+  #   되돌려도 test_ops-repin·test_ci-build·test_pgtools-digest 25 ok/0 not ok + check-image-pins.sh
+  #   SCAN 36 불변 rc=0 — 전건 초록이었다.
+  # 형제 관용구(platform/adguard/prod/test_rewrite_reconciler.bats:191-195)가 pg-tools에 대해 이미
+  # 같은 근거("digest 핀과 Dockerfile은 따로 흐르므로 Dockerfile 베이스 선언을 앵커로 잡는다")로
+  # `FROM debian:bookworm` 존재 단언을 걸어 두었다 — skopeo 쪽만 그 앵커가 없는 비대칭이었다.
+  grep -q '^FROM alpine:'          "$ROOT/ops/skopeo/Dockerfile"
+  grep -q '^FROM debian:bookworm'  "$ROOT/ops/pg-tools/Dockerfile"
+  # 존재 N개(=2) + length==N — ops Dockerfile이 늘어나면 이 등식이 손 갱신을 부른다(신규 ops
+  # 이미지는 이미 손 갱신 대상이다: :77-96 CATALOG↔bump.yaml/check-image-ownership 로스터 등식).
+  run bash -c "git -C \"$ROOT\" grep -hE '^FROM ' -- 'ops/*/Dockerfile' | grep -c ."
+  [ "$output" = "2" ]
+}
+
 @test "rejects an unknown flag with exit 2 (no silent write)" {
   # 형제 mutator가 전부 막은 '오타 침묵-무시' 클래스 — 이 도구엔 `--dry-run`이 아예 없는데
   # 형제 어휘 관성으로 붙이면 그 플래그를 삼킨 채 레포의 인라인 핀을 즉시 재작성했다.

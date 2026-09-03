@@ -1831,7 +1831,13 @@ selfHeal과 플립플롭한다.
   alpine 미러에서 그 플래그를 실행 파일로 오인해 죽었다(소비자는 멀쩡한데 게이트만 red). 게이트도
   소비자와 같은 호출 형태(`skopeo`를 명시)로 맞춰야 한다. cf. 게이트가 실 도메인과 다른 방식으로
   대상을 부르면, 그 게이트가 증명하는 것은 실 도메인의 동작이 아니다.
-> 가드: `tests/gates/image-pin-liveness.sh`, `ops/skopeo/Dockerfile`, `tests/gates/skopeo-timeout-smoke.sh`, `tests/gates/test_pgtools-digest.bats`, `tests/gates/test_ci-build.bats`
+- ⚠️ **예방 증인이 아니라 사후 탐지기였다(2026-09-03까지)** — `image-pin-liveness`는 GC가 **일어난 뒤**에야
+  red를 낸다(그 red 자체가 이 함정이 말하는 피해다). base를 quay로 되돌리는 편집을 재는 단언은 없어서,
+  뮤테이션 실측(ops/skopeo/Dockerfile:13을 quay.io/skopeo/stable로 되돌림)에 test_ci-build·
+  test_pgtools-digest·check-image-pins.sh 전건 초록이었다. `tests/gates/test_ops-repin.bats`에
+  Dockerfile base 앵커(형제 관용구: platform/adguard/prod/test_rewrite_reconciler.bats:191-195의
+  pg-tools `FROM debian:bookworm` 존재 단언) 한 @test를 추가해 이 자리를 예방선으로 닫았다.
+> 가드: `tests/gates/image-pin-liveness.sh`, `ops/skopeo/Dockerfile`, `tests/gates/skopeo-timeout-smoke.sh`, `tests/gates/test_pgtools-digest.bats`, `tests/gates/test_ci-build.bats`, `tests/gates/test_ops-repin.bats`
 
 ### TS 바닥값은 coercion 뒤에서 조용히 꺼진다 — Number("abc")는 NaN이라 n < NaN이 항상 false이고, Number("")는 0이라 빈 입력과 의도적 0을 구별할 수 없다
 - **병(2026-08-25 실측)**: 셸 콜사이트는 `[ "$got" -lt "$min" ]`이 수가 아닌 값에 **에러를 낸다**. TypeScript는
