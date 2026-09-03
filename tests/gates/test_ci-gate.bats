@@ -11,13 +11,16 @@ WF=".github/workflows/ci.yaml"
 # ⚠️ `| .run`을 반드시 붙인다 — 없으면 「yq -e는 값이 false면 exit 1」 축에 스스로 노출된다.
 #    형제 선례: tests/gates/test_check-skeleton-gate.bats:12(같은 이유로 이미 전환된 자리).
 @test "ci gate has ACTIVE run steps for typecheck, chart-test, ledger gate, and bats (structural, F10)" {
-  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("bun run typecheck")) | .run' "$WF"
+  # 행두 앵커 — untouched-b-2와 같은 결함: .run 전문에 test()를 걸면 그 안의 `# 비활성화: …` 같은
+  # 주석 줄도 매치된다. 특히 run-bats.sh는 이 파일의 두 번째 venue가 없어(스켈레톤과 달리) 조용해지면
+  # bats 레인 전체와 그 안의 증인들이 함께 사라지는 진짜 fail-open이다.
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*bun run typecheck")) | .run' "$WF"
   [ "$status" -eq 0 ]
-  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("make chart-test")) | .run' "$WF"
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*make chart-test")) | .run' "$WF"
   [ "$status" -eq 0 ]
-  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("verify:ledger")) | .run' "$WF"
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*bun run verify:ledger")) | .run' "$WF"
   [ "$status" -eq 0 ]
-  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("run-bats.sh")) | .run' "$WF"
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*\./scripts/run-bats\.sh")) | .run' "$WF"
   [ "$status" -eq 0 ]
 }
 
