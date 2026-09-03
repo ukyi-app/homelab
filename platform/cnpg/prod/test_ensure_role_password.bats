@@ -31,6 +31,8 @@ echo "$*" >> "$ERP_KLOG"
 args="$*"
 case "$args" in
   *"get database"*"items"*)            # DB 목록 열거
+    # 열거 실패(권한 거부·apiserver 오류) 주입 — fail-closed 증인용
+    [ -n "${ERP_TEST_ENUM_FAIL:-}" ] && exit 1
     printf '%s\n' $ERP_TEST_DBS ;;
   *"get database"*"status.applied"*)   # Database CR Ready 검사
     printf '%s' "$ERP_TEST_DB_APPLIED" ;;
@@ -102,6 +104,17 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   ! grep -q "apply -f" "$ERP_KLOG"
 }
 
+@test "enumeration failure fails closed (a denied list is not 'zero databases')" {
+  # ⚠️ 위 @test의 vacuous 성공과 **같은 값**이 되면 안 되는 자리다. 예전 스크립트는 열거를
+  #    `2>/dev/null || true`로 감싸 권한 거부·apiserver 오류·NS 오타를 전부 "DB 0건"으로 읽고
+  #    return 0 했다 — 훅은 Succeeded, ArgoCD는 Synced/Healthy, 마커는 0건이다.
+  #    실 트리거는 RBAC 리팩터(지속형)와 sync 중 apiserver 일시 오류다.
+  export ERP_TEST_ENUM_FAIL=1
+  run_erp
+  [ "$status" -ne 0 ]
+  ! grep -q "apply -f" "$ERP_KLOG"   # 못 물어본 DB에 마커를 방출하지 않는다
+}
+
 @test "idempotent: a second run on an already-applied DB also succeeds with no nudge" {
   export ERP_TEST_SCENARIO="applied"
   run_erp; [ "$status" -eq 0 ]
@@ -118,4 +131,13 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   k="$ROOT/platform/cnpg/prod/kustomization.yaml"
   grep -q 'ensure-role-password-job.yaml' "$k"     # 매 sync마다 무조건 실행되도록 등록
   grep -q 'ensure-role-password-rbac.yaml' "$k"
+  # ⚠️ **배선만으로는 "무조건"이 성립하지 않는다** — 훅이 무언가를 검증하려면 Role에
+  #    `postgresql.cnpg.io/databases: get,list`가 있어야 한다. 그 규칙을 지워도 이 파일 7/7이
+  #    초록이었고(실측) tests/gates/test_rbac-verbs.bats도 3/3이었다 — 그 게이트는 **쓰기 verb
+  #    화이트리스트**(상한)라 읽기 규칙 제거는 원리적으로 위반이 아니다.
+  #    이제 열거 실패는 런타임에서 fail-closed로 잡히지만(위 @test), 여기 한 줄이 검출을 머지
+  #    시점으로 앞당긴다. `[select(...)] | length` 형태라 `yq -e` false-exit1 함정 비대상이다.
+  r="$ROOT/platform/cnpg/prod/ensure-role-password-rbac.yaml"
+  v="$(yq ea '[select(.kind=="Role") | .rules[] | select(.resources[]=="databases") | .verbs[]] | sort | join(" ")' "$r")"
+  printf '%s' "$v" | grep -qxF -- 'get list'
 }
