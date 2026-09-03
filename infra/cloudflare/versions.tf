@@ -7,6 +7,7 @@ terraform {
   # 한 변만 올라가면 init 단계에서 fail-closed로 죽는다 — 갈린 채 state를 쓰는 것보다 낫다.
   # ⚠️ tailscale 루트는 `>= 1.9.0`을 유지한다. 거기는 drift 잡이 일부러 1.15.5로 돈다
   #    (docs/traps-detail.md 「owner 로컬 apply 루트는 …」) — 핀 통일이 오히려 고장인 자리다.
+  # renovate: datasource=github-releases depName=hashicorp/terraform
   required_version = "= 1.9.8"
   required_providers {
     cloudflare = {
