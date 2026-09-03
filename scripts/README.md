@@ -211,6 +211,9 @@
 - **`netpol-rehearsal.sh`** — **owner-local**. NetworkPolicy candidate를 selfHeal off→apply→verify-posture→
   trap 복원으로 리허설(라벨 미스가 prod로 안 새게). GitOps selfHeal라 머지 전 필수(pre-merge posture는
   main=broad을 테스트, candidate 아님). Makefile/워크플로 배선 없음 — 직접 실행.
+  ⚠️ posture 스위트 **전체가 아니라 netpol 레그만** 돈다(`POSTURE_BATS` 오버라이드, `git ls-files` 파생 +
+  열거 붕괴 바닥값) — `tests/posture/test_dr-assets.bats`는 owner 매체 env를 요구하는 별개 도메인이라
+  리허설 범위 밖이다(무가드로 부르면 candidate와 무관한 red가 **클러스터 변이 뒤에** 나온다).
   ⚠️ 인-레포 앱 0인 현 정상 상태(`apps/README.md`)에서는 **kubelet 프로브 레그만** skip된다(경고 출력) —
   리허설 자체는 돈다. POSITIVE pg-rw·pg-pooler-rw(F4b)·NEGATIVE egress deny는 `probe()`가 자기 파드를
   띄우므로 앱 파드와 무관하게 실질 판정이고, ipBlock 핀은 `platform/network-policies/prod/test_netpol.bats`가
