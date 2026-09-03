@@ -20,10 +20,22 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
 }
 
 @test "external egress (0.0.0.0/0) always excludes private/cluster ranges (lateral guard)" {
-  run grep -q '0.0.0.0/0' "$P"; [ "$status" -eq 0 ]
-  run grep -q '10.0.0.0/8' "$P"; [ "$status" -eq 0 ]
-  run grep -q '172.16.0.0/12' "$P"; [ "$status" -eq 0 ]
-  run grep -q '192.168.0.0/16' "$P"; [ "$status" -eq 0 ]
+  # ⚠️ **텍스트 needle 금지 — 이름은 전칭인데 판정이 존재였다.** 예전 본문은 네 리터럴이 파일
+  #    어딘가에 한 번이라도 나오는지만 물어서, 다음 두 뮤테이션이 6/6 초록이었다(2026-09-03 격리
+  #    트리 실측): ① 0.0.0.0/0 ipBlock 4개 중 3개에서 `except`를 지운다(alertmanager 하나만 남아도
+  #    리터럴 넷은 전부 살아 있다) ② except 3대역을 형제 allow ipBlock으로 옮겨 극성을 뒤집는다.
+  #    게다가 이 파일 :13·:49·:112·:139 주석이 같은 문자열을 담고 있어, 원문 grep은 규칙이 통째로
+  #    비어도 살아남는 종류다(형제 test_pvc_du_exporter.bats:27-30이 같은 자기-주석 함정을 기록).
+  #    선례: platform/argocd/test_argocd_values.bats:145-156이 같은 병을 진단하고 yq 구조 등호로 고쳤다.
+  #    ⇒ 원문이 아니라 **파싱값**으로, 그리고 0.0.0.0/0 ipBlock **전수**로 판정한다.
+  # 멀티독이라 `ea`(eval-all)로 배열에 모은다 — 문서 사이 `---`가 stdout에 섞이면 줄 단위 판정이
+  # 오염된다. `// ["MISSING"]`이 except **부재**를 값으로 바꿔 과부족을 둘 다 red로 만든다.
+  Q='[select(.kind=="NetworkPolicy")|.spec.egress[]?|.to[]?|select(.ipBlock.cidr=="0.0.0.0/0")|(.ipBlock.except // ["MISSING"])|sort|join(",")]|.[]'
+  out="$(yq ea "$Q" "$P")"
+  n="$(printf '%s\n' "$out" | grep -c .)"    # 열거 붕괴 바닥값 — 0건이면 grep rc 1로 red
+  [ "$n" -ge 4 ]                             # alertmanager·relay·digest-exporter·gha-liveness-exporter
+  ok="$(printf '%s\n' "$out" | grep -cxF -- '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16')"
+  printf '%s' "$ok" | grep -qxF -- "$n"      # 전수 일치 — 하나라도 어긋나면 red
 }
 
 @test "metrics east-west plane is intentionally untouched (no ns-wide default-deny)" {
