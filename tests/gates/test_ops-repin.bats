@@ -136,6 +136,28 @@ teardown() { rm -rf "$FX"; }
   [ "$output" = "2" ]
 }
 
+@test "build.yaml matrix app set matches the tool CATALOG keys (no unowned ops image)" {
+  # untouched-b-3: test_ci-build.bats:69의 "only pg-tools + skopeo" 판정은 멤버십 하한 2건 +
+  # 'api' 부분문자열 금지뿐이라 원소 **추가** 방향이 무증인이다(matrix에 새 원소를 더해도 초록).
+  # 대상은 ops/ 트리(untracked에도 열림)가 아니라 CATALOG다 — 그래야 「matrix + ops/<n>/Dockerfile
+  # 동시 추가」 뮤테이션도 잡는다(ops/만 대조하면 둘 다 늘어 초록이 되는 vacuous green).
+  command -v yq >/dev/null || skip "yq required"
+  build="$ROOT/.github/workflows/build.yaml"
+  tool="$ROOT/tools/repin-ops-image.ts"
+  # matrix.app은 이미지 이름뿐(태그 없음 — 태그는 :112-117 if/elif가 파생), CATALOG 키는
+  # <이름>:<태그>라 콜론 앞만 잘라 같은 도메인(이미지 이름)으로 맞춘다.
+  m="$(yq -r '.jobs.build.strategy.matrix.app[]' "$build" | LC_ALL=C sort -u)"
+  catalog="$(grep -oE '"[a-z0-9-]+:[a-z0-9._-]+": \{ minSites' "$tool" | sed 's/": .*//;s/"//' | cut -d: -f1 | LC_ALL=C sort -u)"
+  [ "$(printf '%s\n' "$m" | grep -c .)" -ge 2 ]
+  [ "$(printf '%s\n' "$catalog" | grep -c .)" -ge 2 ]
+  [ "$m" = "$catalog" ] || {
+    echo "build.yaml matrix != 도구 CATALOG 키 집합 — 재핀 소유자 없는 ops 이미지"
+    echo "matrix:"; printf '%s\n' "$m"
+    echo "catalog:"; printf '%s\n' "$catalog"
+    false
+  }
+}
+
 @test "rejects an unknown flag with exit 2 (no silent write)" {
   # 형제 mutator가 전부 막은 '오타 침묵-무시' 클래스 — 이 도구엔 `--dry-run`이 아예 없는데
   # 형제 어휘 관성으로 붙이면 그 플래그를 삼킨 채 레포의 인라인 핀을 즉시 재작성했다.
