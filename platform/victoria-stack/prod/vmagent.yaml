@@ -65,11 +65,12 @@ spec:
           ports: [{ name: http, containerPort: 8429 }]
           resources:
             requests: { cpu: 50m, memory: 128Mi }
-            # 관측 스택 마진 규약(docs/memory-ledger.md): RSS peak(현 기판, 30초) × 1.5, 16Mi 올림.
-            # 168.5Mi × 1.5 = 252.8 → 256Mi(1.52x). 종전 224Mi는 1.33x로 미달이었다.
+            # 관측 스택 마진 규약(docs/memory-ledger.md): RSS peak(현 기판, 30초, 세대별 첫 10분 제외) × 1.5, 16Mi 올림.
+            # 176.3Mi × 1.5 = 264.5 → 272Mi(1.54x) — 2026-09-03 재측정. 종전 256Mi는 1.45x로 미달이었다(09-01의
+            # 168.5Mi 기준 1.52x였으나 6일간 단조 상승). 상승이 이어지면 limit 상향이 아니라 **재측정이 먼저**다.
             # ⚠️ A′ 기준 1.05x는 **재부팅 전 세대**(2026-08-26T13:41Z 이전)의 값이라 폐기했다 —
             #    창이 기판 변경을 가로지르면 두 체제가 한 숫자에 섞인다.
-            limits: { memory: 256Mi }
+            limits: { memory: 272Mi }
           readinessProbe: { httpGet: { path: /health, port: 8429 } }
           securityContext:
             allowPrivilegeEscalation: false
