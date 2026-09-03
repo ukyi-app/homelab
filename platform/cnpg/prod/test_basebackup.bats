@@ -43,4 +43,7 @@ cj=platform/cnpg/prod/basebackup-cronjob.yaml
   cluster=platform/cnpg/prod/cluster.yaml
   grep -qE 'hostssl replication postgres' "$cluster"
   grep -qE '\bhost replication postgres' "$cluster"
+  # 존재 2줄은 원소를 못박지만 집합 상한이 없어 `host all all 0.0.0.0/0 trust` 같은 3번째
+  # 줄이 더해져도 무증인이었다(2026-09-03 실측) — length 2로 닫는다.
+  h="$(yq '.spec.postgresql.pg_hba | length' "$cluster")"; printf '%s' "$h" | grep -qxF -- '2'
 }
