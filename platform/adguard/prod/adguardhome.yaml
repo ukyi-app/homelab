@@ -1,3 +1,6 @@
+# SSOT: live — 이 ConfigMap은 **첫 부팅 시드**다(`cp -n`: PVC에 conf가 있으면 무시). 권위는 라이브
+#   `conf/AdGuardHome.yaml`(UI 편집)이고, 시드 드리프트는 리컨실러 CronJob의 대조 스텝이 경고로 낸다(red 아님).
+#   `rewrites:` 블록도 시드 전용 — 라이브 rewrite의 권위는 rewrite-reconciler다. 근거: docs/decisions/0007.
 apiVersion: v1
 kind: ConfigMap
 metadata: { name: adguard-config, namespace: edge }
