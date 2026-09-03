@@ -23,6 +23,11 @@ setup() {
   #    기존 to[]에 피어를 더하는 확장은 이름 집합 불변이라 여전히 무증인이다(실측 6/6 ok).
   [ "$(yq ea '[select(.kind=="NetworkPolicy")|.metadata.name]|sort|join(",")' "$P")" = \
     "cloudflared-allow-dns-egress,cloudflared-allow-egress-cloudflare-edge,cloudflared-allow-egress-to-gateway,cloudflared-default-deny-egress" ]
+  # 파일 실재 ≠ 렌더 포함 — 위 단언은 전부 $P를 직접 읽는다. cf. platform/cache/prod/test_render.bats:61-71
+  for r in networkpolicy.yaml configmap.yaml deployment.yaml; do
+    yq '.resources[]' "${BATS_TEST_DIRNAME}/kustomization.yaml" | grep -qxF "$r" \
+      || { echo "kustomization resources에 $r 가 없다 — 렌더에서 빠지면 라이브가 프룬된다"; false; }
+  done
 }
 
 @test "dns egress to coredns on 53 is declared" {
