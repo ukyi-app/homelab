@@ -113,7 +113,15 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
 
 @test "reconcile telegram fires on delete-blocked drift (owner-local apply nudge)" {
   # delete 차단 시에도 telegram이 발화하도록 알림 조건이 guard result(blocked-delete)를 포함해야 한다.
-  run grep -qE "guard|blocked-delete|result" "$WF"
+  # ⚠️ 옛 술어 `grep -qE "guard|blocked-delete|result"`는 항진식이었다 — 세 토큰은 이 워크플로 어디에나
+  #    있어서 $WF 실재만 증언했다. 실측: 발화 조건을 `if: failure()`로 좁히고 status의
+  #    blocked-delete 분기를 지워도 이 파일 12/12 · 형제 gate 7/7 전건 초록이었다(무성화 완료).
+  # 스텝 **실재**는 tests/gates/test_telegram-callsites.bats의 콜사이트 수 SSOT(tf-reconcile.yaml 4)가
+  # 증언한다(스텝 통째 삭제 = 그 gate red 실측). 여기서는 그 gate가 원리적으로 못 보는 **발화 조건**만 본다.
+  # `if:` 리터럴은 이 파일에서 유일하다(:250·:374는 `steps.pf.outputs.configured == 'true' && (…)` 접두).
+  run grep -qF "if: failure() || steps.drift.outputs.drift == 'true'" "$WF"
+  [ "$status" -eq 0 ]
+  run grep -qF "steps.guard.outputs.result == 'blocked-delete' && 'drift'" "$WF"
   [ "$status" -eq 0 ]
 }
 
