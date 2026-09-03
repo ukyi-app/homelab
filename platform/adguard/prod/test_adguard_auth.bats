@@ -20,13 +20,32 @@ S="$BATS_TEST_DIRNAME/adguard-auth.sealed.yaml"
   run grep -qE 'name: AGH_USER, value: ukkiee' "$D"; [ "$status" -eq 0 ]
 }
 
-@test "inject-auth init is restricted-compliant (setcap not needed unlike main container)" {
+@test "every init container is restricted-compliant (inject-auth needs no setcap, unlike the main container)" {
   # yq init은 NET_BIND_SERVICE/setcap이 불필요 → restricted 완전 충족(메인 컨테이너는 ape:true 필요).
-  run grep -q 'readOnlyRootFilesystem: true' "$D"; [ "$status" -eq 0 ]
-  run grep -q 'seccompProfile: { type: RuntimeDefault }' "$D"; [ "$status" -eq 0 ]
-  # yq -i는 /tmp에 임시파일을 쓴다 — emptyDir로 readOnlyRootFilesystem과 양립
-  run grep -q 'name: tmp' "$D"; [ "$status" -eq 0 ]
-  run grep -qE 'name: tmp[[:space:]]*$|name: tmp,' "$D"; [ "$status" -eq 0 ]
+  # ⚠️ **주어와 판정 대상이 어긋나 있었다.** 예전 본문은 파일 **전역** grep이라 형제 init(seed-config,
+  #    :31-37)의 동일 토큰이 증인 노릇을 했다 — inject-auth의 securityContext에서
+  #    readOnlyRootFilesystem·capabilities.drop·seccompProfile을 지우고 allowPrivilegeEscalation을
+  #    true로 뒤집어도 7/7 초록이었고, `- { name: tmp, mountPath: /tmp }`를 통째로 지워도 volumes의
+  #    `- name: tmp`(:121)가 같은 grep을 만족시켜 7/7 초록이었다(2026-09-03 격리 트리 실측).
+  #    edge ns는 PSA **baseline**이라(namespaces.yaml:30·118-120) admission이 restricted 전용 필드를
+  #    강제하지 않으므로, 벗겨진 채로 그대로 배포된다.
+  #    ⇒ 아래 @test의 등호 관용구를 그대로 써 컨테이너 배열로 주어를 고정한다(두 init 모두 커버 —
+  #    inject-auth 단독 스코프보다 같은 값에 더 넓다).
+  # ⚠️ 판정은 `select(...)` **안**에서 한다 — `yq -e`를 `allowPrivilegeEscalation`에 직접 걸면 값이
+  #    false일 때 exit 1이다(docs/traps-detail.md 「yq -e는 값이 false면 exit 1」).
+  total="$(yq -e '.spec.template.spec.initContainers | length' "$D")"
+  hard="$(yq -e '[.spec.template.spec.initContainers[]
+                 | select(.securityContext.readOnlyRootFilesystem == true
+                          and .securityContext.allowPrivilegeEscalation == false
+                          and .securityContext.seccompProfile.type == "RuntimeDefault"
+                          and (.securityContext.capabilities.drop | contains(["ALL"])))] | length' "$D")"
+  [ "$total" -ge 2 ]   # 양성 대조 — 대상 0건을 "전부 통과"로 오독하지 않는다(seed-config + inject-auth)
+  printf '%s' "$hard" | grep -qxF -- "$total"
+  # yq -i는 /tmp에 임시파일을 쓴다 — emptyDir로 readOnlyRootFilesystem과 양립.
+  # ⚠️ 파일 전역 `grep -q 'name: tmp'`는 volumes 항목이 혼자 만족시킨다 — 컨테이너 스코프로 센다.
+  tm="$(yq -e '[.spec.template.spec.initContainers[] | select(.name == "inject-auth")
+               | .volumeMounts[] | select(.name == "tmp" and .mountPath == "/tmp")] | length' "$D")"
+  printf '%s' "$tm" | grep -qxF -- '1'
 }
 
 @test "every init container that writes the PVC runs as 65532 (empty-PVC cold start)" {
