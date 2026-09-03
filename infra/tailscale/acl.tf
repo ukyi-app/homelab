@@ -66,11 +66,11 @@ resource "tailscale_acl" "homelab" {
 #    tailnet에서 떨어져 **tailnet 전역 이름해석이 통째로 죽는다**(위 "폴백 없음"과 같은 뜻). 복구엔
 #    LAN/물리 접근 재인증이 필요하다.
 #    실측 2026-09-03 `tailscale status --json`: Self=`nuc-15-pro`(현 nameserver 노드) Tags=null
-#    **KeyExpiry=2027-02-02T16:15:27Z — 아직 해제되지 않았다**. 2026-08-18 컷오버(맥미니→NUC)가
-#    2026-08-14에 맥미니에 했던 `keyExpiryDisabled=true`를 새 노드로 이월하지 않았다.
-#    ⇒ owner 1회 조작이 처방이다: admin console → Machines → nuc-15-pro → Disable key expiry.
-#    감시는 `policy/credential-expiry.json`의 `ts-node-key-nuc` 행이 진다(D-14 = 2027-01-19).
-#    해제하면 그 행을 2099 sentinel + "해제 완료" note로 바꾼다.
+#    KeyExpiry=null — **2026-09-03 owner가 해제 완료**(감사 2라운드 발견 시점엔 2027-02-02T16:15:27Z였다:
+#    2026-08-18 컷오버가 맥미니의 `keyExpiryDisabled=true`를 새 노드로 이월하지 않았던 갭).
+#    감시는 `policy/credential-expiry.json`의 `ts-node-key-nuc` 행이 진다 — 지금은 2099 sentinel(무발화·가시화).
+#    ⚠️ 노드를 교체·재등록하면 만료가 **다시 기본값으로 켜진다** — 그때 처방은 같다: admin console →
+#    Machines → <노드> → Disable key expiry, 원장 행은 그 사이 실만료로 되돌려 D-14가 울리게 둔다.
 #    IaC(`tailscale_device_key`) 경로는 **쓰지 않는다** — 그 리소스는 `devices:core`(write)를 요구하는데
 #    CI 주입 스코프는 `["policy_file:read","dns:read","oauth_keys:read"]` **정확 일치**로
 #    `infra/tailscale/test_provider_scopes.bats`가 잠가 두었다(required/error인 drift-tailscale이
