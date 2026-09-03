@@ -17,6 +17,11 @@ K="$BATS_TEST_DIRNAME/kustomization.yaml"
   # parentRefs/backendRefs에 group/kind/weight 명시 — SSA atomic-list OutOfSync 함정 회피
   run grep -q 'kind: Gateway' "$H"; [ "$status" -eq 0 ]
   run grep -qE 'weight: 1' "$H"; [ "$status" -eq 0 ]
+  # 리스너 집합 상한 — 위 grep들은 존재만 잰다(원소 추가 축 무증인). web-public parentRef를
+  # 더해도 존재 grep 6줄이 전부 통과했다(2026-09-03 실측). 경로는 이미 `/` 전면이라 상한이
+  # 무의미해 리스너 축만 닫는다.
+  run yq '[.spec.parentRefs[].sectionName] | sort | join(",")' "$H"
+  [ "$output" = "web-internal-tls" ] || { echo "리스너=$output"; false; }
 }
 
 @test "legacy tailscale Ingress is removed (kustomization no longer references it)" {
