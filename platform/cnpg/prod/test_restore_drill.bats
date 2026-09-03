@@ -14,6 +14,10 @@ sh=platform/cnpg/prod/restore-drill-script.sh
 @test "drill bootstraps a FRESH cluster via recovery from R2" {
   grep -q 'bootstrap:' "$sh"
   grep -q 'recovery:' "$sh"
+  # ⚠️ 이 `pg-r2`는 **이중 SSOT**다 — 신원 등호의 정본 증인은 test_object_store.bats의
+  #    "the ObjectStore name is the identity every consumer references"(object-store.yaml에서
+  #    파생해 소비처 4곳을 잰다). 여기는 그 스크립트가 recovery 부트스트랩을 그리는지 보는
+  #    형태 핀이라 개명 시 함께 red가 난다 — 진단은 정본 증인 쪽을 먼저 읽을 것.
   grep -q 'barmanObjectName: pg-r2' "$sh"
   grep -q 'pg-restore-drill' "$sh" # 일회용 클러스터 이름
 }

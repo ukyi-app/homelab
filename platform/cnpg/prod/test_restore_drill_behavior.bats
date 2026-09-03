@@ -233,6 +233,9 @@ kcount() { grep -cF -- "$1" "$KLOG" || true; }
   run_drill
   [ "$status" -eq 0 ]
   grep -qF 'bootstrap:' "$APPLIED"
+  # ⚠️ 이중 SSOT — 신원 등호의 정본 증인은 test_object_store.bats의 "the ObjectStore name is the
+  #    identity every consumer references"다. 여기는 실행 산출물(APPLIED)에 그 값이 실제로 실렸는지
+  #    보는 행위 핀이라 개명 시 함께 red가 난다.
   grep -qF 'barmanObjectName: pg-r2' "$APPLIED"
   grep -qF 'serverName: pg-nuc' "$APPLIED" # 라이브 Cluster에서 파생된 값이 실제로 실렸다
   grep -qF 'restore_drill_last_success_timestamp' "$METRICS"
