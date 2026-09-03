@@ -17,6 +17,11 @@ CJ="$DIR/backup-cronjob.yaml"
   # ⚠️ 10.42.0.0/16(pod CIDR)을 ipBlock cidr로 쓰면 "전체 파드 허용" — default-deny 무력화(라이브 검증 함정).
   #    실제 cidr: 값만 검사(경고 주석의 10.42 언급은 제외).
   [ "$(grep -cE 'cidr:.*10\.42\.0\.0/16' "$NP")" -eq 0 ]
+  # 상한 — 위 grep들은 전부 하한이라 광역 egress(0.0.0.0/0 ipBlock) 정책 한 건이 통째로
+  # 통과했다(실측 2026-09-03: 12/12). 이름 정확 집합 + ipBlock 전칭으로 막는다.
+  [ "$(yq ea '[select(.kind=="NetworkPolicy") | .metadata.name] | sort | join(",")' "$NP")" = \
+    "cache-allow-backup-egress,cache-allow-dns-egress,cache-allow-ingress-backup,cache-allow-ingress-from-prod,cache-allow-ingress-kubelet-probes,cache-default-deny-all" ]
+  [ "$(yq ea '[select(.kind=="NetworkPolicy") | .. | select(has("ipBlock")) | .ipBlock.cidr] | sort | join(",")' "$NP")" = "10.42.0.1/32" ]
 }
 
 @test "ingress allows are prod:6379, intra-ns backup:6379, and node probes only" {

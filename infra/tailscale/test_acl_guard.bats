@@ -48,3 +48,22 @@ setup() { ACL="${BATS_TEST_DIRNAME}/acl.tf"; }
   # NOPASSWD sudoers 드롭인을 불필요하게 만든 근거다(D-i 확정).
   run grep -Eq '"root"' "$ACL"; [ "$status" -eq 0 ]
 }
+
+@test "pg 5432 is never opened to autogroup:member via a port range or wildcard (F2 range-aware)" {
+  # 위 @test는 리터럴 `5432`·`*`만 본다 — Tailscale ACL의 포트 범위(n-m) 문법은 분모 밖이라
+  # `tag:k8s:5400-5450` 한 줄로 전 tailnet 멤버에 DB 직결이 열려도 무증인이었다(실측 4/4 ok).
+  rules="$(tr '\n' ' ' < "$ACL" | grep -oE '\{[^{}]*\}')"
+  mrules="$(printf '%s\n' "$rules" | grep -E 'autogroup:member[^}]*tag:k8s:')"
+  [ -n "$mrules" ]   # 양성 대조 — member/tag:k8s 규칙이 최소 1건(추출이 공허하지 않다)
+  bad=0
+  set -f   # ⚠️ 토큰 `*`가 unquoted `for` 확장에서 파일명 글로빙되지 않게 막는다(실측 함정)
+  for p in $(printf '%s\n' "$mrules" | grep -oE 'tag:k8s:[0-9*,-]+' | sed 's/^tag:k8s://' | tr ',' ' '); do
+    case "$p" in
+      '*') bad=1 ;;
+      *-*) [ "${p%-*}" -le 5432 ] && [ "${p#*-}" -ge 5432 ] && bad=1 ;;
+      *) [ "$p" -eq 5432 ] 2>/dev/null && bad=1 ;;
+    esac
+  done
+  set +f
+  [ "$bad" -eq 0 ]
+}

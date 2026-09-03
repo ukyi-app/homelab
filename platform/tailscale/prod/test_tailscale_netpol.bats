@@ -13,10 +13,17 @@ setup() {
   fi
 }
 
-@test "ns-wide default-deny-egress baseline exists" {
+@test "ns-wide default-deny-egress baseline exists and the policy name set is exact" {
   run grep -q 'kind: NetworkPolicy' "$P"; [ "$status" -eq 0 ]
   run grep -q 'tailscale-default-deny-egress' "$P"; [ "$status" -eq 0 ]
   run grep -q 'podSelector: {}' "$P"; [ "$status" -eq 0 ]
+  # ⚠️ **상한** — 위 레인들은 전부 리터럴 하한이라 ipBlock 없는 광역 정책 한 건이 :52 cidr 등호와
+  #    :59-64 except 등식을 통째로 우회한다(실측: `to:[{namespaceSelector:{}}]` 정책 추가 후 7/7 ok).
+  #    이 ns는 enforce=privileged라 정책 추가 한 건이 곧 최강 권한 워크로드의 무제한 lateral이다.
+  #    정당한 정책 추가는 networkpolicy.yaml 근거 주석 + 이 상수를 같은 PR에서 고치는 것이 리뷰 앵커.
+  #    형태 선례: platform/network-policies/prod/test_netpol.bats의 이름 정확집합 줄(397b001).
+  [ "$(yq ea '[select(.kind=="NetworkPolicy")|.metadata.name]|sort|join(",")' "$P")" = \
+    "tailscale-allow-dns-egress,tailscale-allow-egress-tailnet,tailscale-allow-egress-to-apiserver,tailscale-allow-egress-to-database,tailscale-allow-egress-to-gateway,tailscale-default-deny-egress" ]
 }
 
 @test "dns egress to coredns on 53 is declared" {
@@ -68,4 +75,15 @@ setup() {
   # ⚠️ 이 @test에는 형제 단언이 없다 — 구 `-ne 0`에서는 networkpolicy.yaml을 리네임하면 grep이
   #    rc 2로 죽고도 통과해, 이 파일에서 혼자 초록으로 남았다.
   run grep -Eq 'cidr:[[:space:]]*10\.42' "$P"; [ "$status" -eq 1 ]
+}
+
+@test "netpol/proxyclass are wired into the kustomization (membership, not mere existence)" {
+  # 파일 실재 ≠ 렌더 포함 — resources에서 빠지면 ArgoCD가 라이브를 프룬한다. proxyclass는
+  # policy/memory-limit-allowlist.txt:27-28이 proxy cap의 SSOT로 지목한 파일이다.
+  # 관용구: yq contains()로 원문 grep을 피한다(주석·들여쓰기 위치 변화에 흔들리지 않는다).
+  K="${BATS_TEST_DIRNAME}/kustomization.yaml"
+  run yq '.resources | contains(["traefik-ingress.yaml","proxyclass.yaml","networkpolicy.yaml"])' "$K"
+  printf '%s' "$output" | grep -qxF -- 'true'
+  [ -f "${BATS_TEST_DIRNAME}/proxyclass.yaml" ]
+  [ -f "${BATS_TEST_DIRNAME}/networkpolicy.yaml" ]
 }
