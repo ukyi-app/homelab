@@ -71,6 +71,31 @@ teardown() { rm -rf "$STUBDIR"; }
   [ "$status" -eq 0 ]
 }
 
+@test "fails when the node is not Ready" {
+  # 🔴 [1]·[2]의 판정 술어 3개를 `true`로 바꿔도 17레인이 전건 초록이었다 — setup이 건강한
+  #    nodestatus.txt/sc.txt를 깔 뿐 그 둘을 **망가뜨리는 레인이 0**이었기 때문이다.
+  #    거부 문구를 소스 리터럴로 잡으면 그것이 곧 피연산자 실재 증인이다(rc 127은 그 문구를 못 낸다).
+  echo "NotReady" > "$STUBDIR/nodestatus.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'node is not Ready'
+}
+
+@test "fails when the bulk-ssd StorageClass is missing (partial apply is not a pass)" {
+  printf 'standard\n' > "$STUBDIR/sc.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- "StorageClass 'bulk-ssd' missing"
+}
+
+@test "fails when the standard StorageClass is missing (each SC carries its own witness)" {
+  # 두 SC를 한 레인으로 묶으면 :33 단독 뮤테이션이 빠져나간다(실측) — 레인을 나눠 적는다.
+  printf 'bulk-ssd\n' > "$STUBDIR/sc.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- "StorageClass 'standard' missing"
+}
+
 @test "the servicelb LB pod (svclb-traefik-*) is NOT mistaken for a traefik controller" {
   # 정밀한 '^traefik-' 매칭의 회귀 가드: 건강한 픽스처에 이미 svclb-traefik-abc가
   # 들어 있으므로, 통과하는 실행이 곧 오탐 없음의 증명이다.
