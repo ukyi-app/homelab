@@ -17,10 +17,19 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
 }
 
 @test "internet egress (0.0.0.0/0) always excludes private/cluster ranges (lateral guard)" {
-  run grep -q '0.0.0.0/0' "$P"; [ "$status" -eq 0 ]
-  run grep -q '10.0.0.0/8' "$P"; [ "$status" -eq 0 ]
-  run grep -q '172.16.0.0/12' "$P"; [ "$status" -eq 0 ]
-  run grep -q '192.168.0.0/16' "$P"; [ "$status" -eq 0 ]
+  # ⚠️ **텍스트 needle 금지 — 이름은 전칭인데 판정이 존재였다.** 예전 본문은 네 리터럴의 존재만
+  #    물어서 다음 두 뮤테이션이 5/5 초록이었다(2026-09-03 격리 트리 실측): ① except 없는 두 번째
+  #    allow-egress 정책을 덧붙인다 ② except 3대역을 형제 allow ipBlock으로 옮겨 극성을 뒤집는다
+  #    (문자열은 그대로 남는다). :13·:27 주석도 같은 문자열을 담아 원문 grep을 혼자 만족시킨다.
+  #    선례: platform/argocd/test_argocd_values.bats:145-156(같은 병의 진단·처방).
+  #    ⇒ 원문이 아니라 **파싱값**으로, 0.0.0.0/0 ipBlock **전수**로 판정한다.
+  # 멀티독이라 `ea`(eval-all)로 모은다. `// ["MISSING"]`이 except 부재를 값으로 바꿔 과부족 둘 다 red.
+  Q='[select(.kind=="NetworkPolicy")|.spec.egress[]?|.to[]?|select(.ipBlock.cidr=="0.0.0.0/0")|(.ipBlock.except // ["MISSING"])|sort|join(",")]|.[]'
+  out="$(yq ea "$Q" "$P")"
+  n="$(printf '%s\n' "$out" | grep -c .)"    # 열거 붕괴 바닥값 — 0건이면 grep rc 1로 red
+  [ "$n" -ge 1 ]                             # adguard-allow-egress-upstream-dns
+  ok="$(printf '%s\n' "$out" | grep -cxF -- '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16')"
+  printf '%s' "$ok" | grep -qxF -- "$n"      # 전수 일치 — 정책이 늘어도 새 ipBlock이 함께 판정된다
 }
 
 @test "pod CIDR is never an allowed ipBlock cidr (default-deny bypass trap)" {
