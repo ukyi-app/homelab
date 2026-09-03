@@ -21,4 +21,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
         | grep -vE 'uses:[[:space:]]+\./' \
         | grep -vE 'uses:[[:space:]]+[^@[:space:]]+@[0-9a-f]{40}([[:space:]]|#|$)' || true)
   [ -z "$bad" ]      # 비어야 통과. 디버깅: echo "$bad"로 위반 라인 확인
+
+  # 오너/레포 축 — 위 정규식은 `@40hex` 형태만 재고 `@` 앞 오너는 무제한이라, 오너를 통째로
+  # 공격자 포크로 갈아치우고 그 포크의 유효한 40-hex를 적으면 통과한다(untouched-a-2).
+  # allowlist(⊆) — 액션 제거는 정당한 변경이라 등식이 아니라 상한만 강제. 신규 서드파티
+  # 액션을 도입하면 이 목록을 같은 커밋에서 갱신할 것(형제 관용구: test_app-token-sha-ssot.bats).
+  CANON_ACTIONS=$'actions/checkout\nactions/create-github-app-token\nactions/download-artifact\nactions/setup-node\nactions/upload-artifact\ndocker/build-push-action\ndocker/login-action\ndocker/setup-buildx-action\ndocker/setup-qemu-action\nhashicorp/setup-terraform\noven-sh/setup-bun\nrenovatebot/github-action'
+  unknown=$(printf '%s\n' "$uses_lines" | grep -vE 'uses:[[:space:]]+\./' \
+    | sed -E 's#.*uses:[[:space:]]+##; s#[@[:space:]].*##' | LC_ALL=C sort -u \
+    | grep -vxF "$CANON_ACTIONS" || true)
+  [ -z "$unknown" ]  # 비어야 통과. 디버깅: echo "$unknown"로 미승인 오너 확인
 }
