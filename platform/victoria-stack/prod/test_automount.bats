@@ -89,3 +89,42 @@ EOF
 #   glances(선행)·pvc-du-exporter(Task 2) 두 이름을 손으로 든 **두 번째 하드코딩 로스터**였고,
 #   위 Category A의 파생 분모가 둘을 이미 포함한다(파일 전체 grep이 아니라 파싱한 값으로 판정하므로
 #   엄격히 더 강하다). 같은 회귀를 두 자리에서 재는 대신 분모 하나를 기계가 지키게 둔다.
+
+@test "the memory self-reference decision (allowedBytes vs allowedPercent) is class-wide, not vmsingle-only" {
+  # 원장 110행: 자기조절 워크로드의 자기참조는 GOMEMLIMIT(힙)·allowedPercent(캐시) 두 경로로
+  # 산다 — vmsingle 단독 증인은 같은 결정이 사는 vmagent.yaml:74를 놓치고, victorialogs.yaml:58의
+  # allowedPercent=60은 memory-ledger.md:342가 명시한 **의도적** 결정이라 컴포넌트 전역 부재
+  # 단언은 부당하게 red다. 값(563714457/141033472)은 핀하지 않는다 — right-size마다 손 갱신을 부른다.
+  cd "$ROOT"
+  local files f L C n name flag bad="" e
+  PCT_EXEMPT="victorialogs" # memory-ledger.md:342 — victorialogs만 allowedPercent가 승인된 결정
+  BYTES_REQUIRED="vmsingle vmagent"
+  L="$BATS_TEST_TMPDIR/memflags-raw.txt"
+  C="$BATS_TEST_TMPDIR/memflags.txt"
+  : > "$L"
+  files="$(git ls-files -- platform/victoria-stack/prod | grep '\.yaml$' | LC_ALL=C sort)"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    yq '.spec.template.spec.containers[]? | .name + "|" + ((.args[]?|select(test("--memory.allowed"))) // "")' "$f" >> "$L"
+  done <<EOF
+$files
+EOF
+  grep -v '^---$' "$L" | grep -v '|$' | grep . > "$C" || true
+  n="$(grep -c . "$C" || true)"
+  # 열거 붕괴 바닥값 — 2026-09-04 실측 3건(vmsingle·vmagent·victorialogs). 붕괴 경계이지 상한이 아니다.
+  [ "$n" -ge 3 ] || { echo "memory.allowed 플래그 열거가 ${n}건으로 붕괴했다(기대 >=3)"; false; }
+  # 양성 대조 — vmsingle·vmagent는 allowedBytes를 반드시 갖는다(플래그 리네임/삭제 anchor).
+  #   `run bash -c "…|grep -c"` 형태(원 fix)는 파일 부재 시에도 output=0으로 통과하니 쓰지 않는다.
+  for e in $BYTES_REQUIRED; do
+    grep -q "^$e|--memory.allowedBytes=" "$C" || { echo "$e 에 --memory.allowedBytes 부재(자기참조 절대값 고정이 풀렸다)"; false; }
+  done
+  while IFS='|' read -r name flag; do
+    [ -n "$name" ] || continue
+    case "$flag" in
+      --memory.allowedPercent=*)
+        case " $PCT_EXEMPT " in *" $name "*) : ;; *) bad="$bad $name($flag)";; esac
+        ;;
+    esac
+  done < "$C"
+  [ -z "$bad" ] || { echo "allowedPercent로 자기참조가 되살아난 워크로드:$bad (승인된 예외: $PCT_EXEMPT)"; false; }
+}

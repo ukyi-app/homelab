@@ -2267,7 +2267,7 @@ selfHeal과 플립플롭한다.
 - ⚠️ 연동을 끊어도 `tools/check-resource-limits.ts`의 `GOMEMLIMIT ≤ limit × 0.95`는 그대로 통과한다
   (한쪽 방향 상한만 보기 때문). 즉 **게이트는 이 결정을 강제하지도 막지도 않는다** — 근거는 주석과
   원장에만 산다. 다음 사람이 "90% 연동 규약을 안 지켰다"고 되돌리지 않도록 두 곳 모두에 적었다.
-> 가드: `platform/victoria-stack/prod/vmsingle.yaml`, `docs/memory-ledger.md`
+> 가드: `platform/victoria-stack/prod/vmsingle.yaml`, `docs/memory-ledger.md`, `platform/victoria-stack/prod/test_automount.bats`
 ### 측정 창이 기판 변경을 가로지르면 두 체제가 한 숫자에 섞인다
 - 2026-09-01. `node_boot_time_seconds = 2026-08-26T13:41:06Z`. 그 재부팅에서 관측 스택 다섯 전부
   계단이 있었다 — vmagent A′ 일별 peak 200~213 → 159~171 · vmsingle rss 552 → 350 ·
