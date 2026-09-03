@@ -46,7 +46,10 @@ done
 
 fail=0
 # shellcheck disable=SC2016  # 백틱은 의도된 리터럴 매칭(명령 치환 아님)
-paths="$(grep -oE '`[^`]+`' "$LEDGER" | tr -d '`' | grep -E '\.(bats|sh|ts|rego|mjs|ya?ml|json)$' | LC_ALL=C sort -u)"
+# ⚠️ `|| paths=""`가 **필요하다**(:63의 detail_guards와 같은 이유) — 원장에 실행 가능 확장자
+#    가드가 0건이면 마지막 grep이 rc=1이고 pipefail 아래 `set -e`가 **할당 단계에서** 죽는다.
+#    그러면 메시지 0줄에 rc=1로 끝나 무엇이 틀렸는지 알 수 없다(실측: 단일-행 `.md`-only 픽스처).
+paths="$(grep -oE '`[^`]+`' "$LEDGER" | tr -d '`' | grep -E '\.(bats|sh|ts|rego|mjs|ya?ml|json)$' | LC_ALL=C sort -u)" || paths=""
 while IFS= read -r p; do
   [ -n "$p" ] || continue
   [ -e "$p" ] || { echo "FAIL: 원장이 가리키는 가드 부재: $p"; fail=1; }
@@ -75,15 +78,42 @@ done <<< "$detail_guards"
 # 면제는 `where` 열에 **사유와 함께 명시**한다 — 목록이 아니라 마커라 새 행에도 같은 규칙이 적용된다:
 #   `SSOT없음(불변식)`   = 함정 서사가 아니라 불변식·규약을 지키는 가드다(SSOT에 들어갈 대상이 아니다)
 #   `SSOT없음(승격대상)` = 함정인데 traps-detail 서사가 아직 없다(부채를 침묵시키지 않고 계상한다)
+#   `가드없음(산문SSOT)` = guard 열이 실행 가능한 확장자(.bats/.sh/.ts/.rego/.mjs/.yaml/.json) 경로가
+#                          아니라 산문 문서(예 .md)뿐이다 — 아래 어느 방향도 그 문서의 내용을 검사하지
+#                          않으므로, 그 사실을 정직하게 표기한다(2026-09-03: 이 마커 도입 전에는
+#                          guards가 비면 행이 n_rows에도 안 잡히고 조용히 건너뛰어졌다 — 실측: 단일
+#                          `.md`-only 행 픽스처에서 SSOT 대응 '> 가드:'가 아예 없어도 rc=0).
 n_rows=0
+seen_sep=0
 while IFS= read -r row; do
   case "$row" in '|'*) : ;; *) continue ;; esac
-  case "$row" in *'|---'*) continue ;; esac
-  where="$(printf '%s' "$row" | awk -F'|' '{print $3}')"
+  case "$row" in *'|---'*) seen_sep=1; continue ;; esac
+  # 헤더 행 스킵 — 구분선(|---|---|---|) **이전**의 pipe 행은 전부 헤더다(리터럴 헤더 텍스트에
+  # 기대지 않는다 — 이 파일의 픽스처는 열 이름이 제각각이다). 예전엔 헤더의 guard 열이 백틱
+  # 경로가 아니라 guards가 자연히 비어 옛 `continue`가 그걸 조용히 걸러냈다(부수 효과). 이제
+  # guards=="" 자체가 판정 대상이라 구조로 걸러야 한다(안 그러면 헤더 행이 FAIL로 잡힌다).
+  [ "$seen_sep" -eq 1 ] || continue
+  # ⚠️ 열은 **뒤에서부터** 센다($(NF-2)/$(NF-1)) — 함정 제목 칼럼이 백틱 인용 안에 리터럴 `|`를
+  #    담는 행이 실재한다(예: `^A|B.*$`·`awk … || true`). 앞에서부터 `$3`/`$4`로 고정하면 그
+  #    임베디드 파이프가 열을 밀어 where에 제목 파편이, guards에 " gate "가 들어가 guards==""로
+  #    보여 그 행이 조용히 무증인으로 샜다(2026-09-03 실측: 92·96행). guard·where 칼럼 자체에는
+  #    리터럴 `|`가 오지 않는다는 이 표의 실제 관례에 기대어 뒤에서 셈하면 두 방향 모두 안전하다.
+  where="$(printf '%s' "$row" | awk -F'|' '{print $(NF-2)}')"
   # shellcheck disable=SC2016  # 백틱은 의도된 리터럴 매칭(명령 치환 아님)
-  guards="$(printf '%s' "$row" | awk -F'|' '{print $4}' | grep -oE '`[^`]+`' | tr -d '`' | grep -E '\.(bats|sh|ts|rego|mjs|ya?ml|json)$' || true)"
-  [ -n "$guards" ] || continue
+  guards="$(printf '%s' "$row" | awk -F'|' '{print $(NF-1)}' | grep -oE '`[^`]+`' | tr -d '`' | grep -E '\.(bats|sh|ts|rego|mjs|ya?ml|json)$' || true)"
+  # ⚠️ guards가 비어도 이 행은 **평가된 것**이다 — n_rows를 여기서 늘린다(면제 행도 셈해 붕괴를
+  #    신호에 남긴다. `continue`보다 위에 두지 않으면 예전처럼 guards==""인 행이 무측정으로 샌다).
   n_rows=$((n_rows + 1))
+  if [ -z "$guards" ]; then
+    case "$where" in
+      *'가드없음('*) continue ;;
+      *) title="$(printf '%s' "$row" | awk -F'|' '{print $2}' | cut -c1-72)"
+         echo "FAIL: 원장 행이 실행 가능한 가드(guard 열에 .bats/.sh/.ts/.rego/.mjs/.yaml/.json 경로) 없이 enforced를 주장한다: ${title}"
+         echo "      → guard 열에 실행 가능한 가드 경로를 달거나, where 열에 가드없음(산문SSOT)을 사유로 명시하라."
+         fail=1
+         continue ;;
+    esac
+  fi
   case "$where" in *'SSOT없음('*) continue ;; esac
   hit=0
   while IFS= read -r g; do

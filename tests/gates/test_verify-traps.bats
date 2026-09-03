@@ -78,6 +78,21 @@ _mkindex() {
   [ "$(grep -c 'SSOT없음(' docs/traps.md)" -ge 1 ]
 }
 
+@test "a row whose guard column is prose-only (no executable extension) is flagged unless marked" {
+  # ★ 예전엔 guards가 비면(guard 열이 .md 등 실행 가능 확장자가 아니면) 그 행이 n_rows에도 안
+  #   잡히고 조용히 건너뛰어졌다(2026-09-03 실측: 단일 `.md`-only 행 픽스처 — SSOT 대응
+  #   '> 가드:'가 아예 없어도 rc=0). 이제 명시 면제(`가드없음(산문SSOT)`) 없이는 FAIL이다.
+  printf '| 함정 | where | guard |\n|---|---|---|\n| 산문 SSOT 함정 | gate | `docs/memory-ledger.md` |\n' > "$TMP/prose.md"
+  printf '### 다른 함정\n- 본문\n' > "$TMP/detail.md"
+  _mkindex "$TMP/index.md" '다른 함정'
+  run bash scripts/verify-traps.sh "$TMP/prose.md" "$TMP/detail.md" "$TMP/index.md"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -Fq "실행 가능한 가드"
+  printf '| 함정 | where | guard |\n|---|---|---|\n| 산문 SSOT 함정 | gate · 가드없음(산문SSOT) | `docs/memory-ledger.md` |\n' > "$TMP/prose-ok.md"
+  run bash scripts/verify-traps.sh "$TMP/prose-ok.md" "$TMP/detail.md" "$TMP/index.md"
+  [ "$status" -eq 0 ]
+}
+
 @test "verify-traps flags a ledger guard path that does not exist" {
   printf '| 함정 | status | guard |\n|---|---|---|\n| x | gate-enforced | `tools/tests/nonexistent-guard.bats` |\n' > "$TMP/bad.md"
   printf '### 아무 함정\n- 본문\n' > "$TMP/detail.md"

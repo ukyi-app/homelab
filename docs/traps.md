@@ -15,6 +15,8 @@
   방향 3의 면제는 여기에 **사유와 함께 명시**한다(하드코딩 목록이 아니라 마커라 새 행에도 같은 규칙이 적용된다):
   - `SSOT없음(불변식)` — 함정 서사가 아니라 불변식·규약을 지키는 가드다. traps-detail에 들어갈 대상이 아니다.
   - `SSOT없음(승격대상)` — 함정인데 traps-detail 서사가 아직 없다. **부채를 침묵시키지 않고 계상한다.**
+  - `가드없음(산문SSOT)` — guard 열이 실행 가능한 확장자(.bats/.sh/.ts/.rego/.mjs/.yaml/.json) 경로가
+    아니라 산문 문서뿐이다. 그 문서의 내용을 검사하는 가드는 아무 방향도 없다는 사실을 정직하게 표기한다.
 - 새 가드 테스트를 추가하면 이 표에도 한 줄 추가한다(리네임 시 verify-traps가 강제로 알려준다).
 
 | 함정 (traps-detail.md) | where | guard |
@@ -108,5 +110,5 @@
 | 파일 프리필터(`KIND_RE`)를 함께 넓히지 않으면 kind 추가가 vacuous green으로 착지한다 — 게이트는 초록, 위반 0, 스캔 카운트만 조용히 그대로(21→20). 새 kind는 (a)필드 삭제 red와 (b)프리필터 되돌림 카운트 감소 두 뮤테이션으로 함께 잠근다 | gate | `tools/check-resource-limits.ts` |
 | A′는 회수 가능한 커널 slab을 분자에 싣는다 — 비중이 0.2~27.1%로 100배 갈리고, cadvisor가 cgroup v2에서 커널 계열을 안 채워 peak 시점 값은 소급 측정 불가다. 처방은 `shmem == 0` 확인을 조건으로 한 RSS 분자. 배수·압력·slab 비중이 서로 다른 세 순서다 | gate | `docs/memory-ledger.md`, `tools/check-resource-limits.ts` |
 | 자기조절 워크로드의 자기참조는 **두 경로**로 산다 — GOMEMLIMIT(힙)과 `--memory.allowedPercent`(캐시). 하나만 끊으면 나머지로 되살아나고, fastcache는 mmap이라 GOMEMLIMIT이 캐시를 못 막는다. 둘 다 절대값으로 고정한다(`--memory.allowedBytes`). `≤ limit × 0.95` 게이트는 한쪽 상한만 보므로 이 결정을 강제하지도 막지도 않는다 | gate | `platform/victoria-stack/prod/vmsingle.yaml`, `docs/memory-ledger.md`, `platform/victoria-stack/prod/test_automount.bats` |
-| 측정 창이 기판 변경(노드 재부팅·커널·런타임 메이저)을 가로지르면 두 체제가 한 숫자에 섞인다 — 원장의 `vmagent 1.05x`가 이미 존재하지 않는 세대의 값이었다. 방향도 일정하지 않아(glances는 같은 재부팅에서 상승) 경험칙으로 뭉갤 수 없다 | gate | `docs/memory-ledger.md` |
+| 측정 창이 기판 변경(노드 재부팅·커널·런타임 메이저)을 가로지르면 두 체제가 한 숫자에 섞인다 — 원장의 `vmagent 1.05x`가 이미 존재하지 않는 세대의 값이었다. 방향도 일정하지 않아(glances는 같은 재부팅에서 상승) 경험칙으로 뭉갤 수 없다 | gate · 가드없음(산문SSOT) | `docs/memory-ledger.md` |
 | sed 주소 범위는 시작 줄에서 끝나지 않는다 — 한 줄짜리 `{{- /* … */ -}}` 주석이 범위를 열고 다음 종료 매치(없으면 EOF)까지 지워, 벗겨낸 텍스트 위의 부재 단언이 **빈 것에 대한 참**이 된다(실측: 현행 message에서도 실코드 한 줄이 이미 사라져 있었고, 수동 escape를 심어도 12/12 green). 크기 하한도 앵커 단독도 안 닫는다 — 하중은 한 줄 형태 선(先)소거 2단 strip이 진다 | gate | `tests/gates/test_alertmanager-template.bats` |
