@@ -33,6 +33,10 @@ EOF
   touch "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml"
   printf 'kind: Database\n' > "$FR/platform/cnpg/prod/databases/lonely.yaml"
   touch "$FR/platform/data-conn/prod/db-lonely-conn.sealed.yaml"
+  # ⚠️ 의도적으로 data-conn/prod/kustomization.yaml을 여기서 만들지 않는다 — 위 두 conn 봉인본은
+  # 이 스위트 대부분에서 inert(무배선)로 남아야 한다. conn 축을 겨냥하는 @test만 이 파일을
+  # 직접 쓴다(직접 쓰지 않는 @test가 등록 없이 두 파일을 disk에 남기면 unwired-conn(역방향,
+  # 감사 5라운드 set-kustomization-8)이 뜨므로, 그런 @test는 대신 두 파일을 정리한다).
   # cluster.yaml managed.roles — roles 도메인의 바닥값(기본 1)이 보는 자리다. 이 스위트의 도메인은
   # roles가 아니므로 **고아가 아닌** role 하나만 둔다(passwordSecret sealed 실재 → dangling-role 미발화).
   # 형제 스위트(test_audit-dangling-role.bats)가 고아 role 쪽을 진다.
@@ -94,6 +98,10 @@ teardown() { rm -rf "$TMP"; }
     > "$FR/apps/orders/deploy/prod/.activation"
   sed -i '' '/stale-app/d' "$FR/docs/memory-ledger.md" 2>/dev/null || sed -i '/stale-app/d' "$FR/docs/memory-ledger.md"
   rm "$FR/platform/cnpg/prod/databases/lonely.yaml" "$FR/platform/data-conn/prod/db-lonely-conn.sealed.yaml"
+  # setup()의 shared conn 봉인본도 정리한다 — 이 @test는 conn 축과 무관해 배선하지 않고 두는데
+  # (setup() 헤더 주석), 등록 없이 disk에 남기면 unwired-conn(역방향)이 새로 떠 "clean" 어서션이
+  # 깨진다. 실제로는 무관한 잔재라 배선 대신 제거가 맞다.
+  rm "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml"
   run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --strict
   [ "$status" -eq 0 ]
 }
@@ -124,9 +132,12 @@ teardown() { rm -rf "$TMP"; }
   # B: surface-drift는 설계상 비차단·정보성이고 **이미지 bump마다 재발**한다 → 텔레그램 페이지 대상에서 제외.
   # 감사 JSON엔 남아(findings/count) 가시성 유지하되 alerting=0이라 audit.yaml이 페이지하지 않는다.
   G="$TMP/git-ro"; mkdir -p "$G"; cp -R "$FR/." "$G/"
-  # surface-drift **단독**으로 격리 — 다른 finding 원천 제거: ledger의 stale-app 행 삭제(orders만 남김).
+  # surface-drift **단독**으로 격리 — 다른 finding 원천 제거: ledger의 stale-app 행 삭제(orders만 남김) +
+  # setup()의 무배선 conn 봉인본 2개(shared·lonely) 제거(안 그러면 unwired-conn이 새로 뜬다 —
+  # 감사 5라운드 set-kustomization-8, 이 스위트의 conn 축과 무관).
   printf '<!-- ledger:meta VM_ALLOCATABLE_MIB=11264 LIMIT_BUDGET_MIB=8704 -->\n| <!-- ledger:row --> orders | prod | 64 | 128 |\n' \
     > "$G/docs/memory-ledger.md"
+  rm -f "$G/platform/data-conn/prod/db-shared-conn.sealed.yaml" "$G/platform/data-conn/prod/db-lonely-conn.sealed.yaml"
   git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
   git -C "$G" add -A; git -C "$G" commit -qm init
   oldhash=$(bun "$ROOT/tools/lib/surface-hash.ts" "$G" HEAD orders)
@@ -297,11 +308,14 @@ KEOF
   # 남는 finding을 unreferenced-conn 하나로 격리 — 원장 행은 platform/ 실재 컴포넌트로(stale-ledger-row 배제).
   printf '<!-- ledger:meta VM_ALLOCATABLE_MIB=11264 LIMIT_BUDGET_MIB=8704 -->\n| <!-- ledger:row --> data-conn | prod | 64 | 128 |\n' \
     > "$G/docs/memory-ledger.md"
+  # shared도 등록해 둔다(디스크엔 $FR에서 복사된 db-shared-conn.sealed.yaml도 있다) — 안 그러면
+  # unwired-conn(역방향)이 이 @test가 겨냥하는 축(unreferenced-conn 접힘) 밖에서 alerting을 채운다.
   cat > "$G/platform/data-conn/prod/kustomization.yaml" <<'KEOF'
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: prod
 resources:
+  - db-shared-conn.sealed.yaml
   - db-lonely-conn.sealed.yaml
 KEOF
   git -C "$G" add -A
@@ -430,6 +444,26 @@ YAML
   echo "$output" | jq -e '.findings | any(.type == "orphan-conn" and .subject == "cache-stray-conn")'
   # 음성 대조는 같은 성공 출력의 카운트=0으로 — 별도 파이프의 rc 기반(-ne 0)은 bun이 죽어도 통과한다.
   [ "$(echo "$output" | jq '[.findings[] | select(.type == "orphan-conn" and .subject == "db-shared-conn")] | length')" = "0" ]
+}
+
+@test "audit reports a conn sealed file on disk that kustomization never registered (unwired-conn, reverse direction)" {
+  # 위 orphan-conn은 정방향(kustomization → 소스)만 본다. 이 레인은 역방향 — 디스크에 conn
+  # 봉인본이 있는데 kustomization resources 자체에 등록이 안 된 경우(멱등 등록 실패/손 편집으로
+  # 줄 누락) — 정방향 열거로는 원리적으로 못 보는 붕괴다(감사 5라운드 set-kustomization-8).
+  # setup()이 이미 db-shared-conn.sealed.yaml·db-lonely-conn.sealed.yaml 둘 다 touch해 뒀다(:33,35) —
+  # kustomization에는 shared만 등록해 lonely를 등록 누락 상태로 만든다.
+  cat > "$FR/platform/data-conn/prod/kustomization.yaml" <<'YAML'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - db-shared-conn.sealed.yaml
+YAML
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.findings | any(.type == "unwired-conn" and .subject == "db-lonely-conn.sealed.yaml")'
+  # 음성 대조 — 등록된 shared는 unwired로 뜨지 않는다.
+  [ "$(echo "$output" | jq '[.findings[] | select(.type == "unwired-conn" and .subject == "db-shared-conn.sealed.yaml")] | length')" = "0" ]
 }
 
 @test "audit surfaces malformed conn entries instead of silently dropping them (observation preserved)" {
