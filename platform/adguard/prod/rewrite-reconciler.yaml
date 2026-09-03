@@ -130,7 +130,7 @@ spec:
                   #   소관). 산술 증인은 test_rewrite_reconciler.bats.
                   CURL_READ="curl -fsS --connect-timeout 5 --max-time 20 --retry 6 --retry-delay 3 --retry-connrefused --retry-all-errors --retry-max-time 30"
                   CURL_WRITE="curl -fsS --connect-timeout 5 --max-time 20 --retry 3 --retry-delay 2 --retry-connrefused --retry-max-time 30"
-                  SA=/var/run/secrets/kubernetes.io/serviceaccount
+                  SA="${SA:-/var/run/secrets/kubernetes.io/serviceaccount}" # 기본값이 파드 경로 — 오버라이드는 테스트 하네스 전용
                   APISERVER="https://kubernetes.default.svc"
                   TOKEN=$(cat $SA/token)
                   AG="http://adguard-ui.edge.svc"
@@ -152,6 +152,121 @@ spec:
                     if [ "$rc" -ne 6 ]; then break; fi
                     dns_wait=$((dns_wait + 1)); sleep 1
                   done
+                  # ── 시드 대조 스텝(ADR-0007 결정 2 — adguard 본체 설정의 SSOT는 **라이브**) ──────
+                  # adguardhome.yaml의 ConfigMap은 initContainer `cp -n`이 쓰는 **첫 부팅 시드**다
+                  # (「AdGuard ConfigMap 첫 부팅 시드 전용」 함정). 사람이 UI에서 만지는 라이브가 권위라
+                  # "시드가 라이브와 다르다"는 결함이 아니라 **재구축 시 되돌아갈 거리**다 → severity는
+                  # warning이고 처방은 시드를 라이브에 맞춰 갱신하는 것이다(git으로 라이브를 되돌리지 않는다).
+                  # 라이브 전체 YAML은 RWO PVC 안(adguard 파드)이라 이 파드가 읽을 수 없고 pods/exec은
+                  # 쓰기 verb라 read-only RBAC 화이트리스트에 걸린다 ⇒ 대조 대상은 **control API가 노출하는
+                  # 선언 부분집합**뿐이다. 대조에서 뺀 것과 그 근거:
+                  #   · filtering.rewrites — 라이브 권위가 **이 리컨실러 자신**이다(아래 rewrite 스텝이
+                  #     traefik-ts 실 IP로 덮어쓴다). 대조하면 정상 수렴이 영구 드리프트로 보고된다.
+                  #   · dns.upstream_mode — /control/dns_info가 기본값(load_balance)을 **빈 문자열**로
+                  #     돌려준다(2026-09-03 v0.107.79 실측) → 문자열 대조는 영구 오보다.
+                  #   · querylog.file_enabled·size_memory — 어느 control 응답에도 없다(API 미노출).
+                  # ⚠️ 구 엔드포인트 /control/querylog_info는 쓰지 않는다 — 같은 라이브가 interval을 프리셋
+                  #    일수로 반올림해 돌려준다(시드 14d인데 90). 권위는 /control/querylog/config의 밀리초다.
+                  # ⚠️ 관측 실패(API 불가·응답 형태 변경·시드 파싱 실패)는 드리프트 1이 **아니다** —
+                  #    아무것도 push하지 않고 그 침묵을 AdGuardSeedDriftCheckStale이 잡는다(tri-state).
+                  # ⚠️ 실패 격리(양방향)는 **위치와 `||`가 함께** 만든다: 이 스텝은 실패 경로가 없는 DNS
+                  #    pre-flight 루프 **직후·rewrite 스텝 앞**이라 rewrite가 죽어도 이미 돌았고, rc는
+                  #    아래 `||`가 먹으므로 대조가 죽어도 rewrite 수렴은 무영향이다. 순서를 바꾸면
+                  #    test_seed_drift.bats의 격리 @test 두 개가 red가 된다.
+                  SEED_FILE="${SEED_FILE:-/seed/AdGuardHome.yaml}"
+                  # 네 번째 curl 등급 — **재시도 없음** + 짧은 상한. 대조는 warning 등급 관측이라 한 주기
+                  # 유실을 3주기(30분) 하트비트 임계가 흡수하고, 대신 데드라인 예산이 **상수**가 된다
+                  # (사용처 4곳 × max-time 3 = 12s). READ 등급(최악 50s/호출)을 쓰면 activeDeadlineSeconds
+                  # 150을 깬다 — 산술 증인은 test_rewrite_reconciler.bats의 예산 @test가 진다.
+                  CURL_SEED="curl -fsS --connect-timeout 2 --max-time 3"
+                  # 시드 YAML의 top-level 블록 안 2-space 스칼라 하나(꼬리 주석 제거). 부재면 빈 출력.
+                  seed_scalar() {
+                    awk -v top="$1" -v key="$2" '
+                      $0 ~ "^" top ":[[:space:]]*$" { inb = 1; next }
+                      /^[^ \t#]/ { inb = 0 }
+                      inb && $0 ~ "^  " key ":" {
+                        v = $0
+                        sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[ \t]+#.*$/, "", v)
+                        gsub(/^[ \t]+|[ \t]+$/, "", v)
+                        print v; exit
+                      }
+                    ' "$SEED_FILE"
+                  }
+                  # 시드 dns.upstream_dns 리스트(순서 보존 — 순서도 대조 대상이다).
+                  seed_upstreams() {
+                    awk '
+                      /^dns:[[:space:]]*$/ { ind = 1; next }
+                      /^[^ \t#]/ { ind = 0 }
+                      ind && /^  upstream_dns:[[:space:]]*$/ { inu = 1; next }
+                      ind && inu && /^    - / {
+                        v = $0
+                        sub(/^    - /, "", v); sub(/[ \t]+#.*$/, "", v)
+                        gsub(/^[ \t]+|[ \t]+$/, "", v)
+                        print v; next
+                      }
+                      ind && inu && /^  [^ #]/ { inu = 0 }
+                    ' "$SEED_FILE"
+                  }
+                  # 라이브 JSON 스칼라 하나 — 콤마/중괄호로 필드를 끊고 **줄머리 앵커**로 매치한다.
+                  # 탐욕 `.*`로 뽑으면 접미 동명 키("ignored_enabled")나 뒤쪽 동명 키를 줍는다.
+                  json_scalar() {
+                    printf '%s' "$1" | tr ',{}' '\n\n\n' \
+                      | sed -n "s/^[[:space:]]*\"$2\":[[:space:]]*\([A-Za-z0-9._-]*\)[[:space:]]*$/\1/p"
+                  }
+                  # 라이브 JSON의 문자열 배열(순서 보존, 한 줄에 하나).
+                  json_array() {
+                    printf '%s' "$1" | sed -n "s/.*\"$2\":\[\([^]]*\)\].*/\1/p" | tr ',' '\n' \
+                      | sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//' -e '/^$/d'
+                  }
+                  # 시드의 기간 문자열(14d) → 라이브가 쓰는 밀리초. 단위 없는 수는 **추측하지 않고 실패**한다
+                  # (구 스키마의 "일" 해석을 몰래 되살리면 스키마 변경이 조용한 오보가 된다).
+                  dur_ms() {
+                    n=${1%[dhms]}; u=${1#"$n"}
+                    case "$n" in ''|*[!0-9]*) return 1 ;; esac
+                    case "$u" in
+                      d) printf '%s' "$(( n * 86400000 ))" ;;
+                      h) printf '%s' "$(( n * 3600000 ))" ;;
+                      m) printf '%s' "$(( n * 60000 ))" ;;
+                      s) printf '%s' "$(( n * 1000 ))" ;;
+                      *) return 1 ;;
+                    esac
+                  }
+                  # ⚠️ `set -e`는 `||` 문맥에 놓인 명령의 **함수 본문까지** 비활성이다(bash) — 그래서 이
+                  #    함수는 set -e에 기대지 않고 단계마다 `|| return 1`로 rc를 손으로 전파한다.
+                  seed_drift_report() {
+                    [ -r "$SEED_FILE" ] || { echo "시드 파일 없음: $SEED_FILE" >&2; return 1; }
+                    dns_json=$($CURL_SEED -u "$AUTH" "$AG/control/dns_info") || return 1
+                    ql_json=$($CURL_SEED -u "$AUTH" "$AG/control/querylog/config") || return 1
+                    st_json=$($CURL_SEED -u "$AUTH" "$AG/control/stats/config") || return 1
+                    seed_up=$(seed_upstreams)
+                    live_up=$(json_array "$dns_json" upstream_dns)
+                    [ -n "$seed_up" ] || { echo "시드 upstream_dns 파싱 실패" >&2; return 1; }
+                    [ -n "$live_up" ] || { echo "라이브 upstream_dns 추출 실패(API 형태 변경?)" >&2; return 1; }
+                    d_up=0; [ "$seed_up" = "$live_up" ] || d_up=1
+                    seed_qe=$(seed_scalar querylog enabled)
+                    live_qe=$(json_scalar "$ql_json" enabled); live_qe=${live_qe%%$'\n'*}
+                    case "$seed_qe" in true|false) : ;; *) echo "시드 querylog.enabled 판독 실패" >&2; return 1 ;; esac
+                    case "$live_qe" in true|false) : ;; *) echo "라이브 querylog.enabled 추출 실패" >&2; return 1 ;; esac
+                    d_qe=0; [ "$seed_qe" = "$live_qe" ] || d_qe=1
+                    seed_qi=$(dur_ms "$(seed_scalar querylog interval)") || { echo "시드 querylog.interval 형식 미상" >&2; return 1; }
+                    live_qi=$(json_scalar "$ql_json" interval); live_qi=${live_qi%%$'\n'*}
+                    case "$live_qi" in ''|*[!0-9]*) echo "라이브 querylog.interval 추출 실패" >&2; return 1 ;; esac
+                    d_qi=0; [ "$seed_qi" = "$live_qi" ] || d_qi=1
+                    seed_si=$(dur_ms "$(seed_scalar statistics interval)") || { echo "시드 statistics.interval 형식 미상" >&2; return 1; }
+                    live_si=$(json_scalar "$st_json" interval); live_si=${live_si%%$'\n'*}
+                    case "$live_si" in ''|*[!0-9]*) echo "라이브 statistics.interval 추출 실패" >&2; return 1 ;; esac
+                    d_si=0; [ "$seed_si" = "$live_si" ] || d_si=1
+                    # 섹션별 게이지 + 대조 전용 하트비트. 하트비트는 bare(라벨 0) — absent/or 브랜치와
+                    # 라벨셋이 갈리면 for: pending이 매 주기 리셋된다.
+                    { printf 'adguard_seed_drift{section="dns.upstream_dns"} %s\n' "$d_up"
+                      printf 'adguard_seed_drift{section="querylog.enabled"} %s\n' "$d_qe"
+                      printf 'adguard_seed_drift{section="querylog.interval"} %s\n' "$d_qi"
+                      printf 'adguard_seed_drift{section="statistics.interval"} %s\n' "$d_si"
+                      printf 'adguard_seed_drift_checked_timestamp_seconds %s\n' "$(date +%s)"
+                    } | $CURL_SEED --data-binary @- "http://vmsingle.observability.svc:8428/api/v1/import/prometheus" || return 1
+                    echo "seed-drift: upstream=${d_up} querylog.enabled=${d_qe} querylog.interval=${d_qi} statistics.interval=${d_si}"
+                  }
+                  seed_drift_report || echo "시드 대조 실패 — 게이지·하트비트 미push(관측 실패는 드리프트가 아니다). rewrite 수렴은 계속한다." >&2
                   # 1) want = traefik-ts LB tailscale IP (apiserver로 svc 조회 — status.loadBalancer.ingress[].ip)
                   want=$($CURL_READ --cacert $SA/ca.crt -H "Authorization: Bearer $TOKEN" \
                     "$APISERVER/api/v1/namespaces/gateway/services/traefik-ts" \
@@ -201,6 +316,11 @@ spec:
                   echo "done: have=${have:-<none>} want=${want} fixed=${FIXED}"
               volumeMounts:
                 - { name: tmp, mountPath: /tmp }
+                # 시드 대조용 — adguard 본체가 첫 부팅에 `cp -n`으로 복사하는 그 ConfigMap을 그대로 읽는다
+                # (사본 픽스처 금지 = 드리프트 0). 읽기만 하므로 readOnly, RBAC 추가 0.
+                - { name: seed, mountPath: /seed, readOnly: true }
           volumes:
             - name: tmp
               emptyDir: {}
+            - name: seed
+              configMap: { name: adguard-config }

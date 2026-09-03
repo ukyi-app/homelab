@@ -79,6 +79,7 @@ setup() {
   grep -q 'CURL_READ=' "$F"
   grep -q 'CURL_WRITE=' "$F"
   grep -q 'CURL_PROBE=' "$F"   # DNS pre-flight 판별용(#547 통합) — 재시도 없음은 아래 단언
+  grep -q 'CURL_SEED=' "$F"    # 시드 대조 전용(ADR-0007) — 재시도 없음·짧은 상한은 test_seed_drift.bats
   [ "$(grep -cE 'CURL_(READ|WRITE)=.*connect-timeout 5' "$F")" = "2" ]
   [ "$(grep -cE 'CURL_(READ|WRITE)=.*max-time 20' "$F")" = "2" ]
   [ "$(grep -cE 'CURL_(READ|WRITE)=.*retry-connrefused' "$F")" = "2" ]
@@ -137,7 +138,16 @@ setup() {
   dw=$(grep -v '^[[:space:]]*#' "$F" | grep -oE 'DNS_WAIT_MAX=[0-9]+' | grep -oE '[0-9]+$')
   [ -n "$dw" ]
   big=$(( rmt > wrmt ? rmt : wrmt ))
-  [ $(( dw + 2 * (big + mt) )) -lt "$adl" ]
+  # 시드 대조 스텝(ADR-0007)이 네 번째 등급 CURL_SEED로 curl을 더 부른다 — 등급이 셋에서 넷으로
+  # 늘었는데 산술이 둘만 보면 데드라인 초과가 조용히 통과한다. 대조는 **재시도가 없어** 호출당
+  # 최악이 곧 max-time이고, 사용처 수는 파일에서 센다(콜사이트를 늘리면 이 수가 커져 부등식이
+  # 스스로 조인다 — 상수를 손으로 적으면 그 자리가 드리프트한다).
+  sl=$(grep -v '^[[:space:]]*#' "$F" | grep 'CURL_SEED=')
+  smt=$(printf '%s' "$sl" | grep -oE -- ' --max-time [0-9]+' | grep -oE '[0-9]+$')
+  suses=$(grep -c '\$CURL_SEED' "$F")
+  [ -n "$smt" ]
+  [ "$suses" -ge 4 ]   # GET 3(dns_info·querylog/config·stats/config) + push 1
+  [ $(( dw + suses * smt + 2 * (big + mt) )) -lt "$adl" ]
 }
 
 @test "every curl-holding variable is timeout-bounded (third-var regression guard)" {
@@ -145,7 +155,7 @@ setup() {
   # curl을 담는 var 전수와 그중 max-time 보유 수가 같아야 한다(바닥값 2는 열거 붕괴 방어).
   vars=$(grep -cE '[A-Z_]+="curl' "$F")
   bounded=$(grep -cE '[A-Z_]+="curl[^"]*--max-time [0-9]+' "$F")
-  [ "$vars" -ge 3 ]
+  [ "$vars" -ge 4 ]   # READ · WRITE · PROBE · SEED(시드 대조, ADR-0007)
   [ "$vars" = "$bounded" ]
 }
 
@@ -158,9 +168,9 @@ setup() {
 
 @test "no bare curl reaches the network even through pipes or substitutions" {
   # 라인 선두만 보면 `} | curl …`·`v=$(curl …)`가 샌다(01 리뷰 실측 — metrics push가 정확히
-  # 파이프 형태). var 정의 2줄만 정당 보유처다. 주석(행두·꼬리)은 산문이라 먼저 걷는다 —
+  # 파이프 형태). var 정의 줄(READ·WRITE·PROBE·SEED)만 정당 보유처다. 주석(행두·꼬리)은 산문이라 먼저 걷는다 —
   # "curl 임시 경로" 류 언급이 오탐이 된다(스크립트 본문 문자열에 ` #`가 없어 꼬리 절단이 안전).
-  run bash -c 'sed -e "s/^[[:space:]]*#.*//" -e "s/[[:space:]]#.*$//" "$1" | grep -nE "(^|[|;&(=[[:space:]])curl[[:space:]]" | grep -vE "CURL_(READ|WRITE|PROBE)=\"curl"' _ "$F"
+  run bash -c 'sed -e "s/^[[:space:]]*#.*//" -e "s/[[:space:]]#.*$//" "$1" | grep -nE "(^|[|;&(=[[:space:]])curl[[:space:]]" | grep -vE "CURL_(READ|WRITE|PROBE|SEED)=\"curl"' _ "$F"
   [ "$status" -ne 0 ]
 }
 
