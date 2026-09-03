@@ -71,10 +71,19 @@ teardown() { rm -rf "$TMP"; }
   WF="$ROOT/.github/workflows"
   A="$ROOT/.github/actions"
   # races-6: un-gated 직접 머지 OR-폴백 박멸 — 공유 스크립트만 호출한다.
-  raw=$(grep -rn 'gh pr merge --auto --squash "\$branch" || gh pr merge --squash' "$WF" || true)
+  # ⚠️ 스캔 표면에 `$A`(액션 디렉토리)가 함께 들어간다 — 워크플로만 훑던 판은 raw 폴백이
+  #    **composite 안으로 되돌아와도** 이 게이트의 1차 불변식조차 침묵했다(실측: .github/actions 0건).
+  raw=$(grep -rn 'gh pr merge --auto --squash "\$branch" || gh pr merge --squash' "$WF" "$A" || true)
   [ -z "$raw" ]
   # 변이 reusable의 auto-merge는 pr-first-commit composite로 수렴(B6) — 스크립트는 composite에서 1회 호출.
-  grep -q 'auto-merge-or-fail.sh' "$A/pr-first-commit/action.yml"
+  # ⚠️ **커맨드 줄에 앵커한다.** 앵커 없는 substring grep은 이 액션의 헤더 주석(:3)과 입력
+  #    description(:14)에 매치한다 — 실제 arm 블록(`if [ "$AUTO_MERGE" = "true" ]; …`)을 통째로
+  #    지워도 6/6 전건 초록이었다(2026-09-03 뮤테이션 실측). 규약을 성실히 문서화한 파일이 그
+  #    문서로 자기 자신을 증명하던 자리다(traps 「면제 판정이 주석보다 먼저 돌면…」·「프로브는 호출이 아니다」).
+  # ⚠️ 여기서 주석 제거 뷰 관용구(test_pr-sweeper.bats:96-99)는 듣지 않는다 — :14는 주석이 아니라
+  #    YAML input description이라 스트립을 통과한다. 개수 앵커(`-c … -eq 3`)도 금지: 산문 편집이 red를 낸다.
+  run grep -Eq '^[[:space:]]*bash scripts/auto-merge-or-fail\.sh' "$A/pr-first-commit/action.yml"
+  [ "$status" -eq 0 ]
   # 직접 호출은 bump.yaml(비-변이 reconciler)에만 잔존.
   grep -q 'auto-merge-or-fail.sh' "$WF/bump.yaml" || { echo "missing shared fallback in bump.yaml"; false; }
   # ⚠️ bump-poll 레인은 **파일이 아니라 도구**가 소유한다(plan r4 R-8): auto-merge는 tools/ensure-bump-pr.ts
