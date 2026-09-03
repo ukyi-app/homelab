@@ -43,3 +43,14 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
   run grep -q 'Egress' "$P"; [ "$status" -eq 0 ]
   run grep -q 'Ingress' "$P"; [ "$status" -eq 1 ]
 }
+
+@test "the rendered NetworkPolicy set has an upper bound (names + ipBlock cidrs)" {
+  # 파일 스코프 전칭 둘(위 @test)은 컴포넌트 안의 원소를 잰다 — kustomization에 새 netpol 파일을
+  # 등록하는 세 번째 경로는 파일 스코프 밖이라 무증인이었다(2026-09-03 실측: extra-netpol.yaml
+  # 신설 + kustomization 등록 → 65/65 초록 + 렌더에 podSelector:{} 광역 egress 실재).
+  # adguard/prod는 KSOPS generator가 없어(SealedSecret만) age 키 없이 build가 CI-safe하게 돈다.
+  R="$(kustomize build "$BATS_TEST_DIRNAME")"
+  [ "$(printf '%s\n' "$R" | yq 'select(.kind=="NetworkPolicy")|.metadata.name' | grep -v '^---$' | LC_ALL=C sort | paste -sd,)" = \
+    "adguard-allow-egress-upstream-dns,adguard-default-deny-egress,rewrite-reconciler-allow-egress,rewrite-reconciler-default-deny-egress" ]
+  [ "$(printf '%s\n' "$R" | yq '[.. | select(has("ipBlock")) | .ipBlock.cidr] | .[]' | LC_ALL=C sort | paste -sd,)" = "0.0.0.0/0,192.168.117.0/24" ]
+}
