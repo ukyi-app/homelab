@@ -40,10 +40,20 @@ platform/cnpg/prod/test_creds_reference.bats
 platform/cnpg/prod/test_drill_alerting.bats
 platform/cnpg/prod/test_kustomize_build.bats
 platform/cache/prod/test_ksops_render.bats
-# terraform 의존(gate엔 terraform 미설치) — 실행처: .github/workflows/iac.yaml (advisory 잡)
+# terraform 의존 — 실행처: .github/workflows/iac.yaml (advisory 잡)
+#   ⚠️ **사유는 "gate 러너에 terraform이 없다"가 아니다**(그건 설치 한 줄로 없어진다). 실측 2026-09-03:
+#      `terraform validate`는 provider 플러그인을 요구해 `init` 없이는 3루트 모두 rc=1이고
+#      ("missing or corrupted provider plugins"), `init -backend=false -lockfile=readonly`는 콜드에서
+#      11.6s·**299MB**를 registry.terraform.io에서 받는다(cloudflare 252M·github 25M·tailscale 22M).
+#      required check는 `gate` 하나뿐이라(decisions/0003) 그 편입은 **전 PR의 통과 여부를 서드파티
+#      레지스트리 가용성에 매다는 것**이다 — ci.yaml이 훨씬 작은 다운로드에 대해 이미 거부한 클래스다.
+#      init 뒤 validate 자체는 0.7s, fmt -check는 0.1s·오프라인이다(비용은 전부 provider 수신에 있다).
+#   ⚠️ 게다가 그 @test의 결함 클래스는 **같은 advisory 잡의 바로 앞 스텝**이 이미 덮는다 —
+#      `terraform init -backend=false -lockfile=readonly` 3루트 + `make tf-validate`를 그 스텝이 직접
+#      돌린다. 남은 고유 내용은 `<root>: validated` echo 3줄 대조뿐이다.
 #   ⚠️ test_tf_reconcile.bats는 여기 있었지만 terraform 비의존(전 @test가 워크플로 grep)이라 gate로 옮겼다 —
-#      required check는 `gate` 하나뿐이고(decisions/0003), iac.yaml의 paths 필터는 `.github/**`를 안 봐서
-#      tf-reconcile.yaml만 바꾸는 PR에서는 그 advisory가 아예 뜨지 않았다.
+#      iac.yaml의 paths 필터는 `.github/**`를 안 봐서 tf-reconcile.yaml만 바꾸는 PR에서는 그 advisory가
+#      아예 뜨지 않았다. 반면 `infra/**`는 paths에 있으므로 .tf를 깨는 PR에서는 이 advisory가 실제로 뜬다.
 #   ⚠️ test_tf_validate.bats의 terraform 비의존 @test 2개(R2 prevent_destroy 신원·app DNS 자원 분리)도
 #      같은 이유로 infra/_tests/test_tf_static.bats로 갈라져 gate에서 돈다 — 여기 남은 것은
 #      `make tf-validate`를 부르는 @test 하나뿐이다.
