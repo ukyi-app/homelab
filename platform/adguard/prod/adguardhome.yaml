@@ -52,7 +52,10 @@ data:
         #    AdguardRewriteReconcilerStale가 페이징하고, 그때만 `kubectl -n gateway get svc traefik-ts`의 IP로 수동 갱신한다
         #    (cp -n 시드라 라이브 PVC의 AdGuardHome.yaml도 함께 고쳐 재시작해야 반영).
         - domain: "*.home.ukyi.app"
-          answer: "100.120.85.39" # traefik-ts tailscale 디바이스 IP (2026-06-22 tailscale 전용 ns 이전으로 proxy 재등록 → 갱신)
+          # DR 첫 부팅용 **초기값**(cp -n)이지 라이브 단정이 아니다. 권위는 라이브 `traefik-ts` svc이고
+          # rewrite-reconciler가 ≤10분 내 덮어쓴다 — 이 숫자의 최신성은 보장되지 않는다
+          # (디바이스 재등록 시 어차피 바뀐다. 2026-09-03 실측 갱신: 옛 100.120.85.39는 tailnet에 없다).
+          answer: "100.67.173.106"
       protection_enabled: true
     filters:
       - enabled: true

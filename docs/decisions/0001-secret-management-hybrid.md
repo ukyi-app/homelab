@@ -56,7 +56,7 @@ heredoc·sealed 산출물 경로 — 비-secret). 실제 회전 절차·revoke �
 | 크리덴셜 | SOPS(`*.enc.yaml`) | SealedSecret(`*.sealed.yaml`) | Actions secret / 기타 |
 |---|---|---|---|
 | telegram 봇 토큰 | `victoria-stack/prod/alerting.enc.yaml`, `cnpg/prod/restore-drill-alerting.enc.yaml` (2) | `argocd/extras/argocd-notifications-secret.sealed.yaml` (1) | `TELEGRAM_BOT_TOKEN`(github tf) (1) |
-| R2 pg/cache 키 | `cnpg/prod/r2-creds.enc.yaml`, `cache/prod/cache-r2-creds.enc.yaml` (2) | — | `R2_*`(github tf)·`infra/*/backend.hcl` state 버킷 재사용 |
+| R2 **백업** 키(pg/cache) | `cnpg/prod/r2-creds.enc.yaml`, `cache/prod/cache-r2-creds.enc.yaml` (2) | — | — (owner-local `.env.secrets` `R2_BACKUPS_PG_CACHE_*` → `make seed-secrets`). ⚠️ GH secret `R2_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`·`infra/*/backend.hcl`은 **별개 토큰**(terraform state, 2026-07-08 분리)이고 terraform 관리가 아니다(수동 `gh secret set`) — 그 행은 `policy/credential-expiry.json`의 `r2-terraform-state`가 소유한다 |
 | GHCR_PULL_TOKEN | — | `ghcr-pull/prod/ghcr-pull.sealed.yaml`, `files/prod/ghcr-pull.sealed.yaml`, `victoria-stack/prod/ghcr-read.sealed.yaml` (3) | — (owner-local `.env.secrets`) |
 | cert-manager CF | `traefik/prod/cloudflare-api-token.enc.yaml` (1) | — | (broad `TF_VAR_cloudflare_api_token`은 별개 토큰 — tf provider 전용) |
 

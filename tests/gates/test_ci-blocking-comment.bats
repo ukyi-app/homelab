@@ -20,9 +20,19 @@ setup() {
   [ "$output" = "0" ]
 }
 
-@test "ci.yaml audit gate comment names both real blocking types" {
-  # BLOCKING = {orphan-dns, activation-exposure-drift} (dangling-binding은 연결=SealedSecret으로 제거).
+@test "ci.yaml audit gate comment names every blocking type from the source set" {
+  # ⚠️ 옛 판본은 두 리터럴(orphan-dns·activation-exposure-drift)을 **하드코딩**해서 강제가
+  #    단방향이었다: 주석이 낡아도 코드 쪽 BLOCKING이 커지면 아무도 안 봤다. 실제로 갈렸다 —
+  #    `missing-activation`은 #293(2026-07-06)에 BLOCKING에 들어갔는데 ci.yaml 주석은
+  #    2026-06-25 판본 그대로였고 이 @test는 계속 초록이었다(2026-09-03 실측 재현).
+  #    ⇒ 소유자를 소스 한 곳으로 옮긴다: BLOCKING 줄에서 토큰을 파생해 전건을 루프로 확인한다.
   cmt="$(awk '/registry\/binding 정합 게이트/{f=1} f&&/bun tools\/audit-orphans.ts --ci/{exit} f' "$CI")"
-  run grep -q 'orphan-dns' <<<"$cmt"; [ "$status" -eq 0 ]
-  run grep -q 'activation-exposure-drift' <<<"$cmt"; [ "$status" -eq 0 ]
+  [ -n "$cmt" ]                      # 주석 블록 열거 붕괴(스텝 이름이 바뀌면 여기서 red)
+  toks="$(grep -E 'const BLOCKING = new Set' "$SRC" | grep -oE '"[a-z-]+"' | tr -d '"')"
+  n=0
+  for t in $toks; do
+    grep -q -- "$t" <<<"$cmt" || fail "ci.yaml 게이트 주석에 BLOCKING 유형 '$t'가 없다 — 주석이 코드보다 낡았다"
+    n=$((n + 1))
+  done
+  [ "$n" -ge 3 ]                     # 토큰 열거 붕괴 바닥값(현 셋 크기 = 3)
 }

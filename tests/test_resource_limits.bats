@@ -16,10 +16,12 @@ _track() {
   git -C "$1" add -A 2>/dev/null
 }
 
-# 정상 픽스처(scan-floor 통과용 10건): cpu·memory request + memory limit 보유.
+# 정상 픽스처(scan-floor 통과용): cpu·memory request + memory limit 보유.
+# ⚠️ 개수는 `tools/check-resource-limits.ts`의 MIN_SCAN(18)과 함께 움직인다 — 그보다 적으면
+#    모든 픽스처 @test가 열거 붕괴로 죽는다(판정이 아니라 전제에서 죽어 red-green이 무의미해진다).
 _seed_ok() {
   local root="$1" i
-  for i in $(seq 1 10); do
+  for i in $(seq 1 18); do
     mkdir -p "$root/platform/ok$i/prod"
     cat > "$root/platform/ok$i/prod/deploy.yaml" <<YAML
 apiVersion: apps/v1
@@ -124,7 +126,7 @@ YAML
   tmp="$(mktemp -d)"
   mkdir -p "$tmp/scripts" "$tmp/policy" "$tmp/platform/probe/prod"
   : > "$tmp/policy/memory-limit-allowlist.txt"
-  # 열거는 성공하되(YAML 3건) 워크로드 kind는 0건 → MIN_SCAN=10 미달로 fail-loud.
+  # 열거는 성공하되(YAML 3건) 워크로드 kind는 0건 → MIN_SCAN 미달로 fail-loud.
   echo 'kind: ConfigMap'  > "$tmp/platform/probe/prod/a.yaml"
   echo 'kind: Service'    > "$tmp/platform/probe/prod/b.yaml"
   echo 'kind: Namespace'  > "$tmp/platform/probe/prod/c.yaml"
@@ -158,7 +160,7 @@ spec:
           resources: { requests: { memory: 16Mi } }
 YAML
   _track "$tmp"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp" --exempt-max 1
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -eq 0 ]
@@ -251,7 +253,7 @@ spec:
   instances: 1
 YAML
   _track "$tmp"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp" --exempt-max 1
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -eq 0 ]
@@ -328,4 +330,65 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -eq 0 ]
+}
+
+# ── 면제 목록의 증인(critic-C) ─────────────────────────────────────────────
+# 한 줄 추가가 곧 상주 워크로드의 memory limit 면제인데, 이 목록에만 형제 둘
+# (check-image-pins.sh:67-83 · check-alert-rules.ts ALLOWLIST)이 가진 "사유 강제"가 없었고
+# "면제가 늘어났다"를 잴 상한도 없었다(cf. check-bats-accounting.sh의 EXCL_MAX 선례).
+# 아래 셋이 그 규율의 증인이다 — 뮤테이션이 red를 내지 않으면 규율은 산문일 뿐이다.
+
+@test "an allowlist entry without a reason is rejected" {
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/scripts" "$tmp/platform/probe/prod" "$tmp/policy"
+  printf 'Deployment/probe/probe\n' > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  _track "$tmp"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp" --exempt-max 1
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q '무근거 면제는 금지'
+}
+
+@test "a reason on the preceding line satisfies the requirement" {
+  # check-image-pins.sh:68과 같은 규약 — 인라인 또는 **직전 줄** 주석.
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/scripts" "$tmp/platform/probe/prod" "$tmp/policy"
+  printf '# 직전 줄 사유: 벤더 차트라 소스에 없다\nDeployment/probe/probe\n' > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  _track "$tmp"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp" --exempt-max 1
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+@test "the enforced-exemption count is capped (growth needs a reviewed constant bump)" {
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/scripts" "$tmp/platform/probe/prod" "$tmp/policy"
+  printf 'Deployment/probe/probe   # 사유 있음\n' > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  _track "$tmp"
+  # 기본 상한 0 = 실 트리의 현 강제 면제 건수. 1건이면 상한 초과로 fail-loud.
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q '상한'
+  echo "$output" | grep -q 'EXEMPT_MAX'
+}
+
+@test "a non-integer exempt-max is rejected instead of silently disabling the cap" {
+  # Number("abc")는 NaN이고 `n > NaN`은 항상 false다 — 상한이 조용히 꺼지는 레포 등재 함정.
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/scripts" "$tmp/platform/probe/prod" "$tmp/policy"
+  printf 'Deployment/probe/probe   # 사유 있음\n' > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  _track "$tmp"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp" --exempt-max abc
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q 'exempt-max'
 }

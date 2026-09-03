@@ -6,6 +6,12 @@ limit 합계가 이를 초과하면 새 앱 온보딩은 CI에서 실패한다 (
 원장 포맷/검증기는 이것 하나뿐이다. M6의 온보딩 게이트도 이 파일에 대해
 `bun run verify:ledger`를 재사용하며, 제2의 원장을 정의하지 않는다.
 
+⚠️ **예산의 도메인은 "이 노드에 상주하는 워크로드 전부"이지 `platform/`이 아니다.** ArgoCD가 싱크하지
+않는 것 — `infra/k3s-bootstrap`이 적용하는 substrate 워크로드(local-path-provisioner 2대)와 operator가
+파생 생성하는 것(tailscale proxy StatefulSet) — 도 같은 노드의 allocatable을 먹으므로 예산 안이다.
+`tools/check-resource-limits.ts`의 스캔 root는 `platform`뿐이라 그 둘은 **기계 대조 밖·수기 계상**이다:
+해당 매니페스트의 limit을 바꾸는 PR은 이 원장 행도 손으로 함께 옮겨야 한다.
+
 ## 모델 주석 — 명목 잔여 ≠ 실 헤드룸 (의도적 보수성)
 
 이 합계는 **limit-합 가드(cap)**이지 실제 RAM 예약이 아니다. k8s는 requests만 스케줄에 강제하고
@@ -196,6 +202,25 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
   | `glances` | 76.7Mi | 115.1 | 128Mi | 128Mi | 유지(1.67x) |
   | `victorialogs` | 107.6Mi | 161.4 | 256Mi | 256Mi | 유지(2.38x) |
 
+  🔴 **재측정 필요 — `vmagent` 행이 자기 규약 아래로 내려갔다(2026-09-02 관측, 미착지)**. 같은 규약·
+  같은 창(부팅 2026-08-26T13:41:06Z 이후)·같은 step(30s)으로 다시 재면 vmagent RSS peak는
+  **176.3Mi**이고, 176.3×1.5=264.5 > 256이라 배수가 **1.45x**로 위 표의 하한 1.5를 밑돈다. 값은 6일간
+  단조 상승 중이었다(08-27 148.3 → 08-31 161.9 → 09-01 168.5 → 09-02 176.3). 나머지 넷은 같은
+  재측정에서 규약을 충족했다. 이 이탈은 어떤 게이트도 잡지 않고(원장 행은 라이브 manifest와
+  자동 교차검증되지 않는다 — `homepage`만 예외), `ContainerMemoryNearLimit`은 A′ 0.85(=217.6Mi)라
+  현재 A′ peak 178.6Mi(0.698)에서 침묵한다 — **규약 위반과 알림 사이에 39Mi의 무성 구간이 있다.**
+
+  ⚠️ 그런데 **여기서 숫자를 고치지 않는다.** 이 표의 값은 2026-09-01에 이 규약을 세우면서 라이브로
+  잰 것이고, 그 규약이 요구하는 갱신 단위는 "행 하나"가 아니라 **재측정 1회 전체**다. 한 행만
+  새 창의 숫자로 바꾸면 남은 넷은 옛 창에 머물러 표가 두 체제를 섞는다(바로 위 「측정 창이 기판
+  변경을 가로지르면」이 경고하는 형태 그대로다). 게다가 처방 자체가 갈린다 — 176.3의 1.5배인
+  272Mi는 관측된 상승 속도(150.5→176.3/36h)면 며칠 안에 재위반하고, 대안(분모를
+  `max(실측 RSS peak, GOMEMLIMIT)`로 바꿔 304Mi로 한 번에 올리기)은 규약 문언 자체를 바꾸는
+  결정이라 이 자리에서 조용히 할 일이 아니다. 같은 재측정에서 `grafana`도 창을 어떻게 자르느냐에
+  따라 1.49x(재기동 직후 전이 포함)와 1.71x로 갈리므로, **"재기동 직후 전이를 창에 포함하는가"를
+  규약 문언에 못박는 것이 재측정의 선행 조건**이다. ⇒ owner-local 라이브 재측정 + 규약 문언 확정
+  후 다섯 행을 한 커밋에 갱신한다(followups).
+
   ⚠️ **이 규약은 하한이다 — 만족하는 행을 깎는 근거가 아니다.** 특히 `grafana`는 knob이 하나도 없어
   (allowedPercent도 GOMEMLIMIT도 없는 Go 기본 GOGC) limit을 낮추면 자기조절로 흡수되지 않고 그대로
   OOM 위험으로 전가된다. `victorialogs`는 2.38x로 여유가 커 보이지만 **14일 rss peak 119.8Mi가
@@ -372,8 +397,9 @@ atomic []string이라 strategic-merge가 리스트를 통째로 교체한다(실
 | <!-- ledger:row --> glances        | observability  |     64 |      128 |
 | <!-- ledger:row --> cache-trip-mate | cache          |     96 |      160 |
 | <!-- ledger:row --> files          | files          |     32 |      64 |
+| <!-- ledger:row --> local-path-storage | local-path-storage |     64 |     128 |
 
-**합계:** req ≈ 4663 Mi · limit ≈ 9164 Mi (반드시 ≤ 10240 Mi 유지).
+**합계:** req ≈ 4727 Mi · limit ≈ 9292 Mi (반드시 ≤ 10240 Mi 유지).
 (⚠️ 이 줄의 형식은 **계약**이다 — `≈` 두 개를 포함한 `tools/lib/ledger-totals.ts`의 `TOTALS_RE`가
 쓰기 경로(`replaceTotals` — create-app/provision-cache/teardown-app/teardown-resource)의 앵커다.
 2026-08-31 정정에서 `≈`가 떨어져 나가 실 원장에 대해 `replaceTotals`가 throw했고, 그동안 세 개의
@@ -382,6 +408,13 @@ atomic []string이라 strategic-merge가 리스트를 통째로 교체한다(실
 두 숫자가 행 합과 다르면 red. 손으로 행을 고치면 이 줄도 함께 고칠 것.)
 (`pg-tools`는 CronJob용 ops 이미지 — 일시적이므로 상주 워크로드 행이 없다. worker/web/console
 values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 앱은 온보딩 PR이 행을 추가한다.)
+
+> **local-path-storage 행 = k3s-bootstrap substrate 워크로드** — `infra/k3s-bootstrap/storage/local-path-provisioner.yaml`이
+> Deployment 2개(`local-path-provisioner-internal`·`-bulk`, 각 req 32Mi/limit 64Mi)를 `local-path-storage` ns에
+> 적용한다. ⚠️ 이 둘은 **ArgoCD 관리가 아니고**(`app.kubernetes.io/instance` 라벨 없음 — 라이브 실측
+> 2026-09-03) `tools/check-resource-limits.ts`의 스캔 root(`platform`)에도 없어, 두 `resources:` 블록을
+> 지워도 `make verify`·gate·ArgoCD가 전부 초록이다. tailscale proxy 행과 같은 **수기 계상** 클래스다 —
+> 그 파일의 limit을 바꾸면 이 행도 손으로 따라와야 한다(스캐너 root 확장은 repo-walk 스코프 설계라 별건).
 
 > **tailscale 행 = operator + proxy N대** — `loadBalancerClass: tailscale` 서비스 1개마다 operator가
 > proxy StatefulSet(ts-*)을 1대 생성하고 defaultProxyClass(`resource-capped`)가 각 192Mi limit/64Mi req를

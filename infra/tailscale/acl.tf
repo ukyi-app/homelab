@@ -61,6 +61,20 @@ resource "tailscale_acl" "homelab" {
 #    모든 질의를 MagicDNS로 끌어가 이름해석이 클러스터를 경유하게 되고, 그게 §2.4 콜드스타트
 #    교착이다. 노드에서는 `tailscale set --accept-dns=false`로 끊는다
 #    (`infra/k3s-bootstrap/host-config.sh --apply`가 걸고, `host-preflight.sh` [3]이 검사한다).
+# ⚠️ **이 IP를 가진 노드는 tailscale 노드 key 만료가 해제돼 있어야 한다.** 태그 없는 owner 디바이스는
+#    기본이 만료 있음이고(tag:k8s 프록시·해제한 Mac mini는 `KeyExpiry=null`), 만료되면 그 노드가
+#    tailnet에서 떨어져 **tailnet 전역 이름해석이 통째로 죽는다**(위 "폴백 없음"과 같은 뜻). 복구엔
+#    LAN/물리 접근 재인증이 필요하다.
+#    실측 2026-09-03 `tailscale status --json`: Self=`nuc-15-pro`(현 nameserver 노드) Tags=null
+#    **KeyExpiry=2027-02-02T16:15:27Z — 아직 해제되지 않았다**. 2026-08-18 컷오버(맥미니→NUC)가
+#    2026-08-14에 맥미니에 했던 `keyExpiryDisabled=true`를 새 노드로 이월하지 않았다.
+#    ⇒ owner 1회 조작이 처방이다: admin console → Machines → nuc-15-pro → Disable key expiry.
+#    감시는 `policy/credential-expiry.json`의 `ts-node-key-nuc` 행이 진다(D-14 = 2027-01-19).
+#    해제하면 그 행을 2099 sentinel + "해제 완료" note로 바꾼다.
+#    IaC(`tailscale_device_key`) 경로는 **쓰지 않는다** — 그 리소스는 `devices:core`(write)를 요구하는데
+#    CI 주입 스코프는 `["policy_file:read","dns:read","oauth_keys:read"]` **정확 일치**로
+#    `infra/tailscale/test_provider_scopes.bats`가 잠가 두었다(required/error인 drift-tailscale이
+#    30분마다 403 또는 허위 드리프트를 내게 된다).
 resource "tailscale_dns_nameservers" "global" {
   nameservers = [var.dns_nameserver_tailscale_ip]
 }

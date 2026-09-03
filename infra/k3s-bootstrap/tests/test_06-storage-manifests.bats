@@ -45,8 +45,12 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
 
 @test "helper pod image is wired to the LOCAL_PATH_HELPER_IMAGE placeholder" {
   # 소스 매니페스트는 플레이스홀더 리터럴을 담고 있다; apply-storage.sh(Task 1.8)가
-  # 렌더 시점에 versions.env의 arm64 고정 digest로 치환하며, 그 렌더 결과 검사는
-  # 07-apply-storage.bats에 있다.
+  # 렌더 시점에 versions.env의 `LOCAL_PATH_HELPER_IMAGE` 고정 digest로 치환하며, 그 렌더 결과
+  # 검사는 07-apply-storage.bats에 있다.
+  # ⚠️ 옛 주석은 그 digest를 "arm64 고정"이라 적었는데 SSOT가 그것을 **실측으로 반증**해 두었다
+  #    (versions.env:13-17 — 2026-08-11 실측: amd64 포함 9플랫폼 인덱스다). 노드 아키텍처를
+  #    따라가는 것이 의도이고, NUC(amd64) 이전에 필요한 성질이다. SSOT 정정이 소비처로
+  #    전파되지 않은 자리였다(2026-09-03 정정).
   run grep -F '${LOCAL_PATH_HELPER_IMAGE}' "$PROV"; [ "$status" -eq 0 ]
 }
 
