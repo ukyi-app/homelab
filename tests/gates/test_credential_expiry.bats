@@ -81,6 +81,20 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+# 위 @test는 `기본값 <= 원장 크기`만 잰다 — 기본값이 원장보다 **낮은** 여유(slack)는 그대로 통과한다.
+# 실측 2026-09-03: 기본값 8 / 원장 10으로 2행이 조용히 사라져도 --lint와 --days 14가 모두 초록이었다
+# (#613·#614가 행만 더하고 바닥을 안 올린 결과). 아래가 그 여유를 재는 증인이다 — 수치를 적지 않고
+# 커밋된 원장에서 파생하므로 원장이 커져도 드리프트하지 않는다.
+@test "the default floor carries no slack: dropping one committed row must collapse the enumeration" {
+  tmp="$(mktemp)"
+  jq '.[0:-1]' "$ROOT/policy/credential-expiry.json" > "$tmp"
+  # 양성 대조: 잘라낸 원장이 스키마상 여전히 유효해야 이 단언이 바닥값을 재는 것이 된다.
+  n="$(jq length "$tmp")"; [ "$n" -ge 1 ]
+  run bash "$s" --file "$tmp" --lint
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "열거 붕괴"
+}
+
 @test "committed credential ledger parses and every entry has name+expires" {
   run bash "$s" --file "$ROOT/policy/credential-expiry.json" --lint
   [ "$status" -eq 0 ]
