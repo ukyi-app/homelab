@@ -76,3 +76,14 @@ setup() {
   #    rc 2로 죽고도 통과해, 이 파일에서 혼자 초록으로 남았다.
   run grep -Eq 'cidr:[[:space:]]*10\.42' "$P"; [ "$status" -eq 1 ]
 }
+
+@test "netpol/proxyclass are wired into the kustomization (membership, not mere existence)" {
+  # 파일 실재 ≠ 렌더 포함 — resources에서 빠지면 ArgoCD가 라이브를 프룬한다. proxyclass는
+  # policy/memory-limit-allowlist.txt:27-28이 proxy cap의 SSOT로 지목한 파일이다.
+  # 관용구 출처: tests/gates/test_dual-run-excludes.bats:58-61(원문 grep 금지 — 주석·들여쓰기 통과).
+  K="${BATS_TEST_DIRNAME}/kustomization.yaml"
+  run yq '.resources | contains(["traefik-ingress.yaml","proxyclass.yaml","networkpolicy.yaml"])' "$K"
+  printf '%s' "$output" | grep -qxF -- 'true'
+  [ -f "${BATS_TEST_DIRNAME}/proxyclass.yaml" ]
+  [ -f "${BATS_TEST_DIRNAME}/networkpolicy.yaml" ]
+}
