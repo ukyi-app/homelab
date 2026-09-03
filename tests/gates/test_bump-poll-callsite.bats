@@ -946,7 +946,10 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
   [ "$status" -eq 0 ]
   run grep -q 'auto-merge-or-fail\.sh' "$ROOT/.github/workflows/bump.yaml"
   [ "$status" -eq 0 ]
-  run grep -q 'auto-merge-or-fail\.sh' "$ROOT/.github/actions/pr-first-commit/action.yml"
+  # ⚠️ composite 자리만 **커맨드 줄에 앵커한다** — 이 파일은 액션의 헤더 주석(:3)과 입력
+  #    description(:14)에도 같은 토큰을 담고 있어서, 앵커 없는 substring은 arm 블록을 통째로
+  #    지워도 초록이었다(cf. tests/gates/test_automerge-fallback.bats의 같은 자리, 2026-09-03).
+  run grep -Eq '^[[:space:]]*bash scripts/auto-merge-or-fail\.sh' "$ROOT/.github/actions/pr-first-commit/action.yml"
   [ "$status" -eq 0 ]
   run grep -q 'auto-merge-or-fail\.sh' "$ROOT/tools/ensure-bump-pr.ts"
   [ "$status" -eq 0 ]

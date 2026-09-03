@@ -28,7 +28,9 @@ setup() {
   export GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=ci@homelab.test
   export GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@homelab.test
 }
-teardown() { rm -rf "$TMP"; }
+# ⚠️ 거부 레인 하나가 레포 루트를 밟는다 — 그 경로가 곧 이 스위트의 산출물이므로 정리도 여기 몫이다.
+#    (스크립트가 자기 부작용을 걷게 고쳤어도 teardown은 남긴다: 회귀하면 실행 횟수만큼 다시 쌓인다.)
+teardown() { rm -rf "$TMP" "$ROOT/scratch_ssk_$$"; }
 
 # 스텁: kubectl은 가짜 키 Secret을 내보내고, sops는 base64로 "암호화"한다(평문 grep 차단).
 make_stubs() { # $1 = sops 동작: ok | fail
@@ -82,6 +84,21 @@ EOF
   PATH="$STUB:$PATH" run "$S" "$ROOT/scripts"
   [ "$status" -ne 0 ]
   echo "$output" | grep -qi "git"
+  # 이 레인의 피연산자는 **기존** 디렉토리다 — 거부의 `rmdir … || true`가 비어 있지 않은 outdir을
+  # 지키는 것을 증언한다(부재 경로 축은 아래 @test가 잰다).
+  [ -d "$ROOT/scripts" ]
+}
+
+@test "backup refuses an outdir inside the git work tree and leaves nothing behind" {
+  # ⚠️ 스크립트의 `mkdir -p`가 git-작업트리 판정보다 **앞**이다 — 거부하면서 거부 대상을 만들어
+  #    두면 그 빈 700 디렉토리는 git에 안 보이고(추적 0) 발견 수단이 `ls`뿐인 무증인 잔여물이 된다.
+  #    형제 backup-local-asset.sh에서 실제로 레포 루트에 8개가 그렇게 쌓인 뒤 발견된 클래스다.
+  #    위 @test는 기존 디렉토리를 주므로(mkdir이 no-op) 이 축을 원리적으로 관측하지 못한다.
+  make_stubs ok
+  PATH="$STUB:$PATH" run "$S" "$ROOT/scratch_ssk_$$"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "git 작업트리"
+  [ ! -d "$ROOT/scratch_ssk_$$" ]
 }
 
 @test "failed encryption leaves the previous backup intact and no plaintext on disk" {

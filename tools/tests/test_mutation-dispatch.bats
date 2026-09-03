@@ -257,6 +257,23 @@ EOF
   [ -f "$a" ]
   grep -q 'status=cancelled' "$a"
   grep -q 'source: 변이' "$a"
+  # ⚠️ 위 두 줄은 **리터럴 실재**만 잰다 — 정규화 술어를 도달불가로 만들어도(패턴을 "ZZZNEVER"로),
+  #    두 echo 분기를 서로 맞바꿔도 리터럴이 그대로 남아 34/34 전건 초록이었다(2026-09-03 실측).
+  #    이름이 약속한 「취소>실패」에 증인이 없던 자리다(traps 「테스트 이름은 인터페이스가 아니다」).
+  # ⚠️ 스텝 선택은 인덱스가 아니라 **id**로 — steps[0]은 스텝 순서 드리프트에 조용히 엉뚱한 본문을 잡는다.
+  body="$(yq -r '.runs.steps[] | select(.id == "norm") | .run' "$a")"
+  [ -n "$body" ]   # 추출 붕괴 바닥값
+  # ⚠️ **우선순위 증인은 혼합 페이로드다.** cancelled-only / failure-only 두 레인만으로는 단일 결과라
+  #    우선순위 조건을 아예 밟지 않는다 — 취소와 실패가 **함께** 있는 입력이라야 술어가 답을 낸다.
+  # ⚠️ `bash -c "$body"`는 큰따옴표로 — 홑따옴표면 bats 지역 변수가 빈 문자열이 되어 vacuous green이다
+  #    (traps 「정적 증인의 두 함정」 병 ②).
+  RESULTS='{"a":{"result": "cancelled"},"b":{"result": "failure"}}' \
+    GITHUB_OUTPUT="$BATS_TEST_TMPDIR/norm.cancelled" bash -c "$body"
+  grep -qx 'status=cancelled' "$BATS_TEST_TMPDIR/norm.cancelled"
+  # 대조군 — 실패만 있으면 failure다(분기가 상수로 붕괴하면 둘 중 하나가 red).
+  RESULTS='{"b":{"result": "failure"}}' \
+    GITHUB_OUTPUT="$BATS_TEST_TMPDIR/norm.failure" bash -c "$body"
+  grep -qx 'status=failure' "$BATS_TEST_TMPDIR/norm.failure"
 }
 
 # ⚠️ 아래 세 거부 레인은 `-ne 0`만으로 닫히지 않는다 — validate-mutation.ts를 지우면 bun도 비-0을

@@ -28,6 +28,8 @@ outdir="$(cd "$outdir" && pwd)"
 # git 안 보관 금지: 암호화돼 있어도 키 백업은 레포 밖 매체(외장 SSD/패스워드 매니저)에만 둔다.
 if (cd "$outdir" && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
   echo "ERROR: outdir($outdir)가 git 작업트리 안이다 — 레포 밖에 보관하라" >&2
+  # cf. scripts/backup-local-asset.sh:18-26 — 순서 echo→rmdir→exit, `|| true`는 기존 비어있지 않은 outdir 보호.
+  rmdir "$outdir" 2>/dev/null || true
   exit 1
 fi
 
