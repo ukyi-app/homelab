@@ -209,6 +209,10 @@
 - **`netpol-rehearsal.sh`** — **owner-local**. NetworkPolicy candidate를 selfHeal off→apply→verify-posture→
   trap 복원으로 리허설(라벨 미스가 prod로 안 새게). GitOps selfHeal라 머지 전 필수(pre-merge posture는
   main=broad을 테스트, candidate 아님). Makefile/워크플로 배선 없음 — 직접 실행.
+  ⚠️ 인-레포 앱 0인 현 정상 상태(`apps/README.md`)에서는 **kubelet 프로브 레그만** skip된다(경고 출력) —
+  리허설 자체는 돈다. POSITIVE pg-rw·pg-pooler-rw(F4b)·NEGATIVE egress deny는 `probe()`가 자기 파드를
+  띄우므로 앱 파드와 무관하게 실질 판정이고, ipBlock 핀은 `platform/network-policies/prod/test_netpol.bats`가
+  gate에서 따로 강제한다. prod에 파드는 있는데 셀렉터가 0건이면(라벨 드리프트) 그건 열거 붕괴라 exit 1이다.
 - **`auto-merge-or-fail.sh`** — 워크플로 헬퍼(비파괴). `bump.yaml`·변이 경로가 PR 생성 후 auto-merge
   설정, PR이 CLEAN일 때만 폴백하고 BLOCKED/BEHIND/UNKNOWN이면 시끄럽게 실패(un-gated 직접 머지 차단). `make`/직접 실행 아님.
 - **`backup-local-asset.sh`** — **owner 전용(DR 불변식, 비파괴)**. 런북(`docs/runbooks/`, gitignored 단일
