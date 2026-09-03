@@ -25,20 +25,23 @@ import { appPaths, appRel } from "./lib/app-surface.ts";
 import { decodePlan, encodePlan, resolveLane, type Candidate, type PinRef, type PlanItem, type Target } from "./lib/bump-plan.ts";
 
 const USAGE = `poll-ghcr — GHCR 폴링 bump 플래너(읽기 전용, update-image 권위 경로)
-사용법: bun tools/poll-ghcr.ts [--dry-run] [--root <dir>] [--owner <org>] [--fixtures <dir>]
-  --dry-run         plan JSON만 출력(부작용 0)
+사용법: bun tools/poll-ghcr.ts [--root <dir>] [--owner <org>] [--fixtures <dir>]
   --root <dir>      레포 루트(기본 .)
   --owner <org>     GHCR org(기본 ukyi-app)
   --fixtures <dir>  테스트 픽스처 소스(라이브 gh/docker 대체)
   --help, -h        이 도움말`;
+// ⚠️ --dry-run 없음 — 이 스크립트는 항상 읽기 전용 플래너다(부작용 모드가 애초에 없다).
+//   전에 파싱만 되고 한 번도 읽히지 않던 죽은 플래그가 있었다: usage는 "부작용 0"이라 광고해
+//   기본 모드에 부작용이 있는 것처럼 함의했고, 전 @test가 그 플래그로만 돌아 라이브 콜사이트
+//   (bump-poll.yaml:159, 플래그 없음)와 다른 venue를 탔다 — 미지 인자는 아래 else에서 exit 2로
+//   거부한다(tools/repin-ops-image.ts:37-42와 같은 규약: 어휘 관성 플래그를 조용히 삼키지 않는다).
 
-const args: { root: string; owner: string; dryRun?: boolean; fixtures?: string } = { root: ".", owner: "ukyi-app" };
+const args: { root: string; owner: string; fixtures?: string } = { root: ".", owner: "ukyi-app" };
 const argv = process.argv.slice(2);
 if (argv.includes("--help") || argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
-  if (a === "--dry-run") args.dryRun = true;
-  else if (a === "--root") args.root = argv[++i];
+  if (a === "--root") args.root = argv[++i];
   else if (a === "--fixtures") args.fixtures = argv[++i];
   else if (a === "--owner") args.owner = argv[++i];
   else {

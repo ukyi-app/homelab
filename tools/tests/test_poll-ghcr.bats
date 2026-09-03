@@ -35,7 +35,7 @@ EOF
 }
 teardown() { rm -rf "$TMP"; }
 
-run_poll() { run bun "$P" --root "$TMP" --fixtures "$FX" --dry-run; }
+run_poll() { run bun "$P" --root "$TMP" --fixtures "$FX"; }
 
 @test "autoDeploy true app with a newer eligible main commit becomes a bump with digest" {
   run_poll
@@ -216,7 +216,7 @@ EOF
   printf '{ "status": "ahead", "ahead_by": 1 }\n' > "$FX/files.compare-aaa1111-main.json"
   printf '{ "status": "ahead", "ahead_by": 1 }\n' > "$FX/files.compare-aaa1111-bbb2222.json"
   printf '{ "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" }\n' > "$FX/files.manifest-sha-bbb2222.json"
-  run bun "$P" --root "$TMP" --fixtures "$FX" --dry-run
+  run bun "$P" --root "$TMP" --fixtures "$FX"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.[] | select(.target.name=="files") | .action == "bump"'
   echo "$output" | jq -e '.[] | select(.target.name=="files") | .pin == "platform/files/prod/.image-pin.json"'
@@ -242,7 +242,7 @@ EOF
   printf '{ "status": "ahead", "ahead_by": 1 }\n' > "$FX/files.compare-aaa1111-main.json"
   printf '{ "status": "ahead", "ahead_by": 1 }\n' > "$FX/files.compare-aaa1111-bbb2222.json"
   printf '{ "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" }\n' > "$FX/files.manifest-sha-bbb2222.json"
-  run bun "$P" --root "$TMP" --fixtures "$FX" --dry-run
+  run bun "$P" --root "$TMP" --fixtures "$FX"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.[] | select(.target.name=="files") | .action == "propose-pr"'
 }
@@ -274,7 +274,7 @@ DK
 
 @test "live branch: the seam-routed gh/docker path yields the same bump verdict as the fixtures path" {
   live_stubs
-  run env PATH="$S:$PATH" DOCKER_MODE=ok bun "$P" --root "$TMP" --dry-run
+  run env PATH="$S:$PATH" DOCKER_MODE=ok bun "$P" --root "$TMP"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.[0].action == "bump"'
   echo "$output" | jq -e '.[0].candidate.digest == "sha256:2222222222222222222222222222222222222222222222222222222222222222"'
@@ -284,7 +284,7 @@ DK
   # 종전 execFileSync는 e.stderr∪e.message 두 입력을 봤다 — seam 이관 후엔 r.err(trim된 stderr) 하나다.
   # docker의 실제 실패 표면(stderr)이 isNotFound에 그대로 걸리는지를 라이브 분기로 실증한다.
   live_stubs
-  run env PATH="$S:$PATH" DOCKER_MODE=notfound bun "$P" --root "$TMP" --dry-run
+  run env PATH="$S:$PATH" DOCKER_MODE=notfound bun "$P" --root "$TMP"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.[0].action == "noop"'
   echo "$output" | jq -e '.[0].reason | test("빌드된 main 커밋 없음")'
@@ -292,7 +292,7 @@ DK
 
 @test "live branch: a transient docker failure refuses (never swallowed as absent) through the seam" {
   live_stubs
-  run env PATH="$S:$PATH" DOCKER_MODE=transient bun "$P" --root "$TMP" --dry-run
+  run env PATH="$S:$PATH" DOCKER_MODE=transient bun "$P" --root "$TMP"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.[0].action == "refuse"'
   echo "$output" | jq -e '.[0].reason | test("transient|일시")'
@@ -300,7 +300,7 @@ DK
 
 @test "live branch: a gh api failure folds to refuse via the planner's outer catch (fail-closed preserved)" {
   live_stubs
-  run env PATH="$S:$PATH" GH_FAIL=1 bun "$P" --root "$TMP" --dry-run
+  run env PATH="$S:$PATH" GH_FAIL=1 bun "$P" --root "$TMP"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.[0].action == "refuse"'
   echo "$output" | jq -e '.[0].reason | test("플랜 실패")'

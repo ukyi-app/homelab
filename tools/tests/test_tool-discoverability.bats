@@ -16,7 +16,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   run bun tools/poll-ghcr.ts --help
   [ "$status" -eq 0 ]
   echo "$output" | grep -qi "poll-ghcr"
-  echo "$output" | grep -q -- "--dry-run"
+  echo "$output" | grep -q -- "--root"
 }
 
 @test "make audit runs the read-only static drift audit" {
