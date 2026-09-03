@@ -212,8 +212,11 @@ $RUN tailscale set --accept-dns=false
 $RUN ln -sfn ../run/systemd/resolve/resolv.conf "${R}/etc/resolv.conf"
 
 echo "==> [5/6] 노드 로컬 스토리지 디렉토리"
-# bulk는 넣지 않는다 — D4 한시 운용(국면 A)의 경로·만료일이 미결(D-g)이고, 지금 만들면
-# 어느 국면의 것인지 모르는 디렉토리가 생긴다.
+# bulk는 넣지 않는다 — 그 디렉토리는 이 스크립트 소관이 아니라 **fstab UUID 마운트** 소관이다
+# (국면 B, 2026-08-26 완료: /dev/nvme1n1p1 → /mnt/bulk. SSOT는 versions.env의
+# BULK_MIGRATION_WINDOW_UNTIL 블록). 여기서 만들면 마운트 전에 빈 디렉토리가 생겨 어느
+# 국면의 것인지 모르는 상태가 된다. (초판 주석은 "국면 A의 경로·만료일이 미결(D-g)"이었는데
+# 그 미결은 국면 B 진입으로 해소됐다 — 결론은 같고 근거만 갱신했다.)
 $RUN install -d -m 0700 -o root -g root "${R}${INTERNAL_STORAGE_PATH}"
 
 echo "==> [6/6] 유닛 반영"
