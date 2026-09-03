@@ -19,6 +19,16 @@ setup() {
   run bash "$S" "$FX/ok.sh";  [ "$status" -eq 0 ]
 }
 
+@test "a flag-preceding call site is still caught (the runner's own bats --print-output-on-failure <path> shape)" {
+  # ★ 옛 판정은 `bats` **바로 다음 토큰**만 봐서 플래그가 선행하면 SITES 계상도 위반 판정도
+  #   못 했다(2026-09-03 실측: 레포 러너 자신 scripts/run-bats.sh:67의 표기가 정확히 이 모양이라
+  #   `exec 0</dev/null`을 지워도 SCAN 8·전건 OK가 그대로였다). 플래그 뒤 첫 경로꼴 토큰까지 훑는다.
+  printf 'run:\n  bats --print-output-on-failure tests/foo.bats\n'            > "$FX/flagbad.sh"
+  printf 'run:\n  bats --print-output-on-failure tests/foo.bats </dev/null\n' > "$FX/flagok.sh"
+  run bash "$S" "$FX/flagbad.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[FD0]'
+  run bash "$S" "$FX/flagok.sh";  [ "$status" -eq 0 ]
+}
+
 @test "prose, Makefile help text and version checks are not calls (false-positive control)" {
   # ★ 이 레포의 문장에는 "bats accounting"·"bats 실행(docs/runbooks/)"처럼 bats가 산문으로 나온다.
   #   그걸 호출로 읽으면 가드가 문서를 물어 아무도 켜지 않는다.
