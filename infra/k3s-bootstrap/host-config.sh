@@ -201,11 +201,14 @@ fi
 echo "==> [4/6] 노드 이름해석을 클러스터 독립으로"
 # ⚠️ resolved 드롭인만으로는 부족하다. tailscale이 `~.` 라우팅 도메인으로 **모든** 질의를
 #    가져가고(실측: tailscale0 DNS Domain에 `~.`), 그 업스트림은 tailnet coordination server가
-#    지정한 100.112.20.3 = **맥미니**, 즉 라이브 클러스터의 AdGuard다. 그대로 두면 Mac을 끄는
-#    순간 NUC이 github.com조차 못 푼다 — 이미지 pull 불가.
+#    지정한다. **2026-08-11 실측(2026-08-18 컷오버 전)**에는 그 값이 100.112.20.3 = 맥미니,
+#    즉 옛 라이브 클러스터의 AdGuard였다 — 그대로 두면 Mac을 끄는 순간 NUC이 github.com조차
+#    못 풀었다. **컷오버 후 그 값은 NUC 자신**이므로(infra/tailscale/acl.tf `tailscale_dns_nameservers`)
+#    남는 위험은 외부 의존이 아니라 자기참조 콜드스타트 교착이다: 이름해석을 자기 위의 AdGuard
+#    파드에 맡기면 그 파드가 뜨기 전에는 이미지 pull이 불가능하다.
 #    `--accept-dns=false`는 **이 디바이스에만** 걸린다(tailnet 전역 설정 무변경).
 command -v tailscale >/dev/null 2>&1 \
-  || fail "tailscale이 PATH에 없다 — 노드가 tailnet DNS를 계속 받으면 이름해석이 라이브 Mac에 의존한다"
+  || fail "tailscale이 PATH에 없다 — 노드가 tailnet DNS를 계속 받으면 이름해석이 자기 클러스터의 AdGuard에 의존한다"
 $RUN tailscale set --accept-dns=false
 # DNSStubListener=no면 스텁 파일이 생기지 않는다. resolv.conf가 계속 127.0.0.53을 가리키면
 # 이름해석이 통째로 죽으므로 실업스트림 목록으로 갈아끼운다(Ubuntu 기본과 같은 상대 심링크).
