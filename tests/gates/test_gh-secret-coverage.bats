@@ -14,7 +14,7 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   S="$ROOT/scripts/check-gh-secret-coverage.sh"
   [ -f "$S" ]
-  CLASS="$ROOT/policy/gh-secret-classification.json"
+  CLASS="$ROOT/policy/gh-secret-var-classification.json"
   [ -f "$CLASS" ]
 }
 
@@ -24,7 +24,7 @@ _fixture() {
   d="$BATS_TEST_TMPDIR/fx"
   rm -rf "$d"; mkdir -p "$d"
   ( cd "$ROOT" && git archive HEAD ) | tar -x -C "$d"
-  cp "$ROOT/policy/gh-secret-classification.json" "$d/policy/" 2>/dev/null || true
+  cp "$ROOT/policy/gh-secret-var-classification.json" "$d/policy/" 2>/dev/null || true
   cp "$ROOT/policy/credential-expiry.json" "$d/policy/"
   ( cd "$d" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fx >/dev/null )
   # 픽스처 무결성 — 아카이브 추출과 `cp`의 실패는 커맨드 치환이 삼킨다(치환의 rc는 마지막 `echo`의
@@ -56,7 +56,7 @@ _fixture() {
 
 @test "a stale declaration fails closed (reverse direction)" {
   d="$(_fixture)"
-  python3 - "$d/policy/gh-secret-classification.json" <<'PY'
+  python3 - "$d/policy/gh-secret-var-classification.json" <<'PY'
 import json, sys
 p = sys.argv[1]; d = json.load(open(p, encoding="utf-8"))
 d["secrets"].append({"name": "GONE_FROM_WORKFLOWS", "class": "identifier",
@@ -71,7 +71,7 @@ PY
 
 @test "a reason shorter than the floor is rejected (no unreasoned exemption)" {
   d="$(_fixture)"
-  python3 - "$d/policy/gh-secret-classification.json" <<'PY'
+  python3 - "$d/policy/gh-secret-var-classification.json" <<'PY'
 import json, sys
 p = sys.argv[1]; d = json.load(open(p, encoding="utf-8"))
 for e in d["secrets"]:
@@ -85,7 +85,7 @@ PY
 
 @test "class=ledger without a matching ledger row fails closed" {
   d="$(_fixture)"
-  python3 - "$d/policy/gh-secret-classification.json" <<'PY'
+  python3 - "$d/policy/gh-secret-var-classification.json" <<'PY'
 import json, sys
 p = sys.argv[1]; d = json.load(open(p, encoding="utf-8"))
 for e in d["secrets"]:
@@ -103,7 +103,7 @@ PY
   #    `r2`·`g`·`g.*` 같은 잘린 값이 전부 통과했다(실측) — 분류는 ledger인데 어떤 원장 행도
   #    그 자격을 지지하지 않는 상태가 조용히 초록이었다. 여기가 그 축의 유일한 증인이다.
   d="$(_fixture)"
-  python3 - "$d/policy/gh-secret-classification.json" <<'PY'
+  python3 - "$d/policy/gh-secret-var-classification.json" <<'PY'
 import json, sys
 p = sys.argv[1]; d = json.load(open(p, encoding="utf-8"))
 for e in d["secrets"]:
@@ -128,7 +128,7 @@ PY
 
 @test "moving a real credential into the provided class is caught by the pin" {
   d="$(_fixture)"
-  python3 - "$d/policy/gh-secret-classification.json" <<'PY2'
+  python3 - "$d/policy/gh-secret-var-classification.json" <<'PY2'
 import json, sys
 p = sys.argv[1]; d = json.load(open(p, encoding="utf-8"))
 for e in d["secrets"]:
@@ -138,13 +138,13 @@ PY2
   # 가드 자신은 통과한다(그게 이 구멍의 성질이다) — 잡는 것은 위 핀이다.
   run bash "$S" --root "$d"
   [ "$status" -eq 0 ]
-  got="$(jq -r '[.secrets[] | select(.class=="provided") | .name] | sort | join(",")' "$d/policy/gh-secret-classification.json")"
+  got="$(jq -r '[.secrets[] | select(.class=="provided") | .name] | sort | join(",")' "$d/policy/gh-secret-var-classification.json")"
   [ "$got" != "GITHUB_TOKEN" ]
 }
 
 @test "the policy file is a mandatory read (absence is never zero entries)" {
   d="$(_fixture)"
-  rm -f "$d/policy/gh-secret-classification.json"
+  rm -f "$d/policy/gh-secret-var-classification.json"
   run bash "$S" --root "$d"
   [ "$status" -eq 2 ]
   echo "$output" | grep -q '분류 정책 없음'
@@ -197,7 +197,7 @@ PY2
 
 @test "an undeclared workflow variable reference fails closed" {
   d="$(_fixture)"
-  jq '.vars |= map(select(.name != "HOMELAB_OWNER"))' "$CLASS" > "$d/policy/gh-secret-classification.json"
+  jq '.vars |= map(select(.name != "HOMELAB_OWNER"))' "$CLASS" > "$d/policy/gh-secret-var-classification.json"
   ( cd "$d" && git add -A && git -c user.email=t@t -c user.name=t commit -qm mut >/dev/null )
   run bash "$S" --root "$d"
   [ "$status" -eq 1 ]
@@ -208,7 +208,7 @@ PY2
 @test "a declared variable that no workflow references is stale" {
   d="$(_fixture)"
   jq '.vars += [{name:"ZZZ_PROBE",class:"identifier",why:"뮤테이션 프로브 — 워크플로가 참조하지 않는 이름이다.",since:"2026-09-03"}]' \
-    "$CLASS" > "$d/policy/gh-secret-classification.json"
+    "$CLASS" > "$d/policy/gh-secret-var-classification.json"
   ( cd "$d" && git add -A && git -c user.email=t@t -c user.name=t commit -qm mut >/dev/null )
   run bash "$S" --root "$d"
   [ "$status" -eq 1 ]
@@ -219,7 +219,7 @@ PY2
 @test "the ledger class is rejected inside the vars array" {
   # 만료 원장의 도메인은 자격이다 — 공개 설정값에 ledger 갈래를 허용하면 원장 대조가 무의미해진다.
   d="$(_fixture)"
-  jq '.vars[0].class = "ledger"' "$CLASS" > "$d/policy/gh-secret-classification.json"
+  jq '.vars[0].class = "ledger"' "$CLASS" > "$d/policy/gh-secret-var-classification.json"
   ( cd "$d" && git add -A && git -c user.email=t@t -c user.name=t commit -qm mut >/dev/null )
   run bash "$S" --root "$d"
   [ "$status" -eq 2 ]

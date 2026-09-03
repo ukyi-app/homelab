@@ -37,6 +37,16 @@ guard_init check-image-pins
 # ⚠️ MIN_SCAN_APPS 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거).
 #    앱이 0개인 동안은 레인2 열거 0건이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
 ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; SCOPE_NARROWED=0
+# 면제 **상한** — 사유 강제(lint_allowlist)의 형제 규율. 사유는 "왜"를 재지만 "몇 건까지"를 재지
+# 않아, 사유 주석만 붙이면 면제가 무한히 늘 수 있었다(실측: 사유 붙은 3건을 더해도 rc 0).
+# 선례이자 SSOT 형태: tools/check-resource-limits.ts의 `EXEMPT_MAX` · scripts/check-doc-index.sh의
+# `README_EXEMPT_MAX` · scripts/check-bats-accounting.sh의 `EXCL_MAX`.
+# 현 강제 면제 **0건**(실측 2026-09-03 — 파일은 헤더 주석뿐). 늘리려면 **같은 PR에서** 이 상수를
+# 올려라 — 그 diff가 곧 리뷰 지점이다.
+# ⚠️ 래칫이 아니라 상한이다. 0은 "면제 기계가 죽었다"가 아니라 "정당한 면제가 아직 없다"이고,
+#    기계 자체(사유 강제·멤버십)는 tests/gates/test_image_pins.bats 픽스처가 매번 밟는다.
+# ⚠️ env 오버라이드를 두지 않는다 — 호출부에 안 보이는 off-switch 금지. 픽스처는 `--exempt-max`로만.
+EXEMPT_MAX=0
 # 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 01 — 구 --min-scan/
 # --min-scan-apps 폐지). 선언 라벨은 **방출 라벨의 부분집합**이어야 한다(커버리지 증인이 정적 대조 —
 # 선언 오타가 조용히 꺼진 바닥값이 되는 자리). :platform은 바닥값 없는 신호 전용이라 선언 밖이다
@@ -47,6 +57,14 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT="$2"; SCOPE_NARROWED=1; shift 2 ;;
     --allowlist) ALLOWLIST="$2"; shift 2 ;;
+    # 픽스처 전용 오버라이드(실 트리는 상수가 곧 유효 상한이다 — 호출부 Makefile·ci.yaml에 0건).
+    # ⚠️ 비정수를 받으면 `[ "$n" -gt "$max" ]`가 bash 산술 오류로 죽거나(형제 TS 가드에서는 NaN 비교가
+    #    **항상 false**라 상한이 조용히 꺼졌다 — 레포 등재 함정) 상한이 무의미해진다. 정수만 받는다.
+    --exempt-max)
+      case "${2:-}" in
+        ''|*[!0-9]*) echo "ERROR: --exempt-max는 음이 아닌 정수여야 한다(받은 값: '${2:-}')" >&2; exit 2 ;;
+      esac
+      EXEMPT_MAX="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -113,7 +131,20 @@ image_block_has_digest() {
   ' "$1"
 }
 
+# 강제 면제 **건수** — allow_has의 멤버십 술어와 같은 방식으로 센다(실제로 면제를 부여하는 줄만).
+count_allowlist() {
+  [ -f "$ALLOWLIST" ] || { printf '0\n'; return 0; }
+  sed -E 's/^[[:space:]]*#.*$//; s/[[:space:]]*#.*$//; s/[[:space:]]*$//' "$ALLOWLIST" \
+    | grep -cE '^[[:space:]]*[^[:space:]]' || true
+}
+
 lint_allowlist || exit 2
+n_exempt="$(count_allowlist)"
+if [ "$n_exempt" -gt "$EXEMPT_MAX" ]; then
+  echo "ERROR: $ALLOWLIST: 강제 면제 ${n_exempt}건 > 상한 ${EXEMPT_MAX} — 게이트에서 런타임 이미지가 빠졌다." >&2
+  echo "  정당한 면제라면 이 상한(scripts/check-image-pins.sh의 EXEMPT_MAX 상수)을 **같은 PR에서** 올려라." >&2
+  exit 2
+fi
 
 scanned=0
 fail=0

@@ -73,7 +73,7 @@
   정렬)인지, TS/JS가 `localeCompare`·`toLocale*`·`Intl.Collator`를 쓰지 않는지 hard-zero로 강제한다.
   en_US 계열은 `-1`과 `1`을 같다고 봐 `sort -u`가 하나를 버린다 — 거짓 red가 아니라 **fail-open**이었다.
 - **`check-gh-secret-coverage.sh`** — GH Actions secret ↔ 분류 정책 **전단사** 가드.
-  워크플로가 참조하는 secret 전부가 `policy/gh-secret-classification.json`에 정확히 한 번,
+  워크플로가 참조하는 secret 전부가 `policy/gh-secret-var-classification.json`에 정확히 한 번,
   사유와 함께 분류돼 있어야 한다(ledger/inventory-only/identifier/provided). `ledger` 갈래는
   `policy/credential-expiry.json` 행과 기계 대조된다. 미분류·stale·이중선언 전부 fail-closed.
 - **`check-host-ports.sh`** — 호스트 포트 위생 가드: `tests/gates/**`의 하네스가 호스트 포트를
@@ -127,7 +127,8 @@
   jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)
 - **`check-image-pins.sh`** — 이미지 digest 핀 2-레인 게이트: 레인1(platform 문자열 `image:`)·레인2(apps values
   `image:` 구조체 `digest:`). 벤더(barman-plugin)·테스트/픽스처(`**/tests/**`·`**/fixtures*/**`) 제외, substrate 스코프 밖,
-  scan-floor. 예외=`policy/image-pin-allowlist.txt`(사유 주석). 신규 미핀 이미지는 fail-closed 차단. (메타갭 ②)
+  scan-floor. 예외=`policy/image-pin-allowlist.txt`(사유 주석 **+ 건수 상한 `EXEMPT_MAX`** — 픽스처는
+  `--exempt-max`로만 넘긴다). 신규 미핀 이미지는 fail-closed 차단. (메타갭 ②)
 - **`verify-ledger.sh`** — 메모리 원장 예산 게이트 SSOT. `bun tools/ledger-to-json.ts` 출력을
   `conftest … policy/ledger.rego`로 검사.
 - **`verify-runbook-index.sh`** — `docs/runbooks/`(gitignored) ↔ AGENTS.md 런북 인덱스 정합(로컬 전용).

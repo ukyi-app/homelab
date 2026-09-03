@@ -471,8 +471,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   - **스코프 인식 윈도 귀속**: 메트릭을 **실제로 감싸는** depth-0 종료 서브쿼리의 `[W]`만 본다(S-1 — 형제
     서브쿼리의 미끼 윈도로 죽은 알림이 통과하거나 정당한 룰이 오검출되던 위치 기반 폴백 제거).
   - 검사하는 것은 **하한 `W ≥ 주기`뿐** — 누락 내성(2×)·상한(`W < for:`)은 e2e preflight 소관(헤더 주석 참조).
-  면제는 `policy/alert-instance-stability-allowlist.txt`(사유 주석 필수).
-  `--repo-root` 지원. `--registry <json>`은 **테스트 픽스처 주입 전용**(실 레포는 항상 기본 레지스트리로 검증).
+  면제는 `policy/alert-instance-stability-allowlist.txt`(사유 주석 필수 **+ 건수 상한 `EXEMPT_MAX`** —
+  한 줄이 그 룰의 모드 A/B/C/D를 통째로 끈다). 대칭 형제인 `denylist`는 **강제** 목록이라 상한이
+  없고 바닥값(`MIN_DENY`)이 그 자리를 진다.
+  `--repo-root` 지원. `--registry <json>`·`--exempt-max <n>`은 **테스트 픽스처 주입 전용**(실 레포는 항상 기본 레지스트리·상수로 검증).
 - **`activate-app.ts`** — 재활성/노출 재승인 게이트(owner-local). host/public 표면 변경 시 descendant +
   표면 무변경 + 행 고정을 검증해 재노출을 재승인한다(런북 `app-platform.md`). 라이브 무변경(게이트만).
 - **`dns-drift-check.ts`** — active&&public 앱 host + 예약 platform host(`reserved-hosts.json`)가 실제
