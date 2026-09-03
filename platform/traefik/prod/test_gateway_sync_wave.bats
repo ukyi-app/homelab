@@ -75,7 +75,7 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
   # kustomization의 patch는 CustomResourceDefinition만 겨냥해야 한다 — 다른 kind를 끌어당겨
   # 음수 wave를 붙이면 같은 교착이 재발한다.
   run sh -c "LC_ALL=C grep -E '^ *kind: ' '$D/kustomization.yaml' | LC_ALL=C grep -vcE 'kind: (Kustomization|CustomResourceDefinition)'"
-  [ "$output" = "0" ] || { echo "kustomization에 예상 밖의 patch target kind가 있다 ($output개) — wave 영향을 다시 볼 것"; false; }
+  [ "$output" = "0" ] || { echo "kustomization에 예상 밖의 patch target kind가 있다 (${output}개) — wave 영향을 다시 볼 것"; false; }
 }
 
 @test "CRDs are applied before every Gateway API resource that needs them" {

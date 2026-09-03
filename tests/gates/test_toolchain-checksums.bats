@@ -96,7 +96,7 @@ setup() {
   # (bats는 git clone + 커밋 SHA 핀 경로라 이미 분모 밖이다).
   c=$(grep -cE '^[^#]*curl ' "$A")
   [ "$n" -eq "$c" ] || {
-    echo "curl $c건 vs sha256sum -c $n건 — 무검증 다운로드 스텝이 있다"
+    echo "curl ${c}건 vs sha256sum -c ${n}건 — 무검증 다운로드 스텝이 있다"
     grep -nE '^[^#]*curl ' "$A"
     false
   }

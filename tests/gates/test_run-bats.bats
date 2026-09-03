@@ -5,7 +5,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 @test "run-bats.sh lists every test_*.bats except .ci-exclude entries" {
   run bash "$ROOT/scripts/run-bats.sh" --list
   [ "$status" -eq 0 ]
-  list="$output"   # run 재호출이 $output을 덮으므로 로컬에 보존
+  list="$output"   # run 재호출이 ${output}을 덮으므로 로컬에 보존
   # 포함: 일반 게이트 테스트
   echo "$list" | grep -q 'platform/argocd/root/test_render.bats'
   # 제외: .ci-exclude 멤버 (중간 negate는 침묵 통과 → run+status로 강제)

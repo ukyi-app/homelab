@@ -93,7 +93,7 @@ EOF
   run grep -A8 'path: .apprepo' "$ROOT/.github/workflows/_update-secrets.yaml"
 
   [ "$status" -eq 0 ]
-  block="$output"   # run 재호출이 $output을 덮으므로 보존
+  block="$output"   # run 재호출이 ${output}을 덮으므로 보존
   # 중간 negate는 침묵 통과 → run+status로 강제(check-bats-style.sh)
   run grep -q ".app-config.yml" <<<"$block"
   [ "$status" -ne 0 ]

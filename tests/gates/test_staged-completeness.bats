@@ -93,8 +93,8 @@ scan_files() {
       # **주석 제거 뷰**에 있어야 하고, 마커 뒤이자 이 add 앞이어야 한다.
       sl="$(code_view "$f" | grep -n -- '--porcelain' | cut -d: -f1 | awk -v a="$a" '$1 < a {last=$1} END {print last}')"
       if [ -z "$sl" ]; then bad="$bad $f:$a(판정없음)"; continue; fi
-      [ "$m" -lt "$sl" ] || bad="$bad $f:$a(마커=$m≥판정=$sl)"
-      [ "$sl" -lt "$a" ] || bad="$bad $f:$a(판정=$sl≥add=$a)"
+      [ "$m" -lt "$sl" ] || bad="$bad $f:$a(마커=${m}≥판정=$sl)"
+      [ "$sl" -lt "$a" ] || bad="$bad $f:$a(판정=${sl}≥add=$a)"
       # ③ 결속 — 이 add의 천장 피연산자가 전부 판정 블록 안에 나타나야 한다. 없으면 판정이 **다른**
       #    천장을 재고 있다는 뜻이고, 그 add의 유실은 아무도 안 본다(파일 단위 판정의 사각).
       for tok in $rest; do
@@ -177,7 +177,7 @@ run_block() {  # $1=소스 파일 · $2=천장 env 할당 줄 — 픽스처에�
 scripts/teardown.sh|ALLOWLIST="$ALLOW"
 .github/workflows/bump.yaml|
 EOF
-  [ "$lanes" -eq 3 ] || { echo "enumeration collapse: 레인 $lanes개만 돌았다(기대 3)"; false; }
+  [ "$lanes" -eq 3 ] || { echo "enumeration collapse: 레인 ${lanes}개만 돌았다(기대 3)"; false; }
 }
 
 @test "the bump lane keeps its build artifact out of the checkout (the residue judgment would flag it)" {

@@ -1266,9 +1266,9 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
   }
   # ★ 변이 0: force-push(adopt)도, plain push도, create도 하지 않는다.
   pushes="$(count_calls git push)"
-  [ "$pushes" -eq 0 ] || { echo "ref disagreement: push가 나갔다($pushes회) — 사실을 모른 채 밀면 안 된다"; dump_calls; false; }
+  [ "$pushes" -eq 0 ] || { echo "ref disagreement: push가 나갔다(${pushes}회) — 사실을 모른 채 밀면 안 된다"; dump_calls; false; }
   creates="$(count_calls gh pr create)"
-  [ "$creates" -eq 0 ] || { echo "ref disagreement: gh pr create가 나갔다($creates회)"; dump_calls; false; }
+  [ "$creates" -eq 0 ] || { echo "ref disagreement: gh pr create가 나갔다(${creates}회)"; dump_calls; false; }
 }
 
 # bats test_tags=regression
@@ -1342,7 +1342,7 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
     echo "$output"; dump_calls; false
   }
   pushes="$(count_calls git push)"
-  [ "$pushes" -eq 0 ] || { echo "ref OID mismatch: push가 나갔다($pushes회)"; dump_calls; false; }
+  [ "$pushes" -eq 0 ] || { echo "ref OID mismatch: push가 나갔다(${pushes}회)"; dump_calls; false; }
   creates="$(count_calls gh pr create)"
   [ "$creates" -eq 0 ]
 }
@@ -1361,9 +1361,9 @@ gh_arm_with()      { count_calls gh pr merge --auto --squash "$1"; }
     echo "$output"; dump_calls; false
   }
   pushes="$(count_calls git push)"
-  [ "$pushes" -eq 0 ] || { echo "3자 불일치: force-push가 나갔다($pushes회) — 잘못된 baseline"; dump_calls; false; }
+  [ "$pushes" -eq 0 ] || { echo "3자 불일치: force-push가 나갔다(${pushes}회) — 잘못된 baseline"; dump_calls; false; }
   arms="$(count_calls gh pr merge)"
-  [ "$arms" -eq 0 ] || { echo "3자 불일치: 낡은 head에 auto-merge를 걸었다($arms회)"; dump_calls; false; }
+  [ "$arms" -eq 0 ] || { echo "3자 불일치: 낡은 head에 auto-merge를 걸었다(${arms}회)"; dump_calls; false; }
 }
 
 # ── R-40/R-41: 포크 억제가 **질의 작업(API·서브프로세스·벽시계) 예산**으로 이동했다 ────────────────
@@ -2289,7 +2289,7 @@ setup_closable_sibling() {
   export STUB_GIT_SIBLINGS_FAIL=1
   run_ensure_lane bump
   unset STUB_GIT_SIBLINGS_FAIL
-  RC="$status"   # ⚠️ 아래 원장 질의(`run …`)가 $status를 덮어쓴다 → 지금 보존한다(하네스 함정)
+  RC="$status"   # ⚠️ 아래 원장 질의(`run …`)가 ${status}를 덮어쓴다 → 지금 보존한다(하네스 함정)
 
   # ① 메인 변이는 굶지 않았다 — 스윕은 배포를 막을 수 없다.
   creates="$(count_calls gh pr create)"
@@ -3037,7 +3037,7 @@ setup_closable_sibling() {
   export STUB_DISARM_FAIL_PR=348
   run_ensure_lane bump
   unset STUB_DISARM_FAIL_PR
-  RC="$status"   # ⚠️ 아래 원장 질의(`run …`)가 $status를 덮어쓴다 → 지금 보존한다(하네스 함정)
+  RC="$status"   # ⚠️ 아래 원장 질의(`run …`)가 ${status}를 덮어쓴다 → 지금 보존한다(하네스 함정)
 
   # ① ★ 증상: **회수를 못 했는데 run이 초록이다.** 이게 R-32가 지적한 바로 그 침묵이다.
   [ "$RC" -ne 0 ] || {
@@ -3495,11 +3495,11 @@ setup_closable_sibling() {
     || { echo "에러 메시지가 배타적 head 소유권 위반을 말하지 않는다"; echo "$output$stderr"; false; }
   # ★ 파괴 0: force-push도, 중복 create도, 무장도 없다(안전한 회수만 허용).
   pushes="$(count_calls git push)"
-  [ "$pushes" -eq 0 ] || { echo "contested head force-push: 공유 ref를 밀어 #501의 head를 파괴했다($pushes회)"; dump_calls; false; }
+  [ "$pushes" -eq 0 ] || { echo "contested head force-push: 공유 ref를 밀어 #501의 head를 파괴했다(${pushes}회)"; dump_calls; false; }
   creates="$(count_calls gh pr create)"
-  [ "$creates" -eq 0 ] || { echo "contested head: 중복 PR을 만들었다($creates회)"; dump_calls; false; }
+  [ "$creates" -eq 0 ] || { echo "contested head: 중복 PR을 만들었다(${creates}회)"; dump_calls; false; }
   arms="$(arm_calls_script)"
-  [ "$arms" -eq 0 ] || { echo "contested head: 애매한 상태에서 무장했다($arms회)"; dump_calls; false; }
+  [ "$arms" -eq 0 ] || { echo "contested head: 애매한 상태에서 무장했다(${arms}회)"; dump_calls; false; }
 }
 
 # bats test_tags=regression
@@ -3520,7 +3520,7 @@ setup_closable_sibling() {
     || { echo "에러 메시지가 pre-push 재확인 위반을 말하지 않는다"; echo "$output$stderr"; false; }
   # ★ 파괴 0: 재확인이 잡아 force-push가 나가지 않는다.
   pushes="$(count_calls git push)"
-  [ "$pushes" -eq 0 ] || { echo "TOCTOU: 재확인을 뚫고 force-push가 나갔다($pushes회)"; dump_calls; false; }
+  [ "$pushes" -eq 0 ] || { echo "TOCTOU: 재확인을 뚫고 force-push가 나갔다(${pushes}회)"; dump_calls; false; }
   creates="$(count_calls gh pr create)"
   [ "$creates" -eq 0 ]
   arms="$(arm_calls_script)"
@@ -3544,7 +3544,7 @@ setup_closable_sibling() {
   echo "$output$stderr" | grep -q "사람의 흔적이 생겼다" \
     || { echo "에러 메시지가 재확인 시점 사람 흔적을 말하지 않는다"; echo "$output$stderr"; false; }
   pushes="$(count_calls git push)"
-  [ "$pushes" -eq 0 ] || { echo "R-47: 리뷰된 head를 force-push했다($pushes회)"; dump_calls; false; }
+  [ "$pushes" -eq 0 ] || { echo "R-47: 리뷰된 head를 force-push했다(${pushes}회)"; dump_calls; false; }
   creates="$(count_calls gh pr create)"
   [ "$creates" -eq 0 ]
 }

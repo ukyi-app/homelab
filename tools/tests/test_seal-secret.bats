@@ -171,7 +171,7 @@ EOF
     --config "$TMP/.app-config.yml" --env "$TMP/.env" \
     --cert "$TMP/cert.pem" --app demo --namespace prod --out "$TMP/demo-secrets.sealed.yaml"
   [ "$status" -eq 0 ]
-  seal_output="$output"   # run 재호출이 $output을 덮으므로 보존
+  seal_output="$output"   # run 재호출이 ${output}을 덮으므로 보존
   grep -q "kind: SealedSecret" "$TMP/demo-secrets.sealed.yaml"
   # 평문 값이 산출/출력 어디에도 없다 (중간 negate는 침묵 통과 → run+status로 강제)
   # 산출물이 아예 안 써져도 "평문 없음"이 초록이던 자리다 — 위 `kind: SealedSecret` 단언이

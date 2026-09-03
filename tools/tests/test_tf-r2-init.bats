@@ -75,7 +75,7 @@ run_action() {
     run run_action "$root"
     [ "$status" -eq 0 ] || { echo "root=$root rc=$status: $output"; false; }
     hcl="$FX/infra/$root/backend.hcl"
-    [ -f "$hcl" ] || { echo "root=$root: backend.hcl이 infra/$root에 없다"; false; }
+    [ -f "$hcl" ] || { echo "root=$root: backend.hcl이 infra/${root}에 없다"; false; }
     # key 줄은 정확히 하나이고 그 값이 리터럴로 앵커된다(정렬 공백만 자유)
     [ "$(grep -c '^key' "$hcl")" -eq 1 ]
     run grep -Eq "^key[[:space:]]*= \"$want\"\$" "$hcl"

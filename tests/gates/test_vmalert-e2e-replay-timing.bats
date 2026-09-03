@@ -81,7 +81,7 @@ sites() { git ls-files 'tests/gates/*.sh' 'tests/gates/lib/*.sh' | xargs grep -l
     case "$v" in
       '"$delay"') continue ;;                      # 파일에서 파생 — 아래에서 별도 검증
       *s) s="${v%s}" ;;
-      *) echo "$f: rulesDelay '$v' 형식 미인식(초 단위 리터럴 또는 \$delay만 허용)"; return 1 ;;
+      *) echo "$f: rulesDelay '$v' 형식 미인식(초 단위 리터럴 또는 \${delay}만 허용)"; return 1 ;;
     esac
     case "$s" in ''|*[!0-9]*) echo "$f: rulesDelay '$v' 비수치"; return 1 ;; esac
     [ "$s" -ge 4 ] || {
