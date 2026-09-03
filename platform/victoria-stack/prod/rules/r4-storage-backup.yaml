@@ -518,3 +518,38 @@ data:
             annotations:
               summary: "adguard *.home rewrite 드리프트가 자동 수렴됨"
               description: "리컨실러가 traefik-ts 실 IP로 rewrite를 복구했습니다 — DR 재구축/IP 변경이 있었는지 확인하세요."
+          # ── 시드 대조(ADR-0007 결정 2) ────────────────────────────────────────────────────────
+          # adguard 본체 설정의 SSOT는 **라이브**다(사람이 UI에서 만지는 것이 실사용). git의 ConfigMap은
+          # initContainer `cp -n`이 쓰는 첫 부팅 시드일 뿐이라, "시드가 라이브와 다르다"는 결함이 아니라
+          # **재구축 시 되돌아갈 거리**다 → severity는 warning이고 처방은 "시드를 라이브에 맞춰 갱신"이다.
+          # 라이브를 git으로 되돌리는 수렴은 하지 않는다(그 방향이 ADR이 명시적으로 기각한 것이다).
+          # ⚠️ 이름 표기: 형제 두 룰은 구 표기 `Adguard*`다. 신규 두 룰은 티켓/ADR 계약 표기 `AdGuard*`를
+          #    쓴다 — 룰을 훑을 때는 대소문자 무시(`grep -i adguard`)로 보라(둘 다 같은 도메인이다).
+          # ⚠️ rollup 함수 선택이 의미의 전부다. 이건 **값-게이지**(0/1)이고 시리즈 정체성(section 라벨)은
+          #    고정이라 `last_over_time`이 최신 샘플을 돌려준다 → 드리프트가 해소되면 즉시 0이 되어 래치가
+          #    없다. `max_over_time`이면 해소된 1이 윈도(2h)만큼 부활해 `for: 1h`를 넘겨 영구 오발화한다
+          #    (「rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭」의 상태-게이지 쪽).
+          # ⚠️ 윈도 [2h] ≥ push 주기 10분 — 맨 참조면 매 주기 후반에 시리즈가 vmalert 눈에서 사라져
+          #    `for:` pending이 리셋된다(모드 C).
+          - alert: AdGuardSeedDrift
+            expr: |
+              last_over_time(adguard_seed_drift[2h]) > 0
+            for: 1h
+            labels: { severity: warning }
+            annotations:
+              summary: "adguard 시드가 라이브 설정과 갈렸다: {{ $labels.section }}"
+              description: "git의 adguard ConfigMap(`platform/adguard/prod/adguardhome.yaml`) 중 `{{ $labels.section }}` 절이 라이브 AdGuard 설정과 다릅니다. 이 ConfigMap은 첫 부팅 `cp -n` 시드라 라이브가 권위이고, 지금 당장 고장난 것은 없습니다 — 문제는 **DR 재구축 시 여기 적힌 값으로 되돌아간다**는 것입니다(ADR-0007 결정 2). 처방은 시드를 라이브에 맞춰 갱신하는 것입니다: `kubectl -n edge port-forward svc/adguard-ui 8080:80` 후 해당 control 엔드포인트(dns_info · querylog/config · stats/config)의 값을 읽어 시드에 반영하고 PR로 머지하세요. 라이브를 시드 값으로 되돌리지 마세요."
+          # 대조 스텝 자신의 생존 — 리컨실러 하트비트(AdguardRewriteReconcilerStale)와 **별개 축**이다.
+          # 대조는 실패해도 잡을 죽이지 않으므로(실패 격리) KubeJobFailed·리컨실러 하트비트 어느 것도
+          # 그 침묵을 잡지 못한다. 관측 실패(API 불가·응답 형태 변경·시드 파싱 실패)는 게이지 1이 아니라
+          # **아무 push 없음**으로 표현되므로, 이 부재 알림이 그 tri-state의 세 번째 값을 읽는 유일한 눈이다.
+          # 10분 주기 push라 last_over_time[2h] 윈도 + absent가 fail-closed. 임계 1800s = 3주기 누락.
+          - alert: AdGuardSeedDriftCheckStale
+            expr: |
+              (time() - last_over_time(adguard_seed_drift_checked_timestamp_seconds[2h])) > 1800
+              or absent(last_over_time(adguard_seed_drift_checked_timestamp_seconds[2h]))
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "adguard 시드 대조가 30분+ 침묵 — 시드 드리프트가 무관측"
+              description: "adguard-rewrite-reconciler의 시드 대조 스텝이 하트비트를 못 보냅니다. 대조는 rewrite 수렴과 실패 격리돼 있어 잡은 초록일 수 있습니다 — 파드 로그의 `시드 대조 실패` 줄을 보세요(AdGuard control API 불가 · 응답 형태 변경 · /seed 마운트 부재 · 시드 파싱 실패). 이 침묵 동안 AdGuardSeedDrift는 원리적으로 발화하지 못합니다."
