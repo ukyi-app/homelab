@@ -96,6 +96,24 @@ PY
   echo "$output" | grep -q 'class=ledger인데 원장에 행이 없다'
 }
 
+@test "a truncated ledger_name that is only a prefix of a real slug fails closed too" {
+  # ⚠️ 형제 레인(`does-not-exist-in-ledger`)은 실 슬러그와 접두를 전혀 공유하지 않아 대조의
+  #    **느슨함**을 밟지 않는다. 종전 구현은 앵커 없는 접두 정규식(`grep -q "^${ln}"`)이라
+  #    `r2`·`g`·`g.*` 같은 잘린 값이 전부 통과했다(실측) — 분류는 ledger인데 어떤 원장 행도
+  #    그 자격을 지지하지 않는 상태가 조용히 초록이었다. 여기가 그 축의 유일한 증인이다.
+  d="$(_fixture)"
+  python3 - "$d/policy/gh-secret-classification.json" <<'PY'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p, encoding="utf-8"))
+for e in d["secrets"]:
+    if e["name"] == "R2_ACCESS_KEY_ID": e["ledger_name"] = "r2"
+json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PY
+  run bash "$S" --root "$d"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "ledger_name='r2'"
+}
+
 @test "the provided class is pinned to exactly GITHUB_TOKEN (widening it is an exemption hole)" {
   # 🔴 **실측된 fail-open**: `provided`는 열거에서 빠지므로, 자격을 그 갈래로 옮기면 대조 집합에서도
   #    함께 빠져 **전단사가 그대로 성립한 채 조용히 면제**된다(2026-08-20 실측: TELEGRAM_BOT_TOKEN을

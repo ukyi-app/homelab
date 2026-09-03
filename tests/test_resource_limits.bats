@@ -2,6 +2,11 @@
 # 상주 워크로드 자원 가드: cpu·memory request + memory limit 필수 (vector OOM PR #85 포스트모템 +
 # CPU 단일축 편향 해소). cpu limit은 비요구(throttling 회피 — SRE 권장). @test 이름은 영어(CJK 함정).
 # CI-safe(소스 매니페스트 스캔, bun/TS 단일 — yq/python3 불요) → run-bats.sh gate 도메인에 자동 수집.
+# ⚠️ red-green 레인의 `-ne 0`은 「가드가 위반을 거부했다」와 「가드가 판정 전에 죽었다」를 구별하지
+#    못한다 — 도구를 지우면 bun의 rc도 비-0이다(실측: 대상 삭제 시 14레인 중 6개가 그대로 초록).
+#    그래서 각 red-green 레인은 거부 문구(check-resource-limits.ts:127)를 함께 물고, setup은
+#    피연산자 실재를 닫는다. cf. .scratch/operand-witness/issues/05
+setup() { [ -f "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" ]; }
 
 # 픽스처 트리를 git 추적 상태로 만든다. 가드의 열거는 공유 워커의 `platform-manifests` 스코프가
 # 소유하고 그 스코프는 **tracked**(git ls-files) 열거를 쓴다 — untracked helm 캐시가 자동으로 빠지고
@@ -59,6 +64,7 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
 }
 
 @test "resource guard fails on a workload missing only a CPU request" {
@@ -83,6 +89,7 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
 }
 
 @test "resource guard fails on a workload missing only a memory limit (OOM bound)" {
@@ -107,6 +114,7 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
 }
 
 # scan-floor는 **이 가드가** 소유한다 — 워커는 비어 있으면 조용히 빈 목록을 준다(열거자는 "글롭이
@@ -207,6 +215,7 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
 }
 
 @test "resource guard passes a CNPG Cluster that declares spec.resources" {
@@ -270,6 +279,7 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
 }
 
 @test "resource guard fails on a CNPG Pooler with no template (unlimited pgbouncer)" {
@@ -290,6 +300,7 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
 }
 
 @test "resource guard passes a CNPG Pooler that declares container resources" {

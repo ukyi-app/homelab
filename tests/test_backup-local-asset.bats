@@ -22,8 +22,12 @@ EOF
 teardown() { rm -rf "$STUBDIR" "$OUT" "$ROOT/scratch_backup_$$"; }
 
 @test "usage error when outdir missing" {
+  # ⚠️ `-ne 0`만으로는 「usage로 거부했다」와 「스크립트가 없어 못 돌았다」가 겹친다
+  #    (실측: 스크립트 삭제 시 3레인 중 이 레인만 그대로 초록). usage 문구로 가른다.
+  [ -f "$ROOT/scripts/backup-local-asset.sh" ]
   run scripts/backup-local-asset.sh
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'usage: backup-local-asset.sh'
 }
 
 @test "refuses an outdir inside the git work tree and leaves nothing behind" {

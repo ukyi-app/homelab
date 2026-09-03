@@ -1,6 +1,11 @@
 #!/usr/bin/env bats
 # app-owned NetworkPolicy app-scoped 셀렉터 가드 (blast radius 차단). @test 이름은 영어(CJK 함정).
 # CI-safe(yq만, 라이브/age/docker 불요) → run-bats.sh gate 도메인에 자동 수집.
+# ⚠️ 거부 레인의 `-ne 0`은 「가드가 셀렉터를 거부했다」와 「가드가 없어 bash가 죽었다」를 구별하지
+#    못한다(실측: 스크립트 삭제 시 5레인 중 3개가 그대로 초록). 각 레인이 거부 문구
+#    (check-app-netpol.sh:80)를 물고, setup이 피연산자 실재를 닫는다.
+#    check-app-netpol.sh:43-48 주석이 같은 fail-open을 이미 기록했지만 처방이 없었다.
+setup() { [ -f "${BATS_TEST_DIRNAME}/../scripts/check-app-netpol.sh" ]; }
 
 @test "current repo passes (in-repo apps own no broad NetworkPolicy)" {
   run bash "${BATS_TEST_DIRNAME}/../scripts/check-app-netpol.sh"
@@ -33,6 +38,7 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: app-owned NetworkPolicy는 app-scoped 셀렉터'
 }
 
 @test "guard fails on name-only selector (chart name is shared, non-unique)" {
@@ -42,6 +48,7 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: app-owned NetworkPolicy는 app-scoped 셀렉터'
 }
 
 @test "guard fails when instance label does not match the app directory" {
@@ -51,6 +58,7 @@ YAML
   echo "$output"
   rm -rf "$tmp"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: app-owned NetworkPolicy는 app-scoped 셀렉터'
 }
 
 @test "guard passes when instance label equals the app directory (unique app-scoped)" {
