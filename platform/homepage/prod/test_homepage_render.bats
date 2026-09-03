@@ -82,3 +82,12 @@ setup() {
   run yq -e "$N | .spec.egress[].to[].ipBlock.cidr | select(. == \"10.43.0.1/32\")" "$RENDERED"
   [ "$status" -ne 0 ]
 }
+
+@test "the NetworkPolicy set and its ipBlock set are exact (upper bound, F5)" {
+  # test_homepage_netpol.bats:30-33의 리터럴 부재 단언(0.0.0.0/0)은 표기 하나만 막는다 —
+  # 같은 뜻의 `egress: - {}`나 새 파일+kustomization 등록은 전건 통과한다(실측 2026-09-03).
+  # 소스가 아니라 렌더($RENDERED)를 좌변으로 써서 표기·새 파일 경로를 한 번에 닫는다.
+  [ "$(yq ea '[select(.kind=="NetworkPolicy")|.metadata.name]|sort|join(",")' "$RENDERED")" = \
+    "allow-dns-egress,allow-egress-to-apiserver,allow-egress-to-glances,allow-egress-to-vmsingle,allow-ingress-from-gateway,allow-ingress-kubelet-probes,default-deny-all" ]
+  [ "$(yq ea '[select(.kind=="NetworkPolicy")|..|select(has("ipBlock"))|.ipBlock.cidr]|sort|join(",")' "$RENDERED")" = "10.42.0.1/32,192.168.117.0/24" ]
+}
