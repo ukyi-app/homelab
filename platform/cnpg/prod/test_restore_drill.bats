@@ -14,6 +14,10 @@ sh=platform/cnpg/prod/restore-drill-script.sh
 @test "drill bootstraps a FRESH cluster via recovery from R2" {
   grep -q 'bootstrap:' "$sh"
   grep -q 'recovery:' "$sh"
+  # ⚠️ 이 `pg-r2`는 **이중 SSOT**다 — 신원 등호의 정본 증인은 test_object_store.bats의
+  #    "the ObjectStore name is the identity every consumer references"(object-store.yaml에서
+  #    파생해 소비처 4곳을 잰다). 여기는 그 스크립트가 recovery 부트스트랩을 그리는지 보는
+  #    형태 핀이라 개명 시 함께 red가 난다 — 진단은 정본 증인 쪽을 먼저 읽을 것.
   grep -q 'barmanObjectName: pg-r2' "$sh"
   grep -q 'pg-restore-drill' "$sh" # 일회용 클러스터 이름
 }
@@ -106,4 +110,16 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   [ "$status" -eq 1 ] || { echo "drill.sh 코드가 kubectl --request-timeout을 쓴다 (v1.36.x in-cluster 폴백 버그), 또는 스크립트가 사라졌다:"; echo "$output"; false; }
   # 양성 대조: _live_psql이 timeout 래퍼로 여전히 무한 대기를 막는지(플래그 제거가 보호를 없앤 게 아님)
   grep -qE 'timeout [0-9]+ kubectl .*exec' "$sh"
+}
+
+@test "the manifest is wired into the kustomization (prune would delete it otherwise)" {
+  # ⚠️ cnpg-data App은 prune:true + selfHeal:true라 resources에서 한 줄이 사라지는 것이 곧
+  #    클러스터에서의 삭제다 — 유일한 복구 증명이 통째로 없어진다. 위 @test들은 CronJob·스크립트
+  #    파일을 직접 grep할 뿐 배선을 안 봐서 배선을 지워도 PR 게이트가 전건 초록이었다(실측).
+  #    이 CronJob은 렌더 증인(test_kustomize_build.bats, 게다가 tests/.ci-exclude)조차 없어
+  #    이 한 줄이 배선의 유일한 머지-전 증인이다. 사후 검출은 CNPGRestoreDrillStale(≈8.1일)뿐이다.
+  # ⚠️ 원문 grep이 아니라 파싱된 resources를 본다 — 주석 줄·들여쓰기 어긋난 줄이 통과한다
+  #    (tests/gates의 victoria-stack 배선 대조 @test가 세운 레포 관례).
+  run yq '.resources | contains(["restore-drill-cronjob.yaml"])' platform/cnpg/prod/kustomization.yaml
+  printf '%s' "$output" | grep -qxF -- 'true'
 }

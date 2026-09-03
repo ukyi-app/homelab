@@ -106,7 +106,16 @@ write_marker() {
 
 main() {
   local dbs db owner_rv ro_rv count=0
-  dbs="$(kubectl -n "$NS" get database -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)"
+  # ⚠️ 열거 rc를 버리면 안 된다 — 예전 형태(`2>/dev/null || true`)는 권한 거부·apiserver 오류·NS
+  #    오타를 전부 "DB 0건"과 **같은 값**으로 접어 훅이 성공으로 끝났다(형제 wait_db_ready/ensure_role은
+  #    반대로 fail-closed다). 이 파일이 존재하는 이유(#3 회귀 차단)가 그 침묵으로 무효화된다:
+  #    per-DB 마커도 안 나가는데 ArgoCD는 cnpg-data를 Synced/Healthy로 보고한다.
+  #    레포 SSOT의 「`findings=$(… || true)` — 검출기가 죽어도 '0곳 OK'를 내는 fail-open」 클래스다.
+  #    0건은 여전히 rc 0 + 빈 출력이라 아래 vacuous 성공 의미론은 그대로다. `2>/dev/null`도 없앤다
+  #    — 진단 stderr가 실패 원인을 말해야 한다.
+  if ! dbs="$(kubectl -n "$NS" get database -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"; then
+    fail "Database 열거 실패(권한/접속) — fail-closed"
+  fi
   if [ -z "$dbs" ]; then
     echo "[erp] no Database CRs in ns=${NS} — nothing to verify"
     return 0

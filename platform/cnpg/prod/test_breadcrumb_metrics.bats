@@ -42,10 +42,22 @@
 # (중간 단언은 [ ]/grep 단순 명령으로 — bash 3.2에서 [[ ]] 실패 침묵 통과 회피)
 
 @test "Cluster inherits prometheus.io annotations so vmagent scrapes CNPG :9187" {
-  # 이 주석이 없으면 vmagent의 pod-annotations job이 pg 파드를 건너뛰어 모든 cnpg/barman 시리즈가 부재.
-  grep -q 'inheritedMetadata:' platform/cnpg/prod/cluster.yaml
-  grep -q 'prometheus.io/scrape: "true"' platform/cnpg/prod/cluster.yaml
-  grep -q 'prometheus.io/port: "9187"' platform/cnpg/prod/cluster.yaml
+  # ⚠️ 이 @test 이름이 약속하는 판정 조건은 **위치**다 — vmagent의 pod-annotations job은
+  #    role:pod라 **파드**의 주석만 읽는다(vmagent-scrape-config.yaml:46-58). 주석이 Cluster CR
+  #    자신의 metadata.annotations에만 붙으면 인스턴스 파드엔 아무것도 상속되지 않는다.
+  #    예전 판(파일 전역 grep 3개)은 그 세 토큰이 **같은 블록 안**에 있는지 안 봐서, 주석을
+  #    inheritedMetadata 밖으로 이설해도 8/8 초록이었다(실측). yq 경로가 존재+위치+값을 한 번에
+  #    잰다(경로 부재 = null → `yq -e` rc 1 → 대입 실패로 red).
+  #    값이 문자열 "true"/"9187"이라 이 레포의 `yq -e` false-exit1 함정(test_cluster_params.bats:91-95)
+  #    비대상이다. prometheus.io/path는 현행대로 미측정(범위 확대 금지).
+  # 정정: 이 회귀는 라이브 블라인드가 아니다 — 같은 :9187에서 오는 cnpg_collector_up도 함께
+  #    사라져 PostgresClusterDown(core.yaml:151-155, absent 가지, for:3m, critical)이 페이징한다.
+  #    실질 손해는 트리아지 오도이고, 여기 값은 머지-전 정적 증인이다.
+  c=platform/cnpg/prod/cluster.yaml
+  a="$(yq -e '.spec.inheritedMetadata.annotations."prometheus.io/scrape"' "$c")"
+  printf '%s' "$a" | grep -qxF -- 'true'
+  p="$(yq -e '.spec.inheritedMetadata.annotations."prometheus.io/port"' "$c")"
+  printf '%s' "$p" | grep -qxF -- '9187'
 }
 
 @test "R2BackupStale reads the barman-cloud plugin backup metric, not the deprecated in-tree one" {

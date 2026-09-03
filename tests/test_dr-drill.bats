@@ -170,6 +170,9 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값 · 결과 = �
 
 @test "dr-drill recovers the DB from R2 on the rebuilt node and checks the canary" {
   grep -q 'recovery:' "$sh"
+  # ⚠️ 이중 SSOT — 신원 등호의 정본 증인은 platform/cnpg/prod/test_object_store.bats의
+  #    "the ObjectStore name is the identity every consumer references"(object-store.yaml에서
+  #    파생해 이 스크립트를 포함한 소비처 4곳을 잰다). 여기는 형태 핀이라 개명 시 함께 red다.
   grep -q 'barmanObjectName: pg-r2' "$sh"
   grep -q 'restore_canary' "$sh"
   grep -q 'DR DRILL FAIL: recovered canary' "$sh"

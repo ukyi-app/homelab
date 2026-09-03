@@ -12,6 +12,9 @@
   echo "$output" | grep -q 'kind: ScheduledBackup'
   echo "$output" | grep -q 'name: cnpg-local-basebackup'
   echo "$output" | grep -q 'name: pg-dump-hedge-r2'
+  # 유일하게 빠져 있던 DR 생산자 — 복원 드릴 CronJob. 이 이름이 없으면 렌더 증인이 "백업 3종은
+  # 있는데 복구 증명은 없다"를 초록으로 통과시킨다(배선의 머지-전 증인은 test_restore_drill.bats).
+  echo "$output" | grep -q 'name: pg-restore-drill'
 }
 @test "all THREE database-ns seeds render as Secrets via KSOPS (none silently missing)" {
   run bash -c 'kustomize build --enable-alpha-plugins --enable-exec platform/cnpg/prod'

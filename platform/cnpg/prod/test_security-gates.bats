@@ -54,6 +54,11 @@ DIR="${BATS_TEST_DIRNAME}"
   [ "$status" -eq 0 ]
   run yq ea -e "$SEL | .[0].spec.policyTypes[0] == \"Ingress\"" "$DIR/networkpolicy.yaml"
   [ "$status" -eq 0 ]
+  # ⚠️ 이름의 "non-vacuous"를 지키려면 **무엇을 다시 여는가**도 봐야 한다 — from/ports 없는 규칙
+  #    (`ingress: [{}]`) 한 줄이면 default-deny가 전면 허용으로 뒤집히는데 위 두 줄은 그걸 못 본다
+  #    (형제 test_networkpolicy.bats:23의 같은 얼굴과 동시 초록이었다 — 실측).
+  run yq ea -e "$SEL | (.[0].spec.ingress // []) | length == 0" "$DIR/networkpolicy.yaml"
+  [ "$status" -eq 0 ]
 }
 
 # ── C3: pg-rw tailscale LoadBalancer ─────────────────────────────────────────
