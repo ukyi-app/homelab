@@ -52,6 +52,21 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
   #    모으므로 `select`가 비매칭 doc마다 `---`를 뱉는 함정도 비켜간다.
   EXP='cnpg-allow-tailscale database-allow-ingress-from-cnpg-system database-allow-ingress-from-prod database-allow-ingress-intra database-allow-ingress-kubelet-probes database-allow-ingress-metrics-from-observability database-default-deny-ingress'
   [ "$(yq ea '[select(.kind=="NetworkPolicy") | .metadata.name] | sort | join(" ")' "$NP")" = "$EXP" ]
+  # ⚠️ 정책 **개수**를 고정해도 리스트 **내부 확장**은 남는다 — 기존 doc의 from에
+  #    `- namespaceSelector: {}` 한 줄이면 전 네임스페이스가 그 포트에 닿는데, 형제
+  #    test_security-gates.bats:45-48의 `.[0].spec.ingress[0].from[0]` 단언은 **첫 원소**만 봐서
+  #    cnpg-allow-tailscale·database-allow-ingress-from-prod 어느 쪽에 붙여도 14/14 초록이었다(실측).
+  #    doc-국소 길이 바닥값은 7-doc 중 하나만 닫으므로, doc 무관 peer/port **총 열거**를 센다 —
+  #    신규 doc까지 자동 편입되고, 정당한 peer 추가는 아래 상수 갱신을 강제한다(fail-closed).
+  #    상수는 로스터가 아니라 이 파일 안의 닫힌 불변식이라 하드코딩 소비처 함정 비대상이다.
+  #    `ea` + 수집 배열이라 멀티독 `yq -e` 함정도, 「값이 false면 exit 1」도 비켜간다(length는 null이 없다).
+  # 정정(finding impact): 이 확장이 새로 여는 것은 prod가 아니라 **비-prod** ns다 —
+  #    prod→database:5432는 database-allow-ingress-from-prod로 설계상 이미 허용된다. 라이브 사후
+  #    증인 tests/posture/test_network-policy.bats:80-85는 owner-local이라 머지-전 게이트가 아니다.
+  run yq ea -e '[select(.kind=="NetworkPolicy") | .spec.ingress[]?.from[]?] | length == 6' "$NP"
+  [ "$status" -eq 0 ]
+  run yq ea -e '[select(.kind=="NetworkPolicy") | .spec.ingress[]?.ports[]?] | length == 4' "$NP"
+  [ "$status" -eq 0 ]
 }
 
 @test "egress is intentionally NOT default-denied (CNPG needs API/R2/replication egress)" {
