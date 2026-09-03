@@ -122,6 +122,11 @@ jobs:
         # 무인자 = 가드가 자기 도메인을 열거하고 바닥값을 건다. 예전의 `git ls-files … | xargs -r`는
         # 글롭이 깨지면 스크립트를 **아예 호출하지 않아** 이 스텝이 조용히 초록이었다.
         run: bash scripts/sops-guard.sh
+      - name: sealed-guard — 추적된 모든 *.sealed.yaml 구조 검증
+        # 봉인 전 평문 Secret을 `*.sealed.yaml` 이름으로 커밋했거나 평문 리프가 template.stringData에
+        # 남은 오봉인을 차단. gitleaks의 봉인본 면제(generic-api-key)가 원리적으로 못 보는 클래스라
+        # 룰이 아니라 구조 가드가 문다. 무인자 = 가드가 자기 도메인을 열거하고 바닥값을 건다.
+        run: bash scripts/sealed-guard.sh
       - name: chart render + validate (all kinds)
         run: make chart-test
       - name: memory ledger onboarding gate (M0-owned)

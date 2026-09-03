@@ -48,6 +48,13 @@
   `make verify`·`ci.yaml`(gate)이 호출(출력을 `conftest test … policy/ledger.rego`로 파이프). 라이브 무관.
 - **`sops-guard.sh`** — 인자로 받은 `*.enc.yaml`이 실제 sops 암호화됐는지(평문 누출 차단) 검사.
   **인자 필수** — 대상 목록(staged 파일 등)은 호출자가 소유한다.
+- **`sealed-guard.sh`** — `*.sealed.yaml`이 실제로 **봉인**됐는지 구조 검사(sops-guard.sh가 `*.enc.yaml`에
+  대해 하는 일의 봉인본 판). 4조항: `kind: SealedSecret` · `spec.encryptedData`가 비어 있지 않은 맵 ·
+  평문 리프 0건(`.data`·`.stringData`·`.spec.template.data`·`.spec.template.stringData`) · encryptedData
+  값이 kubeseal 암호문 표기(`^Ag…`). 복호 키 불필요(yq만). 인자 없으면 추적 봉인본 전량을 스스로 열거하고
+  **파일 수·키 총수 두 바닥값**을 건다 — 키 축은 "파일은 다 있는데 내용이 통째로 비었다"를 잡는다(파일 수
+  축이 원리적으로 못 보는 붕괴). gitleaks의 봉인본 면제(generic-api-key)가 원리적으로 못 보는 클래스 —
+  룰이 아니라 구조의 문제라 여기서 문다.
 - **`check-doc-index.sh`** — 두 레인. ① **등재**: `scripts/`·`tools/`·`.github/workflows/` 산출물이 해당
   README에 있는지(가드 없는 인덱스 드리프트 소멸). ② **스코프**: 이 파일의 **가드 bullet**이 계산 가능한
   실행 경로를 주장하지 않는지 — 판정 단위는 `- **` bullet 전건 + bullet 밖 산문이고(절 스코프는 절

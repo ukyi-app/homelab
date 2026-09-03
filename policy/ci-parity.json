@@ -56,6 +56,11 @@
       "local": "scripts/sops-guard.sh"
     },
     {
+      "name": "sealed-guard — 추적된 모든 *.sealed.yaml 구조 검증",
+      "status": "mirrored",
+      "local": "scripts/sealed-guard.sh"
+    },
+    {
       "name": "chart render + validate (all kinds)",
       "status": "mirrored",
       "local": "platform/charts/app/tests/render.sh",

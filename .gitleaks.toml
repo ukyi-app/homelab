@@ -10,9 +10,10 @@ useDefault = true
 # 고엔트로피 base64라 generic-api-key가 8건 걸렸다. 그 파일들의 **generic-api-key만** 면제한다 —
 # 다른 룰은 계속 본다(아래 벤더 manifest 블록과 같은 문형). 룰 스코프가 없으면 파일명 접미만으로 기본 룰셋이 통째로
 # 꺼져, 봉인 안 한 평문 Secret을 `*.sealed.yaml` 이름으로 커밋해도 스캐너가 무성이다(실측 재현).
-# ⚠️ 잔여 갭: generic-api-key는 여전히 면제되므로 가장 개연적인 오봉인(평문 비밀번호를
-#    `template.stringData`에 잔류)은 이 스코프로도 안 잡힌다. 그쪽은 룰이 아니라 구조 가드의 영역이다
-#    (sops-guard.sh가 *.enc.yaml에 대해 하는 일의 봉인본 판).
+# ⚠️ generic-api-key는 여전히 면제되므로 가장 개연적인 오봉인(평문 비밀번호가 `template.stringData`에
+#    잔류 · 봉인 전 평문 Secret을 `*.sealed.yaml` 이름으로 커밋)은 이 스코프로도 안 잡힌다 — 룰이 아니라
+#    구조의 문제다. 그 클래스는 **`scripts/sealed-guard.sh`가 덮는다**(sops-guard.sh가 *.enc.yaml에
+#    대해 하는 일의 봉인본 판 — kind·encryptedData 비었음·평문 리프·암호문 표기 4조항).
 [[allowlists]]
 description = "SealedSecret 봉인본(encryptedData 암호문) — 평문이 아니다"
 targetRules = ["generic-api-key"]
