@@ -499,7 +499,7 @@ data:
           # adguard_rewrite_reconcile_timestamp를 push한다. 침묵(30분+ = 3주기 누락)이면 *.home 드리프트가
           # 무방비가 되므로 페이징. 10분 주기 push라 last_over_time[2h] 윈도 + absent가 fail-closed(push-metric 함정).
           # (도메인은 스토리지 아님이나 push-metric staleness 패턴상 r4에 함께 둔다 — CNPGRestoreDrillStale과 동형.)
-          - alert: AdguardRewriteReconcilerStale
+          - alert: AdGuardRewriteReconcilerStale
             expr: |
               (time() - last_over_time(adguard_rewrite_reconcile_timestamp[2h])) > 1800
               or absent(last_over_time(adguard_rewrite_reconcile_timestamp[2h]))
@@ -513,7 +513,7 @@ data:
           # F19: no-op 런은 fix 샘플을 안 써서 last_over_time이 직전 fix로 유지 — 20분 창 후 자동 해소.
           # ⚠️ drift-fix 이벤트당 telegram 2건(ℹ️ 정보 발화 + 20분 후 🔵 해소, send_resolved). 드리프트는 DR/proxy
           # 재등록 등 IP 변경 시에만이라 저빈도 → 전용 send_resolved:false receiver(telegram 템플릿 40줄 중복) 대신 수용.
-          - alert: AdguardRewriteDriftFixed
+          - alert: AdGuardRewriteDriftFixed
             expr: |
               (time() - last_over_time(adguard_rewrite_last_fix_timestamp[2h])) < 1200
               and last_over_time(adguard_rewrite_last_fix_timestamp[2h]) > 0
@@ -526,8 +526,9 @@ data:
           # initContainer `cp -n`이 쓰는 첫 부팅 시드일 뿐이라, "시드가 라이브와 다르다"는 결함이 아니라
           # **재구축 시 되돌아갈 거리**다 → severity는 warning이고 처방은 "시드를 라이브에 맞춰 갱신"이다.
           # 라이브를 git으로 되돌리는 수렴은 하지 않는다(그 방향이 ADR이 명시적으로 기각한 것이다).
-          # ⚠️ 이름 표기: 형제 두 룰은 구 표기 `Adguard*`다. 신규 두 룰은 티켓/ADR 계약 표기 `AdGuard*`를
-          #    쓴다 — 룰을 훑을 때는 대소문자 무시(`grep -i adguard`)로 보라(둘 다 같은 도메인이다).
+          # ⚠️ 이름 표기는 `AdGuard*` 하나다(제품 표기 그대로 — 2026-09-03 통일). 형제 두 룰이 쓰던 구
+          #    표기 `Adguard*`는 남아 있지 않다. `tests/gates/test_vmalert-config.bats`의 표기 레인이
+          #    룰 파일 전수에서 이 전칭을 문다 — 새 알림을 `Adguard*`로 적으면 그 레인이 red다.
           # ⚠️ rollup 함수 선택이 의미의 전부다. 이건 **값-게이지**(0/1)이고 시리즈 정체성(section 라벨)은
           #    고정이라 `last_over_time`이 최신 샘플을 돌려준다 → 드리프트가 해소되면 즉시 0이 되어 래치가
           #    없다. `max_over_time`이면 해소된 1이 윈도(2h)만큼 부활해 `for: 1h`를 넘겨 영구 오발화한다
@@ -542,7 +543,7 @@ data:
             annotations:
               summary: "adguard 시드가 라이브 설정과 갈렸다: {{ $labels.section }}"
               description: "git의 adguard ConfigMap(`platform/adguard/prod/adguardhome.yaml`) 중 `{{ $labels.section }}` 절이 라이브 AdGuard 설정과 다릅니다. 이 ConfigMap은 첫 부팅 `cp -n` 시드라 라이브가 권위이고, 지금 당장 고장난 것은 없습니다 — 문제는 **DR 재구축 시 여기 적힌 값으로 되돌아간다**는 것입니다(ADR-0007 결정 2). 처방은 시드를 라이브에 맞춰 갱신하는 것입니다: `kubectl -n edge port-forward svc/adguard-ui 8080:80` 후 해당 control 엔드포인트(dns_info · querylog/config · stats/config)의 값을 읽어 시드에 반영하고 PR로 머지하세요. 라이브를 시드 값으로 되돌리지 마세요. ⚠️ **단 두 섹션은 처방이 반대입니다** — `dns.ratelimit`과 `dns.use_private_ptr_resolvers`는 시드 값이 사고(#493 — ratelimit 20에서 40건 중 20건 무응답 · PTR 포워딩으로 에러의 78%가 로그 오염)를 닫은 값이라, 여기서 갈렸다면 **라이브를 시드 값(100 / false)으로 되돌리세요**. 시드를 라이브에 맞추는 PR은 `platform/adguard/prod/test_adguard_querylog.bats`에서 red가 납니다."
-          # 대조 스텝 자신의 생존 — 리컨실러 하트비트(AdguardRewriteReconcilerStale)와 **별개 축**이다.
+          # 대조 스텝 자신의 생존 — 리컨실러 하트비트(AdGuardRewriteReconcilerStale)와 **별개 축**이다.
           # 대조는 실패해도 잡을 죽이지 않으므로(실패 격리) KubeJobFailed·리컨실러 하트비트 어느 것도
           # 그 침묵을 잡지 못한다. 관측 실패(API 불가·응답 형태 변경·시드 파싱 실패)는 게이지 1이 아니라
           # **아무 push 없음**으로 표현되므로, 이 부재 알림이 그 tri-state의 세 번째 값을 읽는 유일한 눈이다.

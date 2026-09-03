@@ -6,7 +6,7 @@
 # `for:` pending이 매 주기 리셋됐다). 그 뒤로 push 메트릭 알림에는 이 계열 게이트가 규율인데,
 # **이 알림 2종만 빠져 있었다**(2026-07-29 실측: 다른 push 메트릭 3종은 전부 보유).
 #
-# ★ 무게: `AdguardRewriteReconcilerStale`은 **`*.home.ukyi.app` split-horizon이 죽는 것을 잡는 유일한
+# ★ 무게: `AdGuardRewriteReconcilerStale`은 **`*.home.ukyi.app` split-horizon이 죽는 것을 잡는 유일한
 #   알림**이다. traefik-ts 디바이스 IP가 바뀌면(DR 재구축·프록시 재등록) 리컨실러가 rewrite를 수렴시키는데,
 #   그 리컨실러가 조용히 멈추면 tailscale/LAN 양쪽에서 전 내부 호스트가 죽은 IP로 향한다.
 #   그 침묵을 잡는 게 이 알림이고, 이 알림이 발화하는지는 아무도 확인한 적이 없었다.
@@ -30,8 +30,8 @@ RECONCILER="$ROOT/platform/adguard/prod/rewrite-reconciler.yaml"
 # shellcheck source=tests/gates/lib/vmalert-e2e.sh
 . "$ROOT/tests/gates/lib/vmalert-e2e.sh"
 
-STALE_ALERT=AdguardRewriteReconcilerStale
-FIX_ALERT=AdguardRewriteDriftFixed
+STALE_ALERT=AdGuardRewriteReconcilerStale
+FIX_ALERT=AdGuardRewriteDriftFixed
 HB=adguard_rewrite_reconcile_timestamp
 FIX_METRIC=adguard_rewrite_last_fix_timestamp
 

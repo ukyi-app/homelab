@@ -314,16 +314,16 @@ alert_defined() {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   A="$AMCFG"   # 제목 매핑은 설정 본문에 있다(setup 주석 참조)
   # 메타갭 ① Task 7(W2-A): 리컨실러 생존(staleness) + 실제 수렴 시 통지(F13 — 발송은 alertmanager 경유).
-  alert_defined "$R" AdguardRewriteReconcilerStale
-  alert_defined "$R" AdguardRewriteDriftFixed
+  alert_defined "$R" AdGuardRewriteReconcilerStale
+  alert_defined "$R" AdGuardRewriteDriftFixed
   # 10분 push라 last_over_time 윈도 + absent fail-closed(push-metric staleness 함정).
   grep -q 'last_over_time(adguard_rewrite_reconcile_timestamp\[2h\])' "$R"
   grep -q 'absent(last_over_time(adguard_rewrite_reconcile_timestamp' "$R"
   # F19: fix 통지는 fix 타임스탬프 > 0 가드(no-op 0 샘플이 직전 fix를 지우지 않음).
   grep -q 'adguard_rewrite_last_fix_timestamp\[2h\]) > 0' "$R"
   # alertmanager 타이틀 매핑(신규 알림 한국어).
-  grep -q 'AdguardRewriteReconcilerStale' "$A"
-  grep -q 'AdguardRewriteDriftFixed' "$A"
+  grep -q 'AdGuardRewriteReconcilerStale' "$A"
+  grep -q 'AdGuardRewriteDriftFixed' "$A"
 }
 
 @test "adguard seed drift has a warning gauge alert and its own check heartbeat (ADR-0007)" {
@@ -336,7 +336,7 @@ alert_defined() {
   # 10분 주기 push라 [2h] 윈도(모드 C: W ≥ 주기).
   grep -q 'last_over_time(adguard_seed_drift\[2h\])' "$R"
   grep -q 'last_over_time(adguard_seed_drift_checked_timestamp_seconds\[2h\])' "$R"
-  # 하트비트 부재는 fail-closed(형제 AdguardRewriteReconcilerStale과 같은 형태).
+  # 하트비트 부재는 fail-closed(형제 AdGuardRewriteReconcilerStale과 같은 형태).
   grep -q 'absent(last_over_time(adguard_seed_drift_checked_timestamp_seconds' "$R"
   # ⚠️ 값-게이지에 max_over_time을 쓰면 해소된 드리프트를 윈도만큼 래치해 for:를 넘긴다
   #    (「rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭」의 상태-게이지 쪽). 최신 샘플만 보는
@@ -351,6 +351,41 @@ alert_defined() {
   # alertmanager 타이틀 매핑(신규 알림 한국어).
   grep -q 'AdGuardSeedDrift' "$A"
   grep -q 'AdGuardSeedDriftCheckStale' "$A"
+}
+
+@test "every adguard alert name uses the AdGuard product spelling (one notation, not two)" {
+  # 병: 같은 도메인의 알림 4건이 두 표기(`Adguard*` 구 · `AdGuard*` 계약)로 갈려 있었고 **그 갈림을
+  #     재는 증인이 0**이었다. 실측(2026-09-03): 계약 표기 2룰을 구 표기로 되돌려도(룰·제목 매핑·
+  #     bats 리터럴을 함께 고쳐) 174 ok / 0 not ok였다. 표기가 갈리면 `alertname` 시리즈·제목 매핑·
+  #     e2e 기대값이 조용히 서로 다른 것을 가리킨다 — red가 아니라 무성 열화다.
+  # 열거는 룰 파일 **전수 파생**이다(손 로스터 금지 — (N+1)번째 알림이 무방비가 된다).
+  # 판정은 대소문자 무시로 도메인을 고르고, 그 안에서 접두를 정확히 문다.
+  names=""
+  nf=0
+  for f in "$ROOT"/platform/victoria-stack/prod/rules/*.yaml; do
+    # ⚠️ `yq -e '.data["<키>"]'`는 키를 손으로 박는다 — 파일명↔키 규약이 바뀌면 조용히 죽는다.
+    #    ConfigMap 하나당 키 하나라는 실 구조에서 to_entries로 파생한다(실측: 5파일 전부 keys=1).
+    inner="$(yq -r '.data | to_entries | .[0].value' "$f")"
+    a="$(printf '%s' "$inner" | yq -r '.groups[].rules[] | select(has("alert")) | .alert')"
+    names="${names}${a}
+"
+    nf=$((nf + 1))
+  done
+  # 3층 바닥값 — 파일 글롭 · 이름 열거 · 도메인 열거. 어느 하나가 붕괴하면 아래 전칭이 공허해진다.
+  [ "$nf" -ge 5 ]
+  total="$(printf '%s' "$names" | grep -c .)"
+  [ "$total" -ge 40 ]        # 현재 58
+  ad="$(printf '%s' "$names" | grep -i 'adguard' || true)"
+  nad="$(printf '%s' "$ad" | grep -c .)"
+  [ "$nad" -ge 4 ]           # 현재 4 — 도메인이 통째로 사라지면(또는 grep이 깨지면) red
+  bad=""
+  while IFS= read -r a; do
+    [ -n "$a" ] || continue
+    case "$a" in AdGuard*) ;; *) bad="${bad} ${a}" ;; esac
+  done <<EOF
+$ad
+EOF
+  if [ -n "$bad" ]; then echo "adguard 알림 표기가 제품 표기(AdGuard*)가 아니다:$bad"; return 1; fi
 }
 
 @test "LAN DNS liveness has a dedicated critical alert (R7 made AdGuard the whole house's resolver)" {

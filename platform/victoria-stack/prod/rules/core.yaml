@@ -392,7 +392,7 @@ data:
           #   그 축은 별건이다(ProxyClass `spec.metrics` + `tailscaled_*` 스크레이프 — CRD가 unstable 표기).
           # ⚠️ "operator가 STS를 아예 못 만든" 상태도 시리즈 자체가 없어 이 룰 밖이다. 그 서브케이스는
           #   traefik-ts Service의 LB IP 부재 → rewrite-reconciler exit 1 → KubeJobFailed와
-          #   AdguardRewriteReconcilerStale(r4-storage-backup.yaml)이 간접 페이징한다.
+          #   AdGuardRewriteReconcilerStale(r4-storage-backup.yaml)이 간접 페이징한다.
           # 시스템 ns 블랙리스트는 WorkloadUnavailable과 같은 규약(신규 ns 자동 포함).
           - alert: StatefulSetUnavailable
             expr: |
