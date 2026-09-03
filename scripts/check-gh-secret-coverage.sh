@@ -7,7 +7,7 @@
 #
 # 이 가드는 두 집합의 **전단사**를 강제한다:
 #   ENUM  = 워크플로가 실제로 참조하는 homelab 소유 secret 이름
-#   DECL  = policy/gh-secret-classification.json이 분류한 이름(4갈래 중 정확히 하나)
+#   DECL  = policy/gh-secret-var-classification.json이 분류한 이름(4갈래 중 정확히 하나)
 # ENUM \ DECL = 미분류 secret(추가하고 어디에도 안 적음) · DECL \ ENUM = stale 선언(워크플로에서 사라짐).
 # 양방향이라 "선언만 하고 안 쓰는" 죽은 행도 잡힌다.
 #
@@ -63,7 +63,7 @@ while [ $# -gt 0 ]; do
 done
 cd "$ROOT"
 LEDGER="policy/credential-expiry.json"
-CLASS="policy/gh-secret-classification.json"
+CLASS="policy/gh-secret-var-classification.json"
 
 
 command -v jq >/dev/null 2>&1 || { echo "ERROR: jq 필요" >&2; exit 2; }
