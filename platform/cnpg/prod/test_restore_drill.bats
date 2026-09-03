@@ -111,3 +111,14 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   # 양성 대조: _live_psql이 timeout 래퍼로 여전히 무한 대기를 막는지(플래그 제거가 보호를 없앤 게 아님)
   grep -qE 'timeout [0-9]+ kubectl .*exec' "$sh"
 }
+
+@test "the manifest is wired into the kustomization (prune would delete it otherwise)" {
+  # ⚠️ cnpg-data App은 prune:true + selfHeal:true라 resources에서 한 줄이 사라지는 것이 곧
+  #    클러스터에서의 삭제다 — 유일한 복구 증명이 통째로 없어진다. 위 @test들은 CronJob·스크립트
+  #    파일을 직접 grep할 뿐 배선을 안 봐서 배선을 지워도 PR 게이트가 전건 초록이었다(실측).
+  #    이 CronJob은 렌더 증인(test_kustomize_build.bats, 게다가 tests/.ci-exclude)조차 없어
+  #    이 한 줄이 배선의 유일한 머지-전 증인이다. 사후 검출은 CNPGRestoreDrillStale(≈8.1일)뿐이다.
+  # ⚠️ 원문 grep이 아니라 파싱된 resources를 본다(tests/gates/test_dual-run-excludes.bats:51-58 관례).
+  run yq '.resources | contains(["restore-drill-cronjob.yaml"])' platform/cnpg/prod/kustomization.yaml
+  printf '%s' "$output" | grep -qxF -- 'true'
+}

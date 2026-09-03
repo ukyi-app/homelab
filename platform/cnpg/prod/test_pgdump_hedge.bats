@@ -22,6 +22,14 @@ f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
 @test "hedge pulls rclone+aws creds from cnpg-r2-creds secret" {
   grep -q 'name: cnpg-r2-creds' "$f"
 }
+@test "the manifest is wired into the kustomization (prune would delete it otherwise)" {
+  # ⚠️ cnpg-data App은 prune:true + selfHeal:true라 resources에서 한 줄이 사라지는 것이 곧
+  #    클러스터에서의 삭제다. 위 @test들은 파일을 직접 grep할 뿐 배선을 안 봐서, 배선을 지워도
+  #    PR 게이트가 전건 초록이었다(실측). 사후 검출은 PgDumpHedgeStale뿐이다.
+  # ⚠️ 원문 grep이 아니라 파싱된 resources를 본다(tests/gates/test_dual-run-excludes.bats:51-58 관례).
+  run yq '.resources | contains(["pgdump-hedge-cronjob.yaml"])' platform/cnpg/prod/kustomization.yaml
+  printf '%s' "$output" | grep -qxF -- 'true'
+}
 
 @test "hedge dumps as the managed superuser so it captures all objects (not just app-owned)" {
   # app 롤은 postgres 소유 객체(restore_canary 등)를 LOCK/덤프하지 못해 실패한다(라이브 검증).

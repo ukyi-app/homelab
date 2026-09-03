@@ -16,6 +16,14 @@ cj=platform/cnpg/prod/basebackup-cronjob.yaml
 @test "cronjob emits the local-basebackup breadcrumb metric M5 alerts on" {
   grep -q 'cnpg.io/backupRole: local-basebackup' "$cj"
 }
+@test "the manifest is wired into the kustomization (prune would delete it otherwise)" {
+  # ⚠️ cnpg-data App은 prune:true + selfHeal:true라 resources에서 한 줄이 사라지는 것이 곧
+  #    클러스터에서의 삭제다. 위 @test들은 파일을 직접 grep할 뿐 배선을 안 봐서, 배선을 지워도
+  #    PR 게이트가 전건 초록이었다(실측). 사후 검출은 LocalBasebackupStale뿐이다.
+  # ⚠️ 원문 grep이 아니라 파싱된 resources를 본다(tests/gates/test_dual-run-excludes.bats:51-58 관례).
+  run yq '.resources | contains(["basebackup-cronjob.yaml"])' platform/cnpg/prod/kustomization.yaml
+  printf '%s' "$output" | grep -qxF -- 'true'
+}
 
 @test "cronjob waits for pg-rw to be reachable before pg_basebackup (kube-router rule-install gap)" {
   # libpq는 첫 연결 거부에서 즉시 포기 — 새 파드의 첫 ClusterIP 접속이 kube-router 룰 설치 전
