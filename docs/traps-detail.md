@@ -2197,7 +2197,7 @@ selfHeal과 플립플롭한다.
   240Mi)까지 분모에 실린다 — 라이브 pg-1이 1344Mi가 아니라 2368Mi가 되어 **고치기 전(8.9%)보다 더 틀린
   4.0%** 가 된다. 처방은 `and on (namespace,pod,container) container_memory_usage_bytes{container!=""}`로
   cAdvisor의 실행 중 시리즈에 결박한 뒤 합산하는 것이다(교정 후 7.1%).
-> 가드: `platform/victoria-stack/prod/rules/core.yaml`, `tools/check-resource-limits.ts`, `tests/gates/test_grafana-dashboards.bats`
+> 가드: `platform/victoria-stack/prod/rules/core.yaml`, `tools/check-resource-limits.ts`, `tests/gates/test_grafana-dashboards.bats`, `tests/gates/test_vmalert-config.bats`
 ### `Container.args`는 patchMergeKey 없는 atomic 리스트다 — strategic-merge patch가 통째로 교체한다
 - 2026-09-01, 벤더 매니페스트에 kustomize patch로 자원 캡만 얹으면서 "이왕이면 로컬 편집한
   `--log-level=info`도 patch로 옮기자"는 부록이 제안됐다. 실행했으면 컨트롤러가 죽는다.

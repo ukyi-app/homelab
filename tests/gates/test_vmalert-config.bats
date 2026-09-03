@@ -251,6 +251,11 @@ alert_defined() {
   run grep -q 'container_memory_working_set_bytes' "$E"; [ "$status" -eq 1 ]
   run grep -q 'container_memory_max_usage_bytes' "$E"; [ "$status" -eq 1 ]
   run grep -q 'container_memory_cache' "$E"; [ "$status" -eq 1 ]
+  # 분모 축 — 네이티브 사이드카(restartPolicy:Always initContainer, plugin-barman-cloud 등)의 limit은
+  # KSM이 kube_pod_init_container_resource_limits로 내보낸다. `or` 가지가 사라지면 그 컨테이너는
+  # 캡이 있어도 영원히 분모가 없어 무성이다(2026-09-03 실측: 가지 삭제에도 이 스위트 전건 초록이던
+  # 무증인 축). 형제: tests/gates/test_grafana-dashboards.bats:53(대시보드 expr 축).
+  grep -q 'kube_pod_init_container_resource_limits' "$E"
 }
 
 @test "R6 ArgoCDOutOfSync has an absent() fail-closed guard like the other R-rules" {
