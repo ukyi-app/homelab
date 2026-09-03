@@ -5,7 +5,7 @@
 #   ② chart-test  — platform/charts/app/tests/ 하위(make chart-test 별도 harness)
 #   ③ .ci-exclude — not-CI-safe 레지스트리(주석이 실행처 iac/manual/age/docker 명시)
 # 매치 수 ≠ 1 → 실패(0=고아, 2+=이중소유). + .ci-exclude 유효성: (a) git-tracked 실재, (b) gate 미포함(모순),
-# (c) 사유 그룹 주석 지배 + 실행처 표기, (d) 레지스트리 상한.
+# (c) 사유 그룹 주석 지배 + 실행처 표기 **및 그 venue의 실재**, (d) 레지스트리 상한.
 # bash 3.2 호환: mapfile·[[ ]]·`cmd && n++`(set -e 함정) 금지 — if-블록·case·카운터로.
 #
 # ⚠️ **도메인 회계만으로는 gate → .ci-exclude '이동'이 원리적으로 안 보인다** — 옮겨도 여전히 정확히 한
@@ -54,21 +54,66 @@ rc=0
 #   · **항목 뒤의 주석은 새 그룹을 연다**(앞 블록에 이어붙지 않는다). 이걸 빼먹으면 새 그룹 헤더가 앞
 #     그룹의 실행처 표기를 물려받아 통과한다 — 이 규칙을 쓰면서 실제로 낸 버그다(전용 @test로 고정).
 #   · 지배 블록에 `실행처` 문자열이 있어야 한다.
-# ⚠️ **이건 텍스트 계약이지 증명이 아니다.** 단어만 적고 실제 venue가 없어도 통과한다(실측: dev-postgres·
-#    bootstrap·makefile은 자동 실행 경로가 0이라 주석을 owner-local 수동 실행으로 정직하게 고쳐 적었다.
-#    sops-guard는 반대로 `make verify`에 실제 호출을 붙여 표기를 참으로 만들었다). 실행처의
-#    실재를 강제하려면 check-guard-authority류의 venue 파생이 필요하다 — 별건이다.
-#    증가를 실제로 **묶는 것은 아래 (0b) 상한**이고, 이 계약은 "조용히"를 없앨 뿐이다.
+#   · 그리고 그 표기가 지목한 venue가 **실재해야 한다**(아래 venue_derive). 예전엔 이 자리가
+#     "텍스트 계약이지 증명이 아니다"라고 스스로 적어 둔 구멍이었다 — 단어만 있으면(「실행처: 그냥
+#     어딘가에서」) 통과했고, 없는 타깃을 적어도(「make no-such-target」) 통과했다(실측 2026-09-03).
+#     증가를 **묶는 것은 아래 (0b) 상한**이고, 이 계약은 표기가 실물을 가리키게 한다.
+# ── 실행처 표기 → **실재하는 venue** 파생 ────────────────────────────────────────
+# 인식 형태 셋이고, 그룹에 하나라도 **실재하는** 토큰이 있으면 그 그룹은 증명된다:
+#   ① make <타깃>   → Makefile에 ^<타깃>: 실재
+#   ② bats <경로>   → 그 경로 실재
+#   ③ .github/workflows/<파일>.ya?ml → 그 파일 실재
+# ⚠️ ①②의 인용 부호는 **백틱과 작은따옴표 둘 다** 받는다 — 레지스트리가 실제로 둘을 섞어 쓴다
+#    (실측: 대부분은 백틱이고 KSOPS 그룹만 작은따옴표). 표기를 한쪽으로 통일하는 규약은 없고,
+#    있어도 다음 편집자가 다시 섞는다 — 표기를 좁히는 것보다 파서를 넓히는 쪽이 정직하다.
+# ⚠️ 인용 구간 밖의 맨 텍스트는 ①②에서 **안 본다** — 산문의 「make 어쩌구」가 venue 행세를 하면
+#    이 가드가 자기 도메인의 표기에 눈멀어 다시 텍스트 계약이 된다. ③는 경로 자체가 식별자라 인용을 안 묻는다.
+# ⚠️ **인식 0건은 red다** — 부재가 아니라 존재 판정이라 방향이 반대다. 그래서 아래 `|| true`는
+#    「`findings="$(awk … || true)"`」의 fail-open과 다르다: 추출기가 깨지면 전 그룹이 red로 간다.
+VENUE_OK=0
+VENUE_TOKENS=""
+venue_derive() {
+  VENUE_OK=0
+  VENUE_TOKENS=""
+  # 백틱을 작은따옴표로 정규화한 뒤 인용 구간만 뽑는다('\140' = 백틱의 8진 표기 — 리터럴로
+  # 적으면 큰따옴표 안에서 명령 치환이 된다).
+  _vd_spans="$(printf '%s' "$1" | tr '\140' "'" | grep -oE "'[^']*'" | tr -d "'" || true)"
+  while IFS= read -r _vd_s; do
+    case "$_vd_s" in
+      'make '*)
+        _vd_t="${_vd_s#make }"; _vd_t="${_vd_t%% *}"
+        VENUE_TOKENS="${VENUE_TOKENS}[make ${_vd_t}] "
+        if grep -qE "^${_vd_t}:" Makefile; then VENUE_OK=$((VENUE_OK + 1)); fi ;;
+      'bats '*)
+        _vd_p="${_vd_s#bats }"; _vd_p="${_vd_p%% *}"
+        VENUE_TOKENS="${VENUE_TOKENS}[bats ${_vd_p}] "
+        if [ -e "$_vd_p" ]; then VENUE_OK=$((VENUE_OK + 1)); fi ;;
+    esac
+  done <<VDEOF
+$_vd_spans
+VDEOF
+  _vd_wfs="$(printf '%s' "$1" | grep -oE '\.github/workflows/[A-Za-z0-9._-]+\.ya?ml' || true)"
+  while IFS= read -r _vd_w; do
+    [ -n "$_vd_w" ] || continue
+    VENUE_TOKENS="${VENUE_TOKENS}[${_vd_w}] "
+    if [ -f "$_vd_w" ]; then VENUE_OK=$((VENUE_OK + 1)); fi
+  done <<VDEOF
+$_vd_wfs
+VDEOF
+}
+
 excl_n=0
 group=""
+group_head=""
 after_entry=0
 lineno=0
 while IFS= read -r line; do
   lineno=$((lineno + 1))
   case "$line" in
-    '') group=""; after_entry=0; continue;;
+    '') group=""; group_head=""; after_entry=0; continue;;
     \#*)
-      if [ "$after_entry" -eq 1 ]; then group=""; after_entry=0; fi
+      if [ "$after_entry" -eq 1 ]; then group=""; group_head=""; after_entry=0; fi
+      if [ -z "$group" ]; then group_head="$line"; fi
       group="${group}${line} "; continue;;
   esac
   excl_n=$((excl_n + 1))
@@ -79,7 +124,17 @@ while IFS= read -r line; do
     continue
   fi
   case "$group" in
-    *실행처*) ;;
+    *실행처*)
+      venue_derive "$group"
+      if [ "$VENUE_OK" -eq 0 ]; then
+        echo "FAIL: ${EXCLUDE_FILE}:${lineno} 실행처 표기가 가리키는 venue가 0건 실재(단어만 있고 증명이 없다): $line"
+        echo "  그룹 첫 줄: ${group_head}"
+        echo "  인식한 토큰: ${VENUE_TOKENS:-(없음)}"
+        # shellcheck disable=SC2016  # 백틱·`^<타깃>:`는 사용법 문구의 리터럴이다(명령 치환 아님)
+        echo '  인식 형태: `make <타깃>`(Makefile의 ^<타깃>:) · `bats <경로>`(경로 실재) · .github/workflows/<파일>.yaml(파일 실재) — 백틱/작은따옴표 둘 다.'
+        rc=1
+      fi
+      ;;
     *) echo "FAIL: ${EXCLUDE_FILE}:${lineno} 지배 그룹 주석에 실행처 표기 없음('왜 제외 + 어디서 실행'을 적어라): $line"; rc=1;;
   esac
 done < "$EXCLUDE_FILE"

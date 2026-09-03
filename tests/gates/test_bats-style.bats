@@ -1,8 +1,13 @@
 #!/usr/bin/env bats
 # bats 단언-스타일 가드의 gate 테스트 — 탐지기가 스스로 vacuous하지 않음을 fixture로 증명(선례: test_bats-naming.bats).
 # ⚠️ 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵 통과 — 이 파일이 막으려는 바로 그 함정).
+# ⚠️ **피연산자 실재 증인**(형제 tests/gates/test_host-ports.bats:57-58 · test_locale-collation.bats:15).
+#    `run bash "$ROOT/scripts/check-bats-style.sh" …`는 가드가 없으면 rc **127**로 죽어 `-ne 0` 레인을
+#    통과시키고, 돌지 않은 프로그램은 마커도 안 내 부재 단언까지 함께 만족시킨다. 실측 2026-09-03
+#    (가드를 지운 트리): 23건 중 「a dead detector emits no marker」 1건만 그대로 `ok`였다.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  [ -f "$ROOT/scripts/check-bats-style.sh" ]
   # heredoc 여는 표기는 lib이 런타임에 조립한다 — 리터럴로 적으면 이 파일이 검출기에게 투명해진다.
   # shellcheck source=tests/gates/lib/heredoc-marker.sh
   . "$ROOT/tests/gates/lib/heredoc-marker.sh"
@@ -171,6 +176,10 @@ setup() {
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/does-not-exist.bats"
   [ "$status" -ne 0 ]
   out="$output"
+  # ★ **양성 대조 — 가드가 실제로 돌아서 거부했다.** setup의 `[ -f ]`가 못 보는 경로(가드가
+  #   실재하면서 판정 전에 다른 이유로 크래시)까지 여기서 증언한다 — 자기 진단 문구를 함께 물어
+  #   "죽은 검출기"와 "없는 검출기"를 갈라낸다(guard.sh detect_run의 읽기 검증 경로 · 문구 드리프트는 red).
+  printf '%s' "$out" | grep -qF '읽을 수 없는 대상'
   run grep -q '^SCAN: check-bats-style:' <<<"$out"
   [ "$status" -ne 0 ]
 }
