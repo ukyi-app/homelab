@@ -104,7 +104,9 @@ spec:
   # 분리된 별도 자격(owner가 TablePlus 등으로 붙는다). 비번은 pg-admin-credentials(KSOPS, wave -2).
   # ★SSA-atomic 리스트: 서버 주입 기본값(ensure/inherit/connectionLimit)을 명시해야 ArgoCD가
   #   OutOfSync 플립을 안 한다(plugins 리스트와 동일 클래스). provision-db는 이 리스트에 owner/ro를
-  #   append(보존)한다. 롤명 ukkiee은 seal-secret.mts F2 거부 SSOT(ADMIN_DB_USERS)와 동기 — 변경 시 동반 수정.
+  #   append(보존)한다. 롤명 ukkiee은 `tools/tests/test_seal-secret.bats` 픽스처와 동기다.
+  #   ⚠️ F2(superuser URL 봉인) 거부는 49412fe(#126)에서 제거돼 **미구현**이다(docs/decisions/0005 §현재 상태) —
+  #      옛 SSOT `ADMIN_DB_USERS`는 더 이상 존재하지 않는다. 재도입 시 그 롤명 목록과 동반 수정.
   managed:
     roles:
       - name: ukkiee

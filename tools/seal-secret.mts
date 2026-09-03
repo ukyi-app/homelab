@@ -37,7 +37,7 @@ function parseDotEnv(path: string) {
     const eq = line.indexOf("=");
     if (eq <= 0) continue;
     let val = line.slice(eq + 1).trim();
-    // .env 관례: 양끝 매칭 따옴표는 구분자라 벗긴다(미제거 시 봉인 값에 따옴표 혼입 + F2 거부 우회).
+    // .env 관례: 양끝 매칭 따옴표는 구분자라 벗긴다(미제거 시 봉인 값에 따옴표가 혼입된다).
     if (val.length >= 2 && ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))) val = val.slice(1, -1);
     out.set(line.slice(0, eq).trim(), val);
   }

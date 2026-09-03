@@ -36,6 +36,12 @@ enforce는 성립할 수 없고 best-effort까지만 가능하다.
 
 봉인 계약 자체는 `tools/lib/sealed-contract.ts`의 `readSealed`가 소유하므로, 규칙이 정해지면
 그 커널에 조항으로 추가하는 것이 맞다(게이트 `check-app-deploy.sh`가 두 adapter에서 강제한다).
+단 **URL 사용자명 매칭은 `readSealed`가 볼 수 없다** — 그 자리에 오는 것은 kubeseal이 끝난
+`encryptedData`이므로(`tools/lib/sealed-contract.ts:20` — 정렬된 키 목록), 키명 기반 절만 그
+커널에서 가능하고 값 기반 절은 앱 레포에 vendored된 `tools/seal-secret.mts`의 best-effort로만
+성립한다(2026-09-03 확인). readSealed를 지목한 근거 자체는 유효하다 — homelab이 강제할 수 있는
+유일한 커널이기 때문이다. 참고로 원 구현의 롤명 목록 `ADMIN_DB_USERS`는 49412fe(#126)에서
+제거됐고, 그 사실을 광고하던 `platform/cnpg/prod/cluster.yaml`의 상호 포인터도 함께 정정했다.
 
 ## 기각한 대안
 
