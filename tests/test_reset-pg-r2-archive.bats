@@ -14,6 +14,12 @@ sh=scripts/reset-pg-r2-archive.sh
   grep -q -- '--purge' "$sh"
   grep -qi 'dry-run' "$sh"
   grep -q 'rclone purge' "$sh"
+  # ⚠️ 위 세 줄은 **토큰 실재**만 잰다 — 기본값이 파괴로 뒤집혀도(`purge=0`→`purge=1`) 전건 초록이었다
+  #    (2026-09-03 뮤테이션 실측: 8/8 ok). 이름이 약속한 「dry-run 기본」의 형태 증인을 아래에 건다.
+  # ⚠️ `^` 앵커가 필수다 — 이 스크립트의 헤더 주석(:7·:15-17)이 --purge·dry-run 규약을 **설명하느라**
+  #    담고 있어서, 앵커 없는 grep은 자기 주석에 걸린다(이 파일 @test 6이 이미 밟은 클래스).
+  grep -qE '^purge=0$' "$sh"                      # 기본값이 dry-run
+  grep -qE '^if \[ "\$purge" -eq 0 \]; then$' "$sh"  # 그 기본값이 실제 분기 조건이다
 }
 
 @test "reset DERIVES the archive serverName from the live Cluster (never hardcodes it)" {
@@ -37,6 +43,10 @@ sh=scripts/reset-pg-r2-archive.sh
   grep -q 'PG_ARCHIVE_SERVER' "$sh"
   grep -q -- '--purge-foreign' "$sh"
   grep -q '남의 아카이브를 지우는 행위다' "$sh"
+  # ⚠️ 위 세 줄도 토큰 실재뿐이다 — 인터록을 항상-참으로 바꿔도(`-eq 1`→`-ge 0`) 8/8 초록이었다.
+  #    기본값 축(`purge_foreign=0`)과 비교 연산자 축(인터록)을 따로 잰다: 전자만으로는 후자를 못 잡는다.
+  grep -qE '^purge_foreign=0$' "$sh"                          # 기본값은 닫힘
+  grep -qE '^ *\[ "\$purge_foreign" -eq 1 \] \|\|' "$sh"       # 인터록이 실제로 -eq 1이다
 }
 
 @test "reset never purges sibling prefixes (pgdump hedge = restore path B stays offsite)" {
