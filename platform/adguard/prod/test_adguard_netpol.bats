@@ -54,3 +54,15 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
     "adguard-allow-egress-upstream-dns,adguard-default-deny-egress,rewrite-reconciler-allow-egress,rewrite-reconciler-default-deny-egress" ]
   [ "$(printf '%s\n' "$R" | yq '[.. | select(has("ipBlock")) | .ipBlock.cidr] | .[]' | LC_ALL=C sort | paste -sd,)" = "0.0.0.0/0,192.168.117.0/24" ]
 }
+
+@test "workload manifests are wired into the kustomization (prune would delete them otherwise)" {
+  # 위 netpol 렌더 상한은 NetworkPolicy 종류만 잡는다 — pvc·adguardhome(첫 부팅 시드)·deployment·
+  # service는 그 축 밖이라 kustomization에서 지워도 무증인이었다(2026-09-04 실측: 4파일 동시
+  # 제거해도 default-deny-egress 등 파일 스코프 전칭 @test는 65/65 초록). 멤버십이라 상한이 아니고
+  # (정당한 추가에 손 갱신 없음), `[ -f ]`는 dangling 양성 대조다(cnpg 명명 규약: test_scheduled_backup.bats:28
+  # 계열, 관용구 출처: test_rewrite_reconciler.bats:255-263).
+  K="${BATS_TEST_DIRNAME}/kustomization.yaml"
+  run yq '.resources | contains(["pvc.yaml","adguardhome.yaml","deployment.yaml","service.yaml","networkpolicy.yaml"])' "$K"
+  printf '%s' "$output" | grep -qxF -- 'true'
+  for r in pvc adguardhome deployment service networkpolicy; do [ -f "${BATS_TEST_DIRNAME}/$r.yaml" ]; done
+}
