@@ -30,6 +30,10 @@ setup() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -qx "apps"
   echo "$output" | grep -qx "platform"
+  # 상한 — 존재 2 + 개수 2 = 정확 집합. 세 번째 AppProject가 조용히 들어오면 red다
+  # (프로젝트는 권한경계 그 자체라 신설은 의식적 편집이어야 한다). `ea`는 멀티독 스트림 합산.
+  run yq ea '[select(.kind=="AppProject") | .metadata.name] | length' "$P"
+  [ "$output" = "2" ]
 }
 
 @test "AppProjects sync strictly before every non-default project consumer (Pass3 #1)" {
@@ -89,6 +93,15 @@ setup() {
   echo "$output" | grep -qx "bitnami.com/SealedSecret"
   # 외부 egress 앱이 자체 NetworkPolicy를 source#3로 배포할 수 있어야 함(없으면 첫 외부-egress 앱 sync 거부).
   echo "$output" | grep -qx "networking.k8s.io/NetworkPolicy"
+  # ⚠️ **상한** — 존재 9 + 개수 9 = 정확 집합(항목을 빼면 위 grep이, 더하면 이 줄이 red).
+  #    이 줄 이전에는 @test 이름이 "exactly"라고 약속하면서 판정은 존재 단언 9개뿐이라
+  #    `{ group: "*", kind: "*" }`와 RoleBinding을 더해도 22/22 초록이었다(실측).
+  #    apps 프로젝트는 외부 앱 레포가 source#3로 싣는 매니페스트의 유일한 kind 경계다.
+  #    형제 레인 :54(sourceRepos=1)·:71(clusterResourceWhitelist=0)과 같은 어휘를 쓴다.
+  #    정당한 kind 추가는 projects.yaml 근거 주석 + 위 grep + 이 상수를 같은 PR에서 고치는 것이
+  #    리뷰 앵커다(sort|join 정확집합 문자열은 쓰지 않는다 — 같은 9 kind의 세 번째 손 로스터가 된다).
+  run yq 'select(.metadata.name=="apps") | .spec.namespaceResourceWhitelist | length' "$P"
+  [ "$output" = "9" ]
 }
 
 # --- platform 프로젝트: 스코프 (소유자 PR 경로, 동작보존) ---
@@ -98,6 +111,10 @@ setup() {
   echo "$output" | grep -qx "$HOMELAB"
   echo "$output" | grep -qx "https://charts.jetstack.io"
   echo "$output" | grep -qx "https://cloudnative-pg.io/charts"
+  # 상한 — 존재 3 + 개수 3 = 정확 집합. :199 레인은 "쓰이는 repoURL이 전부 sourceRepos에 있다"는
+  # 역방향만 재므로, **쓰이지 않는** 4번째 repo가 조용히 들어오는 경로가 무증인이었다.
+  run yq 'select(.metadata.name=="platform") | .spec.sourceRepos | length' "$P"
+  [ "$output" = "3" ]
 }
 
 @test "platform project allows cluster-scoped resources (CRD/ClusterRole/Namespace)" {
