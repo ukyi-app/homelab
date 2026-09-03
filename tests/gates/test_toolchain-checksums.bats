@@ -53,7 +53,11 @@ setup() {
   # floor의 피연산자를 grep 결과가 아니라 **열거 건수**로 둔다(열거 붕괴 → vacuous green 차단).
   run bash -c "$LS_WF | grep -c ."
   [ "$output" -ge 25 ]
-  run bash -c "$LS_WF | xargs grep -nE 'apt-get +(install|update)' || true"
+  # 플래그 선행형(`apt-get -y install`)·`apt` 단축형까지 본다(exact-tests-2) — 원 정규식은
+  # 서브커맨드 바로 뒤 공백만 허용해 `apt-get -y install`·`apt install -y`가 분모 밖이었다.
+  # 산문에 `apt install` 표기가 들어가면 이 레인이 red를 낸다(표현을 바꿀 것). `-o Foo=bar install`
+  # 형태는 여전히 밖이나 ERE에 lazy가 없어 더 넓히면 산문 오탐이 커진다 — 여기가 균형점이다.
+  run bash -c "$LS_WF | xargs grep -nE 'apt(-get)? +(-[^ ]+ +)*(install|update)' || true"
   [ "$status" -eq 0 ]
   [ -z "$output" ] || {
     echo "워크플로/액션이 apt로 도구를 깐다 — setup-toolchain(핀+체크섬)을 쓸 것:"
