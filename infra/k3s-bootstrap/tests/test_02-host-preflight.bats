@@ -40,7 +40,17 @@ DNS=
 EOF
   export FX IPSTUB
 }
-run_pf() { PREFLIGHT_ROOT="$FX" PREFLIGHT_IP="$IPSTUB" run "$BOOTSTRAP_DIR/host-preflight.sh"; }
+# ⚠️ `run`은 피호출자의 출력을 `$output`으로 **삼킨다** — 그래서 뒤따르는 `[ "$status" -eq 0 ]`이
+#    깨지면 bats가 보여줄 것이 실패한 줄 하나뿐이고 진단이 0줄이다(main gate에서 이 파일의
+#    happy-path가 3회 flake했는데 매번 그 상태였다 — 2026-09-03). bats는 **실패한 @test의**
+#    stdout만 보여주므로, 여기서 되울리면 초록 실행의 출력은 그대로 조용하고 실패에만 진단이
+#    남는다. 30개 콜사이트 전부가 이 헬퍼를 지나므로 자리는 여기 하나다(중복·드리프트 0).
+#    `$status`/`$output`은 `run`이 세우는 전역이라 되울림은 그 값을 바꾸지 않는다 — 기능 변화 0.
+run_pf() {
+  PREFLIGHT_ROOT="$FX" PREFLIGHT_IP="$IPSTUB" run "$BOOTSTRAP_DIR/host-preflight.sh"
+  echo "status=$status"
+  echo "$output"
+}
 
 @test "passes on a fully prepared host" {
   run_pf
