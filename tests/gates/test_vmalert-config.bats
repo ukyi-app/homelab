@@ -431,6 +431,63 @@ EOF
   if [ -n "$missing" ]; then echo "critical 알림의 텔레그램 제목 매핑 누락:$missing"; return 1; fi
 }
 
+@test "the substrate pin alerts exist and their literals equal the versions.env pins (no hand copy)" {
+  # 병: `versions.env`·storage 매니페스트의 핀은 `SSOT: seed-only`(재구축 목표값)인데 그 규약의
+  #     대조자가 `verify-cluster.sh` [6][10][11] **손 실행 셋뿐**이었다. Renovate는 주 1회 핀을 올리므로
+  #     상주 신호가 없으면 규약이 조용히 영구 드리프트가 된다(실측 2026-09-03: 라이브 k3s v1.36.2+k3s1
+  #     vs 핀 v1.36.3+k3s1 · provisioner v0.0.36 vs v0.0.37 — 어느 것도 신호 0).
+  # ★ 이 레인이 무는 것은 알림의 **존재**가 아니라 그 안의 두 리터럴이 핀의 **사본이 아니라 등식**이라는
+  #   것이다. 사본으로 두면 핀 bump PR이 룰을 두고 가고, 그 순간 알림이 옛 목표값을 감시한다 —
+  #   "드리프트 없음"이 초록으로 보이는 가장 나쁜 모양이다.
+  R8="$ROOT/platform/victoria-stack/prod/rules/r8-substrate.yaml"
+  VER="$ROOT/infra/k3s-bootstrap/versions.env"
+  PROV="$ROOT/infra/k3s-bootstrap/storage/local-path-provisioner.yaml"
+  [ -s "$R8" ]
+  [ -s "$VER" ]
+  [ -s "$PROV" ]
+  alert_defined "$R8" SubstrateK3sPinDrift
+  alert_defined "$R8" SubstrateProvisionerPinDrift
+  # ── 핀 파생(손 리터럴 0) ──
+  # ⚠️ `source`하지 않는다 — versions.env는 "직접 실행 금지" 파일이고 여기서는 한 줄만 필요하다.
+  k3s="$(grep -oE '^export K3S_VERSION="[^"]+"' "$VER" | sed -e 's/.*="//' -e 's/"$//')"
+  prov="$(grep -oE '^export LOCAL_PATH_PROVISIONER_VERSION="[^"]+"' "$VER" | sed -e 's/.*="//' -e 's/"$//')"
+  [ -n "$k3s" ]
+  [ -n "$prov" ]
+  # 매니페스트 태그도 같은 값이어야 한다(그 등식 자체는 test_06-storage-manifests.bats 소유 —
+  # 여기서는 룰이 **매니페스트에 실제로 있는 문자열**을 물고 있는지를 본다).
+  run grep -cE "image: rancher/local-path-provisioner:${prov}([[:space:]]|\$)" "$PROV"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+  # ── 등식 ──
+  body="$(yq -r '.data | to_entries | .[0].value' "$R8")"
+  [ -n "$body" ]
+  k3s_expr="$(printf '%s' "$body" | yq -r '.groups[].rules[] | select(.alert=="SubstrateK3sPinDrift") | .expr')"
+  prov_expr="$(printf '%s' "$body" | yq -r '.groups[].rules[] | select(.alert=="SubstrateProvisionerPinDrift") | .expr')"
+  printf '%s' "$k3s_expr" | grep -qF "kubelet_version!=\"${k3s}\""
+  printf '%s' "$prov_expr" | grep -qF "image_spec!=\"rancher/local-path-provisioner:${prov}\""
+  # 반대 방향 — 룰이 **다른** 버전 리터럴을 함께 들고 있으면(부분 bump) 위 존재 단언만으로는 초록이다.
+  n_k3s="$(printf '%s' "$k3s_expr" | grep -coE 'kubelet_version!="[^"]+"')"
+  [ "$n_k3s" = "1" ]
+  n_prov="$(printf '%s' "$prov_expr" | grep -coE 'image_spec!="rancher/local-path-provisioner:[^"]+"')"
+  [ "$n_prov" = "1" ]
+  # ── 계약의 나머지 ──
+  # for:는 핀 bump → owner 재수렴 사이의 정상 지연을 흡수해야 한다. 짧으면 Renovate PR마다 페이징이
+  # 되고 그러면 규약이 아니라 알림이 꺼진다. severity도 같은 이유로 warning이다(고장이 아니라 거리).
+  [ "$(printf '%s' "$body" | yq -r '[.groups[].rules[] | select(.alert=="SubstrateK3sPinDrift" or .alert=="SubstrateProvisionerPinDrift") | select(.for=="24h")] | length')" = "2" ]
+  [ "$(printf '%s' "$body" | yq -r '[.groups[].rules[] | select(.alert=="SubstrateK3sPinDrift" or .alert=="SubstrateProvisionerPinDrift") | select(.labels.severity=="warning")] | length')" = "2" ]
+  # helper digest([11])는 KSM에 없다 — 이 룰이 그 축을 덮는다고 읽히면 손 실행이 조용히 사라진다.
+  grep -q 'helper digest' "$R8"
+  # 텔레그램 제목 매핑(setup의 AMCFG — 설정 본문이 SSOT다).
+  grep -qF 'eq $name "SubstrateK3sPinDrift"' "$AMCFG"
+  grep -qF 'eq $name "SubstrateProvisionerPinDrift"' "$AMCFG"
+  # Renovate 동반 갱신 — 두 자리가 한 PR에서 오르지 않으면 위 등식이 그 PR을 red로 만든다.
+  # 그 red가 나지 않게 하는 것은 매니저 설정뿐이라, 설정이 사라졌는지 여기서 함께 본다.
+  RN="$ROOT/renovate.json"
+  grep -qF 'rules/r8-substrate' "$RN"
+  grep -qF 'kubelet_version!=' "$RN"
+  grep -qF 'image_spec!=' "$RN"
+}
+
 @test "every rules file is wired into vmalert (glob, mount, volume, ConfigMap name, kustomization)" {
   # 하나라도 빠지면 룰이 조용히 미적재(silent staleness의 사촌)다 — vmalert는 없는 파일을 불평하지
   # 않고, ArgoCD는 참조되지 않은 파일을 렌더하지 않으며, 제목-매핑 레인은 critical에만 걸린다.

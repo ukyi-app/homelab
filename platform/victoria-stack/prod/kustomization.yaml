@@ -20,6 +20,10 @@ resources:
   - rules/r5-cert-tls.yaml
   - rules/r6-ci-staleness.yaml
   - rules/r7-meta.yaml
+  # 기판 핀 ↔ 라이브 드리프트의 주기 신호. 룰 안의 버전 리터럴은 versions.env와 등식으로 잠겨 있고
+  # (test_vmalert-config.bats) Renovate가 두 자리를 한 PR에서 올린다.
+  # ⚠️ 아래 줄에 꼬리 주석을 붙이지 마라 — 배선 전수 레인이 `^  - rules/<파일>$` 앵커로 문다.
+  - rules/r8-substrate.yaml
   - ghcr-read.sealed.yaml # digest-exporter private GHCR inspect 자격(owner: make seal-ghcr-read)
   - digest-exporter.yaml
   - gha-liveness-exporter.yaml # GHA 스케줄 워크플로 liveness 하트비트(티켓 10 — run 밖 관측자)

@@ -80,6 +80,8 @@ receivers:
           {{- else if eq $name "AlertRuleFlapping" }}{{ $title = "알림 룰 만성 flapping" }}
           {{- else if eq $name "AlertPipelineWriteStale" }}{{ $title = "ALERTS 되쓰기 정체" }}
           {{- else if eq $name "AlertSuppressionProlonged" }}{{ $title = "알림 억제 장기화" }}
+  {{- else if eq $name "SubstrateK3sPinDrift" }}{{ $title = "k3s 핀 드리프트" }}
+  {{- else if eq $name "SubstrateProvisionerPinDrift" }}{{ $title = "local-path 핀 드리프트" }}
           {{- end -}}
           {{- /* 미매핑 alertname → summary를 제목으로(신규 알림도 한국어). 자동 escape됨. summary 없으면 alertname 원문 */ -}}
           {{- if and (eq $title $name) .CommonAnnotations.summary }}{{ $title = .CommonAnnotations.summary }}{{- end -}}
