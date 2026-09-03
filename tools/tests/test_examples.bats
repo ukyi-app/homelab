@@ -5,7 +5,9 @@
 #  렌더 계약은 fixtures가 SSOT다.)
 # ⚠️ 메모리는 이 파일 소관이 아니다 — 앱 사이징은 platform/charts/app/values.schema.json이
 #    resources 4값(requests/limits × cpu/memory)을 required로 강제하고, 그 증인은
-#    platform/charts/app/tests/test_schema.bats:20·39(「per-app sizing gate」·「sizing-discipline」)다.
+#    platform/charts/app/tests/test_schema.bats:20·39·47(「per-app sizing gate」·「sizing-discipline
+#    divergence (limits half)」·「emptied or absent requests axis」)다. :39는 limits 축만 재므로
+#    requests 축 증인은 :47이다 — 예전엔 :39 하나를 「both」로 가리켰고 그 절반이 무증인이었다.
 #    platform 상주 워크로드 쪽은 docs/memory-ledger.md 원장 + tools/check-resource-limits.ts
 #    (GOMEMLIMIT ≤ limit×0.95). 차트 templates/에는 GOMEMLIMIT/NODE_OPTIONS 주입 자리가 없다(실측 0건)
 #    — 그래서 @test 이름도 그것을 약속하지 않는다.

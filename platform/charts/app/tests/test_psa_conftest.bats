@@ -30,3 +30,19 @@ REGO="$CHART/tests/psa-restricted.rego"
   echo "$output"
   [ "$status" -ne 0 ]
 }
+
+@test "conftest denies securityContext keys nulled away (APE, capabilities.drop, runAsNonRoot)" {
+  # values.schema.json의 not.anyOf는 `const: true/false/0`만 거부한다 — 키를 **null로 지우는**
+  # 약화는 helm rc=0으로 통과하므로 이 rego가 마지막 방어선인 자리다.
+  # ⚠️ `[ status -ne 0 ]`만 쓰면 세 규칙의 **논리합** 증인이 된다(하나만 지워도 나머지 2건이
+  #    rc≠0을 유지해 초록). 그래서 메시지 단위로 각각 잰다 — 규칙 하나의 삭제도 red가 된다.
+  # herestring이다 — `… | grep -q`는 pipefail 아래에서 writer를 SIGPIPE로 죽인다.
+  out=$(helm template t "$CHART" -f "$CHART/tests/fixtures-bad/sc-nulled.yaml")
+  echo "$out" | grep -qF 'kind: Deployment'
+  run conftest test --policy "$REGO" - <<<"$out"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  grep -qF 'allowPrivilegeEscalation=false' <<<"$output"
+  grep -qF 'capabilities.drop' <<<"$output"
+  grep -qF 'runAsNonRoot=true' <<<"$output"
+}

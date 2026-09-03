@@ -21,6 +21,13 @@ containers contains c if some c in object.get(ps, ["initContainers"], [])
 
 containers contains c if some c in object.get(ps, ["ephemeralContainers"], [])
 
+# 증인 분모 — 어떤 deny 규칙이 fixtures-bad로 도달 가능한지가 이 파일의 게이트 가치다.
+#   도달 가능(픽스처 있음): capabilities.add(caps-add.yaml) · seccompProfile(seccomp-unconfined.yaml) ·
+#     allowPrivilegeEscalation·capabilities.drop·runAsNonRoot(sc-nulled.yaml — 키를 null로 지우는 약화,
+#     values.schema.json의 not.anyOf가 const만 거부해 helm을 통과하는 경로).
+#   도달 불가(픽스처 없음이 정상): hostNetwork/hostPID/hostIPC/hostPath는 **차트가 렌더하지 않고**,
+#     privileged는 values.schema.json이 `const: true`로 거부한다. 라이브 admission 패리티를 위해
+#     규칙은 남기되 증인 분모 밖이다.
 # --- pod-level host 격리 ---
 deny contains msg if {
 	object.get(ps, ["hostNetwork"], false) == true

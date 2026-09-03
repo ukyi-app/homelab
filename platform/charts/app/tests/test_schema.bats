@@ -36,8 +36,20 @@ complete=(--set image.repo=ghcr.io/x/y --set image.tag=sha-deadbeef \
   [ "$status" -ne 0 ]
 }
 
-@test "schema keeps cpu+memory required on both requests and limits (onboarding sizing-discipline; divergence from platform SRE policy is intentional and documented)" {
+@test "schema documents the sizing-discipline divergence (limits half)" {
+  # 이름을 limits 축으로 좁혔다 — 본문이 재는 건 limits.required와 정책 분기 주석뿐이고,
+  # requests 축은 아래 행동 증인 @test가 맡는다(예전 이름은 「both」를 약속하면서 절반이 무증인이었다).
   S="$CHART/values.schema.json"
   run jq -e '.properties.resources.properties.limits.required == ["cpu","memory"]' "$S"; [ "$status" -eq 0 ]
   run jq -e '.properties.resources.comment | test("사이징 디시플린")' "$S"; [ "$status" -eq 0 ]
+}
+
+@test "schema rejects an emptied or absent requests axis (the other half of the both name)" {
+  # 스키마 JSON을 jq로 미러링하지 않는다 — 동어반복 증인이라 $ref·oneOf 리팩터에 취약하다.
+  # 레포 관용구대로 fail-closed는 `run helm template`의 rc로 잰다. 두 프로브가 각각
+  # requests의 minLength 축·required 축에 대응한다(실측: 각 축을 지우면 그 프로브만 초록이 된다).
+  run helm template t "$CHART" "${complete[@]}" --set resources.requests.cpu=
+  [ "$status" -ne 0 ]                     # minLength 축(빈 quantity)
+  run helm template t "$CHART" "${complete[@]}" --set resources.requests.cpu=null
+  [ "$status" -ne 0 ]                     # required 축(키 삭제)
 }
