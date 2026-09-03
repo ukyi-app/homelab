@@ -21,6 +21,8 @@ setup() {
   #    원문 grep은 주석 한 줄에도 초록이므로 **파싱한** resources를 본다(형제 셋과 동형).
   run yq '.resources | contains(["networkpolicy.yaml"])' "${BATS_TEST_DIRNAME}/kustomization.yaml"
   printf '%s' "$output" | grep -qxF -- 'true'
+  # 상한 — ipBlock 없는 피어(또는 to 없는 규칙)는 :49 cidr 등호가 원리적으로 못 본다(실측 6/6 ok).
+  [ "$(yq ea '[select(.kind=="NetworkPolicy")|.spec.egress[]?|(.to // [{}])[]|select(has("ipBlock")|not)|((.namespaceSelector.matchLabels."kubernetes.io/metadata.name" // "ANY")+"/"+(.podSelector.matchLabels."k8s-app" // "ANY"))]|sort|join(",")' "$P")" = "kube-system/kube-dns" ]
 }
 
 @test "dns egress to coredns on 53 is declared" {
