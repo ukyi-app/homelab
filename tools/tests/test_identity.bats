@@ -6,8 +6,16 @@
 #    단일·다중 **파일**이라 그것으로 닫힌다. 이 파일의 술어는 전부 "콜사이트에서 사라졌는가"라
 #    콜사이트가 리네임되면 `-ne 0`이 SSOT 수렴을 증명하지 않고도 초록이 된다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
+# ⚠️ **SSOT 축은 닫혔다**(감사 3라운드): setup()이 identity.ts 실재를, 정적 로스터 레인(#2·#6·#7·#15)이
+#    각자 인용하는 **심볼의 export 실재**를 진다. 남은 열린 축은 콜사이트 로스터(파일 목록)가
+#    손 관리라는 점 하나다 — 열거 파생은 별건.
 
-setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
+setup() {
+  ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
+  # SSOT 실재 — 이 파일의 술어는 전부 identity.ts를 전제한다. 정적 로스터 레인(#2·#6·#7·#15)은
+  # "콜사이트에서 인라인 regex가 사라졌는가"만 보므로 SSOT가 통째로 없어도 초록이었다(실측).
+  [ -f "$ROOT/tools/lib/identity.ts" ]
+}
 
 @test "identity exports APP_NAME_RE with the validator policy (no trailing hyphen, 2..40)" {
   run bun -e '
@@ -29,6 +37,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   run grep -nE 'a-z0-9-\]\{1,29\}|a-z0-9-\]\{0,40\}' \
     tools/create-app.ts tools/teardown-app.ts tools/bump-tag.ts
   [ "$status" -eq 1 ]   # grep이 아무것도 못 찾아야(=잔존 0) status==1
+  # ⚠️ 이 레인이 인용하는 **심볼**의 export 실재 — 부재 단언과 import 줄만으로는 SSOT가
+  #    `APP_NAME_RE_X`로 리네임돼도 초록이다(실측). `\b`가 `_X` 접미를 가른다.
+  run grep -qE '^export const APP_NAME_RE\b' tools/lib/identity.ts
+  [ "$status" -eq 0 ]
   for f in tools/create-app.ts tools/teardown-app.ts tools/validate-mutation.ts tools/activate-app.ts tools/bump-tag.ts tools/lib/status.ts; do
     # ⚠️ 피연산자를 **import 줄**로 좁힌다 — `grep -q identity.ts`는 그 파일의 *주석* 한 줄에도
     #    매치해, 인라인 regex로 되돌린 뮤테이션에서 초록이 났다(실측). cf. 「정적 증인의 두 함정」
@@ -77,6 +89,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   run grep -nE '\^\[a-z\]\[a-z0-9-\]\*\$' \
     tools/db-url.ts tools/cache-url.ts tools/teardown-resource.ts tools/validate-mutation.ts
   [ "$status" -eq 1 ]
+  # 인용 심볼의 export 실재(#2와 같은 형태) — 로스터 레인은 SSOT 리네임에 눈이 멀다.
+  run grep -qE '^export const RESOURCE_NAME_RE\b' tools/lib/identity.ts
+  [ "$status" -eq 0 ]
   for f in teardown-resource validate-mutation provision-db provision-cache; do
     run grep -q "lib/identity.ts" "tools/$f.ts"
     [ "$status" -eq 0 ]
@@ -93,6 +108,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # 이 @test에는 형제 단언이 없다 — `-ne 0`이면 두 파일이 함께 리네임돼도 혼자 초록으로 남는다
   run grep -nE 'a-z0-9_-\]\*\$/' tools/validate-mutation.ts tools/provision-db.ts
   [ "$status" -eq 1 ]
+  # 인용 심볼의 export 실재(#2와 같은 형태) — 형제 단언이 없는 레인이라 더 필요하다.
+  run grep -qE '^export const EXT_RE\b' tools/lib/identity.ts
+  [ "$status" -eq 0 ]
 }
 
 @test "provision-cache now rejects a >30-char name (29->30 tightening consistent)" {
@@ -195,6 +213,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "executors use shared reserved policy (no local RESERVED/-ro check left)" {
+  # 인용 심볼의 export 실재(#2와 같은 형태) — 콜사이트가 `resourceNameError`를 부른다는 증인은
+  # SSOT 쪽에 그 이름의 export가 남아 있을 때만 "공유 정책"을 뜻한다.
+  run grep -qE '^export function resourceNameError\b' tools/lib/identity.ts
+  [ "$status" -eq 0 ]
   run grep -Fq 'resourceNameError' tools/provision-db.ts;        [ "$status" -eq 0 ]
   run grep -Fq '"streaming_replica"' tools/provision-db.ts;      [ "$status" -eq 1 ]   # 로컬 RESERVED 리터럴 제거
   run grep -Fq '/-ro$/' tools/provision-db.ts;                   [ "$status" -eq 1 ]   # provision-db 로컬 -ro 제거(F8)
