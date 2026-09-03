@@ -16,9 +16,19 @@ D="$BATS_TEST_DIRNAME/deployment.yaml"
   run yq '.spec.template.spec.securityContext.fsGroup' "$D"; [ "$output" = "65532" ]
 }
 
-@test "two container ports 8080 and 8081" {
+@test "two container ports 8080 and 8081, each bound to its own name" {
   run yq '[.spec.template.spec.containers[0].ports[].containerPort] | sort | join(",")' "$D"
   [ "$output" = "8080,8081" ]
+  # 이름↔번호 결속 — service.yaml이 targetPort를 **이름**으로 참조하고(`internal`/`public`) 여기서
+  # 번호로 푼다. 번호 집합만 세면 두 이름을 맞바꿔도 세 조각(HTTPRoute→Service 포트, Service
+  # targetPort 이름, 컨테이너 포트 번호)이 전부 개별적으로 참인 채 조인만 끊긴다(실측 2026-09-03:
+  # 이름 스왑 후 platform/files/prod 33/33 ok).
+  # ⚠️ 이건 **위생 가드**이지 공개 경계가 아니다 — 스왑하면 probe도 같은 이름을 따라가 8081(health
+  #    핸들러 없음)을 쳐서 CrashLoop → WorkloadUnavailable로 착지한다. 즉 fail-closed·loud다.
+  run yq '.spec.template.spec.containers[0].ports[] | select(.name=="public") | .containerPort' "$D"
+  [ "$output" = "8081" ]
+  run yq '.spec.template.spec.containers[0].ports[] | select(.name=="internal") | .containerPort' "$D"
+  [ "$output" = "8080" ]
 }
 
 @test "keys secret is mounted as a FILE, not envFrom" {
