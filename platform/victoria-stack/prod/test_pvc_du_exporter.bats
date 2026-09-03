@@ -61,6 +61,25 @@ setup() {
   grep -q 'pvc_du_last_success_timestamp' "$F"
 }
 
+@test "the du heartbeat is the LAST line of the pushed payload (truncation must be fail-closed)" {
+  # ADR-0003 「살릴 것 하나」 — 형제 2곳(backup-files-data.sh · adguard rewrite-reconciler)과 동형 계약.
+  # /api/v1/import/prometheus는 스트리밍 인입이라 절단되면 읽은 접두부만 적재된다. 하트비트가 앞줄이면
+  # "하트비트만 적재 + 티어/PVC 용량 유실"이 가능해 절단이 무성이 되고, PvcDuExporterStale이 초록인 채
+  # storage_tier_*·pvc_dir_size_bytes만 조용히 사라진다(BulkStorageLow의 원천이 그 값이다). 마지막에
+  # 두면 절단은 언제나 하트비트부터 잃으므로 stale 알림이 그 사실을 페이징한다.
+  # 판정은 **위치**다: 하트비트 append가 BODY append 전건 중 마지막이고, push는 그 뒤다.
+  hb=$(grep -nF 'BODY="${BODY}pvc_du_last_success_timestamp' "$F" | cut -d: -f1)
+  last=$(grep -nF 'BODY="${BODY}' "$F" | tail -n1 | cut -d: -f1)
+  push=$(grep -nF 'printf "%b" "$BODY"' "$F" | cut -d: -f1)
+  [ -n "$hb" ]
+  [ -n "$last" ]
+  [ -n "$push" ]
+  # 양성 대조 — append가 하트비트 하나뿐이면 "마지막"은 공허하게 참이다(실측 2026-09-03: 6줄).
+  [ "$(grep -cF 'BODY="${BODY}' "$F")" -ge 4 ]
+  [ "$hb" -eq "$last" ]
+  [ "$hb" -lt "$push" ]
+}
+
 @test "du exporter enforces the F8 isolation contract (all four guards, not just readOnly)" {
   # 전-PVC 읽기 도달성의 유출 반경을 강제 가드로 봉인 — 4개 전부 grep.
   grep -q 'automountServiceAccountToken: false' "$F"          # (1) API 토큰 미동반
