@@ -78,12 +78,14 @@ teardown() { rm -rf "$TMP"; }
   [ "$(printf '%s' "$output" | grep -c "deadbeef")" -eq 0 ]
 }
 
-@test "group ghcr-pull seals BOTH prod and files planes (single rotation target)" {
+@test "group ghcr-pull seals all three planes (prod/files/observability, single rotation target)" {
   export GHCR_PULL_TOKEN="dummy-ghcr-pull"
   PATH="$TMP/bin:$PATH" run bun tools/seal-batch.ts --group ghcr-pull --cert "$TMP/certA.pem" --out-dir "$TMP"
   [ "$status" -eq 0 ]
   [ -f "$TMP/platform/ghcr-pull/prod/ghcr-pull.sealed.yaml" ]
   [ -f "$TMP/platform/files/prod/ghcr-pull.sealed.yaml" ]
+  [ -f "$TMP/platform/victoria-stack/prod/ghcr-read.sealed.yaml" ]
+  [ "$(find "$TMP/platform" -name '*.sealed.yaml' | wc -l | tr -d ' ')" -eq 3 ]
 }
 
 @test "all seals every declared owner-local secret (rotation drill scope)" {
@@ -96,6 +98,9 @@ teardown() { rm -rf "$TMP"; }
   [ -f "$TMP/platform/files/prod/files-keys.sealed.yaml" ]
   [ -f "$TMP/platform/files/prod/ghcr-pull.sealed.yaml" ]
   [ -f "$TMP/platform/ghcr-pull/prod/ghcr-pull.sealed.yaml" ]
+  [ -f "$TMP/platform/adguard/prod/adguard-api-creds.sealed.yaml" ]
+  [ -f "$TMP/platform/victoria-stack/prod/ghcr-read.sealed.yaml" ]
+  [ "$(find "$TMP/platform" -name '*.sealed.yaml' | wc -l | tr -d ' ')" -eq 7 ]
 }
 
 @test "preflight fails closed when the live cert cannot be fetched (offline skip exit 4 -> abort)" {
