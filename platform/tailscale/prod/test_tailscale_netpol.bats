@@ -3,7 +3,15 @@
 # (디렉토리 단위 실행 시 한글 인코딩 깨짐 — 검증된 버그).
 # ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
-setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
+# ⚠️ lateral guard는 yq 구조 질의다 — yq 부재 처리는 형제 platform/cloudflared/prod/test_cloudflared_seccomp.bats:3-9
+#    그대로(CI 부재=FAIL로 dead-green 방지, 로컬=skip).
+setup() {
+  P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"
+  if ! command -v yq >/dev/null; then
+    [ -z "${CI:-}" ] || { echo "FAIL: CI인데 yq 부재 — 구조 검증 불가(dead-green 방지)"; return 1; }
+    skip "yq 미설치(로컬만 — CI setup-toolchain 제공)"
+  fi
+}
 
 @test "ns-wide default-deny-egress baseline exists" {
   run grep -q 'kind: NetworkPolicy' "$P"; [ "$status" -eq 0 ]
@@ -33,10 +41,18 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
 }
 
 @test "tailnet egress (0.0.0.0/0) always excludes private/cluster ranges (lateral guard)" {
-  run grep -q '0.0.0.0/0' "$P"; [ "$status" -eq 0 ]
-  run grep -q '10.0.0.0/8' "$P"; [ "$status" -eq 0 ]
-  run grep -q '172.16.0.0/12' "$P"; [ "$status" -eq 0 ]
-  run grep -q '192.168.0.0/16' "$P"; [ "$status" -eq 0 ]
+  # ⚠️ 재는 것은 리터럴의 **존재**가 아니라 **YAML 위치(극성)**다. 여기 있던 판정은 세 사설 대역
+  #    문자열이 파일 어딘가에 있는지만 물어서, `except:` 리스트를 지우고 같은 문자열을 형제 allow
+  #    ipBlock으로 옮기면(=「제외」→「명시 허용」) 7/7 ok였다(실측). 이 ns는 enforce=privileged라
+  #    극성 반전이 곧 클러스터 최강 권한 워크로드의 무제한 lateral이다(tailnet 레인은 ports도 없다).
+  # ⚠️ 첫 등호가 **전수 열거**다 — 파일의 ipBlock cidr 집합 전체를 고정한다. 그래서 :19-22가
+  #    리터럴로만 재던 apiserver 대역(192.168.117.0/24)의 **넓이**도 여기서 함께 못박힌다
+  #    (networkpolicy.yaml:53이 인정한 갭). 신규 사설 ipBlock allow 추가도 같은 줄이 잡는다.
+  # ⚠️ `yq -e`는 쓰지 않는다(값 false → exit 1 함정). 관용구 출처: platform/argocd/test_argocd_values.bats:148-156.
+  c="$(yq -N '[.spec.egress[]?.to[]?.ipBlock.cidr | select(.)] | .[]' "$P" | paste -sd, -)"
+  [ "$c" = "192.168.117.0/24,0.0.0.0/0" ] || { echo "ipBlock cidr 집합=$c"; false; }
+  e="$(yq -N '[.spec.egress[]?.to[]?.ipBlock | select(.cidr == "0.0.0.0/0") | .except // [] | .[]] | .[]' "$P" | paste -sd, -)"
+  [ "$e" = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" ] || { echo "except 집합=$e"; false; }
 }
 
 @test "pod CIDR is never an allowed ipBlock cidr (default-deny bypass trap)" {
