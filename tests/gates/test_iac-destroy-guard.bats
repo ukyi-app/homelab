@@ -5,19 +5,20 @@
 
 WF="$BATS_TEST_DIRNAME/../../.github/workflows/iac.yaml"
 
-# ⚠️ mode 판정은 **잡 스코프**여야 한다 — preview(warn)와 apply(block)가 한 파일에 공존하므로
+# ⚠️ 값 판정은 **잡 스코프**여야 한다 — preview(warn)와 apply(block)가 한 파일에 공존하므로
 #    파일 전체 grep은 두 값을 맞바꿔도 전건 통과한다(실측: `mode: warn`↔`mode: block` 맞바꿈
 #    뮤테이션에서 5/5 초록. warn은 `::warning::`만 내고 delete를 막지 않으므로 무인 apply의
 #    destroy 차단선이 사라진 상태였다). 같은 디렉토리 test_pr-sweeper.bats의 yq 관용구를 쓴다.
-guard_mode() { # $1: 잡 이름 — 그 잡의 tf-destroy-guard 콜사이트 mode 값
-  yq -r ".jobs.\"$1\".steps[] | select(.uses == \"./.github/actions/tf-destroy-guard\") | .with.mode" "$WF"
+#    mode 판정으로 landed한 관용구를 $2 키 일반으로 넓혀 allow/allow_max도 같은 함수로 잰다.
+guard_with() { # $1: 잡 이름, $2: with 키 — 그 잡의 tf-destroy-guard 콜사이트 값
+  yq -r ".jobs.\"$1\".steps[] | select(.uses == \"./.github/actions/tf-destroy-guard\") | .with.$2" "$WF"
 }
 
 @test "apply job uses tf-destroy-guard with mode=block" {
   # apply job 블록(plan→apply 사이)에 composite + block 모드가 있어야 한다.
   run grep -q 'uses: ./.github/actions/tf-destroy-guard' "$WF"
   [ "$status" -eq 0 ]
-  m="$(guard_mode apply)"
+  m="$(guard_with apply mode)"
   [ -n "$m" ]        # 비공허 바닥값 — 잡/스텝 리네임으로 추출이 0줄이면 아래 비교가 공허해진다
   [ "$m" = "block" ]
 }
@@ -30,7 +31,7 @@ guard_mode() { # $1: 잡 이름 — 그 잡의 tf-destroy-guard 콜사이트 mod
 }
 
 @test "iac-plan preview uses tf-destroy-guard mode=warn (not an inline jq block)" {
-  m="$(guard_mode iac-plan)"
+  m="$(guard_with iac-plan mode)"
   [ -n "$m" ]
   [ "$m" = "warn" ]
   # 인라인 destroy jq 셀렉터는 composite로 옮겨졌어야 한다(워크플로에서 제거).
@@ -43,7 +44,7 @@ guard_mode() { # $1: 잡 이름 — 그 잡의 tf-destroy-guard 콜사이트 mod
 @test "iac.yaml primary apply guard stays block (drift-2 alert-and-skip is reconcile-only)" {
   # primary apply(iac.yaml)는 alert-and-skip로 완화하지 않는다 — 구조적 무인 delete는 여기서 끝까지
   # 막힌다(app 공개 DNS만 allow로 자동 apply, tunnel/zone/waf/r2 등 delete/replace는 block 유지).
-  m="$(guard_mode apply)"
+  m="$(guard_with apply mode)"
   [ -n "$m" ]
   [ "$m" = "block" ]
   run grep -qE 'continue-on-error:[[:space:]]*true' "$WF"
@@ -53,8 +54,13 @@ guard_mode() { # $1: 잡 이름 — 그 잡의 tf-destroy-guard 콜사이트 mod
 
 @test "iac guards pass allow=app-DNS + allow_max cap (both apply+preview)" {
   # cloudflare_dns_record.app[*]만 자동 허용(apex/www=public[*]는 보호), allow_max로 대량 삭제 차단.
-  # apply(block) + iac-plan preview(warn) 두 콜사이트 모두 allow와 allow_max를 전달해야 한다.
-  na=$(grep -cF 'cloudflare_dns_record\.app' "$WF")
-  nm=$(grep -cE '^[[:space:]]+allow_max:' "$WF")
-  [ "$na" -ge 2 ] && [ "$nm" -ge 2 ]
+  # ⚠️ 부분문자열 grep은 값 axis에 무증인이다 — allow에 `|^cloudflare_dns_record\.public\[`를
+  #    덧대도(apex/www까지 자동 허용) grep -cF는 그대로 매치한다(실측). yq로 잡-스코프 값을 뽑아
+  #    정확 등식으로 잰다(위 guard_with()와 같은 관용구).
+  for j in apply iac-plan; do
+    a="$(guard_with "$j" allow)"; m="$(guard_with "$j" allow_max)"
+    [ -n "$a" ]   # 비공허 바닥값 — 잡/스텝 리네임으로 추출이 0줄이면 아래 비교가 공허해진다
+    [ "$a" = '^cloudflare_dns_record\.app\[' ]
+    [ "$m" = "1" ]
+  done
 }

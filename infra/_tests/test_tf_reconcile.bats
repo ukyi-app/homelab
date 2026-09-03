@@ -85,7 +85,12 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
 
 @test "cloudflare reconcile passes allow=app-DNS + allow_max cap (teardown auto, mass blocked)" {
   # app DNS(app[*])만 자동 apply, apex/www는 보호, allow_max로 대량 삭제 차단.
-  grep -qF 'cloudflare_dns_record\.app' "$WF" && grep -qE '^[[:space:]]+allow_max:' "$WF"
+  # ⚠️ 부분문자열 grep은 값 axis에 무증인이다 — allow에 `|^cloudflare_dns_record\.public\[`를
+  #    덧대도(apex/www까지 자동 허용) grep -cF는 그대로 매치한다(실측). 콜사이트 1개라 파일
+  #    수준 정확 등식으로 닫는다(형제 관용구 infra/_tests/test_tf_static.bats:15).
+  [ "$(grep -cE '^[[:space:]]+allow:' "$WF")" -eq 1 ]
+  [ "$(grep -cF "allow: '^cloudflare_dns_record\\.app\\['" "$WF")" -eq 1 ]
+  [ "$(grep -cF "allow_max: '1'" "$WF")" -eq 1 ]
 }
 
 @test "cloudflare reconcile uses the tf-destroy-guard composite (block) not inline jq" {
