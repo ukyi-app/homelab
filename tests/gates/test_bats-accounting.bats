@@ -62,7 +62,8 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 
 @test "a well-formed registry passes the contract" {
   reg="$BATS_TEST_TMPDIR/ok"
-  mkreg "$reg" '# docker 의존 — 실행처: owner-local `bats tests/gates/test_scan-floor.bats`' 'tests/gates/test_scan-floor.bats'
+  # ⚠️ venue는 항목 자기 자신이 아니라 **다른** 실재 파일이어야 한다(자기지시 금지 — 아래 (0a-self)).
+  mkreg "$reg" '# docker 의존 — 실행처: owner-local `bats tests/gates/test_bats-accounting.bats`' 'tests/gates/test_scan-floor.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
 }
@@ -126,6 +127,46 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   echo "$output" | grep -q "venue가 0건 실재"
 }
 
+# ── 신설 계약 (0a-self): 자기지시/상호지시는 증명이 아니다(항진식) ───────────────────────────────
+# ⚠️ 감사 5라운드 50 critic-venue-tautology 실증: venue_derive는 `bats <경로>` venue를 파일 **존재**로만
+#    검증해, 「이 파일이 실행되는 곳: 이 파일」(자기지시)도 「이 파일이 실행되는 곳: 다른 .ci-exclude
+#    항목」(상호지시)도 그대로 통과시켰다 — 인용 경로를 무관한 다른 .ci-exclude 항목으로 바꿔도
+#    --lint-excludes가 16/16 rc=0로 불변이었다(실측 2026-09-03). 아래 셋이 그 구멍의 증인이다.
+
+@test "a bats venue that cites the item's own path is rejected (self-reference is not proof)" {
+  reg="$BATS_TEST_TMPDIR/selfcite"
+  mkreg "$reg" '# 사유 — 실행처: owner-local `bats tools/tests/test_dev-postgres.bats`' 'tools/tests/test_dev-postgres.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "venue가 0건 실재"
+}
+
+@test "a bats venue that cites ANOTHER .ci-exclude-registered file is also rejected (circular, not external)" {
+  # critic의 정확한 뮤테이션: 자기지시를 무관한 **다른 등재 항목**으로 바꿔도 여전히 무증인이어야 한다.
+  reg="$BATS_TEST_TMPDIR/crosscite"
+  mkreg "$reg" \
+    '# 사유A — 실행처: owner-local `bats tests/test_makefile.bats`' 'tools/tests/test_dev-postgres.bats' \
+    '# 사유B — 실행처: owner-local `bats tools/tests/test_dev-postgres.bats`' 'tests/test_makefile.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "venue가 0건 실재"
+}
+
+@test "a bats venue that cites a real file outside the registry still proves the group" {
+  # 음성 대조 — 자기지시 금지가 정당한 외부 venue까지 막으면 안 된다.
+  reg="$BATS_TEST_TMPDIR/extcite"
+  mkreg "$reg" '# 사유 — 실행처: owner-local `bats tests/gates/test_bats-accounting.bats`' 'tools/tests/test_dev-postgres.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -eq 0 ]
+}
+
+@test "the manual marker self-declares a genuinely absent automated venue" {
+  reg="$BATS_TEST_TMPDIR/manual"
+  mkreg "$reg" '# 사유 — 실행처: `manual`(owner-local, 자동 venue 0)' 'tools/tests/test_dev-postgres.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -eq 0 ]
+}
+
 # ── 신설 계약 (0b): 레지스트리 상한 ─────────────────────────────────────────────────────────────
 # ⚠️ 계약 (0)만으로는 부족하다는 것이 적대 검토로 실측됐다: **기존 유효 그룹 아래**에 이어 붙이는 것은
 #    사람이 실제로 쓸 자연스러운 위치이고, 그 위치로 14건을 한 번에 조용히 제외해도 전 가드가 초록이었다
@@ -157,7 +198,7 @@ excl_max() { grep -oE '^EXCL_MAX=[0-9]+' "$s" | cut -d= -f2; }
   max="$(excl_max)"
   [ -n "$max" ]
   reg="$BATS_TEST_TMPDIR/shrink"
-  mkreg "$reg" '# 사유 — 실행처: owner-local `bats tests/gates/test_scan-floor.bats`' 'tests/gates/test_scan-floor.bats'
+  mkreg "$reg" '# 사유 — 실행처: owner-local `bats tests/gates/test_bats-accounting.bats`' 'tests/gates/test_scan-floor.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
 }

@@ -48,6 +48,15 @@ done
 
 rc=0
 
+# .ci-exclude 등재 항목 집합(공백구분) — venue_derive의 자기지시/상호지시 금지가 쓴다.
+# (0) 앞에 둔다: LINT_ONLY 모드는 뒤쪽 도메인 판정 전에 exit하므로 그쪽 EXCL 계산을 재사용할 수 없다.
+EXCL_ITEMS=" "
+while IFS= read -r _ei_line; do
+  case "$_ei_line" in ''|\#*) continue;; esac
+  EXCL_ITEMS="$EXCL_ITEMS$_ei_line "
+done < "$EXCLUDE_FILE"
+in_excl_items() { case "$EXCL_ITEMS" in *" $1 "*) return 0;; *) return 1;; esac; }
+
 # ── (0) 레지스트리 계약: 항목은 '사유 + 실행처'를 적은 그룹 주석의 지배를 받는다 ──────────────────
 # 파일 헤더가 주장하던 계약을 **실제로** 강제한다.
 #   · 빈 줄이 그룹을 끊는다 — 파일 상단 헤더가 아래 항목 전부를 지배하면 무엇이든 통과한다.
@@ -59,10 +68,11 @@ rc=0
 #     어딘가에서」) 통과했고, 없는 타깃을 적어도(「make no-such-target」) 통과했다(실측 2026-09-03).
 #     증가를 **묶는 것은 아래 (0b) 상한**이고, 이 계약은 표기가 실물을 가리키게 한다.
 # ── 실행처 표기 → **실재하는 venue** 파생 ────────────────────────────────────────
-# 인식 형태 셋이고, 그룹에 하나라도 **실재하는** 토큰이 있으면 그 그룹은 증명된다:
+# 인식 형태 넷이고, 그룹에 하나라도 **실재하는** 토큰이 있으면 그 그룹은 증명된다:
 #   ① make <타깃>   → Makefile에 ^<타깃>: 실재
-#   ② bats <경로>   → 그 경로 실재
+#   ② bats <경로>   → 그 경로 실재 **및 .ci-exclude 등재 파일이 아님**(아래 ⚠️ 자기지시)
 #   ③ .github/workflows/<파일>.ya?ml → 그 파일 실재
+#   ④ manual        → 무조건 실재(owner-local 수동 실행 자기신고 — 자동 venue가 정말 없을 때만 쓴다)
 # ⚠️ ①②의 인용 부호는 **백틱과 작은따옴표 둘 다** 받는다 — 레지스트리가 실제로 둘을 섞어 쓴다
 #    (실측: 대부분은 백틱이고 KSOPS 그룹만 작은따옴표). 표기를 한쪽으로 통일하는 규약은 없고,
 #    있어도 다음 편집자가 다시 섞는다 — 표기를 좁히는 것보다 파서를 넓히는 쪽이 정직하다.
@@ -70,6 +80,10 @@ rc=0
 #    이 가드가 자기 도메인의 표기에 눈멀어 다시 텍스트 계약이 된다. ③는 경로 자체가 식별자라 인용을 안 묻는다.
 # ⚠️ **인식 0건은 red다** — 부재가 아니라 존재 판정이라 방향이 반대다. 그래서 아래 `|| true`는
 #    「`findings="$(awk … || true)"`」의 fail-open과 다르다: 추출기가 깨지면 전 그룹이 red로 간다.
+# ⚠️ **② 자기지시/상호지시는 증명이 아니다(항진식)** — venue가 항목 **자기 자신**이거나 다른
+#    `.ci-exclude` 등재 파일을 가리키면 파일은 실재해도 카운트하지 않는다. 「이 파일이 실행되는 곳:
+#    이 파일」은 늘 참이라 자동 실행 경로의 유무를 증명하지 못한다(실측: 인용 경로를 무관한 다른
+#    .ci-exclude 항목으로 바꿔도 --lint-excludes가 계속 rc=0이었다). 자동 venue가 정말 없으면 ④를 쓴다.
 VENUE_OK=0
 VENUE_TOKENS=""
 venue_derive() {
@@ -87,7 +101,10 @@ venue_derive() {
       'bats '*)
         _vd_p="${_vd_s#bats }"; _vd_p="${_vd_p%% *}"
         VENUE_TOKENS="${VENUE_TOKENS}[bats ${_vd_p}] "
-        if [ -e "$_vd_p" ]; then VENUE_OK=$((VENUE_OK + 1)); fi ;;
+        if [ -e "$_vd_p" ] && ! in_excl_items "$_vd_p"; then VENUE_OK=$((VENUE_OK + 1)); fi ;;
+      manual)
+        VENUE_TOKENS="${VENUE_TOKENS}[manual] "
+        VENUE_OK=$((VENUE_OK + 1)) ;;
     esac
   done <<VDEOF
 $_vd_spans
@@ -131,7 +148,7 @@ while IFS= read -r line; do
         echo "  그룹 첫 줄: ${group_head}"
         echo "  인식한 토큰: ${VENUE_TOKENS:-(없음)}"
         # shellcheck disable=SC2016  # 백틱·`^<타깃>:`는 사용법 문구의 리터럴이다(명령 치환 아님)
-        echo '  인식 형태: `make <타깃>`(Makefile의 ^<타깃>:) · `bats <경로>`(경로 실재) · .github/workflows/<파일>.yaml(파일 실재) — 백틱/작은따옴표 둘 다.'
+        echo '  인식 형태: `make <타깃>`(Makefile의 ^<타깃>:) · `bats <경로>`(경로 실재 & .ci-exclude 비등재) · .github/workflows/<파일>.yaml(파일 실재) · `manual`(자기신고) — 백틱/작은따옴표 둘 다.'
         rc=1
       fi
       ;;
@@ -173,13 +190,8 @@ scan_floor check-bats-accounting:gate "$(scan_count "$gate_list")" "$(floor_of c
 GATE=" $(printf '%s\n' "$gate_list" | tr '\n' ' ') "
 in_gate() { case "$GATE" in *" $1 "*) return 0;; *) return 1;; esac; }
 
-# .ci-exclude 도메인 (공백구분)
-EXCL=" "
-while IFS= read -r line; do
-  case "$line" in ''|\#*) continue;; esac
-  EXCL="$EXCL$line "
-done < "$EXCLUDE_FILE"
-in_excl() { case "$EXCL" in *" $1 "*) return 0;; *) return 1;; esac; }
+# .ci-exclude 도메인 — EXCL_ITEMS/in_excl_items를 재사용한다(위 (0) 앞에서 이미 계산).
+in_excl() { in_excl_items "$1"; }
 
 # ⚠️ 열거를 **변수로** — 자기 글롭이 비면 이 가드가 막으려던 F6 클래스(테스트가 어느 harness에도
 # 안 묶여 조용히 죽음)에 **자기가 걸린다**(라이브 재현: 글롭만 비우는 셰임으로 같은 OK + rc=0).

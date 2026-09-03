@@ -7,9 +7,14 @@
 #        (헤더는 빈 줄 아래 항목을 지배하지 않는다. 항목 뒤의 주석은 새 그룹을 연다.)
 #      · 항목 수 **상한**(check-bats-accounting.sh의 `EXCL_MAX` 상수 = 현재 건수 16). 늘리려면 같은 PR에서
 #        그 상수를 올려야 한다 — env 오버라이드는 없다(호출부에 안 보이는 off-switch를 두지 않는다).
-#      · 그 표기가 지목한 **venue가 실재**해야 한다(0건이면 red). 인식 형태 셋 — `make <타깃>`(Makefile에
-#        그 타깃) · `bats <경로>`(그 경로) · `.github/workflows/<파일>.yaml`(그 파일). 백틱·작은따옴표 둘 다
-#        받지만 **인용 안 한 산문은 안 본다**(예전엔 단어만 적어도 통과했다 — 그게 이 줄이 자인하던 구멍이다).
+#      · 그 표기가 지목한 **venue가 실재**해야 한다(0건이면 red). 인식 형태 넷 — `make <타깃>`(Makefile에
+#        그 타깃) · `bats <경로>`(그 경로 실재 **및 .ci-exclude 비등재**) · `.github/workflows/<파일>.yaml`(그
+#        파일) · `manual`(자동 venue가 정말 없을 때의 자기신고). 백틱·작은따옴표 둘 다 받지만
+#        **인용 안 한 산문은 안 본다**(예전엔 단어만 적어도 통과했다 — 그게 이 줄이 자인하던 구멍이다).
+#      · **자기지시는 증명이 아니다** — `bats <경로>`가 항목 자기 자신이거나 다른 .ci-exclude 등재
+#        파일을 가리키면 파일이 실재해도 무증인이다("이 파일이 실행되는 곳: 이 파일"은 늘 참이라
+#        자동 실행 경로의 유무를 못 가른다 — 감사 5라운드 50 critic-venue-tautology). 자동 venue가
+#        정말 없으면 `manual`을 쓴다.
 # platform/charts/*는 여기 두지 않는다 — 러너가 도메인 prune(make chart-test 별도 harness).
 
 # 라이브 클러스터 의존 — 실행처: owner-local `make verify-posture`(KUBECONFIG 부재=SKIP)
@@ -19,8 +24,10 @@ tests/posture/test_networking-e2e.bats
 tests/posture/test_storage-reclaim.bats
 tests/posture/test_dr-assets.bats
 # docker compose 기동 + dev 전용 도구(tools/dev-postgres)라 gate 가치가 없다 —
-#   실행처: owner-local `bats tools/tests/test_dev-postgres.bats`
-#   ⚠️ 자동 실행 경로가 0이다(실측) — 아무 워크플로·make 타깃도 부르지 않는다.
+#   실행처: `manual`(owner-local) — 사람이 손으로 `bats tools/tests/test_dev-postgres.bats`를 돈다.
+#   ⚠️ 자동 실행 경로가 0이다(실측) — 아무 워크플로·make 타깃도 부르지 않는다. 자기 경로를
+#      venue로 인용하는 것은 증명이 아니다(항진식 — 감사 5라운드 50 critic-venue-tautology).
+#      `manual`이 그 상태를 정직하게 자기신고한다.
 #   ⚠️ 예전 사유 「gate 러너에 docker 없음」은 **쓰인 시점부터 거짓**이었다: gate 잡은 docker를 쓴다
 #      (ci.yaml의 `docker pull` 스텝). 사유를 실제 것으로 고쳐 적는다.
 tools/tests/test_dev-postgres.bats
@@ -31,9 +38,10 @@ tools/tests/test_dev-postgres.bats
 tests/test_sops-roundtrip.bats
 tests/test_sops-guard.bats
 # 실 age 키 의존(왕복 무관 — 실 키가 있어야 도는 make 타깃 단언이라 gate 대응물이 없다) —
-#   실행처: owner-local `bats tests/test_makefile.bats </dev/null`
-#   ⚠️ 자동 실행 경로가 0이다(실측) — 첫 @test가 `make verify`를 부르므로 verify에 배선할 수 없고,
-#      어떤 워크플로·make 타깃도 이 파일을 부르지 않는다. owner가 손으로 부른다.
+#   실행처: `manual`(owner-local) — 사람이 손으로 `bats tests/test_makefile.bats </dev/null`을 돈다.
+#   ⚠️ 자동 실행 경로가 0이다(실측) — 첫 @test 본문이 verify 타깃을 호출할 뿐(자기 검증용)
+#      이 파일 자체가 gate/verify 어디에도 배선돼 있지 않다(자기 경로 인용은 증명이 아니다 —
+#      항진식). 어떤 워크플로·make 타깃도 이 파일을 부르지 않는다. owner가 손으로 부른다.
 tests/test_makefile.bats
 # KSOPS 실 age 시드 복호 의존 — 실행처: owner-local 'make verify-ksops'(age 키 있으면 실행/없으면 skip)
 platform/cnpg/prod/test_creds_reference.bats
@@ -59,6 +67,8 @@ platform/cache/prod/test_ksops_render.bats
 #      `make tf-validate`를 부르는 @test 하나뿐이다.
 infra/_tests/test_tf_validate.bats
 infra/cloudflare/test_apps_data.bats
-# 라이브 전용(VM/k3s 재구축 substrate) — 실행처: owner-local `bats infra/_tests/test_bootstrap.bats`(DR 드릴)
-#   ⚠️ 자동 실행 경로가 0이다(실측) — DR 드릴 때 사람이 직접 부른다.
+# 라이브 전용(VM/k3s 재구축 substrate) — 실행처: `manual`(owner-local) — 사람이 손으로
+#   `bats infra/_tests/test_bootstrap.bats`(DR 드릴)를 돈다.
+#   ⚠️ 자동 실행 경로가 0이다(실측) — DR 드릴 때 사람이 직접 부른다(자기 경로 인용은 증명이
+#      아니다 — 항진식).
 infra/_tests/test_bootstrap.bats
