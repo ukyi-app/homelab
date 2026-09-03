@@ -1,0 +1,127 @@
+# Alertmanager 설정 본문(SSOT). `kustomization.yaml`의 `configMapGenerator`가 이 파일을 ConfigMap
+# `alertmanager-config`로 굽고 **내용 해시를 이름에 붙인다** → 여기를 고치면 Deployment가 자동으로
+# 롤아웃된다(옛 수동 rollout 절차의 구조적 대체 — 근거는 `../alertmanager.yaml` 헤더).
+#
+# ⚠️ ConfigMap 키 이름은 **이 파일의 basename**(`alertmanager.yml`)이다. Deployment initContainer가
+#    `/config-in/alertmanager.yml`을 읽고 컨테이너 args가 `/etc/alertmanager/alertmanager.yml`을
+#    가리키므로, 파일명을 바꾸면 그 세 자리를 함께 바꿔야 한다.
+# ⚠️ `__CHAT_ID__`는 initContainer `render-config`가 sed로 치환한다(chat_id를 평문으로 두지 않는다).
+#    이 파일을 단독으로 amtool에 먹이려면 그 치환을 먼저 모사해야 한다 — 게이트 3곳이 그렇게 한다.
+#
+# ⚠️ 이 파일은 **k8s 매니페스트가 아니다**(`kind` 없음). platform 아래 추적 YAML이라
+#    `tools/lib/repo-walk.ts`의 `platform-manifests`/`platform-image-refs` 분모에는 들어가지만,
+#    kind·container·image가 없어 자원/핀 가드는 여기서 아무것도 세지 않는다. 형제
+#    `platform/homepage/prod/config/*.yaml` 5건이 이미 같은 자리에 있는 선례다(무해, 실측 확인).
+global:
+  resolve_timeout: 5m
+route:
+  receiver: telegram
+  group_by: ['alertname','namespace']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: [ 'alertname = Watchdog' ]
+      receiver: deadmanswitch
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+      continue: false
+    - matchers: [ 'severity = critical' ]
+      receiver: telegram
+      repeat_interval: 1h
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token_file: /etc/alertmanager/secrets/TELEGRAM_BOT_TOKEN
+        chat_id: __CHAT_ID__
+        api_url: https://api.telegram.org
+        parse_mode: HTML
+        send_resolved: true
+        message: |
+          {{- /* ⚠️ AM telegram은 동적 값({{ . }})을 parse_mode=HTML 컨텍스트로 *자동* HTML-escape한다
+                 (render-e2e로 실측: {{ .Annotations.x }}의 <main>이 &lt;main&gt;으로 한 번 escape됨).
+                 따라서 reReplaceAll/safeHtml 수동 escape는 금지 — 수동 escape는 &amp;lt;처럼 이중 escape를
+                 유발해 메시지를 깨뜨린다(검증됨). 리터럴 태그(<b>)는 template 텍스트라 raw로 남아 정상 동작. */ -}}
+          {{- $name := .CommonLabels.alertname -}}
+          {{- $title := $name -}}
+          {{- if eq $name "Watchdog" }}{{ $title = "알림 파이프라인" }}
+          {{- else if eq $name "TargetDown" }}{{ $title = "스크레이프 타겟 다운" }}
+          {{- else if eq $name "R2BackupStale" }}{{ $title = "R2 오프사이트 백업 정체" }}
+          {{- else if eq $name "WALArchiveStalled" }}{{ $title = "WAL 아카이빙 정체" }}
+          {{- else if eq $name "LocalBasebackupStale" }}{{ $title = "로컬 베이스백업 정체" }}
+          {{- else if eq $name "CNPGRestoreDrillStale" }}{{ $title = "복원 드릴 정체" }}
+          {{- else if eq $name "ArgoCDOutOfSync" }}{{ $title = "ArgoCD 동기화 이탈" }}
+          {{- else if eq $name "ImageDigestDrift" }}{{ $title = "이미지 digest 드리프트" }}
+          {{- else if eq $name "PodOOMKilled" }}{{ $title = "파드 OOM 종료" }}
+          {{- else if eq $name "NodeMemoryHigh" }}{{ $title = "노드 메모리 경고" }}
+          {{- else if eq $name "StandardSSDWarning" }}{{ $title = "내장 SSD 여유 경고" }}
+          {{- else if eq $name "StandardSSDFilling" }}{{ $title = "내장 SSD 포화" }}
+          {{- else if eq $name "StandardSSDFillingTrend" }}{{ $title = "내장 SSD 포화 추세" }}
+          {{- else if eq $name "WALVolumeFilling" }}{{ $title = "WAL 볼륨 충전" }}
+          {{- else if eq $name "PostgresClusterDown" }}{{ $title = "PostgreSQL 클러스터 다운" }}
+          {{- else if eq $name "LanDnsPathDown" }}{{ $title = "집 LAN DNS 끊김" }}
+          {{- else if eq $name "FilesBackupStale" }}{{ $title = "files 오프-매체 백업 정체" }}
+          {{- else if eq $name "SystemdUnitFailed" }}{{ $title = "호스트 systemd 유닛 실패" }}
+          {{- else if eq $name "PodCrashLooping" }}{{ $title = "파드 재시작 반복" }}
+          {{- else if eq $name "PgDumpHedgeStale" }}{{ $title = "논리 헤지 백업 정체" }}
+          {{- else if eq $name "CertWildcardExpiringSoon" }}{{ $title = "와일드카드 인증서 만료 임박" }}
+          {{- else if eq $name "CertExpiringSoon" }}{{ $title = "TLS 인증서 만료 임박" }}
+          {{- else if eq $name "CertManagerCertNotReady" }}{{ $title = "TLS 인증서 NotReady" }}
+          {{- else if eq $name "CertMetricsAbsent" }}{{ $title = "인증서 메트릭 부재" }}
+          {{- else if eq $name "DigestExporterStale" }}{{ $title = "digest-exporter 하트비트 정체" }}
+          {{- else if eq $name "DigestExporterScrapeIncomplete" }}{{ $title = "digest-exporter 수집 일부 실패" }}
+          {{- else if eq $name "AdguardRewriteReconcilerStale" }}{{ $title = "adguard rewrite 리컨실러 정체" }}
+          {{- else if eq $name "AdguardRewriteDriftFixed" }}{{ $title = "adguard rewrite 자동 수렴" }}
+          {{- else if eq $name "AdGuardSeedDrift" }}{{ $title = "adguard 시드 드리프트" }}
+          {{- else if eq $name "AdGuardSeedDriftCheckStale" }}{{ $title = "adguard 시드 대조 정체" }}
+          {{- else if eq $name "GrafanaPluginBudgetLow" }}{{ $title = "grafana 플러그인 예산 임박" }}
+          {{- else if eq $name "GrafanaDuFingerprintLost" }}{{ $title = "grafana 지문 스캔 소실" }}
+          {{- else if eq $name "AlertRuleFlapping" }}{{ $title = "알림 룰 만성 flapping" }}
+          {{- else if eq $name "AlertPipelineWriteStale" }}{{ $title = "ALERTS 되쓰기 정체" }}
+          {{- else if eq $name "AlertSuppressionProlonged" }}{{ $title = "알림 억제 장기화" }}
+          {{- end -}}
+          {{- /* 미매핑 alertname → summary를 제목으로(신규 알림도 한국어). 자동 escape됨. summary 없으면 alertname 원문 */ -}}
+          {{- if and (eq $title $name) .CommonAnnotations.summary }}{{ $title = .CommonAnnotations.summary }}{{- end -}}
+          {{- /* .Status → 한글 + glyph (firing: critical=🔴 발생·warning=⚠️ 경고·info=ℹ️ 정보; resolved=해소 🔵) */ -}}
+          {{- if eq .Status "resolved" -}}
+          🔵 <b>{{ $title }}</b> — 해소
+          {{- else if eq .CommonLabels.severity "warning" -}}
+          ⚠️ <b>{{ $title }}</b> — 경고
+          {{- else if eq .CommonLabels.severity "info" -}}
+          ℹ️ <b>{{ $title }}</b> — 정보
+          {{- else -}}
+          🔴 <b>{{ $title }}</b> — 발생
+          {{- end }}
+          알림 · {{ $name }}
+          {{ range .Alerts -}}
+          {{ if .Annotations.summary }}{{ .Annotations.summary }}
+          {{ end }}{{ if .Annotations.description }}{{ .Annotations.description }}
+          {{ end }}{{ if .Annotations.runbook_url }}→ {{ .Annotations.runbook_url }}
+          {{ end }}{{ end }}
+  - name: deadmanswitch
+    webhook_configs:
+      - url: http://deadmanswitch-relay:9095/ping
+        send_resolved: false
+inhibit_rules:
+  - source_matchers: [ 'severity = critical' ]
+    target_matchers: [ 'severity = warning' ]
+    equal: ['alertname','namespace']
+  # 같은 디스크의 critical(예: StandardSSDFilling)이 warning(StandardSSDWarning/Trend)을 억제한다.
+  # 둘은 alertname이 달라 위 규칙(equal:alertname)으로는 매치 안 돼 둘 다 발화하던 것을 교정.
+  # disk 라벨이 있는 알림으로만 한정(=~".+")해 비-디스크 알림을 과억제하지 않는다.
+  # (WAL은 disk:pgwal로 분리 — 루트 fs critical이 WAL 충전 경고를 가리지 않게: 원인이 WAL일 수 있다.)
+  - source_matchers: [ 'severity = critical', 'disk =~ ".+"' ]
+    target_matchers: [ 'severity = warning', 'disk =~ ".+"' ]
+    equal: ['disk']
+  # 같은 unit의 critical(SystemdUnitFailed — `OnFailure=` 이벤트 축)이 warning
+  # (SystemdHostUnitFailed — 주기 스윕 축)을 억제한다. 두 축은 **직교**라 같은 고장을 양쪽이
+  # 보는 것이 정상이고(이벤트는 지연 0, 스윕은 ≤5분), 그때 페이지가 둘이면 안 된다.
+  # alertname이 다르므로 위 첫 규칙(equal:alertname)으로는 매치되지 않는다.
+  # ⚠️ unit 라벨 보유로 한정(=~".+")한다 — 없으면 라벨이 없는 알림끼리 **빈 문자열로 매칭**돼
+  #    엉뚱한 억제가 생긴다(disk 규칙이 같은 이유로 같은 한정을 건다).
+  # ★ 이 규칙이 있어야 "critical이 필요하면 유닛 파일에 OnFailure= 한 줄을 넣어 승격하라"는
+  #   스윕 알림의 처방이 **페이지를 늘리지 않는다**.
+  - source_matchers: [ 'alertname = SystemdUnitFailed', 'unit =~ ".+"' ]
+    target_matchers: [ 'alertname = SystemdHostUnitFailed', 'unit =~ ".+"' ]
+    equal: ['unit']

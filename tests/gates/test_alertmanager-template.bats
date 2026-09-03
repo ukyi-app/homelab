@@ -7,11 +7,16 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  AM="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
-  # ⚠️ AM 파일은 멀티-도큐먼트(ConfigMap+Deployment+Service) — select로 ConfigMap만 좁힌다.
-  # (안 하면 Deployment/Service에 .data가 null 도큐먼트로 섞여 카운트/추출이 깨진다.)
-  MSG="$(yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' "$AM" \
-        | yq '.receivers[] | select(.name == "telegram") | .telegram_configs[0].message')"
+  AM="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"          # Deployment + Service
+  AMCFG="$ROOT/platform/victoria-stack/prod/alertmanager-config/alertmanager.yml"  # 설정 본문(SSOT)
+  # ⚠️ **파일 직독이지 ConfigMap 추출이 아니다.** 설정은 kustomize `configMapGenerator`가 굽는다
+  #    (해시 접미 → 자동 rollout). 옛 관용구
+  #    `yq 'select(.kind=="ConfigMap" …) | .data["alertmanager.yml"]' "$AM"`는 이 전환 뒤 **rc 0으로
+  #    빈 문서**를 낸다 — 그래서 모든 소비 자리에 `[ -s ]`/부재-금지 앵커를 둔다. 앵커가 없으면
+  #    "추출 실패 → 빈 것에 대한 참"으로 접히는 vacuous green이 이 전환의 유일한 실질 위험이다.
+  [ -s "$AMCFG" ]
+  MSG="$(yq '.receivers[] | select(.name == "telegram") | .telegram_configs[0].message' "$AMCFG")"
+  [ -n "$MSG" ]
 }
 
 @test "image stays pinned to v0.33.0 (render-e2e verified; no blind upgrade)" {
@@ -21,16 +26,19 @@ setup() {
 }
 
 @test "exactly one telegram receiver and one chat_id placeholder remain" {
-  recv="$(yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' "$AM" | yq '[.receivers[] | select(.name=="telegram")] | length')"
+  recv="$(yq '[.receivers[] | select(.name=="telegram")] | length' "$AMCFG")"
   [ "$recv" = "1" ]
-  run grep -c 'chat_id: __CHAT_ID__' "$AM"
+  # placeholder는 설정 본문에 있다(initContainer가 sed로 치환) — 매니페스트가 아니라 AMCFG를 센다.
+  run grep -c 'chat_id: __CHAT_ID__' "$AMCFG"
   [ "$output" = "1" ]
 }
 
 @test "telegram config keeps parse_mode HTML and send_resolved true" {
   echo "$MSG" >/dev/null   # MSG must be non-empty
   [ -n "$MSG" ]
-  run yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' "$AM"
+  # ⚠️ `run cat`의 status 0은 앵커가 못 된다(빈 파일도 0). 크기 앵커를 명시로 둔다.
+  [ -s "$AMCFG" ]
+  run cat "$AMCFG"
   [ "$status" -eq 0 ]
   printf '%s' "$output" | grep -q 'parse_mode: HTML'
   printf '%s' "$output" | grep -q 'send_resolved: true'
@@ -88,6 +96,36 @@ setup() {
   printf '%s' "$MSG" | grep -q 'range .Alerts'
 }
 
+@test "the AM config is generated with a content hash, not an inline ConfigMap (auto-rollout)" {
+  # ★ 이 레인이 무는 것은 "설정이 맞나"가 아니라 **"설정 변경이 실행 중 파드에 도달하나"**다.
+  #   착지 전에는 평문 ConfigMap이라 도달 보장이 수동 `rollout restart` 하나뿐이었고, 그 스텝을
+  #   빠뜨려 라이브 파드가 2026-08-27 렌더본을 무기한 쓰고 있었다(2026-09-03 실측).
+  #   해시 접미 generator가 그 도달을 구조로 만든다 — 아래 다섯 조건 중 하나만 깨져도 되돌아간다.
+  KUST="$ROOT/platform/victoria-stack/prod/kustomization.yaml"
+  # ① 매니페스트에 인라인 ConfigMap이 되살아나면 red(두 SSOT가 공존하는 순간 도달이 다시 갈린다).
+  run yq 'select(.kind=="ConfigMap")' "$AM"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # ② generator가 그 파일을 이름 `alertmanager-config`로 굽는다.
+  n="$(yq '[.configMapGenerator[] | select(.name=="alertmanager-config")] | length' "$KUST")"
+  [ "$n" = "1" ]
+  f="$(yq '.configMapGenerator[] | select(.name=="alertmanager-config") | .files[0]' "$KUST")"
+  [ "$f" = "alertmanager-config/alertmanager.yml" ]
+  [ -s "$ROOT/platform/victoria-stack/prod/$f" ]
+  # ③ 해시 접미가 이 전환의 전부다 — 끄면 옛 함정(무기한 옛 렌더본)으로 그대로 복귀한다.
+  #    ⚠️ `yq -e`를 쓰면 값이 false일 때도 exit 1이라 키 부재와 구별 못 한다(함정 원장) — 평문 비교.
+  hash_off="$(yq '.configMapGenerator[] | select(.name=="alertmanager-config") | .options.disableNameSuffixHash' "$KUST")"
+  [ "$hash_off" = "null" ]
+  # ④ Deployment volume 참조 == generator 이름. 어긋나면 kustomize nameReference가 다시 쓰지 못해
+  #    파드가 **존재하지 않는 ConfigMap**을 마운트한다(렌더는 통과, 라이브는 Pending).
+  v="$(yq 'select(.kind=="Deployment" and .metadata.name=="alertmanager") | .spec.template.spec.volumes[] | select(.name=="config-in") | .configMap.name' "$AM")"
+  [ "$v" = "alertmanager-config" ]
+  # ⑤ ConfigMap 키 = 파일 basename == initContainer가 읽는 경로.
+  printf '%s' "$f" | grep -q '/alertmanager\.yml$'
+  a="$(yq 'select(.kind=="Deployment" and .metadata.name=="alertmanager") | .spec.template.spec.initContainers[] | select(.name=="render-config") | .args[0]' "$AM")"
+  printf '%s' "$a" | grep -q '/config-in/alertmanager\.yml'
+}
+
 @test "AM pod is annotated for vmagent scrape on the metrics port" {
   # vmagent pod-annotations job: keep on prometheus.io/scrape==true, port from prometheus.io/port
   ann="$(yq 'select(.kind=="Deployment" and .metadata.name=="alertmanager") | .spec.template.metadata.annotations' "$AM")"
@@ -110,12 +148,11 @@ setup() {
   docker info >/dev/null 2>&1 || skip "docker daemon not available"
   command -v yq >/dev/null || skip "yq required"
   tmp="$(mktemp -d)"
-  # 평문 ConfigMap에서 alertmanager.yml 직접 추출 — kustomize build(KSOPS exec generator) 미경유.
+  # 설정 본문 파일을 **직접** 읽는다 — kustomize build(KSOPS exec generator) 미경유.
   # base kustomization은 secret-generator.yaml(ksops exec, prod/alerting.enc.yaml)을 포함하므로
   # kustomize build는 CI에 없는 ksops 바이너리+age 키를 요구해 환경 사유로 실패한다(교차검증 Finding 1).
-  # alertmanager.yaml은 멀티-도큐먼트(ConfigMap+Deployment+Service) — ConfigMap만 선택.
-  yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' \
-      "$ROOT/platform/victoria-stack/prod/alertmanager.yaml" > "$tmp/raw.yml"
+  # configMapGenerator 전환 뒤에는 그 파일이 곧 ConfigMap 값이라 추출 단계 자체가 없어졌다.
+  cp "$AMCFG" "$tmp/raw.yml"
   [ -s "$tmp/raw.yml" ]
   # init sed 모사: placeholder → 더미 int64 chat_id (amtool은 chat_id를 정수로 파싱).
   sed 's/__CHAT_ID__/-1001234567890/' "$tmp/raw.yml" > "$tmp/alertmanager.yml"
@@ -129,7 +166,8 @@ setup() {
 }
 
 @test "disk-scoped inhibit rule lets a critical suppress the same-disk warning" {
-  am="$(yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' "$AM")"
+  [ -s "$AMCFG" ]
+  am="$(cat "$AMCFG")"
   printf '%s' "$am" | grep -qF -- "equal: ['disk']"   # alertname이 다른 Bulk warning/critical을 disk로 묶어 억제
   printf '%s' "$am" | grep -q 'disk =~'             # disk 라벨 보유 알림만 한정(비-디스크 과억제 방지)
 }

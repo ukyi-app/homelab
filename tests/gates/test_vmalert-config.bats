@@ -7,6 +7,12 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   VMALERT="$ROOT/platform/victoria-stack/prod/vmalert.yaml"
+  # 텔레그램 제목 매핑이 사는 곳 — alertmanager **설정 본문**이다. 매니페스트(alertmanager.yaml)에는
+  # Deployment/Service만 있고, 설정은 kustomize `configMapGenerator`가 이 파일을 굽는다(해시 접미).
+  # ⚠️ 옛 자리(`alertmanager.yaml`)를 계속 grep하면 매핑 단언이 **부재에 대한 참**이 아니라 그냥
+  #    red가 된다(전환 당시 4레인이 그렇게 red였다 — 그래서 앵커를 여기 한 번만 둔다).
+  AMCFG="$ROOT/platform/victoria-stack/prod/alertmanager-config/alertmanager.yml"
+  [ -s "$AMCFG" ]
 }
 
 # 알림 **존재** 단언 — 이름은 반드시 정확 일치여야 한다.
@@ -306,7 +312,7 @@ alert_defined() {
 
 @test "adguard rewrite reconciler has staleness + drift-fixed notify alerts (push metric, notify via AM not pod)" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  A="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
+  A="$AMCFG"   # 제목 매핑은 설정 본문에 있다(setup 주석 참조)
   # 메타갭 ① Task 7(W2-A): 리컨실러 생존(staleness) + 실제 수렴 시 통지(F13 — 발송은 alertmanager 경유).
   alert_defined "$R" AdguardRewriteReconcilerStale
   alert_defined "$R" AdguardRewriteDriftFixed
@@ -322,7 +328,7 @@ alert_defined() {
 
 @test "adguard seed drift has a warning gauge alert and its own check heartbeat (ADR-0007)" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  A="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
+  A="$AMCFG"   # 제목 매핑은 설정 본문에 있다(setup 주석 참조)
   # ADR-0007 결정 2: adguard 본체 설정의 SSOT는 **라이브**이고 git ConfigMap은 `cp -n` 첫 부팅 시드다 —
   # 시드 드리프트는 red가 아니라 "재구축 시 되돌아갈 거리"라 severity warning이 계약의 일부다.
   alert_defined "$R" AdGuardSeedDrift
@@ -367,8 +373,8 @@ alert_defined() {
   # ⚠️ 범위는 **critical만**이다. warning은 36건 중 16건만 매핑돼 있어 전건 강제는 없는 규약을
   #    만들어내는 것이 된다. critical은 신설 당시 9건 중 8건이 매핑돼 있었고 빠진 하나가
   #    FilesBackupStale이었다(2026-10-01 자동 재무장 시 제목 없이 페이징될 뻔했다 — 같은 커밋에서 보충).
-  AM="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
-  [ -f "$AM" ]
+  AM="$AMCFG"   # 제목 매핑은 설정 본문에 있다(setup 주석 참조)
+  [ -s "$AM" ]   # 추출/경로 실패가 빈 파일로 접히면 아래 전칭이 공허해진다
   # 룰 파일에서 (alertname, severity) 쌍을 뽑는다 — alert 줄을 만나면 이름을 기억하고,
   # 다음 alert 줄 전에 나오는 첫 severity를 그 알림의 것으로 본다.
   pairs="$(awk '
@@ -430,7 +436,7 @@ EOF
 @test "every meta alert carries a Telegram title mapping (quality bar of this pass)" {
   # 이름 하드코딩 금지(리뷰 M6) — r7 전량을 룰 파일에서 파생하고, 같은 패스의 r4 신규 2종은
   # 명시로 얹는다(r4 전량 파생은 기존 미매핑 warning 16종을 소급 강제해 별개 결정이 된다 — 유보).
-  AM="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
+  AM="$AMCFG"   # 제목 매핑은 설정 본문에 있다(setup 주석 참조)
   R7="$ROOT/platform/victoria-stack/prod/rules/r7-meta.yaml"
   alerts="$(yq -e '.data["r7.yaml"]' "$R7" | yq '.groups[].rules[].alert')"
   [ "$(printf '%s\n' "$alerts" | grep -c .)" -ge 3 ]

@@ -335,6 +335,16 @@
 
 ### ConfigMap 변경 파드 자동 재시작 없음
 - ConfigMap(relay 스크립트 등) 변경은 파드 자동 재시작이 없다 — `rollout restart` 필요.
+- **실측 사고(2026-09-03)**: alertmanager는 이 함정을 실제로 밟았다. 설정 ConfigMap을 고친 PR이
+  머지돼 ArgoCD가 적용했지만 Deployment spec이 무변경이라 롤아웃이 안 났고, 라이브 파드는
+  2026-08-27 렌더본을 쓰고 있어 새 제목 매핑 2건이 도달하지 않았다(red가 아니라 조용한 품질 저하).
+- **처방은 kustomize `configMapGenerator`다** — 내용 해시가 이름에 붙으므로 설정을 고치면 ConfigMap
+  이름이 바뀌고, nameReference 변환이 pod template의 volume 참조를 다시 써 롤아웃이 **구조로** 난다.
+  현재 이 형태를 쓰는 곳: `platform/homepage/prod`(config·assets) ·
+  `platform/victoria-stack/prod`(alertmanager — `alertmanager-config/alertmanager.yml`).
+  ⚠️ `options.disableNameSuffixHash: true`를 켜면 그 보장이 사라져 이 함정으로 그대로 복귀한다.
+- 남아 있는 자리(수동 `rollout restart`가 여전히 유일한 보장): 위 둘 밖의 ConfigMap 소비자
+  — 예: `deadmanswitch-relay`(스크립트 ConfigMap) · adguard 시드 ConfigMap(첫 부팅 전용, 별도 함정).
 
 ### bats bash 3.2 중간 [[ ]] 침묵 통과
 - **bats가 bash 3.2(macOS 기본)로 돌면 테스트 중간의 `[[ ]]` 실패가 침묵 통과된다**(set -e가

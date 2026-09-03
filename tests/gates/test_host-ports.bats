@@ -104,11 +104,16 @@ run_published() {
 #    삼켜져 치환이 조용히 실패하고, 그러면 그 레인이 원본을 검사해 vacuous하게 통과한다.
 am_root() {
   local r="$1" hsed="${2:-}" hpdrop="${3:-}"
-  mkdir -p "$r/tests/gates/lib" "$r/platform/victoria-stack/prod"
+  mkdir -p "$r/tests/gates/lib" "$r/platform/victoria-stack/prod/alertmanager-config"
   ln -s "$ROOT/tests/gates/mock-telegram.py" "$r/tests/gates/mock-telegram.py"
   ln -s "$ROOT/tests/gates/fixtures"         "$r/tests/gates/fixtures"
+  # 하네스가 읽는 두 자리를 격리 루트에 그대로 비춘다: 매니페스트(이미지 digest 파생)와
+  # **설정 본문**(configMapGenerator가 굽는 파일). 후자가 빠지면 하네스가 `[ -s ]` 앵커에서
+  # 즉사해 아래 docker 축 레인들이 자기 축 대신 그 즉사를 재게 된다(전환 당시 실측 red 1건).
   ln -s "$ROOT/platform/victoria-stack/prod/alertmanager.yaml" \
         "$r/platform/victoria-stack/prod/alertmanager.yaml"
+  ln -s "$ROOT/platform/victoria-stack/prod/alertmanager-config/alertmanager.yml" \
+        "$r/platform/victoria-stack/prod/alertmanager-config/alertmanager.yml"
   if [ -n "$hpdrop" ]; then grep -vF "$hpdrop" "$LIB" > "$r/tests/gates/lib/host-port.sh"
   else cp "$LIB" "$r/tests/gates/lib/host-port.sh"; fi
   if [ -n "$hsed" ]; then
