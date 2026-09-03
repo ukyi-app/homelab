@@ -10,9 +10,25 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; F="$ROOT/platform/a
   [ "$status" -eq 0 ]
   [ "$output" = "2" ]
 }
-@test "appset source paths are unchanged after comment edit" {
-  run grep -c "apps/\*/deploy/prod" "$F"
-  [ "$status" -eq 0 ]
+@test "appset generator discovery paths are locked (both generators)" {
+  # ⚠️ 발견 경로 한 줄이 **어떤 플랫폼 컴포넌트가 존재하는지**를 혼자 결정한다. 좁히거나 오타를 내면
+  #    제너레이터가 더 이상 내지 않는 Application을 ApplicationSet 컨트롤러가 삭제하고, 템플릿의
+  #    resources-finalizer(:42-43)가 그 워크로드를 **cascade prune**한다 — traefik(Gateway API CRD)·
+  #    network-policies·cloudflared·adguard·tailscale 등 11개가 한 커밋으로 사라진다.
+  # ⚠️ 착지 전 이 축의 증인은 레포 전체에 0건이었다. 여기 있던 판정은 `grep -c`의 **건수를 비교조차
+  #    하지 않고**(rc만 봤다) apps 경로 하나만 봤다. tests/gates/ 아래에서 이 appset을 읽는 형제
+  #    가드는 `select(.exclude == true)` — **exclude 집합**만 잠그므로 발견 경로는 도메인 밖이다.
+  #    ⚠️ 그 파일의 경로는 여기 적지 않는다 — 경로 문자열 자체가 그 파일의 마커 원장 리터럴이라,
+  #       이름을 부르는 순간 「마커는 이 파일 밖 어디에도 없다」 @test가 red가 된다(실측으로 밟았다).
+  # ⚠️ `yq ea`(eval-all)여야 한다 — appset.yaml은 문서가 둘이라 `yq`(eval)는 비매치 문서가 빈 결과를
+  #    보태 출력이 두 줄이 된다(같은 형제 가드가 주석에 남긴 실측 함정).
+  # ⚠️ `select(.exclude != true)`는 키 부재(null)를 포함한다. `yq -e`는 쓰지 않는다(값 false→exit 1).
+  for p in 'platform-components=platform/*/prod' 'apps=apps/*/deploy/prod'; do
+    n="${p%%=*}"; want="${p#*=}"
+    run yq ea "select(.metadata.name==\"$n\") | [.spec.generators[0].git.directories[] | select(.exclude != true) | .path] | join(\",\")" "$F"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -qxF -- "$want" || { echo "$n path=$output want=$want"; false; }
+  done
 }
 
 @test "both ApplicationSet templates carry a retry policy (cold-start CRD ordering has no other backstop)" {
