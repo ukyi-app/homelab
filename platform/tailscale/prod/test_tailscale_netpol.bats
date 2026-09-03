@@ -80,7 +80,7 @@ setup() {
 @test "netpol/proxyclass are wired into the kustomization (membership, not mere existence)" {
   # 파일 실재 ≠ 렌더 포함 — resources에서 빠지면 ArgoCD가 라이브를 프룬한다. proxyclass는
   # policy/memory-limit-allowlist.txt:27-28이 proxy cap의 SSOT로 지목한 파일이다.
-  # 관용구 출처: tests/gates/test_dual-run-excludes.bats:58-61(원문 grep 금지 — 주석·들여쓰기 통과).
+  # 관용구: yq contains()로 원문 grep을 피한다(주석·들여쓰기 위치 변화에 흔들리지 않는다).
   K="${BATS_TEST_DIRNAME}/kustomization.yaml"
   run yq '.resources | contains(["traefik-ingress.yaml","proxyclass.yaml","networkpolicy.yaml"])' "$K"
   printf '%s' "$output" | grep -qxF -- 'true'
