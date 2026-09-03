@@ -32,7 +32,7 @@ data:
             labels: { severity: warning, disk: standard }
             annotations:
               summary: "내장 SSD 여유 공간 15% 미만(조기 경보)"
-              description: "standard SC 백킹 fs(루트 /, btrfs ~224GiB)가 차오릅니다 — pg-1/WAL·vmsingle·vlogs·adguard PVC가 쿼터 없이 공유하므로 한 워크로드 폭증이 전체를 위협합니다. 최대 소비자(보통 CNPG WAL 적체 또는 vmsingle/vlogs retention)를 확인하세요."
+              description: "standard SC 백킹 fs(루트 /, ext4 /dev/mapper/ubuntu--vg-ubuntu--lv 913G — 실측 2026-09-03)가 차오릅니다 — pg-1/WAL·adguard-data·trip-mate-data PVC가 쿼터 없이 공유하므로 한 워크로드 폭증이 전체를 위협합니다. 최대 소비자(보통 CNPG WAL 적체·pg-1 PGDATA 또는 restore-drill 일회용 ~50GiB PVC)를 확인하세요 — vmsingle·vlogs는 bulk-ssd라 이 fs에 기여하지 않습니다."
           - alert: StandardSSDFilling
             expr: |
               (node_filesystem_avail_bytes{mountpoint="/"}
@@ -41,7 +41,7 @@ data:
             labels: { severity: critical, disk: standard }
             annotations:
               summary: "내장 SSD 여유 공간 10% 미만"
-              description: "standard SC 디스크 여유 부족 — Postgres PGDATA/WAL과 관측 스택이 임박한 위험입니다. 즉시 최대 소비자를 정리하거나 retention을 낮추세요."
+              description: "standard SC 디스크 여유 부족 — Postgres PGDATA/WAL과 AdGuard가 임박한 위험입니다. 즉시 최대 소비자(pg-1 PGDATA·WAL 적체·restore-drill 잔여 PVC)를 정리하세요."
           - alert: StandardSSDFillingTrend
             expr: |
               predict_linear(node_filesystem_avail_bytes{mountpoint="/"}[6h], 48*3600) < 0

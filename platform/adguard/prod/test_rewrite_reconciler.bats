@@ -54,6 +54,20 @@ setup() {
   [ "$rb" -lt "$hb" ]
 }
 
+@test "the reconcile heartbeat is the LAST line of the pushed payload (truncation must be fail-closed)" {
+  # ADR-0003 「살릴 것 하나」 — 형제 계약(digest-exporter·gha-liveness-exporter)과 동형.
+  # /api/v1/import/prometheus는 스트리밍 인입이라 절단되면 읽은 접두부만 적재된다. 하트비트가 앞줄이면
+  # 절단되어도 하트비트가 살아남아 절단 사실이 무성이 된다. 마지막에 두면 절단이 항상 하트비트를
+  # 먼저 잃으므로 AdguardRewriteReconcilerStale이 그 사실을 페이징한다.
+  # (잃는 줄의 소비 룰 AdguardRewriteDriftFixed는 severity info라 이 자리의 이득은 fail-open 차단이
+  #  아니라 「절단하는 push 경로를 알아차림」이다 — 그래도 형제 계약과 어긋난 채로 두지 않는다.)
+  fx=$(grep -n 'adguard_rewrite_last_fix_timestamp' "$F" | head -1 | cut -d: -f1)
+  hb=$(grep -n 'adguard_rewrite_reconcile_timestamp' "$F" | head -1 | cut -d: -f1)
+  [ -n "$fx" ]
+  [ -n "$hb" ]
+  [ "$fx" -lt "$hb" ]
+}
+
 @test "reconciler carries no telegram credential or direct send path (notify via fix metric only)" {
   # F13: DNS 변이 권한 파드에 발송 자격·인터넷 egress 금지 — 통지는 메트릭→vmalert→alertmanager.
   run grep -qi 'sendMessage' "$F"; [ "$status" -eq 1 ]

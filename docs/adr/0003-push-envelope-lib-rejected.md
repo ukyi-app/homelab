@@ -24,5 +24,17 @@ HELP/TYPE를 내고(push 6곳은 안 낸다) 하트비트-마지막 대신 원�
 `scripts/backup-files-data.sh:231`)은 실재 결함이다. 방출 코드를 옮기지 말고 **이미 있는 생산자
 레지스트리에 정적 가드로 얹어** 닫는다 — per-file 판정 모델이 온전하다.
 
+> **착지(2026-09-03)**: 두 자리 모두 닫혔다. 다만 **레지스트리 전건 정적 가드는 만들지 않았다** —
+> `tools/check-alert-rules.ts`의 DEFAULT_REGISTRY는 메트릭·생산자·스케줄을 대조하는 자리이지
+> 페이로드 내부 순서를 보는 자리가 아니고, 그 확장 비용이 이 ADR의 per-file 판정 모델과 맞지 않는다.
+> 대신 형제 2곳(digest-exporter·gha-liveness-exporter)과 **동형의 per-file 증인**을 신규 하네스 없이
+> 기존 bats에 얹었다: `tests/gates/test_backup-files-data.bats`(exposition @test에 `tail -n1` 단언),
+> `platform/adguard/prod/test_rewrite_reconciler.bats`(fix행 < hb행 정적 단언 — 기존 rb<hb와 같은 idiom).
+> 방출 순서도 함께 뒤집었다(`payload=""`로 시작해 하트비트를 df 분기 **뒤**에 append / reconciler는
+> 두 printf 순서 교체). 두 자리의 이득 크기는 형제와 다르다는 점을 기록해 둔다: adguard에서 절단 시
+> 잃는 줄의 소비 룰은 severity **info**(AdguardRewriteDriftFixed)이고, files 쪽 「하트비트 초록 + 용량
+> stale 3일」은 `r4-storage-backup.yaml`이 df 경화의 대가로 이미 명시 수용한 잔여 위험이다 —
+> 즉 얻은 것은 fail-open 차단이 아니라 **형제 계약 일관성 + 절단 인지**다.
+
 재개 조건: push 생산자가 아니라 **완전성 가드가 파일별 정적 판정을 그만둘 때**.
 그 전까지 아키텍처 리뷰는 이 후보를 재제안하지 않는다.

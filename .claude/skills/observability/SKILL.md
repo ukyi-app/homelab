@@ -23,7 +23,7 @@ description: 이 홈랩 레포의 관측 스택(victoria-stack)을 디버그할 
 - **vmalert 룰/알림 상태** → `http://vmalert:8880/api/v1/rules` (신버전 경로. `/api/v1/groups`는 400).
 - **telegram 알림 전송 검증** → 로그가 아니라 메트릭으로:
   `alertmanager_notifications_total{integration="telegram"}` 와 `alertmanager_notifications_failed_total{integration="telegram"}`. 봇 토큰은 메인 컨테이너 env가 아니라 **init이 렌더한 alertmanager.yml의 `bot_token_file`**에 있다(직접 전송 테스트는 secret을 envFrom한 임시 파드로). AM은 동적값을 자동 HTML-escape하므로 템플릿에서 수동 escape 금지(이중 escape 버그).
-- **PVC/디스크 포화** → **모든 PV가 hostPath라 `kubelet_volume_stats_*`는 영구 부재**. 대신 `node_filesystem_avail_bytes{mountpoint="/"}`(루트 fs) + CNPG `cnpg_collector_pg_wal`(WAL 볼륨 충전율). 외장 SSD는 virtiofs라 VM에서 측정 불가.
+- **PVC/디스크 포화** → **모든 PV가 hostPath라 `kubelet_volume_stats_*`는 영구 부재**. 대신 `node_filesystem_avail_bytes{mountpoint="/"}`(루트 fs) + CNPG `cnpg_collector_pg_wal`(WAL 볼륨 충전율). bulk 티어(/mnt/bulk = 별도 2TB M.2, 국면 B 2026-08-26~)는 `node_filesystem_avail_bytes{mountpoint="/mnt/bulk"}`가 **실재한다**(옛 문구 「외장 SSD는 virtiofs라 측정 불가」는 OrbStack VM 시절 서술). in-cluster 짝은 du exporter `storage_tier_*{tier="bulk"}`(BulkStorageLow), 호스트 df push는 `files_data_bulk_*`(FilesBulkSSDLow) — 임계·기전·롤업 윈도의 SSOT는 `platform/victoria-stack/prod/rules/r4-storage-backup.yaml` 상단 주석이다. 단 **bulk 미마운트의 권위 신호는 이 series의 absent가 아니다** — 평가 주체 vmalert가 vmsingle-data-bulk와 함께 죽어 발화하지 못하므로 backstop은 deadmanswitch→healthchecks.io다(같은 주석).
 - **CPU/메모리 사용량** → hostPath라 `kubectl top`이 신뢰 불가 → Grafana 대시보드 `uid=homelab-resources`.
 
 ## 진단 후

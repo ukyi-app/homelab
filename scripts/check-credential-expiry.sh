@@ -2,8 +2,14 @@
 # 자격증명 만료 원장(policy/credential-expiry.json) 검사 — 값(토큰) 없음, {name, expires(YYYY-MM-DD), note}만.
 #   --days N          : N일 이내 만료 항목이 있으면 목록 출력 + exit 1 (주간 워크플로가 telegram 경고로 중계)
 #   --lint            : 스키마 + 열거 바닥값만 검증 후 exit 0/2
-#   --floor credential-expiry=N : 항목 수 바닥값 오버라이드(기본 8 = 커밋된 원장의 현재 크기 —
+#   --floor credential-expiry=N : 항목 수 바닥값 오버라이드(기본값 = 커밋된 원장의 현재 크기 —
 #                     공용 어휘, kernel-followups 02. 픽스처는 자기 크기에 맞춰 낮춰 쓴다).
+#                     ⚠️ 그 수치를 이 주석에 적지 않는다 — 수치 SSOT는 아래 MIN_ENTRIES 대입 줄
+#                     하나뿐이다. 사본을 두면 드리프트한다(실측 2026-08-20: 주석 2 / 기본값 3 /
+#                     원장 4로 세 곳이 전부 달랐다 — tests/gates/test_credential_expiry.bats:12-16).
+#                     ⚠️ 원장에 행을 더할 때 **같은 PR에서** 이 기본값을 함께 올릴 것(런북
+#                     token-inventory.md §현재 원장 상태의 규약). #613·#614가 그걸 어겨
+#                     8 vs 10으로 벌어졌고, 2행이 조용히 사라져도 주간 감시가 초록이었다.
 # exit: 0=윈도 내 만료 없음/lint OK, 1=만료 임박, 2=인자/원장 형식 오류·열거 붕괴(fail-loud —
 #       붕괴가 1이 아닌 근거는 아래 ⚠️ 소비자 계약)
 #
@@ -51,7 +57,7 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
-MIN_ENTRIES="$(floor_of credential-expiry 8)"
+MIN_ENTRIES="$(floor_of credential-expiry 11)" # = 커밋된 원장 행수(2026-09-03). 여유를 두지 않는다 — 위 ⚠️ 참조.
 command -v jq >/dev/null 2>&1 || { echo "ERROR: jq 필요(이 게이트는 jq 전용 — python fallback 금지)" >&2; exit 2; }
 [ -f "$FILE" ] || { echo "ERROR: 원장 파일 없음: $FILE" >&2; exit 2; }
 # 스키마: 배열 + 각 항목 name(문자열)·expires(YYYY-MM-DD). 위반 시 fail-loud.

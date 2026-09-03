@@ -100,7 +100,7 @@ EOF
 # ⚠️ 열거 0건은 통과가 아니다 — nameserver 줄이 하나도 없으면 위 루프가 0회 돌고 조용히 지나간다.
 [ "$ns_total" -ge 1 ] || fail "${rc}에 nameserver가 하나도 없다"
 [ "$ns_routable" -ge 1 ] || fail "${rc}의 nameserver ${ns_total}건이 전부 loopback이다 — hostPort DNAT(--dst-type LOCAL)에 걸려 노드 이름해석이 클러스터에 의존하게 된다"
-[ "$ns_tailnet" -eq 0 ] || fail "${rc}의 nameserver ${ns_tailnet}건이 tailnet 대역이다(${ns_tailnet_list% }) — MagicDNS의 업스트림은 tailnet이 정하고 지금 그 값은 라이브 Mac의 AdGuard다. 노드 이름해석이 클러스터에 의존한다. 처방: tailscale set --accept-dns=false"
+[ "$ns_tailnet" -eq 0 ] || fail "${rc}의 nameserver ${ns_tailnet}건이 tailnet 대역이다(${ns_tailnet_list% }) — MagicDNS의 업스트림은 tailnet이 정하고 지금 그 값은 이 노드 자신이다(infra/tailscale/acl.tf resource tailscale_dns_nameservers = NUC tailscale IP) — 노드 이름해석이 자기 클러스터의 AdGuard에 의존하면 콜드스타트 자기참조 교착이다. 처방: tailscale set --accept-dns=false"
 
 # ⚠️ **노드 자신의 IP도 거부한다 — R7(LAN DNS를 AdGuard로)이 여는 세 번째 문이다.**
 #    라우터의 DHCP option 6을 AdGuard(=이 노드의 LAN IP)로 바꾸면 노드도 그 값을 받는다.

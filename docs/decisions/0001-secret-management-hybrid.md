@@ -33,14 +33,20 @@
 암묵이었다. 실태를 조사해 de-facto 기준을 명문화한다.
 
 **기준 = 부트스트랩 임계성 / DR 복구 독립성.**
-- **SOPS(`*.enc.yaml`, 9개)** — 클러스터를 *세우는 데* 필요하거나, 컨트롤러 없이 age 개인키만으로
-  복호돼야 하는 시크릿. `scripts/seed-secrets.sh`가 terraform output·`.env.secrets`에서 시드한다:
+- **SOPS(`*.enc.yaml` — 전수는 `git ls-files '*.enc.yaml'`)** — 클러스터를 *세우는 데* 필요하거나,
+  컨트롤러 없이 age 개인키만으로 복호돼야 하는 시크릿. 이 중 `scripts/seed-secrets.sh`가 terraform
+  output·`.env.secrets`에서 시드하는 것들(= 그 파일의 `write_enc` 호출부):
   tunnel·operator-oauth·r2-creds(pg/cache)·pg-app-credentials·alerting·restore-drill-alerting·
   cloudflare-api-token(cert-manager). 이들이 SealedSecret이면 "클러스터를 세우려면 클러스터가
   필요한" 순환(원 결정 근거)에 빠진다.
-- **SealedSecrets(`*.sealed.yaml`, 20개)** — 클러스터가 이미 선 뒤 자동화가 산출하거나(provision-db/
-  cache·create-app·앱 레포 `secret:seal`) owner가 라이브 컨트롤러 공개키로 봉인하는 앱·부가 시크릿:
-  앱 `*-secrets`·data-conn·adguard-auth·argocd-notifications·files-keys·ghcr-pull(prod·files)·ghcr-read.
+  ⚠️ **seed-secrets 밖 자산도 이 채널에 있다** — 현재 `platform/cnpg/prod/pg-admin-credentials.enc.yaml`
+  (ukkiee superuser)이 그렇고, 회전은 owner가 `make secret-edit FILE=…`으로 재봉인한다
+  (절차 = `.env.secrets.example` ⑫). 즉 판정 규칙의 「SOPS = seed-secrets 배선」은 기본값이지 정의가 아니다.
+- **SealedSecrets(`*.sealed.yaml` — 전수는 `git ls-files '*.sealed.yaml'`)** — 클러스터가 이미 선 뒤
+  자동화가 산출하거나(provision-db/cache·create-app·앱 레포 `secret:seal`) owner가 라이브 컨트롤러
+  공개키로 봉인하는 앱·부가 시크릿. 예시(전수 아님): 앱 `*-secrets`(인레포 배포 앱이 없어 현재 0)·
+  data-conn·adguard-auth·adguard-api-creds·argocd-notifications·argocd-accounts·files-keys·
+  ghcr-pull(prod·files)·ghcr-read·cache ACL·DB 롤 자격 `db-*-{owner,ro}`(ADR-0005가 다루는 클래스).
   라이브 컨트롤러 sealing key에 종속돼도 무방한(DR은 sealing key 백업 체인이 커버) 등급.
 
 **판정 규칙(신규 시크릿):** "부트스트랩/DR bring-up 경로가 이 값을 컨트롤러 없이 요구하는가?"
