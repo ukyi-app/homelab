@@ -79,6 +79,28 @@ run_hc() { HOSTCFG_ROOT="$FX" run "$BOOTSTRAP_DIR/host-config.sh" "$@"; }
   [ "$status" -eq 0 ]
 }
 
+@test "the sshd drop-in still hardens (the tree is the only checkable authority)" {
+  # 실효값은 50-cloud-init.conf(600)의 EACCES 때문에 원리적으로 못 읽는다(host-config.sh 헤더).
+  # 위 두 @test는 **파일명 우선순위**만, `--check`는 디스크↔트리 **바이트 동일성**만 본다 —
+  # 트리 자체의 값에는 증인이 0이었다. 형제 드롭인(resolved DNS=·networkd UseDNS=false)에는
+  # 값 증인이 있는데 sshd만 없었던 자리다. 모양은 :345 networkd @test와 같다.
+  f="$TREE/etc/ssh/sshd_config.d/10-k3s-node.conf"
+  [ -f "$f" ]
+  grep -qxF 'PermitRootLogin no' "$f"
+  grep -qxF 'PasswordAuthentication no' "$f"
+  grep -qxF 'KbdInteractiveAuthentication no' "$f"
+}
+
+@test "the journald drop-in still declares a cap (an implied cap moves with the filesystem)" {
+  # 값은 핀하지 않는다 — 요점은 "상한을 **명시**한다"는 것이다. 선언이 사라지면 systemd가
+  # min(fs의 10%, 4G)를 유도하고, 그 값은 파일시스템 크기를 따라 조용히 움직여 어떤 검사도
+  # "얼마여야 하는가"를 말할 수 없게 된다(트리 파일 헤더). :237의 형제는 파일 **존재**만 본다.
+  j="$TREE/etc/systemd/journald.conf.d/10-k3s-node.conf"
+  [ -f "$j" ]
+  grep -qE '^SystemMaxUse=' "$j"
+  grep -qE '^SystemKeepFree=' "$j"
+}
+
 # ── versions.env ↔ 트리 정합 (렌더링하지 않으므로 값이 두 곳에 산다) ───────────────────────
 @test "the resolved drop-in pins exactly versions.env HOST_UPSTREAM_DNS" {
   [ -n "$HOST_UPSTREAM_DNS" ]
@@ -238,15 +260,24 @@ _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RU
   [ -f "$FX/etc/ssh/sshd_config.d/10-k3s-node.conf" ]
 }
 
-@test "apply makes the tmpfiles line effective now (a reboot requirement would make 'applied' a lie)" {
+@test "apply makes the [6/6] reflect step effective now (a reboot requirement would make 'applied' a lie)" {
   # 부팅 때는 systemd-tmpfiles-setup.service가 걸지만, --apply가 재부팅을 요구하면
   # "적용 완료"가 거짓이 된다. 설치만 하고 반영을 빠뜨리는 회귀를 이 @test가 막는다.
+  # 🔴 그 논거는 [6/6]의 나머지 4줄에도 똑같이 적용되는데 tmpfiles만 증인이 있었다 —
+  #    daemon-reload·resolved·journald·ssh를 전부 지워 파일 내 `systemctl` 0건이 돼도
+  #    test_03이 전건 초록이었다(뮤테이션 재현). networkd 반영은 :399 @test가 따로 본다.
+  # ⚠️ 이 핀이 막는 것은 **기존 줄의 삭제**뿐이다. 2026-08-18에 실제로 밟은 경로("새 드롭인을
+  #    트리에 넣고 반영 줄을 안 붙였다")는 여전히 열려 있다 — 닫혔다고 읽지 말 것.
   _sandbox
   _apply
   [ "$status" -eq 0 ]
   log="$(cat "$REC_LOG")"
   printf '%s' "$log" | grep -qF -- 'systemd-tmpfiles --create'
   printf '%s' "$log" | grep -qF -- '/etc/tmpfiles.d/10-k3s-node.conf'
+  printf '%s' "$log" | grep -qF -- 'systemctl daemon-reload'
+  printf '%s' "$log" | grep -qF -- 'restart systemd-resolved'
+  printf '%s' "$log" | grep -qF -- 'restart systemd-journald'
+  printf '%s' "$log" | grep -qF -- 'try-reload-or-restart ssh.service'
   [ -f "$FX/etc/tmpfiles.d/10-k3s-node.conf" ]
 }
 
