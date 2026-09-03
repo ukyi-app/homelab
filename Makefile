@@ -413,7 +413,7 @@ kubeconfig: ## [ops] 라이브 kubeconfig export 출력 — eval "$$(make kubeco
 audit: ## [ops] 레포 정적 드리프트 감사(registry↔매니페스트↔바인딩↔원장, 읽기 전용)
 	@bun tools/audit-orphans.ts
 
-audit-orphan-pv: ## [ops][live] 고아 Released PV 감사(PVC 삭제+Retain hostPath 누수 나열, 파괴 없음)
+audit-orphan-pv: ## [ops][live] 고아 스토리지 감사(Released PV + 소비자 없는 PVC, 나열만·파괴 없음)
 	@$(ASSERT_IDENTITY_WARN)
 	@KUBECONFIG=$(KUBECONFIG_LIVE) bash scripts/audit-orphan-pv.sh
 

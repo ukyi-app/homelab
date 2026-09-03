@@ -154,7 +154,8 @@
 - **`verify-runbook-index.sh`** — `docs/runbooks/`(gitignored) ↔ AGENTS.md 런북 인덱스 정합(로컬 전용).
   런북 부재 시 **SKIP 신호**(exit 4 + `SKIP:` 마커 — CONTRIBUTING '가드 skip 신호'; exit 0은 "실제로
   대조했고 정합"만 뜻한다).
-- **`audit-orphan-pv.sh`** — 고아 Released PV 감사(storageclass Retain이라 PVC 삭제 시 PV 누수). 나열만
+- **`audit-orphan-pv.sh`** — 고아 스토리지 감사: ① Released PV(storageclass Retain이라 PVC 삭제 시 PV 누수)
+  + ② Bound인데 어떤 파드도 마운트하지 않는 PVC(cascade=orphan 잔재 — phase만으로는 못 잡는다). 나열만
   (비파괴), reclaim은 owner 수동. **`make audit-orphan-pv`**(라이브 ops)가 호출. `tests/gates/test_audit-orphan-pv.bats`가
   가드. ★fail-closed(도구/쿼리 실패=비-0).
 
