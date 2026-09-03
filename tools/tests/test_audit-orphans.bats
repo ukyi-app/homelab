@@ -287,6 +287,54 @@ KEOF
   [ "$status" -ne 0 ]
 }
 
+@test "with zero deployable apps the unreferenced-conn verdict is vacuous and folded out of the page" {
+  # 참조자 집합(apps/*/values.yaml envFrom)이 구조적으로 공집합이라 모든 rw conn이 자동으로 '미참조'다
+  # — 판별력 0인 판정이다. 그걸 매일 페이지하면 유일한 정보성 드리프트 채널이 학습된 무시로 죽는다
+  # (라이브: 앱 0개가 된 2026-08-12 이후 매일 같은 「드리프트 감사 · 3건」). findings에는 그대로 남긴다.
+  G="$TMP/noapps"; mkdir -p "$G"; cp -R "$FR/." "$G/"
+  rm -rf "$G/apps"
+  echo '[]' > "$G/infra/cloudflare/apps.json"
+  # 남는 finding을 unreferenced-conn 하나로 격리 — 원장 행은 platform/ 실재 컴포넌트로(stale-ledger-row 배제).
+  printf '<!-- ledger:meta VM_ALLOCATABLE_MIB=11264 LIMIT_BUDGET_MIB=8704 -->\n| <!-- ledger:row --> data-conn | prod | 64 | 128 |\n' \
+    > "$G/docs/memory-ledger.md"
+  cat > "$G/platform/data-conn/prod/kustomization.yaml" <<'KEOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - db-lonely-conn.sealed.yaml
+KEOF
+  git -C "$G" add -A
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$G"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.scan["audit-orphans:apps"] == 0'
+  echo "$output" | jq -e '.findings | any(.type == "unreferenced-conn")'
+  echo "$output" | jq -e '.alerting == 0'
+}
+
+@test "an app that wires no envFrom still pages unreferenced-conn (the zero-app fold must not swallow #211)" {
+  # 대조군. 앱이 있는데 envFrom을 통째로 빠뜨린 상태가 정확히 #211(trip-mate 실재발)이고, 이 판정이
+  # 존재하는 이유다. 억제 술어를 `referenced.size === 0`으로 쓰면 그 자리가 함께 묻히는데, 이 레인이
+  # 없으면 그 뒤집힘이 무증인이다(뮤테이션이 전건 red여도 픽스처가 안 밟는 조건은 증언되지 않는다).
+  echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
+    > "$FR/infra/cloudflare/apps.json"
+  printf '<!-- ledger:meta VM_ALLOCATABLE_MIB=11264 LIMIT_BUDGET_MIB=8704 -->\n| <!-- ledger:row --> orders | prod | 64 | 128 |\n' \
+    > "$FR/docs/memory-ledger.md"
+  cat > "$FR/platform/data-conn/prod/kustomization.yaml" <<'KEOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - db-lonely-conn.sealed.yaml
+KEOF
+  git -C "$FR" add -A
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.scan["audit-orphans:apps"] == 1'
+  echo "$output" | jq -e '.findings | any(.type == "unreferenced-conn")'
+  echo "$output" | jq -e '.alerting >= 1'
+}
+
 @test "a missing apps.json fails loudly instead of collapsing the registry to zero rows" {
   # 병(라이브 재현): registry가 `readJson(…, [])`로 접히면 **진짜 BLOCKING 위반이 있는 상태에서도**
   # --ci가 rc=0이었다 — BLOCKING 3종이 전부 registry 순회 안에 있어 0행이면 동시에 무발화한다.
