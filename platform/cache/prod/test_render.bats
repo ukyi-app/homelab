@@ -44,6 +44,20 @@ CJ="$DIR/backup-cronjob.yaml"
   grep -q "serviceAccountName: cache-backup" "$CJ"
   grep -q "kind: Role" "$DIR/backup-rbac.yaml"
   grep -q "kind: RoleBinding" "$DIR/backup-rbac.yaml"
+  # 디스커버리 조인 — CronJob의 셀렉터와 인스턴스 Service의 라벨이 어긋나면 백업이 0건 no-op으로
+  # **성공**하고(Job은 Complete) r4-storage-backup의 CacheBackupStale은 완료 시각만 보므로 무성이다.
+  # 실측 2026-09-03: trip-mate/service.yaml의 라벨만 valkey-cache로 바꿔도 12/12 초록이었다.
+  # ⚠️ 셀렉터 추출에서 주석줄을 배제한다 — 위 :37 주석이 component=valkey를 설명하고 있다.
+  sel="$(grep -oE '^[^#]*app\.kubernetes\.io/component=[a-z-]+' "$CJ" | grep -oE '=[a-z-]+$' | tr -d = | head -1)"
+  [ "$sel" = valkey ]
+  # 인스턴스 디렉토리 수 바닥값은 두지 않는다 — audit-orphans의 FLOOR_CONNS min:0(캐시 0개는
+  # 정당)과 CronJob의 optional:true 0-인스턴스 결정을 CI-red로 만든다. 비공허 증인은 생산자
+  # 쪽(tools/tests/test_provision-cache.bats)에 둔다.
+  for s in "$DIR"/*/service.yaml; do
+    [ -e "$s" ] || continue
+    [ "$(yq '.metadata.labels."app.kubernetes.io/component"' "$s")" = "$sel" ] \
+      || { echo "인스턴스 Service의 component 라벨이 CronJob 셀렉터($sel)와 다르다: $s"; false; }
+  done
 }
 
 @test "backup r2-creds secret is optional so a no-cache cluster no-ops instead of failing" {

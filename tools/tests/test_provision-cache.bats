@@ -53,6 +53,14 @@ provision() {
   grep -qE "^[[:space:]]*save [0-9]+ [0-9]+" "$d/configmap.yaml"      # RDB 스냅샷 — 백업 체인의 전제
   grep -q "port: 6379" "$d/service.yaml"
   grep -q "storage: 1Gi" "$d/pvc.yaml"
+  # 백업 디스커버리 조인의 **비공허 증인** — 생성물 Service의 component 라벨이 cache-backup CronJob의
+  # 셀렉터와 같아야 한다. 소비처(platform/cache/prod/test_render.bats)의 인스턴스 루프는 캐시가 0개인
+  # 정당한 체제에서 공허해질 수 있고, 그 자리에 바닥값을 두면 audit-orphans의 FLOOR_CONNS min:0과
+  # CronJob의 optional:true 결정을 CI-red로 만든다. 그래서 항상 인스턴스를 만드는 여기에 둔다.
+  # ⚠️ 값을 재타이핑하지 않는다 — CronJob 파일에서 읽어 등호로 세운다(주석줄은 배제).
+  sel="$(grep -oE '^[^#]*app\.kubernetes\.io/component=[a-z-]+' "$ROOT/platform/cache/prod/backup-cronjob.yaml" | grep -oE '=[a-z-]+$' | tr -d = | head -1)"
+  [ -n "$sel" ]
+  grep -qE "^[[:space:]]*app\.kubernetes\.io/component: ${sel}\$" "$d/service.yaml"
 }
 
 @test "valkey pod is hardened (nonroot, no privilege escalation, read-only rootfs)" {
