@@ -38,10 +38,9 @@ const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string)
 const KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler", "Cluster", "ObjectStore"]);
 // spec.template.spec.containers[] 경로를 쓰는 kind(Pooler = CNPG pgbouncer). Cluster는 별도(spec.resources).
 const CONTAINER_KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler"]);
-// ⚠️ KINDS와 **반드시 함께** 넓힌다. 이 정규식이 파일 단위 프리필터라(:enumerate의 첫 줄),
-// KINDS에만 kind를 더하면 그 파일은 아예 열리지 않고 count도 늘지 않는다 — 게이트가 0건을
-// 검사하고 초록을 낸다(「열거 붕괴 → vacuous green」). 2026-09-01 ObjectStore 추가 시 실측 확인.
-const KIND_RE = /^kind:[ \t]*(Deployment|DaemonSet|StatefulSet|Pooler|Cluster|ObjectStore)\b/m;
+// KINDS에서 파생 — 한 곳만 고친다. (손 사본 두 벌이던 시절 KIND_RE만 뒤처지면 그 파일이
+// 아예 안 열려 count도 안 늘고 「열거 붕괴 → vacuous green」이 됐다 — 2026-09-01 ObjectStore 추가 시 실측.)
+const KIND_RE = new RegExp(`^kind:[ \\t]*(${[...KINDS].join("|")})\\b`, "m");
 // 열거 붕괴 바닥값. 2026-09-03 실측 스캔 21건 → **18**(3건 철거를 견딘다). 래칫 아님 —
 // 도메인이 줄지 않는 한 손댈 일이 없다. ⚠️ 초판 값 10은 실 도메인의 절반이라, 21건 중
 // 11건이 조용히 사라져도 초록이었다(호출부 Makefile:78,216·ci.yaml에 `--floor` 오버라이드가
