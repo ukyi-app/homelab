@@ -57,8 +57,12 @@ CACHE="$BATS_TEST_DIRNAME/../../infra/cloudflare/cache.tf"
   [ "$status" -eq 0 ]
 }
 
-@test "ratelimit characteristics include the mandatory cf.colo.id" {
-  # 무료 rate-limit는 ip.src + cf.colo.id 필수(누락 시 apply 400) — entitlement 인접 가드.
-  run grep -qE 'characteristics[[:space:]]*=.*cf\.colo\.id' "$WAF"
+@test "ratelimit characteristics are exactly ip.src + cf.colo.id (free-plan set)" {
+  # 무료 rate-limit는 ip.src + cf.colo.id 둘 다 필수(누락 시 apply 400 또는 colo 단위 집계로
+  # 오집계 — 실제 실패 모드는 waf.tf:40·iac.yaml:59가 적는 「plan은 entitlement 400을 못 잡음 →
+  # post-merge apply 거부·main↔live 드리프트」다). 존재만이 아니라 **집합·순서·건수**를 한 줄에
+  # 못 박는다 — 원소 삭제/추가 양방향에 red.
+  run grep -cE '^[[:space:]]*characteristics[[:space:]]*=[[:space:]]*\["ip\.src",[[:space:]]*"cf\.colo\.id"\]' "$WAF"
   [ "$status" -eq 0 ]
+  [ "$output" -eq 1 ]
 }
