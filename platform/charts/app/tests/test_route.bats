@@ -18,6 +18,13 @@ tpl() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   echo "$rt" | grep -qF -- 'namespace: gateway'
   echo "$rt" | grep -qF -- 'sectionName: web-public'
   echo "$rt" | grep -qF -- 'api.example.com'
+  # backendRef가 실제로 이 릴리스의 Service를 그 Service의 포트로 가리키는지 — 참조 무결성 증인.
+  # kubeconform은 임의 name/port를 스키마상 유효로 보고 conftest는 PSA 축만 본다. 값 축은 이미
+  # 막혀 있다(values.schema.json ports.http/metrics는 const라 앱 values로 드리프트 불가) — 이 두 줄이
+  # 막는 건 service.yaml↔httproute.yaml **비대칭 템플릿 편집**이다. 빈 렌더 공허 통과는 위의
+  # `port: 8080`(Service)·`sectionName: web-public`(HTTPRoute) 비공허 대조가 이미 막는다.
+  [ "$(echo "$out" | yq 'select(.kind=="HTTPRoute") | .spec.rules[0].backendRefs[0].name')" = "$(echo "$out" | yq 'select(.kind=="Service") | .metadata.name')" ]
+  [ "$(echo "$out" | yq 'select(.kind=="HTTPRoute") | .spec.rules[0].backendRefs[0].port')" = "$(echo "$out" | yq 'select(.kind=="Service") | .spec.ports[0].port')" ]
 }
 
 @test "internal app binds to the internal HTTPS listener" {
