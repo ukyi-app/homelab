@@ -48,13 +48,24 @@
   `make verify`·`ci.yaml`(gate)이 호출(출력을 `conftest test … policy/ledger.rego`로 파이프). 라이브 무관.
 - **`sops-guard.sh`** — 인자로 받은 `*.enc.yaml`이 실제 sops 암호화됐는지(평문 누출 차단) 검사.
   **인자 필수** — 대상 목록(staged 파일 등)은 호출자가 소유한다.
+- **`sealed-guard.sh`** — `*.sealed.yaml`이 실제로 **봉인**됐는지 구조 검사(sops-guard.sh가 `*.enc.yaml`에
+  대해 하는 일의 봉인본 판). 4조항: `kind: SealedSecret` · `spec.encryptedData`가 비어 있지 않은 맵 ·
+  평문 리프 0건(`.data`·`.stringData`·`.spec.template.data`·`.spec.template.stringData`) · encryptedData
+  값이 kubeseal 암호문 표기(`^Ag…`). 복호 키 불필요(yq만). 인자 없으면 추적 봉인본 전량을 스스로 열거하고
+  **파일 수·키 총수 두 바닥값**을 건다 — 키 축은 "파일은 다 있는데 내용이 통째로 비었다"를 잡는다(파일 수
+  축이 원리적으로 못 보는 붕괴). gitleaks의 봉인본 면제(generic-api-key)가 원리적으로 못 보는 클래스 —
+  룰이 아니라 구조의 문제라 여기서 문다.
 - **`check-doc-index.sh`** — 두 레인. ① **등재**: `scripts/`·`tools/`·`.github/workflows/` 산출물이 해당
   README에 있는지(가드 없는 인덱스 드리프트 소멸). ② **스코프**: 이 파일의 **가드 bullet**이 계산 가능한
   실행 경로를 주장하지 않는지 — 판정 단위는 `- **` bullet 전건 + bullet 밖 산문이고(절 스코프는 절
   이름을 바꾸면 통째로 우회된다), 가드가 아닌 bullet은 계산원이 없어 스코프 밖이자 **검출기의 상시
   양성 대조**다. 순수 문자열 검사.
 - **`check-app-netpol.sh`** — `apps/<app>/deploy/**`의 app-owned NetworkPolicy가 app-scoped 셀렉터
-  (`app.kubernetes.io/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). netpol 0건은 통과지만 **매니페스트 열거 0건은 scan-floor로 실패**(vacuous pass 아님).
+  (`app.homelab/instance=<app>`)를 갖는지 강제(빈/광범위 podSelector = blast-radius). 그 키는 리터럴이
+  아니라 차트 SSOT(`platform/charts/app/templates/_helpers.tpl`의 `app.selectorLabels` 중 값이
+  `{{ .Release.Name }}`인 줄)에서 **파생**한다 — 손 사본은 갈라진다(실측: 표준 `app.kubernetes.io/instance`를
+  강제하던 판은 차트가 내지 않는 키를 요구해, 그대로 따라 쓴 netpol이 아무 파드도 선택하지 못했다).
+  파생 실패는 fail-closed. netpol 0건은 통과지만 **매니페스트 열거 0건은 scan-floor로 실패**(vacuous pass 아님).
 - **`check-pg-servername.sh`** — CNPG **아카이브 serverName** 분리 가드. `serverName` 한 줄이 `s3://<bucket>/<serverName>/`를 통째로 정하고, 두 primary가 같은 값을 쓰면 타임라인이 섞여 오프사이트 PITR 경로가 망가진다(R2 버저닝 없음 = 되돌릴 수 없음). (A) 쓰기 ≠ 읽기 정합은 항상, (B) `EXPECT_PG_SERVERNAME` 고정은 **main 진입 시에만**(`check-argocd-revision.sh`와 같은 이유로 분리).
 - **`check-argocd-revision.sh`** — ArgoCD **자기레포** 리비전 핀 정합. `repoURL`을 가진 맵 노드를 **재귀로**
   뽑아(Application 단일/다중 소스 · ApplicationSet template 소스 · git generator `revision` — 모양을 세지 않는다)
@@ -72,10 +83,15 @@
 - **`check-locale-collation.sh`** — 로케일 콜레이션 가드: 게이트의 `sort`가 `LC_ALL=C` 접두(또는 숫자
   정렬)인지, TS/JS가 `localeCompare`·`toLocale*`·`Intl.Collator`를 쓰지 않는지 hard-zero로 강제한다.
   en_US 계열은 `-1`과 `1`을 같다고 봐 `sort -u`가 하나를 버린다 — 거짓 red가 아니라 **fail-open**이었다.
-- **`check-gh-secret-coverage.sh`** — GH Actions secret ↔ 분류 정책 **전단사** 가드.
-  워크플로가 참조하는 secret 전부가 `policy/gh-secret-var-classification.json`에 정확히 한 번,
-  사유와 함께 분류돼 있어야 한다(ledger/inventory-only/identifier/provided). `ledger` 갈래는
-  `policy/credential-expiry.json` 행과 기계 대조된다. 미분류·stale·이중선언 전부 fail-closed.
+- **`check-gh-secret-coverage.sh`** — GH Actions **secret·variable 두 평면 ↔ 분류 정책 전단사** 가드.
+  SSOT는 `policy/gh-secret-var-classification.json`이고, 두 평면은 그 안의 **별도 배열**(`secrets`·`vars`)로
+  산다 — 섞으면 `ledger` 갈래와 뒤엉켜 만료 원장 대조가 무의미해진다.
+  ① **secret**: 워크플로가 참조하는 secret 전부가 정확히 한 번, 사유와 함께 분류돼 있어야 한다
+  (ledger/inventory-only/identifier/provided). `ledger` 갈래는 `policy/credential-expiry.json` 행과 기계
+  대조된다. ② **variable**(`vars.X`): 공개 설정값이라 유출·회전 축이 없어 `ledger` 갈래 자체를 허용하지
+  않는다. 그래도 tracked 원장이 필요한 이유는 감시 공백이다 — `vars.HOMELAB_OWNER`는 owner 경계의 신뢰
+  앵커인데 `github_actions_variable` 리소스가 0건이라 terraform 드리프트 감시 범위 밖이다.
+  두 평면 모두 양방향(미분류·stale)이고, 이중선언·열거 붕괴까지 전부 fail-closed.
 - **`check-host-ports.sh`** — 호스트 포트 위생 가드: `tests/gates/**`의 하네스가 호스트 포트를
   **리터럴로 박거나** 기동 프리미티브를 우회하는 자리를 hard-zero로 막는다(publish 인자 · 리스너 헬퍼
   인자 · 배정 lib 미사용 · 포트 변수를 자기가 리터럴로 채움 · publish 컨테이너를 기동 프리미티브 없이

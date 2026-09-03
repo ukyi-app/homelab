@@ -223,6 +223,7 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 	./scripts/run-bats.sh
 	shellcheck $$(git ls-files '*.sh')
 	@bash scripts/sops-guard.sh
+	@bash scripts/sealed-guard.sh
 # ⚠️⚠️ 게이트 스텝을 **서브-make로 묶지 않는다.** GNU make는 `$(MAKE)`가 있는 recipe 줄을 `-n`에서도
 #    **실제로 실행한다**(재귀 make 플래그 전파를 위한 문서화된 동작). 이 레포는 `make -n ci` 출력을
 #    데이터로 읽으므로(check-ci-parity 미러 대조 · check-guard-authority venue 수집) 서브-make 하나가

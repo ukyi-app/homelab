@@ -75,6 +75,7 @@ jobs:
         with: { ref: main } # 항상 main 최신 — 머지된 선언 상태가 권위
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         with:
+          # renovate: datasource=github-releases depName=hashicorp/terraform
           terraform_version: "1.9.8"
           terraform_wrapper: false
       - name: terraform init (R2 backend)
@@ -198,6 +199,7 @@ jobs:
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         if: steps.pf.outputs.configured == 'true'
         with:
+          # renovate: datasource=github-releases depName=hashicorp/terraform
           terraform_version: "1.9.8"
           terraform_wrapper: false
       - name: terraform init (R2 backend, github)
@@ -321,16 +323,20 @@ jobs:
           #    폐기됐고 owner 로컬 작업기는 NUC(terraform 1.9.8)로 옮겨갔다. 그 문장을 근거로
           #    다른 핀들을 '선제' 통일하면 cloudflare/github 등식이 깨진다.
           # 핀은 **루트마다 독립**이다(state writer가 다르므로 통일이 오히려 고장이다):
-          #   · cloudflare — CI(iac.yaml:76 plan·:179 apply · 이 파일 :73 apply)와 owner 로컬
+          #   · cloudflare — CI(iac.yaml의 `iac-plan`·`apply` 잡 · 이 파일의 `reconcile` 잡)와 owner 로컬
           #     apply(blocked-delete 복구 경로)가 번갈아 쓴다 ⇒ 그 핀들 = owner 바이너리 **등식**.
-          #   · github — owner 로컬 apply 전용이고 CI(이 파일 :189)는 plan-only ⇒ CI 핀 ≥ writer.
-          #   · iac.yaml:27(validate all roots)은 `init -backend=false`라 state를 안 만져 등식 밖이다.
+          #   · github — owner 로컬 apply 전용이고 CI(이 파일의 `drift-github` 잡)는 plan-only ⇒ CI 핀 ≥ writer.
+          #   · iac.yaml의 `iac-validate` 잡(「terraform init (no backend) + validate all roots」 스텝)은
+          #     `init -backend=false`라 state를 안 만져 등식 밖이다.
           #   ✅ 그 등식은 이제 기계가 진다 — infra/cloudflare/versions.tf·infra/github/versions.tf의
           #     `required_version = "= 1.9.8"`이 한 변만 올라가도 init에서 fail-closed로 죽인다.
           #     이 루트(tailscale)만 `>= 1.9.0`이라 1.15.5로 돌 수 있다.
           # 🔁 **재발 지점**: owner 머신 terraform이 1.15.5를 넘어서면 이 핀이 다시 낡는다. 로컬
-          #    apply 후 이 값을 함께 올릴 것(Renovate 비대상 — customManager 없고 github-actions
-          #    manager도 비활성이라 자동 갱신 경로가 아예 없다).
+          #    apply 후 이 값을 함께 올릴 것. Renovate 비대상인 이유가 바뀌었다: 등식 핀 쪽에는
+          #    customManager가 생겼지만(renovate.json 「terraform 코어 버전 등식 핀」), 그건 바로 위에
+          #    `# renovate: … depName=hashicorp/terraform` **마커가 붙은 자리만** 잡는다. 이 핀에는
+          #    마커가 없다 — 등식이 아니라 헤드룸이라 같은 PR로 움직이면 안 되기 때문이다.
+          #    (github-actions manager는 여전히 비활성이라 `uses:` 핀도 자동 갱신 경로가 없다.)
           terraform_version: "1.15.5"
           terraform_wrapper: false
       - name: terraform init (R2 backend, tailscale)

@@ -74,7 +74,8 @@ jobs:
           # ⚠️ 해시는 릴리스 **공식 checksums.txt**로 검증한다 — SHA256 하드코딩 금지(버전 bump마다
           #    stale이 되어 게이트가 깨진다). 핀은 v${ver}(= .pre-commit-config.yaml rev) 하나뿐이다.
           #    freshness 소유자: renovate.json의 `pre-commit` manager(opt-in — 이 레포는 명시 활성).
-          #    이 층은 3차 방어다 — 1차는 서버측 secret scanning + push protection(infra/github/repo.tf:7-14),
+          #    이 층은 3차 방어다 — 1차는 서버측 secret scanning + push protection(infra/github/repo.tf의
+          #    `github_repository.homelab` → `security_and_analysis` 블록),
           #    2차는 SOPS/SealedSecrets 규약(CONTRIBUTING.md '시크릿 공급')이다.
           ( cd /tmp
             curl -fsSL -O "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_arm64.tar.gz"
@@ -105,7 +106,8 @@ jobs:
       - name: pre-commit 배선 확인 (훅 정의가 실제로 도는가)
         # ⚠️ gate가 gitleaks·sops-guard를 직접 부르는 것과 **다른 질문**이다: 저건 "검사가 도는가",
         #    여긴 "`.pre-commit-config.yaml`의 훅 배선이 유효한가"(files 정규식·entry 경로·language).
-        #    ci.yaml:45가 이 파일에서 gitleaks rev를 파생하므로 배선이 깨지면 그 파생도 조용히 죽는다.
+        #    이 파일의 `secret-guard` 스텝이 `.pre-commit-config.yaml`에서 gitleaks rev를 파생하므로
+        #    배선이 깨지면 그 파생도 조용히 죽는다.
         #    전체 훅 실행은 하지 않는다 — gitleaks 훅은 `--staged` 대상이라 CI(staged 0)에서 vacuous다.
         #    핀 이유: 이 스텝은 required `gate` 안에서 도는 유일한 무검증 다운로드 경로였다 —
         #    무핀이면 PyPI 신규 릴리스/yank 하나가 전 PR gate를 red로 만들고(재현성 0), 판정을
@@ -122,6 +124,11 @@ jobs:
         # 무인자 = 가드가 자기 도메인을 열거하고 바닥값을 건다. 예전의 `git ls-files … | xargs -r`는
         # 글롭이 깨지면 스크립트를 **아예 호출하지 않아** 이 스텝이 조용히 초록이었다.
         run: bash scripts/sops-guard.sh
+      - name: sealed-guard — 추적된 모든 *.sealed.yaml 구조 검증
+        # 봉인 전 평문 Secret을 `*.sealed.yaml` 이름으로 커밋했거나 평문 리프가 template.stringData에
+        # 남은 오봉인을 차단. gitleaks의 봉인본 면제(generic-api-key)가 원리적으로 못 보는 클래스라
+        # 룰이 아니라 구조 가드가 문다. 무인자 = 가드가 자기 도메인을 열거하고 바닥값을 건다.
+        run: bash scripts/sealed-guard.sh
       - name: chart render + validate (all kinds)
         run: make chart-test
       - name: memory ledger onboarding gate (M0-owned)

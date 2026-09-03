@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # app-owned NetworkPolicy(apps/<app>/deploy/**)는 app-scoped 셀렉터 필수 — 적대 리뷰 Pass1 #2 + Pass2 #2.
 # 공유 prod ns에서 빈/광범위 podSelector는 무관 앱 트래픽에 영향(blast radius)을 준다.
-# 차트 selectorLabels(platform/charts/app/templates/_helpers.tpl): app.kubernetes.io/name=차트명
-# (전 앱 공유·비유니크) + **app.homelab/instance**=Release명(유니크). 표준 app.kubernetes.io/instance는
-# ArgoCD 예약 라벨이라 의도적으로 회피했다(같은 helper 주석 — 값 아닌 '존재'만으로 리소스 트리에서 제외).
-# → podSelector.matchLabels에 app.kubernetes.io/instance=<app>(디렉토리명) 존재·일치 필수(name-only/빈 셀렉터 금지).
-# ⚠️ 아래 로직이 강제하는 키는 여전히 app.kubernetes.io/instance이고, 그 키는 차트가 내지 않는다 —
-#    이 가드를 그대로 따라 쓴 app-owned netpol은 아무 파드도 선택하지 못한다. 키 정렬은 apps/ 소유
-#    netpol 도메인의 별건이라 여기서는 사실만 적어 둔다(app-owned netpol 실물 0건이라 오늘 노출 없음).
+# 차트 selectorLabels(platform/charts/app/templates/_helpers.tpl의 `app.selectorLabels`):
+# app.kubernetes.io/name=차트명(전 앱 공유·비유니크) + **app.homelab/instance**=Release명(유니크).
+# 표준 app.kubernetes.io/instance는 ArgoCD 예약 라벨이라 의도적으로 회피했다(같은 helper 주석 —
+# 값 아닌 '존재'만으로 리소스 트리에서 제외).
+# → podSelector.matchLabels에 **차트 인스턴스 라벨**=<app>(디렉토리명) 존재·일치 필수(name-only/빈 셀렉터 금지).
+# ⚠️ 그 키를 **리터럴로 손에 들지 않는다** — 예전 판은 app.kubernetes.io/instance를 강제했고 그 키는
+#    차트가 내지 않으므로, 가드를 그대로 따라 쓴 app-owned netpol은 아무 파드도 선택하지 못했다
+#    (2026-09-03 실측: 차트 실제 키를 쓴 픽스처는 거부되고, 차트가 내지 않는 키를 쓴 픽스처는 통과했다).
+#    이제 헬퍼 블록에서 **파생**한다 — 앵커는 키 이름이 아니라 값 `{{ .Release.Name }}`이다(키 이름을
+#    앵커로 쓰면 개명 한 번에 파생이 조용히 0건이 된다). 파생 실패는 fail-closed.
+#    차트 쪽 등식은 platform/charts/app/tests/test_route.bats가 렌더 산출물에서 같은 키를 단언한다.
 # netpol 미선언(0건)은 통과지만 **매니페스트 열거 0건은 실패**(scan-floor — 아래 참조).
 # yq만(버전 무관). bash 3.2 호환. shellcheck clean.
 set -euo pipefail
@@ -17,6 +21,8 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-app-netpol
+# 스크립트 위치 — 차트 헬퍼·워커는 **스캔 대상 트리(--root)가 아니라 여기** 기준이다.
+SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 # 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
 take_floors "check-app-netpol:manifests" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
@@ -27,6 +33,26 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+
+# ── 인스턴스 라벨 키 파생(차트 SSOT) ──────────────────────────────────────────────────────────
+# `app.selectorLabels` 블록 안에서 값이 `{{ .Release.Name }}`인 줄의 키가 인스턴스 라벨이다.
+HELPERS="$SCRIPT_DIR/../platform/charts/app/templates/_helpers.tpl"
+if [ ! -r "$HELPERS" ]; then
+  echo "check-app-netpol: 차트 헬퍼를 읽을 수 없다($HELPERS) — 키 파생 불가는 통과가 아니다." >&2
+  exit 1
+fi
+INSTANCE_KEY="$(awk '
+  /^\{\{- define "app\.selectorLabels"/ { inblk = 1; next }
+  inblk && /^\{\{- end/                 { inblk = 0 }
+  inblk && index($0, "{{ .Release.Name }}") > 0 { sub(/:.*/, "", $0); print $0; exit }
+' "$HELPERS")"
+# 라벨 키 문법(영숫자·`/`·`.`·`_`·`-`)만 받는다 — 빈 값·따옴표·공백은 파생 붕괴다(fail-closed).
+case "$INSTANCE_KEY" in
+  '' | *[!a-zA-Z0-9./_-]*)
+    echo "check-app-netpol: 차트 selectorLabels에서 인스턴스 라벨 키를 파생하지 못했다(받은 값: '${INSTANCE_KEY}') — 판정 불가는 통과가 아니다." >&2
+    exit 1 ;;
+esac
+
 cd "$ROOT"
 # ⚠️ 열거를 **변수로** 받는다(프로세스 치환 금지 — 워커 실패를 set -e가 전파하지 않아,
 # bun이 죽으면 0건 검사 후 `OK … 위반 0`이 찍혔다. 라이브 재현됨).
@@ -72,8 +98,8 @@ while IFS= read -r f; do
   while IFS= read -r inst; do
     count=$((count + 1))
     [ "$inst" = "$app" ] && continue
-    viol="${viol}  ${f}: NetworkPolicy podSelector instance='${inst}' (앱 '${app}'와 불일치/비유니크/빈 셀렉터)"$'\n'
-  done < <(yq ea "select(.kind==\"NetworkPolicy\") | .spec.podSelector.matchLabels.\"app.kubernetes.io/instance\" // \"\"" "$f")
+    viol="${viol}  ${f}: NetworkPolicy podSelector ${INSTANCE_KEY}='${inst}' (앱 '${app}'와 불일치/비유니크/빈 셀렉터)"$'\n'
+  done < <(yq ea "select(.kind==\"NetworkPolicy\") | .spec.podSelector.matchLabels.\"${INSTANCE_KEY}\" // \"\"" "$f")
 done <<< "$netpol_files"
 # ⚠️ **열거 건수와 불변식 평가 횟수는 다른 수다.** 마커를 하나만 내면 "매니페스트 6건 스캔"이
 #    증언되는데 정작 셀렉터 불변식은 0회 평가된 상태가 초록으로 통과한다 — 티켓 08이 잡으려던
@@ -82,7 +108,7 @@ done <<< "$netpol_files"
 #     manifests에만 걸고 여기엔 걸지 않는다. 중요한 건 "몇 번 평가됐나"가 보이는 것이다.)
 scan_signal check-app-netpol:netpols "$count"
 if [ -n "$viol" ]; then
-  echo "FAIL: app-owned NetworkPolicy는 app-scoped 셀렉터(app.kubernetes.io/instance=<app>) 필수 — 빈/name-only/불일치 금지:"
+  echo "FAIL: app-owned NetworkPolicy는 app-scoped 셀렉터(${INSTANCE_KEY}=<app>) 필수 — 빈/name-only/불일치 금지:"
   printf '%s' "$viol"
   exit 1
 fi

@@ -6,6 +6,13 @@ repos:
         entry: scripts/sops-guard.sh
         language: script
         files: '\.enc\.yaml$'
+      # 봉인본 판 — 봉인 전 평문 Secret을 `*.sealed.yaml` 이름으로 커밋하거나 평문 리프가
+      # template.stringData에 잔류한 오봉인을 커밋 시점에 막는다(gitleaks 룰이 원리적으로 못 보는 클래스).
+      - id: sealed-guard
+        name: Block unsealed *.sealed.yaml
+        entry: scripts/sealed-guard.sh
+        language: script
+        files: '\.sealed\.yaml$'
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
     hooks:

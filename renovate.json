@@ -94,6 +94,21 @@
     },
     {
       "customType": "regex",
+      "description": "terraform 코어 버전 등식 핀 — infra/{cloudflare,github}/versions.tf의 `required_version = \"= X\"`와 그 두 루트를 도는 워크플로 잡의 setup-terraform 핀이 **한 값**이어야 한다(등식이 깨지면 init이 fail-closed로 죽는다). 마커 `# renovate: … depName=hashicorp/terraform`가 붙은 자리만 잡는다 — tf-reconcile.yaml tailscale 잡의 헤드룸 핀(1.15.5)은 일부러 다른 값이라 마커가 없다. 커버리지 등식은 tests/gates/test_renovate.bats가 강제(마커 누락 = 부분 갱신 PR = red).",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/(iac|tf-reconcile)\\.yaml$/",
+        "/^infra/[a-z-]+/versions\\.tf$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=github-releases depName=hashicorp/terraform\\s+terraform_version: \"(?<currentValue>[0-9][0-9.]*)\"",
+        "# renovate: datasource=github-releases depName=hashicorp/terraform\\s+required_version = \"= (?<currentValue>[0-9][0-9.]*)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "hashicorp/terraform",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
       "description": "kustomize HelmChartInflationGenerator(helmrelease.yaml) — name/repo/version 핀. 키 사이 주석/줄을 허용([\\s\\S]*?) — name↔repo 사이 주석이 있으면 매치 0이 돼 차트가 silent 미추적됐던 버그(sealed-secrets) 회피. \\n앵커로 top-level name만(metadata.name 제외).",
       "managerFilePatterns": ["/^platform/.+/helmrelease\\.yaml$/"],
       "matchStrings": ["\\nname:\\s*(?<depName>\\S+)[\\s\\S]*?\\nrepo:\\s*(?<registryUrl>\\S+)[\\s\\S]*?\\nversion:\\s*(?<currentValue>\\S+)"],
@@ -121,6 +136,16 @@
       "matchDatasources": ["git-refs", "git-tags"],
       "matchPackageNames": ["https://github.com/ukyi-app/homelab.git", "https://github.com/ukyi-app/homelab"],
       "enabled": false
+    },
+    {
+      "description": "terraform 코어 bump는 **state writer 관계**를 건드린다 — 자동머지 금지는 위 custom.regex 규칙이 이미 걸고, 여기는 머지 전 손 절차를 PR 본문에 싣는다(주석은 PR을 여는 사람에게 안 보인다).",
+      "matchPackageNames": ["hashicorp/terraform"],
+      "prBodyNotes": [
+        "⚠️ **로컬 toolchain 갱신이 선행이다.** cloudflare 루트는 CI와 owner 로컬 apply가 번갈아 state를 쓰므로, owner 바이너리를 올리기 전에 이 PR을 머지하면 CI가 owner보다 높은 버전으로 state를 써 로컬 apply가 죽는다(terraform은 자기보다 높은 버전이 쓴 state를 **읽지도 못한다**). 순서: 로컬 `terraform` 갱신 → 이 PR 머지. 핀 표기는 (gitignored) `docs/runbooks/toolchain.md`에도 있다.",
+        "⚠️ 함정 「owner 로컬 apply 루트는 CI가 plan만 해도 terraform 코어 버전이 state writer 이상이어야 한다」 — github 루트는 owner 로컬 apply 전용이고 CI는 plan-only지만, plan도 refresh로 state를 **읽으므로** CI 핀이 writer보다 낮으면 드리프트 감시가 통째로 죽는다.",
+        "⚠️ 함정 「terraform provider lock 첫 커밋 라이브 state writer 이상」 — 코어 bump로 `.terraform.lock.hcl`이 재생성되면 그 lock을 처음 커밋하는 실행이 곧 state writer가 된다. lock 변경이 이 PR에 함께 오면 위 순서를 더 엄격히 지킬 것.",
+        "ℹ️ tf-reconcile.yaml tailscale 잡의 `terraform_version: \"1.15.5\"`는 **일부러 다른 헤드룸 핀**이라 이 PR에 포함되지 않는다(마커 없음). 맞추지 말 것."
+      ]
     },
     {
       "description": "grafana bump는 플러그인 페이로드 재측정을 동반한다 — 측정 앵커(MEASURED_AT_TAG) 대조가 red를 내고, 해소 절차는 test_grafana_plugin_budget.bats 헤더에 있다(followup-sweep 02).",

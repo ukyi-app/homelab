@@ -66,3 +66,75 @@ PY
   grep -q 'chart: cloudnative-pg' platform/argocd/root/apps/cnpg-operator.yaml
   grep -q 'chart: cert-manager' platform/argocd/root/apps/cert-manager.yaml
 }
+
+@test "the terraform core custom manager extracts every equality pin (no partial-bump PR)" {
+  # 병(캠페인 잔여): `required_version = "= X"` 등식은 fail-closed로 잠겨 있지만 **올리는 주체가
+  # 사람**이었다 — customManager가 없었고 github-actions manager도 비활성이다. 등식 사본이 여러
+  # 파일에 흩어져 있어, 한 사본만 매치 밖이면 Renovate PR이 부분 갱신이 되고 그 PR은 init에서
+  # 죽는다. 존재 단언("매니저가 있다")으로는 그 부분성을 못 본다 — **파일별 건수 등식**이 본다.
+  command -v jq >/dev/null || skip "jq required"
+  command -v python3 >/dev/null || skip "python3 required"
+  python3 - <<'PY'
+import json, re, glob
+
+cfg = json.load(open("renovate.json"))
+mgrs = [m for m in cfg.get("customManagers", []) if m.get("depNameTemplate") == "hashicorp/terraform"]
+assert len(mgrs) == 1, "terraform customManager는 정확히 1개여야 한다: %d개" % len(mgrs)
+m = mgrs[0]
+assert m.get("datasourceTemplate") == "github-releases", "datasource 불일치: %r" % m.get("datasourceTemplate")
+
+def rx(s):   # Renovate/RE2 명명그룹 (?<x>) -> python (?P<x>)
+    return re.compile(re.sub(r"\(\?<", "(?P<", s))
+
+pats = [rx(s) for s in m["matchStrings"]]
+filepats = [re.compile(p[1:-1] if p.startswith("/") and p.endswith("/") else p)
+            for p in m["managerFilePatterns"]]
+
+# -- (1) 독립 열거: 함께 움직여야 하는 등식 핀 집합 --------------------------------------------
+roots = sorted(glob.glob("infra/*/versions.tf"))
+assert roots, "infra/*/versions.tf 0개 — 열거 붕괴(등식 자체가 사라졌다)"
+versions, want = set(), {}
+for f in roots:
+    for line in open(f, encoding="utf-8"):
+        mm = re.search(r'required_version\s*=\s*"=\s*([0-9][0-9.]*)"', line)
+        if mm:
+            versions.add(mm.group(1)); want[f] = want.get(f, 0) + 1
+assert len(versions) == 1, "등식 루트의 코어 버전이 갈렸다(부분 갱신 상태): %r" % sorted(versions)
+V = versions.pop()
+wfs = sorted(glob.glob(".github/workflows/*.yaml"))
+for f in wfs:
+    for line in open(f, encoding="utf-8"):
+        if re.search(r'terraform_version:\s*"%s"' % re.escape(V), line):
+            want[f] = want.get(f, 0) + 1
+total = sum(want.values())
+assert total >= 5, "등식 핀 열거가 %d건 — 붕괴 의심(사본은 5건 이상이어야 한다)" % total
+
+# -- (2) 매니저가 실제로 추출하는 집합 ---------------------------------------------------------
+got, values = {}, set()
+for f in sorted(set(roots + wfs)):
+    text = open(f, encoding="utf-8").read()
+    for p in pats:
+        for mm in p.finditer(text):
+            got[f] = got.get(f, 0) + 1
+            values.add(mm.group("currentValue"))
+
+assert got == want, "매치 집합 != 등식 사본 집합\n  등식: %r\n  매치: %r" % (want, got)
+assert values == {V}, "매치가 등식 밖 값을 끌어왔다: %r (등식=%s)" % (sorted(values), V)
+
+# -- (3) managerFilePatterns가 매치 파일 전량을 덮는가(패턴이 좁으면 Renovate는 못 본다) -------
+for f in got:
+    assert any(fp.search(f) for fp in filepats), "managerFilePatterns 밖의 매치 파일: %s" % f
+
+# -- (4) 헤드룸 핀(등식과 일부러 다른 값)은 끌어오지 않는다 ------------------------------------
+head = set()
+for f in wfs:
+    for line in open(f, encoding="utf-8"):
+        mm = re.search(r'terraform_version:\s*"([0-9][0-9.]*)"', line)
+        if mm and mm.group(1) != V:
+            head.add(mm.group(1))
+assert head, "헤드룸 핀이 0건 — (4)의 양성 대조가 사라졌다(등식 밖 값이 실재해야 이 축이 의미를 갖는다)"
+assert not (head & values), "헤드룸 핀이 등식 PR에 섞였다: %r" % sorted(head & values)
+
+print("ok: 등식 핀 %d건(%s) 전량 매치 · 헤드룸 %r 제외" % (total, V, sorted(head)))
+PY
+}

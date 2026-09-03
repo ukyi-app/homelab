@@ -30,6 +30,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         with:
+          # renovate: datasource=github-releases depName=hashicorp/terraform
           terraform_version: "1.9.8"
       # ⚠️ apt로 bats를 깔지 않는다 — arm64는 ports.ubuntu.com 미러가 SPOF고 2026-07 실장애를 냈다.
       #    setup-toolchain은 불변 커밋 SHA로 clone+대조한다(그 근거는 composite 주석이 SSOT).
@@ -83,6 +84,7 @@ jobs:
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         if: steps.pf.outputs.configured == 'true'
         with:
+          # renovate: datasource=github-releases depName=hashicorp/terraform
           terraform_version: "1.9.8"
           terraform_wrapper: false
       - name: terraform init (R2 backend, readonly)
@@ -190,6 +192,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0 — push 이벤트의 머지 SHA가 기본 체크아웃 — SHA 고정
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         with:
+          # renovate: datasource=github-releases depName=hashicorp/terraform
           terraform_version: "1.9.8"
           terraform_wrapper: false
       - name: terraform init (R2 backend)
