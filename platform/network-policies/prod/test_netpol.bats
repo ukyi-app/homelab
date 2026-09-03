@@ -74,8 +74,11 @@ build() { kustomize build "$DIR"; }
 @test "database egress is structurally narrowed — every database peer has podSelector, no namespace-only peer" {
   TMP="$BATS_TEST_TMPDIR/db-egress.yaml"
   build | yq 'select(.metadata.name=="allow-egress-to-database")' > "$TMP"
-  # database namespace를 가리키는데 podSelector 없는 피어(=namespace 전체) 0개여야(F1b — substring은 잔존 broad 통과)
-  run yq '[.spec.egress[].to[] | select(.namespaceSelector.matchLabels."kubernetes.io/metadata.name" == "database" and (has("podSelector") | not))] | length' "$TMP"
+  # podSelector 없는 피어(=namespace 전체 또는 무라벨) 0개여야(F1b — substring은 잔존 broad 통과)
+  # ⚠️ 라벨-한정 술어(`namespaceSelector...=="database"`)는 무라벨(=전 namespace) 피어를 원리적으로
+  #    열거 밖에 둔다 — `- namespaceSelector: {}` 피어 한 건을 더해도 라벨 조건에 안 걸려 8/8 ok였다
+  #    (실측). 라벨 조건을 떼어 이 doc(allow-egress-to-database) 안의 podSelector 없는 피어 전수로 잰다.
+  run yq '[.spec.egress[].to[] | select(has("podSelector") | not)] | length' "$TMP"
   [ "$output" = "0" ]
   # podSelector로 좁힌 피어 ≥1
   run yq '[.spec.egress[].to[] | select(has("podSelector"))] | length' "$TMP"
