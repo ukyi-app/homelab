@@ -260,15 +260,24 @@ _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RU
   [ -f "$FX/etc/ssh/sshd_config.d/10-k3s-node.conf" ]
 }
 
-@test "apply makes the tmpfiles line effective now (a reboot requirement would make 'applied' a lie)" {
+@test "apply makes the [6/6] reflect step effective now (a reboot requirement would make 'applied' a lie)" {
   # 부팅 때는 systemd-tmpfiles-setup.service가 걸지만, --apply가 재부팅을 요구하면
   # "적용 완료"가 거짓이 된다. 설치만 하고 반영을 빠뜨리는 회귀를 이 @test가 막는다.
+  # 🔴 그 논거는 [6/6]의 나머지 4줄에도 똑같이 적용되는데 tmpfiles만 증인이 있었다 —
+  #    daemon-reload·resolved·journald·ssh를 전부 지워 파일 내 `systemctl` 0건이 돼도
+  #    test_03이 전건 초록이었다(뮤테이션 재현). networkd 반영은 :399 @test가 따로 본다.
+  # ⚠️ 이 핀이 막는 것은 **기존 줄의 삭제**뿐이다. 2026-08-18에 실제로 밟은 경로("새 드롭인을
+  #    트리에 넣고 반영 줄을 안 붙였다")는 여전히 열려 있다 — 닫혔다고 읽지 말 것.
   _sandbox
   _apply
   [ "$status" -eq 0 ]
   log="$(cat "$REC_LOG")"
   printf '%s' "$log" | grep -qF -- 'systemd-tmpfiles --create'
   printf '%s' "$log" | grep -qF -- '/etc/tmpfiles.d/10-k3s-node.conf'
+  printf '%s' "$log" | grep -qF -- 'systemctl daemon-reload'
+  printf '%s' "$log" | grep -qF -- 'restart systemd-resolved'
+  printf '%s' "$log" | grep -qF -- 'restart systemd-journald'
+  printf '%s' "$log" | grep -qF -- 'try-reload-or-restart ssh.service'
   [ -f "$FX/etc/tmpfiles.d/10-k3s-node.conf" ]
 }
 
