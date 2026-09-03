@@ -1,16 +1,29 @@
 # Memory Ledger (SSOT, CI-gated)
 
-VM 상한 = 12 GiB. 커널 페이지 캐시 + 버스트용 여유분을 떼어두므로, pod LIMITS에
-강제되는 **allocatable** 예산(cap)은 10240 MiB (10 GiB)다.
+pod LIMITS에 강제되는 예산(cap)은 10240 MiB (10 GiB)다.
 limit 합계가 이를 초과하면 새 앱 온보딩은 CI에서 실패한다 (설계 §10, R2).
+
+🔴 **cap의 물리적 근거는 지금 존재하지 않는 기판이다(미해결 — D-e).** "VM 상한 12 GiB"는 삭제된
+OrbStack VM의 값이고, 라이브 노드는 **베어메탈 NUC**다 — 실측 2026-09-03 `kubectl get node`:
+capacity 63822552Ki(**62327 MiB**) · allocatable 62517976Ki(**61052 MiB**). cap 10240은 그 allocatable의
+**1/6**이라, 이 원장이 「신규 온보딩 실질 차단」(아래 :34)이라고 부르는 상태는 **물리 한계가 아니라
+숫자가 낡은 것**이다. 아래 `ledger:meta`의 `VM_ALLOCATABLE_MIB=12288`도 같은 이유로 5배 틀렸고,
+그 필드에 **소비자가 0건**(파서가 읽지 않는다)이라 이 괴리가 오늘까지 아무 표면에도 안 떴다.
+⚠️ 그러니 이 두 숫자에 정책 deny를 거는 것은 오류를 정책에 각인하는 일이다(감사 3라운드에서 기각).
+재기준선은 owner 결정(D-e — `infra/k3s-bootstrap/versions.env:24-26`)이고, 그때 이름부터
+바로잡는다(meta는 이름과 달리 capacity 값이었다). 노드-OOM 방어선은 이 원장이 아니라
+`rules/core.yaml`의 NodeMemoryHigh·NodePressure·PodOOMKilled·ContainerMemoryNearLimit다.
 원장 포맷/검증기는 이것 하나뿐이다. M6의 온보딩 게이트도 이 파일에 대해
 `bun run verify:ledger`를 재사용하며, 제2의 원장을 정의하지 않는다.
 
 ⚠️ **예산의 도메인은 "이 노드에 상주하는 워크로드 전부"이지 `platform/`이 아니다.** ArgoCD가 싱크하지
 않는 것 — `infra/k3s-bootstrap`이 적용하는 substrate 워크로드(local-path-provisioner 2대)와 operator가
 파생 생성하는 것(tailscale proxy StatefulSet) — 도 같은 노드의 allocatable을 먹으므로 예산 안이다.
-`tools/check-resource-limits.ts`의 스캔 root는 `platform`뿐이라 그 둘은 **기계 대조 밖·수기 계상**이다:
-해당 매니페스트의 limit을 바꾸는 PR은 이 원장 행도 손으로 함께 옮겨야 한다.
+`tools/check-resource-limits.ts`는 `platform-manifests`와 `substrate-manifests` **두 스코프**를 스캔한다.
+substrate 워크로드(local-path-provisioner 2대)는 아래 `local-path-storage` 행 주석대로 원장과 **기계
+대조**된다 — 그 주석이 이 사실의 SSOT다(스코프가 넓어져도 고칠 곳이 하나여야 한다).
+**기계 대조 밖·수기 계상**으로 남은 것은 `platform/` 행과 operator 파생 tailscale proxy 행이고,
+그 둘만 매니페스트의 limit을 바꾸는 PR이 이 원장 행도 손으로 함께 옮겨야 한다.
 
 ## 모델 주석 — 명목 잔여 ≠ 실 헤드룸 (의도적 보수성)
 
@@ -295,12 +308,16 @@ sealed-secrets 128→96·vmsingle 1Gi→896으로 −160Mi 추가 회수, 명목
 이후 2026-07-06 cnpg-operator +160·tailscale +192로 4Mi까지 재소진, 위 2026-07-06 항목 참조). repo-server는
 라이브 peak 271.75Mi(렌더 버스트, 앱 수에 비례 증가)로 288 축소가 1.06x라 UNSAFE → 보류(384 유지)).
 (b) cap 상향은 10240까지 적용됨(VM 12 GiB, 2026-07-08) — page-cache/burst reserve 2048 보호 위해 10240 초과는 금지.
-그 이상의 물리 헤드룸은 VM RAM 증설(VM_ALLOCATABLE_MIB 동반 상향)뿐이나 호스트 Mac RAM 16 GiB가 상한이라 VM
-12 GiB가 실질 최대다(그 이상은 하드웨어 교체). 모두 노드-OOM 안전(동시 peak ≪ allocatable).
-주의: 행은 라이브 manifest와 자동 교차검증되지 **않는다 — 단 하나, `homepage`만 예외다**
-(`platform/homepage/prod/test_homepage_deployment.bats`가 이 표에서 limit을 읽어 매니페스트와 대조한다.
-2026-09-01 3차에서 그 @test가 상수 192Mi를 박고 있어 원장 정정에 red를 냈고, 이름값(`matching the
-ledger`)을 하도록 원장 파서 대조로 고쳤다. 다른 행에 같은 대조는 없다). verify:ledger는 마크다운만; local-helm traefik 등은
+⚠️ **이 금지선의 근거는 삭제된 하드웨어다**(정정 2026-09-03): "호스트 Mac RAM 16 GiB가 상한이라 VM 12 GiB가
+실질 최대"는 OrbStack 시절의 제약이고 현행 기판은 베어메탈 NUC(라이브 실측 allocatable **61052 MiB**)다.
+즉 10240은 물리 천장이 아니라 **낡은 명목 규율**이며, 상향/재기준선은 owner 결정(D-e)이다 —
+그 결정 전까지 이 금지선을 유지하는 이유는 "물리적으로 불가능해서"가 아니라 "근거를 다시 세우지
+않았기 때문"이다. 모두 노드-OOM 안전(동시 peak ≪ allocatable).
+주의: **대부분의** 행은 라이브 manifest와 자동 교차검증되지 **않는다**. 예외는 둘이고 각 행 주석에 적혀
+있다 — `homepage`(`platform/homepage/prod/test_homepage_deployment.bats`가 이 표에서 limit을 읽어
+매니페스트와 대조한다. 2026-09-01 3차에서 그 @test가 상수 192Mi를 박고 있어 원장 정정에 red를 냈고,
+이름값(`matching the ledger`)을 하도록 원장 파서 대조로 고쳤다)와 `local-path-storage`
+(`tools/check-resource-limits.ts`의 substrate 대조 — 아래 그 행 주석). verify:ledger는 마크다운만; local-helm traefik 등은
 check-resource-limits 스캔 밖이라 여기 수기 계상). 신규/변경 상주 워크로드는 반드시 행+산문 동반 갱신.
 
 2026-08-14: observability 행 상향(limit 2080→2400 **+320**, req 1152→1184 **+32**) — NUC 콜드스타트에서
@@ -378,6 +395,11 @@ atomic []string이라 strategic-merge가 리스트를 통째로 교체한다(실
 줄이는 쪽**(vector sink `request.concurrency` 고정)을 먼저 볼 것 — 미검증이므로 넣으면 반드시
 같은 지표를 다시 재라(`docs/traps-detail.md`의 "상주 워크로드 OOM 진단").
 
+⚠️ 아래 meta의 `VM_ALLOCATABLE_MIB=12288`은 **소비자 0건의 죽은 필드**이고(파서는 `LIMIT_BUDGET_MIB`만
+읽는다), 값도 삭제된 OrbStack VM의 **capacity**라 이름부터 틀렸다 — 라이브 노드 allocatable은 61052 MiB로
+5배 차이다(위 헤더). 여기에 새 소비자를 붙이지 말 것: 자기선언 두 숫자끼리의 대조는 물리 앵커가 아니고,
+D-e(NUC 재기준선)를 red로 만든다. 제거·개명은 그 재기준선에서 실측값과 함께 한다.
+
 <!-- ledger:meta VM_ALLOCATABLE_MIB=12288 LIMIT_BUDGET_MIB=10240 -->
 
 | component                          | namespace      | req_mi | limit_mi |
@@ -409,7 +431,7 @@ atomic []string이라 strategic-merge가 리스트를 통째로 교체한다(실
 (`pg-tools`는 CronJob용 ops 이미지 — 일시적이므로 상주 워크로드 행이 없다. worker/web/console
 values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 앱은 온보딩 PR이 행을 추가한다.)
 
-> **local-path-storage 행 = k3s-bootstrap substrate 워크로드 (이 원장에서 유일한 기계 대조 행)** —
+> **local-path-storage 행 = k3s-bootstrap substrate 워크로드 (`check-resource-limits`가 기계 대조하는 유일한 행)** —
 > `infra/k3s-bootstrap/storage/local-path-provisioner.yaml`이 Deployment 2개
 > (`local-path-provisioner-internal`·`-bulk`, 각 req 32Mi/limit 64Mi)를 `local-path-storage` ns에 적용한다.
 > 이 둘은 **ArgoCD 관리가 아니다**(`app.kubernetes.io/instance` 라벨 없음 — 라이브 실측 2026-09-03).

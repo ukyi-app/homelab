@@ -48,8 +48,8 @@
     },
     {
       "artifact": "infra/k3s-bootstrap/storage/local-path-provisioner.yaml",
-      "why": "local-path provisioner — **모든 PV 데이터 경로**를 담당한다(라이브: internal·bulk 두 파드가 v0.0.36 mutable tag로 구동 중). tag-only라 digest 소유자가 없고, renovate.json의 kubernetes manager는 `^platform/`·`^apps/`만 보므로 이 경로에 도달하지 않는다. 적대 검토 실측: 회계 스코프가 `platform|apps|ops`에서 끊겨 이 참조가 **'전건 소유자 확정'이라는 초록 아래에서 통째로 빠져** 있었다.",
-      "freshness": "`infra/k3s-bootstrap/versions.env`의 `LOCAL_PATH_PROVISIONER_VERSION` — renovate.json customManagers(datasource=github-releases)가 소유하고, `infra/k3s-bootstrap/tests/`의 bats가 매니페스트 태그 ↔ versions.env 정합을 강제한다(Renovate bump가 조용히 무시되지 않는다). digest 소유자만 없다.",
+      "why": "local-path provisioner — **모든 PV 데이터 경로**를 담당한다(라이브 실측 2026-09-03: internal·bulk 두 파드가 v0.0.36 mutable tag로 구동 중 — 매니페스트 핀 v0.0.37과 갈려 있다. 이 트리는 seed-only라 갈리는 것이 정상이고, 닫는 시점은 재구축이다). tag-only라 digest 소유자가 없고, renovate.json의 kubernetes manager는 `^platform/`·`^apps/`만 보므로 이 경로에 도달하지 않는다. 적대 검토 실측: 회계 스코프가 `platform|apps|ops`에서 끊겨 이 참조가 **'전건 소유자 확정'이라는 초록 아래에서 통째로 빠져** 있었다.",
+      "freshness": "`infra/k3s-bootstrap/versions.env`의 `LOCAL_PATH_PROVISIONER_VERSION` — renovate.json customManagers(datasource=github-releases)가 소유한다. **두 축을 구별할 것**: git 등식(매니페스트 태그 ↔ versions.env)은 `infra/k3s-bootstrap/tests/`의 bats가 강제하고, 라이브 적용·대조는 owner-local `apply-storage.sh`(적용)와 `verify-cluster.sh` [10][11](대조)이 한다 — **둘 다 owner 수동 실행이라 주기 신호가 없다**. 즉 bump 머지는 git 안에서만 '무시되지 않고', 라이브에 닿는 것은 재구축/`make up`뿐이다(SSOT: seed-only — 매니페스트·versions.env 헤더, docs/decisions/0007). digest 소유자만 없다.",
       "since": "2026-07-28",
       "owner_action": "digest 핀을 원하면 versions.env의 `LOCAL_PATH_HELPER_IMAGE`처럼 `LOCAL_PATH_PROVISIONER_IMAGE=\"repo:tag@sha256:...\"` 형태로 올리고 매니페스트를 그 값으로 치환한다(헬퍼 이미지가 이미 그 방식이라 선례가 있다). substrate 계층이라 부트스트랩 스크립트와 함께 검증할 것."
     },

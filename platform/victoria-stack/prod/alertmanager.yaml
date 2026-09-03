@@ -11,8 +11,17 @@
 #         kubectl exec deploy/alertmanager -n observability -c alertmanager -- \
 #           cat /etc/alertmanager/alertmanager.yml | grep -c '<새 alertname>'
 #
-#    ⚠️ 재기동을 빠뜨리면 새 알림이 **제목 매핑 없이**(alertname 그대로) 텔레그램에 나간다 — red가 아니라
-#       조용한 품질 저하다. 라이브 실측(2026-07-13): 재기동 **전** 매핑 grep 0건 → **후** 2건.
+#    ⚠️ 재기동을 빠뜨리면 새 알림이 **제목 매핑 없이** 텔레그램에 나간다 — red가 아니라 조용한 품질
+#       저하다. 라이브 실측(2026-07-13): 재기동 **전** 매핑 grep 0건 → **후** 2건.
+#       ⚠️ 다만 "alertname 원문이 제목이 된다"는 **부정확**하다(정정 2026-09-03): 아래 템플릿에
+#          미매핑 fallback(`$title = .CommonAnnotations.summary`, 5f330c0 이후)이 있어 대개 한국어
+#          summary가 제목이 된다. 원문이 노출되는 것은 summary가 없거나 그 summary가 **그룹 안에서
+#          갈릴 때**(예: `{{ $labels.section }}`를 담은 알림이 2개 이상 섹션으로 동시 발화)뿐이다.
+#          즉 손실은 "제목이 영문 alertname"이 아니라 "제목 문구가 매핑본이 아니다" 수준이다.
+#
+#    ⚠️ **미적용 실측 2026-09-03**: 이 ConfigMap의 `AdGuardSeedDrift`·`AdGuardSeedDriftCheckStale`
+#       매핑(#607, 오늘 머지)이 라이브 CM에는 있으나 파드는 2026-08-27 기동본이라 렌더본에 없다.
+#       → 이 파일의 `data:`를 만진 PR은 **머지 후 위 rollout까지가 착지**다(체크리스트에 넣을 것).
 #
 #    미착수 후속: pod template에 config checksum 어노테이션을 넣어 변경 시 자동 롤아웃되게 한다
 #    (수동 절차를 구조로 대체). 현재는 위 수동 스텝이 유일한 보장이다.

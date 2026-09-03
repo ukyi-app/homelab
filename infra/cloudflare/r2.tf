@@ -14,6 +14,11 @@ resource "cloudflare_r2_bucket" "pg_backups" {
 }
 
 # 오프사이트 보존 14일 (M4의 CNPG ScheduledBackup retention과 일치).
+# ⚠️ `prefix = ""`는 **버킷 전체**다 — `pg/`(Mac 아카이브)·`pg-nuc/`·`pgdump-nuc/`를 가리지 않고 지운다.
+#    위 `prevent_destroy`는 **버킷 삭제**를 막지 객체 만료를 막지 않는다. 즉 "옛 prefix를 아카이브로
+#    남겨 둔다"는 계획은 여기에 예외를 적지 않는 한 성립하지 않는다(docs/decisions/0006의 정정 문단 —
+#    그 ADR이 `pg/`를 "마지막 독립 사본"으로 전제했는데 이 규칙이 ≈14일 뒤 지웠다).
+#    보존할 prefix가 생기면 이 rules에 조건을 나눠 적을 것.
 resource "cloudflare_r2_bucket_lifecycle" "pg_backups" {
   account_id  = var.cloudflare_account_id
   bucket_name = cloudflare_r2_bucket.pg_backups.name
