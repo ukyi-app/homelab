@@ -105,7 +105,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 
 @test "memory ledger gate runs in the required gate" {
   # W7: ledger 검사(conftest policy/ledger.rego)는 required gate(ci.yaml: bun run verify:ledger) 한 곳으로 일원화.
-  run grep -q 'verify:ledger' "$ROOT/.github/workflows/ci.yaml"
+  # ⚠️ 구조 판정(F10) — 무앵커 grep은 ci.yaml:3 **헤더 주석**이 담은 같은 토큰으로도 만족된다.
+  #    실측 2026-09-03: 원장 스텝 본문을 `run: echo ledger-skipped`로 바꿔도 이 레인이 초록이었다.
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("verify:ledger")) | .run' "$ROOT/.github/workflows/ci.yaml"
   [ "$status" -eq 0 ]
 }
 

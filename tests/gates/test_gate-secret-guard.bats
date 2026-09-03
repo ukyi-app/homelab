@@ -82,6 +82,31 @@ PRECOMMIT="$BATS_TEST_DIRNAME/../../.pre-commit-config.yaml"
   [ -n "$output" ]
 }
 
+# ⚠️ **비-0 전파까지가 '강제'다.** 이 파일의 나머지 레인은 전부 ci.yaml에 대한 토큰 존재 grep이라
+#    검사가 **차단적인지**를 아무도 재지 않았다. 실측 2026-09-03 — 뮤테이션 A(secret-guard 스텝에
+#    `continue-on-error: true` 한 줄 삽입)·B(`--exit-code 1`→`0` + checksum 파이프에 `|| true`)
+#    양쪽에서 이 파일이 9/9 green이었고 check-workflow-readiness·check-ci-parity·actionlint·
+#    check-guard-authority도 전부 rc 0이었다. required check는 `gate` 하나뿐이라(docs/decisions/0003)
+#    스캐너가 조용히 비차단이 되면 평문 토큰 PR이 auto-merge로 main에 착지한다.
+#    관용구 선례: tests/gates/test_iac-destroy-guard.bats:38-40(continue-on-error 부재 단언).
+@test "the gate secret scanner is blocking (no continue-on-error/if, no fail-open idiom in its run body)" {
+  # 두 스텝(secret-guard·sops-guard)이 실재한다 — 열거가 0건이면 아래 부재 단언이 공허하다.
+  run yq -e '[.jobs.gate.steps[] | select((.name // "") | test("secret-guard|sops-guard"))] | length == 2' "$CI"
+  [ "$status" -eq 0 ]
+  # 스텝 수준 무력화: continue-on-error(비-0을 삼킨다) · if(조건부 비실행)
+  run yq -e '[.jobs.gate.steps[] | select((.name // "") | test("secret-guard|sops-guard")) | select(has("continue-on-error") or has("if"))] | length == 0' "$CI"
+  [ "$status" -eq 0 ]
+  # 본문 수준 무력화: `|| true`(검출기 사망·검출을 함께 삼킨다) · `--exit-code 0`(gitleaks 비차단)
+  body="$(yq -r '.jobs.gate.steps[] | select((.name // "") | test("secret-guard|sops-guard")) | .run' "$CI")"
+  [ -n "$body" ]
+  n="$(printf '%s' "$body" | grep -cF -- '|| true' || true)"
+  [ "$n" -eq 0 ]
+  n="$(printf '%s' "$body" | grep -cF -- '--exit-code 0' || true)"
+  [ "$n" -eq 0 ]
+  # 양성 대조 — gitleaks가 차단 종료코드로 돌고 있다(본문 추출이 살아 있다는 증인이기도 하다).
+  printf '%s' "$body" | grep -qF -- '--exit-code 1'
+}
+
 @test "sops-guard PASSES a realistically sops-shaped enc.yaml (ENC[AES256_GCM,...] leaves)" {
   # codex pass1 F4 회귀 fixture: 실제 SOPS 리프 형태가 평문으로 오판되지 않아야(gate가 모든 enc.yaml을
   # 오차단하지 않게). age 키 불필요 — sops-guard는 구조만 본다. 게이트 글롭 포함 파일이라 required로 강제.

@@ -4,9 +4,14 @@
 # 거짓말이 되지 않게 픽스처로 양성·음성 대조를 매 실행 건다.
 # ⚠️ @test 이름은 영어만 · 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵 통과).
 
+# ⚠️ **피연산자 실재 증인**(선례: operand-witness 01·05 — tests/gates/test_host-ports.bats:37-38).
+#    `run bash "$S"`는 가드가 없으면 rc **127**로 죽어 `-ne 0` 레인을 통과시키고, 빈 출력은
+#    "마커를 안 냈다"는 부재 단언까지 함께 만족시킨다. 실측 2026-09-03(`scripts/check-locale-collation.sh`를
+#    지운 격리 트리): 18건 중 「a dead detector emits no marker」가 그대로 `ok`였다.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   S="$ROOT/scripts/check-locale-collation.sh"
+  [ -f "$S" ]
   FX="$BATS_TEST_TMPDIR"
   # heredoc 여는 표기는 lib이 런타임에 조립한다 — 리터럴로 적으면 이 파일이 검출기에게 투명해진다.
   # shellcheck source=tests/gates/lib/heredoc-marker.sh
@@ -203,6 +208,9 @@ setup() {
   run bash "$S" "$FX/does-not-exist.sh"
   [ "$status" -ne 0 ]
   out="$output"
+  # 양성 대조가 하중을 진다 — `[ -f ]`가 못 보는 경로(가드가 실재하면서 판정 전에 다른 이유로
+  # 크래시)에서도 "fatal 진단을 냈다"를 여기서 증언한다(check-locale-collation.sh의 실제 문구).
+  printf '%s' "$out" | grep -qF '읽을 수 없는 대상'
   run grep -q '^SCAN: check-locale-collation:' <<<"$out"
   [ "$status" -ne 0 ]
 }

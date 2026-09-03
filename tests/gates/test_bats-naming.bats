@@ -15,7 +15,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   [ -z "$output" ]   # 접두 없는 bats가 하나라도 있으면 실패
 }
 
-@test "check-skeleton.sh wires the bats naming guard (not a no-op)" {
-  run grep -qE 'test_\[\^/\]|test_ 접두|bats' "$ROOT/scripts/check-skeleton.sh"
+# ⚠️ 술어는 **실행 경로에만 있는 문자열**이어야 한다. 이전 대안 3종은 전부 코드가 아닌 것에 걸렸다 —
+#    `bats`는 이 스크립트에 10곳 넘게 나오고(라벨·floor·CJK 필터), `test_ 접두`는 삭제되지 않는 헤더
+#    주석(:27-28)에 있으며, `test_[^/]`는 네이밍 판정(:36)뿐 아니라 CJK 필터(:49)에도 매치한다.
+#    실측 2026-09-03: `sed -i '36,41d' scripts/check-skeleton.sh`(네이밍 판정 블록 통삭제) 후에도
+#    이 파일이 2/2 green이었다. 아래 문자열은 레포 전체에서 check-skeleton.sh:38 단 1곳이다.
+@test "check-skeleton.sh wires the bats naming guard (FAIL-string witness, not a no-op)" {
+  run grep -qF 'FAIL: test_ 접두 없는 bats' "$ROOT/scripts/check-skeleton.sh"
   [ "$status" -eq 0 ]
 }

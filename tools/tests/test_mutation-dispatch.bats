@@ -29,10 +29,12 @@ setup() {
 }
 
 @test "every dispatcher serializes via homelab-mutation group with queue max" {
+  # ⚠️ `queue: max`는 **키 행으로 앵커한다** — 무앵커 grep은 규약을 설명하는 주석에 걸려, 실키를
+  #    지워도 초록이었다(실측 2026-09-03 · 형제 자리 tests/gates/test_actionlint-gate.bats:17).
   for d in $DISPATCHERS; do
     f="$WF/$d.yaml"; [ -f "$f" ]
     grep -q "group: homelab-mutation" "$f"
-    grep -q "queue: max" "$f"
+    grep -Eq '^[[:space:]]*queue:[[:space:]]*max[[:space:]]*$' "$f"
     grep -q "cancel-in-progress: false" "$f"
   done
 }
