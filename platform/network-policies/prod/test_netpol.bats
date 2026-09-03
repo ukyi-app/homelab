@@ -18,6 +18,21 @@ build() { kustomize build "$DIR"; }
   done
   # namespace 트랜스포머가 prod로 고정 (grep -v는 yq의 문서 간 '---' 구분자를 제거)
   [ "$(build | yq 'select(.kind=="NetworkPolicy") | .metadata.namespace' | grep -v '^---' | LC_ALL=C sort -u)" = "prod" ]
+  # ⚠️ **상한**. 위 for-루프는 하한이라(실패 메시지가 좋아 그대로 둔다) 9번째 광역 정책이 조용히
+  #    통과한다 — 실측: `allow-egress-anywhere`(podSelector:{} · ipBlock 0.0.0.0/0) 한 건을 더해도
+  #    이 파일이 8/8 ok였고 kubeconform strict도 통과했다. NOTES.md:21-23이 계약으로 적은
+  #    "앱은 기본적으로 일반 인터넷 egress가 없다"가 정책 추가 한 건으로 뒤집히는 자리다.
+  #    (scripts/check-app-netpol.sh는 apps/ 트리 전용이라 platform 소유 정책이 원리적으로 분모 밖이고,
+  #     잡을 수 있는 유일한 판정 tests/posture/test_network-policy.bats는 tests/.ci-exclude다.)
+  #    형태 선례: tests/gates/ 아래 appset exclude 집합 가드의 「바닥값으론 부족 — 정확한 집합으로
+  #    잠근다」 주석(그 파일 경로는 적지 않는다 — 경로 자체가 그 파일 마커 원장의 리터럴이다).
+  [ "$(build | yq 'select(.kind=="NetworkPolicy") | .metadata.name' | grep -v '^---$' | LC_ALL=C sort | paste -sd,)" = \
+    "allow-dns-egress,allow-egress-to-cache,allow-egress-to-database,allow-ingress-from-gateway,allow-ingress-kubelet-probes,allow-ingress-metrics-from-observability,allow-intra-prod-http,default-deny-all" ]
+  # ⚠️ ipBlock은 노드 cni0 하나뿐이다 — **어느** 정책이 0.0.0.0/0이나 10.42.0.0/16을 들고 와도 red.
+  #    :79(cache)·:91-92(probes)의 ipBlock 단언은 각각 정책 한 건에만 걸려 있어 신규 정책을 못 본다.
+  #    docs/traps.md의 「NetworkPolicy ipBlock pod-CIDR → 전체 허용」이 이 파일을 enforced 증인으로
+  #    지목하는데, 그 주장을 전칭으로 만드는 줄이 여기다.
+  [ "$(build | yq '[.. | select(has("ipBlock")) | .ipBlock.cidr] | .[]' | LC_ALL=C sort | paste -sd,)" = "10.42.0.1/32" ]
 }
 
 @test "manifests are kubeconform-valid (strict)" {
