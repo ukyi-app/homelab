@@ -16,26 +16,49 @@
 #   traefik 표의 `2`가 대신 매치돼 초록). 로케일과 무관한 별개의 over-broad haystack 결함이다.
 
 setup() {
-  ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; cd "$ROOT" || exit 1
   LEDGER="$ROOT/platform/argocd/root/SYNC-WAVES.md"
+  # 🔴 root 3계층 열거의 SSOT. 착지 전 두 @test는 각자 `ls … root/apps/*.yaml`을 1단계 글롭으로
+  #    돌렸는데 root-app은 `directory.recurse: true`라 하위 디렉토리도 그대로 싱크한다.
+  #    실측 2026-09-03: `apps/platform/evil.yaml`(원장에 없는 sync-wave "777")을 두면 두 @test 모두
+  #    ok였다 — 원장 대조의 존재 이유인 드리프트를 재귀 밖이라는 이유로 통과시켰다.
+  #    열거 어휘·바닥값 근거는 형제 root/test_projects.bats·test_root_app.bats의 setup()과 같다
+  #    (ArgoCD가 싱크하는 것은 tracked 파일뿐 → `git ls-files`, 값은 도메인 크기가 아니라 붕괴 경계).
+  APPFILES="$(git ls-files -- platform/argocd/root/apps | grep '\.yaml$' | LC_ALL=C sort)"
+  local na
+  na="$(printf '%s\n' "$APPFILES" | grep -c . || true)"
+  [ "$na" -ge 6 ] || { echo "root/apps 열거가 ${na}건으로 붕괴했다(기대 >=6)"; false; }
+  # 3계층 = 고정 2개(argocd-app/root-app) + root/apps 재귀. 고정 2개는 열거가 아니라 상수라
+  # 실재를 여기서 못 박는다 — 부재를 통과로 읽으면 그 계층이 조용히 판정 밖이 된다.
+  [ -f platform/argocd/argocd-app.yaml ]
+  [ -f platform/argocd/root/root-app.yaml ]
+  WAVEFILES="$(printf 'platform/argocd/argocd-app.yaml\nplatform/argocd/root/root-app.yaml\n%s\n' "$APPFILES")"
+  NWAVE=$((na + 2))
 }
 
 @test "every sync-wave value in root app definitions has a row in SYNC-WAVES.md" {
-  local files mwaves lwaves w missing="" nm nl nd
-  files="$(ls "$ROOT"/platform/argocd/argocd-app.yaml "$ROOT"/platform/argocd/root/root-app.yaml "$ROOT"/platform/argocd/root/apps/*.yaml)"
-  mwaves="$(grep -hoE 'sync-wave: "[+-]?[0-9]+"' $files | grep -oE '[+-]?[0-9]+' | sed 's/^+//')"
+  local mwaves lwaves w missing="" nm nl nd
+  mwaves="$(grep -hoE 'sync-wave: "[+-]?[0-9]+"' $WAVEFILES | grep -oE '[+-]?[0-9]+' | sed 's/^+//')"
   lwaves="$(awk '/^\| Wave \|/{t++} t==1' "$LEDGER" \
             | grep -E '^\|[[:space:]]*[+-]?[0-9]+[[:space:]]*\|' \
             | sed -E 's/^\|[[:space:]]*([+-]?[0-9]+)[[:space:]]*\|.*/\1/' | sed 's/^+//')"
   nm="$(printf '%s\n' "$mwaves" | grep -c . || true)"
   nl="$(printf '%s\n' "$lwaves" | grep -c . || true)"
-  # 열거 붕괴 바닥값 — 정규식 드리프트든 콜레이션 붕괴든 값이 줄면 여기서 먼저 죽는다
-  # (2026-08-20 실측 mwaves 10 / lwaves 10 — 정당한 축소 여유를 두되 붕괴는 못 넘긴다).
-  [ "$nm" -ge 8 ] || { echo "매니페스트 wave 열거가 ${nm}건으로 붕괴했다(기대 >=8)"; false; }
-  [ "$nl" -ge 8 ] || { echo "원장 root 표 wave 열거가 ${nl}건으로 붕괴했다(기대 >=8)"; false; }
-  # 바닥값의 바닥값: 서로 다른 wave가 실제로 여러 개 남아 있는가. uniq는 바이트 비교라 로케일 무관.
+  # 바이트 비교(uniq)라 로케일 무관 — `sort -u` 금지 근거는 파일 머리말.
   nd="$(printf '%s\n' "$mwaves" | LC_ALL=C sort | uniq | grep -c . || true)"
+  # ── 바닥값 셋. 착지 전엔 nm·nl 둘 다 `-ge 8`이었는데 그 8은 **apps 도메인 크기**와 우연히 같아
+  #    "현재 스냅샷"으로 읽혔다(실제 도메인은 nm 10 · nl 11). 세 값은 서로 다른 도메인이므로
+  #    붕괴 경계도 따로 세운다 — 둘은 파생값이라 손 관리 수치가 아예 없다.
+  # ① 매니페스트 wave 주석 건수 — **파일 열거에서 파생**한다. root Application은 예외 없이 sync-wave
+  #    주석을 하나씩 갖는다(아래 @test가 컴포넌트↔wave로 전수 결박한다) → nm은 파일 수 이상이어야 하고,
+  #    그보다 적으면 정규식 드리프트이거나 주석 없는 Application이 들어온 것이다.
+  [ "$nm" -ge "$NWAVE" ] || { echo "매니페스트 wave 열거가 ${nm}건 — 파일 ${NWAVE}개보다 적다(정규식 드리프트 또는 sync-wave 없는 Application)"; false; }
+  # ② 서로 다른 wave 종수 — 콜레이션 붕괴의 유일한 증인이다(값이 삼켜지면 종수부터 준다).
+  #    붕괴 경계 6(현재 8종): 계층을 정당하게 합치는 변경 여유를 두되 붕괴는 못 넘긴다.
   [ "$nd" -ge 6 ] || { echo "서로 다른 wave가 ${nd}종뿐이다 — 값이 콜레이션에 삼켜졌을 수 있다(기대 >=6)"; false; }
+  # ③ 원장 root 표 행 수 — **불변식에서 파생**한다. 표는 매니페스트가 쓰는 서로 다른 wave를 전부
+  #    담아야 하므로 nd가 하한이다. 현재 크기(11)를 굳히면 행을 정당하게 지울 때마다 red가 난다.
+  [ "$nl" -ge "$nd" ] || { echo "원장 root 표 wave 열거가 ${nl}건 — 매니페스트가 쓰는 ${nd}종보다 적다(표 추출 붕괴)"; false; }
   # ★ 부정 대조군: 원장에 없는 합성 wave 999는 **반드시** 미검출로 잡혀야 한다.
   #   lwaves가 통째로 비거나(정규식 드리프트) 매칭이 무조건 참이 되면 이 등식이 먼저 깨진다.
   for w in $mwaves 999; do
@@ -50,11 +73,10 @@ setup() {
   # namespaces(-9) 행이 없는데 root(-9)·traefik CRD(-9) 두 행 때문에 초록이었다 — 티켓 09가 README
   # 포인터를 「값은 매니페스트가 소유한다」로 우회하게 만든 바로 그 갭). 여기서 이름↔wave를 묶는다.
   # ⚠️ `sort -u` 금지 · 건초더미는 첫 표(root 전역 표)로 좁힘 — 근거는 파일 머리말과 같다.
-  local files f name wave table row p pairs="" missing="" n=0
-  files="$(ls "$ROOT"/platform/argocd/argocd-app.yaml "$ROOT"/platform/argocd/root/root-app.yaml "$ROOT"/platform/argocd/root/apps/*.yaml)"
+  local f name wave table row p pairs="" missing="" n=0
   table="$(awk '/^\| Wave \|/{t++} t==1' "$LEDGER")"
   [ -n "$table" ]
-  for f in $files; do
+  for f in $WAVEFILES; do   # 재귀 열거 SSOT — setup() 참조(1단계 글롭 금지)
     name="$(yq '.metadata.name' "$f")"
     wave="$(yq '.metadata.annotations."argocd.argoproj.io/sync-wave"' "$f" | sed 's/^+//')"
     [ -n "$name" ]
@@ -62,8 +84,9 @@ setup() {
     pairs="$pairs $name:$wave"
     n=$((n + 1))
   done
-  # 열거 붕괴 바닥값 — 글롭이 비면 루프가 0회라 어떤 대조도 안 도는 vacuous green이 된다.
-  [ "$n" -ge 8 ] || { echo "root Application 열거가 ${n}건으로 붕괴했다(기대 >=8)"; false; }
+  # 열거 붕괴 바닥값 — 루프가 파일 수만큼 돌았는가. 손 관리 수치가 아니라 setup()의 파생값이다
+  # (고정 2개 + root/apps 붕괴 경계 6). 착지 전 `-ge 8`은 apps 도메인 크기와 우연히 같았다.
+  [ "$n" -eq "$NWAVE" ] || { echo "root Application 열거가 ${n}회다(기대 ${NWAVE}회 — 파일 열거와 어긋났다)"; false; }
   # ★ 부정 대조군: 원장에 없는 합성 컴포넌트는 **반드시** 미검출로 잡혀야 한다.
   #   표 추출이 비거나 매칭이 무조건 참이 되면 이 등식이 먼저 깨진다.
   for p in $pairs zzz-absent:-10; do
