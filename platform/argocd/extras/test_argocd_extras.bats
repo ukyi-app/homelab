@@ -74,6 +74,10 @@ S="$D/argocd-accounts.sealed.yaml"
   run grep -qE 'port: 80' "$H"; [ "$status" -eq 0 ]
   run grep -q 'kind: Gateway' "$H"; [ "$status" -eq 0 ]
   run grep -qE 'weight: 1' "$H"; [ "$status" -eq 0 ]
+  # ⚠️ 리스너 집합 **상한**. 위 grep은 web-internal-tls의 존재만 본다 — UI 라우트에 web-public
+  #    parentRef를 하나 더 붙이면 argocd UI 전면이 Cloudflare 터널로 나가는데 그 편집이 무증인이었다.
+  run yq '[.spec.parentRefs[].sectionName] | sort | join(",")' "$H"
+  [ "$output" = "web-internal-tls" ] || { echo "UI 리스너=$output"; false; }
 }
 
 @test "webhook HTTPRoute exposes ONLY /api/webhook on web-public (UI stays internal)" {
@@ -82,6 +86,15 @@ S="$D/argocd-accounts.sealed.yaml"
   run grep -q 'sectionName: web-public' "$H"; [ "$status" -eq 0 ]
   run grep -q 'value: /api/webhook' "$H"; [ "$status" -eq 0 ]
   run grep -q 'name: argocd-server' "$H"; [ "$status" -eq 0 ]
-  # 루트 PathPrefix(/)는 web-public에 절대 노출하지 않는다 — /api/webhook만.
-  run grep -qE 'value: /$' "$H"; [ "$status" -eq 1 ]
+  # ⚠️ 루트 부재가 아니라 **경로 집합 자체**를 고정한다. 여기 있던 `value: /$` 부재 단언은
+  #    루트 한 형태만 봐서 `- path: { type: PathPrefix, value: /api }` 한 줄이면 9/9 초록이었다
+  #    (실측). PathPrefix라 `/api`는 /api/v1/session·/api/v1/applications를 전부 포함하고,
+  #    argocd-server는 server.insecure=true(평문 HTTP)로 도는 데다 이 라우트가 argocd의 유일한
+  #    공개 표면이다(reserved-hosts.json + gateway.yaml `*.ukyi.app` web-public 리스너와 교차).
+  # ⚠️ `(.matches // [{}])[] | .path.value // "/"`가 load-bearing이다. 원안 `[.spec.rules[].matches[]
+  #    .path.value]`는 **matches 없는 rule을 통째로 건너뛴다** — Gateway API 기본이 PathPrefix `/`
+  #    (전면 노출)인데 그 rule이 있어도 `/api/webhook`을 내 초록이다(픽스처 실측: 강화식은
+  #    `/,/api/webhook`으로 red, 원안은 green). 헤더 :6 규약대로 rc가 아니라 `$output`으로 판정한다.
+  run yq '[.spec.rules[] | (.matches // [{}])[] | .path.value // "/"] | sort | join(",")' "$H"
+  [ "$output" = "/api/webhook" ] || { echo "web-public 경로 집합=$output"; false; }
 }
