@@ -46,8 +46,12 @@
   (가드 소실 드리프트 = 거짓 안심 차단). 순수 파일 존재 검사.
 - **`ledger-to-json.ts`** — `docs/memory-ledger.md` 표를 JSON으로 변환(conftest 입력 생성). **`bun run verify:ledger`**·
   `make verify`·`ci.yaml`(gate)이 호출(출력을 `conftest test … policy/ledger.rego`로 파이프). 라이브 무관.
-- **`sops-guard.sh`** — 인자로 받은 `*.enc.yaml`이 실제 sops 암호화됐는지(평문 누출 차단) 검사.
-  **인자 필수** — 대상 목록(staged 파일 등)은 호출자가 소유한다.
+- **`sops-guard.sh`** — `*.enc.yaml`이 실제 sops 암호화됐는지 구조 검사(평문 누출 차단). 3조항:
+  `.sops.mac`·`.sops.lastmodified` 실재 · `data`/`stringData` 평문 리프 0건(`ENC[` prefix) · age recipient
+  신원이 canonical(`.sops.yaml` cluster+recovery)과 정확 일치. **인자 선택** — 주면 그 파일만 보고(대상
+  목록이 staged 파일 등으로 좁혀지는 모드 — 그 목록은 호출측이 소유한다), 없으면 추적 `*.enc.yaml`
+  전량을 스스로 열거하고 **파일 수 바닥값**을 건다(무인자=아무것도 평가 안 하고 exit 0이던 옛
+  vacuous pass를 닫았다). 바닥값 오버라이드는 `--floor sops-guard=<n>` 하나뿐이다.
 - **`sealed-guard.sh`** — `*.sealed.yaml`이 실제로 **봉인**됐는지 구조 검사(sops-guard.sh가 `*.enc.yaml`에
   대해 하는 일의 봉인본 판). 4조항: `kind: SealedSecret` · `spec.encryptedData`가 비어 있지 않은 맵 ·
   평문 리프 0건(`.data`·`.stringData`·`.spec.template.data`·`.spec.template.stringData`) · encryptedData
