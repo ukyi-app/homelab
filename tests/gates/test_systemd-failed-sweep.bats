@@ -15,7 +15,8 @@ setup() {
   SVC="$UNIT_DIR/systemd-failed-sweep.service"
   TIMER="$UNIT_DIR/systemd-failed-sweep.timer"
   R4="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  AM="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
+  # 설정 본문은 configMapGenerator가 굽는 파일이 SSOT다(매니페스트에 인라인 ConfigMap 없음).
+  AMCFG="$ROOT/platform/victoria-stack/prod/alertmanager-config/alertmanager.yml"
   TMP="$(mktemp -d)"
   OUT="$TMP/out"; BIN="$TMP/bin"; mkdir -p "$OUT" "$BIN"
 }
@@ -203,7 +204,9 @@ _prom() { cat "$OUT/systemd-failed-sweep.prom"; }
 }
 
 @test "a unit-scoped inhibit keeps the critical axis from double-paging the sweep warning" {
-  am="$(yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' "$AM")"
+  # ⚠️ 파일 직독 — 추출 실패가 빈 문서로 접히면 아래 grep 4건이 전부 "빈 것에 대한 참"이 된다.
+  [ -s "$AMCFG" ]
+  am="$(cat "$AMCFG")"
   printf '%s' "$am" | grep -qF -- "equal: ['unit']"
   printf '%s' "$am" | grep -qF 'alertname = SystemdUnitFailed'
   printf '%s' "$am" | grep -qF 'alertname = SystemdHostUnitFailed'

@@ -45,18 +45,18 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "k3s-bootstrap versions.env — k3s 릴리스 태그",
-      "managerFilePatterns": ["/^infra/k3s-bootstrap/versions\\.env$/"],
-      "matchStrings": ["K3S_VERSION=\"(?<currentValue>v[^\"]+)\""],
+      "description": "k3s-bootstrap versions.env — k3s 릴리스 태그. ⚠️ 룰 파일(r8-substrate.yaml)의 kubelet_version 리터럴을 **같은 매니저**로 함께 매치한다 — 두 자리가 한 PR에서 오르지 않으면 tests/gates/test_vmalert-config.bats의 핀 등식 레인이 그 PR을 red로 만든다(등식은 손 사본이 아니라 잠금이다).",
+      "managerFilePatterns": ["/^infra/k3s-bootstrap/versions\\.env$/", "/^platform/victoria-stack/prod/rules/r8-substrate\\.yaml$/"],
+      "matchStrings": ["K3S_VERSION=\"(?<currentValue>v[^\"]+)\"", "kubelet_version!=\"(?<currentValue>v[^\"]+)\""],
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "k3s-io/k3s",
       "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\+k3s(?<build>\\d+)$"
     },
     {
       "customType": "regex",
-      "description": "k3s-bootstrap versions.env — local-path-provisioner",
-      "managerFilePatterns": ["/^infra/k3s-bootstrap/versions\\.env$/"],
-      "matchStrings": ["LOCAL_PATH_PROVISIONER_VERSION=\"(?<currentValue>v[^\"]+)\""],
+      "description": "k3s-bootstrap versions.env — local-path-provisioner. ⚠️ 룰 파일(r8-substrate.yaml)의 image_spec 리터럴을 **같은 매니저**로 함께 매치한다 — 두 자리가 한 PR에서 오르지 않으면 tests/gates/test_vmalert-config.bats의 핀 등식 레인이 그 PR을 red로 만든다. ⚠️ **매니페스트(storage/local-path-provisioner.yaml)는 일부러 넣지 않는다** — 넣으면 그 파일의 tag-only 참조가 `renovateReaches`로 '소유됨'이 되어 policy/image-ownership.json의 무소유 선언이 죽은 선언으로 red가 된다(실측 2026-09-03). 그 선언은 'digest 소유자가 없다'는 owner 결정을 담고 있으므로 매니저 확장으로 지울 자리가 아니다. 매니페스트 태그 ↔ versions.env 등식은 test_06-storage-manifests.bats가 계속 지고, 그 자리는 owner가 손으로 맞춘다(알려진 잔여).",
+      "managerFilePatterns": ["/^infra/k3s-bootstrap/versions\\.env$/", "/^platform/victoria-stack/prod/rules/r8-substrate\\.yaml$/"],
+      "matchStrings": ["LOCAL_PATH_PROVISIONER_VERSION=\"(?<currentValue>v[^\"]+)\"", "image_spec!=\"rancher/local-path-provisioner:(?<currentValue>v[0-9][^\"]*)\""],
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "rancher/local-path-provisioner"
     },

@@ -20,6 +20,10 @@ resources:
   - rules/r5-cert-tls.yaml
   - rules/r6-ci-staleness.yaml
   - rules/r7-meta.yaml
+  # 기판 핀 ↔ 라이브 드리프트의 주기 신호. 룰 안의 버전 리터럴은 versions.env와 등식으로 잠겨 있고
+  # (test_vmalert-config.bats) Renovate가 두 자리를 한 PR에서 올린다.
+  # ⚠️ 아래 줄에 꼬리 주석을 붙이지 마라 — 배선 전수 레인이 `^  - rules/<파일>$` 앵커로 문다.
+  - rules/r8-substrate.yaml
   - ghcr-read.sealed.yaml # digest-exporter private GHCR inspect 자격(owner: make seal-ghcr-read)
   - digest-exporter.yaml
   - gha-liveness-exporter.yaml # GHA 스케줄 워크플로 liveness 하트비트(티켓 10 — run 밖 관측자)
@@ -37,5 +41,20 @@ resources:
   - grafana.yaml
   - httproute-grafana.yaml
 
+# alertmanager 설정은 generator로 — 내용 해시가 이름에 붙어 설정 변경 시 Deployment가 자동 rollout
+# 된다(형제 선례: platform/homepage/prod/kustomization.yaml). 착지 전에는 평문 ConfigMap이라
+# 수동 `rollout restart`가 유일한 보장이었고, 그것을 빠뜨려 라이브 파드가 8/27 렌더본을 무기한
+# 쓰고 있었다(2026-09-03 실측). 근거·경고 전문은 alertmanager.yaml 헤더.
+# ⚠️ `options.disableNameSuffixHash: true`를 켜면 그 자동 rollout이 사라진다 — 켜지 마라.
+# ⚠️ generator 이름(`alertmanager-config`)은 Deployment volume 참조와 등식이다. kustomize의
+#    nameReference 변환이 그 참조를 해시 이름으로 다시 쓰므로 이름을 바꾸면 양쪽을 함께 바꾼다.
+configMapGenerator:
+  - name: alertmanager-config
+    files:
+      # ConfigMap 키는 basename(`alertmanager.yml`) — initContainer가 그 이름으로 읽는다.
+      - alertmanager-config/alertmanager.yml
+
+# KSOPS exec generator(SOPS 복호화 Secret). 위 built-in configMapGenerator와 공존한다 —
+# kustomize는 `configMapGenerator`(내장)와 `generators`(플러그인)를 각각 돌려 결과를 합친다.
 generators:
   - secret-generator.yaml

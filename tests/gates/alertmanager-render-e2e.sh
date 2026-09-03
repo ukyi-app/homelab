@@ -58,9 +58,18 @@ trap cleanup EXIT
 # mock과 같은 포트를 받아 둘 중 하나가 EADDRINUSE로 죽는다.
 MOCK_PORT="$(hp_pick_port)" || { echo "telegram mock 포트 배정 실패(위 stderr)"; exit 1; }
 
-# 1) CI-safe config 추출(KSOPS 미경유) + 더미 chat_id + api_url→mock + group_wait 축소
-yq 'select(.kind=="ConfigMap" and .metadata.name=="alertmanager-config") | .data["alertmanager.yml"]' \
-   platform/victoria-stack/prod/alertmanager.yaml > "$TMP/am.yml"
+# 1) CI-safe config 직독(KSOPS 미경유) + 더미 chat_id + api_url→mock + group_wait 축소
+# ⚠️ 설정은 kustomize `configMapGenerator`가 굽는 **파일**이 SSOT다(매니페스트에 인라인 ConfigMap 없음).
+#    옛 관용구(`yq 'select(.kind=="ConfigMap" …) | .data[…]' alertmanager.yaml`)는 그 전환 뒤
+#    **rc 0으로 0바이트**를 낸다 — 그리고 이 하네스에는 크기 앵커가 없어서 그 침묵이 아래 AM 기동에서
+#    "AM not ready" 30초 타임아웃으로 둔갑했다(실측: 빈 입력에도 sed·`yq -i` 전부 rc 0).
+#    그래서 경로 파생 + `[ -s ]`를 **여기서** 문다 — 진단이 원인 자리에 서게.
+AM_CONFIG="platform/victoria-stack/prod/alertmanager-config/alertmanager.yml"
+[ -s "$AM_CONFIG" ] || {
+  echo "AM 설정 본문이 없거나 비었다($AM_CONFIG) — configMapGenerator의 files: 경로가 바뀌었는지 확인하라. 빈 config로 AM을 띄우면 실패가 'AM not ready'로 둔갑한다." >&2
+  exit 1
+}
+cp "$AM_CONFIG" "$TMP/am.yml"
 sed 's/__CHAT_ID__/-1001234567890/' "$TMP/am.yml" > "$TMP/am.rendered.yml"
 mv "$TMP/am.rendered.yml" "$TMP/am.yml"
 yq -i "(.receivers[]|select(.name==\"telegram\").telegram_configs[].api_url)=\"http://host.docker.internal:${MOCK_PORT}\"" "$TMP/am.yml"

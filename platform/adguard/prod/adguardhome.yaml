@@ -52,7 +52,7 @@ data:
         #    연결돼 전부 실패한다(.ts.net MagicDNS 경로엔 안 드러남).
         #    ✅ 셀프힐(메타갭 ① W2-A): adguard-rewrite-reconciler CronJob이 10분마다 traefik-ts 실 LB IP로 이 rewrite를
         #    자동 수렴한다(rewrite-reconciler.yaml) — 재구축/IP 변경 시 수동 갱신 불요. 리컨실러 침묵 시
-        #    AdguardRewriteReconcilerStale가 페이징하고, 그때만 `kubectl -n gateway get svc traefik-ts`의 IP로 수동 갱신한다
+        #    AdGuardRewriteReconcilerStale가 페이징하고, 그때만 `kubectl -n gateway get svc traefik-ts`의 IP로 수동 갱신한다
         #    (cp -n 시드라 라이브 PVC의 AdGuardHome.yaml도 함께 고쳐 재시작해야 반영).
         - domain: "*.home.ukyi.app"
           # DR 첫 부팅용 **초기값**(cp -n)이지 라이브 단정이 아니다. 권위는 라이브 `traefik-ts` svc이고

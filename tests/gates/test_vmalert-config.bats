@@ -7,6 +7,12 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   VMALERT="$ROOT/platform/victoria-stack/prod/vmalert.yaml"
+  # 텔레그램 제목 매핑이 사는 곳 — alertmanager **설정 본문**이다. 매니페스트(alertmanager.yaml)에는
+  # Deployment/Service만 있고, 설정은 kustomize `configMapGenerator`가 이 파일을 굽는다(해시 접미).
+  # ⚠️ 옛 자리(`alertmanager.yaml`)를 계속 grep하면 매핑 단언이 **부재에 대한 참**이 아니라 그냥
+  #    red가 된다(전환 당시 4레인이 그렇게 red였다 — 그래서 앵커를 여기 한 번만 둔다).
+  AMCFG="$ROOT/platform/victoria-stack/prod/alertmanager-config/alertmanager.yml"
+  [ -s "$AMCFG" ]
 }
 
 # 알림 **존재** 단언 — 이름은 반드시 정확 일치여야 한다.
@@ -306,23 +312,23 @@ alert_defined() {
 
 @test "adguard rewrite reconciler has staleness + drift-fixed notify alerts (push metric, notify via AM not pod)" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  A="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
+  A="$AMCFG"   # 제목 매핑은 설정 본문에 있다(setup 주석 참조)
   # 메타갭 ① Task 7(W2-A): 리컨실러 생존(staleness) + 실제 수렴 시 통지(F13 — 발송은 alertmanager 경유).
-  alert_defined "$R" AdguardRewriteReconcilerStale
-  alert_defined "$R" AdguardRewriteDriftFixed
+  alert_defined "$R" AdGuardRewriteReconcilerStale
+  alert_defined "$R" AdGuardRewriteDriftFixed
   # 10분 push라 last_over_time 윈도 + absent fail-closed(push-metric staleness 함정).
   grep -q 'last_over_time(adguard_rewrite_reconcile_timestamp\[2h\])' "$R"
   grep -q 'absent(last_over_time(adguard_rewrite_reconcile_timestamp' "$R"
   # F19: fix 통지는 fix 타임스탬프 > 0 가드(no-op 0 샘플이 직전 fix를 지우지 않음).
   grep -q 'adguard_rewrite_last_fix_timestamp\[2h\]) > 0' "$R"
   # alertmanager 타이틀 매핑(신규 알림 한국어).
-  grep -q 'AdguardRewriteReconcilerStale' "$A"
-  grep -q 'AdguardRewriteDriftFixed' "$A"
+  grep -q 'AdGuardRewriteReconcilerStale' "$A"
+  grep -q 'AdGuardRewriteDriftFixed' "$A"
 }
 
 @test "adguard seed drift has a warning gauge alert and its own check heartbeat (ADR-0007)" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  A="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
+  A="$AMCFG"   # 제목 매핑은 설정 본문에 있다(setup 주석 참조)
   # ADR-0007 결정 2: adguard 본체 설정의 SSOT는 **라이브**이고 git ConfigMap은 `cp -n` 첫 부팅 시드다 —
   # 시드 드리프트는 red가 아니라 "재구축 시 되돌아갈 거리"라 severity warning이 계약의 일부다.
   alert_defined "$R" AdGuardSeedDrift
@@ -330,7 +336,7 @@ alert_defined() {
   # 10분 주기 push라 [2h] 윈도(모드 C: W ≥ 주기).
   grep -q 'last_over_time(adguard_seed_drift\[2h\])' "$R"
   grep -q 'last_over_time(adguard_seed_drift_checked_timestamp_seconds\[2h\])' "$R"
-  # 하트비트 부재는 fail-closed(형제 AdguardRewriteReconcilerStale과 같은 형태).
+  # 하트비트 부재는 fail-closed(형제 AdGuardRewriteReconcilerStale과 같은 형태).
   grep -q 'absent(last_over_time(adguard_seed_drift_checked_timestamp_seconds' "$R"
   # ⚠️ 값-게이지에 max_over_time을 쓰면 해소된 드리프트를 윈도만큼 래치해 for:를 넘긴다
   #    (「rollup 윈도 상한 — 상태 게이지 vs 하트비트 비대칭」의 상태-게이지 쪽). 최신 샘플만 보는
@@ -345,6 +351,41 @@ alert_defined() {
   # alertmanager 타이틀 매핑(신규 알림 한국어).
   grep -q 'AdGuardSeedDrift' "$A"
   grep -q 'AdGuardSeedDriftCheckStale' "$A"
+}
+
+@test "every adguard alert name uses the AdGuard product spelling (one notation, not two)" {
+  # 병: 같은 도메인의 알림 4건이 두 표기(`Adguard*` 구 · `AdGuard*` 계약)로 갈려 있었고 **그 갈림을
+  #     재는 증인이 0**이었다. 실측(2026-09-03): 계약 표기 2룰을 구 표기로 되돌려도(룰·제목 매핑·
+  #     bats 리터럴을 함께 고쳐) 174 ok / 0 not ok였다. 표기가 갈리면 `alertname` 시리즈·제목 매핑·
+  #     e2e 기대값이 조용히 서로 다른 것을 가리킨다 — red가 아니라 무성 열화다.
+  # 열거는 룰 파일 **전수 파생**이다(손 로스터 금지 — (N+1)번째 알림이 무방비가 된다).
+  # 판정은 대소문자 무시로 도메인을 고르고, 그 안에서 접두를 정확히 문다.
+  names=""
+  nf=0
+  for f in "$ROOT"/platform/victoria-stack/prod/rules/*.yaml; do
+    # ⚠️ `yq -e '.data["<키>"]'`는 키를 손으로 박는다 — 파일명↔키 규약이 바뀌면 조용히 죽는다.
+    #    ConfigMap 하나당 키 하나라는 실 구조에서 to_entries로 파생한다(실측: 5파일 전부 keys=1).
+    inner="$(yq -r '.data | to_entries | .[0].value' "$f")"
+    a="$(printf '%s' "$inner" | yq -r '.groups[].rules[] | select(has("alert")) | .alert')"
+    names="${names}${a}
+"
+    nf=$((nf + 1))
+  done
+  # 3층 바닥값 — 파일 글롭 · 이름 열거 · 도메인 열거. 어느 하나가 붕괴하면 아래 전칭이 공허해진다.
+  [ "$nf" -ge 5 ]
+  total="$(printf '%s' "$names" | grep -c .)"
+  [ "$total" -ge 40 ]        # 현재 58
+  ad="$(printf '%s' "$names" | grep -i 'adguard' || true)"
+  nad="$(printf '%s' "$ad" | grep -c .)"
+  [ "$nad" -ge 4 ]           # 현재 4 — 도메인이 통째로 사라지면(또는 grep이 깨지면) red
+  bad=""
+  while IFS= read -r a; do
+    [ -n "$a" ] || continue
+    case "$a" in AdGuard*) ;; *) bad="${bad} ${a}" ;; esac
+  done <<EOF
+$ad
+EOF
+  if [ -n "$bad" ]; then echo "adguard 알림 표기가 제품 표기(AdGuard*)가 아니다:$bad"; return 1; fi
 }
 
 @test "LAN DNS liveness has a dedicated critical alert (R7 made AdGuard the whole house's resolver)" {
@@ -367,8 +408,8 @@ alert_defined() {
   # ⚠️ 범위는 **critical만**이다. warning은 36건 중 16건만 매핑돼 있어 전건 강제는 없는 규약을
   #    만들어내는 것이 된다. critical은 신설 당시 9건 중 8건이 매핑돼 있었고 빠진 하나가
   #    FilesBackupStale이었다(2026-10-01 자동 재무장 시 제목 없이 페이징될 뻔했다 — 같은 커밋에서 보충).
-  AM="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
-  [ -f "$AM" ]
+  AM="$AMCFG"   # 제목 매핑은 설정 본문에 있다(setup 주석 참조)
+  [ -s "$AM" ]   # 추출/경로 실패가 빈 파일로 접히면 아래 전칭이 공허해진다
   # 룰 파일에서 (alertname, severity) 쌍을 뽑는다 — alert 줄을 만나면 이름을 기억하고,
   # 다음 alert 줄 전에 나오는 첫 severity를 그 알림의 것으로 본다.
   pairs="$(awk '
@@ -388,6 +429,63 @@ alert_defined() {
 $pairs
 EOF
   if [ -n "$missing" ]; then echo "critical 알림의 텔레그램 제목 매핑 누락:$missing"; return 1; fi
+}
+
+@test "the substrate pin alerts exist and their literals equal the versions.env pins (no hand copy)" {
+  # 병: `versions.env`·storage 매니페스트의 핀은 `SSOT: seed-only`(재구축 목표값)인데 그 규약의
+  #     대조자가 `verify-cluster.sh` [6][10][11] **손 실행 셋뿐**이었다. Renovate는 주 1회 핀을 올리므로
+  #     상주 신호가 없으면 규약이 조용히 영구 드리프트가 된다(실측 2026-09-03: 라이브 k3s v1.36.2+k3s1
+  #     vs 핀 v1.36.3+k3s1 · provisioner v0.0.36 vs v0.0.37 — 어느 것도 신호 0).
+  # ★ 이 레인이 무는 것은 알림의 **존재**가 아니라 그 안의 두 리터럴이 핀의 **사본이 아니라 등식**이라는
+  #   것이다. 사본으로 두면 핀 bump PR이 룰을 두고 가고, 그 순간 알림이 옛 목표값을 감시한다 —
+  #   "드리프트 없음"이 초록으로 보이는 가장 나쁜 모양이다.
+  R8="$ROOT/platform/victoria-stack/prod/rules/r8-substrate.yaml"
+  VER="$ROOT/infra/k3s-bootstrap/versions.env"
+  PROV="$ROOT/infra/k3s-bootstrap/storage/local-path-provisioner.yaml"
+  [ -s "$R8" ]
+  [ -s "$VER" ]
+  [ -s "$PROV" ]
+  alert_defined "$R8" SubstrateK3sPinDrift
+  alert_defined "$R8" SubstrateProvisionerPinDrift
+  # ── 핀 파생(손 리터럴 0) ──
+  # ⚠️ `source`하지 않는다 — versions.env는 "직접 실행 금지" 파일이고 여기서는 한 줄만 필요하다.
+  k3s="$(grep -oE '^export K3S_VERSION="[^"]+"' "$VER" | sed -e 's/.*="//' -e 's/"$//')"
+  prov="$(grep -oE '^export LOCAL_PATH_PROVISIONER_VERSION="[^"]+"' "$VER" | sed -e 's/.*="//' -e 's/"$//')"
+  [ -n "$k3s" ]
+  [ -n "$prov" ]
+  # 매니페스트 태그도 같은 값이어야 한다(그 등식 자체는 test_06-storage-manifests.bats 소유 —
+  # 여기서는 룰이 **매니페스트에 실제로 있는 문자열**을 물고 있는지를 본다).
+  run grep -cE "image: rancher/local-path-provisioner:${prov}([[:space:]]|\$)" "$PROV"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+  # ── 등식 ──
+  body="$(yq -r '.data | to_entries | .[0].value' "$R8")"
+  [ -n "$body" ]
+  k3s_expr="$(printf '%s' "$body" | yq -r '.groups[].rules[] | select(.alert=="SubstrateK3sPinDrift") | .expr')"
+  prov_expr="$(printf '%s' "$body" | yq -r '.groups[].rules[] | select(.alert=="SubstrateProvisionerPinDrift") | .expr')"
+  printf '%s' "$k3s_expr" | grep -qF "kubelet_version!=\"${k3s}\""
+  printf '%s' "$prov_expr" | grep -qF "image_spec!=\"rancher/local-path-provisioner:${prov}\""
+  # 반대 방향 — 룰이 **다른** 버전 리터럴을 함께 들고 있으면(부분 bump) 위 존재 단언만으로는 초록이다.
+  n_k3s="$(printf '%s' "$k3s_expr" | grep -coE 'kubelet_version!="[^"]+"')"
+  [ "$n_k3s" = "1" ]
+  n_prov="$(printf '%s' "$prov_expr" | grep -coE 'image_spec!="rancher/local-path-provisioner:[^"]+"')"
+  [ "$n_prov" = "1" ]
+  # ── 계약의 나머지 ──
+  # for:는 핀 bump → owner 재수렴 사이의 정상 지연을 흡수해야 한다. 짧으면 Renovate PR마다 페이징이
+  # 되고 그러면 규약이 아니라 알림이 꺼진다. severity도 같은 이유로 warning이다(고장이 아니라 거리).
+  [ "$(printf '%s' "$body" | yq -r '[.groups[].rules[] | select(.alert=="SubstrateK3sPinDrift" or .alert=="SubstrateProvisionerPinDrift") | select(.for=="24h")] | length')" = "2" ]
+  [ "$(printf '%s' "$body" | yq -r '[.groups[].rules[] | select(.alert=="SubstrateK3sPinDrift" or .alert=="SubstrateProvisionerPinDrift") | select(.labels.severity=="warning")] | length')" = "2" ]
+  # helper digest([11])는 KSM에 없다 — 이 룰이 그 축을 덮는다고 읽히면 손 실행이 조용히 사라진다.
+  grep -q 'helper digest' "$R8"
+  # 텔레그램 제목 매핑(setup의 AMCFG — 설정 본문이 SSOT다).
+  grep -qF 'eq $name "SubstrateK3sPinDrift"' "$AMCFG"
+  grep -qF 'eq $name "SubstrateProvisionerPinDrift"' "$AMCFG"
+  # Renovate 동반 갱신 — 두 자리가 한 PR에서 오르지 않으면 위 등식이 그 PR을 red로 만든다.
+  # 그 red가 나지 않게 하는 것은 매니저 설정뿐이라, 설정이 사라졌는지 여기서 함께 본다.
+  RN="$ROOT/renovate.json"
+  grep -qF 'rules/r8-substrate' "$RN"
+  grep -qF 'kubelet_version!=' "$RN"
+  grep -qF 'image_spec!=' "$RN"
 }
 
 @test "every rules file is wired into vmalert (glob, mount, volume, ConfigMap name, kustomization)" {
@@ -430,7 +528,7 @@ EOF
 @test "every meta alert carries a Telegram title mapping (quality bar of this pass)" {
   # 이름 하드코딩 금지(리뷰 M6) — r7 전량을 룰 파일에서 파생하고, 같은 패스의 r4 신규 2종은
   # 명시로 얹는다(r4 전량 파생은 기존 미매핑 warning 16종을 소급 강제해 별개 결정이 된다 — 유보).
-  AM="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
+  AM="$AMCFG"   # 제목 매핑은 설정 본문에 있다(setup 주석 참조)
   R7="$ROOT/platform/victoria-stack/prod/rules/r7-meta.yaml"
   alerts="$(yq -e '.data["r7.yaml"]' "$R7" | yq '.groups[].rules[].alert')"
   [ "$(printf '%s\n' "$alerts" | grep -c .)" -ge 3 ]

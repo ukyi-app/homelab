@@ -33,7 +33,11 @@ setup() {
   # ⚠️ 이 대조는 **별도 @test가 아니라 setup**에 선다 — bats는 setup을 @test마다 돌리므로
   #    개별 실행(`bats -f`)에서도 판정들이 함께 닫힌다. 별도 @test로 두면 그 하나만 red가
   #    되고 나머지는 초록으로 남는다(실측: ConfigMap 키 core.yaml -> corex.yaml 뮤테이션).
-  # 하한 3은 래칫이 아니다 — 현재 최소가 r7의 3건(알림 3종)이다.
+  # 하한 2는 래칫이 아니다 — **가장 작은 정당한 패밀리의 크기**를 따라간다(그 아래는 추출 붕괴다).
+  # 2026-09-03에 3 → 2로 내렸다: 신설 `r8-substrate.yaml`이 알림 2종(SubstrateK3sPinDrift ·
+  # SubstrateProvisionerPinDrift)이라 3이면 **정당한 패밀리가 red**가 된다. 이 값이 재는 것은
+  # "패밀리가 충분히 큰가"가 아니라 "추출이 0줄로 접히지 않았는가"이므로 1 이상이면 성립하고,
+  # 최소 패밀리에 붙여 두는 것이 추출 회귀에 가장 민감한 지점이다.
   for f in "$RULES"/*.yaml; do
     key="$(yq -r '.data | keys | .[0]' "$f")"
     [ -n "$key" ]
@@ -41,7 +45,7 @@ setup() {
     for field in summary description; do
       # grep -c는 0건에 rc 1 — 커맨드 치환이 그 rc를 삼키므로 카운트로 판정한다.
       n="$(extract_field "$f" "$key" "$field" | grep -c . || true)"
-      [ "$n" -ge 3 ]
+      [ "$n" -ge 2 ]
     done
   done
 }

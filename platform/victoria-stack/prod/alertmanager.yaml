@@ -1,149 +1,21 @@
-# ⚠️ 이 ConfigMap 변경은 **실행 중 파드에 도달하지 않는다** — 아래 Deployment의 initContainer
-#    `render-config`가 __CHAT_ID__를 치환해 emptyDir(`config-out`)로 복사하는 것은 **파드 기동 시 1회뿐**이고,
-#    pod template에 config checksum 어노테이션도 reloader 사이드카도 없다. ArgoCD가 ConfigMap을 적용해도
-#    Deployment spec은 무변경 → 롤아웃이 안 나고 기존 파드는 옛 렌더 결과를 무기한 사용한다.
-#    (함정 원장: docs/traps-detail.md 「ConfigMap 변경 파드 자동 재시작 없음」의 구체 사례)
+# Alertmanager 배포(Deployment + Service). **설정 본문은 이 파일에 없다** —
+# `alertmanager-config/alertmanager.yml`이 SSOT이고 `kustomization.yaml`의 `configMapGenerator`가
+# 그 파일을 ConfigMap `alertmanager-config`로 굽는다.
 #
-#    → 라우트·리시버·제목 매핑 등 **여기를 고쳤으면 싱크 후 반드시**:
-#         kubectl rollout restart deploy/alertmanager -n observability
-#         kubectl rollout status  deploy/alertmanager -n observability
-#       적용 확인(제목 매핑을 추가한 경우):
-#         kubectl exec deploy/alertmanager -n observability -c alertmanager -- \
-#           cat /etc/alertmanager/alertmanager.yml | grep -c '<새 alertname>'
+# ★ 그 generator는 **내용 해시를 이름에 붙인다**. 설정을 고치면 ConfigMap 이름이 바뀌고, kustomize의
+#   nameReference 변환이 아래 `volumes[config-in].configMap.name`을 그 새 이름으로 다시 쓴다 →
+#   pod template이 변하므로 **ArgoCD 싱크만으로 롤아웃이 난다**. 형제 선례는
+#   `platform/homepage/prod/kustomization.yaml`(같은 이유로 config를 generator로 둔다).
 #
-#    ⚠️ 재기동을 빠뜨리면 새 알림이 **제목 매핑 없이** 텔레그램에 나간다 — red가 아니라 조용한 품질
-#       저하다. 라이브 실측(2026-07-13): 재기동 **전** 매핑 grep 0건 → **후** 2건.
-#       ⚠️ 다만 "alertname 원문이 제목이 된다"는 **부정확**하다(정정 2026-09-03): 아래 템플릿에
-#          미매핑 fallback(`$title = .CommonAnnotations.summary`, 5f330c0 이후)이 있어 대개 한국어
-#          summary가 제목이 된다. 원문이 노출되는 것은 summary가 없거나 그 summary가 **그룹 안에서
-#          갈릴 때**(예: `{{ $labels.section }}`를 담은 알림이 2개 이상 섹션으로 동시 발화)뿐이다.
-#          즉 손실은 "제목이 영문 alertname"이 아니라 "제목 문구가 매핑본이 아니다" 수준이다.
+# ⚠️ 착지 전(≤2026-09-03)에는 이 파일이 평문 ConfigMap을 들고 있었고, 그때는 **수동 rollout이 유일한
+#    보장**이었다(함정 원장: docs/traps-detail.md 「ConfigMap 변경 파드 자동 재시작 없음」).
+#    그 함정이 실제로 물었다 — 2026-09-03 실측에서 라이브 파드가 2026-08-27 렌더본을 쓰고 있어
+#    #607의 제목 매핑 2건이 실행 중 파드에 도달하지 않았다(red가 아니라 조용한 품질 저하).
+#    ⇒ 이제 `kubectl rollout restart deploy/alertmanager -n observability`는 **정상 경로에서 불필요**하다.
+#      필요해지는 경우는 generator를 우회해 라이브 ConfigMap을 손으로 고쳤을 때뿐이다.
 #
-#    ⚠️ **미적용 실측 2026-09-03**: 이 ConfigMap의 `AdGuardSeedDrift`·`AdGuardSeedDriftCheckStale`
-#       매핑(#607, 오늘 머지)이 라이브 CM에는 있으나 파드는 2026-08-27 기동본이라 렌더본에 없다.
-#       → 이 파일의 `data:`를 만진 PR은 **머지 후 위 rollout까지가 착지**다(체크리스트에 넣을 것).
-#
-#    미착수 후속: pod template에 config checksum 어노테이션을 넣어 변경 시 자동 롤아웃되게 한다
-#    (수동 절차를 구조로 대체). 현재는 위 수동 스텝이 유일한 보장이다.
-apiVersion: v1
-kind: ConfigMap
-metadata: { name: alertmanager-config }
-data:
-  alertmanager.yml: |
-    global:
-      resolve_timeout: 5m
-    route:
-      receiver: telegram
-      group_by: ['alertname','namespace']
-      group_wait: 30s
-      group_interval: 5m
-      repeat_interval: 4h
-      routes:
-        - matchers: [ 'alertname = Watchdog' ]
-          receiver: deadmanswitch
-          group_wait: 0s
-          group_interval: 1m
-          repeat_interval: 1m
-          continue: false
-        - matchers: [ 'severity = critical' ]
-          receiver: telegram
-          repeat_interval: 1h
-    receivers:
-      - name: telegram
-        telegram_configs:
-          - bot_token_file: /etc/alertmanager/secrets/TELEGRAM_BOT_TOKEN
-            chat_id: __CHAT_ID__
-            api_url: https://api.telegram.org
-            parse_mode: HTML
-            send_resolved: true
-            message: |
-              {{- /* ⚠️ AM telegram은 동적 값({{ . }})을 parse_mode=HTML 컨텍스트로 *자동* HTML-escape한다
-                     (render-e2e로 실측: {{ .Annotations.x }}의 <main>이 &lt;main&gt;으로 한 번 escape됨).
-                     따라서 reReplaceAll/safeHtml 수동 escape는 금지 — 수동 escape는 &amp;lt;처럼 이중 escape를
-                     유발해 메시지를 깨뜨린다(검증됨). 리터럴 태그(<b>)는 template 텍스트라 raw로 남아 정상 동작. */ -}}
-              {{- $name := .CommonLabels.alertname -}}
-              {{- $title := $name -}}
-              {{- if eq $name "Watchdog" }}{{ $title = "알림 파이프라인" }}
-              {{- else if eq $name "TargetDown" }}{{ $title = "스크레이프 타겟 다운" }}
-              {{- else if eq $name "R2BackupStale" }}{{ $title = "R2 오프사이트 백업 정체" }}
-              {{- else if eq $name "WALArchiveStalled" }}{{ $title = "WAL 아카이빙 정체" }}
-              {{- else if eq $name "LocalBasebackupStale" }}{{ $title = "로컬 베이스백업 정체" }}
-              {{- else if eq $name "CNPGRestoreDrillStale" }}{{ $title = "복원 드릴 정체" }}
-              {{- else if eq $name "ArgoCDOutOfSync" }}{{ $title = "ArgoCD 동기화 이탈" }}
-              {{- else if eq $name "ImageDigestDrift" }}{{ $title = "이미지 digest 드리프트" }}
-              {{- else if eq $name "PodOOMKilled" }}{{ $title = "파드 OOM 종료" }}
-              {{- else if eq $name "NodeMemoryHigh" }}{{ $title = "노드 메모리 경고" }}
-              {{- else if eq $name "StandardSSDWarning" }}{{ $title = "내장 SSD 여유 경고" }}
-              {{- else if eq $name "StandardSSDFilling" }}{{ $title = "내장 SSD 포화" }}
-              {{- else if eq $name "StandardSSDFillingTrend" }}{{ $title = "내장 SSD 포화 추세" }}
-              {{- else if eq $name "WALVolumeFilling" }}{{ $title = "WAL 볼륨 충전" }}
-              {{- else if eq $name "PostgresClusterDown" }}{{ $title = "PostgreSQL 클러스터 다운" }}
-              {{- else if eq $name "LanDnsPathDown" }}{{ $title = "집 LAN DNS 끊김" }}
-              {{- else if eq $name "FilesBackupStale" }}{{ $title = "files 오프-매체 백업 정체" }}
-              {{- else if eq $name "SystemdUnitFailed" }}{{ $title = "호스트 systemd 유닛 실패" }}
-              {{- else if eq $name "PodCrashLooping" }}{{ $title = "파드 재시작 반복" }}
-              {{- else if eq $name "PgDumpHedgeStale" }}{{ $title = "논리 헤지 백업 정체" }}
-              {{- else if eq $name "CertWildcardExpiringSoon" }}{{ $title = "와일드카드 인증서 만료 임박" }}
-              {{- else if eq $name "CertExpiringSoon" }}{{ $title = "TLS 인증서 만료 임박" }}
-              {{- else if eq $name "CertManagerCertNotReady" }}{{ $title = "TLS 인증서 NotReady" }}
-              {{- else if eq $name "CertMetricsAbsent" }}{{ $title = "인증서 메트릭 부재" }}
-              {{- else if eq $name "DigestExporterStale" }}{{ $title = "digest-exporter 하트비트 정체" }}
-              {{- else if eq $name "DigestExporterScrapeIncomplete" }}{{ $title = "digest-exporter 수집 일부 실패" }}
-              {{- else if eq $name "AdguardRewriteReconcilerStale" }}{{ $title = "adguard rewrite 리컨실러 정체" }}
-              {{- else if eq $name "AdguardRewriteDriftFixed" }}{{ $title = "adguard rewrite 자동 수렴" }}
-              {{- else if eq $name "AdGuardSeedDrift" }}{{ $title = "adguard 시드 드리프트" }}
-              {{- else if eq $name "AdGuardSeedDriftCheckStale" }}{{ $title = "adguard 시드 대조 정체" }}
-              {{- else if eq $name "GrafanaPluginBudgetLow" }}{{ $title = "grafana 플러그인 예산 임박" }}
-              {{- else if eq $name "GrafanaDuFingerprintLost" }}{{ $title = "grafana 지문 스캔 소실" }}
-              {{- else if eq $name "AlertRuleFlapping" }}{{ $title = "알림 룰 만성 flapping" }}
-              {{- else if eq $name "AlertPipelineWriteStale" }}{{ $title = "ALERTS 되쓰기 정체" }}
-              {{- else if eq $name "AlertSuppressionProlonged" }}{{ $title = "알림 억제 장기화" }}
-              {{- end -}}
-              {{- /* 미매핑 alertname → summary를 제목으로(신규 알림도 한국어). 자동 escape됨. summary 없으면 alertname 원문 */ -}}
-              {{- if and (eq $title $name) .CommonAnnotations.summary }}{{ $title = .CommonAnnotations.summary }}{{- end -}}
-              {{- /* .Status → 한글 + glyph (firing: critical=🔴 발생·warning=⚠️ 경고·info=ℹ️ 정보; resolved=해소 🔵) */ -}}
-              {{- if eq .Status "resolved" -}}
-              🔵 <b>{{ $title }}</b> — 해소
-              {{- else if eq .CommonLabels.severity "warning" -}}
-              ⚠️ <b>{{ $title }}</b> — 경고
-              {{- else if eq .CommonLabels.severity "info" -}}
-              ℹ️ <b>{{ $title }}</b> — 정보
-              {{- else -}}
-              🔴 <b>{{ $title }}</b> — 발생
-              {{- end }}
-              알림 · {{ $name }}
-              {{ range .Alerts -}}
-              {{ if .Annotations.summary }}{{ .Annotations.summary }}
-              {{ end }}{{ if .Annotations.description }}{{ .Annotations.description }}
-              {{ end }}{{ if .Annotations.runbook_url }}→ {{ .Annotations.runbook_url }}
-              {{ end }}{{ end }}
-      - name: deadmanswitch
-        webhook_configs:
-          - url: http://deadmanswitch-relay:9095/ping
-            send_resolved: false
-    inhibit_rules:
-      - source_matchers: [ 'severity = critical' ]
-        target_matchers: [ 'severity = warning' ]
-        equal: ['alertname','namespace']
-      # 같은 디스크의 critical(예: StandardSSDFilling)이 warning(StandardSSDWarning/Trend)을 억제한다.
-      # 둘은 alertname이 달라 위 규칙(equal:alertname)으로는 매치 안 돼 둘 다 발화하던 것을 교정.
-      # disk 라벨이 있는 알림으로만 한정(=~".+")해 비-디스크 알림을 과억제하지 않는다.
-      # (WAL은 disk:pgwal로 분리 — 루트 fs critical이 WAL 충전 경고를 가리지 않게: 원인이 WAL일 수 있다.)
-      - source_matchers: [ 'severity = critical', 'disk =~ ".+"' ]
-        target_matchers: [ 'severity = warning', 'disk =~ ".+"' ]
-        equal: ['disk']
-      # 같은 unit의 critical(SystemdUnitFailed — `OnFailure=` 이벤트 축)이 warning
-      # (SystemdHostUnitFailed — 주기 스윕 축)을 억제한다. 두 축은 **직교**라 같은 고장을 양쪽이
-      # 보는 것이 정상이고(이벤트는 지연 0, 스윕은 ≤5분), 그때 페이지가 둘이면 안 된다.
-      # alertname이 다르므로 위 첫 규칙(equal:alertname)으로는 매치되지 않는다.
-      # ⚠️ unit 라벨 보유로 한정(=~".+")한다 — 없으면 라벨이 없는 알림끼리 **빈 문자열로 매칭**돼
-      #    엉뚱한 억제가 생긴다(disk 규칙이 같은 이유로 같은 한정을 건다).
-      # ★ 이 규칙이 있어야 "critical이 필요하면 유닛 파일에 OnFailure= 한 줄을 넣어 승격하라"는
-      #   스윕 알림의 처방이 **페이지를 늘리지 않는다**.
-      - source_matchers: [ 'alertname = SystemdUnitFailed', 'unit =~ ".+"' ]
-        target_matchers: [ 'alertname = SystemdHostUnitFailed', 'unit =~ ".+"' ]
-        equal: ['unit']
----
+# ⚠️ `configMapGenerator`에 `options.disableNameSuffixHash: true`를 켜지 마라 — 그 한 줄이 위 자동
+#    롤아웃을 통째로 되돌려 옛 함정(무기한 옛 렌더본)으로 복귀시킨다. 해시 접미가 이 전환의 전부다.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
