@@ -108,6 +108,24 @@ alert_defined() {
   grep -q 'node_filesystem_avail_bytes{mountpoint="/"}' "$R"
 }
 
+# 기판 이전(OrbStack VM → 베어메탈 NUC, 2026-08-18) 뒤 굳은 매체 서술의 회귀 차단 — **알림 텍스트 한정**.
+# 발화 시 오퍼레이터가 받는 유일한 즉시 텍스트가 description이라, 여기의 매체 오기는 트리아지를 아예
+# 다른 디스크로 보낸다(실측 2026-09-03: `/`는 ext4 /dev/mapper/ubuntu--vg-ubuntu--lv 913G인데 문구는
+# btrfs /dev/vdb1 ~224GiB를 부르고, 최대 소비자로 bulk-ssd에 사는 vmsingle/vlogs를 지목했다).
+# ⚠️ **주석 줄은 일부러 분모 밖이다.** r4의 :17-27 블록은 OrbStack/virtiofs를 명시적 **역사**로 서술하는
+#    자기서술 산문이고(그 국면 구분이 "왜 bulk를 node_filesystem으로 직접 재지 않는가"의 근거다),
+#    거기까지 무는 판정은 올바른 매니페스트에서 red가 된다 — 부재 단언의 분모는 알림 텍스트뿐이다.
+@test "alert descriptions name the live storage media, not the retired OrbStack ones" {
+  R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
+  C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
+  # 부재 단언 — 정확한 무매치는 rc 1 하나다(피연산자 소실 rc 2와 구별: [ABS]).
+  run grep -nE '^ *description:.*(btrfs|vdb|virtiofs|224 ?Gi)' "$R"; [ "$status" -eq 1 ]
+  run grep -nE '^ *description:.*(btrfs|vdb|virtiofs|224 ?Gi)' "$C"; [ "$status" -eq 1 ]
+  # 양성 대조 — description 줄이 통째로 사라지면 위 부재는 무증인이다(실측 2026-09-03: r4 25 · core 21).
+  [ "$(grep -cE '^ *description:' "$R")" -ge 10 ]
+  [ "$(grep -cE '^ *description:' "$C")" -ge 10 ]
+}
+
 @test "root-fs pressure stays single-sourced through StandardSSD* (no duplicate threshold/trend rules)" {
   # 메타갭 ③ Task 1(W1-A): 루트 fs('/') 포화는 StandardSSD* 3룰(early warning/critical/trend)이 단일
   # 소스다. 같은 장애 모드에 중복 페이지를 만드는 신규 룰(NodeRootFs*/RootDisk* 등) 신설을 회귀 차단(F16).
