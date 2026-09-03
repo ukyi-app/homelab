@@ -119,9 +119,13 @@ teardown() { rm -rf "$STUBDIR"; }
 }
 
 @test "fails when metrics-server pod is present (must be disabled)" {
+  # ⚠️ `-ne 0`만으로는 「검사가 metrics-server를 잡았다」와 「verify-cluster.sh가 없어 못 돌았다」가
+  #    겹친다(실측: 스크립트 삭제 시 17레인 중 이 레인만 그대로 초록이었다). 거부 문구로 가른다.
+  [ -f "$BOOTSTRAP_DIR/verify-cluster.sh" ]
   echo "metrics-server-zzz" >> "$STUBDIR/pods.txt"
   run "$BOOTSTRAP_DIR/verify-cluster.sh"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'metrics-server pod present'
 }
 
 @test "fails when live k3s version drifts from versions.env K3S_VERSION" {

@@ -5,11 +5,14 @@
 #    이 파일 고유 사정: 비-0 단언 대부분은 teardown.sh 자신의 **거부 종료코드**(dirty·bad arg·
 #    미검증 attestation)라 비대상이고, 전환 대상은 소스 형태를 보는 마지막 @test 하나뿐이다.
 
-setup() { ROOT="$(git rev-parse --show-toplevel)"; SH="$ROOT/scripts/teardown.sh"; }
+# ⚠️ 피연산자 실재 — 이 파일의 거부 레인은 `-ne 0`으로 판정하는데 스크립트가 없으면 bash도
+#    비-0(127)을 내 두 채널이 겹친다(실측: teardown.sh 삭제 시 8레인 중 #1·#4가 그대로 초록).
+setup() { ROOT="$(git rev-parse --show-toplevel)"; SH="$ROOT/scripts/teardown.sh"; [ -f "$SH" ]; }
 
 @test "teardown wrapper refuses a dirty worktree" {
   run env TEARDOWN_DIRTY=1 DRY_RUN=1 bash "$SH" --app foo
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '거부: 워킹트리 dirty'
 }
 @test "teardown wrapper dry-run creates a dedicated branch from origin/main" {
   run env TEARDOWN_DIRTY=0 TEARDOWN_TS=20260618 DRY_RUN=1 bash "$SH" --app foo
@@ -26,6 +29,7 @@ setup() { ROOT="$(git rev-parse --show-toplevel)"; SH="$ROOT/scripts/teardown.sh
 @test "teardown wrapper rejects unknown args" {
   run env DRY_RUN=1 bash "$SH" --bogus x
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '--resource <db|cache>:<name>'
 }
 @test "teardown wrapper resource mode refuses without REFS_VERIFIED attestation (F1)" {
   run env TEARDOWN_DIRTY=0 DRY_RUN=1 bash "$SH" --resource db:foo

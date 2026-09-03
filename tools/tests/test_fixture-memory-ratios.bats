@@ -118,3 +118,16 @@ _fixture() { # $1=container $2=usage $3=inactive $4=active $5=shmem [$6=limit]
   [ "$status" -eq 1 ]
   printf '%s' "$output" | grep -qF -- '픽스처를 읽을 수 없다'
 }
+
+@test "a cache larger than usage is rejected" {
+  # cache는 usage의 부분집합이다 — file+shmem이 usage를 넘을 수 없다. 이 불변식만 다섯 중
+  # 유일하게 증인이 없었다(실측: :99 삭제해도 10/10 초록). cache>usage 픽스처는 두 번째 출력 축
+  # (usage−cache)/limit을 음수로 만들어 하네스의 음성 대조군을 vacuous하게 한다.
+  # ina=0·act=0이라 :98(ws>usage)·:101(항등식)·:105(cache<ina+act)가 안 걸리고 오직 :99만 발화한다.
+  # ⚠️ 대조 문구는 `> usage(`가 아니라 `cache(<수>) > usage(` — 앞 문구는 :98(working_set)과 공유라
+  #    이 레인 고유의 증인이 못 된다.
+  _fixture cachebound 1048576 0 0 104857600
+  run bun "$T" --fixture "$F" --container cachebound
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qE 'cache\([0-9]+\) > usage\('
+}

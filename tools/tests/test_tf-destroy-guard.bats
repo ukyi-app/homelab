@@ -69,8 +69,12 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "invalid mode is rejected fail-closed (exit non-zero)" {
+  # ⚠️ `-ne 0`은 「가드가 mode를 거부했다」와 「destroy-guard.sh가 없어 sh가 죽었다」를 구별하지
+  #    못한다(실측: 스크립트 삭제 시 17레인 중 이 레인이 그대로 초록). 고정 에러 접두로 가른다.
+  [ -f "$SH" ]
   run env MODE=bogus PLAN_JSON="$TMP/no-delete.json" sh "$SH"
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '::error::tf-destroy-guard: mode는 warn|block만'
 }
 
 @test "the destroy jq selector matches the canonical inline impl" {

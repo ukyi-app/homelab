@@ -172,12 +172,17 @@ missing="$(comm -23 <(printf '%s\n' "$enum") <(printf '%s\n' "$decl_all") || tru
 stale="$(comm -13 <(printf '%s\n' "$enum") <(printf '%s\n' "$decl_all") || true)"
 
 # `ledger` 갈래는 원장 행과 기계 대조한다 — 이 갈래만 원장이 SSOT다.
-ledger_names="$(jq -r '.[].name' "$LEDGER" | LC_ALL=C sort -u)"
+# ⚠️ 원장 name은 `<슬러그> (<괄호 설명>)` 형태라 슬러그를 **먼저 잘라** 고정문자열 전행 대조를 한다.
+#    종전 구현은 `grep -q "^${ln}"` — 앵커 없는 **접두 정규식**이라 잘리거나 오타난 ledger_name이
+#    조용히 통과했다(실측: `r2`·`g`·`g.*` 전부 MATCH). 그러면 분류는 `ledger`인데 어떤 원장 행도
+#    그 자격을 지지하지 않는 상태가 되어 이 가드의 존재 이유가 그 자격에 대해 무효가 된다.
+#    형제 가드 scripts/verify-credential-inventory.sh:48-50이 쓰는 슬러그 파생·대조 형태와 같다.
+ledger_names="$(jq -r '.[] | ((.name // "") | tostring | split(" ")[0])' "$LEDGER" | LC_ALL=C sort -u)"
 unbacked=""
 while IFS= read -r pair; do
   [ -n "$pair" ] || continue
   ln="${pair#*=}"
-  grep -q "^${ln}" <<<"$ledger_names" \
+  grep -Fqx -- "$ln" <<<"$ledger_names" \
     || unbacked="${unbacked}${pair%%=*} → ledger_name='${ln}'가 ${LEDGER}에 없다
 "
 done <<EOT

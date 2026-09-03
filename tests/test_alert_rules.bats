@@ -735,10 +735,15 @@ YAML
 
 @test "mode D rejects non-max rollups too, not just max (whitelist not blacklist)" {
   # 블랙리스트("max만 금지")였다면 이 둘이 통과한다. sum은 time()-거대값이 영구 음수라 조용한 무발화다.
+  # ⚠️ `-ne 0`만으로는 「린터가 rollup을 거부했다」와 「check-alert-rules.ts가 없어 import가 죽었다」가
+  #    겹친다(실측: 도구 삭제 시 81레인 중 이 레인만 그대로 초록). 모드 D 위반 문구로 가른다.
+  [ -f "$ROOT/tools/check-alert-rules.ts" ]
   _run_probe AvgProbe '(time() - avg_over_time(fixture_local_ts[10d])) > 100'
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '[모드 D:'
   _run_probe SumProbe '(time() - sum_over_time(fixture_local_ts[10d])) > 100'
   [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '[모드 D:'
 }
 
 @test "mode D fails closed on a metric that is not declared in the policy" {

@@ -52,6 +52,9 @@ catch (e: any) { fail(`.app-config.yml 파싱 실패: ${e.message}`); }
 // ---------- 2) 스키마 검증 (app-config-schema.json이 계약 SSOT) ----------
 // 미니 검증기(check()) 지원 키워드 SSOT는 test_app-config.bats 화이트리스트 — 스키마에 미구현
 // 제약(maxLength/const/oneOf/anyOf/not/format 등) 추가 시 그 정적 가드가 fail-closed로 잡는다.
+// ⚠️ 그 화이트리스트는 **스키마→구현** 한 방향만 잠근다(키워드 이름 대조일 뿐 평가 여부를 안 본다).
+//    반대 방향(여기 구현이 빠지는 것)의 증인은 test_create-app.bats 말미 rejects 레인
+//    「mini-validator witness」다 — pattern/minItems 삭제 시 그 레인만 red가 된다(실측).
 const schema = JSON.parse(readFileSync(new URL("./app-config-schema.json", import.meta.url), "utf8"));
 const deref = (s: any) => (s?.$ref ? schema.definitions[s.$ref.split("/").pop()] : s);
 function check(val: any, sch: any, path: string) {

@@ -42,6 +42,9 @@ platform/cache/prod/test_ksops_render.bats
 #   ⚠️ test_tf_reconcile.bats는 여기 있었지만 terraform 비의존(전 @test가 워크플로 grep)이라 gate로 옮겼다 —
 #      required check는 `gate` 하나뿐이고(decisions/0003), iac.yaml의 paths 필터는 `.github/**`를 안 봐서
 #      tf-reconcile.yaml만 바꾸는 PR에서는 그 advisory가 아예 뜨지 않았다.
+#   ⚠️ test_tf_validate.bats의 terraform 비의존 @test 2개(R2 prevent_destroy 신원·app DNS 자원 분리)도
+#      같은 이유로 infra/_tests/test_tf_static.bats로 갈라져 gate에서 돈다 — 여기 남은 것은
+#      `make tf-validate`를 부르는 @test 하나뿐이다.
 infra/_tests/test_tf_validate.bats
 infra/cloudflare/test_apps_data.bats
 # 라이브 전용(VM/k3s 재구축 substrate) — 실행처: owner-local `bats infra/_tests/test_bootstrap.bats`(DR 드릴)

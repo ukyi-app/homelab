@@ -9,9 +9,14 @@ PIN_RE='ghcr\.io/cloudnative-pg/postgresql:[0-9][A-Za-z0-9._-]*'
 SSOT_FILE=platform/cnpg/prod/cluster.yaml
 
 @test "cluster.yaml exposes exactly one PG image pin (SSOT sanity)" {
+  # ⚠️ 옛 판정은 이름이 약속한 둘 중 어느 것도 재지 않았다. ① 파이프 마지막이 `sort`라 `$status`는
+  #    grep의 rc(1=0건 / 2=파일 부재)와 무관하게 항상 0이고, ② `echo "$output" | wc -l`은 빈
+  #    문자열에도 개행 한 줄을 내 **0건을 1로** 읽었다. 실측: SSOT 파일을 치워도, imageName 줄을
+  #    지워도 이 레인은 초록이었다(red가 되는 유일한 조건이 핀 2건 이상). 「열거 붕괴 → vacuous
+  #    green」②의 교과서적 형태다. `grep -c .`는 빈 입력에 0을 낸다.
+  [ -f "$SSOT_FILE" ]
   run bash -c "grep -Eo '$PIN_RE' $SSOT_FILE | LC_ALL=C sort -u"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(printf '%s' "$output" | grep -c .)" -eq 1 ]
 }
 
 @test "all hardcoded PG image pins repo-wide match the cluster.yaml SSOT" {
