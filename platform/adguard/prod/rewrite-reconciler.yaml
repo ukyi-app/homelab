@@ -165,12 +165,10 @@ spec:
                   #   · dns.upstream_mode — /control/dns_info가 기본값(load_balance)을 **빈 문자열**로
                   #     돌려준다(2026-09-03 v0.107.79 실측) → 문자열 대조는 영구 오보다.
                   #   · querylog.file_enabled·size_memory — 어느 control 응답에도 없다(API 미노출).
-                  #   · dns.bootstrap_dns — dns_info에 실려 오지만 **시드가 flow 배열**(adguardhome.yaml:17
-                  #     `["1.1.1.1", "9.9.9.9"]`)이라 seed_upstreams(블록 시퀀스 전용)로 못 읽는다. 새 정규화
-                  #     파서가 필요해 이번 범위 밖이다 — 값싼 처방 우선.
-                  #   · dns.ratelimit_whitelist — 같은 사고(#493)의 나머지 절반이지만 시드가 블록 시퀀스,
-                  #     라이브가 JSON 배열이라 순서·표기 정규화가 필요하고 dns_info 실림 여부를 라이브
-                  #     GET으로 재확인하지 못했다(이번 착지는 읽기 전용 범위). 다음 라운드 후보.
+                  # ✅ dns.bootstrap_dns·dns.ratelimit_whitelist는 **2026-09-03에 편입**했다(섹션 7·8).
+                  #    라이브 실측(port-forward `GET /control/dns_info`, v0.107.79): 응답 keys에 두 키가
+                  #    **둘 다 실려 온다**(bootstrap_dns = 길이 2 배열 · ratelimit_whitelist = 길이 1 배열).
+                  #    시드 표기가 갈리는 것(flow 배열 vs 블록 시퀀스)은 아래 `seed_list`가 흡수한다.
                   # ⚠️ `dns.ratelimit`·`dns.use_private_ptr_resolvers`는 **처방이 반대**인 두 섹션이다 —
                   #    아래 대조 코드와 r4 룰 description을 함께 볼 것.
                   # ⚠️ 구 엔드포인트 /control/querylog_info는 쓰지 않는다 — 같은 라이브가 interval을 프리셋
@@ -215,6 +213,62 @@ spec:
                       ind && inu && /^  [^ #]/ { inu = 0 }
                     ' "$SEED_FILE"
                   }
+                  # 시드의 **리스트** 하나를 정렬된 줄 목록으로. YAML 두 표기를 함께 받는다:
+                  #   flow   `  bootstrap_dns: ["1.1.1.1", "9.9.9.9"]`   (adguardhome.yaml:17)
+                  #   block  `  ratelimit_whitelist:` + `    - 192.168.117.1`   (같은 파일 :44-45)
+                  # ⚠️ `seed_upstreams`를 이걸로 **대체하지 않는다** — upstream_dns는 순서가 대조 대상이고
+                  #    (형제 @test "upstream order is part of the comparison") 이 함수는 정렬하므로 그 축을
+                  #    지운다. 반대로 bootstrap_dns·ratelimit_whitelist는 **집합**이라 순서 재배열이
+                  #    드리프트가 아니다 — 그래서 두 함수가 공존하는 것이 설계이지 중복이 아니다.
+                  # ⚠️ 런타임 awk는 **mawk**다(debian bookworm-slim). gawk 전용 문법(gensub 등)을 쓰지 마라 —
+                  #    로컬 gawk에서만 초록인 파서가 된다. 아래는 mawk/gawk 양쪽 실측 동형이다.
+                  # ⚠️ 키 스코프는 top 블록이다(`filtering:` 아래 동명 키에 걸리지 않는다 — 실측 확인).
+                  seed_list() {
+                    awk -v top="$1" -v key="$2" '
+                      BEGIN { q = "\047" }
+                      $0 ~ "^" top ":[[:space:]]*$" { inb = 1; inl = 0; next }
+                      /^[^ \t#]/ { inb = 0; inl = 0 }
+                      inb && $0 ~ "^  " key ":" {
+                        v = $0
+                        sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[ \t]+#.*$/, "", v)
+                        gsub(/^[ \t]+|[ \t]+$/, "", v)
+                        inl = 0
+                        if (v ~ /^\[.*\]$/) {
+                          sub(/^\[/, "", v); sub(/\]$/, "", v)
+                          n = split(v, a, ",")
+                          for (i = 1; i <= n; i++) {
+                            s = a[i]
+                            gsub("^[ \t" q "\"]+|[ \t" q "\"]+$", "", s)
+                            if (s != "") print s
+                          }
+                        } else if (v == "") { inl = 1 }
+                        next
+                      }
+                      inb && inl && /^    - / {
+                        v = $0; sub(/^    - /, "", v); sub(/[ \t]+#.*$/, "", v)
+                        gsub("^[ \t" q "\"]+|[ \t" q "\"]+$", "", v)
+                        if (v != "") print v
+                        next
+                      }
+                      inb && inl && /^  [^ #]/ { inl = 0 }
+                    ' "$SEED_FILE" | LC_ALL=C sort
+                  }
+                  # 시드에 그 **키 줄**이 있는가(값이 아니라 선언의 존재). tri-state를 가르는 데 쓴다:
+                  # 키가 없으면 "선언 안 함 = 빈 목록"(정당한 상태)이고, 키는 있는데 목록이 비면
+                  # **파서 회귀**라 관측 실패로 접는다. 이 구별이 없으면 둘 중 하나가 조용해진다.
+                  seed_has() {
+                    awk -v top="$1" -v key="$2" '
+                      $0 ~ "^" top ":[[:space:]]*$" { inb = 1; next }
+                      /^[^ \t#]/ { inb = 0 }
+                      inb && $0 ~ "^  " key ":" { found = 1; exit }
+                      END { exit(found ? 0 : 1) }
+                    ' "$SEED_FILE"
+                  }
+                  # 라이브 JSON에 그 키가 실려 있는가. 빈 배열(`[]`)과 **키 부재**를 가른다 —
+                  # json_array는 둘 다 빈 출력이라 이것 없이는 엔드포인트 개편이 "빈 목록 = 드리프트"로
+                  # 오독된다(tri-state의 세 번째 값이 사라진다).
+                  # ⚠️ 콜론까지 문다 — `"ratelimit":`는 `"ratelimit_whitelist":`에 매치되지 않는다.
+                  json_has() { printf '%s' "$1" | grep -q "\"$2\":"; }
                   # 라이브 JSON 스칼라 하나 — 콤마/중괄호로 필드를 끊고 **줄머리 앵커**로 매치한다.
                   # 탐욕 `.*`로 뽑으면 접미 동명 키("ignored_enabled")나 뒤쪽 동명 키를 줍는다.
                   json_scalar() {
@@ -286,17 +340,43 @@ spec:
                     case "$seed_ptr" in true|false) : ;; *) echo "시드 dns.use_private_ptr_resolvers 판독 실패" >&2; return 1 ;; esac
                     case "$live_ptr" in true|false) : ;; *) echo "라이브 dns.use_private_ptr_resolvers 추출 실패" >&2; return 1 ;; esac
                     d_ptr=0; [ "$seed_ptr" = "$live_ptr" ] || d_ptr=1
+                    # ── 섹션 7·8: **집합** 대조(순서 무관) ─────────────────────────────────────
+                    # 두 값 모두 이미 손에 있는 `$dns_json`에서 읽는다 — 추가 curl·데드라인 예산·netpol 0
+                    # (CURL_SEED 사용처 4곳은 그대로다 — 예산 산술 증인은 test_rewrite_reconciler.bats).
+                    # ⚠️ upstream_dns와 달리 **정렬 후 비교**한다. 두 값은 집합이라(부트스트랩 resolver
+                    #    목록 · 레이트리밋 예외 IP 목록) 순서 재배열이 동작 차이가 아니다. upstream_dns는
+                    #    반대로 순서가 계약이라 seed_upstreams(순서 보존)를 계속 쓴다.
+                    # ⚠️ ratelimit_whitelist는 사고 #493의 나머지 절반이다(라우터가 경우 B에서 LAN의
+                    #    유일한 DNS 클라이언트라 여기서 빠지면 집 전체가 100 q/s 한 버킷에 묶인다).
+                    #    다만 처방은 dns.ratelimit과 달리 **반대가 아니다** — 라이브가 권위이고 시드를
+                    #    맞추는 것이 기본이다(시드 쪽 하한을 무는 게이트가 없다).
+                    json_has "$dns_json" bootstrap_dns || { echo "라이브 dns.bootstrap_dns 키 부재(API 형태 변경?)" >&2; return 1; }
+                    json_has "$dns_json" ratelimit_whitelist || { echo "라이브 dns.ratelimit_whitelist 키 부재(API 형태 변경?)" >&2; return 1; }
+                    seed_bs=$(seed_list dns bootstrap_dns)
+                    live_bs=$(json_array "$dns_json" bootstrap_dns | LC_ALL=C sort)
+                    if seed_has dns bootstrap_dns && [ -z "$seed_bs" ]; then
+                      echo "시드 dns.bootstrap_dns 파싱 실패(키는 있는데 목록이 비었다)" >&2; return 1
+                    fi
+                    d_bs=0; [ "$seed_bs" = "$live_bs" ] || d_bs=1
+                    seed_wl=$(seed_list dns ratelimit_whitelist)
+                    live_wl=$(json_array "$dns_json" ratelimit_whitelist | LC_ALL=C sort)
+                    if seed_has dns ratelimit_whitelist && [ -z "$seed_wl" ]; then
+                      echo "시드 dns.ratelimit_whitelist 파싱 실패(키는 있는데 목록이 비었다)" >&2; return 1
+                    fi
+                    d_wl=0; [ "$seed_wl" = "$live_wl" ] || d_wl=1
                     # 섹션별 게이지 + 대조 전용 하트비트. 하트비트는 bare(라벨 0) — absent/or 브랜치와
                     # 라벨셋이 갈리면 for: pending이 매 주기 리셋된다.
                     { printf 'adguard_seed_drift{section="dns.upstream_dns"} %s\n' "$d_up"
+                      printf 'adguard_seed_drift{section="dns.bootstrap_dns"} %s\n' "$d_bs"
                       printf 'adguard_seed_drift{section="dns.ratelimit"} %s\n' "$d_rl"
+                      printf 'adguard_seed_drift{section="dns.ratelimit_whitelist"} %s\n' "$d_wl"
                       printf 'adguard_seed_drift{section="dns.use_private_ptr_resolvers"} %s\n' "$d_ptr"
                       printf 'adguard_seed_drift{section="querylog.enabled"} %s\n' "$d_qe"
                       printf 'adguard_seed_drift{section="querylog.interval"} %s\n' "$d_qi"
                       printf 'adguard_seed_drift{section="statistics.interval"} %s\n' "$d_si"
                       printf 'adguard_seed_drift_checked_timestamp_seconds %s\n' "$(date +%s)"
                     } | $CURL_SEED --data-binary @- "http://vmsingle.observability.svc:8428/api/v1/import/prometheus" || return 1
-                    echo "seed-drift: upstream=${d_up} ratelimit=${d_rl} ptr=${d_ptr} querylog.enabled=${d_qe} querylog.interval=${d_qi} statistics.interval=${d_si}"
+                    echo "seed-drift: upstream=${d_up} bootstrap=${d_bs} ratelimit=${d_rl} ratelimit_whitelist=${d_wl} ptr=${d_ptr} querylog.enabled=${d_qe} querylog.interval=${d_qi} statistics.interval=${d_si}"
                   }
                   seed_drift_report || echo "시드 대조 실패 — 게이지·하트비트 미push(관측 실패는 드리프트가 아니다). rewrite 수렴은 계속한다." >&2
                   # 1) want = traefik-ts LB tailscale IP (apiserver로 svc 조회 — status.loadBalancer.ingress[].ip)
