@@ -13,10 +13,17 @@ setup() {
   fi
 }
 
-@test "ns-wide default-deny-egress baseline exists" {
+@test "ns-wide default-deny-egress baseline exists and the policy name set is exact" {
   run grep -q 'kind: NetworkPolicy' "$P"; [ "$status" -eq 0 ]
   run grep -q 'tailscale-default-deny-egress' "$P"; [ "$status" -eq 0 ]
   run grep -q 'podSelector: {}' "$P"; [ "$status" -eq 0 ]
+  # ⚠️ **상한** — 위 레인들은 전부 리터럴 하한이라 ipBlock 없는 광역 정책 한 건이 :52 cidr 등호와
+  #    :59-64 except 등식을 통째로 우회한다(실측: `to:[{namespaceSelector:{}}]` 정책 추가 후 7/7 ok).
+  #    이 ns는 enforce=privileged라 정책 추가 한 건이 곧 최강 권한 워크로드의 무제한 lateral이다.
+  #    정당한 정책 추가는 networkpolicy.yaml 근거 주석 + 이 상수를 같은 PR에서 고치는 것이 리뷰 앵커.
+  #    형태 선례: platform/network-policies/prod/test_netpol.bats의 이름 정확집합 줄(397b001).
+  [ "$(yq ea '[select(.kind=="NetworkPolicy")|.metadata.name]|sort|join(",")' "$P")" = \
+    "tailscale-allow-dns-egress,tailscale-allow-egress-tailnet,tailscale-allow-egress-to-apiserver,tailscale-allow-egress-to-database,tailscale-allow-egress-to-gateway,tailscale-default-deny-egress" ]
 }
 
 @test "dns egress to coredns on 53 is declared" {
