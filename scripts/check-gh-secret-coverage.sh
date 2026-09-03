@@ -36,7 +36,12 @@
 #    호출 워크플로가 `with:`로 넘긴 입력을 env로 받는다(telegram-notify가 bot-token 입력을 받는 구조).
 #    그 action.yml의 `secrets.TELEGRAM_BOT_TOKEN`은 **설명 문자열**이고 ①이 이미 걸러낸다.
 #    실측: `.github/actions/**`에 표현식 컨텍스트 `secrets.` 참조 0건.
-# ⚠️ `vars.X`는 자격이 아니다(공개 설정값 — HOMELAB_OWNER 등). 도메인 밖.
+# ⚠️ `vars.X`는 **자격이 아니다**(공개 설정값 — 유출·회전 축이 없다). 그래서 `secrets`와 **같은 배열에 넣지 않는다** —
+#    섞이면 ledger 갈래와 뒤엉키고 원장 대조가 무의미해진다. 다만 **tracked 원장이 필요한 것은 같다**:
+#    `vars.HOMELAB_OWNER`는 15사본 actor 가드의 유일한 신뢰 앵커인데 `github_actions_variable` 리소스가
+#    0건이라 drift-github의 `-target` 목록에 원리적으로 못 들어간다(감시 범위 밖 — workflow-readiness가
+#    그 갭을 선언한다). ⇒ 별도 배열 `vars`로 **이름·갈래·근거만** 두고 워크플로 참조와 양방향 대조한다.
+#    ⚠️ `vars`에는 `ledger` 갈래를 허용하지 않는다 — 만료 원장의 도메인은 자격이지 설정값이 아니다.
 #
 # 종료코드: 0=전단사 성립 · 1=위반(미등재/stale/이중분류)·열거 붕괴(fail-loud) · 2=사용법·정책파일 부재/형식.
 # bash 3.2 호환(mapfile·[[ ]] 금지). shellcheck clean.
@@ -48,7 +53,7 @@ guard_init check-gh-secret-coverage
 SCOPE_NARROWED=0
 # 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 02 — 구 GH_SECRET_*
 # env 폐지). 붕괴 종료코드도 1로 수렴한다(2는 사용법 전용 — check-image-pins 선례와 같은 근거).
-take_floors "check-gh-secret-coverage:workflows check-gh-secret-coverage:secrets" "$@" || exit $?
+take_floors "check-gh-secret-coverage:workflows check-gh-secret-coverage:secrets check-gh-secret-coverage:vars" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -137,6 +142,17 @@ $files
 EOT
 
 enum="$(printf '%s' "$owned" | grep -v '^$' | LC_ALL=C sort -u || true)"
+
+# ── vars 열거(별도 도메인) ──────────────────────────────────────────────────
+# secret과 달리 workflow_call 입력 개념이 없다 — `vars.X`는 항상 레포/org variable로 해소된다.
+# cross-repo reusable도 **caller가 아니라 자기 레포**의 variable을 읽으므로 파일을 가리지 않는다.
+vars_enum="$(printf '%s\n' "$files" | while IFS= read -r f; do
+  [ -n "$f" ] && grep -ohE 'vars\.[A-Z][A-Z0-9_]*' "$f" || true
+done | sed 's/^vars\.//' | LC_ALL=C sort -u || true)"
+nvars="$(scan_count "$vars_enum")"
+if [ "$SCOPE_NARROWED" -eq 0 ] || floor_set check-gh-secret-coverage:vars; then
+  scan_floor check-gh-secret-coverage:vars "$nvars" "$(floor_of check-gh-secret-coverage:vars 2)" quiet || exit 1
+fi
 n="$(scan_count "$enum")"
 if [ "$SCOPE_NARROWED" -eq 0 ] || floor_set check-gh-secret-coverage:secrets; then
   scan_floor check-gh-secret-coverage:secrets "$n" "$(floor_of check-gh-secret-coverage:secrets 12)" quiet || exit 1
@@ -147,9 +163,20 @@ fi
 # "좁혀진 호출"과 "가드 미실행"을 구별할 수 없다.
 scan_signal check-gh-secret-coverage:workflows "$nfiles"
 scan_signal check-gh-secret-coverage:secrets "$n"
+scan_signal check-gh-secret-coverage:vars "$nvars"
 
 # ── 분류 읽기(스키마 강제 — 사유 없는 선언 금지) ────────────────────────────
 [ -f "$CLASS" ] || { echo "ERROR: 분류 정책 부재: ${CLASS} — 부재를 '분류 0건'으로 위장시키지 않는다" >&2; exit 2; }
+jq -e '(.vars|type=="array") and all(.vars[];
+         (.name|type=="string" and test("^[A-Z][A-Z0-9_]*$"))
+     and (.class|type=="string" and (. == "inventory-only" or . == "identifier"))
+     and (.why|type=="string" and (length>=20))
+     and (.since|type=="string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")))' \
+  "$CLASS" >/dev/null 2>&1 || {
+  echo "ERROR: ${CLASS}의 vars 형식 위반 — 각 항목에 name·class(identifier|inventory-only)·why(20자+)·since 필수." >&2
+  echo "       ⚠️ vars에는 class=ledger를 쓸 수 없다(만료 원장의 도메인은 자격이지 공개 설정값이 아니다)." >&2
+  exit 2
+}
 jq -e '(.secrets|type=="array") and all(.secrets[];
          (.name|type=="string" and test("^[A-Z][A-Z0-9_]*$"))
      and (.class|type=="string" and (. == "ledger" or . == "inventory-only" or . == "identifier" or . == "provided"))
@@ -169,6 +196,11 @@ decl_all="$(jq -r '.secrets[] | select(.class!="provided") | .name' "$CLASS" | L
 dupdecl="$(jq -r '.secrets[].name' "$CLASS" | LC_ALL=C sort | uniq -d || true)"
 
 missing="$(comm -23 <(printf '%s\n' "$enum") <(printf '%s\n' "$decl_all") || true)"
+
+vars_decl="$(jq -r '.vars[].name' "$CLASS" | LC_ALL=C sort -u)"
+vars_dup="$(jq -r '.vars[].name' "$CLASS" | LC_ALL=C sort | uniq -d || true)"
+vars_missing="$(comm -23 <(printf '%s\n' "$vars_enum") <(printf '%s\n' "$vars_decl") || true)"
+vars_stale="$(comm -13 <(printf '%s\n' "$vars_enum") <(printf '%s\n' "$vars_decl") || true)"
 stale="$(comm -13 <(printf '%s\n' "$enum") <(printf '%s\n' "$decl_all") || true)"
 
 # `ledger` 갈래는 원장 행과 기계 대조한다 — 이 갈래만 원장이 SSOT다.
@@ -207,10 +239,20 @@ fi
 if [ -n "$stale" ]; then
   echo "FAIL: 분류돼 있는데 워크플로 어디서도 안 쓰는 secret(stale):" >&2; printf '%s\n' "$stale" | sed 's/^/  /' >&2; rc=1
 fi
+if [ -n "$vars_dup" ]; then
+  echo "FAIL: ${CLASS}의 vars에 같은 이름이 두 번 선언됐다(갈래 모호):" >&2; printf '%s\n' "$vars_dup" | sed 's/^/  /' >&2; rc=1
+fi
+if [ -n "$vars_missing" ]; then
+  echo "FAIL: 워크플로가 쓰는데 ${CLASS}의 vars에 분류가 없는 variable:" >&2; printf '%s\n' "$vars_missing" | sed 's/^/  /' >&2
+  echo "  → identifier(자격 아님) / inventory-only 중 하나를 **사유와 함께** 선언하라. 기본값은 없다." >&2; rc=1
+fi
+if [ -n "$vars_stale" ]; then
+  echo "FAIL: vars에 분류돼 있는데 워크플로 어디서도 안 쓰는 variable(stale):" >&2; printf '%s\n' "$vars_stale" | sed 's/^/  /' >&2; rc=1
+fi
 if [ -n "$unbacked" ]; then
   echo "FAIL: class=ledger인데 원장에 행이 없다:" >&2; printf '%s' "$unbacked" | sed 's/^/  /' >&2; rc=1
 fi
 if [ "$rc" -eq 0 ]; then
-  echo "check-gh-secret-coverage: ENUM ${n}건 == 분류 $(scan_count "$decl_all")건 (ledger ${nled} · inventory-only ${ninv} · identifier ${nide} · provided ${npro}) OK"
+  echo "check-gh-secret-coverage: ENUM ${n}건 == 분류 $(scan_count "$decl_all")건 (ledger ${nled} · inventory-only ${ninv} · identifier ${nide} · provided ${npro}) · vars ${nvars}건 == 분류 $(scan_count "$vars_decl")건 OK"
 fi
 exit "$rc"

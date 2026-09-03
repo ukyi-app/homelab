@@ -39,6 +39,7 @@ _fixture() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE '^SCAN: check-gh-secret-coverage:workflows: [0-9]+$'
   echo "$output" | grep -qE '^SCAN: check-gh-secret-coverage:secrets: [0-9]+$'
+  echo "$output" | grep -qE '^SCAN: check-gh-secret-coverage:vars: [0-9]+$'
   echo "$output" | grep -q 'ENUM'
 }
 
@@ -187,4 +188,40 @@ PY2
   out="$output"
   run grep -q "^SCAN: check-gh-secret-coverage:" <<<"$out"
   [ "$status" -ne 0 ]
+}
+
+# ── vars 도메인(repo Actions variable) ──────────────────────────────────────
+# `vars.X`는 자격이 아니라 공개 설정값이지만, `HOMELAB_OWNER`는 15사본 actor 가드의 유일한
+# 신뢰 앵커이고 terraform 밖이라(github_actions_variable 0건 → drift-github `-target` 밖)
+# tracked 원장이 이 파일뿐이다. 그 원장이 워크플로 참조와 **양방향으로** 묶여 있는지 잰다.
+
+@test "an undeclared workflow variable reference fails closed" {
+  d="$(_fixture)"
+  jq '.vars |= map(select(.name != "HOMELAB_OWNER"))' "$CLASS" > "$d/policy/gh-secret-classification.json"
+  ( cd "$d" && git add -A && git -c user.email=t@t -c user.name=t commit -qm mut >/dev/null )
+  run bash "$S" --root "$d"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'vars에 분류가 없는 variable'
+  echo "$output" | grep -q 'HOMELAB_OWNER'
+}
+
+@test "a declared variable that no workflow references is stale" {
+  d="$(_fixture)"
+  jq '.vars += [{name:"ZZZ_PROBE",class:"identifier",why:"뮤테이션 프로브 — 워크플로가 참조하지 않는 이름이다.",since:"2026-09-03"}]' \
+    "$CLASS" > "$d/policy/gh-secret-classification.json"
+  ( cd "$d" && git add -A && git -c user.email=t@t -c user.name=t commit -qm mut >/dev/null )
+  run bash "$S" --root "$d"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'variable(stale)'
+  echo "$output" | grep -q 'ZZZ_PROBE'
+}
+
+@test "the ledger class is rejected inside the vars array" {
+  # 만료 원장의 도메인은 자격이다 — 공개 설정값에 ledger 갈래를 허용하면 원장 대조가 무의미해진다.
+  d="$(_fixture)"
+  jq '.vars[0].class = "ledger"' "$CLASS" > "$d/policy/gh-secret-classification.json"
+  ( cd "$d" && git add -A && git -c user.email=t@t -c user.name=t commit -qm mut >/dev/null )
+  run bash "$S" --root "$d"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q 'vars 형식 위반'
 }
