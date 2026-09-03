@@ -88,6 +88,14 @@ S="$BATS_TEST_DIRNAME/adguard-auth.sealed.yaml"
   [ "$status" -eq 1 ]
 }
 
+@test "the adguard main container keeps setcap-compatible security (ape:true + NET_BIND_SERVICE)" {
+  # setcap 바이너리는 NoNewPrivs와 양립 불가 — edge는 baseline이라 admission이 안 막고 CrashLoop만 남는다.
+  n="$(yq -e '[.spec.template.spec.containers[] | select(.name == "adguard")
+              | select(.securityContext.allowPrivilegeEscalation == true
+                       and (.securityContext.capabilities.add | contains(["NET_BIND_SERVICE"])))] | length' "$D")"
+  printf '%s' "$n" | grep -qxF -- '1'
+}
+
 @test "auth-sealed is a SealedSecret (no plaintext) named adguard-auth in edge" {
   run grep -q 'kind: SealedSecret' "$S"; [ "$status" -eq 0 ]
   run grep -q 'name: adguard-auth' "$S"; [ "$status" -eq 0 ]

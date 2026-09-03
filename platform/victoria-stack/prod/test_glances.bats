@@ -48,4 +48,18 @@ EOF
   run grep -q 'app.kubernetes.io/name: glances' "$N"; [ "$status" -eq 0 ]
   run grep -q 'kubernetes.io/metadata.name: homepage' "$N"; [ "$status" -eq 0 ]
   run grep -q '61208' "$N"; [ "$status" -eq 0 ]
+  # 전칭 피어 — 파일 헤더가 「유일한 생존자」를 자처하는 자리인데 판정은 from 원소를 더하는
+  # 편집을 못 본다(2026-09-03 실측). glances는 hostNetwork 계열 호스트 지표 API라 ingress가
+  # 전 ns로 열리면 안 된다.
+  peers="$(yq ea '[select(.kind=="NetworkPolicy")|.spec.ingress[]?|.from[]?|select(has("namespaceSelector"))|(.namespaceSelector.matchLabels["kubernetes.io/metadata.name"] // "ANY")]|.[]' "$N")"
+  printf '%s\n' "$peers" | grep -qxF -- homepage
+  run grep -qxF -- ANY <<EOF
+$peers
+EOF
+  [ "$status" -eq 1 ]
+  # glances-netpol.yaml 자신의 kustomization 멤버십 — 2026-09-04 실측: 이 파일을 resources에서
+  # 빼도(vmalert·vmagent·networkpolicy.yaml과 동시) 위 판정은 파일을 직접 열어 전건 초록이었다.
+  K="${BATS_TEST_DIRNAME}/kustomization.yaml"
+  run yq '.resources | contains(["glances-netpol.yaml"])' "$K"
+  printf '%s' "$output" | grep -qxF -- 'true'
 }

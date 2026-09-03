@@ -113,6 +113,8 @@ V="platform/argocd/bootstrap-values.yaml"
   # Telegram이 메시지 전체를 400으로 거부한다(실패 알림이 실패로 사라진다).
   has "$output" 'replace "_"'
   has "$output" 'replace "*"'
+  has "$output" 'replace "`"'
+  has "$output" 'replace "["'
   run yq '.notifications.triggers."trigger.on-sync-failed"' "$v"
   has "$output" "phase in ['Error', 'Failed']"
   has "$output" 'operationState.syncResult != nil'      # #224와 같은 nil 가드

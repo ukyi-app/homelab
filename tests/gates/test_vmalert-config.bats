@@ -251,6 +251,11 @@ alert_defined() {
   run grep -q 'container_memory_working_set_bytes' "$E"; [ "$status" -eq 1 ]
   run grep -q 'container_memory_max_usage_bytes' "$E"; [ "$status" -eq 1 ]
   run grep -q 'container_memory_cache' "$E"; [ "$status" -eq 1 ]
+  # 분모 축 — 네이티브 사이드카(restartPolicy:Always initContainer, plugin-barman-cloud 등)의 limit은
+  # KSM이 kube_pod_init_container_resource_limits로 내보낸다. `or` 가지가 사라지면 그 컨테이너는
+  # 캡이 있어도 영원히 분모가 없어 무성이다(2026-09-03 실측: 가지 삭제에도 이 스위트 전건 초록이던
+  # 무증인 축). 형제: tests/gates/test_grafana-dashboards.bats:53(대시보드 expr 축).
+  grep -q 'kube_pod_init_container_resource_limits' "$E"
 }
 
 @test "R6 ArgoCDOutOfSync has an absent() fail-closed guard like the other R-rules" {
@@ -530,6 +535,13 @@ EOF
   done
   # 비공허 바닥값 — 글롭이 붕괴하면 위 전칭이 0회 반복으로 공허하게 참이 된다.
   [ "$n" -ge 5 ]
+  # 룰 파일 배선은 위에서 잠갔지만 그 룰을 평가하는 evaluator(vmalert)·스크레이퍼(vmagent) 자신은
+  # kustomization 멤버십 무증인이었다(2026-09-04 실측: 4파일 동시 제거해도 관련 게이트 10파일 전건
+  # 초록). 룰이 배선돼 있어도 평가자가 프룬되면 알림이 통째로 무성이다 — 같은 @test가 평가자·
+  # 스크레이퍼까지 무는 것이 의미상 정합이다. alertmanager.yaml·namespace.yaml·deadmanswitch-relay.yaml은
+  # 형제 마커 원장 게이트가 이미 문다(중복 증인 금지).
+  run yq '.resources | contains(["vmalert.yaml","vmagent.yaml"])' "$K"
+  printf '%s' "$output" | grep -qxF -- 'true'
 }
 
 @test "meta alerts exclude Watchdog and themselves from the flapping selector (self-reference loop)" {

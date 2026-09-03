@@ -2197,7 +2197,7 @@ selfHeal과 플립플롭한다.
   240Mi)까지 분모에 실린다 — 라이브 pg-1이 1344Mi가 아니라 2368Mi가 되어 **고치기 전(8.9%)보다 더 틀린
   4.0%** 가 된다. 처방은 `and on (namespace,pod,container) container_memory_usage_bytes{container!=""}`로
   cAdvisor의 실행 중 시리즈에 결박한 뒤 합산하는 것이다(교정 후 7.1%).
-> 가드: `platform/victoria-stack/prod/rules/core.yaml`, `tools/check-resource-limits.ts`, `tests/gates/test_grafana-dashboards.bats`
+> 가드: `platform/victoria-stack/prod/rules/core.yaml`, `tools/check-resource-limits.ts`, `tests/gates/test_grafana-dashboards.bats`, `tests/gates/test_vmalert-config.bats`
 ### `Container.args`는 patchMergeKey 없는 atomic 리스트다 — strategic-merge patch가 통째로 교체한다
 - 2026-09-01, 벤더 매니페스트에 kustomize patch로 자원 캡만 얹으면서 "이왕이면 로컬 편집한
   `--log-level=info`도 patch로 옮기자"는 부록이 제안됐다. 실행했으면 컨트롤러가 죽는다.
@@ -2267,7 +2267,7 @@ selfHeal과 플립플롭한다.
 - ⚠️ 연동을 끊어도 `tools/check-resource-limits.ts`의 `GOMEMLIMIT ≤ limit × 0.95`는 그대로 통과한다
   (한쪽 방향 상한만 보기 때문). 즉 **게이트는 이 결정을 강제하지도 막지도 않는다** — 근거는 주석과
   원장에만 산다. 다음 사람이 "90% 연동 규약을 안 지켰다"고 되돌리지 않도록 두 곳 모두에 적었다.
-> 가드: `platform/victoria-stack/prod/vmsingle.yaml`, `docs/memory-ledger.md`
+> 가드: `platform/victoria-stack/prod/vmsingle.yaml`, `docs/memory-ledger.md`, `platform/victoria-stack/prod/test_automount.bats`
 ### 측정 창이 기판 변경을 가로지르면 두 체제가 한 숫자에 섞인다
 - 2026-09-01. `node_boot_time_seconds = 2026-08-26T13:41:06Z`. 그 재부팅에서 관측 스택 다섯 전부
   계단이 있었다 — vmagent A′ 일별 peak 200~213 → 159~171 · vmsingle rss 552 → 350 ·

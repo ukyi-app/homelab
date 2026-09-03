@@ -14,6 +14,12 @@ f=platform/cnpg/prod/cluster.yaml
   grep -q 'maintenance_work_mem: "128MB"' "$f"
   grep -q 'max_connections: "50"' "$f"
   grep -q 'archive_timeout: "5min"' "$f"
+  grep -q 'wal_compression: "on"' "$f"
+  grep -q 'max_wal_size: "1GB"' "$f"
+  grep -q 'min_wal_size: "256MB"' "$f"
+  # 존재 9 + length 9 = 정확 집합(추가·삭제·치환 전부 red) — 하한 6줄만으로는 fsync/full_page_writes
+  # 같은 원소 추가는 물론, 무증인 3키를 다른 키로 치환하는 편집도 무증인이었다(2026-09-03 실측).
+  n="$(yq '.spec.postgresql.parameters | length' "$f")"; printf '%s' "$n" | grep -qxF -- '9'
 }
 
 @test "memory limit is 1Gi and shared_buffers is <= 1/4 of it" {

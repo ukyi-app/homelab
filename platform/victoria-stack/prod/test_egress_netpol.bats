@@ -3,11 +3,16 @@
 # (디렉토리 단위 실행 시 한글 인코딩 깨짐 — 검증된 버그).
 # ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 networkpolicy.yaml 단일 파일이라
 #    그것으로 닫힌다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
-setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
+setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; K="${BATS_TEST_DIRNAME}/kustomization.yaml"; }
 
 @test "alertmanager and relay default-deny-egress baselines exist" {
   run grep -q 'alertmanager-default-deny-egress' "$P"; [ "$status" -eq 0 ]
   run grep -q 'deadmanswitch-relay-default-deny-egress' "$P"; [ "$status" -eq 0 ]
+  # networkpolicy.yaml 자신의 kustomization 멤버십 — 2026-09-04 실측: 이 파일을 resources에서
+  # 빼도(vmalert·vmagent·glances-netpol과 동시) 이 파일의 전 @test가 여전히 초록이었다(파일 직접
+  # grep이라 kustomization을 안 본다).
+  run yq '.resources | contains(["networkpolicy.yaml"])' "$K"
+  printf '%s' "$output" | grep -qxF -- 'true'
 }
 
 @test "workloads selected by app.kubernetes.io/name (live label parity)" {
@@ -36,6 +41,18 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
   [ "$n" -ge 4 ]                             # alertmanager·relay·digest-exporter·gha-liveness-exporter
   ok="$(printf '%s\n' "$out" | grep -cxF -- '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16')"
   printf '%s' "$ok" | grep -qxF -- "$n"      # 전수 일치 — 하나라도 어긋나면 red
+}
+
+@test "every egress peer across the file is a named namespace, never a cluster-wide selector" {
+  # 이름 집합 손 로스터 대신 전칭 피어 — 정책 이름을 안 세면 신규 광역 정책도, 기존 allow의
+  # to: 확장(namespaceSelector:{})도 둘 다 잡는다(2026-09-03 실측: vmagent-allow-egress-everywhere
+  # 신설이 이 파일의 다른 @test 전건 초록이었다). `// "ANY"`가 빈 selector를 값으로 바꿔 fail-closed.
+  peers="$(yq ea '[select(.kind=="NetworkPolicy")|.spec.egress[]?|.to[]?|select(has("namespaceSelector"))|(.namespaceSelector.matchLabels["kubernetes.io/metadata.name"] // "ANY")]|.[]' "$P")"
+  printf '%s\n' "$peers" | grep -qxF -- kube-system
+  run grep -qxF -- ANY <<EOF
+$peers
+EOF
+  [ "$status" -eq 1 ]
 }
 
 @test "metrics east-west plane is intentionally untouched (no ns-wide default-deny)" {
