@@ -86,6 +86,14 @@ build_state() {
   [ "$status" -eq 0 ]
 }
 
+@test "required roster is the 4-artifact deploy contract (schema is SSOT)" {
+  # untouched-d-2(5라운드) — .required 배열의 원소 수·멤버십에 증인이 없어, values.yaml·
+  # .bindings.json을 로스터에서 빼도(real-tree 레인이 4비트 배선 전부 0으로 접혀) 23/23 초록이었다.
+  # 정렬·조인 등식은 추가·삭제 양방향을 한 줄로 잠근다(jq sort는 코드포인트 순 — 로케일 콜레이션
+  # 함정 밖, `-e` 미사용이라 yq/jq -e false=exit1 함정도 비껴간다).
+  [ "$(jq -r '.required | sort | join(",")' "$ROOT/tools/app-deploy-schema.json")" = ".bindings.json,kustomization.yaml,source-repo,values.yaml" ]
+}
+
 @test "poll-ghcr discovers apps by source-repo (contract: missing source-repo = never polled)" {
   # 경로는 app-surface module(appPaths(...).sourceRepo — d4) 경유다 — 그 필드를 검사한 행이 continue로
   # 걸러야 한다(source-repo 부재 = 폴링 대상 아님).
