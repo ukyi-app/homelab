@@ -144,3 +144,22 @@ sites() { git ls-files 'tests/gates/*.sh' 'tests/gates/lib/*.sh' | xargs grep -l
   got="$(vme_rules_delay "/nonexistent/rules-$$.yaml")"
   [ "$got" = "$VME_DELAY_CHAINED" ]
 }
+
+@test "the chaining-race discriminator is called wherever it is defined" {
+  # 원장 71행 「체이닝 레이스의 두 번째 얼굴」의 처방(require_engaged)은 drift·meta 두 하네스에
+  # 정의돼 있지만, 그 정의를 실제로 호출하는지 재는 정적 게이트가 없었다 — 뮤테이션 실측
+  # (2026-09-03): drift 하네스의 `require_engaged L*` 호출 6건을 전부 삭제해도(정의만 잔존)
+  # 이 파일의 나머지 8레인·check-bats-style·verify-traps·check-skeleton 전건 초록이었다.
+  # 건수 바닥값·정의-보유-하네스 집합 등식은 손 로스터다(레그 증감·새 하네스 채택마다 갱신 필요) —
+  # 대신 "정의는 있는데 호출 0"만 좁혀 잡는다(뮤테이션을 정확히 잡고 정당한 증감엔 안 문다).
+  hs="$(git ls-files 'tests/gates/vmalert-*-firing-e2e.sh')"
+  [ "$(printf '%s\n' "$hs" | grep -c .)" -ge 6 ] || { echo "발화 e2e 하네스 열거 붕괴"; return 1; }
+  n=0
+  for f in $hs; do
+    grep -q '^require_engaged() {' "$f" || continue
+    run grep -cE '^require_engaged ' "$f"
+    [ "$output" -gt 0 ] || { echo "$f: 정의만 있고 호출 0 — 레이스 판별기가 죽었다"; return 1; }
+    n=$((n + 1))
+  done
+  [ "$n" -ge 2 ] || { echo "정의 보유 하네스 ${n} < 2(drift + meta)"; return 1; }
+}
