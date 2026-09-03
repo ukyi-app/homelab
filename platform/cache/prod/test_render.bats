@@ -57,6 +57,19 @@ CJ="$DIR/backup-cronjob.yaml"
     [ -e "$s" ] || continue
     [ "$(yq '.metadata.labels."app.kubernetes.io/component"' "$s")" = "$sel" ] \
       || { echo "인스턴스 Service의 component 라벨이 CronJob 셀렉터($sel)와 다르다: $s"; false; }
+    # ⚠️ 인스턴스 kustomization 멤버십 — 부모(위 :67-70)만 닫혔고 인스턴스 자신은 무증인이었다.
+    #    파일명을 손 로스터로 재타이핑하지 않고 디렉토리에서 유도한다(향후 리소스 종류가 늘어도
+    #    자동 커버 — tools/lib/resource-layout.ts 손 사본 금지 규약과 정합). 인스턴스 0개면 이
+    #    루프 자체가 공허(형제 백업 루프와 같은 성질) — 비공허 증인은 생산자 쪽
+    #    tools/tests/test_provision-cache.bats에 있다.
+    d="$(dirname "$s")"; K="$d/kustomization.yaml"
+    [ -f "$K" ]
+    for f in "$d"/*.yaml; do
+      b="$(basename "$f")"
+      case "$b" in kustomization.yaml) continue ;; esac
+      yq '.resources[]' "$K" | grep -qxF "$b" \
+        || { echo "인스턴스 kustomization($K)에 $b 미등록 — 렌더에서 빠지면 라이브가 prune된다"; false; }
+    done
   done
   # 파일 실재 ≠ 렌더 포함 — ArgoCD가 싱크하는 진실은 kustomize 렌더 결과다. 위 grep들은 전부 파일을
   # 직접 읽으므로 kustomization의 resources에서 두 줄을 지워도 초록이었다(실측 2026-09-03: 12/12).
