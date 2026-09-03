@@ -190,6 +190,31 @@ setup() {
   grep -q 'namespace: edge' "$R"
 }
 
+@test "the apiserver path the reconciler calls and the ClusterRole resource/resourceName are one declaration" {
+  # 🔴 위 두 @test는 같은 사실을 **각자 하드코딩한 리터럴 두 개**로 잰다 — 둘을 묶는 등식이 없다.
+  #    실측 2026-09-03: CronJob의 URL을 `services/traefik-tailscale`로 바꾸고 위 @test의 리터럴만 함께
+  #    고치면(매니페스트와 테스트를 같이 고치는 자연스러운 변경) RBAC의 resourceNames는 traefik-ts로
+  #    남는데 21 ok / 0 not ok였다. 런타임은 403이고, 그 리컨실러는 조용히 수렴을 멈춘다.
+  #    같은 클래스의 선례: platform/victoria-stack/prod/test_automount.bats의
+  #    「ClusterRole resources == `--resources=`」 등식(한쪽만 지우면 reflector 403 / 남은 쪽은 죽은 권한).
+  local path res name crres crname n
+  # 좌변 — 스크립트가 **실제로 부르는** apiserver 경로에서 (resource, name)을 뽑는다.
+  path="$(grep -oE '/api/v1/namespaces/[a-z0-9-]+/[a-z]+/[a-z0-9.-]+' "$F" | LC_ALL=C sort | uniq)"
+  n="$(printf '%s\n' "$path" | grep -c . || true)"
+  # 비공허 + 단일 — 경로가 0건이면 등식의 좌변이 사라져 vacuous green이고, 2건 이상이면 이 한 줄
+  # 등식이 무엇을 말하는지 정의되지 않는다(그때는 로스터로 넓혀야 한다).
+  [ "$n" -eq 1 ] || { echo "리컨실러의 apiserver 리소스 경로가 ${n}건이다(기대 1건)"; false; }
+  res="${path%/*}"; res="${res##*/}"
+  name="${path##*/}"
+  # 우변 — RBAC이 실제로 부여한 것. 파일 전체 grep이 아니라 파싱한 목록이다(주석이 단언을 만족시키지 않게).
+  crres="$(yq 'select(.kind=="ClusterRole") | .rules[].resources[]' "$R" | LC_ALL=C sort | uniq)"
+  crname="$(yq 'select(.kind=="ClusterRole") | .rules[].resourceNames[]' "$R" | LC_ALL=C sort | uniq)"
+  [ -n "$crres" ]
+  [ -n "$crname" ]
+  [ "$res" = "$crres" ] || { echo "호출 리소스(${res}) != ClusterRole resources(${crres})"; false; }
+  [ "$name" = "$crname" ] || { echo "호출 대상 이름(${name}) != ClusterRole resourceNames(${crname}) — get by name이라 이 어긋남은 런타임 403이다"; false; }
+}
+
 @test "reconciler egress is locked: apiserver node-subnet + vmsingle + DNS, no internet (F13)" {
   grep -q '192.168.117.0/24' "$F"   # apiserver=노드서브넷(ClusterIP egress 불가 함정)
   grep -q '6443' "$F"
