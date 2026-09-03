@@ -104,6 +104,11 @@ const ALLOWLIST = "policy/alert-instance-stability-allowlist.txt";
 const MIN_SCAN = 30;   // 실 룰 56건(55 alert + 1 record, meta-observability 시점) — 셀렉터 붕괴 false-green 차단
 // denylist 항목 바닥값 — 파일이 남아 있는데 **내용만** 비거나 주석만 남는 부분 드리프트를 잡는다
 // (필수 읽기는 파일 부재만 잡는다). 실 원장 1항목 — 이 목록은 줄어들 이유가 없다. 래칫 아님.
+// ⚠️ **denylist에는 `EXEMPT_MAX` 같은 상한이 없고, 있어서도 안 된다 — 극성이 반대다.** allowlist는
+//    등재가 곧 검사 해제(면제)라 "몇 건까지"가 리뷰 지점이지만, denylist는 등재가 곧 **추가 강제**다
+//    (상태-파생 카운터를 rollup으로 감쌀 때 반드시 등재 — 누락이 false-negative). 상한을 씌우면
+//    "새 카운터를 등재하지 마라"는 압력이 되어 이 파일이 막으려던 결함을 되부른다. 그래서 이 목록의
+//    올바른 가드는 상한이 아니라 **바닥값**(MIN_DENY)이다.
 const MIN_DENY = 1;
 
 // rollup(range) 함수 — 이들만 시계열 첫 샘플을 "0에서 증가"로 취급할 수 있다.
@@ -903,13 +908,32 @@ if (import.meta.main) {
   try {
     const taken = takeFloors(process.argv.slice(2));
     floors = taken.floors;
-    f = parseFlags(taken.rest, { value: ["--repo-root", "--registry", "--supply-policy"], bool: [] });
-  } catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root · --registry · --supply-policy · --floor <도메인>=<n>`); process.exit(2); }
+    f = parseFlags(taken.rest, { value: ["--repo-root", "--registry", "--supply-policy", "--exempt-max"], bool: [] });
+  } catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root · --registry · --supply-policy · --exempt-max <n> · --floor <도메인>=<n>`); process.exit(2); }
   const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string) : ".";
   // --registry: push 메트릭 레지스트리 주입(**테스트 픽스처 격리 전용**). 실 레포 검증은 항상 기본
   // 레지스트리(DEFAULT_REGISTRY)로 돈다 — 부분 레포 루트를 쓰느라 프로덕션 검증을 약화시키지 않기 위함(F-4).
   const REGISTRY_FILE = typeof f["--registry"] === "string" ? (f["--registry"] as string) : "";
   const LOOKBACK = lookbackSec(ROOT);
+
+  // 면제 **상한** — 사유 강제(아래 allowErrors)의 형제 규율이자 형제 가드의 대칭
+  // (tools/check-resource-limits.ts `EXEMPT_MAX` · scripts/check-image-pins.sh `EXEMPT_MAX` ·
+  //  scripts/check-doc-index.sh `README_EXEMPT_MAX`). 사유는 "왜"를 재지만 "몇 건까지"를 재지 않아,
+  // 사유 주석만 붙이면 면제가 무한히 늘 수 있었다(실측: 사유 붙은 3건을 더해도 rc 0).
+  // ⚠️ allowlist 항목은 **룰 단위**라 한 줄이 모드 A/B/C/D를 그 룰에서 통째로 끈다 — blast radius가
+  //    이 파일에서 가장 큰 면제다.
+  // 현 강제 면제 **0건**(실측 2026-09-03 — 파일은 헤더 주석뿐). 늘리려면 **같은 PR에서** 이 상수를
+  // 올려라. 래칫이 아니라 상한이다(0 = "정당한 면제가 아직 없다", 기계는 픽스처가 매번 밟는다).
+  // `--exempt-max`는 **픽스처 전용** 오버라이드다(자기 크기 명시 관례 — `--floor rules=1` 선례).
+  // env 오버라이드는 두지 않는다 — 호출부에 안 보이는 off-switch 금지.
+  // ⚠️ `Number("abc")`는 NaN이고 `n > NaN`은 **항상 false**라 상한이 조용히 꺼진다(레포 등재 함정).
+  //    `Number("")`는 0이라 빈 입력과 의도적 0도 구별되지 않는다 — 정수 문자열만 받는다.
+  const EXEMPT_MAX = (() => {
+    const raw = f["--exempt-max"];
+    if (typeof raw !== "string") return 0;
+    if (!/^\d+$/.test(raw)) { console.error(`ERROR: --exempt-max는 음이 아닌 정수여야 한다(받은 값: '${raw}')`); process.exit(2); }
+    return Number(raw);
+  })();
 
   const denyMetrics = readList(DENYLIST, ROOT).map((l) => l.split("#", 1)[0].trim()).filter(Boolean);
 
@@ -1063,6 +1087,14 @@ if (import.meta.main) {
     if (!raw.includes("#")) { allowErrors.push(`${ALLOWLIST}:${i + 1} '${key}' — 사유 주석(#) 없음`); return; }
     allowed.add(key);
   });
+  // 상한은 사유 강제 **뒤**다 — 순서가 뒤집히면 "사유 없는 한 줄"이 상한 위반으로 보고돼
+  // 진단이 바뀐다(형제 check-resource-limits.ts·check-image-pins.sh와 같은 순서).
+  // 사용법/계약 파손이라 exit 2다(위반 목록의 1과 구별 — CONTRIBUTING 종료코드 규약).
+  if (allowErrors.length === 0 && allowed.size > EXEMPT_MAX) {
+    console.error(`ERROR: ${ALLOWLIST}: 강제 면제 ${allowed.size}건 > 상한 ${EXEMPT_MAX} — 그만큼의 룰이 모드 A/B/C/D 전부에서 빠졌다.`);
+    console.error(`  정당한 면제라면 이 상한(tools/check-alert-rules.ts의 EXEMPT_MAX 상수)을 **같은 PR에서** 올려라.`);
+    process.exit(2);
+  }
 
   // 열거는 공유 워커의 `rules` 스코프가 소유한다(tracked + YAML). MIN_SCAN은 이 린터에 남는다 —
   // 워커 바닥값은 없다(열거자는 "글롭이 깨져 0건"과 "정당하게 0건"을 구별할 도메인 지식이 없다).

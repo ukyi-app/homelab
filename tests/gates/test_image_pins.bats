@@ -86,8 +86,38 @@ EOF
 image: nginx:1.25
 EOF
   printf '# reason: 상류가 이미 digest 고정\nnginx:1.25\n' > "$REPO/allow.txt"
-  run bash "$CHK" --root "$REPO" --allowlist "$REPO/allow.txt"
+  # ⚠️ `--exempt-max 1`은 픽스처가 **자기 크기를 명시하는** 관례다(형제: --floor <도메인>=<n>).
+  #    실 트리의 유효 상한은 스크립트 상단 EXEMPT_MAX 상수 하나뿐이다.
+  run bash "$CHK" --root "$REPO" --allowlist "$REPO/allow.txt" --exempt-max 1
   [ "$status" -eq 0 ]
+}
+
+@test "an allowlist above the exemption cap fails loud (exit 2), even with reasons on every line" {
+  # 사유 강제는 "왜"를 재지만 "몇 건까지"를 재지 않았다 — 사유만 붙이면 면제가 무한히 늘었다
+  # (실측: 실 트리 allowlist에 사유 붙은 3건을 더해도 rc 0). 형제 처방의 대칭:
+  # tools/check-resource-limits.ts EXEMPT_MAX · scripts/check-doc-index.sh README_EXEMPT_MAX.
+  wf platform/x/deployment.yaml <<'EOF'
+image: nginx:1.25
+EOF
+  printf '# reason: 하나\nnginx:1.25\n# reason: 둘\nredis:7\n' > "$REPO/allow.txt"
+  run bash "$CHK" --root "$REPO" --allowlist "$REPO/allow.txt" --exempt-max 1
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | grep -qF '상한'
+  # 같은 목록이 상한 이하면 통과한다 — 상한이 "면제 기계 자체를 껐다"가 아님을 가르는 대조.
+  run bash "$CHK" --root "$REPO" --allowlist "$REPO/allow.txt" --exempt-max 2
+  [ "$status" -eq 0 ]
+}
+
+@test "a non-integer --exempt-max is a usage error (exit 2), not a silently disabled cap" {
+  # 형제 TS 가드가 등재한 함정: `Number("abc")`는 NaN이고 `n > NaN`은 **항상 false**라 상한이
+  # 조용히 꺼진다. 셸 쪽도 같은 자리를 정수 검사로 닫는다.
+  wf platform/x/deployment.yaml <<'EOF'
+image: nginx@sha256:0000000000000000000000000000000000000000000000000000000000000000
+EOF
+  printf '# reason: 하나\nnginx:1.25\n' > "$REPO/allow.txt"
+  run bash "$CHK" --root "$REPO" --allowlist "$REPO/allow.txt" --exempt-max abc
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | grep -qF '정수'
 }
 
 @test "scan-floor fails loud (exit 1) when the scan finds too few images" {
@@ -234,6 +264,8 @@ EOF
 
 @test "(f) real repo passes — all runtime images digest-pinned (default scan-floor, Task 9)" {
   # Task 9: 24 tag-only 이미지 수동 핀 적용 후 실 레포가 allowlist 0으로 통과(기본 바닥값 scan-floor 유효 — 오버라이드는 --floor total=<n>).
+  # 이 레인이 **면제 상한의 실 트리 대조**도 함께 진다 — 위 픽스처 레인은 --exempt-max로 자기 크기를
+  # 명시하므로, 상수 EXEMPT_MAX가 실 도메인과 어긋나는 것은 여기서만 보인다.
   run bash "$ROOT/scripts/check-image-pins.sh"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q '전부 digest 핀됨'

@@ -15,5 +15,9 @@
 #
 # 형식: 메트릭 이름 한 줄에 하나. `#` 이후는 주석.
 # 신규 상태-파생 카운터를 rollup으로 감쌀 때 반드시 여기 추가한다(누락 = false-negative).
+#
+# ⚠️ 이 파일은 **면제 목록이 아니라 강제 목록**이다 — 형제 allowlist가 가진 건수 상한(EXEMPT_MAX)이
+#    여기엔 없고 있어서도 안 된다. 등재가 검사를 끄는 게 아니라 켜기 때문이다. 이 목록의 가드는
+#    상한이 아니라 바닥값이다(check-alert-rules.ts의 MIN_DENY — 내용만 비는 드리프트를 잡는다).
 
 kube_pod_container_status_restarts_total   # KSM이 파드 status.containerStatuses[].restartCount에서 재파생

@@ -118,9 +118,10 @@ _registry_with_period() {   # $1=root  $2=periodSec(JSON 리터럴)
 JSON
 }
 
-_lint() {   # $1=root — 픽스처를 추적 상태로 만든 뒤 픽스처 레지스트리를 주입해 린터 실행
+_lint() {   # $1=root, 이후 인자는 린터에 그대로 전달 — 픽스처를 추적 상태로 만든 뒤 레지스트리 주입 실행
   _track_fixture "$1"
-  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$1" --registry "$1/registry.json" --supply-policy "$1/supply.json" --floor rules=1
+  local root="$1"; shift
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-alert-rules.ts" --repo-root "$root" --registry "$root/registry.json" --supply-policy "$root/supply.json" --floor rules=1 "$@"
   echo "$output"
 }
 
@@ -640,9 +641,50 @@ YAML
   tmp="$(mktemp -d)"
   _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
   echo 'PodCrashLoopingProbe   # 테스트 면제' > "$tmp/policy/alert-instance-stability-allowlist.txt"
-  _lint "$tmp"
+  # ⚠️ `--exempt-max 1`은 픽스처가 **자기 크기를 명시하는** 관례다(형제: --floor rules=1).
+  #    실 트리의 유효 상한은 tools/check-alert-rules.ts의 EXEMPT_MAX 상수 하나뿐이다.
+  _lint "$tmp" --exempt-max 1
   rm -rf "$tmp"
   [ "$status" -eq 0 ]
+}
+
+@test "an allowlist above the exemption cap fails loud (exit 2), even with reasons on every line" {
+  # 사유 강제는 "왜"를 재지만 "몇 건까지"를 재지 않았다 — 사유만 붙이면 면제가 무한히 늘었다
+  # (실측: 실 트리 allowlist에 사유 붙은 3건을 더해도 rc 0). allowlist 항목은 **룰 단위**라
+  # 한 줄이 그 룰의 모드 A/B/C/D를 통째로 끈다. 형제 처방의 대칭:
+  # tools/check-resource-limits.ts EXEMPT_MAX · scripts/check-image-pins.sh EXEMPT_MAX.
+  tmp="$(mktemp -d)"
+  _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
+  printf 'PodCrashLoopingProbe   # 하나\nSomeOtherAlert   # 둘\n' > "$tmp/policy/alert-instance-stability-allowlist.txt"
+  _lint "$tmp" --exempt-max 1
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | grep -qF '상한'
+  # 같은 목록이 상한 이하면 통과한다 — 상한이 "면제 기계 자체를 껐다"가 아님을 가르는 대조.
+  _lint "$tmp" --exempt-max 2
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
+@test "a non-integer --exempt-max is a usage error (exit 2), not a silently disabled cap" {
+  # 등재 함정: `Number("abc")`는 NaN이고 `n > NaN`은 **항상 false**라 상한이 조용히 꺼진다.
+  # `Number("")`는 0이라 빈 입력과 의도적 0도 구별되지 않는다 — 정수 문자열만 받는다.
+  tmp="$(mktemp -d)"
+  _seed "$tmp"
+  _lint "$tmp" --exempt-max abc
+  rm -rf "$tmp"
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | grep -qF '정수'
+}
+
+@test "the reason lint still owns the diagnosis when both faults are present (cap runs second)" {
+  # 순서 계약 — 상한이 사유 강제보다 앞서면 "사유 없는 한 줄"이 상한 위반으로 오진된다.
+  tmp="$(mktemp -d)"
+  _seed "$tmp" PodCrashLoopingProbe 'increase(kube_pod_container_status_restarts_total[15m]) > 3'
+  printf 'PodCrashLoopingProbe   # 하나\nSomeOtherAlert\n' > "$tmp/policy/alert-instance-stability-allowlist.txt"
+  _lint "$tmp" --exempt-max 0
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF '사유 주석'
 }
 
 @test "alert-rule guard rejects an allowlist entry with no reason comment" {

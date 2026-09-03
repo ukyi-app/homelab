@@ -127,7 +127,8 @@
   jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)
 - **`check-image-pins.sh`** — 이미지 digest 핀 2-레인 게이트: 레인1(platform 문자열 `image:`)·레인2(apps values
   `image:` 구조체 `digest:`). 벤더(barman-plugin)·테스트/픽스처(`**/tests/**`·`**/fixtures*/**`) 제외, substrate 스코프 밖,
-  scan-floor. 예외=`policy/image-pin-allowlist.txt`(사유 주석). 신규 미핀 이미지는 fail-closed 차단. (메타갭 ②)
+  scan-floor. 예외=`policy/image-pin-allowlist.txt`(사유 주석 **+ 건수 상한 `EXEMPT_MAX`** — 픽스처는
+  `--exempt-max`로만 넘긴다). 신규 미핀 이미지는 fail-closed 차단. (메타갭 ②)
 - **`verify-ledger.sh`** — 메모리 원장 예산 게이트 SSOT. `bun tools/ledger-to-json.ts` 출력을
   `conftest … policy/ledger.rego`로 검사.
 - **`verify-runbook-index.sh`** — `docs/runbooks/`(gitignored) ↔ AGENTS.md 런북 인덱스 정합(로컬 전용).
