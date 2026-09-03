@@ -230,7 +230,12 @@ push_metrics() {
   #    ⚠️ 값도 `${VAR}`나 숫자여야 한다 — `$(date …)`를 값 자리에 두면 추출기가 못 읽는다
   #       (EXPO_INLINE의 값 토큰은 `%fmt`·`$var`·숫자다. `$(`는 매치하지 않는다 — 실측).
   ts="$(date -u +%s)"
-  payload="files_backup_last_success_timestamp ${ts}\n"
+  # ★ 하트비트는 **페이로드의 마지막 줄**이다 — digest-exporter.yaml:65·gha-liveness-exporter.yaml:88과
+  #   같은 계약이고 ADR-0003 「살릴 것 하나」의 착지다(2026-09-03). 스트리밍 인입은 절단 시 읽은
+  #   접두부만 적재하므로, 하트비트가 앞줄이면 "하트비트만 적재 + 용량 유실"이 가능해 절단이
+  #   무성이 된다. 마지막에 두면 절단은 항상 하트비트부터 잃어 FilesBackupStale이 발화한다.
+  #   ⚠️ 조건부로 만들지 말 것 — df 실패 분기의 "하트비트 1줄" 계약(백업은 실제로 성공했다)은 그대로다.
+  payload=""
   # 숫자인가(빈 값·비숫자 거부) → size > 0인가. 둘 다 통과할 때만 용량을 싣는다.
   if ! printf '%s' "$avail" | grep -qE '^[0-9]+$' || ! printf '%s' "$size" | grep -qE '^[0-9]+$'; then
     echo "WARN: df 파싱 실패(avail='${avail}' size='${size}') — 용량 메트릭을 **보내지 않는다**." >&2
@@ -241,6 +246,7 @@ push_metrics() {
     payload="${payload}files_data_bulk_avail_bytes ${avail}\n"
     payload="${payload}files_data_bulk_size_bytes ${size}\n"
   fi
+  payload="${payload}files_backup_last_success_timestamp ${ts}\n"
   # `%b`가 리터럴 `\n`을 실제 개행으로 편다 — 마지막 줄도 개행으로 끝난다(exposition 규약).
   printf '%b' "$payload" | curl -fsS --data-binary @- "${url}/api/v1/import/prometheus"
 }

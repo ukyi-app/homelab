@@ -151,6 +151,11 @@ teardown() { rm -rf "$STUB" "$DEST" "$SRC"; }
   run grep -qE '^files_data_bulk_size_bytes [0-9]+$' "$DEST/pushed.txt"; [ "$status" -eq 0 ]
   # 마지막 줄이 개행으로 끝나는가(exposition 규약) — 없으면 마지막 메트릭이 잘린다.
   run bash -c "[ -z \"\$(tail -c 1 '$DEST/pushed.txt')\" ]"; [ "$status" -eq 0 ]
+  # ★ 하트비트는 **마지막 줄**이어야 한다(digest-exporter·gha-liveness와 같은 계약, ADR-0003 「살릴 것」).
+  #   /api/v1/import/prometheus는 스트리밍 인입이라 절단되면 읽은 접두부만 적재된다 — 하트비트가 앞줄이면
+  #   "하트비트만 적재 + 용량 유실"이 가능해 절단이 무성이 된다. 마지막에 두면 절단은 항상 하트비트부터
+  #   잃으므로 FilesBackupStale이 발화한다(fail-closed 복원).
+  run bash -c "tail -n1 '$DEST/pushed.txt' | grep -q '^files_backup_last_success_timestamp '"; [ "$status" -eq 0 ]
 }
 
 @test "a broken df sends the heartbeat ALONE — it never fabricates a zero" {

@@ -421,9 +421,13 @@ spec:
                   # 3) read-back 검증(F7) — 실제 라이브 상태가 want인지 재조회로 확인한 뒤에만 성공 하트비트.
                   now=$(list_answer)
                   [ "$now" = "$want" ] || { echo "read-back 불일치: now=${now} want=${want}"; exit 1; }
-                  # 4) 성공 하트비트 + fix 표시 — read-back 통과 시에만. F19: fix 타임스탬프는 FIXED=1일 때만(희소 샘플, 0 금지).
-                  { printf 'adguard_rewrite_reconcile_timestamp %s\n' "$(date +%s)"
-                    if [ "$FIXED" = 1 ]; then printf 'adguard_rewrite_last_fix_timestamp %s\n' "$(date +%s)"; fi
+                  # 4) fix 표시 + 성공 하트비트 — read-back 통과 시에만. F19: fix 타임스탬프는 FIXED=1일 때만(희소 샘플, 0 금지).
+                  # ★ 하트비트가 **마지막 줄**이다(digest-exporter·gha-liveness와 같은 계약, ADR-0003 「살릴 것 하나」
+                  #   2026-09-03 착지). 스트리밍 인입은 절단 시 접두부만 적재하므로 하트비트를 앞에 두면 절단이
+                  #   무성이 된다. 여기서 잃는 줄의 소비 룰은 severity info(AdguardRewriteDriftFixed)라 이득은
+                  #   fail-open 차단이 아니라 「절단하는 push 경로를 알아차림」이다.
+                  { if [ "$FIXED" = 1 ]; then printf 'adguard_rewrite_last_fix_timestamp %s\n' "$(date +%s)"; fi
+                    printf 'adguard_rewrite_reconcile_timestamp %s\n' "$(date +%s)"
                   } | $CURL_READ --data-binary @- "http://vmsingle.observability.svc:8428/api/v1/import/prometheus"
                   echo "done: have=${have:-<none>} want=${want} fixed=${FIXED}"
               volumeMounts:
