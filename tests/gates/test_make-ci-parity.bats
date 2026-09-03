@@ -287,3 +287,90 @@ mkparity_fixture() {   # $1=디렉토리  $2=then 절 본문
   run bash -c "cd '$kept' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
   [ "$status" -eq 0 ]
 }
+
+# ── ⑧ 이름 보존 + 본문 교체 ────────────────────────────────────────────────────────────────────
+# ④는 원장 → `make -n ci`, ⑦은 ci.yaml 본문 → 원장이다. 둘 다 스텝을 **이름**으로 계상하므로,
+# 이름을 남기고 run 본문만 갈아치우면 ④는 Makefile 쪽 문자열로 통과하고 ⑦은 본문에 레포 커맨드가
+# 없어 **침묵**한다(방향 ⑦은 "보이는 커맨드가 원장에 있는가"만 본다 — 0건은 위반이 아니다).
+# 실측 2026-09-03: 실 ci.yaml의 `run: bun run verify:ledger`를 `run: echo swapped`로 바꿔도
+# check-ci-parity·check-guard-authority·check-workflow-readiness가 **전건 초록**이었다.
+# ⇒ ⑧이 그 자리를 문다: 원장이 선언한 토큰은 그 스텝의 본문에도 실재해야 한다.
+mkparity_body() {   # $1=디렉토리  $2=gate 스텝 run 본문  $3=원장 항목 꼬리(예: gate_contains)
+  mkdir -p "$1/.github/workflows" "$1/policy"
+  printf 'name: ci\non: push\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - name: actionlint\n        run: %s\n' \
+    "$2" > "$1/.github/workflows/ci.yaml"
+  printf '{"_readme": "fixture", "steps": [{"name": "actionlint", "status": "mirrored", "local": "actionlint"%s}]}\n' \
+    "$3" > "$1/policy/ci-parity.json"
+  printf 'CI_UNEVAL := .make-ci-uneval\nci:\n\t@rm -f $(CI_UNEVAL)\n\t@if command -v actionlint >/dev/null 2>&1; then actionlint; \\\n\t  else echo "actionlint(워크플로 정적 검사)" >> $(CI_UNEVAL); fi\n' \
+    > "$1/Makefile"
+}
+
+@test "a mirrored step keeping its name while its body is swapped is rejected (direction 8 bites)" {
+  swapped="$BATS_TEST_TMPDIR/swapped"
+  mkparity_body "$swapped" 'echo swapped' ''
+  run bash -c "cd '$swapped' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF -- '이름을 보존한 채 run 본문이 갈렸다'
+
+  # 대조군 — 같은 픽스처에서 본문만 되살리면 통과한다(픽스처 조립 자체의 실패가 아니다).
+  kept="$BATS_TEST_TMPDIR/kept-body"
+  mkparity_body "$kept" 'actionlint' ''
+  run bash -c "cd '$kept' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+# 표기가 **정당하게 다른** 자리가 실재한다 — gate는 `make chart-test`를 부르고 make ci는 그 타깃의
+# 레시피를 편다(그래서 local은 render.sh다). 그 자리를 열어 두되, 아래 두 레인이 그 문이 남용·부패
+# 하지 않게 막는다.
+@test "gate_contains lets a legitimately different notation pass (make target vs recipe path)" {
+  fx="$BATS_TEST_TMPDIR/gc-ok"
+  mkparity_body "$fx" 'make lint' ', "gate_contains": "make lint"'
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "gate_contains is refused when the local token is already in the body (no second hand-managed string)" {
+  fx="$BATS_TEST_TMPDIR/gc-dup"
+  mkparity_body "$fx" 'actionlint' ', "gate_contains": "actionlint"'
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF -- 'gate_contains가 불필요하다'
+}
+
+@test "a gate_contains that no longer matches the body is rejected (the escape hatch cannot go stale)" {
+  fx="$BATS_TEST_TMPDIR/gc-stale"
+  mkparity_body "$fx" 'echo swapped' ', "gate_contains": "make lint"'
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF -- "gate_contains 'make lint'가 없다"
+}
+
+# covered/excluded는 ⑧의 대상 밖이다(gate 본문과 맞댈 로컬 토큰이 없다) — 그러니 그 status에
+# gate_contains를 달면 아무도 대조하지 않는 문자열이 원장에 쌓인다(③ '죽은 선언'과 같은 클래스).
+@test "gate_contains on a non-mirrored entry is rejected (nothing would ever compare it)" {
+  fx="$BATS_TEST_TMPDIR/gc-status"
+  mkdir -p "$fx/.github/workflows" "$fx/policy"
+  printf 'name: ci\non: push\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - name: excluded-step\n        run: docker run x\n' \
+    > "$fx/.github/workflows/ci.yaml"
+  printf '%s\n' '{"_readme": "fixture", "steps": [{"name": "excluded-step", "status": "excluded", "why": "w", "since": "s", "owner_action": "o", "gate_contains": "docker run"}]}' \
+    > "$fx/policy/ci-parity.json"
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF -- 'gate_contains는 mirrored 전용이다'
+}
+
+# 빈 needle은 모든 본문에 있다 — 그 한 줄이 ⑧을 항진식으로 만든다.
+@test "an empty gate_contains is rejected instead of matching every body" {
+  fx="$BATS_TEST_TMPDIR/gc-empty"
+  mkparity_body "$fx" 'echo swapped' ', "gate_contains": ""'
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF -- '항진식'
+}
