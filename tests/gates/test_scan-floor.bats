@@ -252,9 +252,15 @@ c" ]
   # ⚠️ 이 바닥값은 **여유가 없다**(오늘 로스터와 같은 값). 도메인 바닥값은 도메인이 정당하게 줄 수
   #    있어 여유를 두지만, 라벨이 사라지는 것은 드리프트가 아니라 언제나 **의도적 커버리지 변경**이고
   #    그때는 CONTRIBUTING·PROGRESS의 커버리지 수치도 같이 고쳐야 하므로 diff에 보여야 한다.
+  # ⚠️ 그래서 이 상수는 **로스터가 늘 때 같이 올려야 한다**. 29로 굳어 있던 동안 실측은 38이었고
+  #    (2026-09-03 재측정), 그 9칸의 여유가 바로 이 바닥값이 없애려던 것이다 — 뮤테이션 실측: 단일
+  #    라벨 가드 8개의 콜사이트를 죽여 38→30으로 떨어뜨려도 이 @test는 초록이었다(집합 대조는 정적·
+  #    런타임이 **함께** 줄어 등식이 유지되므로 원리적으로 못 본다). 값은 실측이지 래칫이 아니다:
+  #    가드당 라벨 수 = check-{skeleton,image-pins,gh-secret-coverage,doc-index,bats-accounting} 3 ·
+  #    verify-{traps,credential-inventory}·sealed-guard·check-{argocd-revision,app-netpol} 2 · 나머지 13개 1.
   # 라벨 수 바닥값은 **전체** 정적 집합에서 센다 — SKIP과 무관하게 "라벨이 사라졌는가"를 보는 축이다.
   labels=$(printf '%s\n' "$static" | grep -c . || true)
-  [ "$labels" -ge 29 ]
+  [ "$labels" -ge 38 ]
   guards="$(grep -lE '^[^#]*\b(scan_floor|scan_signal) ' "$ROOT"/scripts/*.sh)"
   [ -n "$guards" ]
   # ⚠️ **SKIP(exit 4)은 실패가 아니다 — 그리고 대조에서 양쪽 대칭으로 빠져야 한다.**
