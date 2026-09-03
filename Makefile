@@ -235,6 +235,23 @@ ci: ci-guard-tracked m6-tools chart-test ## push 전 단일 진입점 — ci.yam
 # ⚠️ 여기서 개별적으로 `SKIP:`를 내면 안 된다 — 마커를 내면서 종료코드가 0이면 **호출자에겐 여전히 성공**이고,
 #    그게 이 레포가 금지한 패턴이다(CONTRIBUTING '가드 skip 신호', scripts/check-skip-signalling.sh가 강제).
 #    docker가 없으면 make ci는 gate를 재현하지 **못한** 것이고, 0으로 끝나는 것이 이 원장이 없애려는 거짓말이다.
+# gitleaks(누출 스캔) — required gate의 `secret-guard` 스텝을 **같은 모드·같은 대상**으로 미러한다:
+# `detect --no-git`(작업트리만 — 히스토리를 스캔하면 회전된 옛 시크릿 하나가 모든 실행을 영구 red로
+# 만든다) · `--source .` · `--redact`(평문 미출력) · `--exit-code 1`(차단). 룰 설정은 `.gitleaks.toml`을
+# 양쪽이 자동으로 읽는다.
+# ⚠️ **버전도 원장이다.** gate는 `.pre-commit-config.yaml`의 rev를 파생해 그 버전을 설치한다 —
+#    로컬 판이 다르면 "같은 검사를 돌렸다"가 거짓이다(v8.18.4→v8.30.1 bump에서 gate가 새로 잡은 것이
+#    9건이었다). 그래서 판이 어긋나면 **돌리지 않고** 미평가 원장에 남긴다 — 다른 룰셋의 초록은
+#    재현이 아니다.
+# ⚠️ 왜 로컬에도 필요한가: 에이전트 worktree는 pre-commit 훅이 설치돼 있지 않다(`.git/hooks`에
+#    `.sample`뿐 — 2026-09-03 실측). 훅에만 기대면 그 커밋들은 스캐너를 한 번도 지나지 않고,
+#    누출은 PR gate에서야 처음 보인다(#615 실측).
+	@ver="$$(yq '.repos[] | select(.repo == "https://github.com/gitleaks/gitleaks") | .rev' .pre-commit-config.yaml | sed 's/^v//')"; \
+	  [ -n "$$ver" ] || { echo "gitleaks 핀(rev)을 .pre-commit-config.yaml에서 못 찾았다 — 핀 SSOT 파손" >&2; exit 1; }; \
+	  if ! command -v gitleaks >/dev/null 2>&1; then echo "gitleaks(누출 스캔 — 로컬 미설치)" >> $(CI_UNEVAL); \
+	  elif [ "$$(gitleaks version 2>/dev/null | tr -d 'v ')" != "$$ver" ]; then \
+	    echo "gitleaks(로컬 판이 핀과 다르다 — 다른 룰셋의 초록은 재현이 아니다)" >> $(CI_UNEVAL); \
+	  else gitleaks detect --no-git --source . --redact --no-banner --exit-code 1; fi
 	@if command -v actionlint >/dev/null 2>&1; then actionlint; \
 	  else echo "actionlint(워크플로 정적 검사)" >> $(CI_UNEVAL); fi
 	@if command -v docker >/dev/null 2>&1; then bash tests/gates/alertmanager-render-e2e.sh; \
