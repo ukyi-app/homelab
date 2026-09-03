@@ -117,7 +117,14 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
 
   ### 관측 스택 마진 규약 (자기조절 클래스 — 2026-09-01 확정)
 
-  **`limit ≥ RSS peak(현 기판 창, 30초 해상도, 파드-세대 붕괴) × 1.5`**, 16Mi 단위 올림.
+  **`limit ≥ RSS peak(현 기판 창, 30초 해상도, 파드-세대 붕괴, 세대별 첫 10분 제외) × 1.5`**, 16Mi 단위 올림.
+
+  **창 문언(2026-09-03 owner 확정)**: 창은 `node_boot_time_seconds` 이후 전체이되, **각 파드 세대의 시작 후
+  첫 10분은 분자에서 뺀다**(재기동 직후 전이 — 초기화 스파이크는 정상 상태의 예산이 아니다). 그 스파이크는
+  별도 부등식으로 잰다: **세대별 첫 10분의 RSS peak < limit**(스타트업이 limit을 넘으면 crashloop이므로 이
+  부등식만은 창 밖에서도 유지한다 — 2026-09-03 실측 최대는 grafana 171.8Mi < 256Mi). 2026-09-01 표는 사실상
+  이 기준이었다(grafana의 부팅 3분 뒤 171.8Mi가 그 표에 없었다) — 문언이 없어 재측정 때 같은 행이
+  1.49x/1.71x로 갈렸고, 그래서 못박는다.
 
   **적용 대상**: `observability`의 `vmagent`·`vmsingle`·`grafana`·`glances`·`victorialogs` 5개.
   **적용 조건**: ⭐ **`shmem == 0`을 cgroup `memory.stat` 직독으로 확인한 경우에만.**
@@ -192,34 +199,27 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
   섞는다.** 원장이 적었던 `vmagent 1.05x`가 정확히 그 산물이다 — 그 값은 재부팅 전 세대의 것이고
   현 기판에서는 1.33x다. 기판이 바뀌면(노드 재부팅·커널·런타임 메이저) 창을 그 이후로 자른다.
 
-  #### 적용 결과 (2026-09-01)
+  #### 적용 결과 (2026-09-03 재측정 — 창: 부팅 2026-08-26T13:41:06Z 이후 · 30s · 세대별 첫 10분 제외)
 
   | 워크로드 | RSS peak(현 기판) | ×1.5 | 종전 | 현행 | 판정 |
   |---|---|---|---|---|---|
-  | `vmagent` | 168.5Mi | 252.8 | 224Mi | **256Mi** | 상향(1.33x → 1.52x) |
-  | `vmsingle` | 694.9Mi | 1042.3 | 896Mi | **1056Mi** | 상향(1.29x → 1.52x) |
-  | `grafana` | 149.5Mi | 224.2 | 256Mi | 256Mi | 유지(1.71x) |
-  | `glances` | 76.7Mi | 115.1 | 128Mi | 128Mi | 유지(1.67x) |
-  | `victorialogs` | 107.6Mi | 161.4 | 256Mi | 256Mi | 유지(2.38x) |
+  | `vmagent` | 176.3Mi (09-02T19:18Z) | 264.5 | 256Mi | **272Mi** | 상향(1.45x → 1.54x) |
+  | `vmsingle` | 694.9Mi (09-01T08:29Z) | 1042.3 | 1056Mi | 1056Mi | 유지(1.52x) |
+  | `grafana` | 149.6Mi (09-02T20:44Z) | 224.4 | 256Mi | 256Mi | 유지(1.71x) |
+  | `glances` | 76.7Mi (09-03T02:22Z) | 115.0 | 128Mi | 128Mi | 유지(1.67x) |
+  | `victorialogs` | 109.4Mi (09-02T21:48Z) | 164.1 | 256Mi | 256Mi | 유지(2.34x) |
 
-  🔴 **재측정 필요 — `vmagent` 행이 자기 규약 아래로 내려갔다(2026-09-02 관측, 미착지)**. 같은 규약·
-  같은 창(부팅 2026-08-26T13:41:06Z 이후)·같은 step(30s)으로 다시 재면 vmagent RSS peak는
-  **176.3Mi**이고, 176.3×1.5=264.5 > 256이라 배수가 **1.45x**로 위 표의 하한 1.5를 밑돈다. 값은 6일간
-  단조 상승 중이었다(08-27 148.3 → 08-31 161.9 → 09-01 168.5 → 09-02 176.3). 나머지 넷은 같은
-  재측정에서 규약을 충족했다. 이 이탈은 어떤 게이트도 잡지 않고(원장 행은 라이브 manifest와
-  자동 교차검증되지 않는다 — `homepage`만 예외), `ContainerMemoryNearLimit`은 A′ 0.85(=217.6Mi)라
-  현재 A′ peak 178.6Mi(0.698)에서 침묵한다 — **규약 위반과 알림 사이에 39Mi의 무성 구간이 있다.**
+  직전 표(2026-09-01: vmagent 168.5 · vmsingle 694.9 · grafana 149.5 · glances 76.7 · victorialogs 107.6)는
+  이 재측정으로 통째로 대체됐다 — 규약이 요구하는 갱신 단위는 행 하나가 아니라 **재측정 1회 전체**다.
+  창 안 파드 세대: vmagent·vmsingle 2(둘 다 2026-09-01T09:37Z 재생성), 나머지 셋 1.
 
-  ⚠️ 그런데 **여기서 숫자를 고치지 않는다.** 이 표의 값은 2026-09-01에 이 규약을 세우면서 라이브로
-  잰 것이고, 그 규약이 요구하는 갱신 단위는 "행 하나"가 아니라 **재측정 1회 전체**다. 한 행만
-  새 창의 숫자로 바꾸면 남은 넷은 옛 창에 머물러 표가 두 체제를 섞는다(바로 위 「측정 창이 기판
-  변경을 가로지르면」이 경고하는 형태 그대로다). 게다가 처방 자체가 갈린다 — 176.3의 1.5배인
-  272Mi는 관측된 상승 속도(150.5→176.3/36h)면 며칠 안에 재위반하고, 대안(분모를
-  `max(실측 RSS peak, GOMEMLIMIT)`로 바꿔 304Mi로 한 번에 올리기)은 규약 문언 자체를 바꾸는
-  결정이라 이 자리에서 조용히 할 일이 아니다. 같은 재측정에서 `grafana`도 창을 어떻게 자르느냐에
-  따라 1.49x(재기동 직후 전이 포함)와 1.71x로 갈리므로, **"재기동 직후 전이를 창에 포함하는가"를
-  규약 문언에 못박는 것이 재측정의 선행 조건**이다. ⇒ owner-local 라이브 재측정 + 규약 문언 확정
-  후 다섯 행을 한 커밋에 갱신한다(followups).
+  ✅ **2026-09-02 관측(vmagent 1.45x 이탈)은 2026-09-03 재측정으로 착지했다.** 이탈은 사실이었고(176.3Mi,
+  6일간 단조 상승 08-27 148.3 → 09-02 176.3 → 재측정 시점 peak 동일), 처방은 규약 그대로 272Mi다. 분모를
+  `max(RSS peak, GOMEMLIMIT)`로 바꿔 304Mi로 올리는 대안은 규약 문언을 바꾸는 결정이라 채택하지 않았다 —
+  대신 **상승이 이어지면 재측정이 먼저**라는 조건을 여기 남긴다(272는 1.54x라 여유가 0.04x뿐이다).
+  이 이탈을 잡은 게이트는 없었고 `ContainerMemoryNearLimit`(A′ 0.85)도 침묵했다 — 원장 행과 라이브 manifest의
+  자동 교차검증은 substrate 스코프에만 있다(`tools/check-resource-limits.ts`, 감사 3라운드 티켓 26). 관측
+  스택 5행의 기계 대조는 여전히 없다(followups).
 
   ⚠️ **이 규약은 하한이다 — 만족하는 행을 깎는 근거가 아니다.** 특히 `grafana`는 knob이 하나도 없어
   (allowedPercent도 GOMEMLIMIT도 없는 Go 기본 GOGC) limit을 낮추면 자기조절로 흡수되지 않고 그대로
@@ -387,7 +387,7 @@ atomic []string이라 strategic-merge가 리스트를 통째로 교체한다(실
 | <!-- ledger:row --> cnpg           | database       |    832 |     1472 |
 | <!-- ledger:row --> cnpg-operator  | cnpg-system    |    124 |      160 |
 | <!-- ledger:row --> cert-manager   | cert-manager   |     88 |      240 |
-| <!-- ledger:row --> observability  | observability  |   1184 |     2608 |
+| <!-- ledger:row --> observability  | observability  |   1184 |     2624 |
 | <!-- ledger:row --> edge           | edge           |     96 |      320 |
 | <!-- ledger:row --> tailscale      | tailscale      |    192 |      336 |
 | <!-- ledger:row --> whoami         | gateway        |     16 |       16 |
@@ -399,7 +399,7 @@ atomic []string이라 strategic-merge가 리스트를 통째로 교체한다(실
 | <!-- ledger:row --> files          | files          |     32 |      64 |
 | <!-- ledger:row --> local-path-storage | local-path-storage |     64 |     128 |
 
-**합계:** req ≈ 4727 Mi · limit ≈ 9292 Mi (반드시 ≤ 10240 Mi 유지).
+**합계:** req ≈ 4727 Mi · limit ≈ 9308 Mi (반드시 ≤ 10240 Mi 유지).
 (⚠️ 이 줄의 형식은 **계약**이다 — `≈` 두 개를 포함한 `tools/lib/ledger-totals.ts`의 `TOTALS_RE`가
 쓰기 경로(`replaceTotals` — create-app/provision-cache/teardown-app/teardown-resource)의 앵커다.
 2026-08-31 정정에서 `≈`가 떨어져 나가 실 원장에 대해 `replaceTotals`가 throw했고, 그동안 세 개의

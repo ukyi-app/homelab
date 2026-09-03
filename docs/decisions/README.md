@@ -20,3 +20,4 @@
 | [0004](0004-golden-path-rule-of-two.md) | 골든패스 확장 대신 베스포크 유지(rule-of-two) |
 | [0005](0005-data-connection-residual-risk.md) | 데이터 연결 = 일반 SealedSecret · 잔여 위험 informed 감수 |
 | [0006](0006-archive-separation-contract-retired.md) | 컷오버에서 복구 원본 제거 · "쓰기≠읽기" 계약을 "쓰기 고정"으로 평행이동 |
+| [0007](0007-seed-vs-live-ssot.md) | ArgoCD가 수렴시키지 않는 tracked 값은 자산별 SSOT 선언 · 시드 드리프트는 경고로만 |

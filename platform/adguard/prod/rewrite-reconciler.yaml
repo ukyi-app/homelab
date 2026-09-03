@@ -1,3 +1,5 @@
+# SSOT: live — rewrite의 권위는 이 리컨실러가 갱신하는 **라이브** AdGuard다. adguardhome.yaml의 `rewrites:`
+#   블록은 첫 부팅 시드일 뿐이라 여기서 읽지 않는다(docs/decisions/0007).
 # adguard *.home rewrite 셀프힐 리컨실러(메타갭 ① W2-A) — split-horizon rewrite(`*.home.ukyi.app → traefik-ts
 # tailscale IP`)가 DR 재구축/proxy 재등록으로 stale이 되면 tailscale·LAN 양쪽에서 *.home이 죽은 IP로 해석된다
 # (AdGuard split-horizon rewrite DR stale 함정). 이 CronJob이 10분마다 traefik-ts svc의 실 LB IP를 apiserver로
