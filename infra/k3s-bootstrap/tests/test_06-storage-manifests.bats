@@ -34,6 +34,17 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
 }
 
 @test "provisioner config maps each class to its node path" {
+  # ConfigMap 문서 단위로 봐야 하는 이유: 파일 전체 grep은 두 nodePathMap의 **대칭 스왑**에 눈이 먼다
+  # (두 리터럴이 각 1회씩 그대로 남으므로 아래 존재 검사 3줄이 전부 통과한다). 스왑이 나면
+  # standard(기본 SC)가 /mnt/bulk에, bulk-ssd(files-data, Retain)가 부트 디스크에 프로비저닝된다.
+  # 아래 :57 @test의 pair 루프 관용구를 그대로 재사용한다.
+  for pair in "local-path-config-internal:$INTERNAL_STORAGE_PATH" \
+              "local-path-config-bulk:\${BULK_STORAGE_PATH}"; do
+    cm="${pair%%:*}"; want="${pair#*:}"
+    cfg="$(yq "select(.kind==\"ConfigMap\" and .metadata.name==\"$cm\") | .data[\"config.json\"]" "$PROV")"
+    # select가 0건이면 $cfg가 빈 문자열이라 grep이 rc 1로 죽는다 — CM 리네임도 fail-closed.
+    printf '%s' "$cfg" | grep -qF -- "$want"
+  done
   run grep -F "$INTERNAL_STORAGE_PATH" "$PROV"; [ "$status" -eq 0 ]
   # bulk 경로는 템플릿(${BULK_STORAGE_PATH})이라 apply-storage.sh가 외장 SSD 마운트
   # (또는 VM 디스크 dev 폴백)를 가리키게 할 수 있다; 렌더 결과 검사는 07에 있다.
