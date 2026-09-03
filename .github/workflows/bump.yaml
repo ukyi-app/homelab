@@ -146,6 +146,8 @@ jobs:
           fi
           # ── [/staged-completeness] ───────────────────────────────────────────────────
           if git diff --quiet; then echo "no values changed"; exit 0; fi
+          # 별도 레인(bump/build-*) — 신원 SSOT: tools/lib/bump-plan.ts WRITER_NAME/WRITER_EMAIL,
+          # composite(pr-first-commit) 분모 밖(ensure-bump-pr는 bump-poll/*만 본다).
           git config user.name "ukyi-homelab-writer[bot]"
           git config user.email "293311924+ukyi-homelab-writer[bot]@users.noreply.github.com"
           branch="bump/build-${RUN_ID}"
