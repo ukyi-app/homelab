@@ -98,7 +98,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; F="$ROOT/.github/workf
 @test "reusable-app-build: deploy-trigger job absorbed (needs build + preflight-skip + App token + bump-poll dispatch)" {
   command -v yq >/dev/null || skip "yq required"
   [ "$(yq -r '.jobs.deploy-trigger.needs // "null"' "$F")" = "build" ]
-  grep -q 'create-github-app-token' "$F"
-  grep -q 'gh workflow run bump-poll.yaml' "$F"
+  # ⚠️ 파일 전체 grep을 쓰지 않는다 — 디스패치 스텝의 needle이 같은 파일 :129 주석
+  #   (`# homelab에서 \`gh workflow run bump-poll.yaml\`.`)에도 매치해, 스텝 7줄을 통째로
+  #   지워도 초록이 난다(자체 뮤테이션 9/9 초록 실측). deploy-trigger.steps 구조만 본다.
+  [ "$(yq -r '[.jobs.deploy-trigger.steps[] | select((.uses // "") | test("create-github-app-token"))] | length' "$F")" = "1" ]
+  [ "$(yq -r '[.jobs.deploy-trigger.steps[] | select((.run // "") | test("gh workflow run bump-poll\\.yaml"))] | length' "$F")" = "1" ]
   grep -q 'configured=false' "$F"   # 시크릿 부재 시 clean skip(preflight)
 }
