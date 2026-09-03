@@ -79,6 +79,28 @@ run_hc() { HOSTCFG_ROOT="$FX" run "$BOOTSTRAP_DIR/host-config.sh" "$@"; }
   [ "$status" -eq 0 ]
 }
 
+@test "the sshd drop-in still hardens (the tree is the only checkable authority)" {
+  # 실효값은 50-cloud-init.conf(600)의 EACCES 때문에 원리적으로 못 읽는다(host-config.sh 헤더).
+  # 위 두 @test는 **파일명 우선순위**만, `--check`는 디스크↔트리 **바이트 동일성**만 본다 —
+  # 트리 자체의 값에는 증인이 0이었다. 형제 드롭인(resolved DNS=·networkd UseDNS=false)에는
+  # 값 증인이 있는데 sshd만 없었던 자리다. 모양은 :345 networkd @test와 같다.
+  f="$TREE/etc/ssh/sshd_config.d/10-k3s-node.conf"
+  [ -f "$f" ]
+  grep -qxF 'PermitRootLogin no' "$f"
+  grep -qxF 'PasswordAuthentication no' "$f"
+  grep -qxF 'KbdInteractiveAuthentication no' "$f"
+}
+
+@test "the journald drop-in still declares a cap (an implied cap moves with the filesystem)" {
+  # 값은 핀하지 않는다 — 요점은 "상한을 **명시**한다"는 것이다. 선언이 사라지면 systemd가
+  # min(fs의 10%, 4G)를 유도하고, 그 값은 파일시스템 크기를 따라 조용히 움직여 어떤 검사도
+  # "얼마여야 하는가"를 말할 수 없게 된다(트리 파일 헤더). :237의 형제는 파일 **존재**만 본다.
+  j="$TREE/etc/systemd/journald.conf.d/10-k3s-node.conf"
+  [ -f "$j" ]
+  grep -qE '^SystemMaxUse=' "$j"
+  grep -qE '^SystemKeepFree=' "$j"
+}
+
 # ── versions.env ↔ 트리 정합 (렌더링하지 않으므로 값이 두 곳에 산다) ───────────────────────
 @test "the resolved drop-in pins exactly versions.env HOST_UPSTREAM_DNS" {
   [ -n "$HOST_UPSTREAM_DNS" ]
