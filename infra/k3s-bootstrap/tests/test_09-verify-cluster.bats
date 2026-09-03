@@ -48,10 +48,23 @@ EOF
   printf '["server","--node-ip","%s","--node-name","%s","--disable","traefik,local-storage,metrics-server","--secrets-encryption"]' \
     "$K3S_NODE_IP" "$K3S_NODE_NAME" > "$STUBDIR/nodeargs.txt"
 
+  # local-path substrate 픽스처 — 건강한 기본값은 핀과 일치한다([10][11]).
+  printf 'rancher/local-path-provisioner:%s\nrancher/local-path-provisioner:%s\n' \
+    "$LOCAL_PATH_PROVISIONER_VERSION" "$LOCAL_PATH_PROVISIONER_VERSION" > "$STUBDIR/lppimages.txt"
+  # ⚠️ 픽스처는 라이브 ConfigMap의 실제 모양이어야 한다(들여쓴 `image:` 줄) — 모양이 다르면
+  #    파서가 무엇을 증명하는지 알 수 없어진다(같은 파일 SAN 픽스처와 같은 규약).
+  for _c in internal bulk; do
+    printf 'apiVersion: v1\nkind: Pod\nmetadata:\n  name: helper-pod\nspec:\n  containers:\n    - name: helper-pod\n      image: %s\n      imagePullPolicy: IfNotPresent\n' \
+      "$LOCAL_PATH_HELPER_IMAGE" > "$STUBDIR/helper-$_c.txt"
+  done
+
   cat >"$STUBDIR/kubectl" <<'EOF'
 #!/usr/bin/env bash
 args="$*"
 case "$args" in
+  *"get cm local-path-config-internal"*) cat "$STUBDIR/helper-internal.txt" ;;
+  *"get cm local-path-config-bulk"*)     cat "$STUBDIR/helper-bulk.txt" ;;
+  *"get deploy"*)        cat "$STUBDIR/lppimages.txt" ;;
   *"nodeInfo.kubeletVersion"*) cat "$STUBDIR/kubeletversion.txt" ;;
   *"node-args"*)         cat "$STUBDIR/nodeargs.txt" ;;
   *"InternalIP"*)        cat "$STUBDIR/nodeip.txt" ;;
@@ -223,6 +236,40 @@ teardown() { rm -rf "$STUBDIR"; }
   run "$STUBDIR/bs/verify-cluster.sh"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -q 'K3S_TLS_SANS'
+}
+
+@test "fails when the live local-path provisioner image drifts from the versions.env pin" {
+  # ⚠️ 이 레인의 이유: [6]이 k3s 축을 재는 동안 substrate 핀 3축 중 나머지 둘은 라이브 대조자가
+  #    레포 전역에 0건이었다(실측 2026-09-03 — git v0.0.37 / 라이브 v0.0.36인데 신호 0).
+  printf 'rancher/local-path-provisioner:v0.0.36\nrancher/local-path-provisioner:%s\n' \
+    "$LOCAL_PATH_PROVISIONER_VERSION" > "$STUBDIR/lppimages.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'provisioner image drift'
+}
+
+@test "an empty provisioner enumeration trips the floor (zero is not a pass)" {
+  : > "$STUBDIR/lppimages.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'provisioner Deployment 이미지를'
+}
+
+@test "fails when a live helper pod image drifts from the versions.env digest pin" {
+  # helper는 모든 PV 디렉토리의 mkdir/rm을 수행한다. tag가 같아도 digest가 다르면 다른 이미지다
+  # (라이브 실측 2026-09-03: busybox:1.38@sha256:fd8d9aa6… vs 핀 …dc2d74b2…).
+  printf 'apiVersion: v1\nkind: Pod\nspec:\n  containers:\n    - name: helper-pod\n      image: busybox:1.38@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d\n' \
+    > "$STUBDIR/helper-bulk.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'helper image drift'
+}
+
+@test "a helper config map with no image line trips the floor, not a silent pass" {
+  printf 'apiVersion: v1\nkind: Pod\nspec:\n  containers:\n    - name: helper-pod\n' > "$STUBDIR/helper-internal.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'helperPod 이미지를'
 }
 
 @test "a SAN that is only a prefix of a longer one does not count as present" {

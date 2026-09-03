@@ -9,6 +9,7 @@
 #     플래그 계약을 단언한다(클러스터는 k3s-install.sh로 cattle 재구축되는
 #     대상이기 때문).
 #   - secrets-encryption 활성화
+#   - substrate 핀 3축(k3s 버전 · local-path provisioner 태그 · helper 이미지 digest)이 라이브와 일치
 # 언제든 재실행 가능하게 설계; 첫 번째 불변식 실패에서 non-zero로 종료한다.
 set -euo pipefail
 
@@ -104,4 +105,39 @@ nname="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null |
 [ -n "$nname" ] || fail "라이브 노드명을 읽지 못했다 — 이름 핀을 대조할 수 없다"
 [ "$nname" = "$K3S_NODE_NAME" ] || fail "node name drift: live '${nname}' != pinned '$K3S_NODE_NAME' (versions.env). hostPath PV의 nodeAffinity가 이 값을 담으므로, 지금 고치려면 노드 재등록 + PV 재작성이다."
 
-echo "OK: host substrate verified (node Ready, both SCs, traefik/metrics-server absent, servicelb kept, secrets-encryption enabled, k3s ver pinned, node-ip pinned, node-name ${nname} pinned, ${san_checked} SANs on the live cert)."
+echo "==> [10] local-path provisioner image matches the pin (LOCAL_PATH_PROVISIONER_VERSION)?"
+# ⚠️ 왜 여기인가: [6]이 이미 같은 자리에서 K3S_VERSION↔라이브 kubeletVersion을 재는데, substrate 핀
+#    **3개 중 나머지 둘**(provisioner 태그·helper digest)은 라이브 대조자가 레포 전역에 0건이었다.
+#    실측 2026-09-03: git v0.0.37 / 라이브 v0.0.36 · git dc2d74b2… / 라이브 fd8d9aa6… — 세 축 전부
+#    갈렸는데 신호를 낸 것은 없었다(핀은 2026-08-17 #420·#421·#417에 올랐고 라이브는 부트스트랩 값).
+# ⚠️ **한계를 정직하게**: 이 스크립트의 유일한 호출자는 `host-up.sh:34`이고 그건 apply-storage 직후다
+#    — 재구축 경로에서는 [6]과 마찬가지로 거의 항진명제다. 여기 두는 값은 "주기 신호"가 아니라
+#    ① 세 축의 **비대칭 해소**(하나만 재던 상태를 끝낸다)와 ② 이 파일이 표방하는 "언제든 재실행
+#    가능"(헤더 :12)한 owner 수동 대조가 실제로 세 축을 다 본다는 것이다. 상주 드리프트를 재는
+#    캐던스는 별건이다(ADR-0007 결정 2 형태의 게이지 + vmalert warning).
+lpp_images="$(kubectl -n local-path-storage get deploy \
+  -o jsonpath='{range .items[*]}{.spec.template.spec.containers[0].image}{"\n"}{end}' 2>/dev/null | grep . || true)"
+lpp_n="$(printf '%s\n' "$lpp_images" | grep -c . || true)"
+# ⚠️ 열거가 0이면 "위반 0"이 아니라 아무것도 안 본 것이다 — 듀얼 provisioner라 바닥값은 2다.
+[ "$lpp_n" -ge 2 ] || fail "local-path-storage의 provisioner Deployment 이미지를 ${lpp_n}건만 읽었다(기대 >=2, internal·bulk) — 네임스페이스/이름이 바뀌었거나 apply-storage가 안 돌았다"
+# ⚠️ 위반을 **모아서** 비었는지 본다. `grep -qv`는 줄 단위 반전이라 부재를 재지 못한다(레포 함정).
+lpp_bad="$(printf '%s\n' "$lpp_images" | grep -vxF -- "rancher/local-path-provisioner:${LOCAL_PATH_PROVISIONER_VERSION}" || true)"
+[ -z "$lpp_bad" ] || fail "local-path provisioner image drift: live '$(printf '%s' "$lpp_bad" | tr '\n' ' ')' != pinned 'rancher/local-path-provisioner:${LOCAL_PATH_PROVISIONER_VERSION}' (versions.env). 수렴 경로는 owner-local apply-storage.sh다 — Renovate bump 머지만으로는 라이브가 안 바뀐다."
+
+echo "==> [11] local-path helper pod image matches the pin (LOCAL_PATH_HELPER_IMAGE)?"
+# helper 이미지는 두 ConfigMap의 `helperPod.yaml` 안에 있다(apply-storage.sh가 envsubst로 치환).
+# 이건 **모든 PV의 mkdir/rm을 수행하는 이미지**이고 digest 핀이라, tag가 같아도 digest가 갈리면 다른 것이다.
+helper_seen=0
+helper_bad=""
+for _cm in local-path-config-internal local-path-config-bulk; do
+  _hp="$(kubectl -n local-path-storage get cm "$_cm" -o jsonpath='{.data.helperPod\.yaml}' 2>/dev/null || true)"
+  _img="$(printf '%s\n' "$_hp" | awk '/^[[:space:]]*image:[[:space:]]/{sub(/^[[:space:]]*image:[[:space:]]*/,""); print; exit}')"
+  [ -n "$_img" ] || { helper_bad="${helper_bad} ${_cm}(image 줄 없음)"; continue; }
+  helper_seen=$((helper_seen + 1))
+  [ "$_img" = "$LOCAL_PATH_HELPER_IMAGE" ] || helper_bad="${helper_bad} ${_cm}:${_img}"
+done
+# ⚠️ 루프가 0회 돌거나 두 ConfigMap이 다 비면 위 단언들이 전부 vacuous다 — 바닥값이 그것을 가른다.
+[ "$helper_seen" -ge 2 ] || fail "helperPod 이미지를 ${helper_seen}건만 읽었다(기대 2, internal·bulk):${helper_bad}"
+[ -z "$helper_bad" ] || fail "local-path helper image drift:${helper_bad} != pinned '${LOCAL_PATH_HELPER_IMAGE}' (versions.env). helper는 모든 PV 디렉토리의 mkdir/rm을 수행한다 — digest가 갈리면 재구축이 다른 기판을 만든다."
+
+echo "OK: host substrate verified (node Ready, both SCs, traefik/metrics-server absent, servicelb kept, secrets-encryption enabled, k3s ver pinned, node-ip pinned, node-name ${nname} pinned, ${san_checked} SANs on the live cert, ${lpp_n} provisioner images + ${helper_seen} helper images pinned)."
