@@ -8,6 +8,7 @@
 //   missing-activation    : active:true+public 앱인데 .activation 마커(registry projection) 부재 — 재노출 게이트 사각(차단)
 //   dangling-role         : cluster.yaml managed.role인데 passwordSecret sealed 부재 — 고아 role (정보성)
 //   unreferenced-conn     : data-conn 등록 conn인데 어느 apps/*/values.yaml envFrom도 미참조 (정보성; *-ro-conn 제외)
+//   unwired-conn          : conn 봉인본이 디스크에 있는데 kustomization resources 미등록 — 렌더 제외(정보성; 역방향)
 //   orphan-conn           : conn 등록인데 소스(Database CR/인스턴스 디렉토리) 부재 — teardown 잔재/부분 purge (정보성)
 //   malformed-conn        : conn 형상인데 레이아웃 분류 불가(이름 정책 밖) — 손으로 쓴 불량 엔트리 (정보성)
 //   stale-ledger-row      : prod 원장 행인데 apps/도 platform/도 없음
@@ -142,14 +143,30 @@ const managedRoles: any[] = existsSync(clusterPath)
   ? ((parseYaml(readFileSync(clusterPath, "utf8")) ?? {})?.spec?.managed?.roles ?? [])
   : [];
 const connKustPath = `${ROOT}/${LAYOUT_DIRS.dataConn}/kustomization.yaml`;
-// conn 형상만 이 절의 소관 — 필터 **뒤**를 센다. 도메인은 "검사 대상"이지 "파일에 적힌 줄"이 아니다.
-const connEntries: string[] = existsSync(connKustPath)
-  ? ((parseYaml(readFileSync(connKustPath, "utf8")) ?? {}).resources ?? [])
-      .map((r: any) => String(r))
-      .filter((r: string) => /-conn\.sealed\.yaml$/.test(r))
+// connRaw — 필터 **앞**의 원본 resources(정방향 열거의 전체 도메인). 아래 역방향(디스크→kustomization)이
+// wired 판정에 이 배열을 쓴다 — connEntries(필터 뒤)를 쓰면 conn 파일명 규약이 바뀌었을 때 정방향·
+// 역방향이 **같은 정규식**을 공유해 함께 0으로 붕괴하고 무발화한다(원장 「열거 붕괴 → vacuous green」).
+const connRaw: string[] = existsSync(connKustPath)
+  ? ((parseYaml(readFileSync(connKustPath, "utf8")) ?? {}).resources ?? []).map((r: any) => String(r))
   : [];
+// conn 형상만 이 절의 소관 — 필터 **뒤**를 센다. 도메인은 "검사 대상"이지 "파일에 적힌 줄"이 아니다.
+const connEntries: string[] = connRaw.filter((r: string) => /-conn\.sealed\.yaml$/.test(r));
 const tombs: Record<string, any> = readJson(`${ROOT}/${TOMBSTONES_PATH}`, {});
 const tombEntries = Object.entries(tombs);
+
+// 역방향(디스크 → kustomization) — 정방향(위)은 kustomization의 resources만 보므로, 등록 자체가
+// 누락되면(멱등 헬퍼 실패·손 편집) 그 conn은 어느 열거에도 안 잡혀 0건 검사 후 초록이 된다.
+// wired 판정은 connRaw(필터 전)로 해 정방향과 다른 파일 집합(*.sealed.yaml 전체)을 대조한다 —
+// 필터를 양쪽에 같은 정규식으로 걸면 파일명 규약이 바뀌었을 때 둘 다 0으로 붕괴해 서로를 못 본다.
+// BLOCKING에 넣지 않는다(정보성 — 부분 purge 중간 상태가 정당하게 이 모양을 만든다).
+const connDir = `${ROOT}/${LAYOUT_DIRS.dataConn}`;
+const wired = new Set(connRaw.map((r) => r.replace(/^\.\//, "")));
+const diskConnFiles = existsSync(connDir)
+  ? readdirSync(connDir).filter((f) => /\.sealed\.yaml$/.test(f)).sort()
+  : [];
+for (const f of diskConnFiles)
+  if (!wired.has(f))
+    add("unwired-conn", f, "봉인본이 디스크에 있는데 data-conn kustomization resources 미등록 — 렌더 제외(미배포·appset prune)");
 
 // ── 바닥값 판정 ──────────────────────────────────────────────────────────────────
 // 수치는 소비자가 소유한다(선례: check-image-pins=20 · check-alert-rules=30 · check-guard-authority=15).

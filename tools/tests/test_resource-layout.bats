@@ -248,6 +248,13 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     const a = [...written].sort().join(",");
     const b = [...CACHE_INSTANCE_FILES].sort().join(",");
     if (written.length !== 6 || a !== b) { console.error("written=" + a + " kernel=" + b); process.exit(1); }
+    // ⚠️ 위 검출기는 `writeFileSync(\`${instDir}/…\`)` 리터럴 한 형태만 본다 — 같은 디렉토리에
+    //   `${ROOT}/${layout.paths.instanceDir}/…` 같은 다른 표기로 7번째 파일을 써도 위 단언은
+    //   못 잡는다(자체 뮤테이션 7/7 초록 실측). :248-254의 세 번째 손 로스터(files 배열)도
+    //   커널과 기계 대조되지 않은 채였다 — 같은 정규식 계열로 그 로스터를 커널에 묶는다.
+    const roster = [...src.matchAll(/\$\{layout\.paths\.instanceDir\}\/([a-z.]+)/g)].map((m) => m[1]);
+    const c = [...new Set(roster)].sort().join(",");
+    if (c !== b) { console.error("roster=" + c + " kernel=" + b); process.exit(1); }
     console.log("ok:" + written.length);
   ' "$ROOT"
   [ "$status" -eq 0 ]

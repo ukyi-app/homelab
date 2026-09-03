@@ -259,6 +259,49 @@ YAML
   [ "$status" -eq 0 ]
 }
 
+# barman-plugin ObjectStore(네이티브 사이드카): KIND_RE를 KINDS에서 파생해도 KINDS 자체에서
+# kind가 빠지는 방향은 여전히 무증인이라(원장 108행) 이 레인으로 잠근다.
+@test "resource guard fails on a barman-plugin ObjectStore missing instanceSidecarConfiguration.resources (red-green)" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/platform/cnpg/prod" "$tmp/policy"
+  : > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  cat > "$tmp/platform/cnpg/prod/object-store.yaml" <<'YAML'
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata: { name: pg-r2, namespace: database }
+spec:
+  configuration: {}
+YAML
+  _track "$tmp"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp" --floor substrate=0
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
+}
+
+@test "resource guard passes a barman-plugin ObjectStore that declares instanceSidecarConfiguration.resources" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/platform/cnpg/prod" "$tmp/policy"
+  : > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  cat > "$tmp/platform/cnpg/prod/object-store.yaml" <<'YAML'
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata: { name: pg-r2, namespace: database }
+spec:
+  configuration: {}
+  instanceSidecarConfiguration:
+    resources:
+      requests: { cpu: 25m, memory: 32Mi }
+      limits: { memory: 64Mi }
+YAML
+  _track "$tmp"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp" --floor substrate=0
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
 @test "resource guard fails on a CNPG Pooler whose pgbouncer container drops resources (red-green)" {
   tmp="$(mktemp -d)"; mkdir -p "$tmp/platform/cnpg/prod" "$tmp/policy"
   : > "$tmp/policy/memory-limit-allowlist.txt"

@@ -23,7 +23,7 @@ setup() {
 }
 teardown() { rm -rf "$TMP"; }
 
-run_poll() { run bun "$P" --root "$TMP" --fixtures "$TMP/fx" --dry-run; }
+run_poll() { run bun "$P" --root "$TMP" --fixtures "$TMP/fx"; }
 
 # apps 레인 픽스처: apps/blog/deploy/prod/values.yaml(tag=sha-0000000, digest 없음)
 seed_app_blog() {

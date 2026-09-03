@@ -112,6 +112,10 @@ run_hc() {
   [ -n "$HOST_UPSTREAM_DNS" ]
   run grep -qxF "DNS=${HOST_UPSTREAM_DNS}" "$TREE/etc/systemd/resolved.conf.d/10-k3s-node.conf"
   [ "$status" -eq 0 ]
+  # 멤버십만으로는 "exactly"가 아니다 — resolved.conf의 반복 DNS=는 append라 앞에 한 줄을 더
+  # 끼우면 핀은 그대로 실재하는데 실효 1순위만 바뀐다(2026-08-18 라우터 우선 시 콜드스타트 교착
+  # 실측 — 그 배치를 되돌리는 회귀가 위 멤버십 단언 하나로는 무증인이었다). 집합 상한 1줄로 닫는다.
+  [ "$(grep -c '^DNS=' "$TREE/etc/systemd/resolved.conf.d/10-k3s-node.conf")" -eq 1 ]
 }
 
 @test "check fails when versions.env and the tree disagree on the upstream resolver" {
