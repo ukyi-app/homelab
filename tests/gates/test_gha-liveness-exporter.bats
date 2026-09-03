@@ -300,6 +300,16 @@ EOF
   run grep -qE 'activeDeadlineSeconds: [0-9]+' "$MF"; [ "$status" -eq 0 ]
   run grep -q 'automountServiceAccountToken: false' "$MF"; [ "$status" -eq 0 ]
   run grep -q 'readOnlyRootFilesystem: true' "$MF"; [ "$status" -eq 0 ]
+  # ⚠️ 위 단언은 전부 파일을 직접 여는 grep이라 **그 파일이 렌더에 들어 있는지**를 안 본다
+  #    (2026-09-04 실측: kustomization resources에서 이 줄을 지워도 관련 게이트 + victoria-stack
+  #    83/83 전건 초록). 이 exporter는 "run이 아예 발생하지 않는 것"을 보는 유일한 관측자다 —
+  #    프룬되면 관측자가 사라진 것 자체가 관측되지 않는다(하트비트 부재는 색이 없다).
+  # ⚠️ 건수 바닥값·length==N이 아니라 **정확 일치 멤버십**이다(resources는 정당하게 늘고 준다).
+  #    `yq contains()`는 원소마다 부분문자열 판정이라 이름이 서로의 접미가 되면 조용히 참이 된다
+  #    (2026-09-04 실측 — 형제 자리 test_digest-exporter.bats가 쓰는 형태로 통일).
+  yq '.resources[]' platform/victoria-stack/prod/kustomization.yaml \
+    | grep -qxF 'gha-liveness-exporter.yaml' \
+    || { echo "kustomization resources에 gha-liveness-exporter.yaml이 없다 — 렌더에서 빠지면 프룬된다"; false; }
 }
 
 @test "the exporter image is byte-identical to the digest-exporter reference (intentional reuse)" {

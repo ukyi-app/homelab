@@ -2,7 +2,7 @@
 # homepage RBAC(최소권한 read-only ClusterRole) 가드. @test 이름은 영어.
 # ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 rbac.yaml 단일 파일이라 그것으로 닫힌다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
-setup() { R="${BATS_TEST_DIRNAME}/rbac.yaml"; }
+setup() { R="${BATS_TEST_DIRNAME}/rbac.yaml"; K="${BATS_TEST_DIRNAME}/kustomization.yaml"; }
 
 # 최소권한 표면의 **전칭 화이트리스트**. 확대는 이 두 줄을 고쳐야만 통과하므로 리뷰에 반드시 보인다.
 # ⚠️ 부정 열거(리터럴 동사 블랙리스트)로 되돌리지 마라 — 아래 @test 주석의 실측이 그 이유다.
@@ -16,6 +16,15 @@ RO_RESOURCES="httproutes gateways namespaces pods nodes"
   run grep -q 'kind: ServiceAccount' "$R"; [ "$status" -eq 0 ]
   run grep -q 'kind: ClusterRole' "$R"; [ "$status" -eq 0 ]
   run grep -q 'kind: ClusterRoleBinding' "$R"; [ "$status" -eq 0 ]
+  # rbac.yaml 자신의 kustomization 멤버십 — 2026-09-04 실측: 이 파일을 resources에서 빼도 이
+  # 디렉토리 43/43 전건 초록이었다(형제 deployment·service·httproute·networkpolicy는 렌더를 읽는
+  # test_homepage_render.bats가 이미 문다 — rbac만 렌더 단언 밖이라 무증인으로 남아 있었다).
+  # 프룬되면 SA/ClusterRole이 사라져 자동발견 타일이 통째로 죽는다(파드는 계속 뜬다 — 무성 회귀).
+  # ⚠️ 건수 바닥값·length==N이 아니라 멤버십이다(resources는 정당하게 늘고 준다). 그리고 멤버십은
+  #    `yq contains()`가 아니라 **정확 일치**로 잰다 — yq의 배열 contains는 원소마다 **부분문자열**
+  #    판정이라(2026-09-04 실측) 이름이 서로의 접미가 되는 자리에서 조용히 참이 된다.
+  yq '.resources[]' "$K" | grep -qxF 'rbac.yaml' \
+    || { echo "kustomization resources에 rbac.yaml이 없다 — 렌더에서 빠지면 프룬된다"; false; }
 }
 
 @test "clusterrole can discover gateway httproutes" {

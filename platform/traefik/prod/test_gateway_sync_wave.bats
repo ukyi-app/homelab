@@ -49,6 +49,15 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
   [ "$status" -eq 0 ]
   run grep -qE 'argocd\.argoproj\.io~1sync-wave' "$D/kustomization.yaml"
   [ "$status" -eq 0 ]
+  # ⚠️ patch는 **resources에 든 문서**에만 붙는다 — 번들이 resources에서 빠지면 이 patch는 대상 0건이
+  #    되고 위 두 단언은 그대로 초록이다(2026-09-04 실측: 6개 resources를 한 줄씩 지워도 이 파일 +
+  #    image_pins·gate-secret-guard 42/42 전건 초록이었다). 그리고 CRD가 프룬되면 이 컴포넌트의
+  #    Gateway API 리소스가 전부 apply 불가가 된다(#462 콜드스타트 교착 그 자체).
+  # ⚠️ 건수 바닥값·length==N이 아니라 **정확 일치 멤버십**이다. `yq contains()`를 쓰지 않는 이유가
+  #    바로 이 디렉토리에서 실측됐다(2026-09-04): yq의 배열 contains는 원소마다 부분문자열 판정이라
+  #    `contains(["gateway.yaml"])`가 resources에 남아 있는 `rbac-gateway.yaml` 하나로 참이 된다.
+  yq '.resources[]' "$D/kustomization.yaml" | grep -qxF 'gateway-api-crds.yaml' \
+    || { echo "kustomization resources에 gateway-api-crds.yaml이 없다 — 렌더에서 빠지면 프룬된다"; false; }
 }
 
 @test "the vendored CRD bundle itself stays unedited (no hand-added wave annotation)" {
@@ -94,6 +103,11 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
 @test "the ServiceAccount the controller pod needs is applied before the controller" {
   sa="$(wave_of_kind "$D/rbac-gateway.yaml" ServiceAccount)"
   [ -n "$sa" ]
+  # wave 순서는 그 문서가 **렌더에 들어 있을 때만** 의미가 있다 — 파일을 열어 읽는 위 파생은
+  # kustomization을 안 본다(2026-09-04 실측: resources에서 이 줄을 지워도 42/42 초록).
+  # SA가 프룬되면 「Traefik serviceAccount.name 지정 시 SA 미생성」과 같은 자리에 떨어진다.
+  yq '.resources[]' "$D/kustomization.yaml" | grep -qxF 'rbac-gateway.yaml' \
+    || { echo "kustomization resources에 rbac-gateway.yaml이 없다 — 렌더에서 빠지면 프룬된다"; false; }
   # 컨트롤러는 wave 0(Helm 차트) — SA가 그보다 앞이어야 파드 생성이 거부되지 않는다.
   [ "$sa" -lt 0 ] || { echo "ServiceAccount wave=$sa — traefik 컨트롤러(wave 0)보다 앞(음수)이어야 한다"; false; }
 }
@@ -113,6 +127,15 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
   [ "$status" -eq 0 ]
   run grep -qE 'argocd\.argoproj\.io/sync-wave' "$D/cert-issuer.yaml"
   [ "$status" -eq 1 ] || { echo "cert-issuer.yaml에 sync-wave가 생겼거나 파일이 사라졌다 (rc=$status) — Gateway wave와의 관계를 다시 볼 것"; false; }
+  # 위 세 파일의 wave 관계는 셋이 다 렌더에 들어 있을 때만 성립한다(2026-09-04 실측: 각각을
+  # resources에서 지워도 42/42 초록). cert-issuer가 프룬되면 home-wildcard-tls가 발급되지 않아
+  # web-internal-tls 리스너가 Programmed에 못 가고 내부 인입이 통째로 끊긴다.
+  # ⚠️ 정확 일치로 센다 — `yq contains(["gateway.yaml"])`는 resources의 `rbac-gateway.yaml`에
+  #    부분문자열로 걸려 gateway.yaml이 없어도 참이었다(2026-09-04 실측).
+  for r in gatewayclass.yaml gateway.yaml cert-issuer.yaml; do
+    yq '.resources[]' "$D/kustomization.yaml" | grep -qxF "$r" \
+      || { echo "kustomization resources에 ${r}이 없다 — 렌더에서 빠지면 프룬된다"; false; }
+  done
 }
 
 @test "the whoami smoke HTTPRoute attaches only after its Gateway is programmed" {
@@ -125,6 +148,10 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
   # backend는 라우트와 같은 wave에 묶는다 — 라우트만 먼저 서면 ResolvedRefs가 실패한다.
   [ "$svc" -eq "$gw" ] || { echo "whoami Service wave=$svc · HTTPRoute wave=$gw — 같아야 한다"; false; }
   [ "$dep" -eq "$gw" ] || { echo "whoami Deployment wave=$dep · HTTPRoute wave=$gw — 같아야 한다"; false; }
+  # 같은 이유의 멤버십(2026-09-04 실측: resources에서 이 줄을 지워도 42/42 초록) — 스모크가
+  # 프룬되면 Gateway가 Programmed인지 확인할 라이브 표면 자체가 없어진다.
+  yq '.resources[]' "$D/kustomization.yaml" | grep -qxF 'whoami-smoke.yaml' \
+    || { echo "kustomization resources에 whoami-smoke.yaml이 없다 — 렌더에서 빠지면 프룬된다"; false; }
 }
 
 @test "the Gateway listeners keep their shape (ports tied to the traefik entrypoints)" {

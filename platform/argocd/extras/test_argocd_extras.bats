@@ -52,6 +52,14 @@ S="$D/argocd-accounts.sealed.yaml"
 
 @test "notify-smoke source builds, container is app, and is NOT synced by argocd-extras" {
   kustomize build "$D/smoke" >/dev/null || { echo "smoke build 실패"; false; }
+  # ⚠️ 위 build는 `>/dev/null`이라 **빈 렌더도 성공**이다 — smoke/kustomization.yaml의 resources를
+  #    비워도 rc 0이고, 아래 단언들은 deployment.yaml을 직접 열어 읽어 무관하다(2026-09-04 실측:
+  #    `resources: []`로 바꿔도 platform/argocd 43/43 전건 초록). 이 canary는 ArgoCD가 싱크하지 않고
+  #    owner가 손으로 `kustomize build .../smoke | kubectl apply`하는 자리라, 배선이 빠지면
+  #    "적용했는데 아무것도 안 생겼다"가 조용히 성공으로 보인다.
+  # 멤버십은 정확 일치로 — yq의 배열 contains는 원소마다 부분문자열 판정이다(2026-09-04 실측).
+  yq '.resources[]' "$D/smoke/kustomization.yaml" | grep -qxF 'deployment.yaml' \
+    || { echo "smoke/kustomization resources에 deployment.yaml이 없다 — 빈 렌더를 apply하게 된다"; false; }
   run yq '.metadata.name' "$D/smoke/deployment.yaml"
   [ "$output" = "notify-smoke" ] || { echo "name=$output"; false; }
   grep -q 'name: app' "$D/smoke/deployment.yaml" || { echo "container 이름 app 아님"; false; }
