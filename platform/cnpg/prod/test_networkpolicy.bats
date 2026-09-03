@@ -75,6 +75,24 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
   [ -z "$output" ]
 }
 
+@test "every manifest in this dir is wired into the kustomization (prune deletes what is not)" {
+  # 형제 4개 배선 @test(basebackup·restore-drill·scheduled-backup·pgdump-hedge)가 DR 생산자만
+  # 닫았고, 그 백업의 목적지(object-store)·RBAC(restore-drill-rbac)·PVC(basebackup-pvc)·논리 DB
+  # (databases/)는 이 루프가 닫는다. 손 로스터 대신 글롭 파생 — (N+1)번째 매니페스트가 자동 편입된다
+  # (로스터 기각 선례: tests/gates/test_vmalert-config.bats의 배선-0 신규 파일 무증인 실측).
+  D="$BATS_TEST_DIRNAME"; n=0
+  for f in "$D"/*.yaml; do
+    b="$(basename "$f")"
+    case "$b" in kustomization.yaml|secret-generator.yaml|*.enc.yaml) continue;; esac
+    yq '.resources[]' "$KUST" | grep -qxF "$b" \
+      || { echo "미배선: $b — 렌더에서 빠지면 라이브가 프룬된다"; false; }
+    n=$((n + 1))
+  done
+  [ "$n" -ge 15 ]            # 글롭 붕괴 방지(현재 15). 상한 아님 — 신규 매니페스트는 자동 포함
+  [ -d "$D/databases" ]      # 피연산자 실재 앵커
+  yq '.resources[]' "$KUST" | grep -qxF 'databases/'
+}
+
 @test "kubelet probe ingress is node-only (pod-CIDR-wide ipBlock would defeat default-deny)" {
   p="$(yq 'select(.metadata.name=="database-allow-ingress-kubelet-probes")' "$NP")"
   printf '%s' "$p" | grep -qF -- "cidr: 10.42.0.1/32"   # 노드(cni0)만 — /16은 전 파드에 5432 개방
