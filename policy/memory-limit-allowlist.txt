@@ -7,8 +7,16 @@
 #       <Kind>/<name>/<container>   # 이유   (Cluster는 <container>=postgres)
 #   '#' 이후는 주석. 형식 외 라인은 면제 항목이 아니다(문서로만 취급).
 #
+#   ⚠️ **면제 줄에는 사유가 강제된다**(인라인 `# 사유` 또는 직전 줄 `#` 주석 — 없으면 게이트가 exit 2).
+#      형제 둘(check-image-pins.sh:67-83 · check-alert-rules.ts ALLOWLIST)이 이미 갖고 있던 규율인데
+#      blast radius가 가장 큰 이 목록에만 없었다(감사 2R critic-C).
+#   ⚠️ **강제 면제 건수에는 상한이 있다** — `tools/check-resource-limits.ts`의 `EXEMPT_MAX`(현재 0).
+#      정당한 면제를 더하려면 **같은 PR에서** 그 상수를 올려라. 그 diff가 리뷰 지점이다
+#      (선례: `scripts/check-bats-accounting.sh`의 `EXCL_MAX`).
+#
 # ── 강제 면제(enforced exemptions) ──
 #   현재 없음 — 로컬 소스 매니페스트의 전 상주 워크로드가 cpu·memory request + memory limit 보유(위반 0).
+#   (그래서 EXEMPT_MAX=0이다. 0이라는 상한 자체가 "면제가 늘어났다"의 바닥값이다.)
 #
 # ── 범위 밖(문서 전용, 게이트 미강제) — 의도적으로 limit 미설정인 알려진 컨테이너 ──
 #   이들은 원격-helm 차트/벤더/k3s-시스템이라 소스 매니페스트에 없어 이 게이트가 스캔하지 못한다.

@@ -15,8 +15,8 @@ let floors: Map<string, number>;
 try {
   const taken = takeFloors(process.argv.slice(2));
   floors = taken.floors;
-  f = parseFlags(taken.rest, { value: ["--repo-root"], bool: [] });
-} catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root · --floor check-resource-limits=<n>`); process.exit(2); }
+  f = parseFlags(taken.rest, { value: ["--repo-root", "--exempt-max"], bool: [] });
+} catch (e) { console.error(`${e instanceof Error ? e.message : String(e)}\n허용: --repo-root · --exempt-max <n> · --floor check-resource-limits=<n>`); process.exit(2); }
 const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string) : ".";
 
 const KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler", "Cluster", "ObjectStore"]);
@@ -26,7 +26,11 @@ const CONTAINER_KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pool
 // KINDS에만 kind를 더하면 그 파일은 아예 열리지 않고 count도 늘지 않는다 — 게이트가 0건을
 // 검사하고 초록을 낸다(「열거 붕괴 → vacuous green」). 2026-09-01 ObjectStore 추가 시 실측 확인.
 const KIND_RE = /^kind:[ \t]*(Deployment|DaemonSet|StatefulSet|Pooler|Cluster|ObjectStore)\b/m;
-const MIN_SCAN = 10;
+// 열거 붕괴 바닥값. 2026-09-03 실측 스캔 21건 → **18**(3건 철거를 견딘다). 래칫 아님 —
+// 도메인이 줄지 않는 한 손댈 일이 없다. ⚠️ 초판 값 10은 실 도메인의 절반이라, 21건 중
+// 11건이 조용히 사라져도 초록이었다(호출부 Makefile:78,216·ci.yaml에 `--floor` 오버라이드가
+// 0건이라 이 상수가 곧 유효 바닥값이다). 픽스처는 자기 크기를 `_seed_ok`로 맞춘다.
+const MIN_SCAN = 18;
 const ALLOW = "policy/memory-limit-allowlist.txt";
 
 // GOMEMLIMIT/limit 바이트 파서(구 python to_bytes 이식).
@@ -41,12 +45,46 @@ function toBytes(v: string): number | null {
   return m[2] in u ? Number(m[1]) * u[m[2]] : null;
 }
 
+// 면제 목록의 **증인**. 형제 둘(check-image-pins.sh:67-83 · check-alert-rules.ts의 ALLOWLIST)은
+// 이미 "사유 없는 줄은 거부"를 강제하는데, 정작 blast radius가 가장 큰 이 목록에만 그 규율이
+// 없었다 — 한 줄 추가가 곧 상주 워크로드의 memory limit 면제인데 그 줄의 근거를 재는 것이 0이었고,
+// 강제 면제가 몇 건까지 늘어도 되는지(상한)도 없었다. 선례: `scripts/check-bats-accounting.sh`의
+// `EXCL_MAX`(제외 목록 상한 — "정당하면 같은 PR에서 상한을 올려라").
+// 현 강제 면제 0건. 늘리려면 **같은 PR에서** 이 상수를 올려라(그 diff가 곧 리뷰 지점이다).
+// `--exempt-max`는 **픽스처 전용** 오버라이드다(자기 크기를 명시하는 관례 — `--floor credential-expiry=1` 선례).
+// ⚠️ `Number("abc")`는 NaN이고 `n > NaN`은 항상 false라 상한이 조용히 꺼진다(레포 등재 함정) — 정수만 받는다.
+const EXEMPT_MAX = (() => {
+  const raw = f["--exempt-max"];
+  if (typeof raw !== "string") return 0;
+  if (!/^\d+$/.test(raw)) { console.error(`ERROR: --exempt-max는 음이 아닌 정수여야 한다(받은 값: '${raw}')`); process.exit(2); }
+  return Number(raw);
+})();
 const allowPath = `${ROOT}/${ALLOW}`;
-const allowed = new Set(
-  existsSync(allowPath)
-    ? readFileSync(allowPath, "utf8").split("\n").map((l) => l.split("#", 1)[0].trim()).filter(Boolean)
-    : [],
-);
+const allowRaw = existsSync(allowPath) ? readFileSync(allowPath, "utf8").split("\n") : [];
+const allowBad: string[] = [];
+const allowEntries: string[] = [];
+for (let i = 0; i < allowRaw.length; i++) {
+  const line = allowRaw[i];
+  const key = line.split("#", 1)[0].trim();
+  if (!key) continue; // 순수 주석·공백 — 문서 전용
+  // 사유 강제: 인라인 `# 사유` 또는 **직전 줄**의 `#` 주석(check-image-pins.sh:68과 같은 규약).
+  const inline = line.includes("#") && line.slice(line.indexOf("#") + 1).trim().length > 0;
+  const prev = i > 0 ? allowRaw[i - 1].trim() : "";
+  const above = prev.startsWith("#") && prev.replace(/^#+/, "").trim().length > 0;
+  if (!inline && !above) allowBad.push(`${ALLOW}:${i + 1} '${key}' — 사유 주석(# ...) 필요(인라인 또는 직전 줄)`);
+  allowEntries.push(key);
+}
+if (allowBad.length > 0) {
+  console.error("ERROR: 무근거 면제는 금지다 — 면제 줄은 왜 그 워크로드가 limit 없이 사는지를 적어야 한다:");
+  for (const b of allowBad) console.error("  " + b);
+  process.exit(2);
+}
+if (allowEntries.length > EXEMPT_MAX) {
+  console.error(`ERROR: ${ALLOW}: 강제 면제 ${allowEntries.length}건 > 상한 ${EXEMPT_MAX} — 게이트에서 상주 워크로드가 빠졌다.`);
+  console.error(`  정당한 면제라면 이 상한(tools/check-resource-limits.ts의 EXEMPT_MAX 상수)을 **같은 PR에서** 올려라.`);
+  process.exit(2);
+}
+const allowed = new Set(allowEntries);
 
 // 열거는 공유 워커의 `platform-manifests` 스코프가 소유한다 — 제외 어휘와 tracked 열거가 전부
 // 그 안에 있다(제외 목록은 스코프 정의가 SSOT — 여기 복창하지 않는다). 아래 MIN_SCAN은
