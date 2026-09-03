@@ -17,6 +17,18 @@
   [ "$status" -eq 0 ]
   # 11개 ns × enforce 라벨 = 정확히 11건
   [ "$(echo "$output" | grep -c 'pod-security.kubernetes.io/enforce:')" -eq 11 ]
+  # ⚠️ **값 축 폐쇄(비둘기집)**. 위 줄은 라벨 **존재**만 센다 — 이름으로 값을 못박은 @test는 8개뿐이고
+  #    (prod·edge·tailscale·argocd·cnpg-system·cert-manager + 형제 파일의 files·homepage)
+  #    gateway·sealed-secrets·cache 3개는 레포 어디에도 값 증인이 없었다. 실측: 그 셋을 privileged로
+  #    올려도 이 디렉토리가 13/13 ok였다 — 헤더 :3이 "라벨 없으면 privileged 기본값"을 존재 이유로
+  #    적었는데 **라벨을 privileged로 명시하는** 같은 결과의 회귀는 무증인이었다.
+  #    (PSA의 실효는 노드 탈출 경계가 아니라 git 유래 오배포에 대한 admission floor다 — :48-49·
+  #     namespaces.yaml:11-15가 이미 그렇게 적었다. 그래도 그 floor의 회귀 증인은 있어야 한다.)
+  # ⚠️ 11쌍 상수 대신 총계 2줄을 쓴다: 이름-핀 8개가 privileged 1·restricted 3을 이미 소비하므로
+  #    나머지 3개는 baseline일 수밖에 없다(산술 증인). ns가 추가돼도 상수를 손보지 않고, 신규 ns가
+  #    privileged/restricted면 여기서 red라 값 결정을 강제한다(fail-closed).
+  [ "$(echo "$output" | grep -c 'pod-security.kubernetes.io/enforce: privileged')" -eq 1 ]
+  [ "$(echo "$output" | grep -c 'pod-security.kubernetes.io/enforce: restricted')" -eq 3 ]
 }
 
 @test "prod enforces restricted (shared chart is restricted-compliant)" {
@@ -41,6 +53,9 @@
   run bash -c 'kustomize build platform/namespaces/prod'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | grep -c 'pod-security.kubernetes.io/warn: restricted')" -eq 11 ]
+  # 형제 라벨 audit도 같은 값 축이다 — 착지 전 레포 전역에 증인 0건이었다(warn만 있었다).
+  # warn은 사람이 보는 신호, audit은 감사 로그로 남는 신호라 둘 중 하나만 약해져도 조용하다.
+  [ "$(echo "$output" | grep -c 'pod-security.kubernetes.io/audit: restricted')" -eq 11 ]
 }
 
 @test "argocd enforces at least baseline PSA (bootstrap-created ns: admission floor)" {
