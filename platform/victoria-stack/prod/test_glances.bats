@@ -48,4 +48,13 @@ EOF
   run grep -q 'app.kubernetes.io/name: glances' "$N"; [ "$status" -eq 0 ]
   run grep -q 'kubernetes.io/metadata.name: homepage' "$N"; [ "$status" -eq 0 ]
   run grep -q '61208' "$N"; [ "$status" -eq 0 ]
+  # 전칭 피어 — 파일 헤더가 「유일한 생존자」를 자처하는 자리인데 판정은 from 원소를 더하는
+  # 편집을 못 본다(2026-09-03 실측). glances는 hostNetwork 계열 호스트 지표 API라 ingress가
+  # 전 ns로 열리면 안 된다.
+  peers="$(yq ea '[select(.kind=="NetworkPolicy")|.spec.ingress[]?|.from[]?|select(has("namespaceSelector"))|(.namespaceSelector.matchLabels["kubernetes.io/metadata.name"] // "ANY")]|.[]' "$N")"
+  printf '%s\n' "$peers" | grep -qxF -- homepage
+  run grep -qxF -- ANY <<EOF
+$peers
+EOF
+  [ "$status" -eq 1 ]
 }

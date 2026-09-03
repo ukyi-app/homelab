@@ -88,6 +88,14 @@ setup() {
   grep -qE 'cpu: 200m' "$F"                                   # (3) resources limits
   grep -qE 'memory: 64Mi' "$F"
   # (4) readOnly 마운트는 위 테스트에서 확인
+  # 전칭 피어 — pvc-du-exporter는 runAsUser:0 + DAC_READ_SEARCH로 전 PVC를 읽는 잡이라 egress netpol
+  # 한 건의 to: 확장(namespaceSelector:{})이 곧 유출 경로다(0.0.0.0/0 부재 단언은 위 별도 @test 소관).
+  peers="$(yq ea '[select(.kind=="NetworkPolicy")|.spec.egress[]?|.to[]?|select(has("namespaceSelector"))|(.namespaceSelector.matchLabels["kubernetes.io/metadata.name"] // "ANY")]|.[]' "$F")"
+  printf '%s\n' "$peers" | grep -qxF -- kube-system
+  run grep -qxF -- ANY <<EOF
+$peers
+EOF
+  [ "$status" -eq 1 ]
 }
 
 @test "du exporter reads all PVC dirs via root + DAC_READ_SEARCH (drop-ALL), no write path" {

@@ -38,6 +38,18 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
   printf '%s' "$ok" | grep -qxF -- "$n"      # 전수 일치 — 하나라도 어긋나면 red
 }
 
+@test "every egress peer across the file is a named namespace, never a cluster-wide selector" {
+  # 이름 집합 손 로스터 대신 전칭 피어 — 정책 이름을 안 세면 신규 광역 정책도, 기존 allow의
+  # to: 확장(namespaceSelector:{})도 둘 다 잡는다(2026-09-03 실측: vmagent-allow-egress-everywhere
+  # 신설이 이 파일의 다른 @test 전건 초록이었다). `// "ANY"`가 빈 selector를 값으로 바꿔 fail-closed.
+  peers="$(yq ea '[select(.kind=="NetworkPolicy")|.spec.egress[]?|.to[]?|select(has("namespaceSelector"))|(.namespaceSelector.matchLabels["kubernetes.io/metadata.name"] // "ANY")]|.[]' "$P")"
+  printf '%s\n' "$peers" | grep -qxF -- kube-system
+  run grep -qxF -- ANY <<EOF
+$peers
+EOF
+  [ "$status" -eq 1 ]
+}
+
 @test "metrics east-west plane is intentionally untouched (no ns-wide default-deny)" {
   # vmagent가 전 ns를 scrape(role:pod SD)라 ns-wide deny는 near-allow-all → 외부 egress만 워크로드별 격리.
   # ⚠️ 이 @test는 부재 단언 하나뿐이라 형제 증인이 없다 — 예전 `-ne 0`에서는 networkpolicy.yaml을
