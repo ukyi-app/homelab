@@ -8,6 +8,9 @@
 # - build 잡: arm64 빌드(+ push=true면 GHCR push). 배포 반영은 homelab측 GHCR 폴링(bump-poll.yaml)이 권위 처리.
 # - deploy-trigger 잡(앱 release.yaml에서 흡수): 빌드 직후 homelab bump-poll을 1회 디스패치해 크론 지연을
 #   제거한다. caller는 HOMELAB_DISPATCH_APP_ID/KEY 2개만 passthrough(미전달=크론 백스톱, clean skip).
+#   ⚠️ 2026-09-03: dispatch App(4178609)의 org 설치를 owner가 **제거**했다(확인 가능한 소비 레포 0곳). 현재 이 잡은
+#      모든 caller에서 clean skip이고 배포 반영은 bump-poll 크론(10분)뿐이다. 즉시 디스패치를 되살리려면 App 재설치 +
+#      소비 레포 시크릿 쌍이 필요하다 — 잡 자체는 계약(입력 2개)이라 남긴다.
 # - 구 PAT 기반 dispatch·org secret·bump.yaml 외부 dispatch 경로는 모두 폐기됨(인증 마이그레이션 완료).
 #
 # push=false(BUILD ONLY)가 있는 이유: 앱의 품질 게이트(typecheck+test)는 CI 잡이 아니라 Dockerfile 안에

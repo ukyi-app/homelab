@@ -174,11 +174,12 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 
 **트리거 경계:** 앱 레포는 homelab-write 자격 0 (자기 `GITHUB_TOKEN`으로 GHCR push만).
-인증은 GitHub App **3개**(2026-08-20 실측 `gh api /orgs/ukyi-app/installations`) —
-reader `contents:read`(4043034) / writer `contents:write`+`pull_requests:write`+`issues:write`(4043080) /
-dispatch `actions:write`(4178609, **키는 homelab이 아니라 앱 레포에** — `reusable-app-build.yaml`이
-`workflow_call` 입력으로 받는다). reader/writer 키만 homelab Actions secret에 있다.
-⚠️ **셋 다 설치 범위는 org 전체**(`repository_selection: all`)다 — "앱 레포 전용"·"homelab 전용"은
+인증은 GitHub App **2개**(2026-09-03 실측 `gh api /orgs/ukyi-app/installations`) —
+reader `contents:read`(4043034) / writer `contents:write`+`pull_requests:write`+`issues:write`(4043080).
+dispatch `actions:write`(4178609)는 **2026-09-03 설치 제거**(확인 가능한 소비처 0건) — `reusable-app-build.yaml`의
+deploy-trigger 잡은 `workflow_call` 입력 계약으로만 남고 항상 clean skip이다(배포 반영은 bump-poll 크론뿐).
+reader/writer 키만 homelab Actions secret에 있다.
+⚠️ **둘 다 설치 범위는 org 전체**(`repository_selection: all`)다 — "앱 레포 전용"·"homelab 전용"은
 설치가 아니라 **발급 시점 `repositories:`/`owner` 파라미터**로만 성립한다(호출부 14곳 중 9곳은 둘 다
 생략해 현재 레포로 기본 한정, 3곳은 명시, 2곳은 `owner`만 줘 org 범위 — 후자 둘은 의도적이고
 호출부 주석이 근거를 담는다). **모든 homelab main 쓰기는 PR-first + auto-merge**
