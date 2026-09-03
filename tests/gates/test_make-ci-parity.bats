@@ -14,7 +14,17 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   # 대상 부재를 배선 레인이 초록으로 읽지 않는다 — 「…runs in BOTH…」는 두 파일에 이름이 적혀 있기만 하면
-  # 도구가 없어도 통과한다(operand-witness 05 (b) · 형제 tests/gates/test_disk-caps.bats와 같은 형태).
+  # 도구가 없어도 통과한다(operand-witness 05 (b) · 형제 tests/gates/test_disk-caps.bats:18-19와 같은 형태).
+  # ⚠️ **이 자리를 setup에 둔 대가와 그 대안을 여기 적어 둔다**(감사 2라운드에서 한 번 판정된 자리 —
+  #    다음 독자가 같은 finding을 재발견하지 않게). 이 파일은 test_disk-caps와 달리 **단일 대상 파일이
+  #    아니다**: #1(run-bats.sh)·#6(재귀 make)·#7(m6-tools)·#8(메모리 원장)은 check-ci-parity.ts와
+  #    무관한 대상을 건다. 그래서 도구 부재 뮤테이션에서 setup 단언은 그 4레인까지 함께 red로 만든다
+  #    (실측 2026-09-03 `rm tools/check-ci-parity.ts`: setup 유지 = 0 ok/14 · setup 단언만 뺀 사본 =
+  #    5 ok/9 not ok, 생존이 #1·#2·#6·#7·#8).
+  #    대안은 배선 레인(#2) **본문 첫 줄**에만 두는 것 — 무관 4레인의 거짓 red가 사라지는 대신,
+  #    `bats -f`로 다른 레인만 골라 돌릴 때 대상 부재가 안 보인다. **setup 유지가 결정이다**:
+  #    fail-closed가 이 파일의 기본값이고(거짓 red는 시끄러울 뿐 안전한 방향), 형제와 형태가 같아
+  #    다음 파일이 참조할 관용구가 하나로 남는다. 동작을 바꾸려면 이 문단부터 고칠 것.
   [ -f "$ROOT/tools/check-ci-parity.ts" ]
 }
 
