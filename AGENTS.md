@@ -168,6 +168,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - A′는 회수 가능한 커널 slab을 분자에 싣는다 — 그 비중이 워크로드마다 100배 갈리고 peak 시점 값은 소급 측정이 불가능하다
 - 자기조절 워크로드의 자기참조는 두 경로로 산다 — GOMEMLIMIT(힙)과 allowedPercent(캐시), 하나만 끊으면 되살아난다
 - 측정 창이 기판 변경을 가로지르면 두 체제가 한 숫자에 섞인다
+- sed 주소 범위는 시작 줄에서 끝나지 않는다 — 한 줄짜리 `{{- /* … */ -}}` 주석이 그 뒤를 통째로 지운다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 
