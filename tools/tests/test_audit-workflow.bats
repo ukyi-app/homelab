@@ -35,6 +35,14 @@ setup() { ROOT="$(git rev-parse --show-toplevel)"; F="$ROOT/.github/workflows/au
   #    초록이었다. 단일 파일 피연산자라 `-eq 1`이 rc 2를 red로 가른다.
   #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
   run grep -q "group: homelab-mutation" "$F"; [ "$status" -eq 1 ]
+  # exact-tools-infra-4(5라운드) — "read-only" 축은 위 직렬화 그룹 부재 하나뿐이라, 워크플로
+  # permissions에 contents:write+pull-requests:write를 부여해도 무증인이었다(rc 2/false 구분
+  # 위해 yq 형제 관용구 — tools/tests/test_reusable-app-build.bats:85-86과 동형).
+  [ "$(yq -r '.permissions | to_entries | map(select(.value != "read")) | length' "$F")" = "0" ]
+  [ "$(yq -r '.jobs.audit.permissions // "absent"' "$F")" = "absent" ]
+  # ⚠️ 이 레포의 실제 writer 레버는 GITHUB_TOKEN이 아니라 App 토큰이다(bump-poll.yaml:16-17은
+  #    contents: read인 채 :91-92로 main을 쓴다) — 권한 축만 재면 절반만 막힌다.
+  run grep -q 'create-github-app-token' "$F"; [ "$status" -eq 1 ]
 }
 @test "audit summary does not cap findings at 20" {
   run grep -c '\.findings\[:20\]' "$F"; [ "$output" = "0" ]

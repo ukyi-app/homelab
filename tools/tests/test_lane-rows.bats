@@ -104,9 +104,16 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # 생성 방향 사본(문자열 템플릿)과 파싱 방향 사본(하드코딩 접두)이 소비자에서 소멸했는지 —
   # bats 원장 단언의 리터럴은 독립 앵커라 여기서 세지 않는다(tools/tests/ 제외).
   # 부정 단언은 grep -c=0 관용구 — rc 기반(-ne 0)은 grep 오류(rc=2)도 통과시키는 vacuous green.
-  UNION='create-database/\$|create-cache/\$|create-app/\$|update-secrets/\$|teardown/teardown-app-\$|bump-poll/\$'
-  # 양성 대조 — 검출기 ERE가 사냥하는 형상을 실제로 문다(패턴이 깨지면 여기서 red).
+  # untouched-e-3(5라운드) — 원 UNION은 모든 대안이 슬래시 뒤 `\$`만 요구해 `${…}` 보간형(생성
+  # 방향) 한 형태만 물었다. 주석이 약속한 파싱 방향 사본(하드코딩 접두 `startsWith("create-app/")`)
+  # ·행 데이터 사본(`"create-app/{key}-{runId}"`)은 판정 밖이었다(status.ts에 두 줄 추가해도 8/8
+  # 그대로 통과, 무증인 재현). 표기 3종(`$`·`{`·`"`)으로 넓힌다 — teardown만 구분자가 `-`라 별도 대안.
+  UNION='(create-database|create-cache|create-app|update-secrets|bump-poll)/(\$|\{|")|teardown/teardown-app-(\$|\{|")'
+  # 양성 대조 — 검출기 ERE가 사냥하는 세 형상을 실제로 문다(패턴이 깨지면 여기서 red). 한 대안만
+  # 물면 나머지가 무증인이므로 표기 3종 전부 증인을 세운다.
   [ "$(printf 'x `create-app/${input.app}-${runId}`\n' | grep -cE "$UNION")" = "1" ]
+  [ "$(printf 'b.startsWith("create-app/")\n' | grep -cE "$UNION")" = "1" ]
+  [ "$(printf 'const P = "teardown/teardown-app-{key}-{runId}";\n' | grep -cE "$UNION")" = "1" ]
   for f in tools/lib/verbs.ts tools/lib/secrets.ts tools/lib/status.ts; do
     [ "$(grep -cE "$UNION" "$f")" = "0" ]
   done

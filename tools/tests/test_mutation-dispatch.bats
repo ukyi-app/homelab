@@ -341,7 +341,7 @@ EOF
   done
 }
 
-@test "the bot commit identity lives only in the pr-first-commit composite (no 5x literal copies)" {
+@test "the five mutation reusables carry no inline bot identity copy (pr-first-commit is their SSOT)" {
   a="$ROOT/.github/actions/pr-first-commit/action.yml"
   grep -q 'ukyi-homelab-writer\[bot\]' "$a"
   # 다중 피연산자 — 다섯 중 하나라도 리네임되면 rc 2다. 위 양성 단언은 composite 파일이라
@@ -638,4 +638,32 @@ EOF
   ' _ "$ROOT"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'EXECUTED='
+}
+
+@test "no run step inline-interpolates untrusted inputs (repo-wide, not just DISPATCHERS)" {
+  # traps-a-1(5라운드) — 원 가드(위 @test 「no run inline interpolation」)는 피연산자가
+  # DISPATCHERS 5파일뿐이라 셸이 실제로 도는 _*.yaml과 cross-repo 계약 reusable-app-build.yaml이
+  # 도메인 밖이었다(원장 36행 「GHA client_payload 비신뢰 입력」의 env-경유 규약 회귀 검출).
+  # yq 비사용(tests/gates/test_workflow-pipefail.bats:7 규약과 동형) — bun+yaml 파서로 전 워크플로를 훑는다.
+  run bun -e '
+    const y = require("yaml"), fs = require("fs");
+    const dir = process.argv[1] + "/.github/workflows";
+    const NEEDLE = /\$\{\{[^}]*(inputs\.|github\.event\.|client_payload)/;
+    const bad = []; let seen = 0;
+    for (const f of fs.readdirSync(dir)) {
+      if (!/\.ya?ml$/.test(f)) continue;
+      const doc = y.parse(fs.readFileSync(dir + "/" + f, "utf8"));
+      for (const [jn, job] of Object.entries(doc?.jobs ?? {})) {
+        (job?.steps ?? []).forEach((st, i) => {
+          if (typeof st?.run !== "string") return;
+          if (st.run.includes("${{")) seen++;
+          if (NEEDLE.test(st.run)) bad.push(f + " jobs." + jn + ".steps[" + i + "]: run 인라인 보간");
+        });
+      }
+    }
+    // 양성 대조 — `${{`를 담은 run 스텝 자체가 0이면 needle이 죽어도 초록이라 위 루프가 무의미.
+    if (seen === 0) { console.error("NO-POSITIVE-CONTROL: run 스텝에 ${{ 0건"); process.exit(1); }
+    if (bad.length) { console.error(bad.join("\n")); process.exit(1); }
+  ' "$ROOT"
+  [ "$status" -eq 0 ]
 }

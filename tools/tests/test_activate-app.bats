@@ -138,6 +138,10 @@ teardown() { rm -rf "$TMP"; }
     --repo-dir "$R" --status-file "$TMP/status.json"
   [ "$status" -eq 0 ]
   [ ! -f "$R/apps/orders/deploy/prod/.activation" ]
+  # exact-tools-infra-2(5라운드) — 위 단언은 .activation 부재 하나뿐이라, gate-only 경로가
+  # apps.json active를 뒤집어도(--flip 앞에 무조건 쓰기 삽입) 무증인이었다. 형제 :151(F2)이 이미
+  # 쓰는 관용구 그대로 — gate-only 실행의 워크트리 전체 무변경(노출 축 포함)을 한 줄로 잠근다.
+  [ -z "$(git -C "$R" status --porcelain)" ]
 }
 
 @test "repeated --flip on an already-active app with unchanged surface is a no-op (worktree clean, F2)" {

@@ -10,6 +10,19 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   done
 }
 
+@test "vendored roster covers exactly the two contract artifacts (targets non-empty, same repo set)" {
+  # untouched-d-1(5라운드) — 위 @test는 하한(length>0)뿐이라 원소를 지워도(다운스트림 3 target
+  # 동반 소멸) 초록이었다(실측: pem 항목 삭제 → 4/4). 원소 수·멤버십을 등식으로 잠근다.
+  # target 축은 매직넘버(repo 3개 이름)를 쓰지 않는다 — 앱 레포 집합은 create-app/teardown으로
+  # 변하고 in-repo 파생원이 없어 정당 변경마다 손 갱신 세금이 된다(va 판정 근거). 대신 두 계약
+  # 항목의 target repo 집합이 서로 같다는 구조 불변식(정렬 집합의 unique 길이==1)만 잠근다.
+  n=$(jq -r '[.vendored[].source] | length' "$M"); [ "$n" -eq 2 ]
+  jq -e '[.vendored[].source] | index("tools/seal-secret.mts") != null' "$M"
+  jq -e '[.vendored[].source] | index("tools/sealed-secrets-cert.pem") != null' "$M"
+  jq -e 'all(.vendored[]; (.targets|length) > 0)' "$M"
+  s=$(jq -r '[.vendored[] | [.targets[].repo] | sort] | unique | length' "$M"); [ "$s" -eq 1 ]
+}
+
 @test "vendored-contract excludes files repo (Rust — no vendored seal tooling)" {
   # ⚠️ 이 레인에서 `jq`는 원칙상 비대상이었다(rc 어휘가 grep과 달라 일괄 전환이 위험하다). 이 자리만
   #    예외인 이유: `jq -e`는 **술어 결과와 대상 부재를 서로 다른 rc로 가른다**.
