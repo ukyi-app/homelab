@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # app-owned NetworkPolicy(apps/<app>/deploy/**)는 app-scoped 셀렉터 필수 — 적대 리뷰 Pass1 #2 + Pass2 #2.
 # 공유 prod ns에서 빈/광범위 podSelector는 무관 앱 트래픽에 영향(blast radius)을 준다.
-# 차트 selectorLabels: app.kubernetes.io/name=차트명(전 앱 공유·비유니크), app.kubernetes.io/instance=Release명(유니크).
+# 차트 selectorLabels(platform/charts/app/templates/_helpers.tpl): app.kubernetes.io/name=차트명
+# (전 앱 공유·비유니크) + **app.homelab/instance**=Release명(유니크). 표준 app.kubernetes.io/instance는
+# ArgoCD 예약 라벨이라 의도적으로 회피했다(같은 helper 주석 — 값 아닌 '존재'만으로 리소스 트리에서 제외).
 # → podSelector.matchLabels에 app.kubernetes.io/instance=<app>(디렉토리명) 존재·일치 필수(name-only/빈 셀렉터 금지).
+# ⚠️ 아래 로직이 강제하는 키는 여전히 app.kubernetes.io/instance이고, 그 키는 차트가 내지 않는다 —
+#    이 가드를 그대로 따라 쓴 app-owned netpol은 아무 파드도 선택하지 못한다. 키 정렬은 apps/ 소유
+#    netpol 도메인의 별건이라 여기서는 사실만 적어 둔다(app-owned netpol 실물 0건이라 오늘 노출 없음).
 # netpol 미선언(0건)은 통과지만 **매니페스트 열거 0건은 실패**(scan-floor — 아래 참조).
 # yq만(버전 무관). bash 3.2 호환. shellcheck clean.
 set -euo pipefail

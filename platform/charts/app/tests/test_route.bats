@@ -25,6 +25,21 @@ tpl() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   # `port: 8080`(Service)·`sectionName: web-public`(HTTPRoute) 비공허 대조가 이미 막는다.
   [ "$(echo "$out" | yq 'select(.kind=="HTTPRoute") | .spec.rules[0].backendRefs[0].name')" = "$(echo "$out" | yq 'select(.kind=="Service") | .metadata.name')" ]
   [ "$(echo "$out" | yq 'select(.kind=="HTTPRoute") | .spec.rules[0].backendRefs[0].port')" = "$(echo "$out" | yq 'select(.kind=="Service") | .spec.ports[0].port')" ]
+  # 인스턴스 라벨은 selector의 유일성 축이다(_helpers.tpl app.selectorLabels ★주석 — selector는
+  # 생성 후 immutable). 키는 반드시 app.homelab/instance다(app.kubernetes.io/instance는 ArgoCD
+  # 예약 라벨이라 회피 — 같은 helper 주석). 지우면 prod ns의 전 앱 selector가
+  # `app.kubernetes.io/name: app` 하나로 붕괴해 엔드포인트 혼입·RS 소유권 충돌이 난다.
+  [ "$(echo "$out" | yq 'select(.kind=="Service") | .spec.selector["app.homelab/instance"]')" = "t" ]
+  [ "$(echo "$out" | yq 'select(.kind=="Deployment") | .spec.selector.matchLabels["app.homelab/instance"]')" = "t" ]
+}
+
+@test "selector instance label is release-derived, not a chart-wide constant" {
+  # 위 두 줄만으론 「라벨 값을 리터럴 t로 대체」 뮤테이션이 통과한다 — 릴리스명을 바꾼 두 번째
+  # 렌더로 파생 관계 자체를 잰다. 빈 렌더는 ""≠"zz"라 red(별도 양성 대조 불요).
+  o2=$(helm template zz "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 $R \
+    --set kind=web --set route.public=true --set route.host=api.example.com)
+  [ "$(echo "$o2" | yq 'select(.kind=="Deployment") | .spec.selector.matchLabels["app.homelab/instance"]')" = "zz" ]
+  [ "$(echo "$o2" | yq 'select(.kind=="Service") | .spec.selector["app.homelab/instance"]')" = "zz" ]
 }
 
 @test "internal app binds to the internal HTTPS listener" {
