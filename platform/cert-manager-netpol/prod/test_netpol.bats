@@ -16,6 +16,13 @@ setup() {
 @test "default-deny-egress baseline exists" {
   run grep -q 'kind: NetworkPolicy' "$P"; [ "$status" -eq 0 ]
   run grep -q 'cert-manager-default-deny-egress' "$P"; [ "$status" -eq 0 ]
+  # ⚠️ 파일 실재 ≠ 렌더 포함. 이 컴포넌트는 resources 길이 1이라 한 줄이 곧 존재이고,
+  #    appset(platform/argocd/root/appset.yaml:55)이 prune:true·selfHeal:true라 그 소실이 라이브 프룬이다.
+  #    원문 grep은 주석 한 줄에도 초록이므로 **파싱한** resources를 본다(형제 셋과 동형).
+  run yq '.resources | contains(["networkpolicy.yaml"])' "${BATS_TEST_DIRNAME}/kustomization.yaml"
+  printf '%s' "$output" | grep -qxF -- 'true'
+  # 상한 — ipBlock 없는 피어(또는 to 없는 규칙)는 :49 cidr 등호가 원리적으로 못 본다(실측 6/6 ok).
+  [ "$(yq ea '[select(.kind=="NetworkPolicy")|.spec.egress[]?|(.to // [{}])[]|select(has("ipBlock")|not)|((.namespaceSelector.matchLabels."kubernetes.io/metadata.name" // "ANY")+"/"+(.podSelector.matchLabels."k8s-app" // "ANY"))]|sort|join(",")' "$P")" = "kube-system/kube-dns" ]
 }
 
 @test "dns egress to coredns on 53 is declared" {

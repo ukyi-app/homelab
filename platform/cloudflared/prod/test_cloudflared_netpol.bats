@@ -17,6 +17,17 @@ setup() {
   run grep -q 'kind: NetworkPolicy' "$P"; [ "$status" -eq 0 ]
   run grep -q 'cloudflared-default-deny-egress' "$P"; [ "$status" -eq 0 ]
   run grep -q 'app: cloudflared' "$P"; [ "$status" -eq 0 ]
+  # ⚠️ 상한 — ipBlock을 아예 안 갖는 광역 정책 한 건이 :46 cidr 등호의 도메인 밖이다(실측: 신규
+  #    `podSelector:{}`+`namespaceSelector:{}` 추가 후 6/6 ok). 관용구 출처:
+  #    platform/network-policies/prod/test_netpol.bats:29(397b001). **정책 추가 축만** 닫는다 —
+  #    기존 to[]에 피어를 더하는 확장은 이름 집합 불변이라 여전히 무증인이다(실측 6/6 ok).
+  [ "$(yq ea '[select(.kind=="NetworkPolicy")|.metadata.name]|sort|join(",")' "$P")" = \
+    "cloudflared-allow-dns-egress,cloudflared-allow-egress-cloudflare-edge,cloudflared-allow-egress-to-gateway,cloudflared-default-deny-egress" ]
+  # 파일 실재 ≠ 렌더 포함 — 위 단언은 전부 $P를 직접 읽는다. cf. platform/cache/prod/test_render.bats:61-71
+  for r in networkpolicy.yaml configmap.yaml deployment.yaml; do
+    yq '.resources[]' "${BATS_TEST_DIRNAME}/kustomization.yaml" | grep -qxF "$r" \
+      || { echo "kustomization resources에 $r 가 없다 — 렌더에서 빠지면 라이브가 프룬된다"; false; }
+  done
 }
 
 @test "dns egress to coredns on 53 is declared" {

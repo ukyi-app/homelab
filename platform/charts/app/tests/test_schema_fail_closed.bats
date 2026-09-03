@@ -24,6 +24,13 @@ C="--set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
     --set resources.limits.cpu=100m --set resources.limits.memory=64Mi \
     --set route.public=true --set route.host=x.example.com --set kind=web
   [ "$status" -ne 0 ]
+  # ⚠️ 상한 — 위 단언은 `latest` 한 값의 rc만 본다. 패턴에 `v[0-9]+` 같은 대안을 더해도 `latest`는
+  #    여전히 red라 이 줄만으로는 완화가 무증인이었다(실측: 패턴 확장 후 이 파일 60/60 ok 유지).
+  #    이 자리는 손편집 방어의 2차선이다 — 자동 writer는 create-app.ts:45/bump-tag.ts:80의
+  #    TAG_RE·scripts/check-image-pins.sh 레인2(b)의 digest 필수 검사가 이미 1차선을 막는다.
+  #    후행 --set이 $C의 image.tag=sha-abc1234를 이긴다(helm 규약).
+  run helm template t "$CHART" $C --set kind=web --set image.tag=v1
+  [ "$status" -ne 0 ]   # latest 이외의 가변 태그도 거부(패턴에 대안 추가 시 red)
 }
 
 @test "schema rejects a custom ports.http (const 8080 — coupled to prod ns-wide NetworkPolicy)" {
