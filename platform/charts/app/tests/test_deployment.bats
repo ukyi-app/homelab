@@ -11,6 +11,10 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   echo "$out" | grep -qF -- 'runAsNonRoot: true'
   echo "$out" | grep -qF -- 'runAsUser: 65532'
   echo "$out" | grep -qF -- 'path: /health'
+  # 두 프로브가 같은 경로를 쓰므로 `path: /health` 하나로는 어느 한쪽이 통째로 사라져도 매치한다 —
+  # 키 자체를 각각 잰다(실측: readiness 블록 삭제·기본 liveness else-분기 삭제 각각 58/58 초록이었다).
+  echo "$out" | grep -qF -- 'livenessProbe:'
+  echo "$out" | grep -qF -- 'readinessProbe:'
   run grep -qF 'path: /healthz' <<<"$out"; [ "$status" -ne 0 ]
   run grep -qF 'path: /readyz' <<<"$out"; [ "$status" -ne 0 ]
   run grep -qF 'sleep' <<<"$out"; [ "$status" -ne 0 ]
