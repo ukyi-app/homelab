@@ -165,6 +165,14 @@ spec:
                   #   · dns.upstream_mode — /control/dns_info가 기본값(load_balance)을 **빈 문자열**로
                   #     돌려준다(2026-09-03 v0.107.79 실측) → 문자열 대조는 영구 오보다.
                   #   · querylog.file_enabled·size_memory — 어느 control 응답에도 없다(API 미노출).
+                  #   · dns.bootstrap_dns — dns_info에 실려 오지만 **시드가 flow 배열**(adguardhome.yaml:17
+                  #     `["1.1.1.1", "9.9.9.9"]`)이라 seed_upstreams(블록 시퀀스 전용)로 못 읽는다. 새 정규화
+                  #     파서가 필요해 이번 범위 밖이다 — 값싼 처방 우선.
+                  #   · dns.ratelimit_whitelist — 같은 사고(#493)의 나머지 절반이지만 시드가 블록 시퀀스,
+                  #     라이브가 JSON 배열이라 순서·표기 정규화가 필요하고 dns_info 실림 여부를 라이브
+                  #     GET으로 재확인하지 못했다(이번 착지는 읽기 전용 범위). 다음 라운드 후보.
+                  # ⚠️ `dns.ratelimit`·`dns.use_private_ptr_resolvers`는 **처방이 반대**인 두 섹션이다 —
+                  #    아래 대조 코드와 r4 룰 description을 함께 볼 것.
                   # ⚠️ 구 엔드포인트 /control/querylog_info는 쓰지 않는다 — 같은 라이브가 interval을 프리셋
                   #    일수로 반올림해 돌려준다(시드 14d인데 90). 권위는 /control/querylog/config의 밀리초다.
                   # ⚠️ 관측 실패(API 불가·응답 형태 변경·시드 파싱 실패)는 드리프트 1이 **아니다** —
@@ -256,15 +264,39 @@ spec:
                     live_si=$(json_scalar "$st_json" interval); live_si=${live_si%%$'\n'*}
                     case "$live_si" in ''|*[!0-9]*) echo "라이브 statistics.interval 추출 실패" >&2; return 1 ;; esac
                     d_si=0; [ "$seed_si" = "$live_si" ] || d_si=1
+                    # ⚠️ 아래 두 섹션은 **처방이 반대다.** 다른 섹션의 드리프트는 "시드를 라이브에 맞춰라"
+                    #    (ADR-0007 결정 2)이지만, 이 둘은 라이브 회귀(UI 편집·업그레이드 기본값 복귀)가 곧
+                    #    사고 재발이라 **라이브를 시드 값으로 되돌려야** 한다. 근거는 시드 주석의 실측이다:
+                    #      · ratelimit 20 → 40건 동시 질의 중 정확히 20건 무응답(2026-08-18, 경우 B에서
+                    #        집 전체가 라우터 IP 한 버킷으로 도착한다)
+                    #      · use_private_ptr_resolvers true → 최근 10분 에러 18건 중 14건(78%)이 PTR 실패
+                    #    시드 쪽은 `test_adguard_querylog.bats:74·86`이 이미 잠근다(ratelimit>=100·ptr=false)
+                    #    — 그러니 이 알림을 보고 시드를 낮추는 PR은 그 게이트에서 red가 난다. r4의
+                    #    AdGuardSeedDrift description이 그 반대 처방을 명시한다.
+                    # ⚠️ 두 값 모두 이미 손에 있는 `$dns_json`에서 읽는다 — 추가 curl·데드라인 예산·netpol 0.
+                    #    `json_scalar`의 줄머리 앵커가 `ratelimit_subnet_len_ipv4`·`ratelimit_whitelist`와
+                    #    가르고, `seed_scalar dns ratelimit`은 dns 블록의 들여쓴 주석에 안 걸린다.
+                    seed_rl=$(seed_scalar dns ratelimit)
+                    live_rl=$(json_scalar "$dns_json" ratelimit); live_rl=${live_rl%%$'\n'*}
+                    case "$seed_rl" in ''|*[!0-9]*) echo "시드 dns.ratelimit 판독 실패" >&2; return 1 ;; esac
+                    case "$live_rl" in ''|*[!0-9]*) echo "라이브 dns.ratelimit 추출 실패" >&2; return 1 ;; esac
+                    d_rl=0; [ "$seed_rl" = "$live_rl" ] || d_rl=1
+                    seed_ptr=$(seed_scalar dns use_private_ptr_resolvers)
+                    live_ptr=$(json_scalar "$dns_json" use_private_ptr_resolvers); live_ptr=${live_ptr%%$'\n'*}
+                    case "$seed_ptr" in true|false) : ;; *) echo "시드 dns.use_private_ptr_resolvers 판독 실패" >&2; return 1 ;; esac
+                    case "$live_ptr" in true|false) : ;; *) echo "라이브 dns.use_private_ptr_resolvers 추출 실패" >&2; return 1 ;; esac
+                    d_ptr=0; [ "$seed_ptr" = "$live_ptr" ] || d_ptr=1
                     # 섹션별 게이지 + 대조 전용 하트비트. 하트비트는 bare(라벨 0) — absent/or 브랜치와
                     # 라벨셋이 갈리면 for: pending이 매 주기 리셋된다.
                     { printf 'adguard_seed_drift{section="dns.upstream_dns"} %s\n' "$d_up"
+                      printf 'adguard_seed_drift{section="dns.ratelimit"} %s\n' "$d_rl"
+                      printf 'adguard_seed_drift{section="dns.use_private_ptr_resolvers"} %s\n' "$d_ptr"
                       printf 'adguard_seed_drift{section="querylog.enabled"} %s\n' "$d_qe"
                       printf 'adguard_seed_drift{section="querylog.interval"} %s\n' "$d_qi"
                       printf 'adguard_seed_drift{section="statistics.interval"} %s\n' "$d_si"
                       printf 'adguard_seed_drift_checked_timestamp_seconds %s\n' "$(date +%s)"
                     } | $CURL_SEED --data-binary @- "http://vmsingle.observability.svc:8428/api/v1/import/prometheus" || return 1
-                    echo "seed-drift: upstream=${d_up} querylog.enabled=${d_qe} querylog.interval=${d_qi} statistics.interval=${d_si}"
+                    echo "seed-drift: upstream=${d_up} ratelimit=${d_rl} ptr=${d_ptr} querylog.enabled=${d_qe} querylog.interval=${d_qi} statistics.interval=${d_si}"
                   }
                   seed_drift_report || echo "시드 대조 실패 — 게이지·하트비트 미push(관측 실패는 드리프트가 아니다). rewrite 수렴은 계속한다." >&2
                   # 1) want = traefik-ts LB tailscale IP (apiserver로 svc 조회 — status.loadBalancer.ingress[].ip)

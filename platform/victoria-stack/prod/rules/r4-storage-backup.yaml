@@ -538,7 +538,7 @@ data:
             labels: { severity: warning }
             annotations:
               summary: "adguard 시드가 라이브 설정과 갈렸다: {{ $labels.section }}"
-              description: "git의 adguard ConfigMap(`platform/adguard/prod/adguardhome.yaml`) 중 `{{ $labels.section }}` 절이 라이브 AdGuard 설정과 다릅니다. 이 ConfigMap은 첫 부팅 `cp -n` 시드라 라이브가 권위이고, 지금 당장 고장난 것은 없습니다 — 문제는 **DR 재구축 시 여기 적힌 값으로 되돌아간다**는 것입니다(ADR-0007 결정 2). 처방은 시드를 라이브에 맞춰 갱신하는 것입니다: `kubectl -n edge port-forward svc/adguard-ui 8080:80` 후 해당 control 엔드포인트(dns_info · querylog/config · stats/config)의 값을 읽어 시드에 반영하고 PR로 머지하세요. 라이브를 시드 값으로 되돌리지 마세요."
+              description: "git의 adguard ConfigMap(`platform/adguard/prod/adguardhome.yaml`) 중 `{{ $labels.section }}` 절이 라이브 AdGuard 설정과 다릅니다. 이 ConfigMap은 첫 부팅 `cp -n` 시드라 라이브가 권위이고, 지금 당장 고장난 것은 없습니다 — 문제는 **DR 재구축 시 여기 적힌 값으로 되돌아간다**는 것입니다(ADR-0007 결정 2). 처방은 시드를 라이브에 맞춰 갱신하는 것입니다: `kubectl -n edge port-forward svc/adguard-ui 8080:80` 후 해당 control 엔드포인트(dns_info · querylog/config · stats/config)의 값을 읽어 시드에 반영하고 PR로 머지하세요. 라이브를 시드 값으로 되돌리지 마세요. ⚠️ **단 두 섹션은 처방이 반대입니다** — `dns.ratelimit`과 `dns.use_private_ptr_resolvers`는 시드 값이 사고(#493 — ratelimit 20에서 40건 중 20건 무응답 · PTR 포워딩으로 에러의 78%가 로그 오염)를 닫은 값이라, 여기서 갈렸다면 **라이브를 시드 값(100 / false)으로 되돌리세요**. 시드를 라이브에 맞추는 PR은 `platform/adguard/prod/test_adguard_querylog.bats`에서 red가 납니다."
           # 대조 스텝 자신의 생존 — 리컨실러 하트비트(AdguardRewriteReconcilerStale)와 **별개 축**이다.
           # 대조는 실패해도 잡을 죽이지 않으므로(실패 격리) KubeJobFailed·리컨실러 하트비트 어느 것도
           # 그 침묵을 잡지 못한다. 관측 실패(API 불가·응답 형태 변경·시드 파싱 실패)는 게이지 1이 아니라

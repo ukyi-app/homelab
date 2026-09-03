@@ -51,6 +51,11 @@ dns:
     - https://dns2.example.net/dns-query
   bootstrap_dns: ["1.1.1.1"]
   upstream_mode: load_balance
+  # 사고 처방 두 값 — 이 둘은 드리프트의 처방이 반대다(라이브를 되돌린다).
+  use_private_ptr_resolvers: false
+  ratelimit: 100   # 꼬리 주석 — 파서가 걷어내야 한다
+  ratelimit_whitelist:
+    - 192.168.117.1
 filtering:
   rewrites:
     - domain: "*.home.example.test"
@@ -128,6 +133,8 @@ sections() { sed -n 's/^adguard_seed_drift{section="\([^"]*\)"} [0-9][0-9]*$/\1/
   [ "$status" -eq 0 ]
   [ -s "$OUTDIR/payload.txt" ]
   [ "$(drift dns.upstream_dns)" = "0" ]
+  [ "$(drift dns.ratelimit)" = "0" ]
+  [ "$(drift dns.use_private_ptr_resolvers)" = "0" ]
   [ "$(drift querylog.enabled)" = "0" ]
   [ "$(drift querylog.interval)" = "0" ]
   [ "$(drift statistics.interval)" = "0" ]
@@ -136,15 +143,46 @@ sections() { sed -n 's/^adguard_seed_drift{section="\([^"]*\)"} [0-9][0-9]*$/\1/
   [ "$status" -eq 0 ]
 }
 
-@test "the compared section set is exactly the four API-verifiable ones (enumeration floor)" {
+@test "the compared section set is exactly the six API-verifiable ones (enumeration floor)" {
   # 섹션이 조용히 줄면(파서 회귀) 위 @test들은 남은 섹션만 보고도 초록이다 — 전수를 못 박는다.
   run run_script
   [ "$status" -eq 0 ]
-  [ "$(sections)" = "$(printf 'dns.upstream_dns\nquerylog.enabled\nquerylog.interval\nstatistics.interval')" ]
+  [ "$(sections)" = "$(printf 'dns.ratelimit\ndns.upstream_dns\ndns.use_private_ptr_resolvers\nquerylog.enabled\nquerylog.interval\nstatistics.interval')" ]
+}
+
+@test "a live ratelimit regression drifts only its own section (prescription is reversed)" {
+  # 사고 실측값 그대로 — 2026-08-18 ratelimit 20에서 40건 중 20건이 무응답이었다.
+  # ⚠️ 이 섹션의 처방은 "시드를 라이브에 맞춰라"가 **아니다**(r4 AdGuardSeedDrift description 참조).
+  printf '%s' '{"upstream_dns":["https://dns.example.net/dns-query","https://dns2.example.net/dns-query"],"upstream_dns_file":"","upstream_mode":"","ratelimit":20,"use_private_ptr_resolvers":false}' > "$FIXDIR/dns_info.json"
+  run run_script
+  [ "$status" -eq 0 ]
+  [ "$(drift dns.ratelimit)" = "1" ]
+  [ "$(drift dns.use_private_ptr_resolvers)" = "0" ]
+  [ "$(drift dns.upstream_dns)" = "0" ]
+}
+
+@test "a live private-PTR regression drifts only its own section (prescription is reversed)" {
+  # true는 AdGuard 기본값이고, 그 상태에서 에러 로그의 78%가 PTR 실패였다(2026-08-18 실측).
+  printf '%s' '{"upstream_dns":["https://dns.example.net/dns-query","https://dns2.example.net/dns-query"],"upstream_dns_file":"","upstream_mode":"","ratelimit":100,"use_private_ptr_resolvers":true}' > "$FIXDIR/dns_info.json"
+  run run_script
+  [ "$status" -eq 0 ]
+  [ "$(drift dns.use_private_ptr_resolvers)" = "1" ]
+  [ "$(drift dns.ratelimit)" = "0" ]
+  [ "$(drift dns.upstream_dns)" = "0" ]
+}
+
+@test "a dns_info without the two incident keys pushes nothing (extraction failure is not a zero)" {
+  # 키가 사라진 응답(엔드포인트 개편)을 "0 = 일치"로 접으면 사고 회귀가 조용히 무증인이 된다.
+  printf '%s' '{"upstream_dns":["https://dns.example.net/dns-query","https://dns2.example.net/dns-query"],"upstream_dns_file":"","upstream_mode":""}' > "$FIXDIR/dns_info.json"
+  run run_script
+  [ "$status" -eq 0 ]
+  [ -s "$OUTDIR/payload.txt" ]
+  run grep -q '^adguard_seed_drift{' "$OUTDIR/payload.txt"
+  [ "$status" -eq 1 ]
 }
 
 @test "one differing upstream line drifts only its own section" {
-  printf '%s' '{"upstream_dns":["https://dns.example.net/dns-query","https://dns9.example.net/dns-query"],"upstream_dns_file":"","upstream_mode":""}' > "$FIXDIR/dns_info.json"
+  printf '%s' '{"upstream_dns":["https://dns.example.net/dns-query","https://dns9.example.net/dns-query"],"upstream_dns_file":"","upstream_mode":"","ratelimit":100,"use_private_ptr_resolvers":false}' > "$FIXDIR/dns_info.json"
   run run_script
   [ "$status" -eq 0 ]
   [ "$(drift dns.upstream_dns)" = "1" ]
@@ -154,7 +192,7 @@ sections() { sed -n 's/^adguard_seed_drift{section="\([^"]*\)"} [0-9][0-9]*$/\1/
 }
 
 @test "upstream order is part of the comparison (a reorder is drift, not a wash)" {
-  printf '%s' '{"upstream_dns":["https://dns2.example.net/dns-query","https://dns.example.net/dns-query"],"upstream_dns_file":"","upstream_mode":""}' > "$FIXDIR/dns_info.json"
+  printf '%s' '{"upstream_dns":["https://dns2.example.net/dns-query","https://dns.example.net/dns-query"],"upstream_dns_file":"","upstream_mode":"","ratelimit":100,"use_private_ptr_resolvers":false}' > "$FIXDIR/dns_info.json"
   run run_script
   [ "$status" -eq 0 ]
   [ "$(drift dns.upstream_dns)" = "1" ]
@@ -258,15 +296,17 @@ sections() { sed -n 's/^adguard_seed_drift{section="\([^"]*\)"} [0-9][0-9]*$/\1/
 # ── 실 시드 파일의 모양 ────────────────────────────────────────────────────────────────────────
 
 @test "the parser reaches every section of the real in-repo seed ConfigMap" {
-  # 값이 아니라 **모양**의 증인이다(들여쓰기·꼬리 주석·블록 스칼라 해제 후 컬럼). 네 섹션 중 하나라도
-  # 시드 쪽 추출이 비면 스크립트는 파싱 실패로 접어 아무것도 push하지 않으므로, 게이지 4줄의 존재가
-  # 곧 "네 추출이 전부 성공했다"이다. 값 단언은 합성 픽스처가 진다(정당한 시드 편집 ≠ CI red).
+  # 값이 아니라 **모양**의 증인이다(들여쓰기·꼬리 주석·블록 스칼라 해제 후 컬럼). 여섯 섹션 중 하나라도
+  # 시드 쪽 추출이 비면 스크립트는 파싱 실패로 접어 아무것도 push하지 않으므로, 게이지 6줄의 존재가
+  # 곧 "여섯 추출이 전부 성공했다"이다. 값 단언은 합성 픽스처가 진다(정당한 시드 편집 ≠ CI red).
+  # ⚠️ `dns.ratelimit`이 실 시드의 **들여쓴 주석**(`ratelimit_subnet_len_ipv4 기본값이 24라…`)에 걸리지
+  #    않는다는 것도 여기서 증명된다 — 걸리면 판독값이 숫자가 아니라 파싱 실패로 접힌다.
   yq 'select(.kind=="ConfigMap") | .data["AdGuardHome.yaml"]' "$ROOT/platform/adguard/prod/adguardhome.yaml" \
     > "$BATS_TEST_TMPDIR/real-seed.yaml"
   [ -s "$BATS_TEST_TMPDIR/real-seed.yaml" ]
   SEED_FILE="$BATS_TEST_TMPDIR/real-seed.yaml" run run_script
   [ "$status" -eq 0 ]
-  [ "$(sections)" = "$(printf 'dns.upstream_dns\nquerylog.enabled\nquerylog.interval\nstatistics.interval')" ]
+  [ "$(sections)" = "$(printf 'dns.ratelimit\ndns.upstream_dns\ndns.use_private_ptr_resolvers\nquerylog.enabled\nquerylog.interval\nstatistics.interval')" ]
   run grep -q '^adguard_seed_drift_checked_timestamp_seconds ' "$OUTDIR/payload.txt"
   [ "$status" -eq 0 ]
 }
