@@ -323,10 +323,11 @@ jobs:
           #    폐기됐고 owner 로컬 작업기는 NUC(terraform 1.9.8)로 옮겨갔다. 그 문장을 근거로
           #    다른 핀들을 '선제' 통일하면 cloudflare/github 등식이 깨진다.
           # 핀은 **루트마다 독립**이다(state writer가 다르므로 통일이 오히려 고장이다):
-          #   · cloudflare — CI(iac.yaml:76 plan·:179 apply · 이 파일 :73 apply)와 owner 로컬
+          #   · cloudflare — CI(iac.yaml의 `iac-plan`·`apply` 잡 · 이 파일의 `reconcile` 잡)와 owner 로컬
           #     apply(blocked-delete 복구 경로)가 번갈아 쓴다 ⇒ 그 핀들 = owner 바이너리 **등식**.
-          #   · github — owner 로컬 apply 전용이고 CI(이 파일 :189)는 plan-only ⇒ CI 핀 ≥ writer.
-          #   · iac.yaml:27(validate all roots)은 `init -backend=false`라 state를 안 만져 등식 밖이다.
+          #   · github — owner 로컬 apply 전용이고 CI(이 파일의 `drift-github` 잡)는 plan-only ⇒ CI 핀 ≥ writer.
+          #   · iac.yaml의 `iac-validate` 잡(「terraform init (no backend) + validate all roots」 스텝)은
+          #     `init -backend=false`라 state를 안 만져 등식 밖이다.
           #   ✅ 그 등식은 이제 기계가 진다 — infra/cloudflare/versions.tf·infra/github/versions.tf의
           #     `required_version = "= 1.9.8"`이 한 변만 올라가도 init에서 fail-closed로 죽인다.
           #     이 루트(tailscale)만 `>= 1.9.0`이라 1.15.5로 돌 수 있다.
