@@ -31,7 +31,13 @@ EOF
   # 도메인 0에서 rc 1을 받아 그대로 통과한다(`-eq 1`이 잡는 것은 경로 소실뿐이다).
   [ -n "$(find "$TREE" -type f | head -n 1)" ]
 }
-run_hc() { HOSTCFG_ROOT="$FX" run "$BOOTSTRAP_DIR/host-config.sh" "$@"; }
+# `run`이 출력을 삼켜 실패 시 진단이 0줄이 되는 자리 — 되울림 근거는 test_02-host-preflight.bats의
+# 같은 헬퍼 주석. bats는 실패한 @test의 stdout만 보여주므로 초록 실행은 그대로 조용하다.
+run_hc() {
+  HOSTCFG_ROOT="$FX" run "$BOOTSTRAP_DIR/host-config.sh" "$@"
+  echo "status=$status"
+  echo "$output"
+}
 
 # ── 선언 ↔ 디스크 대조 ─────────────────────────────────────────────────────────────────────
 @test "check passes when the declared tree matches disk" {

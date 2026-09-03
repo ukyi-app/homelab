@@ -30,7 +30,16 @@ load_budget() {
   grep -q 'secretName: ghcr-read' "$D"                    # observability ns dockerconfigjson 마운트
   # SealedSecret 소스 존재(owner seal 산출) + kustomization 배선
   [ -f "$ROOT/platform/victoria-stack/prod/ghcr-read.sealed.yaml" ]
-  grep -q 'ghcr-read.sealed.yaml' "$ROOT/platform/victoria-stack/prod/kustomization.yaml"
+  # ⚠️ **파일 실재 ≠ 렌더 포함**이고, 원문 grep은 그 구별을 못 한다 — resources에서 줄을 지우고
+  #    같은 이름을 주석에 남기기만 해도 초록이었다(2026-09-03 뮤테이션 실측: 이 @test 통과).
+  #    ArgoCD가 싱크하는 진실은 kustomize 렌더 결과이고 prune:true라 그 삭제는 라이브에서 실제로
+  #    ghcr-read Secret을 없애 digest-exporter가 private GHCR inspect에 실패한다(형제 처방:
+  #    platform/cache/prod/test_render.bats의 resources 멤버십 루프).
+  # ⚠️ 건수 바닥값(`.resources | length -ge N`)이 아니라 **멤버십**이다 — 이 kustomization은
+  #    컴포넌트 추가/삭제가 정당하게 일어나는 자리라 래칫은 오탐이 된다.
+  yq '.resources[]' "$ROOT/platform/victoria-stack/prod/kustomization.yaml" \
+    | grep -qxF 'ghcr-read.sealed.yaml' \
+    || { echo "kustomization resources에 ghcr-read.sealed.yaml이 없다 — 렌더에서 빠지면 프룬된다"; false; }
 }
 
 @test "digest-exporter pod is egress-isolated (label + default-deny + ghcr/vmsingle allow)" {

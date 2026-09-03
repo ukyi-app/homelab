@@ -79,7 +79,13 @@ _sandbox() {
   sed -i.bak "s#^export BULK_MIGRATION_WINDOW_UNTIL=.*#export BULK_MIGRATION_WINDOW_UNTIL=\"${1:-}\"#" "$BS/versions.env"
   export BS
 }
-_apply() { BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" run "$BS/apply-storage.sh"; }
+# `run`이 출력을 삼켜 실패 시 진단이 0줄이 되는 자리 — 되울림 근거는 test_02-host-preflight.bats의
+# 같은 헬퍼 주석. bats는 실패한 @test의 stdout만 보여주므로 초록 실행은 그대로 조용하다.
+_apply() {
+  BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" run "$BS/apply-storage.sh"
+  echo "status=$status"
+  echo "$output"
+}
 
 # ── 국면 B 형태(별도 디바이스) — 플래그 없이 통과해야 한다 ─────────────────────────────────
 @test "renders manifests with the helper image substituted (no literal placeholder)" {

@@ -10,9 +10,10 @@ data:
         rules:
           # 디스크 포화 = PVC 포화: 모든 PV가 hostPath(local-path provisioner)라 per-PVC 쿼터·kubelet_volume_stats가
           # 원천 부재다(hostPath는 MetricsProvider 미구현 → kubelet volume stats 영구 0건 — 라이브 검증). standard SC
-          # PVC(pg-1 PGDATA/WAL·adguard·vmsingle·vlogs)는 전부 루트 fs '/'(btrfs /dev/vdb1, ~224GiB 실측)를 쿼터 없이 공유하므로
+          # PVC(pg-1 PGDATA/WAL·adguard-data·trip-mate-data)는 전부 루트 fs '/'(ext4
+          # /dev/mapper/ubuntu--vg-ubuntu--lv, 913G 실측 2026-09-03)를 쿼터 없이 공유하므로
           # '/' 포화 = 모든 standard PVC 동시 위험. node_filesystem 절대값으로 3티어(조기 warning/추세/critical) 감시한다.
-          # mountpoint="/"는 정확일치 — '/run/k3s/.../shm'·tmpfs·virtiofs(/mnt/mac) 노이즈를 배제하는 단일 btrfs series.
+          # mountpoint="/"는 정확일치 — '/run/k3s/.../shm'·tmpfs·/mnt/bulk 노이즈를 배제하는 단일 ext4 series.
           # (bulk-ssd를 node_filesystem으로 직접 재지 않는 이유가 국면마다 다르다: OrbStack 시절엔 virtiofs
           #  /mnt/mac 하위라 VM node-exporter가 별도 series를 못 만들었고, **국면 A(D4 한시)에는 bulk가 루트 LV의
           #  bind 마운트라 애초에 같은 fs**다. 어느 쪽이든 in-cluster 신호는 du exporter의 statfs가 유일하다.
@@ -368,7 +369,7 @@ data:
             labels: { severity: warning }
             annotations:
               summary: "per-PVC 용량 수집이 48시간 이상 정체"
-              description: "pvc-du-exporter CronJob이 pvc_dir_size_bytes/storage_tier_* 갱신에 실패했습니다 — bulk(virtiofs) 용량의 유일 in-cluster 신호가 소실됩니다(W3 선행). CronJob/마운트/경로를 확인하세요."
+              description: "pvc-du-exporter CronJob이 pvc_dir_size_bytes/storage_tier_* 갱신에 실패했습니다 — bulk(/mnt/bulk, ext4 /dev/nvme1n1p1) 용량의 유일 in-cluster 신호가 소실됩니다(W3 선행). CronJob/마운트/경로를 확인하세요."
           # 외장 bulk-ssd의 in-cluster 용량 신호(W3 관측 데이터 이전의 선행 조건, F18) — du exporter가 파드
           # 내부 df로 티어 용량을 push한다. FilesBulkSSDLow(호스트 백업 타이머의 df push, <10%)와 물리 매체는
           # 같으나 ⚠️ 의도적 이원화(중복 아님): (a) 독립 liveness — 호스트 백업이 멈춰도(FilesBulkSSDLow capacity
