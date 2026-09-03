@@ -96,6 +96,25 @@ const SCOPES: Record<string, ScopeDef> = {
     include: YAML_EXT,
     exclude: VENDOR_AND_FIXTURES,
   },
+  // "이 파일이 **k3s-bootstrap이 적용하는 substrate 매니페스트**인가" — `platform-manifests`의
+  // 형제이되 root만 다르다(같은 리더·같은 하네스 제외). **자원 회계 전용**이다.
+  // ⚠️ 왜 `platform-manifests`의 root를 넓히지 않았는가: 그 스코프의 소비자는 자원 가드 하나가
+  //   아니다(check-disk-caps도 쓴다). 한 소비자에게 필요한 확장을 공유 스코프에 밀어 넣으면
+  //   다른 소비자의 분모가 함께 움직인다 — 이 레포는 그 클래스를 이미 밟았다(「파일 프리필터를
+  //   함께 넓히지 않으면 kind 추가가 vacuous green으로 착지한다」의 반대 방향 얼굴).
+  // ⚠️ 이 스코프는 **이미지 축을 건드리지 않는다**. `infra/k3s-bootstrap/storage`의
+  //   local-path-provisioner는 mutable tag(`rancher/local-path-provisioner:vX`)를 쓰고 그 freshness는
+  //   versions.env 관할이다 — image-pins 분모에 들어오면 「핀 없음」 전건 red가 된다. 소비자를
+  //   자원 가드로 한정하는 것이 그 경계다(image-ownership은 이미 infra/를 **별도로** 포함한다:
+  //   "누가 최신으로 유지하는가"는 다른 질문이라 답이 있어야 한다 — 아래 image-ownership 주석).
+  "substrate-manifests": {
+    kind: "manifests",
+    source: "tracked",
+    root: "infra/k3s-bootstrap/storage",
+    include: YAML_EXT,
+    // 벤더 규칙은 스코프별이다 — 이 root 아래엔 벤더 디렉토리가 없다(하네스 제외만 공유).
+    exclude: TEST_HARNESS,
+  },
   // 앱 배포 핀(apps 레인)이 사는 파일. 디렉토리 구조 자체가 필터라 별도 제외가 없다.
   "apps-values": {
     kind: "manifests",

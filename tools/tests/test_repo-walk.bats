@@ -167,7 +167,50 @@ apps/probe" ]
 @test "SCOPE_NAMES exposes the registered scopes" {
   run walk 'console.log(SCOPE_NAMES.slice().sort().join(","))'
   [ "$status" -eq 0 ]
-  [ "$output" == "apps,apps-manifests,apps-values,guards,image-ownership,platform,platform-image-refs,platform-manifests,producers,rules,workflows" ]
+  [ "$output" == "apps,apps-manifests,apps-values,guards,image-ownership,platform,platform-image-refs,platform-manifests,producers,rules,substrate-manifests,workflows" ]
+}
+
+# ── `substrate-manifests` — k3s-bootstrap이 적용하는 상주 워크로드(자원 회계 전용) ──
+# `platform-manifests`의 형제이되 root만 다르다. 별도 픽스처를 쓰는 이유는 `_fixture_repo`와 같다:
+# 위 `_fixture`에 infra 트리를 넣으면 다른 스코프의 정확-일치 단언과 관심사가 결합된다.
+_fixture_substrate() {
+  local t; t="$(mktemp -d)"
+  mkdir -p "$t/infra/k3s-bootstrap/storage/tests" "$t/infra/k3s-bootstrap/vm" "$t/platform/comp/prod"
+  echo 'kind: Deployment'   > "$t/infra/k3s-bootstrap/storage/provisioner.yaml"   # 포함
+  echo 'kind: StorageClass' > "$t/infra/k3s-bootstrap/storage/sc.yml"             # 포함(.yml)
+  echo 'kind: Deployment'   > "$t/infra/k3s-bootstrap/storage/tests/fixture.yaml" # 제외(공유 하네스 어휘)
+  echo 'kind: Deployment'   > "$t/infra/k3s-bootstrap/vm/node.yaml"               # 제외(root 밖)
+  echo 'notes'              > "$t/infra/k3s-bootstrap/storage/notes.txt"          # 제외(include 정규식)
+  echo 'kind: Deployment'   > "$t/platform/comp/prod/deploy.yaml"                 # 제외(다른 스코프의 root)
+  git -C "$t" init -q; git -C "$t" add -A
+  echo 'kind: Deployment'   > "$t/infra/k3s-bootstrap/storage/untracked.yaml"     # 제외(추적 안 됨)
+  echo "$t"
+}
+
+@test "substrate-manifests enumerates the k3s-bootstrap storage root and nothing else" {
+  tmp="$(_fixture_substrate)"
+  run walk 'console.log(walkManifests("substrate-manifests", ROOT).map(e => e.path).join(","))' "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "infra/k3s-bootstrap/storage/provisioner.yaml,infra/k3s-bootstrap/storage/sc.yml" ]
+}
+
+@test "substrate-manifests does not collapse against the real repository" {
+  run walk 'console.log(walkManifests("substrate-manifests", ROOT).length > 0)'
+  [ "$status" -eq 0 ]
+  [ "$output" == "true" ]
+}
+
+# ⚠️ **스코프가 곧 소비자의 분모다.** 이 root의 local-path-provisioner는 mutable tag를 쓰고 그
+# freshness는 versions.env 관할이라, 이 스코프가 image-pins 쪽으로 새면 그 가드가 「핀 없음」으로
+# 전건 red가 된다. 그래서 소비자를 자원 가드 하나로 한정한다 — 그 사실을 **손으로 적지 않고**
+# `guards` 스코프(그 자체가 파생)에서 파생해 대조한다.
+@test "substrate-manifests has exactly one guard consumer (other denominators cannot move)" {
+  run walk 'console.log(walkManifests("guards").filter(e => e.text.includes("substrate-manifests")).map(e => e.path).join(","))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" == "tools/check-resource-limits.ts" ]
 }
 
 # `workflows` 스코프의 위험은 **이름 기반 축소**다 — `_*.yaml`(내부 reusable)과 `reusable-*.yaml`

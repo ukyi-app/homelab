@@ -409,12 +409,17 @@ atomic []string이라 strategic-merge가 리스트를 통째로 교체한다(실
 (`pg-tools`는 CronJob용 ops 이미지 — 일시적이므로 상주 워크로드 행이 없다. worker/web/console
 values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 앱은 온보딩 PR이 행을 추가한다.)
 
-> **local-path-storage 행 = k3s-bootstrap substrate 워크로드** — `infra/k3s-bootstrap/storage/local-path-provisioner.yaml`이
-> Deployment 2개(`local-path-provisioner-internal`·`-bulk`, 각 req 32Mi/limit 64Mi)를 `local-path-storage` ns에
-> 적용한다. ⚠️ 이 둘은 **ArgoCD 관리가 아니고**(`app.kubernetes.io/instance` 라벨 없음 — 라이브 실측
-> 2026-09-03) `tools/check-resource-limits.ts`의 스캔 root(`platform`)에도 없어, 두 `resources:` 블록을
-> 지워도 `make verify`·gate·ArgoCD가 전부 초록이다. tailscale proxy 행과 같은 **수기 계상** 클래스다 —
-> 그 파일의 limit을 바꾸면 이 행도 손으로 따라와야 한다(스캐너 root 확장은 repo-walk 스코프 설계라 별건).
+> **local-path-storage 행 = k3s-bootstrap substrate 워크로드 (이 원장에서 유일한 기계 대조 행)** —
+> `infra/k3s-bootstrap/storage/local-path-provisioner.yaml`이 Deployment 2개
+> (`local-path-provisioner-internal`·`-bulk`, 각 req 32Mi/limit 64Mi)를 `local-path-storage` ns에 적용한다.
+> 이 둘은 **ArgoCD 관리가 아니다**(`app.kubernetes.io/instance` 라벨 없음 — 라이브 실측 2026-09-03).
+> `tools/check-resource-limits.ts`가 `substrate-manifests` 스코프로 이 파일을 함께 열거해 **namespace별
+> memory 합 == 그 namespace를 쓰는 원장 행들의 합**을 기계로 대조한다(replicas 반영). 양방향이다 —
+> 매니페스트의 limit을 올려도, 이 행을 지워도 `make verify`가 red다. 그러니 **손으로 맞추지 말고
+> 한쪽을 고친 뒤 가드를 돌려라**(2026-09-03 착지 전에는 두 뮤테이션 모두 전 게이트 초록이었다).
+> ⚠️ 이 대조가 덮는 것은 substrate 스코프뿐이다. `platform/` 행과 tailscale proxy 행은 여전히
+> **수기 계상**이다(전자는 원장 행이 namespace 총량이고 매니페스트는 컴포넌트 단위라 대응이 1:1이
+> 아니며, 후자는 ProxyClass가 런타임에 만드는 StatefulSet이라 소스에 없다).
 
 > **tailscale 행 = operator + proxy N대** — `loadBalancerClass: tailscale` 서비스 1개마다 operator가
 > proxy StatefulSet(ts-*)을 1대 생성하고 defaultProxyClass(`resource-capped`)가 각 192Mi limit/64Mi req를
