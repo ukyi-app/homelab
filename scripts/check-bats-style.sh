@@ -496,8 +496,14 @@ function abs_line(raw,   t,i,n,parts,s){
   if (t=="") return
   if (abscont!=""){ t=abscont" "t; abscont="" }
   if (t ~ /\\$/){ sub(/\\$/,"",t); abscont=t; return }
-  n=split(t, parts, /;[ \t]*/)
-  for(i=1;i<=n;i++){ s=parts[i]; sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); if(s!="") abs_stmt(s) }
+  # ⚠️ mask_semi(round11 bats-style-lanes-1이 NEG/BB 레인에 넣은 공용 세그먼터)로 따옴표 안 `;`를
+  #    가린 뒤 분해한다 — 안 가리면 `run bash -c '…"a;b"…'`처럼 홑따옴표 본문 안 리터럴 `;`가
+  #    abs_stmt/abs_target(F3 `bash -c` 언랩)이 공유하는 이 진입점을 두 조각으로 잘라 닫는 홑따옴표를
+  #    못 찾게 만들고, ABS/ABS-REC/ABS-GIT/ABS-LOOP/ABS-EXEC/SETCAP 여섯 레인 전부가 그 문장에서
+  #    무증인으로 사라진다(2026-09 정기 회귀 reg-d-bats-style-last-1, 12라운드). NEG/BB(554행)가
+  #    이미 하는 관용구를 abs_line 자신에도 적용하는 것뿐 — 신설 함수 없음.
+  n=split(mask_semi(t), parts, /;[ \t]*/)
+  for(i=1;i<=n;i++){ s=parts[i]; sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); gsub(/\001/,";",s); if(s!="") abs_stmt(s) }
 }
 BEGIN { absn=0; execn=0 }
 FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++

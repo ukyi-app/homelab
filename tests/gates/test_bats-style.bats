@@ -611,6 +611,21 @@ setup() {
   echo "$output" | grep -q '\[ABS-REC\]'
 }
 
+@test "a literal semicolon inside a single-quoted bash -c grep pattern does not blind the shared abs_line split (round12 reg-d-bats-style-last-1)" {
+  # ⚠️ 착지 전: abs_line(495행)의 `;` 분해는 mask_semi 없이 원문 `;`를 그대로 경계로 썼다 —
+  #    홑따옴표 본문 안 리터럴 `;`(패턴 `"a;b"`)가 이 문장을 두 조각으로 잘라 abs_target의
+  #    닫는 홑따옴표 탐색이 실패하고(absk=0), ABS/ABS-REC/ABS-GIT/ABS-LOOP/ABS-EXEC/SETCAP
+  #    여섯 레인 전부에서 이 문장이 투명해졌다(무증인 초록, 실측 exit 0).
+  printf '%s\n' \
+    '@test "bash -c pipe absence with a literal semicolon in the quoted pattern" {' \
+    "  run bash -c 'grep -rqE \"a;b\" \"\$1/\"' _ \"\$TREE\"" \
+    '  [ "$status" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_bashc_semi.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_bashc_semi.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-REC\]'
+}
+
 @test "the bash -c pipe form passes once a floor and a positive control are present" {
   printf '%s\n' \
     'setup() {' \
