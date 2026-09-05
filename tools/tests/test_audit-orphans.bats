@@ -61,6 +61,17 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | jq -e '.findings | any(.type == "orphan-dns" and .subject == "ghost")'
 }
 
+@test "audit reports a public app manifest with no apps.json row (missing-registration)" {
+  # tools-teardown-bump-1(8라운드) — 대칭 짝: orphan-dns는 registry 행인데 매니페스트 부재를 잡고,
+  # 이 레인은 그 역방향(매니페스트인데 registry 행 부재)을 잡는다. 이 판정문(232행)이 통째로
+  # 지워져도 이 @test가 없으면 34/34가 그대로 통과했다.
+  mkdir -p "$FR/apps/rogue/deploy/prod"
+  printf 'route: {public: true, host: rogue.example.com}\n' > "$FR/apps/rogue/deploy/prod/values.yaml"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.findings | any(.type == "missing-registration" and .subject == "rogue")'
+}
+
 @test "audit no longer emits dangling-binding/unreferenced-resource (connection is a sealed secret)" {
   # .bindings.json에 db/redis 참조가 없어 바인딩↔리소스 교차가 사라졌다 — 두 유형 모두 미발화.
   echo '{"db":["missing"],"redis":[],"autoDeploy":true}' > "$FR/apps/orders/deploy/prod/.bindings.json"
@@ -479,6 +490,16 @@ YAML
   run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.findings | any(.type == "malformed-conn" and .subject == "db-BAD-conn.sealed.yaml")'
+}
+
+@test "audit reports an incomplete purge tombstone (state=purging)" {
+  # tools-teardown-bump-2(8라운드) — line 517-518 근방의 seed_all_domains state=purged는
+  # incomplete-purge를 **만들지 않는** 음성 통제뿐이었다. 이 레인이 그 대칭 양성 통제다.
+  # 이 판정문(282행)이 통째로 지워져도 이 @test가 없으면 34/34가 그대로 통과했다.
+  printf '{"db:stuck":{"state":"purging"}}\n' > "$FR/platform/data-conn/prod/.tombstones.json"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.findings | any(.type == "incomplete-purge" and .subject == "db:stuck")'
 }
 
 @test "the retired --min-registry vocabulary is a usage error (kernel-followups 05)" {
