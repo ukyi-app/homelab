@@ -2153,9 +2153,11 @@ selfHeal과 플립플롭한다.
   ⚠️ 이 문단은 #574가 갱신하지 않아 **닫힌 부채를 열린 것으로** 서술하고 있었다(SSOT가 코드와 다른
   사실을 말하는 이 레포의 반복 클래스). verify-traps는 `> 가드:` 줄과 헤드라인만 대조하므로 본문
   산문의 이 드리프트를 **원리적으로 못 본다** — 산문도 SSOT의 일부라는 것이 이 자리의 교훈이다.
-- ⚠️ **가드 도메인 밖**: 판정 범위는 `printf '%s\n' "$var"`·`echo "$var"` 같은 **셸 빌트인 writer**다.
-  외부 명령 writer(`sops -d …`·`kubectl get -o yaml …` → `grep -q`)는 같은 기전을 갖지만 가드가 보지
-  않는다(헤더 ②의 축소 근거 — 패턴을 넓히면 오탐이 도메인을 삼킨다). 그 자리는 **소비-완료 형태**
+- ⚠️ **가드 도메인(2026-09-05 티켓 71로 확장)**: 판정 범위는 `printf '%s\n' "$var"`·`echo "$var"` 같은 셸 빌트인
+  writer **+ 파일/명령 writer**(`sed`·`awk`·`cat`·`grep`·`kubectl`·`locale`·`yq`·`jq` … → `grep -q`)다 — #642가 실증한
+  `check-locale-collation.sh` 레인 D(`sed … "$f" | grep -q`)가 그 클래스였고, 확장한 분모가 곧바로
+  `scripts/netpol-rehearsal.sh`의 `kubectl … -o yaml | grep -q` 2곳을 잡았다(SIGPIPE 시 「복원 확인」이 거짓 성공).
+  열거에 없는 외부 명령(`sops -d …` 등)은 현 트리 위반 0건이라 분모 밖이며, 그 자리는 **소비-완료 형태**
   (`grep -c`/`grep -l`, 또는 herestring)를 손으로 지킨다. 실측 사례: `scripts/backup-sealed-secrets-key.sh`의
   복호 검증은 sops(Go)가 stdout에 단일 write를 하는데, 출력이 커지면(합성 페이로드 실측: ≈90KB부터
   10~20% 확률, ≈139KB=12키부터 결정적) `grep -q`의 조기 종료가 그 write를 EPIPE로 만들어 백업 생성이
