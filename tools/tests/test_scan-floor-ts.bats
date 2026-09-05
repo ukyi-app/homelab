@@ -214,6 +214,23 @@ EOF
   [ "$status" -ne 0 ]
 }
 
+@test "contract breakage outranks collapse when both domains fail in the same run (breakage second)" {
+  # lib-b-2 — collapseCode의 '계약파손(2) > 붕괴(1)' 우선순위(scan-floor.ts:272 if (e.exitCode >
+  # collapseCode))를 실행하는 다중도메인 동시실패 픽스처가 없었다(기존 #14는 alpha 단일 도메인만
+  # 실패시켜 beta는 통과 — 우선순위 분기 자체가 실행되지 않는다). alpha=붕괴(exit1) 먼저,
+  # beta=계약파손(exit2, min이 NaN)이 나중이어도 최종 종료코드는 2여야 한다.
+  FX_N_A=0 FX_MIN_B=abc run bun "$FX"
+  [ "$status" -eq 2 ]
+}
+
+@test "contract breakage outranks collapse regardless of which domain is processed first (breakage first)" {
+  # 위 테스트의 순서 반전 — alpha=계약파손(exit2) 먼저, beta=붕괴(exit1)가 나중이어도 여전히 2.
+  # min/enumerate가 하드코딩 정수·.length뿐인 현재 실 가드에서는 도달 불가 경로이며, 미래 동적
+  # min을 쓰는 새 도메인이 추가될 때 이 우선순위 역전을 잡는 회귀 방지용이다.
+  FX_MIN_A=abc FX_N_B=0 run bun "$FX"
+  [ "$status" -eq 2 ]
+}
+
 @test "output:none keeps stdout free of markers while verdict semantics stay intact" {
   FX_OUTPUT=none run bun "$FX"
   [ "$status" -eq 0 ]
