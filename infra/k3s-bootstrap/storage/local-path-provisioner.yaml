@@ -1,13 +1,19 @@
 # SSOT: seed-only — 이 트리는 **ArgoCD가 수렴시키지 않는다**(docs/decisions/0007 1). 적용자는 owner-local
-#   `apply-storage.sh`(`${LOCAL_PATH_HELPER_IMAGE}`·`${BULK_STORAGE_PATH}`를 렌더해 apply)뿐이고,
-#   Renovate가 올리는 태그는 재구축 목표값이지 현재 라이브 값이 아니다.
+#   `apply-storage.sh`(`${LOCAL_PATH_PROVISIONER_IMAGE}`·`${LOCAL_PATH_HELPER_IMAGE}`·
+#   `${BULK_STORAGE_PATH}`를 렌더해 apply)뿐이고, Renovate가 올리는 핀은 재구축 목표값이지 현재
+#   라이브 값이 아니다.
+#   ⚠️ 감사 60 prov-1~3(2026-09-05): provisioner 이미지가 하드코딩 태그에서 위 첫 플레이스홀더로
+#      바뀌었다 — versions.env의 `LOCAL_PATH_PROVISIONER_IMAGE`(digest 핀, 헬퍼와 같은 형태)가 이제
+#      digest 소유자다(policy/image-ownership.json의 그 자리 무소유 선언은 제거됐다).
 #   라이브 대조는 두 축이다: `verify-cluster.sh` [10][11](세 값 전부 — owner 손 실행)과
 #   `platform/victoria-stack/prod/rules/r8-substrate.yaml`의 `SubstrateProvisionerPinDrift`
-#   warning(**상주 주기 신호** — KSM `kube_pod_container_info.image_spec`을 아래 태그와 대조).
-#   ⚠️ 후자는 helper digest를 **보지 못한다**(ConfigMap data 안 문자열이라 KSM에 없다) → [11]은 손 실행 전용.
-#   ⚠️ 아래 태그를 올리는 PR은 versions.env·r8 룰 리터럴과 **같은 커밋에서** 움직여야 한다
-#      (등식: test_06-storage-manifests.bats · tests/gates/test_vmalert-config.bats).
+#   warning(**상주 주기 신호** — KSM `kube_pod_container_info.image_spec`을 이제 repo:tag@digest
+#   **전체 문자열**과 대조한다 — 매니페스트가 그 형태를 렌더하므로 라이브 image_spec도 그 형태다).
+#   ⚠️ helper digest는 여전히 **보지 못한다**(ConfigMap data 안 문자열이라 KSM에 없다) → [11]은 손 실행 전용.
+#   ⚠️ 위 플레이스홀더가 가리키는 값을 올리는 PR은 versions.env·r8 룰 리터럴과 **같은 커밋에서** 움직여야
+#      한다(등식: test_06-storage-manifests.bats · tests/gates/test_vmalert-config.bats).
 #   ⚠️ 라이브 실측 2026-09-03: 두 Deployment 모두 `v0.0.36` · helper `sha256:fd8d9aa6…`(핀과 갈려 있다).
+#      2026-09-05 digest 승격 이후에도 라이브는 여전히 v0.0.36 태그 형태다 — owner substrate 수렴 전.
 #   자원 limit은 `docs/memory-ledger.md`의 `local-path-storage` 행과 기계 대조된다(check-resource-limits).
 apiVersion: v1
 kind: Namespace
@@ -68,7 +74,7 @@ spec:
       serviceAccountName: local-path-provisioner-sa
       containers:
         - name: local-path-provisioner
-          image: rancher/local-path-provisioner:v0.0.37
+          image: ${LOCAL_PATH_PROVISIONER_IMAGE}
           imagePullPolicy: IfNotPresent
           command: ["local-path-provisioner"]
           args:
@@ -142,7 +148,7 @@ spec:
       serviceAccountName: local-path-provisioner-sa
       containers:
         - name: local-path-provisioner
-          image: rancher/local-path-provisioner:v0.0.37
+          image: ${LOCAL_PATH_PROVISIONER_IMAGE}
           imagePullPolicy: IfNotPresent
           command: ["local-path-provisioner"]
           args:

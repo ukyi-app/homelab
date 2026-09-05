@@ -483,18 +483,25 @@ EOF
   prov="$(grep -oE '^export LOCAL_PATH_PROVISIONER_VERSION="[^"]+"' "$VER" | sed -e 's/.*="//' -e 's/"$//')"
   [ -n "$k3s" ]
   [ -n "$prov" ]
-  # 매니페스트 태그도 같은 값이어야 한다(그 등식 자체는 test_06-storage-manifests.bats 소유 —
-  # 여기서는 룰이 **매니페스트에 실제로 있는 문자열**을 물고 있는지를 본다).
-  run grep -cE "image: rancher/local-path-provisioner:${prov}([[:space:]]|\$)" "$PROV"
-  [ "$status" -eq 0 ]
-  [ "$output" -ge 1 ]
+  # 티켓 60 prov-3 — 매니페스트는 이제 하드코딩 태그가 아니라 `${LOCAL_PATH_PROVISIONER_IMAGE}`
+  # 플레이스홀더다(렌더 결합은 test_06-storage-manifests.bats·test_07-apply-storage.bats 소유).
+  # 여기서는 SSOT 내부 등식만 본다 — 태그 소유자(LOCAL_PATH_PROVISIONER_VERSION, freshness 매니저)와
+  # digest 소유자(LOCAL_PATH_PROVISIONER_IMAGE, 새 digest 매니저)가 **별도 PR로 부분 머지**되면 태그가
+  # 갈린다. 그 갈림을 여기서 잡지 않으면 룰 리터럴이 SSOT 중 하나와만 맞고 다른 하나와는 어긋난다.
+  provimg="$(grep -oE '^export LOCAL_PATH_PROVISIONER_IMAGE="[^"]+"' "$VER" | sed -e 's/.*="//' -e 's/"$//')"
+  [ -n "$provimg" ]
+  printf '%s' "$provimg" | grep -qF '@sha256:'
+  provtag="${provimg#*:}"; provtag="${provtag%%@*}"
+  [ "$provtag" = "$prov" ]
   # ── 등식 ──
   body="$(yq -r '.data | to_entries | .[0].value' "$R8")"
   [ -n "$body" ]
   k3s_expr="$(printf '%s' "$body" | yq -r '.groups[].rules[] | select(.alert=="SubstrateK3sPinDrift") | .expr')"
   prov_expr="$(printf '%s' "$body" | yq -r '.groups[].rules[] | select(.alert=="SubstrateProvisionerPinDrift") | .expr')"
   printf '%s' "$k3s_expr" | grep -qF "kubelet_version!=\"${k3s}\""
-  printf '%s' "$prov_expr" | grep -qF "image_spec!=\"rancher/local-path-provisioner:${prov}\""
+  # 룰 리터럴은 이제 매니페스트가 실제로 렌더할 **전체** repo:tag@digest 값과 등식이다(prefix 부분
+  # 문자열이 아니라 — 매니페스트 형태가 repo:tag@sha256:…가 되면 라이브 image_spec도 그 전체 문자열).
+  printf '%s' "$prov_expr" | grep -qF "image_spec!=\"${provimg}\""
   # 반대 방향 — 룰이 **다른** 버전 리터럴을 함께 들고 있으면(부분 bump) 위 존재 단언만으로는 초록이다.
   n_k3s="$(printf '%s' "$k3s_expr" | grep -coE 'kubelet_version!="[^"]+"')"
   [ "$n_k3s" = "1" ]

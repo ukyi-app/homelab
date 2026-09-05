@@ -30,15 +30,18 @@ data:
           #    잡히지 않는다. 그 축은 `verify-cluster.sh` [11]의 손 실행으로 남는다(런북 참조).
           #
           # ⚠️ 룰 안의 두 리터럴은 손 사본이 아니라 **등식으로 잠겨 있다** —
-          #    `tests/gates/test_vmalert-config.bats`가 versions.env의 `K3S_VERSION`,
-          #    `infra/k3s-bootstrap/storage/local-path-provisioner.yaml`의 이미지 태그와 대조한다.
-          #    그리고 Renovate가 이 파일을 versions.env와 **같은 customManager**로 매치하므로
-          #    (renovate.json의 두 customManager `managerFilePatterns`에 이 파일이 있다) 핀 bump PR이
-          #    두 자리를 함께 올린다 — 안 그러면 그 PR이 등식 bats에서 red가 된다.
-          #    ⚠️ 다만 **storage 매니페스트의 태그는 그 매니저 밖이다**(일부러 — 넣으면 그 파일의
-          #    tag-only 참조가 renovate 소유로 읽혀 `policy/image-ownership.json`의 무소유 선언이
-          #    죽은 선언으로 red가 된다. 실측 2026-09-03). 그 자리(매니페스트 ↔ versions.env)는
-          #    `test_06-storage-manifests.bats`가 지고 owner가 손으로 맞춘다 — 알려진 잔여다.
+          #    `tests/gates/test_vmalert-config.bats`가 versions.env의 `K3S_VERSION`·
+          #    `LOCAL_PATH_PROVISIONER_IMAGE`와 대조한다. 그리고 Renovate가 이 파일을 versions.env와
+          #    **같은 customManager**로 매치하므로(renovate.json의 customManager `managerFilePatterns`에
+          #    이 파일이 있다) 핀 bump PR이 두 자리를 함께 올린다 — 안 그러면 등식 bats가 red가 된다.
+          #    ⚠️ 감사 60 prov-1~3(2026-09-05): storage 매니페스트가 하드코딩 태그에서
+          #    `${LOCAL_PATH_PROVISIONER_IMAGE}` 플레이스홀더로 바뀌었다 — 그 값이 이제 digest
+          #    소유자다(`policy/image-ownership.json`의 그 자리 무소유 선언은 제거됐다). **태그**
+          #    소유자(`LOCAL_PATH_PROVISIONER_VERSION`, freshness)와 **digest** 소유자
+          #    (`LOCAL_PATH_PROVISIONER_IMAGE`)는 renovate.json의 서로 다른 customManager다 — 둘이
+          #    별도 PR로 갈리면(부분 머지) `test_01-versions.bats`·`tests/gates/test_vmalert-config.bats`의
+          #    태그 등식이 그 PR을 red로 만든다. 매니페스트 ↔ versions.env 플레이스홀더 배선은
+          #    `test_06-storage-manifests.bats`·`test_07-apply-storage.bats`가 진다.
           #
           # ⚠️ KSM `--resources` 화이트리스트에 `nodes`·`pods`가 **둘 다** 있어야 이 두 시리즈가 존재한다
           #    (`kube-state-metrics.yaml`의 args ↔ ClusterRole 등식 — test_automount.bats가 강제).
@@ -54,14 +57,18 @@ data:
               summary: "k3s 라이브 버전이 핀과 갈렸다: {{ $labels.node }} = {{ $labels.kubelet_version }}"
               description: "노드의 kubelet 버전이 `infra/k3s-bootstrap/versions.env`의 `K3S_VERSION` 핀과 다릅니다. 이 핀은 **재구축 목표값**이라 갈렸다는 것 자체가 고장은 아니지만, 닫지 않으면 재구축/DR에서 오늘 검증하지 않은 버전으로 올라갑니다. 수렴은 owner-local입니다: `cd infra/k3s-bootstrap && ./k3s-install.sh` 후 `./verify-cluster.sh`([6]이 이 축입니다). ⚠️ 단일 노드라 짧은 apiserver 다운을 동반하니 백업 CronJob 창을 피하세요. 절차 전문은 런북 `docs/runbooks/host-substrate.md`. 핀 bump 직후라면 24시간 안에 수렴하면 이 알림은 저절로 해소됩니다."
           - alert: SubstrateProvisionerPinDrift
-            # `image_spec`은 **매니페스트에 적힌 문자열 그대로**이고 `image`는 레지스트리 접두가 붙는다
-            # (라이브 실측 2026-09-03: image_spec="rancher/local-path-provisioner:v0.0.36" ·
-            #  image="docker.io/rancher/local-path-provisioner:v0.0.36"). 등식 대상은 전자다 —
-            # 후자를 쓰면 리터럴에 `docker.io/`를 손으로 붙여야 하고 그 접두가 상류 규약에 매인다.
+            # `image_spec`은 **매니페스트에 적힌 문자열 그대로**이고 `image`는 레지스트리 접두가 붙는다.
+            # 감사 60 prov-3(2026-09-05): 매니페스트가 `${LOCAL_PATH_PROVISIONER_IMAGE}`(digest 핀,
+            # repo:tag@sha256:… 형태)를 렌더하므로 라이브 image_spec도 이제 그 **전체 문자열**이다.
+            # (라이브 실측 2026-09-03, digest 승격 전: image_spec="rancher/local-path-provisioner:v0.0.36" ·
+            #  image="docker.io/rancher/local-path-provisioner:v0.0.36" — 태그뿐이었다). 등식 대상은
+            # 여전히 image_spec이다 — image는 레지스트리 접두(`docker.io/`)가 상류 규약에 매인다.
+            # ⚠️ owner substrate 수렴 전이라 라이브는 아직 v0.0.36 **태그** 형태다 — 이 룰은 지금
+            # digest 불일치로도 발화 중이고, 그것이 정상이다(수렴 시점은 `apply-storage.sh` 재실행).
             expr: |
-              kube_pod_container_info{namespace="local-path-storage", container="local-path-provisioner", image_spec!="rancher/local-path-provisioner:v0.0.37"}
+              kube_pod_container_info{namespace="local-path-storage", container="local-path-provisioner", image_spec!="rancher/local-path-provisioner:v0.0.37@sha256:e757967a5ec338f6a9b371c5a9688bedaa8c3578ea3dd4db329ea0084be0a86f"}
             for: 24h
             labels: { severity: warning }
             annotations:
               summary: "local-path-provisioner 라이브 이미지가 핀과 갈렸다: {{ $labels.pod }} = {{ $labels.image_spec }}"
-              description: "local-path-provisioner 파드의 이미지가 `infra/k3s-bootstrap/storage/local-path-provisioner.yaml`의 태그 핀과 다릅니다(핀의 freshness 소유자는 `versions.env`의 `LOCAL_PATH_PROVISIONER_VERSION`). 수렴은 owner-local이고 재실행 안전합니다: `cd infra/k3s-bootstrap && ./apply-storage.sh` 후 `./verify-cluster.sh`([10]이 이 축입니다). ⚠️ helper 이미지 digest([11])는 이 알림이 **보지 못합니다** — ConfigMap data 안 문자열이라 KSM에 없습니다. 같은 재수렴에서 함께 적용되지만 확인은 [11]의 손 실행뿐입니다. 절차 전문은 런북 `docs/runbooks/host-substrate.md`."
+              description: "local-path-provisioner 파드의 이미지가 `infra/k3s-bootstrap/versions.env`의 `LOCAL_PATH_PROVISIONER_IMAGE`(digest 핀) 핀과 다릅니다(태그 freshness 소유자는 같은 파일의 `LOCAL_PATH_PROVISIONER_VERSION`). 수렴은 owner-local이고 재실행 안전합니다: `cd infra/k3s-bootstrap && ./apply-storage.sh` 후 `./verify-cluster.sh`([10]이 이 축입니다). ⚠️ helper 이미지 digest([11])는 이 알림이 **보지 못합니다** — ConfigMap data 안 문자열이라 KSM에 없습니다. 같은 재수렴에서 함께 적용되지만 확인은 [11]의 손 실행뿐입니다. 절차 전문은 런북 `docs/runbooks/host-substrate.md`."
