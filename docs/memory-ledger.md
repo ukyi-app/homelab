@@ -28,7 +28,8 @@ substrate 워크로드(local-path-provisioner 2대)는 아래 `local-path-storag
 ## 모델 주석 — 명목 잔여 ≠ 실 헤드룸 (의도적 보수성)
 
 이 합계는 **limit-합 가드(cap)**이지 실제 RAM 예약이 아니다. k8s는 requests만 스케줄에 강제하고
-limit over-commit을 허용하므로, limit 합(현재 8700)은 *동시-peak 상한*일 뿐 실사용이 아니다.
+limit over-commit을 허용하므로, limit 합(파일 하단 "**합계:**" 줄이 SSOT — test_verify-ledger-ssot.bats
+대조)은 *동시-peak 상한*일 뿐 실사용이 아니다.
 실측(2026-06-22): 전 파드 working_set ≈ 2244Mi · 동시 peak(라이브 limit합) ≈ 6586Mi · MemAvailable
 ≈ 7925Mi(66%) — 물리 RAM은 막대히 여유다. 10240 cap은 의도적 보수치(VM 12GiB에서 page-cache/burst·
 OS reserve를 떼어둠)로 "OOM 전에 예산 경계에서 시끄럽게 실패"시키는 가드다. (원래 8704였으나 명목

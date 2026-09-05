@@ -1,6 +1,7 @@
 # 발화 e2e 하네스의 판정·레그·룰 계약을 공용 lib으로 올리지 않는다
 
-발화 e2e 7편이 2,400줄을 유지하는데 공용 lib은 409줄이다. 2026-08 아키텍처 리뷰가 세 후보를 올렸다 —
+발화 e2e `tests/gates/vmalert-*-firing-e2e.sh`(git ls-files 파생, lib 제외) 전수가 공용 lib
+(`tests/gates/lib/vmalert-e2e.sh`)보다 수 배 크다. 2026-08 아키텍처 리뷰가 세 후보를 올렸다 —
 판정 뼈대(`vme_verdict_*`) · 레그 실행기(`vme_run_leg`) · 룰 계약 프리플라이트(`vme_alert_contract`).
 셋 다 기각한다. CONTEXT.md 「판정 어휘」의 확장이다.
 
@@ -12,7 +13,7 @@ depth가 아니라 **물리적으로 무의미한 측정을 scrape 룰에 강제
 
 **레그 실행기** — 처방이 module이 아니라 `drift`의 bare `exit 1` 9곳을 `fault()`로 바꾸는 것뿐이다.
 seam은 이미 있고 안 쓸 뿐이다. 창 경계는 lib이 파생하지 않고(TO 기준이 now 3편·T0-600 3편·T_END-300 1편)
-`vme_replay_window`가 7편 중 3편도 못 덮는다.
+`vme_replay_window`가 전수 중 3편도 못 덮는다.
 
 **룰 계약 프리플라이트** — `for%eval` 결정성 검사는 잊힌 공통 계약이 아니라 **타이트한 경계 산술의
 로컬 전제**다. 가진 3편은 ±1 평가 비교를 쓰고, 없는 4편은 2~4배 여유(`adguard:88`·`gha:146` ×3,
@@ -29,6 +30,11 @@ seam은 이미 있고 안 쓸 뿐이다. 창 경계는 lib이 파생하지 않�
 > `for%eval`) → `contract`. 백필 sanity는 preflight가 아니므로 진단 라벨을 `$PHASE`로 만들어
 > 국면을 보존했다(고정 "preflight" 라벨을 그 자리로 옮기면 라벨이 거짓말을 한다).
 > `meta`의 `extract_rules`는 stderr를 변수로 받아 fault 문구에 동봉한다(`-e` 유지).
+
+> **정정(2026-09-05, 감사 8라운드)**: 작성 시점(2026-08-28) 7편이었던 하네스 전수가
+> memory-nearlimit 신설(2026-08-31, PR #564)로 8편이 됐다. 본문 리터럴(7편)은 위에서 SSOT
+> 포인터(`git ls-files tests/gates/vmalert-*-firing-e2e.sh` 파생)로 대체했다 — 개수가 다시
+> 바뀌어도 이 문단을 고칠 필요가 없다.
 
 재개 조건: 새 하네스가 **자기 결정성을 논증하지 못한 채** 추가될 때.
 그 전까지 아키텍처 리뷰는 이 후보들을 재제안하지 않는다.

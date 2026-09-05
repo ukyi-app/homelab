@@ -62,4 +62,21 @@ case "$fp" in
     ;;
 esac
 
+# AGENTS.md 「벤더 파일 수정 금지」 나머지 2종 — charts/ 캐시(위)와 같은 급의 고확신 경로 차단.
+case "$fp" in
+  */cnpg/barman-plugin/manifest.yaml)
+    echo "차단: '$fp' 는 barman-plugin 벤더 매니페스트다(AGENTS.md 벤더 파일 수정 금지)." >&2
+    echo "→ 값 변경은 같은 디렉토리의 kustomization.yaml patch에서 하라." >&2
+    exit 2
+    ;;
+esac
+
+case "$fp" in
+  */traefik/prod/gateway-api-crds.yaml)
+    echo "차단: '$fp' 는 gateway-api CRD 벤더 매니페스트다(AGENTS.md 벤더 파일 수정 금지)." >&2
+    echo "→ CRD 갱신은 상류 릴리스 재다운로드로 하라." >&2
+    exit 2
+    ;;
+esac
+
 exit 0

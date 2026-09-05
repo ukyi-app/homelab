@@ -32,6 +32,28 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 0 ]
 }
 
+# 티켓 70 critic-manifest-guard-vendor — AGENTS.md 「벤더 파일 수정 금지」 3종 중 charts/ 캐시
+# 1종만 막던 갭(barman-plugin manifest·gateway-api CRD는 그동안 exit 0로 통과했다 — 라이브 재현
+# 실측). 두 벤더 경로 차단 + 같은 디렉토리의 정당한 형제 파일은 여전히 통과함을 대조한다.
+
+@test "blocks Edit of the barman-plugin vendor manifest" {
+  printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":"/repo/platform/cnpg/barman-plugin/manifest.yaml"}}' > "$TMP/in.json"
+  run bash "$HOOK" < "$TMP/in.json"
+  [ "$status" -eq 2 ]
+}
+
+@test "blocks Edit of the gateway-api CRD vendor manifest" {
+  printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":"/repo/platform/traefik/prod/gateway-api-crds.yaml"}}' > "$TMP/in.json"
+  run bash "$HOOK" < "$TMP/in.json"
+  [ "$status" -eq 2 ]
+}
+
+@test "allows editing the barman-plugin kustomization sibling (not the vendor manifest itself)" {
+  printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":"/repo/platform/cnpg/barman-plugin/kustomization.yaml"}}' > "$TMP/in.json"
+  run bash "$HOOK" < "$TMP/in.json"
+  [ "$status" -eq 0 ]
+}
+
 @test "allows tool input that carries no file_path" {
   printf '%s' '{"tool_name":"Bash","tool_input":{"command":"sops -d x.enc.yaml"}}' > "$TMP/in.json"
   run bash "$HOOK" < "$TMP/in.json"
