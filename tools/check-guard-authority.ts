@@ -205,7 +205,16 @@ function sh(cmd: string, args: string[], root: string): string {
   return r.ok ? r.out : "";
 }
 
-type Step = { run?: string; uses?: string };
+type Step = { run?: string; uses?: string; if?: unknown; "continue-on-error"?: unknown };
+
+// gate 최상위 스텝 중 `if`가 걸려 있거나 `continue-on-error: true`인 것은 CI에서 실행되지 않거나
+// 실패해도 job을 안 죽인다 — 어느 쪽이든 「권위 있는 실행 경로」의 증인이 될 수 없다(감사 6라운드
+// grep-c-3, GHA job-level skip은 run conclusion에 안 보인다의 스텝-레벨 얼굴). composite action
+// (`uses: ./.github/actions/*`) 내부 스텝에는 적용하지 않는다 — 재귀 전개(stepTexts)는 이 필터를
+// 거치지 않으므로 setup-toolchain 등의 정당한 `if: inputs.x == 'true'`는 그대로 남는다.
+function liveGateSteps(steps: Step[] | undefined): Step[] {
+  return (steps ?? []).filter((s) => !String(s?.if ?? "").trim() && s?.["continue-on-error"] !== true);
+}
 
 function stepTexts(steps: Step[] | undefined, root: string): string {
   if (!Array.isArray(steps)) return "";
@@ -248,10 +257,12 @@ export function collectVenues(root: string, guards: { path: string; text: string
   // ① ci.yaml의 gate job — 유일한 required check.
   const ciPath = `${root}/${CI_WORKFLOW}`;
   if (existsSync(ciPath)) {
-    const ci = parse(readFileSync(ciPath, "utf8")) as { jobs?: Record<string, { steps?: Step[] }> };
+    const ci = parse(readFileSync(ciPath, "utf8")) as { jobs?: Record<string, { steps?: Step[]; if?: unknown }> };
     const gate = ci?.jobs?.[GATE_JOB];
     if (gate) {
-      const text = stepTexts(gate.steps, root);
+      // job 레벨 `if`도 스텝 레벨과 같은 얼굴이다 — job이 skip되면 스텝은 하나도 안 돈다.
+      const jobSkipped = String(gate.if ?? "").trim();
+      const text = stepTexts(jobSkipped ? [] : liveGateSteps(gate.steps), root);
       venues.push({ id: `${CI_WORKFLOW}:${GATE_JOB}`, kind: "gate", text });
       workflowText.push(text);
     }

@@ -146,6 +146,68 @@ YAML
   echo "$output" | grep -q "scripts/check-orphan.sh"
 }
 
+# ── grep-c-3(감사 6라운드): `if:`/`continue-on-error:`를 무시하면 죽은 스텝도 권위다 ──────────────────
+# stepTexts는 스텝의 존재만 세고 `if`·`continue-on-error`를 안 봐서, gate 스텝에 `if: false`(또는 job
+# 전체에 `if: false`) 한 줄이면 CI에서 그 스텝이 영원히 안 돌아도 세 SCAN·rc가 전부 그대로였다
+# (실측 2026-09-05, 격리 fixture: check-real.sh만 부르는 스텝을 `if: false`로 막아도 orphan 목록에
+# check-real.sh가 없었다). liveGateSteps가 세 축(스텝 if · job if · continue-on-error)을 걸러낸다.
+@test "a step gated by if: false is not an authoritative invocation (dead CI step)" {
+  printf 'verify: ## mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
+name: ci
+on: [pull_request]
+jobs:
+  gate:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - if: false
+        run: bash scripts/check-real.sh
+YAML
+  rm "$FIX/scripts/check-orphan.sh"
+  git -C "$FIX" add -A
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=2
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "scripts/check-real.sh"
+}
+
+@test "a job gated by if: false is not an authoritative invocation (dead CI job, job-level skip is the same face)" {
+  printf 'verify: ## mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
+name: ci
+on: [pull_request]
+jobs:
+  gate:
+    if: false
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - run: bash scripts/check-real.sh
+YAML
+  rm "$FIX/scripts/check-orphan.sh"
+  git -C "$FIX" add -A
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=2
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "scripts/check-real.sh"
+}
+
+@test "continue-on-error: true on a gate step is not an authoritative invocation" {
+  printf 'verify: ## mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
+name: ci
+on: [pull_request]
+jobs:
+  gate:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - continue-on-error: true
+        run: bash scripts/check-real.sh
+YAML
+  rm "$FIX/scripts/check-orphan.sh"
+  git -C "$FIX" add -A
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=2
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "scripts/check-real.sh"
+}
+
 # 리뷰 실측: mirror를 이름(`verify`/`ci`)으로 선언하던 동안 타깃을 `verify-all`로 개명하기만 해도
 # "로컬에만 있고 CI엔 없는 가드"가 통과했다. mirror는 이름이 아니라 성질로 판정해야 한다.
 @test "a local mirror is non-authoritative under any target name (not a hardcoded name list)" {
