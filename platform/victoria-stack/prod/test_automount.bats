@@ -128,3 +128,71 @@ EOF
   done < "$C"
   [ -z "$bad" ] || { echo "allowedPercent로 자기참조가 되살아난 워크로드:$bad (승인된 예외: $PCT_EXEMPT)"; false; }
 }
+
+@test "container securityContext (allowPrivilegeEscalation/readOnlyRootFilesystem/capabilities.drop) is pinned class-wide (critic re-flag, r7+r8)" {
+  # 7·8라운드 연속 지목: 위 두 @test(Category A/B·메모리 자기참조)는 이 축을 보지 않는다.
+  # 격리 재현(2026-09-05): grafana.yaml:19-21의 컨테이너 securityContext 블록(allowPrivilegeEscalation +
+  # capabilities.drop)을 통째로 지워도 이 파일의 47/47이 그대로 초록이었다 — witness 0건.
+  # grafana만 readOnlyRootFilesystem이 없다(grafana.yaml:19-20 주석 — 플러그인 설치·/tmp 쓰기 때문에
+  # 의도적으로 보류한 결정). 그 예외 하나를 뺀 나머지는 세 값 모두 고정한다.
+  cd "$ROOT"
+  local files f L C n name ape rofs cdrop bad="" e
+  RO_EXEMPT="grafana" # grafana.yaml:19-20 — readOnlyRootFilesystem 보류는 승인된 예외
+  L="$BATS_TEST_TMPDIR/seccontext-raw.txt"
+  C="$BATS_TEST_TMPDIR/seccontext.txt"
+  : > "$L"
+  files="$(git ls-files -- platform/victoria-stack/prod | grep '\.yaml$' | LC_ALL=C sort)"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    yq '(select(.kind=="Deployment" or .kind=="DaemonSet" or .kind=="StatefulSet")
+        | .metadata.name + "|"
+          + (.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation | tostring) + "|"
+          + (.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem | tostring) + "|"
+          + ([.spec.template.spec.containers[0].securityContext.capabilities.drop[]?] | join(",")))' "$f" >> "$L"
+  done <<EOF
+$files
+EOF
+  grep -v '^---$' "$L" | grep . > "$C" || true
+  n="$(grep -c . "$C" || true)"
+  # 열거 붕괴 바닥값 — 2026-09-05 실측 11건(Deployment/DaemonSet/StatefulSet, 컨테이너 0번 스코프).
+  [ "$n" -ge 10 ] || { echo "컨테이너 securityContext 열거가 ${n}건으로 붕괴했다(기대 >=10)"; false; }
+  while IFS='|' read -r name ape rofs cdrop; do
+    [ -n "$name" ] || continue
+    [ "$ape" = "false" ] || bad="$bad $name(allowPrivilegeEscalation=$ape)"
+    [ "$cdrop" = "ALL" ] || bad="$bad $name(capabilities.drop=$cdrop)"
+    case " $RO_EXEMPT " in
+      *" $name "*) : ;;
+      *) [ "$rofs" = "true" ] || bad="$bad $name(readOnlyRootFilesystem=$rofs)" ;;
+    esac
+  done < "$C"
+  [ -z "$bad" ] || { echo "컨테이너 securityContext 값이 어긋난 워크로드:$bad"; false; }
+}
+
+@test "pod seccompProfile is RuntimeDefault class-wide (spec-victoria-1: two CronJobs were the lone exceptions)" {
+  # digest-exporter·gha-liveness-exporter CronJob 두 곳만 pod securityContext에 seccompProfile이
+  # 없었다(git log -p --follow 확인 — 삭제가 아니라 원래부터 누락). AUTOMOUNT_Q와 같은 어휘로
+  # 분모를 파생하되 질의만 seccompProfile.type으로 바꾼다. `// "MISSING"`은 `.type`이 문자열
+  # enum이라 boolean-false 함정(yq `//`)에 해당하지 않는다.
+  cd "$ROOT"
+  local files f L C n name typ bad=""
+  SECCOMP_Q='(select(.kind=="Deployment" or .kind=="DaemonSet" or .kind=="StatefulSet") | .metadata.name + "|" + (.spec.template.spec.securityContext.seccompProfile.type // "MISSING")), (select(.kind=="CronJob" or .kind=="Job") | .metadata.name + "|" + (.spec.jobTemplate.spec.template.spec.securityContext.seccompProfile.type // "MISSING"))'
+  L="$BATS_TEST_TMPDIR/seccomp-raw.txt"
+  C="$BATS_TEST_TMPDIR/seccomp.txt"
+  : > "$L"
+  files="$(git ls-files -- platform/victoria-stack/prod | grep '\.yaml$' | LC_ALL=C sort)"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    yq "$SECCOMP_Q" "$f" >> "$L"
+  done <<EOF
+$files
+EOF
+  grep -v '^---$' "$L" | grep . > "$C" || true
+  n="$(grep -c . "$C" || true)"
+  # 열거 붕괴 바닥값(AUTOMOUNT_Q와 동일 어휘) — 2026-09-05 실측 14건.
+  [ "$n" -ge 10 ] || { echo "seccompProfile 열거가 ${n}건으로 붕괴했다(기대 >=10)"; false; }
+  while IFS='|' read -r name typ; do
+    [ -n "$name" ] || continue
+    [ "$typ" = "RuntimeDefault" ] || bad="$bad $name(seccompProfile=$typ)"
+  done < "$C"
+  [ -z "$bad" ] || { echo "pod seccompProfile이 RuntimeDefault가 아닌 워크로드:$bad"; false; }
+}

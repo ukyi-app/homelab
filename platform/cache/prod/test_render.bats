@@ -125,3 +125,23 @@ CJ="$DIR/backup-cronjob.yaml"
   grep -q "allow-egress-to-cache" "$ROOT/platform/network-policies/prod/networkpolicies.yaml"
   grep -q "name: cache" "$ROOT/platform/namespaces/prod/namespaces.yaml"
 }
+
+@test "instance deployment.yaml pins container hardening + probes (values, not just presence)" {
+  # spec-others-4(round8) — trip-mate/deployment.yaml은 provision-cache.ts 산출물이지만 파일
+  # 헤더가 손 편집을 허용하는 git-SSOT다. 값 witness는 tools/tests/test_provision-cache.bats에만
+  # 있고(코드생성기가 방금 찍어낸 tmp fixture 검사) 여기(실제로 배포되는 커밋 파일)엔 0건이었다.
+  # 뮤테이션 재현(2026-09-05): allowPrivilegeEscalation: false -> true 치환 후 이 파일 9/9 ok
+  # (변화 없음) — 값이 약화돼도 이 스위트가 못 잡는다는 뜻이다.
+  # 인스턴스 디렉토리 개수 바닥값은 두지 않는다(0개도 정당 — 위 :55-58 규약과 같은 성질,
+  # service.yaml 루프(:61-78)와 동일 어휘로 디렉토리에서 파일을 유도한다). 비공허 증인은
+  # tools/tests/test_provision-cache.bats에 있다.
+  for f in "$DIR"/*/deployment.yaml; do
+    [ -e "$f" ] || continue
+    grep -q 'allowPrivilegeEscalation: false' "$f"
+    grep -q 'readOnlyRootFilesystem: true' "$f"
+    grep -q 'runAsNonRoot: true' "$f"
+    grep -qF 'capabilities: { drop: [ALL] }' "$f"
+    grep -q 'livenessProbe' "$f"
+    grep -q 'readinessProbe' "$f"
+  done
+}

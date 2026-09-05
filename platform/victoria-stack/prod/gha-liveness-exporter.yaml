@@ -126,7 +126,7 @@ spec:
         spec:
           restartPolicy: Never
           automountServiceAccountToken: false # curl만 — k8s API 미사용
-          securityContext: { runAsNonRoot: true, runAsUser: 65532 }
+          securityContext: { runAsNonRoot: true, runAsUser: 65532, seccompProfile: { type: RuntimeDefault } }
           containers:
             # ⚠️ digest-exporter와 **같은 이미지 참조**를 의도적으로 재사용한다(curl + GNU date + grep이
             #    전부 있다). 새 이미지를 들이면 소유권 회계(policy/image-ownership.json)에 항목이 하나

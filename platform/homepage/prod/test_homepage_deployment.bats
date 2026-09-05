@@ -56,3 +56,14 @@ setup() {
   run grep -q 'name: assets' "$D"; [ "$status" -eq 0 ]
   run grep -q 'homepage-assets' "$D"; [ "$status" -eq 0 ]
 }
+
+@test "probes: readiness and liveness both target / on :3000" {
+  # spec-others-3(round8) — homepage는 raw manifest라 shared chart(platform/charts/app)의 probe
+  # 테스트가 안 닿는다. 뮤테이션 재현(2026-09-05): readinessProbe/livenessProbe 블록을 통째로
+  # 삭제해도 이 디렉토리 43/43이 전건 초록이었다 — probe 축에 witness가 0건이었다. 형제 관용구
+  # (platform/files/prod/test_files_deployment.bats:56-65)를 그대로 복사한다.
+  run yq '.spec.template.spec.containers[0].readinessProbe.httpGet.path' "$D"; [ "$output" = "/" ]
+  run yq '.spec.template.spec.containers[0].readinessProbe.httpGet.port' "$D"; [ "$output" = "3000" ]
+  run yq '.spec.template.spec.containers[0].livenessProbe.httpGet.path' "$D"; [ "$output" = "/" ]
+  run yq '.spec.template.spec.containers[0].livenessProbe.httpGet.port' "$D"; [ "$output" = "3000" ]
+}
