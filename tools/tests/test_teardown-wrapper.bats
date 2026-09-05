@@ -45,6 +45,18 @@ setup() { ROOT="$(git rev-parse --show-toplevel)"; SH="$ROOT/scripts/teardown.sh
   # 전체 base-SHA 검증은 mock remote 필요 — 단위 수준에선 FETCH_HEAD 분기를 단언(stale tracking ref 회피).
   grep -qE 'switch -c .* FETCH_HEAD' "$SH"
 }
+@test "teardown wrapper keeps the plan-review human gate before commit (F-review)" {
+  # ⚠️ :85의 `read -r _`(플랜 검토 후 Enter로 PR 생성, Ctrl-C로 중단 — 유일한 human-in-the-loop
+  #    정지점)를 지워도(2026-09 뮤테이션 실측) 위 8개 @test 전부 DRY_RUN=1 경로만 밟아 그대로 ok였다.
+  # ⚠️ exact-line 앵커(`-x`)여야 한다 — prefix 앵커는 `read -r _ < /dev/null` 뉴트럴화(같은 줄에
+  #    무해한 stdin을 붙여 human gate를 무력화)를 못 잡는다(va 판정 실증).
+  grep -qxE 'read -r _' "$SH"
+  # 배치 — 검토 정지점이 `git add $ALLOWLIST`(커밋 스테이징)보다 앞이어야 한다.
+  add_ln="$(grep -n '^git add \$ALLOWLIST' "$SH" | cut -d: -f1)"
+  read_ln="$(grep -n '^read -r _$' "$SH" | cut -d: -f1)"
+  [ -n "$add_ln" ] && [ -n "$read_ln" ] && [ "$read_ln" -lt "$add_ln" ]
+}
+
 @test "teardown wrapper carries no node/.mjs entrypoints (bun-only)" {
   # ⚠️ 이 @test에는 형제 단언이 없다 — `-ne 0` 형태에서는 teardown.sh를 리네임해도 홀로 초록이었다
   #    (FETCH_HEAD 양성 대조는 다른 @test라 `bats -f` 단일 실행에서는 함께 돌지 않는다).
