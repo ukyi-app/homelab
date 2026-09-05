@@ -141,3 +141,16 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   v="$(yq ea '[select(.kind=="Role") | .rules[] | select(.resources[]=="databases") | .verbs[]] | sort | join(" ")' "$r")"
   printf '%s' "$v" | grep -qxF -- 'get list'
 }
+
+@test "the configMapGenerator files roster still points at the Job's own script" {
+  # 위 @test는 `resources`(렌더 대상) 축만 잰다 — Job이 마운트하는 ConfigMap이 실제로 이
+  # 스크립트를 굽는지(configMapGenerator.files)는 required gate 안에서 무증인이었다(2026-09-05
+  # 실측: 이 files 항목을 `# MUTATED`로 치환해도 required 레인 전건 초록, ci-exclude 등재
+  # test_kustomize_build.bats만 not ok). 리터럴이 아니라 Job의 command[1]에서 파생한다 — 스크립트
+  # 개명·경로 드리프트까지 잡는다.
+  j="$ROOT/platform/cnpg/prod/ensure-role-password-job.yaml"
+  k="$ROOT/platform/cnpg/prod/kustomization.yaml"
+  key="$(basename "$(yq '.spec.template.spec.containers[0].command[1]' "$j")")"
+  yq '.configMapGenerator[] | select(.name=="ensure-role-password-script") | .files[]' "$k" \
+    | grep -qxF "$key"
+}

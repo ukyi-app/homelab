@@ -14,8 +14,9 @@
 #    ⇒ 이제 `kubectl rollout restart deploy/alertmanager -n observability`는 **정상 경로에서 불필요**하다.
 #      필요해지는 경우는 generator를 우회해 라이브 ConfigMap을 손으로 고쳤을 때뿐이다.
 #
-# ⚠️ `configMapGenerator`에 `options.disableNameSuffixHash: true`를 켜지 마라 — 그 한 줄이 위 자동
-#    롤아웃을 통째로 되돌려 옛 함정(무기한 옛 렌더본)으로 복귀시킨다. 해시 접미가 이 전환의 전부다.
+# ⚠️ `configMapGenerator`에 최상위 `generatorOptions` 또는 per-generator `options`의
+#    `disableNameSuffixHash: true`를 켜지 마라 — 어느 철자든 그 한 줄이 위 자동 롤아웃을 통째로
+#    되돌려 옛 함정(무기한 옛 렌더본)으로 복귀시킨다. 해시 접미가 이 전환의 전부다.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

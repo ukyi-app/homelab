@@ -105,4 +105,17 @@ S="$D/argocd-accounts.sealed.yaml"
   #    `/,/api/webhook`으로 red, 원안은 green). 헤더 :6 규약대로 rc가 아니라 `$output`으로 판정한다.
   run yq '[.spec.rules[] | (.matches // [{}])[] | .path.value // "/"] | sort | join(",")' "$H"
   [ "$output" = "/api/webhook" ] || { echo "web-public 경로 집합=$output"; false; }
+  # ⚠️ filters 축 상한 — 경로 집합은 URLRewrite(ReplacePrefixMatch /)를 못 잡는다(매치 경로는 그대로다).
+  #    rule-level과 backendRef-level 둘 다 센다 — 후자만 넣는 회피가 실측됐다(rule-level 등식만이면
+  #    backendRefs[0] 밑에 같은 URLRewrite를 넣어도 NONE으로 통과한다).
+  run yq '[.spec.rules[] | ((.filters // [{"type":"NONE"}])[] , (.backendRefs[]? | (.filters // [])[])) | .type] | sort | join(",")' "$H"
+  [ "$output" = "NONE" ] || { echo "web-public filters 집합=$output"; false; }
+}
+
+@test "argocd-extras kustomization pins namespace argocd" {
+  # appset.yaml:50-51 — destination.namespace 없음: 각 컴포넌트 kustomization의 `namespace:`가
+  # 유일한 권위다. 이 값을 바꿔도(2026-09-05 실측: argocd→default) 이 디렉토리 전 @test가
+  # 초록이었다 — kustomize build는 최상위 metadata.namespace를 전부 default로 덮어써 렌더한다.
+  # AppProject destinations는 `namespace: "*"`(projects.yaml)라 런타임 방벽도 없다.
+  [ "$(yq '.namespace' "$D/kustomization.yaml")" = "argocd" ]
 }

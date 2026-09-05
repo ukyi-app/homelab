@@ -31,6 +31,12 @@ tpl() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   # `app.kubernetes.io/name: app` 하나로 붕괴해 엔드포인트 혼입·RS 소유권 충돌이 난다.
   [ "$(echo "$out" | yq 'select(.kind=="Service") | .spec.selector["app.homelab/instance"]')" = "t" ]
   [ "$(echo "$out" | yq 'select(.kind=="Deployment") | .spec.selector.matchLabels["app.homelab/instance"]')" = "t" ]
+  # ⚠️ 위는 전부 index[0]만 본다 — 두 번째 parentRef(web-public)나 matches 없는 두 번째 rule을
+  # 더해도(2026-09-05 실측: 각각 60/60 ok) 안 잡힌다. **반드시 `yq ea`** — 단일 `yq select`는
+  # 비매치 문서의 빈 줄을 이어붙여 청정 트리에서도 red다(실측). 집합 등호로 원소 추가를 잡는다.
+  [ "$(echo "$out" | yq ea '[select(.kind=="HTTPRoute") | .spec.parentRefs[].sectionName] | sort | join(",")')" = "web-public" ]
+  [ "$(echo "$out" | yq ea '[select(.kind=="HTTPRoute") | .spec.hostnames[]] | sort | join(",")')" = "api.example.com" ]
+  [ "$(echo "$out" | yq ea '[select(.kind=="HTTPRoute") | .spec.rules[] | (.backendRefs // [{"name":"NONE","port":0}])[] | .name + ":" + (.port|tostring)] | sort | join(",")')" = "t:8080" ]
 }
 
 @test "selector instance label is release-derived, not a chart-wide constant" {
@@ -43,7 +49,12 @@ tpl() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
 }
 
 @test "internal app binds to the internal HTTPS listener" {
-  rt=$(tpl --set kind=web --set route.host=admin.home.example.com --set route.public=false | yq 'select(.kind=="HTTPRoute")')
+  out=$(tpl --set kind=web --set route.host=admin.home.example.com --set route.public=false)
+  rt=$(echo "$out" | yq 'select(.kind=="HTTPRoute")')
+  # ⚠️ 아래 부분문자열 단언은 두 번째 parentRef(web-public) 추가에 무증인이다(2026-09-05 실측:
+  # 60/60 ok). `yq ea` 집합 등호를 **먼저** 세운다 — check-bats-style은 중간(마지막이 아닌)
+  # `[[ ]]`를 hard-zero로 거부하므로 기존 부분문자열 줄은 마지막 자리를 유지해야 한다.
+  [ "$(echo "$out" | yq ea '[select(.kind=="HTTPRoute") | .spec.parentRefs[].sectionName] | sort | join(",")')" = "web-internal-tls" ]
   [[ "$rt" == *"sectionName: web-internal-tls"* ]]
 }
 

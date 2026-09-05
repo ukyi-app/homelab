@@ -85,6 +85,14 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
   # 음수 wave를 붙이면 같은 교착이 재발한다.
   run sh -c "LC_ALL=C grep -E '^ *kind: ' '$D/kustomization.yaml' | LC_ALL=C grep -vcE 'kind: (Kustomization|CustomResourceDefinition)'"
   [ "$output" = "0" ] || { echo "kustomization에 예상 밖의 patch target kind가 있다 (${output}개) — wave 영향을 다시 볼 것"; false; }
+  # `generators:`는 `resources:`와 동일한 배선 축인데(HelmChartInflationGenerator) 이 리스트의
+  # 멤버십을 재는 @test가 레포 전체에 0건이었다(2026-09-05 실측: helmrelease.yaml 한 줄을 지워도
+  # 이 디렉토리 9/9 전건 초록). 지워지면 위 wave 전제 전체(컨트롤러=wave 0)가 프룬되어 사라진다.
+  # secret-generator.yaml(cloudflare-api-token)은 대상에서 뺀다 — 티켓 44에서 이미 트리아지된
+  # 결정(프룬 시 즉시 시끄럽다 + cnpg test_networkpolicy.bats:86과 같은 제외 사유)이다.
+  run yq '.generators[]' "$D/kustomization.yaml"
+  printf '%s\n' "$output" | grep -qxF 'helmrelease.yaml' \
+    || { echo "kustomization generators에 helmrelease.yaml이 없다 — 프룬되면 Gateway 컨트롤러가 통째로 사라진다"; false; }
 }
 
 @test "CRDs are applied before every Gateway API resource that needs them" {
@@ -192,4 +200,12 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
   [ "$output" = "$ws" ] || { echo "web-internal-tls port=$output · values-traefik websecure=$ws — 같아야 한다"; false; }
   run bash -c "yq 'select(.kind==\"Gateway\") | .spec.listeners[] | select(.protocol==\"HTTP\") | .port' '$G' | LC_ALL=C sort -u | paste -sd, -"
   [ "$output" = "$wp" ] || { echo "HTTP 리스너 port=$output · values-traefik web=$wp — 같아야 한다"; false; }
+}
+
+@test "traefik kustomization pins namespace gateway" {
+  # appset.yaml:50-51 — destination.namespace 없음: 각 컴포넌트 kustomization의 `namespace:`가
+  # 유일한 권위다. 이 값을 바꿔도(2026-09-05 실측: gateway→default) 이 디렉토리 전 @test가
+  # 초록이었다 — Gateway/HTTPRoute의 parentRef ns 계약이 이 값에 있는데 증인이 없었다.
+  # AppProject destinations는 `namespace: "*"`(projects.yaml)라 런타임 방벽도 없다.
+  [ "$(yq '.namespace' "$D/kustomization.yaml")" = "gateway" ]
 }
