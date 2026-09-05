@@ -62,3 +62,21 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   grep -qF 'http://traefik.gateway.svc.cluster.local:80' "$d"
   grep -qF 'http_status:404' "$d"
 }
+
+@test "pg_backups and cache_backups R2 lifecycles pin enabled=true, prefix=\"\", max_age=1209600 (owner decision 2026-09-04: bucket-wide 14d expiry stays)" {
+  # 티켓 60 r2-1 — owner 결정: pg_backups의 `prefix = ""`(버킷 전체 만료, ADR-0006 정정 문단·r2.tf:14-18
+  # 주석이 이미 적은 사실)를 **증인으로 잠근다**. 존재 단언(위 prevent_destroy @test)은 리소스가
+  # 있다는 것만 재지 값 축은 무증인이었다 — max_age를 86400으로 바꿔도(만료 주기 변경, 데이터 보존
+  # 정책 실질 변경) 위 @test들은 전건 초록이다(실측). 같은 파일 :17의 awk 블록 추출 관용구를
+  # `cloudflare_r2_bucket_lifecycle`에 재사용해 리소스별로 세 값을 앵커한다.
+  for r in pg_backups cache_backups; do
+    block="$(awk -v r="$r" '$0 ~ "^resource \"cloudflare_r2_bucket_lifecycle\" \""r"\"" {f=1} f{print} f&&/^}/{exit}' infra/cloudflare/r2.tf)"
+    [ -n "$block" ] || { echo "FAIL: r2 bucket_lifecycle $r 블록 부재"; false; }
+    printf '%s' "$block" | grep -qE 'enabled[[:space:]]*=[[:space:]]*true' \
+      || { echo "FAIL: r2 bucket_lifecycle $r enabled != true"; false; }
+    printf '%s' "$block" | grep -qE 'prefix[[:space:]]*=[[:space:]]*""' \
+      || { echo "FAIL: r2 bucket_lifecycle $r prefix != \"\" (버킷 전체 만료 계약 이탈)"; false; }
+    printf '%s' "$block" | grep -qE 'max_age[[:space:]]*=[[:space:]]*1209600' \
+      || { echo "FAIL: r2 bucket_lifecycle $r max_age != 1209600(14일)"; false; }
+  done
+}
