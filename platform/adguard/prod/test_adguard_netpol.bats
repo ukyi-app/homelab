@@ -74,3 +74,13 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
   # destinations는 `namespace: "*"`(projects.yaml)라 런타임 방벽도 없다.
   [ "$(yq '.namespace' "${BATS_TEST_DIRNAME}/kustomization.yaml")" = "edge" ]
 }
+
+@test "adguard-dns LoadBalancer exposes exactly 53/UDP + 53/TCP" {
+  # posture-2(58)의 라이브 셀렉터(tests/posture/test_internal-by-default.bats)는 Service
+  # **이름** 집합만 재고 포트 축이 없다 — adguard-dns에 포트를 더해도(예: 관리 UI 3000)
+  # 이름-only 술어는 불변으로 초록이었다. posture는 owner 라이브 전용이라 PR을 못 막으므로
+  # 게이트-세이프 정적 witness를 여기 1순위로 둔다(58 va.corrected_fix ①).
+  S="${BATS_TEST_DIRNAME}/service.yaml"
+  run yq ea 'select(.metadata.name=="adguard-dns") | [.spec.ports[]|"\(.protocol)/\(.port)"] | sort | join(",")' "$S"
+  printf '%s' "$output" | grep -qxF -- 'TCP/53,UDP/53'
+}
