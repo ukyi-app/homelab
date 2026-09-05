@@ -183,11 +183,18 @@ function commandsIn(run: string): string[] {
 // `make -n ci` 출력에서 **실제 호출이 아닌 텍스트**를 지운다(④ 대조 전용).
 //   · `command -v <도구>` — 전제 프로브다. 도구의 존재를 묻지, 도구를 부르지 않는다.
 //   · `echo "…" >> <파일>` — 미평가 원장에 이름만 남기는 append다. 부르지 못했다는 기록이지 호출이 아니다.
+//   · 행두 `#` 주석 — recipe 줄의 `#`는 make 주석이 **아니라** 셸에 그대로 넘어가므로 `-n` 출력에
+//     리터럴로 남는다. 즉 recipe 한 줄을 `#`로 막아도 `makeExec.includes(w)`가 참이 돼 mirrored 전건이
+//     조용히 초록이 된다(실측 2026-09-04: Makefile의 `bun run verify:ledger`를 `# bun run verify:ledger`로
+//     바꿔도 `mirrored 24 · covered 2` rc=0으로 before/after 동일). 형제 관용구는
+//     tools/check-guard-authority.ts의 stripComment — 같은 `make -n` 텍스트에 행두 앵커를 이미 쓴다.
 // 변수명(`CI_UNEVAL`)에 기대지 않는다 — 그 이름이 바뀌면 정제가 조용히 멎고 fail-open이 돌아온다.
 // recipe의 append-echo는 구조상 게이트 호출일 수 없으므로 형태로 지운다.
 // 실측 2026-08-28: 실 레포 mirrored 22항목·local 34문자열에 대해 정제로 사라지는 것 **0건**(오탐 없음).
+// 실측 2026-09-04: 주석 갈래 추가 후에도 클린 트리 mirrored 24 전건 통과(오탐 0건).
 function execOnly(s: string): string {
   return s
+    .replace(/^[ \t]*#.*$/gm, "")
     .replace(/command -v \S+/g, "")
     .replace(/\becho\s+"[^"]*"\s*>>[^\n;]*/g, "")
     .replace(/\becho\s+'[^']*'\s*>>[^\n;]*/g, "");
