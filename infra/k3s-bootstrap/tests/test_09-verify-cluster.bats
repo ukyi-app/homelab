@@ -49,8 +49,11 @@ EOF
     "$K3S_NODE_IP" "$K3S_NODE_NAME" > "$STUBDIR/nodeargs.txt"
 
   # local-path substrate 픽스처 — 건강한 기본값은 핀과 일치한다([10][11]).
-  printf 'rancher/local-path-provisioner:%s\nrancher/local-path-provisioner:%s\n' \
-    "$LOCAL_PATH_PROVISIONER_VERSION" "$LOCAL_PATH_PROVISIONER_VERSION" > "$STUBDIR/lppimages.txt"
+  # ⚠️ [10]의 핀은 digest 소유자 LOCAL_PATH_PROVISIONER_IMAGE(repo:tag@sha256:…)다 — 태그 변수로
+  #    픽스처를 만들면 대조자가 태그만 봐도 초록인 항진이 된다(2026-09-06 실측: #641 digest 승격 뒤
+  #    라이브 수렴이 성공했는데 [10]이 태그-only 대조로 거짓 드리프트 FAIL — 이 픽스처가 그걸 못 봤다).
+  printf '%s\n%s\n' \
+    "$LOCAL_PATH_PROVISIONER_IMAGE" "$LOCAL_PATH_PROVISIONER_IMAGE" > "$STUBDIR/lppimages.txt"
   # ⚠️ 픽스처는 라이브 ConfigMap의 실제 모양이어야 한다(들여쓴 `image:` 줄) — 모양이 다르면
   #    파서가 무엇을 증명하는지 알 수 없어진다(같은 파일 SAN 픽스처와 같은 규약).
   for _c in internal bulk; do
@@ -241,11 +244,30 @@ teardown() { rm -rf "$STUBDIR"; }
 @test "fails when the live local-path provisioner image drifts from the versions.env pin" {
   # ⚠️ 이 레인의 이유: [6]이 k3s 축을 재는 동안 substrate 핀 3축 중 나머지 둘은 라이브 대조자가
   #    레포 전역에 0건이었다(실측 2026-09-03 — git v0.0.37 / 라이브 v0.0.36인데 신호 0).
-  printf 'rancher/local-path-provisioner:v0.0.36\nrancher/local-path-provisioner:%s\n' \
-    "$LOCAL_PATH_PROVISIONER_VERSION" > "$STUBDIR/lppimages.txt"
+  printf 'rancher/local-path-provisioner:v0.0.36\n%s\n' \
+    "$LOCAL_PATH_PROVISIONER_IMAGE" > "$STUBDIR/lppimages.txt"
   run "$BOOTSTRAP_DIR/verify-cluster.sh"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -q 'provisioner image drift'
+}
+
+@test "a live provisioner image that carries the pinned tag but no digest is drift (the pin owner is the digest)" {
+  # ⚠️ 2026-09-06 재발 증인: 대조자가 태그만 조립하면 이 픽스처가 통과한다 — digest 없는 라이브는
+  #    #641 이전 부트스트랩 값이거나 손으로 적용한 태그 이미지라, 핀(digest 소유자)과 갈린 것이다.
+  printf 'rancher/local-path-provisioner:%s\nrancher/local-path-provisioner:%s\n' \
+    "$LOCAL_PATH_PROVISIONER_VERSION" "$LOCAL_PATH_PROVISIONER_VERSION" > "$STUBDIR/lppimages.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'provisioner image drift'
+}
+
+@test "a live provisioner image with the pinned tag but a different digest is drift" {
+  other="${LOCAL_PATH_PROVISIONER_IMAGE%%@*}@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  printf '%s\n%s\n' "$LOCAL_PATH_PROVISIONER_IMAGE" "$other" > "$STUBDIR/lppimages.txt"
+  run "$BOOTSTRAP_DIR/verify-cluster.sh"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -q 'provisioner image drift'
+  printf '%s' "$output" | grep -q '@sha256:0000'
 }
 
 @test "an empty provisioner enumeration trips the floor (zero is not a pass)" {
