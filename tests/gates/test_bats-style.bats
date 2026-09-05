@@ -432,3 +432,118 @@ setup() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE '이름 있는 집합 상한 부재 [0-9]+ \(baseline [0-9]+\)'
 }
+
+# ── [ABS] 분모 확장 — `bash|sh -c` 언랩(F3, 감사 63) ───────────────────────────────────────
+# 근거·형태 규약은 scripts/check-bats-style.sh의 abs_target 주석이 소유한다. 픽스처는 printf로
+# 만든다(위 픽스처들과 같은 이유 — heredoc 속 '@test'는 bats 전처리기가 재작성한다). 홑따옴표
+# 안의 `"$1"`/`"$TREE"`는 이스케이프 조립으로 넣는다(리터럴로 적으면 이 파일이 이 셸에서 깨진다).
+
+@test "detector unwraps a single-quoted bash -c grep pipe and flags it unwitnessed ([ABS-REC])" {
+  printf '%s\n' \
+    '@test "bash -c pipe absence with no witnesses" {' \
+    "  run bash -c 'grep -qE \"TOKEN=\" \"\$1\" | grep -q \"DANGER\"' _ \"\$TREE\"" \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_bashc0.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_bashc0.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-REC\]'
+}
+
+@test "the bash -c pipe form passes once a floor and a positive control are present" {
+  printf '%s\n' \
+    'setup() {' \
+    '  [ -d "$TREE" ]' \
+    '}' \
+    '@test "bash -c pipe absence with both witnesses" {' \
+    "  run bash -c 'grep -qE \"ANCHOR=\" \"\$1\" | grep -q \"here\"' _ \"\$TREE\"" \
+    '  [ "$status" -eq 0 ]' \
+    "  run bash -c 'grep -qE \"TOKEN=\" \"\$1\" | grep -q \"DANGER\"' _ \"\$TREE\"" \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_bashc_ok.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_bashc_ok.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "a double-quoted bash -c body is NOT unwrapped (the literal denominator stays narrow)" {
+  # 겹따옴표는 바깥 셸이 먼저 보간하는 형태라 대상 밖이다(헤더 규약) — 이 자리를 넓히면
+  # [ABS-EXEC] 소유 밖 파일들(예: infra/k3s-bootstrap)에 새 red를 만든다(설계 노트 §4 실측).
+  printf '%s\n' \
+    '@test "double-quoted bash -c grep pipe is out of scope" {' \
+    "  run bash -c \"grep -qE 'TOKEN=' '\$TREE' | grep -q 'DANGER'\"" \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_bashc_dq.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_bashc_dq.bats"
+  [ "$status" -eq 0 ]
+}
+
+# ── [ABS-EXEC] — 레포 소유 실행물 호출의 부재 단언(F4, 감사 63) ───────────────────────────
+# 근거·W1/W2 규약은 scripts/check-bats-style.sh의 [ABS-EXEC] 헤더가 소유한다.
+
+@test "an exec-target call with no witness at all is a finding ([ABS-EXEC])" {
+  printf '%s\n' \
+    '@test "exec target with no witness is a finding" {' \
+    '  run bash scripts/does-not-matter.sh --bogus' \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec0.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec0.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-EXEC\]'
+}
+
+@test "W1(a) a direct echo/printf-piped output-text witness closes the finding" {
+  printf '%s\n' \
+    '@test "exec target passes with a direct output-text witness" {' \
+    '  run bash scripts/does-not-matter.sh --bogus' \
+    '  [ "$status" -ne 0 ]' \
+    '  echo "$output" | grep -q "unknown option"' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_w1direct.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_w1direct.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "W1(b) the bash -c positional-arg witness form also closes the finding" {
+  # docs/traps-detail.md 「정적 증인의 두 함정」 — bats 지역 변수가 `bash -c` 안에서 빈 문자열로
+  # 보이는 함정을 피하는 안전 관용구다. 검출기가 이 갈래를 못 읽으면 규약을 지킨 자리가 red가
+  # 된다(§6-C 경고 — `tests/test_dr-drill.bats`가 라이브로 이 위험을 실증했다).
+  printf '%s\n' \
+    '@test "exec target passes with a positional-arg output-text witness" {' \
+    '  run bash scripts/does-not-matter.sh --bogus' \
+    '  [ "$status" -ne 0 ]' \
+    "  run bash -c 'printf \"%s\" \"\$1\" | grep -q \"unknown option\"' _ \"\$output\"" \
+    '  [ "$status" -eq 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_w1pos.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_w1pos.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "W2 a same-file same-tool rc-eq-0 positive control (in a sibling @test) also closes it" {
+  printf '%s\n' \
+    '@test "exec target passes via a same-file same-tool positive control" {' \
+    '  run bash scripts/does-not-matter.sh --dry-run' \
+    '  [ "$status" -eq 0 ]' \
+    '}' \
+    '@test "a sibling exec target with no witness relies on the positive control above" {' \
+    '  run bash scripts/does-not-matter.sh --bogus' \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_w2.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_w2.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "a bash -c grep pipe that merely reads a script's contents is not an exec target (false-positive control)" {
+  # grep 계열이 이미 배제 대상이다 — 경로 리터럴이 grep의 **피연산자**(실행 대상이 아니다)인
+  # 자리가 [ABS-EXEC]로 오분류되면 안 된다(실측 회귀: tests/gates/test_image-ownership.bats:387).
+  printf '%s\n' \
+    '@test "a bash -c grep pipe that merely reads inside a script is not an exec target" {' \
+    "  run bash -c \"grep -n LABEL 'scripts/whatever.sh' | grep -v TOKEN\"" \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_fp.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_fp.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "the default-mode summary announces the [ABS-EXEC] ratchet" {
+  run bash "$ROOT/scripts/check-bats-style.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '레포 소유 실행물 무증인 [0-9]+ \(baseline [0-9]+\)'
+}

@@ -47,6 +47,7 @@ stub_kubeseal() { # $1: cat할 cert 파일(없으면 exit 1로 fetch 실패 모�
 @test "an unknown option still exits 2 (usage), distinct from the skip code" {
   run bash scripts/secret-cert-check.sh --bogus
   [ "$status" -eq 2 ]
+  echo "$output" | grep -q "알 수 없는 옵션"   # [ABS-EXEC] W1(감사 63)
   out="$output"
   run grep -q "^SKIP:" <<<"$out"
   [ "$status" -ne 0 ]
