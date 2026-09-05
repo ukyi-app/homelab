@@ -97,7 +97,10 @@ probe() {
 }
 
 @test "NEGATIVE: prod egress to a non-database, non-DNS destination is denied by default" {
-  # prod의 egress default-deny는 DNS, database:5432, prod 내부:8080만 허용한다. 외부는 실패해야 한다.
+  # posture-4(6라운드): prod egress allow 집합의 SSOT는 platform/network-policies/prod/networkpolicies.yaml이고,
+  # 그 집합은 platform/network-policies/prod/test_netpol.bats:29-30의 정확 등식이 gate에서 잠근다
+  # (현재 DNS·database:5432·cache:6379·prod 내부:8080). 이 @test는 그 집합 밖 목적지(1.1.1.1:443)가
+  # 거부되는지만 잰다 — 손 로스터를 여기 다시 적지 않는다(5번째 티어가 또 이 자리에서 드리프트한다).
   run probe prod 'sleep 8; nc -w 5 -z 1.1.1.1 443; echo rc=$?'
   [[ "$output" == *"rc=1"* ]] || [[ "$output" == *"rc=143"* ]]
 }
