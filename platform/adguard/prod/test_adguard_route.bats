@@ -22,6 +22,16 @@ K="$BATS_TEST_DIRNAME/kustomization.yaml"
   # 무의미해 리스너 축만 닫는다.
   run yq '[.spec.parentRefs[].sectionName] | sort | join(",")' "$H"
   [ "$output" = "web-internal-tls" ] || { echo "리스너=$output"; false; }
+  # ⚠️ 백엔드/매치 집합 상한 — 위는 rules[0]만 본다. 두 번째 rule로 `/api` PathPrefix →
+  #    다른 Service backendRef를 더해도 위 grep·리스너 등호가 전부 통과했다(2026-09-04 실측:
+  #    격리 사본에 그 rule을 추가해도 2/2 ok). 내부 라우트라 위협은 공개 노출이 아니라
+  #    **백엔드 바꿔치기·경로 우회**다(처방 형제: platform/files/prod/test_files_route.bats,
+  #    착지형 46c799c). `(.matches // [{}])`가 load-bearing — matches 없는 rule은 Gateway API
+  #    기본값 PathPrefix `/` + 전 method로 집합에 들어간다.
+  run yq '[.spec.rules[].backendRefs[] | .name + ":" + (.port|tostring)] | sort | join(",")' "$H"
+  [ "$output" = "adguard-ui:80" ] || { echo "백엔드 집합=$output"; false; }
+  run yq '[.spec.rules[] | (.matches // [{}])[] | (.path.value // "/") + "|" + (.method // "ANY")] | sort | join(",")' "$H"
+  [ "$output" = "/|ANY" ] || { echo "매치 집합=$output"; false; }
 }
 
 @test "legacy tailscale Ingress is removed (kustomization no longer references it)" {
