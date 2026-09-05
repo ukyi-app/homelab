@@ -43,17 +43,25 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 stub_kubectl() {
   # $1 = 1: PVC 3건 전건이 파드에 마운트됨(양성 대조) / 0: obs/vlogs-0만 어떤 파드도 마운트하지
   # 않음(cascade=orphan 재현).
+  # $2 = ①(Released-phase) 축, 선택. 기본(생략) = PV 0건 — 기존 ②전용 호출과 동일 동작을 보존한다.
+  #      released_and_bound: Released PV 1건 + Bound PV 1건(②는 clean으로 고정해 ①만 잰다)
+  #      bound_only:         Bound PV만(Released 0건) — ①의 양성 대조
   B="$BATS_TEST_TMPDIR/bin"; mkdir -p "$B"
   if [ "$1" = "1" ]; then
     pod_json='{"items":[{"metadata":{"namespace":"obs"},"spec":{"volumes":[{"persistentVolumeClaim":{"claimName":"vlogs-0"}}]}},{"metadata":{"namespace":"obs"},"spec":{"volumes":[{"persistentVolumeClaim":{"claimName":"vmsingle-0"}}]}},{"metadata":{"namespace":"cache"},"spec":{"volumes":[{"persistentVolumeClaim":{"claimName":"valkey-0"}}]}}]}'
   else
     pod_json='{"items":[{"metadata":{"namespace":"obs"},"spec":{"volumes":[{"persistentVolumeClaim":{"claimName":"vmsingle-0"}}]}},{"metadata":{"namespace":"cache"},"spec":{"volumes":[{"persistentVolumeClaim":{"claimName":"valkey-0"}}]}}]}'
   fi
+  case "${2:-none}" in
+    released_and_bound) pv_json='{"items":[{"metadata":{"name":"pv-released-orphan"},"status":{"phase":"Released"},"spec":{"hostPath":{"path":"/mnt/data/orphan"},"storageClassName":"standard"}},{"metadata":{"name":"pv-bound-ok"},"status":{"phase":"Bound"},"spec":{"hostPath":{"path":"/mnt/data/ok"},"storageClassName":"standard"}}]}' ;;
+    bound_only)         pv_json='{"items":[{"metadata":{"name":"pv-bound-ok"},"status":{"phase":"Bound"},"spec":{"hostPath":{"path":"/mnt/data/ok"},"storageClassName":"standard"}}]}' ;;
+    *)                  pv_json='{"items":[]}' ;;
+  esac
   cat > "$B/kubectl" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
   "cluster-info") exit 0 ;;
-  "get pv -o json") echo '{"items":[]}' ;;
+  "get pv -o json") echo '$pv_json' ;;
   "get pvc -A -o json") echo '{"items":[{"metadata":{"namespace":"obs","name":"vlogs-0"}},{"metadata":{"namespace":"obs","name":"vmsingle-0"}},{"metadata":{"namespace":"cache","name":"valkey-0"}}]}' ;;
   "get pod -A -o json") echo '$pod_json' ;;
   *) echo "unstubbed kubectl call: \$*" >&2; exit 1 ;;
@@ -74,4 +82,22 @@ EOF
   PATH="$BATS_TEST_TMPDIR/bin:$PATH" run bash "$ROOT/scripts/audit-orphan-pv.sh"
   [ "$status" -eq 0 ]
   printf '%s' "$output" | grep -qF -- '전건이 파드에 마운트됨'
+}
+
+# ── ① Released-phase 축 — 위 stub_kubectl(:43-63)이 "get pv -o json"을 항상 `{"items":[]}`로
+#    고정했던 탓에, 이 축(원래 대상: PVC 삭제 + Retain 잔존)에 실제 PV 데이터를 흘리는 @test가
+#    이 파일에 0건이었다(2026-09 뮤테이션 실측: `select(phase == "Released")`를 `!=`로 반전해도
+#    위 5레인 전건 그대로 ok). ②(소비-여부)와 독립으로 재현한다 — PVC·pod는 clean으로 고정.
+@test "the Released-phase check flags a Released PV even when every PVC stays consumed (axis 1)" {
+  stub_kubectl 1 released_and_bound
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" run bash "$ROOT/scripts/audit-orphan-pv.sh"
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qF -- 'pv-released-orphan'
+}
+
+@test "the Released-phase check passes clean when no PV is Released (axis 1 positive control)" {
+  stub_kubectl 1 bound_only
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" run bash "$ROOT/scripts/audit-orphan-pv.sh"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF -- '없음(쿼리 성공, Released 0건)'
 }
