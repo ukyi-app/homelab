@@ -99,6 +99,29 @@ gen() {
   [ "$output" == "$expected" ]
 }
 
+@test "surfaceHash(HEAD) and surfaceHashWorktree agree when the app tree has a symlink" {
+  # 6라운드 비평가 실증(surface-hash-symlink) — walk()이 심볼릭 링크를 조용히 건너뛰면
+  # surfaceHashWorktree가 surfaceHash(HEAD)와 값이 갈려 활성화 직후 activation-surface-drift가
+  # 오탐한다(헤더 :31 「커밋 후 동일한 값」 계약 위반). create-app 산출물 자체는 심볼릭 링크를
+  # 만들지 않으므로(gen()으로는 재현 불가) apps/<app> 트리를 직접 구성해 두 함수를 나란히 부른다.
+  git -C "$FR" init -q -b main
+  git -C "$FR" config user.email t@t
+  git -C "$FR" config user.name t
+  mkdir -p "$FR/apps/symtest/deploy/prod"
+  echo hello > "$FR/apps/symtest/deploy/prod/a.txt"
+  ln -s a.txt "$FR/apps/symtest/deploy/prod/link.txt"
+  before=$(bun -e "
+    import { surfaceHashWorktree } from '$ROOT/tools/lib/surface-hash.ts';
+    console.log(surfaceHashWorktree('$FR', 'symtest'));
+  ")
+  [ -n "$before" ]
+  git -C "$FR" add -A
+  git -C "$FR" commit -qm "symlink fixture"
+  after=$(bun "$ROOT/tools/lib/surface-hash.ts" "$FR" HEAD symtest)
+  [ -n "$after" ]
+  [ "$before" == "$after" ]
+}
+
 @test "create-app rejects duplicate host in apps.json (silent toset collision guard)" {
   echo '[{"name":"other","host":"orders.example.com","public":true,"active":true}]' \
     > "$FR/infra/cloudflare/apps.json"

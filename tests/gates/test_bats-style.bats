@@ -43,6 +43,48 @@ setup() {
   echo "$output" | grep -q '\[BB\]'
 }
 
+@test "a semicolon-joined MIDDLE [[ ]] is not hidden behind a leading command (round11 bats-style-lanes-1 PoC1)" {
+  # ⚠️ 착지 전: NEG/BB 레인은 원문 `line` 전체의 **선두 토큰만** 봐서 `true; [[ … ]]`가 완전히
+  #    안 보였다(무증인 초록) — bats 1.14.0으로 그 `[[ ]]`가 실제로는 `not ok`임을 별도 확인했다.
+  printf '%s\n' \
+    '@test "semicolon hides a middle [[ ]] behind true" {' \
+    '  run echo hi' \
+    '  true; [[ "$output" == *zzz* ]]' \
+    '  [ "$status" -eq 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_bb_semi_hidden.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_bb_semi_hidden.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[BB\]'
+}
+
+@test "a semicolon-joined [[ ]]; true on the LAST line is still a middle assertion, not the last-line idiom (round11 PoC2)" {
+  # ⚠️ 착지 전: 진짜 마지막 실행 명령은 `true`인데 `[[ ]]`가 물리적 마지막 줄이라는 이유만으로
+  #    pend가 그 줄에서 설정된 뒤 `}`에서 무출력 리셋돼 '마지막-줄 관용구'로 오인 면제됐다.
+  printf '%s\n' \
+    '@test "semicolon true after a middle [[ ]] on the last physical line" {' \
+    '  run echo hi' \
+    '  [ "$status" -eq 0 ]' \
+    '  [[ "$output" == *zzz* ]]; true' \
+    '}' > "$BATS_TEST_TMPDIR/test_bb_semi_falselast.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_bb_semi_falselast.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[BB\]'
+}
+
+@test "a semicolon INSIDE a quoted literal on the last line is NOT split into a fake middle segment (false-positive control)" {
+  # 세그먼트 분해가 따옴표를 안 가리면 `"x &amp; y"` 같은 리터럴의 `;`가 가짜 세그먼트 경계가 되어
+  # 정당한 마지막-줄 부정(`! …`)의 앞부분만 뜯겨 [NEG]로 오탐한다(실측 회귀:
+  # tests/gates/test_telegram-notify.bats:74 — 착지 전 mask_semi 없이 재현됨).
+  printf '%s\n' \
+    '@test "quoted semicolon on the last line stays one segment" {' \
+    '  run echo hi' \
+    '  [ "$status" -eq 0 ]' \
+    '  ! echo "$output" | grep -q "&amp;lt;"' \
+    '}' > "$BATS_TEST_TMPDIR/test_bb_quoted_semi_ok.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_bb_quoted_semi_ok.bats"
+  [ "$status" -eq 0 ]
+}
+
 # 도메인(추적 `*.bats` + `load` seam `*.bash`)이 비면 통과가 아니라 SKIP이다 — 수집이 깨져 0건이 된
 # 것과 "검사했고 깨끗함"을 가르지 못하면 이 가드가 죽어도 게이트가 초록이다.
 # ⚠️ 채널은 **skip이 아니라 열거 붕괴**다 — 기본 모드 도메인은 정당하게 0이 될 수
@@ -364,6 +406,33 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "detector rejects a GNU-grep permutation grep -v PAT -q FILE (round11 bats-style-lanes-2 PoC)" {
+  # ⚠️ 착지 전: qv_seg는 첫 비-플래그 토큰(패턴 인자)에서 스캔을 끊어 그 뒤의 `-q`를 못 봤다.
+  #    GNU grep은 getopt permutation으로 옵션이 위치 인자 사이에 흩어져도 전부 옵션으로 읽는다 —
+  #    `grep -v EXCLUDE -q FILE`은 실제로 `-qv EXCLUDE FILE`과 동치다(라이브 실측).
+  q="-q"; v="-v"
+  printf '%s\n' \
+    '@test "qv permutation form" {' \
+    "  grep $v EXCLUDE $q \"\$file\"" \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_qv_perm.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_qv_perm.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[QV\]'
+}
+
+@test "a quoted pipe inside a grep pattern is NOT split into a fake segment boundary (false-positive control, replicated from test_audit-orphan-pv.bats:9)" {
+  # positional 카운터를 qv_seg에 넓히기만 하면(따옴표-인식 없이) 이 정당한 관용구가 라이브
+  # 회귀를 낸다 — 실측 확인됨(va.corrected_fix). mask_pipe(세그먼트 분해 전 마스킹) +
+  # qv_tokenize(따옴표-인식 토큰화) 둘 다 있어야 이 대조군이 계속 무오탐이다.
+  printf '%s\n' \
+    '@test "root whitelist regression control (quoted pipe pattern)" {' \
+    "  run grep -Eq 'command -v kubectl|command -v yq' \"\$S\"; [ \"\$status\" -eq 0 ]" \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_qv_quoted_pipe_ok.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_qv_quoted_pipe_ok.bats"
+  [ "$status" -eq 0 ]
+}
+
 @test "the state machine reaches 0-column function bodies, not just @test bodies" {
   # 착지 전 검출기는 `^@test … {`로만 상태에 들어가서, 도메인에 있는 파일이어도 setup()·헬퍼
   # 본문은 전부 판정 밖이었다(그 갭을 가드 헤더가 「부재-단언 클래스를 얹을 때의 몫」으로 계상해
@@ -576,6 +645,24 @@ setup() {
     '}' > "$BATS_TEST_TMPDIR/test_absexec_w2.bats"
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_w2.bats"
   [ "$status" -eq 0 ]
+}
+
+@test "W2 toolkey leftmost-match does not let a decoy env-value reference borrow an unrelated positive control (round11 bats-style-lanes-3)" {
+  # ⚠️ 착지 전: exec_toolkey는 문장 전체에서 leftmost 매치만 키로 썼다. 실행 대상이 진짜 bad.sh인데
+  #    같은 문장 안의 `env FALLBACK=scripts/good.sh` 디코이가 리터럴상 먼저 등장해 그 키를 가로채면,
+  #    good.sh의 양성 대조가 bad.sh의 무증인을 대신 닫아준다(무증인 초록).
+  printf '%s\n' \
+    '@test "good.sh positive control" {' \
+    '  run bash scripts/does-not-matter-good.sh --dry-run' \
+    '  [ "$status" -eq 0 ]' \
+    '}' \
+    '@test "bad.sh call with a decoy good.sh reference in an env assignment" {' \
+    '  run env FALLBACK=scripts/does-not-matter-good.sh bash scripts/does-not-matter-bad.sh --bogus' \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_w2_leftmost.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_w2_leftmost.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-EXEC\]'
 }
 
 @test "a bash -c grep pipe that merely reads a script's contents is not an exec target (false-positive control)" {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 // 실행은 exec seam 경유(d6④) — git 실패는 ""로 흡수하는 기존 계약 유지.
 import { git } from "./exec.ts";
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, readlinkSync, statSync } from "node:fs";
 import path from "node:path";
 
 // 공용 코어 — `git ls-tree -r`(또는 그 재구성) 라인 배열에서 canonical surface 해시를 낸다.
@@ -45,6 +45,20 @@ export function surfaceHashWorktree(repoDir: string, app: string): string {
       const r = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
         if (!walk(full, r)) return false;
+      } else if (e.isSymbolicLink()) {
+        // git ls-tree -r은 심볼릭 링크를 mode 120000 blob(링크 **대상 문자열**의 sha)으로 낸다 —
+        // 링크를 따라가 파일 내용을 해시하면 안 된다(그러면 대상 파일이 바뀌었는데 링크 자체는
+        // 그대로인 경우를 놓친다). readlink 결과를 개행 없이 그대로 hash-object --stdin에 먹인다.
+        let target: string;
+        try {
+          target = readlinkSync(full);
+        } catch {
+          return false;
+        }
+        const h = git(repoDir, ["hash-object", "--stdin"], { timeoutMs: 0, input: target });
+        if (!h.ok) return false;
+        const sha = h.out.trim();
+        lines.push(`120000 blob ${sha}\t${r}`);
       } else if (e.isFile()) {
         const h = git(repoDir, ["hash-object", full], { timeoutMs: 0 });
         if (!h.ok) return false;
@@ -52,6 +66,10 @@ export function surfaceHashWorktree(repoDir: string, app: string): string {
         // git ls-tree는 실행권 있으면 100755, 아니면 100644 — create-app 산출물은 전부 비실행(644).
         const mode = statSync(full).mode & 0o111 ? "100755" : "100644";
         lines.push(`${mode} blob ${sha}\t${r}`);
+      } else {
+        // FIFO·소켓 등 그 외 엔트리 유형 — 헤더(:31) 계약대로 fail-loud("" 반환)로 처리한다.
+        // 조용히 건너뛰면(누락) 이번 finding과 같은 값 발산이 다른 엔트리 유형에서 재발한다.
+        return false;
       }
     }
     return true;

@@ -210,7 +210,8 @@ function flush(){ if(pend!=""){ print pend; pend="" } }
 # ── [ABS]/[QV] 레인 헬퍼 ──────────────────────────────────────────────────────────────────
 # 후행 주석 제거 — **따옴표 균형이 맞는 자리에서만** 뗀다. 균형을 안 보면 `'^[[:space:]]*#.*repoURL:'`
 # 같은 패턴 리터럴의 `#`에서 잘려 판정 대상 자체가 사라진다(형제 check-locale-collation이 밟은
-# "상태 기계 순서가 곧 판정" 결함과 같은 얼굴). NEG/BB 레인은 줄 선두 토큰만 보므로 이 정제와 무관하다.
+# "상태 기계 순서가 곧 판정" 결함과 같은 얼굴). NEG/BB 레인은 이 후행-주석 정제와는 무관하다(주석만
+# 있는 줄은 위에서 이미 걸러진다) — 다만 세그먼트 분해(아래 mask_semi)는 NEG/BB도 함께 쓴다.
 function abs_strip(s,   i,c,q1,q2){
   q1=0; q2=0
   for(i=1;i<=length(s);i++){
@@ -220,6 +221,36 @@ function abs_strip(s,   i,c,q1,q2){
     else if(c=="#" && q1==0 && q2==0 && (i==1 || substr(s,i-1,1) ~ /[ \t]/)) return substr(s,1,i-1)
   }
   return s
+}
+# NEG/BB 세그먼트 분해 전 마스킹 — 홑/겹따옴표 **안**의 `;`를 플레이스홀더(\001)로 바꿔 split이 그
+# 자리를 진짜 문장 경계로 오인하지 않게 한다(실측 회귀: `"x &amp; y"` 리터럴의 `;`·sed 스크립트
+# 안 `;;` case 터미네이터 리터럴의 `;`가 마스킹 없이는 가짜 세그먼트 경계를 만들어 [NEG]/[BB]
+# 오탐을 냈다). abs_strip과 같은 q1/q2 토글 모델 — split 뒤 세그먼트마다 gsub로 되돌린다.
+function mask_semi(s,   i,c,q1,q2,out){
+  q1=0; q2=0; out=""
+  for(i=1;i<=length(s);i++){
+    c=substr(s,i,1)
+    if(c=="'" && q2==0) q1=1-q1
+    else if(c=="\"" && q1==0) q2=1-q2
+    else if(c==";" && (q1 || q2)) c="\001"
+    out=out c
+  }
+  return out
+}
+# [QV] 세그먼트 분해(abs_stmt의 `|`·`||`·`&&` split) 전 마스킹 — 따옴표 **안**의 `|`를 플레이스홀더
+# (\002)로 가려 split이 그 자리를 진짜 파이프 경계로 오인하지 않게 한다(mask_semi와 같은 모델,
+# 다른 문자). 안 가리면 `grep -Eq 'command -v kubectl|command -v yq' "$S"` 같은 정당한 리터럴이
+# 세그먼트 경계에서 갈라진다(round11 bats-style-lanes-2 va.corrected_fix).
+function mask_pipe(s,   i,c,q1,q2,out){
+  q1=0; q2=0; out=""
+  for(i=1;i<=length(s);i++){
+    c=substr(s,i,1)
+    if(c=="'" && q2==0) q1=1-q1
+    else if(c=="\"" && q1==0) q2=1-q2
+    else if(c=="|" && (q1 || q2)) c="\002"
+    out=out c
+  }
+  return out
 }
 # 대상 판정 — grep 계열 + 경로 피연산자. 히어스트링은 경로가 없으므로 대상 밖(헤더의 분모 규약).
 # rc 1 = grep 계열(무매치 1 · 부재/읽기불가 2) · rc 2 = git grep(무매치 1 · 치명적 **128**).
@@ -288,8 +319,15 @@ function exec_target(s){
 }
 # 도구 신원 — W2(양성 대조) 매칭 키. `exec_target`과 같은 네 패턴이어야 한다(갈리면 대상은
 # 잡히는데 키가 안 잡히는 불일치가 생긴다).
+# ⚠️ match()는 **leftmost** 매치라, `run env FALLBACK=scripts/good.sh bash scripts/bad.sh --bogus`처럼
+# 한 문장에 스크립트 경로가 두 번(디코이 env 값 + 실제 실행 대상) 나오면 실행과 무관한 앞쪽 참조가
+# 키를 가로채 엉뚱한 양성 대조를 빌려준다(round11 bats-style-lanes-3). abs_target(F3 분모 판정)이
+# 이미 하는 `run `·`env `·`VAR=val` 접두 스트립 관용구를 그대로 재사용해 그 디코이를 먼저 없앤다.
 function exec_toolkey(s,   r){
   r=s
+  sub(/^run[ \t]+/,"",r)
+  sub(/^env[ \t]+/,"",r)
+  while (r ~ /^[A-Za-z_][A-Za-z0-9_]*=[^ \t]*[ \t]+/) sub(/^[A-Za-z_][A-Za-z0-9_]*=[^ \t]*[ \t]+/,"",r)
   if (match(r, /scripts\/[A-Za-z0-9_.\/-]+\.sh/))     return substr(r,RSTART,RLENGTH)
   if (match(r, /tools\/[A-Za-z0-9_.\/-]+\.ts/))        return substr(r,RSTART,RLENGTH)
   if (match(r, /infra\/[A-Za-z0-9_.\/-]+\.sh/))        return substr(r,RSTART,RLENGTH)
@@ -305,19 +343,47 @@ function execw1_hit(s){
   if (s ~ /^run[ \t]+(bash|sh)[ \t]+-c[ \t]+'.*grep[ \t]+-[A-Za-z]*q/ && s ~ /_[ \t]+"\$(output|out)"/) return 1
   return 0
 }
+# 따옴표-인식 토큰화 — 홑/겹따옴표 **안**의 공백은 토큰 경계가 아니다(bash의 실제 단어분리와 같은
+# 규약). qv_seg의 옛 `gsub(quotes)+split(공백)`은 따옴표만 지우고 공백은 무조건 경계로 써서, 따옴표
+# 안에 있던 `-v` 같은 부분열이 따옴표가 사라진 뒤 독립 토큰으로 떠올라 진짜 플래그처럼 읽혔다
+# (round11 bats-style-lanes-2 va.corrected_fix — 실측 회귀: tests/gates/test_audit-orphan-pv.bats:9
+# `grep -Eq 'command -v kubectl|command -v yq' "$S"`의 따옴표 안 `-v`가 이 자리다).
+function qv_tokenize(s, tok,   i,c,q1,q2,cur,n){
+  q1=0; q2=0; cur=""; n=0
+  for(i=1;i<=length(s);i++){
+    c=substr(s,i,1)
+    if(c=="'" && q2==0){ q1=1-q1; continue }
+    if(c=="\"" && q1==0){ q2=1-q2; continue }
+    if((c==" " || c=="\t") && q1==0 && q2==0){
+      if(cur!=""){ n++; tok[n]=cur; cur="" }
+      continue
+    }
+    cur=cur c
+  }
+  if(cur!=""){ n++; tok[n]=cur }
+  return n
+}
 # [QV] 세그먼트 판정 — grep-a-5. 예전 판은 q·v가 **한 토큰 안**에 붙어야 매치해 `grep -q -v`
 # (분리 플래그)·`if grep -qv …`(문장 선두, 파이프 無)가 무측정이었다. 여기서는 문장을 `|`·`||`·`&&`로
 # 쪼갠 뒤 각 세그먼트에서 grep 호출 뒤 **선행 플래그 토큰들**만 훑어 q·v가 (같은 토큰이든 분리
 # 토큰이든) 함께 있으면 위반이다. `abs_rec`처럼 문장 **전체** 토큰을 훑으면 안 된다 — 그러면
 # `grep -v X | grep -q Y`(정당한 다중-grep 파이프) 같은 자리가 두 세그먼트 각각에서 오탐을 낸다
-# (세그먼트 분리 + 첫 비플래그 토큰에서 `break` 두 축이 그 오탐을 막는다 — 실측 8곳 무오탐).
-function qv_seg(t,   n,a,i,seen,q,v){
-  gsub(/['"]/,"",t); n=split(t,a,/[ \t]+/); seen=0; q=0; v=0
+# (세그먼트 분리 + **positional 2개(패턴·파일)까지만** 플래그 스캔을 허용하는 카운터 두 축이 그
+# 오탐을 막는다 — 실측 8곳 무오탐). ⚠️ round11 va.corrected_fix — "첫 비플래그에서 즉시 break"였던
+# 예전 판은 `grep -v EXCLUDE -q FILE`(GNU grep이 실제로 순열 처리하는 형태)를 놓쳤다. positional
+# 카운터로 넓히되, 따옴표-인식 토큰화(qv_tokenize) 없이 넓히면 위 회귀가 재현된다 — 두 변경은 짝이다.
+function qv_seg(t,   n,a,i,seen,q,v,pos){
+  n=qv_tokenize(t,a); seen=0; q=0; v=0; pos=0
   for(i=1;i<=n;i++){
     if(!seen){ if(a[i]=="grep"||a[i]=="egrep"||a[i]=="fgrep") seen=1; continue }
-    if(a[i]=="--" || a[i] !~ /^-/) break          # 선행 플래그 런에서만 본다(그 뒤 패턴/경로는 대상 밖)
-    if(a[i] ~ /^-[A-Za-z]*q/) q=1
-    if(a[i] ~ /^-[A-Za-z]*v/) v=1
+    if(a[i]=="--") break
+    if(a[i] ~ /^-/){
+      if(a[i] ~ /^-[A-Za-z]*q/) q=1
+      if(a[i] ~ /^-[A-Za-z]*v/) v=1
+      continue
+    }
+    pos++
+    if(pos>=2) break                              # 패턴(1)+파일(2) — 그 뒤는 대상 밖
   }
   return (seen && q && v)
 }
@@ -343,8 +409,10 @@ function abs_stmt(s,   rec,qn,qsg,qi){
   else if (s ~ /^done([ \t;].*)?$/) { if(absloop>0) absloop-- }
   # [QV] — rc를 판정으로 쓰는 `-q`와 줄 반전 `-v`가 같은 grep 호출의 선행 플래그에 함께 있으면
   # 항진/거짓실패다. 세그먼트 단위라 `if`/`&&` 선행 위치도 잡는다(문장 선두 앵커 불필요).
-  qn=split(s,qsg,/\|\||&&|\|/)
-  for(qi=1;qi<=qn;qi++) if(qv_seg(qsg[qi])){ print FILENAME":"FNR": [QV] "s; break }
+  # mask_pipe로 따옴표 안 `|`를 가린 뒤 분해 — 안 가리면 그 리터럴이 세그먼트 경계를 만들어
+  # split이 정당한 `grep -Eq 'a|b' file`류 패턴을 조각낸다(round11 bats-style-lanes-2).
+  qn=split(mask_pipe(s),qsg,/\|\||&&|\|/)
+  for(qi=1;qi<=qn;qi++){ gsub(/\002/,"|",qsg[qi]); if(qv_seg(qsg[qi])){ print FILENAME":"FNR": [QV] "s; break } }
   if (s ~ /^run[ \t]/) {
     absk=abs_target(s)
     if (absk) {
@@ -454,8 +522,31 @@ FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++
   t=line; sub(/^[ \t]+/,"",t)
   if (t=="" || t ~ /^#/) next
   flush()
-  if (t ~ /^![ \t]/)    pend=FILENAME":"FNR": [NEG] "t
-  else if (t ~ /^\[\[/) pend=FILENAME":"FNR": [BB] "t
+  # NEG/BB — `;`로 이어붙인 한 줄 복합문도 abs_line(408행)과 같은 분해를 거친다(형제 결함:
+  # 원문 `t` 전체의 선두 토큰만 보면 `true; [[ … ]]`가 완전히 안 보이고, `[[ … ]]; true`는 실제로는
+  # 중간 단언인데 pend가 그 세그먼트에서 설정된 뒤 `}`에서 무출력 리셋돼 마지막-줄 관용구로 오인
+  # 면제된다). 세그먼트 단위로 판정하되 **문장 전체의 마지막(비공백) 세그먼트만** 종전 pend(마지막-줄
+  # 관용구) 지연 판정을 받는다 — 그 앞 세그먼트는 뒤따르는 세그먼트가 같은 줄에 실재하므로 무조건
+  # '중간' 단언이라 즉시 낸다(pend로 미룰 필요가 없다).
+  # ⚠️ split 전에 mask_semi로 따옴표 안 `;`를 가린다 — 안 가리면 `"x &amp; y"` 리터럴이나 sed
+  # 스크립트의 `;;` case 터미네이터가 가짜 세그먼트 경계가 되어 [NEG]/[BB] 오탐을 낸다(실측 회귀:
+  # tests/gates/test_telegram-notify.bats·tools/tests/test_tf-r2-init.bats).
+  bbn=split(mask_semi(t), bbparts, /;[ \t]*/); bbcnt=0
+  for (bbi=1; bbi<=bbn; bbi++) {
+    bbs=bbparts[bbi]; sub(/^[ \t]+/,"",bbs); sub(/[ \t]+$/,"",bbs); gsub(/\001/,";",bbs)
+    if (bbs=="") continue
+    bbcnt++; bbseg[bbcnt]=bbs
+  }
+  for (bbi=1; bbi<bbcnt; bbi++) {
+    bbs=bbseg[bbi]
+    if (bbs ~ /^![ \t]/)    print FILENAME":"FNR": [NEG] "bbs
+    else if (bbs ~ /^\[\[/) print FILENAME":"FNR": [BB] "bbs
+  }
+  if (bbcnt>0) {
+    bbs=bbseg[bbcnt]
+    if (bbs ~ /^![ \t]/)    pend=FILENAME":"FNR": [NEG] "bbs
+    else if (bbs ~ /^\[\[/) pend=FILENAME":"FNR": [BB] "bbs
+  }
   # [ABS]/[QV]는 pend(마지막-명령 면제)를 쓰지 않는다 — 부재 판정은 @test의 **마지막 줄**이 정상 자리다.
   abs_line(line)
 }
