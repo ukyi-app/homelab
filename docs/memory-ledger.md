@@ -313,12 +313,24 @@ sealed-secrets 128→96·vmsingle 1Gi→896으로 −160Mi 추가 회수, 명목
 즉 10240은 물리 천장이 아니라 **낡은 명목 규율**이며, 상향/재기준선은 owner 결정(D-e)이다 —
 그 결정 전까지 이 금지선을 유지하는 이유는 "물리적으로 불가능해서"가 아니라 "근거를 다시 세우지
 않았기 때문"이다. 모두 노드-OOM 안전(동시 peak ≪ allocatable).
-주의: **대부분의** 행은 라이브 manifest와 자동 교차검증되지 **않는다**. 예외는 둘이고 각 행 주석에 적혀
-있다 — `homepage`(`platform/homepage/prod/test_homepage_deployment.bats`가 이 표에서 limit을 읽어
-매니페스트와 대조한다. 2026-09-01 3차에서 그 @test가 상수 192Mi를 박고 있어 원장 정정에 red를 냈고,
-이름값(`matching the ledger`)을 하도록 원장 파서 대조로 고쳤다)와 `local-path-storage`
-(`tools/check-resource-limits.ts`의 substrate 대조 — 아래 그 행 주석). verify:ledger는 마크다운만; local-helm traefik 등은
-check-resource-limits 스캔 밖이라 여기 수기 계상). 신규/변경 상주 워크로드는 반드시 행+산문 동반 갱신.
+주의(2026-09-05 정정 — 티켓 62): 예전엔 「대부분의 행은 라이브 manifest와 자동 교차검증되지 않는다.
+예외는 둘」이라고 적혀 있었으나, `tools/check-resource-limits.ts`의 F1(정적 귀속)+F2(커버리지 파생)
+착지로 platform 스코프도 기계 대조에 들어와 그 문장이 낡았다. 지금은 넷이다 — ①`homepage`
+(`platform/homepage/prod/test_homepage_deployment.bats`가 이 표에서 limit을 읽어 매니페스트와 대조.
+2026-09-01 3차에서 그 @test가 상수 192Mi를 박고 있어 원장 정정에 red를 냈고, 이름값(`matching the
+ledger`)을 하도록 원장 파서 대조로 고쳤다) ②`local-path-storage`(`tools/check-resource-limits.ts`의
+substrate 스코프 기계 대조 — 아래 그 행 주석) ③ platform 스코프 중 **정적으로 완전한 6개
+namespace**(cache·database·edge·files·homepage·observability — homepage는 ①과 같은 namespace를
+이중으로 문다) — F1이 `metadata.namespace` 부재 워크로드를 소유 배포 루트 kustomization의
+`namespace:`로 귀속하고(중첩 base는 루트까지 상승), F2가 그중 helm 생성기 루트나 `chart:`
+Application destination에 걸리는 namespace를 **손 로스터 없이 매 실행마다 다시 스캔해** 제외한다.
+나머지 namespace(argocd·cert-manager·cnpg-system·gateway·sealed-secrets·tailscale)는 F2가 파생한
+제외이지 수기 선정이 아니다 — 그 사유는 `bun tools/check-resource-limits.ts` 실행마다
+`check-resource-limits:ledger coverage` 출력에 `"<ns>: 제외 — <사유>"`로 찍힌다(예:
+`gateway: 제외 — helm 생성기 배포 루트(HelmChartInflationGenerator)`). `kube-system` 1행은 그 파생
+대상에도 없다 — 배포 루트 자체가 없다(k3s 내장, 아래 「라이브/소스 manifest와 교차하지 않는다」
+정정도 참조). verify:ledger는 여전히 마크다운 행 자체(형식·합계·바닥값)만 본다 — 매니페스트를
+안 읽는 것은 그대로다. 신규/변경 상주 워크로드는 반드시 행+산문 동반 갱신.
 
 2026-08-14: observability 행 상향(limit 2080→2400 **+320**, req 1152→1184 **+32**) — NUC 콜드스타트에서
 `victorialogs`(128→256Mi)와 `vector`(320→512Mi)가 실제로 OOMKilled 루프를 돌았다(2시간에 각 16회·22회).
@@ -431,7 +443,8 @@ D-e(NUC 재기준선)를 red로 만든다. 제거·개명은 그 재기준선에
 (`pg-tools`는 CronJob용 ops 이미지 — 일시적이므로 상주 워크로드 행이 없다. worker/web/console
 values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 앱은 온보딩 PR이 행을 추가한다.)
 
-> **local-path-storage 행 = k3s-bootstrap substrate 워크로드 (`check-resource-limits`가 기계 대조하는 유일한 행)** —
+> **local-path-storage 행 = k3s-bootstrap substrate 워크로드 (`check-resource-limits`가 substrate
+> 스코프에서 기계 대조하는 유일한 행)** —
 > `infra/k3s-bootstrap/storage/local-path-provisioner.yaml`이 Deployment 2개
 > (`local-path-provisioner-internal`·`-bulk`, 각 req 32Mi/limit 64Mi)를 `local-path-storage` ns에 적용한다.
 > 이 둘은 **ArgoCD 관리가 아니다**(`app.kubernetes.io/instance` 라벨 없음 — 라이브 실측 2026-09-03).
@@ -439,9 +452,15 @@ values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 �
 > memory 합 == 그 namespace를 쓰는 원장 행들의 합**을 기계로 대조한다(replicas 반영). 양방향이다 —
 > 매니페스트의 limit을 올려도, 이 행을 지워도 `make verify`가 red다. 그러니 **손으로 맞추지 말고
 > 한쪽을 고친 뒤 가드를 돌려라**(2026-09-03 착지 전에는 두 뮤테이션 모두 전 게이트 초록이었다).
-> ⚠️ 이 대조가 덮는 것은 substrate 스코프뿐이다. `platform/` 행과 tailscale proxy 행은 여전히
-> **수기 계상**이다(전자는 원장 행이 namespace 총량이고 매니페스트는 컴포넌트 단위라 대응이 1:1이
-> 아니며, 후자는 ProxyClass가 런타임에 만드는 StatefulSet이라 소스에 없다).
+> ⚠️ 2026-09-05 정정(티켓 62): 이 문단이 원래 "`platform/` 행은 여전히 수기 계상"이라고 적었던
+> 것은 이제 **부분적으로만** 맞다 — `platform/` 스코프도 F1(정적 귀속)+F2(커버리지 파생)로
+> 6개 namespace(cache·database·edge·files·homepage·observability)가 같은 형태로 기계 대조된다
+> (원장 행이 namespace 총량이고 매니페스트는 컴포넌트 단위라 대응이 1:1이 아닌 문제는 F2가
+> namespace별 **합**으로 우변을 만들어 해소한다 — observability+glances 2행 합이 그 예다).
+> 나머지 namespace(argocd·cert-manager·cnpg-system·gateway·sealed-secrets·tailscale)는 F2가
+> 매 실행마다 다시 파생한 제외 목록이라 수기 로스터가 아니다. **tailscale proxy 행**만은 여전히
+> 순수 수기 계상이다 — ProxyClass가 런타임에 만드는 StatefulSet이라 tracked 소스 자체가 없어
+> F1도 F2도 닿지 못한다(아래 tailscale 행 주석).
 
 > **tailscale 행 = operator + proxy N대** — `loadBalancerClass: tailscale` 서비스 1개마다 operator가
 > proxy StatefulSet(ts-*)을 1대 생성하고 defaultProxyClass(`resource-capped`)가 각 192Mi limit/64Mi req를
