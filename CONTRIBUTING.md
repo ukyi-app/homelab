@@ -173,6 +173,20 @@ grep -lE '^[^/]*(scan(Floor|Signal)\(|scan: ")' tools/*.ts
 소비자는 “SCAN 없음”을 “픽스처”나 “0건”으로 읽으면 **안 된다** — 그건 **미지(unknown)** 다.
 신호가 없는 가드에 대한 판정은 종전대로 과다 계상(있는 호출을 권위로 셈)에 머문다.
 
+### 이름 있는 집합의 상한 — 존재 증인만으로는 부족하다
+
+① **이름 있는 배열/집합을 재는 가드는 멤버 존재 증인뿐 아니라 집합 크기 상한(`length == N` 또는 정확
+집합 등식)을 같이 건다 — 원소 *추가*가 무증인이면 상한이 없는 것이다.** (실측: 5라운드 비평가 생존
+군집 최대 12건 · 6라운드 재발 9건 — infra-a-1·a-3·b-4·kustomization-2/3/4·httproute-1/2·posture-2.)
+
+② **존재 증인은 주석 스트립 후 행두 앵커로 센다 — 산문·문자열·heredoc·죽은 스텝 안의 같은 토큰은
+증인이 아니다.** (형제 관용구: `scripts/check-locale-collation.sh:131`.)
+
+`scripts/check-bats-style.sh`의 `[SETCAP]` 레인이 ①을 `@test` 이름-본문 불일치로 강제한다 — 이름이
+exactly/only/no other/전수/EVERY/정확 중 하나로 원소 전수를 선언하면 본문에 집합 등식 술어(`= "…"` ·
+`-eq N` · jq/yq `contains(`/`join(",")`/`length ==`)가 있어야 한다. cf. `docs/traps-detail.md` 「이름
+있는 집합의 상한 부재」.
+
 ### 워크플로 준비상태 회계 — 원장 + 게이트 밖 accounting job
 
 **병.** 자격/설정이 없어 GHA job이 통째로 skip되면 run은 **초록**이다. GHA job conclusion 어휘

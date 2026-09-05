@@ -170,6 +170,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 자기조절 워크로드의 자기참조는 두 경로로 산다 — GOMEMLIMIT(힙)과 allowedPercent(캐시), 하나만 끊으면 되살아난다
 - 측정 창이 기판 변경을 가로지르면 두 체제가 한 숫자에 섞인다
 - sed 주소 범위는 시작 줄에서 끝나지 않는다 — 한 줄짜리 `{{- /* … */ -}}` 주석이 그 뒤를 통째로 지운다
+- 이름 있는 집합의 상한 부재 — 이름이 exactly/only를 선언해도 본문은 존재만 잰다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 
