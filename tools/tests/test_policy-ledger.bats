@@ -128,6 +128,8 @@ EOF
       [-5, { minimum: 1 }],
     ];
     for (const [v, s] of typeless) if (!throws(v, s)) { console.error("NO THROW (typeless):", JSON.stringify(s)); process.exit(1); }
+    // 미해석 $ref(오타·삭제된 정의명) 축 — throw는 아니지만 errs.push로 위반 1건을 내야 한다(lib-b-1).
+    if (schemaErrors(1, { $ref: "#/definitions/nope" }, { definitions: {} }).length === 0) { console.error("NO ERROR ($ref 해석 실패)"); process.exit(1); }
     // 지원 밖 키워드 축 — 화이트리스트 밖 multipleOf는 throw다.
     if (!throws(1, { type: "integer", multipleOf: 2 })) { console.error("NO THROW (unknown keyword)"); process.exit(1); }
     // 대조군 ①: type이 있으면 throw가 아니라 위반 보고다(가드가 정상 스키마를 죽이지 않는다).
