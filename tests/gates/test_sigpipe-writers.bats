@@ -115,3 +115,52 @@ FIXEOF
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '<<<'
 }
+
+# ── c71-3: 분모 ② 확장(파일/명령 writer) — 검출기 자기-뮤테이션 증인 ─────────────────────────────
+# 2026-09-05 실증: 옛 분모(printf/echo만)는 `sed … "$f" | grep -qE 'guard_init'`(scripts/netpol-
+# rehearsal.sh·tests/gates/vmalert-meta-firing-e2e.sh의 kubectl/grep -oE 실측 형태와 동형)에 rc 0을
+# 냈다(레인 D — PR #641 gate red 원인). 아래는 넓힌 분모가 그 클래스를 잡고, 주석/grep -c(소비-완료)/
+# herestring 재작성 형태는 그대로 살리는지를 함께 증언한다.
+
+@test "flags a sed file-writer piped into grep -q (c71-3 denominator expansion)" {
+  seed "sed 's/x//' \"\$f\" | grep -qE 'guard_init'\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -ne 0 ]
+}
+
+@test "flags the same sed writer when indented (c71-3)" {
+  seed "  sed 's/x//' \"\$f\" | grep -qE 'guard_init'\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -ne 0 ]
+}
+
+@test "flags a kubectl multiline writer piped into grep -q (c71-3 denominator expansion)" {
+  # scripts/netpol-rehearsal.sh 실측 형태(2026-09-05, 이 티켓이 herestring으로 전환) 재현.
+  seed "kubectl -n prod get netpol x -o yaml | grep -q \"\$NEEDLE\"\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -ne 0 ]
+}
+
+@test "does not flag a whole-line comment that documents the command-writer idiom (c71-3)" {
+  seed "# sed 's/x//' \"\$f\" | grep -qE 'guard_init'\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -eq 0 ]
+}
+
+@test "does not flag a command writer consumed by grep -c instead of -q (safe consume-to-completion form, c71-3)" {
+  seed "sed 's/x//' \"\$f\" | grep -c 'guard_init'\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -eq 0 ]
+}
+
+@test "does not flag the prescribed herestring rewrite of a command writer (c71-3)" {
+  seed "v=\"\$(sed 's/x//' \"\$f\")\"\ngrep -qE 'guard_init' <<<\"\$v\"\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -eq 0 ]
+}
