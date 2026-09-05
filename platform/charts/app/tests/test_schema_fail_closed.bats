@@ -36,11 +36,35 @@ C="--set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
 @test "schema rejects a custom ports.http (const 8080 — coupled to prod ns-wide NetworkPolicy)" {
   run helm template t "$CHART" $C --set kind=web --set ports.http=3000
   [ "$status" -ne 0 ]
+  # ⚠️ 상한 — 위 단언은 `3000` 한 값의 rc만 본다. `const`를 `enum: [8080, 8081]`로 바꿔 넓혀도
+  #    3000은 여전히 red라 이 줄만으로는 완화가 무증인이다(감사 5라운드 51 carry-7 실측: 그렇게
+  #    바꿔도 이 파일+형제 2파일 21/21 ok). `.const`가 사라지고 `enum`으로 바뀌면 아래는 null==8080
+  #    비교가 돼 그 자체로 red다 — const→enum 치환도 이 한 줄이 잡는다.
+  run jq -e '.properties.ports.properties.http.const == 8080' "$CHART/values.schema.json"; [ "$status" -eq 0 ]
 }
 
 @test "schema rejects a custom ports.metrics (const 9090 — coupled to prod ns-wide NetworkPolicy)" {
   run helm template t "$CHART" $C --set kind=web --set ports.metrics=3000
   [ "$status" -ne 0 ]
+  # 위와 같은 이유(const→enum 치환·인접값 추가 무증인 방어).
+  run jq -e '.properties.ports.properties.metrics.const == 9090' "$CHART/values.schema.json"; [ "$status" -eq 0 ]
+}
+
+@test "schema rejects an unknown image.pullPolicy (enum is IfNotPresent/Always/Never only)" {
+  run helm template t "$CHART" $C --set kind=web --set image.pullPolicy=Foo
+  [ "$status" -ne 0 ]
+  # ⚠️ 위 단언(존재 프로브) 하나만으로는 enum에 4번째 원소를 더해도 무증인이다(감사 5라운드 51
+  #    carry-7 실측: `AUDIT_MUTATION` 추가 후에도 이 파일+형제 2파일 21/21 ok). 스키마 원문 등식.
+  run jq -e '.properties.image.properties.pullPolicy.enum == ["IfNotPresent","Always","Never"]' \
+    "$CHART/values.schema.json"; [ "$status" -eq 0 ]
+}
+
+@test "schema rejects an unknown strategy.type (enum is Recreate/RollingUpdate only)" {
+  run helm template t "$CHART" $C --set kind=web --set strategy.type=Foo
+  [ "$status" -ne 0 ]
+  # 위와 같은 이유 — 존재 프로브가 없던 자리라 반례 프로브(위)와 등식(아래) 둘 다 새로 얹는다.
+  run jq -e '.properties.strategy.properties.type.enum == ["Recreate","RollingUpdate"]' \
+    "$CHART/values.schema.json"; [ "$status" -eq 0 ]
 }
 
 @test "schema rejects nameOverride (app name is selector-derived; Deployment.spec.selector is immutable)" {
