@@ -620,6 +620,24 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "W2 toolkey leftmost-match does not let a decoy env-value reference borrow an unrelated positive control (round11 bats-style-lanes-3)" {
+  # ⚠️ 착지 전: exec_toolkey는 문장 전체에서 leftmost 매치만 키로 썼다. 실행 대상이 진짜 bad.sh인데
+  #    같은 문장 안의 `env FALLBACK=scripts/good.sh` 디코이가 리터럴상 먼저 등장해 그 키를 가로채면,
+  #    good.sh의 양성 대조가 bad.sh의 무증인을 대신 닫아준다(무증인 초록).
+  printf '%s\n' \
+    '@test "good.sh positive control" {' \
+    '  run bash scripts/does-not-matter-good.sh --dry-run' \
+    '  [ "$status" -eq 0 ]' \
+    '}' \
+    '@test "bad.sh call with a decoy good.sh reference in an env assignment" {' \
+    '  run env FALLBACK=scripts/does-not-matter-good.sh bash scripts/does-not-matter-bad.sh --bogus' \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_w2_leftmost.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_w2_leftmost.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-EXEC\]'
+}
+
 @test "a bash -c grep pipe that merely reads a script's contents is not an exec target (false-positive control)" {
   # grep 계열이 이미 배제 대상이다 — 경로 리터럴이 grep의 **피연산자**(실행 대상이 아니다)인
   # 자리가 [ABS-EXEC]로 오분류되면 안 된다(실측 회귀: tests/gates/test_image-ownership.bats:387).

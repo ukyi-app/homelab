@@ -304,8 +304,15 @@ function exec_target(s){
 }
 # 도구 신원 — W2(양성 대조) 매칭 키. `exec_target`과 같은 네 패턴이어야 한다(갈리면 대상은
 # 잡히는데 키가 안 잡히는 불일치가 생긴다).
+# ⚠️ match()는 **leftmost** 매치라, `run env FALLBACK=scripts/good.sh bash scripts/bad.sh --bogus`처럼
+# 한 문장에 스크립트 경로가 두 번(디코이 env 값 + 실제 실행 대상) 나오면 실행과 무관한 앞쪽 참조가
+# 키를 가로채 엉뚱한 양성 대조를 빌려준다(round11 bats-style-lanes-3). abs_target(F3 분모 판정)이
+# 이미 하는 `run `·`env `·`VAR=val` 접두 스트립 관용구를 그대로 재사용해 그 디코이를 먼저 없앤다.
 function exec_toolkey(s,   r){
   r=s
+  sub(/^run[ \t]+/,"",r)
+  sub(/^env[ \t]+/,"",r)
+  while (r ~ /^[A-Za-z_][A-Za-z0-9_]*=[^ \t]*[ \t]+/) sub(/^[A-Za-z_][A-Za-z0-9_]*=[^ \t]*[ \t]+/,"",r)
   if (match(r, /scripts\/[A-Za-z0-9_.\/-]+\.sh/))     return substr(r,RSTART,RLENGTH)
   if (match(r, /tools\/[A-Za-z0-9_.\/-]+\.ts/))        return substr(r,RSTART,RLENGTH)
   if (match(r, /infra\/[A-Za-z0-9_.\/-]+\.sh/))        return substr(r,RSTART,RLENGTH)
