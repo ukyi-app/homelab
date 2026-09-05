@@ -105,4 +105,9 @@ S="$D/argocd-accounts.sealed.yaml"
   #    `/,/api/webhook`으로 red, 원안은 green). 헤더 :6 규약대로 rc가 아니라 `$output`으로 판정한다.
   run yq '[.spec.rules[] | (.matches // [{}])[] | .path.value // "/"] | sort | join(",")' "$H"
   [ "$output" = "/api/webhook" ] || { echo "web-public 경로 집합=$output"; false; }
+  # ⚠️ filters 축 상한 — 경로 집합은 URLRewrite(ReplacePrefixMatch /)를 못 잡는다(매치 경로는 그대로다).
+  #    rule-level과 backendRef-level 둘 다 센다 — 후자만 넣는 회피가 실측됐다(rule-level 등식만이면
+  #    backendRefs[0] 밑에 같은 URLRewrite를 넣어도 NONE으로 통과한다).
+  run yq '[.spec.rules[] | ((.filters // [{"type":"NONE"}])[] , (.backendRefs[]? | (.filters // [])[])) | .type] | sort | join(",")' "$H"
+  [ "$output" = "NONE" ] || { echo "web-public filters 집합=$output"; false; }
 }
