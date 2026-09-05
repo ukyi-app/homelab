@@ -27,9 +27,12 @@ web_public_rules() { jq '[.items[]|select(any(.spec.parentRefs[]?;.sectionName==
   # VM 노드 IP에 :53을 게시한다. 그 외 servicelb LoadBalancer가 늘어나면 공개면 확장이므로 실패해야 한다.
   # ⚠️ tailscale operator가 만든 LB(loadBalancerClass=tailscale, pg-rw-tailscale·traefik-ts)는
   # tailnet 전용(공개면 아님)이라 제외한다 — servicelb(class 미지정) LB만 공개면 후보다.
-  run bash -c "kubectl get svc -A -o json | jq -r '[.items[] | select(.spec.type==\"LoadBalancer\") | select((.spec.loadBalancerClass // \"\") != \"tailscale\") | \"\(.metadata.namespace)/\(.metadata.name)\"] | sort | join(\" \")'"
+  # posture-2(6라운드): 이름 집합 등식은 **포트 추가**에 무증인이었다 — 기존 LB(특히 adguard-dns)에
+  # 새 포트가 붙으면(예: 관리 UI 3000) 공개면이 넓어지는데도 이름 집합은 그대로라 초록이었다.
+  # 이름:포트셋 문자열로 바꿔 원소 추가·삭제·개명·포트 추가를 한 줄에서 함께 잠근다.
+  run bash -c "kubectl get svc -A -o json | jq -r '[.items[] | select(.spec.type==\"LoadBalancer\") | select((.spec.loadBalancerClass // \"\") != \"tailscale\") | \"\(.metadata.namespace)/\(.metadata.name):\([.spec.ports[]|\"\(.protocol)/\(.port)\"]|sort|join(\",\"))\"] | sort | join(\" \")'"
   [ "$status" -eq 0 ]
-  [ "$output" = "edge/adguard-dns gateway/traefik" ]
+  [ "$output" = "edge/adguard-dns:TCP/53,UDP/53 gateway/traefik:TCP/443,TCP/80" ]
 }
 
 @test "ArgoCD server is public only via the /api/webhook allowlist" {
@@ -85,6 +88,25 @@ web_public_rules() { jq '[.items[]|select(any(.spec.parentRefs[]?;.sectionName==
       | select(any(.backendRefs[]?; (.name // "") | startswith("grafana")))
     ] | length' <<<"$routes")"
   [ "$count" = "0" ]   # grafana 백엔드는 web-public 리스너에 절대 없어야 한다(내부 전용)
+}
+
+@test "web-public attachedRoutes equals the sectionName selector count (omitted sectionName)" {
+  # posture-1(6라운드): :23의 web_public_rules()·위 argocd/grafana 술어는 전부
+  # `.sectionName=="web-public"` 문자열 일치뿐이라, sectionName(또는 port)을 생략한 parentRef는
+  # Gateway API 규약상(sectionName 미지정 = 호환되는 모든 리스너에 부착) web-public에 조용히
+  # 부착돼도 셀렉터에서 빠진다. Gateway 자신이 센 attachedRoutes(실제 부착)와 셀렉터가 본 수의
+  # 등식으로 그 누락을 잡는다 — 불일치 = 생략형/port형 parentRef가 조용히 부착됐다는 뜻.
+  # ⚠️ 부착 ≠ 공개 도달이다. 도달에는 DNS 레코드(infra/cloudflare/dns.tf:20-22,26-56 — site+
+  # platform+app host만, 와일드카드 없음)와 tunnel ingress 행(tunnel.tf:19-26, sort(public_hosts)+
+  # 404 catch-all)이 둘 다 필요하고, 그 정확 집합은 infra/_tests/test_tf_static.bats가 게이트에서
+  # 잠근다 — 이 @test는 그 게이트의 중복 증인이 아니라 라이브 Gateway 부착 축 하나만 잰다.
+  run kubectl get httproute -A -o json
+  [ "$status" -eq 0 ]; routes="$output"
+  [ "$(web_public_rules <<<"$routes")" -ge "$WEB_PUBLIC_RULES_MIN" ]   # 열거 붕괴 바닥값
+  sel="$(jq '[.items[]|select(any(.spec.parentRefs[]?;.sectionName=="web-public"))]|length' <<<"$routes")"
+  run bash -c "kubectl -n gateway get gateway homelab -o json | jq '.status.listeners[]|select(.name==\"web-public\")|.attachedRoutes'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$sel" ]   # 라이브 실측 2==2. 불일치=생략형/port형 parentRef 부착
 }
 
 @test "AdGuard UI is ClusterIP (Tailscale-only), never LoadBalancer" {
