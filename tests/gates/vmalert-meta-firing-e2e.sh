@@ -83,10 +83,14 @@ SYN_FLAP="SyntheticFlappy"
 for m in AlertRuleFlapping AlertPipelineWriteStale AlertSuppressionProlonged GrafanaPluginBudgetLow GrafanaDuFingerprintLost; do
   [ "$m" != "$SYN_FLAP" ] || contract "픽스처 alertname($SYN_FLAP)이 판정 집합과 겹친다 — vacuous green"
 done
-printf '%s' "$FLAP_EXPR" | grep -oE 'alertname!~"[^"]*"' | grep -q "$SYN_FLAP" \
+# herestring(c71-3) — grep -oE(다중행 writer 가능)를 grep -q에 직파이프하면 pipefail 아래 조기
+# 종료 SIGPIPE(141)로 매치가 있어도 거짓 판정이 난다(scripts/check-sigpipe-writers.sh 분모 ②). 셀렉터
+# 추출은 한 번만 하고(grep -oE는 -q 없이 EOF까지 읽어 그 자체는 안전) 이후 대조는 herestring으로 한다.
+FLAP_EXCL="$(printf '%s' "$FLAP_EXPR" | grep -oE 'alertname!~"[^"]*"' || true)"
+grep -q "$SYN_FLAP" <<<"$FLAP_EXCL" \
   && contract "픽스처 alertname($SYN_FLAP)이 flapping 제외 셀렉터에 있다 — 발화 레그가 원리적으로 침묵"
 for m in Watchdog AlertRuleFlapping AlertPipelineWriteStale AlertSuppressionProlonged; do
-  printf '%s' "$FLAP_EXPR" | grep -oE 'alertname!~"[^"]*"' | grep -q "$m" \
+  grep -q "$m" <<<"$FLAP_EXCL" \
     || contract "flapping 제외 셀렉터에 $m 부재 — 자기참조/상시 firing 루프"
 done
 

@@ -24,7 +24,10 @@ restore() {   # trap: 성공/실패/STOP 어떤 EXIT에도 복원(F5)
     h="$(kubectl -n argocd get app "$APP" -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
     [ "$s" = Synced ] && [ "$h" = Healthy ] && break; sleep 2
   done
-  if kubectl -n "$NS" get netpol "$NETPOL" -o yaml | grep -q "$NEEDLE"; then
+  # herestring — kubectl(다중행 yaml writer)을 grep -q에 직파이프하면 pipefail 아래 조기 종료
+  # SIGPIPE(141)로 매치가 있어도 거짓 판정이 난다(scripts/check-sigpipe-writers.sh 분모 ② c71-3).
+  netpol_yaml="$(kubectl -n "$NS" get netpol "$NETPOL" -o yaml)" || netpol_yaml=""
+  if grep -q "$NEEDLE" <<<"$netpol_yaml"; then
     echo "⚠️ 복원 후에도 candidate 잔존 — 수동 점검(selfHeal/sync)"; else echo "==> 복원 확인(broad)"; fi
 }
 trap restore EXIT
@@ -32,7 +35,9 @@ kubectl -n argocd get app "$APP" >/dev/null                                  # �
 kubectl -n argocd patch app "$APP" --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}'
 [ "$(kubectl -n argocd get app "$APP" -o jsonpath='{.spec.syncPolicy.automated.selfHeal}')" = false ]  # 확인(F3)
 make -s render COMP="$COMP" | kubectl apply -f -                    # candidate 적용(-s: make 명령 에코 억제 — 안 하면 echo가 line1이라 kubectl YAML 파싱 실패)
-kubectl -n "$NS" get netpol "$NETPOL" -o yaml | grep -q "$NEEDLE"  # 반영 확인(F3)
+# herestring(c71-3) — kubectl 다중행 writer를 grep -q에 직파이프하지 않는다(같은 SIGPIPE 클래스).
+netpol_yaml="$(kubectl -n "$NS" get netpol "$NETPOL" -o yaml)"
+grep -q "$NEEDLE" <<<"$netpol_yaml"  # 반영 확인(F3)
 sleep 8                                                                      # kube-router 룰 갭(검증 함정)
 # 판정 전 도메인 확인 — 분모를 셋으로 나눈다(형제 `tests/posture/test_network-policy.bats:36-71`과
 # 같은 3분할이다. 그 @test가 kubelet 프로브 레그의 실제 판정자이고 여기는 그것을 호출할 뿐이다).

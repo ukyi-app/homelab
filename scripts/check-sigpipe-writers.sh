@@ -19,12 +19,23 @@
 #    아래에서 실행되는데도(sops-guard.sh:24·verify-secrets.sh:22가 그 아래에서 lib을 source한다)
 #    원문 토큰 검사에 걸리지 않아 구조적으로 면제됐다(실측 — 라이브 위반 0건, 잠재 fail-open).
 #    처방: `*/lib/*.sh`는 원문 무관하게 스캔 대상에 넣는다(:52의 case).
-# ② **다중행 writer만** 잡는다:
-#      - `printf '%s\n' "$var"`  — 개행 포맷이라 여러 줄을 쓴다
-#      - `echo "$var"`           — 변수가 다중행일 수 있고 정적으로 판별 불가하다
-#    `printf '%s' "$scalar"`(개행 없음)는 write가 사실상 1회라 제외한다. 완벽한 구분은 아니지만
-#    (아주 긴 스칼라는 여러 번 쓸 수 있다) 실측된 위험은 전부 다중행 쪽이었고, 전면 금지로 넓히면
-#    스칼라 검사 30여 곳까지 herestring으로 바꿔야 해 변경 대비 이득이 낮다.
+# ② **다중행 writer**를 잡는다. 두 갈래다:
+#    (a) 셸 빌트인 — `printf '%s\n' "$var"`(개행 포맷이라 여러 줄을 쓴다)·`echo "$var"`(변수가
+#        다중행일 수 있고 정적으로 판별 불가). `printf '%s' "$scalar"`(개행 없음)는 write가 사실상
+#        1회라 그대로 제외한다. 완벽한 구분은 아니지만(아주 긴 스칼라는 여러 번 쓸 수 있다) 실측된
+#        위험은 전부 다중행 쪽이었고, 전면 금지로 넓히면 스칼라 검사 30여 곳까지 herestring으로
+#        바꿔야 해 변경 대비 이득이 낮다.
+#    (b) [c71-3 확장, 2026-09-05] 파일/명령 writer — `sed`·`awk`·`cat`·`grep`·`kubectl`·`locale`가
+#        stdout에 쓴 다중행 출력을 그대로 `grep -q`에 파이프하는 형태도 같은 기전이다(외부 프로세스는
+#        libc stdio 버퍼링 단위가 bash 빌트인 write보다 작아 다중 write() 확률이 더 높다). 라이브
+#        실증: PR #641 gate red(`check-locale-collation.sh` 레인 D `sed … "$f" | grep -qE 'guard_init'`,
+#        herestring으로 #642가 닫음). 이 판은 이 클래스를 여기 헤더에 「의도적으로 좁다」로 적어
+#        두고 있었다(패턴을 넓히면 오탐이 도메인을 삼킨다는 근거) — 실제로 넓혀 레포 전역을 재검색한
+#        결과 신규 오탐 0건, 대신 라이브 위반 2건(`scripts/netpol-rehearsal.sh`의 kubectl -o yaml →
+#        grep -q "$NEEDLE" · `tests/gates/vmalert-meta-firing-e2e.sh`의 grep -oE → grep -q, 각 2곳
+#        — 같은 커밋에서 herestring 전환)이 나와 그 축소 근거는 재검 결과 성립하지 않았다.
+#        범위 밖(전수 열거 위반 0건이라 이번 확장 대상이 아님): `sops -d …`·`yq`·`jq` 등 나머지
+#        외부 명령 writer — 새 라이브 사례가 나오면 이 목록에 추가한다.
 # ③ 주석 줄은 대상이 아니다 — 이 파일과 traps-detail이 그 관용구를 **설명**하기 때문이다
 #    (이 레포의 「규약을 설명한 파일이 그 규약에서 면제된다」 클래스를 반대로 밟지 않으려는 것).
 #    ⚠️ 이 면제는 **패턴 안이 아니라 별도 단계**에서 한다(2026-09-01 정정). 종전에는 패턴 앞에
@@ -58,8 +69,15 @@ while IFS= read -r f; do
   scanned=$((scanned + 1))
   # 패턴은 순수하게 두고(③), 줄 전체가 주석인 것만 사후에 걷어낸다 — 인라인 주석 앞의 코드는 살린다.
   # 접두를 패턴에 넣으면 컬럼 0을 놓친다(위 ③ 참조).
-  hits="$(grep -nE "(printf[[:space:]]+'%s\\\\n'|echo)[[:space:]]+\"\\\$[A-Za-z_][A-Za-z0-9_]*\"[[:space:]]*\\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q" "$f" \
+  hits_builtin="$(grep -nE "(printf[[:space:]]+'%s\\\\n'|echo)[[:space:]]+\"\\\$[A-Za-z_][A-Za-z0-9_]*\"[[:space:]]*\\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q" "$f" \
     | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  # (b) [c71-3] 파일/명령 writer — 키워드 뒤 같은 파이프 세그먼트(`[^|]*`, 앞선 `|`를 넘지 않는다) 안에
+  # 아무 인자가 오고 그 뒤 `grep -q`로 이어지면 잡는다. `printf '%s' "$scalar"`류는 이 키워드 목록에
+  # 없어 자동으로 제외된다 — 별도 스칼라 예외가 필요 없다. 키워드 집합은 위 (b) 산문의 라이브 실증
+  # 범위로 의도적으로 좁다(sops/yq/jq 등은 전수 열거 위반 0건이라 미포함).
+  hits_cmd="$(grep -nE '\b(sed|awk|cat|grep|kubectl|locale)\b[^|]*\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q' "$f" \
+    | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  hits="$(printf '%s\n' "$hits_builtin" "$hits_cmd" | grep -v '^$' | LC_ALL=C sort -t: -k1,1n -u || true)"
   [ -n "$hits" ] || continue
   while IFS= read -r h; do
     [ -n "$h" ] || continue
