@@ -21,7 +21,8 @@ setup() { ACL="${BATS_TEST_DIRNAME}/acl.tf"; }
   # ⚠️ 형제 양성 단언이 없는 @test다 — 예전 `-ne 0`에서는 acl.tf를 리네임하면 이 파일 4개 중
   #    **이것만 초록으로 남았다**(2026-08-29 격리 트리 실측). crown-jewel DB 과다노출 가드가
   #    ACL 파일 부재에 공허했다는 뜻이다.
-  # 닫힌 축: 파일 부재(아래 양성 대조) + 표기 형태(멀티라인·src/dst 역순) + 포트 와일드카드(tag:k8s:*).
+  # 닫힌 축: 파일 부재(아래 양성 대조) + 표기 형태(멀티라인·src/dst 역순) + 포트 와일드카드(tag:k8s:*)
+  #          + src 와일드카드(`src = ["*"]`)·dst 호스트 와일드카드(`"*:5432"`) + 규칙 집합 상한.
   # 여전히 열린 축: tag:k8s 태그 부여 경로(operator가 무엇을 tag:k8s로 태그하는가)는 여기서 안 본다.
   rules="$(tr '\n' ' ' < "$ACL" | grep -oE '\{[^{}]*\}')"
   # 양성 대조: 규칙 추출이 실제로 돌았다(파일 부재/서식 변화에 공허해지지 않는다).
@@ -31,6 +32,18 @@ setup() { ACL="${BATS_TEST_DIRNAME}/acl.tf"; }
   # `tag:k8s:` 앵커가 acl.tf:10의 정당한 `autogroup:self:*`를 오탐하지 않게 한다.
   run bash -c "printf '%s\n' \"\$1\" | grep -qE 'autogroup:member[^}]*tag:k8s:[^\"]*(\*|5432)|tag:k8s:[^\"]*(\*|5432)[^{]*autogroup:member'" _ "$rules"
   [ "$status" -ne 0 ]
+  # ⚠️ 위 두 술어는 좌변에 `autogroup:member` 리터럴을 요구한다 — 그 **진상위집합**인 `src = ["*"]`와
+  #    dst 호스트 와일드카드 `"*:5432"`는 분모 밖이라, 규칙 한 줄을 더하는 것만으로 crown-jewel DB가
+  #    전 tailnet(최악 any:any)에 열려도 이 파일이 전건 초록이었다(감사 6라운드 실측 5/5 ok).
+  #    표기를 넓히는 대신 **규칙 집합 자체를 계약으로 못 박는다** — acl.tf의 규칙은 인스턴스 가변이
+  #    아니라 손으로 쓰는 계약이라, 추가·삭제 양방향이 즉시 red이고 정당한 추가 시 이 숫자를 함께
+  #    올리는 것이 곧 crown-jewel 리뷰 신호가 된다(형제 관용구: 존재 단언 N개 + length == N —
+  #    platform/network-policies/prod/test_netpol.bats:33-38).
+  # 존재 단언 5개: member↔self(:10) · member↔80,443(:23, 위 양성 대조) · admin↔5432(:28, @test 1) ·
+  #                operator↔tag:k8s:*(아래) · ssh root(:39-40, @test 4).
+  run bash -c "printf '%s\n' \"\$1\" | grep -qE 'tag:k8s-operator[^}]*tag:k8s:\*'" _ "$rules"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$rules" | grep -c 'action = "accept"')" -eq 5 ]
 }
 
 # D-i(2026-08-12) 의존 가드 — 아래 두 줄이 사라지면 D-i의 두 경로가 조용히 죽는다.

@@ -20,6 +20,11 @@
 #    대상 부재에 공허했다.
 
 WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
+# [infra-b-1] 잡-스코프 yq — 파일 전역 grep은 mode·continue-on-error·apply if의 **스텝 소유**를
+# 못 본다(6라운드 실측: mode:block→warn, continue-on-error를 apply 스텝으로 이동, apply if에서
+# guard result 조건 제거 3종 전부 12/12 초록이었다). 형제 tests/gates/test_iac-destroy-guard.bats:13-15
+# guard_with()와 같은 관용구(grep+yq — terraform 비의존, yq는 ci.yaml:57에서 이미 설치됨).
+guard_step() { yq -r ".jobs.reconcile.steps[] | select(.uses == \"./.github/actions/tf-destroy-guard\") | $1" "$WF"; }
 
 @test "github/tailscale drift jobs exist" {
   run grep -qE '^  drift-github:' "$WF"
@@ -81,6 +86,10 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
   [ "$status" -eq 0 ]
   run grep -qE 'chdir=infra/cloudflare apply' "$WF"
   [ "$status" -eq 0 ]
+  # mode 값 축 — 콜사이트가 warn으로 완화되면 위 두 부분문자열 단언은 여전히 초록이다(실측).
+  m="$(guard_step .with.mode)"
+  [ -n "$m" ]
+  [ "$m" = "block" ]
 }
 
 @test "cloudflare reconcile passes allow=app-DNS + allow_max cap (teardown auto, mass blocked)" {
@@ -114,6 +123,10 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
 @test "reconcile guard step is continue-on-error and emits a warning (not job failure)" {
   run grep -qE 'continue-on-error:[[:space:]]*true' "$WF"
   [ "$status" -eq 0 ]
+  # 스텝 소유 축 — 파일 전역 grep은 이 리터럴이 apply 스텝으로 옮겨가도 여전히 초록이다(실측).
+  c="$(guard_step '.["continue-on-error"]')"
+  [ -n "$c" ]
+  [ "$c" = "true" ]
 }
 
 @test "reconcile telegram fires on delete-blocked drift (owner-local apply nudge)" {
@@ -137,4 +150,9 @@ WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
   [ "$status" -eq 0 ]
   run grep -qE "steps\.guard\.outputs\.result == 'error'" "$WF"
   [ "$status" -eq 0 ]
+  # apply if 정확 등식 — 위 부분문자열 단언은 그 리터럴이 apply 스텝의 if:에서 빠져도(다른 스텝
+  # 주석으로 이동) 파일 어딘가에 있기만 하면 초록이다(실측). apply 스텝 자신의 if:를 콕 집는다.
+  a="$(yq -r '.jobs.reconcile.steps[]|select((.name // "")|test("^apply"))|.if' "$WF")"
+  [ -n "$a" ]
+  [ "$a" = "steps.drift.outputs.drift == 'true' && steps.guard.outputs.result == 'ok'" ]
 }

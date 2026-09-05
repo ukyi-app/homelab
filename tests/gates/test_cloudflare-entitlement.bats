@@ -3,9 +3,18 @@
 #  - rate-limit period == 10 && mitigation_timeout == 10 (무료 유일 허용값)
 #  - 모든 ruleset 식에 matches( 정규식 연산자 금지(Business/WAF Advanced 전용 → 400 "not entitled")
 # ⚠️ bash 3.2: 중간 단언은 [ ]만. 순수 grep — terraform/cluster 비접촉(required gate-safe).
+#
+# [critic-cloudflare-values, 6라운드] 이 파일이 waf.tf를 이미 읽으므로 **값 축** 전반의 required-gate
+# 홈으로 함께 쓴다 — waf.tf의 rule enabled/action 값과 zone_settings.tf의 setting_id↔value 쌍은
+# 어떤 가드도 안 보고 있었다(비평가 실증: 두 룰 enabled=false+action=log 무력화, always_use_https
+# off·min_tls_version 1.0 전건 23/24 초록 — 유일 미탐은 환경 전제로 baseline도 실패하는 terraform
+# validate). 도달성: iac.yaml:11-13 push-apply 무인, destroy-guard(iac.yaml:214-221)는 delete/replace만
+# 봐서 update(값 변경)는 원리적으로 못 막는다. cache.tf·oauth·rulesets 등 다른 값 축은 여기서 손대지
+# 않는다(7라운드 축 W).
 
 WAF="$BATS_TEST_DIRNAME/../../infra/cloudflare/waf.tf"
 CACHE="$BATS_TEST_DIRNAME/../../infra/cloudflare/cache.tf"
+ZS="$BATS_TEST_DIRNAME/../../infra/cloudflare/zone_settings.tf"
 
 @test "waf ratelimit period is exactly 10 (free-plan only value)" {
   run grep -cE '^[[:space:]]*period[[:space:]]*=[[:space:]]*10([[:space:]]|$|#)' "$WAF"
@@ -65,4 +74,40 @@ CACHE="$BATS_TEST_DIRNAME/../../infra/cloudflare/cache.tf"
   run grep -cE '^[[:space:]]*characteristics[[:space:]]*=[[:space:]]*\["ip\.src",[[:space:]]*"cf\.colo\.id"\]' "$WAF"
   [ "$status" -eq 0 ]
   [ "$output" -eq 1 ]
+}
+
+@test "waf rules stay enabled and blocking (not silently downgraded to a log-only ruleset)" {
+  # [critic-cloudflare-values] 위 @test들은 rate-limit **파라미터**(period/mitigation_timeout/characteristics)
+  # 값 축만 잰다 — enabled/action 값 축은 무증인이었다(비평가 실증: traversal-block + ip-rate-limit
+  # 두 룰을 enabled=false·action=log로 무력화해도 초록). 3개 룰(traversal·disallowed-methods·
+  # ip-rate-limit) 전부 켜져 있고 block인지 건수로 앵커한다(추가·삭제·무력화 전부 red).
+  [ "$(grep -cE '^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true' "$WAF")" -eq 3 ]
+  [ "$(grep -cE '^[[:space:]]*action[[:space:]]*=[[:space:]]*"block"' "$WAF")" -eq 3 ]
+}
+
+@test "zone_settings pins every setting_id -> value pair (edge hardening SSOT, no silent downgrade)" {
+  # [critic-cloudflare-values] zone_settings.tf를 읽는 가드가 0건이었다(비평가 실증: always_use_https
+  # off·min_tls_version 1.0 뮤테이션에 전건 초록 — 이 파일 자체가 무증인이었다). 리소스 총수 등식
+  # (추가·삭제 축) + setting_id별 값 앵커(변조 축)를 함께 건다.
+  [ "$(grep -cE '^resource "cloudflare_zone_setting"' "$ZS")" -eq 9 ]
+  for pair in \
+    'always_use_https:"on"' \
+    'min_tls_version:"1.2"' \
+    'tls_1_3:"on"' \
+    'opportunistic_encryption:"off"' \
+    'automatic_https_rewrites:"on"' \
+    'browser_check:"on"' \
+    'security_level:"medium"' \
+    'email_obfuscation:"on"' \
+  ; do
+    id="${pair%%:*}"; val="${pair#*:}"
+    awk -v id="$id" '$0 ~ "setting_id[[:space:]]*=[[:space:]]*\"" id "\"" {f=1} f{print} f&&/^}/{exit}' "$ZS" \
+      | grep -qE "value[[:space:]]*=[[:space:]]*${val}" \
+      || { echo "FAIL: zone_setting $id <-> $val 결합 부재"; false; }
+  done
+  # security_header(nested HSTS 객체)는 스칼라 value가 아니라 별도로 앵커한다.
+  block="$(awk '/setting_id[[:space:]]*=[[:space:]]*"security_header"/{f=1} f{print} f&&/^}/{exit}' "$ZS")"
+  [ -n "$block" ]
+  printf '%s' "$block" | grep -qE 'enabled[[:space:]]*=[[:space:]]*true'
+  printf '%s' "$block" | grep -qE 'include_subdomains[[:space:]]*=[[:space:]]*true'
 }
