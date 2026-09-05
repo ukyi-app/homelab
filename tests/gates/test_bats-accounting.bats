@@ -194,6 +194,20 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   echo "$output" | grep -q "venue가 0건 실재"
 }
 
+@test "a make target's trailing comment mentioning a bats path is not treated as a call (acct-trailing-comment)" {
+  # 비평가 실증 — venue_calls()가 줄 전체 주석만 걷을 때는 코드 줄에 붙은 trailing 주석 속 경로
+  # 언급도 호출 증인으로 오인됐다(진짜 호출은 없는데 주석에만 경로가 있어도 HIT). Makefile에
+  # 임시 타깃을 얹어(레시피 한 줄에 trailing 주석으로만 경로 언급) 재현하고 원복한다.
+  cp Makefile "$BATS_TEST_TMPDIR/Makefile.bak"
+  printf '\n_zz_acct_trailing_probe:\n\t@echo hi # see tests/_fixtures_acct/test_zz_trailing_probe.bats for context, not actually called\n' >> Makefile
+  reg="$BATS_TEST_TMPDIR/mktrailing"
+  mkreg "$reg" '# 사유 — 실행처: owner-local `make _zz_acct_trailing_probe`' 'tests/_fixtures_acct/test_zz_trailing_probe.bats'
+  run bash "$s" --lint-excludes "$reg"
+  git checkout -- Makefile
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "venue가 0건 실재"
+}
+
 # ── 신설 계약 (0a-self): 자기지시/상호지시는 증명이 아니다(항진식) ───────────────────────────────
 # ⚠️ 감사 5라운드 50 critic-venue-tautology 실증: venue_derive는 `bats <경로>` venue를 파일 **존재**로만
 #    검증해, 「이 파일이 실행되는 곳: 이 파일」(자기지시)도 「이 파일이 실행되는 곳: 다른 .ci-exclude
