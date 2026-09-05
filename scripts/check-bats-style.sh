@@ -409,9 +409,13 @@ function qv_seg(t,   n,a,i,seen,q,v,pos){
 # ⚠️ 문자열 등식 술어는 **bracket-test 좌변**(`[ "$a" = "b" ]`, `=` 앞에 공백)만 잡는다 — 대입
 #    (`VAR="x"`, `=` 앞 공백 없음)은 배제한다(guard-decision(traps-ops-2), 2026-09-05: `=` 앞
 #    공백 요구 없이는 스코프 안 아무 문자열 대입 하나로 이 술어가 통째로 무력화됐다).
+# ⚠️ 수 등식 술어도 **bracket-test 종료 앵커**(`-eq N[ \t]*]`)만 잡는다 — 앵커 없이는 `run` 문의
+#    CLI 인자에 우연히 등장하는 `-eq N` 텍스트(예 `--retry-eq 5`)만으로 이 술어가 무력화됐다
+#    (2026-09 정기 회귀 reg-c-ledger-rows-1, 12라운드). 이 파일이 이미 쓰는 형제 앵커(451/452/
+#    459/466/467행)를 그대로 복사한 처방 — 신설 로직 없음. 전체 스캔 SETCAP 26/26 회귀 0 실측.
 function setcap_hit(s){
   if (s ~ /[ \t]=[ \t]*"[^"]+"/) return 1
-  if (s ~ /-eq[ \t]+[0-9]+/) return 1
+  if (s ~ /-eq[ \t]+[0-9]+[ \t]*\]/) return 1
   if (s ~ /contains\(/) return 1
   if (s ~ /join\(","\)/) return 1
   if (s ~ /length[ \t]*==/) return 1
@@ -421,6 +425,12 @@ function setcap_hit(s){
 }
 # 한 문장 처리 — 루프 깊이 · [QV] · [SETCAP] 술어 · run/status 짝(ABS·ABS-EXEC 둘 다) · 증인 수집.
 function abs_stmt(s,   rec,qn,qsg,qi){
+  # 한 줄 for/if 관용구(`; do run …`/`; then run …`)는 abs_line의 `;` 분해 뒤 세그먼트가
+  # "do run …"/"then run …"가 되어 아래 run-인식 앵커(`^run[ \t]/`)에 안 걸린다 — `do`/`then`과
+  # `run`은 세미콜론이 아니라 공백으로만 이어지기 때문이다. 앵커 검사 전에 이 두 키워드 접두를
+  # 벗겨 run-인식·[ABS-EXEC]·조건 필터가 모두 재사용하는 이 지역변수 s 하나로 전부 해소한다
+  # (2026-09 정기 회귀 reg-d-bats-style-last-2, 12라운드 — 신설 함수 없음).
+  sub(/^(do|then)[ \t]+/,"",s)
   # [SETCAP]은 위치·세그먼트 무관 — 스코프 안 어디서든 한 번 맞으면 그 스코프는 닫힌다.
   if (setcap_hit(s)) scpred[absscope]=1
   # [ABS-EXEC] W1 — 마찬가지로 위치 무관, 스코프 안 어디서든 한 번 맞으면 그 스코프는 증인을 진다.
@@ -492,8 +502,14 @@ function abs_line(raw,   t,i,n,parts,s){
   if (t=="") return
   if (abscont!=""){ t=abscont" "t; abscont="" }
   if (t ~ /\\$/){ sub(/\\$/,"",t); abscont=t; return }
-  n=split(t, parts, /;[ \t]*/)
-  for(i=1;i<=n;i++){ s=parts[i]; sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); if(s!="") abs_stmt(s) }
+  # ⚠️ mask_semi(round11 bats-style-lanes-1이 NEG/BB 레인에 넣은 공용 세그먼터)로 따옴표 안 `;`를
+  #    가린 뒤 분해한다 — 안 가리면 `run bash -c '…"a;b"…'`처럼 홑따옴표 본문 안 리터럴 `;`가
+  #    abs_stmt/abs_target(F3 `bash -c` 언랩)이 공유하는 이 진입점을 두 조각으로 잘라 닫는 홑따옴표를
+  #    못 찾게 만들고, ABS/ABS-REC/ABS-GIT/ABS-LOOP/ABS-EXEC/SETCAP 여섯 레인 전부가 그 문장에서
+  #    무증인으로 사라진다(2026-09 정기 회귀 reg-d-bats-style-last-1, 12라운드). NEG/BB(554행)가
+  #    이미 하는 관용구를 abs_line 자신에도 적용하는 것뿐 — 신설 함수 없음.
+  n=split(mask_semi(t), parts, /;[ \t]*/)
+  for(i=1;i<=n;i++){ s=parts[i]; sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); gsub(/\001/,";",s); if(s!="") abs_stmt(s) }
 }
 BEGIN { absn=0; execn=0 }
 FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++

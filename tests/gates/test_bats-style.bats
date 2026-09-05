@@ -329,6 +329,19 @@ setup() {
   echo "$output" | grep -q '\[ABS-LOOP\]'
 }
 
+@test "the same loop-driven absence written as a one-liner semicolon-do-run idiom is still caught (round12 reg-d-bats-style-last-2)" {
+  # ⚠️ 착지 전: `; do run …`는 abs_line의 `;` 분해 뒤 세그먼트가 "do run grep -q TOKEN \"\$f\""가
+  #    되어 run-인식 앵커(`^run[ \t]/`)에 안 걸렸다 — `do`와 `run` 사이는 세미콜론이 아니라
+  #    공백이라 이 세그먼트 전체가 target으로도 증인으로도 전혀 안 잡혔다(무증인 초록, 실측 exit 0).
+  printf '%s\n' \
+    '@test "loop-driven absence, one-liner do form" {' \
+    '  for f in "$WF"/*.yaml; do run grep -q TOKEN "$f"; [ "$status" -eq 1 ]; done' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_loop_oneline.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_loop_oneline.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-LOOP\]'
+}
+
 @test "git grep needs the positive control and no filesystem floor (asymmetry is deliberate)" {
   # pathspec은 파일시스템 경로가 아니라 바닥값을 걸 대상이 없고, pathspec이 추적 파일과 하나도
   # 안 맞을 때 git grep은 128이 아니라 **rc 1**이다(실측 git 2.53.0) — 그 붕괴는 같은 pathspec의
@@ -349,6 +362,18 @@ setup() {
     '}' > "$BATS_TEST_TMPDIR/test_abs_gitok.bats"
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_gitok.bats"
   [ "$status" -eq 0 ]
+}
+
+@test "the same git-grep absence written as a one-liner semicolon-then-run idiom is still caught (round12 reg-d-bats-style-last-2)" {
+  # 같은 근본원인의 형제 — `; then run …`도 `do run …`와 동일하게 abs_line 분해 뒤 세그먼트가
+  # "then run git grep …"가 되어 앵커에 안 걸렸다.
+  printf '%s\n' \
+    '@test "git grep absence, one-liner then form" {' \
+    '  if true; then run git grep -n TOKEN -- "*.yaml"; [ "$status" -eq 1 ]; fi' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_git_oneline.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_git_oneline.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-GIT\]'
 }
 
 @test "detector rejects a pipeline-terminal grep -qv (line-wise inversion is not absence)" {
@@ -485,6 +510,24 @@ setup() {
   echo "$output" | grep -q '\[SETCAP\]'
 }
 
+@test "a numeric -eq inside a run command's CLI argument does not smuggle in a false cardinality predicate ([SETCAP] negative, reg-c-ledger-rows-1)" {
+  # 착지 전: setcap_hit의 수 등식 술어(`-eq[ \t]+[0-9]+`)는 bracket-test 좌변을 요구하지 않아,
+  # 단언과 무관한 `run` 인자 문자열(`--retry-eq 5`)에 우연히 들어간 `-eq N` 텍스트만으로도 이
+  # [SETCAP] 레인 전체가 침묵 통과했다(2026-09-05 실측 — regression-2026-09.json reg-c-ledger-rows-1).
+  # 처방은 traps-ops-2가 이미 다른 술어(413행)에 쓴 것과 같은 종류 — 술어를 bracket-test 종료
+  # 앵커(`[ \t]*\]`)로 좁혀 대입/CLI 인자와 진짜 조건식을 문법으로 구별한다.
+  printf '%s\n' \
+    '@test "exactly the right dispatchers are present, no other" {' \
+    '  run bun tools/audit.ts --mode list' \
+    '  [ "$status" = 0 ]' \
+    '  echo "$output" | grep -q x' \
+    '  run bun tools/audit.ts --retry-eq 5' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_run_arg_eq.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_run_arg_eq.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[SETCAP\]'
+}
+
 @test "the grep -qxF/-qx structural-equality idiom satisfies the cardinality predicate ([SETCAP] positive, traps-ops-2)" {
   # 이 레포의 실 선호 관용구(platform/victoria-stack/prod/test_pvc_du_exporter.bats:31-33) — 전체
   # 행 일치(-x)가 곧 등식이다. 새 여섯째 술어의 양성 대조 — 본문에 `=` 자체가 없어(대입도 없음)
@@ -589,6 +632,21 @@ setup() {
     '  [ "$status" -ne 0 ]' \
     '}' > "$BATS_TEST_TMPDIR/test_abs_bashc0.bats"
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_bashc0.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-REC\]'
+}
+
+@test "a literal semicolon inside a single-quoted bash -c grep pattern does not blind the shared abs_line split (round12 reg-d-bats-style-last-1)" {
+  # ⚠️ 착지 전: abs_line(495행)의 `;` 분해는 mask_semi 없이 원문 `;`를 그대로 경계로 썼다 —
+  #    홑따옴표 본문 안 리터럴 `;`(패턴 `"a;b"`)가 이 문장을 두 조각으로 잘라 abs_target의
+  #    닫는 홑따옴표 탐색이 실패하고(absk=0), ABS/ABS-REC/ABS-GIT/ABS-LOOP/ABS-EXEC/SETCAP
+  #    여섯 레인 전부에서 이 문장이 투명해졌다(무증인 초록, 실측 exit 0).
+  printf '%s\n' \
+    '@test "bash -c pipe absence with a literal semicolon in the quoted pattern" {' \
+    "  run bash -c 'grep -rqE \"a;b\" \"\$1/\"' _ \"\$TREE\"" \
+    '  [ "$status" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_bashc_semi.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_bashc_semi.bats"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '\[ABS-REC\]'
 }
