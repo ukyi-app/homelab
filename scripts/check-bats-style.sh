@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bats 단언-스타일 가드 — bats 「코드 표면」에서 **조용히 통과하는 단언 형태** 네 클래스를 잡는다.
+# bats 단언-스타일 가드 — bats 「코드 표면」에서 **조용히 통과하는 단언 형태** 다섯 클래스를 잡는다.
 # bats는 negated/[[ 명령의 실패를 errexit/ERR-trap 면제로 침묵 통과시킨다(라이브 확증: bats 1.13에서
 # 중간 `! echo x|grep -q x`가 'ok'). 그런 중간 단언은 죽은(false-green) 가드다.
 #   NEG(중간 `! `)  = 모든 bash에서 발생(negated pipeline은 set -e 면제) → hard-zero.
@@ -9,9 +9,11 @@
 #   ABS(부재 단언)  = `run grep …` + `[ "$status" … ]` 짝의 **철자와 형태** — 래칫으로 출발해
 #     **0 수렴 완료**, 이제 hard-zero다(아래 ABS_BASELINE 줄이 상환 기록을 진다).
 #   QV (`grep -qv`) = 줄 단위 반전이 전칭(∀¬)을 존재(∃¬)로 바꾼다 → hard-zero(아래).
+#   SETCAP(이름 있는 집합의 상한 부재) = `@test` 이름이 exactly/only/no other/전수/EVERY/정확로
+#     원소 전수를 선언하는데 본문에 그 상한을 재는 술어가 없다 → 래칫(아래 SETCAP_BASELINE).
 # 휴리스틱: 다줄 @test 규약 가정("@test … {" 한 줄 시작, 0열 "}" 종료). heredoc 본문은 명령으로 안 센다.
 # (레포 단일 한줄 @test는 단일 명령이라 무해 — 신규 한줄 본문은 다줄로 작성할 것.)
-# 인자로 파일을 주면 그 파일만 스캔하고 네 클래스 아무거나 있으면 실패(픽스처/ad-hoc 탐지 모드).
+# 인자로 파일을 주면 그 파일만 스캔하고 다섯 클래스 아무거나 있으면 실패(픽스처/ad-hoc 탐지 모드).
 # bash 3.2 호환: mapfile 금지(while read). shellcheck 클린.
 #
 # ── 코드 표면 = `@test` 본문 **+ 0열 함수 본문**(`setup()`·`teardown()`·헬퍼) ──────────────────
@@ -62,6 +64,36 @@
 # 래칫할 부채도 없다 → hard-zero. (필터로 쓰는 `| grep -v '^---'` 류는 `-q`가 없어 대상이 아니다 —
 # rc를 판정으로 쓰지 않기 때문이다.)
 #
+# ── [SETCAP] — 이름 있는 집합의 상한 부재 ──────────────────────────────────────────────────────
+# 다른 축이다: 위 네 클래스는 "단언이 조용히 통과하는 형태"를 잡고, 이건 "이름이 상한을 선언하는데
+# 본문이 그 상한을 재지 않는" **이름-본문 불일치**를 잡는다(SSOT: docs/traps-detail.md 「이름 있는
+# 집합의 상한 부재」· CONTRIBUTING.md 「가드 스캔 신호」 형제 절 규칙 ①②. 근거: 5라운드 비평가
+# 군집 ①(생존 12건) · 6라운드 재발 판정 ①(9건 — infra-a-1·a-3·b-4·kustomization-2/3/4·
+# httproute-1/2·posture-2) · 7라운드 축 N).
+# `@test` 이름에 exactly/only/no other/전수/EVERY/정확 중 하나가 있으면(대소문자 구별 그대로 —
+# 표기 변형을 넓히면 다른 축이 된다, grep-a-1/grep-a-5의 재발과 같은 함정) 그 본문(다음 `@test`
+# 또는 파일 끝까지, 0열 "}"가 경계)에 집합 등식 술어 — 문자열 등식(`= "…"`) · 수 등식
+# (`-eq [0-9]+`) · jq/yq `contains(` · jq/yq `join(",")` · jq/yq `length ==` — 중 하나 이상이
+# 있어야 한다. 다섯 형태는 문안 그대로다(텍스트 매치이지 문장 위치·인용 anchor 요구 없음 —
+# ABS/QV처럼 위치를 재는 레인이 아니라 **존재**만 잰다).
+# ⚠️ **오탐은 면제 어휘가 아니라 이름 정정으로 닫는다.** 이름의 "only"가 집합이 아니라 단수
+#    대상·시간 부사·복합어를 가리키는 자리(`read-only`·`owner-only`·`readonly` 같은 합성어,
+#    "only when"류 조건 부사, "only 1"류 서술 수사)는 검출기가 **그대로** 잡는다 — 면제 조건을
+#    넣지 않는다(아래 픽스처가 이 결정을 고정한다: 오탐 대조 픽스처가 여전히 red여야 한다).
+#    처방은 그 이름에서 상한 어휘를 빼는 것 하나뿐이다(4·5라운드 규약 그대로 — 정직한 이름이 처방).
+# ⚠️ **알려진 갭(다음 라운드 입력) — `-eq N`은 `"$status"` rc 검사와 구별하지 않는다.** 이
+#    레인은 6라운드 비평가 처방 문안을 그대로 옮긴 것이라(「6라운드 비평가 처방 그대로」— 티켓 59),
+#    `[ "$status" -eq 0 ]`처럼 이 레포 거의 모든 @test에 있는 흔한 관용구도 술어로 인정한다.
+#    실측(2026-09-05): 이 관용구를 제외하고 재면 착수 시점 위반이 14건이 아니라 **70건**이다
+#    (프로토타입 스크래치패드 실측 — 커밋되지 않음). 좁히지 않은 이유는 처방 문안을 벗어난
+#    자체 확장이 이 축의 범위를 티켓 하나가 감당 못 할 크기로 불리기 때문이다(round7이 이미
+#    "0건 finding + 규칙 문안 2개도 정당한 답"이라고 명시). 다음 라운드가 `-eq` 분모에서
+#    `"\$status"` 좌변을 제외하는 방향으로 좁힐 후보다.
+# SETCAP_BASELINE도 BB/ABS와 같은 래칫 어휘다 — 착수 시점 위반 N을 바닥값으로 두고 감소만
+# 허용한다. 착수 시점 실측(2026-09-05): 이름-어휘 매치 14건 중 11건은 단수/조건/합성어
+# 오탐이라 이름 정정으로 닫았고(아래 SETCAP_BASELINE 줄이 각 자리를 인용), 3건은 실제로 이름
+# 있는 집합(포트·볼륨·디스패처 입력)을 전수 선언하면서 술어가 없어 다음 라운드 입력으로 남는다.
+#
 # ⚠️ 이 가드는 ci.yaml·Makefile(`verify`·`ci`)의 **명시 스텝**이다 — 자기 bats에만 의존하면
 #    `tests/.ci-exclude` 한 줄로 자기가 꺼진다(형제 check-bats-accounting.sh가 같은 근거로 거부한
 #    자리). NEG·QV 두 hard-zero 클래스의 유일한 집행자가 한 줄로 꺼지면 안 되므로, 그 배선은
@@ -93,6 +125,21 @@ BB_BASELINE=0    # **0 수렴 완료** — 이제 hard-zero다(NEG와 같은 규
 # 올리는 방향은 부채 재유입이다 — 그래도 필요하면 같은 diff에서 이 줄을 고쳐야 하고, 그건 리뷰에
 # 보인다(check-bats-accounting의 EXCL_MAX와 같은 성격).
 ABS_BASELINE=0
+# 이름 있는 집합의 상한 부재 부채 잔액 — **래칫**(티켓 59 착지, 2026-09-05). 착수 시점 이름-어휘
+# 매치(`@test .*(exactly|only|no other|전수|EVERY|정확)`) 14건 중 11건은 이름 정정으로 닫았다
+# (단수 대상·조건 부사·합성어 오탐 — `read-only`/`readonly`/`owner-only`/"only when"/"only 1"류.
+# 같은 커밋의 이름 정정 목록이 각 자리를 진다). 남은 3건은 실제로 이름 있는 집합을 전수 선언하며
+# 술어가 없다 — 다음 라운드 입력(집합 등식 추가는 이 티켓 범위 밖):
+#   test_worker_ports.bats:21 "web defaults to http only and no metrics scrape annotation" —
+#     포트 집합 {http,metrics} 중 http만 — 존재+부재 단언은 있으나 등식/카운트 술어가 없다.
+#   test_basebackup.bats:12 "cronjob runs non-root 26 and mounts only bulk-ssd PVC" —
+#     volumeMounts 집합의 원소 상한이 없다(다른 PVC를 추가해도 무증인).
+#   test_mutation-dispatch.bats:204 "each dispatcher references inputs only via env or with: …" —
+#     `$DISPATCHERS` 루프의 위반 집합을 `[ -z "$bad" ]`로 재는데, 이 형태는 다섯 술어 목록
+#     (`= "…"`/`-eq N`/`contains(`/`join(",")`/`length ==`) 밖이다 — 표기 변형 갭(재발 판정 ②
+#     와 같은 축).
+# 올리는 방향은 부채 재유입이다 — 필요하면 같은 diff에서 이 줄과 위 목록을 함께 고친다.
+SETCAP_BASELINE=3
 # ── 기본 모드의 도메인 = **추적 `*.bats` + bats가 `load`하는 `*.bash` seam** ─────────────
 # `.bash` seam을 빼면 그 파일은 이 가드에게 **영원히 안 보인다** — bats 본문과 같은 문법을
 # 쓰는 코드인데 확장자 하나로 판정 밖이 된다(「처방 도달」 축의 도달 실패).
@@ -177,8 +224,21 @@ function qv_seg(t,   n,a,i,seen,q,v){
   }
   return (seen && q && v)
 }
-# 한 문장 처리 — 루프 깊이 · [QV] · run/status 짝 · 증인 수집.
+# [SETCAP] 술어 판정 — 다섯 형태 텍스트 매치(문장 위치 무관, 존재만 잰다 — ABS/QV처럼 앵커·
+# 세그먼트를 재는 레인이 아니다). 헤더의 분모 규약: 문자열 등식·수 등식·jq/yq contains(/join(","/
+# length ==. 어느 하나라도 맞으면 그 @test 스코프는 상한 술어를 가진 것으로 친다.
+function setcap_hit(s){
+  if (s ~ /=[ \t]*"[^"]+"/) return 1
+  if (s ~ /-eq[ \t]+[0-9]+/) return 1
+  if (s ~ /contains\(/) return 1
+  if (s ~ /join\(","\)/) return 1
+  if (s ~ /length[ \t]*==/) return 1
+  return 0
+}
+# 한 문장 처리 — 루프 깊이 · [QV] · [SETCAP] 술어 · run/status 짝 · 증인 수집.
 function abs_stmt(s,   rec,qn,qsg,qi){
+  # [SETCAP]은 위치·세그먼트 무관 — 스코프 안 어디서든 한 번 맞으면 그 스코프는 닫힌다.
+  if (setcap_hit(s)) scpred[absscope]=1
   if (s ~ /^(for|while|until)[ \t]/) absloop++
   else if (s ~ /^done([ \t;].*)?$/) { if(absloop>0) absloop-- }
   # [QV] — rc를 판정으로 쓰는 `-q`와 줄 반전 `-v`가 같은 grep 호출의 선행 플래그에 함께 있으면
@@ -248,7 +308,13 @@ FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++
     d=substr(hl,RSTART,RLENGTH); gsub(/.*<<-?[ \t]*['"]?/,"",d); delim=d; inhere=1; next
   }
   if (line ~ /^@test .*\{[ \t]*$/){
-    intest=1; pend=""; absscope=FILENAME":"FNR; absrun=""; abscont=""; absloop=0; next
+    intest=1; pend=""; absscope=FILENAME":"FNR; absrun=""; abscont=""; absloop=0
+    # [SETCAP] — 이름이 상한 어휘를 선언하는지는 @test 선언 줄 그 자체로만 판정한다(본문 줄은
+    # 술어 스캔 전용). 대소문자 구별 그대로 — 넓히면 다른 축(표기 변형)이 된다.
+    scname[absscope] = (line ~ /(exactly|only|no other|전수|EVERY|정확)/) ? 1 : 0
+    scpred[absscope] = 0
+    sctext[absscope] = line
+    next
   }
   # 0열 함수 정의 — 본문을 같은 상태 기계에 들인다(헤더 「코드 표면」). 증인 스코프는 **파일 수준**이다:
   # setup()/스텁 팩토리는 그 파일의 모든 @test보다 먼저 도므로 개별 실행(`bats -f`)에서도 증인이 산다.
@@ -259,7 +325,12 @@ FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++
     intest=1; pend=""; abs_line(t); next
   }
   if (!intest) next
-  if (line ~ /^\}[ \t]*$/){ intest=0; pend=""; absrun=""; abscont=""; absloop=0; next }
+  if (line ~ /^\}[ \t]*$/){
+    # [SETCAP] — @test 스코프가 지금 닫힌다. 이름이 상한을 선언했는데 본문 어디서도 술어를
+    # 못 봤으면 여기서 딱 한 번 낸다(0열 함수 스코프는 scname이 항상 0이라 이 자리를 안 탄다).
+    if (scname[absscope] && !scpred[absscope]) print absscope": [SETCAP] "sctext[absscope]
+    intest=0; pend=""; absrun=""; abscont=""; absloop=0; next
+  }
   t=line; sub(/^[ \t]+/,"",t)
   if (t=="" || t ~ /^#/) next
   flush()
@@ -295,7 +366,8 @@ neg="$(count_class '\[NEG\]')"; neg="${neg//[^0-9]/}"; neg="${neg:-0}"
 bb="$(count_class '\[BB\]')";   bb="${bb//[^0-9]/}";   bb="${bb:-0}"
 abs="$(count_class '\[ABS')";   abs="${abs//[^0-9]/}"; abs="${abs:-0}"
 qv="$(count_class '\[QV\]')";   qv="${qv//[^0-9]/}";   qv="${qv:-0}"
-printf '%s\n' "$findings" | grep -E '\[(NEG|BB|ABS(-REC|-LOOP|-GIT)?|QV)\]' || true   # gate bats가 라벨을 검증
+setcap="$(count_class '\[SETCAP\]')"; setcap="${setcap//[^0-9]/}"; setcap="${setcap:-0}"
+printf '%s\n' "$findings" | grep -E '\[(NEG|BB|ABS(-REC|-LOOP|-GIT)?|QV|SETCAP)\]' || true   # gate bats가 라벨을 검증
 rc=0
 if [ "$neg" -gt 0 ]; then
   echo "FAIL: 마지막 명령이 아닌 부정 단언 ${neg}곳 — bats가 침묵 통과. 'run …; [ \"\$status\" -ne 0 ]'로 재작성." >&2; rc=1
@@ -304,13 +376,15 @@ if [ "$qv" -gt 0 ]; then
   echo "FAIL: 부재를 재지 않는 \`grep -qv\` ${qv}곳 — -v는 줄 단위 반전이라 항진이다. 'run grep -qF -- TOKEN <<<\"\$out\"; [ \"\$status\" -eq 1 ]'로. cf. docs/traps-detail.md" >&2; rc=1
 fi
 if [ "$#" -gt 0 ]; then
-  # 명시-파일(픽스처) 모드 — 래칫은 레포 전역 잔액이라 여기선 뜻이 없다. 네 클래스 전부 hard-zero.
+  # 명시-파일(픽스처) 모드 — 래칫은 레포 전역 잔액이라 여기선 뜻이 없다. 다섯 클래스 전부 hard-zero.
   [ "$bb" -eq 0 ] || { echo "FAIL: (명시 파일) 중간 [[ ]] ${bb}곳 탐지." >&2; rc=1; }
   [ "$abs" -eq 0 ] || { echo "FAIL: (명시 파일) 부재 단언 위반 ${abs}곳 탐지." >&2; rc=1; }
+  [ "$setcap" -eq 0 ] || { echo "FAIL: (명시 파일) [SETCAP] 위반 ${setcap}곳 탐지." >&2; rc=1; }
 else
-  echo "check-bats-style: 중간 [[ ]] ${bb} (baseline ${BB_BASELINE}) · 부재 단언 ${abs} (baseline ${ABS_BASELINE})"
+  echo "check-bats-style: 중간 [[ ]] ${bb} (baseline ${BB_BASELINE}) · 부재 단언 ${abs} (baseline ${ABS_BASELINE}) · 이름 있는 집합 상한 부재 ${setcap} (baseline ${SETCAP_BASELINE})"
   [ "$bb" -le "$BB_BASELINE" ] || { echo "FAIL: 중간 [[ ]]가 baseline(${BB_BASELINE}) 초과(${bb}) — 신규는 'run …; [ … ]'로." >&2; rc=1; }
   [ "$abs" -le "$ABS_BASELINE" ] || { echo "FAIL: 부재 단언 위반이 baseline(${ABS_BASELINE}) 초과(${abs}) — [ABS]는 '-eq 1'로 고치고, [ABS-REC]/[ABS-LOOP]는 같은 @test나 그 파일 함수 본문에 **비공허 바닥값 + 양성 대조**를 함께 세워라. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」" >&2; rc=1; }
+  [ "$setcap" -le "$SETCAP_BASELINE" ] || { echo "FAIL: [SETCAP] 위반이 baseline(${SETCAP_BASELINE}) 초과(${setcap}) — 이름이 exactly/only/no other/전수/EVERY/정확를 선언하면 본문에 집합 등식 술어(문자열 등식 · -eq N · jq/yq contains(/join(\",\")/length ==) 중 하나를 걸어라. 집합이 아니라 단수 대상·조건 부사·합성어면 이름에서 그 어휘를 빼라. cf. docs/traps-detail.md 「이름 있는 집합의 상한 부재」" >&2; rc=1; }
 fi
-[ "$rc" -eq 0 ] && echo "check-bats-style: 중간 부정 0곳 + grep -qv 0곳 + [[ ]]·부재 단언 ratchet OK"
+[ "$rc" -eq 0 ] && echo "check-bats-style: 중간 부정 0곳 + grep -qv 0곳 + [[ ]]·부재 단언·집합 상한 ratchet OK"
 exit "$rc"
