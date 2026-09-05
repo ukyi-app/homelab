@@ -184,12 +184,18 @@ extract_step() {
   # 스텝 선택자: `.run`에 러너 호출이 있는 스텝(= bump 스텝)의 **셸 본문(.run)**.
   # ⚠️ `.[0]`은 스텝 **맵 전체**를 준다 — 반드시 `.[0].run`이어야 한다
   # (실측: 맵을 그대로 실행하면 `syntax error near unexpected token '('`로 죽는다).
-  yq -r '[.jobs.poll.steps[] | select(.run) | select(.run | test("run-bump-plan"))] | .[0].run // ""' "$F"
+  # ⚠️ **행두 앵커**(`(^|\n)\s*`) — 이 자리는 판정이 아니라 **선택자**다. 무앵커면 앞선 스텝의
+  #    주석에 `run-bump-plan`이 한 번 나오기만 해도 `.[0]`이 그 스텝을 골라, 하위 @test들이 엉뚱한
+  #    본문을 판정한다(실측 2026-09-04: plan 스텝 주석에 그 토큰을 넣자 3건이 red — 무해한 주석에
+  #    대한 오탐이다. 앵커 후 같은 뮤테이션에서 19/19 초록). fail-open 방향은 이 파일의 hermetic
+  #    하네스가 이미 문다(본문을 주석+true로 무력화하면 5건 red) — 앵커가 닫는 것은 오탐 쪽이다.
+  yq -r '[.jobs.poll.steps[] | select(.run) | select(.run | test("(^|\n)\s*bun tools/run-bump-plan\.ts"))] | .[0].run // ""' "$F"
 }
 # reconcile 패스(인가 회수)의 셸 본문. ★ **별도 job**이다(R-27) — poll job의 스텝이 아니다:
 # 그 안에 있으면 reader 토큰·docker·플래너 스텝의 성공에 묶여, 그것들이 죽는 순간 회수도 죽는다.
 extract_reconcile_step() {
-  yq -r '[.jobs.reconcile.steps[] | select(.run) | select(.run | test("--reconcile-only"))] | .[0].run // ""' "$F"
+  # 위와 같은 이유로 행두 앵커 — 주석에 담긴 `--reconcile-only`가 선택자를 흔들지 않게 한다.
+  yq -r '[.jobs.reconcile.steps[] | select(.run) | select(.run | test("(^|\n)\s*bun tools/ensure-bump-pr\.ts --reconcile-only"))] | .[0].run // ""' "$F"
 }
 
 setup_hermetic() {

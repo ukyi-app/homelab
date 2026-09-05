@@ -122,7 +122,11 @@ setup() {
   # W7: ledger 검사(conftest policy/ledger.rego)는 required gate(ci.yaml: bun run verify:ledger) 한 곳으로 일원화.
   # ⚠️ 구조 판정(F10) — 무앵커 grep은 ci.yaml:3 **헤더 주석**이 담은 같은 토큰으로도 만족된다.
   #    실측 2026-09-03: 원장 스텝 본문을 `run: echo ledger-skipped`로 바꿔도 이 레인이 초록이었다.
-  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("verify:ledger")) | .run' "$ROOT/.github/workflows/ci.yaml"
+  # ⚠️ **행두 앵커**(`(^|\n)\s*`) — `.run` 전문에 test()를 걸면 그 안의 `# 비활성화: bun run
+  #    verify:ledger` 같은 주석 줄도 매치된다. 실측 2026-09-04: 이 스텝 본문을 그 주석 + `true`로
+  #    바꿔도 이 파일 + test_sealed-guard 35/35 전건 초록이었다(형제 test_ci-gate.bats의 같은 축은
+  #    이미 앵커드라 그쪽만 red — 이 자리 자신의 주장이 공허했다). 주석 줄은 앵커에서 탈락한다.
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*bun run verify:ledger")) | .run' "$ROOT/.github/workflows/ci.yaml"
   [ "$status" -eq 0 ]
 }
 
