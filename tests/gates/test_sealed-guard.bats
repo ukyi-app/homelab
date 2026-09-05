@@ -127,6 +127,30 @@ YAML
   echo "$output" | grep -q 'ciphertext'
 }
 
+@test "sealed-guard BLOCKS a value that merely contains the substring Ag (anchor, not substring, match)" {
+  # guard-decision-b-2 — line 82의 test("^Ag[A-Za-z0-9+/=]+\$")가 앵커를 잃고 부분매칭으로 완화돼도
+  # 위 테스트의 픽스처("hunter2-not-ciphertext")는 우연히 "Ag"를 포함하지 않아 그 회귀를 못 잡는다.
+  # 이 픽스처는 "Ag"를 중간에 담되(Agent) 전체가 Ag+base64는 아니다 — 앵커 자체의 독립 증인.
+  d="$BATS_TEST_TMPDIR"
+  cat > "$d/fake.sealed.yaml" <<'YAML'
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: foo-secrets
+  namespace: prod
+spec:
+  encryptedData:
+    DB_PASSWORD: leaked-Agent-007-not-ciphertext
+  template:
+    metadata:
+      name: foo-secrets
+      namespace: prod
+YAML
+  run bash "$GUARD" "$d/fake.sealed.yaml"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'ciphertext'
+}
+
 @test "sealed-guard BLOCKS a file it cannot parse (an unjudgeable file is not a passing file)" {
   # 파싱 실패는 모든 집계를 0으로 만든다 — 그 0을 "위반 없음"으로 읽으면 fail-open이다.
   d="$BATS_TEST_TMPDIR"
