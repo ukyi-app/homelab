@@ -54,7 +54,8 @@ RO_RESOURCES="httproutes gateways namespaces pods nodes"
   done <<EOF
 $verbs
 EOF
-  [ -z "$bad" ] || { echo "read-only 화이트리스트 밖 verb:$bad"; false; }
+  bad_n=$(printf '%s' "$bad" | wc -w)
+  [ "$bad_n" -eq 0 ] || { echo "read-only 화이트리스트 밖 verb:$bad"; false; }
 }
 
 @test "clusterrole resources are a subset of the discovery whitelist" {
