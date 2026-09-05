@@ -193,3 +193,11 @@ wave_of_kind() { # $1=파일 $2=최상위 kind — 그 문서의 sync-wave(annot
   run bash -c "yq 'select(.kind==\"Gateway\") | .spec.listeners[] | select(.protocol==\"HTTP\") | .port' '$G' | LC_ALL=C sort -u | paste -sd, -"
   [ "$output" = "$wp" ] || { echo "HTTP 리스너 port=$output · values-traefik web=$wp — 같아야 한다"; false; }
 }
+
+@test "traefik kustomization pins namespace gateway" {
+  # appset.yaml:50-51 — destination.namespace 없음: 각 컴포넌트 kustomization의 `namespace:`가
+  # 유일한 권위다. 이 값을 바꿔도(2026-09-05 실측: gateway→default) 이 디렉토리 전 @test가
+  # 초록이었다 — Gateway/HTTPRoute의 parentRef ns 계약이 이 값에 있는데 증인이 없었다.
+  # AppProject destinations는 `namespace: "*"`(projects.yaml)라 런타임 방벽도 없다.
+  [ "$(yq '.namespace' "$D/kustomization.yaml")" = "gateway" ]
+}

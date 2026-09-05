@@ -90,3 +90,11 @@ EOF
   # ⚠️ 위 @test와 같다 — 부재 단언 단독이라 대상 부재에 홀로 초록이었다.
   run grep -Eq 'cidr:[[:space:]]*10\.42' "$P"; [ "$status" -eq 1 ]
 }
+
+@test "victoria-stack kustomization pins namespace observability" {
+  # appset.yaml:50-51 — destination.namespace 없음: 각 컴포넌트 kustomization의 `namespace:`가
+  # 유일한 권위다. 이 값을 바꿔도(2026-09-05 실측: observability→default) 이 디렉토리 전 @test가
+  # 초록이었다 — netpol·스크레이프 셀렉터 전제가 이 값에 있는데 증인이 없었다. AppProject
+  # destinations는 `namespace: "*"`(projects.yaml)라 런타임 방벽도 없다.
+  [ "$(yq '.namespace' "$K")" = "observability" ]
+}

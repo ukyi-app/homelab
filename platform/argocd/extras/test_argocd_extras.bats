@@ -111,3 +111,11 @@ S="$D/argocd-accounts.sealed.yaml"
   run yq '[.spec.rules[] | ((.filters // [{"type":"NONE"}])[] , (.backendRefs[]? | (.filters // [])[])) | .type] | sort | join(",")' "$H"
   [ "$output" = "NONE" ] || { echo "web-public filters 집합=$output"; false; }
 }
+
+@test "argocd-extras kustomization pins namespace argocd" {
+  # appset.yaml:50-51 — destination.namespace 없음: 각 컴포넌트 kustomization의 `namespace:`가
+  # 유일한 권위다. 이 값을 바꿔도(2026-09-05 실측: argocd→default) 이 디렉토리 전 @test가
+  # 초록이었다 — kustomize build는 최상위 metadata.namespace를 전부 default로 덮어써 렌더한다.
+  # AppProject destinations는 `namespace: "*"`(projects.yaml)라 런타임 방벽도 없다.
+  [ "$(yq '.namespace' "$D/kustomization.yaml")" = "argocd" ]
+}
