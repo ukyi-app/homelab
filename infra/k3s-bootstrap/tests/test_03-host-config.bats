@@ -406,6 +406,33 @@ _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RU
   grep -qxF "DNS=${HOST_UPSTREAM_DNS}" "$r"
 }
 
+@test "check rejects a resolved drop-in with more than one DNS= line (repeated assignment appends, not replaces)" {
+  # ⚠️ `grep -qxF "DNS=${HOST_UPSTREAM_DNS}"`(위 @test가 재는 것과 같은 자리)는 **존재**만 본다 —
+  #    그 값이 있는 두 번째 줄이 추가돼도 여전히 참이다. systemd는 `DNS=`를 반복하면 **대입이 아니라
+  #    append**해서, 사전(파일 순서)상 **앞선** 줄이 실효 1순위가 된다(2026-08-18 라우터
+  #    192.168.117.1 교착과 같은 클래스 — traps-detail.md 참고). 리졸버를 하나 더 늘리려면
+  #    versions.env의 HOST_UPSTREAM_DNS 한 줄(공백 구분 리스트)로만 해야 하고, 손으로 두 번째
+  #    `DNS=` 줄을 보태면 그 줄이 앞줄로 들어가는 순간 스크립트가 이걸 못 잡는다.
+  # 트리·디스크를 모두 같은 뮤테이션 사본으로 맞춰 [1] 바이트 대조는 통과시키고 이 축만 연다.
+  BS="$BATS_TEST_TMPDIR/bs-dns"
+  cp -R "$BOOTSTRAP_DIR" "$BS"
+  r="$BS/host-config/etc/systemd/resolved.conf.d/10-k3s-node.conf"
+  sed -i.bak '1i DNS=192.168.117.1' "$r" && rm -f "$r.bak"
+  grep -c '^DNS=' "$r" | grep -qxF 2   # 뮤테이션이 실제로 두 줄을 만들었는지(양성 대조)
+  FX2="$BATS_TEST_TMPDIR/root-dns"
+  mkdir -p "$FX2"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    mkdir -p "$FX2/$(dirname "$f")"
+    cp "$BS/host-config/$f" "$FX2/$f"
+  done <<EOF
+$( (cd "$BS/host-config" && find . -type f \( -name '*.conf' -o -name '*.service' -o -name '*.timer' \)) | sed 's|^\./||' )
+EOF
+  HOSTCFG_ROOT="$FX2" HOSTCFG_TREE="$BS/host-config" run "$BS/host-config.sh" --check
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'DNS= 줄이'
+}
+
 @test "apply makes the networkd drop-in effective now (installed-but-inert was the 2026-08-18 defect)" {
   # 🔴 그전까지 [6/6]은 daemon-reload + restart systemd-resolved/journald뿐이었다. 둘 다 networkd에는
   #    아무 영향이 없어서, `10-netplan-<if>.network.d/10-k3s-node.conf`(UseDNS=false)가 **설치만 되고
