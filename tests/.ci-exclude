@@ -7,14 +7,22 @@
 #        (헤더는 빈 줄 아래 항목을 지배하지 않는다. 항목 뒤의 주석은 새 그룹을 연다.)
 #      · 항목 수 **상한**(check-bats-accounting.sh의 `EXCL_MAX` 상수 = 현재 건수 16). 늘리려면 같은 PR에서
 #        그 상수를 올려야 한다 — env 오버라이드는 없다(호출부에 안 보이는 off-switch를 두지 않는다).
-#      · 그 표기가 지목한 **venue가 실재**해야 한다(0건이면 red). 인식 형태 넷 — `make <타깃>`(Makefile에
-#        그 타깃) · `bats <경로>`(그 경로 실재 **및 .ci-exclude 비등재**) · `.github/workflows/<파일>.yaml`(그
-#        파일) · `manual`(자동 venue가 정말 없을 때의 자기신고). 백틱·작은따옴표 둘 다 받지만
+#      · 그 표기가 지목한 **venue가 실재하고, 그 venue가 이 항목을 실제로 부른다**(0건이면 red).
+#        인식 형태 넷 — `make <타깃>`(Makefile에 그 타깃이 실재 **및** 그 항목의 test_*.bats 토큰을
+#        Makefile 어딘가가 부름) · `bats <경로>`(그 경로 실재 **및 .ci-exclude 비등재**) ·
+#        `.github/workflows/<파일>.yaml`(그 파일 실재 **및** 그 항목을 실제로 부름) ·
+#        `manual`(자동 venue가 정말 없을 때의 자기신고). 백틱·작은따옴표 둘 다 받지만
 #        **인용 안 한 산문은 안 본다**(예전엔 단어만 적어도 통과했다 — 그게 이 줄이 자인하던 구멍이다).
+#        ⚠️ venue의 **실재만으로는 부족하다**(감사 6라운드 57 venue-1) — 예전엔 venue 표기를 무관한
+#        다른 실재 파일로 바꿔도, venue 쪽 호출 줄을 지워도 red가 안 났다. 잔여 한계: `make` 형태는
+#        타깃 본문이 아니라 **Makefile 전체**를 스코프로 삼는다(다른 타깃이 우연히 부르는 항목도 통과).
 #      · **자기지시는 증명이 아니다** — `bats <경로>`가 항목 자기 자신이거나 다른 .ci-exclude 등재
 #        파일을 가리키면 파일이 실재해도 무증인이다("이 파일이 실행되는 곳: 이 파일"은 늘 참이라
 #        자동 실행 경로의 유무를 못 가른다 — 감사 5라운드 50 critic-venue-tautology). 자동 venue가
 #        정말 없으면 `manual`을 쓴다.
+#      · `manual` 표기 **상한**(check-bats-accounting.sh의 `MANUAL_MAX` 상수 = 현재 건수 3, 아래 3건).
+#        manual은 무조건 인정이라 상한이 없으면 자동 venue를 manual로 바꿔 (0a) 전체를 우회할 수
+#        있다(감사 6라운드 57 venue-3) — EXCL_MAX와 같은 논거(래칫 아닌 상한, env 오버라이드 없음).
 # platform/charts/*는 여기 두지 않는다 — 러너가 도메인 prune(make chart-test 별도 harness).
 
 # 라이브 클러스터 의존 — 실행처: owner-local `make verify-posture`(KUBECONFIG 부재=SKIP)

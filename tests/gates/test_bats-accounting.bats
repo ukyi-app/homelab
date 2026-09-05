@@ -23,6 +23,42 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   [ "$status" -eq 0 ]
 }
 
+# ── 신설 계약 (1)(2) 핵심 판정 증인 — `--registry <파일>` ────────────────────────────────────────
+# ⚠️ 감사 6라운드 57 venue-2 실증: 이 파일의 픽스처 20여 건은 전부 `--lint-excludes`로만 가드를 부르는데
+#    그 모드는 (1)(고아·이중소유)·(2)(추적 실재·gate 모순) **판정 앞에서** exit한다(스크립트 :214
+#    `if [ "$LINT_ONLY" -eq 1 ]; then exit "$rc"; fi`). 무인자 호출("the real tree …")은 실 트리가 이미
+#    그 판정들을 만족해 양성 대조만 되고, 뮤테이션 A(:242 `-ne 1`→`-gt 3`)·B(:251/:254 두 판정을
+#    `if false;`로)는 24/24 ok·rc=0로 무증인 통과했다(실측). `--registry`(LINT_ONLY=0 유지, EXCLUDE_FILE만
+#    교체)가 그 구멍의 증인이다 — 형제: check-doc-index.sh의 `--readme <파일>`.
+
+@test "a registry that double-registers a real gate member is rejected (double-ownership + gate contradiction)" {
+  # gate 소속 파일(tests/gates/test_scan-floor.bats)을 픽스처 레지스트리에도 등재 — (1)의 매치=2(이중소유)
+  # 축과 (2)(b)의 gate 모순 축을 동시에 문다. 실 .ci-exclude 16건은 이제 어디에도 없어 매치=0(고아)로도 문다.
+  reg="$BATS_TEST_TMPDIR/dup"
+  mkreg "$reg" '# 사유 — 실행처: `manual`(owner-local, 자동 venue 0)' 'tests/gates/test_scan-floor.bats'
+  run bash "$s" --registry "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "매치=2"
+  echo "$output" | grep -q "gate에도 포함(모순)"
+}
+
+@test "a registry entry for a non-tracked file is rejected" {
+  reg="$BATS_TEST_TMPDIR/notracked"
+  mkreg "$reg" '# 사유 — 실행처: `manual`(owner-local, 자동 venue 0)' 'tests/gates/test_no-such.bats'
+  run bash "$s" --registry "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "추적 파일 아님"
+}
+
+@test "--registry with the committed registry passes and still emits all three SCAN markers" {
+  # (0b) env-off-switch @test와 같은 취지 — 플래그를 더해도 회계 자체는 꺼지지 않는다.
+  run bash "$s" --registry "$ROOT/tests/.ci-exclude"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^SCAN: check-bats-accounting:excludes: [0-9]+$'
+  echo "$output" | grep -qE '^SCAN: check-bats-accounting:gate: [0-9]+$'
+  echo "$output" | grep -qE '^SCAN: check-bats-accounting:tracked: [0-9]+$'
+}
+
 # ── 신설 계약 (0): 사유 그룹 주석 지배 + 실행처 표기 ────────────────────────────────────────────
 
 @test "a bare entry with no governing comment is rejected" {
@@ -94,10 +130,13 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 }
 
 @test "each recognized venue form proves a group (make target, bats path, workflow file)" {
-  # 음성 대조 — 이 레인이 '표기가 있으면 무조건 red'가 아니라 **실재**를 재는지 고정한다.
-  # 셋 다 실 트리의 물건이다: `verify` 타깃 · 이 파일 자신 · iac.yaml(terraform 그룹의 실제 표기).
+  # 음성 대조 — 이 레인이 '표기가 있으면 무조건 red'가 아니라 **실재 + 호출**을 재는지 고정한다.
+  # ⚠️ 감사 6라운드 57 venue-1: 항목은 venue가 **실제로 부르는** 파일이어야 한다(venue_calls) — 무관한
+  #    tests/gates/test_scan-floor.bats로는 make/워크플로 형태가 더 이상 통과하지 않는다. 셋 다 실
+  #    트리에서 그 venue가 실제로 부르는 파일이다: `verify`→sops-roundtrip · 이 파일 자신(bats 형태는
+  #    호출 검사 대상이 아니다) · iac.yaml→tf_validate(terraform 그룹의 실제 표기).
   reg="$BATS_TEST_TMPDIR/vmake"
-  mkreg "$reg" '# 사유 — 실행처: owner-local `make verify`' 'tests/gates/test_scan-floor.bats'
+  mkreg "$reg" '# 사유 — 실행처: owner-local `make verify`' 'tests/test_sops-roundtrip.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
   reg="$BATS_TEST_TMPDIR/vbats"
@@ -105,15 +144,16 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
   reg="$BATS_TEST_TMPDIR/vwf"
-  mkreg "$reg" '# 사유 — 실행처: .github/workflows/iac.yaml (advisory 잡)' 'tests/gates/test_scan-floor.bats'
+  mkreg "$reg" '# 사유 — 실행처: .github/workflows/iac.yaml (advisory 잡)' 'infra/_tests/test_tf_validate.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
 }
 
 @test "both backtick and single-quote markings are recognized (the registry mixes them)" {
   # 레지스트리 실측: 대부분 백틱, KSOPS 그룹만 작은따옴표. 파서가 한쪽만 받으면 정직한 표기가 red가 된다.
+  # 항목은 verify-ksops가 실제로 부르는 파일이어야 한다(KSOPS_BATS 변수 리터럴 — venue_calls).
   reg="$BATS_TEST_TMPDIR/vquote"
-  mkreg "$reg" "# 사유 — 실행처: owner-local 'make verify-ksops'" 'tests/gates/test_scan-floor.bats'
+  mkreg "$reg" "# 사유 — 실행처: owner-local 'make verify-ksops'" 'platform/cache/prod/test_ksops_render.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
 }
@@ -122,6 +162,33 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   # 인용 없이 흘린 「make verify」는 산문이지 표기가 아니다 — 여길 열면 (0a)가 다시 텍스트 계약이 된다.
   reg="$BATS_TEST_TMPDIR/vprose"
   mkreg "$reg" '# 사유 — 실행처: 대충 make verify 쯤에서 돈다' 'tests/gates/test_scan-floor.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "venue가 0건 실재"
+}
+
+# ── 신설 계약 (0a-calls): venue의 실재만으로는 부족하다 — 그 venue가 이 항목을 실제로 불러야 한다 ────
+# ⚠️ 감사 6라운드 57 venue-1 실증: venue_derive는 `make <타깃>`과 `.github/workflows/<파일>` 형태에
+#    대해 venue의 **실재**만 쟀다. venue 표기를 무관한 다른 실재 파일로 바꿔도(iac.yaml→renovate.yaml),
+#    venue 쪽의 실제 호출 줄을 지워도 rc=0였다(2026-09-04 실측 — round6 EVIDENCE 뮤테이션 (a)(b)(c)).
+#    venue_calls()가 그 구멍의 증인이다: venue 파일 본문(주석 제외)에서 test_*.bats 토큰을 뽑아
+#    항목 경로가 매치하는지 본다.
+
+@test "a workflow file that exists but never calls this item's bats path is rejected" {
+  # critic의 정확한 뮤테이션: iac.yaml을 실재하지만 무관한 renovate.yaml로 바꾼 것과 동형이다 —
+  # renovate.yaml은 어떤 test_*.bats도 부르지 않는다(전 레포 grep 확인).
+  reg="$BATS_TEST_TMPDIR/wfnocall"
+  mkreg "$reg" '# 사유 — 실행처: .github/workflows/renovate.yaml (advisory 잡)' 'infra/_tests/test_tf_validate.bats'
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "venue가 0건 실재"
+}
+
+@test "a make target that exists but never calls this item's bats path is rejected" {
+  # `verify` 타깃은 실재하지만, 이 파일 경로는 Makefile 어디에도 없다(리터럴도 글롭도) — 예전엔
+  # 타깃 실재만으로 통과했다.
+  reg="$BATS_TEST_TMPDIR/mknocall"
+  mkreg "$reg" '# 사유 — 실행처: owner-local `make verify`' 'tests/gates/test_no-such-in-verify.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "venue가 0건 실재"
@@ -201,6 +268,26 @@ excl_max() { grep -oE '^EXCL_MAX=[0-9]+' "$s" | cut -d= -f2; }
   mkreg "$reg" '# 사유 — 실행처: owner-local `bats tests/gates/test_bats-accounting.bats`' 'tests/gates/test_scan-floor.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
+}
+
+# ── 신설 계약: manual 상한 (감사 6라운드 57 venue-3) ────────────────────────────────────────────
+# ⚠️ `manual` venue는 무조건 인정이라(venue_derive의 manual 분기) 상한이 없으면 자동 venue를 manual
+#    표기로 바꾸는 것이 red를 피하는 최단 경로가 된다. 뮤테이션 재현: 자동 venue 3그룹(posture·
+#    KSOPS·iac.yaml)을 전부 manual로 바꿔도 이 상한 이전에는 --lint-excludes rc=0였다(2026-09-04 실측).
+# 상한도 EXCL_MAX와 같은 관용구로 스크립트 상수를 정적 증인으로 읽는다.
+manual_max() { grep -oE '^MANUAL_MAX=[0-9]+' "$s" | cut -d= -f2; }
+
+@test "manual entries beyond the ceiling trip it (manual cannot absorb the whole registry)" {
+  max="$(manual_max)"
+  [ -n "$max" ]
+  reg="$BATS_TEST_TMPDIR/manualgrow"
+  : > "$reg"
+  echo '# 사유 — 실행처: `manual`(owner-local, 자동 venue 0)' >> "$reg"
+  i=0
+  while [ "$i" -le "$max" ]; do echo "tests/gates/test_fixture-$i.bats" >> "$reg"; i=$((i + 1)); done
+  run bash "$s" --lint-excludes "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "manual 표기"
 }
 
 # 상한이 **env로 꺼지지 않는다**는 것 자체가 단언 대상이다 — 폐지 전에는 `BATS_EXCLUDE_MAX=999` 한 줄로

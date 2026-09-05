@@ -39,8 +39,15 @@ while [ $# -gt 0 ]; do
       EXCLUDE_FILE="${2:-}"
       [ -n "$EXCLUDE_FILE" ] || { echo "ERROR: --lint-excludes에 레지스트리 파일 인자가 필요하다" >&2; exit 2; }
       shift 2 ;;
+    --registry)
+      # LINT_ONLY는 그대로 0 — (1)(2) 핵심 판정(고아·이중소유·gate 모순)까지 픽스처 레지스트리로
+      # 돌리는 모드다(감사 6라운드 57 venue-2: --lint-excludes만으로는 이 두 판정에 원리적으로 못
+      # 닿는다 — 아래 (1)(2) 주석). 형제: check-doc-index.sh의 `--readme <파일>`.
+      EXCLUDE_FILE="${2:-}"
+      [ -n "$EXCLUDE_FILE" ] || { echo "ERROR: --registry에 레지스트리 파일 인자가 필요하다" >&2; exit 2; }
+      shift 2 ;;
     *)
-      echo "ERROR: 알 수 없는 인자 '$1' — 인자 없이 전 회계를 돌리거나 '--lint-excludes <파일>'로 레지스트리 계약만 본다." >&2
+      echo "ERROR: 알 수 없는 인자 '$1' — 인자 없이 전 회계를 돌리거나 '--lint-excludes <파일>'로 레지스트리 계약만, '--registry <파일>'로 전 회계를 그 레지스트리로 본다." >&2
       exit 2 ;;
   esac
 done
@@ -69,10 +76,19 @@ in_excl_items() { case "$EXCL_ITEMS" in *" $1 "*) return 0;; *) return 1;; esac;
 #     증가를 **묶는 것은 아래 (0b) 상한**이고, 이 계약은 표기가 실물을 가리키게 한다.
 # ── 실행처 표기 → **실재하는 venue** 파생 ────────────────────────────────────────
 # 인식 형태 넷이고, 그룹에 하나라도 **실재하는** 토큰이 있으면 그 그룹은 증명된다:
-#   ① make <타깃>   → Makefile에 ^<타깃>: 실재
+#   ① make <타깃>   → Makefile에 ^<타깃>: 실재 **및 그 항목을 실제로 부름**(아래 venue_calls)
 #   ② bats <경로>   → 그 경로 실재 **및 .ci-exclude 등재 파일이 아님**(아래 ⚠️ 자기지시)
-#   ③ .github/workflows/<파일>.ya?ml → 그 파일 실재
+#   ③ .github/workflows/<파일>.ya?ml → 그 파일 실재 **및 그 항목을 실제로 부름**(아래 venue_calls)
 #   ④ manual        → 무조건 실재(owner-local 수동 실행 자기신고 — 자동 venue가 정말 없을 때만 쓴다)
+# ⚠️ **venue의 실재만으로는 부족하다(감사 6라운드 57 venue-1)** — ①③은 venue 파일이 그 실 파일
+#    경로를 **불러야** 증명된다. 예전엔 venue 문자열을 무관한 실재 파일로 바꿔도(예: iac.yaml→
+#    renovate.yaml), 심지어 venue 쪽 호출 줄을 지워도, 「거기서 안 돈다」는 부정문을 적어도 rc=0였다
+#    (실측 2026-09-04 — 항목이 **가리키기만** 하고 **불리지 않아도** 통과하는 구멍). venue_calls()가
+#    venue 파일 본문(주석 제외)에서 test_*.bats 토큰(글롭 포함)을 뽑아 항목 경로가 매치하는지를 본다.
+#    잔여 한계: make 형태는 **타깃 본문이 아니라 Makefile 전체**를 스코프로 삼는다 — 다른 타깃이
+#    우연히 부르는 토큰도 HIT로 친다(타깃 오지목은 여전히 통과). 타깃 본문만 스코핑하려면 `$(VAR)`
+#    변수 전개까지 따라가야 해 12줄을 넘는다(형제: tools/check-ci-parity.ts가 gate 스텝 본문을 재는
+#    방식) — 이번 라운드 범위 밖으로 남긴다.
 # ⚠️ ①②의 인용 부호는 **백틱과 작은따옴표 둘 다** 받는다 — 레지스트리가 실제로 둘을 섞어 쓴다
 #    (실측: 대부분은 백틱이고 KSOPS 그룹만 작은따옴표). 표기를 한쪽으로 통일하는 규약은 없고,
 #    있어도 다음 편집자가 다시 섞는다 — 표기를 좁히는 것보다 파서를 넓히는 쪽이 정직하다.
@@ -84,6 +100,26 @@ in_excl_items() { case "$EXCL_ITEMS" in *" $1 "*) return 0;; *) return 1;; esac;
 #    `.ci-exclude` 등재 파일을 가리키면 파일은 실재해도 카운트하지 않는다. 「이 파일이 실행되는 곳:
 #    이 파일」은 늘 참이라 자동 실행 경로의 유무를 증명하지 못한다(실측: 인용 경로를 무관한 다른
 #    .ci-exclude 항목으로 바꿔도 --lint-excludes가 계속 rc=0이었다). 자동 venue가 정말 없으면 ④를 쓴다.
+# venue 파일(Makefile·워크플로)이 항목 경로($2)를 실제로 부르는지 — 주석을 걷어낸 본문에서
+# test_*.bats 토큰(글롭 포함)을 뽑아 case 패턴으로 매치한다(글롭 토큰은 unquoted라 `test_*.bats`가
+# 패턴으로 살아 posture 5건의 `POSTURE_BATS := tests/posture/test_*.bats` 한 줄이 5건 전부를 문다).
+# ⚠️ 줄-전체 주석을 먼저 걷지 않으면 산문 속 언급(예: 경고 주석의 "test_makefile.bats")이 항진식
+#    증인이 된다 — 실측(2026-09-04): 안 걷으면 manual 3건의 자기신고 주석 자체가 거짓 HIT를 냈다.
+# ⚠️ `| grep -q hit`로 짜면 pipefail 아래 SIGPIPE(141)로 writer가 죽어 매치가 있어도 거짓 MISS가
+#    난다(scripts/check-sigpipe-writers.sh) — herestring + 플래그 변수로 판정한다.
+venue_calls() {
+  _vc_hit=1
+  _vc_calls="$(grep -vE '^[[:space:]]*#' "$1" | grep -ohE '[A-Za-z0-9_./*-]*test_[A-Za-z0-9_.*-]*\.bats' || true)"
+  while IFS= read -r _vc_g; do
+    # shellcheck disable=SC2254  # 의도된 글롭이다 — $_vc_g가 리터럴이 아니라 패턴이어야
+    # `POSTURE_BATS := tests/posture/test_*.bats` 한 줄이 posture 5건 전부를 문다(위 주석).
+    case "$2" in $_vc_g) _vc_hit=0;; esac
+  done <<VCEOF
+$_vc_calls
+VCEOF
+  return "$_vc_hit"
+}
+
 VENUE_OK=0
 VENUE_TOKENS=""
 venue_derive() {
@@ -97,7 +133,7 @@ venue_derive() {
       'make '*)
         _vd_t="${_vd_s#make }"; _vd_t="${_vd_t%% *}"
         VENUE_TOKENS="${VENUE_TOKENS}[make ${_vd_t}] "
-        if grep -qE "^${_vd_t}:" Makefile; then VENUE_OK=$((VENUE_OK + 1)); fi ;;
+        if grep -qE "^${_vd_t}:" Makefile && venue_calls Makefile "$2"; then VENUE_OK=$((VENUE_OK + 1)); fi ;;
       'bats '*)
         _vd_p="${_vd_s#bats }"; _vd_p="${_vd_p%% *}"
         VENUE_TOKENS="${VENUE_TOKENS}[bats ${_vd_p}] "
@@ -113,13 +149,14 @@ VDEOF
   while IFS= read -r _vd_w; do
     [ -n "$_vd_w" ] || continue
     VENUE_TOKENS="${VENUE_TOKENS}[${_vd_w}] "
-    if [ -f "$_vd_w" ]; then VENUE_OK=$((VENUE_OK + 1)); fi
+    if [ -f "$_vd_w" ] && venue_calls "$_vd_w" "$2"; then VENUE_OK=$((VENUE_OK + 1)); fi
   done <<VDEOF
 $_vd_wfs
 VDEOF
 }
 
 excl_n=0
+manual_n=0
 group=""
 group_head=""
 after_entry=0
@@ -142,7 +179,10 @@ while IFS= read -r line; do
   fi
   case "$group" in
     *실행처*)
-      venue_derive "$group"
+      venue_derive "$group" "$line"
+      # manual venue는 무조건 인정이라(:141) 상한이 없으면 레지스트리 전체가 그리로 수렴할 수 있다
+      # (감사 6라운드 57 venue-3) — MANUAL_MAX 카운트는 아래 (0b) 옆에서 판정한다.
+      case "$VENUE_TOKENS" in *"[manual]"*) manual_n=$((manual_n + 1));; esac
       if [ "$VENUE_OK" -eq 0 ]; then
         echo "FAIL: ${EXCLUDE_FILE}:${lineno} 실행처 표기가 가리키는 venue가 0건 실재(단어만 있고 증명이 없다): $line"
         echo "  그룹 첫 줄: ${group_head}"
@@ -174,6 +214,18 @@ if [ "$excl_n" -gt "$EXCL_MAX" ]; then
   echo "FAIL: ${EXCLUDE_FILE}: 제외 ${excl_n}건 > 상한 ${EXCL_MAX} — gate에서 테스트가 빠졌다."
   echo "  정당한 제외라면 이 상한(scripts/check-bats-accounting.sh의 EXCL_MAX 상수)을 같은 PR에서 올려라."
   echo "  제외는 부채다: CI가 안 보는 테스트는 죽어도 아무도 모른다."
+  rc=1
+fi
+
+# ── manual 상한 — (0a) venue 파생 레인의 무조건 우회로를 닫는다(감사 6라운드 57 venue-3) ──────────
+# manual은 「자동 venue가 정말 없을 때만」이라는 조건을 말로만 걸고 있었다 — 코드는 무조건 인정이라
+# 편집자가 red를 피하는 최단 경로가 됐다. 뮤테이션 재현: 자동 venue 3그룹(posture·KSOPS·iac.yaml)의
+# 표기를 전부 manual로 바꿔도 이 상한 이전에는 rc=0였다. 형태·논거는 위 EXCL_MAX와 동일 —
+# 래칫이 아니라 상한, env 오버라이드 없음, 현재 3건이 정확 등식.
+MANUAL_MAX=3
+if [ "$manual_n" -gt "$MANUAL_MAX" ]; then
+  echo "FAIL: ${EXCLUDE_FILE}: manual 표기 ${manual_n}건 > 상한 ${MANUAL_MAX} — 자동 venue를 manual 표기로 바꿔 (0a)를 우회했는지 본다."
+  echo "  정당한 manual 추가라면 이 상한(scripts/check-bats-accounting.sh의 MANUAL_MAX 상수)을 같은 PR에서 올려라."
   rc=1
 fi
 
