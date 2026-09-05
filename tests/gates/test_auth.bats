@@ -36,6 +36,18 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "bump.yaml writeback only reacts to this repo's main (blocks fork/PR builds)" {
+  # wf-ci-build-bump-1: write-back(bump.yaml)의 유일한 신뢰 경계인 head_repository.full_name 비교는
+  # 어느 가드에도 증인이 없었다(전 레포에서 'head_repository' 리터럴이 이 파일 하나뿐 — grep 0건 확인).
+  # 오늘은 build.yaml 트리거(push main-only + workflow_dispatch actor 가드)가 이 조건을 항상 참으로
+  # 만들지만, 향후 build.yaml에 pull_request 트리거가 생기거나 동명(📦 build) 워크플로가 생기면
+  # 이 조건이 유일한 방어선이 된다 — 회귀 방지용 defense-in-depth 커버리지.
+  run bash -c "yq -r '.jobs.writeback.if' '$WF/bump.yaml'"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF 'head_repository.full_name == github.repository'
+  printf '%s' "$output" | grep -qF "head_branch == 'main'"
+}
+
 @test "no github_actions_secret bot_pat resource remains in terraform" {
   # App 마이그레이션 후 DEPLOY_BOT_PAT(write-capable standing PAT)는 소비자 0 — 리소스가 남으면 안 됨
   # 양성 대조 — secrets.tf가 실재하고 여전히 시크릿 리소스를 선언하는 파일인지

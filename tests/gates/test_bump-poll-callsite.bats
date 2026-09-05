@@ -796,6 +796,18 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
       ;;
     *) : ;;
   esac
+  # wf-ci-build-bump-3: 반대 방향 — poll은 reconcile을 needs로 기다려야 한다(순서/직렬화 전용, 위 ①의
+  # !cancelled()가 성공 요구를 이미 풀었다). 이 엣지가 빠지면 poll·reconcile이 병렬로 돌아 같은 PR을
+  # 동시에 건드리는 레이스(거짓 red)가 난다.
+  pneeds="$(yq -r '[.jobs.poll.needs] | flatten | join(" ")' "$F")"
+  case "$pneeds" in
+    *reconcile*) : ;;
+    *)
+      echo "unserialized race: poll job이 reconcile을 needs로 기다리지 않는다('$pneeds') —"
+      echo "  같은 PR을 동시에 건드리면 한쪽이 거짓 red를 낸다(순서 주석 118-120행 참조)."
+      false
+      ;;
+  esac
 
   # ② 회수 실패는 **묻히지 않는다**: 그 스텝은 실패를 삼키지 않고 비-0으로 끝난다.
   export STUB_FAIL_RECONCILE=1
