@@ -98,6 +98,20 @@ _apply() {
   [ "$status" -eq 0 ]
 }
 
+@test "renders manifests with the provisioner image substituted (no literal placeholder)" {
+  # 티켓 60 prov-1 — 헬퍼(위 @test)와 같은 렌더 계약. envsubst SHELL-FORMAT/sed 폴백 목록에
+  # LOCAL_PATH_PROVISIONER_IMAGE를 추가하지 않으면 이 플레이스홀더가 그대로 남아 kubectl apply가
+  # `${LOCAL_PATH_PROVISIONER_IMAGE}`라는 문자열 그대로의 이미지를 당겨 ImagePullBackOff가 난다.
+  _sandbox; _apply
+  [ "$status" -eq 0 ]
+  source "$BS/versions.env"
+  run grep -F '${LOCAL_PATH_PROVISIONER_IMAGE}' "$RENDERED"
+  [ "$status" -eq 1 ]
+  run grep -cF "$LOCAL_PATH_PROVISIONER_IMAGE" "$RENDERED"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 2 ]   # provisioner Deployment 2 아키타입(internal·bulk) 모두 렌더
+}
+
 @test "applies both StorageClasses" {
   _sandbox; _apply
   [ "$status" -eq 0 ]

@@ -81,9 +81,16 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
   done
 }
 
-@test "local-path-provisioner image tag matches versions.env (Renovate bump non-silent)" {
-  # M12: LOCAL_PATH_PROVISIONER_VERSION 소비자 0 → versions.env bump가 silent no-op였다.
-  # 하드코딩 태그가 versions.env와 일치하는지 게이트해 드리프트를 loud하게. (setup()이 versions.env source)
-  run grep -cE "rancher/local-path-provisioner:${LOCAL_PATH_PROVISIONER_VERSION}([[:space:]]|\$)" "$PROV"
-  [ "$output" -ge 2 ]   # provisioner Deployment 2 아키타입(:60,:134) 모두 핀
+@test "provisioner image is wired to the LOCAL_PATH_PROVISIONER_IMAGE placeholder (digest owner promoted)" {
+  # 티켓 60 prov-1 — M12가 닫은 「LOCAL_PATH_PROVISIONER_VERSION 소비자 0 → versions.env bump가
+  # silent no-op」 자리(옛 이름: "local-path-provisioner image tag matches versions.env")가
+  # 하드코딩 태그였다. 헬퍼(:57 @test)와 같은 플레이스홀더 형태로 승격한다 — digest 소유자는
+  # 이제 versions.env의 `LOCAL_PATH_PROVISIONER_IMAGE`(policy/image-ownership.json 무소유 선언
+  # 제거). 렌더 시점 치환은 apply-storage.sh가 하고 그 결과 검사는 07-apply-storage.bats에 있다.
+  run grep -cF '${LOCAL_PATH_PROVISIONER_IMAGE}' "$PROV"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 2 ]   # provisioner Deployment 2 아키타입(internal·bulk) 모두 플레이스홀더로 치환
+  # 옛 하드코딩 태그 리터럴이 되살아나면 안 된다(플레이스홀더 우회 재발 방지).
+  run grep -F "rancher/local-path-provisioner:${LOCAL_PATH_PROVISIONER_VERSION}" "$PROV"
+  [ "$status" -eq 1 ]
 }

@@ -73,20 +73,22 @@ $BULK_RUN env \
       sh "$SCRIPT_DIR/bulk-gate-probe.sh" \
   || gate_fail "bulk 백킹 스토어 검사 실패 — ${BULK_STORAGE_PATH}"
 
-# LOCAL_PATH_HELPER_IMAGE + BULK_STORAGE_PATH 만 템플릿 대상이다; envsubst를 이 두 변수로
-# 제한해 다른 것(예: setup 스크립트 내부의 $VOL_DIR)이 덮어써지지 않게 한다.
+# LOCAL_PATH_PROVISIONER_IMAGE + LOCAL_PATH_HELPER_IMAGE + BULK_STORAGE_PATH 만 템플릿 대상이다;
+# envsubst를 이 세 변수로 제한해 다른 것(예: setup 스크립트 내부의 $VOL_DIR)이 덮어써지지 않게 한다.
+# ⚠️ 감사 60 prov-1 — provisioner 이미지가 하드코딩 태그에서 플레이스홀더로 바뀌면서 추가됐다.
 render() {
   if command -v envsubst >/dev/null 2>&1; then
     # envsubst의 SHELL-FORMAT 인자는 ${VAR} 이름의 리터럴 목록이다 — 작은따옴표 필수.
     # shellcheck disable=SC2016
-    envsubst '${LOCAL_PATH_HELPER_IMAGE} ${BULK_STORAGE_PATH}' < "$1"
+    envsubst '${LOCAL_PATH_PROVISIONER_IMAGE} ${LOCAL_PATH_HELPER_IMAGE} ${BULK_STORAGE_PATH}' < "$1"
   else
-    sed -e "s#\${LOCAL_PATH_HELPER_IMAGE}#${LOCAL_PATH_HELPER_IMAGE}#g" \
+    sed -e "s#\${LOCAL_PATH_PROVISIONER_IMAGE}#${LOCAL_PATH_PROVISIONER_IMAGE}#g" \
+        -e "s#\${LOCAL_PATH_HELPER_IMAGE}#${LOCAL_PATH_HELPER_IMAGE}#g" \
         -e "s#\${BULK_STORAGE_PATH}#${BULK_STORAGE_PATH}#g" "$1"
   fi
 }
 
-echo "==> Applying local-path provisioner (helper image: ${LOCAL_PATH_HELPER_IMAGE}; bulk path: ${BULK_STORAGE_PATH})…"
+echo "==> Applying local-path provisioner (provisioner image: ${LOCAL_PATH_PROVISIONER_IMAGE}; helper image: ${LOCAL_PATH_HELPER_IMAGE}; bulk path: ${BULK_STORAGE_PATH})…"
 render "$SCRIPT_DIR/storage/local-path-provisioner.yaml" | kubectl apply -f -
 
 echo "==> Applying StorageClasses…"
