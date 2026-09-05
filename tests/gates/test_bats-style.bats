@@ -470,6 +470,33 @@ setup() {
   echo "$output" | grep -q '\[SETCAP\]'
 }
 
+@test "an unrelated string assignment does not smuggle in a false cardinality predicate ([SETCAP] negative, traps-ops-2)" {
+  # traps-ops-2 — setcap_hit의 문자열 등식 술어(`=[ \t]*"[^"]+"`)가 bracket-test 좌변이나 `$`
+  # 참조를 요구하지 않아, 스코프 안 아무 데나 있는 무관한 대입(`label="widget-check"`) 하나로
+  # 이 [SETCAP] 레인 전체가 침묵 통과했다(2026-09-05 실측). 처방은 `=` 앞 공백 요구 — 대입은
+  # `=` 앞에 공백이 없다.
+  printf '%s\n' \
+    '@test "the widget set has exactly the expected members" {' \
+    '  label="widget-check"' \
+    '  grep -q widget /some/file' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_asgn.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_asgn.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[SETCAP\]'
+}
+
+@test "the grep -qxF/-qx structural-equality idiom satisfies the cardinality predicate ([SETCAP] positive, traps-ops-2)" {
+  # 이 레포의 실 선호 관용구(platform/victoria-stack/prod/test_pvc_du_exporter.bats:31-33) — 전체
+  # 행 일치(-x)가 곧 등식이다. 새 여섯째 술어의 양성 대조 — 본문에 `=` 자체가 없어(대입도 없음)
+  # 이 술어 하나만 단독으로 행사한다(다른 다섯 형태와 겹치지 않게, 형제: contains/join/length 픽스처).
+  printf '%s\n' \
+    '@test "the widget set has exactly the expected members" {' \
+    '  printf "%s" widget | grep -qxF -- widget' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_grepqx.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_grepqx.bats"
+  [ "$status" -eq 0 ]
+}
+
 @test "detector passes once the body carries a cardinality predicate ([SETCAP] positive)" {
   printf '%s\n' \
     '@test "the widget set has exactly the expected members" {' \

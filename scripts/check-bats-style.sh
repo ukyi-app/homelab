@@ -10,8 +10,8 @@
 #     **0 수렴 완료**, 이제 hard-zero다(아래 ABS_BASELINE 줄이 상환 기록을 진다).
 #   QV (`grep -qv`) = 줄 단위 반전이 전칭(∀¬)을 존재(∃¬)로 바꾼다 → hard-zero(아래).
 #   SETCAP(이름 있는 집합의 상한 부재) = `@test` 이름이 exactly/only/no other/전수/EVERY/정확로
-#     원소 전수를 선언하는데 본문에 그 상한을 재는 술어가 없다 → 래칫으로 출발해 **0 수렴
-#     완료**, 이제 hard-zero다(아래 SETCAP_BASELINE).
+#     원소 전수를 선언하는데 본문에 그 상한을 재는 술어가 없다 — hard-zero 도달 후 술어 자체의
+#     결함(traps-ops-2, 2026-09-05)이 드러나 **래칫으로 재개장**했다(아래 SETCAP_BASELINE).
 # 휴리스틱: 다줄 @test 규약 가정("@test … {" 한 줄 시작, 0열 "}" 종료). heredoc 본문은 명령으로 안 센다.
 # (레포 단일 한줄 @test는 단일 명령이라 무해 — 신규 한줄 본문은 다줄로 작성할 것.)
 # 인자로 파일을 주면 그 파일만 스캔하고 다섯 클래스 아무거나 있으면 실패(픽스처/ad-hoc 탐지 모드).
@@ -82,10 +82,11 @@
 # httproute-1/2·posture-2) · 7라운드 축 N).
 # `@test` 이름에 exactly/only/no other/전수/EVERY/정확 중 하나가 있으면(대소문자 구별 그대로 —
 # 표기 변형을 넓히면 다른 축이 된다, grep-a-1/grep-a-5의 재발과 같은 함정) 그 본문(다음 `@test`
-# 또는 파일 끝까지, 0열 "}"가 경계)에 집합 등식 술어 — 문자열 등식(`= "…"`) · 수 등식
-# (`-eq [0-9]+`) · jq/yq `contains(` · jq/yq `join(",")` · jq/yq `length ==` · jq/yq
-# `== [` 배열 리터럴 등식 — 중 하나 이상이 있어야 한다. 여섯 형태는 문안 그대로다(텍스트
-# 매치이지 문장 위치·인용 anchor 요구 없음 — ABS/QV처럼 위치를 재는 레인이 아니라 **존재**만 잰다).
+# 또는 파일 끝까지, 0열 "}"가 경계)에 집합 등식 술어 — bracket-test 문자열 등식(`[ "$a" = "b" ]`) ·
+# 수 등식(`-eq [0-9]+`) · jq/yq `contains(` · jq/yq `join(",")` · jq/yq `length ==` · jq/yq
+# `== [` 배열 리터럴 등식 · `grep -qxF`/`grep -qx` 구조적 등식(전체 행 일치, traps-ops-2가 추가) —
+# 중 하나 이상이 있어야 한다. 일곱 형태는 문안 그대로다(텍스트 매치이지 문장 위치·인용 anchor
+# 요구 없음 — ABS/QV처럼 위치를 재는 레인이 아니라 **존재**만 잰다).
 # ⚠️ **오탐은 면제 어휘가 아니라 이름 정정으로 닫는다.** 이름의 "only"가 집합이 아니라 단수
 #    대상·시간 부사·복합어를 가리키는 자리(`read-only`·`owner-only`·`readonly` 같은 합성어,
 #    "only when"류 조건 부사, "only 1"류 서술 수사)는 검출기가 **그대로** 잡는다 — 면제 조건을
@@ -105,9 +106,22 @@
 #    새 위반으로 뒤집힌다 — 그 잠금이 뒤따르는 `[ "$status" -eq 0 ]`(jq 성공 rc)에 우연히
 #    걸려 있었을 뿐이기 때문이다.
 # SETCAP_BASELINE은 BB/ABS가 밟은 것과 같은 경로다 — 래칫으로 출발해(티켓 59, 착수 시점
-# 위반 14건 중 11건은 단수/조건/합성어 오탐이라 이름 정정으로 닫았다) **0에 수렴 완료**했다
+# 위반 14건 중 11건은 단수/조건/합성어 오탐이라 이름 정정으로 닫았다) **0에 수렴**했다
 # (티켓 64 c64-7, 2026-09-05). 남았던 3건(포트·볼륨·디스패처 입력 집합)은 각각 집합 등식
-# 술어를 얻었다(아래 SETCAP_BASELINE 줄이 상환 기록을 진다). 이제 hard-zero다.
+# 술어를 얻었다.
+# ⚠️ **hard-zero에서 다시 래칫으로(traps-ops-2, 2026-09-05)** — setcap_hit의 문자열 등식
+#    술어(`=[ \t]*"[^"]+"`)가 bracket-test 좌변(`[ "$a" = "b" ]`)이나 `$` 참조를 요구하지
+#    않아, 스코프 안 아무 문자열 대입(`VAR="x"`) 하나로 무력화됐다(BB/ABS/QV가 밟은
+#    가드-자신-무증인 클래스 재발). 처방: (1) 그 술어에 `=` 앞 공백 요구를 더해 대입과
+#    bracket-test를 문법으로 구별하고(대입은 `=` 앞에 공백이 없다), (2) 이 레포가 실제로
+#    선호하는 구조적 등식 관용구 `grep -qxF`/`grep -qx`(전체 행 일치 — platform/victoria-stack/
+#    prod/test_pvc_du_exporter.bats:31-33)를 여섯째 술어로 추가했다. 두 교정을 함께 적용해
+#    실 트리를 재측정(2026-09-05)하니 26건 — bracket-test 요구 전면화(34건)보다 8건 적은데,
+#    그 8건이 정확히 새 grep-qx 술어가 새로 인정한 자리다. BB/ABS가 밟은 순서 그대로 **래칫
+#    으로 재출발**한다(hard-zero 강행은 26곳 동시 재작업을 부른다 — 107-110행의 관례 위반).
+#    남은 26건은 이름 어휘가 실제로 합성어/단수/조건부사인 오탐(read-only·name-only류, 이
+#    검출기의 설계상 의도된 잔여 — 위 ⚠️ 오탐 규약)과 진짜 미상환 부채가 섞여 있다 — 다음
+#    라운드가 분류해 하나씩 이름 정정 또는 술어 추가로 닫는다.
 #
 # ── [ABS-EXEC] — 레포 소유 실행물 호출의 부재 단언(F4, 감사 63 · 설계 노트
 #    `.scratch/audit-2026-09/design-abs-denominator.md` §6-C) ──────────────────────────────────
@@ -173,8 +187,9 @@ ABS_BASELINE=0
 #     `[.spec.jobTemplate.spec.template.spec.volumes[].name] | sort | join(",")` = "backup" 등식 추가.
 #   test_mutation-dispatch.bats:204 "each dispatcher references inputs only via env or with: …" —
 #     `[ -z "$bad" ]`(다섯 술어 목록 밖 표기 변형)를 위반 카운트 `-eq 0`으로 재작성(동작 불변).
-# 신규 [SETCAP]은 즉시 red다(NEG·BB·ABS와 같은 규율). 올리는 방향은 부채 재유입이다.
-SETCAP_BASELINE=0
+# traps-ops-2(2026-09-05)가 술어 결함을 고쳐 hard-zero에서 래칫으로 재개장 — 교정 후 실측 26건을
+# 그대로 새 상한으로 반영한다(BB/ABS가 밟은 순서 그대로, 위 ⚠️ 절 참조). 올리는 방향은 부채 재유입이다.
+SETCAP_BASELINE=26
 # 레포 소유 실행물 호출의 부재 단언 부채 잔액 — **hard-zero**(F4, 감사 63 착지, 2026-09-05).
 # F1(adguard 리컨실러 2곳)·F2(나머지 10곳 — tools/tests/test_cli-flag-guard.bats 5 ·
 # tests/gates/test_scan-floor.bats 3 · tests/gates/test_secret-cert-check.bats 1 ·
@@ -387,16 +402,21 @@ function qv_seg(t,   n,a,i,seen,q,v,pos){
   }
   return (seen && q && v)
 }
-# [SETCAP] 술어 판정 — 다섯 형태 텍스트 매치(문장 위치 무관, 존재만 잰다 — ABS/QV처럼 앵커·
-# 세그먼트를 재는 레인이 아니다). 헤더의 분모 규약: 문자열 등식·수 등식·jq/yq contains(/join(","/
-# length ==. 어느 하나라도 맞으면 그 @test 스코프는 상한 술어를 가진 것으로 친다.
+# [SETCAP] 술어 판정 — 텍스트 매치(문장 위치 무관, 존재만 잰다 — ABS/QV처럼 앵커·세그먼트를
+# 재는 레인이 아니다). 헤더의 분모 규약: 문자열 등식·수 등식·jq/yq contains(/join(","/length ==/
+# == [ 배열 리터럴·grep -qx 구조적 등식. 어느 하나라도 맞으면 그 @test 스코프는 상한 술어를 가진
+# 것으로 친다.
+# ⚠️ 문자열 등식 술어는 **bracket-test 좌변**(`[ "$a" = "b" ]`, `=` 앞에 공백)만 잡는다 — 대입
+#    (`VAR="x"`, `=` 앞 공백 없음)은 배제한다(guard-decision(traps-ops-2), 2026-09-05: `=` 앞
+#    공백 요구 없이는 스코프 안 아무 문자열 대입 하나로 이 술어가 통째로 무력화됐다).
 function setcap_hit(s){
-  if (s ~ /=[ \t]*"[^"]+"/) return 1
+  if (s ~ /[ \t]=[ \t]*"[^"]+"/) return 1
   if (s ~ /-eq[ \t]+[0-9]+/) return 1
   if (s ~ /contains\(/) return 1
   if (s ~ /join\(","\)/) return 1
   if (s ~ /length[ \t]*==/) return 1
   if (s ~ /==[ \t]*\[/) return 1  # jq/yq 배열 리터럴 등식
+  if (s ~ /grep[ \t]+-q[A-Za-z]*x/) return 1  # grep -qxF/-qx 구조적 등식(전체 행 일치 — 형제: test_pvc_du_exporter.bats:31-33)
   return 0
 }
 # 한 문장 처리 — 루프 깊이 · [QV] · [SETCAP] 술어 · run/status 짝(ABS·ABS-EXEC 둘 다) · 증인 수집.
@@ -608,7 +628,7 @@ else
   [ "$bb" -le "$BB_BASELINE" ] || { echo "FAIL: 중간 [[ ]]가 baseline(${BB_BASELINE}) 초과(${bb}) — 신규는 'run …; [ … ]'로." >&2; rc=1; }
   [ "$abs" -le "$ABS_BASELINE" ] || { echo "FAIL: 부재 단언 위반이 baseline(${ABS_BASELINE}) 초과(${abs}) — [ABS]는 '-eq 1'로 고치고, [ABS-REC]/[ABS-LOOP]는 같은 @test나 그 파일 함수 본문에 **비공허 바닥값 + 양성 대조**를 함께 세워라. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」" >&2; rc=1; }
   [ "$absexec" -le "$ABSEXEC_BASELINE" ] || { echo "FAIL: [ABS-EXEC] 위반이 baseline(${ABSEXEC_BASELINE}) 초과(${absexec}) — 레포 소유 실행물(scripts/*.sh·tools/*.ts·infra/**/*.sh·tests/gates/*.sh) 호출의 비-0 판정에 W1(echo/printf \"\$output\"|grep -q … 또는 run bash -c '… \"\$1\" …' _ \"\$out\") 또는 W2(같은 파일·같은 도구의 rc-eq-0 양성 대조) 중 하나를 세워라. cf. docs/adr/0007" >&2; rc=1; }
-  [ "$setcap" -le "$SETCAP_BASELINE" ] || { echo "FAIL: [SETCAP] 위반이 baseline(${SETCAP_BASELINE}) 초과(${setcap}) — 이름이 exactly/only/no other/전수/EVERY/정확를 선언하면 본문에 집합 등식 술어(문자열 등식 · -eq N · jq/yq contains(/join(\",\")/length ==/== [ 배열 리터럴) 중 하나를 걸어라. 집합이 아니라 단수 대상·조건 부사·합성어면 이름에서 그 어휘를 빼라. cf. docs/traps-detail.md 「이름 있는 집합의 상한 부재」" >&2; rc=1; }
+  [ "$setcap" -le "$SETCAP_BASELINE" ] || { echo "FAIL: [SETCAP] 위반이 baseline(${SETCAP_BASELINE}) 초과(${setcap}) — 이름이 exactly/only/no other/전수/EVERY/정확를 선언하면 본문에 집합 등식 술어(bracket-test 문자열 등식 · -eq N · jq/yq contains(/join(\",\")/length ==/== [ 배열 리터럴 · grep -qxF/-qx 구조적 등식) 중 하나를 걸어라. 집합이 아니라 단수 대상·조건 부사·합성어면 이름에서 그 어휘를 빼라. cf. docs/traps-detail.md 「이름 있는 집합의 상한 부재」" >&2; rc=1; }
 fi
 [ "$rc" -eq 0 ] && echo "check-bats-style: 중간 부정 0곳 + grep -qv 0곳 + [[ ]]·부재 단언·실행물 무증인·집합 상한 ratchet OK"
 exit "$rc"
