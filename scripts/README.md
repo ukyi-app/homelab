@@ -31,8 +31,9 @@
   토큰 또는 워크플로 파일 경로 — 단어만으로는 통과하지 않는다) + 항목 수 **상한**(스크립트 상수 `EXCL_MAX` — env
   오버라이드는 폐지됐다: 호출부에 보이지 않는 off-switch를 두지 않는다). 여기에 gate 도메인
   바닥값(``--floor gate=<n>`` — 러너 붕괴·대량 삭제)까지 셋이 각각 다른 축이다.
-  `--lint-excludes <파일>`은 레지스트리 계약만 보는 픽스처 모드다(그 외 인자는 exit 2 — 맨 인자로 회계를
-  끄는 off-switch를 두지 않는다).
+  `--lint-excludes <파일>`은 레지스트리 계약만 보는 픽스처 모드다. `--registry <파일>`은 (1)(2) 핵심
+  판정(고아·이중소유·gate 모순)까지 그 픽스처 레지스트리로 돌리는 전체 회계 모드다(형제:
+  `check-doc-index.sh --readme`). 그 외 인자는 exit 2 — 맨 인자로 회계를 끄는 off-switch를 두지 않는다.
 - **`check-app-deploy.sh`** — `apps/<name>/deploy/prod/` 배포 계약 가드. 필수 산출물 목록을
   `tools/app-deploy-schema.json`(SSOT)에서 읽어 강제(`source-repo` 누락/공백 = fail-closed) + **봉인 배선
   all-or-none 불변식**(봉인본⇔envFrom `<app>-secrets`⇔kustomization 등재⇔checksum/secrets, 부분 상태 거부)
