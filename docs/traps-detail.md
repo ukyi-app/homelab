@@ -432,14 +432,25 @@
   전에 `gh run list -w tf-reconcile.yaml --status in_progress`가 비어 있는지 확인할 것(근치는 followup).
 
 ### 상주 워크로드 자원 limit 블라인드스팟
-- **자원 limit 블라인드스팟:** 메모리 원장 게이트(`verify:ledger`/`ledger.rego`)는 docs/memory-ledger.md의
-  **마크다운 행만** 검증하고 라이브/소스 manifest와 교차하지 않는다 — 워크로드에 메모리 소비자를 추가하며
-  limit/행을 안 올려도 GREEN, OOM으로만 발현(vector OOM PR #85 포스트모템). 대칭으로 CPU도 starvation 축
-  (cpu request 없으면 점유율 보장 0 → 이웃 굶김). `tools/check-resource-limits.ts`가 상주 워크로드
-  (Deployment/DaemonSet/StatefulSet) main 컨테이너에 **cpu·memory request + memory limit**을 강제한다
-  (cpu limit은 CFS quota라 유휴서도 throttling → 비요구; starvation은 request로, OOM은 memory limit으로).
-  grep 셀렉터 붕괴 시 0매치 침묵통과(false-green)는 scan-floor로 차단. operator/원격-helm 런타임 생성처럼
-  의도적 미설정은 `policy/memory-limit-allowlist.txt`에 사유와 함께 등재(블라인드스팟 가시화).
+- **자원 limit 블라인드스팟:** 메모리 원장 게이트(`verify:ledger`/`ledger.rego`) **자체**는 지금도
+  docs/memory-ledger.md의 마크다운 행만 검증하고 매니페스트를 안 읽는다 — 원장 행의 limit을 손으로
+  고쳐도 rego는 초록이다(행 수·합계·request≤limit 같은 원장 **내부** 불변식만 본다). ⚠️ 2026-09-05
+  정정(티켓 62) — 예전엔 이 문단이 "라이브/소스 manifest와 교차하지 않는다"를 무조건자로 적어
+  두었는데, 그건 **원장 게이트 자신**에 대해서만 참이다. 별도 가드 `tools/check-resource-limits.ts`가
+  이제 두 스코프를 매니페스트와 기계 대조한다 — substrate 전체(`local-path-storage` 행, 티켓 26)와
+  platform 스코프 중 정적으로 완전한 6개 namespace(F1 정적 귀속 + F2 커버리지 파생, 티켓 62 — 나머지
+  namespace는 F2가 매번 다시 스캔해 파생한 제외 목록이지 블라인드스팟의 방치가 아니다). 남는 진짜
+  블라인드스팟은 두 갈래다: ① 위 대조 밖 namespace(argocd·cert-manager·cnpg-system·gateway·
+  sealed-secrets·tailscale proxy — 소스가 helm 렌더/원격 chart/런타임 생성이라 정적 회계가 원리적으로
+  못 본다) ② request가 아니라 memory **limit** 자체를 지우는 축은 `check-resource-limits.ts`의 필수
+  검사(아래)가 잡으므로, 남는 것은 그 필수 검사를 통과한 뒤 **원장 행과의 값 대조**뿐이다 — 대조
+  대상 밖 namespace에서 limit을 조용히 올려도 OOM으로만 발현한다(vector OOM PR #85 포스트모템이
+  최초로 겪은 그 케이스). 대칭으로 CPU도 starvation 축(cpu request 없으면 점유율 보장 0 → 이웃 굶김).
+  `tools/check-resource-limits.ts`가 상주 워크로드(Deployment/DaemonSet/StatefulSet) main 컨테이너에
+  **cpu·memory request + memory limit**을 강제한다(cpu limit은 CFS quota라 유휴서도 throttling →
+  비요구; starvation은 request로, OOM은 memory limit으로). grep 셀렉터 붕괴 시 0매치 침묵통과
+  (false-green)는 scan-floor로 차단. operator/원격-helm 런타임 생성처럼 의도적 미설정은
+  `policy/memory-limit-allowlist.txt`에 사유와 함께 등재(블라인드스팟 가시화).
 > 가드: `tools/check-resource-limits.ts`, `tests/test_resource_limits.bats`
 
 ### GHA run 기본 셸 pipefail 부재(bash -e {0})
