@@ -207,3 +207,31 @@ setup() {
   printf '%s' "$am" | grep -qF -- "equal: ['disk']"   # alertname이 다른 Bulk warning/critical을 disk로 묶어 억제
   printf '%s' "$am" | grep -q 'disk =~'             # disk 라벨 보유 알림만 한정(비-디스크 과억제 방지)
 }
+
+@test "receivers is a closed set of two: telegram and deadmanswitch (no rogue webhook)" {
+  # [7라운드 c71-2] 티켓 67 「다음 라운드 입력」 — receivers 배열 전체 길이에 등식이 없었다. 3번째
+  # receiver(어떤 라우트도 참조하지 않는 rogue webhook 등)를 몰래 추가해도 :28 "exactly one telegram
+  # receiver" @test는 name=="telegram"만 select해 세므로 형제 원소 추가에 반응하지 않는다(무증인).
+  # :36 route.routes 폐집합 등식과 동형으로 receivers 배열 자체를 length로 잠근다.
+  n="$(yq '.receivers | length' "$AMCFG")"
+  [ "$n" = "2" ]
+  names="$(yq '.receivers[].name' "$AMCFG")"
+  printf '%s' "$names" | grep -qFx 'telegram'
+  printf '%s' "$names" | grep -qFx 'deadmanswitch'
+}
+
+@test "deadmanswitch receiver's webhook url matches the relay Service host:port (no silent drift)" {
+  # [7라운드 c71-2] 티켓 67 「다음 라운드 입력」 — deadmanswitch-relay.yaml의 Service(9095)가 실
+  # 수신처인데 AM 쪽 webhook_configs[0].url은 그 host:port를 리터럴로 박고 있어 둘을 잇는 등식이
+  # 0건이었다(test_relay.bats는 relay 쪽만, 이 파일은 AM 쪽만 본다). Service 매니페스트를 SSOT로
+  # 읽어 url을 대조 — 포트·서비스명이 어긋나면 healthchecks.io ping이 조용히 끊긴다(dead-man switch
+  # 무력화, 관측 가능한 신호 없음).
+  RELAY="$ROOT/platform/victoria-stack/prod/deadmanswitch-relay.yaml"
+  [ -s "$RELAY" ]
+  svc_name="$(yq 'select(.kind=="Service" and .metadata.name=="deadmanswitch-relay") | .metadata.name' "$RELAY")"
+  [ "$svc_name" = "deadmanswitch-relay" ]
+  svc_port="$(yq 'select(.kind=="Service" and .metadata.name=="deadmanswitch-relay") | .spec.ports[0].port' "$RELAY")"
+  [ "$svc_port" = "9095" ]
+  url="$(yq '.receivers[] | select(.name=="deadmanswitch") | .webhook_configs[0].url' "$AMCFG")"
+  [ "$url" = "http://${svc_name}:${svc_port}/ping" ]
+}
