@@ -338,6 +338,6 @@ EOF
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'check-image-pins:apps.*열거 붕괴'
   out="$output"
-  run grep -q '^SCAN: check-image-pins:' <<<"$out"
-  [ "$status" -ne 0 ]
+  n=$(printf '%s\n' "$out" | grep -c '^SCAN: check-image-pins:' || true)
+  [ "$n" -eq 0 ]
 }

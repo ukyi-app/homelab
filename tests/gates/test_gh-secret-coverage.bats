@@ -210,8 +210,8 @@ PY2
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "check-gh-secret-coverage:secrets.*열거 붕괴"
   out="$output"
-  run grep -q "^SCAN: check-gh-secret-coverage:" <<<"$out"
-  [ "$status" -ne 0 ]
+  n=$(printf '%s\n' "$out" | grep -c "^SCAN: check-gh-secret-coverage:" || true)
+  [ "$n" -eq 0 ]
 }
 
 # ── vars 도메인(repo Actions variable) ──────────────────────────────────────
