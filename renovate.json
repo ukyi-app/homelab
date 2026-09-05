@@ -54,11 +54,21 @@
     },
     {
       "customType": "regex",
-      "description": "k3s-bootstrap versions.env — local-path-provisioner. ⚠️ 룰 파일(r8-substrate.yaml)의 image_spec 리터럴을 **같은 매니저**로 함께 매치한다 — 두 자리가 한 PR에서 오르지 않으면 tests/gates/test_vmalert-config.bats의 핀 등식 레인이 그 PR을 red로 만든다. ⚠️ **매니페스트(storage/local-path-provisioner.yaml)는 일부러 넣지 않는다** — 넣으면 그 파일의 tag-only 참조가 `renovateReaches`로 '소유됨'이 되어 policy/image-ownership.json의 무소유 선언이 죽은 선언으로 red가 된다(실측 2026-09-03). 그 선언은 'digest 소유자가 없다'는 owner 결정을 담고 있으므로 매니저 확장으로 지울 자리가 아니다. 매니페스트 태그 ↔ versions.env 등식은 test_06-storage-manifests.bats가 계속 지고, 그 자리는 owner가 손으로 맞춘다(알려진 잔여).",
+      "description": "k3s-bootstrap versions.env — local-path-provisioner **태그** 소유자(freshness). ⚠️ 룰 파일(r8-substrate.yaml)의 image_spec 리터럴 중 **태그 부분만** 같은 매니저로 함께 매치한다(정규식이 `@` 앞에서 멈춘다) — 두 자리가 한 PR에서 오르지 않으면 tests/gates/test_vmalert-config.bats의 핀 등식 레인이 그 PR을 red로 만든다. ⚠️ 감사 60 prov-1~3(2026-09-05) 이후: 매니페스트(storage/local-path-provisioner.yaml)는 이제 `${LOCAL_PATH_PROVISIONER_IMAGE}` 플레이스홀더뿐이라 이 매니저가 여전히 안 보는 대상 자체가 아니다(플레이스홀더는 renovateReaches 판정 밖 — visibleRefs가 `$`로 시작하는 값을 참조로 잡지 않는다). **digest** 소유자는 아래 별도 매니저(LOCAL_PATH_PROVISIONER_IMAGE) — 이 매니저와 별도 PR로 갈리면(부분 머지) 태그가 어긋나 test_01-versions.bats·위 등식 bats 둘 다 red다.",
       "managerFilePatterns": ["/^infra/k3s-bootstrap/versions\\.env$/", "/^platform/victoria-stack/prod/rules/r8-substrate\\.yaml$/"],
-      "matchStrings": ["LOCAL_PATH_PROVISIONER_VERSION=\"(?<currentValue>v[^\"]+)\"", "image_spec!=\"rancher/local-path-provisioner:(?<currentValue>v[0-9][^\"]*)\""],
+      "matchStrings": ["LOCAL_PATH_PROVISIONER_VERSION=\"(?<currentValue>v[^\"]+)\"", "image_spec!=\"rancher/local-path-provisioner:(?<currentValue>v[0-9][^\"@]*)(?:@sha256:[a-f0-9]+)?\""],
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "rancher/local-path-provisioner"
+    },
+    {
+      "customType": "regex",
+      "description": "k3s-bootstrap versions.env — local-path-provisioner **digest** 소유자(태그 소유자는 위 freshness 매니저). 헬퍼(LOCAL_PATH_HELPER_IMAGE, 바로 아래)와 같은 정규식 형태 — datasource=docker, 현재 핀된 태그의 digest만 추적한다(태그 자체의 상향은 위 freshness 매니저 몫). ⚠️ r8-substrate.yaml의 image_spec 리터럴 중 **digest 부분**을 같은 매니저로 함께 매치한다 — 두 자리(versions.env·룰 파일)가 한 PR에서 함께 안 오르면 tests/gates/test_vmalert-config.bats의 핀 등식 레인이 그 PR을 red로 만든다. ⚠️ 이 매니저와 위 freshness 매니저는 **서로 다른 매니저**라 태그 bump와 digest bump가 별도 PR로 갈릴 수 있다 — packageRules의 digest 그룹(\"image digests\")이 digest 업데이트끼리는 묶지만 태그 매니저와는 묶지 않는다. 그 갈림은 test_01-versions.bats·tests/gates/test_vmalert-config.bats의 태그 등식이 잡는다(사본이 아니라 등식이 인터록이다).",
+      "managerFilePatterns": ["/^infra/k3s-bootstrap/versions\\.env$/", "/^platform/victoria-stack/prod/rules/r8-substrate\\.yaml$/"],
+      "matchStrings": [
+        "LOCAL_PATH_PROVISIONER_IMAGE=\"(?<depName>[^:\"]+):(?<currentValue>[^@\"]+)@(?<currentDigest>sha256:[a-f0-9]+)\"",
+        "image_spec!=\"(?<depName>rancher/local-path-provisioner):(?<currentValue>v[0-9][^\"@]*)@(?<currentDigest>sha256:[a-f0-9]+)\""
+      ],
+      "datasourceTemplate": "docker"
     },
     {
       "customType": "regex",
