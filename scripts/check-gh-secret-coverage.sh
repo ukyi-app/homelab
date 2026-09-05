@@ -20,7 +20,7 @@
 #   ⚠️ 원장 스키마는 **건드리지 않는다**. gh_secrets 같은 필수 필드를 더하면 기존 픽스처 3건이
 #      rc=2로 죽고(실측) `expires` 형식 가드가 항진명제가 된다 — 그 대가를 치를 이유가 없다.
 #
-# ⚠️ **열거 규칙 4조 — 왜 단순 grep이 틀리는가**:
+# ⚠️ **열거 규칙 5조 — 왜 단순 grep이 틀리는가**:
 #  ① 표현식 컨텍스트(`${{ … secrets.X … }}`)만 센다. 파일명(`<app>-secrets.sealed.yaml`)·산문
 #     (`secrets.tf`)이 걸려 lowercase 유령 4건이 잡혔다(실측: sealed/tf/ts/yaml).
 #  ② `GITHUB_TOKEN`은 GitHub 제공·run별 임시라 회전 대상이 아니다 — 제외(하드코딩 1건, 아래 자기검사 있음).
@@ -31,6 +31,11 @@
 #     · 로컬 호출(`uses: ./.github/workflows/_*.yaml` + `secrets: inherit`) → caller=homelab → 소유.
 #     · 외부 호출(reusable-*.yaml, 로컬 호출 0건)              → caller=앱 레포   → 도메인 밖(파일 통째).
 #     두 신호(로컬 호출 여부 ↔ `_*`/`reusable-*` 네이밍 규약)가 **어긋나면 fail-loud** — 조용한 오분류 대신.
+#  ⑤ **표기법 축 — 인덱스 표기(`secrets['X']`/`vars['Y']`)는 열거하지 않고 거부한다.** GitHub 표현식은
+#     컨텍스트 접근에 점·대괄호 두 표기를 주는데 ①~④는 전부 점 표기 정규식이라 대괄호는 ENUM에도
+#     `residue` 자기검사에도 안 잡힌다(자기검사조차 같은 점 표기라 원리적으로 무증인이다). secret/var
+#     이름은 `[A-Za-z0-9_]`뿐이라 대괄호가 **필요한 경우가 없고**(순수 선택적 문법), 동적 이름
+#     (`secrets[matrix.x]`)은 정적 열거의 도메인 밖이다 ⇒ 열거를 넓히는 대신 표기를 fail-loud로 막는다.
 #
 # ⚠️ composite action(.github/actions/*)은 도메인 밖이다 — composite에는 secrets 컨텍스트가 **없고**
 #    호출 워크플로가 `with:`로 넘긴 입력을 env로 받는다(telegram-notify가 bot-token 입력을 받는 구조).
@@ -105,6 +110,12 @@ while IFS= read -r f; do
   residue="$(comm -23 <(printf '%s\n' "$allrefs" | grep -v '^$' || true) \
                       <(printf '%s\n' "$refs" | grep -v '^$' || true) | grep -E '^[A-Z][A-Z0-9_]*$' || true)"
   [ -z "$residue" ] || bad="${bad}FAIL: ${f}: 표현식 밖 대문자 secrets 참조(열거자가 놓친 형태): $(printf '%s' "$residue" | tr '\n' ' ')
+"
+  # 규칙 ⑤ — 인덱스 표기 거부(열거를 넓히지 않고 표기를 막는다). residue 자기검사는 **점 표기 정규식**이라
+  # `secrets['X']`를 allrefs에도 못 담아 원리적으로 무증인이다. 이 줄은 cross-repo `continue`(아래)보다
+  # 앞이라 전 파일이 밟는다. secrets·vars 두 레인을 한 grep으로 덮는다(vars 레인엔 residue가 없다).
+  brk="$(grep -ohE '\$\{\{[^}]*\b(secrets|vars)\[' "$f" || true)"
+  [ -z "$brk" ] || bad="${bad}FAIL: ${f}: secrets[…]/vars[…] 인덱스 표기 — 열거자는 점 표기만 센다(분류 대조 밖). 점 표기로 쓰라.
 "
   decl="$(yq -r '.on.workflow_call.secrets // {} | keys | .[]' "$f" 2>/dev/null | LC_ALL=C sort -u || true)"
   iscall="$(yq -r '.on | has("workflow_call")' "$f" 2>/dev/null || echo false)"
