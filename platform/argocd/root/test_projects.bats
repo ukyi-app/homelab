@@ -273,7 +273,8 @@ setup() {
 $(cd "$ROOT" && yq 'select(.kind=="Namespace") | [.metadata.name, (.metadata.annotations."argocd.argoproj.io/sync-options" // "MISSING")] | join(" -> ")' "$f" | grep -v '^---$' | grep .)
 EOF
   done
-  if [ -n "$missing" ]; then echo "Prune=false 없는 Namespace:"; echo "$missing"; return 1; fi
+  n=$(printf '%s' "$missing" | grep -c . || true)
+  [ "$n" -eq 0 ] || { echo "Prune=false 없는 Namespace:"; echo "$missing"; return 1; }
 }
 
 # --- appset finalizer (설계 §D, teardown cascade prune) ---

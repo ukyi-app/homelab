@@ -1660,6 +1660,32 @@ selfHeal과 플립플롭한다.
   `["'&;)]+$` 형태는 이 함정에 걸리지 않는다 — 같은 파일의 레인 D가 그 형태다.)
 - ⇒ **그리고 픽스처는 도메인이 실제로 쓰는 표기로 적는다.** 양성 픽스처를 표기별로 전부 걸어라
   (`"…"` · `'…'` · `-p "host:c:h"` · `--publish="…"`). 하나만 걸면 다음 표기로 조용히 빠져나간다.
+- ⚠️ **부분문자열 매치는 fail-open이다 — CONTRIBUTING.md 「새 코드 배치 규칙」의 짝 규칙.** 12라운드
+  한 창에서 이 함정이 서로 다른 축(서로 다른 검출기) 4곳에서 5건 독립 재발했다 — 전부 "토큰이
+  파일 어딘가에 있다"를 "그 위치에서 그 의미로 쓰였다"로 오인하는 동일 패턴이다(다섯 자리 모두
+  12라운드 티켓 75·76 — #656·#657 — 에서 상환됐고, 아래는 상환 전 형태의 기록이다):
+    · `check-doc-index.sh:106` — bullet 등재 판정이 `grep -F`(줄 앵커 없음)라, README 안 산문
+      (변경 이력·함정 서사·인용문)에 같은 굵게+백틱+대시 장식 문자열만 있어도 등재 증인으로
+      오인된다(실측: 실제 bullet을 지우고 산문에 같은 문자열을 심어도 rc=0 "OK" 유지).
+    · `check-app-deploy.sh:71` — E축(envFrom 소비 판정)이 `.envFrom[]?.secretRef.name` 경로
+      한정이 아니라 문서 전체 `..` 재귀라, envFrom과 무관한 자유형 필드(예 `livenessProbe`)에 둔
+      동형 `secretRef.name`도 "봉인본이 envFrom으로 배선됐다"는 증거로 오판한다.
+    · `check-host-ports.sh:209` — [C] 레인의 정의처 면제가 `hp_(pick_port|run_published)` 결합
+      정규식 하나라, 절대 호출되지 않는 `hp_pick_port` 스텁 하나만으로 "배정 lib을 쓴다" 강제
+      전체가 SSOT 백스톱 없이 영구 면제된다.
+    · `check-bats-style.sh`의 [SETCAP] 수 등식 술어 — 종료 앵커(`-eq N[ \t]*]`) 없이 `-eq[ \t]+
+      [0-9]+`만 텍스트 매치하면, 단언과 무관한 `run` 문 CLI 인자(예 `--retry-eq 5`)에 우연히
+      등장한 숫자만으로 이 술어가 무력화된다(cf. 아래 「이름 있는 집합의 상한 부재」 절 — 이
+      파일은 이미 종료 앵커로 상환했고, 8번째 술어(자기유도 변수 등식)를 새로 추가할 때도 같은
+      앵커를 요구해 재발을 막았다).
+    · `check-bats-accounting.sh`의 `venue_calls()` — 줄 전체 주석만 걷어내고 코드 줄에 붙은
+      **trailing 주석**은 안 걷어낸다. 실제 호출 없이 같은 줄 trailing 주석에 도메인 파일 경로만
+      적어도(`@echo "…" # see tests/_fixtures/test_x.bats for context, not actually called`) 언급
+      증인으로 오인된다 — 같은 함수 주석이 "산문 속 언급" 벡터는 이미 막았지만 trailing-주석
+      벡터는 열려 있었다(12라운드 비평가 실증 → 티켓 76 #657이 quote-aware 스트립으로 상환).
+  ⇒ **처방(일반형): 검출기가 문자열 매치로 실재를 증명할 때는 주석·문자열 리터럴을 먼저 걷어내고
+  행두 앵커·경로(YAML 키 스코프 등) 한정·bracket-test 종료 앵커로 위치까지 좁힌다.** 존재만 재는
+  무앵커 `grep -F`/결합(alternation) 정규식/종료 앵커 없는 술어는 그 자체로 fail-open 후보다.
 > 가드: `scripts/check-host-ports.sh`, `tests/gates/test_host-ports.bats`
 
 ### heredoc 상태 기계가 주석 규칙보다 먼저 돌면, `<<PY`를 인용한 주석 한 줄이 파일의 나머지를 통째로 지운다

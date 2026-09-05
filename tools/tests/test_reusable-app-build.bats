@@ -65,7 +65,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; F="$ROOT/.github/workf
   [ "$(yq -r '.on.workflow_call.inputs.push.default' "$F")" = "true" ]
 }
 
-@test "reusable-app-build: build-only mode is honest (push input wired; login+deploy-trigger gated on it)" {
+@test "reusable-app-build: no-push mode is honest (push input wired; login+deploy-trigger gated on it)" {
   command -v yq >/dev/null || skip "yq required"
   # push=false = BUILD ONLY. 세 배선이 전부 있어야 정직하다 — 하나라도 빠지면 PR 빌드가 밀거나(레지스트리 오염)
   # 밀지도 않은 이미지로 배포를 깨운다.

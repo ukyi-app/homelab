@@ -88,7 +88,7 @@ fx_rewrite() {
   printf '%s' "$output" | grep -q '리비전이 갈렸다'
 }
 
-@test "ApplicationSet git generator revision is in the domain (targetRevision-only edit is rejected)" {
+@test "ApplicationSet git generator revision is in the domain (a targetRevision-alone edit is rejected)" {
   # ⚠️ 이 @test가 이 가드의 존재 이유에 가장 가깝다. generator는 `targetRevision`이 아니라
   #    `revision`이라, 마이그레이션 편집이 **구조적으로 빠뜨리는** 자리다. 재귀 열거가 아니라
   #    모양을 하나씩 적었다면 여기가 조용히 빠진다.
@@ -205,7 +205,7 @@ fx_rewrite() {
 }
 
 # ── CI 배선 ─────────────────────────────────────────────────────────────────────────────────
-@test "ci.yaml fills EXPECT_REVISION only for main-bound runs (not unconditionally)" {
+@test "ci.yaml fills EXPECT_REVISION conditionally for main-bound runs, not unconditionally" {
   # 무조건 켜면 마이그레이션 브랜치의 gate가 영구 red다. 조건식이 두 진입 경로(PR base_ref ·
   # push ref)를 **둘 다** 덮는지 구조로 단언한다 — 텍스트 grep은 주석에 걸린다(#441의 교훈).
   y="$ROOT/.github/workflows/ci.yaml"

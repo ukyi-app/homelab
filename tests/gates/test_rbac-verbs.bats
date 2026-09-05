@@ -144,7 +144,8 @@ exempt_verbs_of() {
 $v
 EOF
   done
-  [ -z "$bad" ] || { echo "read-only 화이트리스트 밖 verb(면제 로스터에도 없음):$bad"; false; }
+  bad_n=$(printf '%s' "$bad" | wc -w)
+  [ "$bad_n" -eq 0 ] || { echo "read-only 화이트리스트 밖 verb(면제 로스터에도 없음):$bad"; false; }
 }
 
 @test "every exemption entry is load-bearing (path is enumerated and the verb is actually used)" {
