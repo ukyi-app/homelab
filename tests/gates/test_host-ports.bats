@@ -162,6 +162,23 @@ run_am() { # $1=격리 루트
   run bash "$S" "$FX/clean.sh"; [ "$status" -eq 0 ]
 }
 
+@test "lane C and P do not treat an error-hint string mentioning the lib names as wiring (active-string control)" {
+  # ★ 적대적 리뷰가 잡은 자리 — nocomment()는 주석만 걷고 **문자열 리터럴**은 안 걷는다. 실패 힌트
+  #   echo 한 줄에 "host-port.sh"·"hp_pick_port"·"hp_run_published"를 적기만 해도(호출/소스가 아니라
+  #   언급만) 예전 판은 그것을 배정·기동 프리미티브 사용의 증인으로 오인했다 — 마지막 방어선이
+  #   활성 코드의 문자열 한 줄로 무너졌다. 증인은 호출/소스 표기만 인정해야 한다.
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'AM_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind((\"\",0)); print(s.getsockname()[1])")' \
+    'docker run -d --name am -p "127.0.0.1:${AM_PORT}:9093" img' \
+    'echo "힌트: 포트는 hp_pick_port로 배정받고 컨테이너는 hp_run_published(tests/gates/lib/host-port.sh)로 띄워라" >&2' \
+    > "$FX/hintonly.sh"
+  run bash "$S" "$FX/hintonly.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[C]'
+  echo "$output" | grep -qF '[P]'
+}
+
 @test "lane D fires on a port variable the file fills with a literal itself" {
   # ★ A·B·C가 모두 침묵하는 자리다 — 예전 skopeo-timeout-smoke.sh:64가 `PORT=18443` 뒤에
   #   `"$PORT"`로 썼다. 이 레인이 없으면 lib을 source하기만 하면 고정 포트가 통과한다.

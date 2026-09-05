@@ -182,20 +182,31 @@ FNR==1 { flush_prev(); inhere=0; delim=""; herestart=0; prevfile=FILENAME; nfile
 # ── [C] 호스트 포트를 잡는 파일이 배정 lib을 쓰는가(파일 단위) ──────────────────────
 # publish·헬퍼 쪽 binds는 위 [A]·[B] 블록이 표시했다(판정을 두 벌로 두면 갈린다).
 # ⚠️ **행간 주석은 배정으로 치지 않는다.** 텍스트 등장만 보면 "host-port.sh 라고 적기만 해도" 통과해
-#    마지막 방어선이 주석 한 줄로 무너진다.
-{ if (nocomment($0) ~ /host-port\.sh|hp_pick_port/) used[FILENAME] = 1 }
+#    마지막 방어선이 주석 한 줄로 무너진다. ★ 그런데 **활성 코드의 문자열 리터럴**(에러 힌트·진단문)도
+#    같은 구멍이다 — nocomment()는 주석만 걷지 문자열은 안 걷는다. 실측: 실패 힌트 echo 한 줄에
+#    "host-port.sh"·"hp_pick_port"를 적기만 해도 마지막 방어선이 뚫렸다(뮤테이션 재현). 증인을
+#    **호출/소스 표기로 앵커한다** — (a) source 줄 (b) 변수 간접 소스(vmalert-e2e.sh:75·81의
+#    `_VME_HP_LIB="…/host-port.sh"` 관용구가 정확히 이 모양이라 소스 줄 앵커만으로는 오탐이었다)
+#    (c) `hp_pick_port` **호출**(`$(hp_pick_port …)`) — 이름 언급이 아니라 호출/소스여야 증인이다.
+{ if (nocomment($0) ~ /^[ \t]*(\.|source)[ \t]+[^#]*host-port\.sh/) used[FILENAME] = 1 }
+{ if (nocomment($0) ~ /^[ \t]*[A-Za-z_][A-Za-z0-9_]*=[^#]*host-port\.sh/) used[FILENAME] = 1 }
+{ if (nocomment($0) ~ /\$\([ \t]*hp_pick_port/) used[FILENAME] = 1 }
 # ── [P] publish 컨테이너를 띄우는 파일이 기동 프리미티브를 쓰는가(레인 E · 파일 단위) ────────────
 # ⚠️ [C]와 같은 규율로 **행간 주석은 사용으로 치지 않는다** — 이름을 적기만 해도 통과하면 마지막
 #    방어선이 주석 한 줄로 무너진다. 이 레포의 하네스는 자기가 고친 함정을 인용하며 설명하므로
-#    `hp_run_published`라는 이름은 주석에 실제로 등장한다.
-{ if (nocomment($0) ~ /hp_run_published/) usesrun[FILENAME] = 1 }
+#    `hp_run_published`라는 이름은 주석에 실제로 등장한다. [C]와 같은 이유로 **호출**(`$(hp_run_published`)만
+#    증인으로 친다 — 언급은 증인이 아니다.
+{ if (nocomment($0) ~ /\$\([ \t]*hp_run_published/) usesrun[FILENAME] = 1 }
 # **정의처는 소비자가 아니다.** 파일 목록이 아니라 "이 파일이 그 함수를 정의하는가"라는 규칙이라
-# (레인 D의 `HP_` 이름공간 면제와 같은 형태) lib을 옮겨도 판정이 갈리지 않는다.
+# (레인 D의 `HP_` 이름공간 면제와 같은 형태) lib을 옮겨도 판정이 갈리지 않는다. [C]에도 같은 면제가
+# 필요하다 — 정의처 자신은 호출/소스 표기가 없어 위 세 패턴 어디에도 안 걸리기 때문이다.
+{ if (nocomment($0) ~ /^[ \t]*hp_(pick_port|run_published)[ \t]*\(\)/) defs[FILENAME] = 1 }
 { if (nocomment($0) ~ /^[ \t]*hp_run_published[ \t]*\(\)/) { if (defsrun[FILENAME] != 1) ndefs++; defsrun[FILENAME] = 1 } }
 
 END {
   flush_prev()
   for (f in binds) {
+    if (defs[f] == 1) continue
     if (used[f] != 1) {
       printf "%s:0: [C] 호스트 포트를 잡는데 lib/host-port.sh를 쓰지 않는다(배정을 안 받았다)\n", f
       bad = 1
