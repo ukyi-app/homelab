@@ -406,6 +406,33 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "detector rejects a GNU-grep permutation grep -v PAT -q FILE (round11 bats-style-lanes-2 PoC)" {
+  # ⚠️ 착지 전: qv_seg는 첫 비-플래그 토큰(패턴 인자)에서 스캔을 끊어 그 뒤의 `-q`를 못 봤다.
+  #    GNU grep은 getopt permutation으로 옵션이 위치 인자 사이에 흩어져도 전부 옵션으로 읽는다 —
+  #    `grep -v EXCLUDE -q FILE`은 실제로 `-qv EXCLUDE FILE`과 동치다(라이브 실측).
+  q="-q"; v="-v"
+  printf '%s\n' \
+    '@test "qv permutation form" {' \
+    "  grep $v EXCLUDE $q \"\$file\"" \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_qv_perm.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_qv_perm.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[QV\]'
+}
+
+@test "a quoted pipe inside a grep pattern is NOT split into a fake segment boundary (false-positive control, replicated from test_audit-orphan-pv.bats:9)" {
+  # positional 카운터를 qv_seg에 넓히기만 하면(따옴표-인식 없이) 이 정당한 관용구가 라이브
+  # 회귀를 낸다 — 실측 확인됨(va.corrected_fix). mask_pipe(세그먼트 분해 전 마스킹) +
+  # qv_tokenize(따옴표-인식 토큰화) 둘 다 있어야 이 대조군이 계속 무오탐이다.
+  printf '%s\n' \
+    '@test "root whitelist regression control (quoted pipe pattern)" {' \
+    "  run grep -Eq 'command -v kubectl|command -v yq' \"\$S\"; [ \"\$status\" -eq 0 ]" \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_qv_quoted_pipe_ok.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_qv_quoted_pipe_ok.bats"
+  [ "$status" -eq 0 ]
+}
+
 @test "the state machine reaches 0-column function bodies, not just @test bodies" {
   # 착지 전 검출기는 `^@test … {`로만 상태에 들어가서, 도메인에 있는 파일이어도 setup()·헬퍼
   # 본문은 전부 판정 밖이었다(그 갭을 가드 헤더가 「부재-단언 클래스를 얹을 때의 몫」으로 계상해
