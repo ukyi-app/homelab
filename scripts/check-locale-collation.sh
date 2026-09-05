@@ -134,7 +134,11 @@ for f in "${FILES[@]}"; do
   esac
   # ⚠️ 언급이 아니라 **호출**을 센다 — 가드 머리 주석마다 "guard_init(…)이 소유한다" 산문이 있어,
   #    토큰 존재만 보면 호출 줄을 지워도 초록이다(리뷰 실측). 주석 스트립 후 행두 호출만 인정한다.
-  sed 's|^[[:space:]]*#.*||' "$f" | grep -qE '^[[:space:]]*guard_init[[:space:]]' \
+  # ⚠️ 파이프가 아니라 herestring이다 — `sed … | grep -q`는 pipefail 아래에서 grep -q의 조기 종료가
+  #    sed를 SIGPIPE(141)로 죽여 **매치가 있었는데도** 「누락」으로 판정한다(AGENTS.md 함정 — 부하 아래
+  #    확률적: 2026-09-05 로컬 3회 관찰 + PR #641 gate red 실측). check-sigpipe-writers.sh의 분모(②
+  #    printf/echo "$var" writer)는 이 파일-writer 형태를 안 본다 — 그 확장은 다음 라운드 입력.
+  grep -qE '^[[:space:]]*guard_init[[:space:]]' <<<"$(sed 's|^[[:space:]]*#.*||' "$f")" \
     || d_viol="${d_viol}${f}: [D] 가드 프롤로그 누락 — guard_init(scripts/lib/guard.sh)를 불러라(LC_ALL 전역 export·ROOT·scan-floor가 커널 소유다)"$'\n'
 done
 if [ -n "$d_viol" ]; then
