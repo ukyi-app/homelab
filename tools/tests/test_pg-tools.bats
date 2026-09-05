@@ -6,6 +6,10 @@ DF="ops/pg-tools/Dockerfile"
   run grep -iE 'postgresql-client-18' "$DF"; [ "$status" -eq 0 ]
   run grep -iE 'rclone' "$DF"; [ "$status" -eq 0 ]
   run grep -iE 'curl' "$DF"; [ "$status" -eq 0 ]
+  # ⚠️ 회귀 가드(#424) — stage-level ARG 기본값은 BuildKit predefined platform arg를 이겨(실측:
+  # ARG TARGETARCH=arm64 + --platform linux/amd64 → TARGETARCH=[arm64]) amd64 빌드에 arm64 바이너리를
+  # 심는다. 기본값 없는 정확한 형태만 통과(존재-단언 — 형제: test_ops-repin.bats의 FROM 라인 단언).
+  run grep -qE '^ARG TARGETARCH$' "$DF"; [ "$status" -eq 0 ]
 }
 
 @test "pg-tools kubectl pin equals the k3s release pin in versions.env (no floating channel)" {
