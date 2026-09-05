@@ -35,6 +35,14 @@ const RENOVATE_PATH = "renovate.json";
 
 // `image:`/`imageName:` 스칼라. 앵커해서 `logo_image:`·경로 속 부분매치를 막는다(핀 게이트와 같은 어휘).
 const IMG_KEY = /^[ \t]*(?:-[ \t]+)?(image|imageName):[ \t]*["']?([a-z0-9][^\s"'#]*)/gm;
+// `image: >-`/`image: |` — YAML 블록 스칼라 표기. IMG_KEY는 값 첫 글자로 `[a-z0-9]`를 요구해 이 표기에서
+// 매치가 끊긴다. kubectl·kustomize·ArgoCD는 이 표기를 한 줄 스칼라와 동일하게 적용하지만, IMG_KEY·
+// scripts/check-image-pins.sh의 형제 어휘·Renovate kubernetes manager 어느 것도 이 표기를 추출하지
+// 못한다 — 즉 이 표기로 쓰인 이미지는 참조 스캐너·핀 게이트·freshness 갱신 전부의 바깥에 산다
+// (감사 6라운드 grep-c-2, 실측 2026-09-04: platform/homepage/prod/deployment.yaml을 `image: >-` +
+// digest 제거로 바꾸면 refs 43→42·check-image-pins.sh 36→35 양쪽 rc=0으로 무증인). 열거를 넓히지
+// 않고(추출은 원리적으로 못 한다) fail-closed 위반으로 낸다 — 표기 자체를 거부한다.
+const IMG_BLOCK_SCALAR = /^[ \t]*(?:-[ \t]+)?(?:image|imageName):[ \t]*[|>]/gm;
 // 이미지처럼 생긴 문자열 — 숨은(base64) 참조 판정용. 최소 `<호스트|경로>/<이름>:<태그>` 또는 `<이름>:<태그>`.
 const IMG_SHAPE = /^[a-z0-9][a-z0-9._/-]*[a-z0-9](?::[\w][\w.-]*)?(?:@sha256:[0-9a-f]{64})?$/;
 // base64 후보 — YAML 블록 스칼라로 **줄바꿈**될 수 있어 조각을 이어 붙인 뒤 판정한다.
@@ -270,6 +278,9 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
   const refs: Ref[] = [];
   for (const e of walkManifests("image-ownership", root)) {
     refs.push(...visibleRefs(e.path, e.text), ...blockRefs(e.path, e.text), ...dockerfileRefs(e.path, e.text), ...hiddenRefs(e.path, e.text));
+    for (const _ of e.text.matchAll(IMG_BLOCK_SCALAR)) {
+      bad.push(`${e.path}: image 블록 스칼라 표기(\`>\`/\`|\`)는 참조 스캐너(IMG_KEY·check-image-pins.sh·Renovate kubernetes manager) 밖이다 — 한 줄 스칼라로 써라`);
+    }
   }
 
   // I1 — 같은 `repo:tag`는 같은 digest여야 한다. 핀 게이트가 못 보는 축이다(D-1).

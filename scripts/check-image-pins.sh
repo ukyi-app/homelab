@@ -73,6 +73,11 @@ MIN_SCAN_APPS="$(floor_of check-image-pins:apps "$MIN_SCAN_APPS")"   # 레인2 �
 [ -z "$ALLOWLIST" ] && ALLOWLIST="$ROOT/policy/image-pin-allowlist.txt"
 
 # 앵커된 이미지 키 정규식 — `logo_image:`·경로 내 `my-image:` 부분매치 방지(리스트 아이템 `- ` 허용).
+# ⚠️ IMG_KEY는 `image: >-`/`image: |`(YAML 블록 스칼라) 표기에서 매치가 끊긴다 — 이 레인은 그 표기를
+#    검출하지 않는다(사본 검출기를 두지 않는다). 소유자는 tools/check-image-ownership.ts의
+#    IMG_BLOCK_SCALAR(감사 6라운드 grep-c-2) — repo-walk 스코프 `image-ownership`이 이 레인의
+#    `platform-image-refs`·`apps-values`의 상위집합이라, 그 표기가 착지하면 소유권 회계가 먼저 red를
+#    내 이 레인에 도달하지 못한다.
 IMG_KEY='^[[:space:]]*(-[[:space:]]+)?(image|imageName):[[:space:]]*'
 
 # 열거는 공유 워커(tools/lib/repo-walk.ts)가 소유한다 — tracked 열거·제외 어휘·열거 붕괴 바닥값이

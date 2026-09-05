@@ -352,6 +352,29 @@ PY
   [ "$status" -eq 0 ]
 }
 
+# ── grep-c-2(감사 6라운드): `image: >-`/`image: |` 블록 스칼라는 IMG_KEY에 투명하다 ─────────────────
+# YAML은 `image: >-\n  ghcr.io/x/y:v1`을 한 줄 스칼라와 동일하게 해석하고 kubectl·kustomize·ArgoCD도
+# 똑같이 적용하지만, IMG_KEY(값 첫 글자로 [a-z0-9] 요구)는 이 표기에서 매치가 끊긴다 — 그러면 그 참조는
+# check-image-pins.sh의 형제 어휘·Renovate kubernetes manager에도 안 보여 소유권·핀·freshness 세
+# 스캐너 전부의 바깥에 산다(실측 2026-09-04: platform/homepage/prod/deployment.yaml을 이 표기로 바꾸면
+# refs 43→42·check-image-pins.sh 36→35 양쪽 rc=0 — 무증인). IMG_BLOCK_SCALAR가 그 표기 자체를
+# fail-closed 위반으로 낸다(추출은 원리적으로 못 하므로 열거를 넓히지 않는다).
+@test "an image: block scalar notation is rejected (IMG_KEY, the pin gate and Renovate cannot see it)" {
+  t="$(_fixture blockscalar)"
+  printf 'image: >-\n  ghcr.io/ukyi-app/blockscalar:v1\n' > "$t/platform/comp/prod/blockscalar.yaml"
+  git -C "$t" add -A
+  run GUARD --repo-root "$t" $FIXTURE_ARGS
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "블록 스칼라"
+
+  # 대조군 — 같은 값을 한 줄 스칼라로 쓰면 이 검출기는 침묵한다(픽스처 조립 자체의 실패가 아니다).
+  u="$(_fixture blockscalar_ctrl)"
+  printf 'image: ghcr.io/ukyi-app/blockscalar:v1\n' > "$u/platform/comp/prod/blockscalar.yaml"
+  git -C "$u" add -A
+  run GUARD --repo-root "$u" $FIXTURE_ARGS
+  [ "$status" -eq 0 ]
+}
+
 @test "the pin gate no longer claims chart internals are Renovate-owned (header and success message)" {
   # 이 PR이 거짓이라 문서화한 주장이 **원래 자리**에 남으면 서술 불일치다. 헤더 10행이 "성공 메시지도
   # 이 경계를 반영"을 계약으로 걸고 있으므로 둘을 함께 본다.
