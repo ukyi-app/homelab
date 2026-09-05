@@ -64,3 +64,19 @@ guard_with() { # $1: 잡 이름, $2: with 키 — 그 잡의 tf-destroy-guard �
     [ "$m" = "1" ]
   done
 }
+
+@test "iac.yaml accounting job's fork boundary stays head.repo.full_name == github.repository" {
+  # wf-iac-actions-1: G-09 준비상태 회계(accounting job)는 fork PR을 원장 면제가 아니라 트리거
+  # 경계로 제외한다(140-147행 주석) — 그런데 check-workflow-readiness.ts의 checkStatic은
+  # !cancelled() 존재만 정규식으로 보고 이 fork 절은 파싱하지 않는다(무증인). `==`가 `!=`로 반전되면
+  # same-repo PR에서 accounting이 꺼져(G-09가 막으려던 침묵 재발) fork PR마다는 spurious red가 뜬다.
+  cond="$(yq -r '.jobs.accounting.if' "$WF")"
+  [ -n "$cond" ]   # 비공허 바닥값 — 잡 리네임으로 추출이 0줄이면 아래 비교가 공허해진다
+  case "$cond" in
+    *'head.repo.full_name == github.repository'*) : ;;
+    *)
+      echo "unwitnessed fork boundary: accounting job의 if에 'head.repo.full_name == github.repository'가 없다('$cond')"
+      false
+      ;;
+  esac
+}
