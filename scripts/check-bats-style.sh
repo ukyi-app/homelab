@@ -413,9 +413,18 @@ function qv_seg(t,   n,a,i,seen,q,v,pos){
 #    CLI 인자에 우연히 등장하는 `-eq N` 텍스트(예 `--retry-eq 5`)만으로 이 술어가 무력화됐다
 #    (2026-09 정기 회귀 reg-c-ledger-rows-1, 12라운드). 이 파일이 이미 쓰는 형제 앵커(451/452/
 #    459/466/467행)를 그대로 복사한 처방 — 신설 로직 없음. 전체 스캔 SETCAP 26/26 회귀 0 실측.
+# ⚠️ 자기유도(self-deriving) 등식 — `-eq`의 우변이 리터럴 숫자가 아니라 변수(`[ "$total" -eq
+#    "$expected" ]`류)인 자리는 위 리터럴 술어에 안 걸린다(setcap-17/12라운드 실측 —
+#    tests/gates/test_telegram-callsites.bats:51,63). 이 형태도 **bracket-test 종료 앵커**를
+#    요구한다 — 앵커 없이 `-eq[ \t]+"?\$` 하나만 텍스트 매치하면 reg-c-ledger-rows-1과 같은
+#    급의 `run` 인자 오탐(예 `run … --retry-eq "$RETRIES"`)이 이 형태에도 그대로 재발한다(분류
+#    합의문 원안은 앵커 없이 제안했으나, 이 파일이 바로 위 줄에서 같은 이유로 이미 좁혀 둔
+#    관례를 그대로 따른다 — 신설 취약점을 지금 막는다). 앵커를 더한 뒤 실측: 517행 두 곳(득실
+#    없이 그대로 매치) + 대조 픽스처(run 인자 형태)는 여전히 불일치 확인.
 function setcap_hit(s){
   if (s ~ /[ \t]=[ \t]*"[^"]+"/) return 1
   if (s ~ /-eq[ \t]+[0-9]+[ \t]*\]/) return 1
+  if (s ~ /-eq[ \t]+"?\$[A-Za-z_][A-Za-z0-9_]*"?[ \t]*\]/) return 1  # 자기유도(변수 우변) 등식
   if (s ~ /contains\(/) return 1
   if (s ~ /join\(","\)/) return 1
   if (s ~ /length[ \t]*==/) return 1

@@ -528,6 +528,37 @@ setup() {
   echo "$output" | grep -q '\[SETCAP\]'
 }
 
+@test "a self-deriving numeric equality (variable on both sides) satisfies the cardinality predicate ([SETCAP] positive, setcap-17)" {
+  # 12라운드 setcap-17(tests/gates/test_telegram-callsites.bats:51,63) — `-eq`의 우변이 리터럴
+  # 숫자가 아니라 변수인 자기유도 등식은 위 수 등식 술어(418행, 우변 `[0-9]+` 전용)에 안 걸린다.
+  printf '%s\n' \
+    '@test "exactly the expected workflows notify via the action (self-deriving sum)" {' \
+    '  total=2' \
+    '  expected=2' \
+    '  [ "$total" -eq "$expected" ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_selfderiv.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_selfderiv.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "a variable-eq inside a run command's CLI argument does not smuggle in a false cardinality predicate ([SETCAP] negative, setcap-17)" {
+  # 위 자기유도 술어도 수 등식 술어(reg-c-ledger-rows-1)와 같은 급의 함정을 진다 — bracket-test
+  # 종료 앵커 없이 `-eq[ \t]+"?\$` 텍스트만 잡으면 run 인자(`--retry-eq "$RETRIES"`)에 우연히
+  # 등장한 변수 참조가 [SETCAP] 레인 전체를 침묵 통과시킨다(분류 합의문 원안은 앵커 없이 제안했으나
+  # 이 가드가 바로 위 수 등식 술어에 이미 적용한 관례를 그대로 따라 앵커를 더했다 — 이 픽스처가
+  # 그 앵커를 잠근다).
+  printf '%s\n' \
+    '@test "exactly the right dispatchers are present, no other" {' \
+    '  run bun tools/audit.ts --mode list' \
+    '  [ "$status" = 0 ]' \
+    '  echo "$output" | grep -q x' \
+    '  run bun tools/audit.ts --retry-eq "$RETRIES"' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_run_arg_var_eq.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_run_arg_var_eq.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[SETCAP\]'
+}
+
 @test "the grep -qxF/-qx structural-equality idiom satisfies the cardinality predicate ([SETCAP] positive, traps-ops-2)" {
   # 이 레포의 실 선호 관용구(platform/victoria-stack/prod/test_pvc_du_exporter.bats:31-33) — 전체
   # 행 일치(-x)가 곧 등식이다. 새 여섯째 술어의 양성 대조 — 본문에 `=` 자체가 없어(대입도 없음)
