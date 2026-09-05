@@ -50,7 +50,13 @@ fi
 DETECT=""
 IFS='' read -r -d '' DETECT <<'AWK' || true
 # 단일따옴표 span을 지운다 — yq/jq 표현식 안의 `sort`가 셸 명령으로 오인되지 않게(실측 오탐원 1위).
-function code(l){ gsub(/'[^']*'/,"Q",l); return l }
+# ⚠️ 이 span 제거가 yq/jq 표현식 말고도 두 번째 하중을 진다 — printf 픽스처 리터럴을 억제한다.
+#    그런데 이 레포의 지배적 관용구 `(ba)?sh -c '…'`(bats의 `run bash -c '…'` 포함)도 단일따옴표라
+#    span 제거가 그 **활성 셸 코드**까지 통째로 가려 hard-zero 주장이 거짓이었다(실측 — `bash -c
+#    'git ls-files | sort -u'`가 레인 A/B 양쪽에 무증인). `sh -c '…'`/`bash -c '…'` 페이로드 줄만
+#    원문 그대로 두어 레인 A/B가 그 안의 sort를 계속 본다 — yq/jq 표현식·픽스처 리터럴은 이 형태가
+#    아니므로 그대로 마스킹된다.
+function code(l){ if (l ~ /(^|[ \t;&|(])(ba)?sh[ \t]+-c[ \t]+'/) return l; gsub(/'[^']*'/,"Q",l); return l }
 FNR==1 { inhere=0; delim=""; nfiles++ }
 # ⚠️ **주석 규칙이 heredoc 상태 기계보다 먼저 온다 — 순서가 곧 판정이다.**
 #    뒤집으면 인용된 heredoc 표기 한 줄이 파일의 나머지를 통째로 지우고, 그 침묵은 red가 아니다.

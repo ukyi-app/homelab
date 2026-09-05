@@ -42,6 +42,20 @@ setup() {
   run bash "$S" "$FX/yq.sh"; [ "$status" -eq 0 ]
 }
 
+@test "the detector fires on a bare sort -u hidden inside a bash -c single-quoted payload (the repo's dominant idiom)" {
+  # ★ 단일따옴표 span 제거가 yq/jq 필터만이 아니라 이 레포의 지배적 관용구 `(ba)?sh -c '…'`
+  #   (bats의 `run bash -c '…'` 포함)의 활성 셸 코드까지 가려 hard-zero 주장이 거짓이었다(실측:
+  #   scripts/audit-orphan-pv.sh에 `x=$(bash -c 'git ls-files | sort -u')`를 심으면 무증인).
+  #   ⚠️ 이 .bats 소스 줄 자체가 `bash -c '<payload>'`로 읽히면 이 가드가 자기 소스를 위반으로 잡는다
+  #   (실측). 위 yq 레그와 같은 조립 형태(%s 치환)를 써서 페이로드 전체가 **하나의 단일따옴표 span**
+  #   안에만 있게 한다 — 소스 줄에서는 그 span이 그대로 마스킹되고, 런타임에 쓰인 픽스처 파일에서만
+  #   `bash -c '…'` 표기가 살아나 레인 A가 그 안의 sort -u를 본다.
+  printf '#!/usr/bin/env bash\nrun bash -c %s\n' "'ls | sort -u'" > "$FX/bashc.sh"
+  run bash "$S" "$FX/bashc.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[A]'
+}
+
 @test "the detector fires on JS locale-sensitive comparison APIs" {
   printf 'const x = a.localeCompare(b);\n' > "$FX/dirty.ts"
   run bash "$S" "$FX/dirty.ts"; [ "$status" -ne 0 ]
