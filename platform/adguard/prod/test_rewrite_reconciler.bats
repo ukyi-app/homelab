@@ -75,7 +75,7 @@ setup() {
   grep -q 'adguard_rewrite_last_fix_timestamp' "$F"
 }
 
-@test "reconciler fix timestamp is emitted only when a fix happened (no 0-sample noise, F19)" {
+@test "reconciler fix timestamp is emitted when a fix happened (no 0-sample noise, F19)" {
   # F19: no-op 런의 0 샘플이 last_over_time 최신값을 0으로 덮어 직전 fix 통지를 지우지 않도록 FIXED 게이트.
   grep -q 'FIXED' "$F"
 }

@@ -21,7 +21,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # 그 버킷이 얻으려면 pg_backups·media 중 하나가 잃어야 하고, 그건 앵커 루프가 잡는다.
 }
 
-@test "app DNS is a distinct resource (cloudflare_dns_record.app) — destroy-guard allow targets app hosts only" {
+@test "app DNS is a distinct resource (cloudflare_dns_record.app) — destroy-guard allow targets the app resource, not public" {
   # apex/www=cloudflare_dns_record.public(site_hosts, 구조적·가드 보호), 앱 host=cloudflare_dns_record.app
   # (app_hosts, 자동 관리). allow 정규식 ^cloudflare_dns_record\.app\[ 가 앱 DNS만 자동 허용하는 전제.
   d=infra/cloudflare/dns.tf

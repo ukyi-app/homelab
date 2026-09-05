@@ -15,7 +15,7 @@ setup() { ROOT="$(git rev-parse --show-toplevel)"; F="$ROOT/.github/workflows/au
   # 증언한다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
   run grep -q "outputs.count != '0'" "$F"; [ "$status" -eq 1 ]
 }
-@test "audit sources the alerting gate from the tool (report-only set is SSOT in audit-orphans)" {
+@test "audit sources the alerting gate from the tool (REPORT_ONLY set is SSOT in audit-orphans)" {
   # alerting은 tools/audit-orphans.ts가 산출(REPORT_ONLY 제외) — 워크플로는 jq로 읽기만.
   grep -q 'jq -r .alerting' "$F"
   grep -q 'REPORT_ONLY' "$ROOT/tools/audit-orphans.ts"

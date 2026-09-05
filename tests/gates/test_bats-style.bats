@@ -386,3 +386,49 @@ setup() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE '부재 단언 [0-9]+ \(baseline [0-9]+\)'
 }
+
+# ── [SETCAP] 레인 — 이름 있는 집합의 상한 부재(티켓 59) ───────────────────────────────────────
+# 근거·다섯 술어 형태의 분모 규약은 scripts/check-bats-style.sh의 [SETCAP] 헤더가 소유한다.
+# 픽스처는 printf로 만든다(위 픽스처들과 같은 이유 — heredoc 속 '@test'는 bats 전처리기가 재작성한다).
+
+@test "detector flags a name that declares an exact set backed by a mere-existence body ([SETCAP] negative)" {
+  printf '%s\n' \
+    '@test "the widget set has exactly the expected members" {' \
+    '  grep -q widget /some/file' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_neg.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_neg.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[SETCAP\]'
+}
+
+@test "detector passes once the body carries a cardinality predicate ([SETCAP] positive)" {
+  printf '%s\n' \
+    '@test "the widget set has exactly the expected members" {' \
+    '  count=2' \
+    '  [ "$count" -eq 2 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_pos.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_pos.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "a singular-target vocabulary hit is still flagged — no exemption vocabulary is smuggled in ([SETCAP] false-positive control)" {
+  # 오탐 대조 — 이름의 어휘가 집합이 아니라 단수 대상을 가리키는 자리("only Traefik"류, 티켓
+  # 문안 그대로 — 아래 픽스처 본문)도 검출기는 **그대로** 잡는다. 처방은 면제 조건이 아니라 이름
+  # 정정이다(같은 PR의 lint-2가 실제 위반 11건을 이 방식으로 닫았다) — 이 대조가 그 결정을
+  # 고정한다: 여기서 rc 0이 되는 순간 검출기가 "단수 대상"을 스스로 판별하는 면제 로직을 얻은
+  # 것이고, 그건 설계 밖이다. (⚠️ 이 @test 자신의 이름에는 그 트리거 단어를 쓰지 않는다 —
+  # 쓰면 이 파일 자신이 이 레인에 걸린다, 형제 관용구: qv_seg 픽스처의 런타임 문자 조립.)
+  printf '%s\n' \
+    '@test "the router only speaks Traefik protocol" {' \
+    '  grep -q traefik /some/file' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_fp.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_fp.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[SETCAP\]'
+}
+
+@test "the default-mode summary announces the [SETCAP] ratchet" {
+  run bash "$ROOT/scripts/check-bats-style.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '이름 있는 집합 상한 부재 [0-9]+ \(baseline [0-9]+\)'
+}

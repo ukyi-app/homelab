@@ -39,7 +39,7 @@ teardown() { rm -rf "$STUBDIR" "$OUT" "$ROOT/scratch_backup_$$"; }
   [ ! -d "$ROOT/scratch_backup_$$" ]
 }
 
-@test "errors when runbooks are absent (owner-only)" {
+@test "errors when runbooks are absent (owner machine gate)" {
   # fresh-checkout엔 docs/runbooks 부재 — CI/러너에서 loud하게(fail-closed)
   [ -d "$ROOT/docs/runbooks" ] && skip "런북 실재(owner 머신) — 부재 케이스 검증 불가"
   run scripts/backup-local-asset.sh "$OUT"

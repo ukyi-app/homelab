@@ -18,7 +18,7 @@ C="--set image.repo=ghcr.io/o/x --set image.tag=sha-abc1234 \
   [ "$status" -ne 0 ]
 }
 
-@test "schema rejects mutable image tags (immutable sha pin only)" {
+@test "schema rejects mutable image tags (sha pin required)" {
   run helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=latest \
     --set resources.requests.cpu=10m --set resources.requests.memory=32Mi \
     --set resources.limits.cpu=100m --set resources.limits.memory=64Mi \

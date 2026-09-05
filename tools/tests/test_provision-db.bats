@@ -277,7 +277,7 @@ EOF
   done
 }
 
-@test "provision-db rejects a -ro suffixed name (collides with readonly conn naming)" {
+@test "provision-db rejects a -ro suffixed name (the suffix is reserved for read replica naming)" {
   provision --name orders-ro --repo-root "$FIX"
   [ "$status" -ne 0 ]
   # ⚠️ 옛 `grep -q "ro"`는 두 글자라 bun의 `Module not found ".../p-ro-vision-db.ts"`에도 매치했다

@@ -2316,3 +2316,36 @@ selfHeal과 플립플롭한다.
   「heredoc 상태 기계가 주석 규칙보다 먼저 돌면 …」 — 열림이 닫힘을 못 만나 파일의 나머지를 삼키는
   같은 계열이고, 처방도 같다(열림 판정 **앞**에서 한 줄 형태를 소거 + 대조를 함께 둔다).
 > 가드: `tests/gates/test_alertmanager-template.bats`
+### 이름 있는 집합의 상한 부재 — 이름이 exactly/only를 선언해도 본문은 존재만 잰다
+- **병(5·6라운드에 걸쳐 재발 — 2026-09 감사 캠페인 실측)**: `@test` 제목이 exactly/only/no other/전수/
+  EVERY/정확 같은 어휘로 "원소 전수"를 선언하는데, 본문은 **존재 증인 하나뿐**이고 집합 크기 상한이나
+  등식 술어가 없는 자리가 반복해서 나왔다. 5라운드 비평가 생존 군집(최대 12건 — netpol rule/match·
+  HTTPRoute·kustomization resources)과 6라운드 재발 판정(9건 — infra-a-1 ACL 규칙 집합·infra-a-3 OAuth
+  스코프·infra-b-4 reserved-hosts 집합·kustomization-2/3/4·httproute-1/2·posture-2)이 **같은 근본
+  원인**을 두 라운드 연속 실증했다: 이름이 상한을 **주장**하지만 본문은 그 주장을 재지 않으므로,
+  원소를 몰래 추가(또는 위험한 대안을 끼워 넣어)해도 뮤테이션이 전건 green이다 — 형제 함정
+  「테스트 이름은 인터페이스가 아니다」의 한 특수형이다(이름과 본문의 불일치가 상한 축에서만 난다).
+- **처방(CONTRIBUTING.md 「이름 있는 집합의 상한」)**: 이름 있는 배열/집합을 재는 가드는 존재 증인 +
+  집합 크기 상한(`length == N` 또는 정확 집합 등식)을 **같이** 건다. 존재 증인은 주석 스트립 후
+  행두 앵커로 센다(형제 관용구: `scripts/check-locale-collation.sh:131`) — 산문·문자열·heredoc·죽은
+  스텝 안의 같은 토큰은 증인이 아니다.
+- **린트화(7라운드 축 N, 티켓 59)**: `scripts/check-bats-style.sh`의 `[SETCAP]` 레인이 이 규칙을 정적으로
+  강제한다 — `@test` 이름이 exactly/only/no other/전수/EVERY/정확 중 하나를 선언하면 본문(다음 `@test`
+  또는 파일 끝까지)에 집합 등식 술어(문자열 등식 `= "…"` · 수 등식 `-eq [0-9]+` · jq/yq `contains(` ·
+  jq/yq `join(",")` · jq/yq `length ==`) 중 하나 이상이 있어야 한다. 이름 어휘 자체는 텍스트 매치라
+  대소문자를 구별한다(넓히면 「스캔 신호를 콜사이트가 손으로 내면 순서가 드리프트한다」류의 표기
+  변형 축이 된다).
+- ⚠️ **오탐은 면제 어휘가 아니라 이름 정정으로 닫는다.** 이름의 "only"가 집합이 아니라 단수 대상·
+  조건 부사·합성어를 가리키는 자리(`read-only`·`owner-only`·`readonly` 같은 합성어, "only when"류
+  조건 부사, "only 1"류 서술 수사, "only Traefik"류 단수 대상)는 검출기가 **그대로** 잡는다 — 4·5라운드
+  규약 그대로 정직한 이름이 처방이다. 착수 시점(2026-09-05) 실측: 이름-어휘 매치 14건 중 11건이
+  이 오탐 클래스였고 이름 정정으로 닫았다(예: "reads-only" → "non-writable (readOnly)",
+  "owner-only" → "owner machine gate"). 나머지 3건(`test_worker_ports.bats` 포트 집합 ·
+  `test_basebackup.bats` volumeMounts 집합 · `test_mutation-dispatch.bats` 디스패처 입력 집합)은 실제
+  이름 있는 집합 선언이라 래칫 바닥값으로 남는다(다음 라운드가 등식 술어를 얹는다).
+- ⚠️ **알려진 갭 — `-eq N`은 `"$status"` rc 검사와 구별하지 않는다.** 이 린트는 6라운드 비평가 처방
+  문안을 그대로 옮긴 것이라, `[ "$status" -eq 0 ]`처럼 이 레포 거의 모든 `@test`에 있는 흔한 관용구도
+  술어로 인정한다. 실측: 이 관용구를 제외하고 재면 착수 시점 위반이 14건이 아니라 **70건**이다.
+  좁히지 않은 이유는 처방 문안을 벗어난 자체 확장이 이 축의 범위를 티켓 하나가 감당 못 할 크기로
+  불리기 때문이다 — 다음 라운드가 `-eq` 분모에서 `"$status"` 좌변을 제외하는 방향으로 좁힐 후보다.
+> 가드: `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats`
