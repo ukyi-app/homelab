@@ -5,11 +5,17 @@
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
 #    `run bash -c` 부재 단언 3곳은 비대상이다 — rc가 bash의 것이고, 파이프 종단 grep은 대상
 #    부재에도 빈 stdin을 읽어 rc 1을 낸다(SSOT ③-b) — 여기서 `-eq 1`은 아무것도 못 가른다.
+#    ⚠️ 위 문장은 **철자만** 면제한다 — **바닥값은 아니다**(감사 63 정정). `check-bats-style.sh`의
+#    F3(bash -c 언랩)이 홑따옴표+위치인자 형태를 [ABS-REC]로 분모에 들이면서 $F 리네임/부재에도
+#    조용히 통과하던 두 자리(:121·:179 CURL_WRITE·CURL_PROBE)가 드러났다. 형제
+#    `tools/tests/test_mutation-dispatch.bats:319-323`이 같은 진단(철자 무해·바닥값 필수)을 먼저
+#    적어 뒀다 — setup()의 `[ -f "$F" ]`가 그 바닥값이다.
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   F="$ROOT/platform/adguard/prod/rewrite-reconciler.yaml"       # SA + CronJob + 전용 egress netpol
   R="$ROOT/platform/adguard/prod/rewrite-reconciler-rbac.yaml"  # gateway ns Role/RoleBinding(cross-ns)
+  [ -f "$F" ]   # [ABS-REC] 바닥값 — ${F}가 리네임/삭제되면 아래 `bash -c` 파이프 단언들이 여기서 먼저 죽는다.
 }
 
 @test "reconciler reads traefik-ts svc via apiserver and converges the *.home rewrite" {
@@ -176,6 +182,11 @@ setup() {
 @test "the dns pre-flight probe never retries (rc discrimination needs the raw exit)" {
   # PROBE는 rc 6(해석 실패)만 골라 기다리는 판별기다 — 재시도가 붙으면 rc가 마지막 시도의 것이
   # 되어 대기 판정이 흐려지고, -f가 붙으면 4xx가 22로 뭉개져 "해석은 됐다" 신호를 잃는다.
+  # 양성 대조([ABS-REC] — 감사 63) — CURL_PROBE 줄이 실재하고 최소한 다른 플래그(--max-time)는
+  # 갖는다는 것을 같은 도구 신원으로 확인한다. ${F}가 리네임되면(또는 CURL_PROBE 정의가 사라지면)
+  # 이 파이프가 먼저 무매치로 죽는다 — 위 부재 단언만으로는(파이프 rc 2 채널 소실) 못 잡는 자리다.
+  run bash -c 'grep -E "CURL_PROBE=" "$1" | grep -q -- "--max-time"' _ "$F"
+  [ "$status" -eq 0 ]
   run bash -c 'grep -E "CURL_PROBE=" "$1" | grep -E -- "--retry|-f"' _ "$F"
   [ "$status" -ne 0 ]
 }
