@@ -128,6 +128,24 @@ _apply() {
   [ "$status" -eq 0 ]
 }
 
+@test "the envsubst-absent sed fallback substitutes all three placeholders (FORCE_SED_RENDER seam)" {
+  # ⚠️ render()의 else(sed) 분기는 envsubst가 PATH에 있는 한 절대 실행되지 않는다 — 이 호스트는
+  #    usrmerge라 `/bin`이 `/usr/bin`의 심볼릭 링크라서(sed·envsubst 동거) 디렉토리 단위 PATH
+  #    배제로는 envsubst만 가릴 수 없다(va 실측: `type -a sed envsubst`). FORCE_SED_RENDER 시임으로
+  #    직접 태운다. 뮤테이션 실측(2026-09): BULK_STORAGE_PATH 치환 절만 지워도 위 13개 @test 전부
+  #    그대로 ok였다 — 이 분기가 원리적으로 미실행이었기 때문이다.
+  _sandbox
+  FORCE_SED_RENDER=1 BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" run "$BS/apply-storage.sh"
+  [ "$status" -eq 0 ]
+  source "$BS/versions.env"
+  run grep -F '${LOCAL_PATH_HELPER_IMAGE}' "$RENDERED"; [ "$status" -eq 1 ]
+  run grep -F "$LOCAL_PATH_HELPER_IMAGE" "$RENDERED"; [ "$status" -eq 0 ]
+  run grep -F '${LOCAL_PATH_PROVISIONER_IMAGE}' "$RENDERED"; [ "$status" -eq 1 ]
+  run grep -F "$LOCAL_PATH_PROVISIONER_IMAGE" "$RENDERED"; [ "$status" -eq 0 ]
+  run grep -F '${BULK_STORAGE_PATH}' "$RENDERED"; [ "$status" -eq 1 ]
+  run grep -F "$BULKDIR" "$RENDERED"; [ "$status" -eq 0 ]
+}
+
 @test "a separate device needs no phase-A flag (phase B is the normal path)" {
   _sandbox; _apply
   [ "$status" -eq 0 ]
