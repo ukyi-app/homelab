@@ -58,6 +58,24 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
+@test "rejects create-database spec with a malformed extension name" {
+  # tools-create-provision-3(8라운드) — EXT_RE 형식 검사(76행)는 이 스위트에서 무증인이었다.
+  run bun "$V" --action create-database --payload '{"spec":"{\"name\":\"orders\",\"extensions\":[\"bad;name\"]}"}'
+  [ "$status" -ne 0 ]
+}
+
+@test "rejects create-cache spec whose maxmemory_mi exceeds the shared-cluster cap" {
+  # tools-create-provision-3(8라운드) — maxmemory_mi 상한 검사(80-82행)는 이 스위트에서 무증인이었다.
+  run bun "$V" --action create-cache --payload '{"spec":"{\"name\":\"orders\",\"maxmemory_mi\":99999}"}'
+  [ "$status" -ne 0 ]
+}
+
+@test "rejects create-database spec with a reserved DB name" {
+  # tools-create-provision-3(8라운드) — 예약 이름 검사(68-69행)는 이 스위트에서 무증인이었다.
+  run bun "$V" --action create-database --payload '{"spec":"{\"name\":\"postgres\"}"}'
+  [ "$status" -ne 0 ]
+}
+
 @test "rejects spec with fields outside the shared-cluster contract" {
   # storage/cpu/mem/version은 공유 클러스터 레벨 — DB 생성 API 입력이 아니다
   run bun "$V" --action create-database --payload '{"spec":"{\"name\":\"orders\",\"storage\":\"10Gi\"}"}'
