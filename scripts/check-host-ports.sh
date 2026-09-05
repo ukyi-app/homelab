@@ -200,13 +200,17 @@ FNR==1 { flush_prev(); inhere=0; delim=""; herestart=0; prevfile=FILENAME; nfile
 # **정의처는 소비자가 아니다.** 파일 목록이 아니라 "이 파일이 그 함수를 정의하는가"라는 규칙이라
 # (레인 D의 `HP_` 이름공간 면제와 같은 형태) lib을 옮겨도 판정이 갈리지 않는다. [C]에도 같은 면제가
 # 필요하다 — 정의처 자신은 호출/소스 표기가 없어 위 세 패턴 어디에도 안 걸리기 때문이다.
-{ if (nocomment($0) ~ /^[ \t]*hp_(pick_port|run_published)[ \t]*\(\)/) defs[FILENAME] = 1 }
+# ⚠️ [C]/[P] 면제는 **각자의 정의**만 본다 — 결합 정규식(hp_pick_port|hp_run_published) 한 축으로
+#    묶으면 호출되지 않는 hp_pick_port 스텁 하나가 [C] 전체를 영구 면제하고, 그 절반엔 ndefs류
+#    SSOT 백스톱이 없어 사본이 무한정 쌓여도 안 보인다(reg-a2-ops-guards-2). defspick/npickdefs를
+#    defsrun/ndefs와 대칭으로 따로 세운다.
+{ if (nocomment($0) ~ /^[ \t]*hp_pick_port[ \t]*\(\)/) { if (defspick[FILENAME] != 1) npickdefs++; defspick[FILENAME] = 1 } }
 { if (nocomment($0) ~ /^[ \t]*hp_run_published[ \t]*\(\)/) { if (defsrun[FILENAME] != 1) ndefs++; defsrun[FILENAME] = 1 } }
 
 END {
   flush_prev()
   for (f in binds) {
-    if (defs[f] == 1) continue
+    if (defspick[f] == 1) continue
     if (used[f] != 1) {
       printf "%s:0: [C] 호스트 포트를 잡는데 lib/host-port.sh를 쓰지 않는다(배정을 안 받았다)\n", f
       bad = 1
@@ -221,9 +225,20 @@ END {
   }
   # 정의처 면제가 **우회 통로**가 되지 않게 — 프리미티브를 자기 파일로 복사하면 그만이기 때문이다.
   # 기동 처방의 SSOT는 하나여야 하므로 사본의 존재 자체를 위반으로 낸다(전수 열거 모드에서 문다).
+  # ⚠️ **`defsrun[f]==1`/`defspick[f]==1` 필터가 있어야 한다** — 위 [P]/[C] 면제 루프의
+  #    `if (defsrun[f] == 1)`/`if (defspick[f] == 1)` 비교가 awk 배열 참조 자동 생성으로
+  #    실 정의자가 아닌 파일(순수 소비자)도 키만 만들어 넣는다. 필터 없이 `for (f in defsrun)`를
+  #    돌리면 그 소비자들까지 "정의가 N곳"으로 오출력된다(reg-a2-ops-guards-2 검증 중 실측).
   if (ndefs > 1) {
     for (f in defsrun)
-      printf "%s:0: [P] hp_run_published 정의가 %d곳이다 — 기동 처방의 SSOT는 하나여야 한다(사본은 정의처 면제를 우회 통로로 만든다)\n", f, ndefs
+      if (defsrun[f] == 1)
+        printf "%s:0: [P] hp_run_published 정의가 %d곳이다 — 기동 처방의 SSOT는 하나여야 한다(사본은 정의처 면제를 우회 통로로 만든다)\n", f, ndefs
+    bad = 1
+  }
+  if (npickdefs > 1) {
+    for (f in defspick)
+      if (defspick[f] == 1)
+        printf "%s:0: [C] hp_pick_port 정의가 %d곳이다 — SSOT는 하나여야 한다(사본은 정의처 면제를 우회 통로로 만든다)\n", f, npickdefs
     bad = 1
   }
   # 검출기가 실제로 읽은 파일 수를 **호출자에게 알린다** — SCAN 신호가 "열거한 파일 수"이면

@@ -60,6 +60,21 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "a bullet-decorated decoy inside mid-sentence prose does not satisfy registration (line anchor required)" {
+  # reg-a1-bats-guards-1 — grep-a-7(56d0aad)은 「형제 bullet의 산문 언급이 등재 증인으로
+  # 오인된다」를 고쳤다고 주장했지만 실제 검색이 grep -Fq(무앵커 부분문자열)라 그 취약점이
+  # 그대로 남았다 — 「- **`name`**」 장식이 줄 **어디에** 있든(줄 시작이 아니어도) 매치했다.
+  # 이 픽스처는 그 정확한 형태(장식은 재현하되 줄 시작은 '-'가 아닌 순수 산문)로 재발을 잡는다.
+  tmp="scripts/zz_docindex_anchor_probe.sh"; : > "$tmp"; chmod +x "$tmp"
+  printf '반례를 인용한다: 예전엔 %s- **%s%s%s**%s 처럼 산문 안에서도 매치됐다.\n' \
+    "$BT" "$BT" "zz_docindex_anchor_probe.sh" "$BT" "$BT" >> "$README"
+  run ./scripts/check-doc-index.sh
+  git checkout -- "$README"
+  rm -f "$tmp"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "zz_docindex_anchor_probe.sh"
+}
+
 # ── 레인 [2] 추출의 비공허 바닥값 ─────────────────────────────────────────────────────────────
 # 검출기가 bullet을 실제로 몇 개 봤는지가 SCAN 마커로 나온다 — 이 수가 붕괴하면 "위반 0"은
 # 무의미하다. 추출 자체의 양성 대조다.

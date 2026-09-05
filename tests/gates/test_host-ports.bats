@@ -227,6 +227,19 @@ run_am() { # $1=격리 루트
   echo "$output" | grep -qF 'SSOT'
 }
 
+@test "a never-called hp_pick_port stub does not get a free pass on lane C once it duplicates the real definer" {
+  # reg-a2-ops-guards-2 — 예전엔 [C](lib 미사용) 면제가 hp_(pick_port|run_published) 결합
+  # 정규식 한 축이라, 결코 호출되지 않는 hp_pick_port 스텁 하나만 심어도 그 파일의 [C] 검사
+  # 전체가 영구 면제됐다 — hp_run_published 쪽엔 있는 SSOT 중복 백스톱(defsrun/ndefs)이
+  # hp_pick_port 쪽엔 없었다(비대칭). 죽은 스텁과 실 lib을 함께 스캔하면(둘 다 hp_pick_port를
+  # 정의) 이제 [C] SSOT 위반으로 잡힌다 — 정의처 자체(단독)는 여전히 면제다(위 lane E 대칭).
+  printf '#!/usr/bin/env bash\nhp_pick_port(){ echo unused; }\ndocker run -d -p "127.0.0.1:${FREEPORT}:9093" img\n' > "$FX/deadstub.sh"
+  run bash "$S" "$LIB" "$FX/deadstub.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qF '[C]'
+  echo "$output" | grep -qF 'SSOT'
+}
+
 @test "comment lines quoting the forbidden forms are not flagged (self-hit control)" {
   # ★ 이 레포의 하네스는 자기가 고친 함정을 **인용하며 설명**한다. 줄 머리 앵커가 없으면 검출기가
   #   자기 문서를 위반으로 잡고, 그러면 사람이 주석을 지워 근거가 사라진다(형제 게이트가 밟은 자리).

@@ -103,14 +103,14 @@ if [ "$SCOPE_ONLY" -eq 0 ]; then
   # scripts/*.sh ↔ scripts/README.md (백틱 감싼 파일명 — README 규약)
   for f in scripts/*.sh; do
     b="$(basename "$f")"
-    grep -Fq -- "- **${BT}${b}${BT}**" scripts/README.md || { echo "FAIL: scripts/README.md 미등재: $b"; rc=1; }
+    grep -qE -- "^- \*\*${BT}${b}${BT}\*\*" scripts/README.md || { echo "FAIL: scripts/README.md 미등재: $b"; rc=1; }
   done
 
   # tools/*.ts·*.mts ↔ tools/README.md (스키마 .json은 표로 별도 문서화 → 제외)
   for f in tools/*.ts tools/*.mts; do
     [ -e "$f" ] || continue
     b="$(basename "$f")"
-    grep -Fq -- "- **${BT}${b}${BT}**" tools/README.md || { echo "FAIL: tools/README.md 미등재: $b"; rc=1; }
+    grep -qE -- "^- \*\*${BT}${b}${BT}\*\*" tools/README.md || { echo "FAIL: tools/README.md 미등재: $b"; rc=1; }
   done
 
   # .github/workflows/*.yaml ↔ workflows README (친화명 표기라 basename 존재검사)

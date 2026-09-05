@@ -115,9 +115,22 @@ in_excl_items() { case "$EXCL_ITEMS" in *" $1 "*) return 0;; *) return 1;; esac;
 #    증인이 된다 — 실측(2026-09-04): 안 걷으면 manual 3건의 자기신고 주석 자체가 거짓 HIT를 냈다.
 # ⚠️ `| grep -q hit`로 짜면 pipefail 아래 SIGPIPE(141)로 writer가 죽어 매치가 있어도 거짓 MISS가
 #    난다(scripts/check-sigpipe-writers.sh) — herestring + 플래그 변수로 판정한다.
+# 줄 전체 주석뿐 아니라 **코드 줄의 trailing 주석**(따옴표 밖 `#`)도 걷는다 — 전체 주석만 보면
+# 코드 줄에 붙인 주석 속 경로 언급이 호출 증인으로 오인된다(acct-trailing-comment). quote-aware
+# 토글은 check-bats-style.sh의 abs_strip(230행)과 같은 q1/q2 모델.
+NOCOMMENT_AWK=""
+IFS='' read -r -d '' NOCOMMENT_AWK <<'AWKEOF' || true
+{ q1=0; q2=0; n=length($0)
+  for (i=1;i<=n;i++){ c=substr($0,i,1)
+    if (c=="'" && q2==0) q1=1-q1
+    else if (c=="\"" && q1==0) q2=1-q2
+    else if (c=="#" && q1==0 && q2==0 && (i==1||substr($0,i-1,1)~/[ \t]/)){print substr($0,1,i-1);next} }
+  print }
+AWKEOF
+
 venue_calls() {
   _vc_hit=1
-  _vc_calls="$(grep -vE '^[[:space:]]*#' "$1" | grep -ohE '[A-Za-z0-9_./*-]*test_[A-Za-z0-9_.*-]*\.bats' || true)"
+  _vc_calls="$(awk "$NOCOMMENT_AWK" "$1" | grep -ohE '[A-Za-z0-9_./*-]*test_[A-Za-z0-9_.*-]*\.bats' || true)"
   while IFS= read -r _vc_g; do
     # shellcheck disable=SC2254  # 의도된 글롭이다 — $_vc_g가 리터럴이 아니라 패턴이어야
     # `POSTURE_BATS := tests/posture/test_*.bats` 한 줄이 posture 5건 전부를 문다(위 주석).
