@@ -87,3 +87,22 @@ setup() {
   [ -f "${BATS_TEST_DIRNAME}/proxyclass.yaml" ]
   [ -f "${BATS_TEST_DIRNAME}/networkpolicy.yaml" ]
 }
+
+@test "tailscale kustomization never gains a namespace transformer (reverse polarity)" {
+  # 이 파일 :3-7 자신이 그 필드의 **추가**를 금지로 명시한다 — 전역 namespace 트랜스포머가
+  # `traefik-ts` Service를 포함한 모든 namespaced 리소스를 gateway ns 밖으로 강제해, 그
+  # Service의 gateway ns selector 참조를 끊는다(실측 사고). 다른 5개 컴포넌트와 반대 극성이라
+  # 값 등식이 아니라 **부재 단언**이다(`// "MISSING"` — `yq -e`는 false 값에 exit 1이라 쓰지 않는다).
+  [ "$(yq '.namespace // "MISSING"' "${BATS_TEST_DIRNAME}/kustomization.yaml")" = "MISSING" ]
+}
+
+@test "tailscale kustomization pins generators helmrelease.yaml (56 kustomization-1 sibling)" {
+  # `generators:`는 `resources:`와 동일한 배선 축인데(HelmChartInflationGenerator) 이 리스트의
+  # 멤버십을 재는 @test가 레포 전체에 0건이었다 — helmrelease.yaml이 사라지면 tailscale operator
+  # 전체(tailnet 인입 + traefik-ts Service)가 프룬된다. secret-generator.yaml(operator-oauth)은
+  # 대상에서 뺀다 — 티켓 44/56에서 이미 트리아지된 결정(제거 시 즉시 시끄럽다: envFrom secretRef가
+  # 못 찾는 Secret을 참조해 파드가 CreateContainerConfigError로 죽는다)과 같은 사유다.
+  run yq '.generators[]' "${BATS_TEST_DIRNAME}/kustomization.yaml"
+  printf '%s\n' "$output" | grep -qxF 'helmrelease.yaml' \
+    || { echo "kustomization generators에 helmrelease.yaml이 없다 — 프룬되면 tailscale operator가 통째로 사라진다"; false; }
+}

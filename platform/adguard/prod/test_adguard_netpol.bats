@@ -66,3 +66,11 @@ setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; }
   printf '%s' "$output" | grep -qxF -- 'true'
   for r in pvc adguardhome deployment service networkpolicy; do [ -f "${BATS_TEST_DIRNAME}/$r.yaml" ]; done
 }
+
+@test "adguard kustomization pins namespace edge" {
+  # appset.yaml:50-51 — destination.namespace 없음: 각 컴포넌트 kustomization의 `namespace:`가
+  # 유일한 권위다. 이 값을 바꿔도(2026-09-05 실측: edge→default) 이 디렉토리 전 @test가
+  # 초록이었다 — PSA baseline·setcap 전제가 이 값에 있는데 증인이 없었다. AppProject
+  # destinations는 `namespace: "*"`(projects.yaml)라 런타임 방벽도 없다.
+  [ "$(yq '.namespace' "${BATS_TEST_DIRNAME}/kustomization.yaml")" = "edge" ]
+}

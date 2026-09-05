@@ -73,3 +73,11 @@ setup() {
   #    rc 2로 죽고도 통과해, 이 파일에서 혼자 초록으로 남았다.
   run grep -Eq 'cidr:[[:space:]]*10\.42' "$P"; [ "$status" -eq 1 ]
 }
+
+@test "cloudflared kustomization pins namespace edge" {
+  # appset.yaml:50-51 — destination.namespace 없음: 각 컴포넌트 kustomization의 `namespace:`가
+  # 유일한 권위다. 이 값을 바꿔도(2026-09-05 실측: edge→default) 이 디렉토리 전 @test가
+  # 초록이었다 — egress self-isolation netpol 셀렉터 전제가 이 값에 있는데 증인이 없었다.
+  # AppProject destinations는 `namespace: "*"`(projects.yaml)라 런타임 방벽도 없다.
+  [ "$(yq '.namespace' "${BATS_TEST_DIRNAME}/kustomization.yaml")" = "edge" ]
+}
