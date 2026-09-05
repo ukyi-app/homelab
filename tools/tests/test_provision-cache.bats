@@ -78,6 +78,11 @@ provision() {
   row="$(grep 'ledger:row --> cache-demo' "$FIX/docs/memory-ledger.md")"
   [ -n "$row" ]
   echo "$row" | grep -q "| cache"
+  # ⚠️ 열을 **앞에서**(`$5`) 센다 — traps-f-4(a96d7dd)의 「임베디드 `|`가 열을 미는」 클래스와
+  #    달리, `docs/memory-ledger.md`의 이 표(component/namespace/req_mi/limit_mi)는 대상 열
+  #    앞의 두 열(component·namespace)이 DNS-1123 라벨(create-database/provision-cache가
+  #    생성하는 도구 생성 값)이라 리터럴 `|`를 원리적으로 담을 수 없다. 계약: 앞 두 열에
+  #    자유 텍스트를 넣지 않는다 — 넣게 되면 뒤에서 세는 형태로 바꿀 것.
   limit="$(echo "$row" | awk -F'|' '{gsub(/ /,"",$5); print $5}')"
   [ "$limit" -gt 100 ]                              # limit > maxmemory (BGSAVE COW/단편화 여유)
   grep -q "limit ≈ $((8000 + limit)) Mi" "$FIX/docs/memory-ledger.md"  # 합계 프로즈 갱신
