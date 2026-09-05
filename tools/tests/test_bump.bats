@@ -60,7 +60,7 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   [[ "$output" == *"no-op"* ]]
 }
 
-@test "tag-only bump removes a stale digest (image must follow the new tag)" {
+@test "a bare-tag bump removes a stale digest (image must follow the new tag)" {
   f="$FIX/apps/blog/deploy/prod/values.yaml"
   bun tools/bump-tag.ts blog sha-deadbee --digest "$DIG" --repo-root "$FIX"
   # digest 없이 tag만 bump하면 차트 helper가 stale digest를 계속 우선하므로 digest를 제거해야 한다

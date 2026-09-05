@@ -167,7 +167,7 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | jq -e '.alerting == 0'                                          # 페이지 대상 0
 }
 
-@test "a co-occurring alerting drift is NOT hidden by a report-only surface-drift (alerting counts only the pageable)" {
+@test "a co-occurring alerting drift is NOT hidden by a report-mode surface-drift (alerting counts solely the pageable)" {
   # surface-drift(report-only) + orphan-dns(blocking·alerting) 공존 → count=2, alerting=1(orphan-dns만).
   # report-only가 다른 실측 finding의 페이지를 삼키지 않음을 못박는다.
   G="$TMP/git-mix"; mkdir -p "$G"; cp -R "$FR/." "$G/"

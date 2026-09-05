@@ -68,7 +68,7 @@ YAML
   printf '%s' "$output" | grep -qF -- 'FAIL: app-owned NetworkPolicy는 app-scoped 셀렉터'
 }
 
-@test "guard fails on name-only selector (chart name is shared, non-unique)" {
+@test "guard fails on a bare-name selector (chart name is shared, non-unique)" {
   tmp="$(mktemp -d)"
   _seed "$tmp" foo '{ matchLabels: { "app.kubernetes.io/name": app } }'
   run bash "${BATS_TEST_DIRNAME}/../scripts/check-app-netpol.sh" --root "$tmp"

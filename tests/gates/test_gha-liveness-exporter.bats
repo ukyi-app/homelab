@@ -272,7 +272,7 @@ EOF
     || { echo "마지막 exposition 줄이 하트비트가 아니다: $last"; false; }
 }
 
-@test "SCRAPED increments only after both failure checks (partial failure must not read as success)" {
+@test "SCRAPED increments after both failure checks, never before (partial failure must not read as success)" {
   # 앞에 두면 전건 실패에도 scraped == configured로 오보고되어 부분 고장이 영영 무성해진다.
   lookup="$(grep -n 'gha run lookup failed' "$MF" | cut -d: -f1)"
   parse="$(grep -n 'gha timestamp parse failed' "$MF" | cut -d: -f1)"

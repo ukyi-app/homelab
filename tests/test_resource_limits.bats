@@ -125,7 +125,7 @@ YAML
   printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
 }
 
-@test "resource guard fails on a workload missing only a CPU request" {
+@test "resource guard fails on a workload missing just a CPU request" {
   tmp="$(mktemp -d)"
   mkdir -p "$tmp/scripts" "$tmp/platform/probe/prod" "$tmp/policy"
   : > "$tmp/policy/memory-limit-allowlist.txt"
@@ -151,7 +151,7 @@ YAML
   printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
 }
 
-@test "resource guard fails on a workload missing only a memory limit (OOM bound)" {
+@test "resource guard fails on a workload missing just a memory limit (OOM bound)" {
   tmp="$(mktemp -d)"
   mkdir -p "$tmp/scripts" "$tmp/platform/probe/prod" "$tmp/policy"
   : > "$tmp/policy/memory-limit-allowlist.txt"

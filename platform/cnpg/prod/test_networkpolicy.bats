@@ -107,7 +107,7 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
   [ "$m" -ge 2 ]             # 글롭 붕괴 방지(현재 6 = DB 2개 × {Database CR, owner 봉인본, ro 봉인본}). 상한 아님
 }
 
-@test "kubelet probe ingress is node-only (pod-CIDR-wide ipBlock would defeat default-deny)" {
+@test "kubelet probe ingress is scoped to the single node IP, not the pod CIDR" {
   p="$(yq 'select(.metadata.name=="database-allow-ingress-kubelet-probes")' "$NP")"
   printf '%s' "$p" | grep -qF -- "cidr: 10.42.0.1/32"   # 노드(cni0)만 — /16은 전 파드에 5432 개방
   case "$p" in *"cidr: 10.42.0.0/16"*) false ;; *) true ;; esac

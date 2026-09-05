@@ -158,7 +158,7 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   [ "$status" -eq 0 ]
 }
 
-@test "a venue named only in unquoted prose does not prove the group (the parser is not a word-matcher)" {
+@test "a venue named merely in unquoted prose does not prove the group (the parser is not a word-matcher)" {
   # 인용 없이 흘린 「make verify」는 산문이지 표기가 아니다 — 여길 열면 (0a)가 다시 텍스트 계약이 된다.
   reg="$BATS_TEST_TMPDIR/vprose"
   mkreg "$reg" '# 사유 — 실행처: 대충 make verify 쯤에서 돈다' 'tests/gates/test_scan-floor.bats'

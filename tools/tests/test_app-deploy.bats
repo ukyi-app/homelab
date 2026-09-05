@@ -197,7 +197,7 @@ build_state() {
   [ "$status" -eq 0 ]
 }
 
-@test "E axis: only a conn secretRef (no <app>-secrets) does not satisfy E — sealed present is a partial state" {
+@test "E axis: merely a conn secretRef (no <app>-secrets) does not satisfy E — sealed present is a partial state" {
   d="$BATS_TEST_TMPDIR/connonly/myapp/deploy/prod"
   build_state 1 0 1 0 "$d"
   want="$(sha16 "$d/myapp-secrets.sealed.yaml")"
@@ -270,7 +270,7 @@ build_wired_with_anno() {
   echo "$output" | grep -q 'scope'
 }
 
-@test "scope: annotation under spec.template.metadata is also caught (not only top-level metadata)" {
+@test "scope: annotation under spec.template.metadata is also caught (not merely top-level metadata)" {
   # kubeseal은 scope 어노테이션을 SealedSecret metadata에 두지만, whole-file 검사라 template 배치도 잡아야 한다.
   d="$BATS_TEST_TMPDIR/tmplscope/myapp/deploy/prod"; app="myapp"; mkdir -p "$d"
   echo "{}" > "$d/.bindings.json"
@@ -286,7 +286,7 @@ build_wired_with_anno() {
 
 # ── K/E 경로 앵커(grep-a-3) — 문자열이 파일 어딘가에 있는 것과 그 키 아래에 있는 것은 다르다ㅡ
 
-@test "K axis: the sealed filename under patches: does not satisfy K (resources membership only)" {
+@test "K axis: the sealed filename under patches: does not satisfy K (resources membership alone counts)" {
   # 예전 줄 정규식은 어느 키 아래인지 안 보고 시퀀스 항목 모양이면 등재로 오인했다 —
   # `resources: []`로 비우고 같은 파일명을 `patches:` 아래 두면 kustomize는 그 자리에서
   # SealedSecret을 안 만든다(K는 여전히 0이어야 한다).

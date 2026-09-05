@@ -35,7 +35,7 @@ _expr() {
 # expr 안의 재무장 unixtime(없으면 빈 문자열).
 _rearm() { _expr | grep -oE 'vector\(time\(\)\) >= [0-9]+' | grep -oE '[0-9]+' | head -1; }
 
-@test "the phase-A suppression clause exists exactly while the migration window is open" {
+@test "the phase-A suppression clause exists precisely while the migration window is open" {
   # ⚠️ **추출 양성 대조가 먼저다.** 국면 B에서 이 레인의 판정은 `[ -z "$got" ]` 음성 단언 하나뿐이라
   #    «억제 절이 올바르게 제거됐다»와 «룰 파일이 사라졌다 / ConfigMap 키가 리네임됐다 / alert명이
   #    바뀌었다»를 원리적으로 구별하지 못한다. 실측 2026-09-03(현재 국면 B): r4 룰 파일을 mv해도,
@@ -62,7 +62,7 @@ _rearm() { _expr | grep -oE 'vector\(time\(\)\) >= [0-9]+' | grep -oE '[0-9]+' |
   [ "$(_rearm)" = "$want" ]
 }
 
-@test "only the absent branch is gated, so the staleness branch still pages during phase A" {
+@test "the absent branch alone is gated, so the staleness branch still pages during phase A" {
   # ⚠️ 이것이 이 파일에서 가장 중요한 단언이다. PromQL은 `and`가 `or`보다 강하게 결합하므로
   #    `A or B and on() C` = `A or (B and on() C)` — 시각 절을 **끝에 괄호 없이** 붙이면
   #    absent 가지에만 걸린다. 전체를 괄호로 묶으면(`(A or B) and on() C`) staleness 가지까지

@@ -90,7 +90,7 @@ unseed() {
   [ "$status" -eq 0 ]
 }
 
-@test "flags a source-only lib with no pipefail literal in its own text (lib scope rule)" {
+@test "flags a sourced-not-executed lib with no pipefail literal in its own text (lib scope rule)" {
   # pipefail은 호출자 셸의 런타임 옵션이지 파일의 텍스트 속성이 아니다 — source 전용 lib
   # (scripts/lib/*.sh, 자기 원문에 pipefail 리터럴이 없다)이 pipefail 아래에서 source되는 형태는
   # scripts/lib/sops-recipients.sh(sops-guard.sh:24·verify-secrets.sh:22가 pipefail 아래서 source)가
