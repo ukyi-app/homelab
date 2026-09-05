@@ -37,6 +37,29 @@ setup() {
   echo "$output" | grep -q "zz_docindex_probe.sh"
 }
 
+@test "a prose mention alone does not satisfy registration for a non-guard script (bullet head anchor required)" {
+  # grep-a-7 — 가드 모양 스크립트(check-*/verify-*/*-guard/*-check)는 레인 [2]의 등식
+  # (아래 "the guard-shaped bullet count equals …")이 이미 삭제를 잡는다(bullet 수가 줄면 그
+  # 등식이 깨진다). 이 축이 실제로 새로 닫는 것은 **비-가드** 스크립트(bootstrap.sh·destroy-node.sh·
+  # dr-drill.sh·notify-unit-failure.sh·sealing-key-dr-gate.sh·teardown.sh)다 — 그것들엔 그 백스톱이
+  # 없다. probe는 그래서 가드 모양이 아닌 이름을 쓴다.
+  # ⚠️ 정리(git checkout/rm)는 항상 run 직후·단언 **이전**에 둔다 — 단언이 실패하면 bats가 그
+  #    자리에서 테스트를 중단해, 뒤에 둔 정리가 실행 안 된 채 README·프로브 파일이 실 트리에
+  #    남는다(실측: 이 순서를 뒤집어 두면 이후 @test 1이 오염된 상태로 죽는다).
+  tmp="scripts/zz_docindex_bullet_probe.sh"; : > "$tmp"; chmod +x "$tmp"
+  printf '\n산문 언급 — `zz_docindex_bullet_probe.sh`는 등재 목적이 아니라 그냥 언급이다.\n' >> "$README"
+  run ./scripts/check-doc-index.sh
+  git checkout -- "$README"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "zz_docindex_bullet_probe.sh"
+  # 양성 대조 — 같은 파일에 진짜 bullet 머리를 달면 green이다(원인이 "산문 vs bullet 머리"임을 고정).
+  printf '\n- **`zz_docindex_bullet_probe.sh`** — 프로브(테스트 전용, 실행 없음).\n' >> "$README"
+  run ./scripts/check-doc-index.sh
+  git checkout -- "$README"
+  rm -f "$tmp"
+  [ "$status" -eq 0 ]
+}
+
 # ── 레인 [2] 추출의 비공허 바닥값 ─────────────────────────────────────────────────────────────
 # 검출기가 bullet을 실제로 몇 개 봤는지가 SCAN 마커로 나온다 — 이 수가 붕괴하면 "위반 0"은
 # 무의미하다. 추출 자체의 양성 대조다.

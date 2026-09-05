@@ -87,7 +87,10 @@ fi
 netpol_files=""
 while IFS= read -r p; do
   [ -n "$p" ] || continue
-  if grep -qE '^kind:[[:space:]]*NetworkPolicy' "$p" 2>/dev/null; then netpol_files="${netpol_files}${p}"$'\n'; fi
+  # 프리필터는 인용 표기를 관용한다(형제 check-app-deploy.sh:64,67,94와 같은 표기) — `kind: "NetworkPolicy"`는
+  # 합법 YAML이고 k8s에도 동일 의미라 kustomize/ArgoCD가 정상 적용하지만, 무관용 리터럴은 그 파일을
+  # 후보에서 통째로 빠뜨려 뒤의 yq 판정(:정확한 select(.kind==…))에 도달조차 못 시킨다.
+  if grep -qE '^kind:[[:space:]]*["'"'"']?NetworkPolicy["'"'"']?[[:space:]]*(#.*)?$' "$p" 2>/dev/null; then netpol_files="${netpol_files}${p}"$'\n'; fi
 done <<< "$manifests"
 
 viol=""

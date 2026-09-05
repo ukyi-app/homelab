@@ -54,6 +54,30 @@ _fixture() {
   echo "$output" | grep -q '기본값은 없다'
 }
 
+@test "index notation for secrets or vars is rejected (the enumerator only counts dot notation)" {
+  # 규칙 ⑤ — `secrets['X']`는 열거자에도 residue 자기검사에도 안 잡힌다(둘 다 점 표기 정규식).
+  # 열거를 넓히는 대신 표기를 거부하는 것이 처방이므로, 그 거부가 사라지면 이 레인이 red다.
+  d="$(_fixture)"
+  printf '\n# probe\nbrk-probe: "${{ secrets[%s] }}"\n' "'R2_UNCLASSIFIED_KEY'" >> "$d/.github/workflows/ci.yaml"
+  ( cd "$d" && git add -A >/dev/null )
+  run bash "$S" --root "$d"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q '인덱스 표기'
+  # 대괄호는 ENUM을 늘리지 않는다(점 표기였다면 secrets 18) — 미분류 대조가 아니라 **표기 거부**가
+  # red의 이유임을 SCAN 등식으로 고정한다.
+  echo "$output" | grep -qE '^SCAN: check-gh-secret-coverage:secrets: 17$'
+}
+
+@test "index notation on the vars lane is rejected by the same predicate" {
+  # vars 레인엔 residue 자기검사가 아예 없다 — 같은 한 grep이 두 레인을 덮는지 고정한다.
+  d="$(_fixture)"
+  printf '\n# probe\nbrk-probe: "${{ vars[%s] }}"\n' "'HOMELAB_OWNER'" >> "$d/.github/workflows/ci.yaml"
+  ( cd "$d" && git add -A >/dev/null )
+  run bash "$S" --root "$d"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q '인덱스 표기'
+}
+
 @test "a stale declaration fails closed (reverse direction)" {
   d="$(_fixture)"
   python3 - "$d/policy/gh-secret-var-classification.json" <<'PY'

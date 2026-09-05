@@ -161,14 +161,30 @@ function abs_rec(s,kind,   q,n,i,a,pat){
   }
   return 0
 }
+# [QV] 세그먼트 판정 — grep-a-5. 예전 판은 q·v가 **한 토큰 안**에 붙어야 매치해 `grep -q -v`
+# (분리 플래그)·`if grep -qv …`(문장 선두, 파이프 無)가 무측정이었다. 여기서는 문장을 `|`·`||`·`&&`로
+# 쪼갠 뒤 각 세그먼트에서 grep 호출 뒤 **선행 플래그 토큰들**만 훑어 q·v가 (같은 토큰이든 분리
+# 토큰이든) 함께 있으면 위반이다. `abs_rec`처럼 문장 **전체** 토큰을 훑으면 안 된다 — 그러면
+# `grep -v X | grep -q Y`(정당한 다중-grep 파이프) 같은 자리가 두 세그먼트 각각에서 오탐을 낸다
+# (세그먼트 분리 + 첫 비플래그 토큰에서 `break` 두 축이 그 오탐을 막는다 — 실측 8곳 무오탐).
+function qv_seg(t,   n,a,i,seen,q,v){
+  gsub(/['"]/,"",t); n=split(t,a,/[ \t]+/); seen=0; q=0; v=0
+  for(i=1;i<=n;i++){
+    if(!seen){ if(a[i]=="grep"||a[i]=="egrep"||a[i]=="fgrep") seen=1; continue }
+    if(a[i]=="--" || a[i] !~ /^-/) break          # 선행 플래그 런에서만 본다(그 뒤 패턴/경로는 대상 밖)
+    if(a[i] ~ /^-[A-Za-z]*q/) q=1
+    if(a[i] ~ /^-[A-Za-z]*v/) v=1
+  }
+  return (seen && q && v)
+}
 # 한 문장 처리 — 루프 깊이 · [QV] · run/status 짝 · 증인 수집.
-function abs_stmt(s,   rec){
+function abs_stmt(s,   rec,qn,qsg,qi){
   if (s ~ /^(for|while|until)[ \t]/) absloop++
   else if (s ~ /^done([ \t;].*)?$/) { if(absloop>0) absloop-- }
-  # [QV] — rc를 판정으로 쓰는 `-q`와 줄 반전 `-v`가 같은 클러스터에 있으면 항진/거짓실패다.
-  if (s ~ /\|[ \t]*grep[ \t]+-([A-Za-z]*q[A-Za-z]*v|[A-Za-z]*v[A-Za-z]*q)[A-Za-z]*[ \t]/ ||
-      s ~ /^(run[ \t]+)?grep[ \t]+-([A-Za-z]*q[A-Za-z]*v|[A-Za-z]*v[A-Za-z]*q)[A-Za-z]*[ \t]/)
-    print FILENAME":"FNR": [QV] "s
+  # [QV] — rc를 판정으로 쓰는 `-q`와 줄 반전 `-v`가 같은 grep 호출의 선행 플래그에 함께 있으면
+  # 항진/거짓실패다. 세그먼트 단위라 `if`/`&&` 선행 위치도 잡는다(문장 선두 앵커 불필요).
+  qn=split(s,qsg,/\|\||&&|\|/)
+  for(qi=1;qi<=qn;qi++) if(qv_seg(qsg[qi])){ print FILENAME":"FNR": [QV] "s; break }
   if (s ~ /^run[ \t]/) {
     absk=abs_target(s)
     if (absk) { absrun=s; absline=FNR; absrloop=absloop } else absrun=""

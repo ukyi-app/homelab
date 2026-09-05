@@ -323,6 +323,47 @@ setup() {
   echo "$output" | grep -q '\[QV\]'
 }
 
+@test "detector rejects grep -q -v with separated flags (same clustering, different spelling)" {
+  # grep-a-5 — 예전 판은 q·v가 한 토큰 안에 붙어야 매치했다. `grep -q -v`는 POSIX 동치 표기인데
+  # 무측정이었다(옵션 두 글자를 런타임에 조립 — 리터럴이면 이 파일 자신이 [QV]에 걸린다).
+  q="-q"; v="-v"
+  printf '%s\n' \
+    '@test "qv absence separated" {' \
+    "  echo \"\$out\" | grep $q $v TOKEN" \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_qv_sep.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_qv_sep.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[QV\]'
+}
+
+@test "detector rejects an if-leading grep -qv with no pipe (statement head, not pipeline-terminal)" {
+  # 예전 두 대안 중 두 번째는 `^(run )?grep` 문장-선두 앵커라 `if` 선행에 안 닿았다 — 세그먼트
+  # 분리는 문장 선두 앵커가 필요 없어 이 자리도 잡는다.
+  qv="-q""v"
+  printf '%s\n' \
+    '@test "qv absence if-leading" {' \
+    "  if grep ${qv} TOKEN /etc/hostname; then echo hi; fi" \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_qv_if.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_qv_if.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[QV\]'
+}
+
+@test "a legitimate two-grep pipeline (filter then positive match) is not [QV] (false-positive control)" {
+  # 세그먼트 격리가 없으면(abs_rec처럼 문장 전체 토큰을 훑으면) 이 정당한 관용구가 오탐한다 —
+  # 대조군 없이는 세그먼트 격리 자체가 무증인이다.
+  q="-q"; v="-v"
+  printf '%s\n' \
+    '@test "legit filter-then-match pipeline" {' \
+    "  grep $v EXCLUDE /f | grep $q MATCH" \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_qv_ok.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_qv_ok.bats"
+  [ "$status" -eq 0 ]
+}
+
 @test "the state machine reaches 0-column function bodies, not just @test bodies" {
   # 착지 전 검출기는 `^@test … {`로만 상태에 들어가서, 도메인에 있는 파일이어도 setup()·헬퍼
   # 본문은 전부 판정 밖이었다(그 갭을 가드 헤더가 「부재-단언 클래스를 얹을 때의 몫」으로 계상해

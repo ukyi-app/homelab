@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # 디렉토리 인덱스 드리프트 가드 — 두 레인.
 #
-#   [1] **등재** — scripts/·tools/·.github/workflows/ 의 각 산출물이 해당 README에 문자열로 등재됐는지
-#       검사(가드 없는 인덱스 드리프트 소멸). check-skeleton.sh(디렉토리 지도)·verify-runbook-index.sh
-#       (런북 인덱스)와 동일 불변식.
+#   [1] **등재** — scripts/·tools/ 산출물은 해당 README에 **bullet 머리**(`- **\`name\`**`)로
+#       등재됐는지, .github/workflows/ 산출물은 (친화명 표기라) **언급 존재**만 검사(가드 없는
+#       인덱스 드리프트 소멸). scripts/tools에 파일 전체 고정문자열 검사를 쓰면 형제 bullet의
+#       산문 언급(대개 반례 인용)이 등재 증인으로 오인된다(grep-a-7 — 자기 bullet 삭제가 초록이던
+#       자리). check-skeleton.sh(디렉토리 지도)·verify-runbook-index.sh(런북 인덱스)와 동일 불변식.
 #   [2] **스코프** — scripts/README.md의 **가드 bullet**이 계산 가능한 사실을 주장하지 않는지 검사.
 #       병(2026-08-29 실측): 가드의 실행 경로는 tools/check-guard-authority.ts가 venue에서 계산하는데,
 #       README는 그 계산을 손으로 베낀 사본을 들고 있었다. 사본은 드리프트했다 — 「CI 게이트」 절 26개
@@ -93,18 +95,22 @@ while [ "$#" -gt 0 ]; do
 done
 
 # ── 레인 [1] 등재 ─────────────────────────────────────────────────────────────────────────────
+# grep-a-7 — scripts/·tools/의 「등재」는 **bullet 머리**(`- **\`name\`**`)로 앵커한다. 예전 판은
+# 파일 전체 고정문자열 검사라 형제 bullet의 산문 언급(대개 「X는 이 축에 침묵한다」 반례 인용)이
+# 등재 증인으로 오인됐다 — 자기 등재 bullet을 지워도 다른 bullet의 산문이 대신 증인 노릇을 했다.
+# workflows(아래)는 친화명 표기라 이 앵커를 적용하지 않는다(헤더 주석이 그 유보를 이미 적는다).
 if [ "$SCOPE_ONLY" -eq 0 ]; then
   # scripts/*.sh ↔ scripts/README.md (백틱 감싼 파일명 — README 규약)
   for f in scripts/*.sh; do
     b="$(basename "$f")"
-    grep -Fq "${BT}${b}${BT}" scripts/README.md || { echo "FAIL: scripts/README.md 미등재: $b"; rc=1; }
+    grep -Fq -- "- **${BT}${b}${BT}**" scripts/README.md || { echo "FAIL: scripts/README.md 미등재: $b"; rc=1; }
   done
 
   # tools/*.ts·*.mts ↔ tools/README.md (스키마 .json은 표로 별도 문서화 → 제외)
   for f in tools/*.ts tools/*.mts; do
     [ -e "$f" ] || continue
     b="$(basename "$f")"
-    grep -Fq "${BT}${b}${BT}" tools/README.md || { echo "FAIL: tools/README.md 미등재: $b"; rc=1; }
+    grep -Fq -- "- **${BT}${b}${BT}**" tools/README.md || { echo "FAIL: tools/README.md 미등재: $b"; rc=1; }
   done
 
   # .github/workflows/*.yaml ↔ workflows README (친화명 표기라 basename 존재검사)

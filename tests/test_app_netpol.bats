@@ -31,11 +31,11 @@ _instance_key() {
 # 스크립트를 복사하지 않는다 — 실 스크립트를 `--root <픽스처>`로 부른다. 가드가 공유 워커를 자기
 # 실제 위치 기준으로 찾기 때문에, 복사본은 워커를 못 찾는다(스캔 대상 트리와 도구 위치의 분리).
 _seed() {
-  local root="$1" app="$2" selector="$3"
+  local root="$1" app="$2" selector="$3" kindline="${4:-kind: NetworkPolicy}"
   mkdir -p "$root/apps/$app/deploy/prod"
   cat > "$root/apps/$app/deploy/prod/netpol.yaml" <<YAML
 apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+$kindline
 metadata: { name: $app-egress, namespace: prod }
 spec:
   podSelector: $selector
@@ -48,6 +48,19 @@ YAML
 @test "guard fails on empty podSelector (selects all pods in shared ns)" {
   tmp="$(mktemp -d)"
   _seed "$tmp" foo '{}'
+  run bash "${BATS_TEST_DIRNAME}/../scripts/check-app-netpol.sh" --root "$tmp"
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: app-owned NetworkPolicy는 app-scoped 셀렉터'
+}
+
+@test "guard fails on empty podSelector even when kind is quoted (kind: \"NetworkPolicy\")" {
+  # grep-a-4 — 프리필터가 리터럴 `^kind:[[:space:]]*NetworkPolicy`라 인용 표기 파일은 후보에서
+  # 통째로 빠져 뒤의 yq 판정에 도달 못 했다(도달 못 하면 빈 podSelector도 초록). 합법 YAML이고
+  # kustomize/ArgoCD는 정상 적용하므로 프리필터가 관용해야 한다(check-app-deploy.sh 표기와 동형).
+  tmp="$(mktemp -d)"
+  _seed "$tmp" foo '{}' 'kind: "NetworkPolicy"'
   run bash "${BATS_TEST_DIRNAME}/../scripts/check-app-netpol.sh" --root "$tmp"
   echo "$output"
   rm -rf "$tmp"
