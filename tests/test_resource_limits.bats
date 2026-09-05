@@ -69,6 +69,36 @@ YAML
   printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
 }
 
+# grep-c-4(감사 6라운드): 값에 따옴표를 두른 `kind: "Deployment"`는 유효 YAML이고 kubectl·kustomize·
+# ArgoCD가 한 줄 스칼라와 동일하게 적용하지만, 예전 KIND_RE(`^kind:[ \t]*(Deployment|…)`)는 값 앞의
+# `"`에서 매치가 끊겨 파일이 프리필터에서 통째로 빠졌다(로스터 축과 별개인 **표기 축**) — 안에
+# 자원 블록이 없어도 평가되지 않았다. fast path(kind-무관)로 낮춘 뒤 판정을 파싱 결과에 맡기면
+# 표기에 무관해진다.
+@test "resource guard fails on a workload whose kind: value is quoted (notation axis, not roster axis)" {
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/scripts" "$tmp/platform/probe/prod" "$tmp/policy"
+  : > "$tmp/policy/memory-limit-allowlist.txt"
+  _seed_ok "$tmp"
+  cat > "$tmp/platform/probe/prod/deploy.yaml" <<'YAML'
+apiVersion: apps/v1
+kind: "Deployment"
+metadata: { name: probe, namespace: probe }
+spec:
+  template:
+    spec:
+      containers:
+        - name: probe
+          image: busybox
+          resources: {}
+YAML
+  _track "$tmp"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp" --floor substrate=0
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
+}
+
 @test "resource guard fails on a workload missing only a CPU request" {
   tmp="$(mktemp -d)"
   mkdir -p "$tmp/scripts" "$tmp/platform/probe/prod" "$tmp/policy"
