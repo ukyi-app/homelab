@@ -86,9 +86,10 @@ env를 채우므로 로컬·브랜치에서는 무방비였는데, 이제 매니
   ≈2026-08-27에 소멸했을 것이다. ⇒ **기각 근거 (b)의 절반("마지막 독립 사본이 남아 있다")은
   성립하지 않는다.** 이 ADR의 결론(아카이브 분리 계약 폐기) 자체는 그와 독립이지만, 「NUC 단일
   NVMe에 대한 독립 사본」을 이 prefix에서 기대하면 안 된다.
-  ⚠️ 증인 부재도 실측이다 — `infra/_tests/test_tf_static.bats`는 `prevent_destroy` 건수·신원만 세고
-  lifecycle의 `prefix`/`max_age`에는 단언이 0건이다(`prevent_destroy`는 **버킷 삭제**를 막지
-  **객체 만료**를 막지 않는다). 라이프사이클을 좁힐지(예: `pg/` 제외) 그대로 둘지는 owner 결정이다.
+  ⚠️ **이 갭은 티켓 60(커밋 06f32b1)이 닫았다** — `infra/_tests/test_tf_static.bats`의 "pg_backups
+  and cache_backups R2 lifecycles pin …" @test가 `prefix==""`·`max_age==1209600`·`enabled==true`
+  세 등식을 리소스별 awk 블록으로 강제한다. 라이프사이클을 좁힐지(예: `pg/` 제외) 그대로 둘지는
+  여전히 owner 결정이다.
 - `restore-drill`의 canary 행 수 비교는 여전히 **상수**다(시드가 1회성이라 라이브는 영구히 1행).
   그 드릴이 진짜 복구를 했는지는 스크립트의 `SAW_NONHEALTHY` 증인이 본다(M17 / PR #482).
   **아카이브 신선도(RPO) 증명은 이 ADR의 범위 밖이고 별건으로 남는다.**
