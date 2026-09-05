@@ -144,6 +144,11 @@ FIXEOF
   [ "$status" -ne 0 ]
 }
 
+# ⚠️ reg-a1-bats-guards-2 — 다단 파이프(예: `kubectl … | sort | grep -q NEEDLE`)는 이 레인의 사각이다.
+#    키워드-바로-다음-파이프 인접만 보는 정규식이라 목록 밖 중간 명령(sort·tr·uniq·column 등)이 하나만
+#    끼어도 무증인이다. 의도적으로 미대상 — 코드를 넓히면 무관 파이프가 오탐으로 뒤집힌다(check-sigpipe-writers.sh
+#    헤더 ②(b) 참고). 전수 열거 라이브 위반 0건이라 확장 대상이 아니며, 새 사례가 나오면 개별 케이스로 추가한다.
+
 @test "does not flag a whole-line comment that documents the command-writer idiom (c71-3)" {
   seed "# sed 's/x//' \"\$f\" | grep -qE 'guard_init'\n"
   run bash "$GUARD"
