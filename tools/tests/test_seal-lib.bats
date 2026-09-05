@@ -21,8 +21,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # 파일에 lib/seal.ts import를 요구하는 양성 형제다.
   run grep -nE 'spawnSync\("kubeseal"' tools/provision-db.ts tools/provision-cache.ts
   [ "$status" -eq 1 ]
+  # ⚠️ 양성 형제도 **import 줄**로 좁힌다 — 두 파일 다 본문 주석에 `봉인 SSOT = lib/seal.ts`를
+  #    담고 있어 맨 매치는 sealManifest를 안 써도 참이다(실측 2026-09-04: provision-db.ts의
+  #    직수입을 lib 본문의 로컬 사본으로 바꿔도 이 파일 + 형제 2파일 28/28 그대로 초록).
+  #    좁혀도 위 부재 단언의 피연산자 실재는 이 루프가 그대로 증언한다(rc 2 오독 방지).
   for f in provision-db.ts provision-cache.ts; do
-    run grep -q "lib/seal.ts" "tools/$f"
+    run grep -qE '^import .*"\./lib/seal\.ts"' "tools/$f"
     [ "$status" -eq 0 ]
   done
 }

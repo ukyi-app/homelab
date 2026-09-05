@@ -91,6 +91,20 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
   [ "$n" -ge 15 ]            # 글롭 붕괴 방지(현재 15). 상한 아님 — 신규 매니페스트는 자동 포함
   [ -d "$D/databases" ]      # 피연산자 실재 앵커
   yq '.resources[]' "$KUST" | grep -qxF 'databases/'
+  # `databases/` 한 줄은 **디렉토리를 렌더에 넣을 뿐**이고, 그 안의 배선은 하위 kustomization이 진다.
+  # 2026-09-04 실측: databases/kustomization.yaml에서 page.yaml + db-page-owner.sealed.yaml 두 줄을
+  # 지워도 이 컴포넌트 142건 결과가 클린 트리와 **동일**했고 tools 형제(audit-orphans·provision-db·
+  # teardown·homelab-db) 88/88도 초록이었다 — 논리 DB와 그 owner/ro 비번 봉인본이 프룬돼도 무증인.
+  # 같은 글롭 파생을 하위에도 건다(손 로스터 금지 — create-database가 DB당 3파일을 정당하게 늘린다).
+  DK="$D/databases/kustomization.yaml"; m=0
+  for f in "$D"/databases/*.yaml; do
+    b="$(basename "$f")"
+    case "$b" in kustomization.yaml) continue;; esac
+    yq '.resources[]' "$DK" | grep -qxF "$b" \
+      || { echo "미배선: databases/$b — 렌더에서 빠지면 라이브가 프룬된다"; false; }
+    m=$((m + 1))
+  done
+  [ "$m" -ge 2 ]             # 글롭 붕괴 방지(현재 6 = DB 2개 × {Database CR, owner 봉인본, ro 봉인본}). 상한 아님
 }
 
 @test "kubelet probe ingress is node-only (pod-CIDR-wide ipBlock would defeat default-deny)" {

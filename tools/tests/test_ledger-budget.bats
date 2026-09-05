@@ -64,7 +64,10 @@ EOF
 @test "teardown-app no longer carries an inline ledger row parser (lib SSOT adoption)" {
   run grep -c 'matchAll' "$ROOT/tools/teardown-app.ts"
   [ "$output" = "0" ]
-  grep -q 'lib/ledger-budget' "$ROOT/tools/teardown-app.ts"
+  # ⚠️ 존재 단언은 **import 줄**로 좁힌다 — 형제 test_ledger-totals.bats와 같은 클래스다(맨
+  #    `lib/ledger-budget` 매치는 파일 어디든 주석 한 줄에도 걸린다). 2026-09-04 형제 전수 열거에서
+  #    같은 파일(teardown-app.ts)을 재는 두 번째 자리로 발견돼 같은 커밋에서 함께 좁혔다.
+  grep -qE '^import .*"\./lib/ledger-budget\.ts"' "$ROOT/tools/teardown-app.ts"
 }
 
 # 양성 대조 — 이 스위트의 픽스처는 전부 올바른 합계 형식을 품고 있어서, 실 원장이 그 형식을 잃어도

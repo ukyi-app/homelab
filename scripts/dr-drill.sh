@@ -237,7 +237,10 @@ echo "==> [6.5] files 데이터 재결합 검증: files pod Ready + 재바운드
 #      **정적 바인딩**한 뒤 PVC를 만든다(동적 프로비저닝에 맡기면 빈 디렉토리를 새로 판다).
 #    ⚠️ 그 런북은 gitignored라 CI가 못 본다 — 이 단언이 수행 여부를 검증하는 유일한 기계다.
 kubectl -n files rollout status deploy/files --timeout=300s
-FILES_PVPATH="$(kubectl get pv -o json | yq -r '.items[] | select(.spec.claimRef.namespace=="files" and .spec.claimRef.name=="files-data") | (.spec.hostPath.path // .spec.local.path // "")' | head -1)"
+# ⚠️ `.status.phase=="Bound"`가 **계약이다**(형제: scripts/backup-files-data.sh:101). Retain 정책
+#    PV는 Released가 돼도 claimRef를 그대로 들고 있어서, claimRef만 보는 셀렉터에는 고아 PV가
+#    함께 걸린다 — head -1이 그 고아를 고르면 엉뚱한 옛 디렉토리를 "재결합됨"으로 오판한다.
+FILES_PVPATH="$(kubectl get pv -o json | yq -r '.items[] | select(.status.phase=="Bound" and .spec.claimRef.namespace=="files" and .spec.claimRef.name=="files-data") | (.spec.hostPath.path // .spec.local.path // "")' | head -1)"
 [ -n "$FILES_PVPATH" ] || { echo "DR DRILL FAIL: files-data PV 미바운드 — 정적 PV 재결합 미수행"; exit 1; }
 # ⚠️ **권한 상승해서 센다.** `/mnt/bulk`는 0700 root다(infra/k3s-bootstrap/README.md의 국면 A 절차가
 #    `install -d -m 0700 -o root -g root`로 만든다) — owner 신원으로 읽으면 EACCES가 빈 출력으로 둔갑해

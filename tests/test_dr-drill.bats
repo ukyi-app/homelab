@@ -234,6 +234,11 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값 · 결과 = �
   grep -qE '^[^#]*\$K3S_RUN find ' "$sh"
   # 열거 실패와 '항목 0'은 다른 사건이다 — 분기가 둘 다 있어야 한다.
   grep -q '열거하지 못했다' "$sh"
+  # ⚠️ **Bound가 계약이다**(형제: scripts/backup-files-data.sh:101의 같은 조항). claimRef만 보는
+  #    셀렉터에는 Retain 정책이 Released로 남긴 고아 PV가 함께 걸린다 — head -1이 그 고아를 고르면
+  #    엉뚱한 옛 디렉토리를 「재결합된 files-data」로 오판한다(같은 클러스터 실측 2026-08-19, 형제
+  #    자리에서 이미 한 번 문제였다). 셀렉터 리터럴이 `.status.phase=="Bound"`를 담는지 정적으로 잰다.
+  grep -qE 'select\(\.status\.phase=="Bound" and \.spec\.claimRef\.namespace=="files"' "$sh"
 }
 
 @test "no OrbStack binding remains in the DR destruction path (code, not prose)" {

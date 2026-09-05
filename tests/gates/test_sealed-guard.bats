@@ -227,9 +227,15 @@ YAML
 }
 
 @test "the gate step for the guard is blocking (no continue-on-error, no if)" {
-  run yq -e '[.jobs.gate.steps[] | select((.run // "") | test("scripts/sealed-guard.sh"))] | length == 1' "$CI"
+  # ⚠️ **행두 앵커**(`(^|\n)\s*`) — `.run` 전문에 test()를 걸면 주석 줄도 매치된다. 실측 2026-09-04:
+  #    이 스텝 본문을 `# 비활성화: bash scripts/sealed-guard.sh` + `true`로 바꿔도 이 파일 35/35 ·
+  #    형제 게이트(ci-gate·check-skeleton-gate·guard-authority) 26/27 · `bun tools/check-guard-authority.ts`
+  #    rc 0으로 **아무 곳도** 잡지 않았다(원장 세 줄이 전부 같은 주석 문자열로 만족됐다). 이 파일의
+  #    ledger 축과 달리 여기엔 두 번째 venue가 없어 조용해지면 진짜 fail-open이다.
+  #    아래 `length == 0` 레인은 선택자가 0건이면 공허하게 참이라, 위 `length == 1`이 그 양성 대조다.
+  run yq -e '[.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*bash scripts/sealed-guard\.sh"))] | length == 1' "$CI"
   [ "$status" -eq 0 ]
-  run yq -e '[.jobs.gate.steps[] | select((.run // "") | test("scripts/sealed-guard.sh")) | select(has("continue-on-error") or has("if"))] | length == 0' "$CI"
+  run yq -e '[.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*bash scripts/sealed-guard\.sh")) | select(has("continue-on-error") or has("if"))] | length == 0' "$CI"
   [ "$status" -eq 0 ]
 }
 

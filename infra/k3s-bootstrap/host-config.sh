@@ -125,6 +125,13 @@ EOF
 resolved_decl="${TREE}/etc/systemd/resolved.conf.d/10-k3s-node.conf"
 grep -qxF "DNS=${HOST_UPSTREAM_DNS}" "$resolved_decl" \
   || fail "선언 트리의 resolved 드롭인이 versions.env의 HOST_UPSTREAM_DNS=${HOST_UPSTREAM_DNS}와 다르다(${resolved_decl})"
+# ⚠️ 위 단언은 그 값이 있는 줄의 **존재**만 본다 — 두 번째 `DNS=` 줄이 더 있어도 참이다. systemd는
+#    `DNS=`를 반복하면 대입이 아니라 **append**해서, 사전(파일 순서)상 앞선 줄이 실효 1순위가 된다
+#    (2026-08-18 라우터 192.168.117.1 교착과 같은 클래스). `|| true`가 필요하다 — DNS= 줄이 0건이면
+#    grep -c는 rc 1이라 set -e 아래 이 대입 자체가 죽는다(비어있음과 실패를 가르지 않는 그 클래스).
+dns_n="$(grep -c '^DNS=' "$resolved_decl" || true)"
+[ "$dns_n" -eq 1 ] \
+  || fail "resolved 드롭인의 DNS= 줄이 ${dns_n}건이다 — 반복 대입은 리스트에 append돼 앞줄이 실효 1순위가 된다(2026-08-18 교착). 리졸버는 versions.env HOST_UPSTREAM_DNS 한 줄로만 늘릴 것"
 
 # ── [3] sshd 드롭인 우선순위 ───────────────────────────────────────────────────────────────
 # sshd_config는 **first obtained value wins**이고 드롭인은 본 파일 **앞에** Include된다(man).

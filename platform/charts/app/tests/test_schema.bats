@@ -34,6 +34,11 @@ complete=(--set image.repo=ghcr.io/x/y --set image.tag=sha-deadbeef \
 @test "schema rejects invalid kind enum" {
   run helm template t "$CHART" "${complete[@]}" --set kind=database
   [ "$status" -ne 0 ]
+  # ⚠️ 상한 — 위 단언은 `database` 한 값의 rc만 본다. enum에 대안(예: `cronjob`)을 더해도
+  #   `database`는 여전히 red라 이 줄만으로는 카디널리티 확장이 무증인이다(감사 5라운드 51
+  #   carry-7 실측: 4번째 원소 추가 후에도 이 파일+형제 2파일 21/21 ok). 스키마 원문 등식으로 닫는다.
+  S="$CHART/values.schema.json"
+  run jq -e '.properties.kind.enum == ["web","worker","site"]' "$S"; [ "$status" -eq 0 ]
 }
 
 @test "schema documents the sizing-discipline divergence (limits half)" {

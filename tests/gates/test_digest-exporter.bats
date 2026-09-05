@@ -40,6 +40,13 @@ load_budget() {
   yq '.resources[]' "$ROOT/platform/victoria-stack/prod/kustomization.yaml" \
     | grep -qxF 'ghcr-read.sealed.yaml' \
     || { echo "kustomization resources에 ghcr-read.sealed.yaml이 없다 — 렌더에서 빠지면 프룬된다"; false; }
+  # 자격만 배선하고 **그 자격을 쓰는 CronJob 자신**은 무증인이었다(2026-09-04 실측: digest-exporter.yaml
+  # 줄을 지워도 이 파일 + gha-liveness-exporter + digest-exporter-producer + victoria-stack 83/83
+  # 전건 초록, check-alert-rules·check-resource-limits도 rc 0). 프룬되면 R6 ImageDigestDrift가
+  # 통째로 무성이 된다 — 알림 부재는 색이 없어 라이브에서도 안 보인다.
+  yq '.resources[]' "$ROOT/platform/victoria-stack/prod/kustomization.yaml" \
+    | grep -qxF 'digest-exporter.yaml' \
+    || { echo "kustomization resources에 digest-exporter.yaml이 없다 — 렌더에서 빠지면 프룬된다"; false; }
 }
 
 @test "digest-exporter pod is egress-isolated (label + default-deny + ghcr/vmsingle allow)" {
