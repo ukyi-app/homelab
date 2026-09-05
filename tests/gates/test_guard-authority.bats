@@ -208,6 +208,29 @@ YAML
   echo "$output" | grep -q "scripts/check-real.sh"
 }
 
+# 감사 12라운드 77 reg-a3-tools-infra-1: ①(gate venue)은 liveGateSteps로 if:false 스텝을 걸러
+# workflowText에 push하지만, ④(make 타깃 권위 계산)는 ci.yaml을 원문으로 재스캔해 그 필터를
+# 무력화한다 — if:false 스텝이 `run: make <target>`이면 그 타깃의 recipe가 부르는 가드가
+# 여전히 권위(authoritative)로 승격된다. 위 154행 레인과 대조하면 차이는 오직 간접(make 타깃 경유)뿐.
+@test "a step gated by if: false invoking make <target> does not promote that target's guard (block 4 bypass)" {
+  printf 'deadtarget: ## should stay mirror\n\t@bash scripts/check-real.sh\n' > "$FIX/Makefile"
+  cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
+name: ci
+on: [pull_request]
+jobs:
+  gate:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - if: false
+        run: make deadtarget
+YAML
+  rm "$FIX/scripts/check-mirrored.sh" "$FIX/scripts/check-orphan.sh"
+  git -C "$FIX" add -A
+  run bun "$TOOL" --repo-root "$FIX" --floor guards=1
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "scripts/check-real.sh"
+}
+
 # 리뷰 실측: mirror를 이름(`verify`/`ci`)으로 선언하던 동안 타깃을 `verify-all`로 개명하기만 해도
 # "로컬에만 있고 CI엔 없는 가드"가 통과했다. mirror는 이름이 아니라 성질로 판정해야 한다.
 @test "a local mirror is non-authoritative under any target name (not a hardcoded name list)" {

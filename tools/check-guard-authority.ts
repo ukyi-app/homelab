@@ -292,7 +292,12 @@ export function collectVenues(root: string, guards: { path: string; text: string
   // ⚠️ **워크플로 텍스트만** 본다. gate venue에는 수집 bats도 들어 있는데, 그 안의 `run make -n help`
   //    같은 테스트 호출까지 세면 거의 모든 타깃이 "CI가 부른다"가 되어 default-deny가 무너진다
   //    (실측: 폴루션으로 16개 타깃이 권위로 승격됐다).
+  // ⚠️ 감사 12라운드 77 reg-a3-tools-infra-1 — ci.yaml은 ①에서 이미 liveGateSteps로 걸러(if:false·
+  //    job if:false·continue-on-error 축) workflowText에 push했다(:266-267). 여기서 다시 원문
+  //    재스캔하면 그 필터가 무력화돼, if:false 스텝의 `run: make <target>`이 여전히 권위로
+  //    승격된다(③의 형제 관용구, :280과 동일하게 제외).
   for (const f of sh("git", ["ls-files", "--", `${WORKFLOW_DIR}/*.yaml`], root).split("\n").filter(Boolean)) {
+    if (f === CI_WORKFLOW) continue;
     try {
       const doc = parse(readFileSync(`${root}/${f}`, "utf8")) as { jobs?: Record<string, { steps?: Step[] }> };
       workflowText.push(Object.values(doc?.jobs ?? {}).map((j) => stepTexts(j?.steps, root)).join("\n"));
