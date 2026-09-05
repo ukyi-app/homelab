@@ -85,6 +85,23 @@ ZS="$BATS_TEST_DIRNAME/../../infra/cloudflare/zone_settings.tf"
   [ "$(grep -cE '^[[:space:]]*action[[:space:]]*=[[:space:]]*"block"' "$WAF")" -eq 3 ]
 }
 
+@test "cache.tf pins bypass-dynamic cache=false and cache-static-assets cache=true" {
+  # [7라운드 tfval-cloudflare-1] cache.tf 6행 주석("bypass API + SSR HTML to avoid per-user leaks")의 실제 값 축이 무증인이었다
+  # (뮤테이션: bypass-dynamic의 cache=false -> true, 즉 SSR HTML을 엣지에 캐시해도 18/19 ok — 실측).
+  # 고정 2-룰 파일(waf.tf period/mitigation_timeout과 동형 관용구)이라 건수 등식에 인스턴스 오탐 없다.
+  [ "$(grep -cE '^[[:space:]]*cache[[:space:]]*=[[:space:]]*false' "$CACHE")" -eq 1 ]
+  [ "$(grep -cE '^[[:space:]]*cache[[:space:]]*=[[:space:]]*true' "$CACHE")" -eq 1 ]
+}
+
+@test "waf disallowed-methods rule keeps exactly the 7 standard HTTP methods" {
+  # [7라운드 tfval-cloudflare-4] waf.tf:21 주석("Only allow standard HTTP methods")의 메서드 집합(GET/POST/PUT/PATCH/DELETE/
+  # HEAD/OPTIONS)이 무증인이었다(TRACE 추가에 8/8 ok — 실측). expression이 waf.tf:22 단일 라인이라
+  # 파일 전역 grep -cE 한 줄로 충분(awk 블록 추출은 불필요 — 다른 줄에 이 토큰 형태가 등장하지 않음).
+  # grep -c는 매치 "행" 수라 한 줄에 몰린 7개 토큰이 1로 뭉친다 — -o로 매치 "건" 수를 센다
+  # (형제 관용구: infra/_tests/test_tf_static.bats의 tunnel service= 건수 카운트).
+  [ "$(grep -oE '\\"[A-Z]+\\"' "$WAF" | wc -l)" -eq 7 ]
+}
+
 @test "zone_settings pins every setting_id -> value pair (edge hardening SSOT, no silent downgrade)" {
   # [critic-cloudflare-values] zone_settings.tf를 읽는 가드가 0건이었다(비평가 실증: always_use_https
   # off·min_tls_version 1.0 뮤테이션에 전건 초록 — 이 파일 자체가 무증인이었다). 리소스 총수 등식
