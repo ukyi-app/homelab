@@ -102,6 +102,14 @@ teardown() { rm -rf "$TMP"; }
     --repo-dir "$R" --status-file "$TMP/bad2.json"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -qF -- 'HTTPRoute Accepted=False'
+  # tools-create-provision-2(8라운드) — 위 두 레인은 Application health·HTTPRoute Accepted만
+  # 뒤집었고, conditions[1](ResolvedRefs)을 False로 뒤집는 레인이 없어 그 조건 자체를 통째로
+  # 지워도(["Accepted", "ResolvedRefs"] → ["Accepted"]) 무증인이었다. 형제 레인 그대로 복사.
+  jq '.httproute.status.parents[0].conditions[1].status = "False"' "$TMP/status.json" > "$TMP/bad3.json"
+  run bun "$A" --app orders --sha "$SHA" --synced-rev "$SHA" \
+    --repo-dir "$R" --status-file "$TMP/bad3.json"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'HTTPRoute ResolvedRefs=False'
 }
 
 @test "writes a committed .activation marker with the proved sha and canonical surfaceHash on flip" {

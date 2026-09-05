@@ -47,6 +47,11 @@ teardown() { rm -rf "$TMP"; }
   grep -q "checksum/secrets" "$FR/apps/example-api/deploy/prod/values.yaml"
   grep -q "example-api-secrets.sealed.yaml" "$FR/apps/example-api/deploy/prod/kustomization.yaml"
   [ -f "$FR/apps/example-api/deploy/prod/example-api-secrets.sealed.yaml" ]
+  # tools-create-provision-4(8라운드) — 회전 시 재실행(멱등) 레인이 없어 dedup 가드(58-60행)가
+  # 무증인이었다. 같은 인자로 재실행해 envFrom의 secretRef가 누적되지 않는지 확인한다.
+  run bun "$ROOT/tools/update-secrets.ts" --app example-api --repo-root "$FR" --app-repo-root "$APPREPO"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'secretRef' "$FR/apps/example-api/deploy/prod/values.yaml")" -eq 1 ]
 }
 
 # 봉인 계약 정책 매트릭스(kind/namespace/name/empty/UPPER_SNAKE)는 커널이 소유한다
