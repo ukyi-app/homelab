@@ -310,6 +310,20 @@ build_wired_with_anno() {
   echo "$output" | grep -q '부분 상태'
 }
 
+@test "E axis: a secretRef outside envFrom (e.g. livenessProbe) does not satisfy E (path-anchored, not the whole document)" {
+  # reg-a2-ops-guards-1 — 예전 표현식은 `..`(문서 전체 재귀 하강)라 envFrom 경로 밖 아무
+  # 자유형 맵(platform/charts/app/values.schema.json의 livenessProbe·strategy.rollingUpdate가
+  # additionalProperties 미제한)에 놓인 secretRef.name도 배선 증거로 오인했다. envFrom을 아예
+  # 비우고 livenessProbe 아래 같은 이름의 secretRef만 두면 여전히 부분 상태(E=0)여야 한다.
+  d="$BATS_TEST_TMPDIR/nonenvfrom/myapp/deploy/prod"
+  build_state 1 0 1 1 "$d"
+  want="$(sha16 "$d/myapp-secrets.sealed.yaml")"
+  printf 'image: {}\nlivenessProbe:\n  secretRef:\n    name: myapp-secrets\npodAnnotations:\n  checksum/secrets: %s\n' "$want" > "$d/values.yaml"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '부분 상태'
+}
+
 @test "filename convention: a non-<app>-secrets *.sealed.yaml in the deploy dir is rejected" {
   d="$BATS_TEST_TMPDIR/rogue/myapp/deploy/prod"
   build_state 1 1 1 1 "$d"

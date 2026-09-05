@@ -68,7 +68,7 @@ check_one() {
   # 은폐)·`yq -e`(false=exit1 함정)는 쓰지 않는다.
   e=0
   if [ -f "$values" ]; then
-    eref="$(yq -r '[.. | select(type=="!!map" and has("secretRef")) | .secretRef.name][]? // ""' "$values")" \
+    eref="$(yq -r '[.envFrom[]? | select(type=="!!map" and has("secretRef")) | .secretRef.name][]? // ""' "$values")" \
       || { echo "FAIL: $d values.yaml 파싱 실패 — $values"; rc=1; eref=""; }
     if grep -Fqx -- "$app-secrets" <<< "$eref"; then e=1; fi
   fi
