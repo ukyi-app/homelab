@@ -32,10 +32,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # [infra-b-2] 위 네 리터럴은 존재만 잰다 — resource↔for_each **결합**에 앵커가 없어 두 for_each를
   # 맞바꿔도(신원 교체, 리소스별 신원은 그대로 남아 위 grep 4개는 잔존) 전건 초록이었다(6라운드 실측).
   # 같은 파일 :16-19 r2 앵커 관용구(awk 블록)를 리소스별로 복사해 신원을 확정한다.
+  # [7라운드 tfval-cloudflare-2] 세 리소스 전부의 proxied=true(Cloudflare 프록시 — WAF/캐시/DDoS
+  # 보호의 전제 조건)가 무증인이었다(public 리소스만 false로 뒤집어도 24/25 ok — 실측, 유일 not ok는
+  # 환경 전제 terraform validate). 블록을 한 번만 추출해 for_each 결합과 proxied 값을 함께 앵커한다.
   for pair in public:site_hosts platform:platform_hosts app:app_hosts; do
     res="${pair%%:*}"; loc="${pair##*:}"
-    awk -v r="$res" '$0 ~ "^resource \"cloudflare_dns_record\" \""r"\"" {f=1} f{print} f&&/^}/{exit}' "$d" \
-      | grep -qF "for_each = local.$loc" || { echo "FAIL: dns_record $res <-> local.$loc 결합 부재"; false; }
+    block="$(awk -v r="$res" '$0 ~ "^resource \"cloudflare_dns_record\" \""r"\"" {f=1} f{print} f&&/^}/{exit}' "$d")"
+    printf '%s' "$block" | grep -qF "for_each = local.$loc" || { echo "FAIL: dns_record $res <-> local.$loc 결합 부재"; false; }
+    printf '%s' "$block" | grep -qE 'proxied[[:space:]]*=[[:space:]]*true' || { echo "FAIL: dns_record $res proxied != true"; false; }
   done
   # [infra-b-3] tunnel ingress SSOT(public_hosts 합집합)에서 platform_hosts가 빠져도(reserved-hosts.json
   # 소비 체인 단절) 정적 게이트가 전건 초록이었다(6라운드 실측) — 합집합 원소·platform 리소스 for_each를

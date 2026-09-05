@@ -11,6 +11,8 @@
 setup() {
   P="${BATS_TEST_DIRNAME}/provider.tf"
   V="${BATS_TEST_DIRNAME}/variables.tf"
+  O="${BATS_TEST_DIRNAME}/outputs.tf"
+  OAUTH="${BATS_TEST_DIRNAME}/oauth.tf"
 }
 
 @test "provider takes scopes from a variable, not a hardcoded list (CI read-only path)" {
@@ -90,4 +92,29 @@ ts_job() { awk '/^  drift-tailscale:/{f=1;next} f&&/^  [a-z]/{exit} f' "$(WF)"; 
   #    1.15.5 양성 대조가 같은 술어의 생존을 증언한다. cf. docs/traps-detail.md 「열거 붕괴」③-b
   run bash -c 'printf "%s" "$1" | grep -qF -- '"'"'terraform_version: "1.9.8"'"'"'' _ "$block"
   [ "$status" -ne 0 ]
+}
+
+# ── 7라운드 tfval-tailscale-github-2 + tfval-tailscale-github-4 ──────────────────────────────
+# 위 @test들은 provider.tf(CI 토큰 교환 스코프)·variables.tf(owner 로컬 apply 기본값)만 본다.
+# outputs.tf(실 OAuth 클라이언트 시크릿 output의 sensitive 플래그)와 oauth.tf(k8s-operator
+# 자신의 scopes/tags — 클러스터가 실제로 쓰는 자격)는 이 파일도 test_acl_guard.bats도 열지 않아
+# 무증인이었다(sensitive=false 뮤테이션·scopes/tags 확대 뮤테이션 모두 9/9 ok — 실측).
+
+@test "both tailscale oauth outputs stay sensitive=true (the secret is a live k8s Secret value)" {
+  # sensitive=false로 뒤집히면 owner 로컬 terraform apply/output이 실 OAuth 클라이언트 시크릿을
+  # 터미널에 평문 출력한다(AGENTS.md: 시크릿 값은 채팅/로그에 절대 출력 금지). 출력 블록 수 대비
+  # sensitive=true 수를 세어 신규 output 추가에도 자동으로 닫힌다(acl_guard.bats류 건수 등식과 동형).
+  [ "$(grep -cE '^\s*sensitive\s*=\s*true' "$O")" -eq "$(grep -cE '^output "' "$O")" ]
+}
+
+@test "the k8s-operator client's own scopes/tags stay pinned (this is the live cluster credential)" {
+  # 이 리소스는 클러스터 안 tailscale-operator가 실제로 쓰는 자격이다 — provider.tf의 CI plan-only
+  # 토큰(위 @test들)과 다른 값 축. scopes에 all:write류를 더하면 tailnet 전체 write 권한이,
+  # tags를 확대하면 다른 태그로 디바이스 등록이 가능해진다. 행두·행말 앵커 전체 리터럴 일치로
+  # 원소 추가·순서 변경·삭제 전부를 한 줄씩 닫는다(terraform fmt가 간격을 고정 — make tf-validate
+  # 가 그 전제를 지킨다).
+  run grep -Eq '^\s*scopes\s*=\s*\["devices:core", "auth_keys"\]\s*$' "$OAUTH"
+  [ "$status" -eq 0 ]
+  run grep -Eq '^\s*tags\s*=\s*\["tag:k8s-operator"\]\s*$' "$OAUTH"
+  [ "$status" -eq 0 ]
 }

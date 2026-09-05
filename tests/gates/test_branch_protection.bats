@@ -35,6 +35,22 @@ TF="$BATS_TEST_DIRNAME/../../infra/github/repo.tf"
   [ "$status" -eq 1 ]
 }
 
+@test "allows_force_pushes stays pinned to false" {
+  # [7라운드 tfval-tailscale-github-1] PR-first 쓰기 모델의 서버측 강제 앵커 — force-push는 main
+  # 히스토리 재작성(합의 없는 리라이트)을 가능하게 한다. true로 뒤집거나 줄을 주석 처리해도
+  # (#39-46 앵커 원칙과 동형) 잡히도록 부재 단언(:=true)이 아니라 **양성 anchored 존재 단언(:=false)**을 건다.
+  run grep -E '^[[:space:]]*allows_force_pushes[[:space:]]*=[[:space:]]*false' "$TF"
+  [ "$status" -eq 0 ]
+}
+
+@test "allows_deletions stays pinned to false" {
+  # [7라운드 tfval-tailscale-github-1] GitOps SSOT 브랜치(main) 자체의 삭제를 막는 서버측 앵커 —
+  # ArgoCD가 이 브랜치를 싱크해 전 스택을 운영하므로 파급이 크다. 동일하게 양성 anchored 존재
+  # 단언(:=false)을 건다.
+  run grep -E '^[[:space:]]*allows_deletions[[:space:]]*=[[:space:]]*false' "$TF"
+  [ "$status" -eq 0 ]
+}
+
 @test "enforce_admins=false is documented as a deliberate solo-owner residual bypass" {
   # 잔여 위험을 코드에 명시(미문서 우회로 오인 방지). 주석에 '잔여' 또는 'residual' + 'enforce_admins'.
   # ⚠️ 키는 **실제 대입 줄**로 앵커한다 — 무앵커면 이 설정을 설명하는 주석(repo.tf:49)만으로도
