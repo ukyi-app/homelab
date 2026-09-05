@@ -116,6 +116,12 @@ setup() {
   #    ⚠️ `yq -e`를 쓰면 값이 false일 때도 exit 1이라 키 부재와 구별 못 한다(함정 원장) — 평문 비교.
   hash_off="$(yq '.configMapGenerator[] | select(.name=="alertmanager-config") | .options.disableNameSuffixHash' "$KUST")"
   [ "$hash_off" = "null" ]
+  # 형제 철자도 같은 효과다 — kustomize는 최상위 generatorOptions와 per-generator options 둘 다로
+  # 해시를 끈다(2026-09-05 실측: 최상위 블록만 추가해도 위 두 등식은 그대로 통과했다). `//`는 쓰지
+  # 않는다 — yq v4.53.3에서 키 부재는 이미 문자열 `null`을 내고, `//`는 lhs가 false일 때도 대체값을
+  # 돌려줘 리터럴 false를 null로 뭉갠다(`yq -e` 금지와 같은 함정 계열).
+  top_off="$(yq '.generatorOptions.disableNameSuffixHash' "$KUST")"
+  [ "$top_off" = "null" ]
   # ④ Deployment volume 참조 == generator 이름. 어긋나면 kustomize nameReference가 다시 쓰지 못해
   #    파드가 **존재하지 않는 ConfigMap**을 마운트한다(렌더는 통과, 라이브는 Pending).
   v="$(yq 'select(.kind=="Deployment" and .metadata.name=="alertmanager") | .spec.template.spec.volumes[] | select(.name=="config-in") | .configMap.name' "$AM")"
