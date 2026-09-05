@@ -190,6 +190,18 @@ EOF
   done
 }
 
+@test "each dispatcher notify job needs the actual mutation job (not validate alone)" {
+  # wf-mutation-dispatch-1: notify의 needs가 validate만 남고 실제 변이 잡(예: create-app)이 빠지면
+  # failure()/cancelled()가 참조할 상류가 validate뿐이 되어, validate 성공 시 notify가 무조건 skip된다
+  # — telegram 실패 알림이 완전히 죽는다. 위 @test의 `needs: validate`는 변이 잡 자신의 needs(단수,
+  # 별개 줄)라 notify 잡의 needs 리스트(복수, `[validate, $d]`)와 매치 대상이 다르다 — 여기서
+  # 리스트 원소를 앵커로 직접 검사한다(잡 이름은 파일 basename과 동일 — 위 setup 파생과 같은 전제).
+  for d in $DISPATCHERS; do
+    f="$WF/$d.yaml"
+    grep -q "needs: \[validate, $d\]" "$f"
+  done
+}
+
 @test "each dispatcher triggers only on workflow_dispatch (homelab-initiated boundary)" {
   # 양성 대조 — 같은 술어가 같은 트리 어딘가에서는 매치한다(push/schedule 구동 워크플로가 실재).
   # 술어 쪽이 부패하면 디스패처 전수 무매치가 정당한 결과처럼 보이는데, 이 줄이 먼저 red다.
