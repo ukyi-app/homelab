@@ -63,6 +63,10 @@ setup() {
   # 음성 대조 — **진짜** exec 줄은 여전히 면제다(위 레인이 면제를 통째로 없앤 것이 아니다).
   printf '#!/usr/bin/env bash\nexec 0</dev/null\nbats tools/tests/\n' > "$FX/real.sh"
   run bash "$S" "$FX/real.sh"; [ "$status" -eq 0 ]
+  # 네 번째 표면 — **코드 줄의 문자열 리터럴**(주석이 아니다). Makefile echo·워크플로 run 블록의
+  # 인용문 한 줄이면 예전 술어(앵커 없음)는 self=1을 세워 파일 전체를 면제했다. 행두 앵커가 막는다.
+  printf '#!/usr/bin/env bash\necho "규약: exec 0</dev/null 을 한다"\nbats tools/tests/\n' > "$FX/str.sh"
+  run bash "$S" "$FX/str.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[FD0]'
 }
 
 @test "the floor counts call sites, not files — a broken regex must not pass on file count" {
