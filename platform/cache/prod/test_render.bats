@@ -33,6 +33,11 @@ CJ="$DIR/backup-cronjob.yaml"
   echo "$b" | grep -q "port: 6379"
   probes="$(yq 'select(.metadata.name=="cache-allow-ingress-kubelet-probes")' "$NP")"
   echo "$probes" | grep -q "cidr: 10.42.0.1/32"   # 노드(cni0)만
+  # 상한 — 위 세 단언은 개별 존재만 잰다. ingress 비공백 NetworkPolicy 이름 집합 자체를 잠근다
+  # (yq 스트림 select는 매치 없는 문서에도 '---' 구분자를 내므로 걷어내고 정렬한다 — 형제
+  # platform/argocd/root/test_projects.bats:273 관용구).
+  names="$(yq 'select(.kind=="NetworkPolicy" and ((.spec.ingress // [])|length>0)) | .metadata.name' "$NP" | grep -v '^---$' | grep . | LC_ALL=C sort | paste -sd, -)"
+  [ "$names" = "cache-allow-ingress-backup,cache-allow-ingress-from-prod,cache-allow-ingress-kubelet-probes" ]
 }
 
 @test "egress is DNS for all pods plus a backup-job-scoped allowance" {
