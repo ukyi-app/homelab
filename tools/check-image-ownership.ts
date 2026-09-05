@@ -351,7 +351,9 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
       } else if (/\.ya?ml$/.test(f)) {
         const t = readFileSync(`${root}/${f}`, "utf8");
         // ArgoCD Application의 인라인 helm chart — 경로 무관(root/apps 밖도 recurse로 싱크된다).
-        if (/^kind:\s*Application\s*$/m.test(t) || /\nkind:\s*Application\s*\n/.test(t)) {
+        // ⚠️ 값-앵커가 인용 표기(`kind: "Application"`/`kind: 'Application'`)에 눈멀었었다
+        // (55 grep-c-2 형제, 7라운드 c64-5 실측 — 인용판은 refs=0으로 무증인이었다).
+        if (/^kind:\s*["']?Application["']?\s*$/m.test(t) || /\nkind:\s*["']?Application["']?\s*\n/.test(t)) {
           for (const m of t.matchAll(/^\s*chart:\s*(\S+)/gm)) charts.push(m[1]);
         }
         // Helm 차트의 `dependencies:` — 서브차트도 자기 기본 이미지를 들여온다.
