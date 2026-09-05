@@ -342,7 +342,7 @@
   이름이 바뀌고, nameReference 변환이 pod template의 volume 참조를 다시 써 롤아웃이 **구조로** 난다.
   현재 이 형태를 쓰는 곳: `platform/homepage/prod`(config·assets) ·
   `platform/victoria-stack/prod`(alertmanager — `alertmanager-config/alertmanager.yml`).
-  ⚠️ `options.disableNameSuffixHash: true`를 켜면 그 보장이 사라져 이 함정으로 그대로 복귀한다.
+  ⚠️ 최상위 `generatorOptions.disableNameSuffixHash: true` 또는 per-generator `options.disableNameSuffixHash: true`를 켜면 그 보장이 사라져(두 철자 모두 — 티켓 56 kustomization-4가 가드에 둘 다 잠갔다) 이 함정으로 그대로 복귀한다.
 - 남아 있는 자리(수동 `rollout restart`가 여전히 유일한 보장): 위 둘 밖의 ConfigMap 소비자
   — 예: `deadmanswitch-relay`(스크립트 ConfigMap) · adguard 시드 ConfigMap(첫 부팅 전용, 별도 함정).
 
