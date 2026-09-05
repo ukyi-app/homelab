@@ -93,6 +93,30 @@ _mkindex() {
   [ "$status" -eq 0 ]
 }
 
+@test "direction 2 flags an SSOT guard annotation absent from the ledger (reverse-tie regression)" {
+  # guard-decision-b-3 — line 69의 SSOT→원장 역추적(grep -Fq -- "$p" "$LEDGER")을 무력화해도(뮤테이션:
+  # true로 교체) 기존 7개 @test 전건이 초록이었다 — 이 픽스처는 방향②만 겨냥한다(DETAIL의 '> 가드:'
+  # 경로가 LEDGER 어디에도 없으면 드리프트).
+  printf '| 함정 | where | guard |\n|---|---|---|\n' > "$TMP/led.md"
+  printf '### 다른 함정\n> 가드: `scripts/does-not-appear-in-ledger.sh`\n- 본문\n' > "$TMP/detail.md"
+  _mkindex "$TMP/index.md" '다른 함정'
+  run bash scripts/verify-traps.sh "$TMP/led.md" "$TMP/detail.md" "$TMP/index.md"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -Fq "SSOT(traps-detail.md) 가드가 원장에 부재"
+}
+
+@test "direction 4 flags an AGENTS index line that appends a tail to the SSOT headline" {
+  # guard-decision-b-3 — line 162/169의 완전일치(grep -Fqx)가 부분일치(grep -Fq)로 완화돼도 기존
+  # 7개 @test 전건이 초록이었다 — 꼬리 덧붙임은 개수 등식(n_index==n_heads)으로도 안 잡힌다
+  # (2026-08-29 실사고: 107=107인데 4건이 이 상태).
+  printf '| 함정 | where | guard |\n|---|---|---|\n' > "$TMP/led.md"
+  printf '### 헤드라인 테스트\n- 본문\n' > "$TMP/detail.md"
+  _mkindex "$TMP/index.md" '헤드라인 테스트 (부가설명)'
+  run bash scripts/verify-traps.sh "$TMP/led.md" "$TMP/detail.md" "$TMP/index.md"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -Fq "완전 일치 아님"
+}
+
 @test "verify-traps flags a ledger guard path that does not exist" {
   printf '| 함정 | status | guard |\n|---|---|---|\n| x | gate-enforced | `tools/tests/nonexistent-guard.bats` |\n' > "$TMP/bad.md"
   printf '### 아무 함정\n- 본문\n' > "$TMP/detail.md"
