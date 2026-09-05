@@ -60,8 +60,13 @@ T_MARK="SKIP"
 # 따옴표 클래스는 3종 전부 — 백틱이 빠지면 템플릿 리터럴 방출이 통째로 밖이고, CLI 계약 마커
 # (SKIP: homelab <verb>:)는 보간이 필수인 모양이라 정확히 그 구멍을 부른다(06 리뷰 실측 —
 # console.warn도 같은 스윕에서 편입).
+# ⚠️ console 동사는 **열거가 아니라 클래스**(`console\.[a-z]+`)로 잡는다 — 형제 check-scan-producers.sh:105의
+# VERB는 log/info/warn/error/debug/trace 6종을 손으로 나열하는데, 이 레인도 처음엔 3종(log/error/warn)뿐이라
+# info/debug/trace 콜사이트가 무증인이었다(리뷰 실측). 열거는 두 번 스윕하고도(위 두 문단) 또 드리프트했으므로
+# 클래스로 닫으면 console.dir/table/group까지 포함해 재드리프트가 원리적으로 없다 — `SKIP:` 리터럴 동반이
+# 여전히 선이라 마커를 다루는 무관 코드는 안 걸린다(오탐 0 실측).
 T_Q_CLS='"'"'"'`'   # dquote·squote·backtick — 작은따옴표 연결 조립(백틱을 큰따옴표에 두면 커맨드 치환)
-P_EMIT="(echo|printf|console\\.(log|error|warn)|process\\.(stdout|stderr)\\.write).*[${T_Q_CLS}][^${T_Q_CLS}]*${T_MARK}:"   # 따옴표 리터럴 안 마커의 emission
+P_EMIT="(echo|printf|console\\.[a-z]+|process\\.(stdout|stderr)\\.write).*[${T_Q_CLS}][^${T_Q_CLS}]*${T_MARK}:"   # 따옴표 리터럴 안 마커의 emission
 
 SCOPE_NARROWED=0
 FILES=()
