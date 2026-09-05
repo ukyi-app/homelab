@@ -34,6 +34,10 @@ setup() {
   for s in policy_file dns oauth_keys devices:core auth_keys; do
     printf '%s' "$line" | grep -qF -- "\"${s}\""
   done
+  # [infra-a-3] 위 루프는 멤버십만 잰다(원소 수 상한 0줄) — 기본값에 원소를 추가해도(6라운드 실측
+  # P4: auth_keys, all:write 추가) 무증인이었다. 리스트 전체 리터럴 일치로 상한까지 닫는다
+  # (`terraform fmt`가 간격을 고정하므로 -F가 안전 — make tf-validate가 그 전제를 지킨다).
+  printf '%s' "$line" | grep -qF -- '["policy_file", "dns", "oauth_keys", "devices:core", "auth_keys"]'
 }
 
 # ── CI 주입 자리 (2026-08-19) ───────────────────────────────────────────────────────────────
@@ -54,6 +58,11 @@ ts_job() { awk '/^  drift-tailscale:/{f=1;next} f&&/^  [a-z]/{exit} f' "$(WF)"; 
   run ts_job
   [ "$status" -eq 0 ]
   printf '%s' "$output" | grep -qF -- "TF_VAR_ts_oauth_scopes: '[\"policy_file:read\",\"dns:read\",\"oauth_keys:read\"]'"
+  # ⚠️ 위 부분문자열 grep은 위치에 무감하다 — 같은 리터럴을 주석으로 옮겨도(잡 블록 안이라
+  # ts_job 추출엔 남는다) 매치한다(6라운드 실측 P2). 행두·행말 앵커로 "주입 줄 자신"만 겨냥한다
+  # (`-var` 오버라이드는 terraform이 TF_VAR_보다 우선시켜 이 앵커도 원리적으로 못 보는 축이다 —
+  # 그 경로는 어차피 read-only OAuth client가 403을 내 loud red이므로 별도 단언은 생략한다).
+  printf '%s' "$output" | grep -qE "^[[:space:]]+TF_VAR_ts_oauth_scopes: '\[\"policy_file:read\",\"dns:read\",\"oauth_keys:read\"\]'\$"
 }
 
 # terraform은 state를 쓴 버전보다 낮은 바이너리로 그 state를 **읽지도 못한다**. 이 루트는 owner
