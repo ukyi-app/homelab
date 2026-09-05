@@ -85,7 +85,10 @@ EOF
 # shellcheck disable=SC2016  # awk 프로그램의 문자 클래스에 백틱이 있다 — 셸 확장이 아니다
 DETECT='
   BEGIN {
-    VERB = "(console\\.(log|info|warn|error|debug|trace)|process\\.(stdout|stderr)\\.write)"
+    # ⚠️ console 동사는 열거가 아니라 클래스다(`console\.[a-z]+`) — 6종 손 열거도 dir/table/group
+    #    같은 신규 메서드를 놓친다(형제 check-skip-signalling.sh:63과 같은 처방, 감사 6라운드
+    #    티켓64 c64-6). LIT(아래)가 여전히 "SCAN: " 리터럴 동반을 요구하므로 오탐은 없다.
+    VERB = "(console\\.[a-z]+|process\\.(stdout|stderr)\\.write)"
     LIT  = "[[:space:]]*\\[?[[:space:]]*[\042\047`]SCAN: "
     OPEN = VERB "\\([[:space:]]*$"
     HIT  = "(" VERB "\\(|Bun\\.write\\([^,)]*,)" LIT

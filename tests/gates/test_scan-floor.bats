@@ -710,6 +710,19 @@ PY
   done
 }
 
+# console 동사는 열거가 아니라 클래스다(`console\.[a-z]+`) — 6종 손 열거로는 dir/table/group 같은
+# 목록 밖 메서드가 영원히 무증인이다(감사 6라운드 티켓64 c64-6, 형제 check-skip-signalling.sh:63).
+@test "a producer using an unlisted console method (console.dir) is rejected too (verb is a class, not an enum)" {
+  fx="$(make_tools_fixture unlisted-verb)"
+  printf '%s\n' 'const n = 3;' 'console.dir("SCAN: check-dir: " + n);' > "$fx/tools/check-dir.ts"
+  git -C "$fx" add -A
+  run bash "$ROOT/scripts/check-scan-producers.sh" --root "$fx"
+  [ "$status" -eq 1 ]
+  out="$output"
+  run grep -q "tools/check-dir.ts:2:" <<<"$out"
+  [ "$status" -eq 0 ]
+}
+
 # 검출기 사망은 "매치 0건"이 아니다 — 읽을 수 없는 파일은 넘기기 전에 잡고, 그 실행은 마커를 내지 않는다
 # (함정 원장 `findings="$(awk … || true)"`: 검출이 죽은 실행이 "N파일 스캔"을 내면 소비자가 정반대로 읽는다).
 @test "an unreadable target is a loud failure before any marker, not a silently skipped file" {
