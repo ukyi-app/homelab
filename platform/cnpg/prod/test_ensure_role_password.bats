@@ -142,6 +142,18 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   printf '%s' "$v" | grep -qxF -- 'get list'
 }
 
+@test "ensure-role-password Job container is hardened (no privesc, all caps dropped, seccomp RuntimeDefault)" {
+  # spec-others-2(round8) — 형제 hardened @test 관용구(test_basebackup.bats:34-38)를 그대로 적용.
+  # 기존 값은 이미 올바르다(allowPrivilegeEscalation:false·capabilities.drop:[ALL]·pod-level
+  # seccompProfile RuntimeDefault) — 값 자체를 바꾸지 않고 등식 witness만 추가한다.
+  # 뮤테이션 재현(2026-09-05): allowPrivilegeEscalation false->true 치환 후 이 파일(9/9)·
+  # test_security-gates.bats(8/8) 재실행 — 전건 ok(17/17, 변화 없음, 사본으로 원복).
+  j="$ROOT/platform/cnpg/prod/ensure-role-password-job.yaml"
+  grep -q 'allowPrivilegeEscalation: false' "$j"
+  grep -qF 'drop: [ALL]' "$j"
+  grep -q 'type: RuntimeDefault' "$j"
+}
+
 @test "the configMapGenerator files roster still points at the Job's own script" {
   # 위 @test는 `resources`(렌더 대상) 축만 잰다 — Job이 마운트하는 ConfigMap이 실제로 이
   # 스크립트를 굽는지(configMapGenerator.files)는 required gate 안에서 무증인이었다(2026-09-05
