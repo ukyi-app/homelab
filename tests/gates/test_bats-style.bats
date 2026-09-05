@@ -411,6 +411,54 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+# ── 여섯 번째 형태(jq/yq `== [` 배열 리터럴 등식) — 실 레포 관용구 회귀 잠금 ──────────────────────
+# 7라운드 setcap-denominator-2 실측: platform/charts/app/tests/test_schema_fail_closed.bats:53,62는
+# `run jq -e '...enum == [...]'; [ "$status" -eq 0 ]` 형태로 이미 완전히 상한을 잠갔지만, 그 매치는
+# 뒤따르는 `-eq 0`(jq 성공 rc, 다섯 형태 목록의 「수 등식」)에 **우연히** 걸린 것뿐이었다 — 배열
+# 리터럴 자체를 재는 술어는 이 커밋 전까지 없었다. 실 관용구를 그대로 픽스처로 고정해, 다음
+# 누군가 `-eq N`의 `"$status"` 좌변을 제외하는 처방(위 헤더가 다음 라운드 후보로 적어 둔 그것)을
+# 이 6번째 형태보다 먼저 넣으면 이 @test가 즉시 red로 그 순서 위반을 잡는다.
+@test "detector passes on the real repo idiom (run jq -e '...==[...]'; status -eq 0) ([SETCAP] positive array-literal)" {
+  printf '%s\n' \
+    '@test "schema rejects an unknown enum (enum is A/B only)" {' \
+    '  run jq -e ".foo.enum == [\"A\",\"B\"]" /some/file.json' \
+    '  [ "$status" -eq 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_arrayeq.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_arrayeq.bats"
+  [ "$status" -eq 0 ]
+}
+
+# ── 죽은 세 술어(contains(/join(","/length ==)의 양성 픽스처 — 7라운드 setcap-denominator-3 ───────
+# 실측: 세 정규식 중 어느 하나를 삭제해도 기존 픽스처·라이브 위반집합 양쪽 다 무증인이었다(위
+# `count=2` 픽스처가 「수 등식」 하나로만 초록을 낸다). 각 형태를 **단독으로**(다른 다섯 형태와
+# 겹치지 않게) 행사해 정규식이 지워지면 이 @test들 스스로 red가 나게 잠근다.
+@test "detector passes with a contains() predicate alone ([SETCAP] positive contains)" {
+  printf '%s\n' \
+    '@test "the widget set has exactly the expected members" {' \
+    "  run yq '.resources | contains([\"a.yaml\"])' /some/file" \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_contains.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_contains.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "detector passes with a join(\",\") predicate alone ([SETCAP] positive join)" {
+  printf '%s\n' \
+    '@test "the widget set has exactly the expected members" {' \
+    "  run yq '[.resources[]] | join(\",\")' /some/file" \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_join.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_join.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "detector passes with a length == predicate alone ([SETCAP] positive length)" {
+  printf '%s\n' \
+    '@test "the widget set has exactly the expected members" {' \
+    "  run yq '[.resources[]] | length == 2' /some/file" \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_length.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_length.bats"
+  [ "$status" -eq 0 ]
+}
+
 @test "a singular-target vocabulary hit is still flagged — no exemption vocabulary is smuggled in ([SETCAP] false-positive control)" {
   # 오탐 대조 — 이름의 어휘가 집합이 아니라 단수 대상을 가리키는 자리("only Traefik"류, 티켓
   # 문안 그대로 — 아래 픽스처 본문)도 검출기는 **그대로** 잡는다. 처방은 면제 조건이 아니라 이름
