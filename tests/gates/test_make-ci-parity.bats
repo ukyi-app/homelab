@@ -288,6 +288,36 @@ mkparity_fixture() {   # $1=디렉토리  $2=then 절 본문
   [ "$status" -eq 0 ]
 }
 
+# ── 정제의 세 번째 갈래: 행두 `#` 주석 ────────────────────────────────────────────────────────
+# recipe 줄의 `#`는 **make 주석이 아니다** — make는 탭으로 시작하는 줄을 그대로 셸에 넘기므로
+# `make -n` 출력에 리터럴로 남는다. 그래서 정제에 주석 갈래가 없으면 recipe 한 줄을 `#`로 막아도
+# `makeExec.includes(local)`이 참이 되어 mirrored 전건이 조용히 초록이었다(실측 2026-09-04:
+# Makefile의 `bun run verify:ledger`를 `# bun run verify:ledger`로 바꿔도 `mirrored 24 · covered 2`
+# rc=0으로 before/after 동일). 프로브·미평가 라벨과 같은 클래스다 — 문자열은 남는데 호출은 없다.
+mkparity_line_fixture() {   # $1=디렉토리  $2=recipe 한 줄
+  mkdir -p "$1/.github/workflows" "$1/policy"
+  printf 'name: ci\non: push\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - name: actionlint\n        run: actionlint\n' \
+    > "$1/.github/workflows/ci.yaml"
+  printf '%s\n' '{"_readme": "fixture", "steps": [{"name": "actionlint", "status": "mirrored", "local": "actionlint"}]}' \
+    > "$1/policy/ci-parity.json"
+  printf 'ci:\n\t%s\n' "$2" > "$1/Makefile"
+}
+
+@test "a commented-out recipe line cannot stand in for the call itself (shell comments are not invocations)" {
+  # 뮤테이션: recipe 줄을 지우지 않고 `#` 한 글자로 막는다 — diff 한 글자짜리 fail-open이다.
+  muted="$BATS_TEST_TMPDIR/muted"
+  mkparity_line_fixture "$muted" '# actionlint'
+  run bash -c "cd '$muted' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -q "make -n ci"
+
+  # 대조군 — 같은 픽스처에서 `#`만 걷어내면 통과한다(픽스처 조립 자체의 실패가 아니다).
+  live="$BATS_TEST_TMPDIR/live"
+  mkparity_line_fixture "$live" 'actionlint'
+  run bash -c "cd '$live' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  [ "$status" -eq 0 ]
+}
+
 # ── ⑧ 이름 보존 + 본문 교체 ────────────────────────────────────────────────────────────────────
 # ④는 원장 → `make -n ci`, ⑦은 ci.yaml 본문 → 원장이다. 둘 다 스텝을 **이름**으로 계상하므로,
 # 이름을 남기고 run 본문만 갈아치우면 ④는 Makefile 쪽 문자열로 통과하고 ⑦은 본문에 레포 커맨드가

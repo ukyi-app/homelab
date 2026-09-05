@@ -38,9 +38,17 @@ const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string)
 const KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler", "Cluster", "ObjectStore"]);
 // spec.template.spec.containers[] 경로를 쓰는 kind(Pooler = CNPG pgbouncer). Cluster는 별도(spec.resources).
 const CONTAINER_KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler"]);
-// KINDS에서 파생 — 한 곳만 고친다. (손 사본 두 벌이던 시절 KIND_RE만 뒤처지면 그 파일이
-// 아예 안 열려 count도 안 늘고 「열거 붕괴 → vacuous green」이 됐다 — 2026-09-01 ObjectStore 추가 시 실측.)
-const KIND_RE = new RegExp(`^kind:[ \\t]*(${[...KINDS].join("|")})\\b`, "m");
+// ⚠️ 로스터 축(KINDS 파생)과 표기 축(값 앞 따옴표·들여쓰기 등)은 별개다(감사 6라운드 grep-c-4,
+// docs/traps-detail.md 「파일 프리필터를 함께 넓히지 않으면 kind 추가가 vacuous green으로 착지한다」).
+// `kind: "Deployment"`처럼 값에 따옴표를 두른 표기는 유효 YAML이고 kubectl·kustomize·ArgoCD가
+// 한 줄 스칼라와 동일하게 적용하는데, 앵커된 리터럴 대조(`^kind:[ \t]*(Deployment|…)`)는 값 앞의
+// `"`/`'`에서 매치가 끊긴다 — 그 표기의 파일은 프리필터에서 통째로 빠지고, 안에 어떤 자원 위반이
+// 있어도 평가되지 않는다(실측 2026-09-05: `kind: "Deployment"` + resources 삭제 → SCAN 21→20 rc=0,
+// MIN_SCAN=18이 그 -1을 덮는다). 따옴표 하나를 문자 클래스로 닫아도 계열 전체(들여쓰기·flow 매핑·
+// `!!str` 태그)가 남으므로, 프리필터는 **kind-무관 fast path**로 낮추고(그 파일을 열지조차 못하는
+// 상태만 막는다) 실제 판정은 파싱 결과(:below `KINDS.has(o.kind)`)에 맡긴다 — 그 대조는 이미
+// 표기에 무관하다(YAML 파서가 따옴표를 벗긴 값을 준다).
+const KIND_RE = /^[ \t]*kind:/m;
 // 열거 붕괴 바닥값. 2026-09-03 실측 스캔 21건 → **18**(3건 철거를 견딘다). 래칫 아님 —
 // 도메인이 줄지 않는 한 손댈 일이 없다. ⚠️ 초판 값 10은 실 도메인의 절반이라, 21건 중
 // 11건이 조용히 사라져도 초록이었다(호출부 Makefile:78,216·ci.yaml에 `--floor` 오버라이드가
@@ -178,14 +186,20 @@ function checkBlock(
 function enumerateScope(scope: string, accrue: boolean): number {
   let count = 0;
   for (const { path: rel, text, docs } of walkManifests(scope, ROOT)) {
+    // fast path — 파일에 `kind:` 토큰 자체가 없으면 파싱을 건너뛴다(성능 전용, kind 값은 안 본다).
     if (!KIND_RE.test(text)) continue;
-    count++;
+    // ⚠️ SCAN 건수는 이 fast path가 아니라 **파싱된 kind**에서 파생한다(:below `KINDS.has(o.kind)`가
+    // 처음 성립할 때 파일당 1회) — 그래야 값의 표기(따옴표·들여쓰기 등)에 건수가 무관해진다.
+    let counted = false;
     for (const doc of docs) {
       // throw로 알린다 — 커널이 `FAIL: <scan>: 열거 실패`로 접어 마커 없이 죽는다(enumerate 안의
-      // 직접 exit는 커널의 순서 보장 밖에서 죽는 경로를 되살린다).
+      // 직접 exit는 커널의 순서 보장 밖에서 죽는 경로를 되살린다). fast path가 kind-무관이 되면서
+      // 이 throw는 이제 스코프 안의 `kind:` 문자열을 가진 파일 전부에 적용된다(fail-closed 방향 —
+      // 실측 2026-09-05: 현 트리 파싱 에러 0건, 런타임 무변화).
       if (doc.errors.length) throw new Error(`YAML 파싱 실패: ${rel}: ${doc.errors[0].message}`);
       const o = doc.toJS() as any;
       if (!o || typeof o !== "object" || !KINDS.has(o.kind)) continue;
+      if (!counted) { count++; counted = true; }
       const name = o.metadata?.name ?? "?";
       // namespace는 원장 행의 두 번째 열이다 — 미선언이면 어느 행에도 귀속되지 않으므로
       // (라이브에선 `default`로 떨어진다) 대조 자체가 성립하지 않는다. 즉시 위반으로 낸다.
