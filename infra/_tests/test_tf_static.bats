@@ -84,3 +84,24 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
       || { echo "FAIL: r2 bucket_lifecycle $r max_age != 1209600(14일)"; false; }
   done
 }
+
+@test "each cloudflare output pins the correct sensitive value (tunnel_token is the only live secret)" {
+  # [7라운드 c71-1] 티켓 65 「다음 라운드 입력」 — outputs.tf 6개 output 중 tunnel_token(실
+  # cloudflared run token)만 sensitive=true여야 하고 나머지 5개(tunnel_id·r2 버킷명·엔드포인트 URL)는
+  # 정당하게 false다. infra/tailscale/test_provider_scopes.bats의 "블록 수==sensitive=true 수" 건수
+  # 등식은 **여기 그대로 못 옮긴다** — tailscale은 전 output이 true라 건수만 세도 신원이 잠기지만,
+  # 이 파일은 6개 중 1개만 true라 "아무 출력이나 하나만 true"여도 건수 등식은 속는다(값이 이질적).
+  # 그래서 output 이름별로 기대 sensitive 값을 앵커한다(pair 분할 관용구는 :38-43 dns_record 루프와
+  # 동형 — declare -A는 bash 3.2 미지원이라 쓰지 않는다). 목록 크기==전체 output 블록 수 등식으로
+  # 신규 output 추가(무증인 상태로 섞여 들어오는 회귀)도 함께 닫는다.
+  d=infra/cloudflare/outputs.tf
+  for pair in tunnel_token:true tunnel_id:false r2_account_endpoint:false \
+    r2_pg_backups_bucket:false r2_cache_backups_bucket:false r2_media_bucket:false; do
+    name="${pair%%:*}"; want="${pair##*:}"
+    block="$(awk -v r="$name" '$0 ~ "^output \""r"\"" {f=1} f{print} f&&/^}/{exit}' "$d")"
+    [ -n "$block" ] || { echo "FAIL: output $name 블록 부재"; false; }
+    printf '%s' "$block" | grep -qE "sensitive[[:space:]]*=[[:space:]]*${want}" \
+      || { echo "FAIL: output $name sensitive != ${want}"; false; }
+  done
+  [ "$(grep -cE '^output "' "$d")" -eq 6 ]
+}
