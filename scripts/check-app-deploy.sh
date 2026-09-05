@@ -19,7 +19,8 @@
 #
 # 인자로 deploy/prod 디렉토리들을 받으면 그것만, 없으면 apps/*/deploy/prod 전체를 검사
 # (인자 없는 기본 모드의 앱 열거 0건은 scan-floor가 판정한다 — 아래 바닥값 주석 참조).
-# bash 3.2 호환: `cmd && x`(set -e 함정)·mapfile·[[ ]] 금지 — if-블록·for로. yq는 버전차 함정이라 값 추출은 sed/grep으로.
+# bash 3.2 호환: `cmd && x`(set -e 함정)·mapfile·[[ ]] 금지 — if-블록·for로. yq는 버전차 함정이라 값 추출은 sed/grep으로
+# (checksum/scope처럼 스칼라 값을 읽을 때 한정 — E/K의 **경로 멤버십**은 yq 구조 비교를 쓴다, grep-a-3).
 # 현재 인레포 배포 앱은 **0개**다(page #455 · trip-mate-api 철거). 앱이 있던 시절의 규약은
 # 앱당 <app>-secrets.sealed.yaml 봉인본 1개 — 새 앱 온보딩 시 그대로 적용된다.
 set -euo pipefail
@@ -58,13 +59,27 @@ check_one() {
   # S — 봉인본 존재
   s=0; if [ -f "$sealed" ]; then s=1; fi
   # E — envFrom에 <app>-secrets secretRef(name 줄이 <app>-secrets로 끝, 접미 conn 시크릿 db-*-conn과 구별).
-  # 이 게이트는 손편집 표면을 정찰하므로 정당한 YAML 변형(선택적 따옴표)을 관용한다 — 무관용 시 정상 배선이
-  # false-FAIL. app 이름은 DNS-label(소문자·하이픈)이라 정규식 메타문자 없음(APP_RE 강제).
+  # 경로 앵커(yq 구조 비교) — 예전 줄 정규식은 어느 키 아래인지를 안 보고 「그 문자열이 파일 어딘가
+  # 있다」만 쟀다. 문서용 `notes: |` 블록 스칼라 안에 같은 토큰만 있어도 참이 되던 자리(형제
+  # check-app-netpol.sh:102가 같은 apps/ 도메인에서 이미 `yq ea`를 쓴다 — 헤더 :22의 yq 회피는
+  # 값 추출 한정이고 경로 멤버십에는 걸리지 않는다). `yq | grep -q` 파이프는 쓰지 않는다 —
+  # pipefail 아래 grep의 조기 종료가 writer를 SIGPIPE(141)로 죽여 거짓 FAIL이 난다
+  # (check-argocd-revision.sh:65 근거). 변수 포획 후 대조로 그 경로를 피한다. `|| true`(파싱 실패
+  # 은폐)·`yq -e`(false=exit1 함정)는 쓰지 않는다.
   e=0
-  if [ -f "$values" ] && grep -qE '^[[:space:]]+name:[[:space:]]*["'"'"']?'"$app"'-secrets["'"'"']?[[:space:]]*(#.*)?$' "$values" 2>/dev/null; then e=1; fi
-  # K — kustomization.resources에 봉인본 등재
+  if [ -f "$values" ]; then
+    eref="$(yq -r '[.. | select(type=="!!map" and has("secretRef")) | .secretRef.name][]? // ""' "$values")" \
+      || { echo "FAIL: $d values.yaml 파싱 실패 — $values"; rc=1; eref=""; }
+    if grep -Fqx -- "$app-secrets" <<< "$eref"; then e=1; fi
+  fi
+  # K — kustomization.resources에 봉인본 등재(경로 앵커, 위와 동형). `patches:` 등 다른 키 아래로
+  # 옮겨도 예전 줄 정규식은 등재로 오인했다 — `.resources` 배열만 본다.
   k=0
-  if [ -f "$kust" ] && grep -qE '^[[:space:]]*-[[:space:]]*["'"'"']?'"$app"'-secrets\.sealed\.yaml["'"'"']?[[:space:]]*(#.*)?$' "$kust" 2>/dev/null; then k=1; fi
+  if [ -f "$kust" ]; then
+    kres="$(yq -r '.resources[]? // ""' "$kust")" \
+      || { echo "FAIL: $d kustomization.yaml 파싱 실패 — $kust"; rc=1; kres=""; }
+    if grep -Fqx -- "$app-secrets.sealed.yaml" <<< "$kres"; then k=1; fi
+  fi
   # C_present — checksum/secrets annotation 존재(값은 ②에서 정합 검사; sed로 16진값 추출, yq 함정 회피)
   want=""
   if [ -f "$values" ]; then

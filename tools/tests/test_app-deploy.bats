@@ -284,6 +284,32 @@ build_wired_with_anno() {
   echo "$output" | grep -q 'scope'
 }
 
+# ── K/E 경로 앵커(grep-a-3) — 문자열이 파일 어딘가에 있는 것과 그 키 아래에 있는 것은 다르다ㅡ
+
+@test "K axis: the sealed filename under patches: does not satisfy K (resources membership only)" {
+  # 예전 줄 정규식은 어느 키 아래인지 안 보고 시퀀스 항목 모양이면 등재로 오인했다 —
+  # `resources: []`로 비우고 같은 파일명을 `patches:` 아래 두면 kustomize는 그 자리에서
+  # SealedSecret을 안 만든다(K는 여전히 0이어야 한다).
+  d="$BATS_TEST_TMPDIR/patched/myapp/deploy/prod"
+  build_state 1 1 0 1 "$d"
+  printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources: []\npatches:\n  - myapp-secrets.sealed.yaml\n' > "$d/kustomization.yaml"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '부분 상태'
+}
+
+@test "E axis: a configMapRef typo with the same name does not satisfy E (secretRef key required)" {
+  # envFrom 항목이 secretRef가 아니라 configMapRef면 Secret이 아니라 ConfigMap을 참조한다 —
+  # 이름이 같아도 배선은 안 된 것이다. 예전 줄 정규식은 `name:` 줄만 봐서 키를 구별 못 했다.
+  d="$BATS_TEST_TMPDIR/cmref/myapp/deploy/prod"
+  build_state 1 0 1 1 "$d"
+  want="$(sha16 "$d/myapp-secrets.sealed.yaml")"
+  printf 'image: {}\nenvFrom:\n  - configMapRef:\n      name: myapp-secrets\npodAnnotations:\n  checksum/secrets: %s\n' "$want" > "$d/values.yaml"
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '부분 상태'
+}
+
 @test "filename convention: a non-<app>-secrets *.sealed.yaml in the deploy dir is rejected" {
   d="$BATS_TEST_TMPDIR/rogue/myapp/deploy/prod"
   build_state 1 1 1 1 "$d"
