@@ -1,9 +1,32 @@
 #!/usr/bin/env bats
 # observability 외부 egress 격리 회귀 가드(alertmanager·relay, NETPOL-4 minimal). @test 이름은 영어
 # (디렉토리 단위 실행 시 한글 인코딩 깨짐 — 검증된 버그).
-# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 networkpolicy.yaml 단일 파일이라
-#    그것으로 닫힌다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
+# ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 networkpolicy.yaml 단일 파일인 @test에서만
+#    그것으로 닫힌다(아래 kustomization 배선 @test는 디렉토리 전체를 글롭으로 돈다 — 단일 파일
+#    전제가 아니다). cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
 setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; K="${BATS_TEST_DIRNAME}/kustomization.yaml"; }
+
+@test "every top-level manifest in this dir is wired into the kustomization (prune deletes what is not)" {
+  # 감사 6라운드 티켓56 kustomization-2 — grafana 3종·httproute-grafana·node-exporter·
+  # kube-state-metrics·vmsingle·vmagent-scrape-config·victorialogs·vector·glances 11파일은
+  # 렌더를 읽는 다른 @test가 하나도 열지 않아 kustomization 멤버십이 무증인이었다(2026-09-05
+  # 실측: 11파일을 resources에서 동시 제거해도 이 디렉토리 + 관련 게이트 234/234 전건 초록).
+  # cnpg 선례(platform/cnpg/prod/test_networkpolicy.bats:78-93)의 글롭 파생 루프를 그대로 복사한다
+  # — 손 로스터가 아니라 (N+1)번째 매니페스트가 자동 편입된다.
+  D="$BATS_TEST_DIRNAME"; n=0
+  for f in "$D"/*.yaml; do
+    b="$(basename "$f")"
+    case "$b" in kustomization.yaml|secret-generator.yaml|*.enc.yaml) continue;; esac
+    yq '.resources[]' "$K" | grep -qxF "$b" \
+      || { echo "미배선: $b — 렌더에서 빠지면 라이브가 프룬된다"; false; }
+    n=$((n + 1))
+  done
+  [ "$n" -ge 22 ]            # 글롭 붕괴 방지(현재 22). 상한 아님 — 신규 매니페스트는 자동 포함
+  # rules/*.yaml은 이 글롭(비재귀) 밖이지만 이미 tests/gates/test_vmalert-config.bats:521의
+  # 전칭 루프가 배선을 문다(중복 증인 금지) — 여기서는 디렉토리 실재만 앵커한다.
+  [ -d "$D/rules" ]
+  yq '.resources[]' "$K" | grep -qxF 'rules/core.yaml'
+}
 
 @test "alertmanager and relay default-deny-egress baselines exist" {
   run grep -q 'alertmanager-default-deny-egress' "$P"; [ "$status" -eq 0 ]
