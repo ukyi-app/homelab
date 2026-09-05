@@ -329,6 +329,19 @@ setup() {
   echo "$output" | grep -q '\[ABS-LOOP\]'
 }
 
+@test "the same loop-driven absence written as a one-liner semicolon-do-run idiom is still caught (round12 reg-d-bats-style-last-2)" {
+  # ⚠️ 착지 전: `; do run …`는 abs_line의 `;` 분해 뒤 세그먼트가 "do run grep -q TOKEN \"\$f\""가
+  #    되어 run-인식 앵커(`^run[ \t]/`)에 안 걸렸다 — `do`와 `run` 사이는 세미콜론이 아니라
+  #    공백이라 이 세그먼트 전체가 target으로도 증인으로도 전혀 안 잡혔다(무증인 초록, 실측 exit 0).
+  printf '%s\n' \
+    '@test "loop-driven absence, one-liner do form" {' \
+    '  for f in "$WF"/*.yaml; do run grep -q TOKEN "$f"; [ "$status" -eq 1 ]; done' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_loop_oneline.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_loop_oneline.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-LOOP\]'
+}
+
 @test "git grep needs the positive control and no filesystem floor (asymmetry is deliberate)" {
   # pathspec은 파일시스템 경로가 아니라 바닥값을 걸 대상이 없고, pathspec이 추적 파일과 하나도
   # 안 맞을 때 git grep은 128이 아니라 **rc 1**이다(실측 git 2.53.0) — 그 붕괴는 같은 pathspec의
@@ -349,6 +362,18 @@ setup() {
     '}' > "$BATS_TEST_TMPDIR/test_abs_gitok.bats"
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_gitok.bats"
   [ "$status" -eq 0 ]
+}
+
+@test "the same git-grep absence written as a one-liner semicolon-then-run idiom is still caught (round12 reg-d-bats-style-last-2)" {
+  # 같은 근본원인의 형제 — `; then run …`도 `do run …`와 동일하게 abs_line 분해 뒤 세그먼트가
+  # "then run git grep …"가 되어 앵커에 안 걸렸다.
+  printf '%s\n' \
+    '@test "git grep absence, one-liner then form" {' \
+    '  if true; then run git grep -n TOKEN -- "*.yaml"; [ "$status" -eq 1 ]; fi' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_git_oneline.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_git_oneline.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-GIT\]'
 }
 
 @test "detector rejects a pipeline-terminal grep -qv (line-wise inversion is not absence)" {
