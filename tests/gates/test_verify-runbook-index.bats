@@ -81,6 +81,24 @@ write_index() {   # $@: 인덱스에 나열할 런북 파일명
   [ "$status" -ne 0 ]
 }
 
+@test "a runbook mentioned only outside the section still fails the forward lane (section-scoped, not whole-file)" {
+  # grep-c-5(감사 6라운드): 예전 정방향(`grep -Fq "$b" AGENTS.md`)은 파일 **전체**를 봤다 — 표에서
+  # 지운 파일명이 다른 절의 산문·HTML 주석에 한 번만 남아도 그걸로 통과했다(절 밖 언급이 인덱스로
+  # 둔갑). 지금은 역방향과 같은 idx_md(절 추출)에 완전일치로만 댄다.
+  write_index alpha.md
+  {
+    echo
+    echo "## 기타"
+    echo
+    echo "<!-- 참고: \`b.md\` -->"
+  } >> "$FIX/AGENTS.md"
+  : > "$FIX/docs/runbooks/alpha.md"
+  : > "$FIX/docs/runbooks/b.md"
+  run bash "$FIX/scripts/verify-runbook-index.sh"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "b.md"
+}
+
 @test "an empty index extraction fails loud when runbooks exist (reverse lane must not fail open)" {
   # `^## 런북` 헤딩이 개명·강등되면 추출이 0건이 된다 — 역방향 레인이 errexit로 무언 종료하는
   # 대신 명시 FAIL을 내야 한다(무언 종료는 진단이 아니다).
