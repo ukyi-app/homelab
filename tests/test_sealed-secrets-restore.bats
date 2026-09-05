@@ -148,6 +148,44 @@ EOF
   [ "$status" -eq 1 ]
 }
 
+# --verify(키 회전 게이트, :47-59) 전용 스텁 — make_stubs(:36-62)의 kubectl 계약(고정 Secret YAML,
+# 백업 **생성** axis)과 결이 달라 별도 함수로 둔다: 기존 5개 @test의 kubectl 계약을 건드리지 않는다.
+# ⚠️ hermetic 스텁 스위트에서 --verify 비교 predicate를 실행하는 @test가 이 파일에 0건이었다
+# (2026-09 뮤테이션 실측: :53 `!=`를 `=`로 반전해도 위 12개 @test 전건 그대로 ok — 유일한 실행처는
+# 라이브 posture(tests/posture/test_dr-assets.bats)와 sealing-key-dr-gate.sh:79뿐이었다).
+make_verify_stubs() { # $1 = 백업에 담을 키 이름들(공백 구분, "keyabc keydef" 형태) · 라이브는 keyabc+keydef 고정
+  cat > "$STUB/kubectl" <<'EOF'
+#!/bin/sh
+printf 'sealed-secrets-keyabc\nsealed-secrets-keydef\n'
+EOF
+  chmod +x "$STUB/kubectl"
+  # 기존 sops "ok" 스텁(make_stubs, :42-47)과 동일한 base64 -d 파일-인자 계약 — 재사용.
+  cat > "$STUB/sops" <<'EOF'
+#!/bin/sh
+if [ "$1" = "-d" ]; then for f in "$@"; do :; done; exec base64 -d < "$f"; fi
+exec base64
+EOF
+  chmod +x "$STUB/sops"
+  names=""
+  for k in $1; do names="${names}name: sealed-secrets-${k}
+"; done
+  printf '%s' "$names" | base64 > "$TMP/out/ss-keys.999.enc.yaml"
+}
+
+@test "--verify passes when the latest backup's key set matches the live sealing keys" {
+  make_verify_stubs "keyabc keydef"
+  PATH="$STUB:$PATH" run "$S" --verify "$TMP/out"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qi "일치"
+}
+
+@test "--verify FAILS when the backup's key set no longer matches live (rotation detection, DR gate)" {
+  make_verify_stubs "keyabc"   # 라이브는 keyabc+keydef, 백업은 keyabc뿐 — 회전/누락 시뮬레이션
+  PATH="$STUB:$PATH" run "$S" --verify "$TMP/out"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "회전 감지"
+}
+
 @test "restore runbook documents the sealing key recovery path (local only)" {
   # 런북은 로컬 전용(gitignored) — CI에는 없으므로 존재할 때만 검증
   [ -d "$ROOT/docs/runbooks" ] || skip "no local runbooks"

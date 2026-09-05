@@ -78,3 +78,14 @@ sh=scripts/reset-pg-r2-archive.sh
   grep -q 'cnpg-r2-creds' "$sh"
   grep -qiE 'no_check_bucket' "$sh"
 }
+
+@test "reset calls the D-i cluster identity preflight before deriving SERVER (PONR 1 must fail-closed)" {
+  # ⚠️ 이 스크립트 헤더(:23-26)가 "PONR 1이 여기 있다... 모드와 무관하게 fail-closed로 막는다"고
+  #    선언하는 그 호출이다 — 삭제해도(2026-09 뮤테이션 실측) 이 파일의 다른 7개 @test가 못 잡는다.
+  grep -qE '^bash "\$REPO_ROOT/infra/k3s-bootstrap/assert-cluster-identity\.sh"$' "$sh"
+  # 배치 — 정체성 확인이 SERVER 파생(라이브 kubectl 호출)보다 앞이어야 한다.
+  # 관용구: tests/gates/test_make-ops-targets.bats:73-76 (순서-비교, 두 grep -n을 -lt로 대조).
+  a="$(grep -n 'assert-cluster-identity\.sh' "$sh" | head -1 | cut -d: -f1)"
+  s="$(grep -n '^SERVER="\$(kubectl' "$sh" | head -1 | cut -d: -f1)"
+  [ -n "$a" ] && [ -n "$s" ] && [ "$a" -lt "$s" ]
+}

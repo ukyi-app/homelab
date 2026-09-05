@@ -15,7 +15,9 @@
 # 하나만으로는 안 된다. 플래그는 "지금 이 실행에서 의도했다", 만료일은 "언제까지인지 정했다"이고
 # 둘은 다른 주장이다. 만료 후에는 **요란하게 짖되 기동은 막지 않는다**(선례: check-credential-expiry.sh).
 #
-# 시임(테스트용): KUBECONFIG_PATH · BULK_RUN(권한 상승, 기본 sudo) · BULK_TODAY(오늘 날짜)
+# 시임(테스트용): KUBECONFIG_PATH · BULK_RUN(권한 상승, 기본 sudo) · BULK_TODAY(오늘 날짜) ·
+#   FORCE_SED_RENDER(envsubst 부재 sed 폴백을 강제로 태운다 — usrmerge라 sed·envsubst가 같은
+#   디렉토리에 동거해 PATH 배제로는 재현 불가, 감사 9라운드 72 ops-bootstrap-misc-3)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,7 +79,7 @@ $BULK_RUN env \
 # envsubst를 이 세 변수로 제한해 다른 것(예: setup 스크립트 내부의 $VOL_DIR)이 덮어써지지 않게 한다.
 # ⚠️ 감사 60 prov-1 — provisioner 이미지가 하드코딩 태그에서 플레이스홀더로 바뀌면서 추가됐다.
 render() {
-  if command -v envsubst >/dev/null 2>&1; then
+  if [ "${FORCE_SED_RENDER:-0}" != 1 ] && command -v envsubst >/dev/null 2>&1; then
     # envsubst의 SHELL-FORMAT 인자는 ${VAR} 이름의 리터럴 목록이다 — 작은따옴표 필수.
     # shellcheck disable=SC2016
     envsubst '${LOCAL_PATH_PROVISIONER_IMAGE} ${LOCAL_PATH_HELPER_IMAGE} ${BULK_STORAGE_PATH}' < "$1"
