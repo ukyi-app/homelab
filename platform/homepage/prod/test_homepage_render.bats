@@ -26,6 +26,13 @@ setup() {
 @test "configMapGenerator names are bound to the Deployment volume references (assembled nameReference rewrite, F4)" {
   D='select(.kind == "Deployment" and .metadata.name == "homepage")'
   # 생성된 해시접미 ConfigMap 이름 캡처(config=homepage-<hash>, assets=homepage-assets-<hash>)
+  # ⚠️ 이 정규식 자체가 alertmanager(kustomization-4)와 같은 클래스의 자동 rollout 의존 가드를
+  #    이미 겸한다 — `disableNameSuffixHash`를 최상위/per-generator 어느 철자로 켜도 이름이
+  #    해시 접미 없는 리터럴 `homepage`/`homepage-assets`가 되어 `^homepage-[a-z0-9]+$`에 안
+  #    걸리므로 이 @test와 아래 "generated ConfigMaps enumerate…"가 함께 red다(감사 6라운드
+  #    티켓64 c64-9 실측 — 3가지 철자 전부 확인: 최상위·homepage 단독·homepage-assets 단독).
+  #    별도 witness는 불필요(homepage/prod는 KSOPS 없이 CI에서 실제 kustomize build를 돌기까지
+  #    한다 — alertmanager/victoria-stack보다 강한 커버리지).
   cm_config="$(yq 'select(.kind == "ConfigMap" and (.metadata.name | test("^homepage-[a-z0-9]+$"))) | .metadata.name' "$RENDERED")"
   cm_assets="$(yq 'select(.kind == "ConfigMap" and (.metadata.name | test("^homepage-assets-[a-z0-9]+$"))) | .metadata.name' "$RENDERED")"
   [ -n "$cm_config" ]; [ -n "$cm_assets" ]
