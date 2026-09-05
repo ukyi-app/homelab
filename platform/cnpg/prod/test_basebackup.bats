@@ -12,6 +12,10 @@ cj=platform/cnpg/prod/basebackup-cronjob.yaml
 @test "cronjob runs non-root 26 and mounts only bulk-ssd PVC" {
   grep -q 'runAsUser: 26' "$cj"
   grep -q 'claimName: pg-basebackup-local' "$cj"
+  # ⚠️ 위 존재 단언은 volumes 집합의 상한이 아니다 — 다른 volume을 추가해도 무증인이었다
+  # (감사 6라운드 티켓64 c64-7 실측: emptyDir `scratch` volume을 더해도 이 @test는 초록이었다).
+  vols="$(yq '[.spec.jobTemplate.spec.template.spec.volumes[].name] | sort | join(",")' "$cj")"
+  [ "$vols" = "backup" ]
 }
 @test "cronjob emits the local-basebackup breadcrumb metric M5 alerts on" {
   grep -q 'cnpg.io/backupRole: local-basebackup' "$cj"

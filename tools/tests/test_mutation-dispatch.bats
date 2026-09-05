@@ -217,7 +217,11 @@ EOF
   for d in $DISPATCHERS; do
     bad=$(grep -n 'github.event.inputs' "$WF/$d.yaml" \
       | grep -vE '^[0-9]+:[[:space:]]*(#|[A-Z_]+:|(sha|spec|app|confirm):)' || true)
-    [ -z "$bad" ]
+    # ⚠️ `[ -z "$bad" ]`는 SETCAP 다섯(여섯) 술어 형태 밖이다(카운트가 아니라 문자열 공백만 잰다) —
+    #    이름의 "only"가 상한을 선언하는데 위반 집합의 **카운트 등식**이 없었다(감사 6라운드 티켓64
+    #    c64-7). 같은 판정을 카운트 등식으로 다시 쓴다 — 동작은 불변이고 형태만 기계가 읽는 술어가 된다.
+    n=$(printf '%s\n' "$bad" | grep -c . || true)
+    [ "$n" -eq 0 ] || { echo "위반 집합=$bad"; false; }
   done
 }
 
@@ -225,8 +229,17 @@ EOF
   # create-app/update-secrets는 app만(repo=ukyi-app/<app>·sha는 reusable이 main HEAD에서 해석 — 입력 없음).
   grep -q "app:" "$WF/create-app.yaml";     run grep -q "app_repo:" "$WF/create-app.yaml";     [ "$status" -eq 1 ]
   grep -q "app:" "$WF/update-secrets.yaml"; run grep -q "app_repo:" "$WF/update-secrets.yaml"; [ "$status" -eq 1 ]
-  grep -q "spec:" "$WF/create-database.yaml"
-  grep -q "spec:" "$WF/create-cache.yaml"
+  # ⚠️ 예전엔 `grep -q "spec:"`뿐이었다 — 이 문자열은 workflow_dispatch.inputs: 블록이 아니라
+  #    reusable 호출 잡의 `with: { spec: ... }`에도 매치해, inputs 블록 원소를 전혀 세지 않았다
+  #    (7라운드 setcap-denominator-1 실측: `debug_bogus:` 입력을 workflow_dispatch.inputs 맨
+  #    앞에 삽입해도 이 @test는 여전히 초록이었다). 실제 계약 키 목록으로 잠근다(손 로스터 신설이
+  #    아니라 워크플로 파일 자체에 이미 있는 필드명을 그대로 옮긴다).
+  run yq -o=json -I=0 '.on.workflow_dispatch.inputs | keys' "$WF/create-database.yaml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '["name","ext_pg_trgm","ext_pgcrypto","ext_citext","ext_vector","ext_postgis","ext_extra","correlation"]' ]
+  run yq -o=json -I=0 '.on.workflow_dispatch.inputs | keys' "$WF/create-cache.yaml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '["name","maxmemory_mi","correlation"]' ]
 }
 
 @test "create-app and update-secrets no longer reference app_repo anywhere (org is structurally ukyi-app)" {

@@ -10,7 +10,8 @@
 #     **0 수렴 완료**, 이제 hard-zero다(아래 ABS_BASELINE 줄이 상환 기록을 진다).
 #   QV (`grep -qv`) = 줄 단위 반전이 전칭(∀¬)을 존재(∃¬)로 바꾼다 → hard-zero(아래).
 #   SETCAP(이름 있는 집합의 상한 부재) = `@test` 이름이 exactly/only/no other/전수/EVERY/정확로
-#     원소 전수를 선언하는데 본문에 그 상한을 재는 술어가 없다 → 래칫(아래 SETCAP_BASELINE).
+#     원소 전수를 선언하는데 본문에 그 상한을 재는 술어가 없다 → 래칫으로 출발해 **0 수렴
+#     완료**, 이제 hard-zero다(아래 SETCAP_BASELINE).
 # 휴리스틱: 다줄 @test 규약 가정("@test … {" 한 줄 시작, 0열 "}" 종료). heredoc 본문은 명령으로 안 센다.
 # (레포 단일 한줄 @test는 단일 명령이라 무해 — 신규 한줄 본문은 다줄로 작성할 것.)
 # 인자로 파일을 주면 그 파일만 스캔하고 다섯 클래스 아무거나 있으면 실패(픽스처/ad-hoc 탐지 모드).
@@ -98,10 +99,10 @@
 #    자체 확장이 이 축의 범위를 티켓 하나가 감당 못 할 크기로 불리기 때문이다(round7이 이미
 #    "0건 finding + 규칙 문안 2개도 정당한 답"이라고 명시). 다음 라운드가 `-eq` 분모에서
 #    `"\$status"` 좌변을 제외하는 방향으로 좁힐 후보다.
-# SETCAP_BASELINE도 BB/ABS와 같은 래칫 어휘다 — 착수 시점 위반 N을 바닥값으로 두고 감소만
-# 허용한다. 착수 시점 실측(2026-09-05): 이름-어휘 매치 14건 중 11건은 단수/조건/합성어
-# 오탐이라 이름 정정으로 닫았고(아래 SETCAP_BASELINE 줄이 각 자리를 인용), 3건은 실제로 이름
-# 있는 집합(포트·볼륨·디스패처 입력)을 전수 선언하면서 술어가 없어 다음 라운드 입력으로 남는다.
+# SETCAP_BASELINE은 BB/ABS가 밟은 것과 같은 경로다 — 래칫으로 출발해(티켓 59, 착수 시점
+# 위반 14건 중 11건은 단수/조건/합성어 오탐이라 이름 정정으로 닫았다) **0에 수렴 완료**했다
+# (티켓 64 c64-7, 2026-09-05). 남았던 3건(포트·볼륨·디스패처 입력 집합)은 각각 집합 등식
+# 술어를 얻었다(아래 SETCAP_BASELINE 줄이 상환 기록을 진다). 이제 hard-zero다.
 #
 # ── [ABS-EXEC] — 레포 소유 실행물 호출의 부재 단언(F4, 감사 63 · 설계 노트
 #    `.scratch/audit-2026-09/design-abs-denominator.md` §6-C) ──────────────────────────────────
@@ -159,21 +160,16 @@ BB_BASELINE=0    # **0 수렴 완료** — 이제 hard-zero다(NEG와 같은 규
 # 올리는 방향은 부채 재유입이다 — 그래도 필요하면 같은 diff에서 이 줄을 고쳐야 하고, 그건 리뷰에
 # 보인다(check-bats-accounting의 EXCL_MAX와 같은 성격).
 ABS_BASELINE=0
-# 이름 있는 집합의 상한 부재 부채 잔액 — **래칫**(티켓 59 착지, 2026-09-05). 착수 시점 이름-어휘
-# 매치(`@test .*(exactly|only|no other|전수|EVERY|정확)`) 14건 중 11건은 이름 정정으로 닫았다
-# (단수 대상·조건 부사·합성어 오탐 — `read-only`/`readonly`/`owner-only`/"only when"/"only 1"류.
-# 같은 커밋의 이름 정정 목록이 각 자리를 진다). 남은 3건은 실제로 이름 있는 집합을 전수 선언하며
-# 술어가 없다 — 다음 라운드 입력(집합 등식 추가는 이 티켓 범위 밖):
+# 이름 있는 집합의 상한 부재 부채 잔액 — 티켓 59가 래칫으로 착지(2026-09-05, baseline 3)했고
+# **0 수렴 완료**(티켓 64 c64-7, 2026-09-05) — 이제 hard-zero다. 남았던 3건과 상환 형태:
 #   test_worker_ports.bats:21 "web defaults to http only and no metrics scrape annotation" —
-#     포트 집합 {http,metrics} 중 http만 — 존재+부재 단언은 있으나 등식/카운트 술어가 없다.
+#     포트 집합에 `[.spec.template.spec.containers[].ports[]?.name] | sort | join(",")` = "http" 등식 추가.
 #   test_basebackup.bats:12 "cronjob runs non-root 26 and mounts only bulk-ssd PVC" —
-#     volumeMounts 집합의 원소 상한이 없다(다른 PVC를 추가해도 무증인).
+#     `[.spec.jobTemplate.spec.template.spec.volumes[].name] | sort | join(",")` = "backup" 등식 추가.
 #   test_mutation-dispatch.bats:204 "each dispatcher references inputs only via env or with: …" —
-#     `$DISPATCHERS` 루프의 위반 집합을 `[ -z "$bad" ]`로 재는데, 이 형태는 다섯 술어 목록
-#     (`= "…"`/`-eq N`/`contains(`/`join(",")`/`length ==`) 밖이다 — 표기 변형 갭(재발 판정 ②
-#     와 같은 축).
-# 올리는 방향은 부채 재유입이다 — 필요하면 같은 diff에서 이 줄과 위 목록을 함께 고친다.
-SETCAP_BASELINE=3
+#     `[ -z "$bad" ]`(다섯 술어 목록 밖 표기 변형)를 위반 카운트 `-eq 0`으로 재작성(동작 불변).
+# 신규 [SETCAP]은 즉시 red다(NEG·BB·ABS와 같은 규율). 올리는 방향은 부채 재유입이다.
+SETCAP_BASELINE=0
 # 레포 소유 실행물 호출의 부재 단언 부채 잔액 — **hard-zero**(F4, 감사 63 착지, 2026-09-05).
 # F1(adguard 리컨실러 2곳)·F2(나머지 10곳 — tools/tests/test_cli-flag-guard.bats 5 ·
 # tests/gates/test_scan-floor.bats 3 · tests/gates/test_secret-cert-check.bats 1 ·
