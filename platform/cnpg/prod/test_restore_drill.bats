@@ -123,3 +123,17 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   run yq '.resources | contains(["restore-drill-cronjob.yaml"])' platform/cnpg/prod/kustomization.yaml
   printf '%s' "$output" | grep -qxF -- 'true'
 }
+
+@test "the configMapGenerator files roster still points at the CronJob's own script (drill.sh alias)" {
+  # 위 @test는 `resources`(렌더 대상) 축만 잰다 — CronJob이 마운트하는 ConfigMap이 실제로
+  # `drill.sh`라는 키로 이 스크립트를 굽는지는 configMapGenerator.files 축이고, 그 축의 유일한
+  # 증인은 tests/.ci-exclude 등재 test_kustomize_build.bats(owner-local 'make verify-ksops',
+  # age 키 없으면 skip)뿐이었다 — required gate 안에서는 무증인(2026-09-05 실측: 두 files 항목을
+  # `# MUTATED`로 치환해도 required 레인 전건 초록, kustomize build 필요 4건만 개별 not ok).
+  # 리터럴 로스터가 아니라 CronJob의 command[1]에서 alias 키를 파생한다 — alias가 CronJob
+  # command와 어긋나는 드리프트까지 함께 잡는다(homepage 선례: 손 로스터 금지).
+  k=platform/cnpg/prod/kustomization.yaml
+  key="$(basename "$(yq '.spec.jobTemplate.spec.template.spec.containers[0].command[1]' "$cj")")"
+  yq '.configMapGenerator[] | select(.name=="restore-drill-script") | .files[]' "$k" \
+    | grep -qxF "$key=$(basename "$sh")"
+}
