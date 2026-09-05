@@ -355,6 +355,9 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
   env43="$(echo "$output" | jq -rc 'select(.id==43) | .result.content[0].text')"
   [ "$(echo "$env43" | jq -r '.verb')" = "app init" ]
   [ "$(echo "$env43" | jq -r '.variant')" = "failure" ]
+  # lib-a-1 — mcpIsError가 실패 variant를 실제로 에러로 매핑하는지 여기서 처음 확인한다(이 파일의
+  # isError 단언 6곳은 전부 "false"뿐이었다 — 실패 경로를 실제로 유발하는 이 픽스처가 유일한 자리).
+  [ "$(echo "$output" | jq -rc 'select(.id==43) | .result.isError')" = "true" ]
   [ "$(echo "$env43" | jq -r '.result.checkpoint')" = "preflight" ]
   [ "$(echo "$env43" | jq -r '.result.archetype')" = "hexagon" ]
   # hexagon envelope이 재생성된 결과 계약(사본 트리)에 적합하다 — 두 표면이 한 SSOT에서 함께 확장됐다는 증명.
