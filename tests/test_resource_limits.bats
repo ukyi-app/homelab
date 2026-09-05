@@ -787,6 +787,22 @@ YAML
   [ "$status" -eq 0 ]
 }
 
+# 감사 12라운드 77 reg-a3-tools-infra-2 — 같은 라운드가 두 번(grep-c-2 IMG_KEY·grep-c-4 KIND_RE) 고친
+# "값-앵커 정규식이 인용 표기에서 끊긴다" 클래스가 F1의 새 정규식(deriveNamespace)에 재발했다.
+# `namespace: "attrns"`처럼 값에 따옴표가 있으면 옛 정규식은 매치 실패로 귀속 불가에 빠졌다.
+@test "F1: a quoted kustomization namespace value is still attributed (quote-blindness regression)" {
+  tmp="$(mktemp -d)"; mkdir -p "$tmp/policy"
+  _seed_ok "$tmp"
+  : > "$tmp/policy/memory-limit-allowlist.txt"
+  _attr_root "$tmp" attr '"attrns"' 32 64
+  _sub_ledger "$tmp" attrns attrns 32 64
+  _track "$tmp"
+  run bun "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" --repo-root "$tmp" --floor substrate=0 --floor check-resource-limits:ledger=1
+  echo "$output"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+}
+
 @test "F2: a namespace fed by a HelmChartInflationGenerator deployment root is excluded from ledger comparison" {
   tmp="$(mktemp -d)"; mkdir -p "$tmp/policy" "$tmp/platform/helmish/prod"
   _seed_ok "$tmp"

@@ -134,8 +134,18 @@ _apply() {
   #    배제로는 envsubst만 가릴 수 없다(va 실측: `type -a sed envsubst`). FORCE_SED_RENDER 시임으로
   #    직접 태운다. 뮤테이션 실측(2026-09): BULK_STORAGE_PATH 치환 절만 지워도 위 13개 @test 전부
   #    그대로 ok였다 — 이 분기가 원리적으로 미실행이었기 때문이다.
+  # ⚠️ 감사 12라운드 77 reg-a3-tools-infra-3 — 위 출력 단언만으로는 sed 분기가 **실제로 실행됐는지**
+  #    구별하지 못한다(envsubst와 sed가 이 3-플레이스홀더에 대해 동일 출력을 낸다). 이 @test 안에서만
+  #    PATH 선두에 실패하는 디코이 envsubst를 겹쳐써 분기 자체를 증인한다 — sed가 실제로 돌면 디코이는
+  #    호출되지 않아 아래 status 단언이 그대로 통과하고, FORCE_SED_RENDER 조건이 무력화돼 envsubst
+  #    분기가 대신 돌면 디코이가 exit 90 → set -euo pipefail(apply-storage.sh:21)이 파이프라인 실패를
+  #    전파해 스크립트 전체가 죽어 같은 단언이 이 결함을 잡는다. setup()/STUBDIR는 무변경 — 이 디코이는
+  #    이 @test의 PATH에만 겹쳐 쓴다.
+  DECOY="$BATS_TEST_TMPDIR/decoy"; mkdir -p "$DECOY"
+  printf '#!/usr/bin/env sh\nexit 90\n' > "$DECOY/envsubst"; chmod +x "$DECOY/envsubst"
   _sandbox
-  FORCE_SED_RENDER=1 BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" run "$BS/apply-storage.sh"
+  FORCE_SED_RENDER=1 PATH="$DECOY:$PATH" BULK_RUN="$STUBDIR/asroot" KUBECONFIG_PATH="$KUBECONFIG_PATH" \
+    run "$BS/apply-storage.sh"
   [ "$status" -eq 0 ]
   source "$BS/versions.env"
   run grep -F '${LOCAL_PATH_HELPER_IMAGE}' "$RENDERED"; [ "$status" -eq 1 ]

@@ -238,7 +238,9 @@ function deriveNamespace(rel: string, root: string): string | undefined {
   while (dir === "platform" || dir.startsWith("platform/")) {
     const kpath = `${root}/${dir}/kustomization.yaml`;
     if (existsSync(kpath)) {
-      const m = /^namespace:[ \t]*([a-z0-9-]+)/m.exec(readFileSync(kpath, "utf8"));
+      // 감사 12라운드 77 reg-a3-tools-infra-2 — 값-앵커가 인용 표기(`namespace: "files"`)에
+      // 눈멀었었다(형제 관용구: tools/check-image-ownership.ts:356 kind:\s*["']?Application["']?).
+      const m = /^namespace:[ \t]*["']?([a-z0-9-]+)/m.exec(readFileSync(kpath, "utf8"));
       if (m) found = m[1];
     }
     const parent = dirname(dir);
