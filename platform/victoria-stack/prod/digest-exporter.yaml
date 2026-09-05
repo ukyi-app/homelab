@@ -116,7 +116,7 @@ spec:
         spec:
           restartPolicy: Never
           automountServiceAccountToken: false # skopeo(ghcr)+curl(vmsingle)만 — k8s API 미사용(메타갭 ⑤ W2-C)
-          securityContext: { runAsNonRoot: true, runAsUser: 65532 }
+          securityContext: { runAsNonRoot: true, runAsUser: 65532, seccompProfile: { type: RuntimeDefault } }
           containers:
             - name: digest-exporter
               image: ghcr.io/ukyi-app/skopeo:alpine@sha256:a28a72e4a8950f5c70586ddb3d2c45058b68737d5d7a3122380991fde820ca3d

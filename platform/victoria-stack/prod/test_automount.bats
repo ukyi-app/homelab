@@ -167,3 +167,32 @@ EOF
   done < "$C"
   [ -z "$bad" ] || { echo "컨테이너 securityContext 값이 어긋난 워크로드:$bad"; false; }
 }
+
+@test "pod seccompProfile is RuntimeDefault class-wide (spec-victoria-1: two CronJobs were the lone exceptions)" {
+  # digest-exporter·gha-liveness-exporter CronJob 두 곳만 pod securityContext에 seccompProfile이
+  # 없었다(git log -p --follow 확인 — 삭제가 아니라 원래부터 누락). AUTOMOUNT_Q와 같은 어휘로
+  # 분모를 파생하되 질의만 seccompProfile.type으로 바꾼다. `// "MISSING"`은 `.type`이 문자열
+  # enum이라 boolean-false 함정(yq `//`)에 해당하지 않는다.
+  cd "$ROOT"
+  local files f L C n name typ bad=""
+  SECCOMP_Q='(select(.kind=="Deployment" or .kind=="DaemonSet" or .kind=="StatefulSet") | .metadata.name + "|" + (.spec.template.spec.securityContext.seccompProfile.type // "MISSING")), (select(.kind=="CronJob" or .kind=="Job") | .metadata.name + "|" + (.spec.jobTemplate.spec.template.spec.securityContext.seccompProfile.type // "MISSING"))'
+  L="$BATS_TEST_TMPDIR/seccomp-raw.txt"
+  C="$BATS_TEST_TMPDIR/seccomp.txt"
+  : > "$L"
+  files="$(git ls-files -- platform/victoria-stack/prod | grep '\.yaml$' | LC_ALL=C sort)"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    yq "$SECCOMP_Q" "$f" >> "$L"
+  done <<EOF
+$files
+EOF
+  grep -v '^---$' "$L" | grep . > "$C" || true
+  n="$(grep -c . "$C" || true)"
+  # 열거 붕괴 바닥값(AUTOMOUNT_Q와 동일 어휘) — 2026-09-05 실측 14건.
+  [ "$n" -ge 10 ] || { echo "seccompProfile 열거가 ${n}건으로 붕괴했다(기대 >=10)"; false; }
+  while IFS='|' read -r name typ; do
+    [ -n "$name" ] || continue
+    [ "$typ" = "RuntimeDefault" ] || bad="$bad $name(seccompProfile=$typ)"
+  done < "$C"
+  [ -z "$bad" ] || { echo "pod seccompProfile이 RuntimeDefault가 아닌 워크로드:$bad"; false; }
+}
