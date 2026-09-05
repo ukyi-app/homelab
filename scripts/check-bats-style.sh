@@ -11,7 +11,8 @@
 #   QV (`grep -qv`) = 줄 단위 반전이 전칭(∀¬)을 존재(∃¬)로 바꾼다 → hard-zero(아래).
 #   SETCAP(이름 있는 집합의 상한 부재) = `@test` 이름이 exactly/only/no other/전수/EVERY/정확로
 #     원소 전수를 선언하는데 본문에 그 상한을 재는 술어가 없다 — hard-zero 도달 후 술어 자체의
-#     결함(traps-ops-2, 2026-09-05)이 드러나 **래칫으로 재개장**했다(아래 SETCAP_BASELINE).
+#     결함(traps-ops-2, 2026-09-05)이 드러나 **래칫으로 재개장**했으나, 12라운드 분류(predicate 8·
+#     rename 18)가 잔액을 전부 상환해 **다시 hard-zero로 복귀**했다(티켓 78, 아래 SETCAP_BASELINE).
 # 휴리스틱: 다줄 @test 규약 가정("@test … {" 한 줄 시작, 0열 "}" 종료). heredoc 본문은 명령으로 안 센다.
 # (레포 단일 한줄 @test는 단일 명령이라 무해 — 신규 한줄 본문은 다줄로 작성할 것.)
 # 인자로 파일을 주면 그 파일만 스캔하고 다섯 클래스 아무거나 있으면 실패(픽스처/ad-hoc 탐지 모드).
@@ -120,8 +121,20 @@
 #    그 8건이 정확히 새 grep-qx 술어가 새로 인정한 자리다. BB/ABS가 밟은 순서 그대로 **래칫
 #    으로 재출발**한다(hard-zero 강행은 26곳 동시 재작업을 부른다 — 107-110행의 관례 위반).
 #    남은 26건은 이름 어휘가 실제로 합성어/단수/조건부사인 오탐(read-only·name-only류, 이
-#    검출기의 설계상 의도된 잔여 — 위 ⚠️ 오탐 규약)과 진짜 미상환 부채가 섞여 있다 — 다음
-#    라운드가 분류해 하나씩 이름 정정 또는 술어 추가로 닫는다.
+#    검출기의 설계상 의도된 잔여 — 위 ⚠️ 오탐 규약)과 진짜 미상환 부채가 섞여 있었다.
+# ⚠️ **다시 0으로(티켓 78, 2026-09-05)** — 12라운드 분류자+검토자 합의(predicate 8 · rename 18 ·
+#    detector 0)가 26건 전건을 실측 검증해 착지했다. predicate 8건은 진짜 집합 상한 주장이라
+#    술어를 얻었다(`[ -z "$bad" ]`류 부재 단언 → `bad_n=$(printf '%s' "$bad" | wc -w); [ "$bad_n"
+#    -eq 0 ]` 건수 등식, 또는 `grep -c . || true` — `|| true` 누락은 위반 0건(정상 상태)에서
+#    grep -c의 rc=1이 대입 자체를 set -e로 죽이는 별도 결함이라 처방에 반드시 포함). 그중 하나
+#    (setcap-17, tests/gates/test_telegram-callsites.bats:51)는 이름 정정이 아니라 setcap_hit
+#    자체에 여덟 번째 술어(자기유도 변수 등식, `-eq[ \t]+"?\$…[ \t]*\]` — bracket-test 종료
+#    앵커 필수: 앵커 없이 제안된 원안 그대로 넣으면 reg-c-ledger-rows-1과 같은 급의 run-인자
+#    오탐이 재발한다)를 추가했다. rename 18건은 실제로 단일 시나리오/조건 부사/합성어였다 —
+#    뜻 보존한 채 상한 어휘만 뺐다(옛 이름 인용처 0건 확인). detector(이름-어휘 정규식 면제)는
+#    0건 유지 — 하이픈 복합어 면제를 넣으면 진짜 ∀ 폐쇄 주장 2건(setcap-4/5)이 영구 무증인이
+#    된다는 12라운드 재검증이 tests/gates/test_bats-style.bats:601의 오탐 대조 결정을 재확인했다.
+#    전체 스캔 SETCAP 26/0 실측(2026-09-05) — hard-zero 복귀, 신규 위반은 즉시 red다.
 #
 # ── [ABS-EXEC] — 레포 소유 실행물 호출의 부재 단언(F4, 감사 63 · 설계 노트
 #    `.scratch/audit-2026-09/design-abs-denominator.md` §6-C) ──────────────────────────────────
@@ -187,9 +200,10 @@ ABS_BASELINE=0
 #     `[.spec.jobTemplate.spec.template.spec.volumes[].name] | sort | join(",")` = "backup" 등식 추가.
 #   test_mutation-dispatch.bats:204 "each dispatcher references inputs only via env or with: …" —
 #     `[ -z "$bad" ]`(다섯 술어 목록 밖 표기 변형)를 위반 카운트 `-eq 0`으로 재작성(동작 불변).
-# traps-ops-2(2026-09-05)가 술어 결함을 고쳐 hard-zero에서 래칫으로 재개장 — 교정 후 실측 26건을
-# 그대로 새 상한으로 반영한다(BB/ABS가 밟은 순서 그대로, 위 ⚠️ 절 참조). 올리는 방향은 부채 재유입이다.
-SETCAP_BASELINE=26
+# traps-ops-2(2026-09-05)가 술어 결함을 고쳐 hard-zero에서 래칫으로 재개장했었다 — 그 26건을
+# 티켓 78(2026-09-05)이 12라운드 분류(predicate 8·rename 18·detector 0)대로 전부 착지해
+# **다시 0으로 수렴**했다(위 ⚠️ 「다시 0으로」 절 참조). 올리는 방향은 부채 재유입이다.
+SETCAP_BASELINE=0
 # 레포 소유 실행물 호출의 부재 단언 부채 잔액 — **hard-zero**(F4, 감사 63 착지, 2026-09-05).
 # F1(adguard 리컨실러 2곳)·F2(나머지 10곳 — tools/tests/test_cli-flag-guard.bats 5 ·
 # tests/gates/test_scan-floor.bats 3 · tests/gates/test_secret-cert-check.bats 1 ·
