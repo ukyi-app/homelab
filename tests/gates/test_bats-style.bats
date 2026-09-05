@@ -485,6 +485,24 @@ setup() {
   echo "$output" | grep -q '\[SETCAP\]'
 }
 
+@test "a numeric -eq inside a run command's CLI argument does not smuggle in a false cardinality predicate ([SETCAP] negative, reg-c-ledger-rows-1)" {
+  # 착지 전: setcap_hit의 수 등식 술어(`-eq[ \t]+[0-9]+`)는 bracket-test 좌변을 요구하지 않아,
+  # 단언과 무관한 `run` 인자 문자열(`--retry-eq 5`)에 우연히 들어간 `-eq N` 텍스트만으로도 이
+  # [SETCAP] 레인 전체가 침묵 통과했다(2026-09-05 실측 — regression-2026-09.json reg-c-ledger-rows-1).
+  # 처방은 traps-ops-2가 이미 다른 술어(413행)에 쓴 것과 같은 종류 — 술어를 bracket-test 종료
+  # 앵커(`[ \t]*\]`)로 좁혀 대입/CLI 인자와 진짜 조건식을 문법으로 구별한다.
+  printf '%s\n' \
+    '@test "exactly the right dispatchers are present, no other" {' \
+    '  run bun tools/audit.ts --mode list' \
+    '  [ "$status" = 0 ]' \
+    '  echo "$output" | grep -q x' \
+    '  run bun tools/audit.ts --retry-eq 5' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_run_arg_eq.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_run_arg_eq.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[SETCAP\]'
+}
+
 @test "the grep -qxF/-qx structural-equality idiom satisfies the cardinality predicate ([SETCAP] positive, traps-ops-2)" {
   # 이 레포의 실 선호 관용구(platform/victoria-stack/prod/test_pvc_du_exporter.bats:31-33) — 전체
   # 행 일치(-x)가 곧 등식이다. 새 여섯째 술어의 양성 대조 — 본문에 `=` 자체가 없어(대입도 없음)

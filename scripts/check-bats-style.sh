@@ -409,9 +409,13 @@ function qv_seg(t,   n,a,i,seen,q,v,pos){
 # ⚠️ 문자열 등식 술어는 **bracket-test 좌변**(`[ "$a" = "b" ]`, `=` 앞에 공백)만 잡는다 — 대입
 #    (`VAR="x"`, `=` 앞 공백 없음)은 배제한다(guard-decision(traps-ops-2), 2026-09-05: `=` 앞
 #    공백 요구 없이는 스코프 안 아무 문자열 대입 하나로 이 술어가 통째로 무력화됐다).
+# ⚠️ 수 등식 술어도 **bracket-test 종료 앵커**(`-eq N[ \t]*]`)만 잡는다 — 앵커 없이는 `run` 문의
+#    CLI 인자에 우연히 등장하는 `-eq N` 텍스트(예 `--retry-eq 5`)만으로 이 술어가 무력화됐다
+#    (2026-09 정기 회귀 reg-c-ledger-rows-1, 12라운드). 이 파일이 이미 쓰는 형제 앵커(451/452/
+#    459/466/467행)를 그대로 복사한 처방 — 신설 로직 없음. 전체 스캔 SETCAP 26/26 회귀 0 실측.
 function setcap_hit(s){
   if (s ~ /[ \t]=[ \t]*"[^"]+"/) return 1
-  if (s ~ /-eq[ \t]+[0-9]+/) return 1
+  if (s ~ /-eq[ \t]+[0-9]+[ \t]*\]/) return 1
   if (s ~ /contains\(/) return 1
   if (s ~ /join\(","\)/) return 1
   if (s ~ /length[ \t]*==/) return 1
