@@ -101,6 +101,19 @@ for f in roots:
             versions.add(mm.group(1)); want[f] = want.get(f, 0) + 1
 assert len(versions) == 1, "등식 루트의 코어 버전이 갈렸다(부분 갱신 상태): %r" % sorted(versions)
 V = versions.pop()
+
+# [7라운드 tfval-cloudflare-3 + tfval-tailscale-github-3] `total >= 5` 집계 바닥값은 한 루트의
+# 등식 핀이 통째로 삭제되거나(파일 재작성 실수) 연산자가 `=`->`>=`로 완화돼도(주석이 스스로
+# "정확 핀이다"라고 선언하는 fail-closed 계약 이탈) want/got 양쪽에서 그 파일 키가 대칭적으로
+# 빠져 무증인이었다(cloudflare 삭제 실측 7/7 ok, github `>=` 완화 실측 7/7 ok). tailscale 루트만
+# 의도적으로 `>= 1.9.0`(drift 잡이 헤드룸으로 1.15.5를 씀 — versions.tf 자체 주석)이라 정규식
+# 미매치가 정상이라 exempt. 파일별 최소 1건 존재 단언으로 신원까지 닫는다.
+EXEMPT = {"infra/tailscale/versions.tf"}
+for f in roots:
+    if f in EXEMPT:
+        continue
+    assert want.get(f, 0) >= 1, "%s: 등식 핀 부재(삭제/완화 회귀)" % f
+
 wfs = sorted(glob.glob(".github/workflows/*.yaml"))
 for f in wfs:
     for line in open(f, encoding="utf-8"):
