@@ -53,8 +53,10 @@ if [ -n "$cjk_hits" ]; then
   rc=1
 fi
 
-# README 디렉토리 지도 드리프트 가드: 모든 platform 컴포넌트(charts 제외)가 README 지도에 나열돼야 한다.
-# 새 컴포넌트 추가 시 지도 갱신을 강제(가상명·누락 차단). tools/tests/test_dirmap.bats와 동일 불변식.
+# README 디렉토리 지도 드리프트 가드: 모든 platform 컴포넌트(charts 제외)가 README 지도의 컴포넌트
+# **표 행**에 나열돼야 한다(정방향 dir→표는 부분문자열이 아니라 표 행 집합 멤버십 — 산문에만 있는
+# 이름(cert-manager 등)이 표에 없어도 증인 노릇을 하던 결함을 닫는다). 새 컴포넌트 추가 시 지도 갱신을
+# 강제(가상명·누락 차단). tools/tests/test_dirmap.bats와 동일 불변식.
 # glob 루프(ls 파싱 회피 — SC2011). bash 3.2 안전.
 # 열거는 공유 워커의 `platform` 유닛 스코프가 소유한다(공유 차트 제외도 그 안에 있다).
 # ⚠️ 프로세스 치환은 워커 실패를 전파하지 않아, bun이 죽으면 정방향(dir→표) 검사가 0회 돌고
@@ -62,15 +64,19 @@ fi
 comp_units="$(scan_enumerate check-skeleton bun "$(dirname "${BASH_SOURCE[0]}")/../tools/lib/repo-walk.ts" --units platform)" || exit 1
 n_platform="$(scan_count "$comp_units")"
 scan_floor check-skeleton:platform "$n_platform" "$(floor_of check-skeleton:platform 10)" quiet || exit 1
+# README 컴포넌트 표 행 집합 — 정방향·역방향이 같은 집합을 공유한다(양방향이 곧 그 등식이 되도록).
+comps="$(sed -n '/### platform 컴포넌트/,/^## /p' "$README" | grep -oE "^\| ${BT}[a-z0-9-]+${BT}" | tr -d "${BT}|" | tr -d ' ')"
 while IFS= read -r d; do
   [ -n "$d" ] || continue
   c="$(basename "$d")"
-  if ! grep -q "$c" "$README"; then echo "FAIL: README 디렉토리 지도에 platform 컴포넌트 누락: $c"; rc=1; fi
+  # 정확 일치 멤버십(herestring) — 부분문자열 `grep -q "$c" "$README"`는 표 밖 산문 언급도 증인으로
+  # 오인했다(cert-manager 등). 파이프 금지: 이 스크립트는 set -o pipefail이라 `printf … | grep -q`는
+  # check-sigpipe-writers.sh가 다중행 writer 파이프로 잡는 패턴에 걸린다.
+  grep -qxF "$c" <<<"$comps" || { echo "FAIL: README 컴포넌트 표에 platform 컴포넌트 누락: $c"; rc=1; }
 done <<< "$comp_units"
 
 # 역방향(README 컴포넌트 표 → 디렉토리): 표에 나열된 각 컴포넌트가 platform/<c>/로 실재하는지.
 # 정방향(dir→표)과 합쳐 양방향 — phantom/리네임 항목을 잡고 신규 컴포넌트를 자동 편입한다.
-comps="$(sed -n '/### platform 컴포넌트/,/^## /p' "$README" | grep -oE "^\| ${BT}[a-z0-9-]+${BT}" | tr -d "${BT}|" | tr -d ' ')"
 while IFS= read -r c; do
   [ -n "$c" ] || continue
   [ -d "platform/$c" ] || { echo "FAIL: README 컴포넌트 표에 있으나 platform/ 디렉토리 부재: $c"; rc=1; }

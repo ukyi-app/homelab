@@ -90,6 +90,24 @@ unseed() {
   [ "$status" -eq 0 ]
 }
 
+@test "flags a source-only lib with no pipefail literal in its own text (lib scope rule)" {
+  # pipefail은 호출자 셸의 런타임 옵션이지 파일의 텍스트 속성이 아니다 — source 전용 lib
+  # (scripts/lib/*.sh, 자기 원문에 pipefail 리터럴이 없다)이 pipefail 아래에서 source되는 형태는
+  # scripts/lib/sops-recipients.sh(sops-guard.sh:24·verify-secrets.sh:22가 pipefail 아래서 source)가
+  # 실제로 그 모양이다. 픽스처는 lib 표기(닷 접두 — check-doc-index.sh의 scripts/*.sh 글롭 밖) 아래
+  # pipefail 원문 없이 다중행 writer를 파이프한다.
+  LIBFIX="$ROOT/scripts/lib/.sigpipe-fixture.tmp.sh"
+  cat > "$LIBFIX" <<'FIXEOF'
+v="$(printf 'a\nb\n')"
+printf '%s\n' "$v" | grep -q y
+FIXEOF
+  git -C "$ROOT" add -f -- "$LIBFIX"
+  run bash "$GUARD"
+  git -C "$ROOT" rm -q --cached --force -- "$LIBFIX" 2>/dev/null || true
+  rm -f "$LIBFIX"
+  [ "$status" -ne 0 ]
+}
+
 @test "the guard prescribes herestring in its failure output" {
   seed "printf '%s\\\\n' \"\$list\" | grep -q x\n"
   run bash "$GUARD"

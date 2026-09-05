@@ -29,3 +29,12 @@ setup() {
   echo "$output" | grep -q "ghostcomp"
 }
 
+@test "check-skeleton FAILS when a platform dir's README table row is removed, even if the name is not mentioned elsewhere (forward tie)" {
+  # 정방향(dir→표)이 표 행 **멤버십**인지 확인한다 — 옛 판은 `grep -q "$c" "$README"`로 파일 전체를
+  # 부분문자열 검사해서, 표 행이 없어도 산문 어딘가에 이름이 있으면(cloudflared 등) 초록이었다.
+  # `files`는 README에서 이 표 행에만 등장하므로 행을 지우면 표 밖 증인도 없다.
+  run bash -c 'sed "/| \`files\` |/d" README.md > /tmp/ck_readme_$$ && CK_README=/tmp/ck_readme_$$ ./scripts/check-skeleton.sh; rc=$?; rm -f /tmp/ck_readme_$$; exit $rc'
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "files"
+}
+

@@ -59,6 +59,17 @@ fixture_suite() {   # $1: 하위 디렉토리명
   echo "$output" | grep -q "skip()"
 }
 
+@test "the detector rejects hand-rolled TypeScript skip signalling via console.info (verb class, not just log/error/warn)" {
+  # 리뷰 실측 — P_EMIT의 console 동사가 log|error|warn 3종뿐이라 info/debug/trace로 손조립한 SKIP 방출은
+  # 무증인이었다(형제 check-scan-producers.sh:105 VERB는 6종 전부). 열거 대신 클래스(`console\.[a-z]+`)로
+  # 닫아 재드리프트를 원리적으로 막는다.
+  printf '%s\n' 'const _rc = 4;' 'console.info("SKIP: fake-ts: 도메인 없음");' 'process.exitCode = _rc;' \
+    > "$BATS_TEST_TMPDIR/fake-info.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/fake-info.ts"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "skip()"
+}
+
 @test "a bare TypeScript skip exit without a marker is still caught (TS exit lane witness)" {
   # 리뷰 실측(11): 옛 패턴의 \xHH는 GNU grep ERE에서 리터럴 'x'라 이 픽스처를 영구 미탐했고,
   # 마커 동반 픽스처(위)는 P_EMIT 레인이 잡아 게이트가 초록이었다 — 레인 독립 증인이 이것이다.

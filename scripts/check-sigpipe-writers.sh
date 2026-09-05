@@ -14,6 +14,11 @@
 #
 # ── 판정 범위(의도적으로 좁다) ────────────────────────────────────────────────────────────────────
 # ① `pipefail`을 켠 파일만 본다. bats는 pipefail을 켜지 않아 같은 관용구가 거기선 안전하다.
+#    ⚠️ pipefail은 **호출자 셸의 런타임 옵션**이지 파일의 텍스트 속성이 아니다 — source 전용 lib
+#    (`scripts/lib/*.sh`, 자기 원문에 pipefail 리터럴이 없다)은 guard.sh:35 guard_init이 켠 pipefail
+#    아래에서 실행되는데도(sops-guard.sh:24·verify-secrets.sh:22가 그 아래에서 lib을 source한다)
+#    원문 토큰 검사에 걸리지 않아 구조적으로 면제됐다(실측 — 라이브 위반 0건, 잠재 fail-open).
+#    처방: `*/lib/*.sh`는 원문 무관하게 스캔 대상에 넣는다(:52의 case).
 # ② **다중행 writer만** 잡는다:
 #      - `printf '%s\n' "$var"`  — 개행 포맷이라 여러 줄을 쓴다
 #      - `echo "$var"`           — 변수가 다중행일 수 있고 정적으로 판별 불가하다
@@ -46,7 +51,10 @@ bad=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   [ -f "$f" ] || continue
-  grep -q 'pipefail' "$f" || continue          # ①
+  case "$f" in
+    */lib/*.sh) : ;;                           # source 전용 lib — 원문 토큰 무관 스캔(위 ① 참고)
+    *) grep -q 'pipefail' "$f" || continue ;;  # ①
+  esac
   scanned=$((scanned + 1))
   # 패턴은 순수하게 두고(③), 줄 전체가 주석인 것만 사후에 걷어낸다 — 인라인 주석 앞의 코드는 살린다.
   # 접두를 패턴에 넣으면 컬럼 0을 놓친다(위 ③ 참조).
