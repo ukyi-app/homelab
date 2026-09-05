@@ -62,6 +62,20 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "(c) lane2 flags apps values image struct when digest appears only in a comment" {
+  # 적대 리뷰 — image_block_has_digest()가 주석을 벗기지 않아 '# digest: sha256:...' 주석 한 줄로
+  # 미핀 이미지가 통과했다(guard-decision-a-1). 실 키가 아니라 주석뿐이므로 여전히 lane2 위반이어야 한다.
+  wf apps/myapp/deploy/prod/values.yaml <<'EOF'
+image:
+  repo: ghcr.io/x/y
+  tag: v1
+  # digest: sha256:notreallypinned
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'lane2'
+}
+
 @test "(d) fixtures(+fixtures-bad) and vendor paths are excluded (tag-only ignored)" {
   wf platform/ok/deployment.yaml <<'EOF'
 image: nginx:1.0@sha256:abcdef
@@ -286,6 +300,16 @@ EOF
   rm -rf "$REPO/apps/flowbad"; git -C "$REPO" add -A
   run bash "$CHK" --root "$REPO"
   [ "$status" -eq 0 ]
+}
+
+@test "lane2 flow-style image flags digest that appears only in a trailing comment" {
+  # guard-decision-a-1의 형제 자리(line 207) — flow-style도 같은 comment-strip 누락을 갖는다.
+  wf apps/flowcomment/deploy/prod/values.yaml <<'EOF'
+image: { repo: ghcr.io/x/y, tag: v1 } # digest: sha256:notreallypinned
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'lane2-flow'
 }
 
 @test "the total floor is exempt in a narrowed scope but the signal still goes out" {

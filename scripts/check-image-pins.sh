@@ -132,7 +132,8 @@ image_block_has_digest() {
       if ($0 ~ /^[[:space:]]*$/) next
       c=$0; sub(/[^ ].*/,"",c); cur=length(c)
       if (cur <= ind) { blk=0; next }
-      if ($0 ~ /digest:[[:space:]]*sha256:/) { found=1; exit }
+      l=$0; sub(/[ \t]#.*$/, "", l)
+      if (l ~ /digest:[[:space:]]*sha256:/) { found=1; exit }
     }
     END { exit(found?0:1) }
   ' "$1"
@@ -204,7 +205,9 @@ while IFS= read -r f; do
   while IFS= read -r fl; do
     [ -n "$fl" ] || continue
     scanned=$((scanned + 1))
-    printf '%s' "$fl" | grep -q 'digest:[[:space:]]*sha256:' && continue
+    # herestring 종단(check-sigpipe-writers) — sed 출력을 변수로 받아 grep -q에 파이프하지 않는다.
+    fl_stripped="$(printf '%s' "$fl" | sed -E 's/[[:space:]]*#.*$//')"
+    grep -q 'digest:[[:space:]]*sha256:' <<<"$fl_stripped" && continue
     app=$(printf '%s' "$f" | sed -E 's#^apps/([^/]+)/.*#\1#')
     allow_has "app:$app" && continue
     echo "UNPINNED(lane2-flow): $f — flow-style image에 digest: sha256: 부재"
