@@ -144,6 +144,12 @@ alert_defined() {
   alert_defined "$R" StandardSSDWarning
   alert_defined "$R" StandardSSDFilling
   alert_defined "$R" StandardSSDFillingTrend
+  # round7 finding rules-core-r4-r5-2 — warning(0.15)/critical(0.10) 두 리터럴을 맞바꿔도(severity
+  # 역전) 존재 단언만으로는 34/34 ok로 흡수된다(실측). 알림 이름별 expr에서 뽑아 등식으로 잰다.
+  w_expr="$(yq -e '.data["r4.yaml"]' "$R" | yq '.groups[].rules[] | select(.alert=="StandardSSDWarning") | .expr' -)"
+  c_expr="$(yq -e '.data["r4.yaml"]' "$R" | yq '.groups[].rules[] | select(.alert=="StandardSSDFilling") | .expr' -)"
+  printf '%s' "$w_expr" | grep -q '< 0.15'
+  printf '%s' "$c_expr" | grep -q '< 0.10'
   # ⚠️ 설계 결정: StandardSSD*에는 per-rule absent() 가드를 두지 않는다. 스크레이프 전손(node-exporter
   # 다운)의 fail-closed는 core.yaml의 TargetDown(up==0, critical)이 담당한다 — per-rule absent()를 붙이면
   # 메트릭 부재를 "SSD 여유 부족" critical로 오귀속(잘못된 원인 페이지)하고 TargetDown과 중복된다.
@@ -192,6 +198,14 @@ alert_defined() {
   # 임계가 renewBefore 버퍼 안쪽이라 정상 자동갱신 무발화: wildcard 14일(<LE 30일)·catch-all 7일(<selfsigned 15일).
   grep -q '< 1209600' "$R"   # 14d
   grep -q '< 604800' "$R"    # 7d
+  # ⚠️ 위 두 grep은 파일 전체 매치라 두 리터럴이 서로 바뀐 채(swap) 붙어도 통과한다(round7 finding
+  #    rules-core-r4-r5-1 — 34/34 ok로 실측). 알림 이름별로 expr을 뽑아 등식으로 잰다(:244
+  #    ContainerMemoryNearLimit expr-scoped 관용구와 동형).
+  E="$BATS_TEST_TMPDIR/cert-expr.txt"
+  yq -e '.data["r5.yaml"]' "$R" | yq '.groups[].rules[] | select(.alert=="CertWildcardExpiringSoon") | .expr' > "$E"
+  grep -q '< 1209600' "$E"
+  yq -e '.data["r5.yaml"]' "$R" | yq '.groups[].rules[] | select(.alert=="CertExpiringSoon") | .expr' > "$E"
+  grep -q '< 604800' "$E"
   # vmalert Deployment에 r5 배선(--rule + volumeMount + volume) — 없으면 룰이 로드 안 됨.
   grep -q -- '--rule=/rules/r5/\*.yaml' "$V"
   grep -q 'name: rules-r5, mountPath: /rules/r5' "$V"

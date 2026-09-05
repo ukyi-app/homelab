@@ -33,6 +33,28 @@ setup() {
   [ "$output" = "1" ]
 }
 
+@test "route.routes is a closed pair: Watchdog fast-path and critical fast-repeat" {
+  # round7 finding 1·3 — 두 서브라우트 모두 값 단언이 없었다. 어느 쪽을 통째로 지워도 최상위
+  # 기본 receiver(telegram)가 흡수해 게이트 전건이 초록이었다(73/73·63/63 실측). length 등식으로
+  # 폐집합을 잠그고 각 라우트의 필드를 등식으로 잰다.
+  n="$(yq '.route.routes | length' "$AMCFG")"
+  [ "$n" = "2" ]
+  # Watchdog → deadmanswitch(오프노드 dead-man 백스톱 — healthchecks.io ping), 즉시 반복 + 폴백 금지.
+  m="$(yq '.route.routes[0].matchers[0]' "$AMCFG")"; [ "$m" = "alertname = Watchdog" ]
+  r="$(yq '.route.routes[0].receiver' "$AMCFG")"; [ "$r" = "deadmanswitch" ]
+  c="$(yq '.route.routes[0].continue' "$AMCFG")"; [ "$c" = "false" ]
+  gw="$(yq '.route.routes[0].group_wait' "$AMCFG")"; [ "$gw" = "0s" ]
+  gi="$(yq '.route.routes[0].group_interval' "$AMCFG")"; [ "$gi" = "1m" ]
+  rp="$(yq '.route.routes[0].repeat_interval' "$AMCFG")"; [ "$rp" = "1m" ]
+  # severity=critical → telegram 1h 재통지(최상위 기본 4h보다 4배 빠름). 인덱스가 아니라 matchers로
+  # select — Watchdog 라우트가 앞으로 재배열돼도 라우트 순서에 결합되지 않는다(위 receiver-length
+  # 테스트와 같은 select 관용구).
+  cr="$(yq '.route.routes[] | select(.matchers[0]=="severity = critical") | .receiver' "$AMCFG")"
+  [ "$cr" = "telegram" ]
+  cri="$(yq '.route.routes[] | select(.matchers[0]=="severity = critical") | .repeat_interval' "$AMCFG")"
+  [ "$cri" = "1h" ]
+}
+
 @test "telegram config keeps parse_mode HTML and send_resolved true" {
   echo "$MSG" >/dev/null   # MSG must be non-empty
   [ -n "$MSG" ]
@@ -169,6 +191,14 @@ setup() {
       prom/alertmanager:v0.33.0 check-config /cfg/alertmanager.yml
   [ "$status" -eq 0 ] || { echo "amtool exit=$status output: $output"; false; }
   printf '%s' "$output" | grep -q 'SUCCESS'
+}
+
+@test "inhibit_rules is a closed set of three rules (critical/warning, disk, unit axes only)" {
+  # round7 finding 2 — 기존 3규칙에 대한 @test는 전부 존재(membership) 단언뿐이라, 전칭급 4번째
+  # 규칙(예: source/target 둘 다 alertname =~ ".+", equal:[namespace])을 몰래 얹어도 기존 3개
+  # grep -qF 단언이 그대로 참이라 게이트가 못 잡았다(63/63 실측). length 등식이 그 폐집합을 잠근다.
+  n="$(yq '.inhibit_rules | length' "$AMCFG")"
+  [ "$n" = "3" ]
 }
 
 @test "disk-scoped inhibit rule lets a critical suppress the same-disk warning" {
