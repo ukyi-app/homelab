@@ -126,7 +126,8 @@ EOF
         ;;
     esac
   done < "$C"
-  [ -z "$bad" ] || { echo "allowedPercent로 자기참조가 되살아난 워크로드:$bad (승인된 예외: $PCT_EXEMPT)"; false; }
+  bad_n=$(printf '%s' "$bad" | wc -w)
+  [ "$bad_n" -eq 0 ] || { echo "allowedPercent로 자기참조가 되살아난 워크로드:$bad (승인된 예외: $PCT_EXEMPT)"; false; }
 }
 
 @test "container securityContext (allowPrivilegeEscalation/readOnlyRootFilesystem/capabilities.drop) is pinned class-wide (critic re-flag, r7+r8)" {
