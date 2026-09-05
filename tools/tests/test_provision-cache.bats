@@ -182,7 +182,7 @@ provision() {
   [ "$output" = "cache" ]
 }
 
-@test "provision-cache rejects a -ro suffixed name (collides with readonly conn naming)" {
+@test "provision-cache rejects a -ro suffixed name (the suffix is reserved for read replica naming)" {
   provision --name sessions-ro
   [ "$status" -ne 0 ]
   # ⚠️ 옛 `grep -q "ro"`는 두 글자라 bun의 `Module not found ".../p-ro-vision-cache.ts"`에도

@@ -25,7 +25,7 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   run grep -q 'prometheus.io/scrape' <<<"$out"; [ "$status" -ne 0 ]
 }
 
-@test "web exposes metrics only when metrics.enabled=true" {
+@test "web exposes metrics when metrics.enabled=true" {
   out=$(dep --set kind=web --set route.public=true --set route.host=a.example.com --set metrics.enabled=true)
   echo "$out" | grep -q 'name: http'
   echo "$out" | grep -q 'name: metrics'

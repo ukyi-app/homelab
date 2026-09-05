@@ -381,7 +381,7 @@ sections() { sed -n 's/^adguard_seed_drift{section="\([^"]*\)"} [0-9][0-9]*$/\1/
 
 # ── 매니페스트 배선(실행 seam이 못 보는 축) ─────────────────────────────────────────────────────
 
-@test "the seed ConfigMap is mounted read-only into the reconciler pod" {
+@test "the seed ConfigMap mount into the reconciler pod is non-writable (readOnly)" {
   # 실행 하네스는 SEED_FILE을 주입하므로 **마운트 자체**는 정적으로만 볼 수 있다.
   grep -q 'name: adguard-config' "$F"
   grep -qE 'mountPath: /seed' "$F"

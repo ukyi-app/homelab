@@ -395,7 +395,7 @@ _seed_frozen_fixture() {   # $1=root $2=픽스처 경로
   [ "$status" -eq 0 ]
 }
 
-@test "mode C F-2 rejects irate() as a rollup (needs 2 samples — window holds only 1 push)" {
+@test "mode C F-2 rejects irate() as a rollup (needs 2 samples — window holds a single push)" {
   _run_probe IrateProbe 'irate(ghcr_latest_digest[10m]) > 0'
   rm -rf "$tmp"
   [ "$status" -ne 0 ]

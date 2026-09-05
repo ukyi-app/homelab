@@ -272,7 +272,7 @@ teardown() { rm -rf "$STUBDIR"; }
   printf '%s' "$output" | grep -q 'helperPod 이미지를'
 }
 
-@test "a SAN that is only a prefix of a longer one does not count as present" {
+@test "a SAN that is a strict prefix of a longer one does not count as present" {
   # ⚠️ 라이브 SAN은 `DNS:nuc-15-pro, DNS:nuc-15-pro.tailcf1ac6.ts.net` 형태다. 부분일치로 보면
   #    짧은 이름이 cert에서 **빠져도** 긴 이름에 매치돼 초록이 된다 — 정확일치가 그것을 막는다.
   printf 'X509v3 Subject Alternative Name:\n    DNS:localhost, IP Address:127.0.0.1' > "$STUBDIR/certsans.txt"
