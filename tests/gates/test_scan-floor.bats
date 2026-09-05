@@ -582,6 +582,9 @@ YAML
   make_caps_fixture
   run bash -c "cd '$FX' && bun '$ROOT/tools/check-disk-caps.ts' --floor caps=1"
   [ "$status" -ne 0 ]
+  # [ABS-EXEC] W1(감사 63) — 도구가 리네임/부재여도 bun은 rc 1(Module not found)을 내 위 `-ne 0`이
+  # 침묵 통과한다. 실제 위반 문구로 "정말 위반을 봤다"를 못박는다(아래 히어스트링 대조와 별개 증인).
+  echo "$output" | grep -q "볼륨 선언"
   out="$output"
   run grep -q "^SCAN: check-disk-caps:caps: 1$" <<<"$out"
   [ "$status" -eq 0 ]
@@ -598,6 +601,8 @@ YAML
   make_caps_fixture
   run bash -c "cd '$FX' && bun '$ROOT/tools/check-disk-caps.ts' --floor caps=5"
   [ "$status" -ne 0 ]
+  # [ABS-EXEC] W1(감사 63) — 도구 리네임/부재의 rc 1과 진짜 열거-붕괴 rc를 문구로 가른다.
+  echo "$output" | grep -q "열거 붕괴"
   out="$output"
   # 바닥값 진단은 나간다(도메인 힌트를 달고).
   run grep -q "열거 붕괴" <<<"$out"
@@ -614,6 +619,9 @@ YAML
 @test "check-disk-caps rejects a malformed floor from the override vocabulary" {
   run bash -c "bun '$ROOT/tools/check-disk-caps.ts' --floor caps=abc"
   [ "$status" -eq 2 ]
+  # [ABS-EXEC] W1(감사 63) — rc 2는 이 도구의 부재(Module not found도 rc 1로 다름)와도 다르고
+  # 실제 malformed-floor 오류 문구로 어느 쪽이 죽었는지 못박는다.
+  echo "$output" | grep -q "음이 아닌 정수"
   out="$output"
   run grep -q "^SCAN:" <<<"$out"
   [ "$status" -ne 0 ]
