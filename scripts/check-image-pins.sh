@@ -110,8 +110,10 @@ lint_allowlist() {
 }
 allow_has() {  # 인라인 주석·공백 스트립 후 정확 일치
   [ -f "$ALLOWLIST" ] || return 1
-  grep -v '^[[:space:]]*#' "$ALLOWLIST" 2>/dev/null \
-    | sed -E 's/[[:space:]]*#.*//; s/[[:space:]]*$//' | grep -v '^[[:space:]]*$' | grep -qxF "$1"
+  # ⚠️ 파이프 말단의 grep -q가 아니라 herestring이다 — 다중행 writer 체인을 grep -q에 물리면 pipefail
+  #    아래에서 SIGPIPE(141)가 「불일치」로 둔갑한다(check-locale-collation.sh 레인 D 형제 — 2026-09-05 실측).
+  grep -qxF "$1" <<<"$(grep -v '^[[:space:]]*#' "$ALLOWLIST" 2>/dev/null \
+    | sed -E 's/[[:space:]]*#.*//; s/[[:space:]]*$//' | grep -v '^[[:space:]]*$')"
 }
 
 # 파일에서 앵커된 문자열 이미지 값 추출(따옴표·주석·경로/템플릿 제외). 각 값 한 줄(개행 유지).
