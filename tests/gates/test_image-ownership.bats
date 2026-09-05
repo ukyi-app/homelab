@@ -343,6 +343,19 @@ PY
   echo "$output" | grep -q "chart:some-chart"
 }
 
+@test "a quoted kind: Application is enumerated too (value-anchor blindness, 55 grep-c-2 sibling)" {
+  # `kind: "Application"`/`kind: 'Application'`은 합법 YAML이고 k8s에 동일 의미다 — 값-앵커가
+  # 인용을 못 보면 D-2 선언 강제가 표기 하나로 우회된다(7라운드 c64-5 실측: 인용판은 refs=0으로
+  # 무증인이었다).
+  t="$(_fixture appshapequoted)"
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: "Application"\nmetadata: { name: x }\nspec:\n  source:\n    chart: some-quoted-chart\n' \
+    > "$t/platform/elsewhere.yaml"
+  git -C "$t" add -A
+  run GUARD --repo-root "$t" $FIXTURE_ARGS
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "chart:some-quoted-chart"
+}
+
 @test "operator-injected declarations are exempt from the dead-claim check (no repo string exists)" {
   # operator가 런타임에 주입하는 이미지는 레포에 문자열이 없다 — 참조 스캔으로 원리적으로 매치될 수
   # 없으므로 죽은-선언 검사에서 면제해야 한다. 면제가 없으면 정당한 선언이 red가 된다(실증됨).

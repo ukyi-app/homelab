@@ -10,7 +10,8 @@
 #     **0 수렴 완료**, 이제 hard-zero다(아래 ABS_BASELINE 줄이 상환 기록을 진다).
 #   QV (`grep -qv`) = 줄 단위 반전이 전칭(∀¬)을 존재(∃¬)로 바꾼다 → hard-zero(아래).
 #   SETCAP(이름 있는 집합의 상한 부재) = `@test` 이름이 exactly/only/no other/전수/EVERY/정확로
-#     원소 전수를 선언하는데 본문에 그 상한을 재는 술어가 없다 → 래칫(아래 SETCAP_BASELINE).
+#     원소 전수를 선언하는데 본문에 그 상한을 재는 술어가 없다 → 래칫으로 출발해 **0 수렴
+#     완료**, 이제 hard-zero다(아래 SETCAP_BASELINE).
 # 휴리스틱: 다줄 @test 규약 가정("@test … {" 한 줄 시작, 0열 "}" 종료). heredoc 본문은 명령으로 안 센다.
 # (레포 단일 한줄 @test는 단일 명령이라 무해 — 신규 한줄 본문은 다줄로 작성할 것.)
 # 인자로 파일을 주면 그 파일만 스캔하고 다섯 클래스 아무거나 있으면 실패(픽스처/ad-hoc 탐지 모드).
@@ -82,9 +83,9 @@
 # `@test` 이름에 exactly/only/no other/전수/EVERY/정확 중 하나가 있으면(대소문자 구별 그대로 —
 # 표기 변형을 넓히면 다른 축이 된다, grep-a-1/grep-a-5의 재발과 같은 함정) 그 본문(다음 `@test`
 # 또는 파일 끝까지, 0열 "}"가 경계)에 집합 등식 술어 — 문자열 등식(`= "…"`) · 수 등식
-# (`-eq [0-9]+`) · jq/yq `contains(` · jq/yq `join(",")` · jq/yq `length ==` — 중 하나 이상이
-# 있어야 한다. 다섯 형태는 문안 그대로다(텍스트 매치이지 문장 위치·인용 anchor 요구 없음 —
-# ABS/QV처럼 위치를 재는 레인이 아니라 **존재**만 잰다).
+# (`-eq [0-9]+`) · jq/yq `contains(` · jq/yq `join(",")` · jq/yq `length ==` · jq/yq
+# `== [` 배열 리터럴 등식 — 중 하나 이상이 있어야 한다. 여섯 형태는 문안 그대로다(텍스트
+# 매치이지 문장 위치·인용 anchor 요구 없음 — ABS/QV처럼 위치를 재는 레인이 아니라 **존재**만 잰다).
 # ⚠️ **오탐은 면제 어휘가 아니라 이름 정정으로 닫는다.** 이름의 "only"가 집합이 아니라 단수
 #    대상·시간 부사·복합어를 가리키는 자리(`read-only`·`owner-only`·`readonly` 같은 합성어,
 #    "only when"류 조건 부사, "only 1"류 서술 수사)는 검출기가 **그대로** 잡는다 — 면제 조건을
@@ -98,10 +99,15 @@
 #    자체 확장이 이 축의 범위를 티켓 하나가 감당 못 할 크기로 불리기 때문이다(round7이 이미
 #    "0건 finding + 규칙 문안 2개도 정당한 답"이라고 명시). 다음 라운드가 `-eq` 분모에서
 #    `"\$status"` 좌변을 제외하는 방향으로 좁힐 후보다.
-# SETCAP_BASELINE도 BB/ABS와 같은 래칫 어휘다 — 착수 시점 위반 N을 바닥값으로 두고 감소만
-# 허용한다. 착수 시점 실측(2026-09-05): 이름-어휘 매치 14건 중 11건은 단수/조건/합성어
-# 오탐이라 이름 정정으로 닫았고(아래 SETCAP_BASELINE 줄이 각 자리를 인용), 3건은 실제로 이름
-# 있는 집합(포트·볼륨·디스패처 입력)을 전수 선언하면서 술어가 없어 다음 라운드 입력으로 남는다.
+#    ⚠️ **순서 조건(7라운드 setcap-denominator-2 실측)** — 6번째 형태(jq/yq `== [` 배열 리터럴
+#    등식)를 먼저 얹은 뒤에만 좌변 제외를 진행해야 한다. 그 형태 없이 좌변만 제외하면 이미
+#    `jq -e '...enum == [...]'`로 완전히 상한이 잠긴 자리(test_schema_fail_closed.bats:53,62)가
+#    새 위반으로 뒤집힌다 — 그 잠금이 뒤따르는 `[ "$status" -eq 0 ]`(jq 성공 rc)에 우연히
+#    걸려 있었을 뿐이기 때문이다.
+# SETCAP_BASELINE은 BB/ABS가 밟은 것과 같은 경로다 — 래칫으로 출발해(티켓 59, 착수 시점
+# 위반 14건 중 11건은 단수/조건/합성어 오탐이라 이름 정정으로 닫았다) **0에 수렴 완료**했다
+# (티켓 64 c64-7, 2026-09-05). 남았던 3건(포트·볼륨·디스패처 입력 집합)은 각각 집합 등식
+# 술어를 얻었다(아래 SETCAP_BASELINE 줄이 상환 기록을 진다). 이제 hard-zero다.
 #
 # ── [ABS-EXEC] — 레포 소유 실행물 호출의 부재 단언(F4, 감사 63 · 설계 노트
 #    `.scratch/audit-2026-09/design-abs-denominator.md` §6-C) ──────────────────────────────────
@@ -159,21 +165,16 @@ BB_BASELINE=0    # **0 수렴 완료** — 이제 hard-zero다(NEG와 같은 규
 # 올리는 방향은 부채 재유입이다 — 그래도 필요하면 같은 diff에서 이 줄을 고쳐야 하고, 그건 리뷰에
 # 보인다(check-bats-accounting의 EXCL_MAX와 같은 성격).
 ABS_BASELINE=0
-# 이름 있는 집합의 상한 부재 부채 잔액 — **래칫**(티켓 59 착지, 2026-09-05). 착수 시점 이름-어휘
-# 매치(`@test .*(exactly|only|no other|전수|EVERY|정확)`) 14건 중 11건은 이름 정정으로 닫았다
-# (단수 대상·조건 부사·합성어 오탐 — `read-only`/`readonly`/`owner-only`/"only when"/"only 1"류.
-# 같은 커밋의 이름 정정 목록이 각 자리를 진다). 남은 3건은 실제로 이름 있는 집합을 전수 선언하며
-# 술어가 없다 — 다음 라운드 입력(집합 등식 추가는 이 티켓 범위 밖):
+# 이름 있는 집합의 상한 부재 부채 잔액 — 티켓 59가 래칫으로 착지(2026-09-05, baseline 3)했고
+# **0 수렴 완료**(티켓 64 c64-7, 2026-09-05) — 이제 hard-zero다. 남았던 3건과 상환 형태:
 #   test_worker_ports.bats:21 "web defaults to http only and no metrics scrape annotation" —
-#     포트 집합 {http,metrics} 중 http만 — 존재+부재 단언은 있으나 등식/카운트 술어가 없다.
+#     포트 집합에 `[.spec.template.spec.containers[].ports[]?.name] | sort | join(",")` = "http" 등식 추가.
 #   test_basebackup.bats:12 "cronjob runs non-root 26 and mounts only bulk-ssd PVC" —
-#     volumeMounts 집합의 원소 상한이 없다(다른 PVC를 추가해도 무증인).
+#     `[.spec.jobTemplate.spec.template.spec.volumes[].name] | sort | join(",")` = "backup" 등식 추가.
 #   test_mutation-dispatch.bats:204 "each dispatcher references inputs only via env or with: …" —
-#     `$DISPATCHERS` 루프의 위반 집합을 `[ -z "$bad" ]`로 재는데, 이 형태는 다섯 술어 목록
-#     (`= "…"`/`-eq N`/`contains(`/`join(",")`/`length ==`) 밖이다 — 표기 변형 갭(재발 판정 ②
-#     와 같은 축).
-# 올리는 방향은 부채 재유입이다 — 필요하면 같은 diff에서 이 줄과 위 목록을 함께 고친다.
-SETCAP_BASELINE=3
+#     `[ -z "$bad" ]`(다섯 술어 목록 밖 표기 변형)를 위반 카운트 `-eq 0`으로 재작성(동작 불변).
+# 신규 [SETCAP]은 즉시 red다(NEG·BB·ABS와 같은 규율). 올리는 방향은 부채 재유입이다.
+SETCAP_BASELINE=0
 # 레포 소유 실행물 호출의 부재 단언 부채 잔액 — **hard-zero**(F4, 감사 63 착지, 2026-09-05).
 # F1(adguard 리컨실러 2곳)·F2(나머지 10곳 — tools/tests/test_cli-flag-guard.bats 5 ·
 # tests/gates/test_scan-floor.bats 3 · tests/gates/test_secret-cert-check.bats 1 ·
@@ -329,6 +330,7 @@ function setcap_hit(s){
   if (s ~ /contains\(/) return 1
   if (s ~ /join\(","\)/) return 1
   if (s ~ /length[ \t]*==/) return 1
+  if (s ~ /==[ \t]*\[/) return 1  # jq/yq 배열 리터럴 등식
   return 0
 }
 # 한 문장 처리 — 루프 깊이 · [QV] · [SETCAP] 술어 · run/status 짝(ABS·ABS-EXEC 둘 다) · 증인 수집.
@@ -515,7 +517,7 @@ else
   [ "$bb" -le "$BB_BASELINE" ] || { echo "FAIL: 중간 [[ ]]가 baseline(${BB_BASELINE}) 초과(${bb}) — 신규는 'run …; [ … ]'로." >&2; rc=1; }
   [ "$abs" -le "$ABS_BASELINE" ] || { echo "FAIL: 부재 단언 위반이 baseline(${ABS_BASELINE}) 초과(${abs}) — [ABS]는 '-eq 1'로 고치고, [ABS-REC]/[ABS-LOOP]는 같은 @test나 그 파일 함수 본문에 **비공허 바닥값 + 양성 대조**를 함께 세워라. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」" >&2; rc=1; }
   [ "$absexec" -le "$ABSEXEC_BASELINE" ] || { echo "FAIL: [ABS-EXEC] 위반이 baseline(${ABSEXEC_BASELINE}) 초과(${absexec}) — 레포 소유 실행물(scripts/*.sh·tools/*.ts·infra/**/*.sh·tests/gates/*.sh) 호출의 비-0 판정에 W1(echo/printf \"\$output\"|grep -q … 또는 run bash -c '… \"\$1\" …' _ \"\$out\") 또는 W2(같은 파일·같은 도구의 rc-eq-0 양성 대조) 중 하나를 세워라. cf. docs/adr/0007" >&2; rc=1; }
-  [ "$setcap" -le "$SETCAP_BASELINE" ] || { echo "FAIL: [SETCAP] 위반이 baseline(${SETCAP_BASELINE}) 초과(${setcap}) — 이름이 exactly/only/no other/전수/EVERY/정확를 선언하면 본문에 집합 등식 술어(문자열 등식 · -eq N · jq/yq contains(/join(\",\")/length ==) 중 하나를 걸어라. 집합이 아니라 단수 대상·조건 부사·합성어면 이름에서 그 어휘를 빼라. cf. docs/traps-detail.md 「이름 있는 집합의 상한 부재」" >&2; rc=1; }
+  [ "$setcap" -le "$SETCAP_BASELINE" ] || { echo "FAIL: [SETCAP] 위반이 baseline(${SETCAP_BASELINE}) 초과(${setcap}) — 이름이 exactly/only/no other/전수/EVERY/정확를 선언하면 본문에 집합 등식 술어(문자열 등식 · -eq N · jq/yq contains(/join(\",\")/length ==/== [ 배열 리터럴) 중 하나를 걸어라. 집합이 아니라 단수 대상·조건 부사·합성어면 이름에서 그 어휘를 빼라. cf. docs/traps-detail.md 「이름 있는 집합의 상한 부재」" >&2; rc=1; }
 fi
 [ "$rc" -eq 0 ] && echo "check-bats-style: 중간 부정 0곳 + grep -qv 0곳 + [[ ]]·부재 단언·실행물 무증인·집합 상한 ratchet OK"
 exit "$rc"

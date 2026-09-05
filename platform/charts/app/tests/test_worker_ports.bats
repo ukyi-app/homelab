@@ -23,6 +23,11 @@ dep() { helm template t "$CHART" --set image.repo=ghcr.io/o/x --set image.tag=sh
   echo "$out" | grep -q 'name: http'
   run grep -q 'name: metrics' <<<"$out"; [ "$status" -ne 0 ]
   run grep -q 'prometheus.io/scrape' <<<"$out"; [ "$status" -ne 0 ]
+  # ⚠️ 위 존재+부재 단언은 http/metrics 두 이름만 잰다 — 제3의 포트가 조용히 늘어도 무증인이었다
+  # (감사 6라운드 티켓64 c64-7 실측: unconditional `debug` 포트를 더해도 이 @test는 초록이었다).
+  # 컨테이너 포트 집합 자체를 등식으로 잠근다.
+  ports="$(echo "$out" | yq '[.spec.template.spec.containers[].ports[]?.name] | sort | join(",")')"
+  [ "$ports" = "http" ]
 }
 
 @test "web exposes metrics when metrics.enabled=true" {

@@ -12,8 +12,13 @@ branch protection의 required status check는 **`gate` 하나**로 둔다(`repo.
 다른 잡(verify·iac)은 신호로 두되 머지를 막지 않는다.
 
 ## 근거
-- `gate`가 머지를 막아야 하는 8스텝(chart-test·ledger·audit·bats·shellcheck·telegram-e2e)을
-  결정론적으로 한 잡에 모은다. 단일 required는 "머지해도 되나?"를 한 줄로 답하게 한다.
+- ~~`gate`가 머지를 막아야 하는 8스텝(chart-test·ledger·audit·bats·shellcheck·telegram-e2e)을
+  결정론적으로 한 잡에 모은다.~~
+  🔴 **정정(2026-09-05, 감사 7라운드 비평가 축 밖 실증) — 스텝 수 리터럴은 쓰여진 시점부터
+  드리프트했다.** `gate`가 머지를 막아야 하는 전 스텝을 결정론적으로 한 잡에 모은다 —
+  required check는 `gate` 하나이며, 스텝 로스터는 `tools/check-ci-parity.ts`가 기계 계상한다
+  (손 관리 수치는 반드시 드리프트한다 — `scripts/lib/scan-floor.sh`가 같은 이유로 금지하는
+  것과 같은 종류). 단일 required는 "머지해도 되나?"를 한 줄로 답하게 한다는 결론은 그대로다.
 - verify(sops/pre-commit)·iac(plan)은 보조 신호다 — 실패해도 머지 차단까지 갈 필요는 없다
   (sops 왕복은 ephemeral 키, iac plan은 정보성).
 
