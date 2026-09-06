@@ -885,6 +885,36 @@ setup() {
   echo "$output" | grep -q '\[ABS-EXEC\]'
 }
 
+@test "the same exec-target-plus-grep-filter idiom wrapped in a single-quoted bash -c is still caught (reg13c-fn-bats-style-1/2)" {
+  # ⚠️ 착지 전(13c): 위 exec-target-grep-exclusion 처방은 따옴표 없는 최상위 파이프 형태만 닫았다.
+  #    같은 관용구를 `bash -c '…'`로 한 겹 더 감싸면 내부 파이프가 mask_pipe에 의해 따옴표 안으로
+  #    마스킹돼 첫 세그먼트가 전체 문장이 되고, 그 문장에 grep 필터가 있다는 이유로 실행물 호출까지
+  #    통째로 배제됐다(비평가 실증, before/after 0→1). bash -c 래퍼를 먼저 벗겨 그 본문에만 첫
+  #    세그먼트 grep 판정을 거는 처방으로 닫는다.
+  printf '%s\n' \
+    '@test "single-quoted bash -c exec target with a trailing grep filter" {' \
+    "  run bash -c 'scripts/check-skeleton.sh --bad-flag | grep -q whatever'" \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_bashc_grepfilter_sq.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_bashc_grepfilter_sq.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-EXEC\]'
+}
+
+@test "the same exec-target-plus-grep-filter idiom wrapped in a double-quoted bash -c is still caught (reg13c-fn-bats-style-1/2)" {
+  # 같은 결함의 겹따옴표 변형 — tools/tests/test_dev-data.bats:21이 실 트리에서 이 형태를 쓰지만
+  # 그 자리는 같은 파일의 W2 양성 대조(16-17행)로 이미 닫혀 있어 negative 증거로는 부적절하다
+  # (va 판정) — 그래서 이 픽스처는 합성 PoC로 사각 자체를 고정한다.
+  printf '%s\n' \
+    '@test "double-quoted bash -c exec target with a trailing grep filter" {' \
+    '  run bash -c "scripts/check-skeleton.sh --bad-flag | grep -q whatever"' \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_bashc_grepfilter_dq.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_bashc_grepfilter_dq.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-EXEC\]'
+}
+
 @test "a plain run grep call stays [ABS]'s denominator, not [ABS-EXEC]'s (positive control, exec-target-grep-exclusion)" {
   # 착지 지시 — 정당한 `run grep … <경로>` 형태는 abs_target([ABS] 레인)의 분모이지 exec가
   # 아니므로 그 배제는 유지돼야 한다. exec_target 첫 줄의 abs_target(s) 호출이 이미 이 형태를
