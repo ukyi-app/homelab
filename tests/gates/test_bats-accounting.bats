@@ -208,6 +208,21 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   echo "$output" | grep -q "venue가 0건 실재"
 }
 
+@test "a quoted trailing hash does not truncate a real call after it (acct-quote-aware, reg13-a1-bats-guards-2)" {
+  # NOCOMMENT_AWK(121행)의 quote-aware 트레일링 주석 스트립이 무증인이었다(뮤테이션 실증: q1/q2
+  # 토글 + q1==0 && q2==0 조건 3줄을 지워 순수 '공백 뒤 #는 무조건 주석'으로 되돌려도 31/31
+  # green, 회귀 0). 위 acct-trailing-comment와 형제 관용구 — 이번엔 주석이 **인용부호 안**에
+  # 있고 그 뒤에 실제 test_*.bats 호출이 같은 줄에 이어진다. quote-aware가 없으면 그 `#`에서
+  # 조기 절단돼 뒤따르는 진짜 호출을 놓친다(거짓 MISS).
+  cp Makefile "$BATS_TEST_TMPDIR/Makefile.bak"
+  printf '\n_zz_acct_quote_probe:\n\t@echo "note # symbol" && bash tests/_fixtures_acct/test_zz_quote_probe.bats\n' >> Makefile
+  reg="$BATS_TEST_TMPDIR/mkquote"
+  mkreg "$reg" '# 사유 — 실행처: owner-local `make _zz_acct_quote_probe`' 'tests/_fixtures_acct/test_zz_quote_probe.bats'
+  run bash "$s" --lint-excludes "$reg"
+  git checkout -- Makefile
+  [ "$status" -eq 0 ]
+}
+
 # ── 신설 계약 (0a-self): 자기지시/상호지시는 증명이 아니다(항진식) ───────────────────────────────
 # ⚠️ 감사 5라운드 50 critic-venue-tautology 실증: venue_derive는 `bats <경로>` venue를 파일 **존재**로만
 #    검증해, 「이 파일이 실행되는 곳: 이 파일」(자기지시)도 「이 파일이 실행되는 곳: 다른 .ci-exclude

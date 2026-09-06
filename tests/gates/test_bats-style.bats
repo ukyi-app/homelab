@@ -472,6 +472,22 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "a quoted trailing hash does not truncate a real QV finding on the same line (abs_strip quote-aware, reg13-a1-bats-guards-2 sibling)" {
+  # 형제 전수 열거 — check-bats-accounting.sh:121 NOCOMMENT_AWK와 같은 q1/q2 트레일링-주석-스트립
+  # 관용구가 이 파일의 abs_strip(244행)에도 있는데, 그 quote-aware 분기 자체를 겨냥한 증인이
+  # 없었다(뮤테이션 실증: q1/q2 토글을 지워 순수 '공백 뒤 #는 무조건 주석'으로 되돌려도 이 파일의
+  # 61/61이 전건 green). 따옴표 안 `#`가 truncate하면 **같은 줄**의 실제 [QV] 위반이 통째로
+  # 사라지는 자리로 그 갭을 고정한다. `-qv`는 런타임 조립(리터럴로 적으면 이 파일 자신이 걸린다).
+  qv="-q""v"
+  printf '%s\n' \
+    '@test "quoted trailing hash sibling witness" {' \
+    "  x=\"value # not a comment\"; echo \"\$out\" | grep ${qv} TOKEN" \
+    '}' > "$BATS_TEST_TMPDIR/test_absstrip_quoted_hash.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absstrip_quoted_hash.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[QV\]'
+}
+
 @test "the state machine reaches 0-column function bodies, not just @test bodies" {
   # 착지 전 검출기는 `^@test … {`로만 상태에 들어가서, 도메인에 있는 파일이어도 setup()·헬퍼
   # 본문은 전부 판정 밖이었다(그 갭을 가드 헤더가 「부재-단언 클래스를 얹을 때의 몫」으로 계상해
