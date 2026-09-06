@@ -247,16 +247,49 @@ $RUN systemctl try-reload-or-restart ssh.service
 #    라우터는 AdGuard로 포워딩하므로 결과는 **콜드스타트 교착의 부활**이다(#494가 닫은 문).
 #    → host-preflight.sh [6]이 이제 실효값(`/run/systemd/netif/links/<ifindex>`)으로 이걸 잡는다.
 #    ⚠️ `networkctl reload`만으로는 부족하다 — .network 파일을 다시 읽을 뿐 링크에 재적용하지 않는다.
-#       `reconfigure`가 실제 적용이고, 그 사이 **주소가 약 5초 사라졌다 돌아온다**(DHCP 재획득).
+#       `reconfigure`가 실제 적용이고, 그 사이 **주소가 약 2초 사라졌다 돌아온다**(DHCP 재획득 —
+#       저널 실측 2026-09-06: 00:16:51 Reconfiguring·`DHCP lease lost` → 00:16:53 acquired).
 #       그 주소는 K3S_NODE_IP이자 AdGuard LoadBalancer VIP다 — 그래서 미리 알린다.
 #       `--apply`는 프로비저닝 시 1회 대화형 실행이므로(README) 이 순간 blip은 수용 가능하다.
+#    🔴 그런데 그 2초는 **이 스크립트의 종료 뒤**에 걸쳐 있었다. `host-config.sh --apply && make up`으로
+#       이으면 host-up [1/4] host-preflight의 [4](`ip -o -4 addr show` 열거)가 정확히 그 창을 밟아
+#       「핀한 K3S_NODE_IP가 어느 인터페이스에도 없다」로 FAIL한다(2026-09-06 00:16 실측 — 설정 결함이
+#       아니라 재실행이면 통과하는 flake). 자기가 낸 부작용은 자기가 흡수한다: 아래 net_settled가
+#       참이 될 때까지 기다린 뒤에야 종료한다. 상한을 넘기면 exit 0이 아니라 FAIL이다 — 이 스크립트가
+#       끊은 주소가 돌아오지 않았는데 "적용 완료"라고 말하면 거짓이고(위 「재부팅을 요구하면 '적용했다'가
+#       거짓이 된다」와 같은 원칙), 그 거짓은 다음 단계가 같은 이유로 FAIL해서야 드러난다.
+#       시임 HOSTCFG_NET_WAIT_S = 대기 상한(초, 기본 15 — 실측 2초의 7배). 테스트가 상한 초과 분기를 밟는다.
+#
+# reconfigure 뒤 링크가 안정됐는가 — 두 증인을 **함께** 요구한다.
+#   ① networkd 자신의 판정: `networkctl list <iface>`의 SETUP 열이 configured(재설정 중엔 configuring).
+#   ② 커널 주소 테이블: host-preflight [4]와 **같은 열거**(`ip -o -4 addr show`)가 핀 IP를 보인다.
+#   하나만 보면 안 된다 — ①은 주소 없이도 configured로 갈 수 있고(DHCP 예약 불일치), ②는 주소가 먼저
+#   붙고 networkd가 아직 configuring일 수 있다(그때의 상태 파일 `/run/systemd/netif/links/<idx>`를
+#   host-preflight [6]이 읽는다). 둘 다 읽기 전용·sudo 불요라 `$RUN` 없이 부른다 — 그래서 테스트가
+#   PATH 스텁으로 두 증인을 따로 흔들 수 있다. 히어스트링은 pipefail 아래 `grep -q` SIGPIPE 회피다.
+net_settled() {
+  local setup addrs
+  setup="$(networkctl --no-legend list "$1" 2>/dev/null | awk '{ print $5 }')"
+  [ "$setup" = "configured" ] || return 1
+  addrs="$(ip -o -4 addr show dev "$1" 2>/dev/null | awk '{ print $4 }' | cut -d/ -f1)"
+  grep -qxF -- "$K3S_NODE_IP" <<<"$addrs"
+}
 if ls "$TREE"/etc/systemd/network/*.network.d/*.conf >/dev/null 2>&1; then
   $RUN networkctl reload
   cfg_iface="$(ip -o -4 addr show 2>/dev/null \
     | awk -v ip="${K3S_NODE_IP:-}" 'ip != "" && $4 ~ ("^" ip "/") { print $2; exit }')"
   if [ -n "$cfg_iface" ]; then
-    echo "    ⚠️ networkctl reconfigure ${cfg_iface} — ${K3S_NODE_IP}가 약 5초간 사라졌다 돌아온다"
+    echo "    ⚠️ networkctl reconfigure ${cfg_iface} — ${K3S_NODE_IP}가 약 2초간 사라졌다 돌아온다(돌아올 때까지 기다린다)"
     $RUN networkctl reconfigure "$cfg_iface"
+    _net_wait_max="${HOSTCFG_NET_WAIT_S:-15}"
+    _waited=0
+    until net_settled "$cfg_iface"; do
+      [ "$_waited" -lt "$_net_wait_max" ] \
+        || fail "networkctl reconfigure ${cfg_iface} 뒤 ${_net_wait_max}초 안에 ${K3S_NODE_IP}가 돌아오지 않았다 — networkctl status ${cfg_iface} 로 링크 상태를 볼 것(DHCP 예약 MAC d4:94:a9:26:95:3a). 이대로 make up을 이으면 host-preflight [4]가 같은 이유로 FAIL한다"
+      sleep 1
+      _waited=$((_waited + 1))
+    done
+    echo "    ${K3S_NODE_IP} 복귀 확인 — ${cfg_iface} configured · ${_waited}초 대기"
   else
     echo "    ⚠️ K3S_NODE_IP=${K3S_NODE_IP:-미설정}를 가진 인터페이스를 찾지 못했다 —" \
          "네트워크 드롭인이 **비활성인 채로 남았다**. 수동으로: sudo networkctl reconfigure <iface> (또는 재부팅)"

@@ -253,6 +253,11 @@ REC
 echo "2: wlo1    inet ${K3S_NODE_IP}/24 brd 192.168.117.255 scope global dynamic wlo1"
 EOF
   chmod +x "$SB/bin/ip"
+  # `networkctl list` 시임 — [6/6] reconfigure 뒤 대기 루프의 증인 ①(SETUP 열). reload/reconfigure는
+  # `$RUN`을 거쳐 rec가 삼키므로 이 스텁에 닿는 것은 읽기 전용 `list`뿐이다. 기본은 "이미 안정"
+  # (`configured`) — 대기 분기를 흔드는 @test가 이 파일을 덮어쓴다.
+  printf '#!/usr/bin/env bash\necho "  3 wlo1 wlan routable configured"\n' > "$SB/bin/networkctl"
+  chmod +x "$SB/bin/networkctl"
 }
 _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RUN="$SB/bin/rec" \
              run "$BOOTSTRAP_DIR/host-config.sh" --apply; }
@@ -460,6 +465,45 @@ EOF
   printf '%s' "$output" | grep -qF -- '비활성'
   run bash -c "grep -qE 'networkctl reconfigure [a-z0-9]+' '$REC_LOG'"
   [ "$status" -ne 0 ]   # 못 찾았으면 reconfigure를 부르지 않는다(엉뚱한 링크를 끊지 않는다)
+}
+
+@test "apply waits until the pinned IP is back after reconfigure (the 2s DHCP lease gap broke the && make up chain)" {
+  # 🔴 2026-09-06 00:16 실측: reconfigure → `DHCP lease lost` → 2초 뒤 재획득. 그 창에 `&& make up`이
+  #    이어 부른 host-preflight [4](`ip -o -4 addr show` 열거)가 정확히 밟혀 「핀한 K3S_NODE_IP가 어느
+  #    인터페이스에도 없다」 FAIL — 설정 결함이 아닌데 체인이 끊겼다. 자기가 낸 부작용은 자기가
+  #    흡수한다: 커널 주소 테이블이 핀 IP를 다시 보일 때까지 기다린 뒤에야 종료한다.
+  #    시임: `ip … dev <iface>`(대기 프로브)만 처음 2회 빈 출력(=리스 소실), 3회째부터 주소. 인터페이스
+  #    탐색(`dev` 없는 호출)은 항상 주소를 낸다 — 그래야 reconfigure 분기에 들어간다.
+  _sandbox
+  cat > "$SB/bin/ip" <<EOF
+#!/usr/bin/env bash
+case " \$* " in
+  *" dev "*)
+    n=\$(( \$(cat "$SB/ip.probe" 2>/dev/null || echo 0) + 1 )); echo "\$n" > "$SB/ip.probe"
+    [ "\$n" -ge 3 ] || exit 0 ;;
+esac
+echo "2: wlo1    inet ${K3S_NODE_IP}/24 brd 192.168.117.255 scope global dynamic wlo1"
+EOF
+  _apply
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF -- '복귀 확인'
+  # 프로브가 3회 돌았다(빈 출력 2회 + 주소 1회) — 대기 루프가 없으면 0회, 첫 프로브에서 끝나면 1회다.
+  [ "$(cat "$SB/ip.probe")" -eq 3 ]
+  printf '%s' "$output" | grep -qF -- '2초 대기'
+}
+
+@test "apply fails loudly when the pinned IP does not return within the wait budget (a silent exit 0 hands the gap to host-preflight)" {
+  # networkd 자신의 판정(SETUP 열)이 configuring에 머물면 커널 테이블에 주소가 있어도 안정이 아니다 —
+  # 두 증인을 함께 요구한다는 것을 이 방향에서 증언한다(위 @test는 반대 방향: configured인데 주소 부재).
+  # 상한을 넘기면 exit 0이 아니라 FAIL이다: 이 스크립트가 끊은 주소가 돌아오지 않았는데 "적용 완료"라고
+  # 말하면 거짓이고, 그 거짓은 다음 단계(host-preflight [4])가 같은 이유로 FAIL해서야 드러난다.
+  _sandbox
+  printf '#!/usr/bin/env bash\necho "  3 wlo1 wlan routable configuring"\n' > "$SB/bin/networkctl"
+  export HOSTCFG_NET_WAIT_S=2
+  _apply
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qF -- '돌아오지 않았다'
+  printf '%s' "$output" | grep -qF -- 'networkctl status wlo1'
 }
 
 # ── files 백업 배선 (국면 B 선행 작업, 2026-08-19) ──────────────────────────────────────────
