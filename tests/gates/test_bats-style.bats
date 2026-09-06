@@ -488,6 +488,23 @@ setup() {
   echo "$output" | grep -q '\[QV\]'
 }
 
+@test "detector catches a grep flag wrapped in ANSI-C quoting that is otherwise identical to the plain flag (reg13c-fn-bats-style-3)" {
+  # qv_tokenize는 홑(')·겹(") 두 종류만 토글해 ANSI-C 인용(`\$'…'`)의 `\$`가 토큰에 그대로 남고
+  # 뒤따르는 홑따옴표만 토글돼 최종 토큰이 `\$` 접두 그대로 남는다 — `-`로 시작하지 않아 플래그
+  # 판정(`^-`)에서 벗어난다(hard-zero 사각). 실제 grep은 이 인용 형태를 따옴표 없는 플래그와
+  # 동일하게 실행한다(bash ANSI-C quoting). 옵션 두 글자는 런타임 조립(리터럴로 적으면 이 파일
+  # 자신이 [QV]에 걸린다).
+  qv="-q""v"
+  printf '%s\n' \
+    '@test "qv absence ansi-c quoted flag" {' \
+    "  grep \$'${qv}' TOKEN /some/file" \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_qv_ansic.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_qv_ansic.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[QV\]'
+}
+
 @test "the state machine reaches 0-column function bodies, not just @test bodies" {
   # 착지 전 검출기는 `^@test … {`로만 상태에 들어가서, 도메인에 있는 파일이어도 setup()·헬퍼
   # 본문은 전부 판정 밖이었다(그 갭을 가드 헤더가 「부재-단언 클래스를 얹을 때의 몫」으로 계상해

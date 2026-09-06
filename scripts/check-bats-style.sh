@@ -412,6 +412,10 @@ function qv_tokenize(s, tok,   i,c,q1,q2,cur,n){
   q1=0; q2=0; cur=""; n=0
   for(i=1;i<=length(s);i++){
     c=substr(s,i,1)
+    # reg13c-fn-bats-style-3 — ANSI-C 인용(`$'…'`/`$"…"`)의 `$`는 토큰에 남고 뒤따르는 따옴표만
+    # 토글돼(`$-qv` 꼴) 플래그 판정(`^-`)에서 벗어났다. `$` 다음이 바로 따옴표면 그 `$`만 건너뛰고
+    # 따옴표는 정상 토글 경로로 넘긴다(신설 상태 없음, 기존 q1/q2 토글 재사용).
+    if(c=="$" && (substr(s,i+1,1)=="'" || substr(s,i+1,1)=="\"")) continue
     if(c=="'" && q2==0){ q1=1-q1; continue }
     if(c=="\"" && q1==0){ q2=1-q2; continue }
     if((c==" " || c=="\t") && q1==0 && q2==0){
