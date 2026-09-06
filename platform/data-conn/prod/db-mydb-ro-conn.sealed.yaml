@@ -1,0 +1,14 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: db-mydb-ro-conn
+  namespace: prod
+spec:
+  encryptedData:
+    MYDB_RO_DATABASE_URL: AgBVJ+Wo7qSzklEKmjvbG2O+H/OGGwWW2QhHiJIZtjoVdk3zPkbM0hh+YBe8zo2aYQVmvEz3f+og+l8YMoUeupcIZQL/8rewpiaxvq1l2vSvcsmaeA9AYVCzgZbUQ4IEVpuS7X3RM7f3GnArOA+C9m/AZBrq96UbKJcFk9URTuNZwRKOBsxlWCgY1DKwo5KhTgWBIhkwLO/xf9EPunjSqbWH8FfXVNs34Hp1XlgGipdYBGzZvFjezHueCHMmVDFNqpKylW4Uy9DeXHEAFJDvlvVwGaHtcBdkJk4KxSNN2upwZeeqYJ8VQ8VRfvSGMCodmnHX9B08UYgvyNGraifVXa5kCvTgylagNsz9WV0lXHFa4mZhJQvrvfTINtpj/T9jOGJSk0R7BTpvPMycdhLHpOoJmT/zesZzfbM87D7ObE0FNodPi88LDOoqce2TTXleXcYFKTbg1yyjHKi9hWog/JZ3zzK2xBSpoGWicAQCyXVBOcqIAe/4ZWVZFi5PXXh+UV5oFKOFsrpnqYeJKHtb4l5FyE1dyTB/CmrrCZ3EGJcA4mcdI4mdOrIs+k6KZfZtEnapkoaAbAm8VOVOIY1vWRCk6wMQOFtmuI8OPIGyn0/a2DnE/FHyF5kc00Iag48XcczYmFulkjhNPBV8RWmiMmkwQALBr0AoDe4RfdeZPIEJ+G9wftjP/ulNc20EOjC2Qn5rAebNELgh3K4EiAVbiipW8Lh5t19Kml+ZS6Jv6eXmU7PnasB669thp4+uD0XfmAzbqrxqBrw3XWJFhMgRzke4VADx0dQGPAzNb7EMqiQfdnggUnt2OVeZjlC4bWW2
+  template:
+    metadata:
+      name: db-mydb-ro-conn
+      namespace: prod
+    type: Opaque

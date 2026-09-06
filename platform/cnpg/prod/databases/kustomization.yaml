@@ -11,3 +11,6 @@ resources:
   - trip-mate.yaml
   - db-trip-mate-owner.sealed.yaml
   - db-trip-mate-ro.sealed.yaml
+  - mydb.yaml
+  - db-mydb-owner.sealed.yaml
+  - db-mydb-ro.sealed.yaml
