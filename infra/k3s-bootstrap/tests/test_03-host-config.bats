@@ -484,12 +484,17 @@ case " \$* " in
 esac
 echo "2: wlo1    inet ${K3S_NODE_IP}/24 brd 192.168.117.255 scope global dynamic wlo1"
 EOF
+  t0="$(date +%s)"
   _apply
   [ "$status" -eq 0 ]
   printf '%s' "$output" | grep -qF -- '복귀 확인'
   # 프로브가 3회 돌았다(빈 출력 2회 + 주소 1회) — 대기 루프가 없으면 0회, 첫 프로브에서 끝나면 1회다.
   [ "$(cat "$SB/ip.probe")" -eq 3 ]
   printf '%s' "$output" | grep -qF -- '2초 대기'
+  # 🔴 반복 횟수와 문자열만으로는 "기다렸다"가 증언되지 않는다 — `sleep 1`을 `:`로 바꾼 busy-loop도
+  #    위 세 단언을 전부 통과한다(13라운드 reg13-b2-domain-tests-1 실측: 35/35 초록). 경과 시간 하한이
+  #    실시간 대기의 유일한 증인이다: 프로브 2회 부재 = 폴링 간격 2회 = 최소 2초.
+  [ "$(( $(date +%s) - t0 ))" -ge 2 ]
 }
 
 @test "apply fails loudly when the pinned IP does not return within the wait budget (a silent exit 0 hands the gap to host-preflight)" {
@@ -500,10 +505,13 @@ EOF
   _sandbox
   printf '#!/usr/bin/env bash\necho "  3 wlo1 wlan routable configuring"\n' > "$SB/bin/networkctl"
   export HOSTCFG_NET_WAIT_S=2
+  t0="$(date +%s)"
   _apply
   [ "$status" -eq 1 ]
   printf '%s' "$output" | grep -qF -- '돌아오지 않았다'
   printf '%s' "$output" | grep -qF -- 'networkctl status wlo1'
+  # 상한만큼 **실제로** 기다린 뒤에야 FAIL했다 — busy-loop면 즉시 FAIL이라 이 하한이 red다(위 @test와 짝).
+  [ "$(( $(date +%s) - t0 ))" -ge "$HOSTCFG_NET_WAIT_S" ]
 }
 
 # ── files 백업 배선 (국면 B 선행 작업, 2026-08-19) ──────────────────────────────────────────
