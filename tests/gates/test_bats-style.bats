@@ -376,6 +376,20 @@ setup() {
   echo "$output" | grep -q '\[ABS-GIT\]'
 }
 
+@test "the same git-grep absence written as a one-liner semicolon-else-run idiom is still caught (reg13-a1-bats-guards-1)" {
+  # 같은 근본원인의 형제 — round12(reg-d-bats-style-last-2)가 `do`/`then`만 처방하고 `else`를
+  # 빠뜨렸다. `; else run …`도 abs_line 분해 뒤 세그먼트가 "else run git grep …"가 되어 앵커에
+  # 안 걸렸다. run/status를 @test 선언 줄이 아닌 본문 줄 하나에 같이 둔다(위 then 형제와 동형 —
+  # 선언 줄 자체에 두면 별개의 orthogonal 무증인 구멍과 섞여 else 수정 효과를 단독 검증 못한다).
+  printf '%s\n' \
+    '@test "git grep absence, one-liner else form" {' \
+    '  if false; then true; else run git grep -n TOKEN -- "*.yaml"; [ "$status" -eq 1 ]; fi' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_git_oneline_else.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_git_oneline_else.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-GIT\]'
+}
+
 @test "detector rejects a pipeline-terminal grep -qv (line-wise inversion is not absence)" {
   # ⚠️ 옵션 두 글자를 런타임에 조립한다 — 리터럴로 적으면 이 파일 자신이 [QV] 레인에 걸린다
   #    (같은 처방: tests/gates/lib/heredoc-marker.sh — 고치려는 함정이 테스트를 쓰는 동안 물린다).
@@ -456,6 +470,22 @@ setup() {
     '}' > "$BATS_TEST_TMPDIR/test_abs_qv_quoted_pipe_ok.bats"
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_qv_quoted_pipe_ok.bats"
   [ "$status" -eq 0 ]
+}
+
+@test "a quoted trailing hash does not truncate a real QV finding on the same line (abs_strip quote-aware, reg13-a1-bats-guards-2 sibling)" {
+  # 형제 전수 열거 — check-bats-accounting.sh:121 NOCOMMENT_AWK와 같은 q1/q2 트레일링-주석-스트립
+  # 관용구가 이 파일의 abs_strip(244행)에도 있는데, 그 quote-aware 분기 자체를 겨냥한 증인이
+  # 없었다(뮤테이션 실증: q1/q2 토글을 지워 순수 '공백 뒤 #는 무조건 주석'으로 되돌려도 이 파일의
+  # 61/61이 전건 green). 따옴표 안 `#`가 truncate하면 **같은 줄**의 실제 [QV] 위반이 통째로
+  # 사라지는 자리로 그 갭을 고정한다. `-qv`는 런타임 조립(리터럴로 적으면 이 파일 자신이 걸린다).
+  qv="-q""v"
+  printf '%s\n' \
+    '@test "quoted trailing hash sibling witness" {' \
+    "  x=\"value # not a comment\"; echo \"\$out\" | grep ${qv} TOKEN" \
+    '}' > "$BATS_TEST_TMPDIR/test_absstrip_quoted_hash.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absstrip_quoted_hash.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[QV\]'
 }
 
 @test "the state machine reaches 0-column function bodies, not just @test bodies" {
@@ -557,6 +587,31 @@ setup() {
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_run_arg_var_eq.bats"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '\[SETCAP\]'
+}
+
+@test "a bracket-test-shaped substring inside an echo string literal does not smuggle in a false cardinality predicate ([SETCAP] negative, reg13-a2-ops-infra-1)" {
+  # setcap_hit의 수 등식 술어가 종료 앵커(`]`)만 요구하고 선행 오프닝 `[`을 요구하지 않으면, echo
+  # 진단 메시지 문자열 리터럴 안의 장식 텍스트(`"… -eq 5 ] for context"`)도 진짜 bracket-test로
+  # 오인된다 — 부분문자열 fail-open이 SETCAP 자신에게 재발(비평가 실증 PoC).
+  printf '%s\n' \
+    '@test "EVERY widget in the set is present" {' \
+    '  echo "diagnostic: expected total -eq 5 ] for context"' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_bracket_substring.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_bracket_substring.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[SETCAP\]'
+}
+
+@test "a command-substitution left operand still satisfies the cardinality predicate after the opening-bracket anchor (reg13-a2-ops-infra-1)" {
+  # 위 픽스처의 처방(선행 오프닝 `[` 요구)이 좌변을 식별자로만 좁히면, 이 레포의 실 관용구
+  # `[ "$(… | wc -l)" -eq N ]`(예: infra/_tests/test_tf_static.bats·tests/test_dr-drill.bats 등
+  # 8곳 — 자기-스캔 실측 회귀)가 새 [SETCAP] red가 된다. `$(...)` 갈래를 잠근다.
+  printf '%s\n' \
+    '@test "the widget set has exactly the expected members" {' \
+    '  [ "$(echo hi | wc -l)" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_cmdsub_eq.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_cmdsub_eq.bats"
+  [ "$status" -eq 0 ]
 }
 
 @test "the grep -qxF/-qx structural-equality idiom satisfies the cardinality predicate ([SETCAP] positive, traps-ops-2)" {
@@ -682,6 +737,27 @@ setup() {
   echo "$output" | grep -q '\[ABS-REC\]'
 }
 
+@test "a quoted alternation inside a single-grep bash -c body is not mistaken for a real pipe (reg13-d-bats-style-lanes-1)" {
+  # ⚠️ 착지 전: F3의 파이프 탐지(`body ~ /\|/`)가 quote-aware하지 않아, 홑따옴표 알터네이션
+  #    패턴(`"TOKEN=|OTHER="`)의 `|`만으로도 bashc_pipe=1이 서서 -ne 0 철자 면제(REC와 같은
+  #    floor∧양성대조 요구)를 받았다 — 실제로는 파이프가 없는 단일 grep이라 rc 2(부재/읽기불가)가
+  #    -ne 0을 만족시켜도 무증인이었다. floor+pc를 갖춘 이 픽스처는 mask_pipe(273행) 적용 전엔
+  #    rc 0(무검출), 적용 후엔 [ABS] 스테일 철자로 rc 1이다.
+  printf '%s\n' \
+    'setup() {' \
+    '  [ -d "$TREE" ]' \
+    '}' \
+    '@test "quoted alternation single grep bash -c absence" {' \
+    "  run bash -c 'grep -qE \"ANCHOR=|OTHER=\" \"\$1\"' _ \"\$TREE\"" \
+    '  [ "$status" -eq 0 ]' \
+    "  run bash -c 'grep -qE \"TOKEN=|OTHER=\" \"\$1\"' _ \"\$TREE\"" \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_bashc_quotedalt.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_bashc_quotedalt.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS\]'
+}
+
 @test "the bash -c pipe form passes once a floor and a positive control are present" {
   printf '%s\n' \
     'setup() {' \
@@ -790,6 +866,41 @@ setup() {
     '  [ "$status" -ne 0 ]' \
     '}' > "$BATS_TEST_TMPDIR/test_absexec_fp.bats"
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_fp.bats"
+  [ "$status" -eq 0 ]
+}
+
+@test "an exec target followed by a grep pipe filter is still caught, not excluded wholesale (exec-target-grep-exclusion)" {
+  # ⚠️ 착지 전: exec_target의 grep 배제가 "문장 어딘가에 grep"이면 통째로 배제했다 — `run
+  #    scripts/x.sh --bad | grep -q whatever` 관용구 전체가 hard-zero 게이트의 사각이었다
+  #    (비평가 실증, 13라운드: before/after 0→1, grep 파이프 추가/제거로 재현). mask_pipe로
+  #    가린 뒤 첫 세그먼트에만 grep 배제를 걸어, 실행물이 head이고 grep이 뒤따르는 필터인
+  #    이 관용구가 [ABS-EXEC]로 잡히게 한다.
+  printf '%s\n' \
+    '@test "exec target with grep pipe filter is a finding" {' \
+    '  run scripts/check-skeleton.sh --bad-flag | grep -q whatever' \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_grepfilter.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_grepfilter.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-EXEC\]'
+}
+
+@test "a plain run grep call stays [ABS]'s denominator, not [ABS-EXEC]'s (positive control, exec-target-grep-exclusion)" {
+  # 착지 지시 — 정당한 `run grep … <경로>` 형태는 abs_target([ABS] 레인)의 분모이지 exec가
+  # 아니므로 그 배제는 유지돼야 한다. exec_target 첫 줄의 abs_target(s) 호출이 이미 이 형태를
+  # 배제하지만(mask_pipe 좁히기와 무관한 별도 관문), 그 관문이 이번 좁히기로 깨지지 않았음을
+  # 이 대조가 고정한다 — [ABS-EXEC]는 절대 안 나오고, floor+양성대조가 있으면 [ABS]도 안 난다.
+  printf '%s\n' \
+    'setup() {' \
+    '  [ -d "$TREE" ]' \
+    '}' \
+    '@test "plain run grep stays ABS denominator" {' \
+    '  run grep -q ANCHOR "$TREE/some-file"' \
+    '  [ "$status" -eq 0 ]' \
+    '  run grep -q TOKEN "$TREE/some-file"' \
+    '  [ "$status" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_plaingrep_fp.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_plaingrep_fp.bats"
   [ "$status" -eq 0 ]
 }
 

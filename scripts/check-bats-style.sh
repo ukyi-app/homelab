@@ -302,7 +302,10 @@ function abs_target(s,   p,body,end){
     if (end > 0) {
       body = substr(body, 1, end - 1)
       if (body !~ /<<</) {
-        if (body ~ /\|/) bashc_pipe = 1
+        # reg13-d-bats-style-lanes-1 — body 원문을 그대로 검사하면 홑따옴표 알터네이션 패턴(`"A|B"`)
+        # 의 `|`가 실파이프로 오인된다(quote-aware 아님). 273행 mask_pipe(QV 레인이 이미 쓰는 관용구)
+        # 를 재사용해 따옴표 안 `|`를 가린 뒤에만 검사한다 — 신설 함수 없음.
+        if (mask_pipe(body) ~ /\|/) bashc_pipe = 1
         if (body ~ /^(grep|egrep|fgrep)[ \t]/) return 1
         if (body ~ /^git[ \t]+(-C[ \t]+[^ \t]+[ \t]+)?grep[ \t]/) return 2
       }
@@ -334,12 +337,22 @@ function abs_rec(s,kind,   q,n,i,a,pat){
 # `cd … && bun …`·`bash -c "…"`처럼 감싸도 경로 리터럴이 문장 어딘가에 있으면 잡는다 — 정적
 # 판별이라 피연산자 동일성은 안 본다(`:48` 규약과 같다. `$VAR/scripts/x.sh`처럼 변수 접두라도
 # 리터럴 부분만 있으면 대상이다).
-function exec_target(s){
+function exec_target(s,   seg,segn,first){
   if (abs_target(s)) return 0
   # 홑따옴표 bash -c만 [ABS] 대상으로 승격되므로(F3 분모 규약), 겹따옴표로 감싼 grep 파이프는
   # `abs_target`이 못 보고 여기로 샌다 — 경로 리터럴이 grep의 **피연산자**(실행 대상이 아니다)인
   # 자리라 이중 배제한다(실측: test_image-ownership.bats:387 `bash -c "grep … '$ROOT/scripts/…'"`).
-  if (s ~ /(^|[^A-Za-z0-9_])(grep|egrep|fgrep)[ \t]/) return 0
+  # ⚠️ exec-target-grep-exclusion(비평가 실증, 13라운드) — 예전엔 "문장 어딘가에 grep"이면
+  #    통째로 배제해, `run scripts/x.sh --bad | grep -q whatever`처럼 grep이 **뒤따르는 필터**인
+  #    진짜 실행물 호출까지 분모에서 빠졌다(before/after: 0→1, grep 파이프 추가/제거로 재현).
+  #    mask_pipe(273행, QV 레인과 동일 관용구)로 따옴표 안 `|`를 가린 뒤 첫(top-level) 파이프
+  #    세그먼트에만 grep 판정을 건다 — 그 세그먼트에 grep이 없으면 배제하지 않는다. 겹따옴표
+  #    bash -c 래퍼는 내부 파이프가 따옴표 안이라 mask_pipe가 그대로 가려 첫 세그먼트가 전체
+  #    문장이 되고(실측: test_image-ownership.bats:387류 FP 대조 그대로 통과), 실행물 뒤 진짜
+  #    파이프는 첫 세그먼트 밖이라 배제되지 않는다.
+  segn=split(mask_pipe(s),seg,/\|\||&&|\|/)
+  first=seg[1]; gsub(/\002/,"|",first)
+  if (first ~ /(^|[^A-Za-z0-9_])(grep|egrep|fgrep)[ \t]/) return 0
   if (s ~ /(^|[^A-Za-z0-9_])scripts\/[A-Za-z0-9_.\/-]+\.sh/) return 1
   if (s ~ /(^|[^A-Za-z0-9_])tools\/[A-Za-z0-9_.\/-]+\.ts/) return 1
   if (s ~ /(^|[^A-Za-z0-9_])infra\/[A-Za-z0-9_.\/-]+\.sh/) return 1
@@ -437,8 +450,19 @@ function qv_seg(t,   n,a,i,seen,q,v,pos){
 #    없이 그대로 매치) + 대조 픽스처(run 인자 형태)는 여전히 불일치 확인.
 function setcap_hit(s){
   if (s ~ /[ \t]=[ \t]*"[^"]+"/) return 1
-  if (s ~ /-eq[ \t]+[0-9]+[ \t]*\]/) return 1
-  if (s ~ /-eq[ \t]+"?\$[A-Za-z_][A-Za-z0-9_]*"?[ \t]*\]/) return 1  # 자기유도(변수 우변) 등식
+  # reg13-a2-ops-infra-1 — 종료 앵커(`[ \t]*\]`)만으로는 부족하다: echo/printf 문자열 리터럴 안의
+  # 장식 텍스트(`"… -eq 5 ] for context"`)도 그 `]`에 걸려 진짜 bracket-test로 오인됐다(부분문자열
+  # fail-open이 SETCAP 자신에게 재발). 이 파일이 이미 쓰는 종료 앵커 관례를 대칭 확장해 선행
+  # 오프닝 `[`도 요구한다 — `[[ … ]]`은 내부 `[`가 매치되어 안전, quote-stripping 없이 신설
+  # 마스킹도 불요(va.corrected_fix — quote-stripping 사본은 jq/yq 인용 표현식 4개 양성을 역행시켜 기각).
+  # ⚠️ 좌변 연산자는 `$var` 리터럴만이 아니라 `$(...)` 커맨드 치환도 실 관용구다(레포 전역 8곳 —
+  # infra/_tests/test_tf_static.bats·platform/network-policies/prod/test_netpol.bats·
+  # tests/gates/test_cloudflare-entitlement.bats(2)·tests/gates/test_gate-secret-guard.bats·
+  # tests/test_dr-drill.bats·tests/test_pg-image-pin.bats — 전체 자기-스캔으로 실측한 신규 회귀).
+  # 좌변을 식별자 전용으로 좁히면 이 8곳이 전부 새 [SETCAP] red가 된다 — 그 회귀를 같은 커밋에서
+  # 닫기 위해 `\$\([^)]*\)`(중첩 괄호 없는 실 관용구 형태) 갈래를 더한다.
+  if (s ~ /\[[ \t]+"?(\$\([^)]*\)|\$?[A-Za-z_][A-Za-z0-9_]*)"?[ \t]+-eq[ \t]+[0-9]+[ \t]*\]/) return 1
+  if (s ~ /\[[ \t]+"?(\$\([^)]*\)|\$?[A-Za-z_][A-Za-z0-9_]*)"?[ \t]+-eq[ \t]+"?\$[A-Za-z_][A-Za-z0-9_]*"?[ \t]*\]/) return 1  # 자기유도(변수 우변) 등식
   if (s ~ /contains\(/) return 1
   if (s ~ /join\(","\)/) return 1
   if (s ~ /length[ \t]*==/) return 1
@@ -448,12 +472,13 @@ function setcap_hit(s){
 }
 # 한 문장 처리 — 루프 깊이 · [QV] · [SETCAP] 술어 · run/status 짝(ABS·ABS-EXEC 둘 다) · 증인 수집.
 function abs_stmt(s,   rec,qn,qsg,qi){
-  # 한 줄 for/if 관용구(`; do run …`/`; then run …`)는 abs_line의 `;` 분해 뒤 세그먼트가
-  # "do run …"/"then run …"가 되어 아래 run-인식 앵커(`^run[ \t]/`)에 안 걸린다 — `do`/`then`과
-  # `run`은 세미콜론이 아니라 공백으로만 이어지기 때문이다. 앵커 검사 전에 이 두 키워드 접두를
-  # 벗겨 run-인식·[ABS-EXEC]·조건 필터가 모두 재사용하는 이 지역변수 s 하나로 전부 해소한다
-  # (2026-09 정기 회귀 reg-d-bats-style-last-2, 12라운드 — 신설 함수 없음).
-  sub(/^(do|then)[ \t]+/,"",s)
+  # 한 줄 for/if 관용구(`; do run …`/`; then run …`/`; else run …`)는 abs_line의 `;` 분해 뒤
+  # 세그먼트가 "do run …"/"then run …"/"else run …"가 되어 아래 run-인식 앵커(`^run[ \t]/`)에
+  # 안 걸린다 — `do`/`then`/`else`와 `run`은 세미콜론이 아니라 공백으로만 이어지기 때문이다.
+  # 앵커 검사 전에 이 세 키워드 접두를 벗겨 run-인식·[ABS-EXEC]·조건 필터가 모두 재사용하는 이
+  # 지역변수 s 하나로 전부 해소한다(2026-09 정기 회귀 reg-d-bats-style-last-2, 12라운드가 do/then을
+  # 처방했으나 else를 빠뜨렸다 — reg13-a1-bats-guards-1이 else를 더한다. 신설 함수 없음).
+  sub(/^(do|then|else)[ \t]+/,"",s)
   # [SETCAP]은 위치·세그먼트 무관 — 스코프 안 어디서든 한 번 맞으면 그 스코프는 닫힌다.
   if (setcap_hit(s)) scpred[absscope]=1
   # [ABS-EXEC] W1 — 마찬가지로 위치 무관, 스코프 안 어디서든 한 번 맞으면 그 스코프는 증인을 진다.
