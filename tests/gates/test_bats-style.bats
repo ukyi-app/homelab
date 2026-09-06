@@ -376,6 +376,20 @@ setup() {
   echo "$output" | grep -q '\[ABS-GIT\]'
 }
 
+@test "the same git-grep absence written as a one-liner semicolon-else-run idiom is still caught (reg13-a1-bats-guards-1)" {
+  # 같은 근본원인의 형제 — round12(reg-d-bats-style-last-2)가 `do`/`then`만 처방하고 `else`를
+  # 빠뜨렸다. `; else run …`도 abs_line 분해 뒤 세그먼트가 "else run git grep …"가 되어 앵커에
+  # 안 걸렸다. run/status를 @test 선언 줄이 아닌 본문 줄 하나에 같이 둔다(위 then 형제와 동형 —
+  # 선언 줄 자체에 두면 별개의 orthogonal 무증인 구멍과 섞여 else 수정 효과를 단독 검증 못한다).
+  printf '%s\n' \
+    '@test "git grep absence, one-liner else form" {' \
+    '  if false; then true; else run git grep -n TOKEN -- "*.yaml"; [ "$status" -eq 1 ]; fi' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_git_oneline_else.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_git_oneline_else.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-GIT\]'
+}
+
 @test "detector rejects a pipeline-terminal grep -qv (line-wise inversion is not absence)" {
   # ⚠️ 옵션 두 글자를 런타임에 조립한다 — 리터럴로 적으면 이 파일 자신이 [QV] 레인에 걸린다
   #    (같은 처방: tests/gates/lib/heredoc-marker.sh — 고치려는 함정이 테스트를 쓰는 동안 물린다).

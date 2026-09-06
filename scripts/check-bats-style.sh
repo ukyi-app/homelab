@@ -451,12 +451,13 @@ function setcap_hit(s){
 }
 # 한 문장 처리 — 루프 깊이 · [QV] · [SETCAP] 술어 · run/status 짝(ABS·ABS-EXEC 둘 다) · 증인 수집.
 function abs_stmt(s,   rec,qn,qsg,qi){
-  # 한 줄 for/if 관용구(`; do run …`/`; then run …`)는 abs_line의 `;` 분해 뒤 세그먼트가
-  # "do run …"/"then run …"가 되어 아래 run-인식 앵커(`^run[ \t]/`)에 안 걸린다 — `do`/`then`과
-  # `run`은 세미콜론이 아니라 공백으로만 이어지기 때문이다. 앵커 검사 전에 이 두 키워드 접두를
-  # 벗겨 run-인식·[ABS-EXEC]·조건 필터가 모두 재사용하는 이 지역변수 s 하나로 전부 해소한다
-  # (2026-09 정기 회귀 reg-d-bats-style-last-2, 12라운드 — 신설 함수 없음).
-  sub(/^(do|then)[ \t]+/,"",s)
+  # 한 줄 for/if 관용구(`; do run …`/`; then run …`/`; else run …`)는 abs_line의 `;` 분해 뒤
+  # 세그먼트가 "do run …"/"then run …"/"else run …"가 되어 아래 run-인식 앵커(`^run[ \t]/`)에
+  # 안 걸린다 — `do`/`then`/`else`와 `run`은 세미콜론이 아니라 공백으로만 이어지기 때문이다.
+  # 앵커 검사 전에 이 세 키워드 접두를 벗겨 run-인식·[ABS-EXEC]·조건 필터가 모두 재사용하는 이
+  # 지역변수 s 하나로 전부 해소한다(2026-09 정기 회귀 reg-d-bats-style-last-2, 12라운드가 do/then을
+  # 처방했으나 else를 빠뜨렸다 — reg13-a1-bats-guards-1이 else를 더한다. 신설 함수 없음).
+  sub(/^(do|then|else)[ \t]+/,"",s)
   # [SETCAP]은 위치·세그먼트 무관 — 스코프 안 어디서든 한 번 맞으면 그 스코프는 닫힌다.
   if (setcap_hit(s)) scpred[absscope]=1
   # [ABS-EXEC] W1 — 마찬가지로 위치 무관, 스코프 안 어디서든 한 번 맞으면 그 스코프는 증인을 진다.
