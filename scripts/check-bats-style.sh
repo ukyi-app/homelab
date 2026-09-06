@@ -467,7 +467,14 @@ function qv_seg(t,   n,a,i,seen,q,v,pos){
 #    관례를 그대로 따른다 — 신설 취약점을 지금 막는다). 앵커를 더한 뒤 실측: 517행 두 곳(득실
 #    없이 그대로 매치) + 대조 픽스처(run 인자 형태)는 여전히 불일치 확인.
 function setcap_hit(s){
-  if (s ~ /[ \t]=[ \t]*"[^"]+"/) return 1
+  # reg13c-fn-bats-style-2 — 이 문자열 등식 술어는 traps-ops-2(`=` 앞 공백 요구)까지만 좁혀져
+  # 있었다: 464-465행 수 등식 브랜치와 달리 bracket-test 여는 `[` 앵커가 없어, echo 진단문
+  # 안의 우연한 ` = "…"` 텍스트(예 `"expected = \"http\" for context"`)도 진짜 bracket-test
+  # 등식으로 오인됐다(reg13-a2-ops-infra-1이 수 등식 브랜치만 고치고 이 형제를 놓쳤다 — 비평가
+  # 실증). 처방은 464-465행이 이미 쓰는 좌변 캐리브아웃(`$(...)` 커맨드 치환 ∨ 식별자)을 그대로
+  # 재사용하는 것 — 순수 식별자로만 좁히면 464-465행이 이미 겪은 `$(yq …)` 좌변 배제 회귀가
+  # 문자열 등식 갈래에서 재현된다(tools/tests/test_reusable-app-build.bats:57,79,89 등 8곳).
+  if (s ~ /\[[ \t]+"?(\$\([^)]*\)|\$?[A-Za-z_][A-Za-z0-9_]*)"?[ \t]+=[ \t]*"[^"]+"[ \t]*\]/) return 1
   # reg13-a2-ops-infra-1 — 종료 앵커(`[ \t]*\]`)만으로는 부족하다: echo/printf 문자열 리터럴 안의
   # 장식 텍스트(`"… -eq 5 ] for context"`)도 그 `]`에 걸려 진짜 bracket-test로 오인됐다(부분문자열
   # fail-open이 SETCAP 자신에게 재발). 이 파일이 이미 쓰는 종료 앵커 관례를 대칭 확장해 선행

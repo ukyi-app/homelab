@@ -540,6 +540,35 @@ setup() {
   echo "$output" | grep -q '\[SETCAP\]'
 }
 
+@test "an echo string literal containing a bracket-test-shaped string-equality substring does not smuggle in a false cardinality predicate ([SETCAP] negative, reg13c-fn-bats-style-2)" {
+  # reg13-a2-ops-infra-1(#664)은 수 등식 브랜치(현재 475-476행)에만 여는 `[` 앵커를 추가했다 —
+  # 같은 파일의 문자열 등식 브랜치(traps-ops-2가 `=` 앞 공백만 요구)는 형제 열거에서 놓쳤다.
+  # 그 결과 echo 진단문 안 우연한 ` = "…"` 텍스트(bracket-test 좌우 앵커 없음)도 여전히 진짜
+  # bracket-test 등식으로 오인된다(비평가 실증 PoC 그대로).
+  printf '%s\n' \
+    '@test "exactly the expected worker ports" {' \
+    '  run scripts/check-skeleton.sh --bad-flag' \
+    "  echo 'diagnostic: expected = \"http\" for context'" \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_str_echo.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_str_echo.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[SETCAP\]'
+}
+
+@test "a command-substitution left operand still satisfies the string-equality cardinality predicate after the opening-bracket anchor (reg13c-fn-bats-style-2)" {
+  # 위 픽스처의 처방(여는 `[` 요구)이 좌변을 순수 식별자로만 좁히면, 464-465행(수 등식)이 이미
+  # 겪고 고친 것과 같은 급의 회귀가 문자열 등식 갈래에서 재현된다 — 이 레포의 실 관용구
+  # `[ "$(yq -r … "$F")" = "…" ]`(tools/tests/test_reusable-app-build.bats:57,79,89 등)가 새
+  # [SETCAP] red가 된다. `$(...)` 갈래를 잠근다.
+  printf '%s\n' \
+    '@test "the widget set has exactly the expected members" {' \
+    '  [ "$(yq -r ".widgets" /some/file)" = "true" ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_str_cmdsub.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_str_cmdsub.bats"
+  [ "$status" -eq 0 ]
+}
+
 @test "a numeric -eq inside a run command's CLI argument does not smuggle in a false cardinality predicate ([SETCAP] negative, reg-c-ledger-rows-1)" {
   # 착지 전: setcap_hit의 수 등식 술어(`-eq[ \t]+[0-9]+`)는 bracket-test 좌변을 요구하지 않아,
   # 단언과 무관한 `run` 인자 문자열(`--retry-eq 5`)에 우연히 들어간 `-eq N` 텍스트만으로도 이
