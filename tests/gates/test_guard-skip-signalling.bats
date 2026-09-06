@@ -97,8 +97,14 @@ fixture_suite() {   # $1: 하위 디렉토리명
   #    있는 자리다. 실측 2026-09-03: `mv scripts/check-skip-signalling.sh` 후 31건 중 13건이 초록으로
   #    남았고 대상 의존 레인 중 이 레인이 그 하나였다. `|| true` 자체는 **유지한다** — 정상 트리에서
   #    grep은 0건 매치로 rc 1이라 걷으면 set -e가 게이트를 red로 만든다(이 레포의 표준 관용구).
+  # 81(reg13-e-carryover-1) 이후: `IFS='' read -r -d '' VAR <<EOF ... || true`(quote-aware 스트립
+  # 도입, check-bats-accounting.sh·check-bats-style.sh 등 5개 형제 가드와 동일 관용구)의 `|| true`는
+  # 다른 종류다 — `read -d ''`는 NUL 구분자를 못 찾고 EOF에 닿아 **항상** rc 1로 끝나는 셸 고유
+  # 동작이라 검출기 사망 은폐가 아니다. 그 opener 줄만 구조적으로 제외한다(변수명 손 나열 아님).
   [ -f "$ROOT/scripts/check-skip-signalling.sh" ]
-  n="$(sed 's|^[[:space:]]*#.*||' "$ROOT/scripts/check-skip-signalling.sh" | grep -cF '|| true' || true)"
+  n="$(sed 's|^[[:space:]]*#.*||' "$ROOT/scripts/check-skip-signalling.sh" \
+    | grep -vE "read[[:space:]]+-r[[:space:]]+-d[[:space:]]+''.*<<" \
+    | grep -cF '|| true' || true)"
   [ "$n" -eq 0 ]
 }
 
@@ -138,6 +144,53 @@ fixture_suite() {   # $1: 하위 디렉토리명
   printf '%s\n' '# echo "SKIP: fake: 규약을 설명하는 주석일 뿐"' 'true' > "$BATS_TEST_TMPDIR/cmt.sh"
   run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/cmt.sh"
   [ "$status" -eq 0 ]
+}
+
+# 81(reg13-e-carryover-1) — scan_one의 스트립이 행두 주석 전용이라 실코드 줄에 붙은 trailing
+# 주석 속 예시 문구를 헬퍼 우회 위반으로 오판했다(quote-aware 스트립으로 상환, 형제 관용구:
+# check-bats-accounting.sh NOCOMMENT_AWK). 아래 4건은 처방 전 red(과탐 FAIL)였다.
+@test "a SKIP marker example inside a shell trailing comment is not a violation" {
+  printf '%s\n' 'local x=1  # example: echo "SKIP: guard: reason" style text in a trailing comment' \
+    > "$BATS_TEST_TMPDIR/trailing-skip.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/trailing-skip.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "an exit 4 example inside a shell trailing comment is not a violation" {
+  printf '%s\n' 'local x=1  # example: exit 4 style code in a trailing comment' \
+    > "$BATS_TEST_TMPDIR/trailing-exit.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/trailing-exit.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "a SKIP marker example inside a TypeScript trailing comment is not a violation" {
+  printf '%s\n' 'const x = 1; // example: console.log("SKIP: guard: reason") style text in a trailing comment' \
+    > "$BATS_TEST_TMPDIR/trailing-skip.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/trailing-skip.ts"
+  [ "$status" -eq 0 ]
+}
+
+@test "a process.exit(4) example inside a TypeScript trailing comment is not a violation" {
+  printf '%s\n' 'const x = 1; // example: process.exit(4) style code in a trailing comment' \
+    > "$BATS_TEST_TMPDIR/trailing-exit.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/trailing-exit.ts"
+  [ "$status" -eq 0 ]
+}
+
+# positive 대조 — 따옴표 안의 `#`/`//`는 주석이 아니다. quote-aware 스트립이 문자열 리터럴
+# 안쪽을 걷어내면 리터럴 뒤에 오는 실 위반이 무증인이 된다(과잉 스트립 회귀 방지).
+@test "a quoted hash in a shell string literal is not treated as a comment (exit 4 still caught)" {
+  printf '%s\n' 'echo "exit 4 # not a comment"' > "$BATS_TEST_TMPDIR/quoted-hash.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/quoted-hash.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "guard_skip"
+}
+
+@test "a quoted double-slash in a TypeScript string literal is not treated as a comment (exit(4) still caught)" {
+  printf '%s\n' 'const url = "https://example.com"; process.exit(4);' > "$BATS_TEST_TMPDIR/quoted-slash.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/quoted-slash.ts"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "skip()"
 }
 
 @test "a Makefile help tail mentioning SKIP is not a false positive" {
