@@ -258,6 +258,16 @@ EOF
   # (`configured`) — 대기 분기를 흔드는 @test가 이 파일을 덮어쓴다.
   printf '#!/usr/bin/env bash\necho "  3 wlo1 wlan routable configured"\n' > "$SB/bin/networkctl"
   chmod +x "$SB/bin/networkctl"
+  # `sleep` 시임 — 대기 루프의 폴링 간격을 인자로 기록한 뒤 **실제로 잔다**(/bin/sleep). 초 단위 `date +%s`
+  # 차만으로는 절반 대기(`sleep 0.5` → 실경과 ~1.0초)도 초 경계 반올림으로 15회 중 4회 통과했다(13c
+  # reg13c-a-landing-hunks-3). 기록된 인자 등식(호출 수 · 값 1)이 결정적 증인이고, 경과 시간 하한은 보조다.
+  # `date +%s%N`은 macOS date에 없어(owner 머신) 쓰지 않는다.
+  cat > "$SB/bin/sleep" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$1" >> "$SB/sleep.calls"
+exec /bin/sleep "\$@"
+EOF
+  chmod +x "$SB/bin/sleep"
 }
 _apply() { REC_LOG="$REC_LOG" PATH="$SB/bin:$PATH" HOSTCFG_ROOT="$FX" HOSTCFG_RUN="$SB/bin/rec" \
              run "$BOOTSTRAP_DIR/host-config.sh" --apply; }
@@ -495,6 +505,9 @@ EOF
   #    위 세 단언을 전부 통과한다(13라운드 reg13-b2-domain-tests-1 실측: 35/35 초록). 경과 시간 하한이
   #    실시간 대기의 유일한 증인이다: 프로브 2회 부재 = 폴링 간격 2회 = 최소 2초.
   [ "$(( $(date +%s) - t0 ))" -ge 2 ]
+  # 폴링 간격 등식 — 프로브 3회 사이에 sleep 정확히 2회, 인자는 전부 1(절반 대기·busy-loop 둘 다 red).
+  [ "$(grep -c '' "$SB/sleep.calls")" -eq 2 ]
+  [ "$(LC_ALL=C sort -u "$SB/sleep.calls")" = "1" ]
 }
 
 @test "apply fails loudly when the pinned IP does not return within the wait budget (a silent exit 0 hands the gap to host-preflight)" {
@@ -512,6 +525,9 @@ EOF
   printf '%s' "$output" | grep -qF -- 'networkctl status wlo1'
   # 상한만큼 **실제로** 기다린 뒤에야 FAIL했다 — busy-loop면 즉시 FAIL이라 이 하한이 red다(위 @test와 짝).
   [ "$(( $(date +%s) - t0 ))" -ge "$HOSTCFG_NET_WAIT_S" ]
+  # 상한 2초 = sleep 1 × 2회 — 인자 등식으로 간격까지 닫는다.
+  [ "$(grep -c '' "$SB/sleep.calls")" -eq "$HOSTCFG_NET_WAIT_S" ]
+  [ "$(LC_ALL=C sort -u "$SB/sleep.calls")" = "1" ]
 }
 
 # ── files 백업 배선 (국면 B 선행 작업, 2026-08-19) ──────────────────────────────────────────
