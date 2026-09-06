@@ -869,6 +869,41 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "an exec target followed by a grep pipe filter is still caught, not excluded wholesale (exec-target-grep-exclusion)" {
+  # ⚠️ 착지 전: exec_target의 grep 배제가 "문장 어딘가에 grep"이면 통째로 배제했다 — `run
+  #    scripts/x.sh --bad | grep -q whatever` 관용구 전체가 hard-zero 게이트의 사각이었다
+  #    (비평가 실증, 13라운드: before/after 0→1, grep 파이프 추가/제거로 재현). mask_pipe로
+  #    가린 뒤 첫 세그먼트에만 grep 배제를 걸어, 실행물이 head이고 grep이 뒤따르는 필터인
+  #    이 관용구가 [ABS-EXEC]로 잡히게 한다.
+  printf '%s\n' \
+    '@test "exec target with grep pipe filter is a finding" {' \
+    '  run scripts/check-skeleton.sh --bad-flag | grep -q whatever' \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_grepfilter.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_grepfilter.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-EXEC\]'
+}
+
+@test "a plain run grep call stays [ABS]'s denominator, not [ABS-EXEC]'s (positive control, exec-target-grep-exclusion)" {
+  # 착지 지시 — 정당한 `run grep … <경로>` 형태는 abs_target([ABS] 레인)의 분모이지 exec가
+  # 아니므로 그 배제는 유지돼야 한다. exec_target 첫 줄의 abs_target(s) 호출이 이미 이 형태를
+  # 배제하지만(mask_pipe 좁히기와 무관한 별도 관문), 그 관문이 이번 좁히기로 깨지지 않았음을
+  # 이 대조가 고정한다 — [ABS-EXEC]는 절대 안 나오고, floor+양성대조가 있으면 [ABS]도 안 난다.
+  printf '%s\n' \
+    'setup() {' \
+    '  [ -d "$TREE" ]' \
+    '}' \
+    '@test "plain run grep stays ABS denominator" {' \
+    '  run grep -q ANCHOR "$TREE/some-file"' \
+    '  [ "$status" -eq 0 ]' \
+    '  run grep -q TOKEN "$TREE/some-file"' \
+    '  [ "$status" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_plaingrep_fp.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_plaingrep_fp.bats"
+  [ "$status" -eq 0 ]
+}
+
 @test "the default-mode summary announces the [ABS-EXEC] ratchet" {
   run bash "$ROOT/scripts/check-bats-style.sh"
   [ "$status" -eq 0 ]

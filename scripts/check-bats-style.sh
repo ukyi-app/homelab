@@ -337,12 +337,22 @@ function abs_rec(s,kind,   q,n,i,a,pat){
 # `cd … && bun …`·`bash -c "…"`처럼 감싸도 경로 리터럴이 문장 어딘가에 있으면 잡는다 — 정적
 # 판별이라 피연산자 동일성은 안 본다(`:48` 규약과 같다. `$VAR/scripts/x.sh`처럼 변수 접두라도
 # 리터럴 부분만 있으면 대상이다).
-function exec_target(s){
+function exec_target(s,   seg,segn,first){
   if (abs_target(s)) return 0
   # 홑따옴표 bash -c만 [ABS] 대상으로 승격되므로(F3 분모 규약), 겹따옴표로 감싼 grep 파이프는
   # `abs_target`이 못 보고 여기로 샌다 — 경로 리터럴이 grep의 **피연산자**(실행 대상이 아니다)인
   # 자리라 이중 배제한다(실측: test_image-ownership.bats:387 `bash -c "grep … '$ROOT/scripts/…'"`).
-  if (s ~ /(^|[^A-Za-z0-9_])(grep|egrep|fgrep)[ \t]/) return 0
+  # ⚠️ exec-target-grep-exclusion(비평가 실증, 13라운드) — 예전엔 "문장 어딘가에 grep"이면
+  #    통째로 배제해, `run scripts/x.sh --bad | grep -q whatever`처럼 grep이 **뒤따르는 필터**인
+  #    진짜 실행물 호출까지 분모에서 빠졌다(before/after: 0→1, grep 파이프 추가/제거로 재현).
+  #    mask_pipe(273행, QV 레인과 동일 관용구)로 따옴표 안 `|`를 가린 뒤 첫(top-level) 파이프
+  #    세그먼트에만 grep 판정을 건다 — 그 세그먼트에 grep이 없으면 배제하지 않는다. 겹따옴표
+  #    bash -c 래퍼는 내부 파이프가 따옴표 안이라 mask_pipe가 그대로 가려 첫 세그먼트가 전체
+  #    문장이 되고(실측: test_image-ownership.bats:387류 FP 대조 그대로 통과), 실행물 뒤 진짜
+  #    파이프는 첫 세그먼트 밖이라 배제되지 않는다.
+  segn=split(mask_pipe(s),seg,/\|\||&&|\|/)
+  first=seg[1]; gsub(/\002/,"|",first)
+  if (first ~ /(^|[^A-Za-z0-9_])(grep|egrep|fgrep)[ \t]/) return 0
   if (s ~ /(^|[^A-Za-z0-9_])scripts\/[A-Za-z0-9_.\/-]+\.sh/) return 1
   if (s ~ /(^|[^A-Za-z0-9_])tools\/[A-Za-z0-9_.\/-]+\.ts/) return 1
   if (s ~ /(^|[^A-Za-z0-9_])infra\/[A-Za-z0-9_.\/-]+\.sh/) return 1
