@@ -71,6 +71,36 @@ setup() {
   echo "$output" | grep -q '\[BB\]'
 }
 
+@test "a MIDDLE [[ ]] is not hidden behind an if/then/fi one-liner's then keyword (bbseg-do-then-else)" {
+  # ⚠️ 착지 전: [NEG]/[BB] 핵심 판정(메인 패턴-액션 블록의 bbseg 루프)은 abs_stmt와 달리
+  #    do/then/else 접두 스트립이 없었다 — `if …; then [[ … ]]; fi` 원라이너로 감싸면 세미콜론
+  #    분해 뒤 세그먼트가 "then [[ … ]]"가 되어 `^\[\[` 앵커에 안 걸려 hard-zero 클래스가 침묵
+  #    통과했다(비평가 실증 — '15개 함수' 프레이밍이 named function이 아닌 이 자리를 놓쳤다).
+  printf '%s\n' \
+    '@test "if-then-fi one-liner hides a middle [[ ]] behind then" {' \
+    '  run echo hi' \
+    '  if [ -n "$output" ]; then [[ "$output" == *zzz* ]]; fi' \
+    '  [ "$status" -eq 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_bb_then_hidden.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_bb_then_hidden.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[BB\]'
+}
+
+@test "a MIDDLE negation is not hidden behind an if/then/fi one-liner's then keyword (bbseg-do-then-else NEG sibling)" {
+  # 같은 근본원인의 NEG 형제 — `; then ! …`도 세그먼트가 "then ! …"가 되어 `^![ \t]` 앵커에
+  # 안 걸렸다. strip_dte가 abs_stmt·bbseg 두 자리에서 같은 리터럴을 공유하는지 이 대조가 함께 잠근다.
+  printf '%s\n' \
+    '@test "if-then-fi one-liner hides a middle negation behind then" {' \
+    '  run echo hi' \
+    '  if [ -n "$output" ]; then ! echo "$output" | grep -q zzz; fi' \
+    '  [ "$status" -eq 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_neg_then_hidden.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_neg_then_hidden.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[NEG\]'
+}
+
 @test "a semicolon INSIDE a quoted literal on the last line is NOT split into a fake middle segment (false-positive control)" {
   # 세그먼트 분해가 따옴표를 안 가리면 `"x &amp; y"` 같은 리터럴의 `;`가 가짜 세그먼트 경계가 되어
   # 정당한 마지막-줄 부정(`! …`)의 앞부분만 뜯겨 [NEG]로 오탐한다(실측 회귀:
@@ -488,6 +518,23 @@ setup() {
   echo "$output" | grep -q '\[QV\]'
 }
 
+@test "detector catches a grep flag wrapped in ANSI-C quoting that is otherwise identical to the plain flag (reg13c-fn-bats-style-3)" {
+  # qv_tokenize는 홑(')·겹(") 두 종류만 토글해 ANSI-C 인용(`\$'…'`)의 `\$`가 토큰에 그대로 남고
+  # 뒤따르는 홑따옴표만 토글돼 최종 토큰이 `\$` 접두 그대로 남는다 — `-`로 시작하지 않아 플래그
+  # 판정(`^-`)에서 벗어난다(hard-zero 사각). 실제 grep은 이 인용 형태를 따옴표 없는 플래그와
+  # 동일하게 실행한다(bash ANSI-C quoting). 옵션 두 글자는 런타임 조립(리터럴로 적으면 이 파일
+  # 자신이 [QV]에 걸린다).
+  qv="-q""v"
+  printf '%s\n' \
+    '@test "qv absence ansi-c quoted flag" {' \
+    "  grep \$'${qv}' TOKEN /some/file" \
+    '  [ 1 -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_qv_ansic.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_qv_ansic.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[QV\]'
+}
+
 @test "the state machine reaches 0-column function bodies, not just @test bodies" {
   # 착지 전 검출기는 `^@test … {`로만 상태에 들어가서, 도메인에 있는 파일이어도 setup()·헬퍼
   # 본문은 전부 판정 밖이었다(그 갭을 가드 헤더가 「부재-단언 클래스를 얹을 때의 몫」으로 계상해
@@ -538,6 +585,35 @@ setup() {
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_asgn.bats"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '\[SETCAP\]'
+}
+
+@test "an echo string literal containing a bracket-test-shaped string-equality substring does not smuggle in a false cardinality predicate ([SETCAP] negative, reg13c-fn-bats-style-2)" {
+  # reg13-a2-ops-infra-1(#664)은 수 등식 브랜치(현재 475-476행)에만 여는 `[` 앵커를 추가했다 —
+  # 같은 파일의 문자열 등식 브랜치(traps-ops-2가 `=` 앞 공백만 요구)는 형제 열거에서 놓쳤다.
+  # 그 결과 echo 진단문 안 우연한 ` = "…"` 텍스트(bracket-test 좌우 앵커 없음)도 여전히 진짜
+  # bracket-test 등식으로 오인된다(비평가 실증 PoC 그대로).
+  printf '%s\n' \
+    '@test "exactly the expected worker ports" {' \
+    '  run scripts/check-skeleton.sh --bad-flag' \
+    "  echo 'diagnostic: expected = \"http\" for context'" \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_str_echo.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_str_echo.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[SETCAP\]'
+}
+
+@test "a command-substitution left operand still satisfies the string-equality cardinality predicate after the opening-bracket anchor (reg13c-fn-bats-style-2)" {
+  # 위 픽스처의 처방(여는 `[` 요구)이 좌변을 순수 식별자로만 좁히면, 464-465행(수 등식)이 이미
+  # 겪고 고친 것과 같은 급의 회귀가 문자열 등식 갈래에서 재현된다 — 이 레포의 실 관용구
+  # `[ "$(yq -r … "$F")" = "…" ]`(tools/tests/test_reusable-app-build.bats:57,79,89 등)가 새
+  # [SETCAP] red가 된다. `$(...)` 갈래를 잠근다.
+  printf '%s\n' \
+    '@test "the widget set has exactly the expected members" {' \
+    '  [ "$(yq -r ".widgets" /some/file)" = "true" ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_str_cmdsub.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_str_cmdsub.bats"
+  [ "$status" -eq 0 ]
 }
 
 @test "a numeric -eq inside a run command's CLI argument does not smuggle in a false cardinality predicate ([SETCAP] negative, reg-c-ledger-rows-1)" {
@@ -881,6 +957,36 @@ setup() {
     '  [ "$status" -ne 0 ]' \
     '}' > "$BATS_TEST_TMPDIR/test_absexec_grepfilter.bats"
   run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_grepfilter.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-EXEC\]'
+}
+
+@test "the same exec-target-plus-grep-filter idiom wrapped in a single-quoted bash -c is still caught (reg13c-fn-bats-style-1/2)" {
+  # ⚠️ 착지 전(13c): 위 exec-target-grep-exclusion 처방은 따옴표 없는 최상위 파이프 형태만 닫았다.
+  #    같은 관용구를 `bash -c '…'`로 한 겹 더 감싸면 내부 파이프가 mask_pipe에 의해 따옴표 안으로
+  #    마스킹돼 첫 세그먼트가 전체 문장이 되고, 그 문장에 grep 필터가 있다는 이유로 실행물 호출까지
+  #    통째로 배제됐다(비평가 실증, before/after 0→1). bash -c 래퍼를 먼저 벗겨 그 본문에만 첫
+  #    세그먼트 grep 판정을 거는 처방으로 닫는다.
+  printf '%s\n' \
+    '@test "single-quoted bash -c exec target with a trailing grep filter" {' \
+    "  run bash -c 'scripts/check-skeleton.sh --bad-flag | grep -q whatever'" \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_bashc_grepfilter_sq.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_bashc_grepfilter_sq.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS-EXEC\]'
+}
+
+@test "the same exec-target-plus-grep-filter idiom wrapped in a double-quoted bash -c is still caught (reg13c-fn-bats-style-1/2)" {
+  # 같은 결함의 겹따옴표 변형 — tools/tests/test_dev-data.bats:21이 실 트리에서 이 형태를 쓰지만
+  # 그 자리는 같은 파일의 W2 양성 대조(16-17행)로 이미 닫혀 있어 negative 증거로는 부적절하다
+  # (va 판정) — 그래서 이 픽스처는 합성 PoC로 사각 자체를 고정한다.
+  printf '%s\n' \
+    '@test "double-quoted bash -c exec target with a trailing grep filter" {' \
+    '  run bash -c "scripts/check-skeleton.sh --bad-flag | grep -q whatever"' \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_absexec_bashc_grepfilter_dq.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_absexec_bashc_grepfilter_dq.bats"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '\[ABS-EXEC\]'
 }

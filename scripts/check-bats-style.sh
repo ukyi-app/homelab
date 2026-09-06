@@ -337,7 +337,7 @@ function abs_rec(s,kind,   q,n,i,a,pat){
 # `cd … && bun …`·`bash -c "…"`처럼 감싸도 경로 리터럴이 문장 어딘가에 있으면 잡는다 — 정적
 # 판별이라 피연산자 동일성은 안 본다(`:48` 규약과 같다. `$VAR/scripts/x.sh`처럼 변수 접두라도
 # 리터럴 부분만 있으면 대상이다).
-function exec_target(s,   seg,segn,first){
+function exec_target(s,   seg,segn,first,body,bend){
   if (abs_target(s)) return 0
   # 홑따옴표 bash -c만 [ABS] 대상으로 승격되므로(F3 분모 규약), 겹따옴표로 감싼 grep 파이프는
   # `abs_target`이 못 보고 여기로 샌다 — 경로 리터럴이 grep의 **피연산자**(실행 대상이 아니다)인
@@ -346,11 +346,29 @@ function exec_target(s,   seg,segn,first){
   #    통째로 배제해, `run scripts/x.sh --bad | grep -q whatever`처럼 grep이 **뒤따르는 필터**인
   #    진짜 실행물 호출까지 분모에서 빠졌다(before/after: 0→1, grep 파이프 추가/제거로 재현).
   #    mask_pipe(273행, QV 레인과 동일 관용구)로 따옴표 안 `|`를 가린 뒤 첫(top-level) 파이프
-  #    세그먼트에만 grep 판정을 건다 — 그 세그먼트에 grep이 없으면 배제하지 않는다. 겹따옴표
-  #    bash -c 래퍼는 내부 파이프가 따옴표 안이라 mask_pipe가 그대로 가려 첫 세그먼트가 전체
-  #    문장이 되고(실측: test_image-ownership.bats:387류 FP 대조 그대로 통과), 실행물 뒤 진짜
-  #    파이프는 첫 세그먼트 밖이라 배제되지 않는다.
-  segn=split(mask_pipe(s),seg,/\|\||&&|\|/)
+  #    세그먼트에만 grep 판정을 건다 — 그 세그먼트에 grep이 없으면 배제하지 않는다.
+  # ⚠️ reg13c-fn-bats-style-1/2(비평가 실증, 13c) — 위 처방 그대로 두면 `bash -c` 래퍼(홑/겹
+  #    불문)가 전체 문장을 한 겹 더 감싼 경우가 남는다: mask_pipe(s)는 따옴표 **안** 파이프도
+  #    가리므로, 래퍼를 안 벗기고 s 전체에 mask_pipe를 걸면 내부 파이프가 통째로 가려져 첫
+  #    세그먼트가 다시 전체 문장이 되고, 그 안의 grep 필터 때문에 진짜 실행물 호출까지 배제된다
+  #    (홑/겹 둘 다 재현 — before/after 0→1). 처방: mask_pipe(s) 분해 **전에** bash -c 래퍼만
+  #    먼저 벗겨 그 본문(body)에 대해 첫-세그먼트 판정을 적용한다 — abs_target(298-311행)의
+  #    홑따옴표 "첫 `-c '` 뒤 다음 `'`까지" 언랩을 재사용하고, 겹따옴표는 "첫 `-c \"` 뒤 마지막
+  #    `\"`까지" substr로 대칭 처리한다(신설 함수 없음). 래퍼가 아니면 body=s 그대로라 기존
+  #    동작(예: test_image-ownership.bats:387류 FP 대조)은 불변이다. 356-359행 경로 리터럴
+  #    매칭은 원래 s 그대로 유지(대상 판정 범위는 안 넓힌다).
+  body = s
+  if (body ~ /^run[ \t]+(bash|sh)[ \t]+-c[ \t]+'/) {
+    sub(/^run[ \t]+(bash|sh)[ \t]+-c[ \t]+'/, "", body)
+    bend = index(body, "'")
+    if (bend > 0) body = substr(body, 1, bend - 1)
+  } else if (body ~ /^run[ \t]+(bash|sh)[ \t]+-c[ \t]+"/) {
+    sub(/^run[ \t]+(bash|sh)[ \t]+-c[ \t]+"/, "", body)
+    bend = length(body)
+    while (bend > 0 && substr(body, bend, 1) != "\"") bend--
+    if (bend > 0) body = substr(body, 1, bend - 1)
+  }
+  segn=split(mask_pipe(body),seg,/\|\||&&|\|/)
   first=seg[1]; gsub(/\002/,"|",first)
   if (first ~ /(^|[^A-Za-z0-9_])(grep|egrep|fgrep)[ \t]/) return 0
   if (s ~ /(^|[^A-Za-z0-9_])scripts\/[A-Za-z0-9_.\/-]+\.sh/) return 1
@@ -394,6 +412,10 @@ function qv_tokenize(s, tok,   i,c,q1,q2,cur,n){
   q1=0; q2=0; cur=""; n=0
   for(i=1;i<=length(s);i++){
     c=substr(s,i,1)
+    # reg13c-fn-bats-style-3 — ANSI-C 인용(`$'…'`/`$"…"`)의 `$`는 토큰에 남고 뒤따르는 따옴표만
+    # 토글돼(`$-qv` 꼴) 플래그 판정(`^-`)에서 벗어났다. `$` 다음이 바로 따옴표면 그 `$`만 건너뛰고
+    # 따옴표는 정상 토글 경로로 넘긴다(신설 상태 없음, 기존 q1/q2 토글 재사용).
+    if(c=="$" && (substr(s,i+1,1)=="'" || substr(s,i+1,1)=="\"")) continue
     if(c=="'" && q2==0){ q1=1-q1; continue }
     if(c=="\"" && q1==0){ q2=1-q2; continue }
     if((c==" " || c=="\t") && q1==0 && q2==0){
@@ -449,7 +471,14 @@ function qv_seg(t,   n,a,i,seen,q,v,pos){
 #    관례를 그대로 따른다 — 신설 취약점을 지금 막는다). 앵커를 더한 뒤 실측: 517행 두 곳(득실
 #    없이 그대로 매치) + 대조 픽스처(run 인자 형태)는 여전히 불일치 확인.
 function setcap_hit(s){
-  if (s ~ /[ \t]=[ \t]*"[^"]+"/) return 1
+  # reg13c-fn-bats-style-2 — 이 문자열 등식 술어는 traps-ops-2(`=` 앞 공백 요구)까지만 좁혀져
+  # 있었다: 464-465행 수 등식 브랜치와 달리 bracket-test 여는 `[` 앵커가 없어, echo 진단문
+  # 안의 우연한 ` = "…"` 텍스트(예 `"expected = \"http\" for context"`)도 진짜 bracket-test
+  # 등식으로 오인됐다(reg13-a2-ops-infra-1이 수 등식 브랜치만 고치고 이 형제를 놓쳤다 — 비평가
+  # 실증). 처방은 464-465행이 이미 쓰는 좌변 캐리브아웃(`$(...)` 커맨드 치환 ∨ 식별자)을 그대로
+  # 재사용하는 것 — 순수 식별자로만 좁히면 464-465행이 이미 겪은 `$(yq …)` 좌변 배제 회귀가
+  # 문자열 등식 갈래에서 재현된다(tools/tests/test_reusable-app-build.bats:57,79,89 등 8곳).
+  if (s ~ /\[[ \t]+"?(\$\([^)]*\)|\$?[A-Za-z_][A-Za-z0-9_]*)"?[ \t]+=[ \t]*"[^"]+"[ \t]*\]/) return 1
   # reg13-a2-ops-infra-1 — 종료 앵커(`[ \t]*\]`)만으로는 부족하다: echo/printf 문자열 리터럴 안의
   # 장식 텍스트(`"… -eq 5 ] for context"`)도 그 `]`에 걸려 진짜 bracket-test로 오인됐다(부분문자열
   # fail-open이 SETCAP 자신에게 재발). 이 파일이 이미 쓰는 종료 앵커 관례를 대칭 확장해 선행
@@ -470,15 +499,23 @@ function setcap_hit(s){
   if (s ~ /grep[ \t]+-q[A-Za-z]*x/) return 1  # grep -qxF/-qx 구조적 등식(전체 행 일치 — 형제: test_pvc_du_exporter.bats:31-33)
   return 0
 }
+# do/then/else 접두 스트립 — 한 줄 for/if 관용구(`; do run …`/`; then run …`/`; else run …`)는
+# `;` 분해 뒤 세그먼트가 "do run …"/"then run …"/"else run …"가 되어 이어지는 앵커(`^run[ \t]/`·
+# `^\[\[`·`^![ \t]`)에 안 걸린다 — `do`/`then`/`else`와 뒤 토큰은 세미콜론이 아니라 공백으로만
+# 이어지기 때문이다. abs_stmt([ABS]/[ABS-EXEC]/[SETCAP]/[QV] 레인)와 메인 패턴-액션 블록의
+# bbseg 루프([NEG]/[BB] 레인, 618행대) **둘 다** 이 한 정규식 리터럴을 공유한다(bbseg-do-then-else
+# — 부분 수정이 다음 라운드의 새 finding이 되는 것을 막는 승격 규칙: 형제 판정 루프 전수 점검 +
+# 리터럴 단일화). 2026-09 정기 회귀 reg-d-bats-style-last-2(12라운드)가 do/then을 abs_stmt에
+# 처방했으나 else를 빠뜨렸고(reg13-a1-bats-guards-1이 else를 더함), bbseg 루프는 13c까지 한 번도
+# 이 스트립을 받지 못했다(비평가 실증 — `if …; then [[ … ]]; fi` 원라이너가 hard-zero 클래스를
+# 침묵 통과시켰다).
+function strip_dte(s){
+  sub(/^(do|then|else)[ \t]+/,"",s)
+  return s
+}
 # 한 문장 처리 — 루프 깊이 · [QV] · [SETCAP] 술어 · run/status 짝(ABS·ABS-EXEC 둘 다) · 증인 수집.
 function abs_stmt(s,   rec,qn,qsg,qi){
-  # 한 줄 for/if 관용구(`; do run …`/`; then run …`/`; else run …`)는 abs_line의 `;` 분해 뒤
-  # 세그먼트가 "do run …"/"then run …"/"else run …"가 되어 아래 run-인식 앵커(`^run[ \t]/`)에
-  # 안 걸린다 — `do`/`then`/`else`와 `run`은 세미콜론이 아니라 공백으로만 이어지기 때문이다.
-  # 앵커 검사 전에 이 세 키워드 접두를 벗겨 run-인식·[ABS-EXEC]·조건 필터가 모두 재사용하는 이
-  # 지역변수 s 하나로 전부 해소한다(2026-09 정기 회귀 reg-d-bats-style-last-2, 12라운드가 do/then을
-  # 처방했으나 else를 빠뜨렸다 — reg13-a1-bats-guards-1이 else를 더한다. 신설 함수 없음).
-  sub(/^(do|then|else)[ \t]+/,"",s)
+  s=strip_dte(s)
   # [SETCAP]은 위치·세그먼트 무관 — 스코프 안 어디서든 한 번 맞으면 그 스코프는 닫힌다.
   if (setcap_hit(s)) scpred[absscope]=1
   # [ABS-EXEC] W1 — 마찬가지로 위치 무관, 스코프 안 어디서든 한 번 맞으면 그 스코프는 증인을 진다.
@@ -618,6 +655,11 @@ FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++
   bbn=split(mask_semi(t), bbparts, /;[ \t]*/); bbcnt=0
   for (bbi=1; bbi<=bbn; bbi++) {
     bbs=bbparts[bbi]; sub(/^[ \t]+/,"",bbs); sub(/[ \t]+$/,"",bbs); gsub(/\001/,";",bbs)
+    # bbseg-do-then-else — abs_stmt(504행대)와 같은 do/then/else 접두 문제가 여기도 있다:
+    # `if …; then [[ … ]]; fi` 원라이너는 분해 뒤 세그먼트가 "then [[ … ]]"가 되어 `^\[\[`
+    # 앵커에 안 걸렸다(NEG의 `^![ \t]`도 동형). strip_dte(abs_stmt와 공유하는 한 정규식 리터럴)를
+    # 여기도 적용해 hard-zero 클래스([NEG]/[BB])의 침묵 통과를 닫는다.
+    bbs=strip_dte(bbs)
     if (bbs=="") continue
     bbcnt++; bbseg[bbcnt]=bbs
   }
