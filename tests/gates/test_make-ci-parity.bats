@@ -322,6 +322,36 @@ mkparity_line_fixture() {   # $1=디렉토리  $2=recipe 한 줄
   [ "$status" -eq 0 ]
 }
 
+# ── ⑤ covered_by도 같은 함정 — 죽은 주석이 '실재'를 증명하지 못한다 ─────────────────────────────
+# ⑤(covered)는 "로컬의 다른 메커니즘이 이 대상 파일에서 실재하는가"를 covered_by.file의 원문에
+# 부분문자열 매치로 검사한다. 정제 없이 걸면 대상 파일의 `#` 주석에만 토큰이 남아도 통과한다 —
+# ④가 이미 겪은 것과 같은 병(실측 2026-09-06: Makefile의 `@bats tests/test_sops-roundtrip.bats`를
+# 죽은 주석으로 바꿔도 `covered 2` rc=0으로 그대로였다). execOnly(195행, 원래 ④ 전용)를 재사용해
+# ⑤도 행두 `#` 주석을 걷어낸 뒤 대조한다.
+mkparity_covered_fixture() {   # $1=디렉토리  $2=covered_by.file(witness.txt) 내용
+  mkdir -p "$1/.github/workflows" "$1/policy"
+  printf 'name: ci\non: push\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - name: covered-step\n        run: docker run x\n' \
+    > "$1/.github/workflows/ci.yaml"
+  printf '%s\n' '{"_readme": "fixture", "steps": [{"name": "covered-step", "status": "covered", "why": "w", "covered_by": {"file": "witness.txt", "contains": "tests/witness.bats"}}]}' \
+    > "$1/policy/ci-parity.json"
+  printf '%s\n' "$2" > "$1/witness.txt"
+}
+
+@test "a covered_by token left only in a dead comment does not prove the mechanism is real" {
+  # 뮤테이션: witness.txt에서 실 호출을 지우고 죽은 주석으로만 남긴다.
+  muted="$BATS_TEST_TMPDIR/covered-muted"
+  mkparity_covered_fixture "$muted" '# tests/witness.bats 는 예전에 여기서 불렀으나 지금은 부르지 않는다'
+  run bash -c "cd '$muted' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF -- '덮는다는 주장이 더 이상 참이 아니다'
+
+  # 대조군 — 같은 픽스처에서 실 호출을 남기면 통과한다(픽스처 조립 자체의 실패가 아니다).
+  live="$BATS_TEST_TMPDIR/covered-live"
+  mkparity_covered_fixture "$live" 'bats tests/witness.bats'
+  run bash -c "cd '$live' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  [ "$status" -eq 0 ]
+}
+
 # ── ⑧ 이름 보존 + 본문 교체 ────────────────────────────────────────────────────────────────────
 # ④는 원장 → `make -n ci`, ⑦은 ci.yaml 본문 → 원장이다. 둘 다 스텝을 **이름**으로 계상하므로,
 # 이름을 남기고 run 본문만 갈아치우면 ④는 Makefile 쪽 문자열로 통과하고 ⑦은 본문에 레포 커맨드가
