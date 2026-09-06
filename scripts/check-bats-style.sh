@@ -440,8 +440,19 @@ function qv_seg(t,   n,a,i,seen,q,v,pos){
 #    없이 그대로 매치) + 대조 픽스처(run 인자 형태)는 여전히 불일치 확인.
 function setcap_hit(s){
   if (s ~ /[ \t]=[ \t]*"[^"]+"/) return 1
-  if (s ~ /-eq[ \t]+[0-9]+[ \t]*\]/) return 1
-  if (s ~ /-eq[ \t]+"?\$[A-Za-z_][A-Za-z0-9_]*"?[ \t]*\]/) return 1  # 자기유도(변수 우변) 등식
+  # reg13-a2-ops-infra-1 — 종료 앵커(`[ \t]*\]`)만으로는 부족하다: echo/printf 문자열 리터럴 안의
+  # 장식 텍스트(`"… -eq 5 ] for context"`)도 그 `]`에 걸려 진짜 bracket-test로 오인됐다(부분문자열
+  # fail-open이 SETCAP 자신에게 재발). 이 파일이 이미 쓰는 종료 앵커 관례를 대칭 확장해 선행
+  # 오프닝 `[`도 요구한다 — `[[ … ]]`은 내부 `[`가 매치되어 안전, quote-stripping 없이 신설
+  # 마스킹도 불요(va.corrected_fix — quote-stripping 사본은 jq/yq 인용 표현식 4개 양성을 역행시켜 기각).
+  # ⚠️ 좌변 연산자는 `$var` 리터럴만이 아니라 `$(...)` 커맨드 치환도 실 관용구다(레포 전역 8곳 —
+  # infra/_tests/test_tf_static.bats·platform/network-policies/prod/test_netpol.bats·
+  # tests/gates/test_cloudflare-entitlement.bats(2)·tests/gates/test_gate-secret-guard.bats·
+  # tests/test_dr-drill.bats·tests/test_pg-image-pin.bats — 전체 자기-스캔으로 실측한 신규 회귀).
+  # 좌변을 식별자 전용으로 좁히면 이 8곳이 전부 새 [SETCAP] red가 된다 — 그 회귀를 같은 커밋에서
+  # 닫기 위해 `\$\([^)]*\)`(중첩 괄호 없는 실 관용구 형태) 갈래를 더한다.
+  if (s ~ /\[[ \t]+"?(\$\([^)]*\)|\$?[A-Za-z_][A-Za-z0-9_]*)"?[ \t]+-eq[ \t]+[0-9]+[ \t]*\]/) return 1
+  if (s ~ /\[[ \t]+"?(\$\([^)]*\)|\$?[A-Za-z_][A-Za-z0-9_]*)"?[ \t]+-eq[ \t]+"?\$[A-Za-z_][A-Za-z0-9_]*"?[ \t]*\]/) return 1  # 자기유도(변수 우변) 등식
   if (s ~ /contains\(/) return 1
   if (s ~ /join\(","\)/) return 1
   if (s ~ /length[ \t]*==/) return 1

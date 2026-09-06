@@ -573,6 +573,31 @@ setup() {
   echo "$output" | grep -q '\[SETCAP\]'
 }
 
+@test "a bracket-test-shaped substring inside an echo string literal does not smuggle in a false cardinality predicate ([SETCAP] negative, reg13-a2-ops-infra-1)" {
+  # setcap_hit의 수 등식 술어가 종료 앵커(`]`)만 요구하고 선행 오프닝 `[`을 요구하지 않으면, echo
+  # 진단 메시지 문자열 리터럴 안의 장식 텍스트(`"… -eq 5 ] for context"`)도 진짜 bracket-test로
+  # 오인된다 — 부분문자열 fail-open이 SETCAP 자신에게 재발(비평가 실증 PoC).
+  printf '%s\n' \
+    '@test "EVERY widget in the set is present" {' \
+    '  echo "diagnostic: expected total -eq 5 ] for context"' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_bracket_substring.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_bracket_substring.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[SETCAP\]'
+}
+
+@test "a command-substitution left operand still satisfies the cardinality predicate after the opening-bracket anchor (reg13-a2-ops-infra-1)" {
+  # 위 픽스처의 처방(선행 오프닝 `[` 요구)이 좌변을 식별자로만 좁히면, 이 레포의 실 관용구
+  # `[ "$(… | wc -l)" -eq N ]`(예: infra/_tests/test_tf_static.bats·tests/test_dr-drill.bats 등
+  # 8곳 — 자기-스캔 실측 회귀)가 새 [SETCAP] red가 된다. `$(...)` 갈래를 잠근다.
+  printf '%s\n' \
+    '@test "the widget set has exactly the expected members" {' \
+    '  [ "$(echo hi | wc -l)" -eq 1 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_setcap_cmdsub_eq.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_setcap_cmdsub_eq.bats"
+  [ "$status" -eq 0 ]
+}
+
 @test "the grep -qxF/-qx structural-equality idiom satisfies the cardinality predicate ([SETCAP] positive, traps-ops-2)" {
   # 이 레포의 실 선호 관용구(platform/victoria-stack/prod/test_pvc_du_exporter.bats:31-33) — 전체
   # 행 일치(-x)가 곧 등식이다. 새 여섯째 술어의 양성 대조 — 본문에 `=` 자체가 없어(대입도 없음)
