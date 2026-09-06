@@ -71,6 +71,36 @@ setup() {
   echo "$output" | grep -q '\[BB\]'
 }
 
+@test "a MIDDLE [[ ]] is not hidden behind an if/then/fi one-liner's then keyword (bbseg-do-then-else)" {
+  # ⚠️ 착지 전: [NEG]/[BB] 핵심 판정(메인 패턴-액션 블록의 bbseg 루프)은 abs_stmt와 달리
+  #    do/then/else 접두 스트립이 없었다 — `if …; then [[ … ]]; fi` 원라이너로 감싸면 세미콜론
+  #    분해 뒤 세그먼트가 "then [[ … ]]"가 되어 `^\[\[` 앵커에 안 걸려 hard-zero 클래스가 침묵
+  #    통과했다(비평가 실증 — '15개 함수' 프레이밍이 named function이 아닌 이 자리를 놓쳤다).
+  printf '%s\n' \
+    '@test "if-then-fi one-liner hides a middle [[ ]] behind then" {' \
+    '  run echo hi' \
+    '  if [ -n "$output" ]; then [[ "$output" == *zzz* ]]; fi' \
+    '  [ "$status" -eq 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_bb_then_hidden.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_bb_then_hidden.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[BB\]'
+}
+
+@test "a MIDDLE negation is not hidden behind an if/then/fi one-liner's then keyword (bbseg-do-then-else NEG sibling)" {
+  # 같은 근본원인의 NEG 형제 — `; then ! …`도 세그먼트가 "then ! …"가 되어 `^![ \t]` 앵커에
+  # 안 걸렸다. strip_dte가 abs_stmt·bbseg 두 자리에서 같은 리터럴을 공유하는지 이 대조가 함께 잠근다.
+  printf '%s\n' \
+    '@test "if-then-fi one-liner hides a middle negation behind then" {' \
+    '  run echo hi' \
+    '  if [ -n "$output" ]; then ! echo "$output" | grep -q zzz; fi' \
+    '  [ "$status" -eq 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_neg_then_hidden.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_neg_then_hidden.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[NEG\]'
+}
+
 @test "a semicolon INSIDE a quoted literal on the last line is NOT split into a fake middle segment (false-positive control)" {
   # 세그먼트 분해가 따옴표를 안 가리면 `"x &amp; y"` 같은 리터럴의 `;`가 가짜 세그먼트 경계가 되어
   # 정당한 마지막-줄 부정(`! …`)의 앞부분만 뜯겨 [NEG]로 오탐한다(실측 회귀:

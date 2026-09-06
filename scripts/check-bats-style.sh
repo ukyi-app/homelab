@@ -499,15 +499,23 @@ function setcap_hit(s){
   if (s ~ /grep[ \t]+-q[A-Za-z]*x/) return 1  # grep -qxF/-qx 구조적 등식(전체 행 일치 — 형제: test_pvc_du_exporter.bats:31-33)
   return 0
 }
+# do/then/else 접두 스트립 — 한 줄 for/if 관용구(`; do run …`/`; then run …`/`; else run …`)는
+# `;` 분해 뒤 세그먼트가 "do run …"/"then run …"/"else run …"가 되어 이어지는 앵커(`^run[ \t]/`·
+# `^\[\[`·`^![ \t]`)에 안 걸린다 — `do`/`then`/`else`와 뒤 토큰은 세미콜론이 아니라 공백으로만
+# 이어지기 때문이다. abs_stmt([ABS]/[ABS-EXEC]/[SETCAP]/[QV] 레인)와 메인 패턴-액션 블록의
+# bbseg 루프([NEG]/[BB] 레인, 618행대) **둘 다** 이 한 정규식 리터럴을 공유한다(bbseg-do-then-else
+# — 부분 수정이 다음 라운드의 새 finding이 되는 것을 막는 승격 규칙: 형제 판정 루프 전수 점검 +
+# 리터럴 단일화). 2026-09 정기 회귀 reg-d-bats-style-last-2(12라운드)가 do/then을 abs_stmt에
+# 처방했으나 else를 빠뜨렸고(reg13-a1-bats-guards-1이 else를 더함), bbseg 루프는 13c까지 한 번도
+# 이 스트립을 받지 못했다(비평가 실증 — `if …; then [[ … ]]; fi` 원라이너가 hard-zero 클래스를
+# 침묵 통과시켰다).
+function strip_dte(s){
+  sub(/^(do|then|else)[ \t]+/,"",s)
+  return s
+}
 # 한 문장 처리 — 루프 깊이 · [QV] · [SETCAP] 술어 · run/status 짝(ABS·ABS-EXEC 둘 다) · 증인 수집.
 function abs_stmt(s,   rec,qn,qsg,qi){
-  # 한 줄 for/if 관용구(`; do run …`/`; then run …`/`; else run …`)는 abs_line의 `;` 분해 뒤
-  # 세그먼트가 "do run …"/"then run …"/"else run …"가 되어 아래 run-인식 앵커(`^run[ \t]/`)에
-  # 안 걸린다 — `do`/`then`/`else`와 `run`은 세미콜론이 아니라 공백으로만 이어지기 때문이다.
-  # 앵커 검사 전에 이 세 키워드 접두를 벗겨 run-인식·[ABS-EXEC]·조건 필터가 모두 재사용하는 이
-  # 지역변수 s 하나로 전부 해소한다(2026-09 정기 회귀 reg-d-bats-style-last-2, 12라운드가 do/then을
-  # 처방했으나 else를 빠뜨렸다 — reg13-a1-bats-guards-1이 else를 더한다. 신설 함수 없음).
-  sub(/^(do|then|else)[ \t]+/,"",s)
+  s=strip_dte(s)
   # [SETCAP]은 위치·세그먼트 무관 — 스코프 안 어디서든 한 번 맞으면 그 스코프는 닫힌다.
   if (setcap_hit(s)) scpred[absscope]=1
   # [ABS-EXEC] W1 — 마찬가지로 위치 무관, 스코프 안 어디서든 한 번 맞으면 그 스코프는 증인을 진다.
@@ -647,6 +655,11 @@ FNR==1 { intest=0; pend=""; inhere=0; delim=""; nfiles++
   bbn=split(mask_semi(t), bbparts, /;[ \t]*/); bbcnt=0
   for (bbi=1; bbi<=bbn; bbi++) {
     bbs=bbparts[bbi]; sub(/^[ \t]+/,"",bbs); sub(/[ \t]+$/,"",bbs); gsub(/\001/,";",bbs)
+    # bbseg-do-then-else — abs_stmt(504행대)와 같은 do/then/else 접두 문제가 여기도 있다:
+    # `if …; then [[ … ]]; fi` 원라이너는 분해 뒤 세그먼트가 "then [[ … ]]"가 되어 `^\[\[`
+    # 앵커에 안 걸렸다(NEG의 `^![ \t]`도 동형). strip_dte(abs_stmt와 공유하는 한 정규식 리터럴)를
+    # 여기도 적용해 hard-zero 클래스([NEG]/[BB])의 침묵 통과를 닫는다.
+    bbs=strip_dte(bbs)
     if (bbs=="") continue
     bbcnt++; bbseg[bbcnt]=bbs
   }
