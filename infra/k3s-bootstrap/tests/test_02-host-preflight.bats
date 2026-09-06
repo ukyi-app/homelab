@@ -50,12 +50,38 @@ run_pf() {
   PREFLIGHT_ROOT="$FX" PREFLIGHT_IP="$IPSTUB" run "$BOOTSTRAP_DIR/host-preflight.sh"
   echo "status=$status"
   echo "$output"
+  # 🔴 status가 0이 아닌데 출력이 0줄이면(gate flake 5회 서명 — 되울림만으로는 여전히 0줄이었다) 같은
+  #    픽스처로 `bash -x` 트레이스를 남긴다. 스크립트 쪽 ERR trap이 못 잡는 클래스(인터프리터 기동·
+  #    source 실패·bats run 자체)까지 다음 발생 때 자기진단이 찍히게 한다. 재실행이 초록이면 그것도
+  #    정보다(비결정성 확정). 초록 실행에서는 이 분기가 돌지 않아 기능·출력 변화 0.
+  case "${status}:${output:+has}" in
+    0:*|*:has) : ;;
+    *) echo "---- self-diagnosis: status=${status} with empty output — bash -x re-run trace (tail 60) ----"
+       PREFLIGHT_ROOT="$FX" PREFLIGHT_IP="$IPSTUB" bash -x "$BOOTSTRAP_DIR/host-preflight.sh" \
+         > "$BATS_TEST_TMPDIR/pf-trace.log" 2>&1 || true
+       tail -n 60 "$BATS_TEST_TMPDIR/pf-trace.log"
+       echo "---- end trace ----" ;;
+  esac
 }
 
 @test "passes on a fully prepared host" {
   run_pf
   [ "$status" -eq 0 ]
   printf '%s' "$output" | grep -qF -- 'OK: host-preflight'
+}
+
+@test "an unguarded command failure names its line instead of dying silently (gate flake self-diagnosis)" {
+  # gate flake 5회의 서명은 status=1·출력 0줄이었다 — `set -e`가 `x="$(…)"` 치환 실패 같은 자리에서
+  # fail()을 거치지 않고 죽으면 그렇게 된다. ERR trap이 그 자리를 줄 번호·명령으로 찍는지 사본으로
+  # 증언한다(test_03의 versions.env 사본 관용구). 정상 FAIL 경로는 `|| fail`이라 trap이 침묵한다.
+  BS="$BATS_TEST_TMPDIR/bs"
+  cp -R "$BOOTSTRAP_DIR" "$BS"
+  sed -i.bak 's|^SCRIPT_DIR=|_probe="$(false)"\nSCRIPT_DIR=|' "$BS/host-preflight.sh"
+  PREFLIGHT_ROOT="$FX" PREFLIGHT_IP="$IPSTUB" run "$BS/host-preflight.sh"
+  echo "status=$status"; echo "$output"
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qF -- '예기치 않은 종료 — 줄'
+  printf '%s' "$output" | grep -qF -- '_probe="$(false)"'
 }
 
 # ── [1] 타임존 ─────────────────────────────────────────────────────────────────────────────
