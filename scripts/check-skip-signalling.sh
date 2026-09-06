@@ -145,7 +145,10 @@ AWKEOF
 # 위험(무관한 인접 줄이 합쳐져 case 라벨 등에서 오탐) — 실행 가능한 두 형태만 좁혀 흡수한다.
 # (1) 표준 백슬래시 줄연속 — bash 문법상 유일한 합법 계속줄 형태라 오탐 없음(양옆 공백은 흡수해
 #    "exit  4"류 이중 공백으로 P_SH_EXIT의 리터럴 단일 공백을 놓치지 않게 한다).
-JOIN_BACKSLASH_SED=':a;N;$!ba;s/[ \t]*\\\n[ \t]*/ /g'
+# 백슬래시 줄연속 결합 — GNU sed 전용 라벨 관용구(`:a;N;$!ba`)는 BSD sed(owner macOS의 `make verify`)에서
+# 라벨 파싱이 달라 깨진다(레포 선례 0건) → awk 한 줄로 같은 결합(줄 끝 `\`를 공백으로 바꾸고 다음 줄을 이어 붙인다).
+# shellcheck disable=SC2016  # awk 프로그램의 $0은 의도된 리터럴(셸 확장 아님)
+JOIN_BACKSLASH_AWK='/\\[ \t]*$/ { sub(/[ \t]*\\[ \t]*$/, " "); printf "%s", $0; next } { print }'
 
 # (2) TS 전용 — `process.exitCode`로 끝나는 줄과 `=`로 시작하는 다음 줄만 좁혀 합친다.
 #    NOCOMMENT_AWK와 같은 per-line state machine 스타일(신설 lib 불요). P_EMIT 레인은 손대지
@@ -172,13 +175,13 @@ scan_one() {
   case "$1" in *.ts|*.mts) ists=1 ;; esac
   if [ "$ists" -eq 1 ]; then
     stripped="$(awk "$NOCOMMENT_AWK_TS" "$1")"
-    stripped="$(sed "$JOIN_BACKSLASH_SED" <<<"$stripped")"
+    stripped="$(awk "$JOIN_BACKSLASH_AWK" <<<"$stripped")"
     stripped="$(awk "$EXITCODE_JOIN_AWK_TS" <<<"$stripped")"
     pexit="$P_TS_EXIT"
     helper="skip()"
   else
     stripped="$(awk "$NOCOMMENT_AWK_SH" "$1")"
-    stripped="$(sed "$JOIN_BACKSLASH_SED" <<<"$stripped")"
+    stripped="$(awk "$JOIN_BACKSLASH_AWK" <<<"$stripped")"
     pexit="$P_SH_EXIT"
     helper="guard_skip"
   fi
