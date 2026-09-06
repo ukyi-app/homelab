@@ -50,7 +50,7 @@ data:
             # kube_node_info의 `kubelet_version`은 k3s 릴리스 태그 그대로다
             # (라이브 실측 2026-09-03: `kubelet_version="v1.36.2+k3s1"`).
             expr: |
-              kube_node_info{kubelet_version!="v1.36.3+k3s1"}
+              kube_node_info{kubelet_version!="v1.36.4+k3s1"}
             for: 24h
             labels: { severity: warning }
             annotations:
