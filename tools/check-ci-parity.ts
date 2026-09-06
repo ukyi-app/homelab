@@ -368,7 +368,9 @@ function reconcile(): string[] {
           break;
         }
         if (!existsSync(c.file)) { fail(`"${e.name}": covered_by.file '${c.file}' 부재.`); break; }
-        if (!readFileSync(c.file, "utf8").includes(c.contains)) {
+        // 죽은 주석에 남은 문자열은 '실재'가 아니다 — execOnly(195행, 원래 ④ mirrored 전용)로 행두
+        // `#` 주석을 걷어낸 뒤 대조한다(CONTRIBUTING.md 「검출기 실재 판정」 규칙, reg13-a3-tools-rules-1).
+        if (!execOnly(readFileSync(c.file, "utf8")).includes(c.contains)) {
           fail(`"${e.name}": covered_by.file '${c.file}'에 '${c.contains}'가 없다 — 덮는다는 주장이 더 이상 참이 아니다.`);
         }
         break;

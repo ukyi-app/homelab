@@ -87,6 +87,18 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | jq -e '.findings | any(.type == "stale-ledger-row" and .subject == "stale-app")'
 }
 
+# reg13-e-carryover-2 — cacheDirs 열거가 Dirent.isDirectory()만 쓰면 디렉토리를 가리키는 심볼릭
+# 링크 캐시 인스턴스가 누락돼, 실재하는 인스턴스를 stale-ledger-row로 오탐한다(IMPACT의 과탐 예시).
+@test "audit does NOT flag a cache ledger row backed by a symlinked instance directory" {
+  mkdir -p "$FR/_external/symcache-real"
+  ln -s "$FR/_external/symcache-real" "$FR/platform/cache/prod/symcache-inst"
+  printf '| <!-- ledger:row --> cache-symcache-inst | cache | 64 | 128 |\n' >> "$FR/docs/memory-ledger.md"
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  run bash -c "bun '$ROOT/tools/audit-orphans.ts' --repo-root '$FR' | jq -e '.findings | any(.type == \"stale-ledger-row\" and .subject == \"cache-symcache-inst\")'"
+  [ "$status" -ne 0 ]
+}
+
 @test "audit --ci blocks orphan-dns but passes stale-ledger (no false PR block)" {
   # 픽스처엔 orphan-dns(ghost)+stale-ledger-row(stale-app)가 있다 → --ci는 orphan-dns가 blocking이므로 비-0
   run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci

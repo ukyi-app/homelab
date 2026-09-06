@@ -460,15 +460,21 @@ KERNEL_TS='const k = await import(process.argv[1] + "/tools/lib/scan-floor.ts");
   code="$(awk '/── 실행 커널 guardMain/{exit} {print}' "$ROOT/tools/lib/scan-floor.ts" | grep -vE '^[[:space:]]*(//|\*|/\*)')"
   # 커널을 실제로 읽었다는 증거 — 없으면 아래 판정이 자기 자신 vacuous가 된다.
   [ -n "$code" ]
-  if printf '%s\n' "$code" | grep -q 'process\.exit'; then
+  # reg13-b1-gates-tests-1 — grep -q 'process\.exit'는 **한 줄짜리** 리터럴만 본다. `process`와
+  # `.exit(...)`가 개행으로 갈리면(포매터 재정렬·긴 인자 줄바꿈으로 충분히 생긴다) 각 줄은 패턴에
+  # 안 걸려 이 증인이 무증인으로 초록을 유지한다(실측: 형제 @test 31/33/35는 red로 갔는데 이 @test만
+  # ok였다). 개행을 지우고 한 줄로 접은 뒤 공백 관용 정규식으로 본다.
+  flat="$(printf '%s' "$code" | tr '\n' ' ' | tr -s ' ')"
+  if printf '%s' "$flat" | grep -qE 'process[[:space:]]*\.[[:space:]]*exit[[:space:]]*\('; then
     echo "판정 커널 절이 종료를 부른다(판정 lib은 종료를 소유하지 않는다):"
-    printf '%s\n' "$code" | grep -n 'process\.exit'
+    printf '%s\n' "$code" | grep -n 'process'
     false
   fi
   # 실행 커널 절의 exit 소유는 양성 대조다 — 이게 없으면 위 절단이 빗나가도 조용히 참이다.
   tail_code="$(awk 'f{print} /── 실행 커널 guardMain/{f=1}' "$ROOT/tools/lib/scan-floor.ts" | grep -vE '^[[:space:]]*(//|\*|/\*)')"
   [ -n "$tail_code" ]
-  printf '%s\n' "$tail_code" | grep -q 'process\.exit'
+  tail_flat="$(printf '%s' "$tail_code" | tr '\n' ' ' | tr -s ' ')"
+  printf '%s' "$tail_flat" | grep -qE 'process[[:space:]]*\.[[:space:]]*exit[[:space:]]*\('
 }
 
 # 실패는 ScanError로 나가고 **권고 종료코드**를 싣는다 — 콜사이트가 두 사고를 구별할 수 있어야 한다

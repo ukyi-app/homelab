@@ -15,7 +15,7 @@
 //   incomplete-purge      : tombstone state=purging 잔존 — 상태머신 중단 흔적
 // conn/원장 명명 판정은 레이아웃 커널(lib/resource-layout.ts)을 소비한다 — 자체 정규식 유도는
 // 명명 변경 시 조용히 어긋나는 관측 사각이었다(cli-deepening 심화 4).
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { appPaths, appRel } from "./lib/app-surface.ts";
 import { parse as parseYaml } from "yaml";
 import { surfaceHash } from "./lib/surface-hash.ts";
@@ -132,8 +132,23 @@ if (!Array.isArray(registry)) {
 const appDirs = listUnits("apps", ROOT)
   .map((u) => u.name)
   .filter((a) => existsSync(appPaths(ROOT, a).values));
+// Dirent.isDirectory()는 심볼릭 링크 엔트리에서 대상과 무관하게 항상 false다 — 디렉토리를 가리키는
+// 심볼릭 링크 캐시 인스턴스가 열거에서 통째로 누락된다(reg13-e-carryover-2, repo-walk.ts의 형제
+// 자리와 같은 결함). tools/lib/surface-hash.ts:43-51 형태(대상 종류를 명시 판정)를 재사용한다.
+// 깨진 심볼릭 링크는 statSync가 throw하므로 false로 접는다 — "디렉토리 아님"이 맞는 판정.
+const isDirEntry = (full: string, d: { isDirectory(): boolean; isSymbolicLink(): boolean }): boolean => {
+  if (d.isDirectory()) return true;
+  if (!d.isSymbolicLink()) return false;
+  try {
+    return statSync(full).isDirectory();
+  } catch {
+    return false;
+  }
+};
 const cacheDirs = existsSync(`${ROOT}/${LAYOUT_DIRS.cacheProd}`)
-  ? readdirSync(`${ROOT}/${LAYOUT_DIRS.cacheProd}`, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
+  ? readdirSync(`${ROOT}/${LAYOUT_DIRS.cacheProd}`, { withFileTypes: true })
+      .filter((d) => isDirEntry(`${ROOT}/${LAYOUT_DIRS.cacheProd}/${d.name}`, d))
+      .map((d) => d.name)
   : [];
 const ledgerRows = parseLedgerRows(
   existsSync(`${ROOT}/docs/memory-ledger.md`) ? readFileSync(`${ROOT}/docs/memory-ledger.md`, "utf8") : "",

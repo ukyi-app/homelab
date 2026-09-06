@@ -128,6 +128,33 @@ _fixture() {
   [ "$output" == "naked@apps/naked,probe@apps/probe" ]
 }
 
+# reg13-e-carryover-2 — Dirent.isDirectory()는 심볼릭 링크 엔트리에서 대상과 무관하게 항상 false다
+# (readdir이 링크를 follow하지 않음). filesystemDirs가 이 판정만 쓰면 디렉토리를 가리키는 심볼릭
+# 링크 앱이 열거에서 통째로 누락된다 — apps units는 filesystem 소스라 git add가 필요 없다.
+@test "apps units include a symlinked directory pointing to a real directory" {
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/apps/realapp/deploy/prod"
+  echo 'image: {}' > "$tmp/apps/realapp/deploy/prod/values.yaml"
+  ln -s realapp "$tmp/apps/symapp"
+  run walk 'console.log(listUnits("apps", ROOT).map(u => u.name).sort().join(","))' "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "realapp,symapp" ]
+}
+
+# 대조군 — 대상이 없는(깨진) 심볼릭 링크는 "디렉토리 아님"이 맞는 판정이다. statSync가 throw하는
+# 경로를 false로 접지 않으면 이 열거 자체가 깨진 링크에서 죽는다.
+@test "apps units silently drop a broken symlink instead of throwing" {
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/apps/realapp/deploy/prod"
+  echo 'image: {}' > "$tmp/apps/realapp/deploy/prod/values.yaml"
+  ln -s does-not-exist "$tmp/apps/dangling"
+  run walk 'console.log(listUnits("apps", ROOT).map(u => u.name).sort().join(","))' "$tmp"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$output" == "realapp" ]
+}
+
 # 유닛 파생은 **디렉토리 패턴 매치를 강제**한다. apps/README.md처럼 유닛 디렉토리를 형성하지 않는
 # 추적 파일이 유닛으로 새어 나오면 안 된다(차이 리포트가 잡은 실제 파생 버그).
 @test "unit derivation drops tracked paths that form no unit directory" {
