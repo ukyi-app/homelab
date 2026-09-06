@@ -1,0 +1,17 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: db-mydb-ro
+  namespace: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  encryptedData:
+    password: AgBYsc58b3LM63gtdZrYstrZQZyQUcexlF5uQzFADVB2/Y0zEFXeD1VCrKq45QLEADPClQO+EEtH6JITyBz2DylzAmaT1cU/aqs2C/Iywt9OuMAKUZnSVjXaPavBxl+ky17Tw+ZYfElblLwPULii/U27TI0VqFtFSF8H+rNMv2apIH3AlRUuRGT/mbk10xT8+9gzAxuTbsWoIqLgekf2h+w1F+YZEjfELNXtH664mfs9WFKijpC4XOvvf/cp4C0bgiMEUgxcmJEOouJfCgdqnj2a5ZY6ERNT73J4jad7KwMut3rNS0xQsa90k1bHP+kNza3V2A9WCyH7LjA2I1SEQDy62OtOC37iLl2A+kYvId4AWNAS9q/GaYkITeJqcspbUR3KaoUuXebs/wJ34cbYb10l+cqf/a+1m0gXZJ21YE1R83RfSNwOYfcMaghg4RG+8c12FD6w1AJuNXLg+aZpwb7mVimxSECnc2QF3Qv7Jk+P2ri3Ieac05x22423C9ClccooqVnmdP4diAU5P0EpJeHdyDt2PV8QDPiOdeYqjfqoFpOvtDZhd3OwTzo3Ynpar6/1P/gYzNHAOOICk0QO5iLMqcPhtsdxLry4cCvdchTT4kQEF6BQ+NOkrG3h3CDau40o80ju4nllXpHo88vXaS3rLA6bWAKHguL3CMoTV7RIOe8b+T9IPrrXfFdWMqlais0emFQcb1NZmzbqHG9AgtS+OR4KwTUVRPHVRcoYECq57Q==
+    username: AgCpdYjva0zo4gsQDATJAjpgBjYL50AX+SoiF/Bfo/MFVCk8sVvGfk3OEephQWmNauw7pSEPsRex2jOX+5B6VrdMGWWiem3pLNZhnh9vBCOXnkIQIlEkAFunZ89SZFWwzd30ednDmaQf8znO6dhHyKqwvykSM3e8x9dmnbF2g9C599wpByOB1pHXsFIURxi7ymmANE13OrdIRf7ubG92q5kVWBWIIU1xm7IINpyhy4oQrl4NhXcmxzKbEmdXLzFnd0sBQwrqydDDdUEnIsdiEJ4S7p01EOMf83b0bh9aC2BkZhQD2dmyI95+6prVSFQxLG4tDJ+UzC/iU9CESlvRR/q609U9psuuKhPAeeHfuas4QnpZXpiE/Wd22fzpedM/sAlES0UntHK9oH7v1htOzgxs6zcU+z8+/lv24jXbijPVOBtFV0QVIcSZ7IS2arQok8POk+aMHTd36T1wARYkWvoSPPJHMZu5HRW0vukMX0unK6UOQnkJ9OF556KJZJCel5Zo8MP1uzkoq5EsGUlW/jUSMCFq+VCuXvqkn4uMj+N+IMeFD4kMXwAwcCURJQrWrq/foLaV1+Jd69MfkDFEViK/k2okuk2tDya9p3A4ZocAaH3xytpMQ5VQctxKloFFFJO2bCe/0m8wtEX6xvZGeZU3D+IMj1d77QeEVidpRf/s9EANDGdWrur6O4LPX+98jzNs0bSy6xj2
+  template:
+    metadata:
+      name: db-mydb-ro
+      namespace: database
+    type: kubernetes.io/basic-auth
