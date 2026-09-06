@@ -23,6 +23,12 @@
 # 시임(테스트용): PREFLIGHT_ROOT(기본 `/`) · PREFLIGHT_IP(기본 `ip`)
 # yq 불필요. bash 3.2 호환. shellcheck clean.
 set -euo pipefail
+# 🔴 조용한 exit 1 자기진단(main gate flake 5회 서명 — 2026-09-02~06: happy-path @test가 status=1·출력 0줄).
+#    `set -e`가 어떤 명령(대개 `x="$(…)"` 대입의 치환 실패)에서 죽으면 fail()을 거치지 않아 메시지가
+#    0줄이고, CI에서만 나는 flake라 owner가 진단할 단서가 없었다. ERR trap은 `||`·if 문맥 **밖**에서
+#    실패한 명령만 잡으므로 정상 FAIL 경로(`… || fail`)의 출력은 바뀌지 않는다 — 다음 발생 때 죽은
+#    줄과 명령이 stderr에 남는다(test_02의 run_pf가 그 출력을 되울린다).
+trap 'echo "FAIL: host-preflight: 예기치 않은 종료 — 줄 ${LINENO}: ${BASH_COMMAND} (rc=$?)" >&2' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
