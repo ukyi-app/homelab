@@ -112,7 +112,33 @@ lane_grep() {   # $1=패턴 $2=입력 — 매치 줄을 stdout으로, 사망은 
   return 0
 }
 
-# 셸/TS 레인 — 직접 방출 자체가 위반이다(헬퍼 경유 강제). 행두 주석만 걷는다(옛 판과 동일 도메인).
+# quote-aware 주석 스트립 — 형제 관용구(check-bats-accounting.sh NOCOMMENT_AWK, #657 착지 ·
+# check-bats-style.sh abs_strip, 같은 q1/q2 토글 모델) 재사용. 행두 전용 sed는 실코드 줄에 붙은
+# trailing 주석을 전혀 걷지 않아, 그 안의 SKIP:/exit 4 예시 문구를 헬퍼 우회 위반으로 오판했다
+# (reg13-e-carryover-1). sh 레인은 대상 문자 `#` 그대로, ts 레인은 대상을 `//`(2문자 비교)로만
+# 바꾼 변형 — 공유 lib 신설 없이 각 스크립트가 독립 awk 블록을 갖는 기존 관례를 유지한다.
+# 따옴표(홑/겹) 안의 `#`/`//`는 절대 주석 시작으로 보지 않는다 — positive 대조가 이걸 고정한다.
+NOCOMMENT_AWK_SH=""
+IFS='' read -r -d '' NOCOMMENT_AWK_SH <<'AWKEOF' || true
+{ q1=0; q2=0; n=length($0)
+  for (i=1;i<=n;i++){ c=substr($0,i,1)
+    if (c=="'" && q2==0) q1=1-q1
+    else if (c=="\"" && q1==0) q2=1-q2
+    else if (c=="#" && q1==0 && q2==0 && (i==1||substr($0,i-1,1)~/[ \t]/)){print substr($0,1,i-1);next} }
+  print }
+AWKEOF
+
+NOCOMMENT_AWK_TS=""
+IFS='' read -r -d '' NOCOMMENT_AWK_TS <<'AWKEOF' || true
+{ q1=0; q2=0; n=length($0)
+  for (i=1;i<=n;i++){ c=substr($0,i,1)
+    if (c=="'" && q2==0) q1=1-q1
+    else if (c=="\"" && q1==0) q2=1-q2
+    else if (c=="/" && q1==0 && q2==0 && substr($0,i,2)=="//" && (i==1||substr($0,i-1,1)~/[ \t]/)){print substr($0,1,i-1);next} }
+  print }
+AWKEOF
+
+# 셸/TS 레인 — 직접 방출 자체가 위반이다(헬퍼 경유 강제). 주석은 행두든 trailing이든 quote-aware로 걷는다.
 scan_one() {
   # basename 판별 — 경로 어딘가에 Makefile이 든 .sh/.ts가 약한 짝 레인으로 새지 않게 한다.
   case "${1##*/}" in
@@ -122,11 +148,11 @@ scan_one() {
   ists=0
   case "$1" in *.ts|*.mts) ists=1 ;; esac
   if [ "$ists" -eq 1 ]; then
-    stripped="$(sed -E 's|^[[:space:]]*//.*||' "$1")"
+    stripped="$(awk "$NOCOMMENT_AWK_TS" "$1")"
     pexit="$P_TS_EXIT"
     helper="skip()"
   else
-    stripped="$(sed -E 's|^[[:space:]]*#.*||' "$1")"
+    stripped="$(awk "$NOCOMMENT_AWK_SH" "$1")"
     pexit="$P_SH_EXIT"
     helper="guard_skip"
   fi
