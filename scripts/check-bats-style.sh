@@ -302,7 +302,10 @@ function abs_target(s,   p,body,end){
     if (end > 0) {
       body = substr(body, 1, end - 1)
       if (body !~ /<<</) {
-        if (body ~ /\|/) bashc_pipe = 1
+        # reg13-d-bats-style-lanes-1 — body 원문을 그대로 검사하면 홑따옴표 알터네이션 패턴(`"A|B"`)
+        # 의 `|`가 실파이프로 오인된다(quote-aware 아님). 273행 mask_pipe(QV 레인이 이미 쓰는 관용구)
+        # 를 재사용해 따옴표 안 `|`를 가린 뒤에만 검사한다 — 신설 함수 없음.
+        if (mask_pipe(body) ~ /\|/) bashc_pipe = 1
         if (body ~ /^(grep|egrep|fgrep)[ \t]/) return 1
         if (body ~ /^git[ \t]+(-C[ \t]+[^ \t]+[ \t]+)?grep[ \t]/) return 2
       }

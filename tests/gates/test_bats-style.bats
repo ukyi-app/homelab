@@ -682,6 +682,27 @@ setup() {
   echo "$output" | grep -q '\[ABS-REC\]'
 }
 
+@test "a quoted alternation inside a single-grep bash -c body is not mistaken for a real pipe (reg13-d-bats-style-lanes-1)" {
+  # ⚠️ 착지 전: F3의 파이프 탐지(`body ~ /\|/`)가 quote-aware하지 않아, 홑따옴표 알터네이션
+  #    패턴(`"TOKEN=|OTHER="`)의 `|`만으로도 bashc_pipe=1이 서서 -ne 0 철자 면제(REC와 같은
+  #    floor∧양성대조 요구)를 받았다 — 실제로는 파이프가 없는 단일 grep이라 rc 2(부재/읽기불가)가
+  #    -ne 0을 만족시켜도 무증인이었다. floor+pc를 갖춘 이 픽스처는 mask_pipe(273행) 적용 전엔
+  #    rc 0(무검출), 적용 후엔 [ABS] 스테일 철자로 rc 1이다.
+  printf '%s\n' \
+    'setup() {' \
+    '  [ -d "$TREE" ]' \
+    '}' \
+    '@test "quoted alternation single grep bash -c absence" {' \
+    "  run bash -c 'grep -qE \"ANCHOR=|OTHER=\" \"\$1\"' _ \"\$TREE\"" \
+    '  [ "$status" -eq 0 ]' \
+    "  run bash -c 'grep -qE \"TOKEN=|OTHER=\" \"\$1\"' _ \"\$TREE\"" \
+    '  [ "$status" -ne 0 ]' \
+    '}' > "$BATS_TEST_TMPDIR/test_abs_bashc_quotedalt.bats"
+  run bash "$ROOT/scripts/check-bats-style.sh" "$BATS_TEST_TMPDIR/test_abs_bashc_quotedalt.bats"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '\[ABS\]'
+}
+
 @test "the bash -c pipe form passes once a floor and a positive control are present" {
   printf '%s\n' \
     'setup() {' \
