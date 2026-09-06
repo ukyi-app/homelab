@@ -205,7 +205,7 @@ grep -q '^DNS=' "$lf" || fail "${lf}에 DNS= 키가 없다 — 형식이 예상�
 grep -q '^NETWORK_FILE_DROPINS=' "$lf" || fail "${lf}에 NETWORK_FILE_DROPINS= 키가 없다 — 드롭인 로드 여부를 믿을 수 없다"
 lf_dns="$(sed -n 's/^DNS=//p' "$lf" | head -1 | tr -d '"')"
 [ -z "$lf_dns" ] \
-  || fail "링크 ${lf_idx}가 DNS를 받고 있다(${lf_dns}) — 링크별 DNS는 전역 DNS=보다 **우선**하므로 HOST_UPSTREAM_DNS(${HOST_UPSTREAM_DNS})가 무효다. networkd 드롭인(UseDNS=false)이 설치만 되고 반영되지 않은 상태다: sudo networkctl reload && sudo networkctl reconfigure <iface> (주소가 5초쯤 사라졌다 돌아온다) 또는 재부팅"
+  || fail "링크 ${lf_idx}가 DNS를 받고 있다(${lf_dns}) — 링크별 DNS는 전역 DNS=보다 **우선**하므로 HOST_UPSTREAM_DNS(${HOST_UPSTREAM_DNS})가 무효다. networkd 드롭인(UseDNS=false)이 설치만 되고 반영되지 않은 상태다: sudo networkctl reload && sudo networkctl reconfigure <iface> (주소가 2초쯤 사라졌다 돌아온다 — host-config --apply는 이제 복귀까지 기다린다) 또는 재부팅"
 lf_dropins="$(sed -n 's/^NETWORK_FILE_DROPINS=//p' "$lf" | head -1 | tr -d '"')"
 case "$lf_dropins" in
   *10-k3s-node.conf*) : ;;
