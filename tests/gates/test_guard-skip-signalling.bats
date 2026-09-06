@@ -79,6 +79,15 @@ fixture_suite() {   # $1: 하위 디렉토리명
   echo "$output" | grep -q "skip()"
 }
 
+# 형제 전수 열거(reg13c-a-landing-hunks-2, tests/gates/test_scan-floor.bats) — P_TS_EXIT도 같은
+# 리터럴 `.` 요구 결함을 가졌다: optional chaining(`process?.exit(4)`)이 처방 전엔 무증인이었다.
+@test "a bare TypeScript skip exit via optional chaining is still caught (process?.exit)" {
+  printf '%s\n' 'process?.exit(4);' > "$BATS_TEST_TMPDIR/optchain.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/optchain.ts"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "skip()"
+}
+
 @test "a printf %s emission of the marker is caught (the repo's dominant idiom)" {
   # 리뷰 실측(11): POSIX 브래킷에 \n 이스케이프는 없다 — [^\n]은 '역슬래시·n 제외'라서
   # printf "%s\n"(포맷 문자열의 n이 그 클래스에 걸린다)가 우회 통로였다.
@@ -252,6 +261,35 @@ fixture_suite() {   # $1: 하위 디렉토리명
   run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/ec.ts"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "직접 대입"
+}
+
+# reg13c-b-new-tests-1 — lane_grep은 파일 전체를 넘겨도 grep은 여전히 줄 단위 매치라, 백슬래시
+# 줄연속이나 대입식이 두 줄에 걸치면 P_SH_EXIT/P_TS_EXITCODE가 무증인이었다(처방 전 두 건 모두 red).
+@test "a backslash line-continued shell skip exit is still caught (newline-split bypass)" {
+  printf '%s\n' 'echo "no domain"' 'exit \' '4' > "$BATS_TEST_TMPDIR/split-exit.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/split-exit.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "guard_skip"
+}
+
+@test "a newline-split process.exitCode assignment is still caught (newline-split bypass, TypeScript)" {
+  printf '%s\n' 'process.exitCode' '= 4;' > "$BATS_TEST_TMPDIR/split-exitcode.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/split-exitcode.ts"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "직접 대입"
+}
+
+# positive 대조 — 개행-결합이 너무 넓으면 무관한 다음 줄까지 위반으로 오판한다.
+@test "a process.exitCode line followed by unrelated code is not falsely joined into a violation" {
+  printf '%s\n' 'process.exitCode' 'doSomethingElse();' > "$BATS_TEST_TMPDIR/exitcode-unrelated.ts"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/exitcode-unrelated.ts"
+  [ "$status" -eq 0 ]
+}
+
+@test "a backslash line continuation unrelated to exit stays a non-violation" {
+  printf '%s\n' 'local x=1 \' '  + 2' > "$BATS_TEST_TMPDIR/split-unrelated.sh"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/split-unrelated.sh"
+  [ "$status" -eq 0 ]
 }
 
 @test "the CLI skip marker emission stays singular in cli.ts (skipMarker owns it)" {

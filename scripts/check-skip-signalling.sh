@@ -50,7 +50,9 @@ HELPER_TS="tools/lib/cli.ts"
 #    지배적 관용구가 우회 통로였다(리뷰 실측). grep은 행 단위라 .*가 정확하다.
 T_EXIT="exit"
 P_SH_EXIT="${T_EXIT} 4([^0-9]|\$)"             # 셸 skip 종료코드 직접 방출
-P_TS_EXIT="process\\.${T_EXIT}\\(4\\)"         # TS skip 종료코드 직접 방출
+# 형제 전수 열거(reg13c-a-landing-hunks-2, tests/gates/test_scan-floor.bats) — 같은 리터럴 `.` 요구
+# 결함이 여기도 있었다(`process?.exit(4)` optional chaining 무증인, 실측 확인). `\??`로 대칭 처방.
+P_TS_EXIT="process\\??\\.${T_EXIT}\\(4\\)"     # TS skip 종료코드 직접 방출
 # TS 종료코드 손조립의 두 번째 얼굴 — exitCode에 4를 **직접 대입**하면 exit(4) 패턴 밖이다
 # (variant 파생값·변수 경유 대입은 리터럴 4가 아니라서 이 레인 밖 — 정당).
 P_TS_EXITCODE="process\.${T_EXIT}Code[[:space:]]*=[[:space:]]*4([^0-9]|\$)"
@@ -138,6 +140,30 @@ IFS='' read -r -d '' NOCOMMENT_AWK_TS <<'AWKEOF' || true
   print }
 AWKEOF
 
+# 개행-분할 흡수(reg13c-b-new-tests-1) — quote-aware 스트립 뒤에도 lane_grep은 줄 단위 매치라,
+# 백슬래시 줄연속이나 대입식이 두 줄에 걸치면 P_SH_EXIT/P_TS_EXITCODE가 무증인이었다. 전체 flatten은
+# 위험(무관한 인접 줄이 합쳐져 case 라벨 등에서 오탐) — 실행 가능한 두 형태만 좁혀 흡수한다.
+# (1) 표준 백슬래시 줄연속 — bash 문법상 유일한 합법 계속줄 형태라 오탐 없음(양옆 공백은 흡수해
+#    "exit  4"류 이중 공백으로 P_SH_EXIT의 리터럴 단일 공백을 놓치지 않게 한다).
+# 백슬래시 줄연속 결합 — GNU sed 전용 라벨 관용구(`:a;N;$!ba`)는 BSD sed(owner macOS의 `make verify`)에서
+# 라벨 파싱이 달라 깨진다(레포 선례 0건) → awk 한 줄로 같은 결합(줄 끝 `\`를 공백으로 바꾸고 다음 줄을 이어 붙인다).
+# shellcheck disable=SC2016  # awk 프로그램의 $0은 의도된 리터럴(셸 확장 아님)
+JOIN_BACKSLASH_AWK='/\\[ \t]*$/ { sub(/[ \t]*\\[ \t]*$/, " "); printf "%s", $0; next } { print }'
+
+# (2) TS 전용 — `process.exitCode`로 끝나는 줄과 `=`로 시작하는 다음 줄만 좁혀 합친다.
+#    NOCOMMENT_AWK와 같은 per-line state machine 스타일(신설 lib 불요). P_EMIT 레인은 손대지
+#    않는다 — 마커 리터럴은 항상 같은 줄 인용부호 안에 있어야 해 개행-분할 위험이 구조적으로 낮다.
+EXITCODE_JOIN_AWK_TS=""
+IFS='' read -r -d '' EXITCODE_JOIN_AWK_TS <<'AWKEOF' || true
+{ if (pending) {
+    if ($0 ~ /^[ \t]*=/) { print buf" "$0; pending=0; next }
+    print buf; pending=0
+  }
+  if ($0 ~ /process\.exitCode[ \t]*$/) { buf=$0; pending=1; next }
+  print }
+END { if (pending) print buf }
+AWKEOF
+
 # 셸/TS 레인 — 직접 방출 자체가 위반이다(헬퍼 경유 강제). 주석은 행두든 trailing이든 quote-aware로 걷는다.
 scan_one() {
   # basename 판별 — 경로 어딘가에 Makefile이 든 .sh/.ts가 약한 짝 레인으로 새지 않게 한다.
@@ -149,10 +175,13 @@ scan_one() {
   case "$1" in *.ts|*.mts) ists=1 ;; esac
   if [ "$ists" -eq 1 ]; then
     stripped="$(awk "$NOCOMMENT_AWK_TS" "$1")"
+    stripped="$(awk "$JOIN_BACKSLASH_AWK" <<<"$stripped")"
+    stripped="$(awk "$EXITCODE_JOIN_AWK_TS" <<<"$stripped")"
     pexit="$P_TS_EXIT"
     helper="skip()"
   else
     stripped="$(awk "$NOCOMMENT_AWK_SH" "$1")"
+    stripped="$(awk "$JOIN_BACKSLASH_AWK" <<<"$stripped")"
     pexit="$P_SH_EXIT"
     helper="guard_skip"
   fi

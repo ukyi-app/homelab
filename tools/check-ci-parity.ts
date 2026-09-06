@@ -180,21 +180,44 @@ function commandsIn(run: string): string[] {
   return [...out];
 }
 
-// `make -n ci` 출력에서 **실제 호출이 아닌 텍스트**를 지운다(④ 대조 전용).
+// quote-aware `#` 주석 스트립 — scripts/check-skip-signalling.sh의 NOCOMMENT_AWK_SH와 동형 모델을
+// TS로 이식(신설 lib 없이 이 파일 로컬 함수). execOnly의 옛 행두 전용 정규식(`^[ \t]*#.*$`)은 실 호출
+// 뒤에 붙은 trailing `# ...` 죽은 참조를 못 걷어, ⑤ covered_by 대조가 그 죽은 주석만으로도 rc=0으로
+// 통과했다(reg13c-a-landing-hunks-1 — witness.txt를 `true  # tests/witness.bats ...`로 바꿔도
+// 실측 통과 확인). 따옴표(홑/겹) 안의 `#`는 절대 주석 시작으로 보지 않는다 — positive 대조가 이걸 고정한다.
+function stripHashComments(s: string): string {
+  return s
+    .split("\n")
+    .map((line) => {
+      let q1 = false;
+      let q2 = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === "'" && !q2) q1 = !q1;
+        else if (c === '"' && !q1) q2 = !q2;
+        else if (c === "#" && !q1 && !q2 && (i === 0 || /[ \t]/.test(line[i - 1]))) return line.slice(0, i);
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+// `make -n ci` 출력·covered_by 대상 파일에서 **실제 호출이 아닌 텍스트**를 지운다(④ mirrored ·
+// ⑤ covered_by 공용).
 //   · `command -v <도구>` — 전제 프로브다. 도구의 존재를 묻지, 도구를 부르지 않는다.
 //   · `echo "…" >> <파일>` — 미평가 원장에 이름만 남기는 append다. 부르지 못했다는 기록이지 호출이 아니다.
-//   · 행두 `#` 주석 — recipe 줄의 `#`는 make 주석이 **아니라** 셸에 그대로 넘어가므로 `-n` 출력에
-//     리터럴로 남는다. 즉 recipe 한 줄을 `#`로 막아도 `makeExec.includes(w)`가 참이 돼 mirrored 전건이
-//     조용히 초록이 된다(실측 2026-09-04: Makefile의 `bun run verify:ledger`를 `# bun run verify:ledger`로
-//     바꿔도 `mirrored 24 · covered 2` rc=0으로 before/after 동일). 형제 관용구는
-//     tools/check-guard-authority.ts의 stripComment — 같은 `make -n` 텍스트에 행두 앵커를 이미 쓴다.
+//   · `#` 주석(행두·trailing 모두, quote-aware) — recipe 줄의 `#`는 make 주석이 **아니라** 셸에
+//     그대로 넘어가므로 `-n` 출력에 리터럴로 남는다. 즉 recipe 한 줄을 `#`로 막아도
+//     `makeExec.includes(w)`가 참이 돼 mirrored 전건이 조용히 초록이 된다(실측 2026-09-04: Makefile의
+//     `bun run verify:ledger`를 `# bun run verify:ledger`로 바꿔도 `mirrored 24 · covered 2` rc=0으로
+//     before/after 동일). 형제 관용구는 tools/check-guard-authority.ts의 stripComment — 같은
+//     `make -n` 텍스트에 행두 앵커를 이미 쓴다(이 함수는 trailing까지 포함해 더 넓다).
 // 변수명(`CI_UNEVAL`)에 기대지 않는다 — 그 이름이 바뀌면 정제가 조용히 멎고 fail-open이 돌아온다.
 // recipe의 append-echo는 구조상 게이트 호출일 수 없으므로 형태로 지운다.
 // 실측 2026-08-28: 실 레포 mirrored 22항목·local 34문자열에 대해 정제로 사라지는 것 **0건**(오탐 없음).
 // 실측 2026-09-04: 주석 갈래 추가 후에도 클린 트리 mirrored 24 전건 통과(오탐 0건).
 function execOnly(s: string): string {
-  return s
-    .replace(/^[ \t]*#.*$/gm, "")
+  return stripHashComments(s)
     .replace(/command -v \S+/g, "")
     .replace(/\becho\s+"[^"]*"\s*>>[^\n;]*/g, "")
     .replace(/\becho\s+'[^']*'\s*>>[^\n;]*/g, "");

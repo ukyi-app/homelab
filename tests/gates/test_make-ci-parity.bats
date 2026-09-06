@@ -352,6 +352,27 @@ mkparity_covered_fixture() {   # $1=디렉토리  $2=covered_by.file(witness.txt
   [ "$status" -eq 0 ]
 }
 
+# reg13c-a-landing-hunks-1 — 위 뮤테이션은 행두 전용 주석이었다. execOnly의 옛 정규식(`^[ \t]*#.*$`)은
+# 실 코드 뒤에 붙은 trailing `# ...`는 전혀 걷지 않아, 실 호출을 지우고 두 칸 공백 + `#`만 남기는
+# 흔한 리팩터 패턴이 covered_by를 rc=0으로 계속 통과시켰다(처방 전 실측: witness.txt를
+# `true  # tests/witness.bats reference kept only as a trailing dead comment`로 바꿔도 green).
+@test "a covered_by token surviving solely as a trailing dead comment does not prove the mechanism is real" {
+  muted="$BATS_TEST_TMPDIR/covered-trailing-muted"
+  mkparity_covered_fixture "$muted" 'true  # tests/witness.bats reference kept only as a trailing dead comment'
+  run bash -c "cd '$muted' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF -- '덮는다는 주장이 더 이상 참이 아니다'
+}
+
+# positive 대조 — 따옴표 안의 `#`는 주석이 아니다. quote-aware 스트립이 과잉 적용되면 문자열 리터럴
+# 안의 실 토큰까지 죽은 주석으로 오판해 covered_by가 거짓 실패를 낸다(과잉 스트립 회귀 방지).
+@test "a covered_by token inside a quoted string containing a hash is still recognized as real" {
+  live="$BATS_TEST_TMPDIR/covered-quoted-hash"
+  mkparity_covered_fixture "$live" 'echo "bats tests/witness.bats # not a comment"'
+  run bash -c "cd '$live' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
+  [ "$status" -eq 0 ]
+}
+
 # ── ⑧ 이름 보존 + 본문 교체 ────────────────────────────────────────────────────────────────────
 # ④는 원장 → `make -n ci`, ⑦은 ci.yaml 본문 → 원장이다. 둘 다 스텝을 **이름**으로 계상하므로,
 # 이름을 남기고 run 본문만 갈아치우면 ④는 Makefile 쪽 문자열로 통과하고 ⑦은 본문에 레포 커맨드가
