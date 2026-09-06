@@ -3,7 +3,7 @@
 # restore-drill·pg_dump→rclone→R2 헤지·ensure-role-password Job, 캐시(Valkey) 백업,
 # AdGuard rewrite 리컨실러, pvc-du-exporter가 사용한다.
 # ghcr.io/<owner>/pg-tools:18-rclone으로 게시된다(.github/workflows/build.yaml matrix).
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 
 # ⚠️ 기본값을 주지 않는다. stage-level ARG 기본값은 BuildKit predefined platform arg를 **이긴다**
 #   (실측: `ARG TARGETARCH=arm64` + `--platform linux/amd64` → TARGETARCH=[arm64]).
