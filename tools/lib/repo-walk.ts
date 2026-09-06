@@ -25,7 +25,7 @@
 // 정당한 상태를 고장으로 신고한다(구현 중 픽스처 3곳이 연달아 이 신호를 줬다).
 // 실행은 exec seam 경유(d6④) — git 실패는 빈 목록으로 흡수하는 기존 계약 유지(바닥값이 진단을 대신한다).
 import { git } from "./exec.ts";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { type Document, parseAllDocuments } from "yaml";
 
 // 열거 출처. tracked = git ls-files(untracked helm 캐시 platform/*/prod/charts/가 자동 제외된다 —
@@ -274,6 +274,20 @@ function trackedPaths(root: string, sub: string): string[] {
   return r.out.split("\n").filter(Boolean);
 }
 
+// Dirent.isDirectory()는 심볼릭 링크 엔트리에서 대상과 무관하게 항상 false다(readdir이 링크를
+// follow하지 않음) — 디렉토리를 가리키는 심볼릭 링크가 열거에서 통째로 누락된다(reg13-e-carryover-2).
+// tools/lib/surface-hash.ts:43-51이 이미 쓰는 형태(대상 종류를 명시 판정)를 여기 재사용한다.
+// 깨진 심볼릭 링크(대상 없음)의 statSync는 throw하므로 false로 접는다 — "디렉토리 아님"이 맞는 판정.
+function isDirEntry(full: string, e: { isDirectory(): boolean; isSymbolicLink(): boolean }): boolean {
+  if (e.isDirectory()) return true;
+  if (!e.isSymbolicLink()) return false;
+  try {
+    return statSync(full).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 // filesystem 열거 — 유닛 스코프 전용. 유닛은 "디렉토리가 존재하는가"라는 파일시스템 질문이고,
 // 실측상 tracked 파생과 결과가 동일하다(apps 2=2 · platform 16=16). tracked가 사는 곳은 untracked
 // helm 캐시(platform/*/prod/charts/)인데 그건 **매니페스트 레벨** 문제라 유닛엔 이득이 없다.
@@ -281,7 +295,7 @@ function trackedPaths(root: string, sub: string): string[] {
 function filesystemDirs(root: string, sub: string): string[] {
   try {
     return readdirSync(`${root}/${sub}`, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
+      .filter((e) => isDirEntry(`${root}/${sub}/${e.name}`, e))
       .map((e) => `${sub}/${e.name}/`); // 유닛 패턴이 경계 슬래시를 기대한다
   } catch {
     return [];
