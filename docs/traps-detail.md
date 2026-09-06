@@ -2388,3 +2388,35 @@ selfHeal과 플립플롭한다.
   좁히지 않은 이유는 처방 문안을 벗어난 자체 확장이 이 축의 범위를 티켓 하나가 감당 못 할 크기로
   불리기 때문이다 — 다음 라운드가 `-eq` 분모에서 `"$status"` 좌변을 제외하는 방향으로 좁힐 후보다.
 > 가드: `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats`
+### host-config --apply의 링크 재설정은 DHCP 리스를 2초 잃는다 — `&& make up` 체인은 그 창을 정확히 밟는다
+- **병(2026-09-06 00:16 KST 실측 — substrate 수렴 1차 실행)**: `infra/k3s-bootstrap/host-config.sh --apply`가
+  [6/6]에서 networkd 드롭인(`10-netplan-wlo1.network.d/10-k3s-node.conf`)을 반영하려고 `networkctl reload` +
+  `reconfigure wlo1`을 한다. 저널: 00:16:51 `Reconfiguring with …(dropins: …)` → 같은 초 `DHCP lease lost` →
+  00:16:53 `DHCPv4 address 192.168.117.15/24 … acquired`. 그 **2초 동안 링크에 IPv4 주소가 없다** — 그
+  주소는 `K3S_NODE_IP`이자 AdGuard LoadBalancer VIP다. 스크립트는 reconfigure를 부르고 **곧바로 종료**했으므로
+  `host-config.sh --apply && make up`으로 이으면 host-up [1/4] host-preflight의 [4](`ip -o -4 addr show`
+  열거 → `grep -qxF "$K3S_NODE_IP"`)가 정확히 그 창을 밟아 「핀한 K3S_NODE_IP가 어느 인터페이스에도 없다 —
+  DHCP 예약(MAC …)을 확인할 것」으로 FAIL한다(Makefile:44). 설정 결함이 아니다: IP·MAC·리스·k3s Ready
+  전부 정상이었고 재실행이면 통과한다 — 즉 **원인 측이 자기 부작용을 흡수하지 않아 소비 측이 flake를
+  떠안은** 형태다. 메시지가 가리키는 처방(DHCP 예약 확인)은 오진이라 사람을 라우터로 보낸다.
+- **왜 소비 측 완화(host-preflight [4] 재시도)가 아닌가**: [4]는 "실효값이 맞는가"를 재는 자리다. 거기에
+  「configuring이면 ≤15s 재시도」를 넣으면 진짜 주소 부재(DHCP 예약 불일치·링크 다운)도 15초를 더 기다린
+  뒤에야 드러나고, 무엇보다 **원인을 모르는 채 증상을 흡수**한다 — 다른 호출자(수동 `networkctl
+  reconfigure`, 재부팅 직후)의 창은 그대로 남는다. 창을 연 쪽이 닫는 것이 정확한 자리다.
+- **처방(원인 측)**: `--apply`는 reconfigure 뒤 `net_settled`가 참이 될 때까지 1초 간격으로 기다린 뒤에야
+  종료한다. 증인 둘을 **함께** 요구한다 — ① networkd 자신의 판정(`networkctl --no-legend list <iface>`의
+  SETUP 열 = `configured`, 재설정 중엔 `configuring`) ② host-preflight [4]와 **같은 열거**(`ip -o -4 addr
+  show dev <iface>`)에 핀 IP 존재. 하나만 보면 안 된다: ①은 주소 없이도 configured로 갈 수 있고(예약
+  불일치), ②는 주소가 먼저 붙고 networkd가 아직 configuring일 수 있다(그때의 `/run/systemd/netif/links/
+  <idx>`를 [6]이 읽는다). 상한(`HOSTCFG_NET_WAIT_S`, 기본 15초 = 실측의 7배)을 넘기면 **exit 0이 아니라
+  FAIL** — 이 스크립트가 끊은 주소가 돌아오지 않았는데 "적용 완료"라고 말하면 거짓이고, 그 거짓은 다음
+  단계가 같은 이유로 FAIL해서야 드러난다(형제 원칙 「재부팅을 요구하면 '적용했다'가 거짓이 된다」).
+  두 증인은 `$RUN`(sudo) 없이 부른다 — 읽기 전용이라 그럴 필요가 없고, 그래야 테스트가 PATH 스텁으로
+  둘을 따로 흔들 수 있다(test_03: ① configured인데 ② 2회 부재 → 3회째 복귀를 기다렸다는 프로브 카운트
+  등식 · ① configuring 고정 + 상한 2초 → FAIL 메시지. 뮤테이션 실측: ①만 빼면 후자가, ②만 빼면 전자가,
+  루프를 통째로 빼면 둘 다 red).
+- ⇒ **일반형**: 자기가 링크·데몬·리스를 끊었다 되살리는 스크립트는 "되살아났다"를 **자기가 확인한 뒤**
+  종료한다. `&&`로 이어지는 다음 단계가 그 창을 밟지 않는다는 보장은 시간이 아니라 증인에서 나온다 —
+  형제: 「`&`로 띄운 헬퍼의 바인드 실패는 `set -e`에 안 걸린다 — readiness 줄이 없으면 …」(readiness를
+  시간이 아니라 신호로 재라는 같은 계열).
+> 가드: `infra/k3s-bootstrap/tests/test_03-host-config.bats`
