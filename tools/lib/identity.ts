@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+
 // 앱-이름 식별자 SSOT — 모든 mutator(create-app/teardown-app/validate-mutation/
 // activate-app/bump-tag) **및 앱 이름으로 경로·리소스명을 조립하는 리더(lib/status)**가 이
 // 정규식을 공유한다. 정책은 validate-mutation의 화이트리스트:
@@ -48,6 +50,18 @@ export function pushRouteError(owner: string, app: string, routes: string[] | nu
     return `push 경로가 canonical ${owner}/${app}가 아니다(${routes.join(", ") || "0개"}) — pushurl/insteadOf 재배선 의심`;
   }
   return null;
+}
+
+// 경로 입력의 절대성 SSOT(homelab-cli-r2 티켓 02) — MCP 명시 경로(repoPath·parentDir·envDir)는 서버 cwd·HOME을
+// 기준점으로 삼지 않는다. 상대 경로는 서버 cwd(기본 = homelab 워킹 트리) 아래에 클론·스캐폴드·자격 파일을 만들고,
+// '~'는 확장되지 않아 리터럴 `~` 디렉토리가 생긴다(실측). owner 결정(2026-09-07): 서버 확장 없이 **거부 + 안내**.
+// 술어는 입력 함수(init·secrets·conn-url)가 공유하고, MCP inputSchema의 pattern "^/"이 같은 선언을 에이전트에게
+// 광고한다(두 표면이 같은 판정). CLI는 이 필드를 넘기지 않으므로(undefined = process.cwd()) 콜사이트는 undefined를
+// 통과시킨다 — 안 그러면 CLI 동사 전부가 usage 오류가 된다. `..`·심볼릭 링크 해석은 하지 않는다(봉인 루트가 없는
+// owner-local 도구에서 막아야 할 것은 traversal이 아니라 **묵시적 기준점**이다).
+export function pathInputError(label: string, value: string): string | null {
+  if (isAbsolute(value)) return null;
+  return `${label}는 절대 경로여야 한다(예: /home/<user>/apps) — 상대 경로·'~'는 서버가 확장·추론하지 않는다: ${value}`;
 }
 
 // db/cache 예약 이름 — 실행기·디스패처 공유(둘이 다르면 디스패처 통과→실행기 거부 갭).

@@ -7,6 +7,9 @@
 //   - 각 tool 호출은 동기·바운디드 — --wait류 장기 대기는 스키마에 없다(입력에 wait/pollMs/deadlineMs 부재).
 //   - 결과 = CLI --json과 같은 계약 오브젝트(op가 낸 envelope). isError는 variant로 매핑(x-contract.mcp).
 //   - 디렉토리 추론 없음 — secrets는 앱 레포 경로(repoPath), init은 부모 디렉토리(parentDir)를 명시 입력으로.
+//     경로 입력 3종(repoPath·parentDir·envDir)은 **절대 경로만**(pattern "^/" + identity.pathInputError — 상대 경로·'~'는
+//     -32602, 서버가 확장·추론하지 않는다). 존재하지 않는/앱 레포 아닌 명시 repoPath는 레포 밖이 아니라 거부다
+//     (dispatch-only 폴백은 CLI 암묵 cwd 전용 — homelab-cli-r2 티켓 02, owner 결정 2026-09-07).
 //   - 서버는 무상태 — 동시 호출은 각자 run/PR URL 핸들로 독립 조회되고(status 핸들 모드), 재시작 후 재호출 정상.
 //
 // ⚠️ **입력 표면 선언 3벌(verbs.ts의 op 입력 타입 · 이 파일의 tool inputSchema · 결과 계약의 verb 축)은
@@ -66,8 +69,17 @@ const usage = (m: string): ToolResult => ({ kind: "usage", message: m });
 // url tool(db url/cache url) — 다른 tool과 같은 경로: conn URL 엔진의 op를 직접 소비한다
 // (cli-deepening 심화 5 — 자식 프로세스 이중 실행·계획 키 화이트리스트(release r2-a5 땜질)는
 // 엔진의 타입 결과(UrlResult ↔ urlResult 1:1)로 소멸했다). 평문 비출력·F2 채널 분리는 엔진 소유.
-// envDir = 대상 env 파일의 기준 디렉토리 명시 입력(서버 cwd 추론 없음). envLocal 축은 엔진에
-// 존재하지만 MCP에는 노출하지 않는다(설계 Q9 — 파일 기록 축 확대는 별도 신뢰 경계 결정).
+// envDir = 대상 env 파일의 기준 디렉토리 명시 입력(서버 cwd 추론 없음 — 절대 경로만, 상대 경로면 서버 cwd 아래에
+// 자격 파일이 떨어지므로 거부). envLocal 축은 엔진에 존재하지만 MCP에는 노출하지 않는다(설계 Q9 — 파일 기록 축
+// 확대는 별도 신뢰 경계 결정).
+
+// 경로 속성 description — 에이전트가 경로 의미론을 알 유일한 채널(tools/list)이다. 강제하는 성질만 서술한다
+// (플래그 광고 금지 — mcp-3 류 드리프트 방지): 절대 경로, 기준점 없음, 그 자리에 무엇이 생기는가.
+const ABS_HINT = "절대 경로만(예: /home/<user>/apps). 상대 경로·'~'는 거부된다 — 서버 cwd·HOME을 기준점으로 삼지 않으며 '~'는 확장되지 않는다.";
+const DESC_REPO_PATH = `앱 레포 루트의 ${ABS_HINT} 존재하지 않거나 앱 레포(.app-config.yml 마커 + canonical remote)가 아니면 디스패치 없이 거부된다.`;
+const DESC_PARENT_DIR = `클론 대상 부모 디렉토리의 ${ABS_HINT} 그 아래에 <app>/ 클론·스캐폴드·첫 push가 만들어진다.`;
+const DESC_ENV_DIR = `자격 파일(.env.local / admin은 .env.admin.local)이 기록될 기준 디렉토리의 ${ABS_HINT}`;
+const DESC_DISPATCH_SECRETS = "GitHub App 키 파일(app-id·private-key.pem)이 있는 디렉토리 경로. 지정 시 두 파일이 모두 있어야 하며 값은 --body-file로만 전달된다.";
 
 // MCP tool 테이블 — VERBS 순서를 따르되 destructive(teardown)·서버 모드(mcp)는 제외한다.
 // 각 tool은 op를 --wait 없이 호출한다(wait 미노출 = 동기 바운디드).
@@ -135,7 +147,7 @@ const TOOLS: McpTool[] = [
     description: APP_SECRETS.desc,
     inputSchema: {
       type: "object", additionalProperties: false, required: ["app", "repoPath"],
-      properties: { app: { type: "string", minLength: 1 }, repoPath: { type: "string", minLength: 1 }, noSeal: { type: "boolean" } },
+      properties: { app: { type: "string", minLength: 1 }, repoPath: { type: "string", minLength: 1, pattern: "^/", description: DESC_REPO_PATH }, noSeal: { type: "boolean" } },
     },
     call: (a) => {
       // repoPath = 앱 레포 경로 명시 입력(서버 cwd 추론 없음 — input.cwd로 흐른다).
@@ -153,8 +165,8 @@ const TOOLS: McpTool[] = [
         // archetype enum은 아키타입 SSOT(platform.ts ARCHETYPES)의 파생이다 — 리터럴 사본이면 아키타입
         // 확장 시 init 엔진은 수용하는데 MCP만 -32602로 거부하는 입력 표면 드리프트가 난다(cli-deepening 심화 6).
         app: { type: "string", minLength: 1 }, archetype: { enum: [...ARCHETYPES] },
-        parentDir: { type: "string", minLength: 1 }, public: { type: "boolean" },
-        dispatchSecrets: { type: "string" }, adopt: { type: "boolean" },
+        parentDir: { type: "string", minLength: 1, pattern: "^/", description: DESC_PARENT_DIR }, public: { type: "boolean" },
+        dispatchSecrets: { type: "string", minLength: 1, description: DESC_DISPATCH_SECRETS }, adopt: { type: "boolean" },
       },
     },
     call: (a) => {
@@ -174,7 +186,7 @@ const TOOLS: McpTool[] = [
       type: "object", additionalProperties: false, required: ["name", "envDir"],
       properties: {
         name: { type: "string", minLength: 1 }, mode: { enum: ["ro", "rw", "admin"] },
-        host: { type: "string" }, envDir: { type: "string", minLength: 1 }, dryRun: { type: "boolean" },
+        host: { type: "string" }, envDir: { type: "string", minLength: 1, pattern: "^/", description: DESC_ENV_DIR }, dryRun: { type: "boolean" },
       },
     },
     call: (a) => {
@@ -194,7 +206,7 @@ const TOOLS: McpTool[] = [
       type: "object", additionalProperties: false, required: ["name", "envDir"],
       properties: {
         name: { type: "string", minLength: 1 }, rw: { type: "boolean" },
-        host: { type: "string" }, envDir: { type: "string", minLength: 1 }, dryRun: { type: "boolean" },
+        host: { type: "string" }, envDir: { type: "string", minLength: 1, pattern: "^/", description: DESC_ENV_DIR }, dryRun: { type: "boolean" },
       },
     },
     call: (a) => {

@@ -13,7 +13,7 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { compact } from "./contract.ts";
 import { ALLOW_PUSH_REWRITE_ENV, git, pushRoutes, sh } from "./exec.ts";
-import { APP_NAME_RE, isCanonicalClone, pushRouteError } from "./identity.ts";
+import { APP_NAME_RE, isCanonicalClone, pathInputError, pushRouteError } from "./identity.ts";
 import { ARCHETYPES, OWNER, TEMPLATE_REPO } from "./platform.ts";
 import { SCAFFOLD_ENTRY, scaffoldContractError } from "./template-contract.ts";
 
@@ -39,6 +39,8 @@ export function appInitInputError(input: AppInitInput): string | null {
   if (!(ARCHETYPES as readonly string[]).includes(input.archetype ?? "")) {
     return `아키타입은 ${ARCHETYPES.join("|")} 중 하나여야 한다: ${input.archetype}`;
   }
+  // 명시 parentDir(MCP)만 절대성을 잰다 — undefined는 CLI 기본(process.cwd())이라 통과(identity.pathInputError 주석).
+  if (input.parentDir !== undefined) { const pe = pathInputError("parentDir", input.parentDir); if (pe !== null) return pe; }
   return null;
 }
 

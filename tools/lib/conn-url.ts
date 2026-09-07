@@ -19,7 +19,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { sh } from "./exec.ts";
-import { RESOURCE_NAME_RE } from "./identity.ts";
+import { RESOURCE_NAME_RE, pathInputError } from "./identity.ts";
 import { layoutFor } from "./resource-layout.ts";
 
 export type DbUrlInput = {
@@ -81,6 +81,8 @@ export function hostError(host: string): string | null {
 export function dbUrlInputError(input: DbUrlInput): string | null {
   if (!input.name || !RESOURCE_NAME_RE.test(input.name)) return `이름 형식 불량(소문자 kebab, ≤30): ${input.name}`;
   if (input.host !== undefined) { const he = hostError(input.host); if (he !== null) return `--host ${he}`; }
+  // 명시 envDir(MCP)만 절대성을 잰다 — undefined는 process.cwd() 기준(CLI)이라 통과(identity.pathInputError 주석).
+  if (input.envDir !== undefined) { const pe = pathInputError("envDir", input.envDir); if (pe !== null) return pe; }
   if (input.rw === true && input.admin === true) return "--rw와 --admin은 상호배타 — 하나만 지정";
   // F2 채널 분리 완결 — admin은 .env.admin.local에만 기록(런타임 채널로 superuser URL 유출 차단).
   if (input.admin === true && input.envLocal !== undefined && input.envLocal !== ".env.admin.local") {
@@ -91,6 +93,7 @@ export function dbUrlInputError(input: DbUrlInput): string | null {
 export function cacheUrlInputError(input: CacheUrlInput): string | null {
   if (!input.name || !RESOURCE_NAME_RE.test(input.name)) return `이름 형식 불량(소문자 kebab, ≤30): ${input.name}`;
   if (input.host !== undefined) { const he = hostError(input.host); if (he !== null) return `--host ${he}`; }
+  if (input.envDir !== undefined) { const pe = pathInputError("envDir", input.envDir); if (pe !== null) return pe; }
   return null;
 }
 

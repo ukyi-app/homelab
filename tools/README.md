@@ -310,7 +310,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   tool 이름(verb.path.join("_"))·입력 스키마·인자→op 입력 매핑·JSON-RPC 프레이밍만 갖고 동사 실체는
   verbs.ts op다. 노출 = VERBS 중 !destructive(teardown 제외, 초기화 totality 가드가 파괴 누출·신규
   동사 누락을 fail-closed 차단). --wait류 미노출(동기 바운디드)·명시 경로(secrets=repoPath·init=
-  parentDir, cwd 추론 없음)·결과는 CLI --json과 같은 envelope(isError는 x-contract.mcp variant 매핑)·
+  parentDir·url=envDir, cwd 추론 없음 — **절대 경로만**(pattern "^/" + identity.pathInputError 한 술어, 상대·'~'는
+  -32602 + 안내 문구) · 존재하지 않는/앱 레포 아닌 명시 repoPath는 dispatch-only 강등이 아니라 거부(CLI 암묵 cwd만
+  dispatch-only) · 경로 속성 description이 의미론을 광고)·결과는 CLI --json과 같은 envelope(isError는 x-contract.mcp variant 매핑)·
   usage 오류는 invalid params(-32602). 무상태 — 동시 호출은 run/PR URL 핸들로 독립, 재시작 후 정상.
   url 패스스루(db/cache url)는 캡처 실행(stdio 오염 방지)+명시 envDir. `homelab mcp`가 진입점(서버는
   transport 모드라 catalog 밖 — 자기 자신 비노출).

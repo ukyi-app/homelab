@@ -11,11 +11,11 @@
 // 멱등: 같은 봉인본이면 커밋·push가 no-op으로 건너뛰어지고 디스패치만 재시도된다(push 성공·
 //   디스패치 실패 경계가 재실행으로 수렴). 평문(.env)은 seal 도구의 kubeseal stdin 전용 — 이 엔진은
 //   .env를 읽지도, 봉인본 내용을 출력하지도 않는다.
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { compact } from "./contract.ts";
 import { laneMutationFields } from "./catalog-rows.ts";
 import { ALLOW_PUSH_REWRITE_ENV, git, pushRoutes, sh } from "./exec.ts";
-import { APP_NAME_RE, isCanonicalClone, pushRouteError } from "./identity.ts";
+import { APP_NAME_RE, isCanonicalClone, pathInputError, pushRouteError } from "./identity.ts";
 import { runMutation, waitInputError, waitOpts, type MutationOutcome, type WaitInput } from "./mutation.ts";
 import { OWNER } from "./platform.ts";
 
@@ -29,6 +29,8 @@ export type AppSecretsInput = WaitInput & { app: string; noSeal?: boolean; cwd?:
 // 입력 검증 술어 — CLI(usage exit 2)·MCP(invalid params)가 공유.
 export function appSecretsInputError(input: AppSecretsInput): string | null {
   if (!APP_NAME_RE.test(input.app ?? "")) return `앱 이름 형식 불량(소문자 kebab, 2..40): ${input.app}`;
+  // 명시 cwd(MCP repoPath)만 절대성을 잰다 — undefined는 CLI 기본(process.cwd())이라 통과(identity.pathInputError 주석).
+  if (input.cwd !== undefined) { const pe = pathInputError("repoPath", input.cwd); if (pe !== null) return pe; }
   return waitInputError(input);
 }
 
@@ -114,8 +116,27 @@ export function runAppSecrets(input: AppSecretsInput, cwd = process.cwd()): Muta
   const app = input.app;
   let chain: Chain;
 
+  // 명시 cwd(MCP repoPath)는 fail-closed다(homelab-cli-r2 티켓 02 — owner 결정 2026-09-07): 존재하지 않거나 앱 레포가
+  // 아닌 명시 경로는 '레포 밖(dispatch-only)'이 아니라 **거부**다. 에이전트가 "새 .env를 봉인해 배선하라"고 부른
+  // 호출이 옛 봉인본 재배선 success(chain.mode=dispatch-only)로 돌아오던 fail-open을 막는다. dispatch-only 폴백은
+  // CLI 암묵 cwd(input.cwd 부재 — 사람이 homelab 디렉토리에서 재배선) 전용으로 남고, 결과 스키마 enum은 유지된다.
+  // 거부 envelope의 chain.mode는 "그 경로가 받았을 모드"(dispatch-only)다 — 연쇄는 시작되지 않았다.
+  const explicit = input.cwd !== undefined;
+  const refuse = (error: string): MutationOutcome =>
+    ({ variant: "failure", omitted: [], result: compact({ action: "update-secrets", name: app, chain: { mode: "dispatch-only" }, error }) });
+  if (explicit) {
+    let isDir = false;
+    try { isDir = statSync(cwd).isDirectory(); } catch { isDir = false; } // 깨진 심볼릭 링크도 throw → 디렉토리 아님
+    if (!isDir) return refuse(`명시 repoPath(${cwd})가 디렉토리가 아니다 — 디스패치 없이 거부(dispatch-only 폴백은 CLI 암묵 cwd 전용)`);
+  }
   const top = git(cwd, ["rev-parse", "--show-toplevel"]);
+  // git 바이너리 부재(exec seam errKind not-found)는 '앱 레포 밖'이 아니라 환경 결함이다 — 어느 모드에서도
+  // dispatch-only로 접지 않는다(판정을 못 한 것과 판정 결과 '밖'은 다르다).
+  if (top.errKind !== undefined) return refuse(`git 실행 불가(${top.errKind}: ${top.err.split("\n")[0] || "spawn 실패"}) — 앱 레포 판정을 할 수 없어 디스패치 없이 거부`);
   const toplevel = top.ok ? top.out.trim() : null;
+  if (explicit && (toplevel === null || !existsSync(`${toplevel}/${APP_MARKER}`))) {
+    return refuse(`명시 repoPath(${cwd})가 앱 레포가 아니다(git toplevel 또는 ${APP_MARKER} 마커 부재) — 디스패치 없이 거부(dispatch-only 폴백은 CLI 암묵 cwd 전용)`);
+  }
   if (toplevel !== null && existsSync(`${toplevel}/${APP_MARKER}`)) {
     // 앱 레포 후보 — remote가 canonical이 아니면 fail-closed(엉뚱한 레포에서 이 앱 이름으로 디스패치 금지).
     // 구성 신원 판정은 identity.ts SSOT 술어 — 원본 설정값(insteadOf 미적용)을 본다.
