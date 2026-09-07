@@ -25,9 +25,18 @@ cli_stub_init() {
   BUN="$(command -v bun)"
   # sleep — 디스패치 타임아웃 주입(STUB_GH_DISPATCH_HANG)이 자식을 살아 있게 두는 유일한 수단이다
   # (PATH는 대체라 시스템 도구가 자동으로 들어오지 않는다).
-  for t in bun bash base64 cat git sleep; do
+  # jq는 raw 형상 레인(STUB_GH_RAW=1) 전용이다 — 그 레인에서만 gh stub이 **실제 jq**를 돌린다.
+  # 부재 시 조용한 통과가 아니라 exit 127로 죽어야 해서(test_homelab-gh-jq-contract.bats가 단언),
+  # 스텁 본체는 폴백을 두지 않는다.
+  for t in bun bash base64 cat git sleep jq; do
     ln -s "$(command -v "$t")" "$STUB/$t"
   done
+
+  # 원시 GitHub 페이로드 픽스처 — 접힘이 있는 필터(workflow_runs 언랩 · head.ref 중첩 ·
+  # auto_merge != null)의 의미론 증인. 손으로 적은 형상이 SSOT이고, 테스트는 사본을 뮤테이션해
+  # 필드 리네임이 red가 되는지 잰다(GH_RAW_DIR를 그 사본으로 가리켜서).
+  GH_RAW_DIR="$BATS_TEST_DIRNAME/fixtures/homelab/gh-raw"
+  export GH_RAW_DIR
 
   # 템플릿 컨텐츠 픽스처 — 기본값은 "호환 템플릿"(비대화형 마커 + 컴파일 3종 TARGETARCH).
   # 비호환 시나리오는 각 테스트가 파일을 덮어써서 만든다.
@@ -142,9 +151,16 @@ PY
 # 임의 owner/repo URL을 정당한 입력으로 받는 계약이라(좁히면 계약을 거짓으로 검증) 의도적 비대칭.
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
-# STUB_GH_HANDLE_404 / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패 3종(STUB_GH_RUNS_LIST_FAIL ·
-# STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기 픽스처 2종
-# (STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL). 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
+# STUB_GH_HANDLE_404 / STUB_GH_RAW / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
+# 3종(STUB_GH_RUNS_LIST_FAIL · STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기
+# 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL). 템플릿 파일·status 응답
+# 내용은 $FIX 픽스처가 SSOT.
+#
+# ⚠️ 기본 픽스처는 jq를 **적용한 뒤의** 형상이다 — 손으로 접어 적은 결과라 필터의 의미론
+#    (`.workflow_runs[]` 언랩 · `head: .head.ref` 중첩 · `auto_merge != null` 접힘)은 증언하지 못한다.
+#    case 패턴은 필터 **텍스트**까지 정확 일치라 드리프트를 exit 3으로 잡지만, GitHub 필드 리네임은
+#    접힌 픽스처 아래에서 여전히 초록이다. 그 축은 STUB_GH_RAW=1 레인이 진다: 원시 페이로드
+#    ($GH_RAW_DIR/*.json)에 **실제 jq**를 돌린다(tools/tests/test_homelab-gh-jq-contract.bats).
 make_gh_stub() {
   cat > "$STUB/gh" <<'SH'
 #!/usr/bin/env bash
@@ -209,38 +225,38 @@ case "$*" in
   "workflow run create-app.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
     ;;
-  "api repos/ukyi-app/homelab/actions/workflows/create-app.yaml/runs?per_page=20 --jq "*)
+  "api repos/ukyi-app/homelab/actions/workflows/create-app.yaml/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, conclusion, html_url}]')
     cat "$FIX/appcreate-runs.json"
     ;;
   # ── app teardown 케이스 — teardown-app 디스패처·runs 목록(수동 머지 = 파괴 승인) ──
   "workflow run teardown-app.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
     ;;
-  "api repos/ukyi-app/homelab/actions/workflows/teardown-app.yaml/runs?per_page=20 --jq "*)
+  "api repos/ukyi-app/homelab/actions/workflows/teardown-app.yaml/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, conclusion, html_url}]')
     cat "$FIX/teardown-runs.json"
     ;;
   # ── app secrets 케이스 — update-secrets 디스패처·runs 목록 ──
   "workflow run update-secrets.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
     ;;
-  "api repos/ukyi-app/homelab/actions/workflows/update-secrets.yaml/runs?per_page=20 --jq "*)
+  "api repos/ukyi-app/homelab/actions/workflows/update-secrets.yaml/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, conclusion, html_url}]')
     cat "$FIX/secrets-runs.json"
     ;;
   # ── cache create 케이스 — db와 같은 엔진, 디스패처·runs 목록만 cache 것 ──
   "workflow run create-cache.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
     ;;
-  "api repos/ukyi-app/homelab/actions/workflows/create-cache.yaml/runs?per_page=20 --jq "*)
+  "api repos/ukyi-app/homelab/actions/workflows/create-cache.yaml/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, conclusion, html_url}]')
     cat "$FIX/cache-runs.json"
     ;;
   # ── db create 변이 엔진 케이스 — 유일하게 허용되는 변이 argv는 workflow run 하나뿐 ──
   "workflow run create-database.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
     ;;
-  "api repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20 --jq "*)
+  "api repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, conclusion, html_url}]')
     cat "$FIX/db-runs.json"
     ;;
-  "api repos/ukyi-app/homelab/actions/runs/"*"/jobs --jq "*)
+  "api repos/ukyi-app/homelab/actions/runs/"*"/jobs --jq "'[.jobs[] | select(.conclusion == "failure") | .name]')
     cat "$FIX/db-run-jobs.json"
     ;;
   "api repos/ukyi-app/homelab/actions/runs/"*" --jq {status, conclusion, html_url}")
@@ -254,7 +270,9 @@ case "$*" in
     fi
     cat "$FIX/db-run.json"
     ;;
-  "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "*)
+  # 필터 텍스트 SSOT는 lib/lane-pr.ts의 LANE_PR_JQ(= `[.[] | ${LANE_PR_FIELDS}]`)다 — 티켓 05가
+  # 종결 축으로 `state`를 더하면서 목록형·단건형이 같은 투영을 공유하게 됐다.
+  "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "'[.[] | {number, html_url, merged_at, merge_commit_sha, state}]')
     # STUB_PR_MERGE_AFTER_FIRST: 첫 조회는 미머지, 이후 머지 — "--wait 중 사람이 머지" 전환 재현
     # (마커는 셸 내장 리다이렉션 — PATH=$STUB에 touch 없음, STUB_COMPARE_FLAKY와 같은 관용구).
     # STUB_GH_PR_LOOKUP_FAIL(티켓 19): PR 특정 조회가 **전부** 전송 오류 — grace 재시도를 다 쓰고도
@@ -340,20 +358,23 @@ case "$*" in
     esac
     ;;
   # ── status 동사 케이스 — 응답 픽스처는 $FIX/*.json이 SSOT, 오류 시나리오는 STUB_* env ──
-  "api repos/ukyi-app/homelab/pulls?state=open&per_page=100 --jq "*)
+  "api repos/ukyi-app/homelab/pulls?state=open&per_page=100 --jq "'[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]')
     if [ -n "${STUB_GH_PRS_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
+    if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/pulls-open.json"; fi
     cat "$FIX/homelab-prs.json"
     ;;
-  "api repos/"*"/actions/runs?per_page=3 --jq "*)
+  "api repos/"*"/actions/runs?per_page=3 --jq "'[.workflow_runs[] | {name, status, conclusion, head_sha, html_url}]')
     if [ -n "${STUB_GH_RUNS_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
+    if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/workflow-runs.json"; fi
     cat "$FIX/runs.json"
     ;;
-  "api repos/"*"/actions/runs/"*" --jq "*)
+  "api repos/"*"/actions/runs/"*" --jq "'{name, status, conclusion, head_sha, html_url}')
     if [ -n "${STUB_GH_HANDLE_404:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
     cat "$FIX/run-handle.json"
     ;;
-  "api repos/"*"/pulls/"*" --jq "*)
+  "api repos/"*"/pulls/"*" --jq "'{number, state, merged, merge_commit_sha, title, head_ref: .head.ref, head_sha: .head.sha, auto_merge: (.auto_merge != null), html_url}')
     if [ -n "${STUB_GH_HANDLE_404:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/pull.json"; fi
     cat "$FIX/pr-handle.json"
     ;;
   *)

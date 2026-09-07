@@ -1,0 +1,55 @@
+[
+  {
+    "number": 7,
+    "state": "open",
+    "title": "bump page",
+    "html_url": "https://github.com/ukyi-app/homelab/pull/7",
+    "head": {
+      "label": "ukyi-app:bump-poll/page-sha-abcdef1",
+      "ref": "bump-poll/page-sha-abcdef1",
+      "sha": "aaaa111aaaa111aaaa111aaaa111aaaa111aaaa1",
+      "repo": { "full_name": "ukyi-app/homelab" }
+    },
+    "base": { "label": "ukyi-app:main", "ref": "main" },
+    "auto_merge": {
+      "enabled_by": { "login": "ukyi" },
+      "merge_method": "squash",
+      "commit_title": "bump page (#7)",
+      "commit_message": ""
+    },
+    "merged_at": null,
+    "merge_commit_sha": null
+  },
+  {
+    "number": 8,
+    "state": "open",
+    "title": "update-secrets page",
+    "html_url": "https://github.com/ukyi-app/homelab/pull/8",
+    "head": {
+      "label": "ukyi-app:update-secrets/page-123",
+      "ref": "update-secrets/page-123",
+      "sha": "bbbb222bbbb222bbbb222bbbb222bbbb222bbbb2",
+      "repo": { "full_name": "ukyi-app/homelab" }
+    },
+    "base": { "label": "ukyi-app:main", "ref": "main" },
+    "auto_merge": null,
+    "merged_at": null,
+    "merge_commit_sha": null
+  },
+  {
+    "number": 9,
+    "state": "open",
+    "title": "bump pages (a different app)",
+    "html_url": "https://github.com/ukyi-app/homelab/pull/9",
+    "head": {
+      "label": "ukyi-app:bump-poll/pages-sha-abcdef1",
+      "ref": "bump-poll/pages-sha-abcdef1",
+      "sha": "cccc333cccc333cccc333cccc333cccc333cccc3",
+      "repo": { "full_name": "ukyi-app/homelab" }
+    },
+    "base": { "label": "ukyi-app:main", "ref": "main" },
+    "auto_merge": null,
+    "merged_at": null,
+    "merge_commit_sha": null
+  }
+]
