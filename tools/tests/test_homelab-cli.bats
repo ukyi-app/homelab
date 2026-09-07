@@ -73,6 +73,47 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$output" = "2" ]
 }
 
+@test "mcp variant lists partition the variant enum and an unknown variant fails closed (floor 7)" {
+  # contract-4: mcpIsError는 exitFor와 극성이 같아야 한다 — 미지 variant는 조용한 '정상'이 아니라
+  # 계약 파손이다. 분할(합집합=variant enum · 교집합 0 · exitCodes 키 집합 동일)은 생성기가 생성
+  # 시점에 단언하고, 여기서는 커밋된 생성물과 런타임 리더로 다시 잰다.
+  run bun -e '
+    import { readFileSync } from "node:fs";
+    import { mcpIsError } from "./tools/lib/contract.ts";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const isErr = sch["x-contract"].mcp.isErrorVariants;
+    const normal = sch["x-contract"].mcp.normalVariants;
+    const all = sch.properties.variant.enum;
+    const union = new Set([...isErr, ...normal]);
+    if (union.size !== all.length || !all.every((v) => union.has(v))) { console.error("분할 아님: " + JSON.stringify([...union])); process.exit(1); }
+    const inter = isErr.filter((v) => normal.includes(v));
+    if (inter.length !== 0) { console.error("교집합 비지 않음: " + inter.join(",")); process.exit(1); }
+    const keys = Object.keys(sch["x-contract"].exitCodes).sort().join(",");
+    if (keys !== [...all].sort().join(",")) { console.error("exitCodes 키 집합 어긋남: " + keys); process.exit(1); }
+    // 양성 대조 — 두 목록의 전 원소가 실제로 판정된다(리더가 살아 있다).
+    let n = 0;
+    for (const v of isErr) { if (mcpIsError(v) !== true) { console.error("isError 아님: " + v); process.exit(1); } n++; }
+    for (const v of normal) { if (mcpIsError(v) !== false) { console.error("normal 아님: " + v); process.exit(1); } n++; }
+    // 부정 단언 — 미지 variant는 throw(같은 @test 안에 위의 양성 대조가 있다).
+    let threw = false;
+    try { mcpIsError("bogus"); } catch { threw = true; }
+    if (!threw) { console.error("mcpIsError(bogus)가 throw하지 않았다"); process.exit(1); }
+    console.log("partition:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^partition:7$"
+}
+
+@test "the v1 contract root is hand-anchored (required set + property order — destructive-change witness)" {
+  # 버전 규칙(tools/README.md '버전 규칙' 3줄)의 증인: 추가는 v1 호환이고, **삭제·필수화·enum 축소**는
+  # /2 승격이다. 골든은 엔진과 함께 재생성되므로 파괴적 변경을 못 잡는다 — 루트 앵커 2줄이 잡는다.
+  # 편집처는 생성기(HEADER_A)다(생성물 직접 편집 금지).
+  run jq -r '.required | join(",")' tools/cli-result-schema.json
+  [ "$output" = "schema,verb,variant,exitCode,omitted,result" ]
+  run jq -r '.properties | keys_unsorted | join(",")' tools/cli-result-schema.json
+  [ "$output" = "schema,verb,variant,exitCode,omitted,result" ]
+}
+
 @test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (counts derived from contract rows)" {
   # structure r1 시도2 A2·B2: verb만 result를 고르면 불가능한 variant(doctor+pending 등)가 valid로
   # 남는다 — verb 분기가 허용 variant 집합까지 선언하고, verb별 허용∪비허용 = variant 전체(7종).

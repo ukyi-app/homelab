@@ -92,3 +92,37 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   run cmp -s tools/cli-result-schema.json "$T/gen.json"
   [ "$status" -eq 1 ]
 }
+
+@test "deleting an mcp normalVariants member fails the generation closed (partition mutation)" {
+  # contract-4: 두 목록 ∪ = variant enum 분할을 생성기가 생성 시점에 단언한다 — 목록에서 한 원소가
+  # 빠지면(새 variant를 enum에만 더하는 것과 같은 클래스) 생성이 죽어야 한다.
+  T="$BATS_TEST_TMPDIR/part"
+  mkdir -p "$T/tools/lib"
+  cp tools/lib/catalog-rows.ts tools/lib/platform.ts "$T/tools/lib/"
+  sed 's|"normalVariants": \["success", "no-op", "skip", "pending"\]|"normalVariants": ["success", "no-op", "skip"]|' \
+    tools/generate-result-schema.ts > "$T/tools/generate-result-schema.ts"
+  # sed 무매치의 vacuous green 차단 — 뮤테이션이 실제로 적용됐는지 먼저 확인한다.
+  [ "$(grep -c '"normalVariants": \["success", "no-op", "skip"\]' "$T/tools/generate-result-schema.ts")" = "1" ]
+  run bash -c "cd '$T' && exec bun tools/generate-result-schema.ts --write --out gen.json"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "계약 파손"
+  [ ! -f "$T/gen.json" ]
+}
+
+@test "a contract row ref that names no definition fails the generation closed (typo mutation)" {
+  # simpleBranch는 오타 ref를 그대로 생성한다 — 생성 시점에 실재성을 단언하지 않으면 골든 테스트의
+  # '해석 불가 $ref'가 사후에야 잡는다.
+  T="$BATS_TEST_TMPDIR/ref"
+  mkdir -p "$T/tools/lib"
+  cp tools/generate-result-schema.ts "$T/tools/"
+  cp tools/lib/platform.ts "$T/tools/lib/"
+  sed 's|ref: "doctorResult"|ref: "doctorResultTypo"|' tools/lib/catalog-rows.ts > "$T/tools/lib/catalog-rows.ts"
+  [ "$(grep -c 'ref: "doctorResultTypo"' "$T/tools/lib/catalog-rows.ts")" = "1" ]
+  run bash -c "cd '$T' && exec bun tools/generate-result-schema.ts --write --out gen.json"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "계약 파손"
+  # 양성 대조 — 뮤테이션 없는 같은 사본 트리는 초록이다(이 @test가 트리 복사 실패로 red가 아님).
+  cp tools/lib/catalog-rows.ts "$T/tools/lib/catalog-rows.ts"
+  run bash -c "cd '$T' && exec bun tools/generate-result-schema.ts --write --out gen.json"
+  [ "$status" -eq 0 ]
+}

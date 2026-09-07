@@ -200,6 +200,9 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
   }
 
   // ── 디스패치 시크릿(옵션, 원자적) — 요청 시에만. 쌍의 절반 상태를 결과에 명시하고 재실행이 수렴. ──
+  // checkpoint 규약: 시크릿 **쓰기를 시도한** 뒤의 실패는 도달 지점이 "secrets"다(계약 enum의
+  // 그 멤버를 엔진이 실제로 낸다 — 스키마가 엔진보다 넓은 약속을 하지 않는다). 목록 조회 실패는
+  // 아직 아무 쓰기도 시도하지 못한 자리라 "pushed"로 남는다(재개는 같은 명령 재실행이다).
   let secrets: Record<string, unknown> | undefined;
   let didSecretWork = false;
   if (wantSecrets) {
@@ -213,13 +216,13 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     // App ID 먼저 — 값은 --body-file로만(argv 원장에 값 비노출).
     if (!idSet) {
       const r = sh("gh", ["secret", "set", SECRET_APP_ID, "--repo", `${OWNER}/${app}`, "--body-file", idFile]);
-      if (!r.ok) return fail(`${SECRET_APP_ID} 설정 실패 — ${r.err.split("\n")[0]}`, "pushed", { created, adopted: adopted || undefined, scaffolded, pushed, secrets: { requested: true, appId: false, privateKey: keySet } });
+      if (!r.ok) return fail(`${SECRET_APP_ID} 설정 실패 — ${r.err.split("\n")[0]}`, "secrets", { created, adopted: adopted || undefined, scaffolded, pushed, secrets: { requested: true, appId: false, privateKey: keySet } });
       idSet = true; didSecretWork = true;
     }
     // private key — 값은 --body-file 전용(파일 내용을 이 엔진이 읽지 않는다 = 출력 유출 표면 0).
     if (!keySet) {
       const r = sh("gh", ["secret", "set", SECRET_PRIVATE_KEY, "--repo", `${OWNER}/${app}`, "--body-file", keyFile]);
-      if (!r.ok) return fail(`${SECRET_PRIVATE_KEY} 설정 실패(App ID는 설정됨 — 절반 상태, 재실행이 수렴)`, "pushed", { created, adopted: adopted || undefined, scaffolded, pushed, secrets: { requested: true, appId: idSet, privateKey: false } });
+      if (!r.ok) return fail(`${SECRET_PRIVATE_KEY} 설정 실패(App ID는 설정됨 — 절반 상태, 재실행이 수렴)`, "secrets", { created, adopted: adopted || undefined, scaffolded, pushed, secrets: { requested: true, appId: idSet, privateKey: false } });
       keySet = true; didSecretWork = true;
     }
     secrets = { requested: true, appId: idSet, privateKey: keySet };

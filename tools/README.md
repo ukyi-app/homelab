@@ -131,6 +131,11 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   복제 금지). ⚠️ **생성물이다 — 직접 편집 금지**: 행렬 분기·verb enum은 `generate-result-schema.ts`가
   기술자 행에서 생성한다(수정은 기술자/생성기 조각 → `--write` 재생성, byte 드리프트 게이트가 강제).
   골든 픽스처: `tools/tests/fixtures/homelab/*.golden.json`.
+  **버전 규칙**(envelope `homelab-cli/N`) — ① *추가*(verb·variant·definitions·선택 필드)는 v1 내
+  하위호환이라 승격하지 않는다. ② *삭제·기존 필드의 필수화·enum 축소*는 파괴적 변경이라 `/2` 승격이
+  필요하다(골든은 엔진과 함께 재생성되므로 스스로는 파괴를 잡지 못한다). ③ 그 증인은 루트 앵커
+  2줄이다 — test_homelab-cli.bats "the v1 contract root is hand-anchored"가 루트 `required` 집합과
+  `properties` 키 순서를 리터럴로 핀한다. 편집처는 **생성기의 HEADER_A**다(이 JSON이 아니다).
 - **`generate-result-schema.ts`** — cli-result-schema.json **생성기**(cli-deepening 심화 3): 행렬
   분기(allOf member 0)·verb enum은 기술자 행(lib/catalog-rows `CONTRACT_ROWS`)에서, initSuccess·
   initFailure의 archetype enum은 플랫폼 좌표(lib/platform `ARCHETYPES` — 심화 6 후속)에서 생성하고,

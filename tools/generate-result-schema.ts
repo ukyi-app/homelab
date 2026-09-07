@@ -355,7 +355,7 @@ const DEFINITIONS = `    "doctorResult": {
       }
     },
     "initFailure": {
-      "description": "init 실패 — preflight 거부(부수효과 0)·마커 없는 레포 fail-closed·단계 오류. checkpoint가 도달 지점을 명시하고(재개 근거), 시크릿 절반 상태도 여기 실린다.",
+      "description": "init 실패 — preflight 거부(부수효과 0)·마커 없는 레포 fail-closed·단계 오류. checkpoint가 도달 지점을 명시하고(재개 근거), 시크릿 절반 상태도 여기 실린다. enum은 **엔진 도달 가능 집합**이다 — \\"secrets\\"는 시크릿 쓰기를 시도한 뒤의 실패(절반 상태 포함)가 낸다.",
       "type": "object",
       "additionalProperties": false,
       "required": ["app", "archetype", "public", "repo", "checkpoint", "error"],
@@ -526,11 +526,12 @@ const DEFINITIONS = `    "doctorResult": {
       }
     },
     "statusError": {
+      "description": "status 실패 branch. mode enum은 **엔진 도달 가능 집합**이다 — statusList는 failure를 내지 않으므로(레포 열거는 부재를 빈 목록으로 보고한다) \\"list\\"는 여기 없다.",
       "type": "object",
       "additionalProperties": false,
       "required": ["mode", "error"],
       "properties": {
-        "mode": { "enum": ["list", "app", "run", "pr"] },
+        "mode": { "enum": ["app", "run", "pr"] },
         "error": { "type": "string", "minLength": 1 },
         "createPrs": {
           "description": "app 모드의 산출물 부재 분기에서만: 그 앱을 키로 하는 create-app 레인의 열린 PR(수동 머지 대기). 산출물이 없는 것이 그린필드의 정상 전이일 수 있다는 부가 관측이고, 없으면 키가 없다(읽기 전용 — 머지 원칙 불변).",
@@ -669,7 +670,41 @@ export function generateSchema(): string {
   const actionEnumInline = '"action": { "enum": [' + mutationActions.map((a) => '"' + a + '"').join(", ") + "] }";
   const hits = DEFINITIONS.split(actionEnumInline).length - 1;
   if (hits !== 6) throw new Error("계약 파손: definitions의 action enum(" + hits + "곳)이 계약 행 mutation action 목록과 어긋난다(기대 6곳)");
-  return HEADER_A + "\n" + verbEnumLine() + "\n" + HEADER_B + "\n" + memberZeroBranches() + "\n" + TAIL_MID + "\n" + DEFINITIONS + "\n";
+  const text = HEADER_A + "\n" + verbEnumLine() + "\n" + HEADER_B + "\n" + memberZeroBranches() + "\n" + TAIL_MID + "\n" + DEFINITIONS + "\n";
+  assertGenerated(text);
+  return text;
+}
+
+// 생성물 자기 단언 — **생성한 JSON을 파싱해서** 잰다(문자열 검색이 아니다: 리터럴을 배열 하나로
+// 보간하면 단언 자체가 소멸하고, 검색은 표기 변화에 눈이 먼다). 두 축:
+//  ① MCP 매핑 분할 — isErrorVariants ∪ normalVariants = variant enum · 교집합 0 · exitCodes 키 집합
+//     동일. 셋은 서로 다른 수제 조각(HEADER_A vs HEADER_B)이라 손으로 어긋날 수 있고, 어긋나면
+//     contract.ts의 mcpIsError가 fail-closed로 죽는다(런타임 붕괴 대신 생성 시점 red).
+//  ② simple 행의 ref 실재성 — simpleBranch는 오타 ref를 그대로 생성한다(사후에 골든의 '해석 불가
+//     $ref'가 잡던 자리를 생성 시점으로 당긴다).
+function assertGenerated(text: string): void {
+  const sch = JSON.parse(text) as Record<string, any>;
+  const variants: string[] = sch.properties.variant.enum;
+  const mcp = sch["x-contract"].mcp;
+  const isErr: string[] = mcp.isErrorVariants;
+  const normal: string[] = mcp.normalVariants;
+  const union = new Set([...isErr, ...normal]);
+  const same = (a: Set<string>, b: readonly string[]): boolean => a.size === b.length && b.every((x) => a.has(x));
+  if (!same(union, variants)) {
+    throw new Error("계약 파손: MCP variant 목록 합집합이 variant enum과 다르다 — " + [...union].join(",") + " vs " + variants.join(","));
+  }
+  const inter = isErr.filter((v) => normal.includes(v));
+  if (inter.length > 0) throw new Error("계약 파손: MCP isError/normal 목록이 겹친다 — " + inter.join(","));
+  if (!same(new Set(Object.keys(sch["x-contract"].exitCodes)), variants)) {
+    throw new Error("계약 파손: exitCodes 키 집합이 variant enum과 다르다 — " + Object.keys(sch["x-contract"].exitCodes).join(","));
+  }
+  for (const row of CONTRACT_ROWS) {
+    for (const simple of row.simple ?? []) {
+      if (sch.definitions[simple.ref] === undefined) {
+        throw new Error("계약 파손: 계약 행 '" + row.verb + "'의 ref '" + simple.ref + "'가 definitions에 없다");
+      }
+    }
+  }
 }
 
 function main(): void {

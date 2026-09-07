@@ -13,9 +13,16 @@ export const USAGE_EXIT: number = CONTRACT.usageExit;
 
 // MCP tool 결과 매핑(x-contract.mcp) — variant → isError. failure/race/superseded=에러,
 // success/no-op/skip/pending=정상(pending은 재호출이 재개 경로라 에러 아님). MCP 서버가 공유한다.
+// 두 목록은 variant enum의 **분할**이다(생성기가 생성 시점에 합집합·교집합·exitCodes 키 집합을
+// 단언한다) — 그래서 어디에도 없는 variant는 '정상'이 아니라 계약 파손이다(exitFor와 같은 극성).
+// 종전에는 미지 variant가 조용히 isError=false로 접혀, enum·exitCodes에만 추가된 실패 계열
+// variant 하나가 에이전트에게 '정상'으로 보였다.
 export const MCP_IS_ERROR_VARIANTS: string[] = CONTRACT.mcp.isErrorVariants;
+export const MCP_NORMAL_VARIANTS: string[] = CONTRACT.mcp.normalVariants;
 export function mcpIsError(variant: string): boolean {
-  return MCP_IS_ERROR_VARIANTS.includes(variant);
+  if (MCP_IS_ERROR_VARIANTS.includes(variant)) return true;
+  if (MCP_NORMAL_VARIANTS.includes(variant)) return false;
+  throw new Error(`계약 파손: variant '${variant}'의 MCP 매핑이 스키마에 없다(isError/normal 두 목록 밖)`);
 }
 
 // 계약 envelope — 동사 operation의 반환 단위이자 MCP tool 결과의 재사용 단위(계약 한 벌).
