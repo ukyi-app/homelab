@@ -165,6 +165,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (`--config .app-config.yml --app --repo --domain --tag sha-<sha> --digest sha256:<hex> [--sealed]`).
   스키마+비즈니스 규칙 검증 후 `apps/<app>/deploy/prod/`(values·`.bindings.json`·`source-repo`·
   kustomization) + `apps.json`(active:true, 머지 즉시 공개 승인) + 메모리 원장을 한 번에 산출. `--dry-run`은 plan JSON만.
+  ⚠️ `.bindings.json`의 `autoDeploy` **기본은 `false`(승인 PR)**다 — 이미지 갱신 자동 머지는 앱 레포가
+  `.app-config.yml`의 `deploy.autoDeploy: true`로 **명시 opt-in** 해야 한다(형제 승인 게이트와 같은
+  fail-closed 방향; 기본값 진술의 SSOT는 `app-config-schema.json`의 `default: false`).
 - **`update-secrets.ts`** — `_update-secrets.yaml`이 호출. 앱 레포 main HEAD의
   `deploy/<app>-secrets.sealed.yaml`을 검증한 뒤 homelab `apps/<app>/deploy/prod/`에 봉인본을
   복사하고 `values.yaml.envFrom`·`podAnnotations.checksum/secrets`·`kustomization.yaml.resources`를
@@ -197,7 +200,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `bun tools/poll-ghcr.ts --root . > plan.json`으로 호출. `source-repo` 바인딩이 있는
   `apps/*/deploy/prod`만 순회 — 앱 레포 main 커밋(최신순)을 권위로, 배포 SHA의 descendant + GHCR
   manifest 실존을 증명해 후보를 고른다. `.bindings.json`의 `autoDeploy`가 true면 `bump`(자동 PR+머지),
-  false/누락이면 `propose-pr`(fail-closed 승인). 테스트는 `--fixtures <dir>`.
+  false/누락이면 `propose-pr`(fail-closed 승인). **기본은 승인 PR** — create-app이 `.app-config.yml`의
+  `deploy.autoDeploy` 부재를 false로 옮기므로, 자동 머지는 앱이 그 키를 `true`로 쓴 경우뿐이다.
+  테스트는 `--fixtures <dir>`.
 - **`ensure-bump-pr.ts`** — bump PR **멱등 실행기**(조회 → 결정 → 변이를 한 seam에). `bump-poll.yaml`이
   브랜치(`bump-poll/<kind>/<name>-<tag>` — **RUN_ID 없음**: 같은 bump = 같은 브랜치, kind가 동명 app/bespoke를 가른다)를 최신 main에서 재구축해
   로컬 커밋을 얹은 뒤 이 도구를 부르면, **원격 변이(push·PR·무장/해제)는 전부 이 도구만** 한다.
@@ -623,8 +628,16 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (기본을 0으로 두면 조용히 꺼진 바닥값이 된다). 출력의 `scanned`가 스캔 신호다 — stdout이 기계 판독
   JSON이라 `SCAN:` 마커를 못 낸다.
 - **`contract-drift-check.ts`** — 동봉 계약(vendored `seal-secret.mts`·`sealed-secrets-cert.pem`)이 다운스트림
-  3위치(template scaffold·page·trip-mate-api)와 어긋나는지 정규화 diff(`vendored-contract.json` SSOT). files(Rust)는 대상 아님.
-  `contract-drift.yaml`(주 1회)이 호출·telegram 알림. `--self-test` 오프라인 유닛, 라이브 raw fetch는 워크플로 전용. 읽기 전용.
+  사본과 어긋나는지 정규화 diff(`vendored-contract.json` SSOT). files(Rust)는 대상 아님.
+  `contract-drift.yaml`이 호출·telegram 알림. 읽기 전용. 모드 넷:
+  기본(라이브 fetch + 정규화 diff + 로스터) · `--self-test`(이름 있는 순수 함수 케이스 목록, 오프라인 —
+  `SELFTEST: <n> cases ok` 방출, `--self-test-mutate`는 러너의 양성 대조) · `--roster`(오프라인 로스터만) ·
+  `--checklist --changed <파일>`(오프라인 전파 체크리스트 — 변경 파일 ∩ 매니페스트 `source`).
+  **로스터**: 앱 축은 손 열거가 아니라 `apps/*/deploy/prod/source-repo` 파생 집합과 **등식** 대조다
+  (초과=`stale-target` · 부족=`missing-target`, 둘 다 `errors`가 아니라 `drift`). 템플릿 행은 앱이 아니라
+  `scaffoldRepos` 선언이고, 파생 0건은 통과가 아니라 `greenfield` 상태로 stderr·JSON·telegram ident에 명시된다.
+  **errors 사유 축**: 404/403=`absent-or-private`(레포 삭제·private 전환·경로 리네임 — 비인증 fetch로는 구별
+  불가라 drift로 승격하지 않는다) · 그 외=`transient`. 라이브 raw fetch는 기본 모드 전용이다.
 - **`verify-db-marker.ts`** — `_create-database.yaml` PostSync에서 provision-db 마커(role 비번 적용 등)를
   검증(fail-closed — 마커 부재=비-0). 읽기 전용.
 - **`fixture-memory-ratios.ts`** — 발화 e2e 픽스처(VM import 포맷 — 줄당 하나의 JSON 시계열)에서 한 컨테이너의 메모리

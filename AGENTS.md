@@ -197,7 +197,9 @@ reader/writer 키만 homelab Actions secret에 있다.
   validator(`tools/validate-mutation.ts`)가 계약표 강제. 전역 직렬화: `concurrency: homelab-mutation` + `queue: max`.
 - **update-image:** `bump-poll.yaml`(10분 주기 GHCR 폴링)이 권위 — main reachable + 배포 SHA
   descendant + digest 핀 검증 후 autoDeploy면 자동 PR+머지, 아니면 승인 PR(.bindings.json이
-  autoDeploy SSOT, 누락=fail-closed). (인-레포 **앱 이미지** 전용.)
+  autoDeploy SSOT, 누락=fail-closed). **기본은 승인 PR** — 자동 배포는 앱 레포가
+  `.app-config.yml`의 `deploy.autoDeploy: true`로 명시 opt-in 한다(create-app이 부재를 false로 옮긴다).
+  (인-레포 **앱 이미지** 전용.)
 - **인프라/플랫폼 의존:** self-hosted Renovate(`renovate.json` + `renovate.yaml`, 주 1회, writer App
   토큰 PR-first, automerge 금지 → 리뷰 후 머지)가 서드파티 이미지 digest·terraform provider·
   k3s/local-path(versions.env)·helm 차트(Chart.yaml/CHART_VERSION/helmrelease)·npm을 갱신. **github-actions

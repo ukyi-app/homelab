@@ -154,7 +154,9 @@
   (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). 주간 telegram 경고의 임계는 **D-14**.
   jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)
 - **`check-image-pins.sh`** — 이미지 digest 핀 2-레인 게이트: 레인1(platform 문자열 `image:`)·레인2(apps values
-  `image:` 구조체 `digest:`). 벤더(barman-plugin)·테스트/픽스처(`**/tests/**`·`**/fixtures*/**`) 제외, substrate 스코프 밖,
+  `image:` 구조체 `digest:`). 판정은 접두가 아니라 **형식**(`DIGEST_BODY='sha256:[0-9a-f]{64}'` — 두 레인 공유
+  변수 하나이고, `tools/lib/image-pin.ts` DIGEST_BODY·차트 `values.schema.json` digest pattern의 사본이라
+  세 축 문자열 등식이 대조된다). 벤더(barman-plugin)·테스트/픽스처(`**/tests/**`·`**/fixtures*/**`) 제외, substrate 스코프 밖,
   scan-floor. 예외=`policy/image-pin-allowlist.txt`(사유 주석 **+ 건수 상한 `EXEMPT_MAX`** — 픽스처는
   `--exempt-max`로만 넘긴다). 신규 미핀 이미지는 fail-closed 차단. (메타갭 ②)
 - **`verify-ledger.sh`** — 메모리 원장 예산 게이트 SSOT. `bun tools/ledger-to-json.ts` 출력을
