@@ -1,7 +1,20 @@
 #!/usr/bin/env bats
 # db-url — 로컬/GUI DB 연결 URL을 .env.local(admin은 .env.admin.local)에 기록. canonical DATABASE_URL +
 # 모드 분리(RO/RW/admin) + 채널 분리(F2). dry-run만 검증(CI-safe, kubectl 불요). ⚠️ 중간 단언은 [ ]만.
+# 라이브 레인(kubectl 인라인 stub + 빈 KUBECONFIG)은 host 술어·URL 치환·자격 파일 무결성(티켓 03)을 밟는다.
+bats_require_minimum_version 1.5.0
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
+
+# 라이브 경로 픽스처 — kubectl stub이 $1(평문 conn 값)을 base64로 내고, 빈 KUBECONFIG로 클러스터 도메인을
+# 실재시킨다. 산출물은 $LT 아래(.env.local 등) — BATS_TEST_TMPDIR라 정리는 bats 몫.
+live_fixture() {
+  LT="$BATS_TEST_TMPDIR/live"; mkdir -p "$LT/bin"
+  b64="$(printf '%s' "$1" | base64 | tr -d '\n')"
+  printf '#!/usr/bin/env bash\nprintf %%s %s\n' "$b64" > "$LT/bin/kubectl"
+  chmod +x "$LT/bin/kubectl"
+  : > "$LT/kubeconfig"
+}
+run_live() { run env PATH="$LT/bin:$PATH" KUBECONFIG="$LT/kubeconfig" bun "$ROOT/tools/db-url.ts" --name orders "$@"; }
 
 @test "db-url --dry-run (default RO) writes namespaced ORDERS_RO_DATABASE_URL and forbids stdout plaintext" {
   run bun "$ROOT/tools/db-url.ts" --name orders --host 100.0.0.1 --dry-run
@@ -83,6 +96,85 @@ STUB
   grep -q '^ORDERS_RO_DATABASE_URL=postgres://u:n@100.99.0.1:5432/orders$' "$T/.env.local"   # host 치환 + namespaced 키
   [ "$(printf '%s' "$output" | grep -c 'postgres://')" -eq 0 ]    # 평문 URL stdout 비노출(카운트 패턴)
   rm -rf "$T"
+}
+
+# ── host 술어 · URL 치환 · 자격 파일 무결성(homelab-cli-r2 티켓 03) ──────────────────────────
+# host는 무검증으로 URL·.env 행에 보간됐다 — 개행 하나로 .env.local에 임의 행이 주입되고 success가 났다(실측).
+# 술어는 화이트리스트가 아니라 URL 구조를 깨는 문자 거부라 MagicDNS·밑줄·후행점 FQDN·IPv6 대괄호는 통과한다.
+
+@test "a host carrying a newline is a usage error (exit 2) and no credential file is written (line injection)" {
+  live_fixture 'postgres://u:n@pg-rw.prod:5432/orders'
+  run_live --host $'100.99.0.1\nINJECTED_KEY=evil' --env-local "$LT/.env.local"
+  [ "$status" -eq 2 ]
+  [ ! -e "$LT/.env.local" ]
+}
+
+@test "hosts that break URL structure or carry replace-metacharacters are usage errors (exit 2, floor 7)" {
+  live_fixture 'postgres://u:n@pg-rw.prod:5432/orders'
+  n=0
+  for h in 'X$&Y' 'evil@' 'h/x' 'h:5432' 'h?x' 'h#x' 'a b'; do
+    run_live --host "$h" --env-local "$LT/.env.local"
+    [ "$status" -eq 2 ]
+    n=$((n+1))
+  done
+  [ "$n" -eq 7 ]
+  [ ! -e "$LT/.env.local" ]
+}
+
+@test "the TS_DB_HOST env fallback is validated too: a newline is a failure (exit 1), not a write" {
+  live_fixture 'postgres://u:n@pg-rw.prod:5432/orders'
+  run env PATH="$LT/bin:$PATH" KUBECONFIG="$LT/kubeconfig" TS_DB_HOST=$'a\nb' bun "$ROOT/tools/db-url.ts" --name orders --env-local "$LT/.env.local"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "host 형식"
+  [ ! -e "$LT/.env.local" ]
+}
+
+@test "the host substitution preserves userinfo (encoded @ in the password) — URL host setter, not a first-@ regex" {
+  live_fixture 'postgres://u:p%40x@pg-rw.prod:5432/orders'
+  run_live --host 100.99.0.1 --env-local "$LT/.env.local"
+  [ "$status" -eq 0 ]
+  grep -q '^ORDERS_RO_DATABASE_URL=postgres://u:p%40x@100.99.0.1:5432/orders$' "$LT/.env.local"
+}
+
+@test "a conn value that is not a URL (garbage, or a raw / inside userinfo) is a failure (exit 1) with no file" {
+  live_fixture 'garbage'
+  run_live --host 100.99.0.1 --env-local "$LT/.env.local"
+  [ "$status" -eq 1 ]
+  [ ! -e "$LT/.env.local" ]
+  # 평문 값은 오류 문구에도 실리지 않는다.
+  [ "$(printf '%s' "$output" | grep -c 'garbage')" -eq 0 ]
+  live_fixture 'postgres://u:p/x@pg-rw.prod:5432/orders'
+  run_live --host 100.99.0.1 --env-local "$LT/.env.local"
+  [ "$status" -eq 1 ]
+  [ ! -e "$LT/.env.local" ]
+}
+
+@test "a freshly created credential file is mode 0600; an existing file keeps its own mode and other keys" {
+  live_fixture 'postgres://u:n@pg-rw.prod:5432/orders'
+  run_live --host 100.99.0.1 --env-local "$LT/.env.local"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$LT/.env.local" 2>/dev/null || stat -f %Lp "$LT/.env.local")" = "600" ]
+  # 기존 파일(0644·다른 키 보유)은 퍼미션을 건드리지 않고 같은 키 행만 교체한다.
+  printf 'OTHER=1\nORDERS_RO_DATABASE_URL=stale\n' > "$LT/existing.env"; chmod 644 "$LT/existing.env"
+  run_live --host 100.99.0.1 --env-local "$LT/existing.env"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$LT/existing.env" 2>/dev/null || stat -f %Lp "$LT/existing.env")" = "644" ]
+  grep -q '^OTHER=1$' "$LT/existing.env"
+  [ "$(grep -c '^ORDERS_RO_DATABASE_URL=' "$LT/existing.env")" -eq 1 ]
+  grep -q '^ORDERS_RO_DATABASE_URL=postgres://u:n@100.99.0.1:5432/orders$' "$LT/existing.env"
+}
+
+@test "legitimate hosts pass the predicate: tailscale IP, loopback, MagicDNS, bracketed IPv6, underscore, trailing-dot FQDN (floor 6)" {
+  live_fixture 'postgres://u:n@pg-rw.prod:5432/orders'
+  n=0
+  for h in 100.99.0.1 127.0.0.1 nuc-db.tail1234.ts.net '[fd7a:115c:a1e0::1]' my_host db.example.; do
+    rm -f "$LT/.env.local"
+    run_live --host "$h" --env-local "$LT/.env.local"
+    [ "$status" -eq 0 ]
+    grep -qF "@${h}:5432/orders" "$LT/.env.local"
+    n=$((n+1))
+  done
+  [ "$n" -eq 6 ]
 }
 
 @test "a malformed name is a usage error (exit 2, usage line — shell preserves the legacy contract)" {

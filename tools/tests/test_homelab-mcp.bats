@@ -375,6 +375,21 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
 }
 
+@test "a url tool host carrying a newline is refused as invalid params before any cluster read (shared host predicate)" {
+  # 티켓 03 — host 술어는 dbUrlInputError 한 곳(CLI usage·MCP -32602·bin)이 소유한다. 개행 host는 .env 행 주입이다.
+  ED="$BATS_TEST_TMPDIR/ed4"; mkdir -p "$ED"
+  mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":60,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"host\":\"100.99.0.1\\nINJECTED=evil\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==60) | .error.code')" = "-32602" ]
+  [ ! -e "$ED/.env.local" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" kubectl)" = "0" ]
+  # 양성 대조 — 정당한 host는 같은 술어를 지나 자격 파일을 기록한다(가드가 url tool을 통째로 막지 않는다).
+  mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"host\":\"100.99.0.1\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==61) | .result.content[0].text | fromjson | .variant')" = "success" ]
+  grep -q '^MYDB_RO_DATABASE_URL=postgres://u:p@100.99.0.1:5432/db$' "$ED/.env.local"
+}
+
 @test "a traversal-shaped status app is refused as invalid params (CLI and MCP share one predicate)" {
   # MCP 표면은 LLM 에이전트 입력을 그대로 받는다 — inputSchema에 pattern을 덧붙이는 대신(두 번째
   # 진실 금지) statusInputError 한 곳이 두 표면을 함께 닫는다는 것을 실제로 밟는다.

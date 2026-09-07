@@ -352,6 +352,15 @@ merged_pr_at_descendant() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "4" ]
 }
 
+@test "db url rejects a newline-carrying --host as a usage error (exit 2, no envelope, no file) — engine predicate" {
+  # 티켓 03 — bin(db-url)·MCP(db_url)와 같은 술어(dbUrlInputError). 개행 host는 .env.local 행 주입 표면이다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts db url t --host $'h\nX=1' --env-local "$BATS_TEST_TMPDIR/inj.env.local" --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "host 형식"
+  [ ! -e "$BATS_TEST_TMPDIR/inj.env.local" ]
+}
+
 @test "db create --help prints the verb usage and exits 0" {
   run bun tools/homelab.ts db create --help
   [ "$status" -eq 0 ]
