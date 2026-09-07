@@ -24,10 +24,15 @@ setup() {
 
 # 하네스는 insteadOf로 canonical→로컬 bare 재배선을 쓰므로, push 라우팅 검사(fail-closed)를
 # 명시 플래그로만 완화한다 — 적대 테스트는 이 플래그 없이 돌아 production 기본 경로를 검증한다.
+# ⚠️ 작업 디렉토리 변경은 `env -C`(GNU coreutils ≥8.28 전용 — BSD env에 없다)가 아니라 형제
+#    test_homelab-secrets.bats와 같은 이식성 형태로 한다. 다만 인자는 문자열 보간이 아니라 bash -c의
+#    **위치 인자**로 넘긴다 — `--dispatch-secrets <경로>`처럼 공백을 담을 수 있는 피연산자가 있어
+#    argv 경계 보존이 원장 단언의 전제다(경계 증명은 ledger.py exact 몫).
 run_init() {
-  run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" \
+  run --separate-stderr env PATH="$STUB" \
     GIT_CONFIG_GLOBAL="$INIT_GCFG" GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" \
     HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
     "$BUN" "$ROOT/tools/homelab.ts" app init "$@"
 }
 
@@ -107,9 +112,10 @@ run_init() {
 
 @test "failure right after repo create (scaffold fails) resumes to convergence with --adopt" {
   # run1: 스캐폴드 실패 주입 → 레포는 생성됐으나 마커 없음(push 전).
-  run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
+  run --separate-stderr env PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
     GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_SCAFFOLD_FAIL=1 \
     HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
     "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
@@ -125,6 +131,78 @@ run_init() {
   [ "$(echo "$output" | jq -r '.result.adopted')" = "true" ]
   [ "$(echo "$output" | jq -r '.result.created')" = "null" ]
   [ "$(echo "$output" | jq -r '.result.pushed')" = "true" ]
+  run git -C "$INIT_REMOTES/myapp.git" show main:.homelab-init
+  [ "$status" -eq 0 ]
+}
+
+@test "a failed repo create is a preflight refusal: no created key, no scaffold, no bare repo" {
+  # STUB_GH_CREATE_FAIL은 하네스가 주석으로 광고하고 gh 스텁이 구현까지 했는데 소비자가 0건이었다
+  # (정의만 있는 실패 주입 노브 = 그 분기 자체가 무증인).
+  run --separate-stderr env PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
+    GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_GH_CREATE_FAIL=1 \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
+    "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "preflight" ]
+  # 생성 실패는 '만들다 만 것'을 남기지 않는다 — created 키 자체가 없다(false도 아니다).
+  [ "$(echo "$output" | jq -r '.result | has("created")')" = "false" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold)" = "0" ]
+  [ ! -d "$INIT_REMOTES/myapp.git" ]
+  # 양성 대조 — 같은 argv가 주입 없이는 bare를 만든다(노브 이름 오타가 '다른 이유의 초록'이 되는 걸 막는다).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  [ -d "$INIT_REMOTES/myapp.git" ]
+}
+
+@test "failure right after the first push resumes: refused without --adopt, then converges with it" {
+  # 파일 헤더가 계약으로 선언한 '각 부수효과 직후 실패를 주입해도 재실행이 그 지점부터 수렴'의 가장
+  # 비싼 지점(레포·커밋은 있고 원격 main에 마커 없음)이 무증인이었다. 훅 상태기계 대신 core.hooksPath로
+  # pre-receive를 넣었다 빼는 방식이다 — 훅은 **절대 shebang + 빌트인만** 쓴다($STUB 대체 PATH에는
+  # env조차 없어 `#!/usr/bin/env bash`류는 해석 실패로 무실행 vacuous가 되기 쉽다). 실행 마커가
+  # '훅이 안 돌아서 난 실패'를 배제한다.
+  HOOKS="$BATS_TEST_TMPDIR/init-hooks"; mkdir -p "$HOOKS"
+  printf '#!/bin/sh\n: > "%s/ran"\nexit 1\n' "$HOOKS" > "$HOOKS/pre-receive"
+  chmod +x "$HOOKS/pre-receive"
+  printf '[core]\n\thooksPath = %s\n' "$HOOKS" >> "$INIT_GCFG"
+
+  # run1 — 생성·클론·스캐폴드·커밋까지 갔다가 첫 push에서 죽는다.
+  run_init myapp --archetype api --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "scaffolded" ]
+  [ "$(echo "$output" | jq -r '.result.created')" = "true" ]
+  echo "$output" | jq -r '.result.error' | grep -q "첫 push 실패"
+  [ -f "$HOOKS/ran" ]
+  run git -C "$INIT_REMOTES/myapp.git" show main:.homelab-init
+  [ "$status" -ne 0 ]
+  head1="$(git -C "$INIT_PARENT/myapp" rev-list --count HEAD)"
+  [ "$head1" = "2" ]
+
+  # run2 — --adopt 없이는 거부다. 소유 판정은 **원격** 마커이고 push가 죽었으면 마커가 원격에 없다:
+  # '우리가 만든 레포니까 그냥 이어가도 된다'가 아니라 --adopt가 실제로 **필요**하다는 운영 계약이다.
+  run_init myapp --archetype api --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "preflight" ]
+  echo "$output" | jq -r '.result.error' | grep -q -- "--adopt"
+
+  # run3 — --adopt로 재개하되 push는 아직 죽어 있다. 실패 envelope의 created는 명시 **false**다
+  # (성공 경로는 `created || undefined`로 압축해 키를 지운다 — 그 비대칭이 여기서 처음 관측된다).
+  run_init myapp --archetype api --adopt --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.result.created')" = "false" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "scaffolded" ]
+
+  # run4 — 훅을 걷어내면 같은 명령이 수렴한다. 스캐폴드는 다시 돌지 않고 커밋도 늘지 않는다.
+  rm -f "$HOOKS/pre-receive"
+  run_init myapp --archetype api --adopt --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.pushed')" = "true" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold --archetype api --name myapp --yes)" = "1" ]
+  [ "$(git -C "$INIT_PARENT/myapp" rev-list --count HEAD)" = "$head1" ]
   run git -C "$INIT_REMOTES/myapp.git" show main:.homelab-init
   [ "$status" -eq 0 ]
 }
@@ -146,9 +224,10 @@ run_init() {
 
 @test "a half-set secret pair is reported and a re-run converges the missing one" {
   # run1: private key 설정 실패 주입 → App ID만 설정된 절반 상태.
-  run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
+  run --separate-stderr env PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
     GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_GH_SECRET_FAIL=HOMELAB_DISPATCH_APP_PRIVATE_KEY \
     HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
     "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api --dispatch-secrets "$SECRETS_DIR" --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
@@ -184,6 +263,9 @@ run_init() {
   run_init myapp --archetype api --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  # checkpoint enum 'created'는 이 경로가 유일한 생산자인데 단언이 없었다 — 레포는 만들어졌고
+  # 클론 단계에서 죽은 지점이 그 값의 뜻이다(생성 실패의 'preflight'와 갈리는 자리).
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "created" ]
   echo "$output" | jq -r '.result.error' | grep -q "수동 확인"
   # 마커·push가 새로 만든 ukyi-app/myapp에 흘러가지 않았다(엉뚱한 레포 오염 방지).
   run git -C "$INIT_REMOTES/myapp.git" show main:.homelab-init
@@ -245,8 +327,9 @@ run_init() {
   cat "$INIT_GCFG" > "$EVIL_GCFG"
   printf '[url "%s/"]\n\tpushInsteadOf = https://github.com/ukyi-app/\n' "$EVIL" >> "$EVIL_GCFG"
   # 우회 플래그 없이 실행 — production 기본(fail-closed) 경로.
-  run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" \
+  run --separate-stderr env PATH="$STUB" \
     GIT_CONFIG_GLOBAL="$EVIL_GCFG" GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
     "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api --adopt --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
@@ -360,9 +443,10 @@ run_init() {
   for k in HOMELAB_DISPATCH_APP_ID HOMELAB_DISPATCH_APP_PRIVATE_KEY; do
     rm -rf "$INIT_PARENT/myapp"
     rm -rf "$INIT_REMOTES/myapp.git"
-    run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
+    run --separate-stderr env PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
       GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_GH_SECRET_FAIL="$k" \
       HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+      bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
       "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api --dispatch-secrets "$SECRETS_DIR" --json
     [ "$status" -eq 1 ]
     [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
@@ -385,9 +469,10 @@ run_init() {
   # 양성 대조 — 시크릿 단계 앞에서 죽으면 checkpoint는 secrets가 아니다(단언이 상수가 아님).
   rm -rf "$INIT_PARENT/other"
   rm -rf "$INIT_REMOTES/other.git"
-  run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
+  run --separate-stderr env PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
     GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_SCAFFOLD_FAIL=1 \
     HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
     "$BUN" "$ROOT/tools/homelab.ts" app init other --archetype api --dispatch-secrets "$SECRETS_DIR" --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.result.checkpoint')" != "secrets" ]

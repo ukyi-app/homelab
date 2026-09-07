@@ -63,19 +63,28 @@ run_teardown_tty() {
   [ -z "$output" ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
   echo "$stderr" | grep -q -- "--confirm"
+  # 비-TTY는 프롬프트를 **띄우지 않는다** — 이 부재가 TTY 불일치 거부와 이 거부를 구별하는 유일한
+  # 관측이다(둘 다 exit 2 · gh 0건). 바로 위 `--confirm` grep이 같은 스트림의 양성 대조라, 이 0건이
+  # "stderr를 안 본다"가 아님을 보증한다.
+  [ "$(printf '%s' "$stderr" | grep -c "파괴 확인: 철거할 앱 이름")" = "0" ]
 }
 
 @test "a TTY prompt proceeds only when the re-entered name matches" {
-  # 일치 → 디스패치까지 간다(같은 argv 계약).
+  # 일치 → 디스패치까지 간다(같은 argv 계약). script가 stderr도 pty로 합치므로 프롬프트는 $output에 있다.
   run_teardown_tty myapp --json
   [ "$status" -eq 0 ]
+  echo "$output" | grep -q "파괴 확인: 철거할 앱 이름 'myapp'"
   run python3 "$LEDGER_PY" exact "$CALLS" gh workflow run teardown-app.yaml -R ukyi-app/homelab \
     -f "app=myapp" -f "confirm=myapp" -f "correlation=$NONCE"
   [ "$status" -eq 0 ]
-  # 불일치 → 새 원장에서 gh 호출 0건.
+  # 불일치 → 새 원장에서 gh 호출 0건. exit 2·gh 0건만 보면 pty가 깨져 stdin이 비-TTY가 된 경우와
+  # 구별되지 않는다(그쪽도 같은 usage-error로 떨어진다) — 프롬프트 문구와 **입력 에코**가 이 절반이
+  # 진짜 TTY 분기를 밟았음을 증언한다.
   : > "$CALLS"
   run_teardown_tty wrongname --json
   [ "$status" -eq 2 ]
+  echo "$output" | grep -q "파괴 확인: 철거할 앱 이름 'myapp'"
+  echo "$output" | grep -q "입력: wrongname"
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
 }
 

@@ -54,6 +54,10 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
 @test "no tool exposes a long-wait option (--wait/pollMs/deadlineMs absent from every schema)" {
   mcp_rpc '{"jsonrpc":"2.0","id":3,"method":"tools/list"}'
   [ "$status" -eq 0 ]
+  # 바닥값 — 이 @test 안에서 열거가 실재함을 먼저 못박는다. tools가 비거나 inputSchema.properties가
+  # 전부 부재해도 아래 `bad`는 빈 문자열이라 통과한다(열거 붕괴 → vacuous green). 개수 바닥값이
+  # 다른 @test에만 있으면 이 @test 단독으로는 아무것도 증명하지 못한다.
+  [ "$(echo "$output" | jq -rc 'select(.id==3) | .result.tools | length')" = "9" ]
   # 어떤 tool inputSchema properties에도 wait/pollMs/deadlineMs 키가 없다(동기 바운디드).
   bad="$(echo "$output" | jq -rc 'select(.id==3) | .result.tools[] | .inputSchema.properties // {} | keys[] | select(. == "wait" or . == "pollMs" or . == "deadlineMs")')"
   [ -z "$bad" ]

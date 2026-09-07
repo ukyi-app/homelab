@@ -92,6 +92,11 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   컴파일 아키타입 3종 TARGETARCH — site는 arch 중립이라 대상 아님). fail ≥ 1이면 exit 1.
   테스트: `tools/tests/test_homelab-cli.bats`(라우팅·계약)·`test_homelab-doctor.bats`(진단 —
   PATH stub + NUL argv 원장, 하네스 `tools/tests/helpers/cli_stub.bash`).
+  ⚠️ 그 하네스의 gh 스텁은 jq를 **적용한 뒤의** 형상을 돌려준다(픽스처가 손으로 접은 결과다) —
+  접힘이 있는 필터(`.workflow_runs[]` 언랩·`head: .head.ref` 중첩·`auto_merge != null`)는
+  `STUB_GH_RAW=1` raw 픽스처 경로(`tools/tests/fixtures/homelab/gh-raw/`, 스텁이 실제 jq를 돌린다)
+  로만 증인이 선다. 필터 텍스트 드리프트는 case 정확 일치가 exit 3으로 잡는다
+  (`tools/tests/test_homelab-gh-jq-contract.bats`).
   **`--wait`의 pending은 실패가 아니라 설계된 바운디드 결과다** — 예산(기본 20분,
   `WAIT_DEFAULTS.deadlineMs`, 산정 근거 분해는 그 상수 주석)이 끝나면 관측된 만큼(run·PR 핸들 +
   pendingReason)을 실어 돌려준다. 종료코드가 1인 것은 '완료 확인 못함'이지 실패가 아니다
