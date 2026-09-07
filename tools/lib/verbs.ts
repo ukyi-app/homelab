@@ -19,7 +19,12 @@ import { runStatus, statusInputError, type StatusInput } from "./status.ts";
 // named export + VERBS 행 — 전부 이 파일 안이라 우회 표면이 없다.
 // destructive: 파괴 동사 표시(teardown). MCP 노출 정책(후속 티켓)이 이 표시로 파괴 동사를
 // 제외하고, CLI는 confirm 가드로 사람 확인을 강제한다. 미설정 = 비파괴.
-type VerbShape<I> = { path: readonly string[]; desc: string; op: (input: I) => Envelope; destructive?: boolean };
+// needs: 이 동사가 도달해야 하는 **망 도메인**(티켓 33). 이 홈랩에서는 둘이 독립으로 끊긴다 —
+// 클러스터는 tailscale/LAN, GitHub은 인터넷이라 한쪽만 끊긴 상태가 정상이다. 그 비대칭이 어휘에
+// 없으면 "오프라인에서 무엇이 여전히 되는가"를 표면이 못 말한다(무인자 status·url --dry-run은
+// 완전 망 무의존이다). 값은 **데이터 한 칸**이고 문구 렌더는 셸(homelab.ts) 소유다 — 동사마다
+// 손으로 쓰면 드리프트가 usage에서만 보인다(필수 필드라 새 동사는 타입이 강제한다).
+type VerbShape<I> = { path: readonly string[]; desc: string; needs: string; op: (input: I) => Envelope; destructive?: boolean };
 
 // doctor는 입력이 없는 동사다 — 입력 필드가 생기면 이 타입에서 확장한다.
 export type DoctorInput = Record<string, never>;
@@ -203,6 +208,7 @@ function statusOp(input: StatusInput): Envelope {
 export const DOCTOR: DoctorVerb = {
   path: ["doctor"],
   desc: "플랫폼 전제 진단(gh 인증·owner 일치·스코프 / bun·kubeseal / KUBECONFIG / 템플릿 호환성)",
+  needs: "GitHub(gh) — 클러스터는 파일 존재만 보고 도달성은 재지 않는다",
   op: doctorOp,
 };
 
@@ -210,6 +216,7 @@ export const DOCTOR: DoctorVerb = {
 export const STATUS: StatusVerb = {
   path: ["status"],
   desc: "앱 상태 관찰(목록/단일 앱: 핀·바인딩·run·PR·ArgoCD) + 핸들(run/PR URL) 조회",
+  needs: "없음(인자 없는 목록은 로컬 레포만) · GitHub(<app>·핸들 조회) · 클러스터(KUBECONFIG 있을 때만 — 부재는 생략)",
   op: statusOp,
 };
 
@@ -217,24 +224,28 @@ export const STATUS: StatusVerb = {
 export const DB_CREATE: DbCreateVerb = {
   path: ["db", "create"],
   desc: "공유 CNPG에 논리 DB 생성(create-database 디스패치 + correlation 추적, --wait=배포 수렴까지)",
+  needs: "GitHub(gh) · 클러스터(--wait의 수렴 구간뿐 — KUBECONFIG 부재면 머지까지만 확인하고 생략)",
   op: dbCreateOp,
 };
 
 export const DB_URL: DbUrlVerb = {
   path: ["db", "url"],
   desc: "클러스터 DB 접속 URL을 .env.local(admin은 .env.admin.local)에 기록(평문 비출력 — 엔진 소유)",
+  needs: "클러스터(kubectl — KUBECONFIG 부재면 skip) · --dry-run은 요구 없음",
   op: dbUrlOp,
 };
 
 export const CACHE_CREATE: CacheCreateVerb = {
   path: ["cache", "create"],
   desc: "앱별 Valkey 캐시 생성(create-cache 디스패치 + correlation 추적, --wait=배포 수렴까지)",
+  needs: "GitHub(gh) · 클러스터(--wait의 수렴 구간뿐 — KUBECONFIG 부재면 머지까지만 확인하고 생략)",
   op: cacheCreateOp,
 };
 
 export const CACHE_URL: CacheUrlVerb = {
   path: ["cache", "url"],
   desc: "캐시 접속 URL을 .env.local에 기록(port-forward 선행, 평문 비출력 — 엔진 소유)",
+  needs: "클러스터(kubectl + port-forward 선행 — KUBECONFIG 부재면 skip) · --dry-run은 요구 없음",
   op: cacheUrlOp,
 };
 
@@ -242,12 +253,14 @@ export const CACHE_URL: CacheUrlVerb = {
 export const APP_CREATE: AppCreateVerb = {
   path: ["app", "create"],
   desc: "빌드된 앱을 homelab에 등록(create-app 디스패치 — 수동 머지: 머지가 곧 공개 승인)",
+  needs: "GitHub(gh) · 클러스터(--wait의 수렴 구간뿐 — KUBECONFIG 부재면 머지까지만 확인하고 생략)",
   op: appCreateOp,
 };
 
 export const APP_SECRETS: AppSecretsVerb = {
   path: ["app", "secrets"],
   desc: "앱 시크릿 봉인본 배선(앱 레포 안: seal→커밋→push→디스패치 연쇄 / 밖: update-secrets 디스패치만)",
+  needs: "GitHub(gh + 원격 push·도달성 확인) · 클러스터(--wait의 수렴 구간뿐) — 봉인 자체는 벤더 cert 기반이라 망 무의존",
   op: appSecretsOp,
 };
 
@@ -255,6 +268,7 @@ export const APP_SECRETS: AppSecretsVerb = {
 export const APP_TEARDOWN: AppTeardownVerb = {
   path: ["app", "teardown"],
   desc: "앱 철거(teardown-app 디스패치 — 수동 머지: 머지가 곧 파괴 승인 · confirm 재입력 가드 · 종결 = Application 부재)",
+  needs: "GitHub(gh) · 클러스터(--wait의 부재 관측 구간뿐 — KUBECONFIG 부재면 머지까지만 확인하고 생략)",
   op: appTeardownOp,
   destructive: true,
 };
@@ -262,6 +276,7 @@ export const APP_TEARDOWN: AppTeardownVerb = {
 export const APP_INIT: AppInitVerb = {
   path: ["app", "init"],
   desc: "앱 레포 시작(템플릿→레포 생성·스캐폴드·첫 push, 멱등·재개 가능 — 마커 소유 술어·시크릿 쌍 원자)",
+  needs: "GitHub(gh + 클론·push) — 클러스터 무관",
   op: appInitOp,
 };
 

@@ -74,10 +74,15 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   후손 리비전 표면 부재=superseded). KUBECONFIG 부재=머지까지 확인+omitted=["live"].
   `homelab db url` = conn URL 엔진(`lib/conn-url.ts`)의 catalog op — envelope 계약(--json)·F2
   채널 분리·상호배타는 엔진 술어 소유(구 패스스루 계약은 티켓 08에서 op 계약으로 대체됨).
-  `homelab status [<app>] [--run <url>|--pr <url>] [--json]` = 상태 관찰(관측 전용): 인자 없음=
-  전체 앱 목록·요약(레포 데이터), `<app>`=핀·바인딩·최근 run·열린 PR(+KUBECONFIG 있으면 ArgoCD
+  `homelab status [<app>] [--run <url> [--branch <ref>] | --pr <url>] [--json]` = 상태 관찰(관측 전용):
+  인자 없음=전체 앱 목록·요약(레포 데이터), `<app>`=핀·바인딩·최근 run·열린 PR(+KUBECONFIG 있으면 ArgoCD
   `<app>-prod` sync/health, 없으면 라이브 구간 생략 — envelope.omitted=["live"]·exit 0), 핸들
   조회=run/PR URL로 그 오퍼레이션 단위 상태(대기·conclusion·머지 여부 — MCP tool 입력과 같은 계약).
+  `--run`에 `--branch <ref>`를 더하면 그 **레인 브랜치**의 PR을 정확 조회해 `result.run.pr`로 붙인다
+  (변이 pending이 돌려준 `result.run.branch`를 그대로 넘기는 자리 — 브랜치는 run id의 파생이라
+  둘이 어긋나면 usage 오류, PR이 2개면 race exit 3). `--branch` 단독 조회는 없다. 산출물이 아직 없는
+  앱(`<app>` 모드 failure)에는 진행 중인 create-app 레인 PR을 `result.createPrs`로 알린다 —
+  그린필드에서 '앱 없음' 한 줄만 남던 자리에 재개 좌표를 준다(읽기 전용 — 수동 머지 원칙 불변).
   **설치**: `bun link`(레포 루트) → package.json `bin`이 `homelab`을 전역 PATH에 심링크. 유일하게
   셰뱅+exec 비트를 갖는 .ts다(test_shebang-exec.bats가 bin 선언에서 예외를 파생). 레포 밖(앱 레포
   디렉토리 포함)에서도 동작한다(자기 위치는 import.meta 기준 해석).
@@ -87,6 +92,38 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   컴파일 아키타입 3종 TARGETARCH — site는 arch 중립이라 대상 아님). fail ≥ 1이면 exit 1.
   테스트: `tools/tests/test_homelab-cli.bats`(라우팅·계약)·`test_homelab-doctor.bats`(진단 —
   PATH stub + NUL argv 원장, 하네스 `tools/tests/helpers/cli_stub.bash`).
+  **`--wait`의 pending은 실패가 아니라 설계된 바운디드 결과다** — 예산(기본 20분,
+  `WAIT_DEFAULTS.deadlineMs`, 산정 근거 분해는 그 상수 주석)이 끝나면 관측된 만큼(run·PR 핸들 +
+  pendingReason)을 실어 돌려준다. 종료코드가 1인 것은 '완료 확인 못함'이지 실패가 아니다
+  (x-contract.exitCodes). 재개 경로는 재실행이 아니라 **핸들 재조회**다:
+  `homelab status --run <run URL>`(PR 전이면 `--branch <run.branch>`를 더해 레인 PR까지) 또는
+  `--pr <PR URL>`. 예외는 **run 미출현 pending** 하나다 — 그 봉투에는 run이 없어 어떤 status 모드도
+  쓸 수 없다. 재디스패치는 새 nonce를 발급해 같은 이름의 PR 두 개를 만들므로 금지이고, 실재하는
+  확인 경로는 Actions에서 run-name의 `[correlation]` 에코를 보는 것뿐이다(`status --correlation`
+  핸들 모드는 열지 않는다 — PR 본문에 에코가 없어 reusable 5벌 계약 변경이 선행이다).
+  **종료코드·요구 도메인**: top-level `--help`가 계약(x-contract.exitCodes)에서 **파생 렌더**한
+  종료코드 절을 낸다 — 코드 하나에 variant 여럿이 붙고(0=success·no-op, 1=failure·pending,
+  3=race·superseded, 4=skip) `2`는 variant가 아니라 파싱 실패다. 동사별 `--help`는 `요구:` 한 줄로
+  필요한 망 도메인을 선언한다(값은 catalog 행 `VerbShape.needs` — 손 사본 금지). 이 홈랩에서는
+  GitHub(인터넷)과 클러스터(tailscale/LAN)가 독립으로 끊기므로 **오프라인 진입점**이 실재한다:
+  인자 없는 `homelab status`와 `db|cache url --dry-run`은 망 무의존이다(회귀 앵커는 status bats).
+  **관측 레버**: `HOMELAB_EXEC_LEDGER=<file>` — 외부 명령 argv를 JSONL로 append하는 opt-in 원장.
+  **사전 무장**이라 소급 기록은 불가능하고, 값·stdin·stdout은 기록하지 않는다(kubeseal 평문 채널
+  배제는 계약 테스트가 강제). `--wait`의 시간 노브(`--poll-ms`/`--deadline-ms`)는 테스트의 시간
+  주입 심이면서 **정당한 운영 노브**다 — help 라벨은 그래서 기본값만 적는다(내부 어휘 '심' 비노출).
+  **진행 표시**: 변이 동사는 단계 전이(디스패치 접수·run 식별·run 완료·PR 특정·머지 관측)마다
+  `진행: …` 한 줄을 **stderr**에 즉시 낸다 — correlation·run URL·PR URL·merge SHA가 봉투보다
+  **먼저** 나오므로 ^C·타임아웃 킬로 중단돼도 재조회 핸들이 남는다. stdout 순수성은 불변이고
+  (--json이면 stdout은 봉투 하나) MCP는 이 싱크를 주입하지 않는다(JSON-RPC 스트림 무오염).
+  **재시도 정책**: seam(`lib/exec.ts`)은 재시도하지 않는다 — 재시도는 콜사이트 정책이고 **변이
+  argv(`gh workflow run`)는 어떤 층에서도 재시도하지 않는다**(타임아웃은 '실패'가 아니라 '결과
+  미상'이라 재시도가 곧 두 개의 run이다). 변이 엔진의 폴링 루프·PR 목록 grace 재조회는 부수효과
+  0인 **관측 재조회**지 변이 재시도가 아니며, 폴링 중 지속되는 GitHub 계층 조회 실패는
+  pendingReason 접미(`— 직전 GitHub 계층 조회 실패(N회 연속): …`)로 사유를 지목한다.
+  디스패치 호출이 **타임아웃**이면(errKind timeout — 자식만 SIGTERM으로 죽고 POST 도달 여부는
+  미상) failure가 아니라 그대로 run 특정으로 넘어간다: run이 보이면 정상 수렴이고, 안 보이면
+  '재실행 전 Actions에서 correlation 에코 확인'을 지목하는 pending이다. rc 비-0(인증 실패·입력
+  거부)은 즉시 failure를 유지한다 — 관용은 timeout 하나로만 좁혀 둔다.
 - **`cli-result-schema.json`** — CLI `--json` 출력·MCP tool 결과가 공유하는 **결과 계약 SSOT**
   (envelope `homelab-cli/1`). variant 어휘(success/failure/race/skip/pending/no-op/superseded)·
   종료코드 매핑(x-contract.exitCodes — pending=1 근거 포함)·stdout 순수성(--json이면 stdout은
@@ -287,8 +324,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   종료코드 매핑)를 런타임에 읽어 노출(`ENVELOPE`·`EXIT`·`exitFor`·`Envelope` 타입 — 코드 상수
   복제 금지). 소비자: `homelab.ts`·`lib/verbs.ts`·(예정) MCP 서버.
 - **`lib/verbs.ts`** — 동사 operation catalog(transport 중립·부수효과 없는 import-safe SSOT).
-  행 = path(라우팅 어휘)+desc(--help)+op(타입 입력→계약 Envelope). argv 파싱·렌더링은 CLI 셸
-  소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1). 후속 동사는 여기 행을 추가.
+  행 = path(라우팅 어휘)+desc(--help)+needs(요구 망 도메인 — usage가 렌더)+op(타입 입력→계약
+  Envelope). argv 파싱·렌더링은 CLI 셸 소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1).
+  후속 동사는 여기 행을 추가한다(needs는 필수 필드라 타입이 누락을 막는다).
 - **`lib/catalog-rows.ts`** — 변이 레인 신원 행 + 결과 계약 행(**순수 기술자, import 0** — 설계 게이트 r1 D3).
   액션별 한 행 = 디스패처/reusable 파일명 · 디스패치 입력 이름 · 브랜치 중립 패턴({key}·{runId}) ·
   수렴 Application 집합+표면 패턴. 생성 방향(verbs·secrets의 `laneMutationFields`)과 파싱 방향(status의
@@ -315,19 +353,39 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`lib/mutation.ts`** — 공유 변이 엔진(`runMutation()`) — 변이 동사들의 공통 골격: correlation
   nonce → 디스패치 → run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정(3상 — 빈 목록·
   전송 오류는 deadline 독립 grace 재조회 `PR_GRACE_RETRIES` 뒤 판정, `noopForbidden`이면 0건은 fail-loud) →
-  [--wait] 머지 관측 + Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,
-  health 단독 판정 금지, 후손 리비전 표면 부재=superseded). 시간 심 pollMs/deadlineMs +
-  HOMELAB_CORRELATION 주입(테스트). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
+  [--wait] 머지 관측(머지 없이 닫힌 PR은 대기가 아니라 종결 관측 — 목록의 `state:closed`·미머지를
+  단건 권위 조회 `pulls/<n>`로 확증한 뒤 failure, 전송 오류면 미확정으로 두고 폴링 계속) +
+  Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,
+  health 단독 판정 금지, 후손 리비전 표면 부재=superseded). 세 폴링 루프(run 특정·conclusion·머지)는
+  지속되는 GitHub 계층 조회 실패를 pendingReason 접미로 지목한다(문구 SSOT는 엔진 헬퍼 하나 —
+  필드 신설 금지: pending 계열은 additionalProperties:false다). 단계 전이마다 **진행 이벤트**를
+  낸다(`MutationOpts.onProgress` — dispatched/identified/concluded/pr/merged): 엔진은 이벤트만 내고
+  문구·싱크는 CLI 셸(homelab.ts)이 소유하며 MCP는 주입하지 않는다(stdio 무오염). 시간 심
+  pollMs/deadlineMs + HOMELAB_CORRELATION 주입(테스트). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
+- **`lib/lane-pr.ts`** — 레인 브랜치 PR의 좌표·정확 조회 커널(`readLanePrs()`·`lanePrRef()`·
+  `parseLaneBranch()`·`laneBranchInputError()`). 질의는 `pulls?state=all&head=<owner>:<branch>` —
+  head가 **정확 일치**라 형제 브랜치(`…/mydb-5011`)가 `…/mydb-501` 응답에 원리적으로 섞이지 않는다.
+  투영(`LANE_PR_FIELDS`)은 목록·단건 공용 SSOT이고 argv 원장에 그대로 실려 테스트가 핀한다.
+  파싱은 레인 신원 행(catalog-rows `branchPattern`)에서 파생하고 **왕복 등식**(복원한 key·runId를
+  다시 채워 원문과 대조) + 레인별 이름 정책(app/resource)으로 확증한다 — 임의 ref가 gh 질의
+  문자열로 새지 않는 1차 게이트다. 소비자: 변이 엔진(자기 PR 특정)·status(`--branch` 재개 조회).
 - **`lib/argocd.ts`** — ArgoCD Application status 리더(`syncRevisionOf()`·`revisionFields()`) — 변이 엔진
   (수렴 판정)과 status 엔진(라이브 표시)이 공유하는 리비전 해석. 앱 레인 `<app>-prod`는 appset sources 3개의
   멀티소스라 컨트롤러가 `sync.revision`을 비우고 `sync.revisions[]`만 채운다(라이브 실측) — 단수 필드만 읽던
   두 사본이 앱 레인 --wait를 영구 pending으로 만들던 결함의 흡수 자리. 판정 4상: resolved(전부 SHA·dedupe 1개 —
   계보·표면 ref) / skew(소스 간 불일치 — 표면 ref 미확정) / non-sha(helm 차트 버전 — gh compare 호출 금지) /
   none(관측 0). 엔진의 `sync?.revision` 직접 참조 0건은 test_homelab-status.bats가 grep으로 단언한다.
-- **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghJson` — ghJson은 오브젝트/배열 jq 전용, 스칼라
+- **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghRead`/`ghJson`·`firstReason` — ghRead는 값과 실패 사유를 함께
+  주는 3상 리더(ok/error=stderr 첫 줄/parse=폴백 문구)이고 ghJson은 그 축약(값만·실패 null),
+  둘 다 오브젝트/배열 jq 전용, 스칼라
   jq는 raw라 sh 직접, `git`·`pushRoutes` — push 지향 관측 `git remote get-url --push --all`:
   pushurl 복수·insteadOf/pushInsteadOf 전개 반영) — status·mutation·init·secrets 공유. 판정 정책은
-  콜사이트 소유(doctor의 gh()는 ENOENT 판별 자기 정책이 있어 별도 유지). push 라우팅 검사의
+  콜사이트 소유(doctor의 gh()는 ENOENT 판별 자기 정책이 있어 별도 유지). **오류 충실도**:
+  errKind는 4종(not-found=ENOENT · timeout=ETIMEDOUT · overflow=ENOBUFS · spawn=그 외)이고,
+  자식이 죽기 전에 쓴 **부분 stderr**와 죽인 **시그널**(`signal`)을 결과에 보존한다 — 셋을 한 값으로
+  접으면 원인이 통째로 지워지고 SIGKILL 사망은 빈 사유가 된다. `firstReason(err)`는 다행 stderr에서
+  사유 한 줄을 고른다(`error:`/`fatal:`/`!` 우선, `To `/`hint:` 제외) — git push의 1행 `To <url>`이
+  거부 이유를 가리는 실측 클래스가 그 자리다(소비자: init·secrets의 push 실패). push 라우팅 검사의
   테스트 전용 완화 플래그 이름(`ALLOW_PUSH_REWRITE_ENV` = HOMELAB_TEST_ALLOW_PUSH_REWRITE)도
   여기 산다 — HOMELAB_CORRELATION 주입과 같은 부류(테스트 심).
 - **`lib/secrets.ts`** — app secrets 엔진(`runAppSecrets()`·`appSecretsInputError()`): 이중 모드 판별(git
@@ -340,6 +398,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   레포(핀·바인딩)+GitHub(run·PR)가 기본, 라이브(ArgoCD)는 KUBECONFIG 있을 때만(부재=생략,
   조회 실패=live.error — 유일한 선택 계층). GitHub 계층 오류는 fail-loud(빈 목록 위장 금지).
   입력 검증 술어는 CLI(usage exit 2)·MCP(invalid params)가 공유. 관측 전용(gh api·kubectl get만).
+  run 모드의 `--branch` 좌표는 lane-pr 커널의 정확 조회로 그 레인 PR을 붙이고(2건이면 race exit 3),
+  app 모드의 산출물 부재 분기는 열린 PR 목록 1회로 create-app 레인 PR을 `createPrs`에 싣는다.
 - **`lib/doctor.ts`** — homelab CLI doctor 진단 엔진(`runDoctor()`). 점검 항목·상태 판정·detail
   문구를 소유한다(관측 전용 — `gh api` 읽기만, 테스트가 argv 원장으로 강제). 선행 gh-auth 실패로
   판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든

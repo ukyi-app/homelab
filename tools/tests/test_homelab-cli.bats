@@ -78,7 +78,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # 남는다 — verb 분기가 허용 variant 집합까지 선언하고, verb별 허용∪비허용 = variant 전체(7종).
   # 표본 result는 공유 코퍼스(helpers/contract-samples.ts)가 SSOT — 축자 이중 사본 제거(티켓 05).
   # 바닥값은 계약 행(CONTRACT_ROWS)에서 파생한다 — 손 재계산(구 36/34) 대체. 열거 붕괴 방지의
-  # 손 앵커는 파생 밖에 남는다: oneOf 분기 수 31 · 계약 행 수 10 (exitCodes 리터럴 7쌍 핀은
+  # 손 앵커는 파생 밖에 남는다: oneOf 분기 수 32 · 계약 행 수 10 (exitCodes 리터럴 7쌍 핀은
   # 위의 "result schema pins …" @test가 소유).
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
@@ -89,12 +89,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     const map = sch["x-contract"].exitCodes;
     const all = sch.properties.variant.enum;
     const verbBranches = sch.allOf.find((b) => b.oneOf?.[0]?.properties?.verb)?.oneOf ?? [];
-    if (verbBranches.length !== 31) { console.error("oneOf 분기 수 " + verbBranches.length + " != 31(손 앵커)"); process.exit(1); }
+    if (verbBranches.length !== 32) { console.error("oneOf 분기 수 " + verbBranches.length + " != 32(손 앵커)"); process.exit(1); }
     if (CONTRACT_ROWS.length !== 10) { console.error("계약 행 수 " + CONTRACT_ROWS.length + " != 10(손 앵커)"); process.exit(1); }
     // variant 셀 총합 핀 — 다중 variant 엔트리에서 variant가 지워지면 분기·행 수는 그대로인 채
     // 파생과 워커가 함께 내려가 초록이 된다(리뷰 실측) — 구판 ok:36 리터럴의 정확한 복원이다.
     const cellTotal = verbBranches.reduce((n, b) => n + b.properties.variant.enum.length, 0);
-    if (cellTotal !== 38) { console.error("variant 셀 총합 " + cellTotal + " != 38(손 앵커)"); process.exit(1); }
+    if (cellTotal !== 39) { console.error("variant 셀 총합 " + cellTotal + " != 39(손 앵커)"); process.exit(1); }
     const SAMPLES = buildSamples(sch.definitions.doctorCheck.properties.id.enum);
     const byVerb = {};
     for (const br of verbBranches) (byVerb[br.properties.verb.enum[0]] ??= []).push(br);
@@ -452,4 +452,92 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   '
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^threw:2$"
+}
+
+# ── 티켓 33: 어휘·종료코드·요구 도메인·관측 레버를 표면이 말하게 ──────────────────────────
+
+@test "the top-level usage renders every exit code paired with its variant on one line (schema is the oracle)" {
+  # ⚠️ 맨 숫자 grep은 금지다 — WAIT_FLAG_LINES가 이미 5000·1200000을 뿌려 어떤 숫자든 매치하는
+  # vacuous green이 된다. 기준은 스키마 열거(x-contract)이고 usage가 피검사자이며, 판정은
+  # "variant 이름과 그 코드가 **같은 줄**"이라는 쌍 단위다.
+  bun tools/homelab.ts --help > "$BATS_TEST_TMPDIR/help.txt"
+  HELP="$BATS_TEST_TMPDIR/help.txt" run bun -e '
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const help = readFileSync(process.env.HELP, "utf8").split("\n");
+    const codeOnLine = (line, code) => new RegExp("(^|[^0-9])" + code + "([^0-9]|$)").test(line);
+    let n = 0;
+    for (const [variant, code] of Object.entries(sch["x-contract"].exitCodes)) {
+      if (!help.some((l) => l.includes(variant) && codeOnLine(l, code))) {
+        console.error("미표기 쌍: " + variant + "=" + code); process.exit(1);
+      }
+      n++;
+    }
+    // usage 코드(2)는 variant가 아니라 파싱 실패의 코드다 — 스크립트가 가장 자주 밟는데 원안에 없었다.
+    if (!help.some((l) => l.includes("usage") && codeOnLine(l, sch["x-contract"].usageExit))) {
+      console.error("usage 코드 미표기"); process.exit(1);
+    }
+    console.log("pairs:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^pairs:7$"
+  # 같은 코드를 나눠 갖는 variant가 있다는 사실도 한 줄로 말한다(0=success·no-op, 1=failure·pending).
+  grep -q "variant" "$BATS_TEST_TMPDIR/help.txt"
+}
+
+@test "no --help output leaks the internal seam label, and the exec ledger lever is advertised instead" {
+  # '심(seam)'은 레포 내부 어휘라 owner/에이전트에게는 '쓰지 말라'로도 읽힌다 — 데드라인 조정은
+  # 정당한 운영 노브다. 반대로 실재하는 관측 레버(HOMELAB_EXEC_LEDGER)는 문서가 0건이었다.
+  ALL="$BATS_TEST_TMPDIR/all-help.txt"
+  : > "$ALL"
+  bun tools/homelab.ts --help >> "$ALL"
+  n=0
+  while read -r verb; do
+    bun tools/homelab.ts $verb --help >> "$ALL"
+    n=$((n + 1))
+  done < <(bun -e 'import { VERBS } from "./tools/lib/verbs.ts"; for (const v of VERBS) console.log(v.path.join(" "));')
+  [ "$n" -ge 10 ]   # 열거 바닥값 — 0건이면 아래 '0회' 단언이 공허하다
+  [ "$(grep -c '심)' "$ALL")" = "0" ]
+  # 같은 검출기의 양성 대조 — 착지 전 라벨 모양에서는 1건을 센다.
+  [ "$(printf '%s\n' "  --poll-ms <n>      폴링 간격(기본 5000 — 시간 주입 심)" | grep -c '심)')" = "1" ]
+  grep -q "HOMELAB_EXEC_LEDGER" "$ALL"
+}
+
+@test "every verb usage declares its required network domains, rendered from the descriptor (no hand copies)" {
+  # 홈랩에서는 두 도메인(GitHub=인터넷 / 클러스터=tailscale·LAN)이 독립으로 끊긴다 — 한쪽만
+  # 끊긴 상태가 정상인데 그 비대칭이 어휘에 없었다. 값은 VerbShape의 데이터 한 칸이 소유한다.
+  run bun -e '
+    import { VERBS } from "./tools/lib/verbs.ts";
+    let n = 0;
+    for (const v of VERBS) {
+      if (typeof v.needs !== "string" || v.needs.trim() === "") { console.error("needs 없음: " + v.path.join(" ")); process.exit(1); }
+      n++;
+    }
+    console.log("verbs:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^verbs:10$"
+  # 그 데이터가 실제로 렌더된다 — 동사별 --help가 자기 행의 문자열을 그대로 담는다(손 사본 0).
+  n=0
+  while IFS="	" read -r verb needs; do
+    bun tools/homelab.ts $verb --help > "$BATS_TEST_TMPDIR/h.txt"
+    grep -qF "요구: $needs" "$BATS_TEST_TMPDIR/h.txt"
+    n=$((n + 1))
+  done < <(bun -e 'import { VERBS } from "./tools/lib/verbs.ts"; for (const v of VERBS) console.log(v.path.join(" ") + "\t" + v.needs);')
+  [ "$n" -eq 10 ]
+}
+
+@test "every pending golden points at a resume command the CLI actually accepts" {
+  # '핸들로 재조회 가능'은 다음 명령을 주지 않았다 — 포인터를 넣되 **실재하는 것만** 지목한다.
+  n=0
+  for g in db-create-pending cache-create-pending app-create-pending app-teardown-pending; do
+    reason="$(jq -r '.result.pendingReason' "tools/tests/fixtures/homelab/$g.golden.json")"
+    printf '%s\n' "$reason" | grep -q "homelab status --"
+    flag="$(printf '%s\n' "$reason" | grep -o -- "--run\|--pr" | head -1)"
+    [ -n "$flag" ]
+    bun tools/homelab.ts status --help > "$BATS_TEST_TMPDIR/su.txt"
+    grep -q -- "$flag" "$BATS_TEST_TMPDIR/su.txt"
+    n=$((n + 1))
+  done
+  [ "$n" -eq 4 ]
 }

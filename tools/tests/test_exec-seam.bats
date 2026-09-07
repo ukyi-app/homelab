@@ -8,9 +8,18 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   cd "$ROOT" || exit 1   # git ls-files는 cwd 상대다(sops-guard와 같은 관례)
   FX="$BATS_TEST_TMPDIR/x.ts"
+  # 자기 자신을 SIGKILL하는 헬퍼 — TS 본문에서 `kill -9 $$`를 쓰면 **비인용 heredoc이 그 자리에서
+  # bats의 PID로 확장**해 버린다(같은 클래스: 함정 「인용하지 않은 heredoc」). 인용 heredoc으로 뺀다.
+  FX_KILLER="$BATS_TEST_TMPDIR/killer.sh"
+  export FX_KILLER
+  cat > "$FX_KILLER" <<'SH'
+#!/usr/bin/env bash
+kill -9 $$
+SH
+  chmod +x "$FX_KILLER"
   # ⚠️ heredoc 비인용(EOF) — $ROOT 확장 필요. TS 본문은 ${} 템플릿 리터럴을 쓰지 않는다.
   cat > "$FX" <<EOF
-import { sh, gh, git, kubeseal } from "$ROOT/tools/lib/exec.ts";
+import { firstReason, sh, gh, git, kubeseal } from "$ROOT/tools/lib/exec.ts";
 const mode = process.env.FX_MODE ?? "";
 if (mode === "notfound") {
   const r = sh("hlb-definitely-missing-cmd-xyz", []);
@@ -27,6 +36,21 @@ if (mode === "notfound") {
 } else if (mode === "spawnkind") {
   const r = sh("/etc/hostname", []);
   console.log("ok=" + r.ok + " errKind=" + (r.errKind ?? "none"));
+} else if (mode === "timeout") {
+  const r = sh("bash", ["-c", "echo why >&2; sleep 5"], { timeoutMs: 200 });
+  console.log("ok=" + r.ok + " errKind=" + (r.errKind ?? "none") + " why=" + r.err.includes("why") + " signal=" + (r.signal ?? "none"));
+} else if (mode === "overflow") {
+  const r = sh("bash", ["-c", "echo partial >&2; head -c 65536 /dev/urandom | base64"], { maxBuffer: 1024 });
+  console.log("ok=" + r.ok + " errKind=" + (r.errKind ?? "none") + " partial=" + r.err.includes("partial"));
+} else if (mode === "killed") {
+  const r = sh(process.env.FX_KILLER ?? "", []);
+  console.log("ok=" + r.ok + " errKind=" + (r.errKind ?? "none") + " signal=" + (r.signal ?? "none"));
+} else if (mode === "reason") {
+  const push = ["To https://github.com/ukyi-app/x.git", " ! [rejected] HEAD -> main (fetch first)", "error: failed to push some refs", "hint: Updates were rejected"].join("\n");
+  console.log("push=" + firstReason(push));
+  console.log("clone=" + firstReason("Cloning into 'x'...\nfatal: repository not found"));
+  console.log("gh=" + firstReason("gh: Not Found (HTTP 404)"));
+  console.log("empty=[" + firstReason("") + "]");
 } else if (mode === "ledger") {
   sh("cat", [], { input: "SECRET-PLAINTEXT-7f3a" });
   git(".", ["--version"]);
@@ -59,6 +83,39 @@ EOF
   FX_MODE=named run bun "$FX"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q '^git=true$'
+}
+
+@test "a timed-out child yields errKind timeout AND keeps the partial stderr it wrote before dying" {
+  # 종전에는 ETIMEDOUT·ENOBUFS·기타 spawn 실패가 전부 errKind "spawn" 한 값으로 접혀 원인이 지워졌고,
+  # 자식이 죽기 전에 쓴 stderr(유일한 단서)는 통째로 버려졌다. 실측(Bun 1.3.14): status null·SIGTERM.
+  FX_MODE=timeout run bun "$FX"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^ok=false errKind=timeout why=true signal=SIGTERM$'
+}
+
+@test "a maxBuffer overflow yields errKind overflow (not the catch-all spawn) and keeps the partial stderr" {
+  FX_MODE=overflow run bun "$FX"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^ok=false errKind=overflow partial=true$'
+}
+
+@test "a child killed by a signal carries that signal on the result (empty stderr is not 'no reason')" {
+  # SIGKILL 사망은 r.error가 없어 정상 분기로 온다(ok:false·status null·stderr "") — 시그널을
+  # 나르지 않으면 콜사이트의 사유가 빈 문자열이 되고 '실패했는데 이유가 없다'가 된다.
+  FX_MODE=killed run bun "$FX"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^ok=false errKind=none signal=SIGKILL$'
+}
+
+@test "firstReason picks the rejection line git push hides on line 2, and leaves one-line tools unchanged" {
+  FX_MODE=reason run bun "$FX"
+  [ "$status" -eq 0 ]
+  # git push non-fast-forward: 1행은 `To <url>`(사유 아님) — 사유는 2행이다.
+  echo "$output" | grep -q '^push=! \[rejected\] HEAD -> main (fetch first)$'
+  echo "$output" | grep -q '^clone=fatal: repository not found$'
+  echo "$output" | grep -q '^gh=gh: Not Found (HTTP 404)$'
+  # 빈 입력은 빈 문자열(콜사이트가 폴백 문구를 고른다) — 예외로 죽지 않는다.
+  echo "$output" | grep -q '^empty=\[\]$'
 }
 
 @test "a non-ENOENT spawn failure yields errKind spawn (measured: EACCES on a non-executable)" {

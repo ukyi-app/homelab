@@ -17,7 +17,9 @@ cli_stub_init() {
   export CALLS="$BATS_TEST_TMPDIR/calls.nul"
   : > "$CALLS"
   BUN="$(command -v bun)"
-  for t in bun bash base64 cat git; do
+  # sleep — 디스패치 타임아웃 주입(STUB_GH_DISPATCH_HANG)이 자식을 살아 있게 두는 유일한 수단이다
+  # (PATH는 대체라 시스템 도구가 자동으로 들어오지 않는다).
+  for t in bun bash base64 cat git sleep; do
     ln -s "$(command -v "$t")" "$STUB/$t"
   done
 
@@ -38,8 +40,14 @@ cli_stub_init() {
   # db create 픽스처 기본값(행복 경로): 디스패치 접수 → nonce 에코 run 1개(성공) → PR 1개(미머지).
   printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
   printf '{"status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run.json"
+  # 전이 전 관측(티켓 19) — STUB_RUN_COMPLETE_AFTER_FIRST일 때 **첫** 단건 run 조회의 응답.
+  # 라이브의 기본 경로(queued/in_progress → completed)를 재현하는 자리로, 둘째 조회부터는 db-run.json.
+  printf '{"status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run-first.json"
   printf '[]\n' > "$FIX/db-run-jobs.json"
   printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
+  # PR 단건 권위 조회(티켓 05) — 목록이 state:closed·미머지일 때만 읽힌다(확증 단계). 기본은 목록과
+  # 같은 결론(closed·미머지)이고, stale 레인은 테스트가 merged_at을 채운 사본으로 덮어쓴다.
+  printf '{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"closed"}\n' > "$FIX/pr-confirm.json"
   printf 'identical\n' > "$FIX/db-compare.txt"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
@@ -128,12 +136,32 @@ PY
 # 임의 owner/repo URL을 정당한 입력으로 받는 계약이라(좁히면 계약을 거짓으로 검증) 의도적 비대칭.
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
-# STUB_GH_HANDLE_404. 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
+# STUB_GH_HANDLE_404 / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패 3종(STUB_GH_RUNS_LIST_FAIL ·
+# STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기 픽스처 2종
+# (STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL). 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
 make_gh_stub() {
   cat > "$STUB/gh" <<'SH'
 #!/usr/bin/env bash
 { printf '%s\0' gh "$@"; printf '\x1e'; } >> "$CALLS"
 b64() { base64 < "$1"; }
+# 변이 레인 폴링 실패 주입(티켓 06) — `workflow run`은 exit 0인데 이후 **관측** 조회만 비-0이 된다.
+# status 경로 전용인 STUB_GH_RUNS_FAIL을 재사용하면 이 레인이 vacuous라서 전용 노브를 둔다.
+# 본 case보다 **앞**에 있는 별도 case다: 본 case 안에 글롭을 끼우면 첫 매치가 이겨 디스패처별
+# 픽스처 케이스가 사문이 된다(bash case는 fallthrough가 없다 — `;;&`는 bash 4+).
+case "$*" in
+  "api repos/ukyi-app/homelab/actions/workflows/"*"/runs?per_page=20 --jq "*)
+    if [ -n "${STUB_GH_RUNS_LIST_FAIL:-}" ]; then echo "gh: HTTP 401: Bad credentials" >&2; exit 1; fi
+    ;;
+esac
+# 디스패치 지연 주입(티켓 08) — 자식이 살아 있는 동안 호출자의 timeoutMs가 만료돼 SIGTERM으로
+# 죽는 상황을 만든다(POST 도달 여부는 미상). 부분 stderr를 먼저 흘려 seam의 보존도 함께 관측된다.
+# 본 case **앞**의 별도 case다(bash case는 fallthrough가 없다 — 본 case에 끼우면 디스패처별
+# 픽스처 케이스가 사문이 된다). 원장 기록은 이 지연보다 앞이라 '정확히 1건'이 그대로 관측된다.
+case "$*" in
+  "workflow run "*)
+    if [ -n "${STUB_GH_DISPATCH_HANG:-}" ]; then echo "gh: 요청 전송 중" >&2; sleep 5; fi
+    ;;
+esac
 case "$*" in
   "api -i user")
     if [ -n "${STUB_GH_UNAUTH:-}" ]; then
@@ -210,11 +238,23 @@ case "$*" in
     cat "$FIX/db-run-jobs.json"
     ;;
   "api repos/ukyi-app/homelab/actions/runs/"*" --jq {status, conclusion, html_url}")
+    # STUB_GH_RUN_READ_FAIL(티켓 06): conclusion 폴링 루프의 관측만 전부 전송 오류.
+    if [ -n "${STUB_GH_RUN_READ_FAIL:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
+    # STUB_RUN_COMPLETE_AFTER_FIRST(티켓 19): 첫 조회는 db-run-first.json(전이 전), 이후 db-run.json.
+    # 라이브의 **기본 경로**(queued→in_progress→completed)를 밟는 유일한 자리 — 마커는 셸 내장
+    # 리다이렉션이다(PATH=$STUB에 touch가 없다, STUB_PR_MERGE_AFTER_FIRST와 같은 관용구).
+    if [ -n "${STUB_RUN_COMPLETE_AFTER_FIRST:-}" ] && [ ! -f "$FIX/.run-read-once" ]; then
+      : > "$FIX/.run-read-once"; cat "$FIX/db-run-first.json"; exit 0
+    fi
     cat "$FIX/db-run.json"
     ;;
   "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "*)
     # STUB_PR_MERGE_AFTER_FIRST: 첫 조회는 미머지, 이후 머지 — "--wait 중 사람이 머지" 전환 재현
     # (마커는 셸 내장 리다이렉션 — PATH=$STUB에 touch 없음, STUB_COMPARE_FLAKY와 같은 관용구).
+    # STUB_GH_PR_LOOKUP_FAIL(티켓 19): PR 특정 조회가 **전부** 전송 오류 — grace 재시도를 다 쓰고도
+    # 미확정이면 '명명 드리프트'가 아니라 GitHub 계층 실패다. status의 열린 PR 목록 전용인
+    # STUB_GH_PRS_FAIL과 이름을 의도적으로 분리한다(재사용하면 어느 레인이 죽었는지 못 가른다).
+    if [ -n "${STUB_GH_PR_LOOKUP_FAIL:-}" ]; then echo "gh: HTTP 502: Bad Gateway" >&2; exit 1; fi
     if [ -n "${STUB_PR_MERGE_AFTER_FIRST:-}" ]; then
       if [ ! -f "$FIX/.pr-read-once" ]; then
         : > "$FIX/.pr-read-once"
@@ -231,7 +271,26 @@ case "$*" in
     if [ -n "${STUB_PR_FAIL_FIRST:-}" ] && [ ! -f "$FIX/.pr-fail-once" ]; then
       : > "$FIX/.pr-fail-once"; echo "gh: connect: connection reset" >&2; exit 1
     fi
+    # STUB_GH_PR_LIST_FAIL_AFTER_FIRST(티켓 06): 첫 조회(step 4 PR 특정)만 정상, 이후 머지 폴링은
+    # 전부 전송 오류 — 지속 실패가 '머지 미관측'으로 위장되는 자리를 만든다.
+    if [ -n "${STUB_GH_PR_LIST_FAIL_AFTER_FIRST:-}" ]; then
+      if [ -f "$FIX/.pr-list-once" ]; then echo "gh: HTTP 403: rate limit exceeded" >&2; exit 1; fi
+      : > "$FIX/.pr-list-once"
+    fi
+    # 브랜치별 응답(티켓 09) — 실물 API의 `head=<owner>:<branch>` **정확 일치**를 스텁도 흉내낸다.
+    # 파일명은 브랜치의 '/'를 '_'로 바꾼 `$FIX/prs-head-<branch>.json`이고, 없으면 기존 db-prs.json이
+    # 그대로 쓰인다(기존 레인 무영향). ⚠️ 치환은 셸 파라미터 확장으로만 — PATH=$STUB에 tr/sed가 없다.
+    hr="${2#*head=ukyi-app:}"
+    alt="$FIX/prs-head-${hr//\//_}.json"
+    if [ -f "$alt" ]; then cat "$alt"; exit 0; fi
     cat "$FIX/db-prs.json"
+    ;;
+  # PR 단건 권위 조회(티켓 05) — 머지 없이 닫힌 목록 행의 확증 단계. status의 핸들 조회와 같은
+  # 경로 형상이라 **jq 투영으로 구별**한다(status는 {number, state, merged, …}). STUB_PR_CONFIRM_FAIL이면
+  # 전송 오류 — 확증이 미확정이면 엔진은 종결하지 않고 폴링을 계속한다.
+  "api repos/ukyi-app/homelab/pulls/"*" --jq {number, html_url, merged_at, merge_commit_sha, state}")
+    if [ -n "${STUB_PR_CONFIRM_FAIL:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
+    cat "$FIX/pr-confirm.json"
     ;;
   "api repos/ukyi-app/homelab/compare/"*" --jq .status")
     # STUB_COMPARE_FLAKY: 첫 호출만 전송 오류 — 미확정 관측을 캐시하지 않음(재평가 수렴)을 증명.

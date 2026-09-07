@@ -311,6 +311,131 @@ setup() {
   echo "$output" | grep -q "라이브"
 }
 
+# ── 티켓 09: run 모드의 브랜치 좌표(--branch) 정확 조회 ────────────────────────────────────
+# pending 봉투는 run 핸들과 함께 **레인 브랜치**를 싣는다(추가 API 호출 0). 그 좌표를 받는 조회가
+# 여기다 — 와일드카드 스캔이 아니라 `head=<owner>:<branch>` 정확 일치라서 형제 브랜치를 못 집는다.
+
+@test "run mode with --branch reports the lane PR from an exact head query and never a sibling branch's PR" {
+  # 대상(…mydb-501)과 형제(…mydb-5011)를 둘 다 픽스처로 둔다 — 형제가 실재해도 조회에 안 나온다.
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":"2026-08-20T10:00:00Z","merge_commit_sha":"feedbee","state":"closed"}]\n' > "$FIX/prs-head-create-database_mydb-501.json"
+  printf '[{"number":99,"html_url":"https://github.com/ukyi-app/homelab/pull/99","merged_at":null,"merge_commit_sha":null,"state":"open"}]\n' > "$FIX/prs-head-create-database_mydb-5011.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status \
+    --run "https://github.com/ukyi-app/homelab/actions/runs/501" --branch "create-database/mydb-501" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "run" ]
+  [ "$(echo "$output" | jq -r '.result.run.pr.url')" = "https://github.com/ukyi-app/homelab/pull/21" ]
+  [ "$(echo "$output" | jq -r '.result.run.pr.number')" = "21" ]
+  [ "$(echo "$output" | jq -r '.result.run.pr.merged')" = "true" ]
+  [ "$(echo "$output" | jq -r '.result.run.pr.mergeSha')" = "feedbee" ]
+  # 질의의 정확성을 원장이 고정한다 — 이 문자열이 접두 스캔으로 바뀌면 형제 오귀속이 되살아난다.
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq "[.[] | {number, html_url, merged_at, merge_commit_sha, state}]"
+  [ "$status" -eq 0 ]
+  # 형제 브랜치는 조회 자체가 없었다(부재 단언) + 같은 원장 질의의 양성 대조는 위 exact가 소유한다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-5011" --jq)" = "0" ]
+}
+
+@test "two PRs on the same lane branch is a race (exit 3), never a pick" {
+  printf '[{"number":21,"html_url":"u21","merged_at":null,"merge_commit_sha":null},{"number":22,"html_url":"u22","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/prs-head-create-database_mydb-501.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status \
+    --run "https://github.com/ukyi-app/homelab/actions/runs/501" --branch "create-database/mydb-501" --json
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "race" ]
+  [ "$(echo "$output" | jq -r '.result.observedPrs')" = "2" ]
+  echo "$output" | jq -r '.result.error' | grep -q "create-database/mydb-501"
+}
+
+@test "run mode without --branch carries no pr key (the coordinate is what opens the lookup)" {
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status \
+    --run "https://github.com/ukyi-app/homelab/actions/runs/501" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.run | has("pr")')" = "false" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "0" ]
+  # 같은 @test 안 양성 대조 — 좌표를 주면 같은 경로가 실제로 조회하고 키가 생긴다.
+  : > "$CALLS"
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/prs-head-create-database_mydb-501.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status \
+    --run "https://github.com/ukyi-app/homelab/actions/runs/501" --branch "create-database/mydb-501" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.run | has("pr")')" = "true" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "1" ]
+}
+
+@test "--branch is refused standalone, on a foreign ref, and when its run id contradicts the run URL (no gh query leaks)" {
+  # 임의 ref가 질의 문자열로 새면 안 된다 — 세 거부 레인 모두 gh 호출 0건이어야 한다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --branch "create-database/mydb-501" --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- "--run"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status \
+    --run "https://github.com/ukyi-app/homelab/actions/runs/501" --branch "refs/heads/../evil" --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "브랜치 형식"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status \
+    --run "https://github.com/ukyi-app/homelab/actions/runs/501" --branch "create-database/mydb-5011" --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "5011"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api)" = "0" ]
+  # 같은 @test 안 양성 대조 — 유효한 쌍은 같은 경로에서 gh 조회로 나아간다(부재 단언이 공허하지 않다).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status \
+    --run "https://github.com/ukyi-app/homelab/actions/runs/501" --branch "create-database/mydb-501" --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api)" -ge 1 ]
+}
+
+@test "the run+branch and race envelopes validate against the schema (floor 2)" {
+  export OUTDIR="$BATS_TEST_TMPDIR"
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/prs-head-create-database_mydb-501.json"
+  env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/homelab/actions/runs/501" --branch "create-database/mydb-501" --json 2>/dev/null > "$OUTDIR/env-branch.json"
+  printf '[{"number":21,"html_url":"u21","merged_at":null,"merge_commit_sha":null},{"number":22,"html_url":"u22","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/prs-head-create-database_mydb-501.json"
+  env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/homelab/actions/runs/501" --branch "create-database/mydb-501" --json 2>/dev/null > "$OUTDIR/env-race.json" || true
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const dir = process.env.OUTDIR;
+    let n = 0;
+    for (const m of ["branch", "race"]) {
+      const env = JSON.parse(readFileSync(dir + "/env-" + m + ".json", "utf8"));
+      const errs = schemaErrors(env, sch, sch);
+      if (errs.length) { console.error(m + ": " + errs.join(" | ")); process.exit(1); }
+      n++;
+    }
+    console.log("ok:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:2$"
+}
+
+@test "an app with no deploy artifacts still surfaces the in-flight create-app PR from one open-PR listing" {
+  # 그린필드의 정상 상태: create-app PR이 열려 있고(수동 머지 대기) 산출물은 아직 없다. 종전에는
+  # 그 상태가 '앱 없음' failure 한 줄이라 MCP 에이전트가 이어갈 좌표가 0이었다(mcp-4).
+  printf '[{"number":51,"title":"create-app myapp","head":"create-app/myapp-801","html_url":"https://github.com/ukyi-app/homelab/pull/51","auto_merge":false},{"number":52,"title":"other","head":"create-app/other-802","html_url":"u52","auto_merge":false}]\n' > "$FIX/homelab-prs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status myapp --root "$APPS_ROOT" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.createPrs | length')" = "1" ]
+  [ "$(echo "$output" | jq -r '.result.createPrs[0].number')" = "51" ]
+  # 형제 앱(other)의 PR은 집지 않는다(레인 판정은 tail 형식까지) + 조회는 한 번뿐.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=open&per_page=100" --jq)" = "1" ]
+}
+
+@test "status --json is an offline entry point: exit 0 and a count with gh removed from PATH" {
+  # 티켓 33 — usage가 '요구: 없음'이라고 선언하는 경로에 회귀 앵커가 0건이었다(status 테스트는
+  # 항상 gh 스텁을 깐다). gh만 지운 PATH로 그 주장을 실제로 잰다.
+  make_app_fixture blog true
+  NOGH="$BATS_TEST_TMPDIR/stub-nogh"; mkdir -p "$NOGH"
+  for t in bun bash base64 cat git sleep kubectl; do ln -s "$STUB/$t" "$NOGH/$t"; done
+  run --separate-stderr env PATH="$NOGH" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.count')" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+  # 같은 PATH에서 gh를 요구하는 경로는 실패한다(부재 단언의 양성 짝 — PATH 조작이 실제로 먹혔다).
+  run --separate-stderr env PATH="$NOGH" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status blog --root "$APPS_ROOT" --json
+  [ "$status" -eq 1 ]
+}
+
 @test "a malformed app name is a usage error: exit 2, no envelope (traversal gate, shared predicate)" {
   # status는 리더지만 app을 그대로 apps/<app>/deploy/prod 경로·kubectl 리소스명에 조립한다 —
   # identity.ts의 traversal 1차 게이트를 형제 술어(verbs/secrets/init)와 같은 문구로 공유한다.

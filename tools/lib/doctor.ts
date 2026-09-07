@@ -17,6 +17,10 @@ export type DoctorResult = { checks: DoctorCheck[]; summary: DoctorSummary };
 // (errKind는 seam이 나르고, 그것을 "설치 필요"로 읽는 정책은 doctor의 것이다).
 const gh = ghExec;
 
+// 호스트 도구 핀 런북 — 도구 부재 detail이 지목하는 다음 자리(AGENTS.md 런북 표). 로컬 전용
+// (gitignored)이라 경로만 남긴다: 없는 파일을 가리키는 게 아니라 owner의 로컬 인덱스를 가리킨다.
+const TOOLCHAIN_RUNBOOK = "docs/runbooks/toolchain.md";
+
 // contents API의 base64 본문을 디코드해 돌려준다(실패 = null — 콜사이트가 fail 처리).
 function fetchTemplateFile(path: string): string | null {
   const r = gh(["api", `repos/${TEMPLATE_REPO}/contents/${path}`, "--jq", ".content"]);
@@ -71,14 +75,17 @@ export function runDoctor(): DoctorResult {
   }
 
   // ── 로컬 도구 ──
+  // detail은 '다음에 무엇을 하나'까지 지목한다(티켓 33) — 호스트 도구 핀은 런북이 SSOT다.
   add("bun", Bun.which("bun") ? "pass" : "fail",
-    Bun.which("bun") ? "bun 발견(PATH)" : "bun이 PATH에 없다 — app init(스캐폴드 실행)에 필요");
+    Bun.which("bun") ? "bun 발견(PATH)" : `bun이 PATH에 없다 — app init(스캐폴드 실행)에 필요(${TOOLCHAIN_RUNBOOK})`);
   add("kubeseal", Bun.which("kubeseal") ? "pass" : "fail",
-    Bun.which("kubeseal") ? "kubeseal 발견(PATH)" : "kubeseal이 PATH에 없다 — 시크릿 봉인(app secrets 연쇄 모드)에 필요");
+    Bun.which("kubeseal") ? "kubeseal 발견(PATH)" : `kubeseal이 PATH에 없다 — 시크릿 봉인(app secrets 연쇄 모드)에 필요(${TOOLCHAIN_RUNBOOK})`);
 
   // ── KUBECONFIG — 부재는 경고(라이브 구간 생략), 깨진 경로는 설정 오류라 fail ──
+  // 다음 명령은 canonical 경로를 그대로 준다. 결정성 규약(헤더 — detail에 절대경로 금지)은
+  // `$PWD` 상대 표기로 지킨다(레포 루트에서 실행하는 것이 그 명령의 전제이기도 하다).
   const kc = process.env.KUBECONFIG ?? "";
-  if (kc === "") add("kubeconfig", "warn", "KUBECONFIG 미설정 — status·--wait의 라이브(ArgoCD) 구간이 생략된다");
+  if (kc === "") add("kubeconfig", "warn", "KUBECONFIG 미설정 — status·--wait의 라이브(ArgoCD) 구간이 생략된다(레포 루트에서: export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig)");
   else if (existsSync(kc)) add("kubeconfig", "pass", "KUBECONFIG 설정됨(파일 존재)");
   else add("kubeconfig", "fail", "KUBECONFIG가 존재하지 않는 파일을 가리킨다 — 설정 오류");
 

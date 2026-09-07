@@ -60,6 +60,10 @@ setup() {
   [ "$(echo "$output" | jq -r '.result.checks[] | select(.id=="kubeseal") | .status')" = "fail" ]
   [ "$(echo "$output" | jq -r '.result.checks[] | select(.id=="kubeconfig") | .status')" = "warn" ]
   echo "$output" | jq -r '.result.checks[] | select(.id=="template-targetarch") | .detail' | grep -q "fullstack"
+  # 티켓 33 — detail은 '다음에 무엇을 하나'를 지목한다: 도구 부재는 호스트 도구 핀 런북,
+  # KUBECONFIG 미설정은 레포 루트 기준 export 한 줄(결정성 규약대로 절대경로 대신 $PWD 상대).
+  echo "$output" | jq -r '.result.checks[] | select(.id=="kubeseal") | .detail' | grep -q "docs/runbooks/toolchain.md"
+  echo "$output" | jq -r '.result.checks[] | select(.id=="kubeconfig") | .detail' | grep -q 'export KUBECONFIG=\$PWD/infra/k3s-bootstrap/kubeconfig'
   printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/actual.json"
   diff -u tools/tests/fixtures/homelab/doctor-failure.golden.json "$BATS_TEST_TMPDIR/actual.json"
 }

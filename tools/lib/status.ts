@@ -14,12 +14,17 @@ import { LANES, isDispatchLaneBranch } from "./catalog-rows.ts";
 import { compact } from "./contract.ts";
 import { ghJson, sh } from "./exec.ts";
 import { APP_NAME_RE } from "./identity.ts";
+import { laneBranchInputError, lanePrRef, parseLaneBranch, readLanePrs, type LanePrRow } from "./lane-pr.ts";
 import { parseLedgerRows } from "./ledger-totals.ts";
 import { HOMELAB_REPO } from "./platform.ts";
 import { listUnits } from "./repo-walk.ts";
 
-export type StatusInput = { app?: string; runUrl?: string; prUrl?: string; root?: string };
-export type StatusOutcome = { variant: "success" | "failure"; omitted: string[]; result: Record<string, unknown> };
+// branch — run 모드의 **좌표 보강**(모드가 아니다). 변이 pending이 실어 보낸 레인 브랜치를 받아
+// 그 레인 PR을 정확 조회한다(티켓 09). 단독 모드로 열지 않는 이유는 statusInputError 주석 참조.
+export type StatusInput = { app?: string; runUrl?: string; prUrl?: string; branch?: string; root?: string };
+// race — 브랜치 하나에 PR이 2개면 신원 판정 불가다(fail-closed, exit 3). 변이 엔진의 같은 축과
+// 같은 어휘를 쓴다 — 리더가 임의로 하나를 고르면 그 뒤의 모든 보고가 오귀속이 된다.
+export type StatusOutcome = { variant: "success" | "failure" | "race"; omitted: string[]; result: Record<string, unknown> };
 
 const RUN_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/actions\/runs\/(\d+)(?:\/.*)?$/;
 const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?:\/.*)?$/;
@@ -52,6 +57,19 @@ export function statusInputError(input: StatusInput): string | null {
   if (modes > 1) return "app 인자·--run·--pr는 상호배타다(하나만 지정)";
   if (input.runUrl !== undefined && !RUN_URL_RE.test(input.runUrl)) return `run URL 형식 불량(https://github.com/<o>/<r>/actions/runs/<id>): ${input.runUrl}`;
   if (input.prUrl !== undefined && !PR_URL_RE.test(input.prUrl)) return `PR URL 형식 불량(https://github.com/<o>/<r>/pull/<n>): ${input.prUrl}`;
+  if (input.branch !== undefined) {
+    // --branch는 모드가 아니라 run 모드의 좌표 보강이다. 단독 조회로 열면 '어느 run의 브랜치인가'가
+    // 입력에서 사라져 형제 오귀속을 가를 축이 없어진다(그리고 correlation 핸들 모드와 같은 재개 조건
+    // 문제를 반복한다 — owner 결정 Q2: 그 모드는 열지 않는다).
+    if (input.runUrl === undefined) return "--branch는 --run과 함께 쓴다(레인 브랜치 PR의 정확 조회 — run 좌표가 있어야 형제 오귀속을 가른다)";
+    const be = laneBranchInputError(input.branch);
+    if (be !== null) return be;                    // 임의 ref가 gh 질의 문자열로 새지 않는 1차 게이트
+    // 브랜치는 run id의 파생이다(레인 행 branchPattern `…-{runId}`) — 둘이 어긋나면 입력 자체가
+    // 모순이므로 조회 전에 죽인다(형제 브랜치 `…-5011`을 runId 501 조회에 붙이는 오귀속의 정면).
+    const parsed = parseLaneBranch(input.branch)!;
+    const runId = input.runUrl.match(RUN_URL_RE)![3];
+    if (String(parsed.runId) !== runId) return `--branch의 run id(${parsed.runId})가 --run URL의 run id(${runId})와 다르다 — 브랜치는 그 run의 좌표다`;
+  }
   return null;
 }
 
@@ -95,9 +113,28 @@ function statusList(root: string): StatusOutcome {
   return { variant: "success", omitted: [], result: { mode: "list", apps, count: apps.length } };
 }
 
+// 열린 PR 목록 1회 조회 — app 모드의 두 분기(산출물 실재/부재)가 같은 질의를 공유한다.
+// 실패는 null(fail-loud 판정은 콜사이트 — GitHub 계층은 선택 계층이 아니다).
+function openHomelabPrs(): Array<Record<string, unknown>> | null {
+  const got = ghJson(`repos/${HOMELAB_REPO}/pulls?state=open&per_page=100`,
+    "[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]");
+  return got === null ? null : (got as Array<Record<string, unknown>>);
+}
+const openPrRow = (p: Record<string, unknown>): Record<string, unknown> =>
+  compact({ number: p.number, title: p.title, head: p.head, url: p.html_url, autoMerge: p.auto_merge });
+
 function statusApp(root: string, app: string): StatusOutcome {
   if (!existsSync(appPaths(root, app).prod)) {
-    return { variant: "failure", omitted: [], result: { mode: "app", error: `앱 '${app}'의 배포 산출물(${appRel(app).prod})이 없다` } };
+    // 산출물 부재는 그린필드의 **정상 전이**일 수 있다: create-app PR이 열려 있고(수동 머지 대기)
+    // 그 PR이 바로 이 디렉토리를 만든다. 종전에는 이 상태가 '앱 없음' 한 줄이라 재개 좌표가 0이었다
+    // (mcp-4). 읽기 1회로 그 레인 PR을 별도 필드에 실어 준다 — 수동 머지 원칙은 그대로다.
+    // 조회 실패는 여기서 fail-loud로 승격하지 않는다(주 사유는 산출물 부재이고, 부가 관측의 부재는
+    // 키 부재로 보고된다 — 없는 것과 못 본 것을 결과가 뒤섞지 않게 필드를 만들지 않는다).
+    const prs = openHomelabPrs();
+    const createPrs = (prs ?? [])
+      .filter((p) => isDispatchLaneBranch(LANES["create-app"].branchPattern, app, String(p.head)))
+      .map(openPrRow);
+    return { variant: "failure", omitted: [], result: compact({ mode: "app", error: `앱 '${app}'의 배포 산출물(${appRel(app).prod})이 없다`, createPrs: createPrs.length > 0 ? createPrs : undefined }) };
   }
   const row = readAppRow(root, app);
 
@@ -110,12 +147,9 @@ function statusApp(root: string, app: string): StatusOutcome {
     runs = (got as Array<Record<string, unknown>>).map((r) =>
       compact({ name: r.name, status: r.status, conclusion: r.conclusion, headSha: r.head_sha, url: r.html_url }));
   }
-  const prsGot = ghJson(`repos/${HOMELAB_REPO}/pulls?state=open&per_page=100`,
-    "[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]");
+  const prsGot = openHomelabPrs();
   if (prsGot === null) return { variant: "failure", omitted: [], result: { mode: "app", error: `GitHub 계층 조회 실패 — ${HOMELAB_REPO} 열린 PR` } };
-  const openPrs = (prsGot as Array<Record<string, unknown>>)
-    .filter((p) => isAppLaneBranch(String(p.head), app))
-    .map((p) => compact({ number: p.number, title: p.title, head: p.head, url: p.html_url, autoMerge: p.auto_merge }));
+  const openPrs = prsGot.filter((p) => isAppLaneBranch(String(p.head), app)).map(openPrRow);
 
   // 라이브 계층 — KUBECONFIG 부재는 생략(성공), 조회 실패는 live.error(관측 보고).
   const kc = process.env.KUBECONFIG ?? "";
@@ -141,13 +175,25 @@ function statusApp(root: string, app: string): StatusOutcome {
   return { variant: "success", omitted: [], result: { mode: "app", app: row, runs, openPrs, live } };
 }
 
-function statusRun(url: string): StatusOutcome {
+function statusRun(url: string, branch?: string): StatusOutcome {
   const m = url.match(RUN_URL_RE)!;
   const got = ghJson(`repos/${m[1]}/${m[2]}/actions/runs/${m[3]}`,
     "{name, status, conclusion, head_sha, html_url}");
   if (got === null) return { variant: "failure", omitted: [], result: { mode: "run", error: `run 핸들 조회 실패: ${url}` } };
   const r = got as Record<string, unknown>;
-  return { variant: "success", omitted: [], result: { mode: "run", run: compact({ name: r.name, status: r.status, conclusion: r.conclusion, headSha: r.head_sha, url: r.html_url ?? url }) } };
+  const run = compact({ name: r.name, status: r.status, conclusion: r.conclusion, headSha: r.head_sha, url: r.html_url ?? url });
+  if (branch === undefined) return { variant: "success", omitted: [], result: { mode: "run", run } };
+  // 좌표가 있으면 그 레인 브랜치의 PR을 **정확 조회**한다(변이 엔진과 같은 질의·투영 — lane-pr.ts).
+  // GitHub 계층은 fail-loud다(status.ts 헤더) — 빈 목록으로 위장하면 '아직 PR이 없다'와 구별되지 않는다.
+  const g = readLanePrs(branch);
+  if (g.kind !== "ok") return { variant: "failure", omitted: [], result: { mode: "run", error: `GitHub 계층 조회 실패 — 브랜치(${branch})의 PR 목록: ${g.reason}` } };
+  const rows = g.value as LanePrRow[];
+  if (rows.length >= 2) {
+    return { variant: "race", omitted: [], result: { mode: "run", branch, observedPrs: rows.length, error: `브랜치 ${branch}에 PR이 ${rows.length}개 — 신원 판정 불가(fail-closed)` } };
+  }
+  // 0건은 오류가 아니다 — run은 성공했어도 PR이 아직 안 났거나(멱등 no-op) 그 사이 닫혔을 수 있다.
+  // 값 없음 = 키 부재 규약대로 pr 키를 만들지 않는다(부재와 실패를 결과가 구별한다).
+  return { variant: "success", omitted: [], result: { mode: "run", run: compact({ ...run, branch, pr: rows[0] === undefined ? undefined : lanePrRef(rows[0]) }) } };
 }
 
 function statusPr(url: string): StatusOutcome {
@@ -165,7 +211,7 @@ function statusPr(url: string): StatusOutcome {
 
 export function runStatus(input: StatusInput): StatusOutcome {
   const root = input.root ?? defaultRoot();
-  if (input.runUrl !== undefined) return statusRun(input.runUrl);
+  if (input.runUrl !== undefined) return statusRun(input.runUrl, input.branch);
   if (input.prUrl !== undefined) return statusPr(input.prUrl);
   if (input.app !== undefined) return statusApp(root, input.app);
   return statusList(root);

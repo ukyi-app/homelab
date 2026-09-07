@@ -537,3 +537,72 @@ mcp_rpc_in() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -rc 'select(.id==51) | has("error")')" = "false" ]
 }
+
+# ── 대기 데드라인 인용의 정합(homelab-cli-r2 티켓 10) ────────────────────────────────────────
+
+@test "the deadline quoted in mcp.ts is derived from WAIT_DEFAULTS, never a stale hand copy" {
+  # MCP는 CLI 기본 deadline을 물려받지 않고 짧은 값을 명시한다 — 그 이유를 적은 주석이 상수와
+  # 어긋나면 운영자가 서버 블로킹 상한을 잘못 읽는다. 손 앵커가 아니라 상수에서 유도해 대조한다.
+  mins="$(bun -e 'import { WAIT_DEFAULTS } from "./tools/lib/mutation.ts"; console.log(WAIT_DEFAULTS.deadlineMs / 60000);')"
+  [ -n "$mins" ]   # 바닥값 — 빈 문자열이면 아래 grep이 전부 매치해 공허해진다
+  [ "$(grep -c "WAIT_DEFAULTS.deadlineMs = ${mins}분" tools/lib/mcp.ts)" = "1" ]
+  # 양성 대조(검출기 생존) — 어긋난 값은 같은 grep에서 0건이다.
+  [ "$(grep -c "WAIT_DEFAULTS.deadlineMs = $((mins + 1))분" tools/lib/mcp.ts)" = "0" ]
+}
+
+# ── pending의 브랜치 좌표와 status --branch(homelab-cli-r2 티켓 09) ───────────────────────
+
+@test "the identify-only pending carries the lane branch, derived from the row without an extra API call" {
+  # MCP 변이 pending에는 PR이 원리적으로 없다(run 완료 후 생긴다) — 그래서 **좌표**를 싣는다.
+  # 브랜치는 레인 행에서 유도한 값이지 조회 결과가 아니다(추가 호출 0).
+  mcp_rpc '{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"db_create","arguments":{"name":"mydb"}}}'
+  [ "$status" -eq 0 ]
+  env="$(echo "$output" | jq -rc 'select(.id==41) | .result.content[0].text')"
+  [ "$(echo "$env" | jq -r '.variant')" = "pending" ]
+  [ "$(echo "$env" | jq -r '.result.run.branch')" = "create-database/mydb-501" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "0" ]
+}
+
+@test "the status tool exposes branch (and NOT correlation) and resolves the lane PR through the shared predicate" {
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/prs-head-create-database_mydb-501.json"
+  mcp_rpc '{"jsonrpc":"2.0","id":42,"method":"tools/list"}' \
+    '{"jsonrpc":"2.0","id":43,"method":"tools/call","params":{"name":"status","arguments":{"run":"https://github.com/ukyi-app/homelab/actions/runs/501","branch":"create-database/mydb-501"}}}' \
+    '{"jsonrpc":"2.0","id":44,"method":"tools/call","params":{"name":"status","arguments":{"branch":"create-database/mydb-501"}}}'
+  [ "$status" -eq 0 ]
+  keys="$(echo "$output" | jq -rc 'select(.id==42) | .result.tools[] | select(.name=="status") | .inputSchema.properties | keys | join(",")')"
+  echo "$keys" | grep -q "branch"
+  # owner 결정 Q2 — correlation 핸들 모드는 열지 않는다(재개 조건 미충족). 부정 단언의 양성 짝은 위 줄.
+  [ "$(printf '%s\n' "$keys" | grep -c "correlation")" = "0" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==43) | .result.content[0].text | fromjson | .result.run.pr.url')" = "https://github.com/ukyi-app/homelab/pull/21" ]
+  # 좌표 단독은 CLI와 같은 술어로 거부된다(invalid params).
+  [ "$(echo "$output" | jq -rc 'select(.id==44) | .error.code')" = "-32602" ]
+}
+
+# ── 진행 표시 심의 MCP 무주입(homelab-cli-r2 티켓 07) ─────────────────────────────────────
+
+@test "a mutation tool call leaks no progress line into the JSON-RPC stream (server injects no sink)" {
+  # 변이 엔진은 진행 이벤트를 내지만 sink 주입은 CLI 셸 전용이다 — MCP는 미주입이라 stdout이
+  # JSON-RPC 오브젝트만 남는다(stdio 프레이밍 오염 0). 줄 단위로 전수 판정한다.
+  mcp_rpc '{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"db_create","arguments":{"name":"mydb"}}}'
+  [ "$status" -eq 0 ]
+  n=0
+  bad=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    n=$((n + 1))
+    printf '%s\n' "$line" | jq -e 'type == "object" and .jsonrpc == "2.0"' > /dev/null 2>&1 || bad=$((bad + 1))
+  done <<EOF
+$output
+EOF
+  [ "$n" -ge 1 ]   # 열거 바닥값 — 0줄이면 "비-JSON 0건"이 공허하다
+  [ "$bad" -eq 0 ]
+  # 같은 판정 루프의 양성 대조 — CLI가 내는 진행 줄 모양은 이 루프에서 실제로 bad로 센다.
+  ctrl=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    printf '%s\n' "$line" | jq -e 'type == "object" and .jsonrpc == "2.0"' > /dev/null 2>&1 || ctrl=$((ctrl + 1))
+  done <<EOF
+진행: run 식별 — https://github.com/ukyi-app/homelab/actions/runs/501
+EOF
+  [ "$ctrl" -eq 1 ]
+}

@@ -36,12 +36,24 @@ import {
 const PROTOCOL_VERSION = "2024-11-05";
 type Json = Record<string, unknown>;
 
-// MCP 변이의 run 식별 시간 상한 — identifyOnly라도 run '출현' 대기(step2)는 공유 deadline까지 폴링하므로,
-// run 미출현 시 최대 20분 서버 블로킹이 남는다(release r2-a2/b3). MCP는 짧은 deadline으로 그 대기를
-// 바운드한다(미출현이면 pending 반환, status(run) 재조회로 재개). env로 주입 가능(테스트 시간 심).
+// MCP 변이의 run 식별 시간 상한 — identifyOnly라도 run '출현' 대기(step2)는 **주어진** deadline까지
+// 폴링한다. CLI 기본값(WAIT_DEFAULTS.deadlineMs = 20분)을 그대로 물려받으면 stdio 서버가 run 미출현 시
+// 그만큼 블로킹되므로, MCP는 아래 짧은 deadline을 **명시해** 그 대기를 바운드한다(release r2-a2/b3).
+// 반환되는 pending은 두 갈래이고 재개 경로가 서로 다르다(티켓 09):
+//   · run 식별됨 → result.run.{url,branch}가 좌표다: `status --run <url> --branch <branch>`.
+//   · run 미출현 → 이 봉투에는 **run이 없다** — status의 어떤 모드도 쓸 수 없다. 재디스패치가
+//     아니라 Actions에서 run-name의 [correlation] 에코를 확인하는 것이 유일한 경로다
+//     (owner 결정 Q2: correlation 핸들 모드는 열지 않는다 — PR 본문에 에코가 없어 reusable 5벌
+//     계약 변경이 선행이라 재개 조건 미충족). pendingReason이 그 사실을 문장으로 담는다.
+// env로 주입 가능(테스트 시간 심).
+// ⚠️ 위 인용은 손 사본이 아니다 — test_homelab-mcp.bats가 WAIT_DEFAULTS에서 분(minute)을 유도해 대조한다.
 const MCP_DEADLINE_MS = Number(process.env.HOMELAB_MCP_DEADLINE_MS ?? "30000");
 const MCP_POLL_MS = Number(process.env.HOMELAB_MCP_POLL_MS ?? "2000");
 // 변이 tool 공통 대기 입력 — 짧은 식별 deadline + identifyOnly.
+// ⚠️ `onProgress`(변이 엔진의 진행 이벤트 싱크, 티켓 07)는 **의도적으로 없다** — 이 서버의 stdout은
+// JSON-RPC 프레임 전용이고, 진행 줄은 CLI 셸(homelab.ts)이 stderr에 내는 표현이다. 여기에 싱크를
+// 주입하면 그 줄이 어디로 가든 프레이밍 계약이 표현 결정에 의존하게 된다(test_homelab-mcp.bats가
+// stdout 전 줄의 JSON-RPC 적합을 단언한다).
 const MCP_MUT = { wait: false, identifyOnly: true, deadlineMs: MCP_DEADLINE_MS, pollMs: MCP_POLL_MS } as const;
 
 // tool 호출 결과 — 계약 envelope(전 동사, url 포함) 또는 usage 오류(invalid params -32602).
@@ -80,6 +92,8 @@ const DESC_REPO_PATH = `앱 레포 루트의 ${ABS_HINT} 존재하지 않거나 
 const DESC_PARENT_DIR = `클론 대상 부모 디렉토리의 ${ABS_HINT} 그 아래에 <app>/ 클론·스캐폴드·첫 push가 만들어진다.`;
 const DESC_ENV_DIR = `자격 파일(.env.local / admin은 .env.admin.local)이 기록될 기준 디렉토리의 ${ABS_HINT}`;
 const DESC_DISPATCH_SECRETS = "GitHub App 키 파일(app-id·private-key.pem)이 있는 디렉토리 경로. 지정 시 두 파일이 모두 있어야 하며 값은 --body-file로만 전달된다.";
+// 변이 pending의 result.run.branch를 그대로 넘기는 자리 — 재개 경로를 스키마가 광고한다(티켓 09).
+const DESC_BRANCH = "변이 pending이 돌려준 result.run.branch를 그대로. run과 함께만 쓰며(단독 조회 아님) 그 레인 브랜치의 PR을 정확 조회한다. 그 run의 좌표가 아닌 브랜치는 거부된다.";
 
 // MCP tool 테이블 — VERBS 순서를 따르되 destructive(teardown)·서버 모드(mcp)는 제외한다.
 // 각 tool은 op를 --wait 없이 호출한다(wait 미노출 = 동기 바운디드).
@@ -95,10 +109,10 @@ const TOOLS: McpTool[] = [
     description: STATUS.desc,
     inputSchema: {
       type: "object", additionalProperties: false,
-      properties: { app: { type: "string" }, run: { type: "string" }, pr: { type: "string" } },
+      properties: { app: { type: "string" }, run: { type: "string" }, pr: { type: "string" }, branch: { type: "string", description: DESC_BRANCH } },
     },
     call: (a) => {
-      const input: StatusInput = { app: str(a, "app"), runUrl: str(a, "run"), prUrl: str(a, "pr") };
+      const input: StatusInput = { app: str(a, "app"), runUrl: str(a, "run"), prUrl: str(a, "pr"), branch: str(a, "branch") };
       const bad = statusInputError(input);
       return bad ? usage(bad) : envelope(STATUS.op(input));
     },
