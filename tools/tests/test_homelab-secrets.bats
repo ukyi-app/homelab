@@ -20,6 +20,9 @@ setup() {
   KC="$BATS_TEST_TMPDIR/kubeconfig"
   echo "apiVersion: v1" > "$KC"
   make_app_repo_fixture myapp
+  # dispatch-only 사전 판정(티켓 30)의 전제 — $APPS_ROOT를 '온보딩된 homelab 워킹트리'로 만든다.
+  # 이게 없으면 dispatch-only 경로가 '미온보딩'으로 거부돼 이 스위트의 재배선 레인이 전부 red다.
+  make_app_fixture myapp
   # update-secrets 브랜치 PR(미머지) — pulls?head 케이스는 공유라 파일만 덮는다
   printf '[{"number":41,"html_url":"https://github.com/ukyi-app/homelab/pull/41","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
 }
@@ -51,6 +54,10 @@ run_secrets_in() {
   [ "$status" -eq 0 ]
   run python3 "$LEDGER_PY" exact "$CALLS" gh workflow run update-secrets.yaml -R ukyi-app/homelab -f "app=myapp" -f "correlation=$NONCE"
   [ "$status" -eq 0 ]
+  # 브랜치 명명(update-secrets/<app>-<run_id>) 원장 — 다른 4 레인(db·cache·app create·teardown)은
+  # 엔진 경로에서 이 조회를 핀하는데 secrets만 빠져 있었다. 값 자체는 단위 테스트가 덮으므로 이 줄이
+  # 메우는 공백은 '엔진이 실제로 그 브랜치로 조회한다'는 프로세스 경계 증인이다(run id 701 = 픽스처).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:update-secrets/myapp-701" --jq)" -ge 1 ]
 }
 
 @test "chain-mode success and precondition refusal envelopes validate against the schema (floor 2)" {
@@ -90,6 +97,21 @@ run_secrets_in() {
   run_secrets_in "$APP_WORK" --json
   [ "$status" -eq 1 ]
   echo "$output" | jq -r '.result.error' | grep -q "main"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+}
+
+@test "a precondition refusal renders seal as not-reached, never as executed (three-state sealSkipped)" {
+  # shell-5: 진입 게이트 거부는 chain={mode:"chain"}만 돌려주므로 sealSkipped가 undefined다 —
+  # 2상 렌더는 그것을 false와 같이 취급해 seal이 돌지도 않았는데 "seal 실행"이라고 보고했다.
+  # 사람용 채널(--json 없음)에서 stdout으로 확인한다.
+  git -C "$APP_WORK" checkout -q -b feature/x
+  run_secrets_in "$APP_WORK"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "seal 미도달"
+  # 구분자까지 포함한 부재 단언 — "seal 실행"이 다른 문맥에서 되살아나도 잡힌다
+  [ "$(printf '%s' "$output" | grep -c -- "— seal 실행 ·")" = "0" ]
+  # 양성 대조 — 부재 판정이 무증인이 아니다: 같은 렌더가 '연쇄:' 줄 자체는 실제로 낸다
+  [ "$(printf '%s' "$output" | grep -c "^연쇄: 앱 레포 안 — ")" = "1" ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
 }
 
@@ -152,6 +174,110 @@ run_secrets_in() {
   [ "$(echo "$output" | jq -r '.result.error' | grep -c "push 경로")" = "0" ]
 }
 
+# ── 연쇄 거부 4레인(티켓 20) — staged-completeness '원형'의 자기 테스트 ────────────────────────
+# 손해 모델을 그대로 판정 조건에 옮긴다: foreign 가드가 막는 것은 '잡파일 커밋'이 아니라 **커밋·push가
+# 통째로 건너뛰어져 낡은 봉인본으로 디스패치되는 것**이다. 그래서 네 레인 공통 단언은
+# 「`gh workflow run` 원장 0건 + 원격 main rev-list 불변」이고, 원격 불변을 재려면 원격이 살아 있어야
+# 한다(그래서 push 실패 레인은 rm이 아니라 실행 동안만 옮긴다).
+
+@test "a seal that writes outside the sealed file is refused before commit, push, and dispatch" {
+  before="$(git -C "$APP_REMOTE" rev-list --count main)"
+  [ "$before" = "1" ]
+  export STUB_SEAL_FOREIGN=1
+  run_secrets_in "$APP_WORK" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "봉인본 외"
+  # 양성 대조 — env 이름 오타로 '다른 이유의 red'가 되는 것을 막는다(잡파일이 실제로 쓰였다).
+  [ -f "$APP_WORK/deploy/junk.yaml" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$before" ]
+  [ "$(git -C "$APP_WORK" rev-list --count HEAD)" = "1" ]
+}
+
+@test "a failing seal and a seal that produces no output are both refused without dispatch" {
+  before="$(git -C "$APP_REMOTE" rev-list --count main)"
+  export STUB_SEAL_FAIL=1
+  run_secrets_in "$APP_WORK" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "seal 실패"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$before" ]
+  unset STUB_SEAL_FAIL
+  # 무산출 레인은 봉인본이 **아직 없는** 첫 봉인 상태에서만 도달 가능하다(있으면 existsSync가 참).
+  # 로컬 커밋만 하고 push는 하지 않는다 — 그래야 원격 불변 단언이 그대로 산다.
+  git -C "$APP_WORK" rm -q "deploy/myapp-secrets.sealed.yaml"
+  git -C "$APP_WORK" commit -q -m "drop sealed"
+  : > "$CALLS"
+  export STUB_SEAL_NO_OUTPUT=1
+  run_secrets_in "$APP_WORK" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "seal 후 봉인본"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$before" ]
+}
+
+@test "a push failure is refused without dispatch and leaves the commit made but unpushed" {
+  before="$(git -C "$APP_REMOTE" rev-list --count main)"
+  # insteadOf 대상(로컬 bare)을 실행 동안만 치운다 — `rm -rf`면 원격 불변 단언 자체가 불가능해진다.
+  mv "$APP_REMOTE" "$APP_REMOTE.hold"
+  run_secrets_in "$APP_WORK" --json
+  mv "$APP_REMOTE.hold" "$APP_REMOTE"
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "git push 실패"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  # 커밋은 됐고 push만 실패한 트리 — 재실행 --no-seal 수렴 경로의 전제다.
+  [ "$(git -C "$APP_WORK" rev-list --count HEAD)" = "2" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$before" ]
+}
+
+@test "a local HEAD the remote main does not carry is refused as unproven reachability (no dispatch)" {
+  before="$(git -C "$APP_REMOTE" rev-list --count main)"
+  # 훅 없이 구성한다(훅은 $STUB 대체 PATH에서 무실행 vacuous가 되기 쉽다): --no-seal은 커밋·push를
+  # 건너뛰므로 로컬에만 있는 커밋 하나가 곧 도달성 불일치다.
+  git -C "$APP_WORK" commit -q --allow-empty -m "local only"
+  run_secrets_in "$APP_WORK" --no-seal --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "도달성 미증명"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "0" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$before" ]
+}
+
+@test "a polluted global git config cannot reach the engine (the same file breaks the chain when honored)" {
+  # 형제 appinit는 격리하는데 이 스위트는 안 했다 — 호스트의 commit.gpgsign·url.insteadOf·
+  # status.showUntrackedFiles가 엔진의 git 호출에 그대로 스미면 초록이 venue 의존이 된다.
+  # 격리는 하네스(cli_stub_init의 GIT_CONFIG_GLOBAL/SYSTEM=/dev/null)가 지고, 이 @test가 그 증인이다.
+  POLLUTED="$BATS_TEST_TMPDIR/polluted-gitconfig"
+  {
+    printf '[commit]\n\tgpgsign = true\n'
+    printf '[url "https://evil.invalid/"]\n\tinsteadOf = https://github.com/\n'
+    printf '[status]\n\tshowUntrackedFiles = no\n'
+  } > "$POLLUTED"
+  cp "$POLLUTED" "$BATS_TEST_TMPDIR/.gitconfig"
+  # 격리 경로 — HOME에 오염 파일이 있어도 연쇄가 초록이다(격리가 없으면 gpgsign이 커밋을 죽인다).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 HOME="$BATS_TEST_TMPDIR" \
+    bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "2" ]
+  # 양성 대조 — 같은 파일을 GIT_CONFIG_GLOBAL로 **명시**하면 연쇄가 실제로 깨진다(오염이 무해한 게 아니다).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 GIT_CONFIG_GLOBAL="$POLLUTED" \
+    bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json"
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -r '.result.error' | grep -q "git commit 실패"
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "2" ]
+}
+
 @test "outside an app repo (no marker) only the dispatch runs — no seal, no git mutation" {
   run_secrets_in "$APPS_ROOT" --json
   [ "$status" -eq 0 ]
@@ -190,6 +316,25 @@ run_secrets_in() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.chain.pushed')" = "true" ]
   [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "3" ]
+  # 이름이 약속한 판정 — 엔진 variant가 no-op이 아니다(티켓 04: pushed=true면 no-op 금지).
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result | has("pr")')" = "true" ]
+}
+
+@test "a pushed sealed secret can never be reported as no-op: PR listing fixed empty is a failure (exit 1), not exit 0" {
+  # 교차 증인(티켓 04): chain이 push했으면 kubeseal 비결정 암호문 = 바이트 변경 = 반드시 PR이다. PR 목록이
+  # 계속 []이면(낡은 스냅샷·명명 드리프트) 그것은 no-op의 증거가 아니라 fail-loud 대상이다 — 현행은 no-op exit 0.
+  printf '[]\n' > "$FIX/db-prs.json"
+  run_secrets_in "$APP_WORK" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.chain.pushed')" = "true" ]
+  echo "$output" | jq -r '.result.error' | grep -q "no-op"
+  # push와 디스패치는 실제로 일어났다 — 실패는 관측 단계(PR 특정)의 것이다.
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "2" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  # 재조회는 여기서도 유한하다(1 + 3).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:update-secrets/myapp-701" --jq)" = "4" ]
 }
 
 @test "--no-seal without a committed sealed secret is refused without dispatch" {
@@ -209,6 +354,10 @@ run_secrets_in() {
   [ "$(echo "$output" | jq -r '.variant')" = "no-op" ]
   [ "$(echo "$output" | jq -r '.result | has("pr")')" = "false" ]
   [ "$(echo "$output" | jq -r '.result.chain.pushed')" = "false" ]
+  # 사람용 렌더의 no-op·chain 분기(티켓 13) — sealSkipped=true·pushed=false가 문구로 실린다.
+  echo "$stderr" | grep -q "재봉인 생략(--no-seal)"
+  echo "$stderr" | grep -q "커밋 없음"
+  echo "$stderr" | grep -q "^결과: no-op$"
   [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "1" ]
 }
 
@@ -221,6 +370,10 @@ run_secrets_in() {
   [ "$(echo "$output" | jq -r '.result.applications[0].surfaceOk')" = "true" ]
   [ "$(echo "$output" | jq -r '.result.applications[0] | has("descendant")')" = "false" ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/contents/apps/myapp/deploy/prod/myapp-secrets.sealed.yaml?ref=main" --jq .sha)" -ge 1 ]
+  # 바닥값(티켓 01): 이 no-op 경로(mergeSha 없음)가 밟는 픽스처는 **멀티소스** 형상이다 — revisions[]만 있고
+  # revision 키 부재. 단일소스로 되돌아가면 이 @test는 앱 레인의 실제 결함을 못 본다(수정 전 red의 자리).
+  [ "$(jq -r '.status.sync | has("revisions") and (has("revision") | not)' "$FIX/argocd-app.json")" = "true" ]
+  [ "$(echo "$output" | jq -r '.result.applications[0].revision')" = "abc1234" ]
 }
 
 @test "no-op with --wait and no KUBECONFIG omits the live section (exit 0)" {
@@ -271,6 +424,29 @@ run_secrets_in() {
   echo "$output" | grep -q "^ok:3$"
 }
 
+@test "a non-fast-forward push reports the rejection reason, not git's 'To <url>' first line" {
+  # 티켓 08 — git push의 stderr는 1행이 `To <url>`(사유 아님)이고 거부 이유는 2행 ` ! [rejected] …`이다.
+  # 첫 줄만 자르던 규약이 gh(1행 완결)에는 맞지만 여기서만 틀렸다: 원격이 앞선 상태를 만든다.
+  AHEAD="$BATS_TEST_TMPDIR/ahead"
+  # bare의 HEAD는 init.defaultBranch 소유(CI 러너는 master) — 픽스처는 main만 push하므로 브랜치를 명시해야 venue 무관.
+  git clone -q --branch main "$APP_REMOTE" "$AHEAD"
+  git -C "$AHEAD" config user.name "fixture"
+  git -C "$AHEAD" config user.email "fixture@example.com"
+  git -C "$AHEAD" commit -q --allow-empty -m "remote ahead"
+  git -C "$AHEAD" push -q origin main
+  run_secrets_in "$APP_WORK" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "git push 실패"
+  echo "$output" | jq -r '.result.error' | grep -q "rejected"
+  # 부정 단언(사유 자리에 `To <url>`이 오지 않는다) + 같은 @test 안 양성 대조(같은 검출기가
+  # 착지 전 문구 모양에서는 1건을 센다 — 0건이 '검출기 사망'이 아님을 증명).
+  [ "$(echo "$output" | jq -r '.result.error' | grep -c "실패 — To ")" = "0" ]
+  [ "$(printf '%s\n' "git push 실패 — To https://github.com/ukyi-app/myapp.git" | grep -c "실패 — To ")" = "1" ]
+  # 디스패치는 일어나지 않았다(연쇄 실패 = 디스패치 없이 거부).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run update-secrets.yaml)" = "0" ]
+}
+
 @test "app secrets rejects a bad app name as a usage error and prints usage on --help" {
   run --separate-stderr env PATH="$STUB" "$BUN" tools/homelab.ts app secrets "Bad_Name" --json
   [ "$status" -eq 2 ]
@@ -278,4 +454,54 @@ run_secrets_in() {
   run bun tools/homelab.ts app secrets --help
   [ "$status" -eq 0 ]
   echo "$output" | grep -q -- "--wait"
+}
+
+@test "a remote main ahead of local HEAD is refused with a git pull prescription and no dispatch" {
+  # 도달성 판정은 등식이라 누군가(예: Renovate PR 머지)가 원격 main을 앞서 밀면 수렴 경로인
+  # --no-seal 재실행도 같은 자리에서 거부된다 — 로컬 pull 없이는 빠져나갈 수 없는데 종전 문구에는
+  # 그 처방이 없었다(appverbs-11). 등식 자체는 plan r1 a2의 fail-closed 결정이라 그대로 둔다.
+  before="$(git -C "$APP_REMOTE" rev-list --count main)"
+  git -C "$APP_WORK" commit -q --allow-empty -m "remote ahead"
+  git -C "$APP_WORK" push -q "$APP_REMOTE" HEAD:refs/heads/main
+  git -C "$APP_WORK" reset -q --hard HEAD~1
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$((before + 1))" ]
+  run_secrets_in "$APP_WORK" --no-seal --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "도달성 미증명"
+  echo "$output" | jq -r '.result.error' | grep -q "pull --ff-only"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "0" ]
+}
+
+@test "dispatch-only refuses an app that is not onboarded in the local homelab tree, and passes when no such tree is found" {
+  # dispatch-only는 '이미 push된 봉인본 재배선'인데, 그 앱이 아직 온보딩되지 않았으면 디스패처가
+  # **run 안에서** '미온보딩 앱 — create-app 먼저'로 죽는다(update-secrets.ts) — 그 실패가
+  # homelab-mutation 직렬화 큐와 Telegram 실패 알림을 소비한다(appverbs-5). 판정 근거는 원격 API가
+  # 아니라 **로컬 워킹트리**다: GitHub contents는 낡은 스냅샷을 200으로 돌려주는 함정이 있고
+  # (함정 원장) 로컬 파일에는 그 축이 없다.
+  NOAPP="$BATS_TEST_TMPDIR/homelab-noapp"
+  mkdir -p "$NOAPP/apps/other/deploy/prod"
+  run_secrets_in "$NOAPP" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.chain.mode')" = "dispatch-only" ]
+  echo "$output" | jq -r '.result.error' | grep -q "미온보딩"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+
+  # 반대 방향 — homelab 워킹트리를 못 찾으면(apps/ 부재) 판정하지 않고 **통과**한다(fail-open).
+  # 디스패처가 최종 판정자이고, 이 자리는 큐·알림 절약이지 권한 경계가 아니다.
+  : > "$CALLS"
+  NOTREE="$BATS_TEST_TMPDIR/no-homelab-tree"
+  mkdir -p "$NOTREE"
+  run_secrets_in "$NOTREE" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.chain.mode')" = "dispatch-only" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run update-secrets.yaml)" = "1" ]
+
+  # 양성 대조 — 온보딩된 트리에서는 그대로 디스패치한다(거부가 전칭이 아니다).
+  : > "$CALLS"
+  run_secrets_in "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run update-secrets.yaml)" = "1" ]
 }

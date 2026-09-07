@@ -91,19 +91,38 @@ export type MutationVariantName = "success" | "failure" | "race" | "pending" | "
 
 export type ContractRow = {
   verb: string;
-  // mutation 행렬 동사 — 공유 mutation* 정의에 action 고정 + chain 극성 결합으로 전개된다.
-  // refusedOnFailure: failure가 연쇄 거부(mutationRefused)와의 oneOf인 이중 모드 동사(app secrets).
-  mutation?: { action: LaneAction; chain: boolean; variants: readonly MutationVariantName[]; refusedOnFailure?: true };
+  // mutation 행렬 동사 — 공유 mutation* 정의에 action 고정 + chain·exposure 극성 결합으로 전개된다.
+  // refusedOnFailure: failure가 **디스패치 전 거부**(mutationRefused)와의 oneOf인 동사 —
+  // app secrets의 연쇄 거부와 app create의 사전 판정 거부(티켓 30). 거부 형상의 필수 증거는
+  // 별도 칸이 아니라 chain 극성에서 파생한다(chain 레인=chain · 비-chain 레인=preflight).
+  // exposure: 결과에 공개 노출 경계 부인문(dnsExposure)이 실리는 레인 — 공개 표면을 만드는 create-app뿐.
+  // 극성 결합이라 다른 레인은 그 필드를 **실을 수 없다**(chain과 같은 관용구 — verb↔필드 교차 배선 차단).
+  mutation?: { action: LaneAction; chain: boolean; exposure?: true; variants: readonly MutationVariantName[]; refusedOnFailure?: true };
   // 단순 동사 — variant 집합별 result 정의 참조.
   simple?: readonly { variants: readonly string[]; ref: string }[];
 };
 
 export const CONTRACT_ROWS: readonly ContractRow[] = [
-  { verb: "doctor", simple: [{ variants: ["success", "failure"], ref: "doctorResult" }] },
-  { verb: "status", simple: [{ variants: ["success", "failure"], ref: "statusResult" }] },
+  // doctor·status는 variant별 ref로 갈라져 있다(teardown 선례) — 한 ref가 여러 variant를 받으면
+  // verb→variant 집합만 묶이고 **variant→result 형상**은 안 묶여서, success에 error가 실린
+  // envelope·failure에 성공 형상이 실린 envelope이 전부 스키마 유효였다(리뷰 실측).
+  // doctor는 summary.fail 상/하한으로 갈라 exitCode 거짓말을 스키마가 독립 검출한다.
+  { verb: "doctor", simple: [
+    { variants: ["success"], ref: "doctorOk" },
+    { variants: ["failure"], ref: "doctorFailed" },
+  ] },
+  // status의 race — `--branch` 정확 조회에서 브랜치 하나에 PR이 2개인 경우(신원 판정 불가, exit 3).
+  // 리더도 fail-closed다: 임의로 하나를 고르면 그 뒤의 모든 보고가 오귀속이 된다. 형상이 성공·실패와
+  // 달라(observedPrs + error) 별도 ref로 분리한다 — 성공 union(statusOk)에 넣으면 성공 봉투가 race
+  // 형상으로도 유효해진다.
+  { verb: "status", simple: [
+    { variants: ["success"], ref: "statusOk" },
+    { variants: ["failure"], ref: "statusError" },
+    { variants: ["race"], ref: "statusRace" },
+  ] },
   { verb: "db create", mutation: { action: "create-database", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },
   { verb: "cache create", mutation: { action: "create-cache", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },
-  { verb: "app create", mutation: { action: "create-app", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },
+  { verb: "app create", mutation: { action: "create-app", chain: false, exposure: true, variants: ["success", "failure", "race", "pending", "superseded"], refusedOnFailure: true } },
   { verb: "app secrets", mutation: { action: "update-secrets", chain: true, variants: ["success", "failure", "race", "pending", "superseded", "no-op"], refusedOnFailure: true } },
   { verb: "app teardown", simple: [
     { variants: ["success"], ref: "teardownSuccess" },
@@ -162,6 +181,34 @@ export function laneBranchTail(pattern: string, key: string, head: string): stri
 export function isDispatchLaneBranch(pattern: string, key: string, head: string): boolean {
   const t = laneBranchTail(pattern, key, head);
   return t !== null && /^\d+$/.test(t);
+}
+
+// 파싱 방향의 **전수 역함수**(티켓 40) — head 하나로 (레인 행 · 키 · run id)를 낸다.
+// isDispatchLaneBranch는 (pattern, key, head) 3항이라 "키를 이미 아는" 질문만 답한다. 열린 PR
+// 목록에서 "이건 어느 레인의 무슨 키인가"를 물을 때는 키가 미지수이고, 소비자가 자기 정규식을
+// 유도하면 브랜치 문법의 두 번째 진실이 된다 — 그래서 행 데이터가 이 역도 소유한다.
+// 판정 = 패턴의 {key} 앞 접두 일치 + {key}·{runId} 사이 구분자의 **마지막** 출현 + tail이 \d+.
+// 마지막 출현을 쓰는 이유는 {runId}가 tail 토큰이기 때문이다(하이픈 키 `my-app`이 접두 분할에서
+// 잘리지 않는다 — laneBranchTail이 tail 형식까지 봐야 완성되는 것과 같은 이유).
+// ⚠️ 키의 **이름 정책은 여기서 판정하지 않는다** — import 0 계약(순수 기술자)이라 identity.ts를
+//    읽을 수 없고, 형식을 여기 베끼면 그게 두 번째 진실이다. 형식 검증은 콜사이트가 행의
+//    keyKind에 맞는 SSOT RE(APP_NAME_RE / RESOURCE_NAME_RE)로 한다.
+export function parseDispatchLaneBranch(head: string): { action: LaneAction; key: string; runId: number } | null {
+  for (const row of Object.values(LANES)) {
+    const token = tailToken(row.branchPattern);          // 행 데이터 결함이면 loud(조용한 미매치 금지)
+    const parts = row.branchPattern.split("{key}");
+    if (parts.length !== 2) continue;                    // {key}가 정확히 1개가 아닌 패턴은 이 역의 도메인 밖
+    const before = parts[0]!;
+    const sep = parts[1]!.slice(0, parts[1]!.length - token.length); // {key}와 {runId} 사이
+    if (sep === "" || !head.startsWith(before)) continue;
+    const rest = head.slice(before.length);
+    const cut = rest.lastIndexOf(sep);
+    if (cut <= 0) continue;                              // 키가 비면 판정 아님(빈 키는 신원이 아니다)
+    const tail = rest.slice(cut + sep.length);
+    if (!/^\d+$/.test(tail)) continue;
+    return { action: row.action, key: rest.slice(0, cut), runId: Number(tail) };
+  }
+  return null;
 }
 
 // 채움 결과에 토큰이 남으면 행 데이터 결함 — 조용히 "{runId}" 박힌 경로가 흐르는 대신 던진다.

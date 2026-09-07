@@ -146,8 +146,75 @@ EOF
     // 대조군 ②: enum 전용 노드와 빈 {} 노드는 구조 제약이 없어 면제다(ENTRY_SCHEMA의 자유 값 노드).
     if (throws("a", { enum: ["a", "b"] })) { console.error("FALSE THROW (enum)"); process.exit(1); }
     if (throws({ any: 1 }, {})) { console.error("FALSE THROW (empty)"); process.exit(1); }
+    // ── 티켓 24: 조용한 통과 3면(전부 착지 전 []였다 — 실측) ─────────────────────────────
+    // (1) additionalProperties가 boolean이 아니면 지원 밖 형태다(스키마 객체는 평가되지 않는다).
+    if (!throws({ a: 1, b: "x" }, { type: "object", properties: { a: { type: "integer" } }, additionalProperties: { type: "string" } })) { console.error("NO THROW (object additionalProperties)"); process.exit(1); }
+    // (2) 선언 type과 안 맞는 제약 키워드는 영원히 미평가다 — 아는 제약의 미평가라 fail-closed.
+    if (!throws("x", { type: "string", minimum: 5 })) { console.error("NO THROW (string+minimum)"); process.exit(1); }
+    if (!throws([], { type: "array", required: ["x"] })) { console.error("NO THROW (array+required)"); process.exit(1); }
+    if (!throws(1, { type: "integer", pattern: "^x$" })) { console.error("NO THROW (integer+pattern)"); process.exit(1); }
+    // (3) enum이 형제 type을 단락시키지 않는다 — 값이 enum 멤버여도 type 위반은 위반이다.
+    if (schemaErrors("a", { type: "integer", enum: ["a"] }, {}).length !== 1) { console.error("LOST VIOLATION (enum+type)"); process.exit(1); }
+    // 대조군 (3): type 없는 enum(권한 어휘 형상)과 additionalProperties:true는 throw가 아니다.
+    if (throws("ro", { enum: ["ro", "rw", "admin"] })) { console.error("FALSE THROW (typeless enum)"); process.exit(1); }
+    if (throws({ x: 1 }, { type: "object", additionalProperties: true })) { console.error("FALSE THROW (additionalProperties true)"); process.exit(1); }
+    // 대조군 (4): 형제 type과 맞는 제약은 그대로 평가된다(표가 정상 스키마를 죽이지 않는다).
+    if (schemaErrors("ab", { type: "string", minLength: 4 }, {}).length !== 1) { console.error("LOST VIOLATION (string+minLength)"); process.exit(1); }
     console.log("ok");
   '
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^ok$"
+}
+
+@test "every node of the live schemas walks the hardened schema-check without throwing (4 families, floor 4)" {
+  # 새 fail-closed 3면(객체형 additionalProperties·type 불일치 제약·enum 단락)은 **오늘 위반이 0**이라
+  # 기존 소비 테스트는 가드가 아예 없어도 초록이다 — 그래서 라이브 스키마 4종의 무침묵을 여기서
+  # 명시 단언한다. 값 walk는 값이 닿는 노드만 보므로, 스키마를 **구조로 열거**해 노드마다 커널을
+  # 태운다(값은 무관 — 지원 검사가 값 평가보다 앞이다).
+  cd "$ROOT" || exit 1
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { handleRequest } from "./tools/lib/mcp.ts";
+    import { ENTRY_SCHEMA } from "./tools/check-ci-parity.ts";
+    import { LEDGER_SCHEMA } from "./tools/check-image-ownership.ts";
+    import { readFileSync } from "node:fs";
+    const cli = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const tools = handleRequest({ jsonrpc: "2.0", id: 1, method: "tools/list" }).result.tools;
+    // 노드 열거 — properties·definitions·items·allOf·oneOf·not을 따라 내려간다($ref 해소는 커널 몫).
+    // (`$ref` 뒤에 한글을 붙이지 않는다 — bash 3.2가 그 바이트를 변수명에 삼킨다: shell-bash32-traps)
+    const nodes = (s, out) => {
+      if (s === null || typeof s !== "object" || Array.isArray(s)) return out;
+      out.push(s);
+      for (const k of ["properties", "definitions"]) for (const v of Object.values(s[k] ?? {})) nodes(v, out);
+      for (const k of ["allOf", "oneOf"]) for (const v of s[k] ?? []) nodes(v, out);
+      if (s.items) nodes(s.items, out);
+      if (s.not) nodes(s.not, out);
+      return out;
+    };
+    const families = [
+      ["cli-result-schema", [[cli, cli]]],
+      ["mcp inputSchema", tools.map((t) => [t.inputSchema, t.inputSchema])],
+      ["ENTRY_SCHEMA", [[ENTRY_SCHEMA, ENTRY_SCHEMA]]],
+      ["LEDGER_SCHEMA", [[LEDGER_SCHEMA, LEDGER_SCHEMA]]],
+    ];
+    if (tools.length !== 9) { console.error("MCP tool 수 " + tools.length + " != 9(손 앵커)"); process.exit(1); }
+    let total = 0;
+    for (const [label, pairs] of families) {
+      let seen = 0;
+      for (const [sch, root] of pairs) {
+        for (const node of nodes(sch, [])) {
+          try { schemaErrors(null, node, root); }
+          catch (e) { console.error(label + ": " + (e instanceof Error ? e.message : String(e))); process.exit(1); }
+          seen++;
+        }
+      }
+      // 계열마다 바닥값 — 열거가 붕괴하면 "throw 0"이 무측정이 된다.
+      if (seen < 3) { console.error(label + ": 노드 " + seen + "건 — 열거 붕괴"); process.exit(1); }
+      total += seen;
+    }
+    if (total < 200) { console.error("전체 노드 " + total + "건 — 열거 붕괴(바닥값 200)"); process.exit(1); }
+    console.log("families:" + families.length);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^families:4$"
 }

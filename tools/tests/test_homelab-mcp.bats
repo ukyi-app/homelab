@@ -54,6 +54,10 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
 @test "no tool exposes a long-wait option (--wait/pollMs/deadlineMs absent from every schema)" {
   mcp_rpc '{"jsonrpc":"2.0","id":3,"method":"tools/list"}'
   [ "$status" -eq 0 ]
+  # 바닥값 — 이 @test 안에서 열거가 실재함을 먼저 못박는다. tools가 비거나 inputSchema.properties가
+  # 전부 부재해도 아래 `bad`는 빈 문자열이라 통과한다(열거 붕괴 → vacuous green). 개수 바닥값이
+  # 다른 @test에만 있으면 이 @test 단독으로는 아무것도 증명하지 못한다.
+  [ "$(echo "$output" | jq -rc 'select(.id==3) | .result.tools | length')" = "9" ]
   # 어떤 tool inputSchema properties에도 wait/pollMs/deadlineMs 키가 없다(동기 바운디드).
   bad="$(echo "$output" | jq -rc 'select(.id==3) | .result.tools[] | .inputSchema.properties // {} | keys[] | select(. == "wait" or . == "pollMs" or . == "deadlineMs")')"
   [ -z "$bad" ]
@@ -142,10 +146,149 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
     '{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"status","arguments":{}}}'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -rc 'select(.id==11) | .result.content[0].text | fromjson | .result.mode')" = "list" ]
+  # 출처 진술(티켓 17) — MCP는 root를 **입력으로** 노출하지 않아 항상 defaultRoot를 탄다. 그래서
+  # 어느 체크아웃의 디스크를 읽었는지는 결과가 말해야 한다(에이전트가 낡음을 판별할 유일한 좌표).
+  [ "$(echo "$output" | jq -rc 'select(.id==11) | .result.content[0].text | fromjson | .result.repo | has("root")')" = "true" ]
   # secrets/init 스키마가 명시 경로를 요구한다(cwd 추론 없음).
   mcp_rpc '{"jsonrpc":"2.0","id":12,"method":"tools/list"}'
   [ "$(echo "$output" | jq -rc 'select(.id==12) | .result.tools[] | select(.name=="app_secrets") | .inputSchema.required | index("repoPath") != null')" = "true" ]
   [ "$(echo "$output" | jq -rc 'select(.id==12) | .result.tools[] | select(.name=="app_init") | .inputSchema.required | index("parentDir") != null')" = "true" ]
+  # 실행 축(티켓 02): 경로 값을 준 tool을 **다른 cwd**에서 돌려도 결과가 같다(절대 경로) — 그리고 상대 경로는
+  # 어느 cwd에서도 -32602라 서버 cwd 아래에 아무것도 만들지 않는다. 종전에는 required 여부만 재고 실행하지 않았다.
+  ED="$BATS_TEST_TMPDIR/ed6"; mkdir -p "$ED"; SRV="$BATS_TEST_TMPDIR/srv"; mkdir -p "$SRV"
+  REQ="{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"dryRun\":true}}}"
+  mcp_rpc "$REQ"
+  here="$(echo "$output" | jq -rc 'select(.id==13) | .result.content[0].text')"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" bash -c 'cd "$1" && printf "%s\n" "$3" | "$0" "$2" mcp' "$BUN" "$SRV" "$ROOT/tools/homelab.ts" "$REQ"
+  [ "$status" -eq 0 ]
+  there="$(echo "$output" | jq -rc 'select(.id==13) | .result.content[0].text')"
+  [ -n "$here" ]
+  [ "$here" = "$there" ]
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" bash -c 'cd "$1" && printf "%s\n" "$3" "$4" | "$0" "$2" mcp' "$BUN" "$SRV" "$ROOT/tools/homelab.ts" \
+    '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"db_url","arguments":{"name":"mydb","envDir":".","host":"100.99.0.1"}}}' \
+    '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"app_init","arguments":{"app":"myapp","archetype":"api","parentDir":"apps"}}}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==14) | .error.code')" = "-32602" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==15) | .error.code')" = "-32602" ]
+  [ ! -e "$SRV/.env.local" ]
+  [ ! -e "$SRV/apps" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
+}
+
+# ── 경로 입력의 절대성·앱 레포 판정 fail-closed(homelab-cli-r2 티켓 02) ──────────────────────────
+# owner 결정(2026-09-07): MCP app_secrets는 앱 레포만 받는다(존재하지 않거나 앱 레포가 아닌 명시 repoPath는
+# 레포 밖이 아니라 **거부** — dispatch-only 폴백은 CLI 암묵 cwd 전용, 결과 스키마 enum은 유지). 틸드(~)는 서버가
+# 확장하지 않고 안내 문구와 함께 거부한다(서버 HOME을 기준점으로 삼는 것 자체가 '서버 추론'이다).
+
+mcp_rpc_in() {
+  # 서버를 $1(cwd)에서 띄운다 — 상대 경로의 부수효과가 어디에 떨어지는지 재는 축.
+  local dir="$1"; shift
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'dir="$1"; entry="$2"; shift 2; cd "$dir" && printf "%s\n" "$@" | "$0" "$entry" mcp' "$BUN" "$dir" "$ROOT/tools/homelab.ts" "$@"
+}
+
+@test "path-named string properties across the MCP tool schemas carry the absolute-path pattern and a description (roster, floor 4)" {
+  mcp_rpc '{"jsonrpc":"2.0","id":70,"method":"tools/list"}'
+  [ "$status" -eq 0 ]
+  # 손 열거 금지 — 이름이 Dir/Path로 끝나는 string 속성을 스키마에서 **전부** 뽑아 pattern ^/ 과 description을 잰다.
+  # 다섯 번째 경로 필드가 술어 없이 추가되면 이 루프가 red다.
+  rows="$(echo "$output" | jq -rc 'select(.id==70) | .result.tools[] | .name as $t | (.inputSchema.properties // {}) | to_entries[] | select(.key | test("(Dir|Path)$")) | select(.value.type=="string") | [$t, .key, (.value.pattern // "-"), ((.value.description // "") | length)] | @tsv')"
+  n=0; bad=0
+  while IFS=$'\t' read -r tool prop pat dlen; do
+    [ -n "$tool" ] || continue
+    n=$((n+1))
+    [ "$pat" = "^/" ] || bad=$((bad+1))
+    [ "${dlen:-0}" -gt 0 ] || bad=$((bad+1))
+  done <<<"$rows"
+  [ "$bad" -eq 0 ]
+  # 바닥값: 오늘의 경로 속성은 repoPath·parentDir·envDir×2 = 4개(열거 붕괴 차단).
+  [ "$n" -ge 4 ]
+  # dispatchSecrets(경로지만 Dir/Path 접미가 아니다 — 죽은 옵션, 티켓 29)는 minLength·description만 맞춘다.
+  [ "$(echo "$output" | jq -rc 'select(.id==70) | .result.tools[] | select(.name=="app_init") | .inputSchema.properties.dispatchSecrets.minLength')" = "1" ]
+  # 계약 주석 한 구절 — mcp.ts가 '레포 밖이 아니라 거부'를 선언한다(산문 SSOT 갱신 증인).
+  [ "$(grep -c "레포 밖이 아니라 거부" tools/lib/mcp.ts)" -ge 1 ]
+}
+
+@test "relative and tilde paths (. apps ~/apps) are refused as invalid params before any side effect, and the tilde message carries guidance" {
+  SRV="$BATS_TEST_TMPDIR/srv2"; mkdir -p "$SRV"
+  n=0
+  for p in . apps '~/apps'; do
+    mcp_rpc_in "$SRV" \
+      "{\"jsonrpc\":\"2.0\",\"id\":71,\"method\":\"tools/call\",\"params\":{\"name\":\"app_init\",\"arguments\":{\"app\":\"myapp\",\"archetype\":\"api\",\"parentDir\":\"$p\"}}}" \
+      "{\"jsonrpc\":\"2.0\",\"id\":72,\"method\":\"tools/call\",\"params\":{\"name\":\"app_secrets\",\"arguments\":{\"app\":\"myapp\",\"repoPath\":\"$p\"}}}" \
+      "{\"jsonrpc\":\"2.0\",\"id\":73,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$p\",\"host\":\"100.99.0.1\"}}}"
+    [ "$status" -eq 0 ]
+    for i in 71 72 73; do
+      [ "$(echo "$output" | jq -rc "select(.id==$i) | .error.code")" = "-32602" ]
+      n=$((n+1))
+    done
+  done
+  [ "$n" -eq 9 ]
+  # 틸드 거부 문구는 안내를 담는다 — 절대 경로 예시 + '~'는 확장되지 않는다.
+  echo "$output" | jq -rc 'select(.id==72) | .error.message' | grep -q "절대 경로"
+  echo "$output" | jq -rc 'select(.id==72) | .error.message' | grep -q -- "~"
+  # 부수효과 0 — 레포 생성·디스패치 argv 없음, 서버 cwd 아래에 자격 파일·apps·리터럴 ~ 디렉토리 없음.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ ! -e "$SRV/.env.local" ]
+  [ ! -e "$SRV/apps" ]
+  [ ! -e "$SRV/~" ]
+  # 양성 대조 — 절대 envDir은 같은 tool을 지나 정상 착지한다(가드가 tool을 통째로 막지 않는다).
+  ED="$BATS_TEST_TMPDIR/ed7"; mkdir -p "$ED"
+  mcp_rpc_in "$SRV" "{\"jsonrpc\":\"2.0\",\"id\":74,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"host\":\"100.99.0.1\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==74) | .result.content[0].text | fromjson | .variant')" = "success" ]
+  [ -f "$ED/.env.local" ]
+}
+
+@test "an explicit repoPath that is missing, a git repo without the app marker, or a plain directory is refused before dispatch; a real app repo dispatches (chain)" {
+  OTHER="$BATS_TEST_TMPDIR/other-repo"; git init -q "$OTHER"
+  PLAIN="$BATS_TEST_TMPDIR/plain"; mkdir -p "$PLAIN"
+  n=0
+  for p in "$BATS_TEST_TMPDIR/nope" "$OTHER" "$PLAIN"; do
+    mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":75,\"method\":\"tools/call\",\"params\":{\"name\":\"app_secrets\",\"arguments\":{\"app\":\"myapp\",\"repoPath\":\"$p\"}}}"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -rc 'select(.id==75) | .result.isError')" = "true" ]
+    env75="$(echo "$output" | jq -rc 'select(.id==75) | .result.content[0].text')"
+    [ "$(echo "$env75" | jq -r '.variant')" = "failure" ]
+    echo "$env75" | jq -r '.result.error' | grep -q "거부"
+    n=$((n+1))
+  done
+  [ "$n" -eq 3 ]
+  # 거부 envelope도 계약(mutationRefused)에 적합하다.
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const errs = schemaErrors(JSON.parse(process.argv[1]), sch, sch);
+    console.log(errs.length ? "INVALID:" + errs.join("|") : "valid");
+  ' "$env75"
+  [ "$output" = "valid" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run update-secrets.yaml)" = "0" ]
+  # 양성 대조 — 마커 + canonical remote 앱 레포는 chain으로 디스패치 1건(identifyOnly → pending 핸들).
+  make_app_repo_fixture myapp
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'printf "%s\n" "$@" | "$0" tools/homelab.ts mcp' "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":76,\"method\":\"tools/call\",\"params\":{\"name\":\"app_secrets\",\"arguments\":{\"app\":\"myapp\",\"repoPath\":\"$APP_WORK\"}}}"
+  [ "$status" -eq 0 ]
+  env76="$(echo "$output" | jq -rc 'select(.id==76) | .result.content[0].text')"
+  [ "$(echo "$env76" | jq -r '.result.chain.mode')" = "chain" ]
+  [ "$(echo "$env76" | jq -r '.result.chain.pushed')" = "true" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run update-secrets.yaml)" = "1" ]
+}
+
+@test "a missing git binary on the server PATH refuses app_secrets (errKind not-found) instead of degrading to dispatch-only" {
+  make_app_repo_fixture myapp
+  NOGIT="$BATS_TEST_TMPDIR/stub-nogit"; mkdir -p "$NOGIT"
+  for t in bun bash base64 cat gh kubectl kubeseal; do ln -s "$STUB/$t" "$NOGIT/$t"; done
+  run --separate-stderr env PATH="$NOGIT" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'printf "%s\n" "$@" | "$0" tools/homelab.ts mcp' "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":77,\"method\":\"tools/call\",\"params\":{\"name\":\"app_secrets\",\"arguments\":{\"app\":\"myapp\",\"repoPath\":\"$APP_WORK\"}}}"
+  [ "$status" -eq 0 ]
+  env77="$(echo "$output" | jq -rc 'select(.id==77) | .result.content[0].text')"
+  [ "$(echo "$env77" | jq -r '.variant')" = "failure" ]
+  echo "$env77" | jq -r '.result.error' | grep -q "git"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
 }
 
 @test "the server is stateless: a fresh process handles the same calls after restart" {
@@ -375,6 +518,21 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
 }
 
+@test "a url tool host carrying a newline is refused as invalid params before any cluster read (shared host predicate)" {
+  # 티켓 03 — host 술어는 dbUrlInputError 한 곳(CLI usage·MCP -32602·bin)이 소유한다. 개행 host는 .env 행 주입이다.
+  ED="$BATS_TEST_TMPDIR/ed4"; mkdir -p "$ED"
+  mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":60,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"host\":\"100.99.0.1\\nINJECTED=evil\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==60) | .error.code')" = "-32602" ]
+  [ ! -e "$ED/.env.local" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" kubectl)" = "0" ]
+  # 양성 대조 — 정당한 host는 같은 술어를 지나 자격 파일을 기록한다(가드가 url tool을 통째로 막지 않는다).
+  mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"host\":\"100.99.0.1\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==61) | .result.content[0].text | fromjson | .variant')" = "success" ]
+  grep -q '^MYDB_RO_DATABASE_URL=postgres://u:p@100.99.0.1:5432/db$' "$ED/.env.local"
+}
+
 @test "a traversal-shaped status app is refused as invalid params (CLI and MCP share one predicate)" {
   # MCP 표면은 LLM 에이전트 입력을 그대로 받는다 — inputSchema에 pattern을 덧붙이는 대신(두 번째
   # 진실 금지) statusInputError 한 곳이 두 표면을 함께 닫는다는 것을 실제로 밟는다.
@@ -385,4 +543,257 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
   mcp_rpc '{"jsonrpc":"2.0","id":51,"method":"tools/call","params":{"name":"status","arguments":{"app":"page"}}}'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -rc 'select(.id==51) | has("error")')" = "false" ]
+}
+
+# ── 대기 데드라인 인용의 정합(homelab-cli-r2 티켓 10) ────────────────────────────────────────
+
+@test "the deadline quoted in mcp.ts is derived from WAIT_DEFAULTS, never a stale hand copy" {
+  # MCP는 CLI 기본 deadline을 물려받지 않고 짧은 값을 명시한다 — 그 이유를 적은 주석이 상수와
+  # 어긋나면 운영자가 서버 블로킹 상한을 잘못 읽는다. 손 앵커가 아니라 상수에서 유도해 대조한다.
+  mins="$(bun -e 'import { WAIT_DEFAULTS } from "./tools/lib/mutation.ts"; console.log(WAIT_DEFAULTS.deadlineMs / 60000);')"
+  [ -n "$mins" ]   # 바닥값 — 빈 문자열이면 아래 grep이 전부 매치해 공허해진다
+  [ "$(grep -c "WAIT_DEFAULTS.deadlineMs = ${mins}분" tools/lib/mcp.ts)" = "1" ]
+  # 양성 대조(검출기 생존) — 어긋난 값은 같은 grep에서 0건이다.
+  [ "$(grep -c "WAIT_DEFAULTS.deadlineMs = $((mins + 1))분" tools/lib/mcp.ts)" = "0" ]
+}
+
+# ── pending의 브랜치 좌표와 status --branch(homelab-cli-r2 티켓 09) ───────────────────────
+
+@test "the identify-only pending carries the lane branch, derived from the row without an extra API call" {
+  # MCP 변이 pending에는 PR이 원리적으로 없다(run 완료 후 생긴다) — 그래서 **좌표**를 싣는다.
+  # 브랜치는 레인 행에서 유도한 값이지 조회 결과가 아니다(추가 호출 0).
+  mcp_rpc '{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"db_create","arguments":{"name":"mydb"}}}'
+  [ "$status" -eq 0 ]
+  env="$(echo "$output" | jq -rc 'select(.id==41) | .result.content[0].text')"
+  [ "$(echo "$env" | jq -r '.variant')" = "pending" ]
+  [ "$(echo "$env" | jq -r '.result.run.branch')" = "create-database/mydb-501" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "0" ]
+}
+
+@test "the status tool exposes branch (and NOT correlation) and resolves the lane PR through the shared predicate" {
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/prs-head-create-database_mydb-501.json"
+  mcp_rpc '{"jsonrpc":"2.0","id":42,"method":"tools/list"}' \
+    '{"jsonrpc":"2.0","id":43,"method":"tools/call","params":{"name":"status","arguments":{"run":"https://github.com/ukyi-app/homelab/actions/runs/501","branch":"create-database/mydb-501"}}}' \
+    '{"jsonrpc":"2.0","id":44,"method":"tools/call","params":{"name":"status","arguments":{"branch":"create-database/mydb-501"}}}' \
+    '{"jsonrpc":"2.0","id":45,"method":"tools/call","params":{"name":"status","arguments":{"resources":true}}}' \
+    '{"jsonrpc":"2.0","id":46,"method":"tools/call","params":{"name":"status","arguments":{"resources":true,"app":"myapp"}}}'
+  [ "$status" -eq 0 ]
+  keys="$(echo "$output" | jq -rc 'select(.id==42) | .result.tools[] | select(.name=="status") | .inputSchema.properties | keys | join(",")')"
+  echo "$keys" | grep -q "branch"
+  # 리소스 인벤토리는 관측 전용이라 MCP에도 그대로 노출된다(티켓 40) — CLI 플래그와 같은 술어를 쓴다.
+  echo "$keys" | grep -q "resources"
+  # owner 결정 Q2 — correlation 핸들 모드는 열지 않는다(재개 조건 미충족). 부정 단언의 양성 짝은 위 줄.
+  [ "$(printf '%s\n' "$keys" | grep -c "correlation")" = "0" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==43) | .result.content[0].text | fromjson | .result.run.pr.url')" = "https://github.com/ukyi-app/homelab/pull/21" ]
+  # 좌표 단독은 CLI와 같은 술어로 거부된다(invalid params).
+  [ "$(echo "$output" | jq -rc 'select(.id==44) | .error.code')" = "-32602" ]
+  # --resources 모드는 MCP에서도 돌고(양성), app과 동시 지정은 같은 상호배타 술어로 거부된다(음성).
+  [ "$(echo "$output" | jq -rc 'select(.id==45) | .result.content[0].text | fromjson | .result.mode')" = "resources" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==46) | .error.code')" = "-32602" ]
+}
+
+# ── 진행 표시 심의 MCP 무주입(homelab-cli-r2 티켓 07) ─────────────────────────────────────
+
+@test "a mutation tool call leaks no progress line into the JSON-RPC stream (server injects no sink)" {
+  # 변이 엔진은 진행 이벤트를 내지만 sink 주입은 CLI 셸 전용이다 — MCP는 미주입이라 stdout이
+  # JSON-RPC 오브젝트만 남는다(stdio 프레이밍 오염 0). 줄 단위로 전수 판정한다.
+  mcp_rpc '{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"db_create","arguments":{"name":"mydb"}}}'
+  [ "$status" -eq 0 ]
+  n=0
+  bad=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    n=$((n + 1))
+    printf '%s\n' "$line" | jq -e 'type == "object" and .jsonrpc == "2.0"' > /dev/null 2>&1 || bad=$((bad + 1))
+  done <<EOF
+$output
+EOF
+  [ "$n" -ge 1 ]   # 열거 바닥값 — 0줄이면 "비-JSON 0건"이 공허하다
+  [ "$bad" -eq 0 ]
+  # 같은 판정 루프의 양성 대조 — CLI가 내는 진행 줄 모양은 이 루프에서 실제로 bad로 센다.
+  ctrl=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    printf '%s\n' "$line" | jq -e 'type == "object" and .jsonrpc == "2.0"' > /dev/null 2>&1 || ctrl=$((ctrl + 1))
+  done <<EOF
+진행: run 식별 — https://github.com/ukyi-app/homelab/actions/runs/501
+EOF
+  [ "$ctrl" -eq 1 ]
+}
+
+# ── JSON-RPC 프로토콜 준수: ping·id 경계·프레이밍·서버 env(homelab-cli-r2 티켓 23) ───────────
+
+@test "ping returns an empty result, and an id-less ping writes nothing (notification branch runs first)" {
+  mcp_rpc '{"jsonrpc":"2.0","id":50,"method":"ping"}'
+  [ "$status" -eq 0 ]
+  # MCP 2024-11-05 basic/utilities/ping — 수신자는 빈 result로 즉시 응답한다(-32601이 아니다).
+  [ "$(echo "$output" | jq -rc 'select(.id==50) | .result')" = "{}" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==50) | has("error")')" = "false" ]
+  # id 없는 ping은 알림이라 응답이 없다 — ping 분기가 알림 분기 **뒤**에 있다는 배치 증인이다
+  # (앞에 두면 id 없는 응답 한 줄이 stdio 프레임을 오염시킨다).
+  mcp_rpc '{"jsonrpc":"2.0","method":"ping"}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a null JSON-RPC id is an invalid request and an id-carrying initialized is answered, never swallowed" {
+  mcp_rpc '{"jsonrpc":"2.0","id":null,"method":"tools/list"}' \
+    '{"jsonrpc":"2.0","id":51,"method":"initialized"}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+  [ "$status" -eq 0 ]
+  # 응답 라인 2개 — 셋째(진짜 알림)만 무응답이다.
+  [ "$(printf '%s\n' "$output" | grep -c '"jsonrpc"')" -eq 2 ]
+  # id:null은 스펙상 요청 id가 될 수 없다(종전엔 "id" in req가 참이라 정상 요청으로 응답했다).
+  [ "$(echo "$output" | jq -rc 'select(.id == null) | .error.code')" = "-32600" ]
+  [ "$(echo "$output" | jq -rc 'select(.id == null) | has("result")')" = "false" ]
+  # id가 붙은 initialized — 알림 전용 method지만 그 id를 기다리는 클라이언트가 영구 대기하지
+  # 않도록 답한다(코드는 -32600: 스펙상 알림 전용이라는 사실 자체가 사유다).
+  [ "$(echo "$output" | jq -rc 'select(.id==51) | .error.code')" = "-32600" ]
+}
+
+@test "the stdio framing writes exactly one JSON-RPC response per request and nothing for notifications" {
+  mcp_rpc \
+    '{not json' \
+    '{"jsonrpc":"2.0","id":52,"method":"nope"}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","method":"ping"}' \
+    '{"jsonrpc":"2.0","id":53,"method":"tools/list"}'
+  [ "$status" -eq 0 ]
+  # 5줄 입력: 응답 대상 3(파스 실패 라인은 -32700이 규약) · 알림 2 → stdout 정확히 3줄.
+  n=0
+  bad=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    n=$((n + 1))
+    printf '%s\n' "$line" | jq -e 'has("jsonrpc")' > /dev/null 2>&1 || bad=$((bad + 1))
+  done <<EOF
+$output
+EOF
+  [ "$n" -eq 3 ]
+  [ "$bad" -eq 0 ]
+  # 코드 2종이 실재한다(파스 오류 · 미지 method) — 그리고 마지막 응답이 tools/list 9개다.
+  [ "$(echo "$output" | jq -rc 'select(.error.code==-32700) | .error.code' | head -1)" = "-32700" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==52) | .error.code')" = "-32601" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==53) | .result.tools | length')" = "9" ]
+}
+
+@test "a malformed HOMELAB_MCP_DEADLINE_MS or HOMELAB_MCP_POLL_MS refuses to start the server and names the env var" {
+  # 종전엔 Number("abc")=NaN·Number("")=0이 MCP_MUT에 실려 **첫 변이 호출**에서만 -32602로 드러났고,
+  # 그 문구가 클라이언트가 준 적 없는 CLI 플래그(--deadline-ms)를 가리켰다(mcp-10·exec-7).
+  n=0
+  for bad in abc "" 0 12.5; do
+    run --separate-stderr env PATH="$STUB" HOMELAB_MCP_DEADLINE_MS="$bad" \
+      bash -c 'printf "%s\n" "$1" | "$0" tools/homelab.ts mcp' "$BUN" '{"jsonrpc":"2.0","id":60,"method":"tools/list"}'
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+    printf '%s\n' "$stderr" | grep -qF "HOMELAB_MCP_DEADLINE_MS"
+    n=$((n + 1))
+  done
+  [ "$n" -eq 4 ]   # 열거 바닥값 — 목록이 비면 위 단언이 0회 실행돼 공허해진다
+  # poll 축도 같은 술어다 — 진단이 항상 deadline을 가리키지는 않는다.
+  run --separate-stderr env PATH="$STUB" HOMELAB_MCP_POLL_MS=abc \
+    bash -c 'printf "%s\n" "$1" | "$0" tools/homelab.ts mcp' "$BUN" '{"jsonrpc":"2.0","id":61,"method":"tools/list"}'
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$stderr" | grep -qF "HOMELAB_MCP_POLL_MS"
+  # 양성 대조(같은 @test) — env 부재면 서버는 정상 기동해 응답한다(거부가 전칭이 아니다).
+  mcp_rpc '{"jsonrpc":"2.0","id":62,"method":"tools/list"}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==62) | .result.tools | length')" = "9" ]
+}
+
+@test "no MCP tool description advertises a CLI flag token (floor 9, detector alive, CLI wording intact)" {
+  mcp_rpc '{"jsonrpc":"2.0","id":63,"method":"tools/list"}'
+  [ "$status" -eq 0 ]
+  # 바닥값 둘 — tools 9개 **그리고** 비어 있지 않은 description 9개. 목록이 비거나 description이
+  # 전부 부재해도 아래 부정 카운트는 0이라 통과한다(열거 붕괴 → vacuous green).
+  [ "$(echo "$output" | jq -rc 'select(.id==63) | .result.tools | length')" = "9" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==63) | [.result.tools[] | select((.description // "") != "")] | length')" = "9" ]
+  # description은 MCP 소유 문구다 — CLI 플래그 토큰을 광고하면 inputSchema가 -32602로 거부하는
+  # 입력을 LLM에게 권하는 드리프트가 된다(mcp-3: desc의 --wait vs 스키마의 wait 부재).
+  [ "$(echo "$output" | jq -rc 'select(.id==63) | [.result.tools[].description | select(test("--[a-z]"))] | length')" = "0" ]
+  # 검출기 생존 — 같은 술어를 합성 입력(옛 desc 문구)에 걸면 1건이다.
+  [ "$(echo '{"tools":[{"description":"correlation 추적, --wait=배포 수렴까지"}]}' | jq -rc '[.tools[].description | select(test("--[a-z]"))] | length')" = "1" ]
+  # CLI 문구는 지워지지 않았다 — 동사별 --help와 needs 절이 계속 --wait를 문서화한다.
+  [ "$(grep -c -- '--wait' tools/homelab.ts)" -ge 1 ]
+  [ "$(grep -c -- '--wait' tools/lib/verbs.ts)" -ge 1 ]
+}
+
+@test "the sync-bounded claim states its axis: schema (no wait input) with no child-process wall-clock cap" {
+  # owner 결정 Q7 — 하위 프로세스 wall-clock 상한은 도입하지 않는다. 그 사실이 mcp.ts 헤더와
+  # tools/README.md에 함께 있어야 '동기 바운디드'가 상한 약속으로 오독되지 않는다.
+  [ "$(grep -c 'wall-clock' tools/lib/mcp.ts)" -ge 1 ]
+  [ "$(grep -c 'wall-clock' tools/README.md)" -ge 1 ]
+  # 근거 앵커 — init.ts가 timeoutMs:0을 고른 두 자리(스캐폴드·첫 push)가 상한을 두지 않는 이유다.
+  [ "$(grep -c 'timeoutMs: 0' tools/lib/init.ts)" -ge 2 ]
+}
+
+@test "the app_init visibility input is named repoPublic and its description separates repo visibility from app exposure" {
+  mcp_rpc '{"jsonrpc":"2.0","id":64,"method":"tools/list"}' \
+    '{"jsonrpc":"2.0","id":65,"method":"tools/call","params":{"name":"app_init","arguments":{"app":"myapp","archetype":"api","parentDir":"/tmp","public":true}}}'
+  [ "$status" -eq 0 ]
+  props='select(.id==64) | .result.tools[] | select(.name=="app_init") | .inputSchema.properties'
+  [ "$(echo "$output" | jq -rc "$props | has(\"repoPublic\")")" = "true" ]
+  # 구 이름은 표면에서 사라졌다 — 바로 위 줄이 같은 술어의 양성 대조다(검출기 생존).
+  [ "$(echo "$output" | jq -rc "$props | has(\"public\")")" = "false" ]
+  desc="$(echo "$output" | jq -rc "$props | .repoPublic.description")"
+  [ -n "$desc" ]
+  # 이름 충돌의 다른 쪽을 문구가 지목한다 — 앱 공개 노출은 앱 레포 .app-config.yml의 route.public이다.
+  printf '%s\n' "$desc" | grep -qF "route.public"
+  # additionalProperties:false라 구 인자는 -32602다(옛 이름이 조용히 무시되지 않는다).
+  [ "$(echo "$output" | jq -rc 'select(.id==65) | .error.code')" = "-32602" ]
+}
+
+@test "db_url without a host arg and with TS_DB_HOST unset names every transport in the error (not just --host)" {
+  # connurl-9 / 티켓 39(b): MCP에서 도달 가능한 오류가 CLI 플래그(--host)만 지시했다 — MCP 인자는 host다.
+  # ⚠️ `env -u TS_DB_HOST`가 계약의 일부다: 러너 셸에 그 변수가 남아 있으면 이 @test가 vacuous green이다.
+  ED="$BATS_TEST_TMPDIR/mcp-nohost"; mkdir -p "$ED"
+  run --separate-stderr env -u TS_DB_HOST PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'printf "%s\n" "$@" | "$0" tools/homelab.ts mcp' "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":81,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==81) | .result.isError')" = "true" ]
+  env81="$(echo "$output" | jq -rc 'select(.id==81) | .result.content[0].text')"
+  [ "$(echo "$env81" | jq -r '.variant')" = "failure" ]
+  err81="$(echo "$env81" | jq -r '.result.error')"
+  printf '%s\n' "$err81" | grep -q "host 입력"
+  printf '%s\n' "$err81" | grep -q "MCP host"
+  printf '%s\n' "$err81" | grep -q "TS_DB_HOST"
+  # 기록은 없다(거부는 자격 파일을 만들지 않는다).
+  [ ! -e "$ED/.env.local" ]
+  # 양성 대조 — 같은 서버·같은 tool에 host를 주면 이 오류가 사라지고 기록이 선다.
+  run --separate-stderr env -u TS_DB_HOST PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'printf "%s\n" "$@" | "$0" tools/homelab.ts mcp' "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":82,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"host\":\"100.99.0.1\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==82) | .result.content[0].text' | jq -r '.variant')" = "success" ]
+  [ -f "$ED/.env.local" ]
+}
+
+@test "the db_url tool actually writes into the explicit envDir on a live success (positive witness, no cwd leak)" {
+  # 티켓 18 (c): 현행 envDir 단언은 전부 **부정형**(`[ ! -f $ED/.env.local ]`)이라 envDir가 무시되고
+  # 서버 cwd로 새도 그대로 통과했다 — 부정 단언만으로는 '아무 데도 안 썼다'와 '엉뚱한 데 썼다'가
+  # 구별되지 않는다. 라이브 성공 1레인으로 **양의 증인**을 세운다(기록 위치 + 평문 비출력).
+  ED="$BATS_TEST_TMPDIR/envdir-live"; mkdir -p "$ED"
+  # 서버를 **빈 임시 cwd**에서 띄운다 — cwd 폴백이 살아 있으면 그 디렉토리에 자격이 떨어진다.
+  # 레포 루트를 cwd로 쓰면 이 부정 단언이 venue의 로컬 잔재(.env.local)에 의존하게 된다.
+  SRVCWD="$BATS_TEST_TMPDIR/srvcwd"; mkdir -p "$SRVCWD"
+  [ ! -e "$SRVCWD/.env.local" ]
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" TS_DB_HOST=h HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'cd "$1" || exit 1; entry="$2"; b="$3"; shift 3; printf "%s\n" "$@" | "$b" "$entry" mcp' \
+    _ "$SRVCWD" "$ROOT/tools/homelab.ts" "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":80,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"t\",\"envDir\":\"$ED\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==80) | .result.isError')" = "false" ]
+  env="$(echo "$output" | jq -rc 'select(.id==80) | .result.content[0].text')"
+  [ "$(echo "$env" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$env" | jq -r '.result.wrote')" = "true" ]
+  [ "$(echo "$env" | jq -r '.result.envFile')" = ".env.local" ]
+  # 양의 단언 — envDir 안에 실재하고, 내용은 tailscale host로 치환된 완성 행이다.
+  [ -s "$ED/.env.local" ]
+  grep -q '^T_RO_DATABASE_URL=postgres://u:p@h:5432/db$' "$ED/.env.local"
+  # cwd 비유출 — 서버가 자기 디렉토리에 쓰지 않았다(위 바닥값이 이 부정 단언을 비공허하게 만든다).
+  [ ! -e "$SRVCWD/.env.local" ]
+  # 프로토콜 채널에도 평문이 없다(content text는 계약 오브젝트지 자격 전달자가 아니다).
+  [ "$(printf '%s%s' "$output" "$stderr" | grep -c 'postgres://')" = "0" ]
+  [ "$(grep -c 'postgres://' "$ED/.env.local")" = "1" ]
 }

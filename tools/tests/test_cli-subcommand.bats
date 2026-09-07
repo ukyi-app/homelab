@@ -110,3 +110,33 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "예상치 못한 위치 인자: oops"
 }
+
+@test "parseCommand failures are discriminable without message sniffing: kind, consumed path, vocabulary (floor 5)" {
+  # 티켓 12 — 셸이 '서브커맨드가 필요하다'와 '알 수 없는 단어'를 한국어 문자열로 갈라내면
+  # 문구 한 글자에 정책이 매달린다. 커널은 정책을 갖지 않되 **판별 가능한** 실패를 낸다.
+  run bun -e '
+    import { parseCommand, CommandParseError } from "./tools/lib/cli.ts";
+    const tree = { app: { init: null, create: null }, doctor: null };
+    const cases = [
+      { argv: ["app"], kind: "needs-subcommand", path: "app" },
+      { argv: ["app", "--help"], kind: "needs-subcommand", path: "app" },
+      { argv: ["--json", "app"], kind: "needs-subcommand", path: "" },
+      { argv: ["bogus"], kind: "unknown-word", path: "" },
+      { argv: ["app", "bogus"], kind: "unknown-word", path: "app" },
+    ];
+    let n = 0;
+    for (const c of cases) {
+      try { parseCommand(c.argv, tree); console.error("DID-NOT-THROW: " + c.argv.join(" ")); process.exit(1); }
+      catch (e) {
+        if (!(e instanceof CommandParseError)) { console.error("타입 아님: " + c.argv.join(" ")); process.exit(1); }
+        if (e.kind !== c.kind) { console.error(c.argv.join(" ") + ": kind " + e.kind + " != " + c.kind); process.exit(1); }
+        if (e.path.join(" ") !== c.path) { console.error(c.argv.join(" ") + ": path " + e.path.join(" ") + " != " + c.path); process.exit(1); }
+        if (e.words.length === 0) { console.error(c.argv.join(" ") + ": 어휘 비어 있음"); process.exit(1); }
+      }
+      n++;
+    }
+    console.log("ok:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:5$"
+}

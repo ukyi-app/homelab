@@ -256,11 +256,12 @@ c" ]
   #    (2026-09-03 재측정), 그 9칸의 여유가 바로 이 바닥값이 없애려던 것이다 — 뮤테이션 실측: 단일
   #    라벨 가드 8개의 콜사이트를 죽여 38→30으로 떨어뜨려도 이 @test는 초록이었다(집합 대조는 정적·
   #    런타임이 **함께** 줄어 등식이 유지되므로 원리적으로 못 본다). 값은 실측이지 래칫이 아니다:
-  #    가드당 라벨 수 = check-{skeleton,image-pins,gh-secret-coverage,doc-index,bats-accounting} 3 ·
+  #    가드당 라벨 수 = check-doc-index 6(레인 [1]에 tools·scripts·workflows 도메인이 편입돼 3→6,
+  #    homelab-cli-r2 티켓 34) · check-{skeleton,image-pins,gh-secret-coverage,bats-accounting} 3 ·
   #    verify-{traps,credential-inventory}·sealed-guard·check-{argocd-revision,app-netpol} 2 · 나머지 13개 1.
   # 라벨 수 바닥값은 **전체** 정적 집합에서 센다 — SKIP과 무관하게 "라벨이 사라졌는가"를 보는 축이다.
   labels=$(printf '%s\n' "$static" | grep -c . || true)
-  [ "$labels" -ge 38 ]
+  [ "$labels" -ge 41 ]
   guards="$(grep -lE '^[^#]*\b(scan_floor|scan_signal) ' "$ROOT"/scripts/*.sh)"
   [ -n "$guards" ]
   # ⚠️ **SKIP(exit 4)은 실패가 아니다 — 그리고 대조에서 양쪽 대칭으로 빠져야 한다.**

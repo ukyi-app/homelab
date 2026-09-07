@@ -45,9 +45,12 @@ check_one() {
   for f in $required; do
     if [ ! -f "$d/$f" ]; then echo "FAIL: $d 에 필수 산출물 '$f' 없음(배포 계약 위반)"; rc=1; fi
   done
-  # source-repo는 비어있으면 안 된다(poll-ghcr 발견 경로 — 공백이면 폴링 밖)
-  if [ -f "$d/source-repo" ] && [ ! -s "$d/source-repo" ]; then
-    echo "FAIL: $d/source-repo 가 비어있음(poll-ghcr가 발견 못 함)"; rc=1
+  # source-repo는 비어있으면 안 된다(poll-ghcr 발견 경로 — 공백이면 폴링 밖).
+  # ⚠️ 술어의 폭을 소비자와 맞춘다: `-s`(크기 > 0)는 **공백만 있는 파일을 통과시키는데**
+  #    lib/app-surface.readAppSurface는 `.trim()` 뒤에 판정해 그 파일을 '값 없음'으로 접는다.
+  #    두 폭이 어긋나면 이 게이트가 통과시킨 산출물을 리더가 '인레포 앱'으로 오보한다(티켓 17).
+  if [ -f "$d/source-repo" ] && [ -z "$(tr -d '[:space:]' < "$d/source-repo")" ]; then
+    echo "FAIL: $d/source-repo 가 비어있음(공백만 있어도 값이 아니다 — poll-ghcr가 발견 못 함)"; rc=1
   fi
 
   # 봉인 배선 불변식 — 앱 이름은 deploy/prod의 조부모 디렉토리명(apps/<app>/deploy/prod).
