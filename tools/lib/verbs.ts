@@ -234,16 +234,16 @@ function statusOp(input: StatusInput): Envelope {
 // named export — CLI 어댑터·MCP가 정확한 입력 타입으로 호출한다(union 좁히기 불필요).
 export const DOCTOR: DoctorVerb = {
   path: ["doctor"],
-  desc: "플랫폼 전제 진단(gh 인증·owner 일치·스코프 / bun·kubeseal / KUBECONFIG / 템플릿 호환성)",
-  needs: "GitHub(gh) — 클러스터는 파일 존재만 보고 도달성은 재지 않는다",
+  desc: "플랫폼 전제 진단(gh 인증·버전·owner 일치·스코프 / bun·git·kubeseal·kubectl / git 신원·자격 helper / KUBECONFIG / 템플릿 호환성)",
+  needs: "GitHub(gh) · 로컬 git(읽기 동사) — 클러스터는 파일·실행 파일 존재만 보고 도달성은 재지 않는다",
   op: doctorOp,
 };
 
 // named export — CLI 어댑터·MCP가 정확한 입력 타입으로 호출한다.
 export const STATUS: StatusVerb = {
   path: ["status"],
-  desc: "앱 상태 관찰(목록/단일 앱: 핀·바인딩·run·PR·ArgoCD) + 핸들(run/PR URL) 조회",
-  needs: "없음(인자 없는 목록은 로컬 레포만) · GitHub(<app>·핸들 조회) · 클러스터(KUBECONFIG 있을 때만 — 부재는 생략)",
+  desc: "앱 상태 관찰(목록/단일 앱: 핀·바인딩·run·PR·ArgoCD) + 리소스 인벤토리(db·캐시) + 핸들(run/PR URL) 조회",
+  needs: "없음(--resources·목록의 로컬 인벤토리) · GitHub(<app>·핸들 조회, 목록의 머지 대기 레인 1회 — 실패는 사유와 함께 보고하고 exit 0) · 클러스터(KUBECONFIG 있을 때만 — 부재는 생략)",
   op: statusOp,
 };
 

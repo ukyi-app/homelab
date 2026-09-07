@@ -828,3 +828,69 @@ pr_closed_unmerged() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.variant')" = "success" ]
 }
+
+# ── 티켓 18: 라이브 성공 경로의 증인 ──────────────────────────────────────────────────────────
+
+@test "db url live success writes the rehosted URL to the target file and leaks plaintext on neither channel" {
+  # connurl-7: 레포 전체에서 `wrote == true` 단언이 **0건**이었다 — 평문 비출력도 dry-run·skip·
+  # failure 레인에서만 쟀다. 즉 이 동사의 **유일한 실효 경로**(자격을 실제로 기록하는 경로)가
+  # 무증인이었고, `--json`에서 사람용 보고가 stderr로 가는 순간의 stderr 평문 부재는 아무도 안 쟀다.
+  T="$BATS_TEST_TMPDIR/live.env.local"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" TS_DB_HOST=h "$BUN" tools/homelab.ts db url t --env-local "$T" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.verb')" = "db url" ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.wrote')" = "true" ]
+  [ "$(echo "$output" | jq -r '.result.dryRun')" = "false" ]
+  [ "$(echo "$output" | jq -r '.result.envFile')" = "$T" ]
+  # 파일 내용 — host가 tailscale LB로 치환된 **완성 행**이다(rehost가 no-op이면 여기서 red).
+  [ -s "$T" ]
+  grep -q '^T_RO_DATABASE_URL=postgres://u:p@h:5432/db$' "$T"
+  # 두 채널 어디에도 평문이 없다. --json이라 사람용 렌더는 stderr에 있는데, 그 렌더도 값을 안 낸다.
+  [ "$(printf '%s%s' "$output" "$stderr" | grep -c 'postgres://')" = "0" ]
+  # 부재 단언의 양성 짝 — 같은 문자열이 기록 파일에는 실재한다(grep 패턴이 죽은 게 아니다).
+  [ "$(grep -c 'postgres://' "$T")" = "1" ]
+  export OUTDIR="$BATS_TEST_TMPDIR"
+  echo "$output" > "$OUTDIR/url-live.json"
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const env = JSON.parse(readFileSync(process.env.OUTDIR + "/url-live.json", "utf8"));
+    const errs = schemaErrors(env, sch, sch);
+    if (errs.length) { console.error(errs.join(" | ")); process.exit(1); }
+    console.log("ok");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok$"
+}
+
+@test "the dry-run plan reflects the mode and target wiring: default, --rw with --env-local, and --admin (floor 3)" {
+  # 종전 dry-run 레인은 mode/wrote만 봤다 — `--rw`·`--env-local`·`--admin`의 배선이 유실돼도
+  # 전건 침묵 통과였다(계획 보고가 계획을 보고하지 않는다). 세 레인을 같은 @test에서 대조한다.
+  n=0
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" TS_DB_HOST=h "$BUN" tools/homelab.ts db url t --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "readonly" ]
+  [ "$(echo "$output" | jq -r '.result.envKey')" = "T_RO_DATABASE_URL" ]
+  [ "$(echo "$output" | jq -r '.result.envFile')" = ".env.local" ]
+  n=$((n + 1))
+  T2="$BATS_TEST_TMPDIR/rw.env.local"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" TS_DB_HOST=h "$BUN" tools/homelab.ts db url t --rw --env-local "$T2" --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "owner-readwrite" ]
+  [ "$(echo "$output" | jq -r '.result.envKey')" = "T_DATABASE_URL" ]
+  [ "$(echo "$output" | jq -r '.result.envFile')" = "$T2" ]
+  n=$((n + 1))
+  # --admin은 채널 분리(F2) — 대상 파일 오버라이드가 불가하므로 계획도 .env.admin.local 고정이다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" TS_DB_HOST=h "$BUN" tools/homelab.ts db url t --admin --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "admin-superuser" ]
+  [ "$(echo "$output" | jq -r '.result.envKey')" = "T_DATABASE_ADMIN_URL" ]
+  [ "$(echo "$output" | jq -r '.result.envFile')" = ".env.admin.local" ]
+  n=$((n + 1))
+  # 계획만 — 어떤 레인도 파일을 만들지 않았다(dry-run의 존재 이유).
+  [ "$n" -eq 3 ]
+  [ ! -e "$T2" ]
+  [ ! -e "$BATS_TEST_TMPDIR/.env.local" ]
+}

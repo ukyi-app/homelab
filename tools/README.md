@@ -181,13 +181,29 @@ claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
   둘이 어긋나면 usage 오류, PR이 2개면 race exit 3). `--branch` 단독 조회는 없다. 산출물이 아직 없는
   앱(`<app>` 모드 failure)에는 진행 중인 create-app 레인 PR을 `result.createPrs`로 알린다 —
   그린필드에서 '앱 없음' 한 줄만 남던 자리에 재개 좌표를 준다(읽기 전용 — 수동 머지 원칙 불변).
-  **설치**: `bun link`(레포 루트) → package.json `bin`이 `homelab`을 전역 PATH에 심링크. 유일하게
-  셰뱅+exec 비트를 갖는 .ts다(test_shebang-exec.bats가 bin 선언에서 예외를 파생). 레포 밖(앱 레포
-  디렉토리 포함)에서도 동작한다(자기 위치는 import.meta 기준 해석).
-  `homelab doctor [--json]` = 플랫폼 전제 진단(관측 전용): gh 인증·로그인=HOMELAB_OWNER 일치(actor
-  가드 사전 검증)·토큰 스코프(repo·workflow, 헤더 부재=fine-grained 추정 warn), bun·kubeseal 존재,
-  KUBECONFIG 유무(부재=warn·깨진 경로=fail), 템플릿 접근성·호환성(스캐폴더 비대화형 계약 +
-  컴파일 아키타입 3종 TARGETARCH — site는 arch 중립이라 대상 아님). fail ≥ 1이면 exit 1.
+  **설치**: `bun link`를 **본 체크아웃에서** 실행한다 → package.json `bin`이 `$BUN_INSTALL/bin/homelab`
+  (기본 `~/.bun/bin/homelab`)을 이 파일로 심링크한다. 링크는 link 당시의 **절대경로에 고정**되므로
+  worktree·임시 클론에서 link하면 그 디렉토리가 지워지는 순간 전역 `homelab`이 dangling이 된다
+  (2026-09-07 실측: 이 호스트의 링크가 삭제된 worktree를 가리키고 있었다 — `homelab doctor`의
+  `install` 항목이 그 상태를 fail로 낸다). 그리고 그 심링크가 **PATH에 뜨려면 `$BUN_INSTALL/bin`이
+  PATH에 있어야 한다** — bun을 mise/asdf로 관리하면 bun 설치 스크립트가 하는 PATH 추가 단계를 안
+  거치므로 자동으로 들어가지 않는다(실측). 전제가 아직 참이 아니면 소스 실행
+  (`bun tools/homelab.ts <동사>`)이 동등한 경로다. 유일하게 셰뱅+exec 비트를 갖는 .ts다
+  (test_shebang-exec.bats가 bin 선언에서 예외를 파생). 레포 밖(앱 레포 디렉토리 포함)에서도
+  동작한다(자기 위치는 import.meta 기준 해석) — 지금 어느 체크아웃·어느 커밋이 도는지는
+  `homelab --version`이 해석된 진입점 절대경로와 HEAD로 답한다.
+  `homelab doctor [--json]` = 플랫폼 전제 진단(관측 전용): 전역 설치 4상(PATH에서 해석=pass /
+  링크가 사라진 대상=fail·재-link / 살아 있으나 `$BUN_INSTALL/bin`이 PATH 밖=warn / 엔트리 부재=warn —
+  `Bun.which`는 dangling에 null을 돌려줘 뒤 둘을 구별하지 못하므로 `lstat`으로 판정한다),
+  gh 인증·로그인=HOMELAB_OWNER 일치(actor
+  가드 사전 검증)·토큰 스코프(repo·workflow, 헤더 부재=fine-grained 추정 warn)·gh 버전(코드에 박힌
+  gh 문구 계약의 최소 버전 미만=warn), bun·git·kubeseal·kubectl 존재(kubectl 부재는 KUBECONFIG가
+  있으면 fail·없으면 warn — 라이브 소비자가 전부 그 게이트 뒤다), git 커밋 신원·GitHub https 자격
+  helper(부재=warn — init/secrets의 commit·push가 죽는 자리를 사전에 예고), KUBECONFIG 유무(부재=warn·
+  콜론 구분 병합 목록 지원: 일부 부재=warn·전부 부재=fail), 템플릿 접근성·호환성(스캐폴더 비대화형
+  계약 + 컴파일 아키타입 3종 TARGETARCH — site는 arch 중립이라 대상 아님). fail ≥ 1이면 exit 1.
+  gh 인증이 성립하지 않으면 **추가 gh 호출을 만들지 않는다**(오프라인·rate limit 소진에서 같은
+  실패를 반복하지 않는다 — gh-version이 gh-auth 종속인 이유).
   테스트: `tools/tests/test_homelab-cli.bats`(라우팅·계약)·`test_homelab-doctor.bats`(진단 —
   PATH stub + NUL argv 원장, 하네스 `tools/tests/helpers/cli_stub.bash`).
   ⚠️ 그 하네스의 gh 스텁은 jq를 **적용한 뒤의** 형상을 돌려준다(픽스처가 손으로 접은 결과다) —
@@ -401,6 +417,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   create-app의 손조립이었고 경로 리터럴이 소비자 여럿에 흩어져, 표면이 늘어도 그 사실을 셀 수
   있는 자리가 없었다. 앱-**외부** 표면(apps.json 행·메모리 원장 행·digest-exporter 항목)은 소관
   밖이고 각자의 SSOT 헬퍼가 진다 — 그 경계가 이 module이 데이터 테이블이 아니라 함수 API인 이유다.
+  `readAppSurface`는 source-repo에 대해 **null의 이유**를 함께 낸다(`sourceRepoState`:
+  absent=인레포 앱 · empty=잘린 쓰기 · unreadable=읽기 실패 · ok). 값 해석에서 부재/파손을 한 null로
+  접는 것은 계약이지만 그 계약이 정당한 곳은 값이지 **계층 생략 결정**이 아니다 — 접힌 채로는 잘린
+  쓰기 하나가 '이 앱은 인레포 앱'이라는 적극적 거짓 주장이 된다(catch도 ENOENT로 좁혔다).
 - **`lib/ledger-totals.ts`** — 메모리 원장 행·합계 프리미티브(`TOTALS_RE`·`replaceTotals`·
   `parseLedgerRows`·`addRow`·`removeRow`). 프로즈가 드리프트하면 `String.replace`가 조용한 no-op이
   되어 합계가 stale로 남으므로 매치 0건은 throw다. `TOTALS_RE`가 export인 것은 그 fail-loud가
@@ -500,7 +520,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   계보·표면 ref) / skew(소스 간 불일치 — 표면 ref 미확정) / non-sha(helm 차트 버전 — gh compare 호출 금지) /
   none(관측 0). 엔진의 `sync?.revision` 직접 참조 0건은 test_homelab-status.bats가 grep으로 단언한다.
 - **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghRead`/`ghJson`·`firstReason` — ghRead는 값과 실패 사유를 함께
-  주는 3상 리더(ok/error=stderr 첫 줄/parse=폴백 문구)이고 ghJson은 그 축약(값만·실패 null),
+  주는 3상 리더(ok/error=stderr 첫 줄 **+ errKind**/parse=폴백 문구)이고 ghJson은 그 축약(값만·실패 null),
   둘 다 오브젝트/배열 jq 전용, 스칼라
   jq는 raw라 sh 직접, `git`·`pushRoutes` — push 지향 관측 `git remote get-url --push --all`:
   pushurl 복수·insteadOf/pushInsteadOf 전개 반영) — status·mutation·init·secrets 공유. 판정 정책은
@@ -530,21 +550,57 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   연쇄 각 단계를 사후조건으로 증명(봉인본 외 변경 거부·ls-remote 도달성). 디스패치는 공유 변이 엔진
   (noopOnMissingPr — pr-first-commit 멱등 no-op를 정당한 no-op variant로).
 - **`lib/status.ts`** — homelab CLI status 엔진(`runStatus()`·`statusInputError()`). 계층 계약:
-  레포(핀·바인딩)+GitHub(run·PR)가 기본, 라이브(ArgoCD)는 KUBECONFIG 있을 때만(부재=생략,
-  조회 실패=live.error — 유일한 선택 계층). GitHub 계층 오류는 fail-loud(빈 목록 위장 금지).
+  레포(핀·바인딩)+GitHub(run·PR)가 기본, 라이브(ArgoCD)는 KUBECONFIG 있을 때만(미설정=생략 —
+  유일한 선택 계층). 라이브 결과는 세 disjoint 상태다: `argocd`(실재 — sync/health/리비전 +
+  `conditions` 상위 3건, 원본 배열 순서·단일 줄 정규화·길이 상한) · `absent`(Application 부재 —
+  `--ignore-not-found` + **빈 stdout 검사를 parse 앞에** 둔다. 안 그러면 `JSON.parse("")`가 catch로
+  흘러 부재가 '파싱 실패'로 위장한다. create/teardown 머지 직후가 그 창이다) · `error`(조회 실패).
+  '관측하지 않았다'(omitted)와 '관측했더니 없다'(absent)는 다른 축이다.
+  결과는 **출처를 진술한다**(`repo: {root, head}`) — 레포 계층은 GitHub main이 아니라 CLI가 링크된
+  로컬 디스크라 낡을 수 있고(git pull 미실행), MCP는 root를 입력으로 노출하지 않아 항상 defaultRoot를
+  탄다. head는 git 레포가 아니면 키 부재다. origin/main 비교는 **의도적으로 없다**(gh 의존 + 낡은
+  스냅샷 200 함정) — 두 SHA 대조는 소비자 몫이다.
+  source-repo 축은 부재(인레포 앱 — `omitted`에 `runs`)와 파손(`sourceRepoState` empty·unreadable →
+  app 모드는 fail-loud)을 가른다: 잘린 쓰기 하나가 '이 앱은 인레포 앱'이라는 적극적 거짓 주장이 되던
+  자리다. 원장 조인은 이름 + **env=prod**로 좁혔다(손 편집으로 들어오는 platform 동명 행이 파일
+  순서상 앞서서 이기던 오귀속 — 유일성의 소유자는 여전히 ledger-budget이다).
+  GitHub 계층 오류는 fail-loud(빈 목록 위장 금지)이고
+  **사유를 명명한다**: 3상 리더(exec.ghRead)의 error/parse를 그대로 층으로 옮겨 전송 오류(401·403
+  rate limit·404·망 단절 = stderr 첫 줄)와 응답 파싱 실패를 가르고, errKind not-found는 처방
+  ('gh CLI가 PATH에 없다')으로 번역한다 — 그 넷은 처방이 전부 다르다.
   입력 검증 술어는 CLI(usage exit 2)·MCP(invalid params)가 공유. 관측 전용(gh api·kubectl get만).
   run 모드의 `--branch` 좌표는 lane-pr 커널의 정확 조회로 그 레인 PR을 붙이고(2건이면 race exit 3),
   app 모드의 산출물 부재 분기는 열린 PR 목록 1회로 create-app 레인 PR을 `createPrs`에 싣는다.
+  **목록 모드는 머지 대기 레인(`inFlight`)을 함께 낸다** — create-app·teardown은 수동 머지 동사라
+  '대기 PR'이 그린필드의 정상 상태인데 종전에는 어느 모드에서도 안 보였다. 형상은 라이브와 같은
+  2상(`{prs}|{error}`)이고 variant는 success 유지다(핵심 페이로드가 로컬 인벤토리인 모드를 GitHub
+  의존으로 바꾸지 않는다 — 다만 **조회 실패를 '없음'으로 렌더하지 않는다**). 브랜치→(레인,키)
+  역파싱은 catalog-rows(`parseDispatchLaneBranch`)가 소유하고 db/cache 레인도 포함하며, 키 형식은
+  레인 keyKind에 맞는 identity RE를 통과한 것만 실린다. per_page 상한 도달은 `truncated`.
+  핸들 URL은 **한 지점에서 정규화**한다(`normalizeHandleUrl` — 쿼리·프래그먼트 스트립): 검증과
+  조회가 같은 값을 봐야 한다. `/job/`·`/attempts/` URL은 받되 조회가 run 전체임을 `scope:"run"`으로
+  표기한다(짧은 번호는 여전히 거부 — 기본 레포가 갈려 조용한 오해석이 된다).
   핸들 URL의 owner/repo는 **GitHub 명명 규칙**으로 좁혀 파싱한다(owner=영숫자 시작·하이픈 ≤39,
   repo=영숫자/`.`/`_`/`-` ≤100 + `.`·`..` 배제) — 그 캡처가 `repos/<o>/<r>/…`로 gh api 경로에
   조립되므로 traversal은 형식 게이트에서 닫는다(`.github` 같은 정당한 점-접두 이름은 통과).
+  run 행은 `headBranch`·`event`를 싣고(쿼리 필터는 쓰지 않는다 — 실패한 PR 빌드를 지운다),
+  `deployedBuild.matchesLatestMain`이 핀 tag의 source SHA와 최신 main push run을 접두 비교한다
+  (판정 불가는 false가 아니라 키 부재).
+  `--resources`는 **5번째 mode**다(새 동사 아님 — 관측 전용): db·캐시 인벤토리를 레이아웃 커널의
+  역방향(`classifyArtifact`)에서 열거하고 role별 산출물 실존·cache 전용 원장 행·tombstone을 조인한다.
+  완전 purge된 리소스는 산출물 0건이라 안 나온다(tombstone 키 역파싱은 layoutFor의 소유라 두 번째 진실).
 - **`lib/doctor.ts`** — homelab CLI doctor 진단 엔진(`runDoctor()`). 점검 항목·상태 판정·detail
   문구를 소유한다(관측 전용 — `gh api` 읽기만, 테스트가 argv 원장으로 강제). 선행 gh-auth 실패로
   판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든
   픽스처 계약). 소비자 2: `homelab.ts`(직접 — CLI 어댑터) · `lib/mcp.ts`(**간접** — verbs.ts의
   `DOCTOR.op`를 호출한다. MCP는 엔진을 직접 import하지 않고 catalog 행만 소비한다).
-- **`lib/init.ts`** — app init 엔진(`runAppInit()`·`appInitInputError()`): 앱 레포 시작 로컬 체인
-  (변이 디스패처 아님 — correlation 없음). preflight(부수효과 0) → 레포 생성(기본 private) → 클론
+- **`lib/init.ts`** — app init 엔진(`runAppInit()`·`appInitInputError()`·`cloneParentError()`): 앱 레포
+  시작 로컬 체인
+  (변이 디스패처 아님 — correlation 없음). preflight(부수효과 0 — 첫 관문이 **클론 위치**다:
+  parentDir가 homelab 체크아웃이거나 그 하위면 거부한다. 중첩 레포는 `.gitignore`에도 `ci-guard-tracked`
+  열거에도 없어 로컬 게이트가 보지 못하고, `git add -A` 한 번이면 gitlink로 스테이징된다. 판정은
+  순수 경로 포함이다 — git 프로브로 '임의의 git 레포 안'까지 넓히면 흔한 배치에서 오탐이다.
+  CLI `--parent-dir <절대경로>` / MCP `parentDir`가 명시 표면이다) → 레포 생성(기본 private) → 클론
   (canonical 판정 identity.isCanonicalClone) → push 라우팅 게이트(identity.pushRouteError) →
   스캐폴드(template-contract.SCAFFOLD_ENTRY 직접 실행) → invocation marker(.homelab-init) → 커밋·첫
   push → [--dispatch-secrets면 시크릿 쌍 — dispatch App은 **현재 org 설치 없음**이라 재설치 전까지 무효,

@@ -183,6 +183,34 @@ export function isDispatchLaneBranch(pattern: string, key: string, head: string)
   return t !== null && /^\d+$/.test(t);
 }
 
+// 파싱 방향의 **전수 역함수**(티켓 40) — head 하나로 (레인 행 · 키 · run id)를 낸다.
+// isDispatchLaneBranch는 (pattern, key, head) 3항이라 "키를 이미 아는" 질문만 답한다. 열린 PR
+// 목록에서 "이건 어느 레인의 무슨 키인가"를 물을 때는 키가 미지수이고, 소비자가 자기 정규식을
+// 유도하면 브랜치 문법의 두 번째 진실이 된다 — 그래서 행 데이터가 이 역도 소유한다.
+// 판정 = 패턴의 {key} 앞 접두 일치 + {key}·{runId} 사이 구분자의 **마지막** 출현 + tail이 \d+.
+// 마지막 출현을 쓰는 이유는 {runId}가 tail 토큰이기 때문이다(하이픈 키 `my-app`이 접두 분할에서
+// 잘리지 않는다 — laneBranchTail이 tail 형식까지 봐야 완성되는 것과 같은 이유).
+// ⚠️ 키의 **이름 정책은 여기서 판정하지 않는다** — import 0 계약(순수 기술자)이라 identity.ts를
+//    읽을 수 없고, 형식을 여기 베끼면 그게 두 번째 진실이다. 형식 검증은 콜사이트가 행의
+//    keyKind에 맞는 SSOT RE(APP_NAME_RE / RESOURCE_NAME_RE)로 한다.
+export function parseDispatchLaneBranch(head: string): { action: LaneAction; key: string; runId: number } | null {
+  for (const row of Object.values(LANES)) {
+    const token = tailToken(row.branchPattern);          // 행 데이터 결함이면 loud(조용한 미매치 금지)
+    const parts = row.branchPattern.split("{key}");
+    if (parts.length !== 2) continue;                    // {key}가 정확히 1개가 아닌 패턴은 이 역의 도메인 밖
+    const before = parts[0]!;
+    const sep = parts[1]!.slice(0, parts[1]!.length - token.length); // {key}와 {runId} 사이
+    if (sep === "" || !head.startsWith(before)) continue;
+    const rest = head.slice(before.length);
+    const cut = rest.lastIndexOf(sep);
+    if (cut <= 0) continue;                              // 키가 비면 판정 아님(빈 키는 신원이 아니다)
+    const tail = rest.slice(cut + sep.length);
+    if (!/^\d+$/.test(tail)) continue;
+    return { action: row.action, key: rest.slice(0, cut), runId: Number(tail) };
+  }
+  return null;
+}
+
 // 채움 결과에 토큰이 남으면 행 데이터 결함 — 조용히 "{runId}" 박힌 경로가 흐르는 대신 던진다.
 function assertFilled(s: string): string {
   if (s.indexOf("{") >= 0) throw new Error(`계약 파손: 패턴 토큰 잔존 — ${s}`);

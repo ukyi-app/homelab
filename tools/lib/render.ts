@@ -33,35 +33,95 @@ export function renderStatus(envelope: Envelope): string[] {
     if (Array.isArray(r.createPrs)) lines.push(`진행 중인 create-app PR: ${r.createPrs.map((p: Record<string, unknown>) => `#${p.number} ${p.url}`).join(" · ")}`);
     return lines;
   }
+  // 레포 계층의 출처 — 어느 체크아웃의 디스크를 읽었는지. 두 SHA 대조(핀 vs live.argocd.revision)는
+  // 소비자 몫이라 좌표만 준다(origin/main 비교는 의도적으로 없다 — status.repoProvenance 주석).
+  const repoLine = (repo: Record<string, unknown> | undefined): string[] =>
+    repo === undefined ? [] : [`레포 계층: 로컬 체크아웃 ${repo.root}${repo.head ? `@${repo.head}` : " (git 레포 아님)"}`];
+  // source-repo 파손은 '인레포'로 말하지 않는다 — 잘린 쓰기 하나가 '이 앱은 인레포 앱'이라는
+  // 적극적 거짓 주장이 되던 자리다.
+  const repoCell = (a: Record<string, unknown>): string =>
+    a.sourceRepo !== undefined ? String(a.sourceRepo)
+      : a.sourceRepoState === "empty" ? "(source-repo 비었음 — 잘린 쓰기)"
+        : a.sourceRepoState === "unreadable" ? "(source-repo 읽기 실패)"
+          : "(인레포)";
+  // 머지 대기 레인 — **조회 실패를 '없음'으로 말하지 않는다**. 수동 머지 동사(create-app·teardown)의
+  // 대기 PR은 그린필드의 정상 상태라, 못 본 것과 없는 것이 같은 문장이면 그게 vacuous green이다.
+  const inFlightLines = (f: Record<string, any> | undefined): string[] => {
+    if (f === undefined) return [];
+    if (typeof f.error === "string") return [`머지 대기: 조회 실패 — ${f.error}`];
+    if (!Array.isArray(f.prs) || f.prs.length === 0) return ["머지 대기: 없음"];
+    return [`머지 대기 ${f.prs.length}건${f.truncated ? " (상한 도달 — 더 있을 수 있다)" : ""}`,
+      ...f.prs.map((p: Record<string, unknown>) => `  · ${p.action} ${p.key} — #${p.number} ${p.url}`)];
+  };
   switch (r.mode) {
     case "list": {
-      if (r.count === 0) return ["온보딩된 앱이 없다(그린필드)"];
+      if (r.count === 0) return [...repoLine(r.repo), "온보딩된 앱이 없다(그린필드)", ...inFlightLines(r.inFlight)];
       return [
+        ...repoLine(r.repo),
         `앱 ${r.count}개`,
         ...r.apps.map((a: Record<string, unknown>) =>
-          `• ${a.name} — tag ${a.tag ?? "(핀 없음)"} · autoDeploy ${OX[String(a.autoDeploy)] ?? "미기록"} · repo ${a.sourceRepo ?? "(인레포)"}`),
+          `• ${a.name} — tag ${a.tag ?? "(핀 없음)"} · autoDeploy ${OX[String(a.autoDeploy)] ?? "미기록"} · repo ${repoCell(a)}`),
+        ...inFlightLines(r.inFlight),
+      ];
+    }
+    // 리소스 인벤토리 — role별 산출물 실존을 present/total로 접고, 부재 역할만 이름으로 낸다
+    // (전건 실존이 기준선이라 '무엇이 빠졌나'가 정보다).
+    case "resources": {
+      if (r.count === 0) return [...repoLine(r.repo), "리소스가 없다(db·cache 산출물 0건)"];
+      return [
+        ...repoLine(r.repo),
+        `리소스 ${r.count}개`,
+        ...r.resources.map((x: Record<string, any>) => {
+          const missing = x.artifacts.filter((a: Record<string, unknown>) => a.present !== true).map((a: Record<string, unknown>) => a.role);
+          return `• ${x.kind} ${x.name} — 산출물 ${x.artifacts.length - missing.length}/${x.artifacts.length}`
+            + (missing.length > 0 ? ` (부재: ${missing.join(",")})` : "")
+            + (x.ledgerMi !== undefined ? ` · 원장 limit ${x.ledgerMi}Mi` : "")
+            + (x.tombstone !== undefined ? ` · tombstone ${x.tombstone}` : "");
+        }),
       ];
     }
     case "app": {
       const lines = [
+        ...repoLine(r.repo),
         `앱: ${r.app.name}`,
         `배포 핀: tag ${r.app.tag ?? "(없음)"} · digest ${r.app.digest ?? "(없음)"}`,
-        `autoDeploy: ${OX[String(r.app.autoDeploy)] ?? "미기록"} · source repo: ${r.app.sourceRepo ?? "(인레포)"} · 메모리 원장: ${r.app.ledgerMi !== undefined ? `limit ${r.app.ledgerMi}Mi` : "행 없음"}`,
+        `autoDeploy: ${OX[String(r.app.autoDeploy)] ?? "미기록"} · source repo: ${repoCell(r.app)} · 메모리 원장: ${r.app.ledgerMi !== undefined ? `limit ${r.app.ledgerMi}Mi` : "행 없음"}`,
         // 배선(envFrom의 data-conn 핸들) — 부재는 '없음'으로 말한다: conn이 봉인·커밋돼도 앱이
         // envFrom을 배선 안 하면 앱은 DB/캐시 없이 그대로 뜬다(#211 클래스).
         `배선(data-conn): ${Array.isArray(r.app.conns) ? r.app.conns.join(" · ") : "없음"}`,
-        r.runs.length === 0 ? "최근 run: 없음"
-          : `최근 run: ${r.runs.map((x: Record<string, unknown>) => `${x.name}[${x.status}${x.conclusion ? `/${x.conclusion}` : ""}]`).join(" · ")}`,
+        // '레그를 안 봤다'(omitted runs = 인레포 앱)와 '빌드가 없다'(빈 목록)를 구별한다.
+        envelope.omitted.includes("runs") ? "최근 run: 생략 — 인레포 앱(source-repo 없음)이라 앱 레포 run 계층 없음"
+          : r.runs.length === 0 ? "최근 run: 없음"
+          : `최근 run: ${r.runs.map((x: Record<string, unknown>) => `${x.name}[${x.status}${x.conclusion ? `/${x.conclusion}` : ""}]${x.headBranch ? `@${x.headBranch}` : ""}${x.event ? `(${x.event})` : ""} ${x.url}`).join(" · ")}`,
         r.openPrs.length === 0 ? "열린 PR: 없음"
           : `열린 PR: ${r.openPrs.map((p: Record<string, unknown>) => `#${p.number}(${p.head})`).join(" · ")}`,
       ];
+      // 판정 불가(형식 밖 tag·main push run 부재)는 키 부재라 줄 자체가 없다 — '아니오'로 읽히면 거짓 주장이다.
+      if (r.deployedBuild !== undefined) {
+        lines.push(r.deployedBuild.matchesLatestMain
+          ? "배포 핀 대조: 최신 main 빌드와 일치"
+          : "배포 핀 대조: 최신 main 빌드와 불일치 — 머지된 빌드가 아직 반영되지 않았을 수 있다");
+      }
       if (envelope.omitted.includes("live")) lines.push("라이브(ArgoCD): 생략 — KUBECONFIG 미설정");
       else if (r.live?.error) lines.push(`라이브(ArgoCD): 조회 실패 — ${r.live.error}`);
-      else lines.push(`라이브(ArgoCD): sync ${r.live.argocd.sync} · health ${r.live.argocd.health}${r.live.argocd.revision ? ` · rev ${r.live.argocd.revision}` : Array.isArray(r.live.argocd.revisions) ? ` · revisions ${r.live.argocd.revisions.join(",")}(미확정)` : ""}`);
+      // ⚠️ 부재 분기는 argocd 분기보다 **앞**이어야 한다 — 뒤에 두면 `r.live.argocd.sync`가
+      //    undefined인 채로 렌더돼 상태 보고가 "sync undefined"가 된다.
+      else if (r.live?.absent) lines.push("라이브(ArgoCD): Application 부재 — 아직 생성 전이거나 prune 완료(조회 실패가 아니다)");
+      else {
+        lines.push(`라이브(ArgoCD): sync ${r.live.argocd.sync} · health ${r.live.argocd.health}${r.live.argocd.revision ? ` · rev ${r.live.argocd.revision}` : Array.isArray(r.live.argocd.revisions) ? ` · revisions ${r.live.argocd.revisions.join(",")}(미확정)` : ""}`);
+        // sync·비교 실패 사유 — 'Degraded' 다음 행동이 CLI 밖에서 시작되지 않게 상위 3건을 그대로 보여 준다.
+        if (Array.isArray(r.live.argocd.conditions)) {
+          for (const c of r.live.argocd.conditions as Array<Record<string, string>>) {
+            lines.push(`  · ${c.type ?? "(종류 없음)"}: ${c.message ?? "(메시지 없음)"}`);
+          }
+        }
+      }
       return lines;
     }
     case "run": {
       const lines = [`run: ${r.run.name ?? "(이름 없음)"} — status ${r.run.status}${r.run.conclusion ? ` · conclusion ${r.run.conclusion}` : " · 진행 중"}`];
+      // job·attempt 지정 URL은 run 전체로 승격된 것이다 — 조용히 무시하면 결과가 거짓말이 된다.
+      if (r.run.scope === "run") lines.push("범위: run 전체 — URL의 job·attempt 지정은 조회에 반영되지 않았다");
       // --branch 좌표 조회 — PR 부재(아직 안 났거나 no-op)와 실재를 구별해 보고한다.
       if (r.run.branch) lines.push(r.run.pr ? `레인 PR(${r.run.branch}): #${r.run.pr.number} ${r.run.pr.url} · merged ${OX[String(r.run.pr.merged)]}` : `레인 PR(${r.run.branch}): 없음`);
       return lines;

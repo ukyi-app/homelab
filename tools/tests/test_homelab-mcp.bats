@@ -146,6 +146,9 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
     '{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"status","arguments":{}}}'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -rc 'select(.id==11) | .result.content[0].text | fromjson | .result.mode')" = "list" ]
+  # 출처 진술(티켓 17) — MCP는 root를 **입력으로** 노출하지 않아 항상 defaultRoot를 탄다. 그래서
+  # 어느 체크아웃의 디스크를 읽었는지는 결과가 말해야 한다(에이전트가 낡음을 판별할 유일한 좌표).
+  [ "$(echo "$output" | jq -rc 'select(.id==11) | .result.content[0].text | fromjson | .result.repo | has("root")')" = "true" ]
   # secrets/init 스키마가 명시 경로를 요구한다(cwd 추론 없음).
   mcp_rpc '{"jsonrpc":"2.0","id":12,"method":"tools/list"}'
   [ "$(echo "$output" | jq -rc 'select(.id==12) | .result.tools[] | select(.name=="app_secrets") | .inputSchema.required | index("repoPath") != null')" = "true" ]
@@ -571,15 +574,22 @@ mcp_rpc_in() {
   printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/prs-head-create-database_mydb-501.json"
   mcp_rpc '{"jsonrpc":"2.0","id":42,"method":"tools/list"}' \
     '{"jsonrpc":"2.0","id":43,"method":"tools/call","params":{"name":"status","arguments":{"run":"https://github.com/ukyi-app/homelab/actions/runs/501","branch":"create-database/mydb-501"}}}' \
-    '{"jsonrpc":"2.0","id":44,"method":"tools/call","params":{"name":"status","arguments":{"branch":"create-database/mydb-501"}}}'
+    '{"jsonrpc":"2.0","id":44,"method":"tools/call","params":{"name":"status","arguments":{"branch":"create-database/mydb-501"}}}' \
+    '{"jsonrpc":"2.0","id":45,"method":"tools/call","params":{"name":"status","arguments":{"resources":true}}}' \
+    '{"jsonrpc":"2.0","id":46,"method":"tools/call","params":{"name":"status","arguments":{"resources":true,"app":"myapp"}}}'
   [ "$status" -eq 0 ]
   keys="$(echo "$output" | jq -rc 'select(.id==42) | .result.tools[] | select(.name=="status") | .inputSchema.properties | keys | join(",")')"
   echo "$keys" | grep -q "branch"
+  # 리소스 인벤토리는 관측 전용이라 MCP에도 그대로 노출된다(티켓 40) — CLI 플래그와 같은 술어를 쓴다.
+  echo "$keys" | grep -q "resources"
   # owner 결정 Q2 — correlation 핸들 모드는 열지 않는다(재개 조건 미충족). 부정 단언의 양성 짝은 위 줄.
   [ "$(printf '%s\n' "$keys" | grep -c "correlation")" = "0" ]
   [ "$(echo "$output" | jq -rc 'select(.id==43) | .result.content[0].text | fromjson | .result.run.pr.url')" = "https://github.com/ukyi-app/homelab/pull/21" ]
   # 좌표 단독은 CLI와 같은 술어로 거부된다(invalid params).
   [ "$(echo "$output" | jq -rc 'select(.id==44) | .error.code')" = "-32602" ]
+  # --resources 모드는 MCP에서도 돌고(양성), app과 동시 지정은 같은 상호배타 술어로 거부된다(음성).
+  [ "$(echo "$output" | jq -rc 'select(.id==45) | .result.content[0].text | fromjson | .result.mode')" = "resources" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==46) | .error.code')" = "-32602" ]
 }
 
 # ── 진행 표시 심의 MCP 무주입(homelab-cli-r2 티켓 07) ─────────────────────────────────────
@@ -757,4 +767,33 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -rc 'select(.id==82) | .result.content[0].text' | jq -r '.variant')" = "success" ]
   [ -f "$ED/.env.local" ]
+}
+
+@test "the db_url tool actually writes into the explicit envDir on a live success (positive witness, no cwd leak)" {
+  # 티켓 18 (c): 현행 envDir 단언은 전부 **부정형**(`[ ! -f $ED/.env.local ]`)이라 envDir가 무시되고
+  # 서버 cwd로 새도 그대로 통과했다 — 부정 단언만으로는 '아무 데도 안 썼다'와 '엉뚱한 데 썼다'가
+  # 구별되지 않는다. 라이브 성공 1레인으로 **양의 증인**을 세운다(기록 위치 + 평문 비출력).
+  ED="$BATS_TEST_TMPDIR/envdir-live"; mkdir -p "$ED"
+  # 서버를 **빈 임시 cwd**에서 띄운다 — cwd 폴백이 살아 있으면 그 디렉토리에 자격이 떨어진다.
+  # 레포 루트를 cwd로 쓰면 이 부정 단언이 venue의 로컬 잔재(.env.local)에 의존하게 된다.
+  SRVCWD="$BATS_TEST_TMPDIR/srvcwd"; mkdir -p "$SRVCWD"
+  [ ! -e "$SRVCWD/.env.local" ]
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" TS_DB_HOST=h HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'cd "$1" || exit 1; entry="$2"; b="$3"; shift 3; printf "%s\n" "$@" | "$b" "$entry" mcp' \
+    _ "$SRVCWD" "$ROOT/tools/homelab.ts" "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":80,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"t\",\"envDir\":\"$ED\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==80) | .result.isError')" = "false" ]
+  env="$(echo "$output" | jq -rc 'select(.id==80) | .result.content[0].text')"
+  [ "$(echo "$env" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$env" | jq -r '.result.wrote')" = "true" ]
+  [ "$(echo "$env" | jq -r '.result.envFile')" = ".env.local" ]
+  # 양의 단언 — envDir 안에 실재하고, 내용은 tailscale host로 치환된 완성 행이다.
+  [ -s "$ED/.env.local" ]
+  grep -q '^T_RO_DATABASE_URL=postgres://u:p@h:5432/db$' "$ED/.env.local"
+  # cwd 비유출 — 서버가 자기 디렉토리에 쓰지 않았다(위 바닥값이 이 부정 단언을 비공허하게 만든다).
+  [ ! -e "$SRVCWD/.env.local" ]
+  # 프로토콜 채널에도 평문이 없다(content text는 계약 오브젝트지 자격 전달자가 아니다).
+  [ "$(printf '%s%s' "$output" "$stderr" | grep -c 'postgres://')" = "0" ]
+  [ "$(grep -c 'postgres://' "$ED/.env.local")" = "1" ]
 }

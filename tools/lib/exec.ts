@@ -152,13 +152,16 @@ export function pushRoutes(cwd: string): string[] | null {
 //           "실패했는데 이유가 없다"로 보여 오히려 오진을 만든다).
 // ⚠️ 오브젝트/배열 jq 전용 — 스칼라 jq(.status 등)는 raw 문자열이 나와 JSON.parse가 깨진다.
 //    스칼라는 sh()로 직접 받아 trim해서 쓴다(mutation.ts isDescendant 참고).
+// errKind — 실행 자체가 실패한 종류(seam이 나른 값 그대로). 콜사이트가 사유 **문구**를 처방으로
+// 번역할 수 있게 남긴다: not-found의 reason은 `spawnSync gh ENOENT`라 운영자에게 무의미하고,
+// 그 한 줄이 미인증·404·망 단절과 같은 자리에 놓이면 처방 분기가 원리적으로 불가능하다(티켓 15).
 export type GhRead =
   | { kind: "ok"; value: unknown }
-  | { kind: "error"; reason: string }
+  | { kind: "error"; reason: string; errKind?: ErrKind }
   | { kind: "parse"; reason: string };
 export function ghRead(path: string, jq: string): GhRead {
   const r = gh(["api", path, "--jq", jq]);
-  if (!r.ok) return { kind: "error", reason: r.err.split("\n")[0] || `gh api 비-0 종료(status ${r.status ?? "null"})` };
+  if (!r.ok) return { kind: "error", reason: r.err.split("\n")[0] || `gh api 비-0 종료(status ${r.status ?? "null"})`, errKind: r.errKind };
   try { return { kind: "ok", value: JSON.parse(r.out) }; }
   catch { return { kind: "parse", reason: "gh api 응답이 JSON이 아니다(jq 투영/응답 형상 확인)" }; }
 }

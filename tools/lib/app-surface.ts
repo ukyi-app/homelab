@@ -57,10 +57,21 @@ export function appPaths(root: string, app: string): AppRelPaths {
 // autoDeploy: bindings 부재/파손이면 null, 실재하면 descriptorAutoDeploy 접기(true만 승인 — "yes"·1·
 // 누락 키는 전부 false). 승인 게이트 의미(부재=propose-pr)는 bump-plan.laneFor가, 표시 의미(미기록)는
 // status가 각자 이 원시 사실 위에서 소유한다.
+// sourceRepoState — sourceRepo가 null인 **이유**. 종전에는 셋을 한 null로 접었는데, 그 접힘이
+// 「이 앱은 인레포 앱이다」라는 적극적 거짓 주장을 만들었다(잘린 쓰기 하나로 그 앱의 GitHub run
+// 계층이 영원히 조용히 생략된다 — 실측). 값 해석에서 부재/파손을 한 값으로 접는 것은 계약이지만,
+// 그 계약이 정당한 곳은 값이지 **계층 생략 결정**이 아니다.
+//   absent     — 파일 없음(정상: 인레포 앱)
+//   empty      — 파일은 있는데 trim 후 빈 값(잘린 쓰기)
+//   unreadable — 읽기 실패(권한·디렉토리 등 ENOENT 아닌 오류)
+//   ok         — 값 있음
+export type SourceRepoState = "absent" | "empty" | "unreadable" | "ok";
+
 export type AppSurfaceRead = {
   values: Record<string, unknown> | null;
   autoDeploy: boolean | null;
   sourceRepo: string | null;
+  sourceRepoState: SourceRepoState;
 };
 
 export function readAppSurface(root: string, app: string): AppSurfaceRead {
@@ -70,11 +81,17 @@ export function readAppSurface(root: string, app: string): AppSurfaceRead {
   let bindings: { autoDeploy?: unknown } | null = null;
   try { bindings = JSON.parse(readFileSync(p.bindings, "utf8")); } catch { /* 부재/파손 = null */ }
   let sourceRepo: string | null = null;
+  let sourceRepoState: SourceRepoState = "absent";
   try {
     const s = readFileSync(p.sourceRepo, "utf8").trim();
     sourceRepo = s.length > 0 ? s : null;
-  } catch { /* 부재(인레포 앱) = null */ }
-  return { values, autoDeploy: bindings === null ? null : descriptorAutoDeploy(bindings), sourceRepo };
+    sourceRepoState = sourceRepo === null ? "empty" : "ok";
+  } catch (e) {
+    // ⚠️ catch를 **ENOENT로 좁힌다** — 권한·EISDIR 같은 읽기 실패까지 '부재(인레포 앱)'로 접으면
+    //    파손이 정상 상태로 위장한다. 다른 코드(ENOENT 아님)는 unreadable로 남긴다.
+    sourceRepoState = (e as NodeJS.ErrnoException)?.code === "ENOENT" ? "absent" : "unreadable";
+  }
+  return { values, autoDeploy: bindings === null ? null : descriptorAutoDeploy(bindings), sourceRepo, sourceRepoState };
 }
 
 // ── 쓰기 — create가 쓰는 표면 집합의 유일 선언 ─────────────────────────────────────────────────

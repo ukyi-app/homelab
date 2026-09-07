@@ -29,6 +29,9 @@ bats tools/tests/ infra/k3s-bootstrap/tests/ </dev/null   # 툴링/부트스트�
 make verify-posture   # [live] posture 스위트(internal-by-default·netpol·e2e·DR 자산 신선도) — KUBECONFIG 필요(부재=SKIP 신호·비-0)
                       # + DR 자산 레그는 SEALED_KEY_BACKUP_DIR·LOCAL_ASSET_BACKUP_DIR env 필요(미설정=red)
 bun link && homelab doctor   # 통합 CLI 전역 설치 + 전제 진단(빠른 시작 순서는 tools/README.md)
+bun link && bun tools/homelab.ts doctor   # 전역 엔트리가 아직 안 뜰 때의 소스 실행형.
+                      # 전역 `homelab`은 `$BUN_INSTALL/bin`이 PATH에 있어야 뜬다(mise 관리 bun은 자동 추가 안 함)
+                      # → 그때까지는 소스 실행이 정직한 형태. link는 **본 체크아웃**에서 (worktree에서 하면 지워질 때 dangling)
 export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt
 kustomize build --enable-helm --enable-alpha-plugins --enable-exec platform/<comp>/prod  # KSOPS 풀 렌더
 export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터 접근

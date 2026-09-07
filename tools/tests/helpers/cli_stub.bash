@@ -22,6 +22,13 @@ cli_stub_init() {
   # 하네스 재배선이 아니라 **호스트 설정** 때문에 뒤집힌다(테스트가 자기 전제를 잘못 읽는다).
   # 형제 appinit 하네스는 자기 GIT_CONFIG_GLOBAL(INIT_GCFG)을 run env로 명시해 넘기므로 그쪽이 이긴다.
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+  # 전역 설치 축 격리 — doctor의 install 항목은 `$BUN_INSTALL/bin`(미설정이면 `~/.bun/bin`)에서
+  # `homelab` 엔트리를 찾는다. 격리하지 않으면 판정이 **개발자 머신 상태**에 종속된다: 이 호스트의
+  # `~/.bun/bin/homelab`은 삭제된 worktree를 가리키는 dangling 심링크라(2026-09-07 실측) doctor가
+  # fail을 내고, CI에서는 부재라 warn이 난다 — 같은 커밋이 venue마다 다른 색이 되는 자리다.
+  # 빈 디렉토리를 기본값으로 주고, 설치 상태를 재는 테스트만 여기에 엔트리를 심는다.
+  export BUN_INSTALL="$BATS_TEST_TMPDIR/bun-install"
+  mkdir -p "$BUN_INSTALL/bin"
   BUN="$(command -v bun)"
   # sleep — 디스패치 타임아웃 주입(STUB_GH_DISPATCH_HANG)이 자식을 살아 있게 두는 유일한 수단이다
   # (PATH는 대체라 시스템 도구가 자동으로 들어오지 않는다).
@@ -108,7 +115,8 @@ cli_stub_init() {
 
   # 원장 파서 — NUL/RS 레코드를 배열로 복원해 질의한다. 모드:
   #   count <argv...>  : 접두 일치 레코드 수
-  #   gh-readonly      : 모든 gh 레코드가 `gh api` + 변이 수단 없음인지 (위반 시 비-0)
+  #   observation-only : 모든 gh 레코드가 읽기(`gh api`/`gh --version`)이고 변이 수단이 없으며,
+  #                      모든 git 레코드가 읽기 동사(`var`·`rev-parse`·`config --get*`)인지 (위반 시 비-0)
   #   dump             : 사람용 — argc + 따옴표 표기
   LEDGER_PY="$BATS_TEST_TMPDIR/ledger.py"
   cat > "$LEDGER_PY" <<'PY'
@@ -135,10 +143,29 @@ if mode == "count":
     print(sum(1 for r in records if is_prefix(r, want)))
 elif mode == "exact":  # argc + 각 위치 문자열이 모두 같은 레코드가 있는가(인자 경계 보존 단언)
     sys.exit(0 if any(r == want for r in records) else 1)
-elif mode == "gh-readonly":
-    # doctor는 관측 전용 — 모든 gh 레코드는 `gh api`이고 변이 수단이 없어야 한다.
+elif mode == "observation-only":
+    # doctor·status는 관측 전용 — gh 레코드는 읽기(`gh api` 또는 `gh --version`)이고 변이 수단이 없어야
+    # 하며, git 레코드는 읽기 동사(`var` · `rev-parse` · `config --get*`)뿐이어야 한다. git 계열도
+    # exec seam을 지나므로 gh만 보면 "관측 전용"이 gh 축에서만 참인 반쪽 단언이 된다(티켓 14·17).
     MUTATION = {"-X", "--method", "-f", "-F", "--field", "--raw-field", "--input"}
-    bad = [r for r in records if r[:1] == ["gh"] and (r[1:2] != ["api"] or set(r) & MUTATION)]
+    GH_READ_HEADS = (["api"], ["--version"])
+
+    def git_read(rec):
+        # `git -C <dir> …`(exec seam의 named adapter 형태)는 동사 앞의 위치 지정일 뿐이라 벗겨 낸다.
+        args = rec[1:]
+        if args[:1] == ["-C"]:
+            args = args[2:]
+        head = args[:1]
+        if head in (["var"], ["rev-parse"]):
+            return True
+        return head == ["config"] and len(args) > 1 and args[1].startswith("--get")
+
+    bad = []
+    for r in records:
+        if r[:1] == ["gh"] and (r[1:2] not in GH_READ_HEADS or set(r) & MUTATION):
+            bad.append(r)
+        elif r[:1] == ["git"] and not git_read(r):
+            bad.append(r)
     for r in bad:
         print("MUTATION-SHAPED: " + " ".join(r))
     sys.exit(1 if bad else 0)
@@ -155,7 +182,7 @@ PY
 # 임의 owner/repo URL을 정당한 입력으로 받는 계약이라(좁히면 계약을 거짓으로 검증) 의도적 비대칭.
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
-# STUB_GH_HANDLE_404 / STUB_GH_RAW / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
+# STUB_GH_HANDLE_404 / STUB_GH_NONJSON / STUB_GH_RAW / STUB_GH_HTTP_ERR / STUB_GH_VERSION / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
 # 3종(STUB_GH_RUNS_LIST_FAIL · STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기
 # 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL) / 신선도 스냅샷
 # (STUB_GH_STALE_RUN — 디스패치 전에 이미 같은 nonce를 에코하던 옛 run). 템플릿 파일·status 응답
@@ -190,10 +217,27 @@ case "$*" in
     ;;
 esac
 case "$*" in
+  # gh 버전 — 코드에 박힌 gh 문구 계약(`(HTTP 404)` stderr · `workflow run -f` · `api --jq`)의 전제.
+  # STUB_GH_VERSION으로 구버전 레인을 만든다(기본은 계약 최소 버전 이상).
+  "--version")
+    printf 'gh version %s (2026-08-01)\n' "${STUB_GH_VERSION:-2.97.0}"
+    printf 'https://github.com/cli/cli/releases/latest\n'
+    ;;
   "api -i user")
     if [ -n "${STUB_GH_UNAUTH:-}" ]; then
       echo "gh: To get started with GitHub CLI, please run:  gh auth login" >&2
       exit 4
+    fi
+    # STUB_GH_HTTP_ERR — **서버가 응답한** 실패(401·403 rate limit 소진·권한). `gh api -i`는 비-2xx에서도
+    # 상태줄+헤더를 stdout에 그대로 낸다(라이브 실측: 404 조회 → stdout 첫 줄 `HTTP/2.0 404 Not Found`).
+    # 그 형상이 '자격 부재(rc 4·stdout 공백)'와 이 레인을 가르는 유일한 원료다.
+    if [ -n "${STUB_GH_HTTP_ERR:-}" ]; then
+      printf 'HTTP/2.0 401 Unauthorized\r\n'
+      printf 'X-Ratelimit-Limit: 5000\r\n'
+      printf 'X-Ratelimit-Remaining: 0\r\n'
+      printf '\r\n'
+      echo "gh: Bad credentials (HTTP 401)" >&2
+      exit 1
     fi
     printf 'HTTP/2.0 200 OK\r\n'
     if [ -z "${STUB_NO_SCOPES_HEADER:-}" ]; then
@@ -383,13 +427,16 @@ case "$*" in
     if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/pulls-open.json"; fi
     cat "$FIX/homelab-prs.json"
     ;;
-  "api repos/"*"/actions/runs?per_page=3 --jq "'[.workflow_runs[] | {name, status, conclusion, head_sha, html_url}]')
+  "api repos/"*"/actions/runs?per_page=3 --jq "'[.workflow_runs[] | {name, status, conclusion, head_sha, head_branch, event, html_url}]')
     if [ -n "${STUB_GH_RUNS_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
     if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/workflow-runs.json"; fi
     cat "$FIX/runs.json"
     ;;
   "api repos/"*"/actions/runs/"*" --jq "'{name, status, conclusion, head_sha, html_url}')
     if [ -n "${STUB_GH_HANDLE_404:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    # STUB_GH_NONJSON(티켓 15): rc 0인데 본문이 JSON이 아니다 — 스칼라 jq 오용·응답 형상 변경의
+    # 재현. 3상 리더의 'parse'가 이 레인을 '조회 실패'(전송 오류)와 갈라야 처방이 갈린다.
+    if [ -n "${STUB_GH_NONJSON:-}" ]; then printf 'not-json\n'; exit 0; fi
     cat "$FIX/run-handle.json"
     ;;
   "api repos/"*"/pulls/"*" --jq "'{number, state, merged, merge_commit_sha, title, head_ref: .head.ref, head_sha: .head.sha, auto_merge: (.auto_merge != null), html_url}')
@@ -407,18 +454,28 @@ SH
 }
 
 # kubectl stub — status의 ArgoCD Application 조회 전용(그 외 호출은 exit 3 fail-closed).
-# STUB_KUBECTL_FAIL 설정 시 클러스터 접근 실패를 재현한다.
+# STUB_KUBECTL_FAIL 설정 시 클러스터 접근 실패를 재현한다. STUB_APP_STILL_PRESENT(teardown 레인) ·
+# STUB_APP_ABSENT(status 레인)가 `--ignore-not-found` 조회의 기본값을 뒤집는다(아래 두 케이스 주석).
 make_kubectl_stub() {
   cat > "$STUB/kubectl" <<'SH'
 #!/usr/bin/env bash
 { printf '%s\0' kubectl "$@"; printf '\x1e'; } >> "$CALLS"
 case "$*" in
-  # 부재 조회(absence 수렴 — teardown) : --ignore-not-found가 부재를 exit 0 + 빈 stdout으로 만든다.
-  # 기본 = 부재(prune 완료). STUB_APP_STILL_PRESENT=1이면 존재(prune 미완), STUB_KUBECTL_FAIL이면 미확정.
-  # 이 케이스는 존재 조회 패턴보다 **앞**에 있어야 한다(뒤에 두면 `-o json`으로 끝나는 패턴이 선점).
-  "-n argocd get applications.argoproj.io "*" -o json --ignore-not-found")
+  # 부재 조회(--ignore-not-found = 부재를 exit 0 + 빈 stdout으로) — 소비자가 **둘**이다:
+  # teardown의 absence 수렴(mutation)과 status의 라이브 계층(티켓 16). 기본값을 한쪽으로 통일하면
+  # 다른 쪽 판정이 무증인이 된다 — 전부 부재로 두면 status의 live 테스트가 전건 red이고, 전부
+  # 존재로 두면 teardown의 '기본 = prune 완료' 종결 조건이 vacuous해진다. 그래서 **앱 이름으로 분기**한다.
+  #   teardown 대상(myapp-prod): 기본 부재. STUB_APP_STILL_PRESENT=1이면 존재(prune 미완).
+  #   그 외(status 레인의 앱):   기본 존재. STUB_APP_ABSENT=1이면 부재(생성 전/prune 완료 창).
+  # 두 케이스 모두 존재 조회 패턴보다 **앞**에 있어야 한다(뒤에 두면 `-o json`으로 끝나는 패턴이 선점).
+  "-n argocd get applications.argoproj.io myapp-prod -o json --ignore-not-found")
     if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
     if [ -n "${STUB_APP_STILL_PRESENT:-}" ]; then cat "$FIX/argocd-app.json"; fi
+    ;;
+  "-n argocd get applications.argoproj.io "*" -o json --ignore-not-found")
+    if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
+    if [ -n "${STUB_APP_ABSENT:-}" ]; then exit 0; fi
+    cat "$FIX/argocd-app.json"
     ;;
   "-n argocd get applications.argoproj.io cnpg-data -o json")
     if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
@@ -467,11 +524,53 @@ make_app_fixture() {
   if [ "$src" != "-" ]; then printf '%s\n' "$src" > "$d/source-repo"; fi
 }
 
+# 리소스 산출물 픽스처 — `status --resources`의 역방향 열거(resource-layout.classifyArtifact)가
+# 읽는 자리를 $APPS_ROOT 아래에 재현한다. 경로 형상의 SSOT는 lib/resource-layout.ts layoutFor이고
+# 여기는 그 **사본**이다 — 커널이 경로를 바꾸면 이 픽스처가 드리프트해 열거가 0건으로 붕괴하는데,
+# 그 붕괴는 소비 @test의 종류별 바닥값(db 2 · cache 1)이 잡는다(바닥값 없이 쓰면 vacuous green).
+# 사용: make_db_fixture <name> · make_cache_fixture <name>
+make_db_fixture() {
+  mkdir -p "$APPS_ROOT/platform/cnpg/prod/databases" "$APPS_ROOT/platform/data-conn/prod"
+  printf 'apiVersion: postgresql.cnpg.io/v1\nkind: Database\n' > "$APPS_ROOT/platform/cnpg/prod/databases/$1.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/cnpg/prod/databases/db-$1-owner.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/cnpg/prod/databases/db-$1-ro.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/db-$1-conn.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/db-$1-ro-conn.sealed.yaml"
+}
+
+make_cache_fixture() {
+  mkdir -p "$APPS_ROOT/platform/cache/prod/$1" "$APPS_ROOT/platform/data-conn/prod"
+  for f in configmap.yaml pvc.yaml deployment.yaml service.yaml acl.sealed.yaml kustomization.yaml; do
+    printf 'kind: X\n' > "$APPS_ROOT/platform/cache/prod/$1/$f"
+  done
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/cache-$1-conn.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/cache-$1-ro-conn.sealed.yaml"
+}
+
 # 메모리 원장 픽스처 행 — 형식 SSOT는 tools/lib/ledger-totals.ts LEDGER_ROW_RE.
-# 사용: make_ledger_row <name> <reqMi> <limitMi>
+# 사용: make_ledger_row <name> <reqMi> <limitMi> [env]
+# ⚠️ env를 인자로 연 이유: 2열을 `prod`로 하드코딩하면 「조인이 env를 본다」는 판정이 **구조적으로**
+#    무증인이 된다(모든 픽스처 행이 prod라 조건이 항상 참). 실 원장의 platform 행은 손 편집으로
+#    들어와 namespace가 prod가 아닐 수 있고, 그 행이 파일 순서상 앱 행보다 앞선다.
 make_ledger_row() {
   mkdir -p "$APPS_ROOT/docs"
-  printf '| <!-- ledger:row --> %s | prod | %s | %s |\n' "$1" "$2" "$3" >> "$APPS_ROOT/docs/memory-ledger.md"
+  printf '| <!-- ledger:row --> %s | %s | %s | %s |\n' "$1" "${4:-prod}" "$2" "$3" >> "$APPS_ROOT/docs/memory-ledger.md"
+}
+
+# git 기록 래퍼 — doctor의 git 계열 관측(`var GIT_COMMITTER_IDENT` · `config --get-urlmatch …`)을
+# 공용 원장에 남긴다(cli_stub_init의 심링크를 덮어쓴다). 실물 git으로 exec 위임하는 이유는 판정이
+# **실제 git 의미론**이어야 하기 때문이다 — `git var`의 IDENT_STRICT(신원 미설정 = 비-0)를 흉내내면
+# 그 흉내가 계약이 되고 라이브에서 어긋난다. 관측 전용 원장 판정(observation-only)의 원료이기도 하다.
+# ⚠️ cli_stub_init 뒤에 부른다(심링크가 먼저 생겨야 덮어쓸 자리가 있다).
+make_git_stub() {
+  git_real="$(command -v git)"
+  rm -f "$STUB/git"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '{ printf "%%s\\0" git "$@"; printf "\\x1e"; } >> "$CALLS"\n'
+    printf 'exec "%s" "$@"\n' "$git_real"
+  } > "$STUB/git"
+  chmod +x "$STUB/git"
 }
 
 # kubeseal 존재 시나리오 — doctor는 PATH 존재만 보므로(Bun.which) 실행되지 않지만,

@@ -11,6 +11,8 @@
 // 재실행이 나머지를 수렴시킨다. private key 값은 어떤 출력에도 나타나지 않는다(gh secret set은
 // --body-file로 값을 넘겨 argv 원장에 값이 남지 않는다 — 이 엔진은 키 파일을 읽지도 않는다).
 import { existsSync, realpathSync, writeFileSync } from "node:fs";
+import { resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { compact } from "./contract.ts";
 import { ALLOW_PUSH_REWRITE_ENV, git, pushReason, pushRoutes, sh } from "./exec.ts";
 import { APP_NAME_RE, isCanonicalClone, pathInputError, pushRouteError } from "./identity.ts";
@@ -49,6 +51,22 @@ export function appInitInputError(input: AppInitInput): string | null {
   // 명시 parentDir(MCP)만 절대성을 잰다 — undefined는 CLI 기본(process.cwd())이라 통과(identity.pathInputError 주석).
   if (input.parentDir !== undefined) { const pe = pathInputError("parentDir", input.parentDir); if (pe !== null) return pe; }
   return null;
+}
+
+// 클론 위치 거부 술어(homelab-cli-r2 티켓 35) — parentDir가 homelab 체크아웃 루트이거나 그 **하위**면
+// 거부한다. 근거: 거기 클론하면 GitOps 모노레포 안에 중첩 레포가 생기는데 로컬 게이트가 그것을
+// 보지 못한다 — Makefile `ci-guard-tracked`의 열거 경로가 최상위 새 디렉토리를 아예 안 보고,
+// `.gitignore`에도 대응 항목이 없어 untracked로 남으며, `git add -A` 한 번이면 embedded repo
+// gitlink로 스테이징된다(이 레포가 같은 클래스를 두 번 밟은 이력이 .gitignore 주석에 있다).
+// 그리고 init은 실패 시 dest 재사용으로 수렴하도록 설계돼 있어 잘못 놓인 dest가 계속 재사용된다.
+// ⚠️ 판정은 **순수 경로 포함**이다 — git 프로브로 '임의의 git 레포 안'까지 넓히면 워크스페이스가
+//    git인 흔한 배치에서 오탐이고, 하네스의 부모 디렉토리 위치에 따라 스위트가 통째로 red가 된다.
+//    homelab 체크아웃 동일성으로만 좁힌다(심볼릭 링크 해석도 하지 않는다 — pathInputError와 같은 원칙).
+export function cloneParentError(parentDir: string): string | null {
+  const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+  const p = resolve(parentDir);
+  if (p !== root && !p.startsWith(root + sep)) return null;
+  return "앱 레포를 homelab 체크아웃 안에 클론하지 않는다(중첩 레포 — 로컬 게이트가 보지 못한다) — 상위 디렉토리에서 실행하거나 --parent-dir <절대경로>로 지정하라";
 }
 
 // gh api 3상 — ok(본문)/missing(404)/error(그 외). doctor의 gh()와 같은 원칙(판정 불가 fail-closed).
@@ -116,7 +134,11 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     ({ variant: "failure", omitted: [], result: compact({ ...base, ...extra, checkpoint, error }) });
 
   // ── preflight — 부수효과 0. 실패면 아무것도 만들지 않고 거부한다. ──
-  // (1) 디스패치 시크릿 키 경로(요청 시): 두 파일 모두 존재해야 한다.
+  // (1) 클론 위치 — 가장 먼저 본다(네트워크 0·순수 경로 판정). 뒤로 밀면 레포 생성이 먼저 일어나
+  //     '부수효과 0' 자체가 거짓이 된다.
+  const parentBad = cloneParentError(parentDir);
+  if (parentBad !== null) return fail(parentBad, "preflight");
+  // (2) 디스패치 시크릿 키 경로(요청 시): 두 파일 모두 존재해야 한다.
   if (wantSecrets) {
     const { idFile, keyFile } = secretFiles(input.dispatchSecrets!);
     if (!existsSync(idFile) || !existsSync(keyFile)) {
@@ -131,7 +153,7 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
       return fail(`--dispatch-secrets 경로가 클론 트리(${parentDir}/${input.app}) 안에 있다 — 스캐폴드 커밋의 add -A가 키 파일을 원격 main에 올린다. 클론 밖으로 옮겨라: ${input.dispatchSecrets}`, "preflight");
     }
   }
-  // (2) 템플릿 스캐폴더 계약 호환성 — doctor와 같은 술어(structure r1 a3). 비호환이면 init 거부.
+  // (3) 템플릿 스캐폴더 계약 호환성 — doctor와 같은 술어(structure r1 a3). 비호환이면 init 거부.
   const scaffoldSrc = api(["api", `repos/${TEMPLATE_REPO}/contents/${SCAFFOLD_ENTRY}`, "--jq", ".content"]);
   if (!scaffoldSrc.ok) return fail(`템플릿 스캐폴더 조회 실패(${TEMPLATE_REPO}) — 접근성/구조 확인`, "preflight");
   let scaffoldText: string;
@@ -140,7 +162,7 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
   const contractErr = scaffoldContractError(scaffoldText);
   if (contractErr !== null) return fail(`템플릿 스캐폴더 비대화형 계약 마커 부재(${contractErr}) — 이 템플릿과 비호환`, "preflight");
 
-  // (3) 레포 존재·소유 판정.
+  // (4) 레포 존재·소유 판정.
   const repo = api(["api", `repos/${OWNER}/${app}`, "--jq", ".name"]);
   const exists = repo.ok;
   if (!exists && !repo.missing) return fail(`레포 조회 실패(${OWNER}/${app}) — ${repo.err}`, "preflight");

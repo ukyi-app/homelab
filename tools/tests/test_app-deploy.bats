@@ -70,6 +70,22 @@ build_state() {
   [ "$status" -ne 0 ]
 }
 
+@test "negative fixture: a source-repo of pure whitespace fails (the consumer trims before deciding)" {
+  # `-s`(크기>0)는 공백만 있는 파일을 통과시키는데 소비자(app-surface.readAppSurface)는 `.trim()`
+  # 뒤에 판정해 그 파일을 '부재'로 접는다 — 두 술어의 폭이 어긋나면 게이트가 통과시킨 산출물을
+  # 리더가 '인레포 앱'으로 오보한다(티켓 17 · owner 결정 Q5).
+  d="$BATS_TEST_TMPDIR/blankspace/deploy/prod"; mkdir -p "$d"
+  echo "image: {}" > "$d/values.yaml"
+  echo "{}" > "$d/.bindings.json"
+  echo "resources: []" > "$d/kustomization.yaml"
+  printf '   \n\t\n' > "$d/source-repo"
+  # 바닥값 — 이 파일은 실제로 크기가 0이 아니다(옛 `-s` 술어라면 통과했을 형태여야 판정이 증인을 갖는다).
+  [ -s "$d/source-repo" ]
+  run bash "$CHECK" "$d"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'source-repo'
+}
+
 @test "negative fixture: missing kustomization.yaml fails (appset kustomize render needs it)" {
   d="$BATS_TEST_TMPDIR/nokust/deploy/prod"; mkdir -p "$d"
   echo "image: {}" > "$d/values.yaml"

@@ -43,7 +43,7 @@ tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.y
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/runs/501/jobs%[.jobs[] | select(.conclusion == "failure") | .name]
 tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501%[.[] | {number, html_url, merged_at, merge_commit_sha, state}]%{number, html_url, merged_at, merge_commit_sha, state}
 tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls/21%{number, html_url, merged_at, merge_commit_sha, state}
-tools/lib/status.ts%repos/ukyi-app/page/actions/runs?per_page=3%[.workflow_runs[] | {name, status, conclusion, head_sha, html_url}]
+tools/lib/status.ts%repos/ukyi-app/page/actions/runs?per_page=3%[.workflow_runs[] | {name, status, conclusion, head_sha, head_branch, event, html_url}]
 tools/lib/status.ts%repos/ukyi-app/homelab/pulls?state=open&per_page=100%[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]
 tools/lib/status.ts%repos/ukyi-app/homelab/pulls/7%{number, state, merged, merge_commit_sha, title, head_ref: .head.ref, head_sha: .head.sha, auto_merge: (.auto_merge != null), html_url}
 EOF
@@ -66,6 +66,9 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.runs | length')" = "2" ]
   [ "$(echo "$output" | jq -r '.result.runs[0].headSha')" = "c0ffee1c0ffee1c0ffee1c0ffee1c0ffee1c0ffe" ]
+  # 티켓 40이 더한 두 필드도 원시 페이로드에서 접힌다 — '핀이 최신 main 빌드인가'의 원료다.
+  [ "$(echo "$output" | jq -r '.result.runs[0].headBranch')" = "main" ]
+  [ "$(echo "$output" | jq -r '.result.runs[0].event')" = "push" ]
   # raw의 `"conclusion": null`이 키 부재로 접힌다(계약 "값 없음 = 키 부재").
   [ "$(echo "$output" | jq -r '.result.runs[1] | has("conclusion")')" = "false" ]
   # head.ref 중첩이 실제로 접혀야 레인 필터가 값을 읽는다 — 형제 앱 'pages'(#9)만 배제된다.
@@ -119,7 +122,7 @@ EOF
   # 스텁 PATH는 **대체**라 jq도 심링크로 들여온 것이다. 그 심링크가 없으면 raw 레인은 조용히
   # 접힌 픽스처로 폴백하는 게 아니라 exec 실패(127)로 죽어야 한다 — 폴백은 이 파일 전체를
   # vacuous green으로 만든다(픽스처가 이미 접혀 있으니 모든 단언이 그대로 통과한다).
-  F='[.workflow_runs[] | {name, status, conclusion, head_sha, html_url}]'
+  F='[.workflow_runs[] | {name, status, conclusion, head_sha, head_branch, event, html_url}]'
   run env PATH="$STUB" STUB_GH_RAW=1 "$STUB/gh" api "repos/ukyi-app/page/actions/runs?per_page=3" --jq "$F"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r 'length')" = "2" ]
