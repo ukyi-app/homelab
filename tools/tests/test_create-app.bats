@@ -368,3 +368,25 @@ EOF
   [ "$status" -eq 1 ]
   printf '%s' "$output" | grep -qF -- '최소 1개'
 }
+
+@test "create-app adds a wiring checklist line only when a same-named conn already exists (floor 2)" {
+  # product-1: create-app은 앱 자기 봉인본만 envFrom에 넣는다 — db/cache conn 배선은 손 편집 PR이
+  # 유일 경로다. 자동 배선은 하지 않고(이름≠앱 케이스), **이미 있는** conn을 체크리스트로 표면화한다.
+  # 형식은 create-database가 이미 쓰는 문구(provision-db checklist)와 같다.
+  printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources:\n  - db-orders-conn.sealed.yaml\n  - db-orders-ro-conn.sealed.yaml\n' \
+    > "$FR/platform/data-conn/prod/kustomization.yaml"
+  gen --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -r '.checklist[]' | grep -q "db-orders-conn"
+  echo "$output" | jq -r '.checklist[]' | grep -q "envFrom"
+  # 대조군 — 같은 이름의 캐시 conn은 없으므로 캐시 줄은 나오지 않는다(상수 출력이 아님).
+  [ "$(echo "$output" | jq -r '.checklist[]' | grep -c "cache-orders-conn")" = "0" ]
+  # 부재 축의 양성 대조 — conn 등록이 아예 없으면 배선 줄도 없다.
+  printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources: []\n' \
+    > "$FR/platform/data-conn/prod/kustomization.yaml"
+  gen --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.checklist[]' | grep -c "db-orders-conn")" = "0" ]
+  # 체크리스트 자체는 비어 있지 않다(열거 붕괴로 0건이 된 게 아니다).
+  [ "$(echo "$output" | jq -r '.checklist | length')" -ge 1 ]
+}

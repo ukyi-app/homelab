@@ -16,6 +16,7 @@ import { ghJson, sh } from "./exec.ts";
 import { APP_NAME_RE } from "./identity.ts";
 import { laneBranchInputError, lanePrRef, parseLaneBranch, readLanePrs, type LanePrRow } from "./lane-pr.ts";
 import { parseLedgerRows } from "./ledger-totals.ts";
+import { LAYOUT_DIRS, classifyArtifact } from "./resource-layout.ts";
 import { HOMELAB_REPO } from "./platform.ts";
 import { listUnits } from "./repo-walk.ts";
 
@@ -95,7 +96,20 @@ function readAppRow(root: string, name: string): AppRow {
     const rows = parseLedgerRows(readFileSync(`${root}/docs/memory-ledger.md`, "utf8"));
     ledgerMi = rows.find((r) => r.name === name)?.limitMi;
   } catch { /* 원장 부재 — 키 부재로 보고 */ }
-  return compact({ name, tag, digest, autoDeploy, sourceRepo, ledgerMi });
+  // 앱↔리소스 배선(conns) — values.envFrom의 secretRef 중 data-conn 컴포넌트가 내는 핸들만 추린다.
+  // 판정은 레이아웃 SSOT(classifyArtifact)에 위임한다: 이름 정책(-ro 접미·예약 이름·kind 접두)이
+  // 두 벌이 되면 감사(audit-orphans)와 관측이 서로 다른 집합을 말하게 된다. 앱 자기 봉인본
+  // (<app>-secrets)은 배선이 아니라 자기 시크릿이라 자연히 빠진다.
+  // ⚠️ 배선 **자동화**는 하지 않는다 — audit-orphans:315가 '이름≠앱' 케이스를 비차단 근거로
+  // 명시했고, 자동 배선은 엉뚱한 DB를 물린다. 이 필드는 관측(사실 표면화)뿐이다.
+  const envFrom = Array.isArray((s.values as Record<string, unknown> | null)?.envFrom)
+    ? ((s.values as Record<string, unknown>).envFrom as unknown[])
+    : [];
+  const conns = envFrom
+    .map((e) => (e as { secretRef?: { name?: unknown } } | null)?.secretRef?.name)
+    .filter((n): n is string => typeof n === "string" && n !== ""
+      && classifyArtifact(`${LAYOUT_DIRS.dataConn}/${n}.sealed.yaml`) !== null);
+  return compact({ name, tag, digest, autoDeploy, sourceRepo, ledgerMi, conns: conns.length > 0 ? conns : undefined });
 }
 
 // 열거는 공유 워커(repo-walk `apps` 유닛 스코프) 소유 — 의미론적 필터(deploy/prod 존재 =

@@ -154,7 +154,7 @@ run_init() {
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
   [ "$(echo "$output" | jq -r '.result.secrets.appId')" = "true" ]
   [ "$(echo "$output" | jq -r '.result.secrets.privateKey')" = "false" ]
-  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "pushed" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "secrets" ]
   # run2: 나머지(private key)만 수렴. App ID는 이미 설정돼 재설정하지 않는다.
   run_init myapp --archetype api --dispatch-secrets "$SECRETS_DIR" --json
   [ "$status" -eq 0 ]
@@ -350,4 +350,45 @@ run_init() {
   [ "$(grep -cE '(sh\("gh", \["repo", "create"|sh\("bun", \[SCAFFOLD_ENTRY|sh\("git", \["clone"|git\(dest, \["push")' tools/lib/init.ts)" -eq 4 ]
   [ "$(grep -cE '(sh\("gh", \["repo", "create"|sh\("bun", \[SCAFFOLD_ENTRY|sh\("git", \["clone"|git\(dest, \["push").*timeoutMs: 0' tools/lib/init.ts)" -eq 4 ]
   [ "$(grep -cE 'git\(cwd, \["push".*timeoutMs: 0' tools/lib/secrets.ts)" -eq 1 ]
+}
+
+@test "a secret-stage failure reports checkpoint secrets and stays schema-valid (reachable enum member, floor 2)" {
+  # contract-9: initFailure.checkpoint enum의 "secrets"가 엔진 도달 가능해야 한다 — 시크릿 쓰기를
+  # 시도한 두 실패(App ID·private key)는 '도달 지점 = secrets'다. 목록 조회 실패는 시크릿 쓰기를
+  # 시도조차 못 한 자리라 "pushed"로 남는다(아래 대조군은 그 앞 단계인 스캐폴드 실패).
+  n=0
+  for k in HOMELAB_DISPATCH_APP_ID HOMELAB_DISPATCH_APP_PRIVATE_KEY; do
+    rm -rf "$INIT_PARENT/myapp"
+    rm -rf "$INIT_REMOTES/myapp.git"
+    run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
+      GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_GH_SECRET_FAIL="$k" \
+      HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+      "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api --dispatch-secrets "$SECRETS_DIR" --json
+    [ "$status" -eq 1 ]
+    [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+    [ "$(echo "$output" | jq -r '.result.checkpoint')" = "secrets" ]
+    # 스키마 대조 — enum 멤버가 실재 산출물로 유효해야 '도달 가능'이 증명된다.
+    echo "$output" > "$BATS_TEST_TMPDIR/secfail.json"
+    run bun -e '
+      import { schemaErrors } from "./tools/lib/schema-check.ts";
+      import { readFileSync } from "node:fs";
+      const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+      const env = JSON.parse(readFileSync(process.argv[1], "utf8"));
+      const errs = schemaErrors(env, sch, sch);
+      console.log(errs.length ? "INVALID: " + errs.join(" | ") : "valid");
+    ' "$BATS_TEST_TMPDIR/secfail.json"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "^valid$"
+    n=$((n+1))
+  done
+  [ "$n" -eq 2 ]
+  # 양성 대조 — 시크릿 단계 앞에서 죽으면 checkpoint는 secrets가 아니다(단언이 상수가 아님).
+  rm -rf "$INIT_PARENT/other"
+  rm -rf "$INIT_REMOTES/other.git"
+  run --separate-stderr env -C "$INIT_PARENT" PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
+    GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_SCAFFOLD_FAIL=1 \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    "$BUN" "$ROOT/tools/homelab.ts" app init other --archetype api --dispatch-secrets "$SECRETS_DIR" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" != "secrets" ]
 }

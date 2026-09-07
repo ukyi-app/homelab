@@ -131,6 +131,11 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   복제 금지). ⚠️ **생성물이다 — 직접 편집 금지**: 행렬 분기·verb enum은 `generate-result-schema.ts`가
   기술자 행에서 생성한다(수정은 기술자/생성기 조각 → `--write` 재생성, byte 드리프트 게이트가 강제).
   골든 픽스처: `tools/tests/fixtures/homelab/*.golden.json`.
+  **버전 규칙**(envelope `homelab-cli/N`) — ① *추가*(verb·variant·definitions·선택 필드)는 v1 내
+  하위호환이라 승격하지 않는다. ② *삭제·기존 필드의 필수화·enum 축소*는 파괴적 변경이라 `/2` 승격이
+  필요하다(골든은 엔진과 함께 재생성되므로 스스로는 파괴를 잡지 못한다). ③ 그 증인은 루트 앵커
+  2줄이다 — test_homelab-cli.bats "the v1 contract root is hand-anchored"가 루트 `required` 집합과
+  `properties` 키 순서를 리터럴로 핀한다. 편집처는 **생성기의 HEADER_A**다(이 JSON이 아니다).
 - **`generate-result-schema.ts`** — cli-result-schema.json **생성기**(cli-deepening 심화 3): 행렬
   분기(allOf member 0)·verb enum은 기술자 행(lib/catalog-rows `CONTRACT_ROWS`)에서, initSuccess·
   initFailure의 archetype enum은 플랫폼 좌표(lib/platform `ARCHETYPES` — 심화 6 후속)에서 생성하고,
@@ -178,6 +183,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   상태머신, 각 step 별도 커밋). 되돌릴 수 없어 fail-closed 게이트가 두껍다(런북 `docs/runbooks/teardown-resource.md`).
 
 ## update-image 폴링 (bump 경로 — 인-레포 앱 이미지 전용)
+
+> **온보딩 후 autoDeploy 전환**: `apps/<app>/deploy/prod/.bindings.json`의 `autoDeploy`를 편집하는
+> PR이 유일 경로다(머지 = 승인 정책 변경). 이 값을 바꾸는 동사·make 타깃·워크플로는 없다 —
+> `poll-ghcr`가 이 파일을 권위로 직접 읽고, 누락이면 fail-closed(승인 PR)다.
 
 - **`poll-ghcr.ts`** — GHCR 폴링 bump **플래너**(읽기 전용, 부작용 0). `bump-poll.yaml`(10분 주기)이
   `bun tools/poll-ghcr.ts --root . > plan.json`으로 호출. `source-repo` 바인딩이 있는

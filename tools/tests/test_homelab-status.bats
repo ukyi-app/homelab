@@ -18,6 +18,22 @@ setup() {
   echo "apiVersion: v1" > "$KC"
 }
 
+# 방출된 envelope을 결과 계약으로 대조한다(티켓 25 (a) — variant별 **실산출물**을 검증기에 태운다).
+# 형상 결합이 없던 동안 status failure 4곳은 스키마 대조 없이 variant만 봤다.
+assert_envelope_valid() {
+  printf '%s\n' "$1" > "$BATS_TEST_TMPDIR/assert-env.json"
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const env = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    const errs = schemaErrors(env, sch, sch);
+    console.log(errs.length ? "INVALID: " + errs.join(" | ") : "valid");
+  ' "$BATS_TEST_TMPDIR/assert-env.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^valid$"
+}
+
 @test "status --json on a greenfield root reports an empty list with exit 0" {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
   [ "$status" -eq 0 ]
@@ -139,6 +155,7 @@ setup() {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_PRS_FAIL=1 "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  assert_envelope_valid "$output"
 }
 
 @test "an in-repo app (no source-repo) skips the runs fetch and reports an empty runs list" {
@@ -177,6 +194,7 @@ setup() {
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
   [ "$(echo "$output" | jq -r '.result.mode')" = "app" ]
   echo "$output" | jq -r '.result.error' | grep -q "ghost"
+  assert_envelope_valid "$output"
 }
 
 @test "status app mode fails loud when the GitHub layer errors (no silent empty lists)" {
@@ -184,6 +202,7 @@ setup() {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_RUNS_FAIL=1 "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  assert_envelope_valid "$output"
 }
 
 @test "run handle lookup reports status and conclusion from the run URL" {
@@ -215,6 +234,8 @@ setup() {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_HANDLE_404=1 "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/page/actions/runs/999" --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "run" ]
+  assert_envelope_valid "$output"
 }
 
 @test "a malformed handle URL is a usage error: exit 2, no envelope" {
@@ -283,7 +304,7 @@ setup() {
       const env = JSON.parse(readFileSync(dir + "/env-" + m + ".json", "utf8"));
       const errs = [
         ...schemaErrors(env, sch, sch),
-        ...schemaErrors(env.result, sch.definitions.statusResult, sch),
+        ...schemaErrors(env.result, sch.definitions.statusOk, sch),
       ];
       if (errs.length) { console.error(m + ": " + errs.join(" | ")); process.exit(1); }
       n++;
@@ -448,4 +469,25 @@ setup() {
   [ "$status" -eq 2 ]
   [ -z "$output" ]
   echo "$stderr" | grep -q "사용법"
+}
+
+@test "status app mode reports the wired data-conn handles and omits the key when nothing is wired (floor 2)" {
+  # product-1: conn이 봉인·커밋돼도 앱이 envFrom을 배선 안 하면 어떤 게이트도 안 잡았다(#211 실재발).
+  # 배선 **자동화**는 하지 않는다(이름≠앱 케이스) — status가 배선 사실을 보고하는 것이 이 티켓의 범위다.
+  make_app_fixture wired true
+  printf 'envFrom:\n  - secretRef: { name: db-wired-conn }\n  - secretRef: { name: cache-sessions-ro-conn }\n  - secretRef: { name: wired-secrets }\n' \
+    >> "$APPS_ROOT/apps/wired/deploy/prod/values.yaml"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status wired --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  # data-conn 컴포넌트가 내는 핸들만 추린다 — 앱 자기 봉인본(wired-secrets)은 배선이 아니다.
+  [ "$(echo "$output" | jq -rc '.result.app.conns')" = '["db-wired-conn","cache-sessions-ro-conn"]' ]
+  # 부정 단언의 양성 대조 — 배선이 없는 앱은 키 자체가 부재다(빈 배열이 아니라).
+  make_app_fixture bare true
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status bare --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.app | has("conns")')" = "false" ]
+  # 사람용 렌더도 같은 사실을 말한다(기계 채널만 알고 사람은 모르는 상태 금지).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status wired --root "$APPS_ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "db-wired-conn"
 }

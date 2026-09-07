@@ -8,6 +8,7 @@
     "action": "teardown-app",
     "name": "myapp",
     "dnsReclaim": "iac/tf-reconcile",
+    "resourcesRetained": "teardown-resource",
     "correlation": "corr-fixed-nonce-01",
     "waited": true,
     "run": {

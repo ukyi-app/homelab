@@ -22,7 +22,7 @@
 //    '문서 관례'의 복구 레시피로 꺼낸다).
 import { createInterface } from "node:readline";
 import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInput } from "./conn-url.ts";
-import { mcpIsError, type Envelope } from "./contract.ts";
+import { assertEnvelope, mcpIsError, type Envelope } from "./contract.ts";
 import { schemaErrors } from "./schema-check.ts";
 import { appInitInputError, type AppInitInput } from "./init.ts";
 import { ARCHETYPES } from "./platform.ts";
@@ -285,6 +285,8 @@ export function handleRequest(req: Json): Json | null {
     const r = tool.call(args);
     if (r.kind === "usage") return err(id, -32602, r.message); // usage 오류 = invalid params
     // envelope — CLI --json과 같은 계약 오브젝트를 content로, isError는 variant 매핑.
+    // 방출 전 자기검증(CLI 셸과 같은 지점) — 위반 throw는 서버 루프의 -32603 격리가 받는다.
+    assertEnvelope(r.envelope);
     return ok(id, { content: [{ type: "text", text: JSON.stringify(r.envelope) }], isError: mcpIsError(r.envelope.variant) });
   }
   if (isNotification) return null;

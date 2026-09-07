@@ -226,7 +226,7 @@ function execOnly(s: string): string {
 // ── 원장 + 대조(guardMain check 단계) ──────────────────────────────────────────────────────────
 // 로딩·통일 shape({_readme, steps})·항목 구조는 readLedger(policy-ledger) 소유. 미계상·죽은 선언·
 // ④~⑦ 대조 의미론과 상태별 조건부 요건은 이 콜사이트 소유다(CONTEXT.md 「정책 원장」).
-const ENTRY_SCHEMA = {
+export const ENTRY_SCHEMA = {
   type: "object",
   required: ["name", "status"],
   properties: {
@@ -414,7 +414,9 @@ function reconcile(): string[] {
 // 실행 순서(열거 → floor → SCAN → 검사 → 종료코드)는 guardMain이 구조로 소유한다.
 // 종전에도 scanFloor가 바닥값·마커를 한 몸으로 냈다 — 커널 편입이 옮긴 것은 마커의 존재가
 // 아니라 **순서의 소유**다(콜사이트가 floor·방출·검사의 순서를 손으로 맞추던 자리 소멸).
-guardMain({
+// 진입점일 때만 실행한다(형제 가드 check-image-ownership·check-guard-authority와 같은 관용구) —
+// ENTRY_SCHEMA를 import해 커널 지원 여부를 재는 계약 테스트가 이 가드를 돌려 버리지 않도록.
+if (import.meta.main) guardMain({
   floors,
   domains: [{
     scan: "check-ci-parity",

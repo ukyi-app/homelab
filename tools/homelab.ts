@@ -10,7 +10,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CommandParseError, parseCommand, skipMarker, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
 import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInput } from "./lib/conn-url.ts";
-import { ENVELOPE, EXIT, USAGE_EXIT, type Envelope } from "./lib/contract.ts";
+import { ENVELOPE, EXIT, USAGE_EXIT, assertEnvelope, type Envelope } from "./lib/contract.ts";
 import { git } from "./lib/exec.ts";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { WAIT_DEFAULTS, type ProgressEvent } from "./lib/mutation.ts";
@@ -257,6 +257,8 @@ function appCreateUsage(): string {
     "함께 트리거하고 run을 추적한다. create-app은 **수동 머지** 동사다(머지 = 공개 승인,",
     "auto-merge 없음): --wait는 승인 경계를 약화하지 않고, 미머지면 '사람 머지 대기' 바운디드",
     "pending을 반환하며, 대기 중 머지가 관측되면 라이브 수렴(<app>-prod Application + 표면)을 이어간다.",
+    "실제 노출(공개 DNS/tunnel 또는 내부 rewrite)은 이 명령의 관측 대상이 아니다 — 결과의",
+    "dnsExposure가 소관을 명시한다(공개=iac/tf-reconcile · 내부=adguard rewrite).",
     "  --wait             머지 관측 + Application 수렴까지 대기(미머지 = 바운디드 pending)",
     ...WAIT_FLAG_LINES,
     ...needsLines(APP_CREATE),
@@ -311,6 +313,8 @@ function appTeardownUsage(): string {
     "비-TTY(스크립트)에서는 거부한다. --wait의 종결은 다른 동사와 다르다 — 삭제 대상 Application은",
     "Healthy가 될 수 없으므로, 성공 = 머지 관측 + 생성됐던 Application의 **부재**(prune 완료)다.",
     "DNS 회수는 iac/tf-reconcile 소관이라 이 명령의 관측 대상이 아니다(결과에 명시).",
+    "DB/캐시(conn·CR·Valkey)는 **비접촉**이라 철거 후에도 그대로 남는다 — 결과의 resourcesRetained가",
+    "그 미완 작업을 명시한다(정리는 owner-local `make teardown-resource`, attestation 필요).",
     "  --confirm <app>    파괴 확인 — 철거할 앱 이름 재입력(불일치·비-TTY 무플래그 = 거부)",
     "  --wait             머지 관측 + Application 부재(prune)까지 대기(미머지 = 바운디드 pending)",
     ...WAIT_FLAG_LINES,
@@ -587,6 +591,9 @@ function main(argv: string[]): number {
   // stderr, 결과는 stdout 순수성(--json이면 stdout은 envelope 하나, 사람용은 stderr)을 지킨다.
   if (out.kind === "help") { process.stdout.write(out.text); return 0; }
   if (out.kind === "usage-error") { process.stderr.write(`${out.message}\n\n${out.usage}`); return USAGE_EXIT; }
+  // 런타임 자기검증 — --json 여부와 무관하게(사람용 렌더도 같은 envelope에서 나온다) 계약 위반을
+  // 방출 전에 loud하게 죽인다. 골든이 없는 셀에서 엔진이 계약을 어기면 여기가 유일한 증인이다.
+  assertEnvelope(out.envelope);
   // 기계 채널 먼저 — 사람용 렌더(thunk)가 throw해도 --json 소비자의 envelope는 이미 온전하다.
   // 렌더러를 thunk로 받는 이유가 이 순서다: 종전에는 어댑터가 `human: renderX(envelope)`로 즉시
   // 평가해, 사람용 렌더 결함 하나가 JSON 출력에 도달하기도 전에 프로세스를 죽였다(shell-6).

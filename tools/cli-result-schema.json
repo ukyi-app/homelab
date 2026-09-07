@@ -42,16 +42,32 @@
           "type": "object",
           "properties": {
             "verb": { "enum": ["doctor"] },
-            "variant": { "enum": ["success", "failure"] },
-            "result": { "$ref": "#/definitions/doctorResult" }
+            "variant": { "enum": ["success"] },
+            "result": { "$ref": "#/definitions/doctorOk" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["doctor"] },
+            "variant": { "enum": ["failure"] },
+            "result": { "$ref": "#/definitions/doctorFailed" }
           }
         },
         {
           "type": "object",
           "properties": {
             "verb": { "enum": ["status"] },
-            "variant": { "enum": ["success", "failure"] },
-            "result": { "$ref": "#/definitions/statusResult" }
+            "variant": { "enum": ["success"] },
+            "result": { "$ref": "#/definitions/statusOk" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["status"] },
+            "variant": { "enum": ["failure"] },
+            "result": { "$ref": "#/definitions/statusError" }
           }
         },
         {
@@ -70,7 +86,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationSuccess" },
               { "type": "object", "properties": { "action": { "enum": ["create-database"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -82,7 +99,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationFailure" },
               { "type": "object", "properties": { "action": { "enum": ["create-database"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -94,7 +112,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationRace" },
               { "type": "object", "properties": { "action": { "enum": ["create-database"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -106,7 +125,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationPending" },
               { "type": "object", "properties": { "action": { "enum": ["create-database"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -118,7 +138,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationSuperseded" },
               { "type": "object", "properties": { "action": { "enum": ["create-database"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -130,7 +151,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationSuccess" },
               { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -142,7 +164,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationFailure" },
               { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -154,7 +177,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationRace" },
               { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -166,7 +190,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationPending" },
               { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -178,7 +203,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationSuperseded" },
               { "type": "object", "properties": { "action": { "enum": ["create-cache"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -190,7 +216,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationSuccess" },
               { "type": "object", "properties": { "action": { "enum": ["create-app"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "type": "object", "required": ["dnsExposure"] }
             ] }
           }
         },
@@ -202,7 +229,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationFailure" },
               { "type": "object", "properties": { "action": { "enum": ["create-app"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "type": "object", "required": ["dnsExposure"] }
             ] }
           }
         },
@@ -214,7 +242,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationRace" },
               { "type": "object", "properties": { "action": { "enum": ["create-app"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "type": "object", "required": ["dnsExposure"] }
             ] }
           }
         },
@@ -226,7 +255,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationPending" },
               { "type": "object", "properties": { "action": { "enum": ["create-app"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "type": "object", "required": ["dnsExposure"] }
             ] }
           }
         },
@@ -238,7 +268,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationSuperseded" },
               { "type": "object", "properties": { "action": { "enum": ["create-app"] } } },
-              { "not": { "type": "object", "required": ["chain"] } }
+              { "not": { "type": "object", "required": ["chain"] } },
+              { "type": "object", "required": ["dnsExposure"] }
             ] }
           }
         },
@@ -250,7 +281,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationSuccess" },
               { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-              { "type": "object", "required": ["chain"] }
+              { "type": "object", "required": ["chain"] },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -263,7 +295,8 @@
               { "allOf": [
                 { "$ref": "#/definitions/mutationFailure" },
                 { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-                { "type": "object", "required": ["chain"] }
+                { "type": "object", "required": ["chain"] },
+                { "not": { "type": "object", "required": ["dnsExposure"] } }
               ] },
               { "$ref": "#/definitions/mutationRefused" }
             ] }
@@ -277,7 +310,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationRace" },
               { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-              { "type": "object", "required": ["chain"] }
+              { "type": "object", "required": ["chain"] },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -289,7 +323,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationPending" },
               { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-              { "type": "object", "required": ["chain"] }
+              { "type": "object", "required": ["chain"] },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -301,7 +336,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationSuperseded" },
               { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-              { "type": "object", "required": ["chain"] }
+              { "type": "object", "required": ["chain"] },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -313,7 +349,8 @@
             "result": { "allOf": [
               { "$ref": "#/definitions/mutationNoop" },
               { "type": "object", "properties": { "action": { "enum": ["update-secrets"] } } },
-              { "type": "object", "required": ["chain"] }
+              { "type": "object", "required": ["chain"] },
+              { "not": { "type": "object", "required": ["dnsExposure"] } }
             ] }
           }
         },
@@ -416,6 +453,20 @@
         }
       }
     },
+    "doctorOk": {
+      "description": "doctor success — 실패 0(summary.fail maximum 0). variant가 아니라 **결과 형상**이 성공을 말하므로, 엔진의 exitCode 거짓말(fail ≥ 1인데 success)을 스키마가 독립 검출한다.",
+      "allOf": [
+        { "$ref": "#/definitions/doctorResult" },
+        { "type": "object", "properties": { "summary": { "type": "object", "properties": { "fail": { "type": "integer", "maximum": 0 } } } } }
+      ]
+    },
+    "doctorFailed": {
+      "description": "doctor failure — 실패 ≥ 1(summary.fail minimum 1). doctorOk와 상보다(둘 다 doctorResult 본문을 공유).",
+      "allOf": [
+        { "$ref": "#/definitions/doctorResult" },
+        { "type": "object", "properties": { "summary": { "type": "object", "properties": { "fail": { "type": "integer", "minimum": 1 } } } } }
+      ]
+    },
     "mutationRun": {
       "type": "object",
       "additionalProperties": false,
@@ -492,7 +543,8 @@
         "waited": { "type": "boolean" },
         "run": { "$ref": "#/definitions/mutationRun" },
         "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
-        "chain": { "$ref": "#/definitions/mutationChain" }
+        "chain": { "$ref": "#/definitions/mutationChain" },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationSuccess": {
@@ -507,7 +559,8 @@
         "waited": { "type": "boolean" },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationFailure": {
@@ -521,7 +574,8 @@
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
         "run": { "$ref": "#/definitions/mutationRun" },
-        "pr": { "$ref": "#/definitions/mutationPr" }
+        "pr": { "$ref": "#/definitions/mutationPr" },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationRace": {
@@ -536,7 +590,8 @@
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
         "observedRuns": { "type": "integer", "minimum": 0 },
-        "run": { "$ref": "#/definitions/mutationRun" }
+        "run": { "$ref": "#/definitions/mutationRun" },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationPending": {
@@ -552,7 +607,8 @@
         "pendingReason": { "type": "string", "minLength": 1 },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationSuperseded": {
@@ -568,7 +624,8 @@
         "error": { "type": "string", "minLength": 1 },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationAbsentApp": {
@@ -583,10 +640,10 @@
       }
     },
     "teardownSuccess": {
-      "description": "철거 성공 — 머지 관측 + Application 부재(prune 완료). KUBECONFIG 부재면 applications 생략(omitted=live). dnsReclaim은 DNS 회수가 이 명령의 관측 대상이 아님을 명시(iac/tf-reconcile 소관).",
+      "description": "철거 성공 — 머지 관측 + Application 부재(prune 완료). KUBECONFIG 부재면 applications 생략(omitted=live). dnsReclaim은 DNS 회수가 이 명령의 관측 대상이 아님을 명시(iac/tf-reconcile 소관). resourcesRetained는 성격이 다르다 — 소관 이관이 아니라 **미완 작업**이다: DB/캐시 conn·CR·Valkey는 teardown-app 계약상 비접촉이라 그대로 남아 있고, 정리 경로는 owner-local teardown-resource(attestation 필요)뿐이다. 4 variant 전부에 필수라 반쯤 착지한 순간에도 사라지지 않는다.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "waited", "run", "pr", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "waited", "run", "pr", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
@@ -595,6 +652,7 @@
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationAbsentApp" } }
       }
     },
@@ -602,13 +660,14 @@
       "description": "철거 실패 — 디스패치/run 실패 또는 머지 SHA에 표면이 남음(철거 미반영). presence 동사와 달리 표면 잔존이 실패 신호다(극성 반전).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "error", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "error", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" }
       }
@@ -617,7 +676,7 @@
       "description": "신원 판정 불가(같은 nonce run ≥2 또는 브랜치 PR ≥2) — 전제 상태 변동 계열(exit 3).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "error", "observedRuns", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "error", "observedRuns", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
@@ -625,6 +684,7 @@
         "error": { "type": "string", "minLength": 1 },
         "observedRuns": { "type": "integer", "minimum": 0 },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "run": { "$ref": "#/definitions/mutationRun" }
       }
     },
@@ -632,13 +692,14 @@
       "description": "바운디드 부분 결과 — 사람 머지 대기(파괴 승인) 또는 Application prune 미완. applications는 부재 관측 증거이고 핸들 재조회가 재개 경로다.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "pendingReason", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "pendingReason", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
         "correlation": { "type": "string", "minLength": 8 },
         "pendingReason": { "type": "string", "minLength": 1 },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
         "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationAbsentApp" } }
@@ -675,7 +736,7 @@
       }
     },
     "initFailure": {
-      "description": "init 실패 — preflight 거부(부수효과 0)·마커 없는 레포 fail-closed·단계 오류. checkpoint가 도달 지점을 명시하고(재개 근거), 시크릿 절반 상태도 여기 실린다.",
+      "description": "init 실패 — preflight 거부(부수효과 0)·마커 없는 레포 fail-closed·단계 오류. checkpoint가 도달 지점을 명시하고(재개 근거), 시크릿 절반 상태도 여기 실린다. enum은 **엔진 도달 가능 집합**이다 — \"secrets\"는 시크릿 쓰기를 시도한 뒤의 실패(절반 상태 포함)가 낸다.",
       "type": "object",
       "additionalProperties": false,
       "required": ["app", "archetype", "public", "repo", "checkpoint", "error"],
@@ -711,14 +772,13 @@
         "error": { "type": "string" }
       }
     },
-    "statusResult": {
-      "description": "status의 result — 모드(list/app/run/pr) 판별 union + 오류 branch(variant=failure일 때 mode+error). 생략(live)은 result가 아니라 envelope.omitted가 명시한다.",
+    "statusOk": {
+      "description": "status 성공 result — 모드(list/app/run/pr) 판별 union. 실패(statusError)는 계약 행에서 갈라져 있어 success에 오류 branch가 실린 envelope은 스키마 차원에서 red다(구 statusResult는 둘을 한 union에 담아 그 결합이 없었다). 생략(live)은 result가 아니라 envelope.omitted가 명시한다.",
       "oneOf": [
         { "$ref": "#/definitions/statusList" },
         { "$ref": "#/definitions/statusApp" },
         { "$ref": "#/definitions/statusRun" },
-        { "$ref": "#/definitions/statusPrHandle" },
-        { "$ref": "#/definitions/statusError" }
+        { "$ref": "#/definitions/statusPrHandle" }
       ]
     },
     "statusList": {
@@ -732,7 +792,7 @@
       }
     },
     "statusAppRow": {
-      "description": "값 없음 = 키 부재(스키마는 JSON null을 두지 않는다 — 파일/키 부재의 의미 부여는 소비자).",
+      "description": "값 없음 = 키 부재(스키마는 JSON null을 두지 않는다 — 파일/키 부재의 의미 부여는 소비자). conns = values.envFrom에 배선된 data-conn 핸들(db-*-conn·cache-*-conn) — 배선 0이면 키 부재다. 관측 전용이고 자동 배선은 하지 않는다('이름≠앱' 케이스에서 엉뚱한 리소스를 문다).",
       "type": "object",
       "additionalProperties": false,
       "required": ["name"],
@@ -742,7 +802,8 @@
         "digest": { "type": "string" },
         "autoDeploy": { "type": "boolean" },
         "sourceRepo": { "type": "string" },
-        "ledgerMi": { "type": "integer", "minimum": 0 }
+        "ledgerMi": { "type": "integer", "minimum": 0 },
+        "conns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
     "statusApp": {
@@ -846,11 +907,12 @@
       }
     },
     "statusError": {
+      "description": "status 실패 branch. mode enum은 **엔진 도달 가능 집합**이다 — statusList는 failure를 내지 않으므로(레포 열거는 부재를 빈 목록으로 보고한다) \"list\"는 여기 없다.",
       "type": "object",
       "additionalProperties": false,
       "required": ["mode", "error"],
       "properties": {
-        "mode": { "enum": ["list", "app", "run", "pr"] },
+        "mode": { "enum": ["app", "run", "pr"] },
         "error": { "type": "string", "minLength": 1 },
         "createPrs": {
           "description": "app 모드의 산출물 부재 분기에서만: 그 앱을 키로 하는 create-app 레인의 열린 PR(수동 머지 대기). 산출물이 없는 것이 그린필드의 정상 전이일 수 있다는 부가 관측이고, 없으면 키가 없다(읽기 전용 — 머지 원칙 불변).",

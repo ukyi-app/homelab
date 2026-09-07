@@ -96,6 +96,20 @@ const DEFINITIONS = `    "doctorResult": {
         }
       }
     },
+    "doctorOk": {
+      "description": "doctor success — 실패 0(summary.fail maximum 0). variant가 아니라 **결과 형상**이 성공을 말하므로, 엔진의 exitCode 거짓말(fail ≥ 1인데 success)을 스키마가 독립 검출한다.",
+      "allOf": [
+        { "$ref": "#/definitions/doctorResult" },
+        { "type": "object", "properties": { "summary": { "type": "object", "properties": { "fail": { "type": "integer", "maximum": 0 } } } } }
+      ]
+    },
+    "doctorFailed": {
+      "description": "doctor failure — 실패 ≥ 1(summary.fail minimum 1). doctorOk와 상보다(둘 다 doctorResult 본문을 공유).",
+      "allOf": [
+        { "$ref": "#/definitions/doctorResult" },
+        { "type": "object", "properties": { "summary": { "type": "object", "properties": { "fail": { "type": "integer", "minimum": 1 } } } } }
+      ]
+    },
     "mutationRun": {
       "type": "object",
       "additionalProperties": false,
@@ -172,7 +186,8 @@ const DEFINITIONS = `    "doctorResult": {
         "waited": { "type": "boolean" },
         "run": { "$ref": "#/definitions/mutationRun" },
         "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
-        "chain": { "$ref": "#/definitions/mutationChain" }
+        "chain": { "$ref": "#/definitions/mutationChain" },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationSuccess": {
@@ -187,7 +202,8 @@ const DEFINITIONS = `    "doctorResult": {
         "waited": { "type": "boolean" },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationFailure": {
@@ -201,7 +217,8 @@ const DEFINITIONS = `    "doctorResult": {
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
         "run": { "$ref": "#/definitions/mutationRun" },
-        "pr": { "$ref": "#/definitions/mutationPr" }
+        "pr": { "$ref": "#/definitions/mutationPr" },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationRace": {
@@ -216,7 +233,8 @@ const DEFINITIONS = `    "doctorResult": {
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
         "observedRuns": { "type": "integer", "minimum": 0 },
-        "run": { "$ref": "#/definitions/mutationRun" }
+        "run": { "$ref": "#/definitions/mutationRun" },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationPending": {
@@ -232,7 +250,8 @@ const DEFINITIONS = `    "doctorResult": {
         "pendingReason": { "type": "string", "minLength": 1 },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationSuperseded": {
@@ -248,7 +267,8 @@ const DEFINITIONS = `    "doctorResult": {
         "error": { "type": "string", "minLength": 1 },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationAbsentApp": {
@@ -263,10 +283,10 @@ const DEFINITIONS = `    "doctorResult": {
       }
     },
     "teardownSuccess": {
-      "description": "철거 성공 — 머지 관측 + Application 부재(prune 완료). KUBECONFIG 부재면 applications 생략(omitted=live). dnsReclaim은 DNS 회수가 이 명령의 관측 대상이 아님을 명시(iac/tf-reconcile 소관).",
+      "description": "철거 성공 — 머지 관측 + Application 부재(prune 완료). KUBECONFIG 부재면 applications 생략(omitted=live). dnsReclaim은 DNS 회수가 이 명령의 관측 대상이 아님을 명시(iac/tf-reconcile 소관). resourcesRetained는 성격이 다르다 — 소관 이관이 아니라 **미완 작업**이다: DB/캐시 conn·CR·Valkey는 teardown-app 계약상 비접촉이라 그대로 남아 있고, 정리 경로는 owner-local teardown-resource(attestation 필요)뿐이다. 4 variant 전부에 필수라 반쯤 착지한 순간에도 사라지지 않는다.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "waited", "run", "pr", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "waited", "run", "pr", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
@@ -275,6 +295,7 @@ const DEFINITIONS = `    "doctorResult": {
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationAbsentApp" } }
       }
     },
@@ -282,13 +303,14 @@ const DEFINITIONS = `    "doctorResult": {
       "description": "철거 실패 — 디스패치/run 실패 또는 머지 SHA에 표면이 남음(철거 미반영). presence 동사와 달리 표면 잔존이 실패 신호다(극성 반전).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "error", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "error", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" }
       }
@@ -297,7 +319,7 @@ const DEFINITIONS = `    "doctorResult": {
       "description": "신원 판정 불가(같은 nonce run ≥2 또는 브랜치 PR ≥2) — 전제 상태 변동 계열(exit 3).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "error", "observedRuns", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "error", "observedRuns", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
@@ -305,6 +327,7 @@ const DEFINITIONS = `    "doctorResult": {
         "error": { "type": "string", "minLength": 1 },
         "observedRuns": { "type": "integer", "minimum": 0 },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "run": { "$ref": "#/definitions/mutationRun" }
       }
     },
@@ -312,13 +335,14 @@ const DEFINITIONS = `    "doctorResult": {
       "description": "바운디드 부분 결과 — 사람 머지 대기(파괴 승인) 또는 Application prune 미완. applications는 부재 관측 증거이고 핸들 재조회가 재개 경로다.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "pendingReason", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "pendingReason", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
         "correlation": { "type": "string", "minLength": 8 },
         "pendingReason": { "type": "string", "minLength": 1 },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
         "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationAbsentApp" } }
@@ -355,7 +379,7 @@ const DEFINITIONS = `    "doctorResult": {
       }
     },
     "initFailure": {
-      "description": "init 실패 — preflight 거부(부수효과 0)·마커 없는 레포 fail-closed·단계 오류. checkpoint가 도달 지점을 명시하고(재개 근거), 시크릿 절반 상태도 여기 실린다.",
+      "description": "init 실패 — preflight 거부(부수효과 0)·마커 없는 레포 fail-closed·단계 오류. checkpoint가 도달 지점을 명시하고(재개 근거), 시크릿 절반 상태도 여기 실린다. enum은 **엔진 도달 가능 집합**이다 — \\"secrets\\"는 시크릿 쓰기를 시도한 뒤의 실패(절반 상태 포함)가 낸다.",
       "type": "object",
       "additionalProperties": false,
       "required": ["app", "archetype", "public", "repo", "checkpoint", "error"],
@@ -391,14 +415,13 @@ const DEFINITIONS = `    "doctorResult": {
         "error": { "type": "string" }
       }
     },
-    "statusResult": {
-      "description": "status의 result — 모드(list/app/run/pr) 판별 union + 오류 branch(variant=failure일 때 mode+error). 생략(live)은 result가 아니라 envelope.omitted가 명시한다.",
+    "statusOk": {
+      "description": "status 성공 result — 모드(list/app/run/pr) 판별 union. 실패(statusError)는 계약 행에서 갈라져 있어 success에 오류 branch가 실린 envelope은 스키마 차원에서 red다(구 statusResult는 둘을 한 union에 담아 그 결합이 없었다). 생략(live)은 result가 아니라 envelope.omitted가 명시한다.",
       "oneOf": [
         { "$ref": "#/definitions/statusList" },
         { "$ref": "#/definitions/statusApp" },
         { "$ref": "#/definitions/statusRun" },
-        { "$ref": "#/definitions/statusPrHandle" },
-        { "$ref": "#/definitions/statusError" }
+        { "$ref": "#/definitions/statusPrHandle" }
       ]
     },
     "statusList": {
@@ -412,7 +435,7 @@ const DEFINITIONS = `    "doctorResult": {
       }
     },
     "statusAppRow": {
-      "description": "값 없음 = 키 부재(스키마는 JSON null을 두지 않는다 — 파일/키 부재의 의미 부여는 소비자).",
+      "description": "값 없음 = 키 부재(스키마는 JSON null을 두지 않는다 — 파일/키 부재의 의미 부여는 소비자). conns = values.envFrom에 배선된 data-conn 핸들(db-*-conn·cache-*-conn) — 배선 0이면 키 부재다. 관측 전용이고 자동 배선은 하지 않는다('이름≠앱' 케이스에서 엉뚱한 리소스를 문다).",
       "type": "object",
       "additionalProperties": false,
       "required": ["name"],
@@ -422,7 +445,8 @@ const DEFINITIONS = `    "doctorResult": {
         "digest": { "type": "string" },
         "autoDeploy": { "type": "boolean" },
         "sourceRepo": { "type": "string" },
-        "ledgerMi": { "type": "integer", "minimum": 0 }
+        "ledgerMi": { "type": "integer", "minimum": 0 },
+        "conns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
     "statusApp": {
@@ -526,11 +550,12 @@ const DEFINITIONS = `    "doctorResult": {
       }
     },
     "statusError": {
+      "description": "status 실패 branch. mode enum은 **엔진 도달 가능 집합**이다 — statusList는 failure를 내지 않으므로(레포 열거는 부재를 빈 목록으로 보고한다) \\"list\\"는 여기 없다.",
       "type": "object",
       "additionalProperties": false,
       "required": ["mode", "error"],
       "properties": {
-        "mode": { "enum": ["list", "app", "run", "pr"] },
+        "mode": { "enum": ["app", "run", "pr"] },
         "error": { "type": "string", "minLength": 1 },
         "createPrs": {
           "description": "app 모드의 산출물 부재 분기에서만: 그 앱을 키로 하는 create-app 레인의 열린 PR(수동 머지 대기). 산출물이 없는 것이 그린필드의 정상 전이일 수 있다는 부가 관측이고, 없으면 키가 없다(읽기 전용 — 머지 원칙 불변).",
@@ -586,10 +611,15 @@ const DEF_BY_VARIANT: Record<MutationVariantName, string> = {
 };
 
 // 행렬 분기 3형 — 형식(들여쓰기·인라인 스타일)이 곧 byte 계약이라 문자열 조립로만 만든다.
-function mutationBranch(verb: string, variant: MutationVariantName, action: string, chain: boolean): string {
+// 극성 축 둘(chain·exposure)은 같은 관용구다: 그 레인이 필드를 **싣거나**(required) 다른 레인은
+// **실을 수 없다**(not required). 한쪽만 두면 필드가 verb 사이로 새어도 스키마가 조용하다.
+function mutationBranch(verb: string, variant: MutationVariantName, action: string, chain: boolean, exposure: boolean): string {
   const chainLine = chain
-    ? '              { "type": "object", "required": ["chain"] }'
-    : '              { "not": { "type": "object", "required": ["chain"] } }';
+    ? '              { "type": "object", "required": ["chain"] },'
+    : '              { "not": { "type": "object", "required": ["chain"] } },';
+  const exposureLine = exposure
+    ? '              { "type": "object", "required": ["dnsExposure"] }'
+    : '              { "not": { "type": "object", "required": ["dnsExposure"] } }';
   return [
     "        {",
     '          "type": "object",',
@@ -600,6 +630,7 @@ function mutationBranch(verb: string, variant: MutationVariantName, action: stri
     '              { "$ref": "#/definitions/' + DEF_BY_VARIANT[variant] + '" },',
     '              { "type": "object", "properties": { "action": { "enum": ["' + action + '"] } } },',
     chainLine,
+    exposureLine,
     "            ] }",
     "          }",
     "        }",
@@ -617,7 +648,8 @@ function refusedFailureBranch(verb: string, action: string): string {
     '              { "allOf": [',
     '                { "$ref": "#/definitions/mutationFailure" },',
     '                { "type": "object", "properties": { "action": { "enum": ["' + action + '"] } } },',
-    '                { "type": "object", "required": ["chain"] }',
+    '                { "type": "object", "required": ["chain"] },',
+    '                { "not": { "type": "object", "required": ["dnsExposure"] } }',
     "              ] },",
     '              { "$ref": "#/definitions/mutationRefused" }',
     "            ] }",
@@ -648,7 +680,7 @@ function memberZeroBranches(): string {
       for (const v of row.mutation.variants) {
         out.push(v === "failure" && row.mutation.refusedOnFailure === true
           ? refusedFailureBranch(row.verb, row.mutation.action)
-          : mutationBranch(row.verb, v, row.mutation.action, row.mutation.chain));
+          : mutationBranch(row.verb, v, row.mutation.action, row.mutation.chain, row.mutation.exposure === true));
       }
     }
     for (const s of row.simple ?? []) out.push(simpleBranch(row.verb, s.variants, s.ref));
@@ -669,7 +701,41 @@ export function generateSchema(): string {
   const actionEnumInline = '"action": { "enum": [' + mutationActions.map((a) => '"' + a + '"').join(", ") + "] }";
   const hits = DEFINITIONS.split(actionEnumInline).length - 1;
   if (hits !== 6) throw new Error("계약 파손: definitions의 action enum(" + hits + "곳)이 계약 행 mutation action 목록과 어긋난다(기대 6곳)");
-  return HEADER_A + "\n" + verbEnumLine() + "\n" + HEADER_B + "\n" + memberZeroBranches() + "\n" + TAIL_MID + "\n" + DEFINITIONS + "\n";
+  const text = HEADER_A + "\n" + verbEnumLine() + "\n" + HEADER_B + "\n" + memberZeroBranches() + "\n" + TAIL_MID + "\n" + DEFINITIONS + "\n";
+  assertGenerated(text);
+  return text;
+}
+
+// 생성물 자기 단언 — **생성한 JSON을 파싱해서** 잰다(문자열 검색이 아니다: 리터럴을 배열 하나로
+// 보간하면 단언 자체가 소멸하고, 검색은 표기 변화에 눈이 먼다). 두 축:
+//  ① MCP 매핑 분할 — isErrorVariants ∪ normalVariants = variant enum · 교집합 0 · exitCodes 키 집합
+//     동일. 셋은 서로 다른 수제 조각(HEADER_A vs HEADER_B)이라 손으로 어긋날 수 있고, 어긋나면
+//     contract.ts의 mcpIsError가 fail-closed로 죽는다(런타임 붕괴 대신 생성 시점 red).
+//  ② simple 행의 ref 실재성 — simpleBranch는 오타 ref를 그대로 생성한다(사후에 골든의 '해석 불가
+//     $ref'가 잡던 자리를 생성 시점으로 당긴다).
+function assertGenerated(text: string): void {
+  const sch = JSON.parse(text) as Record<string, any>;
+  const variants: string[] = sch.properties.variant.enum;
+  const mcp = sch["x-contract"].mcp;
+  const isErr: string[] = mcp.isErrorVariants;
+  const normal: string[] = mcp.normalVariants;
+  const union = new Set([...isErr, ...normal]);
+  const same = (a: Set<string>, b: readonly string[]): boolean => a.size === b.length && b.every((x) => a.has(x));
+  if (!same(union, variants)) {
+    throw new Error("계약 파손: MCP variant 목록 합집합이 variant enum과 다르다 — " + [...union].join(",") + " vs " + variants.join(","));
+  }
+  const inter = isErr.filter((v) => normal.includes(v));
+  if (inter.length > 0) throw new Error("계약 파손: MCP isError/normal 목록이 겹친다 — " + inter.join(","));
+  if (!same(new Set(Object.keys(sch["x-contract"].exitCodes)), variants)) {
+    throw new Error("계약 파손: exitCodes 키 집합이 variant enum과 다르다 — " + Object.keys(sch["x-contract"].exitCodes).join(","));
+  }
+  for (const row of CONTRACT_ROWS) {
+    for (const simple of row.simple ?? []) {
+      if (sch.definitions[simple.ref] === undefined) {
+        throw new Error("계약 파손: 계약 행 '" + row.verb + "'의 ref '" + simple.ref + "'가 definitions에 없다");
+      }
+    }
+  }
 }
 
 function main(): void {

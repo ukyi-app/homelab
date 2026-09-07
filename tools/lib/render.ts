@@ -47,6 +47,9 @@ export function renderStatus(envelope: Envelope): string[] {
         `앱: ${r.app.name}`,
         `배포 핀: tag ${r.app.tag ?? "(없음)"} · digest ${r.app.digest ?? "(없음)"}`,
         `autoDeploy: ${OX[String(r.app.autoDeploy)] ?? "미기록"} · source repo: ${r.app.sourceRepo ?? "(인레포)"} · 메모리 원장: ${r.app.ledgerMi !== undefined ? `limit ${r.app.ledgerMi}Mi` : "행 없음"}`,
+        // 배선(envFrom의 data-conn 핸들) — 부재는 '없음'으로 말한다: conn이 봉인·커밋돼도 앱이
+        // envFrom을 배선 안 하면 앱은 DB/캐시 없이 그대로 뜬다(#211 클래스).
+        `배선(data-conn): ${Array.isArray(r.app.conns) ? r.app.conns.join(" · ") : "없음"}`,
         r.runs.length === 0 ? "최근 run: 없음"
           : `최근 run: ${r.runs.map((x: Record<string, unknown>) => `${x.name}[${x.status}${x.conclusion ? `/${x.conclusion}` : ""}]`).join(" · ")}`,
         r.openPrs.length === 0 ? "열린 PR: 없음"
@@ -96,6 +99,10 @@ export function renderMutation(envelope: Envelope): string[] {
     }
   }
   if (r.dnsReclaim) lines.push(`DNS 회수: ${r.dnsReclaim} 소관(이 명령의 관측 대상 아님)`);
+  // 잔여는 '다른 소관'이 아니라 **미완 작업**이다 — 문구가 그 차이를 드러내야 반쯤 착지한 순간에
+  // 운영자가 "정리됐다"로 읽지 않는다(teardown-app 계약: DB/캐시 conn·CR·Valkey 절대 비접촉).
+  if (r.resourcesRetained) lines.push(`DB/캐시 잔여: 제거되지 않았다 — 별도 철거 필요(${r.resourcesRetained} — owner-local, attestation 필요)`);
+  if (r.dnsExposure) lines.push(`공개 노출: ${r.dnsExposure} 소관(이 명령의 관측 대상 아님)`);
   if (envelope.omitted.includes("live")) lines.push("라이브(ArgoCD) 수렴: 생략 — KUBECONFIG 미설정(머지까지만 확인)");
   if (r.pendingReason) lines.push(`대기: ${r.pendingReason}`);
   if (r.error) lines.push(`오류: ${r.error}`);

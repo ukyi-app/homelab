@@ -45,6 +45,10 @@ export type CacheCreateVerb = VerbShape<CacheCreateInput>;
 export type DbUrlVerb = VerbShape<DbUrlInput>;
 export type CacheUrlVerb = VerbShape<CacheUrlInput>;
 
+// 공개 노출 경계 부인문 — create 결과가 싣는 상수(결과 계약 dnsExposure enum과 같은 문자열).
+// 두 모드를 모두 담아 공개 앱에서도 내부 앱에서도 참이다(무조건 상수는 내부 앱에서 거짓이 된다).
+const DNS_EXPOSURE = "iac/tf-reconcile(공개) 또는 adguard rewrite(내부)";
+
 // app create — 수동 머지 변이(머지 = 공개 승인, auto-merge:false — _create-app.yaml).
 export type AppCreateInput = WaitInput & { app: string };
 export type AppCreateVerb = VerbShape<AppCreateInput>;
@@ -137,7 +141,10 @@ function appCreateOp(input: AppCreateInput): Envelope {
   const { variant, omitted, result } = runMutation({
     ...lane,
     dispatchInputs: [["app", input.app]],
-    resultBase: { action: lane.action, name: input.app },
+    // dnsExposure — 노출 경계 부인문. **모드-불가지**여야 한다: create 시점에는 앱 표면이 아직
+    // 없어 route.public을 읽을 수 없고, 무조건 "iac/tf-reconcile"로 쓰면 내부 전용 앱에서 거짓이
+    // 된다(내부 노출은 adguard rewrite 소관). 도달성 검사는 별개 스케줄(dns-drift)이다.
+    resultBase: { action: lane.action, name: input.app, dnsExposure: DNS_EXPOSURE },
     manualMerge: { approval: "공개 승인" }, // 머지 = 공개 승인 — auto-merge를 켜는 어떤 경로도 없다
   }, waitOpts(input));
   return { schema: ENVELOPE, verb: "app create", variant, exitCode: exitFor(variant), omitted, result };
@@ -159,7 +166,11 @@ function appTeardownOp(input: AppTeardownInput): Envelope {
     ...lane,
     // confirm은 디스패처의 confirm 입력으로 전달(서버 측 재검증은 _teardown-app.yaml이 기존대로).
     dispatchInputs: [["app", input.app], ["confirm", input.confirm]],
-    resultBase: { action: lane.action, name: input.app, dnsReclaim: "iac/tf-reconcile" },
+    // resourcesRetained — DB/캐시는 **제거되지 않았다**(teardown-app 계약: conn·CR·Valkey 절대
+    // 비접촉). dnsReclaim이 '다른 소관'을 말하는 것과 달리 이쪽은 **미완 작업**을 말한다: 잔여
+    // 정리는 owner-local `make teardown-resource`뿐이고 attestation을 요구한다. 후보 열거는 하지
+    // 않는다(이름≠앱 케이스에서 엉뚱한 리소스를 지목한다).
+    resultBase: { action: lane.action, name: input.app, dnsReclaim: "iac/tf-reconcile", resourcesRetained: "teardown-resource" },
     manualMerge: { approval: "파괴 승인" }, // 머지 = 파괴 승인 — auto-merge를 켜는 어떤 경로도 없다
     converge: "absence", // 종결 = Application 부재(Healthy 대기 아님)
   }, waitOpts(input));

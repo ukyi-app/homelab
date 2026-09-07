@@ -137,6 +137,18 @@ run_cache_create() {
   echo "$stderr" | grep -q "^SKIP: homelab cache url: "
   [ ! -f "$BATS_TEST_TMPDIR/skip.env.local" ]   # skip = 정말로 안 썼다
   [ "$(echo "$output" | jq -r '.variant')" = "skip" ]
+  # 실산출물 스키마 대조(티켓 25 (a)) — db 레인은 이미 있었고 cache 레인만 variant 단언뿐이었다.
+  echo "$output" > "$BATS_TEST_TMPDIR/cache-url-skip.json"
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const env = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    const errs = schemaErrors(env, sch, sch);
+    console.log(errs.length ? "INVALID: " + errs.join(" | ") : "valid");
+  ' "$BATS_TEST_TMPDIR/cache-url-skip.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^valid$"
 }
 
 @test "cache url is a catalog op: --json yields a schema-valid envelope with no plaintext value" {

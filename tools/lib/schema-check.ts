@@ -1,5 +1,8 @@
-// 계약 스키마 미니 검증기 — homelab CLI 결과 계약(cli-result-schema.json)의 골든 픽스처·계약
-// 테스트 전용 커널(ajv 무의존). 지원 키워드는 아래 KNOWN 화이트리스트가 SSOT이고, 스키마에
+// 계약 스키마 미니 검증기 — homelab CLI 결과 계약(cli-result-schema.json) 커널(ajv 무의존).
+// **테스트 전용이 아니다**: 골든 픽스처·계약 테스트와 함께 (1) MCP 입력 신뢰 경계(mcp.ts의
+// inputSchema 검증), (2) 정책 원장 항목 검증(policy-ledger), (3) 방출 직전 envelope 자기검증
+// (contract.ts assertEnvelope — CLI·MCP 양쪽 실전 경로)이 같은 커널을 쓴다.
+// 지원 키워드는 아래 KNOWN 화이트리스트가 SSOT이고, 스키마에
 // 지원 밖 키워드가 들어오면 **throw로 fail-closed**한다 — "검증기가 모르는 제약"이 조용히
 // 통과(vacuous green)하는 것을 막는다. (create-app.ts의 check()는 .app-config.yml 전용으로 별개
 // 유지 — 에러 문구·exit 정책이 그 콜사이트 소유이고, 지원 키워드 가드도 test_app-config.bats가
@@ -10,11 +13,17 @@ const KNOWN = new Set([
   "pattern", "minimum", "maximum", "items", "minItems", "uniqueItems", "minLength",
   "allOf", "oneOf", "not",
 ]);
-// 구조 제약 키워드 — 아래 walk에서 전부 `t === "…"` 분기 **안**에 있어 `type` 없이는 미평가다.
-const STRUCT = [
-  "properties", "required", "additionalProperties",
-  "pattern", "minLength", "minimum", "maximum", "items", "minItems", "uniqueItems",
-];
+// 키워드 → 적용 type 표(SSOT). 아래 walk에서 구조 제약은 전부 `t === "…"` 분기 **안**에 있어
+// (a) `type` 없이는 미평가이고 (b) 선언 type과 다른 키워드도 미평가다 — 둘 다 "아는 제약의
+// 미평가"라 fail-closed로 던진다. 로스터 2벌(열거·표)이 드리프트하지 않도록 STRUCT는 이 표에서
+// 파생한다. ⚠️ KNOWN에 평가 키워드를 더하면 이 표에도 한 줄을 함께 더한다.
+const APPLIES_TO: Record<string, readonly string[]> = {
+  properties: ["object"], required: ["object"], additionalProperties: ["object"],
+  pattern: ["string"], minLength: ["string"],
+  minimum: ["integer", "number"], maximum: ["integer", "number"],
+  items: ["array"], minItems: ["array"], uniqueItems: ["array"],
+};
+const STRUCT = Object.keys(APPLIES_TO);
 
 // val을 sch로 검증해 위반 목록을 돌려준다(빈 배열 = 유효). root는 $ref(#/definitions/*) 해석용
 // 루트 스키마 — 정의 자체를 sch로 넘겨 부분 검증할 때도 root는 항상 전체 스키마다.
@@ -31,6 +40,11 @@ export function schemaErrors(val: unknown, sch: unknown, root: unknown, path = "
     for (const k of Object.keys(s)) {
       if (!KNOWN.has(k)) throw new Error(`지원 밖 스키마 키워드 '${k}' (${p}) — schema-check.ts 화이트리스트와 함께 확장해야 검증이 유효하다`);
     }
+    // additionalProperties는 boolean만 지원한다(스키마 객체형은 아래 object 분기가 평가하지 않아
+    // 조용히 통과했다 — 실측). 필요해지면 그때 구현하고 여기 한 줄을 푼다.
+    if ("additionalProperties" in s && typeof s.additionalProperties !== "boolean") {
+      throw new Error(`additionalProperties는 boolean만 지원 (${p}) — 스키마 객체형은 평가되지 않는다(fail-closed)`);
+    }
     // KNOWN 화이트리스트가 막는 것은 '모르는 키워드'뿐이다. 두 번째 접힘 표면 — **아는 키워드가
     // `type` 부재로 평가되지 않는 것** — 은 같은 자리에서 fail-closed로 닫는다. `{required:[…]}`·
     // `{minLength:1}`은 JSON Schema로 유효한 표기라 작성 실수가 조용히 통과하면 vacuous green이다.
@@ -41,6 +55,16 @@ export function schemaErrors(val: unknown, sch: unknown, root: unknown, path = "
     if (s.type === undefined && !s.enum && STRUCT.some((k) => k in s)) {
       throw new Error(`type 없는 구조 스키마 (${p}) — 구조 제약은 type이 있어야 평가된다(fail-closed)`);
     }
+    // 같은 클래스의 두 번째 얼굴 — type **불일치**. `{type:"string", minimum:5}`·`{type:"array",
+    // required:[…]}`·`{type:"integer", pattern:"…"}`은 전부 유효한 JSON Schema 표기지만 이 커널의
+    // 분기 구조상 영원히 미평가라, 작성 실수가 vacuous green이 된다(실측 3케이스).
+    if (s.type !== undefined) {
+      for (const k of STRUCT) {
+        if (k in s && !APPLIES_TO[k]!.includes(String(s.type))) {
+          throw new Error(`type 불일치 제약 '${k}' (${p}) — type ${String(s.type)}에는 평가되지 않는 제약이다(fail-closed)`);
+        }
+      }
+    }
     // 결합 키워드 — verb→result·variant→exitCode 판별(allOf의 각 스키마는 전부, oneOf는 정확히 1개 분기).
     if (s.allOf) for (const branch of s.allOf) walk(v, branch, p);
     if (s.oneOf) {
@@ -49,10 +73,6 @@ export function schemaErrors(val: unknown, sch: unknown, root: unknown, path = "
     }
     if (s.not) {
       if (schemaErrors(v, s.not, root, p).length === 0) errs.push(`${p}: not 스키마에 일치(금지된 형상)`);
-    }
-    if (s.enum) {
-      if (!s.enum.some((e: any) => e === v)) errs.push(`${p}: ${JSON.stringify(v)}은 enum ${JSON.stringify(s.enum)} 밖`);
-      return;
     }
     const t = s.type;
     const is: Record<string, (x: any) => boolean> = {
@@ -63,6 +83,13 @@ export function schemaErrors(val: unknown, sch: unknown, root: unknown, path = "
       number: (x) => typeof x === "number",
       boolean: (x) => typeof x === "boolean",
     };
+    // enum은 값 자체를 판정하고 여기서 끝난다 — 다만 형제 `type`을 **단락시키지 않는다**
+    // (`{type:"integer", enum:["a"]}`에 "a"가 통과하던 자리 — 실측).
+    if (s.enum) {
+      if (t && !is[t]?.(v)) { errs.push(`${p}: ${t} 타입이어야 함`); return; }
+      if (!s.enum.some((e: any) => e === v)) errs.push(`${p}: ${JSON.stringify(v)}은 enum ${JSON.stringify(s.enum)} 밖`);
+      return;
+    }
     if (t && !is[t]?.(v)) { errs.push(`${p}: ${t} 타입이어야 함`); return; }
     if (t === "string") {
       // pattern 위반은 속성의 description(있으면)을 덧붙인다 — MCP -32602가 "왜 거부됐고 무엇을 줘야 하는지"를
