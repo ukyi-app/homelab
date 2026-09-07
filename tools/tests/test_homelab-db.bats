@@ -362,6 +362,79 @@ merged_pr_at_descendant() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "4" ]
 }
 
+# ── 머지 없이 닫힌 PR의 종결성(homelab-cli-r2 티켓 05) ──────────────────────────────────────
+# 머지 관측 루프가 merged_at만 보면 close(미머지)가 데드라인까지 '머지 대기'로 접힌다. state를 목록
+# 투영에 실어 종결 상태를 관측하되, 목록 인덱스는 단건 리소스보다 낡을 수 있으므로(함정 「GitHub
+# API는 낡은 스냅샷을 200으로 돌려준다」) 단건 권위 조회로 한 번 확증한 뒤에만 failure로 종결한다.
+
+pr_closed_unmerged() {
+  # 목록이 머지 없이 닫힌 PR을 보고하는 배치(확증 픽스처 기본값도 같은 결론).
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"closed"}]\n' > "$FIX/db-prs.json"
+}
+
+@test "the PR listing jq projection carries state (ledger argv pin — the stub never applies jq)" {
+  # 스텁은 픽스처를 그대로 cat하므로 투영 누락은 픽스처만으로 무증인이다 — argv를 정적으로 고정한다.
+  run_db_create --json
+  [ "$status" -eq 0 ]
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api \
+    "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" \
+    --jq "[.[] | {number, html_url, merged_at, merge_commit_sha, state}]"
+  [ "$status" -eq 0 ]
+}
+
+@test "wait: a PR closed without merge is a failure confirmed by exactly one authoritative read" {
+  pr_closed_unmerged
+  run_db_create --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  # 의도 추정 없는 관측 서술 — closed는 reopen 가능하므로 '거부'로 단정하지 않는다.
+  echo "$output" | jq -r '.result.error' | grep -q "머지 없이 닫혔다"
+  echo "$output" | jq -r '.result.error' | grep -q "state=closed, merged_at=null"
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "21" ]
+  [ "$(echo "$output" | jq -r '.result.pr.merged')" = "false" ]
+  # 데드라인까지 폴링하지 않았음의 증인 — pulls 조회는 목록 1 + 확증 1로 정확히 2회다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" --jq)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" dump "$CALLS" | grep -c "/pulls")" = "2" ]
+}
+
+@test "wait: a stale closed listing overruled by the authoritative read still converges to success" {
+  # 이 레인이 없으면 확증 단계 자체가 무증인이다 — 목록만 믿으면 여기서 거짓 failure가 난다.
+  pr_closed_unmerged
+  printf '{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":"2026-08-20T10:00:00Z","merge_commit_sha":"feedbee","state":"closed"}\n' > "$FIX/pr-confirm.json"
+  run_db_create --wait --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.pr.mergeSha')" = "feedbee" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" --jq)" = "1" ]
+}
+
+@test "wait: a transport error on the authoritative read leaves the closed observation undecided (pending)" {
+  pr_closed_unmerged
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_PR_CONFIRM_FAIL=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 200 --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "머지"
+  # 미확정은 종결이 아니다 — 확증 조회가 반복되며 데드라인까지 폴링했다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" --jq)" -ge 2 ]
+}
+
+@test "wait: a PR row with no state key never reaches the authoritative read (strict comparison)" {
+  # 기존 픽스처(state 키 부재 → undefined)는 === "closed"에 걸리지 않는다: 종전대로 데드라인 pending.
+  run_db_create --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" --jq)" = "0" ]
+  # 양성 대조(같은 @test 안) — 같은 조회 경로가 state:closed 픽스처에서는 실제로 1회 불린다.
+  : > "$CALLS"
+  pr_closed_unmerged
+  run_db_create --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" --jq)" = "1" ]
+}
+
 @test "db url rejects a newline-carrying --host as a usage error (exit 2, no envelope, no file) — engine predicate" {
   # 티켓 03 — bin(db-url)·MCP(db_url)와 같은 술어(dbUrlInputError). 개행 host는 .env.local 행 주입 표면이다.
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts db url t --host $'h\nX=1' --env-local "$BATS_TEST_TMPDIR/inj.env.local" --json

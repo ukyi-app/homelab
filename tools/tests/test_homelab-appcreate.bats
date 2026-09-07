@@ -116,6 +116,26 @@ run_app_create() {
   echo "$output" | grep -q "^ok:3$"
 }
 
+# ── 머지 없이 닫힌 PR의 종결성 · 수동 머지 레인(homelab-cli-r2 티켓 05) ─────────────────────
+# create-app에서 owner가 PR을 닫는 것은 설계된 승인 경계의 정당한 결말이다 — 그 결말이 20분
+# '사람 머지 대기' pending으로 위장되면 안 된다. 종결은 단건 권위 조회로 확증한 뒤에만.
+
+@test "wait: a PR closed without merge is terminal for the manual-merge verb too (approval as context)" {
+  printf '[{"number":51,"html_url":"https://github.com/ukyi-app/homelab/pull/51","merged_at":null,"merge_commit_sha":null,"state":"closed"}]\n' > "$FIX/db-prs.json"
+  printf '{"number":51,"html_url":"https://github.com/ukyi-app/homelab/pull/51","merged_at":null,"merge_commit_sha":null,"state":"closed"}\n' > "$FIX/pr-confirm.json"
+  run_app_create --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "머지 없이 닫혔다"
+  # 수동 머지 동사는 approval을 부가 문맥으로만 싣는다(관측 서술 + 무엇이 승인이었는지).
+  echo "$output" | jq -r '.result.error' | grep -q "공개 승인"
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "51" ]
+  # 확증은 단건 권위 조회 1회 — 데드라인까지 폴링하지 않았다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/51" --jq)" = "1" ]
+  # 종결 경로에서도 승인 경계는 그대로 — gh pr 계열 argv 0건.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh pr)" = "0" ]
+}
+
 # ── 멀티소스 리비전 해석(homelab-cli-r2 티켓 01) ────────────────────────────────────────────
 # 앱 Application은 멀티소스라 `status.sync.revision`이 비고 `revisions[]`만 있다 — 기본 픽스처(cli_stub.bash
 # argocd-app.json)가 그 형상이고, 위 수렴 @test 2건이 그 위에서 success다(수정 전에는 단수 필드만 읽어 pending).

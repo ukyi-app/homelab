@@ -3,7 +3,8 @@
 //   (정확히 1개만 채택: ≥2 = race fail-closed, 0 = 재조회 후 pending — 관측 차분은 신원
 //   메커니즘이 아니다, 스펙 run 특정 절) → run conclusion 추적(실패 시 실패 잡 열거 + run URL)
 //   → run_id 브랜치로 PR 특정(3상: found/empty/error — empty·error는 deadline 독립 grace 재조회 뒤 판정,
-//   noopForbidden이면 0건은 no-op이 아니라 fail-loud) → [--wait] 머지 관측(자동/수동 레인) → 명명된
+//   noopForbidden이면 0건은 no-op이 아니라 fail-loud) → [--wait] 머지 관측(자동/수동 레인 — 머지 없이
+//   닫힌 PR은 대기가 아니라 종결 관측이다: 단건 권위 조회로 확증한 뒤 failure) → 명명된
 //   Application 집합 전체 수렴.
 // 수렴 판정(스펙 대기 매트릭스): 관측 sync revision이 머지 SHA와 동일하거나 그 후손(gh compare —
 //   로컬 git 이력 무의존) AND Synced AND Healthy AND 관측 리비전에서 desired-state 표면 실존.
@@ -91,7 +92,11 @@ function newNonce(): string {
 }
 
 type RunRow = { id: number; name: string; status: string; conclusion: string | null; html_url: string };
-type PrRow = { number: number; html_url: string; merged_at: string | null; merge_commit_sha: string | null };
+// state — 머지 관측 루프의 종결 축(티켓 05). merged_at만 보면 close(미머지)가 데드라인까지 '머지 대기'로
+// 접힌다. 목록 투영에 실려 오지만 판정은 단건 권위 조회로 확증한 뒤에만 한다(아래 readPrOne).
+// 옵셔널인 이유: 이 필드를 모르는 픽스처·응답에서 undefined가 되고, 엄격 동등 비교라 무관 케이스를
+// 뒤집지 않는다(state 부재 = 미판정, closed로 오독하지 않는다).
+type PrRow = { number: number; html_url: string; merged_at: string | null; merge_commit_sha: string | null; state?: string };
 
 export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOutcome {
   const correlation = newNonce();
@@ -153,7 +158,12 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   const owner = HOMELAB_REPO.split("/")[0];
   const readPr = (): PrRow[] | null =>
     ghJson(`repos/${HOMELAB_REPO}/pulls?state=all&head=${owner}:${branch}`,
-      "[.[] | {number, html_url, merged_at, merge_commit_sha}]") as PrRow[] | null;
+      "[.[] | {number, html_url, merged_at, merge_commit_sha, state}]") as PrRow[] | null;
+  // 단건 권위 조회 — 목록 endpoint는 read-replica 인덱스라 단건 리소스보다 낡을 수 있다(함정
+  // 「GitHub API는 낡은 스냅샷을 200으로 돌려준다」). 종결(머지 없이 닫힘) 판정에만 쓴다. 실패는 null.
+  const readPrOne = (n: number): PrRow | null =>
+    ghJson(`repos/${HOMELAB_REPO}/pulls/${n}`,
+      "{number, html_url, merged_at, merge_commit_sha, state}") as PrRow | null;
   // 3상: found(≥1) / empty(0건) / error(null) — empty·error는 그 조회의 미확정이라 grace 재시도 뒤에만 판정.
   // 재시도는 endAt과 무관하다(PR_GRACE_RETRIES 주석) — 여기서 deadline을 보면 수정이 무효가 된다.
   let prs: PrRow[] | null = null;
@@ -186,6 +196,23 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   let mergeSha: string | undefined;
   if (pr !== undefined) {
     while (pr.merged_at === null) {
+      // 종결 관측: 머지 없이 닫힘. 목록 인덱스가 단건 리소스보다 낡을 수 있으므로 단건 권위 조회로
+      // 한 번 확증한 뒤에만 종결한다 — 전송 오류(null)면 미확정으로 두고 폴링을 계속한다(일시 실패
+      // 한 번이 종결이 되면 안 된다, 3상 관측의 같은 규약). 확증이 머지를 보고하면 그 값으로 진행하고,
+      // state가 open이면(reopen) 종결하지 않는다 — closed는 '거부'의 동의어가 아니다.
+      if (pr.state === "closed") {
+        const authoritative = readPrOne(pr.number);
+        if (authoritative !== null) {
+          pr = { ...pr, ...authoritative };
+          if (pr.merged_at !== null) break;
+          if (pr.state === "closed") {
+            // 의도 추정 없는 관측 서술 — 무엇이 승인이었는지는 동사가 알고(manualMerge), 부가 문맥으로만 싣는다.
+            const context = spec.manualMerge !== undefined ? ` · 이 동사의 머지가 곧 ${spec.manualMerge.approval}이었다` : "";
+            return fail(`PR #${pr.number}이 머지 없이 닫혔다(state=closed, merged_at=null) — 변이 미반영(단건 권위 조회로 확증)${context}`,
+              { run: runRef(), pr: prRef() });
+          }
+        }
+      }
       if (Date.now() >= endAt) {
         return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: spec.manualMerge !== undefined ? `사람 머지 대기 — 머지가 곧 ${spec.manualMerge.approval}(PR 검토·머지 후 핸들로 재조회)` : "auto-merge 머지 미관측 — required check 대기 중일 수 있다(핸들로 재조회 가능)" }) };
       }

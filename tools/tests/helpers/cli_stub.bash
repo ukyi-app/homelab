@@ -40,6 +40,9 @@ cli_stub_init() {
   printf '{"status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run.json"
   printf '[]\n' > "$FIX/db-run-jobs.json"
   printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
+  # PR 단건 권위 조회(티켓 05) — 목록이 state:closed·미머지일 때만 읽힌다(확증 단계). 기본은 목록과
+  # 같은 결론(closed·미머지)이고, stale 레인은 테스트가 merged_at을 채운 사본으로 덮어쓴다.
+  printf '{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"closed"}\n' > "$FIX/pr-confirm.json"
   printf 'identical\n' > "$FIX/db-compare.txt"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
@@ -128,7 +131,7 @@ PY
 # 임의 owner/repo URL을 정당한 입력으로 받는 계약이라(좁히면 계약을 거짓으로 검증) 의도적 비대칭.
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
-# STUB_GH_HANDLE_404. 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
+# STUB_GH_HANDLE_404 / STUB_PR_CONFIRM_FAIL. 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
 make_gh_stub() {
   cat > "$STUB/gh" <<'SH'
 #!/usr/bin/env bash
@@ -232,6 +235,13 @@ case "$*" in
       : > "$FIX/.pr-fail-once"; echo "gh: connect: connection reset" >&2; exit 1
     fi
     cat "$FIX/db-prs.json"
+    ;;
+  # PR 단건 권위 조회(티켓 05) — 머지 없이 닫힌 목록 행의 확증 단계. status의 핸들 조회와 같은
+  # 경로 형상이라 **jq 투영으로 구별**한다(status는 {number, state, merged, …}). STUB_PR_CONFIRM_FAIL이면
+  # 전송 오류 — 확증이 미확정이면 엔진은 종결하지 않고 폴링을 계속한다.
+  "api repos/ukyi-app/homelab/pulls/"*" --jq {number, html_url, merged_at, merge_commit_sha, state}")
+    if [ -n "${STUB_PR_CONFIRM_FAIL:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
+    cat "$FIX/pr-confirm.json"
     ;;
   "api repos/ukyi-app/homelab/compare/"*" --jq .status")
     # STUB_COMPARE_FLAKY: 첫 호출만 전송 오류 — 미확정 관측을 캐시하지 않음(재평가 수렴)을 증명.
