@@ -81,11 +81,13 @@ const MIN_SCAN = 18;
 // — ci-parity가 gate 스텝·`make -n ci` 양쪽에서 그것을 강제한다).
 const MIN_SUBSTRATE_SCAN = 1;
 // F2 커버리지 파생 붕괴 바닥값. 2026-09-04 실측 6 ns(cache·database·edge·files·homepage·
-// observability). 0이면 등호 대조가 vacuous해진다(모든 namespace가 "제외"로 파생돼 아무것도
-// 안 재고도 초록) — 티켓 26이 substrate에 세운 것과 같은 판정(MIN_SUBSTRATE_SCAN 주석 참조).
+// observability) → 2026-09-08 5 ns: cache:trip-mate purge로 `cache` ns의 상주 워크로드가 0이 돼 커버리지
+// 집합에서 빠졌다(캐시 인스턴스는 provision-cache 산출물이라 다음 `homelab cache create`가 되돌린다 —
+// 그때 이 바닥값도 6으로 되돌릴 것). 0이면 등호 대조가 vacuous해진다(모든 namespace가 "제외"로 파생돼
+// 아무것도 안 재고도 초록) — 티켓 26이 substrate에 세운 것과 같은 판정(MIN_SUBSTRATE_SCAN 주석 참조).
 // 픽스처는 helm 생성기 마커로 자기 namespace를 제외 처리해 커버리지 0을 만들고
 // `--floor check-resource-limits:ledger=0`으로 명시한다(다른 도메인과 같은 관례).
-const MIN_LEDGER_SCAN = 6;
+const MIN_LEDGER_SCAN = 5;
 const ALLOW = "policy/memory-limit-allowlist.txt";
 const LEDGER = "docs/memory-ledger.md";
 // 원장 대조 위반의 접두 — report가 실패 클래스를 갈라 보고하는 키다(같은 목록에 섞이면

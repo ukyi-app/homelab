@@ -35,10 +35,13 @@ if ! command -v yq >/dev/null 2>&1; then
   exit 2
 fi
 
-# 바닥값 기본값 — 콜사이트 소유(커널은 수치를 모른다). 실측 2026-09-03: 추적 19파일 · 키 27개.
+# 바닥값 기본값 — 콜사이트 소유(커널은 수치를 모른다). 실측 2026-09-03: 추적 19파일 · 키 27개 →
+# 2026-09-08 purge(page·trip-mate DB + trip-mate cache) 뒤 8파일 · 9키: 빠진 11파일·18키는 전부
+# create-database/create-cache 산출물(owner/ro 비번 · conn · ACL)이라 다음 `homelab db|cache create`가
+# 되돌린다 — 그때 이 두 값을 다시 올릴 것(그린필드 상태의 상주 봉인본만으로 잰 값이다).
 # 래칫이 아니다: 정당한 축소를 red로 만들지 않을 만큼 낮게, 붕괴(→0)는 반드시 잡을 만큼 높게.
-FILE_FLOOR=12
-KEY_FLOOR=18
+FILE_FLOOR=5
+KEY_FLOOR=6
 
 # 스코프 1비트 — 인자 모드(pre-commit·픽스처)인가, 자기 도메인을 스스로 여는 기본 모드인가.
 # ⚠️ 기본 모드는 아래에서 `set -- $tracked`로 argv를 채우므로 **그 뒤의 `$#`로는 두 모드를 못 가른다**.
