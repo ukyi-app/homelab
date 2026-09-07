@@ -55,6 +55,13 @@ f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
     grep -q '^kind: Database$' "$y" || continue
     name=$(sed -n 's/^  name: \(.*\)$/\1/p' "$y" | head -1)
     [ -n "$name" ]
+    # `ensure: absent`는 purge 상태머신(teardown-resource --step drop)이 DROP한 DB다 — 실체 없는 DB가
+    # DBS에 남으면 pg_dump가 그 이름에서 실패하고 `set -euo pipefail` 아래 잡 전체가 죽어 뒤에 선 DB의
+    # 덤프까지 잃는다. 그래서 부재 CR은 포함이 아니라 **부재**를 요구한다(양방향 정합).
+    if grep -q '^  ensure: absent' "$y"; then
+      case " $dbs " in *" $name "*) echo "absent DB still in DBS: $name ($y)"; return 1;; esac
+      continue
+    fi
     case " $dbs " in *" $name "*) ;; *) echo "missing: $name ($y)"; return 1;; esac
   done
 }
