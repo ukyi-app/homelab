@@ -92,6 +92,10 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   pendingReason)을 실어 돌려준다. 종료코드가 1인 것은 '완료 확인 못함'이지 실패가 아니다
   (x-contract.exitCodes). 재개 경로는 재실행이 아니라 **핸들 재조회**다:
   `homelab status --run <run URL>` 또는 `--pr <PR URL>`.
+  **진행 표시**: 변이 동사는 단계 전이(디스패치 접수·run 식별·run 완료·PR 특정·머지 관측)마다
+  `진행: …` 한 줄을 **stderr**에 즉시 낸다 — correlation·run URL·PR URL·merge SHA가 봉투보다
+  **먼저** 나오므로 ^C·타임아웃 킬로 중단돼도 재조회 핸들이 남는다. stdout 순수성은 불변이고
+  (--json이면 stdout은 봉투 하나) MCP는 이 싱크를 주입하지 않는다(JSON-RPC 스트림 무오염).
   **재시도 정책**: seam(`lib/exec.ts`)은 재시도하지 않는다 — 재시도는 콜사이트 정책이고 **변이
   argv(`gh workflow run`)는 어떤 층에서도 재시도하지 않는다**(타임아웃은 '실패'가 아니라 '결과
   미상'이라 재시도가 곧 두 개의 run이다). 변이 엔진의 폴링 루프·PR 목록 grace 재조회는 부수효과
@@ -330,8 +334,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,
   health 단독 판정 금지, 후손 리비전 표면 부재=superseded). 세 폴링 루프(run 특정·conclusion·머지)는
   지속되는 GitHub 계층 조회 실패를 pendingReason 접미로 지목한다(문구 SSOT는 엔진 헬퍼 하나 —
-  필드 신설 금지: pending 계열은 additionalProperties:false다). 시간 심 pollMs/deadlineMs +
-  HOMELAB_CORRELATION 주입(테스트). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
+  필드 신설 금지: pending 계열은 additionalProperties:false다). 단계 전이마다 **진행 이벤트**를
+  낸다(`MutationOpts.onProgress` — dispatched/identified/concluded/pr/merged): 엔진은 이벤트만 내고
+  문구·싱크는 CLI 셸(homelab.ts)이 소유하며 MCP는 주입하지 않는다(stdio 무오염). 시간 심
+  pollMs/deadlineMs + HOMELAB_CORRELATION 주입(테스트). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
 - **`lib/argocd.ts`** — ArgoCD Application status 리더(`syncRevisionOf()`·`revisionFields()`) — 변이 엔진
   (수렴 판정)과 status 엔진(라이브 표시)이 공유하는 리비전 해석. 앱 레인 `<app>-prod`는 appset sources 3개의
   멀티소스라 컨트롤러가 `sync.revision`을 비우고 `sync.revisions[]`만 채운다(라이브 실측) — 단수 필드만 읽던

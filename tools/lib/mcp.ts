@@ -44,6 +44,10 @@ type Json = Record<string, unknown>;
 const MCP_DEADLINE_MS = Number(process.env.HOMELAB_MCP_DEADLINE_MS ?? "30000");
 const MCP_POLL_MS = Number(process.env.HOMELAB_MCP_POLL_MS ?? "2000");
 // 변이 tool 공통 대기 입력 — 짧은 식별 deadline + identifyOnly.
+// ⚠️ `onProgress`(변이 엔진의 진행 이벤트 싱크, 티켓 07)는 **의도적으로 없다** — 이 서버의 stdout은
+// JSON-RPC 프레임 전용이고, 진행 줄은 CLI 셸(homelab.ts)이 stderr에 내는 표현이다. 여기에 싱크를
+// 주입하면 그 줄이 어디로 가든 프레이밍 계약이 표현 결정에 의존하게 된다(test_homelab-mcp.bats가
+// stdout 전 줄의 JSON-RPC 적합을 단언한다).
 const MCP_MUT = { wait: false, identifyOnly: true, deadlineMs: MCP_DEADLINE_MS, pollMs: MCP_POLL_MS } as const;
 
 // tool 호출 결과 — 계약 envelope(전 동사, url 포함) 또는 usage 오류(invalid params -32602).

@@ -13,7 +13,7 @@ import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInpu
 import { ENVELOPE, USAGE_EXIT, type Envelope } from "./lib/contract.ts";
 import { git } from "./lib/exec.ts";
 import { APP_NAME_RE } from "./lib/identity.ts";
-import { WAIT_DEFAULTS } from "./lib/mutation.ts";
+import { WAIT_DEFAULTS, type ProgressEvent } from "./lib/mutation.ts";
 import type { TypedFlags } from "./lib/cli.ts";
 import { APP_CREATE, APP_INIT, APP_SECRETS, APP_TEARDOWN, CACHE_CREATE, CACHE_URL, DB_CREATE, DB_URL, DOCTOR, STATUS, VERBS, appCreateInputError, appTeardownInputError, cacheCreateInputError, dbCreateInputError, type AppCreateInput, type AppTeardownInput, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./lib/secrets.ts";
@@ -148,6 +148,23 @@ const WAIT_FLAG_LINES = [
   "",
 ];
 
+// 진행 표시(티켓 07) — 변이 엔진이 낸 단계 전이 이벤트를 사람용 한 줄로 옮겨 **stderr**에 즉시 쓴다.
+// 계약(x-contract.stdout) "사람용 텍스트·진행 표시는 전부 stderr"의 실행형이라 --json이든 아니든
+// stdout은 건드리지 않는다: --json이면 stdout은 envelope 하나뿐이고, 사람 모드에서도 진행 줄은
+// '결과'가 아니라 관측이다(골든 생성 줄이 `2>/dev/null`이라 생성물도 무영향).
+// 문구가 셸에 있는 이유: 엔진은 표현을 모른다(op는 Envelope만 반환) — 그래서 MCP는 이 sink를
+// 주입하지 않고, 같은 엔진 호출이 stdio JSON-RPC 스트림을 오염시키지 않는다.
+const PROGRESS_LINE: Record<ProgressEvent["stage"], (e: ProgressEvent) => string> = {
+  dispatched: (e) => `진행: 디스패치 접수 — correlation ${e.correlation}`,
+  identified: (e) => `진행: run 식별 — ${e.runUrl}`,
+  concluded: (e) => `진행: run 완료 — ${e.runUrl}`,
+  pr: (e) => `진행: PR 특정 — ${e.prUrl}`,
+  merged: (e) => `진행: 머지 관측 — merge SHA ${e.sha}`,
+};
+function progressSink(e: ProgressEvent): void {
+  process.stderr.write(PROGRESS_LINE[e.stage](e) + "\n");
+}
+
 function statusUsage(): string {
   return [
     "사용법: homelab status [<app>] [--run <url> | --pr <url>] [--json]",
@@ -206,7 +223,7 @@ function appCreateCli(rest: string[]): VerbOutput {
   const p = positionalThenFlags(rest, { value: [], num: ["--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab app create", appCreateUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: appCreateUsage() };
-  const input: AppCreateInput = { app: p.positional ?? "", wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms") };
+  const input: AppCreateInput = { app: p.positional ?? "", wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms"), onProgress: progressSink };
   const bad = appCreateInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab app create: ${bad}`, usage: appCreateUsage() };
   const envelope = APP_CREATE.op(input);
@@ -232,7 +249,7 @@ function appSecretsCli(rest: string[]): VerbOutput {
   const p = positionalThenFlags(rest, { value: [], num: ["--poll-ms", "--deadline-ms"], bool: ["--wait", "--no-seal", "--json", "--help"] }, "homelab app secrets", appSecretsUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: appSecretsUsage() };
-  const input: AppSecretsInput = { app: p.positional ?? "", wait: p.flags.bool("--wait"), noSeal: p.flags.bool("--no-seal"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms") };
+  const input: AppSecretsInput = { app: p.positional ?? "", wait: p.flags.bool("--wait"), noSeal: p.flags.bool("--no-seal"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms"), onProgress: progressSink };
   const bad = appSecretsInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab app secrets: ${bad}`, usage: appSecretsUsage() };
   const envelope = APP_SECRETS.op(input);
@@ -280,7 +297,7 @@ function appTeardownCli(rest: string[]): VerbOutput {
   if (confirm !== app) {
     return { kind: "usage-error", message: `homelab app teardown: 파괴 확인 실패 — '${app}' 재입력이 일치하지 않는다(입력: ${confirm ?? "(없음 — 비-TTY에는 --confirm 필수)"})`, usage: appTeardownUsage() };
   }
-  const input: AppTeardownInput = { app, confirm, wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms") };
+  const input: AppTeardownInput = { app, confirm, wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms"), onProgress: progressSink };
   const bad = appTeardownInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab app teardown: ${bad}`, usage: appTeardownUsage() };
   const envelope = APP_TEARDOWN.op(input);
@@ -339,7 +356,7 @@ function cacheCreateCli(rest: string[]): VerbOutput {
   const p = positionalThenFlags(rest, { value: [], num: ["--maxmemory-mi", "--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab cache create", cacheCreateUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: cacheCreateUsage() };
-  const input: CacheCreateInput = { name: p.positional ?? "", maxmemoryMi: numFlag(p.flags, "--maxmemory-mi"), wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms") };
+  const input: CacheCreateInput = { name: p.positional ?? "", maxmemoryMi: numFlag(p.flags, "--maxmemory-mi"), wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms"), onProgress: progressSink };
   const bad = cacheCreateInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab cache create: ${bad}`, usage: cacheCreateUsage() };
   const envelope = CACHE_CREATE.op(input);
@@ -385,6 +402,7 @@ function dbCreateCli(rest: string[]): VerbOutput {
     wait: p.flags.bool("--wait"),
     pollMs: numFlag(p.flags, "--poll-ms"),
     deadlineMs: numFlag(p.flags, "--deadline-ms"),
+    onProgress: progressSink,
   };
   const bad = dbCreateInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab db create: ${bad}`, usage: dbCreateUsage() };

@@ -549,3 +549,32 @@ mcp_rpc_in() {
   # 양성 대조(검출기 생존) — 어긋난 값은 같은 grep에서 0건이다.
   [ "$(grep -c "WAIT_DEFAULTS.deadlineMs = $((mins + 1))분" tools/lib/mcp.ts)" = "0" ]
 }
+
+# ── 진행 표시 심의 MCP 무주입(homelab-cli-r2 티켓 07) ─────────────────────────────────────
+
+@test "a mutation tool call leaks no progress line into the JSON-RPC stream (server injects no sink)" {
+  # 변이 엔진은 진행 이벤트를 내지만 sink 주입은 CLI 셸 전용이다 — MCP는 미주입이라 stdout이
+  # JSON-RPC 오브젝트만 남는다(stdio 프레이밍 오염 0). 줄 단위로 전수 판정한다.
+  mcp_rpc '{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"db_create","arguments":{"name":"mydb"}}}'
+  [ "$status" -eq 0 ]
+  n=0
+  bad=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    n=$((n + 1))
+    printf '%s\n' "$line" | jq -e 'type == "object" and .jsonrpc == "2.0"' > /dev/null 2>&1 || bad=$((bad + 1))
+  done <<EOF
+$output
+EOF
+  [ "$n" -ge 1 ]   # 열거 바닥값 — 0줄이면 "비-JSON 0건"이 공허하다
+  [ "$bad" -eq 0 ]
+  # 같은 판정 루프의 양성 대조 — CLI가 내는 진행 줄 모양은 이 루프에서 실제로 bad로 센다.
+  ctrl=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    printf '%s\n' "$line" | jq -e 'type == "object" and .jsonrpc == "2.0"' > /dev/null 2>&1 || ctrl=$((ctrl + 1))
+  done <<EOF
+진행: run 식별 — https://github.com/ukyi-app/homelab/actions/runs/501
+EOF
+  [ "$ctrl" -eq 1 ]
+}

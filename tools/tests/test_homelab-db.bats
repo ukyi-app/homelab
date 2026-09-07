@@ -648,3 +648,77 @@ pr_closed_unmerged() {
   [ "$status" -eq 0 ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" -ge 1 ]
 }
+
+# ── 티켓 07: 대기 구간의 진행 표시(핸들 조기 방출) ────────────────────────────────────
+# 엔진은 이벤트만 낸다(MutationOpts.onProgress) — 문구·싱크는 CLI 셸 소유이고 MCP는 미주입이다.
+# 계약(x-contract.stdout)의 "사람용 텍스트·진행 표시는 전부 stderr"가 여기서 실행형이 된다.
+
+@test "progress lines put the correlation and the run URL on stderr BEFORE the envelope lands" {
+  # 순서 단언 — 두 스트림을 한 파일로 합쳐 **쓰기 순서**를 잰다(파일 대상 write는 동기라 순서 보존).
+  # 뒤에 나오면 아무것도 고치지 않은 것이다: 그 시점엔 봉투가 이미 같은 핸들을 담고 있다.
+  # ⚠️ 사람용 보고(op 반환 **뒤**)도 correlation·run URL을 담으므로, 단순 문자열 검색으로 순서를
+  #    재면 고치기 전에도 초록이다 — 진행 줄 자체(^진행: )를 앵커로 잡아야 '조기 방출'이 관측된다.
+  OUT="$BATS_TEST_TMPDIR/merged.txt"
+  env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json > "$OUT" 2>&1
+  corr="$(grep -n "^진행: 디스패치 접수 — correlation ${NONCE}\$" "$OUT" | head -1 | cut -d: -f1)"
+  runline="$(grep -n "^진행: run 식별 — https://github.com/ukyi-app/homelab/actions/runs/501\$" "$OUT" | head -1 | cut -d: -f1)"
+  report="$(grep -n "^run: https://github.com/ukyi-app/homelab/actions/runs/501" "$OUT" | head -1 | cut -d: -f1)"
+  envline="$(grep -n '"schema": "homelab-cli/1"' "$OUT" | head -1 | cut -d: -f1)"
+  [ -n "$corr" ]
+  [ -n "$runline" ]
+  [ -n "$report" ]
+  [ -n "$envline" ]
+  [ "$corr" -lt "$runline" ]
+  # op 반환 뒤에 나오는 두 출력(사람용 보고·봉투)보다 앞선다 = 대기 중에 이미 방출됐다.
+  [ "$runline" -lt "$report" ]
+  [ "$runline" -lt "$envline" ]
+}
+
+@test "with --json the progress lines go to stderr only and stdout stays exactly one envelope" {
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -s 'length')" = "1" ]
+  # 부정 단언(stdout 0건) + 같은 @test 안 양성 대조(stderr에는 실재).
+  [ "$(printf '%s\n' "$output" | grep -c '^진행: ')" = "0" ]
+  [ "$(printf '%s\n' "$stderr" | grep -c '^진행: ')" -ge 3 ]
+  printf '%s\n' "$stderr" | grep -q "^진행: 디스패치 접수 — correlation ${NONCE}\$"
+  printf '%s\n' "$stderr" | grep -q "^진행: run 식별 — https://github.com/ukyi-app/homelab/actions/runs/501\$"
+  printf '%s\n' "$stderr" | grep -q "^진행: PR 특정 — https://github.com/ukyi-app/homelab/pull/21\$"
+}
+
+@test "wait: a pending envelope already had the run and PR handles on stderr before the deadline" {
+  # pending 골든과 같은 경로(--deadline-ms 400 --wait)를 --separate-stderr로 한 벌 더 돌린다:
+  # 봉투가 pending인데도 핸들은 이미 방출돼 있다(중단·킬에도 재조회 좌표가 남는다).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 400 --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  printf '%s\n' "$stderr" | grep -q "^진행: run 식별 — https://github.com/ukyi-app/homelab/actions/runs/501\$"
+  printf '%s\n' "$stderr" | grep -q "^진행: PR 특정 — https://github.com/ukyi-app/homelab/pull/21\$"
+}
+
+@test "wait: the merge observation emits the merge SHA as its own progress line" {
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":"2026-08-20T10:00:00Z","merge_commit_sha":"feedbee"}]\n' > "$FIX/db-prs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --wait --json
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$stderr" | grep -q "^진행: 머지 관측 — merge SHA feedbee\$"
+  # 같은 @test 안 대조군 — 미머지 레인에서는 그 줄이 나오지 않는다(부정 단언의 양성 짝).
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 200 --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(printf '%s\n' "$stderr" | grep -c '^진행: 머지 관측')" = "0" ]
+}
+
+@test "in human mode the progress lines stay on stderr and never mix into the stdout report" {
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^진행: ')" = "0" ]
+  [ "$(printf '%s\n' "$stderr" | grep -c '^진행: ')" -ge 3 ]
+  # 양성 대조 — 사람용 보고는 여전히 stdout이다(진행 줄만 갈라진 것이지 보고가 사라진 게 아니다).
+  printf '%s\n' "$output" | grep -q "^결과: success\$"
+}

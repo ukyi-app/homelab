@@ -17,6 +17,7 @@
 //   그 사이클 미확정이다(일시 실패 한 번이 exit 3 종결이 되면 안 된다).
 //   absence 수렴(teardown)의 표면 축은 두 ref를 본다 — 머지 SHA에서 부재 AND 철거 전 ref(first
 //   parent)에서 실재. 부재 한 축만 보면 404의 모든 사유가 "철거 완료"와 같은 값이 된다.
+// 진행 표시: 단계 전이마다 이벤트만 낸다(MutationOpts.onProgress — 문구·싱크는 셸 소유, MCP 미주입).
 // KUBECONFIG 부재: 머지까지 확인하고 라이브 구간은 omitted=["live"]로 명시(생략 ≠ 성공 은폐).
 // 시간 심: pollMs·deadlineMs 주입(테스트가 밀리초로 돌린다), nonce는 HOMELAB_CORRELATION 주입.
 import { randomBytes } from "node:crypto";
@@ -64,7 +65,18 @@ export type MutationSpec = {
 // 테스트가 정확 count(1 + 3)로 이 상수를 핀한다(test_homelab-db.bats·test_homelab-secrets.bats).
 export const PR_GRACE_RETRIES = 3;
 
-export type MutationOpts = { wait: boolean; pollMs: number; deadlineMs: number; identifyOnly: boolean };
+// 진행 이벤트(티켓 07) — 엔진은 **이벤트만** 낸다. 문구·싱크는 셸(homelab.ts)이 소유하고 MCP는
+// 주입하지 않는다(stdio JSON-RPC 스트림 무오염). op가 Envelope만 반환한다는 원칙은 그대로다:
+// 이벤트는 결과가 아니라 **진행 관측**이고 결과 계약(cli-result-schema.json)에 아무것도 더하지 않는다.
+// 왜 필요한가: --wait는 최대 deadline 동안 Bun.sleepSync로 동기 블로킹인데 그 사이 stderr가 0줄이라,
+// ^C·타임아웃 킬로 죽으면 correlation·run URL·PR URL이 어디에도 남지 않는다(재조회 핸들 유실).
+// 왜 엔진이 직접 stderr에 쓰지 않는가: 계약 경계(표현은 셸 소유)가 흐려지고 hermetic bats의 argv
+// 원장 표면이 탁해진다 — 주입 심이라야 MCP에서 "쓰지 않음"이 기본값으로 성립한다.
+// ⚠️ 방출은 **단계 전이**에만 건다(폴링 하트비트는 별건). 그래서 사이클당 줄이 늘지 않는다.
+export type ProgressStage = "dispatched" | "identified" | "concluded" | "pr" | "merged";
+export type ProgressEvent = { stage: ProgressStage; correlation: string; runUrl?: string; prUrl?: string; sha?: string };
+
+export type MutationOpts = { wait: boolean; pollMs: number; deadlineMs: number; identifyOnly: boolean; onProgress?: (e: ProgressEvent) => void };
 
 // 대기 옵션 SSOT — 기본값과 검증 술어를 변이 동사 전부가 공유한다(콜사이트 인라인 사본 금지).
 //
@@ -88,14 +100,15 @@ export const WAIT_DEFAULTS = { pollMs: 5_000, deadlineMs: 1_200_000 } as const;
 // MCP 전용(release r1 a2=b3) — stdio 서버는 단일 스레드라 conclusion 폴링이 서버를 주어진 deadline
 // (기본값을 물려받으면 WAIT_DEFAULTS.deadlineMs)만큼 블로킹한다.
 // 스펙의 "결과의 run URL이 상관 핸들, 진행 확인은 status 핸들 조회로"를 실행형으로 만든다. CLI는 미설정.
-export type WaitInput = { wait?: boolean; pollMs?: number; deadlineMs?: number; identifyOnly?: boolean };
+// onProgress: 진행 이벤트 싱크(위 ProgressEvent 주석) — CLI 셸만 주입하고 MCP는 미설정이다.
+export type WaitInput = { wait?: boolean; pollMs?: number; deadlineMs?: number; identifyOnly?: boolean; onProgress?: (e: ProgressEvent) => void };
 export function waitInputError(input: WaitInput): string | null {
   if (input.pollMs !== undefined && !(Number.isInteger(input.pollMs) && input.pollMs > 0)) return `--poll-ms는 양의 정수여야 한다: ${input.pollMs}`;
   if (input.deadlineMs !== undefined && !(Number.isInteger(input.deadlineMs) && input.deadlineMs > 0)) return `--deadline-ms는 양의 정수여야 한다: ${input.deadlineMs}`;
   return null;
 }
 export function waitOpts(input: WaitInput): MutationOpts {
-  return { wait: input.wait === true, pollMs: input.pollMs ?? WAIT_DEFAULTS.pollMs, deadlineMs: input.deadlineMs ?? WAIT_DEFAULTS.deadlineMs, identifyOnly: input.identifyOnly === true };
+  return { wait: input.wait === true, pollMs: input.pollMs ?? WAIT_DEFAULTS.pollMs, deadlineMs: input.deadlineMs ?? WAIT_DEFAULTS.deadlineMs, identifyOnly: input.identifyOnly === true, onProgress: input.onProgress };
 }
 export type MutationOutcome = { variant: string; omitted: string[]; result: Record<string, unknown> };
 
@@ -137,6 +150,10 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   const endAt = Date.now() + opts.deadlineMs;
   const fail = (error: string, extra: Record<string, unknown> = {}): MutationOutcome =>
     ({ variant: "failure", omitted: [], result: compact({ ...base, ...extra, error }) });
+  // 진행 이벤트 방출(티켓 07) — 싱크 미주입이면 no-op이다(MCP·라이브러리 소비자).
+  const emit = (stage: ProgressStage, handles: { runUrl?: string; prUrl?: string; sha?: string } = {}): void => {
+    opts.onProgress?.({ stage, correlation, ...handles });
+  };
 
   // 1) 디스패치 — 유일한 변이 argv. correlation이 run-name에 에코된다(수령증).
   const dispatchArgs = ["workflow", "run", spec.workflow, "-R", HOMELAB_REPO];
@@ -144,6 +161,8 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   dispatchArgs.push("-f", `correlation=${correlation}`);
   const dispatched = sh("gh", dispatchArgs);
   if (!dispatched.ok) return fail(`디스패치 실패 — ${dispatched.err.split("\n")[0] || "gh workflow run 비-0"}`);
+  // correlation은 여기서부터 유효한 좌표다 — run이 아직 없어도 Actions에서 이 에코를 찾을 수 있다.
+  emit("dispatched");
 
   // 2) 자기 run 특정 — run-name의 [nonce] 에코가 권위. 정확히 1개일 때만 채택.
   let run: RunRow | undefined;
@@ -165,6 +184,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     Bun.sleepSync(opts.pollMs);
   }
   const runRef = () => compact({ id: run!.id, url: run!.html_url, conclusion: run!.conclusion ?? undefined });
+  emit("identified", { runUrl: run.html_url });
 
   // 2b) identifyOnly(MCP) — run을 식별했으면 conclusion 추적 없이 run 핸들을 pending으로 즉시 반환한다.
   // stdio 서버가 GitHub Actions run 완료(최대 deadline)까지 블로킹하지 않게 한다 — 진행은 status(run URL)
@@ -184,6 +204,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     concludeWatch.observe(got);
     if (got.kind === "ok") run = { ...run, ...(got.value as Partial<RunRow>) };
   }
+  emit("concluded", { runUrl: run.html_url });
   if (run.conclusion !== "success") {
     const jobs = ghJson(`repos/${HOMELAB_REPO}/actions/runs/${run.id}/jobs`,
       '[.jobs[] | select(.conclusion == "failure") | .name]');
@@ -225,6 +246,8 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   const prRef = () => (pr === undefined ? undefined
     : compact({ number: pr.number, url: pr.html_url, merged: pr.merged_at !== null, mergeSha: pr.merge_commit_sha ?? undefined }));
   const doneVariant = noop ? "no-op" : "success";
+  // no-op(PR 없음)에는 방출할 PR 핸들이 없다 — 없는 좌표를 지어내지 않는다.
+  if (pr !== undefined) emit("pr", { runUrl: run.html_url, prUrl: pr.html_url });
 
   if (!opts.wait) {
     return { variant: doneVariant, omitted: [], result: compact({ ...base, waited: false, run: runRef(), pr: prRef() }) };
@@ -272,6 +295,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     }
     mergeSha = pr.merge_commit_sha ?? undefined;
     if (!mergeSha) return fail("머지는 관측됐으나 merge SHA가 비어 있다 — GitHub 응답 이상", { run: runRef(), pr: prRef() });
+    emit("merged", { runUrl: run.html_url, prUrl: pr.html_url, sha: mergeSha });
   }
   // 요청값의 기준 ref — 머지 SHA(변이) 또는 main(no-op: 디스패처가 비교한 기준).
   const wantRef: string = mergeSha ?? "main";
