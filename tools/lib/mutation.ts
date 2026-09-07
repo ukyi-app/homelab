@@ -2,7 +2,9 @@
 //   correlation nonce 생성 → 디스패치(gh workflow run) → nonce 에코 run-name으로 자기 run 특정
 //   (정확히 1개만 채택: ≥2 = race fail-closed, 0 = 재조회 후 pending — 관측 차분은 신원
 //   메커니즘이 아니다, 스펙 run 특정 절) → run conclusion 추적(실패 시 실패 잡 열거 + run URL)
-//   → run_id 브랜치로 PR 특정 → [--wait] 머지 관측(자동/수동 레인) → 명명된 Application 집합 전체 수렴.
+//   → run_id 브랜치로 PR 특정(3상: found/empty/error — empty·error는 deadline 독립 grace 재조회 뒤 판정,
+//   noopForbidden이면 0건은 no-op이 아니라 fail-loud) → [--wait] 머지 관측(자동/수동 레인) → 명명된
+//   Application 집합 전체 수렴.
 // 수렴 판정(스펙 대기 매트릭스): 관측 sync revision이 머지 SHA와 동일하거나 그 후손(gh compare —
 //   로컬 git 이력 무의존) AND Synced AND Healthy AND 관측 리비전에서 desired-state 표면 실존.
 //   관측 리비전의 해석은 lib/argocd.ts 공유 리더다 — 앱 레인 Application은 멀티소스라 단수 필드가
@@ -46,7 +48,20 @@ export type MutationSpec = {
   // --wait 검증은 머지 SHA 없이 "관측 리비전의 표면 blob == homelab main의 표면 blob"으로 대체한다
   // (디스패처가 main HEAD와 비교한 그 기준). 미설정이면 PR 0은 명명 드리프트로 failure.
   noopOnMissingPr?: boolean;
+  // no-op 금지 교차 증인(티켓 04): 콜사이트가 "이 실행은 반드시 PR을 만든다"를 아는 경우(app secrets
+  // chain이 push했으면 kubeseal 비결정 암호문 = 바이트 변경 = 반드시 PR) true로 넘긴다. 그러면 PR 0은
+  // no-op이 아니라 fail-loud다 — 낡은/빈 PR 스냅샷 한 번이 "이미 배선됨" exit 0으로 위장하는 것을 막는다.
+  // 엔진은 chain 스키마를 모른다 — secrets.ts가 계산해 이 명시 필드로 넘긴다(resultBase를 들여다보지 않는다).
+  noopForbidden?: boolean;
 };
+
+// PR 특정의 grace 재시도 횟수 — **deadline(endAt)과 독립한** 고정 소수. null(전송 오류)·0건은 미확정이라
+// 이 횟수만큼 pollMs 간격으로 재조회한 뒤에만 판정한다(함정 「GitHub API는 낡은 스냅샷을 200으로 돌려준다」
+// — 목록 endpoint는 read-replica라 방금 만든 PR이 빈 응답 한 번으로 올 수 있다). endAt에 매달면 step 3가
+// 예산을 다 쓴 경우 재시도 0회 = 오늘과 같은 즉결(vacuous fix)이라 일부러 분리했다. 비용: 정당한 no-op
+// (--no-seal·dispatch-only 동일 봉인본)은 매번 PR_GRACE_RETRIES × pollMs(기본 3 × 5s = 15s)만큼 느려진다.
+// 테스트가 정확 count(1 + 3)로 이 상수를 핀한다(test_homelab-db.bats·test_homelab-secrets.bats).
+export const PR_GRACE_RETRIES = 3;
 
 export type MutationOpts = { wait: boolean; pollMs: number; deadlineMs: number; identifyOnly: boolean };
 
@@ -139,8 +154,19 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   const readPr = (): PrRow[] | null =>
     ghJson(`repos/${HOMELAB_REPO}/pulls?state=all&head=${owner}:${branch}`,
       "[.[] | {number, html_url, merged_at, merge_commit_sha}]") as PrRow[] | null;
-  let prs = readPr();
-  if (prs === null) return fail("PR 조회 실패 — GitHub 계층", { run: runRef() });
+  // 3상: found(≥1) / empty(0건) / error(null) — empty·error는 그 조회의 미확정이라 grace 재시도 뒤에만 판정.
+  // 재시도는 endAt과 무관하다(PR_GRACE_RETRIES 주석) — 여기서 deadline을 보면 수정이 무효가 된다.
+  let prs: PrRow[] | null = null;
+  for (let attempt = 0; ; attempt++) {
+    prs = readPr();
+    if (prs !== null && prs.length > 0) break;
+    if (attempt >= PR_GRACE_RETRIES) break;
+    Bun.sleepSync(opts.pollMs);
+  }
+  if (prs === null) return fail(`PR 조회 실패 — GitHub 계층(grace 재시도 ${PR_GRACE_RETRIES}회 뒤에도 전송 오류)`, { run: runRef() });
+  if (prs.length === 0 && spec.noopForbidden === true) {
+    return fail(`run은 성공했으나 브랜치(${branch})의 PR이 없다 — 이 실행은 새 봉인본을 push했으므로 no-op일 수 없다(PR 목록 grace 재시도 ${PR_GRACE_RETRIES}회 뒤에도 0건: 낡은 스냅샷 또는 명명 드리프트 — fail-loud)`, { run: runRef() });
+  }
   const noop = prs.length === 0 && spec.noopOnMissingPr === true;
   if (prs.length === 0 && !noop) return fail(`run은 성공했으나 브랜치(${branch})의 PR이 없다 — 명명 드리프트(no-op 동사가 아님)`, { run: runRef() });
   if (prs.length >= 2) {

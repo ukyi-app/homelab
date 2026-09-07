@@ -310,6 +310,48 @@ merged_pr_at_descendant() {
   echo "$stderr" | grep -q "F2 채널 분리"
 }
 
+# ── PR 특정의 3상 재조회(homelab-cli-r2 티켓 04) ──────────────────────────────────────────────
+# run 성공 직후 PR 목록을 단 한 번 조회해 즉결하면 낡은/빈 스냅샷 한 번이 '명명 드리프트 failure'
+# (create 계열) 또는 거짓 no-op(update-secrets)이 된다. null(전송 오류)·0건은 미확정 → deadline과
+# **독립한** 고정 소수 재시도 뒤에만 판정한다. 아래 정확 count는 그 재시도 횟수(엔진 상수)를 핀한다.
+
+@test "a stale empty PR listing on the first read is retried, not a naming-drift failure (reads >= 2)" {
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_PR_EMPTY_FIRST=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "21" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" -ge 2 ]
+}
+
+@test "a transient PR listing transport error on the first read is retried, not a GitHub-layer failure" {
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_PR_FAIL_FIRST=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" -ge 2 ]
+}
+
+@test "PR grace retries run even after the deadline budget is exhausted (independent of endAt — not a vacuous fix)" {
+  # --deadline-ms 1: run 식별(첫 조회에 존재)·conclusion(completed) 뒤 endAt은 이미 지났다. grace가 endAt에
+  # 매달려 있으면 재시도 0회 = 첫 [] 즉결 = 오늘과 같은 failure다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_PR_EMPTY_FIRST=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 1 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" -ge 2 ]
+}
+
+@test "a persistently empty PR listing is a naming-drift failure only after the bounded retries (exact reads = 1 + 3)" {
+  printf '[]\n' > "$FIX/db-prs.json"
+  run_db_create --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "명명 드리프트"
+  # 재시도는 유한하다 — 정확히 1 + PR_GRACE_RETRIES(3)회. 상수가 바뀌면 여기서 red(의도된 핀).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "4" ]
+}
+
 @test "db create --help prints the verb usage and exits 0" {
   run bun tools/homelab.ts db create --help
   [ "$status" -eq 0 ]

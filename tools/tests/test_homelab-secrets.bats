@@ -190,6 +190,25 @@ run_secrets_in() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.chain.pushed')" = "true" ]
   [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "3" ]
+  # 이름이 약속한 판정 — 엔진 variant가 no-op이 아니다(티켓 04: pushed=true면 no-op 금지).
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result | has("pr")')" = "true" ]
+}
+
+@test "a pushed sealed secret can never be reported as no-op: PR listing fixed empty is a failure (exit 1), not exit 0" {
+  # 교차 증인(티켓 04): chain이 push했으면 kubeseal 비결정 암호문 = 바이트 변경 = 반드시 PR이다. PR 목록이
+  # 계속 []이면(낡은 스냅샷·명명 드리프트) 그것은 no-op의 증거가 아니라 fail-loud 대상이다 — 현행은 no-op exit 0.
+  printf '[]\n' > "$FIX/db-prs.json"
+  run_secrets_in "$APP_WORK" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.chain.pushed')" = "true" ]
+  echo "$output" | jq -r '.result.error' | grep -q "no-op"
+  # push와 디스패치는 실제로 일어났다 — 실패는 관측 단계(PR 특정)의 것이다.
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "2" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  # 재조회는 여기서도 유한하다(1 + 3).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:update-secrets/myapp-701" --jq)" = "4" ]
 }
 
 @test "--no-seal without a committed sealed secret is refused without dispatch" {

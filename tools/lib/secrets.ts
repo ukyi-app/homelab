@@ -146,5 +146,9 @@ export function runAppSecrets(input: AppSecretsInput, cwd = process.cwd()): Muta
     dispatchInputs: [["app", app]],
     resultBase: { action: lane.action, name: app, chain },
     noopOnMissingPr: true, // 동일 봉인본 = PR 없는 멱등 no-op run(pr-first-commit)
+    // 교차 증인(티켓 04): chain이 push했으면 봉인본 바이트가 바뀐 것이고(kubeseal 비결정 암호문 — 위 noSeal
+    // 주석), 디스패처는 반드시 PR을 낸다. 그때 PR 0건은 no-op이 아니라 fail-loud다. 엔진은 chain 스키마를
+    // 모르므로 여기서 계산해 명시 필드로 넘긴다. --no-seal(pushed=false)·dispatch-only(pushed 부재)는 no-op 허용.
+    noopForbidden: chain.pushed === true,
   }, waitOpts(input));
 }
