@@ -2,8 +2,8 @@
 // bin 모듈(homelab.ts)은 import하면 main이 실행되므로 MCP가 재사용할 catalog는 lib에 산다).
 // 행 하나 = 동사 하나: path(라우팅 어휘)·desc(--help 열거)·op(operation — 타입 입력을 받아
 // 계약 Envelope 반환, 프로세스/표현 관심사 없음). argv 파싱·렌더링·stdout·종료코드는 CLI 셸
-// (homelab.ts) 소유이고, MCP 서버(후속 티켓)는 op를 직접 호출해 같은 envelope을 tool 결과로 쓴다.
-// MCP 노출 정책 필드는 MCP 티켓에서 이 descriptor에 추가한다.
+// (homelab.ts) 소유이고, MCP 서버(lib/mcp.ts)는 op를 직접 호출해 같은 envelope을 tool 결과로 쓴다.
+// MCP 노출 정책은 아래 `destructive` 필드에서 파생한다(손 목록 없음).
 import { appConfigPreflight } from "./app-preflight.ts";
 import { CONTRACT_ROWS, DB_CHECKBOX_EXTS, laneMutationFields } from "./catalog-rows.ts";
 import { cacheUrlInputError, dbUrlInputError, runCacheUrl, runDbUrl, type CacheUrlInput, type DbUrlInput } from "./conn-url.ts";
@@ -18,8 +18,8 @@ import { runStatus, statusInputError, type StatusInput } from "./status.ts";
 // 동사 형상 — I가 그 동사의 타입 입력(structure r2-a1: op를 입력 0개로 고정하면 입력 있는
 // 동사가 catalog를 우회해야 한다). 동사 추가 = 입력 타입 + 구체 Verb 타입 + union 멤버 +
 // named export + VERBS 행 — 전부 이 파일 안이라 우회 표면이 없다.
-// destructive: 파괴 동사 표시(teardown). MCP 노출 정책(후속 티켓)이 이 표시로 파괴 동사를
-// 제외하고, CLI는 confirm 가드로 사람 확인을 강제한다. 미설정 = 비파괴.
+// destructive: 파괴 동사 표시(teardown). MCP 노출 정책(lib/mcp.ts의 양방향 totality 가드)이 이
+// 표시로 파괴 동사를 제외하고, CLI는 confirm 가드로 사람 확인을 강제한다. 미설정 = 비파괴.
 // desc: 동사 한 줄 설명 — **transport 중립**이어야 한다. CLI 플래그 어휘(`--wait` 등)를 넣으면
 // 같은 문자열을 MCP tool description으로 내는 mcp.ts가 inputSchema에 없는 입력을 LLM에게 광고하게
 // 된다(실측 드리프트 mcp-3: desc의 `--wait=배포 수렴까지` ↔ 스키마의 wait 부재 → -32602). 대기 축

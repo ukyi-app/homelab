@@ -28,6 +28,7 @@ make tf-validate   # terraform fmt+validate (3 루트)
 bats tools/tests/ infra/k3s-bootstrap/tests/ </dev/null   # 툴링/부트스트랩 테스트(fd 0 격리 — 스텁 hang 방지)
 make verify-posture   # [live] posture 스위트(internal-by-default·netpol·e2e·DR 자산 신선도) — KUBECONFIG 필요(부재=SKIP 신호·비-0)
                       # + DR 자산 레그는 SEALED_KEY_BACKUP_DIR·LOCAL_ASSET_BACKUP_DIR env 필요(미설정=red)
+bun link && homelab doctor   # 통합 CLI 전역 설치 + 전제 진단(빠른 시작 순서는 tools/README.md)
 export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt
 kustomize build --enable-helm --enable-alpha-plugins --enable-exec platform/<comp>/prod  # KSOPS 풀 렌더
 export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터 접근
@@ -194,7 +195,9 @@ reader/writer 키만 homelab Actions secret에 있다.
     ⚠️ 그 쌍이 실제로 작동하려면 dispatch App이 설치돼 있어야 하는데 **현재 org 설치가 없다**(위 트리거
     경계) — 재설치 전까지 `homelab app init --dispatch-secrets`로 쌍을 심어도 크론 지연은 그대로다.
 - **생성 변이:** owner가 homelab에서 액션별 디스패처(workflow_dispatch) 실행 (변이 디스패처는 `vars.HOMELAB_OWNER` actor 가드로 owner 전용 — bump-poll/audit reconciler는 비대상) —
-  `create-app`/`update-secrets`/`create-database`/`create-cache`/`teardown-app`(각 전용 워크플로). **파괴: `teardown-app`은
+  `create-app`/`update-secrets`/`create-database`/`create-cache`/`teardown-app`(각 전용 워크플로).
+  (CLI 래퍼: `homelab db|cache create` · `homelab app create|secrets|teardown` — 빠른 시작·동사 표는
+  `tools/README.md`. 래퍼는 같은 디스패처를 `gh workflow run`으로 깨울 뿐이라 신뢰 경계가 불변이다.) **파괴: `teardown-app`은
   디스패처(`🗑️ teardown-app` — confirm===app 가드 + **수동 머지**, reusable이 파괴 경계에서 confirm 재검증) + owner-local CLI(`make teardown-app`) 공존.
   `teardown-resource`·`activate-app`은 owner-local**(`make teardown-resource`·런북 — 데이터 파괴·attestation·purge 상태머신), **audit은 스케줄 reconciler**(`audit.yaml`).
   validator(`tools/validate-mutation.ts`)가 계약표 강제. 전역 직렬화: `concurrency: homelab-mutation` + `queue: max`.

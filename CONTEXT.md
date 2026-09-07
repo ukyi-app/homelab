@@ -38,6 +38,12 @@ _Avoid_: 핀 설정, 핀 메타데이터
 create-app은 `.app-config.yml`의 `deploy.autoDeploy` 부재를 `false`로 옮기므로
 (`app-config-schema.json`의 `default: false`가 그 진술의 SSOT), 자동 배포는
 앱이 그 키를 `true`로 쓴 **명시 opt-in**일 때만 성립한다.
+**롤백 순서**(autoDeploy 앱 — 손 revert만 하면 10분 안에 폴링이 다시 앞으로 bump한다):
+① 그 앱의 **열린 bump PR을 전부 close --delete-branch**(이미 무장된 형제 PR은
+autoDeploy를 false로 내려도 무장된 채 남는다 — 라이브 좀비 #348) → ② values 핀
+되돌리기 + `.bindings.json` `autoDeploy:false`를 **한 PR**로 → ③ 머지·수렴 →
+④ 원인 수정 후 `true` 복원. 되돌릴 대상이 `refuse`(배포 SHA가 main 조상 아님)로
+잡히는 상태라면 그건 이미 폴링 밖이다(`poll-ghcr.ts`의 (a) 분기).
 _Avoid_: 자동 머지 플래그
 
 **bump 계획 (bump plan)**:

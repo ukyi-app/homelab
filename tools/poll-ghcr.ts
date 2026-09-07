@@ -129,6 +129,16 @@ const getIn = (obj: any, p: (string | number)[]) => p.reduce((o: any, k) => (o =
 function computeBump(result: Draft, s: { key: string; src: string; repo: string; deployed: string; digest: any; autoDeploy: boolean }): Draft {
   const q = makeQuery(s.key);
   // (a) 배포 SHA가 main의 조상인가 — 아니면 수동 rollback/이력 조작 상황: 자동 폴링 거부
+  // ⚠️ **이 거부는 롤백 절차가 아니다.** 이전 커밋으로 되돌리면 배포 SHA는 여전히 main의 조상이라
+  // status='ahead'가 되고 (b)가 최신 이미지 커밋을 다시 후보로 골라 앞으로 bump한다 — autoDeploy면
+  // 10분 안에 자동 머지다. autoDeploy 앱의 **롤백 순서**(어휘·전문은 CONTEXT.md autoDeploy 항):
+  //   ① 그 앱의 **열린 bump PR을 전부 close --delete-branch** — 이미 무장된 형제 PR은 autoDeploy를
+  //      false로 내려도 무장된 채 남는다(라이브 좀비 #348·#350·#351 — ensure-bump-pr.ts의 해제 스윕은
+  //      무장만 거두고 PR을 닫지는 않는다).
+  //   ② values 핀 되돌리기 + `.bindings.json` autoDeploy:false를 **한 PR**로 → ③ 머지·수렴 →
+  //   ④ 원인 수정 후 true 복원.
+  // 기본값이 fail-closed(false)로 뒤집힌 뒤로 이 절차가 필요한 앱은 **명시 opt-in 앱뿐**이다
+  // (create-app의 `?? false` + app-config-schema `default: false` — owner 결정 Q4/티켓 44).
   const baseCmp = q.compare(s.src, s.deployed, "main");
   if (!baseCmp || !["ahead", "identical"].includes(baseCmp.status))
     return { ...result, action: "refuse", reason: `배포 SHA(${short(s.deployed)})가 main 조상이 아님(status=${baseCmp?.status ?? "?"}) — 명시적 rollback 작업으로만` };

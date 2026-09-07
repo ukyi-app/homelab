@@ -732,3 +732,29 @@ EOF
   # additionalProperties:false라 구 인자는 -32602다(옛 이름이 조용히 무시되지 않는다).
   [ "$(echo "$output" | jq -rc 'select(.id==65) | .error.code')" = "-32602" ]
 }
+
+@test "db_url without a host arg and with TS_DB_HOST unset names every transport in the error (not just --host)" {
+  # connurl-9 / 티켓 39(b): MCP에서 도달 가능한 오류가 CLI 플래그(--host)만 지시했다 — MCP 인자는 host다.
+  # ⚠️ `env -u TS_DB_HOST`가 계약의 일부다: 러너 셸에 그 변수가 남아 있으면 이 @test가 vacuous green이다.
+  ED="$BATS_TEST_TMPDIR/mcp-nohost"; mkdir -p "$ED"
+  run --separate-stderr env -u TS_DB_HOST PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'printf "%s\n" "$@" | "$0" tools/homelab.ts mcp' "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":81,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==81) | .result.isError')" = "true" ]
+  env81="$(echo "$output" | jq -rc 'select(.id==81) | .result.content[0].text')"
+  [ "$(echo "$env81" | jq -r '.variant')" = "failure" ]
+  err81="$(echo "$env81" | jq -r '.result.error')"
+  printf '%s\n' "$err81" | grep -q "host 입력"
+  printf '%s\n' "$err81" | grep -q "MCP host"
+  printf '%s\n' "$err81" | grep -q "TS_DB_HOST"
+  # 기록은 없다(거부는 자격 파일을 만들지 않는다).
+  [ ! -e "$ED/.env.local" ]
+  # 양성 대조 — 같은 서버·같은 tool에 host를 주면 이 오류가 사라지고 기록이 선다.
+  run --separate-stderr env -u TS_DB_HOST PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'printf "%s\n" "$@" | "$0" tools/homelab.ts mcp' "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":82,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"host\":\"100.99.0.1\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==82) | .result.content[0].text' | jq -r '.variant')" = "success" ]
+  [ -f "$ED/.env.local" ]
+}
