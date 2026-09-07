@@ -77,7 +77,45 @@ setup() {
   [ "$(echo "$output" | jq -r '.result.live.argocd.sync')" = "Synced" ]
   [ "$(echo "$output" | jq -r '.result.live.argocd.health')" = "Healthy" ]
   [ "$(echo "$output" | jq -r '.result.live.argocd.revision')" = "abc1234" ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd | has("revisions")')" = "false" ]
   [ "$(echo "$output" | jq -r '.omitted | length')" = "0" ]
+}
+
+@test "status live revision resolves multi-source revisions[] to one value, keeps the single-source form (control), and reports skew raw" {
+  make_app_fixture page true
+  # 기본 픽스처 = 멀티소스(revisions 3개·revision 키 부재) — 앱 Application의 실제 형상(티켓 01).
+  [ "$(jq -r '.status.sync | has("revisions") and (has("revision") | not)' "$FIX/argocd-app.json")" = "true" ]
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd.revision')" = "abc1234" ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd | has("revisions")')" = "false" ]
+  # 단일소스 대조군(db/cache 레인 형상) — 같은 리더가 단수 필드를 그대로 낸다.
+  printf '{"status":{"sync":{"status":"Synced","revision":"abc1234"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd.revision')" = "abc1234" ]
+  # skew(소스 간 불일치)는 확정 revision 없이 관측 원본 revisions를 낸다(사람 렌더도 미확정 표기).
+  printf '{"status":{"sync":{"status":"OutOfSync","revisions":["abc1234","def5678","abc1234"]},"health":{"status":"Progressing"}}}\n' > "$FIX/argocd-app.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd | has("revision")')" = "false" ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd.revisions | join(",")')" = "abc1234,def5678,abc1234" ]
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "미확정"
+}
+
+@test "mutation and status engines share one ArgoCD revision reader (no literal sync.revision reads remain)" {
+  # 티켓 01 수용 기준 — 두 엔진이 lib/argocd.ts 리더를 호출하고 단수 필드 직접 참조는 0건. 부정 카운트라
+  # 같은 패턴이 리더 자신에서는 매치함을 양성 대조로 단언한다(검출기 생존).
+  n=0
+  for f in tools/lib/mutation.ts tools/lib/status.ts; do
+    [ "$(grep -cF 'syncRevisionOf(' "$f")" -ge 1 ]
+    [ "$(grep -cF 'sync?.revision' "$f")" = "0" ]
+    n=$((n+1))
+  done
+  [ "$n" -eq 2 ]
+  [ "$(grep -cF 'sync.revision' tools/lib/argocd.ts)" -ge 1 ]
 }
 
 @test "status app mode reports the memory-ledger limit when the app has a ledger row" {

@@ -128,6 +128,7 @@ const DEFINITIONS = `    "doctorResult": {
         "sync": { "type": "string" },
         "health": { "type": "string" },
         "revision": { "type": "string" },
+        "revisions": { "type": "array", "items": { "type": "string" } },
         "descendant": { "type": "boolean" },
         "surfaceOk": { "type": "boolean" },
         "error": { "type": "string" }
@@ -447,7 +448,8 @@ const DEFINITIONS = `    "doctorResult": {
                   "properties": {
                     "sync": { "type": "string", "minLength": 1 },
                     "health": { "type": "string", "minLength": 1 },
-                    "revision": { "type": "string" }
+                    "revision": { "type": "string" },
+                    "revisions": { "type": "array", "items": { "type": "string" } }
                   }
                 }
               }

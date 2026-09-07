@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { appPaths, appRel, readAppSurface } from "./app-surface.ts";
+import { revisionFields, syncRevisionOf } from "./argocd.ts";
 import { parseBranch } from "./bump-plan.ts";
 import { LANES, isDispatchLaneBranch } from "./catalog-rows.ts";
 import { compact } from "./contract.ts";
@@ -128,10 +129,12 @@ function statusApp(root: string, app: string): StatusOutcome {
   } else {
     try {
       const st = (JSON.parse(k.out)?.status ?? {}) as Record<string, any>;
+      // 리비전은 공유 리더(argocd.ts) — 앱 Application은 멀티소스라 단수 필드가 비고 revisions[]만 있다.
+      // resolved면 revision, 아니면(skew·non-sha) 관측 원본 revisions — 변이 엔진의 행과 같은 모양.
       live = { argocd: compact({
         sync: st.sync?.status ?? "Unknown",
         health: st.health?.status ?? "Unknown",
-        revision: st.sync?.revision,
+        ...revisionFields(syncRevisionOf(st)),
       }) };
     } catch { live = { error: "Application JSON 파싱 실패" }; }
   }

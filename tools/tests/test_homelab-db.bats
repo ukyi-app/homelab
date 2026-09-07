@@ -101,8 +101,8 @@ run_db_create() {
 
 @test "wait: stale-Healthy (old revision, Healthy+OutOfSync) never counts as success — pending" {
   printf '[{"number":21,"html_url":"u21","merged_at":"2026-08-20T10:00:00Z","merge_commit_sha":"feedbee"}]\n' > "$FIX/db-prs.json"
-  printf '{"status":{"sync":{"status":"OutOfSync","revision":"0ldrev1"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
-  printf '{"status":{"sync":{"status":"OutOfSync","revision":"0ldrev1"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
+  printf '{"status":{"sync":{"status":"OutOfSync","revision":"01d0e01"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
+  printf '{"status":{"sync":{"status":"OutOfSync","revision":"01d0e01"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
   printf 'behind\n' > "$FIX/db-compare.txt"
   run_db_create --wait --json
   [ "$status" -eq 1 ]
@@ -112,7 +112,7 @@ run_db_create() {
 
 @test "wait: partial convergence (cnpg-data only) never counts as success — pending" {
   printf '[{"number":21,"html_url":"u21","merged_at":"2026-08-20T10:00:00Z","merge_commit_sha":"feedbee"}]\n' > "$FIX/db-prs.json"
-  printf '{"status":{"sync":{"status":"OutOfSync","revision":"0ldrev1"},"health":{"status":"Progressing"}}}\n' > "$FIX/argocd-data-conn.json"
+  printf '{"status":{"sync":{"status":"OutOfSync","revision":"01d0e01"},"health":{"status":"Progressing"}}}\n' > "$FIX/argocd-data-conn.json"
   printf 'behind\n' > "$FIX/db-compare.txt"
   run_db_create --wait --json
   [ "$status" -eq 1 ]
@@ -120,10 +120,10 @@ run_db_create() {
 }
 
 merged_pr_at_descendant() {
-  # 머지 완료 PR + 관측 리비전이 머지 SHA의 후손(afterme, compare=ahead)인 공통 배치
+  # 머지 완료 PR + 관측 리비전이 머지 SHA의 후손(af7e70e, compare=ahead)인 공통 배치
   printf '[{"number":21,"html_url":"u21","merged_at":"2026-08-20T10:00:00Z","merge_commit_sha":"feedbee"}]\n' > "$FIX/db-prs.json"
-  printf '{"status":{"sync":{"status":"Synced","revision":"afterme"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
-  printf '{"status":{"sync":{"status":"Synced","revision":"afterme"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
+  printf '{"status":{"sync":{"status":"Synced","revision":"af7e70e"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
+  printf '{"status":{"sync":{"status":"Synced","revision":"af7e70e"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
   printf 'ahead\n' > "$FIX/db-compare.txt"
 }
 
@@ -205,10 +205,10 @@ merged_pr_at_descendant() {
   # pending(--wait 미머지)
   printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
   env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 400 --wait --json > "$OUTDIR/g-pending.json" 2>/dev/null || true
-  # superseded — 관측 리비전이 머지 SHA의 후손(afterme·ahead)인데 표면이 제거된 배치
+  # superseded — 관측 리비전이 머지 SHA의 후손(af7e70e·ahead)인데 표면이 제거된 배치
   printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":"2026-08-20T10:00:00Z","merge_commit_sha":"feedbee"}]\n' > "$FIX/db-prs.json"
-  printf '{"status":{"sync":{"status":"Synced","revision":"afterme"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
-  printf '{"status":{"sync":{"status":"Synced","revision":"afterme"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
+  printf '{"status":{"sync":{"status":"Synced","revision":"af7e70e"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
+  printf '{"status":{"sync":{"status":"Synced","revision":"af7e70e"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
   printf 'ahead\n' > "$FIX/db-compare.txt"
   env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_SURFACE_ABSENT=1 "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --wait --json > "$OUTDIR/g-superseded.json" 2>/dev/null || true
   # 생략(--wait + KUBECONFIG 부재)

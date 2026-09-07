@@ -116,6 +116,78 @@ run_app_create() {
   echo "$output" | grep -q "^ok:3$"
 }
 
+# ── 멀티소스 리비전 해석(homelab-cli-r2 티켓 01) ────────────────────────────────────────────
+# 앱 Application은 멀티소스라 `status.sync.revision`이 비고 `revisions[]`만 있다 — 기본 픽스처(cli_stub.bash
+# argocd-app.json)가 그 형상이고, 위 수렴 @test 2건이 그 위에서 success다(수정 전에는 단수 필드만 읽어 pending).
+# 아래는 복수형의 미확정 3상(skew·none·non-sha)이 success로 접히지 않음을 밟는 음성 증인이다.
+
+merged_pr() {
+  printf '[{"number":51,"html_url":"u51","merged_at":"2026-08-24T09:00:00Z","merge_commit_sha":"feedbee"}]\n' > "$FIX/db-prs.json"
+}
+
+@test "multi-source: one lagging source revision (skew) is not convergence — pending, raw revisions reported" {
+  merged_pr
+  printf '{"status":{"sync":{"status":"Synced","revisions":["feedbee","01d0e01","feedbee"]},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
+  printf 'behind\n' > "$FIX/db-compare.txt"
+  run_app_create --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  # 계보는 원소 전부 후손이어야 true — 한 source가 behind면 false.
+  [ "$(echo "$output" | jq -r '.result.applications[0].descendant')" = "false" ]
+  # 관측 원본이 그대로 실려 어느 source가 낡았는지 보인다 — 확정 revision 필드는 없다.
+  [ "$(echo "$output" | jq -r '.result.applications[0].revisions | join(",")')" = "feedbee,01d0e01,feedbee" ]
+  [ "$(echo "$output" | jq -r '.result.applications[0] | has("revision")')" = "false" ]
+}
+
+@test "multi-source: skewed sources that are ALL descendants still never converge (no single surface ref)" {
+  merged_pr
+  printf '{"status":{"sync":{"status":"Synced","revisions":["feedbee","af7e70e","feedbee"]},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
+  printf 'ahead\n' > "$FIX/db-compare.txt"
+  run_app_create --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  [ "$(echo "$output" | jq -r '.result.applications[0].descendant')" = "true" ]
+  # 표면은 확정된 하나의 리비전에서만 판정한다 — skew는 표면 ref를 고를 수 없어 surfaceOk 미기록,
+  # 요청값 blob(ref=머지 SHA)도 읽지 않는다.
+  [ "$(echo "$output" | jq -r '.result.applications[0] | has("surfaceOk")')" = "false" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/contents/apps/myapp/deploy/prod/values.yaml?ref=feedbee" --jq .sha)" = "0" ]
+}
+
+@test "multi-source: an empty revisions array or a missing key never folds to success (fail-closed pending, compare 0)" {
+  merged_pr
+  printf '{"status":{"sync":{"status":"Synced","revisions":[]},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
+  run_app_create --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  [ "$(echo "$output" | jq -r '.result.applications[0].descendant')" = "false" ]
+  # 관측 0 = 행에 revision도 revisions도 없다(빈 문자열로 위장하지 않는다).
+  [ "$(echo "$output" | jq -r '.result.applications[0] | has("revision") or has("revisions")')" = "false" ]
+  printf '{"status":{"sync":{"status":"Synced"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
+  run_app_create --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  # 빈 리비전이 compare 피연산자로 새지 않는다(원장에 compare 경로 0건 — 두 호출 합산).
+  [ "$(python3 "$LEDGER_PY" dump "$CALLS" | grep -c 'compare/')" = "0" ]
+}
+
+@test "multi-source: a non-SHA revision (helm chart version) is undecided and NEVER reaches gh compare" {
+  merged_pr
+  printf '{"status":{"sync":{"status":"Synced","revisions":["10.0.1","feedbee","feedbee"]},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
+  run_app_create --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  [ "$(echo "$output" | jq -r '.result.applications[0].revisions | join(",")')" = "10.0.1,feedbee,feedbee" ]
+  [ "$(python3 "$LEDGER_PY" dump "$CALLS" | grep -c 'compare/')" = "0" ]
+  # 양성 대조(검출기 생존): 기본 멀티소스 픽스처(abc1234 ≠ 머지 SHA)는 compare를 실제로 부르고 success다.
+  : > "$CALLS"
+  printf '{"status":{"sync":{"status":"Synced","revisions":["abc1234","abc1234","abc1234"]},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
+  run_app_create --wait --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.applications[0].revision')" = "abc1234" ]
+  [ "$(python3 "$LEDGER_PY" dump "$CALLS" | grep -c 'compare/')" -ge 1 ]
+}
+
 @test "app create rejects a bad app name as a usage error and prints usage on --help" {
   run --separate-stderr env PATH="$STUB" "$BUN" tools/homelab.ts app create "Bad_Name" --json
   [ "$status" -eq 2 ]

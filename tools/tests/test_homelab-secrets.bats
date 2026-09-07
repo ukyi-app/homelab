@@ -221,6 +221,10 @@ run_secrets_in() {
   [ "$(echo "$output" | jq -r '.result.applications[0].surfaceOk')" = "true" ]
   [ "$(echo "$output" | jq -r '.result.applications[0] | has("descendant")')" = "false" ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/contents/apps/myapp/deploy/prod/myapp-secrets.sealed.yaml?ref=main" --jq .sha)" -ge 1 ]
+  # 바닥값(티켓 01): 이 no-op 경로(mergeSha 없음)가 밟는 픽스처는 **멀티소스** 형상이다 — revisions[]만 있고
+  # revision 키 부재. 단일소스로 되돌아가면 이 @test는 앱 레인의 실제 결함을 못 본다(수정 전 red의 자리).
+  [ "$(jq -r '.status.sync | has("revisions") and (has("revision") | not)' "$FIX/argocd-app.json")" = "true" ]
+  [ "$(echo "$output" | jq -r '.result.applications[0].revision')" = "abc1234" ]
 }
 
 @test "no-op with --wait and no KUBECONFIG omits the live section (exit 0)" {
