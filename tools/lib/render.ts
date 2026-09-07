@@ -27,7 +27,12 @@ export function renderDoctor(envelope: Envelope): string[] {
 
 export function renderStatus(envelope: Envelope): string[] {
   const r = envelope.result as Record<string, any>;
-  if (typeof r.error === "string") return [`오류: ${r.error}`];
+  if (typeof r.error === "string") {
+    const lines = [`오류: ${r.error}`];
+    // 산출물 부재 분기의 부가 관측 — 진행 중인 create-app PR(수동 머지 대기)이 있으면 좌표를 준다.
+    if (Array.isArray(r.createPrs)) lines.push(`진행 중인 create-app PR: ${r.createPrs.map((p: Record<string, unknown>) => `#${p.number} ${p.url}`).join(" · ")}`);
+    return lines;
+  }
   switch (r.mode) {
     case "list": {
       if (r.count === 0) return ["온보딩된 앱이 없다(그린필드)"];
@@ -52,8 +57,12 @@ export function renderStatus(envelope: Envelope): string[] {
       else lines.push(`라이브(ArgoCD): sync ${r.live.argocd.sync} · health ${r.live.argocd.health}${r.live.argocd.revision ? ` · rev ${r.live.argocd.revision}` : Array.isArray(r.live.argocd.revisions) ? ` · revisions ${r.live.argocd.revisions.join(",")}(미확정)` : ""}`);
       return lines;
     }
-    case "run":
-      return [`run: ${r.run.name ?? "(이름 없음)"} — status ${r.run.status}${r.run.conclusion ? ` · conclusion ${r.run.conclusion}` : " · 진행 중"}`];
+    case "run": {
+      const lines = [`run: ${r.run.name ?? "(이름 없음)"} — status ${r.run.status}${r.run.conclusion ? ` · conclusion ${r.run.conclusion}` : " · 진행 중"}`];
+      // --branch 좌표 조회 — PR 부재(아직 안 났거나 no-op)와 실재를 구별해 보고한다.
+      if (r.run.branch) lines.push(r.run.pr ? `레인 PR(${r.run.branch}): #${r.run.pr.number} ${r.run.pr.url} · merged ${OX[String(r.run.pr.merged)]}` : `레인 PR(${r.run.branch}): 없음`);
+      return lines;
+    }
     case "pr":
       return [`PR #${r.pr.number} — ${r.pr.state} · merged ${OX[String(r.pr.merged)]} · auto-merge ${OX[String(r.pr.autoMerge)]}`];
     default:

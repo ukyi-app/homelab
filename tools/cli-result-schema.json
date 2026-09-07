@@ -57,6 +57,14 @@
         {
           "type": "object",
           "properties": {
+            "verb": { "enum": ["status"] },
+            "variant": { "enum": ["race"] },
+            "result": { "$ref": "#/definitions/statusRace" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
             "verb": { "enum": ["db create"] },
             "variant": { "enum": ["success"] },
             "result": { "allOf": [
@@ -416,6 +424,7 @@
         "id": { "type": "integer", "minimum": 1 },
         "url": { "type": "string", "minLength": 1 },
         "conclusion": { "type": "string" },
+        "branch": { "type": "string", "minLength": 1, "description": "이 run의 레인 PR 브랜치(run id의 순수 파생 — 추가 조회 0). PR이 아직 없는 단계(identifyOnly pending)의 재개 좌표: homelab status --run <url> --branch <branch>." },
         "failedJobs": { "type": "array", "items": { "type": "string" } }
       }
     },
@@ -777,6 +786,7 @@
       }
     },
     "statusRunRow": {
+      "description": "run 행. branch·pr은 핸들 조회의 --branch 좌표 모드에서만 실린다(앱 레포 build run 목록에는 없다) — pr 부재는 '아직 PR이 없다'이고 조회 실패는 variant=failure다(부재와 실패의 구분).",
       "type": "object",
       "additionalProperties": false,
       "required": ["status", "url"],
@@ -785,7 +795,9 @@
         "status": { "type": "string", "minLength": 1 },
         "conclusion": { "type": "string" },
         "headSha": { "type": "string" },
-        "url": { "type": "string" }
+        "url": { "type": "string" },
+        "branch": { "type": "string", "minLength": 1 },
+        "pr": { "$ref": "#/definitions/mutationPr" }
       }
     },
     "statusOpenPrRow": {
@@ -839,6 +851,23 @@
       "required": ["mode", "error"],
       "properties": {
         "mode": { "enum": ["list", "app", "run", "pr"] },
+        "error": { "type": "string", "minLength": 1 },
+        "createPrs": {
+          "description": "app 모드의 산출물 부재 분기에서만: 그 앱을 키로 하는 create-app 레인의 열린 PR(수동 머지 대기). 산출물이 없는 것이 그린필드의 정상 전이일 수 있다는 부가 관측이고, 없으면 키가 없다(읽기 전용 — 머지 원칙 불변).",
+          "type": "array",
+          "items": { "$ref": "#/definitions/statusOpenPrRow" }
+        }
+      }
+    },
+    "statusRace": {
+      "description": "status --branch 정확 조회에서 브랜치 하나에 PR이 2개 — 신원 판정 불가(fail-closed, exit 3). 리더가 임의로 하나를 고르면 그 뒤의 모든 보고가 오귀속이 된다.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "branch", "observedPrs", "error"],
+      "properties": {
+        "mode": { "enum": ["run"] },
+        "branch": { "type": "string", "minLength": 1 },
+        "observedPrs": { "type": "integer", "minimum": 2 },
         "error": { "type": "string", "minLength": 1 }
       }
     },

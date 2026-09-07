@@ -74,10 +74,15 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   후손 리비전 표면 부재=superseded). KUBECONFIG 부재=머지까지 확인+omitted=["live"].
   `homelab db url` = conn URL 엔진(`lib/conn-url.ts`)의 catalog op — envelope 계약(--json)·F2
   채널 분리·상호배타는 엔진 술어 소유(구 패스스루 계약은 티켓 08에서 op 계약으로 대체됨).
-  `homelab status [<app>] [--run <url>|--pr <url>] [--json]` = 상태 관찰(관측 전용): 인자 없음=
-  전체 앱 목록·요약(레포 데이터), `<app>`=핀·바인딩·최근 run·열린 PR(+KUBECONFIG 있으면 ArgoCD
+  `homelab status [<app>] [--run <url> [--branch <ref>] | --pr <url>] [--json]` = 상태 관찰(관측 전용):
+  인자 없음=전체 앱 목록·요약(레포 데이터), `<app>`=핀·바인딩·최근 run·열린 PR(+KUBECONFIG 있으면 ArgoCD
   `<app>-prod` sync/health, 없으면 라이브 구간 생략 — envelope.omitted=["live"]·exit 0), 핸들
   조회=run/PR URL로 그 오퍼레이션 단위 상태(대기·conclusion·머지 여부 — MCP tool 입력과 같은 계약).
+  `--run`에 `--branch <ref>`를 더하면 그 **레인 브랜치**의 PR을 정확 조회해 `result.run.pr`로 붙인다
+  (변이 pending이 돌려준 `result.run.branch`를 그대로 넘기는 자리 — 브랜치는 run id의 파생이라
+  둘이 어긋나면 usage 오류, PR이 2개면 race exit 3). `--branch` 단독 조회는 없다. 산출물이 아직 없는
+  앱(`<app>` 모드 failure)에는 진행 중인 create-app 레인 PR을 `result.createPrs`로 알린다 —
+  그린필드에서 '앱 없음' 한 줄만 남던 자리에 재개 좌표를 준다(읽기 전용 — 수동 머지 원칙 불변).
   **설치**: `bun link`(레포 루트) → package.json `bin`이 `homelab`을 전역 PATH에 심링크. 유일하게
   셰뱅+exec 비트를 갖는 .ts다(test_shebang-exec.bats가 bin 선언에서 예외를 파생). 레포 밖(앱 레포
   디렉토리 포함)에서도 동작한다(자기 위치는 import.meta 기준 해석).
@@ -91,7 +96,11 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   `WAIT_DEFAULTS.deadlineMs`, 산정 근거 분해는 그 상수 주석)이 끝나면 관측된 만큼(run·PR 핸들 +
   pendingReason)을 실어 돌려준다. 종료코드가 1인 것은 '완료 확인 못함'이지 실패가 아니다
   (x-contract.exitCodes). 재개 경로는 재실행이 아니라 **핸들 재조회**다:
-  `homelab status --run <run URL>` 또는 `--pr <PR URL>`.
+  `homelab status --run <run URL>`(PR 전이면 `--branch <run.branch>`를 더해 레인 PR까지) 또는
+  `--pr <PR URL>`. 예외는 **run 미출현 pending** 하나다 — 그 봉투에는 run이 없어 어떤 status 모드도
+  쓸 수 없다. 재디스패치는 새 nonce를 발급해 같은 이름의 PR 두 개를 만들므로 금지이고, 실재하는
+  확인 경로는 Actions에서 run-name의 `[correlation]` 에코를 보는 것뿐이다(`status --correlation`
+  핸들 모드는 열지 않는다 — PR 본문에 에코가 없어 reusable 5벌 계약 변경이 선행이다).
   **진행 표시**: 변이 동사는 단계 전이(디스패치 접수·run 식별·run 완료·PR 특정·머지 관측)마다
   `진행: …` 한 줄을 **stderr**에 즉시 낸다 — correlation·run URL·PR URL·merge SHA가 봉투보다
   **먼저** 나오므로 ^C·타임아웃 킬로 중단돼도 재조회 핸들이 남는다. stdout 순수성은 불변이고
@@ -342,6 +351,13 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   낸다(`MutationOpts.onProgress` — dispatched/identified/concluded/pr/merged): 엔진은 이벤트만 내고
   문구·싱크는 CLI 셸(homelab.ts)이 소유하며 MCP는 주입하지 않는다(stdio 무오염). 시간 심
   pollMs/deadlineMs + HOMELAB_CORRELATION 주입(테스트). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
+- **`lib/lane-pr.ts`** — 레인 브랜치 PR의 좌표·정확 조회 커널(`readLanePrs()`·`lanePrRef()`·
+  `parseLaneBranch()`·`laneBranchInputError()`). 질의는 `pulls?state=all&head=<owner>:<branch>` —
+  head가 **정확 일치**라 형제 브랜치(`…/mydb-5011`)가 `…/mydb-501` 응답에 원리적으로 섞이지 않는다.
+  투영(`LANE_PR_FIELDS`)은 목록·단건 공용 SSOT이고 argv 원장에 그대로 실려 테스트가 핀한다.
+  파싱은 레인 신원 행(catalog-rows `branchPattern`)에서 파생하고 **왕복 등식**(복원한 key·runId를
+  다시 채워 원문과 대조) + 레인별 이름 정책(app/resource)으로 확증한다 — 임의 ref가 gh 질의
+  문자열로 새지 않는 1차 게이트다. 소비자: 변이 엔진(자기 PR 특정)·status(`--branch` 재개 조회).
 - **`lib/argocd.ts`** — ArgoCD Application status 리더(`syncRevisionOf()`·`revisionFields()`) — 변이 엔진
   (수렴 판정)과 status 엔진(라이브 표시)이 공유하는 리비전 해석. 앱 레인 `<app>-prod`는 appset sources 3개의
   멀티소스라 컨트롤러가 `sync.revision`을 비우고 `sync.revisions[]`만 채운다(라이브 실측) — 단수 필드만 읽던
@@ -371,6 +387,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   레포(핀·바인딩)+GitHub(run·PR)가 기본, 라이브(ArgoCD)는 KUBECONFIG 있을 때만(부재=생략,
   조회 실패=live.error — 유일한 선택 계층). GitHub 계층 오류는 fail-loud(빈 목록 위장 금지).
   입력 검증 술어는 CLI(usage exit 2)·MCP(invalid params)가 공유. 관측 전용(gh api·kubectl get만).
+  run 모드의 `--branch` 좌표는 lane-pr 커널의 정확 조회로 그 레인 PR을 붙이고(2건이면 race exit 3),
+  app 모드의 산출물 부재 분기는 열린 PR 목록 1회로 create-app 레인 PR을 `createPrs`에 싣는다.
 - **`lib/doctor.ts`** — homelab CLI doctor 진단 엔진(`runDoctor()`). 점검 항목·상태 판정·detail
   문구를 소유한다(관측 전용 — `gh api` 읽기만, 테스트가 argv 원장으로 강제). 선행 gh-auth 실패로
   판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든

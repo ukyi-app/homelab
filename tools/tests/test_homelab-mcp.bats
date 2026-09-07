@@ -550,6 +550,34 @@ mcp_rpc_in() {
   [ "$(grep -c "WAIT_DEFAULTS.deadlineMs = $((mins + 1))분" tools/lib/mcp.ts)" = "0" ]
 }
 
+# ── pending의 브랜치 좌표와 status --branch(homelab-cli-r2 티켓 09) ───────────────────────
+
+@test "the identify-only pending carries the lane branch, derived from the row without an extra API call" {
+  # MCP 변이 pending에는 PR이 원리적으로 없다(run 완료 후 생긴다) — 그래서 **좌표**를 싣는다.
+  # 브랜치는 레인 행에서 유도한 값이지 조회 결과가 아니다(추가 호출 0).
+  mcp_rpc '{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"db_create","arguments":{"name":"mydb"}}}'
+  [ "$status" -eq 0 ]
+  env="$(echo "$output" | jq -rc 'select(.id==41) | .result.content[0].text')"
+  [ "$(echo "$env" | jq -r '.variant')" = "pending" ]
+  [ "$(echo "$env" | jq -r '.result.run.branch')" = "create-database/mydb-501" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "0" ]
+}
+
+@test "the status tool exposes branch (and NOT correlation) and resolves the lane PR through the shared predicate" {
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/prs-head-create-database_mydb-501.json"
+  mcp_rpc '{"jsonrpc":"2.0","id":42,"method":"tools/list"}' \
+    '{"jsonrpc":"2.0","id":43,"method":"tools/call","params":{"name":"status","arguments":{"run":"https://github.com/ukyi-app/homelab/actions/runs/501","branch":"create-database/mydb-501"}}}' \
+    '{"jsonrpc":"2.0","id":44,"method":"tools/call","params":{"name":"status","arguments":{"branch":"create-database/mydb-501"}}}'
+  [ "$status" -eq 0 ]
+  keys="$(echo "$output" | jq -rc 'select(.id==42) | .result.tools[] | select(.name=="status") | .inputSchema.properties | keys | join(",")')"
+  echo "$keys" | grep -q "branch"
+  # owner 결정 Q2 — correlation 핸들 모드는 열지 않는다(재개 조건 미충족). 부정 단언의 양성 짝은 위 줄.
+  [ "$(printf '%s\n' "$keys" | grep -c "correlation")" = "0" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==43) | .result.content[0].text | fromjson | .result.run.pr.url')" = "https://github.com/ukyi-app/homelab/pull/21" ]
+  # 좌표 단독은 CLI와 같은 술어로 거부된다(invalid params).
+  [ "$(echo "$output" | jq -rc 'select(.id==44) | .error.code')" = "-32602" ]
+}
+
 # ── 진행 표시 심의 MCP 무주입(homelab-cli-r2 티켓 07) ─────────────────────────────────────
 
 @test "a mutation tool call leaks no progress line into the JSON-RPC stream (server injects no sink)" {

@@ -277,6 +277,12 @@ case "$*" in
       if [ -f "$FIX/.pr-list-once" ]; then echo "gh: HTTP 403: rate limit exceeded" >&2; exit 1; fi
       : > "$FIX/.pr-list-once"
     fi
+    # 브랜치별 응답(티켓 09) — 실물 API의 `head=<owner>:<branch>` **정확 일치**를 스텁도 흉내낸다.
+    # 파일명은 브랜치의 '/'를 '_'로 바꾼 `$FIX/prs-head-<branch>.json`이고, 없으면 기존 db-prs.json이
+    # 그대로 쓰인다(기존 레인 무영향). ⚠️ 치환은 셸 파라미터 확장으로만 — PATH=$STUB에 tr/sed가 없다.
+    hr="${2#*head=ukyi-app:}"
+    alt="$FIX/prs-head-${hr//\//_}.json"
+    if [ -f "$alt" ]; then cat "$alt"; exit 0; fi
     cat "$FIX/db-prs.json"
     ;;
   # PR 단건 권위 조회(티켓 05) — 머지 없이 닫힌 목록 행의 확증 단계. status의 핸들 조회와 같은

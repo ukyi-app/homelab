@@ -78,7 +78,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # 남는다 — verb 분기가 허용 variant 집합까지 선언하고, verb별 허용∪비허용 = variant 전체(7종).
   # 표본 result는 공유 코퍼스(helpers/contract-samples.ts)가 SSOT — 축자 이중 사본 제거(티켓 05).
   # 바닥값은 계약 행(CONTRACT_ROWS)에서 파생한다 — 손 재계산(구 36/34) 대체. 열거 붕괴 방지의
-  # 손 앵커는 파생 밖에 남는다: oneOf 분기 수 31 · 계약 행 수 10 (exitCodes 리터럴 7쌍 핀은
+  # 손 앵커는 파생 밖에 남는다: oneOf 분기 수 32 · 계약 행 수 10 (exitCodes 리터럴 7쌍 핀은
   # 위의 "result schema pins …" @test가 소유).
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
@@ -89,12 +89,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     const map = sch["x-contract"].exitCodes;
     const all = sch.properties.variant.enum;
     const verbBranches = sch.allOf.find((b) => b.oneOf?.[0]?.properties?.verb)?.oneOf ?? [];
-    if (verbBranches.length !== 31) { console.error("oneOf 분기 수 " + verbBranches.length + " != 31(손 앵커)"); process.exit(1); }
+    if (verbBranches.length !== 32) { console.error("oneOf 분기 수 " + verbBranches.length + " != 32(손 앵커)"); process.exit(1); }
     if (CONTRACT_ROWS.length !== 10) { console.error("계약 행 수 " + CONTRACT_ROWS.length + " != 10(손 앵커)"); process.exit(1); }
     // variant 셀 총합 핀 — 다중 variant 엔트리에서 variant가 지워지면 분기·행 수는 그대로인 채
     // 파생과 워커가 함께 내려가 초록이 된다(리뷰 실측) — 구판 ok:36 리터럴의 정확한 복원이다.
     const cellTotal = verbBranches.reduce((n, b) => n + b.properties.variant.enum.length, 0);
-    if (cellTotal !== 38) { console.error("variant 셀 총합 " + cellTotal + " != 38(손 앵커)"); process.exit(1); }
+    if (cellTotal !== 39) { console.error("variant 셀 총합 " + cellTotal + " != 39(손 앵커)"); process.exit(1); }
     const SAMPLES = buildSamples(sch.definitions.doctorCheck.properties.id.enum);
     const byVerb = {};
     for (const br of verbBranches) (byVerb[br.properties.verb.enum[0]] ??= []).push(br);

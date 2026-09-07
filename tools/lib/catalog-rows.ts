@@ -100,7 +100,14 @@ export type ContractRow = {
 
 export const CONTRACT_ROWS: readonly ContractRow[] = [
   { verb: "doctor", simple: [{ variants: ["success", "failure"], ref: "doctorResult" }] },
-  { verb: "status", simple: [{ variants: ["success", "failure"], ref: "statusResult" }] },
+  // status의 race — `--branch` 정확 조회에서 브랜치 하나에 PR이 2개인 경우(신원 판정 불가, exit 3).
+  // 리더도 fail-closed다: 임의로 하나를 고르면 그 뒤의 모든 보고가 오귀속이 된다. 형상이 성공·실패와
+  // 달라(observedPrs + error) 별도 ref로 분리한다 — statusResult union에 넣으면 성공 봉투가 race
+  // 형상으로도 유효해진다.
+  { verb: "status", simple: [
+    { variants: ["success", "failure"], ref: "statusResult" },
+    { variants: ["race"], ref: "statusRace" },
+  ] },
   { verb: "db create", mutation: { action: "create-database", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },
   { verb: "cache create", mutation: { action: "create-cache", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },
   { verb: "app create", mutation: { action: "create-app", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },

@@ -43,6 +43,8 @@ export function buildSamples(doctorIds: readonly string[]): Record<string, Sampl
   return {
     doctor: { checks: doctorIds.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: doctorIds.length, fail: 0, warn: 0 } },
     status: { mode: "list", apps: [], count: 0 },
+    // status의 race는 statusResult union이 아니라 전용 정의(statusRace)다 — 형상이 다르므로 표본도 별도.
+    "status|race": { mode: "run", branch: "create-database/mydb-501", observedPrs: 2, error: "x" },
     ...Object.fromEntries(Object.entries(mut(dbBase)).map(([v, r]) => ["db create|" + v, r])),
     ...Object.fromEntries(Object.entries(mut(cacheBase)).map(([v, r]) => ["cache create|" + v, r])),
     ...Object.fromEntries(Object.entries(mut(appBase)).map(([v, r]) => ["app create|" + v, r])),
@@ -59,8 +61,8 @@ export function buildSamples(doctorIds: readonly string[]): Record<string, Sampl
 // (전체 variant 수 − 허용 집합 크기)의 합. 구판의 손 재계산 floor(36/34)를 대체한다.
 // 행 내 variant 중복은 fail-closed로 던진다 — 같은 verb+variant를 두 분기가 주장하면 oneOf가
 // "정확히 하나"를 잃어 스키마 자체가 모호해지고, 중복/dedup 계수 갈림으로 파생과 워커가
-// 어긋난다(리뷰 실측). 열거 붕괴 방지의 손 앵커(oneOf 분기 수 31 · 행 수 10 · variant 셀 총합
-// 38 · exitCodes 리터럴 7쌍)는 소비 테스트가 파생 밖에 유지한다.
+// 어긋난다(리뷰 실측). 열거 붕괴 방지의 손 앵커(oneOf 분기 수 32 · 행 수 10 · variant 셀 총합
+// 39 · exitCodes 리터럴 7쌍)는 소비 테스트가 파생 밖에 유지한다.
 export function matrixCellCounts(rows: readonly ContractRow[], allVariantCount: number): { allowed: number; rejected: number } {
   let allowed = 0;
   let rejected = 0;

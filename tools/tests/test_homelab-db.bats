@@ -750,6 +750,25 @@ pr_closed_unmerged() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run create-database.yaml)" = "1" ]
 }
 
+@test "the missing-run pending points at a resume path that exists (no correlation lookup verb)" {
+  # 티켓 09 — 종전 문구는 '같은 correlation으로 재조회 가능'이었는데 correlation을 받는 조회 동사가
+  # 없다(status.ts에 correlation 참조 0건). 있지도 않은 재개 수단을 약속하면 에이전트의 자연스러운
+  # 다음 수는 **재디스패치**이고, 새 nonce가 발급돼 같은 이름의 PR 두 개가 난다.
+  printf '[]\n' > "$FIX/db-runs.json"
+  run_db_create --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "재디스패치 금지"
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "Actions"
+  # 부정 단언 + 같은 @test 안 양성 대조(검출기 생존).
+  [ "$(echo "$output" | jq -r '.result.pendingReason' | grep -c "correlation으로 재조회")" = "0" ]
+  [ "$(printf '%s\n' "큐/크론 지연 가능, 같은 correlation으로 재조회 가능" | grep -c "correlation으로 재조회")" = "1" ]
+  # owner 결정 Q2 — `status --correlation` 핸들 모드는 열지 않는다(재개 조건 미충족). 그 사실이
+  # 표면에도 남아 있어야 문구가 거짓말이 아니다: CLI에 그 플래그가 없고, 실재하는 --branch는 있다.
+  [ "$(grep -c -- "--correlation" tools/homelab.ts)" = "0" ]
+  [ "$(grep -c -- "--branch" tools/homelab.ts)" -ge 1 ]
+}
+
 @test "a non-zero dispatch stays an immediate failure (tolerance is narrowed to errKind timeout alone)" {
   # rc 1(인증 실패·입력 거부)은 '결과 미상'이 아니다 — run 특정으로 넘어가면 안 된다(대조군).
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \

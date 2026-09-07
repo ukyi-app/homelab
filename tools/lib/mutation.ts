@@ -25,6 +25,7 @@ import { revisionFields, syncRevisionOf } from "./argocd.ts";
 import { compact } from "./contract.ts";
 import { ghJson, ghRead, sh, type GhRead } from "./exec.ts";
 import { CORRELATION_RE } from "./identity.ts";
+import { LANE_PR_FIELDS, lanePrRef, readLanePrs, type LanePrRow } from "./lane-pr.ts";
 import { HOMELAB_REPO } from "./platform.ts";
 
 export type MutationSpec = {
@@ -129,11 +130,9 @@ function newNonce(): string {
 }
 
 type RunRow = { id: number; name: string; status: string; conclusion: string | null; html_url: string };
-// state — 머지 관측 루프의 종결 축(티켓 05). merged_at만 보면 close(미머지)가 데드라인까지 '머지 대기'로
-// 접힌다. 목록 투영에 실려 오지만 판정은 단건 권위 조회로 확증한 뒤에만 한다(아래 readPrOne).
-// 옵셔널인 이유: 이 필드를 모르는 픽스처·응답에서 undefined가 되고, 엄격 동등 비교라 무관 케이스를
-// 뒤집지 않는다(state 부재 = 미판정, closed로 오독하지 않는다).
-type PrRow = { number: number; html_url: string; merged_at: string | null; merge_commit_sha: string | null; state?: string };
+// PR 행·투영·정확 조회는 lib/lane-pr.ts 공유(티켓 09) — status의 `--branch` 재조회가 같은 질의를
+// 쓴다. state 축(티켓 05)의 근거도 그 모듈이 소유한다. 판정은 단건 권위 조회로 확증한 뒤에만 한다.
+type PrRow = LanePrRow;
 
 // 폴링 루프의 관측 실패 추적(티켓 06) — 마지막 실패 사유와 **연속** 실패 횟수를 들고 데드라인
 // pendingReason의 접미를 만든다. 성공 관측이 한 번이라도 끼면 streak가 0으로 돌아가므로 접미는
@@ -197,21 +196,32 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     if (Date.now() >= endAt) {
       // 디스패치 응답이 유실된 경우(타임아웃)는 '접수됨'을 단언할 수 없다 — 그 사실과 함께,
       // 재실행이 아니라 Actions의 correlation 에코 확인이 다음 행동임을 문구가 지목한다(티켓 08).
+      // ⚠️ 이 분기에는 run 핸들이 없다 — `status --run`도 `--branch`도 쓸 수 없다. 그래서 재개
+      // 수단은 **실재하는 것**만 적는다(티켓 09): correlation을 받는 조회 동사는 없고(owner 결정
+      // Q2 — `status --correlation` 핸들 모드는 열지 않는다: PR 본문에 correlation 에코가 없어
+      // reusable 5벌 계약 변경이 선행이다), 유일하게 실재하는 확인 경로는 Actions에서 run-name의
+      // [correlation] 에코를 눈으로 보는 것이다. 재디스패치는 새 nonce를 발급해 같은 이름의 PR
+      // 두 개를 만든다 — 그래서 문구가 먼저 그것을 금지한다.
       const accepted = dispatchUnconfirmed
-        ? "디스패치 응답이 타임아웃으로 유실됨(접수 여부 미상 — run이 이미 생성됐을 수 있다: 재실행 전 Actions에서 [correlation] 에코를 확인)"
-        : "run 미출현(디스패치는 접수됨) — 큐/크론 지연 가능, 같은 correlation으로 재조회 가능";
+        ? "디스패치 응답이 타임아웃으로 유실됨(접수 여부 미상 — run이 이미 생성됐을 수 있다) · 재디스패치 금지 — Actions에서 run-name의 [correlation] 에코로 확인"
+        : "run 미출현(디스패치는 접수됨) — 큐/크론 지연 가능 · 재디스패치 금지: Actions에서 run-name의 [correlation] 에코로 확인(run이 보이면 status --run <url>로 이어간다)";
       return { variant: "pending", omitted: [], result: compact({ ...base, pendingReason: `${accepted}${identifyWatch.suffix()}` }) };
     }
     Bun.sleepSync(opts.pollMs);
   }
   const runRef = () => compact({ id: run!.id, url: run!.html_url, conclusion: run!.conclusion ?? undefined });
+  // 레인 브랜치는 run id의 순수 파생이다(추가 API 호출 0) — PR이 아직 없는 단계의 유일한 좌표.
+  const branchOf = () => spec.branchFor(run!.id);
   emit("identified", { runUrl: run.html_url });
 
   // 2b) identifyOnly(MCP) — run을 식별했으면 conclusion 추적 없이 run 핸들을 pending으로 즉시 반환한다.
   // stdio 서버가 GitHub Actions run 완료(최대 deadline)까지 블로킹하지 않게 한다 — 진행은 status(run URL)
   // 재조회가 재개 경로다(스펙 "결과의 run URL이 상관 핸들, 진행 확인은 status 핸들 조회로", release r1 a2=b3).
   if (opts.identifyOnly) {
-    return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pendingReason: "run 디스패치·식별 완료 — 진행은 status 핸들(run URL) 조회로 확인(동기 바운디드)" }) };
+    // 좌표를 함께 싣는다(티켓 09): 이 분기에는 PR이 **원리적으로** 없고(run 완료 후 생긴다) run
+    // 핸들만으로는 PR·머지로 갈 길이 없다. 브랜치는 run id의 순수 파생이라 조회가 0회 늘어난다 —
+    // 소비자는 `homelab status --run <url> --branch <branch>`로 그 레인 PR을 정확 조회한다.
+    return { variant: "pending", omitted: [], result: compact({ ...base, run: compact({ ...runRef(), branch: branchOf() }), pendingReason: "run 디스패치·식별 완료 — 진행은 status 핸들 조회로 확인: homelab status --run <run.url> --branch <run.branch>(동기 바운디드)" }) };
   }
 
   // 3) conclusion 추적 — queued/in_progress면 폴링, 실패면 실패 잡 열거.
@@ -233,18 +243,16 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   }
 
   // 4) PR 특정 — run_id 브랜치(reusable 명명 SSOT)로 권위 조회.
-  const branch = spec.branchFor(run.id);
-  const owner = HOMELAB_REPO.split("/")[0];
+  const branch = branchOf();
   // 3상 리더(ghRead) — 머지 루프가 실패 사유를 pendingReason 접미로 실어야 하므로 값만 주는
   // ghJson 대신 사유를 함께 받는다. readPr은 그 축약(step 4 grace 루프는 사유를 쓰지 않는다).
-  const readPrList = (): GhRead =>
-    ghRead(`repos/${HOMELAB_REPO}/pulls?state=all&head=${owner}:${branch}`,
-      "[.[] | {number, html_url, merged_at, merge_commit_sha, state}]");
+  // 질의·투영은 lane-pr.ts 공유(status --branch가 같은 것을 쓴다).
+  const readPrList = (): GhRead => readLanePrs(branch);
   const readPr = (): PrRow[] | null => { const g = readPrList(); return g.kind === "ok" ? (g.value as PrRow[]) : null; };
   // 단건 권위 조회 — 목록 endpoint는 read-replica 인덱스라 단건 리소스보다 낡을 수 있다(함정
   // 「GitHub API는 낡은 스냅샷을 200으로 돌려준다」). 종결(머지 없이 닫힘) 판정에만 쓴다.
   const readPrOne = (n: number): GhRead =>
-    ghRead(`repos/${HOMELAB_REPO}/pulls/${n}`, "{number, html_url, merged_at, merge_commit_sha, state}");
+    ghRead(`repos/${HOMELAB_REPO}/pulls/${n}`, LANE_PR_FIELDS);
   // 3상: found(≥1) / empty(0건) / error(null) — empty·error는 그 조회의 미확정이라 grace 재시도 뒤에만 판정.
   // 재시도는 endAt과 무관하다(PR_GRACE_RETRIES 주석) — 여기서 deadline을 보면 수정이 무효가 된다.
   let prs: PrRow[] | null = null;
@@ -264,8 +272,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     return { variant: "race", omitted: [], result: compact({ ...base, run: runRef(), observedRuns: prs.length, error: `브랜치 ${branch}에 PR이 ${prs.length}개 — 신원 판정 불가(fail-closed)` }) };
   }
   let pr: PrRow | undefined = noop ? undefined : prs[0];
-  const prRef = () => (pr === undefined ? undefined
-    : compact({ number: pr.number, url: pr.html_url, merged: pr.merged_at !== null, mergeSha: pr.merge_commit_sha ?? undefined }));
+  const prRef = () => (pr === undefined ? undefined : lanePrRef(pr));
   const doneVariant = noop ? "no-op" : "success";
   // no-op(PR 없음)에는 방출할 PR 핸들이 없다 — 없는 좌표를 지어내지 않는다.
   if (pr !== undefined) emit("pr", { runUrl: run.html_url, prUrl: pr.html_url });
