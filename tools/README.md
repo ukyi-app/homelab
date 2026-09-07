@@ -87,6 +87,11 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   컴파일 아키타입 3종 TARGETARCH — site는 arch 중립이라 대상 아님). fail ≥ 1이면 exit 1.
   테스트: `tools/tests/test_homelab-cli.bats`(라우팅·계약)·`test_homelab-doctor.bats`(진단 —
   PATH stub + NUL argv 원장, 하네스 `tools/tests/helpers/cli_stub.bash`).
+  **`--wait`의 pending은 실패가 아니라 설계된 바운디드 결과다** — 예산(기본 20분,
+  `WAIT_DEFAULTS.deadlineMs`, 산정 근거 분해는 그 상수 주석)이 끝나면 관측된 만큼(run·PR 핸들 +
+  pendingReason)을 실어 돌려준다. 종료코드가 1인 것은 '완료 확인 못함'이지 실패가 아니다
+  (x-contract.exitCodes). 재개 경로는 재실행이 아니라 **핸들 재조회**다:
+  `homelab status --run <run URL>` 또는 `--pr <PR URL>`.
   **재시도 정책**: seam(`lib/exec.ts`)은 재시도하지 않는다 — 재시도는 콜사이트 정책이고 **변이
   argv(`gh workflow run`)는 어떤 층에서도 재시도하지 않는다**(타임아웃은 '실패'가 아니라 '결과
   미상'이라 재시도가 곧 두 개의 run이다). 변이 엔진의 폴링 루프·PR 목록 grace 재조회는 부수효과

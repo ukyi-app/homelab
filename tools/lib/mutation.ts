@@ -67,9 +67,26 @@ export const PR_GRACE_RETRIES = 3;
 export type MutationOpts = { wait: boolean; pollMs: number; deadlineMs: number; identifyOnly: boolean };
 
 // 대기 옵션 SSOT — 기본값과 검증 술어를 변이 동사 전부가 공유한다(콜사이트 인라인 사본 금지).
+//
+// deadlineMs = 20분의 분해와 출처(티켓 10 — **값은 바꾸지 않았다**, 재개 조건은 아래):
+//   · required check `gate`(ci.yaml gate 잡): 잡 실행구간 p50 483s / p90 514s / max 532s ≈ 9분,
+//     run 구간(큐 포함) max 1687s ≈ 28분 — ci.yaml:44-47이 기록한 2026-09-03 라이브 실측(완료 99건).
+//   · 디스패처: 보조 잡 timeout-minutes 5(create-database.yaml:56) + 변이 본체 20(_create-database.yaml:27).
+//   · homelab-mutation은 `queue: max` FIFO다 — bump-poll(10분 크론)·tf-reconcile(30분)·iac가 앞에
+//     서면 그만큼이 순수 대기다.  · 머지 후 ArgoCD 수렴: timeout.reconciliation 30s(bootstrap-values.yaml:248).
+//   합산 최선 ≈ 2 + 9 + 1 = 12분이고 큐 한 주기가 겹치면 20분에 맞닿는다. endAt은 디스패치 시점에
+//   한 번 계산돼(아래 runMutation) run 출현·conclusion·머지·라이브 수렴이 이 예산 하나를 나눠 쓴다.
+// 원칙: 클라이언트 데드라인이 자기가 관측하는 **서버측 천장**(ci.yaml `timeout-minutes: 45`)보다
+//   짧으면 'CI가 아직 답을 안 냈다'가 'CLI가 확인하지 못함'으로 구조적으로 변환된다. 올린다면 45분이
+//   방어 가능하고 30-40분은 감각값이다.
+// ⚠️ 재개 조건 — 값 변경은 **첫 실전 `db create --wait`의 dispatch→merge 벽시계 실측** 뒤다(CLI 유래
+//   run이 아직 0건이라 위 분해는 파이프라인 부품의 합이지 이 동사 자체의 실측이 아니다). 실측 없이
+//   올리면 에이전트 foreground 상한(10분)과 사람의 인내를 둘 다 넘겨 pending이 더 늦게 돌아올 뿐이다.
+//   pending은 실패가 아니라 설계된 바운디드 결과이고, 재개 경로는 재실행이 아니라 핸들 재조회다.
 export const WAIT_DEFAULTS = { pollMs: 5_000, deadlineMs: 1_200_000 } as const;
 // identifyOnly: run 식별 직후 run 핸들을 pending으로 반환하고 conclusion 추적(최대 deadline)을 건너뛴다.
-// MCP 전용(release r1 a2=b3) — stdio 서버는 단일 스레드라 conclusion 폴링이 서버를 최대 20분 블로킹한다.
+// MCP 전용(release r1 a2=b3) — stdio 서버는 단일 스레드라 conclusion 폴링이 서버를 주어진 deadline
+// (기본값을 물려받으면 WAIT_DEFAULTS.deadlineMs)만큼 블로킹한다.
 // 스펙의 "결과의 run URL이 상관 핸들, 진행 확인은 status 핸들 조회로"를 실행형으로 만든다. CLI는 미설정.
 export type WaitInput = { wait?: boolean; pollMs?: number; deadlineMs?: number; identifyOnly?: boolean };
 export function waitInputError(input: WaitInput): string | null {

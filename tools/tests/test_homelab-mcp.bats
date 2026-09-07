@@ -537,3 +537,15 @@ mcp_rpc_in() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -rc 'select(.id==51) | has("error")')" = "false" ]
 }
+
+# ── 대기 데드라인 인용의 정합(homelab-cli-r2 티켓 10) ────────────────────────────────────────
+
+@test "the deadline quoted in mcp.ts is derived from WAIT_DEFAULTS, never a stale hand copy" {
+  # MCP는 CLI 기본 deadline을 물려받지 않고 짧은 값을 명시한다 — 그 이유를 적은 주석이 상수와
+  # 어긋나면 운영자가 서버 블로킹 상한을 잘못 읽는다. 손 앵커가 아니라 상수에서 유도해 대조한다.
+  mins="$(bun -e 'import { WAIT_DEFAULTS } from "./tools/lib/mutation.ts"; console.log(WAIT_DEFAULTS.deadlineMs / 60000);')"
+  [ -n "$mins" ]   # 바닥값 — 빈 문자열이면 아래 grep이 전부 매치해 공허해진다
+  [ "$(grep -c "WAIT_DEFAULTS.deadlineMs = ${mins}분" tools/lib/mcp.ts)" = "1" ]
+  # 양성 대조(검출기 생존) — 어긋난 값은 같은 grep에서 0건이다.
+  [ "$(grep -c "WAIT_DEFAULTS.deadlineMs = $((mins + 1))분" tools/lib/mcp.ts)" = "0" ]
+}

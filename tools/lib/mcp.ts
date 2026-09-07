@@ -36,9 +36,11 @@ import {
 const PROTOCOL_VERSION = "2024-11-05";
 type Json = Record<string, unknown>;
 
-// MCP 변이의 run 식별 시간 상한 — identifyOnly라도 run '출현' 대기(step2)는 공유 deadline까지 폴링하므로,
-// run 미출현 시 최대 20분 서버 블로킹이 남는다(release r2-a2/b3). MCP는 짧은 deadline으로 그 대기를
-// 바운드한다(미출현이면 pending 반환, status(run) 재조회로 재개). env로 주입 가능(테스트 시간 심).
+// MCP 변이의 run 식별 시간 상한 — identifyOnly라도 run '출현' 대기(step2)는 **주어진** deadline까지
+// 폴링한다. CLI 기본값(WAIT_DEFAULTS.deadlineMs = 20분)을 그대로 물려받으면 stdio 서버가 run 미출현 시
+// 그만큼 블로킹되므로, MCP는 아래 짧은 deadline을 **명시해** 그 대기를 바운드한다(release r2-a2/b3 —
+// 미출현이면 pending 반환, status(run) 재조회로 재개). env로 주입 가능(테스트 시간 심).
+// ⚠️ 위 인용은 손 사본이 아니다 — test_homelab-mcp.bats가 WAIT_DEFAULTS에서 분(minute)을 유도해 대조한다.
 const MCP_DEADLINE_MS = Number(process.env.HOMELAB_MCP_DEADLINE_MS ?? "30000");
 const MCP_POLL_MS = Number(process.env.HOMELAB_MCP_POLL_MS ?? "2000");
 // 변이 tool 공통 대기 입력 — 짧은 식별 deadline + identifyOnly.
