@@ -12,7 +12,7 @@
 // --body-file로 값을 넘겨 argv 원장에 값이 남지 않는다 — 이 엔진은 키 파일을 읽지도 않는다).
 import { existsSync, realpathSync, writeFileSync } from "node:fs";
 import { compact } from "./contract.ts";
-import { ALLOW_PUSH_REWRITE_ENV, firstReason, git, pushRoutes, sh } from "./exec.ts";
+import { ALLOW_PUSH_REWRITE_ENV, git, pushReason, pushRoutes, sh } from "./exec.ts";
 import { APP_NAME_RE, isCanonicalClone, pathInputError, pushRouteError } from "./identity.ts";
 import { ARCHETYPES, OWNER, TEMPLATE_REPO } from "./platform.ts";
 import { SCAFFOLD_ENTRY, scaffoldContractError } from "./template-contract.ts";
@@ -261,8 +261,9 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     // timeoutMs: 0 — push는 망 왕복이고, 서버에 반영된 뒤 클라이언트만 SIGTERM으로 죽으면
     // '첫 push 실패'로 보고돼 운영자가 성공한 부수효과를 실패로 읽는다.
     const push = git(dest, ["push", "-q", "origin", "HEAD:refs/heads/main"], { timeoutMs: 0 });
-    // 사유 선택은 seam의 firstReason 소유 — `To <url>` 1행이 사유를 가리는 push 고유 규약(exec-3).
-    if (!push.ok) return fail(`첫 push 실패 — ${firstReason(push.err) || `git push 비-0(exit ${push.status ?? "?"}${push.signal ? `, ${push.signal}` : ""})`}`, "scaffolded", { created, adopted: adopted || undefined });
+    // 사유 선택은 seam의 pushReason 소유 — `To <url>` 1행이 사유를 가리는 push 고유 규약(exec-3) +
+    // 자격 helper 부재의 다음 행동 지목(티켓 27 — `gh auth setup-git`). 문구를 여기서 조립하지 않는다.
+    if (!push.ok) return fail(`첫 push 실패 — ${pushReason(push.err) || `git push 비-0(exit ${push.status ?? "?"}${push.signal ? `, ${push.signal}` : ""})`}`, "scaffolded", { created, adopted: adopted || undefined });
     pushed = true;
     // 다음 단계의 상관자(티켓 30 · product-9) — 이 push가 촉발한 reusable-app-build run은 이 SHA로
     // 태그되고, `app create`의 서버측 첫 관문이 그 이미지의 실존이다. 네트워크 0(rev-parse).

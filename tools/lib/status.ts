@@ -27,8 +27,17 @@ export type StatusInput = { app?: string; runUrl?: string; prUrl?: string; branc
 // 같은 어휘를 쓴다 — 리더가 임의로 하나를 고르면 그 뒤의 모든 보고가 오귀속이 된다.
 export type StatusOutcome = { variant: "success" | "failure" | "race"; omitted: string[]; result: Record<string, unknown> };
 
-const RUN_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/actions\/runs\/(\d+)(?:\/.*)?$/;
-const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?:\/.*)?$/;
+// 핸들 URL의 owner/repo — GitHub 명명 규칙으로 좁힌다(티켓 27). 종전 `[\w.-]+`는 `.`·`..`를
+// 통과시켰고 그 캡처가 `repos/${owner}/${repo}/…`로 gh api 경로에 조립됐다
+// (`https://github.com/../../pull/1` → `repos/../../pulls/1`). identity.ts:5가 'path traversal
+// 1차 게이트에 분기를 두지 않는다'를 원칙으로 두고 APP_NAME_RE가 `..`를 거르는데 핸들 축만 그
+// 원칙 밖이었다(MCP는 문자열을 그대로 전달한다). 읽기 전용·사용자 자신의 토큰이라 권한 확대는
+// 아니지만, 조립 전에 형식으로 닫는 것이 이 레포의 규약이다.
+//   · owner — 영숫자 시작 + 영숫자/하이픈, ≤39자(GitHub 계정 규칙).
+//   · repo  — 영숫자/`.`/`_`/`-`, ≤100자. 선두 부정 lookahead가 `.`·`..` **전체**를 거른다
+//     (`.github` 같은 정당한 점-접두 이름은 그대로 통과한다 — 뒤에 `/`나 끝이 오지 않으므로).
+const RUN_URL_RE = /^https:\/\/github\.com\/([A-Za-z0-9][A-Za-z0-9-]{0,38})\/((?!\.{1,2}(?:\/|$))[A-Za-z0-9._-]{1,100})\/actions\/runs\/(\d+)(?:\/.*)?$/;
+const PR_URL_RE = /^https:\/\/github\.com\/([A-Za-z0-9][A-Za-z0-9-]{0,38})\/((?!\.{1,2}(?:\/|$))[A-Za-z0-9._-]{1,100})\/pull\/(\d+)(?:\/.*)?$/;
 
 // 이 앱을 대상으로 하는 homelab 변이 PR 브랜치 판정 — 두 SSOT의 분업:
 //   · bump 레인 = tools/lib/bump-plan.ts(parseBranch — kind 인코딩 `bump-poll/<kind>/<name>-<tag>`,

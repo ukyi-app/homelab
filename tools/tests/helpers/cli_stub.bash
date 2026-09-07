@@ -59,6 +59,10 @@ cli_stub_init() {
   # 라이브의 기본 경로(queued/in_progress → completed)를 재현하는 자리로, 둘째 조회부터는 db-run.json.
   printf '{"status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run-first.json"
   printf '[]\n' > "$FIX/db-run-jobs.json"
+  # 신선도 스냅샷 픽스처(티켓 27) — STUB_GH_STALE_RUN=1 전용. **디스패치 전에 이미** 같은 nonce를
+  # 에코하던 옛 완료 run이다(고정 nonce가 프로덕션에서 켜졌을 때의 형상). 투영이 스냅샷 질의와
+  # 같아야 한다: 신원(id·name)만 — 상태·URL은 채택하지 않을 run에 대해 의미가 없다.
+  printf '[{"id":501,"name":"✨ create-database — mydb [%s]"}]\n' "$NONCE" > "$FIX/stale-runs.json"
   printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
   # PR 단건 권위 조회(티켓 05) — 목록이 state:closed·미머지일 때만 읽힌다(확증 단계). 기본은 목록과
   # 같은 결론(closed·미머지)이고, stale 레인은 테스트가 merged_at을 채운 사본으로 덮어쓴다.
@@ -153,7 +157,8 @@ PY
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
 # STUB_GH_HANDLE_404 / STUB_GH_RAW / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
 # 3종(STUB_GH_RUNS_LIST_FAIL · STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기
-# 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL). 템플릿 파일·status 응답
+# 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL) / 신선도 스냅샷
+# (STUB_GH_STALE_RUN — 디스패치 전에 이미 같은 nonce를 에코하던 옛 run). 템플릿 파일·status 응답
 # 내용은 $FIX 픽스처가 SSOT.
 #
 # ⚠️ 기본 픽스처는 jq를 **적용한 뒤의** 형상이다 — 손으로 접어 적은 결과라 필터의 의미론
@@ -227,6 +232,14 @@ case "$*" in
     if [ -n "${STUB_APP_CONFIG_404:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
     if [ -n "${STUB_APP_CONFIG_ERR:-}" ]; then echo "gh: HTTP 502: Bad gateway" >&2; exit 1; fi
     printf '.app-config.yml\n'
+    ;;
+  # ── 신선도 스냅샷(티켓 27) — 변이 엔진이 **디스패치 전에** 내는 질의. 5레인 공통이라 경로만
+  #    글롭이다(응답이 레인 무관하다 — 형제 케이스들과 달리 픽스처가 하나뿐인 이유).
+  #    기본은 공집합: 프로덕션의 랜덤 nonce 경로가 그렇고, 이 하네스의 고정 nonce 픽스처(run이
+  #    처음부터 있다)를 '디스패치 전에도 있었다'로 읽으면 모든 레인이 채택 불가가 된다.
+  #    STUB_GH_STALE_RUN=1이면 같은 nonce를 에코하는 **옛** run을 돌려준다(채택 금지 증인).
+  "api repos/ukyi-app/homelab/actions/workflows/"*"/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name}]')
+    if [ -n "${STUB_GH_STALE_RUN:-}" ]; then cat "$FIX/stale-runs.json"; else echo '[]'; fi
     ;;
   # ── app create 케이스 — create-app 디스패처·runs 목록(수동 머지 동사) ──
   "workflow run create-app.yaml -R ukyi-app/homelab "*)

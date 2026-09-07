@@ -1,5 +1,7 @@
 // 공유 변이 엔진 — 변이 동사(db/cache create, app create/secrets/teardown)의 공통 골격.
-//   correlation nonce 생성 → 디스패치(gh workflow run) → nonce 에코 run-name으로 자기 run 특정
+//   correlation nonce 생성 → **신선도 스냅샷**(디스패치 전에 이미 그 에코를 가진 run id 집합 —
+//   티켓 27, 고정 nonce가 켜졌을 때 옛 run을 자기 것으로 채택하는 것을 막는다) → 디스패치
+//   (gh workflow run) → nonce 에코 run-name으로 자기 run 특정
 //   (정확히 1개만 채택: ≥2 = race fail-closed, 0 = 재조회 후 pending — 관측 차분은 신원
 //   메커니즘이 아니다, 스펙 run 특정 절) → run conclusion 추적(실패 시 실패 잡 열거 + run URL)
 //   → run_id 브랜치로 PR 특정(3상: found/empty/error — empty·error는 deadline 독립 grace 재조회 뒤 판정,
@@ -72,6 +74,10 @@ export const PR_GRACE_RETRIES = 3;
 // 콜사이트 인자뿐이기 때문). 값이 정수·양수가 아니면 무시한다 — Number("")는 0이고 Number("x")는
 // NaN이라, 둘 다 조용히 '무제한(0)'이나 NaN 타임아웃으로 새지 않게 양쪽을 다 막는다.
 export const DISPATCH_TIMEOUT_ENV = "HOMELAB_TEST_DISPATCH_TIMEOUT_MS";
+
+// 신선도 스냅샷의 투영(티켓 27) — 디스패치 **전** 질의라 신원(id·name)만 본다. 식별 루프의
+// 투영과 텍스트가 다른 것이 계약이다: 스텁·jq 계약 테스트가 두 질의를 각각 정확 일치로 잡는다.
+const PRE_RUNS_JQ = "[.workflow_runs[] | {id, name}]";
 
 // 진행 이벤트(티켓 07) — 엔진은 **이벤트만** 낸다. 문구·싱크는 셸(homelab.ts)이 소유하고 MCP는
 // 주입하지 않는다(stdio JSON-RPC 스트림 무오염). op가 Envelope만 반환한다는 원칙은 그대로다:
@@ -161,6 +167,25 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     opts.onProgress?.({ stage, correlation, ...handles });
   };
 
+  // 0) 신선도 스냅샷(티켓 27) — 디스패치 **전에** 이미 이 correlation을 에코하는 run의 **id 집합**을
+  // 찍어 두고 채택에서 배제한다. 없으면 고정 nonce(HOMELAB_CORRELATION 주입)가 프로덕션에서 켜졌을 때
+  // 같은 nonce의 **이전** run이 홀로 매치돼 옛 conclusion·옛 PR 핸들이 이번 실행의 결과로 보고된다
+  // (수령증 루프의 설계 전제는 "디스패치 직후 첫 조회에 새 run이 아직 없다"이므로 0건 분기가 그 문을 연다).
+  // 랜덤 nonce 경로에서는 이 집합이 **항상 공집합**이라 프로덕션 동작이 바뀌지 않고, created_at·시계에
+  // 무의존이다(「GitHub API는 낡은 스냅샷을 200으로 돌려준다」 아래에서도 '디스패치 전에 보였다'는
+  // 사실만 쓴다 — 낡은 스냅샷은 이 집합을 **좁힐** 뿐 넓히지 않는다).
+  // 투영이 식별 루프와 다른 이유: 여기서 필요한 것은 신원(id·name)뿐이고 상태·URL은 **채택하지 않을**
+  // run에 대해 의미가 없다. 두 질의는 서로 다른 시점의 서로 다른 질문이라 계약도 따로 진다.
+  // ⚠️ 스냅샷 조회 실패는 '배제 없음'(오늘의 동작)으로 접는다 — 이 관측은 **좁히기**이고, 여기서
+  // fail-closed로 죽이면 같은 endpoint의 지속 실패를 pendingReason이 지목하는 티켓 06 계약이 사라진다.
+  const runsPath = `repos/${HOMELAB_REPO}/actions/workflows/${spec.workflow}/runs?per_page=20`;
+  const echoesNonce = (r: { name: string }): boolean => r.name.includes(`[${correlation}]`);
+  const preExisting = new Set<number>();
+  const snapshot = ghRead(runsPath, PRE_RUNS_JQ);
+  if (snapshot.kind === "ok") {
+    for (const r of snapshot.value as Array<{ id: number; name: string }>) if (echoesNonce(r)) preExisting.add(r.id);
+  }
+
   // 1) 디스패치 — 유일한 변이 argv. correlation이 run-name에 에코된다(수령증).
   const dispatchArgs = ["workflow", "run", spec.workflow, "-R", HOMELAB_REPO];
   for (const [k, v] of spec.dispatchInputs) dispatchArgs.push("-f", `${k}=${v}`);
@@ -183,11 +208,11 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   let run: RunRow | undefined;
   const identifyWatch = pollWatch();
   for (;;) {
-    const got = ghRead(`repos/${HOMELAB_REPO}/actions/workflows/${spec.workflow}/runs?per_page=20`,
-      "[.workflow_runs[] | {id, name, status, conclusion, html_url}]");
+    const got = ghRead(runsPath, "[.workflow_runs[] | {id, name, status, conclusion, html_url}]");
     identifyWatch.observe(got);
     if (got.kind === "ok") {
-      const mine = (got.value as RunRow[]).filter((r) => r.name.includes(`[${correlation}]`));
+      // 신선도 배제 — 디스패치 전에 이미 있던 같은 에코의 run은 내 run이 아니다(위 0단계).
+      const mine = (got.value as RunRow[]).filter((r) => echoesNonce(r) && !preExisting.has(r.id));
       if (mine.length >= 2) {
         return { variant: "race", omitted: [], result: compact({ ...base, observedRuns: mine.length, error: `같은 correlation을 에코하는 run이 ${mine.length}개 — 신원 판정 불가(fail-closed)` }) };
       }

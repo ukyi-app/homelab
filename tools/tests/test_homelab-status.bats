@@ -252,6 +252,39 @@ assert_envelope_valid() {
   echo "$stderr" | grep -q "사용법"
 }
 
+@test "dot segments in a handle URL are refused before any gh call (traversal closed at the format gate)" {
+  # 티켓 27 — owner/repo 캡처가 `[\w.-]+`라 `.`·`..`가 통과했고 그 캡처가 `repos/<o>/<r>/…`로 gh api
+  # 경로에 조립됐다(`https://github.com/../../pull/1` → `repos/../../pulls/1`). identity.ts가
+  # 'traversal 1차 게이트에 분기를 두지 않는다'를 원칙으로 두는데 핸들 축만 그 밖이었다.
+  # 각 케이스마다 **원장 0건**을 함께 잰다 — exit 2만 보면 '거부는 했는데 그 전에 한 번 쏘았다'가 안 보인다.
+  n=0
+  for u in \
+    "https://github.com/../x/actions/runs/1" \
+    "https://github.com/x/../actions/runs/1" \
+    "https://github.com/x/./actions/runs/1" \
+    "https://github.com/-lead/x/actions/runs/1"; do
+    : > "$CALLS"
+    run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --run "$u" --json
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+    [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+    n=$((n + 1))
+  done
+  [ "$n" -eq 4 ]   # 열거 바닥값 — 루프가 짧아지면 vacuous green이다
+  # PR 축도 같은 술어를 쓴다(두 정규식이 함께 좁혀졌는지 — 한쪽만 고치면 다른 축이 열린 채 남는다).
+  : > "$CALLS"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --pr "https://github.com/../../pull/1" --json
+  [ "$status" -eq 2 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+  # 대조군 — 좁히기가 정당한 이름을 함께 막지 않았다. 점-접두 레포(`.github`)는 GitHub의 실재 이름이고
+  # 임의 owner/repo 핸들을 받는 것이 이 모드의 계약이다(하네스 case가 레포를 글롭으로 두는 이유).
+  : > "$CALLS"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/.github/actions/runs/1" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "run" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/.github/actions/runs/1" --jq "{name, status, conclusion, head_sha, html_url}")" = "1" ]
+}
+
 @test "app argument and handle flags are mutually exclusive: exit 2" {
   make_app_fixture page true
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --run "https://github.com/ukyi-app/page/actions/runs/1" --json

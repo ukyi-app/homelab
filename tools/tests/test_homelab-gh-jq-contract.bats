@@ -20,7 +20,7 @@ setup() {
   make_gh_stub
 }
 
-@test "the seven composite jq filters are shared verbatim by the lib sources and the gh stub (floor 7)" {
+@test "the eight composite jq filters are shared verbatim by the lib sources and the gh stub (floor 8)" {
   # 구분자는 '%' — 필터 본문에 '|'가 들어 있어 파이프를 구분자로 쓸 수 없다.
   # 4번째 칸(lit)은 **소스에 실린 리터럴**이다: 목록형 레인 필터는 lane-pr.ts가
   # `[.[] | ${LANE_PR_FIELDS}]` 템플릿으로 **합성**해서 전문이 소스에 없다(투영 SSOT는 필드 집합
@@ -39,6 +39,7 @@ setup() {
     [ "$status" -eq 3 ]
   done <<'EOF'
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name, status, conclusion, html_url}]
+tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name}]
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/runs/501/jobs%[.jobs[] | select(.conclusion == "failure") | .name]
 tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501%[.[] | {number, html_url, merged_at, merge_commit_sha, state}]%{number, html_url, merged_at, merge_commit_sha, state}
 tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls/21%{number, html_url, merged_at, merge_commit_sha, state}
@@ -46,12 +47,15 @@ tools/lib/status.ts%repos/ukyi-app/page/actions/runs?per_page=3%[.workflow_runs[
 tools/lib/status.ts%repos/ukyi-app/homelab/pulls?state=open&per_page=100%[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]
 tools/lib/status.ts%repos/ukyi-app/homelab/pulls/7%{number, state, merged, merge_commit_sha, title, head_ref: .head.ref, head_sha: .head.sha, auto_merge: (.auto_merge != null), html_url}
 EOF
-  # 비공허 바닥값 — 일곱 줄이 실제로 돌았다(heredoc이 비면 위 전칭이 항진이다).
-  [ "$n" -eq 7 ]
+  # 비공허 바닥값 — 여덟 줄이 실제로 돌았다(heredoc이 비면 위 전칭이 항진이다).
+  [ "$n" -eq 8 ]
   # 변이 엔진의 run 목록 필터는 다섯 레인(create-app·teardown-app·update-secrets·create-cache·
   # create-database)이 **한 텍스트를 공유**한다. 위 루프는 대표 하나만 밟으므로, 나머지 넷이 함께
   # 좁혀졌는지는 이 등식이 잰다(부분 narrowing = 남은 글롭이 드리프트를 삼킨다).
   [ "$(grep -cF '[.workflow_runs[] | {id, name, status, conclusion, html_url}]' tools/tests/helpers/cli_stub.bash)" = "5" ]
+  # 신선도 스냅샷(티켓 27)의 투영은 **경로만 글롭인 한 케이스**가 5레인을 다 받는다 — 응답이 레인
+  # 무관(기본 공집합)이라 사본을 다섯 벌 두면 드리프트 표면만 늘어난다. 그래서 여기는 1건이다.
+  [ "$(grep -cF '[.workflow_runs[] | {id, name}]' tools/tests/helpers/cli_stub.bash)" = "1" ]
 }
 
 @test "the workflow_runs unwrap and the head.ref nesting are witnessed against raw payloads (real jq)" {
