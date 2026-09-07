@@ -10,7 +10,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CommandParseError, parseCommand, skipMarker, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
 import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInput } from "./lib/conn-url.ts";
-import { ENVELOPE, EXIT, USAGE_EXIT, type Envelope } from "./lib/contract.ts";
+import { ENVELOPE, EXIT, USAGE_EXIT, assertEnvelope, type Envelope } from "./lib/contract.ts";
 import { git } from "./lib/exec.ts";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { WAIT_DEFAULTS, type ProgressEvent } from "./lib/mutation.ts";
@@ -587,6 +587,9 @@ function main(argv: string[]): number {
   // stderr, 결과는 stdout 순수성(--json이면 stdout은 envelope 하나, 사람용은 stderr)을 지킨다.
   if (out.kind === "help") { process.stdout.write(out.text); return 0; }
   if (out.kind === "usage-error") { process.stderr.write(`${out.message}\n\n${out.usage}`); return USAGE_EXIT; }
+  // 런타임 자기검증 — --json 여부와 무관하게(사람용 렌더도 같은 envelope에서 나온다) 계약 위반을
+  // 방출 전에 loud하게 죽인다. 골든이 없는 셀에서 엔진이 계약을 어기면 여기가 유일한 증인이다.
+  assertEnvelope(out.envelope);
   // 기계 채널 먼저 — 사람용 렌더(thunk)가 throw해도 --json 소비자의 envelope는 이미 온전하다.
   // 렌더러를 thunk로 받는 이유가 이 순서다: 종전에는 어댑터가 `human: renderX(envelope)`로 즉시
   // 평가해, 사람용 렌더 결함 하나가 JSON 출력에 도달하기도 전에 프로세스를 죽였다(shell-6).

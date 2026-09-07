@@ -780,3 +780,28 @@ pr_closed_unmerged() {
   # run 특정 조회로 넘어가지 않았다(즉시 종결).
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20")" = "0" ]
 }
+
+@test "a schema-violating envelope dies loud at emit time (runtime self-check mutation)" {
+  # contract-7: 골든이 없는 셀은 엔진이 계약을 어겨도 아무도 모른다 — 방출 직전 자기검증이 그 침묵을
+  # 닫는다. 뮤테이션은 **사본 트리의 스키마**에 가짜 required 필드를 넣어 엔진 산출을 위반으로 만든다
+  # (작업 트리는 불변). node_modules는 심링크로 들여온다(사본 트리는 /tmp라 상위 해석이 없다).
+  T="$BATS_TEST_TMPDIR/selfcheck"
+  mkdir -p "$T/tools"
+  cp -R tools/lib "$T/tools/lib"
+  cp tools/homelab.ts "$T/tools/homelab.ts"
+  ln -s "$ROOT/node_modules" "$T/node_modules"
+  sed 's|"required": \["id", "url"\],|"required": ["id", "url", "bogusRequiredField"],|' \
+    tools/cli-result-schema.json > "$T/tools/cli-result-schema.json"
+  # sed 무매치의 vacuous green 차단 — 뮤테이션이 정확히 1곳(mutationRun) 적용됐는지 먼저 확인한다.
+  [ "$(grep -c '"bogusRequiredField"' "$T/tools/cli-result-schema.json")" = "1" ]
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" "$T/tools/homelab.ts" db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -ne 0 ]
+  echo "$stderr" | grep -q "계약 파손"
+  # 양성 대조 — 같은 사본 트리에 원본 스키마를 두면 초록이다(트리 복사 실패로 red가 아님을 증명).
+  cp tools/cli-result-schema.json "$T/tools/cli-result-schema.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" "$T/tools/homelab.ts" db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+}

@@ -119,8 +119,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # 남는다 — verb 분기가 허용 variant 집합까지 선언하고, verb별 허용∪비허용 = variant 전체(7종).
   # 표본 result는 공유 코퍼스(helpers/contract-samples.ts)가 SSOT — 축자 이중 사본 제거(티켓 05).
   # 바닥값은 계약 행(CONTRACT_ROWS)에서 파생한다 — 손 재계산(구 36/34) 대체. 열거 붕괴 방지의
-  # 손 앵커는 파생 밖에 남는다: oneOf 분기 수 32 · 계약 행 수 10 (exitCodes 리터럴 7쌍 핀은
-  # 위의 "result schema pins …" @test가 소유).
+  # 손 앵커는 파생 밖에 남는다: oneOf 분기 수 34 · 계약 행 수 10 (exitCodes 리터럴 7쌍 핀은
+  # 위의 "result schema pins …" @test가 소유). doctor·status 행 분할(티켓 25)로 분기가 32→34가
+  # 됐지만 **variant 셀 총합 39는 불변**이다 — 분할이 셀을 잃지 않았다는 증거.
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
     import { CONTRACT_ROWS } from "./tools/lib/catalog-rows.ts";
@@ -130,7 +131,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     const map = sch["x-contract"].exitCodes;
     const all = sch.properties.variant.enum;
     const verbBranches = sch.allOf.find((b) => b.oneOf?.[0]?.properties?.verb)?.oneOf ?? [];
-    if (verbBranches.length !== 32) { console.error("oneOf 분기 수 " + verbBranches.length + " != 32(손 앵커)"); process.exit(1); }
+    if (verbBranches.length !== 34) { console.error("oneOf 분기 수 " + verbBranches.length + " != 34(손 앵커)"); process.exit(1); }
     if (CONTRACT_ROWS.length !== 10) { console.error("계약 행 수 " + CONTRACT_ROWS.length + " != 10(손 앵커)"); process.exit(1); }
     // variant 셀 총합 핀 — 다중 variant 엔트리에서 variant가 지워지면 분기·행 수는 그대로인 채
     // 파생과 워커가 함께 내려가 초록이 된다(리뷰 실측) — 구판 ok:36 리터럴의 정확한 복원이다.
@@ -144,13 +145,13 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
       const allowed = new Set(brs.flatMap((b) => b.properties.variant.enum));
       if (allowed.size === 0) { console.error(verb + ": 허용 variant 선언 없음"); process.exit(1); }
       for (const br of brs) for (const v of br.properties.variant.enum) {
-        const result = SAMPLES[verb + "|" + v] ?? SAMPLES[verb];
+        const result = SAMPLES[verb + "|" + v];
         if (result === undefined) { console.error(verb + "|" + v + ": SAMPLES에 유효 표본 없음"); process.exit(1); }
         const env = { schema: "homelab-cli/1", verb, variant: v, exitCode: map[v], omitted: [], result };
         if (schemaErrors(env, sch, sch).length) { console.error("허용 조합 거부됨: " + verb + "+" + v); process.exit(1); }
         okN++;
       }
-      const anySample = SAMPLES[verb] ?? SAMPLES[verb + "|" + [...allowed][0]];
+      const anySample = SAMPLES[verb + "|" + [...allowed][0]];
       for (const v of all.filter((x) => !allowed.has(x))) {
         const env = { schema: "homelab-cli/1", verb, variant: v, exitCode: map[v], omitted: [], result: anySample };
         if (schemaErrors(env, sch, sch).length === 0) { console.error("비허용 조합 통과: " + verb + "+" + v); process.exit(1); }
@@ -168,9 +169,53 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   echo "$output" | grep -q "^ok$"
 }
 
+@test "variant-shape coupling rejects mis-shaped results on the split rows (floor 5, with controls)" {
+  # contract-5 실측: 행이 verb→variant 집합만 묶고 variant→result 형상을 묶지 않던 동안, 아래 다섯은
+  # 전부 스키마 유효였다(success에 error가 실린 envelope · failure에 성공 형상 · doctor의 exitCode
+  # 거짓말). doctor는 summary.fail을 maximum:0/minimum:1로 갈라 **스키마가 독립 검출**하게 하고,
+  # status는 success(list|app|run|pr)/failure(statusError)로 나눠 닫았다.
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const ids = sch.definitions.doctorCheck.properties.id.enum;
+    const checks = (fail) => ids.map((id, i) => ({ id, status: i < fail ? "fail" : "pass", detail: "x" }));
+    const doctor = (fail) => ({ checks: checks(fail), summary: { pass: ids.length - fail, fail, warn: 0 } });
+    const env = (verb, variant, result) => ({ schema: "homelab-cli/1", verb, variant, exitCode: sch["x-contract"].exitCodes[variant], omitted: [], result });
+    const rejected = [
+      ["status success carrying an error branch", env("status", "success", { mode: "app", error: "x" })],
+      ["status failure carrying a list result", env("status", "failure", { mode: "list", apps: [], count: 0 })],
+      ["status failure carrying a run result", env("status", "failure", { mode: "run", run: { status: "completed", url: "u" } })],
+      ["doctor success with fail 9 (exitCode lie)", env("doctor", "success", doctor(9))],
+      ["doctor failure with fail 0 (exitCode lie)", env("doctor", "failure", doctor(0))],
+    ];
+    let n = 0;
+    for (const [label, e] of rejected) {
+      if (schemaErrors(e, sch, sch).length === 0) { console.error("ACCEPTED(통과해선 안 됨): " + label); process.exit(1); }
+      n++;
+    }
+    // 양성 대조 — 정상 형상 4종은 그대로 통과해야 한다(분할이 정당한 산출물을 죽이지 않는다).
+    const accepted = [
+      ["doctor success fail 0", env("doctor", "success", doctor(0))],
+      ["doctor failure fail 1", env("doctor", "failure", doctor(1))],
+      ["status success list", env("status", "success", { mode: "list", apps: [], count: 0 })],
+      ["status failure app error", env("status", "failure", { mode: "app", error: "x" })],
+    ];
+    for (const [label, e] of accepted) {
+      const errs = schemaErrors(e, sch, sch);
+      if (errs.length) { console.error("REJECTED(통과해야 함): " + label + " — " + errs.join(" | ")); process.exit(1); }
+    }
+    console.log("rejected:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^rejected:5$"
+}
+
 @test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, count derived)" {
   # structure r1 b2: variant와 exitCode가 독립이면 success+exit 1도 green — 허용 쌍을 스키마가 강제한다.
   # 표본은 공유 코퍼스, 기대 건수는 계약 행 파생(allowed 전수) — 손 앵커는 위 행렬 @test 소유.
+  # 표본 키는 전수 "verb|variant"다(verb 단위 폴백 제거 — 폴백이 남으면 doctor·status의 두 셀이
+  # 한 표본으로 통과해 방금 착지한 형상 결합이 자기 증인 없이 초록이 된다).
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
     import { CONTRACT_ROWS } from "./tools/lib/catalog-rows.ts";
@@ -185,7 +230,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     for (const br of verbBranches) {
       const verb = br.properties.verb.enum[0];
       for (const v of br.properties.variant.enum) {
-        const result = SAMPLES[verb + "|" + v] ?? SAMPLES[verb];
+        const result = SAMPLES[verb + "|" + v];
         if (result === undefined) { console.error(verb + "|" + v + ": SAMPLES에 유효 표본 없음"); process.exit(1); }
         const wrong = codes.find((c) => c !== map[v]);
         const env = { schema: "homelab-cli/1", verb, variant: v, exitCode: wrong, omitted: [], result };

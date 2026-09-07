@@ -203,27 +203,39 @@ run_teardown_tty() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" kubectl)" = "0" ]
 }
 
-@test "app teardown goldens pin default-success, human-merge pending, and pruned variants (floor 3)" {
+@test "app teardown goldens pin default-success, human-merge pending, pruned, failure, and race variants (floor 5)" {
+  # 티켓 25 (d): teardownFailure·teardownRace는 mutation*과 별개 수제 정의라 드리프트 위험이 공유
+  # 정의보다 큰데 골든이 없었다(합성 표본만이 증인). 두 셀을 엔진 산출로 승격한다.
   export OUTDIR="$BATS_TEST_TMPDIR"
   env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
     "$BUN" tools/homelab.ts app teardown myapp --confirm myapp --poll-ms 10 --deadline-ms 500 --json > "$OUTDIR/g-success.json" 2>/dev/null || true
   env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
     "$BUN" tools/homelab.ts app teardown myapp --confirm myapp --poll-ms 10 --deadline-ms 400 --wait --json > "$OUTDIR/g-pending.json" 2>/dev/null || true
+  # race — 같은 nonce를 에코하는 run이 2개(신원 판정 불가, exit 3).
+  printf '[{"id":901,"name":"x [%s]","status":"completed","conclusion":"success","html_url":"u1"},{"id":902,"name":"y [%s]","status":"completed","conclusion":"success","html_url":"u2"}]\n' "$NONCE" "$NONCE" > "$FIX/teardown-runs.json"
+  env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts app teardown myapp --confirm myapp --poll-ms 10 --deadline-ms 500 --json > "$OUTDIR/g-race.json" 2>/dev/null || true
+  printf '[{"id":901,"name":"🗑️ teardown-app — myapp [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/901"}]\n' "$NONCE" > "$FIX/teardown-runs.json"
   printf '%s\n' "$MERGED" > "$FIX/db-prs.json"
+  # failure — 머지됐는데 머지 SHA에 표면이 남아 있다(철거 미반영, 극성 반전).
+  env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts app teardown myapp --confirm myapp --poll-ms 10 --deadline-ms 500 --wait --json > "$OUTDIR/g-failure.json" 2>/dev/null || true
   env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_SURFACE_MERGE_ABSENT=1 \
     "$BUN" tools/homelab.ts app teardown myapp --confirm myapp --poll-ms 10 --deadline-ms 500 --wait --json > "$OUTDIR/g-pruned.json" 2>/dev/null || true
   n=0
-  for g in success pending pruned; do
+  for g in success pending pruned failure race; do
     diff -u "tools/tests/fixtures/homelab/app-teardown-$g.golden.json" "$OUTDIR/g-$g.json"
     n=$((n+1))
   done
-  [ "$n" -eq 3 ]
+  [ "$n" -eq 5 ]
+  # variant 다양성 — 다섯 골든이 서로 다른 셀을 덮는지(같은 variant 다섯 벌이면 floor가 무의미).
+  [ "$(jq -r '.variant' "$OUTDIR"/g-*.json | LC_ALL=C sort -u | wc -l | tr -d ' ')" = "4" ]
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
     import { readFileSync } from "node:fs";
     const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
     let n = 0;
-    for (const g of ["success", "pending", "pruned"]) {
+    for (const g of ["success", "pending", "pruned", "failure", "race"]) {
       const env = JSON.parse(readFileSync("tools/tests/fixtures/homelab/app-teardown-" + g + ".golden.json", "utf8"));
       const errs = schemaErrors(env, sch, sch);
       if (errs.length) { console.error(g + ": " + errs.join(" | ")); process.exit(1); }
@@ -232,7 +244,7 @@ run_teardown_tty() {
     console.log("ok:" + n);
   '
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^ok:3$"
+  echo "$output" | grep -q "^ok:5$"
 }
 
 @test "teardown is the only destructive verb in the catalog (MCP exposure premise, floor 1)" {

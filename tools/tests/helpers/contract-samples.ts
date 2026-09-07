@@ -1,6 +1,8 @@
 // 계약 테스트 표본 SSOT — test_homelab-cli.bats의 행렬 @test 두 개(허용/비허용 행렬 ·
 // exitCode 결합)가 같은 코퍼스를 소비한다(cli-deepening 심화 3 티켓 05: 축자 이중 사본 제거).
-// 키는 "verb|variant" 우선, "verb" 폴백. 새 동사/variant 분기를 추가하면 여기 표본을 추가한다
+// 키는 **전수 "verb|variant"**다 — verb 단위 폴백은 티켓 25에서 제거했다: 폴백이 있으면 한 동사의
+// 여러 셀이 한 표본으로 통과해, variant→result 형상 결합(doctor의 fail 상/하한·status의 성공/오류
+// 분리)이 자기 증인 없이 초록으로 착지한다. 새 동사/variant 분기를 추가하면 여기 표본을 추가한다
 // (누락 = 소비 테스트가 fail-loud). 테스트 전용 헬퍼 — 런타임 코드가 import하지 않는다.
 import type { ContractRow } from "../../lib/catalog-rows.ts";
 
@@ -40,10 +42,20 @@ export function buildSamples(doctorIds: readonly string[]): Record<string, Sampl
     ["failure"]: { name: "mydb", dryRun: false, wrote: false, error: "x" },
     ["skip"]: { name: "mydb", dryRun: false, wrote: false, note: "x" },
   };
+  // doctor·status는 variant별 형상이 다르다(doctorOk는 fail 0, doctorFailed는 fail ≥ 1 —
+  // statusOk는 모드 union, statusError는 mode+error). 표본도 셀마다 따로 짓는다.
+  const doctorChecks = (fail: number): Array<Record<string, unknown>> =>
+    doctorIds.map((id, i) => ({ id, status: i < fail ? "fail" : "pass", detail: "x" }));
+  const doctorSample = (fail: number): Sample => ({
+    checks: doctorChecks(fail),
+    summary: { pass: doctorIds.length - fail, fail, warn: 0 },
+  });
   return {
-    doctor: { checks: doctorIds.map((id) => ({ id, status: "pass", detail: "x" })), summary: { pass: doctorIds.length, fail: 0, warn: 0 } },
-    status: { mode: "list", apps: [], count: 0 },
-    // status의 race는 statusResult union이 아니라 전용 정의(statusRace)다 — 형상이 다르므로 표본도 별도.
+    "doctor|success": doctorSample(0),
+    "doctor|failure": doctorSample(1),
+    "status|success": { mode: "list", apps: [], count: 0 },
+    "status|failure": { mode: "app", error: "x" },
+    // status의 race는 성공 union(statusOk)이 아니라 전용 정의(statusRace)다 — 형상이 다르므로 표본도 별도.
     "status|race": { mode: "run", branch: "create-database/mydb-501", observedPrs: 2, error: "x" },
     ...Object.fromEntries(Object.entries(mut(dbBase)).map(([v, r]) => ["db create|" + v, r])),
     ...Object.fromEntries(Object.entries(mut(cacheBase)).map(([v, r]) => ["cache create|" + v, r])),
@@ -61,7 +73,7 @@ export function buildSamples(doctorIds: readonly string[]): Record<string, Sampl
 // (전체 variant 수 − 허용 집합 크기)의 합. 구판의 손 재계산 floor(36/34)를 대체한다.
 // 행 내 variant 중복은 fail-closed로 던진다 — 같은 verb+variant를 두 분기가 주장하면 oneOf가
 // "정확히 하나"를 잃어 스키마 자체가 모호해지고, 중복/dedup 계수 갈림으로 파생과 워커가
-// 어긋난다(리뷰 실측). 열거 붕괴 방지의 손 앵커(oneOf 분기 수 32 · 행 수 10 · variant 셀 총합
+// 어긋난다(리뷰 실측). 열거 붕괴 방지의 손 앵커(oneOf 분기 수 34 · 행 수 10 · variant 셀 총합
 // 39 · exitCodes 리터럴 7쌍)는 소비 테스트가 파생 밖에 유지한다.
 export function matrixCellCounts(rows: readonly ContractRow[], allVariantCount: number): { allowed: number; rejected: number } {
   let allowed = 0;

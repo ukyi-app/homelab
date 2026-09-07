@@ -3,6 +3,7 @@
 // catalog)·이후 MCP 서버가 이 모듈을 공유한다. import.meta.url 기준 해석이라 어느 디렉토리에서
 // 실행해도(앱 레포 안 포함) 동작한다.
 import { readFileSync } from "node:fs";
+import { schemaErrors } from "./schema-check.ts";
 
 const SCHEMA = JSON.parse(readFileSync(new URL("../cli-result-schema.json", import.meta.url), "utf8"));
 const CONTRACT = SCHEMA["x-contract"];
@@ -39,6 +40,18 @@ export type Envelope = {
 // 않는다)의 실행형. 결과 오브젝트를 조립하는 모든 엔진이 공유한다.
 export function compact(o: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined));
+}
+
+// 방출 직전 자기검증 — envelope이 자기 계약(cli-result-schema.json)을 지키는지 스스로 잰다.
+// **env 게이트 뒤에 숨기지 않는다**: 켜야 도는 검사는 실전 경로에서 영원히 침묵하고, 골든이 없는
+// 셀(행렬 38칸 중 절반)은 정확히 그 실전 경로다. 위반은 조용한 잘못된 출력이 아니라 계약 파손이다
+// (CLI는 stderr로 죽고, MCP는 서버 루프의 -32603 격리가 받는다). 비용은 방출 1회당 walk 1회다.
+export function assertEnvelope(env: Envelope): Envelope {
+  const errs = schemaErrors(env, SCHEMA, SCHEMA);
+  if (errs.length > 0) {
+    throw new Error(`계약 파손: 방출 직전 envelope이 결과 계약을 어긴다 — ${errs.slice(0, 3).join(" | ")}`);
+  }
+  return env;
 }
 
 // variant → 종료코드(x-contract.exitCodes). 매핑 부재는 계약 파손이라 fail-closed.

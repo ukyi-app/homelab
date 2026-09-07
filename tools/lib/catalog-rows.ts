@@ -99,13 +99,21 @@ export type ContractRow = {
 };
 
 export const CONTRACT_ROWS: readonly ContractRow[] = [
-  { verb: "doctor", simple: [{ variants: ["success", "failure"], ref: "doctorResult" }] },
+  // doctor·status는 variant별 ref로 갈라져 있다(teardown 선례) — 한 ref가 여러 variant를 받으면
+  // verb→variant 집합만 묶이고 **variant→result 형상**은 안 묶여서, success에 error가 실린
+  // envelope·failure에 성공 형상이 실린 envelope이 전부 스키마 유효였다(리뷰 실측).
+  // doctor는 summary.fail 상/하한으로 갈라 exitCode 거짓말을 스키마가 독립 검출한다.
+  { verb: "doctor", simple: [
+    { variants: ["success"], ref: "doctorOk" },
+    { variants: ["failure"], ref: "doctorFailed" },
+  ] },
   // status의 race — `--branch` 정확 조회에서 브랜치 하나에 PR이 2개인 경우(신원 판정 불가, exit 3).
   // 리더도 fail-closed다: 임의로 하나를 고르면 그 뒤의 모든 보고가 오귀속이 된다. 형상이 성공·실패와
-  // 달라(observedPrs + error) 별도 ref로 분리한다 — statusResult union에 넣으면 성공 봉투가 race
+  // 달라(observedPrs + error) 별도 ref로 분리한다 — 성공 union(statusOk)에 넣으면 성공 봉투가 race
   // 형상으로도 유효해진다.
   { verb: "status", simple: [
-    { variants: ["success", "failure"], ref: "statusResult" },
+    { variants: ["success"], ref: "statusOk" },
+    { variants: ["failure"], ref: "statusError" },
     { variants: ["race"], ref: "statusRace" },
   ] },
   { verb: "db create", mutation: { action: "create-database", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },

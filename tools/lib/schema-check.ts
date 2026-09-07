@@ -1,5 +1,8 @@
-// 계약 스키마 미니 검증기 — homelab CLI 결과 계약(cli-result-schema.json)의 골든 픽스처·계약
-// 테스트 전용 커널(ajv 무의존). 지원 키워드는 아래 KNOWN 화이트리스트가 SSOT이고, 스키마에
+// 계약 스키마 미니 검증기 — homelab CLI 결과 계약(cli-result-schema.json) 커널(ajv 무의존).
+// **테스트 전용이 아니다**: 골든 픽스처·계약 테스트와 함께 (1) MCP 입력 신뢰 경계(mcp.ts의
+// inputSchema 검증), (2) 정책 원장 항목 검증(policy-ledger), (3) 방출 직전 envelope 자기검증
+// (contract.ts assertEnvelope — CLI·MCP 양쪽 실전 경로)이 같은 커널을 쓴다.
+// 지원 키워드는 아래 KNOWN 화이트리스트가 SSOT이고, 스키마에
 // 지원 밖 키워드가 들어오면 **throw로 fail-closed**한다 — "검증기가 모르는 제약"이 조용히
 // 통과(vacuous green)하는 것을 막는다. (create-app.ts의 check()는 .app-config.yml 전용으로 별개
 // 유지 — 에러 문구·exit 정책이 그 콜사이트 소유이고, 지원 키워드 가드도 test_app-config.bats가

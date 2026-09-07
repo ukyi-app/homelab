@@ -42,16 +42,32 @@
           "type": "object",
           "properties": {
             "verb": { "enum": ["doctor"] },
-            "variant": { "enum": ["success", "failure"] },
-            "result": { "$ref": "#/definitions/doctorResult" }
+            "variant": { "enum": ["success"] },
+            "result": { "$ref": "#/definitions/doctorOk" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["doctor"] },
+            "variant": { "enum": ["failure"] },
+            "result": { "$ref": "#/definitions/doctorFailed" }
           }
         },
         {
           "type": "object",
           "properties": {
             "verb": { "enum": ["status"] },
-            "variant": { "enum": ["success", "failure"] },
-            "result": { "$ref": "#/definitions/statusResult" }
+            "variant": { "enum": ["success"] },
+            "result": { "$ref": "#/definitions/statusOk" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "verb": { "enum": ["status"] },
+            "variant": { "enum": ["failure"] },
+            "result": { "$ref": "#/definitions/statusError" }
           }
         },
         {
@@ -416,6 +432,20 @@
         }
       }
     },
+    "doctorOk": {
+      "description": "doctor success — 실패 0(summary.fail maximum 0). variant가 아니라 **결과 형상**이 성공을 말하므로, 엔진의 exitCode 거짓말(fail ≥ 1인데 success)을 스키마가 독립 검출한다.",
+      "allOf": [
+        { "$ref": "#/definitions/doctorResult" },
+        { "type": "object", "properties": { "summary": { "type": "object", "properties": { "fail": { "type": "integer", "maximum": 0 } } } } }
+      ]
+    },
+    "doctorFailed": {
+      "description": "doctor failure — 실패 ≥ 1(summary.fail minimum 1). doctorOk와 상보다(둘 다 doctorResult 본문을 공유).",
+      "allOf": [
+        { "$ref": "#/definitions/doctorResult" },
+        { "type": "object", "properties": { "summary": { "type": "object", "properties": { "fail": { "type": "integer", "minimum": 1 } } } } }
+      ]
+    },
     "mutationRun": {
       "type": "object",
       "additionalProperties": false,
@@ -711,14 +741,13 @@
         "error": { "type": "string" }
       }
     },
-    "statusResult": {
-      "description": "status의 result — 모드(list/app/run/pr) 판별 union + 오류 branch(variant=failure일 때 mode+error). 생략(live)은 result가 아니라 envelope.omitted가 명시한다.",
+    "statusOk": {
+      "description": "status 성공 result — 모드(list/app/run/pr) 판별 union. 실패(statusError)는 계약 행에서 갈라져 있어 success에 오류 branch가 실린 envelope은 스키마 차원에서 red다(구 statusResult는 둘을 한 union에 담아 그 결합이 없었다). 생략(live)은 result가 아니라 envelope.omitted가 명시한다.",
       "oneOf": [
         { "$ref": "#/definitions/statusList" },
         { "$ref": "#/definitions/statusApp" },
         { "$ref": "#/definitions/statusRun" },
-        { "$ref": "#/definitions/statusPrHandle" },
-        { "$ref": "#/definitions/statusError" }
+        { "$ref": "#/definitions/statusPrHandle" }
       ]
     },
     "statusList": {

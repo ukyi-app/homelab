@@ -18,6 +18,22 @@ setup() {
   echo "apiVersion: v1" > "$KC"
 }
 
+# 방출된 envelope을 결과 계약으로 대조한다(티켓 25 (a) — variant별 **실산출물**을 검증기에 태운다).
+# 형상 결합이 없던 동안 status failure 4곳은 스키마 대조 없이 variant만 봤다.
+assert_envelope_valid() {
+  printf '%s\n' "$1" > "$BATS_TEST_TMPDIR/assert-env.json"
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const env = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    const errs = schemaErrors(env, sch, sch);
+    console.log(errs.length ? "INVALID: " + errs.join(" | ") : "valid");
+  ' "$BATS_TEST_TMPDIR/assert-env.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^valid$"
+}
+
 @test "status --json on a greenfield root reports an empty list with exit 0" {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
   [ "$status" -eq 0 ]
@@ -139,6 +155,7 @@ setup() {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_PRS_FAIL=1 "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  assert_envelope_valid "$output"
 }
 
 @test "an in-repo app (no source-repo) skips the runs fetch and reports an empty runs list" {
@@ -177,6 +194,7 @@ setup() {
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
   [ "$(echo "$output" | jq -r '.result.mode')" = "app" ]
   echo "$output" | jq -r '.result.error' | grep -q "ghost"
+  assert_envelope_valid "$output"
 }
 
 @test "status app mode fails loud when the GitHub layer errors (no silent empty lists)" {
@@ -184,6 +202,7 @@ setup() {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_RUNS_FAIL=1 "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  assert_envelope_valid "$output"
 }
 
 @test "run handle lookup reports status and conclusion from the run URL" {
@@ -215,6 +234,8 @@ setup() {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_HANDLE_404=1 "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/page/actions/runs/999" --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "run" ]
+  assert_envelope_valid "$output"
 }
 
 @test "a malformed handle URL is a usage error: exit 2, no envelope" {
@@ -283,7 +304,7 @@ setup() {
       const env = JSON.parse(readFileSync(dir + "/env-" + m + ".json", "utf8"));
       const errs = [
         ...schemaErrors(env, sch, sch),
-        ...schemaErrors(env.result, sch.definitions.statusResult, sch),
+        ...schemaErrors(env.result, sch.definitions.statusOk, sch),
       ];
       if (errs.length) { console.error(m + ": " + errs.join(" | ")); process.exit(1); }
       n++;

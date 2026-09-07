@@ -116,8 +116,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   mkdir -p "$T/tools/lib"
   cp tools/generate-result-schema.ts "$T/tools/"
   cp tools/lib/platform.ts "$T/tools/lib/"
-  sed 's|ref: "doctorResult"|ref: "doctorResultTypo"|' tools/lib/catalog-rows.ts > "$T/tools/lib/catalog-rows.ts"
-  [ "$(grep -c 'ref: "doctorResultTypo"' "$T/tools/lib/catalog-rows.ts")" = "1" ]
+  sed 's|ref: "doctorOk"|ref: "doctorOkTypo"|' tools/lib/catalog-rows.ts > "$T/tools/lib/catalog-rows.ts"
+  [ "$(grep -c 'ref: "doctorOkTypo"' "$T/tools/lib/catalog-rows.ts")" = "1" ]
   run bash -c "cd '$T' && exec bun tools/generate-result-schema.ts --write --out gen.json"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "계약 파손"
