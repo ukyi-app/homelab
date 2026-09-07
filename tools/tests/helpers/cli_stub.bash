@@ -131,12 +131,22 @@ PY
 # 임의 owner/repo URL을 정당한 입력으로 받는 계약이라(좁히면 계약을 거짓으로 검증) 의도적 비대칭.
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
-# STUB_GH_HANDLE_404 / STUB_PR_CONFIRM_FAIL. 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
+# STUB_GH_HANDLE_404 / STUB_PR_CONFIRM_FAIL / 변이 폴링 실패 3종(STUB_GH_RUNS_LIST_FAIL ·
+# STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST). 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
 make_gh_stub() {
   cat > "$STUB/gh" <<'SH'
 #!/usr/bin/env bash
 { printf '%s\0' gh "$@"; printf '\x1e'; } >> "$CALLS"
 b64() { base64 < "$1"; }
+# 변이 레인 폴링 실패 주입(티켓 06) — `workflow run`은 exit 0인데 이후 **관측** 조회만 비-0이 된다.
+# status 경로 전용인 STUB_GH_RUNS_FAIL을 재사용하면 이 레인이 vacuous라서 전용 노브를 둔다.
+# 본 case보다 **앞**에 있는 별도 case다: 본 case 안에 글롭을 끼우면 첫 매치가 이겨 디스패처별
+# 픽스처 케이스가 사문이 된다(bash case는 fallthrough가 없다 — `;;&`는 bash 4+).
+case "$*" in
+  "api repos/ukyi-app/homelab/actions/workflows/"*"/runs?per_page=20 --jq "*)
+    if [ -n "${STUB_GH_RUNS_LIST_FAIL:-}" ]; then echo "gh: HTTP 401: Bad credentials" >&2; exit 1; fi
+    ;;
+esac
 case "$*" in
   "api -i user")
     if [ -n "${STUB_GH_UNAUTH:-}" ]; then
@@ -213,6 +223,8 @@ case "$*" in
     cat "$FIX/db-run-jobs.json"
     ;;
   "api repos/ukyi-app/homelab/actions/runs/"*" --jq {status, conclusion, html_url}")
+    # STUB_GH_RUN_READ_FAIL(티켓 06): conclusion 폴링 루프의 관측만 전부 전송 오류.
+    if [ -n "${STUB_GH_RUN_READ_FAIL:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
     cat "$FIX/db-run.json"
     ;;
   "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "*)
@@ -233,6 +245,12 @@ case "$*" in
     fi
     if [ -n "${STUB_PR_FAIL_FIRST:-}" ] && [ ! -f "$FIX/.pr-fail-once" ]; then
       : > "$FIX/.pr-fail-once"; echo "gh: connect: connection reset" >&2; exit 1
+    fi
+    # STUB_GH_PR_LIST_FAIL_AFTER_FIRST(티켓 06): 첫 조회(step 4 PR 특정)만 정상, 이후 머지 폴링은
+    # 전부 전송 오류 — 지속 실패가 '머지 미관측'으로 위장되는 자리를 만든다.
+    if [ -n "${STUB_GH_PR_LIST_FAIL_AFTER_FIRST:-}" ]; then
+      if [ -f "$FIX/.pr-list-once" ]; then echo "gh: HTTP 403: rate limit exceeded" >&2; exit 1; fi
+      : > "$FIX/.pr-list-once"
     fi
     cat "$FIX/db-prs.json"
     ;;

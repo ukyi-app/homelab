@@ -87,6 +87,11 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   컴파일 아키타입 3종 TARGETARCH — site는 arch 중립이라 대상 아님). fail ≥ 1이면 exit 1.
   테스트: `tools/tests/test_homelab-cli.bats`(라우팅·계약)·`test_homelab-doctor.bats`(진단 —
   PATH stub + NUL argv 원장, 하네스 `tools/tests/helpers/cli_stub.bash`).
+  **재시도 정책**: seam(`lib/exec.ts`)은 재시도하지 않는다 — 재시도는 콜사이트 정책이고 **변이
+  argv(`gh workflow run`)는 어떤 층에서도 재시도하지 않는다**(타임아웃은 '실패'가 아니라 '결과
+  미상'이라 재시도가 곧 두 개의 run이다). 변이 엔진의 폴링 루프·PR 목록 grace 재조회는 부수효과
+  0인 **관측 재조회**지 변이 재시도가 아니며, 폴링 중 지속되는 GitHub 계층 조회 실패는
+  pendingReason 접미(`— 직전 GitHub 계층 조회 실패(N회 연속): …`)로 사유를 지목한다.
 - **`cli-result-schema.json`** — CLI `--json` 출력·MCP tool 결과가 공유하는 **결과 계약 SSOT**
   (envelope `homelab-cli/1`). variant 어휘(success/failure/race/skip/pending/no-op/superseded)·
   종료코드 매핑(x-contract.exitCodes — pending=1 근거 포함)·stdout 순수성(--json이면 stdout은
@@ -318,7 +323,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   [--wait] 머지 관측(머지 없이 닫힌 PR은 대기가 아니라 종결 관측 — 목록의 `state:closed`·미머지를
   단건 권위 조회 `pulls/<n>`로 확증한 뒤 failure, 전송 오류면 미확정으로 두고 폴링 계속) +
   Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,
-  health 단독 판정 금지, 후손 리비전 표면 부재=superseded). 시간 심 pollMs/deadlineMs +
+  health 단독 판정 금지, 후손 리비전 표면 부재=superseded). 세 폴링 루프(run 특정·conclusion·머지)는
+  지속되는 GitHub 계층 조회 실패를 pendingReason 접미로 지목한다(문구 SSOT는 엔진 헬퍼 하나 —
+  필드 신설 금지: pending 계열은 additionalProperties:false다). 시간 심 pollMs/deadlineMs +
   HOMELAB_CORRELATION 주입(테스트). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
 - **`lib/argocd.ts`** — ArgoCD Application status 리더(`syncRevisionOf()`·`revisionFields()`) — 변이 엔진
   (수렴 판정)과 status 엔진(라이브 표시)이 공유하는 리비전 해석. 앱 레인 `<app>-prod`는 appset sources 3개의
@@ -326,7 +333,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   두 사본이 앱 레인 --wait를 영구 pending으로 만들던 결함의 흡수 자리. 판정 4상: resolved(전부 SHA·dedupe 1개 —
   계보·표면 ref) / skew(소스 간 불일치 — 표면 ref 미확정) / non-sha(helm 차트 버전 — gh compare 호출 금지) /
   none(관측 0). 엔진의 `sync?.revision` 직접 참조 0건은 test_homelab-status.bats가 grep으로 단언한다.
-- **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghJson` — ghJson은 오브젝트/배열 jq 전용, 스칼라
+- **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghRead`/`ghJson` — ghRead는 값과 실패 사유를 함께
+  주는 3상 리더(ok/error=stderr 첫 줄/parse=폴백 문구)이고 ghJson은 그 축약(값만·실패 null),
+  둘 다 오브젝트/배열 jq 전용, 스칼라
   jq는 raw라 sh 직접, `git`·`pushRoutes` — push 지향 관측 `git remote get-url --push --all`:
   pushurl 복수·insteadOf/pushInsteadOf 전개 반영) — status·mutation·init·secrets 공유. 판정 정책은
   콜사이트 소유(doctor의 gh()는 ENOENT 판별 자기 정책이 있어 별도 유지). push 라우팅 검사의

@@ -6,6 +6,12 @@
 // 비-0 종료는 errKind 없이 ok:false다 — rc 의미론은 콜사이트가 판정한다. doctor의 미설치 진단이
 // 이 필드의 소비자다(종전 자체 gh() 유지 사유였던 ENOENT 판별이 seam으로 흡수된 자리).
 //
+// 재시도 정책(선언 — homelab-cli-r2 티켓 06): **seam은 재시도하지 않는다.** sh()는 spawnSync 1회이고
+// 백오프도 없다 — 재시도는 콜사이트 정책이며 **변이 argv(`gh workflow run`)는 어떤 층에서도 재시도하지
+// 않는다**(타임아웃은 '실패'가 아니라 '결과 미상'이라 재시도가 곧 두 개의 run이다).
+// ⚠️ 변이 엔진의 폴링 루프와 PR 목록 grace 재조회(mutation.ts PR_GRACE_RETRIES)는 **관측 재조회**지
+// 변이 재시도가 아니다 — 부수효과 0인 읽기를 반복해 미확정을 확정으로 바꾸는 것뿐이다.
+//
 // HOMELAB_EXEC_LEDGER — env 주입 관측 원장(테스트 adapter). 설정되면 호출마다 {cmd, args} 한 줄을
 // JSONL로 append한다. ⚠️ stdin(input)은 **절대 기록하지 않는다** — kubeseal 평문이 지나는 채널이다.
 // 원장은 관측 편의라 기록 실패가 실행을 막지 않는다(prod 경로 무영향).
@@ -70,11 +76,26 @@ export function pushRoutes(cwd: string): string[] | null {
   return r.out.split("\n").map((s) => s.trim()).filter((s) => s !== "");
 }
 
-// gh api + --jq 결과를 파싱한다. 실패는 null — 콜사이트가 fail-loud 여부를 정한다.
+// gh api + --jq 결과의 3상 리더 — 값과 **실패 사유**를 함께 돌려준다. ghJson(아래)이 null로 접어
+// 버리는 사유를, 폴링 루프가 pendingReason에 실을 수 있게 하는 자리다(티켓 06).
+//   error — 비-0 종료(인증 만료·오프라인·rate limit). 사유 = stderr 첫 줄.
+//   parse — rc 0인데 JSON이 아니다. **stderr가 비어 있으므로** 폴백 문구가 필요하다(빈 사유는
+//           "실패했는데 이유가 없다"로 보여 오히려 오진을 만든다).
 // ⚠️ 오브젝트/배열 jq 전용 — 스칼라 jq(.status 등)는 raw 문자열이 나와 JSON.parse가 깨진다.
 //    스칼라는 sh()로 직접 받아 trim해서 쓴다(mutation.ts isDescendant 참고).
-export function ghJson(path: string, jq: string): unknown | null {
+export type GhRead =
+  | { kind: "ok"; value: unknown }
+  | { kind: "error"; reason: string }
+  | { kind: "parse"; reason: string };
+export function ghRead(path: string, jq: string): GhRead {
   const r = gh(["api", path, "--jq", jq]);
-  if (!r.ok) return null;
-  try { return JSON.parse(r.out); } catch { return null; }
+  if (!r.ok) return { kind: "error", reason: r.err.split("\n")[0] || `gh api 비-0 종료(status ${r.status ?? "null"})` };
+  try { return { kind: "ok", value: JSON.parse(r.out) }; }
+  catch { return { kind: "parse", reason: "gh api 응답이 JSON이 아니다(jq 투영/응답 형상 확인)" }; }
+}
+
+// ghRead의 축약 — 값만 필요한 콜사이트용. 실패는 null(사유가 필요하면 ghRead를 쓴다).
+export function ghJson(path: string, jq: string): unknown | null {
+  const g = ghRead(path, jq);
+  return g.kind === "ok" ? g.value : null;
 }

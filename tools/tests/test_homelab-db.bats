@@ -362,6 +362,61 @@ merged_pr_at_descendant() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "4" ]
 }
 
+# ── 폴링 루프의 지속 gh 실패 사유(homelab-cli-r2 티켓 06) ───────────────────────────────────
+# 세 폴링 루프(run 특정·conclusion·머지)는 관측 실패(null)를 아무 기록 없이 넘겨 데드라인에서
+# '미출현/진행 중/미관측'만 냈다 — 토큰 만료·오프라인·rate limit이 전부 '큐 지연'으로 위장된다.
+# 필드는 신설하지 않는다(pending 계열은 additionalProperties:false — 골든 4종이 형상을 고정):
+# 사유는 pendingReason **접미**로만 실리고, 문구 SSOT는 엔진의 헬퍼 하나다.
+
+@test "run identification: a persistent gh failure names the cause, exclusive with the absent-run reason" {
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_RUNS_LIST_FAIL=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 1 --deadline-ms 20 --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "조회 실패"
+  # stderr 첫 줄이 그대로 사유가 된다(운영자가 인증 만료를 큐 지연과 구별할 수 있어야 한다).
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "Bad credentials"
+  # 배타성 — 진짜 미출현(빈 목록 + gh 정상)은 같은 접미를 달지 않는다. 위 레인이 양성 대조다.
+  printf '[]\n' > "$FIX/db-runs.json"
+  run_db_create --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  absent="$(echo "$output" | jq -r '.result.pendingReason')"
+  [ "$(printf '%s' "$absent" | grep -c "미출현")" = "1" ]
+  [ "$(printf '%s' "$absent" | grep -c "조회 실패")" = "0" ]
+}
+
+@test "conclusion tracking: a persistent gh failure names the cause under the in-progress reason" {
+  printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_RUN_READ_FAIL=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 300 --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "진행 중"
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "조회 실패"
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "connection reset"
+  # 핸들은 그대로 실린다 — 재개 경로는 사유가 붙어도 run URL이다.
+  [ "$(echo "$output" | jq -r '.result.run.id')" = "501" ]
+}
+
+@test "merge observation: a persistent gh failure names the cause under the unmerged reason" {
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_PR_LIST_FAIL_AFTER_FIRST=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 300 --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "머지"
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "조회 실패"
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "rate limit exceeded"
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "21" ]
+}
+
+@test "the three polling loops share ONE failure-cause phrase (single SSOT, three call sites)" {
+  # 문구를 콜사이트마다 복제하면 세 레인이 조용히 갈라진다 — 리터럴은 헬퍼 한 곳에만 있어야 한다.
+  [ "$(grep -c "직전 GitHub 계층 조회 실패" tools/lib/mutation.ts)" = "1" ]
+  # 양성 대조(검출기 생존): 같은 파일에서 그 헬퍼의 접미가 세 데드라인 분기에 실제로 실린다.
+  [ "$(grep -c "Watch.suffix()" tools/lib/mutation.ts)" = "3" ]
+}
+
 # ── 머지 없이 닫힌 PR의 종결성(homelab-cli-r2 티켓 05) ──────────────────────────────────────
 # 머지 관측 루프가 merged_at만 보면 close(미머지)가 데드라인까지 '머지 대기'로 접힌다. state를 목록
 # 투영에 실어 종결 상태를 관측하되, 목록 인덱스는 단건 리소스보다 낡을 수 있으므로(함정 「GitHub

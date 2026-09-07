@@ -22,7 +22,7 @@
 import { randomBytes } from "node:crypto";
 import { revisionFields, syncRevisionOf } from "./argocd.ts";
 import { compact } from "./contract.ts";
-import { ghJson, sh } from "./exec.ts";
+import { ghJson, ghRead, sh, type GhRead } from "./exec.ts";
 import { CORRELATION_RE } from "./identity.ts";
 import { HOMELAB_REPO } from "./platform.ts";
 
@@ -98,6 +98,22 @@ type RunRow = { id: number; name: string; status: string; conclusion: string | n
 // 뒤집지 않는다(state 부재 = 미판정, closed로 오독하지 않는다).
 type PrRow = { number: number; html_url: string; merged_at: string | null; merge_commit_sha: string | null; state?: string };
 
+// 폴링 루프의 관측 실패 추적(티켓 06) — 마지막 실패 사유와 **연속** 실패 횟수를 들고 데드라인
+// pendingReason의 접미를 만든다. 성공 관측이 한 번이라도 끼면 streak가 0으로 돌아가므로 접미는
+// '지속 실패'에만 붙는다(한 사이클 blip을 원인으로 지목하지 않는다).
+// ⚠️ 결과 필드는 신설하지 않는다 — mutationPending/teardownPending이 additionalProperties:false라
+// 필드 추가는 생성기 2곳 + 골든 4개를 흔든다. 같은 파일의 absence 레인(:kubectlError)이 이미
+// pendingReason 문자열 안에서 원인을 가른 선례다. **문구 SSOT는 이 헬퍼 하나**이고, 세 루프
+// (run 특정·conclusion·머지)가 같은 접미를 쓴다(테스트가 리터럴 1건 + 콜사이트 3건으로 고정).
+function pollWatch() {
+  let reason = "";
+  let streak = 0;
+  return {
+    observe: (g: GhRead): void => { if (g.kind === "ok") { streak = 0; } else { reason = g.reason; streak += 1; } },
+    suffix: (): string => (streak === 0 ? "" : ` — 직전 GitHub 계층 조회 실패(${streak}회 연속): ${reason}`),
+  };
+}
+
 export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOutcome {
   const correlation = newNonce();
   const base = { ...spec.resultBase, correlation };
@@ -114,18 +130,20 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
 
   // 2) 자기 run 특정 — run-name의 [nonce] 에코가 권위. 정확히 1개일 때만 채택.
   let run: RunRow | undefined;
+  const identifyWatch = pollWatch();
   for (;;) {
-    const got = ghJson(`repos/${HOMELAB_REPO}/actions/workflows/${spec.workflow}/runs?per_page=20`,
+    const got = ghRead(`repos/${HOMELAB_REPO}/actions/workflows/${spec.workflow}/runs?per_page=20`,
       "[.workflow_runs[] | {id, name, status, conclusion, html_url}]");
-    if (got !== null) {
-      const mine = (got as RunRow[]).filter((r) => r.name.includes(`[${correlation}]`));
+    identifyWatch.observe(got);
+    if (got.kind === "ok") {
+      const mine = (got.value as RunRow[]).filter((r) => r.name.includes(`[${correlation}]`));
       if (mine.length >= 2) {
         return { variant: "race", omitted: [], result: compact({ ...base, observedRuns: mine.length, error: `같은 correlation을 에코하는 run이 ${mine.length}개 — 신원 판정 불가(fail-closed)` }) };
       }
       if (mine.length === 1) { run = mine[0]; break; }
     }
     if (Date.now() >= endAt) {
-      return { variant: "pending", omitted: [], result: compact({ ...base, pendingReason: "run 미출현(디스패치는 접수됨) — 큐/크론 지연 가능, 같은 correlation으로 재조회 가능" }) };
+      return { variant: "pending", omitted: [], result: compact({ ...base, pendingReason: `run 미출현(디스패치는 접수됨) — 큐/크론 지연 가능, 같은 correlation으로 재조회 가능${identifyWatch.suffix()}` }) };
     }
     Bun.sleepSync(opts.pollMs);
   }
@@ -139,13 +157,15 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   }
 
   // 3) conclusion 추적 — queued/in_progress면 폴링, 실패면 실패 잡 열거.
+  const concludeWatch = pollWatch();
   while (run.status !== "completed") {
     if (Date.now() >= endAt) {
-      return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pendingReason: "run 진행 중 — 핸들(run URL)로 재조회 가능" }) };
+      return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pendingReason: `run 진행 중 — 핸들(run URL)로 재조회 가능${concludeWatch.suffix()}` }) };
     }
     Bun.sleepSync(opts.pollMs);
-    const got = ghJson(`repos/${HOMELAB_REPO}/actions/runs/${run.id}`, "{status, conclusion, html_url}");
-    if (got !== null) run = { ...run, ...(got as Partial<RunRow>) };
+    const got = ghRead(`repos/${HOMELAB_REPO}/actions/runs/${run.id}`, "{status, conclusion, html_url}");
+    concludeWatch.observe(got);
+    if (got.kind === "ok") run = { ...run, ...(got.value as Partial<RunRow>) };
   }
   if (run.conclusion !== "success") {
     const jobs = ghJson(`repos/${HOMELAB_REPO}/actions/runs/${run.id}/jobs`,
@@ -156,14 +176,16 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   // 4) PR 특정 — run_id 브랜치(reusable 명명 SSOT)로 권위 조회.
   const branch = spec.branchFor(run.id);
   const owner = HOMELAB_REPO.split("/")[0];
-  const readPr = (): PrRow[] | null =>
-    ghJson(`repos/${HOMELAB_REPO}/pulls?state=all&head=${owner}:${branch}`,
-      "[.[] | {number, html_url, merged_at, merge_commit_sha, state}]") as PrRow[] | null;
+  // 3상 리더(ghRead) — 머지 루프가 실패 사유를 pendingReason 접미로 실어야 하므로 값만 주는
+  // ghJson 대신 사유를 함께 받는다. readPr은 그 축약(step 4 grace 루프는 사유를 쓰지 않는다).
+  const readPrList = (): GhRead =>
+    ghRead(`repos/${HOMELAB_REPO}/pulls?state=all&head=${owner}:${branch}`,
+      "[.[] | {number, html_url, merged_at, merge_commit_sha, state}]");
+  const readPr = (): PrRow[] | null => { const g = readPrList(); return g.kind === "ok" ? (g.value as PrRow[]) : null; };
   // 단건 권위 조회 — 목록 endpoint는 read-replica 인덱스라 단건 리소스보다 낡을 수 있다(함정
-  // 「GitHub API는 낡은 스냅샷을 200으로 돌려준다」). 종결(머지 없이 닫힘) 판정에만 쓴다. 실패는 null.
-  const readPrOne = (n: number): PrRow | null =>
-    ghJson(`repos/${HOMELAB_REPO}/pulls/${n}`,
-      "{number, html_url, merged_at, merge_commit_sha, state}") as PrRow | null;
+  // 「GitHub API는 낡은 스냅샷을 200으로 돌려준다」). 종결(머지 없이 닫힘) 판정에만 쓴다.
+  const readPrOne = (n: number): GhRead =>
+    ghRead(`repos/${HOMELAB_REPO}/pulls/${n}`, "{number, html_url, merged_at, merge_commit_sha, state}");
   // 3상: found(≥1) / empty(0건) / error(null) — empty·error는 그 조회의 미확정이라 grace 재시도 뒤에만 판정.
   // 재시도는 endAt과 무관하다(PR_GRACE_RETRIES 주석) — 여기서 deadline을 보면 수정이 무효가 된다.
   let prs: PrRow[] | null = null;
@@ -195,15 +217,19 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   // (manualMerge: create-app — 머지가 곧 공개 승인)는 사람이 머지한다. no-op은 머지가 없다.
   let mergeSha: string | undefined;
   if (pr !== undefined) {
+    // 이 루프의 관측은 둘이다 — 목록 재조회와 종결 확증 조회. 둘 다 GitHub 계층 조회라 같은
+    // watch가 센다(어느 쪽이 죽었든 운영자가 볼 것은 "이 대기는 관측이 안 되고 있다"이다).
+    const mergeWatch = pollWatch();
     while (pr.merged_at === null) {
       // 종결 관측: 머지 없이 닫힘. 목록 인덱스가 단건 리소스보다 낡을 수 있으므로 단건 권위 조회로
-      // 한 번 확증한 뒤에만 종결한다 — 전송 오류(null)면 미확정으로 두고 폴링을 계속한다(일시 실패
+      // 한 번 확증한 뒤에만 종결한다 — 확증이 ok가 아니면 미확정으로 두고 폴링을 계속한다(일시 실패
       // 한 번이 종결이 되면 안 된다, 3상 관측의 같은 규약). 확증이 머지를 보고하면 그 값으로 진행하고,
       // state가 open이면(reopen) 종결하지 않는다 — closed는 '거부'의 동의어가 아니다.
       if (pr.state === "closed") {
         const authoritative = readPrOne(pr.number);
-        if (authoritative !== null) {
-          pr = { ...pr, ...authoritative };
+        mergeWatch.observe(authoritative);
+        if (authoritative.kind === "ok") {
+          pr = { ...pr, ...(authoritative.value as PrRow) };
           if (pr.merged_at !== null) break;
           if (pr.state === "closed") {
             // 의도 추정 없는 관측 서술 — 무엇이 승인이었는지는 동사가 알고(manualMerge), 부가 문맥으로만 싣는다.
@@ -214,11 +240,18 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
         }
       }
       if (Date.now() >= endAt) {
-        return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: spec.manualMerge !== undefined ? `사람 머지 대기 — 머지가 곧 ${spec.manualMerge.approval}(PR 검토·머지 후 핸들로 재조회)` : "auto-merge 머지 미관측 — required check 대기 중일 수 있다(핸들로 재조회 가능)" }) };
+        const base5 = spec.manualMerge !== undefined
+          ? `사람 머지 대기 — 머지가 곧 ${spec.manualMerge.approval}(PR 검토·머지 후 핸들로 재조회)`
+          : "auto-merge 머지 미관측 — required check 대기 중일 수 있다(핸들로 재조회 가능)";
+        return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: `${base5}${mergeWatch.suffix()}` }) };
       }
       Bun.sleepSync(opts.pollMs);
-      const again = readPr();
-      if (again !== null && again.length === 1) pr = again[0];
+      const again = readPrList();
+      mergeWatch.observe(again);
+      if (again.kind === "ok") {
+        const rows = again.value as PrRow[];
+        if (rows.length === 1) pr = rows[0];
+      }
     }
     mergeSha = pr.merge_commit_sha ?? undefined;
     if (!mergeSha) return fail("머지는 관측됐으나 merge SHA가 비어 있다 — GitHub 응답 이상", { run: runRef(), pr: prRef() });
