@@ -186,7 +186,8 @@ const DEFINITIONS = `    "doctorResult": {
         "waited": { "type": "boolean" },
         "run": { "$ref": "#/definitions/mutationRun" },
         "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
-        "chain": { "$ref": "#/definitions/mutationChain" }
+        "chain": { "$ref": "#/definitions/mutationChain" },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationSuccess": {
@@ -201,7 +202,8 @@ const DEFINITIONS = `    "doctorResult": {
         "waited": { "type": "boolean" },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationFailure": {
@@ -215,7 +217,8 @@ const DEFINITIONS = `    "doctorResult": {
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
         "run": { "$ref": "#/definitions/mutationRun" },
-        "pr": { "$ref": "#/definitions/mutationPr" }
+        "pr": { "$ref": "#/definitions/mutationPr" },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationRace": {
@@ -230,7 +233,8 @@ const DEFINITIONS = `    "doctorResult": {
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
         "observedRuns": { "type": "integer", "minimum": 0 },
-        "run": { "$ref": "#/definitions/mutationRun" }
+        "run": { "$ref": "#/definitions/mutationRun" },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationPending": {
@@ -246,7 +250,8 @@ const DEFINITIONS = `    "doctorResult": {
         "pendingReason": { "type": "string", "minLength": 1 },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationSuperseded": {
@@ -262,7 +267,8 @@ const DEFINITIONS = `    "doctorResult": {
         "error": { "type": "string", "minLength": 1 },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
-        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } }
+        "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationApp" } },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationAbsentApp": {
@@ -277,10 +283,10 @@ const DEFINITIONS = `    "doctorResult": {
       }
     },
     "teardownSuccess": {
-      "description": "철거 성공 — 머지 관측 + Application 부재(prune 완료). KUBECONFIG 부재면 applications 생략(omitted=live). dnsReclaim은 DNS 회수가 이 명령의 관측 대상이 아님을 명시(iac/tf-reconcile 소관).",
+      "description": "철거 성공 — 머지 관측 + Application 부재(prune 완료). KUBECONFIG 부재면 applications 생략(omitted=live). dnsReclaim은 DNS 회수가 이 명령의 관측 대상이 아님을 명시(iac/tf-reconcile 소관). resourcesRetained는 성격이 다르다 — 소관 이관이 아니라 **미완 작업**이다: DB/캐시 conn·CR·Valkey는 teardown-app 계약상 비접촉이라 그대로 남아 있고, 정리 경로는 owner-local teardown-resource(attestation 필요)뿐이다. 4 variant 전부에 필수라 반쯤 착지한 순간에도 사라지지 않는다.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "waited", "run", "pr", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "waited", "run", "pr", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
@@ -289,6 +295,7 @@ const DEFINITIONS = `    "doctorResult": {
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationAbsentApp" } }
       }
     },
@@ -296,13 +303,14 @@ const DEFINITIONS = `    "doctorResult": {
       "description": "철거 실패 — 디스패치/run 실패 또는 머지 SHA에 표면이 남음(철거 미반영). presence 동사와 달리 표면 잔존이 실패 신호다(극성 반전).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "error", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "error", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
         "correlation": { "type": "string", "minLength": 8 },
         "error": { "type": "string", "minLength": 1 },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" }
       }
@@ -311,7 +319,7 @@ const DEFINITIONS = `    "doctorResult": {
       "description": "신원 판정 불가(같은 nonce run ≥2 또는 브랜치 PR ≥2) — 전제 상태 변동 계열(exit 3).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "error", "observedRuns", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "error", "observedRuns", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
@@ -319,6 +327,7 @@ const DEFINITIONS = `    "doctorResult": {
         "error": { "type": "string", "minLength": 1 },
         "observedRuns": { "type": "integer", "minimum": 0 },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "run": { "$ref": "#/definitions/mutationRun" }
       }
     },
@@ -326,13 +335,14 @@ const DEFINITIONS = `    "doctorResult": {
       "description": "바운디드 부분 결과 — 사람 머지 대기(파괴 승인) 또는 Application prune 미완. applications는 부재 관측 증거이고 핸들 재조회가 재개 경로다.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "correlation", "pendingReason", "dnsReclaim"],
+      "required": ["action", "name", "correlation", "pendingReason", "dnsReclaim", "resourcesRetained"],
       "properties": {
         "action": { "enum": ["teardown-app"] },
         "name": { "type": "string", "minLength": 1 },
         "correlation": { "type": "string", "minLength": 8 },
         "pendingReason": { "type": "string", "minLength": 1 },
         "dnsReclaim": { "enum": ["iac/tf-reconcile"] },
+        "resourcesRetained": { "enum": ["teardown-resource"] },
         "run": { "$ref": "#/definitions/mutationRun" },
         "pr": { "$ref": "#/definitions/mutationPr" },
         "applications": { "type": "array", "items": { "$ref": "#/definitions/mutationAbsentApp" } }
@@ -425,7 +435,7 @@ const DEFINITIONS = `    "doctorResult": {
       }
     },
     "statusAppRow": {
-      "description": "값 없음 = 키 부재(스키마는 JSON null을 두지 않는다 — 파일/키 부재의 의미 부여는 소비자).",
+      "description": "값 없음 = 키 부재(스키마는 JSON null을 두지 않는다 — 파일/키 부재의 의미 부여는 소비자). conns = values.envFrom에 배선된 data-conn 핸들(db-*-conn·cache-*-conn) — 배선 0이면 키 부재다. 관측 전용이고 자동 배선은 하지 않는다('이름≠앱' 케이스에서 엉뚱한 리소스를 문다).",
       "type": "object",
       "additionalProperties": false,
       "required": ["name"],
@@ -435,7 +445,8 @@ const DEFINITIONS = `    "doctorResult": {
         "digest": { "type": "string" },
         "autoDeploy": { "type": "boolean" },
         "sourceRepo": { "type": "string" },
-        "ledgerMi": { "type": "integer", "minimum": 0 }
+        "ledgerMi": { "type": "integer", "minimum": 0 },
+        "conns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
     "statusApp": {
@@ -600,10 +611,15 @@ const DEF_BY_VARIANT: Record<MutationVariantName, string> = {
 };
 
 // 행렬 분기 3형 — 형식(들여쓰기·인라인 스타일)이 곧 byte 계약이라 문자열 조립로만 만든다.
-function mutationBranch(verb: string, variant: MutationVariantName, action: string, chain: boolean): string {
+// 극성 축 둘(chain·exposure)은 같은 관용구다: 그 레인이 필드를 **싣거나**(required) 다른 레인은
+// **실을 수 없다**(not required). 한쪽만 두면 필드가 verb 사이로 새어도 스키마가 조용하다.
+function mutationBranch(verb: string, variant: MutationVariantName, action: string, chain: boolean, exposure: boolean): string {
   const chainLine = chain
-    ? '              { "type": "object", "required": ["chain"] }'
-    : '              { "not": { "type": "object", "required": ["chain"] } }';
+    ? '              { "type": "object", "required": ["chain"] },'
+    : '              { "not": { "type": "object", "required": ["chain"] } },';
+  const exposureLine = exposure
+    ? '              { "type": "object", "required": ["dnsExposure"] }'
+    : '              { "not": { "type": "object", "required": ["dnsExposure"] } }';
   return [
     "        {",
     '          "type": "object",',
@@ -614,6 +630,7 @@ function mutationBranch(verb: string, variant: MutationVariantName, action: stri
     '              { "$ref": "#/definitions/' + DEF_BY_VARIANT[variant] + '" },',
     '              { "type": "object", "properties": { "action": { "enum": ["' + action + '"] } } },',
     chainLine,
+    exposureLine,
     "            ] }",
     "          }",
     "        }",
@@ -631,7 +648,8 @@ function refusedFailureBranch(verb: string, action: string): string {
     '              { "allOf": [',
     '                { "$ref": "#/definitions/mutationFailure" },',
     '                { "type": "object", "properties": { "action": { "enum": ["' + action + '"] } } },',
-    '                { "type": "object", "required": ["chain"] }',
+    '                { "type": "object", "required": ["chain"] },',
+    '                { "not": { "type": "object", "required": ["dnsExposure"] } }',
     "              ] },",
     '              { "$ref": "#/definitions/mutationRefused" }',
     "            ] }",
@@ -662,7 +680,7 @@ function memberZeroBranches(): string {
       for (const v of row.mutation.variants) {
         out.push(v === "failure" && row.mutation.refusedOnFailure === true
           ? refusedFailureBranch(row.verb, row.mutation.action)
-          : mutationBranch(row.verb, v, row.mutation.action, row.mutation.chain));
+          : mutationBranch(row.verb, v, row.mutation.action, row.mutation.chain, row.mutation.exposure === true));
       }
     }
     for (const s of row.simple ?? []) out.push(simpleBranch(row.verb, s.variants, s.ref));

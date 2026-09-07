@@ -66,8 +66,9 @@ if (dbKeys.length > 0) {
   console.error(
     `⚠️  seal-secret: DB 접속 URL로 보이는 키를 봉인한다: ${dbKeys.join(", ")}\n` +
       `    봉인이 정당한 경우는 하나뿐이다 — homelab이 이 앱에 DB를 프로비저닝하지 *않을* 때(외부·관리형 DB).\n` +
-      `    homelab이 DB를 프로비저닝하면(create-database) conn SealedSecret이 <DB>_DATABASE_URL을 파드에 직접\n` +
-      `    주입한다(<DB> = 앱 이름이 아니라 DB 이름의 UPPER_SNAKE). 그때 봉인한 이 키가 함께 보이면 api 아키타입의\n` +
+      `    homelab이 DB를 프로비저닝하면(create-database) conn SealedSecret이 생기고, apps/<app>/deploy/prod/values.yaml의\n` +
+      `    envFrom 배선이 끝나면 <DB>_DATABASE_URL이 파드에 주입된다(<DB> = 앱 이름이 아니라 DB 이름의 UPPER_SNAKE —\n` +
+      `    배선은 손 편집 PR이다). 그때 봉인한 이 키가 함께 보이면 api 아키타입의\n` +
       `    src/db.ts는 런타임 URL 후보를 둘로 보고 *기동에서 죽는다*(CrashLoop) — 어느 DB가 이 앱 것인지 정할 수\n` +
       `    없기 때문이다. 소스를 하나만 골라라:\n` +
       `      · homelab DB를 쓴다 → 이 키를 .env에서 빼라. 로컬 개발용 URL은 .env.local에(봉인 대상 아님, bun이 자동 로드).\n` +

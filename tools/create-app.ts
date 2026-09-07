@@ -16,6 +16,7 @@ import { buildActivationMarker, registryProjection } from "./lib/activation-mark
 // 앱 표면(경로·기록 집합)은 app-surface module이 소유한다(d4) — create가 쓰는 집합 = teardown이
 // 지우는 집합의 대칭이 module 테스트로 강제된다. apps.json·원장·digest-exporter는 앱-외부 표면이라 여기 잔류.
 import { appPaths, appRel, writeAppSurface } from "./lib/app-surface.ts";
+import { LAYOUT_DIRS, entryName, layoutFor } from "./lib/resource-layout.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
 let __f: Record<string, string | boolean>;
@@ -174,6 +175,27 @@ if (sealedFacts) {
 // 권위 정책 레지스트리 — 폴러(poll-ghcr) autoDeploy 승인 게이트의 유일 소스
 const bindings = { autoDeploy: config.deploy?.autoDeploy ?? true };
 
+// 앱↔리소스 배선 — **자동 배선은 하지 않는다**: conn 이름과 앱 이름이 같다는 보장이 없고(공유·
+// 재사용), audit-orphans:315가 그 '이름≠앱' 케이스를 비차단 근거로 명시한다. 자동 배선은 엉뚱한
+// DB를 물린다. 대신 **이미 등록된** 같은 이름의 conn을 알아채 PR 체크리스트에 한 줄을 더한다
+// (문구 형식은 create-database/create-cache의 프로비저너 체크리스트와 같다). envFrom을 실제로
+// 넣는 것은 여전히 손 편집 PR이다.
+function wiringChecklist(): string[] {
+  let entries: string[] = [];
+  try {
+    const kust = parseYaml(readFileSync(`${ROOT}/${LAYOUT_DIRS.dataConn}/kustomization.yaml`, "utf8")) ?? {};
+    entries = Array.isArray(kust.resources) ? kust.resources.map((e: unknown) => entryName(String(e))) : [];
+  } catch { /* data-conn 컴포넌트 부재(그린필드) = 후보 0 */ }
+  const out: string[] = [];
+  for (const [kind, label] of [["db", "DB"], ["cache", "캐시"]] as const) {
+    const handle = layoutFor(kind, app!).handles.rw.name;
+    if (entries.includes(`${handle}.sealed.yaml`)) {
+      out.push(`apps/${app}/deploy/prod/values.yaml envFrom에 secretRef '${handle}' 배선 필요 — 이 PR은 배선하지 않는다(미배선 시 앱이 ${label} 없이 그대로 배포된다, #211 재발 클래스). envFrom 시크릿 변경은 파드 재시작 필요`);
+    }
+  }
+  return out;
+}
+
 // ---------- 5) 산출물 ----------
 const plan = {
   app, repo, tag, digest, kind, host: served ? host : null, replicas,
@@ -181,6 +203,7 @@ const plan = {
   bindings, secretKeys: sealedFacts ? sealedFacts.keys : [],
   checklist: [
     `이미지 pull: ghcr-pull imagePullSecret(prod NS)로 private 패키지 pull — 패키지 가시성 public 전환 불필요`,
+    ...wiringChecklist(),
   ],
 };
 

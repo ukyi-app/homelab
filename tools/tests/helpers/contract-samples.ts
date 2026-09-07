@@ -19,10 +19,11 @@ export function buildSamples(doctorIds: readonly string[]): Record<string, Sampl
     ["superseded"]: { ...base, error: "x", pr: { number: 1, url: "u", merged: true, mergeSha: "a" }, applications: [{ name: "cnpg-data" }] },
   });
   const secBase = { action: "update-secrets", name: "myapp", correlation: "corr-fixed-nonce-01", chain: { mode: "dispatch-only" } };
-  const appBase = { action: "create-app", name: "myapp", correlation: "corr-fixed-nonce-01" };
+  // app create만 노출 경계 부인문(dnsExposure)을 싣는다 — 극성 결합이라 다른 레인 표본에 넣으면 red다.
+  const appBase = { action: "create-app", name: "myapp", correlation: "corr-fixed-nonce-01", dnsExposure: "iac/tf-reconcile(공개) 또는 adguard rewrite(내부)" };
   // teardown은 shared mutation* 정의를 쓰지 않는다(dnsReclaim 필수·chain 없음·applications는
   // mutationAbsentApp) — 표본을 직접 짓는다.
-  const tdBase = { action: "teardown-app", name: "myapp", correlation: "corr-fixed-nonce-01", dnsReclaim: "iac/tf-reconcile" };
+  const tdBase = { action: "teardown-app", name: "myapp", correlation: "corr-fixed-nonce-01", dnsReclaim: "iac/tf-reconcile", resourcesRetained: "teardown-resource" };
   const td: Record<string, Sample> = {
     ["success"]: { ...tdBase, waited: false, run: { id: 1, url: "u" }, pr: { number: 1, url: "u", merged: false } },
     ["failure"]: { ...tdBase, error: "x" },

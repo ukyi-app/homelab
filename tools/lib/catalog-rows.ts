@@ -91,9 +91,11 @@ export type MutationVariantName = "success" | "failure" | "race" | "pending" | "
 
 export type ContractRow = {
   verb: string;
-  // mutation 행렬 동사 — 공유 mutation* 정의에 action 고정 + chain 극성 결합으로 전개된다.
+  // mutation 행렬 동사 — 공유 mutation* 정의에 action 고정 + chain·exposure 극성 결합으로 전개된다.
   // refusedOnFailure: failure가 연쇄 거부(mutationRefused)와의 oneOf인 이중 모드 동사(app secrets).
-  mutation?: { action: LaneAction; chain: boolean; variants: readonly MutationVariantName[]; refusedOnFailure?: true };
+  // exposure: 결과에 공개 노출 경계 부인문(dnsExposure)이 실리는 레인 — 공개 표면을 만드는 create-app뿐.
+  // 극성 결합이라 다른 레인은 그 필드를 **실을 수 없다**(chain과 같은 관용구 — verb↔필드 교차 배선 차단).
+  mutation?: { action: LaneAction; chain: boolean; exposure?: true; variants: readonly MutationVariantName[]; refusedOnFailure?: true };
   // 단순 동사 — variant 집합별 result 정의 참조.
   simple?: readonly { variants: readonly string[]; ref: string }[];
 };
@@ -118,7 +120,7 @@ export const CONTRACT_ROWS: readonly ContractRow[] = [
   ] },
   { verb: "db create", mutation: { action: "create-database", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },
   { verb: "cache create", mutation: { action: "create-cache", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },
-  { verb: "app create", mutation: { action: "create-app", chain: false, variants: ["success", "failure", "race", "pending", "superseded"] } },
+  { verb: "app create", mutation: { action: "create-app", chain: false, exposure: true, variants: ["success", "failure", "race", "pending", "superseded"] } },
   { verb: "app secrets", mutation: { action: "update-secrets", chain: true, variants: ["success", "failure", "race", "pending", "superseded", "no-op"], refusedOnFailure: true } },
   { verb: "app teardown", simple: [
     { variants: ["success"], ref: "teardownSuccess" },

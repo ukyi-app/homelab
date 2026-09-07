@@ -184,6 +184,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 
 ## update-image 폴링 (bump 경로 — 인-레포 앱 이미지 전용)
 
+> **온보딩 후 autoDeploy 전환**: `apps/<app>/deploy/prod/.bindings.json`의 `autoDeploy`를 편집하는
+> PR이 유일 경로다(머지 = 승인 정책 변경). 이 값을 바꾸는 동사·make 타깃·워크플로는 없다 —
+> `poll-ghcr`가 이 파일을 권위로 직접 읽고, 누락이면 fail-closed(승인 PR)다.
+
 - **`poll-ghcr.ts`** — GHCR 폴링 bump **플래너**(읽기 전용, 부작용 0). `bump-poll.yaml`(10분 주기)이
   `bun tools/poll-ghcr.ts --root . > plan.json`으로 호출. `source-repo` 바인딩이 있는
   `apps/*/deploy/prod`만 순회 — 앱 레포 main 커밋(최신순)을 권위로, 배포 SHA의 descendant + GHCR

@@ -271,3 +271,40 @@ run_teardown_tty() {
   echo "$output" | grep -q -- "--confirm"
   echo "$output" | grep -q "부재"
 }
+
+@test "every teardown variant states that db/cache resources are retained, not reclaimed (floor 4)" {
+  # product-3: teardown-app의 계약은 'DB/캐시 conn·CR·Valkey는 절대 비접촉'인데 결과는 DNS만
+  # '내 소관 아님'이라 말하고 잔여는 침묵했다(지금 레포가 그 잔여 3건을 안고 있다).
+  # dnsReclaim과 **같은 형식**으로 4 variant 전부에 싣는다 — 반쯤 착지한 순간이 가장 헷갈린다.
+  # 후보 열거는 하지 않는다(이름≠앱 케이스). 문구는 소관 이관이 아니라 **미완 작업**을 드러낸다.
+  n=0
+  for g in success pending pruned failure race; do
+    [ "$(jq -r '.result.resourcesRetained' "tools/tests/fixtures/homelab/app-teardown-$g.golden.json")" = "teardown-resource" ]
+    n=$((n+1))
+  done
+  [ "$n" -eq 5 ]
+  # 4 variant 전부가 실제로 덮였는지 — 골든 다섯이 success/pending/failure/race를 낸다.
+  [ "$(jq -r '.variant' tools/tests/fixtures/homelab/app-teardown-*.golden.json | LC_ALL=C sort -u | tr '\n' ',')" = "failure,pending,race,success," ]
+  # 스키마가 required로 강제한다 — 필드를 지운 envelope은 red다(부정 단언 + 양성 대조).
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    let n = 0;
+    for (const g of ["success", "pending", "pruned", "failure", "race"]) {
+      const env = JSON.parse(readFileSync("tools/tests/fixtures/homelab/app-teardown-" + g + ".golden.json", "utf8"));
+      if (schemaErrors(env, sch, sch).length) { console.error(g + ": 원본이 이미 무효"); process.exit(1); }
+      delete env.result.resourcesRetained;
+      if (schemaErrors(env, sch, sch).length === 0) { console.error(g + ": resourcesRetained 없이도 통과"); process.exit(1); }
+      n++;
+    }
+    console.log("required:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^required:5$"
+  # 사람용 렌더도 같은 사실을 말한다 — 미완 작업임이 드러나야 한다(소관 이관 문구 금지).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts app teardown myapp --confirm myapp --poll-ms 10 --deadline-ms 500
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "teardown-resource"
+}

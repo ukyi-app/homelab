@@ -216,3 +216,27 @@ merged_pr() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "수동 머지"
 }
+
+@test "app create states the exposure boundary in a mode-agnostic way (true for public and internal apps, floor 2)" {
+  # product-8: teardown은 DNS를 '내 소관 아님'이라 말하는데 create는 아무 말도 안 했다.
+  # 무조건 상수(iac/tf-reconcile)는 **내부 앱에서 거짓**이 된다 — 내부 노출은 adguard rewrite 소관이다.
+  # create 시점에는 표면이 아직 없어 route.public을 읽을 수 없으므로 모드-불가지 부인문을 싣는다.
+  n=0
+  for a in mypublic myinternal; do
+    printf '[{"id":801,"name":"✨ create-app — %s [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/801"}]\n' "$a" "$NONCE" > "$FIX/appcreate-runs.json"
+    run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+      "$BUN" tools/homelab.ts app create "$a" --poll-ms 10 --deadline-ms 500 --json
+    [ "$status" -eq 0 ]
+    e="$(echo "$output" | jq -r '.result.dnsExposure')"
+    # 두 모드를 모두 담은 한 문구 — 공개 앱에서도 내부 앱에서도 참이다.
+    case "$e" in *iac*) : ;; *) false ;; esac
+    case "$e" in *adguard*) : ;; *) false ;; esac
+    n=$((n+1))
+  done
+  [ "$n" -eq 2 ]
+  # 대조군 — 리소스 레인(db create)은 이 필드를 싣지 않는다(공개 표면이 없는 동사).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result | has("dnsExposure")')" = "false" ]
+}

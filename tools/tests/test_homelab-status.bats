@@ -470,3 +470,24 @@ assert_envelope_valid() {
   [ -z "$output" ]
   echo "$stderr" | grep -q "사용법"
 }
+
+@test "status app mode reports the wired data-conn handles and omits the key when nothing is wired (floor 2)" {
+  # product-1: conn이 봉인·커밋돼도 앱이 envFrom을 배선 안 하면 어떤 게이트도 안 잡았다(#211 실재발).
+  # 배선 **자동화**는 하지 않는다(이름≠앱 케이스) — status가 배선 사실을 보고하는 것이 이 티켓의 범위다.
+  make_app_fixture wired true
+  printf 'envFrom:\n  - secretRef: { name: db-wired-conn }\n  - secretRef: { name: cache-sessions-ro-conn }\n  - secretRef: { name: wired-secrets }\n' \
+    >> "$APPS_ROOT/apps/wired/deploy/prod/values.yaml"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status wired --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  # data-conn 컴포넌트가 내는 핸들만 추린다 — 앱 자기 봉인본(wired-secrets)은 배선이 아니다.
+  [ "$(echo "$output" | jq -rc '.result.app.conns')" = '["db-wired-conn","cache-sessions-ro-conn"]' ]
+  # 부정 단언의 양성 대조 — 배선이 없는 앱은 키 자체가 부재다(빈 배열이 아니라).
+  make_app_fixture bare true
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status bare --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.app | has("conns")')" = "false" ]
+  # 사람용 렌더도 같은 사실을 말한다(기계 채널만 알고 사람은 모르는 상태 금지).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status wired --root "$APPS_ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "db-wired-conn"
+}
