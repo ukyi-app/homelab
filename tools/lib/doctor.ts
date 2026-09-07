@@ -7,7 +7,7 @@
 //     소진에서 같은 실패를 반복하지 않는다). gh-version이 gh-auth에 종속인 이유가 이것이고,
 //     테스트가 그 상한을 '실패 레인의 gh 호출 1회'로 잰다.
 //   - 결정적 출력: detail에 절대경로·시각·신원 값 등 실행마다 변하는 값을 넣지 않는다(골든 픽스처 계약).
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import { delimiter } from "node:path";
 import { gh as ghExec, sh } from "./exec.ts";
 import { HOMELAB_REPO, TEMPLATE_REPO, ARCH_NEUTRAL_ARCHETYPES, COMPILED_ARCHETYPES } from "./platform.ts";
@@ -33,6 +33,20 @@ const TOOLCHAIN_RUNBOOK = "docs/runbooks/toolchain.md";
 // 증명된다(함정 원장 「fine-grained PAT 능력은 실제 push 테스트로만」과 같은 계열).
 const GH_MIN_VERSION: [number, number] = [2, 40];
 const GH_MIN_LABEL = GH_MIN_VERSION.join(".");
+
+// 전역 설치 진단(homelab-cli-r2 티켓 35) — `bun link`가 심는 진입점 이름. 4상 판정의 원료를
+// **`lstatSync`로** 모은다: `Bun.which`는 dangling 심링크에 null을 돌려줘 "설치 안 됨"과
+// "설치했는데 대상이 사라졌다"를 한 값으로 접는다. 후자가 이 호스트에서 실측된 상태다
+// (2026-09-07: `~/.bun/bin/homelab` → 삭제된 worktree). 두 상태의 처방이 다르므로 접으면 안 된다.
+const CLI_BIN_NAME = "homelab";
+// `$BUN_INSTALL/bin`(미설정이면 `~/.bun/bin`) — bun link의 심링크 자리. 이 디렉토리가 PATH에 있어야
+// 전역 `homelab`이 뜨는데, mise/asdf로 bun을 관리하면 PATH에 자동 추가되지 않는다(실측).
+function bunLinkBin(): string | null {
+  const bi = process.env.BUN_INSTALL;
+  if (bi !== undefined && bi !== "") return `${bi}/bin`;
+  const home = process.env.HOME;
+  return home !== undefined && home !== "" ? `${home}/.bun/bin` : null;
+}
 
 // contents API의 base64 본문을 디코드해 돌려준다(실패 = null — 콜사이트가 fail 처리).
 function fetchTemplateFile(path: string): string | null {
@@ -121,6 +135,27 @@ export function runDoctor(): DoctorResult {
   // detail은 '다음에 무엇을 하나'까지 지목한다(티켓 33) — 호스트 도구 핀은 런북이 SSOT다.
   const kc = process.env.KUBECONFIG ?? "";
   const gitBin = Bun.which("git");
+
+  // ── 전역 설치 — `homelab` 진입점이 실제로 뜨는가(4상) ──
+  // 결정적 출력 계약대로 **경로는 싣지 않는다**: 상태와 처방만 말한다(경로는 `homelab --version`이
+  // 해석된 진입점을 그대로 낸다 — 가변 문자열은 그쪽 채널이다).
+  const pathDirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+  const linkBin = bunLinkBin();
+  const candidates = [...pathDirs, ...(linkBin !== null && !pathDirs.includes(linkBin) ? [linkBin] : [])];
+  let aliveOnPath = false;
+  let aliveOffPath = false;
+  let dangling = false;
+  for (const d of candidates) {
+    const p = `${d}/${CLI_BIN_NAME}`;
+    try { lstatSync(p); } catch { continue; }   // 엔트리 자체가 없다 = 이 디렉토리는 무관
+    if (!existsSync(p)) { dangling = true; continue; }  // 엔트리는 있는데 대상이 없다(끊어진 링크)
+    if (pathDirs.includes(d)) aliveOnPath = true; else aliveOffPath = true;
+  }
+  if (aliveOnPath) add("install", "pass", `전역 ${CLI_BIN_NAME} 진입점이 PATH에서 해석된다`);
+  else if (dangling) add("install", "fail", `전역 ${CLI_BIN_NAME} 링크가 사라진 대상을 가리킨다(worktree/임시 클론에서 link한 흔적) — 본 체크아웃에서 재-link 필요(bun link)`);
+  else if (aliveOffPath) add("install", "warn", `전역 ${CLI_BIN_NAME} 링크는 살아 있지만 그 디렉토리($BUN_INSTALL/bin)가 PATH 밖이다 — PATH에 추가하거나 소스 실행(bun tools/homelab.ts)으로 대체`);
+  else add("install", "warn", `전역 ${CLI_BIN_NAME} 진입점 없음 — bun link 미실행(소스 실행 bun tools/homelab.ts로 대체 가능)`);
+
   add("bun", Bun.which("bun") ? "pass" : "fail",
     Bun.which("bun") ? "bun 발견(PATH)" : `bun이 PATH에 없다 — app init(스캐폴드 실행)에 필요(${TOOLCHAIN_RUNBOOK})`);
   // git은 app init/secrets 연쇄의 clone·commit·push 전부가 지나는 자리다 — 부재면 그 동사들이

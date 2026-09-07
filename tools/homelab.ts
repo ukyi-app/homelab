@@ -365,7 +365,7 @@ function appTeardownCli(rest: string[]): VerbOutput {
 function appInitUsage(): string {
   const choices = ARCHETYPES.join("|"); // 어휘는 platform.ts SSOT 파생(리터럴 사본 금지 — test_platform.bats 가드)
   return [
-    `사용법: homelab app init <app> --archetype ${choices} [--repo-public] [--dispatch-secrets <경로>] [--adopt] [--json]`,
+    `사용법: homelab app init <app> --archetype ${choices} [--repo-public] [--parent-dir <절대경로>] [--dispatch-secrets <경로>] [--adopt] [--json]`,
     "",
     "앱 레포의 시작을 끝까지 만든다(멱등·재개 가능): preflight(부수효과 0) → 템플릿에서 레포 생성",
     "(기본 private) → 클론 → 스캐폴더 비대화형 실행 → invocation marker 기록 → 커밋·첫 push(빌드",
@@ -375,6 +375,8 @@ function appInitUsage(): string {
     `  --archetype <a>    ${choices} (kind는 아키타입 유도값 — CONTEXT.md 용어)`,
     "  --repo-public      **GitHub 레포**를 공개로 생성(기본 private) — 앱의 공개 노출이 아니다.",
     "                     앱 노출은 클론된 앱 레포 .app-config.yml의 route.public이 정한다(손 편집).",
+    "  --parent-dir <절대경로>  클론할 부모 디렉토리(기본: 현재 디렉토리 — 클론 위치는 <부모>/<app>).",
+    "                     homelab 체크아웃 안(그 하위 포함)은 거부한다: 중첩 레포는 로컬 게이트가 보지 못한다.",
     "  --dispatch-secrets <경로>  App 키 디렉토리(app-id·private-key.pem) — 새 레포에 디스패치 시크릿 쌍 설정",
     "                     ⚠️ dispatch App은 2026-09-03 org **설치 없음**(AGENTS.md 트리거 경계) — 재설치",
     "                     전에는 이 쌍을 심어도 무효다(배포 반영은 bump-poll 크론 백스톱뿐). 키 디렉토리는",
@@ -392,7 +394,7 @@ function appInitCli(rest: string[]): VerbOutput {
   // GitHub **레포**이고, 실물 스캐폴더의 --public은 `.app-config.yml`의 route.public(앱 **노출**)이라
   // `app init foo --public`은 '공개 레포 + 내부 전용 앱'을 만들었다. 가장 흔한 조합(비공개 레포 +
   // 공개 앱)은 이 동사의 플래그로는 도달 불가이고 클론된 트리의 파일 편집이 정답이다.
-  const p = positionalThenFlags(rest, { value: ["--archetype", "--dispatch-secrets"], bool: ["--repo-public", "--public", "--adopt", "--json", "--help"] }, "homelab app init", appInitUsage);
+  const p = positionalThenFlags(rest, { value: ["--archetype", "--dispatch-secrets", "--parent-dir"], bool: ["--repo-public", "--public", "--adopt", "--json", "--help"] }, "homelab app init", appInitUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: appInitUsage() };
   if (p.flags.bool("--public")) {
@@ -408,6 +410,9 @@ function appInitCli(rest: string[]): VerbOutput {
     public: p.flags.bool("--repo-public"),
     dispatchSecrets: p.flags.str("--dispatch-secrets"),
     adopt: p.flags.bool("--adopt"),
+    // MCP의 parentDir과 같은 표면·같은 술어(절대 경로 강제). 미지정은 현재 디렉토리 — 엔진의
+    // 기본값이 그대로 쓰인다(undefined를 넘기는 것이 계약, identity.pathInputError 주석).
+    parentDir: p.flags.str("--parent-dir"),
   };
   const bad = appInitInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab app init: ${bad}`, usage: appInitUsage() };

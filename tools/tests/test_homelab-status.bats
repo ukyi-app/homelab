@@ -5,6 +5,15 @@
 # 생략은 성공(exit 0)이지 skip(4)이 아니다(부분 정보 제공이 계약). 하네스: helpers/cli_stub.bash
 # (gh·kubectl PATH stub + NUL argv 원장 + --root 주입 앱 픽스처) — 라이브 무의존.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과. @test 이름은 영어(인코딩 함정).
+#
+# ── 알려진 무증인 축(예약 — homelab-cli-r2 티켓 35 (e)) ─────────────────────────────────────────
+# `status.ts`의 **프로덕션 기본 루트**(`defaultRoot()` = `new URL("../..", import.meta.url)`)는 이
+# 파일의 어떤 @test도 밟지 않는다: 목록·앱 모드 호출이 전부 `--root "$APPS_ROOT"` 심을 통과하고
+# `??`라 기본값 표현식이 **호출조차 되지 않기** 때문이다. 그래서 그 앵커를 `"../../.."`로 바꿔도
+# 전건 초록이다 — 하필 그 경로가 MCP status tool이 항상 타는 유일한 경로다(root 미노출).
+# 지금 이 자리에 "루트에서 count 0" 같은 단언을 세우면 apps/에 앱이 0개라 **공허하다**(그린필드).
+# ⇒ **첫 실전 앱이 `apps/`에 착지하는 커밋**에서 `--root` 없는 @test를 추가한다: 그 앱 이름이
+#    목록에 실재함을 재면 앵커 파손이 red가 된다(그 전에는 어떤 형태로도 비-vacuous하지 않다).
 bats_require_minimum_version 1.5.0
 load "helpers/cli_stub"
 

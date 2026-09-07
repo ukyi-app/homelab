@@ -81,7 +81,7 @@ const DEFINITIONS = `    "doctorResult": {
       "properties": {
         "checks": {
           "type": "array",
-          "minItems": 14,
+          "minItems": 15,
           "items": { "$ref": "#/definitions/doctorCheck" }
         },
         "summary": {
@@ -590,6 +590,7 @@ const DEFINITIONS = `    "doctorResult": {
             "gh-version",
             "gh-owner",
             "gh-scopes",
+            "install",
             "bun",
             "git",
             "kubeseal",

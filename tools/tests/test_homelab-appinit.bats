@@ -28,13 +28,15 @@ setup() {
 #    test_homelab-secrets.bats와 같은 이식성 형태로 한다. 다만 인자는 문자열 보간이 아니라 bash -c의
 #    **위치 인자**로 넘긴다 — `--dispatch-secrets <경로>`처럼 공백을 담을 수 있는 피연산자가 있어
 #    argv 경계 보존이 원장 단언의 전제다(경계 증명은 ledger.py exact 몫).
-run_init() {
+run_init_at() {
+  init_cwd="$1"; shift
   run --separate-stderr env PATH="$STUB" \
     GIT_CONFIG_GLOBAL="$INIT_GCFG" GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" \
     HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
-    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$init_cwd" \
     "$BUN" "$ROOT/tools/homelab.ts" app init "$@"
 }
+run_init() { run_init_at "$INIT_PARENT" "$@"; }
 
 @test "a fresh init creates a PRIVATE repo, scaffolds, and pushes the marker (default private)" {
   run_init myapp --archetype api --json
@@ -677,4 +679,38 @@ run_init() {
   [ "$(printf '%s' "$output" | grep -c "빌드 트리거")" = "0" ]
   # 그 실행도 사람용 렌더 자체는 냈다(0건이 '출력을 안 본다'가 아님을 같은 스트림으로 증명).
   [ "$(printf '%s' "$output" | grep -c "app init myapp")" -ge 1 ]
+}
+
+@test "app init refuses to clone inside the homelab checkout, with zero side effects" {
+  # 근거: 여기 클론하면 GitOps 모노레포 안에 **중첩 레포**가 생기는데 로컬 게이트가 그것을 못 본다
+  # (Makefile ci-guard-tracked의 열거 경로가 최상위 새 디렉토리를 아예 안 보고 .gitignore에도 항목이
+  # 없다). 거부는 preflight(부수효과 0 구간)에서 나야 한다 — 뒤로 밀리면 레포 생성이 먼저 일어난다.
+  run_init_at "$ROOT" myapp --archetype api --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "preflight" ]
+  echo "$output" | jq -r '.result.error' | grep -q "homelab 체크아웃"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
+  # 하위 디렉토리도 같은 판정이다(순수 경로 포함) — 루트 동일성만 보면 apps/·tools/ 밑이 새어 나간다.
+  run_init_at "$ROOT/tools" myapp --archetype api --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "preflight" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
+  # 대조군 — 체크아웃 **밖**이면 같은 명령이 그대로 성공한다(거부가 상수가 아니다).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+}
+
+@test "--parent-dir places the clone outside the checkout even when invoked from inside it" {
+  run_init_at "$ROOT" myapp --archetype api --parent-dir "$INIT_PARENT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ -d "$INIT_PARENT/myapp/.git" ]
+  # 체크아웃 안에는 아무것도 만들지 않았다(양성 대조는 바로 위 -d).
+  [ ! -d "$ROOT/myapp" ]
+  # 상대 경로는 거부한다 — MCP의 parentDir과 같은 술어(묵시적 기준점 금지, identity.pathInputError).
+  run_init_at "$INIT_PARENT" myapp --archetype api --parent-dir ./here --json
+  [ "$status" -eq 2 ]
+  echo "$stderr" | grep -q "절대 경로"
 }

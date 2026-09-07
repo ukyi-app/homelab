@@ -26,6 +26,9 @@ setup() {
   make_kubectl_stub
   KC="$BATS_TEST_TMPDIR/kubeconfig"
   echo "apiVersion: v1" > "$KC"
+  # 초록 레인의 전역 설치 전제 — PATH 안(=$STUB)에 살아 있는 `homelab` 엔트리를 심는다.
+  # $BUN_INSTALL 격리는 하네스(cli_stub_init)가 이미 걸어 호스트 ~/.bun을 읽지 않는다.
+  ln -sfn "$ROOT/tools/homelab.ts" "$STUB/homelab"
   # 초록 레인의 git 전제 — 커밋 신원 + GitHub https 자격 helper를 격리 전역 config에 심는다.
   DOC_GCFG="$BATS_TEST_TMPDIR/doctor-gitconfig"
   {
@@ -40,12 +43,12 @@ setup() {
   run --separate-stderr env "${GITENV[@]}" PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts doctor
   [ "$status" -eq 0 ]
   n=0
-  for id in gh-auth gh-version gh-owner gh-scopes bun git kubeseal kubectl git-identity git-credential kubeconfig template-access template-scaffold-contract template-targetarch; do
+  for id in gh-auth gh-version gh-owner gh-scopes install bun git kubeseal kubectl git-identity git-credential kubeconfig template-access template-scaffold-contract template-targetarch; do
     echo "$output" | grep -q "^✓ $id"
     n=$((n+1))
   done
-  # 열거 바닥값: 점검 14항목 전부 확인(루프 붕괴 → vacuous green 차단)
-  [ "$n" -eq 14 ]
+  # 열거 바닥값: 점검 15항목 전부 확인(루프 붕괴 → vacuous green 차단)
+  [ "$n" -eq 15 ]
   echo "$output" | grep -q "진단 결과"
 }
 
@@ -55,7 +58,7 @@ setup() {
   [ "$(echo "$output" | jq -s 'length')" = "1" ]
   [ "$(echo "$output" | jq -r '.variant')" = "success" ]
   [ "$(echo "$output" | jq -r '.exitCode')" = "$status" ]
-  [ "$(echo "$output" | jq -r '.result.checks | length')" = "14" ]
+  [ "$(echo "$output" | jq -r '.result.checks | length')" = "15" ]
   [ "$(echo "$output" | jq -r '[.result.checks[].status] | unique | join(",")')" = "pass" ]
   echo "$stderr" | grep -q "진단 결과"
 }
@@ -333,6 +336,49 @@ setup() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api repos/ukyi-app/homelab-app-template/contents/scaffold/archetypes/site/Dockerfile --jq .content)" = "0" ]
   # 총 호출 상한 겸 바닥값: user 1 + 버전 1 + owner 변수 1 + 템플릿 메타 1 + 컨텐츠 4 = 8 (미지의 추가 호출 차단)
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "8" ]
+}
+
+@test "the global install is diagnosed in four states (alive on PATH, dangling, off-PATH, absent)" {
+  # ① pass — PATH 안의 살아 있는 엔트리(setup 기본 픽스처).
+  run --separate-stderr env "${GITENV[@]}" PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts doctor --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.checks[] | select(.id=="install") | .status')" = "pass" ]
+  # ② fail — 엔트리는 있는데 대상이 없다. 이 호스트에서 실측된 상태다(전역 링크가 삭제된 worktree를
+  #    가리킨다) — `Bun.which`는 dangling에 null을 돌려줘 '미설치'와 구별하지 못하므로 lstat이 필요하다.
+  ln -sfn "$BATS_TEST_TMPDIR/gone-checkout/tools/homelab.ts" "$STUB/homelab"
+  run --separate-stderr env "${GITENV[@]}" PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts doctor --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.result.checks[] | select(.id=="install") | .status')" = "fail" ]
+  echo "$output" | jq -r '.result.checks[] | select(.id=="install") | .detail' | grep -q "재-link"
+  # ③ warn — 살아 있지만 그 디렉토리가 PATH 밖이다($BUN_INSTALL/bin — mise 관리 bun의 실제 배치).
+  rm -f "$STUB/homelab"
+  ln -sfn "$ROOT/tools/homelab.ts" "$BUN_INSTALL/bin/homelab"
+  run --separate-stderr env "${GITENV[@]}" PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts doctor --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.checks[] | select(.id=="install") | .status')" = "warn" ]
+  echo "$output" | jq -r '.result.checks[] | select(.id=="install") | .detail' | grep -q "PATH 밖"
+  # ④ warn — 어디에도 엔트리가 없다(bun link 미실행). ③과 다른 처방이라 문구로 구별한다.
+  rm -f "$BUN_INSTALL/bin/homelab"
+  run --separate-stderr env "${GITENV[@]}" PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts doctor --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.checks[] | select(.id=="install") | .status')" = "warn" ]
+  echo "$output" | jq -r '.result.checks[] | select(.id=="install") | .detail' > "$BATS_TEST_TMPDIR/install-absent.txt"
+  grep -q "bun link" "$BATS_TEST_TMPDIR/install-absent.txt"
+  run grep -qF "PATH 밖" "$BATS_TEST_TMPDIR/install-absent.txt"
+  [ "$status" -eq 1 ]
+}
+
+@test "the install contract is stated in prose with its PATH premise and worktree trap (floor 3)" {
+  # 산문 3진술(tools/README.md): $BUN_INSTALL/bin PATH 전제 · worktree에서 link하면 그 디렉토리가
+  # 지워지는 순간 dangling · mise 관리 bun은 그 디렉토리를 PATH에 자동 추가하지 않는다.
+  n=0
+  for lit in 'BUN_INSTALL' 'worktree' 'mise'; do
+    grep -qF -- "$lit" tools/README.md
+    n=$((n+1))
+  done
+  [ "$n" -eq 3 ]
+  # AGENTS.md 핵심 명령 — 전역 PATH 전제가 참이 되기 전까지는 소스 실행형이 정직한 형태다.
+  grep -qF -- 'bun link && bun tools/homelab.ts doctor' AGENTS.md
 }
 
 @test "doctor works from outside the repository (resolves its own location)" {

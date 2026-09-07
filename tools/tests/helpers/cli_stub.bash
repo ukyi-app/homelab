@@ -22,6 +22,13 @@ cli_stub_init() {
   # 하네스 재배선이 아니라 **호스트 설정** 때문에 뒤집힌다(테스트가 자기 전제를 잘못 읽는다).
   # 형제 appinit 하네스는 자기 GIT_CONFIG_GLOBAL(INIT_GCFG)을 run env로 명시해 넘기므로 그쪽이 이긴다.
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+  # 전역 설치 축 격리 — doctor의 install 항목은 `$BUN_INSTALL/bin`(미설정이면 `~/.bun/bin`)에서
+  # `homelab` 엔트리를 찾는다. 격리하지 않으면 판정이 **개발자 머신 상태**에 종속된다: 이 호스트의
+  # `~/.bun/bin/homelab`은 삭제된 worktree를 가리키는 dangling 심링크라(2026-09-07 실측) doctor가
+  # fail을 내고, CI에서는 부재라 warn이 난다 — 같은 커밋이 venue마다 다른 색이 되는 자리다.
+  # 빈 디렉토리를 기본값으로 주고, 설치 상태를 재는 테스트만 여기에 엔트리를 심는다.
+  export BUN_INSTALL="$BATS_TEST_TMPDIR/bun-install"
+  mkdir -p "$BUN_INSTALL/bin"
   BUN="$(command -v bun)"
   # sleep — 디스패치 타임아웃 주입(STUB_GH_DISPATCH_HANG)이 자식을 살아 있게 두는 유일한 수단이다
   # (PATH는 대체라 시스템 도구가 자동으로 들어오지 않는다).

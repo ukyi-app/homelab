@@ -27,6 +27,11 @@
         "detail": "토큰 스코프 충족(repo, workflow)"
       },
       {
+        "id": "install",
+        "status": "pass",
+        "detail": "전역 homelab 진입점이 PATH에서 해석된다"
+      },
+      {
         "id": "bun",
         "status": "pass",
         "detail": "bun 발견(PATH)"
@@ -78,7 +83,7 @@
       }
     ],
     "summary": {
-      "pass": 10,
+      "pass": 11,
       "fail": 3,
       "warn": 1
     }

@@ -181,10 +181,21 @@ claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
   둘이 어긋나면 usage 오류, PR이 2개면 race exit 3). `--branch` 단독 조회는 없다. 산출물이 아직 없는
   앱(`<app>` 모드 failure)에는 진행 중인 create-app 레인 PR을 `result.createPrs`로 알린다 —
   그린필드에서 '앱 없음' 한 줄만 남던 자리에 재개 좌표를 준다(읽기 전용 — 수동 머지 원칙 불변).
-  **설치**: `bun link`(레포 루트) → package.json `bin`이 `homelab`을 전역 PATH에 심링크. 유일하게
-  셰뱅+exec 비트를 갖는 .ts다(test_shebang-exec.bats가 bin 선언에서 예외를 파생). 레포 밖(앱 레포
-  디렉토리 포함)에서도 동작한다(자기 위치는 import.meta 기준 해석).
-  `homelab doctor [--json]` = 플랫폼 전제 진단(관측 전용): gh 인증·로그인=HOMELAB_OWNER 일치(actor
+  **설치**: `bun link`를 **본 체크아웃에서** 실행한다 → package.json `bin`이 `$BUN_INSTALL/bin/homelab`
+  (기본 `~/.bun/bin/homelab`)을 이 파일로 심링크한다. 링크는 link 당시의 **절대경로에 고정**되므로
+  worktree·임시 클론에서 link하면 그 디렉토리가 지워지는 순간 전역 `homelab`이 dangling이 된다
+  (2026-09-07 실측: 이 호스트의 링크가 삭제된 worktree를 가리키고 있었다 — `homelab doctor`의
+  `install` 항목이 그 상태를 fail로 낸다). 그리고 그 심링크가 **PATH에 뜨려면 `$BUN_INSTALL/bin`이
+  PATH에 있어야 한다** — bun을 mise/asdf로 관리하면 bun 설치 스크립트가 하는 PATH 추가 단계를 안
+  거치므로 자동으로 들어가지 않는다(실측). 전제가 아직 참이 아니면 소스 실행
+  (`bun tools/homelab.ts <동사>`)이 동등한 경로다. 유일하게 셰뱅+exec 비트를 갖는 .ts다
+  (test_shebang-exec.bats가 bin 선언에서 예외를 파생). 레포 밖(앱 레포 디렉토리 포함)에서도
+  동작한다(자기 위치는 import.meta 기준 해석) — 지금 어느 체크아웃·어느 커밋이 도는지는
+  `homelab --version`이 해석된 진입점 절대경로와 HEAD로 답한다.
+  `homelab doctor [--json]` = 플랫폼 전제 진단(관측 전용): 전역 설치 4상(PATH에서 해석=pass /
+  링크가 사라진 대상=fail·재-link / 살아 있으나 `$BUN_INSTALL/bin`이 PATH 밖=warn / 엔트리 부재=warn —
+  `Bun.which`는 dangling에 null을 돌려줘 뒤 둘을 구별하지 못하므로 `lstat`으로 판정한다),
+  gh 인증·로그인=HOMELAB_OWNER 일치(actor
   가드 사전 검증)·토큰 스코프(repo·workflow, 헤더 부재=fine-grained 추정 warn)·gh 버전(코드에 박힌
   gh 문구 계약의 최소 버전 미만=warn), bun·git·kubeseal·kubectl 존재(kubectl 부재는 KUBECONFIG가
   있으면 fail·없으면 warn — 라이브 소비자가 전부 그 게이트 뒤다), git 커밋 신원·GitHub https 자격
@@ -548,8 +559,13 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든
   픽스처 계약). 소비자 2: `homelab.ts`(직접 — CLI 어댑터) · `lib/mcp.ts`(**간접** — verbs.ts의
   `DOCTOR.op`를 호출한다. MCP는 엔진을 직접 import하지 않고 catalog 행만 소비한다).
-- **`lib/init.ts`** — app init 엔진(`runAppInit()`·`appInitInputError()`): 앱 레포 시작 로컬 체인
-  (변이 디스패처 아님 — correlation 없음). preflight(부수효과 0) → 레포 생성(기본 private) → 클론
+- **`lib/init.ts`** — app init 엔진(`runAppInit()`·`appInitInputError()`·`cloneParentError()`): 앱 레포
+  시작 로컬 체인
+  (변이 디스패처 아님 — correlation 없음). preflight(부수효과 0 — 첫 관문이 **클론 위치**다:
+  parentDir가 homelab 체크아웃이거나 그 하위면 거부한다. 중첩 레포는 `.gitignore`에도 `ci-guard-tracked`
+  열거에도 없어 로컬 게이트가 보지 못하고, `git add -A` 한 번이면 gitlink로 스테이징된다. 판정은
+  순수 경로 포함이다 — git 프로브로 '임의의 git 레포 안'까지 넓히면 흔한 배치에서 오탐이다.
+  CLI `--parent-dir <절대경로>` / MCP `parentDir`가 명시 표면이다) → 레포 생성(기본 private) → 클론
   (canonical 판정 identity.isCanonicalClone) → push 라우팅 게이트(identity.pushRouteError) →
   스캐폴드(template-contract.SCAFFOLD_ENTRY 직접 실행) → invocation marker(.homelab-init) → 커밋·첫
   push → [--dispatch-secrets면 시크릿 쌍 — dispatch App은 **현재 org 설치 없음**이라 재설치 전까지 무효,
