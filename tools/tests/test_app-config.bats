@@ -66,3 +66,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; S="$ROOT/tools/app-con
   '
   [ "$status" -eq 0 ]
 }
+
+@test "deploy.autoDeploy declares a fail-closed default (contract prose matches create-app)" {
+  # 계약 문서의 기본값 진술이 생성기(`config.deploy?.autoDeploy ?? false`)와 같아야 한다 —
+  # 어긋나면 앱 저자는 "안 쓰면 자동"으로 읽고 코드는 승인 PR을 만든다(결정 Q4).
+  run jq -e '.properties.deploy.properties.autoDeploy.default == false' "$S"
+  [ "$status" -eq 0 ]
+}

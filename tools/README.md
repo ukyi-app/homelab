@@ -165,6 +165,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (`--config .app-config.yml --app --repo --domain --tag sha-<sha> --digest sha256:<hex> [--sealed]`).
   스키마+비즈니스 규칙 검증 후 `apps/<app>/deploy/prod/`(values·`.bindings.json`·`source-repo`·
   kustomization) + `apps.json`(active:true, 머지 즉시 공개 승인) + 메모리 원장을 한 번에 산출. `--dry-run`은 plan JSON만.
+  ⚠️ `.bindings.json`의 `autoDeploy` **기본은 `false`(승인 PR)**다 — 이미지 갱신 자동 머지는 앱 레포가
+  `.app-config.yml`의 `deploy.autoDeploy: true`로 **명시 opt-in** 해야 한다(형제 승인 게이트와 같은
+  fail-closed 방향; 기본값 진술의 SSOT는 `app-config-schema.json`의 `default: false`).
 - **`update-secrets.ts`** — `_update-secrets.yaml`이 호출. 앱 레포 main HEAD의
   `deploy/<app>-secrets.sealed.yaml`을 검증한 뒤 homelab `apps/<app>/deploy/prod/`에 봉인본을
   복사하고 `values.yaml.envFrom`·`podAnnotations.checksum/secrets`·`kustomization.yaml.resources`를
@@ -197,7 +200,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `bun tools/poll-ghcr.ts --root . > plan.json`으로 호출. `source-repo` 바인딩이 있는
   `apps/*/deploy/prod`만 순회 — 앱 레포 main 커밋(최신순)을 권위로, 배포 SHA의 descendant + GHCR
   manifest 실존을 증명해 후보를 고른다. `.bindings.json`의 `autoDeploy`가 true면 `bump`(자동 PR+머지),
-  false/누락이면 `propose-pr`(fail-closed 승인). 테스트는 `--fixtures <dir>`.
+  false/누락이면 `propose-pr`(fail-closed 승인). **기본은 승인 PR** — create-app이 `.app-config.yml`의
+  `deploy.autoDeploy` 부재를 false로 옮기므로, 자동 머지는 앱이 그 키를 `true`로 쓴 경우뿐이다.
+  테스트는 `--fixtures <dir>`.
 - **`ensure-bump-pr.ts`** — bump PR **멱등 실행기**(조회 → 결정 → 변이를 한 seam에). `bump-poll.yaml`이
   브랜치(`bump-poll/<kind>/<name>-<tag>` — **RUN_ID 없음**: 같은 bump = 같은 브랜치, kind가 동명 app/bespoke를 가른다)를 최신 main에서 재구축해
   로컬 커밋을 얹은 뒤 이 도구를 부르면, **원격 변이(push·PR·무장/해제)는 전부 이 도구만** 한다.

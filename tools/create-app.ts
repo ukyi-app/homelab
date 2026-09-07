@@ -172,8 +172,14 @@ if (sealedFacts) {
   values.podAnnotations = { "checksum/secrets": sealedFacts.checksum };
 }
 
-// 권위 정책 레지스트리 — 폴러(poll-ghcr) autoDeploy 승인 게이트의 유일 소스
-const bindings = { autoDeploy: config.deploy?.autoDeploy ?? true };
+// 권위 정책 레지스트리 — 폴러(poll-ghcr) autoDeploy 승인 게이트의 유일 소스.
+// ⚠️ 누락 기본값은 **false(fail-closed)**다. 이 레포의 다른 승인 게이트는 전부 그 방향이고
+// (bump-poll의 `.bindings.json` 누락=승인 PR · validate-mutation의 미선언 입력 거부 ·
+// activate-app의 재노출 재승인), 여기만 `?? true`라 deploy 절을 안 쓴 앱이 자동 배포로 착지했다.
+// 그 기본이 곧 "손으로 되돌린 핀이 다음 폴링 주기에 되돌려지는" 상태를 신규 앱의 기본으로 만든다.
+// 자동 배포는 앱이 `.app-config.yml`의 `deploy.autoDeploy: true`로 **명시 opt-in** 한다
+// (계약 문서의 기본값 진술은 tools/app-config-schema.json의 `default: false`가 SSOT).
+const bindings = { autoDeploy: config.deploy?.autoDeploy ?? false };
 
 // 앱↔리소스 배선 — **자동 배선은 하지 않는다**: conn 이름과 앱 이름이 같다는 보장이 없고(공유·
 // 재사용), audit-orphans:315가 그 '이름≠앱' 케이스를 비차단 근거로 명시한다. 자동 배선은 엉뚱한

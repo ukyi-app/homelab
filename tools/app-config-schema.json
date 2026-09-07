@@ -43,7 +43,7 @@
     "deploy": {
       "type": "object",
       "additionalProperties": false,
-      "properties": { "autoDeploy": { "type": "boolean", "default": true } }
+      "properties": { "autoDeploy": { "type": "boolean", "default": false, "description": "새 이미지의 자동 배포 승인. 기본은 false(승인 PR) — 자동 배포는 `true`로 명시 opt-in한다. create-app이 이 값을 `.bindings.json`으로 옮기고 bump-poll이 그것을 권위로 읽는다(누락=fail-closed)." } }
     }
   },
   "definitions": {

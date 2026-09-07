@@ -10,7 +10,7 @@ ArgoCD appset(`platform/argocd/root/appset.yaml`)이 `apps/*/deploy/prod`를 싱
 | 파일 | 역할 |
 |---|---|
 | `values.yaml` | 공유 Helm 차트(`platform/charts/app`) values 오버라이드 (없으면 ArgoCD가 빈 매니페스트로 실패) |
-| `.bindings.json` | **autoDeploy SSOT** (poll-ghcr가 권위로 읽음). db/redis 바인딩은 담지 않는다 — 리소스 연결은 `values.yaml`의 `envFrom`에 conn secretRef(`db-<name>-conn`·`cache-<name>-conn`)를 넣는 손 편집 PR이고, 현재 배선은 `homelab status <app>`의 `conns`로 읽는다 |
+| `.bindings.json` | **autoDeploy SSOT** (poll-ghcr가 권위로 읽음). **기본 `false` = 승인 PR** — 자동 배포는 앱 레포가 `.app-config.yml`의 `deploy.autoDeploy: true`로 명시 opt-in한 경우뿐이다. db/redis 바인딩은 담지 않는다 — 리소스 연결은 `values.yaml`의 `envFrom`에 conn secretRef(`db-<name>-conn`·`cache-<name>-conn`)를 넣는 손 편집 PR이고, 현재 배선은 `homelab status <app>`의 `conns`로 읽는다 |
 | `source-repo` | 외부 앱 레포 바인딩(`ukyi-app/<app>`) — poll-ghcr가 이 파일 있는 앱만 update-image 폴링(`tools/poll-ghcr.ts`; 누락=폴링 밖, fail-closed) |
 | `kustomization.yaml` | appset source #3가 kustomize 렌더(namespace: prod + 봉인본 resources) — 없으면 ArgoCD kustomize build 실패 |
 

@@ -34,7 +34,10 @@ _Avoid_: 핀 설정, 핀 메타데이터
 **autoDeploy**:
 새 이미지의 자동 배포 승인 플래그. 정확히 `true`일 때만 자동이고 false·누락·
 파싱 불가는 전부 수동 승인(fail-closed) — apps 레인(`.bindings.json`)과
-베스포크 레인(descriptor)이 같은 해석을 공유한다.
+베스포크 레인(descriptor)이 같은 해석을 공유한다. **생산자 기본값도 같은 방향**이다:
+create-app은 `.app-config.yml`의 `deploy.autoDeploy` 부재를 `false`로 옮기므로
+(`app-config-schema.json`의 `default: false`가 그 진술의 SSOT), 자동 배포는
+앱이 그 키를 `true`로 쓴 **명시 opt-in**일 때만 성립한다.
 _Avoid_: 자동 머지 플래그
 
 **bump 계획 (bump plan)**:
