@@ -110,7 +110,11 @@ function runChain(cwd: string, app: string, noSeal: boolean): ChainResult {
   const remote = git(cwd, ["ls-remote", "--heads", "origin", "main"]);
   if (!head.ok || !remote.ok) return refuse("원격 main 도달성 확인 실패(ls-remote)");
   const remoteSha = remote.out.split(/\s+/)[0] ?? "";
-  if (remoteSha === "" || remoteSha !== head.out.trim()) return refuse(`원격 main(${remoteSha.slice(0, 7) || "없음"})이 로컬 HEAD(${head.out.trim().slice(0, 7)})와 다르다 — 도달성 미증명`);
+  // 등식 판정은 plan r1 a2의 fail-closed 결정이라 유지한다. 다만 문구에 처방을 **조건 없이**
+  // 덧붙인다: 누군가(예: Renovate PR 머지)가 원격 main을 앞서 밀면 수렴 경로인 재디스패치
+  // (no-seal)도 같은 등식에서 다시 거부되는데, 로컬을 앞세우지 않으면 빠져나갈 길이 없다
+  // (appverbs-11). 앞선 쪽을 판별하는 분기는 두지 않는다 — 같은 처방이 양쪽에 유효하다.
+  if (remoteSha === "" || remoteSha !== head.out.trim()) return refuse(`원격 main(${remoteSha.slice(0, 7) || "없음"})이 로컬 HEAD(${head.out.trim().slice(0, 7)})와 다르다 — 도달성 미증명. \`git pull --ff-only\` 후 재실행하라(재봉인 없이 재디스패치만 하려면 no-seal 모드)`);
   chain.headSha = head.out.trim();
   return { ok: true, chain };
 }

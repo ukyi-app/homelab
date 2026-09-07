@@ -13,7 +13,7 @@ import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInpu
 import { ENVELOPE, EXIT, USAGE_EXIT, assertEnvelope, type Envelope } from "./lib/contract.ts";
 import { git } from "./lib/exec.ts";
 import { APP_NAME_RE } from "./lib/identity.ts";
-import { WAIT_DEFAULTS, type ProgressEvent } from "./lib/mutation.ts";
+import { WAIT_DEFAULTS, waitInputError, type ProgressEvent } from "./lib/mutation.ts";
 import type { TypedFlags } from "./lib/cli.ts";
 import { APP_CREATE, APP_INIT, APP_SECRETS, APP_TEARDOWN, CACHE_CREATE, CACHE_URL, DB_CREATE, DB_URL, DOCTOR, STATUS, VERBS, appCreateInputError, appTeardownInputError, cacheCreateInputError, dbCreateInputError, type AppCreateInput, type AppTeardownInput, type CacheCreateInput, type DbCreateInput } from "./lib/verbs.ts";
 import { appSecretsInputError, type AppSecretsInput } from "./lib/secrets.ts";
@@ -342,12 +342,19 @@ function appTeardownCli(rest: string[]): VerbOutput {
   const app = p.positional ?? "";
   // 앱 이름 형식은 confirm 프롬프트 전에 검증한다(불량 이름으로 프롬프트를 띄우지 않는다).
   if (!APP_NAME_RE.test(app)) return { kind: "usage-error", message: `homelab app teardown: 앱 이름 형식 불량(소문자 kebab, 2..40): ${app}`, usage: appTeardownUsage() };
+  // 대기 플래그 **범위** 검증은 confirm 프롬프트 **앞**이다(appverbs-12) — 뒤에 두면 사람이 파괴
+  // 확인을 다시 타이핑한 **뒤에야** usage 오류를 본다. 표기 축(십진 정수)은 positionalThenFlags가
+  // 이미 위에서 잡았고, 여기서 남는 것은 양수 범위다. 술어는 그대로 동사가 소유한다.
+  const pollMs = numFlag(p.flags, "--poll-ms");
+  const deadlineMs = numFlag(p.flags, "--deadline-ms");
+  const waitBad = waitInputError({ pollMs, deadlineMs });
+  if (waitBad) return { kind: "usage-error", message: `homelab app teardown: ${waitBad}`, usage: appTeardownUsage() };
   // 파괴 확인 가드 — 플래그가 있으면 그 값, 없으면 TTY 재입력(비-TTY면 undefined). 일치해야만 진행.
   const confirm = p.flags.str("--confirm") ?? promptConfirm(app);
   if (confirm !== app) {
     return { kind: "usage-error", message: `homelab app teardown: 파괴 확인 실패 — '${app}' 재입력이 일치하지 않는다(입력: ${confirm ?? "(없음 — 비-TTY에는 --confirm 필수)"})`, usage: appTeardownUsage() };
   }
-  const input: AppTeardownInput = { app, confirm, wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms"), onProgress: progressSink };
+  const input: AppTeardownInput = { app, confirm, wait: p.flags.bool("--wait"), pollMs, deadlineMs, onProgress: progressSink };
   const bad = appTeardownInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab app teardown: ${bad}`, usage: appTeardownUsage() };
   const envelope = APP_TEARDOWN.op(input);

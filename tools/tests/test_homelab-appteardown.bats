@@ -317,3 +317,24 @@ run_teardown_tty() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "teardown-resource"
 }
+
+@test "a bad wait flag is a usage error BEFORE the TTY destruction prompt (notation and range axes)" {
+  # 종전 순서는 APP_NAME_RE → confirm 프롬프트 → appTeardownInputError였다: 사람이 파괴 확인을
+  # 타이핑한 뒤에야 usage 오류를 봤다(appverbs-12). 표기 축(--poll-ms abc)은 파서의 십진 술어가
+  # 이미 앞에서 잡지만 **범위 축**(0)은 그 뒤였다 — 두 축을 한 자리에서 잰다.
+  n=0
+  for badflag in "--poll-ms abc" "--poll-ms 0" "--deadline-ms 0"; do
+    : > "$CALLS"
+    run bash -c "printf '%s\n' 'myapp' | script -qec \"env PATH='$STUB' KUBECONFIG='$KC' HOMELAB_CORRELATION='$NONCE' '$BUN' tools/homelab.ts app teardown myapp $badflag --json\" /dev/null"
+    [ "$status" -eq 2 ]
+    [ "$(printf '%s' "$output" | grep -c '파괴 확인:')" = "0" ]
+    [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+    n=$((n + 1))
+  done
+  [ "$n" -eq 3 ]   # 열거 바닥값 — 목록이 비면 위 단언이 0회 실행돼 공허해진다
+  # 양성 대조 — 같은 pty 경로에서 정상 플래그는 프롬프트를 실제로 띄운다(0건이 '못 보는 것'이 아니다).
+  : > "$CALLS"
+  run_teardown_tty myapp --json
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | grep -c '파괴 확인:')" -ge 1 ]
+}

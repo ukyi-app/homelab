@@ -452,3 +452,21 @@ run_secrets_in() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q -- "--wait"
 }
+
+@test "a remote main ahead of local HEAD is refused with a git pull prescription and no dispatch" {
+  # 도달성 판정은 등식이라 누군가(예: Renovate PR 머지)가 원격 main을 앞서 밀면 수렴 경로인
+  # --no-seal 재실행도 같은 자리에서 거부된다 — 로컬 pull 없이는 빠져나갈 수 없는데 종전 문구에는
+  # 그 처방이 없었다(appverbs-11). 등식 자체는 plan r1 a2의 fail-closed 결정이라 그대로 둔다.
+  before="$(git -C "$APP_REMOTE" rev-list --count main)"
+  git -C "$APP_WORK" commit -q --allow-empty -m "remote ahead"
+  git -C "$APP_WORK" push -q "$APP_REMOTE" HEAD:refs/heads/main
+  git -C "$APP_WORK" reset -q --hard HEAD~1
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$((before + 1))" ]
+  run_secrets_in "$APP_WORK" --no-seal --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "도달성 미증명"
+  echo "$output" | jq -r '.result.error' | grep -q "pull --ff-only"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "0" ]
+}

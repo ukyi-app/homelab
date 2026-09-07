@@ -577,14 +577,19 @@ case "$*" in
     if [ -n "${STUB_GH_CREATE_FAIL:-}" ]; then echo "gh: repo create 실패" >&2; exit 1; fi
     app="${3#ukyi-app/}"
     git clone -q --bare "$INIT_REMOTES/homelab-app-template.git" "$INIT_REMOTES/$app.git"
+    # 서버 반영 **뒤** 클라이언트만 죽는 창(appverbs-7) — bare는 만들어졌는데 gh는 비-0이다.
+    # STUB_GH_CREATE_FAIL(서버에도 미생성)과 갈리는 축이라 별도 노브다.
+    if [ -n "${STUB_GH_CREATE_FAIL_AFTER:-}" ]; then echo "gh: repo create — 서버 반영 후 클라이언트 실패" >&2; exit 1; fi
     ;;
   # 레포 존재 — bare 유무. 인자: $1=api $2=repos/ukyi-app/<app> $3=--jq $4=.name.
   "api repos/ukyi-app/"*" --jq .name")
     app="${2#repos/ukyi-app/}"
     if [ -d "$INIT_REMOTES/$app.git" ]; then printf '%s\n' "$app"; else echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
     ;;
-  # invocation marker — bare main의 .homelab-init(있으면 base64, 없으면 404). $2=repos/ukyi-app/<app>/contents/.homelab-init.
-  "api repos/ukyi-app/"*"/contents/.homelab-init --jq .content")
+  # invocation marker — bare main의 .homelab-init(있으면 base64, 없으면 404). ref는 main 고정이다
+  # (init.ts readRemoteMarker와 같은 텍스트 — 어긋나면 계약 밖 호출로 exit 3).
+  # $2=repos/ukyi-app/<app>/contents/.homelab-init?ref=main.
+  "api repos/ukyi-app/"*"/contents/.homelab-init?ref=main --jq .content")
     rest="${2#repos/ukyi-app/}"; app="${rest%%/*}"
     if git -C "$INIT_REMOTES/$app.git" show main:.homelab-init >/dev/null 2>&1; then
       git -C "$INIT_REMOTES/$app.git" show main:.homelab-init | base64

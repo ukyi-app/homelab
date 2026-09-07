@@ -477,3 +477,122 @@ run_init() {
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.result.checkpoint')" != "secrets" ]
 }
+
+# ── 재개 입력 불일치·생성 3분기·키 경로 격리·마커 ref(homelab-cli-r2 티켓 28) ─────────────────
+
+@test "a re-run with a DIFFERENT archetype is refused at preflight, and a legacy marker without archetype still converges" {
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  before="$(git -C "$INIT_REMOTES/myapp.git" rev-parse main)"
+  head1="$(git -C "$INIT_PARENT/myapp" rev-list --count HEAD)"
+  : > "$CALLS"
+  run_init myapp --archetype worker --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "preflight" ]
+  echo "$output" | jq -r '.result.error' | grep -q "archetype"
+  # 결과의 archetype은 입력 에코가 아니라 **마커 관측값**이다(종전엔 no-op success에 'worker'를 되울렸다).
+  [ "$(echo "$output" | jq -r '.result.archetype')" = "api" ]
+  # 부수효과 0 — 스캐폴드 원장 0건 + 원격 main tip·로컬 커밋 수 불변(git 호출은 원장에 안 남는다).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold)" = "0" ]
+  [ "$(git -C "$INIT_REMOTES/myapp.git" rev-parse main)" = "$before" ]
+  [ "$(git -C "$INIT_PARENT/myapp" rev-list --count HEAD)" = "$head1" ]
+  # 같은 archetype 재실행은 통과한다 — 거부가 전칭이 아니다(양성 대조).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "no-op" ]
+
+  # 구형 마커(archetype 필드 없음)는 비교를 **건너뛴다** — fail-closed로 두면 init 이전에 만들어진
+  # 정상 레포가 영구 거부된다. 관측값이 없으므로 결과의 archetype은 입력으로 폴백한다.
+  printf '{"tool":"homelab-app-init","app":"myapp"}\n' > "$INIT_PARENT/myapp/.homelab-init"
+  git -C "$INIT_PARENT/myapp" -c user.name=t -c user.email=t@example.com commit -q -a -m "legacy marker"
+  git -C "$INIT_PARENT/myapp" push -q "$INIT_REMOTES/myapp.git" HEAD:refs/heads/main
+  run_init myapp --archetype worker --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "no-op" ]
+  [ "$(echo "$output" | jq -r '.result.archetype')" = "worker" ]
+}
+
+@test "a repo create that failed AFTER the server made the repo reports checkpoint created, not preflight" {
+  # 템플릿 복제는 GitHub 쪽 왕복이라(init.ts timeoutMs:0 주석) 서버 반영 뒤 클라이언트만 죽는 창이
+  # 있다. 종전엔 무조건 preflight라 다음 실행이 '마커 없는 기존 레포'를 만나 **자기 레포**에 --adopt를
+  # 요구했고, 사용자는 결과만 보고는 레포 생성 여부를 알 수 없었다(appverbs-7).
+  run --separate-stderr env PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
+    GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_GH_CREATE_FAIL_AFTER=1 \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
+    "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "created" ]
+  [ "$(echo "$output" | jq -r '.result.created')" = "true" ]
+  echo "$output" | jq -r '.result.error' | grep -q -- "--adopt"
+  [ -d "$INIT_REMOTES/myapp.git" ]
+  # 존재 재조회가 실제로 일어났다 — 생성 전 1회 + 생성 실패 후 1회.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api repos/ukyi-app/myapp --jq .name)" = "2" ]
+  # 대조 — 서버에도 안 만들어진 실패는 여전히 preflight이고 created 키가 없다(3분기가 실제로 갈린다).
+  : > "$CALLS"
+  run --separate-stderr env PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
+    GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_GH_CREATE_FAIL=1 \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
+    "$BUN" "$ROOT/tools/homelab.ts" app init other --archetype api --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "preflight" ]
+  [ "$(echo "$output" | jq -r '.result | has("created")')" = "false" ]
+  [ ! -d "$INIT_REMOTES/other.git" ]
+}
+
+@test "a dispatch-secrets key directory inside the clone tree is refused at preflight (add -A would commit it)" {
+  # 재개 경로의 `git add -A`는 클론 안 임의 untracked 파일을 첫 스캐폴드 커밋에 실어 원격 main으로
+  # 보낸다 — 라이브로 읽은 템플릿 .gitignore에 `*.pem`이 없다(appverbs-8). 값을 읽지 않는 이 엔진의
+  # '평문 비노출' 보장이 git 채널에는 없으므로 **위치**로 막는다.
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  KEYS="$INIT_PARENT/myapp/keys"
+  mkdir -p "$KEYS"
+  printf '123456\n' > "$KEYS/app-id"
+  printf 'PRIVATE-KEY-%s\n' "$CANARY" > "$KEYS/private-key.pem"
+  : > "$CALLS"
+  run_init myapp --archetype api --adopt --dispatch-secrets "$KEYS" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "preflight" ]
+  echo "$output" | jq -r '.result.error' | grep -q "클론"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh secret set)" = "0" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold)" = "0" ]
+  # 키가 원격 main에 실려 나가지 않았다.
+  run git -C "$INIT_REMOTES/myapp.git" show main:keys/private-key.pem
+  [ "$status" -ne 0 ]
+  # 평문은 어떤 채널에도 없다(거부 문구가 경로를 인용하므로 값 유출을 따로 잰다).
+  [ "$(printf '%s%s' "$output" "$stderr" | grep -c "$CANARY")" = "0" ]
+  # 양성 대조 — 클론 **밖** 키 디렉토리는 같은 명령에서 통과해 시크릿 쌍을 설정한다.
+  : > "$CALLS"
+  run_init myapp --archetype api --dispatch-secrets "$SECRETS_DIR" --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh secret set)" = "2" ]
+}
+
+@test "the remote marker read pins ref=main, the same fixed ref that push and the dispatchers use" {
+  # 마커 판독만 기본 브랜치를 읽고(ref 미지정) push·_create-app.yaml·_update-secrets.yaml은 main
+  # 고정이었다 — org 기본 브랜치 설정이 바뀌면 마커가 main에 있어도 '부재'로 읽혀 --adopt 재개 →
+  # 재스캐폴드 → non-fast-forward push 루프가 된다(appverbs-9).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  : > "$CALLS"
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api "repos/ukyi-app/myapp/contents/.homelab-init?ref=main" --jq .content
+  [ "$status" -eq 0 ]
+  # 기본 브랜치 축(ref 미지정)은 더 이상 쓰이지 않는다 — 바로 위 줄이 같은 원장의 양성 대조다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/myapp/contents/.homelab-init" --jq .content)" = "0" ]
+}
+
+@test "the scaffolder gate comment names two different objects instead of claiming the verified file is the executed one" {
+  # 관문은 TEMPLATE_REPO의 **원격 사본**(gh api contents), 실행은 클론된 대상 레포의 워킹 트리
+  # 파일이다 — 같은 *경로*이지 같은 오브젝트가 아니다(--adopt·디렉토리 재사용·T1/T2 시차 셋이
+  # 갈린다, r2-mcp-filesystem-authority-4).
+  [ "$(grep -c '검증 대상 = 실행 대상' tools/lib/init.ts)" = "0" ]
+  # 양성 대조(검출기 생존) — 같은 grep 형태가 정정된 문구는 실제로 잡는다.
+  [ "$(grep -c 'TEMPLATE_REPO의 원격 사본' tools/lib/init.ts)" -ge 1 ]
+}
