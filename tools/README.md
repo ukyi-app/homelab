@@ -628,8 +628,16 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (기본을 0으로 두면 조용히 꺼진 바닥값이 된다). 출력의 `scanned`가 스캔 신호다 — stdout이 기계 판독
   JSON이라 `SCAN:` 마커를 못 낸다.
 - **`contract-drift-check.ts`** — 동봉 계약(vendored `seal-secret.mts`·`sealed-secrets-cert.pem`)이 다운스트림
-  3위치(template scaffold·page·trip-mate-api)와 어긋나는지 정규화 diff(`vendored-contract.json` SSOT). files(Rust)는 대상 아님.
-  `contract-drift.yaml`(주 1회)이 호출·telegram 알림. `--self-test` 오프라인 유닛, 라이브 raw fetch는 워크플로 전용. 읽기 전용.
+  사본과 어긋나는지 정규화 diff(`vendored-contract.json` SSOT). files(Rust)는 대상 아님.
+  `contract-drift.yaml`이 호출·telegram 알림. 읽기 전용. 모드 넷:
+  기본(라이브 fetch + 정규화 diff + 로스터) · `--self-test`(이름 있는 순수 함수 케이스 목록, 오프라인 —
+  `SELFTEST: <n> cases ok` 방출, `--self-test-mutate`는 러너의 양성 대조) · `--roster`(오프라인 로스터만) ·
+  `--checklist --changed <파일>`(오프라인 전파 체크리스트 — 변경 파일 ∩ 매니페스트 `source`).
+  **로스터**: 앱 축은 손 열거가 아니라 `apps/*/deploy/prod/source-repo` 파생 집합과 **등식** 대조다
+  (초과=`stale-target` · 부족=`missing-target`, 둘 다 `errors`가 아니라 `drift`). 템플릿 행은 앱이 아니라
+  `scaffoldRepos` 선언이고, 파생 0건은 통과가 아니라 `greenfield` 상태로 stderr·JSON·telegram ident에 명시된다.
+  **errors 사유 축**: 404/403=`absent-or-private`(레포 삭제·private 전환·경로 리네임 — 비인증 fetch로는 구별
+  불가라 drift로 승격하지 않는다) · 그 외=`transient`. 라이브 raw fetch는 기본 모드 전용이다.
 - **`verify-db-marker.ts`** — `_create-database.yaml` PostSync에서 provision-db 마커(role 비번 적용 등)를
   검증(fail-closed — 마커 부재=비-0). 읽기 전용.
 - **`fixture-memory-ratios.ts`** — 발화 e2e 픽스처(VM import 포맷 — 줄당 하나의 JSON 시계열)에서 한 컨테이너의 메모리
