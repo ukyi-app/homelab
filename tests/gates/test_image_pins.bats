@@ -34,7 +34,7 @@ EOF
   wf platform/x/deployment.yaml <<'EOF'
 spec:
   containers:
-    - image: nginx:1.25@sha256:abcdef
+    - image: nginx:1.25@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   run bash "$CHK" --root "$REPO"
   [ "$status" -eq 0 ]
@@ -56,7 +56,7 @@ EOF
 image:
   repo: ghcr.io/x/y
   tag: v1
-  digest: sha256:abcdef
+  digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   run bash "$CHK" --root "$REPO"
   [ "$status" -eq 0 ]
@@ -69,7 +69,7 @@ EOF
 image:
   repo: ghcr.io/x/y
   tag: v1
-  # digest: sha256:notreallypinned
+  # digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   run bash "$CHK" --root "$REPO"
   [ "$status" -eq 1 ]
@@ -78,7 +78,7 @@ EOF
 
 @test "(d) fixtures(+fixtures-bad) and vendor paths are excluded (tag-only ignored)" {
   wf platform/ok/deployment.yaml <<'EOF'
-image: nginx:1.0@sha256:abcdef
+image: nginx:1.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   wf platform/charts/app/tests/fixtures/web.yaml <<'EOF'
 image: foo:1.0
@@ -138,7 +138,7 @@ EOF
   # ⚠️ 1이다 — 2는 CONTRIBUTING이 사용법/파싱 오류로 예약했고, scan-floor 클래스의 다른 가드는
   # 전부 1이다. 여기만 2로 이탈해 있었다(같은 클래스에 두 코드 = 이 캠페인이 지우는 병).
   wf platform/x/deployment.yaml <<'EOF'
-image: nginx:1.0@sha256:abcdef
+image: nginx:1.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   run bash "$CHK" --root "$REPO" --floor total=99
   [ "$status" -eq 1 ]
@@ -148,7 +148,7 @@ EOF
   # 실측 분해: platform 34건 · apps 2건. 합계 바닥값 20은 apps가 0이 돼도 34 >= 20이라 **원리적으로**
   # 발화하지 않는다 — 그동안 apps 레인의 digest 핀 강제가 통째로 사라져도 초록이었다는 뜻이다.
   wf platform/x/deployment.yaml <<'EOF'
-image: nginx:1.0@sha256:abcdef
+image: nginx:1.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   run bash "$CHK" --root "$REPO" --floor apps=1
   [ "$status" -eq 1 ]
@@ -159,10 +159,10 @@ EOF
 
 @test "the apps lane floor passes once the apps lane actually has an image to scan" {
   wf platform/x/deployment.yaml <<'EOF'
-image: nginx:1.0@sha256:abcdef
+image: nginx:1.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   wf apps/orders/deploy/prod/values.yaml <<'EOF'
-image: { repo: ghcr.io/x/orders, digest: sha256:abcdef }
+image: { repo: ghcr.io/x/orders, digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef }
 EOF
   run bash "$CHK" --root "$REPO" --floor apps=1
   [ "$status" -eq 0 ]
@@ -171,7 +171,7 @@ EOF
 @test "a dead enumerator is a hard failure, not a silent zero-image scan" {
   # `done < <(walk_scope …)` 프로세스 치환이 워커 실패를 삼키던 자리 — 이제 rc를 캡처한다.
   wf platform/x/deployment.yaml <<'EOF'
-image: nginx:1.0@sha256:abcdef
+image: nginx:1.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   SHIM="$REPO/../shim-$$"; mkdir -p "$SHIM"
   printf '#!/bin/sh\nexit 1\n' > "$SHIM/bun"; chmod +x "$SHIM/bun"
@@ -195,7 +195,7 @@ EOF
 image: /images/background.jpg
 EOF
   wf platform/ok/deployment.yaml <<'EOF'
-image: nginx:1.0@sha256:abcdef
+image: nginx:1.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   run bash "$CHK" --root "$REPO"
   [ "$status" -eq 0 ]
@@ -232,7 +232,7 @@ settings:
   bg_image: default
 EOF
   wf platform/ok/deployment.yaml <<'EOF'
-image: nginx:1.0@sha256:abcdef
+image: nginx:1.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   run bash "$CHK" --root "$REPO"
   [ "$status" -eq 0 ]
@@ -269,7 +269,7 @@ image:
   repo: ghcr.io/x/y
   tag: v1
 someOtherField:
-  digest: sha256:deadbeef
+  digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   run bash "$CHK" --root "$REPO"
   [ "$status" -eq 1 ]
@@ -294,7 +294,7 @@ EOF
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'lane2-flow'
   wf apps/flowgood/deploy/prod/values.yaml <<'EOF'
-image: { repo: ghcr.io/x/y, tag: v1, digest: sha256:abc }
+image: { repo: ghcr.io/x/y, tag: v1, digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef }
 EOF
   # flowbad 제거 후 flowgood만 → 통과
   rm -rf "$REPO/apps/flowbad"; git -C "$REPO" add -A
@@ -305,7 +305,7 @@ EOF
 @test "lane2 flow-style image flags digest that appears only in a trailing comment" {
   # guard-decision-a-1의 형제 자리(line 207) — flow-style도 같은 comment-strip 누락을 갖는다.
   wf apps/flowcomment/deploy/prod/values.yaml <<'EOF'
-image: { repo: ghcr.io/x/y, tag: v1 } # digest: sha256:notreallypinned
+image: { repo: ghcr.io/x/y, tag: v1 } # digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   run bash "$CHK" --root "$REPO"
   [ "$status" -eq 1 ]
@@ -319,7 +319,7 @@ EOF
   wf platform/x/deployment.yaml <<'EOF'
 spec:
   containers:
-    - image: nginx:1.25@sha256:abcdef
+    - image: nginx:1.25@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   run bash "$CHK" --root "$REPO"
   [ "$status" -eq 0 ]
@@ -332,7 +332,7 @@ EOF
   wf platform/x/deployment.yaml <<'EOF'
 spec:
   containers:
-    - image: nginx:1.25@sha256:abcdef
+    - image: nginx:1.25@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
   run bash "$CHK" --root "$REPO" --floor apps=9999
   [ "$status" -ne 0 ]
@@ -340,4 +340,130 @@ EOF
   out="$output"
   n=$(printf '%s\n' "$out" | grep -c '^SCAN: check-image-pins:' || true)
   [ "$n" -eq 0 ]
+}
+
+# ── digest 형식 축(티켓 45 · 결정 Q6) ────────────────────────────────────────
+# 게이트가 재던 것은 `@sha256:`/`digest: sha256:` **접두**뿐이었다 — `sha256:deadbeef`처럼 형식 밖
+# 값도 "핀됨"으로 읽혔다. 실제 차단은 하류 platform/charts/app/values.schema.json의
+# `^sha256:[0-9a-f]{64}$`가 했고, 게이트는 자기 이름이 약속한 것보다 약했다.
+# 극성은 그 하류 스키마와 **일치**시킨다(소문자 hex 정확히 64자 — 대문자·63/65자 거부).
+
+@test "lane1 rejects a short digest body and accepts the exact 64-hex form" {
+  wf platform/x/deployment.yaml <<'EOF'
+spec:
+  containers:
+    - image: nginx:1.25@sha256:deadbeef
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'UNPINNED(lane1)'
+  # 양성 대조 — 같은 자리를 64-hex로만 바꾸면 통과한다(검출기가 통째로 죽지 않았다는 증인).
+  wf platform/x/deployment.yaml <<'EOF'
+spec:
+  containers:
+    - image: nginx:1.25@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 0 ]
+}
+
+@test "lane1 rejects an uppercase digest body (polarity matches the chart values schema)" {
+  wf platform/x/deployment.yaml <<'EOF'
+spec:
+  containers:
+    - image: nginx:1.25@sha256:0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'UNPINNED(lane1)'
+  wf platform/x/deployment.yaml <<'EOF'
+spec:
+  containers:
+    - image: nginx:1.25@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 0 ]
+}
+
+@test "lane1 rejects an over-length digest body (65 hex is not a prefix match)" {
+  # 꼬리 앵커가 없으면 `{64}`는 65자 값의 앞 64자에 붙어 조용히 통과한다 — 그 자리를 닫는 증인.
+  wf platform/x/deployment.yaml <<'EOF'
+spec:
+  containers:
+    - image: nginx:1.25@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefa
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'UNPINNED(lane1)'
+  wf platform/x/deployment.yaml <<'EOF'
+spec:
+  containers:
+    - image: nginx:1.25@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 0 ]
+}
+
+@test "lane2 block digest rejects a short body and accepts the exact 64-hex form" {
+  wf apps/myapp/deploy/prod/values.yaml <<'EOF'
+image:
+  repo: ghcr.io/x/y
+  tag: v1
+  digest: sha256:deadbeef
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'lane2'
+  wf apps/myapp/deploy/prod/values.yaml <<'EOF'
+image:
+  repo: ghcr.io/x/y
+  tag: v1
+  digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 0 ]
+}
+
+@test "lane2 flow-style digest is judged by format, not by the sha256 prefix" {
+  wf apps/flowfmt/deploy/prod/values.yaml <<'EOF'
+image: { repo: ghcr.io/x/y, tag: v1, digest: sha256:deadbeef }
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'lane2-flow'
+  wf apps/flowfmt/deploy/prod/values.yaml <<'EOF'
+image: { repo: ghcr.io/x/y, tag: v1, digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef }
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 0 ]
+}
+
+@test "lane2 inline string image is judged by digest format too" {
+  wf apps/inline/deploy/prod/values.yaml <<'EOF'
+image: ghcr.io/x/y:v1@sha256:deadbeef
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'lane2-string'
+  wf apps/inline/deploy/prod/values.yaml <<'EOF'
+image: ghcr.io/x/y:v1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+EOF
+  run bash "$CHK" --root "$REPO"
+  [ "$status" -eq 0 ]
+}
+
+@test "the shell digest regex is a byte-identical copy of the image-pin.ts and chart-schema SSOT" {
+  # 셸은 TS를 import할 수 없어 정규식이 **사본**이다 — 사본은 대조로만 묶인다(형제 관용구:
+  # test_setup-bun.bats의 CANON 3축 등식). 축 셋: image-pin.ts DIGEST_BODY · 게이트 DIGEST_BODY ·
+  # 하류 platform/charts/app/values.schema.json의 digest pattern(앵커만 다르다).
+  command -v jq >/dev/null || skip "jq required"
+  ts="$(sed -n 's/^const DIGEST_BODY = String.raw`\(.*\)`;$/\1/p' "$ROOT/tools/lib/image-pin.ts")"
+  sh="$(sed -n "s/^DIGEST_BODY='\(.*\)'\$/\1/p" "$ROOT/scripts/check-image-pins.sh")"
+  schema="$(jq -r '.properties.image.properties.digest.pattern' "$ROOT/platform/charts/app/values.schema.json")"
+  # 바닥값 — 셋 다 비면 등식이 vacuous하게 참이 된다(추출 정규식 드리프트의 조용한 fail-open).
+  [ -n "$ts" ]
+  [ -n "$sh" ]
+  [ -n "$schema" ]
+  [ "$ts" = "$sh" ]
+  [ "$schema" = "^${sh}\$" ]
 }
