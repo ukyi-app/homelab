@@ -929,3 +929,30 @@ PY
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.mode')" = "resources" ]
 }
+
+# ── 티켓 18: 소비자가 넘겨받은 판정의 증인 ────────────────────────────────────────────────────
+
+@test "the deploy/prod filter is the enumeration boundary: a bare apps directory is not an onboarded app" {
+  # r2-status-untouched-dependencies-7: repo-walk의 `apps` 유닛 스코프는 **의미론적 필터를 담지
+  # 않는다**고 명시하고(design-r1 R-1) 그 판정을 소비자에게 넘긴다 — status가 그 유일한 소비자인데
+  # 넘겨받은 판정('deploy/prod 실재 = 배포되는 앱')에 증인이 0건이었다. 스코프 쪽에는 형제들이 든
+  # 'does not collapse' 대조를 세울 수도 없다(앱 0개가 정당하므로) — 그래서 여기가 유일한 자리다.
+  make_app_fixture blog true
+  mkdir -p "$APPS_ROOT/apps/halfbuilt"                       # 유닛은 형성하지만 배포 산출물은 없다
+  mkdir -p "$APPS_ROOT/apps/deployless/deploy"               # deploy는 있고 prod가 없다(경계 한 칸 안쪽)
+  printf 'x\n' > "$APPS_ROOT/apps/README.md"                 # 유닛 자체를 형성하지 않는 추적 파일
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.count')" = "1" ]
+  [ "$(echo "$output" | jq -r '[.result.apps[].name] | sort | join(",")')" = "blog" ]
+  # 양성 대조 — 같은 디렉토리에 deploy/prod가 생기면 즉시 열거된다(필터가 상수 false가 아니다).
+  make_app_fixture halfbuilt true
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.count')" = "2" ]
+  [ "$(echo "$output" | jq -r '[.result.apps[].name] | sort | join(",")')" = "blog,halfbuilt" ]
+  # app 모드도 같은 경계를 쓴다 — 산출물 없는 유닛은 '앱 없음' failure다(목록만의 필터가 아니다).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status deployless --root "$APPS_ROOT" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+}

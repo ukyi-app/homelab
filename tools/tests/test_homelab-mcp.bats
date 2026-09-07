@@ -768,3 +768,32 @@ EOF
   [ "$(echo "$output" | jq -rc 'select(.id==82) | .result.content[0].text' | jq -r '.variant')" = "success" ]
   [ -f "$ED/.env.local" ]
 }
+
+@test "the db_url tool actually writes into the explicit envDir on a live success (positive witness, no cwd leak)" {
+  # 티켓 18 (c): 현행 envDir 단언은 전부 **부정형**(`[ ! -f $ED/.env.local ]`)이라 envDir가 무시되고
+  # 서버 cwd로 새도 그대로 통과했다 — 부정 단언만으로는 '아무 데도 안 썼다'와 '엉뚱한 데 썼다'가
+  # 구별되지 않는다. 라이브 성공 1레인으로 **양의 증인**을 세운다(기록 위치 + 평문 비출력).
+  ED="$BATS_TEST_TMPDIR/envdir-live"; mkdir -p "$ED"
+  # 서버를 **빈 임시 cwd**에서 띄운다 — cwd 폴백이 살아 있으면 그 디렉토리에 자격이 떨어진다.
+  # 레포 루트를 cwd로 쓰면 이 부정 단언이 venue의 로컬 잔재(.env.local)에 의존하게 된다.
+  SRVCWD="$BATS_TEST_TMPDIR/srvcwd"; mkdir -p "$SRVCWD"
+  [ ! -e "$SRVCWD/.env.local" ]
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" TS_DB_HOST=h HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'cd "$1" || exit 1; entry="$2"; b="$3"; shift 3; printf "%s\n" "$@" | "$b" "$entry" mcp' \
+    _ "$SRVCWD" "$ROOT/tools/homelab.ts" "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":80,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"t\",\"envDir\":\"$ED\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==80) | .result.isError')" = "false" ]
+  env="$(echo "$output" | jq -rc 'select(.id==80) | .result.content[0].text')"
+  [ "$(echo "$env" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$env" | jq -r '.result.wrote')" = "true" ]
+  [ "$(echo "$env" | jq -r '.result.envFile')" = ".env.local" ]
+  # 양의 단언 — envDir 안에 실재하고, 내용은 tailscale host로 치환된 완성 행이다.
+  [ -s "$ED/.env.local" ]
+  grep -q '^T_RO_DATABASE_URL=postgres://u:p@h:5432/db$' "$ED/.env.local"
+  # cwd 비유출 — 서버가 자기 디렉토리에 쓰지 않았다(위 바닥값이 이 부정 단언을 비공허하게 만든다).
+  [ ! -e "$SRVCWD/.env.local" ]
+  # 프로토콜 채널에도 평문이 없다(content text는 계약 오브젝트지 자격 전달자가 아니다).
+  [ "$(printf '%s%s' "$output" "$stderr" | grep -c 'postgres://')" = "0" ]
+  [ "$(grep -c 'postgres://' "$ED/.env.local")" = "1" ]
+}
