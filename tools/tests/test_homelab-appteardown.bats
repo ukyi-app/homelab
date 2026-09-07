@@ -99,6 +99,9 @@ run_teardown_tty() {
   [ "$(echo "$output" | jq -r '.variant')" = "success" ]
   [ "$(echo "$output" | jq -r '.result.applications[0].name')" = "myapp-prod" ]
   [ "$(echo "$output" | jq -r '.result.applications[0].present')" = "false" ]
+  # 사람용 렌더의 present 분기(티켓 13) — 부재를 sync/health가 아니라 prune 완료로 말한다.
+  echo "$stderr" | grep -q "^Application myapp-prod: 부재 — prune 완료$"
+  echo "$stderr" | grep -q "^DNS 회수: "
   # health/sync를 종결 근거로 쓰지 않았다: 부재 조회(--ignore-not-found) 형태로만 물었다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" kubectl -n argocd get applications.argoproj.io myapp-prod -o json --ignore-not-found)" -ge 1 ]
   # presence 스타일 조회(정확히 `-o json`으로 끝나는 8-토큰 레코드)는 하나도 없어야 한다.

@@ -266,10 +266,17 @@ run_init() {
   run_init myapp --archetype api --json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  # 사람용 렌더(renderInit)의 단계 분기(티켓 13) — 첫 실행은 실제로 밟은 체크포인트를 열거한다.
+  echo "$stderr" | grep -q "^app init myapp — 아키타입 api · private · repo "
+  echo "$stderr" | grep -q "^단계: 레포 생성 · 스캐폴드 · 첫 push$"
   # 재실행: 이미 완료(마커 존재·시크릿 미요청) → no-op, 부수효과 없음.
   run_init myapp --archetype api --json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.variant')" = "no-op" ]
+  # 재실행의 단계 줄은 **수렴된 상태**를 그린다(델타가 아니다) — created는 빠지고 나머지는 남는다.
+  # renderInit의 "변경 없음(이미 완료)" 분기는 이 경로가 아니라 전 필드 부재일 때의 자리다.
+  echo "$stderr" | grep -q "^단계: 스캐폴드 · 첫 push$"
+  echo "$stderr" | grep -q "^결과: no-op$"
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "1" ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold)" = "1" ]
 }

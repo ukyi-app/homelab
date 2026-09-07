@@ -20,7 +20,7 @@ import { appSecretsInputError, type AppSecretsInput } from "./lib/secrets.ts";
 import { appInitInputError, type AppInitInput } from "./lib/init.ts";
 import { ARCHETYPES } from "./lib/platform.ts";
 import { runMcpServer } from "./lib/mcp.ts";
-import type { DoctorCheck, DoctorSummary } from "./lib/doctor.ts";
+import { renderDoctor, renderInit, renderMutation, renderStatus, renderUrl } from "./lib/render.ts";
 import { statusInputError, type StatusInput } from "./lib/status.ts";
 
 // 동사 실행의 세 결말 — 프로세스 관심사(stdout 채널·종료코드)는 전부 main이 소유한다.
@@ -28,7 +28,7 @@ import { statusInputError, type StatusInput } from "./lib/status.ts";
 type VerbOutput =
   | { kind: "help"; text: string }
   | { kind: "usage-error"; message: string; usage: string }
-  | { kind: "result"; json: boolean; envelope: Envelope; human: string[] };
+  | { kind: "result"; json: boolean; envelope: Envelope; human: () => string[] };
 
 // CLI 어댑터 — catalog 행마다 argv→타입 입력 매핑과 렌더링을 배선한다(어댑터는 named export를
 // 정확한 입력 타입으로 직접 호출). totality는 아래 초기화 검사가 강제: 미배선 동사는 어떤
@@ -148,17 +148,6 @@ const WAIT_FLAG_LINES = [
   "",
 ];
 
-const MARK: Record<string, string> = { pass: "✓", fail: "✗", warn: "⚠" };
-
-function renderDoctor(envelope: Envelope): string[] {
-  const r = envelope.result as { checks: DoctorCheck[]; summary: DoctorSummary };
-  return [
-    ...r.checks.map((c) => `${MARK[c.status]} ${c.id} — ${c.detail}`),
-    "",
-    `진단 결과: pass ${r.summary.pass} · fail ${r.summary.fail} · warn ${r.summary.warn}`,
-  ];
-}
-
 function statusUsage(): string {
   return [
     "사용법: homelab status [<app>] [--run <url> | --pr <url>] [--json]",
@@ -174,40 +163,6 @@ function statusUsage(): string {
   ].join("\n");
 }
 
-const OX: Record<string, string> = { true: "켜짐", false: "꺼짐" };
-
-function renderStatus(envelope: Envelope): string[] {
-  const r = envelope.result as Record<string, any>;
-  if (typeof r.error === "string") return [`오류: ${r.error}`];
-  if (r.mode === "list") {
-    if (r.count === 0) return ["온보딩된 앱이 없다(그린필드)"];
-    return [
-      `앱 ${r.count}개`,
-      ...r.apps.map((a: Record<string, unknown>) =>
-        `• ${a.name} — tag ${a.tag ?? "(핀 없음)"} · autoDeploy ${OX[String(a.autoDeploy)] ?? "미기록"} · repo ${a.sourceRepo ?? "(인레포)"}`),
-    ];
-  }
-  if (r.mode === "app") {
-    const lines = [
-      `앱: ${r.app.name}`,
-      `배포 핀: tag ${r.app.tag ?? "(없음)"} · digest ${r.app.digest ?? "(없음)"}`,
-      `autoDeploy: ${OX[String(r.app.autoDeploy)] ?? "미기록"} · source repo: ${r.app.sourceRepo ?? "(인레포)"} · 메모리 원장: ${r.app.ledgerMi !== undefined ? `limit ${r.app.ledgerMi}Mi` : "행 없음"}`,
-      r.runs.length === 0 ? "최근 run: 없음"
-        : `최근 run: ${r.runs.map((x: Record<string, unknown>) => `${x.name}[${x.status}${x.conclusion ? `/${x.conclusion}` : ""}]`).join(" · ")}`,
-      r.openPrs.length === 0 ? "열린 PR: 없음"
-        : `열린 PR: ${r.openPrs.map((p: Record<string, unknown>) => `#${p.number}(${p.head})`).join(" · ")}`,
-    ];
-    if (envelope.omitted.includes("live")) lines.push("라이브(ArgoCD): 생략 — KUBECONFIG 미설정");
-    else if (r.live?.error) lines.push(`라이브(ArgoCD): 조회 실패 — ${r.live.error}`);
-    else lines.push(`라이브(ArgoCD): sync ${r.live.argocd.sync} · health ${r.live.argocd.health}${r.live.argocd.revision ? ` · rev ${r.live.argocd.revision}` : Array.isArray(r.live.argocd.revisions) ? ` · revisions ${r.live.argocd.revisions.join(",")}(미확정)` : ""}`);
-    return lines;
-  }
-  if (r.mode === "run") {
-    return [`run: ${r.run.name ?? "(이름 없음)"} — status ${r.run.status}${r.run.conclusion ? ` · conclusion ${r.run.conclusion}` : " · 진행 중"}`];
-  }
-  return [`PR #${r.pr.number} — ${r.pr.state} · merged ${OX[String(r.pr.merged)]} · auto-merge ${OX[String(r.pr.autoMerge)]}`];
-}
-
 function statusCli(rest: string[]): VerbOutput {
   // 공용 골격 사용 — 헬퍼 도입(9ee3116) 이전에 쓰인 인라인 5줄(분리·try/catch·--help)의 잔재를 지운다.
   const p = positionalThenFlags(rest, { value: ["--run", "--pr", "--root"], bool: ["--json", "--help"] }, "homelab status", statusUsage);
@@ -219,7 +174,7 @@ function statusCli(rest: string[]): VerbOutput {
   const bad = statusInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab status: ${bad}`, usage: statusUsage() };
   const envelope = STATUS.op(input);
-  return { kind: "result", json: flags.bool("--json"), envelope, human: renderStatus(envelope) };
+  return { kind: "result", json: flags.bool("--json"), envelope, human: () => renderStatus(envelope) };
 }
 
 function dbCreateUsage(): string {
@@ -232,33 +187,6 @@ function dbCreateUsage(): string {
     "  --wait             auto-merge 머지 + Application 집합(cnpg-data·data-conn-prod) 수렴까지 대기",
     ...WAIT_FLAG_LINES,
   ].join("\n");
-}
-
-function renderMutation(envelope: Envelope): string[] {
-  const r = envelope.result as Record<string, any>;
-  const lines = [`${envelope.verb} ${r.name}${r.correlation ? ` — correlation ${r.correlation}` : ""}`];
-  if (r.chain) {
-    lines.push(r.chain.mode === "chain"
-      ? `연쇄: 앱 레포 안 — ${r.chain.sealSkipped === true ? "재봉인 생략(--no-seal)" : "seal 실행"} · ${r.chain.pushed === true ? "봉인본 갱신 커밋 push됨" : r.chain.pushed === false ? "커밋 없음" : "선행 조건 단계"}${r.chain.headSha ? ` · HEAD ${String(r.chain.headSha).slice(0, 7)}` : ""}`
-      : "연쇄: 앱 레포 밖 — 디스패치만");
-  }
-  if (r.run?.url) lines.push(`run: ${r.run.url}${r.run.conclusion ? ` (${r.run.conclusion})` : ""}${r.run.failedJobs ? ` · 실패 잡: ${r.run.failedJobs.join(", ")}` : ""}`);
-  if (r.pr?.url) lines.push(`PR: ${r.pr.url} · merged ${OX[String(r.pr.merged)]}${r.pr.mergeSha ? ` · merge SHA ${r.pr.mergeSha}` : ""}`);
-  if (Array.isArray(r.applications)) {
-    for (const a of r.applications) {
-      if (a.error) lines.push(`Application ${a.name}: 조회 실패 — ${a.error}`);
-      // teardown(absence): 존재/부재 판정 — sync/health가 아니라 present 필드를 쓴다.
-      else if (a.present !== undefined) lines.push(`Application ${a.name}: ${a.present ? "아직 존재 — prune 진행 중" : "부재 — prune 완료"}`);
-      // rev: 확정 리비전 하나 · revisions: 멀티소스 skew/비-SHA(미확정 — 관측 원본 그대로) · "-": 관측 0.
-      else lines.push(`Application ${a.name}: sync ${a.sync} · health ${a.health} · rev ${a.revision ?? (Array.isArray(a.revisions) ? `${a.revisions.join(",")}(미확정)` : "-")} · 후손 ${OX[String(a.descendant)]}${a.surfaceOk !== undefined ? ` · 표면 ${OX[String(a.surfaceOk)]}` : ""}`);
-    }
-  }
-  if (r.dnsReclaim) lines.push(`DNS 회수: ${r.dnsReclaim} 소관(이 명령의 관측 대상 아님)`);
-  if (envelope.omitted.includes("live")) lines.push("라이브(ArgoCD) 수렴: 생략 — KUBECONFIG 미설정(머지까지만 확인)");
-  if (r.pendingReason) lines.push(`대기: ${r.pendingReason}`);
-  if (r.error) lines.push(`오류: ${r.error}`);
-  lines.push(`결과: ${envelope.variant}`);
-  return lines;
 }
 
 function appCreateUsage(): string {
@@ -282,7 +210,7 @@ function appCreateCli(rest: string[]): VerbOutput {
   const bad = appCreateInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab app create: ${bad}`, usage: appCreateUsage() };
   const envelope = APP_CREATE.op(input);
-  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: () => renderMutation(envelope) };
 }
 
 function appSecretsUsage(): string {
@@ -308,7 +236,7 @@ function appSecretsCli(rest: string[]): VerbOutput {
   const bad = appSecretsInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab app secrets: ${bad}`, usage: appSecretsUsage() };
   const envelope = APP_SECRETS.op(input);
-  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: () => renderMutation(envelope) };
 }
 
 function appTeardownUsage(): string {
@@ -356,7 +284,7 @@ function appTeardownCli(rest: string[]): VerbOutput {
   const bad = appTeardownInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab app teardown: ${bad}`, usage: appTeardownUsage() };
   const envelope = APP_TEARDOWN.op(input);
-  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: () => renderMutation(envelope) };
 }
 
 function appInitUsage(): string {
@@ -378,25 +306,6 @@ function appInitUsage(): string {
   ].join("\n");
 }
 
-function renderInit(envelope: Envelope): string[] {
-  const r = envelope.result as Record<string, any>;
-  const lines = [`app init ${r.app} — 아키타입 ${r.archetype} · ${r.public ? "public" : "private"} · repo ${r.repo}`];
-  if (r.error) {
-    lines.push(`체크포인트: ${r.checkpoint ?? "?"}`);
-    lines.push(`오류: ${r.error}`);
-  } else {
-    const st: string[] = [];
-    if (r.created) st.push("레포 생성");
-    if (r.adopted) st.push("입양");
-    if (r.scaffolded) st.push("스캐폴드");
-    if (r.pushed) st.push("첫 push");
-    lines.push(`단계: ${st.length ? st.join(" · ") : "변경 없음(이미 완료)"}`);
-  }
-  if (r.secrets) lines.push(`디스패치 시크릿: App ID ${OX[String(r.secrets.appId)]} · private key ${OX[String(r.secrets.privateKey)]}`);
-  lines.push(`결과: ${envelope.variant}`);
-  return lines;
-}
-
 function appInitCli(rest: string[]): VerbOutput {
   const p = positionalThenFlags(rest, { value: ["--archetype", "--dispatch-secrets"], bool: ["--public", "--adopt", "--json", "--help"] }, "homelab app init", appInitUsage);
   if (isOutput(p)) return p;
@@ -411,7 +320,7 @@ function appInitCli(rest: string[]): VerbOutput {
   const bad = appInitInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab app init: ${bad}`, usage: appInitUsage() };
   const envelope = APP_INIT.op(input);
-  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderInit(envelope) };
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: () => renderInit(envelope) };
 }
 
 function cacheCreateUsage(): string {
@@ -434,7 +343,7 @@ function cacheCreateCli(rest: string[]): VerbOutput {
   const bad = cacheCreateInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab cache create: ${bad}`, usage: cacheCreateUsage() };
   const envelope = CACHE_CREATE.op(input);
-  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: () => renderMutation(envelope) };
 }
 
 function cacheUrlUsage(): string {
@@ -463,7 +372,7 @@ function cacheUrlCli(rest: string[]): VerbOutput {
   const bad = cacheUrlInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab cache url: ${bad}`, usage: cacheUrlUsage() };
   const envelope = CACHE_URL.op(input);
-  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderUrl(envelope) };
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: () => renderUrl(envelope) };
 }
 
 function dbCreateCli(rest: string[]): VerbOutput {
@@ -480,7 +389,7 @@ function dbCreateCli(rest: string[]): VerbOutput {
   const bad = dbCreateInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab db create: ${bad}`, usage: dbCreateUsage() };
   const envelope = DB_CREATE.op(input);
-  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderMutation(envelope) };
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: () => renderMutation(envelope) };
 }
 
 function dbUrlUsage(): string {
@@ -501,17 +410,6 @@ function dbUrlUsage(): string {
   ].join("\n");
 }
 
-// url 동사 공용 렌더러 — 값은 결과에 존재하지 않으므로(비출력 계약) 계획/기록 보고만 그린다.
-function renderUrl(envelope: Envelope): string[] {
-  const r = envelope.result as { mode?: string; secretRef?: string; envKey?: string; envFile?: string; note?: string; dryRun?: boolean; error?: string };
-  if (typeof r.error === "string") return [`오류: ${r.error}`];
-  if (r.dryRun === true) {
-    return [`계획: mode=${r.mode} · secretRef=${r.secretRef} · envKey=${r.envKey} · envFile=${r.envFile}`, ...(r.note ? [r.note] : [])];
-  }
-  if (envelope.variant === "skip") return [`생략: ${r.note ?? "사유 미기록"}`, `결과: ${envelope.variant}`];
-  return [`${r.envFile}에 ${r.envKey} 기록(mode=${r.mode}) — 값은 출력하지 않음`];
-}
-
 // db url — conn URL 엔진의 catalog op 소비(패스스루 소멸 — 티켓 08).
 function dbUrlCli(rest: string[]): VerbOutput {
   const p = positionalThenFlags(rest, { value: ["--name", "--host", "--env-local"], bool: ["--rw", "--admin", "--dry-run", "--json", "--help"], alias: "--name" }, "homelab db url", dbUrlUsage);
@@ -521,7 +419,7 @@ function dbUrlCli(rest: string[]): VerbOutput {
   const bad = dbUrlInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab db url: ${bad}`, usage: dbUrlUsage() };
   const envelope = DB_URL.op(input);
-  return { kind: "result", json: p.flags.bool("--json"), envelope, human: renderUrl(envelope) };
+  return { kind: "result", json: p.flags.bool("--json"), envelope, human: () => renderUrl(envelope) };
 }
 
 function doctorCli(rest: string[]): VerbOutput {
@@ -532,7 +430,7 @@ function doctorCli(rest: string[]): VerbOutput {
   }
   if (flags.bool("--help")) return { kind: "help", text: doctorUsage() };
   const envelope = DOCTOR.op({});
-  return { kind: "result", json: flags.bool("--json"), envelope, human: renderDoctor(envelope) };
+  return { kind: "result", json: flags.bool("--json"), envelope, human: () => renderDoctor(envelope) };
 }
 
 function mcpUsage(): string {
@@ -612,21 +510,43 @@ function main(argv: string[]): number {
 
   // parseCommand가 성공한 path는 TREE의 리프이고 TREE는 VERBS에서 파생되므로, 초기화의
   // totality 검사와 합쳐 어댑터가 항상 존재한다.
-  const out = CLI_BY_VERB[cmd.path.join(" ")]!(cmd.rest);
+  const verb = cmd.path.join(" ");
+  let out: VerbOutput;
+  try { out = CLI_BY_VERB[verb]!(cmd.rest); }
+  catch (e) { return internalError(verb, e); }
 
   // 프로세스 관심사는 여기서만: --help는 --json보다 우선(계약 stdout 절), usage 오류는 exit 2 +
   // stderr, 결과는 stdout 순수성(--json이면 stdout은 envelope 하나, 사람용은 stderr)을 지킨다.
   if (out.kind === "help") { process.stdout.write(out.text); return 0; }
   if (out.kind === "usage-error") { process.stderr.write(`${out.message}\n\n${out.usage}`); return USAGE_EXIT; }
-  const sink = out.json ? process.stderr : process.stdout;
-  for (const line of out.human) sink.write(line + "\n");
+  // 기계 채널 먼저 — 사람용 렌더(thunk)가 throw해도 --json 소비자의 envelope는 이미 온전하다.
+  // 렌더러를 thunk로 받는 이유가 이 순서다: 종전에는 어댑터가 `human: renderX(envelope)`로 즉시
+  // 평가해, 사람용 렌더 결함 하나가 JSON 출력에 도달하기도 전에 프로세스를 죽였다(shell-6).
   if (out.json) process.stdout.write(JSON.stringify(out.envelope, null, 2) + "\n");
+  try {
+    const sink = out.json ? process.stderr : process.stdout;
+    for (const line of out.human()) sink.write(line + "\n");
+  } catch (e) { return internalError(verb, e); }
   // skip variant는 stderr 마커와 짝이다(계약 exitRationale — 같은 실행). 마커는 헬퍼가,
   // 종료코드는 envelope(variant 축의 exitFor 파생 — 스키마가 skip↔4를 강제)가 소유한다.
   if (out.envelope.variant === "skip") {
     skipMarker(out.envelope.verb, String((out.envelope.result as { note?: string }).note ?? "사유 미기록"));
   }
   return out.envelope.exitCode;
+}
+
+// 내부 오류 — 이 경로로 떨어지는 throw는 전부 **계약 파손**이다(correlation nonce 형식, 엔진의
+// '검증 안 된 입력' 불변식, exitFor 미매핑, 렌더러 totality). 그래서:
+//   · stdout을 건드리지 않는다 — --json 소비자에게 반쪽 오브젝트를 주지 않는다.
+//   · 첫 줄이 `homelab <verb>: 내부 오류`다 — exit 1은 failure variant와 값이 같아서, 크래시와
+//     '실패 결과'를 구별할 판별자가 종료코드 밖에 있어야 한다(계약 exitCodes 집합은 불변).
+//   · 스택을 HOMELAB_DEBUG 뒤로 숨기지 않는다 — 도달 모집단이 버그 신고자라 스택이 유일한 증거다.
+// ⚠️ 커버리지 경계: contract.ts의 톱레벨 스키마 로드는 **import 시점**이라 이 catch보다 먼저 돈다
+//   (스키마 파일 부재·파손은 여기 오지 않고 모듈 로드 실패로 죽는다).
+function internalError(verb: string, e: unknown): number {
+  process.stderr.write(`homelab ${verb}: 내부 오류 — ${e instanceof Error ? e.message : String(e)}\n`);
+  if (e instanceof Error && e.stack) process.stderr.write(`${e.stack}\n`);
+  return 1;
 }
 
 // 진입점 — `mcp`는 동사가 아니라 transport 모드라 catalog 밖에서 특별 라우팅한다(서버가 자기 자신을

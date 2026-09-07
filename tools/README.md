@@ -316,6 +316,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   usage 오류는 invalid params(-32602). 무상태 — 동시 호출은 run/PR URL 핸들로 독립, 재시작 후 정상.
   url 패스스루(db/cache url)는 캡처 실행(stdio 오염 방지)+명시 envDir. `homelab mcp`가 진입점(서버는
   transport 모드라 catalog 밖 — 자기 자신 비노출).
+- **`lib/render.ts`** — homelab CLI 사람용 렌더(`renderFor()` + 동사별 5개 + MARK/OX). mcp.ts와 같은
+  **프레젠테이션 계층**이다: op는 Envelope만 반환하고 표현은 셸이 소유한다(동사 descriptor 파생이
+  아니라 ADR-0001과 무관). homelab.ts에서 분리한 이유 둘 — bin 모듈은 import 시 main이 실행돼
+  렌더러 단위 호출이 불가능했고(골든 전수 스윕이 원리적으로 못 섰다), 어댑터가 렌더를 즉시
+  평가해 사람용 결함이 기계 채널(--json)까지 죽였다(지금은 셸이 thunk로 받아 envelope 선행).
+  총체성: renderFor는 verb 전수 분기·미지 verb throw, renderStatus는 mode switch·default throw.
 - **`lib/template-contract.ts`** — 스캐폴더 비대화형 계약 SSOT(`SCAFFOLD_CONTRACT_MARKERS`·
   `scaffoldContractError()`·`SCAFFOLD_ENTRY`): doctor(사전 진단)와 init(실제 실행 preflight)이 **같은
   술어**를 공유한다(structure r1 a3 — 두 번째 소비자 init이 생겨 추출). 마커 = --archetype·--name·--yes,

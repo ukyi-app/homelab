@@ -395,9 +395,61 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$(printf '%s' "$output" | grep -cF "homelab-cli/1")" -ge 1 ]
 }
 
-@test "the stdout contract states the group-node --help convention (generator-owned prose)" {
+@test "the stdout contract states the group-node --help convention and the internal-error exception (generator-owned prose)" {
   run jq -r '."x-contract".stdout' tools/cli-result-schema.json
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "그룹 노드"
   echo "$output" | grep -q -- "--help"
+  # 티켓 13 — 세 번째 예외(내부 오류)와 그 커버리지 경계(import 시점 스키마 로드는 포획 밖)
+  echo "$output" | grep -q "예외 셋"
+  echo "$output" | grep -q "내부 오류"
+  echo "$output" | grep -q "import 시점"
+}
+
+# ── 셸 출력의 총체성(homelab-cli-r2 티켓 13) ───────────────────────────────────────────────────
+# 렌더러는 lib/render.ts가 소유한다(op는 Envelope만 반환 — 표현은 셸). 골든 전수 스윕이 그
+# 총체성(throw 0 · undefined/NaN 누출 0)을 재고, 미지 verb·미지 mode는 조용한 폴백이 아니라 throw다.
+
+@test "every result golden renders without throwing and without leaking undefined or NaN (floor = golden file count)" {
+  want="$(find tools/tests/fixtures/homelab -name '*.golden.json' | wc -l | tr -d ' ')"
+  [ "$want" -ge 22 ]
+  run bun -e '
+    import { renderFor } from "./tools/lib/render.ts";
+    import { readdirSync, readFileSync } from "node:fs";
+    const dir = "tools/tests/fixtures/homelab";
+    const files = readdirSync(dir).filter((f) => f.endsWith(".golden.json")).sort();
+    let n = 0;
+    for (const f of files) {
+      const env = JSON.parse(readFileSync(dir + "/" + f, "utf8"));
+      const lines = renderFor(env);
+      if (!Array.isArray(lines) || lines.length === 0) { console.error(f + ": 렌더 0줄"); process.exit(1); }
+      for (const l of lines) {
+        if (l.includes("undefined") || l.includes("NaN")) { console.error(f + ": 누출 — " + l); process.exit(1); }
+      }
+      n++;
+    }
+    console.log("rendered:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^rendered:$want\$"
+}
+
+@test "the renderers are total: an unknown status mode and an unknown verb throw instead of falling through (floor 2)" {
+  # shell-6 실측: renderStatus의 마지막 return이 'mode는 pr일 것'을 가정해 합성 mode "resource"에서
+  # `undefined is not an object (evaluating 'r.pr.number')`로 죽었다 — 조용한 폴백의 늦은 실패.
+  run bun -e '
+    import { renderFor, renderStatus } from "./tools/lib/render.ts";
+    const base = { schema: "homelab-cli/1", variant: "success", exitCode: 0, omitted: [] };
+    let n = 0;
+    try { renderStatus({ ...base, verb: "status", result: { mode: "resource" } }); console.error("mode: DID-NOT-THROW"); process.exit(1); }
+    catch { n++; }
+    try { renderFor({ ...base, verb: "app bogus", result: {} }); console.error("verb: DID-NOT-THROW"); process.exit(1); }
+    catch { n++; }
+    // 대조군 — 알려진 mode·verb는 그대로 렌더된다(throw가 전칭이 아님)
+    const ok = renderFor({ ...base, verb: "status", result: { mode: "list", count: 0 } });
+    if (ok.length === 0) { console.error("대조군 렌더 0줄"); process.exit(1); }
+    console.log("threw:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^threw:2$"
 }
