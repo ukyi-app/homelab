@@ -436,6 +436,15 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   상태 결과 명시·재실행 수렴), private key 값은 --body-file 전용이라 argv/출력에 비노출(엔진이 키를
   읽지 않는다). variant: success(한 단계 이상 수행)·no-op(이미 완료)·failure(preflight/거부/단계 오류
   + checkpoint).
+- **`lib/app-preflight.ts`** — 앱 온보딩 체인의 **디스패치 전 사전 판정**(`appConfigPreflight()`·
+  `onboardedPreflight()`): `app create`는 앱 레포 main의 `.app-config.yml?ref=main` 404를,
+  dispatch-only `app secrets`는 로컬 homelab 워킹트리의 `apps/<app>/deploy/prod` 부재를 거부로
+  승격한다(둘 다 디스패처가 run 안에서 죽을 자리 — 그 실패가 `homelab-mutation` 직렬화 큐와
+  Telegram 실패 알림을 소비한다). 권한 경계가 아니라 **큐·알림 절약**이라 세 규칙을 지킨다:
+  결정적인 것만 거부(이미지 실존은 승격 안 함 — 낡은 스냅샷·`push:false` PR 빌드·GHCR private
+  함정으로 양방향 오답) · 판정 불가(비-404 gh 오류·워킹트리 미발견)는 통과 후 디스패처 위임 ·
+  온보딩 판정은 원격 API가 아닌 로컬 파일(stale 200 축이 없다). 거부 봉투는 correlation 없는
+  `mutationRefused` 형상이다.
 - **`lib/mcp.ts`** — MCP 서버(`runMcpServer()`·`handleRequest()`): stdio JSON-RPC 2.0(개행 구분)
   위에 파괴 제외 전 동사를 tool로 노출한다. MCP 프레젠테이션 계층(homelab.ts가 CLI를 소유하듯) —
   tool 이름(verb.path.join("_"))·입력 스키마·인자→op 입력 매핑·JSON-RPC 프레이밍만 갖고 동사 실체는

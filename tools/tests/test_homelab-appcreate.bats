@@ -240,3 +240,45 @@ merged_pr() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result | has("dnsExposure")')" = "false" ]
 }
+
+# ── 디스패치 전 사전 판정(homelab-cli-r2 티켓 30) ──────────────────────────────────────────────
+
+@test "a missing .app-config.yml on the app repo main is refused BEFORE dispatch, and a non-404 gh error still dispatches" {
+  # `app init` 직후의 `app create`는 release 빌드(멀티아치, 수 분)가 끝나기 전이라 디스패처의 첫
+  # 관문에서 죽고, 그 실패 run이 homelab-mutation 직렬화 큐와 Telegram 실패 알림을 소비한다
+  # (appverbs-5). 결정적으로 판정 가능한 것 하나(.app-config.yml 부재)만 사전 거부로 승격한다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    STUB_APP_CONFIG_404=1 "$BUN" tools/homelab.ts app create myapp --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.preflight')" = "app-config" ]
+  [ "$(echo "$output" | jq -r '.result | has("correlation")')" = "false" ]
+  echo "$output" | jq -r '.result.error' | grep -q ".app-config.yml"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  # 사전 거부 봉투도 결과 계약을 만족한다(디스패치 전 거부는 correlation 없는 별도 형상이다).
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const errs = schemaErrors(JSON.parse(process.argv[1]), sch, sch);
+    console.log(errs.length ? "INVALID:" + errs.join("|") : "valid");
+  ' "$output"
+  echo "$output" | grep -q "^valid$"
+
+  # 반대 방향 증인 — **비-404 gh 오류는 판정 불가**이므로 통과하고 디스패처에 위임한다.
+  # (이게 없으면 fail-closed 회귀가 무증인으로 들어온다.)
+  : > "$CALLS"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    STUB_APP_CONFIG_ERR=1 "$BUN" tools/homelab.ts app create myapp --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run create-app.yaml)" = "1" ]
+
+  # 양성 대조 — 기본(200) 경로도 디스패치한다(거부가 전칭이 아니다).
+  : > "$CALLS"
+  run_app_create --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run create-app.yaml)" = "1" ]
+  # 성공 경로 결과에는 preflight 필드가 없다(compact 생략 — 골든 3종 불변).
+  [ "$(echo "$output" | jq -r '.result | has("preflight")')" = "false" ]
+}

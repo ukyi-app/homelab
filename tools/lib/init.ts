@@ -202,6 +202,7 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
 
   let scaffolded = markerPresent;
   let pushed = markerPresent;
+  let headSha: string | undefined;
 
   if (!markerPresent) {
     // ── 클론(멱등) — dest가 이미 우리 클론이면 재사용, 아니면 클론. ──
@@ -263,6 +264,12 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     // 사유 선택은 seam의 firstReason 소유 — `To <url>` 1행이 사유를 가리는 push 고유 규약(exec-3).
     if (!push.ok) return fail(`첫 push 실패 — ${firstReason(push.err) || `git push 비-0(exit ${push.status ?? "?"}${push.signal ? `, ${push.signal}` : ""})`}`, "scaffolded", { created, adopted: adopted || undefined });
     pushed = true;
+    // 다음 단계의 상관자(티켓 30 · product-9) — 이 push가 촉발한 reusable-app-build run은 이 SHA로
+    // 태그되고, `app create`의 서버측 첫 관문이 그 이미지의 실존이다. 네트워크 0(rev-parse).
+    // ⚠️ **이번 호출이 만든 인과만** 싣는다: 마커가 이미 있던 no-op·시크릿만 수렴한 실행에는 이
+    // 필드가 없다(그 실행은 push하지 않았다 — 있으면 '이번에 밀었다'는 거짓 인과가 된다).
+    const head = git(dest, ["rev-parse", "HEAD"]);
+    if (head.ok) headSha = head.out.trim();
   }
 
   // ── 디스패치 시크릿(옵션, 원자적) — 요청 시에만. 쌍의 절반 상태를 결과에 명시하고 재실행이 수렴. ──
@@ -306,6 +313,7 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
       adopted: adopted || undefined,
       scaffolded,
       pushed,
+      headSha,
       checkpoint: wantSecrets ? "secrets" : "pushed",
       secrets,
     }),

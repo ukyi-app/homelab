@@ -12,6 +12,7 @@
 //   디스패치 실패 경계가 재실행으로 수렴). 평문(.env)은 seal 도구의 kubeseal stdin 전용 — 이 엔진은
 //   .env를 읽지도, 봉인본 내용을 출력하지도 않는다.
 import { existsSync, statSync } from "node:fs";
+import { onboardedPreflight } from "./app-preflight.ts";
 import { compact } from "./contract.ts";
 import { laneMutationFields } from "./catalog-rows.ts";
 import { ALLOW_PUSH_REWRITE_ENV, firstReason, git, pushRoutes, sh } from "./exec.ts";
@@ -165,6 +166,13 @@ export function runAppSecrets(input: AppSecretsInput, cwd = process.cwd()): Muta
     if (!r.ok) return { variant: "failure", omitted: [], result: compact({ action: "update-secrets", name: app, chain: r.chain, error: r.error }) };
     chain = r.chain;
   } else {
+    // dispatch-only — 이미 push된 봉인본 재배선. 여기서 **미온보딩**을 사전 판정한다(티켓 30):
+    // 디스패처(update-secrets.ts)는 run 안에서야 '미온보딩 앱 — create-app 먼저'로 죽는데, 그
+    // 실패가 homelab-mutation 직렬화 큐와 Telegram 실패 알림을 소비한다(appverbs-5).
+    // 판정 근거는 **로컬 homelab 워킹트리**다(원격 contents API가 아니라 — 낡은 스냅샷 200 함정).
+    // 워킹트리 후보는 cwd의 git toplevel, 없으면 cwd 자신이다. 못 찾으면 통과(fail-open).
+    const pf = onboardedPreflight(app, toplevel ?? cwd);
+    if (!pf.ok) return refuse(pf.error);
     chain = { mode: "dispatch-only" };
   }
 

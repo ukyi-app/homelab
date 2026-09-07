@@ -221,6 +221,13 @@ case "$*" in
   "api repos/ukyi-app/homelab-app-template/contents/scaffold/archetypes/worker/Dockerfile --jq .content")
     b64 "$FIX/Dockerfile.worker"
     ;;
+  # ── app create 사전 판정(티켓 30) — 앱 레포 main의 .app-config.yml 실존. 기본은 200이고
+  # STUB_APP_CONFIG_404(사전 거부 대상)·STUB_APP_CONFIG_ERR(판정 불가 → 통과 후 디스패처 위임)로 가른다.
+  "api repos/ukyi-app/"*"/contents/.app-config.yml?ref=main --jq .name")
+    if [ -n "${STUB_APP_CONFIG_404:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    if [ -n "${STUB_APP_CONFIG_ERR:-}" ]; then echo "gh: HTTP 502: Bad gateway" >&2; exit 1; fi
+    printf '.app-config.yml\n'
+    ;;
   # ── app create 케이스 — create-app 디스패처·runs 목록(수동 머지 동사) ──
   "workflow run create-app.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi

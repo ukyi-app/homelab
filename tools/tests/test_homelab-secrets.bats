@@ -20,6 +20,9 @@ setup() {
   KC="$BATS_TEST_TMPDIR/kubeconfig"
   echo "apiVersion: v1" > "$KC"
   make_app_repo_fixture myapp
+  # dispatch-only 사전 판정(티켓 30)의 전제 — $APPS_ROOT를 '온보딩된 homelab 워킹트리'로 만든다.
+  # 이게 없으면 dispatch-only 경로가 '미온보딩'으로 거부돼 이 스위트의 재배선 레인이 전부 red다.
+  make_app_fixture myapp
   # update-secrets 브랜치 PR(미머지) — pulls?head 케이스는 공유라 파일만 덮는다
   printf '[{"number":41,"html_url":"https://github.com/ukyi-app/homelab/pull/41","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
 }
@@ -469,4 +472,36 @@ run_secrets_in() {
   echo "$output" | jq -r '.result.error' | grep -q "pull --ff-only"
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "0" ]
+}
+
+@test "dispatch-only refuses an app that is not onboarded in the local homelab tree, and passes when no such tree is found" {
+  # dispatch-only는 '이미 push된 봉인본 재배선'인데, 그 앱이 아직 온보딩되지 않았으면 디스패처가
+  # **run 안에서** '미온보딩 앱 — create-app 먼저'로 죽는다(update-secrets.ts) — 그 실패가
+  # homelab-mutation 직렬화 큐와 Telegram 실패 알림을 소비한다(appverbs-5). 판정 근거는 원격 API가
+  # 아니라 **로컬 워킹트리**다: GitHub contents는 낡은 스냅샷을 200으로 돌려주는 함정이 있고
+  # (함정 원장) 로컬 파일에는 그 축이 없다.
+  NOAPP="$BATS_TEST_TMPDIR/homelab-noapp"
+  mkdir -p "$NOAPP/apps/other/deploy/prod"
+  run_secrets_in "$NOAPP" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.chain.mode')" = "dispatch-only" ]
+  echo "$output" | jq -r '.result.error' | grep -q "미온보딩"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+
+  # 반대 방향 — homelab 워킹트리를 못 찾으면(apps/ 부재) 판정하지 않고 **통과**한다(fail-open).
+  # 디스패처가 최종 판정자이고, 이 자리는 큐·알림 절약이지 권한 경계가 아니다.
+  : > "$CALLS"
+  NOTREE="$BATS_TEST_TMPDIR/no-homelab-tree"
+  mkdir -p "$NOTREE"
+  run_secrets_in "$NOTREE" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.chain.mode')" = "dispatch-only" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run update-secrets.yaml)" = "1" ]
+
+  # 양성 대조 — 온보딩된 트리에서는 그대로 디스패치한다(거부가 전칭이 아니다).
+  : > "$CALLS"
+  run_secrets_in "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run update-secrets.yaml)" = "1" ]
 }

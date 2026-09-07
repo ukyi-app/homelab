@@ -367,7 +367,12 @@ run_init() {
 @test "app init goldens pin fresh-success, preflight-refusal, and no-op variants (floor 3)" {
   export OUTDIR="$BATS_TEST_TMPDIR"
   run_init myapp --archetype api --json
-  echo "$output" > "$OUTDIR/g-success.json"
+  # headSha는 커밋 타임스탬프에 의존해 실행마다 다르다 — 골든에서는 자리표시자로 정규화하고
+  # **값 자체**는 원격 main tip과 여기서 대조한다(정규화가 그 축을 지우지 않게).
+  [ "$(echo "$output" | jq -r '.result.headSha')" = "$(git -C "$INIT_REMOTES/myapp.git" rev-parse main)" ]
+  echo "$output" | sed 's/"headSha": "[0-9a-f]\{40\}"/"headSha": "<headSha>"/' > "$OUTDIR/g-success.json"
+  # 치환 불발은 vacuous다(sed는 무매치를 성공으로 낸다) — 정확히 한 줄이 바뀌었음을 증명한다.
+  [ "$(grep -c '"headSha": "<headSha>"' "$OUTDIR/g-success.json")" = "1" ]
   run_init myapp --archetype api --json
   echo "$output" > "$OUTDIR/g-noop.json"
   # preflight 거부(키 경로 부재) — 결정적.
@@ -632,4 +637,44 @@ run_init() {
   # 검출기 생존 — 같은 exact 술어는 한 토큰만 달라도 red다.
   run python3 "$LEDGER_PY" exact "$CALLS" scaffold --archetype api --name myapp --yes --app-public
   [ "$status" -eq 1 ]
+}
+
+@test "a push made by THIS call carries its headSha, and a no-op omits it (only causal facts are reported)" {
+  # 에이전트 E2E 체인의 첫 단절 — init 결과에 다음 단계의 상관자가 없었다(product-9). 첫 push가
+  # 촉발한 빌드는 그 SHA로 태그되므로, push된 HEAD SHA 하나가 status·앱 레포 축 조회의 좌표다.
+  # 네트워크 0(`git rev-parse HEAD`).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  sha="$(echo "$output" | jq -r '.result.headSha')"
+  [ "$sha" = "$(git -C "$INIT_REMOTES/myapp.git" rev-parse main)" ]
+  # no-op은 이번 호출이 만든 인과가 없다 — 키 자체가 없어야 한다(false도 아니다).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "no-op" ]
+  [ "$(echo "$output" | jq -r '.result | has("headSha")')" = "false" ]
+}
+
+@test "the human render tells the operator that the first push is the build trigger" {
+  # 다음 동사(app create)의 서버측 첫 관문이 GHCR 이미지 실존이라, release run 전에 부르면 반드시
+  # 죽는다. 사람 모드 출력이 그 순서를 한 줄로 말한다(표현은 셸 소유 — op는 봉투만 낸다).
+  run --separate-stderr env PATH="$STUB" \
+    GIT_CONFIG_GLOBAL="$INIT_GCFG" GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
+    "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api
+  [ "$status" -eq 0 ]
+  # --json이 없으면 사람용 렌더는 stdout이다(계약 stdout 절 — --json일 때만 stderr로 밀린다).
+  printf '%s\n' "$output" | grep -q "빌드 트리거"
+  printf '%s\n' "$output" | grep -q "app create"
+  # 부재 대조 — no-op(이번 호출이 push하지 않음)에는 그 줄이 없다.
+  run --separate-stderr env PATH="$STUB" \
+    GIT_CONFIG_GLOBAL="$INIT_GCFG" GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
+    "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | grep -c "빌드 트리거")" = "0" ]
+  # 그 실행도 사람용 렌더 자체는 냈다(0건이 '출력을 안 본다'가 아님을 같은 스트림으로 증명).
+  [ "$(printf '%s' "$output" | grep -c "app init myapp")" -ge 1 ]
 }

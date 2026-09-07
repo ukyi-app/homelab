@@ -4,6 +4,7 @@
 // 계약 Envelope 반환, 프로세스/표현 관심사 없음). argv 파싱·렌더링·stdout·종료코드는 CLI 셸
 // (homelab.ts) 소유이고, MCP 서버(후속 티켓)는 op를 직접 호출해 같은 envelope을 tool 결과로 쓴다.
 // MCP 노출 정책 필드는 MCP 티켓에서 이 descriptor에 추가한다.
+import { appConfigPreflight } from "./app-preflight.ts";
 import { CONTRACT_ROWS, DB_CHECKBOX_EXTS, laneMutationFields } from "./catalog-rows.ts";
 import { cacheUrlInputError, dbUrlInputError, runCacheUrl, runDbUrl, type CacheUrlInput, type DbUrlInput } from "./conn-url.ts";
 import { ENVELOPE, exitFor, type Envelope } from "./contract.ts";
@@ -141,6 +142,17 @@ export function appCreateInputError(input: AppCreateInput): string | null {
 function appCreateOp(input: AppCreateInput): Envelope {
   const bad = appCreateInputError(input);
   if (bad) throw new Error(`계약 파손: appCreateOp에 검증 안 된 입력 — ${bad}`);
+  // 디스패치 전 사전 판정(티켓 30) — 앱 레포 main에 .app-config.yml이 없으면 디스패처가 반드시
+  // 죽는다(_create-app.yaml의 관문). 그 실패는 homelab-mutation 직렬화 큐와 Telegram 실패 알림을
+  // 소비하므로 여기서 correlation 없이 거부한다(nonce 미생성 = 디스패치 전 거부 형상).
+  // 판정 불가(비-404)는 통과 — 권위는 디스패처다(lib/app-preflight.ts 헤더 규칙 ②).
+  const pf = appConfigPreflight(input.app);
+  if (!pf.ok) {
+    return {
+      schema: ENVELOPE, verb: "app create", variant: "failure", exitCode: exitFor("failure"), omitted: [],
+      result: { action: "create-app", name: input.app, preflight: "app-config", error: pf.error, dnsExposure: DNS_EXPOSURE },
+    };
+  }
   const lane = laneMutationFields("create-app", input.app); // 레인 신원(workflow·branch·수렴 집합·표면) — 행 파생
   const { variant, omitted, result } = runMutation({
     ...lane,
