@@ -40,6 +40,9 @@ run_db_create() {
   run_db_create --json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -s 'length')" = "1" ]
+  # 사람용 렌더(renderMutation)는 --json에서도 stderr로 나간다 — 필드명 오타가 무증인이던 자리(티켓 13).
+  echo "$stderr" | grep -q "^db create mydb — correlation "
+  echo "$stderr" | grep -q "^결과: success$"
   [ "$(echo "$output" | jq -r '.verb')" = "db create" ]
   [ "$(echo "$output" | jq -r '.variant')" = "success" ]
   [ "$(echo "$output" | jq -r '.result.correlation')" = "$NONCE" ]
@@ -70,6 +73,9 @@ run_db_create() {
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
   echo "$output" | jq -r '.result.pendingReason' | grep -q "미출현"
+  # 사람용 렌더의 pending 분기(티켓 13) — pendingReason이 '대기:' 줄로 실제로 실린다.
+  echo "$stderr" | grep -q "^대기: "
+  echo "$stderr" | grep -q "^결과: pending$"
 }
 
 @test "a failed run reports the failed job names and the run URL with exit 1" {
@@ -134,6 +140,10 @@ merged_pr_at_descendant() {
   [ "$status" -eq 3 ]
   [ "$(echo "$output" | jq -r '.variant')" = "superseded" ]
   echo "$output" | jq -r '.result.error' | grep -q "표면"
+  # 사람용 렌더의 superseded 분기(티켓 13) — 오류 줄 + Application 관측 줄이 함께 실린다.
+  echo "$stderr" | grep -q "^오류: "
+  echo "$stderr" | grep -q "^결과: superseded$"
+  echo "$stderr" | grep -q "^Application cnpg-data: sync "
 }
 
 @test "wait: surface changed to a different blob at a descendant revision is superseded (content, not just existence)" {
@@ -366,4 +376,68 @@ merged_pr_at_descendant() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q -- "--ext"
   echo "$output" | grep -q -- "--wait"
+}
+
+@test "an engine contract breach surfaces as a labelled internal error with a stack, leaving stdout untouched (no dispatch)" {
+  # shell-1 실측(티켓 13 착지 전): rc 1 · stdout 0바이트 · stderr는 Bun 소스 스니펫 + `error: …`.
+  # --json 소비자는 envelope 없는 exit 1을 받았고, 그 값이 failure variant와 같아 크래시와 실패를
+  # 종료코드로 구별할 수 없었다. 계약 exitCodes 집합(0/1/2/3/4)은 불변 — 판별자는 stderr 첫 줄이다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION='bad nonce!' \
+    "$BUN" tools/homelab.ts db create mydb --json
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [ "$(printf '%s\n' "$stderr" | head -1 | grep -c '^homelab db create: 내부 오류 — ')" = "1" ]
+  # 스택 보존 — 도달 모집단이 계약 파손이라 스택이 유일한 증거다(HOMELAB_DEBUG 뒤로 숨기지 않는다).
+  [ "$(printf '%s' "$stderr" | grep -c 'mutation\.ts')" -ge 1 ]
+  # 거부는 디스패치 앞이다
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+  # 양성 대조 — 같은 하네스에서 정상 nonce는 envelope를 stdout에 낸다(단언이 전칭이 아님)
+  run_db_create --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.verb')" = "db create" ]
+}
+
+# ── 숫자 플래그 표기 술어(homelab-cli-r2 티켓 11) ──────────────────────────────────────────────
+# 함정 원장 「TS 바닥값은 coercion 뒤에서 조용히 꺼진다」의 CLI 표면. Number()가 원문을 잃고
+# (거부 문구가 NaN/0을 인용) 1e3·0x10·' 5 '·5.0을 침묵 수용했다 — 둘 다 무증인이었다.
+
+@test "wait flags reject zero, empty and fractional values quoting the raw token, dispatching nothing (floor 4)" {
+  n=0
+  for i in 1 2 3 4; do
+    case "$i" in
+      1) flag=--poll-ms;     val=0;   want="양의 정수여야 한다: 0" ;;
+      2) flag=--poll-ms;     val=abc; want="'abc'" ;;
+      3) flag=--poll-ms;     val="";  want="''" ;;
+      4) flag=--deadline-ms; val=1.5; want="'1.5'" ;;
+    esac
+    run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+      "$BUN" tools/homelab.ts db create mydb "$flag" "$val" --json
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+    echo "$stderr" | grep -q "정수"
+    echo "$stderr" | grep -qF "$want"
+    n=$((n + 1))
+  done
+  [ "$n" -eq 4 ]
+  # 거부는 디스패치 앞이다 — gh 원장 0건(부수효과 없음)
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+}
+
+@test "wait flags reject the notations Number() used to accept silently and still accept plain decimals (floor 4)" {
+  # bun 실측(착지 전): "1e3"→1000 · "0x10"→16 · " 5 "→5 · "5.0"→5 이 전부 ACCEPT였다.
+  n=0
+  for tok in "1e3" "0x10" " 5 " "5.0"; do
+    run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+      "$BUN" tools/homelab.ts db create mydb --poll-ms "$tok" --json
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+    echo "$stderr" | grep -qF "$tok"
+    n=$((n + 1))
+  done
+  [ "$n" -eq 4 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+  # 양성 대조 — 십진 정수 표기는 그대로 통과해 디스패치까지 간다(거부가 전칭이 아님)
+  run_db_create --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" -ge 1 ]
 }

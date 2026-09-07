@@ -93,6 +93,21 @@ run_secrets_in() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
 }
 
+@test "a precondition refusal renders seal as not-reached, never as executed (three-state sealSkipped)" {
+  # shell-5: 진입 게이트 거부는 chain={mode:"chain"}만 돌려주므로 sealSkipped가 undefined다 —
+  # 2상 렌더는 그것을 false와 같이 취급해 seal이 돌지도 않았는데 "seal 실행"이라고 보고했다.
+  # 사람용 채널(--json 없음)에서 stdout으로 확인한다.
+  git -C "$APP_WORK" checkout -q -b feature/x
+  run_secrets_in "$APP_WORK"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "seal 미도달"
+  # 구분자까지 포함한 부재 단언 — "seal 실행"이 다른 문맥에서 되살아나도 잡힌다
+  [ "$(printf '%s' "$output" | grep -c -- "— seal 실행 ·")" = "0" ]
+  # 양성 대조 — 부재 판정이 무증인이 아니다: 같은 렌더가 '연쇄:' 줄 자체는 실제로 낸다
+  [ "$(printf '%s' "$output" | grep -c "^연쇄: 앱 레포 안 — ")" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+}
+
 @test "an app-looking repo with a non-canonical remote is refused fail-closed (no dispatch)" {
   git -C "$APP_WORK" remote set-url origin https://github.com/ukyi-app/otherapp.git
   run_secrets_in "$APP_WORK" --json
@@ -228,6 +243,10 @@ run_secrets_in() {
   [ "$(echo "$output" | jq -r '.variant')" = "no-op" ]
   [ "$(echo "$output" | jq -r '.result | has("pr")')" = "false" ]
   [ "$(echo "$output" | jq -r '.result.chain.pushed')" = "false" ]
+  # 사람용 렌더의 no-op·chain 분기(티켓 13) — sealSkipped=true·pushed=false가 문구로 실린다.
+  echo "$stderr" | grep -q "재봉인 생략(--no-seal)"
+  echo "$stderr" | grep -q "커밋 없음"
+  echo "$stderr" | grep -q "^결과: no-op$"
   [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "1" ]
 }
 

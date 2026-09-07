@@ -252,6 +252,20 @@ setup() {
   echo "$output" | grep -q -- "--pr"
 }
 
+@test "status rejects an unknown option and a single-dash token with the verb usage on stderr (exit 2)" {
+  # 티켓 12 — statusCli만 positionalThenFlags 골격을 손으로 다시 쓰고 있었고, 그 인라인 분기를 밟는
+  # 테스트가 0건이었다(치환의 등가성 증인). `-h`는 이전엔 '앱 이름 형식 불량: -h'였다(shell-9).
+  run --separate-stderr bun tools/homelab.ts status --bogus
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- "--bogus"
+  echo "$stderr" | grep -q "사용법: homelab status"
+  run --separate-stderr bun tools/homelab.ts status -h
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "알 수 없는 옵션"
+}
+
 @test "all four status modes emit schema-valid envelopes (floor 4)" {
   make_app_fixture page true
   export OUTDIR="$BATS_TEST_TMPDIR"

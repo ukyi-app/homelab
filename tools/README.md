@@ -229,6 +229,55 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 
 ## 공유 커널 (lib/ — 콜사이트가 정책 소유, 단 정책이 콜사이트마다 갈릴 때)
 
+- **`lib/cli.ts`** — argv 파싱 커널(`parseFlags`·`typedFlags`·`parseCommand`·`skip`/`skipMarker`).
+  레포에서 가장 널리 소비되는 lib이다(9개 도구 + homelab CLI). fail-closed 네 축을 **여기 한 곳이**
+  소유한다: 미지 옵션 거부 · 값 누락으로 다음 플래그를 삼키는 것 거부 · 같은 플래그 **중복 지정**
+  거부(침묵 last-wins는 `--confirm x --confirm myapp`이 파괴 확인을 통과하는 표면이다) · 단일 대시
+  토큰을 위치 인자로 삼지 않기. `parseCommand`는 정책을 갖지 않되 **판별 가능한** 실패를 낸다
+  (`CommandParseError`: kind · 소비한 유효 노드 path · 그 노드 어휘) — 셸이 한국어 문구 스니핑 없이
+  그룹 노드 --help를 좁힐 수 있는 이유가 이 값이다. 종료코드 규약(0/1/2/3/4)의 산문 SSOT도 이 파일 헤더다.
+- **`lib/identity.ts`** — 신원·형식 술어 SSOT(`APP_NAME_RE`·`RESOURCE_NAME_RE`·`EXT_RE`·
+  `CORRELATION_RE`·`CACHE_MAXMEMORY_MI`·`isCanonicalClone`·`pushRouteError`·`pathInputError`).
+  콜사이트가 20곳 넘는 이유는 하나다 — **분기하면 그 자리가 우회 표면이 된다**: 디스패처
+  (validate-mutation)가 느슨하면 통과시킨 이름을 실행기(provision-*)가 거부하고, 리더(status)가
+  자체 정규식을 쓰면 path traversal 게이트가 리더에만 없다. push 라우팅 판정(insteadOf 재배선
+  fail-closed)과 MCP 경로 입력의 절대성 술어도 같은 이유로 여기 산다.
+- **`lib/app-surface.ts`** — 앱 표면 module(`appRel`·`appPaths`·`readAppSurface`·`writeAppSurface`·
+  `removeAppSurface`). "앱은 어떤 파일들로 이루어지는가"의 유일 선언이다 — 종전에는 표면 6종이
+  create-app의 손조립이었고 경로 리터럴이 소비자 여럿에 흩어져, 표면이 늘어도 그 사실을 셀 수
+  있는 자리가 없었다. 앱-**외부** 표면(apps.json 행·메모리 원장 행·digest-exporter 항목)은 소관
+  밖이고 각자의 SSOT 헬퍼가 진다 — 그 경계가 이 module이 데이터 테이블이 아니라 함수 API인 이유다.
+- **`lib/ledger-totals.ts`** — 메모리 원장 행·합계 프리미티브(`TOTALS_RE`·`replaceTotals`·
+  `parseLedgerRows`·`addRow`·`removeRow`). 프로즈가 드리프트하면 `String.replace`가 조용한 no-op이
+  되어 합계가 stale로 남으므로 매치 0건은 throw다. `TOTALS_RE`가 export인 것은 그 fail-loud가
+  **변이 디스패처가 돌 때만** 들리기 때문이다 — 실 원장의 `≈`가 떨어져 나가 세 디스패처가 전부
+  죽은 동안 픽스처는 전부 `≈`를 품어 red가 0건이었다(2026-08-31~09-02). 게이트가 이 정규식을
+  그대로 가져다 **실 원장**에 물려 그 침묵을 닫는다(사본을 쓰면 드리프트가 재발한다).
+- **`lib/ledger-budget.ts`** — 원장 예산 게이트(`analyzeLedger`·`budgetViolation`·
+  `appendRowWithTotals`·`removeRowWithTotals`). create-app·provision-cache에 12줄씩 복제돼 있던
+  집계·게이트·합계 동반 갱신의 수렴형. 행 파싱·조작은 `lib/ledger-totals.ts`가 SSOT이고 이쪽은
+  그 위의 판정만 얹는다. 실패는 throw — 종료코드와 `::error::` 접두는 콜사이트 `fail()`이 정한다.
+- **`lib/bump-plan.ts`** — bump 계획 계약(`LANES`·`decodePlan`·`branchFor`/`parseBranch` 등).
+  종전에는 같은 계약이 세 프로세스(poll-ghcr 생산 · run-bump-plan 소비 · ensure-bump-pr 검증)에
+  독립 선언돼 optionality까지 갈렸다 — 생산자와 검증자가 같은 문자열을 각자 적으면 한쪽만 바뀔 때
+  소유 증명이 조용히 실패한다. plan은 JSON 경계를 건너므로 TS 타입만으로는 부족해 `decodePlan`이
+  런타임 fail-closed로 디코드한다(미지 action은 조용한 skip이 아니라 throw). 브랜치 문자열이 신원
+  (app/bespoke)을 인코딩하고 그 인코딩·역디코딩을 이 module이 함께 소유한다.
+- **`lib/activation-marker.ts`** — `.activation` 마커 SSOT(`registryProjection`·`buildActivationMarker`).
+  공개 앱 재노출 게이트의 근거 파일이라 **두 생성 경로**(create-app 공개 생성 · activate-app --flip)가
+  같은 포맷으로 남겨야 한다 — 마커가 없는 active&&public 앱은 게이트에서 영구 제외된다.
+  키 순서(name·host·public)가 고정인 것은 audit-orphans가 `JSON.stringify` 동일성으로 비교하기
+  때문이다(순서가 갈리면 그 비교가 오탐한다).
+- **`lib/surface-hash.ts`** — 앱 표면의 canonical 해시(`surfaceHash`·`surfaceHashWorktree`).
+  activate-app의 '표면 무변경' 판정이 이 값 하나에 걸린다. `.activation` 라인을 해시에서 **제외**하는
+  것이 계약이다 — 마커 커밋이 트리를 바꿔 자기 판정을 무효화하는 자기참조를 끊는다.
+- **`lib/kustomization.ts`** — kustomization.yaml `resources` 리스트의 멱등 편집(`addResource`·
+  `removeResource`). provision(등록)·teardown(해제)이 대칭으로 쓴다. `parseDocument`로 주석·포맷을
+  보존하고 trailing slash를 정규화한다(`name` vs `name/`가 다른 항목으로 중복 등록되던 자리).
+- **`lib/seal.ts`** — kubeseal 봉인(`sealManifest`). 평문 Secret manifest를 **디스크에 쓰지 않고**
+  stdin으로만 흘린다. 평문은 stdout·예외 메시지·seam 원장 어디에도 싣지 않는다(원장에 남는 argv는
+  cert 경로뿐). 앱 레포 측 `seal-secret.mts`가 자체 블록을 유지하는 것은 확장자 규약(.mts = bun+node
+  양립) 때문이지 중복이 아니다.
 - **`lib/scan-floor.ts`** — 열거 붕괴 커널(TS adapter — 셸 `scripts/lib/scan-floor.sh`의 형제):
   scanFloor/scanSignal/parseFloor 판정부 + guardMain/takeFloors 실행부(실행 순서·`--floor` 어휘 소유,
   lib-convergence 17). 마커를 내는 구현은 이 파일 하나다(check-scan-producers가 거부로 강제).
@@ -316,6 +365,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   usage 오류는 invalid params(-32602). 무상태 — 동시 호출은 run/PR URL 핸들로 독립, 재시작 후 정상.
   url 패스스루(db/cache url)는 캡처 실행(stdio 오염 방지)+명시 envDir. `homelab mcp`가 진입점(서버는
   transport 모드라 catalog 밖 — 자기 자신 비노출).
+- **`lib/render.ts`** — homelab CLI 사람용 렌더(`renderFor()` + 동사별 5개 + MARK/OX). mcp.ts와 같은
+  **프레젠테이션 계층**이다: op는 Envelope만 반환하고 표현은 셸이 소유한다(동사 descriptor 파생이
+  아니라 ADR-0001과 무관). homelab.ts에서 분리한 이유 둘 — bin 모듈은 import 시 main이 실행돼
+  렌더러 단위 호출이 불가능했고(골든 전수 스윕이 원리적으로 못 섰다), 어댑터가 렌더를 즉시
+  평가해 사람용 결함이 기계 채널(--json)까지 죽였다(지금은 셸이 thunk로 받아 envelope 선행).
+  총체성: renderFor는 verb 전수 분기·미지 verb throw, renderStatus는 mode switch·default throw.
 - **`lib/template-contract.ts`** — 스캐폴더 비대화형 계약 SSOT(`SCAFFOLD_CONTRACT_MARKERS`·
   `scaffoldContractError()`·`SCAFFOLD_ENTRY`): doctor(사전 진단)와 init(실제 실행 preflight)이 **같은
   술어**를 공유한다(structure r1 a3 — 두 번째 소비자 init이 생겨 추출). 마커 = --archetype·--name·--yes,
