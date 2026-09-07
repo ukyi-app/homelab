@@ -12,6 +12,11 @@
         "detail": "gh 인증 확인(login: ukyi)"
       },
       {
+        "id": "gh-version",
+        "status": "pass",
+        "detail": "gh 2.97.0 — 문구 계약 최소 버전(2.40) 충족"
+      },
+      {
         "id": "gh-owner",
         "status": "fail",
         "detail": "gh 로그인(ukyi) ≠ HOMELAB_OWNER(other-owner) — 변이 디스패처 actor 가드가 거부한다"
@@ -27,9 +32,29 @@
         "detail": "bun 발견(PATH)"
       },
       {
+        "id": "git",
+        "status": "pass",
+        "detail": "git 발견(PATH)"
+      },
+      {
         "id": "kubeseal",
         "status": "fail",
         "detail": "kubeseal이 PATH에 없다 — 시크릿 봉인(app secrets 연쇄 모드)에 필요(docs/runbooks/toolchain.md)"
+      },
+      {
+        "id": "kubectl",
+        "status": "pass",
+        "detail": "kubectl 발견(PATH)"
+      },
+      {
+        "id": "git-identity",
+        "status": "pass",
+        "detail": "git 커밋 신원 확인(값 비노출)"
+      },
+      {
+        "id": "git-credential",
+        "status": "pass",
+        "detail": "GitHub https 자격 helper 설정됨"
       },
       {
         "id": "kubeconfig",
@@ -53,7 +78,7 @@
       }
     ],
     "summary": {
-      "pass": 5,
+      "pass": 10,
       "fail": 3,
       "warn": 1
     }

@@ -185,9 +185,14 @@ claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
   셰뱅+exec 비트를 갖는 .ts다(test_shebang-exec.bats가 bin 선언에서 예외를 파생). 레포 밖(앱 레포
   디렉토리 포함)에서도 동작한다(자기 위치는 import.meta 기준 해석).
   `homelab doctor [--json]` = 플랫폼 전제 진단(관측 전용): gh 인증·로그인=HOMELAB_OWNER 일치(actor
-  가드 사전 검증)·토큰 스코프(repo·workflow, 헤더 부재=fine-grained 추정 warn), bun·kubeseal 존재,
-  KUBECONFIG 유무(부재=warn·깨진 경로=fail), 템플릿 접근성·호환성(스캐폴더 비대화형 계약 +
-  컴파일 아키타입 3종 TARGETARCH — site는 arch 중립이라 대상 아님). fail ≥ 1이면 exit 1.
+  가드 사전 검증)·토큰 스코프(repo·workflow, 헤더 부재=fine-grained 추정 warn)·gh 버전(코드에 박힌
+  gh 문구 계약의 최소 버전 미만=warn), bun·git·kubeseal·kubectl 존재(kubectl 부재는 KUBECONFIG가
+  있으면 fail·없으면 warn — 라이브 소비자가 전부 그 게이트 뒤다), git 커밋 신원·GitHub https 자격
+  helper(부재=warn — init/secrets의 commit·push가 죽는 자리를 사전에 예고), KUBECONFIG 유무(부재=warn·
+  콜론 구분 병합 목록 지원: 일부 부재=warn·전부 부재=fail), 템플릿 접근성·호환성(스캐폴더 비대화형
+  계약 + 컴파일 아키타입 3종 TARGETARCH — site는 arch 중립이라 대상 아님). fail ≥ 1이면 exit 1.
+  gh 인증이 성립하지 않으면 **추가 gh 호출을 만들지 않는다**(오프라인·rate limit 소진에서 같은
+  실패를 반복하지 않는다 — gh-version이 gh-auth 종속인 이유).
   테스트: `tools/tests/test_homelab-cli.bats`(라우팅·계약)·`test_homelab-doctor.bats`(진단 —
   PATH stub + NUL argv 원장, 하네스 `tools/tests/helpers/cli_stub.bash`).
   ⚠️ 그 하네스의 gh 스텁은 jq를 **적용한 뒤의** 형상을 돌려준다(픽스처가 손으로 접은 결과다) —

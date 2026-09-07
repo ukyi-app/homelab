@@ -352,7 +352,7 @@ assert_envelope_valid() {
   make_app_fixture page true
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
   [ "$status" -eq 0 ]
-  run python3 "$LEDGER_PY" gh-readonly "$CALLS"
+  run python3 "$LEDGER_PY" observation-only "$CALLS"
   [ "$status" -eq 0 ]
 }
 

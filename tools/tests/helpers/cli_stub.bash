@@ -108,7 +108,8 @@ cli_stub_init() {
 
   # 원장 파서 — NUL/RS 레코드를 배열로 복원해 질의한다. 모드:
   #   count <argv...>  : 접두 일치 레코드 수
-  #   gh-readonly      : 모든 gh 레코드가 `gh api` + 변이 수단 없음인지 (위반 시 비-0)
+  #   observation-only : 모든 gh 레코드가 읽기(`gh api`/`gh --version`)이고 변이 수단이 없으며,
+  #                      모든 git 레코드가 읽기 동사(`var`·`config --get*`)인지 (위반 시 비-0)
   #   dump             : 사람용 — argc + 따옴표 표기
   LEDGER_PY="$BATS_TEST_TMPDIR/ledger.py"
   cat > "$LEDGER_PY" <<'PY'
@@ -135,10 +136,25 @@ if mode == "count":
     print(sum(1 for r in records if is_prefix(r, want)))
 elif mode == "exact":  # argc + 각 위치 문자열이 모두 같은 레코드가 있는가(인자 경계 보존 단언)
     sys.exit(0 if any(r == want for r in records) else 1)
-elif mode == "gh-readonly":
-    # doctor는 관측 전용 — 모든 gh 레코드는 `gh api`이고 변이 수단이 없어야 한다.
+elif mode == "observation-only":
+    # doctor는 관측 전용 — gh 레코드는 읽기(`gh api` 또는 `gh --version`)이고 변이 수단이 없어야 하며,
+    # git 레코드는 읽기 동사(`var` · `config --get*`)뿐이어야 한다. git 계열도 exec seam을 지나므로
+    # gh만 보면 "관측 전용"이 gh 축에서만 참인 반쪽 단언이 된다(티켓 14).
     MUTATION = {"-X", "--method", "-f", "-F", "--field", "--raw-field", "--input"}
-    bad = [r for r in records if r[:1] == ["gh"] and (r[1:2] != ["api"] or set(r) & MUTATION)]
+    GH_READ_HEADS = (["api"], ["--version"])
+
+    def git_read(rec):
+        head = rec[1:2]
+        if head == ["var"]:
+            return True
+        return head == ["config"] and len(rec) > 2 and rec[2].startswith("--get")
+
+    bad = []
+    for r in records:
+        if r[:1] == ["gh"] and (r[1:2] not in GH_READ_HEADS or set(r) & MUTATION):
+            bad.append(r)
+        elif r[:1] == ["git"] and not git_read(r):
+            bad.append(r)
     for r in bad:
         print("MUTATION-SHAPED: " + " ".join(r))
     sys.exit(1 if bad else 0)
@@ -155,7 +171,7 @@ PY
 # 임의 owner/repo URL을 정당한 입력으로 받는 계약이라(좁히면 계약을 거짓으로 검증) 의도적 비대칭.
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
-# STUB_GH_HANDLE_404 / STUB_GH_RAW / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
+# STUB_GH_HANDLE_404 / STUB_GH_RAW / STUB_GH_HTTP_ERR / STUB_GH_VERSION / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
 # 3종(STUB_GH_RUNS_LIST_FAIL · STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기
 # 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL) / 신선도 스냅샷
 # (STUB_GH_STALE_RUN — 디스패치 전에 이미 같은 nonce를 에코하던 옛 run). 템플릿 파일·status 응답
@@ -190,10 +206,27 @@ case "$*" in
     ;;
 esac
 case "$*" in
+  # gh 버전 — 코드에 박힌 gh 문구 계약(`(HTTP 404)` stderr · `workflow run -f` · `api --jq`)의 전제.
+  # STUB_GH_VERSION으로 구버전 레인을 만든다(기본은 계약 최소 버전 이상).
+  "--version")
+    printf 'gh version %s (2026-08-01)\n' "${STUB_GH_VERSION:-2.97.0}"
+    printf 'https://github.com/cli/cli/releases/latest\n'
+    ;;
   "api -i user")
     if [ -n "${STUB_GH_UNAUTH:-}" ]; then
       echo "gh: To get started with GitHub CLI, please run:  gh auth login" >&2
       exit 4
+    fi
+    # STUB_GH_HTTP_ERR — **서버가 응답한** 실패(401·403 rate limit 소진·권한). `gh api -i`는 비-2xx에서도
+    # 상태줄+헤더를 stdout에 그대로 낸다(라이브 실측: 404 조회 → stdout 첫 줄 `HTTP/2.0 404 Not Found`).
+    # 그 형상이 '자격 부재(rc 4·stdout 공백)'와 이 레인을 가르는 유일한 원료다.
+    if [ -n "${STUB_GH_HTTP_ERR:-}" ]; then
+      printf 'HTTP/2.0 401 Unauthorized\r\n'
+      printf 'X-Ratelimit-Limit: 5000\r\n'
+      printf 'X-Ratelimit-Remaining: 0\r\n'
+      printf '\r\n'
+      echo "gh: Bad credentials (HTTP 401)" >&2
+      exit 1
     fi
     printf 'HTTP/2.0 200 OK\r\n'
     if [ -z "${STUB_NO_SCOPES_HEADER:-}" ]; then
@@ -472,6 +505,22 @@ make_app_fixture() {
 make_ledger_row() {
   mkdir -p "$APPS_ROOT/docs"
   printf '| <!-- ledger:row --> %s | prod | %s | %s |\n' "$1" "$2" "$3" >> "$APPS_ROOT/docs/memory-ledger.md"
+}
+
+# git 기록 래퍼 — doctor의 git 계열 관측(`var GIT_COMMITTER_IDENT` · `config --get-urlmatch …`)을
+# 공용 원장에 남긴다(cli_stub_init의 심링크를 덮어쓴다). 실물 git으로 exec 위임하는 이유는 판정이
+# **실제 git 의미론**이어야 하기 때문이다 — `git var`의 IDENT_STRICT(신원 미설정 = 비-0)를 흉내내면
+# 그 흉내가 계약이 되고 라이브에서 어긋난다. 관측 전용 원장 판정(observation-only)의 원료이기도 하다.
+# ⚠️ cli_stub_init 뒤에 부른다(심링크가 먼저 생겨야 덮어쓸 자리가 있다).
+make_git_stub() {
+  git_real="$(command -v git)"
+  rm -f "$STUB/git"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '{ printf "%%s\\0" git "$@"; printf "\\x1e"; } >> "$CALLS"\n'
+    printf 'exec "%s" "$@"\n' "$git_real"
+  } > "$STUB/git"
+  chmod +x "$STUB/git"
 }
 
 # kubeseal 존재 시나리오 — doctor는 PATH 존재만 보므로(Bun.which) 실행되지 않지만,

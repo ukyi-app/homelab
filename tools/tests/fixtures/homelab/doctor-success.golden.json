@@ -12,6 +12,11 @@
         "detail": "gh 인증 확인(login: ukyi)"
       },
       {
+        "id": "gh-version",
+        "status": "pass",
+        "detail": "gh 2.97.0 — 문구 계약 최소 버전(2.40) 충족"
+      },
+      {
         "id": "gh-owner",
         "status": "pass",
         "detail": "gh 로그인 계정이 HOMELAB_OWNER와 일치(ukyi)"
@@ -27,9 +32,29 @@
         "detail": "bun 발견(PATH)"
       },
       {
+        "id": "git",
+        "status": "pass",
+        "detail": "git 발견(PATH)"
+      },
+      {
         "id": "kubeseal",
         "status": "pass",
         "detail": "kubeseal 발견(PATH)"
+      },
+      {
+        "id": "kubectl",
+        "status": "pass",
+        "detail": "kubectl 발견(PATH)"
+      },
+      {
+        "id": "git-identity",
+        "status": "pass",
+        "detail": "git 커밋 신원 확인(값 비노출)"
+      },
+      {
+        "id": "git-credential",
+        "status": "pass",
+        "detail": "GitHub https 자격 helper 설정됨"
       },
       {
         "id": "kubeconfig",
@@ -53,7 +78,7 @@
       }
     ],
     "summary": {
-      "pass": 9,
+      "pass": 14,
       "fail": 0,
       "warn": 0
     }

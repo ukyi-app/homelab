@@ -103,8 +103,9 @@ function doctorUsage(): string {
   return [
     "사용법: homelab doctor [--json]",
     "",
-    "플랫폼 전제 진단 — gh 인증·HOMELAB_OWNER 일치·토큰 스코프, bun·kubeseal 존재,",
-    "KUBECONFIG(부재는 경고), 템플릿 접근성·호환성(스캐폴더 비대화형 계약·TARGETARCH)을 점검한다.",
+    "플랫폼 전제 진단 — gh 인증·버전·HOMELAB_OWNER 일치·토큰 스코프, bun·git·kubeseal·kubectl 존재,",
+    "git 커밋 신원·GitHub https 자격 helper(부재는 경고), KUBECONFIG(부재는 경고·콜론 목록 지원),",
+    "템플릿 접근성·호환성(스캐폴더 비대화형 계약·TARGETARCH)을 점검한다.",
     "  --json        결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
     "",
     ...needsLines(DOCTOR),

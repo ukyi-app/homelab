@@ -234,8 +234,8 @@ function statusOp(input: StatusInput): Envelope {
 // named export — CLI 어댑터·MCP가 정확한 입력 타입으로 호출한다(union 좁히기 불필요).
 export const DOCTOR: DoctorVerb = {
   path: ["doctor"],
-  desc: "플랫폼 전제 진단(gh 인증·owner 일치·스코프 / bun·kubeseal / KUBECONFIG / 템플릿 호환성)",
-  needs: "GitHub(gh) — 클러스터는 파일 존재만 보고 도달성은 재지 않는다",
+  desc: "플랫폼 전제 진단(gh 인증·버전·owner 일치·스코프 / bun·git·kubeseal·kubectl / git 신원·자격 helper / KUBECONFIG / 템플릿 호환성)",
+  needs: "GitHub(gh) · 로컬 git(읽기 동사) — 클러스터는 파일·실행 파일 존재만 보고 도달성은 재지 않는다",
   op: doctorOp,
 };
 

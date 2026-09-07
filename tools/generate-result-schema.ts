@@ -81,7 +81,7 @@ const DEFINITIONS = `    "doctorResult": {
       "properties": {
         "checks": {
           "type": "array",
-          "minItems": 9,
+          "minItems": 14,
           "items": { "$ref": "#/definitions/doctorCheck" }
         },
         "summary": {
@@ -587,10 +587,15 @@ const DEFINITIONS = `    "doctorResult": {
         "id": {
           "enum": [
             "gh-auth",
+            "gh-version",
             "gh-owner",
             "gh-scopes",
             "bun",
+            "git",
             "kubeseal",
+            "kubectl",
+            "git-identity",
+            "git-credential",
             "kubeconfig",
             "template-access",
             "template-scaffold-contract",
