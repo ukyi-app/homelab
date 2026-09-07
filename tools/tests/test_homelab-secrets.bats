@@ -51,6 +51,10 @@ run_secrets_in() {
   [ "$status" -eq 0 ]
   run python3 "$LEDGER_PY" exact "$CALLS" gh workflow run update-secrets.yaml -R ukyi-app/homelab -f "app=myapp" -f "correlation=$NONCE"
   [ "$status" -eq 0 ]
+  # 브랜치 명명(update-secrets/<app>-<run_id>) 원장 — 다른 4 레인(db·cache·app create·teardown)은
+  # 엔진 경로에서 이 조회를 핀하는데 secrets만 빠져 있었다. 값 자체는 단위 테스트가 덮으므로 이 줄이
+  # 메우는 공백은 '엔진이 실제로 그 브랜치로 조회한다'는 프로세스 경계 증인이다(run id 701 = 픽스처).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:update-secrets/myapp-701" --jq)" -ge 1 ]
 }
 
 @test "chain-mode success and precondition refusal envelopes validate against the schema (floor 2)" {
