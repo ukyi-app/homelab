@@ -3,8 +3,58 @@
 # 행에서 생성(fillLanePattern/laneSpec)과 파싱(laneBranchTail/isDispatchLaneBranch)이 함께
 # 파생되므로, 왕복 불변식과 손 핀 리터럴 앵커를 이 표면 하나에서 단언한다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과 함정. @test 이름은 영어(인코딩 함정).
+bats_require_minimum_version 1.5.0
+load "helpers/cli_stub"
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
+
+# 원장에서 그 디스패처의 `-f k=v` **키 집합**을 뽑는다(정렬·중복 제거). 순서는 재지 않는다 —
+# argv 순서는 각 동사 bats의 exact 원장이 이미 소유한다(이 축은 집합 동치뿐).
+# LC_ALL=C — 로케일 콜레이션이 `sort -u`의 동치 판정을 뒤집는 함정(AGENTS.md) 회피.
+dispatch_keys() {
+  python3 "$LEDGER_PY" dump "$CALLS" \
+    | grep -F "'workflow' 'run' '$1'" \
+    | grep -oE "'-f' '[A-Za-z0-9_]+=" \
+    | sed "s/^'-f' '//; s/=\$//" \
+    | LC_ALL=C sort -u | tr '\n' ' '
+}
+
+# 그 트리의 행이 말하는 기대 키 집합(inputs + correlation) — 같은 정렬 규약.
+lane_want_keys() {
+  bun -e '
+    const { LANES } = await import(process.argv[1] + "/tools/lib/catalog-rows.ts");
+    console.log([...LANES[process.argv[2]].inputs, "correlation"].sort().join(" ") + " ");
+  ' "$1" "$2"
+}
+
+# 대조기 본체 — 한 레인의 실제 디스패치 키 집합 vs 그 트리 행의 기대 집합. 양성 대조가 같은
+# 함수를 물어야 판별성이 성립한다(대조기 사본 둘이면 한쪽만 고쳐도 초록이다).
+lane_argv_parity() {
+  got="$(dispatch_keys "$3")"
+  want="$(lane_want_keys "$1" "$2")"
+  echo "action=$2 got=[$got] want=[$want]"
+  # 공허 방지 — 어느 한쪽이 빈 문자열이면(디스패치 0건·행 로드 실패) "둘 다 비어 동치"가 되어
+  # 전건이 조용히 통과한다. 함수는 errexit 밖이라 중간 단언만으로는 못 멈춘다 — 명시 return.
+  [ -n "$got" ] || return 1
+  [ -n "$want" ] || return 1
+  [ "$got" = "$want" ]
+}
+
+# 변이 동사 실행 — 시간 심을 밀리초로 조이고 라이브 계층은 뗀다(KUBECONFIG 미설정 = omitted live).
+run_verb() {
+  run --separate-stderr env -u KUBECONFIG PATH="$STUB" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts "$@" --poll-ms 10 --deadline-ms 300 --json
+}
+
+# 같은 실행을 **다른 cwd**에서 — dispatch-only `app secrets`의 온보딩 사전 판정(티켓 30)이 cwd의
+# git toplevel(없으면 cwd)을 앵커로 쓰기 때문이다. `env -C`는 이 캠페인의 이식성 규약상 금지라
+# `bash -c 'cd …'` 관용구를 쓰고, homelab.ts는 절대경로로 지목한다(cd 뒤 상대경로는 깨진다).
+run_verb_in() {
+  dir="$1"; shift
+  run --separate-stderr env -u KUBECONFIG PATH="$STUB" HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'cd "$1" || exit 1; bun="$2"; root="$3"; shift 3; exec "$bun" "$root/tools/homelab.ts" "$@"' \
+    _ "$dir" "$BUN" "$ROOT" "$@" --poll-ms 10 --deadline-ms 300 --json
+}
 
 @test "the lane descriptor is pure data: zero imports (design gate r1 D3)" {
   [ -f tools/lib/catalog-rows.ts ]
@@ -138,6 +188,54 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   '
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "ok"
+}
+
+@test "the CLI dispatch argv keys equal the lane row inputs plus correlation for all five lanes" {
+  # 티켓 26 — 디스패치 키는 verbs.ts·secrets.ts의 **손 리터럴**이고(행에서 파생되는 것은
+  # DB_CHECKBOX_EXTS뿐) 행↔YAML·행↔CONTRACT 가드 체인 어디에도 CLI argv가 없다. 그래서
+  # `maxmemory_mi`→`maxmemory` 개명을 YAML·행·가드·CONTRACT까지 일관되게 반영해도 CLI만 낡은
+  # 키로 남고, 검출은 라이브 `gh workflow run`의 입력 거부뿐이었다. 이 @test가 그 마지막 변을 잇는다.
+  # 값 조립은 동사별로 다르다(불리언 파생·정수·빈값·confirm)므로 파생이 아니라 **가드**가 맞다(ADR 0001).
+  # 하네스는 이 @test 안에서만 세운다 — 나머지 @test는 프로세스를 띄우지 않는 순수 데이터 계약이다.
+  cli_stub_init
+  make_gh_stub
+  run_verb db create mydb --ext pg_trgm
+  [ "$status" -eq 0 ]
+  run_verb cache create mycache --maxmemory-mi 128
+  [ "$status" -eq 0 ]
+  run_verb app create myapp
+  [ "$status" -eq 0 ]
+  # app secrets는 앱 마커 부재 트리에서 도는 dispatch-only 모드다 — 연쇄 없이 디스패치만. 단
+  # 티켓 30의 사전 판정이 "그 트리에 앱이 온보딩돼 있는가"를 먼저 묻는다(cwd 앵커) — 이 레포의
+  # `apps/`에는 myapp이 없어 여기서 돌리면 디스패치 전에 거부된다. 그래서 $APPS_ROOT를
+  # 온보딩된 워킹트리로 세워 그쪽에서 돈다(형제 스위트 test_homelab-secrets.bats와 같은 규약).
+  make_app_fixture myapp
+  run_verb_in "$APPS_ROOT" app secrets myapp
+  [ "$status" -eq 0 ]
+  run_verb app teardown myapp --confirm myapp
+  [ "$status" -eq 0 ]
+  # 레인별 집합 동치. 열거 바닥값 5 — 루프가 짧아지면 vacuous green이다.
+  n=0
+  while IFS=' ' read -r action workflow; do
+    [ -n "$action" ] || continue
+    run lane_argv_parity "$ROOT" "$action" "$workflow"
+    [ "$status" -eq 0 ]
+    n=$((n + 1))
+  done <<'EOF'
+create-database create-database.yaml
+create-cache create-cache.yaml
+create-app create-app.yaml
+update-secrets update-secrets.yaml
+teardown-app teardown-app.yaml
+EOF
+  [ "$n" -eq 5 ]
+  # 양성 대조 — 행 inputs만 개명한 사본에서 같은 대조기가 실제로 문다(CLI 리터럴은 그대로다).
+  # 행은 import 0 계약이라 사본 한 파일이면 충분하다(node_modules·진입점 불필요).
+  MR="$BATS_TEST_TMPDIR/row-mut"; mkdir -p "$MR/tools/lib"
+  sed 's|"name", "maxmemory_mi"|"name", "maxmemory_renamed"|' tools/lib/catalog-rows.ts > "$MR/tools/lib/catalog-rows.ts"
+  [ "$(grep -c '"maxmemory_renamed"' "$MR/tools/lib/catalog-rows.ts")" = "1" ]
+  run lane_argv_parity "$MR" create-cache create-cache.yaml
+  [ "$status" -ne 0 ]
 }
 
 @test "every lane row surface path equals the kernel derivation (import-0 parity guard)" {

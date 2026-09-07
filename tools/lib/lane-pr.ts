@@ -12,7 +12,7 @@ import { LANES, fillLanePattern, type LaneAction } from "./catalog-rows.ts";
 import { compact } from "./contract.ts";
 import { ghRead, type GhRead } from "./exec.ts";
 import { APP_NAME_RE, RESOURCE_NAME_RE } from "./identity.ts";
-import { HOMELAB_REPO } from "./platform.ts";
+import { HOMELAB_REPO, OWNER } from "./platform.ts";
 
 // state — 머지 관측 루프의 종결 축(티켓 05). merged_at만 보면 close(미머지)가 데드라인까지 '머지
 // 대기'로 접힌다. 옵셔널인 이유: 이 필드를 모르는 픽스처·응답에서 undefined가 되고, 엄격 동등
@@ -24,9 +24,10 @@ export type LanePrRow = { number: number; html_url: string; merged_at: string | 
 export const LANE_PR_FIELDS = "{number, html_url, merged_at, merge_commit_sha, state}";
 export const LANE_PR_JQ = `[.[] | ${LANE_PR_FIELDS}]`;
 
+// head의 owner는 platform.ts의 OWNER SSOT다 — 여기서 HOMELAB_REPO를 다시 split하면 파생 지점이
+// 갈린다(platform.ts:6 주석이 금지한 형태 · test_platform.bats의 파생 가드가 강제).
 export function lanePrPath(branch: string): string {
-  const owner = HOMELAB_REPO.split("/")[0];
-  return `repos/${HOMELAB_REPO}/pulls?state=all&head=${owner}:${branch}`;
+  return `repos/${HOMELAB_REPO}/pulls?state=all&head=${OWNER}:${branch}`;
 }
 
 // 3상 리더 — 값과 실패 사유를 함께 준다(머지 루프가 사유를 pendingReason 접미로 싣는다).
