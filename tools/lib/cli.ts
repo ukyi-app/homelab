@@ -1,5 +1,5 @@
 // CLI 인자 파싱 SSOT — 흩어진 argv 루프 통일(homelab .ts 도구 전용).
-// fail-closed: unknown 플래그 거부, 값이 누락돼 다음 플래그(--)를 삼키는 것 거부.
+// fail-closed: unknown 플래그 거부, 값이 누락돼 다음 플래그(--)를 삼키는 것 거부, 같은 플래그 중복 거부.
 type FlagSpec = { value: string[]; bool: string[] };
 
 export function parseFlags(argv: string[], spec: FlagSpec): Record<string, string | boolean> {
@@ -9,6 +9,11 @@ export function parseFlags(argv: string[], spec: FlagSpec): Record<string, strin
     const a = argv[i];
     if (!a.startsWith("--")) throw new Error(`예상치 못한 위치 인자: ${a}`);
     if (!known.has(a)) throw new Error(`알 수 없는 옵션: ${a}`);
+    // 중복 지정 거부 — 침묵 last-wins는 모순된 편집 실수를 조용히 뒤 값으로 접는다(실측:
+    // `--env-local a --env-local b` → "b", rc 0). 파괴 확인(`--confirm x --confirm myapp`)까지
+    // 같은 경로라 거부는 이 커널 한 곳이 소유한다(9개 도구 공유 — 적용 전 워크플로·스크립트의
+    // tools 호출 argv에 반복 플래그 0건 확인). bool도 포함 — 두 번 준 불리언은 의도가 모호하다.
+    if (Object.hasOwn(out, a)) throw new Error(`옵션 ${a} 중복 지정 — 한 번만 준다`);
     if (spec.bool.includes(a)) { out[a] = true; continue; }
     const v = argv[i + 1];
     if (v === undefined || v.startsWith("--")) throw new Error(`옵션 ${a}에 값이 필요하다(값 누락 또는 다음 플래그 삼킴)`);

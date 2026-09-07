@@ -367,3 +367,48 @@ merged_pr_at_descendant() {
   echo "$output" | grep -q -- "--ext"
   echo "$output" | grep -q -- "--wait"
 }
+
+# ── 숫자 플래그 표기 술어(homelab-cli-r2 티켓 11) ──────────────────────────────────────────────
+# 함정 원장 「TS 바닥값은 coercion 뒤에서 조용히 꺼진다」의 CLI 표면. Number()가 원문을 잃고
+# (거부 문구가 NaN/0을 인용) 1e3·0x10·' 5 '·5.0을 침묵 수용했다 — 둘 다 무증인이었다.
+
+@test "wait flags reject zero, empty and fractional values quoting the raw token, dispatching nothing (floor 4)" {
+  n=0
+  for i in 1 2 3 4; do
+    case "$i" in
+      1) flag=--poll-ms;     val=0;   want="양의 정수여야 한다: 0" ;;
+      2) flag=--poll-ms;     val=abc; want="'abc'" ;;
+      3) flag=--poll-ms;     val="";  want="''" ;;
+      4) flag=--deadline-ms; val=1.5; want="'1.5'" ;;
+    esac
+    run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+      "$BUN" tools/homelab.ts db create mydb "$flag" "$val" --json
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+    echo "$stderr" | grep -q "정수"
+    echo "$stderr" | grep -qF "$want"
+    n=$((n + 1))
+  done
+  [ "$n" -eq 4 ]
+  # 거부는 디스패치 앞이다 — gh 원장 0건(부수효과 없음)
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+}
+
+@test "wait flags reject the notations Number() used to accept silently and still accept plain decimals (floor 4)" {
+  # bun 실측(착지 전): "1e3"→1000 · "0x10"→16 · " 5 "→5 · "5.0"→5 이 전부 ACCEPT였다.
+  n=0
+  for tok in "1e3" "0x10" " 5 " "5.0"; do
+    run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+      "$BUN" tools/homelab.ts db create mydb --poll-ms "$tok" --json
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+    echo "$stderr" | grep -qF "$tok"
+    n=$((n + 1))
+  done
+  [ "$n" -eq 4 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+  # 양성 대조 — 십진 정수 표기는 그대로 통과해 디스패치까지 간다(거부가 전칭이 아님)
+  run_db_create --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" -ge 1 ]
+}

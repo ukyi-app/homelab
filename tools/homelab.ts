@@ -85,16 +85,52 @@ function doctorUsage(): string {
 
 // 변이 어댑터 공용 골격 — "위치 인자 하나 + 플래그" 파싱(cli.ts typedFlags 수렴형과 같은 이유:
 // 콜사이트마다 복제되던 분리·try/catch·--help 분기를 한 곳으로). 실패는 usage-error VerbOutput.
+// spec의 세 축: value=값 플래그 · bool=불리언 · num=값 플래그 중 **십진 정수 표기**를 요구하는 것
+// (값 목록에 자동 편입), alias=위치 인자와 같은 것을 지정하는 플래그(예: url 동사의 --name).
 type Parsed = { positional?: string; flags: TypedFlags };
-function positionalThenFlags(rest: string[], spec: { value: string[]; bool: string[] }, tool: string, usage: () => string): Parsed | VerbOutput {
+type FlagPlan = { value: string[]; bool: string[]; num?: string[]; alias?: string };
+// 십진 정수 표기 술어 — 범위 검사는 그대로 동사의 입력 술어(waitInputError·cacheCreateInputError)가
+// 소유하고 여기서는 **표기**만 본다. Number()는 "1e3"·"0x10"·" 5 "·"5.0"을 조용히 삼켰고(실측)
+// 거부 문구가 원문 대신 NaN/0을 인용했다(함정 원장 「TS 바닥값은 coercion 뒤에서 조용히 꺼진다」).
+const DECIMAL_RE = /^\d+$/;
+function positionalThenFlags(rest: string[], spec: FlagPlan, tool: string, usage: () => string): Parsed | VerbOutput {
+  const fail = (message: string): VerbOutput => ({ kind: "usage-error", message: `${tool}: ${message}`, usage: usage() });
+  const value = spec.num === undefined ? spec.value : [...spec.value, ...spec.num];
+  // 별칭 충돌 — 이름을 위치 인자와 별칭 플래그로 동시에 주면 어느 쪽이 이겼는지가 침묵으로 갈린다
+  // (실측: --name이 이겨 엉뚱한 리소스의 자격이 .env.local에 기록될 수 있었다). 검출은 원본 argv를
+  // parseFlags와 **같은 걸음**(값 플래그는 다음 토큰을 소비)으로 훑어 순서와 무관하게 두 값을 인용한다.
+  // 미지 옵션을 만나면 스캔을 접는다 — 그 진단은 parseFlags가 소유한다(오진 방지).
+  if (spec.alias !== undefined) {
+    let pos: string | undefined;
+    let aliasValue: string | undefined;
+    let scanned = true;
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i]!;
+      if (!a.startsWith("--")) { pos ??= a; continue; }
+      if (spec.bool.includes(a)) continue;
+      if (!value.includes(a)) { scanned = false; break; }
+      if (a === spec.alias) aliasValue ??= rest[i + 1];
+      i++;
+    }
+    if (scanned && pos !== undefined && aliasValue !== undefined) {
+      return fail(`이름이 두 번 지정됐다(위치 인자 '${pos}' · ${spec.alias} '${aliasValue}') — 하나만 준다`);
+    }
+  }
   let positional: string | undefined;
   let flagArgv = rest;
   if (rest[0] !== undefined && !rest[0].startsWith("--")) { positional = rest[0]; flagArgv = rest.slice(1); }
-  try { return { positional, flags: typedFlags(flagArgv, spec) }; }
-  catch (e) { return { kind: "usage-error", message: `${tool}: ${e instanceof Error ? e.message : String(e)}`, usage: usage() }; }
+  let flags: TypedFlags;
+  try { flags = typedFlags(flagArgv, { value, bool: spec.bool }); }
+  catch (e) { return fail(e instanceof Error ? e.message : String(e)); }
+  for (const k of spec.num ?? []) {
+    const v = flags.str(k);
+    if (v !== undefined && !DECIMAL_RE.test(v)) return fail(`${k} 값은 십진 정수여야 한다: '${v}'`);
+  }
+  return { positional, flags };
 }
 const isOutput = (x: Parsed | VerbOutput): x is VerbOutput => "kind" in x;
-// 숫자 플래그 — 부재=undefined, 형식 검증은 동사의 입력 술어(waitInputError 등)가 한다.
+// 숫자 플래그 — 부재=undefined. 표기는 spec.num 술어가 이미 걸렀으므로 Number()가 정확하고,
+// 범위(양의 정수·16..1024)는 그대로 동사의 입력 술어가 소유한다.
 const numFlag = (flags: TypedFlags, k: string): number | undefined => {
   const v = flags.str(k);
   return v === undefined ? undefined : Number(v);
@@ -236,7 +272,7 @@ function appCreateUsage(): string {
 }
 
 function appCreateCli(rest: string[]): VerbOutput {
-  const p = positionalThenFlags(rest, { value: ["--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab app create", appCreateUsage);
+  const p = positionalThenFlags(rest, { value: [], num: ["--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab app create", appCreateUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: appCreateUsage() };
   const input: AppCreateInput = { app: p.positional ?? "", wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms") };
@@ -262,7 +298,7 @@ function appSecretsUsage(): string {
 }
 
 function appSecretsCli(rest: string[]): VerbOutput {
-  const p = positionalThenFlags(rest, { value: ["--poll-ms", "--deadline-ms"], bool: ["--wait", "--no-seal", "--json", "--help"] }, "homelab app secrets", appSecretsUsage);
+  const p = positionalThenFlags(rest, { value: [], num: ["--poll-ms", "--deadline-ms"], bool: ["--wait", "--no-seal", "--json", "--help"] }, "homelab app secrets", appSecretsUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: appSecretsUsage() };
   const input: AppSecretsInput = { app: p.positional ?? "", wait: p.flags.bool("--wait"), noSeal: p.flags.bool("--no-seal"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms") };
@@ -302,7 +338,7 @@ function promptConfirm(app: string): string | undefined {
 }
 
 function appTeardownCli(rest: string[]): VerbOutput {
-  const p = positionalThenFlags(rest, { value: ["--confirm", "--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab app teardown", appTeardownUsage);
+  const p = positionalThenFlags(rest, { value: ["--confirm"], num: ["--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab app teardown", appTeardownUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: appTeardownUsage() };
   const app = p.positional ?? "";
@@ -388,7 +424,7 @@ function cacheCreateUsage(): string {
 }
 
 function cacheCreateCli(rest: string[]): VerbOutput {
-  const p = positionalThenFlags(rest, { value: ["--maxmemory-mi", "--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab cache create", cacheCreateUsage);
+  const p = positionalThenFlags(rest, { value: [], num: ["--maxmemory-mi", "--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab cache create", cacheCreateUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: cacheCreateUsage() };
   const input: CacheCreateInput = { name: p.positional ?? "", maxmemoryMi: numFlag(p.flags, "--maxmemory-mi"), wait: p.flags.bool("--wait"), pollMs: numFlag(p.flags, "--poll-ms"), deadlineMs: numFlag(p.flags, "--deadline-ms") };
@@ -417,7 +453,7 @@ function cacheUrlUsage(): string {
 
 // cache url — conn URL 엔진의 catalog op 소비(패스스루 소멸 — 티켓 08).
 function cacheUrlCli(rest: string[]): VerbOutput {
-  const p = positionalThenFlags(rest, { value: ["--name", "--host", "--env-local"], bool: ["--rw", "--dry-run", "--json", "--help"] }, "homelab cache url", cacheUrlUsage);
+  const p = positionalThenFlags(rest, { value: ["--name", "--host", "--env-local"], bool: ["--rw", "--dry-run", "--json", "--help"], alias: "--name" }, "homelab cache url", cacheUrlUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: cacheUrlUsage() };
   const input: CacheUrlInput = { name: p.flags.str("--name") ?? p.positional ?? "", rw: p.flags.bool("--rw"), host: p.flags.str("--host"), envLocal: p.flags.str("--env-local"), dryRun: p.flags.bool("--dry-run") };
@@ -428,7 +464,7 @@ function cacheUrlCli(rest: string[]): VerbOutput {
 }
 
 function dbCreateCli(rest: string[]): VerbOutput {
-  const p = positionalThenFlags(rest, { value: ["--ext", "--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab db create", dbCreateUsage);
+  const p = positionalThenFlags(rest, { value: ["--ext"], num: ["--poll-ms", "--deadline-ms"], bool: ["--wait", "--json", "--help"] }, "homelab db create", dbCreateUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: dbCreateUsage() };
   const input: DbCreateInput = {
@@ -475,7 +511,7 @@ function renderUrl(envelope: Envelope): string[] {
 
 // db url — conn URL 엔진의 catalog op 소비(패스스루 소멸 — 티켓 08).
 function dbUrlCli(rest: string[]): VerbOutput {
-  const p = positionalThenFlags(rest, { value: ["--name", "--host", "--env-local"], bool: ["--rw", "--admin", "--dry-run", "--json", "--help"] }, "homelab db url", dbUrlUsage);
+  const p = positionalThenFlags(rest, { value: ["--name", "--host", "--env-local"], bool: ["--rw", "--admin", "--dry-run", "--json", "--help"], alias: "--name" }, "homelab db url", dbUrlUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: dbUrlUsage() };
   const input: DbUrlInput = { name: p.flags.str("--name") ?? p.positional ?? "", rw: p.flags.bool("--rw"), admin: p.flags.bool("--admin"), host: p.flags.str("--host"), envLocal: p.flags.str("--env-local"), dryRun: p.flags.bool("--dry-run") };

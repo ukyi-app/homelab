@@ -263,3 +263,54 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.name')" = "t" ]
 }
+
+# ── 파싱 커널의 fail-closed(homelab-cli-r2 티켓 11) ────────────────────────────────────────────
+# 이름 이중 지정·중복 플래그는 이전엔 침묵 last-wins였다 — 엉뚱한 리소스의 자격이 .env.local에
+# 기록되거나(--name이 위치 인자를 이긴다) 편집 실수가 파괴 확인을 통과했다. 둘 다 usage-error다.
+
+@test "a name given both positionally and via --name is a usage error in either order (url verbs, floor 4)" {
+  # shell-4 실측: `db url foo --name bar` → result.name "bar", rc 0 — foo에 대한 언급이 어디에도 없었다.
+  # 검출은 원본 argv를 parseFlags와 같은 걸음으로 훑으므로 순서 무관이고 두 값을 모두 인용한다.
+  n=0
+  for noun in db cache; do
+    run --separate-stderr bun tools/homelab.ts "$noun" url foo --name bar --dry-run --json
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+    echo "$stderr" | grep -q "이름이 두 번 지정"
+    echo "$stderr" | grep -qF "foo"
+    echo "$stderr" | grep -qF "bar"
+    n=$((n + 1))
+    run --separate-stderr bun tools/homelab.ts "$noun" url --name bar foo --dry-run --json
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+    echo "$stderr" | grep -q "이름이 두 번 지정"
+    echo "$stderr" | grep -qF "foo"
+    echo "$stderr" | grep -qF "bar"
+    n=$((n + 1))
+  done
+  [ "$n" -eq 4 ]
+}
+
+@test "a repeated flag is a usage error instead of silent last-wins (shared parsing kernel at the process boundary)" {
+  # shell-7 실측: `--env-local a --env-local b` → envFile "b", rc 0. 편집 실수가 조용히 뒤 값으로 접혔다.
+  run --separate-stderr bun tools/homelab.ts db url t --env-local a --env-local b --dry-run --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- "--env-local"
+  echo "$stderr" | grep -q "중복"
+  # 양성 대조 — 한 번만 준 같은 플래그는 그대로 통과한다(거부가 전칭이 아님)
+  run --separate-stderr bun tools/homelab.ts db url t --env-local "$BATS_TEST_TMPDIR/one.env.local" --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.name')" = "t" ]
+}
+
+@test "url verbs still reject a second positional argument and still accept a lone one (fail-closed anchors)" {
+  # 티켓 11의 별칭 검출이 기존 두 경계를 밀어내지 않았음을 같은 @test에서 양방향으로 고정한다.
+  run --separate-stderr bun tools/homelab.ts db url foo bar --dry-run --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "예상치 못한 위치 인자: bar"
+  run --separate-stderr bun tools/homelab.ts db url foo --dry-run --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.name')" = "foo" ]
+}
