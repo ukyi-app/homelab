@@ -146,6 +146,142 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
   mcp_rpc '{"jsonrpc":"2.0","id":12,"method":"tools/list"}'
   [ "$(echo "$output" | jq -rc 'select(.id==12) | .result.tools[] | select(.name=="app_secrets") | .inputSchema.required | index("repoPath") != null')" = "true" ]
   [ "$(echo "$output" | jq -rc 'select(.id==12) | .result.tools[] | select(.name=="app_init") | .inputSchema.required | index("parentDir") != null')" = "true" ]
+  # 실행 축(티켓 02): 경로 값을 준 tool을 **다른 cwd**에서 돌려도 결과가 같다(절대 경로) — 그리고 상대 경로는
+  # 어느 cwd에서도 -32602라 서버 cwd 아래에 아무것도 만들지 않는다. 종전에는 required 여부만 재고 실행하지 않았다.
+  ED="$BATS_TEST_TMPDIR/ed6"; mkdir -p "$ED"; SRV="$BATS_TEST_TMPDIR/srv"; mkdir -p "$SRV"
+  REQ="{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"dryRun\":true}}}"
+  mcp_rpc "$REQ"
+  here="$(echo "$output" | jq -rc 'select(.id==13) | .result.content[0].text')"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" bash -c 'cd "$1" && printf "%s\n" "$3" | "$0" "$2" mcp' "$BUN" "$SRV" "$ROOT/tools/homelab.ts" "$REQ"
+  [ "$status" -eq 0 ]
+  there="$(echo "$output" | jq -rc 'select(.id==13) | .result.content[0].text')"
+  [ -n "$here" ]
+  [ "$here" = "$there" ]
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" bash -c 'cd "$1" && printf "%s\n" "$3" "$4" | "$0" "$2" mcp' "$BUN" "$SRV" "$ROOT/tools/homelab.ts" \
+    '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"db_url","arguments":{"name":"mydb","envDir":".","host":"100.99.0.1"}}}' \
+    '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"app_init","arguments":{"app":"myapp","archetype":"api","parentDir":"apps"}}}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==14) | .error.code')" = "-32602" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==15) | .error.code')" = "-32602" ]
+  [ ! -e "$SRV/.env.local" ]
+  [ ! -e "$SRV/apps" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
+}
+
+# ── 경로 입력의 절대성·앱 레포 판정 fail-closed(homelab-cli-r2 티켓 02) ──────────────────────────
+# owner 결정(2026-09-07): MCP app_secrets는 앱 레포만 받는다(존재하지 않거나 앱 레포가 아닌 명시 repoPath는
+# 레포 밖이 아니라 **거부** — dispatch-only 폴백은 CLI 암묵 cwd 전용, 결과 스키마 enum은 유지). 틸드(~)는 서버가
+# 확장하지 않고 안내 문구와 함께 거부한다(서버 HOME을 기준점으로 삼는 것 자체가 '서버 추론'이다).
+
+mcp_rpc_in() {
+  # 서버를 $1(cwd)에서 띄운다 — 상대 경로의 부수효과가 어디에 떨어지는지 재는 축.
+  local dir="$1"; shift
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'dir="$1"; entry="$2"; shift 2; cd "$dir" && printf "%s\n" "$@" | "$0" "$entry" mcp' "$BUN" "$dir" "$ROOT/tools/homelab.ts" "$@"
+}
+
+@test "path-named string properties across the MCP tool schemas carry the absolute-path pattern and a description (roster, floor 4)" {
+  mcp_rpc '{"jsonrpc":"2.0","id":70,"method":"tools/list"}'
+  [ "$status" -eq 0 ]
+  # 손 열거 금지 — 이름이 Dir/Path로 끝나는 string 속성을 스키마에서 **전부** 뽑아 pattern ^/ 과 description을 잰다.
+  # 다섯 번째 경로 필드가 술어 없이 추가되면 이 루프가 red다.
+  rows="$(echo "$output" | jq -rc 'select(.id==70) | .result.tools[] | .name as $t | (.inputSchema.properties // {}) | to_entries[] | select(.key | test("(Dir|Path)$")) | select(.value.type=="string") | [$t, .key, (.value.pattern // "-"), ((.value.description // "") | length)] | @tsv')"
+  n=0; bad=0
+  while IFS=$'\t' read -r tool prop pat dlen; do
+    [ -n "$tool" ] || continue
+    n=$((n+1))
+    [ "$pat" = "^/" ] || bad=$((bad+1))
+    [ "${dlen:-0}" -gt 0 ] || bad=$((bad+1))
+  done <<<"$rows"
+  [ "$bad" -eq 0 ]
+  # 바닥값: 오늘의 경로 속성은 repoPath·parentDir·envDir×2 = 4개(열거 붕괴 차단).
+  [ "$n" -ge 4 ]
+  # dispatchSecrets(경로지만 Dir/Path 접미가 아니다 — 죽은 옵션, 티켓 29)는 minLength·description만 맞춘다.
+  [ "$(echo "$output" | jq -rc 'select(.id==70) | .result.tools[] | select(.name=="app_init") | .inputSchema.properties.dispatchSecrets.minLength')" = "1" ]
+  # 계약 주석 한 구절 — mcp.ts가 '레포 밖이 아니라 거부'를 선언한다(산문 SSOT 갱신 증인).
+  [ "$(grep -c "레포 밖이 아니라 거부" tools/lib/mcp.ts)" -ge 1 ]
+}
+
+@test "relative and tilde paths (. apps ~/apps) are refused as invalid params before any side effect, and the tilde message carries guidance" {
+  SRV="$BATS_TEST_TMPDIR/srv2"; mkdir -p "$SRV"
+  n=0
+  for p in . apps '~/apps'; do
+    mcp_rpc_in "$SRV" \
+      "{\"jsonrpc\":\"2.0\",\"id\":71,\"method\":\"tools/call\",\"params\":{\"name\":\"app_init\",\"arguments\":{\"app\":\"myapp\",\"archetype\":\"api\",\"parentDir\":\"$p\"}}}" \
+      "{\"jsonrpc\":\"2.0\",\"id\":72,\"method\":\"tools/call\",\"params\":{\"name\":\"app_secrets\",\"arguments\":{\"app\":\"myapp\",\"repoPath\":\"$p\"}}}" \
+      "{\"jsonrpc\":\"2.0\",\"id\":73,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$p\",\"host\":\"100.99.0.1\"}}}"
+    [ "$status" -eq 0 ]
+    for i in 71 72 73; do
+      [ "$(echo "$output" | jq -rc "select(.id==$i) | .error.code")" = "-32602" ]
+      n=$((n+1))
+    done
+  done
+  [ "$n" -eq 9 ]
+  # 틸드 거부 문구는 안내를 담는다 — 절대 경로 예시 + '~'는 확장되지 않는다.
+  echo "$output" | jq -rc 'select(.id==72) | .error.message' | grep -q "절대 경로"
+  echo "$output" | jq -rc 'select(.id==72) | .error.message' | grep -q -- "~"
+  # 부수효과 0 — 레포 생성·디스패치 argv 없음, 서버 cwd 아래에 자격 파일·apps·리터럴 ~ 디렉토리 없음.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ ! -e "$SRV/.env.local" ]
+  [ ! -e "$SRV/apps" ]
+  [ ! -e "$SRV/~" ]
+  # 양성 대조 — 절대 envDir은 같은 tool을 지나 정상 착지한다(가드가 tool을 통째로 막지 않는다).
+  ED="$BATS_TEST_TMPDIR/ed7"; mkdir -p "$ED"
+  mcp_rpc_in "$SRV" "{\"jsonrpc\":\"2.0\",\"id\":74,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"host\":\"100.99.0.1\"}}}"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==74) | .result.content[0].text | fromjson | .variant')" = "success" ]
+  [ -f "$ED/.env.local" ]
+}
+
+@test "an explicit repoPath that is missing, a git repo without the app marker, or a plain directory is refused before dispatch; a real app repo dispatches (chain)" {
+  OTHER="$BATS_TEST_TMPDIR/other-repo"; git init -q "$OTHER"
+  PLAIN="$BATS_TEST_TMPDIR/plain"; mkdir -p "$PLAIN"
+  n=0
+  for p in "$BATS_TEST_TMPDIR/nope" "$OTHER" "$PLAIN"; do
+    mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":75,\"method\":\"tools/call\",\"params\":{\"name\":\"app_secrets\",\"arguments\":{\"app\":\"myapp\",\"repoPath\":\"$p\"}}}"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -rc 'select(.id==75) | .result.isError')" = "true" ]
+    env75="$(echo "$output" | jq -rc 'select(.id==75) | .result.content[0].text')"
+    [ "$(echo "$env75" | jq -r '.variant')" = "failure" ]
+    echo "$env75" | jq -r '.result.error' | grep -q "거부"
+    n=$((n+1))
+  done
+  [ "$n" -eq 3 ]
+  # 거부 envelope도 계약(mutationRefused)에 적합하다.
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const errs = schemaErrors(JSON.parse(process.argv[1]), sch, sch);
+    console.log(errs.length ? "INVALID:" + errs.join("|") : "valid");
+  ' "$env75"
+  [ "$output" = "valid" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run update-secrets.yaml)" = "0" ]
+  # 양성 대조 — 마커 + canonical remote 앱 레포는 chain으로 디스패치 1건(identifyOnly → pending 핸들).
+  make_app_repo_fixture myapp
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'printf "%s\n" "$@" | "$0" tools/homelab.ts mcp' "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":76,\"method\":\"tools/call\",\"params\":{\"name\":\"app_secrets\",\"arguments\":{\"app\":\"myapp\",\"repoPath\":\"$APP_WORK\"}}}"
+  [ "$status" -eq 0 ]
+  env76="$(echo "$output" | jq -rc 'select(.id==76) | .result.content[0].text')"
+  [ "$(echo "$env76" | jq -r '.result.chain.mode')" = "chain" ]
+  [ "$(echo "$env76" | jq -r '.result.chain.pushed')" = "true" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run update-secrets.yaml)" = "1" ]
+}
+
+@test "a missing git binary on the server PATH refuses app_secrets (errKind not-found) instead of degrading to dispatch-only" {
+  make_app_repo_fixture myapp
+  NOGIT="$BATS_TEST_TMPDIR/stub-nogit"; mkdir -p "$NOGIT"
+  for t in bun bash base64 cat gh kubectl kubeseal; do ln -s "$STUB/$t" "$NOGIT/$t"; done
+  run --separate-stderr env PATH="$NOGIT" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'printf "%s\n" "$@" | "$0" tools/homelab.ts mcp' "$BUN" \
+    "{\"jsonrpc\":\"2.0\",\"id\":77,\"method\":\"tools/call\",\"params\":{\"name\":\"app_secrets\",\"arguments\":{\"app\":\"myapp\",\"repoPath\":\"$APP_WORK\"}}}"
+  [ "$status" -eq 0 ]
+  env77="$(echo "$output" | jq -rc 'select(.id==77) | .result.content[0].text')"
+  [ "$(echo "$env77" | jq -r '.variant')" = "failure" ]
+  echo "$env77" | jq -r '.result.error' | grep -q "git"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
 }
 
 @test "the server is stateless: a fresh process handles the same calls after restart" {
