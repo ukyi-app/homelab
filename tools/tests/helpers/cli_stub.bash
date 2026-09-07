@@ -16,6 +16,12 @@ cli_stub_init() {
   mkdir -p "$STUB"
   export CALLS="$BATS_TEST_TMPDIR/calls.nul"
   : > "$CALLS"
+  # git 전역/시스템 설정 격리 — 이 하네스의 픽스처(신원·insteadOf)는 전부 **로컬** config로 심는데,
+  # 엔진의 git 호출(commit·push·ls-remote·remote get-url)은 호스트 전역 설정도 함께 읽는다. 호스트에
+  # commit.gpgsign=true(키 없음)면 커밋 경로가, 전역 url.*.insteadOf가 있으면 push 라우팅 판정이
+  # 하네스 재배선이 아니라 **호스트 설정** 때문에 뒤집힌다(테스트가 자기 전제를 잘못 읽는다).
+  # 형제 appinit 하네스는 자기 GIT_CONFIG_GLOBAL(INIT_GCFG)을 run env로 명시해 넘기므로 그쪽이 이긴다.
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
   BUN="$(command -v bun)"
   # sleep — 디스패치 타임아웃 주입(STUB_GH_DISPATCH_HANG)이 자식을 살아 있게 두는 유일한 수단이다
   # (PATH는 대체라 시스템 도구가 자동으로 들어오지 않는다).
@@ -451,7 +457,11 @@ make_app_repo_fixture() {
   APP_REMOTE="$BATS_TEST_TMPDIR/remote-$app.git"
   APP_WORK="$BATS_TEST_TMPDIR/work-$app"
   export APP_REMOTE APP_WORK
-  git init -q --bare "$APP_REMOTE"
+  # ⚠️ bare에도 `-b main`을 명시한다 — 전역 config 격리(GIT_CONFIG_GLOBAL=/dev/null) 아래에서는
+  # 호스트의 init.defaultBranch가 사라져 HEAD가 master로 잡힌다. 브랜치 main은 push로 생기므로
+  # 원격 조작(push·fetch)은 그대로 돌지만, 이 bare를 **클론**하는 레인만 조용히 죽는다
+  # (`remote HEAD refers to nonexistent ref` → 체크아웃 없음 → `src refspec main does not match any`).
+  git init -q -b main --bare "$APP_REMOTE"
   git init -q -b main "$APP_WORK"
   git -C "$APP_WORK" config user.name "fixture"
   git -C "$APP_WORK" config user.email "fixture@example.com"
@@ -464,6 +474,8 @@ make_app_repo_fixture() {
   # .env→deploy/<app>-secrets.sealed.yaml, 값 비출력)을 재현한다. 실물처럼 **비결정 암호문**을 낸다
   # (kubeseal은 같은 평문도 매번 다른 ciphertext) — "재봉인 후 동일성"에 기대는 경로는 여기서 죽는다.
   # 원장에는 도구명과 argv만 기록한다(값 없음).
+  # 실패 주입 env(티켓 20 — 연쇄 거부 분기의 증인): STUB_SEAL_FAIL=1(exit 1) ·
+  # STUB_SEAL_NO_OUTPUT=1(봉인본 미기록) · STUB_SEAL_FOREIGN=1(봉인본 **외** 파일도 기록).
   cat > "$APP_WORK/tools/seal-secret.mts" <<'TS'
 import { appendFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
@@ -471,8 +483,12 @@ const argv = process.argv.slice(2);
 appendFileSync(process.env.CALLS!, ["seal-secret", ...argv].join("\0") + "\0\x1e");
 const get = (k: string) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
 if (!get("--config") || !get("--env")) { console.error("seal-secret: --config <.app-config.yml> --env <.env> 필수"); process.exit(1); }
+if (process.env.STUB_SEAL_FAIL) { console.error("seal-secret: STUB_SEAL_FAIL"); process.exit(1); }
 const app = get("--app") ?? "unknown";
-writeFileSync(`deploy/${app}-secrets.sealed.yaml`, `apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nspec:\n  encryptedData:\n    SECRET_KEY: ct-${randomBytes(6).toString("hex")}\n`);
+if (process.env.STUB_SEAL_FOREIGN) writeFileSync("deploy/junk.yaml", "junk: 1\n");
+if (!process.env.STUB_SEAL_NO_OUTPUT) {
+  writeFileSync(`deploy/${app}-secrets.sealed.yaml`, `apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nspec:\n  encryptedData:\n    SECRET_KEY: ct-${randomBytes(6).toString("hex")}\n`);
+}
 TS
   git -C "$APP_WORK" add -A
   git -C "$APP_WORK" commit -q -m "init"

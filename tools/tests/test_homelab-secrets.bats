@@ -167,6 +167,110 @@ run_secrets_in() {
   [ "$(echo "$output" | jq -r '.result.error' | grep -c "push 경로")" = "0" ]
 }
 
+# ── 연쇄 거부 4레인(티켓 20) — staged-completeness '원형'의 자기 테스트 ────────────────────────
+# 손해 모델을 그대로 판정 조건에 옮긴다: foreign 가드가 막는 것은 '잡파일 커밋'이 아니라 **커밋·push가
+# 통째로 건너뛰어져 낡은 봉인본으로 디스패치되는 것**이다. 그래서 네 레인 공통 단언은
+# 「`gh workflow run` 원장 0건 + 원격 main rev-list 불변」이고, 원격 불변을 재려면 원격이 살아 있어야
+# 한다(그래서 push 실패 레인은 rm이 아니라 실행 동안만 옮긴다).
+
+@test "a seal that writes outside the sealed file is refused before commit, push, and dispatch" {
+  before="$(git -C "$APP_REMOTE" rev-list --count main)"
+  [ "$before" = "1" ]
+  export STUB_SEAL_FOREIGN=1
+  run_secrets_in "$APP_WORK" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "봉인본 외"
+  # 양성 대조 — env 이름 오타로 '다른 이유의 red'가 되는 것을 막는다(잡파일이 실제로 쓰였다).
+  [ -f "$APP_WORK/deploy/junk.yaml" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$before" ]
+  [ "$(git -C "$APP_WORK" rev-list --count HEAD)" = "1" ]
+}
+
+@test "a failing seal and a seal that produces no output are both refused without dispatch" {
+  before="$(git -C "$APP_REMOTE" rev-list --count main)"
+  export STUB_SEAL_FAIL=1
+  run_secrets_in "$APP_WORK" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "seal 실패"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$before" ]
+  unset STUB_SEAL_FAIL
+  # 무산출 레인은 봉인본이 **아직 없는** 첫 봉인 상태에서만 도달 가능하다(있으면 existsSync가 참).
+  # 로컬 커밋만 하고 push는 하지 않는다 — 그래야 원격 불변 단언이 그대로 산다.
+  git -C "$APP_WORK" rm -q "deploy/myapp-secrets.sealed.yaml"
+  git -C "$APP_WORK" commit -q -m "drop sealed"
+  : > "$CALLS"
+  export STUB_SEAL_NO_OUTPUT=1
+  run_secrets_in "$APP_WORK" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "seal 후 봉인본"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$before" ]
+}
+
+@test "a push failure is refused without dispatch and leaves the commit made but unpushed" {
+  before="$(git -C "$APP_REMOTE" rev-list --count main)"
+  # insteadOf 대상(로컬 bare)을 실행 동안만 치운다 — `rm -rf`면 원격 불변 단언 자체가 불가능해진다.
+  mv "$APP_REMOTE" "$APP_REMOTE.hold"
+  run_secrets_in "$APP_WORK" --json
+  mv "$APP_REMOTE.hold" "$APP_REMOTE"
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "git push 실패"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  # 커밋은 됐고 push만 실패한 트리 — 재실행 --no-seal 수렴 경로의 전제다.
+  [ "$(git -C "$APP_WORK" rev-list --count HEAD)" = "2" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$before" ]
+}
+
+@test "a local HEAD the remote main does not carry is refused as unproven reachability (no dispatch)" {
+  before="$(git -C "$APP_REMOTE" rev-list --count main)"
+  # 훅 없이 구성한다(훅은 $STUB 대체 PATH에서 무실행 vacuous가 되기 쉽다): --no-seal은 커밋·push를
+  # 건너뛰므로 로컬에만 있는 커밋 하나가 곧 도달성 불일치다.
+  git -C "$APP_WORK" commit -q --allow-empty -m "local only"
+  run_secrets_in "$APP_WORK" --no-seal --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "도달성 미증명"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" seal-secret)" = "0" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "$before" ]
+}
+
+@test "a polluted global git config cannot reach the engine (the same file breaks the chain when honored)" {
+  # 형제 appinit는 격리하는데 이 스위트는 안 했다 — 호스트의 commit.gpgsign·url.insteadOf·
+  # status.showUntrackedFiles가 엔진의 git 호출에 그대로 스미면 초록이 venue 의존이 된다.
+  # 격리는 하네스(cli_stub_init의 GIT_CONFIG_GLOBAL/SYSTEM=/dev/null)가 지고, 이 @test가 그 증인이다.
+  POLLUTED="$BATS_TEST_TMPDIR/polluted-gitconfig"
+  {
+    printf '[commit]\n\tgpgsign = true\n'
+    printf '[url "https://evil.invalid/"]\n\tinsteadOf = https://github.com/\n'
+    printf '[status]\n\tshowUntrackedFiles = no\n'
+  } > "$POLLUTED"
+  cp "$POLLUTED" "$BATS_TEST_TMPDIR/.gitconfig"
+  # 격리 경로 — HOME에 오염 파일이 있어도 연쇄가 초록이다(격리가 없으면 gpgsign이 커밋을 죽인다).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 HOME="$BATS_TEST_TMPDIR" \
+    bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "2" ]
+  # 양성 대조 — 같은 파일을 GIT_CONFIG_GLOBAL로 **명시**하면 연쇄가 실제로 깨진다(오염이 무해한 게 아니다).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 GIT_CONFIG_GLOBAL="$POLLUTED" \
+    bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json"
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -r '.result.error' | grep -q "git commit 실패"
+  [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "2" ]
+}
+
 @test "outside an app repo (no marker) only the dispatch runs — no seal, no git mutation" {
   run_secrets_in "$APPS_ROOT" --json
   [ "$status" -eq 0 ]
