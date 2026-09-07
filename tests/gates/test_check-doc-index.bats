@@ -20,6 +20,12 @@ setup() {
   # 실재 단언 — 대상이 사라지면 아래 판정 전부가 자기 자신 vacuous다.
   [ -x "$GUARD" ]
   [ -s "$README" ]
+  # ⚠️ 픽스처 복원은 **사본**이지 index 되돌리기가 아니다. index에서 되돌리면 그 파일의
+  #    **커밋되지 않은 편집까지 함께 지워진다** — 이 파일과 scripts/README.md를 같은 PR에서
+  #    고치는 작업자는 자기 편집이 테스트 실행 한 번에 소멸하는 것을 본다(티켓 34 착지 중 실측:
+  #    새로 쓴 bullet 10건이 사라졌고, 증상은 "가드가 갑자기 red"라 원인이 테스트로 보이지 않았다).
+  README_KEEP="$BATS_TEST_TMPDIR/scripts-README.md"
+  cp "$README" "$README_KEEP"
 }
 
 @test "check-doc-index passes on the current tree (all artifacts registered)" {
@@ -49,13 +55,13 @@ setup() {
   tmp="scripts/zz_docindex_bullet_probe.sh"; : > "$tmp"; chmod +x "$tmp"
   printf '\n산문 언급 — `zz_docindex_bullet_probe.sh`는 등재 목적이 아니라 그냥 언급이다.\n' >> "$README"
   run ./scripts/check-doc-index.sh
-  git checkout -- "$README"
+  cp "$README_KEEP" "$README"
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "zz_docindex_bullet_probe.sh"
   # 양성 대조 — 같은 파일에 진짜 bullet 머리를 달면 green이다(원인이 "산문 vs bullet 머리"임을 고정).
   printf '\n- **`zz_docindex_bullet_probe.sh`** — 프로브(테스트 전용, 실행 없음).\n' >> "$README"
   run ./scripts/check-doc-index.sh
-  git checkout -- "$README"
+  cp "$README_KEEP" "$README"
   rm -f "$tmp"
   [ "$status" -eq 0 ]
 }
@@ -69,7 +75,7 @@ setup() {
   printf '반례를 인용한다: 예전엔 %s- **%s%s%s**%s 처럼 산문 안에서도 매치됐다.\n' \
     "$BT" "$BT" "zz_docindex_anchor_probe.sh" "$BT" "$BT" >> "$README"
   run ./scripts/check-doc-index.sh
-  git checkout -- "$README"
+  cp "$README_KEEP" "$README"
   rm -f "$tmp"
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "zz_docindex_anchor_probe.sh"
@@ -270,4 +276,96 @@ setup() {
   [ "$status" -eq 2 ]
   run bash "$GUARD" "$README"
   [ "$status" -eq 2 ]
+}
+
+# ── 레인 [1] 확장(homelab-cli-r2 티켓 34) ─────────────────────────────────────────────────────
+# 병: tools 레인 글롭 `tools/*.ts`는 재귀하지 않아 tools/lib/*.ts를 **한 파일도** 열거하지 않았다 —
+# AGENTS.md가 "check-doc-index 강제"라고 적는 로스터에 소비자 최다 커널(cli.ts·identity.ts)이 0줄이었다.
+# 그리고 레인 [1]에는 바닥값도 역방향도 없어, 글롭이 붕괴해도 조용히 0회 돌고 초록이었다.
+
+@test "check-doc-index FAILS when a tools/lib module is missing from tools/README.md (lib/<basename> key)" {
+  tmp="tools/lib/zz_docindex_lib_probe.ts"; : > "$tmp"
+  run bash "$GUARD"
+  rm -f "$tmp"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "lib/zz_docindex_lib_probe.ts"
+  # 대조군 — 프로브를 치운 실 트리는 초록이다(등재 21건이 basename 키로 물어 전건 FAIL이던 실측 31건 red와 구별).
+  run bash "$GUARD"
+  [ "$status" -eq 0 ]
+}
+
+@test "the reverse lane catches a tools/README.md bullet with no file behind it" {
+  # ⚠️ 복원은 **사본**에서 한다 — `git checkout -- tools/README.md`로 되돌리면 그 파일에 있던
+  #    **커밋되지 않은 편집까지 함께 지워진다**(이 티켓 착지 중 실측: 새로 쓴 lib bullet 10건이
+  #    이 idiom 한 줄에 소멸했고, 증상은 "가드가 갑자기 red"라 원인이 테스트로 보이지 않았다).
+  keep="$BATS_TEST_TMPDIR/tools-README.md"
+  cp tools/README.md "$keep"
+  printf '\n- **`zz_docindex_phantom.ts`** — 실파일 없는 유령 bullet(역방향 레인 증인).\n' >> tools/README.md
+  run bash "$GUARD"
+  cp "$keep" tools/README.md
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "zz_docindex_phantom.ts"
+  run bash "$GUARD"
+  [ "$status" -eq 0 ]
+}
+
+@test "lane 1 emits a scan floor for each of its three domains with counts matching the tree" {
+  n_scripts="$(find scripts -maxdepth 1 -name '*.sh' | wc -l | tr -d ' ')"
+  n_tools="$(find tools -maxdepth 1 -name '*.ts' -o -maxdepth 1 -name '*.mts' | wc -l | tr -d ' ')"
+  n_lib="$(find tools/lib -maxdepth 1 -name '*.ts' | wc -l | tr -d ' ')"
+  n_wf="$(find .github/workflows -maxdepth 1 -name '*.yaml' | wc -l | tr -d ' ')"
+  [ "$n_scripts" -ge 20 ]
+  [ "$n_wf" -ge 15 ]
+  want_tools=$(( n_tools + n_lib ))
+  run bash "$GUARD"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^SCAN: check-doc-index:scripts: $n_scripts\$"
+  echo "$output" | grep -q "^SCAN: check-doc-index:tools: $want_tools\$"
+  echo "$output" | grep -q "^SCAN: check-doc-index:workflows: $n_wf\$"
+}
+
+# 픽스처 트리에 가드를 통째로 옮겨 돌린다(guard.sh가 ROOT를 자기 위치에서 산출하므로 성립).
+# 워크플로 디렉토리만 비우면 글롭이 확장되지 않아 `b`가 리터럴 `*`가 되고, README에 `*`가 실재하므로
+# `grep -Fq "*"`가 매치해 **조용히 초록**이던 자리다(nullglob 부재).
+docindex_fixture() {
+  fx="$1"
+  mkdir -p "$fx/scripts/lib" "$fx/tools/lib" "$fx/.github/workflows"
+  cp "$ROOT/scripts/check-doc-index.sh" "$fx/scripts/check-doc-index.sh"
+  cp "$ROOT/scripts/lib/guard.sh" "$fx/scripts/lib/guard.sh"
+  cp "$ROOT/scripts/lib/scan-floor.sh" "$fx/scripts/lib/scan-floor.sh"
+  cp "$ROOT/scripts/README.md" "$fx/scripts/README.md"
+  cp "$ROOT/tools/README.md" "$fx/tools/README.md"
+  cp "$ROOT/.github/workflows/README.md" "$fx/.github/workflows/README.md"
+  for p in "$ROOT"/scripts/*.sh; do : > "$fx/scripts/$(basename "$p")"; done
+  cp "$ROOT/scripts/check-doc-index.sh" "$fx/scripts/check-doc-index.sh"
+  for p in "$ROOT"/tools/*.ts "$ROOT"/tools/*.mts; do : > "$fx/tools/$(basename "$p")"; done
+  for p in "$ROOT"/tools/lib/*.ts; do : > "$fx/tools/lib/$(basename "$p")"; done
+}
+
+@test "the workflows lane goes red when its glob matches nothing (the unexpanded literal used to pass silently)" {
+  fx="$BATS_TEST_TMPDIR/fx-wf"
+  docindex_fixture "$fx"
+  # 양성 대조 — 워크플로 파일이 실재하면 그 레인은 붕괴 진단을 내지 않는다.
+  for p in "$ROOT"/.github/workflows/*.yaml; do : > "$fx/.github/workflows/$(basename "$p")"; done
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$(printf '%s' "$output" | grep -c 'check-doc-index:workflows')" -ge 1 ]
+  [ "$(printf '%s' "$output" | grep -c 'check-doc-index:workflows: 스캔 0건')" = "0" ]
+  # 뮤테이션 — 디렉토리를 비우면 글롭이 리터럴 `*`로 남는다. 그 리터럴은 README에 실재해 존재검사를
+  # 통과하므로, 붕괴를 잡는 것은 바닥값뿐이다.
+  [ "$(grep -cF '*' "$fx/.github/workflows/README.md")" -ge 1 ]
+  rm -f "$fx"/.github/workflows/*.yaml
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$status" -ne 0 ]
+  [ "$(printf '%s' "$output" | grep -c 'check-doc-index:workflows: 스캔 0건')" -ge 1 ]
+}
+
+@test "scripts/README.md declares that sourced libraries are outside the roster (boundary is written, not implied)" {
+  # 티켓 34 — scripts/lib/*.sh는 실행물이 아니라 source 대상이라 로스터 밖이다. 그 경계를 산문으로
+  # 선언하지 않으면 "가드가 못 본다"와 "일부러 안 본다"가 구별되지 않는다.
+  run grep -n "sourced 라이브러리" scripts/README.md
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "scripts/lib"
+  # 대조군 — 선언이 사실인가: scripts/lib/*.sh는 실제로 bullet 로스터에 없다.
+  n_lib="$(find scripts/lib -maxdepth 1 -name '*.sh' | wc -l | tr -d ' ')"
+  [ "$n_lib" -ge 3 ]
 }

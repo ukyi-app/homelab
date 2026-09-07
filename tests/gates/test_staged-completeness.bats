@@ -12,7 +12,10 @@
 #   된다(같은 클래스: docs/traps-detail.md 「이미지 핀의 존재 ≠ 일치 ≠ 소유자」).
 #
 # ⚠️ 여기 있는 것은 **정적 절반 + 블록 실행 절반**이다. "천장이 실제로 맞는가"는 각 레인의 실행
-#    증인이 진다(tools/tests/test_run-bump-plan.bats · tools/tests/test_create-app.bats:290).
+#    증인이 진다 — tools/tests/test_run-bump-plan.bats · tools/tests/test_create-app.bats:290 ·
+#    tools/tests/test_homelab-secrets.bats(이 판정의 **원형**인 app secrets 연쇄: foreign·seal 실패·
+#    무산출·push 실패·도달성 불일치 4레인. 그 레인들의 손해는 '잡파일 커밋'이 아니라 커밋·push가
+#    통째로 건너뛰어져 낡은 봉인본으로 디스패치되는 것이라, 판정 조건이 디스패치 원장 0 + 원격 불변이다).
 # ⚠️ @test 이름은 영어 · 중간 단언은 단일 대괄호만(bash 3.2 [[ ]] 침묵 통과 — AGENTS.md).
 
 setup() {

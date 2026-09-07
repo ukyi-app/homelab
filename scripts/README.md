@@ -16,6 +16,13 @@
 실행 경로의 SSOT다. 그 문장을 지우면 정보 손실이 0이 아니다. 경계는 `scripts/check-doc-index.sh`가
 강제하고, 두 집합이 실제로 일치하는지는 게이트가 권위 도구와 대조한다.
 
+**sourced 라이브러리는 이 로스터 밖이다** — `scripts/lib/*.sh`(`guard.sh`·`scan-floor.sh`·
+`sops-recipients.sh`)는 실행 산출물이 아니라 가드가 `.`로 읽어 들이는 커널이다. 목적·파괴성·위험이라는
+이 인덱스의 축이 그것들에는 서지 않고, 그 계약은 각 파일 헤더와 전용 커널 테스트가 진다. 그래서
+`check-doc-index.sh`의 등재 레인은 `scripts/*.sh`만 열거한다 — **가드가 못 보는 것이 아니라 일부러
+보지 않는 것**이고, 그 구별을 남기려고 이 문장이 있다. (형제 결정은 반대다: `tools/lib/*.ts`는 로스터
+**안**이다 — 도구가 import하는 공유 커널이라 소유 경계를 적을 자리가 필요하다.)
+
 절 제목 셋이 부류 라벨이다 — CI 게이트(읽기 전용 순수 검사) · 시크릿/부트스트랩(라이브 클러스터에
 쓰거나 봉인본을 산출) · DR/owner 전용(파괴적 — 잘못 쓰면 데이터 유실).
 
@@ -147,7 +154,9 @@
   (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). 주간 telegram 경고의 임계는 **D-14**.
   jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)
 - **`check-image-pins.sh`** — 이미지 digest 핀 2-레인 게이트: 레인1(platform 문자열 `image:`)·레인2(apps values
-  `image:` 구조체 `digest:`). 벤더(barman-plugin)·테스트/픽스처(`**/tests/**`·`**/fixtures*/**`) 제외, substrate 스코프 밖,
+  `image:` 구조체 `digest:`). 판정은 접두가 아니라 **형식**(`DIGEST_BODY='sha256:[0-9a-f]{64}'` — 두 레인 공유
+  변수 하나이고, `tools/lib/image-pin.ts` DIGEST_BODY·차트 `values.schema.json` digest pattern의 사본이라
+  세 축 문자열 등식이 대조된다). 벤더(barman-plugin)·테스트/픽스처(`**/tests/**`·`**/fixtures*/**`) 제외, substrate 스코프 밖,
   scan-floor. 예외=`policy/image-pin-allowlist.txt`(사유 주석 **+ 건수 상한 `EXEMPT_MAX`** — 픽스처는
   `--exempt-max`로만 넘긴다). 신규 미핀 이미지는 fail-closed 차단. (메타갭 ②)
 - **`verify-ledger.sh`** — 메모리 원장 예산 게이트 SSOT. `bun tools/ledger-to-json.ts` 출력을

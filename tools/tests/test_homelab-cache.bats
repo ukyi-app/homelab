@@ -63,7 +63,7 @@ run_cache_create() {
 
 @test "cache create wait requires the FULL cache application set (partial convergence is pending)" {
   printf '[{"number":31,"html_url":"u31","merged_at":"2026-08-20T10:00:00Z","merge_commit_sha":"feedbee"}]\n' > "$FIX/db-prs.json"
-  printf '{"status":{"sync":{"status":"OutOfSync","revision":"0ldrev1"},"health":{"status":"Progressing"}}}\n' > "$FIX/argocd-data-conn.json"
+  printf '{"status":{"sync":{"status":"OutOfSync","revision":"01d0e01"},"health":{"status":"Progressing"}}}\n' > "$FIX/argocd-data-conn.json"
   printf 'behind\n' > "$FIX/db-compare.txt"
   run_cache_create --wait --json
   [ "$status" -eq 1 ]
@@ -137,6 +137,18 @@ run_cache_create() {
   echo "$stderr" | grep -q "^SKIP: homelab cache url: "
   [ ! -f "$BATS_TEST_TMPDIR/skip.env.local" ]   # skip = 정말로 안 썼다
   [ "$(echo "$output" | jq -r '.variant')" = "skip" ]
+  # 실산출물 스키마 대조(티켓 25 (a)) — db 레인은 이미 있었고 cache 레인만 variant 단언뿐이었다.
+  echo "$output" > "$BATS_TEST_TMPDIR/cache-url-skip.json"
+  run bun -e '
+    import { schemaErrors } from "./tools/lib/schema-check.ts";
+    import { readFileSync } from "node:fs";
+    const sch = JSON.parse(readFileSync("tools/cli-result-schema.json", "utf8"));
+    const env = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    const errs = schemaErrors(env, sch, sch);
+    console.log(errs.length ? "INVALID: " + errs.join(" | ") : "valid");
+  ' "$BATS_TEST_TMPDIR/cache-url-skip.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^valid$"
 }
 
 @test "cache url is a catalog op: --json yields a schema-valid envelope with no plaintext value" {
@@ -168,4 +180,24 @@ run_cache_create() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q -- "--maxmemory-mi"
   echo "$output" | grep -q -- "--wait"
+}
+
+@test "maxmemory-mi rejects non-decimal notation quoting the raw token and dispatches nothing (floor 3)" {
+  # 티켓 11 — 실측(착지 전): `--maxmemory-mi 1e3`이 1000으로 접혀 범위(16..1024) 안에 들어가 통과했고
+  # `--maxmemory-mi ""`은 "16..1024 정수여야 한다: 0"으로 사용자가 주지 않은 0을 인용했다.
+  n=0
+  for tok in "1e3" "0x10" ""; do
+    run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+      "$BUN" tools/homelab.ts cache create mycache --maxmemory-mi "$tok" --json
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+    echo "$stderr" | grep -q "정수"
+    n=$((n + 1))
+  done
+  [ "$n" -eq 3 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+  # 양성 대조 — 십진 정수는 그대로 통과해 디스패치까지 간다
+  run_cache_create --maxmemory-mi 128 --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" -ge 1 ]
 }

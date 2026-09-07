@@ -2,10 +2,13 @@
 # 이미지 digest 핀 2-레인 게이트(메타갭 ② W2-B) — 런타임 컨테이너 이미지가 @sha256 digest로 고정됐는지 강제.
 # mutable 태그는 재빌드 때마다 움직여 의도치 않은 이미지로 실행될 수 있다(핀 = 재현성·공급망 무결성).
 #
-#   레인1(platform 문자열 이미지): platform/**/*.yaml의 `image:`/`imageName:` 스칼라 값이 `@sha256:` 포함해야.
+#   레인1(platform 문자열 이미지): platform/**/*.yaml의 `image:`/`imageName:` 스칼라 값이 `@sha256:` 핀 보유.
 #     (imageName: = CNPG Cluster CR의 DB 본체 런타임 이미지 — image:와 동일 취급, 적대 리뷰 확인.)
-#   레인2(apps 구조체 이미지): apps/*/deploy/prod/values.yaml의 image 블록이 `digest: sha256:`(블록 스코프) 보유,
+#   레인2(apps 구조체 이미지): apps/*/deploy/prod/values.yaml의 image 블록이 `digest:`(블록 스코프) 보유,
 #     또는 인라인 문자열 image가 @sha256 핀.
+#   ⚠️ 두 레인 모두 판정은 **형식**까지 간다(접두가 아니라 `sha256:` + 정확히 64 소문자 hex) —
+#     종전엔 접두만 재서 `sha256:deadbeef`가 "핀됨"으로 읽혔고 실제 차단은 하류
+#     platform/charts/app/values.schema.json의 pattern이 했다. 게이트가 자기 이름을 지키게 좁혔다.
 #
 # 스코프 한계(성공 메시지도 이 경계를 반영): (a) substrate(infra/k3s-bootstrap/** — versions.env + renovate
 #   custom manager 관할, LOCAL_PATH_PROVISIONER digest 핀은 Task 9 후속), (b) helmrelease 차트-내부 기본
@@ -80,6 +83,14 @@ MIN_SCAN_APPS="$(floor_of check-image-pins:apps "$MIN_SCAN_APPS")"   # 레인2 �
 #    내 이 레인에 도달하지 못한다.
 IMG_KEY='^[[:space:]]*(-[[:space:]]+)?(image|imageName):[[:space:]]*'
 
+# digest 형식 판정 — **두 레인이 공유하는 단일 변수**다(레인마다 정규식이 갈리면 서로 다른 형식
+# 경계를 갖는 오배포 표면이 생긴다). 셸은 TS를 import할 수 없으므로 이 줄은
+# tools/lib/image-pin.ts의 `DIGEST_BODY`(그리고 그 파생 `DIGEST_RE`)의 **사본**이고,
+# 하류 platform/charts/app/values.schema.json의 digest pattern(`^…$` 앵커만 다르다)과도 같아야 한다.
+# 세 축의 문자열 등식은 tests/gates/test_image_pins.bats의 사본 대조 @test가 강제한다 —
+# 이 줄의 표기(`DIGEST_BODY='<본문>'`, 줄 끝 주석 금지)가 그 추출 sed의 계약이다.
+DIGEST_BODY='sha256:[0-9a-f]{64}'
+
 # 열거는 공유 워커(tools/lib/repo-walk.ts)가 소유한다 — tracked 열거·제외 어휘·열거 붕괴 바닥값이
 # 전부 스코프 정의 안에 있다. 여기서 추가 제외를 하지 않으므로 제외 어휘의 사본이 존재하지 않는다.
 # 레인1은 `platform-image-refs`(추적된 **차트 소스 포함** — 공유 차트 values.yaml에 리터럴 이미지가
@@ -124,16 +135,19 @@ extract_string_images() {
     | sed -E "s#${IMG_KEY}##; s/[[:space:]]*#.*//; s/^[\"']//; s/[\"']\$//; s/[[:space:]]*\$//"
 }
 
-# apps values의 value-less `image:` 블록에 digest: sha256: 가 있는지(블록 스코프 — 파일 전역 아님).
+# apps values의 value-less `image:` 블록에 형식 맞는 digest가 있는지(블록 스코프 — 파일 전역 아님).
+# 정규식은 셸 변수 하나(DIGEST_BODY)에서 -v로 주입한다 — awk 안에 사본을 두지 않는다.
+# 꼬리는 `$` 앵커가 아니라 `[^0-9a-f]|$`다: 주석 스트립 뒤에도 후행 공백이 남을 수 있고,
+# 그 대안(hex 아님 또는 줄 끝)이 65자 이상을 앞 64자 부분매치로 통과시키는 자리를 함께 닫는다.
 image_block_has_digest() {
-  awk '
+  awk -v re="digest:[[:space:]]*${DIGEST_BODY}([^0-9a-f]|$)" '
     /^[[:space:]]*image:[[:space:]]*$/ { s=$0; sub(/[^ ].*/,"",s); ind=length(s); blk=1; next }
     blk==1 {
       if ($0 ~ /^[[:space:]]*$/) next
       c=$0; sub(/[^ ].*/,"",c); cur=length(c)
       if (cur <= ind) { blk=0; next }
       l=$0; sub(/[ \t]#.*$/, "", l)
-      if (l ~ /digest:[[:space:]]*sha256:/) { found=1; exit }
+      if (l ~ re) { found=1; exit }
     }
     END { exit(found?0:1) }
   ' "$1"
@@ -170,7 +184,8 @@ while IFS= read -r f; do
     [ -n "$val" ] || continue
     printf '%s' "$val" | grep -qE '^[a-z0-9]' || continue
     scanned=$((scanned + 1))
-    printf '%s' "$val" | grep -q '@sha256:' && continue
+    # 꼬리 `$` 앵커 — 값 전체가 정준 핀으로 끝나야 한다(65자 이상이 앞 64자 부분매치로 통과하지 않게).
+    printf '%s' "$val" | grep -qE "@${DIGEST_BODY}\$" && continue
     allow_has "$val" && continue
     echo "UNPINNED(lane1): $f — $val"
     fail=$((fail + 1))
@@ -186,7 +201,7 @@ while IFS= read -r f; do
     [ -n "$val" ] || continue
     printf '%s' "$val" | grep -qE '^[a-z0-9]' || continue
     scanned=$((scanned + 1))
-    printf '%s' "$val" | grep -q '@sha256:' && continue
+    printf '%s' "$val" | grep -qE "@${DIGEST_BODY}\$" && continue
     app=$(printf '%s' "$f" | sed -E 's#^apps/([^/]+)/.*#\1#')
     allow_has "app:$app" && continue
     echo "UNPINNED(lane2-string): $f — $val"
@@ -198,7 +213,7 @@ while IFS= read -r f; do
     image_block_has_digest "$ROOT/$f" && continue
     app=$(printf '%s' "$f" | sed -E 's#^apps/([^/]+)/.*#\1#')
     allow_has "app:$app" && continue
-    echo "UNPINNED(lane2): $f — image 블록에 digest: sha256: 부재"
+    echo "UNPINNED(lane2): $f — image 블록에 정준 digest(${DIGEST_BODY}) 부재"
     fail=$((fail + 1))
   fi
   # (c) flow-style image: { repo:.., digest:.. } — 같은 줄에 digest sha256 없으면 미핀(빌드가 안 쓰지만 계약 완결).
@@ -207,10 +222,10 @@ while IFS= read -r f; do
     scanned=$((scanned + 1))
     # herestring 종단(check-sigpipe-writers) — sed 출력을 변수로 받아 grep -q에 파이프하지 않는다.
     fl_stripped="$(printf '%s' "$fl" | sed -E 's/[[:space:]]*#.*$//')"
-    grep -q 'digest:[[:space:]]*sha256:' <<<"$fl_stripped" && continue
+    grep -qE "digest:[[:space:]]*${DIGEST_BODY}([^0-9a-f]|\$)" <<<"$fl_stripped" && continue
     app=$(printf '%s' "$f" | sed -E 's#^apps/([^/]+)/.*#\1#')
     allow_has "app:$app" && continue
-    echo "UNPINNED(lane2-flow): $f — flow-style image에 digest: sha256: 부재"
+    echo "UNPINNED(lane2-flow): $f — flow-style image에 정준 digest(${DIGEST_BODY}) 부재"
     fail=$((fail + 1))
   done < <(grep -hE '^[[:space:]]*image:[[:space:]]*\{' "$ROOT/$f" 2>/dev/null || true)
 done <<< "$apps_files"
@@ -247,7 +262,7 @@ scan_signal check-image-pins:apps "$scanned_lane2"
 scan_signal check-image-pins:platform "$scanned_lane1"
 
 if [ "$fail" -gt 0 ]; then
-  echo "핀 안 된 이미지 ${fail}건 (스캔 ${scanned}건). @sha256 digest 핀 또는 allowlist 등재(사유 주석) 필요."
+  echo "핀 안 된 이미지 ${fail}건 (스캔 ${scanned}건). 정준 digest 핀(@${DIGEST_BODY}) 또는 allowlist 등재(사유 주석) 필요."
   exit 1
 fi
 # 성공 메시지도 헤더의 경계를 그대로 반영한다(헤더 10행이 그걸 계약으로 건다) — 차트 내부는

@@ -194,7 +194,7 @@ type Decl = { artifact?: unknown; why?: unknown; freshness?: unknown; since?: un
 
 // 원장 로딩·통일 shape·항목 구조는 readLedger 소유, 죽은-선언·무소유 매칭 대조는 audit 소유
 // (CONTEXT.md 「정책 원장」). 필드가 왜 필수인지의 산문은 원장 _readme가 진다.
-const LEDGER_SCHEMA = {
+export const LEDGER_SCHEMA = {
   type: "object",
   required: ["artifact", "why", "freshness", "since", "owner_action"],
   properties: {

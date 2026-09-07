@@ -260,3 +260,33 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^ok:6$"
 }
+
+@test "roleArtifacts is the exact inverse of classifyArtifact for every name-attributed role (floor 8)" {
+  # 티켓 40: 관측(status --resources)이 "이 리소스의 산출물이 실재하는가"를 물으려면 role → 경로
+  # 방향이 필요한데, 그 유도를 소비자가 하면 명명 정책이 두 벌이 되어 감사와 관측이 다른 집합을
+  # 말한다. 두 방향이 같은 커널에 있다는 것을 왕복으로 잰다 — 그리고 **공유 산출물은 없어야**
+  # 한다(kustomization·cluster.yaml·원장이 섞이면 '전건 실존'이 상수가 된다).
+  run bun -e '
+    import { classifyArtifact, roleArtifacts } from "./tools/lib/resource-layout.ts";
+    let n = 0;
+    for (const [kind, name] of [["db", "orders"], ["cache", "sessions"]]) {
+      const rows = roleArtifacts(kind, name);
+      const roles = rows.map((r) => r.role).sort().join(",");
+      const wantRoles = kind === "db" ? "conn,cr,owner-secret,ro-conn,ro-secret" : "conn,instance,ro-conn";
+      if (roles !== wantRoles) { console.error(kind + " roles: " + roles); process.exit(1); }
+      for (const r of rows) {
+        const back = classifyArtifact(r.path);
+        if (back === null || back.kind !== kind || back.name !== name || back.role !== r.role) {
+          console.error("왕복 실패: " + r.path + " -> " + JSON.stringify(back)); process.exit(1);
+        }
+        // 공유 산출물 배제 — 이름이 경로에 실재해야 이름 귀속이다.
+        if (!r.path.includes(name)) { console.error("이름 무귀속 경로: " + r.path); process.exit(1); }
+        n++;
+      }
+    }
+    console.log("roundtrip:" + n);
+  '
+  [ "$status" -eq 0 ]
+  # 바닥값 — db 5역할 + cache 3역할(열거가 0으로 붕괴하면 위 전칭이 항진이다).
+  echo "$output" | grep -q "^roundtrip:8$"
+}

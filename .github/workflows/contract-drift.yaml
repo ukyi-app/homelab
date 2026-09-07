@@ -1,19 +1,35 @@
-# 동봉 계약(vendored: seal-secret.mts·sealed-secrets-cert.pem) 드리프트 리컨실러 (opt-in 스케줄).
-# homelab SSOT ↔ 다운스트림(template scaffold·page·trip-mate-api) 정규화 diff. files(Rust)는 대상 아님.
-# alert-and-report: 하드 실패 아님 — 드리프트/fetch 실패 시 telegram. 라이브 raw fetch는 이 워크플로 안에서만.
+# 동봉 계약(vendored: seal-secret.mts·sealed-secrets-cert.pem) 드리프트 리컨실러.
+# homelab SSOT ↔ 다운스트림 정규화 diff. 대상 집합은 tools/vendored-contract.json이 SSOT이고,
+# **앱 축은 인레포 파생원**(apps/*/deploy/prod/source-repo)과 등식으로 대조된다 — 손 열거가
+# 아니다(철거된 page·trip-mate-api가 남아 알림이 실질 1건을 3건으로 보고하던 자리).
+# files(Rust)는 seal 도구가 없어 대상 아님.
+# 잡 둘: check(스케줄·수동 — 라이브 fetch, alert-and-report) · checklist(PR — 오프라인 전파 목록).
 name: "🔁 contract-drift"
 run-name: "🔁 contract-drift — ${{ github.event_name == 'schedule' && '스케줄' || format('수동({0})', github.actor) }}"
 on:
   schedule:
     - cron: "37 6 * * 1"   # 매주 월 06:37 UTC (vendored는 거의 안 변함)
   workflow_dispatch: {}
+  # PR 시점 신호 — **오프라인 체크리스트 전용**이다(아래 checklist 잡). 라이브 대조를 PR에 걸면
+  # SSOT를 편집하는 PR에서 drift>0이 정상 상태라 상시 red가 되고, 그 red는 곧 무시된다.
+  # 종전엔 트리거가 schedule+dispatch뿐이라 SSOT 편집이 **PR 시점에 무신호**였다(PR #619가
+  # 드리프트 3건을 만들고 4일간 미해소였던 경위).
+  pull_request:
+    paths:
+      - tools/seal-secret.mts
+      - tools/sealed-secrets-cert.pem
+      - tools/vendored-contract.json
 permissions:
   contents: read
 concurrency:
-  group: contract-drift
+  # PR run과 스케줄 run이 서로를 취소하지 않게 축을 나눈다 — 종전 단일 그룹 + cancel-in-progress는
+  # PR 하나가 그 주의 주간 리컨실을 통째로 죽일 수 있었다.
+  group: contract-drift-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   check:
+    # 라이브 fetch 레인 — PR에서는 돌지 않는다(위 트리거 주석의 근거).
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5   # hung raw.githubusercontent 연결이 주간 run을 platform max까지 끌지 않도록(fetch도 15s AbortSignal 병용)
     steps:
@@ -46,9 +62,20 @@ jobs:
           bun tools/contract-drift-check.ts --manifest tools/vendored-contract.json > /tmp/drift.json
           d=$(bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.drift.length))')
           e=$(bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.errors.length))')
-          echo "drift=$d" >> "$GITHUB_OUTPUT"
-          echo "errors=$e" >> "$GITHUB_OUTPUT"
-          [ "$e" -gt 0 ] && echo "::warning::계약 사본 fetch 실패 ${e}건(transient 가능 — 재확인)"
+          # 사유 축 — 404/403(부재·private 전환·경로 리네임)과 5xx·타임아웃을 가른다. 종전엔 둘이
+          # 한 배열이라 '3주 연속 같은 404'와 '이번 주 망 블립'이 같은 문구로 나갔다.
+          a=$(bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.errors.filter(x=>x.reason==="absent-or-private").length))')
+          t=$(bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.errors.filter(x=>x.reason==="transient").length))')
+          r=$(bun -e 'const o=JSON.parse(require("fs").readFileSync("/tmp/drift.json","utf8"));process.stdout.write(String(o.roster.status))')
+          {
+            echo "drift=$d"
+            echo "errors=$e"
+            echo "absent=$a"
+            echo "transient=$t"
+            echo "roster=$r"
+          } >> "$GITHUB_OUTPUT"
+          [ "$a" -gt 0 ] && echo "::warning::계약 사본 부재·접근 불가(absent-or-private) ${a}건 — 레포 삭제·private 전환·경로 리네임 중 하나(비인증 fetch로는 구별 불가)"
+          [ "$t" -gt 0 ] && echo "::warning::계약 사본 fetch 실패(transient) ${t}건 — 재확인"
           cat /tmp/drift.json
       - name: telegram notify (드리프트·fetch 실패·하드 실패 시)
         # fetch 실패도 알림(codex pass3 P3-2): errors만 있고 무소음이면 체커가 blind pass — 감시의 감시 공백.
@@ -62,7 +89,35 @@ jobs:
           status: ${{ steps.check.outcome == 'success' && ((steps.check.outputs.drift != '0' || steps.check.outputs.errors != '0') && 'drift' || 'success') || 'failure' }}
           source: 계약드리프트
           title: 동봉 계약 드리프트
-          ident: "vendored 불일치 ${{ steps.check.outputs.drift }}건 · fetch 실패 ${{ steps.check.outputs.errors }}건"
+          ident: "vendored 불일치 ${{ steps.check.outputs.drift }}건 · 부재(absent-or-private) ${{ steps.check.outputs.absent }}건 · 전송실패(transient) ${{ steps.check.outputs.transient }}건 · 로스터 ${{ steps.check.outputs.roster }}"
           link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+  checklist:
+    # PR 시점 오프라인 신호 — 네트워크 0, 판정 0. "이 PR이 SSOT를 만졌으니 다운스트림 N곳에
+    # 같은 변경을 전파해야 한다"는 **체크리스트**만 job summary로 낸다.
+    # ⚠️ 알림도 required check도 아니다(alert-and-report 성격 유지). 전파는 사람이 다른 레포에서
+    #    하는 일이라 여기서 막을 수 있는 것이 없다 — 이 잡의 산출은 목록 하나뿐이다.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    steps:
+      # fetch-depth: 0 — `git diff <base>...HEAD`는 병합 기점(merge-base)이 필요하다.
+      # 기본 depth 1에서는 base ref 자체가 로컬에 없어 diff가 통째로 실패한다.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with: { fetch-depth: 0 }
+      - uses: ./.github/actions/setup-bun
+        with: { install: 'false' }     # 체커는 fs만 — deps 불요
+      - name: 변경 파일과 매니페스트 source의 교집합을 다운스트림 체크리스트로
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          # ⚠️ 파이프를 쓰지 않는다 — GHA run의 기본 셸은 `bash -e {0}`라 pipefail이 없고,
+          #    bun 출력을 tee로 파이프하면 bun이 죽어도 tee의 0으로 접힌다(레포 등재 함정).
+          #    (그래서 요약도 파이프가 아니라 파일 경유로 두 번 읽는다.)
+          # ⚠️ 표현식을 run 본문에 보간하지 않는다(셸 인젝션) — base_ref는 env 경유.
+          git diff --name-only "origin/${BASE}...HEAD" > /tmp/changed.txt
+          bun tools/contract-drift-check.ts --checklist --changed /tmp/changed.txt > /tmp/checklist.md
+          cat /tmp/checklist.md
+          cat /tmp/checklist.md >> "$GITHUB_STEP_SUMMARY"

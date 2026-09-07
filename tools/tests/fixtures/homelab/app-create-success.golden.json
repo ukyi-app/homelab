@@ -7,6 +7,7 @@
   "result": {
     "action": "create-app",
     "name": "myapp",
+    "dnsExposure": "iac/tf-reconcile(공개) 또는 adguard rewrite(내부)",
     "correlation": "corr-fixed-nonce-01",
     "waited": false,
     "run": {

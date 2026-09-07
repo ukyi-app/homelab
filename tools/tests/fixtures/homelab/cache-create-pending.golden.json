@@ -18,6 +18,6 @@
       "url": "https://github.com/ukyi-app/homelab/pull/31",
       "merged": false
     },
-    "pendingReason": "auto-merge 머지 미관측 — required check 대기 중일 수 있다(핸들로 재조회 가능)"
+    "pendingReason": "auto-merge 머지 미관측 — required check 대기 중일 수 있다 · 재조회: homelab status --pr https://github.com/ukyi-app/homelab/pull/31"
   }
 }

@@ -11,7 +11,7 @@ k3s 단일 노드(**Intel NUC 베어메탈** · Ubuntu 26.04 LTS · amd64) 홈�
 | `infra/` | Terraform 3 루트(cloudflare/tailscale/github) + `k3s-bootstrap/`(VM·k3s·스토리지) |
 | `platform/` | ArgoCD가 싱크하는 GitOps 컴포넌트 — **전체 목록은 README 디렉토리 지도**(check-skeleton 강제) |
 | `platform/charts/app` | 모든 앱이 쓰는 공유 Helm 차트 (SSOT) |
-| `apps/<name>/deploy/prod/` | 앱별 values + SealedSecret + `.bindings.json`(db/redis·autoDeploy SSOT) + `source-repo`(외부 레포 바인딩) |
+| `apps/<name>/deploy/prod/` | 앱별 values + SealedSecret + `.bindings.json`(**autoDeploy SSOT** — db/redis 바인딩은 여기 없다: 리소스 연결은 values.yaml `envFrom`의 conn secretRef 손 배선이다) + `source-repo`(외부 레포 바인딩) |
 | `tools/` | 앱 플랫폼 DX **Bun/TS CLI** (`create-app`/`activate-app`·`audit-orphans` 등 — 변이 디스패처·`bump-poll`이 호출, `homelab` 통합 CLI 진입점 `homelab.ts` 포함) + 단위 테스트(`tools/tests/`). top-level·`lib/`는 `.ts`(bun 전용), app-shared는 `.mts`(bun + node≥22.18 strip-types 양립) — 산출물 로스터는 `tools/README.md`(check-doc-index 강제) |
 | `scripts/` | 클러스터/DR 운영·시크릿 **셸 스크립트** (bootstrap·seed/seal·dr-drill·`check-*` 게이트·run-bats — `make`/CI 게이트가 호출). cf. `infra/k3s-bootstrap/*.sh` = VM·k3s·스토리지 substrate 부트스트랩 |
 | `policy/` | 메모리 원장 OPA 정책 (`bun run verify:ledger` 게이트) |
@@ -28,6 +28,10 @@ make tf-validate   # terraform fmt+validate (3 루트)
 bats tools/tests/ infra/k3s-bootstrap/tests/ </dev/null   # 툴링/부트스트랩 테스트(fd 0 격리 — 스텁 hang 방지)
 make verify-posture   # [live] posture 스위트(internal-by-default·netpol·e2e·DR 자산 신선도) — KUBECONFIG 필요(부재=SKIP 신호·비-0)
                       # + DR 자산 레그는 SEALED_KEY_BACKUP_DIR·LOCAL_ASSET_BACKUP_DIR env 필요(미설정=red)
+bun link && homelab doctor   # 통합 CLI 전역 설치 + 전제 진단(빠른 시작 순서는 tools/README.md)
+bun link && bun tools/homelab.ts doctor   # 전역 엔트리가 아직 안 뜰 때의 소스 실행형.
+                      # 전역 `homelab`은 `$BUN_INSTALL/bin`이 PATH에 있어야 뜬다(mise 관리 bun은 자동 추가 안 함)
+                      # → 그때까지는 소스 실행이 정직한 형태. link는 **본 체크아웃**에서 (worktree에서 하면 지워질 때 dangling)
 export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt
 kustomize build --enable-helm --enable-alpha-plugins --enable-exec platform/<comp>/prod  # KSOPS 풀 렌더
 export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터 접근
@@ -178,7 +182,8 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 **트리거 경계:** 앱 레포는 homelab-write 자격 0 (자기 `GITHUB_TOKEN`으로 GHCR push만).
 인증은 GitHub App **2개**(2026-09-03 실측 `gh api /orgs/ukyi-app/installations`) —
 reader `contents:read`(4043034) / writer `contents:write`+`pull_requests:write`+`issues:write`(4043080).
-dispatch `actions:write`(4178609)는 **2026-09-03 설치 제거**(확인 가능한 소비처 0건) — `reusable-app-build.yaml`의
+dispatch `actions:write`(4178609)는 **2026-09-03 설치 제거**(소비 *레포* 0곳 — **코드 경로는 휴면 유지**이고
+지우지 않는다: 재설치 한 번으로 되살아난다) — `reusable-app-build.yaml`의
 deploy-trigger 잡은 `workflow_call` 입력 계약으로만 남고 항상 clean skip이다(배포 반영은 bump-poll 크론뿐).
 reader/writer 키만 homelab Actions secret에 있다.
 ⚠️ **둘 다 설치 범위는 org 전체**(`repository_selection: all`)다 — "앱 레포 전용"·"homelab 전용"은
@@ -190,14 +195,20 @@ reader/writer 키만 homelab Actions secret에 있다.
 - **빌드:** 템플릿으로 레포 생성 → `.app-config.yml` 작성(계약: `tools/app-config-schema.json`)
   → main push → `reusable-app-build.yaml`(amd64+arm64 멀티아치→GHCR push + deploy-trigger 잡: `HOMELAB_DISPATCH_APP`
     시크릿 쌍 전달 시 homelab bump-poll 1회 디스패치로 크론 지연 제거, 미전달=clean skip·크론 백스톱).
+    ⚠️ 그 쌍이 실제로 작동하려면 dispatch App이 설치돼 있어야 하는데 **현재 org 설치가 없다**(위 트리거
+    경계) — 재설치 전까지 `homelab app init --dispatch-secrets`로 쌍을 심어도 크론 지연은 그대로다.
 - **생성 변이:** owner가 homelab에서 액션별 디스패처(workflow_dispatch) 실행 (변이 디스패처는 `vars.HOMELAB_OWNER` actor 가드로 owner 전용 — bump-poll/audit reconciler는 비대상) —
-  `create-app`/`update-secrets`/`create-database`/`create-cache`/`teardown-app`(각 전용 워크플로). **파괴: `teardown-app`은
+  `create-app`/`update-secrets`/`create-database`/`create-cache`/`teardown-app`(각 전용 워크플로).
+  (CLI 래퍼: `homelab db|cache create` · `homelab app create|secrets|teardown` — 빠른 시작·동사 표는
+  `tools/README.md`. 래퍼는 같은 디스패처를 `gh workflow run`으로 깨울 뿐이라 신뢰 경계가 불변이다.) **파괴: `teardown-app`은
   디스패처(`🗑️ teardown-app` — confirm===app 가드 + **수동 머지**, reusable이 파괴 경계에서 confirm 재검증) + owner-local CLI(`make teardown-app`) 공존.
   `teardown-resource`·`activate-app`은 owner-local**(`make teardown-resource`·런북 — 데이터 파괴·attestation·purge 상태머신), **audit은 스케줄 reconciler**(`audit.yaml`).
   validator(`tools/validate-mutation.ts`)가 계약표 강제. 전역 직렬화: `concurrency: homelab-mutation` + `queue: max`.
 - **update-image:** `bump-poll.yaml`(10분 주기 GHCR 폴링)이 권위 — main reachable + 배포 SHA
   descendant + digest 핀 검증 후 autoDeploy면 자동 PR+머지, 아니면 승인 PR(.bindings.json이
-  autoDeploy SSOT, 누락=fail-closed). (인-레포 **앱 이미지** 전용.)
+  autoDeploy SSOT, 누락=fail-closed). **기본은 승인 PR** — 자동 배포는 앱 레포가
+  `.app-config.yml`의 `deploy.autoDeploy: true`로 명시 opt-in 한다(create-app이 부재를 false로 옮긴다).
+  (인-레포 **앱 이미지** 전용.)
 - **인프라/플랫폼 의존:** self-hosted Renovate(`renovate.json` + `renovate.yaml`, 주 1회, writer App
   토큰 PR-first, automerge 금지 → 리뷰 후 머지)가 서드파티 이미지 digest·terraform provider·
   k3s/local-path(versions.env)·helm 차트(Chart.yaml/CHART_VERSION/helmrelease)·npm을 갱신. **github-actions
