@@ -546,8 +546,13 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   연쇄 각 단계를 사후조건으로 증명(봉인본 외 변경 거부·ls-remote 도달성). 디스패치는 공유 변이 엔진
   (noopOnMissingPr — pr-first-commit 멱등 no-op를 정당한 no-op variant로).
 - **`lib/status.ts`** — homelab CLI status 엔진(`runStatus()`·`statusInputError()`). 계층 계약:
-  레포(핀·바인딩)+GitHub(run·PR)가 기본, 라이브(ArgoCD)는 KUBECONFIG 있을 때만(부재=생략,
-  조회 실패=live.error — 유일한 선택 계층). GitHub 계층 오류는 fail-loud(빈 목록 위장 금지)이고
+  레포(핀·바인딩)+GitHub(run·PR)가 기본, 라이브(ArgoCD)는 KUBECONFIG 있을 때만(미설정=생략 —
+  유일한 선택 계층). 라이브 결과는 세 disjoint 상태다: `argocd`(실재 — sync/health/리비전 +
+  `conditions` 상위 3건, 원본 배열 순서·단일 줄 정규화·길이 상한) · `absent`(Application 부재 —
+  `--ignore-not-found` + **빈 stdout 검사를 parse 앞에** 둔다. 안 그러면 `JSON.parse("")`가 catch로
+  흘러 부재가 '파싱 실패'로 위장한다. create/teardown 머지 직후가 그 창이다) · `error`(조회 실패).
+  '관측하지 않았다'(omitted)와 '관측했더니 없다'(absent)는 다른 축이다.
+  GitHub 계층 오류는 fail-loud(빈 목록 위장 금지)이고
   **사유를 명명한다**: 3상 리더(exec.ghRead)의 error/parse를 그대로 층으로 옮겨 전송 오류(401·403
   rate limit·404·망 단절 = stderr 첫 줄)와 응답 파싱 실패를 가르고, errKind not-found는 처방
   ('gh CLI가 PATH에 없다')으로 번역한다 — 그 넷은 처방이 전부 다르다.

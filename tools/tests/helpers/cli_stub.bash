@@ -450,18 +450,28 @@ SH
 }
 
 # kubectl stub — status의 ArgoCD Application 조회 전용(그 외 호출은 exit 3 fail-closed).
-# STUB_KUBECTL_FAIL 설정 시 클러스터 접근 실패를 재현한다.
+# STUB_KUBECTL_FAIL 설정 시 클러스터 접근 실패를 재현한다. STUB_APP_STILL_PRESENT(teardown 레인) ·
+# STUB_APP_ABSENT(status 레인)가 `--ignore-not-found` 조회의 기본값을 뒤집는다(아래 두 케이스 주석).
 make_kubectl_stub() {
   cat > "$STUB/kubectl" <<'SH'
 #!/usr/bin/env bash
 { printf '%s\0' kubectl "$@"; printf '\x1e'; } >> "$CALLS"
 case "$*" in
-  # 부재 조회(absence 수렴 — teardown) : --ignore-not-found가 부재를 exit 0 + 빈 stdout으로 만든다.
-  # 기본 = 부재(prune 완료). STUB_APP_STILL_PRESENT=1이면 존재(prune 미완), STUB_KUBECTL_FAIL이면 미확정.
-  # 이 케이스는 존재 조회 패턴보다 **앞**에 있어야 한다(뒤에 두면 `-o json`으로 끝나는 패턴이 선점).
-  "-n argocd get applications.argoproj.io "*" -o json --ignore-not-found")
+  # 부재 조회(--ignore-not-found = 부재를 exit 0 + 빈 stdout으로) — 소비자가 **둘**이다:
+  # teardown의 absence 수렴(mutation)과 status의 라이브 계층(티켓 16). 기본값을 한쪽으로 통일하면
+  # 다른 쪽 판정이 무증인이 된다 — 전부 부재로 두면 status의 live 테스트가 전건 red이고, 전부
+  # 존재로 두면 teardown의 '기본 = prune 완료' 종결 조건이 vacuous해진다. 그래서 **앱 이름으로 분기**한다.
+  #   teardown 대상(myapp-prod): 기본 부재. STUB_APP_STILL_PRESENT=1이면 존재(prune 미완).
+  #   그 외(status 레인의 앱):   기본 존재. STUB_APP_ABSENT=1이면 부재(생성 전/prune 완료 창).
+  # 두 케이스 모두 존재 조회 패턴보다 **앞**에 있어야 한다(뒤에 두면 `-o json`으로 끝나는 패턴이 선점).
+  "-n argocd get applications.argoproj.io myapp-prod -o json --ignore-not-found")
     if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
     if [ -n "${STUB_APP_STILL_PRESENT:-}" ]; then cat "$FIX/argocd-app.json"; fi
+    ;;
+  "-n argocd get applications.argoproj.io "*" -o json --ignore-not-found")
+    if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
+    if [ -n "${STUB_APP_ABSENT:-}" ]; then exit 0; fi
+    cat "$FIX/argocd-app.json"
     ;;
   "-n argocd get applications.argoproj.io cnpg-data -o json")
     if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi

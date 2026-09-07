@@ -197,6 +197,71 @@ assert_envelope_valid() {
   [ "$(echo "$output" | jq -r '.omitted | length')" = "0" ]
 }
 
+@test "the live layer tells absent, unreachable, and present apart (three states, one fixture set)" {
+  # 병: `--ignore-not-found` 없이 조회해 NotFound(exit 1)를 조회 실패로 접었다 — 'appset이 아직
+  # Application을 안 만들었다/prune이 끝났다'는 **상태**인데 관측 실패로 위장됐다(create·teardown
+  # 머지 직후가 정확히 그 창이다). 같은 레포의 teardown 수렴은 이미 부재를 상태로 다룬다.
+  make_app_fixture page true
+  # ① 부재
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_APP_ABSENT=1 "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.live.absent')" = "true" ]
+  [ "$(echo "$output" | jq -r '.result.live | has("error")')" = "false" ]
+  # 생략(omitted)과도 다른 축이다 — 부재는 관측했고, 생략은 관측하지 않은 것이다.
+  [ "$(echo "$output" | jq -r '.omitted | length')" = "0" ]
+  # ⚠️ 사람용 채널 단언은 assert_envelope_valid **앞**이다 — 그 헬퍼가 자기 `run`으로 $stderr를 덮는다.
+  echo "$stderr" | grep -q "Application 부재"
+  assert_envelope_valid "$output"
+  # ② 조회 실패(클러스터 도달 불가)
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_KUBECTL_FAIL=1 "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.live | has("error")')" = "true" ]
+  [ "$(echo "$output" | jq -r '.result.live | has("absent")')" = "false" ]
+  # ③ 실재 — 기본 픽스처는 그대로 Synced다(부재 케이스가 모든 조회를 삼키지 않았다).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd.sync')" = "Synced" ]
+  [ "$(echo "$output" | jq -r '.result.live | has("absent")')" = "false" ]
+}
+
+@test "Degraded conditions ride along as the top three in source order, normalized to one line" {
+  # 'Degraded'만 보고하면 다음 행동이 CLI 밖(kubectl·ArgoCD UI)에서 시작된다. 정렬 기준은 **원본
+  # 배열 순서**로 고정한다 — 임의 정렬은 골든을 비결정적으로 만든다.
+  make_app_fixture page true
+  printf '{"status":{"sync":{"status":"OutOfSync","revisions":["abc1234"]},"health":{"status":"Degraded"},"conditions":[{"type":"ComparisonError","message":"첫 줄\\n둘째 줄"},{"type":"SyncError","message":"two"},{"type":"OrphanedResourceWarning","message":"three"},{"type":"Extra","message":"four"}]}}\n' > "$FIX/argocd-app.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd.health')" = "Degraded" ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd.conditions | length')" = "3" ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd.conditions[0].type')" = "ComparisonError" ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd.conditions[2].type')" = "OrphanedResourceWarning" ]
+  # 단일 줄 정규화 — 여러 줄 메시지가 사람용 렌더의 줄 구조를 깨지 않게 op 계층에서 접는다.
+  [ "$(echo "$output" | jq -r '.result.live.argocd.conditions[0].message' | wc -l | tr -d ' ')" = "1" ]
+  echo "$output" | jq -r '.result.live.argocd.conditions[0].message' | grep -q "둘째 줄"
+  # ⚠️ 사람용 채널 단언은 assert_envelope_valid **앞**이다(그 헬퍼의 `run`이 $stderr를 덮는다).
+  echo "$stderr" | grep -q "ComparisonError"
+  assert_envelope_valid "$output"
+  # 대조군 — conditions가 없는 픽스처는 키 자체가 없다(compact 규약: 값 없음 = 키 부재).
+  printf '{"status":{"sync":{"status":"Synced","revisions":["abc1234"]},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.live.argocd | has("conditions")')" = "false" ]
+}
+
+@test "an over-long condition message is capped so the result stays a report, not a log dump" {
+  make_app_fixture page true
+  long="$(printf 'x%.0s' $(seq 1 900))"
+  printf '{"status":{"sync":{"status":"OutOfSync","revisions":["abc1234"]},"health":{"status":"Degraded"},"conditions":[{"type":"ComparisonError","message":"%s"}]}}\n' "$long" > "$FIX/argocd-app.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  n="$(echo "$output" | jq -r '.result.live.argocd.conditions[0].message' | awk '{print length($0)}')"
+  [ "$n" -le 200 ]
+  # 바닥값 — 상한이 0으로 붕괴하지 않았다(빈 문자열이면 minLength 위반이라 스키마도 잡는다).
+  [ "$n" -ge 100 ]
+  assert_envelope_valid "$output"
+}
+
 @test "status for an unknown app fails with exit 1 and an error result" {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status ghost --root "$APPS_ROOT" --json
   [ "$status" -eq 1 ]

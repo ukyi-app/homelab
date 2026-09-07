@@ -57,7 +57,18 @@ export function renderStatus(envelope: Envelope): string[] {
       ];
       if (envelope.omitted.includes("live")) lines.push("라이브(ArgoCD): 생략 — KUBECONFIG 미설정");
       else if (r.live?.error) lines.push(`라이브(ArgoCD): 조회 실패 — ${r.live.error}`);
-      else lines.push(`라이브(ArgoCD): sync ${r.live.argocd.sync} · health ${r.live.argocd.health}${r.live.argocd.revision ? ` · rev ${r.live.argocd.revision}` : Array.isArray(r.live.argocd.revisions) ? ` · revisions ${r.live.argocd.revisions.join(",")}(미확정)` : ""}`);
+      // ⚠️ 부재 분기는 argocd 분기보다 **앞**이어야 한다 — 뒤에 두면 `r.live.argocd.sync`가
+      //    undefined인 채로 렌더돼 상태 보고가 "sync undefined"가 된다.
+      else if (r.live?.absent) lines.push("라이브(ArgoCD): Application 부재 — 아직 생성 전이거나 prune 완료(조회 실패가 아니다)");
+      else {
+        lines.push(`라이브(ArgoCD): sync ${r.live.argocd.sync} · health ${r.live.argocd.health}${r.live.argocd.revision ? ` · rev ${r.live.argocd.revision}` : Array.isArray(r.live.argocd.revisions) ? ` · revisions ${r.live.argocd.revisions.join(",")}(미확정)` : ""}`);
+        // sync·비교 실패 사유 — 'Degraded' 다음 행동이 CLI 밖에서 시작되지 않게 상위 3건을 그대로 보여 준다.
+        if (Array.isArray(r.live.argocd.conditions)) {
+          for (const c of r.live.argocd.conditions as Array<Record<string, string>>) {
+            lines.push(`  · ${c.type ?? "(종류 없음)"}: ${c.message ?? "(메시지 없음)"}`);
+          }
+        }
+      }
       return lines;
     }
     case "run": {

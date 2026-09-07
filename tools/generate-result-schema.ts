@@ -462,7 +462,7 @@ const DEFINITIONS = `    "doctorResult": {
         "runs": { "type": "array", "items": { "$ref": "#/definitions/statusRunRow" } },
         "openPrs": { "type": "array", "items": { "$ref": "#/definitions/statusOpenPrRow" } },
         "live": {
-          "description": "라이브 계층 — 부재는 envelope.omitted=[\\"live\\"](생략), error는 조회 실패의 관측 보고(선택 계층이라 variant는 success 유지).",
+          "description": "라이브 계층의 세 disjoint 상태 — argocd(실재: sync/health/리비전/conditions) · absent(Application 부재: appset 생성 전이거나 prune 완료 — **관측된 상태**이지 조회 실패가 아니다) · error(조회 실패의 관측 보고). 셋 다 variant는 success 유지(선택 계층). 계층 자체를 건너뛴 것은 여기가 아니라 envelope.omitted=[\\"live\\"]가 말한다 — 관측하지 않은 것과 관측해서 부재인 것은 다른 축이다.",
           "oneOf": [
             {
               "type": "object",
@@ -477,10 +477,28 @@ const DEFINITIONS = `    "doctorResult": {
                     "sync": { "type": "string", "minLength": 1 },
                     "health": { "type": "string", "minLength": 1 },
                     "revision": { "type": "string" },
-                    "revisions": { "type": "array", "items": { "type": "string" } }
+                    "revisions": { "type": "array", "items": { "type": "string" } },
+                    "conditions": {
+                      "description": "status.conditions 상위 3건(원본 배열 순서 — 임의 정렬은 골든을 비결정적으로 만든다). 메시지는 단일 줄 정규화 + 길이 상한. 0건이면 키 부재.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "type": { "type": "string", "minLength": 1 },
+                          "message": { "type": "string", "minLength": 1 }
+                        }
+                      }
+                    }
                   }
                 }
               }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["absent"],
+              "properties": { "absent": { "enum": [true] } }
             },
             {
               "type": "object",

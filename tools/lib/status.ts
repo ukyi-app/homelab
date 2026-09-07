@@ -157,6 +157,25 @@ function openHomelabPrs(): GhRead {
 const openPrRow = (p: Record<string, unknown>): Record<string, unknown> =>
   compact({ number: p.number, title: p.title, head: p.head, url: p.html_url, autoMerge: p.auto_merge });
 
+// Application status.conditions 투영(티켓 16) — 'Degraded'만 보고하면 '왜'의 답이 전부 CLI 밖
+// (kubectl·ArgoCD UI)에서 시작된다. sync/비교 실패 사유가 바로 이 배열에 있다.
+//   정렬은 **원본 배열 순서**로 고정한다 — 임의 정렬(시각·심각도)은 골든을 비결정적으로 만든다.
+//   상한 3건 — 결과는 보고서지 로그 덤프가 아니다(같은 이유로 메시지도 단일 줄 + 길이 상한).
+// ⚠️ `health.message`는 넣지 않는다: 라이브 실측(argocd v3.4.4 + resourceHealthSource:appTree)에서
+//    Application.status에 그 키가 **존재하지 않았다**(21/21건). 없는 필드를 읽는 코드는 영원히
+//    무증인이다. `operationState.message`가 필요해지면 health와 섞지 말고 별도 키로 만든다.
+const LIVE_CONDITIONS_MAX = 3;
+const LIVE_CONDITION_MSG_MAX = 200;
+function liveConditions(raw: unknown): Array<Record<string, string>> | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const rows = raw.slice(0, LIVE_CONDITIONS_MAX).map((c) => {
+    const o = (c ?? {}) as Record<string, unknown>;
+    const msg = String(o.message ?? "").replace(/\s+/g, " ").trim().slice(0, LIVE_CONDITION_MSG_MAX);
+    return compact({ type: typeof o.type === "string" ? o.type : undefined, message: msg === "" ? undefined : msg }) as Record<string, string>;
+  }).filter((r) => Object.keys(r).length > 0);
+  return rows.length > 0 ? rows : undefined;
+}
+
 function statusApp(root: string, app: string): StatusOutcome {
   if (!existsSync(appPaths(root, app).prod)) {
     // 산출물 부재는 그린필드의 **정상 전이**일 수 있다: create-app PR이 열려 있고(수동 머지 대기)
@@ -192,9 +211,17 @@ function statusApp(root: string, app: string): StatusOutcome {
     return { variant: "success", omitted: ["live"], result: { mode: "app", app: row, runs, openPrs } };
   }
   let live: Record<string, unknown>;
-  const k = sh("kubectl", ["-n", "argocd", "get", "applications.argoproj.io", `${app}-prod`, "-o", "json"]);
+  // `--ignore-not-found` — NotFound를 exit 1이 아니라 **exit 0 + 빈 stdout**으로 받는다. 없으면
+  // 'appset이 아직 Application을 안 만들었다 / prune이 끝났다'가 조회 실패로 접혀 **상태가 관측
+  // 실패로 위장**한다(create-app·teardown 머지 직후가 정확히 그 창이다). 같은 레포의 teardown
+  // absence 수렴이 이미 이 형태다(mutation.ts).
+  const k = sh("kubectl", ["-n", "argocd", "get", "applications.argoproj.io", `${app}-prod`, "-o", "json", "--ignore-not-found"]);
   if (!k.ok) {
     live = { error: k.err.split("\n")[0] || "kubectl 실패" };
+  } else if (k.out.trim() === "") {
+    // ⚠️ 빈 stdout 검사는 반드시 parse **앞**이다 — `JSON.parse("")`는 throw라서 아래 catch로 흘러
+    // 부재가 '파싱 실패'로 위장한다(부재를 상태로 만들려던 이 분기 자체가 무력해진다).
+    live = { absent: true };
   } else {
     try {
       const st = (JSON.parse(k.out)?.status ?? {}) as Record<string, any>;
@@ -204,6 +231,7 @@ function statusApp(root: string, app: string): StatusOutcome {
         sync: st.sync?.status ?? "Unknown",
         health: st.health?.status ?? "Unknown",
         ...revisionFields(syncRevisionOf(st)),
+        conditions: liveConditions(st.conditions),
       }) };
     } catch { live = { error: "Application JSON 파싱 실패" }; }
   }
