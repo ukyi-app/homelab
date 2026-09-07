@@ -38,6 +38,9 @@ cli_stub_init() {
   # db create 픽스처 기본값(행복 경로): 디스패치 접수 → nonce 에코 run 1개(성공) → PR 1개(미머지).
   printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
   printf '{"status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run.json"
+  # 전이 전 관측(티켓 19) — STUB_RUN_COMPLETE_AFTER_FIRST일 때 **첫** 단건 run 조회의 응답.
+  # 라이브의 기본 경로(queued/in_progress → completed)를 재현하는 자리로, 둘째 조회부터는 db-run.json.
+  printf '{"status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run-first.json"
   printf '[]\n' > "$FIX/db-run-jobs.json"
   printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
   # PR 단건 권위 조회(티켓 05) — 목록이 state:closed·미머지일 때만 읽힌다(확증 단계). 기본은 목록과
@@ -132,7 +135,8 @@ PY
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
 # STUB_GH_HANDLE_404 / STUB_PR_CONFIRM_FAIL / 변이 폴링 실패 3종(STUB_GH_RUNS_LIST_FAIL ·
-# STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST). 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
+# STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기 픽스처 2종
+# (STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL). 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
 make_gh_stub() {
   cat > "$STUB/gh" <<'SH'
 #!/usr/bin/env bash
@@ -225,11 +229,21 @@ case "$*" in
   "api repos/ukyi-app/homelab/actions/runs/"*" --jq {status, conclusion, html_url}")
     # STUB_GH_RUN_READ_FAIL(티켓 06): conclusion 폴링 루프의 관측만 전부 전송 오류.
     if [ -n "${STUB_GH_RUN_READ_FAIL:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
+    # STUB_RUN_COMPLETE_AFTER_FIRST(티켓 19): 첫 조회는 db-run-first.json(전이 전), 이후 db-run.json.
+    # 라이브의 **기본 경로**(queued→in_progress→completed)를 밟는 유일한 자리 — 마커는 셸 내장
+    # 리다이렉션이다(PATH=$STUB에 touch가 없다, STUB_PR_MERGE_AFTER_FIRST와 같은 관용구).
+    if [ -n "${STUB_RUN_COMPLETE_AFTER_FIRST:-}" ] && [ ! -f "$FIX/.run-read-once" ]; then
+      : > "$FIX/.run-read-once"; cat "$FIX/db-run-first.json"; exit 0
+    fi
     cat "$FIX/db-run.json"
     ;;
   "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "*)
     # STUB_PR_MERGE_AFTER_FIRST: 첫 조회는 미머지, 이후 머지 — "--wait 중 사람이 머지" 전환 재현
     # (마커는 셸 내장 리다이렉션 — PATH=$STUB에 touch 없음, STUB_COMPARE_FLAKY와 같은 관용구).
+    # STUB_GH_PR_LOOKUP_FAIL(티켓 19): PR 특정 조회가 **전부** 전송 오류 — grace 재시도를 다 쓰고도
+    # 미확정이면 '명명 드리프트'가 아니라 GitHub 계층 실패다. status의 열린 PR 목록 전용인
+    # STUB_GH_PRS_FAIL과 이름을 의도적으로 분리한다(재사용하면 어느 레인이 죽었는지 못 가른다).
+    if [ -n "${STUB_GH_PR_LOOKUP_FAIL:-}" ]; then echo "gh: HTTP 502: Bad Gateway" >&2; exit 1; fi
     if [ -n "${STUB_PR_MERGE_AFTER_FIRST:-}" ]; then
       if [ ! -f "$FIX/.pr-read-once" ]; then
         : > "$FIX/.pr-read-once"

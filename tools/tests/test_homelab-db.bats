@@ -79,7 +79,9 @@ run_db_create() {
 }
 
 @test "a failed run reports the failed job names and the run URL with exit 1" {
-  printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","conclusion":"failure","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
+  # 목록을 in_progress로 둬 conclusion 폴링(step 3)이 실제로 돌게 한다 — 목록이 이미 completed/failure면
+  # 아래 db-run.json 픽스처가 한 번도 읽히지 않아 이 이름이 약속한 경로가 사문이었다(티켓 19).
+  printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
   printf '{"status":"completed","conclusion":"failure","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run.json"
   printf '["validate"]\n' > "$FIX/db-run-jobs.json"
   run_db_create --json
@@ -87,6 +89,8 @@ run_db_create() {
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
   [ "$(echo "$output" | jq -r '.result.run.failedJobs | join(",")')" = "validate" ]
   echo "$output" | jq -r '.result.run.url' | grep -q "runs/501"
+  # 전이가 폴링으로 관측됐다는 증인(픽스처가 사문이 아니다).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/runs/501" --jq "{status, conclusion, html_url}")" -ge 1 ]
 }
 
 @test "wait: merged PR plus full application-set convergence is a success with evidence" {
@@ -358,8 +362,83 @@ merged_pr_at_descendant() {
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
   echo "$output" | jq -r '.result.error' | grep -q "명명 드리프트"
+  # 문구가 아니라 **좌표**가 진단 재료다 — 어느 브랜치를 봤는지가 에러에 실린다(티켓 19).
+  echo "$output" | jq -r '.result.error' | grep -q "create-database/mydb-501"
   # 재시도는 유한하다 — 정확히 1 + PR_GRACE_RETRIES(3)회. 상수가 바뀌면 여기서 red(의도된 핀).
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "4" ]
+}
+
+# ── conclusion 폴링·PR 특정 분기의 증인(homelab-cli-r2 티켓 19) ─────────────────────────────
+# 라이브의 **기본 경로**는 dispatch → queued → in_progress → completed다. 그 전이를 밟는 픽스처가
+# 0건이라 step 3(conclusion 폴링)의 병합·실패 판정·'진행 중' pending이 전부 무증인이었다.
+# PR 특정의 판정 분기(0건·≥2 race·조회 실패)도 같은 이유로 픽스처가 없었다.
+
+@test "a queued run transitions through the conclusion poll to completed/success" {
+  printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"queued","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_RUN_COMPLETE_AFTER_FIRST=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 2000 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.run.id')" = "501" ]
+  [ "$(echo "$output" | jq -r '.result.run.conclusion')" = "success" ]
+  # 폴링이 실제로 돌았다 — 첫 조회 in_progress, 둘째 조회 completed로 최소 2회.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/runs/501" --jq "{status, conclusion, html_url}")" -ge 2 ]
+}
+
+@test "a run that stays in_progress to the deadline is a pending with the in-progress reason" {
+  printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
+  printf '{"status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run.json"
+  run_db_create --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "진행 중"
+  # 재개 경로는 핸들이다 — pending에 run URL이 실린다.
+  echo "$output" | jq -r '.result.run.url' | grep -q "runs/501"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/runs/501" --jq "{status, conclusion, html_url}")" -ge 1 ]
+}
+
+@test "a completed run with a null conclusion fails immediately (current behavior pinned as intent)" {
+  # ⚠️ 현행 동작을 **의도로** 핀한다: completed인데 conclusion이 null이면 run 실패로 읽고 즉결한다.
+  # 낡은 스냅샷(status는 completed로 반영됐는데 conclusion이 아직 안 채워진 응답)에서는 거짓 실패가
+  # 될 수 있다 — 재개 조건: **라이브 관측**(그 응답을 실제로 본 run 하나). 그 증거가 나오기 전에는
+  # 폴링 대상으로 바꾸지 않는다(바꾸면 진짜 무결론 run이 데드라인까지 대기로 접힌다).
+  printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
+  printf '["validate"]\n' > "$FIX/db-run-jobs.json"
+  run_db_create --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "run 실패"
+  # 즉결의 증인 — conclusion 폴링에 들어가지 않는다(단건 run 조회 0회).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/runs/501" --jq "{status, conclusion, html_url}")" = "0" ]
+  # 양성 대조(같은 @test 안) — 같은 조회 경로가 in_progress 픽스처에서는 실제로 불린다.
+  : > "$CALLS"
+  printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
+  printf '{"status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run.json"
+  run_db_create --json
+  [ "$status" -eq 1 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/runs/501" --jq "{status, conclusion, html_url}")" -ge 1 ]
+}
+
+@test "a PR listing that keeps failing is a GitHub-layer failure, not a naming drift" {
+  # 0건(드리프트)과 전송 오류(미확정)는 손해 방향이 다르다 — 후자를 드리프트로 읽으면 운영자가
+  # reusable 워크플로의 브랜치 명명을 뒤지게 된다. 노브 이름도 status 전용과 분리한다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_PR_LOOKUP_FAIL=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "PR 조회 실패"
+  # grace 재시도는 유한하다 — 정확히 1 + PR_GRACE_RETRIES(3)회 뒤에 판정한다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "4" ]
+}
+
+@test "two PRs on the run-id branch is a race with exit 3 and the branch coordinate" {
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null},{"number":22,"html_url":"https://github.com/ukyi-app/homelab/pull/22","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
+  run_db_create --json
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "race" ]
+  [ "$(echo "$output" | jq -r '.result.observedRuns')" = "2" ]
+  [ "$(echo "$output" | jq -r '.result.run.id')" = "501" ]
+  echo "$output" | jq -r '.result.error' | grep -q "create-database/mydb-501"
 }
 
 # ── 폴링 루프의 지속 gh 실패 사유(homelab-cli-r2 티켓 06) ───────────────────────────────────
