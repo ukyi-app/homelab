@@ -19,6 +19,10 @@ import { runStatus, statusInputError, type StatusInput } from "./status.ts";
 // named export + VERBS 행 — 전부 이 파일 안이라 우회 표면이 없다.
 // destructive: 파괴 동사 표시(teardown). MCP 노출 정책(후속 티켓)이 이 표시로 파괴 동사를
 // 제외하고, CLI는 confirm 가드로 사람 확인을 강제한다. 미설정 = 비파괴.
+// desc: 동사 한 줄 설명 — **transport 중립**이어야 한다. CLI 플래그 어휘(`--wait` 등)를 넣으면
+// 같은 문자열을 MCP tool description으로 내는 mcp.ts가 inputSchema에 없는 입력을 LLM에게 광고하게
+// 된다(실측 드리프트 mcp-3: desc의 `--wait=배포 수렴까지` ↔ 스키마의 wait 부재 → -32602). 대기 축
+// 문구는 각 셸이 소유한다 — CLI는 동사별 --help, MCP는 mcp.ts의 DESC_MUT_PENDING.
 // needs: 이 동사가 도달해야 하는 **망 도메인**(티켓 33). 이 홈랩에서는 둘이 독립으로 끊긴다 —
 // 클러스터는 tailscale/LAN, GitHub은 인터넷이라 한쪽만 끊긴 상태가 정상이다. 그 비대칭이 어휘에
 // 없으면 "오프라인에서 무엇이 여전히 되는가"를 표면이 못 말한다(무인자 status·url --dry-run은
@@ -234,7 +238,7 @@ export const STATUS: StatusVerb = {
 // named export — CLI 어댑터·MCP가 정확한 입력 타입으로 호출한다.
 export const DB_CREATE: DbCreateVerb = {
   path: ["db", "create"],
-  desc: "공유 CNPG에 논리 DB 생성(create-database 디스패치 + correlation 추적, --wait=배포 수렴까지)",
+  desc: "공유 CNPG에 논리 DB 생성(create-database 디스패치 + correlation 추적)",
   needs: "GitHub(gh) · 클러스터(--wait의 수렴 구간뿐 — KUBECONFIG 부재면 머지까지만 확인하고 생략)",
   op: dbCreateOp,
 };
@@ -248,7 +252,7 @@ export const DB_URL: DbUrlVerb = {
 
 export const CACHE_CREATE: CacheCreateVerb = {
   path: ["cache", "create"],
-  desc: "앱별 Valkey 캐시 생성(create-cache 디스패치 + correlation 추적, --wait=배포 수렴까지)",
+  desc: "앱별 Valkey 캐시 생성(create-cache 디스패치 + correlation 추적)",
   needs: "GitHub(gh) · 클러스터(--wait의 수렴 구간뿐 — KUBECONFIG 부재면 머지까지만 확인하고 생략)",
   op: cacheCreateOp,
 };

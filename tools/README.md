@@ -437,7 +437,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   위에 파괴 제외 전 동사를 tool로 노출한다. MCP 프레젠테이션 계층(homelab.ts가 CLI를 소유하듯) —
   tool 이름(verb.path.join("_"))·입력 스키마·인자→op 입력 매핑·JSON-RPC 프레이밍만 갖고 동사 실체는
   verbs.ts op다. 노출 = VERBS 중 !destructive(teardown 제외, 초기화 totality 가드가 파괴 누출·신규
-  동사 누락을 fail-closed 차단). --wait류 미노출(동기 바운디드)·명시 경로(secrets=repoPath·init=
+  동사 누락을 fail-closed 차단). --wait류 미노출(동기 바운디드 — 그 '바운디드'는 **스키마 축**이다:
+  대기 옵션이 입력 표면에 없다는 뜻이고, 하위 프로세스 **wall-clock 상한은 두지 않는다**(owner 결정 Q7 —
+  근거는 init.ts의 timeoutMs:0 두 자리: 스캐폴더 `bun install`과 첫 push. run 출현 대기만
+  HOMELAB_MCP_DEADLINE_MS로 바운드하고, 그 env가 양의 정수가 아니면 **모듈 로드 시** 이름과 함께 기동
+  거부한다))·JSON-RPC 프레이밍(요청 1건당 응답 1줄·알림 0줄 · ping=빈 result · id:null과 id 붙은
+  initialized는 -32600)·명시 경로(secrets=repoPath·init=
   parentDir·url=envDir, cwd 추론 없음 — **절대 경로만**(pattern "^/" + identity.pathInputError 한 술어, 상대·'~'는
   -32602 + 안내 문구) · 존재하지 않는/앱 레포 아닌 명시 repoPath는 dispatch-only 강등이 아니라 거부(CLI 암묵 cwd만
   dispatch-only) · 경로 속성 description이 의미론을 광고)·결과는 CLI --json과 같은 envelope(isError는 x-contract.mcp variant 매핑)·
