@@ -313,6 +313,29 @@ run_secrets_in() {
   echo "$output" | grep -q "^ok:3$"
 }
 
+@test "a non-fast-forward push reports the rejection reason, not git's 'To <url>' first line" {
+  # 티켓 08 — git push의 stderr는 1행이 `To <url>`(사유 아님)이고 거부 이유는 2행 ` ! [rejected] …`이다.
+  # 첫 줄만 자르던 규약이 gh(1행 완결)에는 맞지만 여기서만 틀렸다: 원격이 앞선 상태를 만든다.
+  AHEAD="$BATS_TEST_TMPDIR/ahead"
+  # bare의 HEAD는 init.defaultBranch 소유(CI 러너는 master) — 픽스처는 main만 push하므로 브랜치를 명시해야 venue 무관.
+  git clone -q --branch main "$APP_REMOTE" "$AHEAD"
+  git -C "$AHEAD" config user.name "fixture"
+  git -C "$AHEAD" config user.email "fixture@example.com"
+  git -C "$AHEAD" commit -q --allow-empty -m "remote ahead"
+  git -C "$AHEAD" push -q origin main
+  run_secrets_in "$APP_WORK" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "git push 실패"
+  echo "$output" | jq -r '.result.error' | grep -q "rejected"
+  # 부정 단언(사유 자리에 `To <url>`이 오지 않는다) + 같은 @test 안 양성 대조(같은 검출기가
+  # 착지 전 문구 모양에서는 1건을 센다 — 0건이 '검출기 사망'이 아님을 증명).
+  [ "$(echo "$output" | jq -r '.result.error' | grep -c "실패 — To ")" = "0" ]
+  [ "$(printf '%s\n' "git push 실패 — To https://github.com/ukyi-app/myapp.git" | grep -c "실패 — To ")" = "1" ]
+  # 디스패치는 일어나지 않았다(연쇄 실패 = 디스패치 없이 거부).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run update-secrets.yaml)" = "0" ]
+}
+
 @test "app secrets rejects a bad app name as a usage error and prints usage on --help" {
   run --separate-stderr env PATH="$STUB" "$BUN" tools/homelab.ts app secrets "Bad_Name" --json
   [ "$status" -eq 2 ]

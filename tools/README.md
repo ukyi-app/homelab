@@ -101,6 +101,10 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   미상'이라 재시도가 곧 두 개의 run이다). 변이 엔진의 폴링 루프·PR 목록 grace 재조회는 부수효과
   0인 **관측 재조회**지 변이 재시도가 아니며, 폴링 중 지속되는 GitHub 계층 조회 실패는
   pendingReason 접미(`— 직전 GitHub 계층 조회 실패(N회 연속): …`)로 사유를 지목한다.
+  디스패치 호출이 **타임아웃**이면(errKind timeout — 자식만 SIGTERM으로 죽고 POST 도달 여부는
+  미상) failure가 아니라 그대로 run 특정으로 넘어간다: run이 보이면 정상 수렴이고, 안 보이면
+  '재실행 전 Actions에서 correlation 에코 확인'을 지목하는 pending이다. rc 비-0(인증 실패·입력
+  거부)은 즉시 failure를 유지한다 — 관용은 timeout 하나로만 좁혀 둔다.
 - **`cli-result-schema.json`** — CLI `--json` 출력·MCP tool 결과가 공유하는 **결과 계약 SSOT**
   (envelope `homelab-cli/1`). variant 어휘(success/failure/race/skip/pending/no-op/superseded)·
   종료코드 매핑(x-contract.exitCodes — pending=1 근거 포함)·stdout 순수성(--json이면 stdout은
@@ -344,12 +348,17 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   두 사본이 앱 레인 --wait를 영구 pending으로 만들던 결함의 흡수 자리. 판정 4상: resolved(전부 SHA·dedupe 1개 —
   계보·표면 ref) / skew(소스 간 불일치 — 표면 ref 미확정) / non-sha(helm 차트 버전 — gh compare 호출 금지) /
   none(관측 0). 엔진의 `sync?.revision` 직접 참조 0건은 test_homelab-status.bats가 grep으로 단언한다.
-- **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghRead`/`ghJson` — ghRead는 값과 실패 사유를 함께
+- **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghRead`/`ghJson`·`firstReason` — ghRead는 값과 실패 사유를 함께
   주는 3상 리더(ok/error=stderr 첫 줄/parse=폴백 문구)이고 ghJson은 그 축약(값만·실패 null),
   둘 다 오브젝트/배열 jq 전용, 스칼라
   jq는 raw라 sh 직접, `git`·`pushRoutes` — push 지향 관측 `git remote get-url --push --all`:
   pushurl 복수·insteadOf/pushInsteadOf 전개 반영) — status·mutation·init·secrets 공유. 판정 정책은
-  콜사이트 소유(doctor의 gh()는 ENOENT 판별 자기 정책이 있어 별도 유지). push 라우팅 검사의
+  콜사이트 소유(doctor의 gh()는 ENOENT 판별 자기 정책이 있어 별도 유지). **오류 충실도**:
+  errKind는 4종(not-found=ENOENT · timeout=ETIMEDOUT · overflow=ENOBUFS · spawn=그 외)이고,
+  자식이 죽기 전에 쓴 **부분 stderr**와 죽인 **시그널**(`signal`)을 결과에 보존한다 — 셋을 한 값으로
+  접으면 원인이 통째로 지워지고 SIGKILL 사망은 빈 사유가 된다. `firstReason(err)`는 다행 stderr에서
+  사유 한 줄을 고른다(`error:`/`fatal:`/`!` 우선, `To `/`hint:` 제외) — git push의 1행 `To <url>`이
+  거부 이유를 가리는 실측 클래스가 그 자리다(소비자: init·secrets의 push 실패). push 라우팅 검사의
   테스트 전용 완화 플래그 이름(`ALLOW_PUSH_REWRITE_ENV` = HOMELAB_TEST_ALLOW_PUSH_REWRITE)도
   여기 산다 — HOMELAB_CORRELATION 주입과 같은 부류(테스트 심).
 - **`lib/secrets.ts`** — app secrets 엔진(`runAppSecrets()`·`appSecretsInputError()`): 이중 모드 판별(git

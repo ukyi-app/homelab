@@ -2,9 +2,11 @@
 // 판정 정책(무엇이 실패인가·실패를 어떻게 보고하는가)은 콜사이트 소유 — 여기는 실행·캡처·관측만
 // 한다(encoding utf8 · timeout 기본 30s/0=무제한 — ExecOpts 참조). 명명 adapter(gh/git/kubeseal)는 sh의 커맨드 고정형이다.
 //
-// errKind — 실행 자체가 실패한 종류("not-found"=바이너리 부재 ENOENT · "spawn"=그 외 spawn 실패).
-// 비-0 종료는 errKind 없이 ok:false다 — rc 의미론은 콜사이트가 판정한다. doctor의 미설치 진단이
-// 이 필드의 소비자다(종전 자체 gh() 유지 사유였던 ENOENT 판별이 seam으로 흡수된 자리).
+// errKind — 실행 자체가 실패한 종류. "not-found"=바이너리 부재(ENOENT) · "timeout"=시간 초과
+// (ETIMEDOUT) · "overflow"=maxBuffer 초과(ENOBUFS) · "spawn"=그 외. 셋을 한 값으로 접으면 원인이
+// 통째로 지워진다(doctor.ts의 오진 주석이 지목한 클래스). 비-0 종료는 errKind 없이 ok:false다 —
+// rc 의미론은 콜사이트가 판정한다. 소비자: doctor의 미설치 진단, 변이 엔진의 디스패치 타임아웃
+// 관용(timeout = '실패'가 아니라 '결과 미상' — mutation.ts 1단계).
 //
 // 재시도 정책(선언 — homelab-cli-r2 티켓 06): **seam은 재시도하지 않는다.** sh()는 spawnSync 1회이고
 // 백오프도 없다 — 재시도는 콜사이트 정책이며 **변이 argv(`gh workflow run`)는 어떤 층에서도 재시도하지
@@ -18,10 +20,13 @@
 import { appendFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
-export type ErrKind = "not-found" | "spawn";
+export type ErrKind = "not-found" | "timeout" | "overflow" | "spawn";
 // status — 자식의 exit code(실행 실패·시그널 사망이면 null). rc **의미론**은 콜사이트 소유지만
 // rc **값** 자체는 seam이 나른다(bump 클러스터 이관의 실증 소비자: 러너의 `exit N` 실패 로그).
-export type Cmd = { ok: boolean; status: number | null; out: string; err: string; errKind?: ErrKind };
+// signal — 자식을 죽인 시그널(없으면 부재). SIGKILL 사망은 r.error가 없어 **정상 분기**로 오고
+// (ok:false·status null·stderr는 흔히 빈 문자열) 이 필드가 없으면 콜사이트의 사유가 빈 문자열이
+// 된다 — '실패했는데 이유가 없다'가 오진을 만든다(exec-2 실측).
+export type Cmd = { ok: boolean; status: number | null; out: string; err: string; errKind?: ErrKind; signal?: string };
 // timeoutMs — 기본 30s(느린 push/pr 경로는 콜사이트가 올린다). **0 = 무제한**(종전 spawnSync
 // 무-timeout 동작을 보존해야 하는 이관 콜사이트용 — 기본값 강제는 조용한 동작 변화다).
 // maxBuffer — 기본 8MiB: Node 기본 1MiB는 ENOBUFS로 죽고 그 죽음이 errKind:"spawn"으로만 보인다
@@ -47,13 +52,35 @@ export function sh(cmd: string, args: string[], opts: ExecOpts = {}): Cmd {
     stdio: opts.inherit ? "inherit" : undefined,
   });
   if (r.error) {
-    const code = (r.error as NodeJS.ErrnoException).code;
+    const code = (r.error as NodeJS.ErrnoException).code ?? "";
+    // 자식이 **죽기 전에 쓴 stderr**를 버리지 않는다 — ETIMEDOUT·ENOBUFS 모두 부분 출력이 남아
+    // 있고(Bun 1.3.14 실측), 그 몇 줄이 '왜 멈췄나'의 유일한 단서다. spawnSync 메시지(한 줄)
+    // 뒤에 붙여 사유 계층(무엇이 죽였나 / 자식이 뭐라 했나)을 둘 다 남긴다.
     return {
-      ok: false, status: null, out: "", err: String((r.error as Error).message),
-      errKind: code === "ENOENT" ? "not-found" : "spawn",
+      ok: false, status: null, out: "",
+      err: [String((r.error as Error).message), (r.stderr ?? "").trim()].filter(Boolean).join("\n"),
+      errKind: ERR_KIND_BY_CODE[code] ?? "spawn",
+      signal: r.signal ?? undefined,
     };
   }
-  return { ok: r.status === 0, status: r.status, out: r.stdout ?? "", err: (r.stderr ?? "").trim() };
+  return { ok: r.status === 0, status: r.status, out: r.stdout ?? "", err: (r.stderr ?? "").trim(), signal: r.signal ?? undefined };
+}
+
+// errno → errKind. 목록 밖은 "spawn"(총체성은 콜사이트가 아니라 여기가 소유한다).
+const ERR_KIND_BY_CODE: Record<string, ErrKind> = { ENOENT: "not-found", ETIMEDOUT: "timeout", ENOBUFS: "overflow" };
+
+// 다행 stderr에서 **사유** 한 줄을 고른다. 첫 줄이 사유가 아닌 도구가 있다 — 실측(git 2.53.0,
+// `push -q` non-fast-forward): 1행 `To <url>`, 2행 ` ! [rejected] HEAD -> main (fetch first)`,
+// 3행 `error: failed to push some refs`. `split("\n")[0]` 규약은 gh(1행 완결)·git clone(`fatal:`
+// 1행)에는 맞지만 push에서만 사유를 통째로 지운다.
+// 우선순위: `error:`/`fatal:`/`!`로 시작하는 첫 줄 → 없으면 `To `/`hint:`가 아닌 첫 줄 → 첫 줄.
+// 빈 입력은 빈 문자열이다(폴백 문구 선택은 콜사이트 소유 — 여기서 지어내지 않는다).
+export function firstReason(err: string): string {
+  const lines = err.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "");
+  const strong = lines.find((l) => /^(error:|fatal:|!)/.test(l.trim()));
+  if (strong !== undefined) return strong.trim();
+  const weak = lines.find((l) => !/^(To |hint:)/.test(l.trim()));
+  return (weak ?? lines[0] ?? "").trim();
 }
 
 export function gh(args: string[], opts: ExecOpts = {}): Cmd { return sh("gh", args, opts); }

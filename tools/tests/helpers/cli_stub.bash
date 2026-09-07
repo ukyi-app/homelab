@@ -17,7 +17,9 @@ cli_stub_init() {
   export CALLS="$BATS_TEST_TMPDIR/calls.nul"
   : > "$CALLS"
   BUN="$(command -v bun)"
-  for t in bun bash base64 cat git; do
+  # sleep — 디스패치 타임아웃 주입(STUB_GH_DISPATCH_HANG)이 자식을 살아 있게 두는 유일한 수단이다
+  # (PATH는 대체라 시스템 도구가 자동으로 들어오지 않는다).
+  for t in bun bash base64 cat git sleep; do
     ln -s "$(command -v "$t")" "$STUB/$t"
   done
 
@@ -134,7 +136,7 @@ PY
 # 임의 owner/repo URL을 정당한 입력으로 받는 계약이라(좁히면 계약을 거짓으로 검증) 의도적 비대칭.
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
-# STUB_GH_HANDLE_404 / STUB_PR_CONFIRM_FAIL / 변이 폴링 실패 3종(STUB_GH_RUNS_LIST_FAIL ·
+# STUB_GH_HANDLE_404 / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패 3종(STUB_GH_RUNS_LIST_FAIL ·
 # STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기 픽스처 2종
 # (STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL). 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
 make_gh_stub() {
@@ -149,6 +151,15 @@ b64() { base64 < "$1"; }
 case "$*" in
   "api repos/ukyi-app/homelab/actions/workflows/"*"/runs?per_page=20 --jq "*)
     if [ -n "${STUB_GH_RUNS_LIST_FAIL:-}" ]; then echo "gh: HTTP 401: Bad credentials" >&2; exit 1; fi
+    ;;
+esac
+# 디스패치 지연 주입(티켓 08) — 자식이 살아 있는 동안 호출자의 timeoutMs가 만료돼 SIGTERM으로
+# 죽는 상황을 만든다(POST 도달 여부는 미상). 부분 stderr를 먼저 흘려 seam의 보존도 함께 관측된다.
+# 본 case **앞**의 별도 case다(bash case는 fallthrough가 없다 — 본 case에 끼우면 디스패처별
+# 픽스처 케이스가 사문이 된다). 원장 기록은 이 지연보다 앞이라 '정확히 1건'이 그대로 관측된다.
+case "$*" in
+  "workflow run "*)
+    if [ -n "${STUB_GH_DISPATCH_HANG:-}" ]; then echo "gh: 요청 전송 중" >&2; sleep 5; fi
     ;;
 esac
 case "$*" in

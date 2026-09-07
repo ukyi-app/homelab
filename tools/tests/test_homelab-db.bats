@@ -722,3 +722,42 @@ pr_closed_unmerged() {
   # 양성 대조 — 사람용 보고는 여전히 stdout이다(진행 줄만 갈라진 것이지 보고가 사라진 게 아니다).
   printf '%s\n' "$output" | grep -q "^결과: success\$"
 }
+
+# ── 티켓 08: 디스패치 타임아웃은 '실패'가 아니라 '결과 미상' ─────────────────────────────
+# 자식(gh)만 SIGTERM으로 죽었을 뿐 POST는 서버에 도달했을 수 있다. 여기서 failure를 내면
+# 운영자·에이전트가 재실행하고, 새 nonce가 발급돼 race 검출조차 우회한 이중 run·PR 2개가 된다.
+
+@test "a dispatch timeout is an unconfirmed result: the engine proceeds to run identification, never redispatches" {
+  # (a) run이 실제로 생겼다면 타임아웃에도 그대로 수렴한다 — 변이 argv는 정확히 1건.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    STUB_GH_DISPATCH_HANG=1 HOMELAB_TEST_DISPATCH_TIMEOUT_MS=150 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.correlation')" = "$NONCE" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run create-database.yaml)" = "1" ]
+  # (b) run이 안 보이면 pending이고, 사유가 '재실행 전 Actions에서 correlation 에코 확인'을 지목한다.
+  : > "$CALLS"
+  printf '[]\n' > "$FIX/db-runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    STUB_GH_DISPATCH_HANG=1 HOMELAB_TEST_DISPATCH_TIMEOUT_MS=150 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 200 --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  [ "$(echo "$output" | jq -r '.result.correlation')" = "$NONCE" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "타임아웃"
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "Actions"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run create-database.yaml)" = "1" ]
+}
+
+@test "a non-zero dispatch stays an immediate failure (tolerance is narrowed to errKind timeout alone)" {
+  # rc 1(인증 실패·입력 거부)은 '결과 미상'이 아니다 — run 특정으로 넘어가면 안 된다(대조군).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    STUB_GH_DISPATCH_FAIL=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 200 --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "디스패치 실패"
+  # run 특정 조회로 넘어가지 않았다(즉시 종결).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20")" = "0" ]
+}

@@ -65,6 +65,13 @@ export type MutationSpec = {
 // 테스트가 정확 count(1 + 3)로 이 상수를 핀한다(test_homelab-db.bats·test_homelab-secrets.bats).
 export const PR_GRACE_RETRIES = 3;
 
+// 디스패치 호출의 타임아웃 주입 심(**테스트 전용**) — 실물 경로는 seam 기본(exec.ts 30s)을 쓴다.
+// 이름 규약은 형제 심과 같다(HOMELAB_TEST_ 접두 — exec.ts ALLOW_PUSH_REWRITE_ENV). 이 심이 없으면
+// '디스패치 타임아웃' 분기는 hermetic 하네스에서 도달 불가라 무증인이 된다(seam에 시간 주입 축이
+// 콜사이트 인자뿐이기 때문). 값이 정수·양수가 아니면 무시한다 — Number("")는 0이고 Number("x")는
+// NaN이라, 둘 다 조용히 '무제한(0)'이나 NaN 타임아웃으로 새지 않게 양쪽을 다 막는다.
+export const DISPATCH_TIMEOUT_ENV = "HOMELAB_TEST_DISPATCH_TIMEOUT_MS";
+
 // 진행 이벤트(티켓 07) — 엔진은 **이벤트만** 낸다. 문구·싱크는 셸(homelab.ts)이 소유하고 MCP는
 // 주입하지 않는다(stdio JSON-RPC 스트림 무오염). op가 Envelope만 반환한다는 원칙은 그대로다:
 // 이벤트는 결과가 아니라 **진행 관측**이고 결과 계약(cli-result-schema.json)에 아무것도 더하지 않는다.
@@ -159,8 +166,17 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   const dispatchArgs = ["workflow", "run", spec.workflow, "-R", HOMELAB_REPO];
   for (const [k, v] of spec.dispatchInputs) dispatchArgs.push("-f", `${k}=${v}`);
   dispatchArgs.push("-f", `correlation=${correlation}`);
-  const dispatched = sh("gh", dispatchArgs);
-  if (!dispatched.ok) return fail(`디스패치 실패 — ${dispatched.err.split("\n")[0] || "gh workflow run 비-0"}`);
+  const injectedTimeout = Number(process.env[DISPATCH_TIMEOUT_ENV] ?? "");
+  const dispatched = sh("gh", dispatchArgs, Number.isInteger(injectedTimeout) && injectedTimeout > 0 ? { timeoutMs: injectedTimeout } : {});
+  // 타임아웃은 '실패'가 아니라 **결과 미상**이다(티켓 08) — 자식(gh)만 SIGTERM으로 죽었고 POST는
+  // 서버에 이미 도달했을 수 있다(Bun 1.3.14 실측: ETIMEDOUT · status null · signal SIGTERM).
+  // 여기서 fail하면 운영자·에이전트가 재실행하고, 그때 **새 nonce**가 발급돼 race 검출조차
+  // 우회한 이중 run·PR 2개가 된다(`queue: max`는 직렬화지 dedupe가 아니다). 그래서 수령증
+  // 메커니즘(2단계: nonce 에코 run 특정, 0건이면 pending)으로 그대로 넘긴다 — 재시도가 아니라
+  // **관측**이다. ⚠️ 관용은 errKind timeout으로만 좁힌다: rc 비-0(인증 실패·입력 거부)은 지금처럼
+  // 즉시 failure다(정말 안 나간 경우까지 pending으로 접으면 손해 방향이 뒤집힌다).
+  const dispatchUnconfirmed = !dispatched.ok && dispatched.errKind === "timeout";
+  if (!dispatched.ok && !dispatchUnconfirmed) return fail(`디스패치 실패 — ${dispatched.err.split("\n")[0] || "gh workflow run 비-0"}`);
   // correlation은 여기서부터 유효한 좌표다 — run이 아직 없어도 Actions에서 이 에코를 찾을 수 있다.
   emit("dispatched");
 
@@ -179,7 +195,12 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
       if (mine.length === 1) { run = mine[0]; break; }
     }
     if (Date.now() >= endAt) {
-      return { variant: "pending", omitted: [], result: compact({ ...base, pendingReason: `run 미출현(디스패치는 접수됨) — 큐/크론 지연 가능, 같은 correlation으로 재조회 가능${identifyWatch.suffix()}` }) };
+      // 디스패치 응답이 유실된 경우(타임아웃)는 '접수됨'을 단언할 수 없다 — 그 사실과 함께,
+      // 재실행이 아니라 Actions의 correlation 에코 확인이 다음 행동임을 문구가 지목한다(티켓 08).
+      const accepted = dispatchUnconfirmed
+        ? "디스패치 응답이 타임아웃으로 유실됨(접수 여부 미상 — run이 이미 생성됐을 수 있다: 재실행 전 Actions에서 [correlation] 에코를 확인)"
+        : "run 미출현(디스패치는 접수됨) — 큐/크론 지연 가능, 같은 correlation으로 재조회 가능";
+      return { variant: "pending", omitted: [], result: compact({ ...base, pendingReason: `${accepted}${identifyWatch.suffix()}` }) };
     }
     Bun.sleepSync(opts.pollMs);
   }
