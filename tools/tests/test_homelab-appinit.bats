@@ -57,8 +57,8 @@ run_init() {
   echo "$output" | grep -q "homelab-app-init"
 }
 
-@test "--public opts into a public repo (argv ledger)" {
-  run_init mypublic --archetype site --public --json
+@test "--repo-public opts into a public GitHub repo (argv ledger)" {
+  run_init mypublic --archetype site --repo-public --json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.public')" = "true" ]
   run python3 "$LEDGER_PY" exact "$CALLS" gh repo create ukyi-app/mypublic --template ukyi-app/homelab-app-template --public
@@ -396,12 +396,16 @@ run_init() {
   echo "$output" | grep -q "^ok:3$"
 }
 
-@test "app init prints usage on --help" {
+@test "app init prints usage on --help, and the help states the dispatch App is not installed today" {
   run bun tools/homelab.ts app init --help
   [ "$status" -eq 0 ]
   echo "$output" | grep -q -- "--archetype"
   echo "$output" | grep -q -- "--adopt"
   echo "$output" | grep -q -- "--dispatch-secrets"
+  echo "$output" | grep -q -- "--repo-public"
+  # dispatch App은 2026-09-03 org 설치가 제거됐다(AGENTS.md 트리거 경계) — 코드 경로는 휴면으로
+  # 남기지만, help가 그 사실을 말하지 않으면 '크론 지연 제거' 약속이 거짓이 된다(docs-1).
+  echo "$output" | grep -q "설치 없음"
 }
 
 @test "the usage archetype choices derive from platform ARCHETYPES (parity, hand-pinned floor)" {
@@ -595,4 +599,37 @@ run_init() {
   [ "$(grep -c '검증 대상 = 실행 대상' tools/lib/init.ts)" = "0" ]
   # 양성 대조(검출기 생존) — 같은 grep 형태가 정정된 문구는 실제로 잡는다.
   [ "$(grep -c 'TEMPLATE_REPO의 원격 사본' tools/lib/init.ts)" -ge 1 ]
+}
+
+# ── --repo-public 의미 분리와 스캐폴드 argv 고정(homelab-cli-r2 티켓 29) ───────────────────────
+
+@test "the old --public flag is a usage error whose hint names the app-exposure key it was confused with" {
+  # 같은 이름 다른 뜻이었다: 이 동사의 --public은 GitHub **레포 가시성**이고, 실물 스캐폴더의
+  # --public은 `.app-config.yml`의 route.public(앱 **노출**)이다 — init은 후자를 넘기지도 않는다
+  # (appverbs-2). 그래서 이름을 --repo-public으로 가르고, 구 이름은 힌트와 함께 거부한다.
+  run_init mypublic --archetype site --public --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  printf '%s\n' "$stderr" | grep -qF -- "--repo-public"
+  printf '%s\n' "$stderr" | grep -qF ".app-config.yml"
+  printf '%s\n' "$stderr" | grep -qF "route.public"
+  # 부수효과 0 — 파싱 단계 거부다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
+}
+
+@test "the scaffolder argv is exactly the non-interactive contract — no app-facing flag is passed through" {
+  # 명시 기각(티켓 29): --app-public·--metrics·--no-autodeploy 패스스루는 넣지 않는다 —
+  # `.app-config.yml`이 SSOT이고 클론이 로컬에 있으며, 계약 마커 확장은 fail-closed로 호환 템플릿을
+  # 거부한다. 그 기각을 코드로 붙잡는 가드다(재개 조건: 실제 온보딩에서 파일 편집이 반복 마찰로
+  # 실증될 때).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  # 원장의 scaffold 레코드는 정확히 1건이고, 그 1건이 아래 exact와 같다 → argv 전체가 고정이다
+  # (exact는 argc까지 비교하므로 접두 count와 달리 패스스루가 붙으면 red다).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold)" = "1" ]
+  run python3 "$LEDGER_PY" exact "$CALLS" scaffold --archetype api --name myapp --yes
+  [ "$status" -eq 0 ]
+  # 검출기 생존 — 같은 exact 술어는 한 토큰만 달라도 red다.
+  run python3 "$LEDGER_PY" exact "$CALLS" scaffold --archetype api --name myapp --yes --app-public
+  [ "$status" -eq 1 ]
 }

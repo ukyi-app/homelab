@@ -116,7 +116,9 @@ const ABS_HINT = "절대 경로만(예: /home/<user>/apps). 상대 경로·'~'�
 const DESC_REPO_PATH = `앱 레포 루트의 ${ABS_HINT} 존재하지 않거나 앱 레포(.app-config.yml 마커 + canonical remote)가 아니면 디스패치 없이 거부된다.`;
 const DESC_PARENT_DIR = `클론 대상 부모 디렉토리의 ${ABS_HINT} 그 아래에 <app>/ 클론·스캐폴드·첫 push가 만들어진다.`;
 const DESC_ENV_DIR = `자격 파일(.env.local / admin은 .env.admin.local)이 기록될 기준 디렉토리의 ${ABS_HINT}`;
-const DESC_DISPATCH_SECRETS = "GitHub App 키 파일(app-id·private-key.pem)이 있는 디렉토리 경로. 지정 시 두 파일이 모두 있어야 하며 값은 --body-file로만 전달된다.";
+const DESC_DISPATCH_SECRETS = "GitHub App 키 파일(app-id·private-key.pem)이 있는 디렉토리 경로. 지정 시 두 파일이 모두 있어야 하고, 클론 트리(parentDir/<app>) 안이면 거부된다(첫 커밋이 키를 원격에 올린다). 값은 파일 경로로만 전달되며 서버가 읽지 않는다. 참고: dispatch App은 2026-09-03 org 설치가 제거돼 재설치 전까지 이 쌍은 무효다(배포 반영은 bump-poll 크론 백스톱).";
+// 이름 충돌 분리(appverbs-2) — 이 축은 GitHub 레포 가시성이고, 앱 노출은 별도 SSOT다.
+const DESC_REPO_PUBLIC = "GitHub 레포를 공개로 만든다(기본 private). 앱의 공개 노출이 아니다 — 그건 앱 레포 .app-config.yml의 route.public이고, 클론된 트리에서 편집한다.";
 // 변이 pending의 result.run.branch를 그대로 넘기는 자리 — 재개 경로를 스키마가 광고한다(티켓 09).
 const DESC_BRANCH = "변이 pending이 돌려준 result.run.branch를 그대로. run과 함께만 쓰며(단독 조회 아님) 그 레인 브랜치의 PR을 정확 조회한다. 그 run의 좌표가 아닌 브랜치는 거부된다.";
 
@@ -212,14 +214,15 @@ const TOOLS: McpTool[] = [
         // archetype enum은 아키타입 SSOT(platform.ts ARCHETYPES)의 파생이다 — 리터럴 사본이면 아키타입
         // 확장 시 init 엔진은 수용하는데 MCP만 -32602로 거부하는 입력 표면 드리프트가 난다(cli-deepening 심화 6).
         app: { type: "string", minLength: 1 }, archetype: { enum: [...ARCHETYPES] },
-        parentDir: { type: "string", minLength: 1, pattern: "^/", description: DESC_PARENT_DIR }, public: { type: "boolean" },
+        parentDir: { type: "string", minLength: 1, pattern: "^/", description: DESC_PARENT_DIR },
+        repoPublic: { type: "boolean", description: DESC_REPO_PUBLIC },
         dispatchSecrets: { type: "string", minLength: 1, description: DESC_DISPATCH_SECRETS }, adopt: { type: "boolean" },
       },
     },
     call: (a) => {
       const input: AppInitInput = {
         app: str(a, "app") ?? "", archetype: str(a, "archetype") ?? "",
-        public: bool(a, "public"), dispatchSecrets: str(a, "dispatchSecrets"),
+        public: bool(a, "repoPublic"), dispatchSecrets: str(a, "dispatchSecrets"),
         adopt: bool(a, "adopt"), parentDir: str(a, "parentDir"),
       };
       const bad = appInitInputError(input);

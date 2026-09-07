@@ -364,7 +364,7 @@ function appTeardownCli(rest: string[]): VerbOutput {
 function appInitUsage(): string {
   const choices = ARCHETYPES.join("|"); // 어휘는 platform.ts SSOT 파생(리터럴 사본 금지 — test_platform.bats 가드)
   return [
-    `사용법: homelab app init <app> --archetype ${choices} [--public] [--dispatch-secrets <경로>] [--adopt] [--json]`,
+    `사용법: homelab app init <app> --archetype ${choices} [--repo-public] [--dispatch-secrets <경로>] [--adopt] [--json]`,
     "",
     "앱 레포의 시작을 끝까지 만든다(멱등·재개 가능): preflight(부수효과 0) → 템플릿에서 레포 생성",
     "(기본 private) → 클론 → 스캐폴더 비대화형 실행 → invocation marker 기록 → 커밋·첫 push(빌드",
@@ -372,8 +372,12 @@ function appInitUsage(): string {
     "도달한 체크포인트부터 수렴한다. 소유 증명은 마커(.homelab-init)이고, 마커 없는 기존 레포는",
     "거부한다 — 확인 후 --adopt로만 이어갈 수 있다. private key 값은 어떤 출력에도 나타나지 않는다.",
     `  --archetype <a>    ${choices} (kind는 아키타입 유도값 — CONTEXT.md 용어)`,
-    "  --public           공개 레포로 생성(기본 private)",
+    "  --repo-public      **GitHub 레포**를 공개로 생성(기본 private) — 앱의 공개 노출이 아니다.",
+    "                     앱 노출은 클론된 앱 레포 .app-config.yml의 route.public이 정한다(손 편집).",
     "  --dispatch-secrets <경로>  App 키 디렉토리(app-id·private-key.pem) — 새 레포에 디스패치 시크릿 쌍 설정",
+    "                     ⚠️ dispatch App은 2026-09-03 org **설치 없음**(AGENTS.md 트리거 경계) — 재설치",
+    "                     전에는 이 쌍을 심어도 무효다(배포 반영은 bump-poll 크론 백스톱뿐). 키 디렉토리는",
+    "                     클론 트리 밖에 둔다(안이면 거부 — 첫 커밋의 add -A가 키를 원격에 올린다).",
     "  --adopt            마커 없는 기존 레포를 명시 입양(사용자 확인 — 소유 미증명 레포 이어가기)",
     "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
     "",
@@ -382,13 +386,25 @@ function appInitUsage(): string {
 }
 
 function appInitCli(rest: string[]): VerbOutput {
-  const p = positionalThenFlags(rest, { value: ["--archetype", "--dispatch-secrets"], bool: ["--public", "--adopt", "--json", "--help"] }, "homelab app init", appInitUsage);
+  // `--public`은 **의도적으로 파서 어휘에 남긴다** — 지우면 typedFlags의 '알 수 없는 옵션'이 되어
+  // 두 뜻이 갈렸다는 사실을 말할 자리가 없다. 이름 충돌은 실재했다(appverbs-2): 여기의 가시성은
+  // GitHub **레포**이고, 실물 스캐폴더의 --public은 `.app-config.yml`의 route.public(앱 **노출**)이라
+  // `app init foo --public`은 '공개 레포 + 내부 전용 앱'을 만들었다. 가장 흔한 조합(비공개 레포 +
+  // 공개 앱)은 이 동사의 플래그로는 도달 불가이고 클론된 트리의 파일 편집이 정답이다.
+  const p = positionalThenFlags(rest, { value: ["--archetype", "--dispatch-secrets"], bool: ["--repo-public", "--public", "--adopt", "--json", "--help"] }, "homelab app init", appInitUsage);
   if (isOutput(p)) return p;
   if (p.flags.bool("--help")) return { kind: "help", text: appInitUsage() };
+  if (p.flags.bool("--public")) {
+    return {
+      kind: "usage-error",
+      message: "homelab app init: --public은 --repo-public으로 바뀌었다(GitHub 레포 가시성). 앱의 공개 노출은 이 플래그가 아니라 앱 레포 .app-config.yml의 route.public이며, 클론된 트리에서 편집한다",
+      usage: appInitUsage(),
+    };
+  }
   const input: AppInitInput = {
     app: p.positional ?? "",
     archetype: p.flags.str("--archetype") ?? "",
-    public: p.flags.bool("--public"),
+    public: p.flags.bool("--repo-public"),
     dispatchSecrets: p.flags.str("--dispatch-secrets"),
     adopt: p.flags.bool("--adopt"),
   };

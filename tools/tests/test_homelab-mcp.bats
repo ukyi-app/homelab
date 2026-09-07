@@ -716,3 +716,19 @@ EOF
   # 근거 앵커 — init.ts가 timeoutMs:0을 고른 두 자리(스캐폴드·첫 push)가 상한을 두지 않는 이유다.
   [ "$(grep -c 'timeoutMs: 0' tools/lib/init.ts)" -ge 2 ]
 }
+
+@test "the app_init visibility input is named repoPublic and its description separates repo visibility from app exposure" {
+  mcp_rpc '{"jsonrpc":"2.0","id":64,"method":"tools/list"}' \
+    '{"jsonrpc":"2.0","id":65,"method":"tools/call","params":{"name":"app_init","arguments":{"app":"myapp","archetype":"api","parentDir":"/tmp","public":true}}}'
+  [ "$status" -eq 0 ]
+  props='select(.id==64) | .result.tools[] | select(.name=="app_init") | .inputSchema.properties'
+  [ "$(echo "$output" | jq -rc "$props | has(\"repoPublic\")")" = "true" ]
+  # 구 이름은 표면에서 사라졌다 — 바로 위 줄이 같은 술어의 양성 대조다(검출기 생존).
+  [ "$(echo "$output" | jq -rc "$props | has(\"public\")")" = "false" ]
+  desc="$(echo "$output" | jq -rc "$props | .repoPublic.description")"
+  [ -n "$desc" ]
+  # 이름 충돌의 다른 쪽을 문구가 지목한다 — 앱 공개 노출은 앱 레포 .app-config.yml의 route.public이다.
+  printf '%s\n' "$desc" | grep -qF "route.public"
+  # additionalProperties:false라 구 인자는 -32602다(옛 이름이 조용히 무시되지 않는다).
+  [ "$(echo "$output" | jq -rc 'select(.id==65) | .error.code')" = "-32602" ]
+}

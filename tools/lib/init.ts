@@ -20,8 +20,15 @@ import { SCAFFOLD_ENTRY, scaffoldContractError } from "./template-contract.ts";
 export type AppInitInput = {
   app: string;
   archetype: string;
+  // GitHub **레포 가시성**(기본 private). 입력 표면의 이름은 셸이 소유한다 — CLI `--repo-public`,
+  // MCP `repoPublic`(구 `--public`/`public`은 거부): 실물 스캐폴더의 `--public`은 `.app-config.yml`의
+  // route.public(앱 **노출**)이라 같은 이름이 두 뜻이었다(appverbs-2). 결과 계약 필드는 `public` 그대로다.
   public?: boolean;
-  dispatchSecrets?: string; // App 키 경로(디렉토리: app-id + private-key.pem). 미지정=크론 백스톱.
+  // App 키 경로(디렉토리: app-id + private-key.pem). 미지정=크론 백스톱.
+  // ⚠️ dispatch App은 2026-09-03 org 설치가 제거됐다(AGENTS.md 트리거 경계) — 이 축은 **휴면 코드
+  // 경로**로 유지한다(재설치 시 그대로 쓰인다). fail-closed 거부를 넣지 않는 이유: 문서화된 재개
+  // 경로를 막게 되고, 재설치는 owner 결정 하나로 끝난다(docs-1).
+  dispatchSecrets?: string;
   adopt?: boolean;          // 마커 없는 기존 레포를 명시 입양(사용자 확인)
   parentDir?: string;       // 대상 부모 디렉토리(MCP 명시 입력 — stdio 서버 cwd 추론 불가, plan r1 b7). 미설정=process.cwd().
 };
