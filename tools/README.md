@@ -571,9 +571,24 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   입력 검증 술어는 CLI(usage exit 2)·MCP(invalid params)가 공유. 관측 전용(gh api·kubectl get만).
   run 모드의 `--branch` 좌표는 lane-pr 커널의 정확 조회로 그 레인 PR을 붙이고(2건이면 race exit 3),
   app 모드의 산출물 부재 분기는 열린 PR 목록 1회로 create-app 레인 PR을 `createPrs`에 싣는다.
+  **목록 모드는 머지 대기 레인(`inFlight`)을 함께 낸다** — create-app·teardown은 수동 머지 동사라
+  '대기 PR'이 그린필드의 정상 상태인데 종전에는 어느 모드에서도 안 보였다. 형상은 라이브와 같은
+  2상(`{prs}|{error}`)이고 variant는 success 유지다(핵심 페이로드가 로컬 인벤토리인 모드를 GitHub
+  의존으로 바꾸지 않는다 — 다만 **조회 실패를 '없음'으로 렌더하지 않는다**). 브랜치→(레인,키)
+  역파싱은 catalog-rows(`parseDispatchLaneBranch`)가 소유하고 db/cache 레인도 포함하며, 키 형식은
+  레인 keyKind에 맞는 identity RE를 통과한 것만 실린다. per_page 상한 도달은 `truncated`.
+  핸들 URL은 **한 지점에서 정규화**한다(`normalizeHandleUrl` — 쿼리·프래그먼트 스트립): 검증과
+  조회가 같은 값을 봐야 한다. `/job/`·`/attempts/` URL은 받되 조회가 run 전체임을 `scope:"run"`으로
+  표기한다(짧은 번호는 여전히 거부 — 기본 레포가 갈려 조용한 오해석이 된다).
   핸들 URL의 owner/repo는 **GitHub 명명 규칙**으로 좁혀 파싱한다(owner=영숫자 시작·하이픈 ≤39,
   repo=영숫자/`.`/`_`/`-` ≤100 + `.`·`..` 배제) — 그 캡처가 `repos/<o>/<r>/…`로 gh api 경로에
   조립되므로 traversal은 형식 게이트에서 닫는다(`.github` 같은 정당한 점-접두 이름은 통과).
+  run 행은 `headBranch`·`event`를 싣고(쿼리 필터는 쓰지 않는다 — 실패한 PR 빌드를 지운다),
+  `deployedBuild.matchesLatestMain`이 핀 tag의 source SHA와 최신 main push run을 접두 비교한다
+  (판정 불가는 false가 아니라 키 부재).
+  `--resources`는 **5번째 mode**다(새 동사 아님 — 관측 전용): db·캐시 인벤토리를 레이아웃 커널의
+  역방향(`classifyArtifact`)에서 열거하고 role별 산출물 실존·cache 전용 원장 행·tombstone을 조인한다.
+  완전 purge된 리소스는 산출물 0건이라 안 나온다(tombstone 키 역파싱은 layoutFor의 소유라 두 번째 진실).
 - **`lib/doctor.ts`** — homelab CLI doctor 진단 엔진(`runDoctor()`). 점검 항목·상태 판정·detail
   문구를 소유한다(관측 전용 — `gh api` 읽기만, 테스트가 argv 원장으로 강제). 선행 gh-auth 실패로
   판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든

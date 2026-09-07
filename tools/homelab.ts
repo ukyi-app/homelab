@@ -208,11 +208,14 @@ function progressSink(e: ProgressEvent): void {
 
 function statusUsage(): string {
   return [
-    "사용법: homelab status [<app>] [--run <url> [--branch <ref>] | --pr <url>] [--json]",
+    "사용법: homelab status [<app>] [--resources | --run <url> [--branch <ref>] | --pr <url>] [--json]",
     "",
-    "앱 상태 관찰 — 인자 없음: 전체 앱 목록·요약(레포 데이터). <app>: 배포 핀·바인딩·최근 run·",
+    "앱 상태 관찰 — 인자 없음: 전체 앱 목록·요약 + 머지 대기 디스패처 PR(열린 PR 1회 조회 —",
+    "실패해도 목록은 그대로 나오고 사유가 실린다). <app>: 배포 핀·바인딩·최근 run·",
     "열린 PR에, KUBECONFIG가 있으면 ArgoCD sync/health를 덧붙인다(없으면 라이브 구간 생략 표시).",
-    "핸들 조회: --run/--pr에 GitHub URL을 주면 그 오퍼레이션 단위의 상태를 보고한다.",
+    "핸들 조회: --run/--pr에 GitHub URL을 주면 그 오퍼레이션 단위의 상태를 보고한다(쿼리·프래그먼트",
+    "꼬리는 무시하고, job/attempts URL은 run 전체로 승격해 그 사실을 표기한다 — 짧은 번호는 거부).",
+    "  --resources   db·캐시 리소스 인벤토리(레포 산출물 역방향 열거 — 로컬 전용, gh 무의존)",
     "  --run <url>   run URL(https://github.com/<o>/<r>/actions/runs/<id>) 핸들 조회",
     "  --branch <ref> --run과 함께: 그 레인 브랜치의 PR을 정확 조회(변이 pending의 run.branch를 그대로)",
     "  --pr <url>    PR URL(https://github.com/<o>/<r>/pull/<n>) 핸들 조회",
@@ -225,12 +228,12 @@ function statusUsage(): string {
 
 function statusCli(rest: string[]): VerbOutput {
   // 공용 골격 사용 — 헬퍼 도입(9ee3116) 이전에 쓰인 인라인 5줄(분리·try/catch·--help)의 잔재를 지운다.
-  const p = positionalThenFlags(rest, { value: ["--run", "--pr", "--branch", "--root"], bool: ["--json", "--help"] }, "homelab status", statusUsage);
+  const p = positionalThenFlags(rest, { value: ["--run", "--pr", "--branch", "--root"], bool: ["--resources", "--json", "--help"] }, "homelab status", statusUsage);
   if (isOutput(p)) return p;
   const app = p.positional;
   const flags = p.flags;
   if (flags.bool("--help")) return { kind: "help", text: statusUsage() };
-  const input: StatusInput = { app, runUrl: flags.str("--run"), prUrl: flags.str("--pr"), branch: flags.str("--branch"), root: flags.str("--root") };
+  const input: StatusInput = { app, runUrl: flags.str("--run"), prUrl: flags.str("--pr"), branch: flags.str("--branch"), resources: flags.bool("--resources") ? true : undefined, root: flags.str("--root") };
   const bad = statusInputError(input);
   if (bad) return { kind: "usage-error", message: `homelab status: ${bad}`, usage: statusUsage() };
   const envelope = STATUS.op(input);

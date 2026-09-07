@@ -120,6 +120,7 @@ const DESC_DISPATCH_SECRETS = "GitHub App 키 파일(app-id·private-key.pem)이
 // 이름 충돌 분리(appverbs-2) — 이 축은 GitHub 레포 가시성이고, 앱 노출은 별도 SSOT다.
 const DESC_REPO_PUBLIC = "GitHub 레포를 공개로 만든다(기본 private). 앱의 공개 노출이 아니다 — 그건 앱 레포 .app-config.yml의 route.public이고, 클론된 트리에서 편집한다.";
 // 변이 pending의 result.run.branch를 그대로 넘기는 자리 — 재개 경로를 스키마가 광고한다(티켓 09).
+const DESC_RESOURCES = "레포 산출물에서 db·캐시 리소스 인벤토리를 낸다(관측 전용·로컬 디스크만). app·run·pr과 상호배타이며, 행은 role별 산출물 실존 + cache 원장 행 + tombstone이다.";
 const DESC_BRANCH = "변이 pending이 돌려준 result.run.branch를 그대로. run과 함께만 쓰며(단독 조회 아님) 그 레인 브랜치의 PR을 정확 조회한다. 그 run의 좌표가 아닌 브랜치는 거부된다.";
 
 // 변이 tool의 MCP 소유 꼬리말 — description은 tools/list의 **에이전트 대면 채널**이라 CLI 셸의
@@ -144,10 +145,10 @@ const TOOLS: McpTool[] = [
     description: STATUS.desc,
     inputSchema: {
       type: "object", additionalProperties: false,
-      properties: { app: { type: "string" }, run: { type: "string" }, pr: { type: "string" }, branch: { type: "string", description: DESC_BRANCH } },
+      properties: { app: { type: "string" }, run: { type: "string" }, pr: { type: "string" }, branch: { type: "string", description: DESC_BRANCH }, resources: { type: "boolean", description: DESC_RESOURCES } },
     },
     call: (a) => {
-      const input: StatusInput = { app: str(a, "app"), runUrl: str(a, "run"), prUrl: str(a, "pr"), branch: str(a, "branch") };
+      const input: StatusInput = { app: str(a, "app"), runUrl: str(a, "run"), prUrl: str(a, "pr"), branch: str(a, "branch"), resources: a?.resources === true ? true : undefined };
       const bad = statusInputError(input);
       return bad ? usage(bad) : envelope(STATUS.op(input));
     },

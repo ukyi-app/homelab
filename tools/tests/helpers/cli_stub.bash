@@ -427,7 +427,7 @@ case "$*" in
     if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/pulls-open.json"; fi
     cat "$FIX/homelab-prs.json"
     ;;
-  "api repos/"*"/actions/runs?per_page=3 --jq "'[.workflow_runs[] | {name, status, conclusion, head_sha, html_url}]')
+  "api repos/"*"/actions/runs?per_page=3 --jq "'[.workflow_runs[] | {name, status, conclusion, head_sha, head_branch, event, html_url}]')
     if [ -n "${STUB_GH_RUNS_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
     if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/workflow-runs.json"; fi
     cat "$FIX/runs.json"
@@ -522,6 +522,29 @@ make_app_fixture() {
     "$name" "$(printf '%033d' 0)" "$(printf 'ab%062d' 0)" > "$d/values.yaml"
   printf '{ "autoDeploy": %s }\n' "$auto" > "$d/.bindings.json"
   if [ "$src" != "-" ]; then printf '%s\n' "$src" > "$d/source-repo"; fi
+}
+
+# 리소스 산출물 픽스처 — `status --resources`의 역방향 열거(resource-layout.classifyArtifact)가
+# 읽는 자리를 $APPS_ROOT 아래에 재현한다. 경로 형상의 SSOT는 lib/resource-layout.ts layoutFor이고
+# 여기는 그 **사본**이다 — 커널이 경로를 바꾸면 이 픽스처가 드리프트해 열거가 0건으로 붕괴하는데,
+# 그 붕괴는 소비 @test의 종류별 바닥값(db 2 · cache 1)이 잡는다(바닥값 없이 쓰면 vacuous green).
+# 사용: make_db_fixture <name> · make_cache_fixture <name>
+make_db_fixture() {
+  mkdir -p "$APPS_ROOT/platform/cnpg/prod/databases" "$APPS_ROOT/platform/data-conn/prod"
+  printf 'apiVersion: postgresql.cnpg.io/v1\nkind: Database\n' > "$APPS_ROOT/platform/cnpg/prod/databases/$1.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/cnpg/prod/databases/db-$1-owner.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/cnpg/prod/databases/db-$1-ro.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/db-$1-conn.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/db-$1-ro-conn.sealed.yaml"
+}
+
+make_cache_fixture() {
+  mkdir -p "$APPS_ROOT/platform/cache/prod/$1" "$APPS_ROOT/platform/data-conn/prod"
+  for f in configmap.yaml pvc.yaml deployment.yaml service.yaml acl.sealed.yaml kustomization.yaml; do
+    printf 'kind: X\n' > "$APPS_ROOT/platform/cache/prod/$1/$f"
+  done
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/cache-$1-conn.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/cache-$1-ro-conn.sealed.yaml"
 }
 
 # 메모리 원장 픽스처 행 — 형식 SSOT는 tools/lib/ledger-totals.ts LEDGER_ROW_RE.

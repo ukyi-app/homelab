@@ -242,8 +242,8 @@ export const DOCTOR: DoctorVerb = {
 // named export — CLI 어댑터·MCP가 정확한 입력 타입으로 호출한다.
 export const STATUS: StatusVerb = {
   path: ["status"],
-  desc: "앱 상태 관찰(목록/단일 앱: 핀·바인딩·run·PR·ArgoCD) + 핸들(run/PR URL) 조회",
-  needs: "없음(인자 없는 목록은 로컬 레포만) · GitHub(<app>·핸들 조회) · 클러스터(KUBECONFIG 있을 때만 — 부재는 생략)",
+  desc: "앱 상태 관찰(목록/단일 앱: 핀·바인딩·run·PR·ArgoCD) + 리소스 인벤토리(db·캐시) + 핸들(run/PR URL) 조회",
+  needs: "없음(--resources·목록의 로컬 인벤토리) · GitHub(<app>·핸들 조회, 목록의 머지 대기 레인 1회 — 실패는 사유와 함께 보고하고 exit 0) · 클러스터(KUBECONFIG 있을 때만 — 부재는 생략)",
   op: statusOp,
 };
 

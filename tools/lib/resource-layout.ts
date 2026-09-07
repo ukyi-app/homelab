@@ -270,3 +270,27 @@ export function classifyArtifact(pathOrEntry: string): ArtifactClass | null {
   }
   return null;
 }
+
+// role → 그 **이름에 귀속된** 산출물 경로(티켓 40). classifyArtifact(경로 → role)의 정확한 역이고,
+// 두 방향이 같은 커널에 있어야 관측(status --resources)과 감사(audit-orphans)가 같은 집합을 말한다.
+// files[]와 다른 뷰인 이유: files는 teardown 스윕 스코프라 **공유 산출물**(kustomization·cluster.yaml·
+// 원장)까지 담는데, 그것들은 이 리소스의 것이 아니라 이름 귀속이 없다 — "이 리소스의 산출물이
+// 실재하는가"라는 질문에 공유 파일의 실존을 섞으면 전건 present가 상수가 된다.
+export function roleArtifacts(kind: ResourceKind, name: string): Array<{ role: ArtifactRole; path: string }> {
+  if (kind === "db") {
+    const p = layoutFor("db", name).paths;
+    return [
+      { role: "cr", path: p.cr },
+      { role: "owner-secret", path: p.ownerSealed },
+      { role: "ro-secret", path: p.roSealed },
+      { role: "conn", path: p.connSealed },
+      { role: "ro-conn", path: p.roConnSealed },
+    ];
+  }
+  const p = layoutFor("cache", name).paths;
+  return [
+    { role: "instance", path: p.instanceDir },
+    { role: "conn", path: p.conn },
+    { role: "ro-conn", path: p.roConn },
+  ];
+}

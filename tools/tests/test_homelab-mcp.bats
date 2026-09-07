@@ -574,15 +574,22 @@ mcp_rpc_in() {
   printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/prs-head-create-database_mydb-501.json"
   mcp_rpc '{"jsonrpc":"2.0","id":42,"method":"tools/list"}' \
     '{"jsonrpc":"2.0","id":43,"method":"tools/call","params":{"name":"status","arguments":{"run":"https://github.com/ukyi-app/homelab/actions/runs/501","branch":"create-database/mydb-501"}}}' \
-    '{"jsonrpc":"2.0","id":44,"method":"tools/call","params":{"name":"status","arguments":{"branch":"create-database/mydb-501"}}}'
+    '{"jsonrpc":"2.0","id":44,"method":"tools/call","params":{"name":"status","arguments":{"branch":"create-database/mydb-501"}}}' \
+    '{"jsonrpc":"2.0","id":45,"method":"tools/call","params":{"name":"status","arguments":{"resources":true}}}' \
+    '{"jsonrpc":"2.0","id":46,"method":"tools/call","params":{"name":"status","arguments":{"resources":true,"app":"myapp"}}}'
   [ "$status" -eq 0 ]
   keys="$(echo "$output" | jq -rc 'select(.id==42) | .result.tools[] | select(.name=="status") | .inputSchema.properties | keys | join(",")')"
   echo "$keys" | grep -q "branch"
+  # 리소스 인벤토리는 관측 전용이라 MCP에도 그대로 노출된다(티켓 40) — CLI 플래그와 같은 술어를 쓴다.
+  echo "$keys" | grep -q "resources"
   # owner 결정 Q2 — correlation 핸들 모드는 열지 않는다(재개 조건 미충족). 부정 단언의 양성 짝은 위 줄.
   [ "$(printf '%s\n' "$keys" | grep -c "correlation")" = "0" ]
   [ "$(echo "$output" | jq -rc 'select(.id==43) | .result.content[0].text | fromjson | .result.run.pr.url')" = "https://github.com/ukyi-app/homelab/pull/21" ]
   # 좌표 단독은 CLI와 같은 술어로 거부된다(invalid params).
   [ "$(echo "$output" | jq -rc 'select(.id==44) | .error.code')" = "-32602" ]
+  # --resources 모드는 MCP에서도 돌고(양성), app과 동시 지정은 같은 상호배타 술어로 거부된다(음성).
+  [ "$(echo "$output" | jq -rc 'select(.id==45) | .result.content[0].text | fromjson | .result.mode')" = "resources" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==46) | .error.code')" = "-32602" ]
 }
 
 # ── 진행 표시 심의 MCP 무주입(homelab-cli-r2 티켓 07) ─────────────────────────────────────

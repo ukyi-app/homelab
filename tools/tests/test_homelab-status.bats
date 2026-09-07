@@ -243,7 +243,10 @@ assert_envelope_valid() {
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
   echo "$output" | jq -r '.result.error' | grep -q "source-repo"
-  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+  # 파손 분기는 gh를 **한 번도** 부르지 않는다. 총계 1은 바로 위 목록 모드의 머지 대기 레인 1회이고
+  # (티켓 40), app 모드가 더한 호출은 0이다 — 두 등식이 함께 서야 이게 정확 상한이다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/blank/actions/runs?per_page=3" --jq)" = "0" ]
   # 읽기 불가(디렉토리 = EISDIR)도 인레포로 위장하지 않는다.
   make_app_fixture unread true
   rm -f "$APPS_ROOT/apps/unread/deploy/prod/source-repo"
@@ -671,17 +674,29 @@ assert_envelope_valid() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=open&per_page=100" --jq)" = "1" ]
 }
 
-@test "status --json is an offline entry point: exit 0 and a count with gh removed from PATH" {
-  # 티켓 33 — usage가 '요구: 없음'이라고 선언하는 경로에 회귀 앵커가 0건이었다(status 테스트는
-  # 항상 gh 스텁을 깐다). gh만 지운 PATH로 그 주장을 실제로 잰다.
+@test "list mode spends exactly one gh call, and losing gh degrades only the in-flight lane" {
+  # 티켓 33이 세운 전제('목록 모드 gh 0회')는 티켓 40의 inFlight로 깨진다 — 부재 단언을 **정확
+  # 상한**으로 다시 못박는다: 목록 모드의 GitHub 접촉은 열린 PR 목록 **1회뿐**이고, 그 1회가
+  # 실패해도 로컬 인벤토리(count·앱 행)는 그대로이며 exit 0이다.
   make_app_fixture blog true
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.count')" = "1" ]
+  # 정확 상한 — 전체 gh 호출 1회이고 그 1회가 열린 PR 목록이다(두 등식이 함께 서야 상한이다).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=open&per_page=100" --jq)" = "1" ]
+  # 목록 모드는 앱 레포 run을 부르지 않는다(앱 수만큼 늘어나는 호출이 없다는 부정 단언).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/blog/actions/runs?per_page=3" --jq)" = "0" ]
+  # gh를 지운 PATH — 로컬 레포 계층은 그대로 서고 GitHub 레그만 사유와 함께 접힌다.
   NOGH="$BATS_TEST_TMPDIR/stub-nogh"; mkdir -p "$NOGH"
   for t in bun bash base64 cat git sleep kubectl; do ln -s "$STUB/$t" "$NOGH/$t"; done
   run --separate-stderr env PATH="$NOGH" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.count')" = "1" ]
-  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
-  # 같은 PATH에서 gh를 요구하는 경로는 실패한다(부재 단언의 양성 짝 — PATH 조작이 실제로 먹혔다).
+  [ "$(echo "$output" | jq -r '.result.apps[0].name')" = "blog" ]
+  echo "$output" | jq -r '.result.inFlight.error' | grep -q "PATH"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "1" ]
+  # 같은 PATH에서 GitHub 계층이 fail-loud인 경로는 실패한다(부재 단언의 양성 짝 — PATH 조작이 먹혔다).
   run --separate-stderr env PATH="$NOGH" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status blog --root "$APPS_ROOT" --json
   [ "$status" -eq 1 ]
 }
@@ -719,4 +734,198 @@ assert_envelope_valid() {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status wired --root "$APPS_ROOT"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "db-wired-conn"
+}
+
+# ── 티켓 40: in-flight 가시성 · 핸들 URL 관용 · 빌드 대조 · 리소스 인벤토리 ─────────────────
+
+@test "list mode surfaces in-flight dispatcher PRs from every lane and never renders a failed lookup as none" {
+  # observe-3: create-app·teardown은 **수동 머지** 동사라 '머지 대기 PR'이 그린필드의 정상 상태이고
+  # 며칠 지속된다. 그 창에서 목록 모드는 「온보딩된 앱이 없다」한 줄이었고 좌표가 0이었다.
+  # ⚠️ inFlight는 live와 같은 모양이다({prs}|{error}) — 핵심 페이로드가 로컬 인벤토리인 모드를
+  #    GitHub 의존으로 바꾸지 않는다(조회 실패여도 variant는 success).
+  make_app_fixture blog true
+  printf '[{"number":51,"title":"create-app","head":"create-app/myapp-801","html_url":"u51","auto_merge":false},{"number":52,"title":"secrets","head":"update-secrets/myapp-802","html_url":"u52","auto_merge":true},{"number":53,"title":"teardown","head":"teardown/teardown-app-myapp-803","html_url":"u53","auto_merge":false},{"number":54,"title":"db","head":"create-database/mydb-804","html_url":"u54","auto_merge":false},{"number":55,"title":"cache","head":"create-cache/mycache-805","html_url":"u55","auto_merge":false},{"number":56,"title":"bad key","head":"create-app/Foo-1","html_url":"u56","auto_merge":false},{"number":57,"title":"bump","head":"bump-poll/blog-sha-abcdef1","html_url":"u57","auto_merge":true}]\n' > "$FIX/homelab-prs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  # 다섯 레인 전부 — keyKind:"resource"(db·cache)도 포함한다(행 데이터가 소유하는 역파싱).
+  [ "$(echo "$output" | jq -r '.result.inFlight.prs | length')" = "5" ]
+  [ "$(echo "$output" | jq -r '[.result.inFlight.prs[].action] | sort | join(",")')" = "create-app,create-cache,create-database,teardown-app,update-secrets" ]
+  [ "$(echo "$output" | jq -r '.result.inFlight.prs[] | select(.action=="create-database") | .key')" = "mydb" ]
+  [ "$(echo "$output" | jq -r '.result.inFlight.prs[] | select(.action=="teardown-app") | .key')" = "myapp" ]
+  # 불량 key(대문자)와 비-디스패처 브랜치(bump-poll)는 표시되지 않는다 — 위 5건이 양성 대조다.
+  [ "$(echo "$output" | jq -r '[.result.inFlight.prs[].number] | index(56) // "none"')" = "none" ]
+  [ "$(echo "$output" | jq -r '[.result.inFlight.prs[].number] | index(57) // "none"')" = "none" ]
+  # 로컬 인벤토리는 그대로다(GitHub 레그가 앱 행을 대체하지 않는다).
+  [ "$(echo "$output" | jq -r '.result.count')" = "1" ]
+  assert_envelope_valid "$output"
+  # 사람용 렌더가 좌표를 낸다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/inflight-human.txt"
+  [ -s "$BATS_TEST_TMPDIR/inflight-human.txt" ]
+  grep -q "머지 대기" "$BATS_TEST_TMPDIR/inflight-human.txt"
+  grep -q "create-app" "$BATS_TEST_TMPDIR/inflight-human.txt"
+  # 조회 실패는 '없음'으로 렌더되지 않는다(vacuous green의 정면) — 그래도 exit 0 + 앱 행 유지.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_PRS_FAIL=1 "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.count')" = "1" ]
+  [ "$(echo "$output" | jq -r '.result.inFlight | has("error")')" = "true" ]
+  [ "$(echo "$output" | jq -r '.result.inFlight | has("prs")')" = "false" ]
+  assert_envelope_valid "$output"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_PRS_FAIL=1 "$BUN" tools/homelab.ts status --root "$APPS_ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/inflight-fail.txt"
+  [ -s "$BATS_TEST_TMPDIR/inflight-fail.txt" ]
+  grep -q "조회 실패" "$BATS_TEST_TMPDIR/inflight-fail.txt"
+  [ "$(grep -c "머지 대기: 없음" "$BATS_TEST_TMPDIR/inflight-fail.txt")" = "0" ]
+  # 부정 단언의 양성 짝 — PR 0건은 실제로 '없음'으로 렌더된다(그 문구가 존재는 한다).
+  printf '[]\n' > "$FIX/homelab-prs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "머지 대기: 없음"
+}
+
+@test "a full page of open PRs is reported as truncated so an empty tail is not read as none" {
+  # per_page=100은 상한이고, 100건이 왔다는 것은 '더 있을 수 있다'는 뜻이다 — 그 사실을 안 실으면
+  # 101번째 머지 대기 PR이 '없음'과 구별되지 않는다.
+  python3 - "$FIX/homelab-prs.json" <<'PY'
+import json, sys
+rows = [{"number": 1000 + i, "title": "t", "head": "create-app/app%d-%d" % (i, 800 + i), "html_url": "u%d" % i, "auto_merge": False} for i in range(100)]
+open(sys.argv[1], "w").write(json.dumps(rows) + "\n")
+PY
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.inFlight.prs | length')" = "100" ]
+  [ "$(echo "$output" | jq -r '.result.inFlight.truncated')" = "true" ]
+  assert_envelope_valid "$output"
+  # 대조군 — 99건은 truncated가 아니다(상한 도달이 판정 조건이지 '많음'이 아니다).
+  python3 - "$FIX/homelab-prs.json" <<'PY'
+import json, sys
+rows = [{"number": 1000 + i, "title": "t", "head": "create-app/app%d-%d" % (i, 800 + i), "html_url": "u%d" % i, "auto_merge": False} for i in range(99)]
+open(sys.argv[1], "w").write(json.dumps(rows) + "\n")
+PY
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.inFlight.prs | length')" = "99" ]
+  [ "$(echo "$output" | jq -r '.result.inFlight | has("truncated")')" = "false" ]
+}
+
+@test "handle URLs are normalized at one point so query, fragment, job, and attempts tails all resolve" {
+  # observe-11: GitHub UI가 붙이는 꼬리(?check_suite_focus=true · #issuecomment-…)는 좌표가 아니라
+  # 뷰 상태인데 `/`로 시작하지 않아 usage 거부였다. 정규화는 **검증과 조회가 같은 값을 보도록**
+  # 한 지점에서 한다 — 두 곳에서 하면 어긋난 순간 형식 오류와 조회가 다른 URL을 본다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/page/actions/runs/1?check_suite_focus=true" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "run" ]
+  [ "$(echo "$output" | jq -r '.result.run | has("scope")')" = "false" ]
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --pr "https://github.com/ukyi-app/homelab/pull/7#issuecomment-99" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "pr" ]
+  # job·attempts는 받되 **승격 사실을 표기**한다 — job 지정이 조용히 무시되면 결과가 거짓말이다.
+  for tail in "job/9" "attempts/2"; do
+    run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/page/actions/runs/1/$tail" --json
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -r '.result.run.scope')" = "run" ]
+    assert_envelope_valid "$output"
+  done
+  # 정규화가 **검증 앞**이라는 증인 — 쿼리가 붙은 run URL에서 --branch 모순이 형식 오류가 아니라
+  # run id 불일치로 잡힌다(정규화가 뒤였다면 'URL 형식 불량'이 먼저 나온다).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/homelab/actions/runs/501?x=1" --branch create-database/mydb-5011 --json
+  [ "$status" -eq 2 ]
+  echo "$stderr" | grep -q "run id"
+  # 음성 대조 — 타 호스트·issues URL·짧은 번호는 여전히 usage 거부다(관용이 전칭이 아니다).
+  for bad in "https://gitlab.com/ukyi-app/page/actions/runs/1" "https://github.com/ukyi-app/page/issues/1" "712"; do
+    run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --run "$bad" --json
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "run rows carry the head branch and event, and the deploy pin is compared to the latest main build in three states" {
+  # observe-12: 앱 레포 run 상위 3개에는 PR 빌드·CI가 섞이는데 branch/event가 없어 '핀이 최신 main
+  # 빌드인가'를 판정할 수 없었다. ⚠️ 쿼리 필터(branch=main&event=push)는 **쓰지 않는다** — 실패한
+  # PR 빌드를 화면에서 지워 3분기 중 하나를 없앤다. 필드로 싣고 판정은 리더가 한다.
+  make_app_fixture page true
+  tag="$(sed -n 's/^  tag: //p' "$APPS_ROOT/apps/page/deploy/prod/values.yaml")"
+  [ -n "$tag" ]
+  sha="${tag#sha-}"
+  printf '[{"name":"release","status":"completed","conclusion":"success","head_sha":"%s","head_branch":"main","event":"push","html_url":"https://github.com/ukyi-app/page/actions/runs/9"},{"name":"ci","status":"completed","conclusion":"failure","head_sha":"deadbee","head_branch":"feat/x","event":"pull_request","html_url":"https://github.com/ukyi-app/page/actions/runs/8"}]\n' "$sha" > "$FIX/runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  # PR 빌드도 목록에 남는다(필터를 걸지 않았다는 증인) + 두 필드가 실린다.
+  [ "$(echo "$output" | jq -r '.result.runs | length')" = "2" ]
+  [ "$(echo "$output" | jq -r '.result.runs[0].headBranch')" = "main" ]
+  [ "$(echo "$output" | jq -r '.result.runs[0].event')" = "push" ]
+  [ "$(echo "$output" | jq -r '.result.runs[1].event')" = "pull_request" ]
+  [ "$(echo "$output" | jq -r '.result.deployedBuild.matchesLatestMain')" = "true" ]
+  assert_envelope_valid "$output"
+  # ② 불일치 — 최신 main push run의 head_sha가 핀과 다르다.
+  printf '[{"name":"release","status":"completed","conclusion":"success","head_sha":"9999999999999999999999999999999999999999","head_branch":"main","event":"push","html_url":"https://github.com/ukyi-app/page/actions/runs/9"}]\n' > "$FIX/runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.deployedBuild.matchesLatestMain')" = "false" ]
+  # ③ `sha-*` 형식 밖 tag — false가 아니라 **키 부재**다(판정 불가를 부정 판정으로 접지 않는다).
+  sed -i.bak 's/^  tag: .*/  tag: v1.2.3/' "$APPS_ROOT/apps/page/deploy/prod/values.yaml"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.app.tag')" = "v1.2.3" ]
+  [ "$(echo "$output" | jq -r '.result | has("deployedBuild")')" = "false" ]
+}
+
+@test "status --resources inventories db and cache rows with per-role artifacts, the cache-only ledger row, and tombstones" {
+  # product-2: 라이브에 DB 2·캐시 1이 실재하는데 status는 앱만 열거하고 count 0을 냈다 — `db create`로
+  # 만든 것을 되읽을 동사가 CLI에 0개였다. 열거는 레이아웃 커널의 역방향(classifyArtifact)에서
+  # 파생한다(두 번째 진실 금지). 새 동사가 아니라 status의 5번째 mode다(ADR 0001 재개 조건 미충족).
+  make_db_fixture page
+  make_db_fixture orders
+  make_cache_fixture sessions
+  make_ledger_row cache-sessions 64 128 cache
+  printf '{"db:page":{"state":"retained"}}\n' > "$APPS_ROOT/platform/data-conn/prod/.tombstones.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --resources --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "resources" ]
+  # 열거 붕괴 방어 — 종류별 바닥값(db 2 · cache 1). 총계만 재면 한 종류가 0으로 꺼져도 통과한다.
+  [ "$(echo "$output" | jq -r '.result.count')" = "3" ]
+  [ "$(echo "$output" | jq -r '[.result.resources[] | select(.kind=="db")] | length')" = "2" ]
+  [ "$(echo "$output" | jq -r '[.result.resources[] | select(.kind=="cache")] | length')" = "1" ]
+  [ "$(echo "$output" | jq -r '[.result.resources[].name] | sort | join(",")')" = "orders,page,sessions" ]
+  # role별 산출물 실존 — db 5역할·cache 3역할이 전부 present다(전건 실존이 기준선).
+  [ "$(echo "$output" | jq -r '.result.resources[] | select(.name=="orders") | [.artifacts[] | select(.present)] | length')" = "5" ]
+  [ "$(echo "$output" | jq -r '.result.resources[] | select(.name=="sessions") | [.artifacts[] | select(.present)] | length')" = "3" ]
+  # 원장 행은 cache에만 — db는 원장 비접촉 불변식이다.
+  [ "$(echo "$output" | jq -r '.result.resources[] | select(.name=="sessions") | .ledgerMi')" = "128" ]
+  [ "$(echo "$output" | jq -r '.result.resources[] | select(.name=="page") | has("ledgerMi")')" = "false" ]
+  # tombstone은 조인된 행에만 실린다(부재는 키 부재).
+  [ "$(echo "$output" | jq -r '.result.resources[] | select(.name=="page") | .tombstone')" = "retained" ]
+  [ "$(echo "$output" | jq -r '.result.resources[] | select(.name=="orders") | has("tombstone")')" = "false" ]
+  # 관측은 로컬 디스크뿐 — gh를 부르지 않는다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+  assert_envelope_valid "$output"
+  # 부분 purge 잔재 — conn만 남고 소스(Database CR)가 사라진 상태를 행이 말한다(전건 present의 음성 짝).
+  rm "$APPS_ROOT/platform/cnpg/prod/databases/orders.yaml"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --resources --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.count')" = "3" ]
+  [ "$(echo "$output" | jq -r '.result.resources[] | select(.name=="orders") | .artifacts[] | select(.role=="cr") | .present')" = "false" ]
+  # 사람용 렌더도 같은 사실을 말한다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --resources --root "$APPS_ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "orders"
+}
+
+@test "the --resources mode joins the mutually exclusive set and its usage error names it" {
+  make_app_fixture blog true
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status blog --resources --root "$APPS_ROOT" --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- "--resources"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --resources --run "https://github.com/ukyi-app/page/actions/runs/1" --root "$APPS_ROOT" --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  # 양성 대조 — 단독 지정은 통과한다(상호배타가 전칭 거부가 아니다).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --resources --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.mode')" = "resources" ]
 }

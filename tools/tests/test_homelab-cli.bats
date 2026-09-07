@@ -184,7 +184,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     const env = (verb, variant, result) => ({ schema: "homelab-cli/1", verb, variant, exitCode: sch["x-contract"].exitCodes[variant], omitted: [], result });
     const rejected = [
       ["status success carrying an error branch", env("status", "success", { mode: "app", error: "x" })],
-      ["status failure carrying a list result", env("status", "failure", { mode: "list", repo: { root: "/x" }, apps: [], count: 0 })],
+      ["status failure carrying a list result", env("status", "failure", { mode: "list", repo: { root: "/x" }, inFlight: { prs: [] }, apps: [], count: 0 })],
       ["status failure carrying a run result", env("status", "failure", { mode: "run", run: { status: "completed", url: "u" } })],
       ["doctor success with fail 9 (exitCode lie)", env("doctor", "success", doctor(9))],
       ["doctor failure with fail 0 (exitCode lie)", env("doctor", "failure", doctor(0))],
@@ -198,7 +198,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     const accepted = [
       ["doctor success fail 0", env("doctor", "success", doctor(0))],
       ["doctor failure fail 1", env("doctor", "failure", doctor(1))],
-      ["status success list", env("status", "success", { mode: "list", repo: { root: "/x" }, apps: [], count: 0 })],
+      ["status success list", env("status", "success", { mode: "list", repo: { root: "/x" }, inFlight: { prs: [] }, apps: [], count: 0 })],
       ["status failure app error", env("status", "failure", { mode: "app", error: "x" })],
     ];
     for (const [label, e] of accepted) {

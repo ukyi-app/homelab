@@ -423,6 +423,7 @@ const DEFINITIONS = `    "doctorResult": {
       "oneOf": [
         { "$ref": "#/definitions/statusList" },
         { "$ref": "#/definitions/statusApp" },
+        { "$ref": "#/definitions/statusResources" },
         { "$ref": "#/definitions/statusRun" },
         { "$ref": "#/definitions/statusPrHandle" }
       ]
@@ -430,12 +431,48 @@ const DEFINITIONS = `    "doctorResult": {
     "statusList": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "repo", "apps", "count"],
+      "required": ["mode", "repo", "inFlight", "apps", "count"],
       "properties": {
         "mode": { "enum": ["list"] },
         "repo": { "$ref": "#/definitions/statusRepo" },
+        "inFlight": { "$ref": "#/definitions/statusInFlight" },
         "apps": { "type": "array", "items": { "$ref": "#/definitions/statusAppRow" } },
         "count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "statusInFlight": {
+      "description": "머지 대기(in-flight) 디스패처 PR 레인. create-app·teardown-app은 **수동 머지** 동사라 '머지 대기 PR'이 그린필드의 정상 상태이고 며칠 지속된다 — 그 창에서 목록 모드가 「앱 없음」한 줄이면 이어갈 좌표가 0이다. 형상은 라이브 계층과 같은 2상이다: 이 모드의 핵심 페이로드는 로컬 인벤토리이므로 조회 실패가 모드를 실패로 바꾸지 않는다(variant는 success 유지). 빈 목록으로 접는 것은 금지 — 못 본 것과 없는 것이 같아지면 vacuous green이다. truncated는 per_page 상한 도달(꼬리가 잘렸을 수 있다).",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["prs"],
+          "properties": {
+            "prs": { "type": "array", "items": { "$ref": "#/definitions/statusInFlightRow" } },
+            "truncated": { "enum": [true] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["error"],
+          "properties": { "error": { "type": "string", "minLength": 1 } }
+        }
+      ]
+    },
+    "statusInFlightRow": {
+      "description": "레인 신원(action·key)은 브랜치에서 역파싱된다 — SSOT는 catalog-rows의 행 데이터(branchPattern)이고, 키 형식은 레인의 keyKind에 맞는 identity RE를 통과한 것만 실린다(불량 키는 행을 만들지 않는다). db/cache 레인(keyKind:resource)도 포함한다 — 머지 대기는 앱만의 상태가 아니다.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "key", "number", "head", "url", "autoMerge"],
+      "properties": {
+        "action": { "enum": ["create-database", "create-cache", "create-app", "update-secrets", "teardown-app"] },
+        "key": { "type": "string", "minLength": 1 },
+        "number": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string" },
+        "head": { "type": "string", "minLength": 1 },
+        "url": { "type": "string" },
+        "autoMerge": { "type": "boolean" }
       }
     },
     "statusRepo": {
@@ -473,6 +510,13 @@ const DEFINITIONS = `    "doctorResult": {
         "repo": { "$ref": "#/definitions/statusRepo" },
         "app": { "$ref": "#/definitions/statusAppRow" },
         "runs": { "type": "array", "items": { "$ref": "#/definitions/statusRunRow" } },
+        "deployedBuild": {
+          "description": "배포 핀 tag가 인코딩한 source SHA와 앱 레포 **최신 main push run**의 head_sha를 접두 비교한 결과. 판정 불가는 false가 아니라 **키 부재**다 — 'sha-*' 형식 밖 tag(수동 릴리스 v1.2.3)나 목록에 main push run이 없는 경우를 false로 접으면 '최신이 아니다'라는 답할 수 없는 주장이 된다. run 목록에 branch/event 쿼리 필터를 걸지 않는 이유도 같다(실패한 PR 빌드를 지우면 3분기 중 하나가 사라진다).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["matchesLatestMain"],
+          "properties": { "matchesLatestMain": { "type": "boolean" } }
+        },
         "openPrs": { "type": "array", "items": { "$ref": "#/definitions/statusOpenPrRow" } },
         "live": {
           "description": "라이브 계층의 세 disjoint 상태 — argocd(실재: sync/health/리비전/conditions) · absent(Application 부재: appset 생성 전이거나 prune 완료 — **관측된 상태**이지 조회 실패가 아니다) · error(조회 실패의 관측 보고). 셋 다 variant는 success 유지(선택 계층). 계층 자체를 건너뛴 것은 여기가 아니라 envelope.omitted=[\\"live\\"]가 말한다 — 관측하지 않은 것과 관측해서 부재인 것은 다른 축이다.",
@@ -533,7 +577,10 @@ const DEFINITIONS = `    "doctorResult": {
         "status": { "type": "string", "minLength": 1 },
         "conclusion": { "type": "string" },
         "headSha": { "type": "string" },
+        "headBranch": { "type": "string" },
+        "event": { "type": "string" },
         "url": { "type": "string" },
+        "scope": { "description": "핸들 URL에 job·attempt 지정이 있었지만 조회는 run 전체였다는 **승격 표기**. 승격을 안 말하면 결과가 '그 job의 상태'로 읽혀 거짓말이 된다. 꼬리 없는 URL에서는 키 부재.", "enum": ["run"] },
         "branch": { "type": "string", "minLength": 1 },
         "pr": { "$ref": "#/definitions/mutationPr" }
       }
@@ -548,6 +595,44 @@ const DEFINITIONS = `    "doctorResult": {
         "head": { "type": "string", "minLength": 1 },
         "url": { "type": "string" },
         "autoMerge": { "type": "boolean" }
+      }
+    },
+    "statusResources": {
+      "description": "db·캐시 리소스 인벤토리(status의 5번째 mode — 새 동사가 아니다). 열거는 레이아웃 커널의 역방향(classifyArtifact)에서 파생한다: 자체 정규식을 유도하면 명명 정책이 두 벌이 되어 감사와 관측이 서로 다른 집합을 말한다. 한계: 완전 purge된 리소스는 산출물이 0건이라 여기 안 나온다(tombstone은 조인으로만 쓰고 행을 만들지 않는다 — 키 형식의 소유자는 layoutFor다).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "repo", "resources", "count"],
+      "properties": {
+        "mode": { "enum": ["resources"] },
+        "repo": { "$ref": "#/definitions/statusRepo" },
+        "resources": { "type": "array", "items": { "$ref": "#/definitions/statusResourceRow" } },
+        "count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "statusResourceRow": {
+      "description": "ledgerMi는 **cache에만** 실린다 — db는 원장 비접촉이 불변식이고(공유 CNPG의 예산은 클러스터 행이 진다), 행 이름·env의 SSOT는 provision-cache다. tombstone은 retain/purge 상태머신의 기록이고, 없으면 키 부재다.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name", "artifacts"],
+      "properties": {
+        "kind": { "enum": ["db", "cache"] },
+        "name": { "type": "string", "minLength": 1 },
+        "artifacts": {
+          "description": "role별 **이름 귀속** 산출물의 실존. 공유 산출물(kustomization·cluster.yaml·원장)은 이 리소스의 것이 아니라 여기 없다 — 섞으면 전건 present가 상수가 된다.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "path", "present"],
+            "properties": {
+              "role": { "enum": ["conn", "ro-conn", "owner-secret", "ro-secret", "cr", "instance"] },
+              "path": { "type": "string", "minLength": 1 },
+              "present": { "type": "boolean" }
+            }
+          }
+        },
+        "ledgerMi": { "type": "integer", "minimum": 0 },
+        "tombstone": { "type": "string", "minLength": 1 }
       }
     },
     "statusRun": {
