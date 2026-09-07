@@ -10,7 +10,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CommandParseError, parseCommand, skipMarker, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
 import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInput } from "./lib/conn-url.ts";
-import { ENVELOPE, USAGE_EXIT, type Envelope } from "./lib/contract.ts";
+import { ENVELOPE, EXIT, USAGE_EXIT, type Envelope } from "./lib/contract.ts";
 import { git } from "./lib/exec.ts";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { WAIT_DEFAULTS, type ProgressEvent } from "./lib/mutation.ts";
@@ -59,6 +59,27 @@ for (const v of VERBS) {
   });
 }
 
+// 종료코드 절 — 계약(x-contract)에서 **파생 렌더**한다(리터럴 복제 금지: 스키마가 SSOT다).
+// 코드별로 묶어 그 코드를 내는 variant를 같은 줄에 적는다 — 스크립트는 코드로, 에이전트는
+// variant로 분기하기 때문에 둘의 관계가 한 줄 안에 보여야 한다. usage(파싱 실패)는 variant가
+// 아니라 코드만 있는 결말이라 따로 적는다(스크립트가 가장 자주 밟는데 어휘에 없었다).
+function exitCodeLines(): string[] {
+  const byCode = new Map<number, string[]>();
+  for (const [variant, code] of Object.entries(EXIT)) byCode.set(code, [...(byCode.get(code) ?? []), variant]);
+  // usage는 variant가 아니라 파싱 실패의 코드다 — 같은 표에 넣되 그 사실을 꼬리에 적는다.
+  const note = new Map<number, string>([[USAGE_EXIT, "  ← variant가 아니라 플래그·인자 해석 실패(이때만 결과 오브젝트가 없다)"]]);
+  byCode.set(USAGE_EXIT, [...(byCode.get(USAGE_EXIT) ?? []), "usage"]);
+  const rows = [...byCode.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([code, variants]) => `  ${code}  ${variants.join(" · ")}${note.get(code) ?? ""}`);
+  return [
+    "종료코드:",
+    ...rows,
+    "  같은 코드를 나눠 갖는 variant가 있다 — 스크립트는 종료코드로, 에이전트는 variant로 분기한다.",
+    "",
+  ];
+}
+
 function usage(): string {
   const rows = VERBS.map((v) => `  ${v.path.join(" ").padEnd(14)}${v.desc}`).join("\n");
   return [
@@ -73,6 +94,8 @@ function usage(): string {
     "  --help        사용법 출력(`-h`·`help` 별칭 — 동사·그룹 노드 어디서든 stdout·exit 0)",
     "  --version     진입점 경로·체크아웃 HEAD·결과 계약 schema 출력",
     "",
+    ...exitCodeLines(),
+    ...LEVER_LINES,
   ].join("\n");
 }
 
@@ -84,6 +107,7 @@ function doctorUsage(): string {
     "KUBECONFIG(부재는 경고), 템플릿 접근성·호환성(스캐폴더 비대화형 계약·TARGETARCH)을 점검한다.",
     "  --json        결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
     "",
+    ...needsLines(DOCTOR),
   ].join("\n");
 }
 
@@ -141,12 +165,28 @@ const numFlag = (flags: TypedFlags, k: string): number | undefined => {
   const v = flags.str(k);
   return v === undefined ? undefined : Number(v);
 };
+// ⚠️ 두 플래그는 테스트가 시간을 밀리초로 줄이는 주입 심이기도 하지만, **데드라인 조정은 정당한
+// 운영 노브**다(--wait의 pending은 실패가 아니라 바운디드 결과다). 사용자용 라벨에 '심(seam)'이라는
+// 레포 내부 어휘를 노출하면 '쓰지 말라'로도 '써도 된다'로도 읽힌다 — 그 사실은 여기 주석과
+// tools/README.md에 남기고 help에는 기본값만 적는다(티켓 33).
 const WAIT_FLAG_LINES = [
-  `  --poll-ms <n>      폴링 간격(기본 ${WAIT_DEFAULTS.pollMs} — 시간 주입 심)`,
-  `  --deadline-ms <n>  전체 데드라인(기본 ${WAIT_DEFAULTS.deadlineMs} — 시간 주입 심)`,
+  `  --poll-ms <n>      폴링 간격(기본 ${WAIT_DEFAULTS.pollMs}ms)`,
+  `  --deadline-ms <n>  전체 데드라인(기본 ${WAIT_DEFAULTS.deadlineMs}ms = ${WAIT_DEFAULTS.deadlineMs / 60000}분)`,
   "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
   "",
 ];
+
+// 관측 레버 — 이미 존재하는 유일한 디버그 축인데 문서가 0건이었다(티켓 33). 값·stdin은 절대
+// 기록되지 않는다(kubeseal 평문이 지나는 채널이라 seam이 stdin을 배제한다 — 계약 테스트 존재).
+// 사후 소급이 불가능하므로 '사전 무장' opt-in임을 문구가 말한다.
+const LEVER_LINES = [
+  "관측 레버(opt-in · 사전 무장 — 소급 불가):",
+  "  HOMELAB_EXEC_LEDGER=<file>  외부 명령 argv를 JSONL로 append(값·stdin은 미기록)",
+  "",
+];
+
+// 요구 도메인 한 줄 — 값은 catalog 행(VerbShape.needs)이 소유하고 여기는 렌더만 한다.
+const needsLines = (verb: { needs: string }): string[] => [`요구: ${verb.needs}`, ""];
 
 // 진행 표시(티켓 07) — 변이 엔진이 낸 단계 전이 이벤트를 사람용 한 줄로 옮겨 **stderr**에 즉시 쓴다.
 // 계약(x-contract.stdout) "사람용 텍스트·진행 표시는 전부 stderr"의 실행형이라 --json이든 아니든
@@ -175,9 +215,10 @@ function statusUsage(): string {
     "  --run <url>   run URL(https://github.com/<o>/<r>/actions/runs/<id>) 핸들 조회",
     "  --branch <ref> --run과 함께: 그 레인 브랜치의 PR을 정확 조회(변이 pending의 run.branch를 그대로)",
     "  --pr <url>    PR URL(https://github.com/<o>/<r>/pull/<n>) 핸들 조회",
-    "  --root <dir>  앱 산출물 루트 오버라이드(기본: CLI 자신의 레포 — 테스트 심)",
+    "  --root <dir>  [고급] 앱 산출물 루트(기본: CLI 자신의 레포)",
     "  --json        결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
     "",
+    ...needsLines(STATUS),
   ].join("\n");
 }
 
@@ -204,6 +245,7 @@ function dbCreateUsage(): string {
     "  --ext <a,b>        확장 목록(알려진 5종은 체크박스, 그 외는 ext_extra로 — 예: pg_trgm,vector)",
     "  --wait             auto-merge 머지 + Application 집합(cnpg-data·data-conn-prod) 수렴까지 대기",
     ...WAIT_FLAG_LINES,
+    ...needsLines(DB_CREATE),
   ].join("\n");
 }
 
@@ -217,6 +259,7 @@ function appCreateUsage(): string {
     "pending을 반환하며, 대기 중 머지가 관측되면 라이브 수렴(<app>-prod Application + 표면)을 이어간다.",
     "  --wait             머지 관측 + Application 수렴까지 대기(미머지 = 바운디드 pending)",
     ...WAIT_FLAG_LINES,
+    ...needsLines(APP_CREATE),
   ].join("\n");
 }
 
@@ -243,6 +286,7 @@ function appSecretsUsage(): string {
     "  --no-seal          재봉인 없이 이미 커밋·push된 봉인본을 재디스패치(push 성공·디스패치 실패 후 재실행)",
     "                     — kubeseal 암호문은 매번 달라 재봉인은 언제나 새 커밋·새 PR·파드 롤링이다",
     ...WAIT_FLAG_LINES,
+    ...needsLines(APP_SECRETS),
   ].join("\n");
 }
 
@@ -270,6 +314,7 @@ function appTeardownUsage(): string {
     "  --confirm <app>    파괴 확인 — 철거할 앱 이름 재입력(불일치·비-TTY 무플래그 = 거부)",
     "  --wait             머지 관측 + Application 부재(prune)까지 대기(미머지 = 바운디드 pending)",
     ...WAIT_FLAG_LINES,
+    ...needsLines(APP_TEARDOWN),
   ].join("\n");
 }
 
@@ -321,6 +366,7 @@ function appInitUsage(): string {
     "  --adopt            마커 없는 기존 레포를 명시 입양(사용자 확인 — 소유 미증명 레포 이어가기)",
     "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
     "",
+    ...needsLines(APP_INIT),
   ].join("\n");
 }
 
@@ -350,6 +396,7 @@ function cacheCreateUsage(): string {
     "  --maxmemory-mi <n> maxmemory(Mi, 16..1024 — 생략 시 디스패처 기본 64)",
     "  --wait             auto-merge 머지 + Application 집합(cache-prod·data-conn-prod) 수렴까지 대기",
     ...WAIT_FLAG_LINES,
+    ...needsLines(CACHE_CREATE),
   ].join("\n");
 }
 
@@ -378,6 +425,7 @@ function cacheUrlUsage(): string {
     "  (KUBECONFIG 미설정이면 skip: exit 4 + stderr SKIP 마커 — 기록 없이 종료)",
     "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
     "",
+    ...needsLines(CACHE_URL),
   ].join("\n");
 }
 
@@ -426,6 +474,7 @@ function dbUrlUsage(): string {
     "  --json             결과를 계약 오브젝트로 stdout에 출력(사람용 보고는 stderr)",
     "  (KUBECONFIG 미설정이면 skip: exit 4 + stderr SKIP 마커 — 기록 없이 종료)",
     "",
+    ...needsLines(DB_URL),
   ].join("\n");
 }
 

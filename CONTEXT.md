@@ -135,6 +135,43 @@ origin이 정확히 canonical 앱 레포(`ukyi-app/<app>`)를 가리키는 로�
 마커 기록·push·디스패치 같은 앱 동사가 오귀속 없이 작동하기 위한 전제 판정이다.
 _Avoid_: 우리 레포, 앱 클론(판정 없는 서술)
 
+**correlation 수령증 (correlation receipt)**:
+CLI가 디스패치마다 발급해 입력으로 실어 보내는 nonce와, 디스패처가 run-name에 되돌려주는
+그 에코의 쌍. 이것으로 **자기 run 하나만** 권위 있게 특정한다 — 에코하는 run이 2개면 신원
+판정 불가(fail-closed)이고, 관측 차분("내가 부르기 전에 없던 run")은 신원 메커니즘이 아니다.
+_Avoid_: 상관 ID, nonce(수령증의 절반만 가리킴 — 에코가 있어야 신원이 성립한다)
+
+**상관 핸들 (operation handle)**:
+한 오퍼레이션을 나중에 되읽는 좌표 — run URL · PR URL, 그리고 PR이 아직 없는 단계의 레인
+브랜치. `homelab status --run|--pr`(브랜치는 `--run … --branch …`)의 입력 단위이고, 바운디드
+결과(pending)의 재개 경로는 재실행이 아니라 이 좌표의 재조회다.
+_Avoid_: 핸들(단독 — conn 핸들과 충돌한다), 작업 ID
+
+**결과 계약 (result contract)**:
+CLI `--json`과 MCP tool 결과가 공유하는 봉투 하나 — `homelab-cli/1`. 축이 셋이다:
+variant(무슨 결말인가) × exitCode(프로세스에 무엇으로 보이는가) × omitted(무엇을 보지
+않았는가). 값·열거는 산문으로 복제하지 않는다 — 정의처는 `tools/cli-result-schema.json`의
+`x-contract`이고 CLI가 그것을 런타임에 읽는다.
+_Avoid_: 응답 JSON, 출력 포맷(계약이 아니라 표현으로 읽힌다)
+
+**대기 매트릭스 (wait matrix)**:
+`--wait`의 종결 조건이 동사마다 다르다는 규약. 자동 머지 동사 = 머지 + 명명된 Application
+집합의 수렴, 수동 머지 동사(create-app·teardown-app) = 머지가 승인이라 미머지는 실패가 아닌
+바운디드 pending, teardown = Healthy가 아니라 **부재**(prune 완료)가 성공이다.
+_Avoid_: --wait 옵션(플래그는 표면일 뿐 종결 조건이 아니다), 동기 대기
+
+**invocation marker**:
+`homelab app init`이 앱 레포에 남기는 `.homelab-init` 파일 — "이 레포는 이 도구가 시작했다"의
+소유 증명. 마커가 있으면 재실행이 도달한 체크포인트부터 수렴하고, 없는 기존 레포는 거부되며
+`--adopt` 명시로만 이어갈 수 있다.
+_Avoid_: 템플릿 계보, 초기화 플래그(소유 판정이 빠진 서술)
+
+**이중 모드 (dual mode)**:
+`homelab app secrets` 하나가 실행 위치에 따라 두 동사로 갈리는 성질. 앱 레포 안(마커 +
+canonical remote)이면 seal→커밋→push→도달성 증명→디스패치 **연쇄**이고, 밖이면 이미 push된
+봉인본의 재배선 **디스패치만**이다. 선행 조건 실패는 디스패치 없이 거부한다.
+_Avoid_: 로컬 모드, 자동 감지(판정 실패 시 거부한다는 사실이 빠진다)
+
 ### 가드 규약 (guard contract)
 
 **스캔 신호 (scan signal)**:

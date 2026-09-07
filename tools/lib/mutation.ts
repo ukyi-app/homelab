@@ -212,6 +212,17 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   const runRef = () => compact({ id: run!.id, url: run!.html_url, conclusion: run!.conclusion ?? undefined });
   // 레인 브랜치는 run id의 순수 파생이다(추가 API 호출 0) — PR이 아직 없는 단계의 유일한 좌표.
   const branchOf = () => spec.branchFor(run!.id);
+  // step 4에서 PR을 특정하면 채워진다 — 그 전 pending은 run 핸들만 갖는다(아래 resume 참조).
+  let prHandleUrl: string | undefined;
+  // 재개 포인터(티켓 33) — pendingReason이 지목하는 **실재하는 다음 명령**. 도달 지점에 따라
+  // 갈리므로(run만 / run+PR) 콜사이트마다 손으로 쓰면 일부만 고쳐진 채 골든이 초록이 된다
+  // (열거 붕괴 — pendingReason은 여섯 자리에 있다). 한 곳에서 만든다.
+  // ⚠️ run이 아직 없는 분기(step 2 미출현)는 이 함수를 쓰지 않는다 — 거기엔 지목할 핸들이 없고,
+  // 그 사실 자체가 그 분기의 문구다(Actions의 correlation 에코 확인).
+  const resume = (): string =>
+    prHandleUrl !== undefined
+      ? `재조회: homelab status --pr ${prHandleUrl}`
+      : `재조회: homelab status --run ${run!.html_url} --branch ${branchOf()}`;
   emit("identified", { runUrl: run.html_url });
 
   // 2b) identifyOnly(MCP) — run을 식별했으면 conclusion 추적 없이 run 핸들을 pending으로 즉시 반환한다.
@@ -228,7 +239,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   const concludeWatch = pollWatch();
   while (run.status !== "completed") {
     if (Date.now() >= endAt) {
-      return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pendingReason: `run 진행 중 — 핸들(run URL)로 재조회 가능${concludeWatch.suffix()}` }) };
+      return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pendingReason: `run 진행 중 — ${resume()}${concludeWatch.suffix()}` }) };
     }
     Bun.sleepSync(opts.pollMs);
     const got = ghRead(`repos/${HOMELAB_REPO}/actions/runs/${run.id}`, "{status, conclusion, html_url}");
@@ -274,8 +285,8 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   let pr: PrRow | undefined = noop ? undefined : prs[0];
   const prRef = () => (pr === undefined ? undefined : lanePrRef(pr));
   const doneVariant = noop ? "no-op" : "success";
-  // no-op(PR 없음)에는 방출할 PR 핸들이 없다 — 없는 좌표를 지어내지 않는다.
-  if (pr !== undefined) emit("pr", { runUrl: run.html_url, prUrl: pr.html_url });
+  // no-op(PR 없음)에는 방출할 PR 핸들이 없다 — 없는 좌표를 지어내지 않는다(재개 포인터도 run 축).
+  if (pr !== undefined) { prHandleUrl = pr.html_url; emit("pr", { runUrl: run.html_url, prUrl: pr.html_url }); }
 
   if (!opts.wait) {
     return { variant: doneVariant, omitted: [], result: compact({ ...base, waited: false, run: runRef(), pr: prRef() }) };
@@ -309,8 +320,8 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
       }
       if (Date.now() >= endAt) {
         const base5 = spec.manualMerge !== undefined
-          ? `사람 머지 대기 — 머지가 곧 ${spec.manualMerge.approval}(PR 검토·머지 후 핸들로 재조회)`
-          : "auto-merge 머지 미관측 — required check 대기 중일 수 있다(핸들로 재조회 가능)";
+          ? `사람 머지 대기 — 머지가 곧 ${spec.manualMerge.approval}(PR 검토·머지 후 ${resume()})`
+          : `auto-merge 머지 미관측 — required check 대기 중일 수 있다 · ${resume()}`;
         return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: `${base5}${mergeWatch.suffix()}` }) };
       }
       Bun.sleepSync(opts.pollMs);
@@ -417,10 +428,10 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
         // "finalizer cascade 진행 중"으로 뭉개면 운영자를 잘못 유도한다(원인별 재조회 판단이 다르다).
         const kubectlError = states.some((s) => s.error !== undefined);
         const pendingReason = surfaceUndecided
-          ? "철거 반영 확인 미완 — 표면/철거 전 ref(git) 조회가 일시 실패했다(핸들로 재조회 가능)"
+          ? `철거 반영 확인 미완 — 표면/철거 전 ref 조회가 일시 실패했다 · ${resume()}`
           : kubectlError
-            ? "Application 부재 미확정 — 클러스터 조회 일시 실패(핸들로 재조회 가능)"
-            : "Application prune 미완 — appset finalizer cascade 진행 중일 수 있다(핸들로 재조회 가능)";
+            ? `Application 부재 미확정 — 클러스터 조회 일시 실패 · ${resume()}`
+            : `Application prune 미완 — appset finalizer cascade 진행 중일 수 있다 · ${resume()}`;
         return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), applications: states, pendingReason }) };
       }
       Bun.sleepSync(opts.pollMs);
@@ -490,7 +501,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
       return { variant: doneVariant, omitted: [], result: compact({ ...base, waited: true, run: runRef(), pr: prRef(), applications: states }) };
     }
     if (Date.now() >= endAt) {
-      return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), applications: states, pendingReason: noop ? "no-op 검증 미수렴 — 클러스터가 main의 표면을 아직 반영하지 않음(핸들로 재조회 가능)" : "Application 집합 미수렴 — 핸들로 재조회 가능" }) };
+      return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), applications: states, pendingReason: noop ? `no-op 검증 미수렴 — 클러스터가 main의 표면을 아직 반영하지 않음 · ${resume()}` : `Application 집합 미수렴 · ${resume()}` }) };
     }
     Bun.sleepSync(opts.pollMs);
   }

@@ -421,6 +421,21 @@ setup() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=open&per_page=100" --jq)" = "1" ]
 }
 
+@test "status --json is an offline entry point: exit 0 and a count with gh removed from PATH" {
+  # 티켓 33 — usage가 '요구: 없음'이라고 선언하는 경로에 회귀 앵커가 0건이었다(status 테스트는
+  # 항상 gh 스텁을 깐다). gh만 지운 PATH로 그 주장을 실제로 잰다.
+  make_app_fixture blog true
+  NOGH="$BATS_TEST_TMPDIR/stub-nogh"; mkdir -p "$NOGH"
+  for t in bun bash base64 cat git sleep kubectl; do ln -s "$STUB/$t" "$NOGH/$t"; done
+  run --separate-stderr env PATH="$NOGH" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.count')" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+  # 같은 PATH에서 gh를 요구하는 경로는 실패한다(부재 단언의 양성 짝 — PATH 조작이 실제로 먹혔다).
+  run --separate-stderr env PATH="$NOGH" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status blog --root "$APPS_ROOT" --json
+  [ "$status" -eq 1 ]
+}
+
 @test "a malformed app name is a usage error: exit 2, no envelope (traversal gate, shared predicate)" {
   # status는 리더지만 app을 그대로 apps/<app>/deploy/prod 경로·kubectl 리소스명에 조립한다 —
   # identity.ts의 traversal 1차 게이트를 형제 술어(verbs/secrets/init)와 같은 문구로 공유한다.

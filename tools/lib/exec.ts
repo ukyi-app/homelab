@@ -14,8 +14,13 @@
 // ⚠️ 변이 엔진의 폴링 루프와 PR 목록 grace 재조회(mutation.ts PR_GRACE_RETRIES)는 **관측 재조회**지
 // 변이 재시도가 아니다 — 부수효과 0인 읽기를 반복해 미확정을 확정으로 바꾸는 것뿐이다.
 //
-// HOMELAB_EXEC_LEDGER — env 주입 관측 원장(테스트 adapter). 설정되면 호출마다 {cmd, args} 한 줄을
-// JSONL로 append한다. ⚠️ stdin(input)은 **절대 기록하지 않는다** — kubeseal 평문이 지나는 채널이다.
+// HOMELAB_EXEC_LEDGER — env 주입 **관측 레버**(계약은 테스트가 강제한다 — 테스트 전용이 아니다).
+// 설정되면 호출마다 {cmd, args} 한 줄을 JSONL로 append한다. 이 레포에서 유일한 디버그 축이라
+// tools/README.md·`homelab --help`가 운영자에게 공개한다(티켓 33): **사전 무장 opt-in**이고
+// 소급 기록은 불가능하다. 민감값 노출 표면은 전 콜사이트 확인 결과 없다 — 변이 argv는 이름·불리언·
+// correlation뿐, 자격은 `--body-file` 경로로만, 봉인 평문은 kubeseal stdin 전용이다.
+// ⚠️ stdin(input)은 **절대 기록하지 않는다** — kubeseal 평문이 지나는 채널이다. stdout/stderr도
+// 넣지 않는다(kubectl은 키 부재 시 Secret을 base64째 stderr에 덤프한다 — conn-url의 라이브 실측).
 // 원장은 관측 편의라 기록 실패가 실행을 막지 않는다(prod 경로 무영향).
 import { appendFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";

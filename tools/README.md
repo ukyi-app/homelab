@@ -101,6 +101,16 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   쓸 수 없다. 재디스패치는 새 nonce를 발급해 같은 이름의 PR 두 개를 만들므로 금지이고, 실재하는
   확인 경로는 Actions에서 run-name의 `[correlation]` 에코를 보는 것뿐이다(`status --correlation`
   핸들 모드는 열지 않는다 — PR 본문에 에코가 없어 reusable 5벌 계약 변경이 선행이다).
+  **종료코드·요구 도메인**: top-level `--help`가 계약(x-contract.exitCodes)에서 **파생 렌더**한
+  종료코드 절을 낸다 — 코드 하나에 variant 여럿이 붙고(0=success·no-op, 1=failure·pending,
+  3=race·superseded, 4=skip) `2`는 variant가 아니라 파싱 실패다. 동사별 `--help`는 `요구:` 한 줄로
+  필요한 망 도메인을 선언한다(값은 catalog 행 `VerbShape.needs` — 손 사본 금지). 이 홈랩에서는
+  GitHub(인터넷)과 클러스터(tailscale/LAN)가 독립으로 끊기므로 **오프라인 진입점**이 실재한다:
+  인자 없는 `homelab status`와 `db|cache url --dry-run`은 망 무의존이다(회귀 앵커는 status bats).
+  **관측 레버**: `HOMELAB_EXEC_LEDGER=<file>` — 외부 명령 argv를 JSONL로 append하는 opt-in 원장.
+  **사전 무장**이라 소급 기록은 불가능하고, 값·stdin·stdout은 기록하지 않는다(kubeseal 평문 채널
+  배제는 계약 테스트가 강제). `--wait`의 시간 노브(`--poll-ms`/`--deadline-ms`)는 테스트의 시간
+  주입 심이면서 **정당한 운영 노브**다 — help 라벨은 그래서 기본값만 적는다(내부 어휘 '심' 비노출).
   **진행 표시**: 변이 동사는 단계 전이(디스패치 접수·run 식별·run 완료·PR 특정·머지 관측)마다
   `진행: …` 한 줄을 **stderr**에 즉시 낸다 — correlation·run URL·PR URL·merge SHA가 봉투보다
   **먼저** 나오므로 ^C·타임아웃 킬로 중단돼도 재조회 핸들이 남는다. stdout 순수성은 불변이고
@@ -314,8 +324,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   종료코드 매핑)를 런타임에 읽어 노출(`ENVELOPE`·`EXIT`·`exitFor`·`Envelope` 타입 — 코드 상수
   복제 금지). 소비자: `homelab.ts`·`lib/verbs.ts`·(예정) MCP 서버.
 - **`lib/verbs.ts`** — 동사 operation catalog(transport 중립·부수효과 없는 import-safe SSOT).
-  행 = path(라우팅 어휘)+desc(--help)+op(타입 입력→계약 Envelope). argv 파싱·렌더링은 CLI 셸
-  소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1). 후속 동사는 여기 행을 추가.
+  행 = path(라우팅 어휘)+desc(--help)+needs(요구 망 도메인 — usage가 렌더)+op(타입 입력→계약
+  Envelope). argv 파싱·렌더링은 CLI 셸 소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1).
+  후속 동사는 여기 행을 추가한다(needs는 필수 필드라 타입이 누락을 막는다).
 - **`lib/catalog-rows.ts`** — 변이 레인 신원 행 + 결과 계약 행(**순수 기술자, import 0** — 설계 게이트 r1 D3).
   액션별 한 행 = 디스패처/reusable 파일명 · 디스패치 입력 이름 · 브랜치 중립 패턴({key}·{runId}) ·
   수렴 Application 집합+표면 패턴. 생성 방향(verbs·secrets의 `laneMutationFields`)과 파싱 방향(status의
