@@ -15,7 +15,7 @@ import { existsSync, statSync } from "node:fs";
 import { onboardedPreflight } from "./app-preflight.ts";
 import { compact } from "./contract.ts";
 import { laneMutationFields } from "./catalog-rows.ts";
-import { ALLOW_PUSH_REWRITE_ENV, firstReason, git, pushRoutes, sh } from "./exec.ts";
+import { ALLOW_PUSH_REWRITE_ENV, git, pushReason, pushRoutes, sh } from "./exec.ts";
 import { APP_NAME_RE, isCanonicalClone, pathInputError, pushRouteError } from "./identity.ts";
 import { runMutation, waitInputError, waitOpts, type MutationOutcome, type WaitInput } from "./mutation.ts";
 import { OWNER } from "./platform.ts";
@@ -97,10 +97,11 @@ function runChain(cwd: string, app: string, noSeal: boolean): ChainResult {
     if (!commit.ok) return refuse(`git commit 실패 — ${commit.err.split("\n")[0]}`);
     // timeoutMs: 0 — push는 망 왕복이라 seam 기본 30s가 끊을 수 있다(init의 같은 자리와 동일 어휘).
     const push = git(cwd, ["push", "-q", "origin", "HEAD:refs/heads/main"], { timeoutMs: 0 });
-    // 사유 선택은 seam의 firstReason 소유 — git push stderr의 1행은 `To <url>`(사유 아님)이라
+    // 사유 선택은 seam의 pushReason 소유 — git push stderr의 1행은 `To <url>`(사유 아님)이라
     // 첫 줄 자르기는 거부 이유(` ! [rejected] … (fetch first)`)를 통째로 지운다(exec-3 실측).
+    // 자격 helper 부재 계열이면 다음 행동(`gh auth setup-git`)까지 그 헬퍼가 붙인다(티켓 27).
     // 시그널 사망(stderr 빈 문자열)의 폴백도 여기서 고른다 — 빈 사유는 오진을 만든다.
-    if (!push.ok) return refuse(`git push 실패 — ${firstReason(push.err) || `git push 비-0(exit ${push.status ?? "?"}${push.signal ? `, ${push.signal}` : ""})`}`);
+    if (!push.ok) return refuse(`git push 실패 — ${pushReason(push.err) || `git push 비-0(exit ${push.status ?? "?"}${push.signal ? `, ${push.signal}` : ""})`}`);
     chain.pushed = true;
   } else {
     chain.pushed = false; // 변경 없음(--no-seal 재디스패치) — 커밋·push 없이 디스패치만

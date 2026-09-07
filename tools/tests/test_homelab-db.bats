@@ -777,8 +777,31 @@ pr_closed_unmerged() {
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
   echo "$output" | jq -r '.result.error' | grep -q "디스패치 실패"
-  # run 특정 조회로 넘어가지 않았다(즉시 종결).
-  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20")" = "0" ]
+  # run 특정 조회로 넘어가지 않았다(즉시 종결) — **식별 루프의 투영**으로 잰다. 같은 endpoint에
+  # 디스패치 **전** 신선도 스냅샷(티켓 27)이 하나 더 있으므로 경로 접두만 세면 그 1건과 뒤섞인다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20" --jq "[.workflow_runs[] | {id, name, status, conclusion, html_url}]")" = "0" ]
+  # 그 스냅샷은 디스패치보다 앞이므로 실패 레인에서도 정확히 1회 관측된다(무-질의로 접히지 않았다).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20" --jq "[.workflow_runs[] | {id, name}]")" = "1" ]
+}
+
+@test "a completed run echoing the same nonce from BEFORE the dispatch is never adopted (freshness snapshot)" {
+  # 티켓 27 — 고정 nonce(HOMELAB_CORRELATION)가 프로덕션에서 켜지면 같은 nonce의 **이전** run이 홀로
+  # 매치돼 옛 conclusion·옛 PR 핸들이 이번 실행의 결과로 보고됐다(수령증 루프의 0건 분기가 그 문이다).
+  # 스냅샷 픽스처가 그 옛 run(501)을 디스패치 **전에** 보여주면 채택 대상에서 빠지고, 이 하네스의
+  # 목록 픽스처에는 그것뿐이라 데드라인까지 새 run이 안 나타나 pending으로 끝난다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    STUB_GH_STALE_RUN=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 60 --json
+  [ "$status" -eq 1 ]   # pending=1(계약 exitCodes — '확인하지 못함'이 0이면 && 체인에 vacuous green)
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  # 옛 run의 핸들이 결과로 새지 않았다 — 부재는 키 부재로 보고된다(값 없음 = 키 없음 규약).
+  [ "$(echo "$output" | jq -r '.result | has("run")')" = "false" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "run 미출현"
+  # 대조군(같은 픽스처·스냅샷만 공집합) — 신선도 배제가 없으면 그 run을 채택해 success가 된다.
+  # 이 줄이 없으면 위 pending이 '스텁이 그냥 비었다'와 구별되지 않는다(vacuous).
+  run_db_create --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.run.id')" = "501" ]
 }
 
 @test "a schema-violating envelope dies loud at emit time (runtime self-check mutation)" {

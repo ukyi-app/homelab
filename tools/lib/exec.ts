@@ -45,6 +45,28 @@ function ledger(cmd: string, args: string[]): void {
   try { appendFileSync(f, JSON.stringify({ cmd, args }) + "\n"); } catch { /* 관측은 실행을 막지 않는다 */ }
 }
 
+// git 실행의 env 위생(티켓 27) — **cmd === "git"인 모든 호출**에 건다. 명명 adapter(git())만
+// 감싸면 `sh("git", ["clone", …])` 직접 호출(init.ts의 템플릿 클론)이 규약 밖에 남는다: 드리프트가
+// 없는 자리는 adapter가 아니라 seam 본체다.
+//   · GIT_TERMINAL_PROMPT=0 — 자격이 없으면 프롬프트 대신 **즉시** 죽는다. 이게 없으면 push/clone이
+//     자격 입력에서 블록하고, 그 hang은 --wait의 deadline **바깥**이라 pendingReason도 안 나온다
+//     (자식이 살아 있으므로 seam의 timeoutMs만이 유일한 탈출구다).
+//     ⚠️ GIT_SSH_COMMAND(BatchMode=yes)는 **넣지 않는다** — 사용자의 ssh 설정(ProxyCommand·
+//     IdentityAgent·Include)을 통째로 덮는 부작용이 봉인 이득보다 크다. 그래서 ssh 라우트의
+//     호스트키 프롬프트는 **미봉인으로 남는다**(알려진 잔여 — canonical 라우트는 https다).
+//   · GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE 스크럽 — 상속되면 `git -C <cwd>`가 **다른 레포**를 본다
+//     (실측: GIT_DIR=a/.git 하에서 `git -C b rev-parse HEAD`는 a의 HEAD, `status --porcelain`은
+//     a의 인덱스 vs b의 트리 차분을 낸다). secrets의 선행 조건 판정(브랜치·클린 트리·staged
+//     완전성·HEAD)과 init의 커밋이 전부 이 adapter 위에 있어, git hook(pre-commit·post-checkout이
+//     이 셋을 export한다) 안에서 CLI/MCP를 띄우면 판정 대상이 cwd가 아니게 된다.
+//     ⚠️ 삭제 allowlist만 둔다 — GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM 상속은 bats 하네스가
+//     의존한다(cli_stub_init이 그 둘로 호스트 전역 설정을 격리한다). 여기서 지우면 하네스가
+//     호스트 gitconfig에 종속된다.
+function gitEnv(): NodeJS.ProcessEnv {
+  const { GIT_DIR: _dir, GIT_WORK_TREE: _work, GIT_INDEX_FILE: _index, ...rest } = process.env;
+  return { ...rest, GIT_TERMINAL_PROMPT: "0" };
+}
+
 export function sh(cmd: string, args: string[], opts: ExecOpts = {}): Cmd {
   ledger(cmd, args);
   const timeoutMs = opts.timeoutMs ?? 30_000;
@@ -55,6 +77,7 @@ export function sh(cmd: string, args: string[], opts: ExecOpts = {}): Cmd {
     cwd: opts.cwd,
     input: opts.input,
     stdio: opts.inherit ? "inherit" : undefined,
+    env: cmd === "git" ? gitEnv() : undefined,
   });
   if (r.error) {
     const code = (r.error as NodeJS.ErrnoException).code ?? "";
@@ -86,6 +109,20 @@ export function firstReason(err: string): string {
   if (strong !== undefined) return strong.trim();
   const weak = lines.find((l) => !/^(To |hint:)/.test(l.trim()));
   return (weak ?? lines[0] ?? "").trim();
+}
+
+// push 실패 사유 + **다음 행동**(티켓 27). GIT_TERMINAL_PROMPT=0 아래서 자격 helper가 없으면
+// https push는 `fatal: could not read Username for '…': terminal prompts disabled`로 즉시 죽는다.
+// 그 줄은 '망 실패'가 아니라 **설정 부재**라 다음 행동이 정해져 있다(`gh auth setup-git`이
+// credential.helper를 심는다) — 그런데 종전 문구는 사유만 옮겨 실어, 운영자가 네트워크·권한을
+// 뒤지게 만들었다. 문구 SSOT는 이 헬퍼 하나다: 콜사이트(init 첫 push · secrets chain push) 둘이
+// 손으로 복사하면 한쪽만 고쳐진다(열거 붕괴).
+// 판정은 자격 계열 사유에만 붙인다 — 무조건 붙이면 DNS·거부 실패까지 자격 문제로 오진한다.
+export const GIT_CRED_HINT = " — 자격 helper 부재로 보인다: `gh auth setup-git` 실행 후 재시도";
+const CRED_REASON_RE = /terminal prompts disabled|could not read (Username|Password)|Authentication failed|Invalid username or (password|token)/i;
+export function pushReason(err: string): string {
+  const reason = firstReason(err);
+  return CRED_REASON_RE.test(reason) ? `${reason}${GIT_CRED_HINT}` : reason;
 }
 
 export function gh(args: string[], opts: ExecOpts = {}): Cmd { return sh("gh", args, opts); }

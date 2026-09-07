@@ -380,7 +380,11 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   필드 신설 금지: pending 계열은 additionalProperties:false다). 단계 전이마다 **진행 이벤트**를
   낸다(`MutationOpts.onProgress` — dispatched/identified/concluded/pr/merged): 엔진은 이벤트만 내고
   문구·싱크는 CLI 셸(homelab.ts)이 소유하며 MCP는 주입하지 않는다(stdio 무오염). 시간 심
-  pollMs/deadlineMs + HOMELAB_CORRELATION 주입(테스트). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
+  pollMs/deadlineMs + HOMELAB_CORRELATION 주입(테스트). run 특정에는 **신선도 스냅샷**이 선다 —
+  디스패치 **직전** 같은 목록 질의(신원 투영 `{id, name}`)로 이미 그 에코를 가진 run id를 찍어
+  채택에서 배제한다: 고정 nonce가 프로덕션에서 켜지면 같은 nonce의 옛 run이 홀로 매치돼 옛
+  conclusion·옛 PR 핸들이 이번 실행의 결과로 보고되기 때문이다(랜덤 nonce 경로는 공집합이라 동작 불변,
+  스냅샷 조회 실패는 배제 없음으로 접힌다). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
 - **`lib/lane-pr.ts`** — 레인 브랜치 PR의 좌표·정확 조회 커널(`readLanePrs()`·`lanePrRef()`·
   `parseLaneBranch()`·`laneBranchInputError()`). 질의는 `pulls?state=all&head=<owner>:<branch>` —
   head가 **정확 일치**라 형제 브랜치(`…/mydb-5011`)가 `…/mydb-501` 응답에 원리적으로 섞이지 않는다.
@@ -404,7 +408,14 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   자식이 죽기 전에 쓴 **부분 stderr**와 죽인 **시그널**(`signal`)을 결과에 보존한다 — 셋을 한 값으로
   접으면 원인이 통째로 지워지고 SIGKILL 사망은 빈 사유가 된다. `firstReason(err)`는 다행 stderr에서
   사유 한 줄을 고른다(`error:`/`fatal:`/`!` 우선, `To `/`hint:` 제외) — git push의 1행 `To <url>`이
-  거부 이유를 가리는 실측 클래스가 그 자리다(소비자: init·secrets의 push 실패). push 라우팅 검사의
+  거부 이유를 가리는 실측 클래스가 그 자리다. `pushReason(err)`는 그 위에 **다음 행동**을 얹는다 —
+  자격 계열 사유(`terminal prompts disabled`·`could not read Username` 등)에만 `gh auth setup-git`
+  포인터를 붙인다(문구 SSOT는 이 헬퍼 하나 · 소비자: init 첫 push·secrets chain push).
+  **git env 위생**: `cmd === "git"`인 모든 실행에 `GIT_TERMINAL_PROMPT=0`을 주입하고
+  GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE을 스크럽한다(adapter뿐 아니라 `sh("git", ["clone", …])`
+  직접 호출까지 — 상속되면 `git -C <cwd>`가 다른 레포를 본다). GIT_CONFIG_GLOBAL/SYSTEM은 **유지**다
+  (bats 하네스가 그 둘로 호스트 전역 설정을 격리한다). GIT_SSH_COMMAND BatchMode는 사용자 ssh 설정을
+  덮으므로 넣지 않는다 — ssh 라우트의 호스트키 프롬프트는 미봉인으로 남는다. push 라우팅 검사의
   테스트 전용 완화 플래그 이름(`ALLOW_PUSH_REWRITE_ENV` = HOMELAB_TEST_ALLOW_PUSH_REWRITE)도
   여기 산다 — HOMELAB_CORRELATION 주입과 같은 부류(테스트 심).
 - **`lib/secrets.ts`** — app secrets 엔진(`runAppSecrets()`·`appSecretsInputError()`): 이중 모드 판별(git
@@ -419,6 +430,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   입력 검증 술어는 CLI(usage exit 2)·MCP(invalid params)가 공유. 관측 전용(gh api·kubectl get만).
   run 모드의 `--branch` 좌표는 lane-pr 커널의 정확 조회로 그 레인 PR을 붙이고(2건이면 race exit 3),
   app 모드의 산출물 부재 분기는 열린 PR 목록 1회로 create-app 레인 PR을 `createPrs`에 싣는다.
+  핸들 URL의 owner/repo는 **GitHub 명명 규칙**으로 좁혀 파싱한다(owner=영숫자 시작·하이픈 ≤39,
+  repo=영숫자/`.`/`_`/`-` ≤100 + `.`·`..` 배제) — 그 캡처가 `repos/<o>/<r>/…`로 gh api 경로에
+  조립되므로 traversal은 형식 게이트에서 닫는다(`.github` 같은 정당한 점-접두 이름은 통과).
 - **`lib/doctor.ts`** — homelab CLI doctor 진단 엔진(`runDoctor()`). 점검 항목·상태 판정·detail
   문구를 소유한다(관측 전용 — `gh api` 읽기만, 테스트가 argv 원장으로 강제). 선행 gh-auth 실패로
   판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든
