@@ -214,6 +214,49 @@ assert_envelope_valid() {
   assert_envelope_valid "$output"
 }
 
+@test "a GitHub layer failure names its cause, and the four lanes are told apart by it" {
+  # 병: ghJson의 null 접힘이 gh 미설치·미인증·404·망 단절·파싱 깨짐을 한 문장으로 만들었다.
+  # 같은 statusApp 안에서 kubectl 실패는 이미 사유를 싣는데 GitHub 레그만 지워지는 비대칭이었다.
+  make_app_fixture page true
+  # ① run 목록 전송 오류 — stub stderr 문구가 result.error에 실린다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_RUNS_FAIL=1 "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -r '.result.error' > "$BATS_TEST_TMPDIR/e-runs.txt"
+  grep -q "API 오류" "$BATS_TEST_TMPDIR/e-runs.txt"
+  # 레인 구별의 증인 — 전송 오류 문구에 404가 섞이지 않는다(양성 대조는 바로 위 매치).
+  run grep -qF "HTTP 404" "$BATS_TEST_TMPDIR/e-runs.txt"
+  [ "$status" -eq 1 ]
+  # ② 열린 PR 목록 전송 오류 — 같은 계약.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_PRS_FAIL=1 "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -r '.result.error' | grep -q "API 오류"
+  # ③ 핸들 404 — 재인증·망 단절과 처방이 다르다(레포 개명·접근권 부재).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_HANDLE_404=1 "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/page/actions/runs/999" --json
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -r '.result.error' | grep -q "HTTP 404"
+  # ④ gh 미설치 — 사유가 `spawnSync gh ENOENT`로 새면 운영자에게 무의미하다. 처방으로 번역한다.
+  rm -f "$STUB/gh"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --pr "https://github.com/ukyi-app/homelab/pull/7" --json
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -r '.result.error' | grep -q "PATH에 없다"
+}
+
+@test "a non-JSON gh response is reported as a parse failure, not as a lookup failure" {
+  # 스칼라 jq 오용(오브젝트 아닌 투영)은 rc 0인데 JSON이 아니다 — '조회 실패'로 위장하면
+  # 네트워크·권한 처방으로 잘못 분기한다. 3상 리더의 'parse'가 그 층을 지킨다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_NONJSON=1 "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/page/actions/runs/1" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' > "$BATS_TEST_TMPDIR/e-parse.txt"
+  grep -q "파싱 실패" "$BATS_TEST_TMPDIR/e-parse.txt"
+  assert_envelope_valid "$output"
+  # 양성 대조 — 같은 핸들 경로의 전송 오류 레인은 '파싱'이라 말하지 않는다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" STUB_GH_HANDLE_404=1 "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/page/actions/runs/999" --json
+  echo "$output" | jq -r '.result.error' > "$BATS_TEST_TMPDIR/e-404.txt"
+  run grep -qF "파싱 실패" "$BATS_TEST_TMPDIR/e-404.txt"
+  [ "$status" -eq 1 ]
+}
+
 @test "run handle lookup reports status and conclusion from the run URL" {
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/page/actions/runs/1" --json
   [ "$status" -eq 0 ]

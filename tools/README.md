@@ -516,7 +516,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   계보·표면 ref) / skew(소스 간 불일치 — 표면 ref 미확정) / non-sha(helm 차트 버전 — gh compare 호출 금지) /
   none(관측 0). 엔진의 `sync?.revision` 직접 참조 0건은 test_homelab-status.bats가 grep으로 단언한다.
 - **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghRead`/`ghJson`·`firstReason` — ghRead는 값과 실패 사유를 함께
-  주는 3상 리더(ok/error=stderr 첫 줄/parse=폴백 문구)이고 ghJson은 그 축약(값만·실패 null),
+  주는 3상 리더(ok/error=stderr 첫 줄 **+ errKind**/parse=폴백 문구)이고 ghJson은 그 축약(값만·실패 null),
   둘 다 오브젝트/배열 jq 전용, 스칼라
   jq는 raw라 sh 직접, `git`·`pushRoutes` — push 지향 관측 `git remote get-url --push --all`:
   pushurl 복수·insteadOf/pushInsteadOf 전개 반영) — status·mutation·init·secrets 공유. 판정 정책은
@@ -547,7 +547,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (noopOnMissingPr — pr-first-commit 멱등 no-op를 정당한 no-op variant로).
 - **`lib/status.ts`** — homelab CLI status 엔진(`runStatus()`·`statusInputError()`). 계층 계약:
   레포(핀·바인딩)+GitHub(run·PR)가 기본, 라이브(ArgoCD)는 KUBECONFIG 있을 때만(부재=생략,
-  조회 실패=live.error — 유일한 선택 계층). GitHub 계층 오류는 fail-loud(빈 목록 위장 금지).
+  조회 실패=live.error — 유일한 선택 계층). GitHub 계층 오류는 fail-loud(빈 목록 위장 금지)이고
+  **사유를 명명한다**: 3상 리더(exec.ghRead)의 error/parse를 그대로 층으로 옮겨 전송 오류(401·403
+  rate limit·404·망 단절 = stderr 첫 줄)와 응답 파싱 실패를 가르고, errKind not-found는 처방
+  ('gh CLI가 PATH에 없다')으로 번역한다 — 그 넷은 처방이 전부 다르다.
   입력 검증 술어는 CLI(usage exit 2)·MCP(invalid params)가 공유. 관측 전용(gh api·kubectl get만).
   run 모드의 `--branch` 좌표는 lane-pr 커널의 정확 조회로 그 레인 PR을 붙이고(2건이면 race exit 3),
   app 모드의 산출물 부재 분기는 열린 PR 목록 1회로 create-app 레인 PR을 `createPrs`에 싣는다.

@@ -12,7 +12,7 @@ import { revisionFields, syncRevisionOf } from "./argocd.ts";
 import { parseBranch } from "./bump-plan.ts";
 import { LANES, isDispatchLaneBranch } from "./catalog-rows.ts";
 import { compact } from "./contract.ts";
-import { ghJson, sh } from "./exec.ts";
+import { ghRead, sh, type GhRead } from "./exec.ts";
 import { APP_NAME_RE } from "./identity.ts";
 import { laneBranchInputError, lanePrRef, parseLaneBranch, readLanePrs, type LanePrRow } from "./lane-pr.ts";
 import { parseLedgerRows } from "./ledger-totals.ts";
@@ -136,12 +136,23 @@ function statusList(root: string): StatusOutcome {
   return { variant: "success", omitted: [], result: { mode: "list", apps, count: apps.length } };
 }
 
+// GitHub 계층 실패의 **사유 한 줄**(티켓 15) — 3상 리더(ghRead)의 종류를 그대로 층으로 옮긴다.
+// 종전에는 ghJson의 null 접힘이 gh 미설치·미인증·404·rate limit·망 단절·파싱 깨짐을 한 문장으로
+// 만들었고, 그 넷은 처방이 전부 다르다(재인증 / 이름·접근권 / 대기 / 재시도). 같은 statusApp 안에서
+// kubectl 실패는 이미 사유를 싣는데 GitHub 레그만 지워지던 비대칭의 해소이기도 하다.
+//   parse  — rc 0인데 JSON이 아니다. '조회 실패'로 위장하면 스칼라 jq 오용이 망 문제로 읽힌다.
+//   not-found — reason이 `spawnSync gh ENOENT`라 운영자에게 무의미하므로 처방으로 번역한다.
+function ghCause(g: Exclude<GhRead, { kind: "ok" }>): string {
+  if (g.kind === "parse") return `응답 파싱 실패(${g.reason})`;
+  if (g.errKind === "not-found") return "gh CLI가 PATH에 없다 — 설치 필요";
+  return g.reason;
+}
+
 // 열린 PR 목록 1회 조회 — app 모드의 두 분기(산출물 실재/부재)가 같은 질의를 공유한다.
-// 실패는 null(fail-loud 판정은 콜사이트 — GitHub 계층은 선택 계층이 아니다).
-function openHomelabPrs(): Array<Record<string, unknown>> | null {
-  const got = ghJson(`repos/${HOMELAB_REPO}/pulls?state=open&per_page=100`,
+// 3상 리더를 그대로 돌려준다(fail-loud 판정과 사유 문구는 콜사이트 — GitHub 계층은 선택 계층이 아니다).
+function openHomelabPrs(): GhRead {
+  return ghRead(`repos/${HOMELAB_REPO}/pulls?state=open&per_page=100`,
     "[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]");
-  return got === null ? null : (got as Array<Record<string, unknown>>);
 }
 const openPrRow = (p: Record<string, unknown>): Record<string, unknown> =>
   compact({ number: p.number, title: p.title, head: p.head, url: p.html_url, autoMerge: p.auto_merge });
@@ -153,8 +164,9 @@ function statusApp(root: string, app: string): StatusOutcome {
     // (mcp-4). 읽기 1회로 그 레인 PR을 별도 필드에 실어 준다 — 수동 머지 원칙은 그대로다.
     // 조회 실패는 여기서 fail-loud로 승격하지 않는다(주 사유는 산출물 부재이고, 부가 관측의 부재는
     // 키 부재로 보고된다 — 없는 것과 못 본 것을 결과가 뒤섞지 않게 필드를 만들지 않는다).
-    const prs = openHomelabPrs();
-    const createPrs = (prs ?? [])
+    const g = openHomelabPrs();
+    const prs = g.kind === "ok" ? (g.value as Array<Record<string, unknown>>) : [];
+    const createPrs = prs
       .filter((p) => isDispatchLaneBranch(LANES["create-app"].branchPattern, app, String(p.head)))
       .map(openPrRow);
     return { variant: "failure", omitted: [], result: compact({ mode: "app", error: `앱 '${app}'의 배포 산출물(${appRel(app).prod})이 없다`, createPrs: createPrs.length > 0 ? createPrs : undefined }) };
@@ -164,15 +176,15 @@ function statusApp(root: string, app: string): StatusOutcome {
   // GitHub 계층 — 최근 run(앱 레포)·열린 PR(homelab 변이 레인). 오류는 fail-loud.
   let runs: unknown[] = [];
   if (typeof row.sourceRepo === "string") {
-    const got = ghJson(`repos/${row.sourceRepo}/actions/runs?per_page=3`,
+    const g = ghRead(`repos/${row.sourceRepo}/actions/runs?per_page=3`,
       "[.workflow_runs[] | {name, status, conclusion, head_sha, html_url}]");
-    if (got === null) return { variant: "failure", omitted: [], result: { mode: "app", error: `GitHub 계층 조회 실패 — ${row.sourceRepo}의 최근 run` } };
-    runs = (got as Array<Record<string, unknown>>).map((r) =>
+    if (g.kind !== "ok") return { variant: "failure", omitted: [], result: { mode: "app", error: `GitHub 계층 조회 실패 — ${row.sourceRepo}의 최근 run: ${ghCause(g)}` } };
+    runs = (g.value as Array<Record<string, unknown>>).map((r) =>
       compact({ name: r.name, status: r.status, conclusion: r.conclusion, headSha: r.head_sha, url: r.html_url }));
   }
   const prsGot = openHomelabPrs();
-  if (prsGot === null) return { variant: "failure", omitted: [], result: { mode: "app", error: `GitHub 계층 조회 실패 — ${HOMELAB_REPO} 열린 PR` } };
-  const openPrs = prsGot.filter((p) => isAppLaneBranch(String(p.head), app)).map(openPrRow);
+  if (prsGot.kind !== "ok") return { variant: "failure", omitted: [], result: { mode: "app", error: `GitHub 계층 조회 실패 — ${HOMELAB_REPO} 열린 PR: ${ghCause(prsGot)}` } };
+  const openPrs = (prsGot.value as Array<Record<string, unknown>>).filter((p) => isAppLaneBranch(String(p.head), app)).map(openPrRow);
 
   // 라이브 계층 — KUBECONFIG 부재는 생략(성공), 조회 실패는 live.error(관측 보고).
   const kc = process.env.KUBECONFIG ?? "";
@@ -200,10 +212,10 @@ function statusApp(root: string, app: string): StatusOutcome {
 
 function statusRun(url: string, branch?: string): StatusOutcome {
   const m = url.match(RUN_URL_RE)!;
-  const got = ghJson(`repos/${m[1]}/${m[2]}/actions/runs/${m[3]}`,
+  const g0 = ghRead(`repos/${m[1]}/${m[2]}/actions/runs/${m[3]}`,
     "{name, status, conclusion, head_sha, html_url}");
-  if (got === null) return { variant: "failure", omitted: [], result: { mode: "run", error: `run 핸들 조회 실패: ${url}` } };
-  const r = got as Record<string, unknown>;
+  if (g0.kind !== "ok") return { variant: "failure", omitted: [], result: { mode: "run", error: `run 핸들 조회 실패: ${url} — ${ghCause(g0)}` } };
+  const r = g0.value as Record<string, unknown>;
   const run = compact({ name: r.name, status: r.status, conclusion: r.conclusion, headSha: r.head_sha, url: r.html_url ?? url });
   if (branch === undefined) return { variant: "success", omitted: [], result: { mode: "run", run } };
   // 좌표가 있으면 그 레인 브랜치의 PR을 **정확 조회**한다(변이 엔진과 같은 질의·투영 — lane-pr.ts).
@@ -221,10 +233,10 @@ function statusRun(url: string, branch?: string): StatusOutcome {
 
 function statusPr(url: string): StatusOutcome {
   const m = url.match(PR_URL_RE)!;
-  const got = ghJson(`repos/${m[1]}/${m[2]}/pulls/${m[3]}`,
+  const g = ghRead(`repos/${m[1]}/${m[2]}/pulls/${m[3]}`,
     "{number, state, merged, merge_commit_sha, title, head_ref: .head.ref, head_sha: .head.sha, auto_merge: (.auto_merge != null), html_url}");
-  if (got === null) return { variant: "failure", omitted: [], result: { mode: "pr", error: `PR 핸들 조회 실패: ${url}` } };
-  const p = got as Record<string, unknown>;
+  if (g.kind !== "ok") return { variant: "failure", omitted: [], result: { mode: "pr", error: `PR 핸들 조회 실패: ${url} — ${ghCause(g)}` } };
+  const p = g.value as Record<string, unknown>;
   return { variant: "success", omitted: [], result: { mode: "pr", pr: compact({
     number: p.number, state: p.state, merged: p.merged, autoMerge: p.auto_merge,
     title: p.title, headRef: p.head_ref, headSha: p.head_sha, mergeCommitSha: p.merge_commit_sha,

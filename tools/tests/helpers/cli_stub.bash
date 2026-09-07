@@ -178,7 +178,7 @@ PY
 # 임의 owner/repo URL을 정당한 입력으로 받는 계약이라(좁히면 계약을 거짓으로 검증) 의도적 비대칭.
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
-# STUB_GH_HANDLE_404 / STUB_GH_RAW / STUB_GH_HTTP_ERR / STUB_GH_VERSION / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
+# STUB_GH_HANDLE_404 / STUB_GH_NONJSON / STUB_GH_RAW / STUB_GH_HTTP_ERR / STUB_GH_VERSION / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
 # 3종(STUB_GH_RUNS_LIST_FAIL · STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기
 # 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL) / 신선도 스냅샷
 # (STUB_GH_STALE_RUN — 디스패치 전에 이미 같은 nonce를 에코하던 옛 run). 템플릿 파일·status 응답
@@ -430,6 +430,9 @@ case "$*" in
     ;;
   "api repos/"*"/actions/runs/"*" --jq "'{name, status, conclusion, head_sha, html_url}')
     if [ -n "${STUB_GH_HANDLE_404:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    # STUB_GH_NONJSON(티켓 15): rc 0인데 본문이 JSON이 아니다 — 스칼라 jq 오용·응답 형상 변경의
+    # 재현. 3상 리더의 'parse'가 이 레인을 '조회 실패'(전송 오류)와 갈라야 처방이 갈린다.
+    if [ -n "${STUB_GH_NONJSON:-}" ]; then printf 'not-json\n'; exit 0; fi
     cat "$FIX/run-handle.json"
     ;;
   "api repos/"*"/pulls/"*" --jq "'{number, state, merged, merge_commit_sha, title, head_ref: .head.ref, head_sha: .head.sha, auto_merge: (.auto_merge != null), html_url}')
