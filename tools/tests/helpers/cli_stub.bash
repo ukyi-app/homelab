@@ -222,6 +222,15 @@ case "$*" in
         exit 0
       fi
     fi
+    # STUB_PR_EMPTY_FIRST: 첫 조회는 [](낡은/빈 스냅샷 — 함정 「GitHub API는 낡은 스냅샷을 200으로 돌려준다」),
+    # 이후 db-prs.json. STUB_PR_FAIL_FIRST: 첫 조회는 전송 오류(exit 1), 이후 정상. 둘 다 PR 특정의 3상
+    # 재조회(티켓 04) 증인 — 단발 즉결이면 각각 거짓 failure/no-op·거짓 failure가 된다.
+    if [ -n "${STUB_PR_EMPTY_FIRST:-}" ] && [ ! -f "$FIX/.pr-empty-once" ]; then
+      : > "$FIX/.pr-empty-once"; printf '[]\n'; exit 0
+    fi
+    if [ -n "${STUB_PR_FAIL_FIRST:-}" ] && [ ! -f "$FIX/.pr-fail-once" ]; then
+      : > "$FIX/.pr-fail-once"; echo "gh: connect: connection reset" >&2; exit 1
+    fi
     cat "$FIX/db-prs.json"
     ;;
   "api repos/ukyi-app/homelab/compare/"*" --jq .status")
