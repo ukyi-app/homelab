@@ -305,3 +305,24 @@ DK
   echo "$output" | jq -e '.[0].action == "refuse"'
   echo "$output" | jq -e '.[0].reason | test("플랜 실패")'
 }
+
+@test "the autoDeploy rollback order is stated on both tracked surfaces, with closing open bump PRs as step 1" {
+  # homelab-cli-r2 티켓 38(b): 런북은 gitignored라 에이전트가 못 읽는다 — 롤백 순서는 tracked 표면
+  # 둘(CONTEXT.md 어휘 · 플래너 refuse 주석)이 들고 있어야 한다. 1단계가 '열린 bump PR 닫기'인 것이
+  # 핵심이다: 이미 무장된 형제 PR은 autoDeploy를 false로 내려도 무장된 채 남는다(라이브 좀비 #348).
+  n=0
+  for f in CONTEXT.md tools/poll-ghcr.ts; do
+    grep -qF '롤백' "$ROOT/$f"
+    grep -qF '열린 bump PR' "$ROOT/$f"
+    grep -qF '①' "$ROOT/$f"
+    n=$((n + 1))
+  done
+  # 열거 바닥값 — 루프가 0바퀴 돌면 위 단언이 하나도 실행되지 않고 통과한다.
+  [ "$n" -eq 2 ]
+  # 1단계가 실제로 **첫 번째**인지 — ①과 같은 줄(또는 바로 다음 줄)에 그 문구가 온다.
+  run grep -A1 -F '①' "$ROOT/CONTEXT.md"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF '열린 bump PR'
+  # 양성 대조 — 같은 검출기가 다른 단계 번호도 실제로 본다(부재 판정이 무증인이 아니다).
+  grep -qF '④' "$ROOT/CONTEXT.md"
+}
