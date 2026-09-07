@@ -5,18 +5,18 @@
     "at": "2026-06-30T07:41:09.402Z"
   },
   "db:page": {
-    "state": "purging",
+    "state": "purged",
     "backupId": "pg-daily-r2-20260907030000",
-    "at": "2026-09-07T15:28:14.187Z"
+    "at": "2026-09-07T15:44:11.531Z"
   },
   "db:trip-mate": {
-    "state": "purging",
+    "state": "purged",
     "backupId": "pg-daily-r2-20260907030000",
-    "at": "2026-09-07T15:28:14.251Z"
+    "at": "2026-09-07T15:44:11.581Z"
   },
   "cache:trip-mate": {
-    "state": "purging",
+    "state": "purged",
     "backupId": "nuc/trip-mate/rdb/dump-20260906T184509Z.rdb",
-    "at": "2026-09-07T15:28:14.318Z"
+    "at": "2026-09-07T15:44:11.638Z"
   }
 }
