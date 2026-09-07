@@ -8,7 +8,9 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
 계산한다(`scripts/README.md` 헤더와 같은 규약). 손으로 적은 사본은 반드시 드리프트한다.
 
 > 신뢰 경계·플로우 전반은 루트 `AGENTS.md`의 "멀티레포 앱 플로우"와 (gitignored) 런북
-> `docs/runbooks/app-platform.md` 참고.
+> `docs/runbooks/app-platform.md` 참고. **권위 순서**: 런북은 **절차**(어떤 순서로 손을 움직이나)를
+> 담고, 신뢰 경계·App 설치 위상의 SSOT는 `AGENTS.md`다 — 둘이 어긋나면 AGENTS.md가 이긴다.
+> 런북은 gitignored라 CI 증인이 없어서 반드시 먼저 낡는다(사본을 늘리는 정정 대신 포인터를 쓴다).
 
 ## 계약 스키마 (2종 — 혼동 주의)
 
@@ -36,6 +38,39 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   없으므로 **규칙 준수에 의존한다**(잔여 위험 — `docs/decisions/0005-data-connection-residual-risk.md`).
 
 ## homelab CLI (통합 진입점)
+
+### 빠른 시작(owner)
+
+첫 앱을 끝까지 태우는 순서다. **추정이 아니라 코드 전제에서 파생했다** — 각 줄의 근거는 아래 각주.
+
+```bash
+bun link                                    # 레포 루트 — package.json bin이 homelab을 전역 PATH에
+homelab doctor                              # 전제 진단(gh 인증·actor 일치·bun/kubeseal·템플릿 호환성)
+homelab app init myapp --archetype web      # 앱 레포 생성·스캐폴드·첫 push(→ GHCR 빌드)
+# 앱 레포에서: .env 작성 → bun run secret:seal → 봉인본 커밋·push          [1]
+homelab db create myapp --wait              # DB가 필요할 때만(캐시는 cache create)     [2]
+homelab app create myapp --wait             # PR 생성 → **사람이 머지**(머지 = 공개 승인) [3]
+homelab status myapp                        # 핀·바인딩·run·PR (+KUBECONFIG면 라이브 계층)
+homelab app secrets myapp --wait            # 이후 시크릿 **회전**은 이 동사가 연쇄한다   [1]
+```
+
+[1] 첫 앱은 봉인·push가 `app create`보다 **앞**이다. `_create-app.yaml`은 앱 레포 main HEAD에 봉인본이
+있으면 `--sealed`로 한 번에 배선하는 반면, `app secrets`가 깨우는 update-secrets는 표면이 없는 앱을
+거부한다(`tools/update-secrets.ts:39` — 「미온보딩 앱 … create-app 먼저」). 그래서 첫 앱에서 `app secrets`를
+먼저 부르면 확정 실패 run이 하나 남는다. `--seal-only`/`--no-dispatch` 플래그는 **보류**다(계약 표면을
+늘리므로 첫 온보딩에서 그 갈림길을 실제로 밟은 뒤 판단한다) — 지금은 순서로만 피한다.
+
+[2] conn SealedSecret이 착지해도 **앱이 그것을 쓰게 만드는 단계는 어떤 동사에도 없다** —
+`apps/<app>/deploy/prod/values.yaml`의 `envFrom`에 secretRef를 넣는 손 편집 PR이 유일 경로다
+(자동 배선을 안 하는 이유: conn 이름과 앱 이름이 같다는 보장이 없다). 현재 배선은
+`homelab status <app>`의 `배선(data-conn)` 줄이 읽는다.
+
+[3] 수동 머지는 `app create`·`app teardown` 둘뿐이다(`tools/lib/verbs.ts:164`·`tools/lib/verbs.ts:190`).
+나머지 레인은 디스패처가 auto-merge를 건다 — CLI에는 그 레버가 아예 없다.
+
+⚠️ **라이브 e2e는 미검증이다.** 그린필드라 CLI 유래 run이 0건이고, 위 순서는 코드 전제(디스패처 입력
+계약·update-secrets 선행 조건)에서 파생한 것이지 실측이 아니다. 첫 실전 온보딩이 곧 이 절의 검증이며,
+그때 관측한 `db create --wait`의 dispatch→merge 벽시계가 `WAIT_DEFAULTS.deadlineMs` 재산정의 재개 조건이다.
 
 ### 동사 표
 

@@ -205,6 +205,65 @@ EOF
   echo "$output" | grep -qE "^SYNOPSIS_OK [1-9][0-9]+$"
 }
 
+# ── 빠른 시작 블록·코드 근거 앵커(homelab-cli-r2 티켓 31) ─────────────────────
+
+@test "every homelab line in the README quickstart routes to a real catalog verb (floor 5)" {
+  # docs-4: 첫 사용 경로가 어디에도 한 번에 없던 자리. 블록의 각 줄이 실재 동사 경로여야 한다 —
+  # 오타·폐기된 동사가 들어가면 red다(사람이 그대로 복사해 붙이는 줄이라 값이 크다).
+  run bun -e '
+    import { readFileSync } from "node:fs";
+    import { VERBS } from "./tools/lib/verbs.ts";
+    const lines = readFileSync("tools/README.md", "utf8").split("\n");
+    const start = lines.findIndex((l) => l.startsWith("### 빠른 시작"));
+    if (start < 0) { console.error("빠른 시작 절 미발견"); process.exit(1); }
+    const open = lines.indexOf("```bash", start);
+    if (open < 0) { console.error("빠른 시작 코드블록 미발견"); process.exit(1); }
+    const close = lines.indexOf("```", open + 1);
+    if (close < 0) { console.error("코드블록이 닫히지 않았다"); process.exit(1); }
+    const paths = VERBS.map((v) => v.path.join(" "));
+    let n = 0;
+    for (const raw of lines.slice(open + 1, close)) {
+      const cmd = raw.replace(/^\s+/, "");
+      if (!cmd.startsWith("homelab ")) continue;
+      const rest = cmd.slice("homelab ".length);
+      const hit = paths.filter((p) => rest === p || rest.startsWith(p + " "));
+      if (hit.length === 0) { console.error("catalog 밖 동사: " + cmd); process.exit(1); }
+      n++;
+    }
+    // 바닥값 — 블록이 비거나 주석만 남으면 "전건 통과"로 접히지 않는다.
+    if (n < 5) { console.error("빠른 시작의 homelab 줄 " + n + "건 < 5"); process.exit(1); }
+    console.log("QUICKSTART_OK " + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE "^QUICKSTART_OK [5-9]|^QUICKSTART_OK [1-9][0-9]"
+}
+
+@test "every file:line code citation in the README resolves to a non-empty line in that file (floor 4)" {
+  # 각주·근거 표기는 손 사본이라 파일이 움직이면 조용히 엉뚱한 줄을 가리킨다. 최소한 그 줄이
+  # 실재하고 비어 있지 않은지는 기계가 잰다(개별 리터럴 왕복은 위 각주 @test가 따로 맡는다).
+  run bun -e '
+    import { existsSync, readFileSync } from "node:fs";
+    const md = readFileSync("tools/README.md", "utf8");
+    const refs = [...md.matchAll(/(tools\/[A-Za-z0-9_./-]+\.ts):(\d+)/g)];
+    // 바닥값 — 인용이 통째로 지워지면 "전건 유효"가 되지 않는다.
+    if (refs.length < 4) { console.error("file:line 인용 " + refs.length + "건 < 4"); process.exit(1); }
+    let n = 0;
+    for (const m of refs) {
+      const [, file, num] = m;
+      if (!existsSync(file)) { console.error("인용한 파일 부재: " + file); process.exit(1); }
+      const src = readFileSync(file, "utf8").split("\n");
+      const i = Number(num);
+      if (!(i >= 1 && i <= src.length)) { console.error(file + ":" + i + " — 줄 범위 밖(총 " + src.length + "줄)"); process.exit(1); }
+      if (src[i - 1].trim() === "") { console.error(file + ":" + i + " — 빈 줄을 가리킨다"); process.exit(1); }
+      n++;
+    }
+    if (n !== refs.length) { console.error("검증 " + n + " != " + refs.length); process.exit(1); }
+    console.log("CITATIONS_OK " + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE "^CITATIONS_OK [4-9]|^CITATIONS_OK [1-9][0-9]"
+}
+
 @test "the MCP server registration recipe lives in both the README and mcp --help, with the KUBECONFIG-absent outcome" {
   # mcp-8: 등록 방법이 레포·런북 어디에도 없던 자리. 전부 **양성** grep이라 표기가 사라지면 red다.
   run grep -c "claude mcp add homelab" tools/README.md

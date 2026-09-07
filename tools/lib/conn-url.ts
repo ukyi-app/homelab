@@ -26,7 +26,7 @@ export type DbUrlInput = {
   name: string;
   rw?: boolean;
   admin?: boolean;
-  host?: string;     // 미지정 = TS_DB_HOST 환경 변수(런북 규약)
+  host?: string;     // 미지정 = TS_DB_HOST 환경 변수(런북 db-cache-access.md 규약)
   envLocal?: string; // 대상 파일 오버라이드(기본: 모드별 — admin은 F2로 오버라이드 금지)
   envDir?: string;   // 대상 파일의 기준 디렉토리(MCP 명시 입력 — 서버 cwd 추론 없음)
   dryRun?: boolean;
@@ -34,7 +34,7 @@ export type DbUrlInput = {
 export type CacheUrlInput = {
   name: string;
   rw?: boolean;
-  host?: string;     // 미지정 = CACHE_LOCAL_HOST 또는 127.0.0.1(port-forward 타깃)
+  host?: string;     // 미지정 = CACHE_LOCAL_HOST 또는 127.0.0.1(port-forward 타깃 — 런북 db-cache-access.md)
   envLocal?: string;
   envDir?: string;
   dryRun?: boolean;
@@ -174,7 +174,7 @@ export function runDbUrl(input: DbUrlInput): UrlOutcome {
     return { variant: "success", omitted: [], result: { ...base, wrote: false, note: "평문 URL은 stdout에 출력하지 않음 — 라이브 실행 시 host를 tailscale로 치환해 대상 파일에만 기록" } };
   }
   const tsHost = input.host ?? process.env.TS_DB_HOST ?? "";
-  if (tsHost === "") return failure("--host <tailscale-host>(또는 TS_DB_HOST) 필요 — pg-rw-tailscale LB host(런북)");
+  if (tsHost === "") return failure("--host <tailscale-host>(또는 TS_DB_HOST) 필요 — pg-rw-tailscale LB host(런북 db-cache-access.md)");
   // host 미지정(입력 결함)은 skip(도메인 부재)보다 앞선다 — 도메인이 생겨도 host 없이는 라이브
   // 실행이 성립하지 않으니, 먼저 고칠 수 있는 것을 먼저 보고한다(cache url은 host 기본값이 있어
   // 이 축 자체가 없다 — 두 동사의 순서 비대칭은 그 차이다). env 폴백(TS_DB_HOST)도 같은 술어를 지난다
