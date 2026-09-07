@@ -197,6 +197,85 @@ assert_envelope_valid() {
   [ "$(echo "$output" | jq -r '.omitted | length')" = "0" ]
 }
 
+@test "the result states which checkout the repo layer read (root always, head only when it is a repo)" {
+  # 병: status의 '레포 계층'은 CLI 자신의 **로컬 체크아웃** 디스크다. bump-poll 자동 머지·--wait 머지
+  # 뒤 git pull을 안 한 체크아웃에서 「배포 핀: 옛 tag」+「라이브: 새 rev」가 모순 없이 success로 나온다.
+  # MCP status tool은 root를 입력으로 노출하지 않아 **항상** defaultRoot를 타므로, 어느 체크아웃을
+  # 읽었는지는 결과가 말해야 한다. origin/main 비교는 넣지 않는다(gh 의존 + 낡은 스냅샷 200 함정).
+  make_app_fixture page true
+  # ① 비-git 루트 — head는 키 부재이고 그래도 success다(기본 픽스처가 밟는 분기).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.result.repo.root')" = "$APPS_ROOT" ]
+  [ "$(echo "$output" | jq -r '.result.repo | has("head")')" = "false" ]
+  assert_envelope_valid "$output"
+  # ② git 루트 — head가 실제 short SHA다.
+  git -C "$APPS_ROOT" init -q -b main
+  printf 'x\n' > "$APPS_ROOT/seed.txt"
+  git -C "$APPS_ROOT" add -A
+  git -C "$APPS_ROOT" -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m seed
+  want="$(git -C "$APPS_ROOT" rev-parse --short HEAD)"
+  [ -n "$want" ]
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.repo.head')" = "$want" ]
+  echo "$stderr" | grep -q "레포 계층"
+  # ③ app 모드도 같은 출처를 진술한다(두 SHA 대조는 소비자 몫이라 좌표가 결과에 있어야 한다).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.repo.head')" = "$want" ]
+}
+
+@test "a broken source-repo never masquerades as an in-repo app, and a real in-repo app says runs are omitted" {
+  # 병: app-surface가 부재(정상 인레포)·빈 값(잘린 쓰기)·읽기 불가를 한 null로 접어, 잘린 쓰기 하나가
+  # 「이 앱은 인레포 앱이다」라는 **적극적 거짓 주장**이 되고 그 앱의 최근 run이 영원히 '없음'이었다.
+  make_app_fixture blank true
+  printf '   \n' > "$APPS_ROOT/apps/blank/deploy/prod/source-repo"
+  # 목록 모드 — 파손을 '인레포'로 말하지 않는다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.apps[] | select(.name=="blank") | .sourceRepoState')" = "empty" ]
+  echo "$stderr" > "$BATS_TEST_TMPDIR/list-human.txt"
+  grep -q "source-repo" "$BATS_TEST_TMPDIR/list-human.txt"
+  # app 모드 — GitHub 계층을 못 여는 상태라 fail-loud다(빈 목록 위장 금지, 모듈 헤더의 계약).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status blank --root "$APPS_ROOT" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "source-repo"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "0" ]
+  # 읽기 불가(디렉토리 = EISDIR)도 인레포로 위장하지 않는다.
+  make_app_fixture unread true
+  rm -f "$APPS_ROOT/apps/unread/deploy/prod/source-repo"
+  mkdir -p "$APPS_ROOT/apps/unread/deploy/prod/source-repo"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status unread --root "$APPS_ROOT" --json
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -r '.result.error' | grep -q "source-repo"
+  # 대조군 — 진짜 인레포 앱(파일 부재)은 성공하고, run 계층 생략을 omitted가 명시한다.
+  make_app_fixture inrepo true -
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status inrepo --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(echo "$output" | jq -r '.omitted | index("runs") != null')" = "true" ]
+  assert_envelope_valid "$output"
+}
+
+@test "the ledger join is scoped to the prod env so a same-named platform row cannot be misattributed" {
+  # 실측: 앱 이름이 platform 컴포넌트와 겹치면(homepage) 그 컴포넌트 행의 limit이 앱 예산으로 보고됐다.
+  # platform 행은 손 편집으로 들어와 create-app의 전역 이름 유일성 게이트를 지나지 않고, addRow가
+  # 앱 행을 **맨 뒤**에 넣으므로 `rows.find`의 첫 매치는 항상 위쪽 platform 행이다.
+  make_app_fixture page true
+  make_ledger_row page 32 208 platform
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.app | has("ledgerMi")')" = "false" ]
+  # 양성 대조 — 같은 이름의 prod 행이 뒤에 오면 그 값을 잡는다(조인이 상수가 아니다).
+  make_ledger_row page 64 128
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.result.app.ledgerMi')" = "128" ]
+}
+
 @test "the live layer tells absent, unreachable, and present apart (three states, one fixture set)" {
   # 병: `--ignore-not-found` 없이 조회해 NotFound(exit 1)를 조회 실패로 접었다 — 'appset이 아직
   # Application을 안 만들었다/prune이 끝났다'는 **상태**인데 관측 실패로 위장됐다(create·teardown

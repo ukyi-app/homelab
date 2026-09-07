@@ -54,7 +54,8 @@ export function buildSamples(doctorIds: readonly string[]): Record<string, Sampl
   return {
     "doctor|success": doctorSample(0),
     "doctor|failure": doctorSample(1),
-    "status|success": { mode: "list", apps: [], count: 0 },
+    // repo(출처 진술)는 list·app 성공 모드의 필수 필드다 — 표본이 빠지면 그 결합이 무증인이 된다.
+    "status|success": { mode: "list", repo: { root: "/x", head: "abc1234" }, apps: [], count: 0 },
     "status|failure": { mode: "app", error: "x" },
     // status의 race는 성공 union(statusOk)이 아니라 전용 정의(statusRace)다 — 형상이 다르므로 표본도 별도.
     "status|race": { mode: "run", branch: "create-database/mydb-501", observedPrs: 2, error: "x" },

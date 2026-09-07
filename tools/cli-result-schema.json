@@ -31,7 +31,7 @@
     "verb": { "enum": ["doctor", "status", "db create", "cache create", "app create", "app secrets", "app teardown", "app init", "db url", "cache url"] },
     "variant": { "enum": ["success", "failure", "race", "skip", "pending", "no-op", "superseded"] },
     "exitCode": { "enum": [0, 1, 3, 4] },
-    "omitted": { "type": "array", "uniqueItems": true, "items": { "enum": ["live"] } },
+    "omitted": { "type": "array", "uniqueItems": true, "items": { "enum": ["live", "runs"] } },
     "result": { "type": "object" }
   },
   "allOf": [
@@ -800,11 +800,22 @@
     "statusList": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "apps", "count"],
+      "required": ["mode", "repo", "apps", "count"],
       "properties": {
         "mode": { "enum": ["list"] },
+        "repo": { "$ref": "#/definitions/statusRepo" },
         "apps": { "type": "array", "items": { "$ref": "#/definitions/statusAppRow" } },
         "count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "statusRepo": {
+      "description": "레포 계층의 출처 — 이 결과가 읽은 체크아웃. status의 레포 계층은 GitHub main이 아니라 CLI가 링크된 **로컬 디스크**라 낡을 수 있고(git pull 미실행), 그때 '옛 핀 + 새 라이브 rev'가 모순 없이 success로 나온다. MCP는 root를 입력으로 노출하지 않아 항상 defaultRoot를 타므로 좌표가 결과에 있어야 소비자가 낡음을 판별한다. head는 git 레포가 아니면 키 부재(실패가 아니다). origin/main 비교는 의도적으로 없다 — gh 의존이 되고 낡은 스냅샷 200이 거짓 안심을 만든다.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root"],
+      "properties": {
+        "root": { "type": "string", "minLength": 1 },
+        "head": { "type": "string", "minLength": 1 }
       }
     },
     "statusAppRow": {
@@ -818,6 +829,7 @@
         "digest": { "type": "string" },
         "autoDeploy": { "type": "boolean" },
         "sourceRepo": { "type": "string" },
+        "sourceRepoState": { "description": "source-repo 파일의 **파손** 상태만 실린다(empty=잘린 쓰기 · unreadable=읽기 실패). 정상 두 상태(값 있음 / 파일 없음 = 인레포 앱)는 sourceRepo 키의 유무가 이미 말한다 — 이 키의 존재 자체가 '부재로 접지 말라'는 신호다.", "enum": ["empty", "unreadable"] },
         "ledgerMi": { "type": "integer", "minimum": 0 },
         "conns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
@@ -825,9 +837,10 @@
     "statusApp": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "app", "runs", "openPrs"],
+      "required": ["mode", "repo", "app", "runs", "openPrs"],
       "properties": {
         "mode": { "enum": ["app"] },
+        "repo": { "$ref": "#/definitions/statusRepo" },
         "app": { "$ref": "#/definitions/statusAppRow" },
         "runs": { "type": "array", "items": { "$ref": "#/definitions/statusRunRow" } },
         "openPrs": { "type": "array", "items": { "$ref": "#/definitions/statusOpenPrRow" } },
@@ -947,6 +960,7 @@
       "required": ["mode", "error"],
       "properties": {
         "mode": { "enum": ["app", "run", "pr"] },
+        "repo": { "$ref": "#/definitions/statusRepo" },
         "error": { "type": "string", "minLength": 1 },
         "createPrs": {
           "description": "app 모드의 산출물 부재 분기에서만: 그 앱을 키로 하는 create-app 레인의 열린 PR(수동 머지 대기). 산출물이 없는 것이 그린필드의 정상 전이일 수 있다는 부가 관측이고, 없으면 키가 없다(읽기 전용 — 머지 원칙 불변).",

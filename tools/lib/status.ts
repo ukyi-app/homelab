@@ -12,7 +12,7 @@ import { revisionFields, syncRevisionOf } from "./argocd.ts";
 import { parseBranch } from "./bump-plan.ts";
 import { LANES, isDispatchLaneBranch } from "./catalog-rows.ts";
 import { compact } from "./contract.ts";
-import { ghRead, sh, type GhRead } from "./exec.ts";
+import { ghRead, git, sh, type GhRead } from "./exec.ts";
 import { APP_NAME_RE } from "./identity.ts";
 import { laneBranchInputError, lanePrRef, parseLaneBranch, readLanePrs, type LanePrRow } from "./lane-pr.ts";
 import { parseLedgerRows } from "./ledger-totals.ts";
@@ -87,6 +87,20 @@ function defaultRoot(): string {
   return fileURLToPath(new URL("../..", import.meta.url));
 }
 
+// 레포 계층의 **출처 진술**(티켓 17) — 이 결과가 어느 체크아웃의 디스크를 읽었는지.
+// status의 레포 계층은 GitHub main이 아니라 CLI가 링크된 로컬 체크아웃이다. bump-poll 자동 머지·
+// `--wait` 머지 뒤 `git pull`을 안 한 체크아웃에서는 「배포 핀: 옛 tag」와 「라이브: 새 rev」가
+// 모순 없이 success로 나오고, teardown 머지 뒤엔 앱이 아직 있는 것으로 보인다. MCP status tool은
+// root를 **입력으로** 노출하지 않아 항상 defaultRoot를 타므로, 좌표를 결과가 말해야 에이전트가
+// 낡음을 판별할 수 있다. 두 SHA 대조는 소비자 몫이다(app 모드가 이미 live.argocd.revision을 낸다).
+// ⚠️ origin/main 비교는 넣지 않는다 — status가 gh 의존이 되고, 함정 원장 「GitHub API는 낡은
+//    스냅샷을 200으로 돌려준다」가 그 비교를 **거짓 안심**으로 만든다. 여기는 '출처 진술'까지다.
+// git이 없거나 레포가 아니면 head는 키 부재다(값 없음 = 키 부재 규약 — 실패가 아니다).
+function repoProvenance(root: string): Record<string, unknown> {
+  const r = git(root, ["rev-parse", "--short", "HEAD"]);
+  return compact({ root, head: r.ok && r.out.trim() !== "" ? r.out.trim() : undefined });
+}
+
 type AppRow = Record<string, unknown>;
 
 // 앱 표면(values.yaml image.{repo,tag,digest} · .bindings.json autoDeploy · source-repo 한 줄)의
@@ -100,10 +114,19 @@ function readAppRow(root: string, name: string): AppRow {
   const digest = typeof image.digest === "string" ? image.digest : undefined;
   const autoDeploy = s.autoDeploy ?? undefined;
   const sourceRepo = s.sourceRepo ?? undefined;
+  // 파손 상태만 결과에 싣는다(정상 두 상태 ok/absent는 sourceRepo 키의 유무가 이미 말한다) —
+  // 이 키의 존재 자체가 「부재로 접지 말라」는 신호다.
+  const sourceRepoState = s.sourceRepoState === "empty" || s.sourceRepoState === "unreadable" ? s.sourceRepoState : undefined;
   let ledgerMi: unknown;
   try {
     const rows = parseLedgerRows(readFileSync(`${root}/docs/memory-ledger.md`, "utf8"));
-    ledgerMi = rows.find((r) => r.name === name)?.limitMi;
+    // 조인은 이름 + **env=prod**다. 행 이름 = 앱 이름은 create-app이 쓰고(env도 그때 prod로 쓴다),
+    // 전역 이름 유일성은 ledger-budget.budgetViolation이 강제한다 — env=prod가 그 유일성의 도메인
+    // 경계다. platform 행은 손 편집으로 들어와 그 게이트 밖이고, addRow가 앱 행을 **맨 뒤**에 넣으므로
+    // env를 안 보면 위쪽 platform 행이 항상 첫 매치로 이긴다(실측: 앱 homepage에 platform limit 208 보고).
+    // ⚠️ 여기서 '이름이 겹치면 거부'를 새로 만들지 않는다 — 유일성의 소유자는 ledger-budget이고,
+    //    리더가 정책을 두 번 선언하면 그게 두 번째 진실이다.
+    ledgerMi = rows.find((r) => r.name === name && r.env === "prod")?.limitMi;
   } catch { /* 원장 부재 — 키 부재로 보고 */ }
   // 앱↔리소스 배선(conns) — values.envFrom의 secretRef 중 data-conn 컴포넌트가 내는 핸들만 추린다.
   // 판정은 레이아웃 SSOT(classifyArtifact)에 위임한다: 이름 정책(-ro 접미·예약 이름·kind 접두)이
@@ -118,7 +141,7 @@ function readAppRow(root: string, name: string): AppRow {
     .map((e) => (e as { secretRef?: { name?: unknown } } | null)?.secretRef?.name)
     .filter((n): n is string => typeof n === "string" && n !== ""
       && classifyArtifact(`${LAYOUT_DIRS.dataConn}/${n}.sealed.yaml`) !== null);
-  return compact({ name, tag, digest, autoDeploy, sourceRepo, ledgerMi, conns: conns.length > 0 ? conns : undefined });
+  return compact({ name, tag, digest, autoDeploy, sourceRepo, sourceRepoState, ledgerMi, conns: conns.length > 0 ? conns : undefined });
 }
 
 // 열거는 공유 워커(repo-walk `apps` 유닛 스코프) 소유 — 의미론적 필터(deploy/prod 존재 =
@@ -133,7 +156,7 @@ function listAppNames(root: string): string[] {
 
 function statusList(root: string): StatusOutcome {
   const apps = listAppNames(root).map((n) => readAppRow(root, n));
-  return { variant: "success", omitted: [], result: { mode: "list", apps, count: apps.length } };
+  return { variant: "success", omitted: [], result: { mode: "list", repo: repoProvenance(root), apps, count: apps.length } };
 }
 
 // GitHub 계층 실패의 **사유 한 줄**(티켓 15) — 3상 리더(ghRead)의 종류를 그대로 층으로 옮긴다.
@@ -188,27 +211,37 @@ function statusApp(root: string, app: string): StatusOutcome {
     const createPrs = prs
       .filter((p) => isDispatchLaneBranch(LANES["create-app"].branchPattern, app, String(p.head)))
       .map(openPrRow);
-    return { variant: "failure", omitted: [], result: compact({ mode: "app", error: `앱 '${app}'의 배포 산출물(${appRel(app).prod})이 없다`, createPrs: createPrs.length > 0 ? createPrs : undefined }) };
+    return { variant: "failure", omitted: [], result: compact({ mode: "app", repo: repoProvenance(root), error: `앱 '${app}'의 배포 산출물(${appRel(app).prod})이 없다`, createPrs: createPrs.length > 0 ? createPrs : undefined }) };
   }
   const row = readAppRow(root, app);
+  const repo = repoProvenance(root);
+  const omitted: string[] = [];
 
   // GitHub 계층 — 최근 run(앱 레포)·열린 PR(homelab 변이 레인). 오류는 fail-loud.
   let runs: unknown[] = [];
   if (typeof row.sourceRepo === "string") {
     const g = ghRead(`repos/${row.sourceRepo}/actions/runs?per_page=3`,
       "[.workflow_runs[] | {name, status, conclusion, head_sha, html_url}]");
-    if (g.kind !== "ok") return { variant: "failure", omitted: [], result: { mode: "app", error: `GitHub 계층 조회 실패 — ${row.sourceRepo}의 최근 run: ${ghCause(g)}` } };
+    if (g.kind !== "ok") return { variant: "failure", omitted: [], result: { mode: "app", repo, error: `GitHub 계층 조회 실패 — ${row.sourceRepo}의 최근 run: ${ghCause(g)}` } };
     runs = (g.value as Array<Record<string, unknown>>).map((r) =>
       compact({ name: r.name, status: r.status, conclusion: r.conclusion, headSha: r.head_sha, url: r.html_url }));
+  } else if (row.sourceRepoState !== undefined) {
+    // 파손(빈 값·읽기 불가)은 '인레포 앱'이 아니다 — GitHub 계층을 **열 수 없는** 상태이므로 헤더의
+    // fail-loud 계약이 그대로 적용된다(빈 목록 위장 금지). gh는 한 번도 부르지 않는다.
+    return { variant: "failure", omitted: [], result: { mode: "app", repo, error: `GitHub 계층 조회 불가 — ${appRel(app).sourceRepo}가 ${row.sourceRepoState === "empty" ? "비어 있다(잘린 쓰기)" : "읽히지 않는다"}` } };
+  } else {
+    // 진짜 인레포 앱(파일 부재) — run 계층을 건너뛴 사실을 명시한다. 종전에는 '최근 run: 없음'이
+    // 홀로 서서 '빌드가 없다'와 '레그를 안 봤다'가 구별되지 않았다.
+    omitted.push("runs");
   }
   const prsGot = openHomelabPrs();
-  if (prsGot.kind !== "ok") return { variant: "failure", omitted: [], result: { mode: "app", error: `GitHub 계층 조회 실패 — ${HOMELAB_REPO} 열린 PR: ${ghCause(prsGot)}` } };
+  if (prsGot.kind !== "ok") return { variant: "failure", omitted: [], result: { mode: "app", repo, error: `GitHub 계층 조회 실패 — ${HOMELAB_REPO} 열린 PR: ${ghCause(prsGot)}` } };
   const openPrs = (prsGot.value as Array<Record<string, unknown>>).filter((p) => isAppLaneBranch(String(p.head), app)).map(openPrRow);
 
   // 라이브 계층 — KUBECONFIG 부재는 생략(성공), 조회 실패는 live.error(관측 보고).
   const kc = process.env.KUBECONFIG ?? "";
   if (kc === "") {
-    return { variant: "success", omitted: ["live"], result: { mode: "app", app: row, runs, openPrs } };
+    return { variant: "success", omitted: [...omitted, "live"], result: { mode: "app", repo, app: row, runs, openPrs } };
   }
   let live: Record<string, unknown>;
   // `--ignore-not-found` — NotFound를 exit 1이 아니라 **exit 0 + 빈 stdout**으로 받는다. 없으면
@@ -235,7 +268,7 @@ function statusApp(root: string, app: string): StatusOutcome {
       }) };
     } catch { live = { error: "Application JSON 파싱 실패" }; }
   }
-  return { variant: "success", omitted: [], result: { mode: "app", app: row, runs, openPrs, live } };
+  return { variant: "success", omitted, result: { mode: "app", repo, app: row, runs, openPrs, live } };
 }
 
 function statusRun(url: string, branch?: string): StatusOutcome {

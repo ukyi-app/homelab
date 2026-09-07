@@ -116,7 +116,7 @@ cli_stub_init() {
   # 원장 파서 — NUL/RS 레코드를 배열로 복원해 질의한다. 모드:
   #   count <argv...>  : 접두 일치 레코드 수
   #   observation-only : 모든 gh 레코드가 읽기(`gh api`/`gh --version`)이고 변이 수단이 없으며,
-  #                      모든 git 레코드가 읽기 동사(`var`·`config --get*`)인지 (위반 시 비-0)
+  #                      모든 git 레코드가 읽기 동사(`var`·`rev-parse`·`config --get*`)인지 (위반 시 비-0)
   #   dump             : 사람용 — argc + 따옴표 표기
   LEDGER_PY="$BATS_TEST_TMPDIR/ledger.py"
   cat > "$LEDGER_PY" <<'PY'
@@ -144,17 +144,21 @@ if mode == "count":
 elif mode == "exact":  # argc + 각 위치 문자열이 모두 같은 레코드가 있는가(인자 경계 보존 단언)
     sys.exit(0 if any(r == want for r in records) else 1)
 elif mode == "observation-only":
-    # doctor는 관측 전용 — gh 레코드는 읽기(`gh api` 또는 `gh --version`)이고 변이 수단이 없어야 하며,
-    # git 레코드는 읽기 동사(`var` · `config --get*`)뿐이어야 한다. git 계열도 exec seam을 지나므로
-    # gh만 보면 "관측 전용"이 gh 축에서만 참인 반쪽 단언이 된다(티켓 14).
+    # doctor·status는 관측 전용 — gh 레코드는 읽기(`gh api` 또는 `gh --version`)이고 변이 수단이 없어야
+    # 하며, git 레코드는 읽기 동사(`var` · `rev-parse` · `config --get*`)뿐이어야 한다. git 계열도
+    # exec seam을 지나므로 gh만 보면 "관측 전용"이 gh 축에서만 참인 반쪽 단언이 된다(티켓 14·17).
     MUTATION = {"-X", "--method", "-f", "-F", "--field", "--raw-field", "--input"}
     GH_READ_HEADS = (["api"], ["--version"])
 
     def git_read(rec):
-        head = rec[1:2]
-        if head == ["var"]:
+        # `git -C <dir> …`(exec seam의 named adapter 형태)는 동사 앞의 위치 지정일 뿐이라 벗겨 낸다.
+        args = rec[1:]
+        if args[:1] == ["-C"]:
+            args = args[2:]
+        head = args[:1]
+        if head in (["var"], ["rev-parse"]):
             return True
-        return head == ["config"] and len(rec) > 2 and rec[2].startswith("--get")
+        return head == ["config"] and len(args) > 1 and args[1].startswith("--get")
 
     bad = []
     for r in records:
@@ -521,10 +525,13 @@ make_app_fixture() {
 }
 
 # 메모리 원장 픽스처 행 — 형식 SSOT는 tools/lib/ledger-totals.ts LEDGER_ROW_RE.
-# 사용: make_ledger_row <name> <reqMi> <limitMi>
+# 사용: make_ledger_row <name> <reqMi> <limitMi> [env]
+# ⚠️ env를 인자로 연 이유: 2열을 `prod`로 하드코딩하면 「조인이 env를 본다」는 판정이 **구조적으로**
+#    무증인이 된다(모든 픽스처 행이 prod라 조건이 항상 참). 실 원장의 platform 행은 손 편집으로
+#    들어와 namespace가 prod가 아닐 수 있고, 그 행이 파일 순서상 앱 행보다 앞선다.
 make_ledger_row() {
   mkdir -p "$APPS_ROOT/docs"
-  printf '| <!-- ledger:row --> %s | prod | %s | %s |\n' "$1" "$2" "$3" >> "$APPS_ROOT/docs/memory-ledger.md"
+  printf '| <!-- ledger:row --> %s | %s | %s | %s |\n' "$1" "${4:-prod}" "$2" "$3" >> "$APPS_ROOT/docs/memory-ledger.md"
 }
 
 # git 기록 래퍼 — doctor의 git 계열 관측(`var GIT_COMMITTER_IDENT` · `config --get-urlmatch …`)을

@@ -33,24 +33,39 @@ export function renderStatus(envelope: Envelope): string[] {
     if (Array.isArray(r.createPrs)) lines.push(`진행 중인 create-app PR: ${r.createPrs.map((p: Record<string, unknown>) => `#${p.number} ${p.url}`).join(" · ")}`);
     return lines;
   }
+  // 레포 계층의 출처 — 어느 체크아웃의 디스크를 읽었는지. 두 SHA 대조(핀 vs live.argocd.revision)는
+  // 소비자 몫이라 좌표만 준다(origin/main 비교는 의도적으로 없다 — status.repoProvenance 주석).
+  const repoLine = (repo: Record<string, unknown> | undefined): string[] =>
+    repo === undefined ? [] : [`레포 계층: 로컬 체크아웃 ${repo.root}${repo.head ? `@${repo.head}` : " (git 레포 아님)"}`];
+  // source-repo 파손은 '인레포'로 말하지 않는다 — 잘린 쓰기 하나가 '이 앱은 인레포 앱'이라는
+  // 적극적 거짓 주장이 되던 자리다.
+  const repoCell = (a: Record<string, unknown>): string =>
+    a.sourceRepo !== undefined ? String(a.sourceRepo)
+      : a.sourceRepoState === "empty" ? "(source-repo 비었음 — 잘린 쓰기)"
+        : a.sourceRepoState === "unreadable" ? "(source-repo 읽기 실패)"
+          : "(인레포)";
   switch (r.mode) {
     case "list": {
-      if (r.count === 0) return ["온보딩된 앱이 없다(그린필드)"];
+      if (r.count === 0) return [...repoLine(r.repo), "온보딩된 앱이 없다(그린필드)"];
       return [
+        ...repoLine(r.repo),
         `앱 ${r.count}개`,
         ...r.apps.map((a: Record<string, unknown>) =>
-          `• ${a.name} — tag ${a.tag ?? "(핀 없음)"} · autoDeploy ${OX[String(a.autoDeploy)] ?? "미기록"} · repo ${a.sourceRepo ?? "(인레포)"}`),
+          `• ${a.name} — tag ${a.tag ?? "(핀 없음)"} · autoDeploy ${OX[String(a.autoDeploy)] ?? "미기록"} · repo ${repoCell(a)}`),
       ];
     }
     case "app": {
       const lines = [
+        ...repoLine(r.repo),
         `앱: ${r.app.name}`,
         `배포 핀: tag ${r.app.tag ?? "(없음)"} · digest ${r.app.digest ?? "(없음)"}`,
-        `autoDeploy: ${OX[String(r.app.autoDeploy)] ?? "미기록"} · source repo: ${r.app.sourceRepo ?? "(인레포)"} · 메모리 원장: ${r.app.ledgerMi !== undefined ? `limit ${r.app.ledgerMi}Mi` : "행 없음"}`,
+        `autoDeploy: ${OX[String(r.app.autoDeploy)] ?? "미기록"} · source repo: ${repoCell(r.app)} · 메모리 원장: ${r.app.ledgerMi !== undefined ? `limit ${r.app.ledgerMi}Mi` : "행 없음"}`,
         // 배선(envFrom의 data-conn 핸들) — 부재는 '없음'으로 말한다: conn이 봉인·커밋돼도 앱이
         // envFrom을 배선 안 하면 앱은 DB/캐시 없이 그대로 뜬다(#211 클래스).
         `배선(data-conn): ${Array.isArray(r.app.conns) ? r.app.conns.join(" · ") : "없음"}`,
-        r.runs.length === 0 ? "최근 run: 없음"
+        // '레그를 안 봤다'(omitted runs = 인레포 앱)와 '빌드가 없다'(빈 목록)를 구별한다.
+        envelope.omitted.includes("runs") ? "최근 run: 생략 — 인레포 앱(source-repo 없음)이라 앱 레포 run 계층 없음"
+          : r.runs.length === 0 ? "최근 run: 없음"
           : `최근 run: ${r.runs.map((x: Record<string, unknown>) => `${x.name}[${x.status}${x.conclusion ? `/${x.conclusion}` : ""}]`).join(" · ")}`,
         r.openPrs.length === 0 ? "열린 PR: 없음"
           : `열린 PR: ${r.openPrs.map((p: Record<string, unknown>) => `#${p.number}(${p.head})`).join(" · ")}`,

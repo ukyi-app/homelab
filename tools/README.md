@@ -417,6 +417,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   create-app의 손조립이었고 경로 리터럴이 소비자 여럿에 흩어져, 표면이 늘어도 그 사실을 셀 수
   있는 자리가 없었다. 앱-**외부** 표면(apps.json 행·메모리 원장 행·digest-exporter 항목)은 소관
   밖이고 각자의 SSOT 헬퍼가 진다 — 그 경계가 이 module이 데이터 테이블이 아니라 함수 API인 이유다.
+  `readAppSurface`는 source-repo에 대해 **null의 이유**를 함께 낸다(`sourceRepoState`:
+  absent=인레포 앱 · empty=잘린 쓰기 · unreadable=읽기 실패 · ok). 값 해석에서 부재/파손을 한 null로
+  접는 것은 계약이지만 그 계약이 정당한 곳은 값이지 **계층 생략 결정**이 아니다 — 접힌 채로는 잘린
+  쓰기 하나가 '이 앱은 인레포 앱'이라는 적극적 거짓 주장이 된다(catch도 ENOENT로 좁혔다).
 - **`lib/ledger-totals.ts`** — 메모리 원장 행·합계 프리미티브(`TOTALS_RE`·`replaceTotals`·
   `parseLedgerRows`·`addRow`·`removeRow`). 프로즈가 드리프트하면 `String.replace`가 조용한 no-op이
   되어 합계가 stale로 남으므로 매치 0건은 throw다. `TOTALS_RE`가 export인 것은 그 fail-loud가
@@ -552,6 +556,14 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `--ignore-not-found` + **빈 stdout 검사를 parse 앞에** 둔다. 안 그러면 `JSON.parse("")`가 catch로
   흘러 부재가 '파싱 실패'로 위장한다. create/teardown 머지 직후가 그 창이다) · `error`(조회 실패).
   '관측하지 않았다'(omitted)와 '관측했더니 없다'(absent)는 다른 축이다.
+  결과는 **출처를 진술한다**(`repo: {root, head}`) — 레포 계층은 GitHub main이 아니라 CLI가 링크된
+  로컬 디스크라 낡을 수 있고(git pull 미실행), MCP는 root를 입력으로 노출하지 않아 항상 defaultRoot를
+  탄다. head는 git 레포가 아니면 키 부재다. origin/main 비교는 **의도적으로 없다**(gh 의존 + 낡은
+  스냅샷 200 함정) — 두 SHA 대조는 소비자 몫이다.
+  source-repo 축은 부재(인레포 앱 — `omitted`에 `runs`)와 파손(`sourceRepoState` empty·unreadable →
+  app 모드는 fail-loud)을 가른다: 잘린 쓰기 하나가 '이 앱은 인레포 앱'이라는 적극적 거짓 주장이 되던
+  자리다. 원장 조인은 이름 + **env=prod**로 좁혔다(손 편집으로 들어오는 platform 동명 행이 파일
+  순서상 앞서서 이기던 오귀속 — 유일성의 소유자는 여전히 ledger-budget이다).
   GitHub 계층 오류는 fail-loud(빈 목록 위장 금지)이고
   **사유를 명명한다**: 3상 리더(exec.ghRead)의 error/parse를 그대로 층으로 옮겨 전송 오류(401·403
   rate limit·404·망 단절 = stderr 첫 줄)와 응답 파싱 실패를 가르고, errKind not-found는 처방

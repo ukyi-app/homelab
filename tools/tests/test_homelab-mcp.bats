@@ -146,6 +146,9 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
     '{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"status","arguments":{}}}'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -rc 'select(.id==11) | .result.content[0].text | fromjson | .result.mode')" = "list" ]
+  # 출처 진술(티켓 17) — MCP는 root를 **입력으로** 노출하지 않아 항상 defaultRoot를 탄다. 그래서
+  # 어느 체크아웃의 디스크를 읽었는지는 결과가 말해야 한다(에이전트가 낡음을 판별할 유일한 좌표).
+  [ "$(echo "$output" | jq -rc 'select(.id==11) | .result.content[0].text | fromjson | .result.repo | has("root")')" = "true" ]
   # secrets/init 스키마가 명시 경로를 요구한다(cwd 추론 없음).
   mcp_rpc '{"jsonrpc":"2.0","id":12,"method":"tools/list"}'
   [ "$(echo "$output" | jq -rc 'select(.id==12) | .result.tools[] | select(.name=="app_secrets") | .inputSchema.required | index("repoPath") != null')" = "true" ]
