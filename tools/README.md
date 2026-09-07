@@ -35,13 +35,76 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
   homelab 측은 수동 확인). 앱 self-migrate는 expand/contract + 멱등이 전제이고 순서를 강제하는 Job이
   없으므로 **규칙 준수에 의존한다**(잔여 위험 — `docs/decisions/0005-data-connection-residual-risk.md`).
 
-## homelab CLI (통합 진입점 — 워킹 스켈레톤)
+## homelab CLI (통합 진입점)
+
+### 동사 표
+
+동사 하나가 어느 디스패처를 깨우고, 그 PR을 누가 머지하며, `--wait`가 무엇을 보고 끝나는지의 한눈 표다.
+**손 사본이라 대조 게이트를 함께 둔다** — 동사·디스패처·수렴 Application·variant 네 열은
+`tools/tests/test_tool-discoverability.bats`가 계약 행(`lib/catalog-rows.ts`)에서 파생해 등식으로 잰다
+(README 헤더의 '손 사본은 반드시 드리프트한다'에 대한 이 절의 답이다 — 생성이 아니라 대조인 이유는
+`docs/adr/0001`이 descriptor 파생을 기각했기 때문이다).
+
+| 동사 | 디스패처(.github/workflows) | 머지[^merge] | `--wait` 종결[^converge] | 수렴 Application | variant |
+|---|---|---|---|---|---|
+| `doctor` | — | — | — | — | success · failure |
+| `status` | — | — | — | — | success · failure · race |
+| `db create` | `create-database.yaml` | auto-merge(디스패처 소유) | 머지 + 수렴 | `cnpg-data` · `data-conn-prod` | success · failure · race · pending · superseded |
+| `cache create` | `create-cache.yaml` | auto-merge(디스패처 소유) | 머지 + 수렴 | `cache-prod` · `data-conn-prod` | success · failure · race · pending · superseded |
+| `app create` | `create-app.yaml` | **수동**(머지 = 공개 승인) | 머지 + 수렴 | `<app>-prod` | success · failure · race · pending · superseded |
+| `app secrets` | `update-secrets.yaml` | auto-merge(디스패처 소유) | 머지 + 수렴(no-op은 표면 blob 동치) | `<app>-prod` | success · failure · race · pending · superseded · no-op |
+| `app teardown` | `teardown-app.yaml` | **수동**(머지 = 파괴 승인) | 머지 + Application **부재** | `<app>-prod` | success · failure · race · pending |
+| `app init` | — | — | — | — | success · no-op · failure |
+| `db url` | — | — | — | — | success · failure · skip |
+| `cache url` | — | — | — | — | success · failure · skip |
+
+[^merge]: 머지 열은 **등식 대상이 아니다**. 수동 머지는 `tools/lib/verbs.ts:164`(공개 승인)·
+`tools/lib/verbs.ts:190`(파괴 승인)의 인라인 리터럴이라 export된 축이 없고, 정적으로 파생하려면
+검출기가 자기 도메인의 표기법에 눈머는 클래스를 그대로 밟는다. 대신 그 두 file:line이 실제로
+`manualMerge` 리터럴을 가리키는지 왕복으로 잰다(같은 bats). auto-merge 레인은 디스패처(reusable)
+소유라 CLI에는 그 레버가 없다 — 엔진 원장에 `gh pr` 계열 argv가 0건인 것이 그 증인이다.
+
+[^converge]: `--wait` 종결 열도 등식 대상이 아니다(같은 이유 — `tools/lib/verbs.ts:191`의
+`converge: "absence"` 인라인 리터럴). `app init`은 변이 디스패처가 아니라 **앱 레포 로컬 체인**이라
+디스패처·머지·수렴 칸이 전부 비고, `db|cache url`·`doctor`·`status`는 관측 전용이다. `mcp`는 VERBS 밖
+transport 모드라 표에 행이 없다 — 등록·노출 범위는 아래 「MCP 서버 등록」 절이 담는다.
+
+### MCP 서버 등록
+
+`homelab mcp`는 stdio JSON-RPC 서버다. 클라이언트에 등록하는 두 형태:
+
+```bash
+# (a) bun link 후 — PATH의 homelab을 그대로 쓴다
+claude mcp add homelab -- homelab mcp
+
+# (b) bun link 없이 — 레포 진입점을 절대 경로로 지목한다
+claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
+```
+
+프로젝트 `.mcp.json`으로 고정할 때도 같은 argv에 **env 블록**을 더한다:
+
+```json
+{ "mcpServers": { "homelab": { "command": "bun",
+    "args": ["/abs/path/to/homelab/tools/homelab.ts", "mcp"],
+    "env": { "KUBECONFIG": "/abs/path/to/homelab/infra/k3s-bootstrap/kubeconfig",
+             "TS_DB_HOST": "pg-rw.<tailnet>.ts.net", "CACHE_LOCAL_HOST": "127.0.0.1" } } } }
+```
+
+**서버 env = 클라이언트가 준 env**다(서버는 자기 cwd도 추론하지 않는다 — 경로 인자는 전부 절대 경로).
+그래서 `KUBECONFIG`를 주지 않으면 라이브 계층이 조용히 빠지는 게 아니라 **관측 가능한 결과**로 나온다:
+`db url`·`cache url`은 `variant skip`(exitCode 4 — 클러스터 도메인 부재)이고, `status`는 GitHub·레포
+계층만 채운 뒤 `omitted=["live"]`로 라이브 계층 생략을 선언한다. 파괴 동사(`app teardown`)는 어떤
+설정으로도 노출되지 않는다(초기화 totality 가드).
 
 - **`homelab.ts`** — `homelab` 서브커맨드 CLI **셸**(argv 파싱·--help·렌더링·stdout 순수성·종료코드만).
   동사의 실체는 `lib/verbs.ts` operation catalog가 SSOT — 이 bin 모듈은 import하면 main이 실행되므로
   MCP 등 다른 소비자는 lib 쪽을 import한다. 변이는 전부 기존 변이 디스패처를
-  `gh workflow run`으로 트리거하는 래퍼가 될 예정이고(신뢰 경계 불변 — actor 가드·전역 직렬화·
+  `gh workflow run`으로 트리거하는 래퍼다(신뢰 경계 불변 — actor 가드·전역 직렬화·
   PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`·`app init|create|secrets|teardown`·`mcp`다.
+  `homelab app init <app> --archetype web|worker|site [--public] [--dispatch-secrets <경로>] [--adopt]` =
+  앱 레포 시작 로컬 체인(변이 디스패처 아님 — correlation 없음): preflight → 템플릿에서 레포 생성
+  (기본 private) → 클론 → 스캐폴더 비대화형 실행 → invocation marker(`.homelab-init`) → 커밋·첫 push.
+  멱등·재개 가능이고, 마커 없는 기존 레포는 fail-closed(`--adopt`로만 이어간다).
   `homelab app create <app> [--wait]` = 수동 머지 변이(머지 = 공개 승인, auto-merge:false — 엔진은 어떤
   경로로도 auto-merge를 켜지 않는다): 기본은 run 추적+PR URL, --wait는 미머지면 '사람 머지 대기' 바운디드
   pending, 머지 관측 시 라이브 수렴(<app>-prod + values.yaml 표면)으로 전환.
@@ -341,7 +404,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   ({_readme, <container>}) + schema-check 항목 검증. 대조 의미론은 콜사이트 잔류(design r1-4).
 - **`lib/contract.ts`** — 결과 계약 SSOT 리더: cli-result-schema.json의 x-contract(envelope 버전·
   종료코드 매핑)를 런타임에 읽어 노출(`ENVELOPE`·`EXIT`·`exitFor`·`Envelope` 타입 — 코드 상수
-  복제 금지). 소비자: `homelab.ts`·`lib/verbs.ts`·(예정) MCP 서버.
+  복제 금지). 소비자 3: `homelab.ts`(종료코드·봉투 자기검증)·`lib/verbs.ts`(동사 op)·`lib/mcp.ts`
+  (`mcpIsError` 매핑).
 - **`lib/verbs.ts`** — 동사 operation catalog(transport 중립·부수효과 없는 import-safe SSOT).
   행 = path(라우팅 어휘)+desc(--help)+needs(요구 망 도메인 — usage가 렌더)+op(타입 입력→계약
   Envelope). argv 파싱·렌더링은 CLI 셸 소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1).
@@ -384,7 +448,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   디스패치 **직전** 같은 목록 질의(신원 투영 `{id, name}`)로 이미 그 에코를 가진 run id를 찍어
   채택에서 배제한다: 고정 nonce가 프로덕션에서 켜지면 같은 nonce의 옛 run이 홀로 매치돼 옛
   conclusion·옛 PR 핸들이 이번 실행의 결과로 보고되기 때문이다(랜덤 nonce 경로는 공집합이라 동작 불변,
-  스냅샷 조회 실패는 배제 없음으로 접힌다). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
+  스냅샷 조회 실패는 배제 없음으로 접힌다). 소비자: `lib/verbs.ts`의 변이 동사 4개
+  (`db create`·`cache create`·`app create`·`app teardown`)와 `lib/secrets.ts`(`app secrets` 연쇄의
+  마지막 단계 — 같은 엔진을 `noopOnMissingPr`로 호출).
 - **`lib/lane-pr.ts`** — 레인 브랜치 PR의 좌표·정확 조회 커널(`readLanePrs()`·`lanePrRef()`·
   `parseLaneBranch()`·`laneBranchInputError()`). 질의는 `pulls?state=all&head=<owner>:<branch>` —
   head가 **정확 일치**라 형제 브랜치(`…/mydb-5011`)가 `…/mydb-501` 응답에 원리적으로 섞이지 않는다.
@@ -403,8 +469,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   둘 다 오브젝트/배열 jq 전용, 스칼라
   jq는 raw라 sh 직접, `git`·`pushRoutes` — push 지향 관측 `git remote get-url --push --all`:
   pushurl 복수·insteadOf/pushInsteadOf 전개 반영) — status·mutation·init·secrets 공유. 판정 정책은
-  콜사이트 소유(doctor의 gh()는 ENOENT 판별 자기 정책이 있어 별도 유지). **오류 충실도**:
+  콜사이트 소유 — doctor의 ENOENT '설치 필요' 해석도 seam이 나르는 errKind 위에서 doctor가 한다
+  (자체 gh()는 없다: `doctor.ts`의 `const gh = ghExec`가 그 흡수 자리다). **오류 충실도**:
   errKind는 4종(not-found=ENOENT · timeout=ETIMEDOUT · overflow=ENOBUFS · spawn=그 외)이고,
+  errKind를 실제로 **읽는** 콜사이트(닫힌 집합이라고 주장하지 않는다 — `grep errKind tools`가 권위):
+  doctor의 미설치 진단(not-found) · 변이 엔진의 디스패치 타임아웃 관용(timeout = '실패'가 아니라
+  '결과 미상') · secrets의 git 부재 거부 · seal의 kubeseal 실행 실패.
   자식이 죽기 전에 쓴 **부분 stderr**와 죽인 **시그널**(`signal`)을 결과에 보존한다 — 셋을 한 값으로
   접으면 원인이 통째로 지워지고 SIGKILL 사망은 빈 사유가 된다. `firstReason(err)`는 다행 stderr에서
   사유 한 줄을 고른다(`error:`/`fatal:`/`!` 우선, `To `/`hint:` 제외) — git push의 1행 `To <url>`이
@@ -436,7 +506,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`lib/doctor.ts`** — homelab CLI doctor 진단 엔진(`runDoctor()`). 점검 항목·상태 판정·detail
   문구를 소유한다(관측 전용 — `gh api` 읽기만, 테스트가 argv 원장으로 강제). 선행 gh-auth 실패로
   판정 불가한 항목은 pass가 아니라 fail(fail-closed). detail은 결정적(절대경로·시각 금지 — 골든
-  픽스처 계약). 소비자: `homelab.ts`(이후 MCP 서버도 같은 엔진 재사용 예정).
+  픽스처 계약). 소비자 2: `homelab.ts`(직접 — CLI 어댑터) · `lib/mcp.ts`(**간접** — verbs.ts의
+  `DOCTOR.op`를 호출한다. MCP는 엔진을 직접 import하지 않고 catalog 행만 소비한다).
 - **`lib/init.ts`** — app init 엔진(`runAppInit()`·`appInitInputError()`): 앱 레포 시작 로컬 체인
   (변이 디스패처 아님 — correlation 없음). preflight(부수효과 0) → 레포 생성(기본 private) → 클론
   (canonical 판정 identity.isCanonicalClone) → push 라우팅 게이트(identity.pushRouteError) →
@@ -473,8 +544,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   -32602 + 안내 문구) · 존재하지 않는/앱 레포 아닌 명시 repoPath는 dispatch-only 강등이 아니라 거부(CLI 암묵 cwd만
   dispatch-only) · 경로 속성 description이 의미론을 광고)·결과는 CLI --json과 같은 envelope(isError는 x-contract.mcp variant 매핑)·
   usage 오류는 invalid params(-32602). 무상태 — 동시 호출은 run/PR URL 핸들로 독립, 재시작 후 정상.
-  url 패스스루(db/cache url)는 캡처 실행(stdio 오염 방지)+명시 envDir. `homelab mcp`가 진입점(서버는
-  transport 모드라 catalog 밖 — 자기 자신 비노출).
+  url 동사(db/cache url)도 **다른 tool과 같은 경로**다 — conn URL 엔진의 op envelope을 직접 소비한다
+  (패스스루 특례·자식 프로세스 이중 실행은 티켓 08에서 소멸했다). 살아 있는 계약은 **명시 envDir**
+  하나뿐이고, 기록 경로가 서버 cwd에서 추론되지 않는다는 뜻이다. `homelab mcp`가 진입점(서버는
+  transport 모드라 catalog 밖 — 자기 자신 비노출). 등록 방법·env 블록은 위 「MCP 서버 등록」 절.
 - **`lib/render.ts`** — homelab CLI 사람용 렌더(`renderFor()` + 동사별 5개 + MARK/OX). mcp.ts와 같은
   **프레젠테이션 계층**이다: op는 Envelope만 반환하고 표현은 셸이 소유한다(동사 descriptor 파생이
   아니라 ADR-0001과 무관). homelab.ts에서 분리한 이유 둘 — bin 모듈은 import 시 main이 실행돼

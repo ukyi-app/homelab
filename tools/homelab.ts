@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// homelab CLI 셸 — 앱 배포·리소스 조작 통합 진입점(워킹 스켈레톤: doctor).
+// homelab CLI 셸 — 앱 배포·리소스 조작 통합 진입점(전 동사 착지: lib/verbs.ts VERBS + mcp).
 // 이 파일은 CLI 관심사만 갖는다: argv 파싱·--help·사람용 렌더링·stdout 순수성·종료코드.
 // 동사의 실체(operation catalog)는 lib/verbs.ts, 계약 상수는 lib/contract.ts가 SSOT다 —
 // 이 bin 모듈은 import 시 main이 실행되므로 MCP 등 다른 소비자는 lib 쪽을 import한다
@@ -536,6 +536,15 @@ function mcpUsage(): string {
     "db create/url·cache create/url·app init/create/secrets)를 tool로 노출한다 — teardown은 노출하지 않는다.",
     "각 tool 호출은 동기·바운디드(--wait류 장기 대기 없음)이고, 결과는 CLI --json과 같은 계약 오브젝트다.",
     "디렉토리 추론이 없다: app secrets는 repoPath, app init은 parentDir를 명시 입력으로 받는다.",
+    "",
+    "등록(클라이언트):",
+    "  claude mcp add homelab -- homelab mcp            # bun link 후 — PATH의 homelab",
+    "  claude mcp add homelab -- bun <repo>/tools/homelab.ts mcp   # bun link 없이 — 절대 경로",
+    "",
+    "서버 env = 클라이언트가 준 env다(.mcp.json의 env 블록). KUBECONFIG를 주지 않으면 조용히 빠지는",
+    "게 아니라 관측 가능한 결과가 된다: db/cache url은 variant skip(exitCode 4), status는 라이브",
+    "계층을 생략하고 omitted=[\"live\"]로 그 사실을 선언한다. TS_DB_HOST·CACHE_LOCAL_HOST도 같은 축이다",
+    "(부재 시 host 입력 필요 오류). 상세는 tools/README.md의 「MCP 서버 등록」 절.",
     "",
   ].join("\n");
 }
