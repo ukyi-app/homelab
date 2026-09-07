@@ -314,3 +314,90 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.name')" = "foo" ]
 }
+
+# ── CLI 관례 정렬(homelab-cli-r2 티켓 12) ──────────────────────────────────────────────────────
+# 그룹 노드 --help·-h/help/--version·단일 대시 토큰. 계약(x-contract.stdout)은 「--help는 stdout
+# (exit 0)」을 규약으로 적어 뒀는데 리프만 그랬고 그룹 노드는 usage 오류였다.
+
+@test "group nodes answer --help on stdout with their own vocabulary and no stderr (floor 3)" {
+  n=0
+  for noun in db cache app; do
+    run --separate-stderr bun tools/homelab.ts "$noun" --help
+    [ "$status" -eq 0 ]
+    [ -z "$stderr" ]
+    echo "$output" | grep -q "사용법: homelab $noun"
+    n=$((n + 1))
+  done
+  [ "$n" -eq 3 ]
+  # 어휘가 실제로 실려 있는가 — 노드마다 자기 서브커맨드(빈 목록이면 위의 grep은 여전히 통과한다)
+  run --separate-stderr bun tools/homelab.ts db --help
+  echo "$output" | grep -q "db create"
+  echo "$output" | grep -q "db url"
+  run --separate-stderr bun tools/homelab.ts app --help
+  echo "$output" | grep -q "app teardown"
+  echo "$output" | grep -q "app init"
+}
+
+@test "help routing narrows to fully valid node prefixes: unknown words stay usage errors (floor 4)" {
+  # 리스크: argv.includes(\"--help\")로 판정하면 fail-open이다 — 알 수 없는 서브커맨드까지 exit 0으로 접힌다.
+  n=0
+  run --separate-stderr bun tools/homelab.ts bogus --help
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  n=$((n + 1))
+  run --separate-stderr bun tools/homelab.ts db creat --help
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "알 수 없는 서브커맨드: creat"
+  n=$((n + 1))
+  run --separate-stderr bun tools/homelab.ts --json db
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  n=$((n + 1))
+  # 리프 --help는 그대로 stdout·exit 0(양성 대조 — 거부가 전칭이 아님)
+  run --separate-stderr bun tools/homelab.ts app init --help
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- "--archetype"
+  n=$((n + 1))
+  [ "$n" -eq 4 ]
+}
+
+@test "-h and help are top-level --help aliases while a single-dash token stays an unknown option at a leaf" {
+  for tok in -h help; do
+    run --separate-stderr bun tools/homelab.ts "$tok"
+    [ "$status" -eq 0 ]
+    [ -z "$stderr" ]
+    echo "$output" | grep -q "사용법: homelab <동사>"
+  done
+  # 리프에서는 단일 대시가 위치 인자(이름)로 해석돼 '이름 형식 불량'을 받았다 — 옵션 오류로 정정된다.
+  run --separate-stderr bun tools/homelab.ts db create -h
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "알 수 없는 옵션"
+}
+
+@test "--version reports the resolved entrypoint, the checkout HEAD and the contract schema (no package.json literal)" {
+  # ⚠️ 지역 변수는 bats 프로세스에서 뽑는다 — `run bash -c` 안의 bats 변수는 빈 문자열이라
+  #    grep이 0건으로 항상 통과한다(함정 원장 「정적 증인의 두 함정」).
+  head="$(git rev-parse --short HEAD)"
+  branch="$(git rev-parse --abbrev-ref HEAD)"
+  [ -n "$head" ]
+  [ -n "$branch" ]
+  run --separate-stderr bun tools/homelab.ts --version
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  echo "$output" | grep -qF "$ROOT/tools/homelab.ts"
+  echo "$output" | grep -qF "$head"
+  echo "$output" | grep -qF "$branch"
+  # package.json version은 최초 커밋 이후 불변이라 거짓 확신이다 — 부재를 카운트로 재고,
+  # 같은 출력에서 계약 schema 존재를 양성 대조로 둔다(검출기 사망 시 둘 다 0이 된다).
+  [ "$(printf '%s' "$output" | grep -cF "1.0.0")" = "0" ]
+  [ "$(printf '%s' "$output" | grep -cF "homelab-cli/1")" -ge 1 ]
+}
+
+@test "the stdout contract states the group-node --help convention (generator-owned prose)" {
+  run jq -r '."x-contract".stdout' tools/cli-result-schema.json
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "그룹 노드"
+  echo "$output" | grep -q -- "--help"
+}

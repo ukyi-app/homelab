@@ -6,9 +6,12 @@
 // (structure r1 A1·B1). 셰뱅+exec 비트는 이 파일만 예외: package.json bin("homelab")의
 // 대상이라 `bun link`가 전역 PATH에 심링크한다(test_shebang-exec.bats가 bin 선언에서 파생).
 import { readSync } from "node:fs";
-import { parseCommand, skipMarker, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { CommandParseError, parseCommand, skipMarker, typedFlags, type CommandTree, type ParsedCommand } from "./lib/cli.ts";
 import { cacheUrlInputError, dbUrlInputError, type CacheUrlInput, type DbUrlInput } from "./lib/conn-url.ts";
-import { USAGE_EXIT, type Envelope } from "./lib/contract.ts";
+import { ENVELOPE, USAGE_EXIT, type Envelope } from "./lib/contract.ts";
+import { git } from "./lib/exec.ts";
 import { APP_NAME_RE } from "./lib/identity.ts";
 import { WAIT_DEFAULTS } from "./lib/mutation.ts";
 import type { TypedFlags } from "./lib/cli.ts";
@@ -65,9 +68,10 @@ function usage(): string {
     rows,
     `  ${"mcp".padEnd(14)}stdio MCP 서버(파괴 제외 전 동사를 tool로 노출 — JSON-RPC 2.0 over stdin/stdout)`,
     "",
-    "공통 옵션:",
+    "공통 옵션(mcp 제외 — 그 모드는 인자를 받지 않는다):",
     "  --json        결과를 계약 오브젝트로 stdout에 출력(계약: tools/cli-result-schema.json)",
-    "  --help        사용법 출력",
+    "  --help        사용법 출력(`-h`·`help` 별칭 — 동사·그룹 노드 어디서든 stdout·exit 0)",
+    "  --version     진입점 경로·체크아웃 HEAD·결과 계약 schema 출력",
     "",
   ].join("\n");
 }
@@ -118,7 +122,9 @@ function positionalThenFlags(rest: string[], spec: FlagPlan, tool: string, usage
   }
   let positional: string | undefined;
   let flagArgv = rest;
-  if (rest[0] !== undefined && !rest[0].startsWith("--")) { positional = rest[0]; flagArgv = rest.slice(1); }
+  // `-`로 시작하는 토큰은 위치 인자가 아니다 — 도움말을 구한 `-h`가 '이름 형식 불량: -h'로
+  // 돌아오던 자리(shell-9). 거부 문구는 parseFlags가 소유한다(단일 대시 규약 한 곳).
+  if (rest[0] !== undefined && !rest[0].startsWith("-")) { positional = rest[0]; flagArgv = rest.slice(1); }
   let flags: TypedFlags;
   try { flags = typedFlags(flagArgv, { value, bool: spec.bool }); }
   catch (e) { return fail(e instanceof Error ? e.message : String(e)); }
@@ -203,14 +209,11 @@ function renderStatus(envelope: Envelope): string[] {
 }
 
 function statusCli(rest: string[]): VerbOutput {
-  let app: string | undefined;
-  let flagArgv = rest;
-  if (rest[0] !== undefined && !rest[0].startsWith("--")) { app = rest[0]; flagArgv = rest.slice(1); }
-  let flags;
-  try { flags = typedFlags(flagArgv, { value: ["--run", "--pr", "--root"], bool: ["--json", "--help"] }); }
-  catch (e) {
-    return { kind: "usage-error", message: `homelab status: ${e instanceof Error ? e.message : String(e)}`, usage: statusUsage() };
-  }
+  // 공용 골격 사용 — 헬퍼 도입(9ee3116) 이전에 쓰인 인라인 5줄(분리·try/catch·--help)의 잔재를 지운다.
+  const p = positionalThenFlags(rest, { value: ["--run", "--pr", "--root"], bool: ["--json", "--help"] }, "homelab status", statusUsage);
+  if (isOutput(p)) return p;
+  const app = p.positional;
+  const flags = p.flags;
   if (flags.bool("--help")) return { kind: "help", text: statusUsage() };
   const input: StatusInput = { app, runUrl: flags.str("--run"), prUrl: flags.str("--pr"), root: flags.str("--root") };
   const bad = statusInputError(input);
@@ -544,13 +547,65 @@ function mcpUsage(): string {
   ].join("\n");
 }
 
+// 도움말 토큰 — GNU/일반 CLI 관례(`-h`·`help`)를 `--help`의 별칭으로 받는다. 리프 동사에서는
+// `--help`만 유효하다(`-h`는 parseFlags의 단일 대시 규약이 '알 수 없는 옵션'으로 거부) — 별칭은
+// **어휘 자리**(top-level·그룹 노드)에만 산다. 그 자리에 오는 토큰은 동사 이름이지 플래그가 아니라
+// 앱/리소스 이름과 충돌할 여지가 없다.
+const HELP_TOKENS = new Set(["--help", "-h", "help"]);
+
+// 그룹 노드 사용법 — 어휘는 catalog(VERBS) 파생이라 손 목록이 없다. 계약 x-contract.stdout이
+// 「--help는 stdout(exit 0)」을 규약으로 적는데 리프만 그랬던 자리(shell-3·docs-3).
+function groupUsage(path: string[]): string {
+  const prefix = path.join(" ");
+  const rows = VERBS
+    .filter((v) => v.path.length > path.length && v.path.slice(0, path.length).join(" ") === prefix)
+    .map((v) => `  ${v.path.join(" ").padEnd(14)}${v.desc}`);
+  return [
+    `사용법: homelab ${prefix} <서브커맨드> [옵션]`,
+    "",
+    "서브커맨드:",
+    ...rows,
+    "",
+    `각 서브커맨드의 상세는 \`homelab ${prefix} <서브커맨드> --help\`.`,
+    "",
+  ].join("\n");
+}
+
+// 버전 — package.json version은 최초 커밋 이후 불변이라 '어느 코드를 도는가'에 대해 거짓 확신이다
+// (전역 심링크가 삭제된 worktree를 가리키는 사고가 이 호스트에서 실측됐다). 대신 **해석된 진입점
+// 절대경로 + 그 체크아웃의 HEAD·브랜치 + 결과 계약 schema**를 낸다. git 조회 실패는 조용히 접지
+// 않고 표기한다(설치 축 진단은 티켓 35 소관 — 여기는 좌표만).
+function versionText(): string {
+  const entry = fileURLToPath(import.meta.url);
+  const dir = dirname(entry);
+  const head = git(dir, ["rev-parse", "--short", "HEAD"]);
+  const branch = git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  return [
+    `homelab — ${entry}`,
+    `체크아웃: ${head.ok ? head.out.trim() : "(git 미확인)"} · 브랜치 ${branch.ok ? branch.out.trim() : "(불명)"}`,
+    `결과 계약: ${ENVELOPE} (tools/cli-result-schema.json)`,
+    "",
+  ].join("\n");
+}
+
 function main(argv: string[]): number {
   if (argv.length === 0) { process.stderr.write(usage()); return USAGE_EXIT; }
-  if (argv[0] === "--help") { process.stdout.write(usage()); return 0; }
+  if (HELP_TOKENS.has(argv[0]!)) { process.stdout.write(usage()); return 0; }
+  if (argv[0] === "--version") { process.stdout.write(versionText()); return 0; }
 
   let cmd: ParsedCommand;
   try { cmd = parseCommand(argv, TREE); }
   catch (e) {
+    // 그룹 노드 --help — 소비한 유효 노드 prefix(e.path) 뒤에 **정확히 도움말 토큰 하나만** 남은
+    // 경우로 좁힌다. `argv.includes("--help")` 판정은 fail-open이다: `bogus --help`·`db creat --help`
+    // 처럼 어휘 밖 단어가 섞인 입력까지 exit 0으로 접힌다(그 둘은 여기서 rest.length가 2라 걸린다).
+    if (e instanceof CommandParseError) {
+      const rest = argv.slice(e.path.length);
+      if (rest.length === 1 && HELP_TOKENS.has(rest[0]!)) {
+        process.stdout.write(e.path.length === 0 ? usage() : groupUsage(e.path));
+        return 0;
+      }
+    }
     process.stderr.write(`homelab: ${e instanceof Error ? e.message : String(e)}\n\n${usage()}`);
     return USAGE_EXIT;
   }

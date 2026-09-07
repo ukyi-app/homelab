@@ -7,7 +7,12 @@ export function parseFlags(argv: string[], spec: FlagSpec): Record<string, strin
   const out: Record<string, string | boolean> = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (!a.startsWith("--")) throw new Error(`예상치 못한 위치 인자: ${a}`);
+    if (!a.startsWith("--")) {
+      // 단일 대시 토큰은 위치 인자가 아니다 — `-h`를 준 사용자가 '이름 형식 불량: -h' 같은
+      // 엉뚱한 계층의 오류를 받던 자리(shell-9). 맨 `-`(stdin 관례)는 위치 인자로 남긴다.
+      if (a.startsWith("-") && a !== "-") throw new Error(`알 수 없는 옵션: ${a}(단일 대시 미지원 — --help)`);
+      throw new Error(`예상치 못한 위치 인자: ${a}`);
+    }
     if (!known.has(a)) throw new Error(`알 수 없는 옵션: ${a}`);
     // 중복 지정 거부 — 침묵 last-wins는 모순된 편집 실수를 조용히 뒤 값으로 접는다(실측:
     // `--env-local a --env-local b` → "b", rc 0). 파괴 확인(`--confirm x --confirm myapp`)까지
@@ -29,15 +34,35 @@ export function parseFlags(argv: string[], spec: FlagSpec): Record<string, strin
 export type CommandTree = { [word: string]: CommandTree | null };
 export type ParsedCommand = { path: string[]; rest: string[] };
 
+// 라우팅 실패의 **판별 가능한** 형태 — 커널은 여전히 정책을 갖지 않는다(어떤 실패에 도움말을
+// 낼지는 셸 소유). 셸이 두 실패를 한국어 문구로 갈라내면 문구 한 글자에 정책이 매달리므로
+// 판별자를 값으로 싣는다: kind(needs-subcommand=어휘 자리에 단어가 아예 없거나 플래그였다 ·
+// unknown-word=단어는 왔는데 어휘 밖) · path(**소비한 유효 노드 prefix**) · words(그 노드의 어휘).
+// path가 있다는 것 자체가 "여기까지는 전부 유효 노드"의 증거라, 셸이 그룹 --help를 좁힐 때 쓴다.
+export type CommandFailureKind = "needs-subcommand" | "unknown-word";
+export class CommandParseError extends Error {
+  readonly kind: CommandFailureKind;
+  readonly path: string[];
+  readonly words: string[];
+  constructor(kind: CommandFailureKind, path: string[], words: string[], message: string) {
+    super(message);
+    this.name = "CommandParseError";
+    this.kind = kind;
+    this.path = path;
+    this.words = words;
+  }
+}
+
 export function parseCommand(argv: string[], tree: CommandTree): ParsedCommand {
   const path: string[] = [];
   let node = tree;
   for (let i = 0; ; i++) {
-    const usage = `사용 가능: ${Object.keys(node).map((w) => [...path, w].join(" ")).join(" | ")}`;
+    const words = Object.keys(node);
+    const usage = `사용 가능: ${words.map((w) => [...path, w].join(" ")).join(" | ")}`;
     const a = argv[i];
-    if (a === undefined || a.startsWith("--")) throw new Error(`서브커맨드가 필요하다. ${usage}`);
+    if (a === undefined || a.startsWith("--")) throw new CommandParseError("needs-subcommand", [...path], words, `서브커맨드가 필요하다. ${usage}`);
     // Object.hasOwn — 프로토타입 상속 단어(constructor 등)를 어휘로 오인하지 않는다(fail-closed).
-    if (!Object.hasOwn(node, a)) throw new Error(`알 수 없는 서브커맨드: ${a}. ${usage}`);
+    if (!Object.hasOwn(node, a)) throw new CommandParseError("unknown-word", [...path], words, `알 수 없는 서브커맨드: ${a}. ${usage}`);
     path.push(a);
     const next = node[a];
     if (next === null) return { path, rest: argv.slice(i + 1) };
