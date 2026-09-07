@@ -805,15 +805,30 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`dev.ts`** — 로컬 개발 진입점. **`bun run dev`**(dev Postgres 기동 + 워크스페이스 dev 루프),
   **`bun run db:up`**/**`bun run db:reset`**(모드 1: docker postgres 기동/초기화 — 파괴 OK). docker compose는
   `tools/dev-postgres/compose.yaml`. `--dry-run` 지원.
+  ⚠️ 모드 1이 안내하는 키는 bare **`DATABASE_URL`**이고 이것은 **모드 1 전용**이다 — 단일 docker dev DB
+  (`app_dev`) 하나뿐이라 per-name 구분이 성립하지 않는다(그래서 `--name`은 키에 영향이 없다).
+  모드 2(`db-url`)와 클러스터 `envFrom`은 namespaced 키(`<NAME>_DATABASE_URL`)를 쓴다 — #141 이후
+  "로컬·클러스터 동일 변수명"은 더 이상 참이 아니고, `--name` 재도입으로 그 이름을 맞추지도 않는다
+  (모드 1 DB는 여전히 하나라 이름↔대상 불일치를 만든다).
 - **`db-url.ts`** — 모드 2(실데이터 디버깅): 클러스터 DB에 tailscale 직결 URL을 기록.
-  **`bun run db:url --name <db> --host <ts-host> [--rw|--admin]`**. 모드(상호배타): 기본=RO
+  **`bun run db:url --name <db> --host <ts-host> [--rw|--admin]`**(통합 CLI로는 `homelab db url <db> …`
+  — 같은 엔진 `lib/conn-url.ts`의 두 껍데기다). 모드(상호배타): 기본=RO
   (`db-<name>-ro-conn`)/`--rw`=owner(`db-<name>-conn`)/`--admin`=superuser(`pg-admin-credentials`, database ns).
-  RO/RW → canonical **`DATABASE_URL` → `.env.local`**(앱 런타임 채널). **`--admin` → `DATABASE_ADMIN_URL`
-  → `.env.admin.local`**(기본 분리 출력). 필요하면 사용자가 `.env`로 옮겨 봉인할 수 있다. host는 pg-rw-tailscale LB.
-  평문 URL stdout 비노출(전 모드). 파괴 수단 없음. `--dry-run`은 계획만. (런북 `docs/runbooks/db-cache-access.md`.)
-- **`cache-url.ts`** — db-url의 캐시 대칭. **`bun run cache:url --name <cache> [--rw]`**. 기본=RO
-  (`cache-<name>-ro-conn`)/`--rw`=default 유저(`cache-<name>-conn`, Valkey per-instance=관리). canonical
-  **`REDIS_URL` → `.env.local`**. ★Valkey tailscale 상시 노출은 deferred → host 기본 **127.0.0.1(port-forward)**;
+  출력 키는 **prod conn 핸들과 같은 namespaced 키**다(#141 이후 — 레이아웃 커널 `resource-layout` 소유,
+  `<NAME>`은 리소스 이름의 대문자·하이픈→언더스코어):
+  RO → **`<NAME>_RO_DATABASE_URL` → `.env.local`** · RW → **`<NAME>_DATABASE_URL` → `.env.local`**
+  (앱 런타임 채널) · `--admin` → **`<NAME>_DATABASE_ADMIN_URL` → `.env.admin.local`**(기본 분리 출력).
+  그래서 로컬 `.env.local`의 키가 클러스터 `envFrom`이 주입하는 키와 **같다**(bare `DATABASE_URL`은
+  `dev.ts`의 모드 1 전용이다 — 아래 로컬 개발 헬퍼 절). 필요하면 사용자가 `.env`로 옮겨 봉인할 수 있다.
+  host는 pg-rw-tailscale LB(입력 없으면 `TS_DB_HOST` — 셋 다 없으면 라이브는 failure, `--dry-run`은
+  success + note에 미해석 표기). 평문 URL stdout 비노출(전 모드). 파괴 수단 없음. `--dry-run`은 계획만.
+  기록 대상이 **git이 무시하지 않는 경로**면 결과 note에 경고를 싣는다(variant는 success — git 부재·판정
+  불가는 침묵). (런북 `docs/runbooks/db-cache-access.md`.)
+- **`cache-url.ts`** — db-url의 캐시 대칭. **`bun run cache:url --name <cache> [--rw]`**
+  (통합 CLI: `homelab cache url <cache> …`). 기본=RO
+  (`cache-<name>-ro-conn`)/`--rw`=default 유저(`cache-<name>-conn`, Valkey per-instance=관리). 키도 같은
+  namespaced 규약이다: RO → **`<NAME>_REDIS_RO_URL`**, RW → **`<NAME>_REDIS_URL`** → `.env.local`.
+  ★Valkey tailscale 상시 노출은 deferred → host 기본 **127.0.0.1(port-forward, `CACHE_LOCAL_HOST`로 상회)**;
   선행 `kubectl -n cache port-forward svc/<name> 6379:6379`. 평문 stdout 비노출. 파괴 수단 없음.
 - **`env-example.mts`** — SealedSecret `encryptedData` 키에서 `.env.example` 생성 — homelab 로컬 전용(앱 미배포).
   **`bun run env:example [--config <f>] [--sealed <f>] [--out <f>]`**. 값은 비움/플레이스홀더(로컬 패리티용). 연결(DB/Redis)

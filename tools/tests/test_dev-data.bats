@@ -12,11 +12,12 @@ setup() {
 }
 teardown() { rm -rf "$TMP"; }
 
-@test "db:up writes the canonical localhost DATABASE_URL for clean dev (dry-run)" {
+@test "db:up writes the mode-1-only bare DATABASE_URL for clean dev (dry-run)" {
   run bun "$ROOT/tools/dev.ts" db:up --dry-run --name orders
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "localhost"
-  # canonical 키(모드2/클러스터와 동일) — per-name ORDERS_DATABASE_URL이 아니어야 함
+  # bare 키는 **모드 1 전용**이다(단일 docker dev DB app_dev — per-name 구분 불성립).
+  # 모드2·클러스터 envFrom은 #141 이후 namespaced 키를 쓰므로 여기서 ORDERS_DATABASE_URL이 나오면 안 된다.
   echo "$output" | grep -q '"DATABASE_URL"'
   run bash -c "bun '$ROOT/tools/dev.ts' db:up --dry-run --name orders | grep -ow ORDERS_DATABASE_URL"
   [ "$status" -ne 0 ]
