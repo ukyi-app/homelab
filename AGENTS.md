@@ -178,7 +178,8 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 **트리거 경계:** 앱 레포는 homelab-write 자격 0 (자기 `GITHUB_TOKEN`으로 GHCR push만).
 인증은 GitHub App **2개**(2026-09-03 실측 `gh api /orgs/ukyi-app/installations`) —
 reader `contents:read`(4043034) / writer `contents:write`+`pull_requests:write`+`issues:write`(4043080).
-dispatch `actions:write`(4178609)는 **2026-09-03 설치 제거**(확인 가능한 소비처 0건) — `reusable-app-build.yaml`의
+dispatch `actions:write`(4178609)는 **2026-09-03 설치 제거**(소비 *레포* 0곳 — **코드 경로는 휴면 유지**이고
+지우지 않는다: 재설치 한 번으로 되살아난다) — `reusable-app-build.yaml`의
 deploy-trigger 잡은 `workflow_call` 입력 계약으로만 남고 항상 clean skip이다(배포 반영은 bump-poll 크론뿐).
 reader/writer 키만 homelab Actions secret에 있다.
 ⚠️ **둘 다 설치 범위는 org 전체**(`repository_selection: all`)다 — "앱 레포 전용"·"homelab 전용"은
@@ -190,6 +191,8 @@ reader/writer 키만 homelab Actions secret에 있다.
 - **빌드:** 템플릿으로 레포 생성 → `.app-config.yml` 작성(계약: `tools/app-config-schema.json`)
   → main push → `reusable-app-build.yaml`(amd64+arm64 멀티아치→GHCR push + deploy-trigger 잡: `HOMELAB_DISPATCH_APP`
     시크릿 쌍 전달 시 homelab bump-poll 1회 디스패치로 크론 지연 제거, 미전달=clean skip·크론 백스톱).
+    ⚠️ 그 쌍이 실제로 작동하려면 dispatch App이 설치돼 있어야 하는데 **현재 org 설치가 없다**(위 트리거
+    경계) — 재설치 전까지 `homelab app init --dispatch-secrets`로 쌍을 심어도 크론 지연은 그대로다.
 - **생성 변이:** owner가 homelab에서 액션별 디스패처(workflow_dispatch) 실행 (변이 디스패처는 `vars.HOMELAB_OWNER` actor 가드로 owner 전용 — bump-poll/audit reconciler는 비대상) —
   `create-app`/`update-secrets`/`create-database`/`create-cache`/`teardown-app`(각 전용 워크플로). **파괴: `teardown-app`은
   디스패처(`🗑️ teardown-app` — confirm===app 가드 + **수동 머지**, reusable이 파괴 경계에서 confirm 재검증) + owner-local CLI(`make teardown-app`) 공존.

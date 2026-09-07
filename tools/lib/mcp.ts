@@ -5,6 +5,14 @@
 // 계약(스펙 "MCP 서버 모드"):
 //   - 노출 = VERBS 중 destructive가 아닌 전부(teardown 제외). 제외 근거는 descriptor의 destructive 표시.
 //   - 각 tool 호출은 동기·바운디드 — --wait류 장기 대기는 스키마에 없다(입력에 wait/pollMs/deadlineMs 부재).
+//     ⚠️ 그 '바운디드'는 **스키마 축**이다: 대기 옵션이 입력 표면에 없다는 뜻이지, 호출 하나의
+//     wall-clock 상한이 있다는 뜻이 아니다. 하위 프로세스 wall-clock 상한은 **두지 않는다**
+//     (owner 결정 Q7). 근거는 init.ts가 timeoutMs:0을 고른 두 자리다 — 스캐폴더는 lock 재생성
+//     `bun install`을 품어 30s SIGTERM이 rollback 전에 트리를 죽였고, 첫 push는 서버에 반영된 뒤
+//     클라이언트만 죽으면 성공한 부수효과가 '실패'로 보고된다. 상한을 씌우면 그 두 함정이 MCP
+//     경로로 되돌아온다. 대신 **run 출현 대기**만 MCP_DEADLINE_MS로 바운드한다(아래).
+//   - JSON-RPC 프레이밍: 응답은 요청 1건당 1줄, 알림(id 부재)에는 0줄. ping은 빈 result(MCP 필수
+//     유틸리티), id:null·id 붙은 initialized는 -32600(스펙상 각각 금지·알림 전용).
 //   - 결과 = CLI --json과 같은 계약 오브젝트(op가 낸 envelope). isError는 variant로 매핑(x-contract.mcp).
 //   - 디렉토리 추론 없음 — secrets는 앱 레포 경로(repoPath), init은 부모 디렉토리(parentDir)를 명시 입력으로.
 //     경로 입력 3종(repoPath·parentDir·envDir)은 **절대 경로만**(pattern "^/" + identity.pathInputError — 상대 경로·'~'는
@@ -47,8 +55,25 @@ type Json = Record<string, unknown>;
 //     계약 변경이 선행이라 재개 조건 미충족). pendingReason이 그 사실을 문장으로 담는다.
 // env로 주입 가능(테스트 시간 심).
 // ⚠️ 위 인용은 손 사본이 아니다 — test_homelab-mcp.bats가 WAIT_DEFAULTS에서 분(minute)을 유도해 대조한다.
-const MCP_DEADLINE_MS = Number(process.env.HOMELAB_MCP_DEADLINE_MS ?? "30000");
-const MCP_POLL_MS = Number(process.env.HOMELAB_MCP_POLL_MS ?? "2000");
+//
+// 서버 env 판독 — 설정됐는데 양의 십진 정수가 아니면 **모듈 로드 시** 죽인다(기동 거부).
+// 종전엔 `Number(env ?? "30000")`이라 "abc"→NaN·""→0이 조용히 MCP_MUT에 실렸고, 서버는 정상
+// 기동해 tools/list까지 멀쩡한 채 **변이 tool만 전부** `-32602 --deadline-ms는 양의 정수여야
+// 한다: NaN`으로 죽었다 — 클라이언트가 준 적 없는 CLI 플래그를 탓하는 진단이라 운영자가 자기
+// 서버 설정을 못 찾는다(함정 원장 「TS 바닥값은 coercion 뒤에서 조용히 꺼진다」). 진단이 반드시
+// **env 이름**을 말해야 하고, 시점은 첫 변이 호출이 아니라 기동이어야 한다.
+// ⚠️ homelab.ts가 이 모듈을 정적 import하므로 불량 env는 mcp 모드가 아닌 동사도 기동 거부한다 —
+// 의도된 blast radius다(계약 밖 값이 프로세스 환경에 있으면 그 프로세스의 어떤 경로도 그 값을
+// 신뢰할 수 없다). 해소는 그 env를 지우거나 양의 정수로 고치는 것이고, stderr가 이름을 준다.
+function envPositiveIntMs(name: string, dflt: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return dflt;
+  // 표기만 본다 — Number()는 "1e3"·" 5 "·"12.5"를 조용히 삼키고 ""를 0으로 접는다.
+  if (!/^[1-9][0-9]*$/.test(raw)) throw new Error(`계약 파손: ${name}=${JSON.stringify(raw)} — 양의 정수 ms여야 한다(MCP 서버 env)`);
+  return Number(raw);
+}
+const MCP_DEADLINE_MS = envPositiveIntMs("HOMELAB_MCP_DEADLINE_MS", 30000);
+const MCP_POLL_MS = envPositiveIntMs("HOMELAB_MCP_POLL_MS", 2000);
 // 변이 tool 공통 대기 입력 — 짧은 식별 deadline + identifyOnly.
 // ⚠️ `onProgress`(변이 엔진의 진행 이벤트 싱크, 티켓 07)는 **의도적으로 없다** — 이 서버의 stdout은
 // JSON-RPC 프레임 전용이고, 진행 줄은 CLI 셸(homelab.ts)이 stderr에 내는 표현이다. 여기에 싱크를
@@ -91,9 +116,19 @@ const ABS_HINT = "절대 경로만(예: /home/<user>/apps). 상대 경로·'~'�
 const DESC_REPO_PATH = `앱 레포 루트의 ${ABS_HINT} 존재하지 않거나 앱 레포(.app-config.yml 마커 + canonical remote)가 아니면 디스패치 없이 거부된다.`;
 const DESC_PARENT_DIR = `클론 대상 부모 디렉토리의 ${ABS_HINT} 그 아래에 <app>/ 클론·스캐폴드·첫 push가 만들어진다.`;
 const DESC_ENV_DIR = `자격 파일(.env.local / admin은 .env.admin.local)이 기록될 기준 디렉토리의 ${ABS_HINT}`;
-const DESC_DISPATCH_SECRETS = "GitHub App 키 파일(app-id·private-key.pem)이 있는 디렉토리 경로. 지정 시 두 파일이 모두 있어야 하며 값은 --body-file로만 전달된다.";
+const DESC_DISPATCH_SECRETS = "GitHub App 키 파일(app-id·private-key.pem)이 있는 디렉토리 경로. 지정 시 두 파일이 모두 있어야 하고, 클론 트리(parentDir/<app>) 안이면 거부된다(첫 커밋이 키를 원격에 올린다). 값은 파일 경로로만 전달되며 서버가 읽지 않는다. 참고: dispatch App은 2026-09-03 org 설치가 제거돼 재설치 전까지 이 쌍은 무효다(배포 반영은 bump-poll 크론 백스톱).";
+// 이름 충돌 분리(appverbs-2) — 이 축은 GitHub 레포 가시성이고, 앱 노출은 별도 SSOT다.
+const DESC_REPO_PUBLIC = "GitHub 레포를 공개로 만든다(기본 private). 앱의 공개 노출이 아니다 — 그건 앱 레포 .app-config.yml의 route.public이고, 클론된 트리에서 편집한다.";
 // 변이 pending의 result.run.branch를 그대로 넘기는 자리 — 재개 경로를 스키마가 광고한다(티켓 09).
 const DESC_BRANCH = "변이 pending이 돌려준 result.run.branch를 그대로. run과 함께만 쓰며(단독 조회 아님) 그 레인 브랜치의 PR을 정확 조회한다. 그 run의 좌표가 아닌 브랜치는 거부된다.";
+
+// 변이 tool의 MCP 소유 꼬리말 — description은 tools/list의 **에이전트 대면 채널**이라 CLI 셸의
+// 어휘(플래그 이름)를 빌려 쓰지 않는다. 빌려 쓰면 inputSchema가 -32602로 거부하는 입력을 LLM에게
+// 권하는 드리프트가 된다(mcp-3: desc가 `--wait=배포 수렴까지`를 광고했는데 wait는 스키마에 없다).
+// verbs.ts의 desc는 이제 transport 중립 문장만 담고, 이 축(대기·재개 경로)은 여기가 소유한다.
+const DESC_MUT_PENDING = " 디스패치 후 run 핸들을 pending으로 즉시 반환한다 — 진행은 status(run·branch)로 재조회하며, 이 표면에는 대기 옵션이 없다.";
+// app_secrets만의 축 — repoPath 기준 동작(cwd 어휘는 stdio 서버에서 의미가 없다).
+const DESC_SECRETS_MODE = ` 앱 레포 루트(repoPath)에서 seal→커밋→push→디스패치 연쇄를 돈다. ${DESC_MUT_PENDING.trim()}`;
 
 // MCP tool 테이블 — VERBS 순서를 따르되 destructive(teardown)·서버 모드(mcp)는 제외한다.
 // 각 tool은 op를 --wait 없이 호출한다(wait 미노출 = 동기 바운디드).
@@ -119,7 +154,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "db_create",
-    description: DB_CREATE.desc,
+    description: DB_CREATE.desc + DESC_MUT_PENDING,
     inputSchema: {
       type: "object", additionalProperties: false, required: ["name"],
       properties: { name: { type: "string", minLength: 1 }, ext: { type: "array", items: { type: "string" } } },
@@ -132,7 +167,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "cache_create",
-    description: CACHE_CREATE.desc,
+    description: CACHE_CREATE.desc + DESC_MUT_PENDING,
     inputSchema: {
       type: "object", additionalProperties: false, required: ["name"],
       properties: { name: { type: "string", minLength: 1 }, maxmemoryMi: { type: "integer" } },
@@ -145,7 +180,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "app_create",
-    description: APP_CREATE.desc,
+    description: APP_CREATE.desc + DESC_MUT_PENDING,
     inputSchema: {
       type: "object", additionalProperties: false, required: ["app"],
       properties: { app: { type: "string", minLength: 1 } },
@@ -158,7 +193,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "app_secrets",
-    description: APP_SECRETS.desc,
+    description: APP_SECRETS.desc + DESC_SECRETS_MODE,
     inputSchema: {
       type: "object", additionalProperties: false, required: ["app", "repoPath"],
       properties: { app: { type: "string", minLength: 1 }, repoPath: { type: "string", minLength: 1, pattern: "^/", description: DESC_REPO_PATH }, noSeal: { type: "boolean" } },
@@ -179,14 +214,15 @@ const TOOLS: McpTool[] = [
         // archetype enum은 아키타입 SSOT(platform.ts ARCHETYPES)의 파생이다 — 리터럴 사본이면 아키타입
         // 확장 시 init 엔진은 수용하는데 MCP만 -32602로 거부하는 입력 표면 드리프트가 난다(cli-deepening 심화 6).
         app: { type: "string", minLength: 1 }, archetype: { enum: [...ARCHETYPES] },
-        parentDir: { type: "string", minLength: 1, pattern: "^/", description: DESC_PARENT_DIR }, public: { type: "boolean" },
+        parentDir: { type: "string", minLength: 1, pattern: "^/", description: DESC_PARENT_DIR },
+        repoPublic: { type: "boolean", description: DESC_REPO_PUBLIC },
         dispatchSecrets: { type: "string", minLength: 1, description: DESC_DISPATCH_SECRETS }, adopt: { type: "boolean" },
       },
     },
     call: (a) => {
       const input: AppInitInput = {
         app: str(a, "app") ?? "", archetype: str(a, "archetype") ?? "",
-        public: bool(a, "public"), dispatchSecrets: str(a, "dispatchSecrets"),
+        public: bool(a, "repoPublic"), dispatchSecrets: str(a, "dispatchSecrets"),
         adopt: bool(a, "adopt"), parentDir: str(a, "parentDir"),
       };
       const bad = appInitInputError(input);
@@ -260,11 +296,17 @@ export function handleRequest(req: Json): Json | null {
   const id = req.id;
   const isNotification = !("id" in req);
 
+  // id 경계 — JSON-RPC 2.0은 요청 id로 null을 금지한다. `"id" in req`이라 알림도 아니어서
+  // 종전엔 정상 요청으로 처리돼 `{"id":null,"result":…}`를 냈다(응답과 알림 응답이 구별 불가).
+  if (!isNotification && id === null) return err(null, -32600, "invalid request: 요청 id는 null일 수 없다");
+
   if (method === "initialize") {
     return ok(id, { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "homelab", version: "1" } });
   }
   if (method === "notifications/initialized" || method === "initialized") {
-    return null; // 알림 — 무응답
+    // 알림 전용 method다. id가 붙어 오면 **삼키지 않는다** — 종전엔 무응답이라 그 id를 기다리는
+    // 클라이언트가 영구 대기했다. 코드는 -32600: 스펙상 알림 전용이라는 사실 자체가 사유다.
+    return isNotification ? null : err(id, -32600, `invalid request: ${method}는 알림 전용이라 id를 붙일 수 없다`);
   }
   if (method === "tools/list") {
     return ok(id, { tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
@@ -290,6 +332,11 @@ export function handleRequest(req: Json): Json | null {
     return ok(id, { content: [{ type: "text", text: JSON.stringify(r.envelope) }], isError: mcpIsError(r.envelope.variant) });
   }
   if (isNotification) return null;
+  // ping — MCP 2024-11-05 basic/utilities/ping: 수신자는 빈 result로 즉시 응답해야 한다(종전엔
+  // -32601이라 keepalive로 ping을 쓰는 호스트가 연결 이상으로 읽을 수 있었다).
+  // ⚠️ 자리는 알림 분기 **뒤**다: 앞에 두면 id 없는 ping에 id 없는 응답 한 줄을 써서 stdio
+  // 프레이밍(요청 1건당 1줄·알림 0줄)을 깬다.
+  if (method === "ping") return ok(id, {});
   return err(id, -32601, `알 수 없는 method: ${method}`);
 }
 

@@ -4,6 +4,7 @@
 // 계약 Envelope 반환, 프로세스/표현 관심사 없음). argv 파싱·렌더링·stdout·종료코드는 CLI 셸
 // (homelab.ts) 소유이고, MCP 서버(후속 티켓)는 op를 직접 호출해 같은 envelope을 tool 결과로 쓴다.
 // MCP 노출 정책 필드는 MCP 티켓에서 이 descriptor에 추가한다.
+import { appConfigPreflight } from "./app-preflight.ts";
 import { CONTRACT_ROWS, DB_CHECKBOX_EXTS, laneMutationFields } from "./catalog-rows.ts";
 import { cacheUrlInputError, dbUrlInputError, runCacheUrl, runDbUrl, type CacheUrlInput, type DbUrlInput } from "./conn-url.ts";
 import { ENVELOPE, exitFor, type Envelope } from "./contract.ts";
@@ -19,6 +20,10 @@ import { runStatus, statusInputError, type StatusInput } from "./status.ts";
 // named export + VERBS 행 — 전부 이 파일 안이라 우회 표면이 없다.
 // destructive: 파괴 동사 표시(teardown). MCP 노출 정책(후속 티켓)이 이 표시로 파괴 동사를
 // 제외하고, CLI는 confirm 가드로 사람 확인을 강제한다. 미설정 = 비파괴.
+// desc: 동사 한 줄 설명 — **transport 중립**이어야 한다. CLI 플래그 어휘(`--wait` 등)를 넣으면
+// 같은 문자열을 MCP tool description으로 내는 mcp.ts가 inputSchema에 없는 입력을 LLM에게 광고하게
+// 된다(실측 드리프트 mcp-3: desc의 `--wait=배포 수렴까지` ↔ 스키마의 wait 부재 → -32602). 대기 축
+// 문구는 각 셸이 소유한다 — CLI는 동사별 --help, MCP는 mcp.ts의 DESC_MUT_PENDING.
 // needs: 이 동사가 도달해야 하는 **망 도메인**(티켓 33). 이 홈랩에서는 둘이 독립으로 끊긴다 —
 // 클러스터는 tailscale/LAN, GitHub은 인터넷이라 한쪽만 끊긴 상태가 정상이다. 그 비대칭이 어휘에
 // 없으면 "오프라인에서 무엇이 여전히 되는가"를 표면이 못 말한다(무인자 status·url --dry-run은
@@ -137,6 +142,17 @@ export function appCreateInputError(input: AppCreateInput): string | null {
 function appCreateOp(input: AppCreateInput): Envelope {
   const bad = appCreateInputError(input);
   if (bad) throw new Error(`계약 파손: appCreateOp에 검증 안 된 입력 — ${bad}`);
+  // 디스패치 전 사전 판정(티켓 30) — 앱 레포 main에 .app-config.yml이 없으면 디스패처가 반드시
+  // 죽는다(_create-app.yaml의 관문). 그 실패는 homelab-mutation 직렬화 큐와 Telegram 실패 알림을
+  // 소비하므로 여기서 correlation 없이 거부한다(nonce 미생성 = 디스패치 전 거부 형상).
+  // 판정 불가(비-404)는 통과 — 권위는 디스패처다(lib/app-preflight.ts 헤더 규칙 ②).
+  const pf = appConfigPreflight(input.app);
+  if (!pf.ok) {
+    return {
+      schema: ENVELOPE, verb: "app create", variant: "failure", exitCode: exitFor("failure"), omitted: [],
+      result: { action: "create-app", name: input.app, preflight: "app-config", error: pf.error, dnsExposure: DNS_EXPOSURE },
+    };
+  }
   const lane = laneMutationFields("create-app", input.app); // 레인 신원(workflow·branch·수렴 집합·표면) — 행 파생
   const { variant, omitted, result } = runMutation({
     ...lane,
@@ -234,7 +250,7 @@ export const STATUS: StatusVerb = {
 // named export — CLI 어댑터·MCP가 정확한 입력 타입으로 호출한다.
 export const DB_CREATE: DbCreateVerb = {
   path: ["db", "create"],
-  desc: "공유 CNPG에 논리 DB 생성(create-database 디스패치 + correlation 추적, --wait=배포 수렴까지)",
+  desc: "공유 CNPG에 논리 DB 생성(create-database 디스패치 + correlation 추적)",
   needs: "GitHub(gh) · 클러스터(--wait의 수렴 구간뿐 — KUBECONFIG 부재면 머지까지만 확인하고 생략)",
   op: dbCreateOp,
 };
@@ -248,7 +264,7 @@ export const DB_URL: DbUrlVerb = {
 
 export const CACHE_CREATE: CacheCreateVerb = {
   path: ["cache", "create"],
-  desc: "앱별 Valkey 캐시 생성(create-cache 디스패치 + correlation 추적, --wait=배포 수렴까지)",
+  desc: "앱별 Valkey 캐시 생성(create-cache 디스패치 + correlation 추적)",
   needs: "GitHub(gh) · 클러스터(--wait의 수렴 구간뿐 — KUBECONFIG 부재면 머지까지만 확인하고 생략)",
   op: cacheCreateOp,
 };

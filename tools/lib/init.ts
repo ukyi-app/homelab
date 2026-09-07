@@ -10,7 +10,7 @@
 // 시크릿 원자성: 디스패치 시크릿 2개(App ID·private key)는 한 쌍 — 절반 상태는 결과에 명시되고
 // 재실행이 나머지를 수렴시킨다. private key 값은 어떤 출력에도 나타나지 않는다(gh secret set은
 // --body-file로 값을 넘겨 argv 원장에 값이 남지 않는다 — 이 엔진은 키 파일을 읽지도 않는다).
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, realpathSync, writeFileSync } from "node:fs";
 import { compact } from "./contract.ts";
 import { ALLOW_PUSH_REWRITE_ENV, firstReason, git, pushRoutes, sh } from "./exec.ts";
 import { APP_NAME_RE, isCanonicalClone, pathInputError, pushRouteError } from "./identity.ts";
@@ -20,8 +20,15 @@ import { SCAFFOLD_ENTRY, scaffoldContractError } from "./template-contract.ts";
 export type AppInitInput = {
   app: string;
   archetype: string;
+  // GitHub **레포 가시성**(기본 private). 입력 표면의 이름은 셸이 소유한다 — CLI `--repo-public`,
+  // MCP `repoPublic`(구 `--public`/`public`은 거부): 실물 스캐폴더의 `--public`은 `.app-config.yml`의
+  // route.public(앱 **노출**)이라 같은 이름이 두 뜻이었다(appverbs-2). 결과 계약 필드는 `public` 그대로다.
   public?: boolean;
-  dispatchSecrets?: string; // App 키 경로(디렉토리: app-id + private-key.pem). 미지정=크론 백스톱.
+  // App 키 경로(디렉토리: app-id + private-key.pem). 미지정=크론 백스톱.
+  // ⚠️ dispatch App은 2026-09-03 org 설치가 제거됐다(AGENTS.md 트리거 경계) — 이 축은 **휴면 코드
+  // 경로**로 유지한다(재설치 시 그대로 쓰인다). fail-closed 거부를 넣지 않는 이유: 문서화된 재개
+  // 경로를 막게 되고, 재설치는 owner 결정 하나로 끝난다(docs-1).
+  dispatchSecrets?: string;
   adopt?: boolean;          // 마커 없는 기존 레포를 명시 입양(사용자 확인)
   parentDir?: string;       // 대상 부모 디렉토리(MCP 명시 입력 — stdio 서버 cwd 추론 불가, plan r1 b7). 미설정=process.cwd().
 };
@@ -53,17 +60,37 @@ function api(args: string[]): Api {
 }
 
 // 원격 마커 판독 — contents API base64 디코드 후 tool+app 대조. present/absent/mismatch/error.
-type Marker = { kind: "present" } | { kind: "absent" } | { kind: "mismatch"; app: string } | { kind: "error"; err: string };
+// present는 마커가 실은 **archetype 관측값**도 싣는다(undefined = 그 필드가 없는 구형 마커).
+// ⚠️ ref는 `main` 고정이다 — push(:HEAD:refs/heads/main)와 디스패처(_create-app.yaml·
+// _update-secrets.yaml의 `ref: main`)가 보는 축과 같아야 한다. ref를 생략하면 기본 브랜치를 읽으므로
+// org 기본 브랜치 설정이 바뀌는 순간 마커가 main에 있어도 '부재'로 읽혀 --adopt 재개 → 재스캐폴드 →
+// non-fast-forward push 실패 루프가 된다(appverbs-9).
+type Marker =
+  | { kind: "present"; archetype?: string }
+  | { kind: "absent" }
+  | { kind: "mismatch"; app: string }
+  | { kind: "error"; err: string };
 function readRemoteMarker(app: string): Marker {
-  const r = api(["api", `repos/${OWNER}/${app}/contents/${MARKER_FILE}`, "--jq", ".content"]);
+  const r = api(["api", `repos/${OWNER}/${app}/contents/${MARKER_FILE}?ref=main`, "--jq", ".content"]);
   if (r.missing) return { kind: "absent" };
   if (!r.ok) return { kind: "error", err: r.err };
-  let decoded: { tool?: string; app?: string };
+  let decoded: { tool?: string; app?: string; archetype?: string };
   try { decoded = JSON.parse(Buffer.from(r.out.replace(/\s+/g, ""), "base64").toString("utf8")); }
   catch { return { kind: "error", err: "마커 디코드 실패" }; }
   if (decoded.tool !== MARKER_TOOL) return { kind: "absent" }; // 다른 도구의 파일 = 우리 마커 아님
   if (decoded.app !== app) return { kind: "mismatch", app: String(decoded.app ?? "?") };
-  return { kind: "present" };
+  return { kind: "present", archetype: typeof decoded.archetype === "string" ? decoded.archetype : undefined };
+}
+
+// 경로 포함 판정 — 심볼릭 링크를 지난 실경로로 본다. 존재하지 않는 경로는 realpath가 throw하므로
+// 원문으로 폴백한다(그 경우 포함이면 문자열 접두로도 포함이다).
+function realpathOr(p: string): string {
+  try { return realpathSync(p); } catch { return p; }
+}
+function isInside(child: string, parent: string): boolean {
+  const c = realpathOr(child);
+  const p = realpathOr(parent);
+  return c === p || c.startsWith(p.endsWith("/") ? p : `${p}/`);
 }
 
 // 시크릿 목록 조회 — 설정된 이름 집합. 조회 실패는 null(판정 불가).
@@ -95,6 +122,14 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     if (!existsSync(idFile) || !existsSync(keyFile)) {
       return fail(`--dispatch-secrets 경로에 키 파일 부재(app-id·private-key.pem 필요): ${input.dispatchSecrets}`, "preflight");
     }
+    // 키 디렉토리가 **클론 트리 안**이면 거부한다 — 재개 경로의 `git add -A`(아래 커밋 단계)가 그
+    // 파일을 첫 스캐폴드 커밋에 실어 원격 main으로 push한다(라이브로 읽은 템플릿 .gitignore에
+    // `*.pem`이 없다 — appverbs-8). 이 엔진은 키 값을 읽지도 출력하지도 않지만, 그 보장이 git
+    // 채널에는 없다. ⚠️ 막는 것은 **위치**뿐이다: basename 화이트리스트(private-key.pem·app-id)는
+    // 자기 도메인 표기법에만 눈뜬 검출기라 '클론에 비밀이 없다'는 완전성 주장을 붙이지 않는다.
+    if (isInside(input.dispatchSecrets!, `${parentDir}/${input.app}`)) {
+      return fail(`--dispatch-secrets 경로가 클론 트리(${parentDir}/${input.app}) 안에 있다 — 스캐폴드 커밋의 add -A가 키 파일을 원격 main에 올린다. 클론 밖으로 옮겨라: ${input.dispatchSecrets}`, "preflight");
+    }
   }
   // (2) 템플릿 스캐폴더 계약 호환성 — doctor와 같은 술어(structure r1 a3). 비호환이면 init 거부.
   const scaffoldSrc = api(["api", `repos/${TEMPLATE_REPO}/contents/${SCAFFOLD_ENTRY}`, "--jq", ".content"]);
@@ -125,6 +160,18 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
       }
       adopted = true;
     }
+    if (marker.kind === "present") {
+      // 재개 입력 일치 — 마커에 실린 archetype이 이번 입력과 다르면 거부한다. 종전엔 `no-op`
+      // success로 통과하면서 결과가 **입력값을 그대로 에코**했다: `init myapp --archetype worker`가
+      // api 레포에 대해 `result.archetype: "worker"`로 성공 보고했다(관측이 아니라 주장 —
+      // appverbs-3). ⚠️ archetype 필드 없는 **구형 마커는 비교를 건너뛴다** — fail-closed로 두면
+      // init 이전/구버전이 만든 정상 레포가 영구 거부된다.
+      if (marker.archetype !== undefined && marker.archetype !== input.archetype) {
+        return fail(`마커 archetype(${marker.archetype}) ≠ 입력(${input.archetype}) — 재개 입력 불일치(archetype은 스캐폴드 시점에 정해진다)`, "preflight", { existed: true, archetype: marker.archetype });
+      }
+      // 결과의 archetype은 관측값이 있으면 관측값이다(없으면 입력 폴백 — 구형 마커).
+      base.archetype = marker.archetype ?? input.archetype;
+    }
     // marker.kind === "present" → 소유 확인, 스캐폴드+push 완료. 남은 것은 시크릿뿐(아래에서 수렴).
     base.existed = true;
   } else {
@@ -132,7 +179,20 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     const vis = isPublic ? "--public" : "--private";
     // timeoutMs: 0 — 템플릿 복제는 GitHub 쪽 왕복이라 seam 기본 30s가 망 사정으로 끊을 수 있다.
     const create = sh("gh", ["repo", "create", `${OWNER}/${app}`, "--template", TEMPLATE_REPO, vis], { timeoutMs: 0 });
-    if (!create.ok) return fail(`레포 생성 실패 — ${create.err.split("\n")[0] || "gh repo create 비-0"}`, "preflight");
+    if (!create.ok) {
+      // 비-0을 곧장 preflight('부수효과 0')로 접으면 안 된다 — 위 timeoutMs:0 주석이 말하듯 이
+      // 호출은 GitHub 쪽 왕복이라 **서버 반영 뒤 클라이언트만 죽는** 창이 있다. 그러면 다음 실행이
+      // '마커 없는 기존 레포'를 만나 자기 레포에 --adopt를 요구하고, 사용자는 결과만 보고는 레포
+      // 생성 여부를 알 수 없다(appverbs-7). 존재를 다시 물어 3분기로 나눈다.
+      const why = create.err.split("\n")[0] || "gh repo create 비-0";
+      const after = api(["api", `repos/${OWNER}/${app}`, "--jq", ".name"]);
+      if (after.ok) return fail(`레포는 생성됐으나 gh repo create가 비-0 종료 — ${why}. 재실행 시 --adopt로 이어간다`, "created", { created: true });
+      if (after.missing) return fail(`레포 생성 실패 — ${why}`, "preflight");
+      // 판정 불가. checkpoint는 'created'를 고른다 — 두 오답의 대가가 비대칭이다: preflight라고
+      // 했는데 레포가 있으면 위 --adopt 함정으로 되돌아가고, created라고 했는데 없으면 재실행이
+      // 그냥 생성 경로를 다시 타 수렴한다. created **플래그**는 관측하지 못했으므로 싣지 않는다.
+      return fail(`레포 생성 실패(생성 여부 미확인 — 존재 재조회도 실패: ${after.err}) — ${why}. GitHub에서 ${OWNER}/${app} 존재를 직접 확인하라`, "created");
+    }
     created = true;
   }
 
@@ -142,6 +202,7 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
 
   let scaffolded = markerPresent;
   let pushed = markerPresent;
+  let headSha: string | undefined;
 
   if (!markerPresent) {
     // ── 클론(멱등) — dest가 이미 우리 클론이면 재사용, 아니면 클론. ──
@@ -164,7 +225,13 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
       // package.json script를 거치면 재개가 그 script의 생존에 의존하는데, 스캐폴더가 스스로 재작성하는
       // 파일이 바로 package.json이다: 재작성 뒤 어떤 이유로든 죽으면 `scripts.scaffold`가 사라져
       // 바로 위 재실행 계약(반쪽 스캐폴드 → 재스캐폴드)이 **재호출 불가**로 깨졌다(04 인계).
-      // 진입점은 preflight가 이미 존재·계약 마커를 검증한 그 경로다 — 검증 대상 = 실행 대상.
+      // ⚠️ 진입점은 preflight가 계약 마커를 검증한 것과 **같은 경로**이지 같은 오브젝트가 아니다:
+      // 검증 대상은 TEMPLATE_REPO의 원격 사본(gh api contents), 실행 대상은 클론된 대상 레포의
+      // 워킹 트리 파일이다. 셋이 갈린다 — (a) --adopt는 템플릿에서 만들어진 적 없는 레포의 파일을
+      // 실행하고, (b) ensureClone은 canonical origin이면 트리 상태를 보지 않고 재사용하며,
+      // (c) 관문은 T1의 원격 스냅샷·실행은 T2의 로컬 파일이다. 이 선택의 목적은 재개 계약이
+      // package.json에 의존하지 않게 하는 것이고(바로 위), **실행 신뢰는 TEMPLATE_REPO가 아니라
+      // OWNER 조직 레포의 내용**에 걸려 있다(r2-mcp-filesystem-authority-4).
       // timeoutMs: 0 — 스캐폴더가 lock 재생성 `bun install`을 품는다. 30s 초과 시 SIGTERM이
       // 스캐폴더의 rollback **전에** 트리를 죽인다(위 갭의 트리거였고, 지금은 재개가 수렴한다).
       const scaffold = sh("bun", [SCAFFOLD_ENTRY, "--archetype", input.archetype, "--name", app, "--yes"], { cwd: dest, timeoutMs: 0 });
@@ -197,6 +264,12 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
     // 사유 선택은 seam의 firstReason 소유 — `To <url>` 1행이 사유를 가리는 push 고유 규약(exec-3).
     if (!push.ok) return fail(`첫 push 실패 — ${firstReason(push.err) || `git push 비-0(exit ${push.status ?? "?"}${push.signal ? `, ${push.signal}` : ""})`}`, "scaffolded", { created, adopted: adopted || undefined });
     pushed = true;
+    // 다음 단계의 상관자(티켓 30 · product-9) — 이 push가 촉발한 reusable-app-build run은 이 SHA로
+    // 태그되고, `app create`의 서버측 첫 관문이 그 이미지의 실존이다. 네트워크 0(rev-parse).
+    // ⚠️ **이번 호출이 만든 인과만** 싣는다: 마커가 이미 있던 no-op·시크릿만 수렴한 실행에는 이
+    // 필드가 없다(그 실행은 push하지 않았다 — 있으면 '이번에 밀었다'는 거짓 인과가 된다).
+    const head = git(dest, ["rev-parse", "HEAD"]);
+    if (head.ok) headSha = head.out.trim();
   }
 
   // ── 디스패치 시크릿(옵션, 원자적) — 요청 시에만. 쌍의 절반 상태를 결과에 명시하고 재실행이 수렴. ──
@@ -240,6 +313,7 @@ export function runAppInit(input: AppInitInput, parentDir: string = process.cwd(
       adopted: adopted || undefined,
       scaffolded,
       pushed,
+      headSha,
       checkpoint: wantSecrets ? "secrets" : "pushed",
       secrets,
     }),

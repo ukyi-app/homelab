@@ -163,15 +163,17 @@ const DEFINITIONS = `    "doctorResult": {
       }
     },
     "mutationRefused": {
-      "description": "디스패치 전 거부(app secrets 선행 조건 실패) — correlation이 없고(nonce 미생성) 연쇄 증거(chain)가 실린다. app secrets failure 분기 전용.",
+      "description": "디스패치 전 거부 — correlation이 없다(nonce 미생성). 거부 근거는 레인에 따라 갈린다: app secrets는 연쇄 증거(chain), app create는 사전 판정 이름(preflight). 어느 쪽이 필수인지는 행렬 분기가 행의 chain 극성에서 파생해 고정하므로 이 정의 자체는 둘 다 optional로 둔다.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "name", "error", "chain"],
+      "required": ["action", "name", "error"],
       "properties": {
-        "action": { "enum": ["update-secrets"] },
+        "action": { "enum": ["create-app", "update-secrets"] },
         "name": { "type": "string", "minLength": 1 },
         "error": { "type": "string", "minLength": 1 },
-        "chain": { "$ref": "#/definitions/mutationChain" }
+        "chain": { "$ref": "#/definitions/mutationChain" },
+        "preflight": { "enum": ["app-config"] },
+        "dnsExposure": { "enum": ["iac/tf-reconcile(공개) 또는 adguard rewrite(내부)"] }
       }
     },
     "mutationNoop": {
@@ -360,7 +362,7 @@ const DEFINITIONS = `    "doctorResult": {
       }
     },
     "initSuccess": {
-      "description": "init 성공 또는 no-op — 스캐폴드+push 완료(+요청 시 시크릿 쌍). success=이번 실행이 최소 한 단계 수행, no-op=이미 완료라 변경 없음(멱등 재실행). correlation 없음(변이 디스패처가 아닌 로컬 체인).",
+      "description": "init 성공 또는 no-op — 스캐폴드+push 완료(+요청 시 시크릿 쌍). success=이번 실행이 최소 한 단계 수행, no-op=이미 완료라 변경 없음(멱등 재실행). correlation 없음(변이 디스패처가 아닌 로컬 체인). headSha는 **이번 호출이 실제로 push한** 커밋이다(다음 단계 상관자 — 그 push가 촉발한 빌드가 그 SHA로 태그된다). 그래서 no-op·시크릿만 수렴한 실행에는 없다: 있으면 '이번에 밀었다'는 거짓 인과가 된다.",
       "type": "object",
       "additionalProperties": false,
       "required": ["app", "archetype", "public", "repo", "scaffolded", "pushed"],
@@ -374,6 +376,7 @@ const DEFINITIONS = `    "doctorResult": {
         "adopted": { "type": "boolean" },
         "scaffolded": { "type": "boolean" },
         "pushed": { "type": "boolean" },
+        "headSha": { "type": "string", "minLength": 7 },
         "checkpoint": { "enum": ["pushed", "secrets"] },
         "secrets": { "$ref": "#/definitions/initSecrets" }
       }
@@ -637,7 +640,20 @@ function mutationBranch(verb: string, variant: MutationVariantName, action: stri
   ].join("\n");
 }
 
-function refusedFailureBranch(verb: string, action: string): string {
+// 디스패치 전 거부와의 oneOf — failure가 두 형상을 갖는 동사(app secrets의 연쇄 거부 · app create의
+// 사전 판정 거부). 거부 형상의 **필수 증거**는 chain 극성에서 파생한다: chain 레인은 연쇄 증거를,
+// 비-chain 레인은 판정 이름(preflight)을 요구한다. 두 멤버가 exposure 극성을 똑같이 물려받아야
+// oneOf가 "정확히 하나"를 유지한다.
+function refusedFailureBranch(verb: string, action: string, chain: boolean, exposure: boolean): string {
+  const chainLine = chain
+    ? '                { "type": "object", "required": ["chain"] },'
+    : '                { "not": { "type": "object", "required": ["chain"] } },';
+  const exposureLine = exposure
+    ? '                { "type": "object", "required": ["dnsExposure"] }'
+    : '                { "not": { "type": "object", "required": ["dnsExposure"] } }';
+  const refusedEvidence = chain
+    ? '                { "type": "object", "required": ["chain"] },'
+    : '                { "type": "object", "required": ["preflight"] },';
   return [
     "        {",
     '          "type": "object",',
@@ -648,10 +664,15 @@ function refusedFailureBranch(verb: string, action: string): string {
     '              { "allOf": [',
     '                { "$ref": "#/definitions/mutationFailure" },',
     '                { "type": "object", "properties": { "action": { "enum": ["' + action + '"] } } },',
-    '                { "type": "object", "required": ["chain"] },',
-    '                { "not": { "type": "object", "required": ["dnsExposure"] } }',
+    chainLine,
+    exposureLine,
     "              ] },",
-    '              { "$ref": "#/definitions/mutationRefused" }',
+    '              { "allOf": [',
+    '                { "$ref": "#/definitions/mutationRefused" },',
+    '                { "type": "object", "properties": { "action": { "enum": ["' + action + '"] } } },',
+    refusedEvidence,
+    exposureLine,
+    "              ] }",
     "            ] }",
     "          }",
     "        }",
@@ -679,7 +700,7 @@ function memberZeroBranches(): string {
       if (!(row.mutation.action in LANES)) throw new Error("계약 파손: 미지의 action — " + row.mutation.action);
       for (const v of row.mutation.variants) {
         out.push(v === "failure" && row.mutation.refusedOnFailure === true
-          ? refusedFailureBranch(row.verb, row.mutation.action)
+          ? refusedFailureBranch(row.verb, row.mutation.action, row.mutation.chain, row.mutation.exposure === true)
           : mutationBranch(row.verb, v, row.mutation.action, row.mutation.chain, row.mutation.exposure === true));
       }
     }

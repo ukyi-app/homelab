@@ -57,8 +57,8 @@ run_init() {
   echo "$output" | grep -q "homelab-app-init"
 }
 
-@test "--public opts into a public repo (argv ledger)" {
-  run_init mypublic --archetype site --public --json
+@test "--repo-public opts into a public GitHub repo (argv ledger)" {
+  run_init mypublic --archetype site --repo-public --json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.public')" = "true" ]
   run python3 "$LEDGER_PY" exact "$CALLS" gh repo create ukyi-app/mypublic --template ukyi-app/homelab-app-template --public
@@ -367,7 +367,12 @@ run_init() {
 @test "app init goldens pin fresh-success, preflight-refusal, and no-op variants (floor 3)" {
   export OUTDIR="$BATS_TEST_TMPDIR"
   run_init myapp --archetype api --json
-  echo "$output" > "$OUTDIR/g-success.json"
+  # headSha는 커밋 타임스탬프에 의존해 실행마다 다르다 — 골든에서는 자리표시자로 정규화하고
+  # **값 자체**는 원격 main tip과 여기서 대조한다(정규화가 그 축을 지우지 않게).
+  [ "$(echo "$output" | jq -r '.result.headSha')" = "$(git -C "$INIT_REMOTES/myapp.git" rev-parse main)" ]
+  echo "$output" | sed 's/"headSha": "[0-9a-f]\{40\}"/"headSha": "<headSha>"/' > "$OUTDIR/g-success.json"
+  # 치환 불발은 vacuous다(sed는 무매치를 성공으로 낸다) — 정확히 한 줄이 바뀌었음을 증명한다.
+  [ "$(grep -c '"headSha": "<headSha>"' "$OUTDIR/g-success.json")" = "1" ]
   run_init myapp --archetype api --json
   echo "$output" > "$OUTDIR/g-noop.json"
   # preflight 거부(키 경로 부재) — 결정적.
@@ -396,12 +401,16 @@ run_init() {
   echo "$output" | grep -q "^ok:3$"
 }
 
-@test "app init prints usage on --help" {
+@test "app init prints usage on --help, and the help states the dispatch App is not installed today" {
   run bun tools/homelab.ts app init --help
   [ "$status" -eq 0 ]
   echo "$output" | grep -q -- "--archetype"
   echo "$output" | grep -q -- "--adopt"
   echo "$output" | grep -q -- "--dispatch-secrets"
+  echo "$output" | grep -q -- "--repo-public"
+  # dispatch App은 2026-09-03 org 설치가 제거됐다(AGENTS.md 트리거 경계) — 코드 경로는 휴면으로
+  # 남기지만, help가 그 사실을 말하지 않으면 '크론 지연 제거' 약속이 거짓이 된다(docs-1).
+  echo "$output" | grep -q "설치 없음"
 }
 
 @test "the usage archetype choices derive from platform ARCHETYPES (parity, hand-pinned floor)" {
@@ -476,4 +485,196 @@ run_init() {
     "$BUN" "$ROOT/tools/homelab.ts" app init other --archetype api --dispatch-secrets "$SECRETS_DIR" --json
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.result.checkpoint')" != "secrets" ]
+}
+
+# ── 재개 입력 불일치·생성 3분기·키 경로 격리·마커 ref(homelab-cli-r2 티켓 28) ─────────────────
+
+@test "a re-run with a DIFFERENT archetype is refused at preflight, and a legacy marker without archetype still converges" {
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  before="$(git -C "$INIT_REMOTES/myapp.git" rev-parse main)"
+  head1="$(git -C "$INIT_PARENT/myapp" rev-list --count HEAD)"
+  : > "$CALLS"
+  run_init myapp --archetype worker --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "preflight" ]
+  echo "$output" | jq -r '.result.error' | grep -q "archetype"
+  # 결과의 archetype은 입력 에코가 아니라 **마커 관측값**이다(종전엔 no-op success에 'worker'를 되울렸다).
+  [ "$(echo "$output" | jq -r '.result.archetype')" = "api" ]
+  # 부수효과 0 — 스캐폴드 원장 0건 + 원격 main tip·로컬 커밋 수 불변(git 호출은 원장에 안 남는다).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold)" = "0" ]
+  [ "$(git -C "$INIT_REMOTES/myapp.git" rev-parse main)" = "$before" ]
+  [ "$(git -C "$INIT_PARENT/myapp" rev-list --count HEAD)" = "$head1" ]
+  # 같은 archetype 재실행은 통과한다 — 거부가 전칭이 아니다(양성 대조).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "no-op" ]
+
+  # 구형 마커(archetype 필드 없음)는 비교를 **건너뛴다** — fail-closed로 두면 init 이전에 만들어진
+  # 정상 레포가 영구 거부된다. 관측값이 없으므로 결과의 archetype은 입력으로 폴백한다.
+  printf '{"tool":"homelab-app-init","app":"myapp"}\n' > "$INIT_PARENT/myapp/.homelab-init"
+  git -C "$INIT_PARENT/myapp" -c user.name=t -c user.email=t@example.com commit -q -a -m "legacy marker"
+  git -C "$INIT_PARENT/myapp" push -q "$INIT_REMOTES/myapp.git" HEAD:refs/heads/main
+  run_init myapp --archetype worker --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "no-op" ]
+  [ "$(echo "$output" | jq -r '.result.archetype')" = "worker" ]
+}
+
+@test "a repo create that failed AFTER the server made the repo reports checkpoint created, not preflight" {
+  # 템플릿 복제는 GitHub 쪽 왕복이라(init.ts timeoutMs:0 주석) 서버 반영 뒤 클라이언트만 죽는 창이
+  # 있다. 종전엔 무조건 preflight라 다음 실행이 '마커 없는 기존 레포'를 만나 **자기 레포**에 --adopt를
+  # 요구했고, 사용자는 결과만 보고는 레포 생성 여부를 알 수 없었다(appverbs-7).
+  run --separate-stderr env PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
+    GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_GH_CREATE_FAIL_AFTER=1 \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
+    "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "created" ]
+  [ "$(echo "$output" | jq -r '.result.created')" = "true" ]
+  echo "$output" | jq -r '.result.error' | grep -q -- "--adopt"
+  [ -d "$INIT_REMOTES/myapp.git" ]
+  # 존재 재조회가 실제로 일어났다 — 생성 전 1회 + 생성 실패 후 1회.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api repos/ukyi-app/myapp --jq .name)" = "2" ]
+  # 대조 — 서버에도 안 만들어진 실패는 여전히 preflight이고 created 키가 없다(3분기가 실제로 갈린다).
+  : > "$CALLS"
+  run --separate-stderr env PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
+    GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_GH_CREATE_FAIL=1 \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
+    "$BUN" "$ROOT/tools/homelab.ts" app init other --archetype api --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "preflight" ]
+  [ "$(echo "$output" | jq -r '.result | has("created")')" = "false" ]
+  [ ! -d "$INIT_REMOTES/other.git" ]
+}
+
+@test "a dispatch-secrets key directory inside the clone tree is refused at preflight (add -A would commit it)" {
+  # 재개 경로의 `git add -A`는 클론 안 임의 untracked 파일을 첫 스캐폴드 커밋에 실어 원격 main으로
+  # 보낸다 — 라이브로 읽은 템플릿 .gitignore에 `*.pem`이 없다(appverbs-8). 값을 읽지 않는 이 엔진의
+  # '평문 비노출' 보장이 git 채널에는 없으므로 **위치**로 막는다.
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  KEYS="$INIT_PARENT/myapp/keys"
+  mkdir -p "$KEYS"
+  printf '123456\n' > "$KEYS/app-id"
+  printf 'PRIVATE-KEY-%s\n' "$CANARY" > "$KEYS/private-key.pem"
+  : > "$CALLS"
+  run_init myapp --archetype api --adopt --dispatch-secrets "$KEYS" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.checkpoint')" = "preflight" ]
+  echo "$output" | jq -r '.result.error' | grep -q "클론"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh secret set)" = "0" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold)" = "0" ]
+  # 키가 원격 main에 실려 나가지 않았다.
+  run git -C "$INIT_REMOTES/myapp.git" show main:keys/private-key.pem
+  [ "$status" -ne 0 ]
+  # 평문은 어떤 채널에도 없다(거부 문구가 경로를 인용하므로 값 유출을 따로 잰다).
+  [ "$(printf '%s%s' "$output" "$stderr" | grep -c "$CANARY")" = "0" ]
+  # 양성 대조 — 클론 **밖** 키 디렉토리는 같은 명령에서 통과해 시크릿 쌍을 설정한다.
+  : > "$CALLS"
+  run_init myapp --archetype api --dispatch-secrets "$SECRETS_DIR" --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh secret set)" = "2" ]
+}
+
+@test "the remote marker read pins ref=main, the same fixed ref that push and the dispatchers use" {
+  # 마커 판독만 기본 브랜치를 읽고(ref 미지정) push·_create-app.yaml·_update-secrets.yaml은 main
+  # 고정이었다 — org 기본 브랜치 설정이 바뀌면 마커가 main에 있어도 '부재'로 읽혀 --adopt 재개 →
+  # 재스캐폴드 → non-fast-forward push 루프가 된다(appverbs-9).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  : > "$CALLS"
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api "repos/ukyi-app/myapp/contents/.homelab-init?ref=main" --jq .content
+  [ "$status" -eq 0 ]
+  # 기본 브랜치 축(ref 미지정)은 더 이상 쓰이지 않는다 — 바로 위 줄이 같은 원장의 양성 대조다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/myapp/contents/.homelab-init" --jq .content)" = "0" ]
+}
+
+@test "the scaffolder gate comment names two different objects instead of claiming the verified file is the executed one" {
+  # 관문은 TEMPLATE_REPO의 **원격 사본**(gh api contents), 실행은 클론된 대상 레포의 워킹 트리
+  # 파일이다 — 같은 *경로*이지 같은 오브젝트가 아니다(--adopt·디렉토리 재사용·T1/T2 시차 셋이
+  # 갈린다, r2-mcp-filesystem-authority-4).
+  [ "$(grep -c '검증 대상 = 실행 대상' tools/lib/init.ts)" = "0" ]
+  # 양성 대조(검출기 생존) — 같은 grep 형태가 정정된 문구는 실제로 잡는다.
+  [ "$(grep -c 'TEMPLATE_REPO의 원격 사본' tools/lib/init.ts)" -ge 1 ]
+}
+
+# ── --repo-public 의미 분리와 스캐폴드 argv 고정(homelab-cli-r2 티켓 29) ───────────────────────
+
+@test "the old --public flag is a usage error whose hint names the app-exposure key it was confused with" {
+  # 같은 이름 다른 뜻이었다: 이 동사의 --public은 GitHub **레포 가시성**이고, 실물 스캐폴더의
+  # --public은 `.app-config.yml`의 route.public(앱 **노출**)이다 — init은 후자를 넘기지도 않는다
+  # (appverbs-2). 그래서 이름을 --repo-public으로 가르고, 구 이름은 힌트와 함께 거부한다.
+  run_init mypublic --archetype site --public --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  printf '%s\n' "$stderr" | grep -qF -- "--repo-public"
+  printf '%s\n' "$stderr" | grep -qF ".app-config.yml"
+  printf '%s\n' "$stderr" | grep -qF "route.public"
+  # 부수효과 0 — 파싱 단계 거부다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
+}
+
+@test "the scaffolder argv is exactly the non-interactive contract — no app-facing flag is passed through" {
+  # 명시 기각(티켓 29): --app-public·--metrics·--no-autodeploy 패스스루는 넣지 않는다 —
+  # `.app-config.yml`이 SSOT이고 클론이 로컬에 있으며, 계약 마커 확장은 fail-closed로 호환 템플릿을
+  # 거부한다. 그 기각을 코드로 붙잡는 가드다(재개 조건: 실제 온보딩에서 파일 편집이 반복 마찰로
+  # 실증될 때).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  # 원장의 scaffold 레코드는 정확히 1건이고, 그 1건이 아래 exact와 같다 → argv 전체가 고정이다
+  # (exact는 argc까지 비교하므로 접두 count와 달리 패스스루가 붙으면 red다).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" scaffold)" = "1" ]
+  run python3 "$LEDGER_PY" exact "$CALLS" scaffold --archetype api --name myapp --yes
+  [ "$status" -eq 0 ]
+  # 검출기 생존 — 같은 exact 술어는 한 토큰만 달라도 red다.
+  run python3 "$LEDGER_PY" exact "$CALLS" scaffold --archetype api --name myapp --yes --app-public
+  [ "$status" -eq 1 ]
+}
+
+@test "a push made by THIS call carries its headSha, and a no-op omits it (only causal facts are reported)" {
+  # 에이전트 E2E 체인의 첫 단절 — init 결과에 다음 단계의 상관자가 없었다(product-9). 첫 push가
+  # 촉발한 빌드는 그 SHA로 태그되므로, push된 HEAD SHA 하나가 status·앱 레포 축 조회의 좌표다.
+  # 네트워크 0(`git rev-parse HEAD`).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  sha="$(echo "$output" | jq -r '.result.headSha')"
+  [ "$sha" = "$(git -C "$INIT_REMOTES/myapp.git" rev-parse main)" ]
+  # no-op은 이번 호출이 만든 인과가 없다 — 키 자체가 없어야 한다(false도 아니다).
+  run_init myapp --archetype api --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "no-op" ]
+  [ "$(echo "$output" | jq -r '.result | has("headSha")')" = "false" ]
+}
+
+@test "the human render tells the operator that the first push is the build trigger" {
+  # 다음 동사(app create)의 서버측 첫 관문이 GHCR 이미지 실존이라, release run 전에 부르면 반드시
+  # 죽는다. 사람 모드 출력이 그 순서를 한 줄로 말한다(표현은 셸 소유 — op는 봉투만 낸다).
+  run --separate-stderr env PATH="$STUB" \
+    GIT_CONFIG_GLOBAL="$INIT_GCFG" GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
+    "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api
+  [ "$status" -eq 0 ]
+  # --json이 없으면 사람용 렌더는 stdout이다(계약 stdout 절 — --json일 때만 stderr로 밀린다).
+  printf '%s\n' "$output" | grep -q "빌드 트리거"
+  printf '%s\n' "$output" | grep -q "app create"
+  # 부재 대조 — no-op(이번 호출이 push하지 않음)에는 그 줄이 없다.
+  run --separate-stderr env PATH="$STUB" \
+    GIT_CONFIG_GLOBAL="$INIT_GCFG" GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" \
+    HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
+    bash -c 'cd "$1" || exit 1; shift; exec "$@"' _ "$INIT_PARENT" \
+    "$BUN" "$ROOT/tools/homelab.ts" app init myapp --archetype api
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | grep -c "빌드 트리거")" = "0" ]
+  # 그 실행도 사람용 렌더 자체는 냈다(0건이 '출력을 안 본다'가 아님을 같은 스트림으로 증명).
+  [ "$(printf '%s' "$output" | grep -c "app init myapp")" -ge 1 ]
 }

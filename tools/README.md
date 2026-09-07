@@ -427,17 +427,34 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (변이 디스패처 아님 — correlation 없음). preflight(부수효과 0) → 레포 생성(기본 private) → 클론
   (canonical 판정 identity.isCanonicalClone) → push 라우팅 게이트(identity.pushRouteError) →
   스캐폴드(template-contract.SCAFFOLD_ENTRY 직접 실행) → invocation marker(.homelab-init) → 커밋·첫
-  push → [--dispatch-secrets면 시크릿 쌍].
+  push → [--dispatch-secrets면 시크릿 쌍 — dispatch App은 **현재 org 설치 없음**이라 재설치 전까지 무효,
+  코드 경로만 휴면 유지(AGENTS.md 트리거 경계)]. 가시성 입력은 `--repo-public`(MCP `repoPublic`)으로
+  **GitHub 레포** 축임을 이름이 말한다 — 앱의 공개 노출은 앱 레포 `.app-config.yml`의 route.public이고
+  init은 그 축을 넘기지 않는다(스캐폴더 argv는 `--archetype/--name/--yes` 고정 — 패스스루 명시 기각).
   각 단계는 사후조건으로 증명하고 재실행이 그 지점부터 수렴한다(멱등). 소유 증명은 계보가 아니라
   마커(plan r2 r2-a2) — 마커 없는 기존 레포는 fail-closed(--adopt로만). 시크릿 쌍은 원자적(절반
   상태 결과 명시·재실행 수렴), private key 값은 --body-file 전용이라 argv/출력에 비노출(엔진이 키를
   읽지 않는다). variant: success(한 단계 이상 수행)·no-op(이미 완료)·failure(preflight/거부/단계 오류
   + checkpoint).
+- **`lib/app-preflight.ts`** — 앱 온보딩 체인의 **디스패치 전 사전 판정**(`appConfigPreflight()`·
+  `onboardedPreflight()`): `app create`는 앱 레포 main의 `.app-config.yml?ref=main` 404를,
+  dispatch-only `app secrets`는 로컬 homelab 워킹트리의 `apps/<app>/deploy/prod` 부재를 거부로
+  승격한다(둘 다 디스패처가 run 안에서 죽을 자리 — 그 실패가 `homelab-mutation` 직렬화 큐와
+  Telegram 실패 알림을 소비한다). 권한 경계가 아니라 **큐·알림 절약**이라 세 규칙을 지킨다:
+  결정적인 것만 거부(이미지 실존은 승격 안 함 — 낡은 스냅샷·`push:false` PR 빌드·GHCR private
+  함정으로 양방향 오답) · 판정 불가(비-404 gh 오류·워킹트리 미발견)는 통과 후 디스패처 위임 ·
+  온보딩 판정은 원격 API가 아닌 로컬 파일(stale 200 축이 없다). 거부 봉투는 correlation 없는
+  `mutationRefused` 형상이다.
 - **`lib/mcp.ts`** — MCP 서버(`runMcpServer()`·`handleRequest()`): stdio JSON-RPC 2.0(개행 구분)
   위에 파괴 제외 전 동사를 tool로 노출한다. MCP 프레젠테이션 계층(homelab.ts가 CLI를 소유하듯) —
   tool 이름(verb.path.join("_"))·입력 스키마·인자→op 입력 매핑·JSON-RPC 프레이밍만 갖고 동사 실체는
   verbs.ts op다. 노출 = VERBS 중 !destructive(teardown 제외, 초기화 totality 가드가 파괴 누출·신규
-  동사 누락을 fail-closed 차단). --wait류 미노출(동기 바운디드)·명시 경로(secrets=repoPath·init=
+  동사 누락을 fail-closed 차단). --wait류 미노출(동기 바운디드 — 그 '바운디드'는 **스키마 축**이다:
+  대기 옵션이 입력 표면에 없다는 뜻이고, 하위 프로세스 **wall-clock 상한은 두지 않는다**(owner 결정 Q7 —
+  근거는 init.ts의 timeoutMs:0 두 자리: 스캐폴더 `bun install`과 첫 push. run 출현 대기만
+  HOMELAB_MCP_DEADLINE_MS로 바운드하고, 그 env가 양의 정수가 아니면 **모듈 로드 시** 이름과 함께 기동
+  거부한다))·JSON-RPC 프레이밍(요청 1건당 응답 1줄·알림 0줄 · ping=빈 result · id:null과 id 붙은
+  initialized는 -32600)·명시 경로(secrets=repoPath·init=
   parentDir·url=envDir, cwd 추론 없음 — **절대 경로만**(pattern "^/" + identity.pathInputError 한 술어, 상대·'~'는
   -32602 + 안내 문구) · 존재하지 않는/앱 레포 아닌 명시 repoPath는 dispatch-only 강등이 아니라 거부(CLI 암묵 cwd만
   dispatch-only) · 경로 속성 description이 의미론을 광고)·결과는 CLI --json과 같은 envelope(isError는 x-contract.mcp variant 매핑)·

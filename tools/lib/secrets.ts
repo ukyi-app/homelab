@@ -12,6 +12,7 @@
 //   디스패치 실패 경계가 재실행으로 수렴). 평문(.env)은 seal 도구의 kubeseal stdin 전용 — 이 엔진은
 //   .env를 읽지도, 봉인본 내용을 출력하지도 않는다.
 import { existsSync, statSync } from "node:fs";
+import { onboardedPreflight } from "./app-preflight.ts";
 import { compact } from "./contract.ts";
 import { laneMutationFields } from "./catalog-rows.ts";
 import { ALLOW_PUSH_REWRITE_ENV, firstReason, git, pushRoutes, sh } from "./exec.ts";
@@ -110,7 +111,11 @@ function runChain(cwd: string, app: string, noSeal: boolean): ChainResult {
   const remote = git(cwd, ["ls-remote", "--heads", "origin", "main"]);
   if (!head.ok || !remote.ok) return refuse("원격 main 도달성 확인 실패(ls-remote)");
   const remoteSha = remote.out.split(/\s+/)[0] ?? "";
-  if (remoteSha === "" || remoteSha !== head.out.trim()) return refuse(`원격 main(${remoteSha.slice(0, 7) || "없음"})이 로컬 HEAD(${head.out.trim().slice(0, 7)})와 다르다 — 도달성 미증명`);
+  // 등식 판정은 plan r1 a2의 fail-closed 결정이라 유지한다. 다만 문구에 처방을 **조건 없이**
+  // 덧붙인다: 누군가(예: Renovate PR 머지)가 원격 main을 앞서 밀면 수렴 경로인 재디스패치
+  // (no-seal)도 같은 등식에서 다시 거부되는데, 로컬을 앞세우지 않으면 빠져나갈 길이 없다
+  // (appverbs-11). 앞선 쪽을 판별하는 분기는 두지 않는다 — 같은 처방이 양쪽에 유효하다.
+  if (remoteSha === "" || remoteSha !== head.out.trim()) return refuse(`원격 main(${remoteSha.slice(0, 7) || "없음"})이 로컬 HEAD(${head.out.trim().slice(0, 7)})와 다르다 — 도달성 미증명. \`git pull --ff-only\` 후 재실행하라(재봉인 없이 재디스패치만 하려면 no-seal 모드)`);
   chain.headSha = head.out.trim();
   return { ok: true, chain };
 }
@@ -161,6 +166,13 @@ export function runAppSecrets(input: AppSecretsInput, cwd = process.cwd()): Muta
     if (!r.ok) return { variant: "failure", omitted: [], result: compact({ action: "update-secrets", name: app, chain: r.chain, error: r.error }) };
     chain = r.chain;
   } else {
+    // dispatch-only — 이미 push된 봉인본 재배선. 여기서 **미온보딩**을 사전 판정한다(티켓 30):
+    // 디스패처(update-secrets.ts)는 run 안에서야 '미온보딩 앱 — create-app 먼저'로 죽는데, 그
+    // 실패가 homelab-mutation 직렬화 큐와 Telegram 실패 알림을 소비한다(appverbs-5).
+    // 판정 근거는 **로컬 homelab 워킹트리**다(원격 contents API가 아니라 — 낡은 스냅샷 200 함정).
+    // 워킹트리 후보는 cwd의 git toplevel, 없으면 cwd 자신이다. 못 찾으면 통과(fail-open).
+    const pf = onboardedPreflight(app, toplevel ?? cwd);
+    if (!pf.ok) return refuse(pf.error);
     chain = { mode: "dispatch-only" };
   }
 

@@ -610,3 +610,125 @@ EOF
 EOF
   [ "$ctrl" -eq 1 ]
 }
+
+# ── JSON-RPC 프로토콜 준수: ping·id 경계·프레이밍·서버 env(homelab-cli-r2 티켓 23) ───────────
+
+@test "ping returns an empty result, and an id-less ping writes nothing (notification branch runs first)" {
+  mcp_rpc '{"jsonrpc":"2.0","id":50,"method":"ping"}'
+  [ "$status" -eq 0 ]
+  # MCP 2024-11-05 basic/utilities/ping — 수신자는 빈 result로 즉시 응답한다(-32601이 아니다).
+  [ "$(echo "$output" | jq -rc 'select(.id==50) | .result')" = "{}" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==50) | has("error")')" = "false" ]
+  # id 없는 ping은 알림이라 응답이 없다 — ping 분기가 알림 분기 **뒤**에 있다는 배치 증인이다
+  # (앞에 두면 id 없는 응답 한 줄이 stdio 프레임을 오염시킨다).
+  mcp_rpc '{"jsonrpc":"2.0","method":"ping"}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a null JSON-RPC id is an invalid request and an id-carrying initialized is answered, never swallowed" {
+  mcp_rpc '{"jsonrpc":"2.0","id":null,"method":"tools/list"}' \
+    '{"jsonrpc":"2.0","id":51,"method":"initialized"}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+  [ "$status" -eq 0 ]
+  # 응답 라인 2개 — 셋째(진짜 알림)만 무응답이다.
+  [ "$(printf '%s\n' "$output" | grep -c '"jsonrpc"')" -eq 2 ]
+  # id:null은 스펙상 요청 id가 될 수 없다(종전엔 "id" in req가 참이라 정상 요청으로 응답했다).
+  [ "$(echo "$output" | jq -rc 'select(.id == null) | .error.code')" = "-32600" ]
+  [ "$(echo "$output" | jq -rc 'select(.id == null) | has("result")')" = "false" ]
+  # id가 붙은 initialized — 알림 전용 method지만 그 id를 기다리는 클라이언트가 영구 대기하지
+  # 않도록 답한다(코드는 -32600: 스펙상 알림 전용이라는 사실 자체가 사유다).
+  [ "$(echo "$output" | jq -rc 'select(.id==51) | .error.code')" = "-32600" ]
+}
+
+@test "the stdio framing writes exactly one JSON-RPC response per request and nothing for notifications" {
+  mcp_rpc \
+    '{not json' \
+    '{"jsonrpc":"2.0","id":52,"method":"nope"}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","method":"ping"}' \
+    '{"jsonrpc":"2.0","id":53,"method":"tools/list"}'
+  [ "$status" -eq 0 ]
+  # 5줄 입력: 응답 대상 3(파스 실패 라인은 -32700이 규약) · 알림 2 → stdout 정확히 3줄.
+  n=0
+  bad=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    n=$((n + 1))
+    printf '%s\n' "$line" | jq -e 'has("jsonrpc")' > /dev/null 2>&1 || bad=$((bad + 1))
+  done <<EOF
+$output
+EOF
+  [ "$n" -eq 3 ]
+  [ "$bad" -eq 0 ]
+  # 코드 2종이 실재한다(파스 오류 · 미지 method) — 그리고 마지막 응답이 tools/list 9개다.
+  [ "$(echo "$output" | jq -rc 'select(.error.code==-32700) | .error.code' | head -1)" = "-32700" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==52) | .error.code')" = "-32601" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==53) | .result.tools | length')" = "9" ]
+}
+
+@test "a malformed HOMELAB_MCP_DEADLINE_MS or HOMELAB_MCP_POLL_MS refuses to start the server and names the env var" {
+  # 종전엔 Number("abc")=NaN·Number("")=0이 MCP_MUT에 실려 **첫 변이 호출**에서만 -32602로 드러났고,
+  # 그 문구가 클라이언트가 준 적 없는 CLI 플래그(--deadline-ms)를 가리켰다(mcp-10·exec-7).
+  n=0
+  for bad in abc "" 0 12.5; do
+    run --separate-stderr env PATH="$STUB" HOMELAB_MCP_DEADLINE_MS="$bad" \
+      bash -c 'printf "%s\n" "$1" | "$0" tools/homelab.ts mcp' "$BUN" '{"jsonrpc":"2.0","id":60,"method":"tools/list"}'
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+    printf '%s\n' "$stderr" | grep -qF "HOMELAB_MCP_DEADLINE_MS"
+    n=$((n + 1))
+  done
+  [ "$n" -eq 4 ]   # 열거 바닥값 — 목록이 비면 위 단언이 0회 실행돼 공허해진다
+  # poll 축도 같은 술어다 — 진단이 항상 deadline을 가리키지는 않는다.
+  run --separate-stderr env PATH="$STUB" HOMELAB_MCP_POLL_MS=abc \
+    bash -c 'printf "%s\n" "$1" | "$0" tools/homelab.ts mcp' "$BUN" '{"jsonrpc":"2.0","id":61,"method":"tools/list"}'
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$stderr" | grep -qF "HOMELAB_MCP_POLL_MS"
+  # 양성 대조(같은 @test) — env 부재면 서버는 정상 기동해 응답한다(거부가 전칭이 아니다).
+  mcp_rpc '{"jsonrpc":"2.0","id":62,"method":"tools/list"}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -rc 'select(.id==62) | .result.tools | length')" = "9" ]
+}
+
+@test "no MCP tool description advertises a CLI flag token (floor 9, detector alive, CLI wording intact)" {
+  mcp_rpc '{"jsonrpc":"2.0","id":63,"method":"tools/list"}'
+  [ "$status" -eq 0 ]
+  # 바닥값 둘 — tools 9개 **그리고** 비어 있지 않은 description 9개. 목록이 비거나 description이
+  # 전부 부재해도 아래 부정 카운트는 0이라 통과한다(열거 붕괴 → vacuous green).
+  [ "$(echo "$output" | jq -rc 'select(.id==63) | .result.tools | length')" = "9" ]
+  [ "$(echo "$output" | jq -rc 'select(.id==63) | [.result.tools[] | select((.description // "") != "")] | length')" = "9" ]
+  # description은 MCP 소유 문구다 — CLI 플래그 토큰을 광고하면 inputSchema가 -32602로 거부하는
+  # 입력을 LLM에게 권하는 드리프트가 된다(mcp-3: desc의 --wait vs 스키마의 wait 부재).
+  [ "$(echo "$output" | jq -rc 'select(.id==63) | [.result.tools[].description | select(test("--[a-z]"))] | length')" = "0" ]
+  # 검출기 생존 — 같은 술어를 합성 입력(옛 desc 문구)에 걸면 1건이다.
+  [ "$(echo '{"tools":[{"description":"correlation 추적, --wait=배포 수렴까지"}]}' | jq -rc '[.tools[].description | select(test("--[a-z]"))] | length')" = "1" ]
+  # CLI 문구는 지워지지 않았다 — 동사별 --help와 needs 절이 계속 --wait를 문서화한다.
+  [ "$(grep -c -- '--wait' tools/homelab.ts)" -ge 1 ]
+  [ "$(grep -c -- '--wait' tools/lib/verbs.ts)" -ge 1 ]
+}
+
+@test "the sync-bounded claim states its axis: schema (no wait input) with no child-process wall-clock cap" {
+  # owner 결정 Q7 — 하위 프로세스 wall-clock 상한은 도입하지 않는다. 그 사실이 mcp.ts 헤더와
+  # tools/README.md에 함께 있어야 '동기 바운디드'가 상한 약속으로 오독되지 않는다.
+  [ "$(grep -c 'wall-clock' tools/lib/mcp.ts)" -ge 1 ]
+  [ "$(grep -c 'wall-clock' tools/README.md)" -ge 1 ]
+  # 근거 앵커 — init.ts가 timeoutMs:0을 고른 두 자리(스캐폴드·첫 push)가 상한을 두지 않는 이유다.
+  [ "$(grep -c 'timeoutMs: 0' tools/lib/init.ts)" -ge 2 ]
+}
+
+@test "the app_init visibility input is named repoPublic and its description separates repo visibility from app exposure" {
+  mcp_rpc '{"jsonrpc":"2.0","id":64,"method":"tools/list"}' \
+    '{"jsonrpc":"2.0","id":65,"method":"tools/call","params":{"name":"app_init","arguments":{"app":"myapp","archetype":"api","parentDir":"/tmp","public":true}}}'
+  [ "$status" -eq 0 ]
+  props='select(.id==64) | .result.tools[] | select(.name=="app_init") | .inputSchema.properties'
+  [ "$(echo "$output" | jq -rc "$props | has(\"repoPublic\")")" = "true" ]
+  # 구 이름은 표면에서 사라졌다 — 바로 위 줄이 같은 술어의 양성 대조다(검출기 생존).
+  [ "$(echo "$output" | jq -rc "$props | has(\"public\")")" = "false" ]
+  desc="$(echo "$output" | jq -rc "$props | .repoPublic.description")"
+  [ -n "$desc" ]
+  # 이름 충돌의 다른 쪽을 문구가 지목한다 — 앱 공개 노출은 앱 레포 .app-config.yml의 route.public이다.
+  printf '%s\n' "$desc" | grep -qF "route.public"
+  # additionalProperties:false라 구 인자는 -32602다(옛 이름이 조용히 무시되지 않는다).
+  [ "$(echo "$output" | jq -rc 'select(.id==65) | .error.code')" = "-32602" ]
+}
