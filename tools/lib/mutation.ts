@@ -5,6 +5,8 @@
 //   → run_id 브랜치로 PR 특정 → [--wait] 머지 관측(자동/수동 레인) → 명명된 Application 집합 전체 수렴.
 // 수렴 판정(스펙 대기 매트릭스): 관측 sync revision이 머지 SHA와 동일하거나 그 후손(gh compare —
 //   로컬 git 이력 무의존) AND Synced AND Healthy AND 관측 리비전에서 desired-state 표면 실존.
+//   관측 리비전의 해석은 lib/argocd.ts 공유 리더다 — 앱 레인 Application은 멀티소스라 단수 필드가
+//   비고 `revisions[]`만 채워진다(resolved/skew/non-sha/none 4상 — status 엔진과 같은 리더).
 //   health 단독 판정 금지(stale-Healthy: 이전 리비전 Healthy+OutOfSync에서 성공 오판).
 //   표면 술어(스펙: "존재·내용이 여전히 요청값"): 관측 리비전의 blob sha == 머지 SHA 시점의
 //   blob sha — 제거형·변경형 추월을 모두 superseded로 포착한다(전제 상태 변동 — exit 3 계열).
@@ -15,6 +17,7 @@
 // KUBECONFIG 부재: 머지까지 확인하고 라이브 구간은 omitted=["live"]로 명시(생략 ≠ 성공 은폐).
 // 시간 심: pollMs·deadlineMs 주입(테스트가 밀리초로 돌린다), nonce는 HOMELAB_CORRELATION 주입.
 import { randomBytes } from "node:crypto";
+import { revisionFields, syncRevisionOf } from "./argocd.ts";
 import { compact } from "./contract.ts";
 import { ghJson, sh } from "./exec.ts";
 import { CORRELATION_RE } from "./identity.ts";
@@ -293,14 +296,22 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
       if (!k.ok) { states.push({ name: app.name, error: k.err.split("\n")[0] || "kubectl 실패" }); allConverged = false; continue; }
       let st: Record<string, any>;
       try { st = JSON.parse(k.out)?.status ?? {}; } catch { states.push({ name: app.name, error: "Application JSON 파싱 실패" }); allConverged = false; continue; }
-      const revision = String(st.sync?.revision ?? "");
+      // 리비전 해석은 공유 리더(argocd.ts) — 앱 레인(멀티소스)은 revisions[], db/cache(단일소스)는 revision.
+      const rev = syncRevisionOf(st);
       const sync = String(st.sync?.status ?? "Unknown");
       const health = String(st.health?.status ?? "Unknown");
-      const descendant = revision !== "" && isDescendant(revision);
-      // 표면은 후손 리비전에서만 판정 의미가 있다 — stale 리비전의 표면 상태는 추월의 증거가 아니다.
+      // 계보: resolved면 그 리비전, skew면 원소 **전부** 후손이어야 true(한 source만 낡은 상태를 후손으로
+      // 접지 않는다). non-sha·none은 false이고 gh compare를 부르지 않는다 — 비-SHA(helm 차트 버전)는
+      // compare 피연산자가 아니고, 관측 0은 판정 재료가 아니다.
+      const descendant = rev.kind === "resolved" ? isDescendant(rev.revision)
+        : rev.kind === "skew" ? rev.revisions.every((r) => isDescendant(r))
+        : false;
+      // 표면은 **확정된 하나의** 후손 리비전에서만 판정 의미가 있다 — stale 리비전의 표면 상태는 추월의
+      // 증거가 아니고, skew는 표면 ref를 하나로 고를 수 없어 그 사이클은 미확정이다(수렴 아님).
       let surfaceOk: boolean | undefined;
       let supersededBy: string | undefined;
-      if (descendant) {
+      if (descendant && rev.kind === "resolved") {
+        const revision = rev.revision;
         const want = requestedBlob(app.surfacePath);
         if (want.kind === "absent") {
           return fail(`기준 ref(${wantRef})에 표면(${app.surfacePath})이 없다 — 요청이 반영되지 않음`, { run: runRef(), pr: prRef() });
@@ -314,9 +325,9 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
         }
         // want.kind === "error" → 미확정: 같은 처리
       }
-      states.push(compact({ name: app.name, sync, health, revision, descendant: mergeSha === undefined ? undefined : descendant, surfaceOk }));
-      if (supersededBy !== undefined && mergeSha !== undefined) {
-        return { variant: "superseded", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), applications: states, error: `관측 리비전(${revision})에서 ${supersededBy} — 요청이 추월됨(superseded)` }) };
+      states.push(compact({ name: app.name, sync, health, ...revisionFields(rev), descendant: mergeSha === undefined ? undefined : descendant, surfaceOk }));
+      if (supersededBy !== undefined && mergeSha !== undefined && rev.kind === "resolved") {
+        return { variant: "superseded", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), applications: states, error: `관측 리비전(${rev.revision})에서 ${supersededBy} — 요청이 추월됨(superseded)` }) };
       }
       if (!(descendant && sync === "Synced" && health === "Healthy" && surfaceOk === true)) allConverged = false;
     }

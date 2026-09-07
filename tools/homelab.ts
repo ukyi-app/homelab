@@ -157,7 +157,7 @@ function renderStatus(envelope: Envelope): string[] {
     ];
     if (envelope.omitted.includes("live")) lines.push("라이브(ArgoCD): 생략 — KUBECONFIG 미설정");
     else if (r.live?.error) lines.push(`라이브(ArgoCD): 조회 실패 — ${r.live.error}`);
-    else lines.push(`라이브(ArgoCD): sync ${r.live.argocd.sync} · health ${r.live.argocd.health}${r.live.argocd.revision ? ` · rev ${r.live.argocd.revision}` : ""}`);
+    else lines.push(`라이브(ArgoCD): sync ${r.live.argocd.sync} · health ${r.live.argocd.health}${r.live.argocd.revision ? ` · rev ${r.live.argocd.revision}` : Array.isArray(r.live.argocd.revisions) ? ` · revisions ${r.live.argocd.revisions.join(",")}(미확정)` : ""}`);
     return lines;
   }
   if (r.mode === "run") {
@@ -210,7 +210,8 @@ function renderMutation(envelope: Envelope): string[] {
       if (a.error) lines.push(`Application ${a.name}: 조회 실패 — ${a.error}`);
       // teardown(absence): 존재/부재 판정 — sync/health가 아니라 present 필드를 쓴다.
       else if (a.present !== undefined) lines.push(`Application ${a.name}: ${a.present ? "아직 존재 — prune 진행 중" : "부재 — prune 완료"}`);
-      else lines.push(`Application ${a.name}: sync ${a.sync} · health ${a.health} · rev ${a.revision} · 후손 ${OX[String(a.descendant)]}${a.surfaceOk !== undefined ? ` · 표면 ${OX[String(a.surfaceOk)]}` : ""}`);
+      // rev: 확정 리비전 하나 · revisions: 멀티소스 skew/비-SHA(미확정 — 관측 원본 그대로) · "-": 관측 0.
+      else lines.push(`Application ${a.name}: sync ${a.sync} · health ${a.health} · rev ${a.revision ?? (Array.isArray(a.revisions) ? `${a.revisions.join(",")}(미확정)` : "-")} · 후손 ${OX[String(a.descendant)]}${a.surfaceOk !== undefined ? ` · 표면 ${OX[String(a.surfaceOk)]}` : ""}`);
     }
   }
   if (r.dnsReclaim) lines.push(`DNS 회수: ${r.dnsReclaim} 소관(이 명령의 관측 대상 아님)`);

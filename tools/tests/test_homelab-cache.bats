@@ -63,7 +63,7 @@ run_cache_create() {
 
 @test "cache create wait requires the FULL cache application set (partial convergence is pending)" {
   printf '[{"number":31,"html_url":"u31","merged_at":"2026-08-20T10:00:00Z","merge_commit_sha":"feedbee"}]\n' > "$FIX/db-prs.json"
-  printf '{"status":{"sync":{"status":"OutOfSync","revision":"0ldrev1"},"health":{"status":"Progressing"}}}\n' > "$FIX/argocd-data-conn.json"
+  printf '{"status":{"sync":{"status":"OutOfSync","revision":"01d0e01"},"health":{"status":"Progressing"}}}\n' > "$FIX/argocd-data-conn.json"
   printf 'behind\n' > "$FIX/db-compare.txt"
   run_cache_create --wait --json
   [ "$status" -eq 1 ]

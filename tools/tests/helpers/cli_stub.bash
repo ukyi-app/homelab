@@ -63,7 +63,16 @@ cli_stub_init() {
   printf '[]\n' > "$FIX/runs.json"
   printf '{"name":"release","status":"completed","conclusion":"success","head_sha":"a1b2c3d","html_url":"https://github.com/ukyi-app/page/actions/runs/1"}\n' > "$FIX/run-handle.json"
   printf '{"number":7,"state":"open","merged":false,"merge_commit_sha":null,"title":"bump","head_ref":"bump-poll/page-sha-1","head_sha":"beef123","auto_merge":true,"html_url":"https://github.com/ukyi-app/homelab/pull/7"}\n' > "$FIX/pr-handle.json"
-  printf '{"status":{"sync":{"status":"Synced","revision":"abc1234"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
+  # ⚠️ 앱 Application(<app>-prod)은 appset(platform/argocd/root/appset.yaml `sources:` 3개)이 만드는
+  # **멀티소스**다 — ArgoCD는 멀티소스에서 `status.sync.revision`을 비우고 `revisions[]`만 채운다
+  # (라이브 실측: argocd·cnpg-operator `revision=None`, `revisions=[…]`). 그래서 app 레인 기본 픽스처는
+  # 복수형이고 `revision` 키가 **없다**. 원소 3개는 appset sources 수에서 외삽한 값이다(라이브 앱 0건).
+  # 단일소스 형상(argocd-cnpg-data·data-conn·cache)은 db/cache 레인 대조군으로 그대로 둔다 — 둘 중 하나로
+  # 통일하면 다른 쪽 판정이 무증인이 된다.
+  # 리비전 자리표시자는 어디서든 **git SHA 형상(hex 7..40)**이어야 한다 — 공유 리더(lib/argocd.ts)가 비-SHA를
+  # 미확정으로 접어 gh compare를 부르지 않으므로, 비-hex 자리표시자(옛 afterme·0ldrev1)는 compare 경로 증인을
+  # 조용히 우회시킨다(티켓 01 착지 중 실측).
+  printf '{"status":{"sync":{"status":"Synced","revisions":["abc1234","abc1234","abc1234"]},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
 
   # 앱 배포 산출물 픽스처 루트 — status의 --root 주입 대상(레포 밖 hermetic 검증).
   APPS_ROOT="$BATS_TEST_TMPDIR/repo-root"

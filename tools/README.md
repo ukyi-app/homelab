@@ -268,6 +268,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   [--wait] 머지 관측 + Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,
   health 단독 판정 금지, 후손 리비전 표면 부재=superseded). 시간 심 pollMs/deadlineMs +
   HOMELAB_CORRELATION 주입(테스트). 소비자: verbs.ts `db create`(이후 cache/app 변이 동사).
+- **`lib/argocd.ts`** — ArgoCD Application status 리더(`syncRevisionOf()`·`revisionFields()`) — 변이 엔진
+  (수렴 판정)과 status 엔진(라이브 표시)이 공유하는 리비전 해석. 앱 레인 `<app>-prod`는 appset sources 3개의
+  멀티소스라 컨트롤러가 `sync.revision`을 비우고 `sync.revisions[]`만 채운다(라이브 실측) — 단수 필드만 읽던
+  두 사본이 앱 레인 --wait를 영구 pending으로 만들던 결함의 흡수 자리. 판정 4상: resolved(전부 SHA·dedupe 1개 —
+  계보·표면 ref) / skew(소스 간 불일치 — 표면 ref 미확정) / non-sha(helm 차트 버전 — gh compare 호출 금지) /
+  none(관측 0). 엔진의 `sync?.revision` 직접 참조 0건은 test_homelab-status.bats가 grep으로 단언한다.
 - **`lib/exec.ts`** — 외부 명령 실행 커널(`sh`·`ghJson` — ghJson은 오브젝트/배열 jq 전용, 스칼라
   jq는 raw라 sh 직접, `git`·`pushRoutes` — push 지향 관측 `git remote get-url --push --all`:
   pushurl 복수·insteadOf/pushInsteadOf 전개 반영) — status·mutation·init·secrets 공유. 판정 정책은
