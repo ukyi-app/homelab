@@ -459,15 +459,15 @@ _fixture_repo() {
 # `ops` 분기가 죽어 있어도 초록이었다(적대 검토 지적). 이제 **정확한 집합**으로 못박는다.
 # 루트가 하나라도 빠지면 그 경로의 이미지가 "전건 소유자 확정"이라는 초록 아래에서 조용히 사라진다.
 @test "image-ownership covers exactly platform, ops and infra (no root silently missing)" {
-  # ⚠️ 루트는 매니페스트가 있을 때만 나타난다 — 인-레포 배포 앱이 0개이던 동안(page #455 · trip-mate-api
-  #    철거 후) 기대 집합은 `infra+ops+platform`이었고, 2026-09-08 page 재온보딩(create-app)으로 `apps`가
-  #    돌아왔다(그때 이 단언이 red로 알려줬다 — 의도된 동작). 앱이 다시 0개가 되면 `apps+`를 뺀다.
+  # ⚠️ 루트는 매니페스트가 있을 때만 나타난다 — `apps`가 빠진 것은 스코프 파손이 아니라 **인-레포 배포 앱이
+  #    0개**이기 때문이다(page 2026-09-08 재온보딩 #691 → 같은 날 철거 드릴 #698; 양방향 모두 이 단언이 red로
+  #    알려줬다 — 의도된 동작). 앱을 다시 온보딩하면 `apps+`를 되돌린다(0↔1 손 단계: apps/README.md).
   run walk 'const p = walkManifests("image-ownership").map(e=>e.path);
     const roots = [...new Set(p.map(x=>x.split("/")[0]))].sort();
     const harness = p.filter(x=>/(^|\/)tests?\/|(^|\/)fixtures|(^|\/)test_[^/]*$|\.bats$/.test(x));
     console.log(roots.join("+") + "|" + harness.length)'
   [ "$status" -eq 0 ]
-  [ "$output" == "apps+infra+ops+platform|0" ]
+  [ "$output" == "infra+ops+platform|0" ]
 }
 
 @test "image-ownership includes Dockerfiles (base images are supply chain, and ops/ would be dead without them)" {

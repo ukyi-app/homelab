@@ -21,8 +21,8 @@
 # (인자 없는 기본 모드의 앱 열거 0건은 scan-floor가 판정한다 — 아래 바닥값 주석 참조).
 # bash 3.2 호환: `cmd && x`(set -e 함정)·mapfile·[[ ]] 금지 — if-블록·for로. yq는 버전차 함정이라 값 추출은 sed/grep으로
 # (checksum/scope처럼 스칼라 값을 읽을 때 한정 — E/K의 **경로 멤버십**은 yq 구조 비교를 쓴다, grep-a-3).
-# 현재 인레포 배포 앱은 **1개**(page — 2026-09-08 재온보딩 #691)다. 규약은 앱당 <app>-secrets.sealed.yaml
-# 봉인본 1개 — 앱이 0개이던 동안(page #455 · trip-mate-api 철거 후)에도 같은 규약이 그대로 적용됐다.
+# 현재 인레포 배포 앱은 **0개**(page — 2026-09-08 재온보딩 #691 뒤 같은 날 철거 드릴 #698로 다시 철거)다. 규약은
+# 앱당 <app>-secrets.sealed.yaml 봉인본 1개 — 앱이 0개인 동안에도 같은 규약이 그대로 적용된다.
 set -euo pipefail
 # 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
 # shellcheck source=scripts/lib/guard.sh
@@ -140,12 +140,12 @@ else
   # 기존 `[ -d ]` 스킵과 동일하게 여기서 처리한다(행위 보존).
   # ⚠️ 열거를 **변수로** 받는다 — 프로세스 치환은 워커 실패를 set -e로 전파하지 않아, bun이 죽으면
   # 배포 계약 5개 조항 전부가 0건 평가된 채 `OK`가 찍혔다(라이브 재현). 래칫 아님.
-  # 바닥값 1 — 2026-09-08 page 재온보딩(#691)으로 인-레포 배포 앱이 다시 1개다. 앱이 0개이던 동안
-  #    (page #455 · trip-mate-api 철거 후)은 열거 0건이 정당해 붕괴와 구별되지 않아 0으로 내려 뒀었다.
-  #    앱이 다시 0개가 되면 0으로 내릴 것 — 1인 동안은 워커가 죽었을 때의 0건이 red가 된다.
+  # ⚠️ 바닥값 0 — 인-레포 배포 앱이 **0개**다(page 2026-09-08 재온보딩 #691 → 같은 날 철거 드릴 #698).
+  #    앱이 0개인 동안은 열거 0건이 정당한 상태라 붕괴와 구별되지 않는다. 앱을 다시 온보딩하면
+  #    이 값을 1로 되돌릴 것 — 그래야 워커가 죽었을 때의 0건이 다시 red가 된다(0↔1 손 단계: apps/README.md).
   units="$(scan_enumerate check-app-deploy bun "$(dirname "${BASH_SOURCE[0]}")/../tools/lib/repo-walk.ts" --units apps --root "$ROOT")" || exit 1
   scanned="$(scan_count "$units")"
-  scan_floor check-app-deploy "$scanned" "$(floor_of check-app-deploy 1)" || exit 1
+  scan_floor check-app-deploy "$scanned" "$(floor_of check-app-deploy 0)" || exit 1
   while IFS= read -r u; do
     [ -n "$u" ] || continue
     [ -d "$u/deploy/prod" ] || continue
