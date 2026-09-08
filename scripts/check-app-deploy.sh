@@ -21,8 +21,8 @@
 # (인자 없는 기본 모드의 앱 열거 0건은 scan-floor가 판정한다 — 아래 바닥값 주석 참조).
 # bash 3.2 호환: `cmd && x`(set -e 함정)·mapfile·[[ ]] 금지 — if-블록·for로. yq는 버전차 함정이라 값 추출은 sed/grep으로
 # (checksum/scope처럼 스칼라 값을 읽을 때 한정 — E/K의 **경로 멤버십**은 yq 구조 비교를 쓴다, grep-a-3).
-# 현재 인레포 배포 앱은 **0개**다(page #455 · trip-mate-api 철거). 앱이 있던 시절의 규약은
-# 앱당 <app>-secrets.sealed.yaml 봉인본 1개 — 새 앱 온보딩 시 그대로 적용된다.
+# 현재 인레포 배포 앱은 **1개**(page — 2026-09-08 재온보딩 #691)다. 규약은 앱당 <app>-secrets.sealed.yaml
+# 봉인본 1개 — 앱이 0개이던 동안(page #455 · trip-mate-api 철거 후)에도 같은 규약이 그대로 적용됐다.
 set -euo pipefail
 # 프롤로그(LC_ALL=C·ROOT·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다.
 # shellcheck source=scripts/lib/guard.sh

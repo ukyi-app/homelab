@@ -21,7 +21,14 @@ ArgoCD appset(`platform/argocd/root/appset.yaml`)이 `apps/*/deploy/prod`를 싱
 CronJob 등이 참조하는 빌드-전용 이미지(예: `pg-tools`)는 **`ops/<name>/`**(Dockerfile만, `deploy/` 없음 — GHCR로
 이미지만 발행). `apps/`는 ArgoCD가 워크로드로 싱크하는 배포 앱 전용이다. `build.yaml`은 `ops/**`만 빌드한다.
 
-> 현재 인레포 배포 앱 **0개** — `page`(#455)·`trip-mate-api`를 철거했다. 이 디렉토리는 빈 채로 남는다
-> (`check-skeleton`이 `apps` 존재를 요구하고 git은 빈 디렉토리를 추적하지 않으므로 이 README가 그 자리를 지킨다).
-> 앱 개수에 걸린 바닥값 4개(`--floor check-app-deploy=<n>`·`--floor check-app-netpol:manifests=<n>`·`--floor check-image-pins:apps=<n>`·`--floor audit-orphans:registry=<n>`)를
-> 그에 맞춰 0으로 낮춰 뒀다 — **새 앱을 온보딩하면 1로 되돌릴 것**(각 소스의 ⚠️ 주석에 표시).
+> 현재 인레포 배포 앱 **1개** — `page`(2026-09-08 재온보딩 #691; `page`·`trip-mate-api`는 2026-08-12에 철거됐었다).
+> 앱이 0개이던 동안 0으로 내려 뒀던 앱 개수 바닥값 5곳(`check-app-deploy` · `check-app-netpol:manifests` · `check-image-pins:apps` ·
+> `audit-orphans` registry·apps)은 #693에서 1로 복원했다 — **앱이 다시 0개가 되면 0으로 내릴 것**(각 소스의 주석에 표시).
+>
+> **앱 개수가 0↔1을 넘을 때의 손 단계**(2026-09-08 첫 실전 온보딩 드릴에서 실측 — 디스패처가 하지 않는 것만):
+> 1. `tools/vendored-contract.json` `targets`에 그 앱의 동봉 계약 사본 2행(`tools/seal-secret.mts`·`tools/sealed-secrets-cert.pem`) 추가/제거 — `_roster` 등식이 create-app PR gate에서 red로 알려준다.
+> 2. `tools/tests/test_repo-walk.bats`의 image-ownership 루트 로스터에 `apps+` 복원/제거 — 같은 gate가 알려준다.
+> 3. 위 바닥값 5곳 1↔0.
+> 4. `apps/<app>/deploy/prod/values.yaml` `envFrom`에 conn secretRef 손 배선(create-app PR 안에서 해도 된다). ⚠️ 이 파일은 도구 소유라
+>    **손 주석은 다음 라운드트립(update-secrets·bump)에서 사라지고 그 자체가 PR 1건이 된다** — 주석은 파일 상단이 아니라 이 README에 둔다.
+> (`db create`의 pgdump 헤지 DBS 등록은 #692부터 자동이다.)
