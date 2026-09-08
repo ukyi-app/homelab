@@ -290,6 +290,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (`--name <db> [--extensions a,b] [--cluster pg]`). 공유 CNPG 안의 논리 DB + owner/ro managed role +
   비밀번호/conn SealedSecret 4개를 산출(`owner==name` 불변식, 논리 DB는 원장 행 비추가).
   비밀번호는 내부 생성→`kubeseal` stdin 직행(평문 비기록). `tools/sealed-secrets-cert.pem` 필요.
+  **+ pgdump 헤지 DBS 등록**(`platform/cnpg/prod/pgdump-hedge-cronjob.yaml`의 헤지 DBS 토큰 —
+  **공유-잔존** 표면이라 파일은 남고 토큰 하나만 추가된다). 갱신본은 계획 단계에서 조립해 dry-run에서도
+  포맷 드리프트가 fail-closed로 걸리고, 이미 등재됐으면 파일 비접촉이다. 이 등록이 없으면
+  `test_pgdump_hedge.bats`가 create-database PR의 required check를 항상 red로 만든다(드릴 실측 PR #689).
 - **`provision-cache.ts`** — create-cache 프로비저너. `_create-cache.yaml`이 호출
   (`--name <cache> [--maxmemory-mi 16..1024]`). 앱별 경량 Valkey 인스턴스(cache NS) +
   conn/ro-conn SealedSecret + 원장 행을 산출. 자격은 `kubeseal` stdin 전용. cert 필요.
@@ -303,6 +307,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (`apps/*/deploy/prod` grep + 실행 워크로드 `kubectl` + 백업 검증) 후 증거 id를 전달해야 진행.
   retain(기본, tombstone) / purge(`--delete-data` + `--backup-verified <id>` + `--step tombstone|drop|verify|cleanup`
   상태머신, 각 step 별도 커밋). 되돌릴 수 없어 fail-closed 게이트가 두껍다(런북 `docs/runbooks/teardown-resource.md`).
+  이름 정책은 provision과 같은 SSOT(`identity.resourceNameError`)라 예약·부트스트랩 이름(`app`·`-ro` 접미)은
+  거부된다 — 그 이름들은 CR이 없어 "멱등 no-op"을 출력하면서 공유 표면만 편집했다.
+  purge `--step drop`이 CR을 absent로 바꾸는 **같은 단계에서 pgdump 헤지 DBS 토큰을 제거**한다(대상 CR이
+  없으면 헤지도 비접촉 — 잔존만 보고). `--step cleanup`의 헤지 제거는 벨트가 아니라 **선행 조건 검사**다:
+  CR이 아직 `ensure: absent`가 아니면 fail-closed(`--step drop`을 먼저) — 무조건 제거는 살아 있는 DB를
+  조용히 백업 목록에서 뺀다.
 
 ## update-image 폴링 (bump 경로 — 인-레포 앱 이미지 전용)
 
@@ -478,6 +488,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   teardown purge의 의도된 부분집합을 데이터로 성문화). 역방향 `classifyArtifact`(경로/엔트리 →
   {kind, name, role})가 같은 커널에 산다 — 소스 없는 고아 conn도 분류된다(설계 게이트 r1 D2).
   순수 문자열 유도만(yaml 편집 비흡수). 왕복·리터럴 앵커는 test_resource-layout.bats.
+  db에는 `paths.hedge`(pgdump 헤지 CronJob) + `hedgeEntry`(DBS 토큰 = DB 이름)가 있다 — cache의
+  `ledgerRow`와 같은 부류의 **공유-잔존** 표면(파일은 남고 토큰 하나만 오간다).
   소비 4모드: provision-db/cache(정방향, paths·handles·envKeys) · teardown-resource(역제거 —
   `purgeArtifactsFor` 삼중·`TOMBSTONES_PATH`) · audit-orphans(감사 — classify 소비, orphan-conn/
   malformed-conn 축) · db-url/cache-url(읽기). 레인 행(catalog-rows)과의 표면 경로 일치는
@@ -704,6 +716,13 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `addApp`/`removeApp`/`retagApp`은 value 라인 매치 0에서 **throw**(fail-loud)하고, `hasApp`은 항목
   부재(`false`)를 포맷 드리프트(throw)와 가른다 — 손 정규식은 그 둘을 같은 무성 skip으로 뭉갠다.
   소비자: `create-app`(추가)·`teardown-app`(제거)·`bump-tag`(태그 이동).
+- **`lib/hedge-dbs.ts`** — pgdump 헤지 `DBS`(공백 구분 DB 이름 목록) 편집 커널. digest-exporter APPS의
+  형제이지만 대상은 yaml 값이 아니라 CronJob `args` 스크립트 **본문 안의 셸 변수 한 줄**이라 파서로는
+  만질 수 없다. **DBS 줄 문법 전부**를 소유한다: 줄 앵커(들여쓰기·인용·뒤따르는 주석 보존) · 항목
+  경계(공백) · **토큰 동일성**(`page`는 `pages`에 매치되지 않는다) · 존재 판정. `addDb`는 말미
+  append다(정렬 금지 — 헤지 루프가 `set -e`라 부트스트랩 `app`이 선두에 남는 순서가 복구 우선순위다).
+  세 함수 모두 DBS 줄 매치가 **정확히 1개가 아니면 throw**(fail-loud — 0=포맷 드리프트, 2+=첫 매치만
+  바뀌는 절반 갱신)하고, `hasDb`는 항목 부재(`false`)를 그 드리프트(throw)와 가른다. 소비자: `provision-db`(추가)·`teardown-resource`(purge drop/cleanup 제거).
 - **`lib/sealed-contract.ts`** — 봉인 계약 커널(`readSealed(raw, app)` 단일 함수). 6검증(kind·
   namespace=prod·name=`<app>-secrets`·encryptedData 비었음·키 UPPER_SNAKE·**strict scope**)의 **판정과
   에러 문구** + checksum + **디스크에 쓸 바이트**를 소유한다. strict scope = scope 확대 어노테이션
