@@ -581,7 +581,7 @@ assert_envelope_valid() {
   [ "$(echo "$output" | jq -r '.result.run.pr.merged')" = "true" ]
   [ "$(echo "$output" | jq -r '.result.run.pr.mergeSha')" = "feedbee" ]
   # 질의의 정확성을 원장이 고정한다 — 이 문자열이 접두 스캔으로 바뀌면 형제 오귀속이 되살아난다.
-  run python3 "$LEDGER_PY" exact "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq "[.[] | {number, html_url, merged_at, merge_commit_sha, state}]"
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq "[.[] | {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}]"
   [ "$status" -eq 0 ]
   # 형제 브랜치는 조회 자체가 없었다(부재 단언) + 같은 원장 질의의 양성 대조는 위 exact가 소유한다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-5011" --jq)" = "0" ]

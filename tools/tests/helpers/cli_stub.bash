@@ -342,7 +342,7 @@ case "$*" in
     ;;
   # 필터 텍스트 SSOT는 lib/lane-pr.ts의 LANE_PR_JQ(= `[.[] | ${LANE_PR_FIELDS}]`)다 — 티켓 05가
   # 종결 축으로 `state`를 더하면서 목록형·단건형이 같은 투영을 공유하게 됐다.
-  "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "'[.[] | {number, html_url, merged_at, merge_commit_sha, state}]')
+  "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "'[.[] | {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}]')
     # STUB_PR_MERGE_AFTER_FIRST: 첫 조회는 미머지, 이후 머지 — "--wait 중 사람이 머지" 전환 재현
     # (마커는 셸 내장 리다이렉션 — PATH=$STUB에 touch 없음, STUB_COMPARE_FLAKY와 같은 관용구).
     # STUB_GH_PR_LOOKUP_FAIL(티켓 19): PR 특정 조회가 **전부** 전송 오류 — grace 재시도를 다 쓰고도
@@ -382,7 +382,7 @@ case "$*" in
   # PR 단건 권위 조회(티켓 05) — 머지 없이 닫힌 목록 행의 확증 단계. status의 핸들 조회와 같은
   # 경로 형상이라 **jq 투영으로 구별**한다(status는 {number, state, merged, …}). STUB_PR_CONFIRM_FAIL이면
   # 전송 오류 — 확증이 미확정이면 엔진은 종결하지 않고 폴링을 계속한다.
-  "api repos/ukyi-app/homelab/pulls/"*" --jq {number, html_url, merged_at, merge_commit_sha, state}")
+  "api repos/ukyi-app/homelab/pulls/"*" --jq {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}")
     if [ -n "${STUB_PR_CONFIRM_FAIL:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
     cat "$FIX/pr-confirm.json"
     ;;

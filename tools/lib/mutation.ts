@@ -6,7 +6,9 @@
 //   메커니즘이 아니다, 스펙 run 특정 절) → run conclusion 추적(실패 시 실패 잡 열거 + run URL)
 //   → run_id 브랜치로 PR 특정(3상: found/empty/error — empty·error는 deadline 독립 grace 재조회 뒤 판정,
 //   noopForbidden이면 0건은 no-op이 아니라 fail-loud) → [--wait] 머지 관측(자동/수동 레인 — 머지 없이
-//   닫힌 PR은 대기가 아니라 종결 관측이다: 단건 권위 조회로 확증한 뒤 failure) → 명명된
+//   닫힌 PR은 대기가 아니라 종결 관측이다: 단건 권위 조회로 확증한 뒤 failure · **required check
+//   (gate) 실패도 종결 관측이다**: PR head SHA의 최신 check-run이 completed + {failure, cancelled,
+//   timed_out}이면 조기 failure, 진행 중·성공 계열·조회 실패는 종전 pending 경로 — 티켓 47) → 명명된
 //   Application 집합 전체 수렴.
 // 수렴 판정(스펙 대기 매트릭스): 관측 sync revision이 머지 SHA와 동일하거나 그 후손(gh compare —
 //   로컬 git 이력 무의존) AND Synced AND Healthy AND 관측 리비전에서 desired-state 표면 실존.
@@ -74,6 +76,46 @@ export const PR_GRACE_RETRIES = 3;
 // 콜사이트 인자뿐이기 때문). 값이 정수·양수가 아니면 무시한다 — Number("")는 0이고 Number("x")는
 // NaN이라, 둘 다 조용히 '무제한(0)'이나 NaN 타임아웃으로 새지 않게 양쪽을 다 막는다.
 export const DISPATCH_TIMEOUT_ENV = "HOMELAB_TEST_DISPATCH_TIMEOUT_MS";
+
+// ── required check(gate)의 조기 종결(티켓 47) ────────────────────────────────────────────────
+// 병: 머지 폴링이 PR의 `merged`만 보므로 gate가 **실패**하면 머지는 영원히 오지 않는데 CLI는
+//   데드라인(20분)을 전부 태운 뒤 pending을 낸다(2026-09-08 드릴 실측: gate 실패 01:06Z ·
+//   CLI pending 01:15Z, 1204s · pendingReason null).
+// 이름: 이 레포의 **유일한 required check**는 ci.yaml의 job id `gate`다(권위는 branch protection —
+//   infra/github/repo.tf `contexts = ["gate"]`). 잡에 `name:`이 없으므로 check-run 이름 = job id다.
+//   ⚠️ 이 상수는 그 두 파일의 **사본**이라 정적 대조 대상이 없다(job id는 YAML, contexts는 HCL).
+//   어긋나면 조회가 공집합을 내고 종전 pending 경로로 접힌다 — 손해 방향이 fail-open이다.
+// 좌표: check-run은 커밋에 붙는다 — PR 번호가 아니라 **head SHA**가 질의 축이고, 그 SHA는 레인 PR
+//   투영(lane-pr.ts LANE_PR_FIELDS)이 사이클마다 갱신해 준다(추가 조회 0회). 브랜치 이름을 ref로
+//   쓰지 않는 이유: 레인 브랜치에는 슬래시가 있어 `commits/{ref}` 경로 해석이 불확실하다.
+// filter=all: GitHub 기본값은 `filter=latest`(이름별 최신 1건)라 최신 선별이 서버에 숨는다. 재실행
+//   시나리오의 판정을 **우리 코드**가 지게 두어야 테스트가 그것을 밟는다.
+// 낡은 스냅샷 방어(티켓 10이 이 축을 범위 밖에 뒀던 사유 — 함정 「GitHub API는 낡은 스냅샷을 200으로
+//   돌려준다」): **실패 판정만** 조기 종결에 쓴다. 실패 스냅샷은 낡을 수 없다 — 실패→성공 전이는
+//   재실행뿐이고 재실행은 **새** check-run이며, 그 새 check-run이 진행 중이면 아래 최신 규칙이 옛
+//   실패를 채택하지 않는다. 반대 방향(성공 스냅샷이 낡음)은 아무것도 종결시키지 않으므로 무해하다.
+export const REQUIRED_CHECK = "gate";
+// 종결 conclusion — 이 셋만 '머지가 오지 않는다'의 증거다. neutral·skipped·success는 required check를
+// 통과시키고, queued/in_progress는 아직 답이 아니다(둘 다 종전 폴링 유지).
+const GATE_TERMINAL = new Set(["failure", "cancelled", "timed_out"]);
+const CHECK_RUNS_JQ = "[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]";
+type CheckRunRow = { id: number; name: string; status: string; conclusion: string | null; html_url: string; started_at?: string | null };
+
+// 같은 이름의 check-run이 여럿이면 **가장 최신** 하나만 권위다(재실행이 새 check-run을 만든다).
+// 최신 = started_at 최대, 동률·미상이면 id 최대. Date.parse는 미상 형식에서 NaN이고 NaN 비교는
+// 전부 false라 '조용히 왼쪽이 이기는' 정렬이 된다 — 유효성을 먼저 재고 나서 비교한다
+// (함정 「TS 바닥값은 coercion 뒤에서 조용히 꺼진다」의 형제).
+export function latestCheckRun(rows: CheckRunRow[]): CheckRunRow | undefined {
+  let best: CheckRunRow | undefined;
+  for (const r of rows) {
+    if (best === undefined) { best = r; continue; }
+    const t = Date.parse(r.started_at ?? "");
+    const tb = Date.parse(best.started_at ?? "");
+    const byTime = Number.isFinite(t) && Number.isFinite(tb) && t !== tb;
+    if (byTime ? t > tb : r.id > best.id) best = r;
+  }
+  return best;
+}
 
 // 신선도 스냅샷의 투영(티켓 27) — 디스패치 **전** 질의라 신원(id·name)만 본다. 식별 루프의
 // 투영과 텍스트가 다른 것이 계약이다: 스텁·jq 계약 테스트가 두 질의를 각각 정확 일치로 잡는다.
@@ -324,6 +366,26 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     // 이 루프의 관측은 둘이다 — 목록 재조회와 종결 확증 조회. 둘 다 GitHub 계층 조회라 같은
     // watch가 센다(어느 쪽이 죽었든 운영자가 볼 것은 "이 대기는 관측이 안 되고 있다"이다).
     const mergeWatch = pollWatch();
+    // required check(gate) 관측(티켓 47 — 상수 절의 근거). 사이클마다 PR 목록과 **함께** 읽으므로
+    // 이 루프의 읽기 빈도가 2배가 되지만, 예산은 같은 endAt 하나라 총량은 데드라인이 상한이다.
+    // 반환: 종결 실패면 {conclusion, url}, 그 외 전부 null(= 종전 pending 경로).
+    // ⚠️ **fail-open** — head SHA 부재(투영이 그 필드를 안 실은 응답)·gh 조회 실패·404·공집합은 전부
+    //   null이다. 여기서 fail-closed로 죽이면 GitHub 계층 blip 한 번이 '변이 실패'가 되고, 그 손해
+    //   (성공했을 수도 있는 PR을 실패로 보고)가 한 사이클 더 도는 비용보다 크다.
+    // ⚠️ 이 조회의 실패는 mergeWatch가 세지 **않는다** — 티켓 06의 접미는 '머지 관측이 죽었다'를
+    //   지목하는 축이고, fail-open 보조 관측의 blip이 그 사유를 가로채면 운영자가 잘못 유도된다.
+    const gateFailure = (): { conclusion: string; url: string } | null => {
+      const sha = pr!.head_sha;
+      if (sha === undefined || sha === "") return null;
+      const g = ghRead(`repos/${HOMELAB_REPO}/commits/${sha}/check-runs?check_name=${REQUIRED_CHECK}&filter=all&per_page=20`, CHECK_RUNS_JQ);
+      if (g.kind !== "ok") return null;
+      // 이름 재확인 — 서버측 check_name 필터의 사본이다. 필터 의미가 접두 일치로 바뀌어도(가정),
+      // 동명 아닌 check가 required check 노릇을 하지 않게 한다(fail-closed 방향의 좁히기).
+      const latest = latestCheckRun((g.value as CheckRunRow[]).filter((r) => r.name === REQUIRED_CHECK));
+      if (latest === undefined || latest.status !== "completed") return null;
+      const conclusion = latest.conclusion ?? "";
+      return GATE_TERMINAL.has(conclusion) ? { conclusion, url: latest.html_url } : null;
+    };
     while (pr.merged_at === null) {
       // 종결 관측: 머지 없이 닫힘. 목록 인덱스가 단건 리소스보다 낡을 수 있으므로 단건 권위 조회로
       // 한 번 확증한 뒤에만 종결한다 — 확증이 ok가 아니면 미확정으로 두고 폴링을 계속한다(일시 실패
@@ -342,6 +404,18 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
               { run: runRef(), pr: prRef() });
           }
         }
+      }
+      // 종결 관측 2: required check 실패. **수동 머지 레인에도 같은 판정**이다 — gate는 branch
+      // protection의 required check라 실패하면 사람도 머지할 수 없고(App 토큰도 owner도 우회 불가),
+      // '사람 머지 대기'로 예산을 태우는 것이 그 레인에서도 똑같이 거짓 대기다. 갈리는 것은 문구뿐:
+      // 무엇이 승인이었는지는 동사가 알고(manualMerge) 부가 문맥으로만 싣는다(닫힘 종결과 같은 규약).
+      const gate = gateFailure();
+      if (gate !== null) {
+        const context = spec.manualMerge !== undefined
+          ? ` · 수동 머지 레인이지만 required check 실패는 사람 머지도 막는다(이 동사의 머지가 곧 ${spec.manualMerge.approval}이었다)`
+          : " · auto-merge는 required check 통과 뒤에만 머지한다";
+        return fail(`required check(${REQUIRED_CHECK})가 실패로 종결됐다(conclusion=${gate.conclusion}) — 머지는 오지 않는다${context} · check-run: ${gate.url} · 재디스패치 금지: gate를 고쳐 이 PR에서 재실행한다(재디스패치는 새 nonce로 같은 이름의 PR을 하나 더 만든다)`,
+          { run: runRef(), pr: prRef() });
       }
       if (Date.now() >= endAt) {
         const base5 = spec.manualMerge !== undefined

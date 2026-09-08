@@ -512,7 +512,7 @@ pr_closed_unmerged() {
   [ "$status" -eq 0 ]
   run python3 "$LEDGER_PY" exact "$CALLS" gh api \
     "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" \
-    --jq "[.[] | {number, html_url, merged_at, merge_commit_sha, state}]"
+    --jq "[.[] | {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}]"
   [ "$status" -eq 0 ]
 }
 

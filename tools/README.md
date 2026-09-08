@@ -102,6 +102,13 @@ pgdump 헤지 DBS 잠복 red 때문이고 #692로 해소) · `app create --wait`
 `manualMerge` 리터럴을 가리키는지 왕복으로 잰다(같은 bats). auto-merge 레인은 디스패처(reusable)
 소유라 CLI에는 그 레버가 없다 — 엔진 원장에 `gh pr` 계열 argv가 0건인 것이 그 증인이다.
 
+⚠️ **`--wait`는 required check(`gate`) 실패를 조기 종결한다**(티켓 47) — 머지 대기 중 PR head SHA의
+최신 check-run `gate`가 `completed` + `failure|cancelled|timed_out`이면 예산을 태우지 않고 즉시
+failure(exit 1, `error`에 conclusion + check-run URL)다. 자동/수동 머지 레인 모두 같은 판정이다
+(gate는 branch protection의 required check라 실패하면 사람도 머지할 수 없다). 진행 중(재실행 포함)·
+성공 계열·조회 실패는 종전 pending 경로 그대로다 — 실패 판정만 종결에 쓰는 비대칭이 낡은 스냅샷
+방어다(실패→성공 전이는 재실행뿐이고 재실행은 새 check-run이다).
+
 [^converge]: `--wait` 종결 열도 등식 대상이 아니다(같은 이유 — `tools/lib/verbs.ts:191`의
 `converge: "absence"` 인라인 리터럴). `app init`은 변이 디스패처가 아니라 **앱 레포 로컬 체인**이라
 디스패처·머지·수렴 칸이 전부 비고, `db|cache url`·`doctor`·`status`는 관측 전용이다. `mcp`는 VERBS 밖
@@ -507,7 +514,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   nonce → 디스패치 → run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정(3상 — 빈 목록·
   전송 오류는 deadline 독립 grace 재조회 `PR_GRACE_RETRIES` 뒤 판정, `noopForbidden`이면 0건은 fail-loud) →
   [--wait] 머지 관측(머지 없이 닫힌 PR은 대기가 아니라 종결 관측 — 목록의 `state:closed`·미머지를
-  단건 권위 조회 `pulls/<n>`로 확증한 뒤 failure, 전송 오류면 미확정으로 두고 폴링 계속) +
+  단건 권위 조회 `pulls/<n>`로 확증한 뒤 failure, 전송 오류면 미확정으로 두고 폴링 계속 ·
+  **required check(`gate`, `REQUIRED_CHECK`) 실패도 종결 관측** — PR head SHA의 check-run 목록
+  (`commits/<sha>/check-runs?check_name=gate&filter=all`)에서 **가장 최신** 하나(started_at 최대,
+  동률·미상이면 id 최대)가 `completed` + `failure|cancelled|timed_out`이면 조기 failure다: 자동·수동
+  머지 레인 공통이고, 진행 중·성공 계열·조회 실패·head SHA 부재는 전부 fail-open으로 종전 pending
+  경로를 유지한다) +
   Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,
   health 단독 판정 금지, 후손 리비전 표면 부재=superseded). 세 폴링 루프(run 특정·conclusion·머지)는
   지속되는 GitHub 계층 조회 실패를 pendingReason 접미로 지목한다(문구 SSOT는 엔진 헬퍼 하나 —
@@ -524,7 +536,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`lib/lane-pr.ts`** — 레인 브랜치 PR의 좌표·정확 조회 커널(`readLanePrs()`·`lanePrRef()`·
   `parseLaneBranch()`·`laneBranchInputError()`). 질의는 `pulls?state=all&head=<owner>:<branch>` —
   head가 **정확 일치**라 형제 브랜치(`…/mydb-5011`)가 `…/mydb-501` 응답에 원리적으로 섞이지 않는다.
-  투영(`LANE_PR_FIELDS`)은 목록·단건 공용 SSOT이고 argv 원장에 그대로 실려 테스트가 핀한다.
+  투영(`LANE_PR_FIELDS`)은 목록·단건 공용 SSOT이고 argv 원장에 그대로 실려 테스트가 핀한다 —
+  `head_sha: .head.sha`는 required check 조기 종결(티켓 47)의 좌표라 여기서 함께 온다(추가 조회 0회).
   파싱은 레인 신원 행(catalog-rows `branchPattern`)에서 파생하고 **왕복 등식**(복원한 key·runId를
   다시 채워 원문과 대조) + 레인별 이름 정책(app/resource)으로 확증한다 — 임의 ref가 gh 질의
   문자열로 새지 않는 1차 게이트다. 소비자: 변이 엔진(자기 PR 특정)·status(`--branch` 재개 조회).

@@ -42,8 +42,8 @@ tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.y
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name}]
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/runs/501/jobs%[.jobs[] | select(.conclusion == "failure") | .name]
 tools/lib/mutation.ts%repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=20%[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]
-tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501%[.[] | {number, html_url, merged_at, merge_commit_sha, state}]%{number, html_url, merged_at, merge_commit_sha, state}
-tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls/21%{number, html_url, merged_at, merge_commit_sha, state}
+tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501%[.[] | {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}]%{number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}
+tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls/21%{number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}
 tools/lib/status.ts%repos/ukyi-app/page/actions/runs?per_page=3%[.workflow_runs[] | {name, status, conclusion, head_sha, head_branch, event, html_url}]
 tools/lib/status.ts%repos/ukyi-app/homelab/pulls?state=open&per_page=100%[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]
 tools/lib/status.ts%repos/ukyi-app/homelab/pulls/7%{number, state, merged, merge_commit_sha, title, head_ref: .head.ref, head_sha: .head.sha, auto_merge: (.auto_merge != null), html_url}
