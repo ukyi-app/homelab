@@ -63,10 +63,10 @@ cd "$ROOT"
 # (봉인본은 선택: `create-app --sealed` 미지정 = values+kustomization 2건, check-app-deploy의
 # all-or-none 불변식이 그 상태를 정당하다고 명시한다). 스냅샷을 굳히면 봉인본 없는 앱 1개짜리
 # 정당한 트리를 "열거 붕괴"로 오탐한다(적대 검토 실측). 래칫 아님.
-# ⚠️ 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거). 앱이 0개인
-#    동안은 매니페스트 열거 0건이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
-#    형제 가드도 같은 경계다 — check-app-deploy 기본 0 · check-image-pins :apps 기본 0.
-MIN_SCAN="$(floor_of check-app-netpol:manifests 0)"
+# 바닥값 1 — 2026-09-08 page 재온보딩(#691)으로 인-레포 배포 앱이 다시 1개다. 앱이 0개이던 동안은
+#    매니페스트 열거 0건이 정당해 0으로 내려 뒀었다. 앱이 다시 0개가 되면 0으로 내릴 것.
+#    형제 가드도 같은 경계다 — check-app-deploy 기본 1 · check-image-pins :apps 기본 1.
+MIN_SCAN="$(floor_of check-app-netpol:manifests 1)"
 
 manifests="$(scan_enumerate check-app-netpol bun "$(dirname "${BASH_SOURCE[0]}")/../tools/lib/repo-walk.ts" --manifests apps-manifests --root "$ROOT")" || exit 1
 scanned="$(scan_count "$manifests")"
