@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# data-conn 컴포넌트 렌더 검증 — 빈 resources여도 kustomize build가 성공해야 하고
+# data-conn 컴포넌트 렌더 검증 — 빈 resources여도 kustomize build가 성공해야 하고(빌드 성공 ≠ 수렴 —
+# 빈 렌더는 ArgoCD auto-sync가 프룬을 거부한다, traps-detail 참조)
 # (appset 발견 시점에 DB가 0개일 수 있음), namespace: prod 변환이 강제되는지 확인한다.
 
 setup() {
