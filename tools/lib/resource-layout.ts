@@ -45,11 +45,14 @@ export type DbLayout = LayoutBase & {
   kind: "db";
   paths: {
     cr: string; ownerSealed: string; roSealed: string; connSealed: string; roConnSealed: string;
-    dbKust: string; parentKust: string; cluster: string; connKust: string;
+    dbKust: string; parentKust: string; cluster: string; connKust: string; hedge: string;
   };
   passwordSecrets: { owner: string; ro: string };       // database NS 비밀번호 Secret 이름
   envKeys: { rw: string; migrate: string; ro: string }; // role → 키 조회(설계 §심화 4)
   roles: { owner: string; ro: string };                 // cluster.yaml managed.roles 이름
+  // pgdump 헤지 DBS 목록의 토큰(= DB 이름). cache의 ledgerRow와 같은 부류 — 파일은 공유-잔존이고
+  // 생성/철거가 오가는 것은 **이 토큰 하나**다. 그 줄의 문법은 lib/hedge-dbs.ts가 소유한다.
+  hedgeEntry: string;
 };
 export type CacheLayout = LayoutBase & {
   kind: "cache";
@@ -73,6 +76,8 @@ const CNPG_DIR = "platform/cnpg/prod";
 const CONN_DIR = "platform/data-conn/prod";
 const CACHE_DIR = "platform/cache/prod";
 const LEDGER = "docs/memory-ledger.md";
+// pgdump 헤지 CronJob — 이름 무관(전 DB 공용) 표면이라 디렉토리 상수와 같은 자리에 둔다.
+const HEDGE_CRONJOB = `${CNPG_DIR}/pgdump-hedge-cronjob.yaml`;
 
 // cache 인스턴스 디렉토리 내용물 — provision-cache 산출 6파일(이름 고정). export는 7번째 파일
 // 드리프트의 기계 검출용(가드가 provision-cache의 write 대상과 대조 — 티켓 06 리뷰 이월).
@@ -102,6 +107,7 @@ export function layoutFor(kind: ResourceKind, name: string): ResourceLayout {
       parentKust: `${CNPG_DIR}/kustomization.yaml`,
       cluster: `${CNPG_DIR}/cluster.yaml`,
       connKust: `${CONN_DIR}/kustomization.yaml`,
+      hedge: HEDGE_CRONJOB,                                          // pgdump 헤지 DBS 손 목록
     };
     return {
       kind: "db",
@@ -116,6 +122,9 @@ export function layoutFor(kind: ResourceKind, name: string): ResourceLayout {
         { path: paths.parentKust, scope: "공유-잔존" },
         { path: paths.cluster, scope: "수동-이연" },                  // managed.roles — 별도 수동 커밋
         { path: paths.connKust, scope: "공유-잔존" },
+        // 헤지는 전 DB 공용 파일이다 — purge가 빼는 것은 DBS 토큰 한 개뿐이라 공유-잔존이다.
+        // (누락 시 test_pgdump_hedge가 required check를 red로 만든다 — 드릴 실측 PR #689.)
+        { path: paths.hedge, scope: "공유-잔존" },
       ],
       kustomizationEntries: [
         { kust: paths.dbKust, entry: bn(paths.cr), scope: "purge-제거" },
@@ -132,6 +141,7 @@ export function layoutFor(kind: ResourceKind, name: string): ResourceLayout {
       passwordSecrets: { owner: `db-${name}-owner`, ro: `db-${name}-ro` },
       envKeys: { rw: `${ENV}_DATABASE_URL`, migrate: `${ENV}_MIGRATE_DATABASE_URL`, ro: `${ENV}_RO_DATABASE_URL` },
       roles: { owner: name, ro: `${name}_ro` },
+      hedgeEntry: name,                                   // DBS 토큰 = DB 이름(CR spec.name과 동일)
       tombstoneKey: `db:${name}`,
     };
   }

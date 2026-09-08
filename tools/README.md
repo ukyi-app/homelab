@@ -478,6 +478,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   teardown purge의 의도된 부분집합을 데이터로 성문화). 역방향 `classifyArtifact`(경로/엔트리 →
   {kind, name, role})가 같은 커널에 산다 — 소스 없는 고아 conn도 분류된다(설계 게이트 r1 D2).
   순수 문자열 유도만(yaml 편집 비흡수). 왕복·리터럴 앵커는 test_resource-layout.bats.
+  db에는 `paths.hedge`(pgdump 헤지 CronJob) + `hedgeEntry`(DBS 토큰 = DB 이름)가 있다 — cache의
+  `ledgerRow`와 같은 부류의 **공유-잔존** 표면(파일은 남고 토큰 하나만 오간다).
   소비 4모드: provision-db/cache(정방향, paths·handles·envKeys) · teardown-resource(역제거 —
   `purgeArtifactsFor` 삼중·`TOMBSTONES_PATH`) · audit-orphans(감사 — classify 소비, orphan-conn/
   malformed-conn 축) · db-url/cache-url(읽기). 레인 행(catalog-rows)과의 표면 경로 일치는
@@ -704,6 +706,13 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `addApp`/`removeApp`/`retagApp`은 value 라인 매치 0에서 **throw**(fail-loud)하고, `hasApp`은 항목
   부재(`false`)를 포맷 드리프트(throw)와 가른다 — 손 정규식은 그 둘을 같은 무성 skip으로 뭉갠다.
   소비자: `create-app`(추가)·`teardown-app`(제거)·`bump-tag`(태그 이동).
+- **`lib/hedge-dbs.ts`** — pgdump 헤지 `DBS`(공백 구분 DB 이름 목록) 편집 커널. digest-exporter APPS의
+  형제이지만 대상은 yaml 값이 아니라 CronJob `args` 스크립트 **본문 안의 셸 변수 한 줄**이라 파서로는
+  만질 수 없다. **DBS 줄 문법 전부**를 소유한다: 줄 앵커(들여쓰기·인용·뒤따르는 주석 보존) · 항목
+  경계(공백) · **토큰 동일성**(`page`는 `pages`에 매치되지 않는다) · 존재 판정. `addDb`는 말미
+  append다(정렬 금지 — 헤지 루프가 `set -e`라 부트스트랩 `app`이 선두에 남는 순서가 복구 우선순위다).
+  세 함수 모두 DBS 줄 매치 0에서 **throw**(fail-loud)하고, `hasDb`는 항목 부재(`false`)를 포맷
+  드리프트(throw)와 가른다. 소비자: `provision-db`(추가)·`teardown-resource`(purge drop/cleanup 제거).
 - **`lib/sealed-contract.ts`** — 봉인 계약 커널(`readSealed(raw, app)` 단일 함수). 6검증(kind·
   namespace=prod·name=`<app>-secrets`·encryptedData 비었음·키 UPPER_SNAKE·**strict scope**)의 **판정과
   에러 문구** + checksum + **디스크에 쓸 바이트**를 소유한다. strict scope = scope 확대 어노테이션

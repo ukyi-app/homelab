@@ -7,6 +7,8 @@
 //   3. 비밀번호 SealedSecret 2개   → platform/cnpg/prod/databases/db-<name>-{owner,ro}.sealed.yaml
 //   4. conn SealedSecret 2개       → platform/data-conn/prod/db-<name>-{conn,ro-conn}.sealed.yaml (prod NS)
 //   + databases/·data-conn kustomization 멱등 등록, 상위 cnpg kustomization에 databases/ 추가.
+//   + pgdump 헤지 DBS 목록에 이름 등록(공유-잔존 표면 — 파일은 남고 토큰만 추가). 이것이 없으면
+//     test_pgdump_hedge.bats가 required check를 red로 만들어 auto-merge가 영원히 대기한다(PR #689).
 //
 // 불변식:
 //   - owner == name 고정(입력 안 받음) — owner 공유 시 한쪽 teardown/회전이 다른 DB를 깬다(role↔DB 1:1).
@@ -19,6 +21,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { RESOURCE_NAME_RE, EXT_RE, resourceNameError } from "./lib/identity.ts";
 import { entryName, layoutFor } from "./lib/resource-layout.ts";
+import { addDb } from "./lib/hedge-dbs.ts";
 import { sealManifest } from "./lib/seal.ts";
 import { parseFlags } from "./lib/cli.ts";
 import { Document, parseDocument } from "yaml";
@@ -79,6 +82,7 @@ const paths = {
   connSealed: j(layout.paths.connSealed),
   roConnSealed: j(layout.paths.roConnSealed),
   connKust: j(layout.paths.connKust),
+  hedge: j(layout.paths.hedge),
 };
 const dbDir = dirOf(paths.cr);
 const connDir = dirOf(paths.connSealed);
@@ -87,6 +91,9 @@ const connDir = dirOf(paths.connSealed);
 if (!existsSync(paths.cluster)) fail(`${paths.cluster} 없음 — repo-root가 homelab 레포 루트인지 확인`);
 if (existsSync(paths.cr)) fail(`DB '${name}' 이미 존재 (${paths.cr}) — name은 전역 유일`);
 if (existsSync(paths.connSealed)) fail(`conn 핸들 이미 존재 (${paths.connSealed}) — name은 전역 유일`);
+// 헤지 DBS는 조용히 건너뛰면 안 된다 — 그 DB는 논리 백업 0인데 잡은 완료(녹색)로 끝나는 무성 갭이
+// 되고, test_pgdump_hedge가 PR 게이트를 red로 만든다. 실 레포엔 항상 있으므로 부재는 고장이다.
+if (!existsSync(paths.hedge)) fail(`${paths.hedge} 없음 — pgdump 헤지 DBS 목록에 등록할 수 없다 (repo-root 확인)`);
 
 const clusterDoc = parseDocument(readFileSync(paths.cluster, "utf8"));
 const existingRoles: any = clusterDoc.getIn(["spec", "managed", "roles"]);
@@ -96,6 +103,12 @@ if (existingRoles?.items) {
     if (n === owner || n === roRole) fail(`managed 롤 '${n}' 이미 존재 — 롤 이름은 전역 유일 (role↔DB 1:1)`);
   }
 }
+
+// 헤지 DBS 갱신본은 **계획 단계에서** 미리 조립한다(순수 문자열 — 파일 비접촉). 포맷 드리프트는
+// dry-run에서도 여기서 fail-closed로 걸리고, 실행 경로에서는 어떤 write보다 앞서 걸린다.
+let hedgeNext = "";
+try { hedgeNext = addDb(readFileSync(paths.hedge, "utf8"), name); }
+catch (e) { fail(e instanceof Error ? e.message : String(e)); }
 
 // ---------- 5) 계획 (비밀값/raw URL 절대 비포함 — PR 본문에 그대로 실린다) ----------
 const plan = {
@@ -108,7 +121,7 @@ const plan = {
   envKeys: [layout.envKeys.rw, layout.envKeys.migrate, layout.envKeys.ro],
   handles: { conn: layout.handles.rw.name, roConn: layout.handles.ro.name },
   files: [paths.cr, paths.ownerSealed, paths.roSealed, paths.connSealed, paths.roConnSealed,
-    paths.dbKust, paths.parentKust, paths.cluster, paths.connKust],
+    paths.dbKust, paths.parentKust, paths.cluster, paths.connKust, paths.hedge],
   dryRun: args.dryRun,
   checklist: [
     `apps/<app>/deploy/prod/values.yaml envFrom에 secretRef '${layout.handles.rw.name}' 배선 필요 — 미배선 시 앱이 DB 없이 그대로 배포된다(#211 재발 클래스). '${layout.handles.ro.name}'은 모드2 디버깅 전용이라 배선하지 않는다`,
@@ -297,5 +310,6 @@ writeFileSync(paths.dbKust, dbKustDoc.toString(OPTS));
 writeFileSync(paths.parentKust, parentDoc.toString(OPTS));
 writeFileSync(paths.cluster, clusterDoc.toString(OPTS));
 writeFileSync(paths.connKust, connKustDoc.toString(OPTS));
+writeFileSync(paths.hedge, hedgeNext); // 헤지 DBS 토큰 추가(들여쓰기·인용·주석은 hedge-dbs가 보존)
 
 console.log(JSON.stringify(plan, null, 2));
