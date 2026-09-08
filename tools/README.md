@@ -68,9 +68,12 @@ homelab app secrets myapp --wait            # 이후 시크릿 **회전**은 이
 [3] 수동 머지는 `app create`·`app teardown` 둘뿐이다(`tools/lib/verbs.ts:164`·`tools/lib/verbs.ts:190`).
 나머지 레인은 디스패처가 auto-merge를 건다 — CLI에는 그 레버가 아예 없다.
 
-⚠️ **라이브 e2e는 미검증이다.** 그린필드라 CLI 유래 run이 0건이고, 위 순서는 코드 전제(디스패처 입력
-계약·update-secrets 선행 조건)에서 파생한 것이지 실측이 아니다. 첫 실전 온보딩이 곧 이 절의 검증이며,
-그때 관측한 `db create --wait`의 dispatch→merge 벽시계가 `WAIT_DEFAULTS.deadlineMs` 재산정의 재개 조건이다.
+**라이브 e2e 실측(2026-09-08, page 재온보딩 — 기존 레포라 `app init`만 생략).** 위 순서대로 끝까지 탔다:
+`db create --wait` 정상 경로 ≈15분(dispatch→run 1분 · PR · gate ≈11분 · 머지→수렴 29s — 첫 실행은 46분이었는데
+pgdump 헤지 DBS 잠복 red 때문이고 #692로 해소) · `app create --wait`는 사람 머지 대기 pending(exit 1)으로 끝나고
+머지 뒤 56s에 수렴 · `app secrets --wait`(레포 밖 dispatch-only) 12분 46초로 success. 데드라인 20분은 정상 경로를
+담지만 gate 재실행 1회(flake·**gate 중 main 이동 → BEHIND 재gate**)면 넘는다 — 상수는 유지하고 gate 실패의 조기
+종결(티켓 47)이 처방이다. 0↔1 앱 전환에만 필요한 손 단계는 `apps/README.md`에 있다.
 
 ### 동사 표
 
