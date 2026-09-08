@@ -169,3 +169,32 @@ FIXEOF
   unseed
   [ "$status" -eq 0 ]
 }
+
+@test "flags an awk early-exit consumer fed by a pipe at column 0 (lane c, ticket 49)" {
+  seed "idx=\"\$(ip -o -4 addr show | awk -v ip=\"\$K3S_NODE_IP\" '\$4 ~ ip { print \$1; exit }')\"\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- "awk '… exit'"
+}
+
+@test "flags the same awk early-exit consumer when indented (lane c)" {
+  seed "  d=\"\$(lsblk -nso NAME,TYPE \"\$src\" | awk '\$2 == \"disk\" { print \$1; exit }')\"\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -ne 0 ]
+}
+
+@test "does not flag the prescribed capture-then-herestring form of an awk early-exit consumer (lane c)" {
+  seed "addrs=\"\$(ip -o -4 addr show)\"\nidx=\"\$(awk '\$4 ~ ip { print \$1; exit }' <<<\"\$addrs\")\"\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -eq 0 ]
+}
+
+@test "does not flag an awk pipe consumer without exit, nor a whole-line comment documenting the idiom (lane c)" {
+  seed "n=\"\$(ip -o -4 addr show | awk '{ print \$4 }' | cut -d/ -f1)\"\n# 옛 형태: ip … | awk '{ print \$1; exit }' 는 SIGPIPE 함정\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -eq 0 ]
+}
