@@ -18,6 +18,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
       "platform/cnpg/prod/databases/kustomization.yaml",
       "platform/cnpg/prod/databases/orders.yaml",
       "platform/cnpg/prod/kustomization.yaml",
+      "platform/cnpg/prod/pgdump-hedge-cronjob.yaml",
       "platform/data-conn/prod/db-orders-conn.sealed.yaml",
       "platform/data-conn/prod/db-orders-ro-conn.sealed.yaml",
       "platform/data-conn/prod/kustomization.yaml",
@@ -30,6 +31,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     if (L.envKeys.rw !== "ORDERS_DATABASE_URL" || L.envKeys.migrate !== "ORDERS_MIGRATE_DATABASE_URL" || L.envKeys.ro !== "ORDERS_RO_DATABASE_URL") { console.error("envKeys: " + JSON.stringify(L.envKeys)); process.exit(1); }
     if (L.roles.owner !== "orders" || L.roles.ro !== "orders_ro") { console.error("roles: " + JSON.stringify(L.roles)); process.exit(1); }
     if (L.tombstoneKey !== "db:orders") { console.error("tombstoneKey: " + L.tombstoneKey); process.exit(1); }
+    // pgdump 헤지는 db 산출물의 공유-잔존 표면이다 — 파일은 남고 DBS 토큰(= DB 이름)만 오간다.
+    if (L.paths.hedge !== "platform/cnpg/prod/pgdump-hedge-cronjob.yaml") { console.error("paths.hedge: " + L.paths.hedge); process.exit(1); }
+    if (L.hedgeEntry !== "orders") { console.error("hedgeEntry: " + L.hedgeEntry); process.exit(1); }
     if (L.ledgerRow !== undefined) { console.error("db는 원장 비접촉인데 ledgerRow=" + L.ledgerRow); process.exit(1); }
     const entries = L.kustomizationEntries.map((e) => e.kust + "|" + e.entry).sort();
     const wantEntries = [
@@ -73,6 +77,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     if (JSON.stringify(L.handles.rw.envKeys) !== JSON.stringify(["DEMO_REDIS_URL"]) || JSON.stringify(L.handles.ro.envKeys) !== JSON.stringify(["DEMO_REDIS_RO_URL"])) { console.error("handle envKeys: " + JSON.stringify(L.handles)); process.exit(1); }
     if (L.envKeys.rw !== "DEMO_REDIS_URL" || L.envKeys.ro !== "DEMO_REDIS_RO_URL" || L.envKeys.migrate !== undefined) { console.error("envKeys: " + JSON.stringify(L.envKeys)); process.exit(1); }
     if (L.ledgerRow !== "cache-demo" || L.tombstoneKey !== "cache:demo") { console.error(L.ledgerRow + " / " + L.tombstoneKey); process.exit(1); }
+    // 헤지는 논리 DB 전용 표면이다 — cache 레이아웃이 그 필드를 가지면 teardown이 남의 목록을 건드린다.
+    if (L.hedgeEntry !== undefined || L.paths.hedge !== undefined) { console.error("cache에 hedge 표면: " + L.hedgeEntry + " / " + L.paths.hedge); process.exit(1); }
     const entries = L.kustomizationEntries.map((e) => e.kust + "|" + e.entry).sort();
     const wantEntries = [
       "platform/cache/prod/kustomization.yaml|demo",
@@ -103,7 +109,15 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     if (JSON.stringify(purged) !== JSON.stringify(wantPurged)) { console.error("db purge:\n" + purged.join("\n")); process.exit(1); }
     const manual = db.files.filter((f) => f.scope === "수동-이연").map((f) => f.path);
     if (JSON.stringify(manual) !== JSON.stringify(["platform/cnpg/prod/cluster.yaml"])) { console.error("manual: " + manual.join(",")); process.exit(1); }
-    if (db.files.filter((f) => f.scope === "공유-잔존").length !== 3) { console.error("db 공유-잔존 수 != 3"); process.exit(1); }
+    const dbShared = db.files.filter((f) => f.scope === "공유-잔존").map((f) => f.path).sort();
+    // 헤지는 4번째 공유-잔존이다: 파일은 전 DB 공용이고 purge는 DBS 토큰 한 개만 뺀다.
+    const wantShared = [
+      "platform/cnpg/prod/databases/kustomization.yaml",
+      "platform/cnpg/prod/kustomization.yaml",
+      "platform/cnpg/prod/pgdump-hedge-cronjob.yaml",
+      "platform/data-conn/prod/kustomization.yaml",
+    ];
+    if (JSON.stringify(dbShared) !== JSON.stringify(wantShared)) { console.error("db 공유-잔존:\n" + dbShared.join("\n")); process.exit(1); }
     const purgedEntries = db.kustomizationEntries.filter((e) => e.scope === "purge-제거").length;
     const sharedEntries = db.kustomizationEntries.filter((e) => e.scope === "공유-잔존").length;
     if (purgedEntries !== 5 || sharedEntries !== 1) { console.error("db entries scope: purge=" + purgedEntries + " shared=" + sharedEntries); process.exit(1); }
@@ -289,4 +303,26 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   # 바닥값 — db 5역할 + cache 3역할(열거가 0으로 붕괴하면 위 전칭이 항진이다).
   echo "$output" | grep -q "^roundtrip:8$"
+}
+
+@test "the hedge kernel round-trips on the real pgdump manifest shipped in this repo" {
+  # 커널의 정규식은 픽스처가 아니라 **실물**에 묶여야 한다. 픽스처만 증인이면 실 매니페스트의
+  # DBS 줄이 커널 밖 형태로 바뀌는 순간(인용부 안쪽 재포맷·DBS 줄 소실·2줄 분할 — 들여쓰기·꼬리
+  # 주석은 문법이 흡수한다) 전 픽스처가 초록인 채로 생성·철거가 조용히 멈춘다 — 그 red는 PR
+  # 게이트(test_pgdump_hedge)에서야 뒤늦게 난다.
+  run bun -e '
+    import { readFileSync } from "node:fs";
+    import { addDb, removeDb, hasDb } from "./tools/lib/hedge-dbs.ts";
+    import { layoutFor } from "./tools/lib/resource-layout.ts";
+    const p = layoutFor("db", "orders").paths.hedge;
+    const text = readFileSync(p, "utf8");
+    // 부트스트랩 app은 실물 목록에 항상 있다(restore_canary 보유 — 복구 드릴의 대조군).
+    if (hasDb(text, "app") !== true) { console.error("실물 DBS에 app이 없다: " + p); process.exit(1); }
+    // 추가→제거 왕복이 **바이트 동일**이어야 커널이 실물을 재포맷하지 않는다는 뜻이다.
+    const rt = removeDb(addDb(text, "zzprobe"), "zzprobe");
+    if (rt !== text) { console.error("왕복이 바이트 동일이 아니다 — 커널이 실물 DBS 줄을 재포맷한다"); process.exit(1); }
+    console.log("anchored:" + p);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^anchored:platform/cnpg/prod/pgdump-hedge-cronjob.yaml$"
 }
