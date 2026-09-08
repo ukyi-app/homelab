@@ -15,7 +15,7 @@ envFrom:
   - secretRef:
       name: page-secrets
   - secretRef:
-      name: db-page-conn # create-database 산출 conn(PAGE_DATABASE_URL·PAGE_MIGRATE_DATABASE_URL) — 손 배선(README [2])
+      name: db-page-conn
 route:
   host: page.ukyi.app
   paths:
