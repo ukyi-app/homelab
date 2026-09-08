@@ -103,11 +103,17 @@ pgdump 헤지 DBS 잠복 red 때문이고 #692로 해소) · `app create --wait`
 소유라 CLI에는 그 레버가 없다 — 엔진 원장에 `gh pr` 계열 argv가 0건인 것이 그 증인이다.
 
 ⚠️ **`--wait`는 required check(`gate`) 실패를 조기 종결한다**(티켓 47) — 머지 대기 중 PR head SHA의
-최신 check-run `gate`가 `completed` + `failure|cancelled|timed_out`이면 예산을 태우지 않고 즉시
-failure(exit 1, `error`에 conclusion + check-run URL)다. 자동/수동 머지 레인 모두 같은 판정이다
-(gate는 branch protection의 required check라 실패하면 사람도 머지할 수 없다). 진행 중(재실행 포함)·
-성공 계열·조회 실패는 종전 pending 경로 그대로다 — 실패 판정만 종결에 쓰는 비대칭이 낡은 스냅샷
-방어다(실패→성공 전이는 재실행뿐이고 재실행은 새 check-run이다).
+**가장 최신** check-run `gate`가 `completed`인데 통과 집합 **밖**이면 예산을 태우지 않고 즉시
+failure(exit 1, `error`에 conclusion + check-run URL)다. **통과 = `success`·`neutral`·`skipped`, 그 외
+completed는 전부 막는다**(`action_required`·`stale`처럼 상류가 더한 어휘도 기본이 fail-closed다).
+자동/수동 머지 레인 모두 같은 판정이다(gate는 branch protection의 required check라 실패하면 사람도
+머지할 수 없다). 진행 중(재실행 포함)·통과 계열은 종전 pending 경로 그대로고, **관측 부재**(조회 실패·
+404·이름 일치 0건·응답이 페이지 상한에 닿아 절단 미상·head SHA 부재)도 마찬가지다 — 결론을 읽었는데
+모르는 어휘인 것과 아예 못 읽은 것은 다른 축이다. 종결 좌표(head SHA)는 목록 스냅샷에서 오므로
+**단건 권위 조회로 확증한 뒤에만** 종결한다(닫힘 종결과 같은 규약). 관측 부재가 3사이클 이상 연속되면
+그 상태 자체를 `pendingReason` 접미로 지목한다(`required check(gate) 관측 불가: …` — 머지 관측 접미와
+분리된 축이다). 실패 판정만 종결에 쓰는 비대칭이 낡은 스냅샷 방어다(실패→성공 전이는 재실행뿐이고
+재실행은 새 check-run이다).
 
 [^converge]: `--wait` 종결 열도 등식 대상이 아니다(같은 이유 — `tools/lib/verbs.ts:191`의
 `converge: "absence"` 인라인 리터럴). `app init`은 변이 디스패처가 아니라 **앱 레포 로컬 체인**이라
@@ -516,10 +522,13 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   [--wait] 머지 관측(머지 없이 닫힌 PR은 대기가 아니라 종결 관측 — 목록의 `state:closed`·미머지를
   단건 권위 조회 `pulls/<n>`로 확증한 뒤 failure, 전송 오류면 미확정으로 두고 폴링 계속 ·
   **required check(`gate`, `REQUIRED_CHECK`) 실패도 종결 관측** — PR head SHA의 check-run 목록
-  (`commits/<sha>/check-runs?check_name=gate&filter=all`)에서 **가장 최신** 하나(started_at 최대,
-  동률·미상이면 id 최대)가 `completed` + `failure|cancelled|timed_out`이면 조기 failure다: 자동·수동
-  머지 레인 공통이고, 진행 중·성공 계열·조회 실패·head SHA 부재는 전부 fail-open으로 종전 pending
-  경로를 유지한다) +
+  (`commits/<sha>/check-runs?check_name=gate&filter=all&per_page=100`)에서 **가장 최신** 하나
+  (started_at이 파싱되는 행들의 최대, 동률이면 id 최대 — 유효 시간이 전무할 때만 id로 떨어진다:
+  **응답 순서와 무관한 전순서**다)가 `completed`인데 통과 집합 `GATE_PASSING`(success·neutral·skipped)
+  **밖**이면 조기 failure다. 좌표는 `pulls/<n>` 단건 권위 조회로 확증한 뒤에만 종결에 쓴다.
+  자동·수동 머지 레인 공통이고, 진행 중·통과 계열·관측 부재(조회 실패·이름 일치 0건·응답이 상한
+  `CHECK_RUNS_PER_PAGE`에 닿아 절단 미상·head SHA 부재)는 전부 fail-open으로 종전 pending 경로를
+  유지하되, 관측 부재가 `GATE_BLIND_STREAK`회 연속이면 pendingReason 접미가 그 상태를 지목한다) +
   Application 집합 수렴(후손 판정은 gh compare — 로컬 git 이력 무의존,
   health 단독 판정 금지, 후손 리비전 표면 부재=superseded). 세 폴링 루프(run 특정·conclusion·머지)는
   지속되는 GitHub 계층 조회 실패를 pendingReason 접미로 지목한다(문구 SSOT는 엔진 헬퍼 하나 —

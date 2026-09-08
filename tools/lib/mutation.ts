@@ -7,8 +7,9 @@
 //   → run_id 브랜치로 PR 특정(3상: found/empty/error — empty·error는 deadline 독립 grace 재조회 뒤 판정,
 //   noopForbidden이면 0건은 no-op이 아니라 fail-loud) → [--wait] 머지 관측(자동/수동 레인 — 머지 없이
 //   닫힌 PR은 대기가 아니라 종결 관측이다: 단건 권위 조회로 확증한 뒤 failure · **required check
-//   (gate) 실패도 종결 관측이다**: PR head SHA의 최신 check-run이 completed + {failure, cancelled,
-//   timed_out}이면 조기 failure, 진행 중·성공 계열·조회 실패는 종전 pending 경로 — 티켓 47) → 명명된
+//   (gate) 실패도 종결 관측이다**: PR head SHA의 최신 check-run이 completed면서 통과 집합
+//   {success, neutral, skipped} **밖**이면 조기 failure — 좌표는 단건 권위 조회로 확증한 뒤에만 쓴다.
+//   진행 중·통과 계열·관측 부재(조회 실패·공집합·절단 미상·head SHA 부재)는 종전 pending 경로 — 티켓 47) → 명명된
 //   Application 집합 전체 수렴.
 // 수렴 판정(스펙 대기 매트릭스): 관측 sync revision이 머지 SHA와 동일하거나 그 후손(gh compare —
 //   로컬 git 이력 무의존) AND Synced AND Healthy AND 관측 리비전에서 desired-state 표면 실존.
@@ -89,31 +90,55 @@ export const DISPATCH_TIMEOUT_ENV = "HOMELAB_TEST_DISPATCH_TIMEOUT_MS";
 //   투영(lane-pr.ts LANE_PR_FIELDS)이 사이클마다 갱신해 준다(추가 조회 0회). 브랜치 이름을 ref로
 //   쓰지 않는 이유: 레인 브랜치에는 슬래시가 있어 `commits/{ref}` 경로 해석이 불확실하다.
 // filter=all: GitHub 기본값은 `filter=latest`(이름별 최신 1건)라 최신 선별이 서버에 숨는다. 재실행
-//   시나리오의 판정을 **우리 코드**가 지게 두어야 테스트가 그것을 밟는다.
+//   시나리오의 판정을 **우리 코드**가 지게 두어야 테스트가 그것을 밟는다. 그 대가로 페이지 상한이
+//   판정의 전제가 된다 — 아래 CHECK_RUNS_PER_PAGE 절.
 // 낡은 스냅샷 방어(티켓 10이 이 축을 범위 밖에 뒀던 사유 — 함정 「GitHub API는 낡은 스냅샷을 200으로
 //   돌려준다」): **실패 판정만** 조기 종결에 쓴다. 실패 스냅샷은 낡을 수 없다 — 실패→성공 전이는
 //   재실행뿐이고 재실행은 **새** check-run이며, 그 새 check-run이 진행 중이면 아래 최신 규칙이 옛
 //   실패를 채택하지 않는다. 반대 방향(성공 스냅샷이 낡음)은 아무것도 종결시키지 않으므로 무해하다.
 export const REQUIRED_CHECK = "gate";
-// 종결 conclusion — 이 셋만 '머지가 오지 않는다'의 증거다. neutral·skipped·success는 required check를
-// 통과시키고, queued/in_progress는 아직 답이 아니다(둘 다 종전 폴링 유지).
-const GATE_TERMINAL = new Set(["failure", "cancelled", "timed_out"]);
+// **통과 집합**(여집합이 종결) — required check를 통과시키는 conclusion은 이 셋뿐이다.
+// 종전 판은 반대로 **종결 어휘를 열거**했는데(failure·cancelled·timed_out) `action_required`·`stale`이
+// 그 열거 밖이라, required check를 실제로 막으면서도 '비종결'로 접혀 데드라인을 태웠다. 집합을 뒤집으면
+// 상류가 어휘를 더해도 기본값이 fail-closed다: status=completed인데 이 집합 밖이면 전부 종결이다.
+//   통과 = success · neutral · skipped. 그 외 completed는 전부 막는다(conclusion 부재 null 포함 —
+//   결론을 읽었는데 통과의 증거가 없는 상태다).
+// ⚠️ 이 fail-closed는 **결론을 읽었는데 모르는 어휘**에만 걸린다. **조회 실패**(전송 오류·404·공집합·
+//   head SHA 부재·절단 미상)는 결론이 아니라 **관측 부재**라서 종전대로 fail-open(pending)이다. 둘을
+//   섞으면 GitHub 계층 blip 한 번이 '변이 실패'가 되고, 그 손해가 한 사이클 더 도는 비용보다 크다.
+export const GATE_PASSING = new Set(["success", "neutral", "skipped"]);
+// 페이지 상한 — 종전 20은 **무페이지네이션**이라 절단이 조용한 오종결이었다: 재실행이 잦은 PR에서
+// 새 in_progress가 잘려 나가면 옛 실패가 '최신'으로 뽑힌다. 상한을 API 최대(100)로 올리고, **그래도
+// 상한에 닿으면** 다음 페이지 유무를 모르므로 판정을 접는다(페이지네이션을 더하는 대신 절단 창에서
+// fail-open). ⚠️ 응답 **순서** 가정은 0이다 — 최신 판정은 전적으로 latestCheckRun이 진다.
+export const CHECK_RUNS_PER_PAGE = 100;
+// 관측 불가를 pendingReason에 지목하기 시작하는 **연속** 사이클 수. 한 사이클 blip을 원인으로
+// 지목하지 않기 위한 하한이고(pollWatch의 streak 규율과 같은 축), 성공 관측이 한 번 끼면 0으로 돌아간다.
+const GATE_BLIND_STREAK = 3;
 const CHECK_RUNS_JQ = "[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]";
 type CheckRunRow = { id: number; name: string; status: string; conclusion: string | null; html_url: string; started_at?: string | null };
 
 // 같은 이름의 check-run이 여럿이면 **가장 최신** 하나만 권위다(재실행이 새 check-run을 만든다).
-// 최신 = started_at 최대, 동률·미상이면 id 최대. Date.parse는 미상 형식에서 NaN이고 NaN 비교는
-// 전부 false라 '조용히 왼쪽이 이기는' 정렬이 된다 — 유효성을 먼저 재고 나서 비교한다
-// (함정 「TS 바닥값은 coercion 뒤에서 조용히 꺼진다」의 형제).
+// 판정은 **응답 순서와 무관한 전순서**여야 한다. 종전 판은 "둘 다 유효하고 다르면 시간, 아니면 id"라
+// 비교가 쌍마다 축을 갈아타서 결과가 배열 순서에 종속됐다(라이브는 최신 먼저로 오는데 픽스처는 최신
+// 나중이라, 순서에 기댄 구현이 그대로 초록이었다).
+//   ① started_at이 **파싱 가능한** 행들만으로 최대를 잡는다(동률이면 id 최대 — 재실행이 같은 초에
+//      시작해도 새 id가 이긴다). Date.parse는 미상 형식에서 NaN이고 NaN 비교는 전부 false라, 유효성을
+//      먼저 재지 않으면 '조용히 왼쪽이 이기는' 정렬이 된다(함정 「TS 바닥값은 coercion 뒤에서 조용히
+//      꺼진다」의 형제).
+//   ② 유효 시간 행이 **하나도 없을 때만** id 최대로 떨어진다(형식 미상 응답에서도 판정이 죽지 않게).
+// 시간이 미상인 행은 '더 새롭다'를 증명하지 못하므로 ①의 후보에서 빠진다 — 실물 API는 started_at을
+// 항상 싣고, 혼합 응답은 형상 이상이다.
 export function latestCheckRun(rows: CheckRunRow[]): CheckRunRow | undefined {
   let best: CheckRunRow | undefined;
+  let bestT = Number.NEGATIVE_INFINITY;
   for (const r of rows) {
-    if (best === undefined) { best = r; continue; }
     const t = Date.parse(r.started_at ?? "");
-    const tb = Date.parse(best.started_at ?? "");
-    const byTime = Number.isFinite(t) && Number.isFinite(tb) && t !== tb;
-    if (byTime ? t > tb : r.id > best.id) best = r;
+    if (!Number.isFinite(t)) continue;
+    if (best === undefined || t > bestT || (t === bestT && r.id > best.id)) { best = r; bestT = t; }
   }
+  if (best !== undefined) return best;
+  for (const r of rows) if (best === undefined || r.id > best.id) best = r;
   return best;
 }
 
@@ -374,17 +399,43 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     //   (성공했을 수도 있는 PR을 실패로 보고)가 한 사이클 더 도는 비용보다 크다.
     // ⚠️ 이 조회의 실패는 mergeWatch가 세지 **않는다** — 티켓 06의 접미는 '머지 관측이 죽었다'를
     //   지목하는 축이고, fail-open 보조 관측의 blip이 그 사유를 가로채면 운영자가 잘못 유도된다.
-    const gateFailure = (): { conclusion: string; url: string } | null => {
+    // gate 관측의 **생사** 축 — 이름 드리프트(REQUIRED_CHECK ≠ ci.yaml job id)나 지속 조회 실패는
+    // 조기 종결을 통째로 무력화하는데, 종전에는 pendingReason에 흔적이 0이라 운영자가 '그냥 대기'와
+    // 구별할 수 없었다. mergeWatch와 **분리된** 축이다: 저쪽 접미는 '머지 관측이 죽었다'를 지목하고
+    // 이쪽은 '조기 종결이 눈을 감고 있다'를 지목한다(fail-open 보조 관측의 blip이 저쪽 사유를 가로채면
+    // 운영자가 잘못 유도된다 — 그래서 mergeWatch.observe를 부르지 않는다).
+    let gateBlind = 0;
+    let gateBlindWhy = "";
+    const blind = (why: string): null => { gateBlind += 1; gateBlindWhy = why; return null; };
+    const gateSuffix = (): string =>
+      gateBlind >= GATE_BLIND_STREAK ? ` — required check(${REQUIRED_CHECK}) 관측 불가(${gateBlind}회 연속): ${gateBlindWhy}` : "";
+    // ⚠️ 이 확증 조회도 mergeWatch가 세지 않는다(위 gate 축과 같은 이유).
+    const gateHeadConfirmed = (sha: string): boolean => {
+      const one = readPrOne(pr!.number);
+      if (one.kind !== "ok") return false;
+      const row = one.value as PrRow;
+      return typeof row.head_sha === "string" && row.head_sha === sha;
+    };
+    const gateFailure = (): { conclusion: string; url: string; sha: string } | null => {
       const sha = pr!.head_sha;
-      if (sha === undefined || sha === "") return null;
-      const g = ghRead(`repos/${HOMELAB_REPO}/commits/${sha}/check-runs?check_name=${REQUIRED_CHECK}&filter=all&per_page=20`, CHECK_RUNS_JQ);
-      if (g.kind !== "ok") return null;
+      // 문자열이 아닌 값(투영이 접지 못한 null·응답 형상 변경)은 좌표가 아니다 — 그대로 질의에 실으면
+      // `commits/null/check-runs`가 나가고, 그 응답이 남의 커밋 결론일 수 있다.
+      if (typeof sha !== "string" || sha === "") return blind("PR 투영에 head SHA가 없다");
+      const g = ghRead(`repos/${HOMELAB_REPO}/commits/${sha}/check-runs?check_name=${REQUIRED_CHECK}&filter=all&per_page=${CHECK_RUNS_PER_PAGE}`, CHECK_RUNS_JQ);
+      if (g.kind !== "ok") return blind(`조회 실패: ${g.reason}`);
+      const all = g.value as CheckRunRow[];
+      if (all.length >= CHECK_RUNS_PER_PAGE) return blind(`응답이 페이지 상한(${CHECK_RUNS_PER_PAGE})에 닿았다 — 절단 여부 미상`);
       // 이름 재확인 — 서버측 check_name 필터의 사본이다. 필터 의미가 접두 일치로 바뀌어도(가정),
       // 동명 아닌 check가 required check 노릇을 하지 않게 한다(fail-closed 방향의 좁히기).
-      const latest = latestCheckRun((g.value as CheckRunRow[]).filter((r) => r.name === REQUIRED_CHECK));
+      const rows = all.filter((r) => r.name === REQUIRED_CHECK);
+      // 0건은 '아직 안 붙었다'와 '이름이 어긋났다'를 구별하지 못한다 — 서버 필터가 이름으로 좁히므로
+      // 둘 다 같은 응답이다. 판정은 종전대로 fail-open이되, 지속되면 위 접미가 그 상태를 지목한다.
+      if (rows.length === 0) return blind(`이름이 ${REQUIRED_CHECK}인 check-run 0건(미부착 또는 이름 드리프트)`);
+      gateBlind = 0;
+      const latest = latestCheckRun(rows);
       if (latest === undefined || latest.status !== "completed") return null;
-      const conclusion = latest.conclusion ?? "";
-      return GATE_TERMINAL.has(conclusion) ? { conclusion, url: latest.html_url } : null;
+      const conclusion = latest.conclusion ?? "null";
+      return GATE_PASSING.has(conclusion) ? null : { conclusion, url: latest.html_url, sha };
     };
     while (pr.merged_at === null) {
       // 종결 관측: 머지 없이 닫힘. 목록 인덱스가 단건 리소스보다 낡을 수 있으므로 단건 권위 조회로
@@ -410,7 +461,11 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
       // '사람 머지 대기'로 예산을 태우는 것이 그 레인에서도 똑같이 거짓 대기다. 갈리는 것은 문구뿐:
       // 무엇이 승인이었는지는 동사가 알고(manualMerge) 부가 문맥으로만 싣는다(닫힘 종결과 같은 규약).
       const gate = gateFailure();
-      if (gate !== null) {
+      // 종결 좌표의 단건 확증 — 종결에 쓰는 head SHA는 **목록 스냅샷**에서 왔는데, 목록 endpoint는
+      // 단건 리소스보다 낡을 수 있다(함정 「GitHub API는 낡은 스냅샷을 200으로 돌려준다」). 닫힘 종결과
+      // 같은 규약으로 단건 권위 조회 1회로 확증한다: SHA가 같을 때만 종결하고, 다르거나(그 사이 새 push)
+      // 조회가 ok가 아니면 이번 사이클은 **미확정**이라 폴링을 계속한다.
+      if (gate !== null && gateHeadConfirmed(gate.sha)) {
         const context = spec.manualMerge !== undefined
           ? ` · 수동 머지 레인이지만 required check 실패는 사람 머지도 막는다(이 동사의 머지가 곧 ${spec.manualMerge.approval}이었다)`
           : " · auto-merge는 required check 통과 뒤에만 머지한다";
@@ -421,7 +476,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
         const base5 = spec.manualMerge !== undefined
           ? `사람 머지 대기 — 머지가 곧 ${spec.manualMerge.approval}(PR 검토·머지 후 ${resume()})`
           : `auto-merge 머지 미관측 — required check 대기 중일 수 있다 · ${resume()}`;
-        return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: `${base5}${mergeWatch.suffix()}` }) };
+        return { variant: "pending", omitted: [], result: compact({ ...base, run: runRef(), pr: prRef(), pendingReason: `${base5}${mergeWatch.suffix()}${gateSuffix()}` }) };
       }
       Bun.sleepSync(opts.pollMs);
       const again = readPrList();
