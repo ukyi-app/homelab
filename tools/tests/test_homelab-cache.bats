@@ -17,7 +17,7 @@ setup() {
   KC="$BATS_TEST_TMPDIR/kubeconfig"
   echo "apiVersion: v1" > "$KC"
   # cache PR 픽스처 — pulls?head 케이스는 db와 공유라 브랜치만 cache 것으로 덮는다
-  printf '[{"number":31,"html_url":"https://github.com/ukyi-app/homelab/pull/31","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
+  printf '[{"number":31,"html_url":"https://github.com/ukyi-app/homelab/pull/31","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
 }
 
 run_cache_create() {

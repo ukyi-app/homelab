@@ -16,7 +16,9 @@ setup() {
   make_kubectl_stub
   KC="$BATS_TEST_TMPDIR/kubeconfig"
   echo "apiVersion: v1" > "$KC"
-  printf '[{"number":51,"html_url":"https://github.com/ukyi-app/homelab/pull/51","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
+  # state·head_sha는 실물 응답의 기본값이다 — head SHA가 없으면 required check 관측이 좌표 부재로
+  # 눈을 감고(티켓 47 리뷰 L5) 그 상태가 pendingReason 접미로 보고된다.
+  printf '[{"number":51,"html_url":"https://github.com/ukyi-app/homelab/pull/51","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
 }
 
 run_app_create() {

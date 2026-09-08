@@ -4,9 +4,11 @@
 # GitHub 페이로드에 대해 무엇을 하는지는 어떤 테스트도 밟지 않았다. 두 축으로 그 공백을 메운다:
 #   (a) 텍스트 등식 — lib 소스의 필터 리터럴 == 스텁 case 패턴(정확 일치). 어느 쪽이 드리프트하면
 #       계약 밖 호출이 되어 스텁이 exit 3으로 죽는다. 표기를 재는 축이지 의미론을 재는 축이 아니다.
-#   (b) raw 형상 — 접힘이 있는 세 필터(`.workflow_runs[]` 언랩 · `head: .head.ref` 중첩 ·
-#       `auto_merge != null`)에 대해 **손으로 적은 원시 페이로드**(fixtures/homelab/gh-raw/)에
-#       스텁이 실제 jq를 돌린다. GitHub 필드 리네임이 여기서 red가 된다.
+#   (b) raw 형상 — 접힘이 있는 네 필터(`.workflow_runs[]` 언랩 · `head: .head.ref` 중첩 ·
+#       `auto_merge != null` · 레인 PR의 `head_sha: .head.sha` 중첩)에 대해 **손으로 적은 원시
+#       페이로드**(fixtures/homelab/gh-raw/)에 스텁이 실제 jq를 돌린다. GitHub 필드 리네임이 여기서
+#       red가 된다. 레인 PR 레그(리뷰 M3)는 그 접힘이 **다음 질의의 좌표**라 특히 조용했다 — 접힌
+#       픽스처에서는 필드가 사라져도 아무 단언이 밟지 않는다.
 # 라이브 녹화 + 신선도 게이트는 채택하지 않았다 — 인증 부재 venue에서 시한폭탄 red가 되고 해제
 # 수단이 owner-local gh뿐이다(티켓 43 결정). 라이브 의존은 이 파일에 0건이다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과. @test 이름은 영어(인코딩 함정).
@@ -41,7 +43,7 @@ setup() {
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name, status, conclusion, html_url}]
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name}]
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/runs/501/jobs%[.jobs[] | select(.conclusion == "failure") | .name]
-tools/lib/mutation.ts%repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=20%[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]
+tools/lib/mutation.ts%repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=100%[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]
 tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501%[.[] | {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}]%{number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}
 tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls/21%{number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}
 tools/lib/status.ts%repos/ukyi-app/page/actions/runs?per_page=3%[.workflow_runs[] | {name, status, conclusion, head_sha, head_branch, event, html_url}]
@@ -132,4 +134,36 @@ EOF
   # 여기서는 127이 결함이 아니라 **계약**이다.
   run -127 env PATH="$STUB" STUB_GH_RAW=1 "$STUB/gh" api "repos/ukyi-app/page/actions/runs?per_page=3" --jq "$F"
   [ "$status" -eq 127 ]
+}
+
+@test "the lane PR head.sha nesting is witnessed against a raw payload and steers the required-check query" {
+  # 리뷰 M3 — `head_sha: .head.sha`는 조기 종결(티켓 47)의 **좌표**인데, 접힌 픽스처만으로는
+  # 원시 페이로드 증인이 0이었다(스텁이 jq를 적용하지 않으므로 GitHub이 `head`를 리네임해도 초록).
+  # 이 레인은 목록형·단건형 둘 다 실제 jq를 돌린다(같은 투영 SSOT = LANE_PR_FIELDS).
+  KC="$BATS_TEST_TMPDIR/kubeconfig"; echo "apiVersion: v1" > "$KC"
+  printf '[{"id":9500,"name":"gate","status":"completed","conclusion":"failure","html_url":"https://github.com/ukyi-app/homelab/runs/9500","started_at":"2026-09-08T01:00:00Z"}]\n' > "$FIX/gate-checks.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_RAW=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 200 --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "21" ]
+  # (a) 원시 페이로드에서 접힌 sha가 **다음 질의의 경로**로 그대로 실린다(exact 핀).
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api \
+    "repos/ukyi-app/homelab/commits/d0d0caca7777d0d0caca7777d0d0caca77770001/check-runs?check_name=gate&filter=all&per_page=100" \
+    --jq "[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]"
+  [ "$status" -eq 0 ]
+
+  # (b) 필드 리네임 뮤테이션 — `head`가 사라지면 좌표가 없어지고 조기 종결은 fail-open(pending)이다.
+  #     ⚠️ 여기서 red가 나야 한다: 종전 판은 null 좌표를 그대로 URL에 실어 `commits/null/…`을 쐈다.
+  MUT="$BATS_TEST_TMPDIR/gh-raw-mut"; mkdir -p "$MUT"
+  cp "$GH_RAW_DIR"/*.json "$MUT/"
+  sed 's/"head":/"head_obj":/' "$GH_RAW_DIR/lane-pulls.json" > "$MUT/lane-pulls.json"
+  sed 's/"head":/"head_obj":/' "$GH_RAW_DIR/lane-pull.json" > "$MUT/lane-pull.json"
+  : > "$CALLS"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_RAW=1 GH_RAW_DIR="$MUT" \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 200 --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  # 좌표가 없으면 질의 자체가 나가지 않는다 — `commits/null/…`이 원장에 0건이어야 한다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/commits/null/check-runs?check_name=gate&filter=all&per_page=100" --jq)" = "0" ]
 }

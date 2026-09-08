@@ -572,16 +572,22 @@ pr_closed_unmerged() {
 # ── required check(gate) 실패의 조기 종결(homelab-cli-r2 티켓 47) ────────────────────────────
 # 머지 폴링이 `merged`만 보면 gate 실패가 데드라인(20분)을 통째로 태운다(2026-09-08 드릴 실측:
 # gate 실패 01:06Z · CLI pending 01:15Z, 1204s · pendingReason null). 엔진은 PR head SHA의
-# check-run `gate`를 함께 읽어 **가장 최신** 하나가 completed + {failure,cancelled,timed_out}이면
-# failure로 조기 종결한다. 낡은 스냅샷 방어는 그 비대칭이다 — 실패 판정만 종결에 쓰고, 재실행
+# check-run `gate`를 함께 읽어 **가장 최신** 하나가 completed면서 통과 집합(success·neutral·skipped)
+# 밖이면 failure로 조기 종결한다. 낡은 스냅샷 방어는 그 비대칭이다 — 실패 판정만 종결에 쓰고, 재실행
 # (= 새 check-run)이 진행 중이면 옛 실패를 채택하지 않는다.
+#
+# 이 절의 판정은 **응답 순서와 무관**해야 한다(리뷰 M1): 라이브 `check-runs?filter=all`은 **최신 먼저**로
+# 온다(2026-09-08 실측 — [{id 101915370989 success 02:16}, {id 101913332313 failure 02:04}]). 픽스처를
+# 한 순서로만 두면 `rows[last]`처럼 순서에 기댄 구현이 초록으로 통과하므로, 재실행 레그는 **두 벌**을
+# 돌려 같은 판정을 요구한다.
 
 # 미머지 PR + head SHA(투영 SSOT는 lib/lane-pr.ts LANE_PR_FIELDS) 배치.
 pr_unmerged_with_head() {
   printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
 }
 
-# check-run 한 줄 픽스처 — <id> <status> <conclusion|null> <started_at>.
+# check-run 한 줄 픽스처 — <id> <status> <conclusion|null> <started_at>. started_at은 빈 문자열·
+# 비ISO도 받는다(그 형상에서 시간 비교가 조용히 왼쪽을 채택하지 않는지가 M1의 축이다).
 gate_check_row() {
   printf '{"id":%s,"name":"gate","status":"%s","conclusion":%s,"html_url":"https://github.com/ukyi-app/homelab/runs/%s","started_at":"%s"}' \
     "$1" "$2" "$3" "$1" "$4"
@@ -610,6 +616,8 @@ run_db_gate_wait() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "1" ]
   # 재디스패치 0건 — 변이 argv는 최초 1회뿐이고 종결은 관측이지 재시도가 아니다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  # 종결 좌표는 단건 권위 조회로 확증한다(리뷰 L4) — 닫힘 종결과 같은 규약.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" --jq)" -ge 1 ]
 }
 
 @test "wait: a required check still in progress keeps the existing pending path (no early exit)" {
@@ -619,44 +627,122 @@ run_db_gate_wait() {
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
   echo "$output" | jq -r '.result.pendingReason' | grep -q "머지"
+  # 관측이 살아 있으므로 '관측 불가' 접미는 붙지 않는다(리뷰 L5의 음성 대조).
+  [ "$(echo "$output" | jq -r '.result.pendingReason' | grep -c "관측 불가")" = "0" ]
   # 사이클마다 다시 읽는다(단발 조회가 아니다) — 대기 중 실패로 전이하면 그때 종결해야 한다.
-  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=20" --jq)" -ge 2 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=100" --jq)" -ge 2 ]
 }
 
-@test "wait: a rerun (an old failure beside a newer in-progress check-run) never ends the wait early" {
-  pr_unmerged_with_head
+@test "wait: a rerun never ends the wait early, in either response order (latest-first and latest-last)" {
   # 재실행은 **새** check-run을 만든다 — 최신이 진행 중이면 옛 실패는 이번 판정의 재료가 아니다.
-  printf '[%s,%s]\n' \
-    "$(gate_check_row 9003 completed '"failure"' 2026-09-08T01:00:00Z)" \
-    "$(gate_check_row 9004 in_progress null 2026-09-08T01:10:00Z)" > "$FIX/gate-checks.json"
-  run_db_gate_wait
-  [ "$status" -eq 1 ]
-  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
-  # 양성 대조(같은 @test 안) — 같은 두-행 배치에서 **최신**이 실패로 종결하면 조기 failure다.
-  : > "$CALLS"
-  printf '[%s,%s]\n' \
-    "$(gate_check_row 9003 completed '"success"' 2026-09-08T01:00:00Z)" \
-    "$(gate_check_row 9004 completed '"timed_out"' 2026-09-08T01:10:00Z)" > "$FIX/gate-checks.json"
-  run_db_gate_wait
-  [ "$status" -eq 1 ]
-  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
-  echo "$output" | jq -r '.result.error' | grep -q "conclusion=timed_out"
-  echo "$output" | jq -r '.result.error' | grep -q "https://github.com/ukyi-app/homelab/runs/9004"
-}
-
-@test "wait: a transport error on the required-check read leaves the wait on its pending path (fail-open)" {
-  pr_unmerged_with_head
-  # 같은 픽스처가 **읽히면** 조기 failure다(위 @test) — 여기서 pending인 것은 조회 실패 때문이다.
-  printf '[%s]\n' "$(gate_check_row 9005 completed '"failure"' 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
-  run_db_gate_wait STUB_GATE_READ_FAIL=1
-  [ "$status" -eq 1 ]
-  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
-  echo "$output" | jq -r '.result.pendingReason' | grep -q "머지"
-}
-
-@test "the three terminal conclusions end the wait and the non-terminal ones never do (floor 6)" {
+  # 라이브는 최신 먼저로 오고 픽스처는 최신 나중이었다(리뷰 M1) — 두 벌 다 같은 판정이어야 한다.
+  old="$(gate_check_row 9003 completed '"failure"' 2026-09-08T01:00:00Z)"
+  new="$(gate_check_row 9004 in_progress null 2026-09-08T01:10:00Z)"
   n=0
-  for c in failure cancelled timed_out; do
+  for pair in "$old,$new" "$new,$old"; do
+    : > "$CALLS"
+    pr_unmerged_with_head
+    printf '[%s]\n' "$pair" > "$FIX/gate-checks.json"
+    run_db_gate_wait
+    [ "$status" -eq 1 ]
+    [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+    n=$((n+1))
+  done
+  # 양성 대조 — 같은 두-행 배치에서 **최신**이 실패로 종결하면 조기 failure다(양쪽 순서 모두).
+  oldok="$(gate_check_row 9003 completed '"success"' 2026-09-08T01:00:00Z)"
+  newbad="$(gate_check_row 9004 completed '"timed_out"' 2026-09-08T01:10:00Z)"
+  for pair in "$oldok,$newbad" "$newbad,$oldok"; do
+    : > "$CALLS"
+    pr_unmerged_with_head
+    printf '[%s]\n' "$pair" > "$FIX/gate-checks.json"
+    run_db_gate_wait
+    [ "$status" -eq 1 ]
+    [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+    echo "$output" | jq -r '.result.error' | grep -q "conclusion=timed_out"
+    echo "$output" | jq -r '.result.error' | grep -q "https://github.com/ukyi-app/homelab/runs/9004"
+    n=$((n+1))
+  done
+  [ "$n" -eq 4 ]
+}
+
+@test "wait: the latest rule breaks a started_at tie by id and ignores rows whose started_at is unparseable" {
+  # ① 동률(같은 started_at) — 재실행이 같은 초에 시작해도 **새 id**가 이긴다.
+  n=0
+  for pair in "$(gate_check_row 9010 completed '"failure"' 2026-09-08T01:00:00Z),$(gate_check_row 9011 in_progress null 2026-09-08T01:00:00Z)" \
+              "$(gate_check_row 9011 in_progress null 2026-09-08T01:00:00Z),$(gate_check_row 9010 completed '"failure"' 2026-09-08T01:00:00Z)"; do
+    : > "$CALLS"
+    pr_unmerged_with_head
+    printf '[%s]\n' "$pair" > "$FIX/gate-checks.json"
+    run_db_gate_wait
+    [ "$status" -eq 1 ]
+    [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+    n=$((n+1))
+  done
+  # ② started_at이 빈 문자열·비ISO인 행은 '더 새롭다'를 증명하지 못한다 — 유효 시간 행만으로 최신을
+  #    잡으므로, 유효 시간을 든 in_progress가 이긴다(시간 비교가 조용히 왼쪽을 채택하면 여기가 red).
+  for bad in "" "not-a-timestamp"; do
+    for pair in "$(gate_check_row 9012 completed '"failure"' "$bad"),$(gate_check_row 9013 in_progress null 2026-09-08T01:10:00Z)" \
+                "$(gate_check_row 9013 in_progress null 2026-09-08T01:10:00Z),$(gate_check_row 9012 completed '"failure"' "$bad")"; do
+      : > "$CALLS"
+      pr_unmerged_with_head
+      printf '[%s]\n' "$pair" > "$FIX/gate-checks.json"
+      run_db_gate_wait
+      [ "$status" -eq 1 ]
+      [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+      n=$((n+1))
+    done
+  done
+  # ③ 유효 시간이 **한 행도 없으면** id 최대로 떨어진다 — 그때도 최신(큰 id)이 진행 중이면 pending.
+  for pair in "$(gate_check_row 9014 completed '"failure"' ""),$(gate_check_row 9015 in_progress null "")" \
+              "$(gate_check_row 9015 in_progress null ""),$(gate_check_row 9014 completed '"failure"' "")"; do
+    : > "$CALLS"
+    pr_unmerged_with_head
+    printf '[%s]\n' "$pair" > "$FIX/gate-checks.json"
+    run_db_gate_wait
+    [ "$status" -eq 1 ]
+    [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+    n=$((n+1))
+  done
+  [ "$n" -eq 8 ]
+}
+
+@test "latestCheckRun is order-independent and total on the same rows (unit, direct call)" {
+  # 위 레그들은 엔진을 통과해서 판정을 본다 — 이 @test는 export된 술어를 **직접** 불러 순서 독립성을
+  # 원소 단위로 잰다(엔진 경로가 다른 이유로 pending이 되면 위 레그가 vacuous해질 수 있다).
+  run bun -e '
+    import { latestCheckRun } from "./tools/lib/mutation.ts";
+    const rows = [
+      { id: 1, name: "gate", status: "completed", conclusion: "failure", html_url: "u1", started_at: "2026-09-08T01:00:00Z" },
+      { id: 2, name: "gate", status: "in_progress", conclusion: null, html_url: "u2", started_at: "2026-09-08T01:10:00Z" },
+      { id: 3, name: "gate", status: "completed", conclusion: "success", html_url: "u3", started_at: "" },
+    ];
+    const perm = (a) => a.map((r) => r.id).join("");
+    const seen = new Set();
+    // 3! = 6 순열 전수 — 어떤 순서로 와도 최신은 id 2(유효 시간 최대)여야 한다.
+    const idx = [[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1],[2,1,0]];
+    for (const p of idx) {
+      const got = latestCheckRun(p.map((i) => rows[i]));
+      if (got === undefined || got.id !== 2) { console.error("order " + perm(p.map((i) => rows[i])) + " -> " + String(got && got.id)); process.exit(1); }
+      seen.add(perm(p.map((i) => rows[i])));
+    }
+    if (seen.size !== 6) { console.error("perm floor: " + seen.size); process.exit(1); }
+    // 동률은 id 최대 · 유효 시간 전무면 id 최대 · 빈 배열은 undefined.
+    const tie = latestCheckRun([{ id: 7, started_at: "2026-09-08T01:00:00Z" }, { id: 9, started_at: "2026-09-08T01:00:00Z" }]);
+    if (tie.id !== 9) { console.error("tie: " + tie.id); process.exit(1); }
+    const noTime = latestCheckRun([{ id: 5, started_at: "x" }, { id: 6, started_at: "" }]);
+    if (noTime.id !== 6) { console.error("noTime: " + noTime.id); process.exit(1); }
+    if (latestCheckRun([]) !== undefined) { console.error("empty"); process.exit(1); }
+    console.log("ok:6");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:6$"
+}
+
+@test "the passing set is success/neutral/skipped and every other completed conclusion ends the wait (floor 10)" {
+  # 리뷰 M2 — 종전 판은 **종결 어휘**를 열거해서(failure·cancelled·timed_out) `action_required`·`stale`이
+  # required check를 막으면서도 비종결로 접혔다. 통과 집합을 반전하면 상류 어휘 추가가 fail-closed다.
+  n=0
+  for c in failure cancelled timed_out action_required stale; do
     : > "$CALLS"
     pr_unmerged_with_head
     printf '[%s]\n' "$(gate_check_row 9006 completed "\"$c\"" 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
@@ -675,7 +761,154 @@ run_db_gate_wait() {
     [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
     n=$((n+1))
   done
-  [ "$n" -eq 6 ]
+  # 상류가 새 어휘를 더한 형상(가정) — 통과 집합 밖이므로 종결이다(fail-closed 방향).
+  : > "$CALLS"
+  pr_unmerged_with_head
+  printf '[%s]\n' "$(gate_check_row 9008 completed '"some_future_conclusion"' 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "conclusion=some_future_conclusion"
+  n=$((n+1))
+  # completed인데 conclusion이 null인 형상도 통과 집합 밖이다 — 결론을 읽었는데 통과의 증거가 없다.
+  : > "$CALLS"
+  pr_unmerged_with_head
+  printf '[%s]\n' "$(gate_check_row 9009 completed null 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  n=$((n+1))
+  [ "$n" -eq 10 ]
+}
+
+@test "a non-completed status is never terminal even when the conclusion field already says failure" {
+  # 리뷰 M4 — `status !== "completed"` 가드가 무증인이었다. 실물 응답에서 진행 중 run의 conclusion은
+  # null이지만, 낡은/이상 스냅샷이 값을 실어 보내도 status가 답이다.
+  n=0
+  for st in in_progress queued; do
+    : > "$CALLS"
+    pr_unmerged_with_head
+    printf '[%s]\n' "$(gate_check_row 9020 "$st" '"failure"' 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+    run_db_gate_wait
+    [ "$status" -eq 1 ]
+    [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+    n=$((n+1))
+  done
+  [ "$n" -eq 2 ]
+}
+
+@test "a foreign check-run name never stands in for the required check (client-side name recheck)" {
+  # 리뷰 L2 — 서버측 `check_name=gate` 필터의 사본인 클라이언트 재확인이 무증인이었다. 필터 의미가
+  # 접두 일치로 바뀌거나(가정) 스텁이 넓게 응답하면 동명 아닌 check가 required check 노릇을 한다.
+  pr_unmerged_with_head
+  printf '[%s,{"id":9999,"name":"build","status":"completed","conclusion":"failure","html_url":"https://github.com/ukyi-app/homelab/runs/9999","started_at":"2026-09-08T02:00:00Z"}]\n' \
+    "$(gate_check_row 9021 in_progress null 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  [ "$(echo "$output" | jq -r '.result | has("error")')" = "false" ]
+}
+
+@test "a response that hits the page cap is undecided (truncation fail-open), and one row under it is not" {
+  # 리뷰 L3 — 종전 per_page=20은 무페이지네이션이라 절단이 조용한 오종결이었다(잘려 나간 새
+  # in_progress 대신 옛 실패가 최신이 된다). 상한을 100으로 올리고, 상한에 **닿으면** 판정을 접는다.
+  pr_unmerged_with_head
+  # 100건(상한 도달) — 그중 최신이 실패여도 종결하지 않는다.
+  jq -nc '[range(100) | {id: (9100 + .), name: "gate", status: "completed", conclusion: "failure",
+           html_url: ("https://github.com/ukyi-app/homelab/runs/" + (9100 + . | tostring)),
+           started_at: ("2026-09-08T01:00:0" + (. % 10 | tostring) + "Z")}]' > "$FIX/gate-checks.json"
+  [ "$(jq -r 'length' "$FIX/gate-checks.json")" = "100" ]
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "관측 불가"
+  # 99건(상한 미달)이면 같은 배치가 종결이다 — 접는 축이 '실패 개수'가 아니라 '절단 미상'임을 가른다.
+  : > "$CALLS"
+  jq -c 'del(.[0])' "$FIX/gate-checks.json" > "$FIX/gate-checks.tmp.json"
+  mv "$FIX/gate-checks.tmp.json" "$FIX/gate-checks.json"
+  [ "$(jq -r 'length' "$FIX/gate-checks.json")" = "99" ]
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "conclusion=failure"
+}
+
+@test "wait: a transport error on the required-check read leaves the wait on its pending path (fail-open)" {
+  pr_unmerged_with_head
+  # 같은 픽스처가 **읽히면** 조기 failure다(위 @test) — 여기서 pending인 것은 조회 실패 때문이다.
+  printf '[%s]\n' "$(gate_check_row 9005 completed '"failure"' 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+  run_db_gate_wait STUB_GATE_READ_FAIL=1
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "머지"
+}
+
+@test "a dead required-check observation is named in the pending reason (read failure and empty set)" {
+  # 리뷰 L5 — 이름 드리프트(REQUIRED_CHECK ≠ ci.yaml job id)나 지속 조회 실패는 조기 종결을 통째로
+  # 무력화하는데 pendingReason에 흔적이 0이었다. mergeWatch 접미와 **분리된** 축이다.
+  n=0
+  pr_unmerged_with_head
+  printf '[%s]\n' "$(gate_check_row 9030 completed '"failure"' 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+  run_db_gate_wait STUB_GATE_READ_FAIL=1
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "관측 불가"
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "Bad Gateway"
+  n=$((n+1))
+  # 공집합 = 이름 드리프트와 구별되지 않는다(서버 필터가 이름으로 좁히므로 0건은 '그 이름이 없다'다).
+  : > "$CALLS"
+  pr_unmerged_with_head
+  printf '[]\n' > "$FIX/gate-checks.json"
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "관측 불가"
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "이름"
+  n=$((n+1))
+  # head SHA 좌표가 없으면 질의 자체가 없다 — 그것도 관측 불가다(그리고 check-runs argv가 0건).
+  : > "$CALLS"
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"open"}]\n' > "$FIX/db-prs.json"
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "관측 불가"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=100" --jq)" = "0" ]
+  n=$((n+1))
+  [ "$n" -eq 3 ]
+}
+
+@test "the terminal head SHA is confirmed against the single-PR resource before the wait ends (L4)" {
+  # 리뷰 L4 — 종결 좌표(head SHA)는 **목록 스냅샷**에서 온다. 목록은 단건 리소스보다 낡을 수 있으므로
+  # (함정 「GitHub API는 낡은 스냅샷을 200으로 돌려준다」) 닫힘 종결과 같은 규약으로 단건 조회 1회로
+  # 확증한 뒤에만 종결한다.
+  n=0
+  # ① 확증이 **다른** head SHA를 보고하면(그 사이 새 push) 이번 사이클은 미확정 — 폴링을 계속한다.
+  pr_unmerged_with_head
+  printf '[%s]\n' "$(gate_check_row 9040 completed '"failure"' 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+  printf '{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"deadbee"}\n' > "$FIX/pr-confirm.json"
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  n=$((n+1))
+  # ② 확증 조회가 전송 오류여도 종결하지 않는다(일시 실패 한 번이 종결이 되면 안 된다).
+  : > "$CALLS"
+  pr_unmerged_with_head
+  printf '{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}\n' > "$FIX/pr-confirm.json"
+  run_db_gate_wait STUB_PR_CONFIRM_FAIL=1
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  n=$((n+1))
+  # ③ 같은 SHA를 보고하면 종결이다 — 확증 조회가 원장에 실제로 찍힌 것이 그 증인이다.
+  : > "$CALLS"
+  pr_unmerged_with_head
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" \
+    --jq "{number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}"
+  [ "$status" -eq 0 ]
+  n=$((n+1))
+  [ "$n" -eq 3 ]
 }
 
 @test "the required-check read carries the head SHA coordinate and the exact projection (ledger argv pin)" {
@@ -686,7 +919,7 @@ run_db_gate_wait() {
   run_db_gate_wait
   [ "$status" -eq 1 ]
   run python3 "$LEDGER_PY" exact "$CALLS" gh api \
-    "repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=20" \
+    "repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=100" \
     --jq "[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]"
   [ "$status" -eq 0 ]
 }

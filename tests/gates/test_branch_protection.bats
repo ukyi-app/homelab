@@ -60,3 +60,27 @@ TF="$BATS_TEST_DIRNAME/../../infra/github/repo.tf"
   run grep -niE '솔로|residual|잔여' "$TF"
   [ "$status" -eq 0 ]
 }
+
+@test "the required check name is one string across repo.tf contexts, the ci.yaml job id, and the CLI constant" {
+  # [homelab-cli-r2 티켓 47 리뷰 L5] `homelab … --wait`의 조기 종결은 check-run **이름**으로 required
+  # check를 찾는다. 그 이름은 세 곳의 사본이다 — HCL `contexts`(권위) · ci.yaml의 job id(잡에 `name:`이
+  # 없으므로 check-run 이름 = job id) · CLI 상수(tools/lib/mutation.ts `REQUIRED_CHECK`). 어긋나면
+  # 조회가 공집합이 되어 조기 종결이 **조용히 꺼진다**(손해 방향이 fail-open이라 라이브 신호가 0이다).
+  # 이름은 repo.tf에서 **파생**한다 — 여기에 리터럴을 적으면 넷째 사본이 된다.
+  WF="$BATS_TEST_DIRNAME/../../.github/workflows/ci.yaml"
+  SRC="$BATS_TEST_DIRNAME/../../tools/lib/mutation.ts"
+  ctx="$(sed -n -E 's/^[[:space:]]*contexts[[:space:]]*=[[:space:]]*\[[[:space:]]*"([^"]+)".*/\1/p' "$TF" | head -1)"
+  [ -n "$ctx" ]
+  # ① 그 이름의 잡이 ci.yaml에 실재한다.
+  run yq -r ".jobs | has(\"$ctx\")" "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+  # ② 그 잡에 `name:`이 없다 — 있으면 check-run 이름이 job id가 아니라 그 값이 되어 등식이 깨진다.
+  #    ⚠️ `yq -e`를 쓰지 않는다 — 값이 false면 exit 1이라 키 부재와 구별되지 않는다(등재된 함정).
+  run yq -r ".jobs.\"$ctx\" | has(\"name\")" "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "false" ]
+  # ③ CLI 상수가 같은 문자열이다.
+  run grep -F "export const REQUIRED_CHECK = \"$ctx\";" "$SRC"
+  [ "$status" -eq 0 ]
+}
