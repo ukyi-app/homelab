@@ -138,9 +138,11 @@ run_app_create() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh pr)" = "0" ]
 }
 
-@test "wait: a failed required check is terminal for the manual-merge verb too (nobody can merge it)" {
-  # 티켓 47 — gate는 branch protection의 required check라 실패하면 **사람도** 머지할 수 없다.
-  # 수동 머지 레인에서 '사람 머지 대기'로 예산을 태우는 것이 똑같이 거짓 대기인 이유다.
+@test "wait: a failed required check is terminal for the manual-merge verb too (the normal path will not merge)" {
+  # 티켓 47 — gate는 branch protection의 required check라 실패하면 **정상 경로로는** 머지되지 않는다.
+  # [리뷰 M4] 종전 문구는 "사람도 머지할 수 없다"였는데 IaC와 어긋난다 — infra/github/repo.tf의
+  # `enforce_admins = false`가 owner(admin)에게 required check를 면제한다(그 파일 주석이 의도된
+  # 잔여 우회임을 기록한다). 판정은 그대로 종결이다: 잔여 우회는 경로이지 대기 사유가 아니다.
   printf '[{"number":51,"html_url":"https://github.com/ukyi-app/homelab/pull/51","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
   printf '[{"id":9101,"name":"gate","status":"completed","conclusion":"failure","html_url":"https://github.com/ukyi-app/homelab/runs/9101","started_at":"2026-09-08T01:00:00Z"}]\n' > "$FIX/gate-checks.json"
   run_app_create --wait --json
@@ -150,6 +152,11 @@ run_app_create() {
   echo "$output" | jq -r '.result.error' | grep -q "https://github.com/ukyi-app/homelab/runs/9101"
   # 수동 머지 동사는 무엇이 승인이었는지를 부가 문맥으로 싣는다(닫힘 종결과 같은 규약).
   echo "$output" | jq -r '.result.error' | grep -q "공개 승인"
+  # [리뷰 M4] 문구가 IaC와 정합한지 — 잔여 우회를 사실대로 지목하고 그 근거 파일을 인용한다.
+  echo "$output" | jq -r '.result.error' | grep -q "정상 경로"
+  echo "$output" | jq -r '.result.error' | grep -q "잔여 우회"
+  echo "$output" | jq -r '.result.error' | grep -q "infra/github/repo.tf"
+  [ "$(echo "$output" | jq -r '.result.error' | grep -c "사람 머지도 막는다")" = "0" ]
   [ "$(echo "$output" | jq -r '.result.pr.number')" = "51" ]
   # 승인 경계는 종결 경로에서도 불변 — gh pr 계열 argv 0건.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh pr)" = "0" ]

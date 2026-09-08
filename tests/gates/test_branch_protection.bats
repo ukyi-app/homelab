@@ -71,6 +71,12 @@ TF="$BATS_TEST_DIRNAME/../../infra/github/repo.tf"
   SRC="$BATS_TEST_DIRNAME/../../tools/lib/mutation.ts"
   ctx="$(sed -n -E 's/^[[:space:]]*contexts[[:space:]]*=[[:space:]]*\[[[:space:]]*"([^"]+)".*/\1/p' "$TF" | head -1)"
   [ -n "$ctx" ]
+  # [리뷰 L2] **상한**도 잰다 — 이름 있는 집합의 상한 부재(등재된 함정)다. 위 파생은 첫 원소만 읽으므로
+  # contexts가 둘이 되면 둘째 required check는 이 등식 밖에서 조용히 산다. CLI 상수는 단일 문자열이라
+  # 그 순간 조기 종결이 '유일한 required check' 전제를 잃는다 — 원소 2개가 곧 red이고, 그것이 상수를
+  # 집합으로 넓히라는 신호다. 인용부호 개수로 센다(원소 1개 = `"` 2개).
+  q="$(sed -n -E 's/^[[:space:]]*contexts[[:space:]]*=[[:space:]]*\[([^]]*)\].*/\1/p' "$TF" | head -1 | tr -cd '"' | wc -c)"
+  [ "$q" -eq 2 ]
   # ① 그 이름의 잡이 ci.yaml에 실재한다.
   run yq -r ".jobs | has(\"$ctx\")" "$WF"
   [ "$status" -eq 0 ]
