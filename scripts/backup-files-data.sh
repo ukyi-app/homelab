@@ -139,7 +139,11 @@ phys_disk() {
   local _p="$1" _src _d
   _src="$(findmnt -no SOURCE --target "$_p" 2>/dev/null | sed 's/\[.*//')" || return 1
   [ -n "$_src" ] || return 1
-  _d="$(lsblk -nso NAME,TYPE --raw "$_src" 2>/dev/null | awk '$2 == "disk" { print $1; exit }')" || return 1
+  # lsblk를 먼저 끝까지 받는다 — `lsblk … | awk '… exit'`는 awk의 조기 종료가 나머지 행을 쓰던 lsblk를
+  # SIGPIPE/EPIPE로 죽여 pipefail 아래 "판별 실패"로 위장한다(티켓 49 클래스 — 다중 디스크 트리일수록 잘 밟는다).
+  local _tree
+  _tree="$(lsblk -nso NAME,TYPE --raw "$_src" 2>/dev/null)" || return 1
+  _d="$(awk '$2 == "disk" { print $1; exit }' <<<"$_tree")" || return 1
   [ -n "$_d" ] || return 1
   printf '%s' "$_d"
 }

@@ -201,8 +201,15 @@ done
 #       NETWORK_FILE_DROPINS="…"   ← networkd가 **실제로 로드한** 드롭인 목록
 #   ⚠️ `/run/systemd/netif/leases/<ifindex>`의 `DNS=`와 혼동하지 말 것 — 그건 DHCP가 준 raw 리스라
 #      UseDNS=false여도 값이 그대로 있다(R7 후 클라이언트 수신 확인용이지 실효값이 아니다).
-lf_idx="$($PREFLIGHT_IP -o -4 addr show 2>/dev/null \
-  | awk -v ip="$K3S_NODE_IP" '$4 ~ ("^" ip "/") { sub(/:$/, "", $1); print $1; exit }')"
+# ⚠️ writer를 먼저 **끝까지** 받고 나서 herestring으로 awk에 준다. 옛 형태(`ip … | awk '… exit'`)는 awk가
+#    첫 매치에서 파이프를 닫아, writer(실물 ip의 나머지 링크·테스트 스텁의 다음 줄)가 그 뒤에 쓰면 SIGPIPE(141)
+#    — 러너처럼 SIGPIPE가 무시된 환경에선 EPIPE 쓰기 오류(rc 1) — 로 죽고 pipefail이 그것을 채택해 여기서
+#    `set -e`가 스크립트를 죽였다(티켓 49: 2026-09-08 CI gate flake 2회, `2>/dev/null`이 "Broken pipe"까지 삼켜
+#    진단 0줄). 등재 함정 「`grep -q`의 조기 종료가 pipefail 아래에서 writer를 SIGPIPE로 죽인다」의 형제 —
+#    소비자가 grep -q가 아니라 awk exit인 형태. 캡처 대입은 writer 실패를 `||`로 정직하게 받는다.
+lf_addrs="$($PREFLIGHT_IP -o -4 addr show 2>/dev/null)" \
+  || fail "인터페이스 주소를 열거하지 못했다(${PREFLIGHT_IP}) — 링크 ifindex를 판별할 수 없다"
+lf_idx="$(awk -v ip="$K3S_NODE_IP" '$4 ~ ("^" ip "/") { sub(/:$/, "", $1); print $1; exit }' <<<"$lf_addrs")"
 [ -n "$lf_idx" ] || fail "K3S_NODE_IP=${K3S_NODE_IP}를 가진 링크의 ifindex를 못 찾았다 — 링크 DNS 실효값을 단언할 수 없다"
 lf="${R}/run/systemd/netif/links/${lf_idx}"
 [ -r "$lf" ] || fail "${lf}를 읽지 못했다 — 링크가 DHCP DNS를 거부하는지 단언할 수 없다(networkd 상태 파일 부재)"

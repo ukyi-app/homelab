@@ -135,7 +135,9 @@ helper_seen=0
 helper_bad=""
 for _cm in local-path-config-internal local-path-config-bulk; do
   _hp="$(kubectl -n local-path-storage get cm "$_cm" -o jsonpath='{.data.helperPod\.yaml}' 2>/dev/null || true)"
-  _img="$(printf '%s\n' "$_hp" | awk '/^[[:space:]]*image:[[:space:]]/{sub(/^[[:space:]]*image:[[:space:]]*/,""); print; exit}')"
+  # herestring — `printf … | awk '… exit'`는 awk의 조기 종료가 다중행 printf writer를 SIGPIPE로 죽여 pipefail 아래
+  # 거짓 실패가 된다(티켓 49 클래스, 가드 check-sigpipe-writers 레인 (c)).
+  _img="$(awk '/^[[:space:]]*image:[[:space:]]/{sub(/^[[:space:]]*image:[[:space:]]*/,""); print; exit}' <<<"$_hp")"
   [ -n "$_img" ] || { helper_bad="${helper_bad} ${_cm}(image 줄 없음)"; continue; }
   helper_seen=$((helper_seen + 1))
   [ "$_img" = "$LOCAL_PATH_HELPER_IMAGE" ] || helper_bad="${helper_bad} ${_cm}:${_img}"

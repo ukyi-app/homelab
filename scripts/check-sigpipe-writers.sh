@@ -83,7 +83,15 @@ while IFS= read -r f; do
   # 범위로 의도적으로 좁다(sops/yq/jq 등은 전수 열거 위반 0건이라 미포함).
   hits_cmd="$(grep -nE '\b(sed|awk|cat|grep|kubectl|locale)\b[^|]*\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q' "$f" \
     | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
-  hits="$(printf '%s\n' "$hits_builtin" "$hits_cmd" | grep -v '^$' | LC_ALL=C sort -t: -k1,1n -u || true)"
+  # (c) [티켓 49, 2026-09-08] **조기 종료 소비자** — `grep -q`가 아니라 `awk '… exit'`가 파이프를 닫는 형태.
+  #     host-preflight [6]의 `ip … | awk '… { print $1; exit }'`가 CI에서 두 번 red였다: awk가 첫 매치에서 나가면
+  #     writer(실물 ip의 나머지 링크·스텁의 다음 echo)가 SIGPIPE(141) — 러너처럼 SIGPIPE가 무시된 환경에선
+  #     EPIPE 쓰기 오류(rc 1) — 로 죽고 pipefail이 그것을 채택한다. writer 종류를 가리지 않는다(`$VAR` 명령
+  #     writer도 포함) — 소비자 쪽 `exit`가 결정적 징후라 소비자를 잰다. herestring 형태(`awk … <<<"$v"`)는
+  #     `|`가 없어 매치되지 않고, `exit` 없는 awk는 끝까지 소비하므로 안전하다.
+  hits_awk="$(grep -nE '\|[[:space:]]*awk[[:space:]][^|]*\bexit\b' "$f" \
+    | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  hits="$(printf '%s\n' "$hits_builtin" "$hits_cmd" "$hits_awk" | grep -v '^$' | LC_ALL=C sort -t: -k1,1n -u || true)"
   [ -n "$hits" ] || continue
   while IFS= read -r h; do
     [ -n "$h" ] || continue
@@ -103,7 +111,8 @@ if [ -n "$bad" ]; then
   echo "FAIL: pipefail 아래에서 다중행 writer를 grep -q에 파이프한다 — 매치가 있어도 SIGPIPE(141)로" >&2
   echo "      거짓 FAIL이 날 수 있고, 부하가 높을수록 실패율이 오른다(로컬이 CI를 예고하지 못한다)." >&2
   echo "      처방: \`grep -q PATTERN <<<\"\$var\"\` (herestring — 파이프가 없어 레이스가 원리적으로 사라진다)" >&2
+  echo "      awk '… exit' 소비자도 같다(레인 c): writer를 먼저 변수로 받고 \`awk '…' <<<\"\$var\"\`" >&2
   printf '%s' "$bad" >&2
   exit 1
 fi
-echo "check-sigpipe-writers OK (pipefail 셸 ${scanned}개 스캔, 다중행 writer→grep -q 파이프 0곳)"
+echo "check-sigpipe-writers OK (pipefail 셸 ${scanned}개 스캔, 다중행 writer→grep -q 파이프 0곳 · awk exit 조기 종료 소비자 0곳)"

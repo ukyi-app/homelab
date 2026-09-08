@@ -276,8 +276,10 @@ net_settled() {
 }
 if ls "$TREE"/etc/systemd/network/*.network.d/*.conf >/dev/null 2>&1; then
   $RUN networkctl reload
-  cfg_iface="$(ip -o -4 addr show 2>/dev/null \
-    | awk -v ip="${K3S_NODE_IP:-}" 'ip != "" && $4 ~ ("^" ip "/") { print $2; exit }')"
+  # writer(ip)를 먼저 끝까지 받고 herestring으로 awk에 준다 — `ip … | awk '… exit'`는 awk의 조기 종료가
+  # 나머지 링크를 쓰던 ip를 SIGPIPE/EPIPE로 죽여 pipefail 아래 거짓 실패가 된다(티켓 49, host-preflight [6]과 같은 자리).
+  cfg_addrs="$(ip -o -4 addr show 2>/dev/null)" || cfg_addrs=""
+  cfg_iface="$(awk -v ip="${K3S_NODE_IP:-}" 'ip != "" && $4 ~ ("^" ip "/") { print $2; exit }' <<<"$cfg_addrs")"
   if [ -n "$cfg_iface" ]; then
     echo "    ⚠️ networkctl reconfigure ${cfg_iface} — ${K3S_NODE_IP}가 약 2초간 사라졌다 돌아온다(돌아올 때까지 기다린다)"
     $RUN networkctl reconfigure "$cfg_iface"

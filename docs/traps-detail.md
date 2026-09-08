@@ -2179,6 +2179,14 @@ selfHeal과 플립플롭한다.
   ⚠️ 이 문단은 #574가 갱신하지 않아 **닫힌 부채를 열린 것으로** 서술하고 있었다(SSOT가 코드와 다른
   사실을 말하는 이 레포의 반복 클래스). verify-traps는 `> 가드:` 줄과 헤드라인만 대조하므로 본문
   산문의 이 드리프트를 **원리적으로 못 본다** — 산문도 SSOT의 일부라는 것이 이 자리의 교훈이다.
+- ⚠️ **소비자가 `grep -q`가 아닐 수도 있다(2026-09-08 티켓 49)**: `awk '… { print …; exit }'`도 첫 매치에서 파이프를 닫는다.
+  host-preflight [6]의 `ip -o -4 addr show | awk '… exit'`가 같은 날 CI gate에서 두 번 red였다(#688 · #691) — 서로 다른
+  happy-path @test에서 `예기치 않은 종료 — 줄 205 … (rc=1)`. 두 겹의 위장: ① 러너는 SIGPIPE를 무시하는 환경이라 writer
+  (스텁의 두 번째 `echo`)가 141이 아니라 **EPIPE 쓰기 오류로 rc 1**을 내고, ② writer 쪽 `2>/dev/null`이 "Broken pipe"까지
+  삼켜 로그에 단서가 0줄이다. 로컬 재현은 결정적이다: 매치 줄을 맨 앞에 두고 파이프 버퍼(64KiB)를 넘는 줄을 뒤에 붙이면
+  부하 없이도 rc=141(`infra/k3s-bootstrap/tests/test_02-host-preflight.bats` 마지막 @test). 처방은 같다 — writer를 먼저
+  변수로 **끝까지** 받고 `awk '…' <<<"$var"`. 형제 3곳(`host-config.sh` cfg_iface · `backup-files-data.sh` phys_disk ·
+  `verify-cluster.sh` _img)을 같이 고쳤고, 가드 레인 (c)가 `| awk … exit` 소비자를 pipefail 파일 전수에서 잰다.
 - ⚠️ **가드 도메인(2026-09-05 티켓 71로 확장)**: 판정 범위는 `printf '%s\n' "$var"`·`echo "$var"` 같은 셸 빌트인
   writer **+ 파일/명령 writer**(`sed`·`awk`·`cat`·`grep`·`kubectl`·`locale`·`yq`·`jq` … → `grep -q`)다 — #642가 실증한
   `check-locale-collation.sh` 레인 D(`sed … "$f" | grep -q`)가 그 클래스였고, 확장한 분모가 곧바로
