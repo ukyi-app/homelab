@@ -35,7 +35,8 @@ EOF
   : > "$FIX/tools/sealed-secrets-cert.pem"
   # pgdump 헤지 — DBS는 손 관리 목록이고 test_pgdump_hedge.bats가 databases/*.yaml과의 정합을
   # 강제한다. 픽스처는 실 매니페스트의 DBS 줄 형태(들여쓰기 18칸 + 인용)를 **그대로** 복제한다 —
-  # 편집이 셸 스크립트 본문 안에서 일어나므로 한 글자만 움직여도 잡이 깨진다.
+  # 편집이 셸 스크립트 본문 안에서 일어나므로 한 글자만 움직여도 잡이 깨진다. **뒤따르는 주석**은
+  # 꼬리 보존을 재는 피연산자다 — 아래 grep -qxF가 줄 전체를 못 박는다.
   HEDGE="$FIX/platform/cnpg/prod/pgdump-hedge-cronjob.yaml"
   cat > "$HEDGE" <<'EOF'
 apiVersion: batch/v1
@@ -53,7 +54,7 @@ spec:
               args:
                 - |
                   set -euo pipefail
-                  DBS="app"
+                  DBS="app" # app이 선두 = 복구 우선순위
                   for DB in ${DBS}; do
                     echo "[hedge] ${DB}"
                   done
@@ -340,7 +341,7 @@ EOF
   [ "$(dbs_count "$HEDGE" orders)" = "1" ]
   [ "$(dbs_count "$HEDGE" app)" = "1" ]   # 부트스트랩 app 보존
   # 들여쓰기·인용 보존 — 셸 스크립트 본문이라 한 글자도 움직이면 잡이 깨진다
-  grep -qxF -- '                  DBS="app orders"' "$HEDGE"
+  grep -qxF -- '                  DBS="app orders" # app이 선두 = 복구 우선순위' "$HEDGE"
 }
 
 @test "provision-db hedge registration is token-exact and idempotent (page must not match pages)" {
@@ -381,5 +382,16 @@ EOF
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -qF -- '::error::provision-db: '
   printf '%s' "$output" | grep -qF -- 'DBS'
+  [ ! -e "$FIX/platform/cnpg/prod/databases" ]
+}
+
+@test "provision-db fails closed when the hedge manifest carries two DBS assignment lines" {
+  # 치환은 첫 매치만 바꾼다 — 절반만 갱신된 목록은 헤지 잡이 어느 줄을 마지막에 평가하느냐로
+  # 결과가 갈리는 무성 갭이다. "정확히 1개"가 아니면 갱신 자체를 거부한다.
+  sed 's/^\(  *\)DBS="app".*$/\1DBS="app"\n\1DBS="app"/' "$HEDGE" > "$TMP/h" && mv "$TMP/h" "$HEDGE"
+  provision --name orders --repo-root "$FIX"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '::error::provision-db: '
+  printf '%s' "$output" | grep -qF -- '2개'
   [ ! -e "$FIX/platform/cnpg/prod/databases" ]
 }

@@ -304,3 +304,24 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   # 바닥값 — db 5역할 + cache 3역할(열거가 0으로 붕괴하면 위 전칭이 항진이다).
   echo "$output" | grep -q "^roundtrip:8$"
 }
+
+@test "the hedge kernel round-trips on the real pgdump manifest shipped in this repo" {
+  # 커널의 정규식은 픽스처가 아니라 **실물**에 묶여야 한다. 픽스처만 증인이면 실 매니페스트의
+  # DBS 줄이 재포맷되는 순간(들여쓰기 변경·주석 추가·2줄 분할) 전 픽스처가 초록인 채로 생성·
+  # 철거가 조용히 멈춘다 — 그 red는 PR 게이트(test_pgdump_hedge)에서야 뒤늦게 난다.
+  run bun -e '
+    import { readFileSync } from "node:fs";
+    import { addDb, removeDb, hasDb } from "./tools/lib/hedge-dbs.ts";
+    import { layoutFor } from "./tools/lib/resource-layout.ts";
+    const p = layoutFor("db", "orders").paths.hedge;
+    const text = readFileSync(p, "utf8");
+    // 부트스트랩 app은 실물 목록에 항상 있다(restore_canary 보유 — 복구 드릴의 대조군).
+    if (hasDb(text, "app") !== true) { console.error("실물 DBS에 app이 없다: " + p); process.exit(1); }
+    // 추가→제거 왕복이 **바이트 동일**이어야 커널이 실물을 재포맷하지 않는다는 뜻이다.
+    const rt = removeDb(addDb(text, "zzprobe"), "zzprobe");
+    if (rt !== text) { console.error("왕복이 바이트 동일이 아니다 — 커널이 실물 DBS 줄을 재포맷한다"); process.exit(1); }
+    console.log("anchored:" + p);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^anchored:platform/cnpg/prod/pgdump-hedge-cronjob.yaml$"
+}
