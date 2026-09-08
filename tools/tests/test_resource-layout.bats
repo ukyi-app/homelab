@@ -18,6 +18,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
       "platform/cnpg/prod/databases/kustomization.yaml",
       "platform/cnpg/prod/databases/orders.yaml",
       "platform/cnpg/prod/kustomization.yaml",
+      "platform/cnpg/prod/pgdump-hedge-cronjob.yaml",
       "platform/data-conn/prod/db-orders-conn.sealed.yaml",
       "platform/data-conn/prod/db-orders-ro-conn.sealed.yaml",
       "platform/data-conn/prod/kustomization.yaml",
@@ -30,6 +31,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     if (L.envKeys.rw !== "ORDERS_DATABASE_URL" || L.envKeys.migrate !== "ORDERS_MIGRATE_DATABASE_URL" || L.envKeys.ro !== "ORDERS_RO_DATABASE_URL") { console.error("envKeys: " + JSON.stringify(L.envKeys)); process.exit(1); }
     if (L.roles.owner !== "orders" || L.roles.ro !== "orders_ro") { console.error("roles: " + JSON.stringify(L.roles)); process.exit(1); }
     if (L.tombstoneKey !== "db:orders") { console.error("tombstoneKey: " + L.tombstoneKey); process.exit(1); }
+    // pgdump 헤지는 db 산출물의 공유-잔존 표면이다 — 파일은 남고 DBS 토큰(= DB 이름)만 오간다.
+    if (L.paths.hedge !== "platform/cnpg/prod/pgdump-hedge-cronjob.yaml") { console.error("paths.hedge: " + L.paths.hedge); process.exit(1); }
+    if (L.hedgeEntry !== "orders") { console.error("hedgeEntry: " + L.hedgeEntry); process.exit(1); }
     if (L.ledgerRow !== undefined) { console.error("db는 원장 비접촉인데 ledgerRow=" + L.ledgerRow); process.exit(1); }
     const entries = L.kustomizationEntries.map((e) => e.kust + "|" + e.entry).sort();
     const wantEntries = [
@@ -73,6 +77,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     if (JSON.stringify(L.handles.rw.envKeys) !== JSON.stringify(["DEMO_REDIS_URL"]) || JSON.stringify(L.handles.ro.envKeys) !== JSON.stringify(["DEMO_REDIS_RO_URL"])) { console.error("handle envKeys: " + JSON.stringify(L.handles)); process.exit(1); }
     if (L.envKeys.rw !== "DEMO_REDIS_URL" || L.envKeys.ro !== "DEMO_REDIS_RO_URL" || L.envKeys.migrate !== undefined) { console.error("envKeys: " + JSON.stringify(L.envKeys)); process.exit(1); }
     if (L.ledgerRow !== "cache-demo" || L.tombstoneKey !== "cache:demo") { console.error(L.ledgerRow + " / " + L.tombstoneKey); process.exit(1); }
+    // 헤지는 논리 DB 전용 표면이다 — cache 레이아웃이 그 필드를 가지면 teardown이 남의 목록을 건드린다.
+    if (L.hedgeEntry !== undefined || L.paths.hedge !== undefined) { console.error("cache에 hedge 표면: " + L.hedgeEntry + " / " + L.paths.hedge); process.exit(1); }
     const entries = L.kustomizationEntries.map((e) => e.kust + "|" + e.entry).sort();
     const wantEntries = [
       "platform/cache/prod/kustomization.yaml|demo",
@@ -103,7 +109,15 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     if (JSON.stringify(purged) !== JSON.stringify(wantPurged)) { console.error("db purge:\n" + purged.join("\n")); process.exit(1); }
     const manual = db.files.filter((f) => f.scope === "수동-이연").map((f) => f.path);
     if (JSON.stringify(manual) !== JSON.stringify(["platform/cnpg/prod/cluster.yaml"])) { console.error("manual: " + manual.join(",")); process.exit(1); }
-    if (db.files.filter((f) => f.scope === "공유-잔존").length !== 3) { console.error("db 공유-잔존 수 != 3"); process.exit(1); }
+    const dbShared = db.files.filter((f) => f.scope === "공유-잔존").map((f) => f.path).sort();
+    // 헤지는 4번째 공유-잔존이다: 파일은 전 DB 공용이고 purge는 DBS 토큰 한 개만 뺀다.
+    const wantShared = [
+      "platform/cnpg/prod/databases/kustomization.yaml",
+      "platform/cnpg/prod/kustomization.yaml",
+      "platform/cnpg/prod/pgdump-hedge-cronjob.yaml",
+      "platform/data-conn/prod/kustomization.yaml",
+    ];
+    if (JSON.stringify(dbShared) !== JSON.stringify(wantShared)) { console.error("db 공유-잔존:\n" + dbShared.join("\n")); process.exit(1); }
     const purgedEntries = db.kustomizationEntries.filter((e) => e.scope === "purge-제거").length;
     const sharedEntries = db.kustomizationEntries.filter((e) => e.scope === "공유-잔존").length;
     if (purgedEntries !== 5 || sharedEntries !== 1) { console.error("db entries scope: purge=" + purgedEntries + " shared=" + sharedEntries); process.exit(1); }

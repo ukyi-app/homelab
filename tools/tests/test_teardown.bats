@@ -65,6 +65,31 @@ namespace: cache
 resources:
   - sessions
 EOF
+  # pgdump 헤지 — DBS 손 목록. drop이 여기서 이름을 빼야 헤지 잡(`set -e`)이 DROP된 DB에서 죽지
+  # 않고, test_pgdump_hedge.bats의 양방향 조건(absent CR은 DBS에 **부재**)도 함께 만족한다.
+  # 실 매니페스트의 DBS 줄 형태(들여쓰기 18칸 + 인용)를 그대로 복제한다.
+  HEDGE="$FR/platform/cnpg/prod/pgdump-hedge-cronjob.yaml"
+  cat > "$HEDGE" <<'EOF'
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pg-dump-hedge-r2
+  namespace: database
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: pgdump-hedge
+              args:
+                - |
+                  set -euo pipefail
+                  DBS="app shared shared-archive"
+                  for DB in ${DBS}; do
+                    echo "[hedge] ${DB}"
+                  done
+EOF
   mkdir -p "$FR/platform/victoria-stack/prod"
   printf 'apiVersion: batch/v1\nkind: CronJob\nmetadata: { name: digest-exporter }\nspec:\n  jobTemplate:\n    spec:\n      template:\n        spec:\n          containers:\n            - name: digest-exporter\n              env:\n                - name: APPS\n                  value: "orders=ghcr.io/ukyi-app/orders:sha-x"\n' > "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
 }
@@ -73,6 +98,10 @@ teardown() { rm -rf "$TMP"; }
 # teardown-resource는 모든 모드에서 --refs-verified attestation 필수(F1 강화) — 자동 refcount 대체.
 # 래퍼는 attestation을 항상 전달; 누락 거부는 별도 테스트에서 ${ROOT} raw 호출로 검증.
 tdr() { bun "$ROOT/tools/teardown-resource.ts" --refs-verified manual-test "$@"; }
+
+# 헤지 DBS 판정 — 토큰 단위다(부분 문자열 금지: shared ∈ "shared-archive"는 거짓이어야 한다).
+dbs_line() { sed -n 's/^ *DBS="\([^"]*\)".*/\1/p' "$1"; }
+dbs_count() { c=0; for t in $(dbs_line "$1"); do if [ "$t" = "$2" ]; then c=$((c + 1)); fi; done; echo "$c"; }
 
 # ── teardown-app ─────────────────────────────────────────────────────────────
 
@@ -267,4 +296,61 @@ tdr() { bun "$ROOT/tools/teardown-resource.ts" --refs-verified manual-test "$@";
   run bun "$ROOT/tools/teardown-app.ts" --app app --repo-root "$FR" --dry-run
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.remove | any(. == "digest-exporter APPS 항목") | not'
+}
+
+# ── 헤지 DBS 대칭(티켓 46) ────────────────────────────────────────────────────
+
+@test "purge drop removes the database from the pgdump hedge DBS in the same step" {
+  # 같은 단계인 것이 요점이다: CR이 absent인데 DBS에 이름이 남으면 헤지 잡이 `set -e`로 통째로
+  # 죽어 뒤에 선 DB의 덤프까지 잃고, test_pgdump_hedge의 부재 조건도 red가 된다.
+  run tdr --db shared --repo-root "$FR" --delete-data --backup-verified barman-1 --step drop
+  [ "$status" -eq 0 ]
+  run grep "ensure: absent" "$FR/platform/cnpg/prod/databases/shared.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(dbs_count "$HEDGE" shared)" = "0" ]
+  [ "$(dbs_count "$HEDGE" app)" = "1" ]             # 부트스트랩 app 보존
+  [ "$(dbs_count "$HEDGE" shared-archive)" = "1" ]  # 토큰 경계 — 접두가 같은 형제는 남는다
+}
+
+@test "hedge DBS removal is idempotent across a repeated drop and the later cleanup" {
+  tdr --db shared --repo-root "$FR" --delete-data --backup-verified barman-1 --step drop
+  run tdr --db shared --repo-root "$FR" --delete-data --backup-verified barman-1 --step drop
+  [ "$status" -eq 0 ]
+  [ "$(dbs_count "$HEDGE" shared)" = "0" ]
+  # cleanup은 이미 빠진 이름에 대해 no-op이어야 한다(재개 가능 상태 머신 — 중단 후 재실행 안전)
+  run tdr --db shared --repo-root "$FR" --delete-data --backup-verified barman-1 --step cleanup
+  [ "$status" -eq 0 ]
+  [ "$(dbs_count "$HEDGE" shared)" = "0" ]
+  [ "$(dbs_count "$HEDGE" app)" = "1" ]
+}
+
+@test "purge drop --dry-run leaves the hedge DBS untouched" {
+  before="$(cat "$HEDGE")"
+  run tdr --db shared --repo-root "$FR" --delete-data --backup-verified barman-1 --step drop --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HEDGE")" = "$before" ]
+}
+
+@test "retain teardown never touches the hedge DBS (the database keeps existing)" {
+  before="$(cat "$HEDGE")"
+  run tdr --db shared --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HEDGE")" = "$before" ]
+}
+
+@test "cache purge never edits the hedge DBS (it is a logical-database surface)" {
+  before="$(cat "$HEDGE")"
+  run tdr --cache sessions --repo-root "$FR" --delete-data --backup-verified rdb-1 --step cleanup
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HEDGE")" = "$before" ]
+}
+
+@test "purge drop fails closed when the hedge manifest is missing (no half transition)" {
+  rm "$HEDGE"
+  run tdr --db shared --repo-root "$FR" --delete-data --backup-verified barman-1 --step drop
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'pgdump-hedge-cronjob.yaml'
+  # CR은 present 그대로 — DBS를 못 빼면 CR만 absent로 가는 반쪽 전이가 남으면 안 된다
+  run grep "ensure: present" "$FR/platform/cnpg/prod/databases/shared.yaml"
+  [ "$status" -eq 0 ]
 }

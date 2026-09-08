@@ -33,6 +33,31 @@ resources:
   - cluster.yaml # 기존 주석 보존 검증용
 EOF
   : > "$FIX/tools/sealed-secrets-cert.pem"
+  # pgdump 헤지 — DBS는 손 관리 목록이고 test_pgdump_hedge.bats가 databases/*.yaml과의 정합을
+  # 강제한다. 픽스처는 실 매니페스트의 DBS 줄 형태(들여쓰기 18칸 + 인용)를 **그대로** 복제한다 —
+  # 편집이 셸 스크립트 본문 안에서 일어나므로 한 글자만 움직여도 잡이 깨진다.
+  HEDGE="$FIX/platform/cnpg/prod/pgdump-hedge-cronjob.yaml"
+  cat > "$HEDGE" <<'EOF'
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pg-dump-hedge-r2
+  namespace: database
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: pgdump-hedge
+              args:
+                - |
+                  set -euo pipefail
+                  DBS="app"
+                  for DB in ${DBS}; do
+                    echo "[hedge] ${DB}"
+                  done
+EOF
 
   # kubeseal 스텁: stdin(JSON manifest)을 소비하고 SealedSecret 모양만 출력 — 평문 값은 절대 미출력
   mkdir -p "$TMP/bin"
@@ -70,6 +95,10 @@ teardown() { rm -rf "$TMP"; }
 #    비-0이라 두 채널이 겹친다(실측: provision-db.ts 삭제 시 17레인 중 #14·#15가 그대로 초록).
 #    거부 문구 양성 대조는 각 레인이 지고, 여기서는 대상 실재를 닫는다.
 provision() { [ -f "$ROOT/tools/provision-db.ts" ]; PATH="$TMP/bin:$PATH" run bun "$ROOT/tools/provision-db.ts" "$@"; }
+
+# 헤지 DBS 판정 — 토큰 단위다(부분 문자열 금지: page ∈ "pages"는 거짓이어야 한다).
+dbs_line() { sed -n 's/^ *DBS="\([^"]*\)".*/\1/p' "$1"; }
+dbs_count() { c=0; for t in $(dbs_line "$1"); do if [ "$t" = "$2" ]; then c=$((c + 1)); fi; done; echo "$c"; }
 
 @test "provision-db emits a CNPG Database CR with owner==name, retain policy and extensions" {
   provision --name orders --extensions pgcrypto,citext --repo-root "$FIX"
@@ -301,4 +330,56 @@ EOF
   echo "$output" | jq -re '.checklist[]' | grep -q "db-orders-conn"
   # ro-conn은 모드2 디버깅 전용 — 배선 대상이 아님이 checklist에 명시된다
   echo "$output" | jq -re '.checklist[]' | grep -q "db-orders-ro-conn"
+}
+
+@test "provision-db registers the new database in the pgdump hedge DBS list" {
+  # DBS 손 목록을 갱신하는 주체가 없어 create-database PR이 required check에서 항상 red였다
+  # (드릴 실측 2026-09-08 PR #689: `not ok … hedge dumps every logical Database CR`).
+  provision --name orders --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+  [ "$(dbs_count "$HEDGE" orders)" = "1" ]
+  [ "$(dbs_count "$HEDGE" app)" = "1" ]   # 부트스트랩 app 보존
+  # 들여쓰기·인용 보존 — 셸 스크립트 본문이라 한 글자도 움직이면 잡이 깨진다
+  grep -qxF -- '                  DBS="app orders"' "$HEDGE"
+}
+
+@test "provision-db hedge registration is token-exact and idempotent (page must not match pages)" {
+  sed 's/DBS="app"/DBS="app pages orders"/' "$HEDGE" > "$TMP/h" && mv "$TMP/h" "$HEDGE"
+  provision --name page --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+  [ "$(dbs_count "$HEDGE" page)" = "1" ]
+  [ "$(dbs_count "$HEDGE" pages)" = "1" ]   # 부분 매치로 pages를 잡아먹지 않는다
+  # 이미 목록에 있는 이름으로 생성해도 토큰은 하나뿐(멱등 추가)
+  provision --name orders --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+  [ "$(dbs_count "$HEDGE" orders)" = "1" ]
+}
+
+@test "provision-db dry-run leaves the hedge DBS untouched but plans it" {
+  before="$(cat "$HEDGE")"
+  provision --name orders --repo-root "$FIX" --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HEDGE")" = "$before" ]
+  # 계획 파일 목록(PR 본문이 읽는다)에는 갱신 대상으로 실린다
+  echo "$output" | jq -re '.files[]' | grep -q "pgdump-hedge-cronjob.yaml"
+}
+
+@test "provision-db fails closed when the hedge manifest is missing (no silent backup gap)" {
+  # 조용히 건너뛰면 그 DB는 논리 백업 0인데 알림은 녹색이다 — 실 레포엔 항상 있으므로 부재는 고장이다.
+  rm "$HEDGE"
+  provision --name orders --repo-root "$FIX"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '::error::provision-db: '
+  printf '%s' "$output" | grep -qF -- 'pgdump-hedge-cronjob.yaml'
+  # 전제 검사 단계라 부분 산출이 남지 않는다
+  [ ! -e "$FIX/platform/cnpg/prod/databases" ]
+}
+
+@test "provision-db fails closed when the hedge DBS line drifted out of shape" {
+  printf 'apiVersion: batch/v1\nkind: CronJob\n' > "$HEDGE"
+  provision --name orders --repo-root "$FIX"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- '::error::provision-db: '
+  printf '%s' "$output" | grep -qF -- 'DBS'
+  [ ! -e "$FIX/platform/cnpg/prod/databases" ]
 }
