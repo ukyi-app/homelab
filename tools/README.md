@@ -290,6 +290,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (`--name <db> [--extensions a,b] [--cluster pg]`). 공유 CNPG 안의 논리 DB + owner/ro managed role +
   비밀번호/conn SealedSecret 4개를 산출(`owner==name` 불변식, 논리 DB는 원장 행 비추가).
   비밀번호는 내부 생성→`kubeseal` stdin 직행(평문 비기록). `tools/sealed-secrets-cert.pem` 필요.
+  **+ pgdump 헤지 DBS 등록**(`platform/cnpg/prod/pgdump-hedge-cronjob.yaml`의 헤지 DBS 토큰 —
+  **공유-잔존** 표면이라 파일은 남고 토큰 하나만 추가된다). 갱신본은 계획 단계에서 조립해 dry-run에서도
+  포맷 드리프트가 fail-closed로 걸리고, 이미 등재됐으면 파일 비접촉이다. 이 등록이 없으면
+  `test_pgdump_hedge.bats`가 create-database PR의 required check를 항상 red로 만든다(드릴 실측 PR #689).
 - **`provision-cache.ts`** — create-cache 프로비저너. `_create-cache.yaml`이 호출
   (`--name <cache> [--maxmemory-mi 16..1024]`). 앱별 경량 Valkey 인스턴스(cache NS) +
   conn/ro-conn SealedSecret + 원장 행을 산출. 자격은 `kubeseal` stdin 전용. cert 필요.
@@ -303,6 +307,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (`apps/*/deploy/prod` grep + 실행 워크로드 `kubectl` + 백업 검증) 후 증거 id를 전달해야 진행.
   retain(기본, tombstone) / purge(`--delete-data` + `--backup-verified <id>` + `--step tombstone|drop|verify|cleanup`
   상태머신, 각 step 별도 커밋). 되돌릴 수 없어 fail-closed 게이트가 두껍다(런북 `docs/runbooks/teardown-resource.md`).
+  이름 정책은 provision과 같은 SSOT(`identity.resourceNameError`)라 예약·부트스트랩 이름(`app`·`-ro` 접미)은
+  거부된다 — 그 이름들은 CR이 없어 "멱등 no-op"을 출력하면서 공유 표면만 편집했다.
+  purge `--step drop`이 CR을 absent로 바꾸는 **같은 단계에서 pgdump 헤지 DBS 토큰을 제거**한다(대상 CR이
+  없으면 헤지도 비접촉 — 잔존만 보고). `--step cleanup`의 헤지 제거는 벨트가 아니라 **선행 조건 검사**다:
+  CR이 아직 `ensure: absent`가 아니면 fail-closed(`--step drop`을 먼저) — 무조건 제거는 살아 있는 DB를
+  조용히 백업 목록에서 뺀다.
 
 ## update-image 폴링 (bump 경로 — 인-레포 앱 이미지 전용)
 

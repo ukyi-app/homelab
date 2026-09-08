@@ -21,7 +21,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { RESOURCE_NAME_RE, EXT_RE, resourceNameError } from "./lib/identity.ts";
 import { entryName, layoutFor } from "./lib/resource-layout.ts";
-import { addDb } from "./lib/hedge-dbs.ts";
+import { addDb, hasDb } from "./lib/hedge-dbs.ts";
 import { sealManifest } from "./lib/seal.ts";
 import { parseFlags } from "./lib/cli.ts";
 import { Document, parseDocument } from "yaml";
@@ -106,9 +106,16 @@ if (existingRoles?.items) {
 
 // 헤지 DBS 갱신본은 **계획 단계에서** 미리 조립한다(순수 문자열 — 파일 비접촉). 포맷 드리프트는
 // dry-run에서도 여기서 fail-closed로 걸리고, 실행 경로에서는 어떤 write보다 앞서 걸린다.
-let hedgeNext = "";
-try { hedgeNext = addDb(readFileSync(paths.hedge, "utf8"), name); }
-catch (e) { fail(e instanceof Error ? e.message : String(e)); }
+// 토큰은 레이아웃 커널이 준다(`hedgeEntry` — 지역에서 name을 재유도하지 않는다: 토큰 유도가
+// 두 벌이면 생성과 철거가 서로 다른 문자열을 오간다).
+// null = 이미 등재됨(파일 비접촉). 부재 판정을 **편집과 같은 문법**(hasDb)으로 먼저 하는 이유는
+// 커널의 산출 형식이 정준(공백 축약)이라 텍스트 diff로 멱등을 재면 비정규 공백 위에서 무의미한
+// 재포맷 diff가 공유 매니페스트에 남기 때문이다.
+let hedgeNext: string | null = null;
+try {
+  const before = readFileSync(paths.hedge, "utf8");
+  hedgeNext = hasDb(before, layout.hedgeEntry) ? null : addDb(before, layout.hedgeEntry);
+} catch (e) { fail(e instanceof Error ? e.message : String(e)); }
 
 // ---------- 5) 계획 (비밀값/raw URL 절대 비포함 — PR 본문에 그대로 실린다) ----------
 const plan = {
@@ -310,6 +317,6 @@ writeFileSync(paths.dbKust, dbKustDoc.toString(OPTS));
 writeFileSync(paths.parentKust, parentDoc.toString(OPTS));
 writeFileSync(paths.cluster, clusterDoc.toString(OPTS));
 writeFileSync(paths.connKust, connKustDoc.toString(OPTS));
-writeFileSync(paths.hedge, hedgeNext); // 헤지 DBS 토큰 추가(들여쓰기·인용·주석은 hedge-dbs가 보존)
+if (hedgeNext !== null) writeFileSync(paths.hedge, hedgeNext); // 헤지 DBS 토큰 추가(들여쓰기·인용·꼬리는 hedge-dbs가 보존)
 
 console.log(JSON.stringify(plan, null, 2));

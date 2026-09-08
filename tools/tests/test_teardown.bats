@@ -195,6 +195,9 @@ dbs_count() { c=0; for t in $(dbs_line "$1"); do if [ "$t" = "$2" ]; then c=$((c
 @test "purge cleanup deregisters every removed file from its kustomization (no broken render)" {
   bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
   bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
+  # cleanup은 drop **뒤**에만 온다 — CR이 아직 ensure: present면 fail-closed다(살아 있는 DB를
+  # 헤지 백업 목록에서 빼는 동작이라). 상태머신 순서를 지켜 cleanup에 정상 도달시킨다.
+  tdr --db shared --repo-root "$FR" --delete-data --backup-verified barman-1 --step drop
   run tdr --db shared --repo-root "$FR" --delete-data \
     --backup-verified barman-1 --step cleanup
   [ "$status" -eq 0 ]

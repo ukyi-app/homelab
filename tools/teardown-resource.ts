@@ -18,7 +18,9 @@
 //                      시도하지만 이미 빠져 있으면 no-op이다(중단→재개 안전 벨트).
 //   --step verify    : (라이브) Database CR status + 실제 DB 부재 확인 — 워크플로/owner가 kubectl로
 //   --step cleanup   : CR 파일·conn sealed 제거 + tombstone state=purged (role 제거는
-//                      cluster.yaml managed.roles에서 — 별도 커밋, 워크플로 단계)
+//                      cluster.yaml managed.roles에서 — 별도 커밋, 워크플로 단계).
+//                      **drop 뒤에만 온다** — CR이 아직 `ensure: absent`가 아니면 fail-closed다
+//                      (헤지 DBS 제거가 살아 있는 DB를 백업 목록에서 빼는 동작이 되므로).
 //   모든 step은 멱등(중단→재실행 안전). --backup-verified <id> 없이는 drop/cleanup 거부
 //   (최근 검증된 백업/복구 지점 강제 — postgres: CNPG barman, valkey: RDB 스냅샷 ID).
 //
@@ -26,11 +28,11 @@
 // 모든 teardown(retain/purge)은 --refs-verified <id> attestation을 강제한다(owner가 런북 수동
 // 확인: 사용 앱 grep + 실행 워크로드 kubectl + 백업 검증 후 증거 id 전달; F1 강화).
 import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
-import { RESOURCE_NAME_RE } from "./lib/identity.ts";
+import { resourceNameError } from "./lib/identity.ts";
 import { TOMBSTONES_PATH, layoutFor, purgeArtifactsFor } from "./lib/resource-layout.ts";
 import { replaceTotals, removeRow, parseLedgerRows } from "./lib/ledger-totals.ts";
 import { removeResource } from "./lib/kustomization.ts";
-import { removeDb } from "./lib/hedge-dbs.ts";
+import { hasDb, removeDb } from "./lib/hedge-dbs.ts";
 import { parseFlags } from "./lib/cli.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()/has()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
@@ -51,10 +53,16 @@ const step = arg("--step", deleteData ? undefined : "tombstone");
 const fail = (msg: string): never => { console.error(`teardown-resource: ${msg}`); process.exit(1); };
 if ((db ? 1 : 0) + (cache ? 1 : 0) !== 1) fail("--db <name> 또는 --cache <name> 중 정확히 하나");
 const name = (db ?? cache)!;
-if (!RESOURCE_NAME_RE.test(name)) fail(`이름 형식 불량: ${name}`);
+const kind: "db" | "cache" = db ? "db" : "cache";
+// 이름 정책은 provision과 **같은 SSOT**다(identity.resourceNameError) — 형식만 보던 옛 판정은
+// 예약·부트스트랩 이름(`app`·`postgres`…, `-ro` 접미)을 통과시켰고, 그 이름들은 CR 파일이 없어
+// "CR 없음 — 멱등 no-op"을 출력하면서 **공유 표면**(pgdump 헤지 DBS)만 편집했다. `--db app` 한 번이
+// restore_canary를 담은 부트스트랩 DB를 논리 백업 0으로 만든다. 철거가 만들 수 없는 이름을
+// 받아들일 이유가 없으므로 fail-closed다(정책이 갈리면 그 자체가 우회 표면 — identity.ts 주석).
+const nameErr = resourceNameError(kind, name);
+if (nameErr) fail(nameErr);
 // 산출물 명명·배치는 레이아웃 커널 소유(cli-deepening 심화 4) — provision과 같은 값을 쓴다
 // (원장 행·엔트리 이름 추정 어긋남 F1 클래스의 구조적 소멸).
-const kind: "db" | "cache" = db ? "db" : "cache";
 const layout = kind === "db" ? layoutFor("db", name) : layoutFor("cache", name);
 const key = layout.tombstoneKey;
 
@@ -73,19 +81,28 @@ const writeTombs = () => writeFileSync(tombPath, JSON.stringify(tombs, null, 2) 
 // drop 단계가 편집하는 Database CR — db 전용(커널 정준형 + ROOT 결합).
 const crPath = layout.kind === "db" ? `${ROOT}/${layout.paths.cr}` : "";
 
-// pgdump 헤지 DBS — db 전용 **공유-잔존** 표면(파일은 남고 토큰 하나만 빠진다). 줄 문법은
-// lib/hedge-dbs.ts 소유. 파일 부재·포맷 드리프트는 fail-closed다: 조용한 skip은 "DB는 DROP됐는데
-// 목록엔 남아 있다"를 남기고, 그건 다음 04:00 헤지 잡의 전멸(그리고 PR 게이트 red)로 착지한다.
+// pgdump 헤지 DBS — db 전용 **공유-잔존** 표면(파일은 남고 토큰 하나만 빠진다). 경로·토큰 모두
+// 레이아웃 커널이 주고(`paths.hedge`·`hedgeEntry` — 지역 재유도 금지), 줄 문법은 lib/hedge-dbs.ts
+// 소유. 파일 부재·포맷 드리프트는 fail-closed다: 조용한 skip은 "DB는 DROP됐는데 목록엔 남아
+// 있다"를 남기고, 그건 다음 04:00 헤지 잡의 전멸(그리고 PR 게이트 red)로 착지한다.
 const hedgePath = layout.kind === "db" ? `${ROOT}/${layout.paths.hedge}` : "";
-function dropFromHedge(): string {
-  if (!existsSync(hedgePath)) fail(`${hedgePath} 없음 — pgdump 헤지 DBS에서 '${name}'을 뺄 수 없다 (repo-root 확인)`);
+const hedgeEntry = layout.kind === "db" ? layout.hedgeEntry : "";
+
+// 헤지 갱신본을 **조립만** 한다 — write는 호출부가 낸다. 두 파일(CR·헤지)을 고치는 단계에서
+// 조립·검증을 write보다 앞세워야 한쪽만 쓰인 반쪽 전이가 생기지 않는다.
+// text === null = 쓸 것이 없다(부재). 부재 판정을 **편집과 같은 문법**(hasDb)으로 먼저 하는 이유:
+// 커널의 산출 형식은 정준(공백 축약)이라, 텍스트 diff로 멱등을 재면 비정규 공백 위에서 "없는
+// 이름 제거"가 공유 매니페스트를 건드리는 diff를 낳는다.
+type HedgePlan = { text: string | null; note: string };
+function planHedgeRemoval(): HedgePlan {
+  if (!existsSync(hedgePath)) fail(`${hedgePath} 없음 — pgdump 헤지 DBS에서 '${hedgeEntry}'을 뺄 수 없다 (repo-root 확인)`);
   const before = readFileSync(hedgePath, "utf8");
-  let after = before;
-  try { after = removeDb(before, name); } catch (e) { fail(e instanceof Error ? e.message : String(e)); }
-  if (after === before) return "DBS 이미 부재 — 멱등 no-op";
-  if (!DRY) writeFileSync(hedgePath, after);
-  return `DBS에서 '${name}' 제거`;
+  try {
+    if (!hasDb(before, hedgeEntry)) return { text: null, note: "DBS 이미 부재 — 멱등 no-op(파일 비접촉)" };
+    return { text: removeDb(before, hedgeEntry), note: `DBS에서 '${hedgeEntry}' 제거` };
+  } catch (e) { return fail(e instanceof Error ? e.message : String(e)); }
 }
+const writeHedge = (h: HedgePlan) => { if (h.text !== null && !DRY) writeFileSync(hedgePath, h.text); };
 
 // purge cleanup이 제거할 (파일/디렉토리, 등록된 kustomization, resources 엔트리) — 커널의
 // purge 삼중이 provision 등록의 정확한 역이다. **파일만 rm하고 kustomization 엔트리를 남기면
@@ -117,18 +134,30 @@ switch (step) {
   }
   case "drop": {
     if (kind === "db") {
-      // CR 편집보다 **먼저** 판정한다 — 헤지를 못 고치는 상태에서 CR만 absent로 가면
-      // "DB는 없는데 헤지 목록엔 있다"는 정확히 그 반쪽 전이가 남는다.
-      const hedge = dropFromHedge();
-      if (!existsSync(crPath)) { console.log(JSON.stringify({ ...plan, hedge, action: "CR 없음 — 멱등 no-op" }, null, 2)); break; }
-      let cr = readFileSync(crPath, "utf8");
-      if (/ensure: absent/.test(cr)) { console.log(JSON.stringify({ ...plan, hedge, action: "이미 absent — 멱등 no-op" }, null, 2)); break; }
-      // 논리 DB만 DROP — PVC/클러스터 비접촉
-      cr = /ensure: present/.test(cr) ? cr.replace(/ensure: present/, "ensure: absent")
-        : cr.replace(/^spec:\s*$/m, "spec:\n  ensure: absent");
-      if (!/ensure: absent/.test(cr)) fail(`${crPath}에 ensure를 설정하지 못함 — 수동 확인 필요`);
-      if (!DRY) writeFileSync(crPath, cr);
-      console.log(JSON.stringify({ ...plan, hedge, action: "Database CR ensure: absent (논리 DB DROP, PVC 비접촉)" }, null, 2));
+      // 헤지 갱신본을 CR 편집보다 **먼저** 조립한다 — 파일 부재·포맷 드리프트를 여기서 fail-closed로
+      // 걸어야 "CR만 absent인데 헤지 목록엔 남았다"는 반쪽 전이가 생기지 않는다(아직 write는 없다).
+      const hedge = planHedgeRemoval();
+      if (!existsSync(crPath)) {
+        // **대상이 실재하지 않으면 헤지도 쓰지 않는다.** CR 없는 이름으로 공유 목록을 편집하면
+        // "CR 없음 — 멱등 no-op"이라는 보고와 파일 변경이 서로 모순된다. 잔존만 보고하고 손을 뗀다.
+        const note = hedge.text === null ? "DBS 부재 — 비접촉"
+          : `DBS에 '${hedgeEntry}' 잔존 — CR이 없어 헤지 비접촉(수동 확인)`;
+        console.log(JSON.stringify({ ...plan, hedge: note, action: "CR 없음 — 멱등 no-op" }, null, 2));
+        break;
+      }
+      const crBefore = readFileSync(crPath, "utf8");
+      if (/ensure: absent/.test(crBefore)) {
+        writeHedge(hedge); // CR은 이미 absent — 헤지 잔존만 마저 걷어낸다(재개 안전)
+        console.log(JSON.stringify({ ...plan, hedge: hedge.note, action: "이미 absent — 멱등 no-op" }, null, 2));
+        break;
+      }
+      // 논리 DB만 DROP — PVC/클러스터 비접촉. 두 갱신본을 **먼저 조립·검증**하고(ensure: absent 단언
+      // 포함) 그 뒤에 두 write를 연달아 낸다 — CR 편집이 실패할 수 있는 자리를 write 앞에 모은다.
+      const crNext = /ensure: present/.test(crBefore) ? crBefore.replace(/ensure: present/, "ensure: absent")
+        : crBefore.replace(/^spec:\s*$/m, "spec:\n  ensure: absent");
+      if (!/ensure: absent/.test(crNext)) fail(`${crPath}에 ensure를 설정하지 못함 — 수동 확인 필요`);
+      if (!DRY) { writeHedge(hedge); writeFileSync(crPath, crNext); }
+      console.log(JSON.stringify({ ...plan, hedge: hedge.note, action: "Database CR ensure: absent (논리 DB DROP, PVC 비접촉)" }, null, 2));
     } else {
       // valkey: 인스턴스 PVC만 — drop 단계는 Deployment scale-down 의미가 없어 cleanup으로 위임
       console.log(JSON.stringify({ ...plan, action: "cache는 drop 단계 없음 — verify 후 cleanup" }, null, 2));
@@ -148,9 +177,19 @@ switch (step) {
     break;
   }
   case "cleanup": {
-    // drop을 건너뛰고 바로 온 경우를 위한 벨트 — 정상 경로에서는 이미 빠져 있어 no-op이다.
-    // 파괴 작업 **전에** 둔다: 헤지를 못 고치면 파일을 지우기 전에 abort하는 쪽이 옳다.
-    const hedge = kind === "db" ? dropFromHedge() : "헤지는 논리 DB 전용 — cache는 비접촉";
+    // 헤지 제거는 '무조건 벨트'가 아니라 **선행 조건 검사**다. drop을 건너뛰고 바로 오면 CR은
+    // 아직 present이고, 그때의 무조건 제거는 **살아 있는 DB**를 조용히 백업 목록에서 빼는 동작이다
+    // (다음 04:00부터 그 DB의 논리 백업이 0인데 잡은 녹색으로 끝난다). CR이 없거나 이미 absent일
+    // 때만 멱등 제거하고, 그 밖에는 fail-closed다. 판정·조립 전부 파괴 작업 **앞**에 둔다 —
+    // 헤지를 못 고치는 상태라면 파일을 지우기 전에 abort하는 쪽이 옳다.
+    let hedgeNote = "헤지는 논리 DB 전용 — cache는 비접촉";
+    if (kind === "db") {
+      if (existsSync(crPath) && !/ensure: absent/.test(readFileSync(crPath, "utf8")))
+        fail(`Database CR이 아직 ensure: absent가 아니다 (${crPath}) — '--step drop'을 먼저 실행하라`);
+      const hedge = planHedgeRemoval();
+      writeHedge(hedge);
+      hedgeNote = hedge.note;
+    }
     if (!DRY) {
       // 원장 행 제거를 파괴적 작업(파일 rm·tombstone) **전에** — totals 프로즈 드리프트/write 실패 시 cleanup abort(F1·F2 버그수정).
       if (layout.kind === "cache") {
@@ -178,7 +217,7 @@ switch (step) {
     }
     console.log(JSON.stringify({
       ...plan,
-      hedge,
+      hedge: hedgeNote,
       action: "cleanup — CR/인스턴스/conn 제거 + kustomization 등록 해제 + tombstone(purged)",
       manual: kind === "db" ? "cluster.yaml managed.roles에서 owner/_ro role 제거는 별도 커밋(워크플로 단계)" : "원장 행 자동 제거됨(cache-<name>)",
     }, null, 2));

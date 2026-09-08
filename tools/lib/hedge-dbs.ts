@@ -12,13 +12,20 @@
 // 뒤가 통째로 죽는다 — restore_canary를 담은 부트스트랩 `app`이 선두에 남는 순서가 곧 복구 우선순위다.
 // (정렬은 알파벳순으로 새 DB를 app 앞에 세운다.)
 const DBS_RE = /^([ \t]*DBS=")([^"\n]*)(".*)$/m;
+// 같은 문법의 전역 판 — **매치 개수**를 세기 위한 것이다(아래 matchDbs 주석).
+const DBS_RE_ALL = new RegExp(DBS_RE.source, "gm");
 
 // DBS 줄 매치 — 에러 문구가 여기 한 곳뿐이라 모든 진입점이 같은 fail-loud 문구를 낸다.
-// 부재는 **throw**다: 조용한 no-op은 "백업 0인데 알림은 녹색"인 무성 갭으로 착지한다.
+// 매치는 **정확히 1개**여야 한다:
+//   0 = 포맷 드리프트. 조용한 no-op은 "백업 0인데 알림은 녹색"인 무성 갭으로 착지한다.
+//   2+ = 첫 줄만 고치고 나머지는 방치된다(String.replace는 비전역 정규식에서 첫 매치만 바꾸고,
+//        존재 판정도 첫 줄만 본다). 셸은 마지막 대입이 이기므로 "갱신했다"는 보고와 실제 평가되는
+//        목록이 어긋난다 — 절반 갱신은 조용히 지나가면 안 되는 부류다.
 function matchDbs(text: string): RegExpMatchArray {
-  const m = text.match(DBS_RE);
-  if (!m) throw new Error('pgdump 헤지 DBS="…" 줄을 찾지 못함 — 포맷 드리프트로 갱신 불가');
-  return m;
+  const all = text.match(DBS_RE_ALL);
+  const n = all ? all.length : 0;
+  if (n !== 1) throw new Error(`pgdump 헤지 DBS="…" 줄이 ${n}개 — 정확히 1개여야 갱신 가능(포맷 드리프트)`);
+  return text.match(DBS_RE)!;
 }
 
 const splitDbs = (val: string): string[] => val.trim().split(/\s+/).filter(Boolean);
