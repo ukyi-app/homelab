@@ -1,0 +1,14 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: db-page-ro-conn
+  namespace: prod
+spec:
+  encryptedData:
+    PAGE_RO_DATABASE_URL: AgDIFuR5NllSjHnZL4Nqg7n8ctzZXc4CUHSLfNF9HDc1KG84Oz1wiSh9SThvei8SIs2Wfwn8uRqEFfNmEqsrIDZLLuIR56vZaGEGG9ZDx4Tek1qnzqtxpD/5PNkeX8dav9GQ7WGC6eRjdmx2i+/A7RDyTeZPdA3L5Gx36TJXVipTgkZ/Z821IPFbiQzcTRvPdrpnwtKyBmV6T3/GrAlOx9vXICppbWI3YapBc+pzQI4o2tYnAhFJDqWeZVmMAIYKaKq/LdWzHNodAJTFux+DICrtXMPWYSQ3yUwIi7nXt9FftAws9tAJlaGjUD32sjUMVLHjk7EeU8WvjPQsIBNAa8GLChXQYlY7ZBZgcC2jnLb9ja9fUZ04liZJ9cmJtQVBZ1SyQk559MVUV3FkYVnXyfBhqnELWS5aQwc8d9ZUDwfF3ZJt/68HPf2BzewMJHbO0X1b+BaqhIEZgMvXGl0zO9ljIlpFo0ACUjsSVsZGq8GYFaqZQSqcBhpesZMvwkOhy5VYZpjhl9mkHAHRHLw6NXJ74vOyA9Aaaz1jWQpK+Xw0NPHRkRZDjcZ206B0clGpgyTF2wRAfnTkpT6S0PloZ3jJQS7zBbsf6avktlb7DuAVem7uUpi5rwQH5M/mlrFTAb+4zJcZWkwSHHhGsPEzvPyjrmjMJ9hS0gVbrV4GuB6ZfNTZ3vNksI347+TwTrQGqymmz97t2YGgATv2xmsjJrdrrpRADaQErvRp5Yn1+q0+eoQycYw+2pP9RqY4vBNTeahzjquDJ4rj51OeTVo73RNx48XTMUGJOy81d9WyPS2akWVg9GWrJdbrHi7L2wrR
+  template:
+    metadata:
+      name: db-page-ro-conn
+      namespace: prod
+    type: Opaque
