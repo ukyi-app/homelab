@@ -609,6 +609,11 @@ run_db_gate_wait() {
   echo "$output" | jq -r '.result.error' | grep -q "required check(gate)"
   echo "$output" | jq -r '.result.error' | grep -q "conclusion=failure"
   echo "$output" | jq -r '.result.error' | grep -q "https://github.com/ukyi-app/homelab/runs/9001"
+  # [리뷰 M4] 자동 레인 문구도 IaC 인용을 싣는다 — 수동 레인(test_homelab-appcreate)과 대칭이라
+  # infra/github/repo.tf의 enforce_admins가 뒤집히면 두 레인 문구가 **함께** red가 된다(상수 절 ⚠️가 게이트가 된다).
+  echo "$output" | jq -r '.result.error' | grep -q "정상 경로"
+  echo "$output" | jq -r '.result.error' | grep -q "잔여 우회"
+  echo "$output" | jq -r '.result.error' | grep -q "infra/github/repo.tf"
   # 기존 핸들은 그대로 실린다 — 조기 종결이 재조회 좌표를 잃으면 안 된다.
   [ "$(echo "$output" | jq -r '.result.run.url')" = "https://github.com/ukyi-app/homelab/actions/runs/501" ]
   [ "$(echo "$output" | jq -r '.result.pr.number')" = "21" ]
@@ -920,12 +925,26 @@ run_db_gate_wait() {
   [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
   [ "$(echo "$output" | jq -r '.result.pendingReason' | grep -c "관측 불가")" = "0" ]
   n=$((n+1))
-  # ③ 형식 불량 심은 무시하고 프로덕션 기본으로 돌아간다(빈 문자열·비정수 — 「TS 바닥값」 함정).
-  #    기본 3이면 짧은 데드라인에서 접미 유무가 사이클 수에 달리므로, 여기서는 **실행이 계약대로
-  #    끝나는지**만 본다(pending) — 접미 단언은 위 두 레그가 결정론으로 진다.
-  for bad in "" 0 3.5 abc; do
+  # ③ 형식 불량 심은 무시하고 프로덕션 기본으로 돌아간다(「TS 바닥값」 함정 — Number("")는 0, Number("abc")는 NaN).
+  #    결정론 증인: **건강한 관측**(gate in_progress) 픽스처에서는 blind가 0에 머물러 사이클 수와 무관하게 접미가
+  #    없어야 한다. 표기 검사가 빠지면 ""→0이 임계 0이 되어 `0 >= 0`으로 매 사이클 접미가 붙는다 — 그 차이를
+  #    접미 **부재**로 잰다(리뷰 r3-low-1: 종전 레그는 pending만 재서 정규식을 지워도 초록이었다).
+  for bad in "" 0; do
     : > "$CALLS"
     pr_unmerged_with_head
+    printf '[%s]\n' "$(gate_check_row 9200 in_progress null 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+    run_db_gate_wait HOMELAB_TEST_GATE_BLIND_STREAK="$bad"
+    [ "$status" -eq 1 ]
+    [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+    [ "$(echo "$output" | jq -r '.result.pendingReason' | grep -c "관측 불가")" = "0" ]
+    n=$((n+1))
+  done
+  #    3.5·abc는 같은 픽스처로는 기본(3)과 구별되지 않는다(NaN 비교는 항상 false라 접미가 안 붙는 방향이
+  #    기본과 같다) — 실행이 계약대로 끝나는지(pending)만 본다.
+  for bad in 3.5 abc; do
+    : > "$CALLS"
+    pr_unmerged_with_head
+    printf '[]\n' > "$FIX/gate-checks.json"
     run_db_gate_wait HOMELAB_TEST_GATE_BLIND_STREAK="$bad"
     [ "$status" -eq 1 ]
     [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
