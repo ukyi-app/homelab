@@ -189,12 +189,12 @@ for (const f of diskConnFiles)
 // **근거 있는 자리에만 양수를 둔다**(근거 없는 매직 넘버 금지). 0인 도메인도 목록에 남는 이유는
 // 페이로드 신호(`scan`)를 내기 위해서다 — 바닥값이 0이어도 건수 자체는 관측된다.
 const DOMAINS: { label: string; got: number; min: number; hint: string }[] = [
-  // 기본 0 — 인-레포 배포 앱이 **0개**라 실 registry가 빈 배열이다(page #455 · trip-mate-api 철거).
-  // 앱이 0개인 동안은 0행이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
+  // 기본 1 — 2026-09-08 page 재온보딩(#691)으로 실 registry가 다시 1행이다. 앱이 0개이던 동안은
+  // 0행이 정당해 붕괴와 구별되지 않아 0으로 내려 뒀었다. 앱이 다시 0개가 되면 0으로 내릴 것.
   // 바닥값이 실제로 작동함은 `--floor registry=1`을 명시해 부르는 test_audit-orphans.bats가 계속 증명한다.
-  { label: FLOOR_REGISTRY, got: registry.length, min: 0, hint: "apps.json 행 붕괴 — 이 자리가 0건 검사 후 초록이 되던 곳이다(BLOCKING 3종이 전부 이 순회 안에 있다)." },
-  // 기본 0 — registry와 같은 근거(인-레포 앱 0개). values.yaml 필터 뒤의 배포 가능 앱 수다.
-  { label: FLOOR_APPS, got: appDirs.length, min: 0, hint: "apps/ 유닛 열거 붕괴(repo-walk 스코프·values.yaml 필터)." },
+  { label: FLOOR_REGISTRY, got: registry.length, min: 1, hint: "apps.json 행 붕괴 — 이 자리가 0건 검사 후 초록이 되던 곳이다(BLOCKING 3종이 전부 이 순회 안에 있다)." },
+  // 기본 1 — registry와 같은 근거(2026-09-08 page 재온보딩). values.yaml 필터 뒤의 배포 가능 앱 수다.
+  { label: FLOOR_APPS, got: appDirs.length, min: 1, hint: "apps/ 유닛 열거 붕괴(repo-walk 스코프·values.yaml 필터)." },
   // 기본 0 — 캐시 인스턴스는 첫 create-cache 전까지 정당하게 0이다.
   { label: FLOOR_CACHES, got: cacheDirs.length, min: 0, hint: "cache 인스턴스 디렉토리 열거 붕괴(LAYOUT_DIRS.cacheProd 경로 변경)." },
   // 기본 1 — docs/memory-ledger.md는 CI가 강제하는 예산 SSOT(AGENTS.md: limit 합계 ≤ 10240Mi)라

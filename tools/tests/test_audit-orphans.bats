@@ -342,7 +342,8 @@ resources:
   - db-lonely-conn.sealed.yaml
 KEOF
   git -C "$G" add -A
-  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$G"
+  # 앱 0개 픽스처 — registry·apps 바닥값(실 트리 기본 1, 2026-09-08 page 재온보딩)을 명시 해제한다(관례).
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$G" --floor registry=0 --floor apps=0
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.scan["audit-orphans:apps"] == 0'
   echo "$output" | jq -e '.findings | any(.type == "unreferenced-conn")'
@@ -569,9 +570,9 @@ YAML
   # 형제 dns-drift-check는 `scanned: a.length + b.length` 합계라 작은 레인의 붕괴를 큰 레인이 덮는다.
   # 여기서는 한 레인을 무너뜨려도 **그 레인만** 0이 되고 다른 레인은 그대로 보여야 한다.
   seed_all_domains
-  # 원장·role은 바닥값이 1이라 붕괴시키면 종료코드가 1이 된다(그 축은 아래 두 @test가 진다).
-  # 이 @test의 질문은 "붕괴가 페이로드에 보이는가"이므로 두 바닥값만 명시 해제한다.
-  LOW="--floor ledger=0 --floor roles=0"
+  # 원장·role·registry·apps는 바닥값이 1이라(registry·apps는 2026-09-08 page 재온보딩 뒤) 붕괴시키면 종료코드가
+  # 1이 된다(그 축은 아래 두 @test가 진다). 이 @test의 질문은 "붕괴가 페이로드에 보이는가"이므로 네 바닥값만 명시 해제한다.
+  LOW="--floor ledger=0 --floor roles=0 --floor registry=0 --floor apps=0"
   collapsed=0
   rm -f "$FR/platform/data-conn/prod/.tombstones.json"
   [ "$(scan_count_of "$FR" tombstones $LOW)" = "0" ]
