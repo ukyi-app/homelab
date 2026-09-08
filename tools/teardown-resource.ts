@@ -184,11 +184,19 @@ switch (step) {
     // 헤지를 못 고치는 상태라면 파일을 지우기 전에 abort하는 쪽이 옳다.
     let hedgeNote = "헤지는 논리 DB 전용 — cache는 비접촉";
     if (kind === "db") {
-      if (existsSync(crPath) && !/ensure: absent/.test(readFileSync(crPath, "utf8")))
-        fail(`Database CR이 아직 ensure: absent가 아니다 (${crPath}) — '--step drop'을 먼저 실행하라`);
-      const hedge = planHedgeRemoval();
-      writeHedge(hedge);
-      hedgeNote = hedge.note;
+      if (!existsSync(crPath)) {
+        // CR 파일이 아예 없으면(재실행·손 삭제·이름 오기) drop과 **같은 규율** — 대상이 실재하지 않는 채로
+        // 공유 목록을 편집하지 않는다. 잔존만 보고하고(수동 확인) 나머지 정리는 멱등하게 이어간다.
+        const probe = planHedgeRemoval();
+        hedgeNote = probe.text === null ? "DBS 부재 — 비접촉"
+          : `DBS에 '${hedgeEntry}' 잔존 — CR이 없어 헤지 비접촉(수동 확인)`;
+      } else {
+        if (!/ensure: absent/.test(readFileSync(crPath, "utf8")))
+          fail(`Database CR이 아직 ensure: absent가 아니다 (${crPath}) — '--step drop'을 먼저 실행하라`);
+        const hedge = planHedgeRemoval();
+        writeHedge(hedge);
+        hedgeNote = hedge.note;
+      }
     }
     if (!DRY) {
       // 원장 행 제거를 파괴적 작업(파일 rm·tombstone) **전에** — totals 프로즈 드리프트/write 실패 시 cleanup abort(F1·F2 버그수정).

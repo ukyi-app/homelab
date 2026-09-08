@@ -721,8 +721,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   만질 수 없다. **DBS 줄 문법 전부**를 소유한다: 줄 앵커(들여쓰기·인용·뒤따르는 주석 보존) · 항목
   경계(공백) · **토큰 동일성**(`page`는 `pages`에 매치되지 않는다) · 존재 판정. `addDb`는 말미
   append다(정렬 금지 — 헤지 루프가 `set -e`라 부트스트랩 `app`이 선두에 남는 순서가 복구 우선순위다).
-  세 함수 모두 DBS 줄 매치 0에서 **throw**(fail-loud)하고, `hasDb`는 항목 부재(`false`)를 포맷
-  드리프트(throw)와 가른다. 소비자: `provision-db`(추가)·`teardown-resource`(purge drop/cleanup 제거).
+  세 함수 모두 DBS 줄 매치가 **정확히 1개가 아니면 throw**(fail-loud — 0=포맷 드리프트, 2+=첫 매치만
+  바뀌는 절반 갱신)하고, `hasDb`는 항목 부재(`false`)를 그 드리프트(throw)와 가른다. 소비자: `provision-db`(추가)·`teardown-resource`(purge drop/cleanup 제거).
 - **`lib/sealed-contract.ts`** — 봉인 계약 커널(`readSealed(raw, app)` 단일 함수). 6검증(kind·
   namespace=prod·name=`<app>-secrets`·encryptedData 비었음·키 UPPER_SNAKE·**strict scope**)의 **판정과
   에러 문구** + checksum + **디스크에 쓸 바이트**를 소유한다. strict scope = scope 확대 어노테이션
