@@ -74,6 +74,11 @@ cli_stub_init() {
   # PR 단건 권위 조회(티켓 05) — 목록이 state:closed·미머지일 때만 읽힌다(확증 단계). 기본은 목록과
   # 같은 결론(closed·미머지)이고, stale 레인은 테스트가 merged_at을 채운 사본으로 덮어쓴다.
   printf '{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"closed"}\n' > "$FIX/pr-confirm.json"
+  # required check(gate) check-run 목록(티켓 47) — 머지 폴링이 조기 종결 여부를 재는 축.
+  # 기본은 **공집합**이다: gate가 아직 안 붙은 창(=종전 pending 경로)이 프로덕션의 기본 형상이고,
+  # 여기에 실패를 기본값으로 두면 모든 --wait 레인이 조기 failure로 뒤집힌다. 시나리오 테스트가
+  # 이 파일을 덮어써서 실패·진행중·재실행을 만든다.
+  printf '[]\n' > "$FIX/gate-checks.json"
   printf 'identical\n' > "$FIX/db-compare.txt"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
@@ -184,7 +189,8 @@ PY
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
 # STUB_GH_HANDLE_404 / STUB_GH_NONJSON / STUB_GH_RAW / STUB_GH_HTTP_ERR / STUB_GH_VERSION / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
 # 3종(STUB_GH_RUNS_LIST_FAIL · STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기
-# 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL) / 신선도 스냅샷
+# 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL) / required check 조회 실패
+# (STUB_GATE_READ_FAIL — 티켓 47의 fail-open 증인) / 신선도 스냅샷
 # (STUB_GH_STALE_RUN — 디스패치 전에 이미 같은 nonce를 에코하던 옛 run). 템플릿 파일·status 응답
 # 내용은 $FIX 픽스처가 SSOT.
 #
@@ -379,6 +385,13 @@ case "$*" in
   "api repos/ukyi-app/homelab/pulls/"*" --jq {number, html_url, merged_at, merge_commit_sha, state}")
     if [ -n "${STUB_PR_CONFIRM_FAIL:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
     cat "$FIX/pr-confirm.json"
+    ;;
+  # required check(gate)의 check-run 목록(티켓 47) — PR **head SHA** 좌표라 경로 중간이 글롭이고,
+  # 질의 파라미터(check_name·filter=all·per_page)와 jq 투영은 정확 일치다(드리프트 = exit 3).
+  # STUB_GATE_READ_FAIL=1이면 전송 오류 — 엔진의 fail-open(종전 pending 경로 유지) 증인이다.
+  "api repos/ukyi-app/homelab/commits/"*"/check-runs?check_name=gate&filter=all&per_page=20 --jq "'[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]')
+    if [ -n "${STUB_GATE_READ_FAIL:-}" ]; then echo "gh: HTTP 502: Bad Gateway" >&2; exit 1; fi
+    cat "$FIX/gate-checks.json"
     ;;
   "api repos/ukyi-app/homelab/compare/"*" --jq .status")
     # STUB_COMPARE_FLAKY: 첫 호출만 전송 오류 — 미확정 관측을 캐시하지 않음(재평가 수렴)을 증명.

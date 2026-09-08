@@ -569,6 +569,128 @@ pr_closed_unmerged() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" --jq)" = "1" ]
 }
 
+# ── required check(gate) 실패의 조기 종결(homelab-cli-r2 티켓 47) ────────────────────────────
+# 머지 폴링이 `merged`만 보면 gate 실패가 데드라인(20분)을 통째로 태운다(2026-09-08 드릴 실측:
+# gate 실패 01:06Z · CLI pending 01:15Z, 1204s · pendingReason null). 엔진은 PR head SHA의
+# check-run `gate`를 함께 읽어 **가장 최신** 하나가 completed + {failure,cancelled,timed_out}이면
+# failure로 조기 종결한다. 낡은 스냅샷 방어는 그 비대칭이다 — 실패 판정만 종결에 쓰고, 재실행
+# (= 새 check-run)이 진행 중이면 옛 실패를 채택하지 않는다.
+
+# 미머지 PR + head SHA(투영 SSOT는 lib/lane-pr.ts LANE_PR_FIELDS) 배치.
+pr_unmerged_with_head() {
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
+}
+
+# check-run 한 줄 픽스처 — <id> <status> <conclusion|null> <started_at>.
+gate_check_row() {
+  printf '{"id":%s,"name":"gate","status":"%s","conclusion":%s,"html_url":"https://github.com/ukyi-app/homelab/runs/%s","started_at":"%s"}' \
+    "$1" "$2" "$3" "$1" "$4"
+}
+
+# 조기 종결 레인의 공통 호출 — pending 레인이 예산을 다 태우므로 데드라인을 짧게 잡는다.
+# 추가 인자는 env 대입(STUB_*)으로 넘긴다.
+run_db_gate_wait() {
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" "$@" \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 200 --wait --json
+}
+
+@test "wait: a failed required check ends the merge wait early as a failure carrying the check-run URL" {
+  pr_unmerged_with_head
+  printf '[%s]\n' "$(gate_check_row 9001 completed '"failure"' 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "required check(gate)"
+  echo "$output" | jq -r '.result.error' | grep -q "conclusion=failure"
+  echo "$output" | jq -r '.result.error' | grep -q "https://github.com/ukyi-app/homelab/runs/9001"
+  # 기존 핸들은 그대로 실린다 — 조기 종결이 재조회 좌표를 잃으면 안 된다.
+  [ "$(echo "$output" | jq -r '.result.run.url')" = "https://github.com/ukyi-app/homelab/actions/runs/501" ]
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "21" ]
+  # 조기 종결의 증인 — 머지 폴링이 예산을 태우지 않았다(PR 목록 조회는 step 4의 1회뿐).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "1" ]
+  # 재디스패치 0건 — 변이 argv는 최초 1회뿐이고 종결은 관측이지 재시도가 아니다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+}
+
+@test "wait: a required check still in progress keeps the existing pending path (no early exit)" {
+  pr_unmerged_with_head
+  printf '[%s]\n' "$(gate_check_row 9002 in_progress null 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "머지"
+  # 사이클마다 다시 읽는다(단발 조회가 아니다) — 대기 중 실패로 전이하면 그때 종결해야 한다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=20" --jq)" -ge 2 ]
+}
+
+@test "wait: a rerun (an old failure beside a newer in-progress check-run) never ends the wait early" {
+  pr_unmerged_with_head
+  # 재실행은 **새** check-run을 만든다 — 최신이 진행 중이면 옛 실패는 이번 판정의 재료가 아니다.
+  printf '[%s,%s]\n' \
+    "$(gate_check_row 9003 completed '"failure"' 2026-09-08T01:00:00Z)" \
+    "$(gate_check_row 9004 in_progress null 2026-09-08T01:10:00Z)" > "$FIX/gate-checks.json"
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  # 양성 대조(같은 @test 안) — 같은 두-행 배치에서 **최신**이 실패로 종결하면 조기 failure다.
+  : > "$CALLS"
+  printf '[%s,%s]\n' \
+    "$(gate_check_row 9003 completed '"success"' 2026-09-08T01:00:00Z)" \
+    "$(gate_check_row 9004 completed '"timed_out"' 2026-09-08T01:10:00Z)" > "$FIX/gate-checks.json"
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "conclusion=timed_out"
+  echo "$output" | jq -r '.result.error' | grep -q "https://github.com/ukyi-app/homelab/runs/9004"
+}
+
+@test "wait: a transport error on the required-check read leaves the wait on its pending path (fail-open)" {
+  pr_unmerged_with_head
+  # 같은 픽스처가 **읽히면** 조기 failure다(위 @test) — 여기서 pending인 것은 조회 실패 때문이다.
+  printf '[%s]\n' "$(gate_check_row 9005 completed '"failure"' 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+  run_db_gate_wait STUB_GATE_READ_FAIL=1
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "머지"
+}
+
+@test "the three terminal conclusions end the wait and the non-terminal ones never do (floor 6)" {
+  n=0
+  for c in failure cancelled timed_out; do
+    : > "$CALLS"
+    pr_unmerged_with_head
+    printf '[%s]\n' "$(gate_check_row 9006 completed "\"$c\"" 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+    run_db_gate_wait
+    [ "$status" -eq 1 ]
+    [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+    echo "$output" | jq -r '.result.error' | grep -q "conclusion=$c"
+    n=$((n+1))
+  done
+  for c in success neutral skipped; do
+    : > "$CALLS"
+    pr_unmerged_with_head
+    printf '[%s]\n' "$(gate_check_row 9007 completed "\"$c\"" 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+    run_db_gate_wait
+    [ "$status" -eq 1 ]
+    [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+    n=$((n+1))
+  done
+  [ "$n" -eq 6 ]
+}
+
+@test "the required-check read carries the head SHA coordinate and the exact projection (ledger argv pin)" {
+  # 스텁은 픽스처를 그대로 cat하므로 좌표·투영 누락은 픽스처만으로 무증인이다 — argv를 정적으로 고정한다.
+  # head SHA가 PR 투영에서 오는 것도 여기서 고정된다(c0ffee1 = pr_unmerged_with_head의 head_sha).
+  pr_unmerged_with_head
+  printf '[%s]\n' "$(gate_check_row 9008 completed '"failure"' 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+  run_db_gate_wait
+  [ "$status" -eq 1 ]
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api \
+    "repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=20" \
+    --jq "[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]"
+  [ "$status" -eq 0 ]
+}
+
 @test "db url rejects a newline-carrying --host as a usage error (exit 2, no envelope, no file) — engine predicate" {
   # 티켓 03 — bin(db-url)·MCP(db_url)와 같은 술어(dbUrlInputError). 개행 host는 .env.local 행 주입 표면이다.
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts db url t --host $'h\nX=1' --env-local "$BATS_TEST_TMPDIR/inj.env.local" --json

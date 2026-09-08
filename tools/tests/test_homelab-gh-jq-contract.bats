@@ -20,7 +20,7 @@ setup() {
   make_gh_stub
 }
 
-@test "the eight composite jq filters are shared verbatim by the lib sources and the gh stub (floor 8)" {
+@test "the nine composite jq filters are shared verbatim by the lib sources and the gh stub (floor 9)" {
   # 구분자는 '%' — 필터 본문에 '|'가 들어 있어 파이프를 구분자로 쓸 수 없다.
   # 4번째 칸(lit)은 **소스에 실린 리터럴**이다: 목록형 레인 필터는 lane-pr.ts가
   # `[.[] | ${LANE_PR_FIELDS}]` 템플릿으로 **합성**해서 전문이 소스에 없다(투영 SSOT는 필드 집합
@@ -41,14 +41,15 @@ setup() {
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name, status, conclusion, html_url}]
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name}]
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/runs/501/jobs%[.jobs[] | select(.conclusion == "failure") | .name]
+tools/lib/mutation.ts%repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=20%[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]
 tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501%[.[] | {number, html_url, merged_at, merge_commit_sha, state}]%{number, html_url, merged_at, merge_commit_sha, state}
 tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls/21%{number, html_url, merged_at, merge_commit_sha, state}
 tools/lib/status.ts%repos/ukyi-app/page/actions/runs?per_page=3%[.workflow_runs[] | {name, status, conclusion, head_sha, head_branch, event, html_url}]
 tools/lib/status.ts%repos/ukyi-app/homelab/pulls?state=open&per_page=100%[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]
 tools/lib/status.ts%repos/ukyi-app/homelab/pulls/7%{number, state, merged, merge_commit_sha, title, head_ref: .head.ref, head_sha: .head.sha, auto_merge: (.auto_merge != null), html_url}
 EOF
-  # 비공허 바닥값 — 여덟 줄이 실제로 돌았다(heredoc이 비면 위 전칭이 항진이다).
-  [ "$n" -eq 8 ]
+  # 비공허 바닥값 — 아홉 줄이 실제로 돌았다(heredoc이 비면 위 전칭이 항진이다).
+  [ "$n" -eq 9 ]
   # 변이 엔진의 run 목록 필터는 다섯 레인(create-app·teardown-app·update-secrets·create-cache·
   # create-database)이 **한 텍스트를 공유**한다. 위 루프는 대표 하나만 밟으므로, 나머지 넷이 함께
   # 좁혀졌는지는 이 등식이 잰다(부분 narrowing = 남은 글롭이 드리프트를 삼킨다).
