@@ -16,7 +16,9 @@ setup() {
   make_kubectl_stub
   KC="$BATS_TEST_TMPDIR/kubeconfig"
   echo "apiVersion: v1" > "$KC"
-  printf '[{"number":51,"html_url":"https://github.com/ukyi-app/homelab/pull/51","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
+  # state·head_sha는 실물 응답의 기본값이다 — head SHA가 없으면 required check 관측이 좌표 부재로
+  # 눈을 감고(티켓 47 리뷰 L5) 그 상태가 pendingReason 접미로 보고된다.
+  printf '[{"number":51,"html_url":"https://github.com/ukyi-app/homelab/pull/51","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
 }
 
 run_app_create() {
@@ -133,6 +135,30 @@ run_app_create() {
   # 확증은 단건 권위 조회 1회 — 데드라인까지 폴링하지 않았다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/51" --jq)" = "1" ]
   # 종결 경로에서도 승인 경계는 그대로 — gh pr 계열 argv 0건.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh pr)" = "0" ]
+}
+
+@test "wait: a failed required check is terminal for the manual-merge verb too (the normal path will not merge)" {
+  # 티켓 47 — gate는 branch protection의 required check라 실패하면 **정상 경로로는** 머지되지 않는다.
+  # [리뷰 M4] 종전 문구는 "사람도 머지할 수 없다"였는데 IaC와 어긋난다 — infra/github/repo.tf의
+  # `enforce_admins = false`가 owner(admin)에게 required check를 면제한다(그 파일 주석이 의도된
+  # 잔여 우회임을 기록한다). 판정은 그대로 종결이다: 잔여 우회는 경로이지 대기 사유가 아니다.
+  printf '[{"number":51,"html_url":"https://github.com/ukyi-app/homelab/pull/51","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
+  printf '[{"id":9101,"name":"gate","status":"completed","conclusion":"failure","html_url":"https://github.com/ukyi-app/homelab/runs/9101","started_at":"2026-09-08T01:00:00Z"}]\n' > "$FIX/gate-checks.json"
+  run_app_create --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  echo "$output" | jq -r '.result.error' | grep -q "required check(gate)"
+  echo "$output" | jq -r '.result.error' | grep -q "https://github.com/ukyi-app/homelab/runs/9101"
+  # 수동 머지 동사는 무엇이 승인이었는지를 부가 문맥으로 싣는다(닫힘 종결과 같은 규약).
+  echo "$output" | jq -r '.result.error' | grep -q "공개 승인"
+  # [리뷰 M4] 문구가 IaC와 정합한지 — 잔여 우회를 사실대로 지목하고 그 근거 파일을 인용한다.
+  echo "$output" | jq -r '.result.error' | grep -q "정상 경로"
+  echo "$output" | jq -r '.result.error' | grep -q "잔여 우회"
+  echo "$output" | jq -r '.result.error' | grep -q "infra/github/repo.tf"
+  [ "$(echo "$output" | jq -r '.result.error' | grep -c "사람 머지도 막는다")" = "0" ]
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "51" ]
+  # 승인 경계는 종결 경로에서도 불변 — gh pr 계열 argv 0건.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh pr)" = "0" ]
 }
 

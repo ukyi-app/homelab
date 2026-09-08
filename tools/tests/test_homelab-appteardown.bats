@@ -20,7 +20,7 @@ setup() {
   KC="$BATS_TEST_TMPDIR/kubeconfig"
   echo "apiVersion: v1" > "$KC"
   # 철거 PR — 기본은 미머지(수동 머지 = 파괴 승인).
-  printf '[{"number":91,"html_url":"https://github.com/ukyi-app/homelab/pull/91","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
+  printf '[{"number":91,"html_url":"https://github.com/ukyi-app/homelab/pull/91","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
   # 머지된 철거 PR 픽스처(테스트가 db-prs.json에 덮어써서 쓴다).
   MERGED='[{"number":91,"html_url":"https://github.com/ukyi-app/homelab/pull/91","merged_at":"2026-08-24T09:00:00Z","merge_commit_sha":"feedbee"}]'
 }

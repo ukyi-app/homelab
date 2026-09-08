@@ -70,10 +70,21 @@ cli_stub_init() {
   # 에코하던 옛 완료 run이다(고정 nonce가 프로덕션에서 켜졌을 때의 형상). 투영이 스냅샷 질의와
   # 같아야 한다: 신원(id·name)만 — 상태·URL은 채택하지 않을 run에 대해 의미가 없다.
   printf '[{"id":501,"name":"✨ create-database — mydb [%s]"}]\n' "$NONCE" > "$FIX/stale-runs.json"
-  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
+  # ⚠️ `state`·`head_sha`는 **기본값**이다(티켓 47 리뷰) — 실물 응답은 항상 싣고, 없으면 엔진의
+  # required check 관측이 좌표 부재로 눈을 감는다(그 상태 자체가 pendingReason 접미로 보고된다).
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
   # PR 단건 권위 조회(티켓 05) — 목록이 state:closed·미머지일 때만 읽힌다(확증 단계). 기본은 목록과
   # 같은 결론(closed·미머지)이고, stale 레인은 테스트가 merged_at을 채운 사본으로 덮어쓴다.
-  printf '{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"closed"}\n' > "$FIX/pr-confirm.json"
+  # head_sha가 여기에도 있어야 한다 — 조기 종결은 목록 스냅샷의 좌표를 이 단건 응답으로 확증한 뒤에만
+  # 종결한다(리뷰 L4). 값이 어긋난 사본은 각 테스트가 덮어써서 만든다.
+  printf '{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"closed","head_sha":"c0ffee1"}\n' > "$FIX/pr-confirm.json"
+  # required check(gate) check-run 목록(티켓 47) — 머지 폴링이 조기 종결 여부를 재는 축.
+  # 기본은 **진행 중 1건**이다: PR이 열리면 gate는 곧바로 큐에 들어가므로 '머지 대기'의 정상 형상이
+  # 이것이고, 판정은 pending(종전 경로)이라 모든 --wait 레인이 종전과 같은 색이다.
+  # ⚠️ 기본을 공집합으로 두지 않는 이유(리뷰 L5): 0건은 이제 **관측 불가**의 한 형태다(이름 드리프트와
+  #   구별되지 않는다) — 그 상태가 pendingReason 접미로 보고되므로, 기본값으로 두면 무관한 레인의
+  #   문구가 전부 그 접미를 달게 된다. 0건·실패·재실행 시나리오는 각 테스트가 이 파일을 덮어써서 만든다.
+  printf '[{"id":9000,"name":"gate","status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/runs/9000","started_at":"2026-09-08T00:50:00Z"}]\n' > "$FIX/gate-checks.json"
   printf 'identical\n' > "$FIX/db-compare.txt"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
@@ -184,7 +195,8 @@ PY
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
 # STUB_GH_HANDLE_404 / STUB_GH_NONJSON / STUB_GH_RAW / STUB_GH_HTTP_ERR / STUB_GH_VERSION / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
 # 3종(STUB_GH_RUNS_LIST_FAIL · STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기
-# 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL) / 신선도 스냅샷
+# 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL) / required check 조회 실패
+# (STUB_GATE_READ_FAIL — 티켓 47의 fail-open 증인) / 신선도 스냅샷
 # (STUB_GH_STALE_RUN — 디스패치 전에 이미 같은 nonce를 에코하던 옛 run). 템플릿 파일·status 응답
 # 내용은 $FIX 픽스처가 SSOT.
 #
@@ -336,12 +348,15 @@ case "$*" in
     ;;
   # 필터 텍스트 SSOT는 lib/lane-pr.ts의 LANE_PR_JQ(= `[.[] | ${LANE_PR_FIELDS}]`)다 — 티켓 05가
   # 종결 축으로 `state`를 더하면서 목록형·단건형이 같은 투영을 공유하게 됐다.
-  "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "'[.[] | {number, html_url, merged_at, merge_commit_sha, state}]')
+  "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "'[.[] | {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}]')
     # STUB_PR_MERGE_AFTER_FIRST: 첫 조회는 미머지, 이후 머지 — "--wait 중 사람이 머지" 전환 재현
     # (마커는 셸 내장 리다이렉션 — PATH=$STUB에 touch 없음, STUB_COMPARE_FLAKY와 같은 관용구).
     # STUB_GH_PR_LOOKUP_FAIL(티켓 19): PR 특정 조회가 **전부** 전송 오류 — grace 재시도를 다 쓰고도
     # 미확정이면 '명명 드리프트'가 아니라 GitHub 계층 실패다. status의 열린 PR 목록 전용인
     # STUB_GH_PRS_FAIL과 이름을 의도적으로 분리한다(재사용하면 어느 레인이 죽었는지 못 가른다).
+    # 원시 페이로드 레인(리뷰 M3) — `head_sha: .head.sha` 중첩이 접힌 픽스처에서는 무증인이다
+    # (스텁이 jq를 적용하지 않으므로 필드가 사라져도 초록). 이 레인만 **실제 jq**를 돌린다.
+    if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/lane-pulls.json"; fi
     if [ -n "${STUB_GH_PR_LOOKUP_FAIL:-}" ]; then echo "gh: HTTP 502: Bad Gateway" >&2; exit 1; fi
     if [ -n "${STUB_PR_MERGE_AFTER_FIRST:-}" ]; then
       if [ ! -f "$FIX/.pr-read-once" ]; then
@@ -376,9 +391,18 @@ case "$*" in
   # PR 단건 권위 조회(티켓 05) — 머지 없이 닫힌 목록 행의 확증 단계. status의 핸들 조회와 같은
   # 경로 형상이라 **jq 투영으로 구별**한다(status는 {number, state, merged, …}). STUB_PR_CONFIRM_FAIL이면
   # 전송 오류 — 확증이 미확정이면 엔진은 종결하지 않고 폴링을 계속한다.
-  "api repos/ukyi-app/homelab/pulls/"*" --jq {number, html_url, merged_at, merge_commit_sha, state}")
+  "api repos/ukyi-app/homelab/pulls/"*" --jq {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}")
+    # 원시 페이로드 레인(리뷰 M3) — 목록형과 **같은 투영 SSOT**(LANE_PR_FIELDS)라 중첩도 같다.
+    if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/lane-pull.json"; fi
     if [ -n "${STUB_PR_CONFIRM_FAIL:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
     cat "$FIX/pr-confirm.json"
+    ;;
+  # required check(gate)의 check-run 목록(티켓 47) — PR **head SHA** 좌표라 경로 중간이 글롭이고,
+  # 질의 파라미터(check_name·filter=all·per_page)와 jq 투영은 정확 일치다(드리프트 = exit 3).
+  # STUB_GATE_READ_FAIL=1이면 전송 오류 — 엔진의 fail-open(종전 pending 경로 유지) 증인이다.
+  "api repos/ukyi-app/homelab/commits/"*"/check-runs?check_name=gate&filter=all&per_page=100 --jq "'[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]')
+    if [ -n "${STUB_GATE_READ_FAIL:-}" ]; then echo "gh: HTTP 502: Bad Gateway" >&2; exit 1; fi
+    cat "$FIX/gate-checks.json"
     ;;
   "api repos/ukyi-app/homelab/compare/"*" --jq .status")
     # STUB_COMPARE_FLAKY: 첫 호출만 전송 오류 — 미확정 관측을 캐시하지 않음(재평가 수렴)을 증명.
