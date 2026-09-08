@@ -117,13 +117,15 @@ mkmanifest() {
 }
 
 @test "the shipped manifest no longer targets torn-down app repos" {
-  # page(#455)·trip-mate-api는 철거됐다 — 실질 대상 1건인데 알림은 3건으로 보고돼 자기 임계를 올렸다.
-  run jq -e '[.vendored[].targets[].repo] | index("page")' "$M"
-  [ "$status" -eq 1 ]
+  # trip-mate-api는 철거됐다(#456) — 철거 레포 잔재 target은 알림 건수를 부풀려 자기 임계를 올린다.
+  # page는 #455에서 철거됐다가 2026-09-08 재온보딩(create-app #691)으로 target 2행이 돌아왔다 —
+  # 손 열거 대신 위 roster 등식(apps/*/source-repo ↔ targets)이 권위이고, 여기서는 철거 레포의 부재만 고정한다.
   run jq -e '[.vendored[].targets[].repo] | index("trip-mate-api")' "$M"
   [ "$status" -eq 1 ]
-  # 양성 대조 — 같은 질의가 템플릿에는 매치한다(로스터가 통째로 비지 않았다).
+  # 양성 대조 — 같은 질의가 템플릿과 재온보딩된 page에는 매치한다(로스터가 통째로 비지 않았다).
   run jq -e '[.vendored[].targets[].repo] | index("homelab-app-template")' "$M"
+  [ "$status" -eq 0 ]
+  run jq -e '[.vendored[].targets[].repo] | index("page")' "$M"
   [ "$status" -eq 0 ]
 }
 
