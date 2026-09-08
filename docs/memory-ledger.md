@@ -432,8 +432,9 @@ D-e(NUC 재기준선)를 red로 만든다. 제거·개명은 그 재기준선에
 | <!-- ledger:row --> glances        | observability  |     64 |      128 |
 | <!-- ledger:row --> files          | files          |     32 |      64 |
 | <!-- ledger:row --> local-path-storage | local-path-storage |     64 |     128 |
+| <!-- ledger:row --> page           | prod           |     96 |      256 |
 
-**합계:** req ≈ 4631 Mi · limit ≈ 9148 Mi (반드시 ≤ 10240 Mi 유지).
+**합계:** req ≈ 4727 Mi · limit ≈ 9404 Mi (반드시 ≤ 10240 Mi 유지).
 (⚠️ 이 줄의 형식은 **계약**이다 — `≈` 두 개를 포함한 `tools/lib/ledger-totals.ts`의 `TOTALS_RE`가
 쓰기 경로(`replaceTotals` — create-app/provision-cache/teardown-app/teardown-resource)의 앵커다.
 2026-08-31 정정에서 `≈`가 떨어져 나가 실 원장에 대해 `replaceTotals`가 throw했고, 그동안 세 개의
