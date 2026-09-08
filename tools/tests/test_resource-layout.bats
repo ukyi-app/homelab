@@ -307,8 +307,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 
 @test "the hedge kernel round-trips on the real pgdump manifest shipped in this repo" {
   # 커널의 정규식은 픽스처가 아니라 **실물**에 묶여야 한다. 픽스처만 증인이면 실 매니페스트의
-  # DBS 줄이 재포맷되는 순간(들여쓰기 변경·주석 추가·2줄 분할) 전 픽스처가 초록인 채로 생성·
-  # 철거가 조용히 멈춘다 — 그 red는 PR 게이트(test_pgdump_hedge)에서야 뒤늦게 난다.
+  # DBS 줄이 커널 밖 형태로 바뀌는 순간(인용부 안쪽 재포맷·DBS 줄 소실·2줄 분할 — 들여쓰기·꼬리
+  # 주석은 문법이 흡수한다) 전 픽스처가 초록인 채로 생성·철거가 조용히 멈춘다 — 그 red는 PR
+  # 게이트(test_pgdump_hedge)에서야 뒤늦게 난다.
   run bun -e '
     import { readFileSync } from "node:fs";
     import { addDb, removeDb, hasDb } from "./tools/lib/hedge-dbs.ts";

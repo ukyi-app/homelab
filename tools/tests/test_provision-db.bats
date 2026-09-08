@@ -395,3 +395,14 @@ EOF
   printf '%s' "$output" | grep -qF -- '2개'
   [ ! -e "$FIX/platform/cnpg/prod/databases" ]
 }
+
+@test "provision-db leaves the hedge file byte-identical when the name is already listed (non-canonical spacing)" {
+  # 멱등 판정은 텍스트 diff가 아니라 hasDb다 — 커널 산출은 정준(공백 축약)이라, 이미 등재된 이름을
+  # 다시 등록할 때 diff로 재면 비정규 공백 위에서 무의미한 재포맷이 공유 매니페스트에 남는다.
+  sed 's/DBS="app"/DBS="app  orders"/' "$HEDGE" > "$TMP/h" && mv "$TMP/h" "$HEDGE"
+  before="$(cat "$HEDGE")"
+  provision --name orders --repo-root "$FIX"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HEDGE")" = "$before" ]
+  [ "$(dbs_count "$HEDGE" orders)" = "1" ]
+}

@@ -442,3 +442,30 @@ dbs_count() { c=0; for t in $(dbs_line "$1"); do if [ "$t" = "$2" ]; then c=$((c
   [ -f "$FR/platform/cnpg/prod/databases/shared.yaml" ]
   [ -f "$FR/platform/data-conn/prod/db-shared-conn.sealed.yaml" ]
 }
+
+@test "purge drop fails closed when the CR has no ensure anchor and leaves both files untouched" {
+  # L5의 반대 방향 증인: 헤지는 CR 편집보다 먼저 조립되지만 write는 CR 단언 **뒤**에 있다. CR에
+  # `ensure:`도 bare `spec:` 줄도 없으면 absent 전환을 조립할 수 없고, 그때 헤지가 이미 쓰였다면
+  # "헤지엔 없는데 CR은 present"라는 반쪽 전이가 남는다 — 두 파일 모두 바이트 동일이어야 한다.
+  CR="$FR/platform/cnpg/prod/databases/shared.yaml"
+  printf 'apiVersion: postgresql.cnpg.io/v1\nkind: Database\nmetadata:\n  name: shared\nspec: { cluster: { name: pg }, name: shared, owner: shared }\n' > "$CR"
+  before_h="$(cat "$HEDGE")"; before_c="$(cat "$CR")"
+  run tdr --db shared --repo-root "$FR" --delete-data --backup-verified barman-1 --step drop
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "ensure를 설정하지 못함"
+  [ "$(cat "$HEDGE")" = "$before_h" ]
+  [ "$(cat "$CR")" = "$before_c" ]
+  [ "$(dbs_count "$HEDGE" shared)" = "1" ]
+}
+
+@test "purge cleanup leaves the hedge DBS untouched when no Database CR file exists" {
+  # drop의 불변식(대상이 실재하지 않으면 공유 목록을 편집하지 않는다)은 cleanup에도 같다 — CR 파일이
+  # 이미 없는 재실행·손 삭제 경로에서 잔존 토큰을 보고만 하고 나머지 정리는 멱등하게 이어간다.
+  rm "$FR/platform/cnpg/prod/databases/shared.yaml"
+  before="$(cat "$HEDGE")"
+  run tdr --db shared --repo-root "$FR" --delete-data --backup-verified barman-1 --step cleanup
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HEDGE")" = "$before" ]
+  [ "$(dbs_count "$HEDGE" shared)" = "1" ]
+  echo "$output" | jq -e '.hedge | test("잔존")'
+}
