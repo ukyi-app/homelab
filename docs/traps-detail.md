@@ -2424,3 +2424,26 @@ selfHeal과 플립플롭한다.
   형제: 「`&`로 띄운 헬퍼의 바인드 실패는 `set -e`에 안 걸린다 — readiness 줄이 없으면 …」(readiness를
   시간이 아니라 신호로 재라는 같은 계열).
 > 가드: `infra/k3s-bootstrap/tests/test_03-host-config.bats`
+
+### 렌더가 비는 컴포넌트는 ArgoCD auto-sync가 프룬을 거부한다 — allowEmpty=false가 마지막 리소스의 삭제를 전멸로 읽는다
+- **병(2026-09-08 09:4x KST 실측 — 잔재 리소스 purge PR-C #688)**: `platform/data-conn/prod/kustomization.yaml`의
+  resources가 6 → 0이 되자 같은 커밋의 `cnpg-data`·`cache-prod`는 수렴했는데 `data-conn-prod`만 OutOfSync에
+  머물렀다. 조건: `SyncError: Skipping sync attempt to bf26a7f…: auto-sync will wipe out all resources`.
+  ArgoCD Application `syncPolicy.automated.allowEmpty`(기본 false)는 **desired가 0개인 auto-sync를 거부**한다 —
+  렌더 붕괴로 전 리소스가 프룬되는 사고를 막는 안전장치인데, 정당한 "마지막 하나 삭제"도 같은 형상이라
+  구별하지 못한다. 결과: SealedSecret 6건(→ prod ns Secret 6건)이 git에는 없는데 라이브에 남았다.
+  `audit-orphans`는 git을 보므로 0건이고, 이 라이브 잔존은 어느 게이트에도 보이지 않는다(posture 스위트는
+  앱 conn을 세지 않는다). 이 디렉토리의 옛 주석 "빈 resources여도 kustomize build는 성공해야 한다"는 여전히
+  참이지만 **빌드 성공 ≠ 수렴**이다 — 주석이 그 갭을 가리키게 고쳤다.
+- **왜 allowEmpty=true가 아닌가**: appset 템플릿(`platform/argocd/root/appset.yaml`)의 syncPolicy는 전 컴포넌트
+  공통이라 per-component로 켤 수 없고, 전역으로 켜면 렌더 붕괴(kustomization 파손·KSOPS 실패)가 그대로
+  전멸이 된다 — 이 레포가 「열거 붕괴 → vacuous green」을 최상위 함정으로 두는 것과 같은 이유로 잘못된 레버다.
+- **처방**: 마지막 리소스를 지우는 PR을 머지한 뒤 **prune을 포함한 명시 sync 1회**(owner 확인 후):
+  `kubectl -n argocd patch app data-conn-prod --type merge -p '{"operation":{"sync":{"prune":true}}}'`.
+  `make argo-sync`의 patch(`{"operation":{"sync":{}}}`)에는 prune이 없어 이 6건을 지우지 못한다.
+  이후 desired 0 = live 0으로 Synced가 되고, 다음 리소스가 추가되면 auto-sync가 정상 재개된다(같은 날 실측:
+  `db create page`가 conn 2건을 넣자 자동 수렴).
+- ⇒ **일반형**: 삭제가 집합을 **비우는** 자리 — provision 산출물 전용 디렉토리(`cnpg/prod/databases/` ·
+  `cache/prod/<name>/` · `data-conn/prod/`)의 마지막 리소스 teardown — 는 전부 같은 형상이다. 런북
+  `teardown-resource.md` §3 PR-C 절에 이 단계가 들어 있다(doc-only — 가드 없음: 라이브 수렴 여부는 정적으로
+  못 잰다).
