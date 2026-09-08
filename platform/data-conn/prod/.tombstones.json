@@ -5,9 +5,9 @@
     "at": "2026-06-30T07:41:09.402Z"
   },
   "db:page": {
-    "state": "purged",
-    "backupId": "pg-daily-r2-20260907030000",
-    "at": "2026-09-07T15:44:11.531Z"
+    "state": "purging",
+    "backupId": "pg-daily-r2-20260908030000",
+    "at": "2026-09-08T23:42:15.617Z"
   },
   "db:trip-mate": {
     "state": "purged",
