@@ -176,6 +176,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - sed 주소 범위는 시작 줄에서 끝나지 않는다 — 한 줄짜리 `{{- /* … */ -}}` 주석이 그 뒤를 통째로 지운다
 - 이름 있는 집합의 상한 부재 — 이름이 exactly/only를 선언해도 본문은 존재만 잰다
 - host-config --apply의 링크 재설정은 DHCP 리스를 2초 잃는다 — `&& make up` 체인은 그 창을 정확히 밟는다
+- 렌더가 비는 컴포넌트는 ArgoCD auto-sync가 프룬을 거부한다 — allowEmpty=false가 마지막 리소스의 삭제를 전멸로 읽는다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

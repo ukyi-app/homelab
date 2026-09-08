@@ -9,6 +9,9 @@
 #
 # resources는 tools/provision-db.ts(이후 provision-cache.ts)가 멱등 등록한다.
 # 빈 resources여도 kustomize build는 성공해야 한다 (appset 발견 시점에 DB 0개 가능).
+# ⚠️ 단 빌드 성공 ≠ 수렴: 마지막 conn을 지워 resources가 비면 ArgoCD auto-sync(allowEmpty=false)가
+# "wipe out all resources"로 프룬을 거부한다 — prune 포함 명시 sync 1회가 필요하다(docs/traps-detail.md
+# 「렌더가 비는 컴포넌트는 ArgoCD auto-sync가 프룬을 거부한다」, 2026-09-08 실측).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: prod
