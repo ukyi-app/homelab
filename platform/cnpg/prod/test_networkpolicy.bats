@@ -104,7 +104,15 @@ KUST="${BATS_TEST_DIRNAME}/kustomization.yaml"
       || { echo "미배선: databases/$b — 렌더에서 빠지면 라이브가 프룬된다"; false; }
     m=$((m + 1))
   done
-  [ "$m" -ge 2 ]             # 글롭 붕괴 방지(현재 6 = DB 2개 × {Database CR, owner 봉인본, ro 봉인본}). 상한 아님
+  # 0개 DB도 정당하다(그린필드 · purge 뒤 — 2026-09-08 page·trip-mate purge로 실제 0이 됐다). 글롭 붕괴는
+  # 바닥값이 아니라 **등식**으로 잡는다: 파일 수 == kustomization resources 수. 위 루프가 파일→엔트리를,
+  # 아래가 엔트리→파일을 재 양방향이라 어느 쪽 열거가 죽어도 다른 쪽과 어긋난다(create-database가 DB당
+  # 3파일을 늘리면 두 수가 같이 는다 — 손 로스터 없음).
+  k=$(yq '.resources | length' "$DK")
+  [ "$m" -eq "$k" ]
+  for e in $(yq '.resources[]' "$DK"); do
+    [ -f "$D/databases/$e" ] || { echo "dangling: databases/$e — 엔트리는 있는데 파일이 없다(렌더 실패)"; false; }
+  done
 }
 
 @test "kubelet probe ingress is scoped to the single node IP, not the pod CIDR" {
