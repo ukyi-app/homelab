@@ -903,11 +903,14 @@ run_db_gate_wait() {
   n=0
   pr_unmerged_with_head
   printf '[]\n' > "$FIX/gate-checks.json"
-  # ① 임계 1 — 첫 사이클의 관측 부재가 곧 접미다.
+  # ① 임계 1 — 첫 사이클의 관측 부재가 곧 접미다(사이클이 몇 번 돌든 붙는다).
+  #    ⚠️ 연속 **횟수**는 단언하지 않는다 — 그 수는 데드라인 안에 돈 사이클 수라 여전히 CPU 경합의
+  #    함수다. 결정론인 것은 접미의 **유무**이고, 이 심이 고정하는 것도 그것이다.
   run_db_gate_wait HOMELAB_TEST_GATE_BLIND_STREAK=1
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
-  echo "$output" | jq -r '.result.pendingReason' | grep -q "관측 불가(1회 연속)"
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "관측 불가"
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "회 연속"
   n=$((n+1))
   # ② 데드라인 안에 도달 불가한 임계 — 같은 픽스처에서 접미가 없다(사이클 수와 무관한 음성 대조).
   : > "$CALLS"
@@ -972,6 +975,24 @@ run_db_gate_wait() {
   [ "$status" -eq 0 ]
   n=$((n+1))
   [ "$n" -eq 3 ]
+}
+
+@test "the blind streak accumulates across cycles even when the check-run read itself succeeds" {
+  # [리뷰 M2] 한 사이클은 관측이 **둘**이다 — check-run 조회와 종결 좌표 확증. 계상이 관측 단위면
+  # 앞 관측(조회 성공)이 뒤 관측(확증 불일치)의 스트릭을 같은 사이클 안에서 곧바로 지워, 지속되는
+  # 확증 불일치가 임계 2에 영영 못 닿는다(흔적 0으로 데드라인을 태우던 종전 형상 그대로다).
+  # 사이클 단위 계상이라야 그 상태가 접미로 올라온다.
+  pr_unmerged_with_head
+  printf '[%s]\n' "$(gate_check_row 9060 completed '"failure"' 2026-09-08T01:00:00Z)" > "$FIX/gate-checks.json"
+  printf '{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"deadbee"}\n' > "$FIX/pr-confirm.json"
+  # 임계 2 — 두 사이클이 **필요**하다. 데드라인은 그 사이클 예산의 10배 이상을 준다(폴링 10ms).
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
+    HOMELAB_TEST_GATE_BLIND_STREAK=2 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 3000 --wait --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "관측 불가"
+  echo "$output" | jq -r '.result.pendingReason' | grep -q "확증 불일치"
 }
 
 @test "an authoritative row that reports the PR merged wins over the gate verdict (stale listing, merged PR)" {
