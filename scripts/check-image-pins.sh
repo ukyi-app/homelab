@@ -37,9 +37,9 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-image-pins
 
-# MIN_SCAN_APPS 바닥값 1 — 2026-09-08 page 재온보딩(#691)으로 인-레포 배포 앱이 다시 1개다. 앱이
-#    0개이던 동안은 레인2 열거 0건이 정당해 0으로 내려 뒀었다. 앱이 다시 0개가 되면 0으로 내릴 것.
-ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=1; SCOPE_NARROWED=0
+# ⚠️ MIN_SCAN_APPS 바닥값 0 — 인-레포 배포 앱이 **0개**다(page 2026-09-08 재온보딩 #691 → 같은 날 철거 드릴 #698).
+#    앱이 0개인 동안은 레인2 열거 0건이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
+ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; SCOPE_NARROWED=0
 # 면제 **상한** — 사유 강제(lint_allowlist)의 형제 규율. 사유는 "왜"를 재지만 "몇 건까지"를 재지
 # 않아, 사유 주석만 붙이면 면제가 무한히 늘 수 있었다(실측: 사유 붙은 3건을 더해도 rc 0).
 # 선례이자 SSOT 형태: tools/check-resource-limits.ts의 `EXEMPT_MAX` · scripts/check-doc-index.sh의

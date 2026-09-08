@@ -9,7 +9,7 @@ setup() {
   mkdir -p "$FR/apps" "$FR/infra/cloudflare" "$FR/docs" \
     "$FR/platform/cnpg/prod/databases" "$FR/platform/data-conn/prod" "$FR/platform/cache/prod"
   # ⚠️ 이 스위트의 도메인은 cluster.yaml managed.roles다 — registry도 원장도 정당하게 비어 있다.
-  # audit-orphans의 registry·apps scan-floor(2026-09-08 page 재온보딩 뒤 기본 1)는 그래서 `--floor registry=0 --floor apps=0`으로 **명시** 해제해 부른다
+  # audit-orphans의 registry·apps scan-floor(실 트리 기본값은 앱 개수를 따라 0↔1 — apps/README.md)는 그래서 `--floor registry=0 --floor apps=0`으로 **명시** 해제해 부른다
   # (선례: check-image-pins `--floor total=1`). 바닥값 판정은 모드 분기보다 **앞**이라 기본·--ci·--strict
   # 세 모드에 전부 적용된다(증인: test_audit-orphans.bats의 `--ci --floor registry=1` → rc 1).
   # ⚠️ 원장도 같은 이유로 `--floor ledger=0`이다 — 아래 픽스처의 원장은 meta 줄뿐(행 0)이고,
