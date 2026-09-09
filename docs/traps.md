@@ -115,3 +115,4 @@
 | 이름 있는 집합의 상한 부재 — `@test` 이름이 exactly/only/no other/전수/EVERY/정확를 선언해도 본문은 존재 증인뿐이라 원소 추가가 무증인이다(5라운드 12건 · 6라운드 9건 재발). `[SETCAP]` 레인이 집합 등식 술어(문자열 등식·수 등식·jq/yq contains(/join(",")/length ==) 부재를 정적으로 강제 | gate | `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats` |
 | host-config --apply의 링크 재설정은 DHCP 리스를 2초 잃는다 — `&& make up` 체인은 그 창을 정확히 밟는다(reconfigure 뒤 networkd configured + 핀 IP 복귀까지 ≤15s 대기, 상한 초과는 FAIL) | gate | `infra/k3s-bootstrap/tests/test_03-host-config.bats` |
 | 파일 단위 병렬 bats에서 실 체크아웃을 잠깐 바꾸는 스위트는 남의 가드를 red로 만든다 — 직렬 레인으로 빼고, 고정 /tmp는 $BATS_TEST_TMPDIR로 옮긴다 | gate | `scripts/run-bats.sh`, `scripts/check-bats-accounting.sh`, `tests/gates/test_run-bats.bats`, `tests/gates/test_bats-accounting.bats` |
+| CNPG는 role DROP(ensure=absent) 뒤에도 passwordStatus 엔트리를 유지 — 존재 증인은 byStatus.reconciled 멤버십(+ absent CR 스킵 · 마커 ownerRef) | gate | `platform/cnpg/prod/test_ensure_role_password.bats` |

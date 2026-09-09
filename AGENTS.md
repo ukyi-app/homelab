@@ -179,6 +179,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - host-config --apply의 링크 재설정은 DHCP 리스를 2초 잃는다 — `&& make up` 체인은 그 창을 정확히 밟는다
 - 렌더가 비는 컴포넌트는 ArgoCD auto-sync가 프룬을 거부한다 — allowEmpty=false가 마지막 리소스의 삭제를 전멸로 읽는다
 - 파일 단위 병렬 bats에서 실 체크아웃을 잠깐 바꾸는 스위트는 남의 가드를 red로 만든다 — 직렬 레인으로 빼고, 고정 /tmp는 $BATS_TEST_TMPDIR로 옮긴다
+- CNPG는 role DROP(ensure: absent) 뒤에도 `.status.managedRolesStatus.passwordStatus[<role>]`을 유지한다 — passwordStatus 존재는 role 존재의 증인이 아니다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

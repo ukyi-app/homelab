@@ -2501,3 +2501,29 @@ selfHeal과 플립플롭한다.
   깬다. 만질 수밖에 없으면(가드가 자기 위치에서 ROOT를 파생해 사본으로 못 돌리는 경우) 직렬 레인에 **사유와 함께**
   등재한다 — 조용히 늦게 도는 것이 아니라 회계에 보이게.
 > 가드: `scripts/run-bats.sh`, `scripts/check-bats-accounting.sh`, `tests/gates/test_run-bats.bats`, `tests/gates/test_bats-accounting.bats`
+
+### CNPG는 role DROP(ensure: absent) 뒤에도 `.status.managedRolesStatus.passwordStatus[<role>]`을 유지한다 — passwordStatus 존재는 role 존재의 증인이 아니다
+- **현상**: Database CR을 `spec.ensure: absent`로 바꿔 논리 DB와 managed role을 DROP해도 Cluster의
+  `.status.managedRolesStatus.passwordStatus[<role>]` 엔트리는 남는다. 그래서 "그 rv가 채워졌는가"만 재는
+  검사는 **이미 존재하지 않는 롤**을 verified로 찍는다 — 비어 있음이 아니라 **잔존**이 오답의 재료다.
+- **근거(2026-09-09 라이브 read-only)**: page purge PR-B sync에서 PostSync 훅 `ensure-role-password`가
+  `pg_roles`에 없는 `page`·`page_ro`를 verified로 찍고 마커 ConfigMap까지 썼다. `managed.roles` 선언이
+  사라진 뒤에도 그 rv(4608992/4608996)가 하루 뒤까지 잔존했고, 같은 시점 passwordStatus에는
+  `page`·`page_ro`·`trip-mate`·`trip-mate_ro` 4엔트리가 남아 있었다.
+- ⇒ **같은 status 안에서 두 필드의 수명이 다르다**: `.status.managedRolesStatus.byStatus.reconciled`는
+  spec 선언이 사라지면 빠지지만(같은 시점 `ukkiee`만) passwordStatus는 남는다. **존재 증인은 reconciled
+  멤버십 쪽**이고, passwordStatus는 '비번이 적용됐다'만 말한다.
+- ⚠️ **`spec.ensure=absent` 스킵만으로는 이 창을 못 덮는다** — CR이 아직 있을 때만 덮기 때문이다. 같은
+  이름으로 재프로비저닝하면 CR은 present라 스킵이 안 걸리고 **옛 rv가 그대로 통과**해, 비번 미적용 인증
+  실패(#3 회귀)를 막으려고 둔 훅이 정확히 그 자리에서 무력해진다.
+- ⚠️ **역도 성립하지 않는다** — CR이 `ensure: absent`인데 Cluster의 `managed.roles` 선언은 아직 남아 있는
+  창에서는 reconciled에 그 롤이 그대로 있다(같은 날 실측 `reconciled=[ukkiee, page, page_ro]`). ⇒ 아래 ①과
+  ②는 서로 **다른 창**을 덮는, 둘 다 필요한 처방이다 — 한쪽이 다른 한쪽을 대체하지 않는다.
+- **처방**(#712): ① `spec.ensure=absent` CR은 Database applied 대기 **뒤에** 롤 검증·마커를 건너뛴다
+  (조회 실패·필드 부재는 absent가 아니라 검증 경로 — 실패가 스킵으로 접히지 않는 방향). ② 판정을 **두
+  증인의 곱**으로 바꾼다 — passwordStatus rv 채워짐 ∧ `byStatus.reconciled` 멤버십. ③ 훅이 직접 apply하는
+  마커에 Database CR `ownerReferences`를 달아 CR 프룬이 GC하게 한다(ownerRef 없던 판이 라이브 고아 2건을
+  남겼다: `db-page-ready`·`db-trip-mate-ready`).
+- ⚠️ **일반형**: status의 하위 필드는 서로 다른 컨트롤러 경로가 쓰고 지운다 — "그 키가 있다"를 상위
+  오브젝트의 존재 증인으로 쓰기 전에, 그 키를 **지우는** 경로가 실재하는지 라이브에서 확인하라.
+> 가드: `platform/cnpg/prod/test_ensure_role_password.bats`
