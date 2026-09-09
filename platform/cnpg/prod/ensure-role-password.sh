@@ -8,17 +8,22 @@
 # 컨트롤러 지연/부분 reconcile/health 동작 변경으로 재현될 수 있어, 이 Job이 결정적 fallback이다.
 #
 # 동작(각 Database CR의 owner/ro 롤에 대해):
-#   0) spec.ensure=absent인 CR은 통째로 건너뛴다(로그 1줄 + 스킵 카운트, rc는 0 유지) —
-#      DROP 대상/완료 CR이라 검증할 롤 자체가 없다. ⚠️ 이 문이 없으면 2)가 **공허 통과**한다:
-#      CNPG는 role DROP 뒤에도 passwordStatus 엔트리를 유지하므로 rv 존재만 재는 검사가 초록이
-#      된다(2026-09-09 라이브 — purge 상태머신 PR-B sync에서 pg_roles에 없는 page/page_ro를
-#      verified로 찍고 마커까지 썼다). 이 훅의 RBAC 안에 있는 존재 증인은 CR의 spec.ensure뿐이다:
-#      cluster.status.managedRolesStatus.byStatus.reconciled는 ensure: absent로 reconcile된 role도
-#      포함하고(같은 날 실측: reconciled=[ukkiee,page,page_ro]), 비번 Secret 값 대조는 secrets
-#      읽기 권한이 필요해 경계 밖이다(ensure-role-password-rbac.yaml 헤더).
-#   1) Database CR이 applied=true가 될 때까지(유한) 대기
-#   2) cluster.status...passwordStatus[<role>].resourceVersion 가 채워질 때까지 폴링
-#      (비어있음 = CNPG가 비번 미적용 → reconcile을 강제하려 Cluster를 annotate해 nudge)
+#   1) Database CR이 applied=true가 될 때까지(유한) 대기 — **absent CR도 포함해서** 기다린다:
+#      absent CR의 applied=true는 "DROP 완료"라는 뜻이고, 막힌 논리 DB DROP을 재는 자동 신호는
+#      이 훅뿐이다(Database CR용 ArgoCD health customization·알림 룰 모두 0건, 2026-09-09 확인).
+#   1b) 그다음 spec.ensure=absent인 CR은 롤 검증·마커를 건너뛴다(로그 1줄 + 스킵 카운트, rc 0 유지)
+#      — DROP 대상/완료 CR이라 검증할 롤 자체가 없다. 조회 실패·필드 부재는 absent가 아니므로
+#      **검증 경로**로 간다(실패가 스킵으로 접히지 않는 방향).
+#   2) 롤이 '지금 선언돼 있고 비번이 적용됨'이 될 때까지 폴링 — **두 증인의 곱**이다:
+#      ① cluster.status...passwordStatus[<role>].resourceVersion 채워짐(비번 적용)
+#      ② cluster.status...byStatus.reconciled 멤버십(role이 지금 선언·reconcile됨 = 존재 증인)
+#      (미충족 = CNPG 미적용/미reconcile → 강제하려 Cluster를 annotate해 nudge)
+#      ⚠️ ①만 재면 **공허 통과**한다: CNPG는 role DROP 뒤에도 passwordStatus 엔트리를 유지한다
+#      (2026-09-09 라이브 — purge PR-B sync에서 pg_roles에 없는 page/page_ro를 verified로 찍고
+#      마커까지 썼고, managed.roles에서 완전히 사라진 뒤에도 그 rv가 하루 뒤까지 잔존했다).
+#      1b)의 spec.ensure 스킵은 **CR이 아직 있을 때만** 그 창을 덮는다 — 같은 이름으로 재프로비저닝하면
+#      CR은 present라 스킵이 안 걸리고 옛 rv가 그대로 통과한다. 그래서 ②를 곱한다. 비번 Secret 값
+#      대조는 secrets 읽기 권한이 필요해 경계 밖이다(ensure-role-password-rbac.yaml 헤더).
 #   3) 타임아웃 내 미충족이면 비0 종료(fail-closed) → PostSync hook 실패 → cnpg-data Degraded → 알림
 #   4) 성공 시 per-DB freshness 마커 ConfigMap db-<name>-ready 방출
 #      ({ownerSecretResourceVersion, roSecretResourceVersion, verifiedAt}) — activate-app이 소비.
@@ -43,6 +48,7 @@ CLUSTER="${ERP_CLUSTER:-pg}"
 POLL_INTERVAL="${ERP_POLL_INTERVAL_SECONDS:-10}"   # 폴링 간격(초)
 MAX_POLLS="${ERP_MAX_POLLS:-30}"                   # 롤당 30 × 10s ≈ 5분 타임아웃
 READY_MAX_POLLS="${ERP_READY_MAX_POLLS:-30}"       # Database Ready 대기 상한
+UID_MAX_TRIES="${ERP_UID_MAX_TRIES:-3}"            # ownerRef용 uid 읽기 재시도 상한
 VERIFIED_RV=""                                     # ensure_role 성공 시 검증된 resourceVersion
 
 # telegram 알림(best-effort, restore-drill-alerting 재사용). 미설정이면 조용히 생략 — 하드 의존 아님.
@@ -73,9 +79,30 @@ pwstatus_rv() {
 db_ensure() {
   kubectl -n "$NS" get database "$1" -o jsonpath='{.spec.ensure}' || true
 }
+# role이 cluster.status.managedRolesStatus.byStatus.reconciled에 있는가 = **지금 선언·reconcile된
+# managed role**이라는 존재 증인. passwordStatus는 DROP 뒤에도 남지만 reconciled는 선언이 사라지면
+# 빠진다(2026-09-09 라이브: managed.roles에 ukkiee만 남은 상태에서 reconciled=[ukkiee]인데
+# passwordStatus에는 page/page_ro/trip-mate/trip-mate_ro가 그대로 있었다).
+# ⚠️ 조회 실패는 '멤버십 없음'이 되어 fail-closed 방향이다(폴링 소진 → 비-0).
+# ⚠️ 파이프 대신 herestring — `kubectl … | grep -q`는 pipefail 아래에서 SIGPIPE 141 거짓 FAIL 클래스다.
+role_reconciled() {
+  local names
+  names="$(kubectl -n "$NS" get cluster "$CLUSTER" \
+    -o jsonpath='{range .status.managedRolesStatus.byStatus.reconciled[*]}{@}{"\n"}{end}' 2>/dev/null || true)"
+  grep -qxF -- "$1" <<<"$names"
+}
 # Database CR의 metadata.uid — 마커 ConfigMap의 ownerReferences에 실린다(GC 연결의 유일한 키).
+# ⚠️ 유한 재시도한다: 빈 uid는 호출부에서 fail(=cnpg-data Degraded + telegram)인데, 형제 읽기
+#    (wait_db_ready·ensure_role)는 전부 재시도하므로 여기만 단발이면 apiserver 일시 오류 1회가
+#    곧 알림이 된다. 소진 후 빈 문자열로 끝나는 fail-closed 방향은 그대로다.
 db_uid() {
-  kubectl -n "$NS" get database "$1" -o jsonpath='{.metadata.uid}' || true
+  local uid i
+  for ((i=1; i<=UID_MAX_TRIES; i++)); do
+    uid="$(kubectl -n "$NS" get database "$1" -o jsonpath='{.metadata.uid}' || true)"
+    if [ -n "$uid" ]; then printf '%s' "$uid"; return 0; fi
+    if [ "$i" -lt "$UID_MAX_TRIES" ]; then sleep "$POLL_INTERVAL"; fi
+  done
+  return 0   # 빈 문자열 = 호출부 fail-closed(ownerRef 없는 마커는 쓰지 않는다)
 }
 # Cluster annotate로 managed-role reconcile을 트리거(비번 값 불변·멱등)
 nudge() {
@@ -83,24 +110,25 @@ nudge() {
     "ensure-role-password.homelab/nudge=$(date -u +%s 2>/dev/null || echo nudge)" --overwrite >/dev/null 2>&1 || true
 }
 
-# 한 롤이 '비번 적용됨'(passwordStatus.resourceVersion 채워짐)이 될 때까지 보장.
-# 성공 시 VERIFIED_RV에 그 rv를 담고 0 반환, 타임아웃이면 fail(비0 종료).
-# ⚠️ 이 검사는 **존재하는 role**을 전제한다 — DROP된 role의 엔트리를 CNPG가 유지하기 때문에
-#    (헤더 0) 참조), ensure=absent CR은 호출부에서 걸러진 뒤에만 여기 들어온다.
+# 한 롤이 '지금 선언돼 있고 비번이 적용됨'이 될 때까지 보장 — passwordStatus rv **∧** reconciled
+# 멤버십(헤더 2)). 성공 시 VERIFIED_RV에 그 rv를 담고 0 반환, 타임아웃이면 fail(비0 종료).
+# ⚠️ 호출부의 ensure=absent 스킵은 이 검사에 role 존재를 보장해 주지 못한다 — CR이 프룬된 뒤나
+#    같은 이름으로 재프로비저닝하는 창에서는 CR이 present이기 때문이다. 존재 증인은 ②뿐이다.
 ensure_role() {
-  local role="$1" got i
+  local role="$1" got rec i
   for ((i=1; i<=MAX_POLLS; i++)); do
     got="$(pwstatus_rv "$role")"
-    if [ -n "$got" ]; then
+    if role_reconciled "$role"; then rec=yes; else rec=no; fi
+    if [ -n "$got" ] && [ "$rec" = "yes" ]; then
       VERIFIED_RV="$got"
       echo "[erp] role=${role} verified (rv=${got})"
       return 0
     fi
-    echo "[erp] role=${role} passwordStatus empty — nudge ${i}/${MAX_POLLS}"
+    echo "[erp] role=${role} not verified (rv=${got:-<empty>} reconciled=${rec}) — nudge ${i}/${MAX_POLLS}"
     nudge
     sleep "$POLL_INTERVAL"
   done
-  fail "role=${role} 비번 미적용: passwordStatus.resourceVersion이 ${MAX_POLLS}회 폴링 내 채워지지 않음(fail-closed)"
+  fail "role=${role} 비번 미적용/미선언: passwordStatus.resourceVersion 채워짐 ∧ byStatus.reconciled 멤버십이 ${MAX_POLLS}회 폴링 내 동시 충족되지 않음(fail-closed)"
 }
 
 # Database CR이 applied=true가 될 때까지 대기(유한); 미도달이면 fail
@@ -123,6 +151,10 @@ wait_db_ready() {
 #    update 권한을 요구해 RBAC 경계를 넓힌다. 마커는 소비자가 fail-closed로 읽는 캐시라
 #    "owner 삭제를 막는" 의미가 없고, 필요한 것은 GC 방향 한쪽뿐이다.
 # ⚠️ ownerRef는 **동일 네임스페이스** owner만 유효하다 — Database CR과 마커 둘 다 $NS다.
+# ⚠️ 이름 스칼라는 **인용한다**. kubectl은 sigs.k8s.io/yaml(=YAML 1.1)로 디코드해 no/on/y/yes를
+#    bool로 읽는데, 그 이름들은 RESOURCE_NAME_RE(tools/lib/identity.ts)가 허용하고 예약어도 아니다.
+#    2026-09-09 실측: 인용 없는 `name: no`는 `json: cannot unmarshal bool into Go struct field
+#    OwnerReference.metadata.ownerReferences.name`으로 apply가 죽고 → 훅 비-0 → cnpg-data 전체 Degraded.
 write_marker() {
   local db="$1" owner_rv="$2" ro_rv="$3" uid="$4" now
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"
@@ -130,13 +162,13 @@ write_marker() {
     'apiVersion: v1' \
     'kind: ConfigMap' \
     'metadata:' \
-    "  name: db-${db}-ready" \
-    "  namespace: ${NS}" \
+    "  name: \"db-${db}-ready\"" \
+    "  namespace: \"${NS}\"" \
     '  ownerReferences:' \
     '    - apiVersion: postgresql.cnpg.io/v1' \
     '      kind: Database' \
-    "      name: ${db}" \
-    "      uid: ${uid}" \
+    "      name: \"${db}\"" \
+    "      uid: \"${uid}\"" \
     'data:' \
     "  ownerSecretResourceVersion: \"${owner_rv}\"" \
     "  roSecretResourceVersion: \"${ro_rv}\"" \
@@ -164,6 +196,10 @@ main() {
   while IFS= read -r db; do
     [ -n "$db" ] || continue
     echo "[erp] === db=${db} (owner=${db}, ro=${db}_ro) ==="
+    # ⚠️ 스킵은 이 대기 **뒤**다. absent CR의 applied=true는 "DROP 완료"라는 뜻이고, 막힌 DROP을
+    #    재는 자동 신호는 이 훅뿐이다(Database CR용 ArgoCD health customization 0건 · cnpg Database
+    #    알림 룰 0건, 2026-09-09). 스킵을 앞에 두면 그 실패가 rc 0으로 조용해진다.
+    wait_db_ready "$db"
     # ensure=absent = purge 상태머신 PR-A/PR-B가 DROP을 지시한 CR. 검증할 롤이 없으므로 폴링도
     # 마커도 하지 않는다. 스킵은 **성공 카운트 밖**이지만 침묵도 아니다 — 열거 실패(비-0)와
     # 구별되는 rc 0 + 스킵 건수 로그다(마지막 요약 줄).
@@ -174,7 +210,6 @@ main() {
       continue
     fi
     count=$((count + 1))
-    wait_db_ready "$db"
     ensure_role "$db";       owner_rv="$VERIFIED_RV"
     ensure_role "${db}_ro";  ro_rv="$VERIFIED_RV"
     # uid 부재 = CR이 중간에 사라졌거나 조회가 깨진 것. ownerRef 없는 마커는 아무도 걷지 못하는
