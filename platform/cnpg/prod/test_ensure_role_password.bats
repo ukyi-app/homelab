@@ -24,7 +24,9 @@ setup() {
   export ERP_TEST_DB_APPLIED="true"
   export ERP_TEST_SCENARIO="applied"
   export ERP_TEST_DB_ENSURE="present"   # Database CR의 spec.ensure — absent면 DROP 대상 CR이다
+  export ERP_TEST_DBS_ABSENT=""         # 그중 absent인 DB 이름들(혼합 시나리오 — 비면 전역 값만 쓴다)
   export ERP_TEST_DB_UID="1f2e3d4c-0000-4a5b-8c9d-abcdefabcdef"  # CR metadata.uid — 마커 ownerRef 증인
+  export ERP_TEST_RECONCILED="page page_ro"  # cluster byStatus.reconciled — role '존재' 증인(티켓 52)
 
   mkdir -p "$TMP/bin"
   # kubectl 스텁: 호출을 기록하고 시나리오에 따라 jsonpath 응답을 흉내낸다(클러스터 무접근).
@@ -40,7 +42,14 @@ case "$args" in
   *"get database"*"status.applied"*)   # Database CR Ready 검사
     printf '%s' "$ERP_TEST_DB_APPLIED" ;;
   *"get database"*"spec.ensure"*)      # CR의 present/absent — absent면 검증·마커를 건너뛴다
-    printf '%s' "$ERP_TEST_DB_ENSURE" ;;
+    # 조회 실패 주입(RBAC 상실·apiserver 오류) — 실패가 '스킵'으로 접히지 않는 방향의 증인용
+    [ -n "${ERP_TEST_ENSURE_FAIL:-}" ] && { echo "error: forced spec.ensure read failure" >&2; exit 1; }
+    ens="$ERP_TEST_DB_ENSURE"
+    # DB별 분기 — 전역 1값이면 혼합(present+absent) 요약 분기를 표현조차 못 한다
+    for a in ${ERP_TEST_DBS_ABSENT:-}; do
+      case " $args " in *" get database $a "*) ens="absent" ;; esac
+    done
+    printf '%s' "$ens" ;;
   *"get database"*"metadata.uid"*)     # CR uid — 마커 ownerReferences에 실린다
     printf '%s' "$ERP_TEST_DB_UID" ;;
   *"passwordStatus"*)                  # 롤 passwordStatus.resourceVersion
@@ -50,6 +59,8 @@ case "$args" in
       eventual) if [ "${n:-0}" -ge 1 ]; then printf '100'; else printf ''; fi ;;
       never)    printf '' ;;
     esac ;;
+  *"byStatus.reconciled"*)             # 선언·reconcile된 managed role 목록 — role 존재 증인(티켓 52)
+    printf '%s\n' ${ERP_TEST_RECONCILED:-} ;;
   *"annotate cluster"*)                # nudge — 카운터 증가(비번 값 불변, reconcile 트리거 흉내)
     n="$(cat "$ERP_NUDGE_FILE" 2>/dev/null || echo 0)"; printf '%s' "$((n+1))" > "$ERP_NUDGE_FILE" ;;
   *"apply -f"*)                        # 마커 upsert — 훅이 조립한 매니페스트를 그대로 보존한다
@@ -72,11 +83,15 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   run_erp
   [ "$status" -eq 0 ]
   [ "$(nudge_count)" = "0" ]                       # 멱등 — 이미 적용된 DB는 nudge하지 않는다
-  printf '%s' "$output" | grep -qF -- 'all 1 database(s) verified'   # 스킵 없는 요약 분기
+  grep -qF -- 'all 1 database(s) verified' <<<"$output"
   grep -q "apply -f" "$ERP_KLOG"                   # 마커 실제 upsert
-  grep -qF 'name: db-page-ready' "$ERP_APPLY_INPUT"
+  grep -qxF '  name: "db-page-ready"' "$ERP_APPLY_INPUT"
   grep -qF 'ownerSecretResourceVersion: "100"' "$ERP_APPLY_INPUT"
   grep -qF 'roSecretResourceVersion: "100"' "$ERP_APPLY_INPUT"
+  # ⚠️ 위 'all 1 database(s) verified'는 **두 요약 분기의 공통 접두사**다 — 그것만 재면 else 분기가
+  #    무증인이다(뮤테이션 실측: if/else를 접미사 포함 한 줄로 붕괴시켜도 13/13 전건 초록).
+  #    접미사 부재가 그 분기를 실제로 가른다. 부정 단언은 @test의 마지막 명령(check-bats-style NEG).
+  ! grep -qF -- 'skipped' <<<"$output"
 }
 
 @test "eventual: nudges (Cluster annotate) until passwordStatus populates, then writes the marker" {
@@ -84,7 +99,7 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   run_erp
   [ "$status" -eq 0 ]
   [ "$(nudge_count)" -ge 1 ]                        # 비어있을 때 reconcile 트리거(nudge)
-  grep -qF 'name: db-page-ready' "$ERP_APPLY_INPUT"
+  grep -qxF '  name: "db-page-ready"' "$ERP_APPLY_INPUT"
 }
 
 @test "marker carries the Database CR ownerReference so a CR prune garbage-collects it" {
@@ -95,12 +110,17 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   run_erp
   [ "$status" -eq 0 ]
   # 스텁이 `kubectl apply -f -`의 stdin으로 받은 매니페스트 원문을 그대로 판정한다.
-  grep -qF 'name: db-page-ready' "$ERP_APPLY_INPUT"
+  grep -qxF '  name: "db-page-ready"' "$ERP_APPLY_INPUT"
+  grep -qxF '  namespace: "database"' "$ERP_APPLY_INPUT"   # ownerRef는 동일 NS owner만 유효하다
   own="$(sed -n '/ownerReferences:/,/^data:/p' "$ERP_APPLY_INPUT")"
-  grep -qF 'apiVersion: postgresql.cnpg.io/v1' <<<"$own"
-  grep -qF 'kind: Database' <<<"$own"
-  grep -qF 'name: page' <<<"$own"
-  grep -qF "uid: $ERP_TEST_DB_UID" <<<"$own"        # CR uid와 동일 — 임의 문자열이면 GC가 안 붙는다
+  # ⚠️ **줄 전체 등식**(-x)이다. 부분 문자열이면 접미 드리프트가 통과한다(뮤테이션 실측:
+  #    `name: ${db}` → `${db}-typo`/`${db}_ro`로 오염해도 13/13 전건 초록이었다). 그 드리프트는
+  #    무해하지 않다 — 존재하지 않는 owner를 가리키는 ownerRef는 GC가 dangling으로 보고 dependent를
+  #    **즉시** 지운다. 티켓 51이 지키려던 마커가 매 sync마다 생성→삭제를 반복한다.
+  grep -qxF '    - apiVersion: postgresql.cnpg.io/v1' <<<"$own"
+  grep -qxF '      kind: Database' <<<"$own"
+  grep -qxF '      name: "page"' <<<"$own"
+  grep -qxF "      uid: \"$ERP_TEST_DB_UID\"" <<<"$own"   # CR uid와 동일 — 임의 문자열이면 GC가 안 붙는다
 }
 
 @test "absent Database CR (spec.ensure=absent) is skipped: no verification, no marker, still rc 0" {
@@ -119,6 +139,76 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   ! grep -q "apply -f" "$ERP_KLOG"                  # 마커 미방출 — 고아 마커의 원천 차단
 }
 
+@test "an absent CR whose DROP has not completed still fails closed (applied=false is not skipped)" {
+  # 스킵은 wait_db_ready **뒤**다. absent CR의 applied=true는 "DROP 완료"라는 뜻이고, 그 미도달을
+  # 재는 자동 신호는 이 훅뿐이다 — Database CR용 ArgoCD health customization도(platform/argocd 0건)
+  # cnpg Database 알림 룰도(victoria-stack 0건) 없다(2026-09-09 확인). 스킵을 wait 앞에 두면 실패한
+  # DROP이 rc 0으로 조용해진다(origin/main 대비 동작 변화 — 이 @test가 그 순서를 고정한다).
+  export ERP_TEST_DB_ENSURE="absent"
+  export ERP_TEST_DB_APPLIED="false"
+  run_erp
+  [ "$status" -ne 0 ]
+  grep -qF -- 'applied=true 미도달(fail-closed)' <<<"$output"
+  ! grep -q "apply -f" "$ERP_KLOG"
+}
+
+@test "stale passwordStatus without reconciled membership fails closed (a dropped role is not verified)" {
+  # 티켓 52 수용기준 2: role DROP 뒤에도 CNPG는 passwordStatus 엔트리를 **유지한다**. 2026-09-09
+  # 라이브(read-only): managed.roles에서 완전히 사라진 page/page_ro의 rv 4608992/4608996가 하루 뒤에도
+  # 잔존했고 byStatus.reconciled에는 ukkiee만 있었다. 같은 이름으로 재프로비저닝하면 spec.ensure는
+  # present라 스킵이 안 걸리고, rv 존재만 재는 검사가 **옛 rv로 verified**를 찍어 이 Job의 존재 이유
+  # (#3 회귀: 비번 미적용 인증 실패)가 무력화된다. 존재 증인은 byStatus.reconciled 멤버십이다.
+  export ERP_TEST_SCENARIO="applied"                # rv는 계속 나온다 = stale 재료
+  export ERP_TEST_RECONCILED=""                     # 그러나 role은 선언·reconcile 목록에 없다
+  run_erp
+  [ "$status" -ne 0 ]
+  [ "$(nudge_count)" = "$ERP_MAX_POLLS" ]           # 두 조건의 곱이 미충족이면 nudge를 소진한다
+  grep -qF -- 'reconciled=no' <<<"$output"
+  ! grep -q "apply -f" "$ERP_KLOG"
+}
+
+@test "spec.ensure read failure takes the verification path (a broken read is not 'absent')" {
+  # db_ensure 실패는 빈 문자열이고 빈 문자열은 absent가 아니다. 이 방향이 뒤집히면(판정을
+  # `!= present`로) apiserver 오류·RBAC 상실·CRD 기본값 소멸이 전부 "전건 스킵 + rc 0 + 마커 0건"으로
+  # 접힌다 — 형제 @test(enumeration failure)가 막는 fail-open과 같은 클래스다.
+  # 뮤테이션 실측: 이 픽스처가 없을 때 `!= present` 치환이 13/13 전건 초록으로 살아남았다.
+  export ERP_TEST_ENSURE_FAIL=1
+  export ERP_TEST_SCENARIO="applied"
+  run_erp
+  [ "$status" -eq 0 ]
+  grep -qF -- 'all 1 database(s) verified' <<<"$output"
+  grep -qxF '  name: "db-page-ready"' "$ERP_APPLY_INPUT"   # 검증 경로로 갔다 = 마커가 나간다
+  ! grep -qF -- 'skipped' <<<"$output"
+}
+
+@test "YAML 1.1 truthy DB names are quoted in the marker manifest so kubectl decodes them as strings" {
+  # RESOURCE_NAME_RE(tools/lib/identity.ts:14)는 no/on/y/yes를 허용하고 DB_RESERVED_NAMES에도 없다.
+  # 인용 없이 쓰면 kubectl(sigs.k8s.io/yaml = YAML 1.1)이 bool로 디코드한다 — 2026-09-09 실측:
+  #   `error: unable to decode: json: cannot unmarshal bool into Go struct field
+  #    OwnerReference.metadata.ownerReferences.name of type string`
+  # → apply 실패 → pipefail+set -e → PostSync hook 비-0 → cnpg-data **전체** Degraded.
+  export ERP_TEST_DBS="no"
+  export ERP_TEST_RECONCILED="no no_ro"
+  export ERP_TEST_SCENARIO="applied"
+  run_erp
+  [ "$status" -eq 0 ]
+  grep -qxF '  name: "db-no-ready"' "$ERP_APPLY_INPUT"
+  grep -qxF '      name: "no"' "$ERP_APPLY_INPUT"
+}
+
+@test "mixed present/absent DBs: only the present one is verified, and the summary counts both" {
+  # 라이브 purge 창(PR-A~PR-C)이 정확히 이 상태다 — 살아 있는 DB들과 absent CR이 공존한다.
+  # 요약 줄의 세 형상 중 (count>0 ∧ skipped>0)은 스텁이 전역 1값일 때 표현 자체가 불가능했다.
+  export ERP_TEST_DBS="page trip-mate"
+  export ERP_TEST_DBS_ABSENT="trip-mate"
+  run_erp
+  [ "$status" -eq 0 ]
+  grep -qF -- 'all 1 database(s) verified' <<<"$output"
+  grep -qF -- '(1 ensure=absent CR(s) skipped)' <<<"$output"
+  grep -qxF '  name: "db-page-ready"' "$ERP_APPLY_INPUT"
+  ! grep -qF -- 'db-trip-mate-ready' "$ERP_APPLY_INPUT"
+}
+
 @test "missing CR uid fails closed: an ownerRef-less marker is never written" {
   # ownerRef 없는 마커가 바로 티켓 51의 고아다. uid 조회가 깨지면(CR이 중간에 사라짐·권한)
   # 마커를 쓰지 않고 비-0으로 끝난다 — 이 판정 조건을 밟는 픽스처가 없으면 무증인이다.
@@ -126,7 +216,9 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   export ERP_TEST_DB_UID=""
   run_erp
   [ "$status" -ne 0 ]
-  printf '%s' "$output" | grep -qF -- 'metadata.uid 조회 실패'
+  grep -qF -- 'metadata.uid 조회 실패' <<<"$output"
+  # 단발 읽기면 apiserver 일시 오류 1회가 곧 Degraded+telegram이다(형제 읽기는 전부 재시도한다).
+  [ "$(grep -c 'metadata.uid' "$ERP_KLOG")" -eq 3 ]
   ! grep -q "apply -f" "$ERP_KLOG"
 }
 
@@ -172,7 +264,7 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   : > "$ERP_KLOG"; printf '0' > "$ERP_NUDGE_FILE"; : > "$ERP_APPLY_INPUT"
   run_erp; [ "$status" -eq 0 ]
   [ "$(nudge_count)" = "0" ]
-  grep -qF "uid: $ERP_TEST_DB_UID" "$ERP_APPLY_INPUT"   # 재실행 마커도 ownerRef를 그대로 단다
+  grep -qxF "      uid: \"$ERP_TEST_DB_UID\"" "$ERP_APPLY_INPUT"   # 재실행 마커도 ownerRef를 그대로 단다
 }
 
 @test "ensure-role-password Job is an unconditional fail-closed PostSync hook, registered in cnpg-data" {
