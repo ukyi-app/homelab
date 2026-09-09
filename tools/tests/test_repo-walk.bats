@@ -474,6 +474,10 @@ _fixture_repo() {
 #    로컬 한정이고(CI는 clone이라 추적 밖 파일이 없다) fail-closed 방향이며, 그 red의 출력
 #    (`기대 apps+… / 실제 infra+…`)이 곧 "추적되지 않은 앱 유닛이 있다"는 진단이다.
 # 판정 기준을 `values.yaml`로 잡은 이유는 배포 앱 계약의 필수 산출물이기 때문이다(apps/README.md).
+# ⚠️ 이 필터는 유닛 스코프(`listUnits("apps")`)와 **의도적으로 다르다** — 저쪽은 필수 산출물로
+#    거르지 않는다(check-app-deploy가 그 파일의 **부재**를 잡아야 하므로). 그래서 values.yaml 없는
+#    반쪽 앱 디렉토리는 여기서 apps 루트 불일치 red로 나타나지만(fail-closed), 그 클래스의 권위는
+#    이 로스터가 아니라 check-app-deploy다 — 문구가 로스터를 가리켜도 원인은 계약 산출물 부재다.
 # 셸 글롭이라 실패 채널이 없다 — 무매치면 패턴이 리터럴로 남고 `[ -e ]`가 거짓이라 0이다.
 _has_app_unit() { # $1 = repo root → 1(앱 유닛 ≥ 1) | 0
   local f
@@ -559,10 +563,13 @@ _fixture_roster() {
   [ "$output" = "${exp}|0" ]
 }
 
-# 글롭 붕괴 — 앱 유닛은 열거되는데 스코프가 apps 매니페스트를 **0건** 낸다. 여기선 공유 하네스
-# 어휘(`tests?/`)가 그 앱 경로를 삼키게 해서 만든다. 붕괴의 기전은 무관하다(include가 좁아져도,
-# 제외가 넓어져도 같은 상태다) — 고정하는 것은 판정이다: 독립 열거가 앱을 보는 한 기대는 여전히
-# `apps`를 요구하고 그 자리는 red다. 기대를 image-ownership 자신에서 파생시키면 이 red가 사라진다.
+# 글롭 붕괴 — 앱 유닛은 열거되는데 스코프가 apps 매니페스트를 **0건** 낸다. 고정하는 **판정**은
+# 기전과 무관하다(include가 좁아져도, 제외가 넓어져도 같은 상태다): 독립 열거가 앱을 보는 한 기대는
+# 여전히 `apps`를 요구하고 그 자리는 red다. 기대를 image-ownership 자신에서 파생시키면 red가 사라진다.
+# ⚠️ 다만 **이 픽스처**는 그 상태를 공유 하네스 어휘(`tests?/`)가 앱 경로를 삼키게 해서 만든다 —
+#    즉 `TEST_HARNESS`를 정당하게 손보면 이 레인도 함께 움직인다(실측: image-ownership의
+#    `exclude: TEST_HARNESS`를 `[]`로 바꾸면 이 레인과 실 트리 레인이 같이 not ok). 그때 고칠 것은
+#    로스터가 아니라 붕괴를 만드는 픽스처 경로다.
 @test "roster expectation stays red when the scope loses all apps manifests" {
   tmp="$(_fixture_roster apps/tests)"
   exp="$(_expected_roster "$tmp")"
