@@ -66,7 +66,8 @@ resources:
   - sessions
 EOF
   # pgdump 헤지 — DBS 손 목록. drop이 여기서 이름을 빼야 헤지 잡(`set -e`)이 DROP된 DB에서 죽지
-  # 않고, test_pgdump_hedge.bats의 양방향 조건(absent CR은 DBS에 **부재**)도 함께 만족한다.
+  # 않고, test_pgdump_hedge.bats의 **집합 등식**(present CR은 DBS에 포함 · absent CR은 부재 ·
+  # CR이 아예 없는 토큰도 red)도 함께 만족한다 — 세 번째 항이 티켓 53이 얹은 상한이다.
   # 실 매니페스트의 DBS 줄 형태(들여쓰기 18칸 + 인용)를 그대로 복제하고, 꼬리 보존을 재려고
   # **뒤따르는 주석**을 붙인다 — 편집 대상이 셸 스크립트 본문 한 줄이라 꼬리를 잃으면 의미가 변한다.
   # shared-archive는 **CR 파일이 없는** 이름이다(목록에만 사는 잔존 토큰 — drop no-CR 레인의 피연산자).

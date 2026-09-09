@@ -479,6 +479,10 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`lib/kustomization.ts`** — kustomization.yaml `resources` 리스트의 멱등 편집(`addResource`·
   `removeResource`). provision(등록)·teardown(해제)이 대칭으로 쓴다. `parseDocument`로 주석·포맷을
   보존하고 trailing slash를 정규화한다(`name` vs `name/`가 다른 항목으로 중복 등록되던 자리).
+  `addResource`는 항목 추가 시 시퀀스를 **block 스타일로 정규화**한다(빈 `resources: []`에서 출발해도 —
+  purge 잔여가 flow로 되살아나던 자리, provision-db.ts 자체 헬퍼와 같은 규약). 정규화는 추가 경로에만
+  걸리므로 **모든 호출이 block을 보장하지는 않는다** — 항목이 이미 있으면 멱등 경로가 원문을 그대로
+  돌려준다. flow→block 전환은 `resources:` 줄 꼬리주석을 마지막 항목 뒤 주석 줄로 옮긴다(소실 아님).
 - **`lib/seal.ts`** — kubeseal 봉인(`sealManifest`). 평문 Secret manifest를 **디스크에 쓰지 않고**
   stdin으로만 흘린다. 평문은 stdout·예외 메시지·seam 원장 어디에도 싣지 않는다(원장에 남는 argv는
   cert 경로뿐). 앱 레포 측 `seal-secret.mts`가 자체 블록을 유지하는 것은 확장자 규약(.mts = bun+node
