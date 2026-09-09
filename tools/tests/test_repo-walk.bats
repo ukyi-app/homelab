@@ -494,13 +494,19 @@ _actual_roster() { # $1 = repo root
 
 # 로스터 전용 픽스처 — 루트 3개(platform·ops·infra)를 채우고 앱 유닛만 인자로 켠다. 별도 픽스처를
 # 쓰는 이유는 `_fixture_repo`와 같다: 위 픽스처들에 ops/infra를 넣으면 그쪽 정확-일치 단언과 결합된다.
-# $1 = 앱 유닛 경로(빈 값이면 앱 0개) · $2 = 일부러 비울 루트(빈 값이면 셋 다 채움).
+# $1 = 앱 유닛 경로(빈 값이면 앱 0개) · $2 = 변형 모드(빈 값 = 정상 트리 | drop-ops = ops 루트를 비움).
+# ⚠️ 변형 값은 **레인이 실제로 주는 것만** 둔다. 앞선 판은 platform·infra를 비우는 분기도 뒀는데
+#    어떤 호출자도 그 값을 주지 않아 두 분기를 삭제해도 전건 초록이었다(적대 검토 실측: not ok 0건,
+#    rc 0). 지키는 것 없는 규칙은 곧 "아무도 대조하지 않는 주장"이라, 같은 이유로
+#    tools/lib/repo-walk.ts가 죽은 제외 규칙을 지웠다 — 필요해지면 그때 레인과 함께 되살린다.
+#    모르는 값은 정상 트리로 접히지만 각 레인이 기대·실제 문자열을 **정확히** 단언하므로 오타는
+#    조용한 초록이 아니라 red로 나온다.
 _fixture_roster() {
   local t; t="$(mktemp -d)"
   mkdir -p "$t/platform/comp/prod" "$t/ops/pg-tools" "$t/infra/k3s-bootstrap/storage"
-  if [ "${2:-}" != platform ]; then echo 'kind: Deployment' > "$t/platform/comp/prod/deploy.yaml"; fi
-  if [ "${2:-}" != ops ]; then echo 'FROM alpine' > "$t/ops/pg-tools/Dockerfile"; fi
-  if [ "${2:-}" != infra ]; then echo 'kind: DaemonSet' > "$t/infra/k3s-bootstrap/storage/prov.yaml"; fi
+  echo 'kind: Deployment' > "$t/platform/comp/prod/deploy.yaml"
+  echo 'kind: DaemonSet' > "$t/infra/k3s-bootstrap/storage/prov.yaml"
+  if [ "${2:-}" != drop-ops ]; then echo 'FROM alpine' > "$t/ops/pg-tools/Dockerfile"; fi
   if [ -n "${1:-}" ]; then
     mkdir -p "$t/$1/deploy/prod"
     echo 'image: {}' > "$t/$1/deploy/prod/values.yaml"   # 배포 앱 계약의 필수 산출물(apps/README.md)
@@ -561,7 +567,7 @@ _fixture_roster() {
 # 기존 이빨의 직접 증인 — 루트 하나(ops)가 사라지면 기대는 그대로인데 실제가 못 미친다.
 # 옵셔널 루트로 쓰던 옛 판이 조용히 통과시키던 바로 그 자리다.
 @test "roster expectation stays red when another root (ops) goes missing" {
-  tmp="$(_fixture_roster apps/probe ops)"
+  tmp="$(_fixture_roster apps/probe drop-ops)"
   exp="$(_expected_roster "$tmp")"
   run _actual_roster "$tmp"
   echo "$output (기대 ${exp}|0)"
