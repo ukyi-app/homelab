@@ -10,10 +10,10 @@
 }
 
 @test "verify:ledger FAILS an over-budget ledger (negative test, gate mechanism)" {
-  cp docs/memory-ledger.md /tmp/bad-ledger.md
-  printf '| <!-- ledger:row --> hog | prod | 100 | 9000 |\n' >> /tmp/bad-ledger.md
-  bun tools/ledger-to-json.ts /tmp/bad-ledger.md > /tmp/bad.json
-  run conftest test /tmp/bad.json --policy policy/ledger.rego
+  cp docs/memory-ledger.md "$BATS_TEST_TMPDIR"/bad-ledger.md
+  printf '| <!-- ledger:row --> hog | prod | 100 | 9000 |\n' >> "$BATS_TEST_TMPDIR"/bad-ledger.md
+  bun tools/ledger-to-json.ts "$BATS_TEST_TMPDIR"/bad-ledger.md > "$BATS_TEST_TMPDIR"/bad.json
+  run conftest test "$BATS_TEST_TMPDIR"/bad.json --policy policy/ledger.rego
   [ "$status" -ne 0 ]
   [[ "$output" == *"over budget"* ]]
 }
