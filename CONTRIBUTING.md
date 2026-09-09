@@ -5,7 +5,7 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
 
 ## 황금률
 1. **검증 우선.** 모든 변경은 "변경 전에는 실패하고 변경 후에는 통과하는" 체크와
-   함께 나간다. push 전에 로컬에서 `make verify`를 실행한다.
+   함께 나간다. push 전에 로컬에서 `make ci`를 실행한다(「push 전에」 절 — `make verify`는 보조).
 2. **평문 시크릿은 절대 금지.** 플랫폼 시크릿은 `*.enc.yaml`이며, 두 age recipient
    (cluster + recovery, `docs/runbooks/age-keys.md` 참고 — gitignored, owner 로컬 전용이라
    신규 체크아웃에선 이 링크가 열리지 않는다)로 SOPS 암호화한다.
@@ -38,7 +38,7 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
   이중 구현(원장 awk↔TS 파서 드리프트 사례 — 파서·계산은 TS 한 곳에만).
 - **검출기 실재 판정** — 파일 어딘가의 문자열 매치로 "그 설정/등재/배선이 실재한다"를 증명할 때는
   주석·문자열 리터럴을 먼저 걷어내고 행두 앵커·경로(YAML 키 스코프 등) 한정으로 위치까지 좁혀라 —
-  부분문자열 매치는 fail-open이다(12라운드 5건 재발 — cf. `docs/traps-detail.md` 「검출기가 자기
+  부분문자열 매치는 fail-open이다(한 리뷰 라운드에서만 5건 재발 — cf. `docs/traps-detail.md` 「검출기가 자기
   도메인의 표기법에 눈이 먼다」).
 - **인용부호·구분자 마스킹 함수 재사용** — `mask_semi`/`mask_pipe`류 인용부호·구분자 마스킹 함수를
   새 판정 레인이나 같은 파일의 형제 코드 경로에 재사용할 때는 그 함수가 다루는 인용 형태(`'`·`"`·
@@ -49,7 +49,7 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
 - **워크플로 인라인 셸 최소화** — run 스텝이 ~20줄을 넘거나 JSON/YAML 구조 파싱을 시작하면
   `tools/*.ts`(또는 `scripts/*.sh`)로 내려 테스트를 붙인다. **선례(해소됨)**: bump-poll의 while-loop이
   제4계층(항목 격리·errexit 관용구·트랜잭션 정리)으로 자라 있었다 → `tools/run-bump-plan.ts`로 내리고
-  스텝은 **한 줄**이 됐다(F-1). 이관 원칙은 계약도 함께 옮기는 것이다: 워크플로 게이트가 강제하던
+  스텝은 **한 줄**이 됐다. 이관 원칙은 계약도 함께 옮기는 것이다: 워크플로 게이트가 강제하던
   실행 증인(순서·레인 verbatim·격리·소유권)은 러너 스위트로 가고, 워크플로엔 **경계**만 남는다
   (그 스텝의 명령이 러너 호출 하나뿐 — 남기지 않으면 계약이 조용히 증발한다).
 - **종료코드 규약(가드·도구 공통)** — `tools/lib/cli.ts` 주석이 SSOT: 0=성공 · 1=검증/게이트 실패 ·
@@ -74,7 +74,7 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
   `scripts/check-skip-signalling.sh`가 강제, 게이트는 `tests/gates/test_guard-skip-signalling.bats`).
   **Makefile 레인만** 함수를 쓸 수 없어 옛 같은-줄 짝 검사로 잔존한다.
 - 평가한 실행은 마커를 내지 않는다: 0=평가·통과, 1=평가·실패.
-- **homelab CLI의 skip variant**(kernel-followups 06)는 같은 어휘의 CLI 대응물이다: 종료코드 4는
+- **homelab CLI의 skip variant**는 같은 어휘의 CLI 대응물이다: 종료코드 4는
   envelope **데이터**(`exitFor(variant)` 계약 파생 — 스키마가 skip↔4 짝을 강제)로 흐르고, stderr
   마커 `SKIP: homelab <동사>: <이유>`는 `skipMarker()`(tools/lib/cli.ts — 유일 방출)가 낸다.
   `process.exitCode = 4` 직접 대입은 check-skip-signalling의 전용 레인이 거부한다.
@@ -117,10 +117,10 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
   규약(마커 형태·방출 순서·억제·SKIP 배타)은 하나이고 구현만 갈린다.
 - TS 실행 커널 `guardMain`(같은 파일)을 쓰는 가드는 커널이 **전 도메인 floor 통과 시에만 일괄**
   방출한다 — 도메인 라벨은 콜사이트의 `scan: "<라벨>"` 리터럴이라 정적 파생 대상이고, 바닥값
-  오버라이드는 `--floor <도메인>=<n>` 하나다(lib-convergence 17). 셸도 같은 어휘다 —
-  `take_floors`(scripts/lib/scan-floor.sh, kernel-followups 01)가 선언 선행으로 같은 fail-closed를
-  강제하고, 선언 라벨 ⊆ 방출 라벨은 게이트가 정적 대조한다(구 env·--min-* 어휘는 01~03에서
-  전 가드 이관 완료 — 재유입은 거부 가드 `scripts/check-floor-vocab.sh`가 정적 red로 막는다). 예외 하나: 픽스처 주입 플래그가
+  오버라이드는 `--floor <도메인>=<n>` 하나다. 셸도 같은 어휘다 — `take_floors`(scripts/lib/scan-floor.sh)가
+  선언 선행으로 같은 fail-closed를 강제하고, 선언 라벨 ⊆ 방출 라벨은 게이트가 정적 대조한다(구 env·--min-*
+  어휘는 전 가드에서 제거됐다 — 재유입은 거부 가드 `scripts/check-floor-vocab.sh`가 정적 red로 막는다).
+  예외 하나: 픽스처 주입 플래그가
   자기 도메인의 floor를 0으로 표현하는 관용구(check-alert-rules `--supply-policy` — 0은 정당한
   바닥값이라 분기 없이 면제가 되고 라벨 집합 불변이 유지된다)는 별개다. 프로덕션 호출은
   floor-free다 — check-ci-parity가 gate 스텝·make -n ci 양쪽에서 `--floor` 잔존을 red로 강제한다.
@@ -157,9 +157,8 @@ dns-drift-check는 판정이 비동기라 동기 check 밖, audit-orphans는 종
 등식 대상 밖이고, 라벨 오타는 콜사이트의 라벨 상수 + --floor 증인 bats가 진다.
 
 ⚠️ **여기에 건수를 적지 않는다.** 예전엔 "28종 중 12종 · 라벨 17개"라고 적혀 있었는데 실측은
-13종/31종 · 라벨 21개였고, `scripts/lib/scan-floor.sh`와 `PROGRESS.md`에는 **또 다른 숫자**가 박혀
-있었다 — 아무도 대조하지 않는 손 관리 주장은 반드시 드리프트한다(티켓 09의 "원장 텍스트도 검증
-대상"과 같은 모양). 현재값이 필요하면 세어라:
+13종/31종 · 라벨 21개였고, 커널 헤더 주석(`scripts/lib/scan-floor.sh`)에는 **또 다른 숫자**가 박혀
+있었다 — 아무도 대조하지 않는 손 관리 주장은 반드시 드리프트한다. 현재값이 필요하면 세어라:
 
 ```
 grep -lE '^[^#]*\b(scan_floor|scan_signal) ' scripts/*.sh
@@ -186,11 +185,11 @@ grep -lE '^[^/]*(scan(Floor|Signal)\(|scan: ")' tools/*.ts
 ### 이름 있는 집합의 상한 — 존재 증인만으로는 부족하다
 
 ① **이름 있는 배열/집합을 재는 가드는 멤버 존재 증인뿐 아니라 집합 크기 상한(`length == N` 또는 정확
-집합 등식)을 같이 건다 — 원소 *추가*가 무증인이면 상한이 없는 것이다.** (실측: 5라운드 비평가 생존
-군집 최대 12건 · 6라운드 재발 9건 — infra-a-1·a-3·b-4·kustomization-2/3/4·httproute-1/2·posture-2.)
+집합 등식)을 같이 건다 — 원소 *추가*가 무증인이면 상한이 없는 것이다.** (리뷰 실측: 이 형태의 무증인
+군집이 한 라운드에 12건까지 살아남았고, 다음 라운드에도 9건이 재발했다.)
 
 ② **존재 증인은 주석 스트립 후 행두 앵커로 센다 — 산문·문자열·heredoc·죽은 스텝 안의 같은 토큰은
-증인이 아니다.** (형제 관용구: `scripts/check-locale-collation.sh:131`.)
+증인이 아니다.** (형제 관용구: `scripts/check-locale-collation.sh`의 레인 D — 주석 스트립 후 `guard_init` 행두 호출만 인정한다.)
 
 `scripts/check-bats-style.sh`의 `[SETCAP]` 레인이 ①을 `@test` 이름-본문 불일치로 강제한다 — 이름이
 exactly/only/no other/전수/EVERY/정확 중 하나로 원소 전수를 선언하면 본문에 집합 등식 술어(`= "…"` ·
@@ -276,7 +275,7 @@ pre-commit run -a    # (보조) 평문 시크릿 가드 + gitleaks
 `make ci`가 gate를 재현한다는 **주장**은 오랫동안 검증되지 않았다. 대조하던 것이
 `test_make-ci-parity.bats`의 **하드코딩된 5개 토큰**뿐이라, 목록에 없는 게이트 스텝은 아무리 늘어나도
 보이지 않았다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 `make ci`에 없었는데 전 검사가 초록이었다
-(하필 그 5개가 전부 미러된 것들이라 우연히 통과했다). 티켓 07의 하드코딩 소비처 목록과 같은 클래스다.
+(하필 그 5개가 전부 미러된 것들이라 우연히 통과했다). 위 「이미지 소유권 회계」의 하드코딩 소비처 목록과 같은 클래스다.
 
 이제 `tools/check-ci-parity.ts`가 **스텝 목록을 `ci.yaml`에서 파생해** 원장(`policy/ci-parity.json`)과
 대조한다. **게이트 스텝을 추가하면 원장에 계상하기 전까지 red**다. 상태는 셋:

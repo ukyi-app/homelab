@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# verify-db-marker — per-DB freshness 마커(db-<name>-ready) 소비자(adversarial pass4).
+# verify-db-marker — per-DB freshness 마커(db-<name>-ready) 소비자.
 # ensure-role-password Job이 방출한 마커가 (a) 존재하고 (b) 기록된 resourceVersion이 현재 owner/ro
 # 비번 Secret의 resourceVersion과 일치(=fresh)함을 검증한다 — stale한 이전 검증/무관 신호로 온보딩이
 # 통과되는 레이스를 차단. kubectl을 PATH 스텁으로 대체(라이브 무접근). ⚠️ @test 이름 영어.
@@ -60,7 +60,7 @@ vdm() { PATH="$TMP/bin:$PATH" run bun "$TOOL" "$@"; }
   export VDM_MARKER_PRESENT="0"
   vdm --name example-api
   [ "$status" -ne 0 ]
-  # 오진단 방지(d6③ 이관에서 실측된 회귀 클래스): die 문구에 kubectl의 실제 실패 사유(stderr)가
+  # 오진단 방지(이관에서 실측된 회귀 클래스): die 문구에 kubectl의 실제 실패 사유(stderr)가
   # 동봉된다 — 연결/인증 실패가 "마커 부재"로만 읽히면 운영자가 엉뚱한 곳(ensure-role-password)을 판다.
   echo "$output" | grep -q "kubectl:"
   echo "$output" | grep -q "NotFound"

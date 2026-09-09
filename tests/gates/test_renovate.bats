@@ -102,7 +102,7 @@ for f in roots:
 assert len(versions) == 1, "등식 루트의 코어 버전이 갈렸다(부분 갱신 상태): %r" % sorted(versions)
 V = versions.pop()
 
-# [7라운드 tfval-cloudflare-3 + tfval-tailscale-github-3] `total >= 5` 집계 바닥값은 한 루트의
+# `total >= 5` 집계 바닥값은 한 루트의
 # 등식 핀이 통째로 삭제되거나(파일 재작성 실수) 연산자가 `=`->`>=`로 완화돼도(주석이 스스로
 # "정확 핀이다"라고 선언하는 fail-closed 계약 이탈) want/got 양쪽에서 그 파일 키가 대칭적으로
 # 빠져 무증인이었다(cloudflare 삭제 실측 7/7 ok, github `>=` 완화 실측 7/7 ok). tailscale 루트만

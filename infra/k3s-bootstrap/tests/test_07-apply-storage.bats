@@ -99,7 +99,7 @@ _apply() {
 }
 
 @test "renders manifests with the provisioner image substituted (no literal placeholder)" {
-  # 티켓 60 prov-1 — 헬퍼(위 @test)와 같은 렌더 계약. envsubst SHELL-FORMAT/sed 폴백 목록에
+  # 헬퍼(위 @test)와 같은 렌더 계약. envsubst SHELL-FORMAT/sed 폴백 목록에
   # LOCAL_PATH_PROVISIONER_IMAGE를 추가하지 않으면 이 플레이스홀더가 그대로 남아 kubectl apply가
   # `${LOCAL_PATH_PROVISIONER_IMAGE}`라는 문자열 그대로의 이미지를 당겨 ImagePullBackOff가 난다.
   _sandbox; _apply
@@ -134,7 +134,7 @@ _apply() {
   #    배제로는 envsubst만 가릴 수 없다(va 실측: `type -a sed envsubst`). FORCE_SED_RENDER 시임으로
   #    직접 태운다. 뮤테이션 실측(2026-09): BULK_STORAGE_PATH 치환 절만 지워도 위 13개 @test 전부
   #    그대로 ok였다 — 이 분기가 원리적으로 미실행이었기 때문이다.
-  # ⚠️ 감사 12라운드 77 reg-a3-tools-infra-3 — 위 출력 단언만으로는 sed 분기가 **실제로 실행됐는지**
+  # ⚠️ 위 출력 단언만으로는 sed 분기가 **실제로 실행됐는지**
   #    구별하지 못한다(envsubst와 sed가 이 3-플레이스홀더에 대해 동일 출력을 낸다). 이 @test 안에서만
   #    PATH 선두에 실패하는 디코이 envsubst를 겹쳐써 분기 자체를 증인한다 — sed가 실제로 돌면 디코이는
   #    호출되지 않아 아래 status 단언이 그대로 통과하고, FORCE_SED_RENDER 조건이 무력화돼 envsubst

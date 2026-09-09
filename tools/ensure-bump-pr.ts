@@ -199,7 +199,7 @@ const USAGE = `ensure-bump-pr — bump PR 멱등 실행기(조회 → 결정 →
        bun tools/ensure-bump-pr.ts --reconcile-only                      (인가 회수 전용 패스 — 대상은 네임스페이스)
   --kind <kind>     target 레인 신원(app | bespoke) — 둘은 인가 소스가 다르다(.bindings.json vs .image-pin.json)
   --name <name>     target 이름(소문자/숫자/하이픈). --kind와 함께 온전한 신원을 이룬다 — 한쪽 부재도 fail-closed
-                    (구 --app 무한정 계약 폐지 — 이름만으로 정책 소스를 추측하지 않는다, design r2-1)
+                    (구 --app 무한정 계약 폐지 — 이름만으로 정책 소스를 추측하지 않는다)
   --tag <tag>       후보 배포 핀 tag(sha-<7..40 hex>) — 브랜치는 bump-poll/<kind>/<name>-<tag>(RUN_ID 없음)
   --action <lane>   플래너(poll-ghcr)의 .action을 **그대로** — bump | propose-pr (필수, 기본값 없음)
                       bump       = autoDeploy:true  → auto-merge 무장(desired state — 없으면 재무장)
@@ -312,7 +312,7 @@ if (args.reconcileOnly) {
     }
   }
 } else {
-  // 신원은 (kind, name) 쌍으로만 온전하다 — 한쪽이라도 없으면 fail-closed(design r2-1: 이름만 받고
+  // 신원은 (kind, name) 쌍으로만 온전하다 — 한쪽이라도 없으면 fail-closed(이름만 받고
   // 파일시스템에서 정책 소스를 추측하면 동명 충돌의 모호성이 프로세스 경계에서 재생된다).
   if (!args.kind) usageError("--kind 필수 (app | bespoke) — 이름만으로 레인을 추측하지 않는다");
   if (!args.name) usageError("--name 필수 — --kind와 함께 온전한 target 신원을 이룬다");
@@ -401,7 +401,7 @@ const MAX_CAPTURE = 4 * 1024 * 1024;
 // 전부 기본값(audit=true)으로 예전 그대로 원장에 남는다(create/push/arm/disarm·ls-remote 무변경).
 function runSoft(cmd: string, a: string[], audit = true): { failure: string | null; stdout: string } {
   if (audit) executed.push([cmd, ...a].join(" "));
-  // 실행은 seam(d6②) 경유 — 종전 계약 보존: timeout 없음(timeoutMs 0)·캡처 경계 MAX_CAPTURE.
+  // 실행은 seam 경유 — 종전 계약 보존: timeout 없음(timeoutMs 0)·캡처 경계 MAX_CAPTURE.
   // 캡처 초과(ENOBUFS)·spawn 실패는 errKind로 선다 → 첫 가드가 잡는다(잘린 stdout을 성공으로 읽는 경로 없음).
   const r = shExec(cmd, a, { timeoutMs: 0, maxBuffer: MAX_CAPTURE });
   if (r.errKind !== undefined) return { failure: `실행 실패: ${r.err}`, stdout: "" };
@@ -1325,7 +1325,7 @@ if (args.reconcileOnly) {
         warn(`${targetKey(nref.target!)}: ${probe.why}`);
       }
       if (legacyWhy !== null && !corruptReported.has(`legacy:${nref.target!.name}`)) {
-        // 레거시 이행의 fail-closed(design r2-1) — 회수는 하되, 사람이 구형 PR을 정리해야 하는 상태라
+        // 레거시 이행의 fail-closed — 회수는 하되, 사람이 구형 PR을 정리해야 하는 상태라
         // run을 빨갛게 만든다(가려진 채 초록이면 이행이 영원히 끝나지 않는다).
         corruptReported.add(`legacy:${nref.target!.name}`);
         failures.push(`${nref.branch}: ${legacyWhy}`);

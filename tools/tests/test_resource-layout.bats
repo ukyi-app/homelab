@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# 리소스 산출물 레이아웃 커널(tools/lib/resource-layout.ts) — cli-deepening 심화 4의 expand 단계.
+# 리소스 산출물 레이아웃 커널(tools/lib/resource-layout.ts) — expand 단계.
 # 정방향(layoutFor)은 provision 산출 실물과의 리터럴 손 핀으로, 역방향(classifyArtifact)은 왕복
 # 불변식(설계 게이트 r1 D2)으로, scope 태그는 teardown purge 의미론과의 대조로 단언한다.
-# 소비자는 아직 무변경이다(티켓 07이 이행). ⚠️ 중간 단언은 [ ]만. @test 이름은 영어.
+# 소비자는 아직 무변경이다. ⚠️ 중간 단언은 [ ]만. @test 이름은 영어.
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
 
@@ -252,7 +252,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 
 @test "provision-cache writes exactly the kernel instance file set (7th-file drift guard)" {
   # provision이 인스턴스 파일을 자체 열거하므로, write 대상과 커널 CACHE_INSTANCE_FILES의
-  # 집합 동치를 기계 대조한다 — 7번째 파일이 커널 갱신 없이 생기면 red(티켓 06 리뷰 이월).
+  # 집합 동치를 기계 대조한다 — 7번째 파일이 커널 갱신 없이 생기면 red.
   run bun -e '
     const root = process.argv[1];
     const { readFileSync } = require("node:fs");
@@ -276,7 +276,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "roleArtifacts is the exact inverse of classifyArtifact for every name-attributed role (floor 8)" {
-  # 티켓 40: 관측(status --resources)이 "이 리소스의 산출물이 실재하는가"를 물으려면 role → 경로
+  # 관측(status --resources)이 "이 리소스의 산출물이 실재하는가"를 물으려면 role → 경로
   # 방향이 필요한데, 그 유도를 소비자가 하면 명명 정책이 두 벌이 되어 감사와 관측이 다른 집합을
   # 말한다. 두 방향이 같은 커널에 있다는 것을 왕복으로 잰다 — 그리고 **공유 산출물은 없어야**
   # 한다(kustomization·cluster.yaml·원장이 섞이면 '전건 실존'이 상수가 된다).

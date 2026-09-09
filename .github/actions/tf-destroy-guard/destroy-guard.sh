@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # tf plan의 delete/replace(=delete+create) 액션 수를 세어 무인 apply를 가드한다(SSOT).
-# ⚠️ codex pass5 F1: 결과를 **typed output**(result, destroy_count)으로 낸다 — 호출 측이 "의도된 delete 차단"과
+# ⚠️ 결과를 **typed output**(result, destroy_count)으로 낸다 — 호출 측이 "의도된 delete 차단"과
 # "내부 오류(plan 읽기 실패·jq 부재·파싱 실패)"를 구분해, 후자는 잡을 **loud 실패**시키게 한다(가드가 깨졌는데
 # green으로 위장하는 것 방지).
 #   result=ok             : delete 0 (또는 mode=warn)  → exit 0

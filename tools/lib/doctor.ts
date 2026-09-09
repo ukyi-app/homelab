@@ -34,7 +34,7 @@ const TOOLCHAIN_RUNBOOK = "docs/runbooks/toolchain.md";
 const GH_MIN_VERSION: [number, number] = [2, 40];
 const GH_MIN_LABEL = GH_MIN_VERSION.join(".");
 
-// 전역 설치 진단(homelab-cli-r2 티켓 35) — `bun link`가 심는 진입점 이름. 4상 판정의 원료를
+// 전역 설치 진단 — `bun link`가 심는 진입점 이름. 4상 판정의 원료를
 // **`lstatSync`로** 모은다: `Bun.which`는 dangling 심링크에 null을 돌려줘 "설치 안 됨"과
 // "설치했는데 대상이 사라졌다"를 한 값으로 접는다. 후자가 이 호스트에서 실측된 상태다
 // (2026-09-07: `~/.bun/bin/homelab` → 삭제된 worktree). 두 상태의 처방이 다르므로 접으면 안 된다.
@@ -132,7 +132,7 @@ export function runDoctor(): DoctorResult {
   }
 
   // ── 로컬 도구 ──
-  // detail은 '다음에 무엇을 하나'까지 지목한다(티켓 33) — 호스트 도구 핀은 런북이 SSOT다.
+  // detail은 '다음에 무엇을 하나'까지 지목한다 — 호스트 도구 핀은 런북이 SSOT다.
   const kc = process.env.KUBECONFIG ?? "";
   const gitBin = Bun.which("git");
 
@@ -200,7 +200,7 @@ export function runDoctor(): DoctorResult {
   // 다음 명령은 canonical 경로를 그대로 준다. 결정성 규약(헤더 — detail에 절대경로 금지)은
   // `$PWD` 상대 표기로 지킨다(레포 루트에서 실행하는 것이 그 명령의 전제이기도 하다).
   // ⚠️ KUBECONFIG는 **콜론 구분 병합 목록**이 유효한 값이다(kubectl/client-go 규약). `existsSync("a:b")`는
-  // false라 단일 경로 판정은 정당한 개발자 셸을 exit 1로 만든다(observe-5·exec-11). 빈 세그먼트
+  // false라 단일 경로 판정은 정당한 개발자 셸을 exit 1로 만든다. 빈 세그먼트
   // (끝의 콜론)는 경로가 아니므로 반드시 제거한다 — 안 하면 ""가 '부재 경로'로 세어진다.
   const kcPaths = kc.split(delimiter).filter(Boolean);
   const kcMissing = kcPaths.filter((p) => !existsSync(p)).length;
@@ -223,7 +223,7 @@ export function runDoctor(): DoctorResult {
     const sc = fetchTemplateFile(SCAFFOLD_ENTRY);
     if (sc === null) add("template-scaffold-contract", "fail", `${SCAFFOLD_ENTRY} 조회 실패 — 템플릿 구조 변경 의심(스캐폴더 부재면 init 불가)`);
     else {
-      // 계약 술어는 lib/template-contract.ts SSOT — init preflight가 같은 술어를 쓴다(structure r1 a3).
+      // 계약 술어는 lib/template-contract.ts SSOT — init preflight가 같은 술어를 쓴다.
       const absent = scaffoldContractError(sc);
       if (absent !== null) add("template-scaffold-contract", "fail", `스캐폴더 비대화형 계약 마커 부재(${absent}) — init이 이 템플릿과 비호환`);
       else add("template-scaffold-contract", "pass", `스캐폴더 비대화형 계약 확인(${SCAFFOLD_CONTRACT_LABEL})`);

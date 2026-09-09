@@ -2374,7 +2374,8 @@ selfHeal과 플립플롭한다.
   「테스트 이름은 인터페이스가 아니다」의 한 특수형이다(이름과 본문의 불일치가 상한 축에서만 난다).
 - **처방(CONTRIBUTING.md 「이름 있는 집합의 상한」)**: 이름 있는 배열/집합을 재는 가드는 존재 증인 +
   집합 크기 상한(`length == N` 또는 정확 집합 등식)을 **같이** 건다. 존재 증인은 주석 스트립 후
-  행두 앵커로 센다(형제 관용구: `scripts/check-locale-collation.sh:131`) — 산문·문자열·heredoc·죽은
+  행두 앵커로 센다(형제 관용구: `scripts/check-locale-collation.sh`의 레인 D — 주석 스트립 후
+  `guard_init` 행두 호출만 인정한다) — 산문·문자열·heredoc·죽은
   스텝 안의 같은 토큰은 증인이 아니다.
 - **린트화(7라운드 축 N, 티켓 59)**: `scripts/check-bats-style.sh`의 `[SETCAP]` 레인이 이 규칙을 정적으로
   강제한다 — `@test` 이름이 exactly/only/no other/전수/EVERY/정확 중 하나를 선언하면 본문(다음 `@test`

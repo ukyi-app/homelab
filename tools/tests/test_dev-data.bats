@@ -17,7 +17,7 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "localhost"
   # bare 키는 **모드 1 전용**이다(단일 docker dev DB app_dev — per-name 구분 불성립).
-  # 모드2·클러스터 envFrom은 #141 이후 namespaced 키를 쓰므로 여기서 ORDERS_DATABASE_URL이 나오면 안 된다.
+  # 모드2·클러스터 envFrom은 namespaced 키를 쓰므로 여기서 ORDERS_DATABASE_URL이 나오면 안 된다.
   echo "$output" | grep -q '"DATABASE_URL"'
   run bash -c "bun '$ROOT/tools/dev.ts' db:up --dry-run --name orders | grep -ow ORDERS_DATABASE_URL"
   [ "$status" -ne 0 ]

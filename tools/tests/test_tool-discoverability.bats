@@ -72,7 +72,7 @@ EOF
   [ -z "$stderr" ]
 }
 
-# ── README 동사 표 대조(homelab-cli-r2 티켓 32) ────────────────────────────────
+# ── README 동사 표 대조 ────────────────────────────────────────────
 # 표는 **손 사본**이다 — README 헤더가 선언한 '손 사본은 반드시 드리프트한다' 규약과의 긴장은
 # 의도된 선택이다(docs/adr/0001이 descriptor 파생을 기각했으므로 생성이 아니라 대조로 막는다).
 # 그 대조가 아래 세 @test이고, 머지·`--wait` 종결 두 열은 명시 제외 + 각주 왕복으로 대신한다.
@@ -184,8 +184,7 @@ EOF
 }
 
 @test "the README CLI section carries a synopsis line for every catalog verb (floor = VERBS length)" {
-  # shell-11: `app init`만 시놉시스가 없었다(10동사 중 유일 누락). 열거는 catalog 파생이라
-  # 동사가 늘면 README가 함께 red가 된다.
+  # 열거는 catalog 파생이라 동사가 늘면 README가 함께 red가 된다.
   run bun -e '
     import { readFileSync } from "node:fs";
     import { VERBS } from "./tools/lib/verbs.ts";
@@ -205,10 +204,10 @@ EOF
   echo "$output" | grep -qE "^SYNOPSIS_OK [1-9][0-9]+$"
 }
 
-# ── 빠른 시작 블록·코드 근거 앵커(homelab-cli-r2 티켓 31) ─────────────────────
+# ── 빠른 시작 블록·코드 근거 앵커 ─────────────────────────────────
 
 @test "every homelab line in the README quickstart routes to a real catalog verb (floor 5)" {
-  # docs-4: 첫 사용 경로가 어디에도 한 번에 없던 자리. 블록의 각 줄이 실재 동사 경로여야 한다 —
+  # 블록의 각 줄이 실재 동사 경로여야 한다 —
   # 오타·폐기된 동사가 들어가면 red다(사람이 그대로 복사해 붙이는 줄이라 값이 크다).
   run bun -e '
     import { readFileSync } from "node:fs";
@@ -265,7 +264,7 @@ EOF
 }
 
 @test "the MCP server registration recipe lives in both the README and mcp --help, with the KUBECONFIG-absent outcome" {
-  # mcp-8: 등록 방법이 레포·런북 어디에도 없던 자리. 전부 **양성** grep이라 표기가 사라지면 red다.
+  # 전부 **양성** grep이라 표기가 사라지면 red다.
   run grep -c "claude mcp add homelab" tools/README.md
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]

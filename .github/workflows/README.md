@@ -41,7 +41,7 @@ run-name에 트리거 출처(`스케줄`/`수동(actor)`)가 박혀 이력에서
 |---|---|---|
 | ci | PR·push | 권위 게이트(job `gate` = 유일 required check) |
 | iac | PR·push(cloudflare) | terraform apply |
-| build | push(`ops/**`)·수동 | 플랫폼 ops 이미지 빌드(pg-tools → GHCR, `:sha-<sha>`+`:18-rclone`) — 배포-전용 apps/는 외부 레포에서 빌드 |
+| build | push(`ops/**`)·수동 | 플랫폼 ops 이미지 매트릭스 빌드(pg-tools→`:18-rclone` · skopeo→`:alpine`, 둘 다 `:sha-<sha>` 동반) — 배포-전용 apps/는 외부 레포에서 빌드 |
 | bump | build 완료(workflow_run) | 이미지 write-back |
 
 ## 🧩 reusable — 직접 실행 불가 (Run 버튼 없음)

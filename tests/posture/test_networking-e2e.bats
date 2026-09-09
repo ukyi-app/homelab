@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
-# Milestone 3 게이트 — 네트워킹 경로 엔드투엔드 검증.
-# LIVE: kubectl 컨텍스트 = k3s VM; tailnet에 연결된 기기에서 실행.
+# 네트워킹 게이트 — 네트워킹 경로 엔드투엔드 검증.
+# LIVE: kubectl 컨텍스트 = k3s 노드; tailnet에 연결된 기기에서 실행.
 
 setup() {
   # DOMAIN 기본값 — make verify-posture는 KUBECONFIG만 주입하므로 기본 zone(ukyi.app)으로 폴백한다.
@@ -81,8 +81,7 @@ setup() {
 
 @test "AdGuard resolves *.home to the Traefik proxy's Tailscale IP via the node's hostPort (R7 LAN path)" {
   # 베어메탈 NUC: svclb hostPort 53이 노드 실주소에 직접 걸린다 — R7(라우터 DHCP option 6 → AdGuard)이
-  # LAN 기기에 주는 경로가 정확히 `@<K3S_NODE_IP>`다. (예전 Mac mini 시대의 OrbStack 127.0.0.1 포워딩
-  # 전제는 2026-08-17 컷오버로 소멸했고, 이 @test는 그 뒤 첫 `make verify-posture`에서 예고대로 red였다.)
+  # LAN 기기에 주는 경로가 정확히 `@<K3S_NODE_IP>`다.
   # 기대값은 이름이 아니라 **Service가 보고하는 프록시 IP**다 — `tailscale ip -4 homelab`은 요청 이름이
   # `-N` 접미로 바뀐 순간(또는 잔존 디바이스가 그 이름을 점유한 동안) 엉뚱한 기기를 가리킨다.
   run bash -c "kubectl -n gateway get svc traefik-ts -o jsonpath='{.status.loadBalancer.ingress[*].ip}'"

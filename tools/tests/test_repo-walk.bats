@@ -117,7 +117,7 @@ _fixture() {
   [ "$output" == "THREW" ]
 }
 
-# ⚠️ R-1 회귀 가드(design-r1 R-1의 핵심). 유닛 열거는 **필수 산출물로 거르면 안 된다** —
+# ⚠️ 회귀 가드. 유닛 열거는 **필수 산출물로 거르면 안 된다** —
 # audit-orphans에겐 values.yaml 필터가 맞지만 check-app-deploy는 그 파일의 **부재**를 잡아야 한다.
 # 열거자가 미리 거르면 위반이 검사 대상에서 사라져 배포를 깨뜨리는 false green이 된다.
 @test "apps units include an app that is missing its required artifacts" {
@@ -128,7 +128,7 @@ _fixture() {
   [ "$output" == "naked@apps/naked,probe@apps/probe" ]
 }
 
-# reg13-e-carryover-2 — Dirent.isDirectory()는 심볼릭 링크 엔트리에서 대상과 무관하게 항상 false다
+# Dirent.isDirectory()는 심볼릭 링크 엔트리에서 대상과 무관하게 항상 false다
 # (readdir이 링크를 follow하지 않음). filesystemDirs가 이 판정만 쓰면 디렉토리를 가리키는 심볼릭
 # 링크 앱이 열거에서 통째로 누락된다 — apps units는 filesystem 소스라 git add가 필요 없다.
 @test "apps units include a symlinked directory pointing to a real directory" {
@@ -365,7 +365,7 @@ _fixture_substrate() {
   [ "$output" == "true" ]
 }
 
-# ── 티켓 05: rules / producers 스코프 ──
+# ── rules / producers 스코프 ─────────
 # 별도 픽스처를 쓴다 — 위 _fixture에 rules 디렉토리를 넣으면 platform-manifests의 정확-일치 단언이
 # 깨져 두 관심사가 결합된다.
 _fixture_repo() {
@@ -414,7 +414,7 @@ _fixture_repo() {
 
 # ⚠️ 룰 디렉토리와 린터 자신의 제외는 **소비자 몫**이다(의미론적 필터). 룰 디렉토리는 이 린터의
 # *검사 대상*(소비자 표면)이지 "레포에 존재하지 않는 파일"이 아니다 — 스코프가 걸러버리면 다른
-# 소비자가 그 파일을 볼 수 없게 된다(design-r1 R-1과 같은 함정).
+# 소비자가 그 파일을 볼 수 없게 된다(위 회귀 가드와 같은 함정).
 @test "producers scope does not apply the linter's own semantic exemptions" {
   tmp="$(_fixture_repo)"
   run walk 'const p = walkManifests("producers", ROOT).map(e => e.path);

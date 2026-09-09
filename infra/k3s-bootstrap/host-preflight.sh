@@ -76,10 +76,10 @@ printf '%s' "$stub" | grep -qxiE 'no|false|0' \
 #
 # ⚠️ loopback만 거르는 것으로는 부족하다(실측 2026-08-11). tailscale이 `~.` 라우팅 도메인으로
 #    **모든** 질의를 가져가고, 실업스트림 1순위가 100.100.100.100(MagicDNS)이다. 그 뒤는 tailnet
-#    coordination server가 지정한 100.112.20.3 = **맥미니**, 즉 라이브 클러스터의 AdGuard다
+#    coordination server가 지정한 전역 nameserver, 즉 **이 클러스터의 AdGuard**다
 #    (infra/tailscale/acl.tf의 tailscale_dns_nameservers). 100.100.100.100은 LOCAL 주소가 아니라
 #    CNI DNAT는 피하지만(ip route get → table 52), 노드 이름해석이 통째로 클러스터에 의존하게 된다
-#    — Mac을 끄는 순간 github.com조차 못 푼다(이미지 pull 불가 = §2.4 교착의 두 번째 얼굴).
+#    — AdGuard가 뜨기 전에는 github.com조차 못 푼다(이미지 pull 불가 = §2.4 교착의 두 번째 얼굴).
 #    tailnet 대역(CGNAT 100.64.0.0/10 · tailscale ULA fd7a:115c:a1e0::/48)은 그래서 거부한다.
 rc="${R}/etc/resolv.conf"
 [ -r "$rc" ] || fail "${rc}를 읽지 못했다"
@@ -204,7 +204,7 @@ done
 # ⚠️ writer를 먼저 **끝까지** 받고 나서 herestring으로 awk에 준다. 옛 형태(`ip … | awk '… exit'`)는 awk가
 #    첫 매치에서 파이프를 닫아, writer(실물 ip의 나머지 링크·테스트 스텁의 다음 줄)가 그 뒤에 쓰면 SIGPIPE(141)
 #    — 러너처럼 SIGPIPE가 무시된 환경에선 EPIPE 쓰기 오류(rc 1) — 로 죽고 pipefail이 그것을 채택해 여기서
-#    `set -e`가 스크립트를 죽였다(티켓 49: 2026-09-08 CI gate flake 2회, `2>/dev/null`이 "Broken pipe"까지 삼켜
+#    `set -e`가 스크립트를 죽였다(2026-09-08 CI gate flake 2회, `2>/dev/null`이 "Broken pipe"까지 삼켜
 #    진단 0줄). 등재 함정 「`grep -q`의 조기 종료가 pipefail 아래에서 writer를 SIGPIPE로 죽인다」의 형제 —
 #    소비자가 grep -q가 아니라 awk exit인 형태. 캡처 대입은 writer 실패를 `||`로 정직하게 받는다.
 lf_addrs="$($PREFLIGHT_IP -o -4 addr show 2>/dev/null)" \

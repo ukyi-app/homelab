@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# drift-2: active&&public host가 실제로 resolve되는지(apply 누락으로 DNS 미생성인지) 확인.
+# active&&public host가 실제로 resolve되는지(apply 누락으로 DNS 미생성인지) 확인.
 # resolver 주입(--fixture)으로 라이브 DNS 없이 fixture 검증. @test 영어, 중간 단언 [ ].
 # ⚠️ 예약 host 바닥값(--floor reserved=<n>)의 **기본값은 1**(fail-closed)이다 — 형제 reserved-hosts.json이
 # 없는 tmp 픽스처는 `--floor reserved=0`으로 **명시** 해제한다. 기본을 0으로 두면 '조용히 꺼진 바닥값'이
@@ -30,7 +30,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 }
 
 @test "a transient resolver failure (SERVFAIL/timeout) is NOT counted as drift (F3 tri-state)" {
-  # ⚠️ codex pass4 F3: transient는 NXDOMAIN과 구분 — drift 버킷이 아니라 transient 버킷에 들어가야 한다.
+  # ⚠️ transient는 NXDOMAIN과 구분 — drift 버킷이 아니라 transient 버킷에 들어가야 한다.
   d="$BATS_TEST_TMPDIR"
   printf '[{"name":"blog","host":"blog.ukyi.app","public":true,"active":true}]\n' > "$d/apps.json"
   out=$(bun "$ROOT/tools/dns-drift-check.ts" --apps "$d/apps.json" --floor reserved=0 --fixture '{"blog.ukyi.app":"TRANSIENT"}')

@@ -20,7 +20,7 @@
 #
 # ⚠️ 위치 축(주석·잡 경계)도 이제 닫혔다 — 예전엔 GOT가 파일 전체를 sed해 -target 4줄을 같은
 #    drift-github 잡 안 주석으로 옮겨도(plan은 여전히 github 루트 전체를 돈다) 4/4 초록이었다
-#    (6라운드 실측, infra-a-2). setup의 gh_job() awk가 잡 블록만 자르고 grep -v가 주석을 뺀다 —
+#    (실측). setup의 gh_job() awk가 잡 블록만 자르고 grep -v가 주석을 뺀다 —
 #    형제 관용구 infra/tailscale/test_provider_scopes.bats의 잡 한정 awk와 같은 형태.
 
 setup() {
@@ -34,8 +34,8 @@ setup() {
   ALL="$(cat "$TFDIR"/*.tf | sed -nE 's/^resource[[:space:]]+"([^"]+)"[[:space:]]+"([^"]+)".*/\1.\2/p' | LC_ALL=C sort -u)"
   # 감시 대상 = repository 리소스를 뺀 나머지(위 주석의 이유로 repository는 읽기 전용 plan 불가)
   WANT="$(printf '%s\n' "$ALL" | grep -v '^github_repository\.' || true)"
-  # [infra-a-2] drift-github job 블록만 잘라낸다 — 파일 전역 sed는 주석·형제 잡의 같은 토큰을
-  # 활성 인자로 센다(6라운드 실측: -target 4줄을 같은 잡 안 주석으로 옮겨도 4/4 초록이었다).
+  # drift-github job 블록만 잘라낸다 — 파일 전역 sed는 주석·형제 잡의 같은 토큰을
+  # 활성 인자로 센다(실측: -target 4줄을 같은 잡 안 주석으로 옮겨도 4/4 초록이었다).
   gh_job() { awk '/^  drift-github:/{f=1;next} f&&/^  [a-z]/{exit} f' "$WF"; }
   # 워크플로가 실제로 지정한 것 — job 한정 + 주석 줄 제외.
   GOT="$(gh_job | grep -v '^[[:space:]]*#' | sed -nE 's/.*-target=([A-Za-z0-9_.]+).*/\1/p' | LC_ALL=C sort -u)"

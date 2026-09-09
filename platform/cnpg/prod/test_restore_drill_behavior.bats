@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# restore-drill **행위** 게이트(M17) — grep이 아니라 스크립트를 실제로 실행해
+# restore-drill **행위** 게이트 — grep이 아니라 스크립트를 실제로 실행해
 # "pre-flight 정리가 apply보다 먼저 돈다"·"복구가 실제로 일어났다"·"열거 실패 ≠ 0건"을
 # 스텁 kubectl/curl의 호출 순서·횟수와 FAIL 문구로 단언한다.
 # 선례: tests/gates/test_digest-exporter-producer.bats(스텁 PATH + argv 순서·줄번호 단언),

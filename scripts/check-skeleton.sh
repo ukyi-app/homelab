@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-skeleton
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 02 — 구 SKELETON_*
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 SKELETON_*
 # env 폐지: env는 호출부에 보이지 않는 채로 바닥값을 끄거나 올린다).
 take_floors "check-skeleton:bats check-skeleton:platform check-skeleton:nul-scan" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"

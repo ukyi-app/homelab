@@ -1,6 +1,6 @@
 # SSOT: live — rewrite의 권위는 이 리컨실러가 갱신하는 **라이브** AdGuard다. adguardhome.yaml의 `rewrites:`
 #   블록은 첫 부팅 시드일 뿐이라 여기서 읽지 않는다(docs/decisions/0007).
-# adguard *.home rewrite 셀프힐 리컨실러(메타갭 ① W2-A) — split-horizon rewrite(`*.home.ukyi.app → traefik-ts
+# adguard *.home rewrite 셀프힐 리컨실러 — split-horizon rewrite(`*.home.ukyi.app → traefik-ts
 # tailscale IP`)가 DR 재구축/proxy 재등록으로 stale이 되면 tailscale·LAN 양쪽에서 *.home이 죽은 IP로 해석된다
 # (AdGuard split-horizon rewrite DR stale 함정). 이 CronJob이 10분마다 traefik-ts svc의 실 LB IP를 apiserver로
 # 읽어 AdGuard rewrite를 수렴시킨다. 통지는 발송 자격 없이 메트릭→vmalert→alertmanager 경유(F13).
@@ -101,12 +101,12 @@ spec:
                 - { name: HOME, value: /tmp } # readOnlyRootFilesystem 하 curl 임시 경로
                 - { name: ADGUARD_USER, value: ukkiee } # username은 비밀 아님 — 평문(deployment inject-auth AGH_USER 동일 규약)
               envFrom:
-                - secretRef: { name: adguard-api-creds } # ADGUARD_PASSWORD 평문(basic auth) — Task 6 봉인, 텔레그램 자격 없음
+                - secretRef: { name: adguard-api-creds } # ADGUARD_PASSWORD 평문(basic auth), 텔레그램 자격 없음
               command: ["/bin/bash", "-c"]
               args:
                 - |
                   set -euo pipefail
-                  # F6: 모든 네트워크 호출 바운드 + 재시도 2등급(followup-sweep 01 — curl 7.71+ 필요:
+                  # F6: 모든 네트워크 호출 바운드 + 재시도 2등급(curl 7.71+ 필요:
                   # --retry-all-errors 7.71·--retry-max-time 7.32, pg-tools는 bookworm 기반 7.88 — 베이스
                   # 단언은 test_rewrite_reconciler.bats).
                   # ⚠️ DNS(exit 6)는 man의 transient 목록 밖이지만 curl이 **이미 재시도한다**(pg-tools

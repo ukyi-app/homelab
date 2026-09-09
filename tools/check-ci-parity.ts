@@ -6,7 +6,7 @@
 // 보이지 않는다 — 실측 시점에 gate의 run 스텝 19개 중 **8개**가 `make ci`에 없었는데 전 검사가 초록이었다.
 // 하필 하드코딩된 5개가 전부 미러된 것들이라 "우연히" 통과한 것이다.
 //
-// 이건 이 레포가 반복해서 맞은 클래스다(티켓 07: 재핀 소비처 하드코딩 목록이 레포와 어긋남). 처방도 같다 —
+// 이건 이 레포가 반복해서 맞은 클래스다(재핀 소비처 하드코딩 목록이 레포와 어긋남). 처방도 같다 —
 // **목록을 손으로 적지 말고 원본에서 파생하고, 파생된 항목마다 소유자를 강제한다.**
 //
 // 이 도구가 하는 일:
@@ -99,7 +99,7 @@ const errors: string[] = [];
 const fail = (m: string) => errors.push(m);
 
 function sh(cmd: string, args: string[]): string {
-  // seam 경유(d6③) — 실패는 throw(파생 실패를 guardMain이 열거 실패로 접는 계약). 64MiB 캡처 유지.
+  // seam 경유 — 실패는 throw(파생 실패를 guardMain이 열거 실패로 접는 계약). 64MiB 캡처 유지.
   // timeoutMs 0 = 종전 execFileSync 무-timeout 보존(make -n ci가 느린 머신에서 30s를 넘을 수 있다).
   const r = shExec(cmd, args, { cwd: ROOT, timeoutMs: 0, maxBuffer: 64 * 1024 * 1024 });
   // 문구에 argv 앞부분을 실어 **어느 파생**이 죽었는지 가른다(스텝 이름/본문 파생이 같은 yq -r 접두다).
@@ -183,7 +183,7 @@ function commandsIn(run: string): string[] {
 // quote-aware `#` 주석 스트립 — scripts/check-skip-signalling.sh의 NOCOMMENT_AWK_SH와 동형 모델을
 // TS로 이식(신설 lib 없이 이 파일 로컬 함수). execOnly의 옛 행두 전용 정규식(`^[ \t]*#.*$`)은 실 호출
 // 뒤에 붙은 trailing `# ...` 죽은 참조를 못 걷어, ⑤ covered_by 대조가 그 죽은 주석만으로도 rc=0으로
-// 통과했다(reg13c-a-landing-hunks-1 — witness.txt를 `true  # tests/witness.bats ...`로 바꿔도
+// 통과했다(witness.txt를 `true  # tests/witness.bats ...`로 바꿔도
 // 실측 통과 확인). 따옴표(홑/겹) 안의 `#`는 절대 주석 시작으로 보지 않는다 — positive 대조가 이걸 고정한다.
 function stripHashComments(s: string): string {
   return s
@@ -392,7 +392,7 @@ function reconcile(): string[] {
         }
         if (!existsSync(c.file)) { fail(`"${e.name}": covered_by.file '${c.file}' 부재.`); break; }
         // 죽은 주석에 남은 문자열은 '실재'가 아니다 — execOnly(195행, 원래 ④ mirrored 전용)로 행두
-        // `#` 주석을 걷어낸 뒤 대조한다(CONTRIBUTING.md 「검출기 실재 판정」 규칙, reg13-a3-tools-rules-1).
+        // `#` 주석을 걷어낸 뒤 대조한다(CONTRIBUTING.md 「검출기 실재 판정」 규칙).
         if (!execOnly(readFileSync(c.file, "utf8")).includes(c.contains)) {
           fail(`"${e.name}": covered_by.file '${c.file}'에 '${c.contains}'가 없다 — 덮는다는 주장이 더 이상 참이 아니다.`);
         }

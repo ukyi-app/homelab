@@ -30,7 +30,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 }
 
 @test "run-bats.sh has executable bit (Makefile/CI invoke ./scripts/run-bats.sh directly)" {
-  # Task 0.5가 make ci·ci.yaml에서 ./scripts/run-bats.sh 직접 호출 → exec 비트 없으면 깨진다.
+  # make ci·ci.yaml이 ./scripts/run-bats.sh 직접 호출 → exec 비트 없으면 깨진다.
   [ -x "$ROOT/scripts/run-bats.sh" ]
 }
 

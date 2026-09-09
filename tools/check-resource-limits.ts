@@ -10,7 +10,7 @@
 // `platform-manifests` 하나만 보던 시절, `infra/k3s-bootstrap/storage`가 적용하는 상주 워크로드
 // (local-path-provisioner Deployment 2개 — 라이브의 **모든 PV 데이터 경로**)는 이 가드·ArgoCD·
 // 원장 셋 다 밖이었다: 두 `resources:` 블록을 통째로 지워도 전 게이트가 초록이었고, 원장 행은
-// 주석 한 줄로만 지켜지는 **수기 계상**이었다(감사 2라운드 critic-A).
+// 주석 한 줄로만 지켜지는 **수기 계상**이었다.
 // 이 가드만 두 스코프를 합쳐 열거한다 — 스코프 확장이 아니라 **소비자 확장**이다. 다른 소비처
 // (image-pins·image-ownership·disk-caps)의 분모는 불변이다(각 가드의 SCAN 건수로 실증).
 //
@@ -20,25 +20,25 @@
 // namespace별 memory 합 == 그 namespace를 쓰는 원장 행들의 합. 양방향이다 — 매니페스트를 올려도,
 // 원장 행을 지워도 red다.
 //
-// ── platform 행도 이제 정적 귀속 + 커버리지 파생으로 기계 대조된다(감사 6라운드 티켓 62) ──
-// 티켓 26 착지 시점엔 "platform 행은 여전히 수기 계상"이었다 — namespace가 원장 행 키인데 정적
+// ── platform 행도 이제 정적 귀속 + 커버리지 파생으로 기계 대조된다 ─────────────────
+// substrate 스코프 착지 시점엔 "platform 행은 여전히 수기 계상"이었다 — namespace가 원장 행 키인데 정적
 // 스캔 21개 중 13개가 `metadata.namespace`를 안 쓰고(kustomization `namespace:`가 렌더에서 주입),
 // 3개는 helm 렌더에만 존재하고(traefik·sealed-secrets·tailscale), 3개는 `chart:` Application이라
 // kustomize 우주 밖(argocd·cert-manager·cnpg-operator)이었기 때문이다. 렌더 없이(권고안 C — 기각된
 // 후보는 전수 렌더 리컨실러·행 단위 렌더 bats, `.scratch/audit-2026-09/design-ledger-platform-rows.md`§6)
-// 두 규칙만 더해 그중 6개 namespace를 기계 대조로 옮긴다:
+// 두 규칙만 더해 그중 정적으로 완전한 namespace들을 기계 대조로 옮긴다(현재 목록은 매 실행의 coverage 출력이 권위):
 //   F1 namespace 귀속(`deriveNamespace`) — `metadata.namespace`가 없으면 그 파일을 **소유한 배포
 //     루트 kustomization의 namespace:**로 귀속한다. 중첩 base는 루트까지 상승 — kustomize의
 //     namespace transformer가 항상 최상위 값으로 덮어쓰는 실제 동작과 같다(가장 바깥에서 발견한
 //     값이 이긴다 — 조상 kustomization을 계속 climb하며 매번 갱신). 루트를 못 찾으면 위반
-//     (fail-closed — substrate의 "namespace 미선언 = 귀속 불가"와 같은 극성, 티켓 26).
+//     (fail-closed — substrate의 "namespace 미선언 = 귀속 불가"와 같은 극성).
 //   F2 커버리지 파생(`deriveExcludedNamespaces`, 로스터 아님) — 그 namespace를 목적지로 갖는
 //     배포 루트 중 (a) `HelmChartInflationGenerator` 생성기를 가진 것이 있거나 (b) `platform/argocd`
 //     아래 `chart:` Application의 destination이면 **정적으로 불완전**이라 대조에서 제외하고
 //     사유를 출력한다(gateway/tailscale/sealed-secrets = (a), argocd/cert-manager/cnpg-system = (b)).
-//     둘 다 아닌 namespace만 "완전"해 등호 대조 대상이다(실측 6: cache·database·edge·files·
-//     homepage·observability). 제외 목록은 손으로 유지하지 않는다 — 매 실행이 스캔에서 다시
-//     파생한다(F2가 매번 다시 계산 — 캐시·수기 갱신 없음).
+//     둘 다 아닌 namespace만 "완전"해 등호 대조 대상이다(어느 namespace가 완전한지는 매 실행의
+//     coverage 출력이 말한다 — 손 열거를 두지 않는다). 제외 목록도 손으로 유지하지 않는다 — 매 실행이
+//     스캔에서 다시 파생한다(F2가 매번 다시 계산 — 캐시·수기 갱신 없음).
 import { existsSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseFlags } from "./lib/cli.ts";
@@ -58,7 +58,7 @@ const ROOT = typeof f["--repo-root"] === "string" ? (f["--repo-root"] as string)
 const KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler", "Cluster", "ObjectStore"]);
 // spec.template.spec.containers[] 경로를 쓰는 kind(Pooler = CNPG pgbouncer). Cluster는 별도(spec.resources).
 const CONTAINER_KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pooler"]);
-// ⚠️ 로스터 축(KINDS 파생)과 표기 축(값 앞 따옴표·들여쓰기 등)은 별개다(감사 6라운드 grep-c-4,
+// ⚠️ 로스터 축(KINDS 파생)과 표기 축(값 앞 따옴표·들여쓰기 등)은 별개다(
 // docs/traps-detail.md 「파일 프리필터를 함께 넓히지 않으면 kind 추가가 vacuous green으로 착지한다」).
 // `kind: "Deployment"`처럼 값에 따옴표를 두른 표기는 유효 YAML이고 kubectl·kustomize·ArgoCD가
 // 한 줄 스칼라와 동일하게 적용하는데, 앵커된 리터럴 대조(`^kind:[ \t]*(Deployment|…)`)는 값 앞의
@@ -84,7 +84,7 @@ const MIN_SUBSTRATE_SCAN = 1;
 // observability) → 2026-09-08 5 ns: cache:trip-mate purge로 `cache` ns의 상주 워크로드가 0이 돼 커버리지
 // 집합에서 빠졌다(캐시 인스턴스는 provision-cache 산출물이라 다음 `homelab cache create`가 되돌린다 —
 // 그때 이 바닥값도 6으로 되돌릴 것). 0이면 등호 대조가 vacuous해진다(모든 namespace가 "제외"로 파생돼
-// 아무것도 안 재고도 초록) — 티켓 26이 substrate에 세운 것과 같은 판정(MIN_SUBSTRATE_SCAN 주석 참조).
+// 아무것도 안 재고도 초록) — substrate에 세운 것과 같은 판정(MIN_SUBSTRATE_SCAN 주석 참조).
 // 픽스처는 helm 생성기 마커로 자기 namespace를 제외 처리해 커버리지 0을 만들고
 // `--floor check-resource-limits:ledger=0`으로 명시한다(다른 도메인과 같은 관례).
 const MIN_LEDGER_SCAN = 5;
@@ -240,7 +240,7 @@ function deriveNamespace(rel: string, root: string): string | undefined {
   while (dir === "platform" || dir.startsWith("platform/")) {
     const kpath = `${root}/${dir}/kustomization.yaml`;
     if (existsSync(kpath)) {
-      // 감사 12라운드 77 reg-a3-tools-infra-2 — 값-앵커가 인용 표기(`namespace: "files"`)에
+      // 값-앵커가 인용 표기(`namespace: "files"`)에
       // 눈멀었었다(형제 관용구: tools/check-image-ownership.ts:356 kind:\s*["']?Application["']?).
       const m = /^namespace:[ \t]*["']?([a-z0-9-]+)/m.exec(readFileSync(kpath, "utf8"));
       if (m) found = m[1];
@@ -256,7 +256,7 @@ function deriveNamespace(rel: string, root: string): string | undefined {
 // 대상뿐이다. `nsMode`가 없으면(레거시 호출 없음, 항상 지정) namespace를 안 본다.
 // - "substrate": `metadata.namespace` 미선언 = 즉시 위반(귀속 불가 — 파일 자신이 유일한 소스).
 // - "platform": `metadata.namespace` 미선언이면 F1(`deriveNamespace`)로 배포 루트에서 귀속을
-//   시도한다. 그래도 못 찾으면 위반(fail-closed) — 티켓 26 substrate와 같은 극성.
+//   시도한다. 그래도 못 찾으면 위반(fail-closed) — substrate와 같은 극성.
 function enumerateScope(scope: string, nsMode: "substrate" | "platform"): number {
   const target = nsMode === "substrate" ? substrateNs : platformNs;
   const violPrefix = nsMode === "substrate" ? SUBSTRATE_LEDGER_VIOL : PLATFORM_LEDGER_VIOL;

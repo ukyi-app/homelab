@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# 이미지 digest 핀 2-레인 체커(메타갭 ② W2-B) 픽스처 테스트 (a)-(e) + scan-floor + 비-컨테이너 경로.
-# 실-레포 통과 단언 (f)는 Task 9(핀 적용 후)에서 추가 — Task 8은 픽스처만(중간 CI 파손 방지).
+# 이미지 digest 핀 2-레인 체커 픽스처 테스트 (a)-(e) + scan-floor + 비-컨테이너 경로.
+# 실-레포 통과 단언 (f)는 핀 적용 후에 추가됐다(그 전에는 픽스처만 — 중간 CI 파손 방지).
 # ⚠️ @test 이름은 영어만(bats dir-run 인코딩), 중간 단언은 [ ]/grep만(bash 3.2 [[ ]] 침묵통과).
 # tmp git 레포 픽스처 패턴(체커가 git ls-files 사용 — staged면 충분, commit 불요).
 
@@ -185,7 +185,7 @@ EOF
 
 @test "the retired --min-scan vocabulary is a usage error (exit 2), distinct from a scan-floor failure" {
   # 두 코드가 각자 의미를 갖는다는 대조 — scan-floor는 1, 사용법은 2. 픽스처가 폐지 어휘를 쓰는
-  # 것은 AC3의 부정 증인이다: 구 --min-scan이 조용히 무시되지 않고 거부된다(kernel-followups 01).
+  # 것은 AC3의 부정 증인이다: 구 --min-scan이 조용히 무시되지 않고 거부된다.
   run bash "$CHK" --root "$REPO" --min-scan 1
   [ "$status" -eq 2 ]
 }
@@ -277,7 +277,7 @@ EOF
 }
 
 @test "(f) real repo passes — all runtime images digest-pinned (default scan-floor, Task 9)" {
-  # Task 9: 24 tag-only 이미지 수동 핀 적용 후 실 레포가 allowlist 0으로 통과(기본 바닥값 scan-floor 유효 — 오버라이드는 --floor total=<n>).
+  # 24 tag-only 이미지 수동 핀 적용 후 실 레포가 allowlist 0으로 통과(기본 바닥값 scan-floor 유효 — 오버라이드는 --floor total=<n>).
   # 이 레인이 **면제 상한의 실 트리 대조**도 함께 진다 — 위 픽스처 레인은 --exempt-max로 자기 크기를
   # 명시하므로, 상수 EXEMPT_MAX가 실 도메인과 어긋나는 것은 여기서만 보인다.
   run bash "$ROOT/scripts/check-image-pins.sh"
@@ -342,7 +342,7 @@ EOF
   [ "$n" -eq 0 ]
 }
 
-# ── digest 형식 축(티켓 45 · 결정 Q6) ────────────────────────────────────────
+# ── digest 형식 축(결정 Q6) ────────────────────────────────────────────────
 # 게이트가 재던 것은 `@sha256:`/`digest: sha256:` **접두**뿐이었다 — `sha256:deadbeef`처럼 형식 밖
 # 값도 "핀됨"으로 읽혔다. 실제 차단은 하류 platform/charts/app/values.schema.json의
 # `^sha256:[0-9a-f]{64}$`가 했고, 게이트는 자기 이름이 약속한 것보다 약했다.

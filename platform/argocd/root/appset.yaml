@@ -32,8 +32,9 @@ spec:
           #    ⚠️ Mac 클러스터를 다시 세우게 되면(또는 어떤 형태로든 두 번째 커넥터가 생기면)
           #    이 제외를 **먼저 되살려야 한다** — 두 커넥터가 붙으면 요청이 비결정적으로 갈리고,
           #    files는 쓰기 표면(업로드)이 있어 조용한 발산의 여지가 있다.
-          # ⚠️ 앱 제외 항목은 없다 — `apps/`가 비어 appset이 아무 Application도 만들지 않는다.
-          #    G4("전 Application Healthy")의 대상은 platform 컴포넌트 집합이다.
+          # ⚠️ 앱 제외 항목은 없다 — apps/는 아래 두 번째 appset(apps)이 소유한다. G4("전 Application
+          #    Healthy")의 대상은 platform 컴포넌트 집합과 그 appset이 만드는 <app>-prod 전부다(현재 인레포
+          #    앱 목록은 apps/README.md).
 
   template:
     metadata:

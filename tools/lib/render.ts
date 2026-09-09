@@ -139,7 +139,7 @@ export function renderMutation(envelope: Envelope): string[] {
   if (r.chain) {
     // sealSkipped 3상 — undefined는 false가 아니다. 진입 게이트 거부(브랜치·더티 트리·비-canonical
     // remote)는 chain={mode:"chain"}만 돌려주므로 seal이 **돌지 않았다**. 2상 렌더는 그 자리를
-    // "seal 실행"으로 보고했다(shell-5 실측 — 거부인데 실행됐다고 말한다).
+    // "seal 실행"으로 보고했다(실측 — 거부인데 실행됐다고 말한다).
     const seal = r.chain.sealSkipped === true ? "재봉인 생략(--no-seal)"
       : r.chain.sealSkipped === false ? "seal 실행"
         : "seal 미도달(선행 조건 거부)";
@@ -185,7 +185,7 @@ export function renderInit(envelope: Envelope): string[] {
     lines.push(`단계: ${st.length ? st.join(" · ") : "변경 없음(이미 완료)"}`);
     // 다음 단계의 순서를 말한다 — `app create`의 서버측 첫 관문이 GHCR 이미지 실존이라, 첫 push가
     // 촉발한 release run이 끝나기 전에 부르면 반드시 죽는다(그 실패가 변이 큐와 Telegram을 소비한다).
-    // 이번 호출이 실제로 push했을 때만 낸다 — headSha가 그 인과의 표식이다(티켓 30).
+    // 이번 호출이 실제로 push했을 때만 낸다 — headSha가 그 인과의 표식이다.
     if (r.headSha) lines.push(`다음: 첫 push = 빌드 트리거(HEAD ${String(r.headSha).slice(0, 7)}) — release run 완료 후 \`homelab app create ${r.app}\``);
   }
   if (r.secrets) lines.push(`디스패치 시크릿: App ID ${OX[String(r.secrets.appId)]} · private key ${OX[String(r.secrets.privateKey)]}`);

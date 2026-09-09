@@ -24,7 +24,7 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 }
 
 # ── 신설 계약 (1)(2) 핵심 판정 증인 — `--registry <파일>` ────────────────────────────────────────
-# ⚠️ 감사 6라운드 57 venue-2 실증: 이 파일의 픽스처 20여 건은 전부 `--lint-excludes`로만 가드를 부르는데
+# ⚠️ 이 파일의 픽스처 20여 건은 전부 `--lint-excludes`로만 가드를 부르는데
 #    그 모드는 (1)(고아·이중소유)·(2)(추적 실재·gate 모순) **판정 앞에서** exit한다(스크립트 :214
 #    `if [ "$LINT_ONLY" -eq 1 ]; then exit "$rc"; fi`). 무인자 호출("the real tree …")은 실 트리가 이미
 #    그 판정들을 만족해 양성 대조만 되고, 뮤테이션 A(:242 `-ne 1`→`-gt 3`)·B(:251/:254 두 판정을
@@ -131,7 +131,7 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 
 @test "each recognized venue form proves a group (make target, bats path, workflow file)" {
   # 음성 대조 — 이 레인이 '표기가 있으면 무조건 red'가 아니라 **실재 + 호출**을 재는지 고정한다.
-  # ⚠️ 감사 6라운드 57 venue-1: 항목은 venue가 **실제로 부르는** 파일이어야 한다(venue_calls) — 무관한
+  # ⚠️ 항목은 venue가 **실제로 부르는** 파일이어야 한다(venue_calls) — 무관한
   #    tests/gates/test_scan-floor.bats로는 make/워크플로 형태가 더 이상 통과하지 않는다. 셋 다 실
   #    트리에서 그 venue가 실제로 부르는 파일이다: `verify`→sops-roundtrip · 이 파일 자신(bats 형태는
   #    호출 검사 대상이 아니다) · iac.yaml→tf_validate(terraform 그룹의 실제 표기).
@@ -168,9 +168,9 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 }
 
 # ── 신설 계약 (0a-calls): venue의 실재만으로는 부족하다 — 그 venue가 이 항목을 실제로 불러야 한다 ────
-# ⚠️ 감사 6라운드 57 venue-1 실증: venue_derive는 `make <타깃>`과 `.github/workflows/<파일>` 형태에
+# ⚠️ venue_derive는 `make <타깃>`과 `.github/workflows/<파일>` 형태에
 #    대해 venue의 **실재**만 쟀다. venue 표기를 무관한 다른 실재 파일로 바꿔도(iac.yaml→renovate.yaml),
-#    venue 쪽의 실제 호출 줄을 지워도 rc=0였다(2026-09-04 실측 — round6 EVIDENCE 뮤테이션 (a)(b)(c)).
+#    venue 쪽의 실제 호출 줄을 지워도 rc=0였다(2026-09-04 실측 — EVIDENCE 뮤테이션 (a)(b)(c)).
 #    venue_calls()가 그 구멍의 증인이다: venue 파일 본문(주석 제외)에서 test_*.bats 토큰을 뽑아
 #    항목 경로가 매치하는지 본다.
 
@@ -224,7 +224,7 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 }
 
 # ── 신설 계약 (0a-self): 자기지시/상호지시는 증명이 아니다(항진식) ───────────────────────────────
-# ⚠️ 감사 5라운드 50 critic-venue-tautology 실증: venue_derive는 `bats <경로>` venue를 파일 **존재**로만
+# ⚠️ venue_derive는 `bats <경로>` venue를 파일 **존재**로만
 #    검증해, 「이 파일이 실행되는 곳: 이 파일」(자기지시)도 「이 파일이 실행되는 곳: 다른 .ci-exclude
 #    항목」(상호지시)도 그대로 통과시켰다 — 인용 경로를 무관한 다른 .ci-exclude 항목으로 바꿔도
 #    --lint-excludes가 16/16 rc=0로 불변이었다(실측 2026-09-03). 아래 셋이 그 구멍의 증인이다.
@@ -299,7 +299,7 @@ excl_max() { grep -oE '^EXCL_MAX=[0-9]+' "$s" | cut -d= -f2; }
   [ "$status" -eq 0 ]
 }
 
-# ── 신설 계약: manual 상한 (감사 6라운드 57 venue-3) ────────────────────────────────────────────
+# ── 신설 계약: manual 상한 ─────────────────────────────────────────────────────────────────
 # ⚠️ `manual` venue는 무조건 인정이라(venue_derive의 manual 분기) 상한이 없으면 자동 venue를 manual
 #    표기로 바꾸는 것이 red를 피하는 최단 경로가 된다. 뮤테이션 재현: 자동 venue 3그룹(posture·
 #    KSOPS·iac.yaml)을 전부 manual로 바꿔도 이 상한 이전에는 --lint-excludes rc=0였다(2026-09-04 실측).

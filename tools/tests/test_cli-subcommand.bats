@@ -112,7 +112,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "parseCommand failures are discriminable without message sniffing: kind, consumed path, vocabulary (floor 5)" {
-  # 티켓 12 — 셸이 '서브커맨드가 필요하다'와 '알 수 없는 단어'를 한국어 문자열로 갈라내면
+  # 셸이 '서브커맨드가 필요하다'와 '알 수 없는 단어'를 한국어 문자열로 갈라내면
   # 문구 한 글자에 정책이 매달린다. 커널은 정책을 갖지 않되 **판별 가능한** 실패를 낸다.
   run bun -e '
     import { parseCommand, CommandParseError } from "./tools/lib/cli.ts";

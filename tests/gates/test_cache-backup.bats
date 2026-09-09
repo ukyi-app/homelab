@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# Valkey 백업 체인(Task 5.2b) — 공용 backup CronJob manifest의 정적 검증.
+# Valkey 백업 체인 — 공용 backup CronJob manifest의 정적 검증.
 # 라이브 검증 함정 반영: R2 R&W 토큰은 HeadBucket 불가(no_check_bucket 필수),
-# CronJob은 VM TZ(Asia/Seoul)로 발화, 신선도 메타는 teardown --delete-data의 게이트 소스.
+# CronJob은 k3s 노드 TZ(Asia/Seoul)로 발화, 신선도 메타는 teardown --delete-data의 게이트 소스.
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -25,7 +25,7 @@ setup() {
 }
 
 @test "backup cronjob documents Asia/Seoul firing and serializes runs" {
-  grep -q "Asia/Seoul" "$CJ"                 # k3s VM TZ — UTC로 읽지 말 것
+  grep -q "Asia/Seoul" "$CJ"                 # k3s 노드 TZ — UTC로 읽지 말 것
   grep -q "concurrencyPolicy: Forbid" "$CJ"
   grep -q "activeDeadlineSeconds" "$CJ"
 }

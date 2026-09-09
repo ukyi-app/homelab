@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 바닥값 어휘 거부 가드(scripts/check-floor-vocab.sh, kernel-followups 04)의 gate 테스트.
+# 바닥값 어휘 거부 가드(scripts/check-floor-vocab.sh)의 gate 테스트.
 #
 # 병: 01~03·05가 구 어휘(--min-* 플래그·*_MIN_* env 폴백 읽기)를 --floor 하나로 접었지만,
 # 재유입을 막는 것은 관례뿐이었다 — env 바닥값이 되살아나도 라벨 집합은 불변이라 로스터 등식·
@@ -48,7 +48,7 @@ setup() {
 }
 
 @test "constants, local reads, --floor and comments are not violations (the legitimate line)" {
-  # 정당 보유처 — 상수 정의·지역 변수 읽기(폴백 없음)·--floor 어휘·주석 산문(05 인계의 선).
+  # 정당 보유처 — 상수 정의·지역 변수 읽기(폴백 없음)·--floor 어휘·주석 산문.
   printf '%s\n' '#!/usr/bin/env bash' 'MIN_SCAN=20' 'n="$MIN_SCAN"' \
     'take_floors "demo" "$@" || exit $?' 'm="$(floor_of demo 3)"' \
     '# 옛 어휘 --min-scan 은 폐지됐다(산문 언급일 뿐)' > "$FX/ok.sh"
@@ -79,7 +79,7 @@ setup() {
 }
 
 @test "all three fallback spellings of an env floor read are rejected (:-, -, :=)" {
-  # 리뷰 실측(H2) — 병의 근거는 폴백 표기가 아니라 "환경에서 온다"다. 한 표기만 보면 같은 뜻의
+  # 리뷰 실측 — 병의 근거는 폴백 표기가 아니라 "환경에서 온다"다. 한 표기만 보면 같은 뜻의
   # 재작성이 통과한다.
   printf '%s\n' '#!/usr/bin/env bash' 'a="${FOO_MIN_SCAN-10}"' > "$FX/fb1.sh"
   run bash "$S" "$FX/fb1.sh"; [ "$status" -eq 1 ]

@@ -1,11 +1,11 @@
 // 결과 계약 스키마 생성기 — tools/cli-result-schema.json 전체가 이 파일과 기술자 행
-// (lib/catalog-rows.ts CONTRACT_ROWS)의 산출물이다(cli-deepening 심화 3). 행렬 분기(allOf
+// (lib/catalog-rows.ts CONTRACT_ROWS)의 산출물이다. 행렬 분기(allOf
 // member 0)와 verb enum은 행에서 생성되고, x-contract·variant→exitCode 재진술(의도된 이중부기)·
 // definitions 본문은 아래 수제 조각이다 — 컴팩트 스타일은 과거 리뷰의 의도적 결정이라 보존한다.
 // import는 기술자(catalog-rows·platform 좌표 SSOT)와 node 표준뿐이다: 계약 독자(contract.ts)도 생성물
-// JSON도 참조하지 않으므로 생성물이 없거나 파손돼도 재생성이 성립한다(설계 게이트 r1 D3 —
-// test_result-schema-gen.bats 증명). initSuccess·initFailure의 archetype enum은 platform.ts ARCHETYPES
-// 파생이다(cli-deepening 심화 6 후속 — 리터럴 사본이면 아키타입 확장 시 입력 표면(MCP)은 수용하는데
+// JSON도 참조하지 않으므로 생성물이 없거나 파손돼도 재생성이 성립한다(test_result-schema-gen.bats
+// 증명). initSuccess·initFailure의 archetype enum은 platform.ts ARCHETYPES
+// 파생이다(리터럴 사본이면 아키타입 확장 시 입력 표면(MCP)은 수용하는데
 // 결과 계약만 낡는다).
 // 사용: 기본 --check(대상과 byte 대조, 드리프트면 exit 1) | --write(대상에 기록).
 //       --out <path>로 대상 지정(기본: 이 파일 옆 cli-result-schema.json).
@@ -55,13 +55,13 @@ const HEADER_B = `    "variant": { "enum": ["success", "failure", "race", "skip"
   },
   "allOf": [
     {
-      "description": "verb→(허용 variant 집합, result) 결합(structure r1 a1·b1 + 시도2 A2·B2): verb별로 낼 수 있는 variant와 result 정의를 루트에 강제 — 어긋난 shape·불가능한 verb/variant 쌍은 스키마 차원에서 red. 변이 동사(db/cache create)는 variant 단위 분기이고 공유 mutation* 정의에 allOf로 verb별 action을 고정한다(verb↔action 교차 배선 차단). 동사 추가 = 분기 추가.",
+      "description": "verb→(허용 variant 집합, result) 결합: verb별로 낼 수 있는 variant와 result 정의를 루트에 강제 — 어긋난 shape·불가능한 verb/variant 쌍은 스키마 차원에서 red. 변이 동사(db/cache create)는 variant 단위 분기이고 공유 mutation* 정의에 allOf로 verb별 action을 고정한다(verb↔action 교차 배선 차단). 동사 추가 = 분기 추가.",
       "oneOf": [`;
 
 const TAIL_MID = `      ]
     },
     {
-      "description": "variant→exitCode 결합(structure r1 b2): 허용 쌍 밖(success+1 등)은 red. 이 분기들은 x-contract.exitCodes의 재진술이며, 둘의 일치는 test_homelab-cli.bats의 SSOT pinning 테스트가 강제한다.",
+      "description": "variant→exitCode 결합: 허용 쌍 밖(success+1 등)은 red. 이 분기들은 x-contract.exitCodes의 재진술이며, 둘의 일치는 test_homelab-cli.bats의 SSOT pinning 테스트가 강제한다.",
       "oneOf": [
         { "type": "object", "properties": { "variant": { "enum": ["success", "no-op"] }, "exitCode": { "enum": [0] } } },
         { "type": "object", "properties": { "variant": { "enum": ["failure", "pending"] }, "exitCode": { "enum": [1] } } },

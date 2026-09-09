@@ -47,7 +47,7 @@ _tree() {
 }
 
 # ── 레인 A: 파일 피연산자 — 대상 리네임 ───────────────────────────────────────────────────────────
-# 이 레인이 재현하는 공백 실증(01 티켓): `infra/github/variables.tf`를 `vars.tf`로 옮기고 PAT을
+# 이 레인이 재현하는 공백 실증: `infra/github/variables.tf`를 `vars.tf`로 옮기고 PAT을
 # 되살려도 전환 전 `test_auth.bats`는 초록이었다. grep이 rc 2를 내고 `-ne 0`이 그걸 통과로 읽었다.
 @test "renaming a gate's target file turns that gate red (file operand)" {
   t="$(_tree a)"
@@ -102,14 +102,13 @@ _tree() {
 # `test_traps-sync.bats`의 역방향 tie는 부재 대상($D = docs/traps-detail.md)에 대한 양성 대조가
 # **없다** — 그 자리에서는 `-eq 1`이 유일한 grep-rc 가드다.
 #
-# ⚠️ **이 레인의 원래 결론은 09번 착지로 무효가 됐다.** 도입 시(01번) 이 레인은 "연산자를 `-ne 0`으로
-#    되돌리면 구멍이 다시 열린다(초록으로 돌아간다)"를 증언했고, 그것이 가능했던 이유는
-#    `scripts/verify-traps.sh`가 `[ -f "$DETAIL" ]`로 감싸 traps-detail.md 부재를 **묵인**했기 때문이다.
-#    09번이 정확히 그 fail-open을 닫았다(세 대상 전부 LEDGER와 같은 규율로 문다). 그래서 이제는
-#    연산자를 되돌려도 같은 @test의 `:29`(`run bash verify-traps.sh; [ -eq 0 ]`)가 red를 만든다.
+# ⚠️ **이 레인은 연산자 단독 감도를 증언하지 않는다.** 한때는 그럴 수 있었다 —
+#    `scripts/verify-traps.sh`가 `[ -f "$DETAIL" ]`로 감싸 traps-detail.md 부재를 **묵인**했기
+#    때문이다. 그 fail-open이 닫힌 뒤(세 대상 전부 LEDGER와 같은 규율로 문다)로는 연산자를
+#    되돌려도 같은 @test의 `:29`(`run bash verify-traps.sh; [ -eq 0 ]`)가 red를 만든다.
 #
-# ⇒ 이 레인은 그 **이중화 자체**를 증언하도록 바뀐다. 대상 부재가 두 겹으로 닫혔다는 것이 09번의
-#    산출물이고, 한 겹(연산자)을 되돌려도 다른 겹(가드의 fail-closed)이 여전히 잡는다.
+# ⇒ 이 레인은 그 **이중화 자체**를 증언한다. 대상 부재가 두 겹으로 닫혀 있고, 한 겹(연산자)을
+#    되돌려도 다른 겹(가드의 fail-closed)이 여전히 잡는다.
 #    연산자 **단독** 감도는 레인 D·E가 실 파일에서 계속 잰다(그 자리들엔 형제 단언이 0건이라
 #    verify-traps 같은 이중 겹이 없다).
 @test "the missing SSOT is closed twice over (operator plus the guard's own fail-closed)" {
@@ -138,7 +137,7 @@ _tree() {
   mv "$g.rev" "$g"
 
   run bats -f 'reverse guard-path-tie' "$g" </dev/null
-  # 09번 이후: 연산자를 되돌려도 여전히 red다 — verify-traps 자신이 대상 부재를 fail-closed로 문다.
+  # 그 fail-open이 닫힌 뒤: 연산자를 되돌려도 여전히 red다 — verify-traps 자신이 대상 부재를 fail-closed로 문다.
   # 그 red가 **다른 줄**에서 난다는 것이 이중화의 증거다(연산자 줄이 아니라 :29의 가드 호출).
   [ "$status" -eq 1 ]
   printf '%s\n' "$output" | grep -q '^not ok 1 '
@@ -146,7 +145,7 @@ _tree() {
 }
 
 # ── 레인 D: tests/ 레인 — 파괴 동사(destroy-node) ─────────────────────────────────────────────────
-# 02 티켓의 A 분류 ①. 이 @test에는 형제 단언이 **하나도 없다** — 전환 전 `-ne 0`에서는
+# 이 @test에는 형제 단언이 **하나도 없다** — 전환 전 `-ne 0`에서는
 # `scripts/destroy-node.sh`를 리네임하면 grep이 rc 2로 죽고도 통과해 그 파일에서 **혼자 초록으로
 # 남았다**(실측). 그래서 여기서는 리네임→red가 곧 `-eq 1`의 서명이다.
 @test "renaming destroy-node.sh turns the tests/ lane's K3S_RUN seam gate red" {
@@ -178,7 +177,7 @@ _tree() {
 }
 
 # ── 레인 E: tests/ 레인 — 시크릿 불변식(sealing key 백업 체인) ────────────────────────────────────
-# 02 티켓의 A 분류 ②. 여기도 그 @test에 형제 단언이 없어 `-eq 1`이 유일한 가드다.
+# 여기도 그 @test에 형제 단언이 없어 `-eq 1`이 유일한 가드다.
 # 레인 D와 **다른 도메인**이라 함께 둔다(파괴 동사 vs 시크릿).
 @test "renaming sealing-key-dr-gate.sh turns the tests/ lane's source-safety gate red" {
   t="$(_tree e)"

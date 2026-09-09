@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# argocd-extras 가드. PR1: SealedSecret(patch-mode). PR2(Task 9)에서 HTTPRoute 단언 추가.
+# argocd-extras 가드 — SealedSecret(patch-mode) + HTTPRoute 단언.
 # (@test 이름 영어. 중간 단언 [ ]/단순 명령, 최종 명령 status만 신뢰.)
 # ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
@@ -63,7 +63,7 @@ S="$D/argocd-accounts.sealed.yaml"
   run yq '.metadata.name' "$D/smoke/deployment.yaml"
   [ "$output" = "notify-smoke" ] || { echo "name=$output"; false; }
   grep -q 'name: app' "$D/smoke/deployment.yaml" || { echo "container 이름 app 아님"; false; }
-  # 상주화 방지: argocd-extras가 smoke를 resources로 싱크하면 안 된다(canary는 Task 6에서 별도 Application만).
+  # 상주화 방지: argocd-extras가 smoke를 resources로 싱크하면 안 된다(canary는 별도 Application만).
   run yq '.resources[]' "$D/kustomization.yaml"
   if printf '%s' "$output" | grep -q 'smoke'; then echo "extras가 smoke 포함 — 상주화 위험"; false; fi
 }

@@ -1,6 +1,6 @@
 // ArgoCD Application status 리더 — 변이 엔진(mutation.ts 수렴 판정)과 status 엔진(라이브 표시)이
 // 공유하는 **리비전 해석** 한 벌. 두 엔진이 각자 `status.sync.revision` 단수 필드만 읽던 사본을
-// 이 리더로 흡수한다(homelab-cli-r2 티켓 01 — 앱 레인 --wait가 원리적으로 수렴하지 못하던 결함).
+// 이 리더로 흡수한다 — 앱 레인 --wait가 원리적으로 수렴하지 못하던 결함이었다.
 //
 // 왜 단수 필드로는 부족한가: 앱 Application(<app>-prod)은 appset(platform/argocd/root/appset.yaml의
 // `sources:` 3개)이 만드는 **멀티소스**이고, ArgoCD 컨트롤러는 멀티소스에서 `status.sync.revision`을

@@ -13,7 +13,7 @@ cj=platform/cnpg/prod/basebackup-cronjob.yaml
   grep -q 'runAsUser: 26' "$cj"
   grep -q 'claimName: pg-basebackup-local' "$cj"
   # ⚠️ 위 존재 단언은 volumes 집합의 상한이 아니다 — 다른 volume을 추가해도 무증인이었다
-  # (감사 6라운드 티켓64 c64-7 실측: emptyDir `scratch` volume을 더해도 이 @test는 초록이었다).
+  # (2026-09-05 실측: emptyDir `scratch` volume을 더해도 이 @test는 초록이었다).
   vols="$(yq '[.spec.jobTemplate.spec.template.spec.volumes[].name] | sort | join(",")' "$cj")"
   [ "$vols" = "backup" ]
 }
@@ -50,8 +50,8 @@ cj=platform/cnpg/prod/basebackup-cronjob.yaml
   # 존재 2줄은 원소를 못박지만 집합 상한이 없어 `host all all 0.0.0.0/0 trust` 같은 3번째
   # 줄이 더해져도 무증인이었다(2026-09-03 실측) — length 2로 닫는다.
   h="$(yq '.spec.postgresql.pg_hba | length' "$cluster")"; printf '%s' "$h" | grep -qxF -- '2'
-  # spec-others-1(round8, 심각도 high→medium — 현재 노출 0·자동 writer 없음·도달 경로는 리뷰
-  # 통과 손 편집 1건): 위 grep들은 부분 문자열 매치라 CIDR·인증방식이 뒤에 뭘 붙여도 통과한다.
+  # 심각도 high→medium(현재 노출 0·자동 writer 없음·도달 경로는 리뷰 통과 손 편집 1건):
+  # 위 grep들은 부분 문자열 매치라 CIDR·인증방식이 뒤에 뭘 붙여도 통과한다.
   # `10.42.0.0/16 scram-sha-256` -> `0.0.0.0/0 trust`로 뮤테이션해도 이 파일(8/8)·
   # test_cluster_params.bats(10/10) 전건 초록이었다(2026-09-05 격리 재현) — CIDR/인증방식 값
   # 자체는 어느 가드도 안 쟀다. 형제 관용구(test_object_store.bats:44 "yq로 값 뽑아 grep -qxF")로

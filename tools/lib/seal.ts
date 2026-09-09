@@ -1,7 +1,7 @@
 // kubeseal 봉인 SSOT — 평문 Secret manifest를 디스크에 쓰지 않고 kubeseal stdin으로만 흘려
 // 봉인 YAML을 반환한다. provision-db/provision-cache 공용(homelab 전용 .ts).
-// ⚠️ 평문은 절대 stdout/예외메시지에 안 싣는다. (app-shared seal-secret.mts는 자체 블록 유지 — Pass1 F3.)
-// 실행은 exec seam의 kubeseal adapter 경유(d6④) — 평문은 stdin으로만 흐르고 seam 원장(HOMELAB_EXEC_LEDGER)은
+// ⚠️ 평문은 절대 stdout/예외메시지에 안 싣는다. (app-shared seal-secret.mts는 자체 블록 유지 — 외부 앱 레포에서 node로 도는 .mts라 bun 전용 lib을 import할 수 없다.)
+// 실행은 exec seam의 kubeseal adapter 경유 — 평문은 stdin으로만 흐르고 seam 원장(HOMELAB_EXEC_LEDGER)은
 // stdin을 절대 기록하지 않는다(원장에 남는 argv는 cert 경로뿐). timeoutMs 0 = 종전 무-timeout 보존.
 import { kubeseal } from "./exec.ts";
 

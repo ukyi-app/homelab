@@ -92,7 +92,7 @@ _run_destroy() {             # 나머지 인자는 env 오버라이드
 }
 
 @test "destroy-node REFUSES when the window value is UNDECIDABLE (the old sed folded all of these to empty)" {
-  # ⚠️ 이 @test가 티켓 07의 본안이다. 옛 파생은 파일 부재 · 키 부재 · 줄 포맷 변경 · 중복을 **전부**
+  # ⚠️ 이 @test가 본안이다. 옛 파생은 파일 부재 · 키 부재 · 줄 포맷 변경 · 중복을 **전부**
   #    빈 문자열로 접었고, 바로 아래 `[ -n ]`이 그 넷을 모두 "국면 B, 파괴 허용"으로 읽었다.
   #    같은 파일의 BULK_STORAGE_PATH는 반대로 fail-closed였다 — 한 파일 안의 그 비대칭이 병소였다.
   # ⚠️ 완화 사실(무효화되는 것이 무엇인지 정확히 적는다): (2b)의 findmnt 정체성 게이트가 뒤에 있으므로

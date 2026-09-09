@@ -4,7 +4,7 @@
 # 거짓말이 되지 않게 픽스처로 양성·음성 대조를 매 실행 건다.
 # ⚠️ @test 이름은 영어만 · 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵 통과).
 
-# ⚠️ **피연산자 실재 증인**(선례: operand-witness 01·05 — tests/gates/test_host-ports.bats:37-38).
+# ⚠️ **피연산자 실재 증인**(선례: tests/gates/test_host-ports.bats:37-38).
 #    `run bash "$S"`는 가드가 없으면 rc **127**로 죽어 `-ne 0` 레인을 통과시키고, 빈 출력은
 #    "마커를 안 냈다"는 부재 단언까지 함께 만족시킨다. 실측 2026-09-03(`scripts/check-locale-collation.sh`를
 #    지운 격리 트리): 18건 중 「a dead detector emits no marker」가 그대로 `ok`였다.

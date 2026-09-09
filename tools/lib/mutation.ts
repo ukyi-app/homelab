@@ -1,6 +1,6 @@
 // 공유 변이 엔진 — 변이 동사(db/cache create, app create/secrets/teardown)의 공통 골격.
 //   correlation nonce 생성 → **신선도 스냅샷**(디스패치 전에 이미 그 에코를 가진 run id 집합 —
-//   티켓 27, 고정 nonce가 켜졌을 때 옛 run을 자기 것으로 채택하는 것을 막는다) → 디스패치
+//   고정 nonce가 켜졌을 때 옛 run을 자기 것으로 채택하는 것을 막는다) → 디스패치
 //   (gh workflow run) → nonce 에코 run-name으로 자기 run 특정
 //   (정확히 1개만 채택: ≥2 = race fail-closed, 0 = 재조회 후 pending — 관측 차분은 신원
 //   메커니즘이 아니다, 스펙 run 특정 절) → run conclusion 추적(실패 시 실패 잡 열거 + run URL)
@@ -9,7 +9,7 @@
 //   닫힌 PR은 대기가 아니라 종결 관측이다: 단건 권위 조회로 확증한 뒤 failure · **required check
 //   (gate) 실패도 종결 관측이다**: PR head SHA의 최신 check-run이 completed면서 통과 집합
 //   {success, neutral, skipped} **밖**이면 조기 failure — 좌표는 단건 권위 조회로 확증한 뒤에만 쓴다.
-//   진행 중·통과 계열·관측 부재(조회 실패·공집합·절단 미상·head SHA 부재)는 종전 pending 경로 — 티켓 47) → 명명된
+//   진행 중·통과 계열·관측 부재(조회 실패·공집합·절단 미상·head SHA 부재)는 종전 pending 경로) → 명명된
 //   Application 집합 전체 수렴.
 // 수렴 판정(스펙 대기 매트릭스): 관측 sync revision이 머지 SHA와 동일하거나 그 후손(gh compare —
 //   로컬 git 이력 무의존) AND Synced AND Healthy AND 관측 리비전에서 desired-state 표면 실존.
@@ -56,7 +56,7 @@ export type MutationSpec = {
   // --wait 검증은 머지 SHA 없이 "관측 리비전의 표면 blob == homelab main의 표면 blob"으로 대체한다
   // (디스패처가 main HEAD와 비교한 그 기준). 미설정이면 PR 0은 명명 드리프트로 failure.
   noopOnMissingPr?: boolean;
-  // no-op 금지 교차 증인(티켓 04): 콜사이트가 "이 실행은 반드시 PR을 만든다"를 아는 경우(app secrets
+  // no-op 금지 교차 증인: 콜사이트가 "이 실행은 반드시 PR을 만든다"를 아는 경우(app secrets
   // chain이 push했으면 kubeseal 비결정 암호문 = 바이트 변경 = 반드시 PR) true로 넘긴다. 그러면 PR 0은
   // no-op이 아니라 fail-loud다 — 낡은/빈 PR 스냅샷 한 번이 "이미 배선됨" exit 0으로 위장하는 것을 막는다.
   // 엔진은 chain 스키마를 모른다 — secrets.ts가 계산해 이 명시 필드로 넘긴다(resultBase를 들여다보지 않는다).
@@ -78,7 +78,7 @@ export const PR_GRACE_RETRIES = 3;
 // NaN이라, 둘 다 조용히 '무제한(0)'이나 NaN 타임아웃으로 새지 않게 양쪽을 다 막는다.
 export const DISPATCH_TIMEOUT_ENV = "HOMELAB_TEST_DISPATCH_TIMEOUT_MS";
 
-// ── required check(gate)의 조기 종결(티켓 47) ────────────────────────────────────────────────
+// ── required check(gate)의 조기 종결 ───────────────────────────────────────────────────────
 // 병: 머지 폴링이 PR의 `merged`만 보므로 gate가 **실패**하면 머지는 영원히 오지 않는데 CLI는
 //   데드라인(20분)을 전부 태운 뒤 pending을 낸다(2026-09-08 드릴 실측: gate 실패 01:06Z ·
 //   CLI pending 01:15Z, 1204s · pendingReason null).
@@ -100,7 +100,7 @@ export const DISPATCH_TIMEOUT_ENV = "HOMELAB_TEST_DISPATCH_TIMEOUT_MS";
 // filter=all: GitHub 기본값은 `filter=latest`(이름별 최신 1건)라 최신 선별이 서버에 숨는다. 재실행
 //   시나리오의 판정을 **우리 코드**가 지게 두어야 테스트가 그것을 밟는다. 그 대가로 페이지 상한이
 //   판정의 전제가 된다 — 아래 CHECK_RUNS_PER_PAGE 절.
-// 낡은 스냅샷 방어(티켓 10이 이 축을 범위 밖에 뒀던 사유 — 함정 「GitHub API는 낡은 스냅샷을 200으로
+// 낡은 스냅샷 방어(이 축을 범위 밖에 뒀던 사유 — 함정 「GitHub API는 낡은 스냅샷을 200으로
 //   돌려준다」): **실패 판정만** 조기 종결에 쓴다. 실패 스냅샷은 낡을 수 없다 — 실패→성공 전이는
 //   재실행뿐이고 재실행은 **새** check-run이며, 그 새 check-run이 진행 중이면 아래 최신 규칙이 옛
 //   실패를 채택하지 않는다. 반대 방향(성공 스냅샷이 낡음)은 아무것도 종결시키지 않으므로 무해하다.
@@ -169,11 +169,11 @@ export function latestCheckRun(rows: CheckRunRow[]): CheckRunRow | undefined {
   return best;
 }
 
-// 신선도 스냅샷의 투영(티켓 27) — 디스패치 **전** 질의라 신원(id·name)만 본다. 식별 루프의
+// 신선도 스냅샷의 투영 — 디스패치 **전** 질의라 신원(id·name)만 본다. 식별 루프의
 // 투영과 텍스트가 다른 것이 계약이다: 스텁·jq 계약 테스트가 두 질의를 각각 정확 일치로 잡는다.
 const PRE_RUNS_JQ = "[.workflow_runs[] | {id, name}]";
 
-// 진행 이벤트(티켓 07) — 엔진은 **이벤트만** 낸다. 문구·싱크는 셸(homelab.ts)이 소유하고 MCP는
+// 진행 이벤트 — 엔진은 **이벤트만** 낸다. 문구·싱크는 셸(homelab.ts)이 소유하고 MCP는
 // 주입하지 않는다(stdio JSON-RPC 스트림 무오염). op가 Envelope만 반환한다는 원칙은 그대로다:
 // 이벤트는 결과가 아니라 **진행 관측**이고 결과 계약(cli-result-schema.json)에 아무것도 더하지 않는다.
 // 왜 필요한가: --wait는 최대 deadline 동안 Bun.sleepSync로 동기 블로킹인데 그 사이 stderr가 0줄이라,
@@ -188,7 +188,7 @@ export type MutationOpts = { wait: boolean; pollMs: number; deadlineMs: number; 
 
 // 대기 옵션 SSOT — 기본값과 검증 술어를 변이 동사 전부가 공유한다(콜사이트 인라인 사본 금지).
 //
-// deadlineMs = 20분의 분해와 출처(티켓 10 — **값은 바꾸지 않았다**, 재개 조건은 아래):
+// deadlineMs = 20분의 분해와 출처(**값은 바꾸지 않았다**, 재개 조건은 아래):
 //   · required check `gate`(ci.yaml gate 잡): 잡 실행구간 p50 483s / p90 514s / max 532s ≈ 9분,
 //     run 구간(큐 포함) max 1687s ≈ 28분 — ci.yaml:44-47이 기록한 2026-09-03 라이브 실측(완료 99건).
 //   · 디스패처: 보조 잡 timeout-minutes 5(create-database.yaml:56) + 변이 본체 20(_create-database.yaml:27).
@@ -205,7 +205,7 @@ export type MutationOpts = { wait: boolean; pollMs: number; deadlineMs: number; 
 //   pending은 실패가 아니라 설계된 바운디드 결과이고, 재개 경로는 재실행이 아니라 핸들 재조회다.
 export const WAIT_DEFAULTS = { pollMs: 5_000, deadlineMs: 1_200_000 } as const;
 // identifyOnly: run 식별 직후 run 핸들을 pending으로 반환하고 conclusion 추적(최대 deadline)을 건너뛴다.
-// MCP 전용(release r1 a2=b3) — stdio 서버는 단일 스레드라 conclusion 폴링이 서버를 주어진 deadline
+// MCP 전용 — stdio 서버는 단일 스레드라 conclusion 폴링이 서버를 주어진 deadline
 // (기본값을 물려받으면 WAIT_DEFAULTS.deadlineMs)만큼 블로킹한다.
 // 스펙의 "결과의 run URL이 상관 핸들, 진행 확인은 status 핸들 조회로"를 실행형으로 만든다. CLI는 미설정.
 // onProgress: 진행 이벤트 싱크(위 ProgressEvent 주석) — CLI 셸만 주입하고 MCP는 미설정이다.
@@ -230,11 +230,11 @@ function newNonce(): string {
 }
 
 type RunRow = { id: number; name: string; status: string; conclusion: string | null; html_url: string };
-// PR 행·투영·정확 조회는 lib/lane-pr.ts 공유(티켓 09) — status의 `--branch` 재조회가 같은 질의를
-// 쓴다. state 축(티켓 05)의 근거도 그 모듈이 소유한다. 판정은 단건 권위 조회로 확증한 뒤에만 한다.
+// PR 행·투영·정확 조회는 lib/lane-pr.ts 공유 — status의 `--branch` 재조회가 같은 질의를
+// 쓴다. state 축의 근거도 그 모듈이 소유한다. 판정은 단건 권위 조회로 확증한 뒤에만 한다.
 type PrRow = LanePrRow;
 
-// 폴링 루프의 관측 실패 추적(티켓 06) — 마지막 실패 사유와 **연속** 실패 횟수를 들고 데드라인
+// 폴링 루프의 관측 실패 추적 — 마지막 실패 사유와 **연속** 실패 횟수를 들고 데드라인
 // pendingReason의 접미를 만든다. 성공 관측이 한 번이라도 끼면 streak가 0으로 돌아가므로 접미는
 // '지속 실패'에만 붙는다(한 사이클 blip을 원인으로 지목하지 않는다).
 // ⚠️ 결과 필드는 신설하지 않는다 — mutationPending/teardownPending이 additionalProperties:false라
@@ -256,12 +256,12 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   const endAt = Date.now() + opts.deadlineMs;
   const fail = (error: string, extra: Record<string, unknown> = {}): MutationOutcome =>
     ({ variant: "failure", omitted: [], result: compact({ ...base, ...extra, error }) });
-  // 진행 이벤트 방출(티켓 07) — 싱크 미주입이면 no-op이다(MCP·라이브러리 소비자).
+  // 진행 이벤트 방출 — 싱크 미주입이면 no-op이다(MCP·라이브러리 소비자).
   const emit = (stage: ProgressStage, handles: { runUrl?: string; prUrl?: string; sha?: string } = {}): void => {
     opts.onProgress?.({ stage, correlation, ...handles });
   };
 
-  // 0) 신선도 스냅샷(티켓 27) — 디스패치 **전에** 이미 이 correlation을 에코하는 run의 **id 집합**을
+  // 0) 신선도 스냅샷 — 디스패치 **전에** 이미 이 correlation을 에코하는 run의 **id 집합**을
   // 찍어 두고 채택에서 배제한다. 없으면 고정 nonce(HOMELAB_CORRELATION 주입)가 프로덕션에서 켜졌을 때
   // 같은 nonce의 **이전** run이 홀로 매치돼 옛 conclusion·옛 PR 핸들이 이번 실행의 결과로 보고된다
   // (수령증 루프의 설계 전제는 "디스패치 직후 첫 조회에 새 run이 아직 없다"이므로 0건 분기가 그 문을 연다).
@@ -271,7 +271,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   // 투영이 식별 루프와 다른 이유: 여기서 필요한 것은 신원(id·name)뿐이고 상태·URL은 **채택하지 않을**
   // run에 대해 의미가 없다. 두 질의는 서로 다른 시점의 서로 다른 질문이라 계약도 따로 진다.
   // ⚠️ 스냅샷 조회 실패는 '배제 없음'(오늘의 동작)으로 접는다 — 이 관측은 **좁히기**이고, 여기서
-  // fail-closed로 죽이면 같은 endpoint의 지속 실패를 pendingReason이 지목하는 티켓 06 계약이 사라진다.
+  // fail-closed로 죽이면 같은 endpoint의 지속 실패를 pendingReason이 지목하는 계약이 사라진다.
   const runsPath = `repos/${HOMELAB_REPO}/actions/workflows/${spec.workflow}/runs?per_page=20`;
   const echoesNonce = (r: { name: string }): boolean => r.name.includes(`[${correlation}]`);
   const preExisting = new Set<number>();
@@ -286,7 +286,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   dispatchArgs.push("-f", `correlation=${correlation}`);
   const injectedTimeout = Number(process.env[DISPATCH_TIMEOUT_ENV] ?? "");
   const dispatched = sh("gh", dispatchArgs, Number.isInteger(injectedTimeout) && injectedTimeout > 0 ? { timeoutMs: injectedTimeout } : {});
-  // 타임아웃은 '실패'가 아니라 **결과 미상**이다(티켓 08) — 자식(gh)만 SIGTERM으로 죽었고 POST는
+  // 타임아웃은 '실패'가 아니라 **결과 미상**이다 — 자식(gh)만 SIGTERM으로 죽었고 POST는
   // 서버에 이미 도달했을 수 있다(Bun 1.3.14 실측: ETIMEDOUT · status null · signal SIGTERM).
   // 여기서 fail하면 운영자·에이전트가 재실행하고, 그때 **새 nonce**가 발급돼 race 검출조차
   // 우회한 이중 run·PR 2개가 된다(`queue: max`는 직렬화지 dedupe가 아니다). 그래서 수령증
@@ -314,9 +314,9 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     }
     if (Date.now() >= endAt) {
       // 디스패치 응답이 유실된 경우(타임아웃)는 '접수됨'을 단언할 수 없다 — 그 사실과 함께,
-      // 재실행이 아니라 Actions의 correlation 에코 확인이 다음 행동임을 문구가 지목한다(티켓 08).
+      // 재실행이 아니라 Actions의 correlation 에코 확인이 다음 행동임을 문구가 지목한다.
       // ⚠️ 이 분기에는 run 핸들이 없다 — `status --run`도 `--branch`도 쓸 수 없다. 그래서 재개
-      // 수단은 **실재하는 것**만 적는다(티켓 09): correlation을 받는 조회 동사는 없고(owner 결정
+      // 수단은 **실재하는 것**만 적는다: correlation을 받는 조회 동사는 없고(owner 결정
       // Q2 — `status --correlation` 핸들 모드는 열지 않는다: PR 본문에 correlation 에코가 없어
       // reusable 5벌 계약 변경이 선행이다), 유일하게 실재하는 확인 경로는 Actions에서 run-name의
       // [correlation] 에코를 눈으로 보는 것이다. 재디스패치는 새 nonce를 발급해 같은 이름의 PR
@@ -333,7 +333,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   const branchOf = () => spec.branchFor(run!.id);
   // step 4에서 PR을 특정하면 채워진다 — 그 전 pending은 run 핸들만 갖는다(아래 resume 참조).
   let prHandleUrl: string | undefined;
-  // 재개 포인터(티켓 33) — pendingReason이 지목하는 **실재하는 다음 명령**. 도달 지점에 따라
+  // 재개 포인터 — pendingReason이 지목하는 **실재하는 다음 명령**. 도달 지점에 따라
   // 갈리므로(run만 / run+PR) 콜사이트마다 손으로 쓰면 일부만 고쳐진 채 골든이 초록이 된다
   // (열거 붕괴 — pendingReason은 여섯 자리에 있다). 한 곳에서 만든다.
   // ⚠️ run이 아직 없는 분기(step 2 미출현)는 이 함수를 쓰지 않는다 — 거기엔 지목할 핸들이 없고,
@@ -346,9 +346,9 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
 
   // 2b) identifyOnly(MCP) — run을 식별했으면 conclusion 추적 없이 run 핸들을 pending으로 즉시 반환한다.
   // stdio 서버가 GitHub Actions run 완료(최대 deadline)까지 블로킹하지 않게 한다 — 진행은 status(run URL)
-  // 재조회가 재개 경로다(스펙 "결과의 run URL이 상관 핸들, 진행 확인은 status 핸들 조회로", release r1 a2=b3).
+  // 재조회가 재개 경로다(스펙 "결과의 run URL이 상관 핸들, 진행 확인은 status 핸들 조회로").
   if (opts.identifyOnly) {
-    // 좌표를 함께 싣는다(티켓 09): 이 분기에는 PR이 **원리적으로** 없고(run 완료 후 생긴다) run
+    // 좌표를 함께 싣는다: 이 분기에는 PR이 **원리적으로** 없고(run 완료 후 생긴다) run
     // 핸들만으로는 PR·머지로 갈 길이 없다. 브랜치는 run id의 순수 파생이라 조회가 0회 늘어난다 —
     // 소비자는 `homelab status --run <url> --branch <branch>`로 그 레인 PR을 정확 조회한다.
     return { variant: "pending", omitted: [], result: compact({ ...base, run: compact({ ...runRef(), branch: branchOf() }), pendingReason: "run 디스패치·식별 완료 — 진행은 status 핸들 조회로 확인: homelab status --run <run.url> --branch <run.branch>(동기 바운디드)" }) };
@@ -418,13 +418,13 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     // 이 루프의 관측은 둘이다 — 목록 재조회와 종결 확증 조회. 둘 다 GitHub 계층 조회라 같은
     // watch가 센다(어느 쪽이 죽었든 운영자가 볼 것은 "이 대기는 관측이 안 되고 있다"이다).
     const mergeWatch = pollWatch();
-    // required check(gate) 관측(티켓 47 — 상수 절의 근거). 사이클마다 PR 목록과 **함께** 읽으므로
+    // required check(gate) 관측(상수 절의 근거). 사이클마다 PR 목록과 **함께** 읽으므로
     // 이 루프의 읽기 빈도가 2배가 되지만, 예산은 같은 endAt 하나라 총량은 데드라인이 상한이다.
     // 반환: 종결 실패면 {conclusion, url}, 그 외 전부 null(= 종전 pending 경로).
     // ⚠️ **fail-open** — head SHA 부재(투영이 그 필드를 안 실은 응답)·gh 조회 실패·404·공집합은 전부
     //   null이다. 여기서 fail-closed로 죽이면 GitHub 계층 blip 한 번이 '변이 실패'가 되고, 그 손해
     //   (성공했을 수도 있는 PR을 실패로 보고)가 한 사이클 더 도는 비용보다 크다.
-    // ⚠️ 이 조회의 실패는 mergeWatch가 세지 **않는다** — 티켓 06의 접미는 '머지 관측이 죽었다'를
+    // ⚠️ 이 조회의 실패는 mergeWatch가 세지 **않는다** — mergeWatch 접미는 '머지 관측이 죽었다'를
     //   지목하는 축이고, fail-open 보조 관측의 blip이 그 사유를 가로채면 운영자가 잘못 유도된다.
     // gate 관측의 **생사** 축 — 이름 드리프트(REQUIRED_CHECK ≠ ci.yaml job id)나 지속 조회 실패는
     // 조기 종결을 통째로 무력화하는데, 종전에는 pendingReason에 흔적이 0이라 운영자가 '그냥 대기'와
@@ -449,8 +449,8 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     const gateSuffix = (): string =>
       gateBlind >= streakFloor ? ` — required check(${REQUIRED_CHECK}) 관측 불가(${gateBlind}회 연속): ${gateBlindWhy}` : "";
     // 종결 좌표의 단건 권위 확증 — **행을 돌려준다**(종전 boolean은 그 행이 이미 싣고 온
-    // merged_at·merge_commit_sha를 버렸다: 리뷰 M3). 확증 실패·불일치는 gate blind 축에 계상하되
-    // 사유 문구를 가른다(리뷰 M2·L3) — '못 읽었다'와 '읽었는데 좌표가 다르다'는 처방이 다르고,
+    // merged_at·merge_commit_sha를 버렸다). 확증 실패·불일치는 gate blind 축에 계상하되
+    // 사유 문구를 가른다 — '못 읽었다'와 '읽었는데 좌표가 다르다'는 처방이 다르고,
     // 종전에는 둘 다 어느 카운터도 세지 않아 흔적 0으로 데드라인을 태웠다.
     // ⚠️ 이 확증 조회도 mergeWatch가 세지 않는다(위 gate 축과 같은 이유).
     type HeadConfirm = { kind: "confirmed"; row: PrRow } | { kind: "undecided" };
@@ -479,7 +479,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
       // 0건은 '아직 안 붙었다'와 '이름이 어긋났다'를 구별하지 못한다 — 서버 필터가 이름으로 좁히므로
       // 둘 다 같은 응답이다. 판정은 종전대로 fail-open이되, 지속되면 위 접미가 그 상태를 지목한다.
       if (rows.length === 0) return blind(`이름이 ${REQUIRED_CHECK}인 check-run 0건(미부착 또는 이름 드리프트)`);
-      // 리뷰 L1 — started_at **혼합** 응답(유효 집합도 무효 집합도 비지 않음)은 형상 이상이다.
+      // started_at **혼합** 응답(유효 집합도 무효 집합도 비지 않음)은 형상 이상이다.
       // 유효 행만으로 최신을 잡으면 버려진 행이 사실 더 새 것일 때 판정이 fail-closed로 뒤집는데,
       // 이 모듈의 규약은 「관측 부재 = fail-open」이다. 균질하게 무효인 응답은 혼합이 아니다 —
       // 그때는 비교 축이 하나(id)뿐이라 전순서가 성립하고, latestCheckRun의 id 폴백이 판정한다.
@@ -526,7 +526,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
           // 권위 행이 '머지됨'을 말하면 종결하지 않는다 — 닫힘 종결과 **같은 순서**다(권위가 머지를
           // 보고하면 그 값으로 정상 머지 경로를 잇는다). 목록이 낡아 open으로 오는 사이 gate가 실패로
           // 끝났고 잔여 우회로 머지된 형상에서, 종전 boolean 확증은 이 필드를 버려 **머지된 PR을
-          // failure로 보고**했다(리뷰 M3).
+          // failure로 보고**했다.
           if (confirm.row.merged_at !== null) { pr = { ...pr, ...confirm.row }; gateCycleEnd(); break; }
           const context = spec.manualMerge !== undefined
             ? ` · 수동 머지 레인이지만 정상 경로로는 머지되지 않는다(owner admin 면제는 잔여 우회 — infra/github/repo.tf enforce_admins=false · 이 동사의 머지가 곧 ${spec.manualMerge.approval}이었다)`
@@ -597,8 +597,8 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     return p;
   };
 
-  // 6a) absence 수렴(teardown) — 삭제 대상 Application은 Healthy가 될 수 없다(스펙 대기 매트릭스,
-  //   plan r2 s5). 두 지점에서 극성이 뒤집힌다: (1) 철거 머지는 표면을 제거하므로 기준 ref에서
+  // 6a) absence 수렴(teardown) — 삭제 대상 Application은 Healthy가 될 수 없다(스펙 대기 매트릭스).
+  //   두 지점에서 극성이 뒤집힌다: (1) 철거 머지는 표면을 제거하므로 기준 ref에서
   //   표면이 사라져 있어야 요청이 반영된 것 — 남아 있으면 철거 미반영(fail-loud). (2) Application은
   //   sync/health가 아니라 존재/부재로 판정한다(--ignore-not-found: 부재=빈 stdout·exit 0).
   //   DNS 회수는 관측 대상이 아니다 — iac/tf-reconcile 소관을 resultBase가 명시한다.

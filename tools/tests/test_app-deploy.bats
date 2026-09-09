@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # apps/<name>/deploy/prod 배포 계약 가드 — 필수 4산출물(values.yaml·.bindings.json·source-repo·
-# kustomization.yaml) + source-repo 발견 계약 + **봉인 배선 all-or-none 불변식**(sealed-wiring #01).
-# 인레포 배포앱 0개라 양성/음성 fixture로 체커를 검증. bash 3.2: 중간 단언은 [ ]만(check-bats-style).
+# kustomization.yaml) + source-repo 발견 계약 + **봉인 배선 all-or-none 불변식**.
+# 실제 apps/ 열거에 결합하지 않고 양성/음성 fixture로 체커를 검증한다. bash 3.2: 중간 단언은 [ ]만(check-bats-style).
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   CHECK="$ROOT/scripts/check-app-deploy.sh"
@@ -73,7 +73,7 @@ build_state() {
 @test "negative fixture: a source-repo of pure whitespace fails (the consumer trims before deciding)" {
   # `-s`(크기>0)는 공백만 있는 파일을 통과시키는데 소비자(app-surface.readAppSurface)는 `.trim()`
   # 뒤에 판정해 그 파일을 '부재'로 접는다 — 두 술어의 폭이 어긋나면 게이트가 통과시킨 산출물을
-  # 리더가 '인레포 앱'으로 오보한다(티켓 17 · owner 결정 Q5).
+  # 리더가 '인레포 앱'으로 오보한다(owner 결정 Q5).
   d="$BATS_TEST_TMPDIR/blankspace/deploy/prod"; mkdir -p "$d"
   echo "image: {}" > "$d/values.yaml"
   echo "{}" > "$d/.bindings.json"
@@ -103,7 +103,7 @@ build_state() {
 }
 
 @test "required roster is the 4-artifact deploy contract (schema is SSOT)" {
-  # untouched-d-2(5라운드) — .required 배열의 원소 수·멤버십에 증인이 없어, values.yaml·
+  # .required 배열의 원소 수·멤버십에 증인이 없어, values.yaml·
   # .bindings.json을 로스터에서 빼도(real-tree 레인이 4비트 배선 전부 0으로 접혀) 23/23 초록이었다.
   # 정렬·조인 등식은 추가·삭제 양방향을 한 줄로 잠근다(jq sort는 코드포인트 순 — 로케일 콜레이션
   # 함정 밖, `-e` 미사용이라 yq/jq -e false=exit1 함정도 비껴간다).
@@ -223,7 +223,7 @@ build_state() {
   echo "$output" | grep -q '부분 상태'
 }
 
-# ── strict scope 강제(sealed-wiring #02, design-r1 R-2) ────────────────────────────────
+# ── strict scope 강제 ──────────────────────────────────────────────────────────────────
 # 완전 배선(1111) 앱을 조립하되 봉인본 metadata.annotations에 $anno 줄을 넣는다(checksum은 정합) —
 # 배선 불변식은 통과시키고 scope 검사만 태우기 위함.
 build_wired_with_anno() {
@@ -300,7 +300,7 @@ build_wired_with_anno() {
   echo "$output" | grep -q 'scope'
 }
 
-# ── K/E 경로 앵커(grep-a-3) — 문자열이 파일 어딘가에 있는 것과 그 키 아래에 있는 것은 다르다ㅡ
+# ── K/E 경로 앵커 — 문자열이 파일 어딘가에 있는 것과 그 키 아래에 있는 것은 다르다ㅡ
 
 @test "K axis: the sealed filename under patches: does not satisfy K (resources membership alone counts)" {
   # 예전 줄 정규식은 어느 키 아래인지 안 보고 시퀀스 항목 모양이면 등재로 오인했다 —
@@ -327,7 +327,7 @@ build_wired_with_anno() {
 }
 
 @test "E axis: a secretRef outside envFrom (e.g. livenessProbe) does not satisfy E (path-anchored, not the whole document)" {
-  # reg-a2-ops-guards-1 — 예전 표현식은 `..`(문서 전체 재귀 하강)라 envFrom 경로 밖 아무
+  # 예전 표현식은 `..`(문서 전체 재귀 하강)라 envFrom 경로 밖 아무
   # 자유형 맵(platform/charts/app/values.schema.json의 livenessProbe·strategy.rollingUpdate가
   # additionalProperties 미제한)에 놓인 secretRef.name도 배선 증거로 오인했다. envFrom을 아예
   # 비우고 livenessProbe 아래 같은 이름의 secretRef만 두면 여전히 부분 상태(E=0)여야 한다.

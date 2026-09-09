@@ -21,13 +21,13 @@ import { HOMELAB_REPO } from "./platform.ts";
 import { listUnits } from "./repo-walk.ts";
 
 // branch — run 모드의 **좌표 보강**(모드가 아니다). 변이 pending이 실어 보낸 레인 브랜치를 받아
-// 그 레인 PR을 정확 조회한다(티켓 09). 단독 모드로 열지 않는 이유는 statusInputError 주석 참조.
+// 그 레인 PR을 정확 조회한다. 단독 모드로 열지 않는 이유는 statusInputError 주석 참조.
 export type StatusInput = { app?: string; runUrl?: string; prUrl?: string; branch?: string; resources?: boolean; root?: string };
 // race — 브랜치 하나에 PR이 2개면 신원 판정 불가다(fail-closed, exit 3). 변이 엔진의 같은 축과
 // 같은 어휘를 쓴다 — 리더가 임의로 하나를 고르면 그 뒤의 모든 보고가 오귀속이 된다.
 export type StatusOutcome = { variant: "success" | "failure" | "race"; omitted: string[]; result: Record<string, unknown> };
 
-// 핸들 URL의 owner/repo — GitHub 명명 규칙으로 좁힌다(티켓 27). 종전 `[\w.-]+`는 `.`·`..`를
+// 핸들 URL의 owner/repo — GitHub 명명 규칙으로 좁힌다. 종전 `[\w.-]+`는 `.`·`..`를
 // 통과시켰고 그 캡처가 `repos/${owner}/${repo}/…`로 gh api 경로에 조립됐다
 // (`https://github.com/../../pull/1` → `repos/../../pulls/1`). identity.ts:5가 'path traversal
 // 1차 게이트에 분기를 두지 않는다'를 원칙으로 두고 APP_NAME_RE가 `..`를 거르는데 핸들 축만 그
@@ -41,7 +41,7 @@ export type StatusOutcome = { variant: "success" | "failure" | "race"; omitted: 
 const RUN_URL_RE = /^https:\/\/github\.com\/([A-Za-z0-9][A-Za-z0-9-]{0,38})\/((?!\.{1,2}(?:\/|$))[A-Za-z0-9._-]{1,100})\/actions\/runs\/(\d+)(\/.*)?$/;
 const PR_URL_RE = /^https:\/\/github\.com\/([A-Za-z0-9][A-Za-z0-9-]{0,38})\/((?!\.{1,2}(?:\/|$))[A-Za-z0-9._-]{1,100})\/pull\/(\d+)(?:\/.*)?$/;
 
-// 핸들 URL 정규화(티켓 40) — GitHub UI가 붙이는 쿼리·프래그먼트(`?check_suite_focus=true` ·
+// 핸들 URL 정규화 — GitHub UI가 붙이는 쿼리·프래그먼트(`?check_suite_focus=true` ·
 // `#issuecomment-…`)는 **좌표가 아니라 뷰 상태**다. `/`로 시작하지 않아 종전에는 usage 거부였다.
 // ⚠️ 접는 지점은 **하나**다 — 검증(statusInputError)과 조회(statusRun/statusPr)가 같은 값을 봐야
 //    한다. 두 곳에서 접으면 어긋난 순간 형식 판정과 질의가 다른 URL을 보게 된다.
@@ -75,7 +75,7 @@ export function statusInputError(input: StatusInput): string | null {
   // apps/<app>/deploy/prod 경로·kubectl 리소스명에 조립하므로 identity.ts가 '분기 금지'로 못 박은
   // traversal 1차 게이트가 여기에도 선다(오타는 '산출물 없음' failure가 아니라 usage로 층이 갈린다).
   if (input.app !== undefined && !APP_NAME_RE.test(input.app)) return `앱 이름 형식 불량(소문자 kebab, 2..40): ${input.app}`;
-  // --resources는 5번째 mode다(티켓 40) — 새 동사가 아니라 status의 모드라 같은 상호배타 집합에 든다.
+  // --resources는 5번째 mode다 — 새 동사가 아니라 status의 모드라 같은 상호배타 집합에 든다.
   const modes = [input.app, input.runUrl, input.prUrl, input.resources === true ? "resources" : undefined]
     .filter((x) => x !== undefined).length;
   if (modes > 1) return "app 인자·--run·--pr·--resources는 상호배타다(하나만 지정)";
@@ -101,7 +101,7 @@ function defaultRoot(): string {
   return fileURLToPath(new URL("../..", import.meta.url));
 }
 
-// 레포 계층의 **출처 진술**(티켓 17) — 이 결과가 어느 체크아웃의 디스크를 읽었는지.
+// 레포 계층의 **출처 진술** — 이 결과가 어느 체크아웃의 디스크를 읽었는지.
 // status의 레포 계층은 GitHub main이 아니라 CLI가 링크된 로컬 체크아웃이다. bump-poll 자동 머지·
 // `--wait` 머지 뒤 `git pull`을 안 한 체크아웃에서는 「배포 핀: 옛 tag」와 「라이브: 새 rev」가
 // 모순 없이 success로 나오고, teardown 머지 뒤엔 앱이 아직 있는 것으로 보인다. MCP status tool은
@@ -173,7 +173,7 @@ function statusList(root: string): StatusOutcome {
   return { variant: "success", omitted: [], result: { mode: "list", repo: repoProvenance(root), inFlight: inFlightPrs(), apps, count: apps.length } };
 }
 
-// GitHub 계층 실패의 **사유 한 줄**(티켓 15) — 3상 리더(ghRead)의 종류를 그대로 층으로 옮긴다.
+// GitHub 계층 실패의 **사유 한 줄** — 3상 리더(ghRead)의 종류를 그대로 층으로 옮긴다.
 // 종전에는 ghJson의 null 접힘이 gh 미설치·미인증·404·rate limit·망 단절·파싱 깨짐을 한 문장으로
 // 만들었고, 그 넷은 처방이 전부 다르다(재인증 / 이름·접근권 / 대기 / 재시도). 같은 statusApp 안에서
 // kubectl 실패는 이미 사유를 싣는데 GitHub 레그만 지워지던 비대칭의 해소이기도 하다.
@@ -185,7 +185,7 @@ function ghCause(g: Exclude<GhRead, { kind: "ok" }>): string {
   return g.reason;
 }
 
-// 열린 PR 목록의 per_page 상한 — 도달하면 "더 있을 수 있다"가 사실이라 truncated를 싣는다(티켓 40).
+// 열린 PR 목록의 per_page 상한 — 도달하면 "더 있을 수 있다"가 사실이라 truncated를 싣는다.
 // 상한을 안 말하면 101번째 머지 대기 PR이 '없음'과 구별되지 않는다(꼬리가 조용히 잘린다).
 // 질의 문자열이 이 상수에서 나와야 판정과 질의가 함께 움직인다(리터럴 두 벌 = 드리프트).
 const PR_PAGE_MAX = 100;
@@ -199,7 +199,7 @@ function openHomelabPrs(): GhRead {
 const openPrRow = (p: Record<string, unknown>): Record<string, unknown> =>
   compact({ number: p.number, title: p.title, head: p.head, url: p.html_url, autoMerge: p.auto_merge });
 
-// 머지 대기(in-flight) 레인 — 목록 모드의 GitHub 계층(티켓 40, observe-3).
+// 머지 대기(in-flight) 레인 — 목록 모드의 GitHub 계층.
 // create-app·teardown-app은 **수동 머지** 동사라 '머지 대기 PR'이 그린필드의 정상 상태이고 며칠
 // 지속된다. 그 창에서 목록 모드는 「온보딩된 앱이 없다」한 줄이라 이어갈 좌표가 0이었다.
 // ⚠️ 형상은 라이브 계층과 **같다**({prs}|{error}) — 이 모드의 핵심 페이로드는 로컬 인벤토리이고,
@@ -227,7 +227,7 @@ function inFlightPrs(): Record<string, unknown> {
 // 배포 핀 tag의 source SHA 인코딩 — create-app이 `sha-<source SHA>`로 쓴다(그 파일이 SSOT).
 const TAG_SHA_RE = /^sha-([0-9a-f]{7,40})$/;
 
-// 「배포 핀이 최신 main 빌드인가」(티켓 40, observe-12) — tag가 인코딩한 source SHA와 앱 레포의
+// 「배포 핀이 최신 main 빌드인가」 — tag가 인코딩한 source SHA와 앱 레포의
 // 최신 main push run의 head_sha를 **접두 비교**한다(tag는 짧을 수 있다).
 // ⚠️ 판정 불가는 false가 아니라 **키 부재**다. `sha-*` 형식 밖 tag(수동 릴리스 태그 v1.2.3)나
 //    main push run이 목록에 없는 경우를 false로 접으면 "최신이 아니다"라는 적극적 주장이 되고,
@@ -241,7 +241,7 @@ function deployedBuildOf(tag: unknown, runs: unknown[]): Record<string, unknown>
   return { matchesLatestMain: String(latest.headSha).startsWith(m[1]!) };
 }
 
-// Application status.conditions 투영(티켓 16) — 'Degraded'만 보고하면 '왜'의 답이 전부 CLI 밖
+// Application status.conditions 투영 — 'Degraded'만 보고하면 '왜'의 답이 전부 CLI 밖
 // (kubectl·ArgoCD UI)에서 시작된다. sync/비교 실패 사유가 바로 이 배열에 있다.
 //   정렬은 **원본 배열 순서**로 고정한다 — 임의 정렬(시각·심각도)은 골든을 비결정적으로 만든다.
 //   상한 3건 — 결과는 보고서지 로그 덤프가 아니다(같은 이유로 메시지도 단일 줄 + 길이 상한).
@@ -264,7 +264,7 @@ function statusApp(root: string, app: string): StatusOutcome {
   if (!existsSync(appPaths(root, app).prod)) {
     // 산출물 부재는 그린필드의 **정상 전이**일 수 있다: create-app PR이 열려 있고(수동 머지 대기)
     // 그 PR이 바로 이 디렉토리를 만든다. 종전에는 이 상태가 '앱 없음' 한 줄이라 재개 좌표가 0이었다
-    // (mcp-4). 읽기 1회로 그 레인 PR을 별도 필드에 실어 준다 — 수동 머지 원칙은 그대로다.
+    // 읽기 1회로 그 레인 PR을 별도 필드에 실어 준다 — 수동 머지 원칙은 그대로다.
     // 조회 실패는 여기서 fail-loud로 승격하지 않는다(주 사유는 산출물 부재이고, 부가 관측의 부재는
     // 키 부재로 보고된다 — 없는 것과 못 본 것을 결과가 뒤섞지 않게 필드를 만들지 않는다).
     const g = openHomelabPrs();
@@ -373,7 +373,7 @@ function statusPr(rawUrl: string): StatusOutcome {
   }) } };
 }
 
-// ── 리소스 인벤토리(티켓 40, product-2) ────────────────────────────────────────────────────
+// ── 리소스 인벤토리 ──────────────────────────────────────────────────────────────────────
 // `db create`/`cache create`로 만든 것을 되읽을 동사가 CLI에 0개였다 — 라이브에 DB 2·캐시 1이
 // 실재하는데 status는 앱만 열거하고 count 0을 냈다(실측). **새 동사가 아니라 status의 5번째 mode**다:
 // 관측 전용이고 파괴 경계를 안 건드리며, ADR docs/adr/0001의 재개 조건(verb descriptor 파생)과 무관하다.

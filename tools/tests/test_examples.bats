@@ -1,13 +1,12 @@
 #!/usr/bin/env bats
 # kind별 차트 렌더 계약 검증 — 차트 자체 fixtures 사용.
-# (과거에는 apps/{worker,web,console} 배포 values를 참조했으나, 그 셋은 Dockerfile 없는
-#  values-only 예시여서 라이브에서 빌드 불가 → 외부 앱 레포 체제 전환과 함께 제거되었고
-#  렌더 계약은 fixtures가 SSOT다.)
+# 앱 배포 values(apps/<name>/deploy/prod)는 참조하지 않는다 — 앱 코드가 외부 레포에 살아 이 레포의
+# values는 배포 설정일 뿐이다. 렌더 계약의 SSOT는 차트 fixtures다.
 # ⚠️ 메모리는 이 파일 소관이 아니다 — 앱 사이징은 platform/charts/app/values.schema.json이
 #    resources 4값(requests/limits × cpu/memory)을 required로 강제하고, 그 증인은
-#    platform/charts/app/tests/test_schema.bats:20·39·47(「per-app sizing gate」·「sizing-discipline
-#    divergence (limits half)」·「emptied or absent requests axis」)다. :39는 limits 축만 재므로
-#    requests 축 증인은 :47이다 — 예전엔 :39 하나를 「both」로 가리켰고 그 절반이 무증인이었다.
+#    platform/charts/app/tests/test_schema.bats:20·44·52(「per-app sizing gate」·「sizing-discipline
+#    divergence (limits half)」·「emptied or absent requests axis」)다. :44는 limits 축만 재므로
+#    requests 축 증인은 :52다 — 한 증인에 두 축을 걸면 절반이 무증인으로 남는다.
 #    platform 상주 워크로드 쪽은 docs/memory-ledger.md 원장 + tools/check-resource-limits.ts
 #    (GOMEMLIMIT ≤ limit×0.95). 차트 templates/에는 GOMEMLIMIT/NODE_OPTIONS 주입 자리가 없다(실측 0건)
 #    — 그래서 @test 이름도 그것을 약속하지 않는다.

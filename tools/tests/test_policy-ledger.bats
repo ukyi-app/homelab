@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 정책 원장 리더(tools/lib/policy-ledger.ts, lib-convergence d1 — design r1-4 축소 범위)의 계약 테스트.
+# 정책 원장 리더(tools/lib/policy-ledger.ts — 축소 범위)의 계약 테스트.
 # readLedger는 fail-closed 로딩 · 통일 shape({_readme, <container>}) · schema-check 항목 검증까지만
 # 소유한다 — 미선언/죽은-선언 대조는 콜사이트 소유(CONTEXT.md 「정책 원장」).
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과. @test 이름은 영어(CJK 함정).
@@ -146,7 +146,7 @@ EOF
     // 대조군 ②: enum 전용 노드와 빈 {} 노드는 구조 제약이 없어 면제다(ENTRY_SCHEMA의 자유 값 노드).
     if (throws("a", { enum: ["a", "b"] })) { console.error("FALSE THROW (enum)"); process.exit(1); }
     if (throws({ any: 1 }, {})) { console.error("FALSE THROW (empty)"); process.exit(1); }
-    // ── 티켓 24: 조용한 통과 3면(전부 착지 전 []였다 — 실측) ─────────────────────────────
+    // ── 조용한 통과 3면(전부 착지 전 []였다 — 실측) ────────────────────────────────────────
     // (1) additionalProperties가 boolean이 아니면 지원 밖 형태다(스키마 객체는 평가되지 않는다).
     if (!throws({ a: 1, b: "x" }, { type: "object", properties: { a: { type: "integer" } }, additionalProperties: { type: "string" } })) { console.error("NO THROW (object additionalProperties)"); process.exit(1); }
     // (2) 선언 type과 안 맞는 제약 키워드는 영원히 미평가다 — 아는 제약의 미평가라 fail-closed.

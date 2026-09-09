@@ -23,7 +23,7 @@ set -euo pipefail
 guard_init check-app-netpol
 # 스크립트 위치 — 차트 헬퍼·워커는 **스캔 대상 트리(--root)가 아니라 여기** 기준이다.
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 env 폐지).
 take_floors "check-app-netpol:manifests" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 SCOPE_NARROWED=0
@@ -105,7 +105,7 @@ while IFS= read -r f; do
   done < <(yq ea "select(.kind==\"NetworkPolicy\") | .spec.podSelector.matchLabels.\"${INSTANCE_KEY}\" // \"\"" "$f")
 done <<< "$netpol_files"
 # ⚠️ **열거 건수와 불변식 평가 횟수는 다른 수다.** 마커를 하나만 내면 "매니페스트 6건 스캔"이
-#    증언되는데 정작 셀렉터 불변식은 0회 평가된 상태가 초록으로 통과한다 — 티켓 08이 잡으려던
+#    증언되는데 정작 셀렉터 불변식은 0회 평가된 상태가 초록으로 통과한다 — 열거 붕괴 가드가 잡으려던
 #    vacuous green이 마커 계층에서 재현되는 자리다. 두 수를 **다른 라벨로** 낸다.
 #    (netpols=0은 정당할 수 있다 — 앱 소유 NetworkPolicy가 아직 없다는 뜻이다. 그래서 바닥값은
 #     manifests에만 걸고 여기엔 걸지 않는다. 중요한 건 "몇 번 평가됐나"가 보이는 것이다.)

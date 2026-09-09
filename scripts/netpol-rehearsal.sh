@@ -2,7 +2,7 @@
 # netpol candidate rehearsal — selfHeal off→candidate apply→verify-posture→ALWAYS restore(trap).
 # 라벨 미스가 prod로 안 새게: 어떤 종료에도 trap이 selfHeal/main 복원. owner-local(라이브 클러스터·워크트리서).
 # ★머지 전 필수 — GitOps selfHeal라 pre-merge verify-posture는 main(broad)을 테스트, candidate가 아니다.
-# ⚠️ 인-레포 앱 0인 현 정상 상태(apps/README.md)에서는 **kubelet 프로브 레그만** skip된다 —
+# ⚠️ prod에 앱 파드가 0건이면 **kubelet 프로브 레그만** skip된다 —
 #    리허설 자체는 돈다(POSITIVE pg-rw·pg-pooler-rw + NEGATIVE egress deny는 probe()가 자기
 #    파드를 띄우므로 앱 파드와 무관하게 실질 판정이다). ipBlock 핀은 gate의
 #    `platform/network-policies/prod/test_netpol.bats`가 매 PR에서 따로 강제한다.
@@ -25,7 +25,7 @@ restore() {   # trap: 성공/실패/STOP 어떤 EXIT에도 복원(F5)
     [ "$s" = Synced ] && [ "$h" = Healthy ] && break; sleep 2
   done
   # herestring — kubectl(다중행 yaml writer)을 grep -q에 직파이프하면 pipefail 아래 조기 종료
-  # SIGPIPE(141)로 매치가 있어도 거짓 판정이 난다(scripts/check-sigpipe-writers.sh 분모 ② c71-3).
+  # SIGPIPE(141)로 매치가 있어도 거짓 판정이 난다(scripts/check-sigpipe-writers.sh 분모 ②).
   netpol_yaml="$(kubectl -n "$NS" get netpol "$NETPOL" -o yaml)" || netpol_yaml=""
   if grep -q "$NEEDLE" <<<"$netpol_yaml"; then
     echo "⚠️ 복원 후에도 candidate 잔존 — 수동 점검(selfHeal/sync)"; else echo "==> 복원 확인(broad)"; fi
@@ -35,14 +35,14 @@ kubectl -n argocd get app "$APP" >/dev/null                                  # �
 kubectl -n argocd patch app "$APP" --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}'
 [ "$(kubectl -n argocd get app "$APP" -o jsonpath='{.spec.syncPolicy.automated.selfHeal}')" = false ]  # 확인(F3)
 make -s render COMP="$COMP" | kubectl apply -f -                    # candidate 적용(-s: make 명령 에코 억제 — 안 하면 echo가 line1이라 kubectl YAML 파싱 실패)
-# herestring(c71-3) — kubectl 다중행 writer를 grep -q에 직파이프하지 않는다(같은 SIGPIPE 클래스).
+# herestring — kubectl 다중행 writer를 grep -q에 직파이프하지 않는다(같은 SIGPIPE 클래스).
 netpol_yaml="$(kubectl -n "$NS" get netpol "$NETPOL" -o yaml)"
 grep -q "$NEEDLE" <<<"$netpol_yaml"  # 반영 확인(F3)
 sleep 8                                                                      # kube-router 룰 갭(검증 함정)
 # 판정 전 도메인 확인 — 분모를 셋으로 나눈다(형제 `tests/posture/test_network-policy.bats:36-71`과
 # 같은 3분할이다. 그 @test가 kubelet 프로브 레그의 실제 판정자이고 여기는 그것을 호출할 뿐이다).
 #   (a) 앱 파드는 있는데 라벨 셀렉터가 0건 = **열거 붕괴** → exit 1(전제 불충족이지 skip이 아니다).
-#   (b) 앱 파드 0건은 **정상 상태**다(apps/README.md — 인-레포 앱 0개). 그때 닫히는 것은 kubelet
+#   (b) 앱 파드 0건은 **정상 상태**다(그린필드·teardown 직후·앱 scale-0). 그때 닫히는 것은 kubelet
 #       프로브 레그 하나뿐인데, 예전엔 그 하나 때문에 리허설 **전체**를 exit 1로 거부했다.
 #       prod netpol은 전부 `podSelector: {}`라 verify-posture의 probe() 임시 파드가 그대로 정책
 #       아래 놓이고, POSITIVE pg-rw·pg-pooler-rw(F4b — 이 스크립트가 자기 기본 대상으로 삼는
@@ -55,7 +55,7 @@ if [ "$all_pods" -gt 0 ] && [ "$pods" -eq 0 ]; then
   exit 1
 fi
 if [ "$pods" -eq 0 ]; then
-  echo "⚠️ $NS 앱 파드 0건(정상 — 인-레포 앱 0개): kubelet 프로브 레그는 skip된다." >&2
+  echo "⚠️ $NS 앱 파드 0건(scale-0·teardown 직후·그린필드면 정상): kubelet 프로브 레그는 skip된다." >&2
   echo "   ipBlock 자체는 platform/network-policies/prod/test_netpol.bats가 gate에서 핀으로 강제한다." >&2
 fi
 # posture 스위트 중 DR 자산 신선도(test_dr-assets)는 netpol candidate 판정과 무관하고 owner 매체

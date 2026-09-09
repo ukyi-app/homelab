@@ -6,7 +6,7 @@
 |---|---|
 | 게시처 | `ghcr.io/<owner>/skopeo:alpine` |
 | base | `alpine:3.22`(Docker Hub, digest 핀) |
-| 담긴 것 | `skopeo`(1.20.x) · `curl` · `ca-certificates` |
+| 담긴 것 | `skopeo`(1.20.x) · `curl` · `ca-certificates` · `coreutils`(GNU `date` — gha-liveness-exporter가 `date -u -d "$ISO"`로 ISO8601을 파싱한다. busybox date는 이를 거부해 신선도 판정이 조용히 깨진다) |
 | 소비자 | `platform/victoria-stack/prod/digest-exporter.yaml` · `gha-liveness-exporter.yaml` |
 
 ## 왜 자체 이미지인가

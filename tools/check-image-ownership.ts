@@ -22,7 +22,7 @@
 // 어디에도 안 걸린 채 데이터 내구성 경로에 있었다(D-3). 그래서 숨은 참조도 따로 스캔한다.
 //
 // 종료코드: tools/lib/cli.ts 규약(0=통과 · 1=검증 실패 · 2=사용법).
-// 실행은 exec seam 경유(d6③) — git 실패는 빈 집합으로 접는 기존 관용 유지(바닥값이 붕괴를 잡는다).
+// 실행은 exec seam 경유 — git 실패는 빈 집합으로 접는 기존 관용 유지(바닥값이 붕괴를 잡는다).
 import { git } from "./lib/exec.ts";
 import { readFileSync } from "node:fs";
 import { typedFlags } from "./lib/cli.ts";
@@ -39,7 +39,7 @@ const IMG_KEY = /^[ \t]*(?:-[ \t]+)?(image|imageName):[ \t]*["']?([a-z0-9][^\s"'
 // 매치가 끊긴다. kubectl·kustomize·ArgoCD는 이 표기를 한 줄 스칼라와 동일하게 적용하지만, IMG_KEY·
 // scripts/check-image-pins.sh의 형제 어휘·Renovate kubernetes manager 어느 것도 이 표기를 추출하지
 // 못한다 — 즉 이 표기로 쓰인 이미지는 참조 스캐너·핀 게이트·freshness 갱신 전부의 바깥에 산다
-// (감사 6라운드 grep-c-2, 실측 2026-09-04: platform/homepage/prod/deployment.yaml을 `image: >-` +
+// (실측 2026-09-04: platform/homepage/prod/deployment.yaml을 `image: >-` +
 // digest 제거로 바꾸면 refs 43→42·check-image-pins.sh 36→35 양쪽 rc=0으로 무증인). 열거를 넓히지
 // 않고(추출은 원리적으로 못 한다) fail-closed 위반으로 낸다 — 표기 자체를 거부한다.
 const IMG_BLOCK_SCALAR = /^[ \t]*(?:-[ \t]+)?(?:image|imageName):[ \t]*[|>]/gm;
@@ -122,7 +122,7 @@ export function hiddenRefs(path: string, text: string): Ref[] {
 }
 
 // ── Renovate 도달성 ───────────────────────────────────────────────────────────
-// 분류표만 보고 "Renovate 소유"로 통과시키면 안 된다(design-r2 R-5) — `ignorePaths` 변경이나 manager
+// 분류표만 보고 "Renovate 소유"로 통과시키면 안 된다 — `ignorePaths` 변경이나 manager
 // 패턴 공백이면 실제로는 추출 불가인데도 초록이 되어 **조용한 stale-pin 노출**이 된다. 그래서 설정에서
 // 계산한다. Renovate를 실제로 돌리는 dry-run이 가장 정확하지만 CI 비용이 크므로 **fail-closed 근사**를
 // 쓰고, 알려진 매치/논매치를 센티넬 테스트로 박아 근사 붕괴를 감지한다(그 테스트가 이 근사의 증인이다).
@@ -352,7 +352,7 @@ export function audit(root: string): { refs: Ref[]; bad: string[]; owners: Map<s
         const t = readFileSync(`${root}/${f}`, "utf8");
         // ArgoCD Application의 인라인 helm chart — 경로 무관(root/apps 밖도 recurse로 싱크된다).
         // ⚠️ 값-앵커가 인용 표기(`kind: "Application"`/`kind: 'Application'`)에 눈멀었었다
-        // (55 grep-c-2 형제, 7라운드 c64-5 실측 — 인용판은 refs=0으로 무증인이었다).
+        // (형제 자리의 실측 — 인용판은 refs=0으로 무증인이었다).
         if (/^kind:\s*["']?Application["']?\s*$/m.test(t) || /\nkind:\s*["']?Application["']?\s*\n/.test(t)) {
           for (const m of t.matchAll(/^\s*chart:\s*(\S+)/gm)) charts.push(m[1]);
         }

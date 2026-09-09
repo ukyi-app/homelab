@@ -6,9 +6,9 @@
 #    단일·다중 **파일**이라 그것으로 닫힌다. 이 파일의 술어는 전부 "콜사이트에서 사라졌는가"라
 #    콜사이트가 리네임되면 `-ne 0`이 SSOT 수렴을 증명하지 않고도 초록이 된다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
-# ⚠️ **SSOT 축은 닫혔다**(감사 3라운드): setup()이 identity.ts 실재를, 정적 로스터 레인이 각자
+# ⚠️ **SSOT 축은 닫혔다**: setup()이 identity.ts 실재를, 정적 로스터 레인이 각자
 #    인용하는 **심볼의 export 실재**를 진다.
-# ⚠️ **콜사이트 로스터는 손 관리가 아니라 파생이다**(감사 3라운드 36-5). 예전 판은 인라인 regex
+# ⚠️ **콜사이트 로스터는 손 관리가 아니라 파생이다**. 예전 판은 인라인 regex
 #    부재 단언의 피연산자를 손으로 3~4개 적었다 — 실측(2026-09-03): identity를 import하면서 인라인
 #    분기 regex를 그대로 든 새 파일(tools/_roster_probe.ts)을 넣어도 15레인 전건이 초록이었다.
 #    이제 `_identity_roster`가 추적 `tools/**`에서 **앵커된 import 줄**로 소비자를 열거하고, 부재
@@ -142,7 +142,7 @@ ROSTER_FLOOR=15
     run grep -qE '^import .*identity\.ts' "tools/$f.ts"
     [ "$status" -eq 0 ]
   done
-  # db-url/cache-url은 엔진 껍데기(티켓 08) — 이름 검증은 conn-url 엔진 술어가 identity SSOT를
+  # db-url/cache-url은 엔진 껍데기 — 이름 검증은 conn-url 엔진 술어가 identity SSOT를
   # 소유하고, bin은 엔진을 경유한다(직수입 대신 위임 — 분기 없는 단일 판정은 유지된다).
   # ⚠️ 위 루프와 같은 이유로 **import 줄**로 좁힌다 — 두 파일 다 :1 헤더 주석이 `lib/conn-url.ts`를
   #    문자열로 담고 있어, 맨 매치는 엔진을 안 써도 참이다(실측 2026-09-04: db-url.ts의 직수입을

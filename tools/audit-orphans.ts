@@ -14,7 +14,7 @@
 //   stale-ledger-row      : prod 원장 행인데 apps/도 platform/도 없음
 //   incomplete-purge      : tombstone state=purging 잔존 — 상태머신 중단 흔적
 // conn/원장 명명 판정은 레이아웃 커널(lib/resource-layout.ts)을 소비한다 — 자체 정규식 유도는
-// 명명 변경 시 조용히 어긋나는 관측 사각이었다(cli-deepening 심화 4).
+// 명명 변경 시 조용히 어긋나는 관측 사각이었다.
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { appPaths, appRel } from "./lib/app-surface.ts";
 import { parse as parseYaml } from "yaml";
@@ -55,7 +55,7 @@ const USAGE = `audit-orphans — registry↔매니페스트↔원장 교차 드�
   --help, -h         이 도움말`;
 if (process.argv.includes("--help") || process.argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 
-// 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 05 — 구 --min-registry
+// 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 --min-registry
 // 폐지, 자체 정수 검증·argv 파서 복제는 커널 parseFloor·takeFloors·typedFlags로 접혔다).
 // guardMain은 쓰지 않는다 — 종료코드가 기본/--ci/--strict 3분기라 report(1)/ok(0) 이분법 밖이다
 // (stdout JSON은 이유가 아니다: output:"none"이 그 용도다 — check-guard-authority 선례).
@@ -84,7 +84,7 @@ const CI = flags.bool("--ci");
 //   missing-activation(active&&public 앱에 .activation 마커 부재 → 재노출 게이트 영구 우회).
 // 연결=SealedSecret이라 .bindings.json엔 db/redis 참조가 없다(dangling-binding 제거).
 // stale-ledger-row는 제외 — apps/·platform/ 밖 워크로드 오탐 방지. 원장 드리프트는 --strict로만.
-const BLOCKING = new Set(["orphan-dns", "activation-exposure-drift", "missing-activation"]); // pass3 F1: surfaceHash(app-tree) drift는 비차단(이미지 bump 데드락 회피); restale2 F1: 노출 행(host/public) drift=activation-exposure-drift는 차단(데드락 무관 + 미재검증 DNS 노출 막음); missing-activation: 마커 부재=재노출 게이트 사각(차단)
+const BLOCKING = new Set(["orphan-dns", "activation-exposure-drift", "missing-activation"]); // surfaceHash(app-tree) drift는 비차단(이미지 bump 데드락 회피); 노출 행(host/public) drift=activation-exposure-drift는 차단(데드락 무관 + 미재검증 DNS 노출 막음); missing-activation: 마커 부재=재노출 게이트 사각(차단)
 // REPORT_ONLY: 정보성이면서 **설계상 재발하는** 드리프트 — 텔레그램 페이지에서 제외한다(감사 JSON엔 유지 = 가시성).
 // activation-surface-drift는 이미지 bump마다 apps/<app> 표면 해시가 바뀌어(비차단, autoDeploy 데드락 회피 위해
 // 의도적 비차단) 매 주기 알림을 내던 유일한 노이즈원이다. 실제 노출 재검증은 blocking activation-exposure-drift
@@ -128,12 +128,12 @@ if (!Array.isArray(registry)) {
 // 도메인은 바닥값도 신호도 없이 붕괴할 수 있었다(글롭·키 경로 변경 → 0건 검사 후 초록).
 // 열거는 공유 워커의 `apps` 유닛 스코프가 소유한다. **의미론적 필터(values.yaml 실재)는 여기 남는다** —
 // 스코프가 그걸 걸러버리면 check-app-deploy가 잡아야 할 "필수 산출물 부재"가 열거에서 사라진다
-// (design-r1 R-1). 이 가드는 배포 가능한 앱만 보면 되므로 필터가 정당하다.
+// 이 가드는 배포 가능한 앱만 보면 되므로 필터가 정당하다.
 const appDirs = listUnits("apps", ROOT)
   .map((u) => u.name)
   .filter((a) => existsSync(appPaths(ROOT, a).values));
 // Dirent.isDirectory()는 심볼릭 링크 엔트리에서 대상과 무관하게 항상 false다 — 디렉토리를 가리키는
-// 심볼릭 링크 캐시 인스턴스가 열거에서 통째로 누락된다(reg13-e-carryover-2, repo-walk.ts의 형제
+// 심볼릭 링크 캐시 인스턴스가 열거에서 통째로 누락된다(repo-walk.ts의 형제
 // 자리와 같은 결함). tools/lib/surface-hash.ts:43-51 형태(대상 종류를 명시 판정)를 재사용한다.
 // 깨진 심볼릭 링크는 statSync가 throw하므로 false로 접는다 — "디렉토리 아님"이 맞는 판정.
 const isDirEntry = (full: string, d: { isDirectory(): boolean; isSymbolicLink(): boolean }): boolean => {
@@ -250,7 +250,7 @@ for (const a of appDirs) {
 // 1b) activation surface-drift (races-5) — .activation 마커가 있는 active:true 앱만 검사한다.
 // create-app PR 머지 자체가 첫 공개 승인이라 초기 active:true 앱에는 마커가 없어도 정상이다.
 // 마커가 있으면 surfaceHash가 현재 canonical surfaceHash(.activation 제외)와 다른지 확인한다.
-// ⚠️ codex pass3 F1: **정보성만**(BLOCKING 아님). 차단 게이트로 쓰면 정상 이미지 bump(values.yaml의
+// ⚠️ **정보성만**(BLOCKING 아님). 차단 게이트로 쓰면 정상 이미지 bump(values.yaml의
 // image.tag 변경 → surface 변경)가 머지 불가가 되고, 새 revision은 머지돼야 Healthy가 되므로 데드락
 // (autoDeploy 붕괴). 노출 재검증은 런북(activate 절차)이 담당한다. canonical 해시(F3)는 .activation 자기
 // 무효화로 인한 false-positive 노이즈를 막기 위해 여전히 필요하다.
@@ -270,8 +270,8 @@ for (const r of registry) {
   const current = surfaceHash(ROOT, "HEAD", r.name); // .activation 제외 canonical — 마커와 동일 함수
   if (current && current !== marker.surfaceHash)
     add("activation-surface-drift", r.name, `activation 이후 ${appRel(r.name).dir} 표면 변경(정보성 — 런북 재검증 권장; 마커 ${String(marker.surfaceHash).slice(0, 12)} ≠ 현재 ${current.slice(0, 12)})`);
-  // ⚠️ codex pass4 F1: apps.json 노출 행(host/public)이 바뀌면 앱 트리 무변경이어도 DNS 노출이 변한다 — 정보성으로 잡는다.
-  // ⚠️ codex restale2 F1: apps.json 노출 행(host/public) 변경은 app-tree(surfaceHash) drift와 달리 **데드락
+  // ⚠️ apps.json 노출 행(host/public)이 바뀌면 앱 트리 무변경이어도 DNS 노출이 변한다 — 정보성으로 잡는다.
+  // ⚠️ apps.json 노출 행(host/public) 변경은 app-tree(surfaceHash) drift와 달리 **데드락
   // 위험이 없다**(호스트 변경은 앱 재배포·Healthy 선행 불필요) → 미재검증 public DNS 노출을 막기 위해 **차단**.
   // (owner가 activate-app --flip로 새 노출 재증명+마커 갱신해야 머지 가능 = 의도한 재승인. surfaceHash drift만 정보성.)
   const curProj = registryProjection(r); // 마커와 동일 projection(키 순서 계약)
@@ -328,7 +328,7 @@ if (connEntries.length > 0) {
     const c = classifyArtifact(raw);
     if (c === null) {
       // 커널이 못 읽는 conn 형상 — 조용히 건너뛰면 손으로 쓴 불량 엔트리가 감사에서 사라진다
-      // (형식 밖 = 산출물 아님으로 접는 관측 축소 금지 — 티켓 06 리뷰 이월).
+      // (형식 밖 = 산출물 아님으로 접는 관측 축소 금지).
       add("malformed-conn", raw, "conn 형상인데 레이아웃 분류 불가(이름 정책 밖) — 손으로 쓴 불량 엔트리 의심(정보성)");
       continue;
     }

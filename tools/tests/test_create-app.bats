@@ -100,7 +100,7 @@ gen() {
 }
 
 @test "surfaceHash(HEAD) and surfaceHashWorktree agree when the app tree has a symlink" {
-  # 6라운드 비평가 실증(surface-hash-symlink) — walk()이 심볼릭 링크를 조용히 건너뛰면
+  # walk()이 심볼릭 링크를 조용히 건너뛰면
   # surfaceHashWorktree가 surfaceHash(HEAD)와 값이 갈려 활성화 직후 activation-surface-drift가
   # 오탐한다(헤더 :31 「커밋 후 동일한 값」 계약 위반). create-app 산출물 자체는 심볼릭 링크를
   # 만들지 않으므로(gen()으로는 재현 불가) apps/<app> 트리를 직접 구성해 두 함수를 나란히 부른다.
@@ -370,7 +370,7 @@ EOF
 }
 
 @test "create-app adds a wiring checklist line only when a same-named conn already exists (floor 2)" {
-  # product-1: create-app은 앱 자기 봉인본만 envFrom에 넣는다 — db/cache conn 배선은 손 편집 PR이
+  # create-app은 앱 자기 봉인본만 envFrom에 넣는다 — db/cache conn 배선은 손 편집 PR이
   # 유일 경로다. 자동 배선은 하지 않고(이름≠앱 케이스), **이미 있는** conn을 체크리스트로 표면화한다.
   # 형식은 create-database가 이미 쓰는 문구(provision-db checklist)와 같다.
   printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources:\n  - db-orders-conn.sealed.yaml\n  - db-orders-ro-conn.sealed.yaml\n' \
@@ -391,7 +391,7 @@ EOF
   [ "$(echo "$output" | jq -r '.checklist | length')" -ge 1 ]
 }
 
-# ── autoDeploy 기본값 축(티켓 44 · 결정 Q4) ──────────────────────────────────
+# ── autoDeploy 기본값 축(결정 Q4) ──────────────────────────────────────────
 # 이 레포의 다른 승인 게이트(bump-poll 누락=false · validate-mutation · activate-app)는 전부
 # fail-closed인데 생성기만 `?? true`로 fail-open이었다 — `.app-config.yml`에 deploy 절을 안 쓴 앱이
 # 자동 배포로 착지했다는 뜻이다. 기본은 승인 PR이고 자동 배포는 명시 opt-in이다.

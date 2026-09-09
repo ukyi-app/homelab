@@ -1,4 +1,4 @@
-# files 파일 스토어 — 단일 파드 2리스너. securityContext는 trip-mate(restricted) + fsGroup(adguard) 복제.
+# files 파일 스토어 — 단일 파드 2리스너. securityContext는 restricted 프로파일 + fsGroup(adguard와 동형).
 # 쓰기는 /data(PVC)·/tmp(emptyDir)뿐. 이미지는 repo:sha-TAG@sha256:DIGEST 인라인 핀(불변).
 apiVersion: apps/v1
 kind: Deployment

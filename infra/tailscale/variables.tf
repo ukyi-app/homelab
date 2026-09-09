@@ -8,8 +8,6 @@ variable "ts_bootstrap_oauth_secret" {
 }
 variable "dns_nameserver_tailscale_ip" {
   type = string
-  # 정정 2026-08-18: 이전 description은 "맥미니 tailscale IP(:53이 OrbStack→AdGuard로 포워딩)"였다.
-  # 컷오버로 대상이 **NUC**(100.109.208.81)로 바뀌었고 OrbStack 포워딩 경로는 소멸했다.
   # ⚠️ `terraform.tfvars.pre-cutover.bak`에는 **맥미니 IP가 남아 있다** — 그 값을 되돌려 넣으면
   #    tailnet 전역 DNS가 죽은 기계를 가리킨다. acl.tf에 폴백이 없어 tailnet 이름해석이 통째로 죽는다.
   description = "tailnet 전역 nameserver로 광고할 tailscale IP. 현재는 NUC(=AdGuard가 :53에 서빙하는 노드). 전용 LB 디바이스 IP보다 안정적이다."

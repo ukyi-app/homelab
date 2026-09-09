@@ -13,7 +13,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "AGENTS tools row exists and its check-doc-index claim is true (the guard really enumerates tools/lib)" {
-  # 티켓 34 — AGENTS.md:15의 tools 행은 「top-level·`lib/`는 `.ts`」와 「산출물 로스터는 tools/README.md
+  # AGENTS.md:15의 tools 행은 「top-level·`lib/`는 `.ts`」와 「산출물 로스터는 tools/README.md
   # (check-doc-index 강제)」를 한 문장에 담는다. 착지 전 그 주장은 거짓이었다: 레인 글롭 `tools/*.ts`는
   # 재귀하지 않아 tools/lib/*.ts를 한 파일도 열거하지 않았고, 그 거짓이 에이전트가 세션마다 처음
   # 로드하는 파일에 무증인으로 살았다.

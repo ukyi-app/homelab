@@ -55,11 +55,11 @@ setup() {
   # ⚠️ `yq -e`는 쓰지 않는다(값 false → exit 1 함정). 관용구 출처: platform/argocd/test_argocd_values.bats:145-156.
   c="$(yq -N '[.spec.egress[]?.to[]?.ipBlock.cidr | select(.)] | .[]' "$P" | paste -sd, -)"
   [ "$c" = "0.0.0.0/0" ] || { echo "ipBlock cidr 집합=$c"; false; }
-  # except는 0.0.0.0/0 ipBlock **마다 개별로** 전수 판정한다(형제 티켓 41이 victoria-stack·adguard에
+  # except는 0.0.0.0/0 ipBlock **마다 개별로** 전수 판정한다(형제 처방이 victoria-stack·adguard에
   # 착지한 형태와 동형). `// ["MISSING"]`이 except 부재를 값으로 바꿔 과부족 둘 다 red다.
   # ⚠️ 부정 카운트(`bad=$(… grep -vcxF …); [ "$bad" -eq 0 ]`)는 쓰지 않는다 — 전건 일치면 `grep -v`가
   #    아무 줄도 못 골라 rc 1이고 bats errexit가 그 **assignment에서** 죽어 **올바른 매니페스트가 red**다
-  #    (티켓 41 실측). 극성을 뒤집어 일치 **카운트 등식**으로 판정한다(정상 경로 rc 0·0건은 fail-closed).
+  #    (실측). 극성을 뒤집어 일치 **카운트 등식**으로 판정한다(정상 경로 rc 0·0건은 fail-closed).
   Q='[select(.kind=="NetworkPolicy")|.spec.egress[]?|.to[]?|select(.ipBlock.cidr=="0.0.0.0/0")|(.ipBlock.except // ["MISSING"])|sort|join(",")]|.[]'
   out="$(yq ea "$Q" "$P")"
   n="$(printf '%s\n' "$out" | grep -c .)"    # 열거 붕괴 바닥값 — 0건이면 grep rc 1로 red

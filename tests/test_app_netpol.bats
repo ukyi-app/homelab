@@ -56,7 +56,7 @@ YAML
 }
 
 @test "guard fails on empty podSelector even when kind is quoted (kind: \"NetworkPolicy\")" {
-  # grep-a-4 — 프리필터가 리터럴 `^kind:[[:space:]]*NetworkPolicy`라 인용 표기 파일은 후보에서
+  # 프리필터가 리터럴 `^kind:[[:space:]]*NetworkPolicy`라 인용 표기 파일은 후보에서
   # 통째로 빠져 뒤의 yq 판정에 도달 못 했다(도달 못 하면 빈 podSelector도 초록). 합법 YAML이고
   # kustomize/ArgoCD는 정상 적용하므로 프리필터가 관용해야 한다(check-app-deploy.sh 표기와 동형).
   tmp="$(mktemp -d)"

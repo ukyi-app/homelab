@@ -61,7 +61,7 @@ const kind: "db" | "cache" = db ? "db" : "cache";
 // 받아들일 이유가 없으므로 fail-closed다(정책이 갈리면 그 자체가 우회 표면 — identity.ts 주석).
 const nameErr = resourceNameError(kind, name);
 if (nameErr) fail(nameErr);
-// 산출물 명명·배치는 레이아웃 커널 소유(cli-deepening 심화 4) — provision과 같은 값을 쓴다
+// 산출물 명명·배치는 레이아웃 커널 소유 — provision과 같은 값을 쓴다
 // (원장 행·엔트리 이름 추정 어긋남 F1 클래스의 구조적 소멸).
 const layout = kind === "db" ? layoutFor("db", name) : layoutFor("cache", name);
 const key = layout.tombstoneKey;

@@ -93,7 +93,7 @@ export function schemaErrors(val: unknown, sch: unknown, root: unknown, path = "
     if (t && !is[t]?.(v)) { errs.push(`${p}: ${t} 타입이어야 함`); return; }
     if (t === "string") {
       // pattern 위반은 속성의 description(있으면)을 덧붙인다 — MCP -32602가 "왜 거부됐고 무엇을 줘야 하는지"를
-      // 담게 하는 유일한 자리다(JSON Schema에는 커스텀 메시지가 없다 — 티켓 02: 틸드 경로 거부 + 안내 문구).
+      // 담게 하는 유일한 자리다(JSON Schema에는 커스텀 메시지가 없다 — 예: 틸드 경로 거부 + 안내 문구).
       if (s.pattern && !new RegExp(s.pattern).test(v)) errs.push(`${p}: 패턴 ${s.pattern} 불일치${typeof s.description === "string" && s.description !== "" ? ` — ${s.description}` : ""}`);
       if (s.minLength != null && v.length < s.minLength) errs.push(`${p}: 길이 < ${s.minLength}`);
     }

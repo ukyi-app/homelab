@@ -69,7 +69,7 @@ k3s 단일 노드(**Intel NUC15CRHU5 베어메탈** · Ubuntu 26.04 LTS · amd64
 
 | 경로 | 역할 |
 |---|---|
-| `infra/` | Terraform(cloudflare · tailscale · github) + `k3s-bootstrap/`(VM · k3s · 스토리지) |
+| `infra/` | Terraform(cloudflare · tailscale · github) + `k3s-bootstrap/`(호스트 설정 · k3s · 스토리지) |
 | `platform/` | ArgoCD가 싱크하는 GitOps 컴포넌트 (아래 표) |
 | `platform/charts/app` | 모든 앱이 쓰는 공유 Helm 차트 (SSOT) |
 | `apps/<name>/deploy/prod/` | 앱별 values + SealedSecret + 바인딩(`.bindings.json` / `source-repo`) |
@@ -103,13 +103,17 @@ make verify       # 기반 게이트: skeleton + 메모리 원장(conftest) + so
 make chart-test   # 공유 차트: 3 kind(web/worker/site) 렌더 + kubeconform + bats
 make tf-validate  # terraform fmt + validate (3 루트)
 make bootstrap    # 멱등 DR 진입점: ArgoCD + sops-age + root app
-make ci           # push 전 단일 진입점 — CI 'gate' job을 로컬에서 그대로 재현
+make ci           # push 전 단일 진입점 — CI 'gate' job 재현(차이는 policy/ci-parity.json에 계상)
 ```
 
 ## 더 보기
 
 - **[AGENTS.md](AGENTS.md)** — 디렉토리 지도, 명령, 컨벤션, 라이브에서 검증된 함정
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — 황금률(검증 우선 · 평문 시크릿 금지 · env는 경로에)
+- **[CONTEXT.md](CONTEXT.md)** — 도메인 용어집(언어의 SSOT — 코드·문서·리뷰가 같은 말을 쓴다)
+- `docs/traps.md`(enforced 원장) · `docs/traps-detail.md`(전문·근거 SSOT) — 라이브에서 검증된 함정
+- `docs/decisions/` — 채택한 아키텍처 결정(ADR-NNNN, append-only) · `docs/adr/` — 기각·유보 기록(번호 독립, 경로로 인용)
+- `docs/memory-ledger.md` — 메모리 예산 SSOT(limit 합계 상한, CI 강제)
 - `docs/runbooks/` — 운영 런북 (로컬 전용, **gitignored** — 신규 체크아웃엔 부재. 디스크 유실 대비 별도 백업)
 - `docs/runbooks-public/toolchain-setup.md` — 호스트 툴체인 최소 설치 가이드 (tracked — gitignored 런북 대체본)
 - `docs/runbooks-public/github-ruleset-verify.md` — bump-poll/** 예약 ruleset owner-local 라이브 강제 검증·롤백 (tracked)

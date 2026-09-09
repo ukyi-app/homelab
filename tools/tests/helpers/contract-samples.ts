@@ -1,6 +1,6 @@
 // 계약 테스트 표본 SSOT — test_homelab-cli.bats의 행렬 @test 두 개(허용/비허용 행렬 ·
-// exitCode 결합)가 같은 코퍼스를 소비한다(cli-deepening 심화 3 티켓 05: 축자 이중 사본 제거).
-// 키는 **전수 "verb|variant"**다 — verb 단위 폴백은 티켓 25에서 제거했다: 폴백이 있으면 한 동사의
+// exitCode 결합)가 같은 코퍼스를 소비한다(축자 이중 사본 제거).
+// 키는 **전수 "verb|variant"**다 — verb 단위 폴백은 제거했다: 폴백이 있으면 한 동사의
 // 여러 셀이 한 표본으로 통과해, variant→result 형상 결합(doctor의 fail 상/하한·status의 성공/오류
 // 분리)이 자기 증인 없이 초록으로 착지한다. 새 동사/variant 분기를 추가하면 여기 표본을 추가한다
 // (누락 = 소비 테스트가 fail-loud). 테스트 전용 헬퍼 — 런타임 코드가 import하지 않는다.

@@ -12,8 +12,6 @@ usage: vmalert-meta-gen.py <scenario> <rp_from> <rp_to> <step> <sup_step>
 
 ⚠️ 독립 파일인 이유: 셸 heredoc에 python을 내장하면 typecheck·lint 사각이 된다 —
    CONTRIBUTING.md 「새 코드 배치 규칙」의 명시적 금지. 형제 관용구 = vmalert-drift-gen.py.
-   (2026-09-01 이관 — 이 파일은 종전 vmalert-meta-firing-e2e.sh:100-157의 `cat > $GEN <<'PY'`
-    블록과 **바이트 동일한 산출물**을 내며, 10 시나리오 JSONL diff로 검증했다.)
 ⚠️ 미지 시나리오는 fail-closed다(SystemExit) — 오타가 다른 시나리오로 조용히 재생되면
    그 레그의 판정이 무측정이 된다.
 """
@@ -30,7 +28,7 @@ def grid(a, b, st): return list(range(a, b + 1, st))
 wd_end = rp_to if scenario != "stale" else rp_from - stale_t - 300
 series("ALERTS", {"alertname": "Watchdog", "alertstate": "firing", "severity": "none"},
        [(t, 1) for t in grid(rp_from - 2 * 3600, wd_end, step)])
-if scenario == "flap":       # activeAt이 창 안에서 flap_n+3회 갱신 — 임계 초과(마진 ≥2 — 리뷰 L2)
+if scenario == "flap":       # activeAt이 창 안에서 flap_n+3회 갱신 — 임계 초과(마진 ≥2)
     start = rp_to - flap_w + 600
     n = flap_n + 3
     pairs = []
@@ -51,7 +49,7 @@ elif scenario == "sup-quiet":    # 창 중간 4h 동안 0 — min이 0이라 침
     a = rp_from - sup_w - 600; hole_a = rp_to - sup_w // 2; hole_b = hole_a + 4 * 3600
     pairs = [(t, 0 if hole_a <= t <= hole_b else 1) for t in grid(a, rp_to, sup_step)]
     series("alertmanager_alerts", {"state": "suppressed", "namespace": "observability"}, pairs)
-elif scenario == "sup-short":    # 시리즈가 40분치뿐 + 내내 1 — 밀도 가드가 "24h 지속" 참칭을 막는다(리뷰 M3)
+elif scenario == "sup-short":    # 시리즈가 40분치뿐 + 내내 1 — 밀도 가드가 "24h 지속" 참칭을 막는다
     series("alertmanager_alerts", {"state": "suppressed", "namespace": "observability"},
            [(t, 1) for t in grid(rp_to - 2400, rp_to, sup_step)])
 elif scenario == "graf":         # 사용률 0.70(임계 초과) + 지문 1·하트비트(FingerprintLost 침묵 대조)
@@ -64,7 +62,7 @@ elif scenario == "graf-quiet":   # 사용률 0.50 — 침묵
     series("grafana_data_dir_size_bytes", {}, [(rp_from - 86400, v), (rp_from - 600, v)])
     series("grafana_du_fingerprint_matches", {}, [(rp_from - 86400, 1), (rp_from - 600, 1)])
     series("pvc_du_last_success_timestamp", {}, [(rp_from - 86400, rp_from - 86400), (rp_from - 600, rp_from - 600)])
-elif scenario == "fp-lost":      # 지문 0 + 하트비트 실재 — FingerprintLost 발화(리뷰 M8 레그)
+elif scenario == "fp-lost":      # 지문 0 + 하트비트 실재 — FingerprintLost 발화
     series("grafana_du_fingerprint_matches", {}, [(rp_from - 86400, 0), (rp_from - 600, 0)])
     series("pvc_du_last_success_timestamp", {}, [(rp_from - 86400, rp_from - 86400), (rp_from - 600, rp_from - 600)])
 elif scenario == "stale":

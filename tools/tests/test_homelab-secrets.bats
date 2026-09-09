@@ -20,7 +20,7 @@ setup() {
   KC="$BATS_TEST_TMPDIR/kubeconfig"
   echo "apiVersion: v1" > "$KC"
   make_app_repo_fixture myapp
-  # dispatch-only 사전 판정(티켓 30)의 전제 — $APPS_ROOT를 '온보딩된 homelab 워킹트리'로 만든다.
+  # dispatch-only 사전 판정의 전제 — $APPS_ROOT를 '온보딩된 homelab 워킹트리'로 만든다.
   # 이게 없으면 dispatch-only 경로가 '미온보딩'으로 거부돼 이 스위트의 재배선 레인이 전부 red다.
   make_app_fixture myapp
   # update-secrets 브랜치 PR(미머지) — pulls?head 케이스는 공유라 파일만 덮는다
@@ -101,7 +101,7 @@ run_secrets_in() {
 }
 
 @test "a precondition refusal renders seal as not-reached, never as executed (three-state sealSkipped)" {
-  # shell-5: 진입 게이트 거부는 chain={mode:"chain"}만 돌려주므로 sealSkipped가 undefined다 —
+  # 진입 게이트 거부는 chain={mode:"chain"}만 돌려주므로 sealSkipped가 undefined다 —
   # 2상 렌더는 그것을 false와 같이 취급해 seal이 돌지도 않았는데 "seal 실행"이라고 보고했다.
   # 사람용 채널(--json 없음)에서 stdout으로 확인한다.
   git -C "$APP_WORK" checkout -q -b feature/x
@@ -174,7 +174,7 @@ run_secrets_in() {
   [ "$(echo "$output" | jq -r '.result.error' | grep -c "push 경로")" = "0" ]
 }
 
-# ── 연쇄 거부 4레인(티켓 20) — staged-completeness '원형'의 자기 테스트 ────────────────────────
+# ── 연쇄 거부 4레인 — staged-completeness '원형'의 자기 테스트 ─────────────────────────────────
 # 손해 모델을 그대로 판정 조건에 옮긴다: foreign 가드가 막는 것은 '잡파일 커밋'이 아니라 **커밋·push가
 # 통째로 건너뛰어져 낡은 봉인본으로 디스패치되는 것**이다. 그래서 네 레인 공통 단언은
 # 「`gh workflow run` 원장 0건 + 원격 main rev-list 불변」이고, 원격 불변을 재려면 원격이 살아 있어야
@@ -316,13 +316,13 @@ run_secrets_in() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.chain.pushed')" = "true" ]
   [ "$(git -C "$APP_REMOTE" rev-list --count main)" = "3" ]
-  # 이름이 약속한 판정 — 엔진 variant가 no-op이 아니다(티켓 04: pushed=true면 no-op 금지).
+  # 이름이 약속한 판정 — 엔진 variant가 no-op이 아니다(pushed=true면 no-op 금지).
   [ "$(echo "$output" | jq -r '.variant')" = "success" ]
   [ "$(echo "$output" | jq -r '.result | has("pr")')" = "true" ]
 }
 
 @test "a pushed sealed secret can never be reported as no-op: PR listing fixed empty is a failure (exit 1), not exit 0" {
-  # 교차 증인(티켓 04): chain이 push했으면 kubeseal 비결정 암호문 = 바이트 변경 = 반드시 PR이다. PR 목록이
+  # 교차 증인: chain이 push했으면 kubeseal 비결정 암호문 = 바이트 변경 = 반드시 PR이다. PR 목록이
   # 계속 []이면(낡은 스냅샷·명명 드리프트) 그것은 no-op의 증거가 아니라 fail-loud 대상이다 — 현행은 no-op exit 0.
   printf '[]\n' > "$FIX/db-prs.json"
   run_secrets_in "$APP_WORK" --json
@@ -354,7 +354,7 @@ run_secrets_in() {
   [ "$(echo "$output" | jq -r '.variant')" = "no-op" ]
   [ "$(echo "$output" | jq -r '.result | has("pr")')" = "false" ]
   [ "$(echo "$output" | jq -r '.result.chain.pushed')" = "false" ]
-  # 사람용 렌더의 no-op·chain 분기(티켓 13) — sealSkipped=true·pushed=false가 문구로 실린다.
+  # 사람용 렌더의 no-op·chain 분기 — sealSkipped=true·pushed=false가 문구로 실린다.
   echo "$stderr" | grep -q "재봉인 생략(--no-seal)"
   echo "$stderr" | grep -q "커밋 없음"
   echo "$stderr" | grep -q "^결과: no-op$"
@@ -370,7 +370,7 @@ run_secrets_in() {
   [ "$(echo "$output" | jq -r '.result.applications[0].surfaceOk')" = "true" ]
   [ "$(echo "$output" | jq -r '.result.applications[0] | has("descendant")')" = "false" ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/contents/apps/myapp/deploy/prod/myapp-secrets.sealed.yaml?ref=main" --jq .sha)" -ge 1 ]
-  # 바닥값(티켓 01): 이 no-op 경로(mergeSha 없음)가 밟는 픽스처는 **멀티소스** 형상이다 — revisions[]만 있고
+  # 바닥값: 이 no-op 경로(mergeSha 없음)가 밟는 픽스처는 **멀티소스** 형상이다 — revisions[]만 있고
   # revision 키 부재. 단일소스로 되돌아가면 이 @test는 앱 레인의 실제 결함을 못 본다(수정 전 red의 자리).
   [ "$(jq -r '.status.sync | has("revisions") and (has("revision") | not)' "$FIX/argocd-app.json")" = "true" ]
   [ "$(echo "$output" | jq -r '.result.applications[0].revision')" = "abc1234" ]
@@ -425,7 +425,7 @@ run_secrets_in() {
 }
 
 @test "a non-fast-forward push reports the rejection reason, not git's 'To <url>' first line" {
-  # 티켓 08 — git push의 stderr는 1행이 `To <url>`(사유 아님)이고 거부 이유는 2행 ` ! [rejected] …`이다.
+  # git push의 stderr는 1행이 `To <url>`(사유 아님)이고 거부 이유는 2행 ` ! [rejected] …`이다.
   # 첫 줄만 자르던 규약이 gh(1행 완결)에는 맞지만 여기서만 틀렸다: 원격이 앞선 상태를 만든다.
   AHEAD="$BATS_TEST_TMPDIR/ahead"
   # bare의 HEAD는 init.defaultBranch 소유(CI 러너는 master) — 픽스처는 main만 push하므로 브랜치를 명시해야 venue 무관.
@@ -459,7 +459,7 @@ run_secrets_in() {
 @test "a remote main ahead of local HEAD is refused with a git pull prescription and no dispatch" {
   # 도달성 판정은 등식이라 누군가(예: Renovate PR 머지)가 원격 main을 앞서 밀면 수렴 경로인
   # --no-seal 재실행도 같은 자리에서 거부된다 — 로컬 pull 없이는 빠져나갈 수 없는데 종전 문구에는
-  # 그 처방이 없었다(appverbs-11). 등식 자체는 plan r1 a2의 fail-closed 결정이라 그대로 둔다.
+  # 그 처방이 없었다. 등식 자체는 fail-closed 결정이라 그대로 둔다.
   before="$(git -C "$APP_REMOTE" rev-list --count main)"
   git -C "$APP_WORK" commit -q --allow-empty -m "remote ahead"
   git -C "$APP_WORK" push -q "$APP_REMOTE" HEAD:refs/heads/main
@@ -477,7 +477,7 @@ run_secrets_in() {
 @test "dispatch-only refuses an app that is not onboarded in the local homelab tree, and passes when no such tree is found" {
   # dispatch-only는 '이미 push된 봉인본 재배선'인데, 그 앱이 아직 온보딩되지 않았으면 디스패처가
   # **run 안에서** '미온보딩 앱 — create-app 먼저'로 죽는다(update-secrets.ts) — 그 실패가
-  # homelab-mutation 직렬화 큐와 Telegram 실패 알림을 소비한다(appverbs-5). 판정 근거는 원격 API가
+  # homelab-mutation 직렬화 큐와 Telegram 실패 알림을 소비한다. 판정 근거는 원격 API가
   # 아니라 **로컬 워킹트리**다: GitHub contents는 낡은 스냅샷을 200으로 돌려주는 함정이 있고
   # (함정 원장) 로컬 파일에는 그 축이 없다.
   NOAPP="$BATS_TEST_TMPDIR/homelab-noapp"

@@ -2,7 +2,7 @@
 # bump-poll **호출부 계약** — 원격 변이(브랜치 push·PR 생성·auto-merge 무장)는 오직 tools/ensure-bump-pr.ts를
 # 통해서만.
 #
-# 왜 이 게이트가 필요한가(plan r2 R-4): ensure-bump-pr가 아무리 옳게 판정해도, 워크플로가 도구를
+# 왜 이 게이트가 필요한가: ensure-bump-pr가 아무리 옳게 판정해도, 워크플로가 도구를
 # 부르기 **전에** 스스로 push/create를 하면 프로덕션은 그대로 중복 PR을 낸다(도구만 GREEN). 순서·부작용
 # 계약을 프로덕션 호출부에 못 박아야 그 false-green이 닫힌다.
 #   ① `gh pr create` 직접 호출 0 — PR 생성은 도구가 관측(gh pr list + git ls-remote) 뒤에만 한다.
@@ -61,7 +61,7 @@ setup() {
   F="$ROOT/.github/workflows/bump-poll.yaml"
   SWEEPER="$ROOT/.github/workflows/pr-sweeper.yaml"
   EXECUTOR="$ROOT/tools/ensure-bump-pr.ts"
-  # 항목 러너 — bump 레인의 **호출부**가 여기로 옮겨왔다(F-1). 경계 금지(무장 플래그·직접 원격 변이)는
+  # 항목 러너 — bump 레인의 **호출부**가 여기로 옮겨왔다. 경계 금지(무장 플래그·직접 원격 변이)는
   # 워크플로만이 아니라 이 파일에도 걸린다: 금지를 워크플로에만 걸면 러너가 그 우회로가 된다.
   RUNNER="$ROOT/tools/run-bump-plan.ts"
   # 러너의 주석 제거 뷰(주석이 금지 토큰을 **설명**하므로 산문 오탐을 막는다 — CODE와 같은 이유).
@@ -423,7 +423,7 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
   fi
 }
 
-# ── ④ 순서 계약의 **이관**(F-1) ───────────────────────────────────────────────────────────────
+# ── ④ 순서 계약의 **이관** ────────────────────────────────────────────────────────────────────
 # 옛 증인은 bump 스텝 셸 본문에서 `git checkout -b` → `bump-tag` → `git commit` → `ensure-bump-pr`의
 # **줄 번호 순서**를 읽었다. 그 순서는 이제 러너 안의 순차 코드이고, 러너 스위트가 **실행으로** 증명한다:
 #   · commit이 ensure보다 앞선다 → "the commit the runner EFFECTIVELY makes…"(ensure 호출 시점의 HEAD가
@@ -551,7 +551,7 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
   }
 }
 
-# ⚠️ 이관됨(F-1) — "the two lanes reach the executor with their own --action (hermetic run of the real
+# ⚠️ 이관됨 — "the two lanes reach the executor with their own --action (hermetic run of the real
 #    bump step)": 워크플로 셸 본문을 stub 아래 돌려 앱별 --action을 단언하던 증인이다. 레인을 나르는
 #    코드가 러너로 옮겨갔으므로 그 실행 증인도 러너 스위트로 갔다 —
 #    `tools/tests/test_run-bump-plan.bats`의 "each item commits its own writePath+digest-exporter with
@@ -748,7 +748,7 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
   }
 }
 
-# ── R-38/R-39 항목 격리의 **이관**(F-1) ─────────────────────────────────────────────────────
+# ── R-38/R-39 항목 격리의 **이관** ──────────────────────────────────────────────────────────
 # 여기 있던 것: 실제 git repo를 만들어 추출한 bump 스텝을 돌리고, (a) 태그 갱신 **쓰기 후** 실패와
 # (b) `git add` **후** 실패(=commit 실패)를 주입해 **다음 항목의 커밋에 앞 항목 경로가 0**임을 단언하던
 # 증인 + 그 격리가 `git checkout -f main` 정리 **덕분**임을 재현하던 이빨 증인.
@@ -973,7 +973,7 @@ step_out() { echo "--- 스텝 출력 ---"; cat "$BATS_TEST_TMPDIR/step.out"; }
   [ "$status" -eq 0 ]
 }
 
-# ⚠️ 이관됨(F-1) — "the commit the workflow EFFECTIVELY makes carries the identity and message the
+# ⚠️ 이관됨 — "the commit the workflow EFFECTIVELY makes carries the identity and message the
 #    executor proves ownership with" + 그 이빨 증인("a later git config override and a --amend both flip
 #    it RED"). 커밋을 만드는 코드가 러너로 옮겨갔으므로 계약도 함께 갔다:
 #    `tools/tests/test_run-bump-plan.bats`의 "the commit the runner EFFECTIVELY makes…"가 같은 파생

@@ -21,10 +21,9 @@ ArgoCD appset(`platform/argocd/root/appset.yaml`)이 `apps/*/deploy/prod`를 싱
 CronJob 등이 참조하는 빌드-전용 이미지(예: `pg-tools`)는 **`ops/<name>/`**(Dockerfile만, `deploy/` 없음 — GHCR로
 이미지만 발행). `apps/`는 ArgoCD가 워크로드로 싱크하는 배포 앱 전용이다. `build.yaml`은 `ops/**`만 빌드한다.
 
-> 현재 인레포 배포 앱 **0개** — `page`는 2026-09-08 재온보딩(#691) 뒤 같은 날 철거 드릴(#698)로 다시 철거됐다
-> (`page`·`trip-mate-api`는 2026-08-12에도 철거됐었다). 앱 개수 바닥값 5곳(`check-app-deploy` · `check-app-netpol:manifests` ·
-> `check-image-pins:apps` · `audit-orphans` registry·apps)은 #693에서 1로 올렸다가 #698에서 0으로 되돌렸다 —
-> **앱을 다시 온보딩하면 1로 올릴 것**(각 소스의 주석에 표시).
+> 현재 인레포 배포 앱 **0개** — `page`는 2026-09-08 재온보딩(#691) 뒤 같은 날 철거 드릴(#698)로 다시 철거됐다.
+> 앱 개수 바닥값 5곳(`check-app-deploy` · `check-app-netpol:manifests` · `check-image-pins:apps` ·
+> `audit-orphans` registry·apps)은 그 수(0)에 맞춰져 있다 — **앱을 다시 온보딩하면 1로 올릴 것**(각 소스의 주석에 표시).
 >
 > **앱 개수가 0↔1을 넘을 때의 손 단계**(2026-09-08 온보딩 드릴 #691에서 실측, 철거 드릴 #698에서 역방향 재실측 — 디스패처가 하지 않는 것만):
 > 1. `tools/vendored-contract.json` `targets`에 그 앱의 동봉 계약 사본 2행(`tools/seal-secret.mts`·`tools/sealed-secrets-cert.pem`) 추가/제거 — `_roster` 등식이 create-app PR gate에서 red로 알려준다.
@@ -32,4 +31,4 @@ CronJob 등이 참조하는 빌드-전용 이미지(예: `pg-tools`)는 **`ops/<
 > 3. 위 바닥값 5곳 1↔0.
 > 4. `apps/<app>/deploy/prod/values.yaml` `envFrom`에 conn secretRef 손 배선(create-app PR 안에서 해도 된다). ⚠️ 이 파일은 도구 소유라
 >    **손 주석은 다음 라운드트립(update-secrets·bump)에서 사라지고 그 자체가 PR 1건이 된다** — 주석은 파일 상단이 아니라 이 README에 둔다.
-> (`db create`의 pgdump 헤지 DBS 등록은 #692부터 자동이다.)
+> (`db create`의 pgdump 헤지 DBS 등록은 자동이라 손 단계가 아니다.)

@@ -4,7 +4,7 @@
 //   update-secrets 디스패치. 선행 조건(remote=canonical ukyi-app/<app> · 브랜치 main · 클린 트리 ·
 //   seal 후 봉인본 외 변경 없음 · push 후 도달성) 중 하나라도 실패면 **디스패치 없이** 거부한다.
 //   디스패처는 앱 레포 main HEAD의 봉인본을 읽으므로, 도달하지 않은 커밋으로 디스패치하면 낡은
-//   봉인본이 배선된다(plan r1 a2).
+//   봉인본이 배선된다.
 //   밖(마커 없음 — homelab 디렉토리 등): 디스패치만(이미 push된 봉인본 재배선).
 //   마커는 있는데 remote가 canonical이 아니면 fail-closed 거부 — "앱 레포처럼 보이는 다른 레포"에서
 //   엉뚱한 앱 이름으로 디스패치하는 사고를 막는다.
@@ -24,7 +24,7 @@ import { OWNER } from "./platform.ts";
 // 재실행 수렴 경로. kubeseal은 같은 평문도 매번 다른 암호문을 내므로(랜덤 세션 키) "재봉인 후
 // 동일성 비교"로는 수렴에 도달할 수 없다 — 재봉인은 언제나 새 커밋·새 PR·파드 롤링이다.
 // cwd: 앱 레포 경로를 명시 입력으로(CLI는 미설정 → process.cwd(), MCP는 stdio 서버라 cwd 추론
-// 불가하므로 repoPath를 명시로 받는다 — plan r1 b7). runAppSecrets의 cwd 인자로 흐른다.
+// 불가하므로 repoPath를 명시로 받는다). runAppSecrets의 cwd 인자로 흐른다.
 export type AppSecretsInput = WaitInput & { app: string; noSeal?: boolean; cwd?: string };
 
 // 입력 검증 술어 — CLI(usage exit 2)·MCP(invalid params)가 공유.
@@ -64,7 +64,7 @@ function runChain(cwd: string, app: string, noSeal: boolean): ChainResult {
     // seal 위임 — 벤더 도구 계약(tools/README.md seal-secret.mts 절): --config --env 필수, --app 명시.
     // .env는 도구 안에서만 kubeseal stdin으로 흐른다(이 엔진은 .env를 읽지 않는다).
     if (!existsSync(`${cwd}/${SEAL_TOOL}`)) return refuse(`${SEAL_TOOL} 부재 — 앱 레포에 벤더된 봉인 도구가 없다(템플릿 계약 드리프트)`);
-    // seam 경유(d6④) — 종전 stdio(stdout ignore·stderr inherit)는 캡처 후 stderr만 흘리는 것으로
+    // seam 경유 — 종전 stdio(stdout ignore·stderr inherit)는 캡처 후 stderr만 흘리는 것으로
     // 등가다(.env 평문은 벤더 도구 안에서만 흐르고 이 엔진의 캡처·원장 어디에도 실리지 않는다).
     const sealed = sh(process.execPath, [SEAL_TOOL, "--config", APP_MARKER, "--env", ".env", "--app", app], { cwd, timeoutMs: 0 });
     if (sealed.err) process.stderr.write(sealed.err + "\n");
@@ -98,8 +98,8 @@ function runChain(cwd: string, app: string, noSeal: boolean): ChainResult {
     // timeoutMs: 0 — push는 망 왕복이라 seam 기본 30s가 끊을 수 있다(init의 같은 자리와 동일 어휘).
     const push = git(cwd, ["push", "-q", "origin", "HEAD:refs/heads/main"], { timeoutMs: 0 });
     // 사유 선택은 seam의 pushReason 소유 — git push stderr의 1행은 `To <url>`(사유 아님)이라
-    // 첫 줄 자르기는 거부 이유(` ! [rejected] … (fetch first)`)를 통째로 지운다(exec-3 실측).
-    // 자격 helper 부재 계열이면 다음 행동(`gh auth setup-git`)까지 그 헬퍼가 붙인다(티켓 27).
+    // 첫 줄 자르기는 거부 이유(` ! [rejected] … (fetch first)`)를 통째로 지운다(실측).
+    // 자격 helper 부재 계열이면 다음 행동(`gh auth setup-git`)까지 그 헬퍼가 붙인다.
     // 시그널 사망(stderr 빈 문자열)의 폴백도 여기서 고른다 — 빈 사유는 오진을 만든다.
     if (!push.ok) return refuse(`git push 실패 — ${pushReason(push.err) || `git push 비-0(exit ${push.status ?? "?"}${push.signal ? `, ${push.signal}` : ""})`}`);
     chain.pushed = true;
@@ -112,10 +112,10 @@ function runChain(cwd: string, app: string, noSeal: boolean): ChainResult {
   const remote = git(cwd, ["ls-remote", "--heads", "origin", "main"]);
   if (!head.ok || !remote.ok) return refuse("원격 main 도달성 확인 실패(ls-remote)");
   const remoteSha = remote.out.split(/\s+/)[0] ?? "";
-  // 등식 판정은 plan r1 a2의 fail-closed 결정이라 유지한다. 다만 문구에 처방을 **조건 없이**
+  // 등식 판정은 fail-closed 결정이라 유지한다. 다만 문구에 처방을 **조건 없이**
   // 덧붙인다: 누군가(예: Renovate PR 머지)가 원격 main을 앞서 밀면 수렴 경로인 재디스패치
   // (no-seal)도 같은 등식에서 다시 거부되는데, 로컬을 앞세우지 않으면 빠져나갈 길이 없다
-  // (appverbs-11). 앞선 쪽을 판별하는 분기는 두지 않는다 — 같은 처방이 양쪽에 유효하다.
+  // 앞선 쪽을 판별하는 분기는 두지 않는다 — 같은 처방이 양쪽에 유효하다.
   if (remoteSha === "" || remoteSha !== head.out.trim()) return refuse(`원격 main(${remoteSha.slice(0, 7) || "없음"})이 로컬 HEAD(${head.out.trim().slice(0, 7)})와 다르다 — 도달성 미증명. \`git pull --ff-only\` 후 재실행하라(재봉인 없이 재디스패치만 하려면 no-seal 모드)`);
   chain.headSha = head.out.trim();
   return { ok: true, chain };
@@ -125,7 +125,7 @@ export function runAppSecrets(input: AppSecretsInput, cwd = process.cwd()): Muta
   const app = input.app;
   let chain: Chain;
 
-  // 명시 cwd(MCP repoPath)는 fail-closed다(homelab-cli-r2 티켓 02 — owner 결정 2026-09-07): 존재하지 않거나 앱 레포가
+  // 명시 cwd(MCP repoPath)는 fail-closed다(owner 결정 2026-09-07): 존재하지 않거나 앱 레포가
   // 아닌 명시 경로는 '레포 밖(dispatch-only)'이 아니라 **거부**다. 에이전트가 "새 .env를 봉인해 배선하라"고 부른
   // 호출이 옛 봉인본 재배선 success(chain.mode=dispatch-only)로 돌아오던 fail-open을 막는다. dispatch-only 폴백은
   // CLI 암묵 cwd(input.cwd 부재 — 사람이 homelab 디렉토리에서 재배선) 전용으로 남고, 결과 스키마 enum은 유지된다.
@@ -167,9 +167,9 @@ export function runAppSecrets(input: AppSecretsInput, cwd = process.cwd()): Muta
     if (!r.ok) return { variant: "failure", omitted: [], result: compact({ action: "update-secrets", name: app, chain: r.chain, error: r.error }) };
     chain = r.chain;
   } else {
-    // dispatch-only — 이미 push된 봉인본 재배선. 여기서 **미온보딩**을 사전 판정한다(티켓 30):
+    // dispatch-only — 이미 push된 봉인본 재배선. 여기서 **미온보딩**을 사전 판정한다:
     // 디스패처(update-secrets.ts)는 run 안에서야 '미온보딩 앱 — create-app 먼저'로 죽는데, 그
-    // 실패가 homelab-mutation 직렬화 큐와 Telegram 실패 알림을 소비한다(appverbs-5).
+    // 실패가 homelab-mutation 직렬화 큐와 Telegram 실패 알림을 소비한다.
     // 판정 근거는 **로컬 homelab 워킹트리**다(원격 contents API가 아니라 — 낡은 스냅샷 200 함정).
     // 워킹트리 후보는 cwd의 git toplevel, 없으면 cwd 자신이다. 못 찾으면 통과(fail-open).
     const pf = onboardedPreflight(app, toplevel ?? cwd);
@@ -183,7 +183,7 @@ export function runAppSecrets(input: AppSecretsInput, cwd = process.cwd()): Muta
     dispatchInputs: [["app", app]],
     resultBase: { action: lane.action, name: app, chain },
     noopOnMissingPr: true, // 동일 봉인본 = PR 없는 멱등 no-op run(pr-first-commit)
-    // 교차 증인(티켓 04): chain이 push했으면 봉인본 바이트가 바뀐 것이고(kubeseal 비결정 암호문 — 위 noSeal
+    // 교차 증인: chain이 push했으면 봉인본 바이트가 바뀐 것이고(kubeseal 비결정 암호문 — 위 noSeal
     // 주석), 디스패처는 반드시 PR을 낸다. 그때 PR 0건은 no-op이 아니라 fail-loud다. 엔진은 chain 스키마를
     // 모르므로 여기서 계산해 명시 필드로 넘긴다. --no-seal(pushed=false)·dispatch-only(pushed 부재)는 no-op 허용.
     noopForbidden: chain.pushed === true,

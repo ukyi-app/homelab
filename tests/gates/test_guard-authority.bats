@@ -9,7 +9,7 @@
 # 단언하면 전건 통과라 죽은 가드가 된다(PROGRESS.md 규율: 새 규칙마다 mutation으로 load-bearing 실측).
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 
-# ⚠️ **피연산자 실재 증인**(선례: operand-witness 01·05). `run bun "$TOOL"`은 도구가 없으면 rc 1로
+# ⚠️ **피연산자 실재 증인**(선례: 형제 게이트들). `run bun "$TOOL"`은 도구가 없으면 rc 1로
 #    죽는데 그 rc는 도구의 **정상 거부**와 같은 값이고, 빈 출력은 "보고하지 않았다"는 부재 단언까지
 #    함께 만족시킨다. 실측 2026-09-03(`tools/check-guard-authority.ts`를 지운 격리 트리): 21건 중
 #    「a guard invoked by the ci gate is not reported」·「a scheduled workflow is an authoritative
@@ -72,7 +72,7 @@ run_tool() { run bun "$TOOL" --repo-root "$FIX" --floor guards=3 "$@"; }
 }
 
 @test "overlapping venues pass — authoritative>=1 plus N non-authoritative is not double ownership" {
-  # 초안 모델이 `count == 1`이었다면 check-real(gate + make verify)이 이중소유 오탐이었다(design-r1 R-2).
+  # 초안 모델이 `count == 1`이었다면 check-real(gate + make verify)이 이중소유 오탐이었다.
   # 비권위 경로를 더 늘려도 판정이 바뀌지 않아야 한다.
   printf 'verify: ## mirror\n\t@bash scripts/check-real.sh\n\nci: ## mirror2\n\t@bash scripts/check-real.sh\n' > "$FIX/Makefile"
   rm "$FIX/scripts/check-mirrored.sh" "$FIX/scripts/check-orphan.sh"
@@ -146,7 +146,7 @@ YAML
   echo "$output" | grep -q "scripts/check-orphan.sh"
 }
 
-# ── grep-c-3(감사 6라운드): `if:`/`continue-on-error:`를 무시하면 죽은 스텝도 권위다 ──────────────────
+# ── `if:`/`continue-on-error:`를 무시하면 죽은 스텝도 권위다 ──────────────────────────────────────
 # stepTexts는 스텝의 존재만 세고 `if`·`continue-on-error`를 안 봐서, gate 스텝에 `if: false`(또는 job
 # 전체에 `if: false`) 한 줄이면 CI에서 그 스텝이 영원히 안 돌아도 세 SCAN·rc가 전부 그대로였다
 # (실측 2026-09-05, 격리 fixture: check-real.sh만 부르는 스텝을 `if: false`로 막아도 orphan 목록에
@@ -208,7 +208,7 @@ YAML
   echo "$output" | grep -q "scripts/check-real.sh"
 }
 
-# 감사 12라운드 77 reg-a3-tools-infra-1: ①(gate venue)은 liveGateSteps로 if:false 스텝을 걸러
+# ①(gate venue)은 liveGateSteps로 if:false 스텝을 걸러
 # workflowText에 push하지만, ④(make 타깃 권위 계산)는 ci.yaml을 원문으로 재스캔해 그 필터를
 # 무력화한다 — if:false 스텝이 `run: make <target>`이면 그 타깃의 recipe가 부르는 가드가
 # 여전히 권위(authoritative)로 승격된다. 위 154행 레인과 대조하면 차이는 오직 간접(make 타깃 경유)뿐.
@@ -244,7 +244,7 @@ YAML
   done
 }
 
-# 반대 갈래 — skip 신호 규약(티켓 01)을 쓰는 가드를 부르는 make 타깃은 권위다. 그 마커가
+# 반대 갈래 — skip 신호 규약을 쓰는 가드를 부르는 make 타깃은 권위다. 그 마커가
 # "이 도메인은 CI에 없을 수 있다"는 선언이고, 그때 owner-local 엔트리포인트가 유일한 권위이기 때문.
 @test "a make target invoking a SKIP-convention guard is authoritative (owner-local)" {
   printf '#!/usr/bin/env bash\necho "SKIP: mirrored: 도메인 없음"; exit 4\n' > "$FIX/scripts/check-mirrored.sh"
@@ -256,8 +256,8 @@ YAML
 }
 
 @test "a make target invoking a guard_skip-routed guard is authoritative (helper era)" {
-  # 07 이관 후 콜사이트에는 emission이 없다 — 헬퍼 호출 자체가 skip 규약 사용의 증거다(티켓 11,
-  # 02에서 오탐 때문에 연기했던 확장). 이 인식이 없으면 헬퍼 경유 가드의 owner-local 권위가 죽는다.
+  # 헬퍼 이관 후 콜사이트에는 emission이 없다 — 헬퍼 호출 자체가 skip 규약 사용의 증거다(오탐
+  # 때문에 연기했던 확장). 이 인식이 없으면 헬퍼 경유 가드의 owner-local 권위가 죽는다.
   # ⚠️ 호출 행은 실 트리 형태(verify-runbook-index.sh:15)를 그대로 밟는다 — `${#files[@]}`의 `#`이
   # guard_skip **앞**에 있어, 주석-제외를 행 전역 문자클래스로 쓰면 이 행이 통째로 미탐이 된다(실측).
   printf '#!/usr/bin/env bash\n. scripts/lib/guard.sh\nguard_init check-mirrored\nfiles=()\nif [ ${#files[@]} -eq 0 ]; then guard_skip check-mirrored "도메인 없음"; fi\n' > "$FIX/scripts/check-mirrored.sh"
@@ -361,7 +361,7 @@ YAML
   echo "$output" | grep -q "전건 권위 경로 ≥1"
 }
 
-# ── 스캔 커널 이행 (티켓 02) ───────────────────────────────────────────────────
+# ── 스캔 커널 이행 ─────────────────────────────────────────────────────────────
 # 바닥값 주입이 raw 문자열을 Number() **앞에서** 판정해야 한다. `Number("")===0`이고
 # `n < NaN`은 항상 false라, coercion 뒤에 검증하면 오타 하나가 바닥값을 조용히 끈다.
 

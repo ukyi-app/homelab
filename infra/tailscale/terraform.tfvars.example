@@ -17,9 +17,8 @@
 
 # tailnet 전역 nameserver로 광고할 주소 = AdGuard가 :53에 서빙하는 노드의 Tailscale IP.
 # **NUC**의 IP를 넣는다 (`tailscale ip -4`로 확인).
-# ⚠️ 정정 2026-08-19: 이전 판은 "AdGuard :53은 servicelb→VM→OrbStack을 거쳐 Mac mini 호스트로
-#    매핑되므로 'Mac mini의 Tailscale IP'를 넣는다"고 적고 있었다 — 컷오버로 그 경로는 소멸했고
-#    대상은 NUC이다. 맥미니 IP를 넣으면 tailnet 전역 DNS가 죽은 기계를 가리켜 tailscale을 켠
-#    **모든 기기**의 이름해석이 끊긴다(acl.tf에 폴백 없음). 같은 값이 CI 시크릿
-#    TF_TAILSCALE_DNS_NAMESERVER_IP에도 들어가며, 어긋나면 30분마다 허위 드리프트가 뜬다.
+# ⚠️ Mac mini IP를 넣으면 안 된다 — 2026-08-18 컷오버로 그 경로는 소멸했고 대상은 NUC이다.
+#    잘못된 IP를 넣으면 tailnet 전역 DNS가 죽은 기계를 가리켜 tailscale을 켠 **모든 기기**의
+#    이름해석이 끊긴다(acl.tf에 폴백 없음). 같은 값이 CI 시크릿 TF_TAILSCALE_DNS_NAMESERVER_IP에도
+#    들어가며, 어긋나면 30분마다 허위 드리프트가 뜬다.
 dns_nameserver_tailscale_ip = "100.x.y.z"

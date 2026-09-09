@@ -44,7 +44,7 @@ platform_triplet() {
 
 @test "the repo owner is derived once: no consumer re-splits HOMELAB_REPO (SSOT comment enforced)" {
   # platform.ts:6 주석이 '소비자가 각자 split하면 파생 지점이 갈린다'고 금지한 형태를 실제로 못 박는다
-  # (티켓 26 arch-4 — 엔진 셋 중 하나만 규약 밖이었다). 양성 대조: 같은 술어가 SSOT에서는 매치한다.
+  # (엔진 셋 중 하나만 규약 밖이었다). 양성 대조: 같은 술어가 SSOT에서는 매치한다.
   [ "$(grep -c 'HOMELAB_REPO.split' tools/lib/platform.ts)" = "1" ]
   scan=()
   for f in tools/*.ts tools/lib/*.ts; do

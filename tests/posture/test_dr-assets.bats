@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # DR 자산 신선도 posture — 라이브 전용 검증 3종을 한 자리에서 판정한다(owner-local `make verify-posture`).
-# 2026-09-03 감사 2라운드 실측: 세 검증이 전부 owner 수동 호출뿐이라 21일간 (1) committed cert가 라이브
+# 2026-09-03 실측: 세 검증이 전부 owner 수동 호출뿐이라 21일간 (1) committed cert가 라이브
 # active cert와 불일치(secret-cert-check STALE → seal-batch가 `make seal-*` 전부 차단) (2) sealing key 백업이
 # 라이브 키 셋보다 오래됨(dr-drill [0.6] abort · 재구축 직후 컨트롤러가 만든 active 키는 무백업) (3) 런북
 # tarball 백업이 편집보다 오래됨 — 아무 신호도 없었다. 판정처가 하나도 없어 "돌린 적 없는 검증"이 됐던 자리다.

@@ -61,7 +61,7 @@ data:
             annotations:
               summary: "파드 eviction: {{ $labels.namespace }}/{{ $labels.pod }}"
               description: "노드 압박으로 파드가 축출됐습니다 — 원인 자원(디스크/메모리)을 확인하세요. hostPath PV 포화 가능. 이 알림은 **축출 이벤트 기준**이라 2시간 뒤 자동 해소됩니다(고쳤다는 뜻이 아니라 '최근 축출이 아니다'라는 뜻입니다 — 축출된 파드 오브젝트는 지울 때까지 남습니다)."
-          # ⚠️ 좌변의 max by(...) 서브쿼리는 필수다(instance 라벨 불안정 — PodCrashLooping :111과 동일 계열).
+          # ⚠️ 좌변의 max by(...) 서브쿼리는 필수다(instance 라벨 불안정 — 아래 PodCrashLooping의 max by 서브쿼리 처리와 동일 계열).
           # kube_pod_container_status_restarts_total은 KSM이 k8s API restartCount에서 재파생하는 상태-파생
           # 카운터라 KSM 프로세스 재시작에도 값이 0으로 리셋되지 않는다. KSM 파드 IP가 바뀌면(instance 라벨)
           # 시계열 정체성이 갈려 VM increase()가 새 시계열 첫 샘플(=누적 재시작수)을 "0에서 증가"로 오독한다.
@@ -261,7 +261,7 @@ data:
               summary: "vmalert 룰/알림 전송 에러"
               description: "vmalert가 룰 평가 또는 Alertmanager 전송에 실패합니다 — 알림 파이프라인 자체가 손상됐을 수 있습니다."
           # 일반 Job 실패 백스톱 — 전용 staleness 알림이 없는 Job(예: files ns Job)의 실패를 잡는다.
-          # 블랙리스트(시스템 ns만 제외) — 화이트리스트는 신규 ns(files 등)를 흘렸다(PodCrashLooping :108과 동일 회귀).
+          # 블랙리스트(시스템 ns만 제외) — 화이트리스트는 신규 ns(files 등)를 흘렸다(PodCrashLooping의 블랙리스트 회귀와 동일).
           # honor_labels(#20)로 kube_job_* namespace가 실제값이라 블랙리스트가 모든 워크로드 ns를 자동 포함한다.
           # 백업 CronJob류(전용 staleness 보유)는 job_name으로 제외(화이트리스트 회귀 금지).
           # ★★ `unless` 절이 없으면 이 룰은 **해소된 과거 실패를 영구히** 발화한다(라이브 2026-07-26~30).
@@ -371,7 +371,7 @@ data:
               description: "최근 2시간 안에 **실패했다가 복구된** 실행이 2회 이상입니다 — 매번 다음 주기에 되살아나더라도 자주 깨지고 있습니다. KubeJobFailed는 실패마다 후속 성공에 억제되므로 이 상태를 원리적으로 볼 수 없습니다(주기가 그 룰의 for:보다 짧을 때). 실패 원인이 간헐적 의존성(DNS·네트워크·레지스트리)인지 확인하세요. 관측 창은 해당 CronJob의 failedJobsHistoryLimit이며, 그 값이 2 미만이면 이 알림은 그 워크로드를 볼 수 없습니다."
           # 워크로드-불가용(NotReady) — Deployment Available=False. 구독 라벨 없는 플랫폼 컴포넌트
           # (files·adguard·homepage)의 1차 실패모드(재시작 없는 NotReady)는 PodCrashLooping·TargetDown·
-          # ArgoCD on-health-degraded 어디에도 안 잡히던 공백(M13). Available 조건은 KSM이 Deployment에만
+          # ArgoCD on-health-degraded 어디에도 안 잡히던 공백. Available 조건은 KSM이 Deployment에만
           # 노출하고 honor_labels로 namespace가 실제값 → 시스템 ns 블랙리스트로 전 워크로드 커버.
           # status="false"==1이 not-available(condition×status 매트릭스). files /readyz 저하(스토리지)도 여기서 페이징.
           - alert: WorkloadUnavailable

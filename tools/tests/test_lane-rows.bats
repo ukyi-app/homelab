@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 변이 레인 신원 행(tools/lib/catalog-rows.ts) — 순수 기술자 계약(cli-deepening 심화 2).
+# 변이 레인 신원 행(tools/lib/catalog-rows.ts) — 순수 기술자 계약.
 # 행에서 생성(fillLanePattern/laneSpec)과 파싱(laneBranchTail/isDispatchLaneBranch)이 함께
 # 파생되므로, 왕복 불변식과 손 핀 리터럴 앵커를 이 표면 하나에서 단언한다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과 함정. @test 이름은 영어(인코딩 함정).
@@ -46,7 +46,7 @@ run_verb() {
     "$BUN" tools/homelab.ts "$@" --poll-ms 10 --deadline-ms 300 --json
 }
 
-# 같은 실행을 **다른 cwd**에서 — dispatch-only `app secrets`의 온보딩 사전 판정(티켓 30)이 cwd의
+# 같은 실행을 **다른 cwd**에서 — dispatch-only `app secrets`의 온보딩 사전 판정이 cwd의
 # git toplevel(없으면 cwd)을 앵커로 쓰기 때문이다. `env -C`는 이 캠페인의 이식성 규약상 금지라
 # `bash -c 'cd …'` 관용구를 쓰고, homelab.ts는 절대경로로 지목한다(cd 뒤 상대경로는 깨진다).
 run_verb_in() {
@@ -82,7 +82,7 @@ run_verb_in() {
 }
 
 @test "the parse-only bump-poll lane is retired (parseBranch is the only branch-grammar SSOT)" {
-  # 티켓 18 — status.ts가 parseBranch(SSOT)로 이행한 뒤 이 행의 실 소비자는 자기 테스트뿐이었다.
+  # status.ts가 parseBranch(SSOT)로 이행한 뒤 이 행의 실 소비자는 자기 테스트뿐이었다.
   # 낡은 문법(bump-poll/{key}-{tag} — 08의 kind 인코딩과 어긋남)을 선언한 행이 남으면 두 번째
   # 진실이다: export 부재를 못박는다. 형제 오귀속 가치는 test_bump-plan.bats로 이관됐다.
   run bun -e '
@@ -154,7 +154,7 @@ run_verb_in() {
   # 생성 방향 사본(문자열 템플릿)과 파싱 방향 사본(하드코딩 접두)이 소비자에서 소멸했는지 —
   # bats 원장 단언의 리터럴은 독립 앵커라 여기서 세지 않는다(tools/tests/ 제외).
   # 부정 단언은 grep -c=0 관용구 — rc 기반(-ne 0)은 grep 오류(rc=2)도 통과시키는 vacuous green.
-  # untouched-e-3(5라운드) — 원 UNION은 모든 대안이 슬래시 뒤 `\$`만 요구해 `${…}` 보간형(생성
+  # 원 UNION은 모든 대안이 슬래시 뒤 `\$`만 요구해 `${…}` 보간형(생성
   # 방향) 한 형태만 물었다. 주석이 약속한 파싱 방향 사본(하드코딩 접두 `startsWith("create-app/")`)
   # ·행 데이터 사본(`"create-app/{key}-{runId}"`)은 판정 밖이었다(status.ts에 두 줄 추가해도 8/8
   # 그대로 통과, 무증인 재현). 표기 3종(`$`·`{`·`"`)으로 넓힌다 — teardown만 구분자가 `-`라 별도 대안.
@@ -191,7 +191,7 @@ run_verb_in() {
 }
 
 @test "the CLI dispatch argv keys equal the lane row inputs plus correlation for all five lanes" {
-  # 티켓 26 — 디스패치 키는 verbs.ts·secrets.ts의 **손 리터럴**이고(행에서 파생되는 것은
+  # 디스패치 키는 verbs.ts·secrets.ts의 **손 리터럴**이고(행에서 파생되는 것은
   # DB_CHECKBOX_EXTS뿐) 행↔YAML·행↔CONTRACT 가드 체인 어디에도 CLI argv가 없다. 그래서
   # `maxmemory_mi`→`maxmemory` 개명을 YAML·행·가드·CONTRACT까지 일관되게 반영해도 CLI만 낡은
   # 키로 남고, 검출은 라이브 `gh workflow run`의 입력 거부뿐이었다. 이 @test가 그 마지막 변을 잇는다.
@@ -206,7 +206,7 @@ run_verb_in() {
   run_verb app create myapp
   [ "$status" -eq 0 ]
   # app secrets는 앱 마커 부재 트리에서 도는 dispatch-only 모드다 — 연쇄 없이 디스패치만. 단
-  # 티켓 30의 사전 판정이 "그 트리에 앱이 온보딩돼 있는가"를 먼저 묻는다(cwd 앵커) — 이 레포의
+  # 사전 판정이 "그 트리에 앱이 온보딩돼 있는가"를 먼저 묻는다(cwd 앵커) — 이 레포의
   # `apps/`에는 myapp이 없어 여기서 돌리면 디스패치 전에 거부된다. 그래서 $APPS_ROOT를
   # 온보딩된 워킹트리로 세워 그쪽에서 돈다(형제 스위트 test_homelab-secrets.bats와 같은 규약).
   make_app_fixture myapp

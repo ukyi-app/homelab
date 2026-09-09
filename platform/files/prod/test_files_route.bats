@@ -30,8 +30,8 @@ P="$BATS_TEST_DIRNAME/httproute-public.yaml"
   #    붙여도(write/admin API 인터넷 노출) 무증인이었다(뮤테이션 A 실측: 33 ok/0 not ok).
   run yq '[.spec.rules[].backendRefs[] | .name + ":" + (.port|tostring)] | sort | join(",")' "$P"
   [ "$output" = "files-public:8081" ] || { echo "공개 백엔드 집합=$output"; false; }
-  # ⚠️ filters 축 상한(감사 6라운드 httproute-1 형제, argocd/extras/test_argocd_extras.bats:a759d33
-  #    형태) — 경로/백엔드 집합은 URLRewrite(ReplacePrefixMatch /)를 못 잡는다(매치 경로는 그대로다).
+  # ⚠️ filters 축 상한(형제 관용구: argocd/extras/test_argocd_extras.bats) — 경로/백엔드 집합은
+  #    URLRewrite(ReplacePrefixMatch /)를 못 잡는다(매치 경로는 그대로다).
   #    rule-level과 backendRef-level 둘 다 센다.
   run yq '[.spec.rules[] | ((.filters // [{"type":"NONE"}])[] , (.backendRefs[]? | (.filters // [])[])) | .type] | sort | join(",")' "$P"
   [ "$output" = "NONE" ] || { echo "공개 filters 집합=$output"; false; }
@@ -40,7 +40,7 @@ P="$BATS_TEST_DIRNAME/httproute-public.yaml"
 @test "PUBLIC BOUNDARY: public route matches GET only (defense-in-depth)" {
   run yq '.spec.rules[0].matches[0].method' "$P"; [ "$output" = "GET" ]
   # ⚠️ 매치 집합 상한 — rules[0].matches[0]만 보면 matches 없는 rule(Gateway API 기본 PathPrefix `/`
-  #    + 전 method)이나 method 없는 match를 더해도 무증인이었다(뮤테이션 B·exact-platform-1 ①③ 실측:
+  #    + 전 method)이나 method 없는 match를 더해도 무증인이었다(뮤테이션 B ①③ 실측:
   #    5/5 ok). `(.matches // [{}])`가 load-bearing — matches 없는 rule을 값으로 바꿔야 red가 된다.
   run yq '[.spec.rules[] | (.matches // [{}])[] | (.path.value // "/") + "|" + (.method // "ANY")] | sort | join(",")' "$P"
   [ "$output" = "/|GET" ] || { echo "공개 매치 집합=$output"; false; }

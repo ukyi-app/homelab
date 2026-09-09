@@ -22,8 +22,8 @@ setup() {
   [ -s "$README" ]
   # ⚠️ 픽스처 복원은 **사본**이지 index 되돌리기가 아니다. index에서 되돌리면 그 파일의
   #    **커밋되지 않은 편집까지 함께 지워진다** — 이 파일과 scripts/README.md를 같은 PR에서
-  #    고치는 작업자는 자기 편집이 테스트 실행 한 번에 소멸하는 것을 본다(티켓 34 착지 중 실측:
-  #    새로 쓴 bullet 10건이 사라졌고, 증상은 "가드가 갑자기 red"라 원인이 테스트로 보이지 않았다).
+  #    고치는 작업자는 자기 편집이 테스트 실행 한 번에 소멸하는 것을 본다(실측: 새로 쓴 bullet
+  #    10건이 사라졌고, 증상은 "가드가 갑자기 red"라 원인이 테스트로 보이지 않았다).
   README_KEEP="$BATS_TEST_TMPDIR/scripts-README.md"
   cp "$README" "$README_KEEP"
 }
@@ -44,7 +44,7 @@ setup() {
 }
 
 @test "a prose mention alone does not satisfy registration for a non-guard script (bullet head anchor required)" {
-  # grep-a-7 — 가드 모양 스크립트(check-*/verify-*/*-guard/*-check)는 레인 [2]의 등식
+  # 가드 모양 스크립트(check-*/verify-*/*-guard/*-check)는 레인 [2]의 등식
   # (아래 "the guard-shaped bullet count equals …")이 이미 삭제를 잡는다(bullet 수가 줄면 그
   # 등식이 깨진다). 이 축이 실제로 새로 닫는 것은 **비-가드** 스크립트(bootstrap.sh·destroy-node.sh·
   # dr-drill.sh·notify-unit-failure.sh·sealing-key-dr-gate.sh·teardown.sh)다 — 그것들엔 그 백스톱이
@@ -67,7 +67,7 @@ setup() {
 }
 
 @test "a bullet-decorated decoy inside mid-sentence prose does not satisfy registration (line anchor required)" {
-  # reg-a1-bats-guards-1 — grep-a-7(56d0aad)은 「형제 bullet의 산문 언급이 등재 증인으로
+  # 앞선 처방(56d0aad)은 「형제 bullet의 산문 언급이 등재 증인으로
   # 오인된다」를 고쳤다고 주장했지만 실제 검색이 grep -Fq(무앵커 부분문자열)라 그 취약점이
   # 그대로 남았다 — 「- **`name`**」 장식이 줄 **어디에** 있든(줄 시작이 아니어도) 매치했다.
   # 이 픽스처는 그 정확한 형태(장식은 재현하되 줄 시작은 '-'가 아닌 순수 산문)로 재발을 잡는다.
@@ -278,7 +278,7 @@ setup() {
   [ "$status" -eq 2 ]
 }
 
-# ── 레인 [1] 확장(homelab-cli-r2 티켓 34) ─────────────────────────────────────────────────────
+# ── 레인 [1] 확장 ─────────────────────────────────────────────────────────────────────────────
 # 병: tools 레인 글롭 `tools/*.ts`는 재귀하지 않아 tools/lib/*.ts를 **한 파일도** 열거하지 않았다 —
 # AGENTS.md가 "check-doc-index 강제"라고 적는 로스터에 소비자 최다 커널(cli.ts·identity.ts)이 0줄이었다.
 # 그리고 레인 [1]에는 바닥값도 역방향도 없어, 글롭이 붕괴해도 조용히 0회 돌고 초록이었다.
@@ -360,7 +360,7 @@ docindex_fixture() {
 }
 
 @test "scripts/README.md declares that sourced libraries are outside the roster (boundary is written, not implied)" {
-  # 티켓 34 — scripts/lib/*.sh는 실행물이 아니라 source 대상이라 로스터 밖이다. 그 경계를 산문으로
+  # scripts/lib/*.sh는 실행물이 아니라 source 대상이라 로스터 밖이다. 그 경계를 산문으로
   # 선언하지 않으면 "가드가 못 본다"와 "일부러 안 본다"가 구별되지 않는다.
   run grep -n "sourced 라이브러리" scripts/README.md
   [ "$status" -eq 0 ]

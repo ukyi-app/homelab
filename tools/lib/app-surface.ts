@@ -1,4 +1,4 @@
-// 앱 표면 module — "앱은 어떤 파일들로 이루어지는가"의 유일 선언(lib-convergence d4 · CONTEXT.md
+// 앱 표면 module — "앱은 어떤 파일들로 이루어지는가"의 유일 선언(CONTEXT.md
 // 「앱 표면」). 종전에는 create-app이 표면 6종을 손조립으로 쓰고 경로 리터럴(`apps/<app>/deploy/prod/…`)이
 // 소비자 여럿에 흩어져 있었다 — 기록 집합의 **선언**이 없어서, 표면이 늘어도 그 사실을 아무 데서도
 // 셀 수 없었다. 철거의 대칭 자체는 종전에도 디렉토리 통째 rm이라 자명했고 지금도 그렇다(removeAppSurface).

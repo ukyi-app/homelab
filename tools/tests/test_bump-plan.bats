@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
-# bump 계약 module(tools/lib/bump-plan.ts, lib-convergence d3)의 계약 테스트.
-# plan 항목은 런타임 디코드 판별 union(Change|Noop|Refusal — Lane은 Change 전용, design r1-1),
+# bump 계약 module(tools/lib/bump-plan.ts)의 계약 테스트.
+# plan 항목은 런타임 디코드 판별 union(Change|Noop|Refusal — Lane은 Change 전용),
 # target은 판별 신원 {kind: app|bespoke, name}(r1-2 — 두 레인의 인가 소스 분리를 interface가 보존),
 # 명명(브랜치·커밋 문구·writer 신원)과 레인 인가 해소(resolveLane·laneFor)를 이 module이 소유한다.
-# 08(design r2-1): 브랜치가 kind를 인코딩하고(branchFor), 역디코딩(parseBranch)·레거시 이행 판정
+# 08: 브랜치가 kind를 인코딩하고(branchFor), 역디코딩(parseBranch)·레거시 이행 판정
 # (legacyAmbiguity — 동명 bespoke 실재 = 구형 브랜치의 app 해석 fail-closed)도 같은 module이 소유한다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과. @test 이름은 영어(CJK 함정).
 
@@ -132,7 +132,7 @@ EOF
 
 @test "the naming contract encodes kind into the branch and keeps the commit message byte-identical" {
   # 커밋 문구·writer 신원은 03의 라이브 문자열 그대로(레거시 브랜치의 소유 증명이 계속 성립해야 한다).
-  # 브랜치만 08에서 kind 세그먼트를 얻는다 — 동명 app/bespoke가 브랜치를 공유하지 못하게(design r2-1).
+  # 브랜치만 08에서 kind 세그먼트를 얻는다 — 동명 app/bespoke가 브랜치를 공유하지 못하게.
   PX_MODE=naming run bun "$FX"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q '^bump-poll/app/demo-sha-abc1234$'

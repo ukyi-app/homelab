@@ -17,7 +17,7 @@ DRILL_CLUSTER="pg-restore-drill"
 DB="app"
 TABLE="${DRILL_TABLE:-restore_canary}" # 라이브 앱/시드가 유지하는 canary 테이블
 TG="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
-# vmsingle의 Prometheus import 엔드포인트 (M5). 클러스터 내 service를 기본값으로 해 메트릭이
+# vmsingle의 Prometheus import 엔드포인트. 클러스터 내 service를 기본값으로 해 메트릭이
 # 항상 전달되게 한다 — M5의 CNPGRestoreDrillStale은 absent()를 쓰므로 시계열이 없으면 영원히 페이징된다.
 PUSHGW="${METRICS_PUSH_URL:-http://vmsingle.observability.svc:8428}"
 
