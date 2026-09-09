@@ -2205,6 +2205,9 @@ selfHeal과 플립플롭한다.
   `head -n1 <<<"$out"`. 별도 문장이어야 `set -e`/pipefail 아래 writer의 실패 전파(`|| fail`·`|| x=""`)가 보존된다.
   `check-sigpipe-writers.sh` 레인 (d)가 `| head` 소비자를 writer 무관하게 잰다(같은 날 전 트리 44곳 전환 — 발화 e2e
   하네스·lib·host-preflight·dr-drill·seed-secrets). 형제 후보 `| sed … q`·`| grep -m1`은 현 트리 0건이라 분모 밖.
+  bats 파일은 @test 본문이 pipefail 아래가 아니지만 `run bash -c '… set -euo pipefail …'` 블록은 다르다 — 레인 (e)가
+  **그 블록의 줄만** 잰다(#706 첫 gate에서 `tests/gates/test_guard-sh.bats`의 블록 안 `sed … | grep -qE … && kern=1`이
+  4 vCPU 병렬 레인에서 로스터 6→5로 red, 로컬 CPU 포화 20회 중 4회 재현 → 캡처 뒤 herestring).
 > 가드: `scripts/check-sigpipe-writers.sh`, `tests/gates/test_sigpipe-writers.bats`
 ### 서브쿼리 step이 스크레이프 간격보다 크면 peak가 조용히 과소평가된다 — 그 위에서 깎은 limit이 회귀가 된다
 - 2026-09-01, 메모리 원장의 마진 규약(`limit ≥ A′ peak × 2.0`)이 A′를 `[14d:5m]` 서브쿼리로 쟀다.
