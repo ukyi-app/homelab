@@ -915,9 +915,14 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `scaffoldRepos` 선언이고, 파생 0건은 통과가 아니라 `greenfield` 상태로 stderr·JSON·telegram ident에 명시된다.
   **errors 사유 축**: 404/403=`absent-or-private`(레포 삭제·private 전환·경로 리네임 — 비인증 fetch로는 구별
   불가라 drift로 승격하지 않는다) · 그 외=`transient`. 라이브 raw fetch는 기본 모드 전용이다.
-- **`verify-db-marker.ts`** — provision-db 마커 ConfigMap(`db-<name>-ready`: owner/ro Secret resourceVersion)이 현재 Secret과
+- **`verify-db-marker.ts`** — 마커 ConfigMap(`db-<name>-ready`: owner/ro Secret resourceVersion)이 현재 Secret과
   일치하는지 검증(fail-closed — 마커 부재·stale=비-0). 읽기 전용, **owner-local**(KUBECONFIG). 프로덕션 호출자는 없다 — `_create-database.yaml`은
   `contents: read` PR 생성기라 클러스터에 닿지 않는다(2026-09-09 정정; 등식을 PostSync 훅으로 당기는 판단은 `.scratch/homelab-cli-r2/issues/52`).
+  마커를 쓰는 쪽은 **`platform/cnpg/prod/ensure-role-password.sh`(PostSync 훅)**다: 롤 검증은 `passwordStatus` rv
+  **∧** `byStatus.reconciled` 멤버십의 곱이고(CNPG가 DROP된 role의 passwordStatus를 유지해 rv 검사만으론 공허
+  통과한다 — 재프로비저닝 창에서 옛 rv가 verified가 된다, 티켓 52), `spec.ensure=absent`인 Database CR은 CR
+  applied 대기 뒤 롤 검증·마커만 스킵하며, 쓰는 마커에는 그 CR의 `ownerReferences`를 달아 CR 프룬 시 GC되게
+  한다(ownerRef 없던 판이 남긴 라이브 고아 2건 — 티켓 51).
 - **`fixture-memory-ratios.ts`** — 발화 e2e 픽스처(VM import 포맷 — 줄당 하나의 JSON 시계열)에서 한 컨테이너의 메모리
   비율 **세 축**(working_set · usage−cache · usage−inactive−active)을 내고 커널 물리 항등식을 검증한다.
   ⚠️ 레포 상태를 보는 가드가 아니라 **테스트 하네스가 부르는 오라클**이다 —

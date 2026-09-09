@@ -6,7 +6,9 @@
 //
 // 권위: ensure-role-password Job의 passwordStatus.<role>.resourceVersion == 적용된 비번 Secret의
 // metadata.resourceVersion(라이브 확인). 마커는 그 값을 기록하고, 이 도구는 현재 Secret rv와 대조한다.
-// owner-local(admin kubeconfig) — DB가 'usable'한지의 단일 권위. WS2 온보딩 수용/activation이 호출.
+// owner-local(admin kubeconfig) — DB가 'usable'한지의 단일 권위. **프로덕션 호출자는 없다**(2026-09-09
+// 정정 — activate-app도 _create-database.yaml도 이 도구를 부르지 않는다): owner가 온보딩/재프로비저닝
+// 때 손으로 대조하는 freshness 증거다. 생산자는 platform/cnpg/prod/ensure-role-password.sh(PostSync 훅).
 // 실행은 exec seam 경유 — timeoutMs 0으로 종전 무-timeout 동작 보존. 실패 판정(die 문구)은 콜사이트 소유.
 import { sh } from "./lib/exec.ts";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
