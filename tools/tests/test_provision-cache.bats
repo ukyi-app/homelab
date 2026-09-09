@@ -156,7 +156,7 @@ provision() {
 }
 
 @test "existing data-conn kustomization gains entries; a missing one becomes a checklist item" {
-  # 없는 경우: 등록하지 않고(kustomization 생성은 다른 작업자 소유) checklist에만 기재
+  # 없는 경우: 등록하지 않고(kustomization 신설은 provision-db 소유) checklist에만 기재
   provision --name demo
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "data-conn"

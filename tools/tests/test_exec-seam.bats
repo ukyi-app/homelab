@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 실행 seam(tools/lib/exec.ts, lib-convergence d6①)의 계약 테스트 — 명명 adapter 4종(gh/git/
+# 실행 seam(tools/lib/exec.ts)의 계약 테스트 — 명명 adapter 4종(gh/git/
 # kubeseal/sh) + errKind(실행 실패 종류) + env 주입 원장(HOMELAB_EXEC_LEDGER).
 # 판정 정책(무엇이 실패인가)은 콜사이트 소유 — seam은 실행·캡처·관측만 한다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과. @test 이름은 영어(CJK 함정).
@@ -58,7 +58,7 @@ if (mode === "notfound") {
   kubeseal(["--version"]);
   console.log("done");
 } else if (mode === "gitdir") {
-  // GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE 하이재킹 아래에서 adapter가 cwd 레포를 보는가(티켓 27).
+  // GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE 하이재킹 아래에서 adapter가 cwd 레포를 보는가.
   const b = process.env.FX_B ?? "";
   const head = git(b, ["rev-parse", "HEAD"]);
   const add = git(b, ["add", "-A"]);
@@ -202,12 +202,12 @@ make_two_repos() {
 }
 
 @test "child_process lives in exec.ts alone across tools (repo-derived, one declared exemption)" {
-  # d6 완결(16) — tools/의 subprocess 실행은 전부 seam(명명 adapter)을 경유한다. 직접 사용이
+  # tools/의 subprocess 실행은 전부 seam(명명 adapter)을 경유한다. 직접 사용이
   # 되살아나면 maxBuffer/timeout/원장 계약이 그 사이트만 조용히 빠진다(ENOBUFS 죽음이 spawn 오류로만
-  # 보이는 클래스). 열거는 레포에서 파생한다(CONTRIBUTING — 소비처 하드코딩 금지; 14·15의 이행기
-  # 목록을 이 완결형이 대체한다). 주석을 걷어낸 소스에서 `child_process` 단어 자체를 센다.
+  # 보이는 클래스). 열거는 레포에서 파생한다(CONTRIBUTING — 소비처 하드코딩 금지).
+  # 주석을 걷어낸 소스에서 `child_process` 단어 자체를 센다.
   # 예외 1: tools/seal-secret.mts — app-shared 양립 파일(bun + node strip-types, 외부 앱 레포에서
-  # node로 돈다)이라 bun 전용 lib(exec.ts)을 import하지 않고 자체 블록을 유지한다(Pass1 F3 결정).
+  # node로 돈다)이라 bun 전용 lib(exec.ts)을 import하지 않고 자체 블록을 유지한다(결정).
   n=0
   for f in $(git ls-files 'tools/*.ts' 'tools/*.mts' 'tools/lib/*.ts' 'tools/lib/*.mts'); do
     case "$f" in
@@ -223,7 +223,7 @@ make_two_repos() {
 }
 
 @test "the git adapter sees the cwd repo even when GIT_DIR and friends are exported (hijack scrub)" {
-  # 티켓 27 — 이 셋이 상속되면 `git -C <cwd>`가 **다른 레포**를 본다. secrets의 선행 조건 판정
+  # 이 셋이 상속되면 `git -C <cwd>`가 **다른 레포**를 본다. secrets의 선행 조건 판정
   # (브랜치·클린 트리·staged 완전성·HEAD)과 init의 커밋이 전부 이 adapter 위에 있어, git hook
   # (pre-commit·post-checkout이 이 셋을 export한다) 안에서 CLI를 띄우면 판정 대상이 cwd가 아니다.
   make_two_repos
@@ -246,7 +246,7 @@ make_two_repos() {
 }
 
 @test "GIT_TERMINAL_PROMPT=0 rides every git exec including the direct sh(git, clone) callsite" {
-  # 티켓 27 — adapter만 감싸면 init의 템플릿 클론(sh("git", ["clone", …]))이 규약 밖에 남는다.
+  # adapter만 감싸면 init의 템플릿 클론(sh("git", ["clone", …]))이 규약 밖에 남는다.
   # PATH 전치로 스텁 git이 자기 env를 찍는다(부재 시나리오가 없어 전치가 안전한 자리다).
   FX_MODE=envecho run env PATH="$ESTUB:$PATH" GIT_DIR=/hijack/.git GIT_WORK_TREE=/hijack \
     GIT_INDEX_FILE=/hijack/.git/index GIT_CONFIG_GLOBAL=/dev/null bun "$FX"

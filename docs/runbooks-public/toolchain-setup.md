@@ -48,7 +48,7 @@ gitignored(owner 로컬 전용)이므로, **도구 설치 단계에 한해** 이
   로컬도 같은 버전을 쓰는 것을 권장한다.
 - **actionlint** — 워크플로 정적 검사. **CI 전용**이라 `m6-tools` 필수가 아니다. 로컬에 없으면
   `make ci`가 그 스텝을 미평가 원장에 남기고 마지막에 `SKIP:` 마커 + exit 4를 낸다(초록으로 끝나지 않는다).
-- **docker**(OrbStack) — telegram-render-e2e 게이트·로컬 dev Postgres(`bun run db:up`). 없으면 위와 같은 SKIP 경로.
+- **docker** — telegram-render-e2e 게이트·로컬 dev Postgres(`bun run db:up`). 없으면 위와 같은 SKIP 경로.
 - **kubectl** — 라이브 클러스터 운영 타겟(`make argo-*`/`render`/posture). 클러스터 minor와 ±1 권장.
 - **pre-commit** — 평문 시크릿 가드 + gitleaks(`pre-commit run -a`). `brew install pre-commit` 후 `pre-commit install`.
 

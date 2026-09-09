@@ -303,7 +303,7 @@ dbs_count() { c=0; for t in $(dbs_line "$1"); do if [ "$t" = "$2" ]; then c=$((c
   echo "$output" | jq -e '.remove | any(. == "digest-exporter APPS 항목") | not'
 }
 
-# ── 헤지 DBS 대칭(티켓 46) ────────────────────────────────────────────────────
+# ── 헤지 DBS 대칭 ───────────────────────────────────────────────────────────
 
 @test "purge drop removes the database from the pgdump hedge DBS in the same step" {
   # 같은 단계인 것이 요점이다: CR이 absent인데 DBS에 이름이 남으면 헤지 잡이 `set -e`로 통째로

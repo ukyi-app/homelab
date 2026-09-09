@@ -11,7 +11,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "vendored roster covers exactly the two contract artifacts (targets non-empty, same repo set)" {
-  # untouched-d-1(5라운드) — 위 @test는 하한(length>0)뿐이라 원소를 지워도(다운스트림 3 target
+  # 위 @test는 하한(length>0)뿐이라 원소를 지워도(다운스트림 3 target
   # 동반 소멸) 초록이었다(실측: pem 항목 삭제 → 4/4). 원소 수·멤버십을 등식으로 잠근다.
   # target 축은 매직넘버(repo 3개 이름)를 쓰지 않는다 — 앱 레포 집합은 create-app/teardown으로
   # 변하고 in-repo 파생원이 없어 정당 변경마다 손 갱신 세금이 된다(va 판정 근거). 대신 두 계약
@@ -45,7 +45,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
 }
 
-# ── (a) 로스터 파생·등식 대조(티켓 36) ────────────────────────────────────────
+# ── (a) 로스터 파생·등식 대조 ─────────────────────────────────────────────────
 # 매니페스트의 앱 target은 손 열거였다 — 철거된 레포는 남고 새 앱은 영원히 미등재였다.
 # 이제 앱 축은 `apps/*/deploy/prod/source-repo`(인레포 파생원)에서 파생하고 매니페스트와
 # **등식**으로 대조한다(⊇가 아니다: 초과분도 드리프트다). 템플릿 행은 앱이 아니라 scaffoldRepos다.

@@ -1,4 +1,4 @@
-# 이미지 digest 핀 게이트(check-image-pins.sh) 예외 목록 — 메타갭 ② W2-B.
+# 이미지 digest 핀 게이트(check-image-pins.sh) 예외 목록.
 # 수용 기준 = allowlist 0(핀 적용 후). 정당한 예외만 최소 등재하고 반드시 사유 주석을 동반한다.
 # ⚠️ 건수에도 **상한**이 있다(check-image-pins.sh의 EXEMPT_MAX, 현재 0). 사유는 "왜"만 재고
 #    "몇 건까지"는 재지 않아 사유만 붙이면 면제가 무한히 늘 수 있었다. 늘리려면 **같은 PR에서**
@@ -9,5 +9,6 @@
 #   레인2(apps 구조체): app:<앱이름> (예: app:page)
 #   그 위/옆 줄에 # 사유(왜 digest 핀이 불가/불요한지).
 #
-# (현재 비어 있음 — Task 9가 renovate pinDigests로 platform tag-only 24건(문자열 image 23 + CNPG
-#  Cluster imageName 1)을 핀 후 이 목록을 최소화한다. 정당한 예외(예: renovate가 못 다루는 이미지)만 남긴다.)
+# (현재 비어 있음 — 2026-07-07 #312가 platform tag-only 24건(문자열 image 23 + CNPG Cluster imageName 1)을
+#  수동 digest 핀 해 예외가 필요 없어졌고, 이 목록은 생성 이래 계속 비어 있다. 정당한 예외(예: renovate가
+#  못 다루는 이미지)만 남긴다.)

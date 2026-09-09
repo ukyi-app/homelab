@@ -31,7 +31,7 @@ spec:
     - { group: gateway.networking.k8s.io, kind: HTTPRoute }
     - { group: bitnami.com, kind: SealedSecret }
     # 외부/API egress가 필요한 앱은 deploy/prod(source#3)에 자체 NetworkPolicy 배포(prod=default-deny-egress).
-    # namespace-scoped·prod 한정이라 권한경계 안 넓힘. app-scoped 셀렉터는 check-app-netpol.sh가 강제(Task 4b),
+    # namespace-scoped·prod 한정이라 권한경계 안 넓힘. app-scoped 셀렉터는 check-app-netpol.sh가 강제,
     # 라이브 셀렉터 정합은 owner-local netpol-rehearsal.sh로 검증.
     - { group: networking.k8s.io, kind: NetworkPolicy }
 ---
@@ -51,7 +51,7 @@ spec:
   # destinations='*' (설계 §A / plan 리뷰 Pass2 #1): appset 생성 platform 앱은 Application
   # destination.namespace가 **비어있고** ArgoCD가 매니페스트 검사 전에 그 빈 destination을 검증한다 →
   # named-only면 InvalidSpec(동작파괴). '*'로 빈 destination 허용. platform 경계=server+repo,
-  # tight namespace 경계는 apps 프로젝트(ns=prod). Task 3 가드가 '빈 destination permitted'를 강제.
+  # tight namespace 경계는 apps 프로젝트(ns=prod). 가드가 '빈 destination permitted'를 강제.
   destinations:
     - { server: https://kubernetes.default.svc, namespace: "*" }
   clusterResourceWhitelist:

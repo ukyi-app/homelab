@@ -40,7 +40,7 @@ run_db_create() {
   run_db_create --json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -s 'length')" = "1" ]
-  # 사람용 렌더(renderMutation)는 --json에서도 stderr로 나간다 — 필드명 오타가 무증인이던 자리(티켓 13).
+  # 사람용 렌더(renderMutation)는 --json에서도 stderr로 나간다 — 필드명 오타가 무증인이던 자리였다.
   echo "$stderr" | grep -q "^db create mydb — correlation "
   echo "$stderr" | grep -q "^결과: success$"
   [ "$(echo "$output" | jq -r '.verb')" = "db create" ]
@@ -73,14 +73,14 @@ run_db_create() {
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
   echo "$output" | jq -r '.result.pendingReason' | grep -q "미출현"
-  # 사람용 렌더의 pending 분기(티켓 13) — pendingReason이 '대기:' 줄로 실제로 실린다.
+  # 사람용 렌더의 pending 분기 — pendingReason이 '대기:' 줄로 실제로 실린다.
   echo "$stderr" | grep -q "^대기: "
   echo "$stderr" | grep -q "^결과: pending$"
 }
 
 @test "a failed run reports the failed job names and the run URL with exit 1" {
   # 목록을 in_progress로 둬 conclusion 폴링(step 3)이 실제로 돌게 한다 — 목록이 이미 completed/failure면
-  # 아래 db-run.json 픽스처가 한 번도 읽히지 않아 이 이름이 약속한 경로가 사문이었다(티켓 19).
+  # 아래 db-run.json 픽스처가 한 번도 읽히지 않아 이 이름이 약속한 경로가 사문이었다.
   printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
   printf '{"status":"completed","conclusion":"failure","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run.json"
   printf '["validate"]\n' > "$FIX/db-run-jobs.json"
@@ -144,7 +144,7 @@ merged_pr_at_descendant() {
   [ "$status" -eq 3 ]
   [ "$(echo "$output" | jq -r '.variant')" = "superseded" ]
   echo "$output" | jq -r '.result.error' | grep -q "표면"
-  # 사람용 렌더의 superseded 분기(티켓 13) — 오류 줄 + Application 관측 줄이 함께 실린다.
+  # 사람용 렌더의 superseded 분기 — 오류 줄 + Application 관측 줄이 함께 실린다.
   echo "$stderr" | grep -q "^오류: "
   echo "$stderr" | grep -q "^결과: superseded$"
   echo "$stderr" | grep -q "^Application cnpg-data: sync "
@@ -251,9 +251,8 @@ merged_pr_at_descendant() {
 }
 
 @test "db url is a catalog op: --json yields a schema-valid envelope with no plaintext value" {
-  # 구 byte-parity(패스스루가 패스스루임을 검증)는 catalog 승격으로 계약이 대체됐다(티켓 08):
-  # url 동사도 op envelope 계약이고, 사람용 출력은 렌더러 소유다. usage의 --json 공통 광고가
-  # 이제 10/10 동사에서 참이 된다.
+  # byte-parity 대조는 url 동사가 catalog로 승격되며 op envelope 계약으로 대체됐다 — url 동사도 op
+  # envelope 계약이고, 사람용 출력은 렌더러 소유다. usage의 --json 공통 광고가 이제 10/10 동사에서 참이 된다.
   export OUTDIR="$BATS_TEST_TMPDIR"
   run --separate-stderr bun tools/homelab.ts db url --name t --dry-run --json
   [ "$status" -eq 0 ]
@@ -279,7 +278,7 @@ merged_pr_at_descendant() {
 
 @test "db url without KUBECONFIG is a skip: exit 4, stderr marker, schema-valid skip envelope" {
   # skip 의미론(계약 exitRationale): 클러스터 도메인 부재는 '평가했고 실패(1)'가 아니라
-  # '평가하지 않음(4)'이다 — 가드 어휘의 skip이 CLI variant로 같은 규약으로 흐른다(kernel-followups 06).
+  # '평가하지 않음(4)'이다 — 가드 어휘의 skip이 CLI variant로 같은 규약으로 흐른다.
   export OUTDIR="$BATS_TEST_TMPDIR"
   run --separate-stderr env -u KUBECONFIG PATH="$STUB" TS_DB_HOST=h "$BUN" tools/homelab.ts db url --name t --env-local "$BATS_TEST_TMPDIR/skip.env.local" --json
   [ "$status" -eq 4 ]
@@ -324,7 +323,7 @@ merged_pr_at_descendant() {
   echo "$stderr" | grep -q "F2 채널 분리"
 }
 
-# ── PR 특정의 3상 재조회(homelab-cli-r2 티켓 04) ──────────────────────────────────────────────
+# ── PR 특정의 3상 재조회 ──────────────────────────────────────────────────────────────────
 # run 성공 직후 PR 목록을 단 한 번 조회해 즉결하면 낡은/빈 스냅샷 한 번이 '명명 드리프트 failure'
 # (create 계열) 또는 거짓 no-op(update-secrets)이 된다. null(전송 오류)·0건은 미확정 → deadline과
 # **독립한** 고정 소수 재시도 뒤에만 판정한다. 아래 정확 count는 그 재시도 횟수(엔진 상수)를 핀한다.
@@ -362,13 +361,13 @@ merged_pr_at_descendant() {
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
   echo "$output" | jq -r '.result.error' | grep -q "명명 드리프트"
-  # 문구가 아니라 **좌표**가 진단 재료다 — 어느 브랜치를 봤는지가 에러에 실린다(티켓 19).
+  # 문구가 아니라 **좌표**가 진단 재료다 — 어느 브랜치를 봤는지가 에러에 실린다.
   echo "$output" | jq -r '.result.error' | grep -q "create-database/mydb-501"
   # 재시도는 유한하다 — 정확히 1 + PR_GRACE_RETRIES(3)회. 상수가 바뀌면 여기서 red(의도된 핀).
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "4" ]
 }
 
-# ── conclusion 폴링·PR 특정 분기의 증인(homelab-cli-r2 티켓 19) ─────────────────────────────
+# ── conclusion 폴링·PR 특정 분기의 증인 ─────────────────────────────────────────────────────
 # 라이브의 **기본 경로**는 dispatch → queued → in_progress → completed다. 그 전이를 밟는 픽스처가
 # 0건이라 step 3(conclusion 폴링)의 병합·실패 판정·'진행 중' pending이 전부 무증인이었다.
 # PR 특정의 판정 분기(0건·≥2 race·조회 실패)도 같은 이유로 픽스처가 없었다.
@@ -441,7 +440,7 @@ merged_pr_at_descendant() {
   echo "$output" | jq -r '.result.error' | grep -q "create-database/mydb-501"
 }
 
-# ── 폴링 루프의 지속 gh 실패 사유(homelab-cli-r2 티켓 06) ───────────────────────────────────
+# ── 폴링 루프의 지속 gh 실패 사유 ────────────────────────────────────────────────────────────
 # 세 폴링 루프(run 특정·conclusion·머지)는 관측 실패(null)를 아무 기록 없이 넘겨 데드라인에서
 # '미출현/진행 중/미관측'만 냈다 — 토큰 만료·오프라인·rate limit이 전부 '큐 지연'으로 위장된다.
 # 필드는 신설하지 않는다(pending 계열은 additionalProperties:false — 골든 4종이 형상을 고정):
@@ -496,7 +495,7 @@ merged_pr_at_descendant() {
   [ "$(grep -c "Watch.suffix()" tools/lib/mutation.ts)" = "3" ]
 }
 
-# ── 머지 없이 닫힌 PR의 종결성(homelab-cli-r2 티켓 05) ──────────────────────────────────────
+# ── 머지 없이 닫힌 PR의 종결성 ──────────────────────────────────────────────────────────────
 # 머지 관측 루프가 merged_at만 보면 close(미머지)가 데드라인까지 '머지 대기'로 접힌다. state를 목록
 # 투영에 실어 종결 상태를 관측하되, 목록 인덱스는 단건 리소스보다 낡을 수 있으므로(함정 「GitHub
 # API는 낡은 스냅샷을 200으로 돌려준다」) 단건 권위 조회로 한 번 확증한 뒤에만 failure로 종결한다.
@@ -569,14 +568,14 @@ pr_closed_unmerged() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" --jq)" = "1" ]
 }
 
-# ── required check(gate) 실패의 조기 종결(homelab-cli-r2 티켓 47) ────────────────────────────
+# ── required check(gate) 실패의 조기 종결 ────────────────────────────────────────────────────
 # 머지 폴링이 `merged`만 보면 gate 실패가 데드라인(20분)을 통째로 태운다(2026-09-08 드릴 실측:
 # gate 실패 01:06Z · CLI pending 01:15Z, 1204s · pendingReason null). 엔진은 PR head SHA의
 # check-run `gate`를 함께 읽어 **가장 최신** 하나가 completed면서 통과 집합(success·neutral·skipped)
 # 밖이면 failure로 조기 종결한다. 낡은 스냅샷 방어는 그 비대칭이다 — 실패 판정만 종결에 쓰고, 재실행
 # (= 새 check-run)이 진행 중이면 옛 실패를 채택하지 않는다.
 #
-# 이 절의 판정은 **응답 순서와 무관**해야 한다(리뷰 M1): 라이브 `check-runs?filter=all`은 **최신 먼저**로
+# 이 절의 판정은 **응답 순서와 무관**해야 한다: 라이브 `check-runs?filter=all`은 **최신 먼저**로
 # 온다(2026-09-08 실측 — [{id 101915370989 success 02:16}, {id 101913332313 failure 02:04}]). 픽스처를
 # 한 순서로만 두면 `rows[last]`처럼 순서에 기댄 구현이 초록으로 통과하므로, 재실행 레그는 **두 벌**을
 # 돌려 같은 판정을 요구한다.
@@ -587,7 +586,7 @@ pr_unmerged_with_head() {
 }
 
 # check-run 한 줄 픽스처 — <id> <status> <conclusion|null> <started_at>. started_at은 빈 문자열·
-# 비ISO도 받는다(그 형상에서 시간 비교가 조용히 왼쪽을 채택하지 않는지가 M1의 축이다).
+# 비ISO도 받는다(그 형상에서 시간 비교가 조용히 왼쪽을 채택하지 않는지가 이 절의 축이다).
 gate_check_row() {
   printf '{"id":%s,"name":"gate","status":"%s","conclusion":%s,"html_url":"https://github.com/ukyi-app/homelab/runs/%s","started_at":"%s"}' \
     "$1" "$2" "$3" "$1" "$4"
@@ -609,7 +608,7 @@ run_db_gate_wait() {
   echo "$output" | jq -r '.result.error' | grep -q "required check(gate)"
   echo "$output" | jq -r '.result.error' | grep -q "conclusion=failure"
   echo "$output" | jq -r '.result.error' | grep -q "https://github.com/ukyi-app/homelab/runs/9001"
-  # [리뷰 M4] 자동 레인 문구도 IaC 인용을 싣는다 — 수동 레인(test_homelab-appcreate)과 대칭이라
+  # 자동 레인 문구도 IaC 인용을 싣는다 — 수동 레인(test_homelab-appcreate)과 대칭이라
   # infra/github/repo.tf의 enforce_admins가 뒤집히면 두 레인 문구가 **함께** red가 된다(상수 절 ⚠️가 게이트가 된다).
   echo "$output" | jq -r '.result.error' | grep -q "정상 경로"
   echo "$output" | jq -r '.result.error' | grep -q "잔여 우회"
@@ -621,7 +620,7 @@ run_db_gate_wait() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "1" ]
   # 재디스패치 0건 — 변이 argv는 최초 1회뿐이고 종결은 관측이지 재시도가 아니다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
-  # 종결 좌표는 단건 권위 조회로 확증한다(리뷰 L4) — 닫힘 종결과 같은 규약.
+  # 종결 좌표는 단건 권위 조회로 확증한다 — 닫힘 종결과 같은 규약.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" --jq)" -ge 1 ]
 }
 
@@ -632,7 +631,7 @@ run_db_gate_wait() {
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
   echo "$output" | jq -r '.result.pendingReason' | grep -q "머지"
-  # 관측이 살아 있으므로 '관측 불가' 접미는 붙지 않는다(리뷰 L5의 음성 대조).
+  # 관측이 살아 있으므로 '관측 불가' 접미는 붙지 않는다(관측 사망 축의 음성 대조).
   [ "$(echo "$output" | jq -r '.result.pendingReason' | grep -c "관측 불가")" = "0" ]
   # 사이클마다 다시 읽는다(단발 조회가 아니다) — 대기 중 실패로 전이하면 그때 종결해야 한다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=100" --jq)" -ge 2 ]
@@ -640,7 +639,7 @@ run_db_gate_wait() {
 
 @test "wait: a rerun never ends the wait early, in either response order (latest-first and latest-last)" {
   # 재실행은 **새** check-run을 만든다 — 최신이 진행 중이면 옛 실패는 이번 판정의 재료가 아니다.
-  # 라이브는 최신 먼저로 오고 픽스처는 최신 나중이었다(리뷰 M1) — 두 벌 다 같은 판정이어야 한다.
+  # 라이브는 최신 먼저로 오고 픽스처는 최신 나중이었다 — 두 벌 다 같은 판정이어야 한다.
   old="$(gate_check_row 9003 completed '"failure"' 2026-09-08T01:00:00Z)"
   new="$(gate_check_row 9004 in_progress null 2026-09-08T01:10:00Z)"
   n=0
@@ -685,7 +684,7 @@ run_db_gate_wait() {
     [ "$(echo "$output" | jq -r '.result.pendingReason' | grep -c "관측 불가")" = "0" ]
     n=$((n+1))
   done
-  # ② [리뷰 L1] started_at이 **혼합**인 응답(유효 집합도 무효 집합도 비지 않음)은 형상 이상이다.
+  # ② started_at이 **혼합**인 응답(유효 집합도 무효 집합도 비지 않음)은 형상 이상이다.
   #    종전엔 무효 행을 조용히 버리고 유효 행만으로 최신을 잡았는데, 그 버려진 행이 사실 더 새 것이면
   #    판정이 fail-closed로 뒤집는다(모듈 규약은 「관측 부재 = fail-open」). 혼합은 접는다 — blind로 접어 pending.
   for bad in "" "not-a-timestamp"; do
@@ -759,7 +758,7 @@ run_db_gate_wait() {
 }
 
 @test "the passing set is success/neutral/skipped and every other completed conclusion ends the wait (floor 10)" {
-  # 리뷰 M2 — 종전 판은 **종결 어휘**를 열거해서(failure·cancelled·timed_out) `action_required`·`stale`이
+  # 종전 판은 **종결 어휘**를 열거해서(failure·cancelled·timed_out) `action_required`·`stale`이
   # required check를 막으면서도 비종결로 접혔다. 통과 집합을 반전하면 상류 어휘 추가가 fail-closed다.
   n=0
   for c in failure cancelled timed_out action_required stale; do
@@ -802,7 +801,7 @@ run_db_gate_wait() {
 }
 
 @test "a non-completed status is never terminal even when the conclusion field already says failure" {
-  # 리뷰 M4 — `status !== "completed"` 가드가 무증인이었다. 실물 응답에서 진행 중 run의 conclusion은
+  # `status !== "completed"` 가드가 무증인이었다. 실물 응답에서 진행 중 run의 conclusion은
   # null이지만, 낡은/이상 스냅샷이 값을 실어 보내도 status가 답이다.
   n=0
   for st in in_progress queued; do
@@ -818,7 +817,7 @@ run_db_gate_wait() {
 }
 
 @test "a foreign check-run name never stands in for the required check (client-side name recheck)" {
-  # 리뷰 L2 — 서버측 `check_name=gate` 필터의 사본인 클라이언트 재확인이 무증인이었다. 필터 의미가
+  # 서버측 `check_name=gate` 필터의 사본인 클라이언트 재확인이 무증인이었다. 필터 의미가
   # 접두 일치로 바뀌거나(가정) 스텁이 넓게 응답하면 동명 아닌 check가 required check 노릇을 한다.
   pr_unmerged_with_head
   printf '[%s,{"id":9999,"name":"build","status":"completed","conclusion":"failure","html_url":"https://github.com/ukyi-app/homelab/runs/9999","started_at":"2026-09-08T02:00:00Z"}]\n' \
@@ -830,7 +829,7 @@ run_db_gate_wait() {
 }
 
 @test "a response that hits the page cap is undecided (truncation fail-open), and one row under it is not" {
-  # 리뷰 L3 — 종전 per_page=20은 무페이지네이션이라 절단이 조용한 오종결이었다(잘려 나간 새
+  # 종전 per_page=20은 무페이지네이션이라 절단이 조용한 오종결이었다(잘려 나간 새
   # in_progress 대신 옛 실패가 최신이 된다). 상한을 100으로 올리고, 상한에 **닿으면** 판정을 접는다.
   pr_unmerged_with_head
   # 100건(상한 도달) — 그중 최신이 실패여도 종결하지 않는다.
@@ -838,7 +837,7 @@ run_db_gate_wait() {
            html_url: ("https://github.com/ukyi-app/homelab/runs/" + (9100 + . | tostring)),
            started_at: ("2026-09-08T01:00:0" + (. % 10 | tostring) + "Z")}]' > "$FIX/gate-checks.json"
   [ "$(jq -r 'length' "$FIX/gate-checks.json")" = "100" ]
-  # 접미는 **임계 주입**으로 결정론화한다(리뷰 M1) — 기본 3은 폴링 사이클 수에 종속돼 CPU 경합에서 flake다.
+  # 접미는 **임계 주입**으로 결정론화한다 — 기본 3은 폴링 사이클 수에 종속돼 CPU 경합에서 flake다.
   run_db_gate_wait HOMELAB_TEST_GATE_BLIND_STREAK=1
   [ "$status" -eq 1 ]
   [ "$(echo "$output" | jq -r '.variant')" = "pending" ]
@@ -865,9 +864,9 @@ run_db_gate_wait() {
 }
 
 @test "a dead required-check observation is named in the pending reason (read failure and empty set)" {
-  # [리뷰 M1] 접미는 **연속 사이클 수**의 함수라 기본 3이면 판정이 폴링 속도에 종속된다(CPU 경합 flake).
+  # 접미는 **연속 사이클 수**의 함수라 기본 3이면 판정이 폴링 속도에 종속된다(CPU 경합 flake).
   # 임계를 심으로 주입해 **1사이클 결정론**으로 잰다 — 아래 @test가 임계 미만/이상 양쪽을 가른다.
-  # 리뷰 L5 — 이름 드리프트(REQUIRED_CHECK ≠ ci.yaml job id)나 지속 조회 실패는 조기 종결을 통째로
+  # 이름 드리프트(REQUIRED_CHECK ≠ ci.yaml job id)나 지속 조회 실패는 조기 종결을 통째로
   # 무력화하는데 pendingReason에 흔적이 0이었다. mergeWatch 접미와 **분리된** 축이다.
   n=0
   pr_unmerged_with_head
@@ -901,7 +900,7 @@ run_db_gate_wait() {
 }
 
 @test "the blind suffix appears only at or above the injected streak threshold (deterministic, no cycle race)" {
-  # [리뷰 M1] 종전 두 @test는 접미가 붙는지를 **기본 임계 3**으로 물었다 — 그 판정은 데드라인 안에
+  # 종전 두 @test는 접미가 붙는지를 **기본 임계 3**으로 물었다 — 그 판정은 데드라인 안에
   # 몇 사이클이 도는지에 종속되고, 그 사이클 수는 CPU 경합의 함수라 신규 flake다. 임계를 심으로
   # 주입하면 '1사이클이면 붙는다'와 '도달 불가 임계면 안 붙는다'를 둘 다 결정론으로 잰다.
   # 프로덕션 기본(3)은 불변이다 — 심이 없을 때의 값은 상수 절이 진다.
@@ -954,10 +953,10 @@ run_db_gate_wait() {
 }
 
 @test "the terminal head SHA is confirmed against the single-PR resource before the wait ends (L4)" {
-  # 리뷰 L4 — 종결 좌표(head SHA)는 **목록 스냅샷**에서 온다. 목록은 단건 리소스보다 낡을 수 있으므로
+  # 종결 좌표(head SHA)는 **목록 스냅샷**에서 온다. 목록은 단건 리소스보다 낡을 수 있으므로
   # (함정 「GitHub API는 낡은 스냅샷을 200으로 돌려준다」) 닫힘 종결과 같은 규약으로 단건 조회 1회로
   # 확증한 뒤에만 종결한다.
-  # [리뷰 M2·L3] 그 확증의 **실패·불일치**는 종전에 어느 카운터도 세지 않아 흔적 0으로 데드라인을
+  # 그 확증의 **실패·불일치**는 종전에 어느 카운터도 세지 않아 흔적 0으로 데드라인을
   # 태웠다. 이제 gate blind 축이 계상하되 사유 문구를 가른다 — 임계 주입으로 결정론이다.
   n=0
   # ① 확증이 **다른** head SHA를 보고하면(그 사이 새 push) 이번 사이클은 미확정 — 폴링을 계속한다.
@@ -997,7 +996,7 @@ run_db_gate_wait() {
 }
 
 @test "the blind streak accumulates across cycles even when the check-run read itself succeeds" {
-  # [리뷰 M2] 한 사이클은 관측이 **둘**이다 — check-run 조회와 종결 좌표 확증. 계상이 관측 단위면
+  # 한 사이클은 관측이 **둘**이다 — check-run 조회와 종결 좌표 확증. 계상이 관측 단위면
   # 앞 관측(조회 성공)이 뒤 관측(확증 불일치)의 스트릭을 같은 사이클 안에서 곧바로 지워, 지속되는
   # 확증 불일치가 임계 2에 영영 못 닿는다(흔적 0으로 데드라인을 태우던 종전 형상 그대로다).
   # 사이클 단위 계상이라야 그 상태가 접미로 올라온다.
@@ -1015,7 +1014,7 @@ run_db_gate_wait() {
 }
 
 @test "an authoritative row that reports the PR merged wins over the gate verdict (stale listing, merged PR)" {
-  # [리뷰 M3] 종결 직전 권위 단건 조회는 이미 merged_at·merge_commit_sha를 싣고 온다(LANE_PR_FIELDS).
+  # 종결 직전 권위 단건 조회는 이미 merged_at·merge_commit_sha를 싣고 온다(LANE_PR_FIELDS).
   # 종전 확증은 boolean이라 그 필드를 버렸다 — 목록이 낡아 open으로 오는 사이 gate가 실패로 끝났고
   # 사람이 admin으로 머지한 형상에서, **머지된 PR을 failure로 보고**했다. 닫힘 종결과 같은 순서다:
   # 권위 행이 머지를 말하면 그 값으로 정상 머지 경로를 잇는다.
@@ -1052,7 +1051,7 @@ run_db_gate_wait() {
 }
 
 @test "db url rejects a newline-carrying --host as a usage error (exit 2, no envelope, no file) — engine predicate" {
-  # 티켓 03 — bin(db-url)·MCP(db_url)와 같은 술어(dbUrlInputError). 개행 host는 .env.local 행 주입 표면이다.
+  # bin(db-url)·MCP(db_url)와 같은 술어(dbUrlInputError). 개행 host는 .env.local 행 주입 표면이다.
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts db url t --host $'h\nX=1' --env-local "$BATS_TEST_TMPDIR/inj.env.local" --json
   [ "$status" -eq 2 ]
   [ -z "$output" ]
@@ -1068,7 +1067,7 @@ run_db_gate_wait() {
 }
 
 @test "an engine contract breach surfaces as a labelled internal error with a stack, leaving stdout untouched (no dispatch)" {
-  # shell-1 실측(티켓 13 착지 전): rc 1 · stdout 0바이트 · stderr는 Bun 소스 스니펫 + `error: …`.
+  # 착지 전 실측: rc 1 · stdout 0바이트 · stderr는 Bun 소스 스니펫 + `error: …`.
   # --json 소비자는 envelope 없는 exit 1을 받았고, 그 값이 failure variant와 같아 크래시와 실패를
   # 종료코드로 구별할 수 없었다. 계약 exitCodes 집합(0/1/2/3/4)은 불변 — 판별자는 stderr 첫 줄이다.
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION='bad nonce!' \
@@ -1086,7 +1085,7 @@ run_db_gate_wait() {
   [ "$(echo "$output" | jq -r '.verb')" = "db create" ]
 }
 
-# ── 숫자 플래그 표기 술어(homelab-cli-r2 티켓 11) ──────────────────────────────────────────────
+# ── 숫자 플래그 표기 술어 ────────────────────────────────────────────────────────────────────
 # 함정 원장 「TS 바닥값은 coercion 뒤에서 조용히 꺼진다」의 CLI 표면. Number()가 원문을 잃고
 # (거부 문구가 NaN/0을 인용) 1e3·0x10·' 5 '·5.0을 침묵 수용했다 — 둘 다 무증인이었다.
 
@@ -1131,7 +1130,7 @@ run_db_gate_wait() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" -ge 1 ]
 }
 
-# ── 티켓 07: 대기 구간의 진행 표시(핸들 조기 방출) ────────────────────────────────────
+# ── 대기 구간의 진행 표시(핸들 조기 방출) ────────────────────────────────────────────────────
 # 엔진은 이벤트만 낸다(MutationOpts.onProgress) — 문구·싱크는 CLI 셸 소유이고 MCP는 미주입이다.
 # 계약(x-contract.stdout)의 "사람용 텍스트·진행 표시는 전부 stderr"가 여기서 실행형이 된다.
 
@@ -1205,7 +1204,7 @@ run_db_gate_wait() {
   printf '%s\n' "$output" | grep -q "^결과: success\$"
 }
 
-# ── 티켓 08: 디스패치 타임아웃은 '실패'가 아니라 '결과 미상' ─────────────────────────────
+# ── 디스패치 타임아웃은 '실패'가 아니라 '결과 미상' ──────────────────────────────────────────
 # 자식(gh)만 SIGTERM으로 죽었을 뿐 POST는 서버에 도달했을 수 있다. 여기서 failure를 내면
 # 운영자·에이전트가 재실행하고, 새 nonce가 발급돼 race 검출조차 우회한 이중 run·PR 2개가 된다.
 
@@ -1233,7 +1232,7 @@ run_db_gate_wait() {
 }
 
 @test "the missing-run pending points at a resume path that exists (no correlation lookup verb)" {
-  # 티켓 09 — 종전 문구는 '같은 correlation으로 재조회 가능'이었는데 correlation을 받는 조회 동사가
+  # 종전 문구는 '같은 correlation으로 재조회 가능'이었는데 correlation을 받는 조회 동사가
   # 없다(status.ts에 correlation 참조 0건). 있지도 않은 재개 수단을 약속하면 에이전트의 자연스러운
   # 다음 수는 **재디스패치**이고, 새 nonce가 발급돼 같은 이름의 PR 두 개가 난다.
   printf '[]\n' > "$FIX/db-runs.json"
@@ -1260,14 +1259,14 @@ run_db_gate_wait() {
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
   echo "$output" | jq -r '.result.error' | grep -q "디스패치 실패"
   # run 특정 조회로 넘어가지 않았다(즉시 종결) — **식별 루프의 투영**으로 잰다. 같은 endpoint에
-  # 디스패치 **전** 신선도 스냅샷(티켓 27)이 하나 더 있으므로 경로 접두만 세면 그 1건과 뒤섞인다.
+  # 디스패치 **전** 신선도 스냅샷이 하나 더 있으므로 경로 접두만 세면 그 1건과 뒤섞인다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20" --jq "[.workflow_runs[] | {id, name, status, conclusion, html_url}]")" = "0" ]
   # 그 스냅샷은 디스패치보다 앞이므로 실패 레인에서도 정확히 1회 관측된다(무-질의로 접히지 않았다).
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20" --jq "[.workflow_runs[] | {id, name}]")" = "1" ]
 }
 
 @test "a completed run echoing the same nonce from BEFORE the dispatch is never adopted (freshness snapshot)" {
-  # 티켓 27 — 고정 nonce(HOMELAB_CORRELATION)가 프로덕션에서 켜지면 같은 nonce의 **이전** run이 홀로
+  # 고정 nonce(HOMELAB_CORRELATION)가 프로덕션에서 켜지면 같은 nonce의 **이전** run이 홀로
   # 매치돼 옛 conclusion·옛 PR 핸들이 이번 실행의 결과로 보고됐다(수령증 루프의 0건 분기가 그 문이다).
   # 스냅샷 픽스처가 그 옛 run(501)을 디스패치 **전에** 보여주면 채택 대상에서 빠지고, 이 하네스의
   # 목록 픽스처에는 그것뿐이라 데드라인까지 새 run이 안 나타나 pending으로 끝난다.
@@ -1287,7 +1286,7 @@ run_db_gate_wait() {
 }
 
 @test "a schema-violating envelope dies loud at emit time (runtime self-check mutation)" {
-  # contract-7: 골든이 없는 셀은 엔진이 계약을 어겨도 아무도 모른다 — 방출 직전 자기검증이 그 침묵을
+  # 골든이 없는 셀은 엔진이 계약을 어겨도 아무도 모른다 — 방출 직전 자기검증이 그 침묵을
   # 닫는다. 뮤테이션은 **사본 트리의 스키마**에 가짜 required 필드를 넣어 엔진 산출을 위반으로 만든다
   # (작업 트리는 불변). node_modules는 심링크로 들여온다(사본 트리는 /tmp라 상위 해석이 없다).
   T="$BATS_TEST_TMPDIR/selfcheck"
@@ -1311,10 +1310,10 @@ run_db_gate_wait() {
   [ "$(echo "$output" | jq -r '.variant')" = "success" ]
 }
 
-# ── 티켓 18: 라이브 성공 경로의 증인 ──────────────────────────────────────────────────────────
+# ── 라이브 성공 경로의 증인 ────────────────────────────────────────────────────────────────
 
 @test "db url live success writes the rehosted URL to the target file and leaks plaintext on neither channel" {
-  # connurl-7: 레포 전체에서 `wrote == true` 단언이 **0건**이었다 — 평문 비출력도 dry-run·skip·
+  # 레포 전체에서 `wrote == true` 단언이 **0건**이었다 — 평문 비출력도 dry-run·skip·
   # failure 레인에서만 쟀다. 즉 이 동사의 **유일한 실효 경로**(자격을 실제로 기록하는 경로)가
   # 무증인이었고, `--json`에서 사람용 보고가 stderr로 가는 순간의 stderr 평문 부재는 아무도 안 쟀다.
   T="$BATS_TEST_TMPDIR/live.env.local"

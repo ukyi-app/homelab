@@ -74,7 +74,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "mcp variant lists partition the variant enum and an unknown variant fails closed (floor 7)" {
-  # contract-4: mcpIsError는 exitFor와 극성이 같아야 한다 — 미지 variant는 조용한 '정상'이 아니라
+  # mcpIsError는 exitFor와 극성이 같아야 한다 — 미지 variant는 조용한 '정상'이 아니라
   # 계약 파손이다. 분할(합집합=variant enum · 교집합 0 · exitCodes 키 집합 동일)은 생성기가 생성
   # 시점에 단언하고, 여기서는 커밋된 생성물과 런타임 리더로 다시 잰다.
   run bun -e '
@@ -115,12 +115,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "schema validates the per-verb allowed-outcome matrix and rejects disallowed variants (counts derived from contract rows)" {
-  # structure r1 시도2 A2·B2: verb만 result를 고르면 불가능한 variant(doctor+pending 등)가 valid로
+  # verb만 result를 고르면 불가능한 variant(doctor+pending 등)가 valid로
   # 남는다 — verb 분기가 허용 variant 집합까지 선언하고, verb별 허용∪비허용 = variant 전체(7종).
-  # 표본 result는 공유 코퍼스(helpers/contract-samples.ts)가 SSOT — 축자 이중 사본 제거(티켓 05).
-  # 바닥값은 계약 행(CONTRACT_ROWS)에서 파생한다 — 손 재계산(구 36/34) 대체. 열거 붕괴 방지의
+  # 표본 result는 공유 코퍼스(helpers/contract-samples.ts)가 SSOT — 축자 이중 사본 제거.
+  # 바닥값은 계약 행(CONTRACT_ROWS)에서 파생한다 — 손 재계산 대체. 열거 붕괴 방지의
   # 손 앵커는 파생 밖에 남는다: oneOf 분기 수 34 · 계약 행 수 10 (exitCodes 리터럴 7쌍 핀은
-  # 위의 "result schema pins …" @test가 소유). doctor·status 행 분할(티켓 25)로 분기가 32→34가
+  # 위의 "result schema pins …" @test가 소유). doctor·status 행 분할로 분기가 32→34가
   # 됐지만 **variant 셀 총합 39는 불변**이다 — 분할이 셀을 잃지 않았다는 증거.
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
@@ -170,7 +170,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "variant-shape coupling rejects mis-shaped results on the split rows (floor 5, with controls)" {
-  # contract-5 실측: 행이 verb→variant 집합만 묶고 variant→result 형상을 묶지 않던 동안, 아래 다섯은
+  # 실측: 행이 verb→variant 집합만 묶고 variant→result 형상을 묶지 않던 동안, 아래 다섯은
   # 전부 스키마 유효였다(success에 error가 실린 envelope · failure에 성공 형상 · doctor의 exitCode
   # 거짓말). doctor는 summary.fail을 maximum:0/minimum:1로 갈라 **스키마가 독립 검출**하게 하고,
   # status는 success(list|app|run|pr)/failure(statusError)로 나눠 닫았다.
@@ -212,7 +212,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "schema rejects an allowed verb variant paired with the wrong exit code (coupling enforced, count derived)" {
-  # structure r1 b2: variant와 exitCode가 독립이면 success+exit 1도 green — 허용 쌍을 스키마가 강제한다.
+  # variant와 exitCode가 독립이면 success+exit 1도 green — 허용 쌍을 스키마가 강제한다.
   # 표본은 공유 코퍼스, 기대 건수는 계약 행 파생(allowed 전수) — 손 앵커는 위 행렬 @test 소유.
   # 표본 키는 전수 "verb|variant"다(verb 단위 폴백 제거 — 폴백이 남으면 doctor·status의 두 셀이
   # 한 표본으로 통과해 방금 착지한 형상 결합이 자기 증인 없이 초록이 된다).
@@ -247,7 +247,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "schema rejects a doctor envelope whose result does not match doctorResult (verb-result coupling)" {
-  # structure r1 a1·b1: result가 열린 object면 doctorResult가 죽은 정의 — verb별 결합을 스키마가 강제한다.
+  # result가 열린 object면 doctorResult가 죽은 정의 — verb별 결합을 스키마가 강제한다.
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
     import { readFileSync } from "node:fs";
@@ -262,7 +262,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 
 @test "exit-code coupling branches restate x-contract.exitCodes exactly (SSOT pinning, floor 7)" {
   # 결합 분기(allOf/oneOf)는 x-contract.exitCodes의 재진술이다 — 둘이 어긋나면 드리프트.
-  # 생성기(티켓 04) 이후에도 둘은 서로 다른 수제 조각(HEADER_A vs TAIL_MID)이라 이 대조가 살아
+  # 생성기 도입 이후에도 둘은 서로 다른 수제 조각(HEADER_A vs TAIL_MID)이라 이 대조가 살아
   # 있고, 리터럴 7쌍 핀은 위 "result schema pins …" @test의 jq 단언이 소유한다(손 앵커 ①).
   run bun -e '
     import { readFileSync } from "node:fs";
@@ -297,7 +297,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "schema keeps verb-specific precision: chain only on app secrets, correlation required for dispatch failures (floor 3)" {
-  # ticket 08 리뷰: app secrets 전용 완화(chain·디스패치 전 거부)가 db/cache 분기까지 느슨하게 만들면 안 된다.
+  # app secrets 전용 완화(chain·디스패치 전 거부)가 db/cache 분기까지 느슨하게 만들면 안 된다.
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
     import { readFileSync } from "node:fs";
@@ -323,7 +323,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "url verbs are consumed directly at the op interface (no child process, schema-valid)" {
-  # AC2(티켓 08)의 직접 형태 — MCP 왕복 없이 op 결과 자체가 계약 적합함을 단언한다.
+  # MCP 왕복 없이 op 결과 자체가 계약 적합함을 직접 단언하는 형태다.
   run bun -e '
     import { CACHE_URL, DB_URL } from "./tools/lib/verbs.ts";
     import { schemaErrors } from "./tools/lib/schema-check.ts";
@@ -350,12 +350,12 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$(echo "$output" | jq -r '.result.name')" = "t" ]
 }
 
-# ── 파싱 커널의 fail-closed(homelab-cli-r2 티켓 11) ────────────────────────────────────────────
+# ── 파싱 커널의 fail-closed ────────────────────────────────────────────────────────────────────
 # 이름 이중 지정·중복 플래그는 이전엔 침묵 last-wins였다 — 엉뚱한 리소스의 자격이 .env.local에
 # 기록되거나(--name이 위치 인자를 이긴다) 편집 실수가 파괴 확인을 통과했다. 둘 다 usage-error다.
 
 @test "a name given both positionally and via --name is a usage error in either order (url verbs, floor 4)" {
-  # shell-4 실측: `db url foo --name bar` → result.name "bar", rc 0 — foo에 대한 언급이 어디에도 없었다.
+  # 실측: `db url foo --name bar` → result.name "bar", rc 0 — foo에 대한 언급이 어디에도 없었다.
   # 검출은 원본 argv를 parseFlags와 같은 걸음으로 훑으므로 순서 무관이고 두 값을 모두 인용한다.
   n=0
   for noun in db cache; do
@@ -378,7 +378,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "a repeated flag is a usage error instead of silent last-wins (shared parsing kernel at the process boundary)" {
-  # shell-7 실측: `--env-local a --env-local b` → envFile "b", rc 0. 편집 실수가 조용히 뒤 값으로 접혔다.
+  # 실측: `--env-local a --env-local b` → envFile "b", rc 0. 편집 실수가 조용히 뒤 값으로 접혔다.
   run --separate-stderr bun tools/homelab.ts db url t --env-local a --env-local b --dry-run --json
   [ "$status" -eq 2 ]
   [ -z "$output" ]
@@ -391,7 +391,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "url verbs still reject a second positional argument and still accept a lone one (fail-closed anchors)" {
-  # 티켓 11의 별칭 검출이 기존 두 경계를 밀어내지 않았음을 같은 @test에서 양방향으로 고정한다.
+  # 별칭 검출이 기존 두 경계를 밀어내지 않았음을 같은 @test에서 양방향으로 고정한다.
   run --separate-stderr bun tools/homelab.ts db url foo bar --dry-run --json
   [ "$status" -eq 2 ]
   [ -z "$output" ]
@@ -401,7 +401,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$(echo "$output" | jq -r '.result.name')" = "foo" ]
 }
 
-# ── CLI 관례 정렬(homelab-cli-r2 티켓 12) ──────────────────────────────────────────────────────
+# ── CLI 관례 정렬 ──────────────────────────────────────────────────────────────────────────────
 # 그룹 노드 --help·-h/help/--version·단일 대시 토큰. 계약(x-contract.stdout)은 「--help는 stdout
 # (exit 0)」을 규약으로 적어 뒀는데 리프만 그랬고 그룹 노드는 usage 오류였다.
 
@@ -486,13 +486,13 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "그룹 노드"
   echo "$output" | grep -q -- "--help"
-  # 티켓 13 — 세 번째 예외(내부 오류)와 그 커버리지 경계(import 시점 스키마 로드는 포획 밖)
+  # 세 번째 예외(내부 오류)와 그 커버리지 경계(import 시점 스키마 로드는 포획 밖)
   echo "$output" | grep -q "예외 셋"
   echo "$output" | grep -q "내부 오류"
   echo "$output" | grep -q "import 시점"
 }
 
-# ── 셸 출력의 총체성(homelab-cli-r2 티켓 13) ───────────────────────────────────────────────────
+# ── 셸 출력의 총체성 ───────────────────────────────────────────────────────────────────────────
 # 렌더러는 lib/render.ts가 소유한다(op는 Envelope만 반환 — 표현은 셸). 골든 전수 스윕이 그
 # 총체성(throw 0 · undefined/NaN 누출 0)을 재고, 미지 verb·미지 mode는 조용한 폴백이 아니라 throw다.
 
@@ -521,7 +521,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "the renderers are total: an unknown status mode and an unknown verb throw instead of falling through (floor 2)" {
-  # shell-6 실측: renderStatus의 마지막 return이 'mode는 pr일 것'을 가정해 합성 mode "resource"에서
+  # 실측: renderStatus의 마지막 return이 'mode는 pr일 것'을 가정해 합성 mode "resource"에서
   # `undefined is not an object (evaluating 'r.pr.number')`로 죽었다 — 조용한 폴백의 늦은 실패.
   run bun -e '
     import { renderFor, renderStatus } from "./tools/lib/render.ts";
@@ -540,7 +540,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   echo "$output" | grep -q "^threw:2$"
 }
 
-# ── 티켓 33: 어휘·종료코드·요구 도메인·관측 레버를 표면이 말하게 ──────────────────────────
+# ── 어휘·종료코드·요구 도메인·관측 레버를 표면이 말하게 ───────────────────────────────────
 
 @test "the top-level usage renders every exit code paired with its variant on one line (schema is the oracle)" {
   # ⚠️ 맨 숫자 grep은 금지다 — WAIT_FLAG_LINES가 이미 5000·1200000을 뿌려 어떤 숫자든 매치하는

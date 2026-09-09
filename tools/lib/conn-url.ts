@@ -1,6 +1,6 @@
-// conn URL 엔진 — db url/cache url 동사의 실체(cli-deepening 심화 5). bin(db-url/cache-url)에
-// 살던 로직의 lib 승격이다: 계획이 타입 값(UrlResult)이 되어 계획 키 드리프트(release r2-a5
-// 실사고 클래스)가 스키마 위반 사후 검출에서 컴파일 타임 오류로 강등되고, CLI 셸과 MCP가
+// conn URL 엔진 — db url/cache url 동사의 실체. bin(db-url/cache-url)에
+// 살던 로직의 lib 승격이다: 계획이 타입 값(UrlResult)이 되어 계획 키 드리프트(실사고
+// 클래스)가 스키마 위반 사후 검출에서 컴파일 타임 오류로 강등되고, CLI 셸과 MCP가
 // 같은 op를 얇은 어댑터로 소비한다(status.ts 패턴 — 자식 프로세스 이중 실행·계획 화이트리스트
 // 소멸). 기존 bin은 이 엔진 위의 껍데기로 존속한다(package.json db:url/cache:url 소비자 보존).
 //
@@ -14,7 +14,7 @@
 //     envLocal의 MCP 노출은 별도 신뢰 경계 결정으로 이연).
 //   - conn 핸들·env 키는 레이아웃 커널(resource-layout) 소비 — 재유도 금지.
 //   - host 입력(--host·TS_DB_HOST·CACHE_LOCAL_HOST)은 hostError 술어를 지나야 URL·.env 행에 보간된다
-//     (티켓 03 — 개행 하나로 .env.local에 임의 행이 주입되고 success가 났다). 치환은 정규식이 아니라
+//     (개행 하나로 .env.local에 임의 행이 주입되고 success가 났다). 치환은 정규식이 아니라
 //     WHATWG URL host setter(userinfo 보존), 쓰기 seam은 개행을 2차로 막고 신규 파일은 0600이다.
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
@@ -125,7 +125,7 @@ function cacheMode(input: CacheUrlInput): Mode {
 // wrote:false로 접는다). host 술어는 상류의 2차이고, URL setter는 개행을 조용히 지우므로 여기가 마지막 선이다.
 // 신규 생성 파일만 0600 — superuser URL(admin)이 같은 호스트의 다른 사용자에게 읽히지 않게. mode는 O_CREAT
 // 시점에만 적용되므로 기존 파일의 퍼미션은 건드리지 않는다(사용자 파일 퍼미션 존중 — chmod 안 함).
-// ⚠️ **중복 제거의 판정 조건은 '키 행이 1개'가 아니라 '옛 자격 문자열이 파일에 0회'다**(티켓 39).
+// ⚠️ **중복 제거의 판정 조건은 '키 행이 1개'가 아니라 '옛 자격 문자열이 파일에 0회'다**.
 // 접두 정확 일치(`KEY=`)만 지우면 dotenv가 똑같이 읽는 `export KEY=`·`KEY = ` 행이 살아남아 새 행과
 // 공존하고, 어느 값이 이기는지가 로더 구현에 달린다 — 회전한 자격이 파일에 남는 것 자체가 결함이다.
 // 빈 줄·주석은 **사용자의 구조**라 보존한다(종전 `.filter(Boolean)`이 빈 줄을 전부 지웠다).
@@ -195,12 +195,12 @@ export function runDbUrl(input: DbUrlInput): UrlOutcome {
   const tsHost = input.host ?? process.env.TS_DB_HOST ?? "";
   if (input.dryRun === true) {
     // 계획은 클러스터 무의존이라 host가 없어도 success다 — 다만 **미해석 사실을 note가 말한다**.
-    // 종전에는 dry-run이 host 해석 앞에서 성공해 "계획은 통과, 라이브는 --host 필요"가 됐다(connurl-8).
+    // 종전에는 dry-run이 host 해석 앞에서 성공해 "계획은 통과, 라이브는 --host 필요"가 됐다.
     const unresolved = tsHost === "" ? " ⚠️ host 미해석(host 입력 없음 — 라이브 실행 전 --host / MCP host / env TS_DB_HOST 중 하나 필요)" : "";
     return { variant: "success", omitted: [], result: { ...base, wrote: false, note: `평문 URL은 stdout에 출력하지 않음 — 라이브 실행 시 host를 tailscale로 치환해 대상 파일에만 기록${unresolved}` } };
   }
   // 문구는 transport 중립이어야 한다 — 이 error는 description이 아니라 Envelope의 result.error라
-  // MCP 에이전트에게 그대로 간다(MCP 인자는 `host`이지 `--host`가 아니다 — connurl-9).
+  // MCP 에이전트에게 그대로 간다(MCP 인자는 `host`이지 `--host`가 아니다).
   if (tsHost === "") return failure("host 입력(CLI --host / MCP host / env TS_DB_HOST) 필요 — pg-rw-tailscale LB host(런북 db-cache-access.md)");
   // host 미지정(입력 결함)은 skip(도메인 부재)보다 앞선다 — 도메인이 생겨도 host 없이는 라이브
   // 실행이 성립하지 않으니, 먼저 고칠 수 있는 것을 먼저 보고한다(cache url은 host 기본값이 있어

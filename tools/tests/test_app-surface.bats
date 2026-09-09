@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 앱 표면 module(tools/lib/app-surface.ts, lib-convergence d4)의 계약 테스트.
+# 앱 표면 module(tools/lib/app-surface.ts)의 계약 테스트.
 # "앱은 어떤 파일들로 이루어지는가"의 유일 선언 — 경로 SSOT(appRel/appPaths) + 읽기/쓰기/제거 함수 API.
 # 집합 동일성 단언(기록 목록 ↔ 디스크 실측)의 이빨은 writeAppSurface **본문**이다: 거기서 쓰고 목록에
 # 안 올리면(또는 반대) red. 철거 대칭은 removeAppSurface의 디렉토리 통째 rm이 구조로 보장한다.

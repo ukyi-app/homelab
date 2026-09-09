@@ -1,4 +1,4 @@
-# recipients는 공개키다(커밋해도 안전). 개인키는 레포 밖에서 보관한다(Task 0.4).
+# recipients는 공개키다(커밋해도 안전). 개인키는 레포 밖에서 보관한다.
 # M0이 여기에 실제 공개키 둘 다 채우고, M2는 cluster 키를 소비만 한다.
 _recipients:
   - &cluster age1n3j7p70f0unl5dgrjhtr9jxrdntz2a67dtntu446qus9c3jd3fnsp8z960

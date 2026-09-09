@@ -5,10 +5,13 @@
 
 운영(ops) 이미지: `kubectl` + `psql` (postgresql-client-18) + `rclone` + `curl`.
 
-CI(Task 6.15 matrix)가 `ghcr.io/ukyi-app/pg-tools:18-rclone`과 `:sha-<gitsha>`로
-게시한다. Milestone 4의 restore-drill CronJob, `pg_dump → rclone → R2` 헤지, 그리고
-캐시(Valkey) 백업 CronJob(`platform/cache/prod/backup-cronjob.yaml` — kubectl discover +
-rclone R2 업로드)이 이 이미지를 참조한다(M4의 LIVE drill 수용 기준은 이 이미지의 존재를 전제).
+`.github/workflows/build.yaml`의 matrix(`app: [pg-tools, skopeo]`)가 `ghcr.io/ukyi-app/pg-tools:18-rclone`과
+`:sha-<gitsha>`로 게시한다. 이 이미지를 참조하는 매니페스트는 CNPG의 restore-drill CronJob·
+`pg_dump → rclone → R2` 헤지 CronJob·ensure-role-password Job, 캐시(Valkey) 백업 CronJob
+(`platform/cache/prod/backup-cronjob.yaml` — kubectl discover + rclone R2 업로드), AdGuard rewrite
+리컨실러, victoria-stack pvc-du-exporter다(LIVE 복구 드릴의 수용 기준이 이 이미지의 존재를 전제한다).
+열거는 손 사본이므로 권위는 레포 스캔이다 — digest 재핀은 `tools/repin-ops-image.ts`가 `repo-walk`의
+`image-ownership` 스코프에서 대상을 파생한다.
 
 ## 버전을 올릴 때 — 그리고 왜 체크섬을 하드코딩하지 않는가
 

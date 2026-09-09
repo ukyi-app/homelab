@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # ensure-bump-pr — bump PR 멱등 **실행기**(조회 → 결정 → 변이). 같은 bump = 같은 브랜치 = 열린 PR 1개.
 #
-# 왜 실행 seam인가(plan r2 R-4): 결정만 하는 도구는 GREEN이 돼도 프로덕션은 그대로일 수 있다.
+# 왜 실행 seam인가: 결정만 하는 도구는 GREEN이 돼도 프로덕션은 그대로일 수 있다.
 # 이 스위트는 도구가 **실제로 낸 명령**(argv)을 PATH stub으로 가로채 기록하고, 그 기록으로
 # ① 순서(조회 → 변이) ② 부작용 유무(skip이면 push·create 0회) ③ 정확한 argv 배열을 단언한다.
 # 하네스 관용구는 이 레포의 선례를 따른다 — tests/test_sealed-secrets-restore.bats(kubectl stub),
@@ -245,7 +245,7 @@ PY
 # NUL 구분 원장(R-9): 인자 개수·경계 보존. 레코드는 RS(0x1e)로 종단한다.
 { printf '%s\0' gh "$@"; printf '\036'; } >> "$CALLS"
 
-# ── 이 stub은 라이브 gh의 **ref-연결 페이지 조회**를 흉내낸다(structure r12 R-40) ─────────────────
+# ── 이 stub은 라이브 gh의 **ref-연결 페이지 조회**를 흉내낸다 ─────────────────────────────────────
 # 도구는 `repository.ref(qualifiedName:$ref).associatedPullRequests` connection을 **한 페이지씩** 소비한다
 # (`endCursor` 변수가 가리키는 페이지). 커서 규약(라이브 opaque 커서 흉내): 없음 = 0페이지, "cursorN" = N+1페이지.
 # ★ 라이브 실측(gh api graphql): associatedPullRequests는 **head-연결**이라(base=main에도 0건 — 라이브 확인)
@@ -3308,7 +3308,7 @@ setup_closable_sibling() {
     [ "$status" -eq 0 ] || { echo "조회 변수 계약 위반: '$want' 인자가 없다"; dump_calls; false; }
   done
 
-  # ①-b ★★ **전 페이지를 한 subprocess 캡처에 담지 않는다**(structure r10 R-33) ────────────────
+  # ①-b ★★ **전 페이지를 한 subprocess 캡처에 담지 않는다** ────────────────────────────────────
   # `--paginate --slurp`은 열거를 끝까지 따라가지만 그 **전부를 한 응답**으로 받는다. spawnSync의 출력
   # 버퍼는 유한하고(bun 1.3.14 실측: 기본 **1 MiB**, 초과 시 자식이 SIGTERM으로 살해되고 ENOBUFS),
   # PR 하나가 comments(first:100)·labels(first:50)까지 실어 오므로 수 KB다 → **같은 head의 포크 PR을
@@ -3933,7 +3933,7 @@ setup_closable_sibling() {
 
 @test "identity is fail-closed at the CLI: --kind without --name (and vice versa) exits 2" {
   # 이름만 받던 구 --app 계약의 폐지 지점 — 신원의 반쪽만 오면 파일시스템에서 나머지를 추측하게 되고,
-  # 그 추측이 동명 충돌에서 다른 target의 인가를 적용한다(design r2-1). 어느 반쪽의 부재도 exit 2다.
+  # 그 추측이 동명 충돌에서 다른 target의 인가를 적용한다. 어느 반쪽의 부재도 exit 2다.
   run bun tools/ensure-bump-pr.ts --kind app --tag "$TAG" --action bump --title t --body b
   [ "$status" -eq 2 ]
   echo "$output" | grep -q -- "--name"
@@ -3961,7 +3961,7 @@ setup_closable_sibling() {
 }
 
 @test "W81: reconcile fail-closes a legacy branch shadowed by a same-name bespoke surface (revoke + red)" {
-  # 레거시 이행의 fail-closed 절반(design r2-1) — 구형 이름엔 kind가 없어서, 동명 bespoke 표면이 실재하면
+  # 레거시 이행의 fail-closed 절반 — 구형 이름엔 kind가 없어서, 동명 bespoke 표면이 실재하면
   # 그 브랜치가 어느 레인의 bump였는지 증명할 수 없다. 무장은 회수하고(안전 방향) run은 빨개진다
   # (사람이 구형 PR을 정리해야 이행이 끝난다 — 조용히 초록이면 영원히 안 끝난다).
   write_image_pin '{"file":"deployment.yaml","path":["spec"],"autoDeploy": true}'

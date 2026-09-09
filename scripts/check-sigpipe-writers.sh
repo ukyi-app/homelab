@@ -25,7 +25,7 @@
 #        1회라 그대로 제외한다. 완벽한 구분은 아니지만(아주 긴 스칼라는 여러 번 쓸 수 있다) 실측된
 #        위험은 전부 다중행 쪽이었고, 전면 금지로 넓히면 스칼라 검사 30여 곳까지 herestring으로
 #        바꿔야 해 변경 대비 이득이 낮다.
-#    (b) [c71-3 확장, 2026-09-05] 파일/명령 writer — `sed`·`awk`·`cat`·`grep`·`kubectl`·`locale`가
+#    (b) [2026-09-05 확장] 파일/명령 writer — `sed`·`awk`·`cat`·`grep`·`kubectl`·`locale`가
 #        stdout에 쓴 다중행 출력을 그대로 `grep -q`에 파이프하는 형태도 같은 기전이다(외부 프로세스는
 #        libc stdio 버퍼링 단위가 bash 빌트인 write보다 작아 다중 write() 확률이 더 높다). 라이브
 #        실증: PR #641 gate red(`check-locale-collation.sh` 레인 D `sed … "$f" | grep -qE 'guard_init'`,
@@ -36,7 +36,7 @@
 #        — 같은 커밋에서 herestring 전환)이 나와 그 축소 근거는 재검 결과 성립하지 않았다.
 #        범위 밖(전수 열거 위반 0건이라 이번 확장 대상이 아님): `sops -d …`·`yq`·`jq` 등 나머지
 #        외부 명령 writer — 새 라이브 사례가 나오면 이 목록에 추가한다.
-#        범위 밖(같은 이유, 전수 열거 위반 0건) — reg-a1-bats-guards-2: 다단 파이프에서 키워드와
+#        범위 밖(같은 이유, 전수 열거 위반 0건) — 다단 파이프에서 키워드와
 #        `grep -q` 사이에 목록 밖 명령(sort·tr·uniq·column 등)이 끼면 무증인이다(`[^|]*`가 파이프
 #        문자를 못 건너뛰어 키워드 바로 다음 세그먼트만 본다). 패턴을 "세그먼트 개수≥1·마지막이
 #        grep -q"로 넓히면 무관 파이프(`printf '%s' "$var" | grep -qE` 등 26곳)가 신규 오탐으로
@@ -77,13 +77,13 @@ while IFS= read -r f; do
   # 접두를 패턴에 넣으면 컬럼 0을 놓친다(위 ③ 참조).
   hits_builtin="$(grep -nE "(printf[[:space:]]+'%s\\\\n'|echo)[[:space:]]+\"\\\$[A-Za-z_][A-Za-z0-9_]*\"[[:space:]]*\\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q" "$f" \
     | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
-  # (b) [c71-3] 파일/명령 writer — 키워드 뒤 같은 파이프 세그먼트(`[^|]*`, 앞선 `|`를 넘지 않는다) 안에
+  # (b) 파일/명령 writer — 키워드 뒤 같은 파이프 세그먼트(`[^|]*`, 앞선 `|`를 넘지 않는다) 안에
   # 아무 인자가 오고 그 뒤 `grep -q`로 이어지면 잡는다. `printf '%s' "$scalar"`류는 이 키워드 목록에
   # 없어 자동으로 제외된다 — 별도 스칼라 예외가 필요 없다. 키워드 집합은 위 (b) 산문의 라이브 실증
   # 범위로 의도적으로 좁다(sops/yq/jq 등은 전수 열거 위반 0건이라 미포함).
   hits_cmd="$(grep -nE '\b(sed|awk|cat|grep|kubectl|locale)\b[^|]*\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q' "$f" \
     | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
-  # (c) [티켓 49, 2026-09-08] **조기 종료 소비자** — `grep -q`가 아니라 `awk '… exit'`가 파이프를 닫는 형태.
+  # (c) [2026-09-08] **조기 종료 소비자** — `grep -q`가 아니라 `awk '… exit'`가 파이프를 닫는 형태.
   #     host-preflight [6]의 `ip … | awk '… { print $1; exit }'`가 CI에서 두 번 red였다: awk가 첫 매치에서 나가면
   #     writer(실물 ip의 나머지 링크·스텁의 다음 echo)가 SIGPIPE(141) — 러너처럼 SIGPIPE가 무시된 환경에선
   #     EPIPE 쓰기 오류(rc 1) — 로 죽고 pipefail이 그것을 채택한다. writer 종류를 가리지 않는다(`$VAR` 명령

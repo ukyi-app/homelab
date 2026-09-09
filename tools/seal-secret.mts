@@ -1,4 +1,4 @@
-// .env → SealedSecret 봉인 CLI (`pnpm secret:seal`).
+// .env → SealedSecret 봉인 CLI (`bun run secret:seal`).
 // .env의 UPPER_SNAKE 키가 봉인 대상의 SSOT다. .app-config.yml에는 시크릿 키 목록을 쓰지 않는다.
 // 평문 Secret manifest는 디스크에 쓰지 않고 kubeseal stdin으로만 흐른다.
 // 이 사본은 homelab 마이그레이션/테스트용 — 동일 스크립트가 app-starter 템플릿에도 동봉된다.

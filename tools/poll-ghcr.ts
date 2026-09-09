@@ -14,7 +14,7 @@
 // 이 스크립트는 플래너(읽기 전용)다 — 실제 bump/PR은 bump-poll.yaml이 plan JSON을 소비해 수행.
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
-// subprocess 실행은 exec seam 경유(d6②) — timeoutMs 0으로 종전 무-timeout 동작을 보존한다.
+// subprocess 실행은 exec seam 경유 — timeoutMs 0으로 종전 무-timeout 동작을 보존한다.
 // 판정 정책(진짜 404만 absent·transient는 rethrow→refuse)은 아래 콜사이트가 그대로 소유한다.
 import { gh as ghExec, sh } from "./lib/exec.ts";
 import { parse } from "yaml";
@@ -138,7 +138,7 @@ function computeBump(result: Draft, s: { key: string; src: string; repo: string;
   //   ② values 핀 되돌리기 + `.bindings.json` autoDeploy:false를 **한 PR**로 → ③ 머지·수렴 →
   //   ④ 원인 수정 후 true 복원.
   // 기본값이 fail-closed(false)로 뒤집힌 뒤로 이 절차가 필요한 앱은 **명시 opt-in 앱뿐**이다
-  // (create-app의 `?? false` + app-config-schema `default: false` — owner 결정 Q4/티켓 44).
+  // (create-app의 `?? false` + app-config-schema `default: false` — owner 결정 Q4).
   const baseCmp = q.compare(s.src, s.deployed, "main");
   if (!baseCmp || !["ahead", "identical"].includes(baseCmp.status))
     return { ...result, action: "refuse", reason: `배포 SHA(${short(s.deployed)})가 main 조상이 아님(status=${baseCmp?.status ?? "?"}) — 명시적 rollback 작업으로만` };
@@ -220,7 +220,7 @@ function planComponent(dir: string, name: string): Draft {
 
 // apps/*/deploy/prod 중 source-repo 바인딩이 있는 앱만 순회.
 // 열거는 공유 워커의 `apps` 유닛 스코프가 소유하고, `source-repo` 실재라는 **의미론적 필터는 여기**
-// 남는다 — 스코프가 거르면 다른 소비자(check-app-deploy)가 잡아야 할 상태가 사라진다(design-r1 R-1).
+// 남는다 — 스코프가 거르면 다른 소비자(check-app-deploy)가 잡아야 할 상태가 사라진다.
 const plans: Draft[] = [];
 for (const { name } of listUnits("apps", args.root)) {
   if (!existsSync(appPaths(args.root, name).sourceRepo)) continue;

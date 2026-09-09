@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 셸 가드 프롤로그/방출 커널(scripts/lib/guard.sh, lib-convergence d2)의 계약 테스트.
+# 셸 가드 프롤로그/방출 커널(scripts/lib/guard.sh)의 계약 테스트.
 # 3함수: guard_init(프롤로그 — pipefail·LC_ALL=C·ROOT·scan-floor source) ·
 # guard_skip(SKIP 마커 + exit 4 원자 방출) · detect_run(awk 검출기의 fail-closed 실행 —
 # 인자 검증·rc 포착·READFILES 열거수 대조. #525가 클래스를 명명하고도 #532에서 손 복사로

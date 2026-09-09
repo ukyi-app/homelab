@@ -5,8 +5,9 @@ SHELL := /usr/bin/env bash
 KUBECONFIG_LIVE := $(PWD)/infra/k3s-bootstrap/kubeconfig
 SOPS_AGE_KEY_FILE ?= $(HOME)/.config/sops/age/keys.txt
 
-# 클러스터 정체성 대조(D-i). 라이브 Mac과 NUC의 kubeconfig는 경로·포트가 같고 노드명까지 `k3s`로
-# 같다 — KUBECONFIG를 잘못 잡으면 아무 경고 없이 반대편을 때린다. context 이름·InternalIP·arch
+# 클러스터 정체성 대조(D-i). 컷오버 시기 두 클러스터의 kubeconfig가 경로·포트는 물론 노드명까지
+# `k3s`로 같았다 — kubeconfig는 스스로를 구별해 주지 않으므로(낡은 사본·DR 재구축·다음 컷오버)
+# KUBECONFIG를 잘못 잡으면 아무 경고 없이 의도하지 않은 클러스터를 때린다. context 이름·InternalIP·arch
 # 셋을 라이브로 대조한다.
 # ⚠️ **prerequisite로 달지 말 것.** prerequisite는 recipe보다 먼저 도는데,
 #    tests/gates/test_guard-skip-signalling.bats가 `make verify-posture`를 `-n` 없이 **실제로**

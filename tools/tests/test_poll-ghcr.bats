@@ -249,7 +249,7 @@ EOF
 
 # ── 라이브 분기(--fixtures 부재) 증인 — seam 이관 코드(gh api·docker inspect)가 실제로 도는 유일한
 # 경로다. 위 픽스처 테스트들은 makeQuery의 fixtures 분기에서 early return하므로 이관 코드를 한 줄도
-# 밟지 않는다(d6② 동작 등가는 여기서만 실증된다). PATH stub이 원격을 대신한다.
+# 밟지 않는다(동작 등가는 여기서만 실증된다). PATH stub이 원격을 대신한다.
 live_stubs() {
   S="$BATS_TEST_TMPDIR/livebin"; mkdir -p "$S"
   cat > "$S/gh" <<'GH'
@@ -307,7 +307,7 @@ DK
 }
 
 @test "the autoDeploy rollback order is stated on both tracked surfaces, with closing open bump PRs as step 1" {
-  # homelab-cli-r2 티켓 38(b): 런북은 gitignored라 에이전트가 못 읽는다 — 롤백 순서는 tracked 표면
+  # 런북은 gitignored라 에이전트가 못 읽는다 — 롤백 순서는 tracked 표면
   # 둘(CONTEXT.md 어휘 · 플래너 refuse 주석)이 들고 있어야 한다. 1단계가 '열린 bump PR 닫기'인 것이
   # 핵심이다: 이미 무장된 형제 PR은 autoDeploy를 false로 내려도 무장된 채 남는다(라이브 좀비 #348).
   n=0

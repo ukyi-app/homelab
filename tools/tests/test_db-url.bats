@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
-# db-url — 로컬/GUI DB 연결 URL을 .env.local(admin은 .env.admin.local)에 기록. 출력 키는 #141 이후
+# db-url — 로컬/GUI DB 연결 URL을 .env.local(admin은 .env.admin.local)에 기록. 출력 키는
 # **namespaced**(`<NAME>_RO_DATABASE_URL`/`<NAME>_DATABASE_URL`/`<NAME>_DATABASE_ADMIN_URL` — 클러스터
 # envFrom과 같은 키. bare DATABASE_URL은 dev.ts 모드 1 전용이다) + 모드 분리(RO/RW/admin) +
 # 채널 분리(F2). dry-run만 검증(CI-safe, kubectl 불요). ⚠️ 중간 단언은 [ ]만.
-# 라이브 레인(kubectl 인라인 stub + 빈 KUBECONFIG)은 host 술어·URL 치환·자격 파일 무결성(티켓 03)을 밟는다.
+# 라이브 레인(kubectl 인라인 stub + 빈 KUBECONFIG)은 host 술어·URL 치환·자격 파일 무결성을 밟는다.
 bats_require_minimum_version 1.5.0
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 
@@ -76,7 +76,7 @@ run_live() { run env PATH="$LT/bin:$PATH" KUBECONFIG="$LT/kubeconfig" bun "$ROOT
 }
 
 @test "db-url without KUBECONFIG signals skip via the helper (exit 4, marker, no write)" {
-  # skip variant의 bin 대응 — 성공 문구/exit 0으로 위장하면 "기록했다"는 거짓말이다(kernel-followups 06).
+  # skip variant의 bin 대응 — 성공 문구/exit 0으로 위장하면 "기록했다"는 거짓말이다.
   T="$(mktemp -d)"
   run env -u KUBECONFIG TS_DB_HOST=h bun "$ROOT/tools/db-url.ts" --name orders --env-local "$T/.env.local"
   [ "$status" -eq 4 ]
@@ -100,7 +100,7 @@ STUB
   rm -rf "$T"
 }
 
-# ── host 술어 · URL 치환 · 자격 파일 무결성(homelab-cli-r2 티켓 03) ──────────────────────────
+# ── host 술어 · URL 치환 · 자격 파일 무결성 ──────────────────────────────────────────────────
 # host는 무검증으로 URL·.env 행에 보간됐다 — 개행 하나로 .env.local에 임의 행이 주입되고 success가 났다(실측).
 # 술어는 화이트리스트가 아니라 URL 구조를 깨는 문자 거부라 MagicDNS·밑줄·후행점 FQDN·IPv6 대괄호는 통과한다.
 
@@ -203,8 +203,8 @@ STUB
   rm -rf "$T"
 }
 
-# ── namespaced 키 문서·env 파일 위생(homelab-cli-r2 티켓 39) ───────────────────────────────
-# #141(b0fb87e) 이후 출력 키는 prod conn 핸들과 같은 namespaced 키다. 문서만 canonical에 멈춰 있었다.
+# ── namespaced 키 문서·env 파일 위생 ───────────────────────────────────────────────────────
+# 출력 키는 prod conn 핸들과 같은 namespaced 키다. 문서만 canonical에 멈춰 있었다.
 
 @test "the README states the five namespaced env keys (positive greps, floor 5)" {
   # 부재 grep 단독은 표기 변경에 우회된다(「canonical」만 지우면 초록) — 존재를 센다.
@@ -230,7 +230,7 @@ STUB
 }
 
 @test "an existing env file keeps its comments and blank lines, and the stale credential survives nowhere (export/spaced forms too)" {
-  # connurl-11: 중복 제거가 `KEY=` 접두 정확 일치뿐이라 `export KEY=`·`KEY =` 행이 남았다 —
+  # 중복 제거가 `KEY=` 접두 정확 일치뿐이라 `export KEY=`·`KEY =` 행이 남았다 —
   # 어느 값이 이기는지가 로더 구현에 달렸다. 판정은 '키 행 1개'가 아니라 **'옛 자격이 0회'**다.
   live_fixture 'postgres://u:n@pg-rw.prod:5432/orders'
   printf '# 로컬 개발용\n\nOTHER=1\nexport ORDERS_RO_DATABASE_URL=postgres://old:old@stale:5432/orders\n\nORDERS_RO_DATABASE_URL = postgres://old2:old2@stale:5432/orders\n# 꼬리 주석\n' > "$LT/pre.env"
@@ -249,7 +249,7 @@ STUB
 }
 
 @test "writing outside .gitignore warns in the note; a repo that ignores .env.* does not (and no git means silence)" {
-  # connurl-12: 대상이 gitignore 밖이어도 아무 신호가 없었다 — `--env-local local.env`나 앱 레포의
+  # 대상이 gitignore 밖이어도 아무 신호가 없었다 — `--env-local local.env`나 앱 레포의
   # .gitignore는 이 레포 통제 밖이다. 경고는 note에만 싣고 variant는 success를 유지한다(관측 편의).
   # 봉투(note)를 읽어야 하므로 통합 CLI(--json)를 쓴다 — bin 껍데기는 성공 시 한 줄만 낸다.
   live_fixture 'postgres://u:n@pg-rw.prod:5432/orders'
@@ -275,7 +275,7 @@ STUB
 }
 
 @test "db --dry-run reports an unresolved host in the note while staying a success variant" {
-  # connurl-8: dry-run이 host 해석 앞에서 success를 내 「계획은 통과, 라이브는 --host 필요」가 됐다.
+  # dry-run이 host 해석 앞에서 success를 내 「계획은 통과, 라이브는 --host 필요」가 됐다.
   # 계획은 클러스터 무의존이라 success를 유지하되, 미해석 사실은 note가 말한다.
   # ⚠️ TS_DB_HOST는 명시적으로 걷어낸다 — 러너 셸에 남아 있으면 vacuous green이다.
   run --separate-stderr env -u TS_DB_HOST bun "$ROOT/tools/homelab.ts" db url orders --dry-run --json
@@ -294,7 +294,7 @@ STUB
 }
 
 @test "the host-absent error names every transport that can supply it (CLI flag, MCP arg, env)" {
-  # connurl-9: MCP에서 도달 가능한 오류가 CLI 플래그(--host)만 지시했다 — MCP 인자는 host다.
+  # MCP에서 도달 가능한 오류가 CLI 플래그(--host)만 지시했다 — MCP 인자는 host다.
   run env -u TS_DB_HOST -u KUBECONFIG bun "$ROOT/tools/db-url.ts" --name orders --env-local "$BATS_TEST_TMPDIR/none.env"
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "host 입력"

@@ -294,7 +294,7 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
 }
 
 @test "a half-scaffolded clone that lost scripts.scaffold still re-scaffolds (entry point, not npm script)" {
-  # 04 인계의 별건: 스캐폴더는 자기 실행 중에 **package.json을 재작성한다**. 그 뒤 어떤 이유로든
+  # 스캐폴더는 자기 실행 중에 **package.json을 재작성한다**. 그 뒤 어떤 이유로든
   # (타임아웃·중단·스캐폴더 오류) 죽으면 `scripts.scaffold`가 사라진 채 scaffold/가 남는데, 재개가
   # `bun run scaffold`였다면 그 재호출이 "Script not found"로 **영구히** 실패해 바로 위 재실행 계약이
   # 깨졌다(timeoutMs: 0은 트리거 하나를 없앴을 뿐이다). init은 preflight가 검증한 **진입점 파일**을
@@ -351,7 +351,7 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
   run_init myapp --archetype api --json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.variant')" = "success" ]
-  # 사람용 렌더(renderInit)의 단계 분기(티켓 13) — 첫 실행은 실제로 밟은 체크포인트를 열거한다.
+  # 사람용 렌더(renderInit)의 단계 분기 — 첫 실행은 실제로 밟은 체크포인트를 열거한다.
   echo "$stderr" | grep -q "^app init myapp — 아키타입 api · private · repo "
   echo "$stderr" | grep -q "^단계: 레포 생성 · 스캐폴드 · 첫 push$"
   # 재실행: 이미 완료(마커 존재·시크릿 미요청) → no-op, 부수효과 없음.
@@ -411,7 +411,7 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
   echo "$output" | grep -q -- "--dispatch-secrets"
   echo "$output" | grep -q -- "--repo-public"
   # dispatch App은 2026-09-03 org 설치가 제거됐다(AGENTS.md 트리거 경계) — 코드 경로는 휴면으로
-  # 남기지만, help가 그 사실을 말하지 않으면 '크론 지연 제거' 약속이 거짓이 된다(docs-1).
+  # 남기지만, help가 그 사실을 말하지 않으면 '크론 지연 제거' 약속이 거짓이 된다.
   echo "$output" | grep -q "설치 없음"
 }
 
@@ -447,7 +447,7 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
 }
 
 @test "a secret-stage failure reports checkpoint secrets and stays schema-valid (reachable enum member, floor 2)" {
-  # contract-9: initFailure.checkpoint enum의 "secrets"가 엔진 도달 가능해야 한다 — 시크릿 쓰기를
+  # initFailure.checkpoint enum의 "secrets"가 엔진 도달 가능해야 한다 — 시크릿 쓰기를
   # 시도한 두 실패(App ID·private key)는 '도달 지점 = secrets'다. 목록 조회 실패는 시크릿 쓰기를
   # 시도조차 못 한 자리라 "pushed"로 남는다(아래 대조군은 그 앞 단계인 스캐폴드 실패).
   n=0
@@ -489,7 +489,7 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
   [ "$(echo "$output" | jq -r '.result.checkpoint')" != "secrets" ]
 }
 
-# ── 재개 입력 불일치·생성 3분기·키 경로 격리·마커 ref(homelab-cli-r2 티켓 28) ─────────────────
+# ── 재개 입력 불일치·생성 3분기·키 경로 격리·마커 ref ─────────────────────────────────────
 
 @test "a re-run with a DIFFERENT archetype is refused at preflight, and a legacy marker without archetype still converges" {
   run_init myapp --archetype api --json
@@ -527,7 +527,7 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
 @test "a repo create that failed AFTER the server made the repo reports checkpoint created, not preflight" {
   # 템플릿 복제는 GitHub 쪽 왕복이라(init.ts timeoutMs:0 주석) 서버 반영 뒤 클라이언트만 죽는 창이
   # 있다. 종전엔 무조건 preflight라 다음 실행이 '마커 없는 기존 레포'를 만나 **자기 레포**에 --adopt를
-  # 요구했고, 사용자는 결과만 보고는 레포 생성 여부를 알 수 없었다(appverbs-7).
+  # 요구했고, 사용자는 결과만 보고는 레포 생성 여부를 알 수 없었다.
   run --separate-stderr env PATH="$STUB" GIT_CONFIG_GLOBAL="$INIT_GCFG" \
     GIT_CONFIG_SYSTEM=/dev/null HOME="$BATS_TEST_TMPDIR" STUB_GH_CREATE_FAIL_AFTER=1 \
     HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 \
@@ -556,7 +556,7 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
 
 @test "a dispatch-secrets key directory inside the clone tree is refused at preflight (add -A would commit it)" {
   # 재개 경로의 `git add -A`는 클론 안 임의 untracked 파일을 첫 스캐폴드 커밋에 실어 원격 main으로
-  # 보낸다 — 라이브로 읽은 템플릿 .gitignore에 `*.pem`이 없다(appverbs-8). 값을 읽지 않는 이 엔진의
+  # 보낸다 — 라이브로 읽은 템플릿 .gitignore에 `*.pem`이 없다. 값을 읽지 않는 이 엔진의
   # '평문 비노출' 보장이 git 채널에는 없으므로 **위치**로 막는다.
   run_init myapp --archetype api --json
   [ "$status" -eq 0 ]
@@ -587,7 +587,7 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
 @test "the remote marker read pins ref=main, the same fixed ref that push and the dispatchers use" {
   # 마커 판독만 기본 브랜치를 읽고(ref 미지정) push·_create-app.yaml·_update-secrets.yaml은 main
   # 고정이었다 — org 기본 브랜치 설정이 바뀌면 마커가 main에 있어도 '부재'로 읽혀 --adopt 재개 →
-  # 재스캐폴드 → non-fast-forward push 루프가 된다(appverbs-9).
+  # 재스캐폴드 → non-fast-forward push 루프가 된다.
   run_init myapp --archetype api --json
   [ "$status" -eq 0 ]
   : > "$CALLS"
@@ -602,18 +602,18 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
 @test "the scaffolder gate comment names two different objects instead of claiming the verified file is the executed one" {
   # 관문은 TEMPLATE_REPO의 **원격 사본**(gh api contents), 실행은 클론된 대상 레포의 워킹 트리
   # 파일이다 — 같은 *경로*이지 같은 오브젝트가 아니다(--adopt·디렉토리 재사용·T1/T2 시차 셋이
-  # 갈린다, r2-mcp-filesystem-authority-4).
+  # 갈린다).
   [ "$(grep -c '검증 대상 = 실행 대상' tools/lib/init.ts)" = "0" ]
   # 양성 대조(검출기 생존) — 같은 grep 형태가 정정된 문구는 실제로 잡는다.
   [ "$(grep -c 'TEMPLATE_REPO의 원격 사본' tools/lib/init.ts)" -ge 1 ]
 }
 
-# ── --repo-public 의미 분리와 스캐폴드 argv 고정(homelab-cli-r2 티켓 29) ───────────────────────
+# ── --repo-public 의미 분리와 스캐폴드 argv 고정 ──────────────────────────────────────────
 
 @test "the old --public flag is a usage error whose hint names the app-exposure key it was confused with" {
   # 같은 이름 다른 뜻이었다: 이 동사의 --public은 GitHub **레포 가시성**이고, 실물 스캐폴더의
-  # --public은 `.app-config.yml`의 route.public(앱 **노출**)이다 — init은 후자를 넘기지도 않는다
-  # (appverbs-2). 그래서 이름을 --repo-public으로 가르고, 구 이름은 힌트와 함께 거부한다.
+  # --public은 `.app-config.yml`의 route.public(앱 **노출**)이다 — init은 후자를 넘기지도 않는다.
+  # 그래서 이름을 --repo-public으로 가르고, 구 이름은 힌트와 함께 거부한다.
   run_init mypublic --archetype site --public --json
   [ "$status" -eq 2 ]
   [ -z "$output" ]
@@ -625,7 +625,7 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
 }
 
 @test "the scaffolder argv is exactly the non-interactive contract — no app-facing flag is passed through" {
-  # 명시 기각(티켓 29): --app-public·--metrics·--no-autodeploy 패스스루는 넣지 않는다 —
+  # 명시 기각: --app-public·--metrics·--no-autodeploy 패스스루는 넣지 않는다 —
   # `.app-config.yml`이 SSOT이고 클론이 로컬에 있으며, 계약 마커 확장은 fail-closed로 호환 템플릿을
   # 거부한다. 그 기각을 코드로 붙잡는 가드다(재개 조건: 실제 온보딩에서 파일 편집이 반복 마찰로
   # 실증될 때).
@@ -642,7 +642,7 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
 }
 
 @test "a push made by THIS call carries its headSha, and a no-op omits it (only causal facts are reported)" {
-  # 에이전트 E2E 체인의 첫 단절 — init 결과에 다음 단계의 상관자가 없었다(product-9). 첫 push가
+  # 에이전트 E2E 체인의 첫 단절 — init 결과에 다음 단계의 상관자가 없었다. 첫 push가
   # 촉발한 빌드는 그 SHA로 태그되므로, push된 HEAD SHA 하나가 status·앱 레포 축 조회의 좌표다.
   # 네트워크 0(`git rev-parse HEAD`).
   run_init myapp --archetype api --json

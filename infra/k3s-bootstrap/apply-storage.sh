@@ -17,7 +17,7 @@
 #
 # 시임(테스트용): KUBECONFIG_PATH · BULK_RUN(권한 상승, 기본 sudo) · BULK_TODAY(오늘 날짜) ·
 #   FORCE_SED_RENDER(envsubst 부재 sed 폴백을 강제로 태운다 — usrmerge라 sed·envsubst가 같은
-#   디렉토리에 동거해 PATH 배제로는 재현 불가, 감사 9라운드 72 ops-bootstrap-misc-3)
+#   디렉토리에 동거해 PATH 배제로는 재현 불가)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

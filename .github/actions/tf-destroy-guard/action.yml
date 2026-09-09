@@ -10,7 +10,7 @@ inputs:
   allow:     { description: "delete를 차단 카운트에서 제외할 resource address 정규식(예: '^cloudflare_dns_record\\.app\\['). 빈값=전 delete 차단(기본)", required: false, default: "" }
   allow_max: { description: "allow-매칭 delete 자동 허용 상한 — 초과 시 자동 허용 취소(전량 차단). 대량 삭제 blast-radius 캡. 빈값=무제한", required: false, default: "" }
 outputs:
-  result:        { description: "ok | blocked-delete | error (codex pass5 F1)", value: "${{ steps.guard.outputs.result }}" }
+  result:        { description: "ok | blocked-delete | error", value: "${{ steps.guard.outputs.result }}" }
   destroy_count: { description: "delete 액션 수(result=error면 미설정)", value: "${{ steps.guard.outputs.destroy_count }}" }
 runs:
   using: composite

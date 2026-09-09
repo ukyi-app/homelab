@@ -1,6 +1,6 @@
 # infra/github
 
-**역할** — GitHub terraform 루트: CI Actions 시크릿(`secrets.tf`) + branch protection(`repo.tf`, required check `contexts=["gate"]`) 관리. App Platform 신뢰 앵커.
+**역할** — GitHub terraform 루트: CI Actions 시크릿(`secrets.tf`) + branch protection(`repo.tf`, required check `contexts=["gate"]`) + `bump-poll/**` ref를 writer App 전용으로 예약하는 repository ruleset(`rulesets.tf`) 관리. App Platform 신뢰 앵커.
 
 **적용 방식** — **owner 로컬 apply 전용 신뢰 앵커**. CI 무인 apply는 광범위 admin PAT를 CI에 저장해야 해 보안 모델 위반 → 금지. CI는 `tf-reconcile`에서 **plan-only 드리프트 알림**만(신규 `TF_GITHUB_*` 시크릿 있을 때만, 없으면 preflight skip).
 

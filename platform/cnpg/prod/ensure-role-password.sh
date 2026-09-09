@@ -4,7 +4,7 @@
 #
 # 배경(#3 회귀 방지): provision-db가 만든 owner/ro 비번 SealedSecret이 Cluster CR(wave -1)보다
 # 늦게 적용되면, CNPG가 비번 Secret 부재 상태로 managed role을 만들어 passwordStatus.<role>.
-# resourceVersion이 비어 인증이 실패한다. wave -2(provision-db Task 1)는 방어 1층일 뿐이다 —
+# resourceVersion이 비어 인증이 실패한다. wave -2(provision-db)는 방어 1층일 뿐이다 —
 # 컨트롤러 지연/부분 reconcile/health 동작 변경으로 재현될 수 있어, 이 Job이 결정적 fallback이다.
 #
 # 동작(각 Database CR의 owner/ro 롤에 대해):

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# supplychain-3: 시크릿 누출 가드(gitleaks + sops-guard)가 required `gate` 잡에 강제되는지 단언.
+# 시크릿 누출 가드(gitleaks + sops-guard)가 required `gate` 잡에 강제되는지 단언.
 # verify.yaml은 required가 아니므로(분기보호 contexts=["gate"]) gate 잡 자체에 폴딩돼야 한다.
 
 ROOT="$BATS_TEST_DIRNAME/../.."
@@ -18,7 +18,7 @@ PRECOMMIT="$BATS_TEST_DIRNAME/../../.pre-commit-config.yaml"
 }
 
 @test "gate gitleaks scans the working tree (--no-git), not full git history (F2)" {
-  # ⚠️ codex pass4 F2: bare 'gitleaks detect'는 히스토리 전체 스캔이라 과거 시크릿 하나로 게이트가 영구 red.
+  # ⚠️ bare 'gitleaks detect'는 히스토리 전체 스캔이라 과거 시크릿 하나로 게이트가 영구 red.
   # 작업트리만 스캔하는 --no-git이 있어야 한다(pre-commit 훅 등가).
   run grep -qE 'gitleaks detect' "$CI"
   [ "$status" -eq 0 ]
@@ -27,7 +27,7 @@ PRECOMMIT="$BATS_TEST_DIRNAME/../../.pre-commit-config.yaml"
 }
 
 @test "gate gitleaks download is checksum-verified against the release checksums.txt, no placeholder (F3+restale F1)" {
-  # ⚠️ codex pass5 F3 + restale F1: gitleaks 다운로드는 sha256sum -c로 검증해야 하고, 하드코딩 placeholder가 아니라
+  # ⚠️ gitleaks 다운로드는 sha256sum -c로 검증해야 하고, 하드코딩 placeholder가 아니라
   # 릴리스 공식 checksums.txt로 검증해야 한다(placeholder를 그대로 두면 게이트가 invalid checksum으로 깨진다).
   run grep -qE 'sha256sum -c' "$CI"
   [ "$status" -eq 0 ]
@@ -108,7 +108,7 @@ PRECOMMIT="$BATS_TEST_DIRNAME/../../.pre-commit-config.yaml"
 }
 
 @test "sops-guard PASSES a realistically sops-shaped enc.yaml (ENC[AES256_GCM,...] leaves)" {
-  # codex pass1 F4 회귀 fixture: 실제 SOPS 리프 형태가 평문으로 오판되지 않아야(gate가 모든 enc.yaml을
+  # 회귀 fixture: 실제 SOPS 리프 형태가 평문으로 오판되지 않아야(gate가 모든 enc.yaml을
   # 오차단하지 않게). age 키 불필요 — sops-guard는 구조만 본다. 게이트 글롭 포함 파일이라 required로 강제.
   # 실제 sops 파일은 항상 .sops.age(canonical cluster+recovery 공개키)를 갖는다 — recipient 신원 검사 통과용.
   d="$BATS_TEST_TMPDIR"
@@ -165,7 +165,7 @@ YAML
   [ "$(grep -c '^targetRules = ' "$C")" -eq 2 ]
   grep -qF -- 'targetRules = ["kubernetes-secret-yaml"]' "$C"
   grep -qF -- 'targetRules = ["generic-api-key"]' "$C"
-  # 원소 '추가' 축(exact-tests-1) — 위 멤버십 5건(useDefault·paths×2·targetRules×2)은 존재만
+  # 원소 '추가' 축 — 위 멤버십 5건(useDefault·paths×2·targetRules×2)은 존재만
   # 잰다. disabledRules 한 줄로 기본 룰을 끄거나 regexes/stopwords/commits/regexTarget으로
   # 면제 스코프를 넓혀도 위 단언은 그대로 초록이었다 — 새 테이블·새 키 자체를 상한으로 문다.
   [ "$(grep -cE '^\[' "$C")" -eq 3 ]              # [extend] + [[allowlists]]×2 — 그 외 테이블 금지

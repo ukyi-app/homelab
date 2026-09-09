@@ -5,7 +5,7 @@
 # 스키마 검증은 test_homelab-cli.bats(계약)와 이 파일(골든)이 나눠 가진다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과. @test 이름은 영어(인코딩 함정).
 #
-# ── git venue 고정(티켓 14) ────────────────────────────────────────────────────────────────────
+# ── git venue 고정 ──────────────────────────────────────────────────────────────────────────
 # doctor는 커밋 신원·https 자격 helper를 **실물 git**에 물어본다. 그 답은 호스트 ~/.gitconfig와
 # GIT_AUTHOR_*/GIT_COMMITTER_* env에 종속이라, 고정하지 않으면 "내 노트북에서는 초록, CI에서만 red"가
 # 된다. 그래서 모든 레인이 `$GITENV`를 앞에 달아 전역/시스템 config를 격리 파일로 고정하고 env 신원
@@ -82,7 +82,7 @@ setup() {
   [ "$(echo "$output" | jq -r '.result.checks[] | select(.id=="kubeseal") | .status')" = "fail" ]
   [ "$(echo "$output" | jq -r '.result.checks[] | select(.id=="kubeconfig") | .status')" = "warn" ]
   echo "$output" | jq -r '.result.checks[] | select(.id=="template-targetarch") | .detail' | grep -q "fullstack"
-  # 티켓 33 — detail은 '다음에 무엇을 하나'를 지목한다: 도구 부재는 호스트 도구 핀 런북,
+  # detail은 '다음에 무엇을 하나'를 지목한다: 도구 부재는 호스트 도구 핀 런북,
   # KUBECONFIG 미설정은 레포 루트 기준 export 한 줄(결정성 규약대로 절대경로 대신 $PWD 상대).
   echo "$output" | jq -r '.result.checks[] | select(.id=="kubeseal") | .detail' | grep -q "docs/runbooks/toolchain.md"
   echo "$output" | jq -r '.result.checks[] | select(.id=="kubeconfig") | .detail' | grep -q 'export KUBECONFIG=\$PWD/infra/k3s-bootstrap/kubeconfig'
@@ -224,7 +224,7 @@ setup() {
 
 @test "a colon-separated KUBECONFIG list is read the way kubectl reads it (all, some, empty segment)" {
   # kubectl은 KUBECONFIG를 `a:b` 병합 목록으로 읽는다 — existsSync("a:b")는 false라 단일 경로 판정은
-  # 정당한 설정을 red로 만든다(observe-5·exec-11).
+  # 정당한 설정을 red로 만든다.
   run --separate-stderr env "${GITENV[@]}" PATH="$STUB" KUBECONFIG="$KC:$KC" "$BUN" tools/homelab.ts doctor --json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.checks[] | select(.id=="kubeconfig") | .status')" = "pass" ]

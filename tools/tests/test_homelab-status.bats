@@ -6,14 +6,14 @@
 # (gh·kubectl PATH stub + NUL argv 원장 + --root 주입 앱 픽스처) — 라이브 무의존.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과. @test 이름은 영어(인코딩 함정).
 #
-# ── 알려진 무증인 축(예약 — homelab-cli-r2 티켓 35 (e)) ─────────────────────────────────────────
+# ── 알려진 무증인 축(예약) ────────────────────────────────────────────────────────────────────
 # `status.ts`의 **프로덕션 기본 루트**(`defaultRoot()` = `new URL("../..", import.meta.url)`)는 이
 # 파일의 어떤 @test도 밟지 않는다: 목록·앱 모드 호출이 전부 `--root "$APPS_ROOT"` 심을 통과하고
 # `??`라 기본값 표현식이 **호출조차 되지 않기** 때문이다. 그래서 그 앵커를 `"../../.."`로 바꿔도
 # 전건 초록이다 — 하필 그 경로가 MCP status tool이 항상 타는 유일한 경로다(root 미노출).
-# 지금 이 자리에 "루트에서 count 0" 같은 단언을 세우면 apps/에 앱이 0개라 **공허하다**(그린필드).
-# ⇒ **첫 실전 앱이 `apps/`에 착지하는 커밋**에서 `--root` 없는 @test를 추가한다: 그 앱 이름이
-#    목록에 실재함을 재면 앵커 파손이 red가 된다(그 전에는 어떤 형태로도 비-vacuous하지 않다).
+# 지금 이 자리에 "루트에서 count 0" 같은 단언은 극성이 반대다 — 앵커가 깨진 쪽이 초록이 된다.
+# ⇒ 2026-09-08 `apps/`에 첫 실전 앱(page)이 들어와 전제는 충족됐다. 남은 일은 `--root` 없는 @test로
+#    page가 목록에 실재함을 재는 것이다(미작성 — 이 축은 여전히 무증인).
 bats_require_minimum_version 1.5.0
 load "helpers/cli_stub"
 
@@ -27,7 +27,7 @@ setup() {
   echo "apiVersion: v1" > "$KC"
 }
 
-# 방출된 envelope을 결과 계약으로 대조한다(티켓 25 (a) — variant별 **실산출물**을 검증기에 태운다).
+# 방출된 envelope을 결과 계약으로 대조한다(variant별 **실산출물**을 검증기에 태운다).
 # 형상 결합이 없던 동안 status failure 4곳은 스키마 대조 없이 variant만 봤다.
 assert_envelope_valid() {
   printf '%s\n' "$1" > "$BATS_TEST_TMPDIR/assert-env.json"
@@ -108,7 +108,7 @@ assert_envelope_valid() {
 
 @test "status live revision resolves multi-source revisions[] to one value, keeps the single-source form (control), and reports skew raw" {
   make_app_fixture page true
-  # 기본 픽스처 = 멀티소스(revisions 3개·revision 키 부재) — 앱 Application의 실제 형상(티켓 01).
+  # 기본 픽스처 = 멀티소스(revisions 3개·revision 키 부재) — 앱 Application의 실제 형상.
   [ "$(jq -r '.status.sync | has("revisions") and (has("revision") | not)' "$FIX/argocd-app.json")" = "true" ]
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status page --root "$APPS_ROOT" --json
   [ "$status" -eq 0 ]
@@ -131,7 +131,7 @@ assert_envelope_valid() {
 }
 
 @test "mutation and status engines share one ArgoCD revision reader (no literal sync.revision reads remain)" {
-  # 티켓 01 수용 기준 — 두 엔진이 lib/argocd.ts 리더를 호출하고 단수 필드 직접 참조는 0건. 부정 카운트라
+  # 수용 기준 — 두 엔진이 lib/argocd.ts 리더를 호출하고 단수 필드 직접 참조는 0건. 부정 카운트라
   # 같은 패턴이 리더 자신에서는 매치함을 양성 대조로 단언한다(검출기 생존).
   n=0
   for f in tools/lib/mutation.ts tools/lib/status.ts; do
@@ -244,7 +244,7 @@ assert_envelope_valid() {
   [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
   echo "$output" | jq -r '.result.error' | grep -q "source-repo"
   # 파손 분기는 gh를 **한 번도** 부르지 않는다. 총계 1은 바로 위 목록 모드의 머지 대기 레인 1회이고
-  # (티켓 40), app 모드가 더한 호출은 0이다 — 두 등식이 함께 서야 이게 정확 상한이다.
+  # app 모드가 더한 호출은 0이다 — 두 등식이 함께 서야 이게 정확 상한이다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh)" = "1" ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/blank/actions/runs?per_page=3" --jq)" = "0" ]
   # 읽기 불가(디렉토리 = EISDIR)도 인레포로 위장하지 않는다.
@@ -452,7 +452,7 @@ assert_envelope_valid() {
 }
 
 @test "dot segments in a handle URL are refused before any gh call (traversal closed at the format gate)" {
-  # 티켓 27 — owner/repo 캡처가 `[\w.-]+`라 `.`·`..`가 통과했고 그 캡처가 `repos/<o>/<r>/…`로 gh api
+  # owner/repo 캡처가 `[\w.-]+`라 `.`·`..`가 통과했고 그 캡처가 `repos/<o>/<r>/…`로 gh api
   # 경로에 조립됐다(`https://github.com/../../pull/1` → `repos/../../pulls/1`). identity.ts가
   # 'traversal 1차 게이트에 분기를 두지 않는다'를 원칙으로 두는데 핸들 축만 그 밖이었다.
   # 각 케이스마다 **원장 0건**을 함께 잰다 — exit 2만 보면 '거부는 했는데 그 전에 한 번 쏘았다'가 안 보인다.
@@ -506,8 +506,8 @@ assert_envelope_valid() {
 }
 
 @test "status rejects an unknown option and a single-dash token with the verb usage on stderr (exit 2)" {
-  # 티켓 12 — statusCli만 positionalThenFlags 골격을 손으로 다시 쓰고 있었고, 그 인라인 분기를 밟는
-  # 테스트가 0건이었다(치환의 등가성 증인). `-h`는 이전엔 '앱 이름 형식 불량: -h'였다(shell-9).
+  # statusCli만 positionalThenFlags 골격을 손으로 다시 쓰고 있었고, 그 인라인 분기를 밟는
+  # 테스트가 0건이었다(치환의 등가성 증인). `-h`는 이전엔 '앱 이름 형식 불량: -h'였다.
   run --separate-stderr bun tools/homelab.ts status --bogus
   [ "$status" -eq 2 ]
   [ -z "$output" ]
@@ -564,7 +564,7 @@ assert_envelope_valid() {
   echo "$output" | grep -q "라이브"
 }
 
-# ── 티켓 09: run 모드의 브랜치 좌표(--branch) 정확 조회 ────────────────────────────────────
+# ── run 모드의 브랜치 좌표(--branch) 정확 조회 ───────────────────────────────────────────
 # pending 봉투는 run 핸들과 함께 **레인 브랜치**를 싣는다(추가 API 호출 0). 그 좌표를 받는 조회가
 # 여기다 — 와일드카드 스캔이 아니라 `head=<owner>:<branch>` 정확 일치라서 형제 브랜치를 못 집는다.
 
@@ -663,7 +663,7 @@ assert_envelope_valid() {
 
 @test "an app with no deploy artifacts still surfaces the in-flight create-app PR from one open-PR listing" {
   # 그린필드의 정상 상태: create-app PR이 열려 있고(수동 머지 대기) 산출물은 아직 없다. 종전에는
-  # 그 상태가 '앱 없음' failure 한 줄이라 MCP 에이전트가 이어갈 좌표가 0이었다(mcp-4).
+  # 그 상태가 '앱 없음' failure 한 줄이라 MCP 에이전트가 이어갈 좌표가 0이었다.
   printf '[{"number":51,"title":"create-app myapp","head":"create-app/myapp-801","html_url":"https://github.com/ukyi-app/homelab/pull/51","auto_merge":false},{"number":52,"title":"other","head":"create-app/other-802","html_url":"u52","auto_merge":false}]\n' > "$FIX/homelab-prs.json"
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status myapp --root "$APPS_ROOT" --json
   [ "$status" -eq 1 ]
@@ -675,7 +675,7 @@ assert_envelope_valid() {
 }
 
 @test "list mode spends exactly one gh call, and losing gh degrades only the in-flight lane" {
-  # 티켓 33이 세운 전제('목록 모드 gh 0회')는 티켓 40의 inFlight로 깨진다 — 부재 단언을 **정확
+  # 종전 전제('목록 모드 gh 0회')는 inFlight로 깨진다 — 부재 단언을 **정확
   # 상한**으로 다시 못박는다: 목록 모드의 GitHub 접촉은 열린 PR 목록 **1회뿐**이고, 그 1회가
   # 실패해도 로컬 인벤토리(count·앱 행)는 그대로이며 exit 0이다.
   make_app_fixture blog true
@@ -716,7 +716,7 @@ assert_envelope_valid() {
 }
 
 @test "status app mode reports the wired data-conn handles and omits the key when nothing is wired (floor 2)" {
-  # product-1: conn이 봉인·커밋돼도 앱이 envFrom을 배선 안 하면 어떤 게이트도 안 잡았다(#211 실재발).
+  # conn이 봉인·커밋돼도 앱이 envFrom을 배선 안 하면 어떤 게이트도 안 잡았다(#211 실재발).
   # 배선 **자동화**는 하지 않는다(이름≠앱 케이스) — status가 배선 사실을 보고하는 것이 이 티켓의 범위다.
   make_app_fixture wired true
   printf 'envFrom:\n  - secretRef: { name: db-wired-conn }\n  - secretRef: { name: cache-sessions-ro-conn }\n  - secretRef: { name: wired-secrets }\n' \
@@ -736,10 +736,10 @@ assert_envelope_valid() {
   echo "$output" | grep -q "db-wired-conn"
 }
 
-# ── 티켓 40: in-flight 가시성 · 핸들 URL 관용 · 빌드 대조 · 리소스 인벤토리 ─────────────────
+# ── in-flight 가시성 · 핸들 URL 관용 · 빌드 대조 · 리소스 인벤토리 ────────────────────────
 
 @test "list mode surfaces in-flight dispatcher PRs from every lane and never renders a failed lookup as none" {
-  # observe-3: create-app·teardown은 **수동 머지** 동사라 '머지 대기 PR'이 그린필드의 정상 상태이고
+  # create-app·teardown은 **수동 머지** 동사라 '머지 대기 PR'이 그린필드의 정상 상태이고
   # 며칠 지속된다. 그 창에서 목록 모드는 「온보딩된 앱이 없다」한 줄이었고 좌표가 0이었다.
   # ⚠️ inFlight는 live와 같은 모양이다({prs}|{error}) — 핵심 페이로드가 로컬 인벤토리인 모드를
   #    GitHub 의존으로 바꾸지 않는다(조회 실패여도 variant는 success).
@@ -813,7 +813,7 @@ PY
 }
 
 @test "handle URLs are normalized at one point so query, fragment, job, and attempts tails all resolve" {
-  # observe-11: GitHub UI가 붙이는 꼬리(?check_suite_focus=true · #issuecomment-…)는 좌표가 아니라
+  # GitHub UI가 붙이는 꼬리(?check_suite_focus=true · #issuecomment-…)는 좌표가 아니라
   # 뷰 상태인데 `/`로 시작하지 않아 usage 거부였다. 정규화는 **검증과 조회가 같은 값을 보도록**
   # 한 지점에서 한다 — 두 곳에서 하면 어긋난 순간 형식 오류와 조회가 다른 URL을 본다.
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" "$BUN" tools/homelab.ts status --run "https://github.com/ukyi-app/page/actions/runs/1?check_suite_focus=true" --json
@@ -844,7 +844,7 @@ PY
 }
 
 @test "run rows carry the head branch and event, and the deploy pin is compared to the latest main build in three states" {
-  # observe-12: 앱 레포 run 상위 3개에는 PR 빌드·CI가 섞이는데 branch/event가 없어 '핀이 최신 main
+  # 앱 레포 run 상위 3개에는 PR 빌드·CI가 섞이는데 branch/event가 없어 '핀이 최신 main
   # 빌드인가'를 판정할 수 없었다. ⚠️ 쿼리 필터(branch=main&event=push)는 **쓰지 않는다** — 실패한
   # PR 빌드를 화면에서 지워 3분기 중 하나를 없앤다. 필드로 싣고 판정은 리더가 한다.
   make_app_fixture page true
@@ -875,7 +875,7 @@ PY
 }
 
 @test "status --resources inventories db and cache rows with per-role artifacts, the cache-only ledger row, and tombstones" {
-  # product-2: 라이브에 DB 2·캐시 1이 실재하는데 status는 앱만 열거하고 count 0을 냈다 — `db create`로
+  # 라이브에 DB 2·캐시 1이 실재하는데 status는 앱만 열거하고 count 0을 냈다 — `db create`로
   # 만든 것을 되읽을 동사가 CLI에 0개였다. 열거는 레이아웃 커널의 역방향(classifyArtifact)에서
   # 파생한다(두 번째 진실 금지). 새 동사가 아니라 status의 5번째 mode다(ADR 0001 재개 조건 미충족).
   make_db_fixture page
@@ -930,11 +930,11 @@ PY
   [ "$(echo "$output" | jq -r '.result.mode')" = "resources" ]
 }
 
-# ── 티켓 18: 소비자가 넘겨받은 판정의 증인 ────────────────────────────────────────────────────
+# ── 소비자가 넘겨받은 판정의 증인 ───────────────────────────────────────────────────────────
 
 @test "the deploy/prod filter is the enumeration boundary: a bare apps directory is not an onboarded app" {
   # r2-status-untouched-dependencies-7: repo-walk의 `apps` 유닛 스코프는 **의미론적 필터를 담지
-  # 않는다**고 명시하고(design-r1 R-1) 그 판정을 소비자에게 넘긴다 — status가 그 유일한 소비자인데
+  # 않는다**고 명시하고 그 판정을 소비자에게 넘긴다 — status가 그 유일한 소비자인데
   # 넘겨받은 판정('deploy/prod 실재 = 배포되는 앱')에 증인이 0건이었다. 스코프 쪽에는 형제들이 든
   # 'does not collapse' 대조를 세울 수도 없다(앱 0개가 정당하므로) — 그래서 여기가 유일한 자리다.
   make_app_fixture blog true

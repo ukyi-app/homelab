@@ -20,8 +20,8 @@
 #    대상 부재에 공허했다.
 
 WF="$BATS_TEST_DIRNAME/../../.github/workflows/tf-reconcile.yaml"
-# [infra-b-1] 잡-스코프 yq — 파일 전역 grep은 mode·continue-on-error·apply if의 **스텝 소유**를
-# 못 본다(6라운드 실측: mode:block→warn, continue-on-error를 apply 스텝으로 이동, apply if에서
+# 잡-스코프 yq — 파일 전역 grep은 mode·continue-on-error·apply if의 **스텝 소유**를
+# 못 본다(실측: mode:block→warn, continue-on-error를 apply 스텝으로 이동, apply if에서
 # guard result 조건 제거 3종 전부 12/12 초록이었다). 형제 tests/gates/test_iac-destroy-guard.bats:13-15
 # guard_with()와 같은 관용구(grep+yq — terraform 비의존, yq는 ci.yaml:57에서 이미 설치됨).
 guard_step() { yq -r ".jobs.reconcile.steps[] | select(.uses == \"./.github/actions/tf-destroy-guard\") | $1" "$WF"; }
@@ -112,7 +112,7 @@ guard_step() { yq -r ".jobs.reconcile.steps[] | select(.uses == \"./.github/acti
 }
 
 @test "reconcile delete guard is alert-and-skip (does not hard-fail the job on delete)" {
-  # drift-2: delete가 있어도 reconcile job 자체는 실패시키지 않는다(::warning:: + telegram). ⚠️ F3: saved-plan
+  # delete가 있어도 reconcile job 자체는 실패시키지 않는다(::warning:: + telegram). ⚠️ F3: saved-plan
   # apply는 원자적이라 delete 포함 시 apply 전체가 skip되며(부분 수렴 불가), owner 로컬 apply 후 다음 주기에 수렴.
   # 즉 reconcile 경로엔 'exit 1'로 잡을 죽이는 인라인 destroy 분기가 없어야 한다(가드는 continue-on-error로 강등).
   # ⚠️ 형제 양성 단언이 없는 @test다 — 예전 `-ne 0`에서는 워크플로 리네임에 홀로 초록이었다(실측).
@@ -144,7 +144,7 @@ guard_step() { yq -r ".jobs.reconcile.steps[] | select(.uses == \"./.github/acti
 }
 
 @test "reconcile apply gates on guard result==ok and fails the job on result==error (F1)" {
-  # ⚠️ codex pass5 F1: outcome은 delete-block과 내부 오류를 구분 못 한다 — apply는 result=='ok'에서만,
+  # ⚠️ outcome은 delete-block과 내부 오류를 구분 못 한다 — apply는 result=='ok'에서만,
   # result=='error'(가드 자체 깨짐)는 잡을 loud 실패시켜야(조용한 skip 금지).
   run grep -qE "steps\.guard\.outputs\.result == 'ok'" "$WF"
   [ "$status" -eq 0 ]

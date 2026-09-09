@@ -61,7 +61,7 @@ if (!RESOURCE_NAME_RE.test(args.cluster)) fail(`cluster 형식 불량: '${args.c
 if (new Set(args.extensions).size !== args.extensions.length) fail("extensions에 중복 항목");
 for (const e of args.extensions) if (!EXT_RE.test(e)) fail(`extension 이름 불량: '${e}'`);
 
-// 산출물 명명·배치는 레이아웃 커널 소유(cli-deepening 심화 4) — 여기서 재유도하지 않는다.
+// 산출물 명명·배치는 레이아웃 커널 소유 — 여기서 재유도하지 않는다.
 const layout = layoutFor("db", name);
 const owner = layout.roles.owner; // owner == name 불변식 — role↔DB 1:1
 const roRole = layout.roles.ro;   // 읽기전용 롤 (모드2 디버깅용)

@@ -4,7 +4,7 @@
 # 절대 공개적으로 접근 가능하면 안 된다. LoadBalancer는 Traefik 하나뿐이고, 공개
 # egress는 cloudflared 하나뿐이다. 공개 접근은 오직 Gateway homelab/gateway의
 # 'web-public' 리스너에 붙은 HTTPRoute로만 부여된다 — 이 서비스들은 그것을 가져선 안 된다.
-# LIVE: kubectl 컨텍스트 = M3가 sync된 k3s VM 필요.
+# LIVE: kubectl 컨텍스트 = M3가 sync된 k3s 노드 필요.
 #
 # ⚠️ 아래 두 공개면 단언은 **부정 카운트=0** 형태다. 셀렉터가 도메인을 잃으면(Gateway 리스너 개명,
 # HTTPRoute CRD 그룹 이동, parentRef 드리프트, 네임스페이스 RBAC 축소) "위반 0"과 "아무것도 안 봤다"가
@@ -27,7 +27,7 @@ web_public_rules() { jq '[.items[]|select(any(.spec.parentRefs[]?;.sectionName==
   # VM 노드 IP에 :53을 게시한다. 그 외 servicelb LoadBalancer가 늘어나면 공개면 확장이므로 실패해야 한다.
   # ⚠️ tailscale operator가 만든 LB(loadBalancerClass=tailscale, pg-rw-tailscale·traefik-ts)는
   # tailnet 전용(공개면 아님)이라 제외한다 — servicelb(class 미지정) LB만 공개면 후보다.
-  # posture-2(6라운드): 이름 집합 등식은 **포트 추가**에 무증인이었다 — 기존 LB(특히 adguard-dns)에
+  # 이름 집합 등식은 **포트 추가**에 무증인이었다 — 기존 LB(특히 adguard-dns)에
   # 새 포트가 붙으면(예: 관리 UI 3000) 공개면이 넓어지는데도 이름 집합은 그대로라 초록이었다.
   # 이름:포트셋 문자열로 바꿔 원소 추가·삭제·개명·포트 추가를 한 줄에서 함께 잠근다.
   run bash -c "kubectl get svc -A -o json | jq -r '[.items[] | select(.spec.type==\"LoadBalancer\") | select((.spec.loadBalancerClass // \"\") != \"tailscale\") | \"\(.metadata.namespace)/\(.metadata.name):\([.spec.ports[]|\"\(.protocol)/\(.port)\"]|sort|join(\",\"))\"] | sort | join(\" \")'"
@@ -91,7 +91,7 @@ web_public_rules() { jq '[.items[]|select(any(.spec.parentRefs[]?;.sectionName==
 }
 
 @test "web-public attachedRoutes equals the sectionName selector count (omitted sectionName)" {
-  # posture-1(6라운드): :23의 web_public_rules()·위 argocd/grafana 술어는 전부
+  # :23의 web_public_rules()·위 argocd/grafana 술어는 전부
   # `.sectionName=="web-public"` 문자열 일치뿐이라, sectionName(또는 port)을 생략한 parentRef는
   # Gateway API 규약상(sectionName 미지정 = 호환되는 모든 리스너에 부착) web-public에 조용히
   # 부착돼도 셀렉터에서 빠진다. Gateway 자신이 센 attachedRoutes(실제 부착)와 셀렉터가 본 수의
@@ -115,7 +115,7 @@ web_public_rules() { jq '[.items[]|select(any(.spec.parentRefs[]?;.sectionName==
 }
 
 @test "admin services are never a cloudflared backend (ConfigMap fallback surface, not the routing authority)" {
-  # exact-tests-4: 라우팅 권위는 infra/cloudflare/tunnel.tf:10 config_src="cloudflare"의 원격
+  # 라우팅 권위는 infra/cloudflare/tunnel.tf:10 config_src="cloudflare"의 원격
   # (API) config다 — 이 ConfigMap의 ingress 블록은 config_src가 "local"로 반전될 때의 폴백일
   # 뿐이라 관측만으로 상한을 못 재고(존재 ≥1 + 3이름 부재 denylist라 다른 backend 추가는
   # 무증인), 새 backend 추가에 대한 정확 집합 상한은 권위 쪽 infra/_tests/test_tf_static.bats

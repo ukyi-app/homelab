@@ -102,7 +102,7 @@ teardown() { rm -rf "$TMP"; }
     --repo-dir "$R" --status-file "$TMP/bad2.json"
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -qF -- 'HTTPRoute Accepted=False'
-  # tools-create-provision-2(8라운드) — 위 두 레인은 Application health·HTTPRoute Accepted만
+  # 위 두 레인은 Application health·HTTPRoute Accepted만
   # 뒤집었고, conditions[1](ResolvedRefs)을 False로 뒤집는 레인이 없어 그 조건 자체를 통째로
   # 지워도(["Accepted", "ResolvedRefs"] → ["Accepted"]) 무증인이었다. 형제 레인 그대로 복사.
   jq '.httproute.status.parents[0].conditions[1].status = "False"' "$TMP/status.json" > "$TMP/bad3.json"
@@ -127,7 +127,7 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "marker surfaceHash stays valid AFTER the .activation marker is committed (F3 self-invalidation)" {
-  # ⚠️ codex pass1 F3 회귀: 마커를 커밋하면 apps/orders 트리가 바뀌지만 canonical 해시는 .activation을
+  # ⚠️ 회귀: 마커를 커밋하면 apps/orders 트리가 바뀌지만 canonical 해시는 .activation을
   # 제외하므로 커밋 전/후가 동일해야 한다(자기 무효화 금지). 이 케이스가 없으면 F3 회귀를 못 잡는다.
   before=$(bun "$ROOT/tools/lib/surface-hash.ts" "$R" HEAD orders)
   run bun "$A" --app orders --sha "$SHA" --synced-rev "$SHA" \
@@ -146,14 +146,14 @@ teardown() { rm -rf "$TMP"; }
     --repo-dir "$R" --status-file "$TMP/status.json"
   [ "$status" -eq 0 ]
   [ ! -f "$R/apps/orders/deploy/prod/.activation" ]
-  # exact-tools-infra-2(5라운드) — 위 단언은 .activation 부재 하나뿐이라, gate-only 경로가
+  # 위 단언은 .activation 부재 하나뿐이라, gate-only 경로가
   # apps.json active를 뒤집어도(--flip 앞에 무조건 쓰기 삽입) 무증인이었다. 형제 :151(F2)이 이미
   # 쓰는 관용구 그대로 — gate-only 실행의 워크트리 전체 무변경(노출 축 포함)을 한 줄로 잠근다.
   [ -z "$(git -C "$R" status --porcelain)" ]
 }
 
 @test "repeated --flip on an already-active app with unchanged surface is a no-op (worktree clean, F2)" {
-  # ⚠️ codex restale F2: 멱등 — 이미 active + 마커(surfaceHash+registry+sha) 동일하면 쓰기 없이 끝나야 한다.
+  # ⚠️ 멱등 — 이미 active + 마커(surfaceHash+registry+sha) 동일하면 쓰기 없이 끝나야 한다.
   run bun "$A" --app orders --sha "$SHA" --synced-rev "$SHA" --repo-dir "$R" --status-file "$TMP/status.json" --flip
   [ "$status" -eq 0 ]
   git -C "$R" add -A; git -C "$R" commit -qm "activate orders"

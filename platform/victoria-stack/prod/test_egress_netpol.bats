@@ -7,7 +7,7 @@
 setup() { P="${BATS_TEST_DIRNAME}/networkpolicy.yaml"; K="${BATS_TEST_DIRNAME}/kustomization.yaml"; }
 
 @test "every top-level manifest in this dir is wired into the kustomization (prune deletes what is not)" {
-  # 감사 6라운드 티켓56 kustomization-2 — grafana 3종·httproute-grafana·node-exporter·
+  # grafana 3종·httproute-grafana·node-exporter·
   # kube-state-metrics·vmsingle·vmagent-scrape-config·victorialogs·vector·glances 11파일은
   # 렌더를 읽는 다른 @test가 하나도 열지 않아 kustomization 멤버십이 무증인이었다(2026-09-05
   # 실측: 11파일을 resources에서 동시 제거해도 이 디렉토리 + 관련 게이트 234/234 전건 초록).

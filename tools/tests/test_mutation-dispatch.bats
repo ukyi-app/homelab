@@ -1,6 +1,5 @@
 #!/usr/bin/env bats
-# 변이 디스패처(create-app/update-secrets/create-database/create-cache) 구조·notify 불변식.
-# 구 단일 디스패처 전용 테스트(삭제됨)의 단언을 4 디스패처로 일반화.
+# 변이 디스패처(create-app/update-secrets/create-database/create-cache/teardown-app) 구조·notify 불변식.
 # (@test 이름 영어, 단언은 run+[ ] — bash 3.2 [[ ]] 침묵통과 함정 회피)
 #
 # ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 워크플로 **파일**이라 그것으로 닫힌다.
@@ -28,7 +27,7 @@ setup() {
   [ "$DISPATCHER_N" -ge 5 ]
 }
 
-# ── 배선 가드 검사기(티켓 26) ────────────────────────────────────────────────
+# ── 배선 가드 검사기 ───────────────────────────────────────────────────────
 # 워크플로 디렉토리를 **인자로** 받는다 — 판별성 증인이 사본 트리를 같은 검사기로 돌리기 위해서다.
 # 검사기 사본을 둘 두면 뮤테이션이 한쪽만 물어도 초록이 되므로(열거 붕괴의 사촌) 한 함수만 둔다.
 
@@ -329,8 +328,8 @@ EOF
     bad=$(grep -n 'github.event.inputs' "$WF/$d.yaml" \
       | grep -vE '^[0-9]+:[[:space:]]*(#|[A-Z_]+:|(sha|spec|app|confirm):)' || true)
     # ⚠️ `[ -z "$bad" ]`는 SETCAP 다섯(여섯) 술어 형태 밖이다(카운트가 아니라 문자열 공백만 잰다) —
-    #    이름의 "only"가 상한을 선언하는데 위반 집합의 **카운트 등식**이 없었다(감사 6라운드 티켓64
-    #    c64-7). 같은 판정을 카운트 등식으로 다시 쓴다 — 동작은 불변이고 형태만 기계가 읽는 술어가 된다.
+    #    이름의 "only"가 상한을 선언하는데 위반 집합의 **카운트 등식**이 없었다.
+    #    같은 판정을 카운트 등식으로 다시 쓴다 — 동작은 불변이고 형태만 기계가 읽는 술어가 된다.
     n=$(printf '%s\n' "$bad" | grep -c . || true)
     [ "$n" -eq 0 ] || { echo "위반 집합=$bad"; false; }
   done
@@ -342,7 +341,7 @@ EOF
   grep -q "app:" "$WF/update-secrets.yaml"; run grep -q "app_repo:" "$WF/update-secrets.yaml"; [ "$status" -eq 1 ]
   # ⚠️ 예전엔 `grep -q "spec:"`뿐이었다 — 이 문자열은 workflow_dispatch.inputs: 블록이 아니라
   #    reusable 호출 잡의 `with: { spec: ... }`에도 매치해, inputs 블록 원소를 전혀 세지 않았다
-  #    (7라운드 setcap-denominator-1 실측: `debug_bogus:` 입력을 workflow_dispatch.inputs 맨
+  #    (실측: `debug_bogus:` 입력을 workflow_dispatch.inputs 맨
   #    앞에 삽입해도 이 @test는 여전히 초록이었다). 실제 계약 키 목록으로 잠근다(손 로스터 신설이
   #    아니라 워크플로 파일 자체에 이미 있는 필드명을 그대로 옮긴다).
   run yq -o=json -I=0 '.on.workflow_dispatch.inputs | keys' "$WF/create-database.yaml"
@@ -532,7 +531,7 @@ EOF
 }
 
 @test "reusable branch: lines match the lane rows' neutral patterns (TS-YAML parity)" {
-  # 레인 신원 parity 축 1(cli-deepening 심화 2): YAML 쪽 branch: 개명은 어떤 테스트도 red가
+  # 레인 신원 parity 축 1: YAML 쪽 branch: 개명은 어떤 테스트도 red가
   # 아니었다 — 이 가드가 그 방향을 CI로 당긴다. 값은 YAML 파서로 읽는다(따옴표·주석 재포맷에
   # 흔들리지 않고, 축 2와 같은 venue). key 표현식은 레인별 **열거 매핑**(가드 소유 — 설계 심화 2
   # "정규화 매핑은 가드 쪽")으로 기대 문자열을 조립해 정확 대조한다 — 포괄 ${{…}}→{key} 붕괴는
@@ -607,7 +606,7 @@ EOF
   # 레인 신원 parity 축 3(Q7 참조·대조 — validate-mutation은 무변경 서버 끝 선언으로 남는다).
   # 패스스루 레인은 행 inputs == required. 조립 레인(create-database/create-cache)은 디스패처가
   # 입력을 spec으로 조립하므로 검증기는 조립 후 계층을 본다(설계 게이트 r1 아티팩트의 검증 노트가
-  # 수용한 계층 구분 — design.md 본문이 아니라 design-r1.json notes가 출처인 구현 결정이다).
+  # 수용한 계층 구분 — 설계 문서 본문이 아니라 리뷰 노트가 출처인 구현 결정이다).
   # 그 경계의 양쪽을 각각 핀한다: ① required == ["spec"], ② validateSpec 허용 필드 리터럴 핀
   # (db) / 행 inputs 동치(cache), ③ 행 inputs 전부를 디스패처 조립이 실제로 소비.
   # CONTRACT/OPTIONAL 키는 전량 리터럴 핀 — 개수 핀만으로는 회귀 앵커 행 개명이 통과한다.
@@ -663,7 +662,7 @@ EOF
 
 @test "each dispatcher echoes correlation into run-name in the exact bracket form the CLI matcher looks for" {
   # 하위호환의 정의상 증명: required 아님 + 기본값 빈 문자열 + run-name은 빈값에서 바이트 동일(조건부 에코).
-  # 티켓 26 — 종전 판정은 `format(` **존재**까지였다. 그래서 한 디스패처가 `format(' ({0})', …)`로
+  # 종전 판정은 `format(` **존재**까지였다. 그래서 한 디스패처가 `format(' ({0})', …)`로
   # 바뀌어도 44/44 초록인 채, 그 레인의 모든 CLI 변이가 run 미출현 pending으로 끝난다(디스패치는
   # 접수됐으므로 서버 변이는 진행 — CLI만 자기 run을 영원히 못 찾는다). 5레인 전수 리터럴이 그 축이다.
   correlation_echo_guard "$WF"
@@ -681,7 +680,7 @@ EOF
 }
 
 @test "every lane dispatcher input is untyped or boolean (the only edit direction that breaks the CLI value format)" {
-  # 티켓 26 — 입력 parity 가드(형제 @test)는 **이름 집합**만 본다. CLI가 보내는 값 형식은 YAML 타입에
+  # 입력 parity 가드(형제 @test)는 **이름 집합**만 본다. CLI가 보내는 값 형식은 YAML 타입에
   # 의존한다: `ext_*`는 `String(exts.includes(k))`("true"/"false")로, `maxmemory_mi`는 미지정 시 ""로
   # 간다(디스패처 조립이 `if $mm == ""`에 기댄다). 누가 `type: number`를 붙이면 이름 집합은 그대로라
   # 가드는 초록이고 라이브 디스패치만 거부된다.
@@ -707,7 +706,7 @@ EOF
 }
 
 @test "the reusable auto-merge value and the CLI manualMerge flag say the same thing per lane" {
-  # 티켓 26 — 머지 정책이 두 곳에 독립 리터럴로 있다: reusable의 `auto-merge:`(서버)와 동사의
+  # 머지 정책이 두 곳에 독립 리터럴로 있다: reusable의 `auto-merge:`(서버)와 동사의
   # `manualMerge`(CLI). 어긋나도 엔진 동작은 같고(둘 다 merged_at 대기) pendingReason 문구만
   # 거짓이 되는데, **그 문구가 에이전트의 재조회 판단 근거**다.
   # LaneRow에 머지 축을 넣지 않는다 — catalog-rows가 manualMerge(approval 문구 = 동사 소유)를
@@ -819,7 +818,7 @@ EOF
 }
 
 @test "no run step inline-interpolates untrusted inputs (repo-wide, not just DISPATCHERS)" {
-  # traps-a-1(5라운드) — 원 가드(위 @test 「no run inline interpolation」)는 피연산자가
+  # 원 가드(위 @test 「no run inline interpolation」)는 피연산자가
   # DISPATCHERS 5파일뿐이라 셸이 실제로 도는 _*.yaml과 cross-repo 계약 reusable-app-build.yaml이
   # 도메인 밖이었다(원장 36행 「GHA client_payload 비신뢰 입력」의 env-경유 규약 회귀 검출).
   # yq 비사용(tests/gates/test_workflow-pipefail.bats:7 규약과 동형) — bun+yaml 파서로 전 워크플로를 훑는다.

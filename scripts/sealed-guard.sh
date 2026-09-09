@@ -35,10 +35,9 @@ if ! command -v yq >/dev/null 2>&1; then
   exit 2
 fi
 
-# 바닥값 기본값 — 콜사이트 소유(커널은 수치를 모른다). 실측 2026-09-03: 추적 19파일 · 키 27개 →
-# 2026-09-08 purge(page·trip-mate DB + trip-mate cache) 뒤 8파일 · 9키: 빠진 11파일·18키는 전부
-# create-database/create-cache 산출물(owner/ro 비번 · conn · ACL)이라 다음 `homelab db|cache create`가
-# 되돌린다 — 그때 이 두 값을 다시 올릴 것(그린필드 상태의 상주 봉인본만으로 잰 값이다).
+# 바닥값 기본값 — 콜사이트 소유(커널은 수치를 모른다). 2026-09-08 purge(page·trip-mate DB + trip-mate
+# cache) 직후 그린필드 상주 봉인본은 8파일 · 9키였다(실측) — 앱/리소스가 붙으면 그 위로 늘어난다
+# (같은 날 page 온보딩이 그랬다). 아래 두 값은 그 그린필드 최소치보다도 낮게 둔다.
 # 래칫이 아니다: 정당한 축소를 red로 만들지 않을 만큼 낮게, 붕괴(→0)는 반드시 잡을 만큼 높게.
 FILE_FLOOR=5
 KEY_FLOOR=6

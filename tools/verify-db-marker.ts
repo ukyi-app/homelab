@@ -1,4 +1,4 @@
-// verify-db-marker — per-DB freshness 마커(db-<name>-ready) 소비자 (adversarial pass4).
+// verify-db-marker — per-DB freshness 마커(db-<name>-ready) 소비자.
 // ensure-role-password PostSync hook Job이 방출한 마커가 (a) 존재하고 (b) 기록된 resourceVersion이
 // 현재 owner/ro 비번 Secret의 resourceVersion과 일치(=fresh)함을 확인한다. 일반 Job 성공이나 무관한
 // 카나리 readiness가 아니라 '대상 DB로 키된' 신선한 마커만 온보딩/노출을 통과시킨다 — stale한 이전
@@ -7,7 +7,7 @@
 // 권위: ensure-role-password Job의 passwordStatus.<role>.resourceVersion == 적용된 비번 Secret의
 // metadata.resourceVersion(라이브 확인). 마커는 그 값을 기록하고, 이 도구는 현재 Secret rv와 대조한다.
 // owner-local(admin kubeconfig) — DB가 'usable'한지의 단일 권위. WS2 온보딩 수용/activation이 호출.
-// 실행은 exec seam 경유(d6③) — timeoutMs 0으로 종전 무-timeout 동작 보존. 실패 판정(die 문구)은 콜사이트 소유.
+// 실행은 exec seam 경유 — timeoutMs 0으로 종전 무-timeout 동작 보존. 실패 판정(die 문구)은 콜사이트 소유.
 import { sh } from "./lib/exec.ts";
 import { RESOURCE_NAME_RE } from "./lib/identity.ts";
 import { typedFlags, type TypedFlags } from "./lib/cli.ts";

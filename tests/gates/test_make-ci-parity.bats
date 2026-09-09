@@ -4,7 +4,7 @@
 # ⚠️ **이 파일이 하던 방식이 바로 잡으려던 병이었다.** 예전에는 하드코딩된 5개 토큰(chart·ledger·audit·
 #    shellcheck·alertmanager-e2e)이 `make -n ci`에 있는지만 봤다. 목록에 없는 게이트 스텝은 아무리 늘어나도
 #    보이지 않는다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 make ci에 없었는데 전 검사가 초록이었다
-#    (하필 하드코딩된 5개가 전부 미러된 것들이라 우연히 통과했다). 티켓 07의 하드코딩 소비처 목록과 같은 클래스다.
+#    (하필 하드코딩된 5개가 전부 미러된 것들이라 우연히 통과했다). 재핀 소비처 하드코딩 목록과 같은 클래스다.
 #    ⇒ 스텝 단위 대조는 **tools/check-ci-parity.ts**가 ci.yaml에서 파생해 수행한다. 여기 남는 것은
 #      그 도구가 **실제로 배선돼 있는지**와, 도구가 딛고 선 전제(러너 동치·`make -n`의 부수효과 부재)다.
 #
@@ -14,8 +14,8 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   # 대상 부재를 배선 레인이 초록으로 읽지 않는다 — 「…runs in BOTH…」는 두 파일에 이름이 적혀 있기만 하면
-  # 도구가 없어도 통과한다(operand-witness 05 (b) · 형제 tests/gates/test_disk-caps.bats:18-19와 같은 형태).
-  # ⚠️ **이 자리를 setup에 둔 대가와 그 대안을 여기 적어 둔다**(감사 2라운드에서 한 번 판정된 자리 —
+  # 도구가 없어도 통과한다(형제 tests/gates/test_disk-caps.bats:18-19와 같은 형태).
+  # ⚠️ **이 자리를 setup에 둔 대가와 그 대안을 여기 적어 둔다**(한 번 판정된 자리 —
   #    다음 독자가 같은 finding을 재발견하지 않게). 이 파일은 test_disk-caps와 달리 **단일 대상 파일이
   #    아니다**: #1(run-bats.sh)·#6(재귀 make)·#7(m6-tools)·#8(메모리 원장)은 check-ci-parity.ts와
   #    무관한 대상을 건다. 그래서 도구 부재 뮤테이션에서 setup 단언은 그 4레인까지 함께 red로 만든다
@@ -119,7 +119,7 @@ setup() {
 }
 
 @test "memory ledger gate runs in the required gate" {
-  # W7: ledger 검사(conftest policy/ledger.rego)는 required gate(ci.yaml: bun run verify:ledger) 한 곳으로 일원화.
+  # ledger 검사(conftest policy/ledger.rego)는 required gate(ci.yaml: bun run verify:ledger) 한 곳으로 일원화.
   # ⚠️ 구조 판정(F10) — 무앵커 grep은 ci.yaml:3 **헤더 주석**이 담은 같은 토큰으로도 만족된다.
   #    실측 2026-09-03: 원장 스텝 본문을 `run: echo ledger-skipped`로 바꿔도 이 레인이 초록이었다.
   # ⚠️ **행두 앵커**(`(^|\n)\s*`) — `.run` 전문에 test()를 걸면 그 안의 `# 비활성화: bun run
@@ -152,7 +152,7 @@ setup() {
 }
 
 
-# ── 스캔 신호 (티켓 04) ────────────────────────────────────────────────────────
+# ── 스캔 신호 ────────────────────────────────────────────────────────────────
 # 이 가드는 바닥값(MIN_STEPS)은 갖고도 스캔 신호가 **아예 없는** 네 번째 변종이었다.
 # 신호가 없으면 관측하는 쪽에서 "돌지 않았다"와 "돌았고 통과했다"가 구별되지 않는다 —
 # `check-guard-authority`의 실행 경로 회계가 그 구별을 못 하면 과다 계상으로 기운다.
@@ -352,7 +352,7 @@ mkparity_covered_fixture() {   # $1=디렉토리  $2=covered_by.file(witness.txt
   [ "$status" -eq 0 ]
 }
 
-# reg13c-a-landing-hunks-1 — 위 뮤테이션은 행두 전용 주석이었다. execOnly의 옛 정규식(`^[ \t]*#.*$`)은
+# 위 뮤테이션은 행두 전용 주석이었다. execOnly의 옛 정규식(`^[ \t]*#.*$`)은
 # 실 코드 뒤에 붙은 trailing `# ...`는 전혀 걷지 않아, 실 호출을 지우고 두 칸 공백 + `#`만 남기는
 # 흔한 리팩터 패턴이 covered_by를 rc=0으로 계속 통과시켰다(처방 전 실측: witness.txt를
 # `true  # tests/witness.bats reference kept only as a trailing dead comment`로 바꿔도 green).

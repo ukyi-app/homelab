@@ -216,7 +216,7 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값 · 결과 = �
 }
 
 @test "dr-drill derives the PG image from cluster.yaml instead of hardcoding a pin" {
-  # 하드코딩 핀은 PG 메이저 갱신 시 cross-major 물리복구 불가로 드릴을 조용히 죽인다(M6).
+  # 하드코딩 핀은 PG 메이저 갱신 시 cross-major 물리복구 불가로 드릴을 조용히 죽인다.
   # SSOT = platform/cnpg/prod/cluster.yaml spec.imageName — 파생 실패는 fail-closed.
   run grep -c 'cloudnative-pg/postgresql:[0-9]' "$sh"
   [ "$output" -eq 0 ]                                  # 리터럴 태그 핀 0
@@ -234,7 +234,7 @@ _drill_fixture() {          # $1 = BULK_MIGRATION_WINDOW_UNTIL 값 · 결과 = �
   grep -qE '^[^#]*\$K3S_RUN find ' "$sh"
   # 열거 실패와 '항목 0'은 다른 사건이다 — 분기가 둘 다 있어야 한다.
   grep -q '열거하지 못했다' "$sh"
-  # ⚠️ **Bound가 계약이다**(형제: scripts/backup-files-data.sh:101의 같은 조항). claimRef만 보는
+  # ⚠️ **Bound가 계약이다**(형제: scripts/backup-files-data.sh:99의 같은 조항). claimRef만 보는
   #    셀렉터에는 Retain 정책이 Released로 남긴 고아 PV가 함께 걸린다 — head -1이 그 고아를 고르면
   #    엉뚱한 옛 디렉토리를 「재결합된 files-data」로 오판한다(같은 클러스터 실측 2026-08-19, 형제
   #    자리에서 이미 한 번 문제였다). 셀렉터 리터럴이 `.status.phase=="Bound"`를 담는지 정적으로 잰다.

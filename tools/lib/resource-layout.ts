@@ -1,5 +1,5 @@
 // 리소스 산출물 레이아웃 커널 — kind+name에서 db/cache 산출물의 명명·배치 전부를 유도한다
-// (cli-deepening 심화 4, CONTEXT.md "산출물 레이아웃"). 지금까지 이 지식은 7개 module
+// (CONTEXT.md "산출물 레이아웃"). 지금까지 이 지식은 7개 module
 // (provision-db/cache · teardown-resource purgeArtifacts · audit-orphans 정규식 · verbs ·
 // db-url/cache-url)이 각자 재유도했다 — 생성·철거·감사·관측이 같은 레이아웃을 읽게 하는
 // 단일 소유자다(선례: identity.ts·sealed-contract.ts readSealed).
@@ -80,7 +80,7 @@ const LEDGER = "docs/memory-ledger.md";
 const HEDGE_CRONJOB = `${CNPG_DIR}/pgdump-hedge-cronjob.yaml`;
 
 // cache 인스턴스 디렉토리 내용물 — provision-cache 산출 6파일(이름 고정). export는 7번째 파일
-// 드리프트의 기계 검출용(가드가 provision-cache의 write 대상과 대조 — 티켓 06 리뷰 이월).
+// 드리프트의 기계 검출용(가드가 provision-cache의 write 대상과 대조).
 export const CACHE_INSTANCE_FILES = ["configmap.yaml", "pvc.yaml", "deployment.yaml", "service.yaml", "acl.sealed.yaml", "kustomization.yaml"] as const;
 
 // 이름 무관 디렉토리 좌표 — 소비자(audit·provision)가 리터럴로 재유도하지 않게 export한다.
@@ -281,7 +281,7 @@ export function classifyArtifact(pathOrEntry: string): ArtifactClass | null {
   return null;
 }
 
-// role → 그 **이름에 귀속된** 산출물 경로(티켓 40). classifyArtifact(경로 → role)의 정확한 역이고,
+// role → 그 **이름에 귀속된** 산출물 경로. classifyArtifact(경로 → role)의 정확한 역이고,
 // 두 방향이 같은 커널에 있어야 관측(status --resources)과 감사(audit-orphans)가 같은 집합을 말한다.
 // files[]와 다른 뷰인 이유: files는 teardown 스윕 스코프라 **공유 산출물**(kustomization·cluster.yaml·
 // 원장)까지 담는데, 그것들은 이 리소스의 것이 아니라 이름 귀속이 없다 — "이 리소스의 산출물이

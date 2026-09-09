@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GHA liveness 알림 **발화** e2e (티켓 10) — hermetic replay로 "실제로 발화하는가"를 증명한다.
+# GHA liveness 알림 **발화** e2e — hermetic replay로 "실제로 발화하는가"를 증명한다.
 #
 # 왜 필요한가: `-dryRun`은 expr **파싱**만 본다. 문법이 멀쩡한데 라이브에서 발화가 0인 룰이 이 레포에
 # 이미 두 번 있었다(ImageDigestDrift·FilesBulkSSDLow — 둘 다 push 주기 > 룩백으로 시리즈에 구멍이 나

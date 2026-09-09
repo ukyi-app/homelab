@@ -2,7 +2,7 @@
 # cache-url — 로컬/GUI Valkey 연결 URL을 .env.local에 기록. 출력 키는 #141 이후 **namespaced**
 # (`<NAME>_REDIS_RO_URL`/`<NAME>_REDIS_URL` — 클러스터 envFrom과 같은 키) + RO/RW 모드 +
 # port-forward 기본(Valkey tailscale 노출 deferred). dry-run만 검증(CI-safe). ⚠️ 중간 단언은 [ ]만.
-# 라이브 레인(kubectl 인라인 stub + 빈 KUBECONFIG)은 host 술어·URL 치환·자격 파일 무결성(티켓 03)을 밟는다.
+# 라이브 레인(kubectl 인라인 stub + 빈 KUBECONFIG)은 host 술어·URL 치환·자격 파일 무결성을 밟는다.
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
 
 # 라이브 경로 픽스처 — db-url 스위트와 같은 관용구(kubectl stub이 $1을 base64로, 빈 KUBECONFIG).
@@ -50,7 +50,7 @@ run_live() { run env PATH="$LT/bin:$PATH" KUBECONFIG="$LT/kubeconfig" bun "$ROOT
 }
 
 @test "cache-url without KUBECONFIG signals skip via the helper (exit 4, marker, no write)" {
-  # db-url과 대칭(kernel-followups 06).
+  # db-url과 대칭.
   T="$(mktemp -d)"
   run env -u KUBECONFIG bun "$ROOT/tools/cache-url.ts" --name sessions --env-local "$T/.env.local"
   [ "$status" -eq 4 ]
@@ -74,7 +74,7 @@ STUB
   rm -rf "$T"
 }
 
-# ── host 술어 · URL 치환 · 자격 파일 무결성(homelab-cli-r2 티켓 03) — db-url과 대칭 ─────────────
+# ── host 술어 · URL 치환 · 자격 파일 무결성 — db-url과 대칭 ─────────────────────────────────────
 
 @test "a host carrying a newline is a usage error (exit 2) and no credential file is written (line injection)" {
   live_fixture 'redis://u:n@cache-sessions:6379'

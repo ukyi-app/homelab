@@ -7,10 +7,10 @@
 #   (b) raw 형상 — 접힘이 있는 네 필터(`.workflow_runs[]` 언랩 · `head: .head.ref` 중첩 ·
 #       `auto_merge != null` · 레인 PR의 `head_sha: .head.sha` 중첩)에 대해 **손으로 적은 원시
 #       페이로드**(fixtures/homelab/gh-raw/)에 스텁이 실제 jq를 돌린다. GitHub 필드 리네임이 여기서
-#       red가 된다. 레인 PR 레그(리뷰 M3)는 그 접힘이 **다음 질의의 좌표**라 특히 조용했다 — 접힌
+#       red가 된다. 레인 PR 레그는 그 접힘이 **다음 질의의 좌표**라 특히 조용했다 — 접힌
 #       픽스처에서는 필드가 사라져도 아무 단언이 밟지 않는다.
 # 라이브 녹화 + 신선도 게이트는 채택하지 않았다 — 인증 부재 venue에서 시한폭탄 red가 되고 해제
-# 수단이 owner-local gh뿐이다(티켓 43 결정). 라이브 의존은 이 파일에 0건이다.
+# 수단이 owner-local gh뿐이다. 라이브 의존은 이 파일에 0건이다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과. @test 이름은 영어(인코딩 함정).
 bats_require_minimum_version 1.5.0
 load "helpers/cli_stub"
@@ -56,7 +56,7 @@ EOF
   # create-database)이 **한 텍스트를 공유**한다. 위 루프는 대표 하나만 밟으므로, 나머지 넷이 함께
   # 좁혀졌는지는 이 등식이 잰다(부분 narrowing = 남은 글롭이 드리프트를 삼킨다).
   [ "$(grep -cF '[.workflow_runs[] | {id, name, status, conclusion, html_url}]' tools/tests/helpers/cli_stub.bash)" = "5" ]
-  # 신선도 스냅샷(티켓 27)의 투영은 **경로만 글롭인 한 케이스**가 5레인을 다 받는다 — 응답이 레인
+  # 신선도 스냅샷의 투영은 **경로만 글롭인 한 케이스**가 5레인을 다 받는다 — 응답이 레인
   # 무관(기본 공집합)이라 사본을 다섯 벌 두면 드리프트 표면만 늘어난다. 그래서 여기는 1건이다.
   [ "$(grep -cF '[.workflow_runs[] | {id, name}]' tools/tests/helpers/cli_stub.bash)" = "1" ]
 }
@@ -69,7 +69,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.result.runs | length')" = "2" ]
   [ "$(echo "$output" | jq -r '.result.runs[0].headSha')" = "c0ffee1c0ffee1c0ffee1c0ffee1c0ffee1c0ffe" ]
-  # 티켓 40이 더한 두 필드도 원시 페이로드에서 접힌다 — '핀이 최신 main 빌드인가'의 원료다.
+  # headBranch·event 두 필드도 원시 페이로드에서 접힌다 — '핀이 최신 main 빌드인가'의 원료다.
   [ "$(echo "$output" | jq -r '.result.runs[0].headBranch')" = "main" ]
   [ "$(echo "$output" | jq -r '.result.runs[0].event')" = "push" ]
   # raw의 `"conclusion": null`이 키 부재로 접힌다(계약 "값 없음 = 키 부재").
@@ -137,7 +137,7 @@ EOF
 }
 
 @test "the lane PR head.sha nesting is witnessed against a raw payload and steers the required-check query" {
-  # 리뷰 M3 — `head_sha: .head.sha`는 조기 종결(티켓 47)의 **좌표**인데, 접힌 픽스처만으로는
+  # `head_sha: .head.sha`는 조기 종결의 **좌표**인데, 접힌 픽스처만으로는
   # 원시 페이로드 증인이 0이었다(스텁이 jq를 적용하지 않으므로 GitHub이 `head`를 리네임해도 초록).
   # 이 레인은 목록형·단건형 둘 다 실제 jq를 돌린다(같은 투영 SSOT = LANE_PR_FIELDS).
   KC="$BATS_TEST_TMPDIR/kubeconfig"; echo "apiVersion: v1" > "$KC"

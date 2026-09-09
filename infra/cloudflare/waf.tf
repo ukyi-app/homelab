@@ -26,13 +26,15 @@ resource "cloudflare_ruleset" "waf_custom" {
   ]
 }
 
-# [결정 2026-07-06] API 호스트(trip-mate-api.ukyi.app)도 zone-wide 보호(아래 rate-limit +
-# zone_settings.tf의 browser_check·security_level)를 의도적으로 상속한다 — 클라이언트가
-# 브라우저 웹앱뿐(쿠키 세션·Google OAuth, owner 확인)이라 브라우저 XHR은 BIC를 통과하고,
-# cache.tf bypass-dynamic으로 전 API 요청이 rate-limit에 계상돼도 100req/10s/IP는 개인용
-# 트래픽에 충분하다. 네이티브 앱/CLI 클라이언트가 생기면: http_config_settings 페이즈
-# ruleset으로 해당 호스트에 BIC off(+필요시 security_level 완화) 예외를 추가한다(무료 플랜
-# config rule 지원). rate-limit 분리는 불가 — 무료는 rate-limit 룰 1개뿐(아래).
+# [결정 2026-07-06] 공개 호스트는 zone-wide 보호(아래 rate-limit + zone_settings.tf의
+# browser_check·security_level)를 호스트별 분리 없이 그대로 상속한다. 공개 표면은 브라우저 웹앱과
+# 비브라우저 두 갈래(files 다운로드, argocd-webhook의 GitHub webhook POST)인데 셋 다 BIC를 통과한다
+# (실측: files.ukyi.app/ = 200 2026-08-12, webhook last_response 200 2026-09-03). cache.tf
+# bypass-dynamic으로 동적 요청이 전부 rate-limit에 계상돼도 100req/10s/IP는 개인용 트래픽에
+# 충분하다. 네이티브 앱/CLI 클라이언트가 생기면: http_config_settings 페이즈 ruleset으로 해당
+# 호스트에 BIC off(+필요시 security_level 완화) 예외를 추가한다(무료 플랜 config rule 지원).
+# 호스트별 rate-limit 분리는 불가 — 무료는 rate-limit 룰 1개뿐(아래)이라 이 상속은 선택이 아니라
+# 제약이다.
 #
 # 단일 노드 SPOF L7 보호 — cloudflared→traefik→단일 노드로 흐르는 공개 표면을 IP당 rate-limit로
 # brute-force/scrape 플러드에서 보호한다. 무료 플랜 호환 규약(apply에서만 검증되는 entitlement):

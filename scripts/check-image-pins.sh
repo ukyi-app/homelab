@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 이미지 digest 핀 2-레인 게이트(메타갭 ② W2-B) — 런타임 컨테이너 이미지가 @sha256 digest로 고정됐는지 강제.
+# 이미지 digest 핀 2-레인 게이트 — 런타임 컨테이너 이미지가 @sha256 digest로 고정됐는지 강제.
 # mutable 태그는 재빌드 때마다 움직여 의도치 않은 이미지로 실행될 수 있다(핀 = 재현성·공급망 무결성).
 #
 #   레인1(platform 문자열 이미지): platform/**/*.yaml의 `image:`/`imageName:` 스칼라 값이 `@sha256:` 핀 보유.
@@ -10,9 +10,9 @@
 #     종전엔 접두만 재서 `sha256:deadbeef`가 "핀됨"으로 읽혔고 실제 차단은 하류
 #     platform/charts/app/values.schema.json의 pattern이 했다. 게이트가 자기 이름을 지키게 좁혔다.
 #
-# 스코프 한계(성공 메시지도 이 경계를 반영): (a) substrate(infra/k3s-bootstrap/** — versions.env + renovate
-#   custom manager 관할, LOCAL_PATH_PROVISIONER digest 핀은 Task 9 후속), (b) helmrelease 차트-내부 기본
-#   이미지(traefik/sealed-secrets/tailscale/cnpg-operator 등 — 레포에 image: 스칼라로 없음).
+# 스코프 한계(성공 메시지도 이 경계를 반영): (a) substrate(infra/k3s-bootstrap/** — versions.env +
+#   renovate custom manager 관할. LOCAL_PATH_PROVISIONER digest 핀도 그쪽에서 이미 완료됐다), (b) helmrelease
+#   차트-내부 기본 이미지(traefik/sealed-secrets/tailscale/cnpg-operator 등 — 레포에 image: 스칼라로 없음).
 #   ⚠️ **"Renovate pinDigests 관할"이라고 적혀 있었는데 그건 절반만 참이었다.** 차트 tarball은
 #   platform/*/prod/charts/에 캐시되고 그 경로는 gitignored이며 renovate.json ignorePaths의
 #   `**/charts/**`에도 걸린다 — Renovate는 **없는 파일을 핀할 수 없다**. 차트 **버전**은 Renovate가
@@ -26,9 +26,10 @@
 # 예외: policy/image-pin-allowlist.txt(라인당 이미지 값 또는 app:<name>, # 사유 주석 **강제** — 인라인 또는 직전 줄).
 #   수용 기준 = allowlist 0(핀 후).
 #
-# make verify 배선됨(Task 9, 핀 적용 후) — 기본 바닥값 20(scan-floor 유효, 배선부는 floor-free).
-#   24 tag-only 이미지를 수동 digest 핀(renovate pin-dependencies 배치가 Issues:write gap으로 엉켜 결정적 경로 선택)
-#   완료 후 실 레포는 allowlist 0으로 통과한다. 신규 미핀 이미지는 이 게이트가 fail-closed로 차단.
+# make verify 배선됨 — 기본 바닥값 20(scan-floor 유효, 배선부는 floor-free). 실 레포는 런타임 이미지가
+#   전부 핀돼 있어 allowlist 0으로 통과한다(Renovate pin-dependencies 배치 대신 수동 digest 핀을 택한 이유:
+#   그 배치가 Issues:write gap으로 엉켜 결정적 경로를 골랐다 — policy/image-pin-allowlist.txt 머리말 참조).
+#   신규 미핀 이미지는 이 게이트가 fail-closed로 차단.
 # bash 3.2 호환: [[ ]]·mapfile 금지(중간 단언 [ ]/grep). --root로 픽스처 tmp git 레포 지정 가능.
 set -euo pipefail
 # 프롤로그(LC_ALL=C·ROOT 기본값·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다 —
@@ -50,7 +51,7 @@ ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; SCOPE_NARROWED=0
 #    기계 자체(사유 강제·멤버십)는 tests/gates/test_image_pins.bats 픽스처가 매번 밟는다.
 # ⚠️ env 오버라이드를 두지 않는다 — 호출부에 안 보이는 off-switch 금지. 픽스처는 `--exempt-max`로만.
 EXEMPT_MAX=0
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 01 — 구 --min-scan/
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 --min-scan/
 # --min-scan-apps 폐지). 선언 라벨은 **방출 라벨의 부분집합**이어야 한다(커버리지 증인이 정적 대조 —
 # 선언 오타가 조용히 꺼진 바닥값이 되는 자리). :platform은 바닥값 없는 신호 전용이라 선언 밖이다
 # (--floor platform=N은 미매칭 진단이 정확한 응답이다 — floor를 소비하지 않는 도메인).
@@ -78,7 +79,7 @@ MIN_SCAN_APPS="$(floor_of check-image-pins:apps "$MIN_SCAN_APPS")"   # 레인2 �
 # 앵커된 이미지 키 정규식 — `logo_image:`·경로 내 `my-image:` 부분매치 방지(리스트 아이템 `- ` 허용).
 # ⚠️ IMG_KEY는 `image: >-`/`image: |`(YAML 블록 스칼라) 표기에서 매치가 끊긴다 — 이 레인은 그 표기를
 #    검출하지 않는다(사본 검출기를 두지 않는다). 소유자는 tools/check-image-ownership.ts의
-#    IMG_BLOCK_SCALAR(감사 6라운드 grep-c-2) — repo-walk 스코프 `image-ownership`이 이 레인의
+#    IMG_BLOCK_SCALAR — repo-walk 스코프 `image-ownership`이 이 레인의
 #    `platform-image-refs`·`apps-values`의 상위집합이라, 그 표기가 착지하면 소유권 회계가 먼저 red를
 #    내 이 레인에 도달하지 못한다.
 IMG_KEY='^[[:space:]]*(-[[:space:]]+)?(image|imageName):[[:space:]]*'
@@ -232,7 +233,7 @@ done <<< "$apps_files"
 scanned_lane2=$((scanned - scanned_lane1))
 
 # --- scan-floor: 스캔이 의심스럽게 적으면(글롭/제외 파손) fail-loud ---
-# 합계 도메인도 커널 경유다(:total — kernel-followups 01 리뷰 수용: 손조립 판정은 라벨이 없어
+# 합계 도메인도 커널 경유다(:total — 리뷰 수용: 손조립 판정은 라벨이 없어
 # --floor 선언과 방출 라벨이 어긋나는 어휘 이탈이었다). 판정·문구·마커는 scan_floor 소유.
 # 픽스처 모드(--root)엔 **기본값을** 적용하지 않는다 — 형제 도메인 `:apps`와 같은 형태다.
 # 픽스처는 정당하게 소수의 파일만 만들고, 그대로 걸면 픽스처 호출마다 `--floor total=<n>`을

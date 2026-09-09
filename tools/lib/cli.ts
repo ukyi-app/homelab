@@ -9,14 +9,14 @@ export function parseFlags(argv: string[], spec: FlagSpec): Record<string, strin
     const a = argv[i];
     if (!a.startsWith("--")) {
       // 단일 대시 토큰은 위치 인자가 아니다 — `-h`를 준 사용자가 '이름 형식 불량: -h' 같은
-      // 엉뚱한 계층의 오류를 받던 자리(shell-9). 맨 `-`(stdin 관례)는 위치 인자로 남긴다.
+      // 엉뚱한 계층의 오류를 받던 자리. 맨 `-`(stdin 관례)는 위치 인자로 남긴다.
       if (a.startsWith("-") && a !== "-") throw new Error(`알 수 없는 옵션: ${a}(단일 대시 미지원 — --help)`);
       throw new Error(`예상치 못한 위치 인자: ${a}`);
     }
     if (!known.has(a)) throw new Error(`알 수 없는 옵션: ${a}`);
     // 중복 지정 거부 — 침묵 last-wins는 모순된 편집 실수를 조용히 뒤 값으로 접는다(실측:
     // `--env-local a --env-local b` → "b", rc 0). 파괴 확인(`--confirm x --confirm myapp`)까지
-    // 같은 경로라 거부는 이 커널 한 곳이 소유한다(9개 도구 공유 — 적용 전 워크플로·스크립트의
+    // 같은 경로라 거부는 이 커널 한 곳이 소유한다(레포의 거의 모든 도구가 공유 — 적용 전 워크플로·스크립트의
     // tools 호출 argv에 반복 플래그 0건 확인). bool도 포함 — 두 번 준 불리언은 의도가 모호하다.
     if (Object.hasOwn(out, a)) throw new Error(`옵션 ${a} 중복 지정 — 한 번만 준다`);
     if (spec.bool.includes(a)) { out[a] = true; continue; }
@@ -76,7 +76,7 @@ export function parseCommand(argv: string[], tree: CommandTree): ParsedCommand {
 //   워크플로는 비-0만 보지만 래퍼/사람이 원인 계층을 구분하도록 유지한다.
 // 4가 0과 갈라져야 하는 이유: 대상이 없어 건너뛴 것과 검사해서 통과한 것이 같은 코드면 가드가 실제 실행
 //   경로를 잃어도 CI가 초록이다(verify-runbook-index 실측 — CI에선 런북이 gitignored라 무조건 skip이었다).
-//   4는 콜사이트에서 직접 내지 않는다 — TS는 이 skip(), 셸은 guard_skip을 경유한다(축 교체, 티켓 11:
+//   4는 콜사이트에서 직접 내지 않는다 — TS는 이 skip(), 셸은 guard_skip을 경유한다(축 교체:
 //   scripts/check-skip-signalling.sh가 직접 방출을 red로 강제한다).
 // skip(4) 방출 — 위 종료코드 어휘의 함수형(산문 SSOT를 코드로). 마커와 종료코드의 같은-줄 원자성은
 // **이 구현 줄 하나가 소유**하고(정확 1은 tests/gates/test_guard-skip-signalling.bats가 잰다),

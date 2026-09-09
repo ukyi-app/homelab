@@ -32,7 +32,7 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 0 ]
 }
 
-# 티켓 70 critic-manifest-guard-vendor — AGENTS.md 「벤더 파일 수정 금지」 3종 중 charts/ 캐시
+# AGENTS.md 「벤더 파일 수정 금지」 3종 중 charts/ 캐시
 # 1종만 막던 갭(barman-plugin manifest·gateway-api CRD는 그동안 exit 0로 통과했다 — 라이브 재현
 # 실측). 두 벤더 경로 차단 + 같은 디렉토리의 정당한 형제 파일은 여전히 통과함을 대조한다.
 

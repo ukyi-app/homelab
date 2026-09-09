@@ -11,5 +11,5 @@ data:
     metrics: 0.0.0.0:9090          # pod에 prometheus.io/scrape annotation (M5)
     ingress:
       - service: http://traefik.gateway.svc.cluster.local:80
-    # 공개 hostname → tunnel 라우팅은 Terraform이 Cloudflare DNS에서 관리 (M2):
+    # 공개 hostname → tunnel 라우팅은 Terraform이 Cloudflare DNS에서 관리:
     #   *.ukyi.app CNAME <tunnel-id>.cfargotunnel.com (proxied)

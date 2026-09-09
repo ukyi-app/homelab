@@ -56,7 +56,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-gh-secret-coverage
 SCOPE_NARROWED=0
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 02 — 구 GH_SECRET_*
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 GH_SECRET_*
 # env 폐지). 붕괴 종료코드도 1로 수렴한다(2는 사용법 전용 — check-image-pins 선례와 같은 근거).
 take_floors "check-gh-secret-coverage:workflows check-gh-secret-coverage:secrets check-gh-secret-coverage:vars" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"

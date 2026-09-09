@@ -108,7 +108,7 @@ run_teardown_tty() {
   [ "$(echo "$output" | jq -r '.variant')" = "success" ]
   [ "$(echo "$output" | jq -r '.result.applications[0].name')" = "myapp-prod" ]
   [ "$(echo "$output" | jq -r '.result.applications[0].present')" = "false" ]
-  # 사람용 렌더의 present 분기(티켓 13) — 부재를 sync/health가 아니라 prune 완료로 말한다.
+  # 사람용 렌더의 present 분기 — 부재를 sync/health가 아니라 prune 완료로 말한다.
   echo "$stderr" | grep -q "^Application myapp-prod: 부재 — prune 완료$"
   echo "$stderr" | grep -q "^DNS 회수: "
   # health/sync를 종결 근거로 쓰지 않았다: 부재 조회(--ignore-not-found) 형태로만 물었다.
@@ -213,7 +213,7 @@ run_teardown_tty() {
 }
 
 @test "app teardown goldens pin default-success, human-merge pending, pruned, failure, and race variants (floor 5)" {
-  # 티켓 25 (d): teardownFailure·teardownRace는 mutation*과 별개 수제 정의라 드리프트 위험이 공유
+  # teardownFailure·teardownRace는 mutation*과 별개 수제 정의라 드리프트 위험이 공유
   # 정의보다 큰데 골든이 없었다(합성 표본만이 증인). 두 셀을 엔진 산출로 승격한다.
   export OUTDIR="$BATS_TEST_TMPDIR"
   env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
@@ -257,7 +257,7 @@ run_teardown_tty() {
 }
 
 @test "teardown is the only destructive verb in the catalog (MCP exposure premise, floor 1)" {
-  # 티켓 12(MCP)가 이 표시로 파괴 동사를 걸러낸다 — 여기서 전제를 원장으로 고정한다.
+  # MCP가 이 표시로 파괴 동사를 걸러낸다 — 여기서 전제를 원장으로 고정한다.
   # 바닥값(=1)이 있어 "표시가 아무 데도 없음"이 vacuous green이 되지 않는다.
   run bun -e '
     import { VERBS } from "./tools/lib/verbs.ts";
@@ -282,7 +282,7 @@ run_teardown_tty() {
 }
 
 @test "every teardown variant states that db/cache resources are retained, not reclaimed (floor 4)" {
-  # product-3: teardown-app의 계약은 'DB/캐시 conn·CR·Valkey는 절대 비접촉'인데 결과는 DNS만
+  # teardown-app의 계약은 'DB/캐시 conn·CR·Valkey는 절대 비접촉'인데 결과는 DNS만
   # '내 소관 아님'이라 말하고 잔여는 침묵했다(지금 레포가 그 잔여 3건을 안고 있다).
   # dnsReclaim과 **같은 형식**으로 4 variant 전부에 싣는다 — 반쯤 착지한 순간이 가장 헷갈린다.
   # 후보 열거는 하지 않는다(이름≠앱 케이스). 문구는 소관 이관이 아니라 **미완 작업**을 드러낸다.
@@ -320,7 +320,7 @@ run_teardown_tty() {
 
 @test "a bad wait flag is a usage error BEFORE the TTY destruction prompt (notation and range axes)" {
   # 종전 순서는 APP_NAME_RE → confirm 프롬프트 → appTeardownInputError였다: 사람이 파괴 확인을
-  # 타이핑한 뒤에야 usage 오류를 봤다(appverbs-12). 표기 축(--poll-ms abc)은 파서의 십진 술어가
+  # 타이핑한 뒤에야 usage 오류를 봤다. 표기 축(--poll-ms abc)은 파서의 십진 술어가
   # 이미 앞에서 잡지만 **범위 축**(0)은 그 뒤였다 — 두 축을 한 자리에서 잰다.
   n=0
   for badflag in "--poll-ms abc" "--poll-ms 0" "--deadline-ms 0"; do

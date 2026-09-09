@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 결과 계약 표화(cli-deepening 심화 3) — cli-result-schema.json은 기술자 행(catalog-rows
+# 결과 계약 표화 — cli-result-schema.json은 기술자 행(catalog-rows
 # CONTRACT_ROWS)과 플랫폼 좌표(platform ARCHETYPES)에서 생성기의 산출물이다. 드리프트 게이트(byte 동일)·
 # 생성물 부재 재생성(의존 순환 부재 — 설계 게이트 r1 D3)·행 순서 손 앵커·판별성을 여기서 강제한다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과 함정. @test 이름은 영어(인코딩 함정).
@@ -94,7 +94,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "deleting an mcp normalVariants member fails the generation closed (partition mutation)" {
-  # contract-4: 두 목록 ∪ = variant enum 분할을 생성기가 생성 시점에 단언한다 — 목록에서 한 원소가
+  # 두 목록 ∪ = variant enum 분할을 생성기가 생성 시점에 단언한다 — 목록에서 한 원소가
   # 빠지면(새 variant를 enum에만 더하는 것과 같은 클래스) 생성이 죽어야 한다.
   T="$BATS_TEST_TMPDIR/part"
   mkdir -p "$T/tools/lib"

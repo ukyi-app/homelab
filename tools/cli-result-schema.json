@@ -36,7 +36,7 @@
   },
   "allOf": [
     {
-      "description": "verb→(허용 variant 집합, result) 결합(structure r1 a1·b1 + 시도2 A2·B2): verb별로 낼 수 있는 variant와 result 정의를 루트에 강제 — 어긋난 shape·불가능한 verb/variant 쌍은 스키마 차원에서 red. 변이 동사(db/cache create)는 variant 단위 분기이고 공유 mutation* 정의에 allOf로 verb별 action을 고정한다(verb↔action 교차 배선 차단). 동사 추가 = 분기 추가.",
+      "description": "verb→(허용 variant 집합, result) 결합: verb별로 낼 수 있는 variant와 result 정의를 루트에 강제 — 어긋난 shape·불가능한 verb/variant 쌍은 스키마 차원에서 red. 변이 동사(db/cache create)는 variant 단위 분기이고 공유 mutation* 정의에 allOf로 verb별 action을 고정한다(verb↔action 교차 배선 차단). 동사 추가 = 분기 추가.",
       "oneOf": [
         {
           "type": "object",
@@ -434,7 +434,7 @@
       ]
     },
     {
-      "description": "variant→exitCode 결합(structure r1 b2): 허용 쌍 밖(success+1 등)은 red. 이 분기들은 x-contract.exitCodes의 재진술이며, 둘의 일치는 test_homelab-cli.bats의 SSOT pinning 테스트가 강제한다.",
+      "description": "variant→exitCode 결합: 허용 쌍 밖(success+1 등)은 red. 이 분기들은 x-contract.exitCodes의 재진술이며, 둘의 일치는 test_homelab-cli.bats의 SSOT pinning 테스트가 강제한다.",
       "oneOf": [
         { "type": "object", "properties": { "variant": { "enum": ["success", "no-op"] }, "exitCode": { "enum": [0] } } },
         { "type": "object", "properties": { "variant": { "enum": ["failure", "pending"] }, "exitCode": { "enum": [1] } } },

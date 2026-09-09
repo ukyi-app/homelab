@@ -49,7 +49,7 @@ setup() {
   [ "$status" -eq 0 ]
   # rc 2(디렉토리 부재)를 통과로 읽지 않는다 — 위 양성 대조가 같은 트리의 비공허성을 증언한다
   # 버전 리터럴이 아니라 모양으로 잰다 — 옛 v0.27.3 하나만 보면 다른 버전으로 인라인해도 초록이다
-  # (untouched-c-2: 인라인 회귀는 버전이 자유 변수).
+  # (인라인 회귀는 버전이 자유 변수).
   run grep -rE 'sealed-secrets/releases/download' "$WF"
   [ "$status" -eq 1 ]
 }
@@ -61,7 +61,7 @@ setup() {
     [ "$status" -eq 0 ]
   done
   # 인라인 helm/kubeconform/conftest 설치기가 워크플로 전역에 없는지 — 옛 버전 리터럴이 아니라
-  # 모양으로 잰다(untouched-c-2: 버전은 인라인 회귀의 자유 변수). 이름이 약속한 kubeconform
+  # 모양으로 잰다(버전은 인라인 회귀의 자유 변수). 이름이 약속한 kubeconform
   # 레인도 여기서 처음 실재한다.
   # 양성 대조 — 열거 대상이 실제 워크플로 트리인지(:48-49와 동일 규약)
   run grep -rlE '^on:' "$WF"

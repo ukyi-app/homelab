@@ -511,7 +511,7 @@ JSON
   [ "$status" -ne 0 ]
 }
 
-# docs.has 필터의 증인(리뷰 M5) — declarations는 파일 열거가 아니라 "실재 워크플로를 가리키는
+# docs.has 필터의 증인 — declarations는 파일 열거가 아니라 "실재 워크플로를 가리키는
 # 항목의 선언"만 센다. 필터가 죽으면 ghost 선언이 마커에 세어져, 대조하지 않은 건수를
 # "스캔했다"로 보고한다(마커 값 단언이 곧 뮤테이션 감도다 — 죽은 선언 위반은 별도로 유지).
 @test "a ledger entry for a missing workflow is excluded from the declarations count (dead claim stays loud)" {
@@ -573,7 +573,7 @@ PY
 # 옮기면서 회귀가 나면 안 되는 자리라(설계 r2 순서 제약), 빈 문자열을 두 플래그 모두에 대해 못박는다.
 # 사용법 오류(2)는 바닥값 붕괴(1)와 다른 사고이고, 거부된 실행은 도메인을 평가한 적이 없으므로 마커가 없다.
 @test "the floor values must be non-negative integers (never a silently disabled floor)" {
-  # ⚠️ `bash -c` 없이 GUARD를 직접 부른다 — 빈 문자열 인자를 문자열로 조립하면 티켓 03이 밟은
+  # ⚠️ `bash -c` 없이 GUARD를 직접 부른다 — 빈 문자열 인자를 문자열로 조립하면 형제 가드가 밟은
   #    `bash -c` + 지역변수 함정 표면이 생긴다(여기선 동작해도 다음 편집자가 그 형태를 복제한다).
   for dom in workflows declarations; do
     for val in "" abc -1 1.5; do
@@ -658,7 +658,7 @@ _needs() { WORKFLOW_NEEDS="$1" GUARD --repo-root "$2" --workflow demo.yaml; }
 
 # 런타임 모드의 `accounted`는 **바닥값 없는** 신호다 — 회계 대상 수는 원장이 정하고 원장의 바닥값은 정적
 # 모드가 본다. 게이트(test_scan-floor.bats)는 이 모드를 **두 번째 실행**(`WORKFLOW_NEEDS='{}'`)으로
-# 덮는데, 그 등식은 콜사이트가 통째로 사라지면 양쪽이 함께 줄어 유지된다(티켓 06 전까지의 알려진 구멍).
+# 덮는데, 그 등식은 콜사이트가 통째로 사라지면 양쪽이 함께 줄어 유지된다(옛 알려진 구멍).
 # 그래서 여기서 값까지 직접 본다: 전건 absent 실패인 실행에서도 선언 수(3)가 그대로 나가야 한다.
 @test "runtime: the accounted marker carries the declared count even when every job is absent" {
   t="$(_fixture rt-accounted)"

@@ -1,4 +1,4 @@
-// cache:url — conn URL 엔진(lib/conn-url.ts)의 CLI 껍데기(cli-deepening 심화 5). db-url과 대칭.
+// cache:url — conn URL 엔진(lib/conn-url.ts)의 CLI 껍데기. db-url과 대칭.
 // 접속 로직·평문 비출력은 엔진 소유 — 여기는 argv 파싱과 기존 출력 계약(dry-run 계획 JSON·기록
 // 한 줄·종료코드 0/1/2, skip=4는 헬퍼 경유)만 보존한다. host 기본은 127.0.0.1(port-forward 타깃 — F3: tailscale 상시
 // 노출은 deferred). homelab CLI(`homelab cache url`)와 MCP(cache_url)는 catalog op로 같은 엔진 소비.

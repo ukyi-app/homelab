@@ -56,7 +56,7 @@ _one_line() {                # 한 줄짜리 픽스처 파일을 만들고 경�
 
 # ── 계약: 텍스트 파서 == source ────────────────────────────────────────────────────────────
 @test "reader output equals the sourced value for every allowed vocabulary shape" {
-  # ⚠️ 이것이 티켓 07의 핵심 단언이다. 두 관측이 갈리면 두 소비자가 서로 다른 값을 본다.
+  # ⚠️ 이것이 이 리더의 핵심 단언이다. 두 관측이 갈리면 두 소비자가 서로 다른 값을 본다.
   #    (`apply-storage.sh`·`k3s-install.sh` 등 6파일은 여전히 source한다 — 갈리면 그쪽이 다른 값을 쓴다.)
   # shellcheck disable=SC1090
   . "$ALLOWED"

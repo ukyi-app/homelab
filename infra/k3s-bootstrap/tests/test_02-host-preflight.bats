@@ -348,7 +348,7 @@ EOF
 }
 
 @test "link ifindex lookup consumes the whole ip listing (an early-exit consumer must not SIGPIPE the writer)" {
-  # 티켓 49(2026-09-08 CI flake 2회): [6]의 `ip … | awk '… exit'`는 첫 매치에서 파이프를 닫는다. writer(스텁의
+  # 2026-09-08 CI flake 2회: [6]의 `ip … | awk '… exit'`는 첫 매치에서 파이프를 닫는다. writer(스텁의
   # 두 번째 echo, 실물 ip의 나머지 링크)가 그 뒤에 쓰면 SIGPIPE(141) 또는 — 러너처럼 SIGPIPE가 무시된
   # 환경에선 — EPIPE 쓰기 오류(rc 1)로 죽고, pipefail이 그것을 파이프라인 rc로 채택해 `set -e`가 스크립트를
   # 죽인다. 등재 함정 「`grep -q`의 조기 종료 …」의 형제(소비자가 grep -q가 아니라 awk exit). 결정적 재현:

@@ -1,16 +1,16 @@
 // bump 계획 계약 module — apps 레인/베스포크 레인 배포 핀 갱신의 plan 항목·명명·레인 인가를
-// 소유한다(lib-convergence d3·08 · CONTEXT.md 「bump 계획」). 종전에는 이 계약이 세 프로세스에
+// 소유한다(CONTEXT.md 「bump 계획」). 종전에는 이 계약이 세 프로세스에
 // 독립 선언돼 있었다(poll-ghcr `type Plan` · run-bump-plan `type PlanItem` — optionality 상이 ·
 // ensure-bump-pr `LANES` + 생산자 소스를 주석으로 붙여넣은 복붙-주석 seam). 생산자와 검증자가
 // 같은 문자열을 각자 적으면 한쪽만 바뀔 때 소유 증명이 조용히 실패한다 — 여기가 그 유일 선언이다.
 //
-// plan 항목은 **런타임 디코드되는 판별 union**(design r1-1): 플래너는 noop·refuse도 적법하게
+// plan 항목은 **런타임 디코드되는 판별 union**: 플래너는 noop·refuse도 적법하게
 // 내므로 Lane("bump"|"propose-pr")은 Change에만 있다. plan은 JSON 경계를 건너므로 TS 타입만으로는
 // 부족하다 — decodePlan()이 fail-closed로 검증하고, 미지 action·형식 위반은 조용한 skip이 아니라
 // throw다. target은 판별 신원 {kind: "app"|"bespoke", name}(r1-2) — 두 레인은 인가 소스가 다르다
 // (.bindings.json vs .image-pin.json).
 //
-// 신원은 프로세스 경계를 관통한다(design r2-1, 08): 브랜치가 kind를 인코딩하고
+// 신원은 프로세스 경계를 관통한다(08): 브랜치가 kind를 인코딩하고
 // (`bump-poll/<kind>/<name>-<tag>`), 인코딩(branchFor)과 역디코딩(parseBranch)을 이 module이
 // **둘 다** 소유한다 — 형제 스윕·소유 증명이 브랜치명에서 target을 복원할 때 같은 module을
 // 지나므로 인코딩·디코딩이 어긋날 자리가 없다. 구형 무한정 브랜치(`bump-poll/<name>-<tag>`)의

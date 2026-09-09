@@ -1,4 +1,4 @@
-// 외부 명령 실행 seam — 이 레포 TS 도구의 subprocess 실행이 전부 지나는 자리(lib-convergence d6).
+// 외부 명령 실행 seam — 이 레포 TS 도구의 subprocess 실행이 전부 지나는 자리.
 // 판정 정책(무엇이 실패인가·실패를 어떻게 보고하는가)은 콜사이트 소유 — 여기는 실행·캡처·관측만
 // 한다(encoding utf8 · timeout 기본 30s/0=무제한 — ExecOpts 참조). 명명 adapter(gh/git/kubeseal)는 sh의 커맨드 고정형이다.
 //
@@ -8,7 +8,7 @@
 // rc 의미론은 콜사이트가 판정한다. 소비자: doctor의 미설치 진단, 변이 엔진의 디스패치 타임아웃
 // 관용(timeout = '실패'가 아니라 '결과 미상' — mutation.ts 1단계).
 //
-// 재시도 정책(선언 — homelab-cli-r2 티켓 06): **seam은 재시도하지 않는다.** sh()는 spawnSync 1회이고
+// 재시도 정책(선언): **seam은 재시도하지 않는다.** sh()는 spawnSync 1회이고
 // 백오프도 없다 — 재시도는 콜사이트 정책이며 **변이 argv(`gh workflow run`)는 어떤 층에서도 재시도하지
 // 않는다**(타임아웃은 '실패'가 아니라 '결과 미상'이라 재시도가 곧 두 개의 run이다).
 // ⚠️ 변이 엔진의 폴링 루프와 PR 목록 grace 재조회(mutation.ts PR_GRACE_RETRIES)는 **관측 재조회**지
@@ -16,7 +16,7 @@
 //
 // HOMELAB_EXEC_LEDGER — env 주입 **관측 레버**(계약은 테스트가 강제한다 — 테스트 전용이 아니다).
 // 설정되면 호출마다 {cmd, args} 한 줄을 JSONL로 append한다. 이 레포에서 유일한 디버그 축이라
-// tools/README.md·`homelab --help`가 운영자에게 공개한다(티켓 33): **사전 무장 opt-in**이고
+// tools/README.md·`homelab --help`가 운영자에게 공개한다: **사전 무장 opt-in**이고
 // 소급 기록은 불가능하다. 민감값 노출 표면은 전 콜사이트 확인 결과 없다 — 변이 argv는 이름·불리언·
 // correlation뿐, 자격은 `--body-file` 경로로만, 봉인 평문은 kubeseal stdin 전용이다.
 // ⚠️ stdin(input)은 **절대 기록하지 않는다** — kubeseal 평문이 지나는 채널이다. stdout/stderr도
@@ -30,7 +30,7 @@ export type ErrKind = "not-found" | "timeout" | "overflow" | "spawn";
 // rc **값** 자체는 seam이 나른다(bump 클러스터 이관의 실증 소비자: 러너의 `exit N` 실패 로그).
 // signal — 자식을 죽인 시그널(없으면 부재). SIGKILL 사망은 r.error가 없어 **정상 분기**로 오고
 // (ok:false·status null·stderr는 흔히 빈 문자열) 이 필드가 없으면 콜사이트의 사유가 빈 문자열이
-// 된다 — '실패했는데 이유가 없다'가 오진을 만든다(exec-2 실측).
+// 된다 — '실패했는데 이유가 없다'가 오진을 만든다(실측).
 export type Cmd = { ok: boolean; status: number | null; out: string; err: string; errKind?: ErrKind; signal?: string };
 // timeoutMs — 기본 30s(느린 push/pr 경로는 콜사이트가 올린다). **0 = 무제한**(종전 spawnSync
 // 무-timeout 동작을 보존해야 하는 이관 콜사이트용 — 기본값 강제는 조용한 동작 변화다).
@@ -45,7 +45,7 @@ function ledger(cmd: string, args: string[]): void {
   try { appendFileSync(f, JSON.stringify({ cmd, args }) + "\n"); } catch { /* 관측은 실행을 막지 않는다 */ }
 }
 
-// git 실행의 env 위생(티켓 27) — **cmd === "git"인 모든 호출**에 건다. 명명 adapter(git())만
+// git 실행의 env 위생 — **cmd === "git"인 모든 호출**에 건다. 명명 adapter(git())만
 // 감싸면 `sh("git", ["clone", …])` 직접 호출(init.ts의 템플릿 클론)이 규약 밖에 남는다: 드리프트가
 // 없는 자리는 adapter가 아니라 seam 본체다.
 //   · GIT_TERMINAL_PROMPT=0 — 자격이 없으면 프롬프트 대신 **즉시** 죽는다. 이게 없으면 push/clone이
@@ -111,7 +111,7 @@ export function firstReason(err: string): string {
   return (weak ?? lines[0] ?? "").trim();
 }
 
-// push 실패 사유 + **다음 행동**(티켓 27). GIT_TERMINAL_PROMPT=0 아래서 자격 helper가 없으면
+// push 실패 사유 + **다음 행동**. GIT_TERMINAL_PROMPT=0 아래서 자격 helper가 없으면
 // https push는 `fatal: could not read Username for '…': terminal prompts disabled`로 즉시 죽는다.
 // 그 줄은 '망 실패'가 아니라 **설정 부재**라 다음 행동이 정해져 있다(`gh auth setup-git`이
 // credential.helper를 심는다) — 그런데 종전 문구는 사유만 옮겨 실어, 운영자가 네트워크·권한을
@@ -146,7 +146,7 @@ export function pushRoutes(cwd: string): string[] | null {
 }
 
 // gh api + --jq 결과의 3상 리더 — 값과 **실패 사유**를 함께 돌려준다. ghJson(아래)이 null로 접어
-// 버리는 사유를, 폴링 루프가 pendingReason에 실을 수 있게 하는 자리다(티켓 06).
+// 버리는 사유를, 폴링 루프가 pendingReason에 실을 수 있게 하는 자리다.
 //   error — 비-0 종료(인증 만료·오프라인·rate limit). 사유 = stderr 첫 줄.
 //   parse — rc 0인데 JSON이 아니다. **stderr가 비어 있으므로** 폴백 문구가 필요하다(빈 사유는
 //           "실패했는데 이유가 없다"로 보여 오히려 오진을 만든다).
@@ -154,7 +154,7 @@ export function pushRoutes(cwd: string): string[] | null {
 //    스칼라는 sh()로 직접 받아 trim해서 쓴다(mutation.ts isDescendant 참고).
 // errKind — 실행 자체가 실패한 종류(seam이 나른 값 그대로). 콜사이트가 사유 **문구**를 처방으로
 // 번역할 수 있게 남긴다: not-found의 reason은 `spawnSync gh ENOENT`라 운영자에게 무의미하고,
-// 그 한 줄이 미인증·404·망 단절과 같은 자리에 놓이면 처방 분기가 원리적으로 불가능하다(티켓 15).
+// 그 한 줄이 미인증·404·망 단절과 같은 자리에 놓이면 처방 분기가 원리적으로 불가능하다.
 export type GhRead =
   | { kind: "ok"; value: unknown }
   | { kind: "error"; reason: string; errKind?: ErrKind }

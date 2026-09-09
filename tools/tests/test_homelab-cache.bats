@@ -131,13 +131,13 @@ run_cache_create() {
 }
 
 @test "cache url without KUBECONFIG is a skip with the stderr marker (exit 4)" {
-  # db url과 같은 skip 규약(kernel-followups 06) — cache 레인 독립 증인.
+  # db url과 같은 skip 규약 — cache 레인 독립 증인.
   run --separate-stderr env -u KUBECONFIG PATH="$STUB" "$BUN" tools/homelab.ts cache url --name t --env-local "$BATS_TEST_TMPDIR/skip.env.local" --json
   [ "$status" -eq 4 ]
   echo "$stderr" | grep -q "^SKIP: homelab cache url: "
   [ ! -f "$BATS_TEST_TMPDIR/skip.env.local" ]   # skip = 정말로 안 썼다
   [ "$(echo "$output" | jq -r '.variant')" = "skip" ]
-  # 실산출물 스키마 대조(티켓 25 (a)) — db 레인은 이미 있었고 cache 레인만 variant 단언뿐이었다.
+  # 실산출물 스키마 대조 — db 레인은 이미 있었고 cache 레인만 variant 단언뿐이었다.
   echo "$output" > "$BATS_TEST_TMPDIR/cache-url-skip.json"
   run bun -e '
     import { schemaErrors } from "./tools/lib/schema-check.ts";
@@ -152,7 +152,7 @@ run_cache_create() {
 }
 
 @test "cache url is a catalog op: --json yields a schema-valid envelope with no plaintext value" {
-  # 구 byte-parity는 catalog 승격으로 계약이 대체됐다(티켓 08) — op envelope 계약 + 렌더러 소유.
+  # byte-parity 대조는 url 동사가 catalog로 승격되며 op envelope 계약으로 대체됐다 — 사람용 출력은 렌더러 소유.
   export OUTDIR="$BATS_TEST_TMPDIR"
   run --separate-stderr bun tools/homelab.ts cache url --name t --dry-run --json
   [ "$status" -eq 0 ]
@@ -183,7 +183,7 @@ run_cache_create() {
 }
 
 @test "maxmemory-mi rejects non-decimal notation quoting the raw token and dispatches nothing (floor 3)" {
-  # 티켓 11 — 실측(착지 전): `--maxmemory-mi 1e3`이 1000으로 접혀 범위(16..1024) 안에 들어가 통과했고
+  # 실측(착지 전): `--maxmemory-mi 1e3`이 1000으로 접혀 범위(16..1024) 안에 들어가 통과했고
   # `--maxmemory-mi ""`은 "16..1024 정수여야 한다: 0"으로 사용자가 주지 않은 0을 인용했다.
   n=0
   for tok in "1e3" "0x10" ""; do

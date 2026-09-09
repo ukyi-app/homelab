@@ -17,7 +17,7 @@ setup() {
   KC="$BATS_TEST_TMPDIR/kubeconfig"
   echo "apiVersion: v1" > "$KC"
   # state·head_sha는 실물 응답의 기본값이다 — head SHA가 없으면 required check 관측이 좌표 부재로
-  # 눈을 감고(티켓 47 리뷰 L5) 그 상태가 pendingReason 접미로 보고된다.
+  # 눈을 감고 그 상태가 pendingReason 접미로 보고된다.
   printf '[{"number":51,"html_url":"https://github.com/ukyi-app/homelab/pull/51","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
 }
 
@@ -118,7 +118,7 @@ run_app_create() {
   echo "$output" | grep -q "^ok:3$"
 }
 
-# ── 머지 없이 닫힌 PR의 종결성 · 수동 머지 레인(homelab-cli-r2 티켓 05) ─────────────────────
+# ── 머지 없이 닫힌 PR의 종결성 · 수동 머지 레인 ──────────────────────────────────────────
 # create-app에서 owner가 PR을 닫는 것은 설계된 승인 경계의 정당한 결말이다 — 그 결말이 20분
 # '사람 머지 대기' pending으로 위장되면 안 된다. 종결은 단건 권위 조회로 확증한 뒤에만.
 
@@ -139,8 +139,8 @@ run_app_create() {
 }
 
 @test "wait: a failed required check is terminal for the manual-merge verb too (the normal path will not merge)" {
-  # 티켓 47 — gate는 branch protection의 required check라 실패하면 **정상 경로로는** 머지되지 않는다.
-  # [리뷰 M4] 종전 문구는 "사람도 머지할 수 없다"였는데 IaC와 어긋난다 — infra/github/repo.tf의
+  # gate는 branch protection의 required check라 실패하면 **정상 경로로는** 머지되지 않는다.
+  # 종전 문구는 "사람도 머지할 수 없다"였는데 IaC와 어긋난다 — infra/github/repo.tf의
   # `enforce_admins = false`가 owner(admin)에게 required check를 면제한다(그 파일 주석이 의도된
   # 잔여 우회임을 기록한다). 판정은 그대로 종결이다: 잔여 우회는 경로이지 대기 사유가 아니다.
   printf '[{"number":51,"html_url":"https://github.com/ukyi-app/homelab/pull/51","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
@@ -152,7 +152,7 @@ run_app_create() {
   echo "$output" | jq -r '.result.error' | grep -q "https://github.com/ukyi-app/homelab/runs/9101"
   # 수동 머지 동사는 무엇이 승인이었는지를 부가 문맥으로 싣는다(닫힘 종결과 같은 규약).
   echo "$output" | jq -r '.result.error' | grep -q "공개 승인"
-  # [리뷰 M4] 문구가 IaC와 정합한지 — 잔여 우회를 사실대로 지목하고 그 근거 파일을 인용한다.
+  # 문구가 IaC와 정합한지 — 잔여 우회를 사실대로 지목하고 그 근거 파일을 인용한다.
   echo "$output" | jq -r '.result.error' | grep -q "정상 경로"
   echo "$output" | jq -r '.result.error' | grep -q "잔여 우회"
   echo "$output" | jq -r '.result.error' | grep -q "infra/github/repo.tf"
@@ -162,7 +162,7 @@ run_app_create() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh pr)" = "0" ]
 }
 
-# ── 멀티소스 리비전 해석(homelab-cli-r2 티켓 01) ────────────────────────────────────────────
+# ── 멀티소스 리비전 해석 ────────────────────────────────────────────────────────────────────────
 # 앱 Application은 멀티소스라 `status.sync.revision`이 비고 `revisions[]`만 있다 — 기본 픽스처(cli_stub.bash
 # argocd-app.json)가 그 형상이고, 위 수렴 @test 2건이 그 위에서 success다(수정 전에는 단수 필드만 읽어 pending).
 # 아래는 복수형의 미확정 3상(skew·none·non-sha)이 success로 접히지 않음을 밟는 음성 증인이다.
@@ -244,7 +244,7 @@ merged_pr() {
 }
 
 @test "app create states the exposure boundary in a mode-agnostic way (true for public and internal apps, floor 2)" {
-  # product-8: teardown은 DNS를 '내 소관 아님'이라 말하는데 create는 아무 말도 안 했다.
+  # teardown은 DNS를 '내 소관 아님'이라 말하는데 create는 아무 말도 안 했다.
   # 무조건 상수(iac/tf-reconcile)는 **내부 앱에서 거짓**이 된다 — 내부 노출은 adguard rewrite 소관이다.
   # create 시점에는 표면이 아직 없어 route.public을 읽을 수 없으므로 모드-불가지 부인문을 싣는다.
   n=0
@@ -267,12 +267,12 @@ merged_pr() {
   [ "$(echo "$output" | jq -r '.result | has("dnsExposure")')" = "false" ]
 }
 
-# ── 디스패치 전 사전 판정(homelab-cli-r2 티켓 30) ──────────────────────────────────────────────
+# ── 디스패치 전 사전 판정 ──────────────────────────────────────────────────────────────────────
 
 @test "a missing .app-config.yml on the app repo main is refused BEFORE dispatch, and a non-404 gh error still dispatches" {
   # `app init` 직후의 `app create`는 release 빌드(멀티아치, 수 분)가 끝나기 전이라 디스패처의 첫
-  # 관문에서 죽고, 그 실패 run이 homelab-mutation 직렬화 큐와 Telegram 실패 알림을 소비한다
-  # (appverbs-5). 결정적으로 판정 가능한 것 하나(.app-config.yml 부재)만 사전 거부로 승격한다.
+  # 관문에서 죽고, 그 실패 run이 homelab-mutation 직렬화 큐와 Telegram 실패 알림을 소비한다.
+  # 결정적으로 판정 가능한 것 하나(.app-config.yml 부재)만 사전 거부로 승격한다.
   run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
     STUB_APP_CONFIG_404=1 "$BUN" tools/homelab.ts app create myapp --poll-ms 10 --deadline-ms 500 --json
   [ "$status" -eq 1 ]

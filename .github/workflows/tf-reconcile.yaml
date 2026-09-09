@@ -99,9 +99,9 @@ jobs:
             2) echo "drift=true" >> "$GITHUB_OUTPUT" ;;
             *) exit "$rc" ;;
           esac
-      # drift-2: delete/replace는 무인 apply 금지하되 reconcile 잡은 죽이지 않는다(alert-and-skip) —
+      # delete/replace는 무인 apply 금지하되 reconcile 잡은 죽이지 않는다(alert-and-skip) —
       # 합법 teardown(push-apply 취소)이 30분마다 잡을 영구 red로 만드는 것을 막는다. ⚠️ F3: 원자적이라 delete
-      # 포함 시 비-delete도 함께 대기. ⚠️ codex pass5 F1: outcome이 아니라 가드의 **typed output**으로 분기 —
+      # 포함 시 비-delete도 함께 대기. ⚠️ outcome이 아니라 가드의 **typed output**으로 분기 —
       # result=='ok'만 apply, 'blocked-delete'면 alert-and-skip, 'error'(가드 자체 깨짐)면 잡을 loud 실패.
       - name: destroy 가드 (block, alert-and-skip)
         id: guard
@@ -116,7 +116,7 @@ jobs:
           # 자동 회수. apex/www(public[*])는 비대상. allow_max=1: 대량 삭제는 자동 허용 취소→차단.
           allow: '^cloudflare_dns_record\.app\['
           allow_max: '1'
-      # codex pass5 F1: 가드 내부 오류(plan 손상·jq 부재 등)는 delete 차단과 다르다 — 조용히 skip하지 말고 잡 실패.
+      # 가드 내부 오류(plan 손상·jq 부재 등)는 delete 차단과 다르다 — 조용히 skip하지 말고 잡 실패.
       - name: 가드 내부 오류면 잡 실패 (delete 차단과 구분)
         if: steps.drift.outputs.drift == 'true' && steps.guard.outputs.result == 'error'
         run: |
@@ -319,9 +319,8 @@ jobs:
           # 이 핀은 **헤드룸**이다 — 세 루트의 state writer는 전부 ≤1.9.8이고(실측 2026-08-19:
           # 1.9.8 바이너리로 github 8건·tailscale 3건·cloudflare 26건 `state list`가 정상 열렸다),
           # 1.15.5는 어떤 writer보다도 높아 이 plan-only 감시가 writer 상승에 죽지 않는다.
-          # ⚠️ 초판 주석의 "owner 머신은 이미 1.15.5다"는 **낡은 사실이다** — 그 머신(맥미니)은
-          #    폐기됐고 owner 로컬 작업기는 NUC(terraform 1.9.8)로 옮겨갔다. 그 문장을 근거로
-          #    다른 핀들을 '선제' 통일하면 cloudflare/github 등식이 깨진다.
+          # ⚠️ owner 로컬 작업기는 **NUC(terraform 1.9.8)** 다 — owner 바이너리가 이미 1.15.5라는
+          #    전제로 다른 핀들을 '선제' 통일하면 cloudflare/github 등식이 깨진다.
           # 핀은 **루트마다 독립**이다(state writer가 다르므로 통일이 오히려 고장이다):
           #   · cloudflare — CI(iac.yaml의 `iac-plan`·`apply` 잡 · 이 파일의 `reconcile` 잡)와 owner 로컬
           #     apply(blocked-delete 복구 경로)가 번갈아 쓴다 ⇒ 그 핀들 = owner 바이너리 **등식**.

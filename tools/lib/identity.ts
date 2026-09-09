@@ -25,7 +25,7 @@ export const CACHE_MAXMEMORY_MI = { min: 16, max: 1024 } as const;
 // validate-mutation(디스패처)·CLI 생성기가 공유 — 둘이 다르면 CLI가 만든 nonce를 디스패처가 거부하는 계약 갭.
 export const CORRELATION_RE = /^[a-z0-9][a-z0-9-]{6,62}[a-z0-9]$/;
 
-// canonical 클론 판정 SSOT — init(ensureClone)·secrets(runAppSecrets)가 공유한다(cli-deepening 심화 1).
+// canonical 클론 판정 SSOT — init(ensureClone)·secrets(runAppSecrets)가 공유한다.
 // 앵커드 3-scheme + .git 허용, host 무앵커/경로 중첩/credential/포트 전부 거부. 판정이 콜사이트마다
 // 다르면 오귀속(엉뚱한 레포에 마커·push·디스패치) 우회 표면이 생긴다 — APP_NAME_RE와 같은 원칙.
 // owner·app은 이름 정책(APP_NAME_RE류)을 통과한 값이라 regex 메타문자가 없다.
@@ -52,7 +52,7 @@ export function pushRouteError(owner: string, app: string, routes: string[] | nu
   return null;
 }
 
-// 경로 입력의 절대성 SSOT(homelab-cli-r2 티켓 02) — MCP 명시 경로(repoPath·parentDir·envDir)는 서버 cwd·HOME을
+// 경로 입력의 절대성 SSOT — MCP 명시 경로(repoPath·parentDir·envDir)는 서버 cwd·HOME을
 // 기준점으로 삼지 않는다. 상대 경로는 서버 cwd(기본 = homelab 워킹 트리) 아래에 클론·스캐폴드·자격 파일을 만들고,
 // '~'는 확장되지 않아 리터럴 `~` 디렉토리가 생긴다(실측). owner 결정(2026-09-07): 서버 확장 없이 **거부 + 안내**.
 // 술어는 입력 함수(init·secrets·conn-url)가 공유하고, MCP inputSchema의 pattern "^/"이 같은 선언을 에이전트에게

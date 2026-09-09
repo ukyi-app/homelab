@@ -2,8 +2,8 @@
 // homelab CLI 셸 — 앱 배포·리소스 조작 통합 진입점(전 동사 착지: lib/verbs.ts VERBS + mcp).
 // 이 파일은 CLI 관심사만 갖는다: argv 파싱·--help·사람용 렌더링·stdout 순수성·종료코드.
 // 동사의 실체(operation catalog)는 lib/verbs.ts, 계약 상수는 lib/contract.ts가 SSOT다 —
-// 이 bin 모듈은 import 시 main이 실행되므로 MCP 등 다른 소비자는 lib 쪽을 import한다
-// (structure r1 A1·B1). 셰뱅+exec 비트는 이 파일만 예외: package.json bin("homelab")의
+// 이 bin 모듈은 import 시 main이 실행되므로 MCP 등 다른 소비자는 lib 쪽을 import한다.
+// 셰뱅+exec 비트는 이 파일만 예외: package.json bin("homelab")의
 // 대상이라 `bun link`가 전역 PATH에 심링크한다(test_shebang-exec.bats가 bin 선언에서 파생).
 import { readSync } from "node:fs";
 import { dirname } from "node:path";
@@ -148,7 +148,7 @@ function positionalThenFlags(rest: string[], spec: FlagPlan, tool: string, usage
   let positional: string | undefined;
   let flagArgv = rest;
   // `-`로 시작하는 토큰은 위치 인자가 아니다 — 도움말을 구한 `-h`가 '이름 형식 불량: -h'로
-  // 돌아오던 자리(shell-9). 거부 문구는 parseFlags가 소유한다(단일 대시 규약 한 곳).
+  // 돌아오던 자리다. 거부 문구는 parseFlags가 소유한다(단일 대시 규약 한 곳).
   if (rest[0] !== undefined && !rest[0].startsWith("-")) { positional = rest[0]; flagArgv = rest.slice(1); }
   let flags: TypedFlags;
   try { flags = typedFlags(flagArgv, { value, bool: spec.bool }); }
@@ -169,7 +169,7 @@ const numFlag = (flags: TypedFlags, k: string): number | undefined => {
 // ⚠️ 두 플래그는 테스트가 시간을 밀리초로 줄이는 주입 심이기도 하지만, **데드라인 조정은 정당한
 // 운영 노브**다(--wait의 pending은 실패가 아니라 바운디드 결과다). 사용자용 라벨에 '심(seam)'이라는
 // 레포 내부 어휘를 노출하면 '쓰지 말라'로도 '써도 된다'로도 읽힌다 — 그 사실은 여기 주석과
-// tools/README.md에 남기고 help에는 기본값만 적는다(티켓 33).
+// tools/README.md에 남기고 help에는 기본값만 적는다.
 const WAIT_FLAG_LINES = [
   `  --poll-ms <n>      폴링 간격(기본 ${WAIT_DEFAULTS.pollMs}ms)`,
   `  --deadline-ms <n>  전체 데드라인(기본 ${WAIT_DEFAULTS.deadlineMs}ms = ${WAIT_DEFAULTS.deadlineMs / 60000}분)`,
@@ -177,7 +177,7 @@ const WAIT_FLAG_LINES = [
   "",
 ];
 
-// 관측 레버 — 이미 존재하는 유일한 디버그 축인데 문서가 0건이었다(티켓 33). 값·stdin은 절대
+// 관측 레버 — 이미 존재하는 유일한 디버그 축인데 문서가 0건이었다. 값·stdin은 절대
 // 기록되지 않는다(kubeseal 평문이 지나는 채널이라 seam이 stdin을 배제한다 — 계약 테스트 존재).
 // 사후 소급이 불가능하므로 '사전 무장' opt-in임을 문구가 말한다.
 const LEVER_LINES = [
@@ -189,7 +189,7 @@ const LEVER_LINES = [
 // 요구 도메인 한 줄 — 값은 catalog 행(VerbShape.needs)이 소유하고 여기는 렌더만 한다.
 const needsLines = (verb: { needs: string }): string[] => [`요구: ${verb.needs}`, ""];
 
-// 진행 표시(티켓 07) — 변이 엔진이 낸 단계 전이 이벤트를 사람용 한 줄로 옮겨 **stderr**에 즉시 쓴다.
+// 진행 표시 — 변이 엔진이 낸 단계 전이 이벤트를 사람용 한 줄로 옮겨 **stderr**에 즉시 쓴다.
 // 계약(x-contract.stdout) "사람용 텍스트·진행 표시는 전부 stderr"의 실행형이라 --json이든 아니든
 // stdout은 건드리지 않는다: --json이면 stdout은 envelope 하나뿐이고, 사람 모드에서도 진행 줄은
 // '결과'가 아니라 관측이다(골든 생성 줄이 `2>/dev/null`이라 생성물도 무영향).
@@ -227,7 +227,6 @@ function statusUsage(): string {
 }
 
 function statusCli(rest: string[]): VerbOutput {
-  // 공용 골격 사용 — 헬퍼 도입(9ee3116) 이전에 쓰인 인라인 5줄(분리·try/catch·--help)의 잔재를 지운다.
   const p = positionalThenFlags(rest, { value: ["--run", "--pr", "--branch", "--root"], bool: ["--resources", "--json", "--help"] }, "homelab status", statusUsage);
   if (isOutput(p)) return p;
   const app = p.positional;
@@ -346,7 +345,7 @@ function appTeardownCli(rest: string[]): VerbOutput {
   const app = p.positional ?? "";
   // 앱 이름 형식은 confirm 프롬프트 전에 검증한다(불량 이름으로 프롬프트를 띄우지 않는다).
   if (!APP_NAME_RE.test(app)) return { kind: "usage-error", message: `homelab app teardown: 앱 이름 형식 불량(소문자 kebab, 2..40): ${app}`, usage: appTeardownUsage() };
-  // 대기 플래그 **범위** 검증은 confirm 프롬프트 **앞**이다(appverbs-12) — 뒤에 두면 사람이 파괴
+  // 대기 플래그 **범위** 검증은 confirm 프롬프트 **앞**이다 — 뒤에 두면 사람이 파괴
   // 확인을 다시 타이핑한 **뒤에야** usage 오류를 본다. 표기 축(십진 정수)은 positionalThenFlags가
   // 이미 위에서 잡았고, 여기서 남는 것은 양수 범위다. 술어는 그대로 동사가 소유한다.
   const pollMs = numFlag(p.flags, "--poll-ms");
@@ -393,7 +392,7 @@ function appInitUsage(): string {
 
 function appInitCli(rest: string[]): VerbOutput {
   // `--public`은 **의도적으로 파서 어휘에 남긴다** — 지우면 typedFlags의 '알 수 없는 옵션'이 되어
-  // 두 뜻이 갈렸다는 사실을 말할 자리가 없다. 이름 충돌은 실재했다(appverbs-2): 여기의 가시성은
+  // 두 뜻이 갈렸다는 사실을 말할 자리가 없다. 이름 충돌은 실재했다: 여기의 가시성은
   // GitHub **레포**이고, 실물 스캐폴더의 --public은 `.app-config.yml`의 route.public(앱 **노출**)이라
   // `app init foo --public`은 '공개 레포 + 내부 전용 앱'을 만들었다. 가장 흔한 조합(비공개 레포 +
   // 공개 앱)은 이 동사의 플래그로는 도달 불가이고 클론된 트리의 파일 편집이 정답이다.
@@ -465,7 +464,7 @@ function cacheUrlUsage(): string {
   ].join("\n");
 }
 
-// cache url — conn URL 엔진의 catalog op 소비(패스스루 소멸 — 티켓 08).
+// cache url — conn URL 엔진의 catalog op 소비(패스스루 소멸).
 function cacheUrlCli(rest: string[]): VerbOutput {
   const p = positionalThenFlags(rest, { value: ["--name", "--host", "--env-local"], bool: ["--rw", "--dry-run", "--json", "--help"], alias: "--name" }, "homelab cache url", cacheUrlUsage);
   if (isOutput(p)) return p;
@@ -514,7 +513,7 @@ function dbUrlUsage(): string {
   ].join("\n");
 }
 
-// db url — conn URL 엔진의 catalog op 소비(패스스루 소멸 — 티켓 08).
+// db url — conn URL 엔진의 catalog op 소비(패스스루 소멸).
 function dbUrlCli(rest: string[]): VerbOutput {
   const p = positionalThenFlags(rest, { value: ["--name", "--host", "--env-local"], bool: ["--rw", "--admin", "--dry-run", "--json", "--help"], alias: "--name" }, "homelab db url", dbUrlUsage);
   if (isOutput(p)) return p;
@@ -565,7 +564,7 @@ function mcpUsage(): string {
 const HELP_TOKENS = new Set(["--help", "-h", "help"]);
 
 // 그룹 노드 사용법 — 어휘는 catalog(VERBS) 파생이라 손 목록이 없다. 계약 x-contract.stdout이
-// 「--help는 stdout(exit 0)」을 규약으로 적는데 리프만 그랬던 자리(shell-3·docs-3).
+// 「--help는 stdout(exit 0)」을 규약으로 적는데 리프만 그랬던 자리다.
 function groupUsage(path: string[]): string {
   const prefix = path.join(" ");
   const rows = VERBS
@@ -585,7 +584,7 @@ function groupUsage(path: string[]): string {
 // 버전 — package.json version은 최초 커밋 이후 불변이라 '어느 코드를 도는가'에 대해 거짓 확신이다
 // (전역 심링크가 삭제된 worktree를 가리키는 사고가 이 호스트에서 실측됐다). 대신 **해석된 진입점
 // 절대경로 + 그 체크아웃의 HEAD·브랜치 + 결과 계약 schema**를 낸다. git 조회 실패는 조용히 접지
-// 않고 표기한다(설치 축 진단은 티켓 35 소관 — 여기는 좌표만).
+// 않고 표기한다(설치 축 진단은 doctor 소관 — 여기는 좌표만).
 function versionText(): string {
   const entry = fileURLToPath(import.meta.url);
   const dir = dirname(entry);
@@ -637,7 +636,7 @@ function main(argv: string[]): number {
   assertEnvelope(out.envelope);
   // 기계 채널 먼저 — 사람용 렌더(thunk)가 throw해도 --json 소비자의 envelope는 이미 온전하다.
   // 렌더러를 thunk로 받는 이유가 이 순서다: 종전에는 어댑터가 `human: renderX(envelope)`로 즉시
-  // 평가해, 사람용 렌더 결함 하나가 JSON 출력에 도달하기도 전에 프로세스를 죽였다(shell-6).
+  // 평가해, 사람용 렌더 결함 하나가 JSON 출력에 도달하기도 전에 프로세스를 죽였다.
   if (out.json) process.stdout.write(JSON.stringify(out.envelope, null, 2) + "\n");
   try {
     const sink = out.json ? process.stderr : process.stdout;

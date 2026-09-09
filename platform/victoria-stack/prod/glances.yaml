@@ -40,7 +40,7 @@ spec:
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
             - { name: os-release, mountPath: /etc/os-release, readOnly: true }
-            # host /proc·/sys는 hostPID + 런타임 기본으로 cpu/mem/process 커버 시도 — Task 12 live-proof로
+            # host /proc·/sys는 hostPID + 런타임 기본으로 cpu/mem/process 커버 시도 — 라이브 증명으로
             # 부족한 metric(sensor/fs) 확인 후 최소 마운트만 추가(host / 는 금지).
       volumes:
         - { name: tmp, emptyDir: {} }

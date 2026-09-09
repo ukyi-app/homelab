@@ -3,7 +3,7 @@
 # 필수 파일 목록은 tools/app-deploy-schema.json(.required)에서 읽는다(SSOT — 하드코딩 금지).
 # source-repo 누락/공백이면 poll-ghcr가 그 앱을 update-image 폴링에서 영영 빠뜨린다 → fail-closed로 차단.
 #
-# ── 봉인 배선 all-or-none 불변식(sealed-wiring #01, design-r1 R-1 · design-r3 R-3) ──
+# ── 봉인 배선 all-or-none 불변식 ────────────────────────────────────────────────────
 # 네 사실이 전부 있거나 전부 없어야 한다(그 사이 부분 상태는 배포를 깨뜨린다):
 #   S = <app>-secrets.sealed.yaml 존재 · E = values.yaml envFrom에 <app>-secrets secretRef ·
 #   K = kustomization.yaml resources에 봉인본 등재 · C_present = values.yaml checksum/secrets annotation 존재
@@ -12,7 +12,7 @@
 # 부분 상태의 실 파손: 봉인본만 지우고 envFrom 잔존 → ArgoCD가 Secret prune → 파드가 낡은 값으로 생존하다
 # 재시작 사망 / 없는 파일 가리키는 resources 항목 → kustomize 렌더 파손.
 #
-# ── strict scope + 파일명 규약(sealed-wiring #02, design-r1 R-2) ──
+# ── strict scope + 파일명 규약 ────────────────────────────────────
 # 봉인본에 scope 확대 어노테이션(namespace-wide/cluster-wide=true)이 있으면 거부 — 이름/네임스페이스 격리
 # 붕괴(암호문 재사용). patch 어노테이션은 scope 아니라 통과. 또 앱 배포 디렉토리 봉인본은
 # <app>-secrets.sealed.yaml 하나만 허용(규약 외 *.sealed.yaml 거부).
@@ -20,7 +20,7 @@
 # 인자로 deploy/prod 디렉토리들을 받으면 그것만, 없으면 apps/*/deploy/prod 전체를 검사
 # (인자 없는 기본 모드의 앱 열거 0건은 scan-floor가 판정한다 — 아래 바닥값 주석 참조).
 # bash 3.2 호환: `cmd && x`(set -e 함정)·mapfile·[[ ]] 금지 — if-블록·for로. yq는 버전차 함정이라 값 추출은 sed/grep으로
-# (checksum/scope처럼 스칼라 값을 읽을 때 한정 — E/K의 **경로 멤버십**은 yq 구조 비교를 쓴다, grep-a-3).
+# (checksum/scope처럼 스칼라 값을 읽을 때 한정 — E/K의 **경로 멤버십**은 yq 구조 비교를 쓴다).
 # 현재 인레포 배포 앱은 **0개**(page — 2026-09-08 재온보딩 #691 뒤 같은 날 철거 드릴 #698로 다시 철거)다. 규약은
 # 앱당 <app>-secrets.sealed.yaml 봉인본 1개 — 앱이 0개인 동안에도 같은 규약이 그대로 적용된다.
 set -euo pipefail
@@ -28,7 +28,7 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-app-deploy
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 env 폐지).
 take_floors "check-app-deploy" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 SCHEMA="$ROOT/tools/app-deploy-schema.json"
@@ -48,7 +48,7 @@ check_one() {
   # source-repo는 비어있으면 안 된다(poll-ghcr 발견 경로 — 공백이면 폴링 밖).
   # ⚠️ 술어의 폭을 소비자와 맞춘다: `-s`(크기 > 0)는 **공백만 있는 파일을 통과시키는데**
   #    lib/app-surface.readAppSurface는 `.trim()` 뒤에 판정해 그 파일을 '값 없음'으로 접는다.
-  #    두 폭이 어긋나면 이 게이트가 통과시킨 산출물을 리더가 '인레포 앱'으로 오보한다(티켓 17).
+  #    두 폭이 어긋나면 이 게이트가 통과시킨 산출물을 리더가 '인레포 앱'으로 오보한다.
   if [ -f "$d/source-repo" ] && [ -z "$(tr -d '[:space:]' < "$d/source-repo")" ]; then
     echo "FAIL: $d/source-repo 가 비어있음(공백만 있어도 값이 아니다 — poll-ghcr가 발견 못 함)"; rc=1
   fi
@@ -104,7 +104,7 @@ check_one() {
     fi
   fi
 
-  # ── strict scope 강제(sealed-wiring #02, design-r1 R-2) — 봉인 계약의 6번째 조항 ──
+  # ── strict scope 강제 — 봉인 계약의 6번째 조항 ────────────────────────────────────
   # kubeseal은 namespace-wide/cluster-wide 어노테이션으로 복호화 범위를 넓힌다. 기대 name·namespace를
   # 그대로 두고 scope만 넓힌 봉인본은 배선 불변식을 전부 통과하면서 실제로는 아무 이름·아무 NS에서
   # 복호화된다(암호문 재사용 → 이름/네임스페이스 격리 붕괴). value가 truthy일 때만 실 위험(=strict 위반)이라
@@ -113,7 +113,7 @@ check_one() {
     echo "FAIL: $d $app-secrets.sealed.yaml scope 확대 어노테이션(namespace-wide/cluster-wide=true) — strict scope 위반: 이름/네임스페이스 격리가 붕괴돼 암호문이 다른 Secret으로 재사용될 수 있다. kubeseal 기본(strict)로 재봉인 필요"; rc=1
   fi
 
-  # ── 파일명 규약(sealed-wiring #02) — 앱 배포 디렉토리 봉인본은 <app>-secrets.sealed.yaml 하나뿐 ──
+  # ── 파일명 규약 — 앱 배포 디렉토리 봉인본은 <app>-secrets.sealed.yaml 하나뿐 ─────────────────────
   # 규약 외 *.sealed.yaml은 kustomize 렌더가 죽기(resources 미참조 파일 방치·오참조) 전에 CI에서 차단.
   # (conn 봉인본은 platform/data-conn·platform/cnpg에 살아 여기 없다 — 오탐 없음.)
   for sf in "$d"/*.sealed.yaml; do
@@ -136,7 +136,7 @@ if [ "$#" -gt 0 ]; then
 else
   cd "$ROOT"
   # 열거는 공유 워커의 `apps` 유닛 스코프가 소유한다. ⚠️ 그 스코프는 **필수 산출물로 거르지 않는다** —
-  # 이 게이트가 잡아야 할 게 정확히 그 부재이기 때문이다(design-r1 R-1). deploy/prod 미존재는
+  # 이 게이트가 잡아야 할 게 정확히 그 부재이기 때문이다. deploy/prod 미존재는
   # 기존 `[ -d ]` 스킵과 동일하게 여기서 처리한다(행위 보존).
   # ⚠️ 열거를 **변수로** 받는다 — 프로세스 치환은 워커 실패를 set -e로 전파하지 않아, bun이 죽으면
   # 배포 계약 5개 조항 전부가 0건 평가된 채 `OK`가 찍혔다(라이브 재현). 래칫 아님.

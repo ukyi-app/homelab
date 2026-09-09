@@ -23,7 +23,7 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
 
 ## App 계약: self-migration (DB 스키마 마이그레이션)
 
-플랫폼은 더 이상 migrate Job을 렌더하지 않는다(`migrate-job.yaml`·`migrate.cmd` 제거). DB 스키마
+플랫폼은 migrate Job을 렌더하지 않는다(부재 가드: `platform/charts/app/tests/test_no_migrate.bats`). DB 스키마
 마이그레이션은 **앱의 책임**이며 다음 계약을 따른다:
 
 - **앱이 부팅 시 self-migrate한다** — 컨테이너 시작 시 자신의 직결 `DATABASE_URL`로 마이그레이션을
@@ -73,7 +73,7 @@ homelab app secrets myapp --wait            # 이후 시크릿 **회전**은 이
 pgdump 헤지 DBS 잠복 red 때문이고 #692로 해소) · `app create --wait`는 사람 머지 대기 pending(exit 1)으로 끝나고
 머지 뒤 56s에 수렴 · `app secrets --wait`(레포 밖 dispatch-only) 12분 46초로 success. 데드라인 20분은 정상 경로를
 담지만 gate 재실행 1회(flake·**gate 중 main 이동 → BEHIND 재gate**)면 넘는다 — 상수는 유지하고 gate 실패의 조기
-종결(티켓 47)이 처방이다. 0↔1 앱 전환에만 필요한 손 단계는 `apps/README.md`에 있다.
+종결(아래 「`--wait`는 required check(`gate`) 실패를 조기 종결한다」 절)이 그 처방이다. 0↔1 앱 전환에만 필요한 손 단계는 `apps/README.md`에 있다.
 
 ### 동사 표
 
@@ -102,7 +102,7 @@ pgdump 헤지 DBS 잠복 red 때문이고 #692로 해소) · `app create --wait`
 `manualMerge` 리터럴을 가리키는지 왕복으로 잰다(같은 bats). auto-merge 레인은 디스패처(reusable)
 소유라 CLI에는 그 레버가 없다 — 엔진 원장에 `gh pr` 계열 argv가 0건인 것이 그 증인이다.
 
-⚠️ **`--wait`는 required check(`gate`) 실패를 조기 종결한다**(티켓 47) — 머지 대기 중 PR head SHA의
+⚠️ **`--wait`는 required check(`gate`) 실패를 조기 종결한다** — 머지 대기 중 PR head SHA의
 **가장 최신** check-run `gate`가 `completed`인데 통과 집합 **밖**이면 예산을 태우지 않고 즉시
 failure(exit 1, `error`에 conclusion + check-run URL)다. **통과 = `success`·`neutral`·`skipped`, 그 외
 completed는 전부 막는다**(`action_required`·`stale`처럼 상류가 더한 어휘도 기본이 fail-closed다).
@@ -192,7 +192,7 @@ claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
   머지 관측 + Application 집합(cnpg-data·data-conn-prod) 수렴(머지 SHA 후손+Synced+Healthy+표면 실존,
   후손 리비전 표면 부재=superseded). KUBECONFIG 부재=머지까지 확인+omitted=["live"].
   `homelab db url` = conn URL 엔진(`lib/conn-url.ts`)의 catalog op — envelope 계약(--json)·F2
-  채널 분리·상호배타는 엔진 술어 소유(구 패스스루 계약은 티켓 08에서 op 계약으로 대체됨).
+  채널 분리·상호배타는 엔진 술어 소유(패스스루가 아니라 op 계약).
   `homelab status [<app>] [--run <url> [--branch <ref>] | --pr <url>] [--json]` = 상태 관찰(관측 전용):
   인자 없음=전체 앱 목록·요약(레포 데이터), `<app>`=핀·바인딩·최근 run·열린 PR(+KUBECONFIG 있으면 ArgoCD
   `<app>-prod` sync/health, 없으면 라이브 구간 생략 — envelope.omitted=["live"]·exit 0), 핸들
@@ -276,7 +276,7 @@ claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
   필요하다(골든은 엔진과 함께 재생성되므로 스스로는 파괴를 잡지 못한다). ③ 그 증인은 루트 앵커
   2줄이다 — test_homelab-cli.bats "the v1 contract root is hand-anchored"가 루트 `required` 집합과
   `properties` 키 순서를 리터럴로 핀한다. 편집처는 **생성기의 HEADER_A**다(이 JSON이 아니다).
-- **`generate-result-schema.ts`** — cli-result-schema.json **생성기**(cli-deepening 심화 3): 행렬
+- **`generate-result-schema.ts`** — cli-result-schema.json **생성기**: 행렬
   분기(allOf member 0)·verb enum은 기술자 행(lib/catalog-rows `CONTRACT_ROWS`)에서, initSuccess·
   initFailure의 archetype enum은 플랫폼 좌표(lib/platform `ARCHETYPES` — 심화 6 후속)에서 생성하고,
   x-contract·variant→exitCode 재진술·나머지 definitions 본문은 수제 조각으로 보존한다(컴팩트 스타일 —
@@ -404,7 +404,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `bump-poll.yaml`이 플래너 출력을 받아 `bun tools/bump-tag.ts <app> sha-<gitsha> [--digest sha256:<hex>]`로
   호출(심층 방어 재검증). `bump.yaml`(인-repo build write-back, workflow_run)도 사용. digest는 비신뢰 입력이라 형식 검증;
   digest 미지정 시 stale digest를 제거(tag bump가 실제 이미지를 바꾸도록).
-- **`run-bump-plan.ts`** — bump **항목 러너**(F-1 — 인-워크플로 셸 루프 대체). `bump-poll.yaml`의 bump 스텝이
+- **`run-bump-plan.ts`** — bump **항목 러너**(인-워크플로 셸 루프 대체). `bump-poll.yaml`의 bump 스텝이
   `bun tools/run-bump-plan.ts --plan plan.json` 한 줄로 호출 — plan.json의 bump/propose-pr 항목을 **항목마다 격리
   git worktree**에서 오케스트레이션한다(worktree add → bump-tag → commit(writer 신원 명시) → ensure-bump-pr →
   worktree remove, 모든 경로 정리). 공유 worktree/index가 없어 R-38(종료상태만 격리)·H-2(staged digest-exporter
@@ -431,7 +431,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 ## 공유 커널 (lib/ — 콜사이트가 정책 소유, 단 정책이 콜사이트마다 갈릴 때)
 
 - **`lib/cli.ts`** — argv 파싱 커널(`parseFlags`·`typedFlags`·`parseCommand`·`skip`/`skipMarker`).
-  레포에서 가장 널리 소비되는 lib이다(9개 도구 + homelab CLI). fail-closed 네 축을 **여기 한 곳이**
+  레포에서 가장 널리 소비되는 lib이다(tools/*.ts 거의 전부 + homelab CLI). fail-closed 네 축을 **여기 한 곳이**
   소유한다: 미지 옵션 거부 · 값 누락으로 다음 플래그를 삼키는 것 거부 · 같은 플래그 **중복 지정**
   거부(침묵 last-wins는 `--confirm x --confirm myapp`이 파괴 확인을 통과하는 표면이다) · 단일 대시
   토큰을 위치 인자로 삼지 않기. `parseCommand`는 정책을 갖지 않되 **판별 가능한** 실패를 낸다
@@ -484,26 +484,27 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   cert 경로뿐). 앱 레포 측 `seal-secret.mts`가 자체 블록을 유지하는 것은 확장자 규약(.mts = bun+node
   양립) 때문이지 중복이 아니다.
 - **`lib/scan-floor.ts`** — 열거 붕괴 커널(TS adapter — 셸 `scripts/lib/scan-floor.sh`의 형제):
-  scanFloor/scanSignal/parseFloor 판정부 + guardMain/takeFloors 실행부(실행 순서·`--floor` 어휘 소유,
-  lib-convergence 17). 마커를 내는 구현은 이 파일 하나다(check-scan-producers가 거부로 강제).
+  scanFloor/scanSignal/parseFloor 판정부 + guardMain/takeFloors 실행부(실행 순서·`--floor` 어휘 소유).
+  마커를 내는 구현은 이 파일 하나다(check-scan-producers가 거부로 강제).
 - **`lib/policy-ledger.ts`** — 정책 원장 리더 readLedger: fail-closed 로딩 + 통일 shape
-  ({_readme, <container>}) + schema-check 항목 검증. 대조 의미론은 콜사이트 잔류(design r1-4).
+  ({_readme, <container>}) + schema-check 항목 검증. 대조 의미론은 콜사이트 잔류.
 - **`lib/contract.ts`** — 결과 계약 SSOT 리더: cli-result-schema.json의 x-contract(envelope 버전·
   종료코드 매핑)를 런타임에 읽어 노출(`ENVELOPE`·`EXIT`·`exitFor`·`Envelope` 타입 — 코드 상수
   복제 금지). 소비자 3: `homelab.ts`(종료코드·봉투 자기검증)·`lib/verbs.ts`(동사 op)·`lib/mcp.ts`
   (`mcpIsError` 매핑).
 - **`lib/verbs.ts`** — 동사 operation catalog(transport 중립·부수효과 없는 import-safe SSOT).
   행 = path(라우팅 어휘)+desc(--help)+needs(요구 망 도메인 — usage가 렌더)+op(타입 입력→계약
-  Envelope). argv 파싱·렌더링은 CLI 셸 소유이고 MCP는 op를 직접 호출한다(structure r1 A1·B1).
+  Envelope). argv 파싱·렌더링은 CLI 셸 소유이고 MCP는 op를 직접 호출한다.
   후속 동사는 여기 행을 추가한다(needs는 필수 필드라 타입이 누락을 막는다).
 - **`lib/catalog-rows.ts`** — 변이 레인 신원 행 + 결과 계약 행(**순수 기술자, import 0** — 설계 게이트 r1 D3).
   액션별 한 행 = 디스패처/reusable 파일명 · 디스패치 입력 이름 · 브랜치 중립 패턴({key}·{runId}) ·
   수렴 Application 집합+표면 패턴. 생성 방향(verbs·secrets의 `laneMutationFields`)과 파싱 방향(status의
   `isDispatchLaneBranch`/`laneBranchTail`)이 같은 행에서 파생된다. bump-poll 브랜치 문법은 이 표의
-  소관이 아니다 — SSOT는 `lib/bump-plan.ts`(parseBranch)이고, 파싱 전용 행은 18에서 폐기됐다.
-  워크플로 YAML과의 정적 parity 가드는 후속 티켓이 이 행을 대조 축으로 쓴다.
+  소관이 아니다 — SSOT는 `lib/bump-plan.ts`(parseBranch)다(이 표엔 파싱 전용 행을 두지 않는다).
+  워크플로 YAML과의 정적 parity 가드(`tools/tests/test_mutation-dispatch.bats` — reusable `branch:` ↔ 중립 패턴,
+  디스패처 workflow_dispatch 입력 ↔ 행 입력+correlation)가 이 행을 대조 축으로 쓴다.
   왕복·리터럴 앵커는 test_lane-rows.bats.
-- **`lib/resource-layout.ts`** — 리소스 산출물 레이아웃 커널(cli-deepening 심화 4, CONTEXT.md
+- **`lib/resource-layout.ts`** — 리소스 산출물 레이아웃 커널(CONTEXT.md
   "산출물 레이아웃"): kind+name → 산출물 집합(파일 경로 · kustomization 엔트리 · role 라벨
   handles/envKeys · 원장 행 · tombstone 키)과 **scope 태그**(purge-제거/공유-잔존/수동-이연 —
   teardown purge의 의도된 부분집합을 데이터로 성문화). 역방향 `classifyArtifact`(경로/엔트리 →
@@ -515,9 +516,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `purgeArtifactsFor` 삼중·`TOMBSTONES_PATH`) · audit-orphans(감사 — classify 소비, orphan-conn/
   malformed-conn 축) · db-url/cache-url(읽기). 레인 행(catalog-rows)과의 표면 경로 일치는
   import-0 계약상 parity 가드(test_lane-rows.bats)가 대조한다.
-- **`lib/conn-url.ts`** — conn URL 엔진(`runDbUrl()`·`runCacheUrl()`·입력 술어 — cli-deepening
-  심화 5): db url/cache url의 실체. 계획이 타입 값(UrlResult ↔ urlResult 스키마 1:1)이라 계획 키
-  드리프트(release r2-a5 클래스)가 컴파일 타임 오류로 강등. 평문 비출력·F2 채널 분리(--admin ↔
+- **`lib/conn-url.ts`** — conn URL 엔진(`runDbUrl()`·`runCacheUrl()`·입력 술어):
+  db url/cache url의 실체. 계획이 타입 값(UrlResult ↔ urlResult 스키마 1:1)이라 계획 키
+  드리프트가 컴파일 타임 오류로 강등. 평문 비출력·F2 채널 분리(--admin ↔
   .env.admin.local)·RW/ADMIN 상호배타는 엔진 소유. 핸들·env 키는 레이아웃 커널 소비. 소비자 3:
   CLI 셸·MCP(같은 op)·bin 껍데기(db-url/cache-url — 기존 출력 계약 보존). envLocal·envDir 축은
   입력에 존재하되 MCP는 envDir만 노출(설계 Q9).
@@ -554,7 +555,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `parseLaneBranch()`·`laneBranchInputError()`). 질의는 `pulls?state=all&head=<owner>:<branch>` —
   head가 **정확 일치**라 형제 브랜치(`…/mydb-5011`)가 `…/mydb-501` 응답에 원리적으로 섞이지 않는다.
   투영(`LANE_PR_FIELDS`)은 목록·단건 공용 SSOT이고 argv 원장에 그대로 실려 테스트가 핀한다 —
-  `head_sha: .head.sha`는 required check 조기 종결(티켓 47)의 좌표라 여기서 함께 온다(추가 조회 0회).
+  `head_sha: .head.sha`는 required check 조기 종결의 좌표라 여기서 함께 온다(추가 조회 0회).
   파싱은 레인 신원 행(catalog-rows `branchPattern`)에서 파생하고 **왕복 등식**(복원한 key·runId를
   다시 채워 원문과 대조) + 레인별 이름 정책(app/resource)으로 확증한다 — 임의 ref가 gh 질의
   문자열로 새지 않는 1차 게이트다. 소비자: 변이 엔진(자기 PR 특정)·status(`--branch` 재개 조회).
@@ -653,7 +654,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   **GitHub 레포** 축임을 이름이 말한다 — 앱의 공개 노출은 앱 레포 `.app-config.yml`의 route.public이고
   init은 그 축을 넘기지 않는다(스캐폴더 argv는 `--archetype/--name/--yes` 고정 — 패스스루 명시 기각).
   각 단계는 사후조건으로 증명하고 재실행이 그 지점부터 수렴한다(멱등). 소유 증명은 계보가 아니라
-  마커(plan r2 r2-a2) — 마커 없는 기존 레포는 fail-closed(--adopt로만). 시크릿 쌍은 원자적(절반
+  마커 — 마커 없는 기존 레포는 fail-closed(--adopt로만). 시크릿 쌍은 원자적(절반
   상태 결과 명시·재실행 수렴), private key 값은 --body-file 전용이라 argv/출력에 비노출(엔진이 키를
   읽지 않는다). variant: success(한 단계 이상 수행)·no-op(이미 완료)·failure(preflight/거부/단계 오류
   + checkpoint).
@@ -681,7 +682,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   dispatch-only) · 경로 속성 description이 의미론을 광고)·결과는 CLI --json과 같은 envelope(isError는 x-contract.mcp variant 매핑)·
   usage 오류는 invalid params(-32602). 무상태 — 동시 호출은 run/PR URL 핸들로 독립, 재시작 후 정상.
   url 동사(db/cache url)도 **다른 tool과 같은 경로**다 — conn URL 엔진의 op envelope을 직접 소비한다
-  (패스스루 특례·자식 프로세스 이중 실행은 티켓 08에서 소멸했다). 살아 있는 계약은 **명시 envDir**
+  (패스스루 특례·자식 프로세스 이중 실행 없음). 살아 있는 계약은 **명시 envDir**
   하나뿐이고, 기록 경로가 서버 cwd에서 추론되지 않는다는 뜻이다. `homelab mcp`가 진입점(서버는
   transport 모드라 catalog 밖 — 자기 자신 비노출). 등록 방법·env 블록은 위 「MCP 서버 등록」 절.
 - **`lib/render.ts`** — homelab CLI 사람용 렌더(`renderFor()` + 동사별 5개 + MARK/OX). mcp.ts와 같은
@@ -692,15 +693,15 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   총체성: renderFor는 verb 전수 분기·미지 verb throw, renderStatus는 mode switch·default throw.
 - **`lib/template-contract.ts`** — 스캐폴더 비대화형 계약 SSOT(`SCAFFOLD_CONTRACT_MARKERS`·
   `scaffoldContractError()`·`SCAFFOLD_ENTRY`): doctor(사전 진단)와 init(실제 실행 preflight)이 **같은
-  술어**를 공유한다(structure r1 a3 — 두 번째 소비자 init이 생겨 추출). 마커 = --archetype·--name·--yes,
+  술어**를 공유한다(두 번째 소비자 init이 생겨 추출). 마커 = --archetype·--name·--yes,
   진입점 = `scaffold/scaffold.ts`. 둘이 갈리면 doctor가 통과시킨 템플릿을 init이 실행 중 거부하는 계약
   갭이 생긴다. 진입점이 계약에 있는 이유: init이 **그 파일을 직접 실행**한다(검증 대상 = 실행 대상).
   `bun run scaffold`(package.json script)를 거치면, 스캐폴더가 자기 실행 중 재작성하는 그 파일에
-  재개가 의존해 반쪽 스캐폴드가 영구 미수렴이 된다(04 인계 별건 — test_homelab-appinit 레인이 증인).
+  재개가 의존해 반쪽 스캐폴드가 영구 미수렴이 된다(test_homelab-appinit 레인이 증인).
 - **`lib/platform.ts`** — 플랫폼 좌표 SSOT(HOMELAB_REPO·TEMPLATE_REPO·ARCHETYPES·
   ARCH_NEUTRAL_ARCHETYPES·COMPILED_ARCHETYPES). doctor가 검증한 대상과 이후 init이 쓰는 대상이
   콜사이트마다 갈리지 않게 한 곳에서만 정의(identity.ts와 같은 원칙 — 저긴 이름 형식, 여긴 좌표).
-  **아키타입 어휘 리터럴은 ARCHETYPES 한 곳뿐**이고 나머지 표면은 전부 파생이다(cli-deepening 심화 6):
+  **아키타입 어휘 리터럴은 ARCHETYPES 한 곳뿐**이고 나머지 표면은 전부 파생이다:
   MCP `app_init` inputSchema enum(mcp.ts)·결과 계약 enum(생성기 → cli-result-schema.json initSuccess·
   initFailure)·CLI 사용법(homelab.ts)·doctor TARGETARCH 검사 대상(COMPILED = ARCHETYPES − 중립 opt-out,
   신규 아키타입은 기본 검사 대상 — fail-closed). 리터럴 사본이면 아키타입 확장 시 init 엔진은
@@ -869,7 +870,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   표면 무변경 + 행 고정을 검증해 재노출을 재승인한다(런북 `app-platform.md`). 라이브 무변경(게이트만).
 - **`dns-drift-check.ts`** — active&&public 앱 host + 예약 platform host(`reserved-hosts.json`)가 실제
   resolve되는지(apply 누락=NXDOMAIN, transient는 별도 버킷) 검사. `dns-drift.yaml`(주기)이 호출. resolver 주입(`--fixture`)으로 테스트. 읽기 전용.
-  **레인별 바닥값** `--floor reserved=<n>`(기본 1, fail-closed — 공용 어휘, kernel-followups 05) —
+  **레인별 바닥값** `--floor reserved=<n>`(기본 1, fail-closed — 공용 어휘) —
   예약 platform host는 구조적으로 항상 ≥1이라
   0은 "대상 없음"이 아니라 SSOT 부재/키 변경이다. 픽스처만 `--floor reserved=0`으로 **명시** 해제한다
   (기본을 0으로 두면 조용히 꺼진 바닥값이 된다). 출력의 `scanned`가 스캔 신호다 — stdout이 기계 판독

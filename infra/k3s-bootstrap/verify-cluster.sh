@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 호스트 기반 계층의 라이브 클러스터 계약 검사 (Milestone 1):
+# 호스트 기반 계층의 라이브 클러스터 계약 검사:
 #   - 노드 Ready
 #   - 두 StorageClass 존재 (standard, bulk-ssd)
 #   - 비활성화된 컴포넌트 부재 (traefik 컨트롤러, metrics-server)
@@ -110,6 +110,7 @@ echo "==> [10] local-path provisioner image matches the pin (LOCAL_PATH_PROVISIO
 #    **3개 중 나머지 둘**(provisioner 태그·helper digest)은 라이브 대조자가 레포 전역에 0건이었다.
 #    실측 2026-09-03: git v0.0.37 / 라이브 v0.0.36 · git dc2d74b2… / 라이브 fd8d9aa6… — 세 축 전부
 #    갈렸는데 신호를 낸 것은 없었다(핀은 2026-08-17 #420·#421·#417에 올랐고 라이브는 부트스트랩 값).
+#    2026-09-09 kubectl 실측: 세 축 모두 핀과 일치한다(다음 bump 후 다시 갈릴 때까지).
 # ⚠️ **한계를 정직하게**: 이 스크립트의 유일한 호출자는 `host-up.sh:34`이고 그건 apply-storage 직후다
 #    — 재구축 경로에서는 [6]과 마찬가지로 거의 항진명제다. 여기 두는 값은 "주기 신호"가 아니라
 #    ① 세 축의 **비대칭 해소**(하나만 재던 상태를 끝낸다)와 ② 이 파일이 표방하는 "언제든 재실행
@@ -136,7 +137,7 @@ helper_bad=""
 for _cm in local-path-config-internal local-path-config-bulk; do
   _hp="$(kubectl -n local-path-storage get cm "$_cm" -o jsonpath='{.data.helperPod\.yaml}' 2>/dev/null || true)"
   # herestring — `printf … | awk '… exit'`는 awk의 조기 종료가 다중행 printf writer를 SIGPIPE로 죽여 pipefail 아래
-  # 거짓 실패가 된다(티켓 49 클래스, 가드 check-sigpipe-writers 레인 (c)).
+  # 거짓 실패가 된다(SIGPIPE 클래스, 가드 check-sigpipe-writers 레인 (c)).
   _img="$(awk '/^[[:space:]]*image:[[:space:]]/{sub(/^[[:space:]]*image:[[:space:]]*/,""); print; exit}' <<<"$_hp")"
   [ -n "$_img" ] || { helper_bad="${helper_bad} ${_cm}(image 줄 없음)"; continue; }
   helper_seen=$((helper_seen + 1))

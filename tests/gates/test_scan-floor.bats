@@ -99,7 +99,7 @@ c" ]
   [ "$status" -ne 0 ]
 }
 
-# ── take_floors — --floor 어휘의 셸 adapter(kernel-followups 01, TS takeFloors 동형) ───────────
+# ── take_floors — --floor 어휘의 셸 adapter(TS takeFloors 동형) ────────────────────────────────
 # 허용 라벨을 **선언 선행**으로 받는다 — TS는 guardMain ⓪가 파싱 뒤 전건 매칭을 검증하지만
 # 셸엔 실행 커널이 없어, 파싱 시점 검증(잊을 수 없는 자리)이 등가물이다.
 
@@ -251,13 +251,12 @@ c" ]
   # 함께 줄어 등식이 유지된다 — 적대 검토가 실측). 라벨 수 바닥값이 그 구멍을 막는다.
   # ⚠️ 이 바닥값은 **여유가 없다**(오늘 로스터와 같은 값). 도메인 바닥값은 도메인이 정당하게 줄 수
   #    있어 여유를 두지만, 라벨이 사라지는 것은 드리프트가 아니라 언제나 **의도적 커버리지 변경**이고
-  #    그때는 CONTRIBUTING·PROGRESS의 커버리지 수치도 같이 고쳐야 하므로 diff에 보여야 한다.
+  #    그때는 CONTRIBUTING의 커버리지 수치도 같이 고쳐야 하므로 diff에 보여야 한다.
   # ⚠️ 그래서 이 상수는 **로스터가 늘 때 같이 올려야 한다**. 29로 굳어 있던 동안 실측은 38이었고
   #    (2026-09-03 재측정), 그 9칸의 여유가 바로 이 바닥값이 없애려던 것이다 — 뮤테이션 실측: 단일
   #    라벨 가드 8개의 콜사이트를 죽여 38→30으로 떨어뜨려도 이 @test는 초록이었다(집합 대조는 정적·
   #    런타임이 **함께** 줄어 등식이 유지되므로 원리적으로 못 본다). 값은 실측이지 래칫이 아니다:
-  #    가드당 라벨 수 = check-doc-index 6(레인 [1]에 tools·scripts·workflows 도메인이 편입돼 3→6,
-  #    homelab-cli-r2 티켓 34) · check-{skeleton,image-pins,gh-secret-coverage,bats-accounting} 3 ·
+  #    가드당 라벨 수 = check-doc-index 6(레인 [1]에 tools·scripts·workflows 도메인이 편입돼 3→6) · check-{skeleton,image-pins,gh-secret-coverage,bats-accounting} 3 ·
   #    verify-{traps,credential-inventory}·sealed-guard·check-{argocd-revision,app-netpol} 2 · 나머지 13개 1.
   # 라벨 수 바닥값은 **전체** 정적 집합에서 센다 — SKIP과 무관하게 "라벨이 사라졌는가"를 보는 축이다.
   labels=$(printf '%s\n' "$static" | grep -c . || true)
@@ -461,11 +460,11 @@ KERNEL_TS='const k = await import(process.argv[1] + "/tools/lib/scan-floor.ts");
   code="$(awk '/── 실행 커널 guardMain/{exit} {print}' "$ROOT/tools/lib/scan-floor.ts" | grep -vE '^[[:space:]]*(//|\*|/\*)')"
   # 커널을 실제로 읽었다는 증거 — 없으면 아래 판정이 자기 자신 vacuous가 된다.
   [ -n "$code" ]
-  # reg13-b1-gates-tests-1 — grep -q 'process\.exit'는 **한 줄짜리** 리터럴만 본다. `process`와
+  # grep -q 'process\.exit'는 **한 줄짜리** 리터럴만 본다. `process`와
   # `.exit(...)`가 개행으로 갈리면(포매터 재정렬·긴 인자 줄바꿈으로 충분히 생긴다) 각 줄은 패턴에
   # 안 걸려 이 증인이 무증인으로 초록을 유지한다(실측: 형제 @test 31/33/35는 red로 갔는데 이 @test만
   # ok였다). 개행을 지우고 한 줄로 접은 뒤 공백 관용 정규식으로 본다.
-  # reg13c-a-landing-hunks-2 — 위 flat 정규식이 리터럴 `.`를 요구해 `process?.exit(`(optional
+  # 위 flat 정규식이 리터럴 `.`를 요구해 `process?.exit(`(optional
   # chaining) 표기는 여전히 무증인이었다(실측: 판정 커널 절에 `if (false) { process?.exit(1); }`를
   # 넣어도 이 @test만 green 유지). `\?` 한 글자를 `.` 앞에 선택적으로 더해 닫는다 — bracket 접근
   # (`process["exit"]`)은 발생확률이 낮고 별도 alternation이 필요해 범위 밖(다음 라운드 입력).
@@ -547,7 +546,7 @@ KERNEL_TS='const k = await import(process.argv[1] + "/tools/lib/scan-floor.ts");
   echo "$output" | grep -q "code=2"
 }
 
-# 0은 정당한 바닥값이다(셸 선례: check-app-deploy 기본 바닥값 0 — 인-레포 앱 0개 동안). 금지하면 안 된다.
+# 0은 정당한 바닥값이다(셸 선례: check-app-deploy가 인레포 앱 0개 동안 기본 바닥값 0을 썼다). 금지하면 안 된다.
 @test "parseFloor accepts an explicit zero" {
   run bun -e "$KERNEL_TS"' console.log(k.parseFloor("0", "--demo"))' "$ROOT"
   [ "$status" -eq 0 ]
@@ -593,7 +592,7 @@ YAML
   make_caps_fixture
   run bash -c "cd '$FX' && bun '$ROOT/tools/check-disk-caps.ts' --floor caps=1"
   [ "$status" -ne 0 ]
-  # [ABS-EXEC] W1(감사 63) — 도구가 리네임/부재여도 bun은 rc 1(Module not found)을 내 위 `-ne 0`이
+  # [ABS-EXEC] W1 — 도구가 리네임/부재여도 bun은 rc 1(Module not found)을 내 위 `-ne 0`이
   # 침묵 통과한다. 실제 위반 문구로 "정말 위반을 봤다"를 못박는다(아래 히어스트링 대조와 별개 증인).
   echo "$output" | grep -q "볼륨 선언"
   out="$output"
@@ -612,7 +611,7 @@ YAML
   make_caps_fixture
   run bash -c "cd '$FX' && bun '$ROOT/tools/check-disk-caps.ts' --floor caps=5"
   [ "$status" -ne 0 ]
-  # [ABS-EXEC] W1(감사 63) — 도구 리네임/부재의 rc 1과 진짜 열거-붕괴 rc를 문구로 가른다.
+  # [ABS-EXEC] W1 — 도구 리네임/부재의 rc 1과 진짜 열거-붕괴 rc를 문구로 가른다.
   echo "$output" | grep -q "열거 붕괴"
   out="$output"
   # 바닥값 진단은 나간다(도메인 힌트를 달고).
@@ -630,7 +629,7 @@ YAML
 @test "check-disk-caps rejects a malformed floor from the override vocabulary" {
   run bash -c "bun '$ROOT/tools/check-disk-caps.ts' --floor caps=abc"
   [ "$status" -eq 2 ]
-  # [ABS-EXEC] W1(감사 63) — rc 2는 이 도구의 부재(Module not found도 rc 1로 다름)와도 다르고
+  # [ABS-EXEC] W1 — rc 2는 이 도구의 부재(Module not found도 rc 1로 다름)와도 다르고
   # 실제 malformed-floor 오류 문구로 어느 쪽이 죽었는지 못박는다.
   echo "$output" | grep -q "음이 아닌 정수"
   out="$output"
@@ -657,7 +656,7 @@ YAML
 }
 
 # 실 `tools/` 추적 트리를 픽스처 루트로 복사한다 — 되돌림 시나리오는 **진짜 가드 파일**에 대해 증명해야
-# 하고, 그러면 바닥값·커널 자기 대조가 주입 없이 자연히 성립한다(티켓 04: 테스트 편의로 env를 열면
+# 하고, 그러면 바닥값·커널 자기 대조가 주입 없이 자연히 성립한다(테스트 편의로 env를 열면
 # 프로덕션 방어가 꺼진다 — 주입은 애초에 필요 없었다).
 make_tools_fixture() {   # $1: 하위 디렉토리명 → 경로를 stdout으로
   local fx="$BATS_TEST_TMPDIR/$1"
@@ -673,7 +672,7 @@ LIST
   echo "$fx"
 }
 
-# 핵심 증인 — 되돌림 시나리오가 red다. 이 단언이 없으면 "거부 축이 있다"는 주장이 무증인이다(티켓 06).
+# 핵심 증인 — 되돌림 시나리오가 red다. 이 단언이 없으면 "거부 축이 있다"는 주장이 무증인이다.
 # 두 형태를 다 건다: 커널 호출을 옛 형태로 **되돌린** 가드 · 커널을 안 거치는 **새** 직접 생산자.
 @test "reverting a guard to direct marker output is rejected (the bypass hole is closed)" {
   fx="$(make_tools_fixture revert)"
@@ -722,7 +721,7 @@ PY
 }
 
 # console 동사는 열거가 아니라 클래스다(`console\.[a-z]+`) — 6종 손 열거로는 dir/table/group 같은
-# 목록 밖 메서드가 영원히 무증인이다(감사 6라운드 티켓64 c64-6, 형제 check-skip-signalling.sh:63).
+# 목록 밖 메서드가 영원히 무증인이다(형제 check-skip-signalling.sh:63).
 @test "a producer using an unlisted console method (console.dir) is rejected too (verb is a class, not an enum)" {
   fx="$(make_tools_fixture unlisted-verb)"
   printf '%s\n' 'const n = 3;' 'console.dir("SCAN: check-dir: " + n);' > "$fx/tools/check-dir.ts"
@@ -751,7 +750,7 @@ PY
 
 # 주석 표면 — `//` 줄 · 블록 주석 본문(JSDoc ` * ` 연속줄 **과 별 없는 줄** 둘 다) · 코드 줄 꼬리 `// …`.
 # 줄 단위 규칙은 여러 줄 구조를 못 본다(함정 원장 "heredoc 상태 기계…"): 별 없는 블록 본문이 코드로
-# 판정돼 오탐이었다(적대 검토 실측) — 그래서 상태 기계다. `^[^/]*`가 `//`만 제외한다는 것은 티켓 03이
+# 판정돼 오탐이었다(적대 검토 실측) — 그래서 상태 기계다. `^[^/]*`가 `//`만 제외한다는 것은
 # 다른 자리(H1 회귀 증인이 JSDoc의 `process.exit` 예시를 코드로 오인)에서 실측한 같은 클래스다.
 # 양성 대조를 같은 파일에 함께 둔다 — 그것이 없으면 "오탐 없음"은 검출기가 죽어도 참이다. 그 대조는
 # **홑따옴표 + 꼬리 주석**이다: 따옴표 세 종과 "주석 판정은 행 앞에서만"을 한 줄이 함께 행사한다

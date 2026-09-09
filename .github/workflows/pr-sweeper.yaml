@@ -46,7 +46,7 @@ jobs:
           # 재실행은 github.actor를 **최초 트리거 신원으로 보존**한다(개시자는 triggering_actor다).
           # actor만 보면 owner의 과거 디스패치를 재실행하는 것으로 통과한다 — actions:write는 재실행 동사를 포함한다.
           [ "$TRIGGERING" = "$OWNER" ] || { echo "::error::workflow_dispatch는 owner($OWNER)만 실행 가능 — 재실행 개시자=$TRIGGERING 거부"; exit 1; }
-      # ⚠️ codex pass2 F8: 로컬 composite(아래 telegram-notify)는 체크아웃된 레포에서 resolve된다 —
+      # ⚠️ 로컬 composite(아래 telegram-notify)는 체크아웃된 레포에서 resolve된다 —
       # checkout이 없으면 failure 알림 스텝이 액션 로드 실패로 죽어 알림 자체가 안 간다. 첫 스텝으로 checkout.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       # writer App: 봇 PR 브랜치 update + auto-merge 무장 확인(Contents+PR write).
@@ -106,7 +106,7 @@ jobs:
                        | select(.headRefName | test("^(bump|create-database|create-cache|create-app|update-secrets)/"))
                        | .number' > /tmp/behind.txt
           if [ ! -s /tmp/behind.txt ]; then echo "behind한 봇 PR 없음 — no-op"; exit 0; fi
-          # ⚠️ codex restale3 F2: 실패를 ::warning::로 삼키고 green으로 끝내면 멈춘 PR(이 스위퍼가 잡으려던 모드)이
+          # ⚠️ 실패를 ::warning::로 삼키고 green으로 끝내면 멈춘 PR(이 스위퍼가 잡으려던 모드)이
           # 무알림으로 묻힌다 → 실패 PR을 모아 잡을 nonzero 종료(아래 failure() telegram이 발화해 owner에게 알림).
           failed=""
           while read -r n; do

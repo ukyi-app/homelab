@@ -6,8 +6,6 @@ usage: vmalert-adguard-rewrite-gen.py <out> <scenario> <from> <to> <push_s> <sto
 
 ⚠️ 독립 파일인 이유: 셸 heredoc에 python을 내장하면 typecheck·lint 사각이 된다 —
    CONTRIBUTING.md 「새 코드 배치 규칙」의 명시적 금지. 형제 관용구 = vmalert-drift-gen.py.
-   (2026-09-01 이관 — 종전 하네스의 인라인 `<<'PY'` 블록과 동일한 코드이며,
-    하네스 전건 통과가 산출물 동일성의 증인이다.)
 """
 import json, sys
 out, scen, frm, to, push, stop_before, fix_t, hb, fixm = (

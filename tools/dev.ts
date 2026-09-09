@@ -3,7 +3,7 @@
 //   db:up     : 모드 1(깨끗한 개발) — docker postgres 기동 + 시드. 파괴 OK.
 //   db:reset  : 모드 1 초기화(volume 포함 내림 후 재기동).
 // 모드 2(실데이터 읽기 전용)는 tools/db-url.ts / cache-url.ts — 파괴 수단 없음.
-// 실행은 exec seam 경유(d6④) — 셸 문자열 대신 argv 배열(공백 경로에도 안전), stdio는 inherit로
+// 실행은 exec seam 경유 — 셸 문자열 대신 argv 배열(공백 경로에도 안전), stdio는 inherit로
 // 종전 화면 출력을 유지한다. timeoutMs 0 = compose 풀/기동·dev 루프의 무제한 대기 보존.
 import { sh } from "./lib/exec.ts";
 
@@ -37,7 +37,7 @@ if (cmd === "db:up" || cmd === "db:reset") {
   process.exit(0);
 }
 
-console.log("starting local dev Postgres (OrbStack docker)…");
+console.log("starting local dev Postgres (docker)…");
 compose("up", "-d", "--wait");
 console.log("dev Postgres ready on localhost:5432 (db=app_dev user=dev).");
 

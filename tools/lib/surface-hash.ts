@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-// 실행은 exec seam 경유(d6④) — git 실패는 ""로 흡수하는 기존 계약 유지.
+// 실행은 exec seam 경유 — git 실패는 ""로 흡수하는 기존 계약 유지.
 import { git } from "./exec.ts";
 import { readdirSync, readlinkSync, statSync } from "node:fs";
 import path from "node:path";
 
 // 공용 코어 — `git ls-tree -r`(또는 그 재구성) 라인 배열에서 canonical surface 해시를 낸다.
-// ⚠️ codex pass1 F3: .activation 마커 라인은 제외한다(마커 커밋이 트리를 바꿔 자기 무효화하는 것 방지).
+// ⚠️ .activation 마커 라인은 제외한다(마커 커밋이 트리를 바꿔 자기 무효화하는 것 방지).
 function hashLines(lines: string[]): string {
   const filtered = lines
     .filter((l) => l && !l.endsWith("\tdeploy/prod/.activation"))
@@ -14,7 +14,7 @@ function hashLines(lines: string[]): string {
 }
 
 // apps/<app>의 canonical surface 해시 — .activation 마커 자신은 제외한다.
-// ⚠️ codex pass1 F3: apps/<app> 전체 tree-hash는 .activation을 포함해 마커 커밋 즉시 자기 무효화한다
+// ⚠️ apps/<app> 전체 tree-hash는 .activation을 포함해 마커 커밋 즉시 자기 무효화한다
 // (정상 활성 앱이 전부 surface-drift로 오탐). marker 기록(activate-app)과 감사(audit-orphans)가
 // 이 함수를 동일하게 호출해야 일치한다. rev: 커밋 ref(syncedRev 또는 "HEAD"). 실패 시 "" 반환.
 export function surfaceHash(repoDir: string, rev: string, app: string): string {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 메타갭 ⑤ W2-C: k8s API를 쓰지 않는 관측 컴포넌트는 default SA 토큰을 마운트하지 않는다
+# k8s API를 쓰지 않는 관측 컴포넌트는 default SA 토큰을 마운트하지 않는다
 # (RBAC 감사 리포트 Category A — 라이브 tokenVol=yes로 미사용 토큰 마운트 확인됨). 회귀 차단.
 # **Category B(2026-09-02 추가)**: API를 *쓰는* 컴포넌트의 **권한 폭**. Category A는 토큰의 유무만 봐서
 # "쓰는데 너무 많이 쓴다"를 원리적으로 못 본다 — KSM이 그 자리였다(효용 0의 클러스터 전역 secrets read).
@@ -86,18 +86,18 @@ EOF
 }
 
 # ⓘ 여기 있던 "already-hardened components keep automount disabled" @test는 삭제했다 —
-#   glances(선행)·pvc-du-exporter(Task 2) 두 이름을 손으로 든 **두 번째 하드코딩 로스터**였고,
+#   glances(선행)·pvc-du-exporter 두 이름을 손으로 든 **두 번째 하드코딩 로스터**였고,
 #   위 Category A의 파생 분모가 둘을 이미 포함한다(파일 전체 grep이 아니라 파싱한 값으로 판정하므로
 #   엄격히 더 강하다). 같은 회귀를 두 자리에서 재는 대신 분모 하나를 기계가 지키게 둔다.
 
 @test "the memory self-reference decision (allowedBytes vs allowedPercent) is class-wide, not vmsingle-only" {
   # 원장 110행: 자기조절 워크로드의 자기참조는 GOMEMLIMIT(힙)·allowedPercent(캐시) 두 경로로
   # 산다 — vmsingle 단독 증인은 같은 결정이 사는 vmagent.yaml:74를 놓치고, victorialogs.yaml:58의
-  # allowedPercent=60은 memory-ledger.md:342가 명시한 **의도적** 결정이라 컴포넌트 전역 부재
+  # allowedPercent=60은 memory-ledger.md:357가 명시한 **의도적** 결정이라 컴포넌트 전역 부재
   # 단언은 부당하게 red다. 값(563714457/141033472)은 핀하지 않는다 — right-size마다 손 갱신을 부른다.
   cd "$ROOT"
   local files f L C n name flag bad="" e
-  PCT_EXEMPT="victorialogs" # memory-ledger.md:342 — victorialogs만 allowedPercent가 승인된 결정
+  PCT_EXEMPT="victorialogs" # memory-ledger.md:357 — victorialogs만 allowedPercent가 승인된 결정
   BYTES_REQUIRED="vmsingle vmagent"
   L="$BATS_TEST_TMPDIR/memflags-raw.txt"
   C="$BATS_TEST_TMPDIR/memflags.txt"
@@ -131,7 +131,7 @@ EOF
 }
 
 @test "container securityContext (allowPrivilegeEscalation/readOnlyRootFilesystem/capabilities.drop) is pinned class-wide (critic re-flag, r7+r8)" {
-  # 7·8라운드 연속 지목: 위 두 @test(Category A/B·메모리 자기참조)는 이 축을 보지 않는다.
+  # 반복 지목: 위 두 @test(Category A/B·메모리 자기참조)는 이 축을 보지 않는다.
   # 격리 재현(2026-09-05): grafana.yaml:19-21의 컨테이너 securityContext 블록(allowPrivilegeEscalation +
   # capabilities.drop)을 통째로 지워도 이 파일의 47/47이 그대로 초록이었다 — witness 0건.
   # grafana만 readOnlyRootFilesystem이 없다(grafana.yaml:19-20 주석 — 플러그인 설치·/tmp 쓰기 때문에

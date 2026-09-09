@@ -32,7 +32,7 @@ cd "$ROOT"
 # shellcheck disable=SC2012
 latest_backup() { ls -1 "$outdir"/runbooks.*.enc.tar 2>/dev/null | LC_ALL=C sort | tail -1; }
 sha256() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$@"; else sha256sum "$@"; fi; }
-# 내용 인지 매니페스트(codex pass3 P3-3): '<sha256> <파일명>'. 파일명 셋 비교만으로는
+# 내용 인지 매니페스트: '<sha256> <파일명>'. 파일명 셋 비교만으로는
 # 내용만 바뀐 stale 백업이 OK 통과한다 — 신선도 게이트가 무력해지는 구멍.
 src_hash_manifest() { (cd "$SRC" && for f in *.md; do printf '%s %s\n' "$(sha256 "$f" | awk '{print $1}')" "$f"; done | LC_ALL=C sort -k2); }
 

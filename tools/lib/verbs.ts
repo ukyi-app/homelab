@@ -1,5 +1,5 @@
-// 동사 operation catalog — transport 중립·부수효과 없는 import-safe SSOT(structure r1 A1·B1:
-// bin 모듈(homelab.ts)은 import하면 main이 실행되므로 MCP가 재사용할 catalog는 lib에 산다).
+// 동사 operation catalog — transport 중립·부수효과 없는 import-safe SSOT —
+// bin 모듈(homelab.ts)은 import하면 main이 실행되므로 MCP가 재사용할 catalog는 lib에 산다.
 // 행 하나 = 동사 하나: path(라우팅 어휘)·desc(--help 열거)·op(operation — 타입 입력을 받아
 // 계약 Envelope 반환, 프로세스/표현 관심사 없음). argv 파싱·렌더링·stdout·종료코드는 CLI 셸
 // (homelab.ts) 소유이고, MCP 서버(lib/mcp.ts)는 op를 직접 호출해 같은 envelope을 tool 결과로 쓴다.
@@ -15,16 +15,16 @@ import { runMutation, waitInputError, waitOpts, type WaitInput } from "./mutatio
 import { appSecretsInputError, runAppSecrets, type AppSecretsInput } from "./secrets.ts";
 import { runStatus, statusInputError, type StatusInput } from "./status.ts";
 
-// 동사 형상 — I가 그 동사의 타입 입력(structure r2-a1: op를 입력 0개로 고정하면 입력 있는
+// 동사 형상 — I가 그 동사의 타입 입력(op를 입력 0개로 고정하면 입력 있는
 // 동사가 catalog를 우회해야 한다). 동사 추가 = 입력 타입 + 구체 Verb 타입 + union 멤버 +
 // named export + VERBS 행 — 전부 이 파일 안이라 우회 표면이 없다.
 // destructive: 파괴 동사 표시(teardown). MCP 노출 정책(lib/mcp.ts의 양방향 totality 가드)이 이
 // 표시로 파괴 동사를 제외하고, CLI는 confirm 가드로 사람 확인을 강제한다. 미설정 = 비파괴.
 // desc: 동사 한 줄 설명 — **transport 중립**이어야 한다. CLI 플래그 어휘(`--wait` 등)를 넣으면
 // 같은 문자열을 MCP tool description으로 내는 mcp.ts가 inputSchema에 없는 입력을 LLM에게 광고하게
-// 된다(실측 드리프트 mcp-3: desc의 `--wait=배포 수렴까지` ↔ 스키마의 wait 부재 → -32602). 대기 축
+// 된다(실측 드리프트: desc의 `--wait=배포 수렴까지` ↔ 스키마의 wait 부재 → -32602). 대기 축
 // 문구는 각 셸이 소유한다 — CLI는 동사별 --help, MCP는 mcp.ts의 DESC_MUT_PENDING.
-// needs: 이 동사가 도달해야 하는 **망 도메인**(티켓 33). 이 홈랩에서는 둘이 독립으로 끊긴다 —
+// needs: 이 동사가 도달해야 하는 **망 도메인**. 이 홈랩에서는 둘이 독립으로 끊긴다 —
 // 클러스터는 tailscale/LAN, GitHub은 인터넷이라 한쪽만 끊긴 상태가 정상이다. 그 비대칭이 어휘에
 // 없으면 "오프라인에서 무엇이 여전히 되는가"를 표면이 못 말한다(무인자 status·url --dry-run은
 // 완전 망 무의존이다). 값은 **데이터 한 칸**이고 문구 렌더는 셸(homelab.ts) 소유다 — 동사마다
@@ -45,8 +45,8 @@ export type DbCreateVerb = VerbShape<DbCreateInput>;
 export type CacheCreateInput = WaitInput & { name: string; maxmemoryMi?: number };
 export type CacheCreateVerb = VerbShape<CacheCreateInput>;
 
-// db url/cache url — conn URL 엔진(lib/conn-url.ts)의 catalog 동사(cli-deepening 심화 5:
-// 패스스루 특례 소멸 — 나머지 동사와 같은 op envelope 계약, CLI·MCP가 같은 op를 소비).
+// db url/cache url — conn URL 엔진(lib/conn-url.ts)의 catalog 동사(패스스루 특례 소멸 —
+// 나머지 동사와 같은 op envelope 계약, CLI·MCP가 같은 op를 소비).
 export type DbUrlVerb = VerbShape<DbUrlInput>;
 export type CacheUrlVerb = VerbShape<CacheUrlInput>;
 
@@ -142,7 +142,7 @@ export function appCreateInputError(input: AppCreateInput): string | null {
 function appCreateOp(input: AppCreateInput): Envelope {
   const bad = appCreateInputError(input);
   if (bad) throw new Error(`계약 파손: appCreateOp에 검증 안 된 입력 — ${bad}`);
-  // 디스패치 전 사전 판정(티켓 30) — 앱 레포 main에 .app-config.yml이 없으면 디스패처가 반드시
+  // 디스패치 전 사전 판정 — 앱 레포 main에 .app-config.yml이 없으면 디스패처가 반드시
   // 죽는다(_create-app.yaml의 관문). 그 실패는 homelab-mutation 직렬화 큐와 Telegram 실패 알림을
   // 소비하므로 여기서 correlation 없이 거부한다(nonce 미생성 = 디스패치 전 거부 형상).
   // 판정 불가(비-404)는 통과 — 권위는 디스패처다(lib/app-preflight.ts 헤더 규칙 ②).

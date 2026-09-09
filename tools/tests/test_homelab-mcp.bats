@@ -84,7 +84,7 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
 }
 
 @test "a mutation tool call returns the run handle promptly (pending) without blocking on conclusion" {
-  # identifyOnly(release r1 a2=b3): MCP 변이는 run을 식별하면 conclusion(최대 20분) 폴링 없이 pending +
+  # identifyOnly: MCP 변이는 run을 식별하면 conclusion(최대 20분) 폴링 없이 pending +
   # run 핸들을 즉시 반환한다 — 진행은 status(run URL) 재조회로. 단일 스레드 서버가 블로킹되지 않게.
   mcp_rpc '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"db_create","arguments":{"name":"mydb","ext":["pg_trgm"]}}}'
   [ "$status" -eq 0 ]
@@ -146,14 +146,14 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
     '{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"status","arguments":{}}}'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -rc 'select(.id==11) | .result.content[0].text | fromjson | .result.mode')" = "list" ]
-  # 출처 진술(티켓 17) — MCP는 root를 **입력으로** 노출하지 않아 항상 defaultRoot를 탄다. 그래서
+  # 출처 진술 — MCP는 root를 **입력으로** 노출하지 않아 항상 defaultRoot를 탄다. 그래서
   # 어느 체크아웃의 디스크를 읽었는지는 결과가 말해야 한다(에이전트가 낡음을 판별할 유일한 좌표).
   [ "$(echo "$output" | jq -rc 'select(.id==11) | .result.content[0].text | fromjson | .result.repo | has("root")')" = "true" ]
   # secrets/init 스키마가 명시 경로를 요구한다(cwd 추론 없음).
   mcp_rpc '{"jsonrpc":"2.0","id":12,"method":"tools/list"}'
   [ "$(echo "$output" | jq -rc 'select(.id==12) | .result.tools[] | select(.name=="app_secrets") | .inputSchema.required | index("repoPath") != null')" = "true" ]
   [ "$(echo "$output" | jq -rc 'select(.id==12) | .result.tools[] | select(.name=="app_init") | .inputSchema.required | index("parentDir") != null')" = "true" ]
-  # 실행 축(티켓 02): 경로 값을 준 tool을 **다른 cwd**에서 돌려도 결과가 같다(절대 경로) — 그리고 상대 경로는
+  # 실행 축: 경로 값을 준 tool을 **다른 cwd**에서 돌려도 결과가 같다(절대 경로) — 그리고 상대 경로는
   # 어느 cwd에서도 -32602라 서버 cwd 아래에 아무것도 만들지 않는다. 종전에는 required 여부만 재고 실행하지 않았다.
   ED="$BATS_TEST_TMPDIR/ed6"; mkdir -p "$ED"; SRV="$BATS_TEST_TMPDIR/srv"; mkdir -p "$SRV"
   REQ="{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"dryRun\":true}}}"
@@ -175,7 +175,7 @@ mcp_rpc() { mcp_rpc_at tools/homelab.ts "$@"; }
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh repo create)" = "0" ]
 }
 
-# ── 경로 입력의 절대성·앱 레포 판정 fail-closed(homelab-cli-r2 티켓 02) ──────────────────────────
+# ── 경로 입력의 절대성·앱 레포 판정 fail-closed ──────────────────────────────────────
 # owner 결정(2026-09-07): MCP app_secrets는 앱 레포만 받는다(존재하지 않거나 앱 레포가 아닌 명시 repoPath는
 # 레포 밖이 아니라 **거부** — dispatch-only 폴백은 CLI 암묵 cwd 전용, 결과 스키마 enum은 유지). 틸드(~)는 서버가
 # 확장하지 않고 안내 문구와 함께 거부한다(서버 HOME을 기준점으로 삼는 것 자체가 '서버 추론'이다).
@@ -203,7 +203,7 @@ mcp_rpc_in() {
   [ "$bad" -eq 0 ]
   # 바닥값: 오늘의 경로 속성은 repoPath·parentDir·envDir×2 = 4개(열거 붕괴 차단).
   [ "$n" -ge 4 ]
-  # dispatchSecrets(경로지만 Dir/Path 접미가 아니다 — 죽은 옵션, 티켓 29)는 minLength·description만 맞춘다.
+  # dispatchSecrets(경로지만 Dir/Path 접미가 아니다 — 죽은 옵션)는 minLength·description만 맞춘다.
   [ "$(echo "$output" | jq -rc 'select(.id==70) | .result.tools[] | select(.name=="app_init") | .inputSchema.properties.dispatchSecrets.minLength')" = "1" ]
   # 계약 주석 한 구절 — mcp.ts가 '레포 밖이 아니라 거부'를 선언한다(산문 SSOT 갱신 증인).
   [ "$(grep -c "레포 밖이 아니라 거부" tools/lib/mcp.ts)" -ge 1 ]
@@ -305,7 +305,7 @@ mcp_rpc_in() {
   ED="$BATS_TEST_TMPDIR/envdir"; mkdir -p "$ED"
   mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"dryRun\":true}}}"
   [ "$status" -eq 0 ]
-  # release r1 a5: url tool도 다른 tool과 같은 envelope 계약을 낸다(raw text 아님).
+  # url tool도 다른 tool과 같은 envelope 계약을 낸다(raw text 아님).
   env="$(echo "$output" | jq -rc 'select(.id==15) | .result.content[0].text')"
   [ "$(echo "$env" | jq -r '.schema')" = "homelab-cli/1" ]
   [ "$(echo "$env" | jq -r '.verb')" = "db url" ]
@@ -324,7 +324,7 @@ mcp_rpc_in() {
     console.log(errs.length ? "INVALID:" + errs.join("|") : "valid");
   ' "$env"
   echo "$output" | grep -q "^valid$"
-  # skip variant(kernel-followups 06): KUBECONFIG 없는 서버의 라이브 조회는 isError가 아니라
+  # skip variant: KUBECONFIG 없는 서버의 라이브 조회는 isError가 아니라
   # 구조화된 skip이다(x-contract.mcp.normalVariants) — 에이전트는 variant·wrote로 읽는다(마커는
   # 종료코드 채널의 보조물이라 MCP엔 없다). 기록이 없어야 한다.
   run --separate-stderr env PATH="$STUB" TS_DB_HOST=h HOMELAB_CORRELATION="$NONCE" \
@@ -338,7 +338,7 @@ mcp_rpc_in() {
   [ "$(echo "$senv" | jq -r '.result.wrote')" = "false" ]
   [ ! -f "$ED/.env.local" ]
 
-  # release r1 a4=b2: envDir은 required — 생략하면 -32602(서버 cwd에 자격 기록 금지).
+  # envDir은 required — 생략하면 -32602(서버 cwd에 자격 기록 금지).
   mcp_rpc '{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"db_url","arguments":{"name":"mydb","dryRun":true}}}'
   [ "$(echo "$output" | jq -rc 'select(.id==16) | .error.code')" = "-32602" ]
   echo "$output" | jq -rc 'select(.id==16) | .error.message' | grep -q "envDir"
@@ -349,7 +349,7 @@ mcp_rpc_in() {
 
 @test "omitting OR type-invalidating a required explicit path is refused server-side (no cwd fallback mutation)" {
   # 명시 경로(repoPath/parentDir)를 생략하거나(undefined) null/wrong-type/빈 문자열로 주면 서버가
-  # -32602로 거부한다 — release r1 a3=b1: 존재만 검사하면 null/숫자가 통과해 str()에서 undefined로 접히고
+  # -32602로 거부한다 — 존재만 검사하면 null/숫자가 통과해 str()에서 undefined로 접히고
   # cwd 폴백으로 서버 디렉토리에 변이가 나간다(신뢰 경계 우회). 타입 인식 검증이 이를 fail-closed로 막는다.
   mcp_rpc \
     '{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"app_secrets","arguments":{"app":"myapp"}}}' \
@@ -370,7 +370,7 @@ mcp_rpc_in() {
 }
 
 @test "type-invalid OPTIONAL args are refused too (a string dryRun must not fold to a real write)" {
-  # release r2-b1: required만 검사하면 optional dryRun:'true'(문자열)가 bool()에서 false로 접혀
+  # required만 검사하면 optional dryRun:'true'(문자열)가 bool()에서 false로 접혀
   # 실제 자격 파일 쓰기(subprocess)를 실행한다. 전체 inputSchema 검증이 이를 -32602로 막는다.
   ED="$BATS_TEST_TMPDIR/ed2"; mkdir -p "$ED"
   mcp_rpc \
@@ -385,9 +385,9 @@ mcp_rpc_in() {
 }
 
 @test "the cache_url success envelope is schema-valid (plan host does not leak into urlResult)" {
-  # release r2-a5: cache-url 계획은 host를 담는데 urlResult(additionalProperties:false)엔 없다 —
+  # cache-url 계획은 host를 담는데 urlResult(additionalProperties:false)엔 없다 —
   # 구판은 자식 계획 JSON의 화이트리스트 복사로 지켰던 성질 — 지금은 엔진의 타입 결과
-  # (UrlResult ↔ urlResult 1:1)가 host류 계획 전용 필드의 유입을 컴파일 타임에 차단한다(티켓 08).
+  # (UrlResult ↔ urlResult 1:1)가 host류 계획 전용 필드의 유입을 컴파일 타임에 차단한다.
   ED="$BATS_TEST_TMPDIR/ed3"; mkdir -p "$ED"
   mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":33,\"method\":\"tools/call\",\"params\":{\"name\":\"cache_url\",\"arguments\":{\"name\":\"mycache\",\"envDir\":\"$ED\",\"dryRun\":true}}}"
   [ "$status" -eq 0 ]
@@ -408,7 +408,7 @@ mcp_rpc_in() {
 }
 
 @test "an MCP mutation bounds run-appearance to a short deadline (no 20-minute block on a missing run)" {
-  # release r2-a2/b3: identifyOnly라도 run '출현' 대기(step2)는 공유 deadline까지 폴링한다 — MCP는
+  # identifyOnly라도 run '출현' 대기(step2)는 공유 deadline까지 폴링한다 — MCP는
   # 짧은 deadline(env 주입)으로 바운드하고, run 미출현이면 pending을 즉시 반환한다(status 재조회로 재개).
   # 매칭 run이 없는 스텁: 디스패처는 접수하나 nonce 에코 run이 목록에 없음 → 짧은 deadline에 pending.
   printf '[]\n' > "$FIX/db-runs.json"
@@ -450,7 +450,7 @@ mcp_rpc_in() {
 }
 
 @test "the app_init archetype enum is exactly platform ARCHETYPES (derivation parity, hand-pinned floor)" {
-  # 두 입력 표면(init 엔진의 ARCHETYPES ↔ MCP inputSchema enum)이 순서까지 일치한다(cli-deepening 심화 6).
+  # 두 입력 표면(init 엔진의 ARCHETYPES ↔ MCP inputSchema enum)이 순서까지 일치한다.
   run bun -e '
     const { ARCHETYPES } = await import(process.argv[1] + "/tools/lib/platform.ts");
     console.log(ARCHETYPES.join(","));
@@ -498,7 +498,7 @@ mcp_rpc_in() {
   env43="$(echo "$output" | jq -rc 'select(.id==43) | .result.content[0].text')"
   [ "$(echo "$env43" | jq -r '.verb')" = "app init" ]
   [ "$(echo "$env43" | jq -r '.variant')" = "failure" ]
-  # lib-a-1 — mcpIsError가 실패 variant를 실제로 에러로 매핑하는지 여기서 처음 확인한다(이 파일의
+  # mcpIsError가 실패 variant를 실제로 에러로 매핑하는지 여기서 처음 확인한다(이 파일의
   # isError 단언 6곳은 전부 "false"뿐이었다 — 실패 경로를 실제로 유발하는 이 픽스처가 유일한 자리).
   [ "$(echo "$output" | jq -rc 'select(.id==43) | .result.isError')" = "true" ]
   [ "$(echo "$env43" | jq -r '.result.checkpoint')" = "preflight" ]
@@ -519,7 +519,7 @@ mcp_rpc_in() {
 }
 
 @test "a url tool host carrying a newline is refused as invalid params before any cluster read (shared host predicate)" {
-  # 티켓 03 — host 술어는 dbUrlInputError 한 곳(CLI usage·MCP -32602·bin)이 소유한다. 개행 host는 .env 행 주입이다.
+  # host 술어는 dbUrlInputError 한 곳(CLI usage·MCP -32602·bin)이 소유한다. 개행 host는 .env 행 주입이다.
   ED="$BATS_TEST_TMPDIR/ed4"; mkdir -p "$ED"
   mcp_rpc "{\"jsonrpc\":\"2.0\",\"id\":60,\"method\":\"tools/call\",\"params\":{\"name\":\"db_url\",\"arguments\":{\"name\":\"mydb\",\"envDir\":\"$ED\",\"host\":\"100.99.0.1\\nINJECTED=evil\"}}}"
   [ "$status" -eq 0 ]
@@ -545,7 +545,7 @@ mcp_rpc_in() {
   [ "$(echo "$output" | jq -rc 'select(.id==51) | has("error")')" = "false" ]
 }
 
-# ── 대기 데드라인 인용의 정합(homelab-cli-r2 티켓 10) ────────────────────────────────────────
+# ── 대기 데드라인 인용의 정합 ────────────────────────────────────────────────────────────────
 
 @test "the deadline quoted in mcp.ts is derived from WAIT_DEFAULTS, never a stale hand copy" {
   # MCP는 CLI 기본 deadline을 물려받지 않고 짧은 값을 명시한다 — 그 이유를 적은 주석이 상수와
@@ -557,7 +557,7 @@ mcp_rpc_in() {
   [ "$(grep -c "WAIT_DEFAULTS.deadlineMs = $((mins + 1))분" tools/lib/mcp.ts)" = "0" ]
 }
 
-# ── pending의 브랜치 좌표와 status --branch(homelab-cli-r2 티켓 09) ───────────────────────
+# ── pending의 브랜치 좌표와 status --branch ─────────────────────────────────────────────────
 
 @test "the identify-only pending carries the lane branch, derived from the row without an extra API call" {
   # MCP 변이 pending에는 PR이 원리적으로 없다(run 완료 후 생긴다) — 그래서 **좌표**를 싣는다.
@@ -580,7 +580,7 @@ mcp_rpc_in() {
   [ "$status" -eq 0 ]
   keys="$(echo "$output" | jq -rc 'select(.id==42) | .result.tools[] | select(.name=="status") | .inputSchema.properties | keys | join(",")')"
   echo "$keys" | grep -q "branch"
-  # 리소스 인벤토리는 관측 전용이라 MCP에도 그대로 노출된다(티켓 40) — CLI 플래그와 같은 술어를 쓴다.
+  # 리소스 인벤토리는 관측 전용이라 MCP에도 그대로 노출된다 — CLI 플래그와 같은 술어를 쓴다.
   echo "$keys" | grep -q "resources"
   # owner 결정 Q2 — correlation 핸들 모드는 열지 않는다(재개 조건 미충족). 부정 단언의 양성 짝은 위 줄.
   [ "$(printf '%s\n' "$keys" | grep -c "correlation")" = "0" ]
@@ -592,7 +592,7 @@ mcp_rpc_in() {
   [ "$(echo "$output" | jq -rc 'select(.id==46) | .error.code')" = "-32602" ]
 }
 
-# ── 진행 표시 심의 MCP 무주입(homelab-cli-r2 티켓 07) ─────────────────────────────────────
+# ── 진행 표시 심의 MCP 무주입 ────────────────────────────────────────────────────────────────
 
 @test "a mutation tool call leaks no progress line into the JSON-RPC stream (server injects no sink)" {
   # 변이 엔진은 진행 이벤트를 내지만 sink 주입은 CLI 셸 전용이다 — MCP는 미주입이라 stdout이
@@ -621,7 +621,7 @@ EOF
   [ "$ctrl" -eq 1 ]
 }
 
-# ── JSON-RPC 프로토콜 준수: ping·id 경계·프레이밍·서버 env(homelab-cli-r2 티켓 23) ───────────
+# ── JSON-RPC 프로토콜 준수: ping·id 경계·프레이밍·서버 env ──────────────────────────────────
 
 @test "ping returns an empty result, and an id-less ping writes nothing (notification branch runs first)" {
   mcp_rpc '{"jsonrpc":"2.0","id":50,"method":"ping"}'
@@ -679,7 +679,7 @@ EOF
 
 @test "a malformed HOMELAB_MCP_DEADLINE_MS or HOMELAB_MCP_POLL_MS refuses to start the server and names the env var" {
   # 종전엔 Number("abc")=NaN·Number("")=0이 MCP_MUT에 실려 **첫 변이 호출**에서만 -32602로 드러났고,
-  # 그 문구가 클라이언트가 준 적 없는 CLI 플래그(--deadline-ms)를 가리켰다(mcp-10·exec-7).
+  # 그 문구가 클라이언트가 준 적 없는 CLI 플래그(--deadline-ms)를 가리켰다.
   n=0
   for bad in abc "" 0 12.5; do
     run --separate-stderr env PATH="$STUB" HOMELAB_MCP_DEADLINE_MS="$bad" \
@@ -709,7 +709,7 @@ EOF
   [ "$(echo "$output" | jq -rc 'select(.id==63) | .result.tools | length')" = "9" ]
   [ "$(echo "$output" | jq -rc 'select(.id==63) | [.result.tools[] | select((.description // "") != "")] | length')" = "9" ]
   # description은 MCP 소유 문구다 — CLI 플래그 토큰을 광고하면 inputSchema가 -32602로 거부하는
-  # 입력을 LLM에게 권하는 드리프트가 된다(mcp-3: desc의 --wait vs 스키마의 wait 부재).
+  # 입력을 LLM에게 권하는 드리프트가 된다(desc의 --wait vs 스키마의 wait 부재).
   [ "$(echo "$output" | jq -rc 'select(.id==63) | [.result.tools[].description | select(test("--[a-z]"))] | length')" = "0" ]
   # 검출기 생존 — 같은 술어를 합성 입력(옛 desc 문구)에 걸면 1건이다.
   [ "$(echo '{"tools":[{"description":"correlation 추적, --wait=배포 수렴까지"}]}' | jq -rc '[.tools[].description | select(test("--[a-z]"))] | length')" = "1" ]
@@ -744,7 +744,7 @@ EOF
 }
 
 @test "db_url without a host arg and with TS_DB_HOST unset names every transport in the error (not just --host)" {
-  # connurl-9 / 티켓 39(b): MCP에서 도달 가능한 오류가 CLI 플래그(--host)만 지시했다 — MCP 인자는 host다.
+  # MCP에서 도달 가능한 오류가 CLI 플래그(--host)만 지시했다 — MCP 인자는 host다.
   # ⚠️ `env -u TS_DB_HOST`가 계약의 일부다: 러너 셸에 그 변수가 남아 있으면 이 @test가 vacuous green이다.
   ED="$BATS_TEST_TMPDIR/mcp-nohost"; mkdir -p "$ED"
   run --separate-stderr env -u TS_DB_HOST PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" \
@@ -770,7 +770,7 @@ EOF
 }
 
 @test "the db_url tool actually writes into the explicit envDir on a live success (positive witness, no cwd leak)" {
-  # 티켓 18 (c): 현행 envDir 단언은 전부 **부정형**(`[ ! -f $ED/.env.local ]`)이라 envDir가 무시되고
+  # 현행 envDir 단언은 전부 **부정형**(`[ ! -f $ED/.env.local ]`)이라 envDir가 무시되고
   # 서버 cwd로 새도 그대로 통과했다 — 부정 단언만으로는 '아무 데도 안 썼다'와 '엉뚱한 데 썼다'가
   # 구별되지 않는다. 라이브 성공 1레인으로 **양의 증인**을 세운다(기록 위치 + 평문 비출력).
   ED="$BATS_TEST_TMPDIR/envdir-live"; mkdir -p "$ED"

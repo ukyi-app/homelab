@@ -55,7 +55,7 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
 }
 
 @test "helper pod image is wired to the LOCAL_PATH_HELPER_IMAGE placeholder" {
-  # 소스 매니페스트는 플레이스홀더 리터럴을 담고 있다; apply-storage.sh(Task 1.8)가
+  # 소스 매니페스트는 플레이스홀더 리터럴을 담고 있다; apply-storage.sh가
   # 렌더 시점에 versions.env의 `LOCAL_PATH_HELPER_IMAGE` 고정 digest로 치환하며, 그 렌더 결과
   # 검사는 07-apply-storage.bats에 있다.
   # ⚠️ 옛 주석은 그 digest를 "arm64 고정"이라 적었는데 SSOT가 그것을 **실측으로 반증**해 두었다
@@ -82,7 +82,7 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
 }
 
 @test "provisioner image is wired to the LOCAL_PATH_PROVISIONER_IMAGE placeholder (digest owner promoted)" {
-  # 티켓 60 prov-1 — M12가 닫은 「LOCAL_PATH_PROVISIONER_VERSION 소비자 0 → versions.env bump가
+  # M12가 닫은 「LOCAL_PATH_PROVISIONER_VERSION 소비자 0 → versions.env bump가
   # silent no-op」 자리(옛 이름: "local-path-provisioner image tag matches versions.env")가
   # 하드코딩 태그였다. 헬퍼(:57 @test)와 같은 플레이스홀더 형태로 승격한다 — digest 소유자는
   # 이제 versions.env의 `LOCAL_PATH_PROVISIONER_IMAGE`(policy/image-ownership.json 무소유 선언

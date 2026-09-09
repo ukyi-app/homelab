@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 가드 skip 신호 규약의 정적 가드 — `CONTRIBUTING.md` '가드 skip 신호' 절 + `tools/lib/cli.ts` 주석이 SSOT.
 #
-# 축(lib-convergence 11): 검사는 "마커와 skip 종료코드(4)가 같은 줄"이 아니라 **헬퍼를 경유했는가**다.
+# 축: 검사는 "마커와 skip 종료코드(4)가 같은 줄"이 아니라 **헬퍼를 경유했는가**다.
 # 같은-줄 원자성은 이제 구현 두 곳이 소유한다 — 셸 `guard_skip`(scripts/lib/guard.sh) ·
 # TS `skip()`(tools/lib/cli.ts). 그러므로 콜사이트의 직접 방출(skip 종료코드든 SKIP 마커 emission이든)은
 # 짝이 맞아도 위반이다: 손조립이 하나라도 살아 있으면 원자성 주장이 그 콜사이트에서 두 번째 진실을 얻는다.
@@ -22,7 +22,7 @@
 #    이 클래스: 종료코드가 envelope.exitCode **데이터**로 흘러 어떤 리터럴 패턴에도 안 잡히고,
 #    그래도 되는 이유는 값이 손조립이 아니라 exitFor(variant) 계약 파생이기 때문이다), `exit 04` 표기.
 # (해소) 옛 판이 '알려진 구멍'으로 등재하던 TS exitCode(process 필드)에 4를 직접 대입하는 경로는 skip variant
-#    구현(kernel-followups 06)과 함께 전용 레인으로 닫았다 — CLI 마커(SKIP: homelab <verb>:)의
+#    구현과 함께 전용 레인으로 닫았다 — CLI 마커(SKIP: homelab <verb>:)의
 #    방출도 헬퍼(cli.ts skipMarker) 소유이고 P_EMIT이 콜사이트 직접 방출을 거부한다(stderr 동사 포함).
 # bash 3.2 호환(mapfile 금지). shellcheck clean.
 set -euo pipefail
@@ -30,7 +30,7 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-skip-signalling
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 env 폐지).
 take_floors "check-skip-signalling" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
@@ -50,7 +50,7 @@ HELPER_TS="tools/lib/cli.ts"
 #    지배적 관용구가 우회 통로였다(리뷰 실측). grep은 행 단위라 .*가 정확하다.
 T_EXIT="exit"
 P_SH_EXIT="${T_EXIT} 4([^0-9]|\$)"             # 셸 skip 종료코드 직접 방출
-# 형제 전수 열거(reg13c-a-landing-hunks-2, tests/gates/test_scan-floor.bats) — 같은 리터럴 `.` 요구
+# 형제 전수 열거(tests/gates/test_scan-floor.bats) — 같은 리터럴 `.` 요구
 # 결함이 여기도 있었다(`process?.exit(4)` optional chaining 무증인, 실측 확인). `\??`로 대칭 처방.
 P_TS_EXIT="process\\??\\.${T_EXIT}\\(4\\)"     # TS skip 종료코드 직접 방출
 # TS 종료코드 손조립의 두 번째 얼굴 — exitCode에 4를 **직접 대입**하면 exit(4) 패턴 밖이다
@@ -117,7 +117,7 @@ lane_grep() {   # $1=패턴 $2=입력 — 매치 줄을 stdout으로, 사망은 
 # quote-aware 주석 스트립 — 형제 관용구(check-bats-accounting.sh NOCOMMENT_AWK, #657 착지 ·
 # check-bats-style.sh abs_strip, 같은 q1/q2 토글 모델) 재사용. 행두 전용 sed는 실코드 줄에 붙은
 # trailing 주석을 전혀 걷지 않아, 그 안의 SKIP:/exit 4 예시 문구를 헬퍼 우회 위반으로 오판했다
-# (reg13-e-carryover-1). sh 레인은 대상 문자 `#` 그대로, ts 레인은 대상을 `//`(2문자 비교)로만
+# sh 레인은 대상 문자 `#` 그대로, ts 레인은 대상을 `//`(2문자 비교)로만
 # 바꾼 변형 — 공유 lib 신설 없이 각 스크립트가 독립 awk 블록을 갖는 기존 관례를 유지한다.
 # 따옴표(홑/겹) 안의 `#`/`//`는 절대 주석 시작으로 보지 않는다 — positive 대조가 이걸 고정한다.
 NOCOMMENT_AWK_SH=""
@@ -140,7 +140,7 @@ IFS='' read -r -d '' NOCOMMENT_AWK_TS <<'AWKEOF' || true
   print }
 AWKEOF
 
-# 개행-분할 흡수(reg13c-b-new-tests-1) — quote-aware 스트립 뒤에도 lane_grep은 줄 단위 매치라,
+# 개행-분할 흡수 — quote-aware 스트립 뒤에도 lane_grep은 줄 단위 매치라,
 # 백슬래시 줄연속이나 대입식이 두 줄에 걸치면 P_SH_EXIT/P_TS_EXITCODE가 무증인이었다. 전체 flatten은
 # 위험(무관한 인접 줄이 합쳐져 case 라벨 등에서 오탐) — 실행 가능한 두 형태만 좁혀 흡수한다.
 # (1) 표준 백슬래시 줄연속 — bash 문법상 유일한 합법 계속줄 형태라 오탐 없음(양옆 공백은 흡수해

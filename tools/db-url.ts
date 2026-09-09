@@ -1,4 +1,4 @@
-// db:url — conn URL 엔진(lib/conn-url.ts)의 CLI 껍데기(cli-deepening 심화 5). 접속 로직·평문
+// db:url — conn URL 엔진(lib/conn-url.ts)의 CLI 껍데기. 접속 로직·평문
 // 비출력·F2 채널 분리(--admin ↔ .env.admin.local)·RW/ADMIN 상호배타는 엔진 술어 소유 — 여기는
 // argv 파싱과 기존 출력 계약(dry-run 계획 JSON·기록 한 줄·종료코드 0/1/2, skip=4는 헬퍼 경유)만 보존한다.
 // homelab CLI(`homelab db url`)와 MCP(db_url)는 catalog op로 같은 엔진을 소비한다.

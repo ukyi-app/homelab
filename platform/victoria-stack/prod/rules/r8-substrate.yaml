@@ -17,7 +17,7 @@ data:
           # 조용히 **영구 드리프트**가 된다. 실측 2026-09-03: 라이브 k3s `v1.36.2+k3s1` vs 핀
           # `v1.36.3+k3s1` · provisioner `v0.0.36` vs `v0.0.37` — 어느 것도 신호를 내지 않았다.
           #
-          # ★ 그래서 이 두 룰은 **머지 직후 실제로 발화하는 것이 정상이다**(오늘 라이브가 핀보다 낡았다).
+          # ★ 그래서 이 두 룰은 **핀 bump 직후 발화하는 것이 정상이다** — 고장이 아니라 '거리'다.
           #   해소는 owner가 `make up`(또는 `apply-storage.sh` + `k3s-install.sh`)으로 수렴할 때다.
           #
           # ⚠️ `for: 24h`는 핀 bump PR 머지 → owner 재수렴 사이의 **정상 지연**을 흡수하는 값이다.
@@ -63,8 +63,6 @@ data:
             # (라이브 실측 2026-09-03, digest 승격 전: image_spec="rancher/local-path-provisioner:v0.0.36" ·
             #  image="docker.io/rancher/local-path-provisioner:v0.0.36" — 태그뿐이었다). 등식 대상은
             # 여전히 image_spec이다 — image는 레지스트리 접두(`docker.io/`)가 상류 규약에 매인다.
-            # ⚠️ owner substrate 수렴 전이라 라이브는 아직 v0.0.36 **태그** 형태다 — 이 룰은 지금
-            # digest 불일치로도 발화 중이고, 그것이 정상이다(수렴 시점은 `apply-storage.sh` 재실행).
             expr: |
               kube_pod_container_info{namespace="local-path-storage", container="local-path-provisioner", image_spec!="rancher/local-path-provisioner:v0.0.37@sha256:e757967a5ec338f6a9b371c5a9688bedaa8c3578ea3dd4db329ea0084be0a86f"}
             for: 24h

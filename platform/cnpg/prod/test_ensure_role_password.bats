@@ -143,7 +143,7 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
 }
 
 @test "ensure-role-password Job container is hardened (no privesc, all caps dropped, seccomp RuntimeDefault)" {
-  # spec-others-2(round8) — 형제 hardened @test 관용구(test_basebackup.bats:34-38)를 그대로 적용.
+  # 형제 hardened @test 관용구(test_basebackup.bats:34-38)를 그대로 적용.
   # 기존 값은 이미 올바르다(allowPrivilegeEscalation:false·capabilities.drop:[ALL]·pod-level
   # seccompProfile RuntimeDefault) — 값 자체를 바꾸지 않고 등식 witness만 추가한다.
   # 뮤테이션 재현(2026-09-05): allowPrivilegeEscalation false->true 치환 후 이 파일(9/9)·
