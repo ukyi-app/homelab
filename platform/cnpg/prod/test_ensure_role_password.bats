@@ -72,6 +72,7 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   run_erp
   [ "$status" -eq 0 ]
   [ "$(nudge_count)" = "0" ]                       # 멱등 — 이미 적용된 DB는 nudge하지 않는다
+  printf '%s' "$output" | grep -qF -- 'all 1 database(s) verified'   # 스킵 없는 요약 분기
   grep -q "apply -f" "$ERP_KLOG"                   # 마커 실제 upsert
   grep -qF 'name: db-page-ready' "$ERP_APPLY_INPUT"
   grep -qF 'ownerSecretResourceVersion: "100"' "$ERP_APPLY_INPUT"
@@ -116,6 +117,17 @@ nudge_count() { cat "$ERP_NUDGE_FILE"; }
   printf '%s' "$output" | grep -qF -- '(1 ensure=absent CR(s) skipped)'     # 그러나 침묵도 아니다
   [ "$(nudge_count)" = "0" ]                        # DROP된 롤에 nudge하지 않는다
   ! grep -q "apply -f" "$ERP_KLOG"                  # 마커 미방출 — 고아 마커의 원천 차단
+}
+
+@test "missing CR uid fails closed: an ownerRef-less marker is never written" {
+  # ownerRef 없는 마커가 바로 티켓 51의 고아다. uid 조회가 깨지면(CR이 중간에 사라짐·권한)
+  # 마커를 쓰지 않고 비-0으로 끝난다 — 이 판정 조건을 밟는 픽스처가 없으면 무증인이다.
+  export ERP_TEST_SCENARIO="applied"
+  export ERP_TEST_DB_UID=""
+  run_erp
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF -- 'metadata.uid 조회 실패'
+  ! grep -q "apply -f" "$ERP_KLOG"
 }
 
 @test "never-applied: fails closed (non-zero) after exhausting polls, writes no marker" {
