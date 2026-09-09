@@ -27,8 +27,8 @@ CronJob 등이 참조하는 빌드-전용 이미지(예: `pg-tools`)는 **`ops/<
 >
 > **앱 개수가 0↔1을 넘을 때의 손 단계**(2026-09-08 온보딩 드릴 #691에서 실측, 철거 드릴 #698에서 역방향 재실측 — 디스패처가 하지 않는 것만):
 > 1. `tools/vendored-contract.json` `targets`에 그 앱의 동봉 계약 사본 2행(`tools/seal-secret.mts`·`tools/sealed-secrets-cert.pem`) 추가/제거 — `_roster` 등식이 create-app PR gate에서 red로 알려준다.
-> 2. `tools/tests/test_repo-walk.bats`의 image-ownership 루트 로스터에 `apps+` 복원/제거 — 같은 gate가 알려준다.
-> 3. 위 바닥값 5곳 1↔0.
-> 4. `apps/<app>/deploy/prod/values.yaml` `envFrom`에 conn secretRef 손 배선(create-app PR 안에서 해도 된다). ⚠️ 이 파일은 도구 소유라
+> 2. 위 바닥값 5곳 1↔0.
+> 3. `apps/<app>/deploy/prod/values.yaml` `envFrom`에 conn secretRef 손 배선(create-app PR 안에서 해도 된다). ⚠️ 이 파일은 도구 소유라
 >    **손 주석은 다음 라운드트립(update-secrets·bump)에서 사라지고 그 자체가 PR 1건이 된다** — 주석은 파일 상단이 아니라 이 README에 둔다.
-> (`db create`의 pgdump 헤지 DBS 등록은 자동이라 손 단계가 아니다.)
+> (`db create`의 pgdump 헤지 DBS 등록은 자동이라 손 단계가 아니다. `tools/tests/test_repo-walk.bats`의 image-ownership 루트 로스터는
+> 손 단계였다가 **파생**이 됐다 — 기대 집합이 `apps/*/deploy/prod/values.yaml` 실재에서 나오므로 0↔1에 무감하다.)

@@ -462,10 +462,25 @@ _fixture_repo() {
 # 그 이빨은 그대로 두고, 앱 개수 0↔1에서 손으로 `apps+`를 넣고 빼던 부분만 파생으로 옮긴다
 # (온보딩 #691·철거 #698 양방향 모두 이 상수가 gate red로 손 단계를 알려줬다 — 비용은 gate 1사이클).
 
-# 기대 루트 집합 = {infra, ops, platform} ∪ ({apps} iff 인-레포 배포 앱 유닛 ≥ 1).
-# ⚠️ 지금은 손 상수다 — 앱 유닛 축이 아직 파생이 아니라서 1-앱 트리에서 기대가 실제를 못 따라간다.
+# 앱 유닛 열거 — **image-ownership 스코프와 독립**이다.
+# 독립 근거: 이쪽은 git 자신의 pathspec 매처(`git ls-files -- 'apps/*/deploy/prod/values.yaml'`)를
+# 쓰고, 대조 대상은 repo-walk의 SCOPES 테이블 + 정규식 필터(bun)다 — 구현도 데이터도 공유하지 않아
+# 한쪽 열거가 붕괴해도 다른 쪽은 산다. 같은 스코프 함수를 양쪽에 쓰면 붕괴가 기대와 실제에서 **동시에**
+# 사라져 대조가 공허해진다(아래 「stays red when the scope loses all apps manifests」가 그 자리다).
+# 판정 기준을 `values.yaml`로 잡은 것도 같은 이유다 — 배포 앱 계약의 필수 산출물(apps/README.md)이라
+# 디렉토리 실재보다 정확하고, 스코프 쪽 include 정규식과 겹치지 않는다.
+_has_app_unit() { # $1 = repo root → 1(앱 유닛 ≥ 1) | 0
+  local out
+  out="$(git -C "$1" ls-files -- 'apps/*/deploy/prod/values.yaml')" || return 2
+  if [ -n "$out" ]; then echo 1; else echo 0; fi
+}
+
+# 기대 루트 집합 = {infra, ops, platform} ∪ ({apps} iff 인-레포 배포 앱 유닛 ≥ 1). 정렬 결합이라
+# apps가 맨 앞이다. 세 루트는 상수로 남는다 — 그게 이 단언의 이빨이고, 하나라도 사라지면 red다.
+# 앱 축만 파생이라 앱 온보딩·철거가 이 파일을 손대지 않는다(0↔1 손 단계 제거).
 _expected_roster() { # $1 = repo root
-  echo "infra+ops+platform"
+  local apps; apps="$(_has_app_unit "$1")" || return 2
+  if [ "$apps" = 1 ]; then echo "apps+infra+ops+platform"; else echo "infra+ops+platform"; fi
 }
 
 # 실제 루트 집합 + 하네스 건수. 하네스는 0이어야 한다 — 픽스처 안의 이미지 문자열은 실물이 아니라
