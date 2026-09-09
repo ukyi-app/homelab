@@ -150,7 +150,7 @@ run_verb_in() {
   echo "$output" | grep -q "^ok:17$"
 }
 
-@test "consumers derive from the rows: no literal lane branch templates left in verbs/secrets/status" {
+@test "consumers derive from the rows: no literal lane branch templates left in the engine or its callsites" {
   # 생성 방향 사본(문자열 템플릿)과 파싱 방향 사본(하드코딩 접두)이 소비자에서 소멸했는지 —
   # bats 원장 단언의 리터럴은 독립 앵커라 여기서 세지 않는다(tools/tests/ 제외).
   # 부정 단언은 grep -c=0 관용구 — rc 기반(-ne 0)은 grep 오류(rc=2)도 통과시키는 vacuous green.
@@ -164,12 +164,26 @@ run_verb_in() {
   [ "$(printf 'x `create-app/${input.app}-${runId}`\n' | grep -cE "$UNION")" = "1" ]
   [ "$(printf 'b.startsWith("create-app/")\n' | grep -cE "$UNION")" = "1" ]
   [ "$(printf 'const P = "teardown/teardown-app-{key}-{runId}";\n' | grep -cE "$UNION")" = "1" ]
-  for f in tools/lib/verbs.ts tools/lib/secrets.ts tools/lib/status.ts; do
+  # ⚠️ 이 열거는 **손 열거**다 — 새 소비자가 생기면 여기 더해야 가드가 그것을 본다. mutation.ts가
+  #    그 자리다: 엔진이 레인 좌표(branchPattern·key)를 **직접** 받는 소비자가 됐다(중복 디스패치
+  #    preflight). 순수 문자열 두 개로 받으므로 오늘은 통과하고, 훗날 `startsWith("create-app/")`
+  #    같은 사본이 들어오면 red다.
+  #    lane-pr.ts는 **면제**다 — 그 모듈은 LANES를 import해 파싱을 파생하므로(행이 SSOT) 접두
+  #    리터럴이 그 파일의 정당한 산물이 아니라 아예 없다. 면제라는 사실을 여기 적어 두어 다음
+  #    사람이 "왜 빠졌나"를 다시 계산하지 않게 한다.
+  for f in tools/lib/verbs.ts tools/lib/secrets.ts tools/lib/status.ts tools/lib/mutation.ts; do
     [ "$(grep -cE "$UNION" "$f")" = "0" ]
   done
   for f in verbs secrets status; do
     [ "$(grep -c "catalog-rows" "tools/lib/$f.ts")" -ge 1 ]
   done
+  # 엔진은 catalog-rows를 import하지 **않는다**(레인 좌표를 순수 문자열 두 개로 받는다) — 위 파생
+  # 하한의 분모에 넣으면 그 설계를 뒤집는 단언이 된다. 그래서 부정 방향으로 따로 못 박는다.
+  # 텍스트가 아니라 **import 형태**를 잰다: 주석의 "catalog-rows" 언급은 설계 설명이지 결합이 아니다.
+  IMP='from "./catalog-rows.ts"'
+  [ "$(grep -cF "$IMP" tools/lib/mutation.ts)" = "0" ]
+  # 양성 대조 — 이 검출기가 실제로 무는 형태다(무면 위 0건이 '패턴이 아무것도 못 문다'와 같아진다).
+  [ "$(grep -cF "$IMP" tools/lib/verbs.ts)" -ge 1 ]
 }
 
 @test "malformed branch patterns fail closed instead of matching a mangled prefix" {

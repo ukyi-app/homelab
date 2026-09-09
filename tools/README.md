@@ -157,6 +157,11 @@ claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
   MCP 등 다른 소비자는 lib 쪽을 import한다. 변이는 전부 기존 변이 디스패처를
   `gh workflow run`으로 트리거하는 래퍼다(신뢰 경계 불변 — actor 가드·전역 직렬화·
   PR-first 그대로), 현재 동사는 `doctor`·`status`·`db create|url`·`cache create|url`·`app init|create|secrets|teardown`·`mcp`다.
+  변이 동사 **다섯**(`db create`·`cache create`·`app create`·`app secrets`·`app teardown`)은 전부 디스패치
+  **앞**에서 같은 중복 디스패치 preflight를 지난다 — 같은 레인·같은 키의 열린 PR 또는 미완료 run이 있으면
+  `gh workflow run`을 아예 내지 않고 그 핸들과 함께 거부하고, 조회가 실패하면 그대로 디스패치한다
+  (관측 부재 = fail-open). 두 축의 근거·극성은 아래 `lib/mutation.ts` 절이 소유한다 — 동사 절에
+  사본을 다섯 벌 두면 한쪽만 고쳐도 초록이다(`--help`도 같은 이유로 `PREFLIGHT_LINES` 한 벌을 공유한다).
   `homelab app init <app> --archetype web|worker|site [--public] [--dispatch-secrets <경로>] [--adopt]` =
   앱 레포 시작 로컬 체인(변이 디스패처 아님 — correlation 없음): preflight → 템플릿에서 레포 생성
   (기본 private) → 클론 → 스캐폴더 비대화형 실행 → invocation marker(`.homelab-init`) → 커밋·첫 push.
@@ -187,8 +192,7 @@ claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
   표면 = 인스턴스 deployment.yaml + conn 봉인본). `homelab cache url` = conn URL 엔진
   (`lib/conn-url.ts`)의 catalog op — 다른 동사와 같은 envelope 계약(--json), 사람용은 렌더러 소유.
   `homelab db create <name> [--ext a,b] [--wait]` = 첫 변이 동사(공유 변이 엔진 `lib/mutation.ts`의
-  첫 인스턴스): 디스패치 **전에** 같은 레인·같은 키의 열린 PR을 1회 조회해 있으면 거부(중복 디스패치
-  preflight — 변이 동사 다섯 공통, 조회 실패는 그대로 진행) → create-database 디스패처를 correlation
+  첫 인스턴스): 중복 디스패치 preflight(위 공통 절) → create-database 디스패처를 correlation
   수령증과 함께 트리거 → nonce 에코 run-name으로 자기 run 특정(정확히 1개, ≥2=race exit 3) →
   conclusion 추적(실패 잡 열거) → `--wait`면 auto-merge
   머지 관측 + Application 집합(cnpg-data·data-conn-prod) 수렴(머지 SHA 후손+Synced+Healthy+표면 실존,
@@ -525,13 +529,20 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   CLI 셸·MCP(같은 op)·bin 껍데기(db-url/cache-url — 기존 출력 계약 보존). envLocal·envDir 축은
   입력에 존재하되 MCP는 envDir만 노출(설계 Q9).
 - **`lib/mutation.ts`** — 공유 변이 엔진(`runMutation()`) — 변이 동사들의 공통 골격: correlation
-  nonce → **중복 디스패치 preflight**(디스패치 **앞**의 읽기 전용 관측: 같은 레인·같은 키의 열린 PR이
-  있으면 `gh workflow run`을 아예 내지 않고 그 PR 핸들과 함께 failure — 판정 술어는 레인 신원 행의
-  `isDispatchLaneBranch`이고 질의는 lane-pr 커널의 `openLaneConflict`다. **권위가 아니라 UX 조기
-  경고**이므로 실행기 가드(`provision-db.ts`·`provision-cache.ts`)를 이 검사로 완화하지 않는다 —
-  조회~디스패치 사이 TOCTOU가 원리적으로 남는다. 관측 부재(gh 비-0·배열 아님·페이지 절단)는
-  fail-open이고 사유는 진행 이벤트 `preflight-blind`로 나간다. 범위는 이 엔진을 쓰는 5레인 전부이고
-  bump 레인 제외는 조건문이 아니라 구조다 — 그쪽은 이 엔진을 아예 쓰지 않는다) → 디스패치 →
+  nonce → **중복 디스패치 preflight**(디스패치 **앞**의 읽기 전용 관측, **축이 둘**이고 시간축에서
+  이어 붙는다: ① 같은 레인·같은 키의 **열린 PR**(판정 술어는 레인 신원 행의 `isDispatchLaneBranch`,
+  질의는 lane-pr 커널의 `openLaneConflict`) · ② 같은 레인·같은 키의 **미완료 run**(run-name 키 에코
+  `RUN_NAME_KEY_SEP` 정확 일치 + 종결 집합 {completed}의 여집합 — 질의는 이미 나가던 신선도
+  스냅샷이라 API 호출이 0건 늘지 않는다). 어느 축이든 맞으면 `gh workflow run`을 아예 내지 않고
+  그 핸들(PR 또는 run)과 함께 failure다. ②가 필요한 이유는 ①의 사각이다 — 디스패치에서 PR 실재까지
+  라이브 실측 ~30초이고, 이 기능의 트리거(Ctrl-C 후 즉시 재실행)가 그 창 안에 떨어진다.
+  **권위가 아니라 UX 조기 경고**이므로 실행기 가드(`provision-db.ts`·`provision-cache.ts`)를 이
+  검사로 완화하지 않는다 — 관측~디스패치 사이 TOCTOU가 원리적으로 남는다. 관측 부재(gh 비-0·배열
+  아님·페이지 절단·run 목록 조회 실패)는 fail-open이고 사유는 진행 이벤트 `preflight-blind`로 나간다
+  (MCP는 그 sink를 주입하지 않아 거기서는 소실된다 — `lib/mcp.ts` 주석). 거부 문구는 "디스패치하지
+  않았다(이 correlation의 run은 존재하지 않는다)"를 먼저 말한다: 봉투가 correlation을 들고 나가지만
+  그 nonce의 run은 없다. 범위는 이 엔진을 쓰는 5레인 전부이고 bump 레인 제외는 조건문이 아니라
+  구조다 — 그쪽은 이 엔진을 아예 쓰지 않는다) → 디스패치 →
   run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정(3상 — 빈 목록·
   전송 오류는 deadline 독립 grace 재조회 `PR_GRACE_RETRIES` 뒤 판정, `noopForbidden`이면 0건은 fail-loud) →
   [--wait] 머지 관측(머지 없이 닫힌 PR은 대기가 아니라 종결 관측 — 목록의 `state:closed`·미머지를

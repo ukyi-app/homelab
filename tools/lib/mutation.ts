@@ -333,7 +333,7 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   //    그래서 실행기 가드는 이 검사로 **완화하지 않는다** — 권위는 여전히 저쪽이고 여기는 20분짜리
   //    왕복과 사람이 닫아야 할 PR 하나를 아끼는 값싼 앞단이다.
   // 범위: 이 엔진을 쓰는 5레인 전부(create-database·create-cache·create-app·update-secrets·teardown-app).
-  //    teardown-app **포함** 근거: 브랜치 문법이 같은 디스패치 레인 형상(`teardown/teardown-app-{key}-{runId}`)
+  //    teardown-app **포함** 근거: 브랜치 문법이 같은 디스패치 레인 형상이고(패턴 SSOT는 레인 행)
   //    이고 두 번째 철거 PR도 첫 PR 머지 뒤 같은 경로 삭제에서 충돌한다. 수동 머지라 auto-merge 정지는
   //    없지만 사람이 닫아야 할 PR이 하나 더 생기는 것은 같다.
   //    bump 레인 **제외**는 조건문이 아니라 구조다 — bump-poll은 이 엔진을 아예 쓰지 않고
