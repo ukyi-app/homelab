@@ -189,8 +189,8 @@ claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
   `homelab db create <name> [--ext a,b] [--wait]` = 첫 변이 동사(공유 변이 엔진 `lib/mutation.ts`의
   첫 인스턴스): 디스패치 **전에** 같은 레인·같은 키의 열린 PR을 1회 조회해 있으면 거부(중복 디스패치
   preflight — 변이 동사 다섯 공통, 조회 실패는 그대로 진행) → create-database 디스패처를 correlation
-  수령증과 함께 트리거 → nonce 에코 run-name으로
-  자기 run 특정(정확히 1개, ≥2=race exit 3) → conclusion 추적(실패 잡 열거) → `--wait`면 auto-merge
+  수령증과 함께 트리거 → nonce 에코 run-name으로 자기 run 특정(정확히 1개, ≥2=race exit 3) →
+  conclusion 추적(실패 잡 열거) → `--wait`면 auto-merge
   머지 관측 + Application 집합(cnpg-data·data-conn-prod) 수렴(머지 SHA 후손+Synced+Healthy+표면 실존,
   후손 리비전 표면 부재=superseded). KUBECONFIG 부재=머지까지 확인+omitted=["live"].
   `homelab db url` = conn URL 엔진(`lib/conn-url.ts`)의 catalog op — envelope 계약(--json)·F2
@@ -531,7 +531,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   경고**이므로 실행기 가드(`provision-db.ts`·`provision-cache.ts`)를 이 검사로 완화하지 않는다 —
   조회~디스패치 사이 TOCTOU가 원리적으로 남는다. 관측 부재(gh 비-0·배열 아님·페이지 절단)는
   fail-open이고 사유는 진행 이벤트 `preflight-blind`로 나간다. 범위는 이 엔진을 쓰는 5레인 전부이고
-  bump 레인 제외는 조건문이 아니라 구조다 — 그쪽은 이 엔진을 아예 쓰지 않는다) → 디스패치 → run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정(3상 — 빈 목록·
+  bump 레인 제외는 조건문이 아니라 구조다 — 그쪽은 이 엔진을 아예 쓰지 않는다) → 디스패치 →
+  run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정(3상 — 빈 목록·
   전송 오류는 deadline 독립 grace 재조회 `PR_GRACE_RETRIES` 뒤 판정, `noopForbidden`이면 0건은 fail-loud) →
   [--wait] 머지 관측(머지 없이 닫힌 PR은 대기가 아니라 종결 관측 — 목록의 `state:closed`·미머지를
   단건 권위 조회 `pulls/<n>`로 확증한 뒤 failure, 전송 오류면 미확정으로 두고 폴링 계속 ·

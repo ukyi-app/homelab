@@ -78,13 +78,16 @@ run_db_create() {
 }
 
 @test "preflight: open PRs on a different key or a different lane are ignored (zero false positives)" {
-  # 네 형상 전부 '이 변이의 중복이 아니다': 다른 키 · 다른 레인의 같은 키 · 하이픈 형제 키 ·
+  # 다섯 형상 전부 '이 변이의 중복이 아니다': 다른 키 · 다른 레인의 같은 키 · 하이픈 형제 키 ·
   # runId tail이 아닌 브랜치 · bump 레인. 하나라도 물면 정당한 변이가 막힌다.
   printf '[{"number":1,"title":"other db","head":"create-database/otherdb-501","html_url":"u1","auto_merge":true},{"number":2,"title":"cache same key","head":"create-cache/mydb-501","html_url":"u2","auto_merge":true},{"number":3,"title":"sibling key","head":"create-database/mydb-extra-501","html_url":"u3","auto_merge":false},{"number":4,"title":"no runId tail","head":"create-database/mydb-main","html_url":"u4","auto_merge":false},{"number":5,"title":"bump","head":"bump-poll/app/mydb-sha-abcdef1","html_url":"u5","auto_merge":true}]\n' > "$FIX/homelab-prs.json"
   run_db_create --json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.variant')" = "success" ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  # ⚠️ 검출기가 실제로 돌았다는 증인 — 이 줄이 없으면 preflight를 통째로 지워도 이 @test는 그대로
+  #    초록이다(오탐 0은 '검사가 없음'과 구별되지 않는다 — 부재 단언의 상시 함정).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=open&per_page=100" --jq)" = "1" ]
 }
 
 @test "preflight: an unreadable open-PR listing does not block the dispatch (fail-open) and names the cause" {
