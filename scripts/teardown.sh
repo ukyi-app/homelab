@@ -8,7 +8,8 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
 DRY_RUN="${DRY_RUN:-0}"
-ALLOWLIST="apps/ docs/memory-ledger.md infra/cloudflare/apps.json platform/"
+# tools/vendored-contract.json = teardown-app.ts가 동봉 계약 target 행을 빼는 자리(앱 철거 경로).
+ALLOWLIST="apps/ docs/memory-ledger.md infra/cloudflare/apps.json platform/ tools/vendored-contract.json"
 BASE_REF="${TEARDOWN_BASE_REF:-origin/main}"
 dirty="${TEARDOWN_DIRTY:-$([ -n "$(git status --porcelain)" ] && echo 1 || echo 0)}"
 ts="${TEARDOWN_TS:-$(date +%Y%m%d%H%M%S)}"

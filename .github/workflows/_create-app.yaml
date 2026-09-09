@@ -129,6 +129,8 @@ jobs:
             echo "create-app 자동 생성 PR입니다. **머지 = 첫 배포 승인 + 공개 승인** (DNS/tunnel은 머지 후 iac.yaml이 적용)."
             echo
             echo '```json'; cat /tmp/plan.json; echo '```'
+            echo
+            echo '동봉 계약(`tools/vendored-contract.json`) target 행은 create-app이 함께 넣는다 — 손 단계가 아니다(로스터 등식은 그대로 게이트).'
             echo; echo "### ⚠️ 머지 전 체크리스트"
             jq -r '.checklist[] | "- [ ] " + .' /tmp/plan.json
           } > /tmp/pr-body.md
@@ -141,7 +143,10 @@ jobs:
           #    `git add $ADD_PATHS`가 그 수정을 스테이징하지 않아 커밋에서 조용히 유실되고,
           #    test_digest-exporter의 parity 게이트가 want≠got으로 red가 된다.
           #    (2026-08-18 발견 — `apps/`가 비어 있어 잠복 상태였다. _teardown-app은 `platform`을 이미 담고 있었다.)
-          add-paths: apps/${{ steps.img.outputs.app }} docs/memory-ledger.md infra/cloudflare/apps.json platform/victoria-stack/prod/digest-exporter.yaml
+          # ⚠️ 같은 이유로 `tools/vendored-contract.json`도 천장 안이다 — create-app.ts가 동봉 계약
+          #    target 행을 쓴다(tools/lib/vendored-targets.ts). 빠지면 그 행만 커밋에서 유실돼
+          #    contract-drift 로스터 등식이 missing-target으로 발화한다.
+          add-paths: apps/${{ steps.img.outputs.app }} docs/memory-ledger.md infra/cloudflare/apps.json platform/victoria-stack/prod/digest-exporter.yaml tools/vendored-contract.json
           commit-message: "feat: ${{ steps.img.outputs.app }} 앱 생성 (create-app — digest 핀, 공개 활성화)"
           pr-title: "feat: ${{ steps.img.outputs.app }} 앱 생성 (create-app)"
           pr-body-file: /tmp/pr-body.md

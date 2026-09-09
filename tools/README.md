@@ -305,7 +305,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`create-app.ts`** — v2 생성기. `_create-app.yaml`이 호출
   (`--config .app-config.yml --app --repo --domain --tag sha-<sha> --digest sha256:<hex> [--sealed]`).
   스키마+비즈니스 규칙 검증 후 `apps/<app>/deploy/prod/`(values·`.bindings.json`·`source-repo`·
-  kustomization) + `apps.json`(active:true, 머지 즉시 공개 승인) + 메모리 원장을 한 번에 산출. `--dry-run`은 plan JSON만.
+  kustomization) + `apps.json`(active:true, 머지 즉시 공개 승인) + 메모리 원장 + digest-exporter `APPS` +
+  **동봉 계약 target 행**(`vendored-contract.json` — `lib/vendored-targets.ts`, 매니페스트 부재는 fail-closed)을
+  한 번에 산출. `--dry-run`은 plan JSON만(`vendoredTargets`가 그 예고).
   ⚠️ `.bindings.json`의 `autoDeploy` **기본은 `false`(승인 PR)**다 — 이미지 갱신 자동 머지는 앱 레포가
   `.app-config.yml`의 `deploy.autoDeploy: true`로 **명시 opt-in** 해야 한다(형제 승인 게이트와 같은
   fail-closed 방향; 기본값 진술의 SSOT는 `app-config-schema.json`의 `default: false`).
@@ -326,7 +328,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   conn/ro-conn SealedSecret + 원장 행을 산출. 자격은 `kubeseal` stdin 전용. cert 필요.
 - **`teardown-app.ts`** — 앱 한정 철거. `_teardown-app.yaml`(🗑️ 디스패처가 confirm 재검증 후 호출)과
   owner-local `make teardown-app`(`scripts/teardown.sh`)이 호출
-  (`--app <name>`). `apps/<app>/`·`apps.json` 행·원장 행만 제거 — DB/캐시 conn·CR·Valkey는
+  (`--app <name>`). `apps/<app>/`·`apps.json` 행·원장 행·digest-exporter `APPS` 항목·**동봉 계약 target 행**
+  (`vendored-contract.json` — `lib/vendored-targets.ts`, 매니페스트 부재는 no-op)만 제거 — DB/캐시 conn·CR·Valkey는
   **절대 비접촉**(리소스 철거는 teardown-resource 전담). 멱등.
 - **`teardown-resource.ts`** — DB/캐시 리소스 철거. owner-local `make teardown-resource`(`scripts/teardown.sh`)가
   호출(`--db <name>`|`--cache <name>`). 자동 refcount는 없다(연결=SealedSecret이라 `.bindings.json`에 db/redis
@@ -779,6 +782,17 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `addApp`/`removeApp`/`retagApp`은 value 라인 매치 0에서 **throw**(fail-loud)하고, `hasApp`은 항목
   부재(`false`)를 포맷 드리프트(throw)와 가른다 — 손 정규식은 그 둘을 같은 무성 skip으로 뭉갠다.
   소비자: `create-app`(추가)·`teardown-app`(제거)·`bump-tag`(태그 이동).
+- **`lib/vendored-targets.ts`** — 동봉 계약(`vendored-contract.json`) target 행의 **앱 축** 편집 커널
+  (`appTargetRows`·`addAppTargets`·`removeAppTargets`·`hasAppTargets`) + 매니페스트 형상 타입 SSOT
+  (`Norm`·`Target`·`Entry`·`Manifest` — 읽는 쪽 `contract-drift-check.ts`가 여기서 가져다 쓴다).
+  **앱 행 문법 전부**를 소유한다: 행 위치(항목 targets 말미) · `path`=`tools/<source 파일명>`(앱 레포 사본은
+  레포 루트 `tools/` 하나에 산다 — 템플릿만 `scaffold/common/tools/…`다) · `ref`=`main` · `normalize`는
+  **같은 source의 기존 행에서 상속**(정규화 모드는 파일 종류의 성질이지 대상 레포의 성질이 아니다) ·
+  2칸 들여쓰기 직렬화. 유도 불가(기존 행 0건·모드 혼재)·`vendored` 0건·앵커 행까지 비우는 제거는 전부
+  **throw**(fail-loud)이고, `hasAppTargets`는 항목 부재(`false`)를 포맷 드리프트(throw)와 가른다.
+  앱-**외부** 표면이라 `lib/app-surface.ts` 소관 밖이고(그쪽은 디렉토리 통째 rm이 대칭을 구조로 보장한다),
+  create↔teardown 대칭은 이 add/remove 쌍과 `test_vendored-targets.bats`의 역함수 레인이 진다.
+  소비자: `create-app`(추가)·`teardown-app`(제거)·`contract-drift-check`(타입).
 - **`lib/hedge-dbs.ts`** — pgdump 헤지 `DBS`(공백 구분 DB 이름 목록) 편집 커널. digest-exporter APPS의
   형제이지만 대상은 yaml 값이 아니라 CronJob `args` 스크립트 **본문 안의 셸 변수 한 줄**이라 파서로는
   만질 수 없다. **DBS 줄 문법 전부**를 소유한다: 줄 앵커(들여쓰기·인용·뒤따르는 주석 보존) · 항목
@@ -913,6 +927,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   **로스터**: 앱 축은 손 열거가 아니라 `apps/*/deploy/prod/source-repo` 파생 집합과 **등식** 대조다
   (초과=`stale-target` · 부족=`missing-target`, 둘 다 `errors`가 아니라 `drift`). 템플릿 행은 앱이 아니라
   `scaffoldRepos` 선언이고, 파생 0건은 통과가 아니라 `greenfield` 상태로 stderr·JSON·telegram ident에 명시된다.
+  앱 행 자체는 손 편집이 아니다 — `create-app`/`teardown-app`이 `lib/vendored-targets.ts`로 넣고 뺀다(등식은 그대로 게이트).
   **errors 사유 축**: 404/403=`absent-or-private`(레포 삭제·private 전환·경로 리네임 — 비인증 fetch로는 구별
   불가라 drift로 승격하지 않는다) · 그 외=`transient`. 라이브 raw fetch는 기본 모드 전용이다.
 - **`verify-db-marker.ts`** — 마커 ConfigMap(`db-<name>-ready`: owner/ro Secret resourceVersion)이 현재 Secret과
