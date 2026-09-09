@@ -27,7 +27,7 @@ _mkindex() {
 @test "verify-traps passes — ledger guards exist + SSOT guard annotations tracked (reverse tie)" {
   run bash scripts/verify-traps.sh
   [ "$status" -eq 0 ]
-  echo "$output" | grep -Fq "실재 + SSOT"   # 3방향 전부 통과
+  echo "$output" | grep -Fq "실재 + SSOT"   # 4방향 전부 통과
 }
 
 @test "direction 3 flags a ledger row that claims enforcement with no SSOT narrative behind it" {
