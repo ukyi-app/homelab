@@ -194,20 +194,48 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   echo "$output" | grep -q "venue가 0건 실재"
 }
 
+# ── 사본 레포 픽스처 — venue_calls의 Makefile 스코프를 실 트리를 건드리지 않고 재는 자리 ─────────
+# 아래 두 @test는 예전에 **실 Makefile**에 프로브 타깃을 append했다가 사본으로 복원했다. 파일 단위
+# 병렬 bats에서 그 창을 밟은 다른 프로세스의 가드(make help·ci-parity·makefile-bun)가 거짓 red를 냈고,
+# 이 스위트는 그 때문에 직렬 레인에 있었다(docs/traps-detail.md 「파일 단위 병렬 bats에서 실 체크아웃을
+# 잠깐 바꾸는 스위트는 …」). 이제 가드 사본 + 커널 사본 + **합성 Makefile**을 $BATS_TEST_TMPDIR/fx에
+# 세우고 그 **사본 가드**를 돌린다 — 가드는 ROOT를 BASH_SOURCE/../..에서 파생하므로
+# (scripts/lib/guard.sh의 guard_init) 사본 가드가 사본 트리의 Makefile을 읽는다. 실 체크아웃이 무변경이라
+# 복원 자체가 사라지고, 구 판이 `git checkout -- Makefile` 대신 사본 복원을 써야 했던 이유(공유
+# .git/index 잠금 + Makefile의 미커밋 편집 소실)도 함께 소멸한다.
+# 선례: tests/gates/test_bats-style.bats의 emptyrepo 픽스처.
+# ⚠️ `--lint-excludes` 모드는 git을 쓰는 (1)(2) 판정 **앞에서** exit하므로 사본 레포가 비어도 된다.
+#    그래도 `git init`은 해 둔다: 안 하면 사본 트리에 git 레포가 없어, 나중에 가드가 git을 더 일찍
+#    부르게 될 때 그 실패가 음성 @test에서 조용한 통과로 흡수된다.
+# $1=프로브 타깃명 · $2=레시피 한 줄(탭은 여기서 붙인다). 사본 루트를 전역 `fx`로 남긴다.
+# ⚠️ 마지막 grep은 픽스처가 **실제로 착지했는지**의 증인이다 — 합성 Makefile이 안 써졌거나 타깃명이
+#    드리프트하면 아래 음성 @test가 「타깃이 없어서 red」로 조용히 통과한다(픽스처가 자기 전제를 잃는 자리).
+acct_fixture() {
+  fx="$BATS_TEST_TMPDIR/fx"
+  mkdir -p "$fx/scripts/lib"
+  cp "$ROOT/scripts/check-bats-accounting.sh" "$fx/scripts/"
+  cp "$ROOT/scripts/lib/guard.sh" "$fx/scripts/lib/"
+  cp "$ROOT/scripts/lib/scan-floor.sh" "$fx/scripts/lib/"
+  printf '%s:\n\t%s\n' "$1" "$2" > "$fx/Makefile"
+  git -C "$fx" init -q
+  grep -q "^$1:" "$fx/Makefile"
+}
+
 @test "a make target's trailing comment mentioning a bats path is not treated as a call (acct-trailing-comment)" {
   # 비평가 실증 — venue_calls()가 줄 전체 주석만 걷을 때는 코드 줄에 붙은 trailing 주석 속 경로
-  # 언급도 호출 증인으로 오인됐다(진짜 호출은 없는데 주석에만 경로가 있어도 HIT). Makefile에
-  # 임시 타깃을 얹어(레시피 한 줄에 trailing 주석으로만 경로 언급) 재현하고 원복한다.
-  cp Makefile "$BATS_TEST_TMPDIR/Makefile.bak"
-  printf '\n_zz_acct_trailing_probe:\n\t@echo hi # see tests/_fixtures_acct/test_zz_trailing_probe.bats for context, not actually called\n' >> Makefile
+  # 언급도 호출 증인으로 오인됐다(진짜 호출은 없는데 주석에만 경로가 있어도 HIT). 합성 Makefile의
+  # 프로브 타깃이 레시피 한 줄에 **trailing 주석으로만** 경로를 언급한다 — 타깃 자체는 실재하므로
+  # 이 레인이 red를 내는 이유는 「주석 속 언급은 호출이 아니다」뿐이다.
+  acct_fixture _zz_acct_trailing_probe \
+    '@echo hi # see tests/_fixtures_acct/test_zz_trailing_probe.bats for context, not actually called'
   reg="$BATS_TEST_TMPDIR/mktrailing"
   mkreg "$reg" '# 사유 — 실행처: owner-local `make _zz_acct_trailing_probe`' 'tests/_fixtures_acct/test_zz_trailing_probe.bats'
-  run bash "$s" --lint-excludes "$reg"
-  # 복원은 :201의 사본으로 — `git checkout -- Makefile`은 공유 .git/index를 잠그고(병렬 레인의 다른 인덱스
-  # writer와 경합) Makefile의 미커밋 편집까지 함께 지운다(test_check-doc-index.bats:298이 실측한 함정).
-  cp "$BATS_TEST_TMPDIR/Makefile.bak" Makefile
+  run bash "$fx/scripts/check-bats-accounting.sh" --lint-excludes "$reg"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "venue가 0건 실재"
+  # 표기가 그 프로브 타깃으로 파싱됐다는 증인 — 레지스트리 쪽 타깃명이 합성 Makefile 쪽과 드리프트하면
+  # 여기서 걸린다(acct_fixture의 grep과 짝: 저긴 Makefile 리터럴, 여긴 레지스트리 리터럴).
+  echo "$output" | grep -q "인식한 토큰: \[make _zz_acct_trailing_probe\]"
 }
 
 @test "a quoted trailing hash does not truncate a real call after it (acct-quote-aware, reg13-a1-bats-guards-2)" {
@@ -216,12 +244,11 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   # green, 회귀 0). 위 acct-trailing-comment와 형제 관용구 — 이번엔 주석이 **인용부호 안**에
   # 있고 그 뒤에 실제 test_*.bats 호출이 같은 줄에 이어진다. quote-aware가 없으면 그 `#`에서
   # 조기 절단돼 뒤따르는 진짜 호출을 놓친다(거짓 MISS).
-  cp Makefile "$BATS_TEST_TMPDIR/Makefile.bak"
-  printf '\n_zz_acct_quote_probe:\n\t@echo "note # symbol" && bash tests/_fixtures_acct/test_zz_quote_probe.bats\n' >> Makefile
+  acct_fixture _zz_acct_quote_probe \
+    '@echo "note # symbol" && bash tests/_fixtures_acct/test_zz_quote_probe.bats'
   reg="$BATS_TEST_TMPDIR/mkquote"
   mkreg "$reg" '# 사유 — 실행처: owner-local `make _zz_acct_quote_probe`' 'tests/_fixtures_acct/test_zz_quote_probe.bats'
-  run bash "$s" --lint-excludes "$reg"
-  cp "$BATS_TEST_TMPDIR/Makefile.bak" Makefile
+  run bash "$fx/scripts/check-bats-accounting.sh" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
 }
 
