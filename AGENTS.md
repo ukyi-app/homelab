@@ -26,6 +26,7 @@ make verify        # 기반 게이트: skeleton + 원장(conftest) + sops 라운
 make chart-test    # 공유 차트: 3 kind(web/worker/site) 렌더 + kubeconform + bats
 make tf-validate   # terraform fmt+validate (3 루트)
 bats tools/tests/ infra/k3s-bootstrap/tests/ </dev/null   # 툴링/부트스트랩 테스트(fd 0 격리 — 스텁 hang 방지)
+./scripts/run-bats.sh   # gate 수집 전수 — 파일 단위 병렬(GNU parallel 필요 · RUNBATS_JOBS=1이면 직렬) + tests/.gate-serial 직렬 레인
 make verify-posture   # [live] posture 스위트(internal-by-default·netpol·e2e·DR 자산 신선도) — KUBECONFIG 필요(부재=SKIP 신호·비-0)
                       # + DR 자산 레그는 SEALED_KEY_BACKUP_DIR·LOCAL_ASSET_BACKUP_DIR env 필요(미설정=red)
 bun link && homelab doctor   # 통합 CLI 전역 설치 + 전제 진단(빠른 시작 순서는 tools/README.md)
@@ -177,6 +178,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 - 이름 있는 집합의 상한 부재 — 이름이 exactly/only를 선언해도 본문은 존재만 잰다
 - host-config --apply의 링크 재설정은 DHCP 리스를 2초 잃는다 — `&& make up` 체인은 그 창을 정확히 밟는다
 - 렌더가 비는 컴포넌트는 ArgoCD auto-sync가 프룬을 거부한다 — allowEmpty=false가 마지막 리소스의 삭제를 전멸로 읽는다
+- 파일 단위 병렬 bats에서 실 체크아웃을 잠깐 바꾸는 스위트는 남의 가드를 red로 만든다 — 직렬 레인으로 빼고, 고정 /tmp는 $BATS_TEST_TMPDIR로 옮긴다
 
 ## 멀티레포 앱 플로우 (App Platform DX — 요약)
 

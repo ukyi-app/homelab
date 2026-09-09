@@ -251,6 +251,21 @@ fail-closed) 바닥값으로 대체했다. 예약 platform host는 구조적으�
 - 벤더 파일도 **포함해** 본다. 수정 금지여도 소유자 질문에는 답(re-vendor 절차)이 있어야 하고,
   답이 없으면 그게 곧 결함이다.
 
+### 테스트는 자기 프로세스 밖을 만지지 않는다 — 직렬 레인은 부채다
+
+gate의 bats는 `scripts/run-bats.sh`가 **파일 단위 병렬**로 돌린다(파일마다 별도 프로세스, 파일 안은 직렬).
+그래서 한 @test가 실 체크아웃(추적 파일·untracked 생성·`.git/index`)이나 고정 절대 경로(`/tmp/foo`)·고정
+포트·사용자 홈·전역 도구 상태를 만지면, 그 창을 밟은 **다른 파일**의 가드가 거짓 red를 낸다(실측:
+`docs/traps-detail.md` 「파일 단위 병렬 bats에서 …」).
+
+- 산출물·픽스처는 `$BATS_TEST_TMPDIR`(또는 `mktemp -d`) 아래에 둔다. 가드를 실 트리 대신 사본에 대해 돌릴 수
+  있으면(가드가 인자로 루트·파일을 받거나 자기 위치에서 ROOT를 파생하면) 사본 트리를 만들어 돌린다.
+- 실 체크아웃을 **바꾸는 것이 불가피한** 스위트만 `tests/.gate-serial`에 **사유와 함께** 등재한다 — 병렬 레인이
+  끝난 뒤 혼자 돈다. 등재는 부채다(상한 `SERIAL_MAX`, 계약은 `check-bats-accounting.sh` (2b)): 직렬 레인이
+  길어지는 만큼 병렬화의 이득이 준다. 고정 경로·포트는 등재 사유가 아니다 — 옮겨 고친다.
+- 로컬 전수는 `./scripts/run-bats.sh`(GNU parallel 필요 — 없으면 직렬 폴백 + 안내). `RUNBATS_JOBS=1`이 예전의
+  한 줄 직렬이고, `--plan`이 레인 분할만 보여 준다.
+
 ## 커밋 메시지 (한국어 conventional commits)
 `type: 설명` — type ∈ `feat | fix | refactor | style | docs | test | chore`.
 AI 마커 금지, Co-Authored-By 금지. 커밋 하나에 논리적 변경 하나.

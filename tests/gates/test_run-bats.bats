@@ -56,9 +56,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   TMPD="$(mktemp -d)"
   # ⚠️ 사본이 $TMPD에 있으면 러너가 `dirname/..`로 계산하는 ROOT가 /tmp가 되어 tests/.ci-exclude를
   #    못 찾는다. ROOT만 실 레포로 고정한다 — fd 0 격리 줄은 바이트 그대로 남는다(그게 피시험 대상이다).
-  grep -vF 'bats --print-output-on-failure "${SELECTED[@]}"' "$ROOT/scripts/run-bats.sh" \
+  # 실행 줄(`# run-bats:exec` 표식 3줄 — 두 레인 호출 + exit)만 잘라낸다. run_lane 함수 정의는 남지만 호출이 없다.
+  grep -vF '# run-bats:exec' "$ROOT/scripts/run-bats.sh" \
     | sed "s|^ROOT=.*|ROOT='$ROOT'|" > "$TMPD/runner.sh"
-  run grep -cF 'bats --print-output-on-failure "${SELECTED[@]}"' "$TMPD/runner.sh"
+  run grep -cF '# run-bats:exec' "$TMPD/runner.sh"
   [ "$output" -eq 0 ]
   printf 'readlink /proc/self/fd/0\n' >> "$TMPD/runner.sh"
 
@@ -92,4 +93,62 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   # 근거가 코드에 남아 있어야 다음 사람이 같은 곳을 다시 밟지 않는다.
   run grep -qF '양립 불가' "$ROOT/scripts/run-bats.sh"
   [ "$status" -eq 0 ]
+}
+
+# ── 레인 분할(병렬 레인 + tests/.gate-serial 직렬 레인) ────────────────────────────────────────────
+# 러너는 수집 집합을 파일 단위 병렬 레인과 직렬 레인으로 나눈다. 직렬 레인은 실 체크아웃을 잠깐 바꾸는
+# 스위트만 담고, 병렬 레인이 끝난 뒤 혼자 돈다(전문: docs/traps-detail.md 「파일 단위 병렬 bats에서 …」).
+
+@test "--list is unchanged by the serial lane (the lane is scheduling, not a domain)" {
+  list="$(bash "$ROOT/scripts/run-bats.sh" --list)"
+  n=0
+  while IFS= read -r f; do
+    case "$f" in ''|\#*) continue;; esac
+    n=$((n + 1))
+    grep -qFx -- "$f" <<<"$list"
+  done < "$ROOT/tests/.gate-serial"
+  [ "$n" -ge 1 ]   # 레지스트리가 비면 위 루프가 공허하게 통과한다 — 바닥값
+}
+
+@test "--plan splits the collected set into the two lanes and names every serial file" {
+  run bash "$ROOT/scripts/run-bats.sh" --plan
+  [ "$status" -eq 0 ]
+  plan="$output"
+  par="$(sed -n 's/^parallel=//p' <<<"$plan")"
+  ser="$(sed -n 's/^serial=//p' <<<"$plan")"
+  listed="$(bash "$ROOT/scripts/run-bats.sh" --list | grep -c '\.bats$')"
+  [ "$((par + ser))" -eq "$listed" ]
+  reg="$(grep -vcE '^[[:space:]]*(#|$)' "$ROOT/tests/.gate-serial")"
+  [ "$ser" -eq "$reg" ]
+  [ "$(grep -c '^serial-file=' <<<"$plan")" -eq "$reg" ]
+}
+
+@test "a serial-lane entry outside the collected set fails loud instead of silently emptying the lane" {
+  # 러너 사본의 레지스트리 경로만 픽스처로 바꾼다(ROOT는 실 레포 — .ci-exclude 수집은 그대로).
+  TMPD="$(mktemp -d)"
+  printf '# 사유\ntests/gates/test_no-such-file.bats\n' > "$TMPD/serial"
+  sed -e "s|^ROOT=.*|ROOT='$ROOT'|" -e "s|tests/.gate-serial|$TMPD/serial|g" "$ROOT/scripts/run-bats.sh" > "$TMPD/runner.sh"
+  run bash "$TMPD/runner.sh" --list
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | grep -qF '수집 집합에 없다'
+  rm -rf "$TMPD"
+}
+
+@test "RUNBATS_JOBS must be a positive integer, and 1 selects the serial form for both lanes" {
+  run env RUNBATS_JOBS=abc bash "$ROOT/scripts/run-bats.sh" --plan
+  [ "$status" -eq 2 ]
+  run env RUNBATS_JOBS=0 bash "$ROOT/scripts/run-bats.sh" --plan
+  [ "$status" -eq 2 ]
+  run env RUNBATS_JOBS=1 bash "$ROOT/scripts/run-bats.sh" --plan
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qx 'jobs=1'
+}
+
+@test "the parallel lane pairs --jobs with --no-parallelize-within-files and the runner detaches the GHA step-output files" {
+  # 정적 증인 — 파일 안 직렬을 빼고 --jobs만 남기면 setup_file/순서 의존 스위트가 조용히 뒤섞인다.
+  run grep -cF 'bats --jobs "$lane_jobs" --no-parallelize-within-files --print-output-on-failure "$@"' "$ROOT/scripts/run-bats.sh"
+  [ "$output" -eq 1 ]
+  # 병렬 프로세스들이 스텝당 하나뿐인 $GITHUB_OUTPUT에 끼어 쓰지 못하게 러너가 넷을 끊는다.
+  run grep -cF 'unset GITHUB_OUTPUT GITHUB_STEP_SUMMARY GITHUB_ENV GITHUB_PATH' "$ROOT/scripts/run-bats.sh"
+  [ "$output" -eq 1 ]
 }

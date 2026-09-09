@@ -1,0 +1,20 @@
+# 직렬 레인 레지스트리 — gate 수집 집합(scripts/run-bats.sh --list) 안에서 **병렬 레인이 끝난 뒤 혼자** 도는 bats.
+# 등재 기준은 하나다: 그 스위트가 **실 체크아웃**(추적 파일·untracked 파일 생성·.git/index)을 잠깐 바꾼다.
+# 파일 단위 병렬 실행에서 그 창을 밟은 다른 프로세스의 가드(check-skeleton·check-doc-index·`make ci-guard-tracked`…)가
+# 거짓 red를 낸다(2026-09-09 실측: 14 jobs 8회 중 8회 재현 — 970·977·1361·1500). 고정 /tmp 경로·고정 포트는 여기
+# 오지 않는다 — 그건 $BATS_TEST_TMPDIR로 옮겨 고친다(등재는 부채다: 직렬 레인이 길어지면 병렬화의 이득이 그만큼 준다).
+# 계약(scripts/check-bats-accounting.sh (2b)가 강제): 항목은 직전 주석 블록(사유)의 지배를 받고, git 추적 + gate 수집
+# 집합 안이어야 하며(.ci-exclude와 배타), 상한 SERIAL_MAX(현재 건수 6)를 넘지 않는다. run-bats.sh는 수집 밖 항목에 exit 2.
+
+# Makefile에 임시 타깃을 append했다가 사본으로 복원한다 — 그 창을 make help·ci-parity·makefile-bun 스위트가 읽는다.
+tests/gates/test_bats-accounting.bats
+# scripts/·tools/lib/에 프로브 파일을 만들고 scripts/README.md·tools/README.md에 append한다 — check-doc-index 소비자 전부가 파트너.
+tests/gates/test_check-doc-index.bats
+# tests/gates/에 CJK 이름 음성 픽스처를 만들고 `git add -N`으로 공유 인덱스에 올린다 — check-skeleton을 도는 스위트가 red.
+tests/gates/test_check-skeleton-cjk.bats
+# policy/ci-parity.json을 그 자리에서 재작성·복원하고 tools/에 프로브를 만들며 `make ci-guard-tracked`(untracked 0 단언)를 돈다.
+tests/gates/test_make-ci-parity.bats
+# scripts/·scripts/lib/에 픽스처를 만들고 `git add -f`로 공유 인덱스에 올린다(git ls-files 기반 열거의 분모가 흔들린다).
+tests/gates/test_sigpipe-writers.bats
+# tools/lib/에 프로브를 만들고 `git add -N`/`git rm --cached`로 공유 인덱스를 쓴다.
+tools/tests/test_identity.bats

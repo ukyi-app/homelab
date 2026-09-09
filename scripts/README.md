@@ -48,6 +48,11 @@
   통과) + **파일명 규약**(`<app>-secrets.sealed.yaml` 하나만 허용). 인자 없는 기본 모드에서 앱 열거 0건은 **scan-floor로 실패**(vacuous pass 아님).
 - **`run-bats.sh`** — **단일 테스트 수집·실행기(required GATE)**. `make ci`·`ci.yaml`(gate)이 공통 호출(이중 SSOT 제거).
   스코프 = git-tracked `test_*.bats` − `platform/charts/*`(chart-test 별도) − `tests/.ci-exclude`. `--list`는 수집 목록만.
+  실행은 두 레인 — **병렬 레인**(`bats --jobs N --no-parallelize-within-files`: 파일마다 별도 프로세스, 파일 안은 직렬.
+  N = `RUNBATS_JOBS` 또는 논리 코어 수. GNU parallel 필요 — 로컬 부재는 직렬 폴백 + 안내, CI 부재는 exit 2) 뒤
+  **직렬 레인**(`tests/.gate-serial` — 실 체크아웃을 잠깐 바꾸는 스위트만, 병렬 레인이 끝난 뒤 혼자. 계약은
+  `check-bats-accounting.sh` (2b)). `--plan`은 레인 분할만 출력. 러너는 `GITHUB_OUTPUT` 등 스텝 출력 파일을 끊고
+  bun 트랜스파일 캐시를 실행 단위로 고정한다(근거: docs/traps-detail.md 「파일 단위 병렬 bats에서 …」).
 - **`verify-secrets.sh`** — 추적 `*.enc.yaml` 무결성(암호화됨 + age recipient 신원이 canonical(.sops.yaml
   cluster+recovery)과 일치 + 복호 가능) 검사. 값 비출력; age 키 없으면(=CI) 복호 단계만 스킵하고 구조 검사는 수행.
 - **`verify-traps.sh`** — `docs/traps.md` enforcement 원장이 가리키는 guard 파일이 실재하는지 검사
