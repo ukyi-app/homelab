@@ -52,6 +52,85 @@ run_db_create() {
   [ "$(echo "$output" | jq -r '.result.pr.merged')" = "false" ]
 }
 
+# ── 중복 디스패치 preflight(디스패치 **앞**의 읽기 전용 관측) ────────────────────────────────
+# 병소(2026-09-06 실물 #669·#670): 같은 이름의 변이를 41초 간격으로 두 번 디스패치하면 실행기
+# 가드가 main 체크아웃 기준이라 둘 다 통과해 PR 2개가 열리고, 하나가 머지되면 나머지는
+# BEHIND→충돌로 auto-merge가 영구 정지한다(pr-sweeper의 알려진 사각). 엔진이 디스패치 전에
+# 같은 레인·같은 키의 열린 PR을 보면 그 두 번째 디스패치를 아예 내지 않는다.
+# ⚠️ 이것은 권위가 아니라 UX 조기 경고다 — 실행기 가드 완화가 아님은 provision-db.ts가 그대로임이 증언한다.
+
+@test "preflight: an open PR on the same lane and key refuses before dispatch (zero workflow-run records)" {
+  printf '[{"number":669,"title":"create-database mydb","head":"create-database/mydb-501","html_url":"https://github.com/ukyi-app/homelab/pull/669","auto_merge":true}]\n' > "$FIX/homelab-prs.json"
+  run_db_create --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  # 재개 좌표 — 기존 failure variant의 pr 핸들로 싣는다(결과 필드 신설 0: mutationFailure의 pr).
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "669" ]
+  [ "$(echo "$output" | jq -r '.result.pr.url')" = "https://github.com/ukyi-app/homelab/pull/669" ]
+  [ "$(echo "$output" | jq -r '.result.pr.merged')" = "false" ]
+  echo "$output" | jq -r '.result.error' | grep -q "이미 진행 중인 PR"
+  # 핵심 단언 — 디스패치 argv가 원장에 **0건**이다(재디스패치가 나가지 않았다).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  # preflight 질의는 status와 **같은** 경로·투영이다(lane-pr.ts SSOT — 리터럴 사본 금지).
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=open&per_page=100" \
+    --jq '[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]'
+  [ "$status" -eq 0 ]
+}
+
+@test "preflight: open PRs on a different key or a different lane are ignored (zero false positives)" {
+  # 네 형상 전부 '이 변이의 중복이 아니다': 다른 키 · 다른 레인의 같은 키 · 하이픈 형제 키 ·
+  # runId tail이 아닌 브랜치 · bump 레인. 하나라도 물면 정당한 변이가 막힌다.
+  printf '[{"number":1,"title":"other db","head":"create-database/otherdb-501","html_url":"u1","auto_merge":true},{"number":2,"title":"cache same key","head":"create-cache/mydb-501","html_url":"u2","auto_merge":true},{"number":3,"title":"sibling key","head":"create-database/mydb-extra-501","html_url":"u3","auto_merge":false},{"number":4,"title":"no runId tail","head":"create-database/mydb-main","html_url":"u4","auto_merge":false},{"number":5,"title":"bump","head":"bump-poll/app/mydb-sha-abcdef1","html_url":"u5","auto_merge":true}]\n' > "$FIX/homelab-prs.json"
+  run_db_create --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+}
+
+@test "preflight: an unreadable open-PR listing does not block the dispatch (fail-open) and names the cause" {
+  # 관측 부재 = fail-open(이 모듈 규약). `?? []`로 조용히 접지 않고 사유를 진행 이벤트로 낸다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_PRS_FAIL=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  printf '%s\n' "$stderr" | grep -q "^진행: 중복 PR preflight 관측 실패"
+  # 조용한 접기가 아님의 증인 — 사유(스텁의 stderr 첫 줄)가 그대로 실린다.
+  printf '%s\n' "$stderr" | grep -q "gh: API 오류"
+}
+
+@test "preflight: a full first page is an incomplete observation, not a clear one (page cap named)" {
+  # 절단은 clear가 아니라 blind다 — 101번째 PR이 '없음'과 구별되지 않는 자리. 극성은 fail-open이라
+  # 디스패치는 그대로 나가고, 사유가 상한을 지목한다.
+  python3 - "$FIX/homelab-prs.json" <<'PY'
+import json, sys
+rows = [{"number": i, "title": "x", "head": "bump-poll/app/other%d-sha-abcdef1" % i,
+         "html_url": "u%d" % i, "auto_merge": False} for i in range(1, 101)]
+open(sys.argv[1], "w").write(json.dumps(rows) + "\n")
+PY
+  run_db_create --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  printf '%s\n' "$stderr" | grep -q "상한(100건)에 닿아"
+}
+
+@test "preflight: a hit inside a truncated page still refuses (found is a fact, truncation is not)" {
+  # 100건째에 진짜 중복이 있으면 절단(blind)보다 hit이 먼저다 — 순서가 뒤집히면 꽉 찬 페이지에서
+  # 중복 검출이 통째로 죽는다(이 판정 조건은 픽스처가 밟지 않으면 무증인이다).
+  python3 - "$FIX/homelab-prs.json" <<'PY'
+import json, sys
+rows = [{"number": i, "title": "x", "head": "bump-poll/app/other%d-sha-abcdef1" % i,
+         "html_url": "u%d" % i, "auto_merge": False} for i in range(1, 100)]
+rows.append({"number": 670, "title": "dup", "head": "create-database/mydb-502",
+             "html_url": "https://github.com/ukyi-app/homelab/pull/670", "auto_merge": True})
+open(sys.argv[1], "w").write(json.dumps(rows) + "\n")
+PY
+  run_db_create --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "670" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+}
+
 @test "db create adopts its own run amid staggered visibility of a foreign run (no misattribution)" {
   printf '[{"id":400,"name":"✨ create-database — otherdb","status":"completed","conclusion":"success","html_url":"u400"},{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
   run_db_create --json

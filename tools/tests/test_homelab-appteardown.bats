@@ -50,6 +50,26 @@ run_teardown_tty() {
   [ "$status" -eq 0 ]
 }
 
+@test "preflight: an open teardown PR for the same app refuses before dispatch (lane included, not excluded)" {
+  # teardown-app이 중복 디스패치 preflight 범위에 **드는** 근거의 증인: 브랜치 문법이 같은
+  # 디스패치 레인 형상(`teardown/teardown-app-{key}-{runId}`)이고, 두 번째 철거 PR도 첫 PR이
+  # 머지되면 같은 경로 삭제에서 충돌한다. 수동 머지라 auto-merge 정지는 없지만 사람이 닫아야 할
+  # PR이 하나 더 생기는 것은 같다(bump 레인만 범위 밖 — 그쪽은 이 엔진을 아예 쓰지 않는다).
+  printf '[{"number":92,"title":"teardown myapp","head":"teardown/teardown-app-myapp-901","html_url":"https://github.com/ukyi-app/homelab/pull/92","auto_merge":false}]\n' > "$FIX/homelab-prs.json"
+  run_teardown --confirm myapp --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "92" ]
+  echo "$output" | jq -r '.result.error' | grep -q "이미 진행 중인 PR"
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  # 다른 앱의 열린 철거 PR은 무시된다(오탐 0 — 형제 앱 오귀속의 정면).
+  : > "$CALLS"
+  printf '[{"number":93,"title":"teardown other","head":"teardown/teardown-app-myapp-extra-901","html_url":"u93","auto_merge":false}]\n' > "$FIX/homelab-prs.json"
+  run_teardown --confirm myapp --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+}
+
 @test "a confirm value that does not match the app name is refused with NO dispatch" {
   run_teardown --confirm otherapp --json
   [ "$status" -eq 2 ]
