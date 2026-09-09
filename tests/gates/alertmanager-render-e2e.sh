@@ -33,11 +33,14 @@ cd "$ROOT"
 #    재푸시해 핀 digest가 GC됐다. ci.yaml의 image-pin-liveness 스텝 주석이 SSOT).
 #    ⚠️ "digest는 amd64 단일 매니페스트라 arm64 러너에서 pull이 안 된다"는 **거짓이다**(2026-08-21 실측:
 #       핀 digest는 `manifest.list.v2+json`이고 amd64·arm64·arm/v7·ppc64le·s390x를 담는다).
-# ⚠️ `[ -n … ]` 검사가 도달 가능하려면 `|| AM_IMAGE=""`가 **필요하다** — `set -o pipefail` 아래에서
-#    grep 0건은 파이프라인 rc=1이라 `set -e`가 **할당 단계에서** 스크립트를 죽인다. 그러면 아래 진단은
+# ⚠️ `[ -n … ]` 검사가 도달 가능하려면 캡처 뒤의 `|| _am_image_matches=""`가 **필요하다** — grep 0건은
+#    rc=1이라 `set -e`가 **할당 단계에서** 스크립트를 죽인다. 그러면 아래 진단은
 #    영원히 실행되지 않고 CI가 메시지 0줄에 rc=1로 죽는다(이 하네스가 없애려는 그 모양이다).
 AM_MANIFEST="$ROOT/platform/victoria-stack/prod/alertmanager.yaml"
-AM_IMAGE="$(grep -oE 'prom/alertmanager:v[0-9.]+@sha256:[0-9a-f]{64}' "$AM_MANIFEST" | head -1)" || AM_IMAGE=""
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring.
+# `grep -m1`으로 줄이지 않는다 — `-m1`은 첫 매치 *줄*에서 멈출 뿐이라 `-o`와 함께면 그 줄의 매치를 전부 낸다.
+_am_image_matches="$(grep -oE 'prom/alertmanager:v[0-9.]+@sha256:[0-9a-f]{64}' "$AM_MANIFEST")" || _am_image_matches=""
+AM_IMAGE="$(head -n1 <<<"$_am_image_matches")"
 [ -n "$AM_IMAGE" ] || {
   echo "AM 이미지 digest 파생 실패($AM_MANIFEST) — 매니페스트가 digest 핀이 아니거나 표기가 바뀌었다. 태그만으로 대신하지 마라(mutable 태그는 배포되지 않은 이미지를 검증하게 만든다)." >&2
   exit 1

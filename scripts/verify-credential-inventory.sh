@@ -92,7 +92,11 @@ $led_sorted
 EOF
 
 # ③ "N건 등재" 수치 ↔ 원장 항목 수
-declared="$(grep -oE '\*\*[0-9]+건\*\* 등재' "$RB" | head -1 | grep -oE '[0-9]+' || true)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring.
+# 원본의 `|| true`는 "매치 0건"(grep rc 1)을 아래 else 분기(형식 변경 FAIL)로 흘리려던 처리라 두 문장 모두에 유지한다.
+# grep -oE는 한 줄에 매치가 여럿이면 여러 줄을 내므로 `grep -m1`로 접지 않는다 — 캡처 뒤 첫 줄만 취한다.
+declared_raw="$(grep -oE '\*\*[0-9]+건\*\* 등재' "$RB" || true)"
+declared="$(head -n1 <<<"$declared_raw" | grep -oE '[0-9]+' || true)"
 if [ -n "$declared" ]; then
   [ "$declared" -eq "$led_n" ] || {
     echo "FAIL: 런북이 '${declared}건 등재'라 적었는데 원장은 ${led_n}건이다 — 아무도 대조하지 않는 손 관리 수치가 드리프트했다."

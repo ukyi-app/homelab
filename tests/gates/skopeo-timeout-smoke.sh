@@ -54,7 +54,10 @@ fault() { echo "HARNESS FAULT: $*" >&2; exit 2; }
 . "$ROOT/tests/gates/lib/host-port.sh"
 
 # ── 1) 핀된 skopeo 이미지 + 계약 타임아웃을 매니페스트에서 파생 ──────────────────────────────────────
-IMAGE="$(yq 'select(.kind=="CronJob").spec.jobTemplate.spec.template.spec.containers[].image' "$EXPORTER" | head -1)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring.
+# 캡처는 별도 문장이라 yq 실패가 set -e로 그대로 전파된다(첫 컨테이너만 쓰는 의미는 그대로).
+IMAGES_RAW="$(yq 'select(.kind=="CronJob").spec.jobTemplate.spec.template.spec.containers[].image' "$EXPORTER")"
+IMAGE="$(head -n1 <<<"$IMAGES_RAW")"
 [ -n "$IMAGE" ] || fault "digest-exporter.yaml에서 skopeo 이미지를 파생하지 못했다"
 case "$IMAGE" in *@sha256:*) : ;; *) fault "skopeo 이미지가 digest 핀이 아니다: $IMAGE" ;; esac
 

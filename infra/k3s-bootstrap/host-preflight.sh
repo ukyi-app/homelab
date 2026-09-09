@@ -216,10 +216,11 @@ lf="${R}/run/systemd/netif/links/${lf_idx}"
 # 키 부재를 '값 없음'으로 읽지 않는다 — [5]의 swaps 헤더와 같은 논거(파서가 물렸다는 양성 증거).
 grep -q '^DNS=' "$lf" || fail "${lf}에 DNS= 키가 없다 — 형식이 예상과 달라 링크 DNS를 믿을 수 없다"
 grep -q '^NETWORK_FILE_DROPINS=' "$lf" || fail "${lf}에 NETWORK_FILE_DROPINS= 키가 없다 — 드롭인 로드 여부를 믿을 수 없다"
-lf_dns="$(sed -n 's/^DNS=//p' "$lf" | head -1 | tr -d '"')"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): sed writer 쪽에서 첫 매치 뒤 q로 끝낸다
+lf_dns="$(sed -n '/^DNS=/{s/^DNS=//;p;q;}' "$lf" | tr -d '"')"
 [ -z "$lf_dns" ] \
   || fail "링크 ${lf_idx}가 DNS를 받고 있다(${lf_dns}) — 링크별 DNS는 전역 DNS=보다 **우선**하므로 HOST_UPSTREAM_DNS(${HOST_UPSTREAM_DNS})가 무효다. networkd 드롭인(UseDNS=false)이 설치만 되고 반영되지 않은 상태다: sudo networkctl reload && sudo networkctl reconfigure <iface> (주소가 2초쯤 사라졌다 돌아온다 — host-config --apply는 이제 복귀까지 기다린다) 또는 재부팅"
-lf_dropins="$(sed -n 's/^NETWORK_FILE_DROPINS=//p' "$lf" | head -1 | tr -d '"')"
+lf_dropins="$(sed -n '/^NETWORK_FILE_DROPINS=/{s/^NETWORK_FILE_DROPINS=//;p;q;}' "$lf" | tr -d '"')"
 case "$lf_dropins" in
   *10-k3s-node.conf*) : ;;
   *) fail "링크 ${lf_idx}에 10-k3s-node.conf 드롭인이 로드돼 있지 않다(NETWORK_FILE_DROPINS=${lf_dropins:-빈값}) — 지금 링크 DNS가 비어 있어도 그건 DHCP가 아직 안 준 것일 수 있고, 갱신되는 순간 전역 DNS=가 무효화된다" ;;

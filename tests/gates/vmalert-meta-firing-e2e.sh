@@ -13,7 +13,7 @@
 # ⚠️ 침묵 레그의 vacuity: 생성기가 시리즈를 아예 안 만들어도 침묵은 green이다 —
 #   침묵 레그마다 룰의 **좌변 자체**를 프로브해 "픽스처가 실재하고 값이 임계 미만"을 fault로
 #   강제한다(형제 bulkssd의 L4 대조군과 같은 역할).
-# ⚠️ 파생 대입은 전부 `|| true` 뒤 [ -n ] 검사: set -e + pipefail에서 grep 무매치가
+# ⚠️ 파생 캡처는 전부 `|| true` 뒤 [ -n ] 검사: set -e + pipefail에서 grep 무매치가
 #   대입문을 즉사시키면 fail-closed 루프가 도달 불가 죽은 코드가 되고 exit 1(leg FAIL)로
 #   오분류된다 — 파생 실패는 exit 2(CONTRACT)여야 한다.
 # 종료 규약: 2=HARNESS FAULT/CONTRACT · 1=leg FAIL · 0=OK (lib 소유).
@@ -51,18 +51,26 @@ done
 grep -q 'alert: GrafanaPluginBudgetLow' "$TMP/r4.yaml" || fault "r4에 GrafanaPluginBudgetLow 부재"
 grep -q 'alert: GrafanaDuFingerprintLost' "$TMP/r4.yaml" || fault "r4에 GrafanaDuFingerprintLost 부재"
 
-# ── 2) 룰 파생 상수(하드코딩 금지 — 전 대입 || true + fail-closed 루프) ────────────────────────────
+# ── 2) 룰 파생 상수(하드코딩 금지 — 전 캡처 || true + fail-closed 루프) ────────────────────────────
 FLAP_EXPR="$(vme_alert_expr "$META_RULES" AlertRuleFlapping || true)"
-FLAP_W="$(printf '%s' "$FLAP_EXPR" | grep -oE '\[[0-9]+[smhd]\]' | head -1 | tr -d '[]' || true)"
-FLAP_N="$(printf '%s' "$FLAP_EXPR" | grep -oE '>= *[0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처(무매치 || true 유지)를 별도 문장으로 두고 herestring으로 첫 줄만 자른다.
+_flap_w_m="$(printf '%s' "$FLAP_EXPR" | grep -oE '\[[0-9]+[smhd]\]' || true)"
+FLAP_W="$(head -n1 <<<"$_flap_w_m" | tr -d '[]')"
+_flap_n_m="$(printf '%s' "$FLAP_EXPR" | grep -oE '>= *[0-9]+' | grep -oE '[0-9]+' || true)"
+FLAP_N="$(head -n1 <<<"$_flap_n_m")"
 FLAP_FOR="$(vme_alert_for "$META_RULES" AlertRuleFlapping || true)"
-STALE_T="$(vme_alert_expr "$META_RULES" AlertPipelineWriteStale | grep -oE '> *[0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+_stale_t_m="$(vme_alert_expr "$META_RULES" AlertPipelineWriteStale | grep -oE '> *[0-9]+' | grep -oE '[0-9]+' || true)"
+STALE_T="$(head -n1 <<<"$_stale_t_m")"
 SUP_EXPR="$(vme_alert_expr "$META_RULES" AlertSuppressionProlonged || true)"
-SUP_W="$(printf '%s' "$SUP_EXPR" | grep -oE '\[[0-9]+[smhd]\]' | head -1 | tr -d '[]' || true)"
-SUP_MIN_SAMPLES="$(printf '%s' "$SUP_EXPR" | grep -oE '>= *[0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+_sup_w_m="$(printf '%s' "$SUP_EXPR" | grep -oE '\[[0-9]+[smhd]\]' || true)"
+SUP_W="$(head -n1 <<<"$_sup_w_m" | tr -d '[]')"
+_sup_min_m="$(printf '%s' "$SUP_EXPR" | grep -oE '>= *[0-9]+' | grep -oE '[0-9]+' || true)"
+SUP_MIN_SAMPLES="$(head -n1 <<<"$_sup_min_m")"
 GRAF_EXPR="$(vme_alert_expr "$TMP/r4.yaml" GrafanaPluginBudgetLow || true)"
-GRAF_DENOM="$(printf '%s' "$GRAF_EXPR" | grep -oE '/ *[0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
-GRAF_RATIO="$(printf '%s' "$GRAF_EXPR" | grep -oE '> *0\.[0-9]+' | grep -oE '0\.[0-9]+' | head -1 || true)"
+_graf_denom_m="$(printf '%s' "$GRAF_EXPR" | grep -oE '/ *[0-9]+' | grep -oE '[0-9]+' || true)"
+GRAF_DENOM="$(head -n1 <<<"$_graf_denom_m")"
+_graf_ratio_m="$(printf '%s' "$GRAF_EXPR" | grep -oE '> *0\.[0-9]+' | grep -oE '0\.[0-9]+' || true)"
+GRAF_RATIO="$(head -n1 <<<"$_graf_ratio_m")"
 FOR_MAX_S=0
 for a in AlertRuleFlapping AlertPipelineWriteStale AlertSuppressionProlonged; do
   f="$(vme_alert_for "$META_RULES" "$a" || true)"; [ -n "$f" ] || fault "for: 파생 실패: $a"
