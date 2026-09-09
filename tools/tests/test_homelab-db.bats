@@ -69,6 +69,10 @@ run_db_create() {
   [ "$(echo "$output" | jq -r '.result.pr.url')" = "https://github.com/ukyi-app/homelab/pull/669" ]
   [ "$(echo "$output" | jq -r '.result.pr.merged')" = "false" ]
   echo "$output" | jq -r '.result.error' | grep -q "이미 진행 중인 PR"
+  # 수령증 무효 선언 — 이 봉투는 correlation을 들고 나가지만(mutationFailure의 필수 필드) 그
+  # nonce의 run은 GitHub에 없다. 사람용 헤드라인(`— correlation …`)과 PR 슬롯이 그것을 수령증처럼
+  # 보이게 하므로, 문구가 **먼저** 부인해야 운영자·에이전트가 0건인 run을 찾지 않는다.
+  echo "$output" | jq -r '.result.error' | grep -q "^디스패치하지 않았다(이 correlation의 run은 존재하지 않는다)"
   # 핵심 단언 — 디스패치 argv가 원장에 **0건**이다(재디스패치가 나가지 않았다).
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
   # preflight 질의는 status와 **같은** 경로·투영이다(lane-pr.ts SSOT — 리터럴 사본 금지).
@@ -165,6 +169,9 @@ PY
   [ "$(echo "$output" | jq -r '.result.run.id')" = "500" ]
   [ "$(echo "$output" | jq -r '.result.run.url')" = "https://github.com/ukyi-app/homelab/actions/runs/500" ]
   echo "$output" | jq -r '.result.error' | grep -q "이미 진행 중인 run"
+  echo "$output" | jq -r '.result.error' | grep -q "^디스패치하지 않았다(이 correlation의 run은 존재하지 않는다)"
+  # 다음 행동이 실재하는 핸들을 지목한다 — 이 창에서 유일하게 존재하는 좌표는 run URL이다.
+  echo "$output" | jq -r '.result.error' | grep -q "homelab status --run https://github.com/ukyi-app/homelab/actions/runs/500"
   # 핵심 단언 — 재디스패치가 나가지 않았다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
 }

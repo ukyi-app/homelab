@@ -75,8 +75,12 @@ run_secrets_in() {
   [ "$(echo "$output" | jq -r '.result.chain.mode')" = "chain" ]
   [ "$(echo "$output" | jq -r '.result.chain.pushed')" = "true" ]
   [ "$(git -C "$APP_REMOTE" rev-parse main)" = "$(git -C "$APP_WORK" rev-parse HEAD)" ]
-  # 그래서 문구는 재봉인이 아니라 **열린 PR의 처리**를 지목해야 한다.
+  # 그래서 문구는 재봉인이 아니라 **열린 PR의 처리**를 지목해야 한다. 그리고 이 레인에서 "머지"와
+  # "닫기"는 등가가 아니다 — 열린 PR은 이전 디스패치의 **옛 봉인 암호문**을 담는데 앱 레포 main에는
+  # 이미 새 봉인본이 있다. 머지하면 옛 값이 먼저 배선되고(파드 롤링 1회) 재실행해야 수렴한다.
   echo "$output" | jq -r '.result.error' | grep -q "이미 진행 중인 PR"
+  echo "$output" | jq -r '.result.error' | grep -q "닫고 다시 실행"
+  echo "$output" | jq -r '.result.error' | grep -q "^디스패치하지 않았다"
 }
 
 @test "chain-mode success and precondition refusal envelopes validate against the schema (floor 2)" {
