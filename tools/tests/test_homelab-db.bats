@@ -102,6 +102,20 @@ run_db_create() {
   printf '%s\n' "$stderr" | grep -q "gh: API 오류"
 }
 
+@test "preflight: an open-PR response that is not an array is an absent observation too (no silent clear)" {
+  # 관측 부재 3상의 **세 번째** — gh 비-0(형제 @test)·페이지 절단(형제 @test)과 달리 이 상만
+  # 픽스처가 0건이었다: `openLaneConflict`의 배열 아님 분기를 `{kind:"clear"}`로 접어도
+  # (요구가 금지한 `?? []`와 의미상 동일) 전 스위트가 초록이었다(2026-09-09 실측).
+  # 그 접힘이 위험한 이유는 응답 형상 드리프트가 '열린 PR 0건'과 구별되지 않기 때문이다 —
+  # 조용한 clear는 이 관측의 유일한 무증인 출구다.
+  printf '{"message":"Not Found"}\n' > "$FIX/homelab-prs.json"
+  run_db_create --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  printf '%s\n' "$stderr" | grep -q "^진행: 중복 PR preflight 관측 실패"
+  printf '%s\n' "$stderr" | grep -q "배열이 아니다"
+}
+
 @test "preflight: a full first page is an incomplete observation, not a clear one (page cap named)" {
   # 절단은 clear가 아니라 blind다 — 101번째 PR이 '없음'과 구별되지 않는 자리. 극성은 fail-open이라
   # 디스패치는 그대로 나가고, 사유가 상한을 지목한다.
@@ -615,6 +629,10 @@ pr_closed_unmerged() {
   # 이름을 붙여 둔다: 붙이지 않으면 "3이 아니라 2"가 무엇 때문인지 이 파일에서 사라진다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=open&per_page=100" --jq)" = "1" ]
   [ "$(python3 "$LEDGER_PY" dump "$CALLS" | grep -cE "/pulls\?state=all|/pulls/")" = "2" ]
+  # 총량 바닥값 — 명명한 세 형상의 합(1+1+1)과 `/pulls` 전체가 같다. 이 줄이 없으면 네 번째
+  # 형상(예: `pulls?state=closed`·`pulls?base=main`)이 폴링 루프에 들어와도 위 두 등식 어디에도
+  # 안 걸린다: 좁힌 정규식이 원래 이 @test가 지키던 '데드라인까지 폴링하지 않았다'에 사각을 낸다.
+  [ "$(python3 "$LEDGER_PY" dump "$CALLS" | grep -c "/pulls")" = "3" ]
 }
 
 @test "wait: a stale closed listing overruled by the authoritative read still converges to success" {
