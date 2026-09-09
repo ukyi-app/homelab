@@ -145,7 +145,9 @@ if [ -d "$sshd_abs" ]; then
     [ -e "$c" ] || continue
     b="$(basename "$c")"
     [ "$b" != "$SSHD_DROPIN" ] || continue
-    first="$(printf '%s\n%s\n' "$b" "$SSHD_DROPIN" | LC_ALL=C sort | head -1)"
+    # 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring
+    sorted_pair="$(printf '%s\n%s\n' "$b" "$SSHD_DROPIN" | LC_ALL=C sort)"
+    first="$(head -n1 <<<"$sorted_pair")"
     if [ "$first" != "$SSHD_DROPIN" ]; then
       earlier="${earlier}${b} "
       earlier_n=$((earlier_n + 1))
