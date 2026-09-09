@@ -335,7 +335,8 @@ EOF
 
 @test "provision-db registers the new database in the pgdump hedge DBS list" {
   # DBS 손 목록을 갱신하는 주체가 없어 create-database PR이 required check에서 항상 red였다
-  # (드릴 실측 2026-09-08 PR #689: `not ok … hedge dumps every logical Database CR`).
+  # (드릴 실측 2026-09-08 PR #689: pgdump 헤지 DBS 정합 @test가 not ok). @test 이름은 그 뒤
+  # 티켓 53에서 집합 등식으로 개명됐다 — 이름을 인용하지 않는 것이 그 자체로 처방이다.
   provision --name orders --repo-root "$FIX"
   [ "$status" -eq 0 ]
   [ "$(dbs_count "$HEDGE" orders)" = "1" ]
