@@ -26,11 +26,15 @@
 #      대조는 secrets 읽기 권한이 필요해 경계 밖이다(ensure-role-password-rbac.yaml 헤더).
 #   3) 타임아웃 내 미충족이면 비0 종료(fail-closed) → PostSync hook 실패 → cnpg-data Degraded → 알림
 #   4) 성공 시 per-DB freshness 마커 ConfigMap db-<name>-ready 방출
-#      ({ownerSecretResourceVersion, roSecretResourceVersion, verifiedAt}) — activate-app이 소비.
+#      ({ownerSecretResourceVersion, roSecretResourceVersion, verifiedAt}).
 #      passwordStatus.<role>.resourceVersion == 적용된 비번 Secret의 metadata.resourceVersion 이므로
-#      (라이브 확인), 마커는 그 값을 secret rv로 기록한다. activate-app은 이를 현재 secret rv와 대조해
-#      stale(회전 후 미적용/무관 Job 성공)을 거른다. 마커에는 그 Database CR의 ownerReferences를
-#      단다 — 훅이 직접 apply하는 리소스라 ArgoCD tracking 밖이고, ownerRef가 없으면 CR 프룬도
+#      (라이브 확인), 마커는 그 값을 secret rv로 기록한다. 소비자는 owner-local `tools/verify-db-marker.ts`
+#      뿐이고 **프로덕션 호출자는 없다**(2026-09-09 정정 — 종전 주석의 "activate-app이 소비"는 사실이
+#      아니다: activate-app이 다루는 마커는 lib/activation-marker.ts의 앱 활성화 JSON이고 이
+#      ConfigMap을 읽지 않는다. tools/README.md의 verify-db-marker 항목이 같은 값을 적는다).
+#      대조는 현재 secret rv와의 등식이라 stale(회전 후 미적용/무관 Job 성공)을 거른다.
+#      마커에는 그 Database CR의 ownerReferences를 단다 — 훅이 직접 apply하는 리소스라 ArgoCD
+#      tracking 밖이고, ownerRef가 없으면 CR 프룬도
 #      teardown cleanup도 audit-orphans도 걷지 않아 **영구 고아**가 된다(2026-09-09 라이브 잔재
 #      2건: db-page-ready·db-trip-mate-ready, owner가 손으로 삭제).
 #
