@@ -170,10 +170,13 @@ hedge_fixture() {
   # 이름 없는 CR로 읽혀 픽스처 전건이 red가 된다(필터의 증인이 실 트리 @test 하나뿐이지 않게 한다).
   printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: database\nresources: []\n' > "$FX/databases/kustomization.yaml"
 }
-# Database CR 하나 — $1 = metadata.name · $2 = spec.ensure(present|absent)
-# spec.name도 함께 쓴다: 판정이 **첫** `^  name:`(=metadata.name)을 집는지의 증인이다.
+# Database CR 하나 — $1 = metadata.name · $2 = spec.ensure(present|absent) · $3 = spec.name(기본 $1)
+# ⚠️ **spec.name을 분리해서 받는다**(2026-09-09 적대 검토). 착지 전 픽스처는 두 이름에 같은 값을 써서
+#    판정이 `head -1`(metadata.name)을 집는지 `tail -1`(spec.name)을 집는지에 **증인이 없었다** —
+#    실측으로 추출을 `tail -1`로 뒤집어도 18건 전건 ok였다(무증인 판정 조건: AGENTS 함정 「테스트
+#    이름은 인터페이스가 아니다」). 아래 name-mismatch 픽스처가 그 자리의 증인이다.
 hedge_fixture_cr() {
-  printf 'apiVersion: postgresql.cnpg.io/v1\nkind: Database\nmetadata:\n  name: %s\nspec:\n  ensure: %s\n  name: %s\n' "$1" "$2" "$1" > "$FX/databases/$1.yaml"
+  printf 'apiVersion: postgresql.cnpg.io/v1\nkind: Database\nmetadata:\n  name: %s\nspec:\n  ensure: %s\n  name: %s\n' "$1" "$2" "${3:-$1}" > "$FX/databases/$1.yaml"
 }
 
 @test "fixture: a consistent DBS and CR set yields no findings (positive control)" {
@@ -264,4 +267,123 @@ hedge_fixture_cr() {
   echo "$findings"
   [ "$n" -eq 1 ]
   grep -qF -- 'no-dbs-line:' <<<"$findings"
+}
+
+# ── 피연산자 바닥값 레인 — 열거가 붕괴하면 '정합'이 아니라 '못 읽었다'다 ───────────────────────
+# 2026-09-09 적대 검토 실측: 판정 두 루프의 분모가 모두 피연산자에서 나오는데 그 실재를 재는
+# 앵커가 없었다. `d=`를 없는 경로로 한 줄 바꾸면 18건 전건 ok(rc 0)였고, databases/를 리네임한
+# 트리에서는 **DBS에 없는 present CR**이 있는데도 rc 0이었다 — 디렉토리 이름 변경 한 번이 상·하한을
+# 통째로 끄고 @test 이름이 선언한 등식의 분모를 0으로 만든다.
+# cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」 · scripts/check-bats-style.sh 「비공허 바닥값」
+
+@test "fixture: a vanished hedge manifest is reported, not read as an empty token set" {
+  hedge_fixture nomanifest "app"
+  findings=$(hedge_dbs_findings "$FX/nope.yaml" "$FX/databases")
+  n=$(hedge_dbs_count "$findings")
+  echo "$findings"
+  [ "$n" -eq 1 ]
+  grep -qF -- 'no-hedge-manifest: ' <<<"$findings"
+}
+
+@test "fixture: a vanished Database CR directory is reported, not read as zero CRs" {
+  # 이 트리는 present CR이 실재하는데 디렉토리 인자만 어긋난다 — 착지 전 판정은 여기서 위반 0건
+  # (초록)을 냈다. 리팩터·이동·오타 한 번이 하한과 absent 레인을 함께 끄는 자리다.
+  hedge_fixture nocrdir "app"
+  hedge_fixture_cr shared present
+  findings=$(hedge_dbs_findings "$FX/hedge.yaml" "$FX/nope")
+  n=$(hedge_dbs_count "$findings")
+  echo "$findings"
+  [ "$n" -eq 1 ]
+  grep -qF -- 'no-cr-dir: ' <<<"$findings"
+}
+
+@test "fixture: a second DBS line is diagnosed as a half-update, not as a set mismatch" {
+  # 셸은 **마지막 대입**이 이기는데 sed는 매치를 전부 이어 붙인다 — 착지 전 판정은 2줄 트리에서
+  # `missing: app` + `ghost: shared`를 냈다(원인은 '정합 위반'이 아니라 'DBS 줄이 2개'인데
+  # 온콜이 읽는 문장이 엉뚱한 토큰을 가리킨다). tools/lib/hedge-dbs.ts matchDbs는 같은 상태를
+  # throw로 내며 「절반 갱신은 조용히 지나가면 안 되는 부류」라고 못 박는다 — 손 편집된 실
+  # 매니페스트에 대해서는 이 bats가 마지막 방어선이라 같은 실패 클래스를 표현해야 한다.
+  hedge_fixture twolines "app"
+  printf '                  DBS="app shared"\n' >> "$FX/hedge.yaml"
+  findings=$(hedge_dbs_findings "$FX/hedge.yaml" "$FX/databases")
+  n=$(hedge_dbs_count "$findings")
+  echo "$findings"
+  [ "$n" -eq 1 ]
+  grep -qF -- 'dbs-lines: ' <<<"$findings"
+}
+
+# ── 이름 계약 레인 — DBS 토큰이 가리키는 것은 spec.name이다 ────────────────────────────────────
+# 헤지가 실제로 실행하는 것은 `pg_dump --dbname="${DB}"`(pgdump-hedge-cronjob.yaml)이고, 그 DB는
+# CNPG Database CR의 **spec.name**이다(형제 커널의 계약: tools/lib/resource-layout.ts의 hedgeEntry
+# 주석 「DBS 토큰 = DB 이름(CR spec.name과 동일)」). provision-db가 두 이름에 같은 값을 쓰므로 정상
+# 경로에서는 갈리지 않지만, 손 편집으로 갈리는 순간 판정이 **뒤집힌다** — 착지 전 실측:
+#   metadata.name=objname · spec.name=realdb 일 때
+#   DBS="app realdb"(pg_dump가 실제로 성공하는 목록) → missing:objname + ghost:realdb  = red
+#   DBS="app objname"(pg_dump가 잡 전체를 죽이는 목록) → 위반 0건                       = green
+# 즉 티켓 53이 막으려던 장애 형상을 초록으로 통과시키고 안전한 형상을 red로 만든다.
+
+@test "fixture: a Database CR whose metadata.name and spec.name diverge is caught" {
+  # 이 @test가 `head -1`/`tail -1` 선택의 증인이기도 하다 — 두 이름이 같은 픽스처만 있으면 추출을
+  # 어느 쪽으로 뒤집어도 전건 초록이었다(2026-09-09 실측 18/18 ok).
+  hedge_fixture divergent "app realdb"
+  hedge_fixture_cr objname present realdb
+  findings=$(hedge_dbs_findings "$FX/hedge.yaml" "$FX/databases")
+  n=$(hedge_dbs_count "$findings")
+  echo "$findings"
+  [ "$n" -eq 1 ]
+  grep -qF -- 'name-mismatch: ' <<<"$findings"
+  grep -qF -- '(objname != realdb)' <<<"$findings"
+}
+
+# ── 열거 폭 레인 — 분모가 실제로 CR 전부를 덮는가 ──────────────────────────────────────────────
+
+@test "fixture: a present Database CR in a .yml file is inside the denominator" {
+  # kustomize는 `.yaml`과 `.yml`을 둘 다 받는다. 글롭이 `*.yaml`뿐이면 `.yml` CR이 분모 밖이라
+  # 그 DB가 DBS에 없어도 하한이 침묵한다(착지 전 실측: 위반 0건).
+  hedge_fixture ymlcr "app"
+  printf 'apiVersion: postgresql.cnpg.io/v1\nkind: Database\nmetadata:\n  name: ymldb\nspec:\n  ensure: present\n  name: ymldb\n' > "$FX/databases/ymldb.yml"
+  findings=$(hedge_dbs_findings "$FX/hedge.yaml" "$FX/databases")
+  n=$(hedge_dbs_count "$findings")
+  echo "$findings"
+  [ "$n" -eq 1 ]
+  grep -qxF -- 'missing: ymldb' <<<"$findings"
+}
+
+@test "fixture: two Database CRs in one file are rejected instead of silently losing the second" {
+  # 이름 추출이 파일당 첫 도큐먼트만 집으므로 두 번째 CR은 **존재 자체가 사라진다** — 그 DB는
+  # 논리 백업 0인데 판정은 초록인, 티켓 46이 막으려던 무성 커버리지 갭 그대로다(착지 전 실측:
+  # a1+a2 한 파일 · DBS="app a1" → 위반 0건). 다중 도큐먼트 파서를 셸에 들이는 대신 fail-closed 한다.
+  hedge_fixture multidoc "app a1"
+  printf 'apiVersion: postgresql.cnpg.io/v1\nkind: Database\nmetadata:\n  name: a1\nspec:\n  ensure: present\n  name: a1\n---\napiVersion: postgresql.cnpg.io/v1\nkind: Database\nmetadata:\n  name: a2\nspec:\n  ensure: present\n  name: a2\n' > "$FX/databases/multi.yaml"
+  findings=$(hedge_dbs_findings "$FX/hedge.yaml" "$FX/databases")
+  n=$(hedge_dbs_count "$findings")
+  echo "$findings"
+  [ "$n" -eq 1 ]
+  grep -qF -- 'multi-doc: ' <<<"$findings"
+}
+
+# ── 토큰 위생 레인 — 이름이 'equals exactly'를 선언하는 자리의 나머지 상한 ─────────────────────
+
+@test "fixture: a DBS token repeated twice is caught (the equation is a multiset, not just a set)" {
+  # 헤지 루프가 같은 DB를 두 번 pg_dump해 R2에 `${DB}-${TS}` 객체가 중복 생성되고 잡 시간이 는다.
+  # 치명적이진 않지만 이름이 상한을 선언하는 자리라 무언(無言)으로 두지 않는다.
+  hedge_fixture dup "app app"
+  findings=$(hedge_dbs_findings "$FX/hedge.yaml" "$FX/databases")
+  n=$(hedge_dbs_count "$findings")
+  echo "$findings"
+  [ "$n" -eq 1 ]
+  grep -qxF -- 'dup: app' <<<"$findings"
+}
+
+@test "fixture: a DBS token holding a glob metacharacter is not expanded against the cwd" {
+  # 토큰 루프가 무인용 확장이라 word splitting뿐 아니라 **pathname expansion**도 탄다. 착지 전
+  # 실측: 레포 루트를 cwd로 DBS="app *"를 돌리면 저장소 엔트리 21건이 전부 `ghost: <파일명>`으로
+  # 나왔다 — 진단이 무의미할 뿐 아니라 **판정 결과가 cwd의 파일 목록에 의존**한다(같은 매니페스트가
+  # venue마다 다른 findings를 낸다). 정답은 위반 1건: 토큰 `*`는 CR이 없으므로 유령이다.
+  hedge_fixture globtoken 'app *'
+  findings=$(hedge_dbs_findings "$FX/hedge.yaml" "$FX/databases")
+  n=$(hedge_dbs_count "$findings")
+  echo "$findings"
+  [ "$n" -eq 1 ]
+  grep -qxF -- 'ghost: *' <<<"$findings"
 }
