@@ -97,3 +97,22 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "ok"
 }
+
+# `resources` 값이 falsy-비-nullish 스칼라(""/0/false)여도 block 시퀀스로 복구한다.
+# 추가 경로의 두 술어(`seq || createNode` · `if (seq)`)가 갈리면 seqNode에 원시값이 들어가
+# flow 대입이 TypeError를 던진다 — origin/main이 하던 self-heal의 회귀 가드다.
+@test "addResource self-heals a falsy non-sequence resources value (predicate parity)" {
+  run bun -e '
+    import { addResource } from "./tools/lib/kustomization.ts";
+    const head = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n";
+    const want = head + "resources:\n  - a.yaml\n";
+    const fail = (label, got) => { console.error(label + ": " + JSON.stringify(got)); process.exit(1); };
+    for (const [label, raw] of [["empty-string", "resources: \"\"\n"], ["zero", "resources: 0\n"], ["false", "resources: false\n"]]) {
+      const out = addResource(head + raw, "a.yaml");
+      if (out !== want) fail(label, out);
+    }
+    console.log("ok");
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "ok"
+}
