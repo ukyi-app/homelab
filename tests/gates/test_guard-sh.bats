@@ -129,7 +129,10 @@ setup() {
     for f in "$1"/scripts/check-*.sh "$1"/scripts/verify-*.sh; do
       hand=0; kern=0
       grep -qE "awk[[:space:]]+\"?\\\$[A-Za-z_]+\"?.*2>\"?\\\$[A-Za-z_]+\"?" "$f" && hand=1
-      sed "s|^[[:space:]]*#.*||" "$f" | grep -qE "(^|[|(;&\` ])detect_run[[:space:]]" && kern=1
+      # 주석을 벗긴 본문은 **캡처 뒤 herestring**으로 대조한다 — 이 블록은 `set -o pipefail`이라 `sed … | grep -q`는
+      # grep의 첫 매치 조기 종료가 sed에 SIGPIPE를 먹여 kern=0으로 떨어진다(CI 4 vCPU 병렬 레인에서 roster 6→5 실측 — 부하 아래 20회 중 4회).
+      body="$(sed "s|^[[:space:]]*#.*||" "$f")"
+      grep -qE "(^|[|(;&\` ])detect_run[[:space:]]" <<<"$body" && kern=1
       [ "$hand" -eq 1 ] || [ "$kern" -eq 1 ] || continue
       roster=$((roster+1))
       if [ "$hand" -eq 1 ]; then
