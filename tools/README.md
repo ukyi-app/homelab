@@ -885,8 +885,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `scaffoldRepos` 선언이고, 파생 0건은 통과가 아니라 `greenfield` 상태로 stderr·JSON·telegram ident에 명시된다.
   **errors 사유 축**: 404/403=`absent-or-private`(레포 삭제·private 전환·경로 리네임 — 비인증 fetch로는 구별
   불가라 drift로 승격하지 않는다) · 그 외=`transient`. 라이브 raw fetch는 기본 모드 전용이다.
-- **`verify-db-marker.ts`** — `_create-database.yaml` PostSync에서 provision-db 마커(role 비번 적용 등)를
-  검증(fail-closed — 마커 부재=비-0). 읽기 전용.
+- **`verify-db-marker.ts`** — provision-db 마커 ConfigMap(`db-<name>-ready`: owner/ro Secret resourceVersion)이 현재 Secret과
+  일치하는지 검증(fail-closed — 마커 부재·stale=비-0). 읽기 전용, **owner-local**(KUBECONFIG). 프로덕션 호출자는 없다 — `_create-database.yaml`은
+  `contents: read` PR 생성기라 클러스터에 닿지 않는다(2026-09-09 정정; 등식을 PostSync 훅으로 당기는 판단은 `.scratch/homelab-cli-r2/issues/52`).
 - **`fixture-memory-ratios.ts`** — 발화 e2e 픽스처(VM import 포맷 — 줄당 하나의 JSON 시계열)에서 한 컨테이너의 메모리
   비율 **세 축**(working_set · usage−cache · usage−inactive−active)을 내고 커널 물리 항등식을 검증한다.
   ⚠️ 레포 상태를 보는 가드가 아니라 **테스트 하네스가 부르는 오라클**이다 —
