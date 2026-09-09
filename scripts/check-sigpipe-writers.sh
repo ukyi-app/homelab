@@ -42,6 +42,9 @@
 #        grep -q"로 넓히면 무관 파이프(`printf '%s' "$var" | grep -qE` 등 26곳)가 신규 오탐으로
 #        뒤집힌다(실측) — 그래서 코드는 넓히지 않는다. 새 라이브 사례가 나오면 그 형태를 키워드에
 #        준해 개별 케이스로 추가한다.
+#    (c) [2026-09-08] 조기 종료 소비자 `awk '… exit'` — writer를 가리지 않고 소비자를 잰다(본문 (c)).
+#    (d) [2026-09-09] 조기 종료 소비자 `| head` — (c)와 같은 원리. 라이브 실증은 restore-drill의 RPO 마커 INSERT
+#        (본문 (d)). 형제 후보(`| sed … q`·`| grep -m1`)는 현 트리 0건이라 이번 분모 밖 — 새 사례가 나오면 추가한다.
 # ③ 주석 줄은 대상이 아니다 — 이 파일과 traps-detail이 그 관용구를 **설명**하기 때문이다
 #    (이 레포의 「규약을 설명한 파일이 그 규약에서 면제된다」 클래스를 반대로 밟지 않으려는 것).
 #    ⚠️ 이 면제는 **패턴 안이 아니라 별도 단계**에서 한다(2026-09-01 정정). 종전에는 패턴 앞에
@@ -91,7 +94,19 @@ while IFS= read -r f; do
   #     `|`가 없어 매치되지 않고, `exit` 없는 awk는 끝까지 소비하므로 안전하다.
   hits_awk="$(grep -nE '\|[[:space:]]*awk[[:space:]][^|]*\bexit\b' "$f" \
     | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
-  hits="$(printf '%s\n' "$hits_builtin" "$hits_cmd" "$hits_awk" | grep -v '^$' | LC_ALL=C sort -t: -k1,1n -u || true)"
+  # (d) [2026-09-09] **head 소비자** — `| head -N`도 첫 N줄(또는 N바이트)을 읽고 닫는 조기 종료 소비자다. 실증:
+  #     restore-drill-script.sh의 RPO 마커 INSERT `_live_psql … | head -1` — PG 18 psql이 `INSERT 0 1` 상태 태그를
+  #     둘째 write로 내므로 head가 첫 줄에서 닫으면 그 write가 SIGPIPE를 맞아 **성공한 쓰기가 "라이브에 쓰지
+  #     못했다"로 보고**됐다(같은 모양의 스텁 파이프라인: 무부하 800회 중 1회, CPU 포화 아래 2500회 중 343회 141 —
+  #     docs/traps-detail.md 「파일 단위 병렬 bats에서 …」). (c)와 같이 writer를 가리지 않고 소비자를 잰다 —
+  #     writer가 단일 write인지는 정적으로 못 가르고(버퍼링 단위·출력 크기·Go 런타임의 무버퍼 stdout),
+  #     bats 병렬화로 CI 부하가 올라 잠복이 깨어난다. 처방: writer 쪽에서 끝내거나(`sed -n '/re/{p;q}'` ·
+  #     `grep -m1`) **캡처를 별도 문장으로 두고** herestring(`head -n1 <<<"$out"`)으로 자른다 — 별도 문장이어야
+  #     `set -e`/pipefail 아래 writer의 실패 전파(`|| fail`·`|| x=""`)가 보존된다. `head -n1 <<<"$v"`는 `|`가 없어
+  #     매치되지 않는다.
+  hits_head="$(grep -nE '\|[[:space:]]*head\b' "$f" \
+    | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  hits="$(printf '%s\n' "$hits_builtin" "$hits_cmd" "$hits_awk" "$hits_head" | grep -v '^$' | LC_ALL=C sort -t: -k1,1n -u || true)"
   [ -n "$hits" ] || continue
   while IFS= read -r h; do
     [ -n "$h" ] || continue
@@ -112,7 +127,8 @@ if [ -n "$bad" ]; then
   echo "      거짓 FAIL이 날 수 있고, 부하가 높을수록 실패율이 오른다(로컬이 CI를 예고하지 못한다)." >&2
   echo "      처방: \`grep -q PATTERN <<<\"\$var\"\` (herestring — 파이프가 없어 레이스가 원리적으로 사라진다)" >&2
   echo "      awk '… exit' 소비자도 같다(레인 c): writer를 먼저 변수로 받고 \`awk '…' <<<\"\$var\"\`" >&2
+  echo "      파이프 뒤의 head 소비자도 같다(레인 d): writer 쪽에서 끝내거나(sed '{p;q}' · grep -m1) 캡처를 별도 문장으로 두고 \`head -n1 <<<\"\$out\"\`" >&2
   printf '%s' "$bad" >&2
   exit 1
 fi
-echo "check-sigpipe-writers OK (pipefail 셸 ${scanned}개 스캔, 다중행 writer→grep -q 파이프 0곳 · awk exit 조기 종료 소비자 0곳)"
+echo "check-sigpipe-writers OK (pipefail 셸 ${scanned}개 스캔, 다중행 writer→grep -q 파이프 0곳 · awk exit 조기 종료 소비자 0곳 · head 소비자 0곳)"

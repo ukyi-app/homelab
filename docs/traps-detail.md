@@ -2201,8 +2201,10 @@ selfHeal과 플립플롭한다.
   `platform/cnpg/prod/restore-drill-script.sh`의 RPO 마커 INSERT가 `_live_psql … | head -1`이라, PG 18 psql이 둘째 줄로
   내는 `INSERT 0 1` 상태 태그 write가 SIGPIPE를 맞아 성공한 쓰기가 "라이브에 쓰지 못했다"로 보고됐다(같은 모양의 스텁
   파이프라인: 무부하 800회 중 1회 · CPU 포화 아래 2500회 중 343회 141 — bats 병렬화가 깨웠다, 「파일 단위 병렬 bats에서
-  …」 참조). 처방은 같다: 캡처 뒤 `head -n 1 <<<"$out"`. `check-sigpipe-writers.sh`의 분모는 아직 `grep -q`·`awk exit`
-  소비자뿐이라 `head` 소비자(발화 e2e 하네스에 20여 곳)는 손으로 지킨다 — 후속 후보.
+  …」 참조). 처방은 같다: writer 쪽에서 끝내거나(`sed -n '/re/{p;q}'`·`grep -m1`) **캡처를 별도 문장으로 두고**
+  `head -n1 <<<"$out"`. 별도 문장이어야 `set -e`/pipefail 아래 writer의 실패 전파(`|| fail`·`|| x=""`)가 보존된다.
+  `check-sigpipe-writers.sh` 레인 (d)가 `| head` 소비자를 writer 무관하게 잰다(같은 날 전 트리 44곳 전환 — 발화 e2e
+  하네스·lib·host-preflight·dr-drill·seed-secrets). 형제 후보 `| sed … q`·`| grep -m1`은 현 트리 0건이라 분모 밖.
 > 가드: `scripts/check-sigpipe-writers.sh`, `tests/gates/test_sigpipe-writers.bats`
 ### 서브쿼리 step이 스크레이프 간격보다 크면 peak가 조용히 과소평가된다 — 그 위에서 깎은 limit이 회귀가 된다
 - 2026-09-01, 메모리 원장의 마진 규약(`limit ≥ A′ peak × 2.0`)이 A′를 `[14d:5m]` 서브쿼리로 쟀다.

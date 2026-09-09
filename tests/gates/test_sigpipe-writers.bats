@@ -198,3 +198,40 @@ FIXEOF
   unseed
   [ "$status" -eq 0 ]
 }
+
+# ── 레인 (d): `| head` 조기 종료 소비자 ─────────────────────────────────────────────────────────
+# restore-drill의 `_live_psql … | head -1`이 성공한 쓰기를 실패로 보고하던 클래스(2026-09-09). writer를 가리지 않는다.
+
+@test "flags a head consumer fed by a pipe at column 0 (lane d)" {
+  seed "x=\"\$(kubectl get pods | head -1)\"\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF '| head -1'
+}
+
+@test "flags an indented head consumer with the -n form and a scalar printf writer (lane d measures the consumer)" {
+  seed "  first=\"\$(printf '%s' \"\$v\" | head -n 1)\"\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -ne 0 ]
+}
+
+@test "does not flag the prescribed capture-then-herestring form of a head consumer (lane d)" {
+  seed "out=\"\$(kubectl get pods)\" || out=''\nfirst=\"\$(head -n1 <<<\"\$out\" | cut -d' ' -f1)\"\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -eq 0 ]
+}
+
+@test "does not flag a whole-line comment documenting the head idiom, and names lane d in the prescription (lane d)" {
+  seed "# 예전 형태: cmd | head -1 (금지)\nx=1\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -eq 0 ]
+  seed "x=\"\$(sed -n 's/^a=//p' f | head -1)\"\n"
+  run bash "$GUARD"
+  unseed
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF '레인 d'
+}
