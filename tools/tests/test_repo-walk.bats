@@ -455,19 +455,162 @@ _fixture_repo() {
   [ "$output" == "true,false" ]
 }
 
+# ── image-ownership 루트 로스터 ───────────────────────────────────────────────────────────────
 # ⚠️ 이 단언은 예전에 루트를 **옵셔널**로 써서(`(ops\+)?`) 실제로는 아무 루트도 강제하지 못했다 —
-# `ops` 분기가 죽어 있어도 초록이었다(적대 검토 지적). 이제 **정확한 집합**으로 못박는다.
+# `ops` 분기가 죽어 있어도 초록이었다(적대 검토 지적). 그래서 **정확한 집합**으로 못박는다.
 # 루트가 하나라도 빠지면 그 경로의 이미지가 "전건 소유자 확정"이라는 초록 아래에서 조용히 사라진다.
-@test "image-ownership covers exactly platform, ops and infra (no root silently missing)" {
-  # ⚠️ 루트는 매니페스트가 있을 때만 나타난다 — `apps`가 빠진 것은 스코프 파손이 아니라 **인-레포 배포 앱이
-  #    0개**이기 때문이다(page 2026-09-08 재온보딩 #691 → 같은 날 철거 드릴 #698; 양방향 모두 이 단언이 red로
-  #    알려줬다 — 의도된 동작). 앱을 다시 온보딩하면 `apps+`를 되돌린다(0↔1 손 단계: apps/README.md).
-  run walk 'const p = walkManifests("image-ownership").map(e=>e.path);
+# 그 이빨은 그대로 두고, 앱 개수 0↔1에서 손으로 `apps+`를 넣고 빼던 부분만 파생으로 옮긴다
+# (온보딩 #691·철거 #698 양방향 모두 이 상수가 gate red로 손 단계를 알려줬다 — 비용은 gate 1사이클).
+
+# 앱 유닛 열거 — **image-ownership 스코프와 독립**이다. 독립은 두 축 다여야 한다:
+#   ① 기판 — 이쪽은 **디스크**를 셸 글롭으로 본다. 대조 대상은 `source: "tracked"`라
+#      `git ls-files`로 열거한다(tools/lib/repo-walk.ts의 image-ownership 정의 · trackedPaths()).
+#   ② 필터 — 이쪽은 경로 글롭 하나뿐이고, 저쪽은 SCOPES의 include/exclude 정규식(bun)이다.
+# 앞선 판은 이 함수도 `git ls-files`를 써서 ①을 공유했다(적대 검토 지적). 그러면 `apps/`가 추적에서
+# 빠지는 순간 기대와 실제가 **동시에** apps를 떨궈 대조가 공허해진다 — 실측: 앱 유닛이 디스크에
+# 실재하는데 양쪽 다 `infra+ops+platform`이라 조용한 ok였다. 두 축의 증인이 아래 레인 둘이다:
+# 「exists on disk but is untracked」(①) · 「the scope loses all apps manifests」(②).
+# ⚠️ 대가는 디스크에 있고 아직 `git add`되지 않은 앱이 실 트리 레인을 red로 만드는 것이다 —
+#    로컬 한정이고(CI는 clone이라 추적 밖 파일이 없다) fail-closed 방향이며, 그 red의 출력
+#    (`기대 apps+… / 실제 infra+…`)이 곧 "추적되지 않은 앱 유닛이 있다"는 진단이다.
+# 판정 기준을 `values.yaml`로 잡은 이유는 배포 앱 계약의 필수 산출물이기 때문이다(apps/README.md).
+# ⚠️ 이 필터는 유닛 스코프(`listUnits("apps")`)와 **의도적으로 다르다** — 저쪽은 필수 산출물로
+#    거르지 않는다(check-app-deploy가 그 파일의 **부재**를 잡아야 하므로). 그래서 values.yaml 없는
+#    반쪽 앱 디렉토리는 여기서 apps 루트 불일치 red로 나타나지만(fail-closed), 그 클래스의 권위는
+#    이 로스터가 아니라 check-app-deploy다 — 문구가 로스터를 가리켜도 원인은 계약 산출물 부재다.
+# 셸 글롭이라 실패 채널이 없다 — 무매치면 패턴이 리터럴로 남고 `[ -e ]`가 거짓이라 0이다.
+_has_app_unit() { # $1 = repo root → 1(앱 유닛 ≥ 1) | 0
+  local f
+  for f in "$1"/apps/*/deploy/prod/values.yaml; do
+    if [ -e "$f" ]; then echo 1; return 0; fi
+  done
+  echo 0
+}
+
+# 기대 루트 집합 = {infra, ops, platform} ∪ ({apps} iff 인-레포 배포 앱 유닛 ≥ 1). 정렬 결합이라
+# apps가 맨 앞이다. 세 루트는 상수로 남는다 — 그게 이 단언의 이빨이고, 하나라도 사라지면 red다.
+# 앱 축만 파생이라 앱 온보딩·철거가 이 파일을 손대지 않는다(0↔1 손 단계 제거).
+_expected_roster() { # $1 = repo root
+  local apps; apps="$(_has_app_unit "$1")"
+  if [ "$apps" = 1 ]; then echo "apps+infra+ops+platform"; else echo "infra+ops+platform"; fi
+}
+
+# 실제 루트 집합 + 하네스 건수. 하네스는 0이어야 한다 — 픽스처 안의 이미지 문자열은 실물이 아니라
+# **주장**이라 소유자가 없는 게 정상이고, 그것이 회계 분모에 섞이면 초록이 무의미해진다.
+_actual_roster() { # $1 = repo root
+  walk 'const p = walkManifests("image-ownership", ROOT).map(e=>e.path);
     const roots = [...new Set(p.map(x=>x.split("/")[0]))].sort();
     const harness = p.filter(x=>/(^|\/)tests?\/|(^|\/)fixtures|(^|\/)test_[^/]*$|\.bats$/.test(x));
-    console.log(roots.join("+") + "|" + harness.length)'
+    console.log(roots.join("+") + "|" + harness.length)' "$1"
+}
+
+# 로스터 전용 픽스처 — 루트 3개(platform·ops·infra)를 채우고 앱 유닛만 인자로 켠다. 별도 픽스처를
+# 쓰는 이유는 `_fixture_repo`와 같다: 위 픽스처들에 ops/infra를 넣으면 그쪽 정확-일치 단언과 결합된다.
+# $1 = 앱 유닛 경로(빈 값이면 앱 0개) · $2 = 변형 모드(빈 값 = 정상 트리 | drop-ops = ops 루트를 비움 |
+#      untrack-apps = 앱 유닛을 디스크에만 두고 `apps/`를 .gitignore로 추적 밖에 둔다).
+# ⚠️ 변형 값은 **레인이 실제로 주는 것만** 둔다. 앞선 판은 platform·infra를 비우는 분기도 뒀는데
+#    어떤 호출자도 그 값을 주지 않아 두 분기를 삭제해도 전건 초록이었다(적대 검토 실측: not ok 0건,
+#    rc 0). 지키는 것 없는 규칙은 곧 "아무도 대조하지 않는 주장"이라, 같은 이유로
+#    tools/lib/repo-walk.ts가 죽은 제외 규칙을 지웠다 — 필요해지면 그때 레인과 함께 되살린다.
+#    모르는 값은 정상 트리로 접히지만 각 레인이 기대·실제 문자열을 **정확히** 단언하므로 오타는
+#    조용한 초록이 아니라 red로 나온다.
+_fixture_roster() {
+  local t; t="$(mktemp -d)"
+  mkdir -p "$t/platform/comp/prod" "$t/ops/pg-tools" "$t/infra/k3s-bootstrap/storage"
+  echo 'kind: Deployment' > "$t/platform/comp/prod/deploy.yaml"
+  echo 'kind: DaemonSet' > "$t/infra/k3s-bootstrap/storage/prov.yaml"
+  if [ "${2:-}" != drop-ops ]; then echo 'FROM alpine' > "$t/ops/pg-tools/Dockerfile"; fi
+  if [ -n "${1:-}" ]; then
+    mkdir -p "$t/$1/deploy/prod"
+    echo 'image: {}' > "$t/$1/deploy/prod/values.yaml"   # 배포 앱 계약의 필수 산출물(apps/README.md)
+  fi
+  # 온보딩 중간 상태의 모형 — 파일은 디스크에 있는데 `git add`가 아직 안 됐다.
+  if [ "${2:-}" = untrack-apps ]; then printf 'apps/\n' > "$t/.gitignore"; fi
+  git -C "$t" init -q; git -C "$t" add -A
+  echo "$t"
+}
+
+@test "image-ownership covers exactly the roots derived from the tree (no root silently missing)" {
+  exp="$(_expected_roster "$ROOT")"
+  run _actual_roster "$ROOT"
+  echo "$output (기대 ${exp}|0)"
   [ "$status" -eq 0 ]
-  [ "$output" == "infra+ops+platform|0" ]
+  [ "$output" = "${exp}|0" ]
+}
+
+# 0-앱 트리 — 실 트리의 기본값이 여기 산다. `apps`가 빠진 것은 스코프 파손이 아니라 인-레포 배포 앱이
+# 없는 정상 상태다(그 사실을 실 트리 단언이 상수로 지고 있었던 게 0↔1 손 단계의 정체다).
+@test "roster expectation drops apps when the tree has no in-repo app unit" {
+  tmp="$(_fixture_roster "")"
+  exp="$(_expected_roster "$tmp")"
+  run _actual_roster "$tmp"
+  echo "$output (기대 ${exp}|0)"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$exp" = "infra+ops+platform" ]
+  [ "$output" = "${exp}|0" ]
+}
+
+# 1-앱 트리 — 앱 하나가 온보딩되면 기대가 **스스로** apps를 얻어야 한다(손 편집 없이).
+@test "roster expectation adds apps as soon as one in-repo app unit exists" {
+  tmp="$(_fixture_roster apps/probe)"
+  exp="$(_expected_roster "$tmp")"
+  run _actual_roster "$tmp"
+  echo "$output (기대 ${exp}|0)"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$exp" = "apps+infra+ops+platform" ]
+  [ "$output" = "${exp}|0" ]
+}
+
+# 글롭 붕괴 — 앱 유닛은 열거되는데 스코프가 apps 매니페스트를 **0건** 낸다. 고정하는 **판정**은
+# 기전과 무관하다(include가 좁아져도, 제외가 넓어져도 같은 상태다): 독립 열거가 앱을 보는 한 기대는
+# 여전히 `apps`를 요구하고 그 자리는 red다. 기대를 image-ownership 자신에서 파생시키면 red가 사라진다.
+# ⚠️ 다만 **이 픽스처**는 그 상태를 공유 하네스 어휘(`tests?/`)가 앱 경로를 삼키게 해서 만든다 —
+#    즉 `TEST_HARNESS`를 정당하게 손보면 이 레인도 함께 움직인다(실측: image-ownership의
+#    `exclude: TEST_HARNESS`를 `[]`로 바꾸면 이 레인과 실 트리 레인이 같이 not ok). 그때 고칠 것은
+#    로스터가 아니라 붕괴를 만드는 픽스처 경로다.
+@test "roster expectation stays red when the scope loses all apps manifests" {
+  tmp="$(_fixture_roster apps/tests)"
+  exp="$(_expected_roster "$tmp")"
+  run _actual_roster "$tmp"
+  echo "$output (기대 ${exp}|0)"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$exp" = "apps+infra+ops+platform" ]   # 독립 열거는 그 앱 유닛을 본다
+  [ "$output" = "infra+ops+platform|0" ]   # 스코프는 apps를 하나도 안 낸다
+  [ "$output" != "${exp}|0" ]              # ⇒ 실 트리 단언 자리에서 red
+}
+
+# 두 열거의 **기판**이 갈리는 자리 — 앱 유닛이 디스크에 실재하는데 git 추적 밖이다. 기대는 디스크
+# 실재에서 나오므로 `apps`를 요구하고, tracked 스코프(`image-ownership`의 source)는 그 파일을 아예
+# 보지 못한다 ⇒ red. 이 레인이 없으면 그 축에 증인이 없다: 기대를 git 열거로 뽑으면 기대와 실제가
+# **함께** apps를 떨궈 조용한 초록이 된다(적대 검토 실측 — git 판정 0 · 스코프 0 · ok).
+# 실 트리에서 이 red를 보는 것은 "앱을 만들었는데 아직 추적되지 않았다"는 정직한 신호다(fail-closed).
+@test "roster expectation still demands apps when an app unit exists on disk but is untracked" {
+  tmp="$(_fixture_roster apps/probe untrack-apps)"
+  exp="$(_expected_roster "$tmp")"
+  run _actual_roster "$tmp"
+  echo "$output (기대 ${exp}|0)"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$exp" = "apps+infra+ops+platform" ]   # 독립 열거는 디스크 실재를 본다
+  [ "$output" = "infra+ops+platform|0" ]   # tracked 스코프는 추적 밖 파일을 못 낸다
+  [ "$output" != "${exp}|0" ]              # ⇒ 실 트리 단언 자리에서 red
+}
+
+# 기존 이빨의 직접 증인 — 루트 하나(ops)가 사라지면 기대는 그대로인데 실제가 못 미친다.
+# 옵셔널 루트로 쓰던 옛 판이 조용히 통과시키던 바로 그 자리다.
+@test "roster expectation stays red when another root (ops) goes missing" {
+  tmp="$(_fixture_roster apps/probe drop-ops)"
+  exp="$(_expected_roster "$tmp")"
+  run _actual_roster "$tmp"
+  echo "$output (기대 ${exp}|0)"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$exp" = "apps+infra+ops+platform" ]
+  [ "$output" = "apps+infra+platform|0" ]
+  [ "$output" != "${exp}|0" ]
 }
 
 @test "image-ownership includes Dockerfiles (base images are supply chain, and ops/ would be dead without them)" {
