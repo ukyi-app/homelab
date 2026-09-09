@@ -68,8 +68,10 @@ cli_stub_init() {
   printf '[]\n' > "$FIX/db-run-jobs.json"
   # 신선도 스냅샷 픽스처 — STUB_GH_STALE_RUN=1 전용. **디스패치 전에 이미** 같은 nonce를
   # 에코하던 옛 완료 run이다(고정 nonce가 프로덕션에서 켜졌을 때의 형상). 투영이 스냅샷 질의와
-  # 같아야 한다: 신원(id·name)만 — 상태·URL은 채택하지 않을 run에 대해 의미가 없다.
-  printf '[{"id":501,"name":"✨ create-database — mydb [%s]"}]\n' "$NONCE" > "$FIX/stale-runs.json"
+  # 같아야 한다: 신원(id·name) + status·html_url — 뒤 둘은 같은 질의의 두 번째 소비자(변이 엔진의
+  # run 축 preflight)가 읽는 축이라, 여기서 빠지면 그 축이 미판정으로 눈을 감는다.
+  # 이 행은 **완료된** 옛 run이다 — 그래서 run 축은 물지 않고 신선도 배제만 걸린다.
+  printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/stale-runs.json"
   # ⚠️ `state`·`head_sha`는 **기본값**이다 — 실물 응답은 항상 싣고, 없으면 엔진의
   # required check 관측이 좌표 부재로 눈을 감는다(그 상태 자체가 pendingReason 접미로 보고된다).
   printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
@@ -295,7 +297,7 @@ case "$*" in
   #    기본은 공집합: 프로덕션의 랜덤 nonce 경로가 그렇고, 이 하네스의 고정 nonce 픽스처(run이
   #    처음부터 있다)를 '디스패치 전에도 있었다'로 읽으면 모든 레인이 채택 불가가 된다.
   #    STUB_GH_STALE_RUN=1이면 같은 nonce를 에코하는 **옛** run을 돌려준다(채택 금지 증인).
-  "api repos/ukyi-app/homelab/actions/workflows/"*"/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name}]')
+  "api repos/ukyi-app/homelab/actions/workflows/"*"/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, html_url}]')
     # STUB_GH_SNAPSHOT_FAIL: 스냅샷 질의만 전송 오류 — 신선도 배제와 run 축 preflight가 함께
     # 눈을 감는 상(fail-open)의 증인. STUB_GH_RUNS_FAIL(status 동사의 runs 목록)과 이름을
     # 의도적으로 분리한다 — 재사용하면 어느 레인이 죽었는지 못 가른다.

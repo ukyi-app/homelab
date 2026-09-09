@@ -174,7 +174,7 @@ const numFlag = (flags: TypedFlags, k: string): number | undefined => {
 // 두 사실을 함께 말한다: 무엇을 막는가, 그리고 **권위가 아니다** — 관측 부재는 fail-open이라 조회가
 // 실패하면 이 검사가 조용한 채로 디스패치가 그대로 나간다(권위는 디스패처의 실행기 가드다).
 const PREFLIGHT_LINES = [
-  "디스패치 전에 같은 레인·같은 키의 열린 PR을 1회 조회해, 있으면 그 PR 핸들과 함께 거부한다",
+  "디스패치 전에 같은 레인·같은 키의 열린 PR과 미완료 run을 1회씩 조회해, 있으면 그 핸들과 함께 거부한다",
   "(중복 디스패치가 만드는 BEHIND→충돌 영구 정지의 예방 — 조회가 실패하면 그대로 디스패치한다).",
 ];
 const WAIT_FLAG_LINES = [
@@ -203,10 +203,10 @@ const needsLines = (verb: { needs: string }): string[] => [`요구: ${verb.needs
 // 문구가 셸에 있는 이유: 엔진은 표현을 모른다(op는 Envelope만 반환) — 그래서 MCP는 이 sink를
 // 주입하지 않고, 같은 엔진 호출이 stdio JSON-RPC 스트림을 오염시키지 않는다.
 const PROGRESS_LINE: Record<ProgressEvent["stage"], (e: ProgressEvent) => string> = {
-  // 중복 PR preflight가 눈을 감은 경우에만 나온다(성공 관측은 조용하다 — 정상 경로의 노이즈를
+  // 중복 디스패치 preflight(두 축 중 하나)가 눈을 감은 경우에만 나온다(성공 관측은 조용하다 — 정상 경로의 노이즈를
   // 늘리지 않는다). 극성이 fail-open이라 이 줄 뒤에도 디스패치는 그대로 나가므로, 문구가 그
   // 사실을 함께 말한다. Record 타입이라 새 stage를 더하면 여기 렌더가 없을 때 컴파일이 죽는다.
-  "preflight-blind": (e) => `진행: 중복 PR preflight 관측 실패(디스패치는 계속) — ${e.note}`,
+  "preflight-blind": (e) => `진행: 중복 디스패치 preflight 관측 실패(디스패치는 계속) — ${e.note}`,
   dispatched: (e) => `진행: 디스패치 접수 — correlation ${e.correlation}`,
   identified: (e) => `진행: run 식별 — ${e.runUrl}`,
   concluded: (e) => `진행: run 완료 — ${e.runUrl}`,

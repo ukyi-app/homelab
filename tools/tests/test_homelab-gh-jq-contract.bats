@@ -44,7 +44,7 @@ setup() {
     [ "$status" -eq 3 ]
   done <<'EOF'
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name, status, conclusion, html_url}]
-tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name}]
+tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name, status, html_url}]
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/runs/501/jobs%[.jobs[] | select(.conclusion == "failure") | .name]
 tools/lib/mutation.ts%repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=100%[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]
 tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501%[.[] | {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}]%{number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}
@@ -61,7 +61,9 @@ EOF
   [ "$(grep -cF '[.workflow_runs[] | {id, name, status, conclusion, html_url}]' tools/tests/helpers/cli_stub.bash)" = "5" ]
   # 신선도 스냅샷의 투영은 **경로만 글롭인 한 케이스**가 5레인을 다 받는다 — 응답이 레인
   # 무관(기본 공집합)이라 사본을 다섯 벌 두면 드리프트 표면만 늘어난다. 그래서 여기는 1건이다.
-  [ "$(grep -cF '[.workflow_runs[] | {id, name}]' tools/tests/helpers/cli_stub.bash)" = "1" ]
+  # 식별 루프와 텍스트가 다른 것(conclusion 유무)이 계약이다 — 같아지면 이 글롭 케이스가 식별
+  # 질의까지 삼켜 다섯 레인 픽스처가 통째로 죽는다.
+  [ "$(grep -cF '[.workflow_runs[] | {id, name, status, html_url}]' tools/tests/helpers/cli_stub.bash)" = "1" ]
 }
 
 @test "the workflow_runs unwrap and the head.ref nesting are witnessed against raw payloads (real jq)" {

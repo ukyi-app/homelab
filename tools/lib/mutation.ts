@@ -177,9 +177,46 @@ export function latestCheckRun(rows: CheckRunRow[]): CheckRunRow | undefined {
   return best;
 }
 
-// 신선도 스냅샷의 투영 — 디스패치 **전** 질의라 신원(id·name)만 본다. 식별 루프의
-// 투영과 텍스트가 다른 것이 계약이다: 스텁·jq 계약 테스트가 두 질의를 각각 정확 일치로 잡는다.
-const PRE_RUNS_JQ = "[.workflow_runs[] | {id, name}]";
+// 신선도 스냅샷의 투영 — 디스패치 **전** 질의이고 소비자가 둘이다:
+//   ① 신선도 배제(id·name — 같은 nonce를 에코하는 **옛** run은 내 run이 아니다, 아래 0b절)
+//   ② 중복 디스패치 preflight의 **run 축**(status·html_url — 같은 키의 미완료 run이면 거부).
+// ②를 여기 얹는 이유: 열린 PR만 보는 축은 "디스패치는 됐는데 PR이 아직 없는" 창을 원리적으로
+// 못 본다(라이브 실측 ~30초 — 아래 0a절 잔존 위험 문단). 이 질의는 원래도 디스패치 전에 나가므로
+// 그 창을 닫는 데 드는 API 호출은 0건이고, 넓어지는 것은 투영뿐이다.
+// 식별 루프의 투영과 텍스트가 다른 것이 계약이다(conclusion 유무): 스텁의 케이스 분기가 그 차이로
+// 갈리고, jq 계약 테스트가 두 질의를 각각 정확 일치로 잡는다.
+const PRE_RUNS_JQ = "[.workflow_runs[] | {id, name, status, html_url}]";
+type PreRunRow = { id: number; name: string; status?: string; html_url?: string };
+
+// 디스패처 run-name의 **키 에코** 문법 — 5벌이 한 형상을 공유한다:
+//   "<이모지> <action> — <key>[ [<correlation>]]"
+//   (create-database.yaml:6 · create-cache.yaml:5 · create-app.yaml:5 · update-secrets.yaml:4 ·
+//    teardown-app.yaml:5 — 앞 둘은 inputs.name, 뒤 셋은 inputs.app을 에코한다.)
+// ⚠️ 이 상수는 그 YAML의 **사본**이다 — correlation 에코 `[{0}]`와 같은 처지이고(YAML은 TS를
+//    import할 수 없다), 그래서 양끝 대조를 가드가 진다: test_mutation-dispatch.bats의 key echo
+//    guard가 이 상수를 import해 5벌 전수와 맞춘다. 대조 없이 상류가 구분자를 바꾸면 키 추출이
+//    실패해 매치가 0건이 되고, 손해 방향이 fail-open(거부 없음)이라 어떤 색도 변하지 않는다.
+export const RUN_NAME_KEY_SEP = " — ";
+// 키 복원 후 **정확 일치**로 판정한다 — 접두 비교면 하이픈 형제가 오귀속된다(`mydb` ↔
+// `mydb-extra`). 레인 브랜치 판정이 tail 형식까지 보는 것과 같은 이유다.
+// 꼬리의 ` [<correlation>]`은 선택적이다: 웹 UI 수동 실행은 correlation이 빈값이라 에코가 없다.
+export function runNameEchoesKey(name: string, key: string): boolean {
+  const cut = name.indexOf(RUN_NAME_KEY_SEP);
+  if (cut < 0) return false;
+  const rest = name.slice(cut + RUN_NAME_KEY_SEP.length);
+  const corr = rest.endsWith("]") ? rest.lastIndexOf(" [") : -1;
+  return (corr > 0 ? rest.slice(0, corr) : rest) === key;
+}
+
+// run 상태의 **종결 집합**(여집합이 미완료) — GATE_PASSING과 같은 뒤집기다: 상류가 어휘를 더해도
+// (queued·in_progress·waiting·requested·pending …) 기본값이 '미완료'라 fail-closed다.
+// ⚠️ 단 **부재·빈 문자열은 미판정**이다. 그건 어휘가 아니라 관측 자체의 부재(투영 드리프트·응답
+//    형상 변경)이고, 이 모듈 규약은 그 자리에서 fail-open이다 — 우리 jq가 깨졌다는 이유로 정당한
+//    변이를 막지 않는다.
+const RUN_TERMINAL = "completed";
+function runInFlight(status: string | undefined): boolean {
+  return typeof status === "string" && status !== "" && status !== RUN_TERMINAL;
+}
 
 // 진행 이벤트 — 엔진은 **이벤트만** 낸다. 문구·싱크는 셸(homelab.ts)이 소유하고 MCP는
 // 주입하지 않는다(stdio JSON-RPC 스트림 무오염). op가 Envelope만 반환한다는 원칙은 그대로다:
@@ -274,17 +311,27 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
     opts.onProgress?.({ stage, correlation, ...handles });
   };
 
-  // 0a) 중복 디스패치 preflight — 같은 레인·같은 키의 **열린** PR이 있으면 디스패치하지 않는다.
+  // 0a) 중복 디스패치 preflight — 같은 레인·같은 키의 변이가 **이미 진행 중**이면 디스패치하지
+  // 않는다. 관측 축이 둘이고 시간축에서 이어 붙는다: 여기(0a)가 **열린 PR**, 아래 0b가 **미완료
+  // run**이다. run이 PR을 만들기까지 걸리는 시간(라이브 실측 ~30초)이 PR 축의 사각이라 축 하나로는
+  // 이 티켓의 트리거를 덮지 못한다.
   // 병소(2026-09-06 실물 #669·#670 — 41초 간격 create-database mydb 2건): 실행기 가드
-  // (provision-db.ts:88·provision-cache.ts:60)는 디스패처가 `ref: main`으로 체크아웃한 **main 기준**이라
+  // (provision-db.ts:92-93·provision-cache.ts:60)는 디스패처가 `ref: main`으로 체크아웃한 **main 기준**이라
   // 첫 PR이 미머지인 동안 두 번째 run도 통과해 PR을 낸다. 둘 다 auto-merge 무장 → 하나가 머지되면
   // 나머지는 BEHIND → pr-sweeper의 update-branch가 같은 파일의 다른 봉인 암호문과 충돌 → auto-merge
   // 영구 정지(pr-sweeper.yaml:87-101이 DIRTY를 자기 사각지대로 이미 명문화했다). CLI는 두 호출 모두
   // success로 봤다. 그 두 번째 디스패치를 여기서 끊는다.
-  // ⚠️ **권위가 아니라 UX 조기 경고다.** 이 조회와 아래 디스패치 사이 TOCTOU가 원리적으로 남는다
-  //    (직후에 열린 PR은 못 본다 · 실행기 가드와 달리 `queue: max` 직렬화 안쪽이 아니다). 그래서
-  //    실행기 가드는 이 검사로 **완화하지 않는다** — 권위는 여전히 저쪽이고 여기는 20분짜리 왕복과
-  //    사람이 닫아야 할 PR 하나를 아끼는 값싼 앞단이다.
+  // ⚠️ **권위가 아니라 UX 조기 경고다.** 잔존 위험 둘을 구별해 적는다:
+  //    ① 이 관측과 아래 디스패치 사이의 TOCTOU — 조회 **직후**에 열린 PR·시작된 run은 못 본다
+  //       (실행기 가드와 달리 `queue: max` 직렬화 안쪽이 아니다). 폭은 이 함수의 왕복 몇 초다.
+  //    ② **디스패치는 됐는데 산출물이 아직 없는 창** — 이쪽이 지배적이었다. 라이브 실측: run
+  //       34040809701의 created_at 2026-09-06T14:58:08Z ↔ 그 run이 만든 PR #669의 created_at
+  //       14:58:38Z = **30초**. 그 30초 안의 재실행은 PR 축에 원리적으로 안 보인다(실물 #670의
+  //       디스패치는 #669가 생긴 뒤 9초라 겨우 걸렸다 — 그보다 이른 재실행은 전부 통과했을 것이다).
+  //       0b의 run 축이 이 창을 닫는다. 남는 것은 run 목록 자체가 아직 그 run을 안 보여주는
+  //       더 좁은 창(GitHub 목록 endpoint의 read-replica 지연)이다.
+  //    그래서 실행기 가드는 이 검사로 **완화하지 않는다** — 권위는 여전히 저쪽이고 여기는 20분짜리
+  //    왕복과 사람이 닫아야 할 PR 하나를 아끼는 값싼 앞단이다.
   // 범위: 이 엔진을 쓰는 5레인 전부(create-database·create-cache·create-app·update-secrets·teardown-app).
   //    teardown-app **포함** 근거: 브랜치 문법이 같은 디스패치 레인 형상(`teardown/teardown-app-{key}-{runId}`)
   //    이고 두 번째 철거 PR도 첫 PR 머지 뒤 같은 경로 삭제에서 충돌한다. 수동 머지라 auto-merge 정지는
@@ -299,34 +346,67 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   // ⚠️ update-secrets 레인에서는 여기 도달 시 **연쇄가 이미 push했을 수 있다**(secrets.ts:105) —
   //    거부 문구가 "아무 일도 없었다"를 함의하면 안 되므로, 다음 행동은 재봉인이 아니라 열린 PR의
   //    처리라고 말한다(그 뒤 재실행은 --no-seal 재디스패치로도 수렴한다).
+  //    그리고 이 레인에서 "머지"와 "닫기"는 **등가가 아니다**: 열린 PR은 이전 디스패치의 것이라 옛
+  //    봉인 암호문을 담는데, 앱 레포 main에는 이미 새 봉인본이 올라가 있다. 머지하면 옛 값이 먼저
+  //    배선되고(파드 롤링 1회) 재실행해야 새 값으로 수렴한다 — 그래서 아래 문구는 두 선택지를
+  //    나란히 놓지 않고 **닫고 다시 실행**을 지목한다. 그 성질은 이 레인만의 것이 아니다: 어느
+  //    레인이든 열린 PR은 그때의 요청값이고, 이번 호출의 입력이 아니다.
   const conflict = openLaneConflict(spec.branchPattern, spec.key);
   if (conflict.kind === "hit") {
     // 결과 필드는 신설하지 않는다 — 기존 failure variant의 `pr` 핸들이 재개 좌표다.
     // merged:false는 관측이 아니라 질의의 성질이다(`state=open`은 미머지의 동의어다).
+    // ⚠️ 문구가 **먼저** 말하는 것은 "디스패치하지 않았다"이다: 이 봉투는 correlation을 들고
+    //    나가는데(mutationFailure가 그것을 필수로 요구한다) 그 nonce의 run은 GitHub에 존재하지
+    //    않는다 — 수령증처럼 읽히면 운영자·에이전트가 영원히 0건인 run을 찾는다. 결과 필드로
+    //    가르는 길(mutationRefused)은 이 레인에 없다: 그 variant의 action enum은 create-app과
+    //    update-secrets뿐이라 db/cache/teardown이 쓸 수 없다(스키마 생성기의 그 정의 주석이
+    //    이 세 번째 형상을 명문화한다).
     return fail(
-      `이미 진행 중인 PR — 같은 레인·같은 키의 열린 PR #${conflict.pr.number}(${conflict.pr.head})이 있다. 그 PR을 머지하거나 닫은 뒤 다시 실행한다(재디스패치는 같은 표면에 두 번째 PR을 만들고, 하나가 머지되면 나머지는 BEHIND→충돌로 영구 정지한다): ${conflict.pr.url}`,
+      `디스패치하지 않았다(이 correlation의 run은 존재하지 않는다) — 이미 진행 중인 PR: 같은 레인·같은 키의 열린 PR #${conflict.pr.number}(${conflict.pr.head})이 같은 표면을 잡고 있다. 그 PR은 이전 디스패치의 것이라 머지하면 그때의 요청값이 배선된다 — 이번 입력으로 가려면 그 PR을 닫고 다시 실행한다(재디스패치는 같은 표면에 두 번째 PR을 만들고, 하나가 머지되면 나머지는 BEHIND→충돌로 영구 정지한다): ${conflict.pr.url}`,
       { pr: { number: conflict.pr.number, url: conflict.pr.url, merged: false } },
     );
   }
   if (conflict.kind === "blind") emit("preflight-blind", { note: conflict.reason });
 
-  // 0) 신선도 스냅샷 — 디스패치 **전에** 이미 이 correlation을 에코하는 run의 **id 집합**을
+  // 0b) 신선도 스냅샷 **+ run 축 preflight** — 한 질의가 두 질문에 답한다.
+  // 신선도 스냅샷 — 디스패치 **전에** 이미 이 correlation을 에코하는 run의 **id 집합**을
   // 찍어 두고 채택에서 배제한다. 없으면 고정 nonce(HOMELAB_CORRELATION 주입)가 프로덕션에서 켜졌을 때
   // 같은 nonce의 **이전** run이 홀로 매치돼 옛 conclusion·옛 PR 핸들이 이번 실행의 결과로 보고된다
   // (수령증 루프의 설계 전제는 "디스패치 직후 첫 조회에 새 run이 아직 없다"이므로 0건 분기가 그 문을 연다).
   // 랜덤 nonce 경로에서는 이 집합이 **항상 공집합**이라 프로덕션 동작이 바뀌지 않고, created_at·시계에
   // 무의존이다(「GitHub API는 낡은 스냅샷을 200으로 돌려준다」 아래에서도 '디스패치 전에 보였다'는
   // 사실만 쓴다 — 낡은 스냅샷은 이 집합을 **좁힐** 뿐 넓히지 않는다).
-  // 투영이 식별 루프와 다른 이유: 여기서 필요한 것은 신원(id·name)뿐이고 상태·URL은 **채택하지 않을**
-  // run에 대해 의미가 없다. 두 질의는 서로 다른 시점의 서로 다른 질문이라 계약도 따로 진다.
-  // ⚠️ 스냅샷 조회 실패는 '배제 없음'(오늘의 동작)으로 접는다 — 이 관측은 **좁히기**이고, 여기서
-  // fail-closed로 죽이면 같은 endpoint의 지속 실패를 pendingReason이 지목하는 계약이 사라진다.
+  // run 축 preflight — 같은 레인(질의가 이미 `spec.workflow`로 좁혀져 있다)·같은 키의 **미완료**
+  // run이 있으면 거부한다. 이 축이 0a의 30초 사각을 닫는 자리이고, 판정은 run-name의 키 에코
+  // (runNameEchoesKey — 정확 일치)와 종결 집합의 여집합(runInFlight)이다.
+  // ⚠️ 자기 nonce를 에코하는 run은 **배제하지 않는다**: 디스패치 전이라 그건 이번 호출이 만든 run이
+  //    아니고(랜덤 nonce 경로에서는 애초에 공집합이다), 고정 nonce가 켜진 채 같은 키의 옛 run이
+  //    아직 돌고 있다면 그것도 진짜 중복이다. 종결 여부(status)가 그 판정을 혼자 진다.
+  // ⚠️ 관측 부재(gh 비-0·파싱 실패·배열 아님)는 두 소비자에 함께 걸린다 — 배제는 '없음'으로
+  //    접히고(이 관측은 **좁히기**라 fail-closed로 죽이면 지속 실패를 pendingReason이 지목하는
+  //    계약이 사라진다) run 축은 눈을 감는다. 조용히 삼키지 않고 사유를 진행 이벤트로 낸다(0a절 극성).
+  //    페이지 상한(per_page=20)은 blind로 세지 않는다: 목록은 created_at 내림차순이고 미완료 run은
+  //    정의상 최근이라, 20건 뒤로 밀리려면 그 사이에 같은 워크플로 run 20개가 새로 생겨야 한다
+  //    (`queue: max` 직렬화 아래에서 그 형상은 이 관측의 사각이 아니라 다른 사건이다).
   const runsPath = `repos/${HOMELAB_REPO}/actions/workflows/${spec.workflow}/runs?per_page=20`;
   const echoesNonce = (r: { name: string }): boolean => r.name.includes(`[${correlation}]`);
   const preExisting = new Set<number>();
   const snapshot = ghRead(runsPath, PRE_RUNS_JQ);
-  if (snapshot.kind === "ok") {
-    for (const r of snapshot.value as Array<{ id: number; name: string }>) if (echoesNonce(r)) preExisting.add(r.id);
+  const preRows: PreRunRow[] | null = snapshot.kind === "ok" && Array.isArray(snapshot.value) ? (snapshot.value as PreRunRow[]) : null;
+  if (preRows === null) {
+    emit("preflight-blind", { note: `run 목록 관측 부재 — ${snapshot.kind === "ok" ? "응답이 배열이 아니다(jq 투영/응답 형상 확인)" : snapshot.reason}` });
+  } else {
+    for (const r of preRows) if (echoesNonce(r)) preExisting.add(r.id);
+    // 재개 좌표는 run 핸들이다 — 이 창에서는 PR이 **원리적으로** 아직 없다(그래서 0a가 못 봤다).
+    // 그래서 `html_url` 부재도 status 부재와 같은 미판정이다: 좌표 없는 거부는 "뭔가 돌고 있다"만
+    // 남기고 다음 행동을 못 준다. 두 필드 다 실물 응답은 항상 싣는다 — 부재는 투영 드리프트다.
+    const busy = preRows.find((r) => runNameEchoesKey(r.name, spec.key) && runInFlight(r.status) && typeof r.html_url === "string" && r.html_url !== "");
+    if (busy !== undefined) {
+      return fail(
+        `디스패치하지 않았다(이 correlation의 run은 존재하지 않는다) — 이미 진행 중인 run: 같은 레인·같은 키의 미완료 run #${busy.id}(status ${busy.status})이 있다. Ctrl-C로 CLI를 끊어도 그 run은 계속 돈다 — 진행은 homelab status --run ${busy.html_url} 로 확인한다(정말 다시 디스패치하려면 Actions에서 그 run을 취소한 뒤 재실행).`,
+        { run: { id: busy.id, url: String(busy.html_url) } },
+      );
+    }
   }
 
   // 1) 디스패치 — 유일한 변이 argv. correlation이 run-name에 에코된다(수령증).
