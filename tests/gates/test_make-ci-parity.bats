@@ -55,29 +55,47 @@ setup() {
   #   `실 도메인 가드` 스텝의 커맨드 10건 중 원장엔 8건만 있었고, `check-locale-collation`·
   #   `check-gh-secret-coverage`가 빠진 채 오래 초록이었다(실측 2026-08-21). 그 목록이 곧
   #   AGENTS.md가 금지하는 하드코딩 소비처 목록이었다.
-  #   여기서는 그 사고를 **재현해** 방향 ⑦이 실제로 무는지 본다(픽스처는 원장 사본에만 가한다).
-  cp "$ROOT/policy/ci-parity.json" "$BATS_TEST_TMPDIR/orig.json"
-  run bun -e '
-    const fs = require("fs");
-    const p = "policy/ci-parity.json";
-    const d = JSON.parse(fs.readFileSync(p, "utf8"));
-    for (const s of d.steps) {
-      if (s.name.includes("실 도메인") && Array.isArray(s.local)) {
-        s.local = s.local.filter((x) => !x.includes("locale-collation"));
-      }
-    }
-    fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");
-  '
+  #   여기서는 그 사고를 **재현해** 방향 ⑦이 실제로 무는지 본다.
+  # ⚠️ 뮤테이션은 **실 체크아웃이 아니라 사본 레포**에 가한다. 예전에는 실 policy/ci-parity.json을
+  #    그 자리에서 재작성했다가 되돌렸는데, 파일 단위 병렬 bats에서는 그 창을 밟은 다른 프로세스의
+  #    가드가 거짓 red를 냈다(docs/traps-detail.md 「파일 단위 병렬 bats에서 실 체크아웃을 잠깐
+  #    바꾸는 스위트는 …」). 이 도구는 process.cwd()를 읽으므로 사본 디렉토리에서 실행하면
+  #    사본 원장·사본 ci.yaml을 그대로 검사한다 — 판정 조건은 같고 실 트리는 불변이다.
+  fx="$BATS_TEST_TMPDIR/dir7"
+  mkdir -p "$fx/.github/workflows" "$fx/policy"
+  cp "$ROOT/.github/workflows/ci.yaml" "$fx/.github/workflows/ci.yaml"
+  cp "$ROOT/policy/ci-parity.json" "$fx/policy/ci-parity.json"
+  # 사본이 실 레포와 같은 판정을 내리려면 ④(`make -n ci`)와 ⑤(covered_by.file)의 원본도 필요하다 —
+  # 원장의 covered_by.file은 Makefile·.pre-commit-config.yaml 둘뿐이다.
+  cp "$ROOT/Makefile" "$fx/Makefile"
+  cp "$ROOT/.pre-commit-config.yaml" "$fx/.pre-commit-config.yaml"
+
+  # 대조군(먼저) — 사본 그대로는 초록이다. 아래 red가 **사본 조립 자체의 실패가 아님**을 고정한다.
+  # (종전 판의 "원복하면 초록이다" 음성 대조와 같은 자리다 — 원복이 사라진 만큼 앞으로 옮겼다.)
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts'"
   [ "$status" -eq 0 ]
-  run bun tools/check-ci-parity.ts
-  mutated_status="$status"; mutated_output="$output"
-  cp "$BATS_TEST_TMPDIR/orig.json" "$ROOT/policy/ci-parity.json"   # 무슨 일이 있어도 되돌린다
-  [ "$mutated_status" -ne 0 ]
-  printf '%s' "$mutated_output" | grep -qF 'check-locale-collation.sh'
-  printf '%s' "$mutated_output" | grep -qF '원장 local에 없다'
-  # 음성 대조 — 원복하면 초록이다(원복 실패를 다음 테스트가 떠안지 않게 여기서 확인한다).
-  run bun tools/check-ci-parity.ts
-  [ "$status" -eq 0 ]
+
+  # 뮤테이션: 사본 원장의 `실 도메인` 항목에서 locale-collation 한 줄만 뺀다.
+  # ⚠️ 실제로 1건이 빠졌는지 뮤테이션 자신이 단언한다 — 스텝 리네임으로 필터가 무효가 되면
+  #    아래 red가 무엇의 증인인지 불분명해진다(뮤테이션 무증인).
+  python3 - "$fx/policy/ci-parity.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p, encoding="utf-8"))
+removed = 0
+for s in d["steps"]:
+    if "실 도메인" in s["name"] and isinstance(s.get("local"), list):
+        n = len(s["local"])
+        s["local"] = [x for x in s["local"] if "locale-collation" not in x]
+        removed += n - len(s["local"])
+assert removed == 1, f"뮤테이션이 {removed}건을 뺐다 — 1건이어야 한다"
+open(p, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+PY
+
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts'"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF 'check-locale-collation.sh'
+  printf '%s' "$output" | grep -qF '원장 local에 없다'
 }
 
 @test "direction 7 accepts the ledger's own notation — basenames, globs and interpreter prefixes" {
@@ -139,14 +157,34 @@ setup() {
   [ "$status" -eq 0 ]
 
   # 양성 대조: 깨끗한 상태에서는 통과한다(항상 죽는 가드는 아무도 안 쓴다 → 곧 제거된다).
+  # ⚠️ 이 한 줄만 **실 체크아웃**을 본다 — 읽기 전용(`git ls-files --others`)이라 남겨 두지만,
+  #    다른 스위트가 레포 안에 untracked 파일을 만들면 이 레인이 그 창을 밟아 거짓 red가 된다.
+  #    그런 스위트가 0이어야 한다는 것이 tests/.gate-serial의 등재 기준이다
+  #    (docs/traps-detail.md 「파일 단위 병렬 bats에서 실 체크아웃을 잠깐 바꾸는 스위트는 …」).
   run make ci-guard-tracked
   [ "$status" -eq 0 ]
 
   # 핵심 단언(마지막): untracked 파일을 넣으면 마커 + 비-0.
-  probe="$ROOT/tools/__ci_parity_probe_$$.ts"
-  printf '// probe\n' > "$probe"
-  run make ci-guard-tracked
-  rm -f "$probe"
+  # ⚠️ 프로브는 **사본 레포**에 만든다 — 실 tools/에 만들면 그 창을 밟은 다른 프로세스의 tracked
+  #    열거 가드(check-doc-index·check-skeleton·`make ci-guard-tracked` 자신)가 거짓 red를 낸다.
+  #    레시피는 `git ls-files --others --exclude-standard -- tools scripts … Makefile`로 판정하므로
+  #    사본 Makefile + 자기 git 레포만 있으면 같은 분기를 그대로 밟는다.
+  fx="$BATS_TEST_TMPDIR/tracked"
+  mkdir -p "$fx/tools"
+  cp "$ROOT/Makefile" "$fx/Makefile"
+  # ⚠️ `env -u GIT_DIR …` — GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE이 환경에 남아 있으면 `git init`이
+  #    **그 경로**에 레포를 만들고 레시피의 `git ls-files`도 그쪽을 읽는다. 상속된 GIT_* 한 줄이
+  #    사본 격리를 실 .git 쓰기로 되돌리므로, 사본을 만지는 네 호출 전부에서 걷어낸다.
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$fx" init -q
+  # Makefile 자신도 pathspec에 있다 — 추적시키지 않으면 자기 자신이 걸린다.
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$fx" add Makefile
+  # 사본 대조군 — 프로브가 없으면 통과한다(사본 조립 자체의 실패가 아니다). 아래 red가 이 사본에서
+  # git이 실제로 열거를 돌렸다는 증인이 된다(git이 죽으면 `u`가 비어 통과로 위장한다).
+  run env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE make --no-print-directory -C "$fx" ci-guard-tracked
+  [ "$status" -eq 0 ]
+
+  printf '// probe\n' > "$fx/tools/__ci_parity_probe.ts"
+  run env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE make --no-print-directory -C "$fx" ci-guard-tracked
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'SKIP: ci: 추적되지 않은'
 }
