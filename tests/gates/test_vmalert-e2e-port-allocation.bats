@@ -167,8 +167,12 @@ band_assert() {
   # ⚠️ 픽스처 밴드는 프로덕션 밴드(20000-29999) **밖**에 둔다. CI에서 이 스위트는 발화 e2e 6종과
   #   **동시에** 도는데, 프로덕션 밴드 안의 고정 포트를 잡으면 그 하네스들과 경합해 이 레인이
   #   간헐적으로 red가 된다(형제 test_host-ports.bats의 배제 레인과 같은 규율).
+  # ⚠️ 밴드는 **프로세스 고유**로 파생한다 — 17000~19499는 프로덕션 밴드(20000~29999)·NodePort(30000~32767)·
+  #   ephemeral(32768~) 전부 밖이고, 같은 파일을 두 프로세스가 동시에 돌려도(개발자의 이중 실행·CI 재시도) 고정
+  #   밴드끼리 부딪히지 않는다. 폭(여기 2, 아래 3)은 그대로다 — `$$`는 이 파일의 bats 프로세스 PID라 두 @test에서 같다.
   printf '1\n' > "$STATE/failfirst"
-  start_vmsingle "VME_PORT_LO=19401; VME_PORT_HI=19402"
+  band=$(( 17000 + ($$ % 500) * 5 ))
+  start_vmsingle "VME_PORT_LO=${band}; VME_PORT_HI=$(( band + 1 ))"
   [ "$status" -eq 0 ]
   out="$output"
   # 조용한 재시도 금지 — 발생 사실이 로그에 없으면 경합 빈도가 관측되지 않는다.
@@ -187,7 +191,8 @@ band_assert() {
 
 @test "a permanent bind failure exits 2 after distinct ports and surfaces the runtime stderr verbatim" {
   printf '9\n' > "$STATE/failfirst"   # 모든 시도를 실패시킨다(HP_BIND_TRIES=3보다 크게)
-  start_vmsingle "VME_PORT_LO=19411; VME_PORT_HI=19413"
+  band=$(( 17000 + ($$ % 500) * 5 ))   # 위 @test와 같은 파생 — 폭 3 밴드는 그 뒤에 잇는다
+  start_vmsingle "VME_PORT_LO=$(( band + 2 )); VME_PORT_HI=$(( band + 4 ))"
   [ "$status" -eq 2 ]
   # 원본 stderr를 삼키면 진단이 사라진다.
   printf '%s' "$output" | grep -qF 'STUBFAIL-COOKIE'
