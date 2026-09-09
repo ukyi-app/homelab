@@ -1,7 +1,10 @@
 // pgdump 헤지 DBS(공백 구분 DB 이름 목록) 편집 SSOT — provision-db(등록)·teardown-resource(해제) 공용.
 // DBS는 pgdump-hedge-cronjob.yaml args 스크립트 **본문 안의 셸 변수 한 줄**이고(yaml 값이 아니다 —
 // 파서로는 못 만진다), test_pgdump_hedge.bats가 databases/*.yaml과의 **집합 등식**을 강제한다:
-// DBS 토큰 집합 == {app} ∪ {`ensure: absent`가 아닌 CR의 metadata.name}. 즉 present CR은 목록에
+// DBS 토큰 집합 == {app} ∪ {`ensure: absent`가 아닌 CR의 spec.name}. 이름이 spec.name인 이유는
+// 헤지가 부르는 것이 `pg_dump --dbname="${DB}"`이기 때문이다(형제 커널 lib/resource-layout.ts의 hedgeEntry가 같은
+// 계약을 진다). provision-db가 metadata.name과 spec.name에 같은 값을 쓰므로 정상 경로에서는 갈리지
+// 않고, 갈리는 순간 판정이 그 발산 자체를 red로 낸다(name-mismatch — 2026-09-09). 즉 present CR은 목록에
 // 있어야 하고, absent CR은 없어야 하며, **CR이 아예 없는 토큰(유령 DB)도 red**다(상한, 티켓 53
 // 2026-09-09 — 그 전까지 분모가 CR 쪽이라 유령 토큰은 어느 DB 개수에서도 통과했다). 그래서 생성/철거가
 // 이 줄을 갱신하지 않으면 create-database PR의 required check가 **항상** red다(드릴 실측 2026-09-08 PR #689).

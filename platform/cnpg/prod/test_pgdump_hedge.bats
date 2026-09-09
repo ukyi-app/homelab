@@ -8,7 +8,18 @@
 #    헤지 잡은 `set -euo pipefail`이라 존재하지 않는 DB의 pg_dump 하나가 잡 전체를 죽여 **뒤에 선
 #    DB의 덤프까지** 잃는다 — 티켓 46이 막으려던 장애 클래스(등록 누락)의 정확한 반대 방향(잔존)이다.
 #    ⇒ 판정은 이제 양방향 등식이다: DBS 토큰 집합 == {app} ∪ {`ensure: absent`가 아닌 Database CR의
-#    metadata.name}. cf. AGENTS.md 함정 「이름 있는 집합의 상한 부재」.
+#    spec.name}. cf. AGENTS.md 함정 「이름 있는 집합의 상한 부재」.
+# ⚠️ **등식의 이름은 spec.name이다(2026-09-09 적대 검토).** 헤지가 실제로 부르는 것은
+#    `pg_dump --dbname="${DB}"`이고 그 DB는 CNPG Database CR의 spec.name이다 —
+#    형제 커널 tools/lib/resource-layout.ts의 hedgeEntry 주석이 같은 계약을 진다. provision-db가
+#    metadata.name과 spec.name에 같은 값을 써서 정상 경로에서는 갈리지 않지만, 손 편집으로 갈리는
+#    순간 착지 전 판정(metadata.name 채택)은 **잡을 죽이는 DBS를 초록으로, 성공하는 DBS를 red로**
+#    뒤집었다. 그래서 두 이름의 동일성 자체를 위반 클래스로 강제한다(name-mismatch) — 그러면
+#    등식이 어느 이름을 집든 유효한 입력에서는 같은 답이고, 발산은 조용히 지나가지 못한다.
+# ⚠️ **판정은 피연산자 실재부터 잰다.** 두 루프의 분모가 전부 인자에서 나오므로 인자가 사라지면
+#    '위반 0건 = 초록'으로 접힌다 — 실측(2026-09-09): CR 디렉토리 인자를 없는 경로로 한 줄 바꾸면
+#    26건 전건 ok, DBS에 없는 present CR이 실재하는 트리에서 databases/를 리네임해도 초록이었다.
+#    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」 · scripts/check-bats-style.sh 「비공허 바닥값」
 # ⚠️ **그래서 판정이 인자화돼 있다** — 실 트리(DBS="app" · CR 0건) 고정이면 유령 토큰을 원리적으로
 #    재현할 수 없어 상한 레인이 영원히 무증인이 된다. `hedge_dbs_findings`가 (헤지 매니페스트,
 #    Database CR 디렉토리) 두 인자를 받고, 실 트리 단언과 픽스처 단언이 **같은 함수**를
@@ -18,44 +29,117 @@ d=platform/cnpg/prod/databases
 
 # DBS 토큰 집합 ↔ Database CR 집합 정합 판정 — 위반을 한 줄씩 stdout으로 낸다(0건이면 무출력).
 #   $1 = 헤지 CronJob 매니페스트 · $2 = Database CR 디렉토리
-# 진단 접두가 위반 클래스다:
-#   missing:       — 기대 원소(부트스트랩 app 또는 `ensure: present` CR)가 DBS에 없다   [하한]
-#   absent-in-dbs: — `ensure: absent` CR 이름이 DBS에 남았다                            [상한]
-#   ghost:         — CR이 아예 없는 DBS 토큰                                            [상한 · 티켓 53]
+# 진단 접두가 위반 클래스다(각각 처방이 다르기 때문에 한 줄로 뭉개지 않는다):
+#   no-hedge-manifest: — 매니페스트 인자가 실재하지 않는다                    [피연산자 바닥값]
+#   no-cr-dir:         — CR 디렉토리 인자가 실재하지 않는다                   [피연산자 바닥값]
+#   no-dbs-line:       — DBS 줄이 0개(포맷 드리프트)                          [피연산자 바닥값]
+#   dbs-lines:         — DBS 줄이 2개 이상(절반 갱신 — 셸은 마지막 대입이 이긴다) [피연산자 바닥값]
+#   multi-doc:         — 한 파일에 Database CR이 2개 이상(뒤의 CR이 안 보인다)   [열거 폭]
+#   no-name:           — CR에서 이름을 못 읽었다                                [열거 폭]
+#   name-mismatch:     — metadata.name != spec.name(어느 이름이 DBS인지 미정)   [이름 계약]
+#   missing:           — 기대 원소(부트스트랩 app 또는 present CR)가 DBS에 없다 [하한]
+#   absent-in-dbs:     — `ensure: absent` CR 이름이 DBS에 남았다                [상한]
+#   ghost:             — CR이 아예 없는 DBS 토큰                                [상한 · 티켓 53]
+#   dup:               — 같은 토큰이 DBS에 두 번(중복 pg_dump)                  [상한 · multiset]
 hedge_dbs_findings() {
   local hf=$1
   local hd=$2
   local dbs
+  local lines
   local want
   local absent
   local y
-  local name
+  local k
+  local nn
+  local mname
+  local sname
   local w
   local t
-  dbs=$(sed -n 's/^ *DBS="\([^"]*\)".*/\1/p' "$hf")
-  if [ -z "$dbs" ]; then
+  local noglob
+  local blocked
+  local NL
+  NL=$'\n'
+  # ── 피연산자 바닥값 — 열거 붕괴를 '정합'으로 읽지 않는다. 인자가 사라지면 아래 두 루프가 각각
+  #    0회 돌아 위반 0건(초록)이 되므로, 실재를 **판정 시작 전에** 앵커한다.
+  if [ ! -f "$hf" ]; then
+    echo "no-hedge-manifest: $hf"
+    return 0
+  fi
+  if [ ! -d "$hd" ]; then
+    echo "no-cr-dir: $hd"
+    return 0
+  fi
+  # DBS 줄은 **정확히 1개**여야 한다 — tools/lib/hedge-dbs.ts matchDbs가 같은 두 실패를 throw로 내며
+  # 「절반 갱신은 조용히 지나가면 안 되는 부류」라고 못 박는다. 손 편집된 실 매니페스트에 대해서는
+  # 이 판정이 마지막 방어선이라 같은 실패 클래스를 표현해야 한다. sed는 매치를 전부 이어 붙이는데
+  # 셸은 마지막 대입이 이기므로, 줄 수를 먼저 재지 않으면 진단이 엉뚱한 토큰을 가리킨다.
+  lines=$(sed -n 's/^ *DBS="[^"]*".*/x/p' "$hf" | grep -c . || true)
+  if [ "$lines" -eq 0 ]; then
     echo "no-dbs-line: $hf"
     return 0
   fi
+  if [ "$lines" -ne 1 ]; then
+    echo "dbs-lines: $hf ($lines)"
+    return 0
+  fi
+  dbs=$(sed -n 's/^ *DBS="\([^"]*\)".*/\1/p' "$hf")
   # 기대 집합 — 하한이자 **상한**의 정본이다. 부트스트랩 app DB(restore_canary 보유)는 CR 없이 늘 원소다.
   want=" app "
   # `ensure: absent`는 purge 상태머신(teardown-resource --step drop)이 DROP한 DB다 — 실체가 없으므로
   # 기대 집합 **밖**이고, DBS에 남으면 아래 상한 레인이 잡는다. 유령과 구별해 진단하려고 따로 모은다.
   absent=" "
-  for y in "$hd"/*.yaml; do
-    [ -f "$y" ] || continue   # 글롭 무매치(빈 디렉토리)의 리터럴 — 판정이 아니라 stderr 잡음 차단
-    grep -q '^kind: Database$' "$y" || continue
-    name=$(sed -n 's/^  name: \(.*\)$/\1/p' "$y" | head -1)
-    if [ -z "$name" ]; then
-      echo "no-name: $y"
+  # 읽지 못한 CR의 누적 — 아래 집합 레인 **이전에** 닫는다(사유는 루프 뒤 주석).
+  blocked=""
+  # `.yml`도 분모다 — kustomize가 두 확장자를 다 받으므로 글롭이 `*.yaml`뿐이면 `.yml` CR이
+  # 판정 밖이라 그 DB가 DBS에 없어도 하한이 침묵한다(실측).
+  for y in "$hd"/*.yaml "$hd"/*.yml; do
+    [ -f "$y" ] || continue   # 글롭 무매치 리터럴의 stderr 잡음 차단 — 디렉토리 실재는 위에서 앵커했다
+    k=$(grep -c '^kind: Database$' "$y" || true)
+    if [ "$k" -eq 0 ]; then
       continue
+    fi
+    if [ "$k" -ne 1 ]; then
+      # 아래 이름 추출은 파일당 한 CR을 전제한다 — 다중 도큐먼트에서는 두 번째 CR의 존재 자체가
+      # 사라져 그 DB가 논리 백업 0인데 판정은 초록이 된다(실측). 셸에 다중 도큐먼트 파서를 들이는
+      # 대신 fail-closed 한다: 실 트리는 provision-db가 DB당 한 파일을 쓰므로 이 자리에 안 온다.
+      blocked="${blocked}multi-doc: $y ($k)${NL}"
+      continue
+    fi
+    nn=$(grep -c '^  name: ' "$y" || true)
+    if [ "$nn" -eq 0 ]; then
+      blocked="${blocked}no-name: $y${NL}"
+      continue
+    fi
+    # 2칸 들여쓴 `name:`은 metadata.name과 spec.name 둘뿐이다(spec.cluster.name·extensions[].name은
+    # 4칸 이상). 동일성을 강제하므로 어느 쪽이 먼저 오는지에 판정이 의존하지 않는다.
+    mname=$(sed -n 's/^  name: \(.*\)$/\1/p' "$y" | head -1)
+    sname=$(sed -n 's/^  name: \(.*\)$/\1/p' "$y" | tail -1)
+    if [ "$mname" != "$sname" ]; then
+      # 발산하면 DBS가 어느 이름을 실어야 하는지 정적으로 말할 수 없다 — 아래 집합은 실제 pg_dump
+      # 피연산자인 spec.name으로 계속 재되, 발산 자체를 위반으로 낸다.
+      echo "name-mismatch: $y ($mname != $sname)"
     fi
     if grep -q '^  ensure: absent' "$y"; then
-      absent="${absent}${name} "
+      absent="${absent}${sname} "
       continue
     fi
-    want="${want}${name} "
+    want="${want}${sname} "
   done
+  # 분모가 불완전하면 집합 판정으로 **넘어가지 않는다** — 읽지 못한 CR의 이름이 기대 집합에서
+  # 빠지므로, 그 DB의 DBS 토큰이 `ghost:`로 오진되고(실측: 다중 도큐먼트 a1+a2 트리에서
+  # `multi-doc:`과 함께 `ghost: a1`이 났다 — a1은 CR이 실재하는데도) 온콜이 없는 문제를 쫓는다.
+  # dbs-lines·no-cr-dir과 같은 규율이다: 구조적으로 못 읽는 분모는 '집합 불일치'가 아니라
+  # 그 이전 단계의 실패이고, 두 사정을 같은 출력에 섞으면 진단이 엉뚱한 토큰을 가리킨다.
+  if [ -n "$blocked" ]; then
+    printf '%s' "$blocked"
+    return 0
+  fi
+  # ── 토큰 확장은 word splitting만 원한다. noglob를 안 걸면 pathname expansion이 함께 돌아 판정
+  #    결과가 **cwd의 파일 목록에 의존**한다(실측: 레포 루트에서 DBS="app *"가 저장소 엔트리 21건을
+  #    ghost로 냈다 — 같은 매니페스트가 venue마다 다른 findings를 낸다). 호출자가 이미 켜 뒀으면 보존.
+  noglob=""
+  case "$-" in *f*) noglob=1;; esac
+  set -f
   # 하한 — 기대 원소가 전부 DBS에 있는가. 누락된 DB는 barman 실패 시 복구 수단이 없는데
   # 알림은 녹색(job 완료 기반)인 무성 커버리지 갭이 된다.
   for w in $want; do
@@ -69,6 +153,15 @@ hedge_dbs_findings() {
     case "$absent" in *" $t "*) echo "absent-in-dbs: $t"; continue;; esac
     echo "ghost: $t"
   done
+  # 상한의 나머지 절반 — 집합이 아니라 multiset이다. 중복 토큰은 같은 DB를 두 번 pg_dump해 R2에
+  # `${DB}-${TS}` 객체를 중복 생성하고 잡 시간을 늘린다(치명적이진 않은 무성 낭비). 로케일
+  # 콜레이션이 `sort -u` 계열 게이트를 뒤집은 선례가 있어 정렬은 C 고정이다(AGENTS 함정).
+  for t in $(printf '%s\n' $dbs | LC_ALL=C sort | uniq -d); do
+    echo "dup: $t"
+  done
+  if [ -z "$noglob" ]; then
+    set +f
+  fi
   return 0
 }
 
@@ -124,8 +217,12 @@ hedge_dbs_count() {
   # 그 DB는 barman 실패 시 복구 불가인데 알림은 녹색(job 완료 기반)인 무성 갭이 된다.
   # 새 DB 온보딩 시 이 테스트가 DBS 갱신을 강제한다. 실 도메인 권위는 이 @test다(픽스처는
   # 판정 함수의 감도를 재고, 여기가 실제 배포 대상을 잰다).
-  dbs=$(sed -n 's/^ *DBS="\([^"]*\)".*/\1/p' "$f")
-  [ -n "$dbs" ]   # DBS 줄 소실은 '정합'이 아니라 '못 읽었다'는 뜻이다
+  # ⚠️ 피연산자 바닥값을 **여기서 다시 세우지 않는다**. 실재·DBS 줄 수는 hedge_dbs_findings가
+  #    소유하고 픽스처 3건(vanished manifest · vanished CR dir · second DBS line)이 증인이다.
+  #    실측(2026-09-09): 경로 상수 f=/d=를 없는 경로로 드리프트시키거나 databases/를 present CR째
+  #    리네임하는 세 뮤테이션 전부, 여기에 `[ -f ]`/`[ -d ]`/`[ -n "$dbs" ]`가 **있든 없든**
+  #    똑같이 이 @test가 red다 — 즉 그 세 줄은 어떤 뮤테이션으로도 red가 되지 않는 무증인 조건이다.
+  #    아래 건수 등식 하나가 판정 전부를 닫는다.
   findings=$(hedge_dbs_findings "$f" "$d")
   n=$(hedge_dbs_count "$findings")
   echo "$findings"
@@ -157,8 +254,9 @@ hedge_dbs_count() {
 }
 
 # ── 픽스처 레인 — 판정 함수의 감도를 재는 합성 트리 ────────────────────────────────────────────
-# 실 트리는 DBS="app" · CR 0건이라 세 위반 클래스 어느 것도 밟지 못한다(그 자체가 초록의 근거이지
-# 판정이 산다는 증거는 아니다). 픽스처가 각 클래스를 하나씩 깨워 판정 조건 전부에 증인을 붙인다.
+# 실 트리는 DBS="app" · CR 0건이라 위반 클래스 어느 것도 밟지 못한다(그 자체가 초록의 근거이지
+# 판정이 산다는 증거는 아니다). 픽스처가 각 클래스를 하나씩 깨워 판정 조건 전부에 증인을 붙인다 —
+# 상한·바닥값·이름 계약의 살아 있음은 **전적으로** 이 레인이 진다(실 도메인에서는 vacuous하다).
 #   $1 = 트리 이름 · $2 = DBS 토큰 목록(공백 구분)
 hedge_fixture() {
   FX="$BATS_TEST_TMPDIR/$1"
