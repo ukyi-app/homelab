@@ -2485,7 +2485,8 @@ selfHeal과 플립플롭한다.
 - **처방**: (1) `scripts/run-bats.sh`가 수집 집합을 두 레인으로 나눈다 — 병렬 레인(`--jobs $(nproc)`, `RUNBATS_JOBS`로 고정
   가능)과 **직렬 레인**(`tests/.gate-serial`, 병렬 레인이 끝난 뒤 혼자). 등재 기준은 "실 체크아웃을 바꾼다" 하나이고 고정
   경로·포트는 등재 대상이 아니라 `$BATS_TEST_TMPDIR`로 옮겨 고친다(등재는 부채 — 상한 SERIAL_MAX, 계약은
-  `check-bats-accounting.sh` (2b), 수집 밖 항목은 러너가 exit 2). (2) 러너가 `GITHUB_OUTPUT`·`GITHUB_STEP_SUMMARY`·
+  `check-bats-accounting.sh` (2b), 수집 밖 항목은 러너가 exit 2). 같은 날 등재됐던 6건 전부를 가드+커널을 복사한
+  사본 레포에서 돌리는 형태로 옮겨 레인은 비었고 상한은 0이다 — 새 등재는 그 상수를 올리는 diff로만 가능하다. (2) 러너가 `GITHUB_OUTPUT`·`GITHUB_STEP_SUMMARY`·
   `GITHUB_ENV`·`GITHUB_PATH`를 끊는다 — 테스트가 부른 실 도구(`check-workflow-readiness.ts`)가 스텝 출력 파일에 heredoc을
   append하는데, 병렬에서는 여러 프로세스가 한 파일에 끼어 쓴다. (3) `BUN_RUNTIME_TRANSPILER_CACHE_PATH`를 실행 단위로
   고정한다 — bun의 캐시 위치는 `XDG_CACHE_HOME`→`HOME`에서 파생되어 테스트가 HOME을 갈아 끼울 때마다 흩어진다.

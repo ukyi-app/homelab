@@ -107,7 +107,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
     n=$((n + 1))
     grep -qFx -- "$f" <<<"$list"
   done < "$ROOT/tests/.gate-serial"
-  [ "$n" -ge 1 ]   # 레지스트리가 비면 위 루프가 공허하게 통과한다 — 바닥값
+  # 레지스트리가 비면 위 루프는 공허하다 — 그래서 등재 수를 러너의 --plan 보고와 등식으로 묶는다(0이면 0).
+  plan_ser="$(bash "$ROOT/scripts/run-bats.sh" --plan | sed -n 's/^serial=//p')"
+  [ "$n" -eq "$plan_ser" ]
 }
 
 @test "--plan splits the collected set into the two lanes and names every serial file" {
@@ -118,7 +120,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; }
   ser="$(sed -n 's/^serial=//p' <<<"$plan")"
   listed="$(bash "$ROOT/scripts/run-bats.sh" --list | grep -c '\.bats$')"
   [ "$((par + ser))" -eq "$listed" ]
-  reg="$(grep -vcE '^[[:space:]]*(#|$)' "$ROOT/tests/.gate-serial")"
+  reg="$(grep -vcE '^[[:space:]]*(#|$)' "$ROOT/tests/.gate-serial" || true)"   # 0건이면 grep -c가 rc 1 — 0은 정당한 값
   [ "$ser" -eq "$reg" ]
   [ "$(grep -c '^serial-file=' <<<"$plan")" -eq "$reg" ]
 }

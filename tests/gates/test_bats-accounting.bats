@@ -416,10 +416,13 @@ manual_max() { grep -oE '^MANUAL_MAX=[0-9]+' "$s" | cut -d= -f2; }
 # run-bats.sh가 병렬 레인 뒤 혼자 도는 파일 목록. 레인은 도메인이 아니라 실행 순서라 (1)의 회계가 못 보므로
 # 별도 계약이다 — 사유 주석 지배 · 추적 + gate 수집 안 · 상한. `--serial-registry <파일>`이 픽스처 모드다.
 
-@test "the committed serial-lane registry passes and reports a non-empty lane" {
+@test "the committed serial-lane registry passes and reports the lane size (0 is the target state)" {
   run bash "$s"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -qE '^SCAN: check-bats-accounting:serial: [1-9][0-9]*$'
+  echo "$output" | grep -qE '^SCAN: check-bats-accounting:serial: [0-9]+$'
+  # 등재 건수는 상한과 같은 자리에서 읽힌다 — 레지스트리 항목 수와 마커가 같아야 한다.
+  n_reg="$(grep -vcE '^[[:space:]]*(#|$)' "$ROOT/tests/.gate-serial" || true)"   # 0건이면 grep -c가 rc 1 — 0은 정당한 값
+  echo "$output" | grep -qE "^SCAN: check-bats-accounting:serial: ${n_reg}\$"
 }
 
 @test "a serial-lane entry outside the gate set is rejected (an .ci-exclude member cannot be serial)" {

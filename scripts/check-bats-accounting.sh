@@ -309,7 +309,7 @@ done < "$EXCLUDE_FILE"
 #   · 상한 SERIAL_MAX — 직렬 레인이 길어질수록 병렬화의 이득이 준다. 래칫이 아니라 상한(EXCL_MAX와 같은 논거).
 # ⚠️ 대상 부재는 통과가 아니다 — 레지스트리 파일이 없으면 run-bats.sh가 죽는 것과 별개로 여기서도 red.
 [ -f "$SERIAL_FILE" ] || { echo "FAIL: 직렬 레인 레지스트리 없음: $SERIAL_FILE"; rc=1; }
-SERIAL_MAX=6
+SERIAL_MAX=0   # 2026-09-09 6건 전부 픽스처 사본으로 이관 — 등재는 같은 PR에서 이 상수를 올리는 예외 경로뿐이다
 serial_n=0
 sgroup=""
 s_after_entry=0
