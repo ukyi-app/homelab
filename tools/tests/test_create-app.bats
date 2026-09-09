@@ -27,6 +27,42 @@ resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128
 route: { public: true, host: orders.example.com }
 deploy: { autoDeploy: false }
 EOF
+  # 동봉 계약 매니페스트 — 실 트리에는 항상 있는 추적 파일이다(create-app은 부재를 fail-closed로
+  # 거부한다: 없는 채로 앱을 만들면 다음 contract-drift 리컨실이 missing-target으로 발화한다).
+  mkdir -p "$FR/tools"
+  cat > "$FR/tools/vendored-contract.json" <<'JSON'
+{
+  "_note": "동봉 계약 SSOT(픽스처)",
+  "owner": "ukyi-app",
+  "scaffoldRepos": [
+    "homelab-app-template"
+  ],
+  "vendored": [
+    {
+      "source": "tools/seal-secret.mts",
+      "targets": [
+        {
+          "repo": "homelab-app-template",
+          "ref": "main",
+          "path": "scaffold/common/tools/seal-secret.mts",
+          "normalize": "typescript"
+        }
+      ]
+    },
+    {
+      "source": "tools/sealed-secrets-cert.pem",
+      "targets": [
+        {
+          "repo": "homelab-app-template",
+          "ref": "main",
+          "path": "scaffold/common/tools/sealed-secrets-cert.pem",
+          "normalize": "exact"
+        }
+      ]
+    }
+  ]
+}
+JSON
   mkdir -p "$FR/platform/victoria-stack/prod"
   printf 'apiVersion: batch/v1\nkind: CronJob\nmetadata: { name: digest-exporter }\nspec:\n  jobTemplate:\n    spec:\n      template:\n        spec:\n          containers:\n            - name: digest-exporter\n              env:\n                - name: APPS\n                  value: ""\n' > "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
 }
@@ -278,6 +314,43 @@ EOF
   gen
   [ "$status" -eq 0 ]
   grep -q 'orders=ghcr.io/ukyi-app/orders:sha-aaa1111' "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
+}
+
+# ── 동봉 계약 target 행(#7xx부터 도구가 쓴다) ────────────────────────────────────
+# 종전에는 앱 온보딩 PR에 사람이 이 행 2개를 손으로 넣었다(#691 실측) — 빠뜨리면 contract-drift의
+# 로스터 등식이 missing-target으로 발화한다. 이제 create-app이 커널(lib/vendored-targets)로 쓴다.
+
+@test "create-app writes the app's vendored-contract target rows (roster equality lands with the PR)" {
+  gen
+  [ "$status" -eq 0 ]
+  V="$FR/tools/vendored-contract.json"
+  run jq -e '[.vendored[].targets[] | select(.repo == "orders")] | length == 2' "$V"
+  [ "$status" -eq 0 ]
+  run jq -e '[.vendored[] | select(.source == "tools/sealed-secrets-cert.pem") | .targets[] | select(.repo == "orders")] | .[0] == {repo:"orders", ref:"main", path:"tools/sealed-secrets-cert.pem", normalize:"exact"}' "$V"
+  [ "$status" -eq 0 ]
+  # 템플릿 행은 그대로다(앱 축만 만진다).
+  run jq -e '[.vendored[].targets[] | select(.repo == "homelab-app-template")] | length == 2' "$V"
+  [ "$status" -eq 0 ]
+}
+
+@test "the plan announces the vendored rows and --dry-run writes none of them" {
+  before="$(cat "$FR/tools/vendored-contract.json")"
+  gen --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.vendoredTargets | length == 2'
+  echo "$output" | jq -e '[.vendoredTargets[].path] == ["tools/seal-secret.mts", "tools/sealed-secrets-cert.pem"]'
+  [ "$(cat "$FR/tools/vendored-contract.json")" = "$before" ]
+}
+
+@test "create-app fails closed when the vendored contract manifest is missing (no silent skip)" {
+  # 조용한 skip이면 앱은 만들어지는데 로스터 행만 없어, 다음 리컨실 주기가 missing-target으로
+  # 발화한다 — 정확히 이 티켓이 없애는 실패다. 형제 처방: digest-exporter.yaml 부재도 exit 1.
+  rm "$FR/tools/vendored-contract.json"
+  gen
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qF 'vendored-contract.json'
+  # 반쪽 착지 금지 — 거부는 앱 표면을 쓰기 전이다.
+  [ ! -d "$FR/apps/orders" ]
 }
 
 @test "create-app rejects a reserved platform host (reserved-hosts.json SSOT)" {
