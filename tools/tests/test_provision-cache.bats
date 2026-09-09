@@ -166,8 +166,12 @@ provision() {
     > "$FIX/platform/data-conn/prod/kustomization.yaml"
   provision --name demo2
   [ "$status" -eq 0 ]
-  grep -q "cache-demo2-conn.sealed.yaml" "$FIX/platform/data-conn/prod/kustomization.yaml"
-  grep -q "cache-demo2-ro-conn.sealed.yaml" "$FIX/platform/data-conn/prod/kustomization.yaml"
+  # 이 레그는 `resources: []`(빈 flow)에서 출발한다 — 이름만 보는 `grep -q`는 flow 산출물
+  # (`resources: [ a, b ]`)에서도 참이라 lib의 block 정규화 회귀를 이 자리에서 못 잡는다.
+  # :154-155(cache kustomization)와 같은 강도로 block 대시 형태까지 단언한다.
+  dk="$FIX/platform/data-conn/prod/kustomization.yaml"
+  [ "$(grep -c -- "^  - cache-demo2-conn.sealed.yaml$" "$dk")" -eq 1 ]
+  [ "$(grep -c -- "^  - cache-demo2-ro-conn.sealed.yaml$" "$dk")" -eq 1 ]
 }
 
 @test "provisioned instance renders via kustomize and passes kubeconform" {

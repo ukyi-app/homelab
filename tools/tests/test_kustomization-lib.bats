@@ -61,6 +61,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     if (two !== head + "resources:\n  - a.yaml\n  - b.yaml\n") fail("empty-flow 2nd add", two);
     const nonEmpty = addResource(head + "resources: [a.yaml]\n", "b.yaml");  // 항목 있는 flow도 정규화
     if (nonEmpty !== head + "resources:\n  - a.yaml\n  - b.yaml\n") fail("non-empty flow add", nonEmpty);
+    // flow→block 전환은 `resources:` 줄 꼬리주석을 마지막 항목 뒤 주석 줄로 옮긴다(소실이 아니라 이동) —
+    // 이 PR이 만든 새 동작이라 계약으로 고정한다. origin/main은 flow를 유지해 주석이 제자리였다.
+    const tailed = addResource(head + "resources: [a.yaml] # 목록\n", "b.yaml");
+    if (tailed !== head + "resources:\n  - a.yaml\n  - b.yaml\n  # 목록\n") fail("flow tail comment", tailed);
     console.log("ok");
   '
   [ "$status" -eq 0 ]
