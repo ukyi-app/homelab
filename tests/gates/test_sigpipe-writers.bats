@@ -14,7 +14,7 @@
 #    체크아웃을 잠깐 바꾸는 스위트는 …」). 가드는 ROOT를 자기 위치(`BASH_SOURCE/../..`)에서 파생하므로,
 #    가드 + 커널 둘을 복사한 빈 git 레포가 곧 **그 사본 가드의 실 도메인**이 된다(선례:
 #    tests/gates/test_bats-style.bats · tests/gates/test_check-doc-index.bats의 docindex_fixture).
-#    바닥값(기본 10)은 공용 어휘 `--floor check-sigpipe-writers:files=1`로 낮춘다 — take_floors는
+#    바닥값(.sh 기본 10 · bats 기본 100)은 공용 어휘 `--floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1`로 낮춘다 — take_floors는
 #    바닥값 **수치만** 바꾸고 위반 검출 경로는 건드리지 않는다(scripts/lib/scan-floor.sh).
 #    사본 트리의 분모에는 가드 자신과 커널 둘도 들어간다(실 트리에서 이미 통과하는 파일들) — 그래서
 #    아래 control 레그가 "기저가 깨끗하다"를 매 실행 다시 확인하고, 양성 레그는 그 위의 델타를 잰다.
@@ -34,6 +34,9 @@ setup() {
   mkdir -p "$FX/scripts/lib"
   cp "$GUARD" "$FXGUARD"
   cp "$ROOT/scripts/lib/guard.sh" "$ROOT/scripts/lib/scan-floor.sh" "$FX/scripts/lib/"
+  # 레인 (e)의 분모(bats 파일 바닥값)를 채우는 무해한 bats 한 장 — pipefail 블록이 없어 위반이 될 수 없다.
+  mkdir -p "$FX/tests"
+  printf '#!/usr/bin/env bats\n@test "control" { run true; [ "$status" -eq 0 ]; }\n' > "$FX/tests/test_control.bats"
   git -C "$FX" init -q
   # `-f` — 사용자 전역 excludesFile이 사본 파일명을 무시 대상으로 잡는 경우까지 닫는다.
   git -C "$FX" add -f -A
@@ -44,6 +47,12 @@ setup() {
 seed() {
   printf '#!/usr/bin/env bash\nset -euo pipefail\n%b' "$1" > "$FIX"
   git -C "$FX" add -f -- "$FIX"
+}
+
+# 레인 (e) 픽스처 — bats 파일을 줄 단위로 사본 레포에 쓴다(작은따옴표가 든 줄은 큰따옴표 인자로 넘긴다).
+seed_bats() {
+  printf '%s\n' "$@" > "$FX/tests/test_fixture.bats"
+  git -C "$FX" add -f -- "$FX/tests/test_fixture.bats"
 }
 
 @test "guard exists, is executable and is registered in the local ledger" {
@@ -58,32 +67,32 @@ seed() {
 # 그러면 `[ "$status" -ne 0 ]` 양성 레그 전부가 **위반을 안 잡고도** 통과한다. 여기서만 rc 0 +
 # 통과 메시지를 함께 요구해 그 자리를 닫는다.
 @test "the unseeded fixture repo passes (control for the positive legs below)" {
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
   grep -q 'check-sigpipe-writers OK' <<<"$output"
 }
 
 @test "flags a vulnerable multiline writer at column 0" {
   seed "printf '%s\\\\n' \"\$list\" | grep -q x\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
 }
 
 @test "flags the same writer when indented" {
   seed "  printf '%s\\\\n' \"\$list\" | grep -q x\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
 }
 
 @test "flags an echo writer at column 0" {
   seed "echo \"\$list\" | grep -q x\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
 }
 
 @test "does not flag a whole-line comment that documents the idiom" {
   seed "# printf '%s\\\\n' \"\$list\" | grep -q x\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
 }
 
@@ -91,13 +100,13 @@ seed() {
   # 이 레그는 옛 정규식에서도 통과했다(거짓양성 재현 안 됨 — ERE는 leftmost-longest라
   # `[^#]`가 공백을 먹는 백트래킹이 기대만큼 열리지 않는다). 회귀 방지로 남긴다.
   seed "  # echo \"\$list\" | grep -q x\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
 }
 
 @test "does not flag the prescribed herestring form" {
   seed "grep -q x <<<\"\$list\"\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
 }
 
@@ -112,12 +121,12 @@ seed() {
   body="printf '%s\\\\n' \"\$list\" | grep -q x\n"
   # 양성 대조 — 같은 본문에 pipefail 헤더면 red다(본문이 실제로 위반이라는 증인).
   seed "$body"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
   # 판정 — 헤더에서 pipefail 리터럴만 빼면 스코프 밖이라 초록이다.
   printf '#!/usr/bin/env bash\nset -eu\n%b' "$body" > "$FIX"
   git -C "$FX" add -f -- "$FIX"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
 }
 
@@ -131,7 +140,7 @@ v="$(printf 'a\nb\n')"
 printf '%s\n' "$v" | grep -q y
 FIXEOF
   git -C "$FX" add -f -- "$LIBFIX"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
   # 위반 자리가 그 lib 픽스처임을 못박는다 — 기저 오염이 이 레그를 대신 통과시키지 못한다.
   grep -qF 'scripts/lib/fixture.sh' <<<"$output"
@@ -139,7 +148,7 @@ FIXEOF
 
 @test "the guard prescribes herestring in its failure output" {
   seed "printf '%s\\\\n' \"\$list\" | grep -q x\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
   grep -q '<<<' <<<"$output"
 }
@@ -152,20 +161,20 @@ FIXEOF
 
 @test "flags a sed file-writer piped into grep -q (c71-3 denominator expansion)" {
   seed "sed 's/x//' \"\$f\" | grep -qE 'guard_init'\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
 }
 
 @test "flags the same sed writer when indented (c71-3)" {
   seed "  sed 's/x//' \"\$f\" | grep -qE 'guard_init'\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
 }
 
 @test "flags a kubectl multiline writer piped into grep -q (c71-3 denominator expansion)" {
   # scripts/netpol-rehearsal.sh 실측 형태(2026-09-05, 이 티켓이 herestring으로 전환) 재현.
   seed "kubectl -n prod get netpol x -o yaml | grep -q \"\$NEEDLE\"\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
 }
 
@@ -176,44 +185,44 @@ FIXEOF
 
 @test "does not flag a whole-line comment that documents the command-writer idiom (c71-3)" {
   seed "# sed 's/x//' \"\$f\" | grep -qE 'guard_init'\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
 }
 
 @test "does not flag a command writer consumed by grep -c instead of -q (safe consume-to-completion form, c71-3)" {
   seed "sed 's/x//' \"\$f\" | grep -c 'guard_init'\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
 }
 
 @test "does not flag the prescribed herestring rewrite of a command writer (c71-3)" {
   seed "v=\"\$(sed 's/x//' \"\$f\")\"\ngrep -qE 'guard_init' <<<\"\$v\"\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
 }
 
 @test "flags an awk early-exit consumer fed by a pipe at column 0 (lane c, ticket 49)" {
   seed "idx=\"\$(ip -o -4 addr show | awk -v ip=\"\$K3S_NODE_IP\" '\$4 ~ ip { print \$1; exit }')\"\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
   grep -qF -- "awk '… exit'" <<<"$output"
 }
 
 @test "flags the same awk early-exit consumer when indented (lane c)" {
   seed "  d=\"\$(lsblk -nso NAME,TYPE \"\$src\" | awk '\$2 == \"disk\" { print \$1; exit }')\"\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
 }
 
 @test "does not flag the prescribed capture-then-herestring form of an awk early-exit consumer (lane c)" {
   seed "addrs=\"\$(ip -o -4 addr show)\"\nidx=\"\$(awk '\$4 ~ ip { print \$1; exit }' <<<\"\$addrs\")\"\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
 }
 
 @test "does not flag an awk pipe consumer without exit, nor a whole-line comment documenting the idiom (lane c)" {
   seed "n=\"\$(ip -o -4 addr show | awk '{ print \$4 }' | cut -d/ -f1)\"\n# 옛 형태: ip … | awk '{ print \$1; exit }' 는 SIGPIPE 함정\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
 }
 
@@ -222,29 +231,29 @@ FIXEOF
 
 @test "flags a head consumer fed by a pipe at column 0 (lane d)" {
   seed "x=\"\$(kubectl get pods | head -1)\"\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
   grep -qF '| head -1' <<<"$output"
 }
 
 @test "flags an indented head consumer with the -n form and a scalar printf writer (lane d measures the consumer)" {
   seed "  first=\"\$(printf '%s' \"\$v\" | head -n 1)\"\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
 }
 
 @test "does not flag the prescribed capture-then-herestring form of a head consumer (lane d)" {
   seed "out=\"\$(kubectl get pods)\" || out=''\nfirst=\"\$(head -n1 <<<\"\$out\" | cut -d' ' -f1)\"\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
 }
 
 @test "does not flag a whole-line comment documenting the head idiom, and names lane d in the prescription (lane d)" {
   seed "# 예전 형태: cmd | head -1 (금지)\nx=1\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -eq 0 ]
   seed "x=\"\$(sed -n 's/^a=//p' f | head -1)\"\n"
-  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
   [ "$status" -ne 0 ]
   grep -qF '레인 d' <<<"$output"
 }
@@ -257,4 +266,63 @@ FIXEOF
   run bash "$GUARD"
   [ "$status" -eq 0 ]
   grep -qE '^SCAN: check-sigpipe-writers:files: [0-9]+$' <<<"$output"
+  grep -qE '^SCAN: check-sigpipe-writers:bats: [0-9]+$' <<<"$output"
+  grep -qE '^SCAN: check-sigpipe-writers:bats-blocks: [1-9][0-9]*$' <<<"$output"   # 실 트리에 pipefail 블록이 있다(test_guard-sh 등)
+}
+
+# ── 레인 (e): bats 파일 안의 `run bash -c '… pipefail …'` 블록 ────────────────────────────────────
+# #706 첫 gate에서 test_guard-sh의 블록 안 `sed … | grep -q && kern=1`이 로스터를 6→5로 떨어뜨렸다(2026-09-09).
+# 블록 **밖**의 bats 본문은 pipefail 아래가 아니라 대상이 아니다 — 픽스처 문자열이 그 대표다.
+
+@test "flags a pipe consumer inside a bats bash -c block that enables pipefail (lane e)" {
+  seed_bats '#!/usr/bin/env bats' \
+    '@test "x" {' \
+    "  run bash -c '" \
+    '    set -euo pipefail' \
+    '    sed "s/a//" "$1" | grep -qE "y" && k=1' \
+    "  ' _ f" \
+    '  [ "$status" -eq 0 ]' \
+    '}'
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
+  [ "$status" -ne 0 ]
+  grep -qF 'test_fixture.bats:5:' <<<"$output"
+  grep -qF '레인 e' <<<"$output"
+}
+
+@test "does not flag the same pipe when the bash -c block does not enable pipefail (lane e scope)" {
+  seed_bats '#!/usr/bin/env bats' \
+    '@test "x" {' \
+    "  run bash -c '" \
+    '    set -eu' \
+    '    sed "s/a//" "$1" | grep -qE "y" && k=1' \
+    "  ' _ f" \
+    '  [ "$status" -eq 0 ]' \
+    '}'
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
+  [ "$status" -eq 0 ]
+}
+
+@test "does not flag a pipe in the plain @test body even when a fixture string mentions pipefail (lane e scope)" {
+  # 이 파일이 실제로 쓰는 모양이다 — seed 문자열에 `set -euo pipefail`이 들어가지만 본문은 pipefail 아래가 아니다.
+  seed_bats '#!/usr/bin/env bats' \
+    '@test "x" {' \
+    "  printf '%s\\n' 'set -euo pipefail' > \"\$BATS_TEST_TMPDIR/s.sh\"" \
+    '  sed "s/a//" "$BATS_TEST_TMPDIR/s.sh" | grep -q pipefail' \
+    '}'
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
+  [ "$status" -eq 0 ]
+}
+
+@test "flags a single-line bash -c that enables pipefail and pipes into head (lane e, one-line block)" {
+  # 픽스처 문자열이 가드의 한 줄 블록 규칙(`bash -c '… pipefail …'`)에 그대로 걸리지 않게 pipefail 토큰은 변수로 넣는다 —
+  # 이 파일 자체가 레인 (e)의 분모에 들어가기 때문이다(주석 줄만 면제, 데이터 줄은 면제가 아니다).
+  pf='set -o pipefail'
+  seed_bats '#!/usr/bin/env bats' \
+    '@test "x" {' \
+    "  run bash -c '$pf; cat \"\$0\" | head -1' f" \
+    '  [ "$status" -eq 0 ]' \
+    '}'
+  run bash "$FXGUARD" --floor check-sigpipe-writers:files=1 --floor check-sigpipe-writers:bats=1
+  [ "$status" -ne 0 ]
+  grep -qF 'test_fixture.bats:3:' <<<"$output"
 }
