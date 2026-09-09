@@ -31,4 +31,5 @@ CronJob 등이 참조하는 빌드-전용 이미지(예: `pg-tools`)는 **`ops/<
 > 3. `apps/<app>/deploy/prod/values.yaml` `envFrom`에 conn secretRef 손 배선(create-app PR 안에서 해도 된다). ⚠️ 이 파일은 도구 소유라
 >    **손 주석은 다음 라운드트립(update-secrets·bump)에서 사라지고 그 자체가 PR 1건이 된다** — 주석은 파일 상단이 아니라 이 README에 둔다.
 > (`db create`의 pgdump 헤지 DBS 등록은 자동이라 손 단계가 아니다. `tools/tests/test_repo-walk.bats`의 image-ownership 루트 로스터는
-> 손 단계였다가 **파생**이 됐다 — 기대 집합이 `apps/*/deploy/prod/values.yaml` 실재에서 나오므로 0↔1에 무감하다.)
+> 손 단계였다가 **파생**이 됐다 — 기대 집합이 `apps/*/deploy/prod/values.yaml`의 디스크 실재(git 추적
+> 여부와 무관하게 셸 글롭이 본다)에서 나오므로 0↔1에 무감하다.)

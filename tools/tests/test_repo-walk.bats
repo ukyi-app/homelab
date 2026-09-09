@@ -462,24 +462,32 @@ _fixture_repo() {
 # 그 이빨은 그대로 두고, 앱 개수 0↔1에서 손으로 `apps+`를 넣고 빼던 부분만 파생으로 옮긴다
 # (온보딩 #691·철거 #698 양방향 모두 이 상수가 gate red로 손 단계를 알려줬다 — 비용은 gate 1사이클).
 
-# 앱 유닛 열거 — **image-ownership 스코프와 독립**이다.
-# 독립 근거: 이쪽은 git 자신의 pathspec 매처(`git ls-files -- 'apps/*/deploy/prod/values.yaml'`)를
-# 쓰고, 대조 대상은 repo-walk의 SCOPES 테이블 + 정규식 필터(bun)다 — 구현도 데이터도 공유하지 않아
-# 한쪽 열거가 붕괴해도 다른 쪽은 산다. 같은 스코프 함수를 양쪽에 쓰면 붕괴가 기대와 실제에서 **동시에**
-# 사라져 대조가 공허해진다(아래 「stays red when the scope loses all apps manifests」가 그 자리다).
-# 판정 기준을 `values.yaml`로 잡은 것도 같은 이유다 — 배포 앱 계약의 필수 산출물(apps/README.md)이라
-# 디렉토리 실재보다 정확하고, 스코프 쪽 include 정규식과 겹치지 않는다.
+# 앱 유닛 열거 — **image-ownership 스코프와 독립**이다. 독립은 두 축 다여야 한다:
+#   ① 기판 — 이쪽은 **디스크**를 셸 글롭으로 본다. 대조 대상은 `source: "tracked"`라
+#      `git ls-files`로 열거한다(tools/lib/repo-walk.ts의 image-ownership 정의 · trackedPaths()).
+#   ② 필터 — 이쪽은 경로 글롭 하나뿐이고, 저쪽은 SCOPES의 include/exclude 정규식(bun)이다.
+# 앞선 판은 이 함수도 `git ls-files`를 써서 ①을 공유했다(적대 검토 지적). 그러면 `apps/`가 추적에서
+# 빠지는 순간 기대와 실제가 **동시에** apps를 떨궈 대조가 공허해진다 — 실측: 앱 유닛이 디스크에
+# 실재하는데 양쪽 다 `infra+ops+platform`이라 조용한 ok였다. 두 축의 증인이 아래 레인 둘이다:
+# 「exists on disk but is untracked」(①) · 「the scope loses all apps manifests」(②).
+# ⚠️ 대가는 디스크에 있고 아직 `git add`되지 않은 앱이 실 트리 레인을 red로 만드는 것이다 —
+#    로컬 한정이고(CI는 clone이라 추적 밖 파일이 없다) fail-closed 방향이며, 그 red의 출력
+#    (`기대 apps+… / 실제 infra+…`)이 곧 "추적되지 않은 앱 유닛이 있다"는 진단이다.
+# 판정 기준을 `values.yaml`로 잡은 이유는 배포 앱 계약의 필수 산출물이기 때문이다(apps/README.md).
+# 셸 글롭이라 실패 채널이 없다 — 무매치면 패턴이 리터럴로 남고 `[ -e ]`가 거짓이라 0이다.
 _has_app_unit() { # $1 = repo root → 1(앱 유닛 ≥ 1) | 0
-  local out
-  out="$(git -C "$1" ls-files -- 'apps/*/deploy/prod/values.yaml')" || return 2
-  if [ -n "$out" ]; then echo 1; else echo 0; fi
+  local f
+  for f in "$1"/apps/*/deploy/prod/values.yaml; do
+    if [ -e "$f" ]; then echo 1; return 0; fi
+  done
+  echo 0
 }
 
 # 기대 루트 집합 = {infra, ops, platform} ∪ ({apps} iff 인-레포 배포 앱 유닛 ≥ 1). 정렬 결합이라
 # apps가 맨 앞이다. 세 루트는 상수로 남는다 — 그게 이 단언의 이빨이고, 하나라도 사라지면 red다.
 # 앱 축만 파생이라 앱 온보딩·철거가 이 파일을 손대지 않는다(0↔1 손 단계 제거).
 _expected_roster() { # $1 = repo root
-  local apps; apps="$(_has_app_unit "$1")" || return 2
+  local apps; apps="$(_has_app_unit "$1")"
   if [ "$apps" = 1 ]; then echo "apps+infra+ops+platform"; else echo "infra+ops+platform"; fi
 }
 
