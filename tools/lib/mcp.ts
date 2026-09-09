@@ -79,6 +79,13 @@ const MCP_POLL_MS = envPositiveIntMs("HOMELAB_MCP_POLL_MS", 2000);
 // JSON-RPC 프레임 전용이고, 진행 줄은 CLI 셸(homelab.ts)이 stderr에 내는 표현이다. 여기에 싱크를
 // 주입하면 그 줄이 어디로 가든 프레이밍 계약이 표현 결정에 의존하게 된다(test_homelab-mcp.bats가
 // stdout 전 줄의 JSON-RPC 적합을 단언한다).
+// ⚠️ **이 결정의 대가**: 변이 엔진의 `preflight-blind`(중복 디스패치 preflight가 눈을 감았다는
+// 사실)가 이 서버에서는 소실된다. 그 사실은 진행 이벤트로만 나가고 결과 봉투에는 자리가 없어서
+// (mutation*/teardown* 정의가 전부 additionalProperties:false), 여기서는 '검사가 clear를 냈다'와
+// '검사가 눈을 감았다'가 같은 관측이다. 극성이 fail-open이라 손해는 "경고 한 줄이 없다"이지
+// 결과의 거짓말이 아니다 — 그래도 결과만 보고 "중복 검사가 돌았다"로 읽지 말 것.
+// 더 필요해지면 길은 둘이다: stderr 전용 sink 주입(프레이밍 계약은 stdout만 구속한다) 또는
+// pendingReason 접미 관용구(mutation.ts pollWatch)와 같은 문자열 접미.
 const MCP_MUT = { wait: false, identifyOnly: true, deadlineMs: MCP_DEADLINE_MS, pollMs: MCP_POLL_MS } as const;
 
 // tool 호출 결과 — 계약 envelope(전 동사, url 포함) 또는 usage 오류(invalid params -32602).

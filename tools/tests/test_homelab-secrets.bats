@@ -60,6 +60,29 @@ run_secrets_in() {
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:update-secrets/myapp-701" --jq)" -ge 1 ]
 }
 
+@test "preflight: an open update-secrets PR refuses AFTER the chain has already pushed (this lane's own shape)" {
+  # 요구된 4레인 중 이 레인에는 preflight 픽스처가 0건이었다 — 방어는 구조(엔진 단일 지점)에만
+  # 있고 증인이 없었다. 이 레인만 갖는 성질을 고정한다: 거부가 **연쇄 push 뒤**에 온다(secrets.ts는
+  # seal→커밋→push→도달성 증명을 마친 뒤에야 엔진을 부른다). 그래서 결과는 '아무 일도 없었다'가
+  # 아니고, 스키마상 이 동사의 failure 분기가 요구하는 chain 증거를 계속 실어야 한다.
+  printf '[{"number":42,"title":"update-secrets myapp","head":"update-secrets/myapp-701","html_url":"https://github.com/ukyi-app/homelab/pull/42","auto_merge":true}]\n' > "$FIX/homelab-prs.json"
+  run_secrets_in "$APP_WORK" --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "42" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  # 연쇄는 이미 일어났다 — 봉인본이 원격 main에 도달해 있고 결과가 그 증거를 싣는다.
+  [ "$(echo "$output" | jq -r '.result.chain.mode')" = "chain" ]
+  [ "$(echo "$output" | jq -r '.result.chain.pushed')" = "true" ]
+  [ "$(git -C "$APP_REMOTE" rev-parse main)" = "$(git -C "$APP_WORK" rev-parse HEAD)" ]
+  # 그래서 문구는 재봉인이 아니라 **열린 PR의 처리**를 지목해야 한다. 그리고 이 레인에서 "머지"와
+  # "닫기"는 등가가 아니다 — 열린 PR은 이전 디스패치의 **옛 봉인 암호문**을 담는데 앱 레포 main에는
+  # 이미 새 봉인본이 있다. 머지하면 옛 값이 먼저 배선되고(파드 롤링 1회) 재실행해야 수렴한다.
+  echo "$output" | jq -r '.result.error' | grep -q "이미 진행 중인 PR"
+  echo "$output" | jq -r '.result.error' | grep -q "닫고 다시 실행"
+  echo "$output" | jq -r '.result.error' | grep -q "^디스패치하지 않았다"
+}
+
 @test "chain-mode success and precondition refusal envelopes validate against the schema (floor 2)" {
   export OUTDIR="$BATS_TEST_TMPDIR"
   env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" HOMELAB_TEST_ALLOW_PUSH_REWRITE=1 bash -c "cd '$APP_WORK' && exec '$BUN' '$ROOT/tools/homelab.ts' app secrets myapp --poll-ms 10 --deadline-ms 500 --json" > "$OUTDIR/chain.json" 2>/dev/null || true

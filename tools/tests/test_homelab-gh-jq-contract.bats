@@ -31,6 +31,9 @@ setup() {
   while IFS='%' read -r src path filter lit; do
     [ -n "$src" ] || continue
     n=$((n+1))
+    # ⚠️ 1번째 칸(src)은 그 필터 리터럴의 **소유 파일**이다 — 열린 PR 목록은 status와 변이 엔진의
+    #    중복 디스패치 preflight가 공유하므로 소유가 lane-pr.ts로 옮겨졌다(소비자 파일을 적으면
+    #    사본이 생기는 순간 둘 다 초록이다).
     # ① lib 소스가 그 필터 리터럴을 실제로 담는다(엔진이 필터를 바꾸면 이 줄이 먼저 red).
     grep -qF -- "${lit:-$filter}" "$src"
     # ② 스텁 case가 그 필터를 계약 안으로 받는다.
@@ -41,13 +44,13 @@ setup() {
     [ "$status" -eq 3 ]
   done <<'EOF'
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name, status, conclusion, html_url}]
-tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name}]
+tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20%[.workflow_runs[] | {id, name, status, html_url}]
 tools/lib/mutation.ts%repos/ukyi-app/homelab/actions/runs/501/jobs%[.jobs[] | select(.conclusion == "failure") | .name]
 tools/lib/mutation.ts%repos/ukyi-app/homelab/commits/c0ffee1/check-runs?check_name=gate&filter=all&per_page=100%[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]
 tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501%[.[] | {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}]%{number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}
 tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls/21%{number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}
 tools/lib/status.ts%repos/ukyi-app/page/actions/runs?per_page=3%[.workflow_runs[] | {name, status, conclusion, head_sha, head_branch, event, html_url}]
-tools/lib/status.ts%repos/ukyi-app/homelab/pulls?state=open&per_page=100%[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]
+tools/lib/lane-pr.ts%repos/ukyi-app/homelab/pulls?state=open&per_page=100%[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]
 tools/lib/status.ts%repos/ukyi-app/homelab/pulls/7%{number, state, merged, merge_commit_sha, title, head_ref: .head.ref, head_sha: .head.sha, auto_merge: (.auto_merge != null), html_url}
 EOF
   # 비공허 바닥값 — 아홉 줄이 실제로 돌았다(heredoc이 비면 위 전칭이 항진이다).
@@ -58,7 +61,9 @@ EOF
   [ "$(grep -cF '[.workflow_runs[] | {id, name, status, conclusion, html_url}]' tools/tests/helpers/cli_stub.bash)" = "5" ]
   # 신선도 스냅샷의 투영은 **경로만 글롭인 한 케이스**가 5레인을 다 받는다 — 응답이 레인
   # 무관(기본 공집합)이라 사본을 다섯 벌 두면 드리프트 표면만 늘어난다. 그래서 여기는 1건이다.
-  [ "$(grep -cF '[.workflow_runs[] | {id, name}]' tools/tests/helpers/cli_stub.bash)" = "1" ]
+  # 식별 루프와 텍스트가 다른 것(conclusion 유무)이 계약이다 — 같아지면 이 글롭 케이스가 식별
+  # 질의까지 삼켜 다섯 레인 픽스처가 통째로 죽는다.
+  [ "$(grep -cF '[.workflow_runs[] | {id, name, status, html_url}]' tools/tests/helpers/cli_stub.bash)" = "1" ]
 }
 
 @test "the workflow_runs unwrap and the head.ref nesting are witnessed against raw payloads (real jq)" {

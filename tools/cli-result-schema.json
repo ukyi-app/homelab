@@ -533,7 +533,7 @@
       }
     },
     "mutationRefused": {
-      "description": "디스패치 전 거부 — correlation이 없다(nonce 미생성). 거부 근거는 레인에 따라 갈린다: app secrets는 연쇄 증거(chain), app create는 사전 판정 이름(preflight). 어느 쪽이 필수인지는 행렬 분기가 행의 chain 극성에서 파생해 고정하므로 이 정의 자체는 둘 다 optional로 둔다.",
+      "description": "디스패치 전 거부 — correlation이 없다(nonce 미생성). 거부 근거는 레인에 따라 갈린다: app secrets는 연쇄 증거(chain), app create는 사전 판정 이름(preflight). 어느 쪽이 필수인지는 행렬 분기가 행의 chain 극성에서 파생해 고정하므로 이 정의 자체는 둘 다 optional로 둔다. ⚠️ 디스패치 전 거부가 전부 이 형상인 것은 아니다 — 중복 디스패치 preflight(같은 레인·같은 키의 열린 PR·미완료 run)의 거부는 nonce 발급 **뒤**라 correlation을 들고 mutationFailure/teardownFailure로 온다. 그 correlation의 run은 존재하지 않으며 error 문구가 그것을 먼저 말한다. 그 세 번째 형상이 이 정의를 쓸 수 없는 이유는 action enum이다: 여기는 create-app·update-secrets뿐이라 db/cache/teardown 레인이 담기지 않는다.",
       "type": "object",
       "additionalProperties": false,
       "required": ["action", "name", "error"],

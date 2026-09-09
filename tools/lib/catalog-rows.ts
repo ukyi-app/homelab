@@ -217,13 +217,19 @@ function assertFilled(s: string): string {
   return s;
 }
 
-// MutationSpec의 레인 파생 필드(action·workflow·branchFor·applications) — 콜사이트는 여기에
-// dispatchInputs(값)·resultBase·variant 축(manualMerge/converge/noopOnMissingPr)을 더한다.
-// branchFor 시그니처는 mutation.ts 계약과 동일.
+// MutationSpec의 레인 파생 필드(action·workflow·branchFor·branchPattern·key·applications) —
+// 콜사이트는 여기에 dispatchInputs(값)·resultBase·variant 축(manualMerge/converge/noopOnMissingPr)을
+// 더한다. branchFor 시그니처는 mutation.ts 계약과 동일.
+// branchPattern·key는 **채우지 않은 좌표**다 — 엔진의 중복 디스패치 preflight가 "열린 PR 하나가
+// 이 레인·이 키의 것인가"를 물을 때 run id를 모르기 때문에 채운 브랜치(branchFor)로는 답이 없다.
+// 여기서 함께 내보내야 콜사이트 5곳이 `...lane` 스프레드만으로 배선되고, 새 레인이 그 배선을
+// 잊을 자리가 없다(MutationSpec의 필수 필드라 타입이 강제한다).
 export function laneMutationFields(action: LaneAction, key: string): {
   action: LaneAction;
   workflow: string;
   branchFor: (runId: number) => string;
+  branchPattern: string;
+  key: string;
   applications: Array<{ name: string; surfacePath: string }>;
 } {
   const row = LANES[action];
@@ -231,6 +237,8 @@ export function laneMutationFields(action: LaneAction, key: string): {
     action,
     workflow: row.workflow,
     branchFor: (runId: number) => assertFilled(fillLanePattern(row.branchPattern, { key, runId })),
+    branchPattern: row.branchPattern,
+    key,
     applications: row.applications.map((a) => ({
       name: assertFilled(fillLanePattern(a.name, { key })),
       surfacePath: assertFilled(fillLanePattern(a.surfacePath, { key })),
