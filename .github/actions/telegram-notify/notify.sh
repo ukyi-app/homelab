@@ -68,10 +68,14 @@ fi
 
 # best-effort 송신 — 비2xx도 step 실패시키지 않는다.
 api="${TG_API_BASE:-https://api.telegram.org/bot}"
-code="$(curl -sS -o /tmp/tg-resp -w '%{http_code}' -X POST "${api}${TG_TOKEN}/sendMessage" \
+# 응답·stderr 파일은 프로세스 고유다 — 고정 /tmp/tg-resp는 같은 호스트의 동시 호출이 서로 덮어 쓴다.
+tg_resp="${TMPDIR:-/tmp}/tg-resp.$$"
+tg_err="${TMPDIR:-/tmp}/tg-err.$$"
+code="$(curl -sS -o "$tg_resp" -w '%{http_code}' -X POST "${api}${TG_TOKEN}/sendMessage" \
   --data-urlencode "chat_id=${TG_CHAT}" \
   --data-urlencode "parse_mode=HTML" \
-  --data-urlencode "text=${text}" 2>/tmp/tg-err || echo 000)"
+  --data-urlencode "text=${text}" 2>"$tg_err" || echo 000)"
+rm -f "$tg_resp" "$tg_err"
 case "$code" in
   2*) : ;;
   *)

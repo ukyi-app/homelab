@@ -203,7 +203,9 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   reg="$BATS_TEST_TMPDIR/mktrailing"
   mkreg "$reg" '# 사유 — 실행처: owner-local `make _zz_acct_trailing_probe`' 'tests/_fixtures_acct/test_zz_trailing_probe.bats'
   run bash "$s" --lint-excludes "$reg"
-  git checkout -- Makefile
+  # 복원은 :201의 사본으로 — `git checkout -- Makefile`은 공유 .git/index를 잠그고(병렬 레인의 다른 인덱스
+  # writer와 경합) Makefile의 미커밋 편집까지 함께 지운다(test_check-doc-index.bats:298이 실측한 함정).
+  cp "$BATS_TEST_TMPDIR/Makefile.bak" Makefile
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "venue가 0건 실재"
 }
@@ -219,7 +221,7 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   reg="$BATS_TEST_TMPDIR/mkquote"
   mkreg "$reg" '# 사유 — 실행처: owner-local `make _zz_acct_quote_probe`' 'tests/_fixtures_acct/test_zz_quote_probe.bats'
   run bash "$s" --lint-excludes "$reg"
-  git checkout -- Makefile
+  cp "$BATS_TEST_TMPDIR/Makefile.bak" Makefile
   [ "$status" -eq 0 ]
 }
 
@@ -363,12 +365,13 @@ manual_max() { grep -oE '^MANUAL_MAX=[0-9]+' "$s" | cut -d= -f2; }
 
 # ── 스캔 신호 규약 ───────────────────────────────────────────────────────────────────────────────
 
-@test "the default run emits all three domain scan markers" {
+@test "the default run emits all four domain scan markers" {
   run bash "$s"
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE '^SCAN: check-bats-accounting:excludes: [0-9]+$'
   echo "$output" | grep -qE '^SCAN: check-bats-accounting:gate: [0-9]+$'
   echo "$output" | grep -qE '^SCAN: check-bats-accounting:tracked: [0-9]+$'
+  echo "$output" | grep -qE '^SCAN: check-bats-accounting:serial: [0-9]+$'
 }
 
 @test "a fixture lint reports a different exclude count than the real registry" {
@@ -380,4 +383,55 @@ manual_max() { grep -oE '^MANUAL_MAX=[0-9]+' "$s" | cut -d= -f2; }
   [ -n "$fix" ]
   [ -n "$real" ]
   [ "$fix" -ne "$real" ]
+}
+
+# ── (2b) 직렬 레인 레지스트리(tests/.gate-serial) 계약 ──────────────────────────────────────────
+# run-bats.sh가 병렬 레인 뒤 혼자 도는 파일 목록. 레인은 도메인이 아니라 실행 순서라 (1)의 회계가 못 보므로
+# 별도 계약이다 — 사유 주석 지배 · 추적 + gate 수집 안 · 상한. `--serial-registry <파일>`이 픽스처 모드다.
+
+@test "the committed serial-lane registry passes and reports a non-empty lane" {
+  run bash "$s"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^SCAN: check-bats-accounting:serial: [1-9][0-9]*$'
+}
+
+@test "a serial-lane entry outside the gate set is rejected (an .ci-exclude member cannot be serial)" {
+  reg="$BATS_TEST_TMPDIR/serial-excl"
+  mkreg "$reg" '# 사유 — 실 트리 변경' 'tests/posture/test_internal-by-default.bats'
+  run bash "$s" --serial-registry "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "gate 수집 집합에 없다"
+}
+
+@test "a serial-lane entry with no governing comment is rejected" {
+  reg="$BATS_TEST_TMPDIR/serial-bare"
+  mkreg "$reg" 'tests/gates/test_scan-floor.bats'
+  run bash "$s" --serial-registry "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "사유 주석 없이"
+}
+
+@test "a serial-lane entry for a non-tracked file is rejected" {
+  reg="$BATS_TEST_TMPDIR/serial-notracked"
+  mkreg "$reg" '# 사유' 'tests/gates/test_no-such.bats'
+  run bash "$s" --serial-registry "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "추적 파일 아님"
+}
+
+@test "the serial lane has a ceiling (growth must be visible in the diff)" {
+  reg="$BATS_TEST_TMPDIR/serial-ceiling"
+  # gate 소속 실 파일 7건 — 상한 6을 하나 넘긴다(전부 추적·수집 안이라 다른 축은 초록).
+  seven="$(bash "$ROOT/scripts/run-bats.sh" --list | sed -n '1,7p')"
+  # shellcheck disable=SC2086  # 줄 분할이 의도다(경로에 공백 없음)
+  mkreg "$reg" '# 사유' $seven
+  run bash "$s" --serial-registry "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "직렬 레인 7건 > 상한"
+}
+
+@test "a missing serial-lane registry is red, not a pass" {
+  run bash "$s" --serial-registry "$BATS_TEST_TMPDIR/nope-serial-$$"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "직렬 레인 레지스트리 없음"
 }

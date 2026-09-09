@@ -289,8 +289,14 @@ echo "[drill] RPO 마커 기록 — 지금 쓴 행이 복구본에 나타나야 
 #    그걸 두면 `MARKER_TS="${MARKER_ROW##*|}"`가 `1787…\nINSERT 0 1`이 되어 아래 숫자 case가 fail한다
 #    (2026-08-25 라이브: --request-timeout 결함을 고치자 이 파싱 결함이 드러났다). RETURNING 행이 항상
 #    첫 줄이므로 head -1이 안전하다. 다른 `_live_psql -tAc` SELECT 호출은 상태 태그가 없어 무관하다.
-MARKER_ROW="$(_live_psql -d "$DB" -tAF'|' -c "INSERT INTO ${TABLE} DEFAULT VALUES RETURNING id, extract(epoch from ts)::bigint;" | head -1)" \
+# ⚠️ **파이프(`_live_psql … | head -1`)가 아니라 캡처 뒤 herestring이다.** `set -o pipefail` 아래에서 head가 첫 줄을
+#    읽고 닫으면 writer(kubectl exec → psql)의 둘째 write가 SIGPIPE를 맞아 파이프라인이 141로 끝나고, `|| fail`이
+#    **쓰기가 성공했는데도** "라이브에 쓰지 못했다"를 낸다. 스케줄링에 달린 일이라 부하가 높을수록 잦다(2026-09-09
+#    실측 — 같은 모양의 스텁 파이프라인: 무부하 800회 중 1회, CPU 포화 아래 2500회 중 343회 141). 캡처하면 파이프가
+#    없다. 같은 계열: docs/traps-detail.md 「`grep -q`의 조기 종료가 pipefail 아래에서 writer를 SIGPIPE로 죽인다」.
+MARKER_OUT="$(_live_psql -d "$DB" -tAF'|' -c "INSERT INTO ${TABLE} DEFAULT VALUES RETURNING id, extract(epoch from ts)::bigint;")" \
   || fail "RPO 마커를 라이브에 쓰지 못했다 — 아카이브 신선도를 증명할 수 없다(테이블 부재/권한/DB 다운/락 확인)"
+MARKER_ROW="$(head -n 1 <<<"$MARKER_OUT")"
 MARKER_ID="${MARKER_ROW%%|*}"
 MARKER_TS="${MARKER_ROW##*|}"
 case "$MARKER_ID" in '' | *[!0-9]*) fail "RPO 마커 INSERT가 숫자 id를 반환하지 않았다(${MARKER_ROW}) — ${TABLE} 스키마 변경 의심" ;; esac

@@ -28,6 +28,7 @@ cd "$ROOT"
 #    (`ci.yaml`·`Makefile` 2곳) 어디든 인자 한 토큰이면 이 가드가 자기 자신을 끄는 off-switch가 된다.
 #    ⇒ 픽스처 모드는 **명시 플래그**로만 열고, 모르는 인자는 fail-loud(exit 2)다.
 EXCLUDE_FILE="tests/.ci-exclude"
+SERIAL_FILE="tests/.gate-serial"
 LINT_ONLY=0
 # 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 env 폐지).
 take_floors "check-bats-accounting:gate check-bats-accounting:tracked" "$@" || exit $?
@@ -46,8 +47,13 @@ while [ $# -gt 0 ]; do
       EXCLUDE_FILE="${2:-}"
       [ -n "$EXCLUDE_FILE" ] || { echo "ERROR: --registry에 레지스트리 파일 인자가 필요하다" >&2; exit 2; }
       shift 2 ;;
+    --serial-registry)
+      # (2b) 직렬 레인 레지스트리(tests/.gate-serial)의 픽스처 모드 — 계약 위반 픽스처가 red를 내는지의 증인.
+      SERIAL_FILE="${2:-}"
+      [ -n "$SERIAL_FILE" ] || { echo "ERROR: --serial-registry에 레지스트리 파일 인자가 필요하다" >&2; exit 2; }
+      shift 2 ;;
     *)
-      echo "ERROR: 알 수 없는 인자 '$1' — 인자 없이 전 회계를 돌리거나 '--lint-excludes <파일>'로 레지스트리 계약만, '--registry <파일>'로 전 회계를 그 레지스트리로 본다." >&2
+      echo "ERROR: 알 수 없는 인자 '$1' — 인자 없이 전 회계를 돌리거나 '--lint-excludes <파일>'로 레지스트리 계약만, '--registry <파일>'로 전 회계를 그 레지스트리로, '--serial-registry <파일>'로 직렬 레인 계약(2b)을 그 레지스트리로 본다." >&2
       exit 2 ;;
   esac
 done
@@ -294,5 +300,48 @@ while IFS= read -r line; do
   fi
 done < "$EXCLUDE_FILE"
 
-if [ "$rc" -eq 0 ]; then echo "check-bats-accounting: 전 bats가 정확히 한 도메인(gate/chart-test/.ci-exclude) OK (${scanned}건 스캔, 제외 ${excl_n}/${EXCL_MAX}건)"; fi
+# ── (2b) 직렬 레인 레지스트리(tests/.gate-serial) 계약 ──────────────────────────────────────────
+# run-bats.sh는 이 목록의 파일을 병렬 레인이 끝난 뒤 혼자 돈다(실 체크아웃을 잠깐 바꾸는 스위트 전용 —
+# 헤더가 기준을 적는다). 레인은 도메인이 아니라 **실행 순서**라 (1)의 회계에는 안 보인다 — 여기서 따로 문다:
+#   · 항목은 직전 주석 블록(사유)의 지배를 받는다(.ci-exclude와 같은 그룹 규칙 — 항목 뒤 주석은 새 그룹).
+#   · git 추적 파일이고 gate 수집 집합 안이어야 한다(.ci-exclude 등재·경로 오타는 run-bats.sh도 exit 2로 막지만,
+#     그쪽은 실행 시점이라 여기서 먼저 잡는다).
+#   · 상한 SERIAL_MAX — 직렬 레인이 길어질수록 병렬화의 이득이 준다. 래칫이 아니라 상한(EXCL_MAX와 같은 논거).
+# ⚠️ 대상 부재는 통과가 아니다 — 레지스트리 파일이 없으면 run-bats.sh가 죽는 것과 별개로 여기서도 red.
+[ -f "$SERIAL_FILE" ] || { echo "FAIL: 직렬 레인 레지스트리 없음: $SERIAL_FILE"; rc=1; }
+SERIAL_MAX=6
+serial_n=0
+sgroup=""
+s_after_entry=0
+s_lineno=0
+if [ -f "$SERIAL_FILE" ]; then
+  while IFS= read -r line; do
+    s_lineno=$((s_lineno + 1))
+    case "$line" in
+      '') sgroup=""; s_after_entry=0; continue;;
+      \#*)
+        if [ "$s_after_entry" -eq 1 ]; then sgroup=""; s_after_entry=0; fi
+        sgroup="${sgroup}${line} "; continue;;
+    esac
+    serial_n=$((serial_n + 1))
+    s_after_entry=1
+    if [ -z "$sgroup" ]; then
+      echo "FAIL: ${SERIAL_FILE}:${s_lineno} 사유 주석 없이 등재된 직렬 항목(무엇을 바꾸는지 적어라): $line"; rc=1
+    fi
+    if ! git ls-files --error-unmatch "$line" >/dev/null 2>&1; then
+      echo "FAIL: ${SERIAL_FILE}:${s_lineno} 항목이 추적 파일 아님: $line"; rc=1
+    fi
+    if ! in_gate "$line"; then
+      echo "FAIL: ${SERIAL_FILE}:${s_lineno} 항목이 gate 수집 집합에 없다(.ci-exclude 등재·경로 오타): $line"; rc=1
+    fi
+  done < "$SERIAL_FILE"
+fi
+if [ "$serial_n" -gt "$SERIAL_MAX" ]; then
+  echo "FAIL: ${SERIAL_FILE}: 직렬 레인 ${serial_n}건 > 상한 ${SERIAL_MAX} — 실 트리를 바꾸지 않게 픽스처로 옮기는 것이 먼저다."
+  echo "  정당한 등재라면 이 상한(scripts/check-bats-accounting.sh의 SERIAL_MAX 상수)을 같은 PR에서 올려라."
+  rc=1
+fi
+scan_signal check-bats-accounting:serial "$serial_n"
+
+if [ "$rc" -eq 0 ]; then echo "check-bats-accounting: 전 bats가 정확히 한 도메인(gate/chart-test/.ci-exclude) OK · 직렬 레인 ${serial_n}/${SERIAL_MAX} (${scanned}건 스캔, 제외 ${excl_n}/${EXCL_MAX}건)"; fi
 exit $rc

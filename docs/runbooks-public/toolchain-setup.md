@@ -30,6 +30,7 @@ gitignored(owner 로컬 전용)이므로, **도구 설치 단계에 한해** 이
 | **kubeconform** | `>=0.6.7` | 매니페스트 스키마 검증(chart-test) | `brew install kubeconform` |
 | **conftest** | (게이트 없음, 필수) | 메모리 원장 OPA 정책(`verify:ledger`) | `brew install conftest` (Open Policy Agent) |
 | **bats** | `>=1.11` | bats 테스트 게이트(`run-bats.sh`) | `brew install bats-core` (CI는 apt가 아니라 커밋 SHA로 clone한다 — macOS 기본 bash 3.2 함정 주의) |
+| **GNU parallel** | (게이트 없음 — 로컬 부재는 직렬 폴백, CI 부재는 exit 2) | `run-bats.sh`의 파일 단위 병렬 레인(`bats --jobs`) | `brew install parallel` / `apt install parallel` (gate 러너 이미지 ubuntu-24.04-arm에 apt 패키지로 있음 — moreutils의 `parallel`은 다른 프로그램) |
 | **shellcheck** | (게이트 없음) | `*.sh` 린트(`make ci`) | `brew install shellcheck` (버전이 다르면 info 체크가 CI와 드리프트) |
 | **yq** | `v4` | YAML 파싱(여러 스크립트/게이트) | `brew install yq` (mikefarah v4 — go-yq) |
 | **jq** | 임의 버전 | JSON 처리 | `brew install jq` |
