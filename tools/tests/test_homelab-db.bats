@@ -604,10 +604,14 @@ pr_closed_unmerged() {
   echo "$output" | jq -r '.result.error' | grep -q "state=closed, merged_at=null"
   [ "$(echo "$output" | jq -r '.result.pr.number')" = "21" ]
   [ "$(echo "$output" | jq -r '.result.pr.merged')" = "false" ]
-  # 데드라인까지 폴링하지 않았음의 증인 — pulls 조회는 목록 1 + 확증 1로 정확히 2회다.
+  # 데드라인까지 폴링하지 않았음의 증인 — **레인 PR** 조회는 목록 1 + 확증 1로 정확히 2회다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "1" ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" --jq)" = "1" ]
-  [ "$(python3 "$LEDGER_PY" dump "$CALLS" | grep -c "/pulls")" = "2" ]
+  # 디스패치 전 중복 PR preflight의 `pulls?state=open`은 이 축이 아니다 — 폴링이 아니라 1회 관측이라
+  # 아래 등식은 레인 PR 두 형상(`?state=all` 목록 · `/pulls/<n>` 단건)만 센다. 그 1건도 여기서
+  # 이름을 붙여 둔다: 붙이지 않으면 "3이 아니라 2"가 무엇 때문인지 이 파일에서 사라진다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=open&per_page=100" --jq)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" dump "$CALLS" | grep -cE "/pulls\?state=all|/pulls/")" = "2" ]
 }
 
 @test "wait: a stale closed listing overruled by the authoritative read still converges to success" {

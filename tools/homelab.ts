@@ -196,6 +196,10 @@ const needsLines = (verb: { needs: string }): string[] => [`요구: ${verb.needs
 // 문구가 셸에 있는 이유: 엔진은 표현을 모른다(op는 Envelope만 반환) — 그래서 MCP는 이 sink를
 // 주입하지 않고, 같은 엔진 호출이 stdio JSON-RPC 스트림을 오염시키지 않는다.
 const PROGRESS_LINE: Record<ProgressEvent["stage"], (e: ProgressEvent) => string> = {
+  // 중복 PR preflight가 눈을 감은 경우에만 나온다(성공 관측은 조용하다 — 정상 경로의 노이즈를
+  // 늘리지 않는다). 극성이 fail-open이라 이 줄 뒤에도 디스패치는 그대로 나가므로, 문구가 그
+  // 사실을 함께 말한다. Record 타입이라 새 stage를 더하면 여기 렌더가 없을 때 컴파일이 죽는다.
+  "preflight-blind": (e) => `진행: 중복 PR preflight 관측 실패(디스패치는 계속) — ${e.note}`,
   dispatched: (e) => `진행: 디스패치 접수 — correlation ${e.correlation}`,
   identified: (e) => `진행: run 식별 — ${e.runUrl}`,
   concluded: (e) => `진행: run 완료 — ${e.runUrl}`,

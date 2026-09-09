@@ -1,5 +1,7 @@
 // 공유 변이 엔진 — 변이 동사(db/cache create, app create/secrets/teardown)의 공통 골격.
-//   correlation nonce 생성 → **신선도 스냅샷**(디스패치 전에 이미 그 에코를 가진 run id 집합 —
+//   correlation nonce 생성 → **중복 디스패치 preflight**(같은 레인·같은 키의 열린 PR이 있으면
+//   디스패치 전에 failure — 권위가 아니라 UX 조기 경고이고, 관측 부재는 fail-open이다:
+//   아래 0a절) → **신선도 스냅샷**(디스패치 전에 이미 그 에코를 가진 run id 집합 —
 //   고정 nonce가 켜졌을 때 옛 run을 자기 것으로 채택하는 것을 막는다) → 디스패치
 //   (gh workflow run) → nonce 에코 run-name으로 자기 run 특정
 //   (정확히 1개만 채택: ≥2 = race fail-closed, 0 = 재조회 후 pending — 관측 차분은 신원
@@ -30,7 +32,7 @@ import { revisionFields, syncRevisionOf } from "./argocd.ts";
 import { compact } from "./contract.ts";
 import { ghJson, ghRead, sh, type GhRead } from "./exec.ts";
 import { CORRELATION_RE } from "./identity.ts";
-import { LANE_PR_FIELDS, lanePrRef, readLanePrs, type LanePrRow } from "./lane-pr.ts";
+import { LANE_PR_FIELDS, lanePrRef, openLaneConflict, readLanePrs, type LanePrRow } from "./lane-pr.ts";
 import { HOMELAB_REPO } from "./platform.ts";
 
 export type MutationSpec = {
@@ -38,6 +40,12 @@ export type MutationSpec = {
   workflow: string;                                // 디스패처 파일명(예: create-database.yaml)
   dispatchInputs: Array<[string, string]>;         // -f k=v 순서 보존(argv 원장 계약 — correlation은 엔진이 뒤에 붙임)
   branchFor: (runId: number) => string;            // PR 브랜치 명명(레인 신원 행 파생 — catalog-rows)
+  // 중복 디스패치 preflight의 좌표 — 레인 브랜치의 **중립 패턴**과 이번 변이의 키.
+  // branchFor는 run id를 요구하는데 preflight는 그것을 모르므로(디스패치 전이다) 채우지 않은
+  // 좌표가 따로 필요하다. 엔진은 레인 행을 import하지 않는다는 설계를 유지하려고 순수 문자열
+  // 두 개로 받고, 콜사이트는 laneMutationFields의 `...lane` 스프레드로 배선한다.
+  branchPattern: string;
+  key: string;
   applications: Array<{ name: string; surfacePath: string }>; // --wait 수렴 대상 집합 + 표면
   resultBase: Record<string, unknown>;             // 모든 variant에 실리는 공통 필드({action, name, …})
   // 수동 머지 동사(create-app: 머지 = 공개 승인 · teardown-app: 머지 = 파괴 승인 — 둘 다
@@ -181,8 +189,13 @@ const PRE_RUNS_JQ = "[.workflow_runs[] | {id, name}]";
 // 왜 엔진이 직접 stderr에 쓰지 않는가: 계약 경계(표현은 셸 소유)가 흐려지고 hermetic bats의 argv
 // 원장 표면이 탁해진다 — 주입 심이라야 MCP에서 "쓰지 않음"이 기본값으로 성립한다.
 // ⚠️ 방출은 **단계 전이**에만 건다(폴링 하트비트는 별건). 그래서 사이클당 줄이 늘지 않는다.
-export type ProgressStage = "dispatched" | "identified" | "concluded" | "pr" | "merged";
-export type ProgressEvent = { stage: ProgressStage; correlation: string; runUrl?: string; prUrl?: string; sha?: string };
+// ⚠️ `preflight-blind`만 **단계 전이가 아니다** — 디스패치 전 관측이 눈을 감았다는 사실의 방출이고,
+// 그 사실을 결과에 실을 자리가 없기 때문에 존재한다(mutation*/teardown* 정의가 전부
+// additionalProperties:false라 필드 신설은 생성기 2곳 + 골든 4개를 흔든다). 대가는 MCP에서
+// 보이지 않는다는 것이다(그 transport는 sink를 주입하지 않는다) — 극성이 fail-open이라
+// 손해는 "경고 한 줄이 없다"이지 결과의 거짓말이 아니다.
+export type ProgressStage = "preflight-blind" | "dispatched" | "identified" | "concluded" | "pr" | "merged";
+export type ProgressEvent = { stage: ProgressStage; correlation: string; runUrl?: string; prUrl?: string; sha?: string; note?: string };
 
 export type MutationOpts = { wait: boolean; pollMs: number; deadlineMs: number; identifyOnly: boolean; onProgress?: (e: ProgressEvent) => void };
 
@@ -257,9 +270,45 @@ export function runMutation(spec: MutationSpec, opts: MutationOpts): MutationOut
   const fail = (error: string, extra: Record<string, unknown> = {}): MutationOutcome =>
     ({ variant: "failure", omitted: [], result: compact({ ...base, ...extra, error }) });
   // 진행 이벤트 방출 — 싱크 미주입이면 no-op이다(MCP·라이브러리 소비자).
-  const emit = (stage: ProgressStage, handles: { runUrl?: string; prUrl?: string; sha?: string } = {}): void => {
+  const emit = (stage: ProgressStage, handles: { runUrl?: string; prUrl?: string; sha?: string; note?: string } = {}): void => {
     opts.onProgress?.({ stage, correlation, ...handles });
   };
+
+  // 0a) 중복 디스패치 preflight — 같은 레인·같은 키의 **열린** PR이 있으면 디스패치하지 않는다.
+  // 병소(2026-09-06 실물 #669·#670 — 41초 간격 create-database mydb 2건): 실행기 가드
+  // (provision-db.ts:88·provision-cache.ts:60)는 디스패처가 `ref: main`으로 체크아웃한 **main 기준**이라
+  // 첫 PR이 미머지인 동안 두 번째 run도 통과해 PR을 낸다. 둘 다 auto-merge 무장 → 하나가 머지되면
+  // 나머지는 BEHIND → pr-sweeper의 update-branch가 같은 파일의 다른 봉인 암호문과 충돌 → auto-merge
+  // 영구 정지(pr-sweeper.yaml:87-101이 DIRTY를 자기 사각지대로 이미 명문화했다). CLI는 두 호출 모두
+  // success로 봤다. 그 두 번째 디스패치를 여기서 끊는다.
+  // ⚠️ **권위가 아니라 UX 조기 경고다.** 이 조회와 아래 디스패치 사이 TOCTOU가 원리적으로 남는다
+  //    (직후에 열린 PR은 못 본다 · 실행기 가드와 달리 `queue: max` 직렬화 안쪽이 아니다). 그래서
+  //    실행기 가드는 이 검사로 **완화하지 않는다** — 권위는 여전히 저쪽이고 여기는 20분짜리 왕복과
+  //    사람이 닫아야 할 PR 하나를 아끼는 값싼 앞단이다.
+  // 범위: 이 엔진을 쓰는 5레인 전부(create-database·create-cache·create-app·update-secrets·teardown-app).
+  //    teardown-app **포함** 근거: 브랜치 문법이 같은 디스패치 레인 형상(`teardown/teardown-app-{key}-{runId}`)
+  //    이고 두 번째 철거 PR도 첫 PR 머지 뒤 같은 경로 삭제에서 충돌한다. 수동 머지라 auto-merge 정지는
+  //    없지만 사람이 닫아야 할 PR이 하나 더 생기는 것은 같다.
+  //    bump 레인 **제외**는 조건문이 아니라 구조다 — bump-poll은 이 엔진을 아예 쓰지 않고
+  //    (ensure-bump-pr의 leased force-push rebuild가 같은 브랜치를 수렴시킨다) 그래서 여기 열거가
+  //    드리프트할 자리가 없다.
+  // ⚠️ 관측 부재(gh 비-0 · JSON/배열 아님 · 페이지 절단)는 **fail-open**이다 — 이 모듈 규약
+  //    (GATE_PASSING 절과 같은 극성: 결론을 읽었는데 모르는 어휘는 fail-closed, 관측 자체의 부재는
+  //    fail-open). 여기서 막으면 GitHub 계층 blip 한 번이 정당한 변이를 거부한다. 조용히 `?? []`로
+  //    접지 않고 사유를 진행 이벤트로 낸다(위 ProgressStage `preflight-blind` 절).
+  // ⚠️ update-secrets 레인에서는 여기 도달 시 **연쇄가 이미 push했을 수 있다**(secrets.ts:105) —
+  //    거부 문구가 "아무 일도 없었다"를 함의하면 안 되므로, 다음 행동은 재봉인이 아니라 열린 PR의
+  //    처리라고 말한다(그 뒤 재실행은 --no-seal 재디스패치로도 수렴한다).
+  const conflict = openLaneConflict(spec.branchPattern, spec.key);
+  if (conflict.kind === "hit") {
+    // 결과 필드는 신설하지 않는다 — 기존 failure variant의 `pr` 핸들이 재개 좌표다.
+    // merged:false는 관측이 아니라 질의의 성질이다(`state=open`은 미머지의 동의어다).
+    return fail(
+      `이미 진행 중인 PR — 같은 레인·같은 키의 열린 PR #${conflict.pr.number}(${conflict.pr.head})이 있다. 그 PR을 머지하거나 닫은 뒤 다시 실행한다(재디스패치는 같은 표면에 두 번째 PR을 만들고, 하나가 머지되면 나머지는 BEHIND→충돌로 영구 정지한다): ${conflict.pr.url}`,
+      { pr: { number: conflict.pr.number, url: conflict.pr.url, merged: false } },
+    );
+  }
+  if (conflict.kind === "blind") emit("preflight-blind", { note: conflict.reason });
 
   // 0) 신선도 스냅샷 — 디스패치 **전에** 이미 이 correlation을 에코하는 run의 **id 집합**을
   // 찍어 두고 채택에서 배제한다. 없으면 고정 nonce(HOMELAB_CORRELATION 주입)가 프로덕션에서 켜졌을 때

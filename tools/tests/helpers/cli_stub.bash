@@ -445,6 +445,10 @@ case "$*" in
         ;;
     esac
     ;;
+  # ── 열린 PR 목록 — 소비자 둘이 같은 질의를 쓴다: status(머지 대기 레인)와 변이 엔진의
+  #    **중복 디스패치 preflight**(디스패치 전 관측). 그래서 STUB_GH_PRS_FAIL은 두 소비자의
+  #    극성을 함께 가른다 — status는 fail-loud(또는 사유를 실은 error), preflight는 fail-open이다.
+  #    기본 픽스처가 `[]`라 변이 레인들은 종전과 같은 색이다(중복 없음 = clear).
   # ── status 동사 케이스 — 응답 픽스처는 $FIX/*.json이 SSOT, 오류 시나리오는 STUB_* env ──
   "api repos/ukyi-app/homelab/pulls?state=open&per_page=100 --jq "'[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]')
     if [ -n "${STUB_GH_PRS_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
