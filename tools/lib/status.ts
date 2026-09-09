@@ -14,7 +14,7 @@ import { LANES, isDispatchLaneBranch, parseDispatchLaneBranch } from "./catalog-
 import { compact } from "./contract.ts";
 import { ghRead, git, sh, type GhRead } from "./exec.ts";
 import { APP_NAME_RE, RESOURCE_NAME_RE } from "./identity.ts";
-import { laneBranchInputError, lanePrRef, parseLaneBranch, readLanePrs, type LanePrRow } from "./lane-pr.ts";
+import { OPEN_PR_PAGE_MAX, laneBranchInputError, lanePrRef, parseLaneBranch, readLanePrs, readOpenHomelabPrs, type LanePrRow } from "./lane-pr.ts";
 import { parseLedgerRows } from "./ledger-totals.ts";
 import { LAYOUT_DIRS, TOMBSTONES_PATH, classifyArtifact, layoutFor, roleArtifacts, type ResourceKind } from "./resource-layout.ts";
 import { HOMELAB_REPO } from "./platform.ts";
@@ -185,17 +185,12 @@ function ghCause(g: Exclude<GhRead, { kind: "ok" }>): string {
   return g.reason;
 }
 
-// 열린 PR 목록의 per_page 상한 — 도달하면 "더 있을 수 있다"가 사실이라 truncated를 싣는다.
-// 상한을 안 말하면 101번째 머지 대기 PR이 '없음'과 구별되지 않는다(꼬리가 조용히 잘린다).
-// 질의 문자열이 이 상수에서 나와야 판정과 질의가 함께 움직인다(리터럴 두 벌 = 드리프트).
-const PR_PAGE_MAX = 100;
-
 // 열린 PR 목록 1회 조회 — app 모드의 두 분기(산출물 실재/부재)가 같은 질의를 공유한다.
-// 3상 리더를 그대로 돌려준다(fail-loud 판정과 사유 문구는 콜사이트 — GitHub 계층은 선택 계층이 아니다).
-function openHomelabPrs(): GhRead {
-  return ghRead(`repos/${HOMELAB_REPO}/pulls?state=open&per_page=${PR_PAGE_MAX}`,
-    "[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]");
-}
+// 질의·투영·per_page 상한의 SSOT는 lane-pr.ts다: 변이 엔진의 중복 디스패치 preflight가 **같은
+// 관측**을 쓰므로 여기 리터럴을 두면 한쪽만 고쳐도 초록인 사본이 된다. 3상 리더를 그대로 받아
+// fail-loud 판정과 사유 문구는 이 파일이 진다(GitHub 계층은 선택 계층이 아니다 — preflight 쪽은
+// 극성이 반대라 그 선택이 리더가 아니라 콜사이트에 있다).
+const openHomelabPrs = readOpenHomelabPrs;
 const openPrRow = (p: Record<string, unknown>): Record<string, unknown> =>
   compact({ number: p.number, title: p.title, head: p.head, url: p.html_url, autoMerge: p.auto_merge });
 
@@ -221,7 +216,7 @@ function inFlightPrs(): Record<string, unknown> {
     if (!re.test(lane.key)) continue;                              // 이름 정책 밖 = 이 레인의 키가 아니다
     prs.push(compact({ action: lane.action, key: lane.key, ...openPrRow(p) }));
   }
-  return compact({ prs, truncated: rows.length >= PR_PAGE_MAX ? true : undefined });
+  return compact({ prs, truncated: rows.length >= OPEN_PR_PAGE_MAX ? true : undefined });
 }
 
 // 배포 핀 tag의 source SHA 인코딩 — create-app이 `sha-<source SHA>`로 쓴다(그 파일이 SSOT).

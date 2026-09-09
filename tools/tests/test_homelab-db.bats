@@ -52,6 +52,168 @@ run_db_create() {
   [ "$(echo "$output" | jq -r '.result.pr.merged')" = "false" ]
 }
 
+# ── 중복 디스패치 preflight(디스패치 **앞**의 읽기 전용 관측) ────────────────────────────────
+# 병소(2026-09-06 실물 #669·#670): 같은 이름의 변이를 41초 간격으로 두 번 디스패치하면 실행기
+# 가드가 main 체크아웃 기준이라 둘 다 통과해 PR 2개가 열리고, 하나가 머지되면 나머지는
+# BEHIND→충돌로 auto-merge가 영구 정지한다(pr-sweeper의 알려진 사각). 엔진이 디스패치 전에
+# 같은 레인·같은 키의 열린 PR을 보면 그 두 번째 디스패치를 아예 내지 않는다.
+# ⚠️ 이것은 권위가 아니라 UX 조기 경고다 — 실행기 가드 완화가 아님은 provision-db.ts가 그대로임이 증언한다.
+
+@test "preflight: an open PR on the same lane and key refuses before dispatch (zero workflow-run records)" {
+  printf '[{"number":669,"title":"create-database mydb","head":"create-database/mydb-501","html_url":"https://github.com/ukyi-app/homelab/pull/669","auto_merge":true}]\n' > "$FIX/homelab-prs.json"
+  run_db_create --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  # 재개 좌표 — 기존 failure variant의 pr 핸들로 싣는다(결과 필드 신설 0: mutationFailure의 pr).
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "669" ]
+  [ "$(echo "$output" | jq -r '.result.pr.url')" = "https://github.com/ukyi-app/homelab/pull/669" ]
+  [ "$(echo "$output" | jq -r '.result.pr.merged')" = "false" ]
+  echo "$output" | jq -r '.result.error' | grep -q "이미 진행 중인 PR"
+  # 수령증 무효 선언 — 이 봉투는 correlation을 들고 나가지만(mutationFailure의 필수 필드) 그
+  # nonce의 run은 GitHub에 없다. 사람용 헤드라인(`— correlation …`)과 PR 슬롯이 그것을 수령증처럼
+  # 보이게 하므로, 문구가 **먼저** 부인해야 운영자·에이전트가 0건인 run을 찾지 않는다.
+  echo "$output" | jq -r '.result.error' | grep -q "^디스패치하지 않았다(이 correlation의 run은 존재하지 않는다)"
+  # 핵심 단언 — 디스패치 argv가 원장에 **0건**이다(재디스패치가 나가지 않았다).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  # preflight 질의는 status와 **같은** 경로·투영이다(lane-pr.ts SSOT — 리터럴 사본 금지).
+  run python3 "$LEDGER_PY" exact "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=open&per_page=100" \
+    --jq '[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]'
+  [ "$status" -eq 0 ]
+}
+
+@test "preflight: open PRs on a different key or a different lane are ignored (zero false positives)" {
+  # 다섯 형상 전부 '이 변이의 중복이 아니다': 다른 키 · 다른 레인의 같은 키 · 하이픈 형제 키 ·
+  # runId tail이 아닌 브랜치 · bump 레인. 하나라도 물면 정당한 변이가 막힌다.
+  printf '[{"number":1,"title":"other db","head":"create-database/otherdb-501","html_url":"u1","auto_merge":true},{"number":2,"title":"cache same key","head":"create-cache/mydb-501","html_url":"u2","auto_merge":true},{"number":3,"title":"sibling key","head":"create-database/mydb-extra-501","html_url":"u3","auto_merge":false},{"number":4,"title":"no runId tail","head":"create-database/mydb-main","html_url":"u4","auto_merge":false},{"number":5,"title":"bump","head":"bump-poll/app/mydb-sha-abcdef1","html_url":"u5","auto_merge":true}]\n' > "$FIX/homelab-prs.json"
+  run_db_create --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  # ⚠️ 검출기가 실제로 돌았다는 증인 — 이 줄이 없으면 preflight를 통째로 지워도 이 @test는 그대로
+  #    초록이다(오탐 0은 '검사가 없음'과 구별되지 않는다 — 부재 단언의 상시 함정).
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=open&per_page=100" --jq)" = "1" ]
+}
+
+@test "preflight: an unreadable open-PR listing does not block the dispatch (fail-open) and names the cause" {
+  # 관측 부재 = fail-open(이 모듈 규약). `?? []`로 조용히 접지 않고 사유를 진행 이벤트로 낸다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_PRS_FAIL=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  printf '%s\n' "$stderr" | grep -q "^진행: 중복 디스패치 preflight 관측 실패"
+  # 조용한 접기가 아님의 증인 — 사유(스텁의 stderr 첫 줄)가 그대로 실린다.
+  printf '%s\n' "$stderr" | grep -q "gh: API 오류"
+}
+
+@test "preflight: an open-PR response that is not an array is an absent observation too (no silent clear)" {
+  # 관측 부재 3상의 **세 번째** — gh 비-0(형제 @test)·페이지 절단(형제 @test)과 달리 이 상만
+  # 픽스처가 0건이었다: `openLaneConflict`의 배열 아님 분기를 `{kind:"clear"}`로 접어도
+  # (요구가 금지한 `?? []`와 의미상 동일) 전 스위트가 초록이었다(2026-09-09 실측).
+  # 그 접힘이 위험한 이유는 응답 형상 드리프트가 '열린 PR 0건'과 구별되지 않기 때문이다 —
+  # 조용한 clear는 이 관측의 유일한 무증인 출구다.
+  printf '{"message":"Not Found"}\n' > "$FIX/homelab-prs.json"
+  run_db_create --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  printf '%s\n' "$stderr" | grep -q "^진행: 중복 디스패치 preflight 관측 실패"
+  printf '%s\n' "$stderr" | grep -q "배열이 아니다"
+}
+
+@test "preflight: a full first page is an incomplete observation, not a clear one (page cap named)" {
+  # 절단은 clear가 아니라 blind다 — 101번째 PR이 '없음'과 구별되지 않는 자리. 극성은 fail-open이라
+  # 디스패치는 그대로 나가고, 사유가 상한을 지목한다.
+  python3 - "$FIX/homelab-prs.json" <<'PY'
+import json, sys
+rows = [{"number": i, "title": "x", "head": "bump-poll/app/other%d-sha-abcdef1" % i,
+         "html_url": "u%d" % i, "auto_merge": False} for i in range(1, 101)]
+open(sys.argv[1], "w").write(json.dumps(rows) + "\n")
+PY
+  run_db_create --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  printf '%s\n' "$stderr" | grep -q "상한(100건)에 닿아"
+}
+
+@test "preflight: a hit inside a truncated page still refuses (found is a fact, truncation is not)" {
+  # 100건째에 진짜 중복이 있으면 절단(blind)보다 hit이 먼저다 — 순서가 뒤집히면 꽉 찬 페이지에서
+  # 중복 검출이 통째로 죽는다(이 판정 조건은 픽스처가 밟지 않으면 무증인이다).
+  python3 - "$FIX/homelab-prs.json" <<'PY'
+import json, sys
+rows = [{"number": i, "title": "x", "head": "bump-poll/app/other%d-sha-abcdef1" % i,
+         "html_url": "u%d" % i, "auto_merge": False} for i in range(1, 100)]
+rows.append({"number": 670, "title": "dup", "head": "create-database/mydb-502",
+             "html_url": "https://github.com/ukyi-app/homelab/pull/670", "auto_merge": True})
+open(sys.argv[1], "w").write(json.dumps(rows) + "\n")
+PY
+  run_db_create --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "670" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+}
+
+# ── 같은 축의 두 번째 관측: **미완료 run**(디스패치는 됐는데 PR이 아직 없는 창) ────────────
+# 열린 PR만 보는 preflight는 디스패치→PR 실재 사이가 통째로 사각이다 — 라이브 실측 ~30초
+# (run 34040809701 created_at 2026-09-06T14:58:08Z ↔ 그 run이 만든 PR #669 created_at 14:58:38Z).
+# 이 티켓의 트리거(Ctrl-C 후 즉시 재실행)가 바로 그 창 안에 떨어진다: 실물 #670의 디스패치는
+# #669가 생긴 뒤 9초라 PR 축에 겨우 걸렸고, 그보다 이른 재실행은 전부 통과했을 것이다.
+# 질의는 이미 나가던 신선도 스냅샷 하나라 API 호출은 0건 늘지 않는다(투영만 넓어진다).
+
+@test "preflight: an in-flight run for the same key refuses before dispatch (the window the PR axis cannot see)" {
+  printf '[{"id":500,"name":"✨ create-database — mydb [corr-earlier-run-01]","status":"in_progress","html_url":"https://github.com/ukyi-app/homelab/actions/runs/500"}]\n' > "$FIX/stale-runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_STALE_RUN=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  # 재개 좌표는 run 핸들이다(PR은 아직 원리적으로 없다) — 결과 필드 신설 0: mutationFailure의 run.
+  [ "$(echo "$output" | jq -r '.result.run.id')" = "500" ]
+  [ "$(echo "$output" | jq -r '.result.run.url')" = "https://github.com/ukyi-app/homelab/actions/runs/500" ]
+  echo "$output" | jq -r '.result.error' | grep -q "이미 진행 중인 run"
+  echo "$output" | jq -r '.result.error' | grep -q "^디스패치하지 않았다(이 correlation의 run은 존재하지 않는다)"
+  # 다음 행동이 실재하는 핸들을 지목한다 — 이 창에서 유일하게 존재하는 좌표는 run URL이다.
+  echo "$output" | jq -r '.result.error' | grep -q "homelab status --run https://github.com/ukyi-app/homelab/actions/runs/500"
+  # 핵심 단언 — 재디스패치가 나가지 않았다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+}
+
+@test "preflight: a sibling key, a completed run and a status-less row never block the dispatch (run axis)" {
+  # 네 형상 전부 '이 변이의 중복이 아니다'. ① 하이픈 형제 키(mydb-extra) — 접두 비교면 오귀속한다.
+  # ② 이미 completed — 종결 집합의 유일한 원소이고 그 여집합이 미완료다. ③ status 부재 · ④ html_url
+  # 부재 — 그건 어휘가 아니라 **관측의 부재**(투영 드리프트)라 이 모듈 규약대로 fail-open이고,
+  # ④는 좌표 없는 거부가 다음 행동을 못 준다는 이유가 더 붙는다.
+  # 넷 다 판정 조건이라 픽스처가 밟지 않으면 무증인이다(전건 red 뮤테이션도 이 넷을 못 가른다).
+  printf '[{"id":498,"name":"✨ create-database — mydb-extra [c1]","status":"in_progress","html_url":"u498"},{"id":499,"name":"✨ create-database — mydb [c2]","status":"completed","html_url":"u499"},{"id":497,"name":"✨ create-database — mydb","html_url":"u497"},{"id":496,"name":"✨ create-database — mydb [c4]","status":"queued"}]\n' > "$FIX/stale-runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_STALE_RUN=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  # ⚠️ 검출기 실행 증인 — 스냅샷 질의가 실제로 1건 나갔다. 없으면 run 축을 통째로 지워도 이
+  #    @test는 초록이다(부재 단언의 상시 함정). --jq까지 세는 이유: 같은 경로를 식별 루프가
+  #    **다른 투영**으로 다시 부르므로 경로 접두만으로는 두 질의가 구별되지 않는다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20" --jq "[.workflow_runs[] | {id, name, status, html_url}]")" = "1" ]
+}
+
+@test "preflight: an unreadable run snapshot blinds the run axis without blocking the dispatch (fail-open)" {
+  # 관측 부재 = fail-open은 두 축에 같이 걸린다. 이 상은 종전에 조용했다 — 스냅샷 실패가
+  # '배제 없음'으로만 접혀 사유가 어디에도 남지 않았다. 이제 같은 진행 이벤트가 사유를 낸다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_SNAPSHOT_FAIL=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  printf '%s\n' "$stderr" | grep -q "^진행: 중복 디스패치 preflight 관측 실패"
+  printf '%s\n' "$stderr" | grep -q "run 목록"
+  printf '%s\n' "$stderr" | grep -q "gh: API 오류"
+  # 같은 상의 두 번째 형상 — rc 0인데 배열이 아니다(jq 투영/응답 형상 드리프트).
+  : > "$CALLS"
+  printf '{"message":"Not Found"}\n' > "$FIX/stale-runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_STALE_RUN=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  printf '%s\n' "$stderr" | grep -q "배열이 아니다"
+}
+
 @test "db create adopts its own run amid staggered visibility of a foreign run (no misattribution)" {
   printf '[{"id":400,"name":"✨ create-database — otherdb","status":"completed","conclusion":"success","html_url":"u400"},{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
   run_db_create --json
@@ -525,10 +687,18 @@ pr_closed_unmerged() {
   echo "$output" | jq -r '.result.error' | grep -q "state=closed, merged_at=null"
   [ "$(echo "$output" | jq -r '.result.pr.number')" = "21" ]
   [ "$(echo "$output" | jq -r '.result.pr.merged')" = "false" ]
-  # 데드라인까지 폴링하지 않았음의 증인 — pulls 조회는 목록 1 + 확증 1로 정확히 2회다.
+  # 데드라인까지 폴링하지 않았음의 증인 — **레인 PR** 조회는 목록 1 + 확증 1로 정확히 2회다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=all&head=ukyi-app:create-database/mydb-501" --jq)" = "1" ]
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls/21" --jq)" = "1" ]
-  [ "$(python3 "$LEDGER_PY" dump "$CALLS" | grep -c "/pulls")" = "2" ]
+  # 디스패치 전 중복 디스패치 preflight의 `pulls?state=open`은 이 축이 아니다 — 폴링이 아니라 1회 관측이라
+  # 아래 등식은 레인 PR 두 형상(`?state=all` 목록 · `/pulls/<n>` 단건)만 센다. 그 1건도 여기서
+  # 이름을 붙여 둔다: 붙이지 않으면 "3이 아니라 2"가 무엇 때문인지 이 파일에서 사라진다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/pulls?state=open&per_page=100" --jq)" = "1" ]
+  [ "$(python3 "$LEDGER_PY" dump "$CALLS" | grep -cE "/pulls\?state=all|/pulls/")" = "2" ]
+  # 총량 바닥값 — 명명한 세 형상의 합(1+1+1)과 `/pulls` 전체가 같다. 이 줄이 없으면 네 번째
+  # 형상(예: `pulls?state=closed`·`pulls?base=main`)이 폴링 루프에 들어와도 위 두 등식 어디에도
+  # 안 걸린다: 좁힌 정규식이 원래 이 @test가 지키던 '데드라인까지 폴링하지 않았다'에 사각을 낸다.
+  [ "$(python3 "$LEDGER_PY" dump "$CALLS" | grep -c "/pulls")" = "3" ]
 }
 
 @test "wait: a stale closed listing overruled by the authoritative read still converges to success" {
@@ -1262,7 +1432,7 @@ run_db_gate_wait() {
   # 디스패치 **전** 신선도 스냅샷이 하나 더 있으므로 경로 접두만 세면 그 1건과 뒤섞인다.
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20" --jq "[.workflow_runs[] | {id, name, status, conclusion, html_url}]")" = "0" ]
   # 그 스냅샷은 디스패치보다 앞이므로 실패 레인에서도 정확히 1회 관측된다(무-질의로 접히지 않았다).
-  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20" --jq "[.workflow_runs[] | {id, name}]")" = "1" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20" --jq "[.workflow_runs[] | {id, name, status, html_url}]")" = "1" ]
 }
 
 @test "a completed run echoing the same nonce from BEFORE the dispatch is never adopted (freshness snapshot)" {

@@ -39,6 +39,25 @@ run_app_create() {
   [ "$status" -eq 0 ]
 }
 
+@test "preflight: an open create-app PR refuses before dispatch and still carries the exposure disclaimer" {
+  # 요구된 4레인 중 이 레인에도 픽스처가 0건이었다. 이 레인만 갖는 성질: 결과에 공개 노출 경계
+  # 부인문(dnsExposure)이 실린다 — 스키마의 create-app failure 분기가 그것을 요구하므로, 거부가
+  # 그 필드를 떨어뜨리면 봉투 자기검증이 죽는다(그 조건을 밟는 픽스처가 이 한 건이다).
+  printf '[{"number":52,"title":"create-app myapp","head":"create-app/myapp-801","html_url":"https://github.com/ukyi-app/homelab/pull/52","auto_merge":false}]\n' > "$FIX/homelab-prs.json"
+  run_app_create --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  [ "$(echo "$output" | jq -r '.result.pr.number')" = "52" ]
+  [ "$(echo "$output" | jq -r '.result.dnsExposure')" = "iac/tf-reconcile(공개) 또는 adguard rewrite(내부)" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+  # 형제 앱은 물지 않는다(오귀속 0) — 하이픈 형제 키가 이 레인에서도 통과해야 한다.
+  : > "$CALLS"
+  printf '[{"number":53,"title":"create-app sibling","head":"create-app/myapp-extra-801","html_url":"u53","auto_merge":false}]\n' > "$FIX/homelab-prs.json"
+  run_app_create --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+}
+
 @test "wait on an unmerged PR is a bounded human-merge pending and NO auto-merge argv exists" {
   run_app_create --wait --json
   [ "$status" -eq 1 ]

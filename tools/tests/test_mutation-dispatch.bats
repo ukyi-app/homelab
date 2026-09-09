@@ -62,6 +62,32 @@ correlation_echo_guard() {
   ' "$1" $DISPATCHERS
 }
 
+# run-name **키 에코** 계약 — 변이 엔진의 중복 디스패치 preflight가 "같은 키의 미완료 run"을
+# 판정할 때 파싱하는 그 형상이다. 리터럴이 TS(mutation.ts RUN_NAME_KEY_SEP)와 YAML 양쪽에
+# 사는 이유는 correlation 에코와 같다(YAML은 TS를 import할 수 없다) — 그래서 여기서도 양끝
+# 대조를 가드가 진다. 이 가드가 없으면 상류가 구분자를 바꿔도 preflight만 조용히 눈을 감는다
+# (키 추출 실패 = 매치 0건 = 거부 없음 — 손해 방향은 fail-open이라 어떤 색도 변하지 않는다).
+key_echo_guard() {
+  run bun -e '''
+    const y = require("yaml"), fs = require("fs");
+    const root = process.argv[1], wf = process.argv[2];
+    const { LANES } = await import(root + "/tools/lib/catalog-rows.ts");
+    const { RUN_NAME_KEY_SEP } = await import(root + "/tools/lib/mutation.ts");
+    const bad = [];
+    let n = 0;
+    for (const row of Object.values(LANES)) {
+      // 행의 **첫** 입력이 그 레인의 키 입력이다(db·cache=name · app 3레인=app) — 순서가 바뀌면
+      // 여기가 red가 되고, 그것이 preflight 파싱을 다시 보라는 신호다.
+      const want = RUN_NAME_KEY_SEP + "${{ inputs." + row.inputs[0] + " }}";
+      const rn = String(y.parse(fs.readFileSync(wf + "/" + row.workflow, "utf8"))["run-name"] ?? "");
+      if (!rn.includes(want)) bad.push(row.workflow + ": run-name이 키를 " + JSON.stringify(want) + " 형태로 에코하지 않는다");
+      n++;
+    }
+    if (n !== 5 || bad.length) { console.error(bad.join("\n") || ("레인 수 " + n + " != 5")); process.exit(1); }
+    console.log("ok:" + n);
+  ''' "$ROOT" "$1"
+}
+
 # 입력 **형상**의 부정 불변식 — 레인 디스패처의 모든 입력은 type이 없거나 boolean이어야 한다.
 # 전량 핀(required·default까지)이 아니라 부정 불변식인 이유: CLI는 `-f k=v` 문자열만 보내고
 # (verbs.ts가 불리언을 "true"/"false"로, 빈 선택값을 ""로 조립한다), number/choice/environment는
@@ -675,6 +701,21 @@ EOF
   # sed 무매치의 vacuous green 차단 — 뮤테이션이 실제로 적용됐는지 먼저 못 박는다.
   [ "$(grep -cF "format(' ({0})', inputs.correlation)" "$T/create-cache.yaml")" = "1" ]
   correlation_echo_guard "$T"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "create-cache"
+}
+
+@test "each dispatcher echoes its key input into run-name in the separator form the CLI preflight parses" {
+  key_echo_guard "$WF"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:5$"
+  # 판별성 증인 — 사본 트리에서 한 레인의 구분자를 ASCII 하이픈으로 바꾸면 red다(작업 트리 불변).
+  T="$BATS_TEST_TMPDIR/key-echo-mut"; mkdir -p "$T"
+  cp "$WF"/*.yaml "$T/"
+  sed 's|— ${{ inputs.name }}|- ${{ inputs.name }}|' "$WF/create-cache.yaml" > "$T/create-cache.yaml"
+  # sed 무매치의 vacuous green 차단 — 뮤테이션이 실제로 적용됐는지 먼저 못 박는다.
+  [ "$(grep -cF -- '- ${{ inputs.name }}' "$T/create-cache.yaml")" = "1" ]
+  key_echo_guard "$T"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "create-cache"
 }

@@ -8,7 +8,7 @@
 // ⚠️ 브랜치 문법의 SSOT는 레인 신원 행(catalog-rows LANES.branchPattern)이다 — 여기서 접두를
 // 리터럴로 복제하지 않는다. 행이 순수 기술자(import 0)라 gh 질의·이름 정책을 가질 수 없어서,
 // '행에서 파생한 파싱 + 질의'가 이 모듈에 산다.
-import { LANES, fillLanePattern, type LaneAction } from "./catalog-rows.ts";
+import { LANES, fillLanePattern, isDispatchLaneBranch, type LaneAction } from "./catalog-rows.ts";
 import { compact } from "./contract.ts";
 import { ghRead, type GhRead } from "./exec.ts";
 import { APP_NAME_RE, RESOURCE_NAME_RE } from "./identity.ts";
@@ -42,6 +42,55 @@ export function readLanePrs(branch: string): GhRead {
 // 결과 계약의 PR 핸들 형상(mutationPr) — 변이 엔진과 status --branch가 같은 모양을 낸다.
 export function lanePrRef(pr: LanePrRow): Record<string, unknown> {
   return compact({ number: pr.number, url: pr.html_url, merged: pr.merged_at !== null, mergeSha: pr.merge_commit_sha ?? undefined });
+}
+
+// ── 열린 homelab PR 목록(레인 무관 스캔) ───────────────────────────────────────────────────
+// 위 정확 조회와 축이 다르다: 저쪽은 "이 브랜치의 PR"이고 이쪽은 "지금 열려 있는 것 전부"다.
+// 소비자 둘이 같은 질의·같은 투영을 공유한다 — status(머지 대기 레인 표시)와 변이 엔진의
+// 중복 디스패치 preflight. 사본 둘이면 한쪽만 고쳐도 초록인 클래스라 여기 한 벌만 둔다.
+//
+// per_page 상한 — 도달하면 "더 있을 수 있다"가 **사실**이라 소비자가 그것을 말해야 한다
+// (status는 truncated 필드로, preflight는 관측 부재로). 상한을 안 말하면 101번째 PR이 '없음'과
+// 구별되지 않는다. 질의 문자열이 이 상수에서 나와야 판정과 질의가 함께 움직인다.
+export const OPEN_PR_PAGE_MAX = 100;
+export const OPEN_PR_JQ = "[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]";
+// 3상 리더를 그대로 돌려준다 — 극성(fail-loud / fail-open)과 사유 문구는 콜사이트 소유다.
+// 두 소비자의 극성이 서로 다르므로(status의 app 모드는 fail-loud, preflight는 fail-open) 이
+// 함수가 그것을 고르면 한쪽이 반드시 틀린다.
+export function readOpenHomelabPrs(): GhRead {
+  return ghRead(`repos/${HOMELAB_REPO}/pulls?state=open&per_page=${OPEN_PR_PAGE_MAX}`, OPEN_PR_JQ);
+}
+
+// 같은 레인·같은 키의 **열린** PR 판정 — 변이 엔진의 중복 디스패치 preflight가 쓰는 3상 관측.
+// 판정 술어는 레인 신원 행이 소유하는 `isDispatchLaneBranch` 하나다(status.ts:67·:273과 같은
+// 술어 — 여기서 접두를 리터럴로 복제하면 그게 브랜치 문법의 두 번째 진실이다).
+// 3상인 이유: hit(중복 실재)·clear(없음)·blind(관측 부재)를 둘로 접으면 GitHub 계층 blip 한 번이
+// 'clear'로(경고가 조용히 죽는다) 또는 'hit'으로(정당한 변이가 막힌다) 위장한다. 어느 쪽으로
+// 접을지는 콜사이트가 명시적으로 고른다.
+// ⚠️ 절단(상한 도달)은 clear가 아니라 blind다 — 페이지네이션을 더하는 대신 "다음 페이지 유무를
+//    모른다"를 그대로 낸다(형제 판단: mutation.ts CHECK_RUNS_PER_PAGE 절). 단 **페이지 안에서
+//    이미 찾았으면 hit이 먼저다** — 찾은 것은 절단과 무관한 사실이고, 순서가 뒤집히면 꽉 찬
+//    페이지에서 검출이 통째로 죽는다.
+// ⚠️ 응답이 배열이 아니면(jq 투영 드리프트·형상 변경) 그것도 관측 부재다 — `?? []`로 접으면
+//    '열린 PR 0건'과 구별되지 않는다(조용한 clear는 이 관측의 유일한 무증인 출구다).
+export type OpenLanePr = { number: number; url: string; head: string };
+export type OpenLaneConflict =
+  | { kind: "hit"; pr: OpenLanePr }
+  | { kind: "clear" }
+  | { kind: "blind"; reason: string };
+export function openLaneConflict(branchPattern: string, key: string): OpenLaneConflict {
+  const g = readOpenHomelabPrs();
+  if (g.kind !== "ok") return { kind: "blind", reason: g.reason };
+  if (!Array.isArray(g.value)) return { kind: "blind", reason: "열린 PR 응답이 배열이 아니다(jq 투영/응답 형상 확인)" };
+  const rows = g.value as Array<Record<string, unknown>>;
+  for (const p of rows) {
+    if (!isDispatchLaneBranch(branchPattern, key, String(p.head))) continue;
+    return { kind: "hit", pr: { number: Number(p.number), url: String(p.html_url), head: String(p.head) } };
+  }
+  if (rows.length >= OPEN_PR_PAGE_MAX) {
+    return { kind: "blind", reason: `열린 PR 목록이 상한(${OPEN_PR_PAGE_MAX}건)에 닿아 꼬리 미관측 — 다음 페이지 유무 미상` };
+  }
+  return { kind: "clear" };
 }
 
 // 브랜치 → (레인, 키, run id) 복원. 생성 방향(laneMutationFields.branchFor)의 역이고, 판정은
