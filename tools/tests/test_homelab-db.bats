@@ -148,6 +148,64 @@ PY
   [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
 }
 
+# ── 같은 축의 두 번째 관측: **미완료 run**(디스패치는 됐는데 PR이 아직 없는 창) ────────────
+# 열린 PR만 보는 preflight는 디스패치→PR 실재 사이가 통째로 사각이다 — 라이브 실측 ~30초
+# (run 34040809701 created_at 2026-09-06T14:58:08Z ↔ 그 run이 만든 PR #669 created_at 14:58:38Z).
+# 이 티켓의 트리거(Ctrl-C 후 즉시 재실행)가 바로 그 창 안에 떨어진다: 실물 #670의 디스패치는
+# #669가 생긴 뒤 9초라 PR 축에 겨우 걸렸고, 그보다 이른 재실행은 전부 통과했을 것이다.
+# 질의는 이미 나가던 신선도 스냅샷 하나라 API 호출은 0건 늘지 않는다(투영만 넓어진다).
+
+@test "preflight: an in-flight run for the same key refuses before dispatch (the window the PR axis cannot see)" {
+  printf '[{"id":500,"name":"✨ create-database — mydb [corr-earlier-run-01]","status":"in_progress","html_url":"https://github.com/ukyi-app/homelab/actions/runs/500"}]\n' > "$FIX/stale-runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_STALE_RUN=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "failure" ]
+  # 재개 좌표는 run 핸들이다(PR은 아직 원리적으로 없다) — 결과 필드 신설 0: mutationFailure의 run.
+  [ "$(echo "$output" | jq -r '.result.run.id')" = "500" ]
+  [ "$(echo "$output" | jq -r '.result.run.url')" = "https://github.com/ukyi-app/homelab/actions/runs/500" ]
+  echo "$output" | jq -r '.result.error' | grep -q "이미 진행 중인 run"
+  # 핵심 단언 — 재디스패치가 나가지 않았다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "0" ]
+}
+
+@test "preflight: a sibling key, a completed run and a status-less row never block the dispatch (run axis)" {
+  # 세 형상 전부 '이 변이의 중복이 아니다'. ① 하이픈 형제 키(mydb-extra) — 접두 비교면 오귀속한다.
+  # ② 이미 completed — 종결 집합의 유일한 원소이고 그 여집합이 미완료다. ③ status 부재 — 그건
+  # 어휘가 아니라 **관측의 부재**(투영 드리프트)라 이 모듈 규약대로 fail-open이다.
+  # 셋 다 판정 조건이라 픽스처가 밟지 않으면 무증인이다(전건 red 뮤테이션도 이 셋을 못 가른다).
+  printf '[{"id":498,"name":"✨ create-database — mydb-extra [c1]","status":"in_progress","html_url":"u498"},{"id":499,"name":"✨ create-database — mydb [c2]","status":"completed","html_url":"u499"},{"id":497,"name":"✨ create-database — mydb","html_url":"u497"}]\n' > "$FIX/stale-runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_STALE_RUN=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.variant')" = "success" ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  # ⚠️ 검출기 실행 증인 — 스냅샷 질의가 실제로 1건 나갔다. 없으면 run 축을 통째로 지워도 이
+  #    @test는 초록이다(부재 단언의 상시 함정). --jq까지 세는 이유: 같은 경로를 식별 루프가
+  #    **다른 투영**으로 다시 부르므로 경로 접두만으로는 두 질의가 구별되지 않는다.
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh api "repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20" --jq "[.workflow_runs[] | {id, name, status, html_url}]")" = "1" ]
+}
+
+@test "preflight: an unreadable run snapshot blinds the run axis without blocking the dispatch (fail-open)" {
+  # 관측 부재 = fail-open은 두 축에 같이 걸린다. 이 상은 종전에 조용했다 — 스냅샷 실패가
+  # '배제 없음'으로만 접혀 사유가 어디에도 남지 않았다. 이제 같은 진행 이벤트가 사유를 낸다.
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_SNAPSHOT_FAIL=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  printf '%s\n' "$stderr" | grep -q "^진행: 중복 디스패치 preflight 관측 실패"
+  printf '%s\n' "$stderr" | grep -q "run 목록"
+  printf '%s\n' "$stderr" | grep -q "gh: API 오류"
+  # 같은 상의 두 번째 형상 — rc 0인데 배열이 아니다(jq 투영/응답 형상 드리프트).
+  : > "$CALLS"
+  printf '{"message":"Not Found"}\n' > "$FIX/stale-runs.json"
+  run --separate-stderr env PATH="$STUB" KUBECONFIG="$KC" HOMELAB_CORRELATION="$NONCE" STUB_GH_STALE_RUN=1 \
+    "$BUN" tools/homelab.ts db create mydb --poll-ms 10 --deadline-ms 500 --json
+  [ "$status" -eq 0 ]
+  [ "$(python3 "$LEDGER_PY" count "$CALLS" gh workflow run)" = "1" ]
+  printf '%s\n' "$stderr" | grep -q "배열이 아니다"
+}
+
 @test "db create adopts its own run amid staggered visibility of a foreign run (no misattribution)" {
   printf '[{"id":400,"name":"✨ create-database — otherdb","status":"completed","conclusion":"success","html_url":"u400"},{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
   run_db_create --json

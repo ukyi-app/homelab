@@ -193,6 +193,7 @@ PY
 # 임의 owner/repo URL을 정당한 입력으로 받는 계약이라(좁히면 계약을 거짓으로 검증) 의도적 비대칭.
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
+# STUB_GH_SNAPSHOT_FAIL /
 # STUB_GH_HANDLE_404 / STUB_GH_NONJSON / STUB_GH_RAW / STUB_GH_HTTP_ERR / STUB_GH_VERSION / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
 # 3종(STUB_GH_RUNS_LIST_FAIL · STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기
 # 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL) / required check 조회 실패
@@ -295,6 +296,10 @@ case "$*" in
   #    처음부터 있다)를 '디스패치 전에도 있었다'로 읽으면 모든 레인이 채택 불가가 된다.
   #    STUB_GH_STALE_RUN=1이면 같은 nonce를 에코하는 **옛** run을 돌려준다(채택 금지 증인).
   "api repos/ukyi-app/homelab/actions/workflows/"*"/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name}]')
+    # STUB_GH_SNAPSHOT_FAIL: 스냅샷 질의만 전송 오류 — 신선도 배제와 run 축 preflight가 함께
+    # 눈을 감는 상(fail-open)의 증인. STUB_GH_RUNS_FAIL(status 동사의 runs 목록)과 이름을
+    # 의도적으로 분리한다 — 재사용하면 어느 레인이 죽었는지 못 가른다.
+    if [ -n "${STUB_GH_SNAPSHOT_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
     if [ -n "${STUB_GH_STALE_RUN:-}" ]; then cat "$FIX/stale-runs.json"; else echo '[]'; fi
     ;;
   # ── app create 케이스 — create-app 디스패처·runs 목록(수동 머지 동사) ──
