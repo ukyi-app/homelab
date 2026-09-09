@@ -170,6 +170,13 @@ const numFlag = (flags: TypedFlags, k: string): number | undefined => {
 // 운영 노브**다(--wait의 pending은 실패가 아니라 바운디드 결과다). 사용자용 라벨에 '심(seam)'이라는
 // 레포 내부 어휘를 노출하면 '쓰지 말라'로도 '써도 된다'로도 읽힌다 — 그 사실은 여기 주석과
 // tools/README.md에 남기고 help에는 기본값만 적는다.
+// 중복 디스패치 preflight 한 줄 — 변이 동사 다섯이 공유한다(사본 다섯이면 한쪽만 고쳐도 초록).
+// 두 사실을 함께 말한다: 무엇을 막는가, 그리고 **권위가 아니다** — 관측 부재는 fail-open이라 조회가
+// 실패하면 이 검사가 조용한 채로 디스패치가 그대로 나간다(권위는 디스패처의 실행기 가드다).
+const PREFLIGHT_LINES = [
+  "디스패치 전에 같은 레인·같은 키의 열린 PR을 1회 조회해, 있으면 그 PR 핸들과 함께 거부한다",
+  "(중복 디스패치가 만드는 BEHIND→충돌 영구 정지의 예방 — 조회가 실패하면 그대로 디스패치한다).",
+];
 const WAIT_FLAG_LINES = [
   `  --poll-ms <n>      폴링 간격(기본 ${WAIT_DEFAULTS.pollMs}ms)`,
   `  --deadline-ms <n>  전체 데드라인(기본 ${WAIT_DEFAULTS.deadlineMs}ms = ${WAIT_DEFAULTS.deadlineMs / 60000}분)`,
@@ -249,6 +256,7 @@ function dbCreateUsage(): string {
     "",
     "공유 CNPG 클러스터에 논리 DB를 생성한다 — create-database 디스패처를 correlation 수령증과",
     "함께 트리거하고 자기 run을 특정해 conclusion까지 추적한다(PR-first — 머지가 곧 적용).",
+    ...PREFLIGHT_LINES,
     "  --ext <a,b>        확장 목록(알려진 5종은 체크박스, 그 외는 ext_extra로 — 예: pg_trgm,vector)",
     "  --wait             auto-merge 머지 + Application 집합(cnpg-data·data-conn-prod) 수렴까지 대기",
     ...WAIT_FLAG_LINES,
@@ -266,6 +274,7 @@ function appCreateUsage(): string {
     "pending을 반환하며, 대기 중 머지가 관측되면 라이브 수렴(<app>-prod Application + 표면)을 이어간다.",
     "실제 노출(공개 DNS/tunnel 또는 내부 rewrite)은 이 명령의 관측 대상이 아니다 — 결과의",
     "dnsExposure가 소관을 명시한다(공개=iac/tf-reconcile · 내부=adguard rewrite).",
+    ...PREFLIGHT_LINES,
     "  --wait             머지 관측 + Application 수렴까지 대기(미머지 = 바운디드 pending)",
     ...WAIT_FLAG_LINES,
     ...needsLines(APP_CREATE),
@@ -291,6 +300,7 @@ function appSecretsUsage(): string {
     "seal(앱 레포의 tools/seal-secret.mts) → 봉인본만 커밋 → push → 원격 main 도달성 확인 → update-secrets",
     "디스패치를 연쇄하고, 선행 조건(main 브랜치·클린 트리·canonical remote) 중 하나라도 실패면 디스패치",
     "없이 거부한다. 앱 레포 밖이면 디스패치만 한다(이미 push된 봉인본 재배선). 평문은 출력되지 않는다.",
+    ...PREFLIGHT_LINES,
     "  --wait             auto-merge 머지 + <app>-prod Application 수렴까지 대기(동일 봉인본이면 no-op 검증)",
     "  --no-seal          재봉인 없이 이미 커밋·push된 봉인본을 재디스패치(push 성공·디스패치 실패 후 재실행)",
     "                     — kubeseal 암호문은 매번 달라 재봉인은 언제나 새 커밋·새 PR·파드 롤링이다",
@@ -322,6 +332,7 @@ function appTeardownUsage(): string {
     "DNS 회수는 iac/tf-reconcile 소관이라 이 명령의 관측 대상이 아니다(결과에 명시).",
     "DB/캐시(conn·CR·Valkey)는 **비접촉**이라 철거 후에도 그대로 남는다 — 결과의 resourcesRetained가",
     "그 미완 작업을 명시한다(정리는 owner-local `make teardown-resource`, attestation 필요).",
+    ...PREFLIGHT_LINES,
     "  --confirm <app>    파괴 확인 — 철거할 앱 이름 재입력(불일치·비-TTY 무플래그 = 거부)",
     "  --wait             머지 관측 + Application 부재(prune)까지 대기(미머지 = 바운디드 pending)",
     ...WAIT_FLAG_LINES,
@@ -432,6 +443,7 @@ function cacheCreateUsage(): string {
     "",
     "앱별 Valkey 캐시를 생성한다 — create-cache 디스패처를 correlation 수령증과 함께 트리거하고",
     "자기 run을 특정해 conclusion까지 추적한다(PR-first — 머지가 곧 적용).",
+    ...PREFLIGHT_LINES,
     "  --maxmemory-mi <n> maxmemory(Mi, 16..1024 — 생략 시 디스패처 기본 64)",
     "  --wait             auto-merge 머지 + Application 집합(cache-prod·data-conn-prod) 수렴까지 대기",
     ...WAIT_FLAG_LINES,

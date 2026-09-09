@@ -187,7 +187,9 @@ claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
   표면 = 인스턴스 deployment.yaml + conn 봉인본). `homelab cache url` = conn URL 엔진
   (`lib/conn-url.ts`)의 catalog op — 다른 동사와 같은 envelope 계약(--json), 사람용은 렌더러 소유.
   `homelab db create <name> [--ext a,b] [--wait]` = 첫 변이 동사(공유 변이 엔진 `lib/mutation.ts`의
-  첫 인스턴스): create-database 디스패처를 correlation 수령증과 함께 트리거 → nonce 에코 run-name으로
+  첫 인스턴스): 디스패치 **전에** 같은 레인·같은 키의 열린 PR을 1회 조회해 있으면 거부(중복 디스패치
+  preflight — 변이 동사 다섯 공통, 조회 실패는 그대로 진행) → create-database 디스패처를 correlation
+  수령증과 함께 트리거 → nonce 에코 run-name으로
   자기 run 특정(정확히 1개, ≥2=race exit 3) → conclusion 추적(실패 잡 열거) → `--wait`면 auto-merge
   머지 관측 + Application 집합(cnpg-data·data-conn-prod) 수렴(머지 SHA 후손+Synced+Healthy+표면 실존,
   후손 리비전 표면 부재=superseded). KUBECONFIG 부재=머지까지 확인+omitted=["live"].
@@ -523,7 +525,13 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   CLI 셸·MCP(같은 op)·bin 껍데기(db-url/cache-url — 기존 출력 계약 보존). envLocal·envDir 축은
   입력에 존재하되 MCP는 envDir만 노출(설계 Q9).
 - **`lib/mutation.ts`** — 공유 변이 엔진(`runMutation()`) — 변이 동사들의 공통 골격: correlation
-  nonce → 디스패치 → run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정(3상 — 빈 목록·
+  nonce → **중복 디스패치 preflight**(디스패치 **앞**의 읽기 전용 관측: 같은 레인·같은 키의 열린 PR이
+  있으면 `gh workflow run`을 아예 내지 않고 그 PR 핸들과 함께 failure — 판정 술어는 레인 신원 행의
+  `isDispatchLaneBranch`이고 질의는 lane-pr 커널의 `openLaneConflict`다. **권위가 아니라 UX 조기
+  경고**이므로 실행기 가드(`provision-db.ts`·`provision-cache.ts`)를 이 검사로 완화하지 않는다 —
+  조회~디스패치 사이 TOCTOU가 원리적으로 남는다. 관측 부재(gh 비-0·배열 아님·페이지 절단)는
+  fail-open이고 사유는 진행 이벤트 `preflight-blind`로 나간다. 범위는 이 엔진을 쓰는 5레인 전부이고
+  bump 레인 제외는 조건문이 아니라 구조다 — 그쪽은 이 엔진을 아예 쓰지 않는다) → 디스패치 → run 특정(정확히 1 — 관측 차분은 신원이 아니다) → 추적 → PR 특정(3상 — 빈 목록·
   전송 오류는 deadline 독립 grace 재조회 `PR_GRACE_RETRIES` 뒤 판정, `noopForbidden`이면 0건은 fail-loud) →
   [--wait] 머지 관측(머지 없이 닫힌 PR은 대기가 아니라 종결 관측 — 목록의 `state:closed`·미머지를
   단건 권위 조회 `pulls/<n>`로 확증한 뒤 failure, 전송 오류면 미확정으로 두고 폴링 계속 ·
@@ -552,7 +560,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (`db create`·`cache create`·`app create`·`app teardown`)와 `lib/secrets.ts`(`app secrets` 연쇄의
   마지막 단계 — 같은 엔진을 `noopOnMissingPr`로 호출).
 - **`lib/lane-pr.ts`** — 레인 브랜치 PR의 좌표·정확 조회 커널(`readLanePrs()`·`lanePrRef()`·
-  `parseLaneBranch()`·`laneBranchInputError()`). 질의는 `pulls?state=all&head=<owner>:<branch>` —
+  `parseLaneBranch()`·`laneBranchInputError()`) + **열린 PR 목록 스캔**(`readOpenHomelabPrs()`·
+  `openLaneConflict()`·`OPEN_PR_PAGE_MAX`) — 축이 둘이다: 전자는 "이 브랜치의 PR", 후자는 "지금 열려
+  있는 것 전부"다. 후자의 소비자는 status(머지 대기 레인 표시)와 변이 엔진의 중복 디스패치
+  preflight이고, `openLaneConflict`는 hit/clear/**blind** 3상이다(절단·조회 실패를 clear로 접으면
+  경고가 조용히 죽고, hit으로 접으면 정당한 변이가 막힌다 — 극성 선택은 콜사이트 소유).
+  질의는 `pulls?state=all&head=<owner>:<branch>` —
   head가 **정확 일치**라 형제 브랜치(`…/mydb-5011`)가 `…/mydb-501` 응답에 원리적으로 섞이지 않는다.
   투영(`LANE_PR_FIELDS`)은 목록·단건 공용 SSOT이고 argv 원장에 그대로 실려 테스트가 핀한다 —
   `head_sha: .head.sha`는 required check 조기 종결의 좌표라 여기서 함께 온다(추가 조회 0회).
