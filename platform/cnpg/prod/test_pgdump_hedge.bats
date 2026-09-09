@@ -1,47 +1,73 @@
 #!/usr/bin/env bats
 # ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
-# ⚠️ **DBS↔databases/ 정합 판정은 인자화돼 있다** — 실 트리 고정이면 CR 파일이 없는 DBS 토큰
-#    (유령 DB)을 원리적으로 재현할 수 없어 상한 레인이 영원히 무증인이 된다. 그래서
-#    `hedge_dbs_findings`가 (헤지 매니페스트, Database CR 디렉토리) 두 인자를 받고, 실 트리
-#    단언과 픽스처 단언이 **같은 함수**를 통과한다(실 트리 @test가 CI의 실 도메인 권위).
+# ⚠️ **DBS↔databases/ 정합은 하한이 아니라 등식이다(2026-09-09 발견 · 티켓 53).** 착지 전 판정은
+#    databases/*.yaml의 Database CR을 **순회**하며 'present면 DBS에 포함 · absent면 부재'만 쟀다 —
+#    분모가 CR 쪽이라 **CR 파일이 아예 없는 DBS 토큰**(유령 DB, 예: DBS="app ghostdb")은 어느 DB
+#    개수에서도 통과했다(반박자 재현: CR 0건 · absent 1건 · present 1건 세 트리 전부 10/10 ok).
+#    헤지 잡은 `set -euo pipefail`이라 존재하지 않는 DB의 pg_dump 하나가 잡 전체를 죽여 **뒤에 선
+#    DB의 덤프까지** 잃는다 — 티켓 46이 막으려던 장애 클래스(등록 누락)의 정확한 반대 방향(잔존)이다.
+#    ⇒ 판정은 이제 양방향 등식이다: DBS 토큰 집합 == {app} ∪ {`ensure: absent`가 아닌 Database CR의
+#    metadata.name}. cf. AGENTS.md 함정 「이름 있는 집합의 상한 부재」.
+# ⚠️ **그래서 판정이 인자화돼 있다** — 실 트리(DBS="app" · CR 0건) 고정이면 유령 토큰을 원리적으로
+#    재현할 수 없어 상한 레인이 영원히 무증인이 된다. `hedge_dbs_findings`가 (헤지 매니페스트,
+#    Database CR 디렉토리) 두 인자를 받고, 실 트리 단언과 픽스처 단언이 **같은 함수**를
+#    통과한다(실 트리 @test가 CI의 실 도메인 권위, 픽스처가 판정 조건의 증인).
 f=platform/cnpg/prod/pgdump-hedge-cronjob.yaml
 d=platform/cnpg/prod/databases
 
 # DBS 토큰 집합 ↔ Database CR 집합 정합 판정 — 위반을 한 줄씩 stdout으로 낸다(0건이면 무출력).
 #   $1 = 헤지 CronJob 매니페스트 · $2 = Database CR 디렉토리
 # 진단 접두가 위반 클래스다:
-#   missing:       — 기대 원소(부트스트랩 app 또는 `ensure: present` CR)가 DBS에 없다
-#   absent-in-dbs: — `ensure: absent` CR 이름이 DBS에 남았다
+#   missing:       — 기대 원소(부트스트랩 app 또는 `ensure: present` CR)가 DBS에 없다   [하한]
+#   absent-in-dbs: — `ensure: absent` CR 이름이 DBS에 남았다                            [상한]
+#   ghost:         — CR이 아예 없는 DBS 토큰                                            [상한 · 티켓 53]
 hedge_dbs_findings() {
   local hf=$1
   local hd=$2
   local dbs
+  local want
+  local absent
   local y
   local name
+  local w
+  local t
   dbs=$(sed -n 's/^ *DBS="\([^"]*\)".*/\1/p' "$hf")
   if [ -z "$dbs" ]; then
     echo "no-dbs-line: $hf"
     return 0
   fi
-  # 부트스트랩 app DB(restore_canary 보유)는 CR 없이 항상 포함된다.
-  case " $dbs " in *" app "*) ;; *) echo "missing: app";; esac
+  # 기대 집합 — 하한이자 **상한**의 정본이다. 부트스트랩 app DB(restore_canary 보유)는 CR 없이 늘 원소다.
+  want=" app "
+  # `ensure: absent`는 purge 상태머신(teardown-resource --step drop)이 DROP한 DB다 — 실체가 없으므로
+  # 기대 집합 **밖**이고, DBS에 남으면 아래 상한 레인이 잡는다. 유령과 구별해 진단하려고 따로 모은다.
+  absent=" "
   for y in "$hd"/*.yaml; do
-    [ -f "$y" ] || continue
+    [ -f "$y" ] || continue   # 글롭 무매치(빈 디렉토리)의 리터럴 — 판정이 아니라 stderr 잡음 차단
     grep -q '^kind: Database$' "$y" || continue
     name=$(sed -n 's/^  name: \(.*\)$/\1/p' "$y" | head -1)
     if [ -z "$name" ]; then
       echo "no-name: $y"
       continue
     fi
-    # `ensure: absent`는 purge 상태머신(teardown-resource --step drop)이 DROP한 DB다 — 실체 없는 DB가
-    # DBS에 남으면 pg_dump가 그 이름에서 실패하고 `set -euo pipefail` 아래 잡 전체가 죽어 뒤에 선 DB의
-    # 덤프까지 잃는다. 그래서 부재 CR은 포함이 아니라 **부재**를 요구한다.
     if grep -q '^  ensure: absent' "$y"; then
-      case " $dbs " in *" $name "*) echo "absent-in-dbs: $name";; esac
+      absent="${absent}${name} "
       continue
     fi
-    case " $dbs " in *" $name "*) ;; *) echo "missing: $name";; esac
+    want="${want}${name} "
+  done
+  # 하한 — 기대 원소가 전부 DBS에 있는가. 누락된 DB는 barman 실패 시 복구 수단이 없는데
+  # 알림은 녹색(job 완료 기반)인 무성 커버리지 갭이 된다.
+  for w in $want; do
+    case " $dbs " in *" $w "*) ;; *) echo "missing: $w";; esac
+  done
+  # 상한 — DBS 토큰이 전부 기대 집합 안인가. **분모가 DBS 쪽**이라 CR 순회로는 원리적으로 못 보던
+  # 잔존 토큰을 여기서 잡는다(티켓 53). 실체 없는 DB 하나의 pg_dump 실패가 `set -euo pipefail`
+  # 아래 잡 전체를 죽여 뒤에 선 DB의 덤프까지 잃는 것이 이 레인이 막는 장애다.
+  for t in $dbs; do
+    case "$want" in *" $t "*) continue;; esac
+    case "$absent" in *" $t "*) echo "absent-in-dbs: $t"; continue;; esac
+    echo "ghost: $t"
   done
   return 0
 }
@@ -140,6 +166,9 @@ hedge_fixture() {
   mkdir -p "$FX/databases"
   # 들여쓰기·인용은 실물과 같은 줄 문법이다(tools/lib/hedge-dbs.ts의 DBS_RE가 소유하는 형태).
   printf '                  DBS="%s"\n' "$2" > "$FX/hedge.yaml"
+  # 실 databases/ 처럼 kustomization.yaml을 함께 둔다 — `kind: Database` 필터가 사라지면 이 행이
+  # 이름 없는 CR로 읽혀 픽스처 전건이 red가 된다(필터의 증인이 실 트리 @test 하나뿐이지 않게 한다).
+  printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: database\nresources: []\n' > "$FX/databases/kustomization.yaml"
 }
 # Database CR 하나 — $1 = metadata.name · $2 = spec.ensure(present|absent)
 # spec.name도 함께 쓴다: 판정이 **첫** `^  name:`(=metadata.name)을 집는지의 증인이다.
@@ -158,7 +187,8 @@ hedge_fixture_cr() {
 }
 
 @test "fixture: a DBS token with no Database CR at all is caught as a ghost" {
-  # 티켓 53의 축 — 상한이 없으면 이 트리가 어느 DB 개수에서도 통과한다(반박자 재현 2026-09-09).
+  # 티켓 53의 축 — 상한 레인을 되돌리면 이 트리가 어느 DB 개수에서도 통과한다(반박자 재현
+  # 2026-09-09: CR 0건 · absent 1건 · present 1건 세 트리 전부 10/10 ok). 뮤테이션 증인이다.
   hedge_fixture ghost "app ghostdb"
   findings=$(hedge_dbs_findings "$FX/hedge.yaml" "$FX/databases")
   n=$(hedge_dbs_count "$findings")
@@ -211,6 +241,18 @@ hedge_fixture_cr() {
   echo "$findings"
   [ "$n" -eq 1 ]
   grep -qxF -- 'missing: app' <<<"$findings"
+}
+
+@test "fixture: a Database CR with no metadata.name is reported, not silently skipped" {
+  # 이름을 못 읽은 CR을 조용히 건너뛰면 그 DB가 기대 집합에서 통째로 빠져 하한이 vacuous가 된다 —
+  # 열거 붕괴를 '정합'으로 읽는 자리라 판정이 red여야 한다.
+  hedge_fixture noname "app"
+  printf 'apiVersion: postgresql.cnpg.io/v1\nkind: Database\nmetadata:\n  labels: {}\nspec:\n  ensure: present\n' > "$FX/databases/broken.yaml"
+  findings=$(hedge_dbs_findings "$FX/hedge.yaml" "$FX/databases")
+  n=$(hedge_dbs_count "$findings")
+  echo "$findings"
+  [ "$n" -eq 1 ]
+  grep -qF -- 'no-name: ' <<<"$findings"
 }
 
 @test "fixture: a vanished DBS line is a failure, not a silent pass" {
