@@ -14,7 +14,8 @@ import { addApp } from "./lib/digest-exporter.ts";
 import { surfaceHashWorktree } from "./lib/surface-hash.ts";
 import { buildActivationMarker, registryProjection } from "./lib/activation-marker.ts";
 // 앱 표면(경로·기록 집합)은 app-surface module이 소유한다(d4) — create가 쓰는 집합 = teardown이
-// 지우는 집합의 대칭이 module 테스트로 강제된다. apps.json·원장·digest-exporter는 앱-외부 표면이라 여기 잔류.
+// 지우는 집합의 대칭이 module 테스트로 강제된다. apps.json·원장·digest-exporter·동봉 계약 target 행은
+// 앱-외부 표면이라 여기 잔류한다 — 각자의 SSOT 커널이 add/remove 쌍으로 자기 대칭을 진다.
 import { appPaths, appRel, writeAppSurface } from "./lib/app-surface.ts";
 import { LAYOUT_DIRS, entryName, layoutFor } from "./lib/resource-layout.ts";
 // 동봉 계약 target 행은 앱-외부 표면이라 app-surface 소관 밖이다 — digest-exporter APPS와 같은 자리로,

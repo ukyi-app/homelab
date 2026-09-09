@@ -455,8 +455,8 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 - **`lib/app-surface.ts`** — 앱 표면 module(`appRel`·`appPaths`·`readAppSurface`·`writeAppSurface`·
   `removeAppSurface`). "앱은 어떤 파일들로 이루어지는가"의 유일 선언이다 — 종전에는 표면 6종이
   create-app의 손조립이었고 경로 리터럴이 소비자 여럿에 흩어져, 표면이 늘어도 그 사실을 셀 수
-  있는 자리가 없었다. 앱-**외부** 표면(apps.json 행·메모리 원장 행·digest-exporter 항목)은 소관
-  밖이고 각자의 SSOT 헬퍼가 진다 — 그 경계가 이 module이 데이터 테이블이 아니라 함수 API인 이유다.
+  있는 자리가 없었다. 앱-**외부** 표면(apps.json 행·메모리 원장 행·digest-exporter 항목·동봉 계약
+  target 행)은 소관 밖이고 각자의 SSOT 헬퍼가 진다 — 그 경계가 이 module이 데이터 테이블이 아니라 함수 API인 이유다.
   `readAppSurface`는 source-repo에 대해 **null의 이유**를 함께 낸다(`sourceRepoState`:
   absent=인레포 앱 · empty=잘린 쓰기 · unreadable=읽기 실패 · ok). 값 해석에서 부재/파손을 한 null로
   접는 것은 계약이지만 그 계약이 정당한 곳은 값이지 **계층 생략 결정**이 아니다 — 접힌 채로는 잘린

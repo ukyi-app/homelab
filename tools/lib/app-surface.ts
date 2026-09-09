@@ -8,8 +8,9 @@
 // 함수 API 형태다(표면 목록의 데이터화는 기각 — 표면마다 쓰기 로직이 달라 데이터에 욱여넣게 된다).
 // autoDeploy 값 해석은 descriptorAutoDeploy(image-pin) 하나를 재사용한다 — 정확히 boolean true만
 // 승인이고, 부재·파손은 null(부재)로 접는다(fail-closed 의미 부여는 소비자 몫).
-// 앱-외부 표면(apps.json 행·메모리 원장 행·digest-exporter APPS 항목)은 이 module의 소관이 아니다 —
-// 각자의 SSOT 헬퍼(digest-exporter.ts·ledger-budget.ts)와 parity 게이트가 지킨다.
+// 앱-외부 표면(apps.json 행·메모리 원장 행·digest-exporter APPS 항목·동봉 계약 target 행)은 이 module의
+// 소관이 아니다 — 각자의 SSOT 헬퍼(digest-exporter.ts·ledger-budget.ts·vendored-targets.ts)와
+// parity 게이트가 지킨다.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
