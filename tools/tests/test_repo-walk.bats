@@ -494,7 +494,8 @@ _actual_roster() { # $1 = repo root
 
 # 로스터 전용 픽스처 — 루트 3개(platform·ops·infra)를 채우고 앱 유닛만 인자로 켠다. 별도 픽스처를
 # 쓰는 이유는 `_fixture_repo`와 같다: 위 픽스처들에 ops/infra를 넣으면 그쪽 정확-일치 단언과 결합된다.
-# $1 = 앱 유닛 경로(빈 값이면 앱 0개) · $2 = 변형 모드(빈 값 = 정상 트리 | drop-ops = ops 루트를 비움).
+# $1 = 앱 유닛 경로(빈 값이면 앱 0개) · $2 = 변형 모드(빈 값 = 정상 트리 | drop-ops = ops 루트를 비움 |
+#      untrack-apps = 앱 유닛을 디스크에만 두고 `apps/`를 .gitignore로 추적 밖에 둔다).
 # ⚠️ 변형 값은 **레인이 실제로 주는 것만** 둔다. 앞선 판은 platform·infra를 비우는 분기도 뒀는데
 #    어떤 호출자도 그 값을 주지 않아 두 분기를 삭제해도 전건 초록이었다(적대 검토 실측: not ok 0건,
 #    rc 0). 지키는 것 없는 규칙은 곧 "아무도 대조하지 않는 주장"이라, 같은 이유로
@@ -511,6 +512,8 @@ _fixture_roster() {
     mkdir -p "$t/$1/deploy/prod"
     echo 'image: {}' > "$t/$1/deploy/prod/values.yaml"   # 배포 앱 계약의 필수 산출물(apps/README.md)
   fi
+  # 온보딩 중간 상태의 모형 — 파일은 디스크에 있는데 `git add`가 아직 안 됐다.
+  if [ "${2:-}" = untrack-apps ]; then printf 'apps/\n' > "$t/.gitignore"; fi
   git -C "$t" init -q; git -C "$t" add -A
   echo "$t"
 }
@@ -561,6 +564,23 @@ _fixture_roster() {
   [ "$status" -eq 0 ]
   [ "$exp" = "apps+infra+ops+platform" ]   # 독립 열거는 그 앱 유닛을 본다
   [ "$output" = "infra+ops+platform|0" ]   # 스코프는 apps를 하나도 안 낸다
+  [ "$output" != "${exp}|0" ]              # ⇒ 실 트리 단언 자리에서 red
+}
+
+# 두 열거의 **기판**이 갈리는 자리 — 앱 유닛이 디스크에 실재하는데 git 추적 밖이다. 기대는 디스크
+# 실재에서 나오므로 `apps`를 요구하고, tracked 스코프(`image-ownership`의 source)는 그 파일을 아예
+# 보지 못한다 ⇒ red. 이 레인이 없으면 그 축에 증인이 없다: 기대를 git 열거로 뽑으면 기대와 실제가
+# **함께** apps를 떨궈 조용한 초록이 된다(적대 검토 실측 — git 판정 0 · 스코프 0 · ok).
+# 실 트리에서 이 red를 보는 것은 "앱을 만들었는데 아직 추적되지 않았다"는 정직한 신호다(fail-closed).
+@test "roster expectation still demands apps when an app unit exists on disk but is untracked" {
+  tmp="$(_fixture_roster apps/probe untrack-apps)"
+  exp="$(_expected_roster "$tmp")"
+  run _actual_roster "$tmp"
+  echo "$output (기대 ${exp}|0)"
+  rm -rf "$tmp"
+  [ "$status" -eq 0 ]
+  [ "$exp" = "apps+infra+ops+platform" ]   # 독립 열거는 디스크 실재를 본다
+  [ "$output" = "infra+ops+platform|0" ]   # tracked 스코프는 추적 밖 파일을 못 낸다
   [ "$output" != "${exp}|0" ]              # ⇒ 실 트리 단언 자리에서 red
 }
 
