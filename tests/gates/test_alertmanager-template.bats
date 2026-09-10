@@ -34,7 +34,7 @@ setup() {
 }
 
 @test "route.routes is a closed pair: Watchdog fast-path and critical fast-repeat" {
-  # round7 finding 1·3 — 두 서브라우트 모두 값 단언이 없었다. 어느 쪽을 통째로 지워도 최상위
+  # 두 서브라우트 모두 값 단언이 없었다. 어느 쪽을 통째로 지워도 최상위
   # 기본 receiver(telegram)가 흡수해 게이트 전건이 초록이었다(73/73·63/63 실측). length 등식으로
   # 폐집합을 잠그고 각 라우트의 필드를 등식으로 잰다.
   n="$(yq '.route.routes | length' "$AMCFG")"
@@ -185,7 +185,7 @@ setup() {
   # init sed 모사: placeholder → 더미 int64 chat_id (amtool은 chat_id를 정수로 파싱).
   sed 's/__CHAT_ID__/-1001234567890/' "$tmp/raw.yml" > "$tmp/alertmanager.yml"
   # 컨테이너의 amtool은 nobody(65534)로 실행 — mktemp -d(700)/파일을 못 읽어 permission denied
-  # (CI ubuntu docker에서 발생; OrbStack은 관대). world-readable로 연다.
+  # (CI ubuntu docker에서 발생). world-readable로 연다.
   chmod 755 "$tmp"; chmod 644 "$tmp/alertmanager.yml"
   run docker run --rm -v "$tmp:/cfg" --entrypoint amtool \
       prom/alertmanager:v0.33.0 check-config /cfg/alertmanager.yml
@@ -194,7 +194,7 @@ setup() {
 }
 
 @test "inhibit_rules is a closed set of three rules (critical/warning, disk, unit axes only)" {
-  # round7 finding 2 — 기존 3규칙에 대한 @test는 전부 존재(membership) 단언뿐이라, 전칭급 4번째
+  # 기존 3규칙에 대한 @test는 전부 존재(membership) 단언뿐이라, 전칭급 4번째
   # 규칙(예: source/target 둘 다 alertname =~ ".+", equal:[namespace])을 몰래 얹어도 기존 3개
   # grep -qF 단언이 그대로 참이라 게이트가 못 잡았다(63/63 실측). length 등식이 그 폐집합을 잠근다.
   n="$(yq '.inhibit_rules | length' "$AMCFG")"
@@ -209,7 +209,7 @@ setup() {
 }
 
 @test "receivers is a closed set of two: telegram and deadmanswitch (no rogue webhook)" {
-  # [7라운드 c71-2] 티켓 67 「다음 라운드 입력」 — receivers 배열 전체 길이에 등식이 없었다. 3번째
+  # receivers 배열 전체 길이에 등식이 없었다. 3번째
   # receiver(어떤 라우트도 참조하지 않는 rogue webhook 등)를 몰래 추가해도 :28 "exactly one telegram
   # receiver" @test는 name=="telegram"만 select해 세므로 형제 원소 추가에 반응하지 않는다(무증인).
   # :36 route.routes 폐집합 등식과 동형으로 receivers 배열 자체를 length로 잠근다.
@@ -221,7 +221,7 @@ setup() {
 }
 
 @test "deadmanswitch receiver's webhook url matches the relay Service host:port (no silent drift)" {
-  # [7라운드 c71-2] 티켓 67 「다음 라운드 입력」 — deadmanswitch-relay.yaml의 Service(9095)가 실
+  # deadmanswitch-relay.yaml의 Service(9095)가 실
   # 수신처인데 AM 쪽 webhook_configs[0].url은 그 host:port를 리터럴로 박고 있어 둘을 잇는 등식이
   # 0건이었다(test_relay.bats는 relay 쪽만, 이 파일은 AM 쪽만 본다). Service 매니페스트를 SSOT로
   # 읽어 url을 대조 — 포트·서비스명이 어긋나면 healthchecks.io ping이 조용히 끊긴다(dead-man switch

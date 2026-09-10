@@ -12,8 +12,7 @@
 #   ⚠️ helper digest는 여전히 **보지 못한다**(ConfigMap data 안 문자열이라 KSM에 없다) → [11]은 손 실행 전용.
 #   ⚠️ 위 플레이스홀더가 가리키는 값을 올리는 PR은 versions.env·r8 룰 리터럴과 **같은 커밋에서** 움직여야
 #      한다(등식: test_06-storage-manifests.bats · tests/gates/test_vmalert-config.bats).
-#   ⚠️ 라이브 실측 2026-09-03: 두 Deployment 모두 `v0.0.36` · helper `sha256:fd8d9aa6…`(핀과 갈려 있다).
-#      2026-09-05 digest 승격 이후에도 라이브는 여전히 v0.0.36 태그 형태다 — owner substrate 수렴 전.
+#   ✅ 라이브 수렴 확인(2026-09-09 kubectl 실측): 두 Deployment의 image·helper 모두 위 플레이스홀더 값과 일치한다.
 #   자원 limit은 `docs/memory-ledger.md`의 `local-path-storage` 행과 기계 대조된다(check-resource-limits).
 apiVersion: v1
 kind: Namespace

@@ -13,7 +13,7 @@ imagePullSecrets: [{ name: ghcr-pull }]
 kind: web # web | worker | site
 replicas: 1
 
-# --- 공유 Gateway (Milestone 3) — 기본값, 오버라이드는 드묾 ---
+# --- 공유 Gateway — 기본값, 오버라이드는 드묾 ---
 gateway:
   name: homelab
   namespace: gateway

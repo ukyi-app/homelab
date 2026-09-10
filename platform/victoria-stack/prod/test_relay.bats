@@ -77,7 +77,7 @@ setup() {
 }
 
 @test "relay Deployment carries a checksum/relay-script annotation matching relay.sh (F7 GitOps roll)" {
-  # ⚠️ codex pass2 F7: ConfigMap 변경은 파드 자동 재시작이 없다 — 스크립트 해시를 pod template annotation으로
+  # ⚠️ ConfigMap 변경은 파드 자동 재시작이 없다 — 스크립트 해시를 pod template annotation으로
   # 박아 relay.sh 변경 시 template이 바뀌어 ArgoCD가 자동 롤하게 한다. 이 단언이 annotation==hash를 강제.
   command -v yq >/dev/null || skip "yq required"
   expected=$(yq 'select(.kind=="ConfigMap").data."relay.sh"' "$F" | sha256sum | cut -c1-16)

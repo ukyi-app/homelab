@@ -88,7 +88,10 @@ FOR="$(vme_alert_for "$VME_RULES" "$ALERT")"
 FOR_S="$(vme_to_s "$FOR")"
 
 # 임계는 **룰에서 파생**한다(하드코딩하면 룰이 바뀔 때 하네스가 조용히 낡는다).
-T="$(grep -oE '>[[:space:]]*0\.[0-9]+' <<<"$EXPR" | head -1 | grep -oE '0\.[0-9]+' || true)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring.
+# (`grep -m1`으로 줄이지 않는다 — 한 줄에 매치가 둘이면 "첫 매치"의 의미가 달라진다.)
+_t_matches="$(grep -oE '>[[:space:]]*0\.[0-9]+' <<<"$EXPR" || true)"
+T="$(head -n1 <<<"$_t_matches" | grep -oE '0\.[0-9]+' || true)"
 [ -n "$T" ] || fault "$ALERT: 임계 상수 추출 실패 — expr에서 '> 0.NN' 형태를 찾지 못했다"
 
 # 계약 대조 — 파생한 임계로 픽스처까지 판정하므로 값이 자유로우면 하네스가 자기충족적이다.

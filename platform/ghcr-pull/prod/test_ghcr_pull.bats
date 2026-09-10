@@ -4,8 +4,7 @@
 # 왜 새 파일인가: 이 컴포넌트에는 bats가 하나도 없었고, 이 디렉토리를 **실 트리에서** 재는 형제도
 # 레포 전체에 없다(2026-09-04 전수 확인 — `tools/tests/test_seal-batch.bats`의 히트는 전부
 # `$TMP/platform/ghcr-pull/...` 픽스처 경로이고, `scripts/sealed-guard.sh`는 봉인 여부만 본다).
-# 그래서 형제에 얹을 자리가 없어 최소 @test 하나로 신설한다(감사 5라운드 티켓 51 carry-1의
-# 마지막 수단 경로).
+# 그래서 형제에 얹을 자리가 없어 최소 @test 하나로 신설한다(마지막 수단 경로).
 #
 # 병(2026-09-04 실측): kustomization의 resources에서 ghcr-pull.sealed.yaml 한 줄을 지워도
 # `scripts/sealed-guard.sh` rc 0 · `scripts/check-skeleton.sh` rc 0 · sealed-secrets/files/gates

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 발화 e2e 시나리오 interface(lib-convergence d5 — vme_scenario/vme_leg)의 계약 테스트.
+# 발화 e2e 시나리오 interface(vme_scenario/vme_leg)의 계약 테스트.
 # 마찰의 근원은 전역 VME_*가 아니라 **암묵 순서**였다(체이닝 레이스 2건 전부 순서 사고) — 그래서
 # 조립 순서(derive → workspace → 룰 추출 · 레그의 start → import)를 lib 내부로 접고, 하네스는
 # 시나리오 호출 1개로 기동한다. 전역 VME_* 출력 변수는 유지한다(소비자 계약 불변).

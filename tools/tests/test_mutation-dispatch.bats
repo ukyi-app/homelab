@@ -1,6 +1,5 @@
 #!/usr/bin/env bats
-# 변이 디스패처(create-app/update-secrets/create-database/create-cache) 구조·notify 불변식.
-# 구 단일 디스패처 전용 테스트(삭제됨)의 단언을 4 디스패처로 일반화.
+# 변이 디스패처(create-app/update-secrets/create-database/create-cache/teardown-app) 구조·notify 불변식.
 # (@test 이름 영어, 단언은 run+[ ] — bash 3.2 [[ ]] 침묵통과 함정 회피)
 #
 # ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 워크플로 **파일**이라 그것으로 닫힌다.
@@ -26,6 +25,143 @@ setup() {
   [ -d "$WF" ]
   [ -n "$DISPATCHERS" ]
   [ "$DISPATCHER_N" -ge 5 ]
+}
+
+# ── 배선 가드 검사기 ───────────────────────────────────────────────────────
+# 워크플로 디렉토리를 **인자로** 받는다 — 판별성 증인이 사본 트리를 같은 검사기로 돌리기 위해서다.
+# 검사기 사본을 둘 두면 뮤테이션이 한쪽만 물어도 초록이 되므로(열거 붕괴의 사촌) 한 함수만 둔다.
+
+# correlation 에코 계약 — 입력 하위호환(required 아님·기본 빈값) + run-name 에코 **형식** 전수.
+# 형식 리터럴이 여기 있는 이유: YAML은 TS를 import할 수 없어 CLI 매처(mutation.ts의 `[<nonce>]`)와
+# 공유 SSOT를 만들 수 없다(identity.ts에 상수를 새로 만들지 않는다 — 소비자가 하나뿐인 상수는
+# SSOT가 아니라 세 번째 사본이다). 그래서 양끝 대조를 가드가 진다.
+correlation_echo_guard() {
+  run bun -e '
+    const y = require("yaml"), fs = require("fs");
+    const wf = process.argv[1];
+    const dispatchers = process.argv.slice(2);
+    if (dispatchers.length < 5) { console.error("dispatcher 열거 붕괴: " + dispatchers.length); process.exit(1); }
+    const ECHO = "format('\'' [{0}]'\'', inputs.correlation)";
+    const bad = [];
+    let n = 0;
+    for (const d of dispatchers) {
+      const src = fs.readFileSync(wf + "/" + d + ".yaml", "utf8");
+      const doc = y.parse(src);
+      const on = doc?.on ?? doc?.[true];   // 일부 YAML 파서의 on→true 키 함정 방어
+      const inp = on?.workflow_dispatch?.inputs?.correlation;
+      if (!inp) { bad.push(d + ": correlation 입력 부재"); continue; }
+      if (inp.required === true) bad.push(d + ": correlation이 required — 웹 UI 하위호환 위반");
+      if (inp.default !== "") bad.push(d + ": correlation 기본값이 빈 문자열이 아니다");
+      const rn = String(doc["run-name"] ?? "");
+      if (!rn.includes("inputs.correlation != '\''")) bad.push(d + ": run-name이 correlation을 조건부 에코하지 않는다");
+      if (!rn.includes(ECHO)) bad.push(d + ": run-name 에코 형식이 " + ECHO + "가 아니다 — CLI 매처는 대괄호를 찾는다");
+      n++;
+    }
+    if (n !== 5 || bad.length) { console.error(bad.join("\n") || ("레인 수 " + n + " != 5")); process.exit(1); }
+    console.log("ok:" + n);
+  ' "$1" $DISPATCHERS
+}
+
+# run-name **키 에코** 계약 — 변이 엔진의 중복 디스패치 preflight가 "같은 키의 미완료 run"을
+# 판정할 때 파싱하는 그 형상이다. 리터럴이 TS(mutation.ts RUN_NAME_KEY_SEP)와 YAML 양쪽에
+# 사는 이유는 correlation 에코와 같다(YAML은 TS를 import할 수 없다) — 그래서 여기서도 양끝
+# 대조를 가드가 진다. 이 가드가 없으면 상류가 구분자를 바꿔도 preflight만 조용히 눈을 감는다
+# (키 추출 실패 = 매치 0건 = 거부 없음 — 손해 방향은 fail-open이라 어떤 색도 변하지 않는다).
+key_echo_guard() {
+  run bun -e '''
+    const y = require("yaml"), fs = require("fs");
+    const root = process.argv[1], wf = process.argv[2];
+    const { LANES } = await import(root + "/tools/lib/catalog-rows.ts");
+    const { RUN_NAME_KEY_SEP } = await import(root + "/tools/lib/mutation.ts");
+    const bad = [];
+    let n = 0;
+    for (const row of Object.values(LANES)) {
+      // 행의 **첫** 입력이 그 레인의 키 입력이다(db·cache=name · app 3레인=app) — 순서가 바뀌면
+      // 여기가 red가 되고, 그것이 preflight 파싱을 다시 보라는 신호다.
+      const want = RUN_NAME_KEY_SEP + "${{ inputs." + row.inputs[0] + " }}";
+      const rn = String(y.parse(fs.readFileSync(wf + "/" + row.workflow, "utf8"))["run-name"] ?? "");
+      if (!rn.includes(want)) bad.push(row.workflow + ": run-name이 키를 " + JSON.stringify(want) + " 형태로 에코하지 않는다");
+      n++;
+    }
+    if (n !== 5 || bad.length) { console.error(bad.join("\n") || ("레인 수 " + n + " != 5")); process.exit(1); }
+    console.log("ok:" + n);
+  ''' "$ROOT" "$1"
+}
+
+# 입력 **형상**의 부정 불변식 — 레인 디스패처의 모든 입력은 type이 없거나 boolean이어야 한다.
+# 전량 핀(required·default까지)이 아니라 부정 불변식인 이유: CLI는 `-f k=v` 문자열만 보내고
+# (verbs.ts가 불리언을 "true"/"false"로, 빈 선택값을 ""로 조립한다), number/choice/environment는
+# 그 문자열을 라이브에서 **거부**한다 — 이것이 CLI를 실제로 깨는 유일한 편집 방향이다.
+# 행 데이터(catalog-rows LaneRow)에는 타입 축이 없고 넣지도 않는다(ADR 0001 — 기술자가 표면을
+# 파생하는 방향). 그래서 이 축은 파생이 아니라 가드가 진다.
+lane_input_shape_guard() {
+  run bun -e '
+    const { parse } = require("yaml");
+    const { readFileSync } = require("node:fs");
+    const root = process.argv[1], wf = process.argv[2];
+    const { LANES } = await import(root + "/tools/lib/catalog-rows.ts");
+    const bad = [];
+    let lanes = 0, inputs = 0;
+    for (const row of Object.values(LANES)) {
+      const doc = parse(readFileSync(wf + "/" + row.workflow, "utf8"));
+      const on = doc?.on ?? doc?.[true];
+      for (const [k, v] of Object.entries(on?.workflow_dispatch?.inputs ?? {})) {
+        const t = (v ?? {}).type;
+        if (t !== undefined && t !== "boolean") bad.push(row.workflow + ": 입력 " + k + "의 type=" + String(t) + " — CLI는 -f k=v 문자열만 보낸다");
+        inputs++;
+      }
+      lanes++;
+    }
+    // 열거 바닥값 — 레인 5 · 입력 18(db 8 + cache 3 + app 2 + secrets 2 + teardown 3, correlation 포함).
+    // 정확 이름 집합은 형제 @test가 소유하므로 여기는 붕괴만 막는다(하한).
+    if (lanes !== 5 || inputs < 18 || bad.length) { console.error(bad.join("\n") || ("레인 " + lanes + " 입력 " + inputs)); process.exit(1); }
+    console.log("lanes:" + lanes + " inputs:" + inputs);
+  ' "$ROOT" "$1"
+}
+
+# 머지 정책 동치 — reusable의 `auto-merge:`(서버 정책) ↔ 동사의 `manualMerge` 유무(CLI 문구).
+# 레포 **루트**를 인자로 받는다(워크플로와 TS 소스 양쪽을 본다). YAML 값은 파서로 읽는다 —
+# 워크플로 주석에 'auto-merge' 산문이 있어 텍스트 grep은 오탐이다.
+merge_policy_guard() {
+  run bun -e '
+    const y = require("yaml"), fs = require("node:fs");
+    const root = process.argv[1];
+    const { LANES } = await import(root + "/tools/lib/catalog-rows.ts");
+    const SRC = ["tools/lib/verbs.ts", "tools/lib/secrets.ts"].map((p) => [p, fs.readFileSync(root + "/" + p, "utf8")]);
+    const collect = (node, out) => {
+      if (Array.isArray(node)) { for (const v of node) collect(v, out); return; }
+      if (node && typeof node === "object") {
+        for (const k of Object.keys(node)) {
+          if (k === "auto-merge") out.push(String(node[k]));
+          else collect(node[k], out);
+        }
+      }
+    };
+    const bad = [];
+    let lanes = 0, manual = 0;
+    for (const row of Object.values(LANES)) {
+      const got = [];
+      collect(y.parse(fs.readFileSync(root + "/.github/workflows/" + row.reusable, "utf8")), got);
+      if (got.length !== 1) { bad.push(row.reusable + ": auto-merge 값 " + got.length + "개(정확히 1 기대)"); continue; }
+      const auto = got[0] === "true";
+      // CLI 쪽 — 그 레인의 MutationSpec 조립 구간(laneMutationFields 콜사이트 ~ waitOpts 종단)에
+      // manualMerge가 실렸는가. 콜사이트가 하나뿐임을 먼저 못 박는다(0·2건은 판정 불가 = red).
+      const call = "laneMutationFields(\"" + row.action + "\"";
+      const hits = SRC.filter((e) => e[1].indexOf(call) >= 0);
+      if (hits.length !== 1) { bad.push(row.action + ": 레인 조립 콜사이트 " + hits.length + "개(정확히 1 기대)"); continue; }
+      const s = hits[0][1];
+      const i = s.indexOf(call);
+      const j = s.indexOf("waitOpts(", i);
+      if (j < 0) { bad.push(row.action + ": " + hits[0][0] + "에서 waitOpts 종단을 못 찾는다"); continue; }
+      const hasManual = s.slice(i, j).indexOf("manualMerge") >= 0;
+      if (hasManual) manual++;
+      if (auto === hasManual) bad.push(row.action + ": auto-merge=" + auto + " ↔ manualMerge=" + hasManual + " — 서버 정책과 CLI 문구가 어긋난다");
+      lanes++;
+    }
+    // 열거 바닥값 — 레인 5 · 수동 머지 2(create-app: 공개 승인 · teardown-app: 파괴 승인).
+    if (lanes !== 5 || manual !== 2 || bad.length) { console.error(bad.join("\n") || ("레인 " + lanes + " 수동 " + manual)); process.exit(1); }
+    console.log("lanes:" + lanes + " manual:" + manual);
+  ' "$1"
 }
 
 @test "every dispatcher serializes via homelab-mutation group with queue max" {
@@ -218,8 +354,8 @@ EOF
     bad=$(grep -n 'github.event.inputs' "$WF/$d.yaml" \
       | grep -vE '^[0-9]+:[[:space:]]*(#|[A-Z_]+:|(sha|spec|app|confirm):)' || true)
     # ⚠️ `[ -z "$bad" ]`는 SETCAP 다섯(여섯) 술어 형태 밖이다(카운트가 아니라 문자열 공백만 잰다) —
-    #    이름의 "only"가 상한을 선언하는데 위반 집합의 **카운트 등식**이 없었다(감사 6라운드 티켓64
-    #    c64-7). 같은 판정을 카운트 등식으로 다시 쓴다 — 동작은 불변이고 형태만 기계가 읽는 술어가 된다.
+    #    이름의 "only"가 상한을 선언하는데 위반 집합의 **카운트 등식**이 없었다.
+    #    같은 판정을 카운트 등식으로 다시 쓴다 — 동작은 불변이고 형태만 기계가 읽는 술어가 된다.
     n=$(printf '%s\n' "$bad" | grep -c . || true)
     [ "$n" -eq 0 ] || { echo "위반 집합=$bad"; false; }
   done
@@ -231,7 +367,7 @@ EOF
   grep -q "app:" "$WF/update-secrets.yaml"; run grep -q "app_repo:" "$WF/update-secrets.yaml"; [ "$status" -eq 1 ]
   # ⚠️ 예전엔 `grep -q "spec:"`뿐이었다 — 이 문자열은 workflow_dispatch.inputs: 블록이 아니라
   #    reusable 호출 잡의 `with: { spec: ... }`에도 매치해, inputs 블록 원소를 전혀 세지 않았다
-  #    (7라운드 setcap-denominator-1 실측: `debug_bogus:` 입력을 workflow_dispatch.inputs 맨
+  #    (실측: `debug_bogus:` 입력을 workflow_dispatch.inputs 맨
   #    앞에 삽입해도 이 @test는 여전히 초록이었다). 실제 계약 키 목록으로 잠근다(손 로스터 신설이
   #    아니라 워크플로 파일 자체에 이미 있는 필드명을 그대로 옮긴다).
   run yq -o=json -I=0 '.on.workflow_dispatch.inputs | keys' "$WF/create-database.yaml"
@@ -421,7 +557,7 @@ EOF
 }
 
 @test "reusable branch: lines match the lane rows' neutral patterns (TS-YAML parity)" {
-  # 레인 신원 parity 축 1(cli-deepening 심화 2): YAML 쪽 branch: 개명은 어떤 테스트도 red가
+  # 레인 신원 parity 축 1: YAML 쪽 branch: 개명은 어떤 테스트도 red가
   # 아니었다 — 이 가드가 그 방향을 CI로 당긴다. 값은 YAML 파서로 읽는다(따옴표·주석 재포맷에
   # 흔들리지 않고, 축 2와 같은 venue). key 표현식은 레인별 **열거 매핑**(가드 소유 — 설계 심화 2
   # "정규화 매핑은 가드 쪽")으로 기대 문자열을 조립해 정확 대조한다 — 포괄 ${{…}}→{key} 붕괴는
@@ -496,7 +632,7 @@ EOF
   # 레인 신원 parity 축 3(Q7 참조·대조 — validate-mutation은 무변경 서버 끝 선언으로 남는다).
   # 패스스루 레인은 행 inputs == required. 조립 레인(create-database/create-cache)은 디스패처가
   # 입력을 spec으로 조립하므로 검증기는 조립 후 계층을 본다(설계 게이트 r1 아티팩트의 검증 노트가
-  # 수용한 계층 구분 — design.md 본문이 아니라 design-r1.json notes가 출처인 구현 결정이다).
+  # 수용한 계층 구분 — 설계 문서 본문이 아니라 리뷰 노트가 출처인 구현 결정이다).
   # 그 경계의 양쪽을 각각 핀한다: ① required == ["spec"], ② validateSpec 허용 필드 리터럴 핀
   # (db) / 행 inputs 동치(cache), ③ 행 inputs 전부를 디스패처 조립이 실제로 소비.
   # CONTRACT/OPTIONAL 키는 전량 리터럴 핀 — 개수 핀만으로는 회귀 앵커 행 개명이 통과한다.
@@ -550,28 +686,85 @@ EOF
   echo "$output" | grep -q "^ok:5$"
 }
 
-@test "each dispatcher declares an optional correlation input echoed into run-name (web-UI compat by definition)" {
+@test "each dispatcher echoes correlation into run-name in the exact bracket form the CLI matcher looks for" {
   # 하위호환의 정의상 증명: required 아님 + 기본값 빈 문자열 + run-name은 빈값에서 바이트 동일(조건부 에코).
-  run bun -e '
-    const y = require("yaml"), fs = require("fs");
-    const wf = process.argv[1];
-    const dispatchers = process.argv.slice(2);
-    if (dispatchers.length < 5) { console.error("dispatcher 열거 붕괴: " + dispatchers.length); process.exit(1); }
-    const bad = [];
-    for (const d of dispatchers) {
-      const src = fs.readFileSync(wf + "/" + d + ".yaml", "utf8");
-      const doc = y.parse(src);
-      const on = doc?.on ?? doc?.[true];   // 일부 YAML 파서의 on→true 키 함정 방어
-      const inp = on?.workflow_dispatch?.inputs?.correlation;
-      if (!inp) { bad.push(d + ": correlation 입력 부재"); continue; }
-      if (inp.required === true) bad.push(d + ": correlation이 required — 웹 UI 하위호환 위반");
-      if (inp.default !== "") bad.push(d + ": correlation 기본값이 빈 문자열이 아니다");
-      const rn = String(doc["run-name"] ?? "");
-      if (!rn.includes("inputs.correlation != '\''") || !rn.includes("format(")) bad.push(d + ": run-name이 correlation을 조건부 에코하지 않는다");
-    }
-    if (bad.length) { console.error(bad.join("\n")); process.exit(1); }
-  ' "$WF" $DISPATCHERS
+  # 종전 판정은 `format(` **존재**까지였다. 그래서 한 디스패처가 `format(' ({0})', …)`로
+  # 바뀌어도 44/44 초록인 채, 그 레인의 모든 CLI 변이가 run 미출현 pending으로 끝난다(디스패치는
+  # 접수됐으므로 서버 변이는 진행 — CLI만 자기 run을 영원히 못 찾는다). 5레인 전수 리터럴이 그 축이다.
+  correlation_echo_guard "$WF"
   [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:5$"
+  # 판별성 증인 — 사본 트리에서 한 레인의 `[{0}]`를 `({0})`로 뒤집으면 red다(작업 트리 불변).
+  T="$BATS_TEST_TMPDIR/echo-mut"; mkdir -p "$T"
+  cp "$WF"/*.yaml "$T/"
+  sed "s|format(' \[{0}\]', inputs.correlation)|format(' ({0})', inputs.correlation)|" "$WF/create-cache.yaml" > "$T/create-cache.yaml"
+  # sed 무매치의 vacuous green 차단 — 뮤테이션이 실제로 적용됐는지 먼저 못 박는다.
+  [ "$(grep -cF "format(' ({0})', inputs.correlation)" "$T/create-cache.yaml")" = "1" ]
+  correlation_echo_guard "$T"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "create-cache"
+}
+
+@test "each dispatcher echoes its key input into run-name in the separator form the CLI preflight parses" {
+  key_echo_guard "$WF"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:5$"
+  # 판별성 증인 — 사본 트리에서 한 레인의 구분자를 ASCII 하이픈으로 바꾸면 red다(작업 트리 불변).
+  T="$BATS_TEST_TMPDIR/key-echo-mut"; mkdir -p "$T"
+  cp "$WF"/*.yaml "$T/"
+  sed 's|— ${{ inputs.name }}|- ${{ inputs.name }}|' "$WF/create-cache.yaml" > "$T/create-cache.yaml"
+  # sed 무매치의 vacuous green 차단 — 뮤테이션이 실제로 적용됐는지 먼저 못 박는다.
+  [ "$(grep -cF -- '- ${{ inputs.name }}' "$T/create-cache.yaml")" = "1" ]
+  key_echo_guard "$T"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "create-cache"
+}
+
+@test "every lane dispatcher input is untyped or boolean (the only edit direction that breaks the CLI value format)" {
+  # 입력 parity 가드(형제 @test)는 **이름 집합**만 본다. CLI가 보내는 값 형식은 YAML 타입에
+  # 의존한다: `ext_*`는 `String(exts.includes(k))`("true"/"false")로, `maxmemory_mi`는 미지정 시 ""로
+  # 간다(디스패처 조립이 `if $mm == ""`에 기댄다). 누가 `type: number`를 붙이면 이름 집합은 그대로라
+  # 가드는 초록이고 라이브 디스패치만 거부된다.
+  lane_input_shape_guard "$WF"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^lanes:5 inputs:1[89]$"
+  MT="$BATS_TEST_TMPDIR/shape-mut"; mkdir -p "$MT"
+  cp "$WF"/*.yaml "$MT/"
+  # ① 판별성 증인 — `maxmemory_mi`에 `type: number`를 붙이면 red. sed의 `\n` 치환은 BSD에서
+  #    안 먹으므로 awk로 줄을 삽입한다(이식성 — 이 레포 가드 규약).
+  awk '{print} /^ *description: "maxmemory \(Mi/ {print "        type: number"}' "$WF/create-cache.yaml" > "$MT/create-cache.yaml"
+  [ "$(grep -c 'type: number' "$MT/create-cache.yaml")" = "1" ]
+  lane_input_shape_guard "$MT"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "maxmemory_mi"
+  # ② 과잉 핀이 아님 — `ext_vector`의 `type: boolean`을 지우는 편집은 이 축의 위반이 아니다(문자열
+  #    "false"는 타입 없는 입력도 그대로 받는다). 부정 불변식이 전량 핀으로 굳지 않았음을 잰다.
+  cp "$WF/create-cache.yaml" "$MT/create-cache.yaml"
+  awk '/^ *ext_vector:/{v=1} v==1 && /^ *type: boolean$/{v=2; next} {print}' "$WF/create-database.yaml" > "$MT/create-database.yaml"
+  [ "$(grep -c 'type: boolean' "$MT/create-database.yaml")" = "4" ]
+  lane_input_shape_guard "$MT"
+  [ "$status" -eq 0 ]
+}
+
+@test "the reusable auto-merge value and the CLI manualMerge flag say the same thing per lane" {
+  # 머지 정책이 두 곳에 독립 리터럴로 있다: reusable의 `auto-merge:`(서버)와 동사의
+  # `manualMerge`(CLI). 어긋나도 엔진 동작은 같고(둘 다 merged_at 대기) pendingReason 문구만
+  # 거짓이 되는데, **그 문구가 에이전트의 재조회 판단 근거**다.
+  # LaneRow에 머지 축을 넣지 않는다 — catalog-rows가 manualMerge(approval 문구 = 동사 소유)를
+  # 의도적으로 행 밖에 뒀고, 축을 옮기면 '기술자가 표면을 파생'(ADR 0001 기각 방향)에 닿는다.
+  merge_policy_guard "$ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^lanes:5 manual:2$"
+  # 판별성 증인 — `_create-cache.yaml`의 auto-merge를 'false'로 뒤집으면 red(사본 트리).
+  MM="$BATS_TEST_TMPDIR/merge-mut"
+  mkdir -p "$MM/.github/workflows" "$MM/tools/lib"
+  cp "$WF"/_*.yaml "$MM/.github/workflows/"
+  cp "$ROOT/tools/lib/catalog-rows.ts" "$ROOT/tools/lib/verbs.ts" "$ROOT/tools/lib/secrets.ts" "$MM/tools/lib/"
+  sed "s|auto-merge: 'true'|auto-merge: 'false'|" "$WF/_create-cache.yaml" > "$MM/.github/workflows/_create-cache.yaml"
+  [ "$(grep -c "auto-merge: 'false'" "$MM/.github/workflows/_create-cache.yaml")" = "1" ]
+  merge_policy_guard "$MM"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "create-cache"
 }
 
 @test "the actor predicate copies are counted (a deleted or flipped copy is red)" {
@@ -666,7 +859,7 @@ EOF
 }
 
 @test "no run step inline-interpolates untrusted inputs (repo-wide, not just DISPATCHERS)" {
-  # traps-a-1(5라운드) — 원 가드(위 @test 「no run inline interpolation」)는 피연산자가
+  # 원 가드(위 @test 「no run inline interpolation」)는 피연산자가
   # DISPATCHERS 5파일뿐이라 셸이 실제로 도는 _*.yaml과 cross-repo 계약 reusable-app-build.yaml이
   # 도메인 밖이었다(원장 36행 「GHA client_payload 비신뢰 입력」의 env-경유 규약 회귀 검출).
   # yq 비사용(tests/gates/test_workflow-pipefail.bats:7 규약과 동형) — bun+yaml 파서로 전 워크플로를 훑는다.

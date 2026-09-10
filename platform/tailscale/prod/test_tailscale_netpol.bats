@@ -54,15 +54,15 @@ setup() {
   #    극성 반전이 곧 클러스터 최강 권한 워크로드의 무제한 lateral이다(tailnet 레인은 ports도 없다).
   # ⚠️ 첫 등호가 **전수 열거**다 — 파일의 ipBlock cidr 집합 전체를 고정한다. 그래서 :19-22가
   #    리터럴로만 재던 apiserver 대역(192.168.117.0/24)의 **넓이**도 여기서 함께 못박힌다
-  #    (networkpolicy.yaml:53이 인정한 갭). 신규 사설 ipBlock allow 추가도 같은 줄이 잡는다.
+  #    (networkpolicy.yaml:51이 인정한 갭). 신규 사설 ipBlock allow 추가도 같은 줄이 잡는다.
   # ⚠️ `yq -e`는 쓰지 않는다(값 false → exit 1 함정). 관용구 출처: platform/argocd/test_argocd_values.bats:145-156.
   c="$(yq -N '[.spec.egress[]?.to[]?.ipBlock.cidr | select(.)] | .[]' "$P" | paste -sd, -)"
   [ "$c" = "192.168.117.0/24,0.0.0.0/0" ] || { echo "ipBlock cidr 집합=$c"; false; }
-  # except는 0.0.0.0/0 ipBlock **마다 개별로** 전수 판정한다(형제 티켓 41이 victoria-stack·adguard에
+  # except는 0.0.0.0/0 ipBlock **마다 개별로** 전수 판정한다(형제 처방이 victoria-stack·adguard에
   # 착지한 형태와 동형). `// ["MISSING"]`이 except 부재를 값으로 바꿔 과부족 둘 다 red다.
   # ⚠️ 부정 카운트(`bad=$(… grep -vcxF …); [ "$bad" -eq 0 ]`)는 쓰지 않는다 — 전건 일치면 `grep -v`가
   #    아무 줄도 못 골라 rc 1이고 bats errexit가 그 **assignment에서** 죽어 **올바른 매니페스트가 red**다
-  #    (티켓 41 실측). 극성을 뒤집어 일치 **카운트 등식**으로 판정한다(정상 경로 rc 0·0건은 fail-closed).
+  #    (실측). 극성을 뒤집어 일치 **카운트 등식**으로 판정한다(정상 경로 rc 0·0건은 fail-closed).
   Q='[select(.kind=="NetworkPolicy")|.spec.egress[]?|.to[]?|select(.ipBlock.cidr=="0.0.0.0/0")|(.ipBlock.except // ["MISSING"])|sort|join(",")]|.[]'
   out="$(yq ea "$Q" "$P")"
   n="$(printf '%s\n' "$out" | grep -c .)"    # 열거 붕괴 바닥값 — 0건이면 grep rc 1로 red
@@ -100,7 +100,7 @@ setup() {
   # `generators:`는 `resources:`와 동일한 배선 축인데(HelmChartInflationGenerator) 이 리스트의
   # 멤버십을 재는 @test가 레포 전체에 0건이었다 — helmrelease.yaml이 사라지면 tailscale operator
   # 전체(tailnet 인입 + traefik-ts Service)가 프룬된다. secret-generator.yaml(operator-oauth)은
-  # 대상에서 뺀다 — 티켓 44/56에서 이미 트리아지된 결정(제거 시 즉시 시끄럽다: envFrom secretRef가
+  # 대상에서 뺀다 — 이미 트리아지된 결정(제거 시 즉시 시끄럽다: envFrom secretRef가
   # 못 찾는 Secret을 참조해 파드가 CreateContainerConfigError로 죽는다)과 같은 사유다.
   run yq '.generators[]' "${BATS_TEST_DIRNAME}/kustomization.yaml"
   printf '%s\n' "$output" | grep -qxF 'helmrelease.yaml' \

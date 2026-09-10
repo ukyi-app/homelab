@@ -9,8 +9,8 @@ capacity 63822552Ki(**62327 MiB**) · allocatable 62517976Ki(**61052 MiB**). cap
 **1/6**이라, 이 원장이 「신규 온보딩 실질 차단」(아래 :34)이라고 부르는 상태는 **물리 한계가 아니라
 숫자가 낡은 것**이다. 아래 `ledger:meta`의 `VM_ALLOCATABLE_MIB=12288`도 같은 이유로 5배 틀렸고,
 그 필드에 **소비자가 0건**(파서가 읽지 않는다)이라 이 괴리가 오늘까지 아무 표면에도 안 떴다.
-⚠️ 그러니 이 두 숫자에 정책 deny를 거는 것은 오류를 정책에 각인하는 일이다(감사 3라운드에서 기각).
-재기준선은 owner 결정(D-e — `infra/k3s-bootstrap/versions.env:24-26`)이고, 그때 이름부터
+⚠️ 그러니 이 두 숫자에 정책 deny를 거는 것은 오류를 정책에 각인하는 일이다(감사에서 기각).
+재기준선은 owner 결정(D-e — `infra/k3s-bootstrap/versions.env`의 「VM 사이징(`ORB_MEMORY_MIB`/`ORB_CPU`)은 제거됐다」 주석 블록)이고, 그때 이름부터
 바로잡는다(meta는 이름과 달리 capacity 값이었다). 노드-OOM 방어선은 이 원장이 아니라
 `rules/core.yaml`의 NodeMemoryHigh·NodePressure·PodOOMKilled·ContainerMemoryNearLimit다.
 원장 포맷/검증기는 이것 하나뿐이다. M6의 온보딩 게이트도 이 파일에 대해
@@ -48,7 +48,7 @@ ts-traefik-ts·ts-pg-rw-tailscale 2대). 새 값 = operator(128/64) + proxy(192/
 right-size 회수(옵션 a) 또는 VM RAM 증설(cap은 이미 9216에서 소진 — 옵션 b 너머, VM_ALLOCATABLE_MIB
 동반 상향)이 유일하다.
 
-2026-07-06 (메타갭 ⑥ Task 5.5 — right-size 스윕 실측 결과, **≥256 회수 불가 판정**): 14일 peak
+2026-07-06 (right-size 스윕 실측 결과, **≥256 회수 불가 판정**): 14일 peak
 working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, right-size만으로는 명목 잔여 ≥256
 달성이 **불가능**함이 확정됐다. 근거(측정 2026-07-06):
 - **cert-manager**(플랜이 지목한 1차 레버): 3컨테이너 peak 합 = 267Mi(cainjector 101·controller 96·
@@ -231,9 +231,10 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
   6일간 단조 상승 08-27 148.3 → 09-02 176.3 → 재측정 시점 peak 동일), 처방은 규약 그대로 272Mi다. 분모를
   `max(RSS peak, GOMEMLIMIT)`로 바꿔 304Mi로 올리는 대안은 규약 문언을 바꾸는 결정이라 채택하지 않았다 —
   대신 **상승이 이어지면 재측정이 먼저**라는 조건을 여기 남긴다(272는 1.54x라 여유가 0.04x뿐이다).
-  이 이탈을 잡은 게이트는 없었고 `ContainerMemoryNearLimit`(A′ 0.85)도 침묵했다 — 원장 행과 라이브 manifest의
-  자동 교차검증은 substrate 스코프에만 있다(`tools/check-resource-limits.ts`, 감사 3라운드 티켓 26). 관측
-  스택 5행의 기계 대조는 여전히 없다(followups).
+  이 이탈을 잡은 게이트는 없었고 `ContainerMemoryNearLimit`(A′ 0.85)도 침묵했다 — 당시 원장 행과
+  매니페스트의 자동 교차검증은 substrate 스코프뿐이었다(`tools/check-resource-limits.ts`; 2026-09-05
+  F1/F2 착지로 platform 스코프의 정적으로 완전한 namespace들까지 넓어졌다 — 아래 「주의」 절 ③ 참조). 다만 그 대조는
+  namespace 합 등식이라 **워크로드별 마진 규약 대조는 여전히 없다**(followups).
 
   ⚠️ **이 규약은 하한이다 — 만족하는 행을 깎는 근거가 아니다.** 특히 `grafana`는 knob이 하나도 없어
   (allowedPercent도 GOMEMLIMIT도 없는 Go 기본 GOGC) limit을 낮추면 자기조절로 흡수되지 않고 그대로
@@ -262,22 +263,24 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
 
   ### 회수 보류 행 (2026-09-01 조사 — 침묵시키지 않고 계상한다)
 
-  2.0x 확정 직후 10개 행을 조사한 결과 **6행이 보류**다. 각 사유는 "나중에 하자"가 아니라 **무엇이
-  갖춰져야 할 수 있는지**를 적는다. 근거 없이 숫자를 넣으면 그 숫자가 곧 CI가 묶인 SSOT가 된다.
+  2.0x 확정 직후 10개 행을 조사한 결과 **6행이 보류**였고, 이후 컨테이너별 A′ 측정으로 4행이 풀렸고 `cache-trip-mate`는 리소스 purge로 행 자체가 사라졌다(합 5행).
+  각 사유는 "나중에 하자"가 아니라 **무엇이 갖춰져야 할 수 있는지**라 그대로 남긴다 — 근거 없이 숫자를
+  넣으면 그 숫자가 곧 CI가 묶인 SSOT가 되기 때문이다. 결과는 셋째 칸에 계상한다(값의 출처는 아래 2차·3차 문단).
 
-  | 행 | 보류 사유 | 풀리는 조건 |
+  | 행 | 보류 사유 | 풀리는 조건 · 결과 |
   |---|---|---|
-  | `cnpg` | 목표가 **산술적으로 불가능**하다. Cluster limit을 772Mi로 만들어야 하는데 requests가 768Mi이고, `platform/cnpg/prod/test_cluster_params.bats`가 계약으로 고정한 `shared_buffers(244.1Mi) ≤ limit/4`가 깨진다. 불변식을 지키는 하한은 977Mi라 **실제 회수 상한은 32Mi**다. 원장이 두 번 보호를 명시한 행이기도 하다 | PostgreSQL 튜닝 변경(= 회수가 아닌 별개 작업)이거나, 32Mi만 회수 |
-  | `tailscale` | 행이 operator + proxy×2 **세 컨테이너**다. 목표대로면 각 64Mi인데 `proxyclass.yaml:5`가 기록한 proxy peak 116Mi 하나로 1.8배 초과다. `ts-traefik-ts`는 **내부 인입의 유일 경로**라(AGENTS.md 규약) 죽으면 `*.home` 전체가 tailscale·LAN 양쪽에서 끊긴다 | 컨테이너별 A′ peak + proxy 대수 변동(현재 `loadBalancerClass: tailscale` 서비스 2개에 연동) 반영 |
-  | `edge` | adguard의 192Mi는 **OOM 대응 상향**이다(`peak 123/128(96%)·블록리스트 성장 → 선제 상향`, 커밋 f1f23e8). 목표 208을 맞추려 −80을 adguard에서 빼면 112가 되어 **그 OOM을 유발했던 128보다 낮다**. cloudflared는 자기 주석이 이미 2.0x 미달(`peak 51Mi × 2.0 = 102 > 96`)이라고 말한다 | 블록리스트 성장을 반영한 adguard 단독 A′ 재측정 |
-  | `argocd` | 컨테이너 **6개** 집계. OOMKill은 cgroup 단위인데 −112Mi를 어디서 뗄지 근거가 없다. 옛 비율로 나누는 우회는 그 비율의 출처가 바로 무효화된 working_set이라 성립하지 않는다 | controller/repoServer/server/applicationSet/notifications/redis **각각**의 A′ peak. GOMEMLIMIT 4곳이 limit의 90%로 걸려 있어 함께 움직여야 한다 |
-  | `cert-manager` | 컨테이너 **3개** 집계, 같은 배분 근거 부재. 옛 비율(cainjector 101 : controller 96 : webhook 69)은 컨테이너마다 캐시 charge가 달라(controller는 WS의 약 2/3가 캐시) 왜곡돼 있다 | controller/cainjector/webhook 각각의 A′ peak |
-  | ~~**관측 스택 5개**~~ | ✅ **해소(2026-09-01 4차)** — 위 「관측 스택 마진 규약」이 이 클래스의 SSOT다. A′가 회수 가능 slab을 분자에 싣는데 그 비중이 0.2~27.1%로 100배 갈리고 peak 시점 값은 소급 측정이 불가능하다 ⇒ 분자를 RSS(=anon, 이 다섯은 `shmem = 0`·스왑 0이라 전량 회수 불가)로 바꾸고 배수를 1.5로 낮췄다. 자기참조는 **GOMEMLIMIT을 limit에 연동하지 않는 것**으로 끊었다. vmagent 224→256 · vmsingle 896→1056 상향, 나머지 셋은 규약 충족으로 유지 | — |
-  | `cache-trip-mate` | A′ 22.4Mi는 작업집합이 아니라 **트래픽 부재**를 잰 값이다 — 소비처 `trip-mate-api`가 2026-08-12(#456)에 철거돼 키스페이스가 비어 있다. 게다가 이 행의 limit은 애초에 working_set이 아니라 `maxmemory 64mb + BGSAVE fork COW + 단편화 + 클라이언트 버퍼` **유도값**이라 이번 지표 정정의 대상이 아니다 | 소비처가 다시 붙어 LRU가 채워진 뒤의 재측정. 또는 리소스 자체의 존치 판단 |
+  | `cnpg` | 목표가 **산술적으로 불가능**하다. Cluster limit을 772Mi로 만들어야 하는데 requests가 768Mi이고, `platform/cnpg/prod/test_cluster_params.bats`가 계약으로 고정한 `shared_buffers(244.1Mi) ≤ limit/4`가 깨진다. 불변식을 지키는 하한은 977Mi라 **실제 회수 상한은 32Mi**다. 원장이 두 번 보호를 명시한 행이기도 하다 | **보류 유지** — PostgreSQL 튜닝 변경(= 회수가 아닌 별개 작업)이거나, 32Mi만 회수 |
+  | ~~`tailscale`~~ | 행이 operator + proxy×2 **세 컨테이너**다. 목표대로면 각 64Mi인데 `proxyclass.yaml:5`가 기록한 proxy peak 116Mi 하나로 1.8배 초과다. `ts-traefik-ts`는 **내부 인입의 유일 경로**라(AGENTS.md 규약) 죽으면 `*.home` 전체가 tailscale·LAN 양쪽에서 끊긴다 | ✅ **해소(2026-09-01 2차·3차, #573)** — 컨테이너별 A′ peak로 512→304(operator 80 + proxy 112×2), 3차 30s 재측정에서 proxy 112→128×2(현행 336). proxy 대수 연동(`loadBalancerClass: tailscale` 서비스 수)은 표 아래 「tailscale 행」 주석이 SSOT다 |
+  | ~~`edge`~~ | adguard의 192Mi는 **OOM 대응 상향**이다(`peak 123/128(96%)·블록리스트 성장 → 선제 상향`, 커밋 f1f23e8). 목표 208을 맞추려 −80을 adguard에서 빼면 112가 되어 **그 OOM을 유발했던 128보다 낮다**. cloudflared는 자기 주석이 이미 2.0x 미달(`peak 51Mi × 2.0 = 102 > 96`)이라고 말한다 | ✅ **해소(2026-09-01, #572)** — 블록리스트 성장을 반영한 adguard 단독 A′ 재측정으로 288→224, 3차에서 adguard 160→256(1.29x 회귀 정정, 현행 320) |
+  | ~~`argocd`~~ | 컨테이너 **6개** 집계. OOMKill은 cgroup 단위인데 −112Mi를 어디서 뗄지 근거가 없다. 옛 비율로 나누는 우회는 그 비율의 출처가 바로 무효화된 working_set이라 성립하지 않는다 | ✅ **해소(2026-09-01 2차·3차, #571)** — controller/repoServer/server/applicationSet/notifications/redis **각각**의 A′ peak로 1472→1248(순 회수가 아니라 **재배분**), 3차에서 application-controller 768→992 · repo-server 144→240(현행 1568). GOMEMLIMIT 4곳이 limit의 90%로 걸려 있어 **앞으로도 함께 움직여야 한다** |
+  | ~~`cert-manager`~~ | 컨테이너 **3개** 집계, 같은 배분 근거 부재. 옛 비율(cainjector 101 : controller 96 : webhook 69)은 컨테이너마다 캐시 charge가 달라(controller는 WS의 약 2/3가 캐시) 왜곡돼 있다 | ✅ **해소(2026-09-01 2차·3차, #571)** — controller/cainjector/webhook 각각의 A′ peak로 384→224(80 · 96 · 48), 3차에서 webhook 48→64(현행 240) |
+  | ~~**관측 스택 5개**~~ | ✅ **해소(2026-09-01 4차, #579)** — 위 「관측 스택 마진 규약」이 이 클래스의 SSOT다. A′가 회수 가능 slab을 분자에 싣는데 그 비중이 0.2~27.1%로 100배 갈리고 peak 시점 값은 소급 측정이 불가능하다 ⇒ 분자를 RSS(=anon, 이 다섯은 `shmem = 0`·스왑 0이라 전량 회수 불가)로 바꾸고 배수를 1.5로 낮췄다. 자기참조는 **GOMEMLIMIT을 limit에 연동하지 않는 것**으로 끊었다. vmagent 224→256 · vmsingle 896→1056 상향, 나머지 셋은 규약 충족으로 유지 | — |
+  | ~~`cache-trip-mate`~~ | A′ 22.4Mi는 작업집합이 아니라 **트래픽 부재**를 잰 값이었다 — 소비처 `trip-mate-api`가 2026-08-12(#456)에 철거돼 키스페이스가 비어 있었다. 이 행의 limit은 애초에 working_set이 아니라 `maxmemory 64mb + BGSAVE fork COW + 단편화 + 클라이언트 버퍼` **유도값**이었다(캐시 행 일반의 산정 모델) | ✅ **행 소멸(2026-09-06~08, #686~#688)** — 리소스 자체가 purge돼 원장에 이 행이 없다. 재측정을 기다릴 소비처도 대상도 없다 |
 
-  ⇒ 공통 갭이 하나 보인다: **다중 컨테이너 행에 컨테이너별 A′가 없다.** 4행(`argocd`·`cert-manager`·
-  `edge`·`tailscale`)이 같은 이유로 막혔다. 이 원장이 행 단위인 것은 예산 회계로는 옳지만, OOM은
-  컨테이너에서 나므로 회수 판단에는 한 단계 더 낮은 해상도가 필요하다.
+  ⇒ 조사 시점의 공통 갭은 **다중 컨테이너 행에 컨테이너별 A′가 없다**였고, 4행(`argocd`·`cert-manager`·
+  `edge`·`tailscale`)이 같은 이유로 막혔다. 2026-09-01 2차·3차의 컨테이너별 측정이 그 갭을 메워 넷 다
+  풀렸다. 이 원장이 행 단위인 것은 예산 회계로는 옳지만, OOM은 컨테이너에서 나므로 회수 판단에는 한
+  단계 더 낮은 해상도가 필요하다 — 그 교훈은 유지된다. 남은 보류는 `cnpg`(계약상 회수 상한 32Mi)뿐이다.
 - **owner 결정(2026-07-07, F23 게이트): (b) VM RAM 증설 확정** — right-size로 ≥256 불가 확정에 따라 VM
   증설이 온보딩 차단의 유일 실효 해소책으로 채택. 착수 = W2 병행 owner-local 태스크(VM 재시작 필요):
   ~~`infra/k3s-bootstrap/versions.env` ORB_MEMORY_MIB~~(베어메탈 이전으로 삭제) 11264→12288 + 이 원장 meta VM_ALLOCATABLE_MIB
@@ -293,8 +296,8 @@ working_set을 파드-세대 붕괴(`max by (container)`)로 실측한 결과, r
 
 (디스크 위치 참고, 2026-07-08 W3: vmsingle TSDB·victorialogs 데이터는 내장 standard VCT → **외장 bulk-ssd
 standalone PVC `vmsingle-data-bulk`·`vlogs-bulk`**로 이전 — 메모리 예산과 무관하며 이 원장의 계상 대상 아님.
-디스크 가드는 r4 `BulkStorageLow`(in-cluster)와 호스트 백업 유닛의 df push(2026-08-19 리눅스 재작성 —
-`files-data-backup.timer` → scripts/backup-files-data.sh, 국면 A 동안은 미-enable)가 담당, 절차는
+디스크 가드는 r4 `BulkStorageLow`(in-cluster)와 호스트 백업 유닛의 df push
+(`files-data-backup.timer` → scripts/backup-files-data.sh)가 담당, 절차는
 runbooks/observability-bootstrap.md §5.)
 
 한 행은 라이브 pod limit보다 **의도적으로 크다**: `k3s+os+coredns`(OS/커널 비-pod reserve — 실 coredns
@@ -314,14 +317,13 @@ sealed-secrets 128→96·vmsingle 1Gi→896으로 −160Mi 추가 회수, 명목
 즉 10240은 물리 천장이 아니라 **낡은 명목 규율**이며, 상향/재기준선은 owner 결정(D-e)이다 —
 그 결정 전까지 이 금지선을 유지하는 이유는 "물리적으로 불가능해서"가 아니라 "근거를 다시 세우지
 않았기 때문"이다. 모두 노드-OOM 안전(동시 peak ≪ allocatable).
-주의(2026-09-05 정정 — 티켓 62): 예전엔 「대부분의 행은 라이브 manifest와 자동 교차검증되지 않는다.
-예외는 둘」이라고 적혀 있었으나, `tools/check-resource-limits.ts`의 F1(정적 귀속)+F2(커버리지 파생)
-착지로 platform 스코프도 기계 대조에 들어와 그 문장이 낡았다. 지금은 넷이다 — ①`homepage`
+주의: 원장 행 대부분은 라이브 manifest와 자동 교차검증되지 않는다. 자동 대조가 걸린 자리는
+다음뿐이다 — ①`homepage`
 (`platform/homepage/prod/test_homepage_deployment.bats`가 이 표에서 limit을 읽어 매니페스트와 대조.
 2026-09-01 3차에서 그 @test가 상수 192Mi를 박고 있어 원장 정정에 red를 냈고, 이름값(`matching the
 ledger`)을 하도록 원장 파서 대조로 고쳤다) ②`local-path-storage`(`tools/check-resource-limits.ts`의
-substrate 스코프 기계 대조 — 아래 그 행 주석) ③ platform 스코프 중 **정적으로 완전한 6개
-namespace**(cache·database·edge·files·homepage·observability — homepage는 ①과 같은 namespace를
+substrate 스코프 기계 대조 — 아래 그 행 주석) ③ platform 스코프 중 **정적으로 완전한 5개
+namespace**(database·edge·files·homepage·observability — homepage는 ①과 같은 namespace를
 이중으로 문다) — F1이 `metadata.namespace` 부재 워크로드를 소유 배포 루트 kustomization의
 `namespace:`로 귀속하고(중첩 base는 루트까지 상승), F2가 그중 helm 생성기 루트나 `chart:`
 Application destination에 걸리는 namespace를 **손 로스터 없이 매 실행마다 다시 스캔해** 제외한다.
@@ -376,7 +378,7 @@ cert-manager-webhook 48→64 · homepage 192→208 · kube-state-metrics 64→80
 application-controller는 이로써 **단계적 상향이 완성**됐다(1.57x → 2.03x) — 30초로 재면 14일 일별
 peak가 376~488Mi로 **전 구간 규약 미달**이었고, 재시작 종료 스파이크가 아니라 정상 진동 상단이다.
 최종: 9020 → 8108 → **8604**, 명목 잔여 1220 → 2132 → **1636**. 남은 보류는 cnpg(계약상 회수 상한 32Mi)와
-cache-trip-mate(A′가 트래픽 부재를 잰 값), 그리고 자기조절 5개(D-e 재기준선 대상)다.)
+자기조절 5개(D-e 재기준선 대상)다 — cache-trip-mate 행은 2026-09-08 리소스 purge로 원장에서 사라졌다.)
 ✅ **미계상 상주 컨테이너 2개 — 해소(2026-09-01 4차, +368Mi).** 3차 조사에서 이 원장 어느 행에도
 잡히지 않으면서 limit·request가 아예 없던 상주 컨테이너 둘을 캡하고 행에 편입했다.
 
@@ -430,11 +432,10 @@ D-e(NUC 재기준선)를 red로 만든다. 제거·개명은 그 재기준선에
 | <!-- ledger:row --> sealed-secrets | sealed-secrets |     32 |       48 |
 | <!-- ledger:row --> homepage       | homepage       |    128 |      208 |
 | <!-- ledger:row --> glances        | observability  |     64 |      128 |
-| <!-- ledger:row --> cache-trip-mate | cache          |     96 |      160 |
 | <!-- ledger:row --> files          | files          |     32 |      64 |
 | <!-- ledger:row --> local-path-storage | local-path-storage |     64 |     128 |
 
-**합계:** req ≈ 4727 Mi · limit ≈ 9308 Mi (반드시 ≤ 10240 Mi 유지).
+**합계:** req ≈ 4631 Mi · limit ≈ 9148 Mi (반드시 ≤ 10240 Mi 유지).
 (⚠️ 이 줄의 형식은 **계약**이다 — `≈` 두 개를 포함한 `tools/lib/ledger-totals.ts`의 `TOTALS_RE`가
 쓰기 경로(`replaceTotals` — create-app/provision-cache/teardown-app/teardown-resource)의 앵커다.
 2026-08-31 정정에서 `≈`가 떨어져 나가 실 원장에 대해 `replaceTotals`가 throw했고, 그동안 세 개의
@@ -453,9 +454,8 @@ values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 �
 > memory 합 == 그 namespace를 쓰는 원장 행들의 합**을 기계로 대조한다(replicas 반영). 양방향이다 —
 > 매니페스트의 limit을 올려도, 이 행을 지워도 `make verify`가 red다. 그러니 **손으로 맞추지 말고
 > 한쪽을 고친 뒤 가드를 돌려라**(2026-09-03 착지 전에는 두 뮤테이션 모두 전 게이트 초록이었다).
-> ⚠️ 2026-09-05 정정(티켓 62): 이 문단이 원래 "`platform/` 행은 여전히 수기 계상"이라고 적었던
-> 것은 이제 **부분적으로만** 맞다 — `platform/` 스코프도 F1(정적 귀속)+F2(커버리지 파생)로
-> 6개 namespace(cache·database·edge·files·homepage·observability)가 같은 형태로 기계 대조된다
+> `platform/` 스코프도 F1(정적 귀속)+F2(커버리지 파생)로 5개 namespace(database·edge·files·
+> homepage·observability)가 같은 형태로 기계 대조된다
 > (원장 행이 namespace 총량이고 매니페스트는 컴포넌트 단위라 대응이 1:1이 아닌 문제는 F2가
 > namespace별 **합**으로 우변을 만들어 해소한다 — observability+glances 2행 합이 그 예다).
 > 나머지 namespace(argocd·cert-manager·cnpg-system·gateway·sealed-secrets·tailscale)는 F2가

@@ -132,7 +132,7 @@ CJ="$DIR/backup-cronjob.yaml"
 }
 
 @test "instance deployment.yaml pins container hardening + probes (values, not just presence)" {
-  # spec-others-4(round8) — trip-mate/deployment.yaml은 provision-cache.ts 산출물이지만 파일
+  # 캐시 인스턴스 deployment.yaml은 provision-cache.ts 산출물이지만 파일
   # 헤더가 손 편집을 허용하는 git-SSOT다. 값 witness는 tools/tests/test_provision-cache.bats에만
   # 있고(코드생성기가 방금 찍어낸 tmp fixture 검사) 여기(실제로 배포되는 커밋 파일)엔 0건이었다.
   # 뮤테이션 재현(2026-09-05): allowPrivilegeEscalation: false -> true 치환 후 이 파일 9/9 ok

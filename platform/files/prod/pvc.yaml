@@ -1,6 +1,6 @@
 # 사용자 파일 저장 — bulk-ssd 티어. ⚠️ 매체는 국면에 따라 다르다: 국면 A(versions.env의
 # BULK_MIGRATION_WINDOW_UNTIL이 비어 있지 않음)에는 노드 루트 LV의 bind 마운트(/mnt/bulk)이고,
-# 국면 B에서만 별도 2TB M.2다(virtiofs는 OrbStack 시절 서술 — 베어메탈 이전으로 소멸).
+# 국면 B에서만 별도 2TB M.2다.
 # storageClassName 명시 필수(opt-in; 누락 시 standard=노드 내장 디스크로 조용히 착지). Prune=false + SC bulk-ssd reclaimPolicy=Retain
 # (git SSOT: infra/k3s-bootstrap/storage/storageclass-bulk-ssd.yaml)로 삭제민감 데이터 보호.
 # 내구성 등급 = 비재생성(non-regenerable): files-data는 git+R2+age로 재구축 불가한 유일 자산.
@@ -12,8 +12,7 @@
 #     배선됐다 — 현행 국면·날짜의 권위는 `infra/k3s-bootstrap/versions.env`(BULK_MIGRATION_WINDOW_UNTIL)다.
 #     실행자는 `infra/k3s-bootstrap/host-config/etc/systemd/system/files-data-backup.{service,timer}`.
 #   · R2 미사용(무료티어)은 '백업 없음'이 아니라 '백업 = 호스트 내장 디스크 사본'.
-#   ⚠️ **DR 재결합 절차의 정본은 `docs/runbooks/external-ssd.md` §3이다**(2026-08-17 베어메탈 재작성에서
-#      신설 — 옛 판은 macOS APFS 외장 볼륨 **생성** 런북이라 재결합 절차를 담은 적이 없었다).
+#   ⚠️ **DR 재결합 절차의 정본은 `docs/runbooks/external-ssd.md` §3이다**.
 #      요건은 `scripts/dr-drill.sh`의 [6.5] 주석도 인라인으로 들고 있고 그 수행 여부를 fail-loud로
 #      검증한다(기존 bulk 데이터 디렉토리를 가리키는 hostPath PV를 claimRef로 정적 바인딩).
 apiVersion: v1

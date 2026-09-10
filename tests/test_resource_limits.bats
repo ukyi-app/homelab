@@ -5,7 +5,7 @@
 # ⚠️ red-green 레인의 `-ne 0`은 「가드가 위반을 거부했다」와 「가드가 판정 전에 죽었다」를 구별하지
 #    못한다 — 도구를 지우면 bun의 rc도 비-0이다(실측: 대상 삭제 시 14레인 중 6개가 그대로 초록).
 #    그래서 각 red-green 레인은 거부 문구(check-resource-limits.ts:127)를 함께 물고, setup은
-#    피연산자 실재를 닫는다. cf. .scratch/operand-witness/issues/05
+#    피연산자 실재를 닫는다.
 setup() { [ -f "${BATS_TEST_DIRNAME}/../tools/check-resource-limits.ts" ]; }
 
 # 픽스처 트리를 git 추적 상태로 만든다. 가드의 열거는 공유 워커의 `platform-manifests` 스코프가
@@ -94,7 +94,7 @@ YAML
   printf '%s' "$output" | grep -qF -- 'FAIL: cpu·memory request 또는 memory limit 없는'
 }
 
-# grep-c-4(감사 6라운드): 값에 따옴표를 두른 `kind: "Deployment"`는 유효 YAML이고 kubectl·kustomize·
+# 값에 따옴표를 두른 `kind: "Deployment"`는 유효 YAML이고 kubectl·kustomize·
 # ArgoCD가 한 줄 스칼라와 동일하게 적용하지만, 예전 KIND_RE(`^kind:[ \t]*(Deployment|…)`)는 값 앞의
 # `"`에서 매치가 끊겨 파일이 프리필터에서 통째로 빠졌다(로스터 축과 별개인 **표기 축**) — 안에
 # 자원 블록이 없어도 평가되지 않았다. fast path(kind-무관)로 낮춘 뒤 판정을 파싱 결과에 맡기면
@@ -683,9 +683,8 @@ YAML
   [ "$n" -ge 1 ]
 }
 
-# ── platform 행 정적 귀속(F1) + 커버리지 파생(F2) — 티켓 62 ────────────────────────────────
-# 위 substrate 레인과 같은 형태(양방향 red-green)를 platform 스코프에도 둔다. 실 트리 R1~R3
-# 뮤테이션(설계 노트 §7)은 컨덕터 보고의 뮤테이션 표에 수기로 남아 있다 — 아래는 그 판정 규칙
+# ── platform 행 정적 귀속(F1) + 커버리지 파생(F2) ────────────────────────────────────────
+# 위 substrate 레인과 같은 형태(양방향 red-green)를 platform 스코프에도 둔다. 아래는 그 판정 규칙
 # 자체가 **픽스처 안에서** 죽으면 red임을 고정하는 G2 레인이다(tools/tests/test_repo-walk.bats의
 # 「역방향 단언」 선례 — 규칙을 지우면 초록이 되는 죽은 규칙을 못 만들게 한다).
 
@@ -787,7 +786,7 @@ YAML
   [ "$status" -eq 0 ]
 }
 
-# 감사 12라운드 77 reg-a3-tools-infra-2 — 같은 라운드가 두 번(grep-c-2 IMG_KEY·grep-c-4 KIND_RE) 고친
+# 앞선 두 처방(IMG_KEY·KIND_RE)이 고친
 # "값-앵커 정규식이 인용 표기에서 끊긴다" 클래스가 F1의 새 정규식(deriveNamespace)에 재발했다.
 # `namespace: "attrns"`처럼 값에 따옴표가 있으면 옛 정규식은 매치 실패로 귀속 불가에 빠졌다.
 @test "F1: a quoted kustomization namespace value is still attributed (quote-blindness regression)" {

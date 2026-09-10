@@ -79,7 +79,7 @@ fixture_suite() {   # $1: 하위 디렉토리명
   echo "$output" | grep -q "skip()"
 }
 
-# 형제 전수 열거(reg13c-a-landing-hunks-2, tests/gates/test_scan-floor.bats) — P_TS_EXIT도 같은
+# 형제 전수 열거(tests/gates/test_scan-floor.bats) — P_TS_EXIT도 같은
 # 리터럴 `.` 요구 결함을 가졌다: optional chaining(`process?.exit(4)`)이 처방 전엔 무증인이었다.
 @test "a bare TypeScript skip exit via optional chaining is still caught (process?.exit)" {
   printf '%s\n' 'process?.exit(4);' > "$BATS_TEST_TMPDIR/optchain.ts"
@@ -106,8 +106,7 @@ fixture_suite() {   # $1: 하위 디렉토리명
   #    있는 자리다. 실측 2026-09-03: `mv scripts/check-skip-signalling.sh` 후 31건 중 13건이 초록으로
   #    남았고 대상 의존 레인 중 이 레인이 그 하나였다. `|| true` 자체는 **유지한다** — 정상 트리에서
   #    grep은 0건 매치로 rc 1이라 걷으면 set -e가 게이트를 red로 만든다(이 레포의 표준 관용구).
-  # 81(reg13-e-carryover-1) 이후: `IFS='' read -r -d '' VAR <<EOF ... || true`(quote-aware 스트립
-  # 도입, check-bats-accounting.sh·check-bats-style.sh 등 5개 형제 가드와 동일 관용구)의 `|| true`는
+  # quote-aware 스트립 도입 이후: `IFS='' read -r -d '' VAR <<EOF ... || true`(check-bats-accounting.sh·check-bats-style.sh 등 5개 형제 가드와 동일 관용구)의 `|| true`는
   # 다른 종류다 — `read -d ''`는 NUL 구분자를 못 찾고 EOF에 닿아 **항상** rc 1로 끝나는 셸 고유
   # 동작이라 검출기 사망 은폐가 아니다. 그 opener 줄만 구조적으로 제외한다(변수명 손 나열 아님).
   [ -f "$ROOT/scripts/check-skip-signalling.sh" ]
@@ -155,7 +154,7 @@ fixture_suite() {   # $1: 하위 디렉토리명
   [ "$status" -eq 0 ]
 }
 
-# 81(reg13-e-carryover-1) — scan_one의 스트립이 행두 주석 전용이라 실코드 줄에 붙은 trailing
+# scan_one의 스트립이 행두 주석 전용이라 실코드 줄에 붙은 trailing
 # 주석 속 예시 문구를 헬퍼 우회 위반으로 오판했다(quote-aware 스트립으로 상환, 형제 관용구:
 # check-bats-accounting.sh NOCOMMENT_AWK). 아래 4건은 처방 전 red(과탐 FAIL)였다.
 @test "a SKIP marker example inside a shell trailing comment is not a violation" {
@@ -255,7 +254,7 @@ fixture_suite() {   # $1: 하위 디렉토리명
 }
 
 @test "a direct process.exitCode skip assignment is caught (the schema-era known gap, closed)" {
-  # 옛 헤더가 '알려진 구멍'으로 등재하던 경로 — homelab CLI skip variant 구현(kernel-followups 06)이
+  # 옛 헤더가 '알려진 구멍'으로 등재하던 경로 — homelab CLI skip variant 구현이
   # 이 레인을 함께 닫는다: 종료코드는 variant 축(exitFor)이 소유하고, 4의 직접 대입은 손조립이다.
   printf '%s\n' 'process.exitCode = 4;' > "$BATS_TEST_TMPDIR/ec.ts"
   run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/ec.ts"
@@ -263,7 +262,7 @@ fixture_suite() {   # $1: 하위 디렉토리명
   echo "$output" | grep -q "직접 대입"
 }
 
-# reg13c-b-new-tests-1 — lane_grep은 파일 전체를 넘겨도 grep은 여전히 줄 단위 매치라, 백슬래시
+# lane_grep은 파일 전체를 넘겨도 grep은 여전히 줄 단위 매치라, 백슬래시
 # 줄연속이나 대입식이 두 줄에 걸치면 P_SH_EXIT/P_TS_EXITCODE가 무증인이었다(처방 전 두 건 모두 red).
 @test "a backslash line-continued shell skip exit is still caught (newline-split bypass)" {
   printf '%s\n' 'echo "no domain"' 'exit \' '4' > "$BATS_TEST_TMPDIR/split-exit.sh"

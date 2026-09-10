@@ -8,7 +8,7 @@
 // 통과 시 active:true만 변경(워크트리) — 커밋/PR은 호출자(owner 또는 워크플로)가 PR-first로.
 // 라이브 상태는 kubectl로 읽고(--status-file 미지정 시), 테스트는 픽스처 주입.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-// 실행은 exec seam 경유(d6④) — 실패 의미(throw/불리언/파싱)는 콜사이트 소유 그대로.
+// 실행은 exec seam 경유 — 실패 의미(throw/불리언/파싱)는 콜사이트 소유 그대로.
 import { git as gitExec, sh } from "./lib/exec.ts";
 import path from "node:path";
 import { APP_NAME_RE } from "./lib/identity.ts";
@@ -116,7 +116,7 @@ if (flip) {
   const registryRow = registryProjection(row); // create-app/audit과 공유(키 순서 계약)
   const sh = surfaceHash(repoDir, syncedRev, app);
   const markerPath = path.join(repoDir, appRel(app).activation); // 앱 표면 경로 SSOT(d4)
-  // ⚠️ codex restale F2: 멱등 — 이미 active이고 마커(surfaceHash+registry+sha)가 동일하면 **아무것도 쓰지 않고**
+  // ⚠️ 멱등 — 이미 active이고 마커(surfaceHash+registry+sha)가 동일하면 **아무것도 쓰지 않고**
   // 끝낸다(재실행/리트라이 시 worktree clean — activatedAt churn·불필요 PR 노이즈 방지). 변경이 있으면 갱신.
   const cur = (row.active === true && existsSync(markerPath)) ? JSON.parse(readFileSync(markerPath, "utf8")) : null;
   const unchanged = cur && cur.surfaceHash === sh && cur.sha === sha && JSON.stringify(cur.registry) === JSON.stringify(registryRow);

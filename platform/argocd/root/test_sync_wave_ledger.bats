@@ -70,7 +70,7 @@ setup() {
 @test "every root Application is bound to its own row in the SYNC-WAVES.md root table (component <-> wave)" {
   # 위 @test는 **값**만 대조한다 — 어떤 컴포넌트가 그 wave에 있는지는 묻지 않는다. 그래서 root 표에서
   # 행 하나가 통째로 빠져도 같은 wave를 쓰는 다른 행이 그 값을 대신 만족시킨다(실측 2026-09-02:
-  # namespaces(-9) 행이 없는데 root(-9)·traefik CRD(-9) 두 행 때문에 초록이었다 — 티켓 09가 README
+  # namespaces(-9) 행이 없는데 root(-9)·traefik CRD(-9) 두 행 때문에 초록이었다 — README
   # 포인터를 「값은 매니페스트가 소유한다」로 우회하게 만든 바로 그 갭). 여기서 이름↔wave를 묶는다.
   # ⚠️ `sort -u` 금지 · 건초더미는 첫 표(root 전역 표)로 좁힘 — 근거는 파일 머리말과 같다.
   local f name wave table row p pairs="" missing="" n=0

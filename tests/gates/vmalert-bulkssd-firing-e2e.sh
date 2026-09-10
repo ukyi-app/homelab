@@ -78,7 +78,9 @@ EVAL_S="$VME_EVAL_S"; LOOKBACK_S="$VME_LOOKBACK_S"
 HOST_PUSH_S=86400
 
 # du exporter(storage_tier_* — L4 대조군)의 push 주기는 CronJob에서 파생한다.
-DU_CRON="$(yq 'select(.kind=="CronJob") | .spec.schedule' "$STACK/pvc-du-exporter.yaml" | head -1)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring
+DU_CRON_RAW="$(yq 'select(.kind=="CronJob") | .spec.schedule' "$STACK/pvc-du-exporter.yaml")"
+DU_CRON="$(head -n1 <<<"$DU_CRON_RAW")"
 # "M H * * *"(일 1회)만 지원 — 다른 형태면 L4 산술이 무너지므로 조용히 넘기지 않는다.
 case "$DU_CRON" in
   [0-9]*' '[0-9]*' * * *') DU_PUSH_S=86400 ;;

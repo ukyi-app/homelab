@@ -9,5 +9,10 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init verify-ledger
-bun "$ROOT/tools/ledger-to-json.ts" "$ROOT/docs/memory-ledger.md" > /tmp/ledger.json
-conftest test /tmp/ledger.json --policy "$ROOT/policy/ledger.rego"
+# 산출물은 실행 단위 임시 디렉토리에 둔다 — 고정 `/tmp/ledger.json`은 이 게이트를 동시에 부르는 프로세스
+# (bats 병렬 레인의 test_ledger·test_ledger-gate·verify-ledger-ssot)끼리 서로의 파일을 덮어 쓴다.
+# 파일명은 ledger.json을 유지한다(conftest가 확장자로 파서를 고른다).
+out="$(mktemp -d "${TMPDIR:-/tmp}/verify-ledger.XXXXXX")"
+trap 'rm -rf "$out"' EXIT
+bun "$ROOT/tools/ledger-to-json.ts" "$ROOT/docs/memory-ledger.md" > "$out/ledger.json"
+conftest test "$out/ledger.json" --policy "$ROOT/policy/ledger.rego"

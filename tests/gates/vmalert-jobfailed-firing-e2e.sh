@@ -70,7 +70,10 @@ FLAP_EXPR="$(vme_alert_expr "$VME_RULES" "$FLAP_ALERT")"
 FLAP_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_RULES" "$FLAP_ALERT")")"
 [ "$FLAP_FOR_S" -gt 0 ] || vme_fault "$FLAP_ALERT: for: 부재 또는 0"
 # 최근성 창 — `(time() - …) < <초>` 형태에서 뽑는다.
-FLAP_WINDOW_S="$(grep -oE '\)\s*<\s*[0-9]+' <<<"$FLAP_EXPR" | grep -oE '[0-9]+$' | head -1)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring
+# (캡처 문장에 `|| true`는 없다 — 원본과 같이 grep 무매치(rc 1)는 `set -e`로 전파된다).
+_flap_window_matches="$(grep -oE '\)\s*<\s*[0-9]+' <<<"$FLAP_EXPR" | grep -oE '[0-9]+$')"
+FLAP_WINDOW_S="$(head -n1 <<<"$_flap_window_matches")"
 [ -n "$FLAP_WINDOW_S" ] || vme_fault "$FLAP_ALERT: 최근성 창 상수를 추출하지 못했다(expr 형태 변경?)"
 # 발화 임계 — 말미 `>= N`.
 FLAP_THRESHOLD="$(grep -oE '>=\s*[0-9]+' <<<"$FLAP_EXPR" | grep -oE '[0-9]+$' | tail -1)"
@@ -86,8 +89,10 @@ FLAP_THRESHOLD="$(grep -oE '>=\s*[0-9]+' <<<"$FLAP_EXPR" | grep -oE '[0-9]+$' | 
 #    셀렉터의 정규식을 **추출해** 픽스처 값이 실제로 그 정규식에 매치되는지만 본다(앵커 필수 — PromQL의
 #    `!~`는 완전 일치 의미론이다).
 assert_not_excluded() { # $1=라벨명 $2=픽스처 값
-  local re
-  re="$(grep -oE "$1!~\"[^\"]*\"" <<<"$EXPR" | head -1 | sed "s/.*!~\"//; s/\"\$//")"
+  local re _re_matches
+  # 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(레인 d): 캡처 뒤 herestring(head가 writer인 파이프는 안전).
+  _re_matches="$(grep -oE "$1!~\"[^\"]*\"" <<<"$EXPR")"
+  re="$(head -n1 <<<"$_re_matches" | sed "s/.*!~\"//; s/\"\$//")"
   [ -n "$re" ] || return 0   # 그 라벨에 블랙리스트가 없으면 검사할 것이 없다
   if printf '%s' "$2" | grep -qE "^($re)\$"; then
     vme_contract "픽스처 $1='$2'가 룰의 블랙리스트 '$re'에 매치된다 — 전 레그가 무측정(vacuous green)이 된다"

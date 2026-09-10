@@ -1,4 +1,4 @@
-# 주의: homelab-tfstate는 Task 2.0에서 수동으로 생성하며, 일부러
+# 주의: homelab-tfstate는 부트스트랩 때 수동으로 생성하며, 일부러
 # Terraform으로 관리하지 않는다 — 이 state 파일을 저장하는 버킷이라 자기참조가 된다.
 
 # Postgres의 오프사이트 3번째 사본 (barman-cloud WAL + base + pg_dump 헤지).

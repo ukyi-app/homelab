@@ -99,7 +99,7 @@ lib() { bun -e "
   #    그래서 bump-tag.ts가 손으로 재유도하던 언앵커드 tag 몸통이 판정 밖이었다 — 그 면제 주석이
   #    바로 이 자리에 있었다. 12번이 그 재유도를 커널로 라우팅해 리터럴이 사라졌으므로, 이제 넓은
   #    철자로 세어 **재유입까지** 막는다(재유도가 주석이든 코드든 파일 바이트로는 같다).
-  # ⚠️ untouched-e-1(5라운드) — 손 로스터(poll-ghcr·bump-tag·create-app 3개 하드코딩)는 실 소비처
+  # ⚠️ 손 로스터(poll-ghcr·bump-tag·create-app 3개 하드코딩)는 실 소비처
   #    ensure-bump-pr.ts(:191 `import { TAG_RE } from "./lib/image-pin.ts"`)를 못 봤다(재유도 뮤테이션
   #    10/10 그대로 통과 실측). `git grep -l 'lib/image-pin' -- 'tools/*.ts'`로 열거해 신규 소비처를
   #    자동 편입한다 — 열거 붕괴 바닥값(-ge 4)이 글롭 붕괴를 막는다.

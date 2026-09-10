@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# run-bump-plan.ts(F-1 항목 러너)의 실행 테스트 — **진짜 git worktree fixture** + ensure-bump-pr **stub**.
+# run-bump-plan.ts(항목 러너)의 실행 테스트 — **진짜 git worktree fixture** + ensure-bump-pr **stub**.
 # 러너의 유일 주장(worktree 공간 격리로 R-38·H-2 누출 소멸)을 실제 git으로 태운다. 원격(ensure-bump-pr)만 stub한다.
 # stub은 cwd=worktree(HEAD=bump 커밋)에서 돌며 argv + 브랜치/author/커밋파일을 원장에 기록 → 러너의 per-item 결과를 증인화.
 # ⚠️ 중간 단언은 `[ ]`만(bash 3.2 set -e가 `[[ ]]` 실패를 침묵 통과) · 중간 부정은 `run …; [ "$status" -ne 0 ]`.

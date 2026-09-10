@@ -44,6 +44,7 @@ deb_is_uint() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac;
 
 deb_load() { # $1 = platform/victoria-stack/prod/digest-exporter.yaml → DEB_* 전역 설정 (실패=1)
   local f="${1:-}" runsh cron cron_min apps_key apps_raw
+  local skopeo_out curl_out ads_out ccp_out cron_out apps_key_out apps_val_out
   [ -n "$f" ] && [ -f "$f" ] || {
     deb_err "매니페스트를 찾을 수 없다: '${1:-<empty>}'"
     return 1
@@ -55,19 +56,23 @@ deb_load() { # $1 = platform/victoria-stack/prod/digest-exporter.yaml → DEB_* 
     return 1
   }
 
-  DEB_SKOPEO_TIMEOUT_S="$(printf '%s\n' "$runsh" | sed -n 's/.*SKOPEO_TIMEOUT:-\([0-9]*\)s}.*/\1/p' | head -1)"
+  # 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring(아래 파생 7곳 동형).
+  skopeo_out="$(printf '%s\n' "$runsh" | sed -n 's/.*SKOPEO_TIMEOUT:-\([0-9]*\)s}.*/\1/p')"
+  DEB_SKOPEO_TIMEOUT_S="$(head -n1 <<<"$skopeo_out")"
   deb_is_uint "$DEB_SKOPEO_TIMEOUT_S" || {
     deb_err "SKOPEO_TIMEOUT 파생 실패(값='$DEB_SKOPEO_TIMEOUT_S') — run.sh의 \${SKOPEO_TIMEOUT:-Ns} 기본값이 사라졌거나 형식이 바뀌었다. 앱당 스크레이프 상한이 무강제가 되면 행(hung) 잡이 activeDeadlineSeconds를 통째로 태우고 push 전에 죽는다."
     return 1
   }
 
-  DEB_CURL_MAX_TIME_S="$(printf '%s\n' "$runsh" | sed -n 's/.*CURL_MAX_TIME:-\([0-9]*\)}.*/\1/p' | head -1)"
+  curl_out="$(printf '%s\n' "$runsh" | sed -n 's/.*CURL_MAX_TIME:-\([0-9]*\)}.*/\1/p')"
+  DEB_CURL_MAX_TIME_S="$(head -n1 <<<"$curl_out")"
   deb_is_uint "$DEB_CURL_MAX_TIME_S" || {
     deb_err "CURL_MAX_TIME 파생 실패(값='$DEB_CURL_MAX_TIME_S') — run.sh의 \${CURL_MAX_TIME:-N} 기본값이 사라졌거나 형식이 바뀌었다. push 상한이 무강제다."
     return 1
   }
 
-  DEB_ACTIVE_DEADLINE_S="$(yq 'select(.kind=="CronJob").spec.jobTemplate.spec.activeDeadlineSeconds' "$f" | head -1)"
+  ads_out="$(yq 'select(.kind=="CronJob").spec.jobTemplate.spec.activeDeadlineSeconds' "$f")"
+  DEB_ACTIVE_DEADLINE_S="$(head -n1 <<<"$ads_out")"
   deb_is_uint "$DEB_ACTIVE_DEADLINE_S" || {
     deb_err "activeDeadlineSeconds 파생 실패(값='$DEB_ACTIVE_DEADLINE_S') — 부재/비정수 = 지연 상한 없음. 행 잡이 슬롯을 무한 점유해 첫 하트비트가 임의로 늦어진다(최초 배포 거짓 페이지)."
     return 1
@@ -77,13 +82,15 @@ deb_load() { # $1 = platform/victoria-stack/prod/digest-exporter.yaml → DEB_* 
     return 1
   }
 
-  DEB_CONCURRENCY_POLICY="$(yq 'select(.kind=="CronJob").spec.concurrencyPolicy' "$f" | head -1)"
+  ccp_out="$(yq 'select(.kind=="CronJob").spec.concurrencyPolicy' "$f")"
+  DEB_CONCURRENCY_POLICY="$(head -n1 <<<"$ccp_out")"
   [ -n "$DEB_CONCURRENCY_POLICY" ] || {
     deb_err "concurrencyPolicy 파생 실패 — 빈 값."
     return 1
   }
 
-  cron="$(yq 'select(.kind=="CronJob").spec.schedule' "$f" | head -1)"
+  cron_out="$(yq 'select(.kind=="CronJob").spec.schedule' "$f")"
+  cron="$(head -n1 <<<"$cron_out")"
   case "$cron" in
     '*/'[0-9]*' * * * *')
       cron_min="${cron%% *}"
@@ -100,12 +107,14 @@ deb_load() { # $1 = platform/victoria-stack/prod/digest-exporter.yaml → DEB_* 
   }
 
   # APPS env **엔트리 존재**는 fail-closed(yq 경로가 바뀌면 N=0으로 조용히 무너진다), 값이 빈 것은 허용(N=0).
-  apps_key="$(yq 'select(.kind=="CronJob").spec.jobTemplate.spec.template.spec.containers[].env[] | select(.name=="APPS").name' "$f" | head -1)"
+  apps_key_out="$(yq 'select(.kind=="CronJob").spec.jobTemplate.spec.template.spec.containers[].env[] | select(.name=="APPS").name' "$f")"
+  apps_key="$(head -n1 <<<"$apps_key_out")"
   [ "$apps_key" = "APPS" ] || {
     deb_err "CronJob에서 APPS env 엔트리를 찾지 못했다(yq 경로 변경?) — 앱 카디널리티를 셀 수 없어 인-데드라인 부등식이 무의미해진다."
     return 1
   }
-  apps_raw="$(yq 'select(.kind=="CronJob").spec.jobTemplate.spec.template.spec.containers[].env[] | select(.name=="APPS").value' "$f" | head -1)"
+  apps_val_out="$(yq 'select(.kind=="CronJob").spec.jobTemplate.spec.template.spec.containers[].env[] | select(.name=="APPS").value' "$f")"
+  apps_raw="$(head -n1 <<<"$apps_val_out")"
   DEB_APPS_N="$(printf '%s\n' "$apps_raw" | tr ' ' '\n' | grep -c '=' | tr -d '[:space:]')"
   deb_is_uint "$DEB_APPS_N" || {
     deb_err "APPS 카디널리티 파생 실패(값='$DEB_APPS_N')."

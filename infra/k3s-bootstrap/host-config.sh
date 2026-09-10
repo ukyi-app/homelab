@@ -145,7 +145,9 @@ if [ -d "$sshd_abs" ]; then
     [ -e "$c" ] || continue
     b="$(basename "$c")"
     [ "$b" != "$SSHD_DROPIN" ] || continue
-    first="$(printf '%s\n%s\n' "$b" "$SSHD_DROPIN" | LC_ALL=C sort | head -1)"
+    # 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring
+    sorted_pair="$(printf '%s\n%s\n' "$b" "$SSHD_DROPIN" | LC_ALL=C sort)"
+    first="$(head -n1 <<<"$sorted_pair")"
     if [ "$first" != "$SSHD_DROPIN" ]; then
       earlier="${earlier}${b} "
       earlier_n=$((earlier_n + 1))
@@ -225,8 +227,7 @@ echo "==> [5/6] 노드 로컬 스토리지 디렉토리"
 # bulk는 넣지 않는다 — 그 디렉토리는 이 스크립트 소관이 아니라 **fstab UUID 마운트** 소관이다
 # (국면 B, 2026-08-26 완료: /dev/nvme1n1p1 → /mnt/bulk. SSOT는 versions.env의
 # BULK_MIGRATION_WINDOW_UNTIL 블록). 여기서 만들면 마운트 전에 빈 디렉토리가 생겨 어느
-# 국면의 것인지 모르는 상태가 된다. (초판 주석은 "국면 A의 경로·만료일이 미결(D-g)"이었는데
-# 그 미결은 국면 B 진입으로 해소됐다 — 결론은 같고 근거만 갱신했다.)
+# 국면의 것인지 모르는 상태가 된다.
 $RUN install -d -m 0700 -o root -g root "${R}${INTERNAL_STORAGE_PATH}"
 
 echo "==> [6/6] 유닛 반영"
@@ -276,8 +277,10 @@ net_settled() {
 }
 if ls "$TREE"/etc/systemd/network/*.network.d/*.conf >/dev/null 2>&1; then
   $RUN networkctl reload
-  cfg_iface="$(ip -o -4 addr show 2>/dev/null \
-    | awk -v ip="${K3S_NODE_IP:-}" 'ip != "" && $4 ~ ("^" ip "/") { print $2; exit }')"
+  # writer(ip)를 먼저 끝까지 받고 herestring으로 awk에 준다 — `ip … | awk '… exit'`는 awk의 조기 종료가
+  # 나머지 링크를 쓰던 ip를 SIGPIPE/EPIPE로 죽여 pipefail 아래 거짓 실패가 된다(host-preflight [6]과 같은 자리).
+  cfg_addrs="$(ip -o -4 addr show 2>/dev/null)" || cfg_addrs=""
+  cfg_iface="$(awk -v ip="${K3S_NODE_IP:-}" 'ip != "" && $4 ~ ("^" ip "/") { print $2; exit }' <<<"$cfg_addrs")"
   if [ -n "$cfg_iface" ]; then
     echo "    ⚠️ networkctl reconfigure ${cfg_iface} — ${K3S_NODE_IP}가 약 2초간 사라졌다 돌아온다(돌아올 때까지 기다린다)"
     $RUN networkctl reconfigure "$cfg_iface"

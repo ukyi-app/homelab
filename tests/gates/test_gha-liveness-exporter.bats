@@ -1,12 +1,12 @@
 #!/usr/bin/env bats
-# GHA liveness 하트비트(티켓 10)의 gate 테스트 — gha-liveness-exporter + r6 룰 3종.
+# GHA liveness 하트비트의 gate 테스트 — gha-liveness-exporter + r6 룰 3종.
 #
 # 병: 09(준비상태 회계)는 *run 안에서* job이 조용히 skip되는 것을 닫았다. 남은 표면은 **run이 아예
 # 발생하지 않는 것**이다(GitHub의 60일 스케줄 자동 비활성화·Actions 비활성화·스케줄러 유실).
 # run conclusion으로는 원리적으로 볼 수 없다 — 없는 run은 색이 없다. 관측자는 run **밖**에 있어야 하고,
 # GitHub-hosted 러너는 internal-by-default 때문에 vmsingle에 못 닿으므로 방향은 클러스터 폴링뿐이다.
 #
-# ⚠️ 이 스위트의 핵심은 **감시 목록을 하드코딩과 대조하지 않는 것**이다. 티켓 07 D-1에서 배운 대로,
+# ⚠️ 이 스위트의 핵심은 **감시 목록을 하드코딩과 대조하지 않는 것**이다.
 #    하드코딩 목록은 자기 자신에 대해서만 정확하다. 그래서 감시 집합과 나이 예산을 **워크플로 파일의
 #    cron에서 계산해** 강제한다 — 새 스케줄 워크플로가 생기면 자동으로 red가 된다.
 # ⚠️ @test 이름은 영어만 · 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵 통과).

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 셸 가드 프롤로그/방출 커널 — 규약이 산문 + 정적 대조로만 존재해 가드마다 손 복사되던 것을
-# 함수 interface 뒤로 접는다(lib-convergence d2). scan-floor.sh(열거 붕괴 커널)의 형제다.
+# 함수 interface 뒤로 접는다. scan-floor.sh(열거 붕괴 커널)의 형제다.
 #
 #   guard_init <가드이름>            프롤로그: set -euo pipefail · export LC_ALL=C · ROOT 산출 ·
 #                                    scan-floor.sh source. 가드마다 손 복사되던 프롤로그가 이 한
@@ -10,7 +10,7 @@
 #   guard_skip <가드> <이유>         `SKIP: <가드>: <이유>` 마커와 exit 4를 **한 줄에서 원자**
 #                                    방출한다 — 같은-줄 원자성은 이 구현 줄 하나가 소유하고(정확 1은
 #                                    게이트 bats가 잰다), check-skip-signalling은 콜사이트의 직접
-#                                    방출을 red로 강제한다(축 교체, 티켓 11). 콜사이트는 짝 규약을
+#                                    방출을 red로 강제한다(축 교체). 콜사이트는 짝 규약을
 #                                    알 필요가 없다. (TS 레인의 대응물은 tools/lib/cli.ts의 skip().)
 #   detect_run <라벨> <awk> <파일…>  awk 검출기의 fail-closed 실행 — 인자 0건/읽기 불가 프리체크 ·
 #                                    rc 포착(`|| true`가 fatal을 삼키던 fail-open 봉쇄) ·

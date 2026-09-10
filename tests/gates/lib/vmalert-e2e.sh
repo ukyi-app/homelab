@@ -271,8 +271,10 @@ vme_alert_for() { # $1=룰 yaml $2=alert 이름 → for:(예 15m). **무매치·
   # ⚠️ yq는 부재 키에 리터럴 `null`을 준다 → 그대로 vme_to_s에 넘기면 산술에서 잡음 크래시가 난다.
   #    여기서 빈 문자열로 정규화하고, **호출부가 `[ -n … ] || vme_fault`로 fail-closed 가드**를 건다
   #    (형제 vme_alert_expr와 동형 — 무매치를 빈 값으로 내고 판정은 호출부가 한다).
-  local v
-  v="$(yq '.groups[].rules[] | select(.alert=="'"$2"'") | .for' "$1" | head -1)"
+  local v for_raw
+  # 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring(캡처 문장에 `|| true`는 없다 — 원본과 같이 yq 실패는 `set -e`로 전파된다).
+  for_raw="$(yq '.groups[].rules[] | select(.alert=="'"$2"'") | .for' "$1")"
+  v="$(head -n1 <<<"$for_raw")"
   case "$v" in null) v="" ;; esac
   printf '%s' "$v"
 }
@@ -316,16 +318,21 @@ vme_assert_rollup_ok() { # $1=expr $2=메트릭명 $3=push 주기(초) $4=alert�
 }
 
 # 배포 매니페스트에서 vmalert/vmsingle 파라미터 파생(하드코딩 0) → VME_VA_VER/VM_VER/EVAL/LOOKBACK(+_S)
-# ⚠️ `set -e`: 미지정 플래그는 grep이 1로 끝난다 → 대입이 스크립트를 죽인다. `|| true`로 기본값 분기 보존.
+# ⚠️ `set -e`: 미지정 플래그는 grep이 1로 끝난다 → 대입이 스크립트를 죽인다. `|| true`로 기본값 분기 보존
+#    (그 `|| true`는 **grep 캡처 문장**에 붙는다 — 뒤따르는 head는 herestring이라 파이프가 없다: 레인 d).
 vme_derive_stack_params() { # $1=platform/victoria-stack/prod 디렉토리
-  local stack="$1"
-  VME_VA_VER="$(grep -oE 'victoriametrics/vmalert:v[0-9.]+' "$stack/vmalert.yaml" | head -1 | cut -d: -f2)"
-  VME_VM_VER="$(grep -oE 'victoriametrics/victoria-metrics:v[0-9.]+' "$stack/vmsingle.yaml" | head -1 | cut -d: -f2)"
+  local stack="$1" va_raw vm_raw eval_raw lookback_raw
+  va_raw="$(grep -oE 'victoriametrics/vmalert:v[0-9.]+' "$stack/vmalert.yaml")"
+  VME_VA_VER="$(head -n1 <<<"$va_raw" | cut -d: -f2)"
+  vm_raw="$(grep -oE 'victoriametrics/victoria-metrics:v[0-9.]+' "$stack/vmsingle.yaml")"
+  VME_VM_VER="$(head -n1 <<<"$vm_raw" | cut -d: -f2)"
   [ -n "$VME_VA_VER" ] && [ -n "$VME_VM_VER" ] || vme_fault "이미지 버전 추출 실패(vmalert/vmsingle)"
-  VME_EVAL="$(grep -oE -- '--evaluationInterval=[0-9a-z]+' "$stack/vmalert.yaml" | head -1 | cut -d= -f2 || true)"
+  eval_raw="$(grep -oE -- '--evaluationInterval=[0-9a-z]+' "$stack/vmalert.yaml" || true)"
+  VME_EVAL="$(head -n1 <<<"$eval_raw" | cut -d= -f2)"
   [ -n "$VME_EVAL" ] || VME_EVAL=1m   # vmalert 기본
   # vmalert instant 질의의 룩백 = -datasource.queryStep(미지정 시 vmalert 기본 5m). 구멍의 원인 상수다.
-  VME_LOOKBACK="$(grep -oE -- '--datasource\.queryStep=[0-9a-z]+' "$stack/vmalert.yaml" | head -1 | cut -d= -f2 || true)"
+  lookback_raw="$(grep -oE -- '--datasource\.queryStep=[0-9a-z]+' "$stack/vmalert.yaml" || true)"
+  VME_LOOKBACK="$(head -n1 <<<"$lookback_raw" | cut -d= -f2)"
   [ -n "$VME_LOOKBACK" ] || VME_LOOKBACK=5m   # vmalert 기본
   # shellcheck disable=SC2034  # 소비자(하네스)가 읽는 출력 변수다
   VME_EVAL_S="$(vme_to_s "$VME_EVAL")"

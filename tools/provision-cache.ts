@@ -9,7 +9,7 @@
 //   docs/memory-ledger.md                           cache-<name> 행 + 합계 프로즈 (예산 초과 시 거부)
 //
 // 비밀번호는 crypto로 생성해 kubeseal stdin으로만 흐른다 — stdout/플랜/디스크에 평문 금지.
-// data-conn kustomization은 다른 작업자(Task 5.1) 소유 — 있으면 resources만 추가, 없으면
+// data-conn kustomization은 다른 작업자 소유 — 있으면 resources만 추가, 없으면
 // 생성하지 않고 plan JSON checklist에 기재한다.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { randomBytes, createHash } from "node:crypto";
@@ -53,7 +53,7 @@ const reqMi = maxmemoryMi + 32;
 const limitMi = Math.ceil(maxmemoryMi * 1.5) + 64;
 
 // ---------- 중복/예산 검증 (쓰기 전 전부) ----------
-// 산출물 명명·배치는 레이아웃 커널 소유(cli-deepening 심화 4) — 여기서 재유도하지 않는다.
+// 산출물 명명·배치는 레이아웃 커널 소유 — 여기서 재유도하지 않는다.
 const layout = layoutFor("cache", name);
 const bn = entryName;
 const instDir = `${ROOT}/${layout.paths.instanceDir}`;
@@ -242,7 +242,7 @@ const dataConnKustomization = `${ROOT}/${layout.paths.connKust}`;
 const dataConnExists = existsSync(dataConnKustomization);
 if (!dataConnExists)
   checklist.unshift(
-    `${layout.paths.connKust}(namespace: prod)에 ${bn(layout.paths.conn)}·${bn(layout.paths.roConn)} 등록 필요 — kustomization 생성은 Task 5.1 작업자 소유, 등록 전까지 prod에 conn Secret이 만들어지지 않는다`,
+    `${layout.paths.connKust}(namespace: prod)에 ${bn(layout.paths.conn)}·${bn(layout.paths.roConn)} 등록 필요 — 그 kustomization 신설은 provision-db(homelab db create)가 담당한다. 등록 전까지 prod에 conn Secret이 만들어지지 않는다`,
   );
 
 const files = [
@@ -314,7 +314,7 @@ resources:
 `);
   }
 
-  // data-conn kustomization은 생성하지 않는다(Task 5.1 소유) — 있으면 등록만
+  // data-conn kustomization은 생성하지 않는다 — 있으면 등록만
   if (dataConnExists) {
     for (const entry of [bn(layout.paths.conn), bn(layout.paths.roConn)]) {
       const updated = registerResource(dataConnKustomization, entry);

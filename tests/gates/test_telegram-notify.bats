@@ -114,7 +114,7 @@ teardown() { rm -rf "$TMP"; }
 @test "rejects an unknown status enum" {
   run env STATUS=bogus SOURCE=배포 TITLE="x" sh "$SH"
   # ⚠️ rc만 보면 `sh <없는 파일>`의 127이 거부로 읽힌다 — 거부는 notify.sh의 규약대로 정확히 2이고,
-  #    문구 대조가 **어느** exit 2인지(status enum vs source enum) 고정한다(operand-witness 05 (a)).
+  #    문구 대조가 **어느** exit 2인지(status enum vs source enum) 고정한다.
   [ "$status" -eq 2 ]
   printf '%s' "$output" | grep -qF -- 'unknown status'
 }

@@ -1,6 +1,6 @@
 # victoria-stack
 
-**역할** — 관측성 스택: vmsingle/vmagent/VictoriaLogs/Vector/Grafana/vmalert/Alertmanager/node-exporter/kube-state-metrics. Telegram 알림 + R2/CNPG/cert/CI staleness 룰. `observability` 네임스페이스.
+**역할** — 관측성 스택: vmsingle/vmagent/VictoriaLogs/Vector/Grafana/vmalert/Alertmanager/node-exporter/kube-state-metrics + 보조 수집기(glances·digest-exporter·gha-liveness-exporter·pvc-du-exporter)와 deadmanswitch relay. Telegram 알림 + R2/CNPG/cert/CI staleness·meta(r7)·기판 핀 드리프트(r8) 룰. `observability` 네임스페이스.
 
 **싱크 Application · sync-wave** — `platform/argocd/root/apps/victoria-stack.yaml`의 **수동 Application**(appset에서 `platform/victoria-stack/*` 제외). **sync-wave +2**(stateful 이후). StatefulSet `volumeClaimTemplates`는 atomic 리스트라 `ignoreDifferences`(+`RespectIgnoreDifferences=true`)로 제외, `CreateNamespace=false`(NS는 자체 manifest).
 

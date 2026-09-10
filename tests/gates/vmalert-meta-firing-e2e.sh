@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# r7-meta(알림의 알림) + r4 grafana 축 발화 e2e — 픽스처 주입 replay(meta-observability 04).
+# r7-meta(알림의 알림) + r4 grafana 축 발화 e2e — 픽스처 주입 replay.
 #
 # 방식이 형제(bulkssd·drift)와 다른 지점: 이 룰들은 vmalert 자신이 만드는 메트릭(ALERTS·
 # ALERTS_FOR_STATE)과 alertmanager 게이지를 읽는다. 실룰을 함께 replay해 vmalert가 ALERTS를
@@ -10,10 +10,10 @@
 # ⚠️ 혼입 방어(조사 리스크 2): 픽스처도 ALERTS라 판정 헬퍼(vme_firing — ALERTS를 셈)와 한
 #   TSDB에 섞인다. 픽스처 alertname은 전부 Synthetic* 로 고정하고, 판정 집합(메타 3종)과의
 #   서로소를 preflight가 기계로 강제한다 — 겹치면 주입 샘플을 발화로 세는 vacuous green.
-# ⚠️ 침묵 레그의 vacuity(리뷰 H2): 생성기가 시리즈를 아예 안 만들어도 침묵은 green이다 —
+# ⚠️ 침묵 레그의 vacuity: 생성기가 시리즈를 아예 안 만들어도 침묵은 green이다 —
 #   침묵 레그마다 룰의 **좌변 자체**를 프로브해 "픽스처가 실재하고 값이 임계 미만"을 fault로
 #   강제한다(형제 bulkssd의 L4 대조군과 같은 역할).
-# ⚠️ 파생 대입은 전부 `|| true` 뒤 [ -n ] 검사(리뷰 M2): set -e + pipefail에서 grep 무매치가
+# ⚠️ 파생 캡처는 전부 `|| true` 뒤 [ -n ] 검사: set -e + pipefail에서 grep 무매치가
 #   대입문을 즉사시키면 fail-closed 루프가 도달 불가 죽은 코드가 되고 exit 1(leg FAIL)로
 #   오분류된다 — 파생 실패는 exit 2(CONTRACT)여야 한다.
 # 종료 규약: 2=HARNESS FAULT/CONTRACT · 1=leg FAIL · 0=OK (lib 소유).
@@ -33,7 +33,7 @@ vme_scenario "meta-e2e-net-$$" "$STACK" "$RULES_CM_META" "r7.yaml"
 TMP="$VME_TMP"
 META_RULES="$VME_RULES"
 
-# r4 룰 추출(grafana 레그) — vme_ 접두는 lib 전용(리뷰 L1)이라 하네스-로컬 이름을 쓴다.
+# r4 룰 추출(grafana 레그) — vme_ 접두는 lib 전용이라 하네스-로컬 이름을 쓴다.
 # ⚠️ stderr를 `2>/dev/null`로 버리지 않는다 — yq 미설치·파싱 오류·키 부재 **세 갈래**가 「룰 추출 실패」
 #    한 문구로 붕괴한다. lib(vme_scenario)의 룰 추출은 이미 stderr를 변수로 받아 fault 문구에 동봉하는데
 #    이 로컬 재구현만 그러지 않았다(ADR-0005 「살릴 것 둘」). `-e`는 유지한다 — null 거절은 이미 fail-closed다.
@@ -51,18 +51,26 @@ done
 grep -q 'alert: GrafanaPluginBudgetLow' "$TMP/r4.yaml" || fault "r4에 GrafanaPluginBudgetLow 부재"
 grep -q 'alert: GrafanaDuFingerprintLost' "$TMP/r4.yaml" || fault "r4에 GrafanaDuFingerprintLost 부재"
 
-# ── 2) 룰 파생 상수(하드코딩 금지 — 전 대입 || true + fail-closed 루프) ────────────────────────────
+# ── 2) 룰 파생 상수(하드코딩 금지 — 전 캡처 || true + fail-closed 루프) ────────────────────────────
 FLAP_EXPR="$(vme_alert_expr "$META_RULES" AlertRuleFlapping || true)"
-FLAP_W="$(printf '%s' "$FLAP_EXPR" | grep -oE '\[[0-9]+[smhd]\]' | head -1 | tr -d '[]' || true)"
-FLAP_N="$(printf '%s' "$FLAP_EXPR" | grep -oE '>= *[0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처(무매치 || true 유지)를 별도 문장으로 두고 herestring으로 첫 줄만 자른다.
+_flap_w_m="$(printf '%s' "$FLAP_EXPR" | grep -oE '\[[0-9]+[smhd]\]' || true)"
+FLAP_W="$(head -n1 <<<"$_flap_w_m" | tr -d '[]')"
+_flap_n_m="$(printf '%s' "$FLAP_EXPR" | grep -oE '>= *[0-9]+' | grep -oE '[0-9]+' || true)"
+FLAP_N="$(head -n1 <<<"$_flap_n_m")"
 FLAP_FOR="$(vme_alert_for "$META_RULES" AlertRuleFlapping || true)"
-STALE_T="$(vme_alert_expr "$META_RULES" AlertPipelineWriteStale | grep -oE '> *[0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+_stale_t_m="$(vme_alert_expr "$META_RULES" AlertPipelineWriteStale | grep -oE '> *[0-9]+' | grep -oE '[0-9]+' || true)"
+STALE_T="$(head -n1 <<<"$_stale_t_m")"
 SUP_EXPR="$(vme_alert_expr "$META_RULES" AlertSuppressionProlonged || true)"
-SUP_W="$(printf '%s' "$SUP_EXPR" | grep -oE '\[[0-9]+[smhd]\]' | head -1 | tr -d '[]' || true)"
-SUP_MIN_SAMPLES="$(printf '%s' "$SUP_EXPR" | grep -oE '>= *[0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+_sup_w_m="$(printf '%s' "$SUP_EXPR" | grep -oE '\[[0-9]+[smhd]\]' || true)"
+SUP_W="$(head -n1 <<<"$_sup_w_m" | tr -d '[]')"
+_sup_min_m="$(printf '%s' "$SUP_EXPR" | grep -oE '>= *[0-9]+' | grep -oE '[0-9]+' || true)"
+SUP_MIN_SAMPLES="$(head -n1 <<<"$_sup_min_m")"
 GRAF_EXPR="$(vme_alert_expr "$TMP/r4.yaml" GrafanaPluginBudgetLow || true)"
-GRAF_DENOM="$(printf '%s' "$GRAF_EXPR" | grep -oE '/ *[0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
-GRAF_RATIO="$(printf '%s' "$GRAF_EXPR" | grep -oE '> *0\.[0-9]+' | grep -oE '0\.[0-9]+' | head -1 || true)"
+_graf_denom_m="$(printf '%s' "$GRAF_EXPR" | grep -oE '/ *[0-9]+' | grep -oE '[0-9]+' || true)"
+GRAF_DENOM="$(head -n1 <<<"$_graf_denom_m")"
+_graf_ratio_m="$(printf '%s' "$GRAF_EXPR" | grep -oE '> *0\.[0-9]+' | grep -oE '0\.[0-9]+' || true)"
+GRAF_RATIO="$(head -n1 <<<"$_graf_ratio_m")"
 FOR_MAX_S=0
 for a in AlertRuleFlapping AlertPipelineWriteStale AlertSuppressionProlonged; do
   f="$(vme_alert_for "$META_RULES" "$a" || true)"; [ -n "$f" ] || fault "for: 파생 실패: $a"
@@ -83,7 +91,7 @@ SYN_FLAP="SyntheticFlappy"
 for m in AlertRuleFlapping AlertPipelineWriteStale AlertSuppressionProlonged GrafanaPluginBudgetLow GrafanaDuFingerprintLost; do
   [ "$m" != "$SYN_FLAP" ] || contract "픽스처 alertname($SYN_FLAP)이 판정 집합과 겹친다 — vacuous green"
 done
-# herestring(c71-3) — grep -oE(다중행 writer 가능)를 grep -q에 직파이프하면 pipefail 아래 조기
+# herestring — grep -oE(다중행 writer 가능)를 grep -q에 직파이프하면 pipefail 아래 조기
 # 종료 SIGPIPE(141)로 매치가 있어도 거짓 판정이 난다(scripts/check-sigpipe-writers.sh 분모 ②). 셀렉터
 # 추출은 한 번만 하고(grep -oE는 -q 없이 EOF까지 읽어 그 자체는 안전) 이후 대조는 herestring으로 한다.
 FLAP_EXCL="$(printf '%s' "$FLAP_EXPR" | grep -oE 'alertname!~"[^"]*"' || true)"
@@ -139,7 +147,7 @@ F1="$(vme_firing AlertRuleFlapping)"
 if [ "$F1" -gt 0 ]; then vme_pass "L1 AlertRuleFlapping fired on ${C1} activeAt changes/${FLAP_W} (threshold ${FLAP_N}, samples=$F1)"; else vme_fail "L1 AlertRuleFlapping silent despite ${C1} activeAt changes in ${FLAP_W} (threshold ${FLAP_N})"; fi
 
 run_leg l2-flapq flap-quiet "$META_RULES"
-# 침묵 vacuity 가드(리뷰 H2): 픽스처가 실재하고 값이 임계 미만임을 좌변으로 증명.
+# 침묵 vacuity 가드: 픽스처가 실재하고 값이 임계 미만임을 좌변으로 증명.
 C2="$(vme_promql "max(changes(ALERTS_FOR_STATE{alertname=\"$SYN_FLAP\"}[$FLAP_W]))")"
 [ "$C2" -ge 1 ] || fault "(L2) 픽스처 changes=0 — 레그가 판정 대상을 안 만들었다(vacuous silent)"
 [ "$C2" -lt "$FLAP_N" ] || fault "(L2) 픽스처 changes=$C2 ≥ 임계 $FLAP_N — 침묵 기대가 성립하지 않는다"

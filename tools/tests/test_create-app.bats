@@ -100,7 +100,7 @@ gen() {
 }
 
 @test "surfaceHash(HEAD) and surfaceHashWorktree agree when the app tree has a symlink" {
-  # 6라운드 비평가 실증(surface-hash-symlink) — walk()이 심볼릭 링크를 조용히 건너뛰면
+  # walk()이 심볼릭 링크를 조용히 건너뛰면
   # surfaceHashWorktree가 surfaceHash(HEAD)와 값이 갈려 활성화 직후 activation-surface-drift가
   # 오탐한다(헤더 :31 「커밋 후 동일한 값」 계약 위반). create-app 산출물 자체는 심볼릭 링크를
   # 만들지 않으므로(gen()으로는 재현 불가) apps/<app> 트리를 직접 구성해 두 함수를 나란히 부른다.
@@ -367,4 +367,84 @@ EOF
   gen
   [ "$status" -eq 1 ]
   printf '%s' "$output" | grep -qF -- '최소 1개'
+}
+
+@test "create-app adds a wiring checklist line only when a same-named conn already exists (floor 2)" {
+  # create-app은 앱 자기 봉인본만 envFrom에 넣는다 — db/cache conn 배선은 손 편집 PR이
+  # 유일 경로다. 자동 배선은 하지 않고(이름≠앱 케이스), **이미 있는** conn을 체크리스트로 표면화한다.
+  # 형식은 create-database가 이미 쓰는 문구(provision-db checklist)와 같다.
+  printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources:\n  - db-orders-conn.sealed.yaml\n  - db-orders-ro-conn.sealed.yaml\n' \
+    > "$FR/platform/data-conn/prod/kustomization.yaml"
+  gen --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -r '.checklist[]' | grep -q "db-orders-conn"
+  echo "$output" | jq -r '.checklist[]' | grep -q "envFrom"
+  # 대조군 — 같은 이름의 캐시 conn은 없으므로 캐시 줄은 나오지 않는다(상수 출력이 아님).
+  [ "$(echo "$output" | jq -r '.checklist[]' | grep -c "cache-orders-conn")" = "0" ]
+  # 부재 축의 양성 대조 — conn 등록이 아예 없으면 배선 줄도 없다.
+  printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: prod\nresources: []\n' \
+    > "$FR/platform/data-conn/prod/kustomization.yaml"
+  gen --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.checklist[]' | grep -c "db-orders-conn")" = "0" ]
+  # 체크리스트 자체는 비어 있지 않다(열거 붕괴로 0건이 된 게 아니다).
+  [ "$(echo "$output" | jq -r '.checklist | length')" -ge 1 ]
+}
+
+# ── autoDeploy 기본값 축(결정 Q4) ──────────────────────────────────────────
+# 이 레포의 다른 승인 게이트(bump-poll 누락=false · validate-mutation · activate-app)는 전부
+# fail-closed인데 생성기만 `?? true`로 fail-open이었다 — `.app-config.yml`에 deploy 절을 안 쓴 앱이
+# 자동 배포로 착지했다는 뜻이다. 기본은 승인 PR이고 자동 배포는 명시 opt-in이다.
+
+@test "an app-config without deploy.autoDeploy yields autoDeploy false (fail-closed default)" {
+  cat > "$TMP/.app-config.yml" <<'EOF'
+kind: web
+resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
+route: { public: true, host: orders.example.com }
+EOF
+  gen
+  [ "$status" -eq 0 ]
+  run jq -e '.autoDeploy == false' "$FR/apps/orders/deploy/prod/.bindings.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "deploy.autoDeploy true is an explicit opt-in that still reaches bindings" {
+  # 양성 대조 — 기본값 반전이 "필드를 통째로 무시한다"로 접히지 않았음을 가른다.
+  cat > "$TMP/.app-config.yml" <<'EOF'
+kind: web
+resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
+route: { public: true, host: orders.example.com }
+deploy: { autoDeploy: true }
+EOF
+  gen
+  [ "$status" -eq 0 ]
+  run jq -e '.autoDeploy == true' "$FR/apps/orders/deploy/prod/.bindings.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "an empty deploy block is the same as a missing one (fail-closed)" {
+  # `deploy: {}`는 "절을 썼지만 값을 안 썼다" — 누락과 같은 판정이어야 한다(옵셔널 체이닝 경로).
+  cat > "$TMP/.app-config.yml" <<'EOF'
+kind: web
+resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi} }
+route: { public: true, host: orders.example.com }
+deploy: {}
+EOF
+  gen
+  [ "$status" -eq 0 ]
+  run jq -e '.autoDeploy == false' "$FR/apps/orders/deploy/prod/.bindings.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "the fail-closed default and its opt-in key are stated in prose (tools README + AGENTS + apps README)" {
+  # 기본값 반전은 opt-in 경로가 문서에 없으면 그냥 고장으로 읽힌다("왜 자동 배포가 안 되나").
+  # 세 표면 전부가 ① 기본이 승인 PR임과 ② 그것을 여는 키를 함께 말해야 한다.
+  n=0
+  for f in tools/README.md AGENTS.md apps/README.md; do
+    grep -qF 'deploy.autoDeploy: true' "$ROOT/$f"
+    grep -qF '승인 PR' "$ROOT/$f"
+    n=$((n + 1))
+  done
+  # 열거 바닥값 — 루프가 0바퀴 돌면 위 단언이 하나도 실행되지 않고 통과한다.
+  [ "$n" -eq 3 ]
 }

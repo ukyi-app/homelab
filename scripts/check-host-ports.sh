@@ -42,7 +42,7 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-host-ports
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 env 폐지).
 take_floors "check-host-ports" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
@@ -202,7 +202,7 @@ FNR==1 { flush_prev(); inhere=0; delim=""; herestart=0; prevfile=FILENAME; nfile
 # 필요하다 — 정의처 자신은 호출/소스 표기가 없어 위 세 패턴 어디에도 안 걸리기 때문이다.
 # ⚠️ [C]/[P] 면제는 **각자의 정의**만 본다 — 결합 정규식(hp_pick_port|hp_run_published) 한 축으로
 #    묶으면 호출되지 않는 hp_pick_port 스텁 하나가 [C] 전체를 영구 면제하고, 그 절반엔 ndefs류
-#    SSOT 백스톱이 없어 사본이 무한정 쌓여도 안 보인다(reg-a2-ops-guards-2). defspick/npickdefs를
+#    SSOT 백스톱이 없어 사본이 무한정 쌓여도 안 보인다. defspick/npickdefs를
 #    defsrun/ndefs와 대칭으로 따로 세운다.
 { if (nocomment($0) ~ /^[ \t]*hp_pick_port[ \t]*\(\)/) { if (defspick[FILENAME] != 1) npickdefs++; defspick[FILENAME] = 1 } }
 { if (nocomment($0) ~ /^[ \t]*hp_run_published[ \t]*\(\)/) { if (defsrun[FILENAME] != 1) ndefs++; defsrun[FILENAME] = 1 } }
@@ -228,7 +228,7 @@ END {
   # ⚠️ **`defsrun[f]==1`/`defspick[f]==1` 필터가 있어야 한다** — 위 [P]/[C] 면제 루프의
   #    `if (defsrun[f] == 1)`/`if (defspick[f] == 1)` 비교가 awk 배열 참조 자동 생성으로
   #    실 정의자가 아닌 파일(순수 소비자)도 키만 만들어 넣는다. 필터 없이 `for (f in defsrun)`를
-  #    돌리면 그 소비자들까지 "정의가 N곳"으로 오출력된다(reg-a2-ops-guards-2 검증 중 실측).
+  #    돌리면 그 소비자들까지 "정의가 N곳"으로 오출력된다(검증 중 실측).
   if (ndefs > 1) {
     for (f in defsrun)
       if (defsrun[f] == 1)

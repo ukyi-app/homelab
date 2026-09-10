@@ -137,7 +137,7 @@ teardown() { rm -rf "$FX"; }
 }
 
 @test "build.yaml matrix app set matches the tool CATALOG keys (no unowned ops image)" {
-  # untouched-b-3: test_ci-build.bats:69의 "only pg-tools + skopeo" 판정은 멤버십 하한 2건 +
+  # test_ci-build.bats:69의 "only pg-tools + skopeo" 판정은 멤버십 하한 2건 +
   # 'api' 부분문자열 금지뿐이라 원소 **추가** 방향이 무증인이다(matrix에 새 원소를 더해도 초록).
   # 대상은 ops/ 트리(untracked에도 열림)가 아니라 CATALOG다 — 그래야 「matrix + ops/<n>/Dockerfile
   # 동시 추가」 뮤테이션도 잡는다(ops/만 대조하면 둘 다 늘어 초록이 되는 vacuous green).

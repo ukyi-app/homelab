@@ -1,0 +1,26 @@
+{
+  "schema": "homelab-cli/1",
+  "verb": "app teardown",
+  "variant": "failure",
+  "exitCode": 1,
+  "omitted": [],
+  "result": {
+    "action": "teardown-app",
+    "name": "myapp",
+    "dnsReclaim": "iac/tf-reconcile",
+    "resourcesRetained": "teardown-resource",
+    "correlation": "corr-fixed-nonce-01",
+    "run": {
+      "id": 901,
+      "url": "https://github.com/ukyi-app/homelab/actions/runs/901",
+      "conclusion": "success"
+    },
+    "pr": {
+      "number": 91,
+      "url": "https://github.com/ukyi-app/homelab/pull/91",
+      "merged": true,
+      "mergeSha": "feedbee"
+    },
+    "error": "기준 ref(feedbee)에 표면(apps/myapp/deploy/prod/values.yaml)이 남아 있다 — 철거가 반영되지 않았다"
+  }
+}

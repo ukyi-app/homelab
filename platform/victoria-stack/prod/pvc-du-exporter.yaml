@@ -1,10 +1,10 @@
-# per-PVC 용량 가시화(메타갭 ③ W1-A) — 모든 PV가 hostPath(local-path)라 kubelet_volume_stats가 원천
-# 부재하고(r4 상단 주석), bulk 티어는 node-exporter가 별도 series로 못 본다(F10). 이 CronJob이
-# ⚠️ 2026-08-17 정정: 옛 문구는 «외장 bulk(virtiofs)»였다 — virtiofs는 OrbStack VM 시절의 전달 방식이고
-#    베어메탈 이전으로 소멸했다. 국면 A의 bulk는 NUC 내장 디스크의 bind이고, 국면 B에서 별도 2TB M.2가 된다.
-#    관측이 필요한 이유(별도 series로 안 보인다)는 전달 방식과 무관하게 그대로다.
-# 두 provisioner 루트를 파드 내부에서 직접 du/df해 per-PVC 사용량(pvc_dir_size_bytes)과 티어 용량
-# (storage_tier_{size,avail}_bytes)을 vmsingle에 push한다. 후자는 W3(관측 데이터 bulk 이전)의 선행 용량 신호다.
+# per-PVC 용량 가시화 — 모든 PV가 hostPath(local-path)라 kubelet_volume_stats가 원천
+# 부재하고(r4 상단 주석), bulk 티어는 node-exporter가 별도 series로 못 본다(F10)
+# (bulk 매체는 국면에 따라 다르다 — 국면 A는 NUC 내장 디스크의 bind, 국면 B는 별도 2TB M.2 —
+#  별도 series로 안 보인다는 사실은 어느 쪽이든 같다). 이 CronJob이 두 provisioner 루트를 파드
+# 내부에서 직접 du/df해 per-PVC 사용량(pvc_dir_size_bytes)과 티어 용량
+# (storage_tier_{size,avail}_bytes)을 vmsingle에 push한다. 후자는 W3(관측 데이터 bulk 이전)의
+# 선행 용량 신호다.
 #
 # ⚠️ 격리 계약(F8 — 전-PVC 읽기 도달성의 명시적 리스크 수용): 이 잡은 두 provisioner 루트 전체(무관한 앱·DB
 #    볼륨 포함)를 읽는다. per-PVC 커버리지가 목적이라 스코프 축소 대신 아래 가드를 전부 강제해 유출 반경을 봉인한다:
@@ -12,7 +12,7 @@
 #    (2) 전용 default-deny egress netpol — 허용은 vmsingle:8428·DNS:53만(인터넷·telegram 불허 → exfil 봉쇄)
 #    (3) resources limits + readOnly 마운트 + readOnlyRootFilesystem
 #    (4) 이미지는 레포 기존 digest 핀(pg-tools) 재사용 — 신규 서드파티 금지
-#    세 번째 루트(/var/lib/kubelet/pods — meta-observability 01): grafana emptyDir du의 유일 경로다
+#    세 번째 루트(/var/lib/kubelet/pods): grafana emptyDir du의 유일 경로다
 #    (cadvisor에 파드별 fs 시리즈가 없음 — 라이브 실측).
 #    ⚠️ 이 루트의 실제 표면 = 노드 상 **모든 파드**의 projected SA 토큰 · secret/configmap tmpfs
 #       (hostPath rbind라 기동 시점 하위 마운트가 보인다) · 타 파드 emptyDir 전량 · etc-hosts.
@@ -136,7 +136,7 @@ spec:
                   # 최소 2개(files-data·pg-basebackup-local, 라이브 3). 0이면 경로/마운트가 틀린 것 — 녹색 하트비트 금지.
                   [ "$N_internal" -ge 1 ] || { echo "internal PVC 0개 — 마운트/경로 확인"; exit 1; }
                   [ "$N_bulk" -ge 1 ] || { echo "bulk PVC 0개 — bulk 경로/외장 마운트 확인(F20)"; exit 1; }
-                  # grafana emptyDir 지문 스캔(meta-observability 01) — pod UID는 재생성마다 바뀌므로
+                  # grafana emptyDir 지문 스캔 — pod UID는 재생성마다 바뀌므로
                   # 경로 추적 대신 내용 지문(data 볼륨 안 grafana.db)으로 특정한다(RBAC 0 — 라이브 실측
                   # 매치 정확 1건·290,372 KiB가 파드 내부 du와 정합). 0건 = grafana 미가동일 수 있어
                   # 미방출(그건 TargetDown류 소관 — 이 exporter의 사망은 아래 하트비트가 감지). 2+건 =
@@ -155,14 +155,14 @@ spec:
                   done
                   if [ "$N_gf" -eq 1 ]; then BODY="${BODY}grafana_data_dir_size_bytes ${GF_BYTES}\n"; fi
                   # 매치 수는 **무조건** 방출한다 — 0건 미방출 + absent 없는 소비 룰 + 초록 하트비트가
-                  # 겹치면 지문 붕괴(DB 파일명 변경·emptyDir→PVC 전환)가 영구 무성이 된다(리뷰 H2 —
-                  # 죽은 알림 클래스의 생산자 쪽 변종·린터가 원리적으로 못 봄). GrafanaDuFingerprintLost
+                  # 겹치면 지문 붕괴(DB 파일명 변경·emptyDir→PVC 전환)가 영구 무성이 된다(죽은 알림
+                  # 클래스의 생산자 쪽 변종 — 린터가 원리적으로 못 봄). GrafanaDuFingerprintLost
                   # (r4)가 이 게이지의 0을 페이징한다.
                   BODY="${BODY}grafana_du_fingerprint_matches ${N_gf}\n"
                   BODY="${BODY}pvc_du_last_success_timestamp ${TS}\n"
                   printf "%b" "$BODY" | curl -fsS --connect-timeout 5 --max-time 30 --data-binary @- \
                     "http://vmsingle.observability.svc:8428/api/v1/import/prometheus"
-                  # 지문 충돌은 push **뒤**에 판정한다(리뷰 M1) — 부수 메트릭의 전제 붕괴가 1차 티어
+                  # 지문 충돌은 push **뒤**에 판정한다 — 부수 메트릭의 전제 붕괴가 1차 티어
                   # 신호·하트비트를 통째로 날리면 안 된다(티어 fail-loud와 범주가 다르다). 충돌 관측은
                   # 위 matches 게이지(≥2)가, Job Failed는 KubeJobFailed가 각각 진다.
                   [ "$N_gf" -le 1 ] || { echo "grafana.db 지문 ${N_gf}건 — 지문 충돌(특정 전제 붕괴)"; exit 1; }

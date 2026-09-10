@@ -109,7 +109,7 @@ S="$BATS_TEST_DIRNAME/adguard-auth.sealed.yaml"
 }
 
 @test "api-creds is a SealedSecret named adguard-api-creds in edge (reconciler basic-auth password)" {
-  # 메타갭 ① Task 6(W2-A): rewrite 리컨실러 basic auth용 평문 비밀번호(UI는 bcrypt·API는 평문, 같은 ADGUARD_PASSWORD).
+  # rewrite 리컨실러 basic auth용 평문 비밀번호(UI는 bcrypt·API는 평문, 같은 ADGUARD_PASSWORD).
   A="$BATS_TEST_DIRNAME/adguard-api-creds.sealed.yaml"
   run grep -q 'kind: SealedSecret' "$A"; [ "$status" -eq 0 ]
   run grep -q 'name: adguard-api-creds' "$A"; [ "$status" -eq 0 ]

@@ -26,8 +26,8 @@ resources:
   - rules/r8-substrate.yaml
   - ghcr-read.sealed.yaml # digest-exporter private GHCR inspect 자격(owner: make seal-ghcr-read)
   - digest-exporter.yaml
-  - gha-liveness-exporter.yaml # GHA 스케줄 워크플로 liveness 하트비트(티켓 10 — run 밖 관측자)
-  - pvc-du-exporter.yaml  # per-PVC 용량 가시화 CronJob + 전용 egress netpol(메타갭 ③ W1-A)
+  - gha-liveness-exporter.yaml # GHA 스케줄 워크플로 liveness 하트비트(run 밖 관측자)
+  - pvc-du-exporter.yaml  # per-PVC 용량 가시화 CronJob + 전용 egress netpol
   # ⚠️ **relay 비활성(`#454`)은 2026-08-17 컷오버로 해제됐다.** 근거는 "두 클러스터가 같은 healthchecks
   #    체크를 ping하면 라이브 Mac이 죽어도 초록으로 남는다"였는데, 라이브 Mac 클러스터가 더 이상
   #    존재하지 않으므로 **경쟁 pinger가 원리적으로 없다.** 두 번째 클러스터를 다시 세우게 되면

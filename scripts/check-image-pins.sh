@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# 이미지 digest 핀 2-레인 게이트(메타갭 ② W2-B) — 런타임 컨테이너 이미지가 @sha256 digest로 고정됐는지 강제.
+# 이미지 digest 핀 2-레인 게이트 — 런타임 컨테이너 이미지가 @sha256 digest로 고정됐는지 강제.
 # mutable 태그는 재빌드 때마다 움직여 의도치 않은 이미지로 실행될 수 있다(핀 = 재현성·공급망 무결성).
 #
-#   레인1(platform 문자열 이미지): platform/**/*.yaml의 `image:`/`imageName:` 스칼라 값이 `@sha256:` 포함해야.
+#   레인1(platform 문자열 이미지): platform/**/*.yaml의 `image:`/`imageName:` 스칼라 값이 `@sha256:` 핀 보유.
 #     (imageName: = CNPG Cluster CR의 DB 본체 런타임 이미지 — image:와 동일 취급, 적대 리뷰 확인.)
-#   레인2(apps 구조체 이미지): apps/*/deploy/prod/values.yaml의 image 블록이 `digest: sha256:`(블록 스코프) 보유,
+#   레인2(apps 구조체 이미지): apps/*/deploy/prod/values.yaml의 image 블록이 `digest:`(블록 스코프) 보유,
 #     또는 인라인 문자열 image가 @sha256 핀.
+#   ⚠️ 두 레인 모두 판정은 **형식**까지 간다(접두가 아니라 `sha256:` + 정확히 64 소문자 hex) —
+#     종전엔 접두만 재서 `sha256:deadbeef`가 "핀됨"으로 읽혔고 실제 차단은 하류
+#     platform/charts/app/values.schema.json의 pattern이 했다. 게이트가 자기 이름을 지키게 좁혔다.
 #
-# 스코프 한계(성공 메시지도 이 경계를 반영): (a) substrate(infra/k3s-bootstrap/** — versions.env + renovate
-#   custom manager 관할, LOCAL_PATH_PROVISIONER digest 핀은 Task 9 후속), (b) helmrelease 차트-내부 기본
-#   이미지(traefik/sealed-secrets/tailscale/cnpg-operator 등 — 레포에 image: 스칼라로 없음).
+# 스코프 한계(성공 메시지도 이 경계를 반영): (a) substrate(infra/k3s-bootstrap/** — versions.env +
+#   renovate custom manager 관할. LOCAL_PATH_PROVISIONER digest 핀도 그쪽에서 이미 완료됐다), (b) helmrelease
+#   차트-내부 기본 이미지(traefik/sealed-secrets/tailscale/cnpg-operator 등 — 레포에 image: 스칼라로 없음).
 #   ⚠️ **"Renovate pinDigests 관할"이라고 적혀 있었는데 그건 절반만 참이었다.** 차트 tarball은
 #   platform/*/prod/charts/에 캐시되고 그 경로는 gitignored이며 renovate.json ignorePaths의
 #   `**/charts/**`에도 걸린다 — Renovate는 **없는 파일을 핀할 수 없다**. 차트 **버전**은 Renovate가
@@ -23,9 +26,10 @@
 # 예외: policy/image-pin-allowlist.txt(라인당 이미지 값 또는 app:<name>, # 사유 주석 **강제** — 인라인 또는 직전 줄).
 #   수용 기준 = allowlist 0(핀 후).
 #
-# make verify 배선됨(Task 9, 핀 적용 후) — 기본 바닥값 20(scan-floor 유효, 배선부는 floor-free).
-#   24 tag-only 이미지를 수동 digest 핀(renovate pin-dependencies 배치가 Issues:write gap으로 엉켜 결정적 경로 선택)
-#   완료 후 실 레포는 allowlist 0으로 통과한다. 신규 미핀 이미지는 이 게이트가 fail-closed로 차단.
+# make verify 배선됨 — 기본 바닥값 20(scan-floor 유효, 배선부는 floor-free). 실 레포는 런타임 이미지가
+#   전부 핀돼 있어 allowlist 0으로 통과한다(Renovate pin-dependencies 배치 대신 수동 digest 핀을 택한 이유:
+#   그 배치가 Issues:write gap으로 엉켜 결정적 경로를 골랐다 — policy/image-pin-allowlist.txt 머리말 참조).
+#   신규 미핀 이미지는 이 게이트가 fail-closed로 차단.
 # bash 3.2 호환: [[ ]]·mapfile 금지(중간 단언 [ ]/grep). --root로 픽스처 tmp git 레포 지정 가능.
 set -euo pipefail
 # 프롤로그(LC_ALL=C·ROOT 기본값·scan-floor)는 guard_init(scripts/lib/guard.sh)이 소유한다 —
@@ -34,7 +38,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-image-pins
 
-# ⚠️ MIN_SCAN_APPS 바닥값 0 — 인-레포 배포 앱이 **0개**다(page #455 · trip-mate-api 이 PR로 철거).
+# ⚠️ MIN_SCAN_APPS 바닥값 0 — 인-레포 배포 앱이 **0개**다(page 2026-09-08 재온보딩 #691 → 같은 날 철거 드릴 #698).
 #    앱이 0개인 동안은 레인2 열거 0건이 정당해 붕괴와 구별되지 않는다. 앱 온보딩 시 1로 되돌릴 것.
 ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; SCOPE_NARROWED=0
 # 면제 **상한** — 사유 강제(lint_allowlist)의 형제 규율. 사유는 "왜"를 재지만 "몇 건까지"를 재지
@@ -47,7 +51,7 @@ ALLOWLIST=""; MIN_SCAN=20; MIN_SCAN_APPS=0; SCOPE_NARROWED=0
 #    기계 자체(사유 강제·멤버십)는 tests/gates/test_image_pins.bats 픽스처가 매번 밟는다.
 # ⚠️ env 오버라이드를 두지 않는다 — 호출부에 안 보이는 off-switch 금지. 픽스처는 `--exempt-max`로만.
 EXEMPT_MAX=0
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 01 — 구 --min-scan/
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 --min-scan/
 # --min-scan-apps 폐지). 선언 라벨은 **방출 라벨의 부분집합**이어야 한다(커버리지 증인이 정적 대조 —
 # 선언 오타가 조용히 꺼진 바닥값이 되는 자리). :platform은 바닥값 없는 신호 전용이라 선언 밖이다
 # (--floor platform=N은 미매칭 진단이 정확한 응답이다 — floor를 소비하지 않는 도메인).
@@ -75,10 +79,18 @@ MIN_SCAN_APPS="$(floor_of check-image-pins:apps "$MIN_SCAN_APPS")"   # 레인2 �
 # 앵커된 이미지 키 정규식 — `logo_image:`·경로 내 `my-image:` 부분매치 방지(리스트 아이템 `- ` 허용).
 # ⚠️ IMG_KEY는 `image: >-`/`image: |`(YAML 블록 스칼라) 표기에서 매치가 끊긴다 — 이 레인은 그 표기를
 #    검출하지 않는다(사본 검출기를 두지 않는다). 소유자는 tools/check-image-ownership.ts의
-#    IMG_BLOCK_SCALAR(감사 6라운드 grep-c-2) — repo-walk 스코프 `image-ownership`이 이 레인의
+#    IMG_BLOCK_SCALAR — repo-walk 스코프 `image-ownership`이 이 레인의
 #    `platform-image-refs`·`apps-values`의 상위집합이라, 그 표기가 착지하면 소유권 회계가 먼저 red를
 #    내 이 레인에 도달하지 못한다.
 IMG_KEY='^[[:space:]]*(-[[:space:]]+)?(image|imageName):[[:space:]]*'
+
+# digest 형식 판정 — **두 레인이 공유하는 단일 변수**다(레인마다 정규식이 갈리면 서로 다른 형식
+# 경계를 갖는 오배포 표면이 생긴다). 셸은 TS를 import할 수 없으므로 이 줄은
+# tools/lib/image-pin.ts의 `DIGEST_BODY`(그리고 그 파생 `DIGEST_RE`)의 **사본**이고,
+# 하류 platform/charts/app/values.schema.json의 digest pattern(`^…$` 앵커만 다르다)과도 같아야 한다.
+# 세 축의 문자열 등식은 tests/gates/test_image_pins.bats의 사본 대조 @test가 강제한다 —
+# 이 줄의 표기(`DIGEST_BODY='<본문>'`, 줄 끝 주석 금지)가 그 추출 sed의 계약이다.
+DIGEST_BODY='sha256:[0-9a-f]{64}'
 
 # 열거는 공유 워커(tools/lib/repo-walk.ts)가 소유한다 — tracked 열거·제외 어휘·열거 붕괴 바닥값이
 # 전부 스코프 정의 안에 있다. 여기서 추가 제외를 하지 않으므로 제외 어휘의 사본이 존재하지 않는다.
@@ -124,16 +136,19 @@ extract_string_images() {
     | sed -E "s#${IMG_KEY}##; s/[[:space:]]*#.*//; s/^[\"']//; s/[\"']\$//; s/[[:space:]]*\$//"
 }
 
-# apps values의 value-less `image:` 블록에 digest: sha256: 가 있는지(블록 스코프 — 파일 전역 아님).
+# apps values의 value-less `image:` 블록에 형식 맞는 digest가 있는지(블록 스코프 — 파일 전역 아님).
+# 정규식은 셸 변수 하나(DIGEST_BODY)에서 -v로 주입한다 — awk 안에 사본을 두지 않는다.
+# 꼬리는 `$` 앵커가 아니라 `[^0-9a-f]|$`다: 주석 스트립 뒤에도 후행 공백이 남을 수 있고,
+# 그 대안(hex 아님 또는 줄 끝)이 65자 이상을 앞 64자 부분매치로 통과시키는 자리를 함께 닫는다.
 image_block_has_digest() {
-  awk '
+  awk -v re="digest:[[:space:]]*${DIGEST_BODY}([^0-9a-f]|$)" '
     /^[[:space:]]*image:[[:space:]]*$/ { s=$0; sub(/[^ ].*/,"",s); ind=length(s); blk=1; next }
     blk==1 {
       if ($0 ~ /^[[:space:]]*$/) next
       c=$0; sub(/[^ ].*/,"",c); cur=length(c)
       if (cur <= ind) { blk=0; next }
       l=$0; sub(/[ \t]#.*$/, "", l)
-      if (l ~ /digest:[[:space:]]*sha256:/) { found=1; exit }
+      if (l ~ re) { found=1; exit }
     }
     END { exit(found?0:1) }
   ' "$1"
@@ -170,7 +185,8 @@ while IFS= read -r f; do
     [ -n "$val" ] || continue
     printf '%s' "$val" | grep -qE '^[a-z0-9]' || continue
     scanned=$((scanned + 1))
-    printf '%s' "$val" | grep -q '@sha256:' && continue
+    # 꼬리 `$` 앵커 — 값 전체가 정준 핀으로 끝나야 한다(65자 이상이 앞 64자 부분매치로 통과하지 않게).
+    printf '%s' "$val" | grep -qE "@${DIGEST_BODY}\$" && continue
     allow_has "$val" && continue
     echo "UNPINNED(lane1): $f — $val"
     fail=$((fail + 1))
@@ -186,7 +202,7 @@ while IFS= read -r f; do
     [ -n "$val" ] || continue
     printf '%s' "$val" | grep -qE '^[a-z0-9]' || continue
     scanned=$((scanned + 1))
-    printf '%s' "$val" | grep -q '@sha256:' && continue
+    printf '%s' "$val" | grep -qE "@${DIGEST_BODY}\$" && continue
     app=$(printf '%s' "$f" | sed -E 's#^apps/([^/]+)/.*#\1#')
     allow_has "app:$app" && continue
     echo "UNPINNED(lane2-string): $f — $val"
@@ -198,7 +214,7 @@ while IFS= read -r f; do
     image_block_has_digest "$ROOT/$f" && continue
     app=$(printf '%s' "$f" | sed -E 's#^apps/([^/]+)/.*#\1#')
     allow_has "app:$app" && continue
-    echo "UNPINNED(lane2): $f — image 블록에 digest: sha256: 부재"
+    echo "UNPINNED(lane2): $f — image 블록에 정준 digest(${DIGEST_BODY}) 부재"
     fail=$((fail + 1))
   fi
   # (c) flow-style image: { repo:.., digest:.. } — 같은 줄에 digest sha256 없으면 미핀(빌드가 안 쓰지만 계약 완결).
@@ -207,17 +223,17 @@ while IFS= read -r f; do
     scanned=$((scanned + 1))
     # herestring 종단(check-sigpipe-writers) — sed 출력을 변수로 받아 grep -q에 파이프하지 않는다.
     fl_stripped="$(printf '%s' "$fl" | sed -E 's/[[:space:]]*#.*$//')"
-    grep -q 'digest:[[:space:]]*sha256:' <<<"$fl_stripped" && continue
+    grep -qE "digest:[[:space:]]*${DIGEST_BODY}([^0-9a-f]|\$)" <<<"$fl_stripped" && continue
     app=$(printf '%s' "$f" | sed -E 's#^apps/([^/]+)/.*#\1#')
     allow_has "app:$app" && continue
-    echo "UNPINNED(lane2-flow): $f — flow-style image에 digest: sha256: 부재"
+    echo "UNPINNED(lane2-flow): $f — flow-style image에 정준 digest(${DIGEST_BODY}) 부재"
     fail=$((fail + 1))
   done < <(grep -hE '^[[:space:]]*image:[[:space:]]*\{' "$ROOT/$f" 2>/dev/null || true)
 done <<< "$apps_files"
 scanned_lane2=$((scanned - scanned_lane1))
 
 # --- scan-floor: 스캔이 의심스럽게 적으면(글롭/제외 파손) fail-loud ---
-# 합계 도메인도 커널 경유다(:total — kernel-followups 01 리뷰 수용: 손조립 판정은 라벨이 없어
+# 합계 도메인도 커널 경유다(:total — 리뷰 수용: 손조립 판정은 라벨이 없어
 # --floor 선언과 방출 라벨이 어긋나는 어휘 이탈이었다). 판정·문구·마커는 scan_floor 소유.
 # 픽스처 모드(--root)엔 **기본값을** 적용하지 않는다 — 형제 도메인 `:apps`와 같은 형태다.
 # 픽스처는 정당하게 소수의 파일만 만들고, 그대로 걸면 픽스처 호출마다 `--floor total=<n>`을
@@ -247,7 +263,7 @@ scan_signal check-image-pins:apps "$scanned_lane2"
 scan_signal check-image-pins:platform "$scanned_lane1"
 
 if [ "$fail" -gt 0 ]; then
-  echo "핀 안 된 이미지 ${fail}건 (스캔 ${scanned}건). @sha256 digest 핀 또는 allowlist 등재(사유 주석) 필요."
+  echo "핀 안 된 이미지 ${fail}건 (스캔 ${scanned}건). 정준 digest 핀(@${DIGEST_BODY}) 또는 allowlist 등재(사유 주석) 필요."
   exit 1
 fi
 # 성공 메시지도 헤더의 경계를 그대로 반영한다(헤더 10행이 그걸 계약으로 건다) — 차트 내부는

@@ -11,6 +11,12 @@
 #    `a.sh` 같은 이름은 원리적으로 위반이 될 수 없다(그 경계 자체도 아래에서 잰다).
 # ⚠️ @test 이름은 영어만 — 디렉토리 단위 실행에서 CJK 이름이 침묵 스킵된다(AGENTS.md).
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2에서 [[ ]] 실패가 침묵 통과한다(AGENTS.md).
+# ⚠️ **이 스위트는 실 체크아웃을 쓰기로 건드리지 않는다.** 레인 [1](미등재·유령 bullet)의 뮤테이션은
+#    전부 `docindex_fixture*`가 만든 $BATS_TEST_TMPDIR 사본 트리에서 낸다. 예전 판은 실 scripts/·
+#    tools/lib/에 프로브 파일을 만들고 실 README에 append했다 사본으로 복원했는데, 파일 단위 병렬
+#    bats에서는 그 창을 밟은 다른 프로세스의 가드가 거짓 red를 냈고(tests/.gate-serial 등재 사유),
+#    복원 cp에는 truncate 창이 남았으며, 같은 PR에서 README를 편집하는 작업자의 미커밋 편집이
+#    소멸할 수 있었다(실측: 새로 쓴 bullet 10건). 사본 트리에서는 그 세 함정이 원리적으로 없다.
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   cd "$ROOT" || exit 1
@@ -22,15 +28,56 @@ setup() {
   [ -s "$README" ]
 }
 
+# ── 픽스처 사본 트리 ──────────────────────────────────────────────────────────────────────────
+# 가드를 통째로 사본 트리에 옮겨 돌린다 — guard.sh가 ROOT를 자기 위치(BASH_SOURCE/../..)에서
+# 파생하므로 사본 가드는 **사본 트리**를 검사한다. 실 트리는 읽기만 한다.
+# ⚠️ 트렁케이트 루프(`: >`)가 먼저, cp가 나중이다. `tools/*` 글롭엔 tools/README.md도 걸리므로
+#    순서를 뒤집으면 사본 README가 0바이트가 되고 등재 레인이 전건 red가 된다(실측) — 그러면
+#    아래 "FAILS when …" 단언들이 프로브가 아니라 픽스처 결함 때문에 통과한다. 각 @test가 프로브
+#    투입 **전에** rc 0 기준선을 재는 이유다.
+# ⚠️ `.json`까지 옮기는 이유: tools/README.md의 역방향 레인은 bullet 이름 전건을 파일로 되묻는데
+#    그 로스터엔 `cli-result-schema.json`이 있다(.ts/.mts만 옮기면 기준선이 red다).
+docindex_fixture() {
+  local fx="$1"
+  local p
+  mkdir -p "$fx/scripts/lib" "$fx/tools/lib" "$fx/.github/workflows"
+  for p in "$ROOT"/scripts/*.sh; do : > "$fx/scripts/$(basename "$p")"; done
+  for p in "$ROOT"/tools/*; do if [ -f "$p" ]; then : > "$fx/tools/$(basename "$p")"; fi; done
+  for p in "$ROOT"/tools/lib/*; do if [ -f "$p" ]; then : > "$fx/tools/lib/$(basename "$p")"; fi; done
+  cp "$ROOT/scripts/check-doc-index.sh" "$fx/scripts/check-doc-index.sh"
+  cp "$ROOT/scripts/lib/guard.sh" "$fx/scripts/lib/guard.sh"
+  cp "$ROOT/scripts/lib/scan-floor.sh" "$fx/scripts/lib/scan-floor.sh"
+  cp "$ROOT/scripts/README.md" "$fx/scripts/README.md"
+  cp "$ROOT/tools/README.md" "$fx/tools/README.md"
+  cp "$ROOT/.github/workflows/README.md" "$fx/.github/workflows/README.md"
+}
+
+# 워크플로 산출물 채우기 — **별도 함수**다. 이걸 부르지 않은 픽스처는 그 레인이 붕괴 상태이고,
+# 그 상태 자체가 아래 마지막 @test의 뮤테이션이다.
+docindex_fixture_workflows() {
+  local p
+  for p in "$ROOT"/.github/workflows/*.yaml; do : > "$1/.github/workflows/$(basename "$p")"; done
+}
+
+# 세 레인이 전부 초록인 기준선 픽스처.
+docindex_fixture_green() {
+  docindex_fixture "$1"
+  docindex_fixture_workflows "$1"
+}
+
 @test "check-doc-index passes on the current tree (all artifacts registered)" {
   run ./scripts/check-doc-index.sh
   [ "$status" -eq 0 ]
 }
 
 @test "check-doc-index FAILS when a script is missing from scripts/README.md" {
-  tmp="scripts/zz_docindex_probe.sh"; : > "$tmp"; chmod +x "$tmp"
-  run ./scripts/check-doc-index.sh
-  rm -f "$tmp"
+  fx="$BATS_TEST_TMPDIR/fx-script"
+  docindex_fixture_green "$fx"
+  # 기준선 — 픽스처 자체가 초록이라야 아래 red가 **프로브의 것**이다(픽스처 결함이 내는 red와 구별).
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$status" -eq 0 ]
+  : > "$fx/scripts/zz_docindex_probe.sh"; chmod +x "$fx/scripts/zz_docindex_probe.sh"
+  run bash "$fx/scripts/check-doc-index.sh"
   # `-ne 0`이 아니라 `-eq 1`이다 — 사용법 오류(2)·검출기 사망도 비-0이라 `-ne 0`은 "미등재를 잡았다"와
   # "가드가 딴 데서 죽었다"를 구별하지 못한다(01의 처방과 같은 축).
   [ "$status" -eq 1 ]
@@ -38,39 +85,41 @@ setup() {
 }
 
 @test "a prose mention alone does not satisfy registration for a non-guard script (bullet head anchor required)" {
-  # grep-a-7 — 가드 모양 스크립트(check-*/verify-*/*-guard/*-check)는 레인 [2]의 등식
+  # 가드 모양 스크립트(check-*/verify-*/*-guard/*-check)는 레인 [2]의 등식
   # (아래 "the guard-shaped bullet count equals …")이 이미 삭제를 잡는다(bullet 수가 줄면 그
   # 등식이 깨진다). 이 축이 실제로 새로 닫는 것은 **비-가드** 스크립트(bootstrap.sh·destroy-node.sh·
   # dr-drill.sh·notify-unit-failure.sh·sealing-key-dr-gate.sh·teardown.sh)다 — 그것들엔 그 백스톱이
   # 없다. probe는 그래서 가드 모양이 아닌 이름을 쓴다.
-  # ⚠️ 정리(git checkout/rm)는 항상 run 직후·단언 **이전**에 둔다 — 단언이 실패하면 bats가 그
-  #    자리에서 테스트를 중단해, 뒤에 둔 정리가 실행 안 된 채 README·프로브 파일이 실 트리에
-  #    남는다(실측: 이 순서를 뒤집어 두면 이후 @test 1이 오염된 상태로 죽는다).
-  tmp="scripts/zz_docindex_bullet_probe.sh"; : > "$tmp"; chmod +x "$tmp"
-  printf '\n산문 언급 — `zz_docindex_bullet_probe.sh`는 등재 목적이 아니라 그냥 언급이다.\n' >> "$README"
-  run ./scripts/check-doc-index.sh
-  git checkout -- "$README"
+  fx="$BATS_TEST_TMPDIR/fx-bullet"
+  docindex_fixture_green "$fx"
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$status" -eq 0 ]
+  : > "$fx/scripts/zz_docindex_bullet_probe.sh"; chmod +x "$fx/scripts/zz_docindex_bullet_probe.sh"
+  printf '\n산문 언급 — `zz_docindex_bullet_probe.sh`는 등재 목적이 아니라 그냥 언급이다.\n' >> "$fx/scripts/README.md"
+  run bash "$fx/scripts/check-doc-index.sh"
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "zz_docindex_bullet_probe.sh"
   # 양성 대조 — 같은 파일에 진짜 bullet 머리를 달면 green이다(원인이 "산문 vs bullet 머리"임을 고정).
-  printf '\n- **`zz_docindex_bullet_probe.sh`** — 프로브(테스트 전용, 실행 없음).\n' >> "$README"
-  run ./scripts/check-doc-index.sh
-  git checkout -- "$README"
-  rm -f "$tmp"
+  # 사본 README를 실 파일에서 다시 깔아 산문 줄을 걷어낸다(실 트리는 읽기뿐).
+  cp "$ROOT/scripts/README.md" "$fx/scripts/README.md"
+  printf '\n- **`zz_docindex_bullet_probe.sh`** — 프로브(테스트 전용, 실행 없음).\n' >> "$fx/scripts/README.md"
+  run bash "$fx/scripts/check-doc-index.sh"
   [ "$status" -eq 0 ]
 }
 
 @test "a bullet-decorated decoy inside mid-sentence prose does not satisfy registration (line anchor required)" {
-  # reg-a1-bats-guards-1 — grep-a-7(56d0aad)은 「형제 bullet의 산문 언급이 등재 증인으로
+  # 앞선 처방(56d0aad)은 「형제 bullet의 산문 언급이 등재 증인으로
   # 오인된다」를 고쳤다고 주장했지만 실제 검색이 grep -Fq(무앵커 부분문자열)라 그 취약점이
   # 그대로 남았다 — 「- **`name`**」 장식이 줄 **어디에** 있든(줄 시작이 아니어도) 매치했다.
   # 이 픽스처는 그 정확한 형태(장식은 재현하되 줄 시작은 '-'가 아닌 순수 산문)로 재발을 잡는다.
-  tmp="scripts/zz_docindex_anchor_probe.sh"; : > "$tmp"; chmod +x "$tmp"
+  fx="$BATS_TEST_TMPDIR/fx-anchor"
+  docindex_fixture_green "$fx"
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$status" -eq 0 ]
+  : > "$fx/scripts/zz_docindex_anchor_probe.sh"; chmod +x "$fx/scripts/zz_docindex_anchor_probe.sh"
   printf '반례를 인용한다: 예전엔 %s- **%s%s%s**%s 처럼 산문 안에서도 매치됐다.\n' \
-    "$BT" "$BT" "zz_docindex_anchor_probe.sh" "$BT" "$BT" >> "$README"
-  run ./scripts/check-doc-index.sh
-  git checkout -- "$README"
-  rm -f "$tmp"
+    "$BT" "$BT" "zz_docindex_anchor_probe.sh" "$BT" "$BT" >> "$fx/scripts/README.md"
+  run bash "$fx/scripts/check-doc-index.sh"
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "zz_docindex_anchor_probe.sh"
 }
@@ -270,4 +319,85 @@ setup() {
   [ "$status" -eq 2 ]
   run bash "$GUARD" "$README"
   [ "$status" -eq 2 ]
+}
+
+# ── 레인 [1] 확장 ─────────────────────────────────────────────────────────────────────────────
+# 병: tools 레인 글롭 `tools/*.ts`는 재귀하지 않아 tools/lib/*.ts를 **한 파일도** 열거하지 않았다 —
+# AGENTS.md가 "check-doc-index 강제"라고 적는 로스터에 소비자 최다 커널(cli.ts·identity.ts)이 0줄이었다.
+# 그리고 레인 [1]에는 바닥값도 역방향도 없어, 글롭이 붕괴해도 조용히 0회 돌고 초록이었다.
+
+@test "check-doc-index FAILS when a tools/lib module is missing from tools/README.md (lib/<basename> key)" {
+  fx="$BATS_TEST_TMPDIR/fx-lib"
+  docindex_fixture_green "$fx"
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$status" -eq 0 ]
+  : > "$fx/tools/lib/zz_docindex_lib_probe.ts"
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "lib/zz_docindex_lib_probe.ts"
+  # 대조군 — 프로브를 치우면 다시 초록이다(등재 21건이 basename 키로 물어 전건 FAIL이던 실측 31건 red와 구별).
+  rm -f "$fx/tools/lib/zz_docindex_lib_probe.ts"
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "the reverse lane catches a tools/README.md bullet with no file behind it" {
+  fx="$BATS_TEST_TMPDIR/fx-phantom"
+  docindex_fixture_green "$fx"
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$status" -eq 0 ]
+  printf '\n- **`zz_docindex_phantom.ts`** — 실파일 없는 유령 bullet(역방향 레인 증인).\n' >> "$fx/tools/README.md"
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "zz_docindex_phantom.ts"
+  # 대조군 — 유령 bullet을 걷어내면 다시 초록이다(사본 README를 실 파일에서 다시 깐다).
+  cp "$ROOT/tools/README.md" "$fx/tools/README.md"
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "lane 1 emits a scan floor for each of its three domains with counts matching the tree" {
+  n_scripts="$(find scripts -maxdepth 1 -name '*.sh' | wc -l | tr -d ' ')"
+  n_tools="$(find tools -maxdepth 1 -name '*.ts' -o -maxdepth 1 -name '*.mts' | wc -l | tr -d ' ')"
+  n_lib="$(find tools/lib -maxdepth 1 -name '*.ts' | wc -l | tr -d ' ')"
+  n_wf="$(find .github/workflows -maxdepth 1 -name '*.yaml' | wc -l | tr -d ' ')"
+  [ "$n_scripts" -ge 20 ]
+  [ "$n_wf" -ge 15 ]
+  want_tools=$(( n_tools + n_lib ))
+  run bash "$GUARD"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^SCAN: check-doc-index:scripts: $n_scripts\$"
+  echo "$output" | grep -q "^SCAN: check-doc-index:tools: $want_tools\$"
+  echo "$output" | grep -q "^SCAN: check-doc-index:workflows: $n_wf\$"
+}
+
+# 워크플로 디렉토리만 비우면 글롭이 확장되지 않아 `b`가 리터럴 `*`가 되고, README에 `*`가 실재하므로
+# `grep -Fq "*"`가 매치해 **조용히 초록**이던 자리다(nullglob 부재). 픽스처 구성은 파일 상단의
+# docindex_fixture*가 소유한다.
+@test "the workflows lane goes red when its glob matches nothing (the unexpanded literal used to pass silently)" {
+  fx="$BATS_TEST_TMPDIR/fx-wf"
+  docindex_fixture "$fx"
+  # 양성 대조 — 워크플로 파일이 실재하면 그 레인은 붕괴 진단을 내지 않는다.
+  docindex_fixture_workflows "$fx"
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$(printf '%s' "$output" | grep -c 'check-doc-index:workflows')" -ge 1 ]
+  [ "$(printf '%s' "$output" | grep -c 'check-doc-index:workflows: 스캔 0건')" = "0" ]
+  # 뮤테이션 — 디렉토리를 비우면 글롭이 리터럴 `*`로 남는다. 그 리터럴은 README에 실재해 존재검사를
+  # 통과하므로, 붕괴를 잡는 것은 바닥값뿐이다.
+  [ "$(grep -cF '*' "$fx/.github/workflows/README.md")" -ge 1 ]
+  rm -f "$fx"/.github/workflows/*.yaml
+  run bash "$fx/scripts/check-doc-index.sh"
+  [ "$status" -ne 0 ]
+  [ "$(printf '%s' "$output" | grep -c 'check-doc-index:workflows: 스캔 0건')" -ge 1 ]
+}
+
+@test "scripts/README.md declares that sourced libraries are outside the roster (boundary is written, not implied)" {
+  # scripts/lib/*.sh는 실행물이 아니라 source 대상이라 로스터 밖이다. 그 경계를 산문으로
+  # 선언하지 않으면 "가드가 못 본다"와 "일부러 안 본다"가 구별되지 않는다.
+  run grep -n "sourced 라이브러리" scripts/README.md
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "scripts/lib"
+  # 대조군 — 선언이 사실인가: scripts/lib/*.sh는 실제로 bullet 로스터에 없다.
+  n_lib="$(find scripts/lib -maxdepth 1 -name '*.sh' | wc -l | tr -d ' ')"
+  [ "$n_lib" -ge 3 ]
 }

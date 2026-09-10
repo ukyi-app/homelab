@@ -2,7 +2,7 @@
 # 런북 인덱스 드리프트 로컬 가드 — docs/runbooks/(gitignored)에 .md가 있으면 AGENTS.md 런북 인덱스와 일치.
 # 런북은 비공개 로컬이라 CI/repo엔 부재 → **SKIP 신호**(exit 4 + `SKIP:` 마커, CONTRIBUTING 규약).
 # exit 0이면 "인덱스를 실제로 대조했고 정합"이라는 뜻이다 — 부재로 건너뛴 것과 절대 같은 코드를 쓰지 않는다.
-# ⚠️ 정방향도 절 **안**만 본다(감사 6라운드 grep-c-5) — AGENTS.md 전문을 grep하면 런북 파일명이
+# ⚠️ 정방향도 절 **안**만 본다 — AGENTS.md 전문을 grep하면 런북 파일명이
 #   다른 절의 산문·표·HTML 주석에 한 번만 등장해도 통과한다. 역방향과 같은 절 추출(idx_md) 결과에
 #   완전 일치로 대조해야 절 밖 언급이 인덱스로 둔갑하지 않는다.
 # cf. verify-runbooks=DR bats 러너(별도, 불변).

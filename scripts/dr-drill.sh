@@ -74,7 +74,7 @@ ARCHIVE_SERVER="$(kubectl -n "$NS" get cluster "$LIVE_CLUSTER" \
 DB="app"
 
 # PG 이미지는 cluster.yaml(SSOT)에서 파생 — 하드코딩 핀은 PG 메이저 갱신 시 cross-major
-# 물리복구 불가로 드릴을 조용히 죽인다(M6). 인클러스터 소비자(basebackup·restore-drill)는
+# 물리복구 불가로 드릴을 조용히 죽인다. 인클러스터 소비자(basebackup·restore-drill)는
 # 런타임에 레포가 없어 파생 불가 → tests/test_pg-image-pin.bats가 핀 정합을 강제한다.
 command -v yq >/dev/null || { echo "DR DRILL FAIL: yq 필요(docs/runbooks/toolchain.md 핀)"; exit 1; }
 PG_IMAGE="$(yq '.spec.imageName' platform/cnpg/prod/cluster.yaml)"
@@ -231,16 +231,17 @@ echo "==> [6.5] files 데이터 재결합 검증: files pod Ready + 재바운드
 # 있어 `/var/lib/rancher`와 함께 사라진다 → 신규 PVC가 bulk 위에 **빈 디렉토리를 새로 파** 조용히
 # '빈 카탈로그'로 정상 복귀할 수 있다. owner는 재구축 후 기존 bulk 데이터 디렉토리에 정적 PV를
 # 바인딩하는 재결합을 수행해야 하며, 이 단언이 그 수행 여부를 fail-loud로 검증한다.
-# ✅ **정본 절차는 `docs/runbooks/external-ssd.md` §3 「DR 재결합」이다** (2026-08-17 감사 16으로
-#    두 스토리지 런북을 베어메탈 재작성하면서 이 주석의 요건을 그리로 옮겼다). 요지만 남긴다:
+# ✅ **정본 절차는 `docs/runbooks/external-ssd.md` §3 「DR 재결합」이다**. 요지만 남긴다:
 #      기존 `/mnt/bulk/<pvc-dir>`를 가리키는 `hostPath` PV를 `claimRef`로 files/files-data에
 #      **정적 바인딩**한 뒤 PVC를 만든다(동적 프로비저닝에 맡기면 빈 디렉토리를 새로 판다).
 #    ⚠️ 그 런북은 gitignored라 CI가 못 본다 — 이 단언이 수행 여부를 검증하는 유일한 기계다.
 kubectl -n files rollout status deploy/files --timeout=300s
-# ⚠️ `.status.phase=="Bound"`가 **계약이다**(형제: scripts/backup-files-data.sh:101). Retain 정책
+# ⚠️ `.status.phase=="Bound"`가 **계약이다**(형제: scripts/backup-files-data.sh:99). Retain 정책
 #    PV는 Released가 돼도 claimRef를 그대로 들고 있어서, claimRef만 보는 셀렉터에는 고아 PV가
-#    함께 걸린다 — head -1이 그 고아를 고르면 엉뚱한 옛 디렉토리를 "재결합됨"으로 오판한다.
-FILES_PVPATH="$(kubectl get pv -o json | yq -r '.items[] | select(.status.phase=="Bound" and .spec.claimRef.namespace=="files" and .spec.claimRef.name=="files-data") | (.spec.hostPath.path // .spec.local.path // "")' | head -1)"
+#    함께 걸린다 — 첫 줄 선택이 그 고아를 고르면 엉뚱한 옛 디렉토리를 "재결합됨"으로 오판한다.
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring
+_files_pv_paths="$(kubectl get pv -o json | yq -r '.items[] | select(.status.phase=="Bound" and .spec.claimRef.namespace=="files" and .spec.claimRef.name=="files-data") | (.spec.hostPath.path // .spec.local.path // "")')"
+FILES_PVPATH="$(head -n1 <<<"$_files_pv_paths")"
 [ -n "$FILES_PVPATH" ] || { echo "DR DRILL FAIL: files-data PV 미바운드 — 정적 PV 재결합 미수행"; exit 1; }
 # ⚠️ **권한 상승해서 센다.** `/mnt/bulk`는 0700 root다(infra/k3s-bootstrap/README.md의 국면 A 절차가
 #    `install -d -m 0700 -o root -g root`로 만든다) — owner 신원으로 읽으면 EACCES가 빈 출력으로 둔갑해

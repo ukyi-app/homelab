@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 동명 app/bespoke target의 신원 관통 e2e(lib-convergence 08, design r2-1) —
+# 동명 app/bespoke target의 신원 관통 e2e —
 # **진짜 러너(run-bump-plan) → 진짜 실행기(ensure-bump-pr) → --reconcile-only**를 한 시나리오로 관통한다.
 # 같은 이름(files)의 app target과 bespoke target이 한 plan에 공존할 때:
 #   ① 두 target은 **다른 브랜치**(kind 인코딩)로 갈라져 서로의 PR을 덮어쓰지 못하고,

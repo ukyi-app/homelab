@@ -36,7 +36,7 @@ setup() {
   for s in policy_file dns oauth_keys devices:core auth_keys; do
     printf '%s' "$line" | grep -qF -- "\"${s}\""
   done
-  # [infra-a-3] 위 루프는 멤버십만 잰다(원소 수 상한 0줄) — 기본값에 원소를 추가해도(6라운드 실측
+  # 위 루프는 멤버십만 잰다(원소 수 상한 0줄) — 기본값에 원소를 추가해도(실측
   # P4: auth_keys, all:write 추가) 무증인이었다. 리스트 전체 리터럴 일치로 상한까지 닫는다
   # (`terraform fmt`가 간격을 고정하므로 -F가 안전 — make tf-validate가 그 전제를 지킨다).
   printf '%s' "$line" | grep -qF -- '["policy_file", "dns", "oauth_keys", "devices:core", "auth_keys"]'
@@ -61,7 +61,7 @@ ts_job() { awk '/^  drift-tailscale:/{f=1;next} f&&/^  [a-z]/{exit} f' "$(WF)"; 
   [ "$status" -eq 0 ]
   printf '%s' "$output" | grep -qF -- "TF_VAR_ts_oauth_scopes: '[\"policy_file:read\",\"dns:read\",\"oauth_keys:read\"]'"
   # ⚠️ 위 부분문자열 grep은 위치에 무감하다 — 같은 리터럴을 주석으로 옮겨도(잡 블록 안이라
-  # ts_job 추출엔 남는다) 매치한다(6라운드 실측 P2). 행두·행말 앵커로 "주입 줄 자신"만 겨냥한다
+  # ts_job 추출엔 남는다) 매치한다(실측 P2). 행두·행말 앵커로 "주입 줄 자신"만 겨냥한다
   # (`-var` 오버라이드는 terraform이 TF_VAR_보다 우선시켜 이 앵커도 원리적으로 못 보는 축이다 —
   # 그 경로는 어차피 read-only OAuth client가 403을 내 loud red이므로 별도 단언은 생략한다).
   printf '%s' "$output" | grep -qE "^[[:space:]]+TF_VAR_ts_oauth_scopes: '\[\"policy_file:read\",\"dns:read\",\"oauth_keys:read\"\]'\$"
@@ -72,9 +72,8 @@ ts_job() { awk '/^  drift-tailscale:/{f=1;next} f&&/^  [a-z]/{exit} f' "$(WF)"; 
 # "통일"되면 헤드룸이 사라지므로 그 통일을 막는다.
 # ✅ 2026-08-19 실측 갱신: 세 루트의 state writer는 **전부 ≤1.9.8이다**(terraform 1.9.8 바이너리로
 #    `state list`가 github 8건·tailscale 3건·cloudflare 26건을 정상 열었다 — 더 높은 버전이 썼다면
-#    "created by Terraform vX, which is newer than current v1.9.8"로 죽는다). 초판 주석의
-#    "그 머신은 이미 1.15.5다"는 **owner 머신 바이너리** 이야기였지 writer가 아니었고, 그 머신(맥미니)은
-#    폐기돼 owner 로컬 작업기가 NUC(terraform 1.9.8 정확 핀)로 옮겨갔다. 즉 writer는 1.9.x에 머문다.
+#    "created by Terraform vX, which is newer than current v1.9.8"로 죽는다). owner 로컬 작업기는
+#    NUC(terraform 1.9.8 정확 핀)이므로 writer는 1.9.x에 머문다.
 #    그래도 이 핀을 내리지 않는다 — 1.15.5는 어떤 writer보다도 높아 안전 여유이고, 내리는 순간
 #    형제 잡과 같은 값이 되어 "통일" 리팩터와 구별되지 않는다.
 # ⚠️ 핀은 루트마다 독립이다(state writer가 다르므로 통일이 오히려 고장이다).
@@ -94,7 +93,7 @@ ts_job() { awk '/^  drift-tailscale:/{f=1;next} f&&/^  [a-z]/{exit} f' "$(WF)"; 
   [ "$status" -ne 0 ]
 }
 
-# ── 7라운드 tfval-tailscale-github-2 + tfval-tailscale-github-4 ──────────────────────────────
+# ── outputs.tf sensitive 플래그 · oauth.tf scopes/tags 증인 ────────────────────────────────────
 # 위 @test들은 provider.tf(CI 토큰 교환 스코프)·variables.tf(owner 로컬 apply 기본값)만 본다.
 # outputs.tf(실 OAuth 클라이언트 시크릿 output의 sensitive 플래그)와 oauth.tf(k8s-operator
 # 자신의 scopes/tags — 클러스터가 실제로 쓰는 자격)는 이 파일도 test_acl_guard.bats도 열지 않아

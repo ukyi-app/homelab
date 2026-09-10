@@ -94,7 +94,7 @@ _mkindex() {
 }
 
 @test "direction 2 flags an SSOT guard annotation absent from the ledger (reverse-tie regression)" {
-  # guard-decision-b-3 — line 69의 SSOT→원장 역추적(grep -Fq -- "$p" "$LEDGER")을 무력화해도(뮤테이션:
+  # line 69의 SSOT→원장 역추적(grep -Fq -- "$p" "$LEDGER")을 무력화해도(뮤테이션:
   # true로 교체) 기존 7개 @test 전건이 초록이었다 — 이 픽스처는 방향②만 겨냥한다(DETAIL의 '> 가드:'
   # 경로가 LEDGER 어디에도 없으면 드리프트).
   printf '| 함정 | where | guard |\n|---|---|---|\n' > "$TMP/led.md"
@@ -106,7 +106,7 @@ _mkindex() {
 }
 
 @test "direction 4 flags an AGENTS index line that appends a tail to the SSOT headline" {
-  # guard-decision-b-3 — line 162/169의 완전일치(grep -Fqx)가 부분일치(grep -Fq)로 완화돼도 기존
+  # line 162/169의 완전일치(grep -Fqx)가 부분일치(grep -Fq)로 완화돼도 기존
   # 7개 @test 전건이 초록이었다 — 꼬리 덧붙임은 개수 등식(n_index==n_heads)으로도 안 잡힌다
   # (2026-08-29 실사고: 107=107인데 4건이 이 상태).
   printf '| 함정 | where | guard |\n|---|---|---|\n' > "$TMP/led.md"

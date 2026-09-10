@@ -1,10 +1,60 @@
 #!/usr/bin/env bats
-# 변이 레인 신원 행(tools/lib/catalog-rows.ts) — 순수 기술자 계약(cli-deepening 심화 2).
+# 변이 레인 신원 행(tools/lib/catalog-rows.ts) — 순수 기술자 계약.
 # 행에서 생성(fillLanePattern/laneSpec)과 파싱(laneBranchTail/isDispatchLaneBranch)이 함께
 # 파생되므로, 왕복 불변식과 손 핀 리터럴 앵커를 이 표면 하나에서 단언한다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과 함정. @test 이름은 영어(인코딩 함정).
+bats_require_minimum_version 1.5.0
+load "helpers/cli_stub"
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
+
+# 원장에서 그 디스패처의 `-f k=v` **키 집합**을 뽑는다(정렬·중복 제거). 순서는 재지 않는다 —
+# argv 순서는 각 동사 bats의 exact 원장이 이미 소유한다(이 축은 집합 동치뿐).
+# LC_ALL=C — 로케일 콜레이션이 `sort -u`의 동치 판정을 뒤집는 함정(AGENTS.md) 회피.
+dispatch_keys() {
+  python3 "$LEDGER_PY" dump "$CALLS" \
+    | grep -F "'workflow' 'run' '$1'" \
+    | grep -oE "'-f' '[A-Za-z0-9_]+=" \
+    | sed "s/^'-f' '//; s/=\$//" \
+    | LC_ALL=C sort -u | tr '\n' ' '
+}
+
+# 그 트리의 행이 말하는 기대 키 집합(inputs + correlation) — 같은 정렬 규약.
+lane_want_keys() {
+  bun -e '
+    const { LANES } = await import(process.argv[1] + "/tools/lib/catalog-rows.ts");
+    console.log([...LANES[process.argv[2]].inputs, "correlation"].sort().join(" ") + " ");
+  ' "$1" "$2"
+}
+
+# 대조기 본체 — 한 레인의 실제 디스패치 키 집합 vs 그 트리 행의 기대 집합. 양성 대조가 같은
+# 함수를 물어야 판별성이 성립한다(대조기 사본 둘이면 한쪽만 고쳐도 초록이다).
+lane_argv_parity() {
+  got="$(dispatch_keys "$3")"
+  want="$(lane_want_keys "$1" "$2")"
+  echo "action=$2 got=[$got] want=[$want]"
+  # 공허 방지 — 어느 한쪽이 빈 문자열이면(디스패치 0건·행 로드 실패) "둘 다 비어 동치"가 되어
+  # 전건이 조용히 통과한다. 함수는 errexit 밖이라 중간 단언만으로는 못 멈춘다 — 명시 return.
+  [ -n "$got" ] || return 1
+  [ -n "$want" ] || return 1
+  [ "$got" = "$want" ]
+}
+
+# 변이 동사 실행 — 시간 심을 밀리초로 조이고 라이브 계층은 뗀다(KUBECONFIG 미설정 = omitted live).
+run_verb() {
+  run --separate-stderr env -u KUBECONFIG PATH="$STUB" HOMELAB_CORRELATION="$NONCE" \
+    "$BUN" tools/homelab.ts "$@" --poll-ms 10 --deadline-ms 300 --json
+}
+
+# 같은 실행을 **다른 cwd**에서 — dispatch-only `app secrets`의 온보딩 사전 판정이 cwd의
+# git toplevel(없으면 cwd)을 앵커로 쓰기 때문이다. `env -C`는 이 캠페인의 이식성 규약상 금지라
+# `bash -c 'cd …'` 관용구를 쓰고, homelab.ts는 절대경로로 지목한다(cd 뒤 상대경로는 깨진다).
+run_verb_in() {
+  dir="$1"; shift
+  run --separate-stderr env -u KUBECONFIG PATH="$STUB" HOMELAB_CORRELATION="$NONCE" \
+    bash -c 'cd "$1" || exit 1; bun="$2"; root="$3"; shift 3; exec "$bun" "$root/tools/homelab.ts" "$@"' \
+    _ "$dir" "$BUN" "$ROOT" "$@" --poll-ms 10 --deadline-ms 300 --json
+}
 
 @test "the lane descriptor is pure data: zero imports (design gate r1 D3)" {
   [ -f tools/lib/catalog-rows.ts ]
@@ -32,7 +82,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "the parse-only bump-poll lane is retired (parseBranch is the only branch-grammar SSOT)" {
-  # 티켓 18 — status.ts가 parseBranch(SSOT)로 이행한 뒤 이 행의 실 소비자는 자기 테스트뿐이었다.
+  # status.ts가 parseBranch(SSOT)로 이행한 뒤 이 행의 실 소비자는 자기 테스트뿐이었다.
   # 낡은 문법(bump-poll/{key}-{tag} — 08의 kind 인코딩과 어긋남)을 선언한 행이 남으면 두 번째
   # 진실이다: export 부재를 못박는다. 형제 오귀속 가치는 test_bump-plan.bats로 이관됐다.
   run bun -e '
@@ -100,11 +150,11 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   echo "$output" | grep -q "^ok:17$"
 }
 
-@test "consumers derive from the rows: no literal lane branch templates left in verbs/secrets/status" {
+@test "consumers derive from the rows: no literal lane branch templates left in the engine or its callsites" {
   # 생성 방향 사본(문자열 템플릿)과 파싱 방향 사본(하드코딩 접두)이 소비자에서 소멸했는지 —
   # bats 원장 단언의 리터럴은 독립 앵커라 여기서 세지 않는다(tools/tests/ 제외).
   # 부정 단언은 grep -c=0 관용구 — rc 기반(-ne 0)은 grep 오류(rc=2)도 통과시키는 vacuous green.
-  # untouched-e-3(5라운드) — 원 UNION은 모든 대안이 슬래시 뒤 `\$`만 요구해 `${…}` 보간형(생성
+  # 원 UNION은 모든 대안이 슬래시 뒤 `\$`만 요구해 `${…}` 보간형(생성
   # 방향) 한 형태만 물었다. 주석이 약속한 파싱 방향 사본(하드코딩 접두 `startsWith("create-app/")`)
   # ·행 데이터 사본(`"create-app/{key}-{runId}"`)은 판정 밖이었다(status.ts에 두 줄 추가해도 8/8
   # 그대로 통과, 무증인 재현). 표기 3종(`$`·`{`·`"`)으로 넓힌다 — teardown만 구분자가 `-`라 별도 대안.
@@ -114,12 +164,26 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   [ "$(printf 'x `create-app/${input.app}-${runId}`\n' | grep -cE "$UNION")" = "1" ]
   [ "$(printf 'b.startsWith("create-app/")\n' | grep -cE "$UNION")" = "1" ]
   [ "$(printf 'const P = "teardown/teardown-app-{key}-{runId}";\n' | grep -cE "$UNION")" = "1" ]
-  for f in tools/lib/verbs.ts tools/lib/secrets.ts tools/lib/status.ts; do
+  # ⚠️ 이 열거는 **손 열거**다 — 새 소비자가 생기면 여기 더해야 가드가 그것을 본다. mutation.ts가
+  #    그 자리다: 엔진이 레인 좌표(branchPattern·key)를 **직접** 받는 소비자가 됐다(중복 디스패치
+  #    preflight). 순수 문자열 두 개로 받으므로 오늘은 통과하고, 훗날 `startsWith("create-app/")`
+  #    같은 사본이 들어오면 red다.
+  #    lane-pr.ts는 **면제**다 — 그 모듈은 LANES를 import해 파싱을 파생하므로(행이 SSOT) 접두
+  #    리터럴이 그 파일의 정당한 산물이 아니라 아예 없다. 면제라는 사실을 여기 적어 두어 다음
+  #    사람이 "왜 빠졌나"를 다시 계산하지 않게 한다.
+  for f in tools/lib/verbs.ts tools/lib/secrets.ts tools/lib/status.ts tools/lib/mutation.ts; do
     [ "$(grep -cE "$UNION" "$f")" = "0" ]
   done
   for f in verbs secrets status; do
     [ "$(grep -c "catalog-rows" "tools/lib/$f.ts")" -ge 1 ]
   done
+  # 엔진은 catalog-rows를 import하지 **않는다**(레인 좌표를 순수 문자열 두 개로 받는다) — 위 파생
+  # 하한의 분모에 넣으면 그 설계를 뒤집는 단언이 된다. 그래서 부정 방향으로 따로 못 박는다.
+  # 텍스트가 아니라 **import 형태**를 잰다: 주석의 "catalog-rows" 언급은 설계 설명이지 결합이 아니다.
+  IMP='from "./catalog-rows.ts"'
+  [ "$(grep -cF "$IMP" tools/lib/mutation.ts)" = "0" ]
+  # 양성 대조 — 이 검출기가 실제로 무는 형태다(무면 위 0건이 '패턴이 아무것도 못 문다'와 같아진다).
+  [ "$(grep -cF "$IMP" tools/lib/verbs.ts)" -ge 1 ]
 }
 
 @test "malformed branch patterns fail closed instead of matching a mangled prefix" {
@@ -138,6 +202,54 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   '
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "ok"
+}
+
+@test "the CLI dispatch argv keys equal the lane row inputs plus correlation for all five lanes" {
+  # 디스패치 키는 verbs.ts·secrets.ts의 **손 리터럴**이고(행에서 파생되는 것은
+  # DB_CHECKBOX_EXTS뿐) 행↔YAML·행↔CONTRACT 가드 체인 어디에도 CLI argv가 없다. 그래서
+  # `maxmemory_mi`→`maxmemory` 개명을 YAML·행·가드·CONTRACT까지 일관되게 반영해도 CLI만 낡은
+  # 키로 남고, 검출은 라이브 `gh workflow run`의 입력 거부뿐이었다. 이 @test가 그 마지막 변을 잇는다.
+  # 값 조립은 동사별로 다르다(불리언 파생·정수·빈값·confirm)므로 파생이 아니라 **가드**가 맞다(ADR 0001).
+  # 하네스는 이 @test 안에서만 세운다 — 나머지 @test는 프로세스를 띄우지 않는 순수 데이터 계약이다.
+  cli_stub_init
+  make_gh_stub
+  run_verb db create mydb --ext pg_trgm
+  [ "$status" -eq 0 ]
+  run_verb cache create mycache --maxmemory-mi 128
+  [ "$status" -eq 0 ]
+  run_verb app create myapp
+  [ "$status" -eq 0 ]
+  # app secrets는 앱 마커 부재 트리에서 도는 dispatch-only 모드다 — 연쇄 없이 디스패치만. 단
+  # 사전 판정이 "그 트리에 앱이 온보딩돼 있는가"를 먼저 묻는다(cwd 앵커) — 이 레포의
+  # `apps/`에는 myapp이 없어 여기서 돌리면 디스패치 전에 거부된다. 그래서 $APPS_ROOT를
+  # 온보딩된 워킹트리로 세워 그쪽에서 돈다(형제 스위트 test_homelab-secrets.bats와 같은 규약).
+  make_app_fixture myapp
+  run_verb_in "$APPS_ROOT" app secrets myapp
+  [ "$status" -eq 0 ]
+  run_verb app teardown myapp --confirm myapp
+  [ "$status" -eq 0 ]
+  # 레인별 집합 동치. 열거 바닥값 5 — 루프가 짧아지면 vacuous green이다.
+  n=0
+  while IFS=' ' read -r action workflow; do
+    [ -n "$action" ] || continue
+    run lane_argv_parity "$ROOT" "$action" "$workflow"
+    [ "$status" -eq 0 ]
+    n=$((n + 1))
+  done <<'EOF'
+create-database create-database.yaml
+create-cache create-cache.yaml
+create-app create-app.yaml
+update-secrets update-secrets.yaml
+teardown-app teardown-app.yaml
+EOF
+  [ "$n" -eq 5 ]
+  # 양성 대조 — 행 inputs만 개명한 사본에서 같은 대조기가 실제로 문다(CLI 리터럴은 그대로다).
+  # 행은 import 0 계약이라 사본 한 파일이면 충분하다(node_modules·진입점 불필요).
+  MR="$BATS_TEST_TMPDIR/row-mut"; mkdir -p "$MR/tools/lib"
+  sed 's|"name", "maxmemory_mi"|"name", "maxmemory_renamed"|' tools/lib/catalog-rows.ts > "$MR/tools/lib/catalog-rows.ts"
+  [ "$(grep -c '"maxmemory_renamed"' "$MR/tools/lib/catalog-rows.ts")" = "1" ]
+  run lane_argv_parity "$MR" create-cache create-cache.yaml
+  [ "$status" -ne 0 ]
 }
 
 @test "every lane row surface path equals the kernel derivation (import-0 parity guard)" {

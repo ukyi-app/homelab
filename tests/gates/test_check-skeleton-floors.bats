@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# check-skeleton 바닥값 어휘(kernel-followups 02) — env 폐지 + --floor 수용의 행동 증인.
+# check-skeleton 바닥값 어휘 — env 폐지 + --floor 수용의 행동 증인.
 # ⚠️ 형제 test_check-skeleton-gate.bats와 분리한 이유: 그쪽 setup은 yq 부재 시 파일 전역 skip인데
 #    이 증인들은 yq 무관이라, 같이 두면 로컬 yq 미설치에서 조용히 vacuous가 된다(리뷰 지적 —
 #    "skip이 단언을 만족하는" 클래스). ⚠️ @test 이름은 영어 · 중간 단언은 [ ]만.

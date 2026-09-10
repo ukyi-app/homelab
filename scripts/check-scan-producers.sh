@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 스캔 신호 규약의 **거부 가드** — TS 가드가 커널(`tools/lib/scan-floor.ts`)을 우회해 `SCAN:` 마커를
-# **직접 출력**하면 red. 규약 SSOT는 `CONTRIBUTING.md` '가드 스캔 신호' 절이다(설계 원문 ts-scan-kernel
-# §5는 git 히스토리의 docs/reviews — 병·근거는 아래 헤더가 자체 보유한다).
+# **직접 출력**하면 red. 규약 SSOT는 `CONTRIBUTING.md` '가드 스캔 신호' 절이다(설계 원문은 git 히스토리의
+# docs/reviews — 병·근거는 아래 헤더가 자체 보유한다).
 #
 # 병: `tests/gates/test_scan-floor.bats`의 로스터 대조(정적 콜사이트 집합 == 런타임 방출 집합)는 우회를
 # 막지 못한다. 정적 집합과 실행 파일 목록이 **같은 패턴**에서 파생되므로, 한 가드가 직접 `console.log`로
@@ -37,7 +37,7 @@
 # ⚠️ `findings="$(awk … || true)"` 함정의 세 겹 처방을 따른다 — ① awk rc 포착(판정 불가는 통과가 아니다)
 #    ② 넘기기 전 `[ -r ]` ③ READFILES를 열거 수와 대조. 그리고 바닥값·SCAN 마커는 **검출 뒤**에 낸다 —
 #    검출이 죽은 실행이 "N파일 스캔"을 내면 소비자가 정반대로 읽는다(check-bats-fd0와 같은 순서).
-# ⚠️ 바닥값은 **상수**다 — env 주입 경로를 열지 않는다(티켓 04: `=0` 한 줄로 required gate의 방어가
+# ⚠️ 바닥값은 **상수**다 — env 주입 경로를 열지 않는다(`=0` 한 줄로 required gate의 방어가
 #    꺼졌다). 붕괴 관측에는 주입이 필요 없다 — `--root <dir>`에 작은 픽스처 트리를 주면 열거가 자연히
 #    붕괴한다. `--root`는 되돌림 시나리오 증인(실 `tools/` 사본 + 한 파일 되돌림)을 위한 것이다.
 # bash 3.2 호환(mapfile 금지). shellcheck clean.
@@ -86,8 +86,8 @@ EOF
 DETECT='
   BEGIN {
     # ⚠️ console 동사는 열거가 아니라 클래스다(`console\.[a-z]+`) — 6종 손 열거도 dir/table/group
-    #    같은 신규 메서드를 놓친다(형제 check-skip-signalling.sh:63과 같은 처방, 감사 6라운드
-    #    티켓64 c64-6). LIT(아래)가 여전히 "SCAN: " 리터럴 동반을 요구하므로 오탐은 없다.
+    #    같은 신규 메서드를 놓친다(형제 check-skip-signalling.sh:63과 같은 처방).
+    #    LIT(아래)가 여전히 "SCAN: " 리터럴 동반을 요구하므로 오탐은 없다.
     VERB = "(console\\.[a-z]+|process\\.(stdout|stderr)\\.write)"
     LIT  = "[[:space:]]*\\[?[[:space:]]*[\042\047`]SCAN: "
     OPEN = VERB "\\([[:space:]]*$"

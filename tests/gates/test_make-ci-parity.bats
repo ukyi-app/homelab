@@ -4,7 +4,7 @@
 # ⚠️ **이 파일이 하던 방식이 바로 잡으려던 병이었다.** 예전에는 하드코딩된 5개 토큰(chart·ledger·audit·
 #    shellcheck·alertmanager-e2e)이 `make -n ci`에 있는지만 봤다. 목록에 없는 게이트 스텝은 아무리 늘어나도
 #    보이지 않는다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 make ci에 없었는데 전 검사가 초록이었다
-#    (하필 하드코딩된 5개가 전부 미러된 것들이라 우연히 통과했다). 티켓 07의 하드코딩 소비처 목록과 같은 클래스다.
+#    (하필 하드코딩된 5개가 전부 미러된 것들이라 우연히 통과했다). 재핀 소비처 하드코딩 목록과 같은 클래스다.
 #    ⇒ 스텝 단위 대조는 **tools/check-ci-parity.ts**가 ci.yaml에서 파생해 수행한다. 여기 남는 것은
 #      그 도구가 **실제로 배선돼 있는지**와, 도구가 딛고 선 전제(러너 동치·`make -n`의 부수효과 부재)다.
 #
@@ -14,8 +14,8 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
   # 대상 부재를 배선 레인이 초록으로 읽지 않는다 — 「…runs in BOTH…」는 두 파일에 이름이 적혀 있기만 하면
-  # 도구가 없어도 통과한다(operand-witness 05 (b) · 형제 tests/gates/test_disk-caps.bats:18-19와 같은 형태).
-  # ⚠️ **이 자리를 setup에 둔 대가와 그 대안을 여기 적어 둔다**(감사 2라운드에서 한 번 판정된 자리 —
+  # 도구가 없어도 통과한다(형제 tests/gates/test_disk-caps.bats:18-19와 같은 형태).
+  # ⚠️ **이 자리를 setup에 둔 대가와 그 대안을 여기 적어 둔다**(한 번 판정된 자리 —
   #    다음 독자가 같은 finding을 재발견하지 않게). 이 파일은 test_disk-caps와 달리 **단일 대상 파일이
   #    아니다**: #1(run-bats.sh)·#6(재귀 make)·#7(m6-tools)·#8(메모리 원장)은 check-ci-parity.ts와
   #    무관한 대상을 건다. 그래서 도구 부재 뮤테이션에서 setup 단언은 그 4레인까지 함께 red로 만든다
@@ -55,29 +55,47 @@ setup() {
   #   `실 도메인 가드` 스텝의 커맨드 10건 중 원장엔 8건만 있었고, `check-locale-collation`·
   #   `check-gh-secret-coverage`가 빠진 채 오래 초록이었다(실측 2026-08-21). 그 목록이 곧
   #   AGENTS.md가 금지하는 하드코딩 소비처 목록이었다.
-  #   여기서는 그 사고를 **재현해** 방향 ⑦이 실제로 무는지 본다(픽스처는 원장 사본에만 가한다).
-  cp "$ROOT/policy/ci-parity.json" "$BATS_TEST_TMPDIR/orig.json"
-  run bun -e '
-    const fs = require("fs");
-    const p = "policy/ci-parity.json";
-    const d = JSON.parse(fs.readFileSync(p, "utf8"));
-    for (const s of d.steps) {
-      if (s.name.includes("실 도메인") && Array.isArray(s.local)) {
-        s.local = s.local.filter((x) => !x.includes("locale-collation"));
-      }
-    }
-    fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");
-  '
+  #   여기서는 그 사고를 **재현해** 방향 ⑦이 실제로 무는지 본다.
+  # ⚠️ 뮤테이션은 **실 체크아웃이 아니라 사본 레포**에 가한다. 예전에는 실 policy/ci-parity.json을
+  #    그 자리에서 재작성했다가 되돌렸는데, 파일 단위 병렬 bats에서는 그 창을 밟은 다른 프로세스의
+  #    가드가 거짓 red를 냈다(docs/traps-detail.md 「파일 단위 병렬 bats에서 실 체크아웃을 잠깐
+  #    바꾸는 스위트는 …」). 이 도구는 process.cwd()를 읽으므로 사본 디렉토리에서 실행하면
+  #    사본 원장·사본 ci.yaml을 그대로 검사한다 — 판정 조건은 같고 실 트리는 불변이다.
+  fx="$BATS_TEST_TMPDIR/dir7"
+  mkdir -p "$fx/.github/workflows" "$fx/policy"
+  cp "$ROOT/.github/workflows/ci.yaml" "$fx/.github/workflows/ci.yaml"
+  cp "$ROOT/policy/ci-parity.json" "$fx/policy/ci-parity.json"
+  # 사본이 실 레포와 같은 판정을 내리려면 ④(`make -n ci`)와 ⑤(covered_by.file)의 원본도 필요하다 —
+  # 원장의 covered_by.file은 Makefile·.pre-commit-config.yaml 둘뿐이다.
+  cp "$ROOT/Makefile" "$fx/Makefile"
+  cp "$ROOT/.pre-commit-config.yaml" "$fx/.pre-commit-config.yaml"
+
+  # 대조군(먼저) — 사본 그대로는 초록이다. 아래 red가 **사본 조립 자체의 실패가 아님**을 고정한다.
+  # (종전 판의 "원복하면 초록이다" 음성 대조와 같은 자리다 — 원복이 사라진 만큼 앞으로 옮겼다.)
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts'"
   [ "$status" -eq 0 ]
-  run bun tools/check-ci-parity.ts
-  mutated_status="$status"; mutated_output="$output"
-  cp "$BATS_TEST_TMPDIR/orig.json" "$ROOT/policy/ci-parity.json"   # 무슨 일이 있어도 되돌린다
-  [ "$mutated_status" -ne 0 ]
-  printf '%s' "$mutated_output" | grep -qF 'check-locale-collation.sh'
-  printf '%s' "$mutated_output" | grep -qF '원장 local에 없다'
-  # 음성 대조 — 원복하면 초록이다(원복 실패를 다음 테스트가 떠안지 않게 여기서 확인한다).
-  run bun tools/check-ci-parity.ts
-  [ "$status" -eq 0 ]
+
+  # 뮤테이션: 사본 원장의 `실 도메인` 항목에서 locale-collation 한 줄만 뺀다.
+  # ⚠️ 실제로 1건이 빠졌는지 뮤테이션 자신이 단언한다 — 스텝 리네임으로 필터가 무효가 되면
+  #    아래 red가 무엇의 증인인지 불분명해진다(뮤테이션 무증인).
+  python3 - "$fx/policy/ci-parity.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p, encoding="utf-8"))
+removed = 0
+for s in d["steps"]:
+    if "실 도메인" in s["name"] and isinstance(s.get("local"), list):
+        n = len(s["local"])
+        s["local"] = [x for x in s["local"] if "locale-collation" not in x]
+        removed += n - len(s["local"])
+assert removed == 1, f"뮤테이션이 {removed}건을 뺐다 — 1건이어야 한다"
+open(p, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+PY
+
+  run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts'"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF 'check-locale-collation.sh'
+  printf '%s' "$output" | grep -qF '원장 local에 없다'
 }
 
 @test "direction 7 accepts the ledger's own notation — basenames, globs and interpreter prefixes" {
@@ -119,7 +137,7 @@ setup() {
 }
 
 @test "memory ledger gate runs in the required gate" {
-  # W7: ledger 검사(conftest policy/ledger.rego)는 required gate(ci.yaml: bun run verify:ledger) 한 곳으로 일원화.
+  # ledger 검사(conftest policy/ledger.rego)는 required gate(ci.yaml: bun run verify:ledger) 한 곳으로 일원화.
   # ⚠️ 구조 판정(F10) — 무앵커 grep은 ci.yaml:3 **헤더 주석**이 담은 같은 토큰으로도 만족된다.
   #    실측 2026-09-03: 원장 스텝 본문을 `run: echo ledger-skipped`로 바꿔도 이 레인이 초록이었다.
   # ⚠️ **행두 앵커**(`(^|\n)\s*`) — `.run` 전문에 test()를 걸면 그 안의 `# 비활성화: bun run
@@ -139,20 +157,40 @@ setup() {
   [ "$status" -eq 0 ]
 
   # 양성 대조: 깨끗한 상태에서는 통과한다(항상 죽는 가드는 아무도 안 쓴다 → 곧 제거된다).
+  # ⚠️ 이 한 줄만 **실 체크아웃**을 본다 — 읽기 전용(`git ls-files --others`)이라 남겨 두지만,
+  #    다른 스위트가 레포 안에 untracked 파일을 만들면 이 레인이 그 창을 밟아 거짓 red가 된다.
+  #    그런 스위트가 0이어야 한다는 것이 tests/.gate-serial의 등재 기준이다
+  #    (docs/traps-detail.md 「파일 단위 병렬 bats에서 실 체크아웃을 잠깐 바꾸는 스위트는 …」).
   run make ci-guard-tracked
   [ "$status" -eq 0 ]
 
   # 핵심 단언(마지막): untracked 파일을 넣으면 마커 + 비-0.
-  probe="$ROOT/tools/__ci_parity_probe_$$.ts"
-  printf '// probe\n' > "$probe"
-  run make ci-guard-tracked
-  rm -f "$probe"
+  # ⚠️ 프로브는 **사본 레포**에 만든다 — 실 tools/에 만들면 그 창을 밟은 다른 프로세스의 tracked
+  #    열거 가드(check-doc-index·check-skeleton·`make ci-guard-tracked` 자신)가 거짓 red를 낸다.
+  #    레시피는 `git ls-files --others --exclude-standard -- tools scripts … Makefile`로 판정하므로
+  #    사본 Makefile + 자기 git 레포만 있으면 같은 분기를 그대로 밟는다.
+  fx="$BATS_TEST_TMPDIR/tracked"
+  mkdir -p "$fx/tools"
+  cp "$ROOT/Makefile" "$fx/Makefile"
+  # ⚠️ `env -u GIT_DIR …` — GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE이 환경에 남아 있으면 `git init`이
+  #    **그 경로**에 레포를 만들고 레시피의 `git ls-files`도 그쪽을 읽는다. 상속된 GIT_* 한 줄이
+  #    사본 격리를 실 .git 쓰기로 되돌리므로, 사본을 만지는 네 호출 전부에서 걷어낸다.
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$fx" init -q
+  # Makefile 자신도 pathspec에 있다 — 추적시키지 않으면 자기 자신이 걸린다.
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$fx" add Makefile
+  # 사본 대조군 — 프로브가 없으면 통과한다(사본 조립 자체의 실패가 아니다). 아래 red가 이 사본에서
+  # git이 실제로 열거를 돌렸다는 증인이 된다(git이 죽으면 `u`가 비어 통과로 위장한다).
+  run env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE make --no-print-directory -C "$fx" ci-guard-tracked
+  [ "$status" -eq 0 ]
+
+  printf '// probe\n' > "$fx/tools/__ci_parity_probe.ts"
+  run env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE make --no-print-directory -C "$fx" ci-guard-tracked
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'SKIP: ci: 추적되지 않은'
 }
 
 
-# ── 스캔 신호 (티켓 04) ────────────────────────────────────────────────────────
+# ── 스캔 신호 ────────────────────────────────────────────────────────────────
 # 이 가드는 바닥값(MIN_STEPS)은 갖고도 스캔 신호가 **아예 없는** 네 번째 변종이었다.
 # 신호가 없으면 관측하는 쪽에서 "돌지 않았다"와 "돌았고 통과했다"가 구별되지 않는다 —
 # `check-guard-authority`의 실행 경로 회계가 그 구별을 못 하면 과다 계상으로 기운다.
@@ -352,7 +390,7 @@ mkparity_covered_fixture() {   # $1=디렉토리  $2=covered_by.file(witness.txt
   [ "$status" -eq 0 ]
 }
 
-# reg13c-a-landing-hunks-1 — 위 뮤테이션은 행두 전용 주석이었다. execOnly의 옛 정규식(`^[ \t]*#.*$`)은
+# 위 뮤테이션은 행두 전용 주석이었다. execOnly의 옛 정규식(`^[ \t]*#.*$`)은
 # 실 코드 뒤에 붙은 trailing `# ...`는 전혀 걷지 않아, 실 호출을 지우고 두 칸 공백 + `#`만 남기는
 # 흔한 리팩터 패턴이 covered_by를 rc=0으로 계속 통과시켰다(처방 전 실측: witness.txt를
 # `true  # tests/witness.bats reference kept only as a trailing dead comment`로 바꿔도 green).

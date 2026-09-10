@@ -128,7 +128,7 @@ YAML
 }
 
 @test "sealed-guard BLOCKS a value that merely contains the substring Ag (anchor, not substring, match)" {
-  # guard-decision-b-2 — line 82의 test("^Ag[A-Za-z0-9+/=]+\$")가 앵커를 잃고 부분매칭으로 완화돼도
+  # line 82의 test("^Ag[A-Za-z0-9+/=]+\$")가 앵커를 잃고 부분매칭으로 완화돼도
   # 위 테스트의 픽스처("hunter2-not-ciphertext")는 우연히 "Ag"를 포함하지 않아 그 회귀를 못 잡는다.
   # 이 픽스처는 "Ag"를 중간에 담되(Agent) 전체가 Ag+base64는 아니다 — 앵커 자체의 독립 증인.
   d="$BATS_TEST_TMPDIR"

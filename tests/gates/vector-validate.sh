@@ -3,10 +3,13 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VEC="$ROOT/platform/victoria-stack/prod/vector.yaml"
-# ⚠️ `|| VER=""`가 **필요하다** — `set -o pipefail` 아래에서 grep 0건은 파이프라인 rc=1이라
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring
+# ⚠️ 캡처 문장의 `|| VEC_IMGS=""`가 **필요하다** — grep 0건은 rc=1이라
 #    `set -e`가 **할당 단계에서** 죽인다. 그러면 아래 `[ -n "$VER" ]` 진단이 영원히 실행되지
 #    않고 게이트가 메시지 0줄에 rc=1로 끝난다(형제 alertmanager-render-e2e에서 실측된 클래스).
-VER="$(grep -oE 'timberio/vector:[0-9.]+' "$VEC" | head -1 | cut -d: -f2)" || VER=""   # DaemonSet 이미지 버전과 동일(드리프트 0)
+#    한 줄에 매치가 둘일 수 있어 grep -m1은 동등하지 않다 — 캡처 뒤 첫 줄을 취한다.
+VEC_IMGS="$(grep -oE 'timberio/vector:[0-9.]+' "$VEC")" || VEC_IMGS=""   # DaemonSet 이미지 버전과 동일(드리프트 0)
+VER="$(head -n1 <<<"$VEC_IMGS" | cut -d: -f2)"
 [ -n "$VER" ] || { echo "vector 버전 추출 실패"; exit 1; }
 TMP="$(mktemp -d)"
 yq 'select(.kind=="ConfigMap" and .metadata.name=="vector-config") | .data."vector.yaml"' "$VEC" > "$TMP/vector.yaml"
