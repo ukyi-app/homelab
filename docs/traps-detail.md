@@ -2501,3 +2501,35 @@ selfHeal과 플립플롭한다.
   깬다. 만질 수밖에 없으면(가드가 자기 위치에서 ROOT를 파생해 사본으로 못 돌리는 경우) 직렬 레인에 **사유와 함께**
   등재한다 — 조용히 늦게 도는 것이 아니라 회계에 보이게.
 > 가드: `scripts/run-bats.sh`, `scripts/check-bats-accounting.sh`, `tests/gates/test_run-bats.bats`, `tests/gates/test_bats-accounting.bats`
+
+### CNPG는 role DROP(ensure: absent) 뒤에도 `.status.managedRolesStatus.passwordStatus[<role>]`을 유지한다 — passwordStatus 존재는 role 존재의 증인이 아니다
+- **현상**: Database CR을 `spec.ensure: absent`로 바꿔 논리 DB와 managed role을 DROP해도 Cluster의
+  `.status.managedRolesStatus.passwordStatus[<role>]` 엔트리는 남는다. 그래서 "그 rv가 채워졌는가"만 재는
+  검사는 **이미 존재하지 않는 롤**을 verified로 찍는다 — 비어 있음이 아니라 **잔존**이 오답의 재료다.
+- **근거(2026-09-09 라이브 read-only — page purge 3 PR)**: cluster.yaml `managed.roles` 선언이
+  `ensure: absent`가 된 PR-B sync에서 PostSync 훅 `ensure-role-password`가 `pg_roles`에 없는
+  `page`·`page_ro`를 verified로 찍고 마커 ConfigMap까지 썼다. 그 rv(4608992/4608996)는 선언 자체가
+  사라진 뒤(PR-C 머지 09:26 KST)에도 **같은 날 저녁 판독까지** 잔존했고, 그 판독의 passwordStatus에는
+  `page`·`page_ro`·`trip-mate`·`trip-mate_ro` 4엔트리가 있었다 — 이 중 `trip-mate*`는 **전날**(09-08)
+  purge한 것이라 하루를 넘긴 잔존 증인이다.
+- ⇒ **같은 status 안에서 두 필드의 수명이 다르다**: `.status.managedRolesStatus.byStatus.reconciled`는
+  선언이 **사라지면** 빠지지만(위 판독에서 `ukkiee`만) passwordStatus는 남는다. 다만 reconciled도
+  **선언이 `ensure: absent`로 남아 있는 창에서는 존재 증인이 아니다** — CNPG는 absent로 선언돼 DROP까지
+  끝난 롤도 reconcile 대상이라 그 목록에 담는다. ⚠️ 이 한 줄만은 **추론**이다: 그 창의 byStatus 판독
+  기록이 없다(남아 있는 유일한 실측 `reconciled=[ukkiee, page, page_ro]`는 09-08 `db create page` 수렴
+  직후 — 즉 **전건 present** 시점 값이라 이 창의 증인이 아니다). ⇒ 존재 증인은 reconciled 멤버십
+  **단독이 아니라** 아래 ①과의 곱이고, passwordStatus는 어느 창에서도 '비번이 적용됐다'만 말한다.
+- ⚠️ **①과 ②는 서로 다른 창을 덮는다 — 한쪽이 다른 한쪽을 대체하지 않는다.** ②(reconciled 멤버십)는
+  위 이유로 선언이 `ensure: absent`로 남은 창을 못 덮는다(그 창이 남긴 측정 산물이 ③의 고아 마커
+  `db-page-ready`다). ①(`spec.ensure=absent` CR 스킵)은 CR이 아직 있을 때만 걸려 **재프로비저닝** 창을
+  못 덮는다 — 같은 이름으로 다시 만들면 CR은 present라 스킵이 안 걸리고 옛 rv가 그대로 통과**할 수
+  있다**(타이밍 위험 — #688→#689 재프로비저닝 실관측에서는 CNPG가 엔트리를 갱신해 발현하지 않았다).
+  발현하면 비번 미적용 인증 실패(#3 회귀)를 막으려고 둔 훅이 정확히 그 자리에서 무력해진다.
+- **처방**(#712): ① `spec.ensure=absent` CR은 Database applied 대기 **뒤에** 롤 검증·마커를 건너뛴다
+  (조회 실패·필드 부재는 absent가 아니라 검증 경로 — 실패가 스킵으로 접히지 않는 방향). ② 판정을 **두
+  증인의 곱**으로 바꾼다 — passwordStatus rv 채워짐 ∧ `byStatus.reconciled` 멤버십. ③ 훅이 직접 apply하는
+  마커에 Database CR `ownerReferences`를 달아 CR 프룬이 GC하게 한다(ownerRef 없던 판이 라이브 고아 2건을
+  남겼다: `db-page-ready`·`db-trip-mate-ready`).
+- ⚠️ **일반형**: status의 하위 필드는 서로 다른 컨트롤러 경로가 쓰고 지운다 — "그 키가 있다"를 상위
+  오브젝트의 존재 증인으로 쓰기 전에, 그 키를 **지우는** 경로가 실재하는지 라이브에서 확인하라.
+> 가드: `platform/cnpg/prod/test_ensure_role_password.bats`

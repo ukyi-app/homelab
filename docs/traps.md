@@ -4,12 +4,16 @@
 이 원장은 그중 **실행 가능한 가드로 강제된 함정만** 추적해, 가드 파일이 삭제·리네임됐는데 함정이
 다시 물리는 드리프트를 `make verify-traps`로 차단한다. 여기 없는 함정 = doc-only(traps-detail.md가 유일 SSOT).
 
-- **검사 방향 3가지**: `scripts/verify-traps.sh`가 전부 강제한다. 가드의 *내용 정확성*은 각 가드 테스트 자신이 책임진다.
+- **검사 방향 4가지**: `scripts/verify-traps.sh`가 전부 강제한다. 가드의 *내용 정확성*은 각 가드 테스트 자신이 책임진다.
   1. 아래 `guard` 열의 백틱 경로가 **실재하는지**(enforced인데 파일 없음 = 거짓 안심 → 실패).
   2. `docs/traps-detail.md`의 `> 가드:` 주석 경로가 **이 원장에도 추적되는지**(SSOT → 원장).
   3. 이 원장의 각 행이 가리키는 가드가 **SSOT의 어느 `> 가드:` 줄에든 있는지**(원장 → SSOT).
      ⚠️ 1·2는 이 갭을 **원리적으로 못 본다** — 1은 파일 실재만, 2는 반대 방향만 본다. 실측 2026-08-21
      도입 시점에 **9행**이 SSOT에도 AGENTS 인덱스에도 없이 enforced를 주장하고 있었다.
+  4. SSOT의 `### ` 섹션 헤드라인과 AGENTS.md 「라이브에서 검증된 함정」 한줄 인덱스가 **완전 일치**하는지
+     (집합 대조 + 개수 등식 — 꼬리를 덧붙이면 red다. 이 방향만 doc-only 함정까지 전건 대상이다).
+     ⚠️ 1~3은 전부 원장↔SSOT 사이라 이 등식을 **원리적으로 못 본다**. 실측 2026-08-29 도입 시점에
+     개수는 107=107인데 인덱스 4줄이 SSOT 헤드라인에 꼬리를 덧붙인 상태였다.
 - **where**: `gate`=ci.yaml job `gate`가 수집 · `iac`=iac/tf-reconcile · `local`=make/pre-commit 로컬 ·
   `app-build`=앱 레포의 pr/release가 호출하는 reusable(이 레포엔 caller가 없어 `gate`가 수집하지 않는다).
   방향 3의 면제는 여기에 **사유와 함께 명시**한다(하드코딩 목록이 아니라 마커라 새 행에도 같은 규칙이 적용된다):
@@ -115,3 +119,4 @@
 | 이름 있는 집합의 상한 부재 — `@test` 이름이 exactly/only/no other/전수/EVERY/정확를 선언해도 본문은 존재 증인뿐이라 원소 추가가 무증인이다(5라운드 12건 · 6라운드 9건 재발). `[SETCAP]` 레인이 집합 등식 술어(문자열 등식·수 등식·jq/yq contains(/join(",")/length ==) 부재를 정적으로 강제 | gate | `scripts/check-bats-style.sh`, `tests/gates/test_bats-style.bats` |
 | host-config --apply의 링크 재설정은 DHCP 리스를 2초 잃는다 — `&& make up` 체인은 그 창을 정확히 밟는다(reconfigure 뒤 networkd configured + 핀 IP 복귀까지 ≤15s 대기, 상한 초과는 FAIL) | gate | `infra/k3s-bootstrap/tests/test_03-host-config.bats` |
 | 파일 단위 병렬 bats에서 실 체크아웃을 잠깐 바꾸는 스위트는 남의 가드를 red로 만든다 — 직렬 레인으로 빼고, 고정 /tmp는 $BATS_TEST_TMPDIR로 옮긴다 | gate | `scripts/run-bats.sh`, `scripts/check-bats-accounting.sh`, `tests/gates/test_run-bats.bats`, `tests/gates/test_bats-accounting.bats` |
+| CNPG는 role DROP(ensure=absent) 뒤에도 passwordStatus 엔트리를 유지 — 존재 증인은 absent CR 스킵 ∧ byStatus.reconciled 멤버십의 **곱**이다(선언이 absent로 남은 창에서는 reconciled 단독도 증인이 아니다 · 마커는 ownerRef로 GC) | gate | `platform/cnpg/prod/test_ensure_role_password.bats` |

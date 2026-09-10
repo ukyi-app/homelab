@@ -338,7 +338,7 @@ verify-ksops: ## [local] KSOPS 렌더 bats(cnpg×3·cache×1) — 실 age 키 �
 	else echo "SKIP: verify-ksops: $(SOPS_AGE_KEY_FILE) 부재 — KSOPS 렌더 미평가. SOPS_AGE_KEY_FILE 지정 후 재실행"; exit 4; fi
 
 .PHONY: verify-traps
-verify-traps: ## docs/traps.md 함정 원장의 guard 경로가 실재하는지(enforced 드리프트 차단)
+verify-traps: ## 함정 원장 3종(traps.md·traps-detail.md·AGENTS 인덱스) 4방향 드리프트 가드 — guard 실재 + 원장↔SSOT 양방향 + 헤드라인 등식
 	@bash scripts/verify-traps.sh
 
 # seal-* 타깃은 seal-batch(선언 테이블·preflight fail-closed) 위임 별칭 — 타깃명은 외부 참조 보존.
