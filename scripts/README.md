@@ -55,8 +55,10 @@
   bun 트랜스파일 캐시를 실행 단위로 고정한다(근거: docs/traps-detail.md 「파일 단위 병렬 bats에서 …」).
 - **`verify-secrets.sh`** — 추적 `*.enc.yaml` 무결성(암호화됨 + age recipient 신원이 canonical(.sops.yaml
   cluster+recovery)과 일치 + 복호 가능) 검사. 값 비출력; age 키 없으면(=CI) 복호 단계만 스킵하고 구조 검사는 수행.
-- **`verify-traps.sh`** — `docs/traps.md` enforcement 원장이 가리키는 guard 파일이 실재하는지 검사
-  (가드 소실 드리프트 = 거짓 안심 차단). 순수 파일 존재 검사.
+- **`verify-traps.sh`** — 함정 원장 3종(원장 `docs/traps.md` · SSOT `docs/traps-detail.md` · AGENTS.md
+  한줄 인덱스)의 **4방향** 드리프트 가드: ① 원장 guard 열의 경로가 실재하는가(가드 소실 = 거짓 안심
+  차단) ② SSOT의 `> 가드:` 경로가 원장에 추적되는가 ③ 원장 각 행이 SSOT 서사에 대응하는가
+  ④ SSOT 섹션 헤드라인 ↔ AGENTS 한줄 인덱스 **완전 일치**(개수 등식 포함). 라이브 무관한 파일 검사.
 - **`tools/ledger-to-json.ts`** (셸 아님 — 참고) — `docs/memory-ledger.md` 표를 JSON으로 변환(conftest 입력 생성). **`bun run verify:ledger`**·
   `make verify`·`ci.yaml`(gate)이 호출(출력을 `conftest test … policy/ledger.rego`로 파이프). 라이브 무관.
 - **`sops-guard.sh`** — `*.enc.yaml`이 실제 sops 암호화됐는지 구조 검사(평문 누출 차단). 3조항:
