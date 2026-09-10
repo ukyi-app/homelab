@@ -19,7 +19,7 @@ ARG TARGETARCH
 # ⚠️ 부동 채널(`release/stable`)을 따라가던 옛 형태는 같은 커밋의 두 빌드가 다른 kubectl을 담았고,
 #    그 재빌드가 restore-drill을 두 번(8/22·8/25) 결정적으로 죽였다. versions.env:5 "고정 —
 #    'stable'/'latest' 금지, cattle 재구축이 결정적이도록"이 이 자리에도 적용된다.
-ARG KUBECTL_VERSION=v1.36.3
+ARG KUBECTL_VERSION=v1.36.4
 
 # rclone 버전 핀. freshness 소유자는 renovate.json customManagers(github-releases: rclone/rclone).
 ARG RCLONE_VERSION=v1.75.1
