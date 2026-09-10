@@ -22,7 +22,7 @@ ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.36.3
 
 # rclone 버전 핀. freshness 소유자는 renovate.json customManagers(github-releases: rclone/rclone).
-ARG RCLONE_VERSION=v1.75.0
+ARG RCLONE_VERSION=v1.75.1
 
 ENV DEBIAN_FRONTEND=noninteractive
 
