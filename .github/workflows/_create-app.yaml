@@ -130,7 +130,7 @@ jobs:
             echo
             echo '```json'; cat /tmp/plan.json; echo '```'
             echo
-            echo '동봉 계약(`tools/vendored-contract.json`) target 행은 create-app이 함께 넣는다 — 손 단계가 아니다(로스터 등식은 그대로 게이트).'
+            echo '동봉 계약(tools/vendored-contract.json) target 행은 create-app이 함께 넣는다 — 손 단계가 아니다(로스터 등식은 그대로 게이트).'
             echo; echo "### ⚠️ 머지 전 체크리스트"
             jq -r '.checklist[] | "- [ ] " + .' /tmp/plan.json
           } > /tmp/pr-body.md
