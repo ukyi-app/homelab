@@ -48,6 +48,18 @@ function parse(text: string): Manifest {
   for (const e of m.vendored) {
     if (typeof e?.source !== "string" || !Array.isArray(e?.targets))
       throw new Error("vendored 항목에 source(문자열)·targets(배열)가 없다 — 포맷 드리프트로 갱신 불가");
+    // ⚠️ target **원소**의 형상까지 본다. 종전엔 `Target` 타입이 런타임 증인 없이 참을 주장했고,
+    //    normalize 상속(rowFor)이 값 집합의 **크기**만 재서 `undefined`(키 부재)나 `"Exact"`(오타)가
+    //    길이 1로 통과했다. 그렇게 만든 앱 행을 소비자(contract-drift-check의 normalize())는
+    //    `mode === "exact"`가 아니라는 이유로 **typescript(느슨한 쪽)** 로 접는다 — cert 사본의
+    //    바이트 위변조가 원본과 같다고 읽히는 방향이다(이 파일 헤더가 스스로 경계한 그 방향).
+    //    targets **0건**은 여기서 안 잡는다: 그 진단은 rowFor의 "normalize 유도 불가"가 소유한다.
+    for (const t of e.targets as Partial<Target>[]) {
+      if (typeof t?.repo !== "string" || typeof t?.ref !== "string" || typeof t?.path !== "string")
+        throw new Error(`${e.source}: target 행에 repo/ref/path(문자열)가 없다 — 포맷 드리프트로 갱신 불가`);
+      if (t.normalize !== "typescript" && t.normalize !== "exact")
+        throw new Error(`${e.source}: target 행의 normalize가 typescript|exact가 아니다(${JSON.stringify(t.normalize)}) — 앱 행이 느슨한 쪽으로 상속된다`);
+    }
   }
   return m as Manifest;
 }
@@ -57,6 +69,8 @@ const serialize = (mf: Manifest) => JSON.stringify(mf, null, 2) + "\n";
 // 한 vendored 항목이 이 앱에 대해 가져야 할 행. normalize는 그 항목의 기존 행에서 상속한다 —
 // 값이 갈리거나(모드 혼재) 기존 행이 0건이면 유도 불가라 throw다(임의 기본값을 고르면 cert가
 // typescript로 느슨해지는 방향의 조용한 계약 약화가 가능해진다).
+// ⚠️ 여기서 재는 것은 **크기**뿐이다 — 값이 `Norm`인지는 parse()가 이미 잠갔다(그게 없으면
+//    `[undefined]`·`["Exact"]`도 길이 1이라 통과해 그 약화가 상속으로 열린다).
 function rowFor(e: Entry, app: string): Target {
   const norms = [...new Set(e.targets.map((t) => t.normalize))];
   if (norms.length !== 1)

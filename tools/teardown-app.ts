@@ -53,11 +53,19 @@ if (existsSync(dePath) && hasApp(readFileSync(dePath, "utf8"), app)) {
 // 동봉 계약 매니페스트 — 부재는 **no-op**이다(멱등 철거 계약: 뺄 행 자체가 없다). create-app 쪽
 // 부재가 fail-closed인 것과 방향이 다른 근거는 거기 주석이 갖는다 — 그쪽 부재는 "행이 영영 안
 // 들어감"이라 다음 리컨실이 발화하지만, 이쪽 부재는 새 거짓 상태를 만들지 않는다. 형제(digest-exporter)도
-// 같은 비대칭이다. 소속 판정은 커널(hasAppTargets)이라 계획과 실제 제거가 **같은 문법**을 본다
-// (부재=false는 정상 no-op, 포맷 드리프트=throw는 고장).
+// 같은 비대칭이다.
+// ⚠️ 대체 바이트를 **쓰기 앞에서** 계산한다(create-app.ts의 「판정·조립은 쓰기 앞이다」와 같은 규율).
+//    `hasAppTargets`만으로 계획을 세우고 쓰기 단계에서 `removeAppTargets`를 처음 부르면, 그 술어가
+//    모르는 두 번째 거부 축(앵커 행까지 비우는 제거)이 **시퀀스 중간에서** 처음 던진다 — 라이브 실측:
+//    dry-run이 rc 0으로 전 항목을 약속해 놓고 실행은 apps/·apps.json·digest-exporter를 이미 쓴 뒤
+//    죽어 원장 행만 남는 **반쪽 철거**가 됐다. 계획과 행동이 같은 **값**을 보게 해 그 창을 없앤다.
+//    등재 판정으로 한 번 더 좁히는 것도 같은 이유다 — 행이 없는 앱의 철거는 매니페스트를 아예 열지
+//    않는다(안 그러면 정준화 재포맷이 계획에 없는 쓰기로 철거 PR에 실린다: 손 편집 산문 파일이라
+//    들여쓰기가 어긋난 순간 도달한다).
 const vcPath = `${ROOT}/tools/vendored-contract.json`;
 const vcBefore = existsSync(vcPath) ? readFileSync(vcPath, "utf8") : null;
-if (vcBefore !== null && hasAppTargets(vcBefore, app)) {
+const vcNext = vcBefore !== null && hasAppTargets(vcBefore, app) ? removeAppTargets(vcBefore, app) : null;
+if (vcNext !== null) {
   plan.remove.push("vendored-contract target 행");
 }
 
@@ -67,11 +75,8 @@ if (!DRY) {
   if (plan.appsJsonRow) {
     writeFileSync(appsJsonPath, JSON.stringify(registry.filter((r: any) => r.name !== app), null, 2) + "\n");
   }
-  if (vcBefore !== null) {
-    // 멱등 — 등재돼 있지 않으면 커널이 같은 바이트를 내고, 그때는 파일을 만지지 않는다.
-    const vcNext = removeAppTargets(vcBefore, app);
-    if (vcNext !== vcBefore) writeFileSync(vcPath, vcNext);
-  }
+  // 계획이 실은 그 바이트를 그대로 쓴다(위에서 이미 계산·검증됐다 — 여기서는 throw가 불가능하다).
+  if (vcNext !== null) writeFileSync(vcPath, vcNext);
   if (plan.ledgerRow) {
     // 행 제거 + 합계 재계산(removeRow는 줄 splice라 빈 줄 잔류 없음 — 구 인라인 replace 버그 소멸)
     writeFileSync(ledgerPath, removeRowWithTotals(ledger, app));
