@@ -342,6 +342,30 @@ EOF
   [ "$(cat "$FR/tools/vendored-contract.json")" = "$before" ]
 }
 
+@test "create-app then teardown-app returns the manifest byte-identical and keeps the roster in equality" {
+  # 실 트리는 앱 0건(greenfield)이라 로스터 등식(test_contract-drift.bats)의 판별력이 0이다 —
+  # "커널이 쓰는 `repo` 값 == `deriveAppRepos`가 source-repo에서 파생하는 이름"이라는 **결합 명제**를
+  # 재는 자리가 없었다(두 반쪽은 따로 고정돼 있다). 그리고 create가 쓰는 집합 == teardown이 빼는
+  # 집합이라는 대칭도, 두 스위트가 서로 다른 픽스처에서 독립으로 초록이라 무증인이었다.
+  # `--roster`는 오프라인 모드다(라이브 fetch 없음).
+  V="$FR/tools/vendored-contract.json"
+  before="$(cat "$V")"
+  gen
+  [ "$status" -eq 0 ]
+  # 항진 배제 — 사이에 실제로 앱 행 2개가 서 있었다(왕복이 no-op의 왕복이 아니다).
+  run jq -e '[.vendored[].targets[] | select(.repo == "orders")] | length == 2' "$V"
+  [ "$status" -eq 0 ]
+  run bun "$ROOT/tools/contract-drift-check.ts" --roster --root "$FR" --manifest "$V"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '"status": "matched"'
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$V")" = "$before" ]
+  run bun "$ROOT/tools/contract-drift-check.ts" --roster --root "$FR" --manifest "$V"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '"status": "greenfield"'
+}
+
 @test "create-app fails closed when the vendored contract manifest is missing (no silent skip)" {
   # 조용한 skip이면 앱은 만들어지는데 로스터 행만 없어, 다음 리컨실 주기가 missing-target으로
   # 발화한다 — 정확히 이 티켓이 없애는 실패다. 형제 처방: digest-exporter.yaml 부재도 exit 1.

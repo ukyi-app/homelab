@@ -380,6 +380,42 @@ dbs_count() { c=0; for t in $(dbs_line "$1"); do if [ "$t" = "$2" ]; then c=$((c
   [ "$(cat "$VC")" = "$before" ]
 }
 
+@test "the anchor-emptying refusal fires in the plan, before any surface is torn down" {
+  # 🔴 적대 검토 실측: plan 단계 판정이 `hasAppTargets`뿐이면 그 술어가 **모르는** 두 번째 거부 축
+  #    (앵커 행까지 비우는 제거)이 쓰기 시퀀스 중간에서 처음 던졌다 — dry-run은 rc 0으로 전 항목을
+  #    약속하고, 실행은 apps/·apps.json·digest-exporter를 이미 쓴 뒤 죽어 원장 행만 남았다(반쪽 철거).
+  #    도달 조건: 앵커(템플릿) 행은 손 편집 축이라, 앱 행만 가진 source가 하나 생기면 열린다.
+  jq 'del(.vendored[0].targets[] | select(.repo == "homelab-app-template"))' "$VC" > "$TMP/vc.json"
+  mv "$TMP/vc.json" "$VC"
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR" --dry-run
+  [ "$status" -ne 0 ]
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  [ "$status" -ne 0 ]
+  # 거부는 어떤 표면도 만지기 전이다 — 네 표면 전부가 철거 전 상태로 살아 있다.
+  [ -d "$FR/apps/orders" ]
+  run jq -e '[.[] | select(.name == "orders")] | length == 1' "$FR/infra/cloudflare/apps.json"
+  [ "$status" -eq 0 ]
+  grep -q 'ledger:row --> orders' "$FR/docs/memory-ledger.md"
+  grep -q 'orders=ghcr.io/ukyi-app/orders:sha-x' "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
+}
+
+@test "a non-canonical manifest survives an unrelated app's teardown untouched (no plan-less rewrite)" {
+  # 🔴 적대 검토 실측: 쓰기 가드가 `vcBefore !== null`뿐이면, 그 앱 행이 0개여도 커널이 돌아
+  #    `JSON.stringify(…, 2)` **정준화 바이트**를 낸다. `_note`/`_roster` 산문 때문에 손 편집을 받는
+  #    파일이라 들여쓰기가 어긋난 순간, 무관한 앱의 철거가 파일 전체를 재포맷해 계획(remove)에
+  #    없는 변경으로 철거 PR에 실렸다(이 경로는 add-paths·ALLOWLIST 안이라 잔여물 판정에도 안 걸린다).
+  jq --indent 4 '.' "$VC" > "$TMP/vc.json"
+  mv "$TMP/vc.json" "$VC"
+  before="$(cat "$VC")"
+  run bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$VC")" = "$before" ]
+  # 양성 대조 — 같은 비-정준 픽스처에서 등재된 앱의 철거는 실제로 이 파일을 만진다(무변경이 상수가 아니다).
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$VC")" != "$before" ]
+}
+
 @test "a missing manifest is a quiet no-op for teardown (idempotent removal contract)" {
   # create-app과 방향이 다르다: 거기서는 부재가 '행이 영영 안 들어감'(다음 리컨실이 발화)이지만,
   # 철거에서는 뺄 행 자체가 없다 — 형제 처방(digest-exporter)도 같은 비대칭이다.

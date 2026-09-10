@@ -204,6 +204,54 @@ JSON
   printf '%s\n' "$output" | grep -qF '0건'
 }
 
+@test "parse rejects a target row missing repo, ref or path (the Target type had no runtime witness)" {
+  # `parse`는 owner/source/targets 형상만 봤고 target **원소**는 안 봤다 — `Target` 타입이 런타임
+  # 증인 없이 참을 주장하던 자리다. 세 키를 하나씩 지워 전부 거부되는지 잰다(한 분기의 세 절).
+  run bun -e "
+    import { addAppTargets } from '$ROOT/tools/lib/vendored-targets.ts';
+    import { readFileSync } from 'node:fs';
+    const orig = readFileSync('$M','utf8');
+    for (const k of ['repo','ref','path']) {
+      const mf = JSON.parse(orig);
+      delete mf.vendored[0].targets[0][k];
+      let threw = '';
+      try { addAppTargets(JSON.stringify(mf, null, 2) + '\n', 'orders'); } catch (e) { threw = String(e); }
+      if (threw.indexOf('repo/ref/path') < 0) { console.error('키 ' + k + ' 부재가 통과했다: ' + threw); process.exit(1); }
+    }
+    console.log('shape-locked');
+  "
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qx 'shape-locked'
+  # 양성 대조 — 손대지 않은 같은 매니페스트는 통과한다(거부가 상수가 아니다).
+  run run_lib "t = addAppTargets(t,'orders');"
+  [ "$status" -eq 0 ]
+}
+
+@test "parse rejects a normalize outside typescript|exact, an absent key included (no silent loosening)" {
+  # 🔴 적대 검토 실측: 상속(rowFor)이 값 집합의 **크기**만 재서 `[undefined]`(키 부재)도
+  #    `["Exact"]`(오타)도 길이 1로 통과했다. 그렇게 만든 앱 행을 소비자(contract-drift-check의
+  #    normalize())는 `mode === "exact"`가 아니라는 이유로 **typescript(느슨한 쪽)** 로 접는다 —
+  #    cert 사본의 바이트 위변조가 원본과 같다고 읽히는 방향이다.
+  run run_lib "
+    const mf = JSON.parse(t);
+    delete mf.vendored[1].targets[0].normalize;
+    t = JSON.stringify(mf, null, 2) + '\n';
+    appTargetRows(t,'orders');
+  "
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF 'tools/sealed-secrets-cert.pem'
+  printf '%s\n' "$output" | grep -qF 'normalize'
+  # 열거 밖 값도 같은 축이다 — 상속은 값을 복사할 뿐 검사하지 않았다.
+  run run_lib "
+    const mf = JSON.parse(t);
+    mf.vendored[1].targets[0].normalize = 'Exact';
+    t = JSON.stringify(mf, null, 2) + '\n';
+    t = addAppTargets(t,'orders');
+  "
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF 'Exact'
+}
+
 @test "addAppTargets refuses a source whose normalize cannot be derived from an existing row" {
   run run_lib "
     const mf = JSON.parse(t);
