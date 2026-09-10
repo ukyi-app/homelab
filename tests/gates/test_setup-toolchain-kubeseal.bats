@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # setup-toolchain composite의 kubeseal input — 봉인 워크플로의 kubeseal 버전 SSOT.
-# 컨트롤러 appVersion(helmrelease.yaml app v0.38.4)과 동일 버전으로 수렴(seal/unseal 호환).
+# 컨트롤러 appVersion(helmrelease.yaml app v0.39.1)과 동일 버전으로 수렴(seal/unseal 호환).
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 # ⚠️ 부재 단언은 `-eq 1`이다 — grep은 대상 부재/읽기불가에 rc 2를 내는데 `-ne 0`은 그것을 무매치와
 #    구별하지 않아 대상이 리네임/삭제돼도 조용히 통과한다. 디렉토리 피연산자는 `-eq 1`로도 안
@@ -18,8 +18,8 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "setup-toolchain pins kubeseal to v0.38.4 (controller appVersion)" {
-  run grep -E 'sealed-secrets/releases/download/v0\.38\.4/kubeseal-0\.38\.4-linux-arm64\.tar\.gz' "$A"
+@test "setup-toolchain pins kubeseal to v0.39.1 (controller appVersion)" {
+  run grep -E 'sealed-secrets/releases/download/v0\.39\.1/kubeseal-0\.39\.1-linux-arm64\.tar\.gz' "$A"
   [ "$status" -eq 0 ]
   # 옛 v0.27.3 핀이 composite에 남지 않았는지 — rc 2(파일 부재)를 통과로 읽지 않는다.
   # 위의 양성 단언이 같은 파일 "$A"의 실재를 함께 증언한다.
