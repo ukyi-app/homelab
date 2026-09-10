@@ -118,8 +118,7 @@ setup() {
 # 도메인(추적 `*.bats` + `load` seam `*.bash`)이 비면 통과가 아니라 SKIP이다 — 수집이 깨져 0건이 된
 # 것과 "검사했고 깨끗함"을 가르지 못하면 이 가드가 죽어도 게이트가 초록이다.
 # ⚠️ 채널은 **skip이 아니라 열거 붕괴**다 — 기본 모드 도메인은 정당하게 0이 될 수
-# 없다. (건수는 여기 적지 않는다 — 손 관리 수치는 드리프트한다, scripts/lib/scan-floor.sh 규약.
-# 착지 전 주석에 남아 있던 "229건"은 실제 열거와 어긋난 낡은 수치였다.)
+# 없다. (건수는 여기 적지 않는다 — 손 관리 수치는 드리프트한다, scripts/lib/scan-floor.sh 규약.)
 # 거의 같은 도메인의 형제(check-skeleton·check-bats-accounting — `*.bats`만)가 exit 1 바닥값이라,
 # 여기서 exit 4 + `SKIP:`를 내면 "정당하게 대상 없음(미평가·정상)"으로 정반대로 읽힌다(적대 검토 확정).
 # 픽스처 = 스크립트 + 커널을 복사한 빈 git 레포(스크립트가 ROOT를 BASH_SOURCE/..로 잡는다).
@@ -407,7 +406,7 @@ setup() {
 }
 
 @test "the same git-grep absence written as a one-liner semicolon-else-run idiom is still caught (reg13-a1-bats-guards-1)" {
-  # 같은 근본원인의 형제 — round12(reg-d-bats-style-last-2)가 `do`/`then`만 처방하고 `else`를
+  # 같은 근본원인의 형제 — 앞선 정기 회귀가 `do`/`then`만 처방하고 `else`를
   # 빠뜨렸다. `; else run …`도 abs_line 분해 뒤 세그먼트가 "else run git grep …"가 되어 앵커에
   # 안 걸렸다. run/status를 @test 선언 줄이 아닌 본문 줄 하나에 같이 둔다(위 then 형제와 동형 —
   # 선언 줄 자체에 두면 별개의 orthogonal 무증인 구멍과 섞여 else 수정 효과를 단독 검증 못한다).
@@ -435,7 +434,7 @@ setup() {
 }
 
 @test "detector rejects grep -q -v with separated flags (same clustering, different spelling)" {
-  # grep-a-5 — 예전 판은 q·v가 한 토큰 안에 붙어야 매치했다. `grep -q -v`는 POSIX 동치 표기인데
+  # 예전 판은 q·v가 한 토큰 안에 붙어야 매치했다. `grep -q -v`는 POSIX 동치 표기인데
   # 무측정이었다(옵션 두 글자를 런타임에 조립 — 리터럴이면 이 파일 자신이 [QV]에 걸린다).
   q="-q"; v="-v"
   printf '%s\n' \
@@ -558,7 +557,7 @@ setup() {
   echo "$output" | grep -qE '부재 단언 [0-9]+ \(baseline [0-9]+\)'
 }
 
-# ── [SETCAP] 레인 — 이름 있는 집합의 상한 부재(티켓 59) ───────────────────────────────────────
+# ── [SETCAP] 레인 — 이름 있는 집합의 상한 부재 ──────────────────────────────────────────────
 # 근거·다섯 술어 형태의 분모 규약은 scripts/check-bats-style.sh의 [SETCAP] 헤더가 소유한다.
 # 픽스처는 printf로 만든다(위 픽스처들과 같은 이유 — heredoc 속 '@test'는 bats 전처리기가 재작성한다).
 
@@ -588,7 +587,7 @@ setup() {
 }
 
 @test "an echo string literal containing a bracket-test-shaped string-equality substring does not smuggle in a false cardinality predicate ([SETCAP] negative, reg13c-fn-bats-style-2)" {
-  # reg13-a2-ops-infra-1(#664)은 수 등식 브랜치(현재 475-476행)에만 여는 `[` 앵커를 추가했다 —
+  # 앞선 처방(#664)은 수 등식 브랜치(현재 475-476행)에만 여는 `[` 앵커를 추가했다 —
   # 같은 파일의 문자열 등식 브랜치(traps-ops-2가 `=` 앞 공백만 요구)는 형제 열거에서 놓쳤다.
   # 그 결과 echo 진단문 안 우연한 ` = "…"` 텍스트(bracket-test 좌우 앵커 없음)도 여전히 진짜
   # bracket-test 등식으로 오인된다(비평가 실증 PoC 그대로).
@@ -635,7 +634,7 @@ setup() {
 }
 
 @test "a self-deriving numeric equality (variable on both sides) satisfies the cardinality predicate ([SETCAP] positive, setcap-17)" {
-  # 12라운드 setcap-17(tests/gates/test_telegram-callsites.bats:51,63) — `-eq`의 우변이 리터럴
+  # tests/gates/test_telegram-callsites.bats:51,63 — `-eq`의 우변이 리터럴
   # 숫자가 아니라 변수인 자기유도 등식은 위 수 등식 술어(418행, 우변 `[0-9]+` 전용)에 안 걸린다.
   printf '%s\n' \
     '@test "exactly the expected workflows notify via the action (self-deriving sum)" {' \
@@ -713,7 +712,7 @@ setup() {
 }
 
 # ── 여섯 번째 형태(jq/yq `== [` 배열 리터럴 등식) — 실 레포 관용구 회귀 잠금 ──────────────────────
-# 7라운드 setcap-denominator-2 실측: platform/charts/app/tests/test_schema_fail_closed.bats:53,62는
+# platform/charts/app/tests/test_schema_fail_closed.bats:53,62는
 # `run jq -e '...enum == [...]'; [ "$status" -eq 0 ]` 형태로 이미 완전히 상한을 잠갔지만, 그 매치는
 # 뒤따르는 `-eq 0`(jq 성공 rc, 다섯 형태 목록의 「수 등식」)에 **우연히** 걸린 것뿐이었다 — 배열
 # 리터럴 자체를 재는 술어는 이 커밋 전까지 없었다. 실 관용구를 그대로 픽스처로 고정해, 다음
@@ -729,7 +728,7 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-# ── 죽은 세 술어(contains(/join(","/length ==)의 양성 픽스처 — 7라운드 setcap-denominator-3 ───────
+# ── 죽은 세 술어(contains(/join(","/length ==)의 양성 픽스처 ──────────────────────────────────────
 # 실측: 세 정규식 중 어느 하나를 삭제해도 기존 픽스처·라이브 위반집합 양쪽 다 무증인이었다(위
 # `count=2` 픽스처가 「수 등식」 하나로만 초록을 낸다). 각 형태를 **단독으로**(다른 다섯 형태와
 # 겹치지 않게) 행사해 정규식이 지워지면 이 @test들 스스로 red가 나게 잠근다.
@@ -948,7 +947,7 @@ setup() {
 @test "an exec target followed by a grep pipe filter is still caught, not excluded wholesale (exec-target-grep-exclusion)" {
   # ⚠️ 착지 전: exec_target의 grep 배제가 "문장 어딘가에 grep"이면 통째로 배제했다 — `run
   #    scripts/x.sh --bad | grep -q whatever` 관용구 전체가 hard-zero 게이트의 사각이었다
-  #    (비평가 실증, 13라운드: before/after 0→1, grep 파이프 추가/제거로 재현). mask_pipe로
+  #    (비평가 실증: before/after 0→1, grep 파이프 추가/제거로 재현). mask_pipe로
   #    가린 뒤 첫 세그먼트에만 grep 배제를 걸어, 실행물이 head이고 grep이 뒤따르는 필터인
   #    이 관용구가 [ABS-EXEC]로 잡히게 한다.
   printf '%s\n' \

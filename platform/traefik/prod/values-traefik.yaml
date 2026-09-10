@@ -43,6 +43,6 @@ resources:
   #    GOMEMLIMIT은 차트가 limits.memory에서 자동 파생한다(=96Mi).
   limits: { cpu: 500m, memory: 96Mi }
 rbac:
-  enabled: true # 기본 RBAC; Gateway-API 확장은 rbac-gateway.yaml에서 (Task 3.3)
+  enabled: true # 기본 RBAC; Gateway-API 확장은 rbac-gateway.yaml에서
 serviceAccount:
   name: traefik

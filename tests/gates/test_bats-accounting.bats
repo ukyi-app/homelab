@@ -24,7 +24,7 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 }
 
 # ── 신설 계약 (1)(2) 핵심 판정 증인 — `--registry <파일>` ────────────────────────────────────────
-# ⚠️ 감사 6라운드 57 venue-2 실증: 이 파일의 픽스처 20여 건은 전부 `--lint-excludes`로만 가드를 부르는데
+# ⚠️ 이 파일의 픽스처 20여 건은 전부 `--lint-excludes`로만 가드를 부르는데
 #    그 모드는 (1)(고아·이중소유)·(2)(추적 실재·gate 모순) **판정 앞에서** exit한다(스크립트 :214
 #    `if [ "$LINT_ONLY" -eq 1 ]; then exit "$rc"; fi`). 무인자 호출("the real tree …")은 실 트리가 이미
 #    그 판정들을 만족해 양성 대조만 되고, 뮤테이션 A(:242 `-ne 1`→`-gt 3`)·B(:251/:254 두 판정을
@@ -131,7 +131,7 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 
 @test "each recognized venue form proves a group (make target, bats path, workflow file)" {
   # 음성 대조 — 이 레인이 '표기가 있으면 무조건 red'가 아니라 **실재 + 호출**을 재는지 고정한다.
-  # ⚠️ 감사 6라운드 57 venue-1: 항목은 venue가 **실제로 부르는** 파일이어야 한다(venue_calls) — 무관한
+  # ⚠️ 항목은 venue가 **실제로 부르는** 파일이어야 한다(venue_calls) — 무관한
   #    tests/gates/test_scan-floor.bats로는 make/워크플로 형태가 더 이상 통과하지 않는다. 셋 다 실
   #    트리에서 그 venue가 실제로 부르는 파일이다: `verify`→sops-roundtrip · 이 파일 자신(bats 형태는
   #    호출 검사 대상이 아니다) · iac.yaml→tf_validate(terraform 그룹의 실제 표기).
@@ -168,9 +168,9 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 }
 
 # ── 신설 계약 (0a-calls): venue의 실재만으로는 부족하다 — 그 venue가 이 항목을 실제로 불러야 한다 ────
-# ⚠️ 감사 6라운드 57 venue-1 실증: venue_derive는 `make <타깃>`과 `.github/workflows/<파일>` 형태에
+# ⚠️ venue_derive는 `make <타깃>`과 `.github/workflows/<파일>` 형태에
 #    대해 venue의 **실재**만 쟀다. venue 표기를 무관한 다른 실재 파일로 바꿔도(iac.yaml→renovate.yaml),
-#    venue 쪽의 실제 호출 줄을 지워도 rc=0였다(2026-09-04 실측 — round6 EVIDENCE 뮤테이션 (a)(b)(c)).
+#    venue 쪽의 실제 호출 줄을 지워도 rc=0였다(2026-09-04 실측 — EVIDENCE 뮤테이션 (a)(b)(c)).
 #    venue_calls()가 그 구멍의 증인이다: venue 파일 본문(주석 제외)에서 test_*.bats 토큰을 뽑아
 #    항목 경로가 매치하는지 본다.
 
@@ -194,18 +194,48 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   echo "$output" | grep -q "venue가 0건 실재"
 }
 
+# ── 사본 레포 픽스처 — venue_calls의 Makefile 스코프를 실 트리를 건드리지 않고 재는 자리 ─────────
+# 아래 두 @test는 예전에 **실 Makefile**에 프로브 타깃을 append했다가 사본으로 복원했다. 파일 단위
+# 병렬 bats에서 그 창을 밟은 다른 프로세스의 가드(make help·ci-parity·makefile-bun)가 거짓 red를 냈고,
+# 이 스위트는 그 때문에 직렬 레인에 있었다(docs/traps-detail.md 「파일 단위 병렬 bats에서 실 체크아웃을
+# 잠깐 바꾸는 스위트는 …」). 이제 가드 사본 + 커널 사본 + **합성 Makefile**을 $BATS_TEST_TMPDIR/fx에
+# 세우고 그 **사본 가드**를 돌린다 — 가드는 ROOT를 BASH_SOURCE/../..에서 파생하므로
+# (scripts/lib/guard.sh의 guard_init) 사본 가드가 사본 트리의 Makefile을 읽는다. 실 체크아웃이 무변경이라
+# 복원 자체가 사라지고, 구 판이 `git checkout -- Makefile` 대신 사본 복원을 써야 했던 이유(공유
+# .git/index 잠금 + Makefile의 미커밋 편집 소실)도 함께 소멸한다.
+# 선례: tests/gates/test_bats-style.bats의 emptyrepo 픽스처.
+# ⚠️ `--lint-excludes` 모드는 git을 쓰는 (1)(2) 판정 **앞에서** exit하므로 사본 레포가 비어도 된다.
+#    그래도 `git init`은 해 둔다: 안 하면 사본 트리에 git 레포가 없어, 나중에 가드가 git을 더 일찍
+#    부르게 될 때 그 실패가 음성 @test에서 조용한 통과로 흡수된다.
+# $1=프로브 타깃명 · $2=레시피 한 줄(탭은 여기서 붙인다). 사본 루트를 전역 `fx`로 남긴다.
+# ⚠️ 마지막 grep은 픽스처가 **실제로 착지했는지**의 증인이다 — 합성 Makefile이 안 써졌거나 타깃명이
+#    드리프트하면 아래 음성 @test가 「타깃이 없어서 red」로 조용히 통과한다(픽스처가 자기 전제를 잃는 자리).
+acct_fixture() {
+  fx="$BATS_TEST_TMPDIR/fx"
+  mkdir -p "$fx/scripts/lib"
+  cp "$ROOT/scripts/check-bats-accounting.sh" "$fx/scripts/"
+  cp "$ROOT/scripts/lib/guard.sh" "$fx/scripts/lib/"
+  cp "$ROOT/scripts/lib/scan-floor.sh" "$fx/scripts/lib/"
+  printf '%s:\n\t%s\n' "$1" "$2" > "$fx/Makefile"
+  git -C "$fx" init -q
+  grep -q "^$1:" "$fx/Makefile"
+}
+
 @test "a make target's trailing comment mentioning a bats path is not treated as a call (acct-trailing-comment)" {
   # 비평가 실증 — venue_calls()가 줄 전체 주석만 걷을 때는 코드 줄에 붙은 trailing 주석 속 경로
-  # 언급도 호출 증인으로 오인됐다(진짜 호출은 없는데 주석에만 경로가 있어도 HIT). Makefile에
-  # 임시 타깃을 얹어(레시피 한 줄에 trailing 주석으로만 경로 언급) 재현하고 원복한다.
-  cp Makefile "$BATS_TEST_TMPDIR/Makefile.bak"
-  printf '\n_zz_acct_trailing_probe:\n\t@echo hi # see tests/_fixtures_acct/test_zz_trailing_probe.bats for context, not actually called\n' >> Makefile
+  # 언급도 호출 증인으로 오인됐다(진짜 호출은 없는데 주석에만 경로가 있어도 HIT). 합성 Makefile의
+  # 프로브 타깃이 레시피 한 줄에 **trailing 주석으로만** 경로를 언급한다 — 타깃 자체는 실재하므로
+  # 이 레인이 red를 내는 이유는 「주석 속 언급은 호출이 아니다」뿐이다.
+  acct_fixture _zz_acct_trailing_probe \
+    '@echo hi # see tests/_fixtures_acct/test_zz_trailing_probe.bats for context, not actually called'
   reg="$BATS_TEST_TMPDIR/mktrailing"
   mkreg "$reg" '# 사유 — 실행처: owner-local `make _zz_acct_trailing_probe`' 'tests/_fixtures_acct/test_zz_trailing_probe.bats'
-  run bash "$s" --lint-excludes "$reg"
-  git checkout -- Makefile
+  run bash "$fx/scripts/check-bats-accounting.sh" --lint-excludes "$reg"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "venue가 0건 실재"
+  # 표기가 그 프로브 타깃으로 파싱됐다는 증인 — 레지스트리 쪽 타깃명이 합성 Makefile 쪽과 드리프트하면
+  # 여기서 걸린다(acct_fixture의 grep과 짝: 저긴 Makefile 리터럴, 여긴 레지스트리 리터럴).
+  echo "$output" | grep -q "인식한 토큰: \[make _zz_acct_trailing_probe\]"
 }
 
 @test "a quoted trailing hash does not truncate a real call after it (acct-quote-aware, reg13-a1-bats-guards-2)" {
@@ -214,17 +244,16 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   # green, 회귀 0). 위 acct-trailing-comment와 형제 관용구 — 이번엔 주석이 **인용부호 안**에
   # 있고 그 뒤에 실제 test_*.bats 호출이 같은 줄에 이어진다. quote-aware가 없으면 그 `#`에서
   # 조기 절단돼 뒤따르는 진짜 호출을 놓친다(거짓 MISS).
-  cp Makefile "$BATS_TEST_TMPDIR/Makefile.bak"
-  printf '\n_zz_acct_quote_probe:\n\t@echo "note # symbol" && bash tests/_fixtures_acct/test_zz_quote_probe.bats\n' >> Makefile
+  acct_fixture _zz_acct_quote_probe \
+    '@echo "note # symbol" && bash tests/_fixtures_acct/test_zz_quote_probe.bats'
   reg="$BATS_TEST_TMPDIR/mkquote"
   mkreg "$reg" '# 사유 — 실행처: owner-local `make _zz_acct_quote_probe`' 'tests/_fixtures_acct/test_zz_quote_probe.bats'
-  run bash "$s" --lint-excludes "$reg"
-  git checkout -- Makefile
+  run bash "$fx/scripts/check-bats-accounting.sh" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
 }
 
 # ── 신설 계약 (0a-self): 자기지시/상호지시는 증명이 아니다(항진식) ───────────────────────────────
-# ⚠️ 감사 5라운드 50 critic-venue-tautology 실증: venue_derive는 `bats <경로>` venue를 파일 **존재**로만
+# ⚠️ venue_derive는 `bats <경로>` venue를 파일 **존재**로만
 #    검증해, 「이 파일이 실행되는 곳: 이 파일」(자기지시)도 「이 파일이 실행되는 곳: 다른 .ci-exclude
 #    항목」(상호지시)도 그대로 통과시켰다 — 인용 경로를 무관한 다른 .ci-exclude 항목으로 바꿔도
 #    --lint-excludes가 16/16 rc=0로 불변이었다(실측 2026-09-03). 아래 셋이 그 구멍의 증인이다.
@@ -299,7 +328,7 @@ excl_max() { grep -oE '^EXCL_MAX=[0-9]+' "$s" | cut -d= -f2; }
   [ "$status" -eq 0 ]
 }
 
-# ── 신설 계약: manual 상한 (감사 6라운드 57 venue-3) ────────────────────────────────────────────
+# ── 신설 계약: manual 상한 ─────────────────────────────────────────────────────────────────
 # ⚠️ `manual` venue는 무조건 인정이라(venue_derive의 manual 분기) 상한이 없으면 자동 venue를 manual
 #    표기로 바꾸는 것이 red를 피하는 최단 경로가 된다. 뮤테이션 재현: 자동 venue 3그룹(posture·
 #    KSOPS·iac.yaml)을 전부 manual로 바꿔도 이 상한 이전에는 --lint-excludes rc=0였다(2026-09-04 실측).
@@ -363,12 +392,13 @@ manual_max() { grep -oE '^MANUAL_MAX=[0-9]+' "$s" | cut -d= -f2; }
 
 # ── 스캔 신호 규약 ───────────────────────────────────────────────────────────────────────────────
 
-@test "the default run emits all three domain scan markers" {
+@test "the default run emits all four domain scan markers" {
   run bash "$s"
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE '^SCAN: check-bats-accounting:excludes: [0-9]+$'
   echo "$output" | grep -qE '^SCAN: check-bats-accounting:gate: [0-9]+$'
   echo "$output" | grep -qE '^SCAN: check-bats-accounting:tracked: [0-9]+$'
+  echo "$output" | grep -qE '^SCAN: check-bats-accounting:serial: [0-9]+$'
 }
 
 @test "a fixture lint reports a different exclude count than the real registry" {
@@ -380,4 +410,58 @@ manual_max() { grep -oE '^MANUAL_MAX=[0-9]+' "$s" | cut -d= -f2; }
   [ -n "$fix" ]
   [ -n "$real" ]
   [ "$fix" -ne "$real" ]
+}
+
+# ── (2b) 직렬 레인 레지스트리(tests/.gate-serial) 계약 ──────────────────────────────────────────
+# run-bats.sh가 병렬 레인 뒤 혼자 도는 파일 목록. 레인은 도메인이 아니라 실행 순서라 (1)의 회계가 못 보므로
+# 별도 계약이다 — 사유 주석 지배 · 추적 + gate 수집 안 · 상한. `--serial-registry <파일>`이 픽스처 모드다.
+
+@test "the committed serial-lane registry passes and reports the lane size (0 is the target state)" {
+  run bash "$s"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^SCAN: check-bats-accounting:serial: [0-9]+$'
+  # 등재 건수는 상한과 같은 자리에서 읽힌다 — 레지스트리 항목 수와 마커가 같아야 한다.
+  n_reg="$(grep -vcE '^[[:space:]]*(#|$)' "$ROOT/tests/.gate-serial" || true)"   # 0건이면 grep -c가 rc 1 — 0은 정당한 값
+  echo "$output" | grep -qE "^SCAN: check-bats-accounting:serial: ${n_reg}\$"
+}
+
+@test "a serial-lane entry outside the gate set is rejected (an .ci-exclude member cannot be serial)" {
+  reg="$BATS_TEST_TMPDIR/serial-excl"
+  mkreg "$reg" '# 사유 — 실 트리 변경' 'tests/posture/test_internal-by-default.bats'
+  run bash "$s" --serial-registry "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "gate 수집 집합에 없다"
+}
+
+@test "a serial-lane entry with no governing comment is rejected" {
+  reg="$BATS_TEST_TMPDIR/serial-bare"
+  mkreg "$reg" 'tests/gates/test_scan-floor.bats'
+  run bash "$s" --serial-registry "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "사유 주석 없이"
+}
+
+@test "a serial-lane entry for a non-tracked file is rejected" {
+  reg="$BATS_TEST_TMPDIR/serial-notracked"
+  mkreg "$reg" '# 사유' 'tests/gates/test_no-such.bats'
+  run bash "$s" --serial-registry "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "추적 파일 아님"
+}
+
+@test "the serial lane has a ceiling (growth must be visible in the diff)" {
+  reg="$BATS_TEST_TMPDIR/serial-ceiling"
+  # gate 소속 실 파일 7건 — 상한 6을 하나 넘긴다(전부 추적·수집 안이라 다른 축은 초록).
+  seven="$(bash "$ROOT/scripts/run-bats.sh" --list | sed -n '1,7p')"
+  # shellcheck disable=SC2086  # 줄 분할이 의도다(경로에 공백 없음)
+  mkreg "$reg" '# 사유' $seven
+  run bash "$s" --serial-registry "$reg"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "직렬 레인 7건 > 상한"
+}
+
+@test "a missing serial-lane registry is red, not a pass" {
+  run bash "$s" --serial-registry "$BATS_TEST_TMPDIR/nope-serial-$$"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "직렬 레인 레지스트리 없음"
 }

@@ -195,11 +195,7 @@ jobs:
       - name: CNPG 아카이브 serverName 분리 (main 진입 시 값 고정)
         # (A) 쓰기 serverName ≠ 복구 원본 serverName — 인자 없이 항상. 두 브랜치 형태 모두 green.
         # (B) 그 값이 EXPECT_PG_SERVERNAME. **main으로 들어갈 때만** 채운다.
-        # ✅ **컷오버 완료 (2026-08-17)** — 기대값을 `pg` → `pg-nuc`로 바꿨다. 이 PR이 리비전 핀
-        #     15곳을 main으로 넘기는 바로 그 PR이고, 계약대로 **같은 PR**에서 함께 바뀐다.
-        #     되돌림 금지: 라이브 NUC의 쓰기 serverName이 `pg-nuc`이므로 `pg`로 되돌리면 (B)가 red다.
-        #     (컷오버 이전의 근거: 라이브 Mac이 살아 있는 동안 `pg-nuc`가 main에 들어가면 Mac의
-        #      ArgoCD가 selfHeal로 아카이브를 갈아탄다 — 그 위험은 Mac k3s 파괴로 소멸했다.)
+        # 되돌림 금지: 라이브 NUC의 쓰기 serverName이 `pg-nuc`이므로 `pg`로 되돌리면 (B)가 red다.
         env:
           EXPECT_PG_SERVERNAME: ${{ (github.base_ref == 'main' || github.ref == 'refs/heads/main') && 'pg-nuc' || '' }}
         run: bash scripts/check-pg-servername.sh
@@ -287,8 +283,12 @@ jobs:
 
           pids=""
           # bats 스위트를 **같이** 띄운다. 수집은 scripts/run-bats.sh 단일 SSOT 그대로다(make ci와 동일 호출).
-          # 왜 같이 도는가: bats는 CPU-bound(~165s), 발화 e2e는 거의 전부 replay **대기**(~195s)라 자원이
-          # 겹치지 않는다 → 합계(~360s)가 아니라 최댓값(~195s)으로 수렴한다.
+          # 왜 같이 도는가: bats는 CPU-bound, 발화 e2e는 거의 전부 replay **대기**(가장 긴 하네스 ~195s)라 자원이
+          # 겹치지 않는다 → 합계가 아니라 최댓값으로 수렴한다. run-bats.sh는 파일 단위 병렬(--jobs=nproc, 이 러너는
+          # 4 vCPU) + 직렬 레인(tests/.gate-serial)이다 — 한 줄 직렬이던 2026-09-09 실측은 574s로 이 스텝(576s)의 전부였고
+          # 6일 사이 잡 p50이 483s→712s로 자랐다(docs/traps-detail.md 「파일 단위 병렬 bats에서 …」). 병렬 레인 첫 gate
+          # 실측(2026-09-09 #704): 잡 712s→419s · 이 스텝 576s→291s · bats 574s→243s(jobs=4). 이제 이 스텝의 장대는
+          # 가장 긴 발화 e2e 하네스(~290s)라 bats를 더 줄여도 스텝은 안 준다.
           ./scripts/run-bats.sh > /tmp/gate-bats.log 2>&1 &
           pids="$pids $!:bats(run-bats.sh)"
           for h in $harnesses; do

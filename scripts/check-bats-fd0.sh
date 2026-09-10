@@ -30,7 +30,7 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-bats-fd0
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 env 폐지).
 take_floors "check-bats-fd0" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
@@ -107,7 +107,9 @@ if [ "$arc" -ne 0 ]; then
   cat "$errlog" >&2
   exit 1
 fi
-sites="$(sed -n 's/^SITES=//p' "$errlog" | head -1)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d):
+# sed writer가 첫 매치에서 `q`로 끝내 파이프 자체를 없앤다(매치 없으면 빈 출력·rc 0으로 동일).
+sites="$(sed -n '/^SITES=/{s/^SITES=//;p;q;}' "$errlog")"
 case "$sites" in '' | *[!0-9]*) echo "FAIL: check-bats-fd0: 검출기가 호출면 수를 보고하지 않았다." >&2; exit 1 ;; esac
 
 # ⚠️ 바닥값의 대상은 **파일 수가 아니라 호출면 수**다. 파일은 수백 개인데 bats 호출면은 한 자리라,

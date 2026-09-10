@@ -76,10 +76,10 @@ printf '%s' "$stub" | grep -qxiE 'no|false|0' \
 #
 # ⚠️ loopback만 거르는 것으로는 부족하다(실측 2026-08-11). tailscale이 `~.` 라우팅 도메인으로
 #    **모든** 질의를 가져가고, 실업스트림 1순위가 100.100.100.100(MagicDNS)이다. 그 뒤는 tailnet
-#    coordination server가 지정한 100.112.20.3 = **맥미니**, 즉 라이브 클러스터의 AdGuard다
+#    coordination server가 지정한 전역 nameserver, 즉 **이 클러스터의 AdGuard**다
 #    (infra/tailscale/acl.tf의 tailscale_dns_nameservers). 100.100.100.100은 LOCAL 주소가 아니라
 #    CNI DNAT는 피하지만(ip route get → table 52), 노드 이름해석이 통째로 클러스터에 의존하게 된다
-#    — Mac을 끄는 순간 github.com조차 못 푼다(이미지 pull 불가 = §2.4 교착의 두 번째 얼굴).
+#    — AdGuard가 뜨기 전에는 github.com조차 못 푼다(이미지 pull 불가 = §2.4 교착의 두 번째 얼굴).
 #    tailnet 대역(CGNAT 100.64.0.0/10 · tailscale ULA fd7a:115c:a1e0::/48)은 그래서 거부한다.
 rc="${R}/etc/resolv.conf"
 [ -r "$rc" ] || fail "${rc}를 읽지 못했다"
@@ -201,18 +201,26 @@ done
 #       NETWORK_FILE_DROPINS="…"   ← networkd가 **실제로 로드한** 드롭인 목록
 #   ⚠️ `/run/systemd/netif/leases/<ifindex>`의 `DNS=`와 혼동하지 말 것 — 그건 DHCP가 준 raw 리스라
 #      UseDNS=false여도 값이 그대로 있다(R7 후 클라이언트 수신 확인용이지 실효값이 아니다).
-lf_idx="$($PREFLIGHT_IP -o -4 addr show 2>/dev/null \
-  | awk -v ip="$K3S_NODE_IP" '$4 ~ ("^" ip "/") { sub(/:$/, "", $1); print $1; exit }')"
+# ⚠️ writer를 먼저 **끝까지** 받고 나서 herestring으로 awk에 준다. 옛 형태(`ip … | awk '… exit'`)는 awk가
+#    첫 매치에서 파이프를 닫아, writer(실물 ip의 나머지 링크·테스트 스텁의 다음 줄)가 그 뒤에 쓰면 SIGPIPE(141)
+#    — 러너처럼 SIGPIPE가 무시된 환경에선 EPIPE 쓰기 오류(rc 1) — 로 죽고 pipefail이 그것을 채택해 여기서
+#    `set -e`가 스크립트를 죽였다(2026-09-08 CI gate flake 2회, `2>/dev/null`이 "Broken pipe"까지 삼켜
+#    진단 0줄). 등재 함정 「`grep -q`의 조기 종료가 pipefail 아래에서 writer를 SIGPIPE로 죽인다」의 형제 —
+#    소비자가 grep -q가 아니라 awk exit인 형태. 캡처 대입은 writer 실패를 `||`로 정직하게 받는다.
+lf_addrs="$($PREFLIGHT_IP -o -4 addr show 2>/dev/null)" \
+  || fail "인터페이스 주소를 열거하지 못했다(${PREFLIGHT_IP}) — 링크 ifindex를 판별할 수 없다"
+lf_idx="$(awk -v ip="$K3S_NODE_IP" '$4 ~ ("^" ip "/") { sub(/:$/, "", $1); print $1; exit }' <<<"$lf_addrs")"
 [ -n "$lf_idx" ] || fail "K3S_NODE_IP=${K3S_NODE_IP}를 가진 링크의 ifindex를 못 찾았다 — 링크 DNS 실효값을 단언할 수 없다"
 lf="${R}/run/systemd/netif/links/${lf_idx}"
 [ -r "$lf" ] || fail "${lf}를 읽지 못했다 — 링크가 DHCP DNS를 거부하는지 단언할 수 없다(networkd 상태 파일 부재)"
 # 키 부재를 '값 없음'으로 읽지 않는다 — [5]의 swaps 헤더와 같은 논거(파서가 물렸다는 양성 증거).
 grep -q '^DNS=' "$lf" || fail "${lf}에 DNS= 키가 없다 — 형식이 예상과 달라 링크 DNS를 믿을 수 없다"
 grep -q '^NETWORK_FILE_DROPINS=' "$lf" || fail "${lf}에 NETWORK_FILE_DROPINS= 키가 없다 — 드롭인 로드 여부를 믿을 수 없다"
-lf_dns="$(sed -n 's/^DNS=//p' "$lf" | head -1 | tr -d '"')"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): sed writer 쪽에서 첫 매치 뒤 q로 끝낸다
+lf_dns="$(sed -n '/^DNS=/{s/^DNS=//;p;q;}' "$lf" | tr -d '"')"
 [ -z "$lf_dns" ] \
   || fail "링크 ${lf_idx}가 DNS를 받고 있다(${lf_dns}) — 링크별 DNS는 전역 DNS=보다 **우선**하므로 HOST_UPSTREAM_DNS(${HOST_UPSTREAM_DNS})가 무효다. networkd 드롭인(UseDNS=false)이 설치만 되고 반영되지 않은 상태다: sudo networkctl reload && sudo networkctl reconfigure <iface> (주소가 2초쯤 사라졌다 돌아온다 — host-config --apply는 이제 복귀까지 기다린다) 또는 재부팅"
-lf_dropins="$(sed -n 's/^NETWORK_FILE_DROPINS=//p' "$lf" | head -1 | tr -d '"')"
+lf_dropins="$(sed -n '/^NETWORK_FILE_DROPINS=/{s/^NETWORK_FILE_DROPINS=//;p;q;}' "$lf" | tr -d '"')"
 case "$lf_dropins" in
   *10-k3s-node.conf*) : ;;
   *) fail "링크 ${lf_idx}에 10-k3s-node.conf 드롭인이 로드돼 있지 않다(NETWORK_FILE_DROPINS=${lf_dropins:-빈값}) — 지금 링크 DNS가 비어 있어도 그건 DHCP가 아직 안 준 것일 수 있고, 갱신되는 순간 전역 DNS=가 무효화된다" ;;

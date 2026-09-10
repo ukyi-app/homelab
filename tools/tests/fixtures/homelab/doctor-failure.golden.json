@@ -12,6 +12,11 @@
         "detail": "gh 인증 확인(login: ukyi)"
       },
       {
+        "id": "gh-version",
+        "status": "pass",
+        "detail": "gh 2.97.0 — 문구 계약 최소 버전(2.40) 충족"
+      },
+      {
         "id": "gh-owner",
         "status": "fail",
         "detail": "gh 로그인(ukyi) ≠ HOMELAB_OWNER(other-owner) — 변이 디스패처 actor 가드가 거부한다"
@@ -22,19 +27,44 @@
         "detail": "토큰 스코프 충족(repo, workflow)"
       },
       {
+        "id": "install",
+        "status": "pass",
+        "detail": "전역 homelab 진입점이 PATH에서 해석된다"
+      },
+      {
         "id": "bun",
         "status": "pass",
         "detail": "bun 발견(PATH)"
       },
       {
+        "id": "git",
+        "status": "pass",
+        "detail": "git 발견(PATH)"
+      },
+      {
         "id": "kubeseal",
         "status": "fail",
-        "detail": "kubeseal이 PATH에 없다 — 시크릿 봉인(app secrets 연쇄 모드)에 필요"
+        "detail": "kubeseal이 PATH에 없다 — 시크릿 봉인(app secrets 연쇄 모드)에 필요(docs/runbooks/toolchain.md)"
+      },
+      {
+        "id": "kubectl",
+        "status": "pass",
+        "detail": "kubectl 발견(PATH)"
+      },
+      {
+        "id": "git-identity",
+        "status": "pass",
+        "detail": "git 커밋 신원 확인(값 비노출)"
+      },
+      {
+        "id": "git-credential",
+        "status": "pass",
+        "detail": "GitHub https 자격 helper 설정됨"
       },
       {
         "id": "kubeconfig",
         "status": "warn",
-        "detail": "KUBECONFIG 미설정 — status·--wait의 라이브(ArgoCD) 구간이 생략된다"
+        "detail": "KUBECONFIG 미설정 — status·--wait의 라이브(ArgoCD) 구간이 생략된다(레포 루트에서: export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig)"
       },
       {
         "id": "template-access",
@@ -53,7 +83,7 @@
       }
     ],
     "summary": {
-      "pass": 5,
+      "pass": 11,
       "fail": 3,
       "warn": 1
     }

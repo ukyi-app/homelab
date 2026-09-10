@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # netpol-rehearsal.sh(owner-local, 라이브 변이) 정적 안전 불변식 — 라이브 실행 없이.
-# ⚠️ 비평가 실증(감사 9라운드 72, critic-netpol-rehearsal-identity): scripts/reset-pg-r2-archive.sh:27과
+# ⚠️ 비평가 실증: scripts/reset-pg-r2-archive.sh:27과
 #    동형인 클러스터 정체성 프리플라이트(:15의 assert-cluster-identity.sh 직접 호출)에 도메인 bats
 #    증인이 0건이었다 — `git grep -l assert-cluster-identity scripts infra`가 찾는 유일한 소비처
 #    (tests/posture/test_network-policy.bats:40)는 산문 언급뿐이고, 그 파일 자체도

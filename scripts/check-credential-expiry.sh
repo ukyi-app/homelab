@@ -3,7 +3,7 @@
 #   --days N          : N일 이내 만료 항목이 있으면 목록 출력 + exit 1 (주간 워크플로가 telegram 경고로 중계)
 #   --lint            : 스키마 + 열거 바닥값만 검증 후 exit 0/2
 #   --floor credential-expiry=N : 항목 수 바닥값 오버라이드(기본값 = 커밋된 원장의 현재 크기 —
-#                     공용 어휘, kernel-followups 02. 픽스처는 자기 크기에 맞춰 낮춰 쓴다).
+#                     공용 어휘. 픽스처는 자기 크기에 맞춰 낮춰 쓴다).
 #                     ⚠️ 그 수치를 이 주석에 적지 않는다 — 수치 SSOT는 아래 MIN_ENTRIES 대입 줄
 #                     하나뿐이다. 사본을 두면 드리프트한다(실측 2026-08-20: 주석 2 / 기본값 3 /
 #                     원장 4로 세 곳이 전부 달랐다 — tests/gates/test_credential_expiry.bats:12-16).
@@ -38,8 +38,8 @@ guard_init check-credential-expiry
 # 기본 원장은 **스크립트 기준**(ROOT)으로 잡는다 — 상대경로면 호출자의 cwd에 의존한다(무인자
 # 실행을 레포 밖에서 하면 조용히 "원장 파일 없음"이 된다). `--file`은 호출자 상대 그대로 둔다.
 FILE="$ROOT/policy/credential-expiry.json"; DAYS=14; LINT=0
-# 바닥값 오버라이드는 공용 어휘 `--floor credential-expiry=<n>`뿐이다(kernel-followups 02 —
-# 구 --min-entries 폐지).
+# 바닥값 오버라이드는 공용 어휘 `--floor credential-expiry=<n>`뿐이다(구 --min-entries
+# 어휘는 폐지됐다).
 # ⚠️ 붕괴 종료코드는 **2를 유지한다** — 형제들의 1 수렴 대상이 아니다: 소비자
 #    credential-expiry.yaml이 rc=1을 "만료 임박"(telegram 경고 + job 성공)으로 읽고 rc>=2만
 #    hard-fail한다. 붕괴를 1로 내면 거짓 제목의 알림이 나가고 job이 초록으로 남는다(게이트

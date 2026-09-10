@@ -55,7 +55,7 @@ no_block_comments() {
 }
 
 # (3) terraform override 파일 경로 판정(override.tf · override.tf.json · *_override.tf · *_override.tf.json).
-# OVR_RE는 실 가드(:74)와 witness(:144-151)가 공유하는 단일 출처다 — 사본이 갈리면(untouched-a-5)
+# OVR_RE는 실 가드(:74)와 witness(:144-151)가 공유하는 단일 출처다 — 사본이 갈리면
 # witness가 함수만 증언하고 실 가드의 인라인 사본은 무증인이 된다.
 OVR_RE='(^|/)([^/]*_)?override\.tf(\.json)?$'
 is_override_path() { printf '%s' "$1" | grep -Eq "$OVR_RE"; }

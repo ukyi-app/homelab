@@ -166,7 +166,7 @@ HP_BIND_TRIES="${HP_BIND_TRIES:-3}"   # 첫 시도 + 재추첨 2회(판별에 �
 #    게이트들은 k3s가 도는 NUC에서도 도니 LAN에 포트를 여는 것 자체가 표면이고, 프로브(0.0.0.0
 #    bind)가 실제 바인드보다 엄격하다는 관계도 그때만 성립한다. 손잡이를 두지 않는 것이 정책이다.
 hp_run_published() {
-  local name cport exclude port try=1 log="" err="" got a
+  local name cport exclude port try=1 log="" err="" got portout a
   # ⚠️ **인자 검사가 `shift`보다 먼저 온다.** `shift 3`을 먼저 하면 인자가 모자랄 때 bash가 rc 1을
   #    내고, 소비자의 `set -e`가 그 rc로 셸을 통째로 죽인다 — `exit`을 한 줄도 안 썼는데 이 lib이
   #    종료를 소유하게 되는 자리다(헤더 규율 위반). 부족은 stderr + rc 1로만 알린다.
@@ -226,10 +226,14 @@ ${err}"
   # 읽어온 포트를 **쓰지 않고 대조한다.** 예전엔 `docker port` 출력을 그대로 믿었는데, 이제는 우리가
   # 고른 값과 다르면 즉시 비-0이다 — 경합으로 매핑이 어긋나면 소비자의 readiness 루프가 30~60초를
   # 통째로 태운 뒤에야 "not ready"로 죽어 원인이 안 보인다.
-  # ⚠️ `|| got=""`가 **필요하다.** 소비자가 `set -o pipefail`인 채 이 함수를 부르면 `docker port`
+  # ⚠️ `|| portout=""`가 **필요하다.** 소비자가 `set -o pipefail`인 채 이 함수를 부르면 `docker port`
   #    실패(컨테이너가 이미 죽었을 때 rc=125)가 명령 치환 rc로 올라와 **할당 단계에서** 죽는다 —
   #    아래 진단도 `docker logs`도 실행되지 않아 하네스가 stdout·stderr 0줄로 끝난다.
-  got="$(docker port "$name" "${cport}/tcp" 2>/dev/null | head -1 | sed 's/.*://')" || got=""
+  # 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring.
+  #    `docker port`의 실패 흡수는 **캡처 문장이** 소유하고(위 문단), 뒤따르는 head|sed는 writer가
+  #    head라 조기 종료 소비자가 없다. 빈 입력이면 sed도 빈 출력이라 got=""로 원본과 같다.
+  portout="$(docker port "$name" "${cport}/tcp" 2>/dev/null)" || portout=""
+  got="$(head -n1 <<<"$portout" | sed 's/.*://')"
   [ "$got" = "$port" ] || {
     hp_err "포트 매핑을 확인할 수 없다: ${name} 요청 ${port} / 실제 '${got}' — 컨테이너가 기동 직후 죽었거나(설정 회귀) 포트 경합이거나 런타임이 매핑을 바꿨다. 아래가 컨테이너 로그다:"
     docker logs "$name" 2>&1 | tail -20 >&2 || echo "  (컨테이너가 남아 있지 않아 로그를 읽지 못했다)" >&2

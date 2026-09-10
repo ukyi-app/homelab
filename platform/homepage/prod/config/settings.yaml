@@ -5,7 +5,7 @@ quicklaunch:
   searchDescriptions: true
   hideInternetSearch: true   # 내부 전용 대시보드 — 등록 서비스/북마크 안에서만 검색
 background:
-  image: /images/background.jpg   # homepage-assets ConfigMap → /app/public/images (Task 5)
+  image: /images/background.jpg   # homepage-assets ConfigMap → /app/public/images
   blur: sm
   brightness: 75
   opacity: 50

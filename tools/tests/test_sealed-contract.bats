@@ -110,7 +110,7 @@ valid_sealed() {  # $1=파일 $2=name $3=keys-block(YAML, \n 허용)
   [ "$output" = "true" ]
 }
 
-# ── strict scope 강제(sealed-wiring #04, design-r1 R-2) — 봉인 계약의 6번째 조항 ──
+# ── strict scope 강제 — 봉인 계약의 6번째 조항 ────────────────────────────────────
 # metadata.annotations에 scope 확대 어노테이션(truthy)이 있는 유효 봉인본을 파일로 쓴다.
 scoped_sealed() {  # $1=파일 $2=어노테이션-줄
   printf 'apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nmetadata:\n  name: myapp-secrets\n  namespace: prod\n  annotations:\n    %s\nspec:\n  encryptedData:\n    FOO: AgA\n' "$2" > "$1"

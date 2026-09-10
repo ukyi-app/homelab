@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# adguard *.home rewrite 셀프힐 리컨실러(메타갭 ① W2-A) 계약.
+# adguard *.home rewrite 셀프힐 리컨실러 계약.
 # ⚠️ @test 이름은 영어만(bats dir-run 인코딩), 중간 단언은 [ ]/grep만(bash 3.2 [[ ]] 침묵통과).
 # ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일이라 그것으로 닫힌다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③
@@ -95,7 +95,7 @@ setup() {
 }
 
 @test "reconciler bounds every curl via READ and WRITE vars (timeouts on both, no bare curl)" {
-  # F6/F12: 전 네트워크 호출이 타임아웃 바운드 — 재시도 등급이 갈려 var가 둘이다(followup-sweep 01).
+  # F6/F12: 전 네트워크 호출이 타임아웃 바운드 — 재시도 등급이 갈려 var가 둘이다.
   grep -q 'CURL_READ=' "$F"
   grep -q 'CURL_WRITE=' "$F"
   grep -q 'CURL_PROBE=' "$F"   # DNS pre-flight 판별용(#547 통합) — 재시도 없음은 아래 단언

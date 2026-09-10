@@ -13,11 +13,10 @@ resource "tailscale_acl" "homelab" {
       # NUC은 owner 소유 기기(autogroup:self)라 위 autogroup:self:* 규칙이 이미 허용한다 —
       # tag:k8s에 53은 불필요.
       # kubelet/etcd/NodePort는 아래 tag:k8s 규칙으로 **열지 않는다**(80,443과 5432만 연다).
-      # ⚠️ 그렇다고 apiserver가 닫혀 있다는 뜻은 아니다 — 예전 주석은 "kubectl은 OrbStack 경유
-      #    로컬이라 kube-apiserver 포트가 노출되지 않는다"고 적었는데 **거짓이다**. 위
-      #    `autogroup:self:*` 한 줄이 owner 소유 기기의 **모든 포트**를 열기 때문이다.
-      #    실측(2026-08-12): Mac에서 `curl -k https://100.109.208.81:6443/version` → HTTP 401
-      #    (= 인증 전 단계까지 도달). D-i의 Mac 사본 원격 kubectl이 정확히 이 경로를 탄다.
+      # ⚠️ 그렇다고 apiserver가 닫혀 있다는 뜻은 아니다 — 위 `autogroup:self:*` 한 줄이 owner 소유
+      #    기기의 **모든 포트**를 열기 때문이다. 실측(2026-08-12): owner 기기에서
+      #    `curl -k https://100.109.208.81:6443/version` → HTTP 401(= 인증 전 단계까지 도달).
+      #    D-i의 원격 kubectl이 정확히 이 경로를 탄다.
       #    ⇒ tag:k8s에 6443을 **더할 필요가 없다**. 반대로 apiserver를 tailnet에서 막고 싶다면
       #    tag:k8s 규칙이 아니라 저 self 규칙을 좁혀야 한다(그러면 Tailscale SSH도 함께 끊긴다).
       { action = "accept", src = ["autogroup:member"], dst = ["tag:k8s:80,443"] },
@@ -51,8 +50,6 @@ resource "tailscale_acl" "homelab" {
 # 죽으면 tailscale 기기의 이름해석이 끊긴다(런북 lan-dns 참고).
 # nameserver = NUC tailscale IP: AdGuard가 :53에 서빙하는 노드 → servicelb DNAT → AdGuard.
 # 전용 tailscale LB 디바이스(Service 재생성 시 IP 변동)보다 노드 IP가 안정적이라 사용자 선택.
-# 옛 "맥미니 :53(OrbStack가 모든 인터페이스에 바인딩)" 경로는 2026-08-18 컷오버로 **소멸했다**
-# (근거 전문은 variables.tf `dns_nameserver_tailscale_ip`).
 # ⚠️ 이 값은 gitignored `terraform.tfvars`에 있어 diff에 보이지 않는다. `terraform.tfvars.pre-cutover.bak`
 #    의 맥미니 IP를 되돌려 넣으면 tailnet 전역 DNS가 죽은 기계를 가리키고, AdGuard/클러스터가
 #    내려간 순간 tailscale을 켠 **모든 기기**의 이름해석이 죽는데 `terraform apply`는 성공한다
@@ -66,7 +63,7 @@ resource "tailscale_acl" "homelab" {
 #    tailnet에서 떨어져 **tailnet 전역 이름해석이 통째로 죽는다**(위 "폴백 없음"과 같은 뜻). 복구엔
 #    LAN/물리 접근 재인증이 필요하다.
 #    실측 2026-09-03 `tailscale status --json`: Self=`nuc-15-pro`(현 nameserver 노드) Tags=null
-#    KeyExpiry=null — **2026-09-03 owner가 해제 완료**(감사 2라운드 발견 시점엔 2027-02-02T16:15:27Z였다:
+#    KeyExpiry=null — **2026-09-03 owner가 해제 완료**(감사 발견 시점엔 2027-02-02T16:15:27Z였다:
 #    2026-08-18 컷오버가 맥미니의 `keyExpiryDisabled=true`를 새 노드로 이월하지 않았던 갭).
 #    감시는 `policy/credential-expiry.json`의 `ts-node-key-nuc` 행이 진다 — 지금은 2099 sentinel(무발화·가시화).
 #    ⚠️ 노드를 교체·재등록하면 만료가 **다시 기본값으로 켜진다** — 그때 처방은 같다: admin console →

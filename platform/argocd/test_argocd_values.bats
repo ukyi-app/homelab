@@ -68,7 +68,7 @@ V="platform/argocd/bootstrap-values.yaml"
 
 @test "reconciliation timeout is tightened to 30s as the polling backstop behind the /api/webhook route" {
   # 웹훅(extras/httproute-webhook.yaml — /api/webhook만 web-public)이 즉시 refresh의 1차 경로이고,
-  # 30s 폴링은 웹훅 유실·서명 실패·터널 다운 시의 백스톱이다. "웹훅을 쓰지 않는다"는 #190 이후 거짓.
+  # 30s 폴링은 웹훅 유실·서명 실패·터널 다운 시의 백스톱이다.
   run yq '.configs.cm."timeout.reconciliation"' "$V"; [ "$output" = "30s" ]
 }
 

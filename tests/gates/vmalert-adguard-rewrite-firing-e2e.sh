@@ -57,9 +57,13 @@ FIX_EXPR="$(vme_alert_expr "$VME_RULES" "$FIX_ALERT")"
 [ -n "$FIX_EXPR" ] || vme_fault "$FIX_ALERT: expr 추출 실패"
 
 # 임계 상수는 **룰에서 파생**한다(하드코딩하면 룰이 바뀔 때 하네스가 조용히 낡는다).
-T_S="$(grep -oE '>[[:space:]]*[0-9]+' <<<"$STALE_EXPR" | head -1 | grep -oE '[0-9]+' || true)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring.
+# grep -m1 로 줄이지 않는다 — 한 줄에 매치가 둘이면 "첫 매치"의 의미가 달라진다(줄 단위로 잘라야 한다).
+STALE_THR_RAW="$(grep -oE '>[[:space:]]*[0-9]+' <<<"$STALE_EXPR" || true)"
+T_S="$(head -n1 <<<"$STALE_THR_RAW" | grep -oE '[0-9]+' || true)"
 [ -n "$T_S" ] || vme_fault "$STALE_ALERT: 임계 상수 추출 실패"
-FIX_T_S="$(grep -oE '<[[:space:]]*[0-9]+' <<<"$FIX_EXPR" | head -1 | grep -oE '[0-9]+' || true)"
+FIX_THR_RAW="$(grep -oE '<[[:space:]]*[0-9]+' <<<"$FIX_EXPR" || true)"
+FIX_T_S="$(head -n1 <<<"$FIX_THR_RAW" | grep -oE '[0-9]+' || true)"
 [ -n "$FIX_T_S" ] || vme_fault "$FIX_ALERT: 임계 상수 추출 실패"
 
 # ── 2b) preflight: 전제를 **기계가** 강제한다(위반 = 룰 판정이 아니라 전제 붕괴 → exit 2) ──────────

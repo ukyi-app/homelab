@@ -12,6 +12,10 @@ ALLOWLIST="apps/ docs/memory-ledger.md infra/cloudflare/apps.json platform/"
 BASE_REF="${TEARDOWN_BASE_REF:-origin/main}"
 dirty="${TEARDOWN_DIRTY:-$([ -n "$(git status --porcelain)" ] && echo 1 || echo 0)}"
 ts="${TEARDOWN_TS:-$(date +%Y%m%d%H%M%S)}"
+# validate-mutation 페이로드는 호출 단위 임시 파일이다 — 고정 `/tmp/td-payload.json`은 같은 호스트의 동시 호출
+# (bats 병렬 레인의 test_teardown-wrapper 등)이 서로의 페이로드를 덮어 쓴다.
+payload="$(mktemp "${TMPDIR:-/tmp}/td-payload.XXXXXX")"
+trap 'rm -f "$payload"' EXIT
 
 mode=""; target=""
 case "${1:-}" in
@@ -27,14 +31,14 @@ esac
 # 입력 형식 검증(validate-mutation 계약 재사용) + 툴 명령·제목·slug 결정
 if [ "$mode" = "app" ]; then
   # confirm은 디스패처(UI)의 오발사 가드 — CLI는 이미 명시 명령+clean-worktree가 마찰이라 confirm=app 자동 주입(단일 계약 유지)
-  printf '{"app":"%s","confirm":"%s"}' "$target" "$target" >/tmp/td-payload.json
-  bun tools/validate-mutation.ts --action teardown-app --payload-file /tmp/td-payload.json
+  printf '{"app":"%s","confirm":"%s"}' "$target" "$target" >"$payload"
+  bun tools/validate-mutation.ts --action teardown-app --payload-file "$payload"
   plan_cmd=(bun tools/teardown-app.ts --app "$target" --repo-root .)
   slug="teardown-app-${target}"
   title="chore: ${target} 앱 철거 (teardown-app)"
 else
-  printf '{"resource":"%s"}' "$target" >/tmp/td-payload.json
-  bun tools/validate-mutation.ts --action teardown-resource --payload-file /tmp/td-payload.json
+  printf '{"resource":"%s"}' "$target" >"$payload"
+  bun tools/validate-mutation.ts --action teardown-resource --payload-file "$payload"
   kind="${target%%:*}"
   name="${target#*:}"
   # teardown-resource는 모든 모드(retain/purge)에 --refs-verified attestation을 fail-closed로 강제한다(F1).

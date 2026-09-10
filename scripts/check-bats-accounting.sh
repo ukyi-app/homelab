@@ -28,8 +28,9 @@ cd "$ROOT"
 #    (`ci.yaml`·`Makefile` 2곳) 어디든 인자 한 토큰이면 이 가드가 자기 자신을 끄는 off-switch가 된다.
 #    ⇒ 픽스처 모드는 **명시 플래그**로만 열고, 모르는 인자는 fail-loud(exit 2)다.
 EXCLUDE_FILE="tests/.ci-exclude"
+SERIAL_FILE="tests/.gate-serial"
 LINT_ONLY=0
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 env 폐지).
 take_floors "check-bats-accounting:gate check-bats-accounting:tracked" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 while [ $# -gt 0 ]; do
@@ -41,13 +42,18 @@ while [ $# -gt 0 ]; do
       shift 2 ;;
     --registry)
       # LINT_ONLY는 그대로 0 — (1)(2) 핵심 판정(고아·이중소유·gate 모순)까지 픽스처 레지스트리로
-      # 돌리는 모드다(감사 6라운드 57 venue-2: --lint-excludes만으로는 이 두 판정에 원리적으로 못
+      # 돌리는 모드다(--lint-excludes만으로는 이 두 판정에 원리적으로 못
       # 닿는다 — 아래 (1)(2) 주석). 형제: check-doc-index.sh의 `--readme <파일>`.
       EXCLUDE_FILE="${2:-}"
       [ -n "$EXCLUDE_FILE" ] || { echo "ERROR: --registry에 레지스트리 파일 인자가 필요하다" >&2; exit 2; }
       shift 2 ;;
+    --serial-registry)
+      # (2b) 직렬 레인 레지스트리(tests/.gate-serial)의 픽스처 모드 — 계약 위반 픽스처가 red를 내는지의 증인.
+      SERIAL_FILE="${2:-}"
+      [ -n "$SERIAL_FILE" ] || { echo "ERROR: --serial-registry에 레지스트리 파일 인자가 필요하다" >&2; exit 2; }
+      shift 2 ;;
     *)
-      echo "ERROR: 알 수 없는 인자 '$1' — 인자 없이 전 회계를 돌리거나 '--lint-excludes <파일>'로 레지스트리 계약만, '--registry <파일>'로 전 회계를 그 레지스트리로 본다." >&2
+      echo "ERROR: 알 수 없는 인자 '$1' — 인자 없이 전 회계를 돌리거나 '--lint-excludes <파일>'로 레지스트리 계약만, '--registry <파일>'로 전 회계를 그 레지스트리로, '--serial-registry <파일>'로 직렬 레인 계약(2b)을 그 레지스트리로 본다." >&2
       exit 2 ;;
   esac
 done
@@ -80,14 +86,13 @@ in_excl_items() { case "$EXCL_ITEMS" in *" $1 "*) return 0;; *) return 1;; esac;
 #   ② bats <경로>   → 그 경로 실재 **및 .ci-exclude 등재 파일이 아님**(아래 ⚠️ 자기지시)
 #   ③ .github/workflows/<파일>.ya?ml → 그 파일 실재 **및 그 항목을 실제로 부름**(아래 venue_calls)
 #   ④ manual        → 무조건 실재(owner-local 수동 실행 자기신고 — 자동 venue가 정말 없을 때만 쓴다)
-# ⚠️ **venue의 실재만으로는 부족하다(감사 6라운드 57 venue-1)** — ①③은 venue 파일이 그 실 파일
+# ⚠️ **venue의 실재만으로는 부족하다** — ①③은 venue 파일이 그 실 파일
 #    경로를 **불러야** 증명된다. 예전엔 venue 문자열을 무관한 실재 파일로 바꿔도(예: iac.yaml→
 #    renovate.yaml), 심지어 venue 쪽 호출 줄을 지워도, 「거기서 안 돈다」는 부정문을 적어도 rc=0였다
 #    (실측 2026-09-04 — 항목이 **가리키기만** 하고 **불리지 않아도** 통과하는 구멍). venue_calls()가
 #    venue 파일 본문(주석 제외)에서 test_*.bats 토큰(글롭 포함)을 뽑아 항목 경로가 매치하는지를 본다.
 #    잔여 한계: make 형태는 **타깃 본문이 아니라 Makefile 전체**를 스코프로 삼는다 — 다른 타깃이
-#    우연히 부르는 토큰도 HIT로 친다(타깃 오지목은 여전히 통과). ⚠️ **재산정(티켓64 c64-8,
-#    2026-09-05) — 여전히 못 좁힌다, 그리고 이유가 처음 적었던 것보다 하나 더 있다.** `$(VAR)`
+#    우연히 부르는 토큰도 HIT로 친다(타깃 오지목은 여전히 통과). ⚠️ **재산정(2026-09-05) — 여전히 못 좁힌다, 그리고 이유가 처음 적었던 것보다 하나 더 있다.** `$(VAR)`
 #    1단 전개만으로는 부족하다: `verify:` 타깃의 실제 레시피는 `@bats tests/test_sops-roundtrip.bats`·
 #    `@bats tests/test_sops-guard.bats` 두 줄이 각각 **줄 전체 주석**(fd0 hang 경고·sops-guard
 #    실행처 정정 사연) 바로 뒤에 있다 — "다음 non-tab 줄에서 레시피가 끝난다"는 순진한 스코프는
@@ -202,7 +207,7 @@ while IFS= read -r line; do
     *실행처*)
       venue_derive "$group" "$line"
       # manual venue는 무조건 인정이라(:141) 상한이 없으면 레지스트리 전체가 그리로 수렴할 수 있다
-      # (감사 6라운드 57 venue-3) — MANUAL_MAX 카운트는 아래 (0b) 옆에서 판정한다.
+      # — MANUAL_MAX 카운트는 아래 (0b) 옆에서 판정한다.
       case "$VENUE_TOKENS" in *"[manual]"*) manual_n=$((manual_n + 1));; esac
       if [ "$VENUE_OK" -eq 0 ]; then
         echo "FAIL: ${EXCLUDE_FILE}:${lineno} 실행처 표기가 가리키는 venue가 0건 실재(단어만 있고 증명이 없다): $line"
@@ -238,7 +243,7 @@ if [ "$excl_n" -gt "$EXCL_MAX" ]; then
   rc=1
 fi
 
-# ── manual 상한 — (0a) venue 파생 레인의 무조건 우회로를 닫는다(감사 6라운드 57 venue-3) ──────────
+# ── manual 상한 — (0a) venue 파생 레인의 무조건 우회로를 닫는다 ──────────────────────────────
 # manual은 「자동 venue가 정말 없을 때만」이라는 조건을 말로만 걸고 있었다 — 코드는 무조건 인정이라
 # 편집자가 red를 피하는 최단 경로가 됐다. 뮤테이션 재현: 자동 venue 3그룹(posture·KSOPS·iac.yaml)의
 # 표기를 전부 manual로 바꿔도 이 상한 이전에는 rc=0였다. 형태·논거는 위 EXCL_MAX와 동일 —
@@ -295,5 +300,48 @@ while IFS= read -r line; do
   fi
 done < "$EXCLUDE_FILE"
 
-if [ "$rc" -eq 0 ]; then echo "check-bats-accounting: 전 bats가 정확히 한 도메인(gate/chart-test/.ci-exclude) OK (${scanned}건 스캔, 제외 ${excl_n}/${EXCL_MAX}건)"; fi
+# ── (2b) 직렬 레인 레지스트리(tests/.gate-serial) 계약 ──────────────────────────────────────────
+# run-bats.sh는 이 목록의 파일을 병렬 레인이 끝난 뒤 혼자 돈다(실 체크아웃을 잠깐 바꾸는 스위트 전용 —
+# 헤더가 기준을 적는다). 레인은 도메인이 아니라 **실행 순서**라 (1)의 회계에는 안 보인다 — 여기서 따로 문다:
+#   · 항목은 직전 주석 블록(사유)의 지배를 받는다(.ci-exclude와 같은 그룹 규칙 — 항목 뒤 주석은 새 그룹).
+#   · git 추적 파일이고 gate 수집 집합 안이어야 한다(.ci-exclude 등재·경로 오타는 run-bats.sh도 exit 2로 막지만,
+#     그쪽은 실행 시점이라 여기서 먼저 잡는다).
+#   · 상한 SERIAL_MAX — 직렬 레인이 길어질수록 병렬화의 이득이 준다. 래칫이 아니라 상한(EXCL_MAX와 같은 논거).
+# ⚠️ 대상 부재는 통과가 아니다 — 레지스트리 파일이 없으면 run-bats.sh가 죽는 것과 별개로 여기서도 red.
+[ -f "$SERIAL_FILE" ] || { echo "FAIL: 직렬 레인 레지스트리 없음: $SERIAL_FILE"; rc=1; }
+SERIAL_MAX=0   # 2026-09-09 6건 전부 픽스처 사본으로 이관 — 등재는 같은 PR에서 이 상수를 올리는 예외 경로뿐이다
+serial_n=0
+sgroup=""
+s_after_entry=0
+s_lineno=0
+if [ -f "$SERIAL_FILE" ]; then
+  while IFS= read -r line; do
+    s_lineno=$((s_lineno + 1))
+    case "$line" in
+      '') sgroup=""; s_after_entry=0; continue;;
+      \#*)
+        if [ "$s_after_entry" -eq 1 ]; then sgroup=""; s_after_entry=0; fi
+        sgroup="${sgroup}${line} "; continue;;
+    esac
+    serial_n=$((serial_n + 1))
+    s_after_entry=1
+    if [ -z "$sgroup" ]; then
+      echo "FAIL: ${SERIAL_FILE}:${s_lineno} 사유 주석 없이 등재된 직렬 항목(무엇을 바꾸는지 적어라): $line"; rc=1
+    fi
+    if ! git ls-files --error-unmatch "$line" >/dev/null 2>&1; then
+      echo "FAIL: ${SERIAL_FILE}:${s_lineno} 항목이 추적 파일 아님: $line"; rc=1
+    fi
+    if ! in_gate "$line"; then
+      echo "FAIL: ${SERIAL_FILE}:${s_lineno} 항목이 gate 수집 집합에 없다(.ci-exclude 등재·경로 오타): $line"; rc=1
+    fi
+  done < "$SERIAL_FILE"
+fi
+if [ "$serial_n" -gt "$SERIAL_MAX" ]; then
+  echo "FAIL: ${SERIAL_FILE}: 직렬 레인 ${serial_n}건 > 상한 ${SERIAL_MAX} — 실 트리를 바꾸지 않게 픽스처로 옮기는 것이 먼저다."
+  echo "  정당한 등재라면 이 상한(scripts/check-bats-accounting.sh의 SERIAL_MAX 상수)을 같은 PR에서 올려라."
+  rc=1
+fi
+scan_signal check-bats-accounting:serial "$serial_n"
+
+if [ "$rc" -eq 0 ]; then echo "check-bats-accounting: 전 bats가 정확히 한 도메인(gate/chart-test/.ci-exclude) OK · 직렬 레인 ${serial_n}/${SERIAL_MAX} (${scanned}건 스캔, 제외 ${excl_n}/${EXCL_MAX}건)"; fi
 exit $rc

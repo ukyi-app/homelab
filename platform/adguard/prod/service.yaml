@@ -1,5 +1,6 @@
-# LAN에서 접근 가능한 DNS: type LoadBalancer로 두면 k3s servicelb가 VM 노드 IP에 :53을 노출하고,
-# OrbStack이 이를 Mac mini 호스트로 매핑 — LAN 클라이언트는 Mac의 예약된 LAN IP로 접근한다.
+# LAN에서 접근 가능한 DNS: type LoadBalancer로 두면 k3s servicelb가 노드(NUC)의 LAN IP에 :53을
+# hostPort로 노출하고, 라우터(.1)가 그 주소를 자기 업스트림 DNS로 물어 LAN 클라이언트 질의를 포워딩한다
+# (런북 lan-dns §2-2 "경우 B" — 이 라우터는 DHCP로 DNS를 광고할 수 없어 클라이언트가 노드에 직접 붙지 않는다).
 # (ClusterIP는 가정 LAN 클라이언트에서 라우팅 불가하므로 DHCP option 6의 대상이 될 수 없다.)
 apiVersion: v1
 kind: Service

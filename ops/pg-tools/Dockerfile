@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
 # kubectl/psql/rclone 기반 운영(ops) 이미지 (Postgres 백업/복구 + 캐시 백업).
-# Milestone 4의 restore-drill CronJob·pg_dump→rclone→R2 헤지와 캐시(Valkey) 백업 CronJob이 사용한다.
-# ghcr.io/<owner>/pg-tools:18-rclone으로 게시된다 (Task 6.15 matrix 참조).
+# restore-drill·pg_dump→rclone→R2 헤지·ensure-role-password Job, 캐시(Valkey) 백업,
+# AdGuard rewrite 리컨실러, pvc-du-exporter가 사용한다.
+# ghcr.io/<owner>/pg-tools:18-rclone으로 게시된다(.github/workflows/build.yaml matrix).
 FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
 
 # ⚠️ 기본값을 주지 않는다. stage-level ARG 기본값은 BuildKit predefined platform arg를 **이긴다**

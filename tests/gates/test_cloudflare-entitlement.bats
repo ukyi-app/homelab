@@ -1,16 +1,16 @@
 #!/usr/bin/env bats
-# drift-5: Cloudflare 무료 플랜 entitlement를 정적 강제(현재는 주석 + apply-time 400으로만 드러남).
+# Cloudflare 무료 플랜 entitlement를 정적 강제(현재는 주석 + apply-time 400으로만 드러남).
 #  - rate-limit period == 10 && mitigation_timeout == 10 (무료 유일 허용값)
 #  - 모든 ruleset 식에 matches( 정규식 연산자 금지(Business/WAF Advanced 전용 → 400 "not entitled")
 # ⚠️ bash 3.2: 중간 단언은 [ ]만. 순수 grep — terraform/cluster 비접촉(required gate-safe).
 #
-# [critic-cloudflare-values, 6라운드] 이 파일이 waf.tf를 이미 읽으므로 **값 축** 전반의 required-gate
+# 이 파일이 waf.tf를 이미 읽으므로 **값 축** 전반의 required-gate
 # 홈으로 함께 쓴다 — waf.tf의 rule enabled/action 값과 zone_settings.tf의 setting_id↔value 쌍은
 # 어떤 가드도 안 보고 있었다(비평가 실증: 두 룰 enabled=false+action=log 무력화, always_use_https
 # off·min_tls_version 1.0 전건 23/24 초록 — 유일 미탐은 환경 전제로 baseline도 실패하는 terraform
-# validate). 도달성: iac.yaml:11-13 push-apply 무인, destroy-guard(iac.yaml:214-221)는 delete/replace만
+# validate). 도달성: iac.yaml:11-13 push-apply 무인, destroy-guard(iac.yaml:213-220)는 delete/replace만
 # 봐서 update(값 변경)는 원리적으로 못 막는다. cache.tf·oauth·rulesets 등 다른 값 축은 여기서 손대지
-# 않는다(7라운드 축 W).
+# 않는다.
 
 WAF="$BATS_TEST_DIRNAME/../../infra/cloudflare/waf.tf"
 CACHE="$BATS_TEST_DIRNAME/../../infra/cloudflare/cache.tf"
@@ -39,7 +39,7 @@ ZS="$BATS_TEST_DIRNAME/../../infra/cloudflare/zone_settings.tf"
 }
 
 @test "no 'matches' regex operator in any cloudflare ruleset expression (infix or call)" {
-  # ⚠️ codex restale2 F2: Cloudflare `matches`는 **infix 연산자**다 — `http.host matches "..."`(괄호 없음).
+  # ⚠️ Cloudflare `matches`는 **infix 연산자**다 — `http.host matches "..."`(괄호 없음).
   # `matches(`만 막으면 infix 형태가 게이트를 통과해 apply 400. 주석(인라인 포함)을 sed로 제거한 뒤 `\bmatches\b`
   # 토큰을 잡는다(라인 43의 'matches 미사용' 인라인 주석 false-positive 회피). starts_with()만 허용.
   # 비공허 floor — 이 단언은 rc만으로 안 닫힌다: 파이프 끝 grep이 **stdin**을 읽으므로 두 피연산자가
@@ -77,7 +77,7 @@ ZS="$BATS_TEST_DIRNAME/../../infra/cloudflare/zone_settings.tf"
 }
 
 @test "waf rules stay enabled and blocking (not silently downgraded to a log-only ruleset)" {
-  # [critic-cloudflare-values] 위 @test들은 rate-limit **파라미터**(period/mitigation_timeout/characteristics)
+  # 위 @test들은 rate-limit **파라미터**(period/mitigation_timeout/characteristics)
   # 값 축만 잰다 — enabled/action 값 축은 무증인이었다(비평가 실증: traversal-block + ip-rate-limit
   # 두 룰을 enabled=false·action=log로 무력화해도 초록). 3개 룰(traversal·disallowed-methods·
   # ip-rate-limit) 전부 켜져 있고 block인지 건수로 앵커한다(추가·삭제·무력화 전부 red).
@@ -86,7 +86,7 @@ ZS="$BATS_TEST_DIRNAME/../../infra/cloudflare/zone_settings.tf"
 }
 
 @test "cache.tf pins bypass-dynamic cache=false and cache-static-assets cache=true" {
-  # [7라운드 tfval-cloudflare-1] cache.tf 6행 주석("bypass API + SSR HTML to avoid per-user leaks")의 실제 값 축이 무증인이었다
+  # cache.tf 6행 주석("bypass API + SSR HTML to avoid per-user leaks")의 실제 값 축이 무증인이었다
   # (뮤테이션: bypass-dynamic의 cache=false -> true, 즉 SSR HTML을 엣지에 캐시해도 18/19 ok — 실측).
   # 고정 2-룰 파일(waf.tf period/mitigation_timeout과 동형 관용구)이라 건수 등식에 인스턴스 오탐 없다.
   [ "$(grep -cE '^[[:space:]]*cache[[:space:]]*=[[:space:]]*false' "$CACHE")" -eq 1 ]
@@ -94,7 +94,7 @@ ZS="$BATS_TEST_DIRNAME/../../infra/cloudflare/zone_settings.tf"
 }
 
 @test "waf disallowed-methods rule keeps exactly the 7 standard HTTP methods" {
-  # [7라운드 tfval-cloudflare-4] waf.tf:21 주석("Only allow standard HTTP methods")의 메서드 집합(GET/POST/PUT/PATCH/DELETE/
+  # waf.tf:21 주석("Only allow standard HTTP methods")의 메서드 집합(GET/POST/PUT/PATCH/DELETE/
   # HEAD/OPTIONS)이 무증인이었다(TRACE 추가에 8/8 ok — 실측). expression이 waf.tf:22 단일 라인이라
   # 파일 전역 grep -cE 한 줄로 충분(awk 블록 추출은 불필요 — 다른 줄에 이 토큰 형태가 등장하지 않음).
   # grep -c는 매치 "행" 수라 한 줄에 몰린 7개 토큰이 1로 뭉친다 — -o로 매치 "건" 수를 센다
@@ -103,7 +103,7 @@ ZS="$BATS_TEST_DIRNAME/../../infra/cloudflare/zone_settings.tf"
 }
 
 @test "zone_settings pins every setting_id -> value pair (edge hardening SSOT, no silent downgrade)" {
-  # [critic-cloudflare-values] zone_settings.tf를 읽는 가드가 0건이었다(비평가 실증: always_use_https
+  # zone_settings.tf를 읽는 가드가 0건이었다(비평가 실증: always_use_https
   # off·min_tls_version 1.0 뮤테이션에 전건 초록 — 이 파일 자체가 무증인이었다). 리소스 총수 등식
   # (추가·삭제 축) + setting_id별 값 앵커(변조 축)를 함께 건다.
   [ "$(grep -cE '^resource "cloudflare_zone_setting"' "$ZS")" -eq 9 ]

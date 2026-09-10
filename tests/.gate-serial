@@ -1,0 +1,11 @@
+# 직렬 레인 레지스트리 — gate 수집 집합(scripts/run-bats.sh --list) 안에서 **병렬 레인이 끝난 뒤 혼자** 도는 bats.
+# 등재 기준은 하나다: 그 스위트가 **실 체크아웃**(추적 파일·untracked 파일 생성·.git/index)을 잠깐 바꾼다.
+# 파일 단위 병렬 실행에서 그 창을 밟은 다른 프로세스의 가드(check-skeleton·check-doc-index·`make ci-guard-tracked`…)가
+# 거짓 red를 낸다(2026-09-09 실측: 14 jobs 8회 중 8회 재현 — 970·977·1361·1500). 고정 /tmp 경로·고정 포트는 여기
+# 오지 않는다 — 그건 $BATS_TEST_TMPDIR로 옮겨 고친다(등재는 부채다: 직렬 레인이 길어지면 병렬화의 이득이 그만큼 준다).
+# 계약(scripts/check-bats-accounting.sh (2b)가 강제): 항목은 직전 주석 블록(사유)의 지배를 받고, git 추적 + gate 수집
+# 집합 안이어야 하며(.ci-exclude와 배타), 상한 SERIAL_MAX(현재 0 — 비어 있는 것이 목표 상태다)를 넘지 않는다. run-bats.sh는 수집 밖 항목에 exit 2.
+# 2026-09-09 등재됐던 6건(test_bats-accounting·test_check-doc-index·test_check-skeleton-cjk·test_make-ci-parity·test_sigpipe-writers·
+# tools/tests/test_identity)은 같은 날 전부 $BATS_TEST_TMPDIR 사본 레포에서 가드를 돌리는 형태로 옮겨 레인에서 뺐다. 새로 등재하려면
+# 같은 PR에서 SERIAL_MAX를 올려야 하고, 그 diff가 곧 "사본으로 못 돌리는 이유"를 묻는 리뷰 지점이다.
+

@@ -56,7 +56,7 @@ setup() { source "$BOOTSTRAP_DIR/versions.env"; }
 }
 
 @test "provisioner image is pinned by immutable digest and its tag equals LOCAL_PATH_PROVISIONER_VERSION" {
-  # 티켓 60 prov-1~2 — digest 소유자 승격(헬퍼와 같은 형태, 위 @test 형제). 매니페스트는 이제
+  # digest 소유자 승격(헬퍼와 같은 형태, 위 @test 형제). 매니페스트는 이제
   # ${LOCAL_PATH_PROVISIONER_IMAGE} 플레이스홀더뿐이라(렌더 결과 검사는 test_07-apply-storage.bats)
   # 여기서는 SSOT 두 값의 계약만 잰다.
   # ⚠️ 태그 소유자(이 변수, freshness·github-releases)와 digest 소유자(LOCAL_PATH_PROVISIONER_IMAGE,

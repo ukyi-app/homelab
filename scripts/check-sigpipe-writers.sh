@@ -25,7 +25,7 @@
 #        1회라 그대로 제외한다. 완벽한 구분은 아니지만(아주 긴 스칼라는 여러 번 쓸 수 있다) 실측된
 #        위험은 전부 다중행 쪽이었고, 전면 금지로 넓히면 스칼라 검사 30여 곳까지 herestring으로
 #        바꿔야 해 변경 대비 이득이 낮다.
-#    (b) [c71-3 확장, 2026-09-05] 파일/명령 writer — `sed`·`awk`·`cat`·`grep`·`kubectl`·`locale`가
+#    (b) [2026-09-05 확장] 파일/명령 writer — `sed`·`awk`·`cat`·`grep`·`kubectl`·`locale`가
 #        stdout에 쓴 다중행 출력을 그대로 `grep -q`에 파이프하는 형태도 같은 기전이다(외부 프로세스는
 #        libc stdio 버퍼링 단위가 bash 빌트인 write보다 작아 다중 write() 확률이 더 높다). 라이브
 #        실증: PR #641 gate red(`check-locale-collation.sh` 레인 D `sed … "$f" | grep -qE 'guard_init'`,
@@ -36,12 +36,20 @@
 #        — 같은 커밋에서 herestring 전환)이 나와 그 축소 근거는 재검 결과 성립하지 않았다.
 #        범위 밖(전수 열거 위반 0건이라 이번 확장 대상이 아님): `sops -d …`·`yq`·`jq` 등 나머지
 #        외부 명령 writer — 새 라이브 사례가 나오면 이 목록에 추가한다.
-#        범위 밖(같은 이유, 전수 열거 위반 0건) — reg-a1-bats-guards-2: 다단 파이프에서 키워드와
+#        범위 밖(같은 이유, 전수 열거 위반 0건) — 다단 파이프에서 키워드와
 #        `grep -q` 사이에 목록 밖 명령(sort·tr·uniq·column 등)이 끼면 무증인이다(`[^|]*`가 파이프
 #        문자를 못 건너뛰어 키워드 바로 다음 세그먼트만 본다). 패턴을 "세그먼트 개수≥1·마지막이
 #        grep -q"로 넓히면 무관 파이프(`printf '%s' "$var" | grep -qE` 등 26곳)가 신규 오탐으로
 #        뒤집힌다(실측) — 그래서 코드는 넓히지 않는다. 새 라이브 사례가 나오면 그 형태를 키워드에
 #        준해 개별 케이스로 추가한다.
+#    (c) [2026-09-08] 조기 종료 소비자 `awk '… exit'` — writer를 가리지 않고 소비자를 잰다(본문 (c)).
+#    (d) [2026-09-09] 조기 종료 소비자 `| head` — (c)와 같은 원리. 라이브 실증은 restore-drill의 RPO 마커 INSERT
+#        (본문 (d)). 형제 후보(`| sed … q`·`| grep -m1`)는 현 트리 0건이라 이번 분모 밖 — 새 사례가 나오면 추가한다.
+#    (e) [2026-09-09] **bats 파일 안의 pipefail 블록** — ①의 "bats는 pipefail을 켜지 않는다"는 @test 본문 이야기다.
+#        본문이 `run bash -c '… set -euo pipefail …'`로 여는 블록은 그 안에서 켜므로 같은 파이프가 거기서는
+#        위험하다. 스캔은 **그 블록의 줄만** 잰다(본문 (e)). 실증: #706 첫 gate에서 tests/gates/test_guard-sh.bats의
+#        블록 안 `sed … "$f" | grep -qE … && kern=1`이 4 vCPU 병렬 레인에서 로스터 6→5(ROSTER-COLLAPSE)로 red —
+#        로컬 CPU 포화 20회 중 4회 재현.
 # ③ 주석 줄은 대상이 아니다 — 이 파일과 traps-detail이 그 관용구를 **설명**하기 때문이다
 #    (이 레포의 「규약을 설명한 파일이 그 규약에서 면제된다」 클래스를 반대로 밟지 않으려는 것).
 #    ⚠️ 이 면제는 **패턴 안이 아니라 별도 단계**에서 한다(2026-09-01 정정). 종전에는 패턴 앞에
@@ -58,10 +66,46 @@ set -euo pipefail
 guard_init check-sigpipe-writers
 cd "$ROOT"
 
-take_floors "check-sigpipe-writers:files" "$@" || exit $?
+take_floors "check-sigpipe-writers:files check-sigpipe-writers:bats" "$@" || exit $?
 
 files="$(git ls-files '*.sh')"
 [ -n "$files" ] || { echo "check-sigpipe-writers: 추적된 .sh가 0건 — 열거 붕괴다" >&2; exit 2; }
+
+# 검출 본체 — (a)(b)(c)(d) 네 레인. $1의 "N:줄" 형태로 위반을 낸다. .sh는 파일을 그대로, bats는 블록 밖 줄을
+# 빈 줄로 바꾼 사본을 넘긴다(줄 번호가 원본과 같아야 진단이 그 줄을 가리킨다).
+sigpipe_hits() {
+    # 패턴은 순수하게 두고(③), 줄 전체가 주석인 것만 사후에 걷어낸다 — 인라인 주석 앞의 코드는 살린다.
+    # 접두를 패턴에 넣으면 컬럼 0을 놓친다(위 ③ 참조).
+    hits_builtin="$(grep -nE "(printf[[:space:]]+'%s\\\\n'|echo)[[:space:]]+\"\\\$[A-Za-z_][A-Za-z0-9_]*\"[[:space:]]*\\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q" "$1" \
+      | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+    # (b) 파일/명령 writer — 키워드 뒤 같은 파이프 세그먼트(`[^|]*`, 앞선 `|`를 넘지 않는다) 안에
+    # 아무 인자가 오고 그 뒤 `grep -q`로 이어지면 잡는다. `printf '%s' "$scalar"`류는 이 키워드 목록에
+    # 없어 자동으로 제외된다 — 별도 스칼라 예외가 필요 없다. 키워드 집합은 위 (b) 산문의 라이브 실증
+    # 범위로 의도적으로 좁다(sops/yq/jq 등은 전수 열거 위반 0건이라 미포함).
+    hits_cmd="$(grep -nE '\b(sed|awk|cat|grep|kubectl|locale)\b[^|]*\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q' "$1" \
+      | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+    # (c) [2026-09-08] **조기 종료 소비자** — `grep -q`가 아니라 `awk '… exit'`가 파이프를 닫는 형태.
+    #     host-preflight [6]의 `ip … | awk '… { print $1; exit }'`가 CI에서 두 번 red였다: awk가 첫 매치에서 나가면
+    #     writer(실물 ip의 나머지 링크·스텁의 다음 echo)가 SIGPIPE(141) — 러너처럼 SIGPIPE가 무시된 환경에선
+    #     EPIPE 쓰기 오류(rc 1) — 로 죽고 pipefail이 그것을 채택한다. writer 종류를 가리지 않는다(`$VAR` 명령
+    #     writer도 포함) — 소비자 쪽 `exit`가 결정적 징후라 소비자를 잰다. herestring 형태(`awk … <<<"$v"`)는
+    #     `|`가 없어 매치되지 않고, `exit` 없는 awk는 끝까지 소비하므로 안전하다.
+    hits_awk="$(grep -nE '\|[[:space:]]*awk[[:space:]][^|]*\bexit\b' "$1" \
+      | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+    # (d) [2026-09-09] **head 소비자** — `| head -N`도 첫 N줄(또는 N바이트)을 읽고 닫는 조기 종료 소비자다. 실증:
+    #     restore-drill-script.sh의 RPO 마커 INSERT `_live_psql … | head -1` — PG 18 psql이 `INSERT 0 1` 상태 태그를
+    #     둘째 write로 내므로 head가 첫 줄에서 닫으면 그 write가 SIGPIPE를 맞아 **성공한 쓰기가 "라이브에 쓰지
+    #     못했다"로 보고**됐다(같은 모양의 스텁 파이프라인: 무부하 800회 중 1회, CPU 포화 아래 2500회 중 343회 141 —
+    #     docs/traps-detail.md 「파일 단위 병렬 bats에서 …」). (c)와 같이 writer를 가리지 않고 소비자를 잰다 —
+    #     writer가 단일 write인지는 정적으로 못 가르고(버퍼링 단위·출력 크기·Go 런타임의 무버퍼 stdout),
+    #     bats 병렬화로 CI 부하가 올라 잠복이 깨어난다. 처방: writer 쪽에서 끝내거나(`sed -n '/re/{p;q}'` ·
+    #     `grep -m1`) **캡처를 별도 문장으로 두고** herestring(`head -n1 <<<"$out"`)으로 자른다 — 별도 문장이어야
+    #     `set -e`/pipefail 아래 writer의 실패 전파(`|| fail`·`|| x=""`)가 보존된다. `head -n1 <<<"$v"`는 `|`가 없어
+    #     매치되지 않는다.
+    hits_head="$(grep -nE '\|[[:space:]]*head\b' "$1" \
+      | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+    printf '%s\n' "$hits_builtin" "$hits_cmd" "$hits_awk" "$hits_head" | grep -v '^$' | LC_ALL=C sort -t: -k1,1n -u || true
+}
 
 scanned=0
 bad=""
@@ -73,23 +117,51 @@ while IFS= read -r f; do
     *) grep -q 'pipefail' "$f" || continue ;;  # ①
   esac
   scanned=$((scanned + 1))
-  # 패턴은 순수하게 두고(③), 줄 전체가 주석인 것만 사후에 걷어낸다 — 인라인 주석 앞의 코드는 살린다.
-  # 접두를 패턴에 넣으면 컬럼 0을 놓친다(위 ③ 참조).
-  hits_builtin="$(grep -nE "(printf[[:space:]]+'%s\\\\n'|echo)[[:space:]]+\"\\\$[A-Za-z_][A-Za-z0-9_]*\"[[:space:]]*\\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q" "$f" \
-    | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
-  # (b) [c71-3] 파일/명령 writer — 키워드 뒤 같은 파이프 세그먼트(`[^|]*`, 앞선 `|`를 넘지 않는다) 안에
-  # 아무 인자가 오고 그 뒤 `grep -q`로 이어지면 잡는다. `printf '%s' "$scalar"`류는 이 키워드 목록에
-  # 없어 자동으로 제외된다 — 별도 스칼라 예외가 필요 없다. 키워드 집합은 위 (b) 산문의 라이브 실증
-  # 범위로 의도적으로 좁다(sops/yq/jq 등은 전수 열거 위반 0건이라 미포함).
-  hits_cmd="$(grep -nE '\b(sed|awk|cat|grep|kubectl|locale)\b[^|]*\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q' "$f" \
-    | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
-  hits="$(printf '%s\n' "$hits_builtin" "$hits_cmd" | grep -v '^$' | LC_ALL=C sort -t: -k1,1n -u || true)"
+  hits="$(sigpipe_hits "$f")"
   [ -n "$hits" ] || continue
   while IFS= read -r h; do
     [ -n "$h" ] || continue
     bad="${bad}  ${f}:${h}"$'\n'
   done <<<"$hits"
 done <<<"$files"
+
+# ── (e) [2026-09-09] bats 파일 안의 pipefail 블록 ────────────────────────────────────────────────
+# 여는 줄(`bash -c '`가 같은 줄에서 닫히지 않음)부터 **다음에 작은따옴표가 나오는 줄**까지가 한 블록이고(작은따옴표
+# 스크립트는 안에 `'`를 담을 수 없으므로 첫 `'`가 곧 닫힘이다 — `' _ "$ROOT"`처럼 줄머리든 `…'`처럼 줄끝이든), 블록 본문에
+# pipefail 리터럴이 있을 때만 그 줄들을 위 네 레인으로 잰다. 한 줄짜리 `bash -c '… pipefail …'`도 그 줄 하나가
+# 블록이다. 블록 밖(픽스처 문자열·@test 본문의 `echo "$output" | grep -q`)은 pipefail 아래가 아니라 분모 밖 —
+# test_sigpipe-writers.bats의 seed 문자열이 그 대표다. 블록 밖 줄은 빈 줄로 바꿔 임시 파일에 쓴다(줄 번호 보존).
+bats_files="$(git ls-files '*.bats')"
+[ -n "$bats_files" ] || { echo "check-sigpipe-writers: 추적된 .bats가 0건 — 열거 붕괴다" >&2; exit 2; }
+scanned_bats=0
+blocks=0
+tmp_blk="$(mktemp "${TMPDIR:-/tmp}/sigpipe-blk.XXXXXX")"
+trap 'rm -f "$tmp_blk"' EXIT
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  [ -f "$f" ] || continue
+  scanned_bats=$((scanned_bats + 1))
+  awk '
+    { L[NR] = $0 }
+    !inb && $0 ~ /bash -c \047[^\047]*$/ { inb = 1; s = NR; next }
+    !inb && $0 ~ /bash -c \047.*pipefail.*\047/ { M[NR] = 1; next }
+    inb && index($0, "\047") {
+      blk = ""; for (i = s; i <= NR; i++) blk = blk L[i] "\n"
+      if (blk ~ /pipefail/) for (i = s; i <= NR; i++) M[i] = 1
+      inb = 0
+    }
+    END { for (i = 1; i <= NR; i++) print (i in M) ? L[i] : "" }
+  ' "$f" > "$tmp_blk"
+  nb="$(grep -c "bash -c '" "$tmp_blk" || true)"
+  [ "$nb" -gt 0 ] || continue
+  blocks=$((blocks + nb))
+  hits="$(sigpipe_hits "$tmp_blk")"
+  [ -n "$hits" ] || continue
+  while IFS= read -r h; do
+    [ -n "$h" ] || continue
+    bad="${bad}  ${f}:${h}"$'\n'
+  done <<<"$hits"
+done <<<"$bats_files"
 
 # ⚠️ SCAN 신호를 손으로 내지 않는다 — scan_floor가 **통과 경로에서만** 낸다. 콜사이트가 따로 echo하면
 #    실패 시에도 마커가 찍혀 소비자가 "검사했다"로 오독한다(이 레포의 「스캔 신호를 콜사이트가 손으로
@@ -98,12 +170,17 @@ done <<<"$files"
 #    `scan_floor [a-z0-9:-]+`로 라벨을 뽑으므로, 따옴표를 씌우면 추출되지 않아 "선언은 있는데
 #    방출이 없다"로 red가 난다(형제 가드 전부 따옴표 없는 관례).
 scan_floor check-sigpipe-writers:files "$scanned" "$(floor_of check-sigpipe-writers:files 10)" || exit 1
+scan_floor check-sigpipe-writers:bats "$scanned_bats" "$(floor_of check-sigpipe-writers:bats 100)" || exit 1
+scan_signal check-sigpipe-writers:bats-blocks "$blocks"
 
 if [ -n "$bad" ]; then
   echo "FAIL: pipefail 아래에서 다중행 writer를 grep -q에 파이프한다 — 매치가 있어도 SIGPIPE(141)로" >&2
   echo "      거짓 FAIL이 날 수 있고, 부하가 높을수록 실패율이 오른다(로컬이 CI를 예고하지 못한다)." >&2
   echo "      처방: \`grep -q PATTERN <<<\"\$var\"\` (herestring — 파이프가 없어 레이스가 원리적으로 사라진다)" >&2
+  echo "      awk '… exit' 소비자도 같다(레인 c): writer를 먼저 변수로 받고 \`awk '…' <<<\"\$var\"\`" >&2
+  echo "      파이프 뒤의 head 소비자도 같다(레인 d): writer 쪽에서 끝내거나(sed '{p;q}' · grep -m1) 캡처를 별도 문장으로 두고 \`head -n1 <<<\"\$out\"\`" >&2
+  echo "      bats 파일도 \`run bash -c '… set -euo pipefail …'\` 블록 안은 같다(레인 e) — 블록 밖 @test 본문은 대상이 아니다" >&2
   printf '%s' "$bad" >&2
   exit 1
 fi
-echo "check-sigpipe-writers OK (pipefail 셸 ${scanned}개 스캔, 다중행 writer→grep -q 파이프 0곳)"
+echo "check-sigpipe-writers OK (pipefail 셸 ${scanned}개 + bats pipefail 블록 ${blocks}개 스캔, 다중행 writer→grep -q 파이프 0곳 · awk exit 조기 종료 소비자 0곳 · head 소비자 0곳)"

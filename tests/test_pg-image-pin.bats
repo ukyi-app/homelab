@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# PG 이미지 핀 정합 가드(M6) — SSOT는 platform/cnpg/prod/cluster.yaml spec.imageName.
+# PG 이미지 핀 정합 가드 — SSOT는 platform/cnpg/prod/cluster.yaml spec.imageName.
 # 인클러스터 소비자(basebackup-cronjob.yaml·restore-drill-script.sh)는 런타임에 레포가 없어
 # 파생 불가 → 하드코딩을 허용하되 이 게이트가 SSOT 일치를 강제한다(PG 메이저 3-이미지 동시
 # 갱신 함정 클래스 — PgDumpHedgeStale #178 낙진과 동일 계열). dr-drill.sh는 파생이라 리터럴 0.

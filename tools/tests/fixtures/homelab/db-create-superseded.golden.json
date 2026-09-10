@@ -24,11 +24,11 @@
         "name": "cnpg-data",
         "sync": "Synced",
         "health": "Healthy",
-        "revision": "afterme",
+        "revision": "af7e70e",
         "descendant": true,
         "surfaceOk": false
       }
     ],
-    "error": "관측 리비전(afterme)에서 표면(platform/cnpg/prod/databases/mydb.yaml) 부재 — 요청이 추월됨(superseded)"
+    "error": "관측 리비전(af7e70e)에서 표면(platform/cnpg/prod/databases/mydb.yaml) 부재 — 요청이 추월됨(superseded)"
   }
 }

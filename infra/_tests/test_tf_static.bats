@@ -29,10 +29,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     && grep -qE 'resource "cloudflare_dns_record" "public"' "$d" \
     && grep -qE 'for_each = local\.site_hosts' "$d" \
     && grep -qE 'for_each = local\.app_hosts' "$d"
-  # [infra-b-2] 위 네 리터럴은 존재만 잰다 — resource↔for_each **결합**에 앵커가 없어 두 for_each를
-  # 맞바꿔도(신원 교체, 리소스별 신원은 그대로 남아 위 grep 4개는 잔존) 전건 초록이었다(6라운드 실측).
+  # 위 네 리터럴은 존재만 잰다 — resource↔for_each **결합**에 앵커가 없어 두 for_each를
+  # 맞바꿔도(신원 교체, 리소스별 신원은 그대로 남아 위 grep 4개는 잔존) 전건 초록이었다(실측).
   # 같은 파일 :16-19 r2 앵커 관용구(awk 블록)를 리소스별로 복사해 신원을 확정한다.
-  # [7라운드 tfval-cloudflare-2] 세 리소스 전부의 proxied=true(Cloudflare 프록시 — WAF/캐시/DDoS
+  # 세 리소스 전부의 proxied=true(Cloudflare 프록시 — WAF/캐시/DDoS
   # 보호의 전제 조건)가 무증인이었다(public 리소스만 false로 뒤집어도 24/25 ok — 실측, 유일 not ok는
   # 환경 전제 terraform validate). 블록을 한 번만 추출해 for_each 결합과 proxied 값을 함께 앵커한다.
   for pair in public:site_hosts platform:platform_hosts app:app_hosts; do
@@ -41,8 +41,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
     printf '%s' "$block" | grep -qF "for_each = local.$loc" || { echo "FAIL: dns_record $res <-> local.$loc 결합 부재"; false; }
     printf '%s' "$block" | grep -qE 'proxied[[:space:]]*=[[:space:]]*true' || { echo "FAIL: dns_record $res proxied != true"; false; }
   done
-  # [infra-b-3] tunnel ingress SSOT(public_hosts 합집합)에서 platform_hosts가 빠져도(reserved-hosts.json
-  # 소비 체인 단절) 정적 게이트가 전건 초록이었다(6라운드 실측) — 합집합 원소·platform 리소스 for_each를
+  # tunnel ingress SSOT(public_hosts 합집합)에서 platform_hosts가 빠져도(reserved-hosts.json
+  # 소비 체인 단절) 정적 게이트가 전건 초록이었다(실측) — 합집합 원소·platform 리소스 for_each를
   # 함께 앵커한다.
   line="$(grep -E '^[[:space:]]*public_hosts[[:space:]]*=' "$d")"
   for l in site_hosts platform_hosts app_hosts; do
@@ -53,7 +53,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "cloudflared tunnel ingress backends are exactly traefik + the 404 catch-all (no admin/app backend)" {
-  # exact-tests-4: 라우팅 권위는 여기다 — tunnel.tf:10 config_src="cloudflare"라 cloudflared의
+  # 라우팅 권위는 여기다 — tunnel.tf:10 config_src="cloudflare"라 cloudflared의
   # ConfigMap ingress 블록은 원격(API) config에 밀려 비관여다(posture 쪽 @test는 죽은 표면을
   # 읽고 있었다). for-loop라 host 수를 늘려도 `service =` **개수**는 늘지 않아(호스트마다 같은
   # traefik URL을 재사용) 정당한 host 추가마다 손 갱신을 부르지 않는다.
@@ -68,7 +68,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "pg_backups and cache_backups R2 lifecycles pin enabled=true, prefix=\"\", max_age=1209600 (owner decision 2026-09-04: bucket-wide 14d expiry stays)" {
-  # 티켓 60 r2-1 — owner 결정: pg_backups의 `prefix = ""`(버킷 전체 만료, ADR-0006 정정 문단·r2.tf:14-18
+  # owner 결정: pg_backups의 `prefix = ""`(버킷 전체 만료, ADR-0006 정정 문단·r2.tf:14-18
   # 주석이 이미 적은 사실)를 **증인으로 잠근다**. 존재 단언(위 prevent_destroy @test)은 리소스가
   # 있다는 것만 재지 값 축은 무증인이었다 — max_age를 86400으로 바꿔도(만료 주기 변경, 데이터 보존
   # 정책 실질 변경) 위 @test들은 전건 초록이다(실측). 같은 파일 :17의 awk 블록 추출 관용구를
@@ -86,7 +86,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "each cloudflare output pins the correct sensitive value (tunnel_token is the only live secret)" {
-  # [7라운드 c71-1] 티켓 65 「다음 라운드 입력」 — outputs.tf 6개 output 중 tunnel_token(실
+  # outputs.tf 6개 output 중 tunnel_token(실
   # cloudflared run token)만 sensitive=true여야 하고 나머지 5개(tunnel_id·r2 버킷명·엔드포인트 URL)는
   # 정당하게 false다. infra/tailscale/test_provider_scopes.bats의 "블록 수==sensitive=true 수" 건수
   # 등식은 **여기 그대로 못 옮긴다** — tailscale은 전 output이 true라 건수만 세도 신원이 잠기지만,

@@ -34,13 +34,13 @@ setup() { ACL="${BATS_TEST_DIRNAME}/acl.tf"; }
   [ "$status" -ne 0 ]
   # ⚠️ 위 두 술어는 좌변에 `autogroup:member` 리터럴을 요구한다 — 그 **진상위집합**인 `src = ["*"]`와
   #    dst 호스트 와일드카드 `"*:5432"`는 분모 밖이라, 규칙 한 줄을 더하는 것만으로 crown-jewel DB가
-  #    전 tailnet(최악 any:any)에 열려도 이 파일이 전건 초록이었다(감사 6라운드 실측 5/5 ok).
+  #    전 tailnet(최악 any:any)에 열려도 이 파일이 전건 초록이었다(실측 5/5 ok).
   #    표기를 넓히는 대신 **규칙 집합 자체를 계약으로 못 박는다** — acl.tf의 규칙은 인스턴스 가변이
   #    아니라 손으로 쓰는 계약이라, 추가·삭제 양방향이 즉시 red이고 정당한 추가 시 이 숫자를 함께
   #    올리는 것이 곧 crown-jewel 리뷰 신호가 된다(형제 관용구: 존재 단언 N개 + length == N —
   #    platform/network-policies/prod/test_netpol.bats:33-38).
-  # 존재 단언 5개: member↔self(:10) · member↔80,443(:23, 위 양성 대조) · admin↔5432(:28, @test 1) ·
-  #                operator↔tag:k8s:*(아래) · ssh root(:39-40, @test 4).
+  # 존재 단언 5개: member↔self(:10) · member↔80,443(:22, 위 양성 대조) · admin↔5432(:27, @test 1) ·
+  #                operator↔tag:k8s:*(아래) · ssh root(:38-39, @test 4).
   run bash -c "printf '%s\n' \"\$1\" | grep -qE 'tag:k8s-operator[^}]*tag:k8s:\*'" _ "$rules"
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$rules" | grep -c 'action = "accept"')" -eq 5 ]

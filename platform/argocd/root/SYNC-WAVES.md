@@ -50,7 +50,7 @@ Gateway API 리소스는 **그것을 Healthy로 만들어 주는 컨트롤러보
 |   2  | Gateway                                                        | Programmed는 컨트롤러 + cert Secret 둘 다 필요 |
 |   3  | whoami 스모크 Deployment/Service/HTTPRoute                      | Programmed된 Gateway에 attach된다 |
 
-## 앱별 내부 wave (공유 차트, M6)
+## 앱별 내부 wave (공유 차트)
 | Wave | 리소스                                     |
 |------|--------------------------------------------|
 |   0  | ConfigMap / Secret (앱 설정)               |

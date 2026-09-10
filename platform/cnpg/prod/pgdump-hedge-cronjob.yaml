@@ -46,8 +46,10 @@ spec:
                   # 논리 백업은 DB 단위다 — 클러스터 전역 물리 백업과 달리 여기 없는 DB는 물리
                   # 사본 손상(포맷/WAL 재생 실패) 시 복구 수단이 없다. databases/*.yaml의 논리 DB
                   # CR 전부 + 부트스트랩 app(restore_canary)을 나열한다. test_pgdump_hedge.bats가
-                  # databases/ 와의 정합을 강제한다(누락 = CI 실패).
-                  DBS="app page trip-mate"
+                  # databases/ 와의 정합을 강제한다(누락 = CI 실패). 단 `ensure: absent`(purge
+                  # 상태머신이 DROP한 DB)는 **빠져야** 한다 — 이 루프는 `set -e`라 부재 DB 하나가
+                  # 잡 전체를 죽여 뒤에 선 DB의 덤프까지 잃는다(같은 테스트가 부재를 강제한다).
+                  DBS="app"
                   # ⚠️ **클러스터별 prefix.** 라이브 Mac과 병행 운용하는 동안 같은 prefix를 쓰면
                   #    아래 `rclone delete --min-age 14d`가 **상대편의 덤프를 지운다**(파일명이
                   #    ${DB}-${TS}라 두 클러스터를 구별할 수 없다). 계획서 §3.4 표에 빠져 있던 충돌이다.

@@ -8,7 +8,7 @@
 // 이름뿐이고, 무엇을 뺄지·tracked인지 filesystem인지·바닥값이 얼마인지는 전부 안으로 들어간다.
 // 조합 가능한 기술자로 열면 제외 어휘가 호출자로 되밀려 나가 지금의 9벌 중복이 API로 승격된다.
 //
-// ⚠️ **스코프는 의미론적 필터를 담지 않는다**(design-r1 R-1). 어떤 소비자에겐 맞는 필터가 다른
+// ⚠️ **스코프는 의미론적 필터를 담지 않는다**. 어떤 소비자에겐 맞는 필터가 다른
 // 소비자에겐 치명적이다 — audit-orphans는 values.yaml 있는 앱만 보면 되지만 check-app-deploy는 그
 // 파일의 **부재**를 잡아야 한다. 열거자가 미리 거르면 위반이 검사 대상에서 사라진다.
 // 스코프를 추가할 때마다 물을 것: *"이 필터를 통과 못 한 항목이, 어떤 소비자에게는 찾아내야 할
@@ -23,7 +23,7 @@
 // (check-resource-limits MIN_SCAN=10 · check-image-pins --floor total=20 · check-alert-rules 30) —
 // 그것들은 **의미론적 필터 이후**를 세므로 훨씬 정확하다. 워커 바닥값은 없던 보호를 더하지 않으면서
 // 정당한 상태를 고장으로 신고한다(구현 중 픽스처 3곳이 연달아 이 신호를 줬다).
-// 실행은 exec seam 경유(d6④) — git 실패는 빈 목록으로 흡수하는 기존 계약 유지(바닥값이 진단을 대신한다).
+// 실행은 exec seam 경유 — git 실패는 빈 목록으로 흡수하는 기존 계약 유지(바닥값이 진단을 대신한다).
 import { git } from "./exec.ts";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { type Document, parseAllDocuments } from "yaml";
@@ -165,7 +165,7 @@ const SCOPES: Record<string, ScopeDef> = {
   // 지키는 것 없는 규칙을 남기면 그게 곧 "아무도 대조하지 않는 주장"이다.
   // ⚠️ **이름 규약은 프록시이고, 강제되지 않는다.** 규약 밖 이름의 새 가드는 조용히 열거에서 빠진다 —
   // 이 스코프가 아는 것은 "이 레포가 가드에 쓰는 이름 모양"뿐이다. 실제 성질(불변식을 판정하고
-  // 비-0으로 막는가)로 열거하려면 실행 관측이 필요하고 그건 후속(티켓 08)이다.
+  // 비-0으로 막는가)로 열거하려면 실행 관측이 필요하고 그건 후속이다.
   // 최소 방어로 `test_repo-walk.bats`에 **역방향 단언**을 둔다: 규약 모양의 추적 파일은 반드시 열거된다
   // (정방향만 두면 include가 좁아져도 "규약 밖 0건"은 계속 참이라 통과한다 — 실제로 그렇게 뚫렸다).
   guards: {
@@ -221,7 +221,7 @@ const SCOPES: Record<string, ScopeDef> = {
     include: YAML_EXT,
     exclude: [],
   },
-  // 앱 유닛. **필수 산출물로 거르지 않는다**(design-r1 R-1) — audit-orphans에겐 values.yaml 필터가
+  // 앱 유닛. **필수 산출물로 거르지 않는다** — audit-orphans에겐 values.yaml 필터가
   // 맞지만 check-app-deploy는 그 파일의 **부재**를 잡아야 한다. 의미론적 필터는 소비자 쪽이다.
   // dir은 앱 루트(apps/<app>)다 — 소비자가 필요하면 /deploy/prod를 덧붙인다(컴포넌트 유닛과 동형).
   apps: {
@@ -275,7 +275,7 @@ function trackedPaths(root: string, sub: string): string[] {
 }
 
 // Dirent.isDirectory()는 심볼릭 링크 엔트리에서 대상과 무관하게 항상 false다(readdir이 링크를
-// follow하지 않음) — 디렉토리를 가리키는 심볼릭 링크가 열거에서 통째로 누락된다(reg13-e-carryover-2).
+// follow하지 않음) — 디렉토리를 가리키는 심볼릭 링크가 열거에서 통째로 누락된다.
 // tools/lib/surface-hash.ts:43-51이 이미 쓰는 형태(대상 종류를 명시 판정)를 여기 재사용한다.
 // 깨진 심볼릭 링크(대상 없음)의 statSync는 throw하므로 false로 접는다 — "디렉토리 아님"이 맞는 판정.
 function isDirEntry(full: string, e: { isDirectory(): boolean; isSymbolicLink(): boolean }): boolean {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # seed-secrets.sh heredoc 산출물 ↔ 커밋본 *.enc.yaml 평문 정합 가드 — metadata(name/namespace) + stringData 키 집합.
 # 컴포넌트 ns 이동(#102 tailscale 분리 등) 시 seed 스크립트 미동기 → 재시드/DR에서 구 ns로
-# 재생성되는 클래스(M3)를 정적으로 차단한다. sops는 metadata·키 이름을 암호화하지 않으므로 age 키 불필요(CI-safe).
+# 재생성되는 클래스를 정적으로 차단한다. sops는 metadata·키 이름을 암호화하지 않으므로 age 키 불필요(CI-safe).
 # ⚠️ **키 집합 축도 같은 재시드 경로다** — write_enc는 경로를 통째로 덮어쓰므로 드리프트가 양방향이다:
 #    seed에서 키가 빠지면 재시드가 커밋본에서 그 키를 지우고(예: alerting-secrets의 GRAFANA_ADMIN_PASSWORD가
 #    사라지면 grafana.yaml:30의 secretKeyRef가 CreateContainerConfigError), make secret-edit으로 키를

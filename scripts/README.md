@@ -16,6 +16,13 @@
 실행 경로의 SSOT다. 그 문장을 지우면 정보 손실이 0이 아니다. 경계는 `scripts/check-doc-index.sh`가
 강제하고, 두 집합이 실제로 일치하는지는 게이트가 권위 도구와 대조한다.
 
+**sourced 라이브러리는 이 로스터 밖이다** — `scripts/lib/*.sh`(`guard.sh`·`scan-floor.sh`·
+`sops-recipients.sh`)는 실행 산출물이 아니라 가드가 `.`로 읽어 들이는 커널이다. 목적·파괴성·위험이라는
+이 인덱스의 축이 그것들에는 서지 않고, 그 계약은 각 파일 헤더와 전용 커널 테스트가 진다. 그래서
+`check-doc-index.sh`의 등재 레인은 `scripts/*.sh`만 열거한다 — **가드가 못 보는 것이 아니라 일부러
+보지 않는 것**이고, 그 구별을 남기려고 이 문장이 있다. (형제 결정은 반대다: `tools/lib/*.ts`는 로스터
+**안**이다 — 도구가 import하는 공유 커널이라 소유 경계를 적을 자리가 필요하다.)
+
 절 제목 셋이 부류 라벨이다 — CI 게이트(읽기 전용 순수 검사) · 시크릿/부트스트랩(라이브 클러스터에
 쓰거나 봉인본을 산출) · DR/owner 전용(파괴적 — 잘못 쓰면 데이터 유실).
 
@@ -41,11 +48,16 @@
   통과) + **파일명 규약**(`<app>-secrets.sealed.yaml` 하나만 허용). 인자 없는 기본 모드에서 앱 열거 0건은 **scan-floor로 실패**(vacuous pass 아님).
 - **`run-bats.sh`** — **단일 테스트 수집·실행기(required GATE)**. `make ci`·`ci.yaml`(gate)이 공통 호출(이중 SSOT 제거).
   스코프 = git-tracked `test_*.bats` − `platform/charts/*`(chart-test 별도) − `tests/.ci-exclude`. `--list`는 수집 목록만.
+  실행은 두 레인 — **병렬 레인**(`bats --jobs N --no-parallelize-within-files`: 파일마다 별도 프로세스, 파일 안은 직렬.
+  N = `RUNBATS_JOBS` 또는 논리 코어 수. GNU parallel 필요 — 로컬 부재는 직렬 폴백 + 안내, CI 부재는 exit 2) 뒤
+  **직렬 레인**(`tests/.gate-serial` — 실 체크아웃을 잠깐 바꾸는 스위트만, 병렬 레인이 끝난 뒤 혼자. 계약은
+  `check-bats-accounting.sh` (2b)). `--plan`은 레인 분할만 출력. 러너는 `GITHUB_OUTPUT` 등 스텝 출력 파일을 끊고
+  bun 트랜스파일 캐시를 실행 단위로 고정한다(근거: docs/traps-detail.md 「파일 단위 병렬 bats에서 …」).
 - **`verify-secrets.sh`** — 추적 `*.enc.yaml` 무결성(암호화됨 + age recipient 신원이 canonical(.sops.yaml
   cluster+recovery)과 일치 + 복호 가능) 검사. 값 비출력; age 키 없으면(=CI) 복호 단계만 스킵하고 구조 검사는 수행.
 - **`verify-traps.sh`** — `docs/traps.md` enforcement 원장이 가리키는 guard 파일이 실재하는지 검사
   (가드 소실 드리프트 = 거짓 안심 차단). 순수 파일 존재 검사.
-- **`ledger-to-json.ts`** — `docs/memory-ledger.md` 표를 JSON으로 변환(conftest 입력 생성). **`bun run verify:ledger`**·
+- **`tools/ledger-to-json.ts`** (셸 아님 — 참고) — `docs/memory-ledger.md` 표를 JSON으로 변환(conftest 입력 생성). **`bun run verify:ledger`**·
   `make verify`·`ci.yaml`(gate)이 호출(출력을 `conftest test … policy/ledger.rego`로 파이프). 라이브 무관.
 - **`sops-guard.sh`** — `*.enc.yaml`이 실제 sops 암호화됐는지 구조 검사(평문 누출 차단). 3조항:
   `.sops.mac`·`.sops.lastmodified` 실재 · `data`/`stringData` 평문 리프 0건(`ENC[` prefix) · age recipient
@@ -138,18 +150,20 @@
   주석(`//`·블록 주석 상태 기계·꼬리 주석)을 걷어낸 뒤 판정하고, 면제는 커널 경로 하나 — 그 파일도
   건너뛰지 않고 생산자 히트 ≥1을 검출기 생존 증거로 요구한다. awk 3겹 처방(rc 포착·`[ -r ]`·READFILES)
   + 바닥값·마커는 검출 뒤. 바닥값은 상수(`MIN_FILES`, env 주입 없음) · `--root <dir>`는 픽스처 전용.
-- **`check-floor-vocab.sh`** — 바닥값 어휘 거부 가드(kernel-followups 04): 구 어휘의 재유입 —
+- **`check-floor-vocab.sh`** — 바닥값 어휘 거부 가드: 구 어휘의 재유입 —
   `--min-*` 플래그 표면 · `${…MIN…:-…}` env 폴백 읽기(셸) · `process.env.…MIN…`(TS) — 을 정적
   red로 만든다. 상수 정의·지역 읽기·주석 산문·`*.bats`(거부 증인 픽스처)는 정당 보유처로 선 밖.
   패턴은 조립식(self-exclusion 없음), 검출은 detect_run(rc·READFILES 대조), 오버라이드는
   `--floor check-floor-vocab=<n>` 하나(dogfood).
 - **`check-credential-expiry.sh`** — 자격증명 만료 원장(`policy/credential-expiry.json`) 검사. `--days N`
   (D-N 이내 만료 시 exit 1·목록 출력), `--lint`(스키마만). 주간 telegram 경고의 임계는 **D-14**.
-  jq 전용·값(토큰) 미보유(만료일 원장만). (메타갭 ④)
+  jq 전용·값(토큰) 미보유(만료일 원장만).
 - **`check-image-pins.sh`** — 이미지 digest 핀 2-레인 게이트: 레인1(platform 문자열 `image:`)·레인2(apps values
-  `image:` 구조체 `digest:`). 벤더(barman-plugin)·테스트/픽스처(`**/tests/**`·`**/fixtures*/**`) 제외, substrate 스코프 밖,
+  `image:` 구조체 `digest:`). 판정은 접두가 아니라 **형식**(`DIGEST_BODY='sha256:[0-9a-f]{64}'` — 두 레인 공유
+  변수 하나이고, `tools/lib/image-pin.ts` DIGEST_BODY·차트 `values.schema.json` digest pattern의 사본이라
+  세 축 문자열 등식이 대조된다). 벤더(barman-plugin)·테스트/픽스처(`**/tests/**`·`**/fixtures*/**`) 제외, substrate 스코프 밖,
   scan-floor. 예외=`policy/image-pin-allowlist.txt`(사유 주석 **+ 건수 상한 `EXEMPT_MAX`** — 픽스처는
-  `--exempt-max`로만 넘긴다). 신규 미핀 이미지는 fail-closed 차단. (메타갭 ②)
+  `--exempt-max`로만 넘긴다). 신규 미핀 이미지는 fail-closed 차단.
 - **`verify-ledger.sh`** — 메모리 원장 예산 게이트 SSOT. `bun tools/ledger-to-json.ts` 출력을
   `conftest … policy/ledger.rego`로 검사.
 - **`verify-runbook-index.sh`** — `docs/runbooks/`(gitignored) ↔ AGENTS.md 런북 인덱스 정합(로컬 전용).
@@ -182,7 +196,7 @@
   **기본 dry-run** — 실제 삭제는 `ARGS=--purge`. 라이브 ObjectStore에서 bucket/endpoint를 읽음.
 - **`destroy-node.sh`** — **극도로 파괴적(owner 전용, D-j)**. 베어메탈 노드 파괴 프리미티브:
   `k3s-uninstall.sh` + `/var/lib/rancher` 삭제(= standard 클래스 PV 전량 소멸, 복구 불가).
-  OrbStack 시절 `orb delete -f k3s` 한 줄을 대체한다. `dr-drill.sh`의 [1]이 유일한 자동 호출자이고
+  `dr-drill.sh`의 [1]이 유일한 자동 호출자이고
   그 밖에는 사람이 직접 실행한다 — Makefile/워크플로 **배선 없음**(`make down`은 의도적 비배선).
   3중 fail-closed: 확인 env `DR_DRILL_DESTROY_CONFIRM=1` · 국면 A(`BULK_MIGRATION_WINDOW_UNTIL`이
   비어있지 않으면) 거부 · `k3s-uninstall.sh` 부재 fail-loud. **`|| true` 없음** — 파괴 실패를 삼키면
@@ -203,11 +217,12 @@
   (판별은 `findmnt --target` → 백킹 디바이스 → `lsblk -nso` TYPE=disk까지 거슬러 올라간다).
   스테이징→sanity(빈/급감 중단)→승격(data.prev 1개 보존). 성공 시 `files_backup_last_success_timestamp`·
   용량을 vmsingle에 push(r4의 FilesBackupStale/FilesBulkSSDLow).
-  ⚠️ 2026-08-19에 **리눅스로 재작성**됐다(이전 판은 macOS 결박 — `diskutil` 매체 판별 + launchd 배선).
   실행자는 `infra/k3s-bootstrap/host-config/etc/systemd/system/files-data-backup.{service,timer}`이고
-  🔴 **국면 A 동안 enable하지 않는다** — `/mnt/bulk`가 루트 LV의 bind 마운트라 2차 매체가 원리적으로
-  없고, 스크립트가 같은 물리 디스크를 dest로 주면 거부한다. 국면 B(2TB M.2 장착) 이후
-  `sudo systemctl enable --now files-data-backup.timer`가 배선의 마지막이다.
+  🔴 **타이머 enable은 국면 B 전제다** — 국면 A에서는 `/mnt/bulk`가 루트 LV의 bind 마운트라 2차
+  매체가 원리적으로 없고, 스크립트가 같은 물리 디스크를 dest로 주면 거부하므로 의도적으로
+  enable하지 않았다. 국면 B(별도 2TB M.2, 2026-08-26 진입) 이후에는 **enable돼 있어야 한다**(2026-09-09
+  실측 `systemctl is-enabled files-data-backup.timer` = enabled·active) — 아니면 r4 FilesBackupStale이 상시
+  발화한다(현행 국면의 권위는 `infra/k3s-bootstrap/versions.env`의 `BULK_MIGRATION_WINDOW_UNTIL`).
   실패는 `OnFailure=`가 `notify-unit-failure.sh`로 즉시 알린다(신선도 알림은 1주기보다 빨리 못 운다).
   Makefile 배선 없음 — 직접 실행.
 - **`notify-unit-failure.sh`** — **호스트 systemd 전용**(직접 실행하지 않는다).
@@ -236,7 +251,7 @@
   ⚠️ posture 스위트 **전체가 아니라 netpol 레그만** 돈다(`POSTURE_BATS` 오버라이드, `git ls-files` 파생 +
   열거 붕괴 바닥값) — `tests/posture/test_dr-assets.bats`는 owner 매체 env를 요구하는 별개 도메인이라
   리허설 범위 밖이다(무가드로 부르면 candidate와 무관한 red가 **클러스터 변이 뒤에** 나온다).
-  ⚠️ 인-레포 앱 0인 현 정상 상태(`apps/README.md`)에서는 **kubelet 프로브 레그만** skip된다(경고 출력) —
+  ⚠️ prod에 앱 파드가 0건일 때(인-레포 앱은 0개일 수 있다 — `apps/README.md`)는 **kubelet 프로브 레그만** skip된다(경고 출력) —
   리허설 자체는 돈다. POSITIVE pg-rw·pg-pooler-rw(F4b)·NEGATIVE egress deny는 `probe()`가 자기 파드를
   띄우므로 앱 파드와 무관하게 실질 판정이고, ipBlock 핀은 `platform/network-policies/prod/test_netpol.bats`가
   gate에서 따로 강제한다. prod에 파드는 있는데 셀렉터가 0건이면(라벨 드리프트) 그건 열거 붕괴라 exit 1이다.

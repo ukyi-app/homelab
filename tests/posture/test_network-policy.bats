@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
 
-# 동서(east-west) 격리 자세 (Pass-5 Open Item #3): `prod`(앱)와 `database`(CNPG)
+# 동서(east-west) 격리 자세: `prod`(앱)와 `database`(CNPG)
 # 네임스페이스에 default-deny + 최소 allow. 공개 앱이 침해되더라도 Postgres 5432를
 # 통한 경로 외에는 데이터베이스에 닿을 수 없어야 하며, 나머지는 전부 거부된다.
-# LIVE: kubectl 컨텍스트 = M3+M4가 sync되고 network-policies 컴포넌트가 적용된 k3s VM 필요.
+# LIVE: kubectl 컨텍스트 = M3+M4가 sync되고 network-policies 컴포넌트가 적용된 k3s 노드 필요.
 # 렌더된 매니페스트가 아니라 실제 적용(kube-router)을 검증한다.
 
 # ⚠️ prod 네임스페이스는 restricted PSA를 enforce한다 — 임시 프로브 파드도 PSA-호환
@@ -43,12 +43,11 @@ probe() {
   # app.kubernetes.io/name 라벨 드리프트) 빈 출력이 `!= *False*`를 만족한다. (b) Ready condition을
   # **아직 못 쓴** 파드도 빈 문자열이라 같이 통과한다. -o json 3단 단언으로 둘 다 닫는다.
   #
-  # ⚠️ 그런데 그 바닥값(`>= 1`)이 **앱 개수에 결합**돼 있었다. 인-레포 앱이 0개가 된 뒤로는
-  # (apps/README.md — page·trip-mate-api 철거) 완전히 건강한 클러스터에서도 이 @test가 red였고,
-  # 그 비-0은 AGENTS.md가 규정한 "KUBECONFIG 부재 = SKIP 신호"와 구별되지 않았다. 형제
-  # `test_internal-by-default.bats:14-18`이 같은 병을 이미 진단해 분모를 플랫폼 소유로 옮겼는데,
-  # apps/README.md의 "앱 개수에 걸린 바닥값 4개를 0으로" 캠페인이 **라이브 전용인 이 다섯 번째**를
-  # 열거에서 빠뜨렸다. 그래서 분모를 셋으로 나눈다:
+  # ⚠️ 그런데 그 바닥값(`>= 1`)이 **앱 개수에 결합**돼 있었다. 인-레포 앱이 0개인 동안에는 완전히
+  # 건강한 클러스터에서도 이 @test가 red였고, 그 비-0은 AGENTS.md가 규정한 "KUBECONFIG 부재 = SKIP
+  # 신호"와 구별되지 않았다. 형제 `test_internal-by-default.bats:14-18`이 같은 병을 이미 진단해 분모를
+  # 플랫폼 소유로 옮겼고, apps/README.md가 계상하는 앱 개수 바닥값 5곳은 정적 가드뿐이라 **라이브
+  # 전용인 이 자리**는 그 열거 밖이다. 그래서 분모를 셋으로 나눈다:
   #   (a) 네임스페이스 실재 — 앱 개수와 무관한 양성 대조. `kubectl -n <없는 ns> get pods -o json`은
   #       rc 0에 빈 목록이라(실측) 조회 성공만으로는 도메인 실재를 증언하지 못한다.
   #   (b) 라벨 드리프트 = 열거 붕괴 — prod에 파드가 있는데 셀렉터가 0건이면 red.
@@ -67,7 +66,7 @@ probe() {
     [ "$pods" -ge 1 ]            # 파드는 있는데 라벨 셀렉터가 0건 = 열거 붕괴
   fi
   if [ "$pods" -eq 0 ]; then
-    skip "prod에 앱 파드 0건(인-레포 앱 0개) — 잴 대상이 없다. 온보딩하면 실질 판정으로 복귀한다"
+    skip "prod에 앱 파드 0건 — 잴 대상이 없다(앱 파드가 서면 실질 판정으로 자동 복귀)"
   fi
   ready="$(jq '[.items[]|select(any(.status.conditions[]?; .type=="Ready" and .status=="True"))]|length' <<<"$output")"
   [ "$ready" -eq "$pods" ]       # Ready=True가 아닌 파드(False·condition 부재 포함) 0건
@@ -97,7 +96,7 @@ probe() {
 }
 
 @test "NEGATIVE: prod egress to a non-database, non-DNS destination is denied by default" {
-  # posture-4(6라운드): prod egress allow 집합의 SSOT는 platform/network-policies/prod/networkpolicies.yaml이고,
+  # prod egress allow 집합의 SSOT는 platform/network-policies/prod/networkpolicies.yaml이고,
   # 그 집합은 platform/network-policies/prod/test_netpol.bats:29-30의 정확 등식이 gate에서 잠근다
   # (현재 DNS·database:5432·cache:6379·prod 내부:8080). 이 @test는 그 집합 밖 목적지(1.1.1.1:443)가
   # 거부되는지만 잰다 — 손 로스터를 여기 다시 적지 않는다(5번째 티어가 또 이 자리에서 드리프트한다).

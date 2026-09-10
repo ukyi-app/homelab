@@ -6,7 +6,7 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
-  # 대상 실재를 setup에서 닫는다 — 선택 실행(`bats -f`)에서도 부재가 초록으로 읽히지 않게(operand-witness 05 (b)).
+  # 대상 실재를 setup에서 닫는다 — 선택 실행(`bats -f`)에서도 부재가 초록으로 읽히지 않게.
   [ -f "$ROOT/scripts/secret-cert-check.sh" ]
   TMP="$(mktemp -d)"; mkdir -p "$TMP/bin"
   # 두 개의 자체서명 cert(A=committed 픽스처, B=다른 라이브)
@@ -37,7 +37,7 @@ stub_kubeseal() { # $1: cat할 cert 파일(없으면 exit 1로 fetch 실패 모�
 
 @test "skips with a distinct exit 4 when the live cert cannot be fetched (offline)" {
   # exit 0(검증됨)·1(stale)과 구분되는 SKIP 신호 → 자동화가 fail-open을 '검증됨'으로 오인하지 않음.
-  # 4는 규약(CONTRIBUTING '가드 skip 신호') — 예전 2는 아래 unknown-option과 같은 코드였다.
+  # 4는 규약(CONTRIBUTING '가드 skip 신호') — 아래 unknown-option의 2와 구분되는 코드다.
   stub_kubeseal ""
   PATH="$TMP/bin:$PATH" run bash scripts/secret-cert-check.sh --cert "$TMP/certA.pem"
   [ "$status" -eq 4 ]

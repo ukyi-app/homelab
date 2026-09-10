@@ -30,7 +30,7 @@ setup() {
 }
 
 @test "pr-sweeper surfaces update-branch failures (tracks + exits nonzero, not silent green) (restale3 F2)" {
-  # ⚠️ codex restale3 F2: update-branch 실패를 ::warning::로 삼키고 green 종료하면 멈춘 PR이 무알림으로 묻힌다.
+  # ⚠️ update-branch 실패를 ::warning::로 삼키고 green 종료하면 멈춘 PR이 무알림으로 묻힌다.
   # 실패 PR을 모아 exit 1(→ failure() telegram 발화)해야 한다. 정적 단언: 실패 추적 변수 + nonzero 종료.
   grep -q 'failed=' "$F"
   grep -qE 'failed.*exit 1' "$F"
@@ -172,7 +172,7 @@ probe_select() {
 }
 
 @test "pr-sweeper checks out the repo before using the local telegram-notify action (F8)" {
-  # ⚠️ codex pass2 F8: 로컬 액션은 체크아웃된 레포에서 resolve된다 — checkout이 telegram-notify보다 앞서야.
+  # ⚠️ 로컬 액션은 체크아웃된 레포에서 resolve된다 — checkout이 telegram-notify보다 앞서야.
   co=$(grep -nE 'uses:[[:space:]]*actions/checkout' "$F" | head -1 | cut -d: -f1)
   tg=$(grep -nE 'uses:[[:space:]]*\./\.github/actions/telegram-notify' "$F" | head -1 | cut -d: -f1)
   [ -n "$co" ]

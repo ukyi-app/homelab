@@ -92,7 +92,8 @@ alert_defined() {
 
 @test "disk-fill alerts carry a disk label so a critical inhibits the matching warning" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  # bulk-ssd 알림은 제거됨(virtiofs 집계라 측정 불가 — 죽은 알림). 잔존 금지.
+  # 옛 `disk: bulk-ssd` 라벨의 잔존만 금지한다 — bulk를 node_filesystem으로 직접 재지 않는 이유는 r4 :17-27이
+  # 국면별로 소유하고, 현행 bulk 알림은 `disk: bulk`(FilesBulkSSDLow·BulkStorageLow)다.
   run grep -q 'disk: bulk-ssd' "$R"; [ "$status" -eq 1 ]
   # standard 디스크는 warning(StandardSSDWarning/Trend)+critical(StandardSSDFilling)이 같은 disk 라벨을
   # 공유해 disk-scoped inhibit(critical→warning)가 동작해야 한다.
@@ -134,7 +135,7 @@ alert_defined() {
 }
 
 @test "root-fs pressure stays single-sourced through StandardSSD* (no duplicate threshold/trend rules)" {
-  # 메타갭 ③ Task 1(W1-A): 루트 fs('/') 포화는 StandardSSD* 3룰(early warning/critical/trend)이 단일
+  # 루트 fs('/') 포화는 StandardSSD* 3룰(early warning/critical/trend)이 단일
   # 소스다. 같은 장애 모드에 중복 페이지를 만드는 신규 룰(NodeRootFs*/RootDisk* 등) 신설을 회귀 차단(F16).
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   C="$ROOT/platform/victoria-stack/prod/rules/core.yaml"
@@ -144,7 +145,7 @@ alert_defined() {
   alert_defined "$R" StandardSSDWarning
   alert_defined "$R" StandardSSDFilling
   alert_defined "$R" StandardSSDFillingTrend
-  # round7 finding rules-core-r4-r5-2 — warning(0.15)/critical(0.10) 두 리터럴을 맞바꿔도(severity
+  # warning(0.15)/critical(0.10) 두 리터럴을 맞바꿔도(severity
   # 역전) 존재 단언만으로는 34/34 ok로 흡수된다(실측). 알림 이름별 expr에서 뽑아 등식으로 잰다.
   w_expr="$(yq -e '.data["r4.yaml"]' "$R" | yq '.groups[].rules[] | select(.alert=="StandardSSDWarning") | .expr' -)"
   c_expr="$(yq -e '.data["r4.yaml"]' "$R" | yq '.groups[].rules[] | select(.alert=="StandardSSDFilling") | .expr' -)"
@@ -175,7 +176,7 @@ alert_defined() {
   alert_defined "$C" VmagentRemoteWriteDropping  # 메트릭 유실
   alert_defined "$C" VmalertUnhealthy            # 알림 엔진 자체 에러
   alert_defined "$C" KubeJobFailed               # 전용 staleness 없는 Job 실패(files ns 등)
-  # 블랙리스트(namespace!~)여야 신규 ns(files 등)를 자동 포함 — 화이트리스트 회귀 금지(:108 교훈, PodCrashLooping과 동일).
+  # 블랙리스트(namespace!~)여야 신규 ns(files 등)를 자동 포함 — 화이트리스트 회귀 금지(PodCrashLooping의 블랙리스트 회귀와 동일 교훈).
   grep -qE 'kube_job_failed\{condition="true", namespace!~' "$C"
   # self-scrape 주석 — 위 self-metric이 TSDB에 들어가려면 4개 컴포넌트가 scrape돼야 한다.
   for comp in vmsingle vmagent vmalert victorialogs; do
@@ -198,9 +199,9 @@ alert_defined() {
   # 임계가 renewBefore 버퍼 안쪽이라 정상 자동갱신 무발화: wildcard 14일(<LE 30일)·catch-all 7일(<selfsigned 15일).
   grep -q '< 1209600' "$R"   # 14d
   grep -q '< 604800' "$R"    # 7d
-  # ⚠️ 위 두 grep은 파일 전체 매치라 두 리터럴이 서로 바뀐 채(swap) 붙어도 통과한다(round7 finding
-  #    rules-core-r4-r5-1 — 34/34 ok로 실측). 알림 이름별로 expr을 뽑아 등식으로 잰다(:244
-  #    ContainerMemoryNearLimit expr-scoped 관용구와 동형).
+  # ⚠️ 위 두 grep은 파일 전체 매치라 두 리터럴이 서로 바뀐 채(swap) 붙어도 통과한다
+  #    (34/34 ok로 실측). 알림 이름별로 expr을 뽑아 등식으로 잰다 — 이 파일 아래
+  #    ContainerMemoryNearLimit @test의 expr-scoped 관용구와 동형.
   E="$BATS_TEST_TMPDIR/cert-expr.txt"
   yq -e '.data["r5.yaml"]' "$R" | yq '.groups[].rules[] | select(.alert=="CertWildcardExpiringSoon") | .expr' > "$E"
   grep -q '< 1209600' "$E"
@@ -343,7 +344,7 @@ alert_defined() {
 
 @test "per-PVC du exporter has staleness + in-cluster bulk capacity alerts (push metric windows)" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
-  # 메타갭 ③ Task 2(W1-A): du exporter 생존 + bulk 용량(W3 선행 신호, F18/F20).
+  # du exporter 생존 + bulk 용량(bulk 이전의 선행 신호, F18/F20).
   alert_defined "$R" PvcDuExporterStale
   alert_defined "$R" BulkStorageLow
   # 일 1회 단발 push라 last_over_time 윈도 + absent fail-closed(instant staleness 함정, restore-drill 패턴).
@@ -357,7 +358,7 @@ alert_defined() {
 @test "adguard rewrite reconciler has staleness + drift-fixed notify alerts (push metric, notify via AM not pod)" {
   R="$ROOT/platform/victoria-stack/prod/rules/r4-storage-backup.yaml"
   A="$AMCFG"   # 제목 매핑은 설정 본문에 있다(setup 주석 참조)
-  # 메타갭 ① Task 7(W2-A): 리컨실러 생존(staleness) + 실제 수렴 시 통지(F13 — 발송은 alertmanager 경유).
+  # 리컨실러 생존(staleness) + 실제 수렴 시 통지(F13 — 발송은 alertmanager 경유).
   alert_defined "$R" AdGuardRewriteReconcilerStale
   alert_defined "$R" AdGuardRewriteDriftFixed
   # 10분 push라 last_over_time 윈도 + absent fail-closed(push-metric staleness 함정).
@@ -497,7 +498,7 @@ EOF
   prov="$(grep -oE '^export LOCAL_PATH_PROVISIONER_VERSION="[^"]+"' "$VER" | sed -e 's/.*="//' -e 's/"$//')"
   [ -n "$k3s" ]
   [ -n "$prov" ]
-  # 티켓 60 prov-3 — 매니페스트는 이제 하드코딩 태그가 아니라 `${LOCAL_PATH_PROVISIONER_IMAGE}`
+  # 매니페스트는 이제 하드코딩 태그가 아니라 `${LOCAL_PATH_PROVISIONER_IMAGE}`
   # 플레이스홀더다(렌더 결합은 test_06-storage-manifests.bats·test_07-apply-storage.bats 소유).
   # 여기서는 SSOT 내부 등식만 본다 — 태그 소유자(LOCAL_PATH_PROVISIONER_VERSION, freshness 매니저)와
   # digest 소유자(LOCAL_PATH_PROVISIONER_IMAGE, 새 digest 매니저)가 **별도 PR로 부분 머지**되면 태그가
@@ -584,7 +585,7 @@ EOF
 }
 
 @test "every meta alert carries a Telegram title mapping (quality bar of this pass)" {
-  # 이름 하드코딩 금지(리뷰 M6) — r7 전량을 룰 파일에서 파생하고, 같은 패스의 r4 신규 2종은
+  # 이름 하드코딩 금지 — r7 전량을 룰 파일에서 파생하고, 같은 패스의 r4 신규 2종은
   # 명시로 얹는다(r4 전량 파생은 기존 미매핑 warning 16종을 소급 강제해 별개 결정이 된다 — 유보).
   AM="$AMCFG"   # 제목 매핑은 설정 본문에 있다(setup 주석 참조)
   R7="$ROOT/platform/victoria-stack/prod/rules/r7-meta.yaml"

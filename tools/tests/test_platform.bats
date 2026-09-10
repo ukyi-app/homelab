@@ -42,6 +42,31 @@ platform_triplet() {
   [ "$output" = "api,fullstack,site,worker,hexagon|site,hexagon|api,fullstack,worker" ]
 }
 
+@test "the repo owner is derived once: no consumer re-splits HOMELAB_REPO (SSOT comment enforced)" {
+  # platform.ts:6 주석이 '소비자가 각자 split하면 파생 지점이 갈린다'고 금지한 형태를 실제로 못 박는다
+  # (엔진 셋 중 하나만 규약 밖이었다). 양성 대조: 같은 술어가 SSOT에서는 매치한다.
+  [ "$(grep -c 'HOMELAB_REPO.split' tools/lib/platform.ts)" = "1" ]
+  scan=()
+  for f in tools/*.ts tools/lib/*.ts; do
+    [ "$f" = "tools/lib/platform.ts" ] && continue
+    [ -r "$f" ]
+    scan+=("$f")
+  done
+  [ "${#scan[@]}" -ge 40 ]
+  # 부정 카운트 본체 — rc를 삼키지 않는다(검출기 사망 rc 2를 '0건 OK'로 읽지 않기 위해).
+  rc=0; hits="$(grep -n 'HOMELAB_REPO.split' "${scan[@]}")" || rc=$?
+  echo "rc=$rc"; echo "$hits"
+  [ "$rc" -eq 1 ]
+  [ -z "$hits" ]
+  # OWNER가 실제로 그 유일 파생임을 값으로 확인한다(리터럴 재유도가 아니라 SSOT 소비인지).
+  run bun -e '
+    const { OWNER, HOMELAB_REPO } = await import(process.argv[1]);
+    console.log(OWNER + "|" + HOMELAB_REPO);
+  ' "$ROOT/tools/lib/platform.ts"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ukyi-app|ukyi-app/homelab" ]
+}
+
 @test "the archetype vocabulary literal lives only in platform.ts (sentinel token guard, fail-closed)" {
   # 감시 토큰 = "fullstack"(다른 이름은 일반어라 오탐). 양성 대조: 같은 grep이 SSOT에서는 rc 0으로 매치한다.
   grep -q "fullstack" tools/lib/platform.ts

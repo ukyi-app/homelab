@@ -32,7 +32,7 @@ spec:
         # right-size 2026-09-01: 옛 근거 "peak_ws controller 82·cainjector 77·webhook 69 → 각 128Mi"는
         # working_set 기준이라 PR #564로 무효화됐다. 컨테이너별 A′ peak(14일) × 2.0x로 재산정한다 —
         # controller 35.3→80Mi(2.27x) · cainjector 43.9→96Mi(2.19x) · webhook 23.4→48Mi(2.05x).
-        # 행 384→224. 옛 판정이 셋을 같은 128Mi로 묶은 것은 캐시 charge가 컨테이너마다 달라 생긴 왜곡이다.
+        # 셋을 같은 limit으로 묶지 않는다 — 캐시 charge가 컨테이너마다 달라 왜곡이 생긴다.
         - { name: resources.requests.cpu, value: "10m" }
         - { name: resources.requests.memory, value: "32Mi" }
         - { name: resources.limits.memory, value: "80Mi" }

@@ -52,6 +52,30 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   echo "$output" | grep -q "^ok$"
 }
 
+@test "parseFlags rejects a repeated flag instead of silent last-wins (value and bool, floor 2)" {
+  # 마지막 값이 조용히 이기면 `--confirm x --confirm myapp` 같은 편집 실수가
+  # 파괴 확인을 통과한다. 이 커널을 공유하는 모든 도구를 위해 거부는 여기 한 곳이 소유한다.
+  run bun -e '
+    import { parseFlags } from "./tools/lib/cli.ts";
+    const cases = [
+      { argv: ["--name", "a", "--name", "b"], spec: { value: ["--name"], bool: [] } },
+      { argv: ["--dry-run", "--dry-run"], spec: { value: [], bool: ["--dry-run"] } },
+    ];
+    let n = 0;
+    for (const { argv, spec } of cases) {
+      try { parseFlags(argv, spec); console.error("DID-NOT-THROW: " + argv.join(" ")); process.exit(1); }
+      catch (e) { if (!String(e.message).includes("중복")) { console.error("wrong error: " + e.message); process.exit(1); } }
+      n++;
+    }
+    // 대조군 — 서로 다른 두 플래그는 그대로 통과한다(거부가 전칭이 아님)
+    const ok = parseFlags(["--name", "a", "--dry-run"], { value: ["--name"], bool: ["--dry-run"] });
+    if (ok["--name"] !== "a" || ok["--dry-run"] !== true) { console.error("대조군 실패"); process.exit(1); }
+    console.log("ok:" + n);
+  '
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^ok:2$"
+}
+
 @test "migrated mutators import the shared parseFlags (cli.ts adoption)" {
   # ⚠️ 피연산자를 **import 줄**로 좁힌다 — 맨 `lib/cli.ts` 매치는 그 파일 어디든(주석 한 줄에도)
   #    걸려 「리터럴 언급이면 참」이 된다. 실측 2026-09-04: create-app.ts의 import를 주석으로 바꾸고
@@ -64,7 +88,7 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 
 @test "migrated mutators reject a missing flag value (arg-swallow guard per callsite)" {
   # 값-요구 플래그 뒤 값 누락 → fail-closed(이전엔 다음 플래그를 삼킴).
-  # [ABS-EXEC] W1(감사 63) — 도구가 리네임/부재여도 bun은 rc 1(Module not found)을 내 아래
+  # [ABS-EXEC] W1 — 도구가 리네임/부재여도 bun은 rc 1(Module not found)을 내 아래
   # `-ne 0`이 같은 값으로 침묵 통과한다(R2 실증). 실제 출력 문구로 "값이 필요하다" 오류임을 못박는다.
   run bun tools/teardown-app.ts --app --dry-run;     [ "$status" -ne 0 ]
   echo "$output" | grep -q "값이 필요하다"

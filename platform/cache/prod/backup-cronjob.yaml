@@ -1,9 +1,9 @@
-# 공용 Valkey 백업 체인 (Task 5.2b) — cache NS의 모든 인스턴스를 순회하며
+# 공용 Valkey 백업 체인 — cache NS의 모든 인스턴스를 순회하며
 # BGSAVE 트리거 → 완료 대기 → RDB 네트워크 풀 → R2 업로드 → 신선도 메타 기록.
 # teardown-resource --cache <name> --delete-data는 last_success.json(시각/체크섬)을
 # 신선도 게이트로 읽는다 — 메타가 낡으면 파괴가 차단된다.
 # 인스턴스 PVC는 마운트하지 않는다: RDB는 valkey-cli --rdb(SYNC)로 네트워크에서 받는다.
-# ⚠️ CronJob은 k3s VM의 TZ(Asia/Seoul)로 발화한다 — 아래 schedule을 UTC로 읽지 말 것.
+# ⚠️ CronJob은 k3s 노드 TZ(Asia/Seoul)로 발화한다 — 아래 schedule을 UTC로 읽지 말 것.
 apiVersion: batch/v1
 kind: CronJob
 metadata:

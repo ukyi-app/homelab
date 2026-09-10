@@ -7,8 +7,8 @@ spec:
   selector: { app.kubernetes.io/name: victorialogs }
   ports: [{ name: http, port: 9428, targetPort: 9428 }]
 ---
-# W3 관측 로그 저장소 bulk-ssd 이전(메타갭 캠페인 Task 14, 컷오버 2026-07-08 STS delete-orphan
-# 재생성) — vmsingle(Task 13)과 동일 시퀀스(F2). 로그는 보존 요구가 낮아 데이터 이전 없이
+# W3 관측 로그 저장소 bulk-ssd 이전(컷오버 2026-07-08 STS delete-orphan
+# 재생성) — vmsingle과 동일 시퀀스(F2). 로그는 보존 요구가 낮아 데이터 이전 없이
 # 빈 볼륨 재축적(retention 14d, owner 결정). 절차는 runbooks/observability-bootstrap.md §5.
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -35,7 +35,7 @@ spec:
       labels: { app.kubernetes.io/name: victorialogs }
       annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9428" } # 자기관측 vl_rows_ingested 등
     spec:
-      automountServiceAccountToken: false # k8s API 미사용(로그 저장) — SA 토큰 마운트 금지(메타갭 ⑤ W2-C)
+      automountServiceAccountToken: false # k8s API 미사용(로그 저장) — SA 토큰 마운트 금지
       securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: victorialogs
