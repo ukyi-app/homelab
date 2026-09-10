@@ -788,8 +788,12 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   **앱 행 문법 전부**를 소유한다: 행 위치(항목 targets 말미) · `path`=`tools/<source 파일명>`(앱 레포 사본은
   레포 루트 `tools/` 하나에 산다 — 템플릿만 `scaffold/common/tools/…`다) · `ref`=`main` · `normalize`는
   **같은 source의 기존 행에서 상속**(정규화 모드는 파일 종류의 성질이지 대상 레포의 성질이 아니다) ·
-  2칸 들여쓰기 직렬화. 유도 불가(기존 행 0건·모드 혼재)·`vendored` 0건·앵커 행까지 비우는 제거는 전부
-  **throw**(fail-loud)이고, `hasAppTargets`는 항목 부재(`false`)를 포맷 드리프트(throw)와 가른다.
+  2칸 들여쓰기 직렬화. 소유가 문법 **전부**이므로 추가는 존재 확인이 아니라 **정본화**다 — 어긋난 기존 앱 행은
+  유도한 값으로 되돌린다(존재만 보면 `appTargetRows`가 낸 plan이 파일에 없는 행을 예고한다).
+  유도 불가(기존 행 0건·모드 혼재)·`path` 유도를 뒷받침하는 기존 행 0건·항목 간 `basename` 충돌·
+  `target` 원소 형상(`repo`/`ref`/`path` 문자열, `normalize`가 `typescript|exact`)·`vendored` 0건·
+  앵커 행까지 비우는 제거는 전부 **throw**(fail-loud — 호출부가 `::error::` 규약으로 옮긴다)이고,
+  `hasAppTargets`는 항목 부재(`false`)를 포맷 드리프트(throw)와 가른다.
   앱-**외부** 표면이라 `lib/app-surface.ts` 소관 밖이고(그쪽은 디렉토리 통째 rm이 대칭을 구조로 보장한다),
   create↔teardown 대칭은 이 add/remove 쌍과 `test_vendored-targets.bats`의 역함수 레인이 진다.
   소비자: `create-app`(추가)·`teardown-app`(제거)·`contract-drift-check`(타입).

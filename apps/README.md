@@ -32,4 +32,4 @@ CronJob 등이 참조하는 빌드-전용 이미지(예: `pg-tools`)는 **`ops/<
 > (`db create`의 pgdump 헤지 DBS 등록은 자동이라 손 단계가 아니다. `tools/tests/test_repo-walk.bats`의 image-ownership 루트 로스터는
 > 손 단계였다가 **파생**이 됐다 — 기대 집합이 `apps/*/deploy/prod/values.yaml`의 디스크 실재(git 추적
 > 여부와 무관하게 셸 글롭이 본다)에서 나오므로 0↔1에 무감하다. `tools/vendored-contract.json`의 동봉 계약 target 2행도
-> 손 단계였다가 **#7xx부터 create-app/teardown-app이 쓴다** — 커널 `tools/lib/vendored-targets.ts`가 넣고 뺀다.)
+> 손 단계였다가 **create-app/teardown-app이 쓴다** — 커널 `tools/lib/vendored-targets.ts`가 넣고 뺀다.)

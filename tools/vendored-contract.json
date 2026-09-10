@@ -1,6 +1,6 @@
 {
   "_note": "동봉 계약(vendored) SSOT. homelab tools/*가 원본, 다운스트림은 복사본. files(Rust)는 seal 도구 없어 제외. cert는 exact(공개 봉인 cert 바이트 일치 필수), .mts는 typescript(포매터 재포맷 허용).",
-  "_roster": "targets의 **앱** 축은 손 열거가 아니라 인레포 파생원(apps/<app>/deploy/prod/source-repo)과 등식으로 대조된다 — contract-drift-check.ts의 reconcileRoster. 초과(철거된 레포 잔재)도 부족(새 앱 미등재)도 drift다 — 잔재를 남기면 실질 대상 1건에 알림이 여러 건으로 부풀어 자기 임계를 올린다. 앱의 target 행은 **도구가 쓴다**: create-app이 온보딩 PR에 넣고 teardown-app이 철거 PR에서 뺀다(커널 tools/lib/vendored-targets.ts — 멱등·직렬화 보존, 손 편집은 경로가 아니다). 템플릿(scaffoldRepos) 행은 앱이 아니라 선언 축이라 그 자동화 밖이다. 앱 개수 0↔1 손 단계는 apps/README.md.",
+  "_roster": "targets의 **앱** 축은 손 열거가 아니라 인레포 파생원(apps/<app>/deploy/prod/source-repo)과 등식으로 대조된다 — contract-drift-check.ts의 reconcileRoster. 초과(철거된 레포 잔재)도 부족(새 앱 미등재)도 drift다 — 잔재를 남기면 실질 대상 1건에 알림이 여러 건으로 부풀어 자기 임계를 올린다. 앱의 target 행은 **도구가 쓴다**: create-app이 온보딩 PR에 넣고 teardown-app이 철거 PR에서 뺀다(커널 tools/lib/vendored-targets.ts — 멱등·직렬화 보존, 어긋난 앱 행은 다음 실행이 정본으로 되돌린다. 손 편집은 경로가 아니다). 템플릿(scaffoldRepos) 행은 앱이 아니라 선언 축이라 그 자동화 밖이다. 앱 개수 0↔1 손 단계는 apps/README.md.",
   "owner": "ukyi-app",
   "scaffoldRepos": [
     "homelab-app-template"
