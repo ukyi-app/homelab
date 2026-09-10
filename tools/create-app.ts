@@ -219,7 +219,12 @@ function wiringChecklist(): string[] {
 const vcPath = `${ROOT}/tools/vendored-contract.json`;
 if (!existsSync(vcPath)) fail(`tools/vendored-contract.json 부재: ${vcPath} — 동봉 계약 target 행을 쓸 수 없다(로스터 등식이 missing-target으로 발화한다)`);
 const vcBefore = readFileSync(vcPath, "utf8");
-const vendoredTargets = appTargetRows(vcBefore, app);
+// 커널의 거부 축(파싱·형상·0건·path 유도 불가·normalize 유도 불가·basename 충돌)을 이 파일의
+// fail() 규약으로 옮긴다 — raw throw는 `::error::` 접두가 없어 GHA 에러 어노테이션에 안 뜨고,
+// 이 워크플로의 telegram notify는 job.status만 싣는다(사람이 문구에 닿는 유일한 채널이 로그다).
+let vendoredTargets;
+try { vendoredTargets = appTargetRows(vcBefore, app); }
+catch (e) { fail(e instanceof Error ? e.message : String(e)); }
 
 // ---------- 5) 산출물 ----------
 const plan = {

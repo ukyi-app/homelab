@@ -26,6 +26,8 @@ if (!app || !APP_NAME_RE.test(app)) {
   console.error("usage: teardown-app --app <name> [--repo-root <dir>] [--dry-run]");
   process.exit(2);
 }
+// 정책 거부의 단일 출구(create-app.ts:fail과 같은 규약). usage(rc 2)와 갈린다 — 그쪽은 호출 오류다.
+function fail(msg: string): never { console.error(`::error::teardown-app: ${msg}`); process.exit(1); }
 
 const plan: { app: string; remove: string[]; appsJsonRow: any; ledgerRow: boolean; untouched: string } =
   { app, remove: [], appsJsonRow: null, ledgerRow: false, untouched: "db/cache conn·CR·Valkey는 teardown-resource 전담" };
@@ -64,7 +66,12 @@ if (existsSync(dePath) && hasApp(readFileSync(dePath, "utf8"), app)) {
 //    들여쓰기가 어긋난 순간 도달한다).
 const vcPath = `${ROOT}/tools/vendored-contract.json`;
 const vcBefore = existsSync(vcPath) ? readFileSync(vcPath, "utf8") : null;
-const vcNext = vcBefore !== null && hasAppTargets(vcBefore, app) ? removeAppTargets(vcBefore, app) : null;
+// 커널 throw를 fail() 규약으로 옮긴다 — 파괴 경계의 거부 문구가 `::error::` 없이 raw
+// 스택트레이스로 나가면 GHA 어노테이션에 안 뜨고, 이 잡의 telegram notify는 job.status만 싣는다.
+let vcNext: string | null = null;
+try {
+  if (vcBefore !== null && hasAppTargets(vcBefore, app)) vcNext = removeAppTargets(vcBefore, app);
+} catch (e) { fail(e instanceof Error ? e.message : String(e)); }
 if (vcNext !== null) {
   plan.remove.push("vendored-contract target 행");
 }
