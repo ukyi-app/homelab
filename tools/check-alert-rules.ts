@@ -101,7 +101,7 @@ const ALLOWLIST = "policy/alert-instance-stability-allowlist.txt";
 // tmax는 argmax 시각(값 기반)이라 클래스 밖 = 기존 화이트리스트 red 유지. r7
 // AlertPipelineWriteStale의 통과는 이제 공백이 아니라 정당 판정이다. 분류 SSOT는 정책 파일
 // _readme(TS 클래스 항목)와 TS_FRESHNESS_* 주석이 함께 진다.
-const MIN_SCAN = 30;   // 실 룰 56건(55 alert + 1 record, meta-observability 시점) — 셀렉터 붕괴 false-green 차단
+const MIN_SCAN = 30;   // 셀렉터 붕괴 false-green 차단 — 실측 2026-09-08 스캔 61건(60 alert + 1 record)의 절반 아래로 둔다(대량 철거를 견딘다). 현재값은 SCAN 마커가 낸다 — 래칫 아님.
 // denylist 항목 바닥값 — 파일이 남아 있는데 **내용만** 비거나 주석만 남는 부분 드리프트를 잡는다
 // (필수 읽기는 파일 부재만 잡는다). 실 원장 1항목 — 이 목록은 줄어들 이유가 없다. 래칫 아님.
 // ⚠️ **denylist에는 `EXEMPT_MAX` 같은 상한이 없고, 있어서도 안 된다 — 극성이 반대다.** allowlist는
@@ -254,7 +254,7 @@ const DEFAULT_REGISTRY: PushEntry[] = [
   ...["ghcr_latest_digest", "digest_exporter_last_success_timestamp",
     "digest_exporter_apps_configured", "digest_exporter_apps_scraped"]
     .map((metric): PushEntry => ({ metric, producer: DIGEST_EXPORTER, schedule: { kind: "cron", file: DIGEST_EXPORTER } })),
-  // grafana emptyDir 지문 du(meta-observability 01)도 같은 실행·같은 push라 스케줄·하트비트를 공유한다 —
+  // grafana emptyDir 지문 du도 같은 실행·같은 push라 스케줄·하트비트를 공유한다 —
   // 0건(grafana 미가동)은 의도적 미방출이므로 소비 룰은 absent 절 없이 사용률만 본다(GrafanaPluginBudgetLow).
   ...["pvc_dir_size_bytes", "storage_tier_size_bytes", "storage_tier_avail_bytes", "pvc_du_last_success_timestamp",
     "grafana_data_dir_size_bytes", "grafana_du_fingerprint_matches"]
@@ -465,7 +465,7 @@ type Candidate = { path: string; why: string; viaUrl: boolean; metrics: string[]
 // staleness**(빠진 항목이 조용히 안 보임)를 스스로 갖고 있었다.
 // 열거(레포 전역·하네스/charts 제외·생산자 확장자)는 공유 워커의 `producers` 스코프가 소유한다.
 // 여기 남는 것은 전부 **의미론적 판정**이다 — "이 파일이 생산자인가"는 도메인 질문이지 "레포에
-// 무엇이 있는가"가 아니다(design-r1 R-1). 특히 룰 디렉토리는 이 린터의 **검사 대상**(소비자 표면)
+// 무엇이 있는가"가 아니다. 특히 룰 디렉토리는 이 린터의 **검사 대상**(소비자 표면)
 // 이라 생산자로 오인하면 안 되는 것이지, 존재하지 않는 파일이 아니다.
 function collectProducers(root: string): Candidate[] {
   const out: Candidate[] = [];

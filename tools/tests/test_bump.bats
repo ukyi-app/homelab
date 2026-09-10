@@ -119,7 +119,7 @@ DIG="sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
 }
 
 @test "bump rejects a value-flag with no value (arity, F2 digest-pin downgrade class)" {
-  # ⚠️ codex pass5 F2: --digest가 값 없이 끝에 오면 digest=undefined로 떨어져 digest 핀을 조용히 격하했다.
+  # ⚠️ --digest가 값 없이 끝에 오면 digest=undefined로 떨어져 digest 핀을 조용히 격하했다.
   # arity 파서는 값 누락을 exit 2로 거부해야 한다(핀 격하 방지).
   run bun tools/bump-tag.ts blog sha-feedbee --digest --repo-root "$FIX"
   [ "$status" -eq 2 ]
@@ -216,7 +216,7 @@ NEWDIG="sha256:1111111111111111111111111111111111111111111111111111111111111111"
   [ "$status" -eq 2 ]
 }
 
-# ── digest-exporter APPS 신선도 동기(codex pass2 P2-2): bump 시 같은 앱의 APPS 태그도 함께 갱신 ──
+# ── digest-exporter APPS 신선도 동기: bump 시 같은 앱의 APPS 태그도 함께 갱신 ────────────────────
 # APPS는 "name=ghcr.io/owner/name:tag" 공백 구분 목록. sha-* 태그 불변이라 배포 핀만 갱신하면
 # digest-exporter가 stale 참조로 거짓 ImageDigestDrift(B2)를 낸다 — bump-tag가 같은 커밋에서 동기.
 seed_exporter() {  # $1 = APPS value 문자열

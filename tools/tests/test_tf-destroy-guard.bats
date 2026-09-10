@@ -83,7 +83,7 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "emits typed result=blocked-delete on delete+block and result=ok on no-delete (F1)" {
-  # ⚠️ codex pass5 F1: 호출 측이 outcome이 아니라 result로 분기 — blocked-delete만 alert-and-skip.
+  # ⚠️ 호출 측이 outcome이 아니라 result로 분기 — blocked-delete만 alert-and-skip.
   run env GITHUB_OUTPUT="$TMP/o1" MODE=block PLAN_JSON="$TMP/has-delete.json" sh "$SH"
   [ "$status" -eq 1 ]
   grep -q '^result=blocked-delete$' "$TMP/o1"

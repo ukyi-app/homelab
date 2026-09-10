@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# supplychain-1(부분): main 분기보호의 게이트 불변식이 무인으로 약화되지 못하게 한다.
+# main 분기보호의 게이트 불변식이 무인으로 약화되지 못하게 한다.
 #  - required_status_checks.contexts 가 "gate" 를 포함(auto-merge 폴백의 유일 required check).
 #  - strict == true (머지 전 브랜치가 base에 최신 — stale 통과 차단).
 #  - enforce_admins == false 가 의도된 솔로-오너 잔여 우회임을 주석으로 문서화.
@@ -36,7 +36,7 @@ TF="$BATS_TEST_DIRNAME/../../infra/github/repo.tf"
 }
 
 @test "allows_force_pushes stays pinned to false" {
-  # [7라운드 tfval-tailscale-github-1] PR-first 쓰기 모델의 서버측 강제 앵커 — force-push는 main
+  # PR-first 쓰기 모델의 서버측 강제 앵커 — force-push는 main
   # 히스토리 재작성(합의 없는 리라이트)을 가능하게 한다. true로 뒤집거나 줄을 주석 처리해도
   # (#39-46 앵커 원칙과 동형) 잡히도록 부재 단언(:=true)이 아니라 **양성 anchored 존재 단언(:=false)**을 건다.
   run grep -E '^[[:space:]]*allows_force_pushes[[:space:]]*=[[:space:]]*false' "$TF"
@@ -44,7 +44,7 @@ TF="$BATS_TEST_DIRNAME/../../infra/github/repo.tf"
 }
 
 @test "allows_deletions stays pinned to false" {
-  # [7라운드 tfval-tailscale-github-1] GitOps SSOT 브랜치(main) 자체의 삭제를 막는 서버측 앵커 —
+  # GitOps SSOT 브랜치(main) 자체의 삭제를 막는 서버측 앵커 —
   # ArgoCD가 이 브랜치를 싱크해 전 스택을 운영하므로 파급이 크다. 동일하게 양성 anchored 존재
   # 단언(:=false)을 건다.
   run grep -E '^[[:space:]]*allows_deletions[[:space:]]*=[[:space:]]*false' "$TF"
@@ -58,5 +58,35 @@ TF="$BATS_TEST_DIRNAME/../../infra/github/repo.tf"
   run grep -nE '^[[:space:]]*enforce_admins[[:space:]]*=' "$TF"
   [ "$status" -eq 0 ]
   run grep -niE '솔로|residual|잔여' "$TF"
+  [ "$status" -eq 0 ]
+}
+
+@test "the required check name is one string across repo.tf contexts, the ci.yaml job id, and the CLI constant" {
+  # `homelab … --wait`의 조기 종결은 check-run **이름**으로 required
+  # check를 찾는다. 그 이름은 세 곳의 사본이다 — HCL `contexts`(권위) · ci.yaml의 job id(잡에 `name:`이
+  # 없으므로 check-run 이름 = job id) · CLI 상수(tools/lib/mutation.ts `REQUIRED_CHECK`). 어긋나면
+  # 조회가 공집합이 되어 조기 종결이 **조용히 꺼진다**(손해 방향이 fail-open이라 라이브 신호가 0이다).
+  # 이름은 repo.tf에서 **파생**한다 — 여기에 리터럴을 적으면 넷째 사본이 된다.
+  WF="$BATS_TEST_DIRNAME/../../.github/workflows/ci.yaml"
+  SRC="$BATS_TEST_DIRNAME/../../tools/lib/mutation.ts"
+  ctx="$(sed -n -E 's/^[[:space:]]*contexts[[:space:]]*=[[:space:]]*\[[[:space:]]*"([^"]+)".*/\1/p' "$TF" | head -1)"
+  [ -n "$ctx" ]
+  # **상한**도 잰다 — 이름 있는 집합의 상한 부재(등재된 함정)다. 위 파생은 첫 원소만 읽으므로
+  # contexts가 둘이 되면 둘째 required check는 이 등식 밖에서 조용히 산다. CLI 상수는 단일 문자열이라
+  # 그 순간 조기 종결이 '유일한 required check' 전제를 잃는다 — 원소 2개가 곧 red이고, 그것이 상수를
+  # 집합으로 넓히라는 신호다. 인용부호 개수로 센다(원소 1개 = `"` 2개).
+  q="$(sed -n -E 's/^[[:space:]]*contexts[[:space:]]*=[[:space:]]*\[([^]]*)\].*/\1/p' "$TF" | head -1 | tr -cd '"' | wc -c)"
+  [ "$q" -eq 2 ]
+  # ① 그 이름의 잡이 ci.yaml에 실재한다.
+  run yq -r ".jobs | has(\"$ctx\")" "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+  # ② 그 잡에 `name:`이 없다 — 있으면 check-run 이름이 job id가 아니라 그 값이 되어 등식이 깨진다.
+  #    ⚠️ `yq -e`를 쓰지 않는다 — 값이 false면 exit 1이라 키 부재와 구별되지 않는다(등재된 함정).
+  run yq -r ".jobs.\"$ctx\" | has(\"name\")" "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "false" ]
+  # ③ CLI 상수가 같은 문자열이다.
+  run grep -F "export const REQUIRED_CHECK = \"$ctx\";" "$SRC"
   [ "$status" -eq 0 ]
 }

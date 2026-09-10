@@ -25,7 +25,7 @@ spec:
       containers:
         - name: pgbouncer
           # pgbouncer는 유일한 network-facing 프록시인데 CNPG 기본값이 pod/container securityContext를
-          # 명시하지 않아 이 컴포넌트만 무증인이었다(spec-others-2, round8). 값은 라이브 파드가 이미
+          # 명시하지 않아 이 컴포넌트만 무증인이었다. 값은 라이브 파드가 이미
           # CNPG 오퍼레이터 기본값으로 쓰고 있는 그대로다(kubectl get pod -l cnpg.io/poolerName=pg-pooler-rw
           # -o yaml, 2026-09-05 확인) — 암묵 기본값을 git-선언으로 승격한다.
           securityContext:

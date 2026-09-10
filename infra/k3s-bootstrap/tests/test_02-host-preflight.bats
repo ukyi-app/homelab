@@ -346,3 +346,19 @@ EOF
   [ "$status" -ne 0 ]
   printf '%s' "$output" | grep -qF -- 'DNS= 키가 없다'
 }
+
+@test "link ifindex lookup consumes the whole ip listing (an early-exit consumer must not SIGPIPE the writer)" {
+  # 2026-09-08 CI flake 2회: [6]의 `ip … | awk '… exit'`는 첫 매치에서 파이프를 닫는다. writer(스텁의
+  # 두 번째 echo, 실물 ip의 나머지 링크)가 그 뒤에 쓰면 SIGPIPE(141) 또는 — 러너처럼 SIGPIPE가 무시된
+  # 환경에선 — EPIPE 쓰기 오류(rc 1)로 죽고, pipefail이 그것을 파이프라인 rc로 채택해 `set -e`가 스크립트를
+  # 죽인다. 등재 함정 「`grep -q`의 조기 종료 …」의 형제(소비자가 grep -q가 아니라 awk exit). 결정적 재현:
+  # 매치 줄을 맨 앞에 두고 뒤에 파이프 버퍼(64KiB)를 넘는 줄을 붙이면 부하 없이도 writer가 반드시 늦는다.
+  cat > "$IPSTUB" <<EOF
+#!/usr/bin/env bash
+echo "2: wlo1    inet ${K3S_NODE_IP}/24 brd 192.168.117.255 scope global dynamic wlo1"
+for i in \$(seq 3 3000); do echo "\$i: dummy\$i  inet 10.99.\$((i / 250)).\$((i % 250))/32 scope global dummy\$i"; done
+EOF
+  run_pf
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF -- 'link-dns 비었음'
+}

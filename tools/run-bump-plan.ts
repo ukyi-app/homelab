@@ -1,4 +1,4 @@
-// bump 플랜 항목 러너 — bump-poll.yaml의 인-워크플로 셸 루프를 대체하는 테스트된 오케스트레이터(F-1).
+// bump 플랜 항목 러너 — bump-poll.yaml의 인-워크플로 셸 루프를 대체하는 테스트된 오케스트레이터.
 //
 // 플래너(poll-ghcr)가 만든 plan.json을 소비해 bump/propose-pr 항목을 **항목마다 격리 git worktree**에서 처리한다:
 //   worktree add(<base> 기준 결정적 새 브랜치) → bump-tag → **잔여물 판정**(천장 밖 변경 0) → git add(writePath+digest-exporter) → commit(writer 신원) →
@@ -27,9 +27,9 @@ import { join, resolve } from "node:path";
 // 앱명 게이트는 전 mutator 공유 SSOT — 분기 금지(콜사이트마다 다르면 우회 표면). bump-tag와 같은 정규식을 쓴다.
 import { APP_NAME_RE } from "./lib/identity.ts";
 // plan 계약·명명·writer 신원은 bump-plan module이 소유한다(d3·08) — 디코드는 fail-closed고,
-// target 신원(kind+name)은 argv(--kind/--name)로 ensure-bump-pr까지 관통한다(design r2-1).
+// target 신원(kind+name)은 argv(--kind/--name)로 ensure-bump-pr까지 관통한다.
 import { WRITER_NAME, WRITER_EMAIL, decodePlan, branchFor, commitMessage, type Change, type PlanItem } from "./lib/bump-plan.ts";
-// subprocess 실행은 exec seam 경유(d6②) — timeoutMs 0으로 종전 무-timeout 동작을 보존한다.
+// subprocess 실행은 exec seam 경유 — timeoutMs 0으로 종전 무-timeout 동작을 보존한다.
 import { sh } from "./lib/exec.ts";
 // argv 파싱 SSOT — unknown/값 누락 fail-closed. 광고(USAGE)도 같은 목록에서 파생한다.
 import { typedFlags, type TypedFlags } from "./lib/cli.ts";

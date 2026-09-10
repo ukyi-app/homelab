@@ -3,5 +3,5 @@
 BOOTSTRAP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export BOOTSTRAP_DIR
 
-# gitignored된 kubeconfig 위치 (Task 1.6이 여기에 쓴다).
+# gitignored된 kubeconfig 위치 (k3s-install.sh가 여기에 쓴다).
 export KUBECONFIG_PATH="${KUBECONFIG_PATH:-$BOOTSTRAP_DIR/kubeconfig}"

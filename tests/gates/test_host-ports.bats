@@ -228,7 +228,7 @@ run_am() { # $1=격리 루트
 }
 
 @test "a never-called hp_pick_port stub does not get a free pass on lane C once it duplicates the real definer" {
-  # reg-a2-ops-guards-2 — 예전엔 [C](lib 미사용) 면제가 hp_(pick_port|run_published) 결합
+  # 예전엔 [C](lib 미사용) 면제가 hp_(pick_port|run_published) 결합
   # 정규식 한 축이라, 결코 호출되지 않는 hp_pick_port 스텁 하나만 심어도 그 파일의 [C] 검사
   # 전체가 영구 면제됐다 — hp_run_published 쪽엔 있는 SSOT 중복 백스톱(defsrun/ndefs)이
   # hp_pick_port 쪽엔 없었다(비대칭). 죽은 스텁과 실 lib을 함께 스캔하면(둘 다 hp_pick_port를

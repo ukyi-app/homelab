@@ -12,7 +12,7 @@ setup() {
   # 코드의 BLOCKING 셋엔 stale-ledger-row가 없다 — 주석도 그것을 차단한다고 말하면 안 된다.
   run grep -nE '^\s*const BLOCKING = new Set\(' "$SRC"
   [ "$status" -eq 0 ]
-  # restale2: 정확-set 하드코딩 대신 stale-ledger-row 부재를 단언(BLOCKING에 activation-exposure-drift 추가됨).
+  # 정확-set 하드코딩 대신 stale-ledger-row 부재를 단언(BLOCKING에 activation-exposure-drift 추가됨).
   run sh -c "grep -E 'const BLOCKING = new Set' '$SRC' | grep -c stale-ledger-row"
   [ "$output" = "0" ]
   # audit-orphans 게이트 스텝 주석(run 라인 직전 #...)에 stale-ledger-row가 등장하면 실패

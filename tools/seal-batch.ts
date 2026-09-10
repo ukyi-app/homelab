@@ -3,7 +3,7 @@
 // ⚠️ 평문/해시/토큰은 어떤 경로로도(stdout·예외·산출물 diff) 노출하지 않는다 — kubeseal stdin 전용.
 // 봉인 전 secret-cert-check preflight를 fail-closed로 실행(--offline-ok/SEAL_OFFLINE=1 break-glass, dry-run 비대상).
 // 변환은 TS에서 Secret manifest 조립(kubectl 불요) → kubeseal(lib/seal.ts). docker는 bcrypt에만, gh는 dockerconfig user에만.
-// 실행은 exec seam 경유(d6④) — 평문(비밀값)은 stdin으로만 흐르고 seam 원장은 stdin을 기록하지 않는다.
+// 실행은 exec seam 경유 — 평문(비밀값)은 stdin으로만 흐르고 seam 원장은 stdin을 기록하지 않는다.
 import { gh as ghExec, sh } from "./lib/exec.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 자격증명 만료 원장/체커/워크플로 계약(메타갭 ④ W1-B).
+# 자격증명 만료 원장/체커/워크플로 계약.
 # ⚠️ @test 이름은 영어만(한글이면 bats dir-run 인코딩 깨짐 — AGENTS.md).
 # ⚠️ 중간 단언은 [ ]/grep만(bash 3.2 [[ ]] 실패 침묵통과 — AGENTS.md).
 
@@ -125,7 +125,7 @@ setup() {
 }
 
 @test "the retired --min-entries vocabulary is a usage error (exit 2)" {
-  # 폐지 어휘가 조용히 무시되지 않는다(kernel-followups 02) — unknown arg 경로가 거부를 소유한다.
+  # 폐지 어휘가 조용히 무시되지 않는다 — unknown arg 경로가 거부를 소유한다.
   tmp="$(mktemp)"; printf '[{"name":"x","expires":"2099-01-01"}]' > "$tmp"
   run bash "$s" --file "$tmp" --min-entries 1
   rm -f "$tmp"

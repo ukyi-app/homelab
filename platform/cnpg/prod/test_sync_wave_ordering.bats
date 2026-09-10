@@ -26,5 +26,11 @@
     if [ "$w" = "null" ]; then echo "no sync-wave annotation: $f"; return 1; fi
     if [ "$w" -ge -1 ]; then echo "sync-wave $w not ahead of Cluster (-1): $f"; return 1; fi
   done
-  [ "$checked" -gt 0 ]
+  # 0개 DB도 정당하다(그린필드·전량 purge 뒤 상태를 포함) — DB 존재 자체를 요구하지 않는다. 빈 글롭 vacuous-pass는
+  # 바닥값(> 0)이 아니라 **등식**으로 막는다: 검사한 파일 수 == databases/kustomization.yaml에 등록된 owner/ro
+  # 봉인본 엔트리 수. 글롭이 죽으면 등록 수와 어긋나고, 등록 쪽이 죽으면 test_networkpolicy.bats의 파일↔엔트리
+  # 양방향 등식이 잡는다(두 증인이 서로 다른 열거를 본다).
+  local expected
+  expected=$(yq '[.resources[] | select(test("^db-.*-(owner|ro)\\.sealed\\.yaml$"))] | length' platform/cnpg/prod/databases/kustomization.yaml)
+  [ "$checked" -eq "$expected" ]
 }

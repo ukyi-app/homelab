@@ -9,7 +9,7 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init sops-guard
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 env 폐지).
 take_floors "sops-guard" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 
@@ -54,7 +54,7 @@ for f in "$@"; do
         reason="no sops.lastmodified"
       else
         # data/stringData 리프 중 ENC[AES256_GCM,...] prefix가 아닌 평문 리프 개수.
-        # ⚠️ codex pass1 F4: 리터럴 "ENC[*]" 정확일치는 실제 ENC[AES256_GCM,...]를 평문으로 오판 →
+        # ⚠️ 리터럴 "ENC[*]" 정확일치는 실제 ENC[AES256_GCM,...]를 평문으로 오판 →
         #    추적된 모든 enc.yaml을 오차단(gate 자체가 실패)한다. mikefarah yq엔 startswith가 없어
         #    test() 정규식으로 prefix 검사. `\\[`는 yq가 `\[`(리터럴 `[`)로 unescape한다.
         leaks=$(yq '[(.data // {})[], (.stringData // {})[]] | map(select(test("^ENC\\[") | not)) | length' "$f" 2>/dev/null || echo 99)

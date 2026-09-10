@@ -11,8 +11,8 @@
 #   QV (`grep -qv`) = 줄 단위 반전이 전칭(∀¬)을 존재(∃¬)로 바꾼다 → hard-zero(아래).
 #   SETCAP(이름 있는 집합의 상한 부재) = `@test` 이름이 exactly/only/no other/전수/EVERY/정확로
 #     원소 전수를 선언하는데 본문에 그 상한을 재는 술어가 없다 — hard-zero 도달 후 술어 자체의
-#     결함(traps-ops-2, 2026-09-05)이 드러나 **래칫으로 재개장**했으나, 12라운드 분류(predicate 8·
-#     rename 18)가 잔액을 전부 상환해 **다시 hard-zero로 복귀**했다(티켓 78, 아래 SETCAP_BASELINE).
+#     결함(2026-09-05)이 드러나 **래칫으로 재개장**했으나, 후속 분류(predicate 8·
+#     rename 18)가 잔액을 전부 상환해 **다시 hard-zero로 복귀**했다(아래 SETCAP_BASELINE).
 # 휴리스틱: 다줄 @test 규약 가정("@test … {" 한 줄 시작, 0열 "}" 종료). heredoc 본문은 명령으로 안 센다.
 # (레포 단일 한줄 @test는 단일 명령이라 무해 — 신규 한줄 본문은 다줄로 작성할 것.)
 # 인자로 파일을 주면 그 파일만 스캔하고 다섯 클래스 아무거나 있으면 실패(픽스처/ad-hoc 탐지 모드).
@@ -78,39 +78,38 @@
 # ── [SETCAP] — 이름 있는 집합의 상한 부재 ──────────────────────────────────────────────────────
 # 다른 축이다: 위 네 클래스는 "단언이 조용히 통과하는 형태"를 잡고, 이건 "이름이 상한을 선언하는데
 # 본문이 그 상한을 재지 않는" **이름-본문 불일치**를 잡는다(SSOT: docs/traps-detail.md 「이름 있는
-# 집합의 상한 부재」· CONTRIBUTING.md 「가드 스캔 신호」 형제 절 규칙 ①②. 근거: 5라운드 비평가
-# 군집 ①(생존 12건) · 6라운드 재발 판정 ①(9건 — infra-a-1·a-3·b-4·kustomization-2/3/4·
-# httproute-1/2·posture-2) · 7라운드 축 N).
+# 집합의 상한 부재」· CONTRIBUTING.md 「가드 스캔 신호」 형제 절 규칙 ①②. 근거: 이 형태의 무증인
+# 군집이 한 리뷰 라운드에 12건 살아남았고 다음 라운드에도 9건 재발했다).
 # `@test` 이름에 exactly/only/no other/전수/EVERY/정확 중 하나가 있으면(대소문자 구별 그대로 —
-# 표기 변형을 넓히면 다른 축이 된다, grep-a-1/grep-a-5의 재발과 같은 함정) 그 본문(다음 `@test`
+# 표기 변형을 넓히면 다른 축이 된다, 형제 레인의 재발과 같은 함정) 그 본문(다음 `@test`
 # 또는 파일 끝까지, 0열 "}"가 경계)에 집합 등식 술어 — bracket-test 문자열 등식(`[ "$a" = "b" ]`) ·
 # 수 등식(`-eq [0-9]+`) · jq/yq `contains(` · jq/yq `join(",")` · jq/yq `length ==` · jq/yq
-# `== [` 배열 리터럴 등식 · `grep -qxF`/`grep -qx` 구조적 등식(전체 행 일치, traps-ops-2가 추가) —
+# `== [` 배열 리터럴 등식 · `grep -qxF`/`grep -qx` 구조적 등식(전체 행 일치) —
 # 중 하나 이상이 있어야 한다. 일곱 형태는 문안 그대로다(텍스트 매치이지 문장 위치·인용 anchor
 # 요구 없음 — ABS/QV처럼 위치를 재는 레인이 아니라 **존재**만 잰다).
 # ⚠️ **오탐은 면제 어휘가 아니라 이름 정정으로 닫는다.** 이름의 "only"가 집합이 아니라 단수
 #    대상·시간 부사·복합어를 가리키는 자리(`read-only`·`owner-only`·`readonly` 같은 합성어,
 #    "only when"류 조건 부사, "only 1"류 서술 수사)는 검출기가 **그대로** 잡는다 — 면제 조건을
 #    넣지 않는다(아래 픽스처가 이 결정을 고정한다: 오탐 대조 픽스처가 여전히 red여야 한다).
-#    처방은 그 이름에서 상한 어휘를 빼는 것 하나뿐이다(4·5라운드 규약 그대로 — 정직한 이름이 처방).
+#    처방은 그 이름에서 상한 어휘를 빼는 것 하나뿐이다(규약 그대로 — 정직한 이름이 처방).
 # ⚠️ **알려진 갭(다음 라운드 입력) — `-eq N`은 `"$status"` rc 검사와 구별하지 않는다.** 이
-#    레인은 6라운드 비평가 처방 문안을 그대로 옮긴 것이라(「6라운드 비평가 처방 그대로」— 티켓 59),
+#    레인은 리뷰 처방 문안을 그대로 옮긴 것이라,
 #    `[ "$status" -eq 0 ]`처럼 이 레포 거의 모든 @test에 있는 흔한 관용구도 술어로 인정한다.
 #    실측(2026-09-05): 이 관용구를 제외하고 재면 착수 시점 위반이 14건이 아니라 **70건**이다
 #    (프로토타입 스크래치패드 실측 — 커밋되지 않음). 좁히지 않은 이유는 처방 문안을 벗어난
-#    자체 확장이 이 축의 범위를 티켓 하나가 감당 못 할 크기로 불리기 때문이다(round7이 이미
+#    자체 확장이 이 축의 범위를 티켓 하나가 감당 못 할 크기로 불리기 때문이다(앞선 리뷰가 이미
 #    "0건 finding + 규칙 문안 2개도 정당한 답"이라고 명시). 다음 라운드가 `-eq` 분모에서
 #    `"\$status"` 좌변을 제외하는 방향으로 좁힐 후보다.
-#    ⚠️ **순서 조건(7라운드 setcap-denominator-2 실측)** — 6번째 형태(jq/yq `== [` 배열 리터럴
+#    ⚠️ **순서 조건(실측)** — 6번째 형태(jq/yq `== [` 배열 리터럴
 #    등식)를 먼저 얹은 뒤에만 좌변 제외를 진행해야 한다. 그 형태 없이 좌변만 제외하면 이미
 #    `jq -e '...enum == [...]'`로 완전히 상한이 잠긴 자리(test_schema_fail_closed.bats:53,62)가
 #    새 위반으로 뒤집힌다 — 그 잠금이 뒤따르는 `[ "$status" -eq 0 ]`(jq 성공 rc)에 우연히
 #    걸려 있었을 뿐이기 때문이다.
-# SETCAP_BASELINE은 BB/ABS가 밟은 것과 같은 경로다 — 래칫으로 출발해(티켓 59, 착수 시점
+# SETCAP_BASELINE은 BB/ABS가 밟은 것과 같은 경로다 — 래칫으로 출발해(착수 시점
 # 위반 14건 중 11건은 단수/조건/합성어 오탐이라 이름 정정으로 닫았다) **0에 수렴**했다
-# (티켓 64 c64-7, 2026-09-05). 남았던 3건(포트·볼륨·디스패처 입력 집합)은 각각 집합 등식
+# (2026-09-05). 남았던 3건(포트·볼륨·디스패처 입력 집합)은 각각 집합 등식
 # 술어를 얻었다.
-# ⚠️ **hard-zero에서 다시 래칫으로(traps-ops-2, 2026-09-05)** — setcap_hit의 문자열 등식
+# ⚠️ **hard-zero에서 다시 래칫으로(2026-09-05)** — setcap_hit의 문자열 등식
 #    술어(`=[ \t]*"[^"]+"`)가 bracket-test 좌변(`[ "$a" = "b" ]`)이나 `$` 참조를 요구하지
 #    않아, 스코프 안 아무 문자열 대입(`VAR="x"`) 하나로 무력화됐다(BB/ABS/QV가 밟은
 #    가드-자신-무증인 클래스 재발). 처방: (1) 그 술어에 `=` 앞 공백 요구를 더해 대입과
@@ -122,7 +121,7 @@
 #    으로 재출발**한다(hard-zero 강행은 26곳 동시 재작업을 부른다 — 107-110행의 관례 위반).
 #    남은 26건은 이름 어휘가 실제로 합성어/단수/조건부사인 오탐(read-only·name-only류, 이
 #    검출기의 설계상 의도된 잔여 — 위 ⚠️ 오탐 규약)과 진짜 미상환 부채가 섞여 있었다.
-# ⚠️ **다시 0으로(티켓 78, 2026-09-05)** — 12라운드 분류자+검토자 합의(predicate 8 · rename 18 ·
+# ⚠️ **다시 0으로(2026-09-05)** — 분류자+검토자 합의(predicate 8 · rename 18 ·
 #    detector 0)가 26건 전건을 실측 검증해 착지했다. predicate 8건은 진짜 집합 상한 주장이라
 #    술어를 얻었다(`[ -z "$bad" ]`류 부재 단언 → `bad_n=$(printf '%s' "$bad" | wc -w); [ "$bad_n"
 #    -eq 0 ]` 건수 등식, 또는 `grep -c . || true` — `|| true` 누락은 위반 0건(정상 상태)에서
@@ -133,7 +132,7 @@
 #    오탐이 재발한다)를 추가했다. rename 18건은 실제로 단일 시나리오/조건 부사/합성어였다 —
 #    뜻 보존한 채 상한 어휘만 뺐다(옛 이름 인용처 0건 확인). detector(이름-어휘 정규식 면제)는
 #    0건 유지 — 하이픈 복합어 면제를 넣으면 진짜 ∀ 폐쇄 주장 2건(setcap-4/5)이 영구 무증인이
-#    된다는 12라운드 재검증이 tests/gates/test_bats-style.bats:601의 오탐 대조 결정을 재확인했다.
+#    된다는 재검증이 tests/gates/test_bats-style.bats:601의 오탐 대조 결정을 재확인했다.
 #    전체 스캔 SETCAP 26/0 실측(2026-09-05) — hard-zero 복귀, 신규 위반은 즉시 red다.
 #
 # ── [ABS-EXEC] — 레포 소유 실행물 호출의 부재 단언(F4, 감사 63 · 설계 노트
@@ -170,7 +169,7 @@ set -euo pipefail
 # shellcheck source=scripts/lib/guard.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/guard.sh"
 guard_init check-bats-style
-# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 03 — 구 env 폐지).
+# 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 env 폐지).
 take_floors "check-bats-style" "$@" || exit $?
 set -- "${REST_ARGV[@]+"${REST_ARGV[@]}"}"
 cd "$ROOT"
@@ -192,8 +191,8 @@ BB_BASELINE=0    # **0 수렴 완료** — 이제 hard-zero다(NEG와 같은 규
 # 올리는 방향은 부채 재유입이다 — 그래도 필요하면 같은 diff에서 이 줄을 고쳐야 하고, 그건 리뷰에
 # 보인다(check-bats-accounting의 EXCL_MAX와 같은 성격).
 ABS_BASELINE=0
-# 이름 있는 집합의 상한 부재 부채 잔액 — 티켓 59가 래칫으로 착지(2026-09-05, baseline 3)했고
-# **0 수렴 완료**(티켓 64 c64-7, 2026-09-05) — 이제 hard-zero다. 남았던 3건과 상환 형태:
+# 이름 있는 집합의 상한 부재 부채 잔액 — 래칫으로 착지(2026-09-05, baseline 3)했고
+# **0 수렴 완료**(2026-09-05) — 이제 hard-zero다. 남았던 3건과 상환 형태:
 #   test_worker_ports.bats:21 "web defaults to http only and no metrics scrape annotation" —
 #     포트 집합에 `[.spec.template.spec.containers[].ports[]?.name] | sort | join(",")` = "http" 등식 추가.
 #   test_basebackup.bats:12 "cronjob runs non-root 26 and mounts only bulk-ssd PVC" —
@@ -201,7 +200,7 @@ ABS_BASELINE=0
 #   test_mutation-dispatch.bats:204 "each dispatcher references inputs only via env or with: …" —
 #     `[ -z "$bad" ]`(다섯 술어 목록 밖 표기 변형)를 위반 카운트 `-eq 0`으로 재작성(동작 불변).
 # traps-ops-2(2026-09-05)가 술어 결함을 고쳐 hard-zero에서 래칫으로 재개장했었다 — 그 26건을
-# 티켓 78(2026-09-05)이 12라운드 분류(predicate 8·rename 18·detector 0)대로 전부 착지해
+# 후속(2026-09-05)이 분류(predicate 8·rename 18·detector 0)대로 전부 착지해
 # **다시 0으로 수렴**했다(위 ⚠️ 「다시 0으로」 절 참조). 올리는 방향은 부채 재유입이다.
 SETCAP_BASELINE=0
 # 레포 소유 실행물 호출의 부재 단언 부채 잔액 — **hard-zero**(F4, 감사 63 착지, 2026-09-05).
@@ -269,7 +268,7 @@ function mask_semi(s,   i,c,q1,q2,out){
 # [QV] 세그먼트 분해(abs_stmt의 `|`·`||`·`&&` split) 전 마스킹 — 따옴표 **안**의 `|`를 플레이스홀더
 # (\002)로 가려 split이 그 자리를 진짜 파이프 경계로 오인하지 않게 한다(mask_semi와 같은 모델,
 # 다른 문자). 안 가리면 `grep -Eq 'command -v kubectl|command -v yq' "$S"` 같은 정당한 리터럴이
-# 세그먼트 경계에서 갈라진다(round11 bats-style-lanes-2 va.corrected_fix).
+# 세그먼트 경계에서 갈라진다(va.corrected_fix).
 function mask_pipe(s,   i,c,q1,q2,out){
   q1=0; q2=0; out=""
   for(i=1;i<=length(s);i++){
@@ -302,7 +301,7 @@ function abs_target(s,   p,body,end){
     if (end > 0) {
       body = substr(body, 1, end - 1)
       if (body !~ /<<</) {
-        # reg13-d-bats-style-lanes-1 — body 원문을 그대로 검사하면 홑따옴표 알터네이션 패턴(`"A|B"`)
+        # body 원문을 그대로 검사하면 홑따옴표 알터네이션 패턴(`"A|B"`)
         # 의 `|`가 실파이프로 오인된다(quote-aware 아님). 273행 mask_pipe(QV 레인이 이미 쓰는 관용구)
         # 를 재사용해 따옴표 안 `|`를 가린 뒤에만 검사한다 — 신설 함수 없음.
         if (mask_pipe(body) ~ /\|/) bashc_pipe = 1
@@ -342,12 +341,12 @@ function exec_target(s,   seg,segn,first,body,bend){
   # 홑따옴표 bash -c만 [ABS] 대상으로 승격되므로(F3 분모 규약), 겹따옴표로 감싼 grep 파이프는
   # `abs_target`이 못 보고 여기로 샌다 — 경로 리터럴이 grep의 **피연산자**(실행 대상이 아니다)인
   # 자리라 이중 배제한다(실측: test_image-ownership.bats:387 `bash -c "grep … '$ROOT/scripts/…'"`).
-  # ⚠️ exec-target-grep-exclusion(비평가 실증, 13라운드) — 예전엔 "문장 어딘가에 grep"이면
+  # ⚠️ exec-target-grep-exclusion(비평가 실증) — 예전엔 "문장 어딘가에 grep"이면
   #    통째로 배제해, `run scripts/x.sh --bad | grep -q whatever`처럼 grep이 **뒤따르는 필터**인
   #    진짜 실행물 호출까지 분모에서 빠졌다(before/after: 0→1, grep 파이프 추가/제거로 재현).
   #    mask_pipe(273행, QV 레인과 동일 관용구)로 따옴표 안 `|`를 가린 뒤 첫(top-level) 파이프
   #    세그먼트에만 grep 판정을 건다 — 그 세그먼트에 grep이 없으면 배제하지 않는다.
-  # ⚠️ reg13c-fn-bats-style-1/2(비평가 실증, 13c) — 위 처방 그대로 두면 `bash -c` 래퍼(홑/겹
+  # ⚠️ 비평가 실증 — 위 처방 그대로 두면 `bash -c` 래퍼(홑/겹
   #    불문)가 전체 문장을 한 겹 더 감싼 경우가 남는다: mask_pipe(s)는 따옴표 **안** 파이프도
   #    가리므로, 래퍼를 안 벗기고 s 전체에 mask_pipe를 걸면 내부 파이프가 통째로 가려져 첫
   #    세그먼트가 다시 전체 문장이 되고, 그 안의 grep 필터 때문에 진짜 실행물 호출까지 배제된다
@@ -381,7 +380,7 @@ function exec_target(s,   seg,segn,first,body,bend){
 # 잡히는데 키가 안 잡히는 불일치가 생긴다).
 # ⚠️ match()는 **leftmost** 매치라, `run env FALLBACK=scripts/good.sh bash scripts/bad.sh --bogus`처럼
 # 한 문장에 스크립트 경로가 두 번(디코이 env 값 + 실제 실행 대상) 나오면 실행과 무관한 앞쪽 참조가
-# 키를 가로채 엉뚱한 양성 대조를 빌려준다(round11 bats-style-lanes-3). abs_target(F3 분모 판정)이
+# 키를 가로채 엉뚱한 양성 대조를 빌려준다. abs_target(F3 분모 판정)이
 # 이미 하는 `run `·`env `·`VAR=val` 접두 스트립 관용구를 그대로 재사용해 그 디코이를 먼저 없앤다.
 function exec_toolkey(s,   r){
   r=s
@@ -406,13 +405,13 @@ function execw1_hit(s){
 # 따옴표-인식 토큰화 — 홑/겹따옴표 **안**의 공백은 토큰 경계가 아니다(bash의 실제 단어분리와 같은
 # 규약). qv_seg의 옛 `gsub(quotes)+split(공백)`은 따옴표만 지우고 공백은 무조건 경계로 써서, 따옴표
 # 안에 있던 `-v` 같은 부분열이 따옴표가 사라진 뒤 독립 토큰으로 떠올라 진짜 플래그처럼 읽혔다
-# (round11 bats-style-lanes-2 va.corrected_fix — 실측 회귀: tests/gates/test_audit-orphan-pv.bats:9
+# (실측 회귀: tests/gates/test_audit-orphan-pv.bats:9
 # `grep -Eq 'command -v kubectl|command -v yq' "$S"`의 따옴표 안 `-v`가 이 자리다).
 function qv_tokenize(s, tok,   i,c,q1,q2,cur,n){
   q1=0; q2=0; cur=""; n=0
   for(i=1;i<=length(s);i++){
     c=substr(s,i,1)
-    # reg13c-fn-bats-style-3 — ANSI-C 인용(`$'…'`/`$"…"`)의 `$`는 토큰에 남고 뒤따르는 따옴표만
+    # ANSI-C 인용(`$'…'`/`$"…"`)의 `$`는 토큰에 남고 뒤따르는 따옴표만
     # 토글돼(`$-qv` 꼴) 플래그 판정(`^-`)에서 벗어났다. `$` 다음이 바로 따옴표면 그 `$`만 건너뛰고
     # 따옴표는 정상 토글 경로로 넘긴다(신설 상태 없음, 기존 q1/q2 토글 재사용).
     if(c=="$" && (substr(s,i+1,1)=="'" || substr(s,i+1,1)=="\"")) continue
@@ -427,13 +426,13 @@ function qv_tokenize(s, tok,   i,c,q1,q2,cur,n){
   if(cur!=""){ n++; tok[n]=cur }
   return n
 }
-# [QV] 세그먼트 판정 — grep-a-5. 예전 판은 q·v가 **한 토큰 안**에 붙어야 매치해 `grep -q -v`
+# [QV] 세그먼트 판정 — 예전 판은 q·v가 **한 토큰 안**에 붙어야 매치해 `grep -q -v`
 # (분리 플래그)·`if grep -qv …`(문장 선두, 파이프 無)가 무측정이었다. 여기서는 문장을 `|`·`||`·`&&`로
 # 쪼갠 뒤 각 세그먼트에서 grep 호출 뒤 **선행 플래그 토큰들**만 훑어 q·v가 (같은 토큰이든 분리
 # 토큰이든) 함께 있으면 위반이다. `abs_rec`처럼 문장 **전체** 토큰을 훑으면 안 된다 — 그러면
 # `grep -v X | grep -q Y`(정당한 다중-grep 파이프) 같은 자리가 두 세그먼트 각각에서 오탐을 낸다
 # (세그먼트 분리 + **positional 2개(패턴·파일)까지만** 플래그 스캔을 허용하는 카운터 두 축이 그
-# 오탐을 막는다 — 실측 8곳 무오탐). ⚠️ round11 va.corrected_fix — "첫 비플래그에서 즉시 break"였던
+# 오탐을 막는다 — 실측 8곳 무오탐). ⚠️ "첫 비플래그에서 즉시 break"였던
 # 예전 판은 `grep -v EXCLUDE -q FILE`(GNU grep이 실제로 순열 처리하는 형태)를 놓쳤다. positional
 # 카운터로 넓히되, 따옴표-인식 토큰화(qv_tokenize) 없이 넓히면 위 회귀가 재현된다 — 두 변경은 짝이다.
 function qv_seg(t,   n,a,i,seen,q,v,pos){
@@ -460,10 +459,10 @@ function qv_seg(t,   n,a,i,seen,q,v,pos){
 #    공백 요구 없이는 스코프 안 아무 문자열 대입 하나로 이 술어가 통째로 무력화됐다).
 # ⚠️ 수 등식 술어도 **bracket-test 종료 앵커**(`-eq N[ \t]*]`)만 잡는다 — 앵커 없이는 `run` 문의
 #    CLI 인자에 우연히 등장하는 `-eq N` 텍스트(예 `--retry-eq 5`)만으로 이 술어가 무력화됐다
-#    (2026-09 정기 회귀 reg-c-ledger-rows-1, 12라운드). 이 파일이 이미 쓰는 형제 앵커(451/452/
+#    (2026-09 정기 회귀 reg-c-ledger-rows-1). 이 파일이 이미 쓰는 형제 앵커(451/452/
 #    459/466/467행)를 그대로 복사한 처방 — 신설 로직 없음. 전체 스캔 SETCAP 26/26 회귀 0 실측.
 # ⚠️ 자기유도(self-deriving) 등식 — `-eq`의 우변이 리터럴 숫자가 아니라 변수(`[ "$total" -eq
-#    "$expected" ]`류)인 자리는 위 리터럴 술어에 안 걸린다(setcap-17/12라운드 실측 —
+#    "$expected" ]`류)인 자리는 위 리터럴 술어에 안 걸린다(실측 —
 #    tests/gates/test_telegram-callsites.bats:51,63). 이 형태도 **bracket-test 종료 앵커**를
 #    요구한다 — 앵커 없이 `-eq[ \t]+"?\$` 하나만 텍스트 매치하면 reg-c-ledger-rows-1과 같은
 #    급의 `run` 인자 오탐(예 `run … --retry-eq "$RETRIES"`)이 이 형태에도 그대로 재발한다(분류
@@ -471,15 +470,15 @@ function qv_seg(t,   n,a,i,seen,q,v,pos){
 #    관례를 그대로 따른다 — 신설 취약점을 지금 막는다). 앵커를 더한 뒤 실측: 517행 두 곳(득실
 #    없이 그대로 매치) + 대조 픽스처(run 인자 형태)는 여전히 불일치 확인.
 function setcap_hit(s){
-  # reg13c-fn-bats-style-2 — 이 문자열 등식 술어는 traps-ops-2(`=` 앞 공백 요구)까지만 좁혀져
+  # 이 문자열 등식 술어는 앞선 처방(`=` 앞 공백 요구)까지만 좁혀져
   # 있었다: 464-465행 수 등식 브랜치와 달리 bracket-test 여는 `[` 앵커가 없어, echo 진단문
   # 안의 우연한 ` = "…"` 텍스트(예 `"expected = \"http\" for context"`)도 진짜 bracket-test
-  # 등식으로 오인됐다(reg13-a2-ops-infra-1이 수 등식 브랜치만 고치고 이 형제를 놓쳤다 — 비평가
+  # 등식으로 오인됐다(앞선 처방이 수 등식 브랜치만 고치고 이 형제를 놓쳤다 — 비평가
   # 실증). 처방은 464-465행이 이미 쓰는 좌변 캐리브아웃(`$(...)` 커맨드 치환 ∨ 식별자)을 그대로
   # 재사용하는 것 — 순수 식별자로만 좁히면 464-465행이 이미 겪은 `$(yq …)` 좌변 배제 회귀가
   # 문자열 등식 갈래에서 재현된다(tools/tests/test_reusable-app-build.bats:57,79,89 등 8곳).
   if (s ~ /\[[ \t]+"?(\$\([^)]*\)|\$?[A-Za-z_][A-Za-z0-9_]*)"?[ \t]+=[ \t]*"[^"]+"[ \t]*\]/) return 1
-  # reg13-a2-ops-infra-1 — 종료 앵커(`[ \t]*\]`)만으로는 부족하다: echo/printf 문자열 리터럴 안의
+  # 종료 앵커(`[ \t]*\]`)만으로는 부족하다: echo/printf 문자열 리터럴 안의
   # 장식 텍스트(`"… -eq 5 ] for context"`)도 그 `]`에 걸려 진짜 bracket-test로 오인됐다(부분문자열
   # fail-open이 SETCAP 자신에게 재발). 이 파일이 이미 쓰는 종료 앵커 관례를 대칭 확장해 선행
   # 오프닝 `[`도 요구한다 — `[[ … ]]`은 내부 `[`가 매치되어 안전, quote-stripping 없이 신설
@@ -505,8 +504,8 @@ function setcap_hit(s){
 # 이어지기 때문이다. abs_stmt([ABS]/[ABS-EXEC]/[SETCAP]/[QV] 레인)와 메인 패턴-액션 블록의
 # bbseg 루프([NEG]/[BB] 레인, 618행대) **둘 다** 이 한 정규식 리터럴을 공유한다(bbseg-do-then-else
 # — 부분 수정이 다음 라운드의 새 finding이 되는 것을 막는 승격 규칙: 형제 판정 루프 전수 점검 +
-# 리터럴 단일화). 2026-09 정기 회귀 reg-d-bats-style-last-2(12라운드)가 do/then을 abs_stmt에
-# 처방했으나 else를 빠뜨렸고(reg13-a1-bats-guards-1이 else를 더함), bbseg 루프는 13c까지 한 번도
+# 리터럴 단일화). 2026-09 정기 회귀 reg-d-bats-style-last-2가 do/then을 abs_stmt에
+# 처방했으나 else를 빠뜨렸고(후속이 else를 더함), bbseg 루프는 그때까지 한 번도
 # 이 스트립을 받지 못했다(비평가 실증 — `if …; then [[ … ]]; fi` 원라이너가 hard-zero 클래스를
 # 침묵 통과시켰다).
 function strip_dte(s){
@@ -525,7 +524,7 @@ function abs_stmt(s,   rec,qn,qsg,qi){
   # [QV] — rc를 판정으로 쓰는 `-q`와 줄 반전 `-v`가 같은 grep 호출의 선행 플래그에 함께 있으면
   # 항진/거짓실패다. 세그먼트 단위라 `if`/`&&` 선행 위치도 잡는다(문장 선두 앵커 불필요).
   # mask_pipe로 따옴표 안 `|`를 가린 뒤 분해 — 안 가리면 그 리터럴이 세그먼트 경계를 만들어
-  # split이 정당한 `grep -Eq 'a|b' file`류 패턴을 조각낸다(round11 bats-style-lanes-2).
+  # split이 정당한 `grep -Eq 'a|b' file`류 패턴을 조각낸다.
   qn=split(mask_pipe(s),qsg,/\|\||&&|\|/)
   for(qi=1;qi<=qn;qi++){ gsub(/\002/,"|",qsg[qi]); if(qv_seg(qsg[qi])){ print FILENAME":"FNR": [QV] "s; break } }
   if (s ~ /^run[ \t]/) {
@@ -587,11 +586,11 @@ function abs_line(raw,   t,i,n,parts,s){
   if (t=="") return
   if (abscont!=""){ t=abscont" "t; abscont="" }
   if (t ~ /\\$/){ sub(/\\$/,"",t); abscont=t; return }
-  # ⚠️ mask_semi(round11 bats-style-lanes-1이 NEG/BB 레인에 넣은 공용 세그먼터)로 따옴표 안 `;`를
+  # ⚠️ mask_semi(bats-style-lanes-1이 NEG/BB 레인에 넣은 공용 세그먼터)로 따옴표 안 `;`를
   #    가린 뒤 분해한다 — 안 가리면 `run bash -c '…"a;b"…'`처럼 홑따옴표 본문 안 리터럴 `;`가
   #    abs_stmt/abs_target(F3 `bash -c` 언랩)이 공유하는 이 진입점을 두 조각으로 잘라 닫는 홑따옴표를
   #    못 찾게 만들고, ABS/ABS-REC/ABS-GIT/ABS-LOOP/ABS-EXEC/SETCAP 여섯 레인 전부가 그 문장에서
-  #    무증인으로 사라진다(2026-09 정기 회귀 reg-d-bats-style-last-1, 12라운드). NEG/BB(554행)가
+  #    무증인으로 사라진다(2026-09 정기 회귀 reg-d-bats-style-last-1). NEG/BB(554행)가
   #    이미 하는 관용구를 abs_line 자신에도 적용하는 것뿐 — 신설 함수 없음.
   n=split(mask_semi(t), parts, /;[ \t]*/)
   for(i=1;i<=n;i++){ s=parts[i]; sub(/^[ \t]+/,"",s); sub(/[ \t]+$/,"",s); gsub(/\001/,";",s); if(s!="") abs_stmt(s) }

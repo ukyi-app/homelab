@@ -34,7 +34,16 @@ _Avoid_: 핀 설정, 핀 메타데이터
 **autoDeploy**:
 새 이미지의 자동 배포 승인 플래그. 정확히 `true`일 때만 자동이고 false·누락·
 파싱 불가는 전부 수동 승인(fail-closed) — apps 레인(`.bindings.json`)과
-베스포크 레인(descriptor)이 같은 해석을 공유한다.
+베스포크 레인(descriptor)이 같은 해석을 공유한다. **생산자 기본값도 같은 방향**이다:
+create-app은 `.app-config.yml`의 `deploy.autoDeploy` 부재를 `false`로 옮기므로
+(`app-config-schema.json`의 `default: false`가 그 진술의 SSOT), 자동 배포는
+앱이 그 키를 `true`로 쓴 **명시 opt-in**일 때만 성립한다.
+**롤백 순서**(autoDeploy 앱 — 손 revert만 하면 10분 안에 폴링이 다시 앞으로 bump한다):
+① 그 앱의 **열린 bump PR을 전부 close --delete-branch**(이미 무장된 형제 PR은
+autoDeploy를 false로 내려도 무장된 채 남는다 — 라이브 좀비 #348) → ② values 핀
+되돌리기 + `.bindings.json` `autoDeploy:false`를 **한 PR**로 → ③ 머지·수렴 →
+④ 원인 수정 후 `true` 복원. 되돌릴 대상이 `refuse`(배포 SHA가 main 조상 아님)로
+잡히는 상태라면 그건 이미 폴링 밖이다(`poll-ghcr.ts`의 (a) 분기).
 _Avoid_: 자동 머지 플래그
 
 **bump 계획 (bump plan)**:
@@ -80,8 +89,8 @@ _Avoid_: 시크릿 검증, sealed 스키마
 봉인본이 **그 이름·그 네임스페이스에서만** 복호화된다는 성질. kubeseal 기본값이며,
 `sealedsecrets.bitnami.com/namespace-wide`·`cluster-wide` 어노테이션이 이를 넓힌다 — 봉인 계약은
 그 어노테이션(truthy)을 **거부**한다(`readSealed` 6번째 조항 + `check-app-deploy.sh` 게이트, 두 adapter).
-`namespace: prod` 등호는 strict scope를 함의하지 않는다(등호만으론 scope 확대 어노테이션을 못 잡는다 —
-design-r1 R-2). patch(`sealedsecrets.bitnami.com/patch`)는 scope가 아니라 통과.
+`namespace: prod` 등호는 strict scope를 함의하지 않는다(등호만으론 scope 확대 어노테이션을 못 잡는다).
+patch(`sealedsecrets.bitnami.com/patch`)는 scope가 아니라 통과.
 _Avoid_: prod 스코프, 네임스페이스 검증
 
 **봉인 원본 바이트**:
@@ -125,15 +134,53 @@ _Avoid_: 브랜치 규약(신원의 한 조각만 가리킴), 레인 설정
 
 **산출물 레이아웃 (artifact layout)**:
 리소스 종류와 이름에서 결정되는 산출물 집합의 명명·배치 — 파일 경로 ·
-kustomization 엔트리 · conn 핸들 · env 키 · 원장 행 · tombstone 키, 그리고 각
-항목의 처분 범위(purge-제거 / 공유-잔존 / 수동-이연). 생성·철거·감사·관측이
-같은 레이아웃을 읽는다.
+kustomization 엔트리 · conn 핸들 · env 키 · 원장 행 · **헤지 DBS 토큰** · tombstone 키,
+그리고 각 항목의 처분 범위(purge-제거 / 공유-잔존 / 수동-이연). 생성·철거·감사·관측이
+같은 레이아웃을 읽는다. 헤지 DBS 토큰은 원장 행과 같은 부류다 — 파일은 전 리소스 공용
+(공유-잔존)이고 생성·철거가 오가는 것은 그 안의 **토큰 한 개**다.
 _Avoid_: 파일 목록, 명명 규칙(처분 범위가 빠진 부분 개념)
 
 **canonical 클론**:
 origin이 정확히 canonical 앱 레포(`ukyi-app/<app>`)를 가리키는 로컬 클론.
 마커 기록·push·디스패치 같은 앱 동사가 오귀속 없이 작동하기 위한 전제 판정이다.
 _Avoid_: 우리 레포, 앱 클론(판정 없는 서술)
+
+**correlation 수령증 (correlation receipt)**:
+CLI가 디스패치마다 발급해 입력으로 실어 보내는 nonce와, 디스패처가 run-name에 되돌려주는
+그 에코의 쌍. 이것으로 **자기 run 하나만** 권위 있게 특정한다 — 에코하는 run이 2개면 신원
+판정 불가(fail-closed)이고, 관측 차분("내가 부르기 전에 없던 run")은 신원 메커니즘이 아니다.
+_Avoid_: 상관 ID, nonce(수령증의 절반만 가리킴 — 에코가 있어야 신원이 성립한다)
+
+**상관 핸들 (operation handle)**:
+한 오퍼레이션을 나중에 되읽는 좌표 — run URL · PR URL, 그리고 PR이 아직 없는 단계의 레인
+브랜치. `homelab status --run|--pr`(브랜치는 `--run … --branch …`)의 입력 단위이고, 바운디드
+결과(pending)의 재개 경로는 재실행이 아니라 이 좌표의 재조회다.
+_Avoid_: 핸들(단독 — conn 핸들과 충돌한다), 작업 ID
+
+**결과 계약 (result contract)**:
+CLI `--json`과 MCP tool 결과가 공유하는 봉투 하나 — `homelab-cli/1`. 축이 셋이다:
+variant(무슨 결말인가) × exitCode(프로세스에 무엇으로 보이는가) × omitted(무엇을 보지
+않았는가). 값·열거는 산문으로 복제하지 않는다 — 정의처는 `tools/cli-result-schema.json`의
+`x-contract`이고 CLI가 그것을 런타임에 읽는다.
+_Avoid_: 응답 JSON, 출력 포맷(계약이 아니라 표현으로 읽힌다)
+
+**대기 매트릭스 (wait matrix)**:
+`--wait`의 종결 조건이 동사마다 다르다는 규약. 자동 머지 동사 = 머지 + 명명된 Application
+집합의 수렴, 수동 머지 동사(create-app·teardown-app) = 머지가 승인이라 미머지는 실패가 아닌
+바운디드 pending, teardown = Healthy가 아니라 **부재**(prune 완료)가 성공이다.
+_Avoid_: --wait 옵션(플래그는 표면일 뿐 종결 조건이 아니다), 동기 대기
+
+**invocation marker**:
+`homelab app init`이 앱 레포에 남기는 `.homelab-init` 파일 — "이 레포는 이 도구가 시작했다"의
+소유 증명. 마커가 있으면 재실행이 도달한 체크포인트부터 수렴하고, 없는 기존 레포는 거부되며
+`--adopt` 명시로만 이어갈 수 있다.
+_Avoid_: 템플릿 계보, 초기화 플래그(소유 판정이 빠진 서술)
+
+**이중 모드 (dual mode)**:
+`homelab app secrets` 하나가 실행 위치에 따라 두 동사로 갈리는 성질. 앱 레포 안(마커 +
+canonical remote)이면 seal→커밋→push→도달성 증명→디스패치 **연쇄**이고, 밖이면 이미 push된
+봉인본의 재배선 **디스패치만**이다. 선행 조건 실패는 디스패치 없이 거부한다.
+_Avoid_: 로컬 모드, 자동 감지(판정 실패 시 거부한다는 사실이 빠진다)
 
 ### 가드 규약 (guard contract)
 

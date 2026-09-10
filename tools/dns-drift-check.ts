@@ -10,7 +10,7 @@ import { assertFloorKeys, floorOf, takeFloors } from "./lib/scan-floor.ts";
 let flags;
 let floors: Map<string, number>;
 try {
-  // 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(kernel-followups 05 — 구 --min-reserved 폐지).
+  // 바닥값 오버라이드는 공용 어휘 `--floor <도메인>=<n>`뿐이다(구 --min-reserved 어휘는 폐지됐다).
   const taken = takeFloors(process.argv.slice(2));
   floors = taken.floors;
   flags = typedFlags(taken.rest, {
@@ -39,9 +39,8 @@ const reservedPath = flags.str("--reserved", join(dirname(appsPath), "reserved-h
 // **레인별 바닥값**(합계 바닥값은 작은 레인의 붕괴를 못 잡는다). apps 레인은 정당하게 0일 수 있지만
 // (첫 공개 앱 이전) 예약 platform host는 구조적으로 항상 ≥1이다 — 0이면 그건 "검사할 게 없다"가
 // 아니라 **파일이 사라졌거나 키가 바뀌었다**는 뜻이고, 그 상태에서 조용히 0건 검사하면 이 체커가
-// vacuous해진다. 기본값을 1(fail-closed)로 두고, 픽스처는 `--min-reserved 0`으로 **명시** 해제한다
-// (기본이 off면 '조용히 꺼진 바닥값'이 된다 — 같은 클래스의 실측 버그가 있었다. 해제 어휘는
-// `--floor reserved=0` — kernel-followups 05).
+// vacuous해진다. 기본값을 1(fail-closed)로 두고, 픽스처는 `--floor reserved=0`으로 **명시** 해제한다
+// (기본이 off면 '조용히 꺼진 바닥값'이 된다 — 같은 클래스의 실측 버그가 있었다).
 const minReserved = floorOf(floors, FLOOR_RESERVED, 1);
 
 // resolver: host → 배열(존재) | null(NXDOMAIN) | undefined(transient: SERVFAIL/timeout)
@@ -65,7 +64,7 @@ if (fixture !== undefined) {
 }
 
 // ── 열거 ── 검사 대상을 먼저 모두 확정하고 바닥값을 건 뒤에 resolve한다. resolve 도중에 세면
-// "글롭이 깨져 0건"과 "정당하게 0건"이 같은 초록으로 끝난다(티켓 08의 열거 붕괴 클래스).
+// "글롭이 깨져 0건"과 "정당하게 0건"이 같은 초록으로 끝난다(열거 붕괴 클래스).
 const registry = JSON.parse(readFileSync(appsPath, "utf8"));
 const appHosts = registry.filter((r: { public?: boolean; active?: boolean }) => r.public && r.active);
 // 예약 platform host(reserved-hosts.json SSOT) — 구조적으로 항상 public&&active라 반드시 resolve돼야
@@ -83,7 +82,7 @@ if (reservedHosts.length < minReserved) {
 }
 
 const drift = [];       // NXDOMAIN — active:true인데 DNS 레코드 미존재(apply 누락). 이것만 drift로 센다.
-const transient = [];   // ⚠️ codex pass4 F3: SERVFAIL/timeout/저하된 resolver — drift로 단정 불가(별도 버킷)
+const transient = [];   // ⚠️ SERVFAIL/timeout/저하된 resolver — drift로 단정 불가(별도 버킷)
 for (const r of appHosts) {                                // dns.tf는 public&&active만 노출
   const recs = await resolve(r.host);
   if (recs === null) drift.push({ host: r.host, name: r.name, reason: "NXDOMAIN — active:true인데 DNS 레코드 미존재(apply 누락 의심)" });

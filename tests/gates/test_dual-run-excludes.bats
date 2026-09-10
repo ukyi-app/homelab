@@ -34,10 +34,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
 }
 
 @test "no apps/ path is excluded from the platform appset (app exclusion is never the dual-run lever)" {
-  # ⚠️ 인-레포 배포 앱은 현재 **0개**다(#455 page · #456 trip-mate-api 철거) — 지킬 앱 Application이
-  #    없으니 이 단언은 지금 당장은 공허하다. 그래도 남긴다: 앱을 다시 온보딩했을 때 "병행 운용 중이니
-  #    앱을 빼두자"가 재발하는 것을 막는 자리이기 때문이다. 분리는 cloudflared(공개 인입)와
-  #    serverName(아카이브)으로 하지, 앱 Application을 지우는 방식으로 하지 않는다.
+  # ⚠️ 인-레포 배포 앱은 page 1개다(apps/README.md가 SSOT) — 이 단언은
+  #    이제 공허하지 않다. 병행 운용 중이던 시절 "다른 클러스터와 겹치니 앱을 빼두자"가 재발하는
+  #    것을 막는 자리다. 분리는 cloudflared(공개 인입)와 serverName(아카이브)으로 하지, 앱
+  #    Application을 지우는 방식으로 하지 않는다.
   ex="$(yq -e '[.spec.generators[0].git.directories[] | select(.exclude == true) | .path] | join(",")' platform/argocd/root/appset.yaml)"
   ! printf '%s' "$ex" | grep -qF -- 'apps/'
 }

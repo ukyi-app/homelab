@@ -3,5 +3,20 @@
     "state": "purged",
     "backupId": "pg-daily-r2-20260630030000",
     "at": "2026-06-30T07:41:09.402Z"
+  },
+  "db:page": {
+    "state": "purged",
+    "backupId": "pg-daily-r2-20260908030000",
+    "at": "2026-09-08T23:50:31.221Z"
+  },
+  "db:trip-mate": {
+    "state": "purged",
+    "backupId": "pg-daily-r2-20260907030000",
+    "at": "2026-09-07T15:44:11.581Z"
+  },
+  "cache:trip-mate": {
+    "state": "purged",
+    "backupId": "nuc/trip-mate/rdb/dump-20260906T184509Z.rdb",
+    "at": "2026-09-07T15:44:11.638Z"
   }
 }

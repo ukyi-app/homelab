@@ -4,7 +4,7 @@
 #   [1] **등재** — scripts/·tools/ 산출물은 해당 README에 **bullet 머리**(`- **\`name\`**`)로
 #       등재됐는지, .github/workflows/ 산출물은 (친화명 표기라) **언급 존재**만 검사(가드 없는
 #       인덱스 드리프트 소멸). scripts/tools에 파일 전체 고정문자열 검사를 쓰면 형제 bullet의
-#       산문 언급(대개 반례 인용)이 등재 증인으로 오인된다(grep-a-7 — 자기 bullet 삭제가 초록이던
+#       산문 언급(대개 반례 인용)이 등재 증인으로 오인된다(자기 bullet 삭제가 초록이던
 #       자리). check-skeleton.sh(디렉토리 지도)·verify-runbook-index.sh(런북 인덱스)와 동일 불변식.
 #   [2] **스코프** — scripts/README.md의 **가드 bullet**이 계산 가능한 사실을 주장하지 않는지 검사.
 #       병(2026-08-29 실측): 가드의 실행 경로는 tools/check-guard-authority.ts가 venue에서 계산하는데,
@@ -95,14 +95,27 @@ while [ "$#" -gt 0 ]; do
 done
 
 # ── 레인 [1] 등재 ─────────────────────────────────────────────────────────────────────────────
-# grep-a-7 — scripts/·tools/의 「등재」는 **bullet 머리**(`- **\`name\`**`)로 앵커한다. 예전 판은
+# scripts/·tools/의 「등재」는 **bullet 머리**(`- **\`name\`**`)로 앵커한다. 예전 판은
 # 파일 전체 고정문자열 검사라 형제 bullet의 산문 언급(대개 「X는 이 축에 침묵한다」 반례 인용)이
 # 등재 증인으로 오인됐다 — 자기 등재 bullet을 지워도 다른 bullet의 산문이 대신 증인 노릇을 했다.
 # workflows(아래)는 친화명 표기라 이 앵커를 적용하지 않는다(헤더 주석이 그 유보를 이미 적는다).
+# ⚠️ 이 레인엔 **바닥값도 역방향도 없었다** — 헤더가 「check-skeleton과 동일 불변식」이라 적는데
+#    그쪽은 양방향(dir→표 + 표→dir) + 열거 바닥값이다. 글롭이 붕괴하면(디렉토리 이동·리네임)
+#    루프가 0회 돌고 조용히 초록이었고, workflows 레인은 더 나빴다: nullglob이 없어 미확장 글롭이
+#    리터럴 `*`로 남는데 README에 `*`가 실재해 `grep -Fq`가 매치했다(0건 검사 후 초록).
+#    아래 세 도메인의 열거 건수에 바닥값을 걸고(판정은 quiet — 마커는 검출 뒤에 일괄 방출),
+#    tools 레인엔 역방향(README bullet → 실파일) 루프를 붙인다.
+n_scripts=0
+n_tools=0
+n_workflows=0
 if [ "$SCOPE_ONLY" -eq 0 ]; then
   # scripts/*.sh ↔ scripts/README.md (백틱 감싼 파일명 — README 규약)
+  # ⚠️ scripts/lib/*.sh는 이 로스터 **밖**이다 — 실행물이 아니라 source 대상이고, 그 경계는
+  #    scripts/README.md가 산문으로 선언한다(가드가 못 보는 것과 일부러 안 보는 것의 구별).
   for f in scripts/*.sh; do
+    [ -e "$f" ] || continue
     b="$(basename "$f")"
+    n_scripts=$(( n_scripts + 1 ))
     grep -qE -- "^- \*\*${BT}${b}${BT}\*\*" scripts/README.md || { echo "FAIL: scripts/README.md 미등재: $b"; rc=1; }
   done
 
@@ -110,15 +123,43 @@ if [ "$SCOPE_ONLY" -eq 0 ]; then
   for f in tools/*.ts tools/*.mts; do
     [ -e "$f" ] || continue
     b="$(basename "$f")"
+    n_tools=$(( n_tools + 1 ))
     grep -qE -- "^- \*\*${BT}${b}${BT}\*\*" tools/README.md || { echo "FAIL: tools/README.md 미등재: $b"; rc=1; }
   done
+
+  # tools/lib/*.ts ↔ tools/README.md — **별도 루프**다. 키가 basename이 아니라 `lib/<basename>`이기
+  # 때문이다(README 규약). basename으로 물으면 이미 등재된 lib bullet까지 전건 FAIL이 된다(실측 31건 red).
+  # 이 레인이 없던 동안 소비자 최다 커널(cli.ts 25곳·identity.ts 20곳)이 로스터에 0줄이었다.
+  for f in tools/lib/*.ts; do
+    [ -e "$f" ] || continue
+    b="lib/$(basename "$f")"
+    n_tools=$(( n_tools + 1 ))
+    grep -qE -- "^- \*\*${BT}${b}${BT}\*\*" tools/README.md || { echo "FAIL: tools/README.md 미등재: $b"; rc=1; }
+  done
+
+  # 역방향(tools/README.md bullet → 실파일) — 정방향만으로는 리네임·삭제 뒤 남은 phantom bullet이
+  # 영구히 초록이다. check-skeleton.sh의 표→dir 레인을 그대로 이식한다.
+  while IFS= read -r b; do
+    [ -n "$b" ] || continue
+    [ -e "tools/$b" ] || { echo "FAIL: tools/README.md bullet에 있으나 파일 부재: $b"; rc=1; }
+  done <<EOF
+$(sed -n "s/^- \*\*${BT}\([A-Za-z0-9_./-]*\)${BT}\*\*.*/\1/p" tools/README.md)
+EOF
 
   # .github/workflows/*.yaml ↔ workflows README (친화명 표기라 basename 존재검사)
   # ⚠️ 거친 검사: prose 언급도 통과(build은 'build 완료'에 이미 등장). 제로-언급 신규 워크플로 차단이 목적.
   for f in .github/workflows/*.yaml; do
+    [ -e "$f" ] || continue
     b="$(basename "$f" .yaml)"
+    n_workflows=$(( n_workflows + 1 ))
     grep -Fq "$b" .github/workflows/README.md || { echo "FAIL: workflows README 미등재: ${b}.yaml"; rc=1; }
   done
+
+  # 바닥값(판정만 — 마커는 검출 뒤 일괄). 실측 2026-09-07: scripts 42 · tools 67(top 34 + lib 33) ·
+  # workflows 23. 래칫이 아니라 붕괴 탐지라 정당한 삭제를 red로 만들지 않을 만큼 낮게 둔다.
+  scan_floor check-doc-index:scripts   "$n_scripts"   25 quiet || rc=1
+  scan_floor check-doc-index:tools     "$n_tools"     40 quiet || rc=1
+  scan_floor check-doc-index:workflows "$n_workflows" 15 quiet || rc=1
 fi
 
 # ── 레인 [2] scripts/README.md 스코프 계약 ────────────────────────────────────────────────────
@@ -246,6 +287,11 @@ scan_floor check-doc-index:readme-bullets "$bullets" "$BULLET_FLOOR" || rc=1
 if [ "$SCOPE_ONLY" -eq 0 ]; then
   scan_floor check-doc-index:witness-venue "$wvenue" "$README_WITNESS_VENUE_FLOOR" || rc=1
   scan_floor check-doc-index:witness-rel   "$wrel"   "$README_WITNESS_REL_FLOOR"   || rc=1
+  # 레인 [1]의 quiet 판정과 짝인 신호 — 검출 뒤에 낸다(마커는 "열거·판정을 마쳤다"는 뜻이므로
+  # 검출기가 죽은 실행이 내면 소비자가 정반대로 읽는다).
+  scan_signal check-doc-index:scripts   "$n_scripts"
+  scan_signal check-doc-index:tools     "$n_tools"
+  scan_signal check-doc-index:workflows "$n_workflows"
 fi
 
 if [ "$rc" -eq 0 ]; then

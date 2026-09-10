@@ -15,7 +15,7 @@
 # (3종 프로브 실측).
 # ⚠️ 한계: 정적 가드라 미래 업스트림 증가 자체는 못 잡는다 — 그건 emptyDir 사용률 관측이 담당해야 한다.
 #
-# 측정 앵커(followup-sweep 02): MEASURED_PAYLOAD_KIB는 **잰 시점의 이미지 태그**(MEASURED_AT_TAG)와
+# 측정 앵커: MEASURED_PAYLOAD_KIB는 **잰 시점의 이미지 태그**(MEASURED_AT_TAG)와
 # 짝이다 — 태그만 올라가고 상수가 낡으면 가드가 옛 페이로드로 마진을 재는 죽은 가드가 된다
 # (실측: 13.1.0→13.1.3 사이 재측정 없이 페이로드 +10.5%·preinstall에 zipkin 신규 — 커밋 0건 성장).
 # 아래 @test가 grafana.yaml의 이미지 태그와 앵커 태그를 대조해 불일치를 red로 만든다.
@@ -170,14 +170,14 @@ _grafana_image_tag() {
 
 @test "the live-usage rule denominator equals the declared sizeLimit (static binding)" {
   # GrafanaPluginBudgetLow(r4)의 분모는 선언 sizeLimit의 바이트 리터럴이다 — 결박이 없으면 선언만
-  # 바꿨을 때 사용률 판정이 낡은 예산으로 돌아 임계 의미가 조용히 뒤틀린다(meta-observability 02).
+  # 바꿨을 때 사용률 판정이 낡은 예산으로 돌아 임계 의미가 조용히 뒤틀린다.
   run _grafana_data_sizelimit_kib "$D/grafana.yaml"
   [ "$status" -eq 0 ]
   declared_bytes=$(( output * 1024 ))
   denom="$(grep -oE 'grafana_data_dir_size_bytes\[3d\]\) / [0-9]+' "$D/rules/r4-storage-backup.yaml" | grep -oE '[0-9]+$')"
   [ -n "$denom" ]
   [ "$denom" -eq "$declared_bytes" ]
-  # 임계도 마진 정책의 역수(반올림)와 결박한다(리뷰 M7) — MARGIN만 바꾸면 임계 의미가 조용히
+  # 임계도 마진 정책의 역수(반올림)와 결박한다 — MARGIN만 바꾸면 임계 의미가 조용히
   # 뒤틀린다(이 게이트의 존재 이유와 같은 결함 클래스).
   ratio="$(grep -oE '/ [0-9]+\) > 0\.[0-9]+' "$D/rules/r4-storage-backup.yaml" | grep -oE '0\.[0-9]+$')"
   [ -n "$ratio" ]

@@ -2179,6 +2179,14 @@ selfHeal과 플립플롭한다.
   ⚠️ 이 문단은 #574가 갱신하지 않아 **닫힌 부채를 열린 것으로** 서술하고 있었다(SSOT가 코드와 다른
   사실을 말하는 이 레포의 반복 클래스). verify-traps는 `> 가드:` 줄과 헤드라인만 대조하므로 본문
   산문의 이 드리프트를 **원리적으로 못 본다** — 산문도 SSOT의 일부라는 것이 이 자리의 교훈이다.
+- ⚠️ **소비자가 `grep -q`가 아닐 수도 있다(2026-09-08 티켓 49)**: `awk '… { print …; exit }'`도 첫 매치에서 파이프를 닫는다.
+  host-preflight [6]의 `ip -o -4 addr show | awk '… exit'`가 같은 날 CI gate에서 두 번 red였다(#688 · #691) — 서로 다른
+  happy-path @test에서 `예기치 않은 종료 — 줄 205 … (rc=1)`. 두 겹의 위장: ① 러너는 SIGPIPE를 무시하는 환경이라 writer
+  (스텁의 두 번째 `echo`)가 141이 아니라 **EPIPE 쓰기 오류로 rc 1**을 내고, ② writer 쪽 `2>/dev/null`이 "Broken pipe"까지
+  삼켜 로그에 단서가 0줄이다. 로컬 재현은 결정적이다: 매치 줄을 맨 앞에 두고 파이프 버퍼(64KiB)를 넘는 줄을 뒤에 붙이면
+  부하 없이도 rc=141(`infra/k3s-bootstrap/tests/test_02-host-preflight.bats` 마지막 @test). 처방은 같다 — writer를 먼저
+  변수로 **끝까지** 받고 `awk '…' <<<"$var"`. 형제 3곳(`host-config.sh` cfg_iface · `backup-files-data.sh` phys_disk ·
+  `verify-cluster.sh` _img)을 같이 고쳤고, 가드 레인 (c)가 `| awk … exit` 소비자를 pipefail 파일 전수에서 잰다.
 - ⚠️ **가드 도메인(2026-09-05 티켓 71로 확장)**: 판정 범위는 `printf '%s\n' "$var"`·`echo "$var"` 같은 셸 빌트인
   writer **+ 파일/명령 writer**(`sed`·`awk`·`cat`·`grep`·`kubectl`·`locale`·`yq`·`jq` … → `grep -q`)다 — #642가 실증한
   `check-locale-collation.sh` 레인 D(`sed … "$f" | grep -q`)가 그 클래스였고, 확장한 분모가 곧바로
@@ -2189,6 +2197,17 @@ selfHeal과 플립플롭한다.
   10~20% 확률, ≈139KB=12키부터 결정적) `grep -q`의 조기 종료가 그 write를 EPIPE로 만들어 백업 생성이
   **141로 죽고 EXIT trap이 tmp를 지운다**. sealing key 회전 핀(`keyrenewperiod "0"`)이 풀리면 30일마다
   키가 하나씩 늘어 시한부로 도달하는 경로라 `grep -c`로 전환했다.
+- ⚠️ **조기 종료 소비자는 `grep -q`만이 아니다 — `| head -1`도 첫 줄을 읽고 닫는다.** 2026-09-09 실측:
+  `platform/cnpg/prod/restore-drill-script.sh`의 RPO 마커 INSERT가 `_live_psql … | head -1`이라, PG 18 psql이 둘째 줄로
+  내는 `INSERT 0 1` 상태 태그 write가 SIGPIPE를 맞아 성공한 쓰기가 "라이브에 쓰지 못했다"로 보고됐다(같은 모양의 스텁
+  파이프라인: 무부하 800회 중 1회 · CPU 포화 아래 2500회 중 343회 141 — bats 병렬화가 깨웠다, 「파일 단위 병렬 bats에서
+  …」 참조). 처방은 같다: writer 쪽에서 끝내거나(`sed -n '/re/{p;q}'`·`grep -m1`) **캡처를 별도 문장으로 두고**
+  `head -n1 <<<"$out"`. 별도 문장이어야 `set -e`/pipefail 아래 writer의 실패 전파(`|| fail`·`|| x=""`)가 보존된다.
+  `check-sigpipe-writers.sh` 레인 (d)가 `| head` 소비자를 writer 무관하게 잰다(같은 날 전 트리 44곳 전환 — 발화 e2e
+  하네스·lib·host-preflight·dr-drill·seed-secrets). 형제 후보 `| sed … q`·`| grep -m1`은 현 트리 0건이라 분모 밖.
+  bats 파일은 @test 본문이 pipefail 아래가 아니지만 `run bash -c '… set -euo pipefail …'` 블록은 다르다 — 레인 (e)가
+  **그 블록의 줄만** 잰다(#706 첫 gate에서 `tests/gates/test_guard-sh.bats`의 블록 안 `sed … | grep -qE … && kern=1`이
+  4 vCPU 병렬 레인에서 로스터 6→5로 red, 로컬 CPU 포화 20회 중 4회 재현 → 캡처 뒤 herestring).
 > 가드: `scripts/check-sigpipe-writers.sh`, `tests/gates/test_sigpipe-writers.bats`
 ### 서브쿼리 step이 스크레이프 간격보다 크면 peak가 조용히 과소평가된다 — 그 위에서 깎은 limit이 회귀가 된다
 - 2026-09-01, 메모리 원장의 마진 규약(`limit ≥ A′ peak × 2.0`)이 A′를 `[14d:5m]` 서브쿼리로 쟀다.
@@ -2366,7 +2385,8 @@ selfHeal과 플립플롭한다.
   「테스트 이름은 인터페이스가 아니다」의 한 특수형이다(이름과 본문의 불일치가 상한 축에서만 난다).
 - **처방(CONTRIBUTING.md 「이름 있는 집합의 상한」)**: 이름 있는 배열/집합을 재는 가드는 존재 증인 +
   집합 크기 상한(`length == N` 또는 정확 집합 등식)을 **같이** 건다. 존재 증인은 주석 스트립 후
-  행두 앵커로 센다(형제 관용구: `scripts/check-locale-collation.sh:131`) — 산문·문자열·heredoc·죽은
+  행두 앵커로 센다(형제 관용구: `scripts/check-locale-collation.sh`의 레인 D — 주석 스트립 후
+  `guard_init` 행두 호출만 인정한다) — 산문·문자열·heredoc·죽은
   스텝 안의 같은 토큰은 증인이 아니다.
 - **린트화(7라운드 축 N, 티켓 59)**: `scripts/check-bats-style.sh`의 `[SETCAP]` 레인이 이 규칙을 정적으로
   강제한다 — `@test` 이름이 exactly/only/no other/전수/EVERY/정확 중 하나를 선언하면 본문(다음 `@test`
@@ -2424,3 +2444,60 @@ selfHeal과 플립플롭한다.
   형제: 「`&`로 띄운 헬퍼의 바인드 실패는 `set -e`에 안 걸린다 — readiness 줄이 없으면 …」(readiness를
   시간이 아니라 신호로 재라는 같은 계열).
 > 가드: `infra/k3s-bootstrap/tests/test_03-host-config.bats`
+
+### 렌더가 비는 컴포넌트는 ArgoCD auto-sync가 프룬을 거부한다 — allowEmpty=false가 마지막 리소스의 삭제를 전멸로 읽는다
+- **병(2026-09-08 09:4x KST 실측 — 잔재 리소스 purge PR-C #688)**: `platform/data-conn/prod/kustomization.yaml`의
+  resources가 6 → 0이 되자 같은 커밋의 `cnpg-data`·`cache-prod`는 수렴했는데 `data-conn-prod`만 OutOfSync에
+  머물렀다. 조건: `SyncError: Skipping sync attempt to bf26a7f…: auto-sync will wipe out all resources`.
+  ArgoCD Application `syncPolicy.automated.allowEmpty`(기본 false)는 **desired가 0개인 auto-sync를 거부**한다 —
+  렌더 붕괴로 전 리소스가 프룬되는 사고를 막는 안전장치인데, 정당한 "마지막 하나 삭제"도 같은 형상이라
+  구별하지 못한다. 결과: SealedSecret 6건(→ prod ns Secret 6건)이 git에는 없는데 라이브에 남았다.
+  `audit-orphans`는 git을 보므로 0건이고, 이 라이브 잔존은 어느 게이트에도 보이지 않는다(posture 스위트는
+  앱 conn을 세지 않는다). 이 디렉토리의 옛 주석 "빈 resources여도 kustomize build는 성공해야 한다"는 여전히
+  참이지만 **빌드 성공 ≠ 수렴**이다 — 주석이 그 갭을 가리키게 고쳤다.
+- **왜 allowEmpty=true가 아닌가**: appset 템플릿(`platform/argocd/root/appset.yaml`)의 syncPolicy는 전 컴포넌트
+  공통이라 per-component로 켤 수 없고, 전역으로 켜면 렌더 붕괴(kustomization 파손·KSOPS 실패)가 그대로
+  전멸이 된다 — 이 레포가 「열거 붕괴 → vacuous green」을 최상위 함정으로 두는 것과 같은 이유로 잘못된 레버다.
+- **처방**: 마지막 리소스를 지우는 PR을 머지한 뒤 **prune을 포함한 명시 sync 1회**(owner 확인 후):
+  `kubectl -n argocd patch app data-conn-prod --type merge -p '{"operation":{"sync":{"prune":true}}}'`.
+  `make argo-sync`의 patch(`{"operation":{"sync":{}}}`)에는 prune이 없어 이 6건을 지우지 못한다.
+  이후 desired 0 = live 0으로 Synced가 되고, 다음 리소스가 추가되면 auto-sync가 정상 재개된다(같은 날 실측:
+  `db create page`가 conn 2건을 넣자 자동 수렴).
+- ⇒ **일반형**: 삭제가 집합을 **비우는** 자리 — provision 산출물 전용 디렉토리(`cnpg/prod/databases/` ·
+  `cache/prod/<name>/` · `data-conn/prod/`)의 마지막 리소스 teardown — 는 전부 같은 형상이다. 런북
+  `teardown-resource.md` §3 PR-C 절에 이 단계가 들어 있다(doc-only — 가드 없음: 라이브 수렴 여부는 정적으로
+  못 잰다).
+
+### 파일 단위 병렬 bats에서 실 체크아웃을 잠깐 바꾸는 스위트는 남의 가드를 red로 만든다 — 직렬 레인으로 빼고, 고정 /tmp는 $BATS_TEST_TMPDIR로 옮긴다
+- **병(2026-09-09 실측)**: gate의 bats 3282건은 한 줄로 직렬이라 러너에서 574s(잡 712s의 8할)였고, 6일 사이 잡 p50이
+  483s→712s로 자랐다(테스트가 늘수록 선형). `bats --jobs 14 --no-parallelize-within-files`(파일마다 별도 프로세스, 파일 안은
+  직렬)로 돌리자 NUC에서 90s — 그러나 8회 중 8회 같은 두 @test가 red였고(check-skeleton-floors 977 · check-doc-index 970)
+  간헐 3종이 더 있었다(make-ci-parity 1361 · scan-floor 1500 · bats-style 883). 원인은 그 @test가 아니라 **동시에 돌던
+  다른 파일**이다: `test_check-skeleton-cjk.bats`가 `tests/gates/`에 CJK 이름 픽스처를 만들고 `git add -N`으로 공유
+  `.git/index`에 올리는 창, `test_check-doc-index.bats`가 `tools/README.md`에 유령 bullet을 append했다 복원하는 창(cp의
+  truncate 순간엔 빈 파일), `test_bats-accounting.bats`가 Makefile에 임시 타깃을 append하는 창을 밟은 프로세스가, 실 트리를
+  데이터로 읽는 가드(`check-skeleton.sh`·`check-doc-index.sh`·`make ci-guard-tracked`)를 돌려 거짓 red를 냈다. 정적 스캔
+  (gate 파일 280건 정독 + 반증 검증)으로 같은 부류 6파일을 확정했다 — 전부 실 체크아웃(추적 파일·untracked 생성·`.git/index`)을 쓴다.
+- **두 번째 얼굴 — 고정 `/tmp` 경로**: `tests/test_ledger.bats`와 `tools/tests/test_ledger-gate.bats`가 같은
+  `/tmp/bad-ledger.md`·`/tmp/bad.json`을 쓰고 `scripts/verify-ledger.sh`는 `/tmp/ledger.json`에 썼다 — 셋이 동시에 돌면
+  서로의 파일을 덮는다. `scripts/teardown.sh`(`/tmp/td-payload.json`)·telegram-notify `notify.sh`(`/tmp/tg-resp`)도 같은
+  모양이었다. 직렬로 돌던 동안은 원리적으로 안 보이던 클래스라 병렬화가 이 잠복을 한꺼번에 깨운다.
+- **세 번째 얼굴 — 부하가 깨운 기존 버그**: `restore-drill-script.sh`의 RPO 마커 INSERT가 `_live_psql … | head -1`이었다
+  (전문은 「`grep -q`의 조기 종료 …」의 추가 항목). 라이브 CronJob도 같은 코드라 노드가 바쁜 일요일 05:00에는 주 1회짜리
+  유일 신호가 거짓 실패로 죽을 수 있었다 — 병렬 실험이 아니었으면 "간헐 flake"로 남았을 자리다.
+- **처방**: (1) `scripts/run-bats.sh`가 수집 집합을 두 레인으로 나눈다 — 병렬 레인(`--jobs $(nproc)`, `RUNBATS_JOBS`로 고정
+  가능)과 **직렬 레인**(`tests/.gate-serial`, 병렬 레인이 끝난 뒤 혼자). 등재 기준은 "실 체크아웃을 바꾼다" 하나이고 고정
+  경로·포트는 등재 대상이 아니라 `$BATS_TEST_TMPDIR`로 옮겨 고친다(등재는 부채 — 상한 SERIAL_MAX, 계약은
+  `check-bats-accounting.sh` (2b), 수집 밖 항목은 러너가 exit 2). 같은 날 등재됐던 6건 전부를 가드+커널을 복사한
+  사본 레포에서 돌리는 형태로 옮겨 레인은 비었고 상한은 0이다 — 새 등재는 그 상수를 올리는 diff로만 가능하다. (2) 러너가 `GITHUB_OUTPUT`·`GITHUB_STEP_SUMMARY`·
+  `GITHUB_ENV`·`GITHUB_PATH`를 끊는다 — 테스트가 부른 실 도구(`check-workflow-readiness.ts`)가 스텝 출력 파일에 heredoc을
+  append하는데, 병렬에서는 여러 프로세스가 한 파일에 끼어 쓴다. (3) `BUN_RUNTIME_TRANSPILER_CACHE_PATH`를 실행 단위로
+  고정한다 — bun의 캐시 위치는 `XDG_CACHE_HOME`→`HOME`에서 파생되어 테스트가 HOME을 갈아 끼울 때마다 흩어진다.
+  (4) 로컬은 GNU parallel이 없으면 직렬 폴백 + 안내, CI는 exit 2 — 게이트 시간이 조용히 6배가 되는 것을 폴백으로 덮지 않는다.
+  gate 실측(#704 첫 run): 잡 712s→419s, 스텝 576s→291s, bats 574s→243s(jobs=4) — 스텝의 남은 장대는 가장 긴 발화 e2e
+  하네스(약 290s)다.
+- ⇒ **일반형**: 테스트는 자기 프로세스 밖의 것을 만지지 않는다 — 실 체크아웃, 고정 절대 경로, 고정 포트, 사용자 홈, 전역
+  도구 상태. "지금은 혼자 도니까"는 스케줄링에 기댄 정합성이고 병렬화·재시도·다른 세션의 동시 실행이 그 전제를 언제든
+  깬다. 만질 수밖에 없으면(가드가 자기 위치에서 ROOT를 파생해 사본으로 못 돌리는 경우) 직렬 레인에 **사유와 함께**
+  등재한다 — 조용히 늦게 도는 것이 아니라 회계에 보이게.
+> 가드: `scripts/run-bats.sh`, `scripts/check-bats-accounting.sh`, `tests/gates/test_run-bats.bats`, `tests/gates/test_bats-accounting.bats`

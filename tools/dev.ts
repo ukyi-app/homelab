@@ -3,7 +3,7 @@
 //   db:up     : 모드 1(깨끗한 개발) — docker postgres 기동 + 시드. 파괴 OK.
 //   db:reset  : 모드 1 초기화(volume 포함 내림 후 재기동).
 // 모드 2(실데이터 읽기 전용)는 tools/db-url.ts / cache-url.ts — 파괴 수단 없음.
-// 실행은 exec seam 경유(d6④) — 셸 문자열 대신 argv 배열(공백 경로에도 안전), stdio는 inherit로
+// 실행은 exec seam 경유 — 셸 문자열 대신 argv 배열(공백 경로에도 안전), stdio는 inherit로
 // 종전 화면 출력을 유지한다. timeoutMs 0 = compose 풀/기동·dev 루프의 무제한 대기 보존.
 import { sh } from "./lib/exec.ts";
 
@@ -20,8 +20,11 @@ const compose = (...a: string[]) => {
 };
 
 if (cmd === "db:up" || cmd === "db:reset") {
-  // canonical DATABASE_URL — db-url.ts(모드2)·클러스터 계약과 동일 변수명(설계 §5.7 로컬·클러스터 일치).
-  // 모드1은 단일 docker dev DB(app_dev)라 per-name 구분 불요(--name은 더 이상 키에 영향 없음).
+  // bare DATABASE_URL — **모드 1 전용 키**다. 모드1은 단일 docker dev DB(app_dev)라 per-name 구분이
+  // 성립하지 않는다(그래서 --name은 키에 영향이 없다 — #114가 의도적으로 제거한 축이고 되돌리지 않는다).
+  // ⚠️ "db-url.ts(모드2)·클러스터 계약과 동일 변수명"이라는 옛 근거절은 **#141(b0fb87e)에서 소멸했다** —
+  // 모드2와 클러스터 envFrom은 namespaced 키(`<NAME>_DATABASE_URL`)를 쓴다. 이 불변식(모드1=bare)은
+  // test_dev-data.bats가 강제하는 의도된 것이지 드리프트가 아니다.
   const envKey = "DATABASE_URL";
   const url = "postgres://dev:dev@localhost:5432/app_dev";
   if (DRY) {
@@ -34,7 +37,7 @@ if (cmd === "db:up" || cmd === "db:reset") {
   process.exit(0);
 }
 
-console.log("starting local dev Postgres (OrbStack docker)…");
+console.log("starting local dev Postgres (docker)…");
 compose("up", "-d", "--wait");
 console.log("dev Postgres ready on localhost:5432 (db=app_dev user=dev).");
 

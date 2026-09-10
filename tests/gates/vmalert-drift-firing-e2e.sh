@@ -67,7 +67,9 @@ EVAL="$VME_EVAL"
 # vmalert instant 질의의 룩백 = -datasource.queryStep (미지정 시 vmalert 기본 5m). 이게 버그의 핵심 상수다.
 LOOKBACK="$VME_LOOKBACK"
 # push 주기 = digest-exporter CronJob 크론의 분 필드(*/N).
-CRON="$(yq 'select(.kind=="CronJob") | .spec.schedule' "$STACK/digest-exporter.yaml" | head -1)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring.
+_cron_raw="$(yq 'select(.kind=="CronJob") | .spec.schedule' "$STACK/digest-exporter.yaml")"
+CRON="$(head -n1 <<<"$_cron_raw")"
 PUSH_MIN="$(printf '%s' "$CRON" | cut -d' ' -f1 | grep -oE '[0-9]+$' || true)"
 # ⚠️ 아래 셋은 **룰 판정이 아니라 전제 붕괴**다(매니페스트 파생 실패·겨냥 룰 부재) — bare `exit 1`이면
 #    CI 로그가 이걸 「leg FAIL」(제품 결함)로 보고해 진단이 오귀속된다. 종료 규약은 exit 2다(ADR-0005).

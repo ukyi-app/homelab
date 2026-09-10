@@ -82,7 +82,7 @@ write_index() {   # $@: 인덱스에 나열할 런북 파일명
 }
 
 @test "a runbook mentioned only outside the section still fails the forward lane (section-scoped, not whole-file)" {
-  # grep-c-5(감사 6라운드): 예전 정방향(`grep -Fq "$b" AGENTS.md`)은 파일 **전체**를 봤다 — 표에서
+  # 예전 정방향(`grep -Fq "$b" AGENTS.md`)은 파일 **전체**를 봤다 — 표에서
   # 지운 파일명이 다른 절의 산문·HTML 주석에 한 번만 남아도 그걸로 통과했다(절 밖 언급이 인덱스로
   # 둔갑). 지금은 역방향과 같은 idx_md(절 추출)에 완전일치로만 댄다.
   write_index alpha.md

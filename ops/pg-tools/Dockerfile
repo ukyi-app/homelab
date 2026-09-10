@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
 # kubectl/psql/rclone 기반 운영(ops) 이미지 (Postgres 백업/복구 + 캐시 백업).
-# Milestone 4의 restore-drill CronJob·pg_dump→rclone→R2 헤지와 캐시(Valkey) 백업 CronJob이 사용한다.
-# ghcr.io/<owner>/pg-tools:18-rclone으로 게시된다 (Task 6.15 matrix 참조).
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
+# restore-drill·pg_dump→rclone→R2 헤지·ensure-role-password Job, 캐시(Valkey) 백업,
+# AdGuard rewrite 리컨실러, pvc-du-exporter가 사용한다.
+# ghcr.io/<owner>/pg-tools:18-rclone으로 게시된다(.github/workflows/build.yaml matrix).
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 
 # ⚠️ 기본값을 주지 않는다. stage-level ARG 기본값은 BuildKit predefined platform arg를 **이긴다**
 #   (실측: `ARG TARGETARCH=arm64` + `--platform linux/amd64` → TARGETARCH=[arm64]).
@@ -21,7 +22,7 @@ ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.36.4
 
 # rclone 버전 핀. freshness 소유자는 renovate.json customManagers(github-releases: rclone/rclone).
-ARG RCLONE_VERSION=v1.75.0
+ARG RCLONE_VERSION=v1.75.1
 
 ENV DEBIAN_FRONTEND=noninteractive
 

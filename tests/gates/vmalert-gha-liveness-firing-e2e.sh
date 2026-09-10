@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GHA liveness 알림 **발화** e2e (티켓 10) — hermetic replay로 "실제로 발화하는가"를 증명한다.
+# GHA liveness 알림 **발화** e2e — hermetic replay로 "실제로 발화하는가"를 증명한다.
 #
 # 왜 필요한가: `-dryRun`은 expr **파싱**만 본다. 문법이 멀쩡한데 라이브에서 발화가 0인 룰이 이 레포에
 # 이미 두 번 있었다(ImageDigestDrift·FilesBulkSSDLow — 둘 다 push 주기 > 룩백으로 시리즈에 구멍이 나
@@ -84,7 +84,9 @@ STALE_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_RULES" "$STALE_ALERT")")"
 HB_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_RULES" "$HB_ALERT")")"
 SCRAPE_FOR_S="$(vme_to_s "$(vme_alert_for "$VME_RULES" "$SCRAPE_ALERT")")"
 HB_EXPR="$(vme_alert_expr "$VME_RULES" "$HB_ALERT")"
-HB_THRESHOLD_S="$(grep -oE '>[[:space:]]*[0-9]+' <<<"$HB_EXPR" | head -1 | grep -oE '[0-9]+' || true)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring(아래 좌변 rollup 추출도 동형).
+HB_THR_MATCHES="$(grep -oE '>[[:space:]]*[0-9]+' <<<"$HB_EXPR" || true)"
+HB_THRESHOLD_S="$(head -n1 <<<"$HB_THR_MATCHES" | grep -oE '[0-9]+' || true)"
 [ -n "$HB_THRESHOLD_S" ] || vme_fault "$HB_ALERT: 임계 상수 추출 실패"
 
 # ── 2b) preflight: 전제를 **기계가** 강제한다(위반 = 룰 판정이 아니라 전제 붕괴 → exit 2) ──────────
@@ -117,8 +119,8 @@ echo "[preflight] regress 산술 OK: N_BACK=${N_BACK}폴 · 지속 $(( N_BACK * 
 
 # ⚠️ **순서가 곧 진단의 정확성이다.** 배포 룰의 좌변부터 본다 — 아래 픽스처 대조를 먼저 걸면, 픽스가
 #    되돌아갔을 때 "픽스처가 고쳐졌다"는 **엉뚱한 파일**을 지목한다(거짓 진단 = 게이트 신뢰 붕괴).
-TS_ROLLUP_FN="$(grep -oE "[a-z_]+_over_time[[:space:]]*\([[:space:]]*${TS_METRIC}\[" <<<"$STALE_EXPR" \
-  | head -1 | grep -oE '^[a-z_]+_over_time' || true)"
+TS_ROLLUP_MATCHES="$(grep -oE "[a-z_]+_over_time[[:space:]]*\([[:space:]]*${TS_METRIC}\[" <<<"$STALE_EXPR" || true)"
+TS_ROLLUP_FN="$(head -n1 <<<"$TS_ROLLUP_MATCHES" | grep -oE '^[a-z_]+_over_time' || true)"
 [ -n "$TS_ROLLUP_FN" ] || vme_fault "$STALE_ALERT: 좌변 rollup 함수 추출 실패 — expr 파싱이 깨졌다"
 [ "$TS_ROLLUP_FN" = "max_over_time" ] \
   || vme_fault "$STALE_ALERT 좌변이 '$TS_ROLLUP_FN'이다 — **배포 룰이 되돌아갔다**($RULES_CM). 단조량인 $TS_METRIC 은 max_over_time이어야 공급원의 역행 샘플을 흡수한다. L8/L9는 이 전제 위에서만 의미가 있다"

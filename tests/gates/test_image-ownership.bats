@@ -345,7 +345,7 @@ PY
 
 @test "a quoted kind: Application is enumerated too (value-anchor blindness, 55 grep-c-2 sibling)" {
   # `kind: "Application"`/`kind: 'Application'`은 합법 YAML이고 k8s에 동일 의미다 — 값-앵커가
-  # 인용을 못 보면 D-2 선언 강제가 표기 하나로 우회된다(7라운드 c64-5 실측: 인용판은 refs=0으로
+  # 인용을 못 보면 D-2 선언 강제가 표기 하나로 우회된다(실측: 인용판은 refs=0으로
   # 무증인이었다).
   t="$(_fixture appshapequoted)"
   printf 'apiVersion: argoproj.io/v1alpha1\nkind: "Application"\nmetadata: { name: x }\nspec:\n  source:\n    chart: some-quoted-chart\n' \
@@ -365,7 +365,7 @@ PY
   [ "$status" -eq 0 ]
 }
 
-# ── grep-c-2(감사 6라운드): `image: >-`/`image: |` 블록 스칼라는 IMG_KEY에 투명하다 ─────────────────
+# ── `image: >-`/`image: |` 블록 스칼라는 IMG_KEY에 투명하다 ───────────────────────────────────────
 # YAML은 `image: >-\n  ghcr.io/x/y:v1`을 한 줄 스칼라와 동일하게 해석하고 kubectl·kustomize·ArgoCD도
 # 똑같이 적용하지만, IMG_KEY(값 첫 글자로 [a-z0-9] 요구)는 이 표기에서 매치가 끊긴다 — 그러면 그 참조는
 # check-image-pins.sh의 형제 어휘·Renovate kubernetes manager에도 안 보여 소유권·핀·freshness 세

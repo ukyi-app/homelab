@@ -137,3 +137,13 @@ sh=platform/cnpg/prod/restore-drill-script.sh
   yq '.configMapGenerator[] | select(.name=="restore-drill-script") | .files[]' "$k" \
     | grep -qxF "$key=$(basename "$sh")"
 }
+
+@test "the RPO marker INSERT is captured before head takes the first line (no pipefail SIGPIPE race on the live write)" {
+  # `_live_psql … | head -1`이던 자리다 — pipefail 아래에서 head가 첫 줄을 읽고 닫으면 writer의 둘째 write(PG 18의
+  # `INSERT 0 1` 상태 태그)가 SIGPIPE를 맞아 141 → `|| fail`이 성공한 쓰기를 "라이브에 쓰지 못했다"로 보고한다
+  # (2026-09-09 실측: 같은 모양의 스텁 파이프라인이 CPU 포화 아래 2500회 중 343회). 캡처 뒤 herestring이어야 한다.
+  # 주석은 분모 밖(`^[^#]*` — 스크립트의 경고 주석이 옛 모양을 인용한다).
+  run grep -nE '^[^#]*_live_psql[^|#]*\|[[:space:]]*head' "$sh"
+  [ "$status" -eq 1 ]
+  grep -qF 'MARKER_ROW="$(head -n 1 <<<"$MARKER_OUT")"' "$sh"
+}

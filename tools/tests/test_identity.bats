@@ -6,14 +6,20 @@
 #    단일·다중 **파일**이라 그것으로 닫힌다. 이 파일의 술어는 전부 "콜사이트에서 사라졌는가"라
 #    콜사이트가 리네임되면 `-ne 0`이 SSOT 수렴을 증명하지 않고도 초록이 된다.
 #    cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
-# ⚠️ **SSOT 축은 닫혔다**(감사 3라운드): setup()이 identity.ts 실재를, 정적 로스터 레인이 각자
+# ⚠️ **SSOT 축은 닫혔다**: setup()이 identity.ts 실재를, 정적 로스터 레인이 각자
 #    인용하는 **심볼의 export 실재**를 진다.
-# ⚠️ **콜사이트 로스터는 손 관리가 아니라 파생이다**(감사 3라운드 36-5). 예전 판은 인라인 regex
+# ⚠️ **콜사이트 로스터는 손 관리가 아니라 파생이다**. 예전 판은 인라인 regex
 #    부재 단언의 피연산자를 손으로 3~4개 적었다 — 실측(2026-09-03): identity를 import하면서 인라인
 #    분기 regex를 그대로 든 새 파일(tools/_roster_probe.ts)을 넣어도 15레인 전건이 초록이었다.
 #    이제 `_identity_roster`가 추적 `tools/**`에서 **앵커된 import 줄**로 소비자를 열거하고, 부재
 #    단언은 그 전량을 피연산자로 받는다. 열거 붕괴(→0건)는 전칭을 공허하게 만드므로 바닥값이 막는다.
 #    앵커가 `^import`인 이유: 맨 `identity.ts` 매치는 **주석 한 줄**에도 걸린다(같은 파일의 옛 실측).
+# ⚠️ **이 스위트는 실 체크아웃을 건드리지 않는다**. 프로브 레인은 예전에 실 `tools/lib/`에 파일을
+#    만들고 `git add -N`/`git rm --cached`로 **공유 `.git/index`**를 썼다 — 파일 단위 병렬 bats에서
+#    그 창을 밟은 다른 프로세스의 가드(check-skeleton·check-doc-index·`make ci-guard-tracked`)가
+#    거짓 red를 냈다. 지금은 `$BATS_TEST_TMPDIR` 아래 **픽스처 사본 레포**에서만 프로브를 심는다
+#    (`_identity_fixture_repo`). cf. docs/traps-detail.md
+#    「파일 단위 병렬 bats에서 실 체크아웃을 잠깐 바꾸는 스위트는 …」
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1
@@ -24,16 +30,38 @@ setup() {
 
 # 콜사이트 로스터 — 추적 tools 소스 중 identity SSOT를 **앵커된 import 줄**로 들여오는 파일 전량.
 # ⚠️ 손 목록으로 되돌리지 말 것. 로스터의 존재 이유가 "새 콜사이트가 자동으로 피연산자가 된다"이다.
+# 인자 = 열거 기준 루트(기본 `$ROOT` — **실 트리 기본 동작은 불변**이다: cwd가 ROOT라
+# `git -C "$ROOT"`도 `$ROOT/$f`도 예전과 같은 것을 읽는다). 인자형은 프로브 레인이 공유 체크아웃
+# 대신 **픽스처 사본 레포**를 같은 파생으로 재기 위한 것뿐이다. 출력은 늘 그 루트 상대 경로라,
+# 소비자는 그 루트를 cwd로 둔 채 위치 인자로 재주입한다.
 _identity_roster() {
-  git ls-files 'tools/*.ts' 'tools/*.mts' > "$BATS_TEST_TMPDIR/tools-src.txt"
+  _ir_root="${1:-$ROOT}"
+  git -C "$_ir_root" ls-files 'tools/*.ts' 'tools/*.mts' > "$BATS_TEST_TMPDIR/tools-src.txt"
   while IFS= read -r f; do
-    if grep -qE '^import .*identity\.ts' "$f"; then printf '%s\n' "$f"; fi
+    if grep -qE '^import .*identity\.ts' "$_ir_root/$f"; then printf '%s\n' "$f"; fi
   done < "$BATS_TEST_TMPDIR/tools-src.txt"
 }
 
 # 로스터 바닥값 — 실측 2026-09-03: 20건. 래칫이 아니다(정당하게 줄면 같이 내린다). 여유는 두되
 # 열거가 깨져 0~소수로 무너지는 것은 반드시 잡는다 — 그 위의 전칭 단언이 전부 공허해지는 자리다.
 ROSTER_FLOOR=15
+
+# 픽스처 사본 레포 — 추적 `tools/**`의 `.ts`/`.mts` 전량을 `$BATS_TEST_TMPDIR` 아래로 복사하고
+# 그 자리를 독립 git 레포로 만든다(가드가 아니라 **로스터 파생**이 `git ls-files`를 쓰므로
+# 인덱스가 있어야 한다). 프로브 레인이 여기에만 쓰기 때문에 실 체크아웃은 추적 파일 수정 0 ·
+# 레포 안 untracked 0 · 공유 `.git/index` 쓰기 0이다.
+_identity_fixture_repo() {
+  fx="$1"
+  git ls-files 'tools/*.ts' 'tools/*.mts' > "$BATS_TEST_TMPDIR/fx-src.txt"
+  # 복사 원본이 무너지면 사본 로스터도 함께 비어 프로브 레인이 통째로 공허해진다 — 바닥값이 먼저다.
+  [ "$(grep -c . "$BATS_TEST_TMPDIR/fx-src.txt" || true)" -ge "$ROSTER_FLOOR" ]
+  while IFS= read -r f; do
+    mkdir -p "$fx/$(dirname "$f")"
+    cp "$ROOT/$f" "$fx/$f"
+  done < "$BATS_TEST_TMPDIR/fx-src.txt"
+  git -C "$fx" init -q
+  git -C "$fx" add -A
+}
 
 @test "identity exports APP_NAME_RE with the validator policy (no trailing hyphen, 2..40)" {
   run bun -e '
@@ -73,18 +101,29 @@ ROSTER_FLOOR=15
 @test "the derived roster picks up a new callsite the hand list could not see" {
   # 이 파일이 닫는 축의 직접 증인 — 로스터를 손으로 적던 판에서는 새 콜사이트가 무증인이었다
   # (실측: identity를 import하면서 인라인 regex를 든 파일을 넣어도 전건 초록).
+  # ⚠️ 프로브는 **픽스처 사본 레포**에만 심는다 — 예전 판은 실 `tools/lib/`에 파일을 만들고
+  #    `git add -N`/`git rm --cached`로 공유 `.git/index`를 썼다(그래서 직렬 레인 등재 부채였다).
+  #    사본이라도 파생·피연산자·판정은 그대로다: 같은 `_identity_roster`가 같은 앵커로 열거한다.
+  fx="$BATS_TEST_TMPDIR/fx"
+  _identity_fixture_repo "$fx"
   probe="tools/lib/_identity_roster_probe.ts"
   printf '%s\n' 'import { APP_NAME_RE } from "./identity.ts";' \
                 'export const LOOSE = /^[a-z][a-z0-9-]{1,29}$/;' \
-                'export const use = (s: string) => APP_NAME_RE.test(s) || LOOSE.test(s);' > "$probe"
-  git add -N "$probe"
-  roster="$(_identity_roster)"
+                'export const use = (s: string) => APP_NAME_RE.test(s) || LOOSE.test(s);' > "$fx/$probe"
+  git -C "$fx" add -N "$probe"
+  roster="$(_identity_roster "$fx")"
+  # ⚠️ 바닥값이 **먼저다** — 사본 열거가 무너지면 아래 grep이 피연산자 없이 stdin을 읽어 red가
+  #    아니라 정지가 된다(bats fd 0 함정과 같은 클래스). 형제 레인과 같은 바닥값을 쓴다.
+  n="$(printf '%s\n' "$roster" | grep -c . || true)"
+  [ "$n" -ge "$ROSTER_FLOOR" ]
   hit=0
   printf '%s\n' "$roster" | grep -qx "$probe" && hit=1
+  # 로스터는 사본 루트 상대 경로다 — 그 루트를 cwd로 두고 위치 인자로 재주입한다.
+  # (setup()이 @test마다 `cd "$ROOT"`를 다시 하므로 이 cd는 이 레인 밖으로 새지 않는다.)
+  cd "$fx" || return 1
+  # shellcheck disable=SC2086  # 로스터는 개행 구분 경로 목록이다 — 위치 인자로 재주입
   run grep -nE 'a-z0-9-\]\{1,29\}|a-z0-9-\]\{0,40\}' $roster
   st="$status"
-  git rm -q --cached "$probe"
-  rm -f "$probe"
   [ "$hit" -eq 1 ]     # 파생이 새 파일을 로스터에 넣었다
   [ "$st" -eq 0 ]      # 그리고 그 파일의 인라인 regex가 부재 단언에 걸린다(옛 판은 못 봤다)
 }
@@ -142,7 +181,7 @@ ROSTER_FLOOR=15
     run grep -qE '^import .*identity\.ts' "tools/$f.ts"
     [ "$status" -eq 0 ]
   done
-  # db-url/cache-url은 엔진 껍데기(티켓 08) — 이름 검증은 conn-url 엔진 술어가 identity SSOT를
+  # db-url/cache-url은 엔진 껍데기 — 이름 검증은 conn-url 엔진 술어가 identity SSOT를
   # 소유하고, bin은 엔진을 경유한다(직수입 대신 위임 — 분기 없는 단일 판정은 유지된다).
   # ⚠️ 위 루프와 같은 이유로 **import 줄**로 좁힌다 — 두 파일 다 :1 헤더 주석이 `lib/conn-url.ts`를
   #    문자열로 담고 있어, 맨 매치는 엔진을 안 써도 참이다(실측 2026-09-04: db-url.ts의 직수입을

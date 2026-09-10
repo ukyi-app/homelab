@@ -118,7 +118,7 @@ export function parseFloor(raw: string | undefined, source: string): number {
   return Number(raw.trim());
 }
 
-// (제거된 표면 — kernel-followups 07) reportScanError: "진단을 내고 권고 코드를 돌려주는" 규약
+// (제거된 표면) reportScanError: "진단을 내고 권고 코드를 돌려주는" 규약
 // 함수였으나 17 재접목 이후 소비자 0이 지속됐고(05·06도 미소비 실측), 유지 근거였던 "ScanError
 // 계약을 소비하는 유일한 규약 함수"는 05에서 거짓이 됐다 — 실소비자는 guardMain ⓪의
 // assertFloorKeys catch(+②의 scanFloor catch — 권고 코드 번역·비-ScanError 되던짐)다.
@@ -149,7 +149,7 @@ export function scanFloor(label: string, got: number, min: number, opts: ScanOpt
   scanSignal(label, got, opts);
 }
 
-// ── 실행 커널 guardMain (lib-convergence 17 — 06/13의 재접목) ─────────────────────────────────
+// ── 실행 커널 guardMain ───────────────────────────────────────────────────────────────────
 // 순서가 곧 계약이다: **전 도메인 열거 → 전 floor 판정 → (전부 통과 시에만) SCAN 일괄 방출 →
 // 검사 → 종료코드.** 콜사이트가 순서를 손으로 맞추던 시절의 실측 버그 2건 — 위반 exit가 마커보다
 // 앞(check-disk-caps) · 마커가 바닥값 판정보다 앞(check-alert-rules) — 이 이 구조에서는 표현
@@ -194,7 +194,7 @@ export function takeFloors(argv: string[]): { floors: Map<string, number>; rest:
 }
 
 // --floor 키의 선언 도메인 전건 매칭 검증 — guardMain ⓪가 소비하고, guardMain에 맞지 않는 도구
-// (kernel-followups 05: dns-drift-check는 판정이 비동기라 동기 check 계약 밖, audit-orphans는
+// (dns-drift-check는 판정이 비동기라 동기 check 계약 밖, audit-orphans는
 // 종료코드가 3분기라 report/ok 이분법 밖)도 같은 fail-closed를 이것으로 얻는다.
 // ScanError(2) throw — takeFloors와 같은 오류 규율(판정은 던지고 종료·접두는 콜사이트 소유).
 export function assertFloorKeys(floors: Map<string, number>, scans: string[]): void {
@@ -224,7 +224,7 @@ export function guardMain(opts: {
   // 매칭**돼야 한다: 오타·타 가드 키가 조용히 무시되면 바닥값이 소리 없이 꺼진다(구 typedFlags
   // 화이트리스트가 잡던 fail-closed의 복원). 미매칭·모호(2개 이상 매칭)는 사용법 exit(2)다.
   floors?: Map<string, number>;
-  // 방출 정책 — **명시 필수**(design r1-3: 기본값에 숨기지 않는다). "none"은 기계 판독 stdout
+  // 방출 정책 — **명시 필수**(기본값에 숨기지 않는다). "none"은 기계 판독 stdout
   // 모드 전용이며 마커만 끄고 floor 판정·fail-closed는 그대로다.
   output: "stdout" | "none";
   check: () => string[];       // 위반 목록 — 비었으면 통과

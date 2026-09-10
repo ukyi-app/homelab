@@ -8,7 +8,7 @@ data:
     groups:
       - name: meta
         rules:
-          # ── 알림의 알림(meta-observability 03) — 기존 4표면이 못 보는 세 축만 담당한다 ─────────
+          # ── 알림의 알림 — 기존 4표면이 못 보는 세 축만 담당한다 ────────────────────────────────
           # VmalertUnhealthy(평가·전송 에러)·AlertmanagerTelegramFailing(전송 실패)·TargetDown
           # (스크레이프 단절)·Watchdog deadman(파이프라인 전멸)은 전부 "기계가 고장났다"를 본다.
           # 여기 세 룰은 "기계는 도는데 **알림이 일을 못 한다**"를 본다: for:를 못 채우고 되도는
@@ -24,7 +24,7 @@ data:
           # (라이브 실측: 값=타임스탬프). 활성화가 되풀이되면 activeAt이 갱신되므로 **값 변경 횟수 =
           # 활성화 리셋 횟수** — "for: 룰 51종 중 누구도 자기 리셋을 관측하지 않는다"는 갭의 직접
           # 신호다. ⚠️ 이 신호는 "for:를 못 채운 리셋"과 "정상 발화·해소의 반복"을 **구분하지
-          # 않는다**(후자도 activeAt 갱신 — 리뷰 M4). 어느 쪽이든 6h에 6회는 임계 근처 진동이라
+          # 않는다**(후자도 activeAt 갱신). 어느 쪽이든 6h에 6회는 임계 근처 진동이라
           # 관측 가치가 있고, 판별은 description이 안내한다.
           # ⚠️ 집계·라벨(리뷰 H3): rollup 결과는 원본 알림의 전체 라벨셋을 보존해 알림 라벨의
           #   베이스가 된다 — disk 라벨 보유 룰(StandardSSD류)이 flap하면 이 메타 알림이 disk를
@@ -32,13 +32,13 @@ data:
           #   신원이 갈려 시리즈별 changes가 과소 계수된다(L7). max by (alertname)로 라벨을 벗기고
           #   원본 이름은 label_replace로 전용 라벨(flapping_alert)에 옮긴다 — 그룹 축도 안정된다.
           # 임계 6/6h: 라이브 top(vmagent 195/24h ≈ 49/6h)은 즉발, 정상 단발 해소·재발(glances
-          # 3/24h)은 침묵. ⚠️ VM의 changes()는 창 직전 샘플과의 전이도 세므로(Prometheus와 다름 —
-          # 리뷰 L6) 실효 임계는 창 내 전이 5회다. for: 30m은 **순수 지연 + 창 경계의 5↔6 진동
-          # de-flap**이다(창 축적형이라 그 이상의 역할은 없다 — 리뷰 L4).
+          # 3/24h)은 침묵. ⚠️ VM의 changes()는 창 직전 샘플과의 전이도 세므로(Prometheus와 다름)
+          # 실효 임계는 창 내 전이 5회다. for: 30m은 **순수 지연 + 창 경계의 5↔6 진동
+          # de-flap**이다(창 축적형이라 그 이상의 역할은 없다).
           # 셀렉터 제외: Watchdog + 메타 3종 자신(양성 피드백). Watchdog 제외는 죽은 방어가 아니다 —
           # for: 없는 룰도 VM은 ALERTS_FOR_STATE를 기록한다(라이브 실측: AFS{Watchdog} 실재, 값
           # 1787751660 — live-facts.md). 게이트가 네 이름을 강제한다.
-          # ⚠️ 정확성 의존(리뷰 L10): vmalert 재시작 시 activeAt 복원은 vmalert.yaml의
+          # ⚠️ 정확성 의존: vmalert 재시작 시 activeAt 복원은 vmalert.yaml의
           #   --remoteRead.url이 담당한다 — 그 플래그가 빠지면 재시작마다 전 알림의 activeAt이
           #   갱신돼 이 룰이 조용히 오탐 폭발한다.
           - alert: AlertRuleFlapping
@@ -69,7 +69,7 @@ data:
           #   무발화와 오해소는 다른 범주다(후자는 적극적 오정보). 24h면 발화가 하루 유지되고,
           #   그 넘는 전무(파이프 전멸·vmalert 다운)는 빈 벡터 = 무발화가 맞다 — 그 축은
           #   TargetDown + 오프노드 deadman(healthchecks.io)의 소관이다(경계).
-          # ⚠️ max(...) 집계(리뷰 M5): ALERTS{Watchdog}는 셀렉터라 external label 추가 등으로
+          # ⚠️ max(...) 집계: ALERTS{Watchdog}는 셀렉터라 external label 추가 등으로
           #   시리즈가 갈리면 낡은 형제 시리즈가 창 만료까지 오발화를 끈다 — 최신 샘플 하나로 접는다.
           # ⚠️ absent 가지 없음(의도): 첫 배포 전 ALERTS 무이력 오발화 방지 — 시리즈가 있는데
           #   낡는 것이 이 룰의 표적이다.
@@ -87,7 +87,7 @@ data:
           # silence**를 합산한다(Alertmanager marker 의미론 — 리뷰 H5: 원인별 분해 게이지가 없어
           # expr로는 못 가른다) — 문구가 inhibit로 단정하면 유지보수 silence를 오귀속한다.
           # 억제 자체는 정상 동작이라 이 룰은 오류가 아니라 장기화의 관측이다(warning).
-          # ⚠️ 창 밀도 가드(리뷰 M3): min_over_time은 창을 **덮었는지** 요구하지 않는다 — 파드
+          # ⚠️ 창 밀도 가드: min_over_time은 창을 **덮었는지** 요구하지 않는다 — 파드
           #   재시작으로 시리즈가 갈리면 새 시리즈 30분 만에 "24시간 지속"을 참칭한다. 샘플 수
           #   하한(2400 ≈ 20h치 @30s 스크레이프)이 그 참칭과 장기 스크레이프 갭을 함께 막는다.
           - alert: AlertSuppressionProlonged

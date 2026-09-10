@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# TS 가드 실행 커널 guardMain(tools/lib/scan-floor.ts, lib-convergence 17 재접목)의 순서 계약 테스트.
+# TS 가드 실행 커널 guardMain(tools/lib/scan-floor.ts)의 순서 계약 테스트.
 # 순서가 곧 계약이다: 전 도메인 열거 → 전 floor 판정 → (전부 통과 시에만) SCAN 일괄 방출 →
 # 검사 → 종료코드. 콜사이트가 순서를 손으로 맞추던 시절의 실측 버그 2건(위반 exit가 마커보다
 # 앞 · 마커가 바닥값보다 앞)이 이 구조에서 표현 불가능함을 픽스처 가드로 고정한다.
@@ -250,7 +250,7 @@ EOF
 }
 
 @test "assertFloorKeys is a first-class contract for kernel-vocabulary-only consumers" {
-  # guardMain 밖 소비자(어휘만 소비·마커 미방출 — kernel-followups 05)의 fail-closed가 이 함수
+  # guardMain 밖 소비자(어휘만 소비·마커 미방출)의 fail-closed가 이 함수
   # 하나에 걸린다 — ScanError(2) throw(takeFloors와 같은 오류 규율, 종료·접두는 콜사이트 소유).
   run bun -e '
     import { ScanError, assertFloorKeys, takeFloors } from "'"$ROOT"'/tools/lib/scan-floor.ts";

@@ -81,5 +81,7 @@ if [ -n "$SERVER" ]; then
   grep -qF "server: ${SERVER}" "$FILE" || fail "server 재작성 실패 — ${SERVER}: $FILE"
 fi
 
-srv="$(sed -n 's/^    server: //p' "$FILE" | head -1)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d):
+# writer(sed)가 첫 매치에서 q로 끝내 파이프 자체를 없앤다. 매치 0건이면 빈 출력·rc 0으로 종전과 같다.
+srv="$(sed -n '/^    server: /{s/^    server: //p;q;}' "$FILE")"
 echo "==> kubeconfig 정체성 각인 완료: name=${NAME} server=${srv:-<없음>} ($FILE)"

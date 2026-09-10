@@ -3,7 +3,7 @@
 # (A) 읽기와 쓰기로 갈려 있는지, (B) (CI에서 main으로 들어갈 때) 라이브가 기대하는 값인지 강제한다.
 #
 # 왜: `serverName` **한 줄**이 `s3://<bucket>/<serverName>/{base,wals}/`를 통째로 정한다.
-# 두 primary(라이브 Mac + NUC)가 같은 값을 쓰면 타임라인이 섞여 오프사이트 PITR 경로가 망가지고,
+# 두 primary(컷오버 시기의 Mac + NUC처럼)가 같은 값을 쓰면 타임라인이 섞여 오프사이트 PITR 경로가 망가지고,
 # R2에 버저닝이 없어(`infra/cloudflare/r2.tf`) **되돌릴 수 없다**(계획서 §3.4의 ❌ 항목).
 # ObjectStore CRD는 `serverName`을 CEL로 금지하므로 분리 지점은 Cluster의 plugin parameter뿐이다.
 #
@@ -13,10 +13,11 @@
 #   (B) 고정  — 쓰기 serverName이 `EXPECT_PG_SERVERNAME`과 일치. env가 비면 **건너뛴다**.
 # (B)를 기본으로 켜면 마이그레이션 브랜치의 gate가 영구 red가 된다 — ci.yaml이 main 진입 시에만 채운다.
 #
-# ⚠️ **컷오버 때 이 가드가 강제로 알려준다.** Mac이 살아 있는 동안 `pg-nuc`가 main에 들어가면
-#    Mac의 ArgoCD가 selfHeal로 라이브 Cluster의 아카이브를 갈아탄다 — 체인이 그 자리에서 갈라진다.
-#    컷오버 시점에는 ci.yaml의 기대값을 `pg-nuc`로 바꾸는 **같은 PR**이어야 통과한다.
-#    지금 이걸 막고 있는 것은 `check-argocd-revision.sh`의 부수효과일 뿐 설계된 방어가 아니었다.
+# ⚠️ **컷오버 때 이 가드가 강제로 알려줬다.** 옛 클러스터가 살아 있는 동안 `pg-nuc`가 main에
+#    들어가면 그쪽 ArgoCD가 selfHeal로 라이브 Cluster의 아카이브를 갈아탄다 — 체인이 그 자리에서
+#    갈라진다. 그래서 컷오버는 ci.yaml의 기대값을 `pg-nuc`로 바꾸는 **같은 PR**이어야 통과했고,
+#    다음 컷오버(재구축·이전)에서도 같은 규약이다. 그 전까지 이걸 막고 있던 것은
+#    `check-argocd-revision.sh`의 부수효과일 뿐 설계된 방어가 아니었다.
 #
 # yq(mikefarah) 필요. bash 3.2 호환. shellcheck clean.
 set -euo pipefail

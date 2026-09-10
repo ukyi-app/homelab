@@ -16,10 +16,34 @@ cli_stub_init() {
   mkdir -p "$STUB"
   export CALLS="$BATS_TEST_TMPDIR/calls.nul"
   : > "$CALLS"
+  # git 전역/시스템 설정 격리 — 이 하네스의 픽스처(신원·insteadOf)는 전부 **로컬** config로 심는데,
+  # 엔진의 git 호출(commit·push·ls-remote·remote get-url)은 호스트 전역 설정도 함께 읽는다. 호스트에
+  # commit.gpgsign=true(키 없음)면 커밋 경로가, 전역 url.*.insteadOf가 있으면 push 라우팅 판정이
+  # 하네스 재배선이 아니라 **호스트 설정** 때문에 뒤집힌다(테스트가 자기 전제를 잘못 읽는다).
+  # 형제 appinit 하네스는 자기 GIT_CONFIG_GLOBAL(INIT_GCFG)을 run env로 명시해 넘기므로 그쪽이 이긴다.
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+  # 전역 설치 축 격리 — doctor의 install 항목은 `$BUN_INSTALL/bin`(미설정이면 `~/.bun/bin`)에서
+  # `homelab` 엔트리를 찾는다. 격리하지 않으면 판정이 **개발자 머신 상태**에 종속된다: 이 호스트의
+  # `~/.bun/bin/homelab`은 삭제된 worktree를 가리키는 dangling 심링크라(2026-09-07 실측) doctor가
+  # fail을 내고, CI에서는 부재라 warn이 난다 — 같은 커밋이 venue마다 다른 색이 되는 자리다.
+  # 빈 디렉토리를 기본값으로 주고, 설치 상태를 재는 테스트만 여기에 엔트리를 심는다.
+  export BUN_INSTALL="$BATS_TEST_TMPDIR/bun-install"
+  mkdir -p "$BUN_INSTALL/bin"
   BUN="$(command -v bun)"
-  for t in bun bash base64 cat git; do
+  # sleep — 디스패치 타임아웃 주입(STUB_GH_DISPATCH_HANG)이 자식을 살아 있게 두는 유일한 수단이다
+  # (PATH는 대체라 시스템 도구가 자동으로 들어오지 않는다).
+  # jq는 raw 형상 레인(STUB_GH_RAW=1) 전용이다 — 그 레인에서만 gh stub이 **실제 jq**를 돌린다.
+  # 부재 시 조용한 통과가 아니라 exit 127로 죽어야 해서(test_homelab-gh-jq-contract.bats가 단언),
+  # 스텁 본체는 폴백을 두지 않는다.
+  for t in bun bash base64 cat git sleep jq; do
     ln -s "$(command -v "$t")" "$STUB/$t"
   done
+
+  # 원시 GitHub 페이로드 픽스처 — 접힘이 있는 필터(workflow_runs 언랩 · head.ref 중첩 ·
+  # auto_merge != null)의 의미론 증인. 손으로 적은 형상이 SSOT이고, 테스트는 사본을 뮤테이션해
+  # 필드 리네임이 red가 되는지 잰다(GH_RAW_DIR를 그 사본으로 가리켜서).
+  GH_RAW_DIR="$BATS_TEST_DIRNAME/fixtures/homelab/gh-raw"
+  export GH_RAW_DIR
 
   # 템플릿 컨텐츠 픽스처 — 기본값은 "호환 템플릿"(비대화형 마커 + 컴파일 3종 TARGETARCH).
   # 비호환 시나리오는 각 테스트가 파일을 덮어써서 만든다.
@@ -38,8 +62,31 @@ cli_stub_init() {
   # db create 픽스처 기본값(행복 경로): 디스패치 접수 → nonce 에코 run 1개(성공) → PR 1개(미머지).
   printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/db-runs.json"
   printf '{"status":"completed","conclusion":"success","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run.json"
+  # 전이 전 관측 — STUB_RUN_COMPLETE_AFTER_FIRST일 때 **첫** 단건 run 조회의 응답.
+  # 라이브의 기본 경로(queued/in_progress → completed)를 재현하는 자리로, 둘째 조회부터는 db-run.json.
+  printf '{"status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}\n' > "$FIX/db-run-first.json"
   printf '[]\n' > "$FIX/db-run-jobs.json"
-  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null}]\n' > "$FIX/db-prs.json"
+  # 신선도 스냅샷 픽스처 — STUB_GH_STALE_RUN=1 전용. **디스패치 전에 이미** 같은 nonce를
+  # 에코하던 옛 완료 run이다(고정 nonce가 프로덕션에서 켜졌을 때의 형상). 투영이 스냅샷 질의와
+  # 같아야 한다: 신원(id·name) + status·html_url — 뒤 둘은 같은 질의의 두 번째 소비자(변이 엔진의
+  # run 축 preflight)가 읽는 축이라, 여기서 빠지면 그 축이 미판정으로 눈을 감는다.
+  # 이 행은 **완료된** 옛 run이다 — 그래서 run 축은 물지 않고 신선도 배제만 걸린다.
+  printf '[{"id":501,"name":"✨ create-database — mydb [%s]","status":"completed","html_url":"https://github.com/ukyi-app/homelab/actions/runs/501"}]\n' "$NONCE" > "$FIX/stale-runs.json"
+  # ⚠️ `state`·`head_sha`는 **기본값**이다 — 실물 응답은 항상 싣고, 없으면 엔진의
+  # required check 관측이 좌표 부재로 눈을 감는다(그 상태 자체가 pendingReason 접미로 보고된다).
+  printf '[{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"open","head_sha":"c0ffee1"}]\n' > "$FIX/db-prs.json"
+  # PR 단건 권위 조회 — 목록이 state:closed·미머지일 때만 읽힌다(확증 단계). 기본은 목록과
+  # 같은 결론(closed·미머지)이고, stale 레인은 테스트가 merged_at을 채운 사본으로 덮어쓴다.
+  # head_sha가 여기에도 있어야 한다 — 조기 종결은 목록 스냅샷의 좌표를 이 단건 응답으로 확증한 뒤에만
+  # 종결한다. 값이 어긋난 사본은 각 테스트가 덮어써서 만든다.
+  printf '{"number":21,"html_url":"https://github.com/ukyi-app/homelab/pull/21","merged_at":null,"merge_commit_sha":null,"state":"closed","head_sha":"c0ffee1"}\n' > "$FIX/pr-confirm.json"
+  # required check(gate) check-run 목록 — 머지 폴링이 조기 종결 여부를 재는 축.
+  # 기본은 **진행 중 1건**이다: PR이 열리면 gate는 곧바로 큐에 들어가므로 '머지 대기'의 정상 형상이
+  # 이것이고, 판정은 pending(종전 경로)이라 모든 --wait 레인이 종전과 같은 색이다.
+  # ⚠️ 기본을 공집합으로 두지 않는 이유: 0건은 이제 **관측 불가**의 한 형태다(이름 드리프트와
+  #   구별되지 않는다) — 그 상태가 pendingReason 접미로 보고되므로, 기본값으로 두면 무관한 레인의
+  #   문구가 전부 그 접미를 달게 된다. 0건·실패·재실행 시나리오는 각 테스트가 이 파일을 덮어써서 만든다.
+  printf '[{"id":9000,"name":"gate","status":"in_progress","conclusion":null,"html_url":"https://github.com/ukyi-app/homelab/runs/9000","started_at":"2026-09-08T00:50:00Z"}]\n' > "$FIX/gate-checks.json"
   printf 'identical\n' > "$FIX/db-compare.txt"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-cnpg-data.json"
   printf '{"status":{"sync":{"status":"Synced","revision":"feedbee"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-data-conn.json"
@@ -63,7 +110,16 @@ cli_stub_init() {
   printf '[]\n' > "$FIX/runs.json"
   printf '{"name":"release","status":"completed","conclusion":"success","head_sha":"a1b2c3d","html_url":"https://github.com/ukyi-app/page/actions/runs/1"}\n' > "$FIX/run-handle.json"
   printf '{"number":7,"state":"open","merged":false,"merge_commit_sha":null,"title":"bump","head_ref":"bump-poll/page-sha-1","head_sha":"beef123","auto_merge":true,"html_url":"https://github.com/ukyi-app/homelab/pull/7"}\n' > "$FIX/pr-handle.json"
-  printf '{"status":{"sync":{"status":"Synced","revision":"abc1234"},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
+  # ⚠️ 앱 Application(<app>-prod)은 appset(platform/argocd/root/appset.yaml `sources:` 3개)이 만드는
+  # **멀티소스**다 — ArgoCD는 멀티소스에서 `status.sync.revision`을 비우고 `revisions[]`만 채운다
+  # (라이브 실측: argocd·cnpg-operator `revision=None`, `revisions=[…]`). 그래서 app 레인 기본 픽스처는
+  # 복수형이고 `revision` 키가 **없다**. 원소 3개는 appset sources 수에서 외삽한 값이다(라이브 앱 0건).
+  # 단일소스 형상(argocd-cnpg-data·data-conn·cache)은 db/cache 레인 대조군으로 그대로 둔다 — 둘 중 하나로
+  # 통일하면 다른 쪽 판정이 무증인이 된다.
+  # 리비전 자리표시자는 어디서든 **git SHA 형상(hex 7..40)**이어야 한다 — 공유 리더(lib/argocd.ts)가 비-SHA를
+  # 미확정으로 접어 gh compare를 부르지 않으므로, 비-hex 자리표시자(옛 afterme·0ldrev1)는 compare 경로 증인을
+  # 조용히 우회시킨다(실측).
+  printf '{"status":{"sync":{"status":"Synced","revisions":["abc1234","abc1234","abc1234"]},"health":{"status":"Healthy"}}}\n' > "$FIX/argocd-app.json"
 
   # 앱 배포 산출물 픽스처 루트 — status의 --root 주입 대상(레포 밖 hermetic 검증).
   APPS_ROOT="$BATS_TEST_TMPDIR/repo-root"
@@ -72,7 +128,8 @@ cli_stub_init() {
 
   # 원장 파서 — NUL/RS 레코드를 배열로 복원해 질의한다. 모드:
   #   count <argv...>  : 접두 일치 레코드 수
-  #   gh-readonly      : 모든 gh 레코드가 `gh api` + 변이 수단 없음인지 (위반 시 비-0)
+  #   observation-only : 모든 gh 레코드가 읽기(`gh api`/`gh --version`)이고 변이 수단이 없으며,
+  #                      모든 git 레코드가 읽기 동사(`var`·`rev-parse`·`config --get*`)인지 (위반 시 비-0)
   #   dump             : 사람용 — argc + 따옴표 표기
   LEDGER_PY="$BATS_TEST_TMPDIR/ledger.py"
   cat > "$LEDGER_PY" <<'PY'
@@ -99,10 +156,29 @@ if mode == "count":
     print(sum(1 for r in records if is_prefix(r, want)))
 elif mode == "exact":  # argc + 각 위치 문자열이 모두 같은 레코드가 있는가(인자 경계 보존 단언)
     sys.exit(0 if any(r == want for r in records) else 1)
-elif mode == "gh-readonly":
-    # doctor는 관측 전용 — 모든 gh 레코드는 `gh api`이고 변이 수단이 없어야 한다.
+elif mode == "observation-only":
+    # doctor·status는 관측 전용 — gh 레코드는 읽기(`gh api` 또는 `gh --version`)이고 변이 수단이 없어야
+    # 하며, git 레코드는 읽기 동사(`var` · `rev-parse` · `config --get*`)뿐이어야 한다. git 계열도
+    # exec seam을 지나므로 gh만 보면 "관측 전용"이 gh 축에서만 참인 반쪽 단언이 된다.
     MUTATION = {"-X", "--method", "-f", "-F", "--field", "--raw-field", "--input"}
-    bad = [r for r in records if r[:1] == ["gh"] and (r[1:2] != ["api"] or set(r) & MUTATION)]
+    GH_READ_HEADS = (["api"], ["--version"])
+
+    def git_read(rec):
+        # `git -C <dir> …`(exec seam의 named adapter 형태)는 동사 앞의 위치 지정일 뿐이라 벗겨 낸다.
+        args = rec[1:]
+        if args[:1] == ["-C"]:
+            args = args[2:]
+        head = args[:1]
+        if head in (["var"], ["rev-parse"]):
+            return True
+        return head == ["config"] and len(args) > 1 and args[1].startswith("--get")
+
+    bad = []
+    for r in records:
+        if r[:1] == ["gh"] and (r[1:2] not in GH_READ_HEADS or set(r) & MUTATION):
+            bad.append(r)
+        elif r[:1] == ["git"] and not git_read(r):
+            bad.append(r)
     for r in bad:
         print("MUTATION-SHAPED: " + " ".join(r))
     sys.exit(1 if bad else 0)
@@ -119,17 +195,64 @@ PY
 # 임의 owner/repo URL을 정당한 입력으로 받는 계약이라(좁히면 계약을 거짓으로 검증) 의도적 비대칭.
 # 응답은 STUB_* env로 제어: STUB_GH_UNAUTH / STUB_LOGIN / STUB_SCOPES / STUB_NO_SCOPES_HEADER /
 # STUB_OWNER / STUB_OWNER_404 / STUB_IS_TEMPLATE / STUB_GH_PRS_FAIL / STUB_GH_RUNS_FAIL /
-# STUB_GH_HANDLE_404. 템플릿 파일·status 응답 내용은 $FIX 픽스처가 SSOT.
+# STUB_GH_SNAPSHOT_FAIL /
+# STUB_GH_HANDLE_404 / STUB_GH_NONJSON / STUB_GH_RAW / STUB_GH_HTTP_ERR / STUB_GH_VERSION / STUB_PR_CONFIRM_FAIL / STUB_GH_DISPATCH_HANG / 변이 폴링 실패
+# 3종(STUB_GH_RUNS_LIST_FAIL · STUB_GH_RUN_READ_FAIL · STUB_GH_PR_LIST_FAIL_AFTER_FIRST) / 변이 분기
+# 픽스처 2종(STUB_RUN_COMPLETE_AFTER_FIRST · STUB_GH_PR_LOOKUP_FAIL) / required check 조회 실패
+# (STUB_GATE_READ_FAIL — fail-open 증인) / 신선도 스냅샷
+# (STUB_GH_STALE_RUN — 디스패치 전에 이미 같은 nonce를 에코하던 옛 run). 템플릿 파일·status 응답
+# 내용은 $FIX 픽스처가 SSOT.
+#
+# ⚠️ 기본 픽스처는 jq를 **적용한 뒤의** 형상이다 — 손으로 접어 적은 결과라 필터의 의미론
+#    (`.workflow_runs[]` 언랩 · `head: .head.ref` 중첩 · `auto_merge != null` 접힘)은 증언하지 못한다.
+#    case 패턴은 필터 **텍스트**까지 정확 일치라 드리프트를 exit 3으로 잡지만, GitHub 필드 리네임은
+#    접힌 픽스처 아래에서 여전히 초록이다. 그 축은 STUB_GH_RAW=1 레인이 진다: 원시 페이로드
+#    ($GH_RAW_DIR/*.json)에 **실제 jq**를 돌린다(tools/tests/test_homelab-gh-jq-contract.bats).
 make_gh_stub() {
   cat > "$STUB/gh" <<'SH'
 #!/usr/bin/env bash
 { printf '%s\0' gh "$@"; printf '\x1e'; } >> "$CALLS"
 b64() { base64 < "$1"; }
+# 변이 레인 폴링 실패 주입 — `workflow run`은 exit 0인데 이후 **관측** 조회만 비-0이 된다.
+# status 경로 전용인 STUB_GH_RUNS_FAIL을 재사용하면 이 레인이 vacuous라서 전용 노브를 둔다.
+# 본 case보다 **앞**에 있는 별도 case다: 본 case 안에 글롭을 끼우면 첫 매치가 이겨 디스패처별
+# 픽스처 케이스가 사문이 된다(bash case는 fallthrough가 없다 — `;;&`는 bash 4+).
 case "$*" in
+  "api repos/ukyi-app/homelab/actions/workflows/"*"/runs?per_page=20 --jq "*)
+    if [ -n "${STUB_GH_RUNS_LIST_FAIL:-}" ]; then echo "gh: HTTP 401: Bad credentials" >&2; exit 1; fi
+    ;;
+esac
+# 디스패치 지연 주입 — 자식이 살아 있는 동안 호출자의 timeoutMs가 만료돼 SIGTERM으로
+# 죽는 상황을 만든다(POST 도달 여부는 미상). 부분 stderr를 먼저 흘려 seam의 보존도 함께 관측된다.
+# 본 case **앞**의 별도 case다(bash case는 fallthrough가 없다 — 본 case에 끼우면 디스패처별
+# 픽스처 케이스가 사문이 된다). 원장 기록은 이 지연보다 앞이라 '정확히 1건'이 그대로 관측된다.
+case "$*" in
+  "workflow run "*)
+    if [ -n "${STUB_GH_DISPATCH_HANG:-}" ]; then echo "gh: 요청 전송 중" >&2; sleep 5; fi
+    ;;
+esac
+case "$*" in
+  # gh 버전 — 코드에 박힌 gh 문구 계약(`(HTTP 404)` stderr · `workflow run -f` · `api --jq`)의 전제.
+  # STUB_GH_VERSION으로 구버전 레인을 만든다(기본은 계약 최소 버전 이상).
+  "--version")
+    printf 'gh version %s (2026-08-01)\n' "${STUB_GH_VERSION:-2.97.0}"
+    printf 'https://github.com/cli/cli/releases/latest\n'
+    ;;
   "api -i user")
     if [ -n "${STUB_GH_UNAUTH:-}" ]; then
       echo "gh: To get started with GitHub CLI, please run:  gh auth login" >&2
       exit 4
+    fi
+    # STUB_GH_HTTP_ERR — **서버가 응답한** 실패(401·403 rate limit 소진·권한). `gh api -i`는 비-2xx에서도
+    # 상태줄+헤더를 stdout에 그대로 낸다(라이브 실측: 404 조회 → stdout 첫 줄 `HTTP/2.0 404 Not Found`).
+    # 그 형상이 '자격 부재(rc 4·stdout 공백)'와 이 레인을 가르는 유일한 원료다.
+    if [ -n "${STUB_GH_HTTP_ERR:-}" ]; then
+      printf 'HTTP/2.0 401 Unauthorized\r\n'
+      printf 'X-Ratelimit-Limit: 5000\r\n'
+      printf 'X-Ratelimit-Remaining: 0\r\n'
+      printf '\r\n'
+      echo "gh: Bad credentials (HTTP 401)" >&2
+      exit 1
     fi
     printf 'HTTP/2.0 200 OK\r\n'
     if [ -z "${STUB_NO_SCOPES_HEADER:-}" ]; then
@@ -162,50 +285,86 @@ case "$*" in
   "api repos/ukyi-app/homelab-app-template/contents/scaffold/archetypes/worker/Dockerfile --jq .content")
     b64 "$FIX/Dockerfile.worker"
     ;;
+  # ── app create 사전 판정 — 앱 레포 main의 .app-config.yml 실존. 기본은 200이고
+  # STUB_APP_CONFIG_404(사전 거부 대상)·STUB_APP_CONFIG_ERR(판정 불가 → 통과 후 디스패처 위임)로 가른다.
+  "api repos/ukyi-app/"*"/contents/.app-config.yml?ref=main --jq .name")
+    if [ -n "${STUB_APP_CONFIG_404:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    if [ -n "${STUB_APP_CONFIG_ERR:-}" ]; then echo "gh: HTTP 502: Bad gateway" >&2; exit 1; fi
+    printf '.app-config.yml\n'
+    ;;
+  # ── 신선도 스냅샷 — 변이 엔진이 **디스패치 전에** 내는 질의. 5레인 공통이라 경로만
+  #    글롭이다(응답이 레인 무관하다 — 형제 케이스들과 달리 픽스처가 하나뿐인 이유).
+  #    기본은 공집합: 프로덕션의 랜덤 nonce 경로가 그렇고, 이 하네스의 고정 nonce 픽스처(run이
+  #    처음부터 있다)를 '디스패치 전에도 있었다'로 읽으면 모든 레인이 채택 불가가 된다.
+  #    STUB_GH_STALE_RUN=1이면 같은 nonce를 에코하는 **옛** run을 돌려준다(채택 금지 증인).
+  "api repos/ukyi-app/homelab/actions/workflows/"*"/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, html_url}]')
+    # STUB_GH_SNAPSHOT_FAIL: 스냅샷 질의만 전송 오류 — 신선도 배제와 run 축 preflight가 함께
+    # 눈을 감는 상(fail-open)의 증인. STUB_GH_RUNS_FAIL(status 동사의 runs 목록)과 이름을
+    # 의도적으로 분리한다 — 재사용하면 어느 레인이 죽었는지 못 가른다.
+    if [ -n "${STUB_GH_SNAPSHOT_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
+    if [ -n "${STUB_GH_STALE_RUN:-}" ]; then cat "$FIX/stale-runs.json"; else echo '[]'; fi
+    ;;
   # ── app create 케이스 — create-app 디스패처·runs 목록(수동 머지 동사) ──
   "workflow run create-app.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
     ;;
-  "api repos/ukyi-app/homelab/actions/workflows/create-app.yaml/runs?per_page=20 --jq "*)
+  "api repos/ukyi-app/homelab/actions/workflows/create-app.yaml/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, conclusion, html_url}]')
     cat "$FIX/appcreate-runs.json"
     ;;
   # ── app teardown 케이스 — teardown-app 디스패처·runs 목록(수동 머지 = 파괴 승인) ──
   "workflow run teardown-app.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
     ;;
-  "api repos/ukyi-app/homelab/actions/workflows/teardown-app.yaml/runs?per_page=20 --jq "*)
+  "api repos/ukyi-app/homelab/actions/workflows/teardown-app.yaml/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, conclusion, html_url}]')
     cat "$FIX/teardown-runs.json"
     ;;
   # ── app secrets 케이스 — update-secrets 디스패처·runs 목록 ──
   "workflow run update-secrets.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
     ;;
-  "api repos/ukyi-app/homelab/actions/workflows/update-secrets.yaml/runs?per_page=20 --jq "*)
+  "api repos/ukyi-app/homelab/actions/workflows/update-secrets.yaml/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, conclusion, html_url}]')
     cat "$FIX/secrets-runs.json"
     ;;
   # ── cache create 케이스 — db와 같은 엔진, 디스패처·runs 목록만 cache 것 ──
   "workflow run create-cache.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
     ;;
-  "api repos/ukyi-app/homelab/actions/workflows/create-cache.yaml/runs?per_page=20 --jq "*)
+  "api repos/ukyi-app/homelab/actions/workflows/create-cache.yaml/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, conclusion, html_url}]')
     cat "$FIX/cache-runs.json"
     ;;
   # ── db create 변이 엔진 케이스 — 유일하게 허용되는 변이 argv는 workflow run 하나뿐 ──
   "workflow run create-database.yaml -R ukyi-app/homelab "*)
     if [ -n "${STUB_GH_DISPATCH_FAIL:-}" ]; then echo "gh: workflow dispatch 실패" >&2; exit 1; fi
     ;;
-  "api repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20 --jq "*)
+  "api repos/ukyi-app/homelab/actions/workflows/create-database.yaml/runs?per_page=20 --jq "'[.workflow_runs[] | {id, name, status, conclusion, html_url}]')
     cat "$FIX/db-runs.json"
     ;;
-  "api repos/ukyi-app/homelab/actions/runs/"*"/jobs --jq "*)
+  "api repos/ukyi-app/homelab/actions/runs/"*"/jobs --jq "'[.jobs[] | select(.conclusion == "failure") | .name]')
     cat "$FIX/db-run-jobs.json"
     ;;
   "api repos/ukyi-app/homelab/actions/runs/"*" --jq {status, conclusion, html_url}")
+    # STUB_GH_RUN_READ_FAIL: conclusion 폴링 루프의 관측만 전부 전송 오류.
+    if [ -n "${STUB_GH_RUN_READ_FAIL:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
+    # STUB_RUN_COMPLETE_AFTER_FIRST: 첫 조회는 db-run-first.json(전이 전), 이후 db-run.json.
+    # 라이브의 **기본 경로**(queued→in_progress→completed)를 밟는 유일한 자리 — 마커는 셸 내장
+    # 리다이렉션이다(PATH=$STUB에 touch가 없다, STUB_PR_MERGE_AFTER_FIRST와 같은 관용구).
+    if [ -n "${STUB_RUN_COMPLETE_AFTER_FIRST:-}" ] && [ ! -f "$FIX/.run-read-once" ]; then
+      : > "$FIX/.run-read-once"; cat "$FIX/db-run-first.json"; exit 0
+    fi
     cat "$FIX/db-run.json"
     ;;
-  "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "*)
+  # 필터 텍스트 SSOT는 lib/lane-pr.ts의 LANE_PR_JQ(= `[.[] | ${LANE_PR_FIELDS}]`)다 — 종결 축으로
+  # `state`를 더하면서 목록형·단건형이 같은 투영을 공유하게 됐다.
+  "api repos/ukyi-app/homelab/pulls?state=all&head="*" --jq "'[.[] | {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}]')
     # STUB_PR_MERGE_AFTER_FIRST: 첫 조회는 미머지, 이후 머지 — "--wait 중 사람이 머지" 전환 재현
     # (마커는 셸 내장 리다이렉션 — PATH=$STUB에 touch 없음, STUB_COMPARE_FLAKY와 같은 관용구).
+    # STUB_GH_PR_LOOKUP_FAIL: PR 특정 조회가 **전부** 전송 오류 — grace 재시도를 다 쓰고도
+    # 미확정이면 '명명 드리프트'가 아니라 GitHub 계층 실패다. status의 열린 PR 목록 전용인
+    # STUB_GH_PRS_FAIL과 이름을 의도적으로 분리한다(재사용하면 어느 레인이 죽었는지 못 가른다).
+    # 원시 페이로드 레인 — `head_sha: .head.sha` 중첩이 접힌 픽스처에서는 무증인이다
+    # (스텁이 jq를 적용하지 않으므로 필드가 사라져도 초록). 이 레인만 **실제 jq**를 돌린다.
+    if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/lane-pulls.json"; fi
+    if [ -n "${STUB_GH_PR_LOOKUP_FAIL:-}" ]; then echo "gh: HTTP 502: Bad Gateway" >&2; exit 1; fi
     if [ -n "${STUB_PR_MERGE_AFTER_FIRST:-}" ]; then
       if [ ! -f "$FIX/.pr-read-once" ]; then
         : > "$FIX/.pr-read-once"
@@ -213,7 +372,44 @@ case "$*" in
         exit 0
       fi
     fi
+    # STUB_PR_EMPTY_FIRST: 첫 조회는 [](낡은/빈 스냅샷 — 함정 「GitHub API는 낡은 스냅샷을 200으로 돌려준다」),
+    # 이후 db-prs.json. STUB_PR_FAIL_FIRST: 첫 조회는 전송 오류(exit 1), 이후 정상. 둘 다 PR 특정의 3상
+    # 재조회 증인 — 단발 즉결이면 각각 거짓 failure/no-op·거짓 failure가 된다.
+    if [ -n "${STUB_PR_EMPTY_FIRST:-}" ] && [ ! -f "$FIX/.pr-empty-once" ]; then
+      : > "$FIX/.pr-empty-once"; printf '[]\n'; exit 0
+    fi
+    if [ -n "${STUB_PR_FAIL_FIRST:-}" ] && [ ! -f "$FIX/.pr-fail-once" ]; then
+      : > "$FIX/.pr-fail-once"; echo "gh: connect: connection reset" >&2; exit 1
+    fi
+    # STUB_GH_PR_LIST_FAIL_AFTER_FIRST: 첫 조회(step 4 PR 특정)만 정상, 이후 머지 폴링은
+    # 전부 전송 오류 — 지속 실패가 '머지 미관측'으로 위장되는 자리를 만든다.
+    if [ -n "${STUB_GH_PR_LIST_FAIL_AFTER_FIRST:-}" ]; then
+      if [ -f "$FIX/.pr-list-once" ]; then echo "gh: HTTP 403: rate limit exceeded" >&2; exit 1; fi
+      : > "$FIX/.pr-list-once"
+    fi
+    # 브랜치별 응답 — 실물 API의 `head=<owner>:<branch>` **정확 일치**를 스텁도 흉내낸다.
+    # 파일명은 브랜치의 '/'를 '_'로 바꾼 `$FIX/prs-head-<branch>.json`이고, 없으면 기존 db-prs.json이
+    # 그대로 쓰인다(기존 레인 무영향). ⚠️ 치환은 셸 파라미터 확장으로만 — PATH=$STUB에 tr/sed가 없다.
+    hr="${2#*head=ukyi-app:}"
+    alt="$FIX/prs-head-${hr//\//_}.json"
+    if [ -f "$alt" ]; then cat "$alt"; exit 0; fi
     cat "$FIX/db-prs.json"
+    ;;
+  # PR 단건 권위 조회 — 머지 없이 닫힌 목록 행의 확증 단계. status의 핸들 조회와 같은
+  # 경로 형상이라 **jq 투영으로 구별**한다(status는 {number, state, merged, …}). STUB_PR_CONFIRM_FAIL이면
+  # 전송 오류 — 확증이 미확정이면 엔진은 종결하지 않고 폴링을 계속한다.
+  "api repos/ukyi-app/homelab/pulls/"*" --jq {number, html_url, merged_at, merge_commit_sha, state, head_sha: .head.sha}")
+    # 원시 페이로드 레인 — 목록형과 **같은 투영 SSOT**(LANE_PR_FIELDS)라 중첩도 같다.
+    if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/lane-pull.json"; fi
+    if [ -n "${STUB_PR_CONFIRM_FAIL:-}" ]; then echo "gh: connect: connection reset" >&2; exit 1; fi
+    cat "$FIX/pr-confirm.json"
+    ;;
+  # required check(gate)의 check-run 목록 — PR **head SHA** 좌표라 경로 중간이 글롭이고,
+  # 질의 파라미터(check_name·filter=all·per_page)와 jq 투영은 정확 일치다(드리프트 = exit 3).
+  # STUB_GATE_READ_FAIL=1이면 전송 오류 — 엔진의 fail-open(종전 pending 경로 유지) 증인이다.
+  "api repos/ukyi-app/homelab/commits/"*"/check-runs?check_name=gate&filter=all&per_page=100 --jq "'[.check_runs[] | {id, name, status, conclusion, html_url, started_at}]')
+    if [ -n "${STUB_GATE_READ_FAIL:-}" ]; then echo "gh: HTTP 502: Bad Gateway" >&2; exit 1; fi
+    cat "$FIX/gate-checks.json"
     ;;
   "api repos/ukyi-app/homelab/compare/"*" --jq .status")
     # STUB_COMPARE_FLAKY: 첫 호출만 전송 오류 — 미확정 관측을 캐시하지 않음(재평가 수렴)을 증명.
@@ -256,21 +452,31 @@ case "$*" in
         ;;
     esac
     ;;
+  # ── 열린 PR 목록 — 소비자 둘이 같은 질의를 쓴다: status(머지 대기 레인)와 변이 엔진의
+  #    **중복 디스패치 preflight**(디스패치 전 관측). 그래서 STUB_GH_PRS_FAIL은 두 소비자의
+  #    극성을 함께 가른다 — status는 fail-loud(또는 사유를 실은 error), preflight는 fail-open이다.
+  #    기본 픽스처가 `[]`라 변이 레인들은 종전과 같은 색이다(중복 없음 = clear).
   # ── status 동사 케이스 — 응답 픽스처는 $FIX/*.json이 SSOT, 오류 시나리오는 STUB_* env ──
-  "api repos/ukyi-app/homelab/pulls?state=open&per_page=100 --jq "*)
+  "api repos/ukyi-app/homelab/pulls?state=open&per_page=100 --jq "'[.[] | {number, title, head: .head.ref, html_url, auto_merge: (.auto_merge != null)}]')
     if [ -n "${STUB_GH_PRS_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
+    if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/pulls-open.json"; fi
     cat "$FIX/homelab-prs.json"
     ;;
-  "api repos/"*"/actions/runs?per_page=3 --jq "*)
+  "api repos/"*"/actions/runs?per_page=3 --jq "'[.workflow_runs[] | {name, status, conclusion, head_sha, head_branch, event, html_url}]')
     if [ -n "${STUB_GH_RUNS_FAIL:-}" ]; then echo "gh: API 오류" >&2; exit 1; fi
+    if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/workflow-runs.json"; fi
     cat "$FIX/runs.json"
     ;;
-  "api repos/"*"/actions/runs/"*" --jq "*)
+  "api repos/"*"/actions/runs/"*" --jq "'{name, status, conclusion, head_sha, html_url}')
     if [ -n "${STUB_GH_HANDLE_404:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    # STUB_GH_NONJSON: rc 0인데 본문이 JSON이 아니다 — 스칼라 jq 오용·응답 형상 변경의
+    # 재현. 3상 리더의 'parse'가 이 레인을 '조회 실패'(전송 오류)와 갈라야 처방이 갈린다.
+    if [ -n "${STUB_GH_NONJSON:-}" ]; then printf 'not-json\n'; exit 0; fi
     cat "$FIX/run-handle.json"
     ;;
-  "api repos/"*"/pulls/"*" --jq "*)
+  "api repos/"*"/pulls/"*" --jq "'{number, state, merged, merge_commit_sha, title, head_ref: .head.ref, head_sha: .head.sha, auto_merge: (.auto_merge != null), html_url}')
     if [ -n "${STUB_GH_HANDLE_404:-}" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    if [ -n "${STUB_GH_RAW:-}" ]; then exec jq -c "${!#}" "$GH_RAW_DIR/pull.json"; fi
     cat "$FIX/pr-handle.json"
     ;;
   *)
@@ -283,18 +489,28 @@ SH
 }
 
 # kubectl stub — status의 ArgoCD Application 조회 전용(그 외 호출은 exit 3 fail-closed).
-# STUB_KUBECTL_FAIL 설정 시 클러스터 접근 실패를 재현한다.
+# STUB_KUBECTL_FAIL 설정 시 클러스터 접근 실패를 재현한다. STUB_APP_STILL_PRESENT(teardown 레인) ·
+# STUB_APP_ABSENT(status 레인)가 `--ignore-not-found` 조회의 기본값을 뒤집는다(아래 두 케이스 주석).
 make_kubectl_stub() {
   cat > "$STUB/kubectl" <<'SH'
 #!/usr/bin/env bash
 { printf '%s\0' kubectl "$@"; printf '\x1e'; } >> "$CALLS"
 case "$*" in
-  # 부재 조회(absence 수렴 — teardown) : --ignore-not-found가 부재를 exit 0 + 빈 stdout으로 만든다.
-  # 기본 = 부재(prune 완료). STUB_APP_STILL_PRESENT=1이면 존재(prune 미완), STUB_KUBECTL_FAIL이면 미확정.
-  # 이 케이스는 존재 조회 패턴보다 **앞**에 있어야 한다(뒤에 두면 `-o json`으로 끝나는 패턴이 선점).
-  "-n argocd get applications.argoproj.io "*" -o json --ignore-not-found")
+  # 부재 조회(--ignore-not-found = 부재를 exit 0 + 빈 stdout으로) — 소비자가 **둘**이다:
+  # teardown의 absence 수렴(mutation)과 status의 라이브 계층. 기본값을 한쪽으로 통일하면
+  # 다른 쪽 판정이 무증인이 된다 — 전부 부재로 두면 status의 live 테스트가 전건 red이고, 전부
+  # 존재로 두면 teardown의 '기본 = prune 완료' 종결 조건이 vacuous해진다. 그래서 **앱 이름으로 분기**한다.
+  #   teardown 대상(myapp-prod): 기본 부재. STUB_APP_STILL_PRESENT=1이면 존재(prune 미완).
+  #   그 외(status 레인의 앱):   기본 존재. STUB_APP_ABSENT=1이면 부재(생성 전/prune 완료 창).
+  # 두 케이스 모두 존재 조회 패턴보다 **앞**에 있어야 한다(뒤에 두면 `-o json`으로 끝나는 패턴이 선점).
+  "-n argocd get applications.argoproj.io myapp-prod -o json --ignore-not-found")
     if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
     if [ -n "${STUB_APP_STILL_PRESENT:-}" ]; then cat "$FIX/argocd-app.json"; fi
+    ;;
+  "-n argocd get applications.argoproj.io "*" -o json --ignore-not-found")
+    if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
+    if [ -n "${STUB_APP_ABSENT:-}" ]; then exit 0; fi
+    cat "$FIX/argocd-app.json"
     ;;
   "-n argocd get applications.argoproj.io cnpg-data -o json")
     if [ -n "${STUB_KUBECTL_FAIL:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
@@ -343,11 +559,53 @@ make_app_fixture() {
   if [ "$src" != "-" ]; then printf '%s\n' "$src" > "$d/source-repo"; fi
 }
 
+# 리소스 산출물 픽스처 — `status --resources`의 역방향 열거(resource-layout.classifyArtifact)가
+# 읽는 자리를 $APPS_ROOT 아래에 재현한다. 경로 형상의 SSOT는 lib/resource-layout.ts layoutFor이고
+# 여기는 그 **사본**이다 — 커널이 경로를 바꾸면 이 픽스처가 드리프트해 열거가 0건으로 붕괴하는데,
+# 그 붕괴는 소비 @test의 종류별 바닥값(db 2 · cache 1)이 잡는다(바닥값 없이 쓰면 vacuous green).
+# 사용: make_db_fixture <name> · make_cache_fixture <name>
+make_db_fixture() {
+  mkdir -p "$APPS_ROOT/platform/cnpg/prod/databases" "$APPS_ROOT/platform/data-conn/prod"
+  printf 'apiVersion: postgresql.cnpg.io/v1\nkind: Database\n' > "$APPS_ROOT/platform/cnpg/prod/databases/$1.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/cnpg/prod/databases/db-$1-owner.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/cnpg/prod/databases/db-$1-ro.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/db-$1-conn.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/db-$1-ro-conn.sealed.yaml"
+}
+
+make_cache_fixture() {
+  mkdir -p "$APPS_ROOT/platform/cache/prod/$1" "$APPS_ROOT/platform/data-conn/prod"
+  for f in configmap.yaml pvc.yaml deployment.yaml service.yaml acl.sealed.yaml kustomization.yaml; do
+    printf 'kind: X\n' > "$APPS_ROOT/platform/cache/prod/$1/$f"
+  done
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/cache-$1-conn.sealed.yaml"
+  printf 'kind: SealedSecret\n' > "$APPS_ROOT/platform/data-conn/prod/cache-$1-ro-conn.sealed.yaml"
+}
+
 # 메모리 원장 픽스처 행 — 형식 SSOT는 tools/lib/ledger-totals.ts LEDGER_ROW_RE.
-# 사용: make_ledger_row <name> <reqMi> <limitMi>
+# 사용: make_ledger_row <name> <reqMi> <limitMi> [env]
+# ⚠️ env를 인자로 연 이유: 2열을 `prod`로 하드코딩하면 「조인이 env를 본다」는 판정이 **구조적으로**
+#    무증인이 된다(모든 픽스처 행이 prod라 조건이 항상 참). 실 원장의 platform 행은 손 편집으로
+#    들어와 namespace가 prod가 아닐 수 있고, 그 행이 파일 순서상 앱 행보다 앞선다.
 make_ledger_row() {
   mkdir -p "$APPS_ROOT/docs"
-  printf '| <!-- ledger:row --> %s | prod | %s | %s |\n' "$1" "$2" "$3" >> "$APPS_ROOT/docs/memory-ledger.md"
+  printf '| <!-- ledger:row --> %s | %s | %s | %s |\n' "$1" "${4:-prod}" "$2" "$3" >> "$APPS_ROOT/docs/memory-ledger.md"
+}
+
+# git 기록 래퍼 — doctor의 git 계열 관측(`var GIT_COMMITTER_IDENT` · `config --get-urlmatch …`)을
+# 공용 원장에 남긴다(cli_stub_init의 심링크를 덮어쓴다). 실물 git으로 exec 위임하는 이유는 판정이
+# **실제 git 의미론**이어야 하기 때문이다 — `git var`의 IDENT_STRICT(신원 미설정 = 비-0)를 흉내내면
+# 그 흉내가 계약이 되고 라이브에서 어긋난다. 관측 전용 원장 판정(observation-only)의 원료이기도 하다.
+# ⚠️ cli_stub_init 뒤에 부른다(심링크가 먼저 생겨야 덮어쓸 자리가 있다).
+make_git_stub() {
+  git_real="$(command -v git)"
+  rm -f "$STUB/git"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '{ printf "%%s\\0" git "$@"; printf "\\x1e"; } >> "$CALLS"\n'
+    printf 'exec "%s" "$@"\n' "$git_real"
+  } > "$STUB/git"
+  chmod +x "$STUB/git"
 }
 
 # kubeseal 존재 시나리오 — doctor는 PATH 존재만 보므로(Bun.which) 실행되지 않지만,
@@ -374,7 +632,11 @@ make_app_repo_fixture() {
   APP_REMOTE="$BATS_TEST_TMPDIR/remote-$app.git"
   APP_WORK="$BATS_TEST_TMPDIR/work-$app"
   export APP_REMOTE APP_WORK
-  git init -q --bare "$APP_REMOTE"
+  # ⚠️ bare에도 `-b main`을 명시한다 — 전역 config 격리(GIT_CONFIG_GLOBAL=/dev/null) 아래에서는
+  # 호스트의 init.defaultBranch가 사라져 HEAD가 master로 잡힌다. 브랜치 main은 push로 생기므로
+  # 원격 조작(push·fetch)은 그대로 돌지만, 이 bare를 **클론**하는 레인만 조용히 죽는다
+  # (`remote HEAD refers to nonexistent ref` → 체크아웃 없음 → `src refspec main does not match any`).
+  git init -q -b main --bare "$APP_REMOTE"
   git init -q -b main "$APP_WORK"
   git -C "$APP_WORK" config user.name "fixture"
   git -C "$APP_WORK" config user.email "fixture@example.com"
@@ -387,6 +649,8 @@ make_app_repo_fixture() {
   # .env→deploy/<app>-secrets.sealed.yaml, 값 비출력)을 재현한다. 실물처럼 **비결정 암호문**을 낸다
   # (kubeseal은 같은 평문도 매번 다른 ciphertext) — "재봉인 후 동일성"에 기대는 경로는 여기서 죽는다.
   # 원장에는 도구명과 argv만 기록한다(값 없음).
+  # 실패 주입 env(연쇄 거부 분기의 증인): STUB_SEAL_FAIL=1(exit 1) ·
+  # STUB_SEAL_NO_OUTPUT=1(봉인본 미기록) · STUB_SEAL_FOREIGN=1(봉인본 **외** 파일도 기록).
   cat > "$APP_WORK/tools/seal-secret.mts" <<'TS'
 import { appendFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
@@ -394,8 +658,12 @@ const argv = process.argv.slice(2);
 appendFileSync(process.env.CALLS!, ["seal-secret", ...argv].join("\0") + "\0\x1e");
 const get = (k: string) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
 if (!get("--config") || !get("--env")) { console.error("seal-secret: --config <.app-config.yml> --env <.env> 필수"); process.exit(1); }
+if (process.env.STUB_SEAL_FAIL) { console.error("seal-secret: STUB_SEAL_FAIL"); process.exit(1); }
 const app = get("--app") ?? "unknown";
-writeFileSync(`deploy/${app}-secrets.sealed.yaml`, `apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nspec:\n  encryptedData:\n    SECRET_KEY: ct-${randomBytes(6).toString("hex")}\n`);
+if (process.env.STUB_SEAL_FOREIGN) writeFileSync("deploy/junk.yaml", "junk: 1\n");
+if (!process.env.STUB_SEAL_NO_OUTPUT) {
+  writeFileSync(`deploy/${app}-secrets.sealed.yaml`, `apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nspec:\n  encryptedData:\n    SECRET_KEY: ct-${randomBytes(6).toString("hex")}\n`);
+}
 TS
   git -C "$APP_WORK" add -A
   git -C "$APP_WORK" commit -q -m "init"
@@ -463,14 +731,19 @@ case "$*" in
     if [ -n "${STUB_GH_CREATE_FAIL:-}" ]; then echo "gh: repo create 실패" >&2; exit 1; fi
     app="${3#ukyi-app/}"
     git clone -q --bare "$INIT_REMOTES/homelab-app-template.git" "$INIT_REMOTES/$app.git"
+    # 서버 반영 **뒤** 클라이언트만 죽는 창 — bare는 만들어졌는데 gh는 비-0이다.
+    # STUB_GH_CREATE_FAIL(서버에도 미생성)과 갈리는 축이라 별도 노브다.
+    if [ -n "${STUB_GH_CREATE_FAIL_AFTER:-}" ]; then echo "gh: repo create — 서버 반영 후 클라이언트 실패" >&2; exit 1; fi
     ;;
   # 레포 존재 — bare 유무. 인자: $1=api $2=repos/ukyi-app/<app> $3=--jq $4=.name.
   "api repos/ukyi-app/"*" --jq .name")
     app="${2#repos/ukyi-app/}"
     if [ -d "$INIT_REMOTES/$app.git" ]; then printf '%s\n' "$app"; else echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
     ;;
-  # invocation marker — bare main의 .homelab-init(있으면 base64, 없으면 404). $2=repos/ukyi-app/<app>/contents/.homelab-init.
-  "api repos/ukyi-app/"*"/contents/.homelab-init --jq .content")
+  # invocation marker — bare main의 .homelab-init(있으면 base64, 없으면 404). ref는 main 고정이다
+  # (init.ts readRemoteMarker와 같은 텍스트 — 어긋나면 계약 밖 호출로 exit 3).
+  # $2=repos/ukyi-app/<app>/contents/.homelab-init?ref=main.
+  "api repos/ukyi-app/"*"/contents/.homelab-init?ref=main --jq .content")
     rest="${2#repos/ukyi-app/}"; app="${rest%%/*}"
     if git -C "$INIT_REMOTES/$app.git" show main:.homelab-init >/dev/null 2>&1; then
       git -C "$INIT_REMOTES/$app.git" show main:.homelab-init | base64

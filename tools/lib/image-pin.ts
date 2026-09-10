@@ -4,6 +4,12 @@
 //
 // SSOT: 배포 핀 tag/digest 정규식과 인라인 핀 파싱을 여기 한 곳에서만 정의한다. 콜사이트마다
 // 정규식이 갈리면 apps 레인과 베스포크 레인이 서로 다른 형식 경계를 갖는 오배포 표면이 생긴다.
+//
+// ⚠️ DIGEST_BODY에는 **import할 수 없는 사본이 둘** 있다 — 셸 게이트
+// scripts/check-image-pins.sh의 `DIGEST_BODY=` 한 줄과, 하류 차트 값 계약
+// platform/charts/app/values.schema.json의 digest `pattern`(`^…$` 앵커만 다르다).
+// 세 축의 문자열 등식은 tests/gates/test_image_pins.bats의 사본 대조 @test가 강제하므로,
+// 이 줄을 고치면 그 둘도 같은 PR에서 함께 고쳐야 한다(어긋나면 게이트가 red).
 const TAG_BODY = String.raw`sha-[0-9a-f]{7,40}`;
 const DIGEST_BODY = String.raw`sha256:[0-9a-f]{64}`;
 

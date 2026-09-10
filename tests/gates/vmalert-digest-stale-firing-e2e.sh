@@ -121,7 +121,9 @@ CTRL_FOR="$(vme_alert_for "$VME_RULES" "$CONTROL")"
 [ -n "$CTRL_FOR" ] || vme_fault "배포 룰에서 대조 알림 ${CONTROL}의 for: 추출 실패(부재/null) — replay 길이를 그 for:에서 파생하므로 음성 레그의 vacuity 차단이 무너진다."
 CTRL_FOR_S="$(vme_to_s "$CTRL_FOR")"
 # staleness 임계 T — expr의 `> N`에서 파생(하드코딩 금지).
-T_S="$(grep -oE '>[[:space:]]*[0-9]+' <<<"$EXPR" | head -1 | grep -oE '[0-9]+' || true)"
+# 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 herestring
+T_MATCHES="$(grep -oE '>[[:space:]]*[0-9]+' <<<"$EXPR" || true)"
+T_S="$(head -n1 <<<"$T_MATCHES" | grep -oE '[0-9]+' || true)"
 [ -n "$T_S" ] || vme_fault "$ALERT expr에서 staleness 임계(> N)를 파생하지 못했다"
 
 # 수집 카운트 알림(US2) — 같은 파일에서 파생(하드코딩 0).

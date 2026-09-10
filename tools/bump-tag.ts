@@ -8,7 +8,7 @@ import { appPaths } from "./lib/app-surface.ts";
 // APPS 리스트 문법(항목 경계·이름 키·ref 표기·존재 판정)의 SSOT — create-app·teardown-app과 공유한다.
 import { hasApp, retagApp } from "./lib/digest-exporter.ts";
 
-// digest-exporter APPS 신선도 동기(codex pass2 P2-2): bump한 앱이 APPS 목록에 있으면 그 항목의
+// digest-exporter APPS 신선도 동기: bump한 앱이 APPS 목록에 있으면 그 항목의
 // 이미지 태그를 새 tag로 갱신한다. sha-* 태그가 불변이라 배포 핀만 바꾸면 digest-exporter가 stale
 // 참조로 거짓 ImageDigestDrift(B2)를 낸다.
 //
@@ -84,7 +84,7 @@ if (!TAG_RE.test(tag ?? "")) {
 if (digest !== undefined && !DIGEST_RE.test(digest)) {
   console.error(`bad digest: ${digest}`); process.exit(2);
 }
-// --kind는 target 신원의 교차 검증이다(bump-plan 계약, design r2-1 — 러너는 항상 넘긴다): 편집 모드는
+// --kind는 target 신원의 교차 검증이다(bump-plan 계약 — 러너는 항상 넘긴다): 편집 모드는
 // --pin 유무가 가르지만, 호출부가 주장한 kind와 그 모드가 갈리면 엉뚱한 레인의 파일을 편집하게 되므로
 // fail-closed다. 선택 플래그인 이유: 구 호출부(bump.yaml 수동 디스패처)는 apps 레인 positional 계약로
 // kind 무주장 호출을 유지한다(무주장 = 검증 생략이지 관용 해석이 아니다).

@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# files-data 오프-매체 rsync 백업 (H2/M14 — files는 git+R2+age 재구축 불변식의 유일 예외).
+# files-data 오프-매체 rsync 백업 (files는 git+R2+age 재구축 불변식의 유일 예외).
 #
-# > 리눅스 재작성 2026-08-19. 이전 판은 **macOS/OrbStack 시대** 문서이자 코드였다 —
-# > 매체 판별이 `diskutil Device Location == Internal`이었고, source 경로에
-# > `${vmpath#/mnt/mac}`(OrbStack VM → 호스트 /Volumes) 변환이 박혀 있었으며,
-# > 배선이 레포 밖 launchd plist였다. NUC엔 `diskutil`도 launchd도 없어 **하드 실패**했다.
+# > 리눅스 재작성 2026-08-19 — 이전 macOS/OrbStack 판은 매체 판별이 `diskutil Device Location ==
+# > Internal`이었고 배선이 레포 밖 launchd plist였다. NUC엔 `diskutil`도 launchd도 없어 **하드 실패**했다.
 #
 # 왜: bulk-ssd의 files-data PV는 Retain·Prune=false·관측으로 오삭제/침묵유실은 막지만
 # **매체 자체가 죽으면 전손**이다. 다른 물리 디스크로 rsync해 매체 유실에 대비한다.
@@ -139,7 +137,11 @@ phys_disk() {
   local _p="$1" _src _d
   _src="$(findmnt -no SOURCE --target "$_p" 2>/dev/null | sed 's/\[.*//')" || return 1
   [ -n "$_src" ] || return 1
-  _d="$(lsblk -nso NAME,TYPE --raw "$_src" 2>/dev/null | awk '$2 == "disk" { print $1; exit }')" || return 1
+  # lsblk를 먼저 끝까지 받는다 — `lsblk … | awk '… exit'`는 awk의 조기 종료가 나머지 행을 쓰던 lsblk를
+  # SIGPIPE/EPIPE로 죽여 pipefail 아래 "판별 실패"로 위장한다(SIGPIPE 클래스 — 다중 디스크 트리일수록 잘 밟는다).
+  local _tree
+  _tree="$(lsblk -nso NAME,TYPE --raw "$_src" 2>/dev/null)" || return 1
+  _d="$(awk '$2 == "disk" { print $1; exit }' <<<"$_tree")" || return 1
   [ -n "$_d" ] || return 1
   printf '%s' "$_d"
 }

@@ -28,7 +28,7 @@
 // 즉 fixture↔real 구분은 인자 형태로 결정되지 않는다(루트 인자가 실 레포를 가리킬 수 있다).
 // 그래서 **과다 계상 쪽으로 기운다** — 있는 호출을 권위로 세되, 없는 호출을 지어내지는 않는다.
 // 오탐(정당한 가드를 고아라 부름)보다 미탐이 낫다는 판단이다: 이 게이트의 첫 번째 의무는
-// 거짓 경보로 신뢰를 잃지 않는 것이다. 정밀화는 후속(티켓 08의 스캔 건수 신호와 함께 하는 편이 낫다 —
+// 거짓 경보로 신뢰를 잃지 않는 것이다. 정밀화는 후속(스캔 건수 신호와 함께 하는 편이 낫다 —
 // 가드가 "몇 건 검사했다"를 이미 출력하므로 실행 관측으로 fixture↔real을 가를 수 있다).
 // skip-only(01의 `SKIP:` 마커)는 지금 판정에 영향이 없다: 유일한 해당 가드 verify-runbook-index가
 // owner-local `make verify-runbook-index`로 이미 권위를 갖는다.
@@ -52,7 +52,7 @@ const GATE_JOB = "gate";
 //
 // 대신 **계산한다**: make 타깃이 권위인 경우는 정확히 둘이다.
 //   ① 워크플로가 그 타깃을 실제로 부른다(`run: make chart-test`) — CI에서 도는 것이 증명된다.
-//   ② 그 타깃이 **skip 신호 규약을 쓰는 가드**를 부른다 — 티켓 01의 `SKIP:` 마커는 "이 가드의
+//   ② 그 타깃이 **skip 신호 규약을 쓰는 가드**를 부른다 — `SKIP:` 마커는 "이 가드의
 //      도메인은 없을 수 있다"는 뜻이고, 도메인이 CI에 없는 가드에겐 owner-local 엔트리포인트가
 //      유일한 권위다. 01이 06의 선행 티켓인 이유가 정확히 이것이다.
 // 그 외는 mirror다(폴백이 default-deny로 뒤집힌다). `make verify`는 규약을 쓰는 가드를 부르지
@@ -62,7 +62,7 @@ const GATE_JOB = "gate";
 //   · 앞에 공백을 요구했다가 skipGuards가 0건 — 실제 마커는 `echo "SKIP: …"`처럼 따옴표 뒤에 온다.
 //   · 출력 동사를 안 보다가 이 파일 자신의 **정규식 상수**가 마커로 잡혀 `make verify`가 권위로
 //     승격됐다(규약을 다루는 코드 ≠ 규약을 쓰는 가드).
-// 세 대안(티켓 11 — 02에서 오탐 때문에 연기했던 확장을 소비자와 함께 착지):
+// 세 대안(오탐 때문에 연기했던 확장을 소비자와 함께 착지):
 //   ① 직접 emission — Makefile recipe 잔존 레인(같은-줄 짝)이 여전히 이 모양이다.
 //   ② 셸 `guard_skip <이름>` 호출 — 07 이관 후 셸 콜사이트의 유일한 모양. **행두 주석만** 배제하고
 //      (행 전역 `[^\n#]*`는 `${#files[@]}`의 `#`에서 실 호출 행을 통째로 미탐시킨다 —
@@ -198,7 +198,7 @@ export function invokesGuard(text: string, guard: string, allGuards: string[]): 
 
 // ── venue 수집 ────────────────────────────────────────────────────────────────
 function sh(cmd: string, args: string[], root: string): string {
-  // seam 경유(d6③) — venue 수집은 실패를 빈 문자열로 접는 기존 관용 유지(부재 venue = 빈 텍스트,
+  // seam 경유 — venue 수집은 실패를 빈 문자열로 접는 기존 관용 유지(부재 venue = 빈 텍스트,
   // 열거 붕괴는 SKIP_EMISSION 바닥값이 잡는다). stderr는 버린다(종전 stdio ignore와 동일 효과).
   // timeoutMs 0 = 종전 무-timeout 보존(git log 전 이력 스캔이 느린 디스크에서 30s를 넘을 수 있다).
   const r = shExec(cmd, args, { cwd: root, timeoutMs: 0 });
@@ -208,8 +208,8 @@ function sh(cmd: string, args: string[], root: string): string {
 type Step = { run?: string; uses?: string; if?: unknown; "continue-on-error"?: unknown };
 
 // gate 최상위 스텝 중 `if`가 걸려 있거나 `continue-on-error: true`인 것은 CI에서 실행되지 않거나
-// 실패해도 job을 안 죽인다 — 어느 쪽이든 「권위 있는 실행 경로」의 증인이 될 수 없다(감사 6라운드
-// grep-c-3, GHA job-level skip은 run conclusion에 안 보인다의 스텝-레벨 얼굴). composite action
+// 실패해도 job을 안 죽인다 — 어느 쪽이든 「권위 있는 실행 경로」의 증인이 될 수 없다
+// (GHA job-level skip은 run conclusion에 안 보인다의 스텝-레벨 얼굴). composite action
 // (`uses: ./.github/actions/*`) 내부 스텝에는 적용하지 않는다 — 재귀 전개(stepTexts)는 이 필터를
 // 거치지 않으므로 setup-toolchain 등의 정당한 `if: inputs.x == 'true'`는 그대로 남는다.
 function liveGateSteps(steps: Step[] | undefined): Step[] {
@@ -292,7 +292,7 @@ export function collectVenues(root: string, guards: { path: string; text: string
   // ⚠️ **워크플로 텍스트만** 본다. gate venue에는 수집 bats도 들어 있는데, 그 안의 `run make -n help`
   //    같은 테스트 호출까지 세면 거의 모든 타깃이 "CI가 부른다"가 되어 default-deny가 무너진다
   //    (실측: 폴루션으로 16개 타깃이 권위로 승격됐다).
-  // ⚠️ 감사 12라운드 77 reg-a3-tools-infra-1 — ci.yaml은 ①에서 이미 liveGateSteps로 걸러(if:false·
+  // ⚠️ ci.yaml은 ①에서 이미 liveGateSteps로 걸러(if:false·
   //    job if:false·continue-on-error 축) workflowText에 push했다(:266-267). 여기서 다시 원문
   //    재스캔하면 그 필터가 무력화돼, if:false 스텝의 `run: make <target>`이 여전히 권위로
   //    승격된다(③의 형제 관용구, :280과 동일하게 제외).

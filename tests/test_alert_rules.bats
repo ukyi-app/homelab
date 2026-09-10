@@ -720,7 +720,7 @@ YAML
   echo "$output" | grep -q 'WALVolumeFilling'
 }
 
-# ── 정책 파일 열거 붕괴(ownership-accounting 08) ─────────────────────────────────
+# ── 정책 파일 열거 붕괴 ───────────────────────────────────────────────────────
 # 옛 `existsSync ? … : []` 폴백은 denylist 부재를 '항목 0개'로 위장했다. denyMetrics가 비면
 # 모드 A의 find()가 상시 미스라 위반 0이 되는데, 성공 메시지는 '모드 A/B/C 위반 0'이라며
 # 검사했다고 주장한다 — 적대 검토가 A/B 대조로 실측한 fail-open이다.
@@ -819,7 +819,7 @@ YAML
 }
 
 # ── 모드 D 확장(linter-mode-d 01): 대문자 메트릭 + timestamp-생산 rollup 클래스 ──
-# 공백 실증(meta-observability 04 리뷰 M1): 토큰 필터가 소문자 시작만 매치해 ALERTS류가 시야 밖
+# 공백 실증: 토큰 필터가 소문자 시작만 매치해 ALERTS류가 시야 밖
 # 이었고, t*_over_time(값이 아니라 샘플 시각)은 값-타임스탬프 모델에 클래스가 없었다.
 
 @test "mode D sees uppercase metrics in time() comparisons (ALERTS-class gap, closed)" {
@@ -864,7 +864,7 @@ YAML
 }
 
 @test "mode D stays closed when TS-exempt and bare references mix (one metric, two contexts)" {
-  # 핵심 불변식(리뷰 M3): 면제는 "전 참조가 샘플-시각 클래스"일 때만이다 — 한 참조라도 값
+  # 핵심 불변식: 면제는 "전 참조가 샘플-시각 클래스"일 때만이다 — 한 참조라도 값
   # 문맥(bare)이면 등재 요구가 살아야 한다(nonTsRef fail-closed).
   _run_probe MixedProbe '(time() - tlast_over_time(FIXTURE_UPPER_TS[2h])) > 100 and on() (FIXTURE_UPPER_TS > 0)'
   [ "$status" -ne 0 ]
@@ -886,7 +886,7 @@ YAML
   rm -rf "$tmp"
 }
 
-# ── 스캔 신호 순서 (티켓 03) ───────────────────────────────────────────────────
+# ── 스캔 신호 순서 ───────────────────────────────────────────────────────────
 # 규약: 바닥값을 **통과한** 실행만 마커를 낸다. 붕괴한 실행의 건수는 "검사했다"가 아니라
 # "붕괴했다"는 뜻이라 같은 마커로 내면 소비자가 정반대로 읽는다.
 # 이행 전 이 파일은 마커 4개를 앞에서 몰아 내고 바닥값을 뒤에서 봤다 — 즉 붕괴해도 마커가 나갔다.
@@ -944,7 +944,6 @@ YAML
 
 # supply·supply-refs 바닥값의 붕괴 경로. `--supply-policy`를 **주지 않고** 픽스처 루트의
 # 실 경로(policy/alert-supply-monotonicity.json)에 원장을 두면 주입 면제 없이 바닥값이 살아 있다.
-# (한때 이 자리를 "주입이 곧 면제라 재현 불가"라고 적었으나 거짓이었다 — 적대 검토가 우회로를 실증했다.)
 _seed_real_supply() {   # $1=root $2=원장 항목 수
   local root="$1" n="$2" i body=""
   mkdir -p "$root/policy"

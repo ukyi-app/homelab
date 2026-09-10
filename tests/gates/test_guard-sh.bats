@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 셸 가드 프롤로그/방출 커널(scripts/lib/guard.sh, lib-convergence d2)의 계약 테스트.
+# 셸 가드 프롤로그/방출 커널(scripts/lib/guard.sh)의 계약 테스트.
 # 3함수: guard_init(프롤로그 — pipefail·LC_ALL=C·ROOT·scan-floor source) ·
 # guard_skip(SKIP 마커 + exit 4 원자 방출) · detect_run(awk 검출기의 fail-closed 실행 —
 # 인자 검증·rc 포착·READFILES 열거수 대조. #525가 클래스를 명명하고도 #532에서 손 복사로
@@ -129,7 +129,10 @@ setup() {
     for f in "$1"/scripts/check-*.sh "$1"/scripts/verify-*.sh; do
       hand=0; kern=0
       grep -qE "awk[[:space:]]+\"?\\\$[A-Za-z_]+\"?.*2>\"?\\\$[A-Za-z_]+\"?" "$f" && hand=1
-      sed "s|^[[:space:]]*#.*||" "$f" | grep -qE "(^|[|(;&\` ])detect_run[[:space:]]" && kern=1
+      # 주석을 벗긴 본문은 **캡처 뒤 herestring**으로 대조한다 — 이 블록은 `set -o pipefail`이라 `sed … | grep -q`는
+      # grep의 첫 매치 조기 종료가 sed에 SIGPIPE를 먹여 kern=0으로 떨어진다(CI 4 vCPU 병렬 레인에서 roster 6→5 실측 — 부하 아래 20회 중 4회).
+      body="$(sed "s|^[[:space:]]*#.*||" "$f")"
+      grep -qE "(^|[|(;&\` ])detect_run[[:space:]]" <<<"$body" && kern=1
       [ "$hand" -eq 1 ] || [ "$kern" -eq 1 ] || continue
       roster=$((roster+1))
       if [ "$hand" -eq 1 ]; then

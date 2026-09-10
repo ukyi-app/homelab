@@ -35,8 +35,8 @@ EOF
   touch "$FR/platform/data-conn/prod/db-lonely-conn.sealed.yaml"
   # ⚠️ 의도적으로 data-conn/prod/kustomization.yaml을 여기서 만들지 않는다 — 위 두 conn 봉인본은
   # 이 스위트 대부분에서 inert(무배선)로 남아야 한다. conn 축을 겨냥하는 @test만 이 파일을
-  # 직접 쓴다(직접 쓰지 않는 @test가 등록 없이 두 파일을 disk에 남기면 unwired-conn(역방향,
-  # 감사 5라운드 set-kustomization-8)이 뜨므로, 그런 @test는 대신 두 파일을 정리한다).
+  # 직접 쓴다(직접 쓰지 않는 @test가 등록 없이 두 파일을 disk에 남기면 unwired-conn(역방향)이
+  # 뜨므로, 그런 @test는 대신 두 파일을 정리한다).
   # cluster.yaml managed.roles — roles 도메인의 바닥값(기본 1)이 보는 자리다. 이 스위트의 도메인은
   # roles가 아니므로 **고아가 아닌** role 하나만 둔다(passwordSecret sealed 실재 → dangling-role 미발화).
   # 형제 스위트(test_audit-dangling-role.bats)가 고아 role 쪽을 진다.
@@ -62,7 +62,7 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "audit reports a public app manifest with no apps.json row (missing-registration)" {
-  # tools-teardown-bump-1(8라운드) — 대칭 짝: orphan-dns는 registry 행인데 매니페스트 부재를 잡고,
+  # 대칭 짝: orphan-dns는 registry 행인데 매니페스트 부재를 잡고,
   # 이 레인은 그 역방향(매니페스트인데 registry 행 부재)을 잡는다. 이 판정문(232행)이 통째로
   # 지워져도 이 @test가 없으면 34/34가 그대로 통과했다.
   mkdir -p "$FR/apps/rogue/deploy/prod"
@@ -87,7 +87,7 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | jq -e '.findings | any(.type == "stale-ledger-row" and .subject == "stale-app")'
 }
 
-# reg13-e-carryover-2 — cacheDirs 열거가 Dirent.isDirectory()만 쓰면 디렉토리를 가리키는 심볼릭
+# cacheDirs 열거가 Dirent.isDirectory()만 쓰면 디렉토리를 가리키는 심볼릭
 # 링크 캐시 인스턴스가 누락돼, 실재하는 인스턴스를 stale-ledger-row로 오탐한다(IMPACT의 과탐 예시).
 @test "audit does NOT flag a cache ledger row backed by a symlinked instance directory" {
   mkdir -p "$FR/_external/symcache-real"
@@ -145,7 +145,7 @@ teardown() { rm -rf "$TMP"; }
   # apps.json: orders만 active:true (ghost 제거해 orphan-dns 노이즈 배제)
   echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
     > "$G/infra/cloudflare/apps.json"
-  # ⚠️ codex pass3 F1: surface-drift는 정보성 — --ci를 막지 않는다(정상 bump 데드락 방지). 리포트는 된다.
+  # ⚠️ surface-drift는 정보성 — --ci를 막지 않는다(정상 bump 데드락 방지). 리포트는 된다.
   run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$G" --ci
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "activation-surface-drift"
@@ -157,7 +157,7 @@ teardown() { rm -rf "$TMP"; }
   G="$TMP/git-ro"; mkdir -p "$G"; cp -R "$FR/." "$G/"
   # surface-drift **단독**으로 격리 — 다른 finding 원천 제거: ledger의 stale-app 행 삭제(orders만 남김) +
   # setup()의 무배선 conn 봉인본 2개(shared·lonely) 제거(안 그러면 unwired-conn이 새로 뜬다 —
-  # 감사 5라운드 set-kustomization-8, 이 스위트의 conn 축과 무관).
+  # 이 스위트의 conn 축과 무관).
   printf '<!-- ledger:meta VM_ALLOCATABLE_MIB=11264 LIMIT_BUDGET_MIB=8704 -->\n| <!-- ledger:row --> orders | prod | 64 | 128 |\n' \
     > "$G/docs/memory-ledger.md"
   rm -f "$G/platform/data-conn/prod/db-shared-conn.sealed.yaml" "$G/platform/data-conn/prod/db-lonely-conn.sealed.yaml"
@@ -212,7 +212,7 @@ EOF
   echo '[{ "name": "orders", "host": "orders.example.com", "public": true, "active": true }]' \
     > "$G/infra/cloudflare/apps.json"
   git -C "$G" add -A; git -C "$G" commit -qm init
-  # ⚠️ codex pass1 F3: canonical surfaceHash(.activation 제외)로 마커를 만들고 .activation을 **커밋**한다.
+  # ⚠️ canonical surfaceHash(.activation 제외)로 마커를 만들고 .activation을 **커밋**한다.
   # 커밋이 apps/orders 트리를 바꿔도 canonical 해시는 불변이라 drift가 없어야 한다(자기 무효화 회귀).
   curhash=$(bun "$ROOT/tools/lib/surface-hash.ts" "$G" HEAD orders)
   printf '{"app":"orders","sha":"abc1234","syncedRev":"abc1234","surfaceHash":"%s","registry":{"name":"orders","host":"orders.example.com","public":true}}\n' "$curhash" \
@@ -278,7 +278,7 @@ JSON
 }
 
 @test "audit BLOCKS exposure drift when apps.json host/public changes after activation (restale2 F1)" {
-  # ⚠️ codex pass4 F1 + restale2 F1: 앱 트리 무변경이어도 apps.json host/public가 바뀌면 DNS 노출이 변한다 →
+  # ⚠️ 앱 트리 무변경이어도 apps.json host/public가 바뀌면 DNS 노출이 변한다 →
   # 마커 registry projection과 불일치 → activation-exposure-drift는 **차단**(데드락 무관, 미재검증 노출 막음).
   G="$TMP/git5"; mkdir -p "$G"; cp -R "$FR/." "$G/"
   git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
@@ -342,7 +342,8 @@ resources:
   - db-lonely-conn.sealed.yaml
 KEOF
   git -C "$G" add -A
-  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$G"
+  # 앱 0개 픽스처 — registry·apps 바닥값(실 트리 기본값은 앱 개수를 따라 0↔1)을 명시 해제한다(관례).
+  run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$G" --floor registry=0 --floor apps=0
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.scan["audit-orphans:apps"] == 0'
   echo "$output" | jq -e '.findings | any(.type == "unreferenced-conn")'
@@ -394,8 +395,8 @@ KEOF
 }
 
 @test "an empty registry trips the scan-floor at any positive floor, and 0 lets it through" {
-  # ⚠️ 바닥값을 **명시해서** 부른다 — 기본값은 인-레포 앱 0개에 맞춰 0이라(page #455 ·
-  #    trip-mate-api 철거) 무인자 호출로는 트립을 볼 수 없다. 수치를 박아야 "바닥값이 실제로
+  # ⚠️ 바닥값을 **명시해서** 부른다 — 기본값은 인레포 앱 개수에 결합돼 있어(apps/README.md의 바닥값
+  #    5곳) 무인자 호출로는 앱 개수에 따라 트립 여부가 달라진다. 수치를 박아야 "바닥값이 실제로
   #    작동한다"는 계약이 앱 개수와 무관하게 증명된다.
   echo '[]' > "$FR/infra/cloudflare/apps.json"
   run bun "$ROOT/tools/audit-orphans.ts" --repo-root "$FR" --ci --floor registry=1
@@ -472,7 +473,7 @@ YAML
 @test "audit reports a conn sealed file on disk that kustomization never registered (unwired-conn, reverse direction)" {
   # 위 orphan-conn은 정방향(kustomization → 소스)만 본다. 이 레인은 역방향 — 디스크에 conn
   # 봉인본이 있는데 kustomization resources 자체에 등록이 안 된 경우(멱등 등록 실패/손 편집으로
-  # 줄 누락) — 정방향 열거로는 원리적으로 못 보는 붕괴다(감사 5라운드 set-kustomization-8).
+  # 줄 누락) — 정방향 열거로는 원리적으로 못 보는 붕괴다.
   # setup()이 이미 db-shared-conn.sealed.yaml·db-lonely-conn.sealed.yaml 둘 다 touch해 뒀다(:33,35) —
   # kustomization에는 shared만 등록해 lonely를 등록 누락 상태로 만든다.
   cat > "$FR/platform/data-conn/prod/kustomization.yaml" <<'YAML'
@@ -491,7 +492,7 @@ YAML
 
 @test "audit surfaces malformed conn entries instead of silently dropping them (observation preserved)" {
   # 커널 분류가 null인 conn 형상 엔트리를 조용히 건너뛰면 손으로 쓴 불량 엔트리가 감사에서
-  # 사라진다(티켓 06 리뷰 이월 — 관측 축소 금지). 별도 유형으로 표면화한다.
+  # 사라진다(관측 축소 금지). 별도 유형으로 표면화한다.
   cat > "$FR/platform/data-conn/prod/kustomization.yaml" <<'YAML'
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -505,7 +506,7 @@ YAML
 }
 
 @test "audit reports an incomplete purge tombstone (state=purging)" {
-  # tools-teardown-bump-2(8라운드) — line 517-518 근방의 seed_all_domains state=purged는
+  # 아래 seed_all_domains의 state=purged는
   # incomplete-purge를 **만들지 않는** 음성 통제뿐이었다. 이 레인이 그 대칭 양성 통제다.
   # 이 판정문(282행)이 통째로 지워져도 이 @test가 없으면 34/34가 그대로 통과했다.
   printf '{"db:stuck":{"state":"purging"}}\n' > "$FR/platform/data-conn/prod/.tombstones.json"
@@ -521,7 +522,7 @@ YAML
   echo "$output" | grep -q "알 수 없는 옵션"
 }
 
-# ── 스캔 신호 규약(티켓 14) ────────────────────────────────────────────────────────
+# ── 스캔 신호 규약 ───────────────────────────────────────────────────────────────
 # 이 도구는 stdout이 기계 판독 JSON이라 `SCAN:` 마커를 낼 수 없다 — 같은 정보를 페이로드
 # `scan: {라벨: 건수}`에 싣는다(형제 tools/dns-drift-check.ts의 관용구, 단 그 파일의 **합계**
 # 결함은 복제하지 않는다). 아래 증인들이 그 두 축(도메인별 관측 · 근거 있는 바닥값)을 진다.
@@ -569,9 +570,10 @@ YAML
   # 형제 dns-drift-check는 `scanned: a.length + b.length` 합계라 작은 레인의 붕괴를 큰 레인이 덮는다.
   # 여기서는 한 레인을 무너뜨려도 **그 레인만** 0이 되고 다른 레인은 그대로 보여야 한다.
   seed_all_domains
-  # 원장·role은 바닥값이 1이라 붕괴시키면 종료코드가 1이 된다(그 축은 아래 두 @test가 진다).
-  # 이 @test의 질문은 "붕괴가 페이로드에 보이는가"이므로 두 바닥값만 명시 해제한다.
-  LOW="--floor ledger=0 --floor roles=0"
+  # 원장·role은 바닥값이 1이라 붕괴시키면 종료코드가 1이 된다(그 축은 아래 두 @test가 진다). registry·apps는
+  # 실 트리 기본값이 앱 개수를 따라 0↔1이므로 값과 무관하게 함께 명시 해제한다. 이 @test의 질문은 "붕괴가
+  # 페이로드에 보이는가"이므로 네 바닥값만 명시 해제한다.
+  LOW="--floor ledger=0 --floor roles=0 --floor registry=0 --floor apps=0"
   collapsed=0
   rm -f "$FR/platform/data-conn/prod/.tombstones.json"
   [ "$(scan_count_of "$FR" tombstones $LOW)" = "0" ]

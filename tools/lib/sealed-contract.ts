@@ -27,7 +27,7 @@ export type SealedFacts = {
 // UPPER_SNAKE 키 규약 — 두 콜사이트 공통(바이트 동일 정규식이었다).
 const KEY_RE = /^[A-Z][A-Z0-9_]*$/;
 
-// strict scope(봉인 계약 6번째 조항, sealed-wiring #04 / design-r1 R-2) — kubeseal은 이 어노테이션으로
+// strict scope(봉인 계약 6번째 조항) — kubeseal은 이 어노테이션으로
 // 복호화 범위를 넓힌다. namespace==="prod" 등호는 scope를 함의하지 않는다: 기대 name·namespace를 그대로
 // 두고 scope만 넓힌 봉인본은 5검증을 전부 통과하면서 아무 이름·아무 NS에서 복호화된다(암호문 재사용).
 // patch(sealedsecrets.bitnami.com/patch)는 scope가 아니라 patch 모드라 대상이 아니다(argocd extras 선례).

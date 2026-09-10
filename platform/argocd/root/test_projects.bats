@@ -334,7 +334,7 @@ NS_FINALIZER_ALLOW="cnpg-data victoria-stack"
 }
 
 # --- appset-생성 컴포넌트의 Namespace 소유 금지 (설계리뷰 Pass3 #3) ---
-# Task 5가 두 appset 템플릿에 finalizer를 부여하므로, appset이 발견하는 platform/*/prod(exclude 제외)는
+# 두 appset 템플릿이 finalizer를 부여하므로, appset이 발견하는 platform/*/prod(exclude 제외)는
 # finalizer를 **상속**한다. 그 경로가 Namespace를 소유하면 cascade 위험 → Namespace 소유 컴포넌트는
 # 반드시 exclude(수동 root/apps Application, finalizer 없음)로 관리해야 한다. 정적 grep(CI-safe).
 @test "no ApplicationSet-discovered platform component owns a Namespace (would inherit finalizer)" {

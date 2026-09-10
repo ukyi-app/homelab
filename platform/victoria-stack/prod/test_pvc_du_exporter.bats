@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# per-PVC 용량 가시화 du exporter(메타갭 ③ W1-A)의 계약을 강제한다.
+# per-PVC 용량 가시화 du exporter의 계약을 강제한다.
 # (중간 단언은 [ ]/grep 단순 명령으로 — bash 3.2에서 [[ ]] 실패 침묵 통과 회피)
 # ⚠️ 부재 단언은 `[ "$status" -eq 1 ]`이다 — 피연산자가 전부 단일 파일(매니페스트 또는 캡처 픽스처)이라
 #    그것으로 닫힌다. cf. docs/traps-detail.md 「열거 붕괴 → vacuous green」③·③-a
@@ -141,7 +141,7 @@ EOF
 }
 
 @test "du exporter mounts kubelet pods read-only and documents the widened F8 surface" {
-  # 세 번째 루트(meta-observability 01) — emptyDir du는 cadvisor에 파드별 fs 시리즈가 없어(라이브
+  # 세 번째 루트 — emptyDir du는 cadvisor에 파드별 fs 시리즈가 없어(라이브
   # 실측) du만 남는다. 이 루트는 타 파드 projected SA 토큰 도달 표면이라 F8 계약 주석에 수용·완화가
   # 명시돼야 한다(readOnly·egress vmsingle뿐·자기 SA 비마운트·숫자만 push).
   vk="$(yq -e 'select(.kind=="CronJob") | .spec.jobTemplate.spec.template.spec.volumes[] | select(.name=="kubelet-pods") | .hostPath.path' "$F")"
@@ -164,14 +164,14 @@ EOF
   FX="$BATS_TEST_TMPDIR"
   yq -e 'select(.kind=="CronJob") | .spec.jobTemplate.spec.template.spec.containers[0].args[0]' "$F" > "$FX/script.sh"
   # 접두 보존형 치환(sed 구분자 # — 경로에 |가 와도 안전) + 치환 착지 앵커: 마운트 경로가
-  # 리네임되면 sed가 no-op이 되어 **실 경로**를 읽는다 — 조용한 no-op을 여기서 죽인다(01 리뷰 M5).
+  # 리네임되면 sed가 no-op이 되어 **실 경로**를 읽는다 — 조용한 no-op을 여기서 죽인다.
   sed -i "s#/storage-#$FX/storage-#g; s#/kubelet-pods#$FX/kp#g" "$FX/script.sh"
   grep -qF "$FX/kp/" "$FX/script.sh"
   grep -qF "$FX/storage-internal" "$FX/script.sh"
   mkdir -p "$FX/bin" "$FX/storage-internal/pvc-a_ns1_data" "$FX/storage-bulk/pvc-b_ns2_files"
   printf 'x' > "$FX/storage-internal/pvc-a_ns1_data/f"; printf 'x' > "$FX/storage-bulk/pvc-b_ns2_files/f"
   printf '%s\n' '#!/usr/bin/env bash' 'cat > "$CAPTURE"' > "$FX/bin/curl"; chmod +x "$FX/bin/curl"
-  # 시나리오 1: 지문 1건 + **노이즈 혼재**(01 리뷰 M6 — 프로덕션 실모양: alertmanager도 data
+  # 시나리오 1: 지문 1건 + **노이즈 혼재**(프로덕션 실모양: alertmanager도 data
   # emptyDir을 갖는다): 비지문 data 볼륨·서브디렉토리 지문(미매치여야)을 섞고, 값까지 결박한다
   # (kubelet과 같은 블록 회계 -sB1 — [0-9][0-9]*는 빈 값 방어, digest-exporter gauge 관례).
   mkdir -p "$FX/kp/uid1/volumes/kubernetes.io~empty-dir/data"
@@ -187,7 +187,7 @@ EOF
   want="$(du -sB1 "$FX/kp/uid1/volumes/kubernetes.io~empty-dir/data" | cut -f1)"
   [ "$v" = "$want" ]
   grep -q '^grafana_du_fingerprint_matches 1$' "$FX/cap1"
-  # 시나리오 2: 지문 0건 → 크기 미방출·matches=0은 방출(지문 붕괴 무성 방지 — 01 리뷰 H2)
+  # 시나리오 2: 지문 0건 → 크기 미방출·matches=0은 방출(지문 붕괴 무성 방지)
   rm -rf "${FX:?}/kp"; mkdir -p "$FX/kp"
   CAPTURE="$FX/cap2" PATH="$FX/bin:$PATH" run bash "$FX/script.sh"
   [ "$status" -eq 0 ]
@@ -198,7 +198,7 @@ EOF
   run grep -q 'grafana_data_dir_size_bytes' "$FX/cap2"
   [ "$status" -eq 1 ]
   grep -q '^grafana_du_fingerprint_matches 0$' "$FX/cap2"
-  # 시나리오 3: 지문 2건 → **push는 나가고**(1차 신호·하트비트 보존 — 01 리뷰 M1) 그 뒤 fail-loud.
+  # 시나리오 3: 지문 2건 → **push는 나가고**(1차 신호·하트비트 보존) 그 뒤 fail-loud.
   # 이 단언 쌍이 그 설계 결정을 락한다 — 순서를 되돌리면 여기가 red로 반대한다(L4).
   mkdir -p "$FX/kp/uid1/volumes/kubernetes.io~empty-dir/data" "$FX/kp/uid2/volumes/kubernetes.io~empty-dir/data"
   printf 'db' > "$FX/kp/uid1/volumes/kubernetes.io~empty-dir/data/grafana.db"

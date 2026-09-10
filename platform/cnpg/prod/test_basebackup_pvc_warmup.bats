@@ -57,7 +57,7 @@ setup() {
 }
 
 @test "the warmup Job container is hardened (no privesc, ro rootfs, all caps dropped)" {
-  # spec-others-2(round8) — 형제 hardened @test 관용구(test_basebackup.bats:34-38)를 그대로 적용.
+  # 형제 hardened @test 관용구(test_basebackup.bats:38-42)를 그대로 적용.
   # 기존 값은 이미 올바르다(allowPrivilegeEscalation:false·readOnlyRootFilesystem:true·
   # capabilities.drop:[ALL]) — 값 자체를 바꾸지 않고 등식 witness만 추가한다.
   # 뮤테이션 재현(2026-09-05): readOnlyRootFilesystem true->false 치환 후 이 파일 5/5 재실행 —

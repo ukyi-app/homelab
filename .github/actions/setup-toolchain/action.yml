@@ -1,6 +1,6 @@
 name: setup-toolchain
 description: 핀된 차트/정책/시크릿 툴체인 설치 (버전 SSOT). 필요한 도구만 입력으로 켠다. 러너=ubuntu-24.04-arm(arm64).
-# ⚠️ supplychain-5: 모든 다운로드는 받기→sha256sum -c→설치 패턴(TLS만 신뢰 금지 — 미러/계정 침해 시 변조 차단).
+# ⚠️ 모든 다운로드는 받기→sha256sum -c→설치 패턴(TLS만 신뢰 금지 — 미러/계정 침해 시 변조 차단).
 # 체크섬은 각 핀 버전 자산을 직접 받아 산출한 실 SHA256(placeholder 금지 — test_toolchain-checksums.bats가 강제).
 # ⚠️ **이 파일의 버전 핀에는 자동 freshness 소유자가 없다 — 수동 회전이다.** renovate.json의 어떤
 #    manager도 `.github/actions/**`에 도달하지 않고(kubernetes·argocd는 platform/apps 경로 한정,
@@ -21,7 +21,7 @@ inputs:
   shellcheck:  { description: shellcheck v0.11.0,    default: 'false' }
   sops:        { description: sops v3.13.1,           default: 'false' }
   age:         { description: age v1.3.1,            default: 'false' }
-  kubeseal:    { description: kubeseal v0.38.4,       default: 'false' }
+  kubeseal:    { description: kubeseal v0.39.1,       default: 'false' }
   actionlint:  { description: actionlint v1.7.12,     default: 'false' }
 
 runs:
@@ -93,7 +93,7 @@ runs:
     - if: ${{ inputs.age == 'true' }}
       shell: bash
       run: |
-        # age 버전 핀 + 체크섬 — 무핀 latest(dl.filippo.io)는 공급망/재현성 구멍(supplychain-5).
+        # age 버전 핀 + 체크섬 — 무핀 latest(dl.filippo.io)는 공급망/재현성 구멍.
         f=/tmp/age.tgz
         curl -fsSL https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-arm64.tar.gz -o "$f"
         echo "c6878a324421b69e3e20b00ba17c04bc5c6dab0030cfe55bf8f68fa8d9e9093a  $f" | sha256sum -c -
@@ -101,10 +101,10 @@ runs:
     - if: ${{ inputs.kubeseal == 'true' }}
       shell: bash
       run: |
-        # kubeseal 버전 핀 — 컨트롤러 appVersion(platform/sealed-secrets app v0.38.4)과 동일해야 seal/unseal 호환.
+        # kubeseal 버전 핀 — 컨트롤러 appVersion(platform/sealed-secrets app v0.39.1)과 동일해야 seal/unseal 호환.
         # 봉인 워크플로(_create-cache/_create-database)가 제각각 핀하던 v0.27.3/v0.37.0을 이 한 곳으로 수렴.
         f=/tmp/kubeseal.tgz
-        curl -fsSL https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.38.4/kubeseal-0.38.4-linux-arm64.tar.gz -o "$f"
+        curl -fsSL https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.39.1/kubeseal-0.39.1-linux-arm64.tar.gz -o "$f"
         echo "bcc40ac15e29a21c270e2be8c62af29d4b01b9111ae667723e4b6d8e4009228b  $f" | sha256sum -c -
         sudo tar -xz -C /usr/local/bin -f "$f" kubeseal
     - if: ${{ inputs.actionlint == 'true' }}

@@ -129,7 +129,10 @@ EOF
 # (pg_basebackup은 대신 관리형 `pg-superuser` 시크릿을 쓴다 — REPLICATION 권한이 필요한데
 # 앱 role에는 없다.)
 if [ ! -f platform/cnpg/prod/app-credentials.enc.yaml ]; then
-  PG_APP_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 32)"
+  # 파이프 뒤 head는 조기 종료 소비자 — pipefail SIGPIPE(check-sigpipe-writers 레인 d): 캡처 뒤 bash 부분 문자열.
+  # base64 24바이트 = 32자라 tr 뒤 길이는 항상 32 이하 — 절단은 원본 `head -c 32`와 같은 상한 역할이다.
+  _pg_pw_pool="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9')"
+  PG_APP_PASSWORD="${_pg_pw_pool:0:32}"
   write_enc platform/cnpg/prod/app-credentials.enc.yaml <<EOF
 apiVersion: v1
 kind: Secret

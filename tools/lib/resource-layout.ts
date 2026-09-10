@@ -1,5 +1,5 @@
 // 리소스 산출물 레이아웃 커널 — kind+name에서 db/cache 산출물의 명명·배치 전부를 유도한다
-// (cli-deepening 심화 4, CONTEXT.md "산출물 레이아웃"). 지금까지 이 지식은 7개 module
+// (CONTEXT.md "산출물 레이아웃"). 지금까지 이 지식은 7개 module
 // (provision-db/cache · teardown-resource purgeArtifacts · audit-orphans 정규식 · verbs ·
 // db-url/cache-url)이 각자 재유도했다 — 생성·철거·감사·관측이 같은 레이아웃을 읽게 하는
 // 단일 소유자다(선례: identity.ts·sealed-contract.ts readSealed).
@@ -45,11 +45,14 @@ export type DbLayout = LayoutBase & {
   kind: "db";
   paths: {
     cr: string; ownerSealed: string; roSealed: string; connSealed: string; roConnSealed: string;
-    dbKust: string; parentKust: string; cluster: string; connKust: string;
+    dbKust: string; parentKust: string; cluster: string; connKust: string; hedge: string;
   };
   passwordSecrets: { owner: string; ro: string };       // database NS 비밀번호 Secret 이름
   envKeys: { rw: string; migrate: string; ro: string }; // role → 키 조회(설계 §심화 4)
   roles: { owner: string; ro: string };                 // cluster.yaml managed.roles 이름
+  // pgdump 헤지 DBS 목록의 토큰(= DB 이름). cache의 ledgerRow와 같은 부류 — 파일은 공유-잔존이고
+  // 생성/철거가 오가는 것은 **이 토큰 하나**다. 그 줄의 문법은 lib/hedge-dbs.ts가 소유한다.
+  hedgeEntry: string;
 };
 export type CacheLayout = LayoutBase & {
   kind: "cache";
@@ -73,9 +76,11 @@ const CNPG_DIR = "platform/cnpg/prod";
 const CONN_DIR = "platform/data-conn/prod";
 const CACHE_DIR = "platform/cache/prod";
 const LEDGER = "docs/memory-ledger.md";
+// pgdump 헤지 CronJob — 이름 무관(전 DB 공용) 표면이라 디렉토리 상수와 같은 자리에 둔다.
+const HEDGE_CRONJOB = `${CNPG_DIR}/pgdump-hedge-cronjob.yaml`;
 
 // cache 인스턴스 디렉토리 내용물 — provision-cache 산출 6파일(이름 고정). export는 7번째 파일
-// 드리프트의 기계 검출용(가드가 provision-cache의 write 대상과 대조 — 티켓 06 리뷰 이월).
+// 드리프트의 기계 검출용(가드가 provision-cache의 write 대상과 대조).
 export const CACHE_INSTANCE_FILES = ["configmap.yaml", "pvc.yaml", "deployment.yaml", "service.yaml", "acl.sealed.yaml", "kustomization.yaml"] as const;
 
 // 이름 무관 디렉토리 좌표 — 소비자(audit·provision)가 리터럴로 재유도하지 않게 export한다.
@@ -102,6 +107,7 @@ export function layoutFor(kind: ResourceKind, name: string): ResourceLayout {
       parentKust: `${CNPG_DIR}/kustomization.yaml`,
       cluster: `${CNPG_DIR}/cluster.yaml`,
       connKust: `${CONN_DIR}/kustomization.yaml`,
+      hedge: HEDGE_CRONJOB,                                          // pgdump 헤지 DBS 손 목록
     };
     return {
       kind: "db",
@@ -116,6 +122,9 @@ export function layoutFor(kind: ResourceKind, name: string): ResourceLayout {
         { path: paths.parentKust, scope: "공유-잔존" },
         { path: paths.cluster, scope: "수동-이연" },                  // managed.roles — 별도 수동 커밋
         { path: paths.connKust, scope: "공유-잔존" },
+        // 헤지는 전 DB 공용 파일이다 — purge가 빼는 것은 DBS 토큰 한 개뿐이라 공유-잔존이다.
+        // (누락 시 test_pgdump_hedge가 required check를 red로 만든다 — 드릴 실측 PR #689.)
+        { path: paths.hedge, scope: "공유-잔존" },
       ],
       kustomizationEntries: [
         { kust: paths.dbKust, entry: bn(paths.cr), scope: "purge-제거" },
@@ -132,6 +141,7 @@ export function layoutFor(kind: ResourceKind, name: string): ResourceLayout {
       passwordSecrets: { owner: `db-${name}-owner`, ro: `db-${name}-ro` },
       envKeys: { rw: `${ENV}_DATABASE_URL`, migrate: `${ENV}_MIGRATE_DATABASE_URL`, ro: `${ENV}_RO_DATABASE_URL` },
       roles: { owner: name, ro: `${name}_ro` },
+      hedgeEntry: name,                                   // DBS 토큰 = DB 이름(CR spec.name과 동일)
       tombstoneKey: `db:${name}`,
     };
   }
@@ -269,4 +279,28 @@ export function classifyArtifact(pathOrEntry: string): ArtifactClass | null {
     return validName("cache", name) ? { kind: "cache", name, role: "instance" } : null;
   }
   return null;
+}
+
+// role → 그 **이름에 귀속된** 산출물 경로. classifyArtifact(경로 → role)의 정확한 역이고,
+// 두 방향이 같은 커널에 있어야 관측(status --resources)과 감사(audit-orphans)가 같은 집합을 말한다.
+// files[]와 다른 뷰인 이유: files는 teardown 스윕 스코프라 **공유 산출물**(kustomization·cluster.yaml·
+// 원장)까지 담는데, 그것들은 이 리소스의 것이 아니라 이름 귀속이 없다 — "이 리소스의 산출물이
+// 실재하는가"라는 질문에 공유 파일의 실존을 섞으면 전건 present가 상수가 된다.
+export function roleArtifacts(kind: ResourceKind, name: string): Array<{ role: ArtifactRole; path: string }> {
+  if (kind === "db") {
+    const p = layoutFor("db", name).paths;
+    return [
+      { role: "cr", path: p.cr },
+      { role: "owner-secret", path: p.ownerSealed },
+      { role: "ro-secret", path: p.roSealed },
+      { role: "conn", path: p.connSealed },
+      { role: "ro-conn", path: p.roConnSealed },
+    ];
+  }
+  const p = layoutFor("cache", name).paths;
+  return [
+    { role: "instance", path: p.instanceDir },
+    { role: "conn", path: p.conn },
+    { role: "ro-conn", path: p.roConn },
+  ];
 }
