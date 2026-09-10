@@ -352,7 +352,7 @@ dbs_count() { c=0; for t in $(dbs_line "$1"); do if [ "$t" = "$2" ]; then c=$((c
   echo "$output" | jq -e '.remove | any(. == "digest-exporter APPS 항목") | not'
 }
 
-# ── 동봉 계약 target 행(#7xx부터 도구가 뺀다) ────────────────────────────────
+# ── 동봉 계약 target 행(도구가 뺀다 — 커널 tools/lib/vendored-targets.ts) ──────────
 
 @test "teardown-app removes the app's vendored-contract rows and plans them first" {
   run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR" --dry-run
@@ -387,10 +387,19 @@ dbs_count() { c=0; for t in $(dbs_line "$1"); do if [ "$t" = "$2" ]; then c=$((c
   #    도달 조건: 앵커(템플릿) 행은 손 편집 축이라, 앱 행만 가진 source가 하나 생기면 열린다.
   jq 'del(.vendored[0].targets[] | select(.repo == "homelab-app-template"))' "$VC" > "$TMP/vc.json"
   mv "$TMP/vc.json" "$VC"
+  # ⚠️ 비-0만 보면 usage(rc 2)·잘못된 --repo-root·픽스처 붕괴로 죽어도 통과한다(레포 규약:
+  #    tests/gates/test_staged-completeness.bats). 그래서 진단이 그 거부를 지목하는지 함께 잰다 —
+  #    커널 형제 레인(tools/tests/test_vendored-targets.bats의 앵커 거부)과 같은 형태다.
+  #    `::error::teardown-app:` 접두는 fail() 규약 — 없으면 raw 스택트레이스라 GHA 어노테이션에 안 뜬다.
   run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR" --dry-run
   [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF '::error::teardown-app:'
+  printf '%s\n' "$output" | grep -qF 'tools/seal-secret.mts'
+  printf '%s\n' "$output" | grep -qF '앵커'
   run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
   [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF '::error::teardown-app:'
+  printf '%s\n' "$output" | grep -qF 'tools/seal-secret.mts'
   # 거부는 어떤 표면도 만지기 전이다 — 네 표면 전부가 철거 전 상태로 살아 있다.
   [ -d "$FR/apps/orders" ]
   run jq -e '[.[] | select(.name == "orders")] | length == 1' "$FR/infra/cloudflare/apps.json"

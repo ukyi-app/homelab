@@ -137,6 +137,55 @@ mkmanifest() {
   echo "$output" | grep -qE '"status": "(greenfield|matched)"'
 }
 
+# 파생 앱 각각에 대해 커널이 유도한 행이 매니페스트에 **그대로**(repo·ref·path·normalize) 있는지.
+# $1=루트 · $2=매니페스트. 실 트리와 픽스처에 같은 술어를 태워 양성 대조가 진짜가 되게 한다.
+app_row_parity() {
+  bun -e "
+    import { appTargetRows } from '$ROOT/tools/lib/vendored-targets.ts';
+    import { deriveAppRepos } from '$ROOT/tools/contract-drift-check.ts';
+    import { readFileSync } from 'node:fs';
+    const text = readFileSync('$2','utf8');
+    const mf = JSON.parse(text);
+    const apps = deriveAppRepos('$1');
+    const bad = [];
+    for (const app of apps) for (const want of appTargetRows(text, app)) {
+      const e = mf.vendored.find((x) => x.source === want.source);
+      const got = e && e.targets.find((t) => t.repo === app);
+      if (!got || got.ref !== want.ref || got.path !== want.path || got.normalize !== want.normalize)
+        bad.push(want.source + ' -> ' + JSON.stringify(got ?? null));
+    }
+    if (bad.length) { console.error('APP-ROW-DRIFT ' + bad.join(' | ')); process.exit(1); }
+    console.log(apps.length === 0 ? 'greenfield' : 'checked:' + apps.length);
+  "
+}
+
+@test "each derived app's shipped rows match the kernel derivation, not just its repo name" {
+  # 🔴 적대 검토: 위 로스터 등식은 `repo` **문자열 집합**만 비교한다(reconcileRoster) — 커널이
+  #    소유한다고 선언한 「앱 행 문법 전부」(ref·path·normalize)는 실 매니페스트에 대해 아무도
+  #    대조하지 않았다. 어긋난 행은 라이브 fetch에서 404가 되고 classifyStatus가 그것을
+  #    absent-or-private로 접어 **drift로 승격하지 않는다**(그 정책은 의도된 것이다) — 즉 조용히
+  #    감시 밖이 된다. 게다가 addAppTargets가 그 드리프트를 복구하기 전에는 재실행도 못 고쳤다.
+  run app_row_parity "$ROOT" "$ROOT/$M"
+  [ "$status" -eq 0 ]
+  # 앱 0건이면 이 레인의 판별력은 0이다 — 조용한 통과가 아니라 값으로 낸다(vacuous green 위장 금지).
+  printf '%s\n' "$output" | grep -qE '^(greenfield|checked:[0-9]+)$'
+  # 양성 대조 — 같은 술어를 1앱 픽스처에 태운다. 정본이면 통과하고,
+  mkroot orders=ukyi-app/orders
+  mkmanifest orders
+  run app_row_parity "$R" "$MF"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qx 'checked:1'
+  # path만 앵커 값으로 어긋난 행은 잡는다(로스터 등식은 이것을 matched로 읽는다 — repo가 같으므로).
+  jq '.vendored[0].targets |= map(if .repo == "orders" then .path = "scaffold/common/tools/seal-secret.mts" else . end)' "$MF" > "$R/drift.json"
+  run bun tools/contract-drift-check.ts --roster --root "$R" --manifest "$R/drift.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '"status": "matched"'
+  run app_row_parity "$R" "$R/drift.json"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF 'APP-ROW-DRIFT'
+  rm -rf "$R"
+}
+
 @test "the scaffold repo is declared, not derived (a template is not an app)" {
   # scaffoldRepos가 없으면 템플릿 행이 매번 stale로 잡힌다 — 선언 축이 로스터 등식의 전제다.
   jq -e '.scaffoldRepos | index("homelab-app-template") != null' "$M"

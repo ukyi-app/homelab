@@ -316,7 +316,7 @@ EOF
   grep -q 'orders=ghcr.io/ukyi-app/orders:sha-aaa1111' "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
 }
 
-# ── 동봉 계약 target 행(#7xx부터 도구가 쓴다) ────────────────────────────────────
+# ── 동봉 계약 target 행(도구가 쓴다 — 커널 tools/lib/vendored-targets.ts) ──────────────────
 # 종전에는 앱 온보딩 PR에 사람이 이 행 2개를 손으로 넣었다(#691 실측) — 빠뜨리면 contract-drift의
 # 로스터 등식이 missing-target으로 발화한다. 이제 create-app이 커널(lib/vendored-targets)로 쓴다.
 
@@ -366,15 +366,45 @@ EOF
   echo "$output" | grep -q '"status": "greenfield"'
 }
 
+@test "a shape-drifted manifest is refused before any surface is written (no half landing)" {
+  # 🔴 적대 검토 실측: 「판정·조립은 쓰기 앞이다」(create-app.ts)를 재는 레인이 **파일 부재**
+  #    하나뿐이라, 조립을 쓰기 뒤로 옮겨도 이 스위트가 34/34 초록이었다. 그 상태로 형상
+  #    드리프트(normalize 열거 밖)를 주면 rc 1인데 apps/orders·apps.json·digest-exporter는
+  #    이미 쓰인 반쪽 착지가 난다. 부재 축(아래 레인)과 달리 여기서는 파일이 **있고** 커널이
+  #    던진다 — 커널의 거부 축이 전부 이 한 경로를 지난다.
+  V="$FR/tools/vendored-contract.json"
+  jq '.vendored[0].targets[0].normalize = "TypeScript"' "$V" > "$TMP/vc.json"
+  mv "$TMP/vc.json" "$V"
+  aj="$(cat "$FR/infra/cloudflare/apps.json")"
+  lg="$(cat "$FR/docs/memory-ledger.md")"
+  de="$(cat "$FR/platform/victoria-stack/prod/digest-exporter.yaml")"
+  gen
+  [ "$status" -eq 1 ]
+  # 진단은 create-app의 fail() 규약을 지난다 — raw 스택트레이스는 GHA 에러 어노테이션에 안 뜬다.
+  printf '%s' "$output" | grep -qF '::error::create-app:'
+  printf '%s' "$output" | grep -qF 'normalize'
+  # 반쪽 착지 금지는 앱 디렉토리만이 아니라 **앱-외부 표면 전부**에 걸린다.
+  [ ! -d "$FR/apps/orders" ]
+  [ "$(cat "$FR/infra/cloudflare/apps.json")" = "$aj" ]
+  [ "$(cat "$FR/docs/memory-ledger.md")" = "$lg" ]
+  [ "$(cat "$FR/platform/victoria-stack/prod/digest-exporter.yaml")" = "$de" ]
+}
+
 @test "create-app fails closed when the vendored contract manifest is missing (no silent skip)" {
   # 조용한 skip이면 앱은 만들어지는데 로스터 행만 없어, 다음 리컨실 주기가 missing-target으로
   # 발화한다 — 정확히 이 티켓이 없애는 실패다. 형제 처방: digest-exporter.yaml 부재도 exit 1.
   rm "$FR/tools/vendored-contract.json"
+  aj="$(cat "$FR/infra/cloudflare/apps.json")"
+  lg="$(cat "$FR/docs/memory-ledger.md")"
+  de="$(cat "$FR/platform/victoria-stack/prod/digest-exporter.yaml")"
   gen
   [ "$status" -eq 1 ]
   printf '%s' "$output" | grep -qF 'vendored-contract.json'
-  # 반쪽 착지 금지 — 거부는 앱 표면을 쓰기 전이다.
+  # 반쪽 착지 금지 — 거부는 앱 표면과 앱-외부 표면 어느 쪽도 쓰기 전이다(위 레인과 같은 술어).
   [ ! -d "$FR/apps/orders" ]
+  [ "$(cat "$FR/infra/cloudflare/apps.json")" = "$aj" ]
+  [ "$(cat "$FR/docs/memory-ledger.md")" = "$lg" ]
+  [ "$(cat "$FR/platform/victoria-stack/prod/digest-exporter.yaml")" = "$de" ]
 }
 
 @test "create-app rejects a reserved platform host (reserved-hosts.json SSOT)" {
