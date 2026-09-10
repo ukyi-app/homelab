@@ -19,7 +19,7 @@ setup() {
 }
 
 @test "setup-toolchain pins kubeseal to v0.39.1 (controller appVersion)" {
-  run grep -E 'sealed-secrets/releases/download/v0\.38\.4/kubeseal-0\.38\.4-linux-arm64\.tar\.gz' "$A"
+  run grep -E 'sealed-secrets/releases/download/v0\.39\.1/kubeseal-0\.39\.1-linux-arm64\.tar\.gz' "$A"
   [ "$status" -eq 0 ]
   # 옛 v0.27.3 핀이 composite에 남지 않았는지 — rc 2(파일 부재)를 통과로 읽지 않는다.
   # 위의 양성 단언이 같은 파일 "$A"의 실재를 함께 증언한다.
