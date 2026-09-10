@@ -12,7 +12,9 @@
 #   된다(같은 클래스: docs/traps-detail.md 「이미지 핀의 존재 ≠ 일치 ≠ 소유자」).
 #
 # ⚠️ 여기 있는 것은 **정적 절반 + 블록 실행 절반**이다. "천장이 실제로 맞는가"는 각 레인의 실행
-#    증인이 진다 — tools/tests/test_run-bump-plan.bats · tools/tests/test_create-app.bats:290 ·
+#    증인이 진다 — tools/tests/test_run-bump-plan.bats · test_create-app.bats·test_teardown.bats의
+#    「…writes is covered by the workflow's add-paths…」/「…is inside both the workflow add-paths and the
+#    wrapper ALLOWLIST」레인(레인 **이름**으로 인용한다 — 줄번호 인용은 레인이 하나 끼면 조용히 어긋난다) ·
 #    tools/tests/test_homelab-secrets.bats(이 판정의 **원형**인 app secrets 연쇄: foreign·seal 실패·
 #    무산출·push 실패·도달성 불일치 4레인. 그 레인들의 손해는 '잡파일 커밋'이 아니라 커밋·push가
 #    통째로 건너뛰어져 낡은 봉인본으로 디스패치되는 것이라, 판정 조건이 디스패치 원장 0 + 원격 불변이다).

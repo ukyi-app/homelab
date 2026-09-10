@@ -27,6 +27,42 @@ resources: { requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128
 route: { public: true, host: orders.example.com }
 deploy: { autoDeploy: false }
 EOF
+  # 동봉 계약 매니페스트 — 실 트리에는 항상 있는 추적 파일이다(create-app은 부재를 fail-closed로
+  # 거부한다: 없는 채로 앱을 만들면 다음 contract-drift 리컨실이 missing-target으로 발화한다).
+  mkdir -p "$FR/tools"
+  cat > "$FR/tools/vendored-contract.json" <<'JSON'
+{
+  "_note": "동봉 계약 SSOT(픽스처)",
+  "owner": "ukyi-app",
+  "scaffoldRepos": [
+    "homelab-app-template"
+  ],
+  "vendored": [
+    {
+      "source": "tools/seal-secret.mts",
+      "targets": [
+        {
+          "repo": "homelab-app-template",
+          "ref": "main",
+          "path": "scaffold/common/tools/seal-secret.mts",
+          "normalize": "typescript"
+        }
+      ]
+    },
+    {
+      "source": "tools/sealed-secrets-cert.pem",
+      "targets": [
+        {
+          "repo": "homelab-app-template",
+          "ref": "main",
+          "path": "scaffold/common/tools/sealed-secrets-cert.pem",
+          "normalize": "exact"
+        }
+      ]
+    }
+  ]
+}
+JSON
   mkdir -p "$FR/platform/victoria-stack/prod"
   printf 'apiVersion: batch/v1\nkind: CronJob\nmetadata: { name: digest-exporter }\nspec:\n  jobTemplate:\n    spec:\n      template:\n        spec:\n          containers:\n            - name: digest-exporter\n              env:\n                - name: APPS\n                  value: ""\n' > "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
 }
@@ -280,6 +316,97 @@ EOF
   grep -q 'orders=ghcr.io/ukyi-app/orders:sha-aaa1111' "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
 }
 
+# ── 동봉 계약 target 행(도구가 쓴다 — 커널 tools/lib/vendored-targets.ts) ──────────────────
+# 종전에는 앱 온보딩 PR에 사람이 이 행 2개를 손으로 넣었다(#691 실측) — 빠뜨리면 contract-drift의
+# 로스터 등식이 missing-target으로 발화한다. 이제 create-app이 커널(lib/vendored-targets)로 쓴다.
+
+@test "create-app writes the app's vendored-contract target rows (roster equality lands with the PR)" {
+  gen
+  [ "$status" -eq 0 ]
+  V="$FR/tools/vendored-contract.json"
+  run jq -e '[.vendored[].targets[] | select(.repo == "orders")] | length == 2' "$V"
+  [ "$status" -eq 0 ]
+  run jq -e '[.vendored[] | select(.source == "tools/sealed-secrets-cert.pem") | .targets[] | select(.repo == "orders")] | .[0] == {repo:"orders", ref:"main", path:"tools/sealed-secrets-cert.pem", normalize:"exact"}' "$V"
+  [ "$status" -eq 0 ]
+  # 템플릿 행은 그대로다(앱 축만 만진다).
+  run jq -e '[.vendored[].targets[] | select(.repo == "homelab-app-template")] | length == 2' "$V"
+  [ "$status" -eq 0 ]
+}
+
+@test "the plan announces the vendored rows and --dry-run writes none of them" {
+  before="$(cat "$FR/tools/vendored-contract.json")"
+  gen --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.vendoredTargets | length == 2'
+  echo "$output" | jq -e '[.vendoredTargets[].path] == ["tools/seal-secret.mts", "tools/sealed-secrets-cert.pem"]'
+  [ "$(cat "$FR/tools/vendored-contract.json")" = "$before" ]
+}
+
+@test "create-app then teardown-app returns the manifest byte-identical and keeps the roster in equality" {
+  # 실 트리는 앱 0건(greenfield)이라 로스터 등식(test_contract-drift.bats)의 판별력이 0이다 —
+  # "커널이 쓰는 `repo` 값 == `deriveAppRepos`가 source-repo에서 파생하는 이름"이라는 **결합 명제**를
+  # 재는 자리가 없었다(두 반쪽은 따로 고정돼 있다). 그리고 create가 쓰는 집합 == teardown이 빼는
+  # 집합이라는 대칭도, 두 스위트가 서로 다른 픽스처에서 독립으로 초록이라 무증인이었다.
+  # `--roster`는 오프라인 모드다(라이브 fetch 없음).
+  V="$FR/tools/vendored-contract.json"
+  before="$(cat "$V")"
+  gen
+  [ "$status" -eq 0 ]
+  # 항진 배제 — 사이에 실제로 앱 행 2개가 서 있었다(왕복이 no-op의 왕복이 아니다).
+  run jq -e '[.vendored[].targets[] | select(.repo == "orders")] | length == 2' "$V"
+  [ "$status" -eq 0 ]
+  run bun "$ROOT/tools/contract-drift-check.ts" --roster --root "$FR" --manifest "$V"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '"status": "matched"'
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$V")" = "$before" ]
+  run bun "$ROOT/tools/contract-drift-check.ts" --roster --root "$FR" --manifest "$V"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '"status": "greenfield"'
+}
+
+@test "a shape-drifted manifest is refused before any surface is written (no half landing)" {
+  # 🔴 적대 검토 실측: 「판정·조립은 쓰기 앞이다」(create-app.ts)를 재는 레인이 **파일 부재**
+  #    하나뿐이라, 조립을 쓰기 뒤로 옮겨도 이 스위트가 34/34 초록이었다. 그 상태로 형상
+  #    드리프트(normalize 열거 밖)를 주면 rc 1인데 apps/orders·apps.json·digest-exporter는
+  #    이미 쓰인 반쪽 착지가 난다. 부재 축(아래 레인)과 달리 여기서는 파일이 **있고** 커널이
+  #    던진다 — 커널의 거부 축이 전부 이 한 경로를 지난다.
+  V="$FR/tools/vendored-contract.json"
+  jq '.vendored[0].targets[0].normalize = "TypeScript"' "$V" > "$TMP/vc.json"
+  mv "$TMP/vc.json" "$V"
+  aj="$(cat "$FR/infra/cloudflare/apps.json")"
+  lg="$(cat "$FR/docs/memory-ledger.md")"
+  de="$(cat "$FR/platform/victoria-stack/prod/digest-exporter.yaml")"
+  gen
+  [ "$status" -eq 1 ]
+  # 진단은 create-app의 fail() 규약을 지난다 — raw 스택트레이스는 GHA 에러 어노테이션에 안 뜬다.
+  printf '%s' "$output" | grep -qF '::error::create-app:'
+  printf '%s' "$output" | grep -qF 'normalize'
+  # 반쪽 착지 금지는 앱 디렉토리만이 아니라 **앱-외부 표면 전부**에 걸린다.
+  [ ! -d "$FR/apps/orders" ]
+  [ "$(cat "$FR/infra/cloudflare/apps.json")" = "$aj" ]
+  [ "$(cat "$FR/docs/memory-ledger.md")" = "$lg" ]
+  [ "$(cat "$FR/platform/victoria-stack/prod/digest-exporter.yaml")" = "$de" ]
+}
+
+@test "create-app fails closed when the vendored contract manifest is missing (no silent skip)" {
+  # 조용한 skip이면 앱은 만들어지는데 로스터 행만 없어, 다음 리컨실 주기가 missing-target으로
+  # 발화한다 — 정확히 이 티켓이 없애는 실패다. 형제 처방: digest-exporter.yaml 부재도 exit 1.
+  rm "$FR/tools/vendored-contract.json"
+  aj="$(cat "$FR/infra/cloudflare/apps.json")"
+  lg="$(cat "$FR/docs/memory-ledger.md")"
+  de="$(cat "$FR/platform/victoria-stack/prod/digest-exporter.yaml")"
+  gen
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | grep -qF 'vendored-contract.json'
+  # 반쪽 착지 금지 — 거부는 앱 표면과 앱-외부 표면 어느 쪽도 쓰기 전이다(위 레인과 같은 술어).
+  [ ! -d "$FR/apps/orders" ]
+  [ "$(cat "$FR/infra/cloudflare/apps.json")" = "$aj" ]
+  [ "$(cat "$FR/docs/memory-ledger.md")" = "$lg" ]
+  [ "$(cat "$FR/platform/victoria-stack/prod/digest-exporter.yaml")" = "$de" ]
+}
+
 @test "create-app rejects a reserved platform host (reserved-hosts.json SSOT)" {
   cat > "$TMP/.app-config.yml" <<'EOF'
 kind: web
@@ -349,8 +476,8 @@ EOF
   # 미니 검증기(create-app.ts check())가 pattern/minItems를 **실제로 평가하는지**의 유일한 증인.
   # test_app-config.bats:52는 스키마 JSON과 손으로 베낀 OK Set만 대조하므로 구현이 빠지는 방향을
   # 원리적으로 못 본다(실측: :68 pattern 삭제 + :71 minItems 무력화에도 33/33 초록).
-  # ⚠️ 레인 위치는 파일 **말미** — tests/gates/test_staged-completeness.bats:15가 이 파일을
-  #    줄번호로 인용한다. 앞에 끼우면 그 주석이 어긋난다.
+  # ⚠️ tests/gates/test_staged-completeness.bats 헤더가 이 파일의 add-paths 레인을 **이름**으로
+  #    인용한다(구 줄번호 인용은 레인이 하나 끼면서 이미 어긋나 있었다).
   cat > "$TMP/.app-config.yml" <<'EOF'
 kind: web
 resources: { requests: {cpu: 50m, memory: 32Mi}, limits: {cpu: 200m, memory: "64 mega bytes"} }

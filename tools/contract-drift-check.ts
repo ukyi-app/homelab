@@ -9,13 +9,11 @@
 //   --checklist   변경 파일 목록 ∩ 매니페스트 source → 다운스트림 전파 체크리스트(오프라인)
 import { existsSync, readFileSync } from "node:fs";
 import { listUnits } from "./lib/repo-walk.ts";
-
-export type Norm = "typescript" | "exact";
-type Target = { repo: string; ref: string; path: string; normalize: Norm };
-type Entry = { source: string; targets: Target[] };
-// scaffoldRepos = **앱이 아닌** 대상(템플릿 레포). 로스터 등식에서 제외된다 —
-// 선언 축이 없으면 템플릿 행이 매 실행 stale로 잡힌다.
-export type Manifest = { owner: string; scaffoldRepos?: string[]; vendored: Entry[] };
+// 매니페스트 형상은 `lib/vendored-targets.ts`가 SSOT다 — 그 커널이 같은 파일을 **쓰는** 쪽이라,
+// 읽는 쪽이 자기 사본을 들면 두 벌이 조용히 갈린다. scaffoldRepos = **앱이 아닌** 대상(템플릿
+// 레포)이고 로스터 등식에서 제외된다 — 선언 축이 없으면 템플릿 행이 매 실행 stale로 잡힌다.
+import type { Manifest, Norm, Target } from "./lib/vendored-targets.ts";
+export type { Manifest, Norm };
 
 // ── 정규화 ────────────────────────────────────────────────────────────────────
 // 줄 주석 제거를 **공백 축약보다 먼저** 한다. 종전엔 `\s+` 축약이 개행까지 지워

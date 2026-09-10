@@ -93,6 +93,54 @@ spec:
                     echo "[hedge] ${DB}"
                   done
 EOF
+  # 동봉 계약 매니페스트 — orders는 등재돼 있고 billing은 아니다(제거 축과 무변경 축을 한 픽스처에서 잰다).
+  mkdir -p "$FR/tools"
+  VC="$FR/tools/vendored-contract.json"
+  cat > "$VC" <<'JSON'
+{
+  "_note": "동봉 계약 SSOT(픽스처)",
+  "owner": "ukyi-app",
+  "scaffoldRepos": [
+    "homelab-app-template"
+  ],
+  "vendored": [
+    {
+      "source": "tools/seal-secret.mts",
+      "targets": [
+        {
+          "repo": "homelab-app-template",
+          "ref": "main",
+          "path": "scaffold/common/tools/seal-secret.mts",
+          "normalize": "typescript"
+        },
+        {
+          "repo": "orders",
+          "ref": "main",
+          "path": "tools/seal-secret.mts",
+          "normalize": "typescript"
+        }
+      ]
+    },
+    {
+      "source": "tools/sealed-secrets-cert.pem",
+      "targets": [
+        {
+          "repo": "homelab-app-template",
+          "ref": "main",
+          "path": "scaffold/common/tools/sealed-secrets-cert.pem",
+          "normalize": "exact"
+        },
+        {
+          "repo": "orders",
+          "ref": "main",
+          "path": "tools/sealed-secrets-cert.pem",
+          "normalize": "exact"
+        }
+      ]
+    }
+  ]
+}
+JSON
   mkdir -p "$FR/platform/victoria-stack/prod"
   printf 'apiVersion: batch/v1\nkind: CronJob\nmetadata: { name: digest-exporter }\nspec:\n  jobTemplate:\n    spec:\n      template:\n        spec:\n          containers:\n            - name: digest-exporter\n              env:\n                - name: APPS\n                  value: "orders=ghcr.io/ukyi-app/orders:sha-x"\n' > "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
 }
@@ -302,6 +350,133 @@ dbs_count() { c=0; for t in $(dbs_line "$1"); do if [ "$t" = "$2" ]; then c=$((c
   run bun "$ROOT/tools/teardown-app.ts" --app app --repo-root "$FR" --dry-run
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.remove | any(. == "digest-exporter APPS 항목") | not'
+}
+
+# ── 동봉 계약 target 행(도구가 뺀다 — 커널 tools/lib/vendored-targets.ts) ──────────
+
+@test "teardown-app removes the app's vendored-contract rows and plans them first" {
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remove | any(. == "vendored-contract target 행")'
+  # 계획은 행동의 예고다 — dry-run은 파일을 만지지 않는다.
+  before="$(cat "$VC")"
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$VC")" != "$before" ]
+  run jq -e '[.vendored[].targets[] | select(.repo == "orders")] | length == 0' "$VC"
+  [ "$status" -eq 0 ]
+  # 템플릿 행은 무손상(앱 축만 뺀다 — 계약 자체가 꺼지면 안 된다).
+  run jq -e '[.vendored[].targets[] | select(.repo == "homelab-app-template")] | length == 2' "$VC"
+  [ "$status" -eq 0 ]
+}
+
+@test "an app with no vendored rows leaves the manifest byte-identical and off the plan" {
+  before="$(cat "$VC")"
+  run bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remove | any(. == "vendored-contract target 행") | not'
+  run bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$VC")" = "$before" ]
+}
+
+@test "the anchor-emptying refusal fires in the plan, before any surface is torn down" {
+  # 🔴 적대 검토 실측: plan 단계 판정이 `hasAppTargets`뿐이면 그 술어가 **모르는** 두 번째 거부 축
+  #    (앵커 행까지 비우는 제거)이 쓰기 시퀀스 중간에서 처음 던졌다 — dry-run은 rc 0으로 전 항목을
+  #    약속하고, 실행은 apps/·apps.json·digest-exporter를 이미 쓴 뒤 죽어 원장 행만 남았다(반쪽 철거).
+  #    도달 조건: 앵커(템플릿) 행은 손 편집 축이라, 앱 행만 가진 source가 하나 생기면 열린다.
+  jq 'del(.vendored[0].targets[] | select(.repo == "homelab-app-template"))' "$VC" > "$TMP/vc.json"
+  mv "$TMP/vc.json" "$VC"
+  # ⚠️ 비-0만 보면 usage(rc 2)·잘못된 --repo-root·픽스처 붕괴로 죽어도 통과한다(레포 규약:
+  #    tests/gates/test_staged-completeness.bats). 그래서 진단이 그 거부를 지목하는지 함께 잰다 —
+  #    커널 형제 레인(tools/tests/test_vendored-targets.bats의 앵커 거부)과 같은 형태다.
+  #    `::error::teardown-app:` 접두는 fail() 규약 — 없으면 raw 스택트레이스라 GHA 어노테이션에 안 뜬다.
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR" --dry-run
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF '::error::teardown-app:'
+  printf '%s\n' "$output" | grep -qF 'tools/seal-secret.mts'
+  printf '%s\n' "$output" | grep -qF '앵커'
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qF '::error::teardown-app:'
+  printf '%s\n' "$output" | grep -qF 'tools/seal-secret.mts'
+  # 거부는 어떤 표면도 만지기 전이다 — 네 표면 전부가 철거 전 상태로 살아 있다.
+  [ -d "$FR/apps/orders" ]
+  run jq -e '[.[] | select(.name == "orders")] | length == 1' "$FR/infra/cloudflare/apps.json"
+  [ "$status" -eq 0 ]
+  grep -q 'ledger:row --> orders' "$FR/docs/memory-ledger.md"
+  grep -q 'orders=ghcr.io/ukyi-app/orders:sha-x' "$FR/platform/victoria-stack/prod/digest-exporter.yaml"
+}
+
+@test "a non-canonical manifest survives an unrelated app's teardown untouched (no plan-less rewrite)" {
+  # 🔴 적대 검토 실측: 쓰기 가드가 `vcBefore !== null`뿐이면, 그 앱 행이 0개여도 커널이 돌아
+  #    `JSON.stringify(…, 2)` **정준화 바이트**를 낸다. `_note`/`_roster` 산문 때문에 손 편집을 받는
+  #    파일이라 들여쓰기가 어긋난 순간, 무관한 앱의 철거가 파일 전체를 재포맷해 계획(remove)에
+  #    없는 변경으로 철거 PR에 실렸다(이 경로는 add-paths·ALLOWLIST 안이라 잔여물 판정에도 안 걸린다).
+  jq --indent 4 '.' "$VC" > "$TMP/vc.json"
+  mv "$TMP/vc.json" "$VC"
+  before="$(cat "$VC")"
+  run bun "$ROOT/tools/teardown-app.ts" --app billing --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$VC")" = "$before" ]
+  # 양성 대조 — 같은 비-정준 픽스처에서 등재된 앱의 철거는 실제로 이 파일을 만진다(무변경이 상수가 아니다).
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$VC")" != "$before" ]
+}
+
+@test "a missing manifest is a quiet no-op for teardown (idempotent removal contract)" {
+  # create-app과 방향이 다르다: 거기서는 부재가 '행이 영영 안 들어감'(다음 리컨실이 발화)이지만,
+  # 철거에서는 뺄 행 자체가 없다 — 형제 처방(digest-exporter)도 같은 비대칭이다.
+  rm "$VC"
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  [ ! -d "$FR/apps/orders" ]
+}
+
+@test "every path teardown-app writes is inside both the workflow add-paths and the wrapper ALLOWLIST" {
+  # 🔴 형제 실사고(2026-08-18, `.github/workflows/_create-app.yaml` 주석이 SSOT): 도구가 천장 밖에
+  #    쓰면 `git add`가 그 변경을 스테이징하지 않아 커밋에서 조용히 유실된다. 철거 쪽은 그 증인이
+  #    없었다 — 여기서 두 천장(디스패처 add-paths · owner-local teardown.sh ALLOWLIST)을 한 번에 잰다.
+  sig() { (cd "$FR" && find . -type f -exec cksum {} \; | sed 's|^\([0-9]* [0-9]*\) \./|\1 |' | LC_ALL=C sort); }
+  before="$(sig)"
+  run bun "$ROOT/tools/teardown-app.ts" --app orders --repo-root "$FR"
+  [ "$status" -eq 0 ]
+  after="$(sig)"
+  # 추가·변경·삭제 전부가 천장 대상이다(제거도 `git add <path>`가 스테이징해야 한다).
+  changed="$(comm -3 <(echo "$before") <(echo "$after") | sed 's|^[[:space:]]*||; s|^[0-9]* [0-9]* ||' | LC_ALL=C sort -u)"
+  [ -n "$changed" ]
+
+  wf_paths="$(sed -n 's/^ *add-paths: *//p' "$ROOT/.github/workflows/_teardown-app.yaml" | sed 's/\${{[^}]*}}/orders/g')"
+  [ -n "$wf_paths" ]
+  allow="$(sed -n 's/^ALLOWLIST="\(.*\)"$/\1/p' "$ROOT/scripts/teardown.sh")"
+  [ -n "$allow" ]
+
+  covered() {  # $1=경로 $2=천장 목록(공백 구분). 끝이 `/`면 디렉토리 접두, 아니면 파일 또는 디렉토리.
+    for p in $2; do
+      case "$p" in
+        */) case "$1" in "$p"*) return 0 ;; esac ;;
+        *)  case "$1" in "$p"|"$p"/*) return 0 ;; esac ;;
+      esac
+    done
+    return 1
+  }
+  n_changed=0; n_wf=0; n_allow=0; uncovered=""
+  for c in $changed; do
+    n_changed=$((n_changed + 1))
+    if covered "$c" "$wf_paths"; then n_wf=$((n_wf + 1)); else uncovered="$uncovered add-paths:$c"; fi
+    if covered "$c" "$allow"; then n_allow=$((n_allow + 1)); else uncovered="$uncovered ALLOWLIST:$c"; fi
+  done
+  if [ -n "$uncovered" ]; then
+    echo "teardown-app이 쓰지만 천장이 안 덮는 경로:$uncovered"
+    echo "선언된 add-paths: $wf_paths"
+    echo "선언된 ALLOWLIST: $allow"
+    return 1
+  fi
+  # 전수의 상한 — 덮인 건수 == 관측된 변경 건수(진단 문자열이 비었다는 사실만으로는 루프가
+  # 0회 돌았을 때도 초록이다).
+  [ "$n_wf" = "$n_changed" ]
+  [ "$n_allow" = "$n_changed" ]
 }
 
 # ── 헤지 DBS 대칭 ───────────────────────────────────────────────────────────

@@ -14,9 +14,13 @@ import { addApp } from "./lib/digest-exporter.ts";
 import { surfaceHashWorktree } from "./lib/surface-hash.ts";
 import { buildActivationMarker, registryProjection } from "./lib/activation-marker.ts";
 // 앱 표면(경로·기록 집합)은 app-surface module이 소유한다(d4) — create가 쓰는 집합 = teardown이
-// 지우는 집합의 대칭이 module 테스트로 강제된다. apps.json·원장·digest-exporter는 앱-외부 표면이라 여기 잔류.
+// 지우는 집합의 대칭이 module 테스트로 강제된다. apps.json·원장·digest-exporter·동봉 계약 target 행은
+// 앱-외부 표면이라 여기 잔류한다 — 각자의 SSOT 커널이 add/remove 쌍으로 자기 대칭을 진다.
 import { appPaths, appRel, writeAppSurface } from "./lib/app-surface.ts";
 import { LAYOUT_DIRS, entryName, layoutFor } from "./lib/resource-layout.ts";
+// 동봉 계약 target 행은 앱-외부 표면이라 app-surface 소관 밖이다 — digest-exporter APPS와 같은 자리로,
+// add/remove 쌍을 가진 전용 커널이 create↔teardown 대칭을 진다.
+import { addAppTargets, appTargetRows } from "./lib/vendored-targets.ts";
 
 // parseFlags: unknown 옵션 + arg 삼킴 fail-closed(arg()가 미지정 플래그를 조용히 무시하던 것 차단). 종료 코드 2 보존.
 let __f: Record<string, string | boolean>;
@@ -202,11 +206,32 @@ function wiringChecklist(): string[] {
   return out;
 }
 
+// ---------- 4b) 동봉 계약(vendored) target 행 ----------
+// 매니페스트 targets의 앱 축은 손 열거가 아니라 `apps/<app>/deploy/prod/source-repo` 파생 집합과
+// **등식**으로 대조된다(contract-drift-check의 reconcileRoster). 종전에는 이 행 2개를 create-app PR에
+// 사람이 손으로 넣었고, 잊으면 다음 리컨실 주기가 missing-target으로 발화했다(#691 실측 — gate red
+// 한 사이클이 그 통보 채널이었다).
+// ⚠️ 부재는 **fail-closed**다(형제 처방: 아래 digest-exporter.yaml 부재도 exit 1). 조용히 건너뛰면 앱은
+//    생기는데 행만 없어, 이 배선이 없애려는 바로 그 실패가 다음 주기에 그대로 난다. 실 트리에는 항상
+//    있는 추적 파일이라 부재는 잘못된 `--repo-root`이거나 깨진 체크아웃이다.
+//    (teardown-app 쪽 부재는 반대로 no-op이다 — 뺄 행이 없는 것은 새 거짓 상태를 만들지 않는다.)
+// 판정·조립은 쓰기 **앞**이다: 여기서 죽으면 앱 표면이 하나도 안 남는다(반쪽 착지 금지).
+const vcPath = `${ROOT}/tools/vendored-contract.json`;
+if (!existsSync(vcPath)) fail(`tools/vendored-contract.json 부재: ${vcPath} — 동봉 계약 target 행을 쓸 수 없다(로스터 등식이 missing-target으로 발화한다)`);
+const vcBefore = readFileSync(vcPath, "utf8");
+// 커널의 거부 축(파싱·형상·0건·path 유도 불가·normalize 유도 불가·basename 충돌)을 이 파일의
+// fail() 규약으로 옮긴다 — raw throw는 `::error::` 접두가 없어 GHA 에러 어노테이션에 안 뜨고,
+// 이 워크플로의 telegram notify는 job.status만 싣는다(사람이 문구에 닿는 유일한 채널이 로그다).
+let vendoredTargets;
+try { vendoredTargets = appTargetRows(vcBefore, app); }
+catch (e) { fail(e instanceof Error ? e.message : String(e)); }
+
 // ---------- 5) 산출물 ----------
 const plan = {
   app, repo, tag, digest, kind, host: served ? host : null, replicas,
   reqMi, limitMi, ledger: { before: sumLimit, after: sumLimit + limitMi, budget },
   bindings, secretKeys: sealedFacts ? sealedFacts.keys : [],
+  vendoredTargets,
   checklist: [
     `이미지 pull: ghcr-pull imagePullSecret(prod NS)로 private 패키지 pull — 패키지 가시성 public 전환 불필요`,
     ...wiringChecklist(),
@@ -245,5 +270,9 @@ if (!DRY) {
   const dePath = `${ROOT}/platform/victoria-stack/prod/digest-exporter.yaml`;
   if (!existsSync(dePath)) { console.error(`digest-exporter.yaml 부재: ${dePath} — APPS 배선 불가`); process.exit(1); }
   writeFileSync(dePath, addApp(readFileSync(dePath, "utf8"), app, `ghcr.io/${owner}/${app}:${tag}`));
+  // 동봉 계약 target 행 — 멱등(이미 있으면 커널이 무변경을 낸다). 바이트가 같으면 쓰지 않는다:
+  // 재실행이 매번 공유 SSOT에 무관 diff를 남기지 않게 하는 형제 규약(hedge-dbs와 같다).
+  const vcNext = addAppTargets(vcBefore, app);
+  if (vcNext !== vcBefore) writeFileSync(vcPath, vcNext);
 }
 console.log(JSON.stringify(plan, null, 2));

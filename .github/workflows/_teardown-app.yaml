@@ -71,7 +71,10 @@ jobs:
         uses: ./.github/actions/pr-first-commit
         with:
           branch: teardown/teardown-app-${{ inputs.app }}-${{ github.run_id }}
-          add-paths: apps docs/memory-ledger.md infra/cloudflare/apps.json platform
+          # ⚠️ `tools/vendored-contract.json`은 teardown-app.ts가 동봉 계약 target 행을 빼는 자리다
+          #    (tools/lib/vendored-targets.ts). 천장 밖이면 그 제거가 커밋에서 유실돼 로스터 등식이
+          #    stale-target으로 발화한다 — 형제 실사고는 `_create-app.yaml`의 add-paths 주석이 SSOT.
+          add-paths: apps docs/memory-ledger.md infra/cloudflare/apps.json platform tools/vendored-contract.json
           commit-message: "chore: ${{ inputs.app }} 앱 철거 (teardown-app)"
           pr-title: "chore: ${{ inputs.app }} 앱 철거 (teardown-app)"
           pr-body-file: /tmp/pr-body.md
