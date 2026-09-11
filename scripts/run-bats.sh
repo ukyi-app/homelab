@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 단일 테스트 수집·실행기 (required GATE). Makefile ci 와 ci.yaml gate 가 공통 호출 → 이중 SSOT 제거.
+# 단일 테스트 수집·실행기 (required GATE). justfile ci 와 ci.yaml gate 가 공통 호출 → 이중 SSOT 제거.
 # **모델: gate = 모든 CI-safe test_*.bats** (정적 infra 가드 포함 — required 게이트라야 실제로 보호된다).
 # 스코프 = git-tracked test_*.bats − platform/charts/*(chart-test 별도 harness) − tests/.ci-exclude.
 # 실행 = 병렬 레인(파일 단위 --jobs) 뒤 직렬 레인(tests/.gate-serial) — 아래 「레인 분할」. `--plan`이 그 분할을 보여 준다.
-#   - platform/charts/* 만 prune(차트 fixtures 필요한 별도 harness, make chart-test).
+#   - platform/charts/* 만 prune(차트 fixtures 필요한 별도 harness, just chart-test).
 #   - **infra/는 prune하지 않는다** — k3s-bootstrap(hermetic, bats+yq)은 CI-safe라 gate에서 보호.
 #     단 terraform 의존 infra 테스트(cloudflare test_apps_data·tf_validate)는 .ci-exclude(아래).
 #     test_tf_reconcile은 terraform 비의존(워크플로 grep뿐)이라 gate가 수집한다.
@@ -11,12 +11,12 @@
 #     tf_validate/cloudflare-apps-data(terraform 의존, iac.yaml advisory)·bootstrap(live). 사유+실행처 주석.
 # **bash 3.2(macOS 기본) 호환 필수** — mapfile(bash4+)·set -u 빈배열 확장 금지. (AGENTS.md bash3.2 함정)
 set -e
-# 콜레이션 고정 — 이 파일은 이미 "`make ci`와 `ci.yaml gate`의 단일 SSOT"인데 **로케일만 SSOT 밖**이라
+# 콜레이션 고정 — 이 파일은 이미 "`just ci`와 `ci.yaml gate`의 단일 SSOT"인데 **로케일만 SSOT 밖**이라
 # 두 venue가 서로 다른 술어를 평가했다(실측 2026-08-20: sync-wave 원장 가드가 오너의 en_US에서
 # fail-open, 러너에서만 red). 게이트에 로케일 콜레이션이 필요한 정렬은 하나도 없다.
 # C.UTF-8 = 바이트 콜레이션 + UTF-8 ctype(한국어 진단 출력 보존). 없는 libc(BSD)에서는 C로 폴백.
 # ⚠️ **이 고정은 `scripts/check-locale-collation.sh`의 대체가 아니다** — 고정하면 개별 결함의
-#    뮤테이션 감도가 죽는다(실측: `Makefile`의 `LC_ALL=C sort`를 되돌려도 C.UTF-8에서는 초록).
+#    뮤테이션 감도가 죽는다(실측: `justfile`의 `LC_ALL=C sort`를 되돌려도 C.UTF-8에서는 초록).
 #    고정은 두 venue를 맞추고, "다음 파일에서 또 난다"는 그 정적 스캐너가 막는다.
 if locale -a 2>/dev/null | grep -qiE '^C\.(UTF-8|utf8)$'; then export LC_ALL=C.UTF-8; else export LC_ALL=C; fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,7 +29,7 @@ cd "$ROOT"
 # `bats -f rehearse tests/test_sealed-secrets-restore.bats`가 `1..1`에서 정지, rc=124.
 # 같은 명령에 `</dev/null`을 주면 1초에 `ok`. 이전 세션은 이 모양으로 1시간 39분을 태웠다).
 # ⚠️ CI가 이걸 안 밟는 것은 이 러너의 성질이 아니다 — ci.yaml:245가 이 러너를 `&`로 띄우기 때문이다
-#    (비대화형 bash의 async 명령은 fd 0이 /dev/null). `make ci`는 포그라운드라 호출자 fd 0을 그대로
+#    (비대화형 bash의 async 명령은 fd 0이 /dev/null). `just ci`는 포그라운드라 호출자 fd 0을 그대로
 #    물려받는다. 즉 venue가 갈리는 자리이므로 **러너가 스스로 끊는다**.
 # 아래 수집 루프는 각자 자기 리다이렉트(`< tests/.ci-exclude`, `< <(git ls-files …)`)를 쓰므로 무영향.
 exec 0</dev/null
@@ -67,7 +67,7 @@ done < <(git ls-files '*test_*.bats' | LC_ALL=C sort)
 #     러너(4 vCPU)에서는 직렬 bats 574s가 게이트 12분의 8할이었다.
 #   직렬 레인 — `tests/.gate-serial` 등재 파일을 병렬 레인이 **끝난 뒤 혼자** 돈다. 등재 기준은 하나:
 #     그 스위트가 실 체크아웃(추적 파일·untracked 생성·.git/index)을 잠깐 바꾼다. 병렬로 돌리면 그
-#     창을 밟은 다른 프로세스의 가드(check-skeleton·check-doc-index·`make ci-guard-tracked`…)가 거짓
+#     창을 밟은 다른 프로세스의 가드(check-skeleton·check-doc-index·`just ci-guard-tracked`…)가 거짓
 #     red를 낸다(실측: 14 jobs 8회 중 8회 재현). 레지스트리 계약은 check-bats-accounting.sh (2b)가 강제한다.
 # ⚠️ 등재 항목이 수집 집합 밖이면 여기서 죽는다(exit 2) — 오타·이동·.ci-exclude 중복 등재로 직렬 레인이
 #    조용히 비는 것을 막는다. `--list`보다 앞에 두어 회계 가드의 `--list` 호출도 같은 검사를 지난다.

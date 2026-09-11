@@ -58,7 +58,7 @@ data:
           #    `unless`가 그 앱을 지우지 못해 **상시 오탐**이 된다. (구 `image_id` 소스는 컨테이너가 뜨기만 하면
           #    항상 digest 형태라 이 의존이 **없었다** — 즉 픽스가 전제를 하나 늘렸다.)
           #    이 전제는 `scripts/check-image-pins.sh` **레인2**(apps/*/deploy/prod/values.yaml의 image 블록에
-          #    `digest: sha256:` 블록-스코프 강제, `make verify` 배선)가 게이트로 지킨다. 좌변 app 집합은
+          #    `digest: sha256:` 블록-스코프 강제, `just verify` 배선)가 게이트로 지킨다. 좌변 app 집합은
           #    digest-exporter의 `APPS`(=apps/ 디렉토리 parity)라 레인2 스코프와 **정확히 일치**한다.
           #    공유 차트 `_helpers.tpl`의 `app.image`는 digest 부재 시 **조용히 `repo:tag`로 폴백**하므로(렌더는
           #    성공 — 실패로 드러나지 않는다) 그 게이트가 **유일한 방어선**이다.

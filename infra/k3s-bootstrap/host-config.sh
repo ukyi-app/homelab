@@ -252,7 +252,7 @@ $RUN systemctl try-reload-or-restart ssh.service
 #       저널 실측 2026-09-06: 00:16:51 Reconfiguring·`DHCP lease lost` → 00:16:53 acquired).
 #       그 주소는 K3S_NODE_IP이자 AdGuard LoadBalancer VIP다 — 그래서 미리 알린다.
 #       `--apply`는 프로비저닝 시 1회 대화형 실행이므로(README) 이 순간 blip은 수용 가능하다.
-#    🔴 그런데 그 2초는 **이 스크립트의 종료 뒤**에 걸쳐 있었다. `host-config.sh --apply && make up`으로
+#    🔴 그런데 그 2초는 **이 스크립트의 종료 뒤**에 걸쳐 있었다. `host-config.sh --apply && just up`으로
 #       이으면 host-up [1/4] host-preflight의 [4](`ip -o -4 addr show` 열거)가 정확히 그 창을 밟아
 #       「핀한 K3S_NODE_IP가 어느 인터페이스에도 없다」로 FAIL한다(2026-09-06 00:16 실측 — 설정 결함이
 #       아니라 재실행이면 통과하는 flake). 자기가 낸 부작용은 자기가 흡수한다: 아래 net_settled가
@@ -288,7 +288,7 @@ if ls "$TREE"/etc/systemd/network/*.network.d/*.conf >/dev/null 2>&1; then
     _waited=0
     until net_settled "$cfg_iface"; do
       [ "$_waited" -lt "$_net_wait_max" ] \
-        || fail "networkctl reconfigure ${cfg_iface} 뒤 ${_net_wait_max}초 안에 ${K3S_NODE_IP}가 돌아오지 않았다 — networkctl status ${cfg_iface} 로 링크 상태를 볼 것(DHCP 예약 MAC d4:94:a9:26:95:3a). 이대로 make up을 이으면 host-preflight [4]가 같은 이유로 FAIL한다"
+        || fail "networkctl reconfigure ${cfg_iface} 뒤 ${_net_wait_max}초 안에 ${K3S_NODE_IP}가 돌아오지 않았다 — networkctl status ${cfg_iface} 로 링크 상태를 볼 것(DHCP 예약 MAC d4:94:a9:26:95:3a). 이대로 just up을 이으면 host-preflight [4]가 같은 이유로 FAIL한다"
       sleep 1
       _waited=$((_waited + 1))
     done

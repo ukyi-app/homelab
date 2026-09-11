@@ -4,7 +4,7 @@
 # LIVE: kubectl 컨텍스트 = k3s 노드; tailnet에 연결된 기기에서 실행.
 
 setup() {
-  # DOMAIN 기본값 — make verify-posture는 KUBECONFIG만 주입하므로 기본 zone(ukyi.app)으로 폴백한다.
+  # DOMAIN 기본값 — just verify-posture는 KUBECONFIG만 주입하므로 기본 zone(ukyi.app)으로 폴백한다.
   # 다른 zone을 테스트하려면 `DOMAIN=… bats …`로 override(:= 는 미설정일 때만 대입).
   : "${DOMAIN:=ukyi.app}"
 }

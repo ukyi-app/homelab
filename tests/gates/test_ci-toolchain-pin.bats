@@ -34,3 +34,16 @@ setup() {
   run grep -E 'get\.helm\.sh/helm-v[0-9]+\.[0-9]+\.[0-9]+' .github/actions/setup-toolchain/action.yml
   [ "$status" -eq 0 ]
 }
+
+@test "just is pinned and installed before the CI and IaC entrypoints" {
+  local wf
+  run yq -r '.inputs.just.description' .github/actions/setup-toolchain/action.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = "just v1.58.0" ]
+  for wf in ci.yaml iac.yaml; do
+    run yq -e '.jobs[].steps[] | select(.uses == "./.github/actions/setup-toolchain") | select(.with.just == "true")' ".github/workflows/$wf"
+    [ "$status" -eq 0 ]
+  done
+  run grep -F 'set minimum-version := "1.58.0"' justfile
+  [ "$status" -eq 0 ]
+}

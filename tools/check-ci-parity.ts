@@ -1,9 +1,9 @@
-// `make ci` ↔ ci.yaml job `gate` **패리티 회계**.
+// `just ci` ↔ ci.yaml job `gate` **패리티 회계**.
 //
-// 병: Makefile은 `ci` 타깃을 "ci.yaml job 'gate'를 로컬에서 그대로 재현"이라고 선언한다. 그런데 그 주장을
+// 병: justfile은 `ci` 타깃을 "ci.yaml job 'gate'를 로컬에서 그대로 재현"이라고 선언한다. 그런데 그 주장을
 // 검증하던 것은 `test_make-ci-parity.bats`의 **하드코딩된 5개 토큰**(chart·ledger·audit·shellcheck·
-// alertmanager-e2e)이 `make -n ci`에 있는지 보는 것뿐이었다. 즉 목록에 없는 게이트 스텝은 아무리 늘어나도
-// 보이지 않는다 — 실측 시점에 gate의 run 스텝 19개 중 **8개**가 `make ci`에 없었는데 전 검사가 초록이었다.
+// alertmanager-e2e)이 `just --dry-run ci`에 있는지 보는 것뿐이었다. 즉 목록에 없는 게이트 스텝은 아무리 늘어나도
+// 보이지 않는다 — 실측 시점에 gate의 run 스텝 19개 중 **8개**가 `just ci`에 없었는데 전 검사가 초록이었다.
 // 하필 하드코딩된 5개가 전부 미러된 것들이라 "우연히" 통과한 것이다.
 //
 // 이건 이 레포가 반복해서 맞은 클래스다(재핀 소비처 하드코딩 목록이 레포와 어긋남). 처방도 같다 —
@@ -14,38 +14,38 @@
 //   ② 모든 스텝은 원장(policy/ci-parity.json)에 **계상**돼야 한다. 미계상 = red → 새 게이트 스텝을 넣는
 //      사람이 "이건 로컬에서 어떻게 도는가"를 반드시 답하게 된다.
 //   ③ 죽은 선언(원장엔 있는데 ci.yaml엔 없는 스텝) = red. 아무도 대조하지 않는 주장은 원장이 아니다.
-//   ④ `mirrored`는 선언한 로컬 커맨드가 **`make -n ci` 실제 출력에** 있어야 한다. 여기가 load-bearing이다 —
-//      단, 대조 전에 출력을 정제한다. `make -n ci` 출력에는 **호출이 아닌 것**이 섞여 있다: 전제 프로브
+//   ④ `mirrored`는 선언한 로컬 커맨드가 **`just --dry-run ci` 실제 출력에** 있어야 한다. 여기가 load-bearing이다 —
+//      단, 대조 전에 출력을 정제한다. `just --dry-run ci` 출력에는 **호출이 아닌 것**이 섞여 있다: 전제 프로브
 //      `command -v <도구>`와, 도구 부재 시 이름만 남기는 미평가 라벨 append. 둘 다 그 도구를 부르지
 //      않는데 문자열은 남는다 — 원문에 대조를 걸면 **실제 호출만 지워도 통과한다**(실측: `then actionlint;`를
 //      `then :;`로 바꿔도 초록. 선언이 자기 자신을 증명한다).
-//      Makefile에서 스텝이 빠지면 이 검사가 red를 낸다(Makefile 텍스트를 파싱하지 않는다. make 자신에게
+//      justfile에서 스텝이 빠지면 이 검사가 red를 낸다(justfile 텍스트를 파싱하지 않는다. just 자신에게
 //      해소를 맡긴다 — 조건부·변수·전제 타깃을 사람이 다시 구현하면 그 재구현이 곧 다음 드리프트다).
 //   ⑤ `covered`는 로컬의 **다른 메커니즘**이 덮는 경우다. 그 메커니즘이 실재하는지(파일·문자열)를 검사한다.
 //   ⑥ `excluded`는 로컬에서 안 도는 것이다. why·since·owner_action이 전부 있어야 한다 — 선언되지 않은
 //      부재는 통과할 수 없고, 사유 없는 선언도 통과할 수 없다.
 //
-//   ⑦ `mirrored`의 `local` 배열이 **ci.yaml 스텝 본문의 커맨드 전건**을 담는지. ④는 원장 → Makefile
+//   ⑦ `mirrored`의 `local` 배열이 **ci.yaml 스텝 본문의 커맨드 전건**을 담는지. ④는 원장 → justfile
 //      한 방향뿐이라, ci.yaml 스텝에 가드를 추가하고 원장에 안 적어도 아무도 red를 못 냈다 —
 //      실측 2026-08-21: `실 도메인 가드` 스텝의 커맨드 10건 중 원장엔 **8건**만 있었고
 //      `check-locale-collation`·`check-gh-secret-coverage`가 빠진 채 오래 초록이었다. 그 목록이
 //      곧 AGENTS.md가 금지하는 **하드코딩 소비처 목록**이었다. ⇒ 목록을 ci.yaml에서 파생해 대조한다.
-//      (④는 그대로 둔다: ⑦은 "원장이 스텝을 다 담았는가", ④는 "담긴 것이 make ci에서 실제로 도는가".)
+//      (④는 그대로 둔다: ⑦은 "원장이 스텝을 다 담았는가", ④는 "담긴 것이 just ci에서 실제로 도는가".)
 //
 //   ⑧ `mirrored`의 `local` 토큰이 **그 gate 스텝의 run 본문에도** 실재하는지. ④·⑦은 스텝을
-//      **이름**으로만 계상한다 — 그래서 이름을 보존한 채 본문만 갈아치우면 ④는 Makefile 쪽
+//      **이름**으로만 계상한다 — 그래서 이름을 보존한 채 본문만 갈아치우면 ④는 justfile 쪽
 //      문자열로 통과하고, ⑦은 본문에 커맨드가 없어 **침묵**한다(방향 ⑦은 "보이는 커맨드가 원장에
 //      있는가"만 본다). 실측 2026-09-03: 실 ci.yaml의 `run: bun run verify:ledger`를
 //      `run: echo swapped`로 바꿔도 ci-parity·guard-authority·workflow-readiness가 전건 초록이었다
 //      (겹은 bats 두 레인뿐 — 그것도 하드코딩된 네 토큰에 한정된다). ⑧이 그 자리를 문다.
-//      표기가 **정당하게 다른** 스텝(gate는 `make chart-test`를 부르고 make ci는 그 타깃의 레시피를
+//      표기가 **정당하게 다른** 스텝(gate는 `just chart-test`를 부르고 just ci는 그 타깃의 레시피를
 //      편다)은 항목에 `gate_contains`로 본문 쪽 토큰을 명시한다. 그 필드는 `local`이 이미 본문에
 //      있으면 **거부**되므로 손 관리 문자열이 두 벌로 번지지 않는다.
 //      covered/excluded는 ⑧의 대상 밖이다 — covered는 "**다른** 로컬 수단이 덮는다"는 선언이라
 //      gate 본문과 대조할 토큰 자체가 없고(covered_by는 덮는 쪽 파일이다), excluded는 local이 없다.
 //
-// ⚠️ 이 도구는 "gate와 make ci가 같다"를 증명하지 않는다. **모든 차이가 의도된 것인지**를 증명한다.
-//    그 구분이 핵심이다 — 완전 일치를 강제하면 docker 없는 환경에서 make ci가 못 돌고, 결국 아무도 안 쓴다.
+// ⚠️ 이 도구는 "gate와 just ci가 같다"를 증명하지 않는다. **모든 차이가 의도된 것인지**를 증명한다.
+//    그 구분이 핵심이다 — 완전 일치를 강제하면 docker 없는 환경에서 just ci가 못 돌고, 결국 아무도 안 쓴다.
 
 import { existsSync, readFileSync } from "node:fs";
 import { sh as shExec } from "./lib/exec.ts";
@@ -100,11 +100,11 @@ const fail = (m: string) => errors.push(m);
 
 function sh(cmd: string, args: string[]): string {
   // seam 경유 — 실패는 throw(파생 실패를 guardMain이 열거 실패로 접는 계약). 64MiB 캡처 유지.
-  // timeoutMs 0 = 종전 execFileSync 무-timeout 보존(make -n ci가 느린 머신에서 30s를 넘을 수 있다).
+  // timeoutMs 0 = 종전 execFileSync 무-timeout 보존(just --dry-run ci가 느린 머신에서 30s를 넘을 수 있다).
   const r = shExec(cmd, args, { cwd: ROOT, timeoutMs: 0, maxBuffer: 64 * 1024 * 1024 });
   // 문구에 argv 앞부분을 실어 **어느 파생**이 죽었는지 가른다(스텝 이름/본문 파생이 같은 yq -r 접두다).
   if (!r.ok) throw new Error(`${cmd} ${args.join(" ").slice(0, 160)} 실패: ${r.err || `exit ${r.status}`}`);
-  return r.out;
+  return cmd === "just" && args.includes("--dry-run") ? r.err : r.out;
 }
 
 // ── ① gate의 run 스텝을 ci.yaml에서 파생 ──────────────────────────────────────────────────────────
@@ -202,16 +202,16 @@ function stripHashComments(s: string): string {
     .join("\n");
 }
 
-// `make -n ci` 출력·covered_by 대상 파일에서 **실제 호출이 아닌 텍스트**를 지운다(④ mirrored ·
+// `just --dry-run ci` 출력·covered_by 대상 파일에서 **실제 호출이 아닌 텍스트**를 지운다(④ mirrored ·
 // ⑤ covered_by 공용).
 //   · `command -v <도구>` — 전제 프로브다. 도구의 존재를 묻지, 도구를 부르지 않는다.
 //   · `echo "…" >> <파일>` — 미평가 원장에 이름만 남기는 append다. 부르지 못했다는 기록이지 호출이 아니다.
-//   · `#` 주석(행두·trailing 모두, quote-aware) — recipe 줄의 `#`는 make 주석이 **아니라** 셸에
+//   · `#` 주석(행두·trailing 모두, quote-aware) — recipe 줄의 `#`는 just 주석이 **아니라** 셸에
 //     그대로 넘어가므로 `-n` 출력에 리터럴로 남는다. 즉 recipe 한 줄을 `#`로 막아도
-//     `makeExec.includes(w)`가 참이 돼 mirrored 전건이 조용히 초록이 된다(실측 2026-09-04: Makefile의
+//     `justExec.includes(w)`가 참이 돼 mirrored 전건이 조용히 초록이 된다(실측 2026-09-04: justfile의
 //     `bun run verify:ledger`를 `# bun run verify:ledger`로 바꿔도 `mirrored 24 · covered 2` rc=0으로
 //     before/after 동일). 형제 관용구는 tools/check-guard-authority.ts의 stripComment — 같은
-//     `make -n` 텍스트에 행두 앵커를 이미 쓴다(이 함수는 trailing까지 포함해 더 넓다).
+//     `just --dry-run` 텍스트에 행두 앵커를 이미 쓴다(이 함수는 trailing까지 포함해 더 넓다).
 // 변수명(`CI_UNEVAL`)에 기대지 않는다 — 그 이름이 바뀌면 정제가 조용히 멎고 fail-open이 돌아온다.
 // recipe의 append-echo는 구조상 게이트 호출일 수 없으므로 형태로 지운다.
 // 실측 2026-08-28: 실 레포 mirrored 22항목·local 34문자열에 대해 정제로 사라지는 것 **0건**(오탐 없음).
@@ -266,7 +266,7 @@ function reconcile(): string[] {
     if (!byName.has(n)) {
       fail(
         `게이트 스텝이 원장에 없다: "${n}"\n` +
-          `    → ${LEDGER}에 계상하라. mirrored(make ci가 같은 걸 돈다) / covered(다른 로컬 수단이 덮는다) /\n` +
+          `    → ${LEDGER}에 계상하라. mirrored(just ci가 같은 걸 돈다) / covered(다른 로컬 수단이 덮는다) /\n` +
           `      excluded(로컬에선 안 돈다 — why·since·owner_action 필수) 중 하나를 골라야 한다.`,
       );
     }
@@ -279,32 +279,32 @@ function reconcile(): string[] {
     }
   }
 
-  // ── ④ mirrored: make -n ci 실측 대조 ──────────────────────────────────────────────────────────
-  let makeOut = "";
-  let makeExec = "";
-  const needMake = [...byName.values()].some((e) => e.status === "mirrored");
-  if (needMake) {
+  // ── ④ mirrored: just --dry-run ci 실측 대조 ──────────────────────────────────────────────────────────
+  let justOut = "";
+  let justExec = "";
+  const needJust = [...byName.values()].some((e) => e.status === "mirrored");
+  if (needJust) {
     try {
-      makeOut = sh("make", ["-n", "ci"]);
+      justOut = sh("just", ["--dry-run", "ci"]);
     } catch (e) {
       // ⚠️ 여기서 조용히 넘어가면 mirrored 전건이 무검사로 통과한다(fail-open). 명시적으로 죽인다.
-      fail(`\`make -n ci\` 실행 실패 — mirrored 항목을 하나도 검증할 수 없다: ${(e as Error).message}`);
+      fail(`\`just --dry-run ci\` 실행 실패 — mirrored 항목을 하나도 검증할 수 없다: ${(e as Error).message}`);
     }
-    if (makeOut.trim().length === 0) fail("`make -n ci` 출력이 비었다 — mirrored 검증이 무측정이 된다.");
-    makeExec = execOnly(makeOut);
+    if (justOut.trim().length === 0) fail("`just --dry-run ci` 출력이 비었다 — mirrored 검증이 무측정이 된다.");
+    justExec = execOnly(justOut);
   }
 
   // ── 프로덕션 호출은 floor-free다 ──────────────────────────────────────────────────────────────
   // --floor는 테스트·픽스처 전용 오버라이드다. env 주입 폐지 결정("한 줄로 required gate의 바닥값이
   // 꺼졌다")의 승계가 "argv라 호출자에게 보인다"는 주장인데, 그 주장을 사람 눈에만 맡기면 되돌림
-  // 한 줄이 조용히 통과한다 — 이 회계가 기계로 진다(gate 스텝 본문 + make -n ci 실측 양쪽).
+  // 한 줄이 조용히 통과한다 — 이 회계가 기계로 진다(gate 스텝 본문 + just --dry-run ci 실측 양쪽).
   for (const [n, run] of runByName) {
     if (run.includes("--floor")) {
       fail(`"${n}": gate 스텝이 --floor를 넘긴다 — 프로덕션 호출은 floor-free여야 한다(바닥값은 콜사이트 상수).`);
     }
   }
-  if (makeOut.includes("--floor")) {
-    fail("`make -n ci` 출력에 --floor가 있다 — 프로덕션 호출은 floor-free여야 한다(바닥값은 콜사이트 상수).");
+  if (justOut.includes("--floor")) {
+    fail("`just --dry-run ci` 출력에 --floor가 있다 — 프로덕션 호출은 floor-free여야 한다(바닥값은 콜사이트 상수).");
   }
 
   for (const e of byName.values()) {
@@ -320,25 +320,25 @@ function reconcile(): string[] {
     switch (e.status) {
       case "mirrored": {
         // local은 문자열 하나 또는 **배열**이다. 배열이 필요한 이유: 게이트 스텝 하나가 여러 스위트를
-        // 덮을 수 있다(예: bats ∥ 발화 e2e 동시 실행). 그때 문자열 하나만 대조하면 나머지가 make ci에서
+        // 덮을 수 있다(예: bats ∥ 발화 e2e 동시 실행). 그때 문자열 하나만 대조하면 나머지가 just ci에서
         // 빠져도 통과한다 — 부분 대조는 대조가 아니다. **전건**이 있어야 한다.
         const wants = Array.isArray(e.local) ? e.local : e.local ? [e.local] : [];
         if (wants.length === 0) { fail(`"${e.name}": mirrored인데 local(대조할 커맨드 문자열)이 없다.`); break; }
         for (const w of wants) {
           if (typeof w !== "string" || w.length === 0) { fail(`"${e.name}": local 항목이 빈 문자열이다.`); continue; }
-          if (makeOut && !makeExec.includes(w)) {
+          if (justOut && !justExec.includes(w)) {
             fail(
-              `"${e.name}": mirrored로 선언됐지만 \`make -n ci\` 출력에 '${w}'이(가) 없다.\n` +
-                `    → make ci에서 빠졌거나 커맨드가 바뀌었다. Makefile을 고치거나 원장 상태를 바꿔라.\n` +
+              `"${e.name}": mirrored로 선언됐지만 \`just --dry-run ci\` 출력에 '${w}'이(가) 없다.\n` +
+                `    → just ci에서 빠졌거나 커맨드가 바뀌었다. justfile을 고치거나 원장 상태를 바꿔라.\n` +
                 `      (전제 프로브 \`command -v\`와 미평가 라벨은 호출이 아니라 대조에서 제외된다.)`,
             );
           }
         }
         // ⑦ 역방향: ci.yaml 스텝 본문의 커맨드가 전부 local에 있는가.
-        // ⚠️ ④(원장 → make)만으로는 **원장에 안 적은 커맨드**가 원리적으로 안 보인다. 그 목록이
+        // ⚠️ ④(원장 → just)만으로는 **원장에 안 적은 커맨드**가 원리적으로 안 보인다. 그 목록이
         //    손 관리 로스터가 되는 자리이고, 실제로 10건 중 2건이 빠진 채 오래 초록이었다.
-        // ⚠️ 원장의 `local`은 **basename**이나 **글롭**이다(그 문자열은 `make -n ci` 출력 대조용이라
-        //    Makefile이 쓰는 형태를 따른다 — 예: `vmalert-*-firing-e2e.sh`는 Makefile이 글롭을 쓰기
+        // ⚠️ 원장의 `local`은 **basename**이나 **글롭**이다(그 문자열은 `just --dry-run ci` 출력 대조용이라
+        //    justfile이 쓰는 형태를 따른다 — 예: `vmalert-*-firing-e2e.sh`는 justfile이 글롭을 쓰기
         //    때문이다). 전체 경로로만 대조하면 이 방향이 **정상 원장을 물어** 아무도 안 켠다.
         const body = runByName.get(e.name) ?? "";
         const inStep = commandsIn(body);
@@ -350,11 +350,11 @@ function reconcile(): string[] {
             );
           }
         }
-        // ⑧ 이름 보존 + 본문 교체 — ④(원장→make)도 ⑦(본문→원장)도 못 보는 자리다.
+        // ⑧ 이름 보존 + 본문 교체 — ④(원장→just)도 ⑦(본문→원장)도 못 보는 자리다.
         // ⑦이 못 보는 이유가 요점이다: 본문에 레포 커맨드가 없으면 대조할 것이 0건이라 **침묵**한다.
         // 여기서는 반대로 **원장이 선언한 토큰이 본문에 실재하는지**를 묻는다.
         if (e.gate_contains !== undefined) {
-          // 표기가 정당하게 다른 자리(gate = make 타깃 · make ci = 그 타깃의 레시피)만 이 필드를
+          // 표기가 정당하게 다른 자리(gate = just 타깃 · just ci = 그 타깃의 레시피)만 이 필드를
           // 쓴다. local이 이미 본문에 있는데도 선언하면 **손 관리 문자열이 두 벌**이 되므로 거부한다 —
           // 그 거부가 이 필드를 원장 전역으로 번지지 않게 하는 기계 장치다(선언 가능 ≠ 선언 허용).
           if (typeof e.gate_contains === "string" && e.gate_contains.length > 0) {
@@ -375,7 +375,7 @@ function reconcile(): string[] {
             if (!body.includes(w)) {
               fail(
                 `"${e.name}": gate 스텝 본문에 local '${w}'이(가) 없다 — 이름을 보존한 채 run 본문이 갈렸다.\n` +
-                  `    → 본문을 되돌리거나, 표기가 정당하게 다르면(gate가 make 타깃을 부르는 경우 등)\n` +
+                  `    → 본문을 되돌리거나, 표기가 정당하게 다르면(gate가 just 타깃을 부르는 경우 등)\n` +
                   `      그 항목에 gate_contains로 본문 쪽 토큰을 명시하라.`,
               );
             }

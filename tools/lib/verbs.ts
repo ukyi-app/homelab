@@ -184,7 +184,7 @@ function appTeardownOp(input: AppTeardownInput): Envelope {
     dispatchInputs: [["app", input.app], ["confirm", input.confirm]],
     // resourcesRetained — DB/캐시는 **제거되지 않았다**(teardown-app 계약: conn·CR·Valkey 절대
     // 비접촉). dnsReclaim이 '다른 소관'을 말하는 것과 달리 이쪽은 **미완 작업**을 말한다: 잔여
-    // 정리는 owner-local `make teardown-resource`뿐이고 attestation을 요구한다. 후보 열거는 하지
+    // 정리는 owner-local `just teardown-resource`뿐이고 attestation을 요구한다. 후보 열거는 하지
     // 않는다(이름≠앱 케이스에서 엉뚱한 리소스를 지목한다).
     resultBase: { action: lane.action, name: input.app, dnsReclaim: "iac/tf-reconcile", resourcesRetained: "teardown-resource" },
     manualMerge: { approval: "파괴 승인" }, // 머지 = 파괴 승인 — auto-merge를 켜는 어떤 경로도 없다

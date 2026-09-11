@@ -7,7 +7,7 @@
 #    라이브 버그" — 이 가드가 없던 시절, helm install 실패가 `... | grep ... || true`에 먹혀 rc 0으로
 #    "bootstrap complete"까지 찍혔다. 지금은 :29-30이 명시적으로 fail-closed지만, 이를 실행-검증하는
 #    @test가 레포에 0개였다(git grep이 찾는 test_makefile·test_check-doc-index·test_make-ops-targets는
-#    전부 `make -n`(dry-run) 또는 문서 인덱스만 본다; infra/_tests/test_bootstrap.bats는 tests/.ci-exclude
+#    전부 `just --dry-run`(dry-run) 또는 문서 인덱스만 본다; infra/_tests/test_bootstrap.bats는 tests/.ci-exclude
 #    manual venue의 라이브 DR idempotency 드릴이라 helm 실패 경로 자체를 원리적으로 못 본다).
 sh=scripts/bootstrap.sh
 

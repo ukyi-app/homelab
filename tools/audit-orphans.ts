@@ -104,7 +104,7 @@ const readJson = (p: string, d: any): any => (existsSync(p) ? JSON.parse(readFil
 // 접으면 apps.json 부재/파싱 실패가 "행 0개"로 위장돼 BLOCKING 3종(orphan-dns · activation-exposure-drift ·
 // missing-activation)이 전부 0건 평가되고 required check `gate`가 조용히 초록이 된다. 라이브 재현:
 // 진짜 missing-activation 위반이 있는 상태에서 apps.json만 치우면 blocking 1→0 · rc 1→0(stderr 0줄).
-// 레포 밖 cwd에서 기본 `--repo-root .`로 부르면(Makefile:102 · ci.yaml:72의 형태) 전 도메인이 0건이었다.
+// 레포 밖 cwd에서 기본 `--repo-root .`로 부르면(justfile:102 · ci.yaml:72의 형태) 전 도메인이 0건이었다.
 // ⚠️ 나머지 readJson 폴백 2곳(.tombstones.json · .activation 마커)은 **부재가 정상 상태**라 건드리지 않는다.
 // 값 검증(빈 값·공백이 유효한 0으로 통과하던 자리 — 적대 검토 실측)은 커널 parseFloor가
 // takeFloors 안에서 소유한다 — 이 파일의 검증 사본은 05에서 소멸했다.

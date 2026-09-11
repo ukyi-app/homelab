@@ -24,7 +24,7 @@ resources:
   # (test_vmalert-config.bats) Renovate가 두 자리를 한 PR에서 올린다.
   # ⚠️ 아래 줄에 꼬리 주석을 붙이지 마라 — 배선 전수 레인이 `^  - rules/<파일>$` 앵커로 문다.
   - rules/r8-substrate.yaml
-  - ghcr-read.sealed.yaml # digest-exporter private GHCR inspect 자격(owner: make seal-ghcr-read)
+  - ghcr-read.sealed.yaml # digest-exporter private GHCR inspect 자격(owner: just seal-ghcr-read)
   - digest-exporter.yaml
   - gha-liveness-exporter.yaml # GHA 스케줄 워크플로 liveness 하트비트(run 밖 관측자)
   - pvc-du-exporter.yaml  # per-PVC 용량 가시화 CronJob + 전용 egress netpol

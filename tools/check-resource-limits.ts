@@ -4,7 +4,7 @@
 // CNPG CR도 스캔한다: kind:Cluster는 컨테이너 개념이 없어 spec.resources를 pseudo-container 'postgres'로
 // (allowlist 키 Cluster/<name>/postgres), kind:Pooler는 spec.template.spec.containers[](pgbouncer)로 검사한다.
 // 구 scripts/check-resource-limits.sh(bash+yq+python3 3언어)를 bun/TS 단일로 이관.
-// 원격-helm 벤더(platform/*/prod/charts/)·barman-plugin은 스캔 밖. make verify가 호출, bats가 행동 검증.
+// 원격-helm 벤더(platform/*/prod/charts/)·barman-plugin은 스캔 밖. just verify가 호출, bats가 행동 검증.
 //
 // ── 두 스코프: platform(GitOps) + substrate(k3s-bootstrap) ────────────────────────────────────
 // `platform-manifests` 하나만 보던 시절, `infra/k3s-bootstrap/storage`가 적용하는 상주 워크로드
@@ -71,14 +71,14 @@ const CONTAINER_KINDS = new Set(["Deployment", "DaemonSet", "StatefulSet", "Pool
 const KIND_RE = /^[ \t]*kind:/m;
 // 열거 붕괴 바닥값. 2026-09-03 실측 스캔 21건 → **18**(3건 철거를 견딘다). 래칫 아님 —
 // 도메인이 줄지 않는 한 손댈 일이 없다. ⚠️ 초판 값 10은 실 도메인의 절반이라, 21건 중
-// 11건이 조용히 사라져도 초록이었다(호출부 Makefile:78,216·ci.yaml에 `--floor` 오버라이드가
+// 11건이 조용히 사라져도 초록이었다(호출부 justfile:78,216·ci.yaml에 `--floor` 오버라이드가
 // 0건이라 이 상수가 곧 유효 바닥값이다). 픽스처는 자기 크기를 `_seed_ok`로 맞춘다.
 const MIN_SCAN = 18;
 // substrate 스코프의 열거 붕괴 바닥값. 2026-09-03 실측 1건(local-path-provisioner.yaml — 나머지
 // 두 파일은 StorageClass라 KIND_RE 밖이다). **0으로 두면 안 된다**: 이 스코프가 0건이면 아래 원장
 // 대조가 좌변 없이 vacuous해지고, 대응 원장 행은 아무도 안 보는 채로 남는다(그 상태가 이 착지 전
 // 현실이었다). 픽스처는 자기 크기를 `--floor substrate=<n>`으로 명시한다(프로덕션 호출은 floor-free
-// — ci-parity가 gate 스텝·`make -n ci` 양쪽에서 그것을 강제한다).
+// — ci-parity가 gate 스텝·`just --dry-run ci` 양쪽에서 그것을 강제한다).
 const MIN_SUBSTRATE_SCAN = 1;
 // F2 커버리지 파생 붕괴 바닥값. 2026-09-04 실측 6 ns(cache·database·edge·files·homepage·
 // observability) → 2026-09-08 5 ns: cache:trip-mate purge로 `cache` ns의 상주 워크로드가 0이 돼 커버리지

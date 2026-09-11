@@ -130,5 +130,5 @@ write_index() {   # $@: 인덱스에 나열할 런북 파일명
 }
 
 @test "existing verify-runbooks DR bats runner target is preserved (not replaced, F2)" {
-  run grep -Eq 'bats .*docs/runbooks|bats "\$\$RB"' "$ROOT/Makefile"; [ "$status" -eq 0 ]
+  run grep -Eq 'bats .*docs/runbooks|bats "\$\$RB"' "$ROOT/justfile"; [ "$status" -eq 0 ]
 }

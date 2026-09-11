@@ -2,10 +2,10 @@
 # G1 권위 경로 회계(tools/check-guard-authority.ts)의 gate 테스트.
 #
 # 병: 가드가 추가되고, README에 등재되고, 전 게이트가 초록이고, **CI에서 한 번도 실행되지 않을 수 있다.**
-# required check는 `gate` 하나인데 `make verify`는 CI에서 안 돈다 — 두 스텝 목록을 대조하는 것이 없었다.
+# required check는 `gate` 하나인데 `just verify`는 CI에서 안 돈다 — 두 스텝 목록을 대조하는 것이 없었다.
 #
-# 이 스위트가 지켜야 할 것은 회계의 **판별력**이다: 권위 0을 잡는가, 그리고 mirror(make verify)를
-# 권위로 착각하지 않는가. 픽스처는 최소 레포(git init + ci.yaml + Makefile)로 만든다 — 실 레포로만
+# 이 스위트가 지켜야 할 것은 회계의 **판별력**이다: 권위 0을 잡는가, 그리고 mirror(just verify)를
+# 권위로 착각하지 않는가. 픽스처는 최소 레포(git init + ci.yaml + justfile)로 만든다 — 실 레포로만
 # 단언하면 전건 통과라 죽은 가드가 된다(PROGRESS.md 규율: 새 규칙마다 mutation으로 load-bearing 실측).
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 
@@ -38,16 +38,16 @@ jobs:
       - run: bash scripts/check-real.sh
 YAML
 
-  # Makefile — verify(=mirror)는 셋 중 둘을 부르지만 권위가 아니다.
-  printf 'verify: ## mirror\n\t@bash scripts/check-mirrored.sh\n\t@bash scripts/check-real.sh\n' > "$FIX/Makefile"
+  # justfile — verify(=mirror)는 셋 중 둘을 부르지만 권위가 아니다.
+  printf 'verify: ## mirror\n\t@bash scripts/check-mirrored.sh\n\t@bash scripts/check-real.sh\n' > "$FIX/justfile"
 
   git -C "$FIX" add -A
 }
 
 run_tool() { run bun "$TOOL" --repo-root "$FIX" --floor guards=3 "$@"; }
 
-@test "a guard reachable only through the local mirror (make verify) counts as orphaned" {
-  # 이 구분이 회계의 핵심이다 — make verify는 CI에서 돌지 않으므로 거기 있다는 건 보호가 아니다.
+@test "a guard reachable only through the local mirror (just verify) counts as orphaned" {
+  # 이 구분이 회계의 핵심이다 — just verify는 CI에서 돌지 않으므로 거기 있다는 건 보호가 아니다.
   run_tool
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "scripts/check-mirrored.sh"
@@ -72,9 +72,9 @@ run_tool() { run bun "$TOOL" --repo-root "$FIX" --floor guards=3 "$@"; }
 }
 
 @test "overlapping venues pass — authoritative>=1 plus N non-authoritative is not double ownership" {
-  # 초안 모델이 `count == 1`이었다면 check-real(gate + make verify)이 이중소유 오탐이었다.
+  # 초안 모델이 `count == 1`이었다면 check-real(gate + just verify)이 이중소유 오탐이었다.
   # 비권위 경로를 더 늘려도 판정이 바뀌지 않아야 한다.
-  printf 'verify: ## mirror\n\t@bash scripts/check-real.sh\n\nci: ## mirror2\n\t@bash scripts/check-real.sh\n' > "$FIX/Makefile"
+  printf 'verify: ## mirror\n\t@bash scripts/check-real.sh\n\nci: ## mirror2\n\t@bash scripts/check-real.sh\n' > "$FIX/justfile"
   rm "$FIX/scripts/check-mirrored.sh" "$FIX/scripts/check-orphan.sh"
   git -C "$FIX" add -A
   run bun "$TOOL" --repo-root "$FIX" --floor guards=1
@@ -106,7 +106,7 @@ YAML
 @test "invocation through a shell variable binding is detected (no false orphan)" {
   # 실측 형태: CHECK="$ROOT/scripts/check-x.sh" … run bash "$CHECK"
   # (tools/tests/test_app-deploy.bats:7,45). 직접 경로만 보면 그 가드가 고아로 오탐된다.
-  printf 'verify: ## mirror\n\t@true\n' > "$FIX/Makefile"
+  printf 'verify: ## mirror\n\t@true\n' > "$FIX/justfile"
   cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
 name: ci
 on: [pull_request]
@@ -126,7 +126,7 @@ YAML
 
 @test "a mere mention in a comment is not an invocation" {
   # 주석의 언급이 권위로 둔갑하면 회계가 통째로 vacuous해진다.
-  printf 'verify: ## mirror\n\t@true\n' > "$FIX/Makefile"
+  printf 'verify: ## mirror\n\t@true\n' > "$FIX/justfile"
   cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
 name: ci
 on: [pull_request]
@@ -152,7 +152,7 @@ YAML
 # (실측 2026-09-05, 격리 fixture: check-real.sh만 부르는 스텝을 `if: false`로 막아도 orphan 목록에
 # check-real.sh가 없었다). liveGateSteps가 세 축(스텝 if · job if · continue-on-error)을 걸러낸다.
 @test "a step gated by if: false is not an authoritative invocation (dead CI step)" {
-  printf 'verify: ## mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  printf 'verify: ## mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/justfile"
   cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
 name: ci
 on: [pull_request]
@@ -171,7 +171,7 @@ YAML
 }
 
 @test "a job gated by if: false is not an authoritative invocation (dead CI job, job-level skip is the same face)" {
-  printf 'verify: ## mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  printf 'verify: ## mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/justfile"
   cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
 name: ci
 on: [pull_request]
@@ -190,7 +190,7 @@ YAML
 }
 
 @test "continue-on-error: true on a gate step is not an authoritative invocation" {
-  printf 'verify: ## mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  printf 'verify: ## mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/justfile"
   cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
 name: ci
 on: [pull_request]
@@ -209,11 +209,11 @@ YAML
 }
 
 # ①(gate venue)은 liveGateSteps로 if:false 스텝을 걸러
-# workflowText에 push하지만, ④(make 타깃 권위 계산)는 ci.yaml을 원문으로 재스캔해 그 필터를
-# 무력화한다 — if:false 스텝이 `run: make <target>`이면 그 타깃의 recipe가 부르는 가드가
-# 여전히 권위(authoritative)로 승격된다. 위 154행 레인과 대조하면 차이는 오직 간접(make 타깃 경유)뿐.
-@test "a step gated by if: false invoking make <target> does not promote that target's guard (block 4 bypass)" {
-  printf 'deadtarget: ## should stay mirror\n\t@bash scripts/check-real.sh\n' > "$FIX/Makefile"
+# workflowText에 push하지만, ④(just 타깃 권위 계산)는 ci.yaml을 원문으로 재스캔해 그 필터를
+# 무력화한다 — if:false 스텝이 `run: just <target>`이면 그 타깃의 recipe가 부르는 가드가
+# 여전히 권위(authoritative)로 승격된다. 위 154행 레인과 대조하면 차이는 오직 간접(just 타깃 경유)뿐.
+@test "a step gated by if: false invoking just <target> does not promote that target's guard (block 4 bypass)" {
+  printf 'deadtarget: ## should stay mirror\n\t@bash scripts/check-real.sh\n' > "$FIX/justfile"
   cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
 name: ci
 on: [pull_request]
@@ -222,7 +222,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - if: false
-        run: make deadtarget
+        run: just deadtarget
 YAML
   rm "$FIX/scripts/check-mirrored.sh" "$FIX/scripts/check-orphan.sh"
   git -C "$FIX" add -A
@@ -236,7 +236,7 @@ YAML
 @test "a local mirror is non-authoritative under any target name (not a hardcoded name list)" {
   rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-orphan.sh"
   for name in verify verify-all local-checks; do
-    printf '%s: ## local mirror\n\t@bash scripts/check-mirrored.sh\n' "$name" > "$FIX/Makefile"
+    printf '%s: ## local mirror\n\t@bash scripts/check-mirrored.sh\n' "$name" > "$FIX/justfile"
     git -C "$FIX" add -A
     run bun "$TOOL" --repo-root "$FIX" --floor guards=1
     [ "$status" -eq 1 ]
@@ -244,51 +244,51 @@ YAML
   done
 }
 
-# 반대 갈래 — skip 신호 규약을 쓰는 가드를 부르는 make 타깃은 권위다. 그 마커가
+# 반대 갈래 — skip 신호 규약을 쓰는 가드를 부르는 just 타깃은 권위다. 그 마커가
 # "이 도메인은 CI에 없을 수 있다"는 선언이고, 그때 owner-local 엔트리포인트가 유일한 권위이기 때문.
-@test "a make target invoking a SKIP-convention guard is authoritative (owner-local)" {
+@test "a just target invoking a SKIP-convention guard is authoritative (owner-local)" {
   printf '#!/usr/bin/env bash\necho "SKIP: mirrored: 도메인 없음"; exit 4\n' > "$FIX/scripts/check-mirrored.sh"
-  printf 'whatever: ## owner-local\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  printf 'whatever: ## owner-local\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/justfile"
   rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-orphan.sh"
   git -C "$FIX" add -A
   run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 0 ]
 }
 
-@test "a make target invoking a guard_skip-routed guard is authoritative (helper era)" {
+@test "a just target invoking a guard_skip-routed guard is authoritative (helper era)" {
   # 헬퍼 이관 후 콜사이트에는 emission이 없다 — 헬퍼 호출 자체가 skip 규약 사용의 증거다(오탐
   # 때문에 연기했던 확장). 이 인식이 없으면 헬퍼 경유 가드의 owner-local 권위가 죽는다.
   # ⚠️ 호출 행은 실 트리 형태(verify-runbook-index.sh:15)를 그대로 밟는다 — `${#files[@]}`의 `#`이
   # guard_skip **앞**에 있어, 주석-제외를 행 전역 문자클래스로 쓰면 이 행이 통째로 미탐이 된다(실측).
   printf '#!/usr/bin/env bash\n. scripts/lib/guard.sh\nguard_init check-mirrored\nfiles=()\nif [ ${#files[@]} -eq 0 ]; then guard_skip check-mirrored "도메인 없음"; fi\n' > "$FIX/scripts/check-mirrored.sh"
-  printf 'whatever: ## owner-local\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  printf 'whatever: ## owner-local\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/justfile"
   rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-orphan.sh"
   git -C "$FIX" add -A
   run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 0 ]
 }
 
-@test "a make target invoking a ts guard that calls skip(...) is authoritative" {
+@test "a just target invoking a ts guard that calls skip(...) is authoritative" {
   mkdir -p "$FIX/tools"
   printf 'import { skip } from "./lib/cli.ts";\nif (!process.env.DOMAIN) skip("check-tsguard", "도메인 없음");\n' > "$FIX/tools/check-tsguard.ts"
-  printf 'whatever: ## owner-local\n\t@bun tools/check-tsguard.ts\n' > "$FIX/Makefile"
+  printf 'whatever: ## owner-local\n\t@bun tools/check-tsguard.ts\n' > "$FIX/justfile"
   rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-mirrored.sh" "$FIX/scripts/check-orphan.sh"
   git -C "$FIX" add -A
   run bun "$TOOL" --repo-root "$FIX" --floor guards=1
   [ "$status" -eq 0 ]
 }
 
-@test "the real repo keeps make verify as a mirror (no self-promotion)" {
+@test "the real repo keeps just verify as a mirror (no self-promotion)" {
   # 리뷰 실측(11): 이 도구 자신의 주석 산문(백틱 인라인 코드 안의 TS 헬퍼 호출 모양)이 분기 ③에
-  # 매치하면 스스로 skipGuards에 들어가고, 자신을 부르는 make verify가 owner-local로 승격된다 —
-  # "make verify에만 있는 가드는 고아"라는 이 회계의 전제가 실 트리에서 무효가 된다.
-  # ⚠️ make:ci는 여기 안 넣는다 — ci recipe 자신이 SKIP 규약을 직접 쓴다(untracked 가드·미평가
-  #    원장, `make -n ci`에 'SKIP: ci:' 방출 2건 실측)라 ② 레인의 **정당한** owner-local이다.
+  # 매치하면 스스로 skipGuards에 들어가고, 자신을 부르는 just verify가 owner-local로 승격된다 —
+  # "just verify에만 있는 가드는 고아"라는 이 회계의 전제가 실 트리에서 무효가 된다.
+  # ⚠️ just:ci는 여기 안 넣는다 — ci recipe 자신이 SKIP 규약을 직접 쓴다(untracked 가드·미평가
+  #    원장, `just --dry-run ci`에 'SKIP: ci:' 방출 2건 실측)라 ② 레인의 **정당한** owner-local이다.
   bun "$TOOL" --json --repo-root "$ROOT" > "$BATS_TEST_TMPDIR/report.json"
   cat > "$BATS_TEST_TMPDIR/assert.ts" <<'TS'
 const r = await Bun.file(process.argv[2]).json();
 const bad = r.report.flatMap((g: { authoritative: string[] }) => g.authoritative)
-  .filter((v: string) => v === "make:verify");
+  .filter((v: string) => v === "just:verify");
 if (bad.length) { console.error("owner-local로 승격된 mirror: " + bad.join(", ")); process.exit(1); }
 console.log("mirrors stay mirrors");
 TS
@@ -300,7 +300,7 @@ TS
   # 02 리뷰의 오탐 2형("skip(cert" 문자열·"// skip(4)" 주석) + 산문·대입 — 규약을 다루는 코드는
   # 규약을 쓰는 가드가 아니다. 이들이 승격되면 mirror 타깃이 조용히 권위로 둔갑한다.
   printf '#!/usr/bin/env bash\nh="guard_skip"\necho "헬퍼(guard_skip / skip()) 경유만"\necho "skip(cert"\n# skip(4)은 내지 않는다\necho ok\n' > "$FIX/scripts/check-mirrored.sh"
-  printf 'whatever: ## still a mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/Makefile"
+  printf 'whatever: ## still a mirror\n\t@bash scripts/check-mirrored.sh\n' > "$FIX/justfile"
   rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-orphan.sh"
   git -C "$FIX" add -A
   run bun "$TOOL" --repo-root "$FIX" --floor guards=1
@@ -312,7 +312,7 @@ TS
 # 승격돼, 호출이 0건인 가드가 권위를 얻었다(vacuous pass).
 @test "a guard path inside a quoted pattern is not an invocation" {
   rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-mirrored.sh"
-  printf 'verify: ## mirror\n\t@true\n' > "$FIX/Makefile"
+  printf 'verify: ## mirror\n\t@true\n' > "$FIX/justfile"
   cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
 name: ci
 on: [pull_request]
@@ -333,7 +333,7 @@ YAML
 # 반대 방향의 실패(거짓 red)가 더 나쁘다 — 셸 키워드 뒤 호출을 못 보면 정당한 가드가 고아로 오탐된다.
 @test "an invocation behind a shell keyword (then/do) is detected" {
   rm -f "$FIX/scripts/check-real.sh" "$FIX/scripts/check-mirrored.sh"
-  printf 'verify: ## mirror\n\t@true\n' > "$FIX/Makefile"
+  printf 'verify: ## mirror\n\t@true\n' > "$FIX/justfile"
   cat > "$FIX/.github/workflows/ci.yaml" <<'YAML'
 name: ci
 on: [pull_request]

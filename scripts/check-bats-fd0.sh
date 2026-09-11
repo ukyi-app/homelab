@@ -5,16 +5,16 @@
 # 없이 fd 0을 읽으면(`cat`처럼) **호출자의 stdin에서 영원히 블록한다** — 실패도 출력도 없는 hang이다.
 # 이전 세션이 그 형태로 **1시간 39분**을 태웠다.
 # ⚠️ 더 나쁜 것은 venue가 갈린다는 점이다: `ci.yaml`은 러너를 `&`로 띄우는데 비대화형 bash의 async
-#    명령은 fd 0이 `/dev/null`이라 **CI는 우연히 면역**이다. `make ci`는 포그라운드라 호출자 fd 0을
+#    명령은 fd 0이 `/dev/null`이라 **CI는 우연히 면역**이다. `just ci`는 포그라운드라 호출자 fd 0을
 #    물려받는다. ⇒ **로컬만 밟고 CI는 영원히 초록**인 클래스라 사후에 드러나지 않는다.
 #
 # `scripts/run-bats.sh`는 스스로 `exec 0</dev/null`을 하므로 그 안의 호출은 면제다. 나머지 호출면
-# (Makefile·워크플로·다른 스크립트)은 호출 줄에 `</dev/null`을 붙여야 한다. AGENTS.md와 run-bats.sh
+# (justfile·워크플로·다른 스크립트)은 호출 줄에 `</dev/null`을 붙여야 한다. AGENTS.md와 run-bats.sh
 # 헤더가 그 규약을 **선언**하지만 도입 전까지 강제하는 것은 아무것도 없었다 — 현재 호출면이 전부
 # 준수하는 지금이 hard-zero로 못박을 자리다.
 #
 # 판별(오탐을 내면 아무도 이 가드를 안 켠다):
-#   · 줄 머리 주석 · Makefile `##` 도움말 · 행간 주석 · YAML `name:` 줄은 명령이 아니다.
+#   · 줄 머리 주석 · justfile `##` 도움말 · 행간 주석 · YAML `name:` 줄은 명령이 아니다.
 #   · `bats --version`은 테스트 실행이 아니다.
 #   · `bats` 다음 argv를 훑어 **첫 경로꼴 토큰**(`/` 포함 · `.bats` 포함 · `$`로 시작)을 찾되, 그 앞은
 #     플래그·플래그값만 허용한다 — `bats -t <path>`·`bats --print-output-on-failure <path>` 같은
@@ -37,7 +37,7 @@ cd "$ROOT"
 
 FILES=()
 if [ "$#" -gt 0 ]; then FILES=("$@"); else
-  enumerated="$(scan_enumerate check-bats-fd0 git ls-files 'Makefile' '.github/workflows/*.yaml' '*.sh')" || exit 1
+  enumerated="$(scan_enumerate check-bats-fd0 git ls-files 'justfile' '.github/workflows/*.yaml' '*.sh')" || exit 1
   while IFS= read -r f; do [ -n "$f" ] && FILES+=("$f"); done <<EOF
 $enumerated
 EOF
@@ -49,8 +49,8 @@ for f in "${FILES[@]}"; do [ -r "$f" ] || missing="${missing} ${f}"; done
 DETECT=""
 IFS='' read -r -d '' DETECT <<'AWK' || true
 function code(l) {
-  sub(/^[ \t]*@?/, "", l)          # Makefile recipe의 `@` 접두
-  sub(/##.*$/, "", l)              # Makefile 도움말
+  sub(/^[ \t]*@?/, "", l)          # justfile recipe의 `@` 접두
+  sub(/##.*$/, "", l)              # justfile 도움말
   sub(/[ \t]#[ \t].*$/, "", l)     # 셸/YAML 행간 주석
   return l
 }
@@ -61,13 +61,13 @@ FNR==1 { nfiles++; self = 0 }
   c = code($0)
   # 파일이 스스로 fd 0을 끊으면 그 안의 호출은 면제다(파일 목록이 아니라 사실로 판정한다).
   # ⚠️ **이 판정은 주석을 벗긴 뒤에 해야 한다.** 앞서는 이 규칙이 주석·`name:` 스킵보다 **위**에 있어서,
-  #    `# 규약: exec 0</dev/null 을 한다` 같은 설명 한 줄·Makefile `##` 도움말·워크플로 스텝 이름만으로도
+  #    `# 규약: exec 0</dev/null 을 한다` 같은 설명 한 줄·justfile `##` 도움말·워크플로 스텝 이름만으로도
   #    self=1이 서서 **그 파일 전체가 면제**됐다(실측). 가드 자신도 자기 헤더가 그 규약을 설명하므로
   #    영구 면제 상태였다 — hard-zero 보증이 그대로 거짓이 된다.
-  # ⚠️ 주석뿐 아니라 **코드 줄의 문자열 리터럴**(Makefile echo·워크플로 run 블록의 인용문)도 같은
+  # ⚠️ 주석뿐 아니라 **코드 줄의 문자열 리터럴**(justfile echo·워크플로 run 블록의 인용문)도 같은
   #    자리에서 self를 세운다 — `code()`가 못 벗기는 문자열 값이라 위치 무감 판정은 그대로 뚫린다.
   #    그래서 행두 앵커다: 실 면제처(`scripts/run-bats.sh:34`)는 코드 줄 0열에서 시작하고, `code()`가
-  #    선행 공백·`@`·행간 주석을 이미 벗기므로 Makefile recipe·워크플로 `run:` 들여쓰기도 그대로 산다.
+  #    선행 공백·`@`·행간 주석을 이미 벗기므로 justfile recipe·워크플로 `run:` 들여쓰기도 그대로 산다.
   if (c ~ /^exec[ \t]+0<[ \t]*\/dev\/null/) self = 1
   if (match(c, /(^|[ \t;&|(){}])bats[ \t]+/)) {
     # 첫 경로꼴 토큰을 찾는다 — 그 앞은 플래그(`-x`/`--x`)와 그 값만 통과시킨다. 플래그도 경로꼴도

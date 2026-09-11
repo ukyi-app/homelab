@@ -7,7 +7,7 @@
 # CI에서 무조건 skip이고 그 래퍼는 `[ "$status" -eq 0 ]`만 단언했다 — skip이 그 단언을 만족했다).
 #
 # 규약: 미평가 = `SKIP: <가드>: <이유>` 마커 + **exit 4**(같은 줄). 평가됨 = 0(통과)/1(실패), 마커 없음.
-# ⚠️ GNU make는 recipe 종료코드를 자기 Error 2로 뭉갠다 → make 계층 신호는 **마커 + 비-0**까지다.
+# ⚠️ GNU make는 recipe 종료코드를 자기 Error 2로 뭉갠다 → just 계층 신호는 **마커 + 비-0**까지다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2 [[ ]] 침묵 통과.
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
@@ -201,29 +201,29 @@ fixture_suite() {   # $1: 하위 디렉토리명
   echo "$output" | grep -q "skip()"
 }
 
-@test "a Makefile help tail mentioning SKIP is not a false positive" {
-  printf '%s\n' 'verify-x: ## [local] 도메인 부재면 SKIP: 신호' '	@true' > "$BATS_TEST_TMPDIR/Makefile"
-  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/Makefile"
+@test "a justfile help tail mentioning SKIP is not a false positive" {
+  printf '%s\n' 'verify-x: ## [local] 도메인 부재면 SKIP: 신호' '	@true' > "$BATS_TEST_TMPDIR/justfile"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/justfile"
   [ "$status" -eq 0 ]
 }
 
-# Makefile 레인만 옛 같은-줄 짝 검사로 잔존한다(함수를 쓸 수 없는 자리) — 정방향·역방향 각각.
-@test "a Makefile recipe with marker and exit code on one line is accepted (surviving pair lane)" {
-  printf '%s\n' 'verify-x:' '	@echo "SKIP: x: 도메인 없음" && exit 4' > "$BATS_TEST_TMPDIR/Makefile.ok"
-  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/Makefile.ok"
+# justfile 레인만 옛 같은-줄 짝 검사로 잔존한다(함수를 쓸 수 없는 자리) — 정방향·역방향 각각.
+@test "a justfile recipe with marker and exit code on one line is accepted (surviving pair lane)" {
+  printf '%s\n' 'verify-x:' '	@echo "SKIP: x: 도메인 없음" && exit 4' > "$BATS_TEST_TMPDIR/justfile.ok"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/justfile.ok"
   [ "$status" -eq 0 ]
 }
 
-@test "a Makefile recipe with a bare skip exit code is still a violation (pair lane teeth)" {
-  printf '%s\n' 'verify-x:' '	@exit 4' > "$BATS_TEST_TMPDIR/Makefile.bad"
-  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/Makefile.bad"
+@test "a justfile recipe with a bare skip exit code is still a violation (pair lane teeth)" {
+  printf '%s\n' 'verify-x:' '	@exit 4' > "$BATS_TEST_TMPDIR/justfile.bad"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/justfile.bad"
   [ "$status" -ne 0 ]
 }
 
-@test "a Makefile recipe emitting the marker without the exit code is a violation (reverse pair)" {
+@test "a justfile recipe emitting the marker without the exit code is a violation (reverse pair)" {
   # 이 방향이 이 규약의 원래 병이다 — 마커만 내고 0으로 끝나면 호출자에겐 여전히 성공이다.
-  printf '%s\n' 'verify-x:' '	@echo "SKIP: verify-x: 도메인 없음"' > "$BATS_TEST_TMPDIR/Makefile.rev"
-  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/Makefile.rev"
+  printf '%s\n' 'verify-x:' '	@echo "SKIP: verify-x: 도메인 없음"' > "$BATS_TEST_TMPDIR/justfile.rev"
+  run bash "$ROOT/scripts/check-skip-signalling.sh" "$BATS_TEST_TMPDIR/justfile.rev"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "skip 종료코드 아님"
 }
@@ -309,19 +309,19 @@ fixture_suite() {   # $1: 하위 디렉토리명
   run grep -q '4=skip' CONTRIBUTING.md; [ "$status" -eq 0 ]
 }
 
-# --- 행동: make 가드 진입점이 도메인 부재를 skip으로 신호하는가 ---
-# 도메인 오버라이드가 시임이다. make 계층이라 종료코드는 2(GNU make)이고 마커가 권위 신호다.
+# --- 행동: just 가드 진입점이 도메인 부재를 skip으로 신호하는가 ---
+# 도메인 오버라이드가 시임이다. just는 SKIP 종료코드 4를 보존하며 마커를 함께 검사한다.
 
-@test "make verify-posture signals skip when the live kubeconfig is absent" {
-  run make verify-posture KUBECONFIG_LIVE="$BATS_TEST_TMPDIR/absent-kubeconfig"
-  [ "$status" -ne 0 ]
+@test "just verify-posture signals skip when the live kubeconfig is absent" {
+  run just KUBECONFIG_LIVE="$BATS_TEST_TMPDIR/absent-kubeconfig" verify-posture
+  [ "$status" -eq 4 ]
   echo "$output" | grep -q "^SKIP: verify-posture:"
 }
 
-@test "make verify-posture evaluates its suite when the kubeconfig is present" {
+@test "just verify-posture evaluates its suite when the kubeconfig is present" {
   suite="$(fixture_suite posture)"
   : > "$BATS_TEST_TMPDIR/present-kubeconfig"
-  run make verify-posture KUBECONFIG_LIVE="$BATS_TEST_TMPDIR/present-kubeconfig" POSTURE_BATS="$suite"
+  run just KUBECONFIG_LIVE="$BATS_TEST_TMPDIR/present-kubeconfig" POSTURE_BATS="$suite" verify-posture
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "fixture suite posture actually ran"
   out="$output"
@@ -329,16 +329,16 @@ fixture_suite() {   # $1: 하위 디렉토리명
   [ "$status" -ne 0 ]
 }
 
-@test "make verify-ksops signals skip when the age key is absent" {
-  run make verify-ksops SOPS_AGE_KEY_FILE="$BATS_TEST_TMPDIR/absent-age-key"
-  [ "$status" -ne 0 ]
+@test "just verify-ksops signals skip when the age key is absent" {
+  run just SOPS_AGE_KEY_FILE="$BATS_TEST_TMPDIR/absent-age-key" verify-ksops
+  [ "$status" -eq 4 ]
   echo "$output" | grep -q "^SKIP: verify-ksops:"
 }
 
-@test "make verify-ksops evaluates its suite when the age key is present" {
+@test "just verify-ksops evaluates its suite when the age key is present" {
   suite="$(fixture_suite ksops)"
   : > "$BATS_TEST_TMPDIR/present-age-key"
-  run make verify-ksops SOPS_AGE_KEY_FILE="$BATS_TEST_TMPDIR/present-age-key" KSOPS_BATS="$suite"
+  run just SOPS_AGE_KEY_FILE="$BATS_TEST_TMPDIR/present-age-key" KSOPS_BATS="$suite" verify-ksops
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "fixture suite ksops actually ran"
   out="$output"
@@ -346,16 +346,16 @@ fixture_suite() {   # $1: 하위 디렉토리명
   [ "$status" -ne 0 ]
 }
 
-@test "make verify-runbooks signals skip when the runbook bats domain is empty" {
+@test "just verify-runbooks signals skip when the runbook bats domain is empty" {
   mkdir -p "$BATS_TEST_TMPDIR/empty"
-  run make verify-runbooks RUNBOOK_DIR="$BATS_TEST_TMPDIR/empty"
-  [ "$status" -ne 0 ]
+  run just RUNBOOK_DIR="$BATS_TEST_TMPDIR/empty" verify-runbooks
+  [ "$status" -eq 4 ]
   echo "$output" | grep -q "^SKIP: verify-runbooks:"
 }
 
 # 대칭 갈래 — 도메인이 있으면 **실제 판정**을 낸다(skip 마커 없음). 이게 없으면 위 세 개는
 # "무조건 skip"인 죽은 타깃과 구별되지 않는다.
-@test "make verify-runbooks evaluates the domain when runbook bats exist" {
+@test "just verify-runbooks evaluates the domain when runbook bats exist" {
   mkdir -p "$BATS_TEST_TMPDIR/rb"
   {
     echo '#!/usr/bin/env bats'
@@ -364,7 +364,7 @@ fixture_suite() {   # $1: 하위 디렉토리명
     echo '  [ 1 -eq 1 ]'
     echo '}'
   } > "$BATS_TEST_TMPDIR/rb/test_fixture.bats"
-  run make verify-runbooks RUNBOOK_DIR="$BATS_TEST_TMPDIR/rb"
+  run just RUNBOOK_DIR="$BATS_TEST_TMPDIR/rb" verify-runbooks
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "fixture runbook assertion runs"
   out="$output"
@@ -372,7 +372,7 @@ fixture_suite() {   # $1: 하위 디렉토리명
   [ "$status" -ne 0 ]
 }
 
-@test "make verify-runbooks reports failure (not skip) when a runbook regression fails" {
+@test "just verify-runbooks reports failure (not skip) when a runbook regression fails" {
   mkdir -p "$BATS_TEST_TMPDIR/rbfail"
   {
     echo '#!/usr/bin/env bats'
@@ -381,7 +381,7 @@ fixture_suite() {   # $1: 하위 디렉토리명
     echo '  [ 1 -eq 2 ]'
     echo '}'
   } > "$BATS_TEST_TMPDIR/rbfail/test_fixture.bats"
-  run make verify-runbooks RUNBOOK_DIR="$BATS_TEST_TMPDIR/rbfail"
+  run just RUNBOOK_DIR="$BATS_TEST_TMPDIR/rbfail" verify-runbooks
   [ "$status" -ne 0 ]
   out="$output"
   run grep -q "^SKIP:" <<<"$out"
@@ -391,7 +391,7 @@ fixture_suite() {   # $1: 하위 디렉토리명
 # 도메인 시임은 **명령행 오버라이드 전용**이어야 한다. `?=`면 환경변수가 새어 들어와 이 스위트 자체가
 # 환경 의존이 된다(실측: RUNBOOK_DIR=/tmp/zzz로 test_make-runbooks가 red).
 @test "the RUNBOOK_DIR seam ignores the ambient environment" {
-  run env RUNBOOK_DIR=/tmp/definitely-not-the-runbook-dir make -n verify-runbooks
+  run env RUNBOOK_DIR=/tmp/definitely-not-the-runbook-dir just --dry-run verify-runbooks
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "docs/runbooks"
 }

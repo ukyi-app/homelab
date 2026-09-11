@@ -81,7 +81,7 @@ repoServer:
       volumeMounts:
         - name: custom-tools
           mountPath: /custom-tools
-  # 클러스터 내 sops-age Secret(make bootstrap이 생성)을 read-only로 마운트한다.
+  # 클러스터 내 sops-age Secret(just bootstrap이 생성)을 read-only로 마운트한다.
   volumes:
     - name: custom-tools
       emptyDir: {}

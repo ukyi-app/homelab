@@ -16,6 +16,6 @@ listener(M3, :8443)를 거쳐 `*.home.ukyi.app`으로만 접근 가능하다. �
 internal-by-default (§6).
 
 ## dead-man's-switch 부트스트랩 의존성
-오프 노드 감지기는 healthchecks.io에 있다(외부 계정 / Makefile
+오프 노드 감지기는 healthchecks.io에 있다(외부 계정 / justfile
 bootstrap 단계 참조). 노드가 죽으면 relay의 ping이 멈추고 healthchecks.io가 페이징한다.
 모니터링 대상 노드에 자체 호스팅할 수 없는 유일한 관측 신호다 (R8).

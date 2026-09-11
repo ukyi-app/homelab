@@ -161,7 +161,7 @@ docindex_fixture_green() {
   run bash "$GUARD" --readme "$f"
   [ "$status" -eq 0 ]
   # 리네임한 절 안에 잘못된 권위 주장을 하나 되살린다.
-  line="- **${BT}check-zz-probe.sh${BT}** — **${BT}make verify${BT}**가 호출."
+  line="- **${BT}check-zz-probe.sh${BT}** — **${BT}just verify${BT}**가 호출."
   awk -v L="$line" '{ print } /^## 검사 모음/ { print ""; print L }' "$f" > "$f.bad"
   run bash "$GUARD" --readme "$f.bad"
   [ "$status" -eq 1 ]
@@ -181,7 +181,7 @@ docindex_fixture_green() {
   ok="$BATS_TEST_TMPDIR/claim-ok.md"
   bad="$BATS_TEST_TMPDIR/claim-bad.md"
   printf '%s\n' '# t' '' '## X' '' "- **${BT}check-a.sh${BT}** — 순수 검사(읽기 전용). 잘못 쓰면 아무 일도 없다." > "$ok"
-  printf '%s\n' '# t' '' '## X' '' "- **${BT}check-a.sh${BT}** — 순수 검사. **${BT}make verify${BT}** 배선됨." > "$bad"
+  printf '%s\n' '# t' '' '## X' '' "- **${BT}check-a.sh${BT}** — 순수 검사. **${BT}just verify${BT}** 배선됨." > "$bad"
   # 양성 대조 — 주장이 없는 같은 모양의 bullet은 green이다(도메인 산문은 두 어휘를 쓰지 않는다).
   run bash "$GUARD" --readme "$ok"
   [ "$status" -eq 0 ]
@@ -200,7 +200,7 @@ docindex_fixture_green() {
   [ "$status" -eq 0 ]
   bad=""
   # base README:29 · :97 · :103의 실제 문장에서 뽑은 표기. 어느 것도 옛 서술어 6종을 쓰지 않는다.
-  for s in "${BT}make ci${BT}·${BT}ci.yaml${BT}(gate)이 공통 호출" \
+  for s in "${BT}just ci${BT}·${BT}ci.yaml${BT}(gate)이 공통 호출" \
            "${BT}tests/gates/test_floor-vocab.bats${BT}가 게이트" \
            "${BT}tests/gates/test_image_pins.bats${BT}가 픽스처+실-레포로 가드"; do
     f="$BATS_TEST_TMPDIR/esc.md"
@@ -215,7 +215,7 @@ docindex_fixture_green() {
 # 않는 리터럴은 사라져도 무증인이다(라이브 양성 대조는 어휘 단위까지만 증인이다).
 @test "every literal in both vocabularies is load-bearing" {
   bad=""
-  for p in "make " "ci.yaml" "bun run " "tests/gates/test_" "tests/test_" \
+  for p in "just " "ci.yaml" "bun run " "tests/gates/test_" "tests/test_" \
            "가 호출" "이 호출" "호출 아님" "가 부른" "이 부른" \
            "배선됨" "배선 아님" "배선 없" "배선되어" \
            "진입점" "실행자" "밟는" "직접 실행" \
@@ -230,14 +230,14 @@ docindex_fixture_green() {
 
 @test "a claim in prose outside any bullet goes red (the header is not an exit)" {
   f="$BATS_TEST_TMPDIR/prose.md"
-  printf '%s\n' '# t' '' "헤더 산문에 **${BT}make verify${BT}**가 호출한다고 적어 둔다." '' '## X' '' \
+  printf '%s\n' '# t' '' "헤더 산문에 **${BT}just verify${BT}**가 호출한다고 적어 둔다." '' '## X' '' \
     "- **${BT}check-a.sh${BT}** — 순수 검사." > "$f"
   run bash "$GUARD" --readme "$f"
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "bullet 밖 산문"
   # 산문 레인은 두 어휘 전건이다 — venue 이름 없는 관계 주장도 같은 자리에서 죽는다.
   g="$BATS_TEST_TMPDIR/prose-rel.md"
-  printf '%s\n' '# t' '' '이 셋은 Makefile에 배선 없음이라 직접 부른다.' '' '## X' '' \
+  printf '%s\n' '# t' '' '이 셋은 justfile에 배선 없음이라 직접 부른다.' '' '## X' '' \
     "- **${BT}check-a.sh${BT}** — 순수 검사." > "$g"
   run bash "$GUARD" --readme "$g"
   [ "$status" -eq 1 ]
@@ -251,8 +251,8 @@ docindex_fixture_green() {
 @test "the same claim is red on a guard bullet and green on a non-guard one" {
   g="$BATS_TEST_TMPDIR/scope-guard.md"
   n="$BATS_TEST_TMPDIR/scope-nonguard.md"
-  printf '%s\n' '# t' '' '## X' '' "- **${BT}check-a.sh${BT}** — **${BT}make verify${BT}**가 호출." > "$g"
-  printf '%s\n' '# t' '' '## X' '' "- **${BT}bootstrap.sh${BT}** — **${BT}make bootstrap${BT}**이 호출." > "$n"
+  printf '%s\n' '# t' '' '## X' '' "- **${BT}check-a.sh${BT}** — **${BT}just verify${BT}**가 호출." > "$g"
+  printf '%s\n' '# t' '' '## X' '' "- **${BT}bootstrap.sh${BT}** — **${BT}just bootstrap${BT}**이 호출." > "$n"
   run bash "$GUARD" --readme "$g"
   [ "$status" -eq 1 ]
   run bash "$GUARD" --readme "$n"
@@ -279,7 +279,7 @@ docindex_fixture_green() {
 @test "an exemption is caught by the cap, not by the claim lane (the mechanism is still alive)" {
   f="$BATS_TEST_TMPDIR/ex1.md"
   printf '%s\n' '# t' '' '## X' '' \
-    "- **${BT}check-x.sh${BT}** — [계산-밖] **${BT}make verify${BT}**가 호출. 왜 계산이 못 보는가: venue 밖이다." > "$f"
+    "- **${BT}check-x.sh${BT}** — [계산-밖] **${BT}just verify${BT}**가 호출. 왜 계산이 못 보는가: venue 밖이다." > "$f"
   run bash "$GUARD" --readme "$f"
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "면제 1건 > 상한 0"
@@ -292,7 +292,7 @@ docindex_fixture_green() {
   noreason="$BATS_TEST_TMPDIR/noreason.md"
   dead="$BATS_TEST_TMPDIR/dead.md"
   printf '%s\n' '# t' '' '## X' '' \
-    "- **${BT}check-a.sh${BT}** — [계산-밖] **${BT}make verify${BT}**가 호출." > "$noreason"
+    "- **${BT}check-a.sh${BT}** — [계산-밖] **${BT}just verify${BT}**가 호출." > "$noreason"
   printf '%s\n' '# t' '' '## X' '' \
     "- **${BT}check-a.sh${BT}** — [계산-밖] 왜 계산이 못 보는가: venue 밖이다. (주장은 적지 않았다)" > "$dead"
   run bash "$GUARD" --readme "$noreason"
@@ -306,7 +306,7 @@ docindex_fixture_green() {
 @test "an exemption on a non-guard bullet is dead weight and goes red" {
   f="$BATS_TEST_TMPDIR/ex-nonguard.md"
   printf '%s\n' '# t' '' '## X' '' \
-    "- **${BT}bootstrap.sh${BT}** — [계산-밖] **${BT}make bootstrap${BT}**이 호출. 왜 계산이 못 보는가: venue 밖이다." > "$f"
+    "- **${BT}bootstrap.sh${BT}** — [계산-밖] **${BT}just bootstrap${BT}**이 호출. 왜 계산이 못 보는가: venue 밖이다." > "$f"
   run bash "$GUARD" --readme "$f"
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "면제가 필요 없다"

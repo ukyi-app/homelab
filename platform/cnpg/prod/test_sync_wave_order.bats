@@ -45,7 +45,7 @@ wave_of() { # $1=파일 — sync-wave 값(없으면 ArgoCD 기본값 0)
   #    plugin) 산출물엔 적용되지 않는다(kustomization.yaml:42-52의 자기 주석). 그 4건을 통째로
   #    지워도 이 파일이 3/3 초록이었다(실측) — wave_of가 집는 건 :40의 generatorOptions뿐이다.
   #    유일한 증인이던 test_kustomize_build.bats:55-72는 tests/.ci-exclude(owner-local
-  #    `make verify-ksops`, 게다가 age 키 부재 시 SKIP)라 required gate 밖이다.
+  #    `just verify-ksops`, 게다가 age 키 부재 시 SKIP)라 required gate 밖이다.
   # ⚠️ 이름 하드코딩만으로는 **시드 추가 시 patch 누락**을 못 잡으므로 로스터 등식을 함께 건다.
   k="$D/kustomization.yaml"
   cl="$(wave_of "$D/cluster.yaml")"

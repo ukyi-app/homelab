@@ -16,7 +16,7 @@ WF=".github/workflows/ci.yaml"
   # 달리) 조용해지면 bats 레인 전체와 그 안의 증인들이 함께 사라지는 진짜 fail-open이다.
   run yq -e '.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*bun run typecheck")) | .run' "$WF"
   [ "$status" -eq 0 ]
-  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*make chart-test")) | .run' "$WF"
+  run yq -e '.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*just chart-test")) | .run' "$WF"
   [ "$status" -eq 0 ]
   run yq -e '.jobs.gate.steps[] | select((.run // "") | test("(^|\n)\s*bun run verify:ledger")) | .run' "$WF"
   [ "$status" -eq 0 ]

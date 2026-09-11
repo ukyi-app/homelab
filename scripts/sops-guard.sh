@@ -24,7 +24,7 @@ fi
 . "$(dirname "${BASH_SOURCE[0]}")/lib/sops-recipients.sh"
 CANON="$(sops_canonical_recipients)"
 
-# 인자 0개 = 아무것도 평가하지 않고 exit 0이었다. 호출자 3곳(.pre-commit-config · Makefile ·
+# 인자 0개 = 아무것도 평가하지 않고 exit 0이었다. 호출자 3곳(.pre-commit-config · justfile ·
 # ci.yaml의 `xargs -r`)이 전부 "0 파일=성공"으로 읽었고, 글롭이 깨지면 required 스텝이 조용히 초록이었다.
 # 이제 무인자면 **자기 도메인을 스스로 열거**하고 바닥값을 건다(현재 추적 9건 — 래칫 아님).
 if [ "$#" -gt 0 ]; then

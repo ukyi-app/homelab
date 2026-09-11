@@ -26,7 +26,7 @@
 # 예외: policy/image-pin-allowlist.txt(라인당 이미지 값 또는 app:<name>, # 사유 주석 **강제** — 인라인 또는 직전 줄).
 #   수용 기준 = allowlist 0(핀 후).
 #
-# make verify 배선됨 — 기본 바닥값 20(scan-floor 유효, 배선부는 floor-free). 실 레포는 런타임 이미지가
+# just verify 배선됨 — 기본 바닥값 20(scan-floor 유효, 배선부는 floor-free). 실 레포는 런타임 이미지가
 #   전부 핀돼 있어 allowlist 0으로 통과한다(Renovate pin-dependencies 배치 대신 수동 digest 핀을 택한 이유:
 #   그 배치가 Issues:write gap으로 엉켜 결정적 경로를 골랐다 — policy/image-pin-allowlist.txt 머리말 참조).
 #   신규 미핀 이미지는 이 게이트가 fail-closed로 차단.
@@ -61,7 +61,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT="$2"; SCOPE_NARROWED=1; shift 2 ;;
     --allowlist) ALLOWLIST="$2"; shift 2 ;;
-    # 픽스처 전용 오버라이드(실 트리는 상수가 곧 유효 상한이다 — 호출부 Makefile·ci.yaml에 0건).
+    # 픽스처 전용 오버라이드(실 트리는 상수가 곧 유효 상한이다 — 호출부 justfile·ci.yaml에 0건).
     # ⚠️ 비정수를 받으면 `[ "$n" -gt "$max" ]`가 bash 산술 오류로 죽거나(형제 TS 가드에서는 NaN 비교가
     #    **항상 false**라 상한이 조용히 꺼졌다 — 레포 등재 함정) 상한이 무의미해진다. 정수만 받는다.
     --exempt-max)

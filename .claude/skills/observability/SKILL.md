@@ -5,7 +5,7 @@ description: 이 홈랩 레포의 관측 스택(victoria-stack)을 디버그할 
 
 # 관측성 디버그 (victoria-stack)
 
-라이브 read-only 진단. `eval "$(make kubeconfig)"`로 KUBECONFIG 설정. 알림 자체(victoria-stack 룰)는 운영 중이므로, 이 스킬은 **임시 질의·경로 단절 진단**에 집중한다.
+라이브 read-only 진단. `eval "$(just kubeconfig)"`로 KUBECONFIG 설정. 알림 자체(victoria-stack 룰)는 운영 중이므로, 이 스킬은 **임시 질의·경로 단절 진단**에 집중한다.
 
 ## distroless 함정 (핵심)
 - `vmsingle`(메트릭 :8428)·`victorialogs`(로그 :9428)는 **StatefulSet + distroless** — `sh`/`wget`이 없어 그 파드 안에서 질의 불가.
@@ -29,5 +29,5 @@ description: 이 홈랩 레포의 관측 스택(victoria-stack)을 디버그할 
 ## 진단 후
 - ConfigMap(relay 스크립트 등) 변경은 파드 자동 재시작이 없다 → `kubectl rollout restart`.
 - `envFrom` 시크릿 변경도 파드 재시작이 있어야 반영.
-- 매니페스트 확인은 `make render COMP=victoria-stack`(= `kustomize build --enable-helm --enable-alpha-plugins --enable-exec platform/victoria-stack/prod`, SOPS_AGE_KEY_FILE 설정 후).
+- 매니페스트 확인은 `just COMP=victoria-stack render`(= `kustomize build --enable-helm --enable-alpha-plugins --enable-exec platform/victoria-stack/prod`, SOPS_AGE_KEY_FILE 설정 후).
 - 시크릿 값/`*.enc.yaml` 평문은 출력하지 않는다.

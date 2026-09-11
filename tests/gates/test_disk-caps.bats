@@ -87,11 +87,11 @@ mkfx() {
   echo "$output" | grep -q '열거 붕괴'
 }
 
-@test "the guard runs in BOTH the required gate and make ci" {
+@test "the guard runs in BOTH the required gate and just ci" {
   # 한쪽에만 있으면 회계가 반쪽이다(패리티 원장이 별도로 강제하지만 여기서도 못 박는다).
   run grep -q 'check-disk-caps.ts' "$ROOT/.github/workflows/ci.yaml"
   [ "$status" -eq 0 ]
-  run make -n ci
+  run just --dry-run ci
   [ "$status" -eq 0 ]
   # 핵심 단언(마지막)
   echo "$output" | grep -q 'check-disk-caps.ts'

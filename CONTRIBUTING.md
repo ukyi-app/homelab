@@ -5,7 +5,7 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
 
 ## 황금률
 1. **검증 우선.** 모든 변경은 "변경 전에는 실패하고 변경 후에는 통과하는" 체크와
-   함께 나간다. push 전에 로컬에서 `make ci`를 실행한다(「push 전에」 절 — `make verify`는 보조).
+   함께 나간다. push 전에 로컬에서 `just ci`를 실행한다(「push 전에」 절 — `just verify`는 보조).
 2. **평문 시크릿은 절대 금지.** 플랫폼 시크릿은 `*.enc.yaml`이며, 두 age recipient
    (cluster + recovery, `docs/runbooks/age-keys.md` 참고 — gitignored, owner 로컬 전용이라
    신규 체크아웃에선 이 링크가 열리지 않는다)로 SOPS 암호화한다.
@@ -72,7 +72,7 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
   마커와 `exit 4`의 같은-줄 원자성은 이 구현 두 곳이 소유하므로, 콜사이트의 직접 방출은 짝이
   맞아도 위반이다(손조립 하나가 살아 있으면 원자성 주장이 두 번째 진실을 얻는다 —
   `scripts/check-skip-signalling.sh`가 강제, 게이트는 `tests/gates/test_guard-skip-signalling.bats`).
-  **Makefile 레인만** 함수를 쓸 수 없어 옛 같은-줄 짝 검사로 잔존한다.
+  **justfile 레인만** 함수를 쓸 수 없어 옛 같은-줄 짝 검사로 잔존한다.
 - 평가한 실행은 마커를 내지 않는다: 0=평가·통과, 1=평가·실패.
 - **homelab CLI의 skip variant**는 같은 어휘의 CLI 대응물이다: 종료코드 4는
   envelope **데이터**(`exitFor(variant)` 계약 파생 — 스키마가 skip↔4 짝을 강제)로 흐르고, stderr
@@ -85,19 +85,18 @@ ArgoCD가 클러스터를 수렴시킨다. 클러스터에서 손으로 바꾸�
   변수 오버라이드)이 없으면 만들어서 두 갈래를 실증한다.
 
 **왜 마커만으로 끝내지 않는가.** stdout 마커만 두면 기본 종료코드가 여전히 0이라 이 규약을 모르는
-호출자에게는 병이 그대로 남는다. 4는 `set -e`·make·CI에서 저절로 드러난다. 실제로
-`scripts/netpol-rehearsal.sh`는 candidate NetworkPolicy를 적용한 뒤 `make verify-posture`로 검증하는데,
+호출자에게는 병이 그대로 남는다. 4는 `set -e`·just·CI에서 저절로 드러난다. 실제로
+`scripts/netpol-rehearsal.sh`는 candidate NetworkPolicy를 적용한 뒤 `just verify-posture`로 검증하는데,
 skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS를 찍을 수 있었다**.
 
 **왜 2를 재사용하지 않는가.** 2는 사용법/파싱 오류다. `scripts/secret-cert-check.sh`가 skip에 2를
 쓰고 있었는데 같은 파일이 unknown-option에도 2를 쓴다 — 한 코드에 두 의미였다. 4로 갈랐다.
 
-**make 계층 예외.** GNU make는 recipe 종료코드를 자기 Error 2로 뭉갠다. `make verify-posture` 같은
-가드 타깃은 recipe에서 `exit 4`를 내지만 make 프로세스는 2로 끝난다 — 이 계층에서 관측 가능한 신호는
-**마커 + 비-0**까지다(원래 코드는 make의 `Error 4` 메시지에만 남는다).
+**just 종료코드.** `just verify-posture` 같은 가드 진입점은 recipe의 종료코드를 보존한다.
+도메인 부재는 **SKIP 마커 + exit 4**로 확인한다.
 
-**적용 범위 = 가드 진입점.** 집계자(`make ci`·`make verify`)는 대상이 아니다. 자식을 조건부로
-건너뛰는 것은 도메인 부재가 아니라 실행처 선택이고(`make ci`의 docker 분기는 gate가 실제로 평가한다),
+**적용 범위 = 가드 진입점.** 집계자(`just ci`·`just verify`)는 대상이 아니다. 자식을 조건부로
+건너뛰는 것은 도메인 부재가 아니라 실행처 선택이고(`just ci`의 docker 분기는 gate가 실제로 평가한다),
 집계자가 4를 내면 push 전 진입점이 못 쓰게 된다.
 
 ### 가드 스캔 신호 — `SCAN: <가드>: <n>`
@@ -123,7 +122,7 @@ skip이 0이던 동안 그 리허설은 **아무것도 검증하지 않고 PASS�
   예외 하나: 픽스처 주입 플래그가
   자기 도메인의 floor를 0으로 표현하는 관용구(check-alert-rules `--supply-policy` — 0은 정당한
   바닥값이라 분기 없이 면제가 되고 라벨 집합 불변이 유지된다)는 별개다. 프로덕션 호출은
-  floor-free다 — check-ci-parity가 gate 스텝·make -n ci 양쪽에서 `--floor` 잔존을 red로 강제한다.
+  floor-free다 — check-ci-parity가 gate 스텝·just --dry-run ci 양쪽에서 `--floor` 잔존을 red로 강제한다.
   ⚠️ 이는 위 "같은 검사의 셸·TS **이중 구현** 금지"의 대상이 **아니다** — 그 조항의 주어는 같은
   *검사*이고 괄호가 "파서·계산은 TS 한 곳에만"으로 못박는다. 스캔 커널은 도메인 판정이 없는 신호
   기계이고 임계값은 양쪽 다 콜사이트에 남으므로, 그 조항이 막는 해악(판정 드리프트) 밖이다.
@@ -279,17 +278,17 @@ AI 마커 금지, Co-Authored-By 금지. 커밋 하나에 논리적 변경 하�
 
 ## push 전에
 ```
-make ci              # ci.yaml job 'gate'(유일 required check) 재현 — 차이는 policy/ci-parity.json에 계상
-make verify          # (보조) skeleton + 메모리 원장 + sops 왕복 — 로컬 age 키 필요
+just ci              # ci.yaml job 'gate'(유일 required check) 재현 — 차이는 policy/ci-parity.json에 계상
+just verify          # (보조) skeleton + 메모리 원장 + sops 왕복 — 로컬 age 키 필요
 pre-commit run -a    # (보조) 평문 시크릿 가드 + gitleaks
 ```
-`make ci`가 통과하면 머지를 막는 required check는 통과한다(branch protection `contexts=[gate]`).
+`just ci`가 통과하면 머지를 막는 required check는 통과한다(branch protection `contexts=[gate]`).
 
 ### 패리티 회계 — "재현한다"는 주장은 검증 대상이다
 
-`make ci`가 gate를 재현한다는 **주장**은 오랫동안 검증되지 않았다. 대조하던 것이
+`just ci`가 gate를 재현한다는 **주장**은 오랫동안 검증되지 않았다. 대조하던 것이
 `test_make-ci-parity.bats`의 **하드코딩된 5개 토큰**뿐이라, 목록에 없는 게이트 스텝은 아무리 늘어나도
-보이지 않았다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 `make ci`에 없었는데 전 검사가 초록이었다
+보이지 않았다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 `just ci`에 없었는데 전 검사가 초록이었다
 (하필 그 5개가 전부 미러된 것들이라 우연히 통과했다). 위 「이미지 소유권 회계」의 하드코딩 소비처 목록과 같은 클래스다.
 
 이제 `tools/check-ci-parity.ts`가 **스텝 목록을 `ci.yaml`에서 파생해** 원장(`policy/ci-parity.json`)과
@@ -297,26 +296,26 @@ pre-commit run -a    # (보조) 평문 시크릿 가드 + gitleaks
 
 | status | 뜻 | 검증 방식 |
 |---|---|---|
-| `mirrored` | `make ci`가 같은 것을 돈다 | 선언한 `local` 문자열이 **`make -n ci` 실제 출력**에 있어야 한다 |
+| `mirrored` | `just ci`가 같은 것을 돈다 | 선언한 `local` 문자열이 **`just --dry-run ci` 실제 출력**에 있어야 한다 |
 | `covered` | 로컬의 **다른 수단**이 덮는다 | `covered_by.file`에 `contains`가 실재해야 한다 |
 | `excluded` | 로컬에선 안 돈다 | `why`·`since`·`owner_action` 전부 필수 |
 
 ⚠️ 이 원장은 "차이가 없다"가 아니라 **"모든 차이가 의도된 것이다"**를 강제한다. 완전 일치를 요구하면
-docker 없는 환경에서 `make ci`가 못 돌고, 그러면 아무도 안 쓴다 — 그게 패리티가 실제로 무너지는 경로다.
+docker 없는 환경에서 `just ci`가 못 돌고, 그러면 아무도 안 쓴다 — 그게 패리티가 실제로 무너지는 경로다.
 
 ⚠️ 도구가 없는 스텝은 `SKIP:` 마커를 내고 넘어간다(`actionlint`·docker·`node`). **조용히 건너뛰지 않는
 이유**는 "로컬 초록"이 gate가 잡을 것을 못 본 채 push되는 것을 막기 위해서다.
 
-⚠️ **`git add` 전에 `make ci`를 돌리면 새 파일은 측정되지 않는다.** 게이트가 `git ls-files`로 열거하기
+⚠️ **`git add` 전에 `just ci`를 돌리면 새 파일은 측정되지 않는다.** 게이트가 `git ls-files`로 열거하기
 때문이다 — untracked 파일은 로컬에서 대상 밖인데 커밋되면 CI에서는 측정된다. 실측: 새 `tools/*.ts`를
-add 전에 검증해 1671건 전건 초록을 받고 커밋했더니 CI가 shebang 규약 위반으로 red를 냈다. `make ci`의
+add 전에 검증해 1671건 전건 초록을 받고 커밋했더니 CI가 shebang 규약 위반으로 red를 냈다. `just ci`의
 첫 전제(`ci-guard-tracked`)가 이 상태를 마커 + exit 4로 끊는다.
 
-⚠️ **`make` 레시피에서 `$(MAKE)`를 쓰지 마라.** GNU make는 `$(MAKE)`가 있는 레시피 줄을 `-n`에서도
-**실제로 실행한다**. 이 레포는 `make -n ci` 출력을 데이터로 읽으므로(패리티 미러 대조 ·
-`check-guard-authority`의 venue 수집) 서브-make 하나가 드라이런을 부수효과로 바꾼다 —
-실측: 게이트 스텝을 서브-make로 묶었더니 `make -n ci` 한 번에 docker e2e가 통째로 돌았다.
-verify·pre-commit은 sops/시크릿 안전망이다. `make ci`는 시스템 PATH의 `bun`(1.3.14 핀)을 쓴다 —
+`just --dry-run ci`의 출력(stderr)을 패리티·권위 검사가 읽는다. 의존 명령은 레시피 의존성으로
+선언하고, 검사할 스크립트 호출은 각 레시피에 직접 둔다. 셸 안의 `just ...` 호출은 dry-run에서
+펼쳐지지 않으므로 검증 대상을 숨길 수 있다.
+
+verify·pre-commit은 sops/시크릿 안전망이다. `just ci`는 시스템 PATH의 `bun`(1.3.14 핀)을 쓴다 —
 설치는 `docs/runbooks-public/toolchain-setup.md` 참고(`m6-tools`가 버전 게이트).
 
 ## 문서 관례

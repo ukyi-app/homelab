@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # terraform 비의존 IaC 정적 계약 — 순수 grep/awk라 gate(required check)에서 돈다.
-# ⚠️ 이 파일이 test_tf_validate.bats에서 갈라져 나온 이유: 그쪽 첫 @test가 `make tf-validate`를 불러
+# ⚠️ 이 파일이 test_tf_validate.bats에서 갈라져 나온 이유: 그쪽 첫 @test가 `just tf-validate`를 불러
 #    terraform을 요구해 파일 전체가 tests/.ci-exclude에 있었고, 그래서 아래 두 계약의 red가
 #    required check를 막은 적이 없었다(유일 실행처가 advisory iac.yaml). test_tf_reconcile.bats가
 #    같은 이유로 gate에 편입된 선례를 따른다.

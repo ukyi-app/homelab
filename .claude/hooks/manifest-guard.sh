@@ -49,7 +49,7 @@ fi
 case "$fp" in
   *.enc.yaml)
     echo "차단: '$fp' 는 SOPS 암호화 파일이다. 직접 편집은 평문 메타데이터까지 MAC에 묶여 복호 불능이 된다." >&2
-    echo "→ 'sops $fp' (또는 make secret-edit FILE=$fp)로 복호화→편집→재암호화하라." >&2
+    echo "→ 'sops $fp' (또는 just FILE=$fp secret-edit)로 복호화→편집→재암호화하라." >&2
     exit 2
     ;;
 esac

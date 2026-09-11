@@ -100,7 +100,7 @@ setup() {
 @test "the gate venues pin a collation-stable locale" {
   # 런너 고정은 스캐너의 **대체가 아니라 짝**이다 — 고정이 없으면 오너의 en_US와 러너가 서로 다른
   # 술어를 평가하고(실측: sync-wave 원장 가드가 en_US에서 fail-open이었다), 고정만 하면 개별 결함의
-  # 뮤테이션 감도가 죽는다(실측: Makefile 회귀가 C.UTF-8에서 초록).
+  # 뮤테이션 감도가 죽는다(실측: justfile 회귀가 C.UTF-8에서 초록).
   run grep -qE '^export LC_ALL=C(\.UTF-8)?$|LC_ALL=C\.UTF-8; else export LC_ALL=C' "$ROOT/scripts/run-bats.sh"
   [ "$status" -eq 0 ]
   run yq -e '.env.LC_ALL == "C.UTF-8"' "$ROOT/.github/workflows/ci.yaml"

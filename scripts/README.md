@@ -34,7 +34,7 @@
 - **`check-bats-accounting.sh`** — 모든 추적 `test_*.bats`가 정확히 한 도메인(gate / chart-test /
   `.ci-exclude`)에 배정됐는지 검사(고아·이중소유 차단). `run-bats.sh --list`를 읽는다. 도메인 회계만으로는 **gate → `.ci-exclude` 이동**이 원리적으로 안 보이므로
   (옮겨도 여전히 "정확히 한 도메인") 레지스트리 계약 세 가지가 더 붙는다: 항목은 빈 줄로 끊긴 직전 주석
-  블록의 지배를 받고 그 블록이 `실행처`를 명시 + 그 표기가 지목한 venue가 **실재**(인용된 `make`/`bats`
+  블록의 지배를 받고 그 블록이 `실행처`를 명시 + 그 표기가 지목한 venue가 **실재**(인용된 `just`/`bats`
   토큰 또는 워크플로 파일 경로 — 단어만으로는 통과하지 않는다) + 항목 수 **상한**(스크립트 상수 `EXCL_MAX` — env
   오버라이드는 폐지됐다: 호출부에 보이지 않는 off-switch를 두지 않는다). 여기에 gate 도메인
   바닥값(``--floor gate=<n>`` — 러너 붕괴·대량 삭제)까지 셋이 각각 다른 축이다.
@@ -46,7 +46,7 @@
   all-or-none 불변식**(봉인본⇔envFrom `<app>-secrets`⇔kustomization 등재⇔checksum/secrets, 부분 상태 거부)
   + `S → checksum 정합`(#277 재발 방지) + **strict scope**(namespace-wide/cluster-wide 어노테이션 거부, patch는
   통과) + **파일명 규약**(`<app>-secrets.sealed.yaml` 하나만 허용). 인자 없는 기본 모드에서 앱 열거 0건은 **scan-floor로 실패**(vacuous pass 아님).
-- **`run-bats.sh`** — **단일 테스트 수집·실행기(required GATE)**. `make ci`·`ci.yaml`(gate)이 공통 호출(이중 SSOT 제거).
+- **`run-bats.sh`** — **단일 테스트 수집·실행기(required GATE)**. `just ci`·`ci.yaml`(gate)이 공통 호출(이중 SSOT 제거).
   스코프 = git-tracked `test_*.bats` − `platform/charts/*`(chart-test 별도) − `tests/.ci-exclude`. `--list`는 수집 목록만.
   실행은 두 레인 — **병렬 레인**(`bats --jobs N --no-parallelize-within-files`: 파일마다 별도 프로세스, 파일 안은 직렬.
   N = `RUNBATS_JOBS` 또는 논리 코어 수. GNU parallel 필요 — 로컬 부재는 직렬 폴백 + 안내, CI 부재는 exit 2) 뒤
@@ -60,7 +60,7 @@
   차단) ② SSOT의 `> 가드:` 경로가 원장에 추적되는가 ③ 원장 각 행이 SSOT 서사에 대응하는가
   ④ SSOT 섹션 헤드라인 ↔ AGENTS 한줄 인덱스 **완전 일치**(개수 등식 포함). 라이브 무관한 파일 검사.
 - **`tools/ledger-to-json.ts`** (셸 아님 — 참고) — `docs/memory-ledger.md` 표를 JSON으로 변환(conftest 입력 생성). **`bun run verify:ledger`**·
-  `make verify`·`ci.yaml`(gate)이 호출(출력을 `conftest test … policy/ledger.rego`로 파이프). 라이브 무관.
+  `just verify`·`ci.yaml`(gate)이 호출(출력을 `conftest test … policy/ledger.rego`로 파이프). 라이브 무관.
 - **`sops-guard.sh`** — `*.enc.yaml`이 실제 sops 암호화됐는지 구조 검사(평문 누출 차단). 3조항:
   `.sops.mac`·`.sops.lastmodified` 실재 · `data`/`stringData` 평문 리프 0건(`ENC[` prefix) · age recipient
   신원이 canonical(`.sops.yaml` cluster+recovery)과 정확 일치. **인자 선택** — 주면 그 파일만 보고(대상
@@ -142,7 +142,7 @@
   바닥값의 대상은 파일 수가 아니라 **호출면 수**다(파일 수로 걸면 정규식이 깨져도 통과한다).
 - **`check-skip-signalling.sh`** — 가드 skip 신호 규약(CONTRIBUTING '가드 skip 신호')의 정적 가드:
   `SKIP: <가드>: <이유>` 마커와 skip 종료코드(셸 `exit 4` / TS `process.exit(4)`)가 **같은 줄에서 짝**을
-  이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + Makefile
+  이루는지 검사한다. 짝이 깨지면 "미평가"가 다시 성공으로 위장한다. 추적 `.sh`/`.ts`/`.mts` + justfile
   전수(자기 자신 제외 — 패턴 리터럴이 위반과 같은 모양). 열거 붕괴 차단용 바닥값 보유(오버라이드는 `--floor check-skip-signalling=<n>`).
 - **`check-scan-producers.sh`** — 가드 스캔 신호 규약(CONTRIBUTING '가드 스캔 신호')의 **거부 가드**:
   추적 `tools/**/*.ts`·`*.mts`의 코드 줄이 커널(`tools/lib/scan-floor.ts`)을 우회해 `SCAN:` 마커를 직접
@@ -173,19 +173,19 @@
   대조했고 정합"만 뜻한다).
 - **`audit-orphan-pv.sh`** — 고아 스토리지 감사: ① Released PV(storageclass Retain이라 PVC 삭제 시 PV 누수)
   + ② Bound인데 어떤 파드도 마운트하지 않는 PVC(cascade=orphan 잔재 — phase만으로는 못 잡는다). 나열만
-  (비파괴), reclaim은 owner 수동. **`make audit-orphan-pv`**(라이브 ops)가 호출. `tests/gates/test_audit-orphan-pv.bats`가
+  (비파괴), reclaim은 owner 수동. **`just audit-orphan-pv`**(라이브 ops)가 호출. `tests/gates/test_audit-orphan-pv.bats`가
   가드. ★fail-closed(도구/쿼리 실패=비-0).
 
 ## 시크릿 / 부트스트랩 (라이브 쓰기·봉인본 산출)
 
 - **`bootstrap.sh`** — 멱등 DR 진입점: argocd NS + sops-age Secret + ArgoCD + root app 설치.
-  **`make bootstrap`**이 호출(+ `bootstrap-deadmanswitch` 선행). 라이브 클러스터에 적용.
+  **`just bootstrap`**이 호출(+ `bootstrap-deadmanswitch` 선행). 라이브 클러스터에 적용.
 - **`seed-secrets.sh`** — terraform output + `.env.secrets`에서 SOPS 암호화 시드 시크릿 생성.
-  **`make seed-secrets`**가 호출(`.env.secrets`를 source한 뒤). R2/telegram 등 키를 env로 요구.
+  **`just seed-secrets`**가 호출(`.env.secrets`를 source한 뒤). R2/telegram 등 키를 env로 요구.
   전제: `infra/cloudflare`·`infra/tailscale` apply 완료(state에 output 실재) — 부재/null은
   `jq -re`가 FATAL로 끊는다(예전엔 문자열 `null`이 그대로 봉인·커밋됐다).
 - **`tools/seal-batch.ts`** (셸 아님 — 참고) — seal-* 4종(adguard-auth·argocd-notify·files·ghcr-pull)을
-  선언 테이블로 통합. `make seal-<name>`(별칭)·`make seal-all`(회전 드릴)이 호출. 봉인 전 `secret-cert-check`
+  선언 테이블로 통합. `just seal-<name>`(별칭)·`just seal-all`(회전 드릴)이 호출. 봉인 전 `secret-cert-check`
   preflight fail-closed(break-glass `--offline-ok`). 평문·해시·토큰은 kubeseal stdin 전용(값 미출력).
 - **`secret-cert-check.sh`** — 봉인 전 preflight: 커밋된 `tools/sealed-secrets-cert.pem`이 라이브
   컨트롤러 cert와 fingerprint 일치하는지(stale 차단) 검사. read-only(fetch만); 오프라인/kubeseal 부재면 **SKIP 신호**(exit 4 + 마커 — 예전 2는 unknown-option과
@@ -194,21 +194,21 @@
 ## DR / owner 전용 — 파괴적
 
 - **`reset-pg-r2-archive.sh`** — **파괴적**. fresh initdb `pg`가 R2의 옛 barman 아카이브와 충돌할 때
-  serverName `pg` 아카이브(base/+wals/)만 정리해 아카이빙 재개. **`make reset-pg-archive`**가 호출하되
+  serverName `pg` 아카이브(base/+wals/)만 정리해 아카이빙 재개. **`just reset-pg-archive`**가 호출하되
   **기본 dry-run** — 실제 삭제는 `ARGS=--purge`. 라이브 ObjectStore에서 bucket/endpoint를 읽음.
 - **`destroy-node.sh`** — **극도로 파괴적(owner 전용, D-j)**. 베어메탈 노드 파괴 프리미티브:
   `k3s-uninstall.sh` + `/var/lib/rancher` 삭제(= standard 클래스 PV 전량 소멸, 복구 불가).
   `dr-drill.sh`의 [1]이 유일한 자동 호출자이고
-  그 밖에는 사람이 직접 실행한다 — Makefile/워크플로 **배선 없음**(`make down`은 의도적 비배선).
+  그 밖에는 사람이 직접 실행한다 — justfile/워크플로 **배선 없음**(`just down`은 의도적 비배선).
   3중 fail-closed: 확인 env `DR_DRILL_DESTROY_CONFIRM=1` · 국면 A(`BULK_MIGRATION_WINDOW_UNTIL`이
   비어있지 않으면) 거부 · `k3s-uninstall.sh` 부재 fail-loud. **`|| true` 없음** — 파괴 실패를 삼키면
   드릴이 거짓 PASS를 찍는다. 시임 `K3S_RUN`(기본 sudo)·`K3S_UNINSTALL`. 가드 `tests/test_destroy-node.bats`.
 - **`dr-drill.sh`** — **극도로 파괴적(owner 전용)**. 노드를 DESTROY→RECREATE(`destroy-node.sh`에 위임)하고
-  git+R2+age 키만으로 전 플랫폼 재구축 + R2 DB 복구(canary 일치)를 증명하는 풀 DR 드릴(R5). Makefile/워크플로
+  git+R2+age 키만으로 전 플랫폼 재구축 + R2 DB 복구(canary 일치)를 증명하는 풀 DR 드릴(R5). justfile/워크플로
   **배선 없음** — 직접 실행. 파괴 전 canary 캡처 + 복구 증명 후에만 노드 파괴. `sealing-key-dr-gate.sh`를 source.
 - **`sealing-key-dr-gate.sh`** — sealing-key DR 게이트 **라이브러리(source 전용 — top-level 실행 없음)**.
   `dr-drill.sh`가 source한다. SealedSecret 소비자/커밋 cert가 있으면 파괴 전 백업·실복원 증명 + 재구축 후
-  전수 unseal + cert 일치를 강제(권위 소스 조회 실패 = fail-closed). `make`/워크플로 직접 호출 아님.
+  전수 unseal + cert 일치를 강제(권위 소스 조회 실패 = fail-closed). `just`/워크플로 직접 호출 아님.
 - **`backup-sealed-secrets-key.sh`** — **owner 전용(DR 불변식)**. SealedSecrets 컨트롤러 sealing key를
   out-of-band 백업. `scripts/backup-sealed-secrets-key.sh <outdir>`(백업 생성, outdir는 git 밖) /
   `--verify <outdir>`(최신 백업이 라이브 키 셋을 담는지 — 회전 게이트). `sealing-key-dr-gate.sh`가 `--verify`로 호출.
@@ -226,7 +226,7 @@
   실측 `systemctl is-enabled files-data-backup.timer` = enabled·active) — 아니면 r4 FilesBackupStale이 상시
   발화한다(현행 국면의 권위는 `infra/k3s-bootstrap/versions.env`의 `BULK_MIGRATION_WINDOW_UNTIL`).
   실패는 `OnFailure=`가 `notify-unit-failure.sh`로 즉시 알린다(신선도 알림은 1주기보다 빨리 못 운다).
-  Makefile 배선 없음 — 직접 실행.
+  justfile 배선 없음 — 직접 실행.
 - **`notify-unit-failure.sh`** — **호스트 systemd 전용**(직접 실행하지 않는다).
   `OnFailure=unit-failure-notify@%n.service`가 호출해 `systemd_unit_last_failure_timestamp{unit=…}`를
   node-exporter textfile collector 디렉토리에 원자적으로 쓴다(r4 `SystemdUnitFailed`가 읽는다).
@@ -243,13 +243,13 @@
   "failed 0건"과 "스윕 미실행"을 구별하는 것이 이 스크립트의 계약이고, 그 구별은 하트비트가 진다.
   배선: `host-config.sh --apply` 후 `sudo systemctl enable --now systemd-failed-sweep.timer`
   (잊으면 `SystemdSweepStale`이 운다).
-- **`teardown.sh`** — **파괴적(owner 전용)**. `make teardown-app`/`teardown-resource` 래퍼가 호출 —
+- **`teardown.sh`** — **파괴적(owner 전용)**. `just teardown-app`/`teardown-resource` 래퍼가 호출 —
   clean-worktree 가드 → origin/main fetch → `teardown/<target>-<ts>` fresh-main 전용브랜치 → 툴(plan) →
   allowlist staging → PR(owner gh 자격). 앱/리소스 매니페스트·apps.json·원장 행 제거(리소스 purge는
   상태머신·런북 전용). fresh-main 기반이라 무관 커밋 미포함(C-F1). 잘못 쓰면 배포/데이터 유실.
 - **`netpol-rehearsal.sh`** — **owner-local**. NetworkPolicy candidate를 selfHeal off→apply→verify-posture→
   trap 복원으로 리허설(라벨 미스가 prod로 안 새게). GitOps selfHeal라 머지 전 필수(pre-merge posture는
-  main=broad을 테스트, candidate 아님). Makefile/워크플로 배선 없음 — 직접 실행.
+  main=broad을 테스트, candidate 아님). justfile/워크플로 배선 없음 — 직접 실행.
   ⚠️ posture 스위트 **전체가 아니라 netpol 레그만** 돈다(`POSTURE_BATS` 오버라이드, `git ls-files` 파생 +
   열거 붕괴 바닥값) — `tests/posture/test_dr-assets.bats`는 owner 매체 env를 요구하는 별개 도메인이라
   리허설 범위 밖이다(무가드로 부르면 candidate와 무관한 red가 **클러스터 변이 뒤에** 나온다).
@@ -258,8 +258,8 @@
   띄우므로 앱 파드와 무관하게 실질 판정이고, ipBlock 핀은 `platform/network-policies/prod/test_netpol.bats`가
   gate에서 따로 강제한다. prod에 파드는 있는데 셀렉터가 0건이면(라벨 드리프트) 그건 열거 붕괴라 exit 1이다.
 - **`auto-merge-or-fail.sh`** — 워크플로 헬퍼(비파괴). `bump.yaml`·변이 경로가 PR 생성 후 auto-merge
-  설정, PR이 CLEAN일 때만 폴백하고 BLOCKED/BEHIND/UNKNOWN이면 시끄럽게 실패(un-gated 직접 머지 차단). `make`/직접 실행 아님.
+  설정, PR이 CLEAN일 때만 폴백하고 BLOCKED/BEHIND/UNKNOWN이면 시끄럽게 실패(un-gated 직접 머지 차단). `just`/직접 실행 아님.
 - **`backup-local-asset.sh`** — **owner 전용(DR 불변식, 비파괴)**. 런북(`docs/runbooks/`, gitignored 단일
   사본)을 tarball→age(sops binary) 암호화해 git 밖 매체에 버전드 백업. `<outdir>`(생성)/`--verify <outdir>`
-  (최신 백업이 현재 런북과 파일명+내용 sha256 일치하는지 신선도 게이트). **`make backup-local-asset OUT=<git 밖>`**
+  (최신 백업이 현재 런북과 파일명+내용 sha256 일치하는지 신선도 게이트). **`just OUT=<git 밖> backup-local-asset`**
   (`ARGS=--verify`)가 호출. sealing key 백업과 대칭. `verify-runbook-index`가 양방향 fail-closed로 인덱스 드리프트 차단.

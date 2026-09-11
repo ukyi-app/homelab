@@ -1,5 +1,7 @@
 # 라이브에서 검증된 함정 — 상세 (SSOT)
 
+> 2026-09-11: 현재 명령 진입점은 `justfile`이다. 아래 GNU make 관련 기록과 당시 코드 예시는 이력으로 보존한다. 현재 호출은 `just <명령>`, 변수 지정은 `just APP=cnpg argo-sync` 형식이다.
+
 > 이 파일이 함정의 **단일 SSOT**다(AGENTS.md '라이브에서 검증된 함정'절에서 이전, progressive disclosure).
 > AGENTS.md에는 한줄 인덱스만 둔다. enforced 함정의 가드 현황은 `docs/traps.md` 원장(`make verify-traps`).
 > 컴포넌트 작업 전 해당 항목을 확인할 것.

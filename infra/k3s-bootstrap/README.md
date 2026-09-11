@@ -1,6 +1,6 @@
 # infra/k3s-bootstrap
 
-**역할** — 호스트 substrate 부트스트랩: 호스트 설정(`host-config.sh` + `host-config/` 트리) + 전제 확인(`host-preflight.sh`) + k3s 설치(`k3s-install.sh`) + 스토리지(local-path-provisioner, standard/bulk-ssd StorageClass) + 라이브 계약 검증(`verify-cluster.sh`). terraform이 아닌 셸 스크립트 계층. 진입점은 `host-up.sh`(= `make up`).
+**역할** — 호스트 substrate 부트스트랩: 호스트 설정(`host-config.sh` + `host-config/` 트리) + 전제 확인(`host-preflight.sh`) + k3s 설치(`k3s-install.sh`) + 스토리지(local-path-provisioner, standard/bulk-ssd StorageClass) + 라이브 계약 검증(`verify-cluster.sh`). terraform이 아닌 셸 스크립트 계층. 진입점은 `host-up.sh`(= `just up`).
 
 **적용 방식** — **bootstrap 스크립트(owner 로컬)**: `host-up.sh`로 k3s·스토리지를 올리고 `verify-cluster.sh`로 검증. 버전 핀은 `versions.env`. CI 아님.
 
@@ -25,7 +25,7 @@ sudo install -d -m 0700 -o root -g root /var/lib/rancher/k3s-storage/bulk /mnt/b
 sudo mount --bind /var/lib/rancher/k3s-storage/bulk /mnt/bulk
 echo '/var/lib/rancher/k3s-storage/bulk /mnt/bulk none bind 0 0' | sudo tee -a /etc/fstab
 #   → versions.env의 BULK_MIGRATION_WINDOW_UNTIL="YYYY-MM-DD" 를 채우고(커밋),
-#   → BULK_TEMPORARY_ALLOWED=1 make up
+#   → BULK_TEMPORARY_ALLOWED=1 just up
 #   ⚠️ 이 창이 열려 있는 동안 scripts/dr-drill.sh 와 scripts/destroy-node.sh 가 둘 다 실행을 거부한다
 #      (bulk가 파괴 대상과 같은 디스크 — 정확히는 bind 소스가 /var/lib/rancher 밑에 있다).
 
@@ -38,7 +38,7 @@ echo '/var/lib/rancher/k3s-storage/bulk /mnt/bulk none bind 0 0' | sudo tee -a /
 #        (a) r4-storage-backup.yaml 의 FilesBackupStale 에서 국면 A 억제 절
 #            `and on() (vector(time()) >= ...)` 를 제거한다.
 #        (b) versions.env의 BULK_MIGRATION_WINDOW_UNTIL 을 비운다. 그러면 dr-drill 과
-#            destroy-node.sh 가 다시 열리고, 플래그 없이 make up 이 통과한다(디바이스가 / 와 다르므로).
+#            destroy-node.sh 가 다시 열리고, 플래그 없이 just up 이 통과한다(디바이스가 / 와 다르므로).
 #   ⚠️ **강제 장치는 이 주석이 아니라 게이트다** — tests/gates/test_files-backup-phase-a.bats 는
 #      **양방향**이라 (a)·(b)를 나눈 두 순서가 **둘 다** RED 다:
 #        · (b)만 한 커밋 → "창은 비었는데 억제 절이 남아 있음"

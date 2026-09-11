@@ -4,7 +4,7 @@
 # ⚠️ **이 가드가 왜 tracked 위치에 있는가.** 원본은 `docs/runbooks/test_restore_runbook.bats`였는데
 #    그 디렉토리가 gitignored라 `scripts/run-bats.sh`(= `git ls-files '*test_*.bats'`)가 **한 번도
 #    수집한 적이 없다** — @test 3건이 존재만 하고 실행된 적 없는 죽은 가드였다(실측 2026-08-17).
-#    여기로 옮겨야 최소한 owner 로컬 `make ci`에서는 실제로 돈다.
+#    여기로 옮겨야 최소한 owner 로컬 `just ci`에서는 실제로 돈다.
 #
 # ⚠️ **CI에서는 파일이 없어 SKIP된다.** 그 자체가 이 레포가 싫어하는 '무측정 초록'에 가깝다는 것을
 #    안다 — 그래서 SKIP 사유를 요란하게 남기고, 판정은 런북이 실재하는 곳(owner 로컬)에 맡긴다.

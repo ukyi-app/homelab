@@ -9,7 +9,7 @@
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; }
 
 @test "verify-runbooks target runs bats over the runbook directory" {
-  run make -n verify-runbooks
+  run just --dry-run verify-runbooks
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE 'bats [^;|]*docs/runbooks'
 }

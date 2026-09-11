@@ -477,8 +477,8 @@ EOF
   [ "$status" -ne 0 ]   # 못 찾았으면 reconfigure를 부르지 않는다(엉뚱한 링크를 끊지 않는다)
 }
 
-@test "apply waits until the pinned IP is back after reconfigure (the 2s DHCP lease gap broke the && make up chain)" {
-  # 🔴 2026-09-06 00:16 실측: reconfigure → `DHCP lease lost` → 2초 뒤 재획득. 그 창에 `&& make up`이
+@test "apply waits until the pinned IP is back after reconfigure (the 2s DHCP lease gap broke the && just up chain)" {
+  # 🔴 2026-09-06 00:16 실측: reconfigure → `DHCP lease lost` → 2초 뒤 재획득. 그 창에 `&& just up`이
   #    이어 부른 host-preflight [4](`ip -o -4 addr show` 열거)가 정확히 밟혀 「핀한 K3S_NODE_IP가 어느
   #    인터페이스에도 없다」 FAIL — 설정 결함이 아닌데 체인이 끊겼다. 자기가 낸 부작용은 자기가
   #    흡수한다: 커널 주소 테이블이 핀 IP를 다시 보일 때까지 기다린 뒤에야 종료한다.

@@ -958,7 +958,7 @@ PY
   # 보이지 않는다. 즉 ci.yaml에서 이 스텝을 지워도 다른 게이트가 아무 말을 하지 않는다.
   run grep -qE '^ +run: bun tools/check-workflow-readiness\.ts *$' "$ROOT/.github/workflows/ci.yaml"
   [ "$status" -eq 0 ]
-  # make verify 미러도 함께(로컬 진입점에서 같은 검사가 돈다)
-  run grep -q 'bun tools/check-workflow-readiness.ts' "$ROOT/Makefile"
+  # just verify 미러도 함께(로컬 진입점에서 같은 검사가 돈다)
+  run grep -q 'bun tools/check-workflow-readiness.ts' "$ROOT/justfile"
   [ "$status" -eq 0 ]
 }

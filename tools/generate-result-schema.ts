@@ -9,7 +9,7 @@
 // 결과 계약만 낡는다).
 // 사용: 기본 --check(대상과 byte 대조, 드리프트면 exit 1) | --write(대상에 기록).
 //       --out <path>로 대상 지정(기본: 이 파일 옆 cli-result-schema.json).
-// 강제 지점 둘: 게이트는 test_result-schema-gen.bats(run-bats 수집 — required check), make verify의
+// 강제 지점 둘: 게이트는 test_result-schema-gen.bats(run-bats 수집 — required check), just verify의
 // --check 라인은 로컬 보조다(verify는 CI에서 안 돈다 — check-guard-authority.ts 헤더). 파일명이
 // 가드 열거 규약(check-*) 밖인 것은 의도다 — 생성기 겸 게이트라 check- 접두가 거짓이 된다.
 import { readFileSync, writeFileSync } from "node:fs";

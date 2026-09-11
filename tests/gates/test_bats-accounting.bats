@@ -106,18 +106,18 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
 
 # ── 신설 계약 (0a): 실행처 표기가 가리키는 venue의 **실재** ──────────────────────────────────────
 # ⚠️ (0)의 `실행처` 문자열 매칭만 있던 시절, 이 자리는 스크립트 주석이 스스로 "텍스트 계약이지 증명이
-#    아니다"라고 적어 둔 구멍이었다. 실측 2026-09-03(착지 전): 없는 타깃(`make no-such-target`)도,
+#    아니다"라고 적어 둔 구멍이었다. 실측 2026-09-03(착지 전): 없는 타깃(`just no-such-target`)도,
 #    아무 단어도(「실행처: 그냥 어딘가에서」) 전부 rc 0이었다. 아래 넷이 그 구멍의 증인이다.
 
 @test "a named venue that does not exist is rejected (the marking must derive, not merely be spelled)" {
   reg="$BATS_TEST_TMPDIR/badvenue"
-  mkreg "$reg" '# 사유 — 실행처: `make no-such-target`' 'tests/gates/test_scan-floor.bats'
+  mkreg "$reg" '# 사유 — 실행처: `just no-such-target`' 'tests/gates/test_scan-floor.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "venue가 0건 실재"
   # 진단은 그룹 첫 줄과 **인식한 토큰**을 함께 낸다 — 어느 표기가 왜 안 걸렸는지 없이는 고칠 수 없다.
   echo "$output" | grep -q "그룹 첫 줄: # 사유"
-  echo "$output" | grep -q "인식한 토큰: \[make no-such-target\]"
+  echo "$output" | grep -q "인식한 토큰: \[just no-such-target\]"
 }
 
 @test "a venue marking with no recognizable token at all is rejected" {
@@ -129,14 +129,14 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   echo "$output" | grep -q "인식한 토큰: (없음)"
 }
 
-@test "each recognized venue form proves a group (make target, bats path, workflow file)" {
+@test "each recognized venue form proves a group (just target, bats path, workflow file)" {
   # 음성 대조 — 이 레인이 '표기가 있으면 무조건 red'가 아니라 **실재 + 호출**을 재는지 고정한다.
   # ⚠️ 항목은 venue가 **실제로 부르는** 파일이어야 한다(venue_calls) — 무관한
-  #    tests/gates/test_scan-floor.bats로는 make/워크플로 형태가 더 이상 통과하지 않는다. 셋 다 실
+  #    tests/gates/test_scan-floor.bats로는 just/워크플로 형태가 더 이상 통과하지 않는다. 셋 다 실
   #    트리에서 그 venue가 실제로 부르는 파일이다: `verify`→sops-roundtrip · 이 파일 자신(bats 형태는
   #    호출 검사 대상이 아니다) · iac.yaml→tf_validate(terraform 그룹의 실제 표기).
   reg="$BATS_TEST_TMPDIR/vmake"
-  mkreg "$reg" '# 사유 — 실행처: owner-local `make verify`' 'tests/test_sops-roundtrip.bats'
+  mkreg "$reg" '# 사유 — 실행처: owner-local `just verify`' 'tests/test_sops-roundtrip.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
   reg="$BATS_TEST_TMPDIR/vbats"
@@ -153,22 +153,22 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   # 레지스트리 실측: 대부분 백틱, KSOPS 그룹만 작은따옴표. 파서가 한쪽만 받으면 정직한 표기가 red가 된다.
   # 항목은 verify-ksops가 실제로 부르는 파일이어야 한다(KSOPS_BATS 변수 리터럴 — venue_calls).
   reg="$BATS_TEST_TMPDIR/vquote"
-  mkreg "$reg" "# 사유 — 실행처: owner-local 'make verify-ksops'" 'platform/cache/prod/test_ksops_render.bats'
+  mkreg "$reg" "# 사유 — 실행처: owner-local 'just verify-ksops'" 'platform/cache/prod/test_ksops_render.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
 }
 
 @test "a venue named merely in unquoted prose does not prove the group (the parser is not a word-matcher)" {
-  # 인용 없이 흘린 「make verify」는 산문이지 표기가 아니다 — 여길 열면 (0a)가 다시 텍스트 계약이 된다.
+  # 인용 없이 흘린 「just verify」는 산문이지 표기가 아니다 — 여길 열면 (0a)가 다시 텍스트 계약이 된다.
   reg="$BATS_TEST_TMPDIR/vprose"
-  mkreg "$reg" '# 사유 — 실행처: 대충 make verify 쯤에서 돈다' 'tests/gates/test_scan-floor.bats'
+  mkreg "$reg" '# 사유 — 실행처: 대충 just verify 쯤에서 돈다' 'tests/gates/test_scan-floor.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "venue가 0건 실재"
 }
 
 # ── 신설 계약 (0a-calls): venue의 실재만으로는 부족하다 — 그 venue가 이 항목을 실제로 불러야 한다 ────
-# ⚠️ venue_derive는 `make <타깃>`과 `.github/workflows/<파일>` 형태에
+# ⚠️ venue_derive는 `just <타깃>`과 `.github/workflows/<파일>` 형태에
 #    대해 venue의 **실재**만 쟀다. venue 표기를 무관한 다른 실재 파일로 바꿔도(iac.yaml→renovate.yaml),
 #    venue 쪽의 실제 호출 줄을 지워도 rc=0였다(2026-09-04 실측 — EVIDENCE 뮤테이션 (a)(b)(c)).
 #    venue_calls()가 그 구멍의 증인이다: venue 파일 본문(주석 제외)에서 test_*.bats 토큰을 뽑아
@@ -184,31 +184,31 @@ mkreg() { f="$1"; shift; printf '%s\n' "$@" > "$f"; }
   echo "$output" | grep -q "venue가 0건 실재"
 }
 
-@test "a make target that exists but never calls this item's bats path is rejected" {
-  # `verify` 타깃은 실재하지만, 이 파일 경로는 Makefile 어디에도 없다(리터럴도 글롭도) — 예전엔
+@test "a just target that exists but never calls this item's bats path is rejected" {
+  # `verify` 타깃은 실재하지만, 이 파일 경로는 justfile 어디에도 없다(리터럴도 글롭도) — 예전엔
   # 타깃 실재만으로 통과했다.
   reg="$BATS_TEST_TMPDIR/mknocall"
-  mkreg "$reg" '# 사유 — 실행처: owner-local `make verify`' 'tests/gates/test_no-such-in-verify.bats'
+  mkreg "$reg" '# 사유 — 실행처: owner-local `just verify`' 'tests/gates/test_no-such-in-verify.bats'
   run bash "$s" --lint-excludes "$reg"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "venue가 0건 실재"
 }
 
-# ── 사본 레포 픽스처 — venue_calls의 Makefile 스코프를 실 트리를 건드리지 않고 재는 자리 ─────────
-# 아래 두 @test는 예전에 **실 Makefile**에 프로브 타깃을 append했다가 사본으로 복원했다. 파일 단위
-# 병렬 bats에서 그 창을 밟은 다른 프로세스의 가드(make help·ci-parity·makefile-bun)가 거짓 red를 냈고,
+# ── 사본 레포 픽스처 — venue_calls의 justfile 스코프를 실 트리를 건드리지 않고 재는 자리 ─────────
+# 아래 두 @test는 예전에 **실 justfile**에 프로브 타깃을 append했다가 사본으로 복원했다. 파일 단위
+# 병렬 bats에서 그 창을 밟은 다른 프로세스의 가드(just help·ci-parity·makefile-bun)가 거짓 red를 냈고,
 # 이 스위트는 그 때문에 직렬 레인에 있었다(docs/traps-detail.md 「파일 단위 병렬 bats에서 실 체크아웃을
-# 잠깐 바꾸는 스위트는 …」). 이제 가드 사본 + 커널 사본 + **합성 Makefile**을 $BATS_TEST_TMPDIR/fx에
+# 잠깐 바꾸는 스위트는 …」). 이제 가드 사본 + 커널 사본 + **합성 justfile**을 $BATS_TEST_TMPDIR/fx에
 # 세우고 그 **사본 가드**를 돌린다 — 가드는 ROOT를 BASH_SOURCE/../..에서 파생하므로
-# (scripts/lib/guard.sh의 guard_init) 사본 가드가 사본 트리의 Makefile을 읽는다. 실 체크아웃이 무변경이라
-# 복원 자체가 사라지고, 구 판이 `git checkout -- Makefile` 대신 사본 복원을 써야 했던 이유(공유
-# .git/index 잠금 + Makefile의 미커밋 편집 소실)도 함께 소멸한다.
+# (scripts/lib/guard.sh의 guard_init) 사본 가드가 사본 트리의 justfile을 읽는다. 실 체크아웃이 무변경이라
+# 복원 자체가 사라지고, 구 판이 `git checkout -- justfile` 대신 사본 복원을 써야 했던 이유(공유
+# .git/index 잠금 + justfile의 미커밋 편집 소실)도 함께 소멸한다.
 # 선례: tests/gates/test_bats-style.bats의 emptyrepo 픽스처.
 # ⚠️ `--lint-excludes` 모드는 git을 쓰는 (1)(2) 판정 **앞에서** exit하므로 사본 레포가 비어도 된다.
 #    그래도 `git init`은 해 둔다: 안 하면 사본 트리에 git 레포가 없어, 나중에 가드가 git을 더 일찍
 #    부르게 될 때 그 실패가 음성 @test에서 조용한 통과로 흡수된다.
 # $1=프로브 타깃명 · $2=레시피 한 줄(탭은 여기서 붙인다). 사본 루트를 전역 `fx`로 남긴다.
-# ⚠️ 마지막 grep은 픽스처가 **실제로 착지했는지**의 증인이다 — 합성 Makefile이 안 써졌거나 타깃명이
+# ⚠️ 마지막 grep은 픽스처가 **실제로 착지했는지**의 증인이다 — 합성 justfile이 안 써졌거나 타깃명이
 #    드리프트하면 아래 음성 @test가 「타깃이 없어서 red」로 조용히 통과한다(픽스처가 자기 전제를 잃는 자리).
 acct_fixture() {
   fx="$BATS_TEST_TMPDIR/fx"
@@ -216,26 +216,26 @@ acct_fixture() {
   cp "$ROOT/scripts/check-bats-accounting.sh" "$fx/scripts/"
   cp "$ROOT/scripts/lib/guard.sh" "$fx/scripts/lib/"
   cp "$ROOT/scripts/lib/scan-floor.sh" "$fx/scripts/lib/"
-  printf '%s:\n\t%s\n' "$1" "$2" > "$fx/Makefile"
+  printf '%s:\n\t%s\n' "$1" "$2" > "$fx/justfile"
   git -C "$fx" init -q
-  grep -q "^$1:" "$fx/Makefile"
+  grep -q "^$1:" "$fx/justfile"
 }
 
-@test "a make target's trailing comment mentioning a bats path is not treated as a call (acct-trailing-comment)" {
+@test "a just target's trailing comment mentioning a bats path is not treated as a call (acct-trailing-comment)" {
   # 비평가 실증 — venue_calls()가 줄 전체 주석만 걷을 때는 코드 줄에 붙은 trailing 주석 속 경로
-  # 언급도 호출 증인으로 오인됐다(진짜 호출은 없는데 주석에만 경로가 있어도 HIT). 합성 Makefile의
+  # 언급도 호출 증인으로 오인됐다(진짜 호출은 없는데 주석에만 경로가 있어도 HIT). 합성 justfile의
   # 프로브 타깃이 레시피 한 줄에 **trailing 주석으로만** 경로를 언급한다 — 타깃 자체는 실재하므로
   # 이 레인이 red를 내는 이유는 「주석 속 언급은 호출이 아니다」뿐이다.
   acct_fixture _zz_acct_trailing_probe \
     '@echo hi # see tests/_fixtures_acct/test_zz_trailing_probe.bats for context, not actually called'
   reg="$BATS_TEST_TMPDIR/mktrailing"
-  mkreg "$reg" '# 사유 — 실행처: owner-local `make _zz_acct_trailing_probe`' 'tests/_fixtures_acct/test_zz_trailing_probe.bats'
+  mkreg "$reg" '# 사유 — 실행처: owner-local `just _zz_acct_trailing_probe`' 'tests/_fixtures_acct/test_zz_trailing_probe.bats'
   run bash "$fx/scripts/check-bats-accounting.sh" --lint-excludes "$reg"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "venue가 0건 실재"
-  # 표기가 그 프로브 타깃으로 파싱됐다는 증인 — 레지스트리 쪽 타깃명이 합성 Makefile 쪽과 드리프트하면
-  # 여기서 걸린다(acct_fixture의 grep과 짝: 저긴 Makefile 리터럴, 여긴 레지스트리 리터럴).
-  echo "$output" | grep -q "인식한 토큰: \[make _zz_acct_trailing_probe\]"
+  # 표기가 그 프로브 타깃으로 파싱됐다는 증인 — 레지스트리 쪽 타깃명이 합성 justfile 쪽과 드리프트하면
+  # 여기서 걸린다(acct_fixture의 grep과 짝: 저긴 justfile 리터럴, 여긴 레지스트리 리터럴).
+  echo "$output" | grep -q "인식한 토큰: \[just _zz_acct_trailing_probe\]"
 }
 
 @test "a quoted trailing hash does not truncate a real call after it (acct-quote-aware, reg13-a1-bats-guards-2)" {
@@ -247,7 +247,7 @@ acct_fixture() {
   acct_fixture _zz_acct_quote_probe \
     '@echo "note # symbol" && bash tests/_fixtures_acct/test_zz_quote_probe.bats'
   reg="$BATS_TEST_TMPDIR/mkquote"
-  mkreg "$reg" '# 사유 — 실행처: owner-local `make _zz_acct_quote_probe`' 'tests/_fixtures_acct/test_zz_quote_probe.bats'
+  mkreg "$reg" '# 사유 — 실행처: owner-local `just _zz_acct_quote_probe`' 'tests/_fixtures_acct/test_zz_quote_probe.bats'
   run bash "$fx/scripts/check-bats-accounting.sh" --lint-excludes "$reg"
   [ "$status" -eq 0 ]
 }
@@ -372,7 +372,7 @@ manual_max() { grep -oE '^MANUAL_MAX=[0-9]+' "$s" | cut -d= -f2; }
 # ── 픽스처 모드가 회계를 끄는 off-switch가 아님 ─────────────────────────────────────────────────
 # ⚠️ 앞선 판은 `if [ "$#" -gt 0 ]`로 **첫 인자**를 레지스트리 경로로 삼았다. 그러면 아무 토큰이나 하나
 #    붙는 순간 도메인 회계와 gate 바닥값이 통째로 건너뛰어지고 exit 0이 된다 — 소비처가 셋이라(ci.yaml·
-#    Makefile 2곳) 어디든 인자 한 토큰이면 이 가드가 자기 자신을 끄는 스위치가 됐다(적대 검토 실측).
+#    justfile 2곳) 어디든 인자 한 토큰이면 이 가드가 자기 자신을 끄는 스위치가 됐다(적대 검토 실측).
 
 @test "an unknown argument fails loud instead of silently degrading to lint mode" {
   run bash "$s" tests/.ci-exclude

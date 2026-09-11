@@ -13,7 +13,7 @@ k3s 단일 노드(**Intel NUC 베어메탈** · Ubuntu 26.04 LTS · amd64) 홈�
 | `platform/charts/app` | 모든 앱이 쓰는 공유 Helm 차트 (SSOT) |
 | `apps/<name>/deploy/prod/` | 앱별 values + SealedSecret + `.bindings.json`(**autoDeploy SSOT** — db/redis 바인딩은 여기 없다: 리소스 연결은 values.yaml `envFrom`의 conn secretRef 손 배선이다) + `source-repo`(외부 레포 바인딩) |
 | `tools/` | 앱 플랫폼 DX **Bun/TS CLI** (`create-app`/`activate-app`·`audit-orphans` 등 — 변이 디스패처·`bump-poll`이 호출, `homelab` 통합 CLI 진입점 `homelab.ts` 포함) + 단위 테스트(`tools/tests/`). top-level·`lib/`는 `.ts`(bun 전용), app-shared는 `.mts`(bun + node≥22.18 strip-types 양립) — 산출물 로스터는 `tools/README.md`(check-doc-index 강제) |
-| `scripts/` | 클러스터/DR 운영·시크릿 **셸 스크립트** (bootstrap·seed/seal·dr-drill·`check-*` 게이트·run-bats — `make`/CI 게이트가 호출). cf. `infra/k3s-bootstrap/*.sh` = 호스트 설정·k3s·스토리지 substrate 부트스트랩 |
+| `scripts/` | 클러스터/DR 운영·시크릿 **셸 스크립트** (bootstrap·seed/seal·dr-drill·`check-*` 게이트·run-bats — `just`/CI 게이트가 호출). cf. `infra/k3s-bootstrap/*.sh` = 호스트 설정·k3s·스토리지 substrate 부트스트랩 |
 | `policy/` | 메모리 원장 OPA 정책 (`bun run verify:ledger` 게이트) |
 | `docs/memory-ledger.md` | 메모리 예산 SSOT — limit 합계 ≤ 10240Mi, CI 강제 |
 | `docs/runbooks/` | **로컬 전용**(gitignored) 운영 런북 — 아래 인덱스 참고 |
@@ -22,12 +22,12 @@ k3s 단일 노드(**Intel NUC 베어메탈** · Ubuntu 26.04 LTS · amd64) 홈�
 ## 핵심 명령
 
 ```bash
-make verify        # 기반 게이트: skeleton + 원장(conftest) + sops 라운드트립
-make chart-test    # 공유 차트: 3 kind(web/worker/site) 렌더 + kubeconform + bats
-make tf-validate   # terraform fmt+validate (3 루트)
+just verify        # 기반 게이트: skeleton + 원장(conftest) + sops 라운드트립
+just chart-test    # 공유 차트: 3 kind(web/worker/site) 렌더 + kubeconform + bats
+just tf-validate   # terraform fmt+validate (3 루트)
 bats tools/tests/ infra/k3s-bootstrap/tests/ </dev/null   # 툴링/부트스트랩 테스트(fd 0 격리 — 스텁 hang 방지)
 ./scripts/run-bats.sh   # gate 수집 전수 — 파일 단위 병렬(GNU parallel 필요 · RUNBATS_JOBS=1이면 직렬) + tests/.gate-serial 직렬 레인
-make verify-posture   # [live] posture 스위트(internal-by-default·netpol·e2e·DR 자산 신선도) — KUBECONFIG 필요(부재=SKIP 신호·비-0)
+just verify-posture   # [live] posture 스위트(internal-by-default·netpol·e2e·DR 자산 신선도) — KUBECONFIG 필요(부재=SKIP 신호·비-0)
                       # + DR 자산 레그는 SEALED_KEY_BACKUP_DIR·LOCAL_ASSET_BACKUP_DIR env 필요(미설정=red)
 bun link && homelab doctor   # 통합 CLI 전역 설치 + 전제 진단(빠른 시작 순서는 tools/README.md)
 bun link && bun tools/homelab.ts doctor   # 전역 엔트리가 아직 안 뜰 때의 소스 실행형.
@@ -57,7 +57,7 @@ export KUBECONFIG=$PWD/infra/k3s-bootstrap/kubeconfig   # 라이브 클러스터
 ## 라이브에서 검증된 함정 (재발 주의)
 
 > 전문·근거는 **`docs/traps-detail.md`(SSOT)** — 컴포넌트 작업 전 해당 항목 확인. enforced 가드 현황은
-> `docs/traps.md` 원장(`make verify-traps`). 아래는 한줄 인덱스(헤드라인 = traps-detail.md 섹션과 동일).
+> `docs/traps.md` 원장(`just verify-traps`). 아래는 한줄 인덱스(헤드라인 = traps-detail.md 섹션과 동일).
 
 - ArgoCD sync-wave 순서/교착
 - ArgoCD retry 소진 후 명시 sync
@@ -205,8 +205,8 @@ reader/writer 키만 homelab Actions secret에 있다.
   `create-app`/`update-secrets`/`create-database`/`create-cache`/`teardown-app`(각 전용 워크플로).
   (CLI 래퍼: `homelab db|cache create` · `homelab app create|secrets|teardown` — 빠른 시작·동사 표는
   `tools/README.md`. 래퍼는 같은 디스패처를 `gh workflow run`으로 깨울 뿐이라 신뢰 경계가 불변이다.) **파괴: `teardown-app`은
-  디스패처(`🗑️ teardown-app` — confirm===app 가드 + **수동 머지**, reusable이 파괴 경계에서 confirm 재검증) + owner-local CLI(`make teardown-app`) 공존.
-  `teardown-resource`·`activate-app`은 owner-local**(`make teardown-resource`·런북 — 데이터 파괴·attestation·purge 상태머신), **audit은 스케줄 reconciler**(`audit.yaml`).
+  디스패처(`🗑️ teardown-app` — confirm===app 가드 + **수동 머지**, reusable이 파괴 경계에서 confirm 재검증) + owner-local CLI(`just teardown-app`) 공존.
+  `teardown-resource`·`activate-app`은 owner-local**(`just teardown-resource`·런북 — 데이터 파괴·attestation·purge 상태머신), **audit은 스케줄 reconciler**(`audit.yaml`).
   validator(`tools/validate-mutation.ts`)가 계약표 강제. 전역 직렬화: `concurrency: homelab-mutation` + `queue: max`.
 - **update-image:** `bump-poll.yaml`(10분 주기 GHCR 폴링)이 권위 — main reachable + 배포 SHA
   descendant + digest 핀 검증 후 autoDeploy면 자동 PR+머지, 아니면 승인 PR(.bindings.json이

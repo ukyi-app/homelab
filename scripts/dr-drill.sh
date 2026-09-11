@@ -200,8 +200,8 @@ echo "==> [2] 커밋된 host-config/install에서 노드 + k3s + StorageClass �
 bash infra/k3s-bootstrap/host-up.sh
 use_live_kubeconfig # host-up.sh가 kubeconfig를 재생성한다
 
-echo "==> [3] make bootstrap — ArgoCD + sops-age Secret + root app, 전부 git에서"
-make bootstrap
+echo "==> [3] just bootstrap — ArgoCD + sops-age Secret + root app, 전부 git에서"
+just bootstrap
 
 echo "==> [3.5] sealing-key DR: 컨트롤러 대기 → 백업 키 복원 + committed cert 일치(항상)"
 restore_sealing_key "$REPO_ROOT" "$SEALED_KEY_BACKUP_DIR" || { echo "DR DRILL FAIL: 복원 실패"; exit 1; }

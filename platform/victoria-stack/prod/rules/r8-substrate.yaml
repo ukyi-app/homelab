@@ -18,7 +18,7 @@ data:
           # `v1.36.3+k3s1` · provisioner `v0.0.36` vs `v0.0.37` — 어느 것도 신호를 내지 않았다.
           #
           # ★ 그래서 이 두 룰은 **핀 bump 직후 발화하는 것이 정상이다** — 고장이 아니라 '거리'다.
-          #   해소는 owner가 `make up`(또는 `apply-storage.sh` + `k3s-install.sh`)으로 수렴할 때다.
+          #   해소는 owner가 `just up`(또는 `apply-storage.sh` + `k3s-install.sh`)으로 수렴할 때다.
           #
           # ⚠️ `for: 24h`는 핀 bump PR 머지 → owner 재수렴 사이의 **정상 지연**을 흡수하는 값이다.
           #    짧게 잡으면 Renovate PR을 머지할 때마다 페이징이 되어 알림 피로가 되고, 그러면 규약이

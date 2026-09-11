@@ -12,6 +12,7 @@ description: 핀된 차트/정책/시크릿 툴체인 설치 (버전 SSOT). 필�
 # ⚠️ kubeseal은 컨트롤러 appVersion과 lockstep이다(아래 kubeseal 스텝 주석 + tests/gates/test_setup-toolchain-kubeseal.bats).
 
 inputs:
+  just:        { description: just v1.58.0,          default: 'false' }
   yq:          { description: yq v4.53.3,            default: 'false' }
   kubeconform: { description: kubeconform v0.6.7,    default: 'false' }
   helm:        { description: helm v3.21.2,          default: 'false' }
@@ -27,6 +28,13 @@ inputs:
 runs:
   using: composite
   steps:
+    - if: ${{ inputs.just == 'true' }}
+      shell: bash
+      run: |
+        f=/tmp/just.tgz
+        curl -fsSL https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-aarch64-unknown-linux-musl.tar.gz -o "$f"
+        echo "748237128c4c40cbdabc65e841d05ceba13cc23a91eaba395495894c1d9764df  $f" | sha256sum -c -
+        sudo tar -xz -C /usr/local/bin -f "$f" just
     - if: ${{ inputs.yq == 'true' }}
       shell: bash
       run: |
