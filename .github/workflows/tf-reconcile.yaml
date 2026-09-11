@@ -76,7 +76,7 @@ jobs:
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         with:
           # renovate: datasource=github-releases depName=hashicorp/terraform
-          terraform_version: "1.9.8"
+          terraform_version: "1.16.2"
           terraform_wrapper: false
       - name: terraform init (R2 backend)
         uses: ./.github/actions/tf-r2-init
@@ -200,7 +200,7 @@ jobs:
         if: steps.pf.outputs.configured == 'true'
         with:
           # renovate: datasource=github-releases depName=hashicorp/terraform
-          terraform_version: "1.9.8"
+          terraform_version: "1.16.2"
           terraform_wrapper: false
       - name: terraform init (R2 backend, github)
         if: steps.pf.outputs.configured == 'true'
@@ -313,30 +313,12 @@ jobs:
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         if: steps.pf.outputs.configured == 'true'
         with:
-          # ⚠️ **형제 잡(1.9.8)과 일부러 다르다 — 맞추지 마라.** terraform은 state를 쓴 버전보다
-          # 낮은 바이너리로는 그 state를 **읽지도 못한다**("state snapshot was created by Terraform
-          # vX, which is newer than current vY"). plan-only여도 refresh가 state를 읽으므로 같다.
-          # 이 핀은 **헤드룸**이다 — 세 루트의 state writer는 전부 ≤1.9.8이고(실측 2026-08-19:
-          # 1.9.8 바이너리로 github 8건·tailscale 3건·cloudflare 26건 `state list`가 정상 열렸다),
-          # 1.15.5는 어떤 writer보다도 높아 이 plan-only 감시가 writer 상승에 죽지 않는다.
-          # ⚠️ owner 로컬 작업기는 **NUC(terraform 1.9.8)** 다 — owner 바이너리가 이미 1.15.5라는
-          #    전제로 다른 핀들을 '선제' 통일하면 cloudflare/github 등식이 깨진다.
-          # 핀은 **루트마다 독립**이다(state writer가 다르므로 통일이 오히려 고장이다):
-          #   · cloudflare — CI(iac.yaml의 `iac-plan`·`apply` 잡 · 이 파일의 `reconcile` 잡)와 owner 로컬
-          #     apply(blocked-delete 복구 경로)가 번갈아 쓴다 ⇒ 그 핀들 = owner 바이너리 **등식**.
-          #   · github — owner 로컬 apply 전용이고 CI(이 파일의 `drift-github` 잡)는 plan-only ⇒ CI 핀 ≥ writer.
-          #   · iac.yaml의 `iac-validate` 잡(「terraform init (no backend) + validate all roots」 스텝)은
-          #     `init -backend=false`라 state를 안 만져 등식 밖이다.
-          #   ✅ 그 등식은 이제 기계가 진다 — infra/cloudflare/versions.tf·infra/github/versions.tf의
-          #     `required_version = "= 1.9.8"`이 한 변만 올라가도 init에서 fail-closed로 죽인다.
-          #     이 루트(tailscale)만 `>= 1.9.0`이라 1.15.5로 돌 수 있다.
-          # 🔁 **재발 지점**: owner 머신 terraform이 1.15.5를 넘어서면 이 핀이 다시 낡는다. 로컬
-          #    apply 후 이 값을 함께 올릴 것. Renovate 비대상인 이유가 바뀌었다: 등식 핀 쪽에는
-          #    customManager가 생겼지만(renovate.json 「terraform 코어 버전 등식 핀」), 그건 바로 위에
-          #    `# renovate: … depName=hashicorp/terraform` **마커가 붙은 자리만** 잡는다. 이 핀에는
-          #    마커가 없다 — 등식이 아니라 헤드룸이라 같은 PR로 움직이면 안 되기 때문이다.
-          #    (github-actions manager는 여전히 비활성이라 `uses:` 핀도 자동 갱신 경로가 없다.)
-          terraform_version: "1.15.5"
+          # owner 로컬 Terraform 1.16.2에 맞춘 plan-only 핀이다.
+          # 새 state 형식의 하위 버전 호환은 보장되지 않으므로 owner 갱신 시 함께 검토한다.
+          # tailscale은 >= 1.9.0 계약을 유지하고 CI 핀은 다른 실행 환경과 함께 갱신한다.
+          # 다른 루트와 값이 같은 것은 허용한다. 필요한 것은 owner와의 호환성이다.
+          # renovate: datasource=github-releases depName=hashicorp/terraform
+          terraform_version: "1.16.2"
           terraform_wrapper: false
       - name: terraform init (R2 backend, tailscale)
         if: steps.pf.outputs.configured == 'true'

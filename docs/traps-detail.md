@@ -1336,27 +1336,18 @@ selfHeal과 플립플롭한다.
 > 가드: `infra/tailscale/test_provider_scopes.bats`
 
 ### owner 로컬 apply 루트는 CI가 plan만 해도 terraform 코어 버전이 state writer 이상이어야 한다
-- **terraform은 state를 쓴 버전보다 낮은 바이너리로 그 state를 읽지도 못한다**
-  (`state snapshot was created by Terraform vX, which is newer than current vY`). apply가 아니라
-  **plan-only여도 마찬가지다** — refresh가 state를 읽어야 하기 때문이다.
-- **왜 이 레포에서 물리는가**: 루트마다 state writer가 다르다.
-  - **github·tailscale은 owner 로컬 apply 전용**이라 writer가 owner 머신의 terraform이 된다.
-    owner가 brew/mise로 terraform을 올리고 한 번 apply하면, 그 순간부터 CI의 plan-only 감시가
-    죽는다 — 그 job이 `required/error`면 **매 30분 red**다.
-  - ⚠️ **cloudflare는 "CI 전용"이 아니다.** CI가 apply하지만(iac.yaml plan/apply · tf-reconcile
-    apply) blocked-delete 복구 경로는 **owner 로컬 apply**다 — 즉 writer 집합이 CI ∪ owner이고,
-    "CI가 apply하므로 writer가 CI 핀에 고정"은 절반만 참이었다. 이 루트의 CI 핀과 owner 바이너리는
-    한 값이어야 하는 **등식**이다.
-- ⚠️ **핀 통일이 오히려 고장이다.** 워크플로의 `terraform_version` 핀들을 "일관성" 명목으로 맞추면
-  로컬-apply 루트가 깨진다. 핀은 루트마다 독립이며, 그 의도를 주석에 박아 두지 않으면 다음 사람이
-  통일한다(실제로 그 방향의 리팩터가 자연스러워 보인다).
-- ✅ **등식은 이제 terraform 자신이 진다**(가드 신설 0): `infra/cloudflare/versions.tf`와
-  `infra/github/versions.tf`의 `required_version = "= 1.9.8"`이 CI 핀·owner 바이너리 어느 한 변만
-  올라가도 `init`/`validate` 단계에서 fail-closed로 죽인다 — state를 쓰기 **전에**, 그리고
-  `init -backend=false`인 PR gate에서도 걸린다. `infra/tailscale/versions.tf`만 `>= 1.9.0`이다
-  (그 루트의 drift 잡은 일부러 1.15.5 헤드룸으로 돈다).
-- ⚠️ **Renovate가 이 값을 안 본다** — `renovate.json`에 `terraform_version` customManager가 없고
-  github-actions manager도 비활성이다. 즉 자동 갱신 경로가 0이고, 로컬 apply 후 손으로 올려야 한다.
+- 새 Terraform이 쓴 state의 **하위 버전 호환은 보장되지 않는다**. 버전 숫자가 높다는 이유만으로
+  항상 읽기 실패하는 것은 아니지만, 새 state 형식·기능을 이전 CLI가 해석하지 못할 수 있다.
+- github·tailscale은 owner 로컬 apply, cloudflare는 CI와 owner 복구 경로가 writer다.
+  plan-only CI도 state를 읽으므로 owner 업그레이드 때 함께 검토해야 한다.
+- **2026-09-11 실행 핀 갱신:** owner·iac.yaml·tf-reconcile.yaml은 Terraform **1.16.2**를 사용한다.
+  cloudflare·github는 `required_version = "= 1.16.2"`, tailscale은 `>= 1.9.0`을 유지한다.
+  과거 tailscale CI 1.15.5와 다른 루트 1.9.8의 차이는 당시의 여유였지, 영구적인 불일치 계약이 아니다.
+- Renovate는 마커가 붙은 실행 핀과 등식 제약을 함께 갱신한다(tailscale CI 포함).
+  순서: owner 바이너리 준비 → CI 핀 PR 반영 → 새 버전으로 owner apply.
+  바이너리 설치만으로 원격 state가 바뀌지는 않는다. provider lock 파일 갱신과 원격 state 쓰기도 별개다.
+- 이번 핀 갱신 자체는 라이브 state 마이그레이션 완료를 뜻하지 않는다.
+
 > 가드: `infra/tailscale/test_provider_scopes.bats`
 
 ### GitHub API는 낡은 스냅샷을 200으로 돌려준다 — `last_over_time`은 그 역행 샘플 하나를 그대로 페이지로 바꾼다
