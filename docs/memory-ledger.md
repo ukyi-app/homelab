@@ -452,7 +452,7 @@ values-only 예시는 외부 앱 레포 체제 전환과 함께 제거 — 새 �
 > 이 둘은 **ArgoCD 관리가 아니다**(`app.kubernetes.io/instance` 라벨 없음 — 라이브 실측 2026-09-03).
 > `tools/check-resource-limits.ts`가 `substrate-manifests` 스코프로 이 파일을 함께 열거해 **namespace별
 > memory 합 == 그 namespace를 쓰는 원장 행들의 합**을 기계로 대조한다(replicas 반영). 양방향이다 —
-> 매니페스트의 limit을 올려도, 이 행을 지워도 `make verify`가 red다. 그러니 **손으로 맞추지 말고
+> 매니페스트의 limit을 올려도, 이 행을 지워도 `just verify`가 red다. 그러니 **손으로 맞추지 말고
 > 한쪽을 고친 뒤 가드를 돌려라**(2026-09-03 착지 전에는 두 뮤테이션 모두 전 게이트 초록이었다).
 > `platform/` 스코프도 F1(정적 귀속)+F2(커버리지 파생)로 5개 namespace(database·edge·files·
 > homepage·observability)가 같은 형태로 기계 대조된다

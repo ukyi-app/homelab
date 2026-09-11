@@ -1,25 +1,25 @@
 {
   "_readme": [
-    "make ci ↔ ci.yaml job 'gate' 패리티 원장. 강제: tools/check-ci-parity.ts (필수 게이트).",
+    "just ci ↔ ci.yaml job 'gate' 패리티 원장. 강제: tools/check-ci-parity.ts (필수 게이트).",
     "게이트의 모든 run 스텝은 여기 계상돼야 한다. 미계상도 red, 죽은 선언(gate에 없는 이름)도 red.",
-    "status: mirrored = make ci가 같은 걸 돈다(local 문자열이 `make -n ci` 출력에 실재해야 한다) /",
+    "status: mirrored = just ci가 같은 걸 돈다(local 문자열이 `just --dry-run ci` 출력에 실재해야 한다) /",
     "        covered  = 로컬의 다른 메커니즘이 덮는다(covered_by.file에 contains가 실재해야 한다) /",
     "        excluded = 로컬에선 안 돈다(why·since·owner_action 필수).",
     "⚠️ 이 원장은 '차이가 없다'가 아니라 '모든 차이가 의도된 것이다'를 강제한다. 완전 일치를 요구하면",
-    "   docker 없는 환경에서 make ci가 못 돌고 결국 아무도 안 쓴다 — 그게 패리티 붕괴의 실제 경로다.",
-    "mirrored의 local 토큰은 `make -n ci` 출력**과** 그 gate 스텝의 run 본문 **양쪽에** 실재해야 한다.",
+    "   docker 없는 환경에서 just ci가 못 돌고 결국 아무도 안 쓴다 — 그게 패리티 붕괴의 실제 경로다.",
+    "mirrored의 local 토큰은 `just --dry-run ci` 출력**과** 그 gate 스텝의 run 본문 **양쪽에** 실재해야 한다.",
     "  스텝 계상은 이름 기반이라, 이름을 보존한 채 본문만 갈아치우면 나머지 방향이 전부 침묵한다",
     "  (실측 2026-09-03: 실 ci.yaml의 `run: bun run verify:ledger` → `run: echo swapped`가 ci-parity·",
     "  guard-authority·workflow-readiness 전건 초록).",
-    "gate_contains: 표기가 **정당하게 다를 때만** 쓰는 본문 쪽 토큰(현재 1건 — gate는 `make chart-test`를",
-    "  부르고 make ci는 그 타깃의 레시피를 펴므로 local이 render.sh다). local이 이미 본문에 있으면",
+    "gate_contains: 표기가 **정당하게 다를 때만** 쓰는 본문 쪽 토큰(현재 1건 — gate는 `just chart-test`를",
+    "  부르고 just ci는 그 타깃의 레시피를 펴므로 local이 render.sh다). local이 이미 본문에 있으면",
     "  거부된다 — 손 관리 문자열이 두 벌로 번지지 않게 하는 기계 장치다. mirrored 전용.",
     "covered/excluded는 이 대조의 대상 밖이다: covered는 '**다른** 로컬 수단이 덮는다'는 선언이라 gate",
     "  본문과 맞댈 토큰이 없고(covered_by는 덮는 쪽 파일이다), excluded는 local 자체가 없다."
   ],
   "steps": [
     {
-      "name": "typecheck (tsc --noEmit — erasableSyntaxOnly 게이트, make ci 패리티)",
+      "name": "typecheck (tsc --noEmit — erasableSyntaxOnly 게이트, just ci 패리티)",
       "status": "mirrored",
       "local": "bun run typecheck"
     },
@@ -31,16 +31,16 @@
     {
       "name": "SOPS 왕복 (ephemeral CI 키)",
       "status": "covered",
-      "why": "게이트는 실 age 키가 없어 즉석 키로 왕복을 증명한다. 로컬은 반대로 실 키가 있으므로 make verify가 tests/test_sops-roundtrip.bats로 같은 불변식(암호화 후 평문 부재 + 복호 왕복)을 더 강하게 검증한다. make ci에 미러하면 age 키 없는 환경에서 make ci가 죽는다(그래서 그 bats가 tests/.ci-exclude에 있다).",
+      "why": "게이트는 실 age 키가 없어 즉석 키로 왕복을 증명한다. 로컬은 반대로 실 키가 있으므로 just verify가 tests/test_sops-roundtrip.bats로 같은 불변식(암호화 후 평문 부재 + 복호 왕복)을 더 강하게 검증한다. just ci에 미러하면 age 키 없는 환경에서 just ci가 죽는다(그래서 그 bats가 tests/.ci-exclude에 있다).",
       "covered_by": {
-        "file": "Makefile",
+        "file": "justfile",
         "contains": "tests/test_sops-roundtrip.bats"
       }
     },
     {
       "name": "pre-commit 배선 확인 (훅 정의가 실제로 도는가)",
       "status": "covered",
-      "why": "훅이 커밋마다 도는 것은 훅을 설치한 개발 체크아웃에서뿐이다 — 에이전트 worktree에는 훅이 없다(2026-09-03 실측: .git/hooks에 .sample뿐). 그래서 이 원장이 기대는 것은 훅 실행이 아니라 **정의된 훅의 내용이 로컬에서 각자 도는 것**이다: sops-guard·sealed-guard는 각각 자기 mirrored 스텝이고, gitleaks는 secret-guard 항목이 mirrored로 덮는다(로컬 판이 핀과 다르면 미평가 원장). 남는 차이는 `pre-commit validate-config`(설정 문법 유효성) 하나다 — make ci에서 pre-commit을 재실행하면 pip 설치가 오프라인 환경의 진입점을 깬다.",
+      "why": "훅이 커밋마다 도는 것은 훅을 설치한 개발 체크아웃에서뿐이다 — 에이전트 worktree에는 훅이 없다(2026-09-03 실측: .git/hooks에 .sample뿐). 그래서 이 원장이 기대는 것은 훅 실행이 아니라 **정의된 훅의 내용이 로컬에서 각자 도는 것**이다: sops-guard·sealed-guard는 각각 자기 mirrored 스텝이고, gitleaks는 secret-guard 항목이 mirrored로 덮는다(로컬 판이 핀과 다르면 미평가 원장). 남는 차이는 `pre-commit validate-config`(설정 문법 유효성) 하나다 — just ci에서 pre-commit을 재실행하면 pip 설치가 오프라인 환경의 진입점을 깬다.",
       "covered_by": {
         "file": ".pre-commit-config.yaml",
         "contains": "sops-guard"
@@ -60,7 +60,7 @@
       "name": "chart render + validate (all kinds)",
       "status": "mirrored",
       "local": "platform/charts/app/tests/render.sh",
-      "gate_contains": "make chart-test"
+      "gate_contains": "just chart-test"
     },
     {
       "name": "memory ledger onboarding gate (M0-owned)",
@@ -126,7 +126,7 @@
       "local": "scripts/check-pg-servername.sh"
     },
     {
-      "name": "make ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)",
+      "name": "just ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)",
       "status": "mirrored",
       "local": "check-ci-parity.ts"
     },

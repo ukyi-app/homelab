@@ -5,7 +5,7 @@
 #    증인이 0건이었다 — `git grep -l assert-cluster-identity scripts infra`가 찾는 유일한 소비처
 #    (tests/posture/test_network-policy.bats:40)는 산문 언급뿐이고, 그 파일 자체도
 #    tests/.ci-exclude(라이브 전용, 라인 30)라 required gate 밖이다. tests/gates/test_make-ops-targets.bats는
-#    Makefile 경유 타깃(argo-sync/argo-terminate/bootstrap)만 다뤄 이 직접 실행 스크립트는 범위 밖이다.
+#    justfile 경유 타깃(argo-sync/argo-terminate/bootstrap)만 다뤄 이 직접 실행 스크립트는 범위 밖이다.
 sh=scripts/netpol-rehearsal.sh
 
 @test "netpol-rehearsal exists, is executable, and passes shellcheck" {

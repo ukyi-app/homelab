@@ -6,7 +6,7 @@ import rego.v1
 
 # 열거 붕괴 → vacuous green 차단(scan-floor). 아래 두 deny는 **전부** `input.rows` 한정이라
 # 행 파서가 0행을 내면 동시에 무발화한다 — 마커/포맷 드리프트 하나로 limit 합계 상한과
-# limit ≥ request 불변식이 같이 사라지고, 이 정책을 부르는 `make verify`·`make ci`·required
+# limit ≥ request 불변식이 같이 사라지고, 이 정책을 부르는 `just verify`·`just ci`·required
 # check `gate`가 전부 초록이 된다(원장 예산 게이트 전체가 vacuous). 부분 드리프트도 같은 클래스다.
 # 게이트는 스크립트가 아니라 **정책**이므로 바닥값도 여기가 제자리다.
 # 실 원장 **16행**(2026-09-03 실측 `grep -c 'ledger:row' docs/memory-ledger.md`) → 12

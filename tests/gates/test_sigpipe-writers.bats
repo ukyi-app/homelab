@@ -10,7 +10,7 @@
 # ⚠️ 판정은 **실 체크아웃이 아니라 $BATS_TEST_TMPDIR의 사본 레포**에서 잰다(2026-09-09). 종전 판은
 #    실 `scripts/`·`scripts/lib/`에 픽스처 `.sh`를 만들고 실 레포의 **공유 인덱스**를 썼다 — 파일 단위
 #    병렬 bats에서 그 창을 밟은 다른 프로세스의 가드(check-skeleton·check-doc-index·
-#    `make ci-guard-tracked`…)가 거짓 red를 낸다(docs/traps-detail.md 「파일 단위 병렬 bats에서 실
+#    `just ci-guard-tracked`…)가 거짓 red를 낸다(docs/traps-detail.md 「파일 단위 병렬 bats에서 실
 #    체크아웃을 잠깐 바꾸는 스위트는 …」). 가드는 ROOT를 자기 위치(`BASH_SOURCE/../..`)에서 파생하므로,
 #    가드 + 커널 둘을 복사한 빈 git 레포가 곧 **그 사본 가드의 실 도메인**이 된다(선례:
 #    tests/gates/test_bats-style.bats · tests/gates/test_check-doc-index.bats의 docindex_fixture).

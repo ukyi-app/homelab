@@ -1,14 +1,14 @@
 #!/usr/bin/env bats
-# make ci == ci.yaml job 'gate' 패리티 — push 전 풀 게이트를 한 명령으로 재현하는 단일 진입점.
+# just ci == ci.yaml job 'gate' 패리티 — push 전 풀 게이트를 한 명령으로 재현하는 단일 진입점.
 #
 # ⚠️ **이 파일이 하던 방식이 바로 잡으려던 병이었다.** 예전에는 하드코딩된 5개 토큰(chart·ledger·audit·
-#    shellcheck·alertmanager-e2e)이 `make -n ci`에 있는지만 봤다. 목록에 없는 게이트 스텝은 아무리 늘어나도
-#    보이지 않는다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 make ci에 없었는데 전 검사가 초록이었다
+#    shellcheck·alertmanager-e2e)이 `just --dry-run ci`에 있는지만 봤다. 목록에 없는 게이트 스텝은 아무리 늘어나도
+#    보이지 않는다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 just ci에 없었는데 전 검사가 초록이었다
 #    (하필 하드코딩된 5개가 전부 미러된 것들이라 우연히 통과했다). 재핀 소비처 하드코딩 목록과 같은 클래스다.
 #    ⇒ 스텝 단위 대조는 **tools/check-ci-parity.ts**가 ci.yaml에서 파생해 수행한다. 여기 남는 것은
-#      그 도구가 **실제로 배선돼 있는지**와, 도구가 딛고 선 전제(러너 동치·`make -n`의 부수효과 부재)다.
+#      그 도구가 **실제로 배선돼 있는지**와, 도구가 딛고 선 전제(러너 동치·`just --dry-run`의 부수효과 부재)다.
 #
-# dry-run(make -n) + 정적 grep으로 age/docker 없이도 돈다.
+# dry-run(just --dry-run) + 정적 grep으로 age/docker 없이도 돈다.
 # ⚠️ 중간 단언은 [ ]만 — bash 3.2에서 [[ ]] 실패는 침묵 통과.
 
 setup() {
@@ -17,7 +17,7 @@ setup() {
   # 도구가 없어도 통과한다(형제 tests/gates/test_disk-caps.bats:18-19와 같은 형태).
   # ⚠️ **이 자리를 setup에 둔 대가와 그 대안을 여기 적어 둔다**(한 번 판정된 자리 —
   #    다음 독자가 같은 finding을 재발견하지 않게). 이 파일은 test_disk-caps와 달리 **단일 대상 파일이
-  #    아니다**: #1(run-bats.sh)·#6(재귀 make)·#7(m6-tools)·#8(메모리 원장)은 check-ci-parity.ts와
+  #    아니다**: #1(run-bats.sh)·#6(재귀 just)·#7(m6-tools)·#8(메모리 원장)은 check-ci-parity.ts와
   #    무관한 대상을 건다. 그래서 도구 부재 뮤테이션에서 setup 단언은 그 4레인까지 함께 red로 만든다
   #    (실측 2026-09-03 `rm tools/check-ci-parity.ts`: setup 유지 = 0 ok/14 · setup 단언만 뺀 사본 =
   #    5 ok/9 not ok, 생존이 #1·#2·#6·#7·#8).
@@ -33,12 +33,12 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "the parity accounting runs in BOTH the required gate and make ci" {
+@test "the parity accounting runs in BOTH the required gate and just ci" {
   # 한쪽에만 있으면 회계가 반쪽이다 — gate에만 있으면 로컬이 계속 거짓말을 하고,
-  # make ci에만 있으면 아무도 강제하지 않는다.
+  # just ci에만 있으면 아무도 강제하지 않는다.
   run grep -q 'check-ci-parity.ts' "$ROOT/.github/workflows/ci.yaml"
   [ "$status" -eq 0 ]
-  run make -n ci
+  run just --dry-run ci
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "check-ci-parity.ts"
 }
@@ -51,7 +51,7 @@ setup() {
 }
 
 @test "the ledger's local roster is derived from ci.yaml, not hand-maintained (direction 7 bites)" {
-  # ★ ④(원장 → `make -n ci`)만으로는 **원장에 안 적은 커맨드**가 원리적으로 안 보인다. 그래서
+  # ★ ④(원장 → `just --dry-run ci`)만으로는 **원장에 안 적은 커맨드**가 원리적으로 안 보인다. 그래서
   #   `실 도메인 가드` 스텝의 커맨드 10건 중 원장엔 8건만 있었고, `check-locale-collation`·
   #   `check-gh-secret-coverage`가 빠진 채 오래 초록이었다(실측 2026-08-21). 그 목록이 곧
   #   AGENTS.md가 금지하는 하드코딩 소비처 목록이었다.
@@ -65,9 +65,9 @@ setup() {
   mkdir -p "$fx/.github/workflows" "$fx/policy"
   cp "$ROOT/.github/workflows/ci.yaml" "$fx/.github/workflows/ci.yaml"
   cp "$ROOT/policy/ci-parity.json" "$fx/policy/ci-parity.json"
-  # 사본이 실 레포와 같은 판정을 내리려면 ④(`make -n ci`)와 ⑤(covered_by.file)의 원본도 필요하다 —
-  # 원장의 covered_by.file은 Makefile·.pre-commit-config.yaml 둘뿐이다.
-  cp "$ROOT/Makefile" "$fx/Makefile"
+  # 사본이 실 레포와 같은 판정을 내리려면 ④(`just --dry-run ci`)와 ⑤(covered_by.file)의 원본도 필요하다 —
+  # 원장의 covered_by.file은 justfile·.pre-commit-config.yaml 둘뿐이다.
+  cp "$ROOT/justfile" "$fx/justfile"
   cp "$ROOT/.pre-commit-config.yaml" "$fx/.pre-commit-config.yaml"
 
   # 대조군(먼저) — 사본 그대로는 초록이다. 아래 red가 **사본 조립 자체의 실패가 아님**을 고정한다.
@@ -99,7 +99,7 @@ PY
 }
 
 @test "direction 7 accepts the ledger's own notation — basenames, globs and interpreter prefixes" {
-  # ★ 원장의 `local`은 `make -n ci` 출력과 대조되므로 Makefile이 쓰는 형태를 따른다:
+  # ★ 원장의 `local`은 `just --dry-run ci` 출력과 대조되므로 justfile이 쓰는 형태를 따른다:
   #   basename(`check-ci-parity.ts`) · 글롭(`vmalert-*-firing-e2e.sh`) · 인터프리터 접두
   #   (`bash tests/gates/image-pin-liveness.sh`) · 인자(`tools/audit-orphans.ts --ci`).
   #   전체 경로로만 대조하면 이 방향이 **정상 원장을 물어** 아무도 안 켠다 — 그 표기들이 실제로
@@ -114,24 +114,20 @@ PY
   [ "$status" -eq 0 ]
 }
 
-@test "no recipe line uses recursive make — it executes even under 'make -n'" {
-  # ⚠️ GNU make는 recipe 줄에 \$(MAKE)가 있으면 -n에서도 그 줄을 **실제로 실행한다**(재귀 make에 플래그를
-  #    전파하려는 문서화된 동작). 그런데 이 레포는 `make -n ci` 출력을 **데이터로 읽는다**
-  #    (check-ci-parity의 미러 대조 · check-guard-authority의 venue 수집).
-  #    실측: 게이트 스텝을 서브-make로 묶었더니 `make -n ci` 한 번에 docker e2e가 통째로 돌았다.
-  # 레시피 줄(탭으로 시작)만 본다 — 주석의 설명 문구는 대상이 아니다.
-  # ⚠️ 이 자리는 `-eq 1`만으로 안 닫힌다: Makefile이 사라지면 1단 grep이 rc 2에 빈 출력을 내고
-  #    2단 grep(stdin)이 rc **1**을 내 부재가 무매치로 위장한다. 그래서 비공허 대조를 먼저 세운다 —
-  #    레시피 줄이 실재해야 아래 부정 단언이 무언가를 검사한 것이 된다.
-  run bash -c "grep -c '^	' '$ROOT/Makefile'"
+@test "dry-run expands dependencies without executing commands" {
+  fx="$BATS_TEST_TMPDIR/dry-run"
+  mkdir -p "$fx"
+  printf 'ci: preflight\n    touch ran-ci\npreflight:\n    touch ran-preflight\n' > "$fx/justfile"
+  run just --justfile "$fx/justfile" --dry-run ci
   [ "$status" -eq 0 ]
-  [ "$output" -ge 1 ]
-  run bash -c "grep '^	' '$ROOT/Makefile' | grep -F '\$(MAKE)'"
-  [ "$status" -eq 1 ]   # rc 2(대상 부재)를 통과로 읽지 않는다
+  printf '%s\n' "$output" | grep -q 'touch ran-preflight'
+  printf '%s\n' "$output" | grep -q 'touch ran-ci'
+  [ ! -e "$fx/ran-preflight" ]
+  [ ! -e "$fx/ran-ci" ]
 }
 
-@test "make ci depends on the m6-tools toolchain check" {
-  run make -n ci
+@test "just ci depends on the m6-tools toolchain check" {
+  run just --dry-run ci
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "required"
 }
@@ -148,12 +144,12 @@ PY
   [ "$status" -eq 0 ]
 }
 
-@test "make ci refuses to run while gate-scoped files are untracked (local under-measures)" {
+@test "just ci refuses to run while gate-scoped files are untracked (local under-measures)" {
   # ⚠️ 이 레포의 게이트는 대부분 `git ls-files`로 열거한다 → untracked 파일은 **로컬에서 측정 대상 밖**인데
-  #    커밋되면 CI에서는 측정된다. 그 상태의 `make ci` 초록은 gate를 재현한 것이 아니다.
+  #    커밋되면 CI에서는 측정된다. 그 상태의 `just ci` 초록은 gate를 재현한 것이 아니다.
   #    실측(2026-07-28): 새 tools/*.ts를 `git add` 전에 검증해 1671건 전건 초록이었는데 커밋 직후 CI가 red.
   # 가드는 ci의 **첫 전제**여야 한다(1분짜리 chart-test 앞에서 끊는다).
-  run grep -qE '^ci: ci-guard-tracked ' "$ROOT/Makefile"
+  run grep -qE '^ci: ci-guard-tracked ' "$ROOT/justfile"
   [ "$status" -eq 0 ]
 
   # 양성 대조: 깨끗한 상태에서는 통과한다(항상 죽는 가드는 아무도 안 쓴다 → 곧 제거된다).
@@ -161,30 +157,30 @@ PY
   #    다른 스위트가 레포 안에 untracked 파일을 만들면 이 레인이 그 창을 밟아 거짓 red가 된다.
   #    그런 스위트가 0이어야 한다는 것이 tests/.gate-serial의 등재 기준이다
   #    (docs/traps-detail.md 「파일 단위 병렬 bats에서 실 체크아웃을 잠깐 바꾸는 스위트는 …」).
-  run make ci-guard-tracked
+  run just ci-guard-tracked
   [ "$status" -eq 0 ]
 
   # 핵심 단언(마지막): untracked 파일을 넣으면 마커 + 비-0.
   # ⚠️ 프로브는 **사본 레포**에 만든다 — 실 tools/에 만들면 그 창을 밟은 다른 프로세스의 tracked
-  #    열거 가드(check-doc-index·check-skeleton·`make ci-guard-tracked` 자신)가 거짓 red를 낸다.
-  #    레시피는 `git ls-files --others --exclude-standard -- tools scripts … Makefile`로 판정하므로
-  #    사본 Makefile + 자기 git 레포만 있으면 같은 분기를 그대로 밟는다.
+  #    열거 가드(check-doc-index·check-skeleton·`just ci-guard-tracked` 자신)가 거짓 red를 낸다.
+  #    레시피는 `git ls-files --others --exclude-standard -- tools scripts … justfile`로 판정하므로
+  #    사본 justfile + 자기 git 레포만 있으면 같은 분기를 그대로 밟는다.
   fx="$BATS_TEST_TMPDIR/tracked"
   mkdir -p "$fx/tools"
-  cp "$ROOT/Makefile" "$fx/Makefile"
+  cp "$ROOT/justfile" "$fx/justfile"
   # ⚠️ `env -u GIT_DIR …` — GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE이 환경에 남아 있으면 `git init`이
   #    **그 경로**에 레포를 만들고 레시피의 `git ls-files`도 그쪽을 읽는다. 상속된 GIT_* 한 줄이
   #    사본 격리를 실 .git 쓰기로 되돌리므로, 사본을 만지는 네 호출 전부에서 걷어낸다.
   env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$fx" init -q
-  # Makefile 자신도 pathspec에 있다 — 추적시키지 않으면 자기 자신이 걸린다.
-  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$fx" add Makefile
+  # justfile 자신도 pathspec에 있다 — 추적시키지 않으면 자기 자신이 걸린다.
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$fx" add justfile
   # 사본 대조군 — 프로브가 없으면 통과한다(사본 조립 자체의 실패가 아니다). 아래 red가 이 사본에서
   # git이 실제로 열거를 돌렸다는 증인이 된다(git이 죽으면 `u`가 비어 통과로 위장한다).
-  run env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE make --no-print-directory -C "$fx" ci-guard-tracked
+  run env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE just --justfile "$fx/justfile" ci-guard-tracked
   [ "$status" -eq 0 ]
 
   printf '// probe\n' > "$fx/tools/__ci_parity_probe.ts"
-  run env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE make --no-print-directory -C "$fx" ci-guard-tracked
+  run env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE just --justfile "$fx/justfile" ci-guard-tracked
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'SKIP: ci: 추적되지 않은'
 }
@@ -300,9 +296,9 @@ PY
 }
 
 # ── mirrored는 자기 자신을 증명할 수 없다 ─────────────────────────────────────────────────────────
-# ④는 `makeOut.includes(local)` 하나였다. 그런데 `make -n ci` 출력에는 **호출이 아닌 것**이 두 종류
+# ④는 `makeOut.includes(local)` 하나였다. 그런데 `just --dry-run ci` 출력에는 **호출이 아닌 것**이 두 종류
 # 섞여 있다: 전제 프로브 `command -v actionlint`와, 도구 부재 시 이름만 남기는 미평가 라벨
-# `echo "actionlint(…)" >> .make-ci-uneval`. 둘 다 그 도구를 **부르지 않는다**.
+# `echo "actionlint(…)" >> .just-ci-uneval`. 둘 다 그 도구를 **부르지 않는다**.
 # ⇒ 실제 호출을 지워도 두 문자열이 남아 대조가 통과했다 — 선언이 자기 자신을 증명한다(실측: 초록).
 # 정제 대상은 그 둘뿐이고, 실 레포 mirrored 22항목·local 34문자열에 대한 오탐은 0건이다(실측).
 mkparity_fixture() {   # $1=디렉토리  $2=then 절 본문
@@ -311,8 +307,8 @@ mkparity_fixture() {   # $1=디렉토리  $2=then 절 본문
     > "$1/.github/workflows/ci.yaml"
   printf '%s\n' '{"_readme": "fixture", "steps": [{"name": "actionlint", "status": "mirrored", "local": "actionlint"}]}' \
     > "$1/policy/ci-parity.json"
-  printf 'CI_UNEVAL := .make-ci-uneval\nci:\n\t@rm -f $(CI_UNEVAL)\n\t@if command -v actionlint >/dev/null 2>&1; then %s \\\n\t  else echo "actionlint(워크플로 정적 검사)" >> $(CI_UNEVAL); fi\n' \
-    "$2" > "$1/Makefile"
+  printf 'CI_UNEVAL := ".just-ci-uneval"\nci:\n\t@rm -f {{CI_UNEVAL}}\n\t@if command -v actionlint >/dev/null 2>&1; then %s \\\n\t  else echo "actionlint(워크플로 정적 검사)" >> {{CI_UNEVAL}}; fi\n' \
+    "$2" > "$1/justfile"
 }
 
 @test "a probe or an unevaluated label cannot stand in for the call itself (mirrored proves nothing about itself)" {
@@ -321,7 +317,7 @@ mkparity_fixture() {   # $1=디렉토리  $2=then 절 본문
   mkparity_fixture "$gone" ':;'
   run bash -c "cd '$gone' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
   [ "$status" -ne 0 ]
-  printf '%s\n' "$output" | grep -q "make -n ci"
+  printf '%s\n' "$output" | grep -q "just --dry-run ci"
 
   # 대조군 — 같은 픽스처에서 호출만 되살리면 통과한다(픽스처 조립 자체의 실패가 아니다).
   kept="$BATS_TEST_TMPDIR/kept"
@@ -331,10 +327,10 @@ mkparity_fixture() {   # $1=디렉토리  $2=then 절 본문
 }
 
 # ── 정제의 세 번째 갈래: 행두 `#` 주석 ────────────────────────────────────────────────────────
-# recipe 줄의 `#`는 **make 주석이 아니다** — make는 탭으로 시작하는 줄을 그대로 셸에 넘기므로
-# `make -n` 출력에 리터럴로 남는다. 그래서 정제에 주석 갈래가 없으면 recipe 한 줄을 `#`로 막아도
+# recipe 줄의 `#`는 **just 주석이 아니다** — make는 탭으로 시작하는 줄을 그대로 셸에 넘기므로
+# `just --dry-run` 출력에 리터럴로 남는다. 그래서 정제에 주석 갈래가 없으면 recipe 한 줄을 `#`로 막아도
 # `makeExec.includes(local)`이 참이 되어 mirrored 전건이 조용히 초록이었다(실측 2026-09-04:
-# Makefile의 `bun run verify:ledger`를 `# bun run verify:ledger`로 바꿔도 `mirrored 24 · covered 2`
+# justfile의 `bun run verify:ledger`를 `# bun run verify:ledger`로 바꿔도 `mirrored 24 · covered 2`
 # rc=0으로 before/after 동일). 프로브·미평가 라벨과 같은 클래스다 — 문자열은 남는데 호출은 없다.
 mkparity_line_fixture() {   # $1=디렉토리  $2=recipe 한 줄
   mkdir -p "$1/.github/workflows" "$1/policy"
@@ -342,7 +338,7 @@ mkparity_line_fixture() {   # $1=디렉토리  $2=recipe 한 줄
     > "$1/.github/workflows/ci.yaml"
   printf '%s\n' '{"_readme": "fixture", "steps": [{"name": "actionlint", "status": "mirrored", "local": "actionlint"}]}' \
     > "$1/policy/ci-parity.json"
-  printf 'ci:\n\t%s\n' "$2" > "$1/Makefile"
+  printf 'ci:\n\t%s\n' "$2" > "$1/justfile"
 }
 
 @test "a commented-out recipe line cannot stand in for the call itself (shell comments are not invocations)" {
@@ -351,7 +347,7 @@ mkparity_line_fixture() {   # $1=디렉토리  $2=recipe 한 줄
   mkparity_line_fixture "$muted" '# actionlint'
   run bash -c "cd '$muted' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
   [ "$status" -ne 0 ]
-  printf '%s\n' "$output" | grep -q "make -n ci"
+  printf '%s\n' "$output" | grep -q "just --dry-run ci"
 
   # 대조군 — 같은 픽스처에서 `#`만 걷어내면 통과한다(픽스처 조립 자체의 실패가 아니다).
   live="$BATS_TEST_TMPDIR/live"
@@ -363,7 +359,7 @@ mkparity_line_fixture() {   # $1=디렉토리  $2=recipe 한 줄
 # ── ⑤ covered_by도 같은 함정 — 죽은 주석이 '실재'를 증명하지 못한다 ─────────────────────────────
 # ⑤(covered)는 "로컬의 다른 메커니즘이 이 대상 파일에서 실재하는가"를 covered_by.file의 원문에
 # 부분문자열 매치로 검사한다. 정제 없이 걸면 대상 파일의 `#` 주석에만 토큰이 남아도 통과한다 —
-# ④가 이미 겪은 것과 같은 병(실측 2026-09-06: Makefile의 `@bats tests/test_sops-roundtrip.bats`를
+# ④가 이미 겪은 것과 같은 병(실측 2026-09-06: justfile의 `@bats tests/test_sops-roundtrip.bats`를
 # 죽은 주석으로 바꿔도 `covered 2` rc=0으로 그대로였다). execOnly(195행, 원래 ④ 전용)를 재사용해
 # ⑤도 행두 `#` 주석을 걷어낸 뒤 대조한다.
 mkparity_covered_fixture() {   # $1=디렉토리  $2=covered_by.file(witness.txt) 내용
@@ -412,8 +408,8 @@ mkparity_covered_fixture() {   # $1=디렉토리  $2=covered_by.file(witness.txt
 }
 
 # ── ⑧ 이름 보존 + 본문 교체 ────────────────────────────────────────────────────────────────────
-# ④는 원장 → `make -n ci`, ⑦은 ci.yaml 본문 → 원장이다. 둘 다 스텝을 **이름**으로 계상하므로,
-# 이름을 남기고 run 본문만 갈아치우면 ④는 Makefile 쪽 문자열로 통과하고 ⑦은 본문에 레포 커맨드가
+# ④는 원장 → `just --dry-run ci`, ⑦은 ci.yaml 본문 → 원장이다. 둘 다 스텝을 **이름**으로 계상하므로,
+# 이름을 남기고 run 본문만 갈아치우면 ④는 justfile 쪽 문자열로 통과하고 ⑦은 본문에 레포 커맨드가
 # 없어 **침묵**한다(방향 ⑦은 "보이는 커맨드가 원장에 있는가"만 본다 — 0건은 위반이 아니다).
 # 실측 2026-09-03: 실 ci.yaml의 `run: bun run verify:ledger`를 `run: echo swapped`로 바꿔도
 # check-ci-parity·check-guard-authority·check-workflow-readiness가 **전건 초록**이었다.
@@ -424,8 +420,8 @@ mkparity_body() {   # $1=디렉토리  $2=gate 스텝 run 본문  $3=원장 항�
     "$2" > "$1/.github/workflows/ci.yaml"
   printf '{"_readme": "fixture", "steps": [{"name": "actionlint", "status": "mirrored", "local": "actionlint"%s}]}\n' \
     "$3" > "$1/policy/ci-parity.json"
-  printf 'CI_UNEVAL := .make-ci-uneval\nci:\n\t@rm -f $(CI_UNEVAL)\n\t@if command -v actionlint >/dev/null 2>&1; then actionlint; \\\n\t  else echo "actionlint(워크플로 정적 검사)" >> $(CI_UNEVAL); fi\n' \
-    > "$1/Makefile"
+  printf 'CI_UNEVAL := ".just-ci-uneval"\nci:\n\t@rm -f {{CI_UNEVAL}}\n\t@if command -v actionlint >/dev/null 2>&1; then actionlint; \\\n\t  else echo "actionlint(워크플로 정적 검사)" >> {{CI_UNEVAL}}; fi\n' \
+    > "$1/justfile"
 }
 
 @test "a mirrored step keeping its name while its body is swapped is rejected (direction 8 bites)" {
@@ -444,12 +440,12 @@ mkparity_body() {   # $1=디렉토리  $2=gate 스텝 run 본문  $3=원장 항�
   [ "$status" -eq 0 ]
 }
 
-# 표기가 **정당하게 다른** 자리가 실재한다 — gate는 `make chart-test`를 부르고 make ci는 그 타깃의
+# 표기가 **정당하게 다른** 자리가 실재한다 — gate는 `just chart-test`를 부르고 just ci는 그 타깃의
 # 레시피를 편다(그래서 local은 render.sh다). 그 자리를 열어 두되, 아래 두 레인이 그 문이 남용·부패
 # 하지 않게 막는다.
-@test "gate_contains lets a legitimately different notation pass (make target vs recipe path)" {
+@test "gate_contains lets a legitimately different notation pass (just target vs recipe path)" {
   fx="$BATS_TEST_TMPDIR/gc-ok"
-  mkparity_body "$fx" 'make lint' ', "gate_contains": "make lint"'
+  mkparity_body "$fx" 'just lint' ', "gate_contains": "just lint"'
   run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
   echo "$output"
   [ "$status" -eq 0 ]
@@ -466,11 +462,11 @@ mkparity_body() {   # $1=디렉토리  $2=gate 스텝 run 본문  $3=원장 항�
 
 @test "a gate_contains that no longer matches the body is rejected (the escape hatch cannot go stale)" {
   fx="$BATS_TEST_TMPDIR/gc-stale"
-  mkparity_body "$fx" 'echo swapped' ', "gate_contains": "make lint"'
+  mkparity_body "$fx" 'echo swapped' ', "gate_contains": "just lint"'
   run bash -c "cd '$fx' && bun '$ROOT/tools/check-ci-parity.ts' --floor check-ci-parity=1"
   echo "$output"
   [ "$status" -ne 0 ]
-  printf '%s\n' "$output" | grep -qF -- "gate_contains 'make lint'가 없다"
+  printf '%s\n' "$output" | grep -qF -- "gate_contains 'just lint'가 없다"
 }
 
 # covered/excluded는 ⑧의 대상 밖이다(gate 본문과 맞댈 로컬 토큰이 없다) — 그러니 그 status에

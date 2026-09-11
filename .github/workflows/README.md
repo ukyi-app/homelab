@@ -14,7 +14,7 @@
 | ✨ update-secrets | app | 앱 SealedSecret 첫 추가/갱신(앱 이름만 — repo=ukyi-app/<app> main HEAD 기준) |
 | ✨ create-database | name + 확장(체크박스 pg_trgm/pgcrypto/citext/vector/postgis + 자유입력) | 앱용 CNPG DB 프로비전 |
 | ✨ create-cache | name + maxmemory(선택) | 앱용 redis 프로비전 |
-| 🗑️ teardown-app | app, confirm | 앱 철거 — **파괴**(confirm===app 가드 + **수동 머지**; reusable이 파괴 경계에서 confirm 재검증). owner-local `make teardown-app`과 공존 |
+| 🗑️ teardown-app | app, confirm | 앱 철거 — **파괴**(confirm===app 가드 + **수동 머지**; reusable이 파괴 경계에서 confirm 재검증). owner-local `just teardown-app`과 공존 |
 
 전역 직렬화(`group: homelab-mutation`, `queue: max`, `cancel-in-progress: false`)로 bump-poll/iac/tf-reconcile과 한 줄로 직렬 실행. ⚠️ 그래서 이 그룹의 **모든 잡에 `timeout-minutes`가 있어야 한다** — 하나가 hang하면 나머지가 platform max(6h)까지 pending FIFO로 선다. route 잡(`uses:`)엔 걸 수 없어(actionlint 거부) 값은 동명 `_*.yaml`의 잡에 있다(가드: `tools/tests/test_mutation-dispatch.bats`). 변이 로직은 동명 `_*.yaml` reusable에, 이 디스패처는 **actor 가드(owner-only, `vars.HOMELAB_OWNER`)→validate→route→실패 notify(`.github/actions/mutation-notify`)** 셸. reusable의 PR-first 커밋은 `.github/actions/pr-first-commit`(브랜치·커밋·PR·선택적 auto-merge) 공통 사용. ⚠️ actor 가드는 `vars.HOMELAB_OWNER` 미설정 시 fail-closed — owner 로그인을 repo variable로 1회 설정해야 변이 실행 가능.
 
@@ -53,6 +53,6 @@ run-name에 트리거 출처(`스케줄`/`수동(actor)`)가 박혀 이력에서
 
 | 작업 | 명령 | 사유 |
 |---|---|---|
-| 앱 철거(로컬) | `make teardown-app APP=<x>` | 디스패처 `🗑️ teardown-app`과 공존하는 로컬 경로(오프라인/파워유저). 래퍼가 clean-worktree·fresh-main 전용브랜치·allowlist staging·PR 강제 + confirm=app 자동 |
-| 리소스 철거(retain) | `make teardown-resource RESOURCE=<db\|cache>:<name>` | 위와 동일. purge(--delete-data)는 런북 절차로만 |
+| 앱 철거(로컬) | `just APP=<x> teardown-app` | 디스패처 `🗑️ teardown-app`과 공존하는 로컬 경로(오프라인/파워유저). 래퍼가 clean-worktree·fresh-main 전용브랜치·allowlist staging·PR 강제 + confirm=app 자동 |
+| 리소스 철거(retain) | `just RESOURCE=<db\|cache> teardown-resource:<name>` | 위와 동일. purge(--delete-data)는 런북 절차로만 |
 | 앱 재활성화/노출 재승인 | `tools/activate-app.ts` (런북 app-platform) | host/public 변경 등 별도 재증명이 필요할 때만 |

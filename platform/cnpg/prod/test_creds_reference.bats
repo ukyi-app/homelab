@@ -2,7 +2,7 @@
 # M2 의존: platform/cnpg/prod/r2-creds.enc.yaml은 M2의 seed-secrets.sh가 생성한다
 # (라이브, 실제 R2 자격증명 필요). 이 테스트들은 M2 실행 이후에만 통과한다.
 # ⚠️ 피연산자가 **상대 경로**다 — 이 파일은 레포 루트에서 실행해야 rc가 의미를 갖는다
-#    (실행처: .ci-exclude 항목 — owner-local `make verify-ksops`).
+#    (실행처: .ci-exclude 항목 — owner-local `just verify-ksops`).
 
 f=platform/cnpg/prod/r2-creds.enc.yaml # M2 소유 — 여기서는 참조만
 

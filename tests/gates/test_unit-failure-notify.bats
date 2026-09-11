@@ -46,7 +46,7 @@ _expr() { # $1=alert 이름 → r4 ConfigMap 안의 expr(주석 제거)
 
 @test "no non-producer file writes metrics (the completeness guard cannot see outside its extensions)" {
   # 🔴 **실측된 구멍**(2026-08-20): `tools/lib/repo-walk.ts`의 producers 스코프 include는
-  #    `\.(ya?ml|sh|m?[jt]s|py)$`라 `.service`·`.timer`·`Makefile`·`.conf`가 **확장자에서 탈락**한다.
+  #    `\.(ya?ml|sh|m?[jt]s|py)$`라 `.service`·`.timer`·`justfile`·`.conf`가 **확장자에서 탈락**한다.
   #    격리 사본에서 `files-data-backup.service`에 `ExecStopPost=… curl …/api/v1/import/prometheus`로
   #    **레지스트리에 없는 메트릭**을 push하게 하고 린터를 돌렸더니 "모드 A/B/C 위반 0"으로 통과했다.
   #    같은 push를 `scripts/*.sh`에 두면 즉시 FAIL이다. 즉 그 메트릭은 모드 C 검사를 원리적으로

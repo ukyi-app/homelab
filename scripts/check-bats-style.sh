@@ -51,7 +51,7 @@
 #              새 red를 만든다).
 # ⚠️ **분모는 grep 계열 + 경로 피연산자뿐이다.** 히어스트링(`<<<`)은 경로가 없어 rc 2 채널 자체가
 #    없고(그 자리의 `-ne 0`은 옳다 — 착지 시점 잔여 `-ne 0` 95곳이 **전부** 히어스트링이었다),
-#    `run bash|bun|make|conftest`·`yq`·`jq`·`ls`는 (위 bash -c 언랩이 그 안에서 grep을 찾은 경우
+#    `run bash|bun|just|conftest`·`yq`·`jq`·`ls`는 (위 bash -c 언랩이 그 안에서 grep을 찾은 경우
 #    제외) rc 알파벳이 grep과 달라 하나의 형태 규칙으로 말할 수 없다(실측: `bun <없는 파일>`=1인데
 #    그 도구의 **거부**도 1 · `ls`는 무매치와 부재를 둘 다 2로 접는다). 이 구별이 없으면
 #    `tests/gates/test_scan-floor.bats`처럼 18곳 전부 정당한 비대상인 파일이 영구 red 또는 영구
@@ -160,7 +160,7 @@
 # ABSEXEC_BASELINE은 hard-zero다 — **래칫 신설 금지**(설계 노트 §9). F1(adguard 2곳)·F2(나머지
 # 10곳)가 먼저 잔액을 0으로 갚은 뒤에만 이 클래스를 켠다(BB·[ABS]가 밟은 순서 그대로).
 #
-# ⚠️ 이 가드는 ci.yaml·Makefile(`verify`·`ci`)의 **명시 스텝**이다 — 자기 bats에만 의존하면
+# ⚠️ 이 가드는 ci.yaml·justfile(`verify`·`ci`)의 **명시 스텝**이다 — 자기 bats에만 의존하면
 #    `tests/.ci-exclude` 한 줄로 자기가 꺼진다(형제 check-bats-accounting.sh가 같은 근거로 거부한
 #    자리). NEG·QV 두 hard-zero 클래스의 유일한 집행자가 한 줄로 꺼지면 안 되므로, 그 배선은
 #    이 클래스의 별건 확대가 아니라 **전제**다. 패리티는 policy/ci-parity.json이 대조한다.

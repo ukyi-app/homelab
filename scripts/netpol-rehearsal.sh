@@ -11,7 +11,7 @@ set -euo pipefail
 # ⚠️ 이 스크립트는 selfHeal을 끄고 candidate netpol을 apply한다 — **변이**다. 잘못된 클러스터에서
 #    돌면 그쪽 prod의 네트워크 정책을 갈아엎고, 아래 trap의 복원도 그 잘못된 쪽에 걸린다.
 #    ⇒ trap을 걸기 **전에** 정체성부터 확인한다(D-i). make를 거치지 않는 직접 실행 경로라
-#    Makefile 주입이 못 덮는 자리다.
+#    justfile 주입이 못 덮는 자리다.
 bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/infra/k3s-bootstrap/assert-cluster-identity.sh"
 APP=network-policies-prod; NS=prod
 COMP="${COMP:-network-policies}"; NETPOL="${NETPOL:-allow-egress-to-database}"; NEEDLE="${NEEDLE:-cnpg.io/poolerName}"
@@ -34,7 +34,7 @@ trap restore EXIT
 kubectl -n argocd get app "$APP" >/dev/null                                  # 앱 존재(F3; 없으면 set -e→trap)
 kubectl -n argocd patch app "$APP" --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}'
 [ "$(kubectl -n argocd get app "$APP" -o jsonpath='{.spec.syncPolicy.automated.selfHeal}')" = false ]  # 확인(F3)
-make -s render COMP="$COMP" | kubectl apply -f -                    # candidate 적용(-s: make 명령 에코 억제 — 안 하면 echo가 line1이라 kubectl YAML 파싱 실패)
+just --quiet COMP="$COMP" render | kubectl apply -f -                    # candidate 적용(--quiet: stderr의 명령 에코를 억제)
 # herestring — kubectl 다중행 writer를 grep -q에 직파이프하지 않는다(같은 SIGPIPE 클래스).
 netpol_yaml="$(kubectl -n "$NS" get netpol "$NETPOL" -o yaml)"
 grep -q "$NEEDLE" <<<"$netpol_yaml"  # 반영 확인(F3)
@@ -69,5 +69,5 @@ suite="$(git ls-files 'tests/posture/test_*.bats' | grep -v '/test_dr-assets\.ba
 # 3은 **붕괴 경계**이지 현재 도메인 크기(4)가 아니다 — 정당한 철거에서 red가 나지 않게(선례: test_automount.bats).
 n="$(printf '%s\n' "$suite" | grep -c . || true)"
 [ "$n" -ge 3 ] || { echo "✗ posture netpol 레그 열거가 ${n}건으로 붕괴(기대 >=3) — 경로/파일명 규약 확인" >&2; exit 1; }
-make verify-posture POSTURE_BATS="$(printf '%s\n' "$suite" | tr '\n' ' ')"   # pg-rw + pg-pooler-rw(F4b, fail-closed)
+just POSTURE_BATS="$(printf '%s\n' " verify-posture$suite" | tr '\n' ' ')"   # pg-rw + pg-pooler-rw(F4b, fail-closed)
 echo "==> rehearsal PASS — candidate 안전(trap이 곧 main 복원 · $NS 앱 파드 ${pods}건 · kubelet 레그는 파드 ≥1일 때만)"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# 툴링 발견성 — 읽기전용 진입점 make audit + `--help`는 stdout·exit 0 표준.
+# 툴링 발견성 — 읽기전용 진입점 just audit + `--help`는 stdout·exit 0 표준.
 #
 # 스코프는 **homelab 통합 CLI가 라우팅하는 전 표면**과 고빈도 단독 도구 2개다. 노드 열거는
 # lib/verbs.ts VERBS 파생이라 손 목록이 없다(리프 + 그룹 노드 + top-level), 그리고 `mcp`는
@@ -32,8 +32,8 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; cd "$ROOT" || exit 1; 
   echo "$output" | grep -q -- "--root"
 }
 
-@test "make audit runs the read-only static drift audit" {
-  run make -n audit
+@test "just audit runs the read-only static drift audit" {
+  run just --dry-run audit
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "audit-orphans"
 }

@@ -1,7 +1,7 @@
 {
   "_readme": [
     "이미지 소유권 원장 — '이 이미지를 누가 최신으로 유지하고, 누가 immutable 핀을 보증하는가'의 SSOT.",
-    "가드: tools/check-image-ownership.ts (ci.yaml gate + make verify). 산문 SSOT: CONTRIBUTING.md.",
+    "가드: tools/check-image-ownership.ts (ci.yaml gate + just verify). 산문 SSOT: CONTRIBUTING.md.",
     "",
     "두 축은 다르다. **freshness 소유자**(새 버전을 가져오는 것)와 **digest 소유자**(immutable 핀을",
     "보증하는 것)가 자주 갈린다. helm 차트 내부 기본 이미지가 그 전형이다 — 차트 **버전**은 Renovate가",
@@ -93,7 +93,7 @@
       "why": "GitOps 컨트롤러 자신 — 이 레포를 클러스터에 적용하는 주체다. 라이브 실측 quay.io/argoproj/argocd:v3.4.4(5개 파드) + 번들 redis. 차트 캐시 gitignored + ignorePaths. ⚠️ argocd는 self-manage라 잘못된 핀이 자기 수렴을 막을 수 있다(부트스트랩 복구 경로 필요).",
       "freshness": "platform/argocd/CHART_VERSION(renovate customManagers, datasource=helm argo-helm). argocd-app.yaml targetRevision과 쌍이며 등식은 platform/argocd/test_argocd_values.bats가 강제한다(renovate argocd manager도 그 파일을 함께 추적).",
       "since": "2026-07-28",
-      "owner_action": "platform/argocd/bootstrap-values.yaml에서 global.image 오버라이드로 끌어올 수 있다. self-manage 컴포넌트라 롤백 경로(make bootstrap)를 먼저 확인하고, redis 등 번들 의존 이미지도 함께 볼 것."
+      "owner_action": "platform/argocd/bootstrap-values.yaml에서 global.image 오버라이드로 끌어올 수 있다. self-manage 컴포넌트라 롤백 경로(just bootstrap)를 먼저 확인하고, redis 등 번들 의존 이미지도 함께 볼 것."
     }
   ]
 }

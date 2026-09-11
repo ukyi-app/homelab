@@ -266,7 +266,7 @@ c" ]
   # ⚠️ **SKIP(exit 4)은 실패가 아니다 — 그리고 대조에서 양쪽 대칭으로 빠져야 한다.**
   #    `verify-credential-inventory.sh`는 런북이 gitignored라 CI에서 원리적으로 SKIP한다(rc=4,
   #    SCAN 라벨 0개). 예전 판은 그 rc를 "비-0으로 죽었다"로 읽어 **로컬은 초록·CI만 red**였다
-  #    (실측 2026-08-24: 로컬 make ci rc=0인데 PR gate FAILURE — venue가 갈리는 형태라
+  #    (실측 2026-08-24: 로컬 just ci rc=0인데 PR gate FAILURE — venue가 갈리는 형태라
   #    로컬 초록이 CI를 예고하지 못했다). SKIP을 인정하되 그 가드의 라벨을 **정적 쪽에서도** 빼야
   #    등식이 성립한다 — 한쪽만 빼면 반대 방향으로 red다.
   cmp_static=""; runtime=""; skipped=""; nskip=0

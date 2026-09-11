@@ -16,7 +16,7 @@
 #    앵커가 `^import`인 이유: 맨 `identity.ts` 매치는 **주석 한 줄**에도 걸린다(같은 파일의 옛 실측).
 # ⚠️ **이 스위트는 실 체크아웃을 건드리지 않는다**. 프로브 레인은 예전에 실 `tools/lib/`에 파일을
 #    만들고 `git add -N`/`git rm --cached`로 **공유 `.git/index`**를 썼다 — 파일 단위 병렬 bats에서
-#    그 창을 밟은 다른 프로세스의 가드(check-skeleton·check-doc-index·`make ci-guard-tracked`)가
+#    그 창을 밟은 다른 프로세스의 가드(check-skeleton·check-doc-index·`just ci-guard-tracked`)가
 #    거짓 red를 냈다. 지금은 `$BATS_TEST_TMPDIR` 아래 **픽스처 사본 레포**에서만 프로브를 심는다
 #    (`_identity_fixture_repo`). cf. docs/traps-detail.md
 #    「파일 단위 병렬 bats에서 실 체크아웃을 잠깐 바꾸는 스위트는 …」

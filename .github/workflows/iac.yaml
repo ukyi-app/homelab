@@ -4,7 +4,7 @@ on:
     paths:
       - "infra/**"
       - "platform/argocd/**"
-      - "Makefile"
+      - "justfile"
       - "scripts/**"
   # post-merge SHA 고정 apply: 머지된 커밋의 apps.json/dns/tunnel 상태를 그대로 적용한다.
   # 트랜잭션 안전: 라이브 Cloudflare는 commit 전에 절대 건드리지 않는다(커밋된 상태만 apply).
@@ -37,13 +37,14 @@ jobs:
       - uses: ./.github/actions/setup-toolchain
         with:
           bats: 'true'
+          just: 'true'
       - name: terraform init (no backend) + validate all roots
         run: |
           for r in cloudflare tailscale github; do
             # -lockfile=readonly: 커밋된 멀티플랫폼 lock과 어긋나면(provider 추가/버전 변경) 실패 → 드리프트 게이트화.
             terraform -chdir=infra/$r init -backend=false -lockfile=readonly
           done
-          make tf-validate
+          just tf-validate
       - name: terraform 의존 bats 가드 (fmt/validate·prevent_destroy·apps.json SSOT)
         # gate(terraform 미설치)에 못 넣는 terraform-결합 테스트만 여기서 advisory로 실행한다.
         # argocd_values·root_app은 platform/argocd로 이동 → required gate 러너가 수집·실행(이중실행 방지로 제외).

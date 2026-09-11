@@ -5,9 +5,9 @@
 # 같은-줄 원자성은 이제 구현 두 곳이 소유한다 — 셸 `guard_skip`(scripts/lib/guard.sh) ·
 # TS `skip()`(tools/lib/cli.ts). 그러므로 콜사이트의 직접 방출(skip 종료코드든 SKIP 마커 emission이든)은
 # 짝이 맞아도 위반이다: 손조립이 하나라도 살아 있으면 원자성 주장이 그 콜사이트에서 두 번째 진실을 얻는다.
-# Makefile만 함수를 쓸 수 없어 옛 같은-줄 짝 검사로 잔존한다(## 도움말 꼬리 절단 포함).
+# justfile만 함수를 쓸 수 없어 옛 같은-줄 짝 검사로 잔존한다(## 도움말 꼬리 절단 포함).
 #
-# 대상 = 추적 셸/TS/Makefile. 열거는 git — 하드코딩 글롭이 리네임에 조용히 0매치되는 것을 피한다.
+# 대상 = 추적 셸/TS/justfile. 열거는 git — 하드코딩 글롭이 리네임에 조용히 0매치되는 것을 피한다.
 # 인자를 주면 그 파일만 검사한다(픽스처/ad-hoc 모드). `*.bats`는 대상 밖(단언문이 토큰을 정상 포함).
 #
 # ⚠️ 주석 줄은 대상 밖 — 규약을 설명하는 산문이 곳곳에 있다.
@@ -77,11 +77,11 @@ if [ "$#" -gt 0 ]; then
   for f in "$@"; do FILES+=("$f"); done
 else
   while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.sh' '*.ts' '*.mts')
-  FILES+=("Makefile")
+  FILES+=("justfile")
 fi
 
-# Makefile 잔존 레인 — 옛 같은-줄 짝 검사(패턴은 -v로 주입해 이 파일에 리터럴을 남기지 않는다).
-scan_makefile() {
+# justfile 잔존 레인 — 옛 같은-줄 짝 검사(패턴은 -v로 주입해 이 파일에 리터럴을 남기지 않는다).
+scan_justfile() {
   awk -v F="$1" -v pexit="${T_EXIT} 4([^0-9]|$)" -v pmark="${T_MARK}:" '
     /^[[:space:]]*#/ { next }
     {
@@ -94,8 +94,8 @@ scan_makefile() {
         pre = substr(line, 1, mi - 1)
         if (index(pre, "\042") > 0 || index(pre, "\047") > 0) hasMark = 1
       }
-      if (hasExit && !hasMark) print F":"FNR": skip 종료코드인데 SKIP 마커 없음(Makefile 짝 레인): "$0
-      if (hasMark && !hasExit) print F":"FNR": SKIP 마커인데 skip 종료코드 아님(Makefile 짝 레인): "$0
+      if (hasExit && !hasMark) print F":"FNR": skip 종료코드인데 SKIP 마커 없음(justfile 짝 레인): "$0
+      if (hasMark && !hasExit) print F":"FNR": SKIP 마커인데 skip 종료코드 아님(justfile 짝 레인): "$0
     }
   ' "$1"
 }
@@ -145,7 +145,7 @@ AWKEOF
 # 위험(무관한 인접 줄이 합쳐져 case 라벨 등에서 오탐) — 실행 가능한 두 형태만 좁혀 흡수한다.
 # (1) 표준 백슬래시 줄연속 — bash 문법상 유일한 합법 계속줄 형태라 오탐 없음(양옆 공백은 흡수해
 #    "exit  4"류 이중 공백으로 P_SH_EXIT의 리터럴 단일 공백을 놓치지 않게 한다).
-# 백슬래시 줄연속 결합 — GNU sed 전용 라벨 관용구(`:a;N;$!ba`)는 BSD sed(owner macOS의 `make verify`)에서
+# 백슬래시 줄연속 결합 — GNU sed 전용 라벨 관용구(`:a;N;$!ba`)는 BSD sed(owner macOS의 `just verify`)에서
 # 라벨 파싱이 달라 깨진다(레포 선례 0건) → awk 한 줄로 같은 결합(줄 끝 `\`를 공백으로 바꾸고 다음 줄을 이어 붙인다).
 # shellcheck disable=SC2016  # awk 프로그램의 $0은 의도된 리터럴(셸 확장 아님)
 JOIN_BACKSLASH_AWK='/\\[ \t]*$/ { sub(/[ \t]*\\[ \t]*$/, " "); printf "%s", $0; next } { print }'
@@ -166,9 +166,9 @@ AWKEOF
 
 # 셸/TS 레인 — 직접 방출 자체가 위반이다(헬퍼 경유 강제). 주석은 행두든 trailing이든 quote-aware로 걷는다.
 scan_one() {
-  # basename 판별 — 경로 어딘가에 Makefile이 든 .sh/.ts가 약한 짝 레인으로 새지 않게 한다.
+  # basename 판별 — 경로 어딘가에 justfile이 든 .sh/.ts가 약한 짝 레인으로 새지 않게 한다.
   case "${1##*/}" in
-    Makefile|Makefile.*) scan_makefile "$1"; return ;;   # 픽스처(Makefile.ok 등)도 이 레인 — 실 트리는 Makefile 하나다.
+    justfile|justfile.*) scan_justfile "$1"; return ;;   # 픽스처(justfile.ok 등)도 이 레인 — 실 트리는 justfile 하나다.
                                                          # bare return: awk 사망 rc가 그대로 전파된다(fail-loud).
   esac
   ists=0
@@ -226,7 +226,7 @@ fi
 
 rc=0
 if [ -n "$viol" ]; then
-  echo "FAIL: 가드 skip 신호 규약 위반 — 방출은 헬퍼(guard_skip / skip()) 경유만, Makefile은 같은-줄 짝:" >&2
+  echo "FAIL: 가드 skip 신호 규약 위반 — 방출은 헬퍼(guard_skip / skip()) 경유만, justfile은 같은-줄 짝:" >&2
   printf '%s' "$viol" >&2
   rc=1
 fi

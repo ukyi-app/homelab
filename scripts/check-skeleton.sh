@@ -101,7 +101,7 @@ while IFS= read -r f; do
   # NUL을 지운 바이트 수와 원본 바이트 수를 비교한다 — 다르면 NUL이 있다.
   # (`tr … | cmp - "$f"`는 같은 파일을 한 파이프라인에서 두 번 읽어 shellcheck SC2094가 붙는다.)
   if [ "$(LC_ALL=C tr -d '\000' < "$f" | wc -c)" -ne "$(wc -c < "$f")" ]; then nul_bad="${nul_bad}  $f"$'\n'; fi
-done <<< "$(git ls-files '*.ts' '*.mts' '*.sh' '*.bats' '*.yaml' '*.yml' '*.json' '*.md' '*.py' '*.tf' '*.rego' 'Makefile')"
+done <<< "$(git ls-files '*.ts' '*.mts' '*.sh' '*.bats' '*.yaml' '*.yml' '*.json' '*.md' '*.py' '*.tf' '*.rego' 'justfile')"
 scan_floor check-skeleton:nul-scan "$nul_scanned" "$(floor_of check-skeleton:nul-scan 200)" quiet || exit 1
 
 # ── 마커 일괄 방출 — 전 도메인이 바닥값을 통과한 뒤에만 나간다 ──

@@ -50,7 +50,7 @@ write_enc() { # $1=path; 평문 yaml을 stdin으로 받음 -> 원자적: 평문�
 
 # ── 자격 인벤토리(이 두 신원은 terraform이 만들고 여기서만 클러스터로 들어온다) ──────────────
 # cloudflared 터널 run token — 공개 인입 커넥터의 **유일한** 신원. terraform infra/cloudflare 파생.
-# 회전 = `terraform apply -replace=random_password.tunnel_secret` → `make seed-secrets` → PR.
+# 회전 = `terraform apply -replace=random_password.tunnel_secret` → `just seed-secrets` → PR.
 # tunnel id가 바뀌어도 dns.tf:10이 CNAME 타깃을 리소스 id에서 보간하므로 CNAME 3건은 같은
 # apply에서 따라온다 — 남는 위험은 cloudflared 파드가 새 토큰을 받기 전까지의 공개 인입 순단뿐.
 write_enc platform/cloudflared/prod/tunnel.enc.yaml <<EOF
@@ -70,7 +70,7 @@ EOF
 # ⚠️ 이름이 비슷한 형제 둘과 **별개**다 — 혼동하면 보안 모델이 깨진다:
 #    · owner-local bootstrap client(`.env.secrets` TF_VAR_ts_bootstrap_oauth_*, write 집합)
 #    · CI 읽기 전용 client(GH secret TF_TAILSCALE_OAUTH_*, policy_file/dns/oauth_keys:read)
-# 회전 = `terraform apply -replace=tailscale_oauth_client.k8s_operator` → `make seed-secrets`
+# 회전 = `terraform apply -replace=tailscale_oauth_client.k8s_operator` → `just seed-secrets`
 #      → PR → operator 재조인·tag:k8s 프록시 복구 확인.
 write_enc platform/tailscale/prod/operator-oauth.enc.yaml <<EOF
 apiVersion: v1

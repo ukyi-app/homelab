@@ -12,7 +12,7 @@
 # 그 wave가 루프에 아예 안 들어갔기 때문이다.
 #
 # ⚠️ **런너 로케일 고정은 이 가드의 대체가 아니다.** 고정하면 개별 결함의 뮤테이션 감도가 죽는다
-#    (실측: `Makefile`의 `LC_ALL=C sort`를 되돌려도 C.UTF-8에서는 초록). 고정은 두 venue가 같은
+#    (실측: `justfile`의 `LC_ALL=C sort`를 되돌려도 C.UTF-8에서는 초록). 고정은 두 venue가 같은
 #    술어를 평가하게 만들 뿐이고, "다음 파일에서 또 난다"를 막는 것은 이 정적 스캐너다 —
 #    bash 3.2 `$VAR한글` 함정이 쓴 것과 같은 처방(러너가 원리적으로 재현 못 하는 환경 의존은
 #    정적 가드로 잡는다). cf. `docs/traps-detail.md` 「로케일 콜레이션이 게이트를 뒤집는다 …」
@@ -37,7 +37,7 @@ cd "$ROOT"
 FILES=()
 if [ "$#" -gt 0 ]; then FILES=("$@"); else
   while IFS= read -r f; do FILES+=("$f"); done < <(
-    git ls-files '*.sh' '*.bats' 'Makefile' '*.ts' '*.mts' '.github/workflows/*.yaml' '.github/actions/*/*.yml'
+    git ls-files '*.sh' '*.bats' 'justfile' '*.ts' '*.mts' '.github/workflows/*.yaml' '.github/actions/*/*.yml'
   )
 fi
 # ⚠️ 기본 모드의 도메인은 **정당하게 0이 될 수 없다** — 0건은 열거 붕괴다(형제 가드와 같은 규율).

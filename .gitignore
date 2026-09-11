@@ -18,8 +18,8 @@ keys.txt
 *.tfvars
 # ⚠️ 파생 사본도 함께 무시한다(`*.tfstate.*`와 대칭). tfvars는 시크릿을 담아 무시되는데
 #    `terraform.tfvars.pre-cutover.bak` 같은 사본은 `*.tfvars`에 **안 걸려** untracked로 남고,
-#    `git add -A` 한 번에 커밋될 수 있었다. 게다가 `make ci-guard-tracked`가 untracked 게이트
-#    대상 파일을 보고 exit 4로 막으므로, 그런 백업 하나가 로컬 `make ci` 재현을 통째로 세운다
+#    `git add -A` 한 번에 커밋될 수 있었다. 게다가 `just ci-guard-tracked`가 untracked 게이트
+#    대상 파일을 보고 exit 4로 막으므로, 그런 백업 하나가 로컬 `just ci` 재현을 통째로 세운다
 #    (2026-08-17 컷오버 백업이 실제로 그렇게 막았다).
 *.tfvars.*
 !*.tfvars.example
@@ -87,7 +87,7 @@ platform/*/prod/charts/
 # 무인 apply/reconcile가 -lockfile=readonly로 핀된 provider만 쓰도록(재현성·공급망).
 # 운영 런북은 로컬 전용 — public 레포에 올리지 않는다(사용자 결정 2026-06-11)
 docs/runbooks/
-.make-ci-uneval
+.just-ci-uneval
 
 # python 바이트코드 — tests/gates/*.py(하네스 생성기)를 py_compile로 검사할 때 생긴다.
 __pycache__/

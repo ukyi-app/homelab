@@ -331,7 +331,7 @@ function appTeardownUsage(): string {
     "Healthy가 될 수 없으므로, 성공 = 머지 관측 + 생성됐던 Application의 **부재**(prune 완료)다.",
     "DNS 회수는 iac/tf-reconcile 소관이라 이 명령의 관측 대상이 아니다(결과에 명시).",
     "DB/캐시(conn·CR·Valkey)는 **비접촉**이라 철거 후에도 그대로 남는다 — 결과의 resourcesRetained가",
-    "그 미완 작업을 명시한다(정리는 owner-local `make teardown-resource`, attestation 필요).",
+    "그 미완 작업을 명시한다(정리는 owner-local `just teardown-resource`, attestation 필요).",
     ...PREFLIGHT_LINES,
     "  --confirm <app>    파괴 확인 — 철거할 앱 이름 재입력(불일치·비-TTY 무플래그 = 거부)",
     "  --wait             머지 관측 + Application 부재(prune)까지 대기(미머지 = 바운디드 pending)",

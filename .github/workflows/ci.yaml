@@ -49,7 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: ./.github/actions/setup-bun
-      - name: typecheck (tsc --noEmit — erasableSyntaxOnly 게이트, make ci 패리티)
+      - name: typecheck (tsc --noEmit — erasableSyntaxOnly 게이트, just ci 패리티)
         run: bun run typecheck
       - name: install chart toolchain
         uses: ./.github/actions/setup-toolchain
@@ -60,6 +60,7 @@ jobs:
           kustomize: 'true'
           conftest: 'true'
           bats: 'true'
+          just: 'true'
           shellcheck: 'true'
           actionlint: 'true'
           sops: 'true'
@@ -87,7 +88,7 @@ jobs:
           gitleaks detect --no-git --source . --redact --no-banner --exit-code 1
       - name: SOPS 왕복 (ephemeral CI 키)
         # verify.yaml에서 이식(그 잡의 유일한 고유 책임이었다). 실 age 키 없이 자기완결로 왕복을 증명한다 —
-        # 암호화 후 평문이 남지 않는지 + 복호가 원문을 되돌리는지. 로컬 대응은 `make verify`의
+        # 암호화 후 평문이 남지 않는지 + 복호가 원문을 되돌리는지. 로컬 대응은 `just verify`의
         # tests/test_sops-roundtrip.bats(실 키 사용)라 policy/ci-parity.json에 covered로 계상한다.
         run: |
           age-keygen -o /tmp/ci.agekey
@@ -130,7 +131,7 @@ jobs:
         # 룰이 아니라 구조 가드가 문다. 무인자 = 가드가 자기 도메인을 열거하고 바닥값을 건다.
         run: bash scripts/sealed-guard.sh
       - name: chart render + validate (all kinds)
-        run: make chart-test
+        run: just chart-test
       - name: memory ledger onboarding gate (M0-owned)
         run: bun run verify:ledger
       - name: registry/binding 정합 게이트 (배포 깨는 드리프트 차단)
@@ -199,10 +200,10 @@ jobs:
         env:
           EXPECT_PG_SERVERNAME: ${{ (github.base_ref == 'main' || github.ref == 'refs/heads/main') && 'pg-nuc' || '' }}
         run: bash scripts/check-pg-servername.sh
-      - name: make ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)
+      - name: just ci ↔ gate 패리티 회계 (이 job의 모든 스텝이 로컬에서 어떻게 도는지)
         # 스텝 목록을 이 파일에서 **파생**해 원장(policy/ci-parity.json)과 대조한다 — 스텝을 추가하는
         # 사람은 "이건 로컬에서 어떻게 도는가"를 반드시 답해야 한다. 하드코딩 토큰 대조였을 땐 19스텝 중
-        # 8건이 make ci에 없는데도 전 검사가 초록이었다(대조하던 5개가 하필 전부 미러된 것들이었다).
+        # 8건이 just ci에 없는데도 전 검사가 초록이었다(대조하던 5개가 하필 전부 미러된 것들이었다).
         run: bun tools/check-ci-parity.ts
       - name: shell script lint (전 추적 .sh)
         # 전 추적 *.sh를 shellcheck — scripts/(DR/파괴적)뿐 아니라 notify.sh(알림 경로)·
@@ -282,7 +283,7 @@ jobs:
           echo "발화 e2e ${n}건 병렬 실행"
 
           pids=""
-          # bats 스위트를 **같이** 띄운다. 수집은 scripts/run-bats.sh 단일 SSOT 그대로다(make ci와 동일 호출).
+          # bats 스위트를 **같이** 띄운다. 수집은 scripts/run-bats.sh 단일 SSOT 그대로다(just ci와 동일 호출).
           # 왜 같이 도는가: bats는 CPU-bound, 발화 e2e는 거의 전부 replay **대기**(가장 긴 하네스 ~195s)라 자원이
           # 겹치지 않는다 → 합계가 아니라 최댓값으로 수렴한다. run-bats.sh는 파일 단위 병렬(--jobs=nproc, 이 러너는
           # 4 vCPU) + 직렬 레인(tests/.gate-serial)이다 — 한 줄 직렬이던 2026-09-09 실측은 574s로 이 스텝(576s)의 전부였고

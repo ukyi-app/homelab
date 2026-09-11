@@ -55,7 +55,7 @@ export function appInitInputError(input: AppInitInput): string | null {
 
 // 클론 위치 거부 술어 — parentDir가 homelab 체크아웃 루트이거나 그 **하위**면
 // 거부한다. 근거: 거기 클론하면 GitOps 모노레포 안에 중첩 레포가 생기는데 로컬 게이트가 그것을
-// 보지 못한다 — Makefile `ci-guard-tracked`의 열거 경로가 최상위 새 디렉토리를 아예 안 보고,
+// 보지 못한다 — justfile `ci-guard-tracked`의 열거 경로가 최상위 새 디렉토리를 아예 안 보고,
 // `.gitignore`에도 대응 항목이 없어 untracked로 남으며, `git add -A` 한 번이면 embedded repo
 // gitlink로 스테이징된다(이 레포가 같은 클래스를 두 번 밟은 이력이 .gitignore 주석에 있다).
 // 그리고 init은 실패 시 dest 재사용으로 수렴하도록 설계돼 있어 잘못 놓인 dest가 계속 재사용된다.

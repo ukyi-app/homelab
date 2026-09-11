@@ -5,7 +5,7 @@ image:
   pullPolicy: IfNotPresent
 # GHCR pull: 패키지는 private 유지(첫 push 기본 — 가시성 변경은 UI 전용·비가역). 클러스터는
 # imagePullSecret `ghcr-pull`로 pull한다(platform/ghcr-pull/prod = prod NS dockerconfigjson
-# SealedSecret, seed: .env.secrets GHCR_PULL_TOKEN → `make seal-ghcr-pull`). 인레포 앱은 전부
+# SealedSecret, seed: .env.secrets GHCR_PULL_TOKEN → `just seal-ghcr-pull`). 인레포 앱은 전부
 # prod NS라 아래 기본값으로 충분 — 패키지 public 전환 불필요.
 imagePullSecrets: [{ name: ghcr-pull }]
 

@@ -4,7 +4,7 @@
 # 재생성되는 클래스를 정적으로 차단한다. sops는 metadata·키 이름을 암호화하지 않으므로 age 키 불필요(CI-safe).
 # ⚠️ **키 집합 축도 같은 재시드 경로다** — write_enc는 경로를 통째로 덮어쓰므로 드리프트가 양방향이다:
 #    seed에서 키가 빠지면 재시드가 커밋본에서 그 키를 지우고(예: alerting-secrets의 GRAFANA_ADMIN_PASSWORD가
-#    사라지면 grafana.yaml:30의 secretKeyRef가 CreateContainerConfigError), make secret-edit으로 키를
+#    사라지면 grafana.yaml:30의 secretKeyRef가 CreateContainerConfigError), just secret-edit으로 키를
 #    늘리면 다음 재시드가 그것을 되돌린다. 2026-09-03까지 이 축에 게이트가 0건이었다(뮤테이션 실측: 2/2 ok).
 # ⚠️ 중간 단언은 [ ]만 사용 — bash 3.2에서 [[ ]] 실패는 침묵 통과.
 

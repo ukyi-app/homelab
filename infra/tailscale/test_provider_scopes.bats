@@ -38,7 +38,7 @@ setup() {
   done
   # 위 루프는 멤버십만 잰다(원소 수 상한 0줄) — 기본값에 원소를 추가해도(실측
   # P4: auth_keys, all:write 추가) 무증인이었다. 리스트 전체 리터럴 일치로 상한까지 닫는다
-  # (`terraform fmt`가 간격을 고정하므로 -F가 안전 — make tf-validate가 그 전제를 지킨다).
+  # (`terraform fmt`가 간격을 고정하므로 -F가 안전 — just tf-validate가 그 전제를 지킨다).
   printf '%s' "$line" | grep -qF -- '["policy_file", "dns", "oauth_keys", "devices:core", "auth_keys"]'
 }
 
@@ -99,7 +99,7 @@ ts_job() { awk '/^  drift-tailscale:/{f=1;next} f&&/^  [a-z]/{exit} f' "$(WF)"; 
   # 이 리소스는 클러스터 안 tailscale-operator가 실제로 쓰는 자격이다 — provider.tf의 CI plan-only
   # 토큰(위 @test들)과 다른 값 축. scopes에 all:write류를 더하면 tailnet 전체 write 권한이,
   # tags를 확대하면 다른 태그로 디바이스 등록이 가능해진다. 행두·행말 앵커 전체 리터럴 일치로
-  # 원소 추가·순서 변경·삭제 전부를 한 줄씩 닫는다(terraform fmt가 간격을 고정 — make tf-validate
+  # 원소 추가·순서 변경·삭제 전부를 한 줄씩 닫는다(terraform fmt가 간격을 고정 — just tf-validate
   # 가 그 전제를 지킨다).
   run grep -Eq '^\s*scopes\s*=\s*\["devices:core", "auth_keys"\]\s*$' "$OAUTH"
   [ "$status" -eq 0 ]

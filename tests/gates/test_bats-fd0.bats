@@ -2,7 +2,7 @@
 # `</dev/null` 규약 가드(scripts/check-bats-fd0.sh)의 **변별력** 테스트.
 #
 # 왜 필요한가: 이 규약이 막는 것은 red가 아니라 **hang**이다. 그리고 venue가 갈린다 —
-# `ci.yaml`은 러너를 `&`로 띄워 fd 0이 `/dev/null`이므로 **CI는 우연히 면역**이고, `make ci`만
+# `ci.yaml`은 러너를 `&`로 띄워 fd 0이 `/dev/null`이므로 **CI는 우연히 면역**이고, `just ci`만
 # 밟는다. 즉 검출기가 조용히 죽어도 CI는 영원히 초록이라 사후에 드러나지 않는다.
 # ⚠️ @test 이름은 영어만 · 중간 단언은 [ ]만(bash 3.2 [[ ]] 침묵 통과).
 
@@ -29,7 +29,7 @@ setup() {
   run bash "$S" "$FX/flagok.sh";  [ "$status" -eq 0 ]
 }
 
-@test "prose, Makefile help text and version checks are not calls (false-positive control)" {
+@test "prose, justfile help text and version checks are not calls (false-positive control)" {
   # ★ 이 레포의 문장에는 "bats accounting"·"bats 실행(docs/runbooks/)"처럼 bats가 산문으로 나온다.
   #   그걸 호출로 읽으면 가드가 문서를 물어 아무도 켜지 않는다.
   printf '#!/usr/bin/env bash\n# bats accounting 설명\nx: ## 로컬 런북 bats 실행(docs/runbooks/)\nbats --version | grep -q x\n' > "$FX/prose.sh"
@@ -53,17 +53,17 @@ setup() {
   # ★ 적대적 리뷰가 잡은 자리. self 판정이 주석·`name:` 스킵보다 **위**에 있어, 그 문자열을
   #   인용하기만 한 줄에도 self=1이 서서 **파일 전체가 면제**됐다. 그리고 이 가드 자신이
   #   자기 헤더에서 그 규약을 설명하므로 **영구 면제 상태**였다 — hard-zero 보증이 거짓이었다.
-  #   세 표면을 전부 건다: 셸 주석 · Makefile `##` 도움말 · 워크플로 스텝 `name:`.
+  #   세 표면을 전부 건다: 셸 주석 · justfile `##` 도움말 · 워크플로 스텝 `name:`.
   printf '#!/usr/bin/env bash\n# 규약: exec 0</dev/null 을 한다\nbats tools/tests/\n' > "$FX/cmt.sh"
   run bash "$S" "$FX/cmt.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[FD0]'
-  printf 'x: ## 러너는 exec 0</dev/null 을 한다\n\t@bats tests/foo.bats\n' > "$FX/Makefile"
-  run bash "$S" "$FX/Makefile"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[FD0]'
+  printf 'x: ## 러너는 exec 0</dev/null 을 한다\n\t@bats tests/foo.bats\n' > "$FX/justfile"
+  run bash "$S" "$FX/justfile"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[FD0]'
   printf 'steps:\n  - name: 러너 (exec 0</dev/null 로 fd 0을 끊는다)\n    run: |\n      bats tests/foo.bats\n' > "$FX/wf.yaml"
   run bash "$S" "$FX/wf.yaml"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[FD0]'
   # 음성 대조 — **진짜** exec 줄은 여전히 면제다(위 레인이 면제를 통째로 없앤 것이 아니다).
   printf '#!/usr/bin/env bash\nexec 0</dev/null\nbats tools/tests/\n' > "$FX/real.sh"
   run bash "$S" "$FX/real.sh"; [ "$status" -eq 0 ]
-  # 네 번째 표면 — **코드 줄의 문자열 리터럴**(주석이 아니다). Makefile echo·워크플로 run 블록의
+  # 네 번째 표면 — **코드 줄의 문자열 리터럴**(주석이 아니다). justfile echo·워크플로 run 블록의
   # 인용문 한 줄이면 예전 술어(앵커 없음)는 self=1을 세워 파일 전체를 면제했다. 행두 앵커가 막는다.
   printf '#!/usr/bin/env bash\necho "규약: exec 0</dev/null 을 한다"\nbats tools/tests/\n' > "$FX/str.sh"
   run bash "$S" "$FX/str.sh"; [ "$status" -ne 0 ]; echo "$output" | grep -qF '[FD0]'

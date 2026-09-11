@@ -106,9 +106,9 @@ ALL4='| ① | `aaa` | x |
   echo "$output" | grep -qF '열거 붕괴'
 }
 
-@test "the gate is wired to a make target so it has an authority path on the owner machine" {
-  # 이 가드는 CI에서 영원히 SKIP이므로, 권위는 owner-local make 진입점뿐이다. 그 배선을 문다.
-  run bash -c "grep -c 'scripts/verify-credential-inventory.sh' '$ROOT/Makefile'"
+@test "the gate is wired to a just target so it has an authority path on the owner machine" {
+  # 이 가드는 CI에서 영원히 SKIP이므로, 권위는 owner-local just 진입점뿐이다. 그 배선을 문다.
+  run bash -c "grep -c 'scripts/verify-credential-inventory.sh' '$ROOT/justfile'"
   [ "$output" -ge 1 ]
 }
 

@@ -1,8 +1,8 @@
 // G1 — 가드가 **권위 있는 실행 경로**를 갖는지 계산한다.
 //
 // 병: 가드가 추가되고, scripts/README.md에 등재되고, 전 게이트가 초록이고, **CI에서 한 번도 실행되지
-// 않을 수 있다**. required check는 `gate` 하나(infra/github/repo.tf)인데 `make verify`는 CI에서 안 돈다 —
-// Makefile의 스텝 목록과 ci.yaml의 스텝 목록은 서로 다른 손으로 쓴 목록이고 둘을 대조하는 것이 없었다.
+// 않을 수 있다**. required check는 `gate` 하나(infra/github/repo.tf)인데 `just verify`는 CI에서 안 돈다 —
+// justfile의 스텝 목록과 ci.yaml의 스텝 목록은 서로 다른 손으로 쓴 목록이고 둘을 대조하는 것이 없었다.
 // 특히 ci.yaml이 직접 부르는 `tests/gates/*.sh` 8개는 `*test_*.bats`가 아니라 check-bats-accounting의
 // 도메인 밖이었다 — 9번째가 추가되고 잊혀도, 기존 하나가 삭제되고 파일만 남아도 감지되지 않았다.
 //
@@ -12,11 +12,11 @@
 //   · `.github/workflows/ci.yaml`   → jobs.gate.steps[].run (+ `uses: ./.github/actions/X` 전개)
 //   · `.github/workflows/*.yaml`    → `on.schedule`가 있는 워크플로의 steps[].run
 //   · `./scripts/run-bats.sh --list` → gate가 **실제로 수집하는** bats 전량(하드코딩 목록 아님)
-//   · `make -n <target>`             → Makefile 텍스트 파싱이 아니라 **make에게** 해소를 맡긴다
+//   · `just --dry-run <target>`             → justfile 텍스트 파싱이 아니라 **just에게** 해소를 맡긴다
 //   · `package.json` scripts         → `bun run verify:ledger` 같은 별칭을 전이적으로 해소
 //
 // **판정은 `authoritative >= 1`이다. `== 1`이 아니다.** venue는 의도적으로 겹친다 — check-skeleton은
-// ci.yaml과 make verify 양쪽에서 돈다. 정확히-하나 모델이면 그게 이중소유 오탐이 된다.
+// ci.yaml과 just verify 양쪽에서 돈다. 정확히-하나 모델이면 그게 이중소유 오탐이 된다.
 //
 // ⚠️ **이 회계가 아직 못 하는 것 — 호출이 가드의 실제 도메인에 닿는지는 판정하지 않는다.**
 // 티켓은 "픽스처 전용·스모크 전용·skip-only 호출은 권위가 아니다"라고 했는데, 그 셋을 텍스트로
@@ -31,7 +31,7 @@
 // 거짓 경보로 신뢰를 잃지 않는 것이다. 정밀화는 후속(스캔 건수 신호와 함께 하는 편이 낫다 —
 // 가드가 "몇 건 검사했다"를 이미 출력하므로 실행 관측으로 fixture↔real을 가를 수 있다).
 // skip-only(01의 `SKIP:` 마커)는 지금 판정에 영향이 없다: 유일한 해당 가드 verify-runbook-index가
-// owner-local `make verify-runbook-index`로 이미 권위를 갖는다.
+// owner-local `just verify-runbook-index`로 이미 권위를 갖는다.
 //
 // 종료코드: tools/lib/cli.ts 규약(0=통과 · 1=권위 0인 가드 존재 · 2=사용법).
 import { sh as shExec } from "./lib/exec.ts";
@@ -45,25 +45,25 @@ const WORKFLOW_DIR = ".github/workflows";
 const CI_WORKFLOW = `${WORKFLOW_DIR}/ci.yaml`;
 const GATE_JOB = "gate";
 
-// make 타깃의 권위 여부는 **이름으로 선언하지 않는다**. 처음엔 `new Set(["verify","ci"])`로 mirror를
+// just 타깃의 권위 여부는 **이름으로 선언하지 않는다**. 처음엔 `new Set(["verify","ci"])`로 mirror를
 // 지목했는데, 그건 (a) 아무것도 대조하지 않는 레지스트리이고 (b) 폴백이 default-allow라
 // 문서화된 나머지 타깃 37개가 무조건 권위가 됐다 — `verify`를 `verify-all`로 개명하거나
 // 로컬 전용 타깃을 새로 만들기만 해도 "로컬에만 있고 CI엔 없는 가드"가 통과했다(리뷰가 실측).
 //
-// 대신 **계산한다**: make 타깃이 권위인 경우는 정확히 둘이다.
-//   ① 워크플로가 그 타깃을 실제로 부른다(`run: make chart-test`) — CI에서 도는 것이 증명된다.
+// 대신 **계산한다**: just 타깃이 권위인 경우는 정확히 둘이다.
+//   ① 워크플로가 그 타깃을 실제로 부른다(`run: just chart-test`) — CI에서 도는 것이 증명된다.
 //   ② 그 타깃이 **skip 신호 규약을 쓰는 가드**를 부른다 — `SKIP:` 마커는 "이 가드의
 //      도메인은 없을 수 있다"는 뜻이고, 도메인이 CI에 없는 가드에겐 owner-local 엔트리포인트가
 //      유일한 권위다. 01이 06의 선행 티켓인 이유가 정확히 이것이다.
-// 그 외는 mirror다(폴백이 default-deny로 뒤집힌다). `make verify`는 규약을 쓰는 가드를 부르지
-// 않으므로 자동으로 mirror가 된다(게이트 bats가 실 레포에서 이 불변을 단언한다). `make ci`는
+// 그 외는 mirror다(폴백이 default-deny로 뒤집힌다). `just verify`는 규약을 쓰는 가드를 부르지
+// 않으므로 자동으로 mirror가 된다(게이트 bats가 실 레포에서 이 불변을 단언한다). `just ci`는
 // recipe 자신이 SKIP 규약을 직접 쓴다(untracked 가드·미평가 원장)라 ②로 정당하게 owner-local.
 // ⚠️ 마커를 **내는** 줄만 센다(출력 동사 필요). 두 번 틀렸던 자리다:
 //   · 앞에 공백을 요구했다가 skipGuards가 0건 — 실제 마커는 `echo "SKIP: …"`처럼 따옴표 뒤에 온다.
-//   · 출력 동사를 안 보다가 이 파일 자신의 **정규식 상수**가 마커로 잡혀 `make verify`가 권위로
+//   · 출력 동사를 안 보다가 이 파일 자신의 **정규식 상수**가 마커로 잡혀 `just verify`가 권위로
 //     승격됐다(규약을 다루는 코드 ≠ 규약을 쓰는 가드).
 // 세 대안(오탐 때문에 연기했던 확장을 소비자와 함께 착지):
-//   ① 직접 emission — Makefile recipe 잔존 레인(같은-줄 짝)이 여전히 이 모양이다.
+//   ① 직접 emission — justfile recipe 잔존 레인(같은-줄 짝)이 여전히 이 모양이다.
 //   ② 셸 `guard_skip <이름>` 호출 — 07 이관 후 셸 콜사이트의 유일한 모양. **행두 주석만** 배제하고
 //      (행 전역 `[^\n#]*`는 `${#files[@]}`의 `#`에서 실 호출 행을 통째로 미탐시킨다 —
 //      verify-runbook-index.sh:15 실측, check-skip-signalling의 행두 스트립과 같은 도메인 규율)
@@ -73,7 +73,7 @@ const GATE_JOB = "gate";
 //      따옴표 부재)과 메서드 호출(.skip), 백틱 인라인 코드 산문을 배제한다.
 // ⚠️ 이 주석 자신이 위반 모양의 연속 리터럴을 담지 않게 쓴다(check-skip-signalling의 조립식과
 //    같은 규율) — 직전 판은 백틱 산문 한 줄이 분기 ③에 매치해 이 파일이 skipGuards에 들어갔고,
-//    이 파일을 부르는 make verify·make ci가 통째로 owner-local로 승격됐다(실측 — 세 번째 재발이라
+//    이 파일을 부르는 just verify·just ci가 통째로 owner-local로 승격됐다(실측 — 세 번째 재발이라
 //    lookbehind에 백틱도 넣고 게이트 bats가 실 레포의 mirror 불변을 단언한다).
 const SKIP_EMISSION =
   /(echo|printf|console\.log)[^\n]*SKIP: [a-z0-9-]+:|(^|\n)(?![ \t]*#)[^\n]*\bguard_skip [a-z0-9][a-z0-9-]*|(?<![.\w`])skip\(\s*["'`]/;
@@ -136,20 +136,20 @@ function commandHeads(line: string): string[] {
   return heads;
 }
 
-// venue 텍스트는 전부 셸(워크플로 `run:` · bats · `make -n` 출력)이라 해시 주석만 있다.
+// venue 텍스트는 전부 셸(워크플로 `run:` · bats · `just --dry-run` 출력)이라 해시 주석만 있다.
 // 처음엔 `//` 갈래도 뒀는데 호출처가 전부 hash=true라 한 번도 평가되지 않는 죽은 분기였다(리뷰 지적).
 function stripComment(line: string): string {
   return line.replace(/^\s*#.*$/, "");
 }
-// 텍스트가 **실행하는** make 타깃 이름. 주석과 따옴표를 앞서와 같은 규율로 걸러
-// `make <target>`의 인자를 뽑는다(`make -s render COMP=x` → render).
-function makeInvocations(text: string): Set<string> {
+// 텍스트가 **실행하는** just 타깃 이름. 주석과 따옴표를 앞서와 같은 규율로 걸러
+// `just <target>`의 인자를 뽑는다(`just --quiet COMP=x render` → render).
+function justInvocations(text: string): Set<string> {
   const out = new Set<string>();
   for (const raw of text.split("\n")) {
     const line = stripComment(raw);
     for (const seg of neutralizeQuoted(line).split(/\|\||&&|[;|&()]/)) {
       const toks = seg.trim().split(/\s+/).filter(Boolean);
-      const i = toks.indexOf("make");
+      const i = toks.indexOf("just");
       if (i < 0) continue;
       for (let j = i + 1; j < toks.length; j++) {
         const t = toks[j];
@@ -199,10 +199,14 @@ export function invokesGuard(text: string, guard: string, allGuards: string[]): 
 // ── venue 수집 ────────────────────────────────────────────────────────────────
 function sh(cmd: string, args: string[], root: string): string {
   // seam 경유 — venue 수집은 실패를 빈 문자열로 접는 기존 관용 유지(부재 venue = 빈 텍스트,
-  // 열거 붕괴는 SKIP_EMISSION 바닥값이 잡는다). stderr는 버린다(종전 stdio ignore와 동일 효과).
+  // 열거 붕괴는 SKIP_EMISSION 바닥값이 잡는다). just 실패는 전파하고 dry-run은 stderr를 읽는다.
   // timeoutMs 0 = 종전 무-timeout 보존(git log 전 이력 스캔이 느린 디스크에서 30s를 넘을 수 있다).
   const r = shExec(cmd, args, { cwd: root, timeoutMs: 0 });
-  return r.ok ? r.out : "";
+  if (!r.ok) {
+    if (cmd === "just") throw new Error(`${cmd} ${args.join(" ")} 실패: ${r.err || r.status}`);
+    return "";
+  }
+  return cmd === "just" && args.includes("--dry-run") ? r.err : r.out;
 }
 
 type Step = { run?: string; uses?: string; if?: unknown; "continue-on-error"?: unknown };
@@ -237,20 +241,17 @@ function stepTexts(steps: Step[] | undefined, root: string): string {
   return parts.join("\n");
 }
 
-// make 도움말에 선언된 타깃을 make 자신에게 물어 해소한다(Makefile 텍스트 파싱 금지 — 티켓 조항).
-function makeTargets(root: string): string[] {
-  const mk = existsSync(`${root}/Makefile`) ? readFileSync(`${root}/Makefile`, "utf8") : "";
-  const names = new Set<string>();
-  for (const line of mk.split("\n")) {
-    const m = /^([a-zA-Z][a-zA-Z0-9_-]*):.*?##/.exec(line);
-    if (m) names.add(m[1]);
-  }
-  return [...names].sort();
+// just 도움말에 선언된 타깃을 just 자신에게 물어 해소한다(justfile 텍스트 파싱 금지 — 티켓 조항).
+function justTargets(root: string): string[] {
+  if (!existsSync(`${root}/justfile`)) return [];
+  const summary = sh("just", ["--summary"], root).trim();
+  if (!summary) throw new Error("just 레시피 열거 결과가 비었다");
+  return summary.split(/\s+/).sort();
 }
 
 export function collectVenues(root: string, guards: { path: string; text: string }[] = []): Venue[] {
   const venues: Venue[] = [];
-  const workflowText: string[] = [];   // 워크플로 `run:` 텍스트만 — make 호출 판정용(bats 제외)
+  const workflowText: string[] = [];   // 워크플로 `run:` 텍스트만 — just 호출 판정용(bats 제외)
   // skip 신호 규약을 쓰는 가드 = 도메인이 CI에 없을 수 있다고 스스로 선언한 가드.
   const skipGuards = guards.filter((g) => SKIP_EMISSION.test(g.text)).map((g) => g.path);
 
@@ -287,14 +288,14 @@ export function collectVenues(root: string, guards: { path: string; text: string
     workflowText.push(text);
   }
 
-  // ④ make 타깃 — 권위는 **계산한다**(위 SKIP_MARKER 주석 참조). 비권위는 mirror로 분리해 기록한다
-  //    (판정엔 안 세지만 진단 출력에는 남긴다 — "make verify에만 있다"를 사람이 읽을 수 있게).
-  // ⚠️ **워크플로 텍스트만** 본다. gate venue에는 수집 bats도 들어 있는데, 그 안의 `run make -n help`
+  // ④ just 타깃 — 권위는 **계산한다**(위 SKIP_MARKER 주석 참조). 비권위는 mirror로 분리해 기록한다
+  //    (판정엔 안 세지만 진단 출력에는 남긴다 — "just verify에만 있다"를 사람이 읽을 수 있게).
+  // ⚠️ **워크플로 텍스트만** 본다. gate venue에는 수집 bats도 들어 있는데, 그 안의 `run just --dry-run help`
   //    같은 테스트 호출까지 세면 거의 모든 타깃이 "CI가 부른다"가 되어 default-deny가 무너진다
   //    (실측: 폴루션으로 16개 타깃이 권위로 승격됐다).
   // ⚠️ ci.yaml은 ①에서 이미 liveGateSteps로 걸러(if:false·
   //    job if:false·continue-on-error 축) workflowText에 push했다(:266-267). 여기서 다시 원문
-  //    재스캔하면 그 필터가 무력화돼, if:false 스텝의 `run: make <target>`이 여전히 권위로
+  //    재스캔하면 그 필터가 무력화돼, if:false 스텝의 `run: just <target>`이 여전히 권위로
   //    승격된다(③의 형제 관용구, :280과 동일하게 제외).
   for (const f of sh("git", ["ls-files", "--", `${WORKFLOW_DIR}/*.yaml`], root).split("\n").filter(Boolean)) {
     if (f === CI_WORKFLOW) continue;
@@ -303,15 +304,15 @@ export function collectVenues(root: string, guards: { path: string; text: string
       workflowText.push(Object.values(doc?.jobs ?? {}).map((j) => stepTexts(j?.steps, root)).join("\n"));
     } catch { /* 파싱 실패는 venue 바닥값이 잡는다 */ }
   }
-  const ciInvoked = makeInvocations(workflowText.join("\n"));
-  for (const t of makeTargets(root)) {
-    const text = sh("make", ["-n", t], root);
+  const ciInvoked = justInvocations(workflowText.join("\n"));
+  for (const t of justTargets(root)) {
+    const text = sh("just", ["--dry-run", t], root);
     if (!text) continue;
     const authoritative =
       ciInvoked.has(t) ||                                  // ① 워크플로가 실제로 부른다
       SKIP_EMISSION.test(text) ||                          // ② recipe 자신이 skip 규약을 쓴다
       skipGuards.some((g) => text.includes(g));            //   또는 규약을 쓰는 가드를 부른다
-    venues.push({ id: `make:${t}`, kind: authoritative ? "owner-local" : "mirror", text });
+    venues.push({ id: `just:${t}`, kind: authoritative ? "owner-local" : "mirror", text });
   }
 
   // ⑤ 별칭 전이 해소 — `bun run verify:ledger` → package.json → scripts/verify-ledger.sh.
@@ -370,7 +371,7 @@ if (import.meta.main) {
       {
         scan: "check-guard-authority:venues",
         min: 1,
-        floorHint: "venue 수집 붕괴 — ci.yaml/run-bats/make 확인",
+        floorHint: "venue 수집 붕괴 — ci.yaml/run-bats/just 확인",
         enumerate: () => {
           venues = collectVenues(root, guardEntries);
           return venues.length;
@@ -382,7 +383,7 @@ if (import.meta.main) {
         // ("라벨 = 바닥값이 걸린 열거 도메인 하나" — 비-도메인 진단으로 접으면 라벨 참칭이다).
         scan: "check-guard-authority:authoritative-venues",
         min: 1,
-        floorHint: "권위 venue 수집 붕괴 — ci.yaml/run-bats/make 확인",
+        floorHint: "권위 venue 수집 붕괴 — ci.yaml/run-bats/just 확인",
         enumerate: () => venues.filter((v) => v.kind !== "mirror").length,
       },
     ],
@@ -406,7 +407,7 @@ if (import.meta.main) {
         const mirror = o.nonAuthoritative.length ? ` (비권위 경로만: ${o.nonAuthoritative.join(", ")})` : " (어떤 경로에도 없음)";
         lines.push(`  ${o.guard}${mirror}`);
       }
-      lines.push("  권위 = ci.yaml gate 스텝 · gate 수집 bats · 스케줄 워크플로 · owner-local make 타깃");
+      lines.push("  권위 = ci.yaml gate 스텝 · gate 수집 bats · 스케줄 워크플로 · owner-local just 타깃");
       return lines;
     },
     report: (lines) => { for (const l of lines) console.error(l); },

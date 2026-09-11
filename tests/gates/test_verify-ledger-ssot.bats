@@ -17,10 +17,10 @@ setup() {
   echo "$output" | grep -q 'scripts/verify-ledger.sh'
 }
 
-@test "Makefile verify target no longer inlines the conftest pipeline" {
-  run grep -c 'conftest test /tmp/ledger.json' "$ROOT/Makefile"
+@test "justfile verify target no longer inlines the conftest pipeline" {
+  run grep -c 'conftest test /tmp/ledger.json' "$ROOT/justfile"
   [ "$output" = "0" ]
-  grep -q 'scripts/verify-ledger.sh' "$ROOT/Makefile"
+  grep -q 'scripts/verify-ledger.sh' "$ROOT/justfile"
 }
 
 # 마진 규약의 A′ 측정 서브쿼리 step이 cadvisor 스크레이프 간격을 넘으면 peak가 과소평가된다

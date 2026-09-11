@@ -28,7 +28,7 @@
 #    말바꾸기 경주다. 그래서 **닫힌 쪽을 문다**:
 #      · VENUE — 실행 경로 주장은 **venue를 지목하지 않고는 성립하지 않는다**. venue 종류는
 #        check-guard-authority가 소유하는 닫힌 집합이다(ci.yaml gate 스텝 · gate 수집 bats ·
-#        스케줄 워크플로 · make 타깃 · bun run 별칭). 이쪽이 주력이다.
+#        스케줄 워크플로 · just 타깃 · bun run 별칭). 이쪽이 주력이다.
 #      · REL — venue 이름 없이 서는 주장(「배선 없음」·「직접 실행」·「진입점은」)을 받는 보조 어휘.
 #    **합집합이지 접속사 조건이 아니다** — 둘 중 하나만 걸려도 red다(접속사로 묶으면 레인이 vacuous
 #    해지는 자리를 형제 가드 check-host-ports가 이미 실측했다).
@@ -211,7 +211,7 @@ BEGIN {
   # VENUE — 계산이 소유하는 venue 종류. 주장은 이 이름들을 지목하지 않고는 성립하지 않는다.
   # bats는 `tests/` 접두까지 요구한다: 접두 없는 `test_*.bats`는 가드가 **검사 대상**으로 말하는
   # 도메인 어휘라(check-bats-accounting) venue 지목과 구별해야 한다.
-  VEN[1] = "make "; VEN[2] = "ci.yaml"; VEN[3] = "bun run "
+  VEN[1] = "just "; VEN[2] = "ci.yaml"; VEN[3] = "bun run "
   VEN[4] = "tests/gates/test_"; VEN[5] = "tests/test_"; nv = 5
   # REL — venue 이름 없이 서는 관계 주장. 도메인 산문과 겹치는 맨 명사(「가드」·「게이트」·「배선」·
   # 「호출자」)는 넣지 않는다 — 주어 표지를 붙인 술어형만 쓴다(실측: 맨 「가드」는 현 README에서

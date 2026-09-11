@@ -98,12 +98,16 @@ k3s 단일 노드(**Intel NUC15CRHU5 베어메탈** · Ubuntu 26.04 LTS · amd64
 
 ## 명령
 
+`just` 1.58.0 이상이 필요하다([설치 안내](docs/runbooks-public/toolchain-setup.md)).
+`just` 또는 `just --list`로 명령을 찾고, 변수는 `just APP=cnpg argo-sync`처럼 명령 앞에 둔다.
+실행 정의는 루트 `justfile` 한 곳에 둔다.
+
 ```bash
-make verify       # 기반 게이트: skeleton + 메모리 원장(conftest) + sops 라운드트립
-make chart-test   # 공유 차트: 3 kind(web/worker/site) 렌더 + kubeconform + bats
-make tf-validate  # terraform fmt + validate (3 루트)
-make bootstrap    # 멱등 DR 진입점: ArgoCD + sops-age + root app
-make ci           # push 전 단일 진입점 — CI 'gate' job 재현(차이는 policy/ci-parity.json에 계상)
+just verify       # 기반 게이트: skeleton + 메모리 원장(conftest) + sops 라운드트립
+just chart-test   # 공유 차트: 3 kind(web/worker/site) 렌더 + kubeconform + bats
+just tf-validate  # terraform fmt + validate (3 루트)
+just bootstrap    # 멱등 DR 진입점: ArgoCD + sops-age + root app
+just ci           # push 전 단일 진입점 — CI 'gate' job 재현(차이는 policy/ci-parity.json에 계상)
 ```
 
 ## 더 보기

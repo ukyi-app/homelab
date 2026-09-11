@@ -2,7 +2,7 @@
 # 전 bats 도메인 accounting 가드 (F6 클래스 차단 — 테스트가 어느 harness에도 안 묶여 조용히 죽음).
 # 모든 추적 test_*.bats는 **정확히 한 도메인**에 배정돼야 한다:
 #   ① gate        — scripts/run-bats.sh --list 에 포함(required gate가 수집·실행)
-#   ② chart-test  — platform/charts/app/tests/ 하위(make chart-test 별도 harness)
+#   ② chart-test  — platform/charts/app/tests/ 하위(just chart-test 별도 harness)
 #   ③ .ci-exclude — not-CI-safe 레지스트리(주석이 실행처 iac/manual/age/docker 명시)
 # 매치 수 ≠ 1 → 실패(0=고아, 2+=이중소유). + .ci-exclude 유효성: (a) git-tracked 실재, (b) gate 미포함(모순),
 # (c) 사유 그룹 주석 지배 + 실행처 표기 **및 그 venue의 실재**, (d) 레지스트리 상한.
@@ -10,7 +10,7 @@
 #
 # ⚠️ **도메인 회계만으로는 gate → .ci-exclude '이동'이 원리적으로 안 보인다** — 옮겨도 여전히 정확히 한
 #    도메인이라 초록이다. 실측(2026-07-30): gate 208건 중 81건을 .ci-exclude로 옮겨도 이 가드·
-#    check-skeleton·check-guard-authority·`make verify`가 전부 초록이었고, 사유 주석 없이 한 줄 추가하는
+#    check-skeleton·check-guard-authority·`just verify`가 전부 초록이었고, 사유 주석 없이 한 줄 추가하는
 #    것도 아무 가드에 안 걸렸다. `.ci-exclude` 헤더는 "accounting 가드가 강제한다"고 **주장만** 하고 있었다
 #    (가드는 `#` 줄을 건너뛰기만 했다 — 이 레포가 반복해 밟은 "코드와 다른 서술").
 #    ⇒ 아래 (0)(0b)(3)이 그 구멍이다.
@@ -25,7 +25,7 @@ cd "$ROOT"
 # ⚠️ **맨 인자로 모드를 바꾸지 않는다.** 앞선 판은 `if [ "$#" -gt 0 ]`로 첫 인자를 레지스트리 경로로 삼았는데,
 #    그러면 **아무 토큰이나 하나** 붙는 순간 도메인 회계와 gate 바닥값이 통째로 건너뛰어지고 exit 0이 된다
 #    (적대 검토 실측: gate를 0건으로 파괴한 상태에서 무인자=rc 1 / 인자 1개=rc 0). 소비처가 셋이라
-#    (`ci.yaml`·`Makefile` 2곳) 어디든 인자 한 토큰이면 이 가드가 자기 자신을 끄는 off-switch가 된다.
+#    (`ci.yaml`·`justfile` 2곳) 어디든 인자 한 토큰이면 이 가드가 자기 자신을 끄는 off-switch가 된다.
 #    ⇒ 픽스처 모드는 **명시 플래그**로만 열고, 모르는 인자는 fail-loud(exit 2)다.
 EXCLUDE_FILE="tests/.ci-exclude"
 SERIAL_FILE="tests/.gate-serial"
@@ -78,11 +78,11 @@ in_excl_items() { case "$EXCL_ITEMS" in *" $1 "*) return 0;; *) return 1;; esac;
 #   · 지배 블록에 `실행처` 문자열이 있어야 한다.
 #   · 그리고 그 표기가 지목한 venue가 **실재해야 한다**(아래 venue_derive). 예전엔 이 자리가
 #     "텍스트 계약이지 증명이 아니다"라고 스스로 적어 둔 구멍이었다 — 단어만 있으면(「실행처: 그냥
-#     어딘가에서」) 통과했고, 없는 타깃을 적어도(「make no-such-target」) 통과했다(실측 2026-09-03).
+#     어딘가에서」) 통과했고, 없는 타깃을 적어도(「just no-such-target」) 통과했다(실측 2026-09-03).
 #     증가를 **묶는 것은 아래 (0b) 상한**이고, 이 계약은 표기가 실물을 가리키게 한다.
 # ── 실행처 표기 → **실재하는 venue** 파생 ────────────────────────────────────────
 # 인식 형태 넷이고, 그룹에 하나라도 **실재하는** 토큰이 있으면 그 그룹은 증명된다:
-#   ① make <타깃>   → Makefile에 ^<타깃>: 실재 **및 그 항목을 실제로 부름**(아래 venue_calls)
+#   ① just <타깃>   → justfile에 ^<타깃>: 실재 **및 그 항목을 실제로 부름**(아래 venue_calls)
 #   ② bats <경로>   → 그 경로 실재 **및 .ci-exclude 등재 파일이 아님**(아래 ⚠️ 자기지시)
 #   ③ .github/workflows/<파일>.ya?ml → 그 파일 실재 **및 그 항목을 실제로 부름**(아래 venue_calls)
 #   ④ manual        → 무조건 실재(owner-local 수동 실행 자기신고 — 자동 venue가 정말 없을 때만 쓴다)
@@ -91,7 +91,7 @@ in_excl_items() { case "$EXCL_ITEMS" in *" $1 "*) return 0;; *) return 1;; esac;
 #    renovate.yaml), 심지어 venue 쪽 호출 줄을 지워도, 「거기서 안 돈다」는 부정문을 적어도 rc=0였다
 #    (실측 2026-09-04 — 항목이 **가리키기만** 하고 **불리지 않아도** 통과하는 구멍). venue_calls()가
 #    venue 파일 본문(주석 제외)에서 test_*.bats 토큰(글롭 포함)을 뽑아 항목 경로가 매치하는지를 본다.
-#    잔여 한계: make 형태는 **타깃 본문이 아니라 Makefile 전체**를 스코프로 삼는다 — 다른 타깃이
+#    잔여 한계: just 형태는 **타깃 본문이 아니라 justfile 전체**를 스코프로 삼는다 — 다른 타깃이
 #    우연히 부르는 토큰도 HIT로 친다(타깃 오지목은 여전히 통과). ⚠️ **재산정(2026-09-05) — 여전히 못 좁힌다, 그리고 이유가 처음 적었던 것보다 하나 더 있다.** `$(VAR)`
 #    1단 전개만으로는 부족하다: `verify:` 타깃의 실제 레시피는 `@bats tests/test_sops-roundtrip.bats`·
 #    `@bats tests/test_sops-guard.bats` 두 줄이 각각 **줄 전체 주석**(fd0 hang 경고·sops-guard
@@ -105,7 +105,7 @@ in_excl_items() { case "$EXCL_ITEMS" in *" $1 "*) return 0;; *) return 1;; esac;
 # ⚠️ ①②의 인용 부호는 **백틱과 작은따옴표 둘 다** 받는다 — 레지스트리가 실제로 둘을 섞어 쓴다
 #    (실측: 대부분은 백틱이고 KSOPS 그룹만 작은따옴표). 표기를 한쪽으로 통일하는 규약은 없고,
 #    있어도 다음 편집자가 다시 섞는다 — 표기를 좁히는 것보다 파서를 넓히는 쪽이 정직하다.
-# ⚠️ 인용 구간 밖의 맨 텍스트는 ①②에서 **안 본다** — 산문의 「make 어쩌구」가 venue 행세를 하면
+# ⚠️ 인용 구간 밖의 맨 텍스트는 ①②에서 **안 본다** — 산문의 「just 어쩌구」가 venue 행세를 하면
 #    이 가드가 자기 도메인의 표기에 눈멀어 다시 텍스트 계약이 된다. ③는 경로 자체가 식별자라 인용을 안 묻는다.
 # ⚠️ **인식 0건은 red다** — 부재가 아니라 존재 판정이라 방향이 반대다. 그래서 아래 `|| true`는
 #    「`findings="$(awk … || true)"`」의 fail-open과 다르다: 추출기가 깨지면 전 그룹이 red로 간다.
@@ -113,7 +113,7 @@ in_excl_items() { case "$EXCL_ITEMS" in *" $1 "*) return 0;; *) return 1;; esac;
 #    `.ci-exclude` 등재 파일을 가리키면 파일은 실재해도 카운트하지 않는다. 「이 파일이 실행되는 곳:
 #    이 파일」은 늘 참이라 자동 실행 경로의 유무를 증명하지 못한다(실측: 인용 경로를 무관한 다른
 #    .ci-exclude 항목으로 바꿔도 --lint-excludes가 계속 rc=0이었다). 자동 venue가 정말 없으면 ④를 쓴다.
-# venue 파일(Makefile·워크플로)이 항목 경로($2)를 실제로 부르는지 — 주석을 걷어낸 본문에서
+# venue 파일(justfile·워크플로)이 항목 경로($2)를 실제로 부르는지 — 주석을 걷어낸 본문에서
 # test_*.bats 토큰(글롭 포함)을 뽑아 case 패턴으로 매치한다(글롭 토큰은 unquoted라 `test_*.bats`가
 # 패턴으로 살아 posture 5건의 `POSTURE_BATS := tests/posture/test_*.bats` 한 줄이 5건 전부를 문다).
 # ⚠️ 줄-전체 주석을 먼저 걷지 않으면 산문 속 언급(예: 경고 주석의 "test_makefile.bats")이 항진식
@@ -156,10 +156,10 @@ venue_derive() {
   _vd_spans="$(printf '%s' "$1" | tr '\140' "'" | grep -oE "'[^']*'" | tr -d "'" || true)"
   while IFS= read -r _vd_s; do
     case "$_vd_s" in
-      'make '*)
-        _vd_t="${_vd_s#make }"; _vd_t="${_vd_t%% *}"
-        VENUE_TOKENS="${VENUE_TOKENS}[make ${_vd_t}] "
-        if grep -qE "^${_vd_t}:" Makefile && venue_calls Makefile "$2"; then VENUE_OK=$((VENUE_OK + 1)); fi ;;
+      'just '*)
+        _vd_t="${_vd_s#just }"; _vd_t="${_vd_t%% *}"
+        VENUE_TOKENS="${VENUE_TOKENS}[just ${_vd_t}] "
+        if grep -qE "^${_vd_t}:" justfile && venue_calls justfile "$2"; then VENUE_OK=$((VENUE_OK + 1)); fi ;;
       'bats '*)
         _vd_p="${_vd_s#bats }"; _vd_p="${_vd_p%% *}"
         VENUE_TOKENS="${VENUE_TOKENS}[bats ${_vd_p}] "
@@ -214,7 +214,7 @@ while IFS= read -r line; do
         echo "  그룹 첫 줄: ${group_head}"
         echo "  인식한 토큰: ${VENUE_TOKENS:-(없음)}"
         # shellcheck disable=SC2016  # 백틱·`^<타깃>:`는 사용법 문구의 리터럴이다(명령 치환 아님)
-        echo '  인식 형태: `make <타깃>`(Makefile의 ^<타깃>:) · `bats <경로>`(경로 실재 & .ci-exclude 비등재) · .github/workflows/<파일>.yaml(파일 실재) · `manual`(자기신고) — 백틱/작은따옴표 둘 다.'
+        echo '  인식 형태: `just <타깃>`(justfile의 ^<타깃>:) · `bats <경로>`(경로 실재 & .ci-exclude 비등재) · .github/workflows/<파일>.yaml(파일 실재) · `manual`(자기신고) — 백틱/작은따옴표 둘 다.'
         rc=1
       fi
       ;;
@@ -230,8 +230,8 @@ scan_signal check-bats-accounting:excludes "$excl_n"
 # 이 숫자를 올려야 하고, 그건 리뷰에 보인다.
 # ⚠️ 래칫이 아니라 **상한**이다: 항목을 지우는 방향(제외를 줄이는 좋은 방향)은 그냥 통과한다.
 #    그래서 이 손 관리 수치의 드리프트는 단방향이고 무해하다 — 목표 상태는 0이다.
-# ⚠️ **env 오버라이드를 두지 않는다.** 예전엔 `${BATS_EXCLUDE_MAX:-16}`이라 `BATS_EXCLUDE_MAX=999 make verify`
-#    한 줄로 상한이 통째로 꺼졌다 — 호출부(ci.yaml·Makefile 2곳) 어디에도 보이지 않는 off-switch다.
+# ⚠️ **env 오버라이드를 두지 않는다.** 예전엔 `${BATS_EXCLUDE_MAX:-16}`이라 `BATS_EXCLUDE_MAX=999 just verify`
+#    한 줄로 상한이 통째로 꺼졌다 — 호출부(ci.yaml·justfile 2곳) 어디에도 보이지 않는 off-switch다.
 #    바로 위 「늘리려면 … 그건 리뷰에 보인다」가 이 자리에서만 거짓이었다. 형제 처방이 같은 결론을 냈다:
 #    check-bats-style.sh의 `BB_BASELINE_OVERRIDE`(소비자 0인데도 폐지) · check-doc-index.sh의
 #    `README_EXEMPT_MAX=0`(상수). 상한을 올리려면 이 줄을 고쳐야 하고, 그건 diff에 남는다.

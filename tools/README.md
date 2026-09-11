@@ -1,7 +1,7 @@
 # tools/ — DX 도구 인덱스
 
 App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도구의 **호출 경로**를
-명시한다 — 대부분은 워크플로(변이 디스패처)나 `bun`/`make` 타겟을 통해서만 돌고,
+명시한다 — 대부분은 워크플로(변이 디스패처)나 `bun`/`just` 타겟을 통해서만 돌고,
 일부만 직접 `bun tools/x.ts`로 부른다. 라이브 변이는 전부 PR-first(사람 머지 = 승인).
 
 **가드가 어느 venue에서 권위인지는 여기 적지 않는다** — `bun tools/check-guard-authority.ts --json`이
@@ -19,7 +19,7 @@ App Platform DX 스크립트(`.ts`)와 계약 스키마(`.json`) 모음. 각 도
 | 파일 | 검증 대상 | 누가 읽나 |
 |---|---|---|
 | `app-config-schema.json` | **외부 앱 레포**의 `.app-config.yml` 자기선언 (v2 계약). `kind`/`resources` 필수. web 기본 health는 `/health` 하나이며, site는 `kind: site`만 선언하면 내부에서 SWS로 서빙한다. `/metrics`는 `metrics.enabled: true` opt-in이다. 시크릿 키 목록은 `deploy/<app>-secrets.sealed.yaml`의 `encryptedData`가 SSOT다. 연결(DB/Redis)은 앱 SealedSecret(DATABASE_URL/REDIS_URL), 마이그레이션은 앱 self-migrate — 평문 env 필드 없음. | `create-app.ts`, `seal-secret.mts`(앱 레포 벤더)·`env-example.mts`(homelab 로컬 전용) |
-| `app-deploy-schema.json` | **이 레포**의 `apps/<name>/deploy/prod/` 산출물 계약. 필수: `values.yaml`·`.bindings.json`·`source-repo`·`kustomization.yaml`. create-app이 만드는 암묵 계약의 명문화. | `scripts/check-app-deploy.sh`(SSOT — `make verify`) |
+| `app-deploy-schema.json` | **이 레포**의 `apps/<name>/deploy/prod/` 산출물 계약. 필수: `values.yaml`·`.bindings.json`·`source-repo`·`kustomization.yaml`. create-app이 만드는 암묵 계약의 명문화. | `scripts/check-app-deploy.sh`(SSOT — `just verify`) |
 
 ## App 계약: self-migration (DB 스키마 마이그레이션)
 
@@ -286,7 +286,7 @@ claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
   분기(allOf member 0)·verb enum은 기술자 행(lib/catalog-rows `CONTRACT_ROWS`)에서, initSuccess·
   initFailure의 archetype enum은 플랫폼 좌표(lib/platform `ARCHETYPES` — 심화 6 후속)에서 생성하고,
   x-contract·variant→exitCode 재진술·나머지 definitions 본문은 수제 조각으로 보존한다(컴팩트 스타일 —
-  과거 리뷰의 의도적 결정). 기본 `--check`(byte 대조 — make verify 로컬 보조), `--write`(재생성).
+  과거 리뷰의 의도적 결정). 기본 `--check`(byte 대조 — just verify 로컬 보조), `--write`(재생성).
   **게이트 강제는 bats**(test_result-schema-gen.bats — run-bats 수집)가 담당한다. 기술자(행·좌표) 외
   무참조라 생성물 부재·파손에서도 재생성 성립(설계 게이트 r1 D3). 이름이 가드 열거 규약(check-*)의
   밖인 것은 의도다 — 생성기 겸 게이트라 check- 접두가 거짓이 된다.
@@ -295,7 +295,7 @@ claude mcp add homelab -- bun /abs/path/to/homelab/tools/homelab.ts mcp
 
 owner가 homelab에서 액션별 변이 디스패처(`create-app.yaml` 등, workflow_dispatch)를 실행하면
 reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸다. 직접 `node`로 돌리지 않는다.
-(teardown-resource만 예외 — owner-local `make teardown-resource`뿐이고 디스패처가 없다. `teardown-app`은
+(teardown-resource만 예외 — owner-local `just teardown-resource`뿐이고 디스패처가 없다. `teardown-app`은
 `_teardown-app.yaml`(🗑️ 디스패처 경유)과 owner-local `scripts/teardown.sh` **둘 다가** 호출한다.)
 
 - **`validate-mutation.ts`** — payload 검증기(계약표 강제). 각 변이 디스패처(`create-app.yaml` 등)와
@@ -327,11 +327,11 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   (`--name <cache> [--maxmemory-mi 16..1024]`). 앱별 경량 Valkey 인스턴스(cache NS) +
   conn/ro-conn SealedSecret + 원장 행을 산출. 자격은 `kubeseal` stdin 전용. cert 필요.
 - **`teardown-app.ts`** — 앱 한정 철거. `_teardown-app.yaml`(🗑️ 디스패처가 confirm 재검증 후 호출)과
-  owner-local `make teardown-app`(`scripts/teardown.sh`)이 호출
+  owner-local `just teardown-app`(`scripts/teardown.sh`)이 호출
   (`--app <name>`). `apps/<app>/`·`apps.json` 행·원장 행·digest-exporter `APPS` 항목·**동봉 계약 target 행**
   (`vendored-contract.json` — `lib/vendored-targets.ts`, 매니페스트 부재는 no-op)만 제거 — DB/캐시 conn·CR·Valkey는
   **절대 비접촉**(리소스 철거는 teardown-resource 전담). 멱등.
-- **`teardown-resource.ts`** — DB/캐시 리소스 철거. owner-local `make teardown-resource`(`scripts/teardown.sh`)가
+- **`teardown-resource.ts`** — DB/캐시 리소스 철거. owner-local `just teardown-resource`(`scripts/teardown.sh`)가
   호출(`--db <name>`|`--cache <name>`). 자동 refcount는 없다(연결=SealedSecret이라 `.bindings.json`에 db/redis
   참조 없음) → **모든 모드가 `--refs-verified <evidence-id>` attestation 강제**(F1): 런북 수동 확인
   (`apps/*/deploy/prod` grep + 실행 워크로드 `kubectl` + 백업 검증) 후 증거 id를 전달해야 진행.
@@ -347,7 +347,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 ## update-image 폴링 (bump 경로 — 인-레포 앱 이미지 전용)
 
 > **온보딩 후 autoDeploy 전환**: `apps/<app>/deploy/prod/.bindings.json`의 `autoDeploy`를 편집하는
-> PR이 유일 경로다(머지 = 승인 정책 변경). 이 값을 바꾸는 동사·make 타깃·워크플로는 없다 —
+> PR이 유일 경로다(머지 = 승인 정책 변경). 이 값을 바꾸는 동사·just 타깃·워크플로는 없다 —
 > `poll-ghcr`가 이 파일을 권위로 직접 읽고, 누락이면 fail-closed(승인 PR)다.
 
 - **`poll-ghcr.ts`** — GHCR 폴링 bump **플래너**(읽기 전용, 부작용 0). `bump-poll.yaml`(10분 주기)이
@@ -817,7 +817,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
 ## 정적 감사 (읽기 전용)
 
 - **`audit-orphans.ts`** — registry(`apps.json`)↔매니페스트↔바인딩↔원장 교차 드리프트 리포트.
-  `make audit`(전체)·`make ci`/`ci.yaml`(`--ci`, 배포 깨는 유형만 차단)·`audit.yaml`(스케줄
+  `just audit`(전체)·`just ci`/`ci.yaml`(`--ci`, 배포 깨는 유형만 차단)·`audit.yaml`(스케줄
   reconciler)이 호출. `--ci`(orphan-dns/activation-exposure-drift만 비-0)·`--strict`(전부 비-0)·기본(리포트만).
 - **`ledger-to-json.ts`** — `docs/memory-ledger.md` 표 → conftest 입력 JSON(행 파서 SSOT=`lib/ledger-totals.ts`).
   `scripts/verify-ledger.sh`(= `bun run verify:ledger`, gate)가 호출. 라이브 무관.
@@ -825,9 +825,9 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   **실제로 실행되는 경로를 최소 하나** 갖는지 계산한다. 가드가 추가되고 README에 등재되고 전 게이트가
   초록인데 **CI에서 한 번도 안 도는** 상태를 막는다. **계산하되 선언하지 않는다** — 소유권 레지스트리를
   만들지 않고 멤버십을 실제로 정하는 것에게 묻는다: `ci.yaml`의 `gate` job(로컬 composite action 전개) ·
-  `run-bats.sh --list`(수집 bats) · `on.schedule` 워크플로 · `make -n <타깃>`(Makefile 텍스트 파싱 아님) ·
+  `run-bats.sh --list`(수집 bats) · `on.schedule` 워크플로 · `just --dry-run <타깃>`(justfile 텍스트 파싱 아님) ·
   `package.json` 별칭 전이 해소(`bun run verify:ledger` → `verify-ledger.sh`).
-  **`make verify`·`make ci`는 비권위**(CI에서 돌지 않는 로컬 mirror)로 분리해 센다. 판정은
+  **`just verify`·`just ci`는 비권위**(CI에서 돌지 않는 로컬 mirror)로 분리해 센다. 판정은
   `authoritative >= 1` — venue는 의도적으로 겹치므로 정확히-하나 모델이면 오탐이 난다.
   `tests/gates/test_guard-authority.bats`가 호출(픽스처 red-green + 실 레포 전건).
 - **`check-image-ownership.ts`** — G2 이미지 **소유권 회계**: 레포의 모든 이미지 참조가 **권위 있는 핀
@@ -853,7 +853,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   드리프트 감시 2개가 한 번도 실행된 적 없이 매 30분 초록). skip된 job은 `if: always()` 스텝조차
   실행하지 않으므로 신호는 **게이트 밖의 별도 accounting job**에서만 낼 수 있다.
   두 모드가 한 파일에 있는 이유는 게이트 탐지 규칙이 SSOT여야 하기 때문이다:
-  - **정적**(무인자, `ci.yaml` gate 명시 스텝 + `make verify`) — `policy/workflow-readiness.json`
+  - **정적**(무인자, `ci.yaml` gate 명시 스텝 + `just verify`) — `policy/workflow-readiness.json`
     원장 ↔ 실제 워크플로 **양방향** 대조. 미선언 게이트(역방향)·죽은 선언(정방향)·`outputs.executed`
     미승격·회계 job 부재/`!cancelled()` 누락/`needs` 누락·`expect_executed` 바닥값·**면제 불가
     보안 항목**(`bump-poll.reconcile`은 required+error 고정)을 강제.
@@ -863,14 +863,14 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   게이트 탐지는 **자격 변수의 공백 검사**(`secrets.*`/`vars.*` env를 `[ -n "$X" ]`로 재고 플래그를
   내림)를 요구한다 — 이 선이 도메인-크기 게이트(열거 붕괴 클래스, 처방=scan-floor)와 결과 플래그
   (terraform `drift=false` 등)를 갈라낸다. `tests/gates/test_workflow-readiness.bats`가 호출.
-- **`check-ci-parity.ts`** — `make ci` ↔ `ci.yaml` job `gate` **패리티 회계**. Makefile은 `ci`를 "gate를
+- **`check-ci-parity.ts`** — `just ci` ↔ `ci.yaml` job `gate` **패리티 회계**. justfile은 `ci`를 "gate를
   로컬에서 재현"이라 선언하는데, 그 주장을 검증하던 것은 `test_make-ci-parity.bats`의 **하드코딩된 5개
-  토큰**뿐이었다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 `make ci`에 없었는데 전 검사가 초록이었다
+  토큰**뿐이었다 — 실측 시점에 gate의 run 스텝 19건 중 **8건**이 `just ci`에 없었는데 전 검사가 초록이었다
   (하필 그 5개가 전부 미러된 것들이라 우연히 통과했다). 이제 스텝 목록을 `ci.yaml`에서 **파생**해
-  `policy/ci-parity.json`과 대조한다: 미계상 red · 죽은 선언 red · `mirrored`는 **`make -n ci` 실제 출력**
-  대조(Makefile 텍스트를 파싱하지 않는다 — 조건부·전제 타깃을 사람이 재구현하면 그 재구현이 다음 드리프트다).
-  ⚠️ 그래서 `make -n`은 **부수효과가 없어야** 한다: 레시피에 `$(MAKE)`가 있으면 GNU make는 `-n`에서도 그 줄을
-  실행하므로 서브-make 금지(`test_make-ci-parity.bats`가 강제).
+  `policy/ci-parity.json`과 대조한다: 미계상 red · 죽은 선언 red · `mirrored`는 **`just --dry-run ci` 실제 출력**
+  대조(justfile 텍스트를 파싱하지 않는다 — 조건부·전제 타깃을 사람이 재구현하면 그 재구현이 다음 드리프트다).
+  `just --dry-run`의 stderr를 수집한다. 셸 내부의 재귀 호출은 펼쳐지지 않으므로
+  검사할 명령은 레시피 본문이나 의존 레시피에 직접 둔다.
 - **`check-disk-caps.ts`** — 디스크 **자기-상한 ↔ 볼륨 선언** 정합(D-4). 워크로드가 바이트로 선언하는
   자기 데이터 상한(`-retention.maxDiskSpaceUsageBytes` 등)이 자기 볼륨의 선언 용량보다 **작은지** 본다.
   라이브 실측(2026-07-29): `victorialogs`가 15GB / 10Gi = **139.7%**였고 전 게이트가 초록이었다.
@@ -960,7 +960,7 @@ reusable 워크플로가 이 도구들을 호출하고 결과를 **PR**로 낸�
   `--dry-run`은 대상 키 목록만. 같은 스크립트가 app-starter 템플릿에도 동봉(이 사본은 마이그레이션/테스트용).
 - **`seal-batch.ts`** — **homelab owner-local 시크릿 봉인**(앱 레포 아님 — 위 seal-secret.mts와 신뢰 맥락 다름).
   `adguard-auth`·`argocd-notify`·`files`·`ghcr-pull`(prod·files·observability 3평면) 봉인본을 선언 테이블로
-  통합. `make seal-<name>`(별칭)·`make seal-all`(회전 드릴)이 호출(owner-local). 봉인 전 `secret-cert-check`
+  통합. `just seal-<name>`(별칭)·`just seal-all`(회전 드릴)이 호출(owner-local). 봉인 전 `secret-cert-check`
   preflight fail-closed(break-glass `--offline-ok`/`SEAL_OFFLINE=1`). 평문·해시·토큰은 kubeseal stdin 전용(값 미출력).
 
 ## 로컬 개발 헬퍼 (bun 경유)

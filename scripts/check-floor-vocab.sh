@@ -51,7 +51,7 @@ if [ "$#" -gt 0 ]; then
   for f in "$@"; do FILES+=("$f"); done
 else
   SCOPE_NARROWED=0
-  while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.sh' '*.ts' '*.mts' 'Makefile')
+  while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.sh' '*.ts' '*.mts' 'justfile')
 fi
 
 # 조립 토큰 — \x2d 류 이스케이프는 쓰지 않는다(GNU grep ERE에서 리터럴 x — 11 실측 함정).

@@ -683,7 +683,7 @@ run_init() { run_init_at "$INIT_PARENT" "$@"; }
 
 @test "app init refuses to clone inside the homelab checkout, with zero side effects" {
   # 근거: 여기 클론하면 GitOps 모노레포 안에 **중첩 레포**가 생기는데 로컬 게이트가 그것을 못 본다
-  # (Makefile ci-guard-tracked의 열거 경로가 최상위 새 디렉토리를 아예 안 보고 .gitignore에도 항목이
+  # (justfile ci-guard-tracked의 열거 경로가 최상위 새 디렉토리를 아예 안 보고 .gitignore에도 항목이
   # 없다). 거부는 preflight(부수효과 0 구간)에서 나야 한다 — 뒤로 밀리면 레포 생성이 먼저 일어난다.
   run_init_at "$ROOT" myapp --archetype api --json
   [ "$status" -eq 1 ]

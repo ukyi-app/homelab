@@ -20,13 +20,12 @@ CANON="1.4.2"
 # `action.yml:2`의 "버전 SSOT"는 **워크플로 축**의 주장이다(어떤 워크플로도 bun을 각자 핀하지 않는다는
 # 뜻 — 그 **배제**는 아래 마지막 @test의 인라인 0 단언이 트리 전역으로 증언하고, 아래 로스터 @test는
 # 채택 바닥값일 뿐이다. 실측 채택은 19개고 로스터는 12개다 — 로스터를 19로 늘리면 같은 드리프트를
-# 재생산하므로 늘리지 않는다). 로컬 축의 핀은 `Makefile`의 m6-tools이고, `package.json`의
+# 재생산하므로 늘리지 않는다). 로컬 축의 핀은 `justfile`의 m6-tools이고, `package.json`의
 # `packageManager`가 세 번째 선언이다. 셋이 같은 값인지 묻는 게이트가 0건이었다 — 각 테스트가
-# 자기 파일 리터럴만 봐서, `action.yml` + 그 두 테스트만 올리고 `Makefile`을 잊으면 로컬도 CI도
+# 자기 파일 리터럴만 봐서, `action.yml` + 그 두 테스트만 올리고 `justfile`을 잊으면 로컬도 CI도
 # 초록인 채 런타임이 갈린다. 이 레포가 "하드코딩 소비처 목록은 자기 자신에게만 정확하다"로 이름
 # 붙여 둔 클래스다(tools/check-ci-parity.ts:8-9).
-# ⚠️ Makefile:147을 `jq`에서 **파생하지 않는다** — recipe의 `$(jq …)`를 make가 자기 함수로 먼저
-#    확장해 빈 값이 되고, `grep -qF ""`는 모든 버전에 매치한다(툴체인 핀 게이트의 조용한 fail-open).
+# ⚠️ 로컬 핀은 명시 문자열로 유지한다 — 빈 패턴 `grep -qF ""`가 모든 버전을 허용하지 않게 한다.
 # ⚠️ 트리 전체 `1\.3\.[0-9]+` 센서스도 금물이다 — `@types/bun`은 Renovate가 독립적으로 올리고,
 #    `tools/ensure-bump-pr.ts`의 "bun 1.3.14 실측"은 핀이 아니라 측정 출처 기록이다.
 @test "every bun pin site declares the canonical version" {
@@ -38,8 +37,8 @@ CANON="1.4.2"
   run jq -r .packageManager "$ROOT/package.json"
   [ "$status" -eq 0 ]
   [ "$output" = "bun@$CANON" ]
-  # (3) 로컬 축 — Makefile m6-tools. ERE에서 `|`는 교대 연산자라 `[|]`로 리터럴화한다.
-  run grep -oE "bun --version [|] grep -qF '[0-9.]+'" "$ROOT/Makefile"
+  # (3) 로컬 축 — justfile m6-tools. ERE에서 `|`는 교대 연산자라 `[|]`로 리터럴화한다.
+  run grep -oE "bun --version [|] grep -qF '[0-9.]+'" "$ROOT/justfile"
   [ "$status" -eq 0 ]
   [ "$output" = "bun --version | grep -qF '$CANON'" ]
   # (4) 그 등식이 **어디서 강제되는지**를 composite 자신이 가리켜야 한다 — 위 산문("버전 SSOT"의 축
