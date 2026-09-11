@@ -1,11 +1,9 @@
 terraform {
-  # ⚠️ **정확 핀이다(`>=`가 아니다).** 이 루트는 owner 로컬 apply 전용이고
-  # CI(tf-reconcile.yaml의 drift-github 잡)는 plan-only인데, plan도 refresh가 state를 읽으므로
-  # CI 바이너리가 state writer보다 낮으면 죽는다. 그 두 변(owner mise · 그 잡)을 한 값에 묶어
-  # fail-closed로 만든다.
-  # ⚠️ tailscale 루트는 `>= 1.9.0`을 유지한다(drift 잡이 일부러 1.15.5) — 핀은 루트마다 독립이다.
+  # owner 로컬과 CI 실행 버전을 정확 핀으로 맞춘다.
+  # 새 state 형식의 하위 버전 호환은 보장되지 않으므로 두 실행 환경을 함께 갱신한다.
+  # tailscale은 >= 1.9.0 계약을 유지하며 plan-only CI 핀은 별도로 검토한다.
   # renovate: datasource=github-releases depName=hashicorp/terraform
-  required_version = "= 1.9.8"
+  required_version = "= 1.16.2"
   required_providers {
     github = {
       source  = "integrations/github"

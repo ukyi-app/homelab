@@ -23,7 +23,7 @@ gitignored(owner 로컬 전용)이므로, **도구 설치 단계에 한해** 이
 
 | 도구 | 로컬 최소(`m6-tools`) | 용도 | 설치 힌트 |
 |---|---|---|---|
-| **bun** | `1.3.14` (핀) | tools/`*.ts`·`*.mts` 실행 + 패키지/스크립트 런타임 | `curl -fsSL https://bun.sh/install \| bash`(시스템 PATH) 또는 `mise use -g bun@1.3.14` |
+| **bun** | `1.4.2` (핀) | tools/`*.ts`·`*.mts` 실행 + 패키지/스크립트 런타임 | `curl -fsSL https://bun.sh/install \| bash`(시스템 PATH) 또는 `mise use -g bun@1.4.2` |
 | **Node.js** | `>=22.18`(app-shared 계약 하한) | app-shared `*.mts`(seal-secret 벤더·env-example homelab-로컬) node strip-types 실행 — 앱 레포 `bun run secret:seal` 경로 | `mise use -g node@22` 또는 `brew install node` |
 | **helm** | `>=3.16` | 공유 차트 렌더(chart-test) | `brew install helm` (CI는 고정 핀 — major 변동 시 chart-test 파손 위험) |
 | **kustomize** | (게이트 없음) | KSOPS 풀 렌더(`make render`) | `brew install kustomize` |
@@ -39,10 +39,10 @@ gitignored(owner 로컬 전용)이므로, **도구 설치 단계에 한해** 이
 
 추가로 필요(게이트엔 없지만 실사용):
 
-- **terraform** — `make tf-validate`/IaC 루트용. **코어 핀은 루트마다 독립이다**(state writer가
-  다르므로 한 값으로 통일하는 것이 오히려 고장이다 — `docs/traps-detail.md` 「owner 로컬 apply
-  루트는 …」). 값을 여기 적지 않는다: 각 루트 `infra/<root>/versions.tf`의 `required_version`과
-  워크플로의 `terraform_version`(`iac.yaml`·`tf-reconcile.yaml`)을 보라.
+- **terraform** — `make tf-validate`/IaC 루트용. owner와 CI 실행 핀은 함께 갱신한다.
+  각 루트 `infra/<root>/versions.tf`의 `required_version`과 워크플로의 `terraform_version`
+  (`iac.yaml`·`tf-reconcile.yaml`)을 확인한다. owner 바이너리 준비 → CI 핀 PR 반영 → owner apply
+  순서다(`docs/traps-detail.md` 「owner 로컬 apply 루트는 …」).
 - **kubeseal** — 앱/리소스 시크릿 봉인(`seal-secret.mts`·provision-*). CI 핀은 `action.yml`의
   `kubeseal` input이고, 그 값은 **컨트롤러 appVersion과 lockstep**이다
   (`platform/sealed-secrets/prod/helmrelease.yaml`이 SSOT, `tests/gates/test_setup-toolchain-kubeseal.bats`가 강제).
@@ -56,7 +56,7 @@ gitignored(owner 로컬 전용)이므로, **도구 설치 단계에 한해** 이
 ## 설치 후 검증
 
 ```bash
-make m6-tools        # helm/kubeconform/bats/bun(1.3.14)/yq/jq 최소 버전 게이트
+make m6-tools        # helm/kubeconform/bats/bun(1.4.2)/yq/jq 최소 버전 게이트
 bun install      # 워크스페이스 의존성
 pre-commit install   # 시크릿 가드 훅
 export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt   # 로컬 복호화(age 키는 owner 보관)

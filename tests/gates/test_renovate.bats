@@ -106,7 +106,7 @@ V = versions.pop()
 # 등식 핀이 통째로 삭제되거나(파일 재작성 실수) 연산자가 `=`->`>=`로 완화돼도(주석이 스스로
 # "정확 핀이다"라고 선언하는 fail-closed 계약 이탈) want/got 양쪽에서 그 파일 키가 대칭적으로
 # 빠져 무증인이었다(cloudflare 삭제 실측 7/7 ok, github `>=` 완화 실측 7/7 ok). tailscale 루트만
-# 의도적으로 `>= 1.9.0`(drift 잡이 헤드룸으로 1.15.5를 씀 — versions.tf 자체 주석)이라 정규식
+# 의도적으로 `>= 1.9.0`(루트 제약은 하한, CI 실행 핀은 등식 집합에 포함)이라 정규식
 # 미매치가 정상이라 exempt. 파일별 최소 1건 존재 단언으로 신원까지 닫는다.
 EXEMPT = {"infra/tailscale/versions.tf"}
 for f in roots:
@@ -138,16 +138,17 @@ assert values == {V}, "매치가 등식 밖 값을 끌어왔다: %r (등식=%s)"
 for f in got:
     assert any(fp.search(f) for fp in filepats), "managerFilePatterns 밖의 매치 파일: %s" % f
 
-# -- (4) 헤드룸 핀(등식과 일부러 다른 값)은 끌어오지 않는다 ------------------------------------
-head = set()
+# -- (4) 모든 CI 실행 핀이 현재 owner 버전과 일치해야 한다 -------------------------------
+# 값이 다른 핀도 열거해 위 want 집합에서 조용히 빠지는 회귀를 막는다.
+all_pins = []
 for f in wfs:
     for line in open(f, encoding="utf-8"):
         mm = re.search(r'terraform_version:\s*"([0-9][0-9.]*)"', line)
-        if mm and mm.group(1) != V:
-            head.add(mm.group(1))
-assert head, "헤드룸 핀이 0건 — (4)의 양성 대조가 사라졌다(등식 밖 값이 실재해야 이 축이 의미를 갖는다)"
-assert not (head & values), "헤드룸 핀이 등식 PR에 섞였다: %r" % sorted(head & values)
+        if mm:
+            all_pins.append((f, mm.group(1)))
+assert all_pins, "CI Terraform 실행 핀 부재"
+assert all(v == V for _, v in all_pins), "owner와 다른 CI 실행 핀: %r" % all_pins
 
-print("ok: 등식 핀 %d건(%s) 전량 매치 · 헤드룸 %r 제외" % (total, V, sorted(head)))
+print("ok: 등식 핀 %d건(%s) 전량 매치 · 모든 CI 실행 핀 일치" % (total, V))
 PY
 }
