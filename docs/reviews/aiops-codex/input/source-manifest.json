@@ -7,21 +7,21 @@
   "files": [
     {
       "source": ".scratch/aiops-codex/spec.md",
-      "source_sha256": "911f2b76e49e0f79c0dc5338bc2d2f11bfcafc31958feb390e8d6cf5f4b194c0",
+      "source_sha256": "b37d3b7143ba1d5be1a92f3833bc2d7cb73dbbeeee4d52c18a3f015240efdc4f",
       "review_path": "docs/reviews/aiops-codex/input/spec.md",
-      "review_sha256": "a9290a26df97a7d7adace85d2c92cb586b5866e5b89c15644fe8e111788bec9e"
+      "review_sha256": "0238803b9bae1803b5aa24142f2a6770fd771029866c5458686cde5d71740d09"
     },
     {
       "source": ".scratch/aiops-codex/design.md",
-      "source_sha256": "5bdae50c40b9fb7a2f67b9a96087335a79a95fc0955953ee5c16e5695a562628",
+      "source_sha256": "e83d3db7b59300ab505d5eea80edb3c18de12fb6159ac3c96bc7db2cfaddd580",
       "review_path": "docs/reviews/aiops-codex/input/design.md",
-      "review_sha256": "ba53d02f8ea135d837deeb419905fdf255d32e3210c7d9a86fed10bee56a053f"
+      "review_sha256": "2dfb0e910eef62a544e7ff7c0c07a542f5486260cebca7eda61e47ad8f553292"
     },
     {
       "source": ".scratch/aiops-codex/implementation.md",
-      "source_sha256": "9dfb71877a0775f3b3c6f54ce220a4e1d9d1d56c98a6a694df9f592e29962c5c",
+      "source_sha256": "01eb2627f4049e8e622d0c4f10e0ac83b42a8bcf345799b8c3a96a3c6116f4e4",
       "review_path": "docs/reviews/aiops-codex/input/implementation.md",
-      "review_sha256": "249a464456b0764722b66a307d7677d6b20be692d348f4b186a6f4a27b0bf91a"
+      "review_sha256": "b6fb768ec2d1aec6e36068704200387a10d22992ccf6e98208a9617740942851"
     },
     {
       "source": ".scratch/aiops-codex/research.md",
@@ -31,33 +31,35 @@
     },
     {
       "source": ".scratch/aiops-codex/issues/01-incident-queue.md",
-      "source_sha256": "2f13e7186c0ffb8ec1d48909b22cab8bd8ad6345f3c2c31afb3db9a7fd921e20",
+      "source_sha256": "a21fdea189c0d6d4a0a573dcd1177cc4f4d52fa9f80dad54df500fd1b5ac9739",
       "review_path": "docs/reviews/aiops-codex/input/issues/01-incident-queue.md",
-      "review_sha256": "2f13e7186c0ffb8ec1d48909b22cab8bd8ad6345f3c2c31afb3db9a7fd921e20"
+      "review_sha256": "a21fdea189c0d6d4a0a573dcd1177cc4f4d52fa9f80dad54df500fd1b5ac9739"
     },
     {
       "source": ".scratch/aiops-codex/issues/02-notification-sources.md",
-      "source_sha256": "a921aaccc322c9ff8ffc6836f73be938d3766db93ee72b30e7129327693c3a73",
+      "source_sha256": "751f7dd0447b25f4f13f49b656043eeb35ce359f2999cca49759ee1d9ed62fb5",
       "review_path": "docs/reviews/aiops-codex/input/issues/02-notification-sources.md",
-      "review_sha256": "a921aaccc322c9ff8ffc6836f73be938d3766db93ee72b30e7129327693c3a73"
+      "review_sha256": "751f7dd0447b25f4f13f49b656043eeb35ce359f2999cca49759ee1d9ed62fb5"
     },
     {
       "source": ".scratch/aiops-codex/issues/03-evidence-codex-runner.md",
-      "source_sha256": "540b3676d5c3f4ff1c606127c9967f35ef15f7fee69d41e6f8b362f304033e74",
+      "source_sha256": "31497618e5c5074dc5157f202b61718301f9db16c99775ee53ce98504c847f13",
       "review_path": "docs/reviews/aiops-codex/input/issues/03-evidence-codex-runner.md",
-      "review_sha256": "540b3676d5c3f4ff1c606127c9967f35ef15f7fee69d41e6f8b362f304033e74"
+      "review_sha256": "31497618e5c5074dc5157f202b61718301f9db16c99775ee53ce98504c847f13"
     },
     {
       "source": ".scratch/aiops-codex/issues/04-validation-publication.md",
-      "source_sha256": "5beb1843ebfe2466ae8b77294f7d08f7b91e76196a5fc0f3f1d461cecf4dd60b",
+      "source_sha256": "a513b9c17b21ee7294796927c581036a39bcd6b48a662c0de0e47eab6fbcc9d4",
       "review_path": "docs/reviews/aiops-codex/input/issues/04-validation-publication.md",
-      "review_sha256": "5beb1843ebfe2466ae8b77294f7d08f7b91e76196a5fc0f3f1d461cecf4dd60b"
+      "review_sha256": "a513b9c17b21ee7294796927c581036a39bcd6b48a662c0de0e47eab6fbcc9d4"
     },
     {
       "source": ".scratch/aiops-codex/issues/05-nuc-pilot-acceptance.md",
-      "source_sha256": "59ff570bf8ebc29f2a18516ad4a02ef5fd323a95ca4007ac4c3791a5446b8ac2",
+      "source_sha256": "ee16e6b32900a71be3f024f9f60239c6bbae18083314e8406c6a4f59d0b11374",
       "review_path": "docs/reviews/aiops-codex/input/issues/05-nuc-pilot-acceptance.md",
-      "review_sha256": "59ff570bf8ebc29f2a18516ad4a02ef5fd323a95ca4007ac4c3791a5446b8ac2"
+      "review_sha256": "ee16e6b32900a71be3f024f9f60239c6bbae18083314e8406c6a4f59d0b11374"
     }
-  ]
+  ],
+  "round": 2,
+  "prior_snapshot_commit": "826b0d3"
 }
