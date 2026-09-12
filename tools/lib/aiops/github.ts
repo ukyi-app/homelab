@@ -19,7 +19,9 @@ export async function pollGithub(incidents: Incidents, input: unknown) {
   try {
     requireCondition(typeof settings.repository === "string" && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(settings.repository) && Number.isSafeInteger(settings.repositoryId), "invalid-github-repository");
     const token = readBounded(String(settings.readTokenFile), 1024).trim();
-    const api = new JsonApi(String(settings.apiUrl ?? "https://api.github.com/"), { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }, "https://api.github.com", config.mode === "replay");
+    const client = (milliseconds: number) => new JsonApi(String(settings.apiUrl ?? "https://api.github.com/"), { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }, "https://api.github.com", config.mode === "replay", milliseconds);
+    let api = client(30_000);
+    const latestDeadline = Date.now() + 30_000;
     const root = `repos/${settings.repository}/`;
     const repository = record(await api.request(root.slice(0, -1)));
     requireCondition(repository.id === settings.repositoryId, "github-repository-id-mismatch");
@@ -117,13 +119,28 @@ export async function pollGithub(incidents: Incidents, input: unknown) {
     };
     saveScan();
     // 최신 알림과 고정 기간의 과거 순회를 함께 처리한다. 같은 run의 새 attempt도 다시 검증한다.
-    const latest = runs(record(await api.request(`${root}actions/runs?per_page=100&exclude_pull_requests=true`)));
-    for (const listed of latest) await inspectAndRecord(listed);
+    let latest: ListedRun[] = [];
+    try {
+      latest = runs(record(await api.request(`${root}actions/runs?per_page=100&exclude_pull_requests=true`)));
+      incidents.sourceHealth("gha-latest", { status: "observed", lastAttempt: at, lastSuccess: at });
+    }
+    catch (error) {
+      scan.missing++; saveScan();
+      incidents.sourceHealth("gha-latest", { status: "unobservable", lastAttempt: at, reason: error instanceof AiopsError ? error.code : "github-latest-query-failed" });
+    }
+    for (const listed of latest) {
+      if (Date.now() >= latestDeadline) break;
+      await inspectAndRecord(listed);
+    }
+    // 최신 미완료/누락 run이 매번 예산을 소진해도 과거 cursor에 45초를 별도로 보장한다.
+    api = client(45_000);
+    const historyDeadline = Date.now() + 45_000;
     for (let pageBudget = 0; pageBudget < 4; pageBudget++) {
-      while (scan.pending.length) {
+      while (scan.pending.length && Date.now() < historyDeadline) {
         await inspectAndRecord(scan.pending[0]);
         scan.pending.shift(); saveScan();
       }
+      if (scan.pending.length || Date.now() >= historyDeadline) break;
       if (!scan.ranges.length) break;
       const range = scan.ranges[0];
       const parameters = new URLSearchParams({ per_page: "100", exclude_pull_requests: "true", created: `${range.start}..${range.end}`, page: String(range.page) });

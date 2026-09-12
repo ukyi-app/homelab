@@ -12,7 +12,7 @@ export type Validation = {
   candidate: { revision: string; manifestHash: string; treeHash: string };
   patchHash: string; patch: string; changedPaths: string[]; policyChanged: boolean;
   ledger: { baselineBudget: number | null; candidateBudget: number | null; totalLimit: number | null; metadataChanged: boolean; fixed: Verdict; proposed: Verdict };
-  checks: { name: string; status: string }[]; unverified: string[]; toolchain: { bun: string; conftest: string | null; bunHash: string; conftestHash: string | null; parserBlob: string | null; policyBlobs: string[] };
+  checks: { name: string; status: string }[]; unverified: string[]; toolchain: { bun: string; conftest: string | null; bunHash: string; conftestHash: string | null; parserBlob: string | null; policyBlobs: string[]; checkerHash: string; helperHashes: Record<string, string>; dependencyLockHash: string };
 };
 
 // 프로즈의 예산 언급은 제외한다. 활성 메타 주석은 정확히 하나이고 상한도 정확히 하나여야 한다.
@@ -41,11 +41,17 @@ export async function validateCandidate(baseline: GitSnapshot, candidate: GitSna
     candidate: { revision: candidate.revision, manifestHash: candidate.manifestHash, treeHash: candidate.git(["rev-parse", `${candidate.revision}^{tree}`]).trim() }, patchHash: digest(patch), patch, changedPaths,
     policyChanged: changedPaths.some(p => p.startsWith("policy/") || p.startsWith("scripts/check-") || p.startsWith("tools/lib/") || p.startsWith(".github/") || p.startsWith("docs/decisions/") || ["docs/memory-ledger.md", "AGENTS.md", "CONTEXT.md"].includes(p)),
     ledger: { baselineBudget, candidateBudget, totalLimit: null, metadataChanged: baselineBudget !== candidateBudget, fixed: { status: "unverifiable" }, proposed: { status: "unverifiable" } },
-    checks: [], unverified: ["live-cluster", "encrypted-secrets", "terraform", "candidate-CI", "host-cgroup", "other-repository-gates"], toolchain: { bun: Bun.version, conftest: null, bunHash: digest(readFileSync(process.execPath)), conftestHash: null, parserBlob: baselineEntries.get("tools/lib/ledger-totals.ts")?.blob ?? null, policyBlobs: baseline.entries.filter(e => /^policy\/[^/]+\.rego$/.test(e.path)).map(e => e.blob) },
+    checks: [], unverified: ["live-cluster", "encrypted-secrets", "terraform", "candidate-CI", "host-cgroup", "other-repository-gates"], toolchain: { bun: Bun.version, conftest: null, bunHash: digest(readFileSync(process.execPath)), conftestHash: null, parserBlob: baselineEntries.get("tools/lib/ledger-totals.ts")?.blob ?? null, policyBlobs: baseline.entries.filter(e => /^policy\/[^/]+\.rego$/.test(e.path)).map(e => e.blob), checkerHash: digest(readFileSync(import.meta.path)), helperHashes: Object.fromEntries(["git.ts", "input.ts", "process.ts", "../exec.ts"].map(path => [path, digest(readFileSync(join(import.meta.dir, path)))])), dependencyLockHash: digest(readFileSync(join(import.meta.dir, "../../../bun.lock"))) },
   };
   const scratch = mkdtempSync(join(tmpdir(), "aiops-validation-"));
   const deadline = Date.now() + STAGE_LIMITS.validate.milliseconds;
-  const execute = (command: string[]) => runProcess(command, { cwd: scratch, timeoutMs: Math.max(1, deadline - Date.now()), maxBytes: STAGE_LIMITS.validate.bytes, onStart: () => {} });
+  let outputBytes = 0;
+  const execute = async (command: string[]) => {
+    requireCondition(Date.now() < deadline && outputBytes < STAGE_LIMITS.validate.bytes, "validation-stage-limit");
+    const result = await runProcess(command, { cwd: scratch, timeoutMs: deadline - Date.now(), maxBytes: STAGE_LIMITS.validate.bytes - outputBytes, onStart: () => {} });
+    outputBytes += result.bytes;
+    return result;
+  };
   try {
     for (const [index, path] of changedPaths.entries()) {
       if (!candidateEntries.has(path) || !/\.(?:json|yaml|yml|sh)$/.test(path)) continue;

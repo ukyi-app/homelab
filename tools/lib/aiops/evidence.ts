@@ -8,6 +8,7 @@ export type Evidence = {
   items: EvidenceItem[]; rules: { path: string; blob: string; text: string }[];
   omitted: { id: string; reason: string }[]; redactions: number; truncated: string[]; partial: boolean;
   sourceRevision: string | null; revisionMismatch: boolean; bytes: number;
+  gitContext: { committedAt: string | null; comparison: "baseline-commit" | "source-to-baseline" | "unavailable"; changedPaths: string[]; ownershipPolicy: string; liveCurrentness: "unverified"; externalApplicationSource: "not-in-scope"; privateRunbooks: "excluded" };
 };
 export function sealEvidence(evidence: Evidence): Evidence {
   evidence.hash = "0".repeat(64); evidence.bytes = 0;
@@ -59,8 +60,18 @@ export function collectEvidence(incident: Incident, snapshot: GitSnapshot, input
     revision: snapshot.revision, sourceRevision: incident.observation.revision, revisionMismatch: snapshot.revision !== incident.observation.revision,
     manifestHash: snapshot.manifestHash, hash: "", collectedAt: source.collectedAt, from: new Date(start).toISOString(),
     items: [], rules: [], omitted: [], redactions: 0, truncated: [], partial: false, bytes: 0,
+    gitContext: { committedAt: null, comparison: "unavailable", changedPaths: [], ownershipPolicy: "docs/decisions/0007-seed-vs-live-ssot.md", liveCurrentness: "unverified", externalApplicationSource: "not-in-scope", privateRunbooks: "excluded" },
   };
   const safeText = (value: string) => { const result = redact(value); evidence.redactions += result.count; return result.text; };
+  try {
+    evidence.gitContext.committedAt = snapshot.git(["show", "-s", "--format=%cI", snapshot.revision]).trim();
+    const different = incident.observation.revision && incident.observation.revision !== snapshot.revision;
+    const paths = different
+      ? snapshot.git(["diff", "--name-only", "-z", "--no-ext-diff", "--no-textconv", incident.observation.revision!, snapshot.revision, "--"], 32 * 1024)
+      : snapshot.git(["diff-tree", "--no-commit-id", "--name-only", "-z", "-r", "--root", snapshot.revision, "--"], 32 * 1024);
+    evidence.gitContext.changedPaths = paths.split("\0").filter(Boolean).map(safeText);
+    evidence.gitContext.comparison = different ? "source-to-baseline" : "baseline-commit";
+  } catch { evidence.omitted.push({ id: "git-change-context", reason: "source-revision-or-change-unavailable" }); }
   const logLines = new Map<string, number>();
   for (const [index, raw] of source.items.entries()) {
     const item = record(raw);

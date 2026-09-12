@@ -83,17 +83,19 @@ export function cleanUnit(unit: string): boolean {
 }
 
 // 감독자는 worker 밖에서 종료 한도와 cgroup 정리를 집행한다. 작업 이름은 실행 전에 영속화한다.
-export async function runHostStage(options: { role: Role; stage: keyof typeof STAGE_LIMITS; command: string[]; writable: string; readable: string[]; deadline: number; onUnit: (unit: string) => void; probe?: boolean }): Promise<ProcessResult & { unit: string }> {
+export async function runHostStage(options: { role: Role; stage: keyof typeof STAGE_LIMITS; command: string[]; writable: string; readable: string[]; deadline: number; onUnit: (unit: string) => void; maxBytes?: number; probe?: boolean }): Promise<ProcessResult & { unit: string }> {
   requireCondition(process.getuid?.() === 0 && ROLES.includes(options.role), "host-coordinator-root-required");
   const limits = STAGE_LIMITS[options.stage], milliseconds = Math.min(limits.milliseconds, options.deadline - Date.now());
   requireCondition(milliseconds > 0, "whole-attempt-timeout");
+  const maxBytes = Math.min(limits.bytes, options.maxBytes ?? limits.bytes);
+  requireCondition(Number.isSafeInteger(maxBytes) && maxBytes > 0, "stage-output-budget-exhausted");
   const unit = `aiops-${options.role}-${crypto.randomUUID().replaceAll("-", "")}.service`;
   options.onUnit(unit);
   const properties = ["Type=exec", `User=aiops-${options.role}`, `Group=aiops-${options.role}`, `RuntimeMaxSec=${Math.ceil(milliseconds / 1000)}`, "TimeoutStopSec=10", "KillMode=control-group", "SendSIGKILL=yes", `MemoryMax=${limits.memoryMiB}M`, "MemorySwapMax=0", "CPUQuota=200%", "TasksMax=128", "OOMPolicy=kill", "LimitCORE=0", `LimitFSIZE=${limits.bytes}`, "UMask=0077", "ProtectSystem=strict", "ProtectHome=true", "NoNewPrivileges=true", "PrivateDevices=true", "TemporaryFileSystem=/tmp:rw,size=256M,mode=1777", `ReadWritePaths=${options.writable}`, ...options.readable.map(path => `ReadOnlyPaths=${path}`)];
   if (options.probe) properties.push("DynamicUser=yes");
   let result: ProcessResult;
   try {
-    result = await runProcess(["/usr/bin/systemd-run", "--quiet", "--wait", "--pipe", `--unit=${unit}`, `--setenv=PATH=${resolve(options.command[0], "..")}:/usr/bin:/bin`, ...properties.flatMap(property => ["--property", property]), "--", ...options.command], { timeoutMs: milliseconds + 10_000, maxBytes: limits.bytes, onStart: () => {} });
+    result = await runProcess(["/usr/bin/systemd-run", "--quiet", "--wait", "--pipe", `--unit=${unit}`, `--setenv=PATH=${resolve(options.command[0], "..")}:/usr/bin:/bin`, ...properties.flatMap(property => ["--property", property]), "--", ...options.command], { timeoutMs: milliseconds + 10_000, maxBytes, onStart: () => {} });
   } catch {
     result = { status: "stage-start-failed", exitCode: null, bytes: 0, stdout: "", cleanup: "unknown", confinement: "process-group", unverified: [] };
   }

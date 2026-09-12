@@ -176,3 +176,103 @@ PY
   [ "$status" -eq 1 ]
   jq -e '.source.reason == "no-verified-observations" and (.source.lastSuccess // null) == null' <<< "$output"
 }
+
+@test "latest missing observations cannot consume the history progress budget" {
+  cat > "$BATS_TEST_TMPDIR/clock-api.py" <<'PY'
+import datetime
+import http.server
+import json
+import pathlib
+import sys
+import urllib.parse
+
+
+def serve(root: pathlib.Path):
+    marker = root / "clock"
+    sha = "1" * 40
+
+    def run_data(run_id):
+        return dict(
+            id=run_id,
+            workflow_id=7,
+            run_attempt=1,
+            event="schedule",
+            head_branch="main",
+            status="completed",
+            head_sha=sha,
+            head_repository=dict(id=42),
+            created_at="2026-09-12T00:00:00Z",
+            updated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        )
+
+    class Api(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            with (root / "requests.jsonl").open("a") as output:
+                output.write(json.dumps(self.path) + "\n")
+            # 각 응답이 HTTP 단건 상한 10초보다 짧은 8초를 쓴 것으로 한다.
+            marker.write_text(str(int(marker.read_text()) + 8000))
+            parsed = urllib.parse.urlsplit(self.path)
+            path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
+            if path == "/repos/ukyi-app/homelab":
+                body = dict(id=42)
+            elif path.endswith("/actions/runs"):
+                history = "created" in query
+                body = dict(
+                    total_count=3 if history else 8,
+                    workflow_runs=[run_data(i) for i in (range(100, 103) if history else range(200, 208))],
+                )
+            elif path.endswith("/actions/workflows/7"):
+                body = dict(id=7, path=".github/workflows/audit.yaml")
+            elif path.endswith("/artifacts"):
+                # 누락 결과는 성공 cache에 들어가지 않아 다음 tick에서도 최신 run을 다시 검사한다.
+                body = dict(total_count=0, artifacts=[])
+            elif "/actions/runs/" in path:
+                body = run_data(int(path.rsplit("/", 1)[-1]))
+            else:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+    return http.server.HTTPServer(("127.0.0.1", 0), Api)
+
+
+if __name__ == "__main__":
+    server = serve(pathlib.Path(sys.argv[1]))
+    print(server.server_port, flush=True)
+    server.serve_forever()
+PY
+  cat > "$BATS_TEST_TMPDIR/clock.mjs" <<'JS'
+import { readFileSync } from "node:fs";
+
+// HTTP 대역이 기록한 경과 시간만 더한다. 실제 시간 대기는 하지 않는다.
+const realNow = Date.now;
+const clockFile = process.env.AIOPS_REVIEW_CLOCK_FILE;
+if (!clockFile) throw new Error("AIOPS_REVIEW_CLOCK_FILE required");
+Date.now = () => realNow() + Number(readFileSync(clockFile, "utf8"));
+JS
+  printf 0 > "$BATS_TEST_TMPDIR/clock"
+  printf mock-token > "$BATS_TEST_TMPDIR/token"
+  python3 "$BATS_TEST_TMPDIR/clock-api.py" "$BATS_TEST_TMPDIR" > "$BATS_TEST_TMPDIR/port" &
+  server=$!
+  for attempt in $(seq 1 60); do [ -s "$BATS_TEST_TMPDIR/port" ] && break; sleep 0.02; done
+  jq -n --arg url "http://127.0.0.1:$(cat "$BATS_TEST_TMPDIR/port")/" --arg token "$BATS_TEST_TMPDIR/token" '{mode:"replay",github:{apiUrl:$url,repository:"ukyi-app/homelab",repositoryId:42,readTokenFile:$token}}' > "$BATS_TEST_TMPDIR/config.json"
+  for cycle in 1 2; do
+    printf 0 > "$BATS_TEST_TMPDIR/clock"
+    AIOPS_REVIEW_CLOCK_FILE="$BATS_TEST_TMPDIR/clock" run bun --preload "$BATS_TEST_TMPDIR/clock.mjs" tools/aiops.ts poll-gha --state-dir "$AIOPS_STATE" --config "$BATS_TEST_TMPDIR/config.json"
+    [ "$status" -eq 1 ]
+    printf '%s\n' "$output" | grep -q 'missing-verified-artifacts'
+    run aiops list
+    [ "$status" -eq 0 ]
+    if [ "$cycle" -eq 1 ]; then
+      jq -e '.sources["gha-scan"].cursor | fromjson | [.pending[].id] == [102]' <<< "$output"
+    else
+      jq -e '.sources["gha-scan"].cursor | fromjson | .pending == [] and .ranges == []' <<< "$output"
+    fi
+  done
+  jq -s -e 'any(.[]; contains("created="))' "$BATS_TEST_TMPDIR/requests.jsonl"
+}

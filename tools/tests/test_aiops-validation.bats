@@ -65,3 +65,19 @@ commit_candidate() {
   jq -e '.incident.validation.checks | any(.name == "format:broken.json" and .status == "failed")' <<< "$output"
   [ ! -e "$REPO/SHOULD_NOT_EXIST" ]
 }
+
+@test "validation output budget is shared across tool invocations" {
+  printf 'candidate\n' > "$REPO/README.md"
+  commit_candidate
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  cat > "$BATS_TEST_TMPDIR/bin/conftest" <<'PY'
+#!/usr/bin/python3
+import sys
+sys.stderr.write('x' * (3 * 1024 * 1024))
+print('Conftest: fixture' if '--version' in sys.argv else '[{"successes":1,"failures":[]}]')
+PY
+  chmod +x "$BATS_TEST_TMPDIR/bin/conftest"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" run aiops validate --incident "$INCIDENT" --repo "$REPO" --revision "$BASE" --candidate "$CANDIDATE"
+  [ "$status" -eq 0 ]
+  jq -e '.incident.validation.ledger.fixed.status == "passed" and .incident.validation.ledger.proposed.status == "unverifiable" and .incident.validation.ledger.proposed.reason == "output-limit"' <<< "$output"
+}

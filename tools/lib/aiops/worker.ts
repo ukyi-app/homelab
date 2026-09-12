@@ -32,6 +32,7 @@ export async function worker(incidents: Incidents, input: unknown, state: string
   const deadline = Date.now() + 1200_000;
   let run: Execution | undefined, counter = 0, last: ProcessResult | undefined, publicationId: string | undefined;
   const units: string[] = [];
+  let publicationBytes = 0;
   const stage = async (role: Role, kind: string, data: Record<string, unknown>, limit: keyof typeof STAGE_LIMITS, until = deadline) => {
     const jobDirectory = join(directory, String(counter++)); mkdirSync(jobDirectory, { mode: 0o711 });
     const output = join(jobDirectory, "output"); mkdirSync(output, { mode: 0o700 });
@@ -43,10 +44,11 @@ export async function worker(incidents: Incidents, input: unknown, state: string
     writeFileSync(path, JSON.stringify({ role, kind, ...data, rawOutput: join(output, "raw.jsonl") }), { mode: 0o400 });
     chownSync(path, Number(uid.stdout.trim()), Number(gid.stdout.trim()));
     const writable = [output, ...(role === "engine" ? [String(config.authentication)] : []), ...(kind === "poll" ? [state] : [])];
-    last = await runHostStage({ role, stage: limit, command: [String(installation.bun), `${installation.code}/tools/aiops-stage.ts`, path], writable: writable.join(" "), readable: [path, String(installation.code), String(config.repository)], deadline: Math.min(deadline, until), onUnit: unit => {
+    last = await runHostStage({ role, stage: limit, maxBytes: limit === "publish" ? 1024 * 1024 - publicationBytes : undefined, command: [String(installation.bun), `${installation.code}/tools/aiops-stage.ts`, path], writable: writable.join(" "), readable: [path, String(installation.code), String(config.repository)], deadline: Math.min(deadline, until), onUnit: unit => {
       units.push(unit); if (run) incidents.bindUnit(run, unit);
       if (publicationId) { const publication = incidents.get(publicationId).publication; (publication.units ??= []).push(unit); incidents.savePublication(publicationId, publication); }
     } });
+    if (limit === "publish") publicationBytes += last.bytes;
     requireCondition(last.cleanup === "confirmed", "cleanup-unknown-new-executions-blocked");
     let result: Record<string, unknown>;
     try { result = record(JSON.parse(last.stdout)); } catch { throw new AiopsError(`stage-${last.status}`); }
@@ -70,7 +72,16 @@ export async function worker(incidents: Incidents, input: unknown, state: string
     return result;
   };
   try {
-    if (!commissioning) await stage("collector", "poll", { state }, "collect");
+    if (!commissioning) {
+      try {
+        await stage("collector", "poll", { state }, "collect");
+        incidents.sourceHealth("poll", { status: "observed", lastAttempt: new Date().toISOString(), lastSuccess: new Date().toISOString() });
+      }
+      catch (error) {
+        requireCondition(last?.cleanup === "confirmed", "poll-cleanup-unknown");
+        incidents.sourceHealth("poll", { status: "unobservable", lastAttempt: new Date().toISOString(), reason: error instanceof AiopsError ? error.code : "poll-stage-failed" });
+      }
+    }
     const deferred = incidents.list().find(item => (!commissioning || item.id === commissioning.incident) && item.reportAvailable && item.publication.status === "deferred" && (!item.publication.retryAt || Date.parse(item.publication.retryAt) <= Date.now()));
     if (deferred) return { incident: await publish(deferred.id), modelAdmission: false };
     const id = commissioning?.incident ?? incidents.next(new Date().toISOString());

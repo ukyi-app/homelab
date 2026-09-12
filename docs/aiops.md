@@ -26,12 +26,15 @@ bun tools/aiops.ts replay --state-dir .scratch/aiops-demo --incident <사건-ID>
 대상 워크로드가 매칭되지 않거나 메트릭이 비어 있으면 누락을 기록한다. 모델 증거는 256 KiB,
 컨테이너별 로그는 200줄이다. Secret·Pod env는 선별하지 않고 로그의 알려진 자격 표기를 제거한다.
 지원 로그는 text·JSONL·kubectl timestamp 접두다. 깨진 JSON·바이너리는 생략하며 JSON의 따옴표로 감싼 자격값도 제거한다.
+JSONL은 메시지·수준·오류·대상 같은 허용 필드만 남긴다. Git 근거에는 commit 시각과 source→기준 변경 경로를 기록한다.
+자료의 live 현행성은 미검증이며, private 런북 제외·외부 앱 범위·시드/수렴 소유권 문서도 함께 명시한다.
 `diagnose --mode replay`는 외부 엔진 대역을 호출하며 빈 인증 디렉토리를 쓴다. 실제 구독 실행은 `worker`의 전용 역할 경로만 지원한다.
 
 `validate`는 기준 Git의 원장 파서·정책과 후보의 행을 결합한다. 상한은 **기준 revision의 활성 `ledger:meta`**에서만 읽는다.
 기준 상한이 없거나 기형이면 검증 불가다. 후보 상한 제안은 별도 판정이다. JSON/YAML/bash 문법도 검사하지만
 Helm 템플릿·암호화 자료·live/Terraform·나머지 저장소 게이트는 미검증으로 남긴다.
 후보 CI 결과로 고정 검증 결과를 대체하지 않는다. 변경된 정책·ADR도 보고서에 표시한다.
+검사기·실행 helper·의존성 lock·기준 파서/정책·도구 바이너리 hash와 실제 후보 manifest를 보고서에서 대조할 수 있다.
 
 ## 2. NUC에 설치한다
 
@@ -94,6 +97,8 @@ GHA는 Telegram 조건과 독립된 artifact를 기록한다. workflow/run/attem
 누락·skip·부분 실행은 정상으로 접지 않는다. DNS는 대상별 정상/경고/미관측을 구별한다.
 최신 100건과 최근 30일의 고정 기간 페이지를 함께 조회하고 순회 cursor를 저장한다. 큰 검색 구간은 분할하며
 관측 0건·과거 순회 미완료·artifact 누락은 수집 성공으로 기록하지 않는다. 오래된 run의 새 attempt도 다시 대조한다.
+최신 조회 30초와 과거 순회 45초를 분리해 새 run이 몰려도 과거 cursor가 진행한다. 수집 작업 실패는 별도로 표시하며
+자식 정리가 확인되면 이미 저장된 사건의 진단은 진행한다. 검증·게시의 출력 상한도 내부 호출 전체에 합산한다.
 `github.observationSince`에는 실제 관측 artifact 배포 시각을 한 번 기록한다. 전환 이전에 마지막으로 갱신된 run만
 제외하며, 그 뒤 재실행된 이전 run은 수집한다. 이력의 복구 불가 구간은 source 상태에 남긴다.
 역할별 설정을 바꾼 뒤에는 비활성 상태에서 설치된 `aiops-install-config.ts write`로 역할 설정 사본도 다시 생성한다.
