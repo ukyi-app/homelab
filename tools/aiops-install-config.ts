@@ -1,5 +1,5 @@
 // 설치 셸의 구조 데이터 처리는 타입 검사되는 이 진입점에서만 한다.
-import { chownSync, chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { accessSync, constants, chownSync, chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isolatedSpawnSync } from "./lib/exec.ts";
 import { AiopsError, readBounded, record, requireCondition } from "./lib/aiops/input.ts";
@@ -10,6 +10,7 @@ try {
   requireCondition(["check", "write"].includes(action) && path, "invalid-install-config-arguments");
   const config = record(JSON.parse(readBounded(path)));
   requireCondition(config.enabled === false && config.mode === "codex" && config.authentication === "/var/lib/homelab-aiops/auth" && config.repository === "/var/lib/homelab-aiops/repository", "invalid-disabled-install-config");
+  accessSync(String(record(config.collection).kubectl), constants.X_OK);
   if (action === "write") {
     requireCondition(process.getuid?.() === 0 && /^[a-f0-9]{40}$/.test(revision) && release === `/opt/homelab-aiops/${revision}`, "invalid-install-release");
     const binary = (name: string) => join(release, "bin", name);

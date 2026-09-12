@@ -5,6 +5,7 @@ import type { Incident } from "./lib/aiops/incidents.ts";
 import { AiopsError, readBounded, record, requireCondition } from "./lib/aiops/input.ts";
 import { GitSnapshot, applyCandidate } from "./lib/aiops/git.ts";
 import { collectLive } from "./lib/aiops/collection.ts";
+import { collectEvidence } from "./lib/aiops/evidence.ts";
 import { diagnose } from "./lib/aiops/diagnosis.ts";
 import { validateCandidate } from "./lib/aiops/validation.ts";
 import { JsonApi } from "./lib/aiops/http.ts";
@@ -46,6 +47,7 @@ try {
     console.log(JSON.stringify({ result }));
   } else if (job.kind === "poll") {
     requireCondition(role === "collector", "collector-role-required");
+    process.umask(0o007);
     using incidents = new Incidents(String(job.state));
     const config = JSON.parse(readBounded("/etc/homelab-aiops/collector.json"));
     await pollGithub(incidents, config); await pollHealthchecks(incidents, config);
@@ -55,7 +57,7 @@ try {
     const incident = job.incident as Incident;
     if (job.kind === "collect") {
       requireCondition(role === "collector", "collector-role-required");
-      console.log(JSON.stringify({ evidence: await collectLive(incident, snapshot, JSON.parse(readBounded("/etc/homelab-aiops/collector.json"))) }));
+      console.log(JSON.stringify({ evidence: job.fixture ? collectEvidence(incident, snapshot, job.fixture) : await collectLive(incident, snapshot, JSON.parse(readBounded("/etc/homelab-aiops/collector.json"))) }));
     } else if (job.kind === "diagnose") {
       requireCondition(role === "engine" && incident.evidence, "engine-evidence-required");
       const options = record(job.options);

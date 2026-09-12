@@ -18,10 +18,14 @@ bun tools/aiops.ts replay --state-dir .scratch/aiops-demo --incident <사건-ID>
 관측 실패는 기존 firing을 해소하지 않는다. 사건·실행·게시 상태는 독립적이며, 모의 보고서에는 `simulated:true`가 붙는다.
 같은 상태 디렉토리에서 모의 실행과 구독 실행을 섞을 수 없다. 날짜별 입장 원장은 KST, 동시 1건·하루 20건이다.
 중단·재시도도 입장 횟수에 포함하고, 정리 여부가 불명이면 새 실행을 막는다.
+확인된 엔진 시작 실패는 같은 10분 상한 안에서 한 번만 재입장한다. 인증 만료·구독 용량 제한은
+`waiting-authentication`·`waiting-capacity`로 영속 대기한다. 로그인 또는 구독 한도 회복을 확인한 뒤
+`resume --incident <ID>`로 다시 대기열에 넣는다. 재개 명령은 예산을 환급하지 않는다.
 
 `collect`는 선별 자료 파일, `collect-live`는 고정 kubectl 조회와 내부 메트릭 API를 사용한다.
 대상 워크로드가 매칭되지 않거나 메트릭이 비어 있으면 누락을 기록한다. 모델 증거는 256 KiB,
 컨테이너별 로그는 200줄이다. Secret·Pod env는 선별하지 않고 로그의 알려진 자격 표기를 제거한다.
+지원 로그는 text·JSONL·kubectl timestamp 접두다. 깨진 JSON·바이너리는 생략하며 JSON의 따옴표로 감싼 자격값도 제거한다.
 `diagnose --mode replay`는 외부 엔진 대역을 호출하며 빈 인증 디렉토리를 쓴다. 실제 구독 실행은 `worker`의 전용 역할 경로만 지원한다.
 
 `validate`는 기준 Git의 원장 파서·정책과 후보의 행을 결합한다. 상한은 **기준 revision의 활성 `ledger:meta`**에서만 읽는다.
@@ -35,6 +39,8 @@ Helm 템플릿·암호화 자료·live/Terraform·나머지 저장소 게이트�
 커밋한 실행 코드를 `/opt/homelab-aiops/<revision>`에 고정하고 바이너리 해시를 설정에 기록한다.
 설정의 `revision`은 조사·검증할 homelab 기준 commit이다. 저장소에 해당 commit이 있어야 한다.
 기준 main이 전진하면 저장소 사본과 설정을 갱신하고 수용 증거를 다시 확인한다. 오래된 기준으로 새 PR은 만들지 않는다.
+기본 kubectl 경로는 k3s의 `/usr/local/bin/kubectl`이며 설치 전 실행 가능 여부를 검사한다.
+SQLite DB/WAL은 `0660`, 운영 state 디렉토리는 root:`aiops-state`의 `2770`으로 유지한다.
 
 | 역할 | 접근 자료 | 허용 작업 |
 |---|---|---|
@@ -86,6 +92,11 @@ Alertmanager의 observability Secret은 raw `token` 키를 사용한다. 서로 
 수신기는 전 인터페이스 주소·공개 주소를 거부하며 bearer 인증 후 영속 저장을 완료해야 응답한다.
 GHA는 Telegram 조건과 독립된 artifact를 기록한다. workflow/run/attempt/repository/revision을 검증하며
 누락·skip·부분 실행은 정상으로 접지 않는다. DNS는 대상별 정상/경고/미관측을 구별한다.
+최신 100건과 최근 30일의 고정 기간 페이지를 함께 조회하고 순회 cursor를 저장한다. 큰 검색 구간은 분할하며
+관측 0건·과거 순회 미완료·artifact 누락은 수집 성공으로 기록하지 않는다. 오래된 run의 새 attempt도 다시 대조한다.
+`github.observationSince`에는 실제 관측 artifact 배포 시각을 한 번 기록한다. 전환 이전에 마지막으로 갱신된 run만
+제외하며, 그 뒤 재실행된 이전 run은 수집한다. 이력의 복구 불가 구간은 source 상태에 남긴다.
+역할별 설정을 바꾼 뒤에는 비활성 상태에서 설치된 `aiops-install-config.ts write`로 역할 설정 사본도 다시 생성한다.
 
 ## 4. 수용 증거를 기록한다
 
@@ -104,6 +115,20 @@ bun tools/aiops.ts readiness --state-dir .scratch/aiops-install/state --config <
 각 키에 `passed,revision,engineHash,checkedAt` 증거를 기록한다. 미수행 항목을 true로 채우지 않는다.
 이 증거는 최대 30일간 유효하며 기준 revision 또는 engine 해시가 바뀌면 다시 수용한다.
 `readiness` 결과의 pending 항목이 남아 있으면 worker는 모델을 호출하지 않는다.
+
+실제 진단·게시의 수용 증거는 `commission`으로 만든다. `enabled:false`에서 사건을 명시하는 1회 실행이다.
+바이너리·구독 인증 파일·저장소·격리·역할·cgroup·fork Actions 비활성화는 먼저 통과해야 한다.
+생산자 도달·실제 구독 실행·게시·12개 진단 평가·관찰 기준은 이 시험 경로로 확인하고 기록한다.
+시험도 같은 역할·자원 제한·동시 1건·하루 20회 원장을 사용하며 실제 Telegram/Draft PR을 만들 수 있다.
+
+```bash
+sudo /opt/homelab-aiops/current/bin/bun /opt/homelab-aiops/current/tools/aiops.ts commission \
+  --state-dir /var/lib/homelab-aiops/state --config /etc/homelab-aiops/config.json \
+  --incident <사건-ID> --input <선별-사례-증거.json>
+```
+
+`--input`을 생략하면 실제 관련 증거를 수집한다. 제공한 사례 자료도 collector의 필드 선택과 마스킹을 거친다.
+사전 수용을 위해 전체 readiness 증거를 미리 true로 채우거나 worker를 활성화할 필요가 없다.
 
 진단 자료는 `tools/fixtures/aiops/cases.json`의 12개 사례다. 정답 파일은 Git 사본 밖에 보관하며 입력과 hash를 분리한다.
 이 작업의 로컬 정답은 `.scratch/aiops-codex/evaluation/answers.json`이다. 사례별 보고서를 `<id>.json`으로 저장한 뒤:

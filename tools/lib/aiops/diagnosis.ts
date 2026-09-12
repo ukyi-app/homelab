@@ -50,6 +50,7 @@ export async function diagnose(evidence: Evidence, snapshot: GitSnapshot, option
   }
   requireCondition(snapshot.revision === evidence.revision && snapshot.manifestHash === evidence.manifestHash, "evidence-revision-mismatch");
   requireCondition(evidence.hash === digest(JSON.stringify({ ...evidence, hash: "" })), "evidence-hash-mismatch");
+  if (options.mode === "codex" && options.rawOutput) writeFileSync(options.rawOutput, "", { mode: 0o600 });
   if (!evidence.items.length) return { status: "needs-evidence", report: { simulated: options.mode === "replay", patch: null, missing: ["선별된 관측 증거가 없습니다."], usage: null, diagnosis: { baseRevision: snapshot.revision, outcome: "needs-evidence", summary: "추가 관측 증거가 필요합니다.", causes: [], missingEvidence: ["선별된 상태·메트릭·이벤트·로그"], patch: null } } };
   const scratch = mkdtempSync(join(tmpdir(), "aiops-diagnosis-"));
   const authentication = options.mode === "codex" ? options.authentication! : mkdtempSync(join(tmpdir(), "aiops-replay-auth-"));
@@ -64,7 +65,7 @@ export async function diagnose(evidence: Evidence, snapshot: GitSnapshot, option
     { cwd: scratch, engineEnvironment: { CODEX_HOME: authentication }, timeoutMs: STAGE_LIMITS.codex.milliseconds, maxBytes: STAGE_LIMITS.codex.bytes, onStart: options.onStart });
     report.process = { ...result, stdout: "" };
     if (options.mode === "codex" && options.rawOutput) writeFileSync(options.rawOutput, result.stdout, { mode: 0o600 });
-    if (result.status !== "completed") return { status: result.status, report };
+    if (result.status !== "completed") return { status: result.failureHint === "authentication" ? "waiting-authentication" : result.failureHint === "capacity" ? "waiting-capacity" : result.status, report };
     const events = result.stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
     const completed = events.filter(e => e.type === "turn.completed");
     requireCondition(completed.length === 1 && !events.some(e => ["turn.failed", "error"].includes(String(e.type))), "engine-terminal-invalid");

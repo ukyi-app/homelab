@@ -14,7 +14,7 @@ import type { ProcessResult, STAGE_LIMITS } from "./process.ts";
 import { publishIncident } from "./publication.ts";
 
 // 이 프로세스만 사건 저장소와 단계 실행 권한을 함께 갖는다. 모델은 역할 작업 안에서만 실행한다.
-export async function worker(incidents: Incidents, input: unknown, state: string) {
+export async function worker(incidents: Incidents, input: unknown, state: string, commissioning?: { incident: string; evidence?: unknown }) {
   const config = record(input), installation = record(config.installation);
   requireCondition(process.getuid?.() === 0, "host-coordinator-root-required");
   if (incidents.budget().active) await incidents.recover();
@@ -25,7 +25,7 @@ export async function worker(incidents: Incidents, input: unknown, state: string
   }
   incidents.prune(new Date().toISOString());
   const prepared = readiness(config);
-  requireCondition(prepared.ready && config.enabled === true, "live-readiness-required");
+  requireCondition(commissioning ? prepared.commissioning.ready : prepared.ready && config.enabled === true, "live-readiness-required");
   const work = "/var/lib/homelab-aiops/work";
   mkdirSync(work, { recursive: true, mode: 0o711 });
   const directory = mkdtempSync(join(work, "attempt-")); chmodSync(directory, 0o711);
@@ -70,15 +70,22 @@ export async function worker(incidents: Incidents, input: unknown, state: string
     return result;
   };
   try {
-    await stage("collector", "poll", { state }, "collect");
-    const deferred = incidents.list().find(item => item.reportAvailable && item.publication.status === "deferred" && (!item.publication.retryAt || Date.parse(item.publication.retryAt) <= Date.now()));
+    if (!commissioning) await stage("collector", "poll", { state }, "collect");
+    const deferred = incidents.list().find(item => (!commissioning || item.id === commissioning.incident) && item.reportAvailable && item.publication.status === "deferred" && (!item.publication.retryAt || Date.parse(item.publication.retryAt) <= Date.now()));
     if (deferred) return { incident: await publish(deferred.id), modelAdmission: false };
-    const id = incidents.next(new Date().toISOString());
+    const id = commissioning?.incident ?? incidents.next(new Date().toISOString());
     run = incidents.reserve(id, "codex", new Date().toISOString());
     const base = { repository: config.repository, revision: config.revision };
-    const collection = await stage("collector", "collect", { ...base, incident: incidents.get(id) }, "collect");
+    const collection = await stage("collector", "collect", { ...base, incident: incidents.get(id), ...(commissioning?.evidence ? { fixture: commissioning.evidence } : {}) }, "collect");
     incidents.attachEvidence(id, collection.evidence as Evidence);
-    const diagnosis = await stage("engine", "diagnose", { ...base, incident: incidents.get(id), options: { engine: installation.engine, engineHash: record(installation.hashes).engine, authentication: config.authentication, model: config.model } }, "codex");
+    const engineDeadline = Math.min(deadline, Date.now() + 600_000);
+    const diagnoseJob = () => stage("engine", "diagnose", { ...base, incident: incidents.get(id), options: { engine: installation.engine, engineHash: record(installation.hashes).engine, authentication: config.authentication, model: config.model } }, "codex", engineDeadline);
+    let diagnosis = await diagnoseJob();
+    // 자식 시작이 실패했고 정리가 확인된 경우만 한 번 재입장한다. 두 시도는 같은 10분 상한이다.
+    if (diagnosis.status === "start-failed" && Date.now() < engineDeadline) {
+      try { incidents.retryAdmission(run); diagnosis = await diagnoseJob(); }
+      catch (error) { if (!(error instanceof AiopsError) || error.code !== "daily-limit") throw error; }
+    }
     incidents.recordReport(id, diagnosis.report as Report);
     if (incidents.get(id).report?.patch) {
       const result = await stage("validator", "validate", { ...base, incident: incidents.get(id) }, "validate");
@@ -87,7 +94,7 @@ export async function worker(incidents: Incidents, input: unknown, state: string
     await publish(id);
     const report = incidents.get(id).report!;
     report.process = { ...(report.process ?? last!), stdout: "", confinement: "systemd-cgroup", unverified: [], cleanup: units.map(cleanUnit).every(Boolean) ? "confirmed" : "unknown" };
-    return { incident: incidents.finishReport(run, String(diagnosis.status), report) };
+    return { incident: incidents.finishReport(run, String(diagnosis.status), report), commissioning: !!commissioning };
   } catch (error) {
     if (!run && error instanceof AiopsError && error.code === "no-queued-incidents") return { status: "idle" };
     if (!run && error instanceof AiopsError && error.code === "daily-limit") {
@@ -99,7 +106,8 @@ export async function worker(incidents: Incidents, input: unknown, state: string
       return { status: "deferred", reason: "daily-limit", queued: count };
     }
     if (!run) throw error;
-    const reason = error instanceof AiopsError ? error.code : "host-worker-failed";
+    const code = error instanceof AiopsError ? error.code : "host-worker-failed";
+    const reason = code === "subscription-auth-required-no-api-fallback" ? "waiting-authentication" : code;
     const clean = units.map(cleanUnit).every(Boolean);
     const report = incidents.get(run.incident).report ?? { simulated: false, patch: null, missing: [] };
     report.missing.push(reason);

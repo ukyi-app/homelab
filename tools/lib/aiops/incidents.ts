@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync, readdirSync, lstatSync, unlinkSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, lstatSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { AiopsError, requireCondition, observationInput, record } from "./input.ts";
@@ -17,10 +17,12 @@ export type Observation = {
   revision: string | null; severity: "critical" | "warning" | "info";
   reason: string; status: "firing" | "resolved" | "unobservable";
 };
+const executionStates = ["queued", "running", "deferred", "cancelled", "observed-only", "self-observation", "cleanup-unknown", "interrupted", "needs-evidence", "diagnosed", "external-app", "no-change", "invalid-result", "waiting-authentication", "waiting-capacity", "start-failed", "failed", "timeout", "output-limit", "oom", "initialization-failed", "completed"] as const;
+type ExecutionState = typeof executionStates[number];
 export type Incident = {
   id: string; observation: Observation; status: Observation["status"];
   observationCount: number; firstObservedAt: string;
-  execution: { status: string; id?: string }; publication: Publication;
+  execution: { status: ExecutionState; id?: string; reason?: string }; publication: Publication;
   report: Report | null;
   evidence?: Evidence;
   validation?: Validation;
@@ -37,7 +39,18 @@ export class Incidents implements Disposable {
   constructor(directory: string) {
     this.directory = directory;
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    this.db = new Database(join(directory, "incidents.sqlite"), { create: true, strict: true });
+    const database = join(directory, "incidents.sqlite");
+    const sharedMode = (path: string) => {
+      try {
+        const info = lstatSync(path);
+        requireCondition(info.isFile() && !info.isSymbolicLink(), "invalid-state-file");
+        if ((info.mode & 0o777) !== 0o660) chmodSync(path, 0o660);
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    };
+    // SQLite의 기본 생성 모드는 0644다. umask만으로 그룹 쓰기를 추가할 수 없어 WAL 생성 전에 고정한다.
+    for (const suffix of ["", "-wal", "-shm"]) sharedMode(database + suffix);
+    this.db = new Database(database, { create: true, strict: true });
+    sharedMode(database);
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA max_page_count=65536; PRAGMA journal_size_limit=8388608; PRAGMA wal_autocheckpoint=128;");
     this.db.exec("CREATE TABLE IF NOT EXISTS incidents (id TEXT PRIMARY KEY, body TEXT NOT NULL)");
     this.db.exec("CREATE TABLE IF NOT EXISTS observations (id TEXT PRIMARY KEY, incident TEXT NOT NULL, body TEXT NOT NULL)");
@@ -185,7 +198,8 @@ export class Incidents implements Disposable {
       const incident = this.get(run.incident);
       requireCondition(incident.execution.id === run.id, "execution-identity-changed");
       run.status = status;
-      incident.execution.status = status;
+      incident.execution.status = (executionStates as readonly string[]).includes(status) ? status as ExecutionState : "failed";
+      if (incident.execution.status !== status) incident.execution.reason = status;
       this.save(incident);
       this.db.query("UPDATE executions SET active=0, body=? WHERE id=?").run(JSON.stringify(run), run.id);
     }).immediate();
@@ -197,6 +211,27 @@ export class Incidents implements Disposable {
   bindUnit(run: Execution, unit: string) {
     (run.units ??= []).push(unit); run.status = "running";
     this.db.query("UPDATE executions SET body=? WHERE id=? AND active=1").run(JSON.stringify(run), run.id);
+  }
+  retryAdmission(run: Execution, at = new Date().toISOString()) {
+    this.db.transaction(() => {
+      const active = this.budget().active;
+      requireCondition(active?.id === run.id, "retry-active-execution-required");
+      const key = `retry:${run.id}`;
+      requireCondition(!this.db.query("SELECT id FROM metadata WHERE id=?").get(key), "retry-already-consumed");
+      const day = new Date(Date.parse(at) + 9 * 3600_000).toISOString().slice(0, 10);
+      requireCondition((this.budget().days[day] ?? 0) < 20, "daily-limit");
+      const retry = { ...run, id: crypto.randomUUID(), day, startedAt: at, status: "retry-reserved" };
+      this.db.query("INSERT INTO executions VALUES (?, ?, 0, ?)").run(retry.id, day, JSON.stringify(retry));
+      this.db.query("INSERT INTO metadata VALUES (?, ?)").run(key, retry.id);
+    }).immediate();
+  }
+  resume(id: string) {
+    return this.db.transaction(() => {
+      const incident = this.get(id);
+      requireCondition(incident.status === "firing" && ["waiting-authentication", "waiting-capacity"].includes(incident.execution.status), "incident-not-waiting-for-recovery");
+      incident.execution = { status: "queued" }; this.save(incident);
+      return incident;
+    }).immediate();
   }
   finishReport(run: Execution, status: string, report: Report): Incident {
     this.db.transaction(() => {
@@ -248,6 +283,8 @@ export class Incidents implements Disposable {
       const deleted = this.db.query("DELETE FROM incidents WHERE COALESCE(json_extract(body, '$.updatedAt'), json_extract(body, '$.observation.observedAt')) < ? AND id != ?").run(cutoff, active?.incident ?? "");
       this.db.exec("DELETE FROM observations WHERE incident NOT IN (SELECT id FROM incidents)");
       this.db.query("DELETE FROM executions WHERE active=0 AND day < ?").run(cutoff.slice(0, 10));
+      this.db.exec("DELETE FROM metadata WHERE id LIKE 'retry:%' AND value NOT IN (SELECT id FROM executions)");
+      this.db.query("DELETE FROM sources WHERE id LIKE 'gha-run:%' AND json_extract(body, '$.lastAttempt') < ?").run(cutoff);
       return { incidentsRemoved: deleted.changes, evidenceRemoved, evidenceDays: 7, incidentDays: 30, rawRemoved: 0 };
     }).immediate();
     const raw = join(this.directory, "raw");
@@ -333,10 +370,16 @@ export class Incidents implements Disposable {
   async replay(id: string, at = new Date().toISOString(), engine?: string, timeoutMs: number = STAGE_LIMITS.codex.milliseconds): Promise<Incident> {
     requireCondition(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= STAGE_LIMITS.codex.milliseconds, "invalid-timeout");
     const run = this.reserve(id, "replay", at);
-    const result = engine ? await runProcess([engine], { timeoutMs, maxBytes: STAGE_LIMITS.codex.bytes, onStart: identity => {
+    const deadline = Date.now() + timeoutMs;
+    const execute = () => engine ? runProcess([engine], { timeoutMs: Math.max(1, deadline - Date.now()), maxBytes: STAGE_LIMITS.codex.bytes, onStart: identity => {
       run.process = identity; run.status = "running";
       this.db.query("UPDATE executions SET body=? WHERE id=?").run(JSON.stringify(run), run.id);
     } }) : undefined;
+    let result = await execute();
+    if (result?.status === "start-failed" && result.cleanup === "confirmed" && Date.now() < deadline) {
+      try { this.retryAdmission(run, at); result = await execute(); }
+      catch (error) { if (!(error instanceof AiopsError) || error.code !== "daily-limit") throw error; }
+    }
     const incident = this.get(id);
     incident.report = { simulated: true, patch: null, missing: ["운영 증거와 실제 모델 실행"], ...(result ? { process: { ...result, stdout: "" } } : {}) };
     this.save(incident);

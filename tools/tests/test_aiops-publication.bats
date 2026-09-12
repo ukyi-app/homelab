@@ -7,6 +7,7 @@ setup() {
   REPO="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$REPO"
   printf 'fixture\n' > "$REPO/README.md"
+  printf 'fixture\n' > "$REPO/CONTEXT.md"
   git -C "$REPO" init -q
   git -C "$REPO" add .
   git -C "$REPO" -c user.name=Test -c user.email=test@example.invalid commit -qm fixture
@@ -65,7 +66,8 @@ PYTHON
 }
 
 @test "lost Draft PR response reconciles one fork PR with separate credentials" {
-  sed -i "s/patch=None/patch='diff --git a\/README.md b\/README.md\\\\n--- a\/README.md\\\\n+++ b\/README.md\\\\n@@ -1 +1 @@\\\\n-fixture\\\\n+fixed\\\\n'/" "$ENGINE"
+  sed -i "s/patch=None/patch='diff --git a\/CONTEXT.md b\/CONTEXT.md\\\\n--- a\/CONTEXT.md\\\\n+++ b\/CONTEXT.md\\\\n@@ -1 +1 @@\\\\n-fixture\\\\n+fixed\\\\n'/" "$ENGINE"
+  sed -i "s/nextChecks=\['노드 가용 메모리 확인'\]/nextChecks=['확인1','확인2','확인3','ADR 충돌 검토']/" "$ENGINE"
   aiops diagnose --incident "$INCIDENT" --repo "$REPO" --revision "$REVISION" --engine "$ENGINE" --mode replay >/dev/null
   aiops validate --incident "$INCIDENT" --repo "$REPO" --revision "$REVISION" > "$BATS_TEST_TMPDIR/validated.json"
   cat > "$BATS_TEST_TMPDIR/publisher-api.py" <<'PY'
@@ -117,5 +119,6 @@ PY
   [ "$status" -eq 0 ]
   jq -e '.incident.publication.pr.status == "draft" and .incident.publication.pr.number == 1' <<< "$output"
   jq -s -e '[.[] | select(.path | endswith("/pulls"))] | length == 1 and .[0].authorization == "Bearer pr-only" and .[0].body.draft == true and .[0].body.maintainer_can_modify == false' "$BATS_TEST_TMPDIR/requests.jsonl"
+  jq -s -e '[.[] | select(.path | endswith("/pulls"))][0].body.body | contains("정책·ADR 검토 필요") and contains("CONTEXT.md") and contains("ADR 충돌 검토")' "$BATS_TEST_TMPDIR/requests.jsonl"
   jq -s -e 'all(.[] | select(.path | contains("/git/")); .authorization == "Bearer fork-only")' "$BATS_TEST_TMPDIR/requests.jsonl"
 }

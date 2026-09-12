@@ -6,9 +6,9 @@ import { redact } from "./evidence.ts";
 import { applyCandidate, digest, GitSnapshot } from "./git.ts";
 
 export type Publication = {
-  status: string; owner?: ProcessIdentity;
-  telegram?: { status: string; messageId?: number; reason?: string; contentHash?: string };
-  pr?: { status: string; url?: string; number?: number; reason?: string };
+  status: "not-requested" | "publishing" | "published" | "deferred"; owner?: ProcessIdentity;
+  telegram?: { status: "sent" | "failed"; messageId?: number; reason?: string; contentHash?: string };
+  pr?: { status: "creating" | "uncertain" | "deferred" | "draft" | "reviewed"; url?: string; number?: number; reason?: string };
   branch?: string; marker?: string; patchHash?: string;
   commit?: string;
   units?: string[];
@@ -19,6 +19,7 @@ function summary(incident: Incident): string {
   const diagnosis = incident.report?.diagnosis;
   const lines = [
     `장애 조사 ${incident.id.slice(0, 12)} · ${incident.status}`,
+    ...(incident.validation?.policyChanged ? ["정책·ADR 검토 필요: 변경은 미채택 상태입니다."] : []),
     diagnosis?.summary ?? "진단 자료 또는 실행이 불완전합니다.",
     ...(diagnosis?.causes.slice(0, 3).map(c => `${c.hypothesis} (근거: ${c.evidenceIds.join(", ")})`) ?? []),
     ...(diagnosis?.causes.flatMap(c => c.nextChecks).slice(0, 3) ?? incident.report?.missing ?? []),
@@ -102,7 +103,9 @@ async function draft(incidents: Incidents, incident: Incident, publication: Publ
   requireCondition(record(record(await prApi.request(`${upstream}/git/ref/heads/main`)).object).sha === validation.baseline.revision, "publication-base-stale");
   publication.pr = { status: "creating" };
   incidents.savePublication(incident.id, publication);
-  const body = `${publication.marker}\n\n${summary(incident)}\n\n기준: ${validation.baseline.revision}\n고정 원장 검사: ${validation.ledger.fixed.status}\n후보 예산 제안 평가: ${validation.ledger.proposed.status}\n미검증: ${validation.unverified.join(", ")}\n\n자동 적용·자동 머지는 하지 않습니다.`;
+  const review = validation.policyChanged ? `정책·ADR 검토 필요: 변경은 미채택 상태입니다.\n변경 경로: ${validation.changedPaths.join(", ").slice(0, 8000)}\n\n` : "";
+  const nextChecks = incident.report?.diagnosis?.causes.flatMap(cause => cause.nextChecks).join("\n") ?? "";
+  const body = `${publication.marker}\n\n${review}${summary(incident)}\n\n다음 확인·충돌 검토:\n${nextChecks.slice(0, 8000)}${nextChecks.length > 8000 ? "\n[추가 절차는 로컬 상세 보고서 참조]" : ""}\n\n기준: ${validation.baseline.revision}\n고정 원장 검사: ${validation.ledger.fixed.status}\n후보 예산 제안 평가: ${validation.ledger.proposed.status}\n형식 검사: ${validation.checks.map(check => `${check.name}=${check.status}`).join(", ").slice(0, 8000)}\n미검증: ${validation.unverified.join(", ")}\n\n자동 적용·자동 머지는 하지 않습니다.`;
   const pr = record(await prApi.request(`${upstream}/pulls`, { method: "POST", body: { title: `장애 ${incident.id.slice(0, 12)} 운영 수정 초안`, head, base: "main", draft: true, maintainer_can_modify: false, body } }));
   requireCondition(Number.isSafeInteger(pr.number) && pr.draft === true, "draft-pr-response-invalid");
   publication.pr = { status: "draft", number: Number(pr.number), url: `https://github.com/${settings.upstream}/pull/${pr.number}` };

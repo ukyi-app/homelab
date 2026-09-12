@@ -11,7 +11,7 @@ export const STAGE_LIMITS = {
   publish: { milliseconds: 60_000, memoryMiB: 256, bytes: 1024 * 1024 },
 } as const;
 export type ProcessIdentity = { pid: number; start: string; boot: string };
-export type ProcessResult = { status: string; exitCode: number | null; bytes: number; stdout: string; cleanup: "confirmed" | "unknown"; confinement: "process-group" | "systemd-cgroup"; unverified: string[] };
+export type ProcessResult = { status: string; exitCode: number | null; bytes: number; stdout: string; failureHint?: "authentication" | "capacity"; cleanup: "confirmed" | "unknown"; confinement: "process-group" | "systemd-cgroup"; unverified: string[] };
 export function processIdentity(pid: number): ProcessIdentity {
   const stat = readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1].split(" ");
   return { pid, start: stat[19], boot: readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim() };
@@ -57,7 +57,8 @@ export async function runProcess(command: string[], options: { timeoutMs: number
     cwd: options.cwd,
     env: { PATH: process.env.PATH, LANG: "C.UTF-8", XDG_DATA_HOME: environmentRoot, XDG_CONFIG_HOME: environmentRoot, XDG_CACHE_HOME: environmentRoot, ...options.engineEnvironment },
   });
-  let reason = "completed", bytes = 0, stdout = "";
+  let reason = "completed", bytes = 0, stdout = "", diagnosticTail = "";
+  let failureHint: ProcessResult["failureHint"];
   let stopping: Promise<boolean> | undefined;
   const stop = (why: string) => { if (!stopping && child.pid) { reason = why; stopping = stopGroup(child.pid); } };
   const timer = setTimeout(() => stop("timeout"), options.timeoutMs);
@@ -70,6 +71,10 @@ export async function runProcess(command: string[], options: { timeoutMs: number
   const consume = (chunk: Buffer, capture: boolean) => {
     bytes += chunk.length;
     if (bytes > options.maxBytes) { stop("output-limit"); return; }
+    // 원문 stderr는 반환하지 않는다. 실패한 프로세스의 회복 분류에 필요한 고정 어휘만 남긴다.
+    diagnosticTail = (diagnosticTail + chunk.toString("utf8")).slice(-8192);
+    if (/usage[_ -]limit|quota|rate[_ -]limit|\b429\b|capacity.*exhausted/i.test(diagnosticTail)) failureHint = "capacity";
+    if (/authentication|unauthorized|login.*required|\b401\b|token.*expired|refresh_token/i.test(diagnosticTail)) failureHint = "authentication";
     if (capture) stdout += chunk.toString("utf8");
   };
   child.stdout.on("data", chunk => consume(chunk, true));
@@ -81,7 +86,7 @@ export async function runProcess(command: string[], options: { timeoutMs: number
     const exitCode = await exited;
     if (exitCode !== 0 && reason === "completed") reason = "failed";
     const clean = child.pid ? await (stopping ?? stopGroup(child.pid)) : true;
-    return { status: clean ? reason : "cleanup-unknown", exitCode, bytes, stdout, cleanup: clean ? "confirmed" : "unknown", confinement: "process-group", unverified: ["cgroup-memory", "cpu", "tasks", "disk", "setsid-escape"] };
+    return { status: clean ? reason : "cleanup-unknown", exitCode, bytes, stdout, ...(reason === "failed" && failureHint ? { failureHint } : {}), cleanup: clean ? "confirmed" : "unknown", confinement: "process-group", unverified: ["cgroup-memory", "cpu", "tasks", "disk", "setsid-escape"] };
   } finally {
     clearTimeout(timer); process.removeListener("SIGTERM", interrupt); process.removeListener("SIGINT", interrupt);
     child.stdout.destroy(); child.stderr.destroy();

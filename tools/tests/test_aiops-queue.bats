@@ -103,3 +103,13 @@ SH
   [ "$status" -eq 0 ]
   [ "$(jq -r '.incident.id' <<< "$output")" = "$critical" ]
 }
+
+@test "a proven pre-execution failure consumes at most one bounded retry admission" {
+  seed_incident
+  run aiops replay --incident "$INCIDENT" --engine "$BATS_TEST_TMPDIR/missing-engine"
+  [ "$status" -eq 0 ]
+  jq -e '.incident.execution.status == "start-failed"' <<< "$output"
+  run aiops list
+  [ "$status" -eq 0 ]
+  jq -e '([.budget.days[]] | add) == 2 and .budget.active == null' <<< "$output"
+}

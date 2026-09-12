@@ -48,3 +48,56 @@ PY
   [ "$status" -eq 0 ]
   jq -e '.incident.execution.status == "invalid-result" and .incident.report.patch == null and (.incident.report.missing | index("diagnosis-evidence-invalid")) != null' <<< "$output"
 }
+
+@test "diagnosis reads a protected repository owned by the installation account" {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  cat > "$BATS_TEST_TMPDIR/bin/git" <<'SH'
+#!/usr/bin/env bash
+# 실제 Git의 다른 소유자 검사를 강제한다. 전역 safe.directory는 설정하지 않는다.
+export GIT_TEST_ASSUME_DIFFERENT_OWNER=1
+exec /usr/bin/git "$@"
+SH
+  chmod +x "$BATS_TEST_TMPDIR/bin/git"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" run aiops diagnose --incident "$INCIDENT" --repo "$REPO" --revision "$REVISION" --engine "$ENGINE" --mode replay
+  [ "$status" -eq 0 ]
+  jq -e '.incident.execution.status == "diagnosed"' <<< "$output"
+}
+
+@test "authentication failure waits durably until an explicit recovery resumes admission" {
+  cat > "$ENGINE" <<'PY'
+#!/usr/bin/python3
+import json,sys
+print(json.dumps({'type':'turn.failed','error':{'message':'authentication token expired; login required'}}))
+sys.exit(1)
+PY
+  run aiops diagnose --incident "$INCIDENT" --repo "$REPO" --revision "$REVISION" --engine "$ENGINE" --mode replay
+  [ "$status" -eq 0 ]
+  jq -e '.incident.execution.status == "waiting-authentication"' <<< "$output"
+  run aiops replay
+  [ "$status" -eq 1 ]
+  run aiops resume --incident "$INCIDENT"
+  [ "$status" -eq 0 ]
+  jq -e '.incident.execution.status == "queued"' <<< "$output"
+  run aiops list
+  [ "$status" -eq 0 ]
+  jq -e '([.budget.days[]] | add) == 1 and .budget.active == null' <<< "$output"
+  run aiops replay
+  [ "$status" -eq 0 ]
+  run aiops list
+  [ "$status" -eq 0 ]
+  jq -e '([.budget.days[]] | add) == 2' <<< "$output"
+}
+
+@test "subscription capacity failure on stderr waits without exposing its raw message" {
+  cat > "$ENGINE" <<'PY'
+#!/usr/bin/python3
+import sys
+print('usage_limit_reached secret=private-capacity-canary',file=sys.stderr)
+sys.exit(1)
+PY
+  run aiops diagnose --incident "$INCIDENT" --repo "$REPO" --revision "$REVISION" --engine "$ENGINE" --mode replay
+  [ "$status" -eq 0 ]
+  jq -e '.incident.execution.status == "waiting-capacity" and .incident.report.process.failureHint == "capacity"' <<< "$output"
+  run grep -F private-capacity-canary <<< "$output"
+  [ "$status" -eq 1 ]
+}

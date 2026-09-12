@@ -55,3 +55,16 @@ PY
   [ "$status" -eq 0 ]
   jq -e '.incident.evidence.partial and .incident.evidence.items == []' <<< "$output"
 }
+
+@test "quoted credential values are redacted and malformed structured logs are omitted" {
+  seed_incident
+  jq -n '{collectedAt:"2026-09-12T00:10:00Z",items:[
+    {id:"json-log",kind:"logs",target:"monitoring/vmalert",observedAt:"2026-09-12T00:01:00Z",container:"main",data:"{\"password\":\"short-canary-password\",\"message\":\"connection refused\"}"},
+    {id:"broken-log",kind:"logs",target:"monitoring/vmalert",observedAt:"2026-09-12T00:01:00Z",container:"sidecar",data:"{\"password\":\"broken-private-value"}
+  ]}' > "$BATS_TEST_TMPDIR/evidence.json"
+  run aiops collect --incident "$INCIDENT" --repo "$REPO" --revision "$REVISION" --input "$BATS_TEST_TMPDIR/evidence.json"
+  [ "$status" -eq 0 ]
+  jq -e '.incident.evidence.items | length == 1' <<< "$output"
+  jq -e '.incident.evidence.items[0].data | contains("connection refused") and (contains("short-canary-password") | not)' <<< "$output"
+  jq -e '.incident.evidence.omitted | any(.id == "broken-log" and .reason == "unsupported-log-format")' <<< "$output"
+}

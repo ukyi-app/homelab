@@ -23,12 +23,31 @@ export function redact(text: string): { text: string; count: number } {
   for (const pattern of [
     /-----BEGIN [\s\S]*?-----END [^-]+-----/g,
     /\b(?:[a-z][a-z0-9+.-]*):\/\/[^\s"'<>]+/gi,
-    /\b(?:authorization|bearer|password|passwd|token|secret|api[_-]?key|cookie)\b\s*[:= ]\s*[^\s,;]+/gi,
+    /["']?\b(?:authorization|bearer|password|passwd|token|secret|api[_-]?key|cookie)\b["']?\s*[:= ]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gi,
     /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
     /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
     /\b[A-Za-z0-9_+\/-]{32,}={0,2}\b/g,
   ]) safe = safe.replace(pattern, () => { count++; return "[REDACTED]"; });
   return { text: safe, count };
+}
+
+// text·JSONL·kubectl timestamp 접두만 지원한다. 구조 로그 파싱 실패나 바이너리는 원문을 생략한다.
+function selectLogs(text: string): { text: string; omittedFields: number } | null {
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\ufffd]/.test(text)) return null;
+  let omittedFields = 0;
+  const fields = new Set(["time", "timestamp", "level", "severity", "message", "msg", "error", "reason", "status", "code", "component", "controller", "namespace", "name", "pod", "container", "count"]);
+  const select = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(select);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value).filter(([key]) => { if (fields.has(key)) return true; omittedFields++; return false; }).map(([key, item]) => [key, select(item)]));
+  };
+  const selected: string[] = [];
+  for (const line of text.split("\n")) {
+    const content = line.replace(/^\d{4}-\d{2}-\d{2}T\S+\s+/, "").trim();
+    if (!content.startsWith("{") && !content.startsWith("[")) { selected.push(line); continue; }
+    try { selected.push(JSON.stringify(select(JSON.parse(content)))); } catch { return null; }
+  }
+  return { text: selected.join("\n"), omittedFields };
 }
 
 export function collectEvidence(incident: Incident, snapshot: GitSnapshot, input: unknown): Evidence {
@@ -54,9 +73,11 @@ export function collectEvidence(incident: Incident, snapshot: GitSnapshot, input
     if (evidence.items.some(i => i.id === id)) { omit("duplicate-evidence-id"); continue; }
     const selected: EvidenceItem = { id, kind: String(item.kind), target: String(item.target), observedAt: new Date(timestamp).toISOString(), data: null };
     if (item.kind === "logs") {
-      if (typeof item.data !== "string" || typeof item.container !== "string" || !/^[a-zA-Z0-9_.-]{1,80}$/.test(item.container)) { omit("unsupported-log-format"); continue; }
+      const logs = typeof item.data === "string" ? selectLogs(item.data) : null;
+      if (!logs || typeof item.container !== "string" || !/^[a-zA-Z0-9_.-]{1,80}$/.test(item.container)) { omit("unsupported-log-format"); continue; }
+      evidence.redactions += logs.omittedFields;
       const previous = logLines.get(item.container) ?? 0;
-      const lines = item.data.split("\n");
+      const lines = logs.text.split("\n");
       const selectedLines = lines.slice(0, Math.max(0, 200 - previous));
       if (selectedLines.length < lines.length) evidence.truncated.push(id);
       logLines.set(item.container, previous + selectedLines.length);

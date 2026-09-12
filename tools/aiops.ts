@@ -20,13 +20,14 @@ import { evaluateCases } from "./lib/aiops/evaluation.ts";
 
 if (process.argv.slice(2).includes("--help")) {
   console.log(`usage: bun tools/aiops.ts <command> --state-dir <directory> [options]
-incident: ingest --input | list | show --incident | replay [--incident] | recover
+incident: ingest --input | list | show --incident | replay [--incident] | recover | resume --incident
 evidence: collect --incident --input --repo --revision | collect-live --incident --config --repo --revision
 diagnosis: diagnose --incident --repo --revision --engine --mode replay [--model]
 validation: validate --incident --repo --revision [--candidate]
 sources: serve --config | poll-gha --config | poll-healthchecks --config
 publication: publish --incident --config --repo (replay only; live uses isolated worker)
 host: host-plan --output | producer-plan --repo --output --address | readiness --config | probe-isolation --engine | probe-host | worker --config
+commission: commission --config --incident [--input selected-evidence.json] (one live acceptance case, activation disabled)
 retention: prune [--at]
 evaluation: evaluate --cases --answers --reports
 observation: observation-start --config | observation-record --input | observation-summary
@@ -44,6 +45,8 @@ try {
   commandFlags.readiness = ["--config"];
   commandFlags["collect-live"] = ["--incident", "--repo", "--revision", "--config"];
   commandFlags.worker = ["--config"];
+  commandFlags.commission = ["--config", "--incident", "--input"];
+  commandFlags.resume = ["--incident"];
   commandFlags.prune = ["--at"];
   commandFlags["producer-plan"] = ["--repo", "--output", "--address"];
   commandFlags["probe-host"] = [];
@@ -56,9 +59,12 @@ try {
   const required = (name: string) => { const value = flags.str(name); if (!value) throw new AiopsError("required-option-missing"); return value; };
   parsing = false;
   const observation = path[0] === "ingest" ? observationInput(JSON.parse(readBounded(required("--input")))) : null;
-  if (path[0] === "worker") process.umask(0o007);
+  // root 사전 점검이 DB/WAL을 먼저 만들어도 collector가 같은 그룹으로 쓸 수 있다.
+  process.umask(0o007);
   using incidents = new Incidents(required("--state-dir"));
-  if (path[0] === "observation-start") {
+  if (path[0] === "resume") {
+    console.log(JSON.stringify({ incident: incidents.resume(required("--incident")) }));
+  } else if (path[0] === "observation-start") {
     console.log(JSON.stringify({ observation: incidents.observationStart(JSON.parse(readBounded(required("--config")))) }));
   } else if (path[0] === "observation-record") {
     console.log(JSON.stringify({ observation: incidents.observationRecord(JSON.parse(readBounded(required("--input")))) }));
@@ -73,8 +79,9 @@ try {
     console.log(JSON.stringify(producerPlan(required("--repo"), required("--output"), required("--address"))));
   } else if (path[0] === "prune") {
     console.log(JSON.stringify({ retention: incidents.prune(flags.str("--at") ?? new Date().toISOString()) }));
-  } else if (path[0] === "worker") {
-    console.log(JSON.stringify(await worker(incidents, JSON.parse(readBounded(required("--config"))), required("--state-dir"))));
+  } else if (["worker", "commission"].includes(path[0])) {
+    const commissioning = path[0] === "commission" ? { incident: required("--incident"), ...(flags.str("--input") ? { evidence: JSON.parse(readBounded(required("--input"), 2 * 1024 * 1024)) } : {}) } : undefined;
+    console.log(JSON.stringify(await worker(incidents, JSON.parse(readBounded(required("--config"))), required("--state-dir"), commissioning)));
   } else if (path[0] === "collect-live") {
     const id = required("--incident"), snapshot = new GitSnapshot(required("--repo"), required("--revision"));
     const evidence = await collectLive(incidents.get(id), snapshot, JSON.parse(readBounded(required("--config"))));

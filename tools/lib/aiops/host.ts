@@ -16,17 +16,17 @@ export function hostPlan(output: string) {
     installation: { code: CODE, bun: "/opt/homelab-aiops/bin/bun", engine: "/opt/homelab-aiops/bin/codex", conftest: "/opt/homelab-aiops/bin/conftest", hashes: {} },
     authentication: `${ROOT}/auth`, readinessFile: "/etc/homelab-aiops/acceptance.json",
     ingress: { address: "127.0.0.1", port: 21980, tokens: { alertmanager: "/etc/homelab-aiops/collector/alertmanager", argocd: "/etc/homelab-aiops/collector/argocd", cnpg: "/etc/homelab-aiops/collector/cnpg" } },
-    github: { repository: "ukyi-app/homelab", repositoryId: null, readTokenFile: "/etc/homelab-aiops/collector/github" },
+    github: { repository: "ukyi-app/homelab", repositoryId: null, observationSince: null, readTokenFile: "/etc/homelab-aiops/collector/github" },
     healthchecks: { readKeyFile: "/etc/homelab-aiops/collector/healthchecks", keyAccess: "read-only" },
     publication: { upstream: "ukyi-app/homelab", upstreamId: null, fork: null, forkId: null, base: "main", forkTokenFile: "/etc/homelab-aiops/fork/token", prTokenFile: "/etc/homelab-aiops/pr/token" },
     telegram: { tokenFile: "/etc/homelab-aiops/telegram/token", chatId: null },
-    collection: { kubectl: "/usr/bin/kubectl", kubeconfig: "/etc/homelab-aiops/collector/kubeconfig", metricsUrl: null, logsUrl: null },
+    collection: { kubectl: "/usr/local/bin/kubectl", kubeconfig: "/etc/homelab-aiops/collector/kubeconfig", metricsUrl: null, logsUrl: null },
     model: "gpt-6-astra", observation: { days: 14, minimumCases: null, requiredSources: null, qualityCriteria: null, manualBaseline: null },
   };
   writeFileSync(join(directory, "config.example.json"), JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
   writeFileSync(join(directory, "aiops-worker.service"), `[Unit]\nDescription=Homelab AIOps bounded coordinator\nAfter=network-online.target\nWants=network-online.target\nOnFailure=unit-failure-notify@%n.service\n\n[Service]\nType=exec\nExecStart=${CODE}/bin/bun ${CODE}/tools/aiops.ts worker --state-dir ${ROOT}/state --config /etc/homelab-aiops/config.json\nRuntimeMaxSec=1200\nTimeoutStopSec=10\nKillMode=control-group\nMemoryMax=512M\nTasksMax=128\nCPUQuota=200%\nUMask=0077\nLimitCORE=0\nStandardOutput=journal\nStandardError=journal\n`, { mode: 0o644 });
   writeFileSync(join(directory, "aiops-worker.timer"), "[Unit]\nDescription=Homelab AIOps admission tick\n\n[Timer]\nOnBootSec=120\nOnUnitInactiveSec=60\nUnit=aiops-worker.service\n\n[Install]\nWantedBy=timers.target\n", { mode: 0o644 });
-  writeFileSync(join(directory, "aiops-ingress.service"), `[Unit]\nDescription=Homelab AIOps authenticated ingress\nAfter=network-online.target\nOnFailure=unit-failure-notify@%n.service\n\n[Service]\nType=exec\nUser=aiops-collector\nGroup=aiops-state\nExecStart=${CODE}/bin/bun ${CODE}/tools/aiops.ts serve --state-dir ${ROOT}/state --config /etc/homelab-aiops/collector.json\nRestart=on-failure\nRestartSec=10\nTimeoutStopSec=10\nMemoryMax=256M\nTasksMax=64\nCPUQuota=100%\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=${ROOT}/state\nNoNewPrivileges=true\nPrivateTmp=true\nUMask=0007\n\n[Install]\nWantedBy=multi-user.target\n`, { mode: 0o644 });
+  writeFileSync(join(directory, "aiops-ingress.service"), `[Unit]\nDescription=Homelab AIOps authenticated ingress\nAfter=network-online.target\nOnFailure=unit-failure-notify@%n.service\n\n[Service]\nType=exec\nUser=aiops-collector\nGroup=aiops-collector\nSupplementaryGroups=aiops-state\nExecStart=${CODE}/bin/bun ${CODE}/tools/aiops.ts serve --state-dir ${ROOT}/state --config /etc/homelab-aiops/collector.json\nRestart=on-failure\nRestartSec=10\nTimeoutStopSec=10\nMemoryMax=256M\nTasksMax=64\nCPUQuota=100%\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=${ROOT}/state\nNoNewPrivileges=true\nPrivateTmp=true\nUMask=0007\n\n[Install]\nWantedBy=multi-user.target\n`, { mode: 0o644 });
   writeFileSync(join(directory, "sysusers.conf"), `g aiops-state -\n${ROLES.map(role => `u aiops-${role} - "AIOps ${role}" ${role === "engine" ? `${ROOT}/auth` : "/nonexistent"} /usr/sbin/nologin`).join("\n")}\nm aiops-collector aiops-state\n`, { mode: 0o644 });
   writeFileSync(join(directory, "tmpfiles.conf"), `d ${ROOT} 0711 root root -\nd ${ROOT}/state 2770 root aiops-state -\nd ${ROOT}/auth 0700 aiops-engine aiops-engine -\nd ${ROOT}/work 0711 root root -\nd /etc/homelab-aiops 0711 root root -\n${ROLES.map(role => `d /etc/homelab-aiops/${role} 0700 aiops-${role} aiops-${role} -`).join("\n")}\n`, { mode: 0o644 });
   return { activation: "disabled", roles: ROLES, limits: { stages: STAGE_LIMITS, wholeAttemptSeconds: 1200, diskMiB: 512 }, directory };
@@ -59,7 +59,9 @@ export function readiness(input: unknown) {
   const observation = record(config.observation);
   if (!(Number.isSafeInteger(observation.minimumCases) && Number(observation.minimumCases) > 0 && Array.isArray(observation.requiredSources) && observation.requiredSources.length === 5 && typeof observation.qualityCriteria === "string" && observation.qualityCriteria && typeof observation.manualBaseline === "string" && observation.manualBaseline)) pending.push("observation-criteria");
   if (typeof config.revision !== "string" || !/^[a-f0-9]{40}$/.test(config.revision)) pending.push("trusted-revision");
-  return { ready: pending.length === 0, pending, enabled: config.enabled === true };
+  // 실제 진단·게시 수용 증거는 시험 실행으로 만든다. 격리·역할·cgroup·fork 안전 조건은 먼저 필요하다.
+  const commissioningPending = pending.filter(name => !["acceptance-producerDelivery", "acceptance-subscription", "acceptance-publication", "acceptance-diagnosticCases", "observation-criteria"].includes(name));
+  return { ready: pending.length === 0, pending, enabled: config.enabled === true, commissioning: { ready: commissioningPending.length === 0 && config.enabled === false, pending: commissioningPending } };
 }
 
 function systemctl(args: string[]) {
