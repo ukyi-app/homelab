@@ -21,3 +21,5 @@
 | [0005](0005-data-connection-residual-risk.md) | 데이터 연결 = 일반 SealedSecret · 잔여 위험 informed 감수 |
 | [0006](0006-archive-separation-contract-retired.md) | 컷오버에서 복구 원본 제거 · "쓰기≠읽기" 계약을 "쓰기 고정"으로 평행이동 |
 | [0007](0007-seed-vs-live-ssot.md) | ArgoCD가 수렴시키지 않는 tracked 값은 자산별 SSOT 선언 · 시드 드리프트는 경고로만 |
+| [0008](0008-aiops-diagnostic-drafts.md) | AIOps 첫 권한 경계는 장애 진단과 운영 수정 초안까지 · 운영 적용은 별도 승인 |
+| [0009](0009-aiops-fork-pr-boundary.md) | AIOps 수정 초안은 전용 fork에서 Draft PR로 제출 · upstream 운영 시크릿과 실행 분리 |
