@@ -13,15 +13,15 @@
     },
     {
       "source": ".scratch/aiops-codex/design.md",
-      "source_sha256": "e83d3db7b59300ab505d5eea80edb3c18de12fb6159ac3c96bc7db2cfaddd580",
+      "source_sha256": "d293e29c3112a5a2394957783d4f9c7d66e2851a7a492a4f623e254b85cb5671",
       "review_path": "docs/reviews/aiops-codex/input/design.md",
-      "review_sha256": "2dfb0e910eef62a544e7ff7c0c07a542f5486260cebca7eda61e47ad8f553292"
+      "review_sha256": "532b3c80689d9884b96ceb8264061caf6648beab9c96346c778346f87ef4715d"
     },
     {
       "source": ".scratch/aiops-codex/implementation.md",
-      "source_sha256": "01eb2627f4049e8e622d0c4f10e0ac83b42a8bcf345799b8c3a96a3c6116f4e4",
+      "source_sha256": "1fd66c934a7775fdf6574795116ddd2aaa3da5d5650bc479c5a14f91907f43ed",
       "review_path": "docs/reviews/aiops-codex/input/implementation.md",
-      "review_sha256": "b6fb768ec2d1aec6e36068704200387a10d22992ccf6e98208a9617740942851"
+      "review_sha256": "19d74faa15d0cb65281cff5ef59434fea036761e0a93c31bc23f1c06c9875310"
     },
     {
       "source": ".scratch/aiops-codex/research.md",
@@ -49,17 +49,17 @@
     },
     {
       "source": ".scratch/aiops-codex/issues/04-validation-publication.md",
-      "source_sha256": "a513b9c17b21ee7294796927c581036a39bcd6b48a662c0de0e47eab6fbcc9d4",
+      "source_sha256": "c6b736a7c53cee59a4a71f982d823cc8b9d046a6788af64c9611634f1352837c",
       "review_path": "docs/reviews/aiops-codex/input/issues/04-validation-publication.md",
-      "review_sha256": "a513b9c17b21ee7294796927c581036a39bcd6b48a662c0de0e47eab6fbcc9d4"
+      "review_sha256": "c6b736a7c53cee59a4a71f982d823cc8b9d046a6788af64c9611634f1352837c"
     },
     {
       "source": ".scratch/aiops-codex/issues/05-nuc-pilot-acceptance.md",
-      "source_sha256": "ee16e6b32900a71be3f024f9f60239c6bbae18083314e8406c6a4f59d0b11374",
+      "source_sha256": "f24186711a7e88e24a86619071cea9590104c0329c8af65bd9a89fa076829714",
       "review_path": "docs/reviews/aiops-codex/input/issues/05-nuc-pilot-acceptance.md",
-      "review_sha256": "ee16e6b32900a71be3f024f9f60239c6bbae18083314e8406c6a4f59d0b11374"
+      "review_sha256": "f24186711a7e88e24a86619071cea9590104c0329c8af65bd9a89fa076829714"
     }
   ],
-  "round": 2,
-  "prior_snapshot_commit": "826b0d3"
+  "round": 3,
+  "prior_snapshot_commit": "c52ae4d"
 }

@@ -1,0 +1,321 @@
+{
+  "ok": true,
+  "status": "ok",
+  "kind": "plan",
+  "ack": "herdr-human-triage",
+  "triageMode": "human",
+  "verdict": "approve",
+  "summary": "[a] Round 2 a1 resolved. The plan now reads LIMIT_BUDGET_MIB from the trusted baseline revision, records the revision/blob hash/extracted value, rejects missing/duplicate/malformed baseline metadata without candidate fallback, and builds fixed-policy input from candidate rows plus the trusted budget (implementation.md:56-59; issues/04-validation-publication.md:30-44; design.md:224-243). The repository’s current parser confirms the prior risk source: ledger-to-json.ts derives budget from the input file (lines 10-13), while the new plan explicitly avoids passing that candidate JSON directly and requires separate row parsing and baseline-budget injection. The added regression cases cover simultaneous row/budget increases, metadata-only changes, malformed or deleted candidate metadata, and malformed baseline metadata (issues/04-validation-publication.md:64-72). No new critical or high issue was introduced by this fix.",
+  "planFile": "docs/reviews/aiops-codex/input/implementation.md",
+  "planInDiff": true,
+  "reviewedFileCount": 8,
+  "target": "working tree frozen at a0e411b06daf (HEAD c52ae4d83e4b)",
+  "scope": "working-tree",
+  "requestedScope": "working-tree",
+  "base": null,
+  "reviewer": "codex",
+  "effort": "xhigh",
+  "inputMode": "inline-diff",
+  "reviewedSha": "c52ae4d83e4bec2b5d4ee7a504f8dd7419e7b194",
+  "reviewedTree": "a935f415f6540b938087e87ef86e41ab8581d2a0",
+  "reviewedPlanSha256": "19d74faa15d0cb65281cff5ef59434fea036761e0a93c31bc23f1c06c9875310",
+  "headMovedDuringReview": false,
+  "planDriftDuringReview": false,
+  "frozen": {
+    "commit": "5b72021bcf14a9204151a1ed5fdfd9cc4891c64e",
+    "tree": "a0e411b06dafc4a4ea8fc31437e5bbeb1c69d135",
+    "parent": "c52ae4d83e4bec2b5d4ee7a504f8dd7419e7b194",
+    "diffRange": "c52ae4d83e4bec2b5d4ee7a504f8dd7419e7b194..a0e411b06dafc4a4ea8fc31437e5bbeb1c69d135",
+    "gitEnvironment": {
+      "selectors": [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_INDEX_FILE",
+        "GIT_NAMESPACE",
+        "GIT_CEILING_DIRECTORIES"
+      ],
+      "strippedFromLauncher": [],
+      "paneInheritsLauncherEnvironment": false
+    },
+    "ref": "refs/herdr-review/aiopscod/plan/r3/a-ef8b5f23",
+    "refPinned": true
+  },
+  "herdr": {
+    "workspaceId": "w16",
+    "callerPaneId": "w16:p2",
+    "reviewerPaneId": "w16:p7",
+    "agentName": "hrg-aiopscod-p-r3-a-ef8b5f23",
+    "agentKind": "codex",
+    "agentSessionId": "01a093be-fbd4-7a51-816a-5e1f8c5dc635"
+  },
+  "isolation": {
+    "executedArgv": [
+      "codex",
+      "-C",
+      "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r3-a-ef8b5f23--f1lfux",
+      "-s",
+      "read-only",
+      "-c",
+      "approval_policy=never",
+      "-c",
+      "projects./tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r3-a-ef8b5f23--f1lfux.trust_level=\"trusted\"",
+      "-c",
+      "memories.use_memories=false",
+      "-c",
+      "memories.generate_memories=false",
+      "-c",
+      "model_reasoning_effort=xhigh"
+    ],
+    "requestedArgv": [
+      "-C",
+      "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r3-a-ef8b5f23--f1lfux",
+      "-s",
+      "read-only",
+      "-c",
+      "approval_policy=never",
+      "-c",
+      "projects./tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r3-a-ef8b5f23--f1lfux.trust_level=\"trusted\"",
+      "-c",
+      "memories.use_memories=false",
+      "-c",
+      "memories.generate_memories=false",
+      "-c",
+      "model_reasoning_effort=xhigh"
+    ],
+    "sandbox": {
+      "requested": "read-only",
+      "observedInExecutedArgv": "read-only",
+      "matchesRequest": true
+    },
+    "approval": {
+      "requested": "never",
+      "observedInExecutedArgv": "never",
+      "matchesRequest": true
+    },
+    "memoriesRead": {
+      "requested": "false",
+      "observedInExecutedArgv": "false",
+      "matchesRequest": true
+    },
+    "memoriesWrite": {
+      "requested": "false",
+      "observedInExecutedArgv": "false",
+      "matchesRequest": true
+    },
+    "trust": {
+      "requested": "\"trusted\"",
+      "observedInExecutedArgv": "\"trusted\"",
+      "matchesRequest": true
+    },
+    "mcpDisables": {
+      "requested": "",
+      "observedInExecutedArgv": "",
+      "matchesRequest": true
+    },
+    "workingRoot": {
+      "requested": "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r3-a-ef8b5f23--f1lfux",
+      "observedInExecutedArgv": "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r3-a-ef8b5f23--f1lfux",
+      "matchesRequest": true
+    },
+    "confinementAxes": [
+      "sandbox",
+      "approval",
+      "memoriesRead",
+      "memoriesWrite",
+      "trust",
+      "mcpDisables",
+      "workingRoot"
+    ],
+    "confinementConfirmed": true,
+    "workRoot": "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r3-a-ef8b5f23--f1lfux",
+    "owner": {
+      "workspace": "w16",
+      "session": "w16:p2",
+      "slug": "aiopscod",
+      "kind": "plan",
+      "round": 3,
+      "slot": "a",
+      "nonce": "ef8b5f23"
+    },
+    "mcp": {
+      "overrides": [],
+      "servers": [],
+      "enumerated": true,
+      "verified": true,
+      "note": "No MCP server is configured for this reviewer under /home/ukyi/.codex — the configuration root this launcher enumerated and the reviewer's tab is opened with."
+    },
+    "canary": {
+      "path": "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-canary-aiopscod-p-r3-a-ef8b5f23",
+      "asked": true,
+      "wrote": false,
+      "conclusion": "none",
+      "note": "No canary appeared, and that proves NOTHING: the sandbox may have blocked the write, or the reviewer may have declined it, misread it, or run no tool at all. Absence of an effect is not evidence of prevention."
+    },
+    "platformSandboxCheck": {
+      "axis": "permission-profile (-P), the axis `codex sandbox` drives",
+      "reviewerAxis": "sandbox-mode (-s), the axis the reviewer agent is started on",
+      "result": "enforcing",
+      "denied": {
+        "code": 2,
+        "stderr": "sh: 1: cannot create /tmp/hrgaiops-1gi3ltuq/hrg-probe-canary-8142505f: Read-only file system",
+        "wrote": false
+      },
+      "allowed": {
+        "code": 0,
+        "stderr": "",
+        "wrote": true
+      },
+      "note": "PLATFORM CHECK: on this machine `codex sandbox -P :read-only` refused a write outside its frame and `-P :workspace` performed the same write, so the sandbox mechanism is alive and discriminating. Whether those two axes converge on the same policy is UNDETERMINED, so this result is a fact about this MACHINE and does not show that this reviewer was confined."
+    },
+    "sandboxEnforcement": "not-independently-verified",
+    "sandboxEnforcementNote": "The sandbox argument (`-s read-only`) is present in the argv herdr reported executing; see executedArgv. The approval-policy argument (`approval_policy=never`) is present in the argv herdr reported executing; see executedArgv. The memory-read override (`memories.use_memories=false`) is present in the argv herdr reported executing; see executedArgv. The memory-write override (`memories.generate_memories=false`) is present in the argv herdr reported executing; see executedArgv. The trust declaration for the frozen root (`trust_level=\"trusted\"`) is present in the argv herdr reported executing; see executedArgv. No MCP server is configured on this machine, so no disable override was needed, and the argv herdr reported executing carries none. The working-root argument (`-C /tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r3-a-ef8b5f23--f1lfux`) is present in the argv herdr reported executing and names the frozen copy; see executedArgv. This gate does NOT independently confirm the CLI enforced it. Extraction removes the reviewer's path to this repository's git metadata and makes the target immune to the CALLER's edits; it does not remove the repository from the filesystem."
+  },
+  "gateBinding": null,
+  "deadlines": {
+    "paneReadyMs": 5000,
+    "agentStartMs": 120000,
+    "canaryMs": 60000,
+    "promptAckMs": 5000,
+    "stallCandidateMs": 180000,
+    "stallConfirmMs": 300000,
+    "panePollMs": 10000,
+    "settleMs": 30000,
+    "roundMs": 1800000
+  },
+  "deadlineOwners": {
+    "paneReadyMs": "launcher",
+    "agentStartMs": "launcher",
+    "canaryMs": "launcher",
+    "promptAckMs": "herdr",
+    "stallCandidateMs": "launcher",
+    "stallConfirmMs": "launcher",
+    "panePollMs": "launcher",
+    "settleMs": "launcher",
+    "roundMs": "launcher"
+  },
+  "readback": {
+    "sessionAnchor": "01a093be-fbd4-7a51-816a-5e1f8c5dc635",
+    "declaredCount": 0,
+    "recoveredCount": 0,
+    "failure": null,
+    "settle": {
+      "polls": 0,
+      "waitedMs": 6,
+      "deadlineMs": 30000,
+      "pollMs": 500,
+      "boundaryOffset": 187277,
+      "grew": 0
+    },
+    "threadCount": 1,
+    "sessionLogCopy": {
+      "requested": false
+    }
+  },
+  "liveness": {
+    "polls": 4,
+    "paneMoves": 1,
+    "rolloutMoves": 3,
+    "descendantMoves": 0,
+    "lateAnchors": 0,
+    "holds": 0,
+    "candidateWarnings": 0
+  },
+  "findingCount": 0,
+  "planFindingCount": 0,
+  "findings": [],
+  "next_steps": [
+    "Implement the adapter so the baseline revision, blob hash, extracted budget, candidate rows, and separate candidate-budget result are persisted and verified exactly as specified."
+  ],
+  "triage": "Clean verdict: note it in your report and COMMIT this artifact with the next bookkeeping commit. The reviewer TABS are still open — close each `panel.members[].tabId` with `herdr tab close <tabId>` when you are done with them. Closing the pane instead leaves an empty tab behind.",
+  "triageHeader": "plan r3 · codex · 1/1 members · 0 findings (0 consensus, 0 solo) · verdict approve",
+  "collected": {
+    "frozenDirs": 0,
+    "skippedUnidentified": 0,
+    "skippedOtherWorkspace": 0,
+    "skippedTooYoung": 0,
+    "skippedAlive": 0,
+    "livenessKnown": true,
+    "frozenDirsForeign": 0,
+    "reclaimFailed": 0,
+    "workspacesKnown": true,
+    "panes": {
+      "known": true,
+      "closed": 0,
+      "ids": [],
+      "closeFailed": 0,
+      "skippedHeld": 0,
+      "skippedOtherWorkspace": 0,
+      "skippedUnidentified": 0,
+      "skippedCaller": 0
+    }
+  },
+  "panelDegraded": false,
+  "panel": {
+    "expected": 1,
+    "delivered": 1,
+    "degraded": false,
+    "members": [
+      {
+        "slot": "a",
+        "delivered": true,
+        "status": "ok",
+        "message": null,
+        "class": null,
+        "classAxis": null,
+        "hint": null,
+        "herdrErrorCode": null,
+        "canary": {
+          "path": "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-canary-aiopscod-p-r3-a-ef8b5f23",
+          "asked": true,
+          "wrote": false,
+          "conclusion": "none",
+          "note": "No canary appeared, and that proves NOTHING: the sandbox may have blocked the write, or the reviewer may have declined it, misread it, or run no tool at all. Absence of an effect is not evidence of prevention."
+        },
+        "agentName": "hrg-aiopscod-p-r3-a-ef8b5f23",
+        "paneId": "w16:p7",
+        "tabId": "w16:t7",
+        "abandonedTerminals": [],
+        "paneOpen": true,
+        "cleanupFailed": null,
+        "attempts": 2,
+        "attemptStatuses": [
+          "prompt-stalled",
+          "ok"
+        ],
+        "workRoot": "/tmp/hrgaiops-1gi3ltuq/herdr-review-gate-frozen-w16--aiopscod-p-r3-a-ef8b5f23--f1lfux",
+        "readback": {
+          "sessionAnchor": "01a093be-fbd4-7a51-816a-5e1f8c5dc635",
+          "declaredCount": 0,
+          "recoveredCount": 0,
+          "failure": null,
+          "settle": {
+            "polls": 0,
+            "waitedMs": 6,
+            "deadlineMs": 30000,
+            "pollMs": 500,
+            "boundaryOffset": 187277,
+            "grew": 0
+          },
+          "threadCount": 1,
+          "sessionLogCopy": {
+            "requested": false
+          }
+        },
+        "liveness": {
+          "polls": 4,
+          "paneMoves": 1,
+          "rolloutMoves": 3,
+          "descendantMoves": 0,
+          "lateAnchors": 0,
+          "holds": 0,
+          "candidateWarnings": 0
+        },
+        "verdict": "approve",
+        "file": "plan-r3.a.json"
+      }
+    ]
+  }
+}
